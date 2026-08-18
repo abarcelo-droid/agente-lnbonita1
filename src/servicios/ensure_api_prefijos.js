@@ -127,7 +127,11 @@ const PREFIJOS = [
   ['sg-compras',         'sg/recepciones,sg/oc,sg/compra-retroactiva,sg/lotes'],
   ['sg-stock',           'sg/lotes,sg/disponibilidad,sg/decomisos'],
   ['sg-ventas',          'sg/despachos,sg/pedidos,sg/ventas'],
-  ['sg-catalogo',        'sg/productos,sg/familias,sg/especies,sg/variedades,sg/proveedores,sg/condiciones-pago,sg/envases,sg/config'],
+  // 'sg/presentaciones' y 'sg/clientes' faltaban, y son dos solapas de esta
+  // misma pantalla. Sin declararlas, moduloDeRuta devolvía null y exigirNivel
+  // dejaba pasar: el día que sus escrituras dejaran de pedir admin —que es hoy—
+  // quedaban abiertas a cualquiera con sesión.
+  ['sg-catalogo',        'sg/productos,sg/familias,sg/especies,sg/variedades,sg/proveedores,sg/condiciones-pago,sg/envases,sg/config,sg/presentaciones,sg/clientes'],
   ['sg-gvariables',      'sg/gastos-globales'],
   // Control Cooperativa vive DENTRO de esta pantalla desde que dejó de ser un
   // renglón del menú, así que sus direcciones también son suyas. El módulo

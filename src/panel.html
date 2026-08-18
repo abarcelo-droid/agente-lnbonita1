@@ -4874,9 +4874,14 @@ function sgFamGuardarAlic(id){
 }
 
 function sgActions(entity, id){
+  // ANULAR ES UN NIVEL, NO UN ROL (CLAUDE.md). Borrar un maestro deja afuera
+  // algo que ya se usó en órdenes y lotes: lo ve quien tiene "anular" en
+  // Maestros, y el que sólo carga catálogo no.
   return '<td style="text-align:right;white-space:nowrap">'
     + '<button class="btn bo bs" onclick="sgOpenModal(\''+entity+'\','+id+')">✏️</button> '
-    + '<button class="btn bd bs" onclick="sgDelete(\''+entity+'\','+id+')">🗑️</button></td>';
+    + (lnbPuedeAnular('sg-catalogo')
+        ? '<button class="btn bd bs" onclick="sgDelete(\''+entity+'\','+id+')">🗑️</button>' : '')
+    + '</td>';
 }
 
 function sgRow(entity, r){
@@ -5272,6 +5277,7 @@ function sgSaveCond(){
 
 // ── Borrar (soft) ─────────────────────────────────────────────────────────────
 function sgDelete(entity, id){
+  if (!lnbPuedeAnular('sg-catalogo')) { toast('No tenés permiso para anular en Maestros', 'er'); return; }
   if (!confirm('¿Eliminar este registro? (borrado lógico)')) return;
   var path = (entity==='condiciones') ? 'condiciones-pago' : SG_SCHEMA[entity].path;
   api('/api/sg/'+path+'/'+id, 'DELETE').then(function(r){
@@ -7296,7 +7302,8 @@ function sgOcPintar(){
     eid('sg-tb-oc').innerHTML = rows.length ? rows.map(function(o){
       var acc='<button class="btn bo bs" onclick="sgOcVer('+o.id+')">👁</button> ';
       if(o.estado==='abierta'||o.estado==='recibida_parcial') acc+='<button class="btn bo bs" onclick="sgRecOpen('+o.id+')">📥</button> ';
-      if(o.estado==='abierta') acc+='<button class="btn bd bs" onclick="sgOcAnular('+o.id+')">✖</button>';
+      if(o.estado==='abierta' && lnbPuedeAnular('sg-compras'))
+        acc+='<button class="btn bd bs" title="Anular la orden" onclick="sgOcAnular('+o.id+')">✖</button>';
 
 
       var cant = sgOcCantidad(o);
@@ -10453,7 +10460,7 @@ function sgLoadGDirectos(){
     api('/api/sg/gastos-directos'+(lote?('?lote_id='+lote):'')).then(function(r){
       var rows=(r&&r.ok)?r.data:[];
       eid('sg-tb-gdirectos').innerHTML = rows.length ? rows.map(function(g){
-        return '<tr><td><code>'+esc(g.codigo_lote||'')+'</code></td><td>'+esc(g.tipo_gasto||'—')+'</td><td>'+esc(g.proveedor_gasto_nombre||'—')+'</td><td>'+(g.fecha||'—')+'</td><td style="text-align:right">'+sgMoney(g.monto)+'</td><td style="text-align:right"><button class="btn bd bs" onclick="sgGdDel('+g.id+')">🗑️</button></td></tr>';
+        return '<tr><td><code>'+esc(g.codigo_lote||'')+'</code></td><td>'+esc(g.tipo_gasto||'—')+'</td><td>'+esc(g.proveedor_gasto_nombre||'—')+'</td><td>'+(g.fecha||'—')+'</td><td style="text-align:right">'+sgMoney(g.monto)+'</td><td style="text-align:right">'+(lnbPuedeAnular('sg-gastos-directos')?'<button class="btn bd bs" onclick="sgGdDel('+g.id+')">🗑️</button>':'')+'</td></tr>';
       }).join('') : '<tr><td colspan="6" class="emp">Sin gastos directos.</td></tr>';
     });
   });
@@ -10486,7 +10493,7 @@ function sgLoadGGlobales(){
   api('/api/sg/gastos-globales'+(per?('?periodo='+per):'')).then(function(r){
     var rows=(r&&r.ok)?r.data:[];
     eid('sg-tb-gglobales').innerHTML = rows.length ? rows.map(function(g){
-      return '<tr><td>'+esc(g.periodo)+'</td><td>'+esc(g.tipo_gasto||'—')+'</td><td>'+(g.fecha||'—')+'</td><td>'+esc(g.observaciones||'')+'</td><td style="text-align:right">'+sgMoney(g.monto)+'</td><td style="text-align:right"><button class="btn bd bs" onclick="sgGgDel('+g.id+')">🗑️</button></td></tr>';
+      return '<tr><td>'+esc(g.periodo)+'</td><td>'+esc(g.tipo_gasto||'—')+'</td><td>'+(g.fecha||'—')+'</td><td>'+esc(g.observaciones||'')+'</td><td style="text-align:right">'+sgMoney(g.monto)+'</td><td style="text-align:right">'+(lnbPuedeAnular('sg-gvariables')?'<button class="btn bd bs" onclick="sgGgDel('+g.id+')">🗑️</button>':'')+'</td></tr>';
     }).join('') : '<tr><td colspan="6" class="emp">Sin gastos fijos cargados.</td></tr>';
   });
 }
@@ -10680,7 +10687,9 @@ function sgLoteVer(id){
         +'<div style="margin-top:8px;display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap">'
         +'<div class="fl"><label>Destino</label><select id="sg-lb-destino" onchange="sgLoteBajaToggle()">'+SG_DESTINO.map(function(o){return '<option value="'+o[0]+'">'+o[1]+'</option>';}).join('')+'</select></div>'
         +'<div class="fl" id="sg-lb-receptor-wrap" style="display:none"><label>Receptor donación</label><input id="sg-lb-receptor" placeholder="Ej: Banco de Alimentos"></div>'
-        +'<button class="btn bd bs" onclick="sgLoteBaja('+l.id+')">Confirmar baja</button>'
+        +(lnbPuedeAnular(['sg-stock', 'sg-compras'])
+            ? '<button class="btn bd bs" onclick="sgLoteBaja('+l.id+')">Confirmar baja</button>'
+            : '<span style="font-size:11.5px;color:var(--mut)">No tenés permiso para dar de baja mercadería.</span>')
         +'</div></details>';
     }
     eid('sg-lote-body').innerHTML=h;
@@ -10963,7 +10972,8 @@ function sgLoadPedidos(){
     var rows=(r&&r.ok)?r.data:[];
     eid('sg-tb-pedidos').innerHTML = rows.length ? rows.map(function(p){
       var acc='<button class="btn bo bs" onclick="sgPedVer('+p.id+')">👁</button>';
-      if(p.estado!=='anulado') acc+=' <button class="btn bd bs" onclick="sgPedAnular('+p.id+')">✖</button>';
+      if(p.estado!=='anulado' && lnbPuedeAnular('sg-ventas'))
+        acc+=' <button class="btn bd bs" title="Anular el pedido" onclick="sgPedAnular('+p.id+')">✖</button>';
       return '<tr><td><code>'+esc(p.numero||'')+'</code></td><td>'+(p.fecha_pedido||'—')+'</td><td>'+esc(p.cliente_nombre||'—')+'</td><td style="text-align:right">'+sgMoney(p.total)+'</td><td style="text-align:center"><span class="bdg '+(p.estado==='anulado'?'ber':'bcc')+'">'+(SG_ESTPED[p.estado]||p.estado)+'</span></td><td style="text-align:right;white-space:nowrap">'+acc+'</td></tr>';
     }).join('') : '<tr><td colspan="6" class="emp">Sin pedidos.</td></tr>';
   });
@@ -11137,7 +11147,7 @@ function sgLoadDespachos(){
   api('/api/sg/despachos').then(function(r){
     var rows=(r&&r.ok)?r.data:[];
     eid('sg-tb-despachos').innerHTML = rows.length ? rows.map(function(d){
-      return '<tr><td><code>'+esc(d.numero||'')+'</code></td><td>'+(d.fecha_despacho||'—')+'</td><td>'+esc(d.cliente_alias||'—')+'</td><td>'+esc(d.cliente_nombre||'—')+'</td><td>'+esc(d.vendido||'—')+'</td><td style="text-align:right">'+sgMoney(d.total)+'</td><td style="text-align:center"><span class="bdg bok">'+(SG_ESTDESP[d.estado]||d.estado)+'</span></td><td style="text-align:right;white-space:nowrap"><button class="btn bo bs" onclick="sgDespVer('+d.id+')">🔍</button> <button class="btn bd bs" onclick="sgDespAnular('+d.id+')">✖</button></td></tr>';
+      return '<tr><td><code>'+esc(d.numero||'')+'</code></td><td>'+(d.fecha_despacho||'—')+'</td><td>'+esc(d.cliente_alias||'—')+'</td><td>'+esc(d.cliente_nombre||'—')+'</td><td>'+esc(d.vendido||'—')+'</td><td style="text-align:right">'+sgMoney(d.total)+'</td><td style="text-align:center"><span class="bdg bok">'+(SG_ESTDESP[d.estado]||d.estado)+'</span></td><td style="text-align:right;white-space:nowrap"><button class="btn bo bs" onclick="sgDespVer('+d.id+')">🔍</button>'+(lnbPuedeAnular('sg-ventas')?' <button class="btn bd bs" title="Anular el despacho" onclick="sgDespAnular('+d.id+')">✖</button>':'')+'</td></tr>';
     }).join('') : '<tr><td colspan="8" class="emp">Sin despachos.</td></tr>';
   });
 }
@@ -11838,7 +11848,9 @@ function sgCoopLoad(){
         + '<td style="text-align:right">' + nr(c.descargas) + '</td>'
         + '<td style="text-align:right;white-space:nowrap">'
           + '<button class="btn bo bs" onclick="sgCoopOpen(' + c.id + ')">✏️</button> '
-          + '<button class="btn bd bs" onclick="sgCoopBaja(' + c.id + ')">🗑</button></td>'
+          + (lnbPuedeAnular(['sg-gastos-directos', 'sg-control-coop'])
+              ? '<button class="btn bd bs" onclick="sgCoopBaja(' + c.id + ')">🗑</button>' : '')
+          + '</td>'
         + '</tr>';
     }).join('') : '<tr><td colspan="5" class="emp">Todavía no hay ninguna cooperativa dada de alta.</td></tr>';
   });
@@ -22217,7 +22229,7 @@ function sgImpInit(){
         +'<td style="text-align:right">'+(e.costo_caja_neto!=null?sgMoney(Math.round(e.costo_caja_neto)):'—')+'</td>'
         +'<td style="text-align:right">'+(e.costo_caja_c_impuestos!=null?sgMoney(Math.round(e.costo_caja_c_impuestos)):'—')+'</td>'
         +'<td style="text-align:right;color:'+mCol+';font-weight:600">'+(m!=null?m.toFixed(1)+'%':'—')+'</td>'
-        +'<td style="text-align:right;white-space:nowrap"><button class="btn bo bs" onclick="sgImpOpen('+e.id+')">✏️</button> <button class="btn bd bs" onclick="sgImpDel('+e.id+')">×</button></td>'
+        +'<td style="text-align:right;white-space:nowrap"><button class="btn bo bs" onclick="sgImpOpen('+e.id+')">✏️</button>'+(lnbPuedeAnular('sg-importacion')?' <button class="btn bd bs" onclick="sgImpDel('+e.id+')">×</button>':'')+'</td>'
       +'</tr>';
     }).join('') : '<tr><td colspan="8" class="emp">Sin embarques. Creá el primero con “+ Nuevo embarque”.</td></tr>';
   });
@@ -51174,7 +51186,11 @@ function sgctVerAsiento(id) {
       + '</table>'
       + (a.anulado ? '<div style="background:#fef2f2;border:1px solid #fca5a5;border-radius:8px;padding:10px 14px;font-size:13px;color:#991b1b">⚠ Asiento anulado el '+(a.anulado_en||'').slice(0,10)+'</div>' : '');
     document.getElementById('sgct-as-det-body').innerHTML = html;
-    document.getElementById('sgct-as-det-anular-btn').style.display = a.anulado ? 'none' : '';
+    // Anular un asiento es lo más delicado de todo: se muestra sólo a quien
+    // tiene nivel para anular en el libro de IVA compras, que es el módulo
+    // dueño de esa dirección.
+    document.getElementById('sgct-as-det-anular-btn').style.display =
+      (a.anulado || !lnbPuedeAnular('sgct-iva-compras')) ? 'none' : '';
     document.getElementById('sgct-mb-asiento-det').classList.add('on');
   });
 }

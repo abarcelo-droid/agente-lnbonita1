@@ -173,7 +173,11 @@ function montarCRUD(path, tabla, fields, opts = {}) {
   });
 
   // BORRAR (soft)
-  router.delete(`/${path}/:id`, requireAdmin, (req, res) => {
+  // ANULAR ES UN NIVEL, NO UN ROL (CLAUDE.md). Este delete es el de los cuatro
+  // maestros que se montan con esta función —envases, presentaciones,
+  // proveedores y clientes—, y los cuatro son de sg-catalogo, que es quien
+  // decide el nivel. Es soft delete: la fila queda, con su eliminado_en.
+  router.delete(`/${path}/:id`, requireAuth, (req, res) => {
     const db = getDb();
     try {
       const info = db.prepare(
@@ -327,7 +331,11 @@ function borrarNivelTax(db, req, res, tabla, id, bloqueos) {
   res.json({ ok: true, data: { id: Number(id) } });
 }
 
-router.delete('/variedades/:id', requireAdmin, (req, res) => {
+// ANULAR ES UN NIVEL, NO UN ROL (CLAUDE.md). exigirNivel reconoce la anulación
+// por la URL —el DELETE y los sufijos /anular, /baja— y pide nivel "anular" en
+// el módulo dueño de la dirección. Con requireAdmin, todo esto lo tenía que
+// hacer el dueño de la empresa.
+router.delete('/variedades/:id', requireAuth, (req, res) => {
   const db = getDb();
   try {
     borrarNivelTax(db, req, res, 'sg_variedades', req.params.id, [
@@ -336,7 +344,7 @@ router.delete('/variedades/:id', requireAdmin, (req, res) => {
   } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
 });
 
-router.delete('/especies/:id', requireAdmin, (req, res) => {
+router.delete('/especies/:id', requireAuth, (req, res) => {
   const db = getDb();
   try {
     borrarNivelTax(db, req, res, 'sg_especies', req.params.id, [
@@ -346,7 +354,7 @@ router.delete('/especies/:id', requireAdmin, (req, res) => {
   } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
 });
 
-router.delete('/familias/:id', requireAdmin, (req, res) => {
+router.delete('/familias/:id', requireAuth, (req, res) => {
   const db = getDb();
   try {
     borrarNivelTax(db, req, res, 'sg_familias', req.params.id, [
@@ -470,7 +478,7 @@ router.put('/productos/:id', requireAdmin, (req, res) => {
     }
   } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
 });
-router.delete('/productos/:id', requireAdmin, (req, res) => {
+router.delete('/productos/:id', requireAuth, (req, res) => {
   const db = getDb();
   try {
     const info = db.prepare(`UPDATE sg_productos SET activo=0, eliminado_en=datetime('now','localtime'), eliminado_por_id=? WHERE id=? AND activo=1`).run(uid(req), req.params.id);
@@ -968,7 +976,7 @@ router.put('/condiciones-pago/:id', requireAdmin, (req, res) => {
 });
 
 // BORRAR condición (soft)
-router.delete('/condiciones-pago/:id', requireAdmin, (req, res) => {
+router.delete('/condiciones-pago/:id', requireAuth, (req, res) => {
   const db = getDb();
   try {
     const info = db.prepare(
@@ -2985,7 +2993,10 @@ router.post('/oc/:id/contabilizar', requireAdmin, (req, res) => {
 
 // ANULAR un asiento. Con la clave del administrador: no se borra, queda a la
 // vista con quién lo anuló y cuándo, y la factura vuelve a poder contabilizarse.
-router.post('/asientos/:id/anular', requireAdmin, async (req, res) => {
+// ANULAR UN ASIENTO es lo más delicado de la lista y por eso mismo tiene que
+// poder hacerlo el contador sin depender del dueño. Los frenos siguen abajo:
+// pide la clave del que lo hace y un motivo, y no borra nada — marca anulado.
+router.post('/asientos/:id/anular', requireAuth, async (req, res) => {
   const db = getDb();
   try {
     const motivo = val(req.body && req.body.motivo);
@@ -3509,7 +3520,7 @@ router.put('/oc/:id', requireAdmin, (req, res) => {
 });
 
 // Anular OC (solo si no tiene recepciones)
-router.post('/oc/:id/anular', requireAdmin, (req, res) => {
+router.post('/oc/:id/anular', requireAuth, (req, res) => {
   const db = getDb();
   try {
     const tieneRec = db.prepare('SELECT COUNT(*) c FROM sg_recepciones WHERE oc_id=? AND activo=1').get(req.params.id).c;
@@ -4150,7 +4161,7 @@ router.put('/gastos-directos/:id', requireAdmin, (req, res) => {
   } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
 });
 
-router.delete('/gastos-directos/:id', requireAdmin, (req, res) => {
+router.delete('/gastos-directos/:id', requireAuth, (req, res) => {
   const db = getDb();
   try {
     const g = db.prepare('SELECT lote_id FROM sg_gastos_directos_lote WHERE id=? AND activo=1').get(req.params.id);
@@ -4201,7 +4212,7 @@ router.put('/gastos-globales/:id', requireAdmin, (req, res) => {
   } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
 });
 
-router.delete('/gastos-globales/:id', requireAdmin, (req, res) => {
+router.delete('/gastos-globales/:id', requireAuth, (req, res) => {
   const db = getDb();
   try {
     const g = db.prepare('SELECT periodo FROM sg_gastos_globales_periodo WHERE id=? AND activo=1').get(req.params.id);
@@ -4292,7 +4303,7 @@ router.get('/lotes/:id/trazabilidad', requireAuth, (req, res) => {
 });
 
 // Baja de lote: destino_baja (venta/liquidacion/donacion/disposal). Donación exige receptor.
-router.post('/lotes/:id/baja', requireAdmin, (req, res) => {
+router.post('/lotes/:id/baja', requireAuth, (req, res) => {
   const db = getDb();
   try {
     const destino = req.body.destino_baja;
@@ -4874,7 +4885,7 @@ router.get('/pedidos/:id', requireAuth, (req, res) => {
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
-router.post('/pedidos/:id/anular', requireAdmin, (req, res) => {
+router.post('/pedidos/:id/anular', requireAuth, (req, res) => {
   const db = getDb();
   try {
     db.prepare("UPDATE sg_pedidos SET estado='anulado', modificado_en=datetime('now','localtime'), modificado_por=? WHERE id=?").run(uid(req), req.params.id);
@@ -5237,7 +5248,7 @@ router.get('/despachos/:id/trazabilidad', requireAuth, (req, res) => {
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
-router.post('/despachos/:id/anular', requireAdmin, (req, res) => {
+router.post('/despachos/:id/anular', requireAuth, (req, res) => {
   const db = getDb();
   try {
     const d = db.prepare('SELECT id FROM sg_despachos WHERE id=? AND activo=1').get(req.params.id);
@@ -5320,7 +5331,7 @@ router.put('/cooperativas/:id', requireAdmin, (req, res) => {
 
 // Baja lógica. Las descargas ya cargadas la siguen nombrando: borrarla de verdad
 // dejaría gastos apuntando a una cooperativa que no existe.
-router.delete('/cooperativas/:id', requireAdmin, (req, res) => {
+router.delete('/cooperativas/:id', requireAuth, (req, res) => {
   const db = getDb();
   try {
     const c = db.prepare('SELECT * FROM sg_cooperativas WHERE id=? AND activo=1').get(req.params.id);
@@ -6979,7 +6990,7 @@ router.put('/embarques/:id', requireAdmin, (req, res) => {
 });
 
 // SOFT DELETE — no borra físico (patrón eliminado_en).
-router.delete('/embarques/:id', requireAdmin, (req, res) => {
+router.delete('/embarques/:id', requireAuth, (req, res) => {
   const db = getDb();
   try {
     const info = db.prepare(`UPDATE sg_embarques SET activo=0, eliminado_en=datetime('now','localtime'), eliminado_por_id=?
@@ -7158,7 +7169,7 @@ router.get('/embarques/:id/documentos/:docId/descargar', requireAuth, async (req
 });
 
 // ELIMINAR — soft delete (conserva el expediente; NO borra de R2). requireAdmin. Anti-IDOR en el WHERE.
-router.delete('/embarques/:id/documentos/:docId', requireAdmin, (req, res) => {
+router.delete('/embarques/:id/documentos/:docId', requireAuth, (req, res) => {
   const db = getDb();
   try {
     const info = db.prepare(`UPDATE sg_embarque_documentos SET activo=0, eliminado_en=datetime('now','localtime'), eliminado_por_id=?
