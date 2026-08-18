@@ -6759,19 +6759,59 @@ const EMB_CREDITOS  = new Set(['iva_credito_computable','percepcion_iva_computab
 // para los rubros en USD. Usa COALESCE(monto_real, monto_estimado) como monto EFECTIVO.
 // soloEstimado=true fuerza la mirada PROYECTADA: montos estimados y tc estimado, ignorando
 // todo lo real. Es contra esto que se compara el cierre para saber si la cotización afinó.
+// Fecha estimada de pago de un rubro. Se expresa como "N días desde un hito" para que si el
+// barco se corre, la fecha —y con ella el TC— se recalculen solos. null = sin condición
+// cargada (o falta el hito), y entonces el TC cae al de hoy.
+function fechaPagoRubro(emb, c) {
+  if (c.pago_ancla === 'fija') return c.pago_fecha || null;
+  // Sin días cargados NO hay condición de pago. Sin este corte, un rubro al que nadie le
+  // cargó nada caía igual en la rama de la ETA y se costeaba como si se pagara el día de la
+  // llegada, que es una fecha que nadie eligió.
+  if (c.pago_dias == null || c.pago_dias === '') return null;
+  const base = c.pago_ancla === 'etd' ? emb.fecha_etd : emb.fecha_eta;
+  if (!base) return null;
+  const d = new Date(Date.parse(String(base).slice(0, 10) + 'T00:00:00Z'));
+  if (isNaN(d.getTime())) return null;
+  d.setUTCDate(d.getUTCDate() + (Number(c.pago_dias) || 0));
+  return d.toISOString().slice(0, 10);
+}
+
 function calcEmbarque(emb, costos, soloEstimado) {
-  const tc = soloEstimado
+  const db = getDb();
+  const hoy = db.prepare("SELECT date('now','localtime') d").get().d;
+  // Override manual del embarque. tc_estimado dejó de ser obligatorio: si está cargado pisa
+  // la curva para todos los rubros (pago anticipado ya hecho, TC pactado con el proveedor).
+  const override = soloEstimado
     ? (emb.tc_estimado != null ? Number(emb.tc_estimado) : null)
     : (emb.tc_real != null ? Number(emb.tc_real) : (emb.tc_estimado != null ? Number(emb.tc_estimado) : null));
-  const aARS = (monto, moneda) => {
-    if (monto == null) return null;
-    const m = Number(monto) || 0;
-    return ((moneda || 'ARS') === 'USD' && tc) ? m * tc : m;
+
+  // TC de cada rubro: el de la curva en su fecha de pago.
+  // LA REGLA DEL VENCIDO: si la fecha ya pasó y todavía no se pagó, no se puede seguir
+  // usando el dólar de una fecha vieja — el TC sigue rodando al de hoy hasta que se pague.
+  const tcCache = {};
+  const tcDeRubro = (c) => {
+    if (override != null) return { tc: override, modo: 'manual' };
+    const f = fechaPagoRubro(emb, c);
+    const vencido = !!(f && f < hoy);
+    const fTC = (f && !vencido) ? f : hoy;
+    if (tcCache[fTC] === undefined) tcCache[fTC] = tcEsperadoEnFecha(db, fTC);
+    const r = tcCache[fTC];
+    return { tc: r.tc, modo: r.modo, fecha_pago: f, fecha_tc: fTC, vencido, sin_condicion: !f };
   };
+
   let bruto = 0, creditos = 0, total_estimado = 0, total_real = 0, gap_total = 0;
+  const tc_por_concepto = {};
   const detalle = costos.map(c => {
-    const est  = aARS(c.monto_estimado, c.moneda);
-    const real = aARS(c.monto_real, c.moneda);
+    const esUSD = (c.moneda || 'ARS') === 'USD';
+    const info = esUSD ? tcDeRubro(c) : { tc: null, modo: 'no_aplica' };
+    if (esUSD) tc_por_concepto[c.concepto] = info.tc;
+    const est = c.monto_estimado == null ? null
+      : (esUSD && info.tc ? (Number(c.monto_estimado) || 0) * info.tc : (Number(c.monto_estimado) || 0));
+    // El REAL se carga en pesos: es lo que salió de la caja, tal como figura en el extracto.
+    // moneda_real existe por si algún día se paga desde una cuenta en dólares.
+    const monReal = c.moneda_real || 'ARS';
+    const real = c.monto_real == null ? null
+      : ((monReal === 'USD' && info.tc) ? (Number(c.monto_real) || 0) * info.tc : (Number(c.monto_real) || 0));
     // COALESCE(real, estimado) — salvo en la mirada proyectada, que ignora lo real a propósito.
     const efectivo = soloEstimado ? (est != null ? est : 0)
                                   : (real != null ? real : (est != null ? est : 0));
@@ -6780,8 +6820,13 @@ function calcEmbarque(emb, costos, soloEstimado) {
     if (real != null) total_real += real;
     const gap = (real != null && est != null) ? real - est : null;
     if (gap != null) gap_total += gap;
-    return { ...c, monto_estimado_ars: est, monto_real_ars: real, efectivo_ars: efectivo, gap };
+    return { ...c, monto_estimado_ars: est, monto_real_ars: real, efectivo_ars: efectivo, gap,
+      tc_rubro: info.tc, tc_modo: info.modo, fecha_pago: info.fecha_pago || null,
+      tc_vencido: !!info.vencido, tc_sin_condicion: !!info.sin_condicion };
   });
+  // tc_aplicado queda como el de la mercadería, que es el rubro que manda en el costo. Ya no
+  // existe "el TC del embarque": cada rubro tiene el suyo según cuándo se paga.
+  const tc = tc_por_concepto.costo_mercaderia != null ? tc_por_concepto.costo_mercaderia : override;
   const neto  = bruto - creditos;
   const cajas = Number(emb.cantidad_cajas) || 0;
   const merma = Number(emb.merma_esperada_pct) || 0;
@@ -6791,7 +6836,8 @@ function calcEmbarque(emb, costos, soloEstimado) {
   const costo_caja_vendible    = (costo_caja_neto != null && merma < 100) ? costo_caja_neto / (1 - merma / 100) : costo_caja_neto;
   const margen_proyectado_pct  = (precioRef && precioRef > 0 && costo_caja_vendible != null) ? (precioRef - costo_caja_vendible) / precioRef * 100 : null;
   return { bruto, creditos, neto, costo_caja_neto, costo_caja_c_impuestos, costo_caja_vendible,
-    margen_proyectado_pct, total_estimado, total_real, gap_total, tc_aplicado: tc, detalle };
+    margen_proyectado_pct, total_estimado, total_real, gap_total, tc_aplicado: tc,
+    tc_por_concepto, tc_manual: override != null, detalle };
 }
 
 function embCostos(db, embId) {
@@ -6813,7 +6859,10 @@ function embCostos(db, embId) {
 function costoBaseLineasEmbarque(emb, costos, lineas) {
   const calc = calcEmbarque(emb, costos);
   const neto = calc.neto || 0;
-  const tc = calc.tc_aplicado;
+  // El FOB por línea es mercadería, así que se convierte con el TC de ESE rubro (el de su
+  // fecha de pago), no con un TC genérico del embarque, que ya no existe.
+  const tc = calc.tc_por_concepto && calc.tc_por_concepto.costo_mercaderia != null
+    ? calc.tc_por_concepto.costo_mercaderia : calc.tc_aplicado;
   const merc = costos.find(c => c.concepto === 'costo_mercaderia');
   const mercUSD = merc && (merc.moneda || 'ARS') === 'USD';
   const fobConv = p => { const v = Number(p) || 0; return (mercUSD && tc) ? v * tc : v; };   // FOB USD→ARS
@@ -7088,6 +7137,14 @@ function embCostosDelBody(body) {
     moneda: (c.moneda === 'USD' ? 'USD' : 'ARS'),
     monto_estimado: (c.monto_estimado != null && c.monto_estimado !== '') ? Number(c.monto_estimado) : null,
     monto_real: (c.monto_real != null && c.monto_real !== '') ? Number(c.monto_real) : null,
+    // El real se carga en pesos (lo que salió de la caja). moneda_real queda por si algún
+    // día se paga desde una cuenta en dólares.
+    moneda_real: (c.moneda_real === 'USD' ? 'USD' : 'ARS'),
+    // Condición de pago del rubro: solo tiene sentido en los que van en dólares, que son los
+    // únicos que necesitan saber a qué TC se van a liquidar.
+    pago_ancla: ['etd', 'eta', 'fija'].includes(c.pago_ancla) ? c.pago_ancla : null,
+    pago_dias: (c.pago_dias != null && c.pago_dias !== '') ? Math.round(Number(c.pago_dias)) : null,
+    pago_fecha: val(c.pago_fecha),
     observaciones: val(c.observaciones)
   }));
 }
@@ -7162,14 +7219,18 @@ router.put('/embarques/:id', requireAdmin, (req, res) => {
       db.prepare(`UPDATE sg_embarques SET ${EMB_HEADER_COLS.map(k => k + '=?').join(', ')},
         modificado_en=datetime('now','localtime'), modificado_por=? WHERE id=?`)
         .run(...EMB_HEADER_COLS.map(k => h[k]), uid(req), emb.id);
-      const upd = db.prepare(`UPDATE sg_embarque_costos SET es_credito=?, moneda=?, monto_estimado=?, monto_real=?, observaciones=?,
+      const upd = db.prepare(`UPDATE sg_embarque_costos SET es_credito=?, moneda=?, monto_estimado=?, monto_real=?,
+        moneda_real=?, pago_ancla=?, pago_dias=?, pago_fecha=?, observaciones=?,
         modificado_en=datetime('now','localtime'), modificado_por=? WHERE embarque_id=? AND concepto=? AND activo=1`);
       const ins = db.prepare(`INSERT INTO sg_embarque_costos
-        (embarque_id, concepto, es_credito, moneda, monto_estimado, monto_real, observaciones, creado_por)
-        VALUES (?,?,?,?,?,?,?,?)`);
+        (embarque_id, concepto, es_credito, moneda, monto_estimado, monto_real,
+         moneda_real, pago_ancla, pago_dias, pago_fecha, observaciones, creado_por)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`);
       for (const c of costos) {
-        const r = upd.run(c.es_credito, c.moneda, c.monto_estimado, c.monto_real, c.observaciones, uid(req), emb.id, c.concepto);
-        if (r.changes === 0) ins.run(emb.id, c.concepto, c.es_credito, c.moneda, c.monto_estimado, c.monto_real, c.observaciones, uid(req));
+        const r = upd.run(c.es_credito, c.moneda, c.monto_estimado, c.monto_real,
+          c.moneda_real, c.pago_ancla, c.pago_dias, c.pago_fecha, c.observaciones, uid(req), emb.id, c.concepto);
+        if (r.changes === 0) ins.run(emb.id, c.concepto, c.es_credito, c.moneda, c.monto_estimado, c.monto_real,
+          c.moneda_real, c.pago_ancla, c.pago_dias, c.pago_fecha, c.observaciones, uid(req));
       }
       embSyncLineas(db, emb.id, b, uid(req), emb.estado);   // F5 — replace-all de líneas (si no está recibido) + cantidad_cajas derivada
     });
