@@ -2792,20 +2792,50 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
       <div><div class="ph-t">🏦 San Gerónimo · Caja y Bancos</div>
         <div class="ph-s" id="cb-sub">De dónde sale y a dónde entra la plata</div></div>
       <div style="display:flex;gap:8px">
-        <button class="btn bb" id="cb-btn-nueva" onclick="sgCbCuentaOpen(null)">+ Nueva</button>
+        <button class="btn bb" id="cb-btn-nueva" onclick="sgCbNueva()">+ Nueva</button>
         <button class="btn bo" onclick="sgCbInit()">↻ Actualizar</button>
       </div>
     </div>
     <div class="cb-tabs">
       <button class="cb-tab" id="cb-tab-cajas"  onclick="sgCbTab('cajas')">💵 Cajas</button>
       <button class="cb-tab" id="cb-tab-bancos" onclick="sgCbTab('bancos')">🏦 Bancos</button>
+      <button class="cb-tab" id="cb-tab-terceros" onclick="sgCbTab('terceros')">📥 Cheques de terceros</button>
+      <button class="cb-tab" id="cb-tab-concil" onclick="sgCbTab('concil')">⚖️ Conciliación</button>
     </div>
     <div class="cb-cards" id="cb-cards"></div>
+    <!-- Los filtros de la cartera de cheques. Se esconden en las otras solapas. -->
+    <div id="cb-filtros" style="display:none;margin-bottom:10px">
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+        <select id="cb-ct-estado" onchange="sgCbCargar()" style="max-width:220px">
+          <option value="">Todos los estados</option>
+          <option value="en_cartera">En cartera</option>
+          <option value="depositado">Depositados</option>
+          <option value="endosado">Endosados</option>
+          <option value="rechazado">Rechazados</option>
+          <option value="anulado">Anulados</option>
+        </select>
+        <input id="cb-ct-q" placeholder="🔎 Librador, banco o número…" oninput="sgCbPintar()"
+               style="max-width:280px;flex:1">
+      </div>
+    </div>
+    <!-- La conciliación tiene su propia cabecera: cuenta y mes. -->
+    <div id="cb-cc-barra" style="display:none;margin-bottom:10px">
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end">
+        <div class="fl" style="margin:0;min-width:230px"><label>Cuenta</label>
+          <select id="cb-cc-cuenta" onchange="sgCbCcCargar()"></select></div>
+        <div class="fl" style="margin:0"><label>Mes</label>
+          <input type="month" id="cb-cc-periodo" onchange="sgCbCcCargar()" style="width:170px"></div>
+        <button class="btn bo" onclick="sgCbCcImportarOpen()">📄 Cargar extracto</button>
+        <button class="btn bo" onclick="sgCbCcAuto()">🪄 Cruzar automático</button>
+      </div>
+    </div>
     <div class="ab-table-wrap"><table class="pa-tbl">
       <thead id="cb-th"></thead>
       <tbody id="cb-tb"><tr><td colspan="7" class="emp">Cargando…</td></tr></tbody>
     </table></div>
     <div id="cb-nota" style="font-size:11.5px;color:var(--mut);margin-top:8px"></div>
+    <!-- El tablero de conciliación: extracto a la izquierda, libro a la derecha. -->
+    <div id="cb-concil" style="display:none;margin-top:14px"></div>
 
     <!-- El detalle de la cuenta elegida: sus movimientos, y si es banco, sus
          chequeras con los cheques que salieron de cada una. -->
@@ -2903,6 +2933,87 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
         <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:16px">
           <button class="btn bo" onclick="closeMB('cb-mov-modal')">Cancelar</button>
           <button class="btn bb" onclick="sgCbMovGuardar()">Guardar</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── UN CHEQUE QUE NOS DAN ─────────────────────────────────────────
+       El que entrega el cliente. Entra en cartera, y de ahí se deposita, se
+       endosa o el banco lo rechaza. -->
+  <div class="ab-modal-overlay" id="cb-ct-modal">
+    <div class="ab-modal" style="max-width:min(660px,96vw)">
+      <div class="mhd"><div class="mht">Recibir un cheque</div>
+        <button class="mcl" onclick="closeMB('cb-ct-modal')">×</button></div>
+      <div class="mbd">
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px">
+          <div class="fl"><label>Librador</label>
+            <input id="cb-ct-librador" placeholder="Quién firma el cheque"></div>
+          <div class="fl"><label>Banco</label><input id="cb-ct-banco"></div>
+          <div class="fl"><label>N° de cheque</label><input id="cb-ct-nro"></div>
+          <div class="fl"><label>Importe</label>
+            <input type="text" inputmode="decimal" id="cb-ct-monto" placeholder="$ 0"
+                   style="text-align:right" oninput="this.value=sgMilFmtLive(this.value)"></div>
+          <div class="fl"><label>Lo recibimos el</label><input type="date" id="cb-ct-frec"></div>
+          <div class="fl"><label>Vence el</label><input type="date" id="cb-ct-fvto"></div>
+        </div>
+        <div class="fl" style="margin-top:10px"><label>Notas</label><input id="cb-ct-notas"></div>
+        <div style="font-size:11.5px;color:var(--mut);margin-top:8px">
+          Con librador y número cargados, el sistema no deja entrar dos veces el
+          mismo cheque.
+        </div>
+        <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:16px">
+          <button class="btn bo" onclick="closeMB('cb-ct-modal')">Cancelar</button>
+          <button class="btn bb" onclick="sgCbCtGuardar()">Guardar</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── DEPOSITAR UN CHEQUE ────────────────────────────────────────────
+       Marcarlo "depositado" en una lista no hace entrar la plata a ningún
+       lado: se pregunta en qué cuenta entra y se le carga el movimiento. -->
+  <div class="ab-modal-overlay" id="cb-dep-modal">
+    <div class="ab-modal" style="max-width:min(520px,96vw)">
+      <div class="mhd"><div class="mht" id="cb-dep-tit">Depositar el cheque</div>
+        <button class="mcl" onclick="closeMB('cb-dep-modal')">×</button></div>
+      <div class="mbd">
+        <div id="cb-dep-det" style="font-size:12.5px;color:var(--mut);margin-bottom:10px"></div>
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px">
+          <div class="fl"><label>En qué cuenta entra</label>
+            <select id="cb-dep-cuenta"></select></div>
+          <div class="fl"><label>Fecha del depósito</label>
+            <input type="date" id="cb-dep-fecha"></div>
+        </div>
+        <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:16px">
+          <button class="btn bo" onclick="closeMB('cb-dep-modal')">Cancelar</button>
+          <button class="btn bb" onclick="sgCbDepGuardar()">Depositar</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── EL EXTRACTO DEL BANCO ──────────────────────────────────────────
+       Se pega tal cual sale del homebanking: fecha, concepto, importe. El
+       importe negativo es lo que salió. -->
+  <div class="ab-modal-overlay" id="cb-ext-modal">
+    <div class="ab-modal" style="max-width:min(720px,96vw)">
+      <div class="mhd"><div class="mht">Cargar el extracto</div>
+        <button class="mcl" onclick="closeMB('cb-ext-modal')">×</button></div>
+      <div class="mbd">
+        <div style="font-size:12.5px;color:var(--mut);margin-bottom:8px">
+          Pegá los renglones del homebanking, uno por línea, separados por tab,
+          punto y coma o coma:<br>
+          <code>2026-09-02;Transferencia a ZZ;-1500</code><br>
+          El importe negativo es lo que salió de la cuenta.
+        </div>
+        <textarea id="cb-ext-texto" rows="10" style="width:100%;box-sizing:border-box;
+          font-family:monospace;font-size:12px" placeholder="2026-09-02;Pago proveedor;-1500"></textarea>
+        <div id="cb-ext-prev" style="font-size:11.5px;color:var(--mut);margin-top:8px"></div>
+        <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:14px">
+          <button class="btn bo" onclick="closeMB('cb-ext-modal')">Cancelar</button>
+          <button class="btn bo" onclick="sgCbExtPrevia()">Previsualizar</button>
+          <button class="btn bb" onclick="sgCbExtGuardar()">Cargar</button>
         </div>
       </div>
     </div>
@@ -3041,6 +3152,15 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
           </div>
         </div>
         <div id="sg-pago-total" style="text-align:right;font-size:15px;font-weight:700;margin-top:10px"></div>
+        <!-- ── EL ASIENTO, ANTES DE CONFIRMAR ────────────────────────────
+             Convención del proyecto (ver CLAUDE.md): toda operación que toca
+             rubros contables muestra su asiento con el "balancea" abajo. Se
+             veía recién después, entrando a Asientos Contables, y para
+             entonces ya estaba hecho. -->
+        <div class="sg-oc-box" style="margin-top:12px">
+          <div class="sg-oc-box-tit">Cómo entra al libro</div>
+          <div id="sg-pago-asiento"></div>
+        </div>
         <div class="fl" style="margin-top:8px"><label>Notas</label><input id="sg-pago-notas"></div>
         <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:14px">
           <button class="btn bo" onclick="closeMB('sg-pago-modal')">Cancelar</button>
@@ -5167,7 +5287,7 @@ function sgCcFicha(provId){
 // concretas —no es "le pagué un millón", es "le pagué la factura 1-23"— y entra
 // al libro con su asiento, igual que la factura.
 var SG_PAGO = { provId: null, facturas: [], cuentas: [], anticipos: [],
-                aCuentaDisp: 0, forma: 'transferencia' };
+                aCuentaDisp: 0, forma: 'transferencia', ctaProveedores: null };
 
 // Con qué cuentas se puede pagar de cada forma. La caja paga en efectivo y el
 // banco por transferencia o cheque: ofrecer todas para todo es la manera de que
@@ -5242,6 +5362,7 @@ function sgPagoCuentasPintar(){
 }
 
 function sgPagoCuentaCambio(){
+  sgPagoAsientoPintar();
   if (SG_PAGO.forma !== 'cheque') return;
   var cta = (eid('sg-pago-cuenta') || {}).value;
   var sel = eid('sg-pago-chequera'); if (!sel) return;
@@ -5279,7 +5400,7 @@ function sgPagoProximoCheque(){
 
 function sgPagoOpen(provId, nombre){
   SG_PAGO = { provId: provId, facturas: [], cuentas: [], anticipos: [],
-              aCuentaDisp: 0, forma: 'transferencia' };
+              aCuentaDisp: 0, forma: 'transferencia', ctaProveedores: null };
   var t = eid('sg-pago-tit'); if (t) t.textContent = 'Registrar pago — ' + nombre;
   var f = eid('sg-pago-fecha'); if (f) f.value = new Date().toISOString().slice(0, 10);
   ['sg-pago-ref', 'sg-pago-notas', 'sg-pago-acuenta', 'sg-pago-chnro', 'sg-pago-chvto']
@@ -5287,6 +5408,7 @@ function sgPagoOpen(provId, nombre){
 
   api('/api/sg/pagos/cuentas').then(function(r){
     SG_PAGO.cuentas = (r && r.ok) ? r.data : [];
+    SG_PAGO.ctaProveedores = (r && r.ok) ? (r.proveedores || null) : null;
     sgPagoForma('transferencia');
   });
 
@@ -5415,6 +5537,7 @@ function sgPagoTotal(){
       : (cab ? cab + '<br><span style="font-size:12px;font-weight:400;color:var(--mut)">'
                + 'No sale plata hoy</span>' : '');
   }
+  sgPagoAsientoPintar();
   return t;
 }
 
@@ -5496,7 +5619,8 @@ function lnbPuedeAnular(modulo){
 // de efectivo la maneja una persona y se arquea; el banco tiene chequera,
 // extractos y conciliación.
 var SG_CB = { tab: 'cajas', cuentas: [], contables: [], ctblCargado: false, sel: null,
-              movs: [], chequeras: [], cheques: [], usrCta: null, editId: null };
+              movs: [], chequeras: [], cheques: [], usrCta: null, editId: null,
+              terceros: [], depId: null, cc: null };
 
 function sgCbApi(path, method, body){
   return api('/api/sg/tesoreria' + path, method, body);
@@ -5515,32 +5639,61 @@ function sgCbInit(){
   }
 }
 
+var SG_CB_SUB = {
+  cajas:    'La plata en efectivo: cada caja, su cuenta contable y quiénes la tocan',
+  bancos:   'Las cuentas bancarias, sus chequeras y los cheques librados',
+  terceros: 'Los cheques que nos dan: qué hay en cartera, qué vence y qué se depositó',
+  concil:   'El extracto del banco contra lo que dice el libro'
+};
+var SG_CB_BTN = {
+  cajas: '+ Nueva caja', bancos: '+ Nueva cuenta bancaria',
+  terceros: '+ Recibir un cheque', concil: ''
+};
+
 function sgCbTab(t){
   SG_CB.tab = t;
   SG_CB.sel = null;
-  ['cajas', 'bancos'].forEach(function(x){
+  ['cajas', 'bancos', 'terceros', 'concil'].forEach(function(x){
     var b = eid('cb-tab-' + x); if (b) b.classList.toggle('on', x === t);
   });
-  var sub = eid('cb-sub');
-  if (sub) sub.textContent = t === 'cajas'
-    ? 'La plata en efectivo: cada caja, su cuenta contable y quiénes la tocan'
-    : 'Las cuentas bancarias, sus chequeras y los cheques librados';
+  var sub = eid('cb-sub'); if (sub) sub.textContent = SG_CB_SUB[t] || '';
   var bn = eid('cb-btn-nueva');
-  if (bn) bn.textContent = t === 'cajas' ? '+ Nueva caja' : '+ Nueva cuenta bancaria';
+  if (bn) { bn.textContent = SG_CB_BTN[t] || ''; bn.style.display = SG_CB_BTN[t] ? '' : 'none'; }
   var det = eid('cb-detalle'); if (det) det.style.display = 'none';
+  var fil = eid('cb-filtros'); if (fil) fil.style.display = (t === 'terceros') ? '' : 'none';
+  var bar = eid('cb-cc-barra'); if (bar) bar.style.display = (t === 'concil') ? '' : 'none';
+  var cc = eid('cb-concil'); if (cc) cc.style.display = (t === 'concil') ? '' : 'none';
+  // La tabla de arriba no tiene nada que decir en Conciliación: ahí manda el
+  // tablero de abajo, que es de dos columnas.
+  var wrap = eid('cb-tb') && eid('cb-tb').parentNode ? eid('cb-tb').parentNode.parentNode : null;
+  if (wrap && wrap.style) wrap.style.display = (t === 'concil') ? 'none' : '';
+  var cards = eid('cb-cards'); if (cards && t === 'concil') cards.innerHTML = '';
   sgCbCargar();
 }
 
 function sgCbEsCaja(c){ return c.tipo === 'caja'; }
 
+function sgCbNueva(){
+  if (SG_CB.tab === 'terceros') sgCbCtOpen();
+  else sgCbCuentaOpen(null);
+}
+
 function sgCbCargar(){
   sgCbApi('/cuentas').then(function(r){
     SG_CB.cuentas = (r && r.ok) ? r.data : [];
-    sgCbPintar();
+    if (SG_CB.tab === 'concil') { sgCbCcCuentas(); return; }
+    if (SG_CB.tab !== 'terceros') { sgCbPintar(); return; }
+    var est = (eid('cb-ct-estado') || {}).value || '';
+    sgCbApi('/cheques-terceros' + (est ? '?estado=' + est : '')).then(function(r2){
+      SG_CB.terceros = (r2 && r2.ok) ? r2.data : [];
+      sgCbPintar();
+    });
   });
 }
 
 function sgCbPintar(){
+  if (SG_CB.tab === 'terceros') { sgCbTercerosPintar(); return; }
+  if (SG_CB.tab === 'concil') return;
   var esCaja = SG_CB.tab === 'cajas';
   var lista = SG_CB.cuentas.filter(function(c){ return sgCbEsCaja(c) === esCaja; });
 
@@ -6014,6 +6167,486 @@ function sgCbChequeAnular(id, nro){
     if (!r || !r.ok) { toast((r && r.error) || 'No se pudo anular', 'er'); return; }
     toast('Cheque N° ' + nro + ' anulado', 'ok');
     if (SG_CB.sel) sgCbVer(SG_CB.sel.id);
+  });
+}
+
+
+
+// ── EL CUADRO DEL ASIENTO ───────────────────────────────────────────────
+// Convención del proyecto (CLAUDE.md): toda operación que toca rubros contables
+// muestra el asiento que va a generar, con el control de que BALANCEE, antes de
+// confirmarla. Hasta ahora el asiento se veía recién después, entrando a
+// Asientos Contables — y para entonces ya estaba hecho.
+//
+// Recibe [{codigo, nombre, descripcion, debe, haber}]. No decide nada: espeja lo
+// que arma el backend, que sigue siendo el único que asienta.
+function sgAsientoTabla(lineas, nota){
+  lineas = lineas || [];
+  if (!lineas.length) {
+    return '<div style="font-size:12.5px;color:var(--mut)">' + escH(nota || 'Sin asiento.') + '</div>';
+  }
+  var totD = 0, totH = 0;
+  var filas = lineas.map(function(l){
+    var d = Number(l.debe) || 0, h = Number(l.haber) || 0;
+    totD += d; totH += h;
+    return '<tr>'
+      + '<td style="font-family:monospace;font-size:12px">' + escH(l.codigo || '—') + '</td>'
+      + '<td class="pg-partida">' + escH(l.nombre || '(cuenta sin nombre)') + '</td>'
+      + '<td style="font-size:11.5px;color:var(--mut)">' + escH(l.descripcion || '') + '</td>'
+      + '<td style="text-align:right">' + (d ? sgMoney(d) : '') + '</td>'
+      + '<td style="text-align:right">' + (h ? sgMoney(h) : '') + '</td>'
+      + '</tr>';
+  }).join('');
+  var dif = Math.round((totD - totH) * 100) / 100;
+  var ok = Math.abs(dif) < 0.01;
+  return '<div class="ab-table-wrap"><table class="pa-tbl">'
+    + '<thead><tr><th style="width:130px">Código</th><th>Cuenta</th>'
+    + '<th style="width:170px">Detalle</th>'
+    + '<th style="width:130px;text-align:right">Debe</th>'
+    + '<th style="width:130px;text-align:right">Haber</th></tr></thead><tbody>'
+    + filas
+    + '<tr style="border-top:2px solid var(--bor);font-weight:700">'
+      + '<td colspan="3">Totales</td>'
+      + '<td style="text-align:right">' + sgMoney(totD) + '</td>'
+      + '<td style="text-align:right">' + sgMoney(totH) + '</td></tr>'
+    + '<tr><td colspan="5" style="padding-top:8px">'
+      + (ok
+          ? '<span style="color:#166534;font-weight:700">✓ El asiento balancea</span>'
+          : '<span style="color:var(--err);font-weight:700">✗ NO balancea — diferencia de '
+            + sgMoney(Math.abs(dif)) + '</span>')
+      + (nota ? '<div style="font-size:11.5px;color:var(--mut);margin-top:4px">' + escH(nota) + '</div>' : '')
+    + '</td></tr>'
+    + '</tbody></table></div>';
+}
+
+// El asiento del pago: Proveedores al DEBE —se cancela deuda— contra la cuenta
+// del banco o la caja de donde sale la plata. Es EXACTAMENTE lo que arma el
+// backend en POST /pagos; si acá se ve otra cosa, el que está mal es este
+// preview y hay que arreglarlo, no el backend.
+function sgPagoAsientoPintar(){
+  var cont = eid('sg-pago-asiento'); if (!cont) return;
+  var imp = 0, usaAC = 0;
+  SG_PAGO.facturas.forEach(function(_, i){
+    imp   += sgMilParse((eid('sg-pago-imp-' + i) || {}).value) || 0;
+    usaAC += sgMilParse((eid('sg-pago-ac-'  + i) || {}).value) || 0;
+  });
+  var ac = sgMilParse((eid('sg-pago-acuenta') || {}).value) || 0;
+  var total = Math.round((imp + ac) * 100) / 100;
+
+  if (!(total > 0)) {
+    // Aplicar un anticipo NO asienta: la plata salió el día del anticipo y ese
+    // día se hizo el asiento. Volver a asentarlo sería contarlo dos veces.
+    cont.innerHTML = '<div style="font-size:12.5px;color:var(--mut)">'
+      + (usaAC > 0
+          ? 'Aplicar un saldo a cuenta <b>no genera asiento</b>: la plata salió el día del anticipo '
+            + 'y ese día ya se asentó. Esto sólo dice a qué factura se imputa.'
+          : 'Poné cuánto se paga y acá se muestra el asiento que va a entrar al libro.')
+      + '</div>';
+    return;
+  }
+  if (!SG_PAGO.ctaProveedores) {
+    cont.innerHTML = '<div style="font-size:12.5px;color:#9a3412">'
+      + '⚠️ El asiento modelo de las facturas no tiene línea de Proveedores. Sin esa cuenta no se sabe '
+      + 'contra qué cancelar el pago, y el pago no se va a poder registrar.</div>';
+    return;
+  }
+  var id = (eid('sg-pago-cuenta') || {}).value;
+  var cta = SG_PAGO.cuentas.filter(function(c){ return String(c.id) === String(id); })[0];
+  if (!cta || !cta.cuenta_contable_id) {
+    cont.innerHTML = '<div style="font-size:12.5px;color:#9a3412">'
+      + '⚠️ Elegí una cuenta con cuenta contable asignada: sin eso el pago no puede entrar al libro.</div>';
+    return;
+  }
+  var p = SG_PAGO.ctaProveedores;
+  cont.innerHTML = sgAsientoTabla([
+    { codigo: p.codigo, nombre: p.nombre, descripcion: 'Proveedores', debe: total, haber: 0 },
+    { codigo: cta.cuenta_codigo, nombre: cta.cuenta_nombre, descripcion: cta.nombre,
+      debe: 0, haber: total }
+  ], usaAC > 0
+      ? 'Los ' + sgMoney(usaAC) + ' que se aplican del saldo a cuenta NO entran acá: ya se asentaron '
+        + 'el día del anticipo.'
+      : '');
+}
+
+// ── LOS CHEQUES QUE NOS DAN ─────────────────────────────────────────────
+// Entran en cartera; de ahí se depositan, se endosan o el banco los rechaza.
+// Lo que importa de un vistazo es cuánto hay en cartera y qué está por vencer:
+// un cheque vencido en un cajón es plata que se dejó de cobrar.
+var SG_CT_EST = {
+  en_cartera: ['En cartera', 'si'], depositado: ['Depositado', 'si'],
+  endosado: ['Endosado', 'int'], rechazado: ['Rechazado', 'no'],
+  anulado: ['Anulado', 'no']
+};
+
+function sgCbTercerosPintar(){
+  var q = ((eid('cb-ct-q') || {}).value || '').toLowerCase().trim();
+  var lista = SG_CB.terceros.filter(function(c){
+    if (!q) return true;
+    return ((c.librador || '') + ' ' + (c.banco || '') + ' ' + (c.nro_cheque || ''))
+      .toLowerCase().indexOf(q) >= 0;
+  });
+
+  var cartera = SG_CB.terceros.filter(function(c){ return c.estado === 'en_cartera'; });
+  var enCartera = cartera.reduce(function(a, c){ return a + (c.monto || 0); }, 0);
+  var vencidos = cartera.filter(function(c){ return c.vencido; });
+  var cards = eid('cb-cards');
+  if (cards) cards.innerHTML =
+    '<div class="cb-card"><div class="cb-c-n">En cartera</div>'
+    + '<div class="cb-c-v">' + sgMoney(enCartera) + '</div></div>'
+    + '<div class="cb-card"><div class="cb-c-n">Cheques</div>'
+    + '<div class="cb-c-v">' + cartera.length + '</div></div>'
+    + '<div class="cb-card"><div class="cb-c-n">Vencidos sin depositar</div>'
+    + '<div class="cb-c-v"' + (vencidos.length ? ' style="color:#b91c1c"' : '') + '>'
+    + vencidos.length + '</div></div>';
+
+  var th = eid('cb-th');
+  if (th) th.innerHTML = '<tr><th class="cb-nom">Librador</th>'
+    + '<th style="width:130px">Banco</th><th style="width:110px">N°</th>'
+    + '<th style="width:100px">Vence</th>'
+    + '<th style="width:130px;text-align:right">Importe</th>'
+    + '<th style="width:150px;text-align:center">Estado</th>'
+    + '<th style="width:210px"></th></tr>';
+
+  var puedeAnular = lnbPuedeAnular('sg-caja-bancos');
+  var tb = eid('cb-tb'); if (!tb) return;
+  tb.innerHTML = lista.length ? lista.map(function(c){
+    var e = SG_CT_EST[c.estado] || [c.estado, 'no'];
+    var muerto = (c.estado === 'anulado' || c.estado === 'rechazado');
+    var acc = '';
+    if (c.estado === 'en_cartera') {
+      acc += '<button class="btn bb bs" onclick="sgCbDepOpen(' + c.id + ')">Depositar</button>'
+        + ' <button class="btn bo bs" title="Se lo pasamos a un proveedor"'
+        + ' onclick="sgCbCtEstado(' + c.id + ',\'endosado\')">Endosar</button>';
+    } else if (c.estado === 'depositado') {
+      acc += '<button class="btn bo bs" title="El banco lo devolvió"'
+        + ' onclick="sgCbCtEstado(' + c.id + ',\'rechazado\')">Rechazado</button>';
+    }
+    if (puedeAnular && !muerto && c.estado !== 'depositado') {
+      acc += ' <button class="btn bd bs" onclick="sgCbCtAnular(' + c.id + ')">Anular</button>';
+    }
+    return '<tr' + (muerto ? ' style="opacity:.5"' : '') + '>'
+      + '<td class="cb-nom"><b>' + escH(c.librador || '—') + '</b>'
+        + (c.cuenta_destino_nombre
+            ? '<div style="font-size:10.5px;color:var(--mut)">→ ' + escH(c.cuenta_destino_nombre) + '</div>'
+            : '')
+        + '</td>'
+      + '<td>' + escH(c.banco || '—') + '</td>'
+      + '<td>' + escH(c.nro_cheque || '—') + '</td>'
+      + '<td' + (c.vencido ? ' style="color:#b91c1c;font-weight:700"' : '') + '>'
+        + escH(c.fecha_vto || '—') + '</td>'
+      + '<td style="text-align:right"><b>' + sgMoney(c.monto) + '</b></td>'
+      + '<td style="text-align:center"><span class="cb-chip ' + e[1] + '">' + e[0] + '</span>'
+        + (c.vencido ? ' <span class="cb-chip no" title="Venció y sigue sin depositar">vencido</span>' : '')
+        + '</td>'
+      + '<td style="text-align:right;white-space:nowrap">' + acc + '</td></tr>';
+  }).join('')
+    : '<tr><td colspan="7" class="emp">'
+      + (SG_CB.terceros.length ? 'Ningún cheque coincide con la búsqueda.'
+                               : 'No hay cheques de terceros cargados.') + '</td></tr>';
+
+  var nt = eid('cb-nota');
+  if (nt) nt.textContent = vencidos.length
+    ? 'Hay ' + vencidos.length + ' cheque(s) vencidos que siguen en cartera: son plata que se dejó de cobrar.'
+    : 'Depositar un cheque le carga el ingreso a la cuenta que elijas: por eso el saldo del banco cierra.';
+}
+
+function sgCbCtOpen(){
+  ['cb-ct-librador', 'cb-ct-banco', 'cb-ct-nro', 'cb-ct-monto', 'cb-ct-notas', 'cb-ct-fvto']
+    .forEach(function(id){ var e = eid(id); if (e) e.value = ''; });
+  var f = eid('cb-ct-frec'); if (f) f.value = new Date().toISOString().slice(0, 10);
+  sgModalArriba('cb-ct-modal');
+}
+
+function sgCbCtGuardar(){
+  var monto = sgMilParse((eid('cb-ct-monto') || {}).value) || 0;
+  if (!(monto > 0)) { toast('Poné el importe del cheque', 'er'); return; }
+  sgCbApi('/cheques-terceros', 'POST', {
+    librador: (eid('cb-ct-librador') || {}).value,
+    banco: (eid('cb-ct-banco') || {}).value,
+    nro_cheque: (eid('cb-ct-nro') || {}).value,
+    monto: monto,
+    fecha_recepcion: (eid('cb-ct-frec') || {}).value,
+    fecha_vto: (eid('cb-ct-fvto') || {}).value,
+    notas: (eid('cb-ct-notas') || {}).value
+  }).then(function(r){
+    if (!r || !r.ok) { toast((r && r.error) || 'No se pudo guardar', 'er'); return; }
+    toast('Cheque en cartera', 'ok');
+    closeMB('cb-ct-modal');
+    sgCbCargar();
+  });
+}
+
+function sgCbCtEstado(id, estado){
+  var txt = estado === 'endosado'
+    ? '¿Endosar este cheque?\n\nSale de la cartera: se lo entregamos a un tercero.'
+    : '¿Marcar este cheque como RECHAZADO?\n\nSi ya estaba depositado, se saca el ingreso '
+      + 'de la cuenta: el banco devolvió esa plata.';
+  if (!confirm(txt)) return;
+  sgCbApi('/cheques-terceros/' + id + '/estado', 'PATCH', { estado: estado }).then(function(r){
+    if (!r || !r.ok) { toast((r && r.error) || 'No se pudo', 'er'); return; }
+    toast(estado === 'endosado' ? 'Cheque endosado' : 'Cheque rechazado', 'ok');
+    sgCbCargar();
+  });
+}
+
+function sgCbCtAnular(id){
+  var motivo = prompt('¿Por qué se anula este cheque?');
+  if (motivo === null) return;
+  sgCbApi('/cheques-terceros/' + id + '/anular', 'POST', { motivo: motivo }).then(function(r){
+    if (!r || !r.ok) { toast((r && r.error) || 'No se pudo anular', 'er'); return; }
+    toast('Cheque anulado', 'ok');
+    sgCbCargar();
+  });
+}
+
+// ── DEPOSITARLO ─────────────────────────────────────────────────────────
+function sgCbDepOpen(id){
+  var c = SG_CB.terceros.filter(function(x){ return x.id === id; })[0];
+  if (!c) return;
+  SG_CB.depId = id;
+  var d = eid('cb-dep-det');
+  if (d) d.innerHTML = '<b>' + escH(c.librador || 'Sin librador') + '</b>'
+    + (c.nro_cheque ? ' — cheque N° ' + escH(c.nro_cheque) : '')
+    + (c.banco ? ' (' + escH(c.banco) + ')' : '')
+    + ' — <b>' + sgMoney(c.monto) + '</b>'
+    + (c.fecha_vto ? ' · vence ' + escH(c.fecha_vto) : '');
+  var f = eid('cb-dep-fecha'); if (f) f.value = new Date().toISOString().slice(0, 10);
+  var sel = eid('cb-dep-cuenta');
+  if (sel) {
+    // Un cheque se deposita en un banco, no en la caja de efectivo.
+    var ctas = SG_CB.cuentas.filter(function(x){ return x.tipo !== 'caja'; });
+    sel.innerHTML = ctas.length
+      ? ctas.map(function(x){
+          var mal = x.puedo === 0 ? ' — no es tuya' : '';
+          return '<option value="' + x.id + '"' + (mal ? ' disabled' : '') + '>'
+            + esc(x.nombre) + mal + '</option>';
+        }).join('')
+      : '<option value="">— no hay cuentas bancarias cargadas —</option>';
+  }
+  sgModalArriba('cb-dep-modal');
+}
+
+function sgCbDepGuardar(){
+  var cuenta = (eid('cb-dep-cuenta') || {}).value;
+  if (!cuenta) { toast('Elegí en qué cuenta entra', 'er'); return; }
+  sgCbApi('/cheques-terceros/' + SG_CB.depId + '/depositar', 'POST', {
+    cuenta_fin_id: Number(cuenta), fecha: (eid('cb-dep-fecha') || {}).value
+  }).then(function(r){
+    if (!r || !r.ok) { toast((r && r.error) || 'No se pudo depositar', 'er'); return; }
+    toast('Depositado en ' + r.data.cuenta, 'ok');
+    closeMB('cb-dep-modal');
+    sgCbCargar();
+  });
+}
+
+// ── LA CONCILIACIÓN ─────────────────────────────────────────────────────
+// El extracto del banco de un lado, el libro del otro, y la diferencia arriba.
+// Mientras la diferencia no sea cero, el saldo que muestra el sistema y el que
+// muestra el banco no son el mismo número, y uno de los dos está mal.
+function sgCbCcCuentas(){
+  var sel = eid('cb-cc-cuenta'); if (!sel) return;
+  var previo = sel.value;
+  var ctas = SG_CB.cuentas.filter(function(c){ return c.tipo !== 'caja'; });
+  sel.innerHTML = ctas.length
+    ? ctas.map(function(c){ return '<option value="' + c.id + '">' + esc(c.nombre) + '</option>'; }).join('')
+    : '<option value="">— no hay cuentas bancarias —</option>';
+  if (previo && sel.querySelector('option[value="' + previo + '"]')) sel.value = previo;
+  var per = eid('cb-cc-periodo');
+  if (per && !per.value) per.value = new Date().toISOString().slice(0, 7);
+  sgCbCcCargar();
+}
+
+function sgCbCcCargar(){
+  var cta = (eid('cb-cc-cuenta') || {}).value;
+  var per = (eid('cb-cc-periodo') || {}).value;
+  var cont = eid('cb-concil'); if (!cont) return;
+  if (!cta) { cont.innerHTML = '<div class="emp">Cargá una cuenta bancaria primero.</div>'; return; }
+  cont.innerHTML = '<div class="emp">Cargando…</div>';
+  sgCbApi('/conciliacion?cuentaId=' + cta + (per ? '&periodo=' + per : '')).then(function(r){
+    if (!r || !r.ok) { cont.innerHTML = '<div class="emp">No se pudo leer</div>'; return; }
+    SG_CB.cc = r;
+    sgCbCcPintar();
+  });
+}
+
+function sgCbCcPintar(){
+  var r = SG_CB.cc, cont = eid('cb-concil');
+  if (!r || !cont) return;
+  var dif = Math.round((r.diferencia || 0) * 100) / 100;
+  var puedeAnular = lnbPuedeAnular('sg-caja-bancos');
+
+  var h = '<div class="cb-cards">'
+    + '<div class="cb-card"><div class="cb-c-n">Según el libro</div>'
+    + '<div class="cb-c-v">' + sgMoney(r.saldo_libro) + '</div></div>'
+    + '<div class="cb-card"><div class="cb-c-n">Según el extracto</div>'
+    + '<div class="cb-c-v">' + sgMoney(r.saldo_extracto) + '</div></div>'
+    + '<div class="cb-card"><div class="cb-c-n">Diferencia</div>'
+    + '<div class="cb-c-v"' + (dif ? ' style="color:#b91c1c"' : ' style="color:#0f766e"') + '>'
+    + sgMoney(dif) + '</div></div></div>'
+    + '<div style="font-size:11.5px;color:var(--mut);margin:2px 0 12px">'
+    + (dif
+        ? 'Mientras la diferencia no sea cero, el saldo del sistema y el del banco no son el mismo número.'
+        : '✓ El libro y el extracto dicen lo mismo.')
+    + '</div>';
+
+  var pend = (r.extracto || []).filter(function(x){ return !x.conciliado; });
+  var movPend = (r.movimientos || []).filter(function(x){ return !x.conciliado; });
+
+  h += '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(330px,1fr));gap:14px">';
+
+  // ── Extracto ──
+  h += '<div><div style="font-weight:700;font-size:12px;text-transform:uppercase;'
+    + 'letter-spacing:.04em;color:var(--mut);margin-bottom:6px">'
+    + 'Extracto del banco — ' + pend.length + ' sin cruzar</div>'
+    + '<div class="ab-table-wrap"><table class="pa-tbl"><thead><tr>'
+    + '<th style="width:90px">Fecha</th><th>Concepto</th>'
+    + '<th style="width:110px;text-align:right">Importe</th>'
+    + '<th style="width:92px"></th></tr></thead><tbody>'
+    + ((r.extracto || []).length ? r.extracto.map(function(x){
+        return '<tr' + (x.conciliado ? ' style="opacity:.45"' : '') + '>'
+          + '<td>' + escH(x.fecha) + '</td>'
+          + '<td class="cb-nom">' + escH(x.concepto || '—') + '</td>'
+          + '<td style="text-align:right;color:' + (x.tipo === 'ingreso' ? '#0f766e' : '#b91c1c') + '">'
+            + (x.tipo === 'ingreso' ? '' : '−') + sgMoney(x.monto) + '</td>'
+          + '<td style="text-align:right;white-space:nowrap">'
+            + (x.conciliado
+                ? '<button class="btn bo bs" title="Deshacer el cruce"'
+                  + ' onclick="sgCbCcDesconciliar(' + x.id + ')">✕</button>'
+                : (puedeAnular
+                    ? '<button class="btn bd bs" title="Sacar este renglón"'
+                      + ' onclick="sgCbCcBorrarLinea(' + x.id + ')">🗑</button>'
+                    : ''))
+            + '</td></tr>';
+      }).join('')
+      : '<tr><td colspan="4" class="emp">Sin extracto cargado para este mes.</td></tr>')
+    + '</tbody></table></div></div>';
+
+  // ── Libro ──
+  h += '<div><div style="font-weight:700;font-size:12px;text-transform:uppercase;'
+    + 'letter-spacing:.04em;color:var(--mut);margin-bottom:6px">'
+    + 'Lo que dice el libro — ' + movPend.length + ' sin cruzar</div>'
+    + '<div class="ab-table-wrap"><table class="pa-tbl"><thead><tr>'
+    + '<th style="width:90px">Fecha</th><th>Concepto</th>'
+    + '<th style="width:110px;text-align:right">Importe</th>'
+    + '<th style="width:60px"></th></tr></thead><tbody>'
+    + ((r.movimientos || []).length ? r.movimientos.map(function(m){
+        return '<tr' + (m.conciliado ? ' style="opacity:.45"' : '') + '>'
+          + '<td>' + escH(m.fecha) + '</td>'
+          + '<td class="cb-nom">' + escH(m.concepto || '—') + '</td>'
+          + '<td style="text-align:right;color:' + (m.tipo === 'ingreso' ? '#0f766e' : '#b91c1c') + '">'
+            + (m.tipo === 'ingreso' ? '' : '−') + sgMoney(m.monto) + '</td>'
+          + '<td style="text-align:center">' + (m.conciliado ? '✓' : '') + '</td></tr>';
+      }).join('')
+      : '<tr><td colspan="4" class="emp">Sin movimientos en este mes.</td></tr>')
+    + '</tbody></table></div></div>';
+
+  h += '</div>';
+  cont.innerHTML = h;
+}
+
+function sgCbCcAuto(){
+  var cta = (eid('cb-cc-cuenta') || {}).value;
+  if (!cta) { toast('Elegí la cuenta', 'er'); return; }
+  sgCbApi('/conciliacion/auto-match', 'POST', {
+    cuenta_id: Number(cta), periodo: (eid('cb-cc-periodo') || {}).value
+  }).then(function(r){
+    if (!r || !r.ok) { toast((r && r.error) || 'No se pudo cruzar', 'er'); return; }
+    // Cruza por importe, tipo y hasta 3 días de diferencia. Lo que no cruzó es
+    // justamente lo que hay que mirar a mano.
+    toast(r.matches ? ('Se cruzaron ' + r.matches + ' movimientos') : 'No se pudo cruzar nada solo',
+          r.matches ? 'ok' : 'er');
+    sgCbCcCargar();
+  });
+}
+
+function sgCbCcDesconciliar(id){
+  sgCbApi('/conciliacion/desconciliar', 'PATCH', { extracto_id: id }).then(function(r){
+    if (!r || !r.ok) { toast((r && r.error) || 'No se pudo', 'er'); return; }
+    sgCbCcCargar();
+  });
+}
+
+function sgCbCcBorrarLinea(id){
+  if (!confirm('¿Sacar este renglón del extracto?')) return;
+  sgCbApi('/conciliacion/extracto/' + id, 'DELETE').then(function(r){
+    if (!r || !r.ok) { toast((r && r.error) || 'No se pudo', 'er'); return; }
+    sgCbCcCargar();
+  });
+}
+
+// ── PEGAR EL EXTRACTO ───────────────────────────────────────────────────
+// Se pega tal cual sale del homebanking. Se acepta tab, punto y coma y coma
+// como separador porque cada banco exporta distinto, y se previsualiza antes de
+// cargar: cargar mal un extracto ensucia la conciliación de todo el mes.
+// UNA FECHA CON LA FORMA DE UNA FECHA NO ES UNA FECHA.
+// El control era /^\d{4}-\d{2}-\d{2}$/, y con eso "2026-13-99" entraba al
+// extracto como si nada: después ese renglón no cruzaba con nada, no aparecía
+// en ningún mes, y la diferencia de la conciliación no cerraba sin que se
+// pudiera ver por qué. Se comprueba que el día exista de verdad.
+function sgFechaValida(s){
+  var m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(s || ''));
+  if (!m) return false;
+  var a = +m[1], me = +m[2], d = +m[3];
+  if (me < 1 || me > 12 || d < 1 || d > 31) return false;
+  var f = new Date(a, me - 1, d);
+  return f.getFullYear() === a && f.getMonth() === me - 1 && f.getDate() === d;
+}
+
+function sgCbExtParsear(txt){
+  var lineas = String(txt || '').split(/\r?\n/), out = [], malas = [];
+  lineas.forEach(function(l, i){
+    var s = l.trim(); if (!s) return;
+    var p = s.split(/\t|;|,(?=\s*[^\d])/).map(function(x){ return x.trim(); });
+    if (p.length < 2) { malas.push((i + 1) + ': ' + s); return; }
+    var fecha = p[0];
+    // dd/mm/aaaa es como lo escribe la mitad de los bancos.
+    var m = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/.exec(fecha);
+    if (m) fecha = m[3] + '-' + ('0' + m[2]).slice(-2) + '-' + ('0' + m[1]).slice(-2);
+    if (!sgFechaValida(fecha)) { malas.push((i + 1) + ': fecha "' + p[0] + '"'); return; }
+    var crudo = p[p.length - 1];
+    var neg = /^-/.test(crudo.replace(/\s/g, ''));
+    var monto = sgMilParse(crudo.replace(/-/g, ''));
+    if (!(monto > 0)) { malas.push((i + 1) + ': importe "' + crudo + '"'); return; }
+    out.push({ fecha: fecha, concepto: p.slice(1, p.length - 1).join(' ') || null,
+               monto: monto, tipo: neg ? 'egreso' : 'ingreso' });
+  });
+  return { lineas: out, malas: malas };
+}
+
+function sgCbCcImportarOpen(){
+  if (!(eid('cb-cc-cuenta') || {}).value) { toast('Elegí primero la cuenta', 'er'); return; }
+  var t = eid('cb-ext-texto'); if (t) t.value = '';
+  var p = eid('cb-ext-prev'); if (p) p.innerHTML = '';
+  sgModalArriba('cb-ext-modal');
+}
+
+function sgCbExtPrevia(){
+  var res = sgCbExtParsear((eid('cb-ext-texto') || {}).value);
+  var p = eid('cb-ext-prev'); if (!p) return res;
+  var suma = res.lineas.reduce(function(a, x){ return a + (x.tipo === 'ingreso' ? x.monto : -x.monto); }, 0);
+  p.innerHTML = (res.lineas.length
+      ? '<b>' + res.lineas.length + ' renglones</b> — neto ' + sgMoney(suma)
+      : '<b style="color:#b91c1c">No se entendió ningún renglón</b>')
+    + (res.malas.length
+        ? '<div style="color:#b91c1c;margin-top:5px">No se entendieron: '
+          + escH(res.malas.slice(0, 5).join(' · '))
+          + (res.malas.length > 5 ? ' y ' + (res.malas.length - 5) + ' más' : '') + '</div>'
+        : '');
+  return res;
+}
+
+function sgCbExtGuardar(){
+  var res = sgCbExtPrevia();
+  if (!res.lineas.length) { toast('No se entendió ningún renglón', 'er'); return; }
+  sgCbApi('/conciliacion/extracto', 'POST', {
+    cuenta_id: Number((eid('cb-cc-cuenta') || {}).value),
+    periodo: (eid('cb-cc-periodo') || {}).value,
+    lineas: res.lineas
+  }).then(function(r){
+    if (!r || !r.ok) { toast((r && r.error) || 'No se pudo cargar', 'er'); return; }
+    toast('Se cargaron ' + r.insertadas + ' renglones', 'ok');
+    closeMB('cb-ext-modal');
+    sgCbCcCargar();
   });
 }
 

@@ -57,6 +57,20 @@ Y la anulación necesita su PROPIA dirección (`POST .../:id/anular`), porque
 `exigirNivel` la reconoce por la URL. Un `PATCH .../:id/estado` que aceptara
 `estado='anulado'` es una puerta lateral: quien sólo puede operar, anula.
 
+### TODA OPERACIÓN QUE ASIENTA MUESTRA EL ASIENTO
+Si toca rubros contables y genera asiento —un pago, una cobranza, el depósito de
+un cheque, un ajuste—, la pantalla muestra el CUADRO del asiento (cuenta,
+descripción, debe, haber) y abajo la fila de totales con el cartel **balancea**,
+igual que la factura de compra. En rojo y con la diferencia si descuadra.
+
+Por qué: el asiento se arma en el backend y el usuario lo veía recién después,
+entrando a Asientos Contables. Si estaba mal, ya estaba hecho. El cuadro es el
+único momento en que se puede frenar.
+
+El preview del front ESPEJA lo que arma el backend; el backend sigue siendo el
+único que decide. Si una operación toca rubros contables y todavía no genera
+asiento, eso es un pendiente — no una excepción.
+
 ### OPERAR NO ES SER ADMIN
 `requireAdmin` sirve para PARAMETRIZAR (dar de alta una cuenta bancaria, una
 caja, decidir quién la toca, tocar el asiento modelo). El trabajo del día
