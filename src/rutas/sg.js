@@ -6872,10 +6872,10 @@ function calcEmbarque(emb, costos, soloEstimado) {
 // entre las dos miradas es la diferencia de cambio, que se muestra desglosada.
 function paramsImportacion(db) {
   const p = { iva_pct: 10.5, iibb_pct: 0.69, despachante_pct: 7, iva_servicios_pct: 21,
-              tasa_maria_usd: 110, gastos_bancarios_pct: 0.6 };
+              tasa_maria_usd: 110, gastos_bancarios_usd: 90 };
   const map = { imp_iva_pct: 'iva_pct', imp_iibb_pct: 'iibb_pct', imp_despachante_pct: 'despachante_pct',
                 imp_iva_servicios_pct: 'iva_servicios_pct', imp_tasa_maria_usd: 'tasa_maria_usd',
-                imp_gastos_bancarios_pct: 'gastos_bancarios_pct' };
+                imp_gastos_bancarios_usd: 'gastos_bancarios_usd' };
   try {
     for (const r of db.prepare("SELECT clave, valor FROM sg_config WHERE clave LIKE 'imp_%'").all()) {
       if (map[r.clave] && r.valor != null && r.valor !== '' && !isNaN(Number(r.valor))) p[map[r.clave]] = Number(r.valor);
@@ -6905,9 +6905,10 @@ function calcImportacion(db, emb, costos, kgOverride) {
   const flete_base_usd  = Number(emb.flete_base_usd) || 0;
   const seguro_usd      = Number(emb.seguro_usd) || 0;
   const flete_real_usd  = usdDe(rFlete);
-  // Los gastos bancarios ya no se tipean: son un % del invoice y se pagan junto con la
-  // mercadería, así que toman su misma fecha y su mismo TC.
-  const bancarios_usd   = r2(invoice_usd * (p.gastos_bancarios_pct / 100));
+  // Los gastos bancarios no se tipean: son un monto FIJO en dólares por operación (no un
+  // porcentaje del invoice), y se pagan junto con la mercadería, así que se valorizan al
+  // mismo TC que ella.
+  const bancarios_usd   = Number(p.gastos_bancarios_usd) || 0;
 
   const base_usd = invoice_usd + flete_base_usd + seguro_usd;
   const sinTc = tcHoy == null;
@@ -6962,7 +6963,7 @@ function calcImportacion(db, emb, costos, kgOverride) {
       { k: 'despachante', label: 'Despachante ' + p.despachante_pct + '%', usd: null, tc: tcHoy, ars: despachante_ars, plazo: false, detalle: 'sobre la base imponible' },
       { k: 'iva_desp',    label: 'IVA despachante ' + p.iva_servicios_pct + '%', usd: null, tc: tcHoy, ars: iva_desp_ars, plazo: false },
       { k: 'flete_real',  label: 'Flete real',            usd: flete_real_usd, tc: tcFlete, ars: flete_ars,       plazo: true,  fecha_pago: fechaPagoRubro(emb, rFlete) },
-      { k: 'bancarios',   label: 'Gastos bancarios ' + p.gastos_bancarios_pct + '%', usd: bancarios_usd, tc: tcBanc, ars: banc_ars, plazo: true, detalle: 'del invoice · se paga con la mercadería', fecha_pago: fechaPagoRubro(emb, rMerc) },
+      { k: 'bancarios',   label: 'Gastos bancarios',      usd: bancarios_usd,  tc: tcBanc,  ars: banc_ars,        plazo: true,  detalle: 'monto fijo · al TC de la mercadería', fecha_pago: fechaPagoRubro(emb, rMerc) },
       { k: 'iva_banc',    label: 'IVA bancarios ' + p.iva_servicios_pct + '%', usd: null, tc: tcBanc, ars: iva_banc_ars, plazo: true }
     ],
     total_contado, total_plazo,
@@ -7070,7 +7071,7 @@ const IMP_PARAMS = [
   ['imp_despachante_pct', 'Honorarios del despachante sobre la base imponible', '%'],
   ['imp_iva_servicios_pct', 'IVA de despachante y gastos bancarios', '%'],
   ['imp_tasa_maria_usd', 'Tasa María', 'USD'],
-  ['imp_gastos_bancarios_pct', 'Gastos bancarios sobre el invoice', '%']
+  ['imp_gastos_bancarios_usd', 'Gastos bancarios por operación', 'USD']
 ];
 
 router.get('/importacion/parametros', requireAuth, (req, res) => {
