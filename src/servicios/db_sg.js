@@ -1193,6 +1193,33 @@ try {
   }
 } catch (e) { console.error('[DB] SG sg_tc_esperado:', e.message); }
 
+// ── EXPEDIENTE DOCUMENTAL DEL EMBARQUE (Importación F6) ─────────────────────────────
+// La tabla FALTABA: F6 dejó los endpoints (subir/listar/descargar/borrar en rutas/sg.js)
+// pero nunca el CREATE, así que el expediente entero tiraba "no such table" y no había forma
+// de adjuntar un solo papel. Se crea acá con las columnas que esos endpoints usan.
+// El archivo vive en R2; la fila solo guarda la metadata + storage_key para ir a buscarlo.
+try {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS sg_embarque_documentos (
+      id               INTEGER PRIMARY KEY AUTOINCREMENT,
+      embarque_id      INTEGER NOT NULL REFERENCES sg_embarques(id),
+      tipo             TEXT NOT NULL,
+      storage_key      TEXT NOT NULL,
+      nombre_original  TEXT,
+      mime             TEXT,
+      tamano_bytes     INTEGER,
+      fecha_documento  TEXT,
+      observaciones    TEXT,
+      activo           INTEGER NOT NULL DEFAULT 1,
+      creado_en        TEXT DEFAULT (datetime('now','localtime')),
+      creado_por       INTEGER,
+      eliminado_en     TEXT,
+      eliminado_por_id INTEGER
+    );
+    CREATE INDEX IF NOT EXISTS idx_sg_emb_docs_emb ON sg_embarque_documentos(embarque_id, activo);
+  `);
+} catch (e) { console.error('[DB] SG sg_embarque_documentos:', e.message); }
+
 // ── Condición de pago por rubro del embarque ────────────────────────────────────────
 // El TC de un rubro sale de la curva en su FECHA DE PAGO, así que cada rubro en dólares
 // necesita saber cuándo se paga. Se expresa como "N días desde un hito" (ETD o ETA) para
