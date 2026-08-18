@@ -298,7 +298,6 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
   <div class="ni" data-sec="sg-importacion" data-admin-only="1"></div>
   <div class="ni" data-sec="sg-catalogo" data-admin-only="1"></div>
   <div class="ni" data-sec="sg-reportes" data-admin-only="1"></div>
-  <div class="ni" data-sec="sg-control-coop" data-admin-only="1"></div>
   <div class="ni" data-sec="sg-facturas-merc" data-admin-only="1"></div>
   <div class="ni" data-sec="sg-cc-proveedores" data-admin-only="1"></div>
   <div class="ni" data-sec="sg-caja-bancos" data-admin-only="1"></div>
@@ -2716,7 +2715,8 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
     </style>
     <div style="display:inline-flex;gap:2px;background:var(--bg);border:1px solid var(--bor);border-radius:8px;padding:3px;margin-bottom:16px;flex-wrap:wrap">
       <div class="sggd-tab on" data-t="flete_salida"     onclick="sgGdsTab('flete_salida')">🚚 Fletes de salida</div>
-      <div class="sggd-tab" data-t="cargas_descargas" onclick="sgGdsTab('cargas_descargas')">📦 Cargas y Descargas</div>
+      <div class="sggd-tab" data-t="flete_entrada"    onclick="sgGdsTab('flete_entrada')">🚛 Fletes de entrada</div>
+      <div class="sggd-tab" data-t="coop"             onclick="sgGdsTab('coop')">🤝 Control Cooperativa</div>
       <div class="sggd-tab" data-t="repaso"           onclick="sgGdsTab('repaso')">🔁 Repasos</div>
     </div>
 
@@ -2733,18 +2733,89 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
       <div id="sggd-content"><div class="emp">Cargando…</div></div>
     </div>
 
-    <div class="sggd-pane" id="sggd-pane-cargas_descargas">
+    <!-- ── FLETES DE ENTRADA ────────────────────────────────────────────
+         El comprador anota en la orden lo que va a costar traer la mercadería,
+         y con eso cierra la compra. Después llega la factura del fletero a
+         administración y casi nunca dice exactamente eso. Acá se PISA lo
+         estimado con lo que dice la factura — y recién ese número es el que va
+         al costo del lote. Antes el de la orden no llegaba a ningún lado. -->
+    <div class="sggd-pane" id="sggd-pane-flete_entrada">
       <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:14px">
         <div style="display:inline-flex;gap:2px;background:var(--bg);border:1px solid var(--bor);border-radius:8px;padding:3px">
-          <div class="sgcd-est on" data-e="pendiente_valorizar" onclick="sgCdsEstado('pendiente_valorizar')" style="padding:5px 12px;cursor:pointer;font-size:12px;font-weight:600;border-radius:6px;background:var(--burg);color:#fff">⏳ Pendientes</div>
-          <div class="sgcd-est" data-e="valorizado" onclick="sgCdsEstado('valorizado')" style="padding:5px 12px;cursor:pointer;font-size:12px;font-weight:600;border-radius:6px;color:var(--mut)">✅ Valorizadas</div>
+          <div class="sgfe-est on" data-e="pendiente_valorizar" onclick="sgFeEstado('pendiente_valorizar')"
+               style="padding:5px 12px;cursor:pointer;font-size:12px;font-weight:600;border-radius:6px;background:var(--burg);color:#fff">⏳ A valorizar</div>
+          <div class="sgfe-est" data-e="valorizado" onclick="sgFeEstado('valorizado')"
+               style="padding:5px 12px;cursor:pointer;font-size:12px;font-weight:600;border-radius:6px;color:var(--mut)">✅ Valorizados</div>
         </div>
-        <label style="font-size:12px;color:var(--mut)">Cooperativa
-          <select id="sgcd-filtro-coop" onchange="sgCdsLoad()" style="padding:5px 8px;border-radius:6px;border:1px solid var(--bor);background:var(--bg)"><option value="">— Todas —</option></select>
-        </label>
-        <span style="font-size:11px;color:var(--mut)">Descarga ↓ = costo de ingreso (lote) · Carga ↑ = costo de venta (margen)</span>
+        <input id="sgfe-q" placeholder="🔎 Partida o proveedor…" oninput="sgFePintar()"
+               style="max-width:280px;padding:5px 9px;border-radius:6px;border:1px solid var(--bor);background:var(--bg)">
+        <span style="font-size:11px;color:var(--mut)">El flete a cargo del vendedor no figura: viene adentro del precio.</span>
       </div>
-      <div id="sgcd-content"><div class="emp">Cargando…</div></div>
+      <div class="ab-table-wrap"><table class="pa-tbl">
+        <thead><tr><th style="width:165px">Partida</th><th style="width:96px">Fecha</th>
+          <th>Proveedor</th>
+          <th style="width:76px;text-align:right">Bultos</th>
+          <th style="width:96px;text-align:right">Kg</th>
+          <th style="width:135px;text-align:right">Estimó el comprador</th>
+          <th style="width:135px;text-align:right">Factura del fletero</th>
+          <th style="width:120px"></th></tr></thead>
+        <tbody id="sgfe-tb"><tr><td colspan="8" class="emp">Cargando…</td></tr></tbody>
+      </table></div>
+      <div id="sgfe-n" style="font-size:11.5px;color:var(--mut);margin-top:6px"></div>
+    </div>
+
+    <div class="sggd-pane" id="sggd-pane-coop">
+    <!-- ── CONTROL COOPERATIVA, ADENTRO DE GASTOS DIRECTOS ──────────────
+         Era un submenú aparte y no tenía por qué: lo que la cooperativa
+         descargó ES un gasto directo de la mercadería que entró, y se
+         valoriza igual que un flete. Acá está el catálogo de cooperativas,
+         lo que descargó cada una y lo que falta valorizar.
+
+         Reemplaza a la vieja solapa "Cargas y Descargas", que mostraba lo
+         mismo peor: sin filtro por fecha, sin el catálogo, y llamando a la
+         descarga por el número de recepción en vez de por la partida. -->
+    <div style="display:flex;justify-content:flex-end;gap:8px;margin-bottom:12px">
+      <button class="btn bb" onclick="sgCoopOpen()">+ Nueva cooperativa</button>
+      <button class="btn bo" onclick="sgCcoopLoad()">↻ Actualizar</button>
+    </div>
+
+    <div style="display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap;margin-bottom:16px">
+      <div class="fl"><label>Desde</label><input type="date" id="sgcc-desde" onchange="sgCcoopLoad()"></div>
+      <div class="fl"><label>Hasta</label><input type="date" id="sgcc-hasta" onchange="sgCcoopLoad()"></div>
+      <div class="fl"><label>Cooperativa</label><select id="sgcc-coop" onchange="sgCcoopLoad()"><option value="">— Todas —</option></select></div>
+      <div style="display:inline-flex;gap:2px;background:var(--bg);border:1px solid var(--bor);border-radius:8px;padding:3px">
+        <div class="sgcc-est on" data-e=""                     onclick="sgCcoopEstado('')">Todas</div>
+        <div class="sgcc-est"    data-e="sin_coop"             onclick="sgCcoopEstado('sin_coop')">⚠️ Sin cooperativa</div>
+        <div class="sgcc-est"    data-e="pendiente_valorizar"  onclick="sgCcoopEstado('pendiente_valorizar')">⏳ A valorizar</div>
+        <div class="sgcc-est"    data-e="valorizado"           onclick="sgCcoopEstado('valorizado')">✅ Valorizadas</div>
+      </div>
+    </div>
+    <style>
+      .sg-mod .sgcc-est{padding:5px 12px;cursor:pointer;font-size:12px;font-weight:600;border-radius:6px;color:var(--mut)}
+      .sg-mod .sgcc-est.on{background:var(--burg);color:#fff}
+      .sg-mod .sgcc-kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:18px}
+      .sg-mod .sgcc-kpi{border:1px solid var(--bor);border-radius:10px;padding:12px 14px;background:var(--bg)}
+      .sg-mod .sgcc-kpi .v{font-size:22px;font-weight:700;color:var(--txt);line-height:1.15}
+      .sg-mod .sgcc-kpi .r{font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--mut);margin-top:3px}
+      .sg-mod .sgcc-kpi.alerta{border-color:#e0a72e;background:rgba(224,167,46,.12)}
+    </style>
+
+    <!-- El catálogo. Una cooperativa es la cuadrilla que descarga y SIEMPRE
+         cuelga de un proveedor, que es a quién se le paga: sin eso, una descarga
+         cargada no se puede liquidar. -->
+    <div style="font-weight:700;font-size:12px;text-transform:uppercase;letter-spacing:.04em;color:var(--mut);margin-bottom:8px">
+      🤝 Cooperativas dadas de alta
+    </div>
+    <div class="ab-table-wrap" style="margin-bottom:22px"><table class="pa-tbl">
+      <thead><tr><th>Cooperativa</th><th>Se le factura a</th><th>Contacto</th>
+        <th style="text-align:right">Descargas</th><th></th></tr></thead>
+      <tbody id="sg-tb-coops"><tr><td colspan="5" class="emp">Cargando…</td></tr></tbody>
+    </table></div>
+
+    <div id="sgcc-kpis" class="sgcc-kpis"></div>
+    <div id="sgcc-coops"></div>
+    <div id="sgcc-detalle"><div class="emp">Cargando…</div></div>
+  
     </div>
     <div class="sggd-pane" id="sggd-pane-repaso"><div class="emp" style="padding:40px">🔁 Repasos — próximamente (Fase 3).</div></div>
   </div>
@@ -3470,53 +3541,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
     </div>
   </div>
 
-  <div class="sec sg-mod" id="sec-sg-control-coop">
-    <div class="ph">
-      <div><div class="ph-t">🤝 San Gerónimo · Control Cooperativa</div>
-        <div class="ph-s">Las descargas de ingreso declaradas en la recepción, por cooperativa y por período</div></div>
-      <div style="display:flex;gap:8px">
-        <button class="btn bb" onclick="sgCoopOpen()">+ Nueva cooperativa</button>
-        <button class="btn bo" onclick="sgCcoopLoad()">↻ Actualizar</button>
-      </div>
-    </div>
 
-    <div style="display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap;margin-bottom:16px">
-      <div class="fl"><label>Desde</label><input type="date" id="sgcc-desde" onchange="sgCcoopLoad()"></div>
-      <div class="fl"><label>Hasta</label><input type="date" id="sgcc-hasta" onchange="sgCcoopLoad()"></div>
-      <div class="fl"><label>Cooperativa</label><select id="sgcc-coop" onchange="sgCcoopLoad()"><option value="">— Todas —</option></select></div>
-      <div style="display:inline-flex;gap:2px;background:var(--bg);border:1px solid var(--bor);border-radius:8px;padding:3px">
-        <div class="sgcc-est on" data-e=""                     onclick="sgCcoopEstado('')">Todas</div>
-        <div class="sgcc-est"    data-e="sin_coop"             onclick="sgCcoopEstado('sin_coop')">⚠️ Sin cooperativa</div>
-        <div class="sgcc-est"    data-e="pendiente_valorizar"  onclick="sgCcoopEstado('pendiente_valorizar')">⏳ A valorizar</div>
-        <div class="sgcc-est"    data-e="valorizado"           onclick="sgCcoopEstado('valorizado')">✅ Valorizadas</div>
-      </div>
-    </div>
-    <style>
-      .sg-mod .sgcc-est{padding:5px 12px;cursor:pointer;font-size:12px;font-weight:600;border-radius:6px;color:var(--mut)}
-      .sg-mod .sgcc-est.on{background:var(--burg);color:#fff}
-      .sg-mod .sgcc-kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:18px}
-      .sg-mod .sgcc-kpi{border:1px solid var(--bor);border-radius:10px;padding:12px 14px;background:var(--bg)}
-      .sg-mod .sgcc-kpi .v{font-size:22px;font-weight:700;color:var(--txt);line-height:1.15}
-      .sg-mod .sgcc-kpi .r{font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--mut);margin-top:3px}
-      .sg-mod .sgcc-kpi.alerta{border-color:#e0a72e;background:rgba(224,167,46,.12)}
-    </style>
-
-    <!-- El catálogo. Una cooperativa es la cuadrilla que descarga y SIEMPRE
-         cuelga de un proveedor, que es a quién se le paga: sin eso, una descarga
-         cargada no se puede liquidar. -->
-    <div style="font-weight:700;font-size:12px;text-transform:uppercase;letter-spacing:.04em;color:var(--mut);margin-bottom:8px">
-      🤝 Cooperativas dadas de alta
-    </div>
-    <div class="ab-table-wrap" style="margin-bottom:22px"><table class="pa-tbl">
-      <thead><tr><th>Cooperativa</th><th>Se le factura a</th><th>Contacto</th>
-        <th style="text-align:right">Descargas</th><th></th></tr></thead>
-      <tbody id="sg-tb-coops"><tr><td colspan="5" class="emp">Cargando…</td></tr></tbody>
-    </table></div>
-
-    <div id="sgcc-kpis" class="sgcc-kpis"></div>
-    <div id="sgcc-coops"></div>
-    <div id="sgcc-detalle"><div class="emp">Cargando…</div></div>
-  </div>
 
   <div class="sec sg-mod" id="sec-sg-importacion">
     <div class="ph"><div><div class="ph-t">🍅 San Gerónimo · Importación</div><div class="ph-s">Cotizador de embarque: costo neto por caja, ajuste por merma y margen proyectado. Estimado vs real.</div></div><button class="btn bb" onclick="sgImpOpen()">+ Nuevo embarque</button></div>
@@ -4151,6 +4176,31 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
     <div class="ab-modal-footer">
       <button class="btn bo" onclick="closeMB('sg-so-modal')">Cancelar</button>
       <button class="btn bb" onclick="sgSoGuardar()">Guardar</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── PISAR EL FLETE CON LA FACTURA ─────────────────────────────────── -->
+<div class="ab-modal-overlay" id="sgfe-modal">
+  <div class="ab-modal" style="width:620px;max-width:96vw">
+    <div class="mhd"><div class="mht" id="sgfe-tit">Flete de entrada</div>
+      <button class="mcl" onclick="closeMB('sgfe-modal')">×</button></div>
+    <div class="fg">
+      <div id="sgfe-cab" style="font-size:12.5px;color:var(--mut);margin-bottom:10px"></div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px">
+        <div class="fl"><label>A qué fletero se le paga</label><select id="sgfe-fletero"></select></div>
+        <div class="fl"><label>Lo que dice la factura</label>
+          <input type="text" inputmode="decimal" id="sgfe-monto" placeholder="$ 0"
+                 style="text-align:right" oninput="this.value=sgMilFmtLive(this.value);sgFeDif()"></div>
+        <div class="fl"><label>Fecha</label><input type="date" id="sgfe-fecha"></div>
+        <div class="fl"><label>N° de comprobante</label><input id="sgfe-ref"></div>
+      </div>
+      <div id="sgfe-dif" style="font-size:12.5px;margin-top:8px"></div>
+      <div class="fl ff" style="margin-top:8px"><label>Observaciones</label><input id="sgfe-obs"></div>
+    </div>
+    <div class="ab-modal-footer">
+      <button class="btn bo" onclick="closeMB('sgfe-modal')">Cancelar</button>
+      <button class="btn bb" onclick="sgFeGuardar()">Guardar</button>
     </div>
   </div>
 </div>
@@ -11353,7 +11403,8 @@ function sgGdsTab(t){
   document.querySelectorAll('.sg-mod .sggd-tab').forEach(function(el){el.classList.toggle('on',el.dataset.t===t);});
   document.querySelectorAll('.sg-mod .sggd-pane').forEach(function(el){el.classList.toggle('on',el.id==='sggd-pane-'+t);});
   if(t==='flete_salida') sgGdsLoad();
-  else if(t==='cargas_descargas') sgCdsInit();   // FASE 2
+  else if(t==='flete_entrada') sgFeInit();
+  else if(t==='coop') sgCcoopInit();
 }
 function sgGdsEstado(e){
   SGGD.estado=e;
@@ -11448,6 +11499,155 @@ function sgGdsValGuardar(){
   api('/api/sg/gastos-servicio/valorizar','POST',{proveedor_servicio_id:SGGD.valProv,items:items}).then(function(r){
     if(r&&r.ok){ toast(r.data.valorizados+' operación(es) valorizada(s)','ok'); closeMB('sg-val-modal'); (SGGD.valReload||sgGdsLoad)(); }
     else toast((r&&r.error)||'Error','er');
+  });
+}
+
+
+// ── FLETES DE ENTRADA ───────────────────────────────────────────────────
+// El comprador anota en la orden lo que va a costar el flete y cierra la compra
+// con ese número. Después llega la factura del fletero a administración, y casi
+// nunca dice exactamente eso. Acá se pisa uno con el otro — y recién el número
+// pisado es el que entra al costo del lote.
+var SGFE = { estado: 'pendiente_valorizar', filas: [], sel: null, fleteros: [] };
+
+function sgFeInit(){
+  if (!SGFE.fleteros.length) {
+    api('/api/sg/proveedores-servicio').then(function(r){
+      SGFE.fleteros = (r && r.ok) ? r.data : [];
+    });
+  }
+  sgFeLoad();
+}
+
+function sgFeEstado(e){
+  SGFE.estado = e;
+  document.querySelectorAll('.sg-mod .sgfe-est').forEach(function(el){
+    var on = el.dataset.e === e;
+    el.classList.toggle('on', on);
+    el.style.background = on ? 'var(--burg)' : '';
+    el.style.color = on ? '#fff' : 'var(--mut)';
+  });
+  sgFeLoad();
+}
+
+function sgFeLoad(){
+  api('/api/sg/fletes-entrada?estado=' + SGFE.estado).then(function(r){
+    SGFE.filas = (r && r.ok) ? r.data : [];
+    sgFePintar();
+  });
+}
+
+function sgFePintar(){
+  var q = String((eid('sgfe-q') || {}).value || '').toLowerCase().trim();
+  var filas = SGFE.filas.filter(function(x){
+    if (!q) return true;
+    return ((x.partida || '') + ' ' + (x.oc_numero || '') + ' ' + (x.proveedor_nombre || ''))
+      .toLowerCase().indexOf(q) >= 0;
+  });
+  var tb = eid('sgfe-tb'); if (!tb) return;
+  tb.innerHTML = filas.length ? filas.map(function(x){
+    var val = x.gasto_estado === 'valorizado';
+    var dif = val ? Math.round(((x.gasto_monto || 0) - (x.estimado || 0)) * 100) / 100 : 0;
+    return '<tr>'
+      + '<td style="font-family:monospace;font-size:11.5px"><b>'
+        + escH(x.partida || x.oc_numero || '—') + '</b></td>'
+      + '<td>' + escH(x.fecha_recepcion || '—') + '</td>'
+      + '<td class="cb-nom">' + escH(x.proveedor_nombre || '—') + '</td>'
+      + '<td style="text-align:right">' + (x.bultos || 0) + '</td>'
+      + '<td style="text-align:right">' + nr(x.kg || 0) + '</td>'
+      + '<td style="text-align:right">' + (x.estimado ? sgMoney(x.estimado)
+          : '<span style="color:var(--mut)">—</span>') + '</td>'
+      + '<td style="text-align:right">'
+        + (val
+            ? '<b>' + sgMoney(x.gasto_monto) + '</b>'
+              + (dif ? '<div style="font-size:10.5px;color:' + (dif > 0 ? '#b91c1c' : '#0f766e') + '">'
+                  + (dif > 0 ? '+' : '−') + sgMoney(Math.abs(dif)) + '</div>' : '')
+            : '<span style="color:#9a3412">falta</span>')
+        + '</td>'
+      + '<td style="text-align:right">'
+        + '<button class="btn ' + (val ? 'bo' : 'bb') + ' bs" onclick="sgFeOpen(' + x.recepcion_id + ')">'
+        + (val ? 'Corregir' : 'Valorizar') + '</button></td></tr>';
+  }).join('')
+    : '<tr><td colspan="8" class="emp">'
+      + (SGFE.estado === 'valorizado'
+          ? 'Todavía no se valorizó ningún flete de entrada.'
+          : '✓ No hay fletes de entrada esperando la factura del fletero.')
+      + '</td></tr>';
+  var n = eid('sgfe-n');
+  if (n) n.textContent = (SGFE.estado === 'pendiente_valorizar' && filas.length)
+    ? filas.length + ' viaje(s) esperando la factura: hasta que llegue, ese costo no está en el lote.'
+    : '';
+}
+
+function sgFeOpen(recId){
+  var x = SGFE.filas.filter(function(f){ return f.recepcion_id === recId; })[0];
+  if (!x) return;
+  SGFE.sel = x;
+  var t = eid('sgfe-tit');
+  if (t) t.textContent = 'Flete de entrada — ' + (x.proveedor_nombre || '');
+  var cab = eid('sgfe-cab');
+  if (cab) cab.innerHTML = 'Partida <b style="font-family:monospace">'
+    + escH(x.partida || x.oc_numero || '') + '</b> · ' + escH(x.fecha_recepcion || '')
+    + ' · ' + (x.bultos || 0) + ' bulto(s) · ' + nr(x.kg || 0) + ' kg'
+    + (x.estimado
+        ? '<br>El comprador estimó <b>' + sgMoney(x.estimado) + '</b>'
+          + (x.flete_modalidad && x.flete_cantidad
+              ? ' (' + nr(x.flete_cantidad) + ' × ' + sgMoney(x.flete_precio_unit) + ' por '
+                + escH(x.flete_modalidad) + ')'
+              : '')
+        : '<br><span style="color:#9a3412">El comprador no dejó estimado en la orden.</span>');
+  var sel = eid('sgfe-fletero');
+  if (sel) sel.innerHTML = '<option value="">— Elegir —</option>' + SGFE.fleteros.map(function(f){
+    return '<option value="' + f.id + '"'
+      + (String(f.id) === String(x.proveedor_servicio_id) ? ' selected' : '') + '>'
+      + esc(f.razon_social) + '</option>';
+  }).join('');
+  var m = eid('sgfe-monto');
+  if (m) m.value = x.gasto_monto ? sgMilShow(x.gasto_monto) : (x.estimado ? sgMilShow(x.estimado) : '');
+  var f = eid('sgfe-fecha');
+  if (f) f.value = x.fecha_valorizacion || new Date().toISOString().slice(0, 10);
+  var ref = eid('sgfe-ref'); if (ref) ref.value = x.cuenta_ref || '';
+  var obs = eid('sgfe-obs'); if (obs) obs.value = '';
+  sgFeDif();
+  sgModalArriba('sgfe-modal');
+}
+
+// La diferencia contra lo que estimó el comprador. No frena nada —la factura es
+// la factura— pero se ve: una diferencia grande casi siempre es un error de
+// carga, no un fletero que cobró de más.
+function sgFeDif(){
+  var d = eid('sgfe-dif'); if (!d || !SGFE.sel) return;
+  var est = SGFE.sel.estimado || 0;
+  var real = sgMilParse((eid('sgfe-monto') || {}).value) || 0;
+  if (!est || !real) { d.innerHTML = ''; return; }
+  var dif = Math.round((real - est) * 100) / 100;
+  var pct = est ? Math.round((dif / est) * 1000) / 10 : 0;
+  d.innerHTML = dif === 0
+    ? '<span style="color:#0f766e">✓ Coincide con lo que estimó el comprador.</span>'
+    : '<span style="color:' + (Math.abs(pct) > 20 ? '#b91c1c' : 'var(--mut)') + '">'
+      + (dif > 0 ? 'La factura viene ' + sgMoney(dif) + ' ARRIBA' : 'La factura viene '
+         + sgMoney(-dif) + ' ABAJO')
+      + ' de lo estimado (' + (pct > 0 ? '+' : '') + pct + '%).'
+      + (Math.abs(pct) > 20 ? ' Fijate que no sea un error de carga.' : '')
+      + '</span>';
+}
+
+function sgFeGuardar(){
+  var x = SGFE.sel; if (!x) return;
+  var monto = sgMilParse((eid('sgfe-monto') || {}).value) || 0;
+  if (!(monto > 0)) { toast('Poné lo que dice la factura del fletero', 'er'); return; }
+  var fl = (eid('sgfe-fletero') || {}).value;
+  if (!fl) { toast('Elegí a qué fletero se le paga', 'er'); return; }
+  api('/api/sg/fletes-entrada/' + x.recepcion_id + '/valorizar', 'POST', {
+    monto: monto, proveedor_servicio_id: Number(fl),
+    fecha: (eid('sgfe-fecha') || {}).value,
+    cuenta_ref: (eid('sgfe-ref') || {}).value,
+    observaciones: (eid('sgfe-obs') || {}).value
+  }).then(function(r){
+    if (!r || !r.ok) { toast((r && r.error) || 'No se pudo guardar', 'er'); return; }
+    toast('Flete valorizado — ya está en el costo de los lotes', 'ok');
+    closeMB('sgfe-modal');
+    sgFeLoad();
   });
 }
 
@@ -11740,7 +11940,10 @@ function sgCdsRenderPend(){
     var gr=grupos[k];
     var filas=gr.items.map(function(x){
       var tipoBadge=x.tipo_gasto==='descarga_ingreso'?'<span class="bdg bcc">Descarga ↓</span>':'<span class="bdg bok">Carga ↑</span>';
-      return '<tr><td>'+tipoBadge+'</td><td><code>'+esc(x.operacion_ref||'—')+'</code></td><td>'+esc(x.cliente_nombre||'—')+'</td><td>'+(x.operacion_fecha||'—')+'</td><td style="text-align:right">'+nr(x.cantidad)+' '+esc(x.unidad||'')+'</td></tr>';
+      // LA PARTIDA, no el número interno de la recepción: es el número que
+      // está en la orden, en el lote y en la factura, y el único que sirve
+      // para cruzar la cuenta de la cooperativa contra algo.
+      return '<tr><td>'+tipoBadge+'</td><td><code>'+esc(x.operacion_ref||'—')+'</code></td><td>'+esc(x.contraparte||x.cliente_nombre||'—')+'</td><td>'+(x.operacion_fecha||'—')+'</td><td style="text-align:right">'+nr(x.cantidad)+' '+esc(x.unidad||'')+'</td></tr>';
     }).join('');
     return '<div style="border:1px solid var(--bor);border-radius:10px;padding:12px;margin-bottom:12px">'
       +'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;gap:10px;flex-wrap:wrap">'
@@ -18834,7 +19037,6 @@ function loadSec(s) {
     'sg-reprocesos': function(){ sgReprocesosInit(); },
     'sg-ventas':     function(){ sgVenInit(); },
     'sg-gastos-directos': function(){ sgGdsInit(); },
-    'sg-control-coop': function(){ sgCcoopInit(); },
     'sg-facturas-merc': function(){ sgFmModeloCargar(); sgFmLoad(); sgFmSinContabilizar(); },
     'sg-cc-proveedores': function(){ sgLoadCcProv(); },
     'sg-caja-bancos': function(){ sgCbInit(); },
