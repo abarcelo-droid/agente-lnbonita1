@@ -22640,8 +22640,16 @@ function sgImpInit(){
 }
 function sgImpVal(v){ return (v==null)?'':String(v); }
 function sgImpProvOpts(sel){
-  return '<option value="">— Proveedor —</option>'+(SG.cacheProv||[]).map(function(p){
-    return '<option value="'+p.id+'"'+(String(sel)===String(p.id)?' selected':'')+'>'+esc(p.razon_social||p.nombre||('#'+p.id))+'</option>';
+  // Solo proveedores del exterior: un embarque de importación no se le compra a uno nacional.
+  // Excepción: el que YA está elegido se conserva aunque sea nacional (embarques viejos). Si no,
+  // al editar el select quedaría vacío y el próximo guardado borraría el proveedor sin avisar.
+  var lista=(SG.cacheProv||[]).filter(function(p){
+    return p.origen==='extranjero' || (sel!=null && sel!=='' && String(sel)===String(p.id));
+  });
+  if(!lista.length) return '<option value="">— No hay proveedores del exterior cargados —</option>';
+  return '<option value="">— Proveedor —</option>'+lista.map(function(p){
+    var etq=esc(p.razon_social||p.nombre||('#'+p.id))+(p.origen==='extranjero'?'':' (nacional)');
+    return '<option value="'+p.id+'"'+(String(sel)===String(p.id)?' selected':'')+'>'+etq+'</option>';
   }).join('');
 }
 function sgImpOpen(id){
