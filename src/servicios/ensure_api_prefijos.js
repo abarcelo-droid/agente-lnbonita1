@@ -125,7 +125,12 @@ const PREFIJOS = [
   ['sg-ventas',          'sg/despachos,sg/pedidos,sg/ventas'],
   ['sg-catalogo',        'sg/productos,sg/familias,sg/especies,sg/variedades,sg/proveedores,sg/condiciones-pago,sg/envases,sg/config'],
   ['sg-gvariables',      'sg/gastos-globales'],
-  ['sg-gastos-directos', 'sg/gastos-directos,sg/gastos-servicio,sg/proveedores-servicio'],
+  // Control Cooperativa vive DENTRO de esta pantalla desde que dejó de ser un
+  // renglón del menú, así que sus direcciones también son suyas. El módulo
+  // sg-control-coop las conserva —abajo— para no dejar sin acceso a quien tenga
+  // ese permiso tildado y no éste: con dos dueños, exigirNivel se queda con el
+  // nivel MÁS ALTO de los dos.
+  ['sg-gastos-directos', 'sg/gastos-directos,sg/gastos-servicio,sg/proveedores-servicio,sg/control-coop,sg/cooperativas'],
   ['sg-reprocesos',      'sg/reprocesos,sg/transformaciones'],
   ['sg-importacion',     'sg/embarques'],
   // Control Cooperativa es casi todo lectura, pero tiene UNA escritura: asignar

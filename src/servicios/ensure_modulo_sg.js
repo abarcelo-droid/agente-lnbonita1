@@ -146,7 +146,16 @@ try {
     ['Ingresos',                      661,  'sg-compras'],
     // Control Cooperativa va pegado a Ingresos porque se alimenta de ahí: cada
     // recepción que contesta "con descarga" cae en esta pantalla.
-    ['Ingresos',                      662,  'sg-control-coop'],
+    // CONTROL COOPERATIVA YA NO ES UN RENGLÓN DEL MENÚ. Lo que la cooperativa
+    // descargó ES un gasto directo de la mercadería que entró: vive adentro de
+    // Gastos Directos, en su propia solapa, junto al flete de entrada y al de
+    // salida. Un renglón aparte obligaba a saltar de pantalla para ver dos
+    // costos de la misma descarga.
+    //
+    // El módulo NO se borra: sigue existiendo como PERMISO (modulos_config,
+    // usuario_modulos), y sus direcciones se declaran también bajo
+    // sg-gastos-directos para que quien tenga esa pantalla pueda operar la
+    // solapa. Borrarlo le sacaría el acceso a quien lo tenía tildado.
     ['Ingresos',                      663,  'sg-importacion'],
     ['Ingresos',                      664,  'sg-gastos-directos'],
     ['Ingresos',                      665,  'sg-reprocesos'],
@@ -173,6 +182,16 @@ try {
   // sg-*). Órdenes de Pago venía de otro grupo y no tenía: se le pone el mismo
   // que usa su propia pantalla, para que no quede como la única sin ícono.
   db.prepare("UPDATE modulos_config SET label='💸 Órdenes de Pago — Seguimiento' WHERE modulo='sp-pagos' AND label NOT LIKE '💸%'").run();
+
+  // ── CONTROL COOPERATIVA SE ESCONDE, NO SE BORRA ─────────────────────────
+  // Su pantalla pasó a ser una solapa de Gastos Directos, así que el renglón del
+  // menú sobra. Pero sacarlo de MENU_SG no alcanza: el módulo queda en el grupo
+  // con el que nace, "Abasto SG", y aparece igual — solo, en un grupo fantasma
+  // de un renglón. Se marca oculto, que es lo que mira el sidebar.
+  //
+  // Y NO se borra la fila: es el permiso. Borrarla le sacaría el acceso a quien
+  // lo tenga tildado, y sus direcciones también cuelgan de sg-gastos-directos.
+  db.prepare("UPDATE modulos_config SET oculto=1 WHERE modulo='sg-control-coop'").run();
 
   console.log("[ORG] Labels Abasto SG (con emoji) verificados en modulos_config");
 } catch (e) { console.error("[ORG] Error ensureModuloSG:", e.message); }

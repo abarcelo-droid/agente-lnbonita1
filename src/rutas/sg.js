@@ -1066,9 +1066,15 @@ function recalcCostoLote(db, loteId) {
   // un directo genuino que SE QUEDA — NO confundir con el 'sueldo_descarga' del pool global.)
   // FASE 2 — descarga de ingreso (cooperativa) VALORIZADA de la recepción del lote, prorrateada
   // por kg entre los lotes de esa recepción (es costo de ingreso, igual que el flete de ingreso).
+  // EL FLETE DE ENTRADA VA EN LA MISMA BOLSA que la descarga: los dos son lo
+  // que costó meter esa mercadería adentro, y los dos se reparten por kilo entre
+  // los lotes de la recepción. Antes el flete de entrada no llegaba al costo del
+  // lote por ningún camino: el comprador lo anotaba en la orden y ahí moría.
   let descarga = 0;
   if (lote.recepcion_id) {
-    const dt = db.prepare("SELECT COALESCE(SUM(monto),0) s FROM sg_gastos_directos WHERE recepcion_id=? AND tipo_gasto='descarga_ingreso' AND estado='valorizado' AND activo=1").get(lote.recepcion_id).s;
+    const dt = db.prepare(`SELECT COALESCE(SUM(monto),0) s FROM sg_gastos_directos
+      WHERE recepcion_id=? AND tipo_gasto IN ('descarga_ingreso','flete_entrada')
+        AND estado='valorizado' AND activo=1`).get(lote.recepcion_id).s;
     if (dt > 0) {
       const totKgRec = db.prepare("SELECT COALESCE(SUM(kg_reales),0) s FROM sg_lotes WHERE recepcion_id=? AND activo=1").get(lote.recepcion_id).s;
       if (totKgRec > 0) descarga = dt * (lote.kg_reales / totKgRec);
@@ -5446,6 +5452,118 @@ router.post('/control-coop/:id/cooperativa', requireAdmin, (req, res) => {
   } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
 });
 
+
+// ══════════════════════════════════════════════════════════════════════════
+// FLETES DE ENTRADA
+// ══════════════════════════════════════════════════════════════════════════
+// El comprador anota en la orden lo que va a costar traer la mercadería —tantos
+// bultos a tanto, o un total— y con eso cierra la compra. Después llega la
+// factura del fletero a administración, y casi nunca dice exactamente eso.
+//
+// Hasta hoy ese número quedaba en la orden y NO llegaba a ningún lado: no era un
+// gasto directo, no entraba al costo del lote, y la factura del fletero no
+// tenía contra qué compararse. Acá se PISA lo que estimó el comprador con lo que
+// dice la factura, y recién ese número es el que va al costo.
+
+// Lo que el comprador dejó anotado en la orden. Sale de las columnas flete_* de
+// sg_oc, que ya existían y no las miraba nadie.
+function fleteEstimadoDeOC(oc) {
+  if (!oc) return 0;
+  if (oc.flete_monto != null && oc.flete_monto > 0) return r2(oc.flete_monto);
+  const cant = Number(oc.flete_cantidad || 0), pu = Number(oc.flete_precio_unit || 0);
+  return (cant > 0 && pu > 0) ? r2(cant * pu) : 0;
+}
+
+router.get('/fletes-entrada', requireAuth, (req, res) => {
+  const db = getDb();
+  try {
+    const estado = req.query.estado === 'valorizado' ? 'valorizado' : 'pendiente_valorizar';
+    // Una recepción por fila: el flete se paga por viaje, no por orden.
+    const rows = db.prepare(`
+      SELECT r.id AS recepcion_id, r.numero_recepcion, r.fecha_recepcion, r.oc_id,
+             o.trazabilidad AS partida, o.numero AS oc_numero, o.flete_a_cargo,
+             o.flete_monto, o.flete_modalidad, o.flete_cantidad, o.flete_precio_unit,
+             p.razon_social AS proveedor_nombre,
+             (SELECT COALESCE(SUM(l.kg_reales),0) FROM sg_lotes l
+               WHERE l.recepcion_id = r.id AND l.activo = 1) AS kg,
+             (SELECT COUNT(*) FROM sg_lotes l WHERE l.recepcion_id = r.id AND l.activo = 1) AS bultos,
+             g.id AS gasto_id, g.estado AS gasto_estado, g.monto AS gasto_monto,
+             g.proveedor_servicio_id, g.cuenta_ref, g.fecha_valorizacion,
+             pv.razon_social AS fletero_nombre
+        FROM sg_recepciones r
+        JOIN sg_oc o ON o.id = r.oc_id
+        LEFT JOIN sg_proveedores p ON p.id = o.proveedor_id
+        LEFT JOIN sg_gastos_directos g ON g.recepcion_id = r.id
+             AND g.tipo_gasto = 'flete_entrada' AND g.activo = 1 AND g.estado <> 'anulado'
+        LEFT JOIN sg_proveedores pv ON pv.id = g.proveedor_servicio_id
+       WHERE o.activo = 1 AND o.estado <> 'anulada'
+       ORDER BY r.fecha_recepcion DESC, r.id DESC`).all();
+
+    // EL FLETE A CARGO DEL VENDEDOR NO SE PAGA: viene en el precio. Mostrarlo
+    // en la bandeja sería mandar a administración a buscar una factura que no
+    // existe.
+    const data = rows
+      .filter((x) => x.flete_a_cargo !== 'vendedor')
+      .map((x) => ({ ...x, estimado: fleteEstimadoDeOC(x) }))
+      .filter((x) => x.estimado > 0 || x.gasto_id)
+      .filter((x) => (estado === 'valorizado')
+        ? x.gasto_estado === 'valorizado'
+        : x.gasto_estado !== 'valorizado');
+    res.json({ ok: true, data, pendientes: data.length });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// PISAR el estimado del comprador con lo que dice la factura del fletero.
+// El monto que se guarda acá es el que entra al costo del lote — el de la orden
+// nunca entró, y ése es justamente el agujero que esto tapa.
+router.post('/fletes-entrada/:recepcionId/valorizar', requireAdmin, (req, res) => {
+  const db = getDb();
+  try {
+    const b = req.body || {};
+    const rec = db.prepare(`SELECT r.*, o.id AS oc, o.trazabilidad, o.flete_a_cargo
+      FROM sg_recepciones r JOIN sg_oc o ON o.id = r.oc_id WHERE r.id=?`).get(req.params.recepcionId);
+    if (!rec) return res.status(404).json({ ok: false, error: 'Recepción no encontrada' });
+    if (rec.flete_a_cargo === 'vendedor') {
+      return res.status(400).json({ ok: false,
+        error: 'Ese flete es a cargo del vendedor: viene adentro del precio y no se paga aparte.' });
+    }
+    const monto = r2(b.monto);
+    if (!(monto > 0)) return res.status(400).json({ ok: false, error: 'Poné lo que dice la factura del fletero' });
+    const fletero = Number(b.proveedor_servicio_id);
+    if (!fletero) return res.status(400).json({ ok: false, error: 'Elegí a qué fletero se le paga' });
+    if (!db.prepare('SELECT 1 FROM sg_proveedores WHERE id=? AND activo=1').get(fletero)) {
+      return res.status(400).json({ ok: false, error: 'Ese fletero no existe' });
+    }
+
+    let gastoId = null;
+    db.transaction(() => {
+      const ya = db.prepare(`SELECT * FROM sg_gastos_directos WHERE recepcion_id=?
+        AND tipo_gasto='flete_entrada' AND activo=1 AND estado<>'anulado'`).get(rec.id);
+      const fecha = val(b.fecha) || db.prepare("SELECT date('now','localtime') d").get().d;
+      if (ya) {
+        db.prepare(`UPDATE sg_gastos_directos SET estado='valorizado', monto=?,
+          proveedor_servicio_id=?, fecha_valorizacion=?, valorizado_por=?, cuenta_ref=?,
+          observaciones=COALESCE(?, observaciones) WHERE id=?`)
+          .run(monto, fletero, fecha, uid(req), val(b.cuenta_ref), val(b.observaciones), ya.id);
+        gastoId = ya.id;
+      } else {
+        gastoId = db.prepare(`INSERT INTO sg_gastos_directos
+          (tipo_gasto, recepcion_id, proveedor_servicio_id, estado, monto, fecha_servicio,
+           fecha_valorizacion, cuenta_ref, observaciones, creado_por, valorizado_por)
+          VALUES ('flete_entrada', ?,?, 'valorizado', ?,?,?,?,?,?,?)`).run(
+          rec.id, fletero, monto, rec.fecha_recepcion, fecha,
+          val(b.cuenta_ref), val(b.observaciones), uid(req), uid(req)).lastInsertRowid;
+      }
+      // Y AHORA SÍ ENTRA AL COSTO. Se reparte por kilo entre los lotes de esa
+      // recepción, igual que la descarga.
+      for (const l of db.prepare('SELECT id FROM sg_lotes WHERE recepcion_id=? AND activo=1').all(rec.id)) {
+        recalcCostoLote(db, Number(l.id));
+      }
+    })();
+    res.json({ ok: true, data: { id: Number(gastoId), recepcion_id: Number(rec.id), monto } });
+  } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
+});
+
 router.get('/gastos-servicio', requireAuth, (req, res) => {
   const db = getDb();
   try {
@@ -5459,8 +5577,18 @@ router.get('/gastos-servicio', requireAuth, (req, res) => {
     const rows = db.prepare(`
       SELECT g.*, pv.razon_social AS fletero_nombre,
         d.numero AS despacho_numero, d.fecha_despacho, c.razon_social AS cliente_nombre,
-        r.numero_recepcion,
-        COALESCE(d.numero, r.numero_recepcion) AS operacion_ref,
+        r.numero_recepcion, oc.trazabilidad AS partida, oc.numero AS oc_numero,
+        prov.razon_social AS proveedor_nombre,
+        -- ── LA OPERACIÓN SE LLAMA POR LA PARTIDA ──────────────────────────
+        -- Acá decía SG-REC-20260817-0001, que es el número interno de la
+        -- recepción: no está en ningún papel, no lo conoce el proveedor y no
+        -- sirve para cruzar nada. Lo que identifica una descarga es la PARTIDA
+        -- (0034.17.08.2026.01), que es el mismo número que va en la orden, en el
+        -- lote y en la factura.
+        COALESCE(d.numero, oc.trazabilidad, oc.numero, r.numero_recepcion) AS operacion_ref,
+        -- Una descarga no tiene cliente: tiene proveedor. La columna mostraba
+        -- un guión en todas las filas de ingreso.
+        COALESCE(c.razon_social, prov.razon_social) AS contraparte,
         COALESCE(d.fecha_despacho, r.fecha_recepcion, g.fecha_servicio) AS operacion_fecha,
         (SELECT COALESCE(SUM(kg_despachados),0) FROM sg_despacho_items WHERE despacho_id=d.id) AS kg,
         uv.nombre AS valorizado_por_nombre
@@ -5469,6 +5597,8 @@ router.get('/gastos-servicio', requireAuth, (req, res) => {
       LEFT JOIN sg_despachos d ON d.id=g.despacho_id
       LEFT JOIN sg_clientes c ON c.id=d.cliente_id
       LEFT JOIN sg_recepciones r ON r.id=g.recepcion_id
+      LEFT JOIN sg_oc oc ON oc.id=r.oc_id
+      LEFT JOIN sg_proveedores prov ON prov.id=oc.proveedor_id
       LEFT JOIN usuarios uv ON uv.id=g.valorizado_por
       WHERE ${where.join(' AND ')} ORDER BY g.id DESC`).all(...params);
     res.json({ ok: true, data: rows });
