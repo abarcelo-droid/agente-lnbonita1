@@ -2643,7 +2643,11 @@ function anotarEdicion(db, { tabla, registroId, campo, antes, despues, motivo, o
 // Los frenos son los MISMOS que para corregirla: si de ese lote ya salió
 // mercadería, o su costo viajó a otro lote, o ya está contabilizado, borrarlo
 // dejaría la plata mal contada en otro lado.
-router.delete('/lotes/:id', requireAdmin, (req, res) => {
+// ELIMINAR UNA PARTIDA ES ANULAR, y anular es un NIVEL, no un rol (CLAUDE.md).
+// Con requireAdmin, el encargado de depósito que se dio cuenta de que cargó la
+// recepción dos veces tenía que ir a buscar al dueño. exigirNivel reconoce el
+// DELETE y pide nivel "anular" en el módulo: quien lo tenga, lo hace.
+router.delete('/lotes/:id', requireAuth, (req, res) => {
   const db = getDb();
   try {
     const motivo = val(req.body && req.body.motivo);
@@ -2682,7 +2686,10 @@ router.delete('/lotes/:id', requireAdmin, (req, res) => {
 });
 
 // Corregir un lote: kilos, bultos, calidad y precio. Sólo admin.
-router.put('/lotes/:id/corregir', requireAdmin, (req, res) => {
+// CORREGIR ES OPERAR. Los frenos de verdad no son el rol: no se corrige una
+// partida ya contabilizada —primero se anula el asiento— ni una de la que ya se
+// despachó mercadería, y eso lo controla frenosDeEdicionLote() acá abajo.
+router.put('/lotes/:id/corregir', requireAuth, (req, res) => {
   const db = getDb();
   try {
     const b = req.body || {};
@@ -2801,7 +2808,9 @@ router.post('/oc/:id/liquidada', requireAdmin, (req, res) => {
 // El comprador se equivoca al cargar la orden y la partida termina en la
 // bandeja que no es. Sólo admin, con motivo, y queda registrado — igual que
 // cualquier otra corrección.
-router.put('/oc/:id/documenta', requireAdmin, (req, res) => {
+// Cambiar el circuito de una partida —factura o liquidación— es OPERAR: lo
+// decide el comprador cuando se aclara cómo se documenta la compra.
+router.put('/oc/:id/documenta', requireAuth, (req, res) => {
   const db = getDb();
   try {
     const destino = req.body && req.body.documenta;
@@ -4073,7 +4082,9 @@ router.get('/lotes', requireAuth, (req, res) => {
 });
 
 // Cerrar precio de un lote pizarra → setea precio, recalcula costos y genera vencimientos.
-router.post('/lotes/:id/cerrar-precio', requireAdmin, (req, res) => {
+// Cerrar el precio de un lote de pizarra es el trabajo de todos los días de
+// quien liquida: operar.
+router.post('/lotes/:id/cerrar-precio', requireAuth, (req, res) => {
   const db = getDb();
   try {
     const precio = Number(req.body.precio_unitario_kg);
@@ -4206,7 +4217,10 @@ router.delete('/gastos-globales/:id', requireAdmin, (req, res) => {
 // ════════════════════════════════════════════════════════════════════════════
 
 // Editar campos manuales del lote (vencimiento, calibre, origen, calidad).
-router.put('/lotes/:id', requireAdmin, (req, res) => {
+// CORREGIR lo que se cargó mal es operar. Los frenos de verdad no son el rol:
+// no se corrige una partida ya contabilizada —primero se anula el asiento— ni
+// una de la que ya se despachó mercadería, y eso lo controla el servidor abajo.
+router.put('/lotes/:id', requireAuth, (req, res) => {
   const db = getDb();
   try {
     const lote = db.prepare('SELECT id FROM sg_lotes WHERE id=? AND activo=1').get(req.params.id);

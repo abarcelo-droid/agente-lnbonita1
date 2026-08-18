@@ -120,7 +120,11 @@ const PREFIJOS = [
   // ── Abasto San Gerónimo ────────────────────────────────────────────────
   // Los diez comparten /api/sg. Se separan por sub-path; el desempate por
   // longitud hace que sg/ventas le gane a sg, igual que en el montaje real.
-  ['sg-compras',         'sg/recepciones,sg/oc,sg/compra-retroactiva'],
+  // 'sg/lotes' tambien: la ficha de la orden deja corregir y anular una PARTIDA,
+  // y la partida es un lote. Sin declararlo aca, quien tiene Ingresos veia el
+  // boton y comia un 403 porque el dueno de /sg/lotes era solo Stock. Con dos
+  // duenos, exigirNivel se queda con el nivel MAS ALTO de los dos.
+  ['sg-compras',         'sg/recepciones,sg/oc,sg/compra-retroactiva,sg/lotes'],
   ['sg-stock',           'sg/lotes,sg/disponibilidad,sg/decomisos'],
   ['sg-ventas',          'sg/despachos,sg/pedidos,sg/ventas'],
   ['sg-catalogo',        'sg/productos,sg/familias,sg/especies,sg/variedades,sg/proveedores,sg/condiciones-pago,sg/envases,sg/config'],
