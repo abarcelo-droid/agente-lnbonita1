@@ -1880,7 +1880,8 @@ try {
     ['imp_iibb_pct', '0.69'],           // percepción IIBB sobre la base imponible
     ['imp_despachante_pct', '7'],       // honorarios del despachante, % de la base imponible
     ['imp_iva_servicios_pct', '21'],    // IVA de despachante y gastos bancarios
-    ['imp_tasa_maria_usd', '110']       // Tasa María, monto fijo en dólares
+    ['imp_tasa_maria_usd', '110'],      // Tasa María, monto fijo en dólares
+    ['imp_gastos_bancarios_pct', '0.6'] // gastos bancarios, % del invoice (90 sobre 15.000)
   ];
   const ins = db.prepare('INSERT OR IGNORE INTO sg_config (clave, valor) VALUES (?,?)');
   for (const [k, v] of def) ins.run(k, v);

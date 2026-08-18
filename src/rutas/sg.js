@@ -6871,9 +6871,11 @@ function calcEmbarque(emb, costos, soloEstimado) {
 // los bancarios van a plazo, así que se valorizan al TC de SU fecha de pago. La diferencia
 // entre las dos miradas es la diferencia de cambio, que se muestra desglosada.
 function paramsImportacion(db) {
-  const p = { iva_pct: 10.5, iibb_pct: 0.69, despachante_pct: 7, iva_servicios_pct: 21, tasa_maria_usd: 110 };
+  const p = { iva_pct: 10.5, iibb_pct: 0.69, despachante_pct: 7, iva_servicios_pct: 21,
+              tasa_maria_usd: 110, gastos_bancarios_pct: 0.6 };
   const map = { imp_iva_pct: 'iva_pct', imp_iibb_pct: 'iibb_pct', imp_despachante_pct: 'despachante_pct',
-                imp_iva_servicios_pct: 'iva_servicios_pct', imp_tasa_maria_usd: 'tasa_maria_usd' };
+                imp_iva_servicios_pct: 'iva_servicios_pct', imp_tasa_maria_usd: 'tasa_maria_usd',
+                imp_gastos_bancarios_pct: 'gastos_bancarios_pct' };
   try {
     for (const r of db.prepare("SELECT clave, valor FROM sg_config WHERE clave LIKE 'imp_%'").all()) {
       if (map[r.clave] && r.valor != null && r.valor !== '' && !isNaN(Number(r.valor))) p[map[r.clave]] = Number(r.valor);
@@ -6903,7 +6905,9 @@ function calcImportacion(db, emb, costos, kgOverride) {
   const flete_base_usd  = Number(emb.flete_base_usd) || 0;
   const seguro_usd      = Number(emb.seguro_usd) || 0;
   const flete_real_usd  = usdDe(rFlete);
-  const bancarios_usd   = usdDe(rBanc);
+  // Los gastos bancarios ya no se tipean: son un % del invoice y se pagan junto con la
+  // mercadería, así que toman su misma fecha y su mismo TC.
+  const bancarios_usd   = r2(invoice_usd * (p.gastos_bancarios_pct / 100));
 
   const base_usd = invoice_usd + flete_base_usd + seguro_usd;
   const sinTc = tcHoy == null;
@@ -6918,11 +6922,11 @@ function calcImportacion(db, emb, costos, kgOverride) {
   const iva_desp_ars    = sinTc ? null : r2(despachante_ars * (p.iva_servicios_pct / 100));
 
   // A plazo: cada uno al TC de su fecha de pago.
-  const tcMerc = tcDe(rMerc), tcFlete = tcDe(rFlete), tcBanc = tcDe(rBanc);
+  const tcMerc = tcDe(rMerc), tcFlete = tcDe(rFlete), tcBanc = tcMerc;   // bancarios ↔ mercadería
   const falta_tc = [];
   if (invoice_usd    && tcMerc  == null) falta_tc.push('Mercadería');
   if (flete_real_usd && tcFlete == null) falta_tc.push('Flete real');
-  if (bancarios_usd  && tcBanc  == null) falta_tc.push('Gastos bancarios');
+
   if (sinTc && (base_usd || p.tasa_maria_usd)) falta_tc.push('Impuestos (TC de hoy)');
 
   const merc_ars   = tcMerc  == null ? null : r2(invoice_usd    * tcMerc);
@@ -6958,7 +6962,7 @@ function calcImportacion(db, emb, costos, kgOverride) {
       { k: 'despachante', label: 'Despachante ' + p.despachante_pct + '%', usd: null, tc: tcHoy, ars: despachante_ars, plazo: false, detalle: 'sobre la base imponible' },
       { k: 'iva_desp',    label: 'IVA despachante ' + p.iva_servicios_pct + '%', usd: null, tc: tcHoy, ars: iva_desp_ars, plazo: false },
       { k: 'flete_real',  label: 'Flete real',            usd: flete_real_usd, tc: tcFlete, ars: flete_ars,       plazo: true,  fecha_pago: fechaPagoRubro(emb, rFlete) },
-      { k: 'bancarios',   label: 'Gastos bancarios',      usd: bancarios_usd,  tc: tcBanc,  ars: banc_ars,        plazo: true,  fecha_pago: fechaPagoRubro(emb, rBanc) },
+      { k: 'bancarios',   label: 'Gastos bancarios ' + p.gastos_bancarios_pct + '%', usd: bancarios_usd, tc: tcBanc, ars: banc_ars, plazo: true, detalle: 'del invoice · se paga con la mercadería', fecha_pago: fechaPagoRubro(emb, rMerc) },
       { k: 'iva_banc',    label: 'IVA bancarios ' + p.iva_servicios_pct + '%', usd: null, tc: tcBanc, ars: iva_banc_ars, plazo: true }
     ],
     total_contado, total_plazo,
@@ -7065,7 +7069,8 @@ const IMP_PARAMS = [
   ['imp_iibb_pct', 'Percepción IIBB sobre la base imponible', '%'],
   ['imp_despachante_pct', 'Honorarios del despachante sobre la base imponible', '%'],
   ['imp_iva_servicios_pct', 'IVA de despachante y gastos bancarios', '%'],
-  ['imp_tasa_maria_usd', 'Tasa María', 'USD']
+  ['imp_tasa_maria_usd', 'Tasa María', 'USD'],
+  ['imp_gastos_bancarios_pct', 'Gastos bancarios sobre el invoice', '%']
 ];
 
 router.get('/importacion/parametros', requireAuth, (req, res) => {
@@ -7290,8 +7295,6 @@ router.post('/embarques/estimador-preview', requireAuth, (req, res) => {
       id: null,
       flete_base_usd: b.flete_base_usd, seguro_usd: b.seguro_usd,
       cantidad_cajas: b.cantidad_cajas, fecha_etd: b.fecha_etd, fecha_eta: b.fecha_eta,
-      tc_estimado: (b.tc_estimado != null && b.tc_estimado !== '') ? Number(b.tc_estimado) : null,
-      tc_real: (b.tc_real != null && b.tc_real !== '') ? Number(b.tc_real) : null
     };
     res.json({ ok: true, data: calcImportacion(db, emb, embCostosDelBody(b), b.kg) });
   } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
@@ -7386,7 +7389,10 @@ function embCostosDelBody(body) {
   }));
 }
 
-const EMB_HEADER_COLS = ['nombre','proveedor_id','pais_origen','incoterm','certificado_origen_mercosur','ncm','moneda','tc_estimado','tc_real','estado','cantidad_cajas','flete_base_usd','seguro_usd','fecha_etd','fecha_eta','observaciones'];
+// tc_estimado / tc_real y cantidad_cajas NO están acá a propósito: los TC salen de la curva
+// según la fecha de pago de cada rubro, y las cajas se derivan de las líneas (embSyncLineas).
+// Si estuvieran, cada guardado los pisaría con lo que mandó la pantalla — o con null.
+const EMB_HEADER_COLS = ['nombre','proveedor_id','pais_origen','incoterm','certificado_origen_mercosur','ncm','moneda','estado','flete_base_usd','seguro_usd','fecha_etd','fecha_eta','observaciones'];
 function embHeaderVals(b) {
   return {
     nombre: val(b.nombre),
@@ -7396,12 +7402,9 @@ function embHeaderVals(b) {
     certificado_origen_mercosur: b.certificado_origen_mercosur ? 1 : 0,
     ncm: val(b.ncm),
     moneda: (b.moneda === 'ARS' ? 'ARS' : 'USD'),
-    tc_estimado: (b.tc_estimado != null && b.tc_estimado !== '') ? Number(b.tc_estimado) : null,
-    tc_real: (b.tc_real != null && b.tc_real !== '') ? Number(b.tc_real) : null,
     estado: EMB_ESTADOS.has(b.estado) ? b.estado : 'cotizacion',
     flete_base_usd: (b.flete_base_usd != null && b.flete_base_usd !== '') ? Number(b.flete_base_usd) : null,
     seguro_usd: (b.seguro_usd != null && b.seguro_usd !== '') ? Number(b.seguro_usd) : null,
-    cantidad_cajas: (b.cantidad_cajas != null && b.cantidad_cajas !== '') ? Math.round(Number(b.cantidad_cajas)) : null,
     fecha_etd: val(b.fecha_etd),
     fecha_eta: val(b.fecha_eta),
     observaciones: val(b.observaciones)
