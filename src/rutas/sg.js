@@ -6870,6 +6870,86 @@ router.get('/embarques', requireAuth, (req, res) => {
 });
 
 // DETALLE — cabecera + rubros + cálculo completo.
+// ── CURVA DE TIPO DE CAMBIO ESPERADO ────────────────────────────────────────────────
+// Qué esperamos del dólar mes a mes. El valor de cada mes es el esperado al CIERRE de ese
+// mes, que es como vienen los futuros; entre meses se interpola día a día.
+// Sirve para responder "¿a qué dólar voy a pagar esto?" sin que nadie tipee un TC.
+
+// Último día del mes 'YYYY-MM' → 'YYYY-MM-DD'. Día 0 del mes siguiente es el último del actual.
+function finDeMes(mes) {
+  const [y, m] = String(mes).split('-').map(Number);
+  return new Date(Date.UTC(y, m, 0)).toISOString().slice(0, 10);
+}
+const diasEntre = (a, b) => (Date.parse(b) - Date.parse(a)) / 86400000;
+
+// TC esperado para una fecha. Fuera de los extremos NO extrapola: devuelve el valor del
+// punto más cercano y avisa con `modo`, para que la pantalla pueda pedir que carguen más
+// meses en vez de inventar un número que nadie estimó.
+function tcEsperadoEnFecha(db, fechaIso) {
+  const curva = db.prepare('SELECT mes, valor FROM sg_tc_esperado ORDER BY mes').all();
+  if (!curva.length) return { tc: null, modo: 'sin_curva' };
+  const puntos = curva.map(p => ({ fecha: finDeMes(p.mes), mes: p.mes, valor: Number(p.valor) }));
+  const f = String(fechaIso || '').slice(0, 10);
+  if (!f) return { tc: null, modo: 'sin_fecha' };
+  const exacto = puntos.find(p => p.fecha === f);
+  if (exacto) return { tc: exacto.valor, modo: 'exacto', mes: exacto.mes };
+  const primero = puntos[0], ultimo = puntos[puntos.length - 1];
+  if (f < primero.fecha) return { tc: primero.valor, modo: 'antes_de_la_curva', mes: primero.mes };
+  if (f > ultimo.fecha)   return { tc: ultimo.valor,  modo: 'despues_de_la_curva', mes: ultimo.mes };
+  for (let i = 1; i < puntos.length; i++) {
+    const a = puntos[i - 1], b = puntos[i];
+    if (f <= b.fecha) {
+      const total = diasEntre(a.fecha, b.fecha);
+      const tc = total > 0 ? a.valor + (b.valor - a.valor) * (diasEntre(a.fecha, f) / total) : b.valor;
+      return { tc, modo: 'interpolado', entre: [a.mes, b.mes] };
+    }
+  }
+  return { tc: ultimo.valor, modo: 'despues_de_la_curva', mes: ultimo.mes };
+}
+
+// GET /tc-esperado/curva — la curva completa.
+router.get('/tc-esperado/curva', requireAuth, (req, res) => {
+  const db = getDb();
+  try {
+    const curva = db.prepare(`SELECT c.mes, c.valor, c.nota, c.modificado_en, u.nombre AS modificado_por_nombre
+      FROM sg_tc_esperado c LEFT JOIN usuarios u ON u.id = c.modificado_por ORDER BY c.mes`).all();
+    const hoy = db.prepare("SELECT date('now','localtime') d, strftime('%Y-%m','now','localtime') m").get();
+    res.json({ ok: true, data: { curva, mes_actual: hoy.m, hoy: hoy.d,
+      tc_hoy: tcEsperadoEnFecha(db, hoy.d) } });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// PUT /tc-esperado/curva — reemplaza la curva completa (replace-all, como las líneas del embarque).
+router.put('/tc-esperado/curva', requireAdmin, (req, res) => {
+  const db = getDb();
+  try {
+    const filas = Array.isArray(req.body && req.body.curva) ? req.body.curva : [];
+    for (const f of filas) {
+      if (!/^\d{4}-\d{2}$/.test(String(f.mes || ''))) return res.status(400).json({ ok: false, error: 'Mes inválido: ' + f.mes + ' (se espera AAAA-MM)' });
+      if (!(Number(f.valor) > 0)) return res.status(400).json({ ok: false, error: 'El valor de ' + f.mes + ' tiene que ser mayor a cero' });
+    }
+    const vistos = new Set();
+    for (const f of filas) {
+      if (vistos.has(f.mes)) return res.status(400).json({ ok: false, error: 'El mes ' + f.mes + ' está cargado dos veces' });
+      vistos.add(f.mes);
+    }
+    db.transaction(() => {
+      db.prepare('DELETE FROM sg_tc_esperado').run();
+      const ins = db.prepare(`INSERT INTO sg_tc_esperado (mes, valor, nota, modificado_en, modificado_por)
+        VALUES (?,?,?,datetime('now','localtime'),?)`);
+      for (const f of filas) ins.run(f.mes, Number(f.valor), (f.nota || '').trim() || null, uid(req));
+    })();
+    res.json({ ok: true, data: { meses: filas.length } });
+  } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
+});
+
+// GET /tc-esperado/en?fecha=AAAA-MM-DD — a qué dólar se paga algo ese día.
+router.get('/tc-esperado/en', requireAuth, (req, res) => {
+  const db = getDb();
+  try { res.json({ ok: true, data: tcEsperadoEnFecha(db, req.query.fecha) }); }
+  catch (e) { res.status(400).json({ ok: false, error: e.message }); }
+});
+
 // ── TIPO DE CAMBIO ESPERADO (Importación) ───────────────────────────────────────────
 // Un solo valor para todos los embarques que todavía son una proyección: se mueve el TC y
 // se re-costean solos, en vez de entrar camión por camión a corregirlo a mano.

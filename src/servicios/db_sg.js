@@ -1164,6 +1164,35 @@ try {
   `);
 } catch (e) { console.error('[DB] SG sg_embarques:', e.message); }
 
+// ── CURVA DE TIPO DE CAMBIO ESPERADO ────────────────────────────────────────────────
+// Qué esperamos del dólar mes a mes. Un valor por mes ('YYYY-MM'), cargado como vienen los
+// futuros: el valor es el esperado al CIERRE de ese mes. Entre meses se interpola día a día.
+//
+// Existe porque el TC de un embarque no es un dato del embarque: es consecuencia de CUÁNDO
+// se paga. Un pago a 30 días de la llegada se liquida a un dólar que no es el de hoy, y
+// cotizar con el de hoy subvalúa el costo de todo lo que se compra a plazo.
+try {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS sg_tc_esperado (
+      mes            TEXT PRIMARY KEY,      -- 'YYYY-MM'
+      valor          REAL NOT NULL,
+      nota           TEXT,
+      modificado_en  TEXT DEFAULT (datetime('now','localtime')),
+      modificado_por INTEGER
+    );
+  `);
+  // Seed: el TC esperado plano que existía como parámetro suelto pasa a ser el mes actual.
+  // La curva lo generaliza (es el mismo dato, con dimensión tiempo), así que no se pierde.
+  const plano = db.prepare("SELECT valor FROM sg_config WHERE clave='tc_esperado'").get();
+  const hayCurva = db.prepare('SELECT COUNT(*) n FROM sg_tc_esperado').get().n;
+  if (plano && Number(plano.valor) > 0 && !hayCurva) {
+    const mes = db.prepare("SELECT strftime('%Y-%m','now','localtime') m").get().m;
+    db.prepare("INSERT OR IGNORE INTO sg_tc_esperado (mes, valor, nota) VALUES (?,?,?)")
+      .run(mes, Number(plano.valor), 'Migrado del TC esperado global');
+    console.log('[DB] SG curva TC: sembrada con el TC esperado plano (' + mes + ' = ' + plano.valor + ')');
+  }
+} catch (e) { console.error('[DB] SG sg_tc_esperado:', e.message); }
+
 // ── MÓDULO IMPORTACIÓN (F3) — cierre del embarque ───────────────────────────────────
 // Al cerrar se congela la foto de lo PROYECTADO (estimados + tc estimado) contra lo REAL
 // (COALESCE(real, estimado) + tc real). Es la única forma de aprender si cotizás bien: sin
