@@ -245,6 +245,14 @@ const REF_LOG = `
 // vieja sigue funcionando.
 const RE_SECCION = /^\d(\.\d{2})?$/;        // 4   ó  4.01
 const RE_TITULO  = /^\d\.\d{2}\.\d{2}$/;    // 4.01.01
+// EL TRAMO .00 ES DEL GRUPO "SIN TÍTULO ASIGNADO" y no se le puede dar a un
+// título de verdad. Las cuentas que todavía no se clasificaron viven en
+// X.XX.00.NNNN; si además existe un título X.XX.00, sus cuentas usan los MISMOS
+// códigos, y mirando el número deja de poder saberse cuál está sin clasificar y
+// cuál no. Medido: se podía crear el título, y las dos familias se mezclaban.
+const RE_TITULO_CERO = /^\d\.\d{2}\.00$/;
+const NO_CERO = (c) => `El tramo .00 está reservado: ${c} es donde el sistema deja las cuentas que `
+  + `todavía no tienen título. Elegí otro número, por ejemplo ${String(c).slice(0, -2)}01.`;
 const RE_CUENTA  = /^\d\.\d{2}\.\d{2}\.\d{4}$/;  // 4.01.01.0001
 
 const AYUDA_SECCION = 'El código de una sección es X.XX (por ejemplo 4.01), o el dígito del grupo solo '
@@ -304,6 +312,52 @@ function noCuelgaDe(codigoHijo, codigoPadre, quePadre) {
 
 // El mensaje que ve el usuario. Dice DÓNDE está el código, que es lo único que
 // le sirve para poder resolverlo.
+// ── LO QUE ENTRA POR EL FORMULARIO NO ES UN NOMBRE HASTA QUE SE LO MIRA ────
+// El plan de cuentas se carga PEGANDO una lista, casi siempre de un Excel o de
+// un PDF del contador. Eso trae de todo: renglones vacíos que parecen vacíos
+// pero no lo están, separadores, guiones, y espacios de ancho cero (U+200B) que
+// el ojo no ve y el trim() no saca. Cada uno de esos renglones se convertía en
+// una CUENTA, y una cuenta del plan contable no se borra: se usa en asientos.
+//
+// Medido antes de esto: una lista con "-", ".", "..." y "@@@" creaba cuatro
+// cuentas; un pegado con espacios de ancho cero creaba dos cuentas con el
+// nombre en blanco; y mandar un objeto creaba una cuenta llamada
+// literalmente "[object Object]".
+const INVISIBLES = /[\u200B-\u200D\uFEFF\u00AD\u2060\u180E]/g;
+const SALTOS = /\r\n|[\n\r\u2028\u2029]/;
+const NOMBRE_MAX = 120;
+
+function limpiarNombre(x) {
+  if (x === null || x === undefined) return '';
+  // Un objeto o un array NO son un nombre. String({}) da "[object Object]".
+  if (typeof x === 'object') return '';
+  return String(x).replace(INVISIBLES, '').replace(/\s+/g, ' ').trim();
+}
+
+// Un nombre de cuenta tiene por lo menos una LETRA. "0", "---" y "..." no son
+// nombres: son basura del pegado.
+function nombreUsable(n) {
+  return n.length > 0 && /[a-záéíóúüñA-ZÁÉÍÓÚÜÑ]/.test(n);
+}
+
+// parseInt("5basura") devuelve 5. Con eso, un seccion_id mal armado entraba
+// como si fuera la sección 5, y las cuentas caían en otra sección. Acá o es un
+// número entero de punta a punta, o no es nada.
+function enteroEstricto(v) {
+  if (typeof v === 'number') return Number.isInteger(v) ? v : null;
+  const t = String(v ?? '').trim();
+  return /^\d+$/.test(t) ? parseInt(t, 10) : null;
+}
+
+// Qué tipo le corresponde a una cuenta según el grupo de su sección. No es una
+// preferencia: una cuenta del Activo es patrimonial y una de Gastos va al
+// resultado. El modal manda 'resultado' por default, así que sin este control
+// medio plan de cuentas nace marcado al revés.
+const TIPO_DE_GRUPO = {
+  activo: 'patrimonial', pasivo: 'patrimonial', patrimonio_neto: 'patrimonial',
+  ingresos: 'resultado', gastos: 'resultado',
+};
+
 function mensajeChoque(codigo, choque) {
   const art = choque.nivel === 'sección' || choque.nivel === 'cuenta' ? 'la' : 'el';
   let m = `El código ${codigo} ya lo usa ${art} ${choque.nivel} "${choque.nombre}"`;
@@ -333,6 +387,7 @@ router.post('/titulos', requireAdmin, (req, res) => {
     return res.status(400).json({ error: 'codigo, nombre y seccion_id son requeridos' });
   }
   const codigoStr = String(codigo).trim();
+  if (RE_TITULO_CERO.test(codigoStr)) return res.status(400).json({ error: NO_CERO(codigoStr) });
   if (!RE_TITULO.test(codigoStr)) {
     return res.status(400).json({ error: `"${codigoStr}" no sirve como código de título. ${AYUDA_TITULO}` });
   }
@@ -361,6 +416,7 @@ router.put('/titulos/:id', requireAdmin, (req, res) => {
   const { nombre, codigo } = req.body || {};
   if (codigo !== undefined && String(codigo).trim() !== String(tit.codigo)) {
     const codigoStr = String(codigo).trim();
+    if (RE_TITULO_CERO.test(codigoStr)) return res.status(400).json({ error: NO_CERO(codigoStr) });
     if (!RE_TITULO.test(codigoStr)) {
       return res.status(400).json({ error: `"${codigoStr}" no sirve como código de título. ${AYUDA_TITULO}` });
     }
@@ -630,6 +686,18 @@ router.post('/', requireAdmin, (req, res) => {
   const choque = codigoEnUso(db, codigoStr);
   if (choque) return res.status(400).json({ error: mensajeChoque(codigoStr, choque) });
 
+  // EL MISMO CONTROL DE NOMBRE QUE EL ALTA DE A MUCHAS. Los dos caminos crean la
+  // misma cuenta y aplicaban reglas distintas: el lote rechazaba el nombre
+  // repetido y el de a una lo dejaba entrar, así que alcanzaba con cargarla por
+  // el modal para tener dos "Honorarios" en el mismo título.
+  const nombreLimpio = limpiarNombre(nombre);
+  if (!nombreUsable(nombreLimpio)) {
+    return res.status(400).json({ error: 'El nombre de la cuenta tiene que tener por lo menos una letra.' });
+  }
+  if (nombreLimpio.length > NOMBRE_MAX) {
+    return res.status(400).json({ error: `El nombre no puede pasar de ${NOMBRE_MAX} caracteres.` });
+  }
+
   try {
     const ordenMax = db.prepare('SELECT COALESCE(MAX(orden), 0) AS m FROM sg_cuentas WHERE seccion_id = ?').get(seccion_id).m;
 
@@ -651,13 +719,29 @@ router.post('/', requireAdmin, (req, res) => {
       if (cuelga) return res.status(400).json({ error: cuelga });
     }
 
+    // Repetido en el MISMO lugar —misma sección y mismo título—, que es donde
+    // molesta. "Honorarios" de Ventas y "Honorarios" de Administración son dos
+    // cuentas distintas y las dos tienen que poder existir.
+    const gemela = titIdFinal
+      ? db.prepare(`SELECT codigo, activo FROM sg_cuentas
+           WHERE seccion_id = ? AND titulo_id = ?
+             AND LOWER(TRIM(nombre)) = LOWER(?)`).get(seccion_id, titIdFinal, nombreLimpio)
+      : db.prepare(`SELECT codigo, activo FROM sg_cuentas
+           WHERE seccion_id = ? AND titulo_id IS NULL
+             AND LOWER(TRIM(nombre)) = LOWER(?)`).get(seccion_id, nombreLimpio);
+    if (gemela) {
+      return res.status(400).json({
+        error: `Ya hay una cuenta que se llama "${nombreLimpio}" en ese mismo lugar: ${gemela.codigo}`
+             + (gemela.activo === 0 ? ', y está DESACTIVADA (por eso no la ves en la lista).' : '.') });
+    }
+
     const r = db.prepare(`
       INSERT INTO sg_cuentas
         (codigo, nombre, seccion_id, titulo_id, tipo, permite_lote, permite_campania, es_sistema, orden, activo)
       VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, 1)
     `).run(
       codigoStr,
-      String(nombre).trim(),
+      nombreLimpio,
       seccion_id,
       titIdFinal,
       tipo,
@@ -692,16 +776,41 @@ router.post('/', requireAdmin, (req, res) => {
 // contador ya tiene a mano —una columna de Excel, un mail— y no hay formato que
 // aprender ni archivo que se pueda subir equivocado.
 router.post('/lote', requireAdmin, (req, res) => {
-  const seccionId = parseInt(req.body?.seccion_id, 10);
+  const seccionId = enteroEstricto(req.body?.seccion_id);
   const titRaw    = req.body?.titulo_id;
-  const tituloId  = (titRaw === null || titRaw === undefined || titRaw === '') ? null : parseInt(titRaw, 10);
+  const sinTitulo = (titRaw === null || titRaw === undefined || titRaw === '');
+  const tituloId  = sinTitulo ? null : enteroEstricto(titRaw);
   const tipo      = req.body?.tipo || 'resultado';
 
-  if (!Number.isInteger(seccionId)) return res.status(400).json({ error: 'Falta la sección.' });
+  if (seccionId === null) return res.status(400).json({ error: 'Falta la sección.' });
   if (!['resultado', 'patrimonial'].includes(tipo)) return res.status(400).json({ error: 'tipo inválido' });
+  // titulo_id que llega mal formado NO puede caer a "sin título" en silencio: el
+  // usuario eligió un título y las cuentas terminaban sueltas en la sección, con
+  // el tramo .00, sin que nadie se enterara.
+  if (!sinTitulo && tituloId === null) {
+    return res.status(400).json({ error: 'El título elegido no es válido. Volvé a elegirlo en el desplegable.' });
+  }
 
   const sec = db.prepare('SELECT * FROM sg_cuentas_secciones WHERE id = ?').get(seccionId);
   if (!sec) return res.status(400).json({ error: 'La sección no existe.' });
+  // Una sección desactivada no se ve en la pantalla: cargarle cuentas es
+  // meterlas en un lugar al que nadie va a llegar.
+  if (!sec.activo) {
+    return res.status(400).json({
+      error: `La sección ${sec.codigo} — ${sec.nombre} está DESACTIVADA: no se le pueden cargar `
+           + `cuentas. Volvé a activarla primero, o elegí otra.` });
+  }
+
+  // EL TIPO SALE DEL GRUPO DE LA SECCIÓN. El modal manda 'resultado' por
+  // default, así que sin esto una sección del Activo se llenaba de cuentas
+  // marcadas como resultado y el balance quedaba mal desde el día uno.
+  const tipoEsperado = TIPO_DE_GRUPO[sec.grupo];
+  if (tipoEsperado && tipo !== tipoEsperado) {
+    return res.status(400).json({
+      error: `La sección ${sec.codigo} — ${sec.nombre} es del grupo ${sec.grupo}, así que sus `
+           + `cuentas son de tipo "${tipoEsperado}", no "${tipo}".`,
+      tipo_esperado: tipoEsperado });
+  }
 
   let tit = null;
   if (tituloId) {
@@ -709,6 +818,11 @@ router.post('/lote', requireAdmin, (req, res) => {
     if (!tit) return res.status(400).json({ error: 'El título no existe.' });
     if (tit.seccion_id !== sec.id) {
       return res.status(400).json({ error: 'Ese título no pertenece a la sección elegida.' });
+    }
+    if (!tit.activo) {
+      return res.status(400).json({
+        error: `El título ${tit.codigo} — ${tit.nombre} está DESACTIVADO: no se le pueden colgar `
+             + `cuentas. Volvé a activarlo primero, o elegí otro.` });
     }
   }
 
@@ -742,21 +856,54 @@ router.post('/lote', requireAdmin, (req, res) => {
   // Una cuenta por línea. Se acepta también un array, para poder llamarlo desde
   // afuera del panel.
   const crudo = req.body?.nombres;
-  const lista = (Array.isArray(crudo) ? crudo : String(crudo ?? '').split(/\r?\n/))
-    .map(n => String(n ?? '').trim())
-    .filter(Boolean);
-  if (!lista.length) return res.status(400).json({ error: 'No hay ningún nombre en la lista.' });
+  // Un objeto o un número NO son una lista de nombres. String({a:1}) da
+  // "[object Object]", y así entró más de una cuenta con ese nombre.
+  if (crudo === null || crudo === undefined
+      || (!Array.isArray(crudo) && typeof crudo !== 'string')) {
+    return res.status(400).json({ error: 'La lista de nombres tiene que ser texto, uno por renglón.' });
+  }
+  // NO TODO SALTO DE LÍNEA ES \n. Copiar de un PDF trae U+2028 (line separator)
+  // y U+2029; un archivo viejo de Mac trae \r solo. Con /\r?\n/ nada de eso
+  // partía, y las 40 cuentas del contador entraban como UN nombre gigante — que
+  // ahora además el tope de largo rechaza, así que no entraba nada.
+  const renglones = (Array.isArray(crudo) ? crudo : crudo.split(SALTOS)).map(limpiarNombre);
+  const lista = renglones.filter(nombreUsable);
+  // Lo que se descartó se DICE. Descartar en silencio es peor que crear basura:
+  // el usuario pega 40 renglones, ve 37 cuentas y no sabe cuáles faltan.
+  // Los que TRAÍAN algo y no sirvieron. Un renglón en blanco no se cuenta: no
+  // es un descarte, es el enter de más al final del pegado.
+  const originales = Array.isArray(crudo) ? crudo : crudo.split(SALTOS);
+  const descartados = renglones.filter((n, i) =>
+    !nombreUsable(n) && String(originales[i] ?? '').trim() !== '');
+  const largos = lista.filter(n => n.length > NOMBRE_MAX);
+  if (largos.length) {
+    return res.status(400).json({
+      error: `Hay ${largos.length} nombre(s) de más de ${NOMBRE_MAX} caracteres. `
+           + `Eso no es el nombre de una cuenta: fijate que no se haya pegado un párrafo entero.` });
+  }
+  if (!lista.length) {
+    return res.status(400).json({
+      error: descartados.length
+        ? `Ninguno de los ${descartados.length} renglones sirve como nombre de cuenta: un nombre `
+          + `tiene que tener por lo menos una letra.`
+        : 'No hay ningún nombre en la lista.' });
+  }
   if (lista.length > 300) {
     return res.status(400).json({ error: `Son ${lista.length} nombres: van de a 300 como máximo.` });
   }
 
   // Lo que ya está en la sección, por nombre. Se compara sin mayúsculas ni
   // espacios de más, que es como se duplican las cuentas en la vida real.
-  const clave = (s) => String(s).trim().toLowerCase().replace(/\s+/g, ' ');
+  // EL REPETIDO SE MIRA DONDE VA A VIVIR LA CUENTA, no en toda la sección.
+  // "Honorarios" bajo el título Ventas y "Honorarios" bajo el título
+  // Administración son DOS cuentas distintas y las dos tienen que poder existir:
+  // el control por sección entera bloqueaba la segunda.
+  const clave = (s) => limpiarNombre(s).toLowerCase();
   const yaEstan = new Map();
-  for (const c of db.prepare('SELECT codigo, nombre FROM sg_cuentas WHERE seccion_id = ?').all(sec.id)) {
-    yaEstan.set(clave(c.nombre), c);
-  }
+  const mismoLugar = tit
+    ? db.prepare('SELECT codigo, nombre, activo FROM sg_cuentas WHERE seccion_id = ? AND titulo_id = ?').all(sec.id, tit.id)
+    : db.prepare('SELECT codigo, nombre, activo FROM sg_cuentas WHERE seccion_id = ? AND titulo_id IS NULL').all(sec.id);
+  for (const c of mismoLugar) yaEstan.set(clave(c.nombre), c);
 
   // Desde qué número sigue la numeración bajo este prefijo.
   let ultimo = 0;
@@ -784,7 +931,10 @@ router.post('/lote', requireAdmin, (req, res) => {
         const k = clave(nombre);
         const previa = yaEstan.get(k);
         if (previa) {
-          omitidas.push({ nombre, motivo: `ya existe en esta sección como ${previa.codigo}` });
+          // Si la que choca está DESACTIVADA hay que decirlo: no se ve en la
+          // pantalla, y el usuario se queda buscando un código que no aparece.
+          omitidas.push({ nombre, motivo: `ya existe acá como ${previa.codigo}`
+            + (previa.activo === 0 ? ', y está DESACTIVADA (por eso no la ves en la lista)' : '') });
           continue;
         }
 
@@ -819,13 +969,20 @@ router.post('/lote', requireAdmin, (req, res) => {
       }
     })();
   } catch (e) {
-    return res.status(500).json({ error: e.message });
+    // La transacción revierte entera: NO quedó ninguna creada. Se dice así, con
+    // las listas vacías, para que la pantalla muestre el resultado igual que
+    // siempre y el usuario no se quede sin saber si algo entró.
+    return res.status(500).json({ error: e.message, creadas: [], omitidas: [], descartados: 0 });
   }
 
   res.json({
     ok: true,
     creadas,
     omitidas,
+    // Los renglones del pegado que no eran un nombre —guiones, puntos, espacios
+    // de ancho cero—. Van aparte de las omitidas: éstas ni siquiera llegaron a
+    // ser candidatas.
+    descartados: descartados.length,
     donde: tit ? `${tit.codigo} — ${tit.nombre}` : `${sec.codigo} — ${sec.nombre} (sin título asignado)`,
   });
 });
