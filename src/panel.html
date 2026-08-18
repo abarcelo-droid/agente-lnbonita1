@@ -3558,9 +3558,9 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
 
 
   <div class="sec sg-mod" id="sec-sg-importacion">
-    <div class="ph"><div><div class="ph-t">🍅 San Gerónimo · Importación</div><div class="ph-s">Cotizador de embarque: costo neto por caja, ajuste por merma y margen proyectado. Estimado vs real.</div></div><div style="display:flex;gap:8px"><button class="btn bo" onclick="sgCurvaAbrir()">📈 Curva TC</button><button class="btn bo" onclick="sgTcAbrir()">💱 TC esperado</button><button class="btn bb" onclick="sgImpOpen()">+ Nuevo embarque</button></div></div>
+    <div class="ph"><div><div class="ph-t">🍅 San Gerónimo · Importación</div><div class="ph-s">Cotizador de embarque: costo por caja en pesos según a qué dólar se paga cada rubro. Estimado vs real.</div></div><div style="display:flex;gap:8px"><button class="btn bo" onclick="sgCurvaAbrir()">📈 Curva TC</button><button class="btn bo" onclick="sgTcAbrir()">💱 TC esperado</button><button class="btn bb" onclick="sgImpOpen()">+ Nuevo embarque</button></div></div>
     <div class="ab-table-wrap"><table class="pa-tbl">
-      <thead><tr><th>Embarque</th><th>Proveedor</th><th style="text-align:center">Estado</th><th style="text-align:right">Cajas</th><th style="text-align:right">Costo/caja neto</th><th style="text-align:right">Costo/caja c-imp.</th><th style="text-align:right">Margen proy.</th><th></th></tr></thead>
+      <thead><tr><th>Embarque</th><th>Proveedor</th><th style="text-align:center">Estado</th><th style="text-align:right">Cajas</th><th style="text-align:right">Costo/caja neto</th><th style="text-align:right">Costo/caja c-imp.</th><th style="text-align:right">Costo/kg</th><th></th></tr></thead>
       <tbody id="sg-tb-embarques"><tr><td colspan="8" class="emp">Cargando…</td></tr></tbody>
     </table></div>
   </div>
@@ -3742,8 +3742,6 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
       <div class="fl"><label>TC real</label><input type="number" step="0.01" id="sg-emb-tc-real" oninput="sgImpCalc()" placeholder="al cerrar" title="TC definitivo del embarque. Si cargás los montos reales en pesos, no hace falta."></div>
       <div class="fl"><label>Estado</label><select id="sg-emb-estado"></select></div>
       <div class="fl"><label>Cantidad de cajas <span style="font-weight:400;color:var(--mut);font-size:11px">(Σ líneas si hay desglose)</span></label><input type="number" step="1" min="0" id="sg-emb-cajas" oninput="sgImpCalc()"></div>
-      <div class="fl"><label>Merma esperada %</label><input type="number" step="0.1" min="0" id="sg-emb-merma" oninput="sgImpCalc()"></div>
-      <div class="fl"><label>Precio referencia $/caja</label><input type="number" step="0.01" min="0" id="sg-emb-precio-ref" oninput="sgImpCalc()"></div>
       <div class="fl"><label>ETD</label><input type="date" id="sg-emb-etd"></div>
       <div class="fl"><label>ETA</label><input type="date" id="sg-emb-eta"></div>
       <div class="fl" style="grid-column:span 4"><label>Observaciones</label><input type="text" id="sg-emb-obs"></div>
@@ -22630,7 +22628,6 @@ var SG_EMB_CONCEPTOS = [
   {k:'anticipo_impuesto',         l:'Anticipo de impuesto',      cred:false},
   {k:'gastos_despachante',        l:'Gastos despachante',        cred:false},
   {k:'fletes',                    l:'Fletes',                    cred:false},
-  {k:'diferencia_cotizacion',     l:'Diferencia de cotización',  cred:false},
   {k:'gastos_bancarios',          l:'Gastos bancarios',          cred:false},
   {k:'iva_credito_computable',    l:'IVA crédito computable',    cred:true},
   {k:'percepcion_iva_computable', l:'Percepción IVA computable', cred:true},
@@ -22645,8 +22642,6 @@ function sgImpInit(){
   api('/api/sg/embarques').then(function(r){
     var rows=(r&&r.ok)?r.data:[];
     eid('sg-tb-embarques').innerHTML = rows.length ? rows.map(function(e){
-      var m=e.margen_proyectado_pct;
-      var mCol=(m==null)?'var(--mut)':(m>=0?'var(--ok,#16a34a)':'var(--err,#dc2626)');
       return '<tr>'
         +'<td><b>'+esc(e.nombre||'')+'</b></td>'
         +'<td>'+esc(e.proveedor_nombre||'—')+'</td>'
@@ -22654,8 +22649,8 @@ function sgImpInit(){
         +'<td style="text-align:right">'+(e.cantidad_cajas!=null?nr(e.cantidad_cajas):'—')+'</td>'
         +'<td style="text-align:right">'+(e.costo_caja_neto!=null?sgMoney(Math.round(e.costo_caja_neto)):'—')+'</td>'
         +'<td style="text-align:right">'+(e.costo_caja_c_impuestos!=null?sgMoney(Math.round(e.costo_caja_c_impuestos)):'—')+'</td>'
-        +'<td style="text-align:right;color:'+mCol+';font-weight:600">'+(m!=null?m.toFixed(1)+'%':'—')+'</td>'
-        +'<td style="text-align:right;white-space:nowrap"><button class="btn bo bs" onclick="sgImpOpen('+e.id+')">✏️</button>'+(lnbPuedeAnular('sg-importacion')?' <button class="btn bd bs" onclick="sgImpDel('+e.id+')">×</button>':'')+'</td>'
+        +'<td style="text-align:right">'+(e.costo_kg_neto!=null?sgMoney(Math.round(e.costo_kg_neto)):'—')+'</td>'
+        +'<td style="text-align:right;white-space:nowrap"><button class="btn bo bs" title="Duplicar: arranca un embarque nuevo con esta estructura de costos" onclick="sgImpDuplicar('+e.id+')">⧉</button> <button class="btn bo bs" onclick="sgImpOpen('+e.id+')">✏️</button>'+(lnbPuedeAnular('sg-importacion')?' <button class="btn bd bs" onclick="sgImpDel('+e.id+')">×</button>':'')+'</td>'
       +'</tr>';
     }).join('') : '<tr><td colspan="8" class="emp">Sin embarques. Creá el primero con “+ Nuevo embarque”.</td></tr>';
   });
@@ -22708,8 +22703,6 @@ function sgImpFill(e){
     return '<option value="'+x[0]+'"'+(sel?' selected':'')+((auto&&!sel)?' disabled':'')+'>'+x[1]+(auto?' (automático)':'')+'</option>';
   }).join('');
   eid('sg-emb-cajas').value = sgImpVal(e.cantidad_cajas);
-  eid('sg-emb-merma').value = sgImpVal(e.merma_esperada_pct);
-  eid('sg-emb-precio-ref').value = sgImpVal(e.precio_referencia);
   eid('sg-emb-etd').value = sgImpVal(e.fecha_etd);
   eid('sg-emb-eta').value = sgImpVal(e.fecha_eta);
   eid('sg-emb-obs').value = sgImpVal(e.observaciones);
@@ -22938,6 +22931,7 @@ function sgImpCalc(){
   var override = parseFloat(eid('sg-emb-tc-real').value) || parseFloat(eid('sg-emb-tc-est').value) || null;
   var hoy = new Date().toISOString().slice(0,10);
   var bruto=0, cred=0;                                  // efectivo (COALESCE real,est) → alimenta el neto
+  var difCot=0, difCos=0;                               // desvío de los rubros USD (cotización) vs los en pesos (costo real)
   var sub={ bruto:{est:0,real:0}, cred:{est:0,real:0} }; // subtotales por bloque para la tabla de rubros
   SG_EMB_CONCEPTOS.forEach(function(c){
     var mon=eid('sg-emb-mon-'+c.k).value;
@@ -22972,7 +22966,7 @@ function sgImpCalc(){
     if(real!=null) bk.real+=real;
     if(c.cred) cred+=efec; else bruto+=efec;
     var g=eid('sg-emb-gap-'+c.k);
-    if(real!=null&&est!=null){ var d=real-est; g.textContent=(d>=0?'+':'')+sgMoney(Math.round(d)); g.style.color=(d>0?'var(--err,#dc2626)':(d<0?'var(--ok,#16a34a)':'var(--mut)')); }
+    if(real!=null&&est!=null){ var d=real-est; if(esUSD) difCot+=d; else difCos+=d; g.textContent=(d>=0?'+':'')+sgMoney(Math.round(d)); g.style.color=(d>0?'var(--err,#dc2626)':(d<0?'var(--ok,#16a34a)':'var(--mut)')); }
     else { g.textContent='—'; g.style.color='var(--mut)'; }
   });
   // Subtotales de cada bloque (Σestimado | Σreal | Σgap).
@@ -22988,13 +22982,10 @@ function sgImpCalc(){
 
   var neto=bruto-cred;
   var cajas=parseInt(eid('sg-emb-cajas').value,10)||0;
-  var merma=parseFloat(eid('sg-emb-merma').value)||0;
-  var precioRef=parseFloat(eid('sg-emb-precio-ref').value)||null;
-  var ccn=cajas>0?neto/cajas:null;                     // base del MARGEN (crédito recuperado)
+  var kgTot=(SG._embLineas||[]).reduce(function(a,l){ return a+((parseInt(l.cajas,10)||0)*(parseFloat(l.kg_por_bulto)||0)); },0);
+  var ccn=cajas>0?neto/cajas:null;                     // el número para decidir a cuánto vender
   var cci=cajas>0?bruto/cajas:null;                    // desembolso de caja (cash flow)
-  var ccv=(ccn!=null&&merma<100)?ccn/(1-merma/100):ccn;
-  var margen=(precioRef&&precioRef>0&&ccv!=null)?(precioRef-ccv)/precioRef*100:null;
-  var mCol=(margen==null)?'var(--mut)':(margen>=0?'#16a34a':'#dc2626');
+  var ckg=kgTot>0?neto/kgTot:null;
   // Costo/caja con 2 decimales (como la planilla: 42.747,62). Los totales van redondeados.
   var money2 = function(n){ return (n==null)?'—':('$'+(Number(n)||0).toLocaleString('es-AR',{minimumFractionDigits:2,maximumFractionDigits:2})); };
   function row(l,v,strong){ return '<div style="display:flex;justify-content:space-between;font-size:13px;padding:2px 0"><span style="color:var(--mut)">'+l+'</span><span style="font-variant-numeric:tabular-nums"'+(strong?' style="font-weight:700"':'')+'>'+v+'</span></div>'; }
@@ -23008,13 +22999,15 @@ function sgImpCalc(){
     +row('= Costo Neto de Impuestos', sgMoney(Math.round(neto)), true)
     +row('÷ cajas', nr(cajas)+' caja'+(cajas===1?'':'s'))
     +'<hr style="border:none;border-top:1px solid var(--bor);margin:8px 0">'
-    +big('💰','Costo/caja NETO','base del margen (crédito recuperado)', money2(ccn), '#16a34a', 'rgba(16,163,74,.10)')
+    +big('💰','Costo/caja NETO','en pesos — el número para poner precio', money2(ccn), '#16a34a', 'rgba(16,163,74,.10)')
     +big('💵','Costo/caja c/impuestos','desembolso de caja (cash flow)', money2(cci), 'var(--fg,inherit)', 'var(--bg)')
-    +big('📦','Costo/caja vendible','ajustado por merma '+merma+'%', money2(ccv), 'var(--fg,inherit)', 'var(--bg)')
-    +'<div style="margin-top:8px;padding:8px 10px;border-radius:8px;background:'+(margen==null?'var(--bg)':(margen>=0?'rgba(16,163,74,.12)':'rgba(220,38,38,.12)'))+';display:flex;justify-content:space-between;align-items:center">'
-      +'<div><div style="font-weight:600">📈 MARGEN PROYECTADO</div><div style="font-size:11px;color:var(--mut)">sobre el costo NETO, no el c/impuestos</div></div>'
-      +'<span style="font-size:20px;font-weight:700;color:'+mCol+'">'+(margen!=null?margen.toFixed(1)+'%':'—')+'</span>'
-    +'</div>';
+    +(ckg!=null?big('⚖️','Costo por kg','neto, sobre '+nr(Math.round(kgTot))+' kg', money2(ckg), 'var(--fg,inherit)', 'var(--bg)'):'')
+    // La diferencia de cotización no se carga: sale sola del desvío de los rubros en dólares.
+    +((difCot||difCos)
+      ? '<hr style="border:none;border-top:1px solid var(--bor);margin:8px 0">'
+        +row('Diferencia de cotización', (difCot>=0?'+':'')+sgMoney(Math.round(difCot)))
+        +row('Diferencia de costos reales', (difCos>=0?'+':'')+sgMoney(Math.round(difCos)))
+      : '');
 }
 function sgImpGather(){
   return {
@@ -23029,8 +23022,6 @@ function sgImpGather(){
     tc_real: eid('sg-emb-tc-real').value,
     estado: eid('sg-emb-estado').value,
     cantidad_cajas: eid('sg-emb-cajas').value,
-    merma_esperada_pct: eid('sg-emb-merma').value,
-    precio_referencia: eid('sg-emb-precio-ref').value,
     fecha_etd: eid('sg-emb-etd').value,
     fecha_eta: eid('sg-emb-eta').value,
     observaciones: eid('sg-emb-obs').value,
@@ -23060,6 +23051,22 @@ function sgImpSave(){
   (id ? api('/api/sg/embarques/'+id,'PUT',b) : api('/api/sg/embarques','POST',b)).then(function(r){
     if(r&&r.ok){ toast(id?'Embarque actualizado':'Embarque creado','ok'); closeMB('sg-emb-modal'); sgImpInit(); }
     else toast((r&&r.error)||'Error','er');
+  });
+}
+// Duplicar: arranca un embarque nuevo con la ESTRUCTURA de otro (proveedor, rubros con sus
+// montos estimados y sus condiciones de pago, y opcionalmente los productos). No copia
+// montos reales, fechas del viaje, documentos ni lotes: eso era de aquel camión.
+function sgImpDuplicar(id){
+  var nombre=prompt('Nombre del embarque nuevo:');
+  if(nombre===null) return;
+  nombre=String(nombre).trim();
+  if(!nombre){ toast('Poné un nombre','er'); return; }
+  var conLineas=confirm('¿Copiar también los productos (líneas) del embarque original?\n\nAceptar = sí · Cancelar = solo la estructura de costos');
+  api('/api/sg/embarques/'+id+'/duplicar','POST',{ nombre:nombre, con_lineas:conLineas }).then(function(r){
+    if(r&&r.ok){
+      toast('Embarque duplicado — '+r.data.costos+' rubro(s)'+(r.data.lineas?' y '+r.data.lineas+' producto(s)':''),'ok');
+      sgImpInit(); sgImpOpen(r.data.id);      // se abre para completar fechas y ajustar montos
+    } else toast((r&&r.error)||'Error al duplicar','er');
   });
 }
 function sgImpDel(id){
