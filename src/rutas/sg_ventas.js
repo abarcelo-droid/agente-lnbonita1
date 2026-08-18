@@ -471,7 +471,14 @@ router.get('/cc/:clienteId', (req, res) => {
       ORDER BY co.fecha DESC
     `).all(cid);
 
-    res.json({ ok: true, docs, totales, cobranzas });
+    // La cuenta contable del cliente va en la ficha para que la pantalla pueda
+    // MOSTRAR el asiento del cobro antes de confirmarlo (convención del
+    // proyecto), y para avisar cuando falta en vez de fallar al guardar.
+    const cli = db.prepare(`SELECT c.razon_social, cc.id, cc.codigo, cc.nombre
+      FROM sg_clientes c LEFT JOIN sg_cuentas cc ON cc.id = c.cuenta_contable_id
+      WHERE c.id = ?`).get(cid);
+    res.json({ ok: true, docs, totales, cobranzas,
+      cuenta_cliente: (cli && cli.id) ? { id: cli.id, codigo: cli.codigo, nombre: cli.nombre } : null });
   } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
@@ -479,62 +486,218 @@ router.get('/cc/:clienteId', (req, res) => {
 // COBRANZAS
 // ═══════════════════════════════════════════════════════════════════════════════
 
+// De dónde sale la cuenta contable del cliente: de su ficha. Es la misma que usa
+// el asiento de la liquidación —donde el cliente va al DEBE— así que la cobranza
+// la usa al HABER y el mayor del cliente cierra solo.
+function ctaContableCliente(clienteId) {
+  const c = db.prepare('SELECT id, razon_social, cuenta_contable_id FROM sg_clientes WHERE id=? AND activo=1')
+    .get(clienteId);
+  return c || null;
+}
+
+// Lo que le queda por cobrar a un documento, mirando SOLO las cobranzas vivas.
+function pendienteDeDoc(tipo, docId) {
+  const tabla = tipo === 'liquidacion' ? 'sg_ven_liquidaciones' : 'sg_ven_facturas';
+  const campo = tipo === 'liquidacion' ? 'neto_acreditar' : 'total';
+  const d = db.prepare(`SELECT id, numero, cliente_id, estado, ${campo} AS total FROM ${tabla} WHERE id=?`)
+    .get(docId);
+  if (!d) return null;
+  const cob = db.prepare(`SELECT COALESCE(SUM(cd.monto),0) t FROM sg_ven_cobranza_docs cd
+    JOIN sg_ven_cobranzas co ON co.id = cd.cobranza_id
+    WHERE cd.tipo=? AND cd.doc_id=? AND co.anulada=0`).get(tipo, docId).t;
+  return { ...d, cobrado: cob, pendiente: Math.round(((d.total || 0) - cob) * 100) / 100 };
+}
+
+// Las cuentas de donde puede entrar la plata, para el desplegable de la pantalla.
+router.get('/cobranzas/cuentas', requireAuth, (req, res) => {
+  try {
+    const rows = db.prepare(`SELECT c.id, c.nombre, c.tipo, c.banco, c.cuenta_contable_id,
+        cc.codigo AS cuenta_codigo, cc.nombre AS cuenta_nombre
+      FROM sg_fin_cuentas c LEFT JOIN sg_cuentas cc ON cc.id = c.cuenta_contable_id
+      WHERE c.activo = 1 ORDER BY c.tipo, c.nombre`).all();
+    res.json({ ok: true, data: rows });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// ── REGISTRAR UNA COBRANZA ─────────────────────────────────────────────────
+// Hacía tres cosas y le faltaban dos. Anotaba la cobranza, la imputaba a los
+// documentos y los marcaba cobrados; pero NO generaba asiento y NO movía ninguna
+// cuenta. Entraba la plata y no subía nada: por eso la cuenta corriente de
+// clientes mostraba "cobrado = 0" — no faltaba la consulta, faltaba que la
+// cobranza existiera para la contabilidad.
+//
+// Y no controlaba nada: se podía imputar a un documento de OTRO cliente, por más
+// de lo que ese documento debía, o contra uno anulado.
 router.post('/cobranzas', requireAuth, (req, res) => {
   const u = req._user;
   const { fecha, cliente_id, monto, forma_pago, referencia, notas, docs } = req.body || {};
-  if (!cliente_id) return res.status(400).json({ ok: false, error: 'cliente_id requerido' });
-  if (!monto || monto <= 0) return res.status(400).json({ ok: false, error: 'monto inválido' });
-  if (!docs?.length) return res.status(400).json({ ok: false, error: 'Seleccioná al menos un documento' });
-  try {
-    const tx = db.transaction(() => {
-      const r = db.prepare(`INSERT INTO sg_ven_cobranzas (fecha, cliente_id, monto, forma_pago, referencia, notas, usuario_id)
-        VALUES (?,?,?,?,?,?,?)`)
-        .run(fecha||new Date().toISOString().split('T')[0], parseInt(cliente_id),
-             parseFloat(monto), forma_pago||'transferencia', referencia||null, notas||null, u.id);
-      const cobId = r.lastInsertRowid;
+  const cli = ctaContableCliente(parseInt(cliente_id));
+  if (!cli) return res.status(400).json({ ok: false, error: 'Elegí el cliente' });
+  const total = Math.round(parseFloat(monto || 0) * 100) / 100;
+  if (!(total > 0)) return res.status(400).json({ ok: false, error: 'Poné cuánto se cobró' });
 
-      for (const d of docs) {
-        db.prepare(`INSERT INTO sg_ven_cobranza_docs (cobranza_id, tipo, doc_id, monto) VALUES (?,?,?,?)`)
-          .run(cobId, d.tipo, parseInt(d.doc_id), parseFloat(d.monto));
-        if (d.tipo === 'liquidacion') {
-          const liq = db.prepare('SELECT neto_acreditar FROM sg_ven_liquidaciones WHERE id=?').get(d.doc_id);
-          const cobrado = db.prepare(`SELECT COALESCE(SUM(cd.monto),0) as tot FROM sg_ven_cobranza_docs cd
-            JOIN sg_ven_cobranzas co ON co.id=cd.cobranza_id
-            WHERE cd.tipo='liquidacion' AND cd.doc_id=? AND co.anulada=0`).get(d.doc_id);
-          if (cobrado.tot >= liq.neto_acreditar - 0.01)
-            db.prepare("UPDATE sg_ven_liquidaciones SET estado='cobrada' WHERE id=?").run(d.doc_id);
-        } else if (d.tipo === 'factura') {
-          const fac = db.prepare('SELECT total FROM sg_ven_facturas WHERE id=?').get(d.doc_id);
-          const cobrado = db.prepare(`SELECT COALESCE(SUM(cd.monto),0) as tot FROM sg_ven_cobranza_docs cd
-            JOIN sg_ven_cobranzas co ON co.id=cd.cobranza_id
-            WHERE cd.tipo='factura' AND cd.doc_id=? AND co.anulada=0`).get(d.doc_id);
-          if (cobrado.tot >= fac.total - 0.01)
-            db.prepare("UPDATE sg_ven_facturas SET estado='cobrada' WHERE id=?").run(d.doc_id);
+  const lista = (Array.isArray(docs) ? docs : [])
+    .map((d) => ({ tipo: d.tipo, doc_id: parseInt(d.doc_id), monto: Math.round(parseFloat(d.monto || 0) * 100) / 100 }))
+    .filter((d) => d.doc_id && d.monto > 0);
+  if (lista.some((d) => !['liquidacion', 'factura'].includes(d.tipo))) {
+    return res.status(400).json({ ok: false, error: 'Tipo de documento inválido' });
+  }
+
+  // Cada imputación contra un documento DE ESE CLIENTE, vivo, y sin pasarse de
+  // lo que le queda. Sin esto se podía cancelar la factura de otro.
+  for (const d of lista) {
+    const doc = pendienteDeDoc(d.tipo, d.doc_id);
+    if (!doc) return res.status(400).json({ ok: false, error: 'Uno de los documentos no existe' });
+    if (Number(doc.cliente_id) !== cli.id) {
+      return res.status(400).json({ ok: false,
+        error: `El comprobante ${doc.numero} es de otro cliente.` });
+    }
+    if (doc.estado === 'anulada') {
+      return res.status(400).json({ ok: false,
+        error: `El comprobante ${doc.numero} está anulado: no se le puede imputar un cobro.` });
+    }
+    if (d.monto > doc.pendiente + 0.01) {
+      return res.status(400).json({ ok: false,
+        error: `Al comprobante ${doc.numero} le quedan ${doc.pendiente} y le estás imputando ${d.monto}.` });
+    }
+  }
+  const imputado = Math.round(lista.reduce((a, d) => a + d.monto, 0) * 100) / 100;
+  if (imputado > total + 0.01) {
+    return res.status(400).json({ ok: false,
+      error: `Estás imputando ${imputado} y la cobranza es de ${total}.` });
+  }
+
+  // LA PLATA ENTRA A ALGÚN LADO, y ese lado tiene que tener cuenta contable: sin
+  // ella el asiento no se puede armar.
+  // El id se limpia ANTES de la consulta: better-sqlite3 tira una excepción si le
+  // pasan undefined, así que sin este paso "no elegí la cuenta" salía como un
+  // error 500 del servidor en vez de decir qué falta.
+  const ctaFinId = parseInt(req.body?.cuenta_fin_id, 10);
+  const cuenta = Number.isInteger(ctaFinId)
+    ? db.prepare(`SELECT c.*, cc.id AS cta FROM sg_fin_cuentas c
+        LEFT JOIN sg_cuentas cc ON cc.id = c.cuenta_contable_id
+        WHERE c.id=? AND c.activo=1`).get(ctaFinId)
+    : null;
+  if (!cuenta) return res.status(400).json({ ok: false, error: 'Elegí en qué cuenta entra la plata' });
+  if (!cuenta.cta) {
+    return res.status(400).json({ ok: false,
+      error: `La cuenta "${cuenta.nombre}" no tiene cuenta contable asociada, así que la cobranza no `
+           + `puede entrar al libro. Asignásela en Caja y Bancos.` });
+  }
+  if (!cli.cuenta_contable_id) {
+    return res.status(400).json({ ok: false,
+      error: `El cliente ${cli.razon_social} no tiene cuenta contable asignada: sin ella no se sabe `
+           + `contra qué cuenta corriente se cancela el cobro. Asignásela en su ficha.` });
+  }
+
+  try {
+    let cobId = null, asientoId = null;
+    db.transaction(() => {
+      const f = fecha || new Date().toISOString().split('T')[0];
+      cobId = db.prepare(`INSERT INTO sg_ven_cobranzas
+        (fecha, cliente_id, monto, forma_pago, referencia, notas, usuario_id, cuenta_fin_id)
+        VALUES (?,?,?,?,?,?,?,?)`)
+        .run(f, cli.id, total, forma_pago || 'transferencia', referencia || null, notas || null,
+             u.id, cuenta.id).lastInsertRowid;
+
+      const insDoc = db.prepare('INSERT INTO sg_ven_cobranza_docs (cobranza_id, tipo, doc_id, monto) VALUES (?,?,?,?)');
+      for (const d of lista) {
+        insDoc.run(cobId, d.tipo, d.doc_id, d.monto);
+        // El documento queda cobrado cuando no le falta nada. Se recalcula con
+        // TODAS las cobranzas vivas, no con la de ahora: puede haberse cobrado
+        // en tres veces.
+        const doc = pendienteDeDoc(d.tipo, d.doc_id);
+        const tabla = d.tipo === 'liquidacion' ? 'sg_ven_liquidaciones' : 'sg_ven_facturas';
+        if (doc.pendiente <= 0.01) {
+          db.prepare(`UPDATE ${tabla} SET estado='cobrada' WHERE id=?`).run(d.doc_id);
         }
       }
-      return cobId;
-    });
-    const cobId = tx();
-    res.json({ ok: true, id: cobId });
-  } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
+
+      // ── EL ASIENTO ────────────────────────────────────────────────────
+      // La plata entra: la cuenta del banco o de la caja al DEBE, contra la
+      // cuenta corriente del cliente al HABER — que es el espejo exacto del
+      // asiento de la liquidación, donde el cliente va al debe.
+      asientoId = db.prepare(`INSERT INTO sg_asientos (fecha, descripcion, usuario_id, ref_codigo)
+        VALUES (?,?,?,?)`).run(f,
+        'Cobranza de ' + cli.razon_social + (referencia ? ' — ' + referencia : '')
+          + (lista.length ? ' — ' + lista.length + ' comprobante(s)' : ' (a cuenta)'),
+        u.id, referencia || null).lastInsertRowid;
+      const insL = db.prepare(`INSERT INTO sg_asientos_lineas (asiento_id, cuenta_id, debe, haber, descripcion)
+        VALUES (?,?,?,?,?)`);
+      insL.run(asientoId, cuenta.cta, total, 0, cuenta.nombre);
+      insL.run(asientoId, cli.cuenta_contable_id, 0, total, cli.razon_social);
+      db.prepare('UPDATE sg_ven_cobranzas SET asiento_id=? WHERE id=?').run(asientoId, cobId);
+
+      // ── Y LA CUENTA SUBE ──────────────────────────────────────────────
+      // El saldo de Caja y Bancos se calcula con los movimientos, no con el
+      // libro: sin esto la plata entraba y el banco seguía igual.
+      db.prepare(`INSERT INTO sg_fin_movimientos
+        (cuenta_id, fecha, tipo, concepto, monto, referencia, usuario_id)
+        VALUES (?,?, 'ingreso', ?,?,?,?)`).run(cuenta.id, f,
+        'Cobranza de ' + cli.razon_social, total, 'COB-' + cobId, u.id);
+    })();
+    res.json({ ok: true, id: Number(cobId), asiento_id: Number(asientoId),
+      total, imputado, a_cuenta: Math.round((total - imputado) * 100) / 100 });
+  } catch(e) { res.status(400).json({ ok: false, error: e.message }); }
 });
 
+// ── ANULAR UNA COBRANZA ────────────────────────────────────────────────────
+// Devuelve todo: el saldo a los comprobantes, la plata a la cuenta y el asiento
+// queda anulado —no borrado, como todo lo que ya tocó la contabilidad—.
+//
+// Es una función y no sólo una ruta porque el DELETE viejo tiene que hacer lo
+// MISMO: había pantallas llamándolo, y un borrado que no devolviera la plata ni
+// tocara el asiento dejaría la cuenta corriente diciendo cualquier cosa.
+function anularCobranza(id, motivo, usuarioId) {
+  if (!motivo) return { status: 400, error: 'Escribí por qué se anula: queda registrado' };
+  const co = db.prepare('SELECT * FROM sg_ven_cobranzas WHERE id=?').get(id);
+  if (!co) return { status: 404, error: 'Cobranza no encontrada' };
+  if (co.anulada) return { status: 400, error: 'Esa cobranza ya está anulada' };
+  {
+    const req = { _user: { id: usuarioId } };
+    db.transaction(() => {
+      db.prepare(`UPDATE sg_ven_cobranzas SET anulada=1, anulada_en=datetime('now','localtime'),
+        anulada_por=?, anulada_motivo=? WHERE id=?`).run(req._user?.id || null, motivo, co.id);
+      // Los comprobantes vuelven a estar pendientes. Se mira el pendiente ya SIN
+      // esta cobranza —arriba se marcó anulada— así que si otra la cubría, sigue
+      // cobrada.
+      for (const d of db.prepare('SELECT * FROM sg_ven_cobranza_docs WHERE cobranza_id=?').all(co.id)) {
+        const doc = pendienteDeDoc(d.tipo, d.doc_id);
+        const tabla = d.tipo === 'liquidacion' ? 'sg_ven_liquidaciones' : 'sg_ven_facturas';
+        if (doc && doc.pendiente > 0.01) {
+          db.prepare(`UPDATE ${tabla} SET estado='pendiente' WHERE id=? AND estado='cobrada'`).run(d.doc_id);
+        }
+      }
+      // La plata se va de la cuenta. El movimiento se BORRA en vez de marcarse:
+      // el saldo se calcula sumando movimientos, y uno "anulado" seguiría sumando.
+      db.prepare("DELETE FROM sg_fin_movimientos WHERE referencia=?").run('COB-' + co.id);
+      if (co.asiento_id) {
+        db.prepare(`UPDATE sg_asientos SET anulado=1, anulado_por=?, anulado_en=datetime('now','localtime'),
+          descripcion = descripcion || ' — ANULADO: ' || ? WHERE id=?`)
+          .run(req._user?.id || null, motivo, co.asiento_id);
+      }
+    })();
+  }
+  return { ok: true, id: Number(co.id) };
+}
+
+router.post('/cobranzas/:id/anular', requireAuth, (req, res) => {
+  try {
+    const r = anularCobranza(parseInt(req.params.id), String(req.body?.motivo || '').trim(),
+      req._user?.id || null);
+    if (r.error) return res.status(r.status).json({ ok: false, error: r.error });
+    res.json({ ok: true, data: { id: r.id } });
+  } catch(e) { res.status(400).json({ ok: false, error: e.message }); }
+});
+
+// El DELETE viejo hace exactamente lo mismo: hay pantallas que lo llaman.
 router.delete('/cobranzas/:id', requireAuth, (req, res) => {
   try {
-    const co = db.prepare('SELECT * FROM sg_ven_cobranzas WHERE id=?').get(req.params.id);
-    if (!co) return res.status(404).json({ ok: false, error: 'No encontrada' });
-    db.transaction(() => {
-      const docs = db.prepare('SELECT * FROM sg_ven_cobranza_docs WHERE cobranza_id=?').all(co.id);
-      for (const d of docs) {
-        if (d.tipo === 'liquidacion')
-          db.prepare("UPDATE sg_ven_liquidaciones SET estado='pendiente' WHERE id=? AND estado='cobrada'").run(d.doc_id);
-        else if (d.tipo === 'factura')
-          db.prepare("UPDATE sg_ven_facturas SET estado='pendiente' WHERE id=? AND estado='cobrada'").run(d.doc_id);
-      }
-      db.prepare('UPDATE sg_ven_cobranzas SET anulada=1 WHERE id=?').run(co.id);
-    })();
+    const r = anularCobranza(parseInt(req.params.id),
+      String(req.body?.motivo || '').trim() || 'Anulada desde la pantalla', req._user?.id || null);
+    if (r.error) return res.status(r.status).json({ ok: false, error: r.error });
     res.json({ ok: true });
-  } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
+  } catch(e) { res.status(400).json({ ok: false, error: e.message }); }
 });
 
 export default router;

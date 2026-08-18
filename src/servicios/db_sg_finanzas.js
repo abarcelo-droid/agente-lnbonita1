@@ -409,6 +409,23 @@ db.exec(`
   );
 `);
 
+// ── LA COBRANZA TIENE QUE ENTRAR AL LIBRO Y A LA CAJA ─────────────────────
+// El circuito de cobranzas existía —se registraba, se imputaba a facturas y
+// liquidaciones, se marcaba el documento como cobrado— pero se quedaba ahí: no
+// generaba asiento y no movía ninguna cuenta. Entraba la plata y no subía nada.
+//
+// Por eso la cuenta corriente de clientes mostraba "cobrado = 0": no era que
+// faltara la consulta, era que la cobranza no tenía de dónde salir para la
+// contabilidad. Es el mismo agujero que tenía proveedores antes de los pagos.
+try { db.exec("ALTER TABLE sg_ven_cobranzas ADD COLUMN cuenta_fin_id INTEGER"); } catch (_) {}
+try { db.exec("ALTER TABLE sg_ven_cobranzas ADD COLUMN asiento_id INTEGER"); } catch (_) {}
+try { db.exec("ALTER TABLE sg_ven_cobranzas ADD COLUMN anulada_en TEXT"); } catch (_) {}
+try { db.exec("ALTER TABLE sg_ven_cobranzas ADD COLUMN anulada_por INTEGER"); } catch (_) {}
+try { db.exec("ALTER TABLE sg_ven_cobranzas ADD COLUMN anulada_motivo TEXT"); } catch (_) {}
+// El cheque de terceros que entra cobrando: el vínculo con la cartera.
+try { db.exec("ALTER TABLE sg_ven_cobranzas ADD COLUMN cheque_terceros_id INTEGER"); } catch (_) {}
+try { db.exec("CREATE INDEX IF NOT EXISTS idx_sg_cob_cliente ON sg_ven_cobranzas(cliente_id)"); } catch (_) {}
+
 // ── UN PAGO SE PAGA CON VARIAS COSAS ──────────────────────────────────────
 // La orden de pago tenía UNA cuenta y UNA forma: o todo en efectivo, o todo por
 // transferencia, o todo con un cheque. En la vida real un pago de 500.000 sale
