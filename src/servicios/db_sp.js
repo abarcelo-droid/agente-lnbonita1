@@ -569,6 +569,30 @@ try { seed(); } catch (e) { console.error('[SP] Seed falló:', e.message); }
   }
 })();
 
+// ── EL AVISO DE DEVOLUCIÓN DECÍA UNA COSA QUE YA NO ES CIERTA ─────────────
+// Decía "el circuito arranca de nuevo desde el principio", porque devolver era
+// siempre devolver al solicitante. Ahora una orden puede volver SÓLO al paso de
+// fechas —cuando el que la confecciona ve que el día no cierra— y ahí la
+// autorización sigue en pie: lo único que se corrige es la fecha. Con el texto
+// viejo, el que recibía el mail creía que había que rehacer todo.
+//
+// Se toca ÚNICAMENTE la plantilla que sigue teniendo el texto original: si
+// alguien la editó desde el configurador, esa la escribió una persona y no se
+// pisa.
+(function corregirAvisoDevuelto() {
+  try {
+    const VIEJO = 'Corregila y volvé a enviarla. El circuito arranca de nuevo desde el principio:';
+    const NUEVO = 'Volvió a: {{volvio_a}}\nCorregí lo que dice el motivo y seguí desde ahí:';
+    const r = db.prepare(
+      `UPDATE sp_plantillas SET cuerpo = REPLACE(cuerpo, ?, ?)
+        WHERE clave = 'evento:devuelto' AND cuerpo LIKE ?`
+    ).run(VIEJO, NUEVO, '%' + VIEJO + '%');
+    if (r.changes) console.log(`[SP] Aviso de devolución corregido en ${r.changes} versión(es).`);
+  } catch (e) {
+    console.error('[SP] Error corrigiendo el aviso de devolución:', e.message);
+  }
+})();
+
 // ── EL TILDE DE "YA LE AVISÉ AL PROVEEDOR" ────────────────────────────────
 // Lo pidió el dueño: el que solicita un pago necesita acordarse de si ya le
 // avisó al proveedor y le mandó los comprobantes. Sin esto hay que abrir las

@@ -274,10 +274,29 @@ function quienConfecciono(solicitudId) {
   }
 }
 
+// Quién confirmó la fecha de pago. Mismo criterio que quienConfecciono: sale del
+// último evento que resolvió el paso, no de un campo copiado — si la fecha se
+// rehace porque se devolvió, el que vale es el último.
+function quienPusoLaFecha(solicitudId) {
+  try {
+    return db.prepare(
+      `SELECT actor_id, actor_nombre FROM sp_eventos
+        WHERE solicitud_id = ? AND hito = 'fechas' AND clase = 'avanza'
+        ORDER BY seq DESC LIMIT 1`
+    ).get(solicitudId) || null;
+  } catch (e) {
+    return null;
+  }
+}
+
 // El contexto que necesita el motor para saber a qué pasos se puede devolver.
 function ctxDevolucion(solicitudId) {
   const c = quienConfecciono(solicitudId);
-  return { confeccionadoPor: c ? { id: c.actor_id, nombre: c.actor_nombre } : null };
+  const f = quienPusoLaFecha(solicitudId);
+  return {
+    confeccionadoPor: c ? { id: c.actor_id, nombre: c.actor_nombre } : null,
+    fechaPuestaPor: f ? { id: f.actor_id, nombre: f.actor_nombre } : null,
+  };
 }
 
 // ── EL AVISO NO PUEDE DEPENDER DE LA CONFIGURACIÓN ────────────────────────
@@ -293,7 +312,8 @@ function ctxDevolucion(solicitudId) {
 const AVISO_BASE = {
   devuelto: { asunto: 'Te devolvieron la solicitud {{numero}}',
     cuerpo: 'Hola {{destinatario}},\n\n{{actor}} devolvió tu solicitud de pago a {{proveedor}} '
-      + 'por {{monto}}.\n\nVolvió desde: {{paso_origen}}\nMotivo: {{comentario}}\n\n{{link}}\n' },
+      + 'por {{monto}}.\n\nVolvió desde: {{paso_origen}}\nVolvió a: {{volvio_a}}\n'
+      + 'Motivo: {{comentario}}\n\n{{link}}\n' },
   rechazado: { asunto: 'Rechazaron la solicitud {{numero}}',
     cuerpo: 'Hola {{destinatario}},\n\n{{actor}} rechazó tu solicitud de pago a {{proveedor}} '
       + 'por {{monto}}.\n\nMotivo: {{comentario}}\n\n{{link}}\n' },
@@ -1057,9 +1077,13 @@ router.post('/solicitudes/:id/accion', wrap((req, res) => {
       // da la cara al proveedor y no puede enterarse de que su pago se frenó porque
       // alguien se lo comenta. A quien le toca rehacer el trabajo ya le avisó
       // avisarPaso, que notifica a los del paso destino.
+      // A dónde volvió, dicho como lo entiende el que lo lee. Si volvió al paso
+      // de fechas, el circuito NO se rehace: la autorización sigue en pie y lo
+      // único que hay que corregir es el día.
+      const A_DONDE = { confeccion: 'confección', fechas: 'la confirmación de fecha' };
       avisarSolicitante(def, solFresca, 'devuelto', evId, {
         actor: req.user.nombre, comentario, paso_origen: paso.nombre || paso.clave,
-        volvio_a: destinoMotivo === 'confeccion' ? 'confección' : 'vos' });
+        volvio_a: A_DONDE[destinoMotivo] || 'vos' });
       avisado = true;
     }
     if (tr.clase === 'rechaza') {
