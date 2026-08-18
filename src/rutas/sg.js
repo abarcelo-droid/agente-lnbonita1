@@ -6858,6 +6858,122 @@ function calcEmbarque(emb, costos, soloEstimado) {
     tc_por_concepto, tc_manual: override != null, convertible, sin_tc, detalle };
 }
 
+// ── ESTIMADOR DE IMPORTACIÓN ────────────────────────────────────────────────────────
+// Espeja la planilla del equipo. Se cargan 5 números y todo lo demás sale solo:
+//   invoice USD · flete declarado USD · seguro USD · flete real USD · gastos bancarios USD
+//
+// BASE IMPONIBLE = (invoice + flete declarado + seguro) × TC de hoy. Es base de cálculo de
+// IMPUESTOS, no un costo: el flete declarado sirve para liquidar aduana, y lo que sale del
+// bolsillo es la factura del fletero (el flete real). Contar los dos inflaba el camión por
+// el flete declarado entero — en el ejemplo del equipo, $3.000.000 sobre $31.606.268.
+//
+// Los impuestos y el despachante se pagan al CONTADO (TC de hoy). La mercadería, el flete y
+// los bancarios van a plazo, así que se valorizan al TC de SU fecha de pago. La diferencia
+// entre las dos miradas es la diferencia de cambio, que se muestra desglosada.
+function paramsImportacion(db) {
+  const p = { iva_pct: 10.5, iibb_pct: 0.69, despachante_pct: 7, iva_servicios_pct: 21, tasa_maria_usd: 110 };
+  const map = { imp_iva_pct: 'iva_pct', imp_iibb_pct: 'iibb_pct', imp_despachante_pct: 'despachante_pct',
+                imp_iva_servicios_pct: 'iva_servicios_pct', imp_tasa_maria_usd: 'tasa_maria_usd' };
+  try {
+    for (const r of db.prepare("SELECT clave, valor FROM sg_config WHERE clave LIKE 'imp_%'").all()) {
+      if (map[r.clave] && r.valor != null && r.valor !== '' && !isNaN(Number(r.valor))) p[map[r.clave]] = Number(r.valor);
+    }
+  } catch (_) { /* sin config: quedan los defaults */ }
+  return p;
+}
+
+function calcImportacion(db, emb, costos, kgOverride) {
+  const p = paramsImportacion(db);
+  const hoy = db.prepare("SELECT date('now','localtime') d").get().d;
+  const override = emb.tc_real != null ? Number(emb.tc_real)
+                 : (emb.tc_estimado != null ? Number(emb.tc_estimado) : null);
+  const tcHoy = override != null ? override : tcEsperadoEnFecha(db, hoy).tc;
+  const rubro = k => costos.find(c => c.concepto === k) || {};
+  const usdDe = c => (c.monto_estimado != null && c.monto_estimado !== '') ? Number(c.monto_estimado) : 0;
+  // TC de un rubro a plazo: el de su fecha de pago; si venció sin pagarse, sigue rodando a hoy.
+  const tcDe = (c) => {
+    if (override != null) return override;
+    const f = fechaPagoRubro(emb, c);
+    const fTC = (f && f >= hoy) ? f : hoy;
+    return tcEsperadoEnFecha(db, fTC).tc;
+  };
+
+  const rMerc = rubro('costo_mercaderia'), rFlete = rubro('fletes'), rBanc = rubro('gastos_bancarios');
+  const invoice_usd     = usdDe(rMerc);
+  const flete_base_usd  = Number(emb.flete_base_usd) || 0;
+  const seguro_usd      = Number(emb.seguro_usd) || 0;
+  const flete_real_usd  = usdDe(rFlete);
+  const bancarios_usd   = usdDe(rBanc);
+
+  const base_usd = invoice_usd + flete_base_usd + seguro_usd;
+  const sinTc = tcHoy == null;
+  const base_ars = sinTc ? null : r2(base_usd * tcHoy);
+
+  // Impuestos y despachante: contado, al TC de hoy.
+  const iva_ars         = sinTc ? null : r2(base_ars * (p.iva_pct / 100));
+  const iibb_ars        = sinTc ? null : r2(base_ars * (p.iibb_pct / 100));
+  const tasa_maria_ars  = sinTc ? null : r2(p.tasa_maria_usd * tcHoy);
+  const anticipos_ars   = sinTc ? null : r2(iva_ars + iibb_ars + tasa_maria_ars);
+  const despachante_ars = sinTc ? null : r2(base_ars * (p.despachante_pct / 100));
+  const iva_desp_ars    = sinTc ? null : r2(despachante_ars * (p.iva_servicios_pct / 100));
+
+  // A plazo: cada uno al TC de su fecha de pago.
+  const tcMerc = tcDe(rMerc), tcFlete = tcDe(rFlete), tcBanc = tcDe(rBanc);
+  const falta_tc = [];
+  if (invoice_usd    && tcMerc  == null) falta_tc.push('Mercadería');
+  if (flete_real_usd && tcFlete == null) falta_tc.push('Flete real');
+  if (bancarios_usd  && tcBanc  == null) falta_tc.push('Gastos bancarios');
+  if (sinTc && (base_usd || p.tasa_maria_usd)) falta_tc.push('Impuestos (TC de hoy)');
+
+  const merc_ars   = tcMerc  == null ? null : r2(invoice_usd    * tcMerc);
+  const flete_ars  = tcFlete == null ? null : r2(flete_real_usd * tcFlete);
+  const banc_ars   = tcBanc  == null ? null : r2(bancarios_usd  * tcBanc);
+  const iva_banc_ars = banc_ars == null ? null : r2(banc_ars * (p.iva_servicios_pct / 100));
+
+  const convertible = falta_tc.length === 0;
+  const sum = (...xs) => r2(xs.reduce((a, x) => a + (Number(x) || 0), 0));
+  // Mirada CONTADO: todo al TC de hoy. Mirada A PLAZO: cada rubro al TC de su fecha.
+  const total_contado = !convertible ? null
+    : sum(invoice_usd * tcHoy, anticipos_ars, despachante_ars, iva_desp_ars,
+          flete_real_usd * tcHoy, bancarios_usd * tcHoy, (bancarios_usd * tcHoy) * (p.iva_servicios_pct / 100));
+  const total_plazo = !convertible ? null
+    : sum(merc_ars, anticipos_ars, despachante_ars, iva_desp_ars, flete_ars, banc_ars, iva_banc_ars);
+
+  const cajas = Number(emb.cantidad_cajas) || 0;
+  // El preview manda los kg directo (el embarque puede no estar guardado todavía).
+  const kg = kgOverride != null ? (Number(kgOverride) || 0)
+    : (emb.id ? (db.prepare(`SELECT COALESCE(SUM(cajas * COALESCE(kg_por_bulto,0)),0) kg
+        FROM sg_embarque_lineas WHERE embarque_id=? AND activo=1`).get(emb.id).kg || 0) : 0);
+
+  return {
+    parametros: p, tc_hoy: tcHoy, tc_manual: override != null, convertible, falta_tc,
+    usd: { invoice: invoice_usd, flete_base: flete_base_usd, seguro: seguro_usd,
+           flete_real: flete_real_usd, bancarios: bancarios_usd, base: base_usd },
+    base_ars,
+    lineas: [
+      { k: 'mercaderia',  label: 'Mercadería (invoice)',  usd: invoice_usd,    tc: tcMerc,  ars: merc_ars,        plazo: true,  fecha_pago: fechaPagoRubro(emb, rMerc) },
+      { k: 'iva',         label: 'IVA ' + p.iva_pct + '%', usd: null,          tc: tcHoy,   ars: iva_ars,         plazo: false, detalle: 'sobre la base imponible' },
+      { k: 'iibb',        label: 'IIBB ' + p.iibb_pct + '%', usd: null,        tc: tcHoy,   ars: iibb_ars,        plazo: false, detalle: 'sobre la base imponible' },
+      { k: 'tasa_maria',  label: 'Tasa María',            usd: p.tasa_maria_usd, tc: tcHoy, ars: tasa_maria_ars,  plazo: false },
+      { k: 'despachante', label: 'Despachante ' + p.despachante_pct + '%', usd: null, tc: tcHoy, ars: despachante_ars, plazo: false, detalle: 'sobre la base imponible' },
+      { k: 'iva_desp',    label: 'IVA despachante ' + p.iva_servicios_pct + '%', usd: null, tc: tcHoy, ars: iva_desp_ars, plazo: false },
+      { k: 'flete_real',  label: 'Flete real',            usd: flete_real_usd, tc: tcFlete, ars: flete_ars,       plazo: true,  fecha_pago: fechaPagoRubro(emb, rFlete) },
+      { k: 'bancarios',   label: 'Gastos bancarios',      usd: bancarios_usd,  tc: tcBanc,  ars: banc_ars,        plazo: true,  fecha_pago: fechaPagoRubro(emb, rBanc) },
+      { k: 'iva_banc',    label: 'IVA bancarios ' + p.iva_servicios_pct + '%', usd: null, tc: tcBanc, ars: iva_banc_ars, plazo: true }
+    ],
+    total_contado, total_plazo,
+    dif_cambio: (total_plazo == null || total_contado == null) ? null : total_plazo - total_contado,
+    dif_cambio_detalle: !convertible ? [] : [
+      { label: 'Mercadería',       ars: invoice_usd    * ((tcMerc  || tcHoy) - tcHoy) },
+      { label: 'Flete real',       ars: flete_real_usd * ((tcFlete || tcHoy) - tcHoy) },
+      { label: 'Gastos bancarios', ars: bancarios_usd  * ((tcBanc  || tcHoy) - tcHoy) * (1 + p.iva_servicios_pct / 100) }
+    ].filter(x => Math.abs(x.ars) > 0.005),
+    cajas, kg,
+    costo_caja: (total_plazo != null && cajas > 0) ? total_plazo / cajas : null,
+    costo_kg:   (total_plazo != null && kg > 0)    ? total_plazo / kg    : null
+  };
+}
+
 function embCostos(db, embId) {
   return db.prepare('SELECT * FROM sg_embarque_costos WHERE embarque_id=? AND activo=1 ORDER BY id').all(embId);
 }
@@ -6942,6 +7058,44 @@ router.get('/embarques', requireAuth, (req, res) => {
 });
 
 // DETALLE — cabecera + rubros + cálculo completo.
+// ── PARÁMETROS DE IMPORTACIÓN ───────────────────────────────────────────────────────
+// Las alícuotas y porcentajes del despacho, iguales para todas las importaciones.
+const IMP_PARAMS = [
+  ['imp_iva_pct', 'IVA sobre la base imponible', '%'],
+  ['imp_iibb_pct', 'Percepción IIBB sobre la base imponible', '%'],
+  ['imp_despachante_pct', 'Honorarios del despachante sobre la base imponible', '%'],
+  ['imp_iva_servicios_pct', 'IVA de despachante y gastos bancarios', '%'],
+  ['imp_tasa_maria_usd', 'Tasa María', 'USD']
+];
+
+router.get('/importacion/parametros', requireAuth, (req, res) => {
+  const db = getDb();
+  try {
+    const vals = db.prepare("SELECT clave, valor FROM sg_config WHERE clave LIKE 'imp_%'").all()
+      .reduce((m, r) => { m[r.clave] = r.valor; return m; }, {});
+    res.json({ ok: true, data: IMP_PARAMS.map(([k, label, unidad]) => ({ clave: k, label, unidad, valor: vals[k] })) });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+router.put('/importacion/parametros', requireAdmin, (req, res) => {
+  const db = getDb();
+  try {
+    const b = req.body || {};
+    for (const [k, label] of IMP_PARAMS) {
+      if (b[k] == null || b[k] === '') continue;
+      if (!(Number(b[k]) >= 0)) return res.status(400).json({ ok: false, error: label + ': tiene que ser un número mayor o igual a cero' });
+    }
+    db.transaction(() => {
+      const up = db.prepare(`INSERT INTO sg_config (clave, valor, modificado_en, modificado_por)
+        VALUES (?,?,datetime('now','localtime'),?)
+        ON CONFLICT(clave) DO UPDATE SET valor=excluded.valor,
+          modificado_en=excluded.modificado_en, modificado_por=excluded.modificado_por`);
+      for (const [k] of IMP_PARAMS) if (b[k] != null && b[k] !== '') up.run(k, String(Number(b[k])), uid(req));
+    })();
+    res.json({ ok: true });
+  } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
+});
+
 // ── CURVA DE TIPO DE CAMBIO ESPERADO ────────────────────────────────────────────────
 // Qué esperamos del dólar mes a mes. El valor de cada mes es el esperado al CIERRE de ese
 // mes, que es como vienen los futuros; entre meses se interpola día a día.
@@ -7120,8 +7274,27 @@ router.get('/embarques/:id', requireAuth, (req, res) => {
       LEFT JOIN sg_productos pr ON pr.id=l.producto_id
       LEFT JOIN sg_envases e ON e.id=l.envase_id
       WHERE l.embarque_id=? AND l.activo=1 ORDER BY l.id`).all(emb.id);
-    res.json({ ok: true, data: { ...emb, costos, lineas, calculo: calcEmbarque(emb, costos) } });
+    res.json({ ok: true, data: { ...emb, costos, lineas, calculo: calcEmbarque(emb, costos), estimador: calcImportacion(db, emb, costos) } });
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// POST /embarques/estimador-preview — el estimador sobre datos sin guardar.
+// Existe para que la pantalla muestre el cálculo en vivo mientras se tipea SIN reimplementar
+// la fórmula en el navegador: hay una sola versión de la cuenta, y es esta.
+// No choca con /embarques/:id porque aquella es GET y esta POST: Express matchea método+path.
+router.post('/embarques/estimador-preview', requireAuth, (req, res) => {
+  const db = getDb();
+  try {
+    const b = req.body || {};
+    const emb = {
+      id: null,
+      flete_base_usd: b.flete_base_usd, seguro_usd: b.seguro_usd,
+      cantidad_cajas: b.cantidad_cajas, fecha_etd: b.fecha_etd, fecha_eta: b.fecha_eta,
+      tc_estimado: (b.tc_estimado != null && b.tc_estimado !== '') ? Number(b.tc_estimado) : null,
+      tc_real: (b.tc_real != null && b.tc_real !== '') ? Number(b.tc_real) : null
+    };
+    res.json({ ok: true, data: calcImportacion(db, emb, embCostosDelBody(b), b.kg) });
+  } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
 });
 
 // GET /embarques/:id/ficha — todo el camión de una: datos, costos con su TC, productos,
@@ -7152,6 +7325,7 @@ router.get('/embarques/:id/ficha', requireAuth, (req, res) => {
     const resultado = (emb.estado === 'recibido' || emb.estado === 'cerrado') ? resultadoEmbarque(db, emb) : null;
     res.json({ ok: true, data: {
       embarque: emb, costos: calc.detalle, lineas, documentos, resultado,
+      estimador: calcImportacion(db, emb, costos),
       totales: {
         bruto: calc.bruto, creditos: calc.creditos, neto: calc.neto,
         cajas: Number(emb.cantidad_cajas) || 0, kg,
@@ -7212,7 +7386,7 @@ function embCostosDelBody(body) {
   }));
 }
 
-const EMB_HEADER_COLS = ['nombre','proveedor_id','pais_origen','incoterm','certificado_origen_mercosur','ncm','moneda','tc_estimado','tc_real','estado','cantidad_cajas','fecha_etd','fecha_eta','observaciones'];
+const EMB_HEADER_COLS = ['nombre','proveedor_id','pais_origen','incoterm','certificado_origen_mercosur','ncm','moneda','tc_estimado','tc_real','estado','cantidad_cajas','flete_base_usd','seguro_usd','fecha_etd','fecha_eta','observaciones'];
 function embHeaderVals(b) {
   return {
     nombre: val(b.nombre),
@@ -7225,6 +7399,8 @@ function embHeaderVals(b) {
     tc_estimado: (b.tc_estimado != null && b.tc_estimado !== '') ? Number(b.tc_estimado) : null,
     tc_real: (b.tc_real != null && b.tc_real !== '') ? Number(b.tc_real) : null,
     estado: EMB_ESTADOS.has(b.estado) ? b.estado : 'cotizacion',
+    flete_base_usd: (b.flete_base_usd != null && b.flete_base_usd !== '') ? Number(b.flete_base_usd) : null,
+    seguro_usd: (b.seguro_usd != null && b.seguro_usd !== '') ? Number(b.seguro_usd) : null,
     cantidad_cajas: (b.cantidad_cajas != null && b.cantidad_cajas !== '') ? Math.round(Number(b.cantidad_cajas)) : null,
     fecha_etd: val(b.fecha_etd),
     fecha_eta: val(b.fecha_eta),
