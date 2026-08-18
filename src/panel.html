@@ -3762,6 +3762,11 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
         <div id="sg-emb-result" style="border:1px solid var(--bor);border-radius:10px;padding:12px"></div>
       </div>
     </div>
+    <!-- F3 — Resultado del camión: qué dejó de verdad. Solo con el embarque ya recibido. -->
+    <div id="sg-emb-resultado-wrap" style="margin-top:12px;border:1px solid var(--bor);border-radius:10px;padding:10px;display:none">
+      <div style="font-size:12px;font-weight:600;color:var(--mut);margin-bottom:6px">📊 RESULTADO DEL CAMIÓN · costo real y margen de lo vendido</div>
+      <div id="sg-emb-resultado"></div>
+    </div>
     <!-- F6 — Expediente documental (persistente en R2). Solo visible al EDITAR un embarque (necesita id). -->
     <div id="sg-emb-docs-wrap" style="margin-top:12px;border:1px solid var(--bor);border-radius:10px;padding:10px;display:none">
       <div style="font-size:12px;font-weight:600;color:var(--mut);margin-bottom:6px">📎 EXPEDIENTE · documentos de importación (persistente en R2)</div>
@@ -3779,6 +3784,8 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
     <div style="display:flex;justify-content:space-between;gap:8px;margin-top:14px;align-items:center">
       <!-- Recibir: crea un lote por línea con el costo prorrateado. Solo al editar y antes de recibir. -->
       <button class="btn bb" id="sg-emb-btn-recibir" style="display:none;background:var(--ok,#16a34a);border-color:var(--ok,#16a34a)" onclick="sgImpAbrirRecibir()">📥 Recibir embarque</button>
+      <!-- Cerrar: congela proyectado vs real y re-costea los lotes con los números finales. -->
+      <button class="btn bb" id="sg-emb-btn-cerrar" style="display:none" onclick="sgImpAbrirCerrar()">🔒 Cerrar embarque</button>
       <div style="flex:1"></div>
       <button class="btn bo" onclick="closeMB('sg-emb-modal')">Cancelar</button>
       <button class="btn bb" onclick="sgImpSave()">Guardar embarque</button>
@@ -3794,6 +3801,18 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
     <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:14px">
       <button class="btn bo" onclick="closeMB('sg-emb-recibir-modal')">Cancelar</button>
       <button class="btn bb" id="sg-emb-recibir-ok" onclick="sgImpConfirmarRecibir()">Confirmar recepción</button>
+    </div>
+  </div>
+</div>
+
+<!-- Cierre del embarque: proyectado vs real + impacto del re-costeo, antes de confirmar. -->
+<div class="ab-modal-overlay" id="sg-emb-cerrar-modal">
+  <div class="ab-modal" style="max-width:760px">
+    <div class="mhd"><div class="mht">🔒 Cerrar embarque</div><button class="mcl" onclick="closeMB('sg-emb-cerrar-modal')">×</button></div>
+    <div id="sg-emb-cerrar-body" style="padding:4px 2px"></div>
+    <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:14px">
+      <button class="btn bo" onclick="closeMB('sg-emb-cerrar-modal')">Cancelar</button>
+      <button class="btn bb" id="sg-emb-cerrar-ok" onclick="sgImpConfirmarCerrar()">Cerrar y re-costear</button>
     </div>
   </div>
 </div>
@@ -22304,6 +22323,12 @@ function sgImpFill(e){
   // Recibir: solo tiene sentido en un embarque ya guardado y que todavía no se recibió.
   eid('sg-emb-btn-recibir').style.display =
     (e.id && estActual!=='recibido' && estActual!=='cerrado') ? '' : 'none';
+  // Cerrar: recién cuando ya hay lotes que re-costear.
+  eid('sg-emb-btn-cerrar').style.display = (e.id && estActual==='recibido') ? '' : 'none';
+  // Resultado del camión: existe desde que hay lotes.
+  var verRes = !!(e.id && (estActual==='recibido' || estActual==='cerrado'));
+  eid('sg-emb-resultado-wrap').style.display = verRes ? '' : 'none';
+  if(verRes) sgImpCargarResultado(e.id);
   sgEmbDocsInit(e.id||null);   // F6 — expediente documental (solo al editar; necesita id)
   eid('sg-emb-modal').classList.add('on');
 }
@@ -22611,6 +22636,79 @@ function sgImpAbrirRecibir(){
       + '<div class="fl" style="margin-top:12px;max-width:220px"><label>Fecha de ingreso</label>'
       + '<input type="date" id="sg-emb-recibir-fecha" value="'+hoy+'"></div>';
     eid('sg-emb-recibir-ok').disabled = false;
+  });
+}
+// ── RESULTADO Y CIERRE DEL CAMIÓN ─────────────────────────────────────────────
+// El resultado se calcula en vivo: lo vendido sale de los despachos reales de cada lote.
+function sgImpPct(p){ return (p==null) ? '—' : (Math.round(p*10)/10).toFixed(1)+'%'; }
+function sgImpCargarResultado(id){
+  eid('sg-emb-resultado').innerHTML = '<div style="color:var(--mut);font-size:12px">Calculando…</div>';
+  api('/api/sg/embarques/'+id+'/resultado').then(function(r){
+    if(!r||!r.ok){ eid('sg-emb-resultado').innerHTML = '<div style="color:var(--mut);font-size:12px">'+esc((r&&r.error)||'Sin datos')+'</div>'; return; }
+    var d=r.data, c=d.comparacion||{}, col=function(v){ return v>0?'var(--err,#dc2626)':(v<0?'var(--ok,#16a34a)':'var(--mut)'); };
+    var box=function(lbl,val,sub){ return '<div style="flex:1;min-width:120px"><div style="font-size:10px;text-transform:uppercase;color:var(--mut);letter-spacing:.05em">'+lbl+'</div>'
+      +'<div style="font-size:17px;font-weight:700;margin-top:2px">'+val+'</div>'
+      +(sub?'<div style="font-size:11px;color:var(--mut)">'+sub+'</div>':'')+'</div>'; };
+    eid('sg-emb-resultado').innerHTML =
+        '<div style="display:flex;gap:14px;flex-wrap:wrap;margin-bottom:10px">'
+      + box('Costo del camión', sgMoney(Math.round(d.costo_total)), nr(d.kg_totales)+' kg')
+      + box('Vendido', sgMoney(Math.round(d.ingresos)), nr(Math.round(d.kg_vendidos))+' kg · '+sgImpPct(d.vendido_pct)+' del camión')
+      + box('Margen realizado', sgMoney(Math.round(d.margen)), sgImpPct(d.margen_pct)+' sobre lo vendido')
+      + box('Queda en stock', sgMoney(Math.round(d.valor_en_stock)), nr(Math.round(d.kg_en_stock))+' kg')
+      + '</div>'
+      + '<div style="font-size:12px;padding:8px 10px;border-radius:8px;background:var(--bg2,#f5f5f5);border:1px solid var(--bor);margin-bottom:10px">'
+      + 'Proyectado <b>'+sgMoney(Math.round(c.proyectado&&c.proyectado.neto||0))+'</b> · Real <b>'+sgMoney(Math.round(c.real&&c.real.neto||0))+'</b> · '
+      + 'Desvío <b style="color:'+col(c.desvio)+'">'+(c.desvio>0?'+':'')+sgMoney(Math.round(c.desvio||0))+' ('+sgImpPct(c.desvio_pct)+')</b>'
+      + (d.cerrado_en ? ' · <span style="color:var(--ok,#16a34a)">🔒 cerrado el '+esc(String(d.cerrado_en).slice(0,10))+'</span>'
+                      : (c.tc_es_estimado ? ' · <span style="color:var(--mut)">costo provisorio, falta el TC real</span>' : ''))
+      + '</div>'
+      + '<table class="pa-tbl" style="font-size:12px;width:100%"><thead><tr><th>Lote</th><th>Producto</th>'
+      + '<th style="text-align:right">kg</th><th style="text-align:right">$/kg</th><th style="text-align:right">Vendido</th>'
+      + '<th style="text-align:right">Margen</th><th style="text-align:right">%</th></tr></thead><tbody>'
+      + d.lotes.map(function(l){
+          return '<tr><td>'+esc(l.codigo||'')+'</td><td>'+esc(l.producto||'')+'</td>'
+            + '<td style="text-align:right">'+nr(l.kg)+'</td>'
+            + '<td style="text-align:right">'+sgMoney(Math.round(l.costo_kg))+'</td>'
+            + '<td style="text-align:right">'+(l.ingresos?sgMoney(Math.round(l.ingresos)):'<span style="color:var(--mut)">sin vender</span>')+'</td>'
+            + '<td style="text-align:right;font-weight:600;color:'+(l.margen>0?'var(--ok,#16a34a)':(l.margen<0?'var(--err,#dc2626)':'var(--mut)'))+'">'+(l.ingresos?sgMoney(Math.round(l.margen)):'—')+'</td>'
+            + '<td style="text-align:right">'+(l.ingresos?sgImpPct(l.margen_pct):'—')+'</td></tr>';
+        }).join('')
+      + '</tbody></table>';
+  });
+}
+function sgImpAbrirCerrar(){
+  var id=SG._embId; if(!id) return;
+  eid('sg-emb-cerrar-body').innerHTML='<div style="padding:20px;text-align:center;color:var(--mut)">Calculando…</div>';
+  eid('sg-emb-cerrar-ok').disabled=true;
+  eid('sg-emb-cerrar-modal').classList.add('on');
+  api('/api/sg/embarques/'+id+'/resultado').then(function(r){
+    if(!r||!r.ok){ eid('sg-emb-cerrar-body').innerHTML='<div style="color:var(--err,#dc2626)">'+esc((r&&r.error)||'Error')+'</div>'; return; }
+    var d=r.data, c=d.comparacion||{};
+    var fila=function(lbl,p,rl){ return '<tr><td>'+lbl+'</td><td style="text-align:right">'+p+'</td><td style="text-align:right;font-weight:600">'+rl+'</td></tr>'; };
+    eid('sg-emb-cerrar-body').innerHTML =
+        '<div style="font-size:12px;color:var(--mut);margin-bottom:10px">Al cerrar, el costo de cada lote pasa a ser el <b>real</b> y el embarque queda bloqueado.</div>'
+      + (c.tc_es_estimado ? '<div style="padding:10px 12px;border-radius:8px;border:1px solid var(--err,#dc2626);color:var(--err,#dc2626);font-size:12px;margin-bottom:10px">⚠️ <b>No cargaste el TC real.</b> Se va a cerrar con el estimado ('+nr(c.real&&c.real.tc)+'), y el costo no va a ser el verdadero. Cargá el TC real antes de cerrar.</div>' : '')
+      + '<table class="pa-tbl" style="font-size:12px;width:100%"><thead><tr><th></th><th style="text-align:right">Proyectado</th><th style="text-align:right">Real</th></tr></thead><tbody>'
+      + fila('Tipo de cambio', nr(c.proyectado&&c.proyectado.tc), nr(c.real&&c.real.tc))
+      + fila('Costo neto del embarque', sgMoney(Math.round(c.proyectado&&c.proyectado.neto||0)), sgMoney(Math.round(c.real&&c.real.neto||0)))
+      + fila('Costo por caja', sgMoney(Math.round(c.proyectado&&c.proyectado.costo_caja||0)), sgMoney(Math.round(c.real&&c.real.costo_caja||0)))
+      + '</tbody></table>'
+      + '<div style="margin-top:10px;padding:10px 12px;border-radius:8px;background:var(--bg2,#f5f5f5);border:1px solid var(--bor);font-size:12px">'
+      + 'Desvío: <b style="color:'+(c.desvio>0?'var(--err,#dc2626)':'var(--ok,#16a34a)')+'">'+(c.desvio>0?'+':'')+sgMoney(Math.round(c.desvio||0))+' ('+sgImpPct(c.desvio_pct)+')</b>'
+      + ' · Se van a re-costear <b>'+d.lotes.length+'</b> lote'+(d.lotes.length===1?'':'s')+'.</div>'
+      + (d.kg_vendidos>0 ? '<div style="margin-top:8px;padding:10px 12px;border-radius:8px;border:1px solid var(--bor);font-size:12px">ℹ️ Ya se vendieron <b>'+nr(Math.round(d.kg_vendidos))+' kg</b> de este camión. Al re-costear, <b>el margen de esas ventas cambia</b>: los reportes que ya miraste van a mostrar otro número. Es a propósito — el costo pasa a ser el real.</div>' : '');
+    eid('sg-emb-cerrar-ok').disabled=false;
+  });
+}
+function sgImpConfirmarCerrar(){
+  var id=SG._embId; if(!id) return;
+  var btn=eid('sg-emb-cerrar-ok'); btn.disabled=true;
+  api('/api/sg/embarques/'+id+'/cerrar','POST',{}).then(function(r){
+    if(r&&r.ok){
+      var d=r.data, sl=(d.recosteo&&d.recosteo.sin_linea)||0;
+      toast('Embarque cerrado — '+((d.recosteo&&d.recosteo.recosteados)||0)+' lote(s) re-costeado(s)'+(sl?' · '+sl+' sin línea, revisalos':''),'ok');
+      closeMB('sg-emb-cerrar-modal'); closeMB('sg-emb-modal'); sgImpInit();
+    } else { toast((r&&r.error)||'Error al cerrar','er'); btn.disabled=false; }
   });
 }
 function sgImpConfirmarRecibir(){
