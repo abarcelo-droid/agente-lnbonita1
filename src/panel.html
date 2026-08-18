@@ -22944,6 +22944,7 @@ function sgImpCalc(){
   var override = parseFloat(eid('sg-emb-tc-real').value) || parseFloat(eid('sg-emb-tc-est').value) || null;
   var hoy = new Date().toISOString().slice(0,10);
   var bruto=0, cred=0;                                  // efectivo (COALESCE real,est) → alimenta el neto
+  var sinTc=[];                                         // rubros en USD sin TC: el total no se puede pasar a pesos
   var difCot=0, difCos=0;                               // desvío de los rubros USD (cotización) vs los en pesos (costo real)
   var sub={ bruto:{est:0,real:0}, cred:{est:0,real:0} }; // subtotales por bloque para la tabla de rubros
   SG_EMB_CONCEPTOS.forEach(function(c){
@@ -22968,6 +22969,9 @@ function sgImpCalc(){
         celdaTC.style.color = vencido?'var(--err,#dc2626)':'var(--mut)';
       }
     }
+    // Sin TC un monto en dólares NO se puede pasar a pesos. Se marca y el resultado no
+    // muestra ningún total: sumarlo crudo daba un número mil veces menor.
+    if(esUSD && tcR==null && String(eid('sg-emb-est-'+c.k).value||'').trim()!=='') sinTc.push(c.l);
     var aARS=function(x){ if(x==null||x==='') return null; var m=Number(x)||0; return (esUSD&&tcR)?m*tcR:m; };
     var est=aARS(eid('sg-emb-est-'+c.k).value);
     // El real se carga en PESOS: es lo que salió de la caja, sin convertir.
@@ -23006,6 +23010,14 @@ function sgImpCalc(){
   function big(emoji,l,sub,v,col,bg){ return '<div style="margin-top:6px;padding:8px 10px;border-radius:8px;background:'+bg+';display:flex;justify-content:space-between;align-items:center;gap:10px">'
     +'<div><div style="font-weight:600">'+emoji+' '+l+'</div><div style="font-size:11px;color:var(--mut)">'+sub+'</div></div>'
     +'<span style="font-size:18px;font-weight:700;color:'+(col||'inherit')+';font-variant-numeric:tabular-nums">'+v+'</span></div>'; }
+  // Sin TC para algún rubro en dólares, el total es una mezcla de pesos y dólares: no se
+  // muestra ningún número, se explica qué falta cargar.
+  if(sinTc.length){
+    eid('sg-emb-result').innerHTML='<div style="padding:12px;border-radius:8px;border:1px solid var(--err,#dc2626);background:rgba(220,38,38,.08);color:var(--err,#dc2626);font-size:12.5px">'
+      +'<b>No se puede pasar a pesos.</b><br>'+esc(sinTc.join(', '))+' está en dólares y no hay tipo de cambio para su fecha de pago.<br><br>'
+      +'Cargá la <b>Curva TC</b>, o la <b>condición de pago</b> del rubro (columna “Se paga a”), o un <b>TC manual</b> arriba.</div>';
+    return;
+  }
   eid('sg-emb-result').innerHTML =
      row('Total Costo Mercadería (bruto)', sgMoney(Math.round(bruto)))
     +row('− Total Créditos', '− '+sgMoney(Math.round(cred)))
@@ -23066,6 +23078,27 @@ function sgImpSave(){
     else toast((r&&r.error)||'Error','er');
   });
 }
+// Visor de documentos DENTRO de la ficha: el PDF o la imagen se abre acá abajo, sin salir de
+// la pantalla. El endpoint necesita ?inline=1 para que el navegador lo muestre en vez de
+// bajarlo (por defecto va con Content-Disposition: attachment).
+function sgDocVer(embId, docId){
+  var doc=(SG._visorDocs||[]).find(function(x){ return String(x.id)===String(docId); }) || {};
+  var url='/api/sg/embarques/'+embId+'/documentos/'+docId+'/descargar?inline=1';
+  var cont=eid('sg-doc-visor-cont'), box=eid('sg-doc-visor');
+  if(!cont||!box) return;
+  eid('sg-doc-visor-tit').textContent=(doc.nombre_original||'Documento');
+  eid('sg-doc-visor-nueva').href=url;
+  cont.innerHTML = /^image\//.test(doc.mime||'')
+    ? '<div style="padding:12px;text-align:center"><img src="'+url+'" alt="'+esc(doc.nombre_original||'')+'" style="max-width:100%;max-height:70vh;border-radius:6px"></div>'
+    : '<iframe src="'+url+'" style="width:100%;height:70vh;border:0" title="'+esc(doc.nombre_original||'')+'"></iframe>';
+  box.style.display='';
+  box.scrollIntoView({ behavior:'smooth', block:'nearest' });
+}
+function sgDocCerrar(){
+  var box=eid('sg-doc-visor');
+  if(box){ box.style.display='none'; eid('sg-doc-visor-cont').innerHTML=''; }   // libera el iframe
+}
+
 // ── VISOR DEL CAMIÓN ──────────────────────────────────────────────────────────
 // Todo el embarque de un vistazo, sin poder tocar nada. Lo primero y más grande es el costo
 // por caja y por kg EN PESOS, que es el número con el que se decide a cuánto vender.
@@ -23086,12 +23119,22 @@ function sgImpVisor(id){
       +'<div style="font-size:11px;color:var(--mut)">'+sub+'</div></div>'; };
 
     var h='';
+    // Si algún rubro en dólares no tiene TC, el total es una mezcla de pesos y dólares y no
+    // significa nada: no se muestra ningún número, se explica qué falta.
+    var conv=(t.convertible!==false);
+    if(!conv){
+      h+='<div style="padding:12px 14px;border-radius:10px;border:1px solid var(--err,#dc2626);background:rgba(220,38,38,.08);color:var(--err,#dc2626);font-size:12.5px;margin-bottom:12px">'
+        +'<b>No se puede pasar a pesos todavía.</b> '+esc((t.sin_tc||[]).join(', '))
+        +' está en dólares y no hay tipo de cambio para su fecha de pago.<br>'
+        +'Cargá la <b>Curva TC</b> (botón arriba) y la <b>condición de pago</b> del rubro, o poné un TC manual en el embarque.'
+        +'</div>';
+    }
     // 1) Lo que se necesita para poner precio, arriba de todo.
     h+='<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px">'
-      +big('Costo por caja', money2(t.costo_caja_neto), 'en pesos · neto de impuestos', 'rgba(16,163,74,.10)', '#16a34a')
-      +big('Costo por kg', money2(t.costo_kg_neto), t.kg?(nr(Math.round(t.kg))+' kg en total'):'sin productos cargados', 'rgba(16,163,74,.10)', '#16a34a')
-      +big('Costo total', sgMoney(Math.round(t.neto)), nr(t.cajas)+' caja'+(t.cajas===1?'':'s'), 'var(--bg2,#f5f5f5)')
-      +big('Desembolso de caja', sgMoney(Math.round(t.bruto)), 'con impuestos, antes de recuperar', 'var(--bg2,#f5f5f5)')
+      +big('Costo por caja', conv?money2(t.costo_caja_neto):'—', conv?'en pesos · neto de impuestos':'falta el TC', 'rgba(16,163,74,.10)', '#16a34a')
+      +big('Costo por kg', conv?money2(t.costo_kg_neto):'—', conv?(t.kg?(nr(Math.round(t.kg))+' kg en total'):'sin productos cargados'):'falta el TC', 'rgba(16,163,74,.10)', '#16a34a')
+      +big('Costo total', conv?sgMoney(Math.round(t.neto)):'—', nr(t.cajas)+' caja'+(t.cajas===1?'':'s'), 'var(--bg2,#f5f5f5)')
+      +big('Desembolso de caja', conv?sgMoney(Math.round(t.bruto)):'—', 'con impuestos, antes de recuperar', 'var(--bg2,#f5f5f5)')
       +'</div>';
     // 2) Datos del viaje.
     h+='<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px;padding:12px;border:1px solid var(--bor);border-radius:10px;margin-bottom:12px">'
@@ -23120,7 +23163,7 @@ function sgImpVisor(id){
           +'<td style="text-align:right">'+(c.tc_rubro!=null?nr(Math.round(c.tc_rubro*100)/100):'—')+'</td></tr>';
       }).join('')
       +'</tbody><tfoot><tr style="font-weight:700;border-top:2px solid var(--bor)"><td colspan="3">Neto de impuestos</td>'
-      +'<td colspan="3" style="text-align:right">'+sgMoney(Math.round(t.neto))+'</td></tr></tfoot></table>';
+      +'<td colspan="3" style="text-align:right">'+(conv?sgMoney(Math.round(t.neto)):'<span style="color:var(--err,#dc2626)">falta el TC</span>')+'</td></tr></tfoot></table>';
     if(t.dif_cotizacion||t.dif_costos){
       h+='<div style="font-size:11px;color:var(--mut);margin-top:6px">Desvío contra lo proyectado — '
         +'cotización: <b>'+(t.dif_cotizacion>=0?'+':'')+sgMoney(Math.round(t.dif_cotizacion))+'</b> · '
@@ -23155,13 +23198,24 @@ function sgImpVisor(id){
     h+='<div style="font-size:12px;font-weight:600;color:var(--mut);margin:14px 0 5px">DOCUMENTOS</div>';
     h+= d.documentos.length
       ? '<table class="pa-tbl" style="font-size:12px;width:100%"><tbody>'+d.documentos.map(function(x){
-          return '<tr><td>'+esc(sgEmbDocTipoLbl(x.tipo))+'</td><td>'+esc(x.nombre_original||'')+'</td>'
+          var verAqui=/^(application\/pdf|image\/(jpeg|png|webp|gif))$/.test(x.mime||'');
+          return '<tr'+(verAqui?' style="cursor:pointer" onclick="sgDocVer('+e.id+','+x.id+')"':'')+'>'
+            +'<td>'+(verAqui?'👁 ':'')+esc(sgEmbDocTipoLbl(x.tipo))+'</td><td>'+esc(x.nombre_original||'')+'</td>'
             +'<td style="color:var(--mut)">'+(x.fecha_documento?esc(x.fecha_documento):'—')+'</td>'
             +'<td style="text-align:right;color:var(--mut)">'+sgEmbFmtBytes(x.tamano_bytes)+'</td>'
-            +'<td style="text-align:right"><a class="btn bo bs" href="/api/sg/embarques/'+e.id+'/documentos/'+x.id+'/descargar" target="_blank" rel="noopener">Abrir</a></td></tr>';
+            +'<td style="text-align:right" onclick="event.stopPropagation()">'
+              +(verAqui?'<button class="btn bo bs" onclick="sgDocVer('+e.id+','+x.id+')">Ver</button> ':'')
+              +'<a class="btn bo bs" href="/api/sg/embarques/'+e.id+'/documentos/'+x.id+'/descargar" target="_blank" rel="noopener">Bajar</a></td></tr>';
         }).join('')+'</tbody></table>'
+        +'<div id="sg-doc-visor" style="display:none;margin-top:10px;border:1px solid var(--bor);border-radius:10px;overflow:hidden">'
+          +'<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;padding:8px 10px;background:var(--bg2,#f5f5f5);border-bottom:1px solid var(--bor)">'
+            +'<div style="font-size:12px;font-weight:600" id="sg-doc-visor-tit"></div>'
+            +'<div style="display:flex;gap:6px"><a class="btn bo bs" id="sg-doc-visor-nueva" target="_blank" rel="noopener">Abrir aparte</a>'
+            +'<button class="btn bo bs" onclick="sgDocCerrar()">Cerrar</button></div></div>'
+          +'<div id="sg-doc-visor-cont" style="background:#525659;min-height:420px"></div></div>'
       : '<div style="font-size:12px;color:var(--mut);padding:8px 0">Sin documentos cargados. Se suben desde Editar.</div>';
     eid('sg-visor-body').innerHTML=h;
+    SG._visorDocs=d.documentos;
   });
 }
 

@@ -6801,10 +6801,17 @@ function calcEmbarque(emb, costos, soloEstimado) {
 
   let bruto = 0, creditos = 0, total_estimado = 0, total_real = 0, gap_total = 0;
   const tc_por_concepto = {};
+  // Rubros en dólares para los que NO hay TC (curva vacía en esa fecha y sin override manual).
+  // Sin esto, un monto en USD se sumaba tal cual al total y se mostraba como si fueran pesos:
+  // un FOB de USD 19.500 aparecía como "$19.500 · costo por caja $19,50". Mil veces menos.
+  const sin_tc = [];
   const detalle = costos.map(c => {
     const esUSD = (c.moneda || 'ARS') === 'USD';
     const info = esUSD ? tcDeRubro(c) : { tc: null, modo: 'no_aplica' };
-    if (esUSD) tc_por_concepto[c.concepto] = info.tc;
+    if (esUSD) {
+      tc_por_concepto[c.concepto] = info.tc;
+      if (info.tc == null && (c.monto_estimado != null || c.monto_real != null)) sin_tc.push(c.concepto);
+    }
     const est = c.monto_estimado == null ? null
       : (esUSD && info.tc ? (Number(c.monto_estimado) || 0) * info.tc : (Number(c.monto_estimado) || 0));
     // El REAL se carga en pesos: es lo que salió de la caja, tal como figura en el extracto.
@@ -6829,8 +6836,13 @@ function calcEmbarque(emb, costos, soloEstimado) {
   const tc = tc_por_concepto.costo_mercaderia != null ? tc_por_concepto.costo_mercaderia : override;
   const neto  = bruto - creditos;
   const cajas = Number(emb.cantidad_cajas) || 0;
-  const costo_caja_neto        = cajas > 0 ? neto  / cajas : null;
-  const costo_caja_c_impuestos = cajas > 0 ? bruto / cajas : null;
+  // Si falta algún TC, el total NO está en pesos: es una mezcla de pesos y dólares y no
+  // significa nada. Los derivados quedan en null a propósito, para que la pantalla muestre
+  // "—" en vez de un número mil veces menor, y para que recibir/cerrar se bloqueen solos
+  // (los dos abortan cuando costo_caja_neto viene null).
+  const convertible = sin_tc.length === 0;
+  const costo_caja_neto        = (convertible && cajas > 0) ? neto  / cajas : null;
+  const costo_caja_c_impuestos = (convertible && cajas > 0) ? bruto / cajas : null;
   // La diferencia de cotización NO se carga como rubro: sale sola. Es el desvío de los
   // rubros en DÓLARES (pagaste distinto a lo que esperabas porque el dólar se movió); el de
   // los rubros en pesos es otra cosa —facturaron distinto— y va separado.
@@ -6843,7 +6855,7 @@ function calcEmbarque(emb, costos, soloEstimado) {
   });
   return { bruto, creditos, neto, costo_caja_neto, costo_caja_c_impuestos,
     dif_cotizacion, dif_costos, total_estimado, total_real, gap_total, tc_aplicado: tc,
-    tc_por_concepto, tc_manual: override != null, detalle };
+    tc_por_concepto, tc_manual: override != null, convertible, sin_tc, detalle };
 }
 
 function embCostos(db, embId) {
@@ -7467,7 +7479,9 @@ function prepararRecepcionEmbarque(db, emb) {
   const costos = embCostos(db, emb.id);
   const calc = calcEmbarque(emb, costos);
   if (calc.costo_caja_neto == null)
-    throw new Error('No se puede costear el embarque (falta cantidad de cajas o costos cargados)');
+    throw new Error(calc.sin_tc && calc.sin_tc.length
+      ? 'Falta el tipo de cambio: ' + calc.sin_tc.join(', ') + ' está en dólares y no hay curva cargada en su fecha de pago (ni TC manual). Sin eso el costo no se puede pasar a pesos.'
+      : 'No se puede costear el embarque (falta cantidad de cajas o costos cargados)');
   // F7 — costo_base por línea: FOB unitario diferencia; gastos parejos por caja; Σ = neto exacto.
   return { lineas, calc, bases: costoBaseLineasEmbarque(emb, costos, lineas) };
 }
@@ -7608,7 +7622,9 @@ router.post('/embarques/:id/cerrar', requireAdmin, (req, res) => {
     const proy = calcEmbarque(emb, costos, true);    // solo estimados + tc estimado
     const real = calcEmbarque(emb, costos);          // COALESCE(real, estimado) + tc real
     if (real.costo_caja_neto == null)
-      return res.status(400).json({ ok: false, error: 'No se puede costear el embarque (falta cantidad de cajas o costos cargados)' });
+      return res.status(400).json({ ok: false, error: real.sin_tc && real.sin_tc.length
+        ? 'Falta el tipo de cambio: ' + real.sin_tc.join(', ') + ' está en dólares y no hay curva cargada en su fecha de pago. Cargá la curva antes de cerrar.'
+        : 'No se puede costear el embarque (falta cantidad de cajas o costos cargados)' });
 
     let recosteo;
     const tx = db.transaction(() => {
@@ -7723,7 +7739,12 @@ router.get('/embarques/:id/documentos/:docId/descargar', requireAuth, async (req
     if (!doc) return res.status(404).json({ ok: false, error: 'Documento no encontrado' });
     const stream = await obtenerArchivo(doc.storage_key);
     res.setHeader('Content-Type', doc.mime || 'application/octet-stream');
-    res.setHeader('Content-Disposition', "attachment; filename*=UTF-8''" + encodeURIComponent(doc.nombre_original || 'documento'));
+    // ?inline=1 → el navegador lo MUESTRA en vez de bajarlo, para el visor de la pantalla.
+    // Solo para PDF e imágenes: cualquier otro mime se fuerza a descarga, así un archivo
+    // raro no se renderiza dentro de la app.
+    const inline = req.query.inline === '1' && /^(application\/pdf|image\/(jpeg|png|webp|gif))$/.test(doc.mime || '');
+    res.setHeader('Content-Disposition', (inline ? 'inline' : 'attachment')
+      + "; filename*=UTF-8''" + encodeURIComponent(doc.nombre_original || 'documento'));
     if (doc.tamano_bytes) res.setHeader('Content-Length', doc.tamano_bytes);
     stream.on('error', () => { if (!res.headersSent) res.status(500).end(); });
     stream.pipe(res);
