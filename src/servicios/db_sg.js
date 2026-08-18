@@ -802,6 +802,16 @@ try {
 // o la puso el backfill de una sola corrida.
 try { db.exec("ALTER TABLE sg_oc ADD COLUMN liquidada_en TEXT"); } catch (_) {}
 try { db.exec("ALTER TABLE sg_oc ADD COLUMN liquidada_por INTEGER"); } catch (_) {}
+
+// ── LA ORDEN QUE NACIÓ DE UNA DESCARGA, Y TODAVÍA NO ES UNA ORDEN ─────────
+// Cuando llega un camión sin orden de compra, la mercadería se recibe igual —no
+// se la va a mandar de vuelta— y el sistema arma la orden hacia atrás. Pero esa
+// orden nace a medias: tiene proveedor, fecha y partida, y le falta lo que
+// decide el comprador (a cuánto se cerró, en cuántos días se paga, qué
+// documenta). Hasta hoy esas órdenes se mezclaban con las demás y no había
+// forma de saber cuáles estaban a medio hacer.
+try { db.exec("ALTER TABLE sg_oc ADD COLUMN completada_en TEXT"); } catch (_) {}
+try { db.exec("ALTER TABLE sg_oc ADD COLUMN completada_por INTEGER"); } catch (_) {}
 try {
   const yaEstaba = db.prepare("SELECT COUNT(*) c FROM sg_oc WHERE liquidada_en IS NOT NULL").get().c;
   if (!yaEstaba) {
