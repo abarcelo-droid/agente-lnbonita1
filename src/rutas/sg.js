@@ -6749,8 +6749,12 @@ const EMB_CREDITOS  = new Set(['iva_credito_computable','percepcion_iva_computab
 
 // Cálculo del embarque (server-side). Todos los montos se llevan a ARS con tc (real ?? estimado)
 // para los rubros en USD. Usa COALESCE(monto_real, monto_estimado) como monto EFECTIVO.
-function calcEmbarque(emb, costos) {
-  const tc = emb.tc_real != null ? Number(emb.tc_real) : (emb.tc_estimado != null ? Number(emb.tc_estimado) : null);
+// soloEstimado=true fuerza la mirada PROYECTADA: montos estimados y tc estimado, ignorando
+// todo lo real. Es contra esto que se compara el cierre para saber si la cotización afinó.
+function calcEmbarque(emb, costos, soloEstimado) {
+  const tc = soloEstimado
+    ? (emb.tc_estimado != null ? Number(emb.tc_estimado) : null)
+    : (emb.tc_real != null ? Number(emb.tc_real) : (emb.tc_estimado != null ? Number(emb.tc_estimado) : null));
   const aARS = (monto, moneda) => {
     if (monto == null) return null;
     const m = Number(monto) || 0;
@@ -6760,7 +6764,9 @@ function calcEmbarque(emb, costos) {
   const detalle = costos.map(c => {
     const est  = aARS(c.monto_estimado, c.moneda);
     const real = aARS(c.monto_real, c.moneda);
-    const efectivo = real != null ? real : (est != null ? est : 0);   // COALESCE(real, estimado)
+    // COALESCE(real, estimado) — salvo en la mirada proyectada, que ignora lo real a propósito.
+    const efectivo = soloEstimado ? (est != null ? est : 0)
+                                  : (real != null ? real : (est != null ? est : 0));
     if (c.es_credito) creditos += efectivo; else bruto += efectivo;
     if (est != null) total_estimado += est;
     if (real != null) total_real += real;
@@ -7069,6 +7075,41 @@ router.put('/embarques/:id/lineas', requireAdmin, (req, res) => {
 // Transición transito→recibido. Crea un sg_lote importado por línea con costo PROVISORIO del
 // embarque (costo_caja_neto × cajas, ya en ARS). El lote entra a stock, se vende; el cierre de
 // cambio (F3, ZONA PABLO) ajustará el costo más adelante. Idempotente por estado: no recibe 2 veces.
+// ── RE-COSTEO DE LOS LOTES DE UN EMBARQUE (Importación F3) ──────────────────────────
+// Vuelve a repartir el costo del embarque entre sus lotes con los números que haya AHORA
+// (montos reales si están cargados, tc real si está) y reescribe costo_base de cada lote.
+// Es re-costeo retroactivo (opción A): el lote pasa a valer lo que costó de verdad, aunque
+// ya se haya vendido parte. Eso mueve márgenes de meses ya mirados — es la decisión tomada,
+// porque para gestión importa que el costo del camión sea el exacto.
+// El reparto es por LÍNEA, así que un lote sin embarque_linea_id no se puede re-costear sin
+// adivinar: se cuenta aparte y se avisa, nunca se le asigna un costo al azar.
+function recostearLotesEmbarque(db, emb, userId) {
+  const lineas = db.prepare('SELECT * FROM sg_embarque_lineas WHERE embarque_id=? AND activo=1 ORDER BY id').all(emb.id);
+  const lotes = db.prepare(`SELECT id, codigo_lote, kg_reales, costo_base, costo_final
+                            FROM sg_lotes WHERE embarque_id=? AND eliminado_en IS NULL ORDER BY id`).all(emb.id);
+  if (!lineas.length || !lotes.length) return { recosteados: 0, sin_linea: lotes.length, detalle: [] };
+  const bases = costoBaseLineasEmbarque(emb, embCostos(db, emb.id), lineas);
+  const porLinea = {};
+  lineas.forEach((l, i) => { porLinea[l.id] = bases[i]; });
+  const conLinea = db.prepare('SELECT id, embarque_linea_id FROM sg_lotes WHERE embarque_id=? AND eliminado_en IS NULL').all(emb.id)
+    .reduce((m, l) => { m[l.id] = l.embarque_linea_id; return m; }, {});
+  const upd = db.prepare("UPDATE sg_lotes SET costo_base=?, precio_unitario_kg=?, modificado_en=datetime('now','localtime'), modificado_por=? WHERE id=?");
+  const detalle = [];
+  let sinLinea = 0;
+  for (const lo of lotes) {
+    const lid = conLinea[lo.id];
+    if (lid == null || porLinea[lid] == null) { sinLinea++; continue; }
+    const base = porLinea[lid];
+    const kg = Number(lo.kg_reales) || 0;
+    upd.run(base, kg > 0 ? base / kg : null, userId, lo.id);
+    const nuevoFinal = recalcCostoLote(db, lo.id);   // suma los gastos directos propios del lote
+    detalle.push({ lote_id: lo.id, codigo: lo.codigo_lote,
+      costo_anterior: lo.costo_final, costo_nuevo: nuevoFinal,
+      delta: (Number(nuevoFinal) || 0) - (Number(lo.costo_final) || 0) });
+  }
+  return { recosteados: detalle.length, sin_linea: sinLinea, detalle };
+}
+
 // Chequeos previos a recibir, compartidos por el preview y la recepción real: un solo criterio,
 // así la pantalla no puede decir que se puede recibir algo que después el POST rechaza.
 // Tira Error con el motivo; devuelve lo necesario para crear los lotes.
@@ -7133,6 +7174,136 @@ router.post('/embarques/:id/recibir', requireAdmin, (req, res) => {
     });
     const loteIds = tx();
     res.json({ ok: true, data: { lotes: loteIds, costo_caja_neto: calc.costo_caja_neto } });
+  } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
+});
+
+// ── RESULTADO DEL EMBARQUE (Importación F3) ─────────────────────────────────────────
+// Qué dejó el camión, con plata de verdad: lo vendido sale de sg_despacho_items (kg y
+// subtotal reales), el costo de lo vendido se prorratea por kg al costo actual del lote, y
+// lo que queda en stock se valúa a ese mismo costo. Se calcula EN VIVO, no se snapshotea:
+// después del cierre se sigue vendiendo y una foto quedaría vieja al día siguiente.
+function resultadoEmbarque(db, emb) {
+  const lotes = db.prepare(`
+    SELECT l.id, l.codigo_lote, l.kg_reales, l.costo_final, p.nombre AS producto,
+           COALESCE(v.kg_vendidos, 0) AS kg_vendidos, COALESCE(v.ingresos, 0) AS ingresos
+    FROM sg_lotes l
+    LEFT JOIN sg_productos p ON p.id = l.producto_id
+    LEFT JOIN (SELECT lote_id, SUM(kg_despachados) AS kg_vendidos, SUM(subtotal) AS ingresos
+               FROM sg_despacho_items GROUP BY lote_id) v ON v.lote_id = l.id
+    WHERE l.embarque_id = ? AND l.eliminado_en IS NULL
+    ORDER BY l.id`).all(emb.id);
+
+  let costoTotal = 0, kgTotal = 0, kgVend = 0, ingresos = 0, costoVend = 0;
+  const filas = lotes.map(l => {
+    const kg = Number(l.kg_reales) || 0;
+    const costo = Number(l.costo_final) || 0;
+    const costoKg = kg > 0 ? costo / kg : 0;
+    const kgv = Math.min(Number(l.kg_vendidos) || 0, kg);   // no puede venderse más de lo que entró
+    const ing = Number(l.ingresos) || 0;
+    const cv = kgv * costoKg;
+    costoTotal += costo; kgTotal += kg; kgVend += kgv; ingresos += ing; costoVend += cv;
+    return { lote_id: l.id, codigo: l.codigo_lote, producto: l.producto,
+      kg, costo, costo_kg: costoKg, kg_vendidos: kgv, ingresos: ing, costo_vendido: cv,
+      margen: ing - cv, margen_pct: ing > 0 ? (ing - cv) / ing * 100 : null,
+      kg_en_stock: kg - kgv, valor_en_stock: (kg - kgv) * costoKg };
+  });
+  const margen = ingresos - costoVend;
+  return {
+    lotes: filas,
+    kg_totales: kgTotal, costo_total: costoTotal,
+    kg_vendidos: kgVend, ingresos, costo_vendido: costoVend,
+    margen, margen_pct: ingresos > 0 ? margen / ingresos * 100 : null,
+    kg_en_stock: kgTotal - kgVend, valor_en_stock: costoTotal - costoVend,
+    vendido_pct: kgTotal > 0 ? kgVend / kgTotal * 100 : null
+  };
+}
+
+// GET /embarques/:id/resultado — el resultado del camión, en vivo.
+router.get('/embarques/:id/resultado', requireAuth, (req, res) => {
+  const db = getDb();
+  try {
+    const emb = db.prepare('SELECT * FROM sg_embarques WHERE id=? AND activo=1').get(req.params.id);
+    if (!emb) return res.status(404).json({ ok: false, error: 'Embarque no encontrado' });
+    // Comparación EN VIVO proyectado vs real, sirva o no de preview del cierre: antes de
+    // cerrar muestra qué va a pasar, después queda como control contra el snapshot.
+    const cs = embCostos(db, emb.id);
+    const proy = calcEmbarque(emb, cs, true), rl = calcEmbarque(emb, cs);
+    res.json({ ok: true, data: Object.assign(resultadoEmbarque(db, emb), {
+      estado: emb.estado, cerrado_en: emb.cerrado_en,
+      comparacion: {
+        proyectado: { neto: proy.neto, costo_caja: proy.costo_caja_neto, tc: proy.tc_aplicado },
+        real:       { neto: rl.neto,   costo_caja: rl.costo_caja_neto,   tc: rl.tc_aplicado },
+        desvio: rl.neto - proy.neto,
+        desvio_pct: proy.neto > 0 ? (rl.neto - proy.neto) / proy.neto * 100 : null,
+        tc_es_estimado: emb.tc_real == null
+      },
+      cierre: emb.cerrado_en ? {
+        tc: emb.cierre_tc,
+        neto_proyectado: emb.cierre_neto_proyectado, neto_real: emb.cierre_neto_real,
+        costo_caja_proyectado: emb.cierre_costo_caja_proyectado, costo_caja_real: emb.cierre_costo_caja_real,
+        desvio_pct: (emb.cierre_neto_proyectado > 0)
+          ? (emb.cierre_neto_real - emb.cierre_neto_proyectado) / emb.cierre_neto_proyectado * 100 : null
+      } : null
+    }) });
+  } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
+});
+
+// POST /embarques/:id/cerrar — cierre del embarque (Importación F3).
+// Congela la comparación proyectado vs real, re-costea los lotes con los números finales y
+// deja el embarque cerrado. La parte contable (asiento por la diferencia de cambio) NO entra
+// acá: esto es gestión. El objetivo es que el costo y el margen del camión sean los exactos.
+router.post('/embarques/:id/cerrar', requireAdmin, (req, res) => {
+  const db = getDb();
+  try {
+    const emb = db.prepare('SELECT * FROM sg_embarques WHERE id=? AND activo=1').get(req.params.id);
+    if (!emb) return res.status(404).json({ ok: false, error: 'Embarque no encontrado' });
+    if (emb.estado === 'cerrado') return res.status(400).json({ ok: false, error: 'El embarque ya está cerrado' });
+    if (emb.estado !== 'recibido') return res.status(400).json({ ok: false, error: 'Solo se puede cerrar un embarque recibido. Este está en "' + emb.estado + '".' });
+
+    const costos = embCostos(db, emb.id);
+    const proy = calcEmbarque(emb, costos, true);    // solo estimados + tc estimado
+    const real = calcEmbarque(emb, costos);          // COALESCE(real, estimado) + tc real
+    if (real.costo_caja_neto == null)
+      return res.status(400).json({ ok: false, error: 'No se puede costear el embarque (falta cantidad de cajas o costos cargados)' });
+
+    let recosteo;
+    const tx = db.transaction(() => {
+      recosteo = recostearLotesEmbarque(db, emb, uid(req));
+      db.prepare(`UPDATE sg_embarques SET estado='cerrado',
+          cerrado_en=datetime('now','localtime'), cerrado_por=?,
+          cierre_tc=?, cierre_neto_proyectado=?, cierre_neto_real=?,
+          cierre_costo_caja_proyectado=?, cierre_costo_caja_real=?,
+          modificado_en=datetime('now','localtime'), modificado_por=?
+        WHERE id=?`)
+        .run(uid(req), real.tc_aplicado, proy.neto, real.neto,
+             proy.costo_caja_neto, real.costo_caja_neto, uid(req), emb.id);
+    });
+    tx();
+
+    const embPost = db.prepare('SELECT * FROM sg_embarques WHERE id=?').get(emb.id);
+    res.json({ ok: true, data: {
+      proyectado: { neto: proy.neto, costo_caja: proy.costo_caja_neto, tc: proy.tc_aplicado },
+      real:       { neto: real.neto, costo_caja: real.costo_caja_neto, tc: real.tc_aplicado },
+      desvio: real.neto - proy.neto,
+      desvio_pct: proy.neto > 0 ? (real.neto - proy.neto) / proy.neto * 100 : null,
+      recosteo,
+      resultado: resultadoEmbarque(db, embPost)
+    } });
+  } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
+});
+
+// POST /embarques/:id/recostear — re-costear sin cerrar. Sirve cuando van llegando los
+// números reales de a poco (liquidación del despachante, tc de pago) y querés que el stock
+// valga lo correcto antes del cierre definitivo.
+router.post('/embarques/:id/recostear', requireAdmin, (req, res) => {
+  const db = getDb();
+  try {
+    const emb = db.prepare('SELECT * FROM sg_embarques WHERE id=? AND activo=1').get(req.params.id);
+    if (!emb) return res.status(404).json({ ok: false, error: 'Embarque no encontrado' });
+    if (emb.estado !== 'recibido') return res.status(400).json({ ok: false, error: 'Solo se re-costea un embarque recibido y todavía no cerrado' });
+    let r;
+    db.transaction(() => { r = recostearLotesEmbarque(db, emb, uid(req)); })();
+    res.json({ ok: true, data: r });
   } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
 });
 

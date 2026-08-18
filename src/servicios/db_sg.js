@@ -1164,6 +1164,24 @@ try {
   `);
 } catch (e) { console.error('[DB] SG sg_embarques:', e.message); }
 
+// ── MÓDULO IMPORTACIÓN (F3) — cierre del embarque ───────────────────────────────────
+// Al cerrar se congela la foto de lo PROYECTADO (estimados + tc estimado) contra lo REAL
+// (COALESCE(real, estimado) + tc real). Es la única forma de aprender si cotizás bien: sin
+// esto el estimado se pisa con el real y nadie vuelve a compararlos.
+// El margen NO se snapshotea: se calcula en vivo desde las ventas de los lotes, porque se
+// sigue vendiendo después del cierre y una foto quedaría vieja al día siguiente.
+try {
+  const cols = db.prepare("PRAGMA table_info(sg_embarques)").all().map(c => c.name);
+  const nuevas = [
+    ['cerrado_en', 'TEXT'], ['cerrado_por', 'INTEGER'],
+    ['cierre_tc', 'REAL'],
+    ['cierre_neto_proyectado', 'REAL'], ['cierre_neto_real', 'REAL'],
+    ['cierre_costo_caja_proyectado', 'REAL'], ['cierre_costo_caja_real', 'REAL']
+  ].filter(([n]) => !cols.includes(n));
+  for (const [n, t] of nuevas) db.exec(`ALTER TABLE sg_embarques ADD COLUMN ${n} ${t}`);
+  if (nuevas.length) console.log(`[DB] SG sg_embarques migrado (+cierre: ${nuevas.map(x => x[0]).join(', ')})`);
+} catch (e) { console.error('[DB] SG migración sg_embarques (cierre):', e.message); }
+
 // ── MÓDULO IMPORTACIÓN (F2) — líneas de producto del embarque + enganche al lote ────
 // F1 modeló solo cantidad_cajas TOTAL. F2 necesita saber QUÉ lleva cada lote: producto, envase y
 // kg por bulto. sg_embarque_lineas describe la composición del embarque; al recibir (POST
