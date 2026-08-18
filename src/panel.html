@@ -2283,6 +2283,9 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
       <div class="sgc-subtab on" data-sub="oc"        onclick="sgComSub('oc')">📋 Órdenes de compra</div>
       <div class="sgc-subtab" data-sub="recepciones"  onclick="sgComSub('recepciones')">⏳ Recepciones pendientes</div>
       <div class="sgc-subtab" data-sub="ocrecibidas" onclick="sgComSub('ocrecibidas')">✅ OC recibidas</div>
+      <!-- Lo que entró sin orden. El contador va al lado porque es una bandeja
+           de trabajo pendiente: mientras tenga número, hay compras a medio hacer. -->
+      <div class="sgc-subtab" data-sub="sinorden" onclick="sgComSub('sinorden')">⚡ Ingresó sin orden<span class="liq-cnt" id="sg-so-cnt">·</span></div>
       <div class="sgc-subtab" data-sub="gdirectos"    onclick="sgComSub('gdirectos')">🧾 Gastos directos</div>
     </div>
 
@@ -2321,7 +2324,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
           </select>
         </label>
         <div style="display:flex;gap:8px">
-          <button class="btn bo" onclick="sgRetroOpen()">⚡ Compra retroactiva</button>
+          <button class="btn bo" onclick="sgRetroOpen()" title="Entró mercadería sin orden de compra">⚡ Recibir sin orden</button>
           <button class="btn bb" onclick="sgOcOpen()">+ Nueva OC</button>
         </div>
       </div>
@@ -2332,6 +2335,39 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
         <tbody id="sg-tb-oc"><tr><td colspan="8" class="emp">Cargando…</td></tr></tbody>
       </table></div>
       <div id="sg-oc-n" style="font-size:11.5px;color:var(--mut);margin-top:6px"></div>
+    </div>
+
+    <!-- ── LA MERCADERÍA QUE ENTRÓ SIN ORDEN ────────────────────────────
+         Llega un camión sin orden de compra. No se lo manda de vuelta: se
+         recibe, se pesa, y con el proveedor y la fecha se le arma el número de
+         partida. Pero esa orden nace a medias — le falta lo que decide el
+         comprador. Antes se mezclaban con el resto y se descubrían recién
+         cuando había que facturar. -->
+    <div class="sgc-sub" id="sgc-sub-sinorden">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;
+           flex-wrap:wrap;margin-bottom:10px">
+        <div style="font-size:12px;color:var(--mut);max-width:640px">
+          Entró la mercadería y la partida ya está numerada. Falta que el comprador
+          cierre la compra: a cuánto, en cuántos días se paga y qué documenta.
+        </div>
+        <div style="display:flex;gap:8px;align-items:center">
+          <label style="font-size:12px;color:var(--mut);display:flex;gap:5px;align-items:center">
+            <input type="checkbox" id="sg-so-todas" onchange="sgLoadSinOrden()" style="width:15px;height:15px">
+            Ver también las ya completadas
+          </label>
+          <button class="btn bo" onclick="sgRetroOpen()">⚡ Recibir sin orden</button>
+        </div>
+      </div>
+      <div class="ab-table-wrap"><table class="pa-tbl">
+        <thead><tr><th style="width:170px">Partida</th><th style="width:96px">Fecha</th>
+          <th>Proveedor</th><th style="width:180px">Producto</th>
+          <th style="width:84px;text-align:right">Bultos</th>
+          <th style="width:130px;text-align:right">Importe</th>
+          <th style="width:230px">Qué falta</th>
+          <th style="width:110px"></th></tr></thead>
+        <tbody id="sg-tb-sinorden"><tr><td colspan="8" class="emp">Cargando…</td></tr></tbody>
+      </table></div>
+      <div id="sg-so-n" style="font-size:11.5px;color:var(--mut);margin-top:6px"></div>
     </div>
 
     <!-- Recepciones -->
@@ -2873,7 +2909,15 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
         <!-- SIN CUENTA CONTABLE EL PAGO NO ENTRA AL LIBRO: es el dato que hace
              que la caja o el banco sirvan para algo más que anotar. -->
         <div class="fl" style="margin-top:10px"><label>Contra qué cuenta contable actúa</label>
-          <select id="cb-cta-contable"></select></div>
+          <div class="sg-bc">
+            <input id="cb-cta-ctaq" autocomplete="off" placeholder="🔎 Escribí el nombre o el código…"
+                   oninput="sgBcBuscar('cb-cta')" onfocus="sgBcBuscar('cb-cta')"
+                   onkeydown="sgBcTecla(event,'cb-cta')" style="width:100%;box-sizing:border-box">
+            <input type="hidden" id="cb-cta-contable">
+            <div class="sg-bc-list" id="cb-cta-ctalist"></div>
+          </div>
+          <div id="cb-cta-ctasel"></div>
+        </div>
         <div class="bank-only" style="margin-top:12px">
           <label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer">
             <input type="checkbox" id="cb-cta-chequera" style="width:16px;height:16px">
@@ -3078,6 +3122,21 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
         box-shadow:0 0 0 2px rgba(37,99,235,.16) inset}
       .sg-fp-b:disabled{opacity:.42;cursor:not-allowed}
       #sg-pago-modal td.pg-ac input{width:112px;text-align:right}
+      /* ── EL BUSCADOR DE RUBROS ────────────────────────────────────────
+         Un <select> con el plan de cuentas entero son 300 renglones para
+         encontrar "BANCO GALICIA": hay que bajar con la rueda leyendo códigos.
+         Se escribe una parte del nombre o del código y quedan tres. */
+      .sg-bc{position:relative}
+      .sg-bc-list{position:absolute;left:0;right:0;top:100%;z-index:60;max-height:260px;
+        overflow-y:auto;background:var(--pan);border:1.5px solid var(--pri);border-top:none;
+        border-radius:0 0 9px 9px;box-shadow:0 8px 22px rgba(0,0,0,.14);display:none}
+      .sg-bc-list.on{display:block}
+      .sg-bc-it{padding:7px 11px;cursor:pointer;font-size:12.5px;border-bottom:1px solid var(--bor)}
+      .sg-bc-it:hover,.sg-bc-it.sel{background:rgba(37,99,235,.12)}
+      .sg-bc-it code{font-family:monospace;font-size:11.5px;color:var(--mut);margin-right:7px}
+      .sg-bc-vacio{padding:9px 11px;font-size:12px;color:var(--mut)}
+      .sg-bc-elegida{font-size:12px;margin-top:5px;padding:5px 9px;border-radius:7px;
+        background:rgba(16,122,87,.10);color:#0f766e;font-weight:600}
       @media(max-width:900px){ #sg-pago-modal .ab-table-wrap{overflow-x:auto !important} }
     </style>
     <div class="ab-modal">
@@ -4061,12 +4120,53 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
   </div>
 </div>
 
+<!-- ── COMPLETAR LA COMPRA QUE YA ENTRÓ ────────────────────────────────
+     Lo que pone el comprador cuando se sienta a cerrar una descarga que
+     entró sin orden. -->
+<div class="ab-modal-overlay" id="sg-so-modal">
+  <div class="ab-modal" style="width:760px;max-width:96vw;max-height:90vh;overflow-y:auto">
+    <div class="mhd"><div class="mht" id="sg-so-tit">Completar la orden</div>
+      <button class="mcl" onclick="closeMB('sg-so-modal')">×</button></div>
+    <div class="fg">
+      <div id="sg-so-cab" style="font-size:12.5px;color:var(--mut);margin-bottom:10px"></div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px">
+        <div class="fl"><label>¿Qué documenta?</label>
+          <select id="sg-so-doc" onchange="sgSoDocCambio()">
+            <option value="factura">Recibimos factura del proveedor</option>
+            <option value="liquidacion">Le liquidamos nosotros</option>
+          </select></div>
+        <div class="fl"><label>Tipo de precio</label>
+          <select id="sg-so-precio" onchange="sgSoRender()">
+            <option value="firme">Firme (ya está cerrado)</option>
+            <option value="pizarra">Pizarra (se cierra al vender)</option>
+          </select></div>
+        <div class="fl"><label>Condición de pago</label><select id="sg-so-cond"></select></div>
+      </div>
+      <div class="fl ff" style="margin-top:10px"><label>A cuánto se cerró cada artículo</label>
+        <div id="sg-so-items"></div>
+      </div>
+      <div class="fl ff"><label>Observaciones</label><input id="sg-so-obs"></div>
+      <div id="sg-so-aviso" style="font-size:12px;margin-top:6px"></div>
+    </div>
+    <div class="ab-modal-footer">
+      <button class="btn bo" onclick="closeMB('sg-so-modal')">Cancelar</button>
+      <button class="btn bb" onclick="sgSoGuardar()">Guardar</button>
+    </div>
+  </div>
+</div>
+
 <!-- Modal Compra retroactiva -->
 <div class="ab-modal-overlay" id="sg-retro-modal">
   <div class="ab-modal" style="width:820px;max-height:90vh;overflow-y:auto">
-    <div class="mhd"><div class="mht">⚡ Compra retroactiva</div><button class="mcl" onclick="closeMB('sg-retro-modal')">×</button></div>
+    <div class="mhd"><div class="mht">⚡ Recibir mercadería sin orden de compra</div><button class="mcl" onclick="closeMB('sg-retro-modal')">×</button></div>
     <div class="fg">
-      <div style="font-size:12px;color:var(--mut);margin-bottom:4px">Crea OC + recepción + lotes en una sola operación (compra en campo).</div>
+      <!-- EL PROVEEDOR NO ES UN DATO MÁS: el número de partida se arma con el
+           proveedor y la fecha (0034.12.08.2026.03). Sin eso la descarga no se
+           puede rastrear, ni facturar, ni reclamar. -->
+      <div style="font-size:12px;color:var(--mut);margin-bottom:4px">
+        Entró un camión sin orden. Se recibe igual: decí de quién es y de qué día,
+        que con eso se numera la partida. Después el comprador completa la compra
+        desde <b>Ingresó sin orden</b>.</div>
       <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">
         <div class="fl"><label>Proveedor <span style="color:var(--err)">*</span></label><select id="sg-retro-prov"></select></div>
         <div class="fl"><label>Tipo de precio</label>
@@ -5130,7 +5230,7 @@ function sgDelete(entity, id){
 }
 
 // ════ FASE 2 — COMPRAS (frontend) ════════════════════════════════════════════
-function sgComInit(){ sgLoadCaches(function(){ sgComSub(SG.comSub || 'oc'); }); }
+function sgComInit(){ sgLoadCaches(function(){ sgComSub(SG.comSub || 'oc'); sgLoadSinOrden(); }); }
 function sgComSub(s){
   SG.comSub = s;
   document.querySelectorAll('.sg-mod .sgc-subtab').forEach(function(el){ el.classList.toggle('on', el.dataset.sub===s); });
@@ -5138,6 +5238,7 @@ function sgComSub(s){
   if (s==='oc') sgLoadOC();
   else if (s==='recepciones') sgLoadPendientesRecibir();
   else if (s==='ocrecibidas') { sgLoadOcRecibidas(); sgLoadRecepciones(); }
+  else if (s==='sinorden') sgLoadSinOrden();
   else if (s==='gdirectos') sgLoadGDirectos();
 
 }
@@ -5969,13 +6070,6 @@ function sgCbCuentaOpen(id){
   if (t) t.textContent = c ? ('Editar — ' + c.nombre)
     : (SG_CB.tab === 'cajas' ? 'Nueva caja' : 'Nueva cuenta bancaria');
 
-  var sel = eid('cb-cta-contable');
-  if (sel) {
-    sel.innerHTML = '<option value="">— elegí la cuenta contable —</option>'
-      + SG_CB.contables.map(function(x){
-          return '<option value="' + x.id + '">' + esc(x.codigo + ' · ' + x.nombre) + '</option>';
-        }).join('');
-  }
   var tipo = eid('cb-cta-tipo');
   if (tipo) tipo.value = c ? c.tipo : (SG_CB.tab === 'cajas' ? 'caja' : 'cuenta_corriente');
   var pon = function(id2, v){ var e = eid(id2); if (e) e.value = (v === null || v === undefined) ? '' : v; };
@@ -5986,7 +6080,7 @@ function sgCbCuentaOpen(id){
   pon('cb-cta-alias',  c ? c.alias : '');
   pon('cb-cta-saldo',  c && c.saldo_inicial ? sgMilShow(c.saldo_inicial) : '');
   var amb = eid('cb-cta-ambito'); if (amb) amb.value = (c && c.ambito) || 'fiscal';
-  if (sel) sel.value = (c && c.cuenta_contable_id) ? String(c.cuenta_contable_id) : '';
+  sgBcPoner('cb-cta', c ? c.cuenta_contable_id : null);
   var chq = eid('cb-cta-chequera'); if (chq) chq.checked = !!(c && c.tiene_chequera);
   sgCbCtaTipo();
   sgModalArriba('cb-cta-modal');
@@ -6171,6 +6265,122 @@ function sgCbChequeAnular(id, nro){
 }
 
 
+
+
+// ── BUSCAR UN RUBRO ─────────────────────────────────────────────────────
+// El plan de cuentas tiene cientos de renglones. En un <select> hay que bajar
+// con la rueda leyendo códigos hasta encontrar "BANCO GALICIA", y el que carga
+// una caja nueva no se sabe el código de memoria. Acá se escribe un pedazo del
+// nombre o del código y quedan tres.
+//
+// Palabra por palabra y sin importar el orden: "galicia banco" encuentra
+// "Banco GALICIA" igual que "banco galicia". Sin acentos ni mayúsculas, porque
+// nadie escribe "Comisión" con tilde cuando está buscando.
+var SG_BC = {};
+
+function sgBcNorm(s){
+  return String(s == null ? '' : s).toLowerCase()
+    .replace(/[áàä]/g, 'a').replace(/[éèë]/g, 'e').replace(/[íìï]/g, 'i')
+    .replace(/[óòö]/g, 'o').replace(/[úùü]/g, 'u').replace(/ñ/g, 'n');
+}
+
+// De dónde saca las cuentas cada buscador. Un solo lugar: si mañana hay otro
+// campo de rubro, se agrega acá y no se copia la función.
+function sgBcFuente(pref){
+  if (pref === 'cb-cta') return (window.SG_CB && SG_CB.contables) || [];
+  return [];
+}
+
+function sgBcBuscar(pref){
+  var inp = eid(pref + '-ctaq'), lista = eid(pref + '-ctalist');
+  if (!inp || !lista) return;
+  var q = sgBcNorm(inp.value).trim();
+  var pal = q ? q.split(/\s+/) : [];
+  var todas = sgBcFuente(pref);
+  var res = todas.filter(function(c){
+    if (!pal.length) return true;
+    var t = sgBcNorm(c.codigo + ' ' + c.nombre);
+    return pal.every(function(p){ return t.indexOf(p) >= 0; });
+  });
+  // Se muestran hasta 40: más que eso no se lee, y significa que hay que
+  // escribir una letra más. Se dice cuántas quedaron afuera para que nadie crea
+  // que su cuenta no existe.
+  var tope = res.slice(0, 40);
+  SG_BC[pref] = { res: tope, i: -1 };
+  lista.innerHTML = tope.length
+    ? tope.map(function(c, i){
+        return '<div class="sg-bc-it" data-i="' + i + '" onclick="sgBcElegir(\'' + pref + '\',' + i + ')">'
+          + '<code>' + escH(c.codigo) + '</code>' + escH(c.nombre) + '</div>';
+      }).join('')
+      + (res.length > tope.length
+          ? '<div class="sg-bc-vacio">y ' + (res.length - tope.length)
+            + ' más — escribí una letra más</div>'
+          : '')
+    : '<div class="sg-bc-vacio">'
+      + (todas.length
+          ? 'Ninguna cuenta imputable coincide. Ojo: las secciones y los títulos no se pueden elegir.'
+          : 'Todavía no se cargó el plan de cuentas de San Gerónimo.')
+      + '</div>';
+  lista.classList.add('on');
+}
+
+function sgBcElegir(pref, i){
+  var st = SG_BC[pref]; if (!st || !st.res[i]) return;
+  var c = st.res[i];
+  var hid = eid(pref + '-contable'), inp = eid(pref + '-ctaq'),
+      lista = eid(pref + '-ctalist'), sel = eid(pref + '-ctasel');
+  if (hid) hid.value = c.id;
+  if (inp) inp.value = '';
+  if (lista) lista.classList.remove('on');
+  if (sel) sel.innerHTML = '<div class="sg-bc-elegida">✓ ' + escH(c.codigo + ' · ' + c.nombre)
+    + ' <a href="javascript:void(0)" onclick="sgBcLimpiar(\'' + pref + '\')"'
+    + ' style="margin-left:8px;font-weight:400">cambiar</a></div>';
+}
+
+function sgBcLimpiar(pref){
+  var hid = eid(pref + '-contable'), sel = eid(pref + '-ctasel'), inp = eid(pref + '-ctaq');
+  if (hid) hid.value = '';
+  if (sel) sel.innerHTML = '';
+  if (inp) { inp.value = ''; inp.focus(); }
+}
+
+// Flechas y Enter: el que carga veinte cuentas seguidas no quiere soltar el
+// teclado para agarrar el mouse.
+function sgBcTecla(ev, pref){
+  var st = SG_BC[pref]; if (!st || !st.res.length) return;
+  var lista = eid(pref + '-ctalist');
+  if (ev.key === 'ArrowDown' || ev.key === 'ArrowUp') {
+    ev.preventDefault();
+    st.i = Math.max(0, Math.min(st.res.length - 1, st.i + (ev.key === 'ArrowDown' ? 1 : -1)));
+    if (lista) [].slice.call(lista.querySelectorAll('.sg-bc-it')).forEach(function(el){
+      el.classList.toggle('sel', Number(el.getAttribute('data-i')) === st.i);
+    });
+  } else if (ev.key === 'Enter') {
+    ev.preventDefault();
+    sgBcElegir(pref, st.i >= 0 ? st.i : 0);
+  } else if (ev.key === 'Escape') {
+    if (lista) lista.classList.remove('on');
+  }
+}
+
+// Mostrar la que ya tenía elegida al abrir la ficha de una cuenta existente.
+function sgBcPoner(pref, id){
+  sgBcLimpiar(pref);
+  if (!id) return;
+  var c = sgBcFuente(pref).filter(function(x){ return String(x.id) === String(id); })[0];
+  if (!c) {
+    // La cuenta existe pero NO es imputable (o la borraron): se dice, en vez de
+    // dejar el campo vacío y que el que guarde la pierda sin enterarse.
+    var hid = eid(pref + '-contable'), sel = eid(pref + '-ctasel');
+    if (hid) hid.value = id;
+    if (sel) sel.innerHTML = '<div class="sg-bc-elegida" style="background:rgba(224,167,46,.12);'
+      + 'color:#9a3412">⚠ La cuenta contable que tenía asignada ya no está entre las imputables.'
+      + ' <a href="javascript:void(0)" onclick="sgBcLimpiar(\'' + pref + '\')">elegir otra</a></div>';
+    return;
+  }
+  SG_BC[pref] = { res: [c], i: 0 };
+  sgBcElegir(pref, 0);
+}
 
 // ── EL CUADRO DEL ASIENTO ───────────────────────────────────────────────
 // Convención del proyecto (CLAUDE.md): toda operación que toca rubros contables
@@ -9648,6 +9858,179 @@ function sgRecPreviewPDF(){
     .catch(function(){ toast('No se pudo generar la vista previa','er'); });
 }
 
+
+// ── LO QUE ENTRÓ SIN ORDEN DE COMPRA ────────────────────────────────────
+// La bandeja del comprador: descargas que ya entraron, con la partida numerada,
+// y a las que les falta cerrar la compra. Antes se mezclaban con el resto de las
+// órdenes y se descubrían recién cuando había que facturar.
+var SG_SO = { filas: [], sel: null, items: [] };
+
+function sgLoadSinOrden(){
+  var todas = (eid('sg-so-todas') || {}).checked ? '?todas=1' : '';
+  api('/api/sg/oc/sin-orden' + todas).then(function(r){
+    SG_SO.filas = (r && r.ok) ? r.data : [];
+    var cnt = eid('sg-so-cnt');
+    if (cnt) cnt.textContent = (r && r.ok) ? String(r.pendientes) : '·';
+    sgSoPintar();
+  });
+}
+
+function sgSoPintar(){
+  var tb = eid('sg-tb-sinorden'); if (!tb) return;
+  tb.innerHTML = SG_SO.filas.length ? SG_SO.filas.map(function(o){
+    var listo = !!o.completada_en;
+    return '<tr' + (listo ? ' style="opacity:.55"' : '') + '>'
+      + '<td style="font-family:monospace;font-size:11.5px"><b>'
+        + escH(o.trazabilidad || o.numero || '—') + '</b></td>'
+      + '<td>' + escH(o.fecha_oc || '—') + '</td>'
+      + '<td class="cb-nom">' + escH(o.proveedor_nombre || '— sin proveedor —') + '</td>'
+      + '<td style="font-size:11.5px">' + escH(o.productos || '—') + '</td>'
+      + '<td style="text-align:right">' + (o.bultos || 0) + '</td>'
+      + '<td style="text-align:right">'
+        + (o.total_estimado_monto ? sgMoney(o.total_estimado_monto)
+           : '<span style="color:var(--mut)">—</span>') + '</td>'
+      + '<td style="font-size:11.5px">'
+        + (listo
+            ? '<span style="color:#0f766e;font-weight:600">✓ completada</span>'
+            : (o.falta && o.falta.length
+                ? '<span style="color:#9a3412">Falta ' + escH(o.falta.join(', ')) + '</span>'
+                : '<span style="color:#0f766e">nada — ya se puede marcar</span>'))
+        + '</td>'
+      + '<td style="text-align:right">'
+        + '<button class="btn ' + (listo ? 'bo' : 'bb') + ' bs" onclick="sgSoOpen(' + o.id + ')">'
+        + (listo ? 'Ver' : 'Completar') + '</button></td></tr>';
+  }).join('')
+    : '<tr><td colspan="8" class="emp">'
+      + ((eid('sg-so-todas') || {}).checked
+          ? 'Nunca entró mercadería sin orden de compra.'
+          : '✓ No hay mercadería esperando que se complete la orden.')
+      + '</td></tr>';
+  var n = eid('sg-so-n');
+  var pend = SG_SO.filas.filter(function(o){ return !o.completada_en; }).length;
+  if (n) n.textContent = pend
+    ? pend + ' compra(s) a medio hacer: la mercadería ya está adentro y todavía no se sabe a cuánto.'
+    : '';
+}
+
+function sgSoOpen(id){
+  var o = SG_SO.filas.filter(function(x){ return x.id === id; })[0];
+  if (!o) return;
+  SG_SO.sel = o;
+  var t = eid('sg-so-tit');
+  if (t) t.textContent = (o.completada_en ? 'La orden de ' : 'Completar la orden de ') + (o.proveedor_nombre || '');
+  var cab = eid('sg-so-cab');
+  if (cab) cab.innerHTML = 'Partida <b style="font-family:monospace">'
+    + escH(o.trazabilidad || o.numero || '') + '</b> · entró el ' + escH(o.fecha_oc || '—')
+    + ' · ' + (o.bultos || 0) + ' bulto(s)'
+    + (o.completada_en
+        ? ' · <span style="color:#0f766e;font-weight:600">completada el ' + escH(o.completada_en) + '</span>'
+        : '');
+  var doc = eid('sg-so-doc'); if (doc) doc.value = o.documenta || 'factura';
+  var pre = eid('sg-so-precio'); if (pre) pre.value = o.tipo_precio || 'firme';
+  var cond = eid('sg-so-cond');
+  if (cond) cond.innerHTML = sgOpts(SG.cacheCond, 'nombre', o.condicion_pago_id || '', '— Elegir —');
+  var obs = eid('sg-so-obs'); if (obs) obs.value = o.observaciones || '';
+  eid('sg-so-items').innerHTML = '<div class="emp">Cargando…</div>';
+  sgSoDocCambio();
+  api('/api/sg/oc/' + id + '/items-sin-orden').then(function(r){
+    SG_SO.items = (r && r.ok) ? r.data : [];
+    sgSoRender();
+  });
+  sgModalArriba('sg-so-modal');
+}
+
+// Con liquidación el precio SIEMPRE es de pizarra: se cierra cuando se vende.
+// Es la misma regla del alta normal, y acá se muestra en vez de dejar elegir
+// una combinación que el servidor va a corregir sin avisar.
+function sgSoDocCambio(){
+  var doc = (eid('sg-so-doc') || {}).value;
+  var pre = eid('sg-so-precio');
+  if (pre) {
+    if (doc === 'factura') { pre.value = 'firme'; pre.disabled = true; }
+    else pre.disabled = false;
+  }
+  sgSoRender();
+}
+
+function sgSoRender(){
+  var cont = eid('sg-so-items'); if (!cont) return;
+  var pizarra = (eid('sg-so-precio') || {}).value === 'pizarra';
+  if (!SG_SO.items.length) { cont.innerHTML = '<div class="emp">Sin artículos.</div>'; return; }
+  if (pizarra) {
+    cont.innerHTML = '<div style="font-size:12px;color:var(--mut);padding:8px 10px;'
+      + 'border:1px dashed var(--bor);border-radius:8px">'
+      + 'Con precio de pizarra no se pone precio ahora: se cierra lote por lote cuando se vende. '
+      + 'Los artículos son: ' + escH(SG_SO.items.map(function(i){ return i.producto_nombre; }).join(', '))
+      + '</div>';
+    return;
+  }
+  cont.innerHTML = SG_SO.items.map(function(it, i){
+    return '<div style="display:grid;grid-template-columns:1fr 110px 130px 130px;gap:8px;'
+      + 'align-items:center;padding:6px 0;border-bottom:1px solid var(--bor)">'
+      + '<div style="font-size:13px"><b>' + escH(it.producto_nombre || '—') + '</b>'
+        + '<div style="font-size:11px;color:var(--mut)">' + (it.bultos || 0) + ' bulto(s)</div></div>'
+      + '<div style="text-align:right;font-size:12.5px">' + nr(it.kg_estimados || 0) + ' kg</div>'
+      + '<input type="text" inputmode="decimal" id="sg-so-p-' + i + '" placeholder="$/kg"'
+        + ' style="text-align:right" value="'
+        + (it.precio_estimado_por_kg ? sgMilShow(it.precio_estimado_por_kg) : '') + '"'
+        + ' oninput="this.value=sgMilFmtLive(this.value);sgSoTotal()">'
+      + '<div style="text-align:right;font-weight:600" id="sg-so-t-' + i + '"></div>'
+      + '</div>';
+  }).join('')
+    + '<div id="sg-so-total" style="text-align:right;font-weight:700;font-size:14px;'
+    + 'margin-top:8px"></div>';
+  sgSoTotal();
+}
+
+function sgSoTotal(){
+  var tot = 0;
+  SG_SO.items.forEach(function(it, i){
+    var p = sgMilParse((eid('sg-so-p-' + i) || {}).value) || 0;
+    var sub = p * (Number(it.kg_estimados) || 0);
+    tot += sub;
+    var c = eid('sg-so-t-' + i);
+    if (c) c.textContent = sub ? sgMoney(sub) : '';
+  });
+  var t = eid('sg-so-total');
+  if (t) t.innerHTML = tot ? 'Total de la compra: ' + sgMoney(tot) : '';
+  var av = eid('sg-so-aviso');
+  var faltan = SG_SO.items.filter(function(_, i){
+    return !(sgMilParse((eid('sg-so-p-' + i) || {}).value) > 0);
+  }).length;
+  var pizarra = (eid('sg-so-precio') || {}).value === 'pizarra';
+  if (av) av.innerHTML = (!pizarra && faltan)
+    ? '<span style="color:#9a3412">Faltan ' + faltan + ' precio(s): la orden se guarda igual, '
+      + 'pero sigue en la bandeja hasta que estén todos.</span>'
+    : '';
+}
+
+function sgSoGuardar(){
+  var o = SG_SO.sel; if (!o) return;
+  var pizarra = (eid('sg-so-precio') || {}).value === 'pizarra';
+  var items = [];
+  if (!pizarra) {
+    SG_SO.items.forEach(function(it, i){
+      var p = sgMilParse((eid('sg-so-p-' + i) || {}).value) || 0;
+      if (p > 0) items.push({ oc_item_id: it.id, precio_por_kg: p });
+    });
+  }
+  api('/api/sg/oc/' + o.id + '/completar', 'POST', {
+    documenta: (eid('sg-so-doc') || {}).value,
+    tipo_precio: (eid('sg-so-precio') || {}).value,
+    condicion_pago_id: (eid('sg-so-cond') || {}).value || null,
+    observaciones: (eid('sg-so-obs') || {}).value,
+    items: items
+  }).then(function(r){
+    if (!r || !r.ok) { toast((r && r.error) || 'No se pudo guardar', 'er'); return; }
+    toast(r.data.completada
+      ? 'Orden completada'
+      : 'Guardado — sigue en la bandeja: falta ' + (r.data.falta || []).join(', '), 'ok');
+    closeMB('sg-so-modal');
+    sgLoadSinOrden();
+    sgLoadOC();
+  });
+}
+
 // ── Compra retroactiva ──
 function sgRetroOpen(){
   SG.retroItems=[];
@@ -9705,7 +10088,8 @@ function sgRetroGuardar(){
   if(!items.length){ toast('Cargá un item con lote','er'); return; }
   var body={ proveedor_id:Number(prov), tipo_precio:sgRetroPrecio(), condicion_pago_id:eid('sg-retro-cond').value?Number(eid('sg-retro-cond').value):null, fecha:eid('sg-retro-fecha').value, numero_remito_proveedor:eid('sg-retro-remito').value, observaciones:eid('sg-retro-obs').value, items:items };
   api('/api/sg/compra-retroactiva','POST',body).then(function(r){
-    if(r&&r.ok){ toast('Compra registrada','ok'); closeMB('sg-retro-modal'); sgLoadOC(); sgLoadPendientesRecibir(); }
+    if(r&&r.ok){ toast('Mercadería recibida — completá la orden desde «Ingresó sin orden»','ok');
+      closeMB('sg-retro-modal'); sgLoadOC(); sgLoadPendientesRecibir(); sgLoadSinOrden(); }
     else toast((r&&r.error)||'Error','er');
   });
 }

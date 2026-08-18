@@ -3143,6 +3143,144 @@ router.post('/oc/:id/factura', requireAdmin, (req, res) => {
 });
 
 // Listar OC con filtros
+// ══════════════════════════════════════════════════════════════════════════
+// LA MERCADERÍA QUE ENTRÓ SIN ORDEN DE COMPRA
+// ══════════════════════════════════════════════════════════════════════════
+// Llega un camión sin orden. No se lo manda de vuelta: se recibe, se pesa y se
+// le arma la orden hacia atrás con el proveedor y la fecha, que es lo que
+// nomencla la partida. Pero esa orden nace a medias — le falta lo que decide el
+// comprador: a cuánto se cerró, en cuántos días se paga, qué documenta.
+//
+// Sin esta bandeja, esas órdenes se mezclaban con las demás y nadie sabía
+// cuáles estaban a medio hacer. Se descubrían cuando había que facturar.
+
+// Qué le falta a una orden para dejar de estar a medias. Devuelve la lista de
+// huecos, en el orden en que molestan.
+function faltaDeOrden(db, oc) {
+  const falta = [];
+  if (!oc.condicion_pago_id) falta.push('condición de pago');
+  // Con precio de pizarra el precio se cierra después, y eso NO es un hueco:
+  // es la modalidad. El hueco es el precio firme sin número.
+  if (oc.tipo_precio !== 'pizarra') {
+    const sinPrecio = db.prepare(`SELECT COUNT(*) c FROM sg_oc_items
+      WHERE oc_id=? AND (precio_estimado_por_kg IS NULL OR precio_estimado_por_kg <= 0)`).get(oc.id).c;
+    if (sinPrecio) falta.push(sinPrecio === 1 ? 'el precio' : 'el precio de ' + sinPrecio + ' artículos');
+  }
+  // NO se pide "quién compró": San Gerónimo no tiene todavía ninguna pantalla
+  // que asigne comercial a una orden, así que pedirlo dejaría a TODAS las
+  // órdenes eternamente incompletas y la bandeja no se vaciaría nunca.
+  return falta;
+}
+
+router.get('/oc/sin-orden', requireAuth, (req, res) => {
+  const db = getDb();
+  try {
+    const verTodas = req.query.todas === '1';
+    const rows = db.prepare(`
+      SELECT o.id, o.numero, o.trazabilidad, o.fecha_oc, o.proveedor_id, o.tipo_precio,
+             o.tipo_fiscal, o.documenta, o.condicion_pago_id, o.comercial_id, o.observaciones,
+             o.total_estimado_kg, o.total_estimado_monto, o.completada_en, o.estado,
+             p.razon_social AS proveedor_nombre,
+             (SELECT COUNT(*) FROM sg_lotes l JOIN sg_oc_items i2 ON i2.id = l.oc_item_id
+               WHERE i2.oc_id = o.id AND l.activo = 1) AS bultos,
+             (SELECT GROUP_CONCAT(DISTINCT pr.nombre) FROM sg_oc_items i3
+                JOIN sg_productos pr ON pr.id = i3.producto_id WHERE i3.oc_id = o.id) AS productos
+        FROM sg_oc o
+        LEFT JOIN sg_proveedores p ON p.id = o.proveedor_id
+       WHERE o.modalidad = 'retroactiva' AND o.activo = 1 AND o.estado <> 'anulada'
+         ${verTodas ? '' : 'AND o.completada_en IS NULL'}
+       ORDER BY o.fecha_oc DESC, o.id DESC`).all();
+    const data = rows.map((o) => ({ ...o, falta: faltaDeOrden(db, o) }));
+    res.json({ ok: true, data, pendientes: data.filter((o) => !o.completada_en).length });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// Los artículos de esa orden, para que el comprador les ponga precio.
+router.get('/oc/:id/items-sin-orden', requireAuth, (req, res) => {
+  const db = getDb();
+  try {
+    const items = db.prepare(`SELECT i.id, i.producto_id, i.kg_estimados, i.precio_estimado_por_kg,
+        pr.nombre AS producto_nombre,
+        (SELECT COUNT(*) FROM sg_lotes l WHERE l.oc_item_id = i.id AND l.activo = 1) AS bultos
+      FROM sg_oc_items i LEFT JOIN sg_productos pr ON pr.id = i.producto_id
+      WHERE i.oc_id = ? ORDER BY i.id`).all(req.params.id);
+    res.json({ ok: true, data: items });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// COMPLETAR LA ORDEN. Lo que pone el comprador cuando se sienta a cerrar la
+// compra que ya entró. El precio baja hasta los lotes: el costo de la
+// mercadería es el del lote, no el del renglón de la orden.
+router.post('/oc/:id/completar', requireAdmin, (req, res) => {
+  const db = getDb();
+  try {
+    const b = req.body || {};
+    const oc = db.prepare("SELECT * FROM sg_oc WHERE id=? AND activo=1").get(req.params.id);
+    if (!oc) return res.status(404).json({ ok: false, error: 'Orden no encontrada' });
+    if (oc.modalidad !== 'retroactiva') {
+      return res.status(400).json({ ok: false,
+        error: 'Esta orden no nació de una descarga sin orden: se edita desde la orden misma.' });
+    }
+    if (oc.estado === 'anulada') return res.status(400).json({ ok: false, error: 'Esa orden está anulada' });
+
+    const precios = (Array.isArray(b.items) ? b.items : [])
+      .map((x) => ({ id: Number(x.oc_item_id), precio: Number(x.precio_por_kg) }))
+      .filter((x) => x.id && x.precio > 0);
+
+    // El circuito —factura o liquidación, precio firme o pizarra— se decide con
+    // la misma función que el alta normal: una sola cabeza para todo el sistema.
+    const dft = defaultsProveedor(db, oc.proveedor_id, {});
+    const circ = circuitoDeCompra(
+      { documenta: b.documenta, tipo_precio: b.tipo_precio || oc.tipo_precio }, dft.tipo_fiscal);
+
+    let quedaSinPrecio = 0;
+    db.transaction(() => {
+      db.prepare(`UPDATE sg_oc SET condicion_pago_id=?, comercial_id=?, tipo_precio=?, tipo_fiscal=?,
+          documenta=?, observaciones=COALESCE(?, observaciones),
+          modificado_en=datetime('now','localtime'), modificado_por=? WHERE id=?`).run(
+        b.condicion_pago_id ? Number(b.condicion_pago_id) : oc.condicion_pago_id,
+        b.comercial_id ? Number(b.comercial_id) : oc.comercial_id,
+        circ.tipoPrecio, circ.tipoFiscal, circ.documenta,
+        val(b.observaciones) || null, uid(req), oc.id);
+
+      const setItem = db.prepare('UPDATE sg_oc_items SET precio_estimado_por_kg=? WHERE id=? AND oc_id=?');
+      const lotesDe = db.prepare('SELECT id, kg_reales FROM sg_lotes WHERE oc_item_id=? AND activo=1');
+      const setLote = db.prepare(`UPDATE sg_lotes SET precio_unitario_kg=?, costo_base=?,
+        modificado_en=datetime('now','localtime'), modificado_por=? WHERE id=?`);
+      for (const p of precios) {
+        setItem.run(p.precio, p.id, oc.id);
+        for (const l of lotesDe.all(p.id)) {
+          setLote.run(p.precio, r2((l.kg_reales || 0) * p.precio), uid(req), l.id);
+          recalcCostoLote(db, Number(l.id));
+        }
+      }
+
+      // El total de la orden se rehace con lo que quedó, no con lo que se mandó:
+      // puede haber artículos que ya tenían precio y no se tocaron.
+      const tot = db.prepare(`SELECT COALESCE(SUM(kg_estimados),0) kg,
+          COALESCE(SUM(kg_estimados * COALESCE(precio_estimado_por_kg,0)),0) monto
+        FROM sg_oc_items WHERE oc_id=?`).get(oc.id);
+      db.prepare('UPDATE sg_oc SET total_estimado_kg=?, total_estimado_monto=? WHERE id=?')
+        .run(tot.kg, r2(tot.monto), oc.id);
+
+      const nueva = db.prepare('SELECT * FROM sg_oc WHERE id=?').get(oc.id);
+      quedaSinPrecio = faltaDeOrden(db, nueva).length;
+      // SÓLO SE MARCA COMPLETA SI DE VERDAD LO ESTÁ. Marcarla igual la saca de
+      // la bandeja con los huecos adentro, que es peor que no tener bandeja.
+      if (!quedaSinPrecio) {
+        db.prepare(`UPDATE sg_oc SET completada_en=datetime('now','localtime'), completada_por=?
+          WHERE id=?`).run(uid(req), oc.id);
+      }
+      generarVencimientos(db, oc.id);
+    })();
+
+    const fin = db.prepare('SELECT * FROM sg_oc WHERE id=?').get(oc.id);
+    res.json({ ok: true, data: {
+      id: Number(oc.id), completada: !quedaSinPrecio, falta: faltaDeOrden(db, fin),
+    } });
+  } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
+});
+
 router.get('/oc', requireAuth, (req, res) => {
   const db = getDb();
   try {
@@ -3814,6 +3952,20 @@ router.post('/compra-retroactiva', requireAdmin, (req, res) => {
     const b = req.body;
     const items = Array.isArray(b.items) ? b.items : [];
     if (!items.length) return res.status(400).json({ ok: false, error: 'Sin items' });
+    // ── SIN PROVEEDOR NO HAY PARTIDA ──────────────────────────────────────
+    // El número de partida se arma con el proveedor y la fecha
+    // (0034.12.08.2026.03). Sin proveedor salía 0000.12.08.2026.03: una partida
+    // de nadie, que después no se puede facturar, ni liquidar, ni reclamar. La
+    // pantalla ya lo pedía; el servidor lo aceptaba igual, y por ahí entraba
+    // cualquier llamada que no fuera la pantalla.
+    const provRow = b.proveedor_id
+      ? db.prepare('SELECT id, razon_social FROM sg_proveedores WHERE id=? AND activo=1').get(b.proveedor_id)
+      : null;
+    if (!provRow) {
+      return res.status(400).json({ ok: false,
+        error: 'Decí de qué proveedor es la mercadería: el número de partida se arma con el proveedor '
+             + 'y la fecha, y sin eso la descarga no se puede rastrear.' });
+    }
     const dft = defaultsProveedor(db, b.proveedor_id, b);
     const { documenta, tipoPrecio, tipoFiscal } = circuitoDeCompra(b, dft.tipo_fiscal);
     const fechaIngreso = val(b.fecha) || db.prepare("SELECT date('now','localtime') d").get().d;
@@ -3866,6 +4018,7 @@ router.post('/compra-retroactiva', requireAdmin, (req, res) => {
     res.json({ ok: true, data: { oc_id: Number(out.ocId), recepcion_id: Number(out.recId) } });
   } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
 });
+
 
 // ── LOTES (lectura mínima para F2; F3 extiende con trazabilidad + bajas) ────────
 router.get('/lotes', requireAuth, (req, res) => {
