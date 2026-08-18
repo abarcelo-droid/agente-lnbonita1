@@ -50924,7 +50924,16 @@ function sgctPcGuardarLote() {
     nombres:    nombres
   })}).then(function(r){
     btn.disabled = false; btn.textContent = 'Crear cuentas';
-    if (!r.ok) return toast('Error: ' + (r.error || 'desconocido'), 'er');
+    if (!r.ok) {
+      // EL TIPO SALE DEL GRUPO DE LA SECCIÓN y el modal manda 'resultado' por
+      // default: si no coincide, se corrige el selector solo y se dice por qué,
+      // en vez de dejar al usuario probando.
+      if (r.tipo_esperado) {
+        var selT = document.getElementById('sgct-lote-tipo');
+        if (selT) selT.value = r.tipo_esperado;
+      }
+      return toast(r.error || 'desconocido', 'er');
+    }
 
     // El resultado se muestra DENTRO del modal y no en un toast que se va: hay
     // que poder leer qué se creó con qué código y, sobre todo, qué se salteó.
@@ -50943,6 +50952,16 @@ function sgctPcGuardarLote() {
          + '<div style="font-size:11px;color:#92400e;max-height:120px;overflow:auto">'
          + r.omitidas.map(function(o){ return esc(o.nombre)+' — '+esc(o.motivo); }).join('<br>')
          + '</div></div>';
+    }
+    // RENGLONES QUE NO ERAN UN NOMBRE. Un pegado de Excel trae separadores,
+    // guiones y espacios de ancho cero que el ojo no ve. Antes cada uno de esos
+    // se convertía en una cuenta; ahora se descartan, y se dice cuántos: si el
+    // que pegó 40 renglones ve 37 cuentas, tiene que saber por qué.
+    if (r.descartados) {
+      h += '<div style="background:#f8fafc;border:1px dashed var(--bor);border-radius:6px;'
+         + 'padding:8px 11px;margin-top:10px;font-size:11.5px;color:var(--mut)">'
+         + r.descartados + ' renglón(es) del pegado no eran un nombre de cuenta '
+         + '(guiones, puntos, líneas en blanco) y se descartaron.</div>';
     }
     document.getElementById('sgct-lote-result').innerHTML = h;
     // Se deja la lista pegada: si algo se salteó, se ve al lado de lo que se
