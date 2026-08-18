@@ -6862,6 +6862,91 @@ router.get('/embarques', requireAuth, (req, res) => {
 });
 
 // DETALLE — cabecera + rubros + cálculo completo.
+// ── TIPO DE CAMBIO ESPERADO (Importación) ───────────────────────────────────────────
+// Un solo valor para todos los embarques que todavía son una proyección: se mueve el TC y
+// se re-costean solos, en vez de entrar camión por camión a corregirlo a mano.
+//
+// OJO CON EL ORDEN: estas dos rutas van ANTES de /embarques/:id, si no Express matchea
+// :id='tc-esperado' y nunca llegan.
+//
+// Qué alcanza y qué NO:
+//   - 'cerrado' nunca: su costo ya es definitivo.
+//   - con tc_real cargado nunca. No solo porque su costo sale del TC real, sino porque
+//     tc_estimado es la base contra la que el cierre mide el desvío: pisarla borraría la
+//     comparación proyectado vs real, que es justo lo que sirve para aprender a cotizar.
+//   - 'recibido' solo si se pide expresamente, porque ahí ya hay lotes y mover el TC les
+//     reescribe el costo.
+const TC_ESPERADO_KEY = 'tc_esperado';
+
+function embarquesAlcanzadosPorTc(db) {
+  return db.prepare(`SELECT * FROM sg_embarques
+    WHERE activo=1 AND eliminado_en IS NULL AND estado <> 'cerrado' AND tc_real IS NULL
+    ORDER BY id`).all();
+}
+
+// GET /embarques/tc-esperado[?tc=1080] — valor guardado y, si mandás un tc, qué pasaría.
+router.get('/embarques/tc-esperado', requireAuth, (req, res) => {
+  const db = getDb();
+  try {
+    const guardado = db.prepare('SELECT valor FROM sg_config WHERE clave=?').get(TC_ESPERADO_KEY);
+    const nuevo = (req.query.tc != null && req.query.tc !== '') ? Number(req.query.tc) : null;
+    const embs = embarquesAlcanzadosPorTc(db);
+    const items = embs.map(e => {
+      const costos = embCostos(db, e.id);
+      const antes = calcEmbarque(e, costos);
+      const desp  = nuevo != null ? calcEmbarque({ ...e, tc_estimado: nuevo }, costos) : null;
+      const lotes = db.prepare('SELECT COUNT(*) n FROM sg_lotes WHERE embarque_id=? AND eliminado_en IS NULL').get(e.id).n;
+      return { id: e.id, nombre: e.nombre, estado: e.estado, tc_actual: e.tc_estimado,
+        cajas: e.cantidad_cajas, lotes,
+        costo_caja_antes: antes.costo_caja_neto,
+        costo_caja_despues: desp ? desp.costo_caja_neto : null,
+        delta: (desp && desp.neto != null && antes.neto != null) ? desp.neto - antes.neto : null };
+    });
+    // Los excluidos se informan para que nadie se pregunte por qué su camión no se movió.
+    const excluidos = db.prepare(`SELECT id, nombre, estado, tc_real FROM sg_embarques
+      WHERE activo=1 AND eliminado_en IS NULL AND (estado='cerrado' OR tc_real IS NOT NULL)
+      ORDER BY id`).all().map(e => ({ ...e,
+        motivo: e.estado === 'cerrado' ? 'cerrado' : 'ya tiene TC real' }));
+    res.json({ ok: true, data: {
+      tc_guardado: guardado ? Number(guardado.valor) : null,
+      tc_consultado: nuevo, items, excluidos,
+      con_lotes: items.filter(i => i.lotes > 0).length
+    } });
+  } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
+});
+
+// POST /embarques/tc-esperado — aplica el TC a los embarques alcanzados.
+// incluir_recibidos=true además re-costea los lotes de los que ya entraron.
+router.post('/embarques/tc-esperado', requireAdmin, (req, res) => {
+  const db = getDb();
+  try {
+    const tc = Number(req.body && req.body.tc);
+    if (!(tc > 0)) return res.status(400).json({ ok: false, error: 'El tipo de cambio tiene que ser un número mayor a cero' });
+    const incluirRecibidos = !!(req.body && req.body.incluir_recibidos);
+    const todos = embarquesAlcanzadosPorTc(db);
+    const objetivo = todos.filter(e => e.estado !== 'recibido' || incluirRecibidos);
+    let recosteados = 0, sinLinea = 0;
+    const tx = db.transaction(() => {
+      const up = db.prepare("UPDATE sg_embarques SET tc_estimado=?, modificado_en=datetime('now','localtime'), modificado_por=? WHERE id=?");
+      for (const e of objetivo) {
+        up.run(tc, uid(req), e.id);
+        if (e.estado === 'recibido') {
+          const r = recostearLotesEmbarque(db, { ...e, tc_estimado: tc }, uid(req));
+          recosteados += r.recosteados; sinLinea += r.sin_linea;
+        }
+      }
+      db.prepare(`INSERT INTO sg_config (clave, valor, modificado_en, modificado_por)
+        VALUES (?,?,datetime('now','localtime'),?)
+        ON CONFLICT(clave) DO UPDATE SET valor=excluded.valor,
+          modificado_en=excluded.modificado_en, modificado_por=excluded.modificado_por`)
+        .run(TC_ESPERADO_KEY, String(tc), uid(req));
+    });
+    tx();
+    res.json({ ok: true, data: { tc, actualizados: objetivo.length,
+      omitidos_recibidos: todos.length - objetivo.length, lotes_recosteados: recosteados, lotes_sin_linea: sinLinea } });
+  } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
+});
+
 router.get('/embarques/:id', requireAuth, (req, res) => {
   const db = getDb();
   try {

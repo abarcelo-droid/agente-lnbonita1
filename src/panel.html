@@ -3545,7 +3545,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
 
 
   <div class="sec sg-mod" id="sec-sg-importacion">
-    <div class="ph"><div><div class="ph-t">🍅 San Gerónimo · Importación</div><div class="ph-s">Cotizador de embarque: costo neto por caja, ajuste por merma y margen proyectado. Estimado vs real.</div></div><button class="btn bb" onclick="sgImpOpen()">+ Nuevo embarque</button></div>
+    <div class="ph"><div><div class="ph-t">🍅 San Gerónimo · Importación</div><div class="ph-s">Cotizador de embarque: costo neto por caja, ajuste por merma y margen proyectado. Estimado vs real.</div></div><div style="display:flex;gap:8px"><button class="btn bo" onclick="sgTcAbrir()">💱 TC esperado</button><button class="btn bb" onclick="sgImpOpen()">+ Nuevo embarque</button></div></div>
     <div class="ab-table-wrap"><table class="pa-tbl">
       <thead><tr><th>Embarque</th><th>Proveedor</th><th style="text-align:center">Estado</th><th style="text-align:right">Cajas</th><th style="text-align:right">Costo/caja neto</th><th style="text-align:right">Costo/caja c-imp.</th><th style="text-align:right">Margen proy.</th><th></th></tr></thead>
       <tbody id="sg-tb-embarques"><tr><td colspan="8" class="emp">Cargando…</td></tr></tbody>
@@ -3801,6 +3801,26 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
     <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:14px">
       <button class="btn bo" onclick="closeMB('sg-emb-recibir-modal')">Cancelar</button>
       <button class="btn bb" id="sg-emb-recibir-ok" onclick="sgImpConfirmarRecibir()">Confirmar recepción</button>
+    </div>
+  </div>
+</div>
+
+<!-- TC esperado: un solo valor para todos los embarques que todavía son proyección. -->
+<div class="ab-modal-overlay" id="sg-tc-modal">
+  <div class="ab-modal" style="max-width:760px">
+    <div class="mhd"><div class="mht">💱 Tipo de cambio esperado</div><button class="mcl" onclick="closeMB('sg-tc-modal')">×</button></div>
+    <div style="font-size:12px;color:var(--mut);margin-bottom:10px">Se aplica a los embarques que todavía son una proyección. Los <b>cerrados</b> y los que <b>ya tienen TC real</b> no se tocan: su costo ya es definitivo.</div>
+    <div style="display:flex;gap:10px;align-items:end;margin-bottom:10px">
+      <div class="fl" style="max-width:180px"><label>Nuevo TC esperado</label><input type="number" step="0.01" min="0" id="sg-tc-valor" oninput="sgTcPreview()"></div>
+      <div style="font-size:12px;color:var(--mut);padding-bottom:8px" id="sg-tc-actual"></div>
+    </div>
+    <div id="sg-tc-body"></div>
+    <label style="display:flex;align-items:center;gap:6px;font-size:12px;margin-top:10px" id="sg-tc-recib-wrap">
+      <input type="checkbox" id="sg-tc-recib"> Re-costear también los <b>recibidos</b> (reescribe el costo de sus lotes)
+    </label>
+    <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:14px">
+      <button class="btn bo" onclick="closeMB('sg-tc-modal')">Cancelar</button>
+      <button class="btn bb" id="sg-tc-ok" onclick="sgTcAplicar()" disabled>Aplicar</button>
     </div>
   </div>
 </div>
@@ -22638,6 +22658,66 @@ function sgImpAbrirRecibir(){
     eid('sg-emb-recibir-ok').disabled = false;
   });
 }
+// ── TIPO DE CAMBIO ESPERADO (masivo) ──────────────────────────────────────────
+// Mover el TC y que los camiones abiertos se re-costeen solos, en vez de entrar uno por uno.
+var SG_TC = { debounce: null };
+function sgTcAbrir(){
+  eid('sg-tc-valor').value=''; eid('sg-tc-recib').checked=false;
+  eid('sg-tc-body').innerHTML=''; eid('sg-tc-ok').disabled=true;
+  eid('sg-tc-modal').classList.add('on');
+  sgTcPreview();
+}
+function sgTcPreview(){
+  clearTimeout(SG_TC.debounce);
+  SG_TC.debounce = setTimeout(function(){
+    var v = eid('sg-tc-valor').value;
+    api('/api/sg/embarques/tc-esperado'+(v?('?tc='+encodeURIComponent(v)):'')).then(function(r){
+      if(!r||!r.ok){ eid('sg-tc-body').innerHTML='<div style="color:var(--err,#dc2626);font-size:12px">'+esc((r&&r.error)||'Error')+'</div>'; return; }
+      var d=r.data;
+      eid('sg-tc-actual').textContent = d.tc_guardado!=null ? ('Último aplicado: '+nr(d.tc_guardado)) : 'Todavía no se aplicó ninguno';
+      eid('sg-tc-recib-wrap').style.display = d.con_lotes ? '' : 'none';
+      if(!d.items.length){
+        eid('sg-tc-body').innerHTML='<div style="font-size:12px;color:var(--mut);padding:14px;text-align:center">No hay embarques alcanzados: todos están cerrados o ya tienen TC real.</div>';
+        eid('sg-tc-ok').disabled=true; return;
+      }
+      var hay = d.tc_consultado!=null;
+      eid('sg-tc-body').innerHTML =
+          '<table class="pa-tbl" style="font-size:12px;width:100%"><thead><tr><th>Embarque</th><th>Estado</th>'
+        + '<th style="text-align:right">TC actual</th><th style="text-align:right">$/caja ahora</th>'
+        + (hay?'<th style="text-align:right">$/caja nuevo</th><th style="text-align:right">Δ total</th>':'')
+        + '</tr></thead><tbody>'
+        + d.items.map(function(i){
+            var dl=i.delta;
+            return '<tr><td><b>'+esc(i.nombre||'')+'</b>'+(i.lotes?' <span style="font-size:10px;color:var(--mut)">'+i.lotes+' lote(s)</span>':'')+'</td>'
+              + '<td>'+esc(sgEmbEstadoLbl(i.estado))+'</td>'
+              + '<td style="text-align:right">'+(i.tc_actual!=null?nr(i.tc_actual):'—')+'</td>'
+              + '<td style="text-align:right">'+(i.costo_caja_antes!=null?sgMoney(Math.round(i.costo_caja_antes)):'—')+'</td>'
+              + (hay?('<td style="text-align:right;font-weight:600">'+(i.costo_caja_despues!=null?sgMoney(Math.round(i.costo_caja_despues)):'—')+'</td>'
+                +'<td style="text-align:right;color:'+(dl>0?'var(--err,#dc2626)':(dl<0?'var(--ok,#16a34a)':'var(--mut)'))+'">'+(dl!=null?((dl>0?'+':'')+sgMoney(Math.round(dl))):'—')+'</td>'):'')
+              + '</tr>';
+          }).join('')
+        + '</tbody></table>'
+        + (d.excluidos.length ? '<div style="font-size:11px;color:var(--mut);margin-top:8px">No se tocan: '
+            + d.excluidos.map(function(x){ return esc(x.nombre||('#'+x.id))+' ('+esc(x.motivo)+')'; }).join(' · ')+'</div>' : '');
+      eid('sg-tc-ok').disabled = !hay;
+    });
+  }, 300);
+}
+function sgTcAplicar(){
+  var v=parseFloat(eid('sg-tc-valor').value);
+  if(!(v>0)){ toast('Poné un tipo de cambio válido','er'); return; }
+  var btn=eid('sg-tc-ok'); btn.disabled=true;
+  api('/api/sg/embarques/tc-esperado','POST',{ tc:v, incluir_recibidos: eid('sg-tc-recib').checked }).then(function(r){
+    if(r&&r.ok){
+      var d=r.data;
+      toast('TC '+nr(d.tc)+' aplicado a '+d.actualizados+' embarque(s)'
+        +(d.lotes_recosteados?' · '+d.lotes_recosteados+' lote(s) re-costeado(s)':'')
+        +(d.omitidos_recibidos?' · '+d.omitidos_recibidos+' recibido(s) sin tocar':''),'ok');
+      closeMB('sg-tc-modal'); sgImpInit();
+    } else { toast((r&&r.error)||'Error','er'); btn.disabled=false; }
+  });
+}
+
 // ── RESULTADO Y CIERRE DEL CAMIÓN ─────────────────────────────────────────────
 // El resultado se calcula en vivo: lo vendido sale de los despachos reales de cada lote.
 function sgImpPct(p){ return (p==null) ? '—' : (Math.round(p*10)/10).toFixed(1)+'%'; }
