@@ -1183,6 +1183,9 @@ try {
   `);
   // Seed: el TC esperado plano que existía como parámetro suelto pasa a ser el mes actual.
   // La curva lo generaliza (es el mismo dato, con dimensión tiempo), así que no se pierde.
+  // OJO: sg_config se crea MÁS ABAJO en este archivo, así que en una base nueva esta lectura
+  // tira "no such table" y la agarra el catch. Está bien: en una base nueva no hay ningún
+  // valor plano que migrar. La tabla de la curva ya quedó creada arriba, que es lo que importa.
   const plano = db.prepare("SELECT valor FROM sg_config WHERE clave='tc_esperado'").get();
   const hayCurva = db.prepare('SELECT COUNT(*) n FROM sg_tc_esperado').get().n;
   if (plano && Number(plano.valor) > 0 && !hayCurva) {
@@ -1193,21 +1196,6 @@ try {
   }
 } catch (e) { console.error('[DB] SG sg_tc_esperado:', e.message); }
 
-// ── PARÁMETROS DE IMPORTACIÓN ───────────────────────────────────────────────────────
-// Alícuotas y porcentajes del despacho. Son los mismos para todas las importaciones, así que
-// viven una sola vez acá y cada embarque los hereda. Se editan desde la pantalla cuando
-// cambia alguna; INSERT OR IGNORE para no pisar lo que ya ajustaron.
-try {
-  const def = [
-    ['imp_iva_pct', '10.5'],            // IVA sobre la base imponible
-    ['imp_iibb_pct', '0.69'],           // percepción IIBB sobre la base imponible
-    ['imp_despachante_pct', '7'],       // honorarios del despachante, % de la base imponible
-    ['imp_iva_servicios_pct', '21'],    // IVA de despachante y gastos bancarios
-    ['imp_tasa_maria_usd', '110']       // Tasa María, monto fijo en dólares
-  ];
-  const ins = db.prepare('INSERT OR IGNORE INTO sg_config (clave, valor) VALUES (?,?)');
-  for (const [k, v] of def) ins.run(k, v);
-} catch (e) { console.error('[DB] SG parámetros de importación:', e.message); }
 
 // Base imponible: el flete y el seguro DECLARADOS en aduana. Son base de cálculo de
 // impuestos, no costos — el costo del flete es la factura del fletero, que va aparte.
@@ -1881,6 +1869,22 @@ db.exec(`
   );
   INSERT OR IGNORE INTO sg_config (clave, valor) VALUES ('fecha_corte', '2026-06-30');
 `);
+
+// ── PARÁMETROS DE IMPORTACIÓN ───────────────────────────────────────────────────────
+// Alícuotas y porcentajes del despacho. Son los mismos para todas las importaciones, así que
+// viven una sola vez acá y cada embarque los hereda. Se editan desde la pantalla cuando
+// cambia alguna; INSERT OR IGNORE para no pisar lo que ya ajustaron.
+try {
+  const def = [
+    ['imp_iva_pct', '10.5'],            // IVA sobre la base imponible
+    ['imp_iibb_pct', '0.69'],           // percepción IIBB sobre la base imponible
+    ['imp_despachante_pct', '7'],       // honorarios del despachante, % de la base imponible
+    ['imp_iva_servicios_pct', '21'],    // IVA de despachante y gastos bancarios
+    ['imp_tasa_maria_usd', '110']       // Tasa María, monto fijo en dólares
+  ];
+  const ins = db.prepare('INSERT OR IGNORE INTO sg_config (clave, valor) VALUES (?,?)');
+  for (const [k, v] of def) ins.run(k, v);
+} catch (e) { console.error('[DB] SG parámetros de importación:', e.message); }
 
 // (b) saldo_inicial al corte por cliente y por proveedor. Se SUMA al cálculo derivado de CC
 //     (no lo reemplaza): saldo_total = saldo_inicial + movimientos post-corte. Default 0.
