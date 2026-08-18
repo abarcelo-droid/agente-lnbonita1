@@ -3738,8 +3738,8 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
       <div class="fl"><label>NCM</label><input type="text" id="sg-emb-ncm"></div>
       <div class="fl"><label>Cert. origen Mercosur</label><label style="display:flex;align-items:center;gap:6px;font-size:13px;margin-top:4px"><input type="checkbox" id="sg-emb-cert"> Sí</label></div>
       <div class="fl"><label>Moneda embarque</label><select id="sg-emb-moneda"><option value="USD">USD</option><option value="ARS">ARS</option></select></div>
-      <div class="fl"><label>TC estimado</label><input type="number" step="0.01" id="sg-emb-tc-est" oninput="sgImpCalc()"></div>
-      <div class="fl"><label>TC real</label><input type="number" step="0.01" id="sg-emb-tc-real" oninput="sgImpCalc()"></div>
+      <div class="fl"><label>TC manual <span style="font-weight:400;color:var(--mut);font-size:11px">(opcional — pisa la curva)</span></label><input type="number" step="0.01" id="sg-emb-tc-est" oninput="sgImpCalc()" placeholder="sale de la curva" title="Dejalo vacío y cada rubro toma el TC de la curva según su fecha de pago. Cargalo solo si este embarque tiene un TC pactado o ya pagado."></div>
+      <div class="fl"><label>TC real</label><input type="number" step="0.01" id="sg-emb-tc-real" oninput="sgImpCalc()" placeholder="al cerrar" title="TC definitivo del embarque. Si cargás los montos reales en pesos, no hace falta."></div>
       <div class="fl"><label>Estado</label><select id="sg-emb-estado"></select></div>
       <div class="fl"><label>Cantidad de cajas <span style="font-weight:400;color:var(--mut);font-size:11px">(Σ líneas si hay desglose)</span></label><input type="number" step="1" min="0" id="sg-emb-cajas" oninput="sgImpCalc()"></div>
       <div class="fl"><label>Merma esperada %</label><input type="number" step="0.1" min="0" id="sg-emb-merma" oninput="sgImpCalc()"></div>
@@ -3767,7 +3767,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
     <div style="display:grid;grid-template-columns:1.4fr 1fr;gap:16px;margin-top:8px">
       <div>
         <div style="font-size:12px;font-weight:600;color:var(--mut);margin-bottom:6px">RUBROS · estimado vs real (el gap Δ es el control central)</div>
-        <table class="pa-tbl" style="font-size:12px"><thead><tr><th>Rubro</th><th>Mon.</th><th style="text-align:right">Estimado</th><th style="text-align:right">Real</th><th style="text-align:right">Δ (real−est.)</th></tr></thead>
+        <table class="pa-tbl" style="font-size:12px"><thead><tr><th>Rubro</th><th>Mon.</th><th style="text-align:right">Estimado</th><th style="text-align:right" title="Los pesos que efectivamente salieron">Real (en $)</th><th style="text-align:right">Δ (real−est.)</th><th title="Cuándo se paga. Solo aplica a los rubros en dólares.">Se paga a</th><th style="text-align:right" title="El de la curva en la fecha de pago. ⏰ = venció sin pagar, sigue rodando al de hoy. ✋ = TC manual del embarque.">TC</th></tr></thead>
           <tbody id="sg-emb-costos"></tbody></table>
       </div>
       <div>
@@ -22640,6 +22640,8 @@ var SG_EMB_ESTADOS = [['cotizacion','Cotización'],['abierto','Abierto'],['trans
 function sgEmbEstadoLbl(e){ var f=SG_EMB_ESTADOS.find(function(x){return x[0]===e;}); return f?f[1]:(e||'—'); }
 
 function sgImpInit(){
+  // La curva alimenta el preview en vivo de los TC por rubro; se cachea al entrar al módulo.
+  api('/api/sg/tc-esperado/curva').then(function(r){ SG._curva=(r&&r.ok&&r.data.curva)||[]; });
   api('/api/sg/embarques').then(function(r){
     var rows=(r&&r.ok)?r.data:[];
     eid('sg-tb-embarques').innerHTML = rows.length ? rows.map(function(e){
@@ -22861,15 +22863,24 @@ function sgImpCostoRow(c){
     +'<td>'+esc(c.l)+'</td>'
     +'<td><select id="sg-emb-mon-'+c.k+'" onchange="sgImpCalc()"><option value="ARS"'+(mon==='ARS'?' selected':'')+'>ARS</option><option value="USD"'+(mon==='USD'?' selected':'')+'>USD</option></select></td>'
     +'<td><input type="number" step="0.01" min="0" id="sg-emb-est-'+c.k+'" value="'+sgImpVal(v.monto_estimado)+'" oninput="sgImpCalc()" style="width:120px;text-align:right"></td>'
-    +'<td><input type="number" step="0.01" min="0" id="sg-emb-real-'+c.k+'" value="'+sgImpVal(v.monto_real)+'" oninput="sgImpCalc()" style="width:120px;text-align:right"></td>'
+    +'<td><input type="number" step="0.01" min="0" id="sg-emb-real-'+c.k+'" value="'+sgImpVal(v.monto_real)+'" oninput="sgImpCalc()" style="width:120px;text-align:right" title="Los pesos que efectivamente salieron"></td>'
     +'<td id="sg-emb-gap-'+c.k+'" style="text-align:right;color:var(--mut)">—</td>'
+    // Condición de pago: solo se habilita en los rubros en dólares, que son los únicos que
+    // necesitan saber a qué TC se van a liquidar. En pesos queda apagada.
+    +'<td id="sg-emb-pago-'+c.k+'" style="white-space:nowrap">'
+      +'<input type="number" step="1" id="sg-emb-pdias-'+c.k+'" value="'+sgImpVal(v.pago_dias)+'" oninput="sgImpCalc()" style="width:52px;text-align:right" placeholder="días">'
+      +' <select id="sg-emb-panc-'+c.k+'" onchange="sgImpCalc()" style="width:auto">'
+        +'<option value="eta"'+((v.pago_ancla||'eta')==='eta'?' selected':'')+'>de la llegada</option>'
+        +'<option value="etd"'+(v.pago_ancla==='etd'?' selected':'')+'>del embarque</option>'
+      +'</select></td>'
+    +'<td id="sg-emb-tc-'+c.k+'" style="text-align:right;color:var(--mut);white-space:nowrap">—</td>'
   +'</tr>';
 }
 // F4a — dos bloques como la planilla real: COSTOS (bruto) y CRÉDITOS RECUPERABLES (se restan).
 // Cada bloque cierra con su subtotal Σestimado | Σreal | Σgap (los llena sgImpCalc en vivo).
 function sgImpRenderCostos(){
   var grpHdr = function(txt, note){
-    return '<tr><td colspan="5" style="font-weight:700;font-size:11px;letter-spacing:.03em;color:var(--mut);padding-top:10px">'
+    return '<tr><td colspan="7" style="font-weight:700;font-size:11px;letter-spacing:.03em;color:var(--mut);padding-top:10px">'
       +txt+(note?' <span style="font-weight:400;letter-spacing:0;text-transform:none">· '+note+'</span>':'')+'</td></tr>';
   };
   var subRow = function(id, lbl){
@@ -22878,6 +22889,7 @@ function sgImpRenderCostos(){
       +'<td id="'+id+'-est" style="text-align:right;font-weight:600;color:var(--mut)">—</td>'
       +'<td id="'+id+'-real" style="text-align:right;font-weight:700">—</td>'
       +'<td id="'+id+'-gap" style="text-align:right">—</td>'
+      +'<td colspan="2"></td>'
     +'</tr>';
   };
   var costos = SG_EMB_CONCEPTOS.filter(function(c){ return !c.cred; });
@@ -22890,15 +22902,70 @@ function sgImpRenderCostos(){
     + creds.map(sgImpCostoRow).join('')
     + subRow('sg-emb-sub-cred','Total Créditos');
 }
+// Espejo en el navegador de tcEsperadoEnFecha() del backend, para el preview en vivo.
+// Si se toca la fórmula allá, hay que tocarla acá: el preview tiene que mostrar lo mismo
+// que después va a calcular el servidor.
+function sgTcFinDeMes(mes){ var p=String(mes).split('-'); return new Date(Date.UTC(+p[0],+p[1],0)).toISOString().slice(0,10); }
+function sgTcEnFecha(fecha){
+  var curva=(SG._curva||[]);
+  if(!curva.length||!fecha) return null;
+  var pts=curva.map(function(c){ return { f:sgTcFinDeMes(c.mes), v:Number(c.valor) }; })
+               .sort(function(a,b){ return a.f<b.f?-1:1; });
+  var f=String(fecha).slice(0,10);
+  for(var j=0;j<pts.length;j++) if(pts[j].f===f) return pts[j].v;
+  if(f<pts[0].f) return pts[0].v;
+  if(f>pts[pts.length-1].f) return pts[pts.length-1].v;
+  for(var i=1;i<pts.length;i++){
+    var a=pts[i-1], b=pts[i];
+    if(f<=b.f){ var t=(Date.parse(b.f)-Date.parse(a.f))/86400000;
+      return t>0 ? a.v+(b.v-a.v)*((Date.parse(f)-Date.parse(a.f))/86400000/t) : b.v; }
+  }
+  return pts[pts.length-1].v;
+}
+// Fecha de pago de un rubro: N días desde el hito elegido (ETA por defecto).
+function sgImpFechaPago(k){
+  var anc=(eid('sg-emb-panc-'+k)||{}).value||'eta';
+  var base=(anc==='etd'?eid('sg-emb-etd').value:eid('sg-emb-eta').value);
+  var dias=parseInt((eid('sg-emb-pdias-'+k)||{}).value,10);
+  if(!base||isNaN(dias)) return null;
+  var d=new Date(Date.parse(base+'T00:00:00Z'));
+  if(isNaN(d.getTime())) return null;
+  d.setUTCDate(d.getUTCDate()+dias);
+  return d.toISOString().slice(0,10);
+}
 function sgImpCalc(){
-  var tc = parseFloat(eid('sg-emb-tc-real').value) || parseFloat(eid('sg-emb-tc-est').value) || null;
-  var aARS = function(x, mon){ if(x==null||x==='') return null; var m=Number(x)||0; return (mon==='USD'&&tc)?m*tc:m; };
+  // tc_estimado dejó de ser obligatorio: si está cargado pisa la curva para todo el embarque.
+  var override = parseFloat(eid('sg-emb-tc-real').value) || parseFloat(eid('sg-emb-tc-est').value) || null;
+  var hoy = new Date().toISOString().slice(0,10);
   var bruto=0, cred=0;                                  // efectivo (COALESCE real,est) → alimenta el neto
   var sub={ bruto:{est:0,real:0}, cred:{est:0,real:0} }; // subtotales por bloque para la tabla de rubros
   SG_EMB_CONCEPTOS.forEach(function(c){
     var mon=eid('sg-emb-mon-'+c.k).value;
-    var est=aARS(eid('sg-emb-est-'+c.k).value, mon);
-    var real=aARS(eid('sg-emb-real-'+c.k).value, mon);
+    var esUSD=(mon==='USD');
+    // TC del rubro: el de la curva en su fecha de pago. LA REGLA DEL VENCIDO: si la fecha ya
+    // pasó y no se pagó, no se congela en un dólar viejo — sigue rodando al de hoy.
+    var fPago = esUSD ? sgImpFechaPago(c.k) : null;
+    var vencido = !!(fPago && fPago < hoy);
+    var fTC = (fPago && !vencido) ? fPago : hoy;
+    var tcR = esUSD ? (override!=null ? override : sgTcEnFecha(fTC)) : null;
+    var celdaTC=eid('sg-emb-tc-'+c.k), celdaPago=eid('sg-emb-pago-'+c.k);
+    if(celdaPago) celdaPago.style.opacity = esUSD?'1':'.35';
+    if(celdaTC){
+      if(!esUSD){ celdaTC.textContent='—'; celdaTC.style.color='var(--mut)'; }
+      else if(tcR==null){ celdaTC.textContent='sin curva'; celdaTC.style.color='var(--err,#dc2626)'; }
+      else {
+        celdaTC.textContent=nr(Math.round(tcR*100)/100)+(override!=null?' ✋':(vencido?' ⏰':''));
+        celdaTC.title = override!=null ? 'TC manual del embarque (pisa la curva)'
+          : (vencido ? 'El pago venció el '+fPago+' y sigue sin cargarse: se usa el dólar de hoy y se va a seguir moviendo'
+                     : (fPago ? 'Pago estimado el '+fPago : 'Sin condición de pago: se usa el dólar de hoy'));
+        celdaTC.style.color = vencido?'var(--err,#dc2626)':'var(--mut)';
+      }
+    }
+    var aARS=function(x){ if(x==null||x==='') return null; var m=Number(x)||0; return (esUSD&&tcR)?m*tcR:m; };
+    var est=aARS(eid('sg-emb-est-'+c.k).value);
+    // El real se carga en PESOS: es lo que salió de la caja, sin convertir.
+    var rv=eid('sg-emb-real-'+c.k).value;
+    var real=(rv==null||rv==='')?null:(Number(rv)||0);
     var efec = real!=null?real:(est!=null?est:0);
     var bk = c.cred?sub.cred:sub.bruto;
     if(est!=null) bk.est+=est;
@@ -22969,7 +23036,10 @@ function sgImpGather(){
     observaciones: eid('sg-emb-obs').value,
     costos: SG_EMB_CONCEPTOS.map(function(c){
       return { concepto:c.k, moneda:eid('sg-emb-mon-'+c.k).value,
-        monto_estimado:eid('sg-emb-est-'+c.k).value, monto_real:eid('sg-emb-real-'+c.k).value };
+        monto_estimado:eid('sg-emb-est-'+c.k).value, monto_real:eid('sg-emb-real-'+c.k).value,
+        moneda_real:'ARS',                                  // el real siempre en pesos
+        pago_ancla:(eid('sg-emb-panc-'+c.k)||{}).value||null,
+        pago_dias:(eid('sg-emb-pdias-'+c.k)||{}).value||null };
     }),
     // F5 — líneas de producto (descarta filas sin producto). El backend deriva cantidad_cajas = Σ cajas.
     lineas: (SG._embLineas||[]).filter(function(l){ return l.producto_id!=null && l.producto_id!==''; }).map(function(l){
@@ -23095,8 +23165,11 @@ function sgCurvaGuardar(){
   if(dup){ toast('El mes '+dup+' está cargado dos veces','er'); return; }
   filas.sort(function(a,b){ return a.mes<b.mes?-1:(a.mes>b.mes?1:0); });
   api('/api/sg/tc-esperado/curva','PUT',{ curva:filas }).then(function(r){
-    if(r&&r.ok){ toast('Curva guardada — '+r.data.meses+' mes(es)','ok'); closeMB('sg-curva-modal'); }
-    else toast((r&&r.error)||'Error','er');
+    if(r&&r.ok){
+      toast('Curva guardada — '+r.data.meses+' mes(es)','ok');
+      SG._curva=filas;                    // el preview de los embarques usa la curva nueva
+      closeMB('sg-curva-modal'); sgImpInit();
+    } else toast((r&&r.error)||'Error','er');
   });
 }
 
