@@ -1193,6 +1193,24 @@ try {
   }
 } catch (e) { console.error('[DB] SG sg_tc_esperado:', e.message); }
 
+// ── Condición de pago por rubro del embarque ────────────────────────────────────────
+// El TC de un rubro sale de la curva en su FECHA DE PAGO, así que cada rubro en dólares
+// necesita saber cuándo se paga. Se expresa como "N días desde un hito" (ETD o ETA) para
+// que si el barco se corre, la fecha —y el TC— se recalculen solos. 'fija' es la salida
+// para el caso puntual que no cuelga de ningún hito.
+// Los rubros en pesos no llevan nada: se pagan en el momento y no tienen TC.
+// moneda_real: el real se carga en PESOS (lo que salió de la caja); la columna existe por si
+// algún día se paga desde una cuenta en dólares.
+try {
+  const cols = db.prepare("PRAGMA table_info(sg_embarque_costos)").all().map(c => c.name);
+  const nuevas = [
+    ['pago_ancla', 'TEXT'], ['pago_dias', 'INTEGER'], ['pago_fecha', 'TEXT'],
+    ['moneda_real', "TEXT DEFAULT 'ARS'"]
+  ].filter(([n]) => !cols.includes(n));
+  for (const [n, t] of nuevas) db.exec(`ALTER TABLE sg_embarque_costos ADD COLUMN ${n} ${t}`);
+  if (nuevas.length) console.log(`[DB] SG sg_embarque_costos migrado (+${nuevas.map(x => x[0]).join(', ')})`);
+} catch (e) { console.error('[DB] SG migración sg_embarque_costos (pago):', e.message); }
+
 // ── MÓDULO IMPORTACIÓN (F3) — cierre del embarque ───────────────────────────────────
 // Al cerrar se congela la foto de lo PROYECTADO (estimados + tc estimado) contra lo REAL
 // (COALESCE(real, estimado) + tc real). Es la única forma de aprender si cotizás bien: sin
