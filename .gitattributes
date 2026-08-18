@@ -1,2 +1,8 @@
 # Auto detect text files and perform LF normalization
 * text=auto
+
+# panel.html es un archivo de 3 MB: la deteccion automatica de git lo dio por
+# binario y lo guardo con CRLF, y a partir de ahi CADA commit reescribia las
+# 51.000 lineas enteras. Un diff asi no se puede revisar y choca con cualquier
+# rama paralela. Se declara explicito.
+src/panel.html text eol=lf

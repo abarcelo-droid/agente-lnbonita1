@@ -2778,43 +2778,43 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
       <button class="btn bb" onclick="sgCoopOpen()">+ Nueva cooperativa</button>
       <button class="btn bo" onclick="sgCcoopLoad()">↻ Actualizar</button>
     </div>
-
-    <div style="display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap;margin-bottom:16px">
-      <div class="fl"><label>Desde</label><input type="date" id="sgcc-desde" onchange="sgCcoopLoad()"></div>
-      <div class="fl"><label>Hasta</label><input type="date" id="sgcc-hasta" onchange="sgCcoopLoad()"></div>
-      <div class="fl"><label>Cooperativa</label><select id="sgcc-coop" onchange="sgCcoopLoad()"><option value="">— Todas —</option></select></div>
-      <div style="display:inline-flex;gap:2px;background:var(--bg);border:1px solid var(--bor);border-radius:8px;padding:3px">
-        <div class="sgcc-est on" data-e=""                     onclick="sgCcoopEstado('')">Todas</div>
-        <div class="sgcc-est"    data-e="sin_coop"             onclick="sgCcoopEstado('sin_coop')">⚠️ Sin cooperativa</div>
-        <div class="sgcc-est"    data-e="pendiente_valorizar"  onclick="sgCcoopEstado('pendiente_valorizar')">⏳ A valorizar</div>
-        <div class="sgcc-est"    data-e="valorizado"           onclick="sgCcoopEstado('valorizado')">✅ Valorizadas</div>
-      </div>
-    </div>
-    <style>
-      .sg-mod .sgcc-est{padding:5px 12px;cursor:pointer;font-size:12px;font-weight:600;border-radius:6px;color:var(--mut)}
-      .sg-mod .sgcc-est.on{background:var(--burg);color:#fff}
-      .sg-mod .sgcc-kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:18px}
-      .sg-mod .sgcc-kpi{border:1px solid var(--bor);border-radius:10px;padding:12px 14px;background:var(--bg)}
-      .sg-mod .sgcc-kpi .v{font-size:22px;font-weight:700;color:var(--txt);line-height:1.15}
-      .sg-mod .sgcc-kpi .r{font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--mut);margin-top:3px}
-      .sg-mod .sgcc-kpi.alerta{border-color:#e0a72e;background:rgba(224,167,46,.12)}
-    </style>
-
-    <!-- El catálogo. Una cooperativa es la cuadrilla que descarga y SIEMPRE
-         cuelga de un proveedor, que es a quién se le paga: sin eso, una descarga
-         cargada no se puede liquidar. -->
-    <div style="font-weight:700;font-size:12px;text-transform:uppercase;letter-spacing:.04em;color:var(--mut);margin-bottom:8px">
-      🤝 Cooperativas dadas de alta
-    </div>
-    <div class="ab-table-wrap" style="margin-bottom:22px"><table class="pa-tbl">
-      <thead><tr><th>Cooperativa</th><th>Se le factura a</th><th>Contacto</th>
-        <th style="text-align:right">Descargas</th><th></th></tr></thead>
-      <tbody id="sg-tb-coops"><tr><td colspan="5" class="emp">Cargando…</td></tr></tbody>
-    </table></div>
-
-    <div id="sgcc-kpis" class="sgcc-kpis"></div>
-    <div id="sgcc-coops"></div>
-    <div id="sgcc-detalle"><div class="emp">Cargando…</div></div>
+
+    <div style="display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap;margin-bottom:16px">
+      <div class="fl"><label>Desde</label><input type="date" id="sgcc-desde" onchange="sgCcoopLoad()"></div>
+      <div class="fl"><label>Hasta</label><input type="date" id="sgcc-hasta" onchange="sgCcoopLoad()"></div>
+      <div class="fl"><label>Cooperativa</label><select id="sgcc-coop" onchange="sgCcoopLoad()"><option value="">— Todas —</option></select></div>
+      <div style="display:inline-flex;gap:2px;background:var(--bg);border:1px solid var(--bor);border-radius:8px;padding:3px">
+        <div class="sgcc-est on" data-e=""                     onclick="sgCcoopEstado('')">Todas</div>
+        <div class="sgcc-est"    data-e="sin_coop"             onclick="sgCcoopEstado('sin_coop')">⚠️ Sin cooperativa</div>
+        <div class="sgcc-est"    data-e="pendiente_valorizar"  onclick="sgCcoopEstado('pendiente_valorizar')">⏳ A valorizar</div>
+        <div class="sgcc-est"    data-e="valorizado"           onclick="sgCcoopEstado('valorizado')">✅ Valorizadas</div>
+      </div>
+    </div>
+    <style>
+      .sg-mod .sgcc-est{padding:5px 12px;cursor:pointer;font-size:12px;font-weight:600;border-radius:6px;color:var(--mut)}
+      .sg-mod .sgcc-est.on{background:var(--burg);color:#fff}
+      .sg-mod .sgcc-kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:18px}
+      .sg-mod .sgcc-kpi{border:1px solid var(--bor);border-radius:10px;padding:12px 14px;background:var(--bg)}
+      .sg-mod .sgcc-kpi .v{font-size:22px;font-weight:700;color:var(--txt);line-height:1.15}
+      .sg-mod .sgcc-kpi .r{font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--mut);margin-top:3px}
+      .sg-mod .sgcc-kpi.alerta{border-color:#e0a72e;background:rgba(224,167,46,.12)}
+    </style>
+
+    <!-- El catálogo. Una cooperativa es la cuadrilla que descarga y SIEMPRE
+         cuelga de un proveedor, que es a quién se le paga: sin eso, una descarga
+         cargada no se puede liquidar. -->
+    <div style="font-weight:700;font-size:12px;text-transform:uppercase;letter-spacing:.04em;color:var(--mut);margin-bottom:8px">
+      🤝 Cooperativas dadas de alta
+    </div>
+    <div class="ab-table-wrap" style="margin-bottom:22px"><table class="pa-tbl">
+      <thead><tr><th>Cooperativa</th><th>Se le factura a</th><th>Contacto</th>
+        <th style="text-align:right">Descargas</th><th></th></tr></thead>
+      <tbody id="sg-tb-coops"><tr><td colspan="5" class="emp">Cargando…</td></tr></tbody>
+    </table></div>
+
+    <div id="sgcc-kpis" class="sgcc-kpis"></div>
+    <div id="sgcc-coops"></div>
+    <div id="sgcc-detalle"><div class="emp">Cargando…</div></div>
   
     </div>
     <div class="sggd-pane" id="sggd-pane-repaso"><div class="emp" style="padding:40px">🔁 Repasos — próximamente (Fase 3).</div></div>
