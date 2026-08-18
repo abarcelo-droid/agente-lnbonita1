@@ -2921,7 +2921,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
           <option value="rechazado">Rechazados</option>
           <option value="anulado">Anulados</option>
         </select>
-        <input id="cb-ct-q" placeholder="🔎 Librador, banco o número…" oninput="sgCbPintar()"
+        <input id="cb-ct-q" placeholder="🔎 Cliente, librador, banco o número…" oninput="sgCbPintar()"
                style="max-width:280px;flex:1">
       </div>
     </div>
@@ -3062,6 +3062,12 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
         <button class="mcl" onclick="closeMB('cb-ct-modal')">×</button></div>
       <div class="mbd">
         <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px">
+          <!-- DE QUIÉN SE COBRÓ, que no es lo mismo que quién firmó el cheque:
+               muchas veces al cliente le pagaron con ese cheque y él lo endosó.
+               Sin este dato la cartera dice qué hay, pero no contra qué cuenta
+               corriente entró. -->
+          <div class="fl"><label>A qué cliente se le cobró</label>
+            <select id="cb-ct-cliente"></select></div>
           <div class="fl"><label>Librador</label>
             <input id="cb-ct-librador" placeholder="Quién firma el cheque"></div>
           <div class="fl"><label>Banco</label><input id="cb-ct-banco"></div>
@@ -6650,8 +6656,8 @@ function sgCbTercerosPintar(){
   var q = ((eid('cb-ct-q') || {}).value || '').toLowerCase().trim();
   var lista = SG_CB.terceros.filter(function(c){
     if (!q) return true;
-    return ((c.librador || '') + ' ' + (c.banco || '') + ' ' + (c.nro_cheque || ''))
-      .toLowerCase().indexOf(q) >= 0;
+    return ((c.cliente_nombre || '') + ' ' + (c.librador || '') + ' ' + (c.banco || '')
+      + ' ' + (c.nro_cheque || '')).toLowerCase().indexOf(q) >= 0;
   });
 
   var cartera = SG_CB.terceros.filter(function(c){ return c.estado === 'en_cartera'; });
@@ -6668,7 +6674,7 @@ function sgCbTercerosPintar(){
     + vencidos.length + '</div></div>';
 
   var th = eid('cb-th');
-  if (th) th.innerHTML = '<tr><th class="cb-nom">Librador</th>'
+  if (th) th.innerHTML = '<tr><th class="cb-nom">De quién</th>'
     + '<th style="width:130px">Banco</th><th style="width:110px">N°</th>'
     + '<th style="width:100px">Vence</th>'
     + '<th style="width:130px;text-align:right">Importe</th>'
@@ -6693,7 +6699,14 @@ function sgCbTercerosPintar(){
       acc += ' <button class="btn bd bs" onclick="sgCbCtAnular(' + c.id + ')">Anular</button>';
     }
     return '<tr' + (muerto ? ' style="opacity:.5"' : '') + '>'
-      + '<td class="cb-nom"><b>' + escH(c.librador || '—') + '</b>'
+      // Arriba de quién se cobró; abajo, quién firmó el papel. Cuando son
+      // distintos —el cliente endosó un cheque que le dieron a él— hay que ver
+      // los dos: uno dice contra qué cuenta corriente entró y el otro, a quién
+      // reclamarle si rebota.
+      + '<td class="cb-nom"><b>' + escH(c.cliente_nombre || c.librador || '—') + '</b>'
+        + (c.cliente_nombre && c.librador && c.cliente_nombre !== c.librador
+            ? '<div style="font-size:10.5px;color:var(--mut)">firma ' + escH(c.librador) + '</div>'
+            : '')
         + (c.cuenta_destino_nombre
             ? '<div style="font-size:10.5px;color:var(--mut)">→ ' + escH(c.cuenta_destino_nombre) + '</div>'
             : '')
@@ -6722,6 +6735,16 @@ function sgCbCtOpen(){
   ['cb-ct-librador', 'cb-ct-banco', 'cb-ct-nro', 'cb-ct-monto', 'cb-ct-notas', 'cb-ct-fvto']
     .forEach(function(id){ var e = eid(id); if (e) e.value = ''; });
   var f = eid('cb-ct-frec'); if (f) f.value = new Date().toISOString().slice(0, 10);
+  var sel = eid('cb-ct-cliente');
+  if (sel) {
+    sel.innerHTML = '<option value="">— sin cliente —</option>';
+    api('/api/sg/clientes').then(function(r){
+      var cs = (r && r.ok) ? (r.data || []) : [];
+      sel.innerHTML = '<option value="">— sin cliente —</option>' + cs.map(function(c){
+        return '<option value="' + c.id + '">' + esc(c.razon_social) + '</option>';
+      }).join('');
+    });
+  }
   sgModalArriba('cb-ct-modal');
 }
 
@@ -6729,6 +6752,7 @@ function sgCbCtGuardar(){
   var monto = sgMilParse((eid('cb-ct-monto') || {}).value) || 0;
   if (!(monto > 0)) { toast('Poné el importe del cheque', 'er'); return; }
   sgCbApi('/cheques-terceros', 'POST', {
+    cliente_id: (eid('cb-ct-cliente') || {}).value || null,
     librador: (eid('cb-ct-librador') || {}).value,
     banco: (eid('cb-ct-banco') || {}).value,
     nro_cheque: (eid('cb-ct-nro') || {}).value,
