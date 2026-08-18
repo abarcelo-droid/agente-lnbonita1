@@ -3215,40 +3215,35 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
         <button class="mcl" onclick="closeMB('sg-pago-modal')">×</button></div>
       <div class="mbd">
         <div id="sg-pago-aviso"></div>
-        <div class="fl" style="margin-bottom:10px"><label>Forma de pago</label>
-          <div class="sg-fp" id="sg-pago-formas">
-            <button type="button" class="sg-fp-b" data-fp="efectivo" onclick="sgPagoForma('efectivo')">
-              <span class="sg-fp-i">💵</span><span>Caja</span></button>
-            <button type="button" class="sg-fp-b" data-fp="cheque" onclick="sgPagoForma('cheque')">
-              <span class="sg-fp-i">🧾</span><span>Cheque</span></button>
-            <button type="button" class="sg-fp-b" data-fp="transferencia" onclick="sgPagoForma('transferencia')">
-              <span class="sg-fp-i">🏦</span><span>Transferencia</span></button>
-            <button type="button" class="sg-fp-b" data-fp="insumos" disabled
-                    title="Pagar con insumos se desarrolla más adelante">
-              <span class="sg-fp-i">📦</span><span>Insumos</span></button>
-          </div>
-        </div>
         <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px">
           <div class="fl"><label>Fecha</label><input type="date" id="sg-pago-fecha"></div>
-          <div class="fl"><label id="sg-pago-cuenta-lb">De qué cuenta sale</label>
-            <select id="sg-pago-cuenta" onchange="sgPagoCuentaCambio()"></select></div>
-          <div class="fl"><label>Referencia</label>
-            <input id="sg-pago-ref" placeholder="N° de transferencia, recibo…"></div>
+          <div class="fl"><label>Referencia general</label>
+            <input id="sg-pago-ref" placeholder="N° de orden de pago, recibo…"></div>
         </div>
-        <!-- ── EL CHEQUE ──────────────────────────────────────────────────
-             El número no se escribe en "referencia" —texto libre que no
-             controla nadie— sino contra la chequera, que es la que sabe qué
-             números existen y cuáles ya se usaron. -->
-        <div class="sg-oc-box" id="sg-pago-cheque" style="margin-top:10px;display:none">
-          <div class="sg-oc-box-tit">El cheque</div>
-          <div style="display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap">
-            <div class="fl" style="margin:0;min-width:230px"><label>Chequera</label>
-              <select id="sg-pago-chequera" onchange="sgPagoProximoCheque()"></select></div>
-            <div class="fl" style="margin:0"><label>N° de cheque</label>
-              <input id="sg-pago-chnro" inputmode="numeric" style="width:130px;text-align:right"></div>
-            <div class="fl" style="margin:0"><label>Vencimiento</label>
-              <input type="date" id="sg-pago-chvto" style="width:160px"></div>
-            <div id="sg-pago-chaviso" style="font-size:11.5px;color:var(--mut);flex:1;min-width:200px"></div>
+        <!-- ── DE DÓNDE SALE LA PLATA ──────────────────────────────────────
+             Puede salir de varios lados a la vez: 100.000 de la caja, un cheque
+             a 30 días por 300.000 y una transferencia por el resto. Con una
+             sola forma había que cargarlo como tres pagos distintos, que
+             después figuran como tres movimientos que nadie sabe que eran el
+             mismo. -->
+        <div style="font-weight:700;font-size:12px;text-transform:uppercase;letter-spacing:.04em;
+             color:var(--mut);margin:14px 0 6px;display:flex;justify-content:space-between;
+             align-items:baseline;gap:10px">
+          <span>Con qué se paga</span>
+          <span id="sg-pago-medios-tot" style="font-weight:600;text-transform:none;letter-spacing:0"></span>
+        </div>
+        <div id="sg-pago-medios"></div>
+        <div class="fl" style="margin:8px 0 4px"><label>Agregar otro medio de pago</label>
+          <div class="sg-fp" id="sg-pago-formas">
+            <button type="button" class="sg-fp-b" onclick="sgPagoMedioAdd('efectivo')">
+              <span class="sg-fp-i">💵</span><span>Caja</span></button>
+            <button type="button" class="sg-fp-b" onclick="sgPagoMedioAdd('cheque')">
+              <span class="sg-fp-i">🧾</span><span>Cheque</span></button>
+            <button type="button" class="sg-fp-b" onclick="sgPagoMedioAdd('transferencia')">
+              <span class="sg-fp-i">🏦</span><span>Transferencia</span></button>
+            <button type="button" class="sg-fp-b" disabled
+                    title="Pagar con insumos se desarrolla más adelante">
+              <span class="sg-fp-i">📦</span><span>Insumos</span></button>
           </div>
         </div>
         <div style="font-weight:700;font-size:12px;text-transform:uppercase;letter-spacing:.04em;
@@ -5451,99 +5446,159 @@ function sgPagoCuentasDe(forma){
   });
 }
 
-function sgPagoForma(f){
-  SG_PAGO.forma = f;
-  var cont = eid('sg-pago-formas');
-  if (cont) [].slice.call(cont.querySelectorAll('.sg-fp-b')).forEach(function(b){
-    b.classList.toggle('on', b.getAttribute('data-fp') === f);
+var SG_FP_LBL = { efectivo: ['💵', 'Caja'], cheque: ['🧾', 'Cheque'],
+                  transferencia: ['🏦', 'Transferencia'] };
+
+// AGREGAR UN MEDIO. El primero se lleva todo lo que falta; a partir del segundo,
+// el que agrega dice cuánto sale de cada lado.
+function sgPagoMedioAdd(forma){
+  var cts = sgPagoCuentasDe(forma);
+  if (!cts.length) {
+    toast(forma === 'efectivo' ? 'No hay ninguna caja cargada en Caja y Bancos'
+      : (forma === 'cheque' ? 'Ninguna cuenta bancaria está marcada con chequera'
+         : 'No hay ninguna cuenta bancaria cargada'), 'er');
+    return;
+  }
+  var usable = cts.filter(function(c){ return c.cuenta_contable_id && c.puedo !== 0; })[0] || cts[0];
+  SG_PAGO.medios.push({ forma: forma, cuenta_fin_id: usable.id, monto: null,
+                        referencia: '', chequera_id: '', nro_cheque: '', cheque_vto: '' });
+  sgPagoMediosPintar();
+  sgPagoTotal();
+  // La chequera del medio nuevo se pide sola: si no, el desplegable arranca
+  // vacío y parece que la cuenta no tiene talonario.
+  if (forma === 'cheque') sgPagoChequeras(SG_PAGO.medios.length - 1);
+}
+
+function sgPagoMedioDel(i){
+  SG_PAGO.medios.splice(i, 1);
+  sgPagoMediosPintar();
+  sgPagoTotal();
+}
+
+function sgPagoMedioUpd(i, campo, valor){
+  if (!SG_PAGO.medios[i]) return;
+  SG_PAGO.medios[i][campo] = valor;
+  if (campo === 'cuenta_fin_id' && SG_PAGO.medios[i].forma === 'cheque') sgPagoChequeras(i);
+  if (campo === 'monto') sgPagoTotal();
+}
+
+function sgPagoMediosPintar(){
+  var cont = eid('sg-pago-medios'); if (!cont) return;
+  if (!SG_PAGO.medios.length) {
+    cont.innerHTML = '<div class="emp" style="padding:14px;font-size:12.5px">'
+      + 'Elegí abajo con qué se paga. Puede ser más de una cosa: parte de la caja, '
+      + 'parte con un cheque y parte por transferencia.</div>';
+    return;
+  }
+  var uno = SG_PAGO.medios.length === 1;
+  cont.innerHTML = SG_PAGO.medios.map(function(m, i){
+    var lbl = SG_FP_LBL[m.forma] || ['💸', m.forma];
+    var cts = sgPagoCuentasDe(m.forma);
+    var opts = cts.map(function(c){
+      var mal = !c.cuenta_contable_id ? ' — sin cuenta contable'
+              : (c.puedo === 0 ? ' — no es tuya' : '');
+      return '<option value="' + c.id + '"' + (String(c.id) === String(m.cuenta_fin_id) ? ' selected' : '')
+        + (mal ? ' disabled' : '') + '>' + esc(c.nombre) + mal + '</option>';
+    }).join('');
+    var h = '<div class="sg-oc-box" style="margin-bottom:8px;padding:10px 12px">'
+      + '<div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap">'
+      + '<div style="font-size:20px;line-height:1.6" title="' + esc(lbl[1]) + '">' + lbl[0] + '</div>'
+      + '<div class="fl" style="margin:0;flex:1;min-width:190px"><label>'
+        + (m.forma === 'efectivo' ? 'De qué caja sale' : 'De qué cuenta sale') + '</label>'
+        + '<select onchange="sgPagoMedioUpd(' + i + ',\'cuenta_fin_id\',this.value)">'
+        + (opts || '<option value="">— no hay cuentas —</option>') + '</select></div>'
+      + '<div class="fl" style="margin:0"><label>Importe</label>'
+        + '<input type="text" inputmode="decimal" id="sg-pago-m-' + i + '" placeholder="'
+        + (uno ? 'todo' : '$ 0') + '" style="width:130px;text-align:right" value="'
+        + (m.monto ? esc(sgMilShow(m.monto)) : '') + '"'
+        + ' oninput="this.value=sgMilFmtLive(this.value);sgPagoMedioUpd(' + i + ',\'monto\',sgMilParse(this.value))"></div>'
+      + '<div class="fl" style="margin:0;min-width:150px"><label>Referencia</label>'
+        + '<input value="' + esc(m.referencia || '') + '"'
+        + ' oninput="sgPagoMedioUpd(' + i + ',\'referencia\',this.value)"></div>'
+      + '<button class="btn bd bs" type="button" title="Sacar este medio"'
+        + ' onclick="sgPagoMedioDel(' + i + ')">×</button>'
+      + '</div>';
+    if (m.forma === 'cheque') {
+      h += '<div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap;margin-top:8px;'
+        + 'padding-top:8px;border-top:1px solid var(--bor)">'
+        + '<div class="fl" style="margin:0;min-width:210px"><label>Chequera</label>'
+          + '<select id="sg-pago-chq-' + i + '" onchange="sgPagoProximoCheque(' + i + ')">'
+          + '<option value="">—</option></select></div>'
+        + '<div class="fl" style="margin:0"><label>N° de cheque</label>'
+          + '<input id="sg-pago-chnro-' + i + '" inputmode="numeric" style="width:120px;text-align:right"'
+          + ' value="' + esc(m.nro_cheque || '') + '"'
+          + ' oninput="sgPagoMedioUpd(' + i + ',\'nro_cheque\',this.value)"></div>'
+        + '<div class="fl" style="margin:0"><label>Vencimiento</label>'
+          + '<input type="date" style="width:155px" value="' + esc(m.cheque_vto || '') + '"'
+          + ' onchange="sgPagoMedioUpd(' + i + ',\'cheque_vto\',this.value)"></div>'
+        + '<div id="sg-pago-chaviso-' + i + '" style="font-size:11.5px;color:var(--mut);flex:1;min-width:190px"></div>'
+        + '</div>';
+    }
+    return h + '</div>';
+  }).join('');
+  // Los desplegables de chequera se llenan después de existir en el DOM.
+  SG_PAGO.medios.forEach(function(m, i){ if (m.forma === 'cheque') sgPagoChequeras(i); });
+}
+
+function sgPagoChequeras(i){
+  var m = SG_PAGO.medios[i]; if (!m) return;
+  var sel = eid('sg-pago-chq-' + i); if (!sel) return;
+  if (!m.cuenta_fin_id) { sel.innerHTML = '<option value="">—</option>'; return; }
+  api('/api/sg/tesoreria/chequeras?cuentaId=' + m.cuenta_fin_id).then(function(r){
+    var qs = (r && r.ok) ? r.data : [];
+    sel.innerHTML = qs.length
+      ? qs.map(function(q){
+          return '<option value="' + q.id + '"' + (String(q.id) === String(m.chequera_id) ? ' selected' : '')
+            + '>' + esc(q.nro_chequera || ('#' + q.id)) + ' — ' + q.desde + ' al ' + q.hasta + '</option>';
+        }).join('')
+      : '<option value="">— sin chequeras cargadas —</option>';
+    if (!m.chequera_id && qs.length) m.chequera_id = qs[0].id;
+    sgPagoProximoCheque(i);
   });
-  var lb = eid('sg-pago-cuenta-lb');
-  if (lb) lb.textContent = f === 'efectivo' ? 'De qué caja sale' : 'De qué cuenta sale';
-  var box = eid('sg-pago-cheque'); if (box) box.style.display = (f === 'cheque') ? '' : 'none';
-  sgPagoCuentasPintar();
 }
 
 function sgPagoCuentasPintar(){
-  var sel = eid('sg-pago-cuenta'); if (!sel) return;
-  var previo = sel.value;
-  var cts = sgPagoCuentasDe(SG_PAGO.forma);
-  // Sin cuenta contable el pago no puede entrar al libro; y si la cuenta tiene
-  // dueño y no sos vos, tampoco. Se muestran igual, deshabilitadas y diciendo
-  // por qué: esconderlas se lee como "no hay caja cargada" y termina en que
-  // alguien crea una segunda caja que ya existía.
-  var usables = cts.filter(function(c){ return c.cuenta_contable_id && c.puedo !== 0; });
-  sel.innerHTML = cts.length
-    ? cts.map(function(c){
-        var mal = !c.cuenta_contable_id ? ' — sin cuenta contable'
-                : (c.puedo === 0 ? ' — no es tuya' : '');
-        return '<option value="' + c.id + '"' + (mal ? ' disabled' : '')
-          + '>' + esc(c.nombre) + mal + '</option>';
-      }).join('')
-    : '<option value="">— no hay cuentas para esta forma de pago —</option>';
-  if (previo && sel.querySelector('option[value="' + previo + '"]')) sel.value = previo;
-
   // SIN CUENTA NO HAY PAGO, y el desplegable solo no lo explica: se dice qué
   // falta y dónde se arregla, en vez de dejar el botón fallando.
+  var cts = SG_PAGO.cuentas;
+  var usables = cts.filter(function(c){ return c.cuenta_contable_id && c.puedo !== 0; });
   var av = eid('sg-pago-aviso');
   if (av) {
     var falta = '';
-    if (!SG_PAGO.cuentas.length) {
+    if (!cts.length) {
       falta = '⚠️ Todavía no hay ninguna cuenta cargada en Caja y Bancos. Cargá el banco o la caja '
             + 'de donde sale la plata, con su cuenta contable, y volvé acá.';
-    } else if (!cts.length) {
-      falta = SG_PAGO.forma === 'efectivo'
-        ? '⚠️ No hay ninguna CAJA cargada en Caja y Bancos. Para pagar en efectivo hace falta una.'
-        : (SG_PAGO.forma === 'cheque'
-            ? '⚠️ Ninguna cuenta bancaria está marcada con chequera. Marcala en Caja y Bancos y '
-              + 'cargale el talonario.'
-            : '⚠️ No hay ninguna cuenta bancaria cargada en Caja y Bancos.');
     } else if (!usables.length) {
       falta = cts.some(function(c){ return c.cuenta_contable_id; })
-        ? '⚠️ Ninguna de esas cuentas es tuya: todas tienen usuarios asignados y no estás entre '
-          + 'ellos. Que te agreguen desde Caja y Bancos.'
-        : '⚠️ Ninguna de esas cuentas tiene cuenta contable asignada. Sin eso el pago no puede '
-          + 'entrar al libro: asignásela en Caja y Bancos.';
+        ? '⚠️ Ninguna cuenta es tuya: todas tienen usuarios asignados y no estás entre ellos. '
+          + 'Que te agreguen desde Caja y Bancos.'
+        : '⚠️ Ninguna cuenta tiene cuenta contable asignada. Sin eso el pago no puede entrar al '
+          + 'libro: asignásela en Caja y Bancos.';
     }
     av.innerHTML = falta
       ? '<div style="border:1.5px solid #e0a72e;background:rgba(224,167,46,.10);border-radius:8px;'
         + 'padding:9px 11px;margin-bottom:10px;font-size:12.5px;color:#9a3412">' + falta + '</div>'
       : '';
   }
-  sgPagoCuentaCambio();
-}
-
-function sgPagoCuentaCambio(){
-  sgPagoAsientoPintar();
-  if (SG_PAGO.forma !== 'cheque') return;
-  var cta = (eid('sg-pago-cuenta') || {}).value;
-  var sel = eid('sg-pago-chequera'); if (!sel) return;
-  if (!cta) { sel.innerHTML = '<option value="">—</option>'; return; }
-  api('/api/sg/tesoreria/chequeras?cuentaId=' + cta).then(function(r){
-    var qs = (r && r.ok) ? r.data : [];
-    sel.innerHTML = qs.length
-      ? qs.map(function(q){
-          return '<option value="' + q.id + '">' + esc(q.nro_chequera || ('#' + q.id))
-            + ' — ' + q.desde + ' al ' + q.hasta + '</option>';
-        }).join('')
-      : '<option value="">— sin chequeras cargadas —</option>';
-    sgPagoProximoCheque();
-  });
+  sgPagoMediosPintar();
 }
 
 // El próximo número libre, para no tener que ir a mirar el talonario.
-function sgPagoProximoCheque(){
-  var q = (eid('sg-pago-chequera') || {}).value;
-  var av = eid('sg-pago-chaviso'), nro = eid('sg-pago-chnro');
+function sgPagoProximoCheque(i){
+  var m = SG_PAGO.medios[i]; if (!m) return;
+  var sel = eid('sg-pago-chq-' + i);
+  var q = sel ? sel.value : m.chequera_id;
+  m.chequera_id = q;
+  var av = eid('sg-pago-chaviso-' + i), nro = eid('sg-pago-chnro-' + i);
   if (!q) { if (av) av.textContent = 'Cargá una chequera en Caja y Bancos.'; return; }
   api('/api/sg/tesoreria/chequeras/' + q + '/proximo').then(function(r){
     if (!r || !r.ok) return;
     if (r.data.agotada) {
       if (av) av.innerHTML = '<b style="color:#b91c1c">Esa chequera está agotada</b> — todos los '
         + 'números del ' + r.data.desde + ' al ' + r.data.hasta + ' ya se usaron.';
-      if (nro) nro.value = '';
       return;
     }
-    if (nro && !nro.value) nro.value = r.data.proximo;
+    if (nro && !nro.value) { nro.value = r.data.proximo; m.nro_cheque = r.data.proximo; }
     if (av) av.innerHTML = 'Próximo libre: <b>' + r.data.proximo + '</b> (talonario ' + r.data.desde
       + ' al ' + r.data.hasta + '). Un número no se usa dos veces.';
   });
@@ -5551,16 +5606,16 @@ function sgPagoProximoCheque(){
 
 function sgPagoOpen(provId, nombre){
   SG_PAGO = { provId: provId, facturas: [], cuentas: [], anticipos: [],
-              aCuentaDisp: 0, forma: 'transferencia', ctaProveedores: null };
+              aCuentaDisp: 0, medios: [], ctaProveedores: null };
   var t = eid('sg-pago-tit'); if (t) t.textContent = 'Registrar pago — ' + nombre;
   var f = eid('sg-pago-fecha'); if (f) f.value = new Date().toISOString().slice(0, 10);
-  ['sg-pago-ref', 'sg-pago-notas', 'sg-pago-acuenta', 'sg-pago-chnro', 'sg-pago-chvto']
+  ['sg-pago-ref', 'sg-pago-notas', 'sg-pago-acuenta']
     .forEach(function(id){ var el = eid(id); if (el) el.value = ''; });
 
   api('/api/sg/pagos/cuentas').then(function(r){
     SG_PAGO.cuentas = (r && r.ok) ? r.data : [];
     SG_PAGO.ctaProveedores = (r && r.ok) ? (r.proveedores || null) : null;
-    sgPagoForma('transferencia');
+    sgPagoCuentasPintar();
   });
 
   // LO QUE YA ESTÁ A CUENTA. Si el productor tiene una seña de 500 y la factura
@@ -5688,6 +5743,17 @@ function sgPagoTotal(){
       : (cab ? cab + '<br><span style="font-size:12px;font-weight:400;color:var(--mut)">'
                + 'No sale plata hoy</span>' : '');
   }
+  var mt = eid('sg-pago-medios-tot');
+  if (mt) {
+    var rep2 = SG_PAGO.medios.reduce(function(a, m){
+      return a + ((SG_PAGO.medios.length === 1 && !(m.monto > 0)) ? t : (m.monto || 0));
+    }, 0);
+    rep2 = Math.round(rep2 * 100) / 100;
+    mt.innerHTML = !SG_PAGO.medios.length ? ''
+      : (Math.abs(rep2 - t) < 0.01
+          ? '<span style="color:#0f766e">✓ ' + sgMoney(rep2) + '</span>'
+          : '<span style="color:#b91c1c">' + sgMoney(rep2) + ' de ' + sgMoney(t) + '</span>');
+  }
   sgPagoAsientoPintar();
   return t;
 }
@@ -5715,27 +5781,38 @@ function sgPagoGuardar(){
   var body = {
     proveedor_id: SG_PAGO.provId,
     fecha: (eid('sg-pago-fecha') || {}).value,
-    forma_pago: SG_PAGO.forma,
     referencia: (eid('sg-pago-ref') || {}).value,
     notas: (eid('sg-pago-notas') || {}).value,
     a_cuenta: aCuenta,
     imputaciones: imputaciones
   };
-  // Sólo hace falta cuenta si HOY sale plata: aplicar un anticipo no mueve el
+  // Sólo hacen falta medios si HOY sale plata: aplicar un anticipo no mueve el
   // banco, la plata salió el día del anticipo.
   var saleHoy = Math.round((sale + aCuenta) * 100) / 100;
   if (saleHoy > 0) {
-    var cuenta = (eid('sg-pago-cuenta') || {}).value;
-    if (!cuenta) { toast('Elegí de qué cuenta sale la plata', 'er'); return; }
-    body.cuenta_fin_id = Number(cuenta);
-    if (SG_PAGO.forma === 'cheque') {
-      var q = (eid('sg-pago-chequera') || {}).value;
-      var n = parseInt((eid('sg-pago-chnro') || {}).value, 10);
-      if (!q) { toast('Elegí de qué chequera sale el cheque', 'er'); return; }
-      if (!(n > 0)) { toast('Poné el número de cheque', 'er'); return; }
-      body.chequera_id = Number(q);
-      body.nro_cheque = n;
-      body.cheque_vto = (eid('sg-pago-chvto') || {}).value || null;
+    if (!SG_PAGO.medios.length) { toast('Elegí con qué se paga', 'er'); return; }
+    var suma = 0, mal = '';
+    body.medios = SG_PAGO.medios.map(function(m){
+      var monto = (SG_PAGO.medios.length === 1 && !(m.monto > 0)) ? saleHoy : (m.monto || 0);
+      suma += monto;
+      if (!m.cuenta_fin_id) mal = mal || 'Elegí de qué cuenta sale cada medio';
+      if (!(monto > 0)) mal = mal || 'Poné cuánto sale de cada medio';
+      if (m.forma === 'cheque') {
+        if (!m.chequera_id) mal = mal || 'Elegí de qué chequera sale el cheque';
+        if (!(parseInt(m.nro_cheque, 10) > 0)) mal = mal || 'Poné el número de cheque';
+      }
+      return { forma_pago: m.forma, cuenta_fin_id: Number(m.cuenta_fin_id), monto: monto,
+               referencia: m.referencia || null,
+               chequera_id: m.chequera_id ? Number(m.chequera_id) : null,
+               nro_cheque: m.nro_cheque ? parseInt(m.nro_cheque, 10) : null,
+               cheque_vto: m.cheque_vto || null };
+    });
+    if (mal) { toast(mal, 'er'); return; }
+    // LOS MEDIOS TIENEN QUE SUMAR EL PAGO. Se avisa acá para no mandar un
+    // pedido que el servidor va a rechazar por lo mismo.
+    if (Math.abs(Math.round((suma - saleHoy) * 100) / 100) > 0.01) {
+      toast('Los medios suman ' + sgMoney(suma) + ' y el pago es de ' + sgMoney(saleHoy), 'er');
+      return;
     }
   }
   api('/api/sg/pagos', 'POST', body).then(function(r){
@@ -6510,22 +6587,43 @@ function sgPagoAsientoPintar(){
       + 'contra qué cancelar el pago, y el pago no se va a poder registrar.</div>';
     return;
   }
-  var id = (eid('sg-pago-cuenta') || {}).value;
-  var cta = SG_PAGO.cuentas.filter(function(c){ return String(c.id) === String(id); })[0];
-  if (!cta || !cta.cuenta_contable_id) {
+  if (!SG_PAGO.medios.length) {
     cont.innerHTML = '<div style="font-size:12.5px;color:#9a3412">'
-      + '⚠️ Elegí una cuenta con cuenta contable asignada: sin eso el pago no puede entrar al libro.</div>';
+      + '⚠️ Elegí con qué se paga: de ahí sale la contrapartida del asiento.</div>';
     return;
   }
+  // UNA LÍNEA POR MEDIO. Un pago mitad caja y mitad banco tiene dos
+  // contrapartidas: con una sola línea por el total quedaba todo descargado
+  // contra una de las dos cuentas, y el mayor de esa cuenta pasaba a mentir.
   var p = SG_PAGO.ctaProveedores;
-  cont.innerHTML = sgAsientoTabla([
-    { codigo: p.codigo, nombre: p.nombre, descripcion: 'Proveedores', debe: total, haber: 0 },
-    { codigo: cta.cuenta_codigo, nombre: cta.cuenta_nombre, descripcion: cta.nombre,
-      debe: 0, haber: total }
-  ], usaAC > 0
-      ? 'Los ' + sgMoney(usaAC) + ' que se aplican del saldo a cuenta NO entran acá: ya se asentaron '
-        + 'el día del anticipo.'
-      : '');
+  var lineas = [{ codigo: p.codigo, nombre: p.nombre, descripcion: 'Proveedores',
+                  debe: total, haber: 0 }];
+  var repartido = 0, sinCta = null;
+  SG_PAGO.medios.forEach(function(m){
+    var cta = SG_PAGO.cuentas.filter(function(c){ return String(c.id) === String(m.cuenta_fin_id); })[0];
+    if (!cta || !cta.cuenta_contable_id) { sinCta = cta ? cta.nombre : 'una de las cuentas'; return; }
+    // Con un solo medio el importe puede estar vacío: es todo el pago.
+    var monto = (SG_PAGO.medios.length === 1 && !(m.monto > 0)) ? total : (m.monto || 0);
+    repartido += monto;
+    lineas.push({ codigo: cta.cuenta_codigo, nombre: cta.cuenta_nombre,
+      descripcion: (SG_FP_LBL[m.forma] || ['', m.forma])[1] + ' · ' + cta.nombre,
+      debe: 0, haber: monto });
+  });
+  if (sinCta) {
+    cont.innerHTML = '<div style="font-size:12.5px;color:#9a3412">'
+      + '⚠️ "' + escH(sinCta) + '" no tiene cuenta contable asignada: sin eso el pago no puede '
+      + 'entrar al libro.</div>';
+    return;
+  }
+  var nota = usaAC > 0
+    ? 'Los ' + sgMoney(usaAC) + ' que se aplican del saldo a cuenta NO entran acá: ya se asentaron '
+      + 'el día del anticipo.'
+    : '';
+  if (Math.abs(Math.round((repartido - total) * 100) / 100) > 0.01) {
+    nota = 'Los medios suman ' + sgMoney(repartido) + ' y el pago es de ' + sgMoney(total)
+      + '. Mientras no coincidan, el pago no se registra.' + (nota ? ' ' + nota : '');
+  }
+  cont.innerHTML = sgAsientoTabla(lineas, nota);
 }
 
 // ── LOS CHEQUES QUE NOS DAN ─────────────────────────────────────────────

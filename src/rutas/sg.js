@@ -5874,23 +5874,27 @@ router.post('/pagos', requireAuth, (req, res) => {
              + 'movimiento no tienen sentido: entregarías una seña y la aplicarías en el mismo acto.' });
     }
 
-    // Con plata nueva sale de algún lado, y ese lado tiene que tener cuenta
-    // contable: sin ella el asiento no se puede armar. Si se cancela SÓLO con
-    // saldo a cuenta no sale plata de ninguna parte, así que no se pide cuenta.
-    let cuenta = null, ctaProv = null;
+    // ── DE DÓNDE SALE LA PLATA: PUEDE SER DE VARIOS LADOS ─────────────────
+    // Un pago de 500.000 sale como 100.000 de la caja, un cheque a 30 días por
+    // 300.000 y una transferencia por el resto. Con una sola forma había que
+    // cargarlo como tres pagos distintos, que después figuran como tres
+    // movimientos que nadie sabe que eran el mismo.
+    //
+    // El formato viejo —cuenta_fin_id + forma_pago sueltos— se sigue aceptando y
+    // se traduce a un medio único: hay llamadas que ya lo usan.
+    const mediosCrudos = Array.isArray(b.medios) && b.medios.length
+      ? b.medios
+      : (b.cuenta_fin_id
+          ? [{ cuenta_fin_id: b.cuenta_fin_id, forma_pago: b.forma_pago, monto: total,
+               referencia: b.referencia, chequera_id: b.chequera_id, nro_cheque: b.nro_cheque,
+               cheque_vto: b.cheque_vto }]
+          : []);
+
+    let ctaProv = null;
+    const medios = [];
     if (total > 0) {
-      cuenta = db.prepare(`SELECT c.*, cc.id AS cta FROM sg_fin_cuentas c
-        LEFT JOIN sg_cuentas cc ON cc.id = c.cuenta_contable_id
-        WHERE c.id=? AND c.activo=1`).get(b.cuenta_fin_id);
-      if (!cuenta) return res.status(400).json({ ok: false, error: 'Elegí de qué cuenta sale la plata' });
-      if (!puedeMoverCuenta(req.user, cuenta.id)) {
-        return res.status(403).json({ ok: false,
-          error: 'La cuenta "' + cuenta.nombre + '" tiene usuarios asignados y no estás entre ellos.' });
-      }
-      if (!cuenta.cta) {
-        return res.status(400).json({ ok: false,
-          error: 'La cuenta "' + cuenta.nombre + '" no tiene cuenta contable asociada, así que el pago no '
-               + 'puede entrar al libro. Asignásela en Caja y Bancos.' });
+      if (!mediosCrudos.length) {
+        return res.status(400).json({ ok: false, error: 'Elegí de qué cuenta sale la plata' });
       }
       ctaProv = cuentaProveedoresDeModelo(db);
       if (!ctaProv) {
@@ -5898,42 +5902,86 @@ router.post('/pagos', requireAuth, (req, res) => {
           error: 'El asiento modelo de las facturas no tiene línea de Proveedores: sin esa cuenta no se '
                + 'sabe contra qué cancelar el pago.' });
       }
-    }
+      const numerosPedidos = new Set();
+      for (const m of mediosCrudos) {
+        const cuenta = db.prepare(`SELECT c.*, cc.id AS cta FROM sg_fin_cuentas c
+          LEFT JOIN sg_cuentas cc ON cc.id = c.cuenta_contable_id
+          WHERE c.id=? AND c.activo=1`).get(m.cuenta_fin_id);
+        if (!cuenta) return res.status(400).json({ ok: false, error: 'Elegí de qué cuenta sale la plata' });
+        if (!puedeMoverCuenta(req.user, cuenta.id)) {
+          return res.status(403).json({ ok: false,
+            error: 'La cuenta "' + cuenta.nombre + '" tiene usuarios asignados y no estás entre ellos.' });
+        }
+        if (!cuenta.cta) {
+          return res.status(400).json({ ok: false,
+            error: 'La cuenta "' + cuenta.nombre + '" no tiene cuenta contable asociada, así que el pago no '
+                 + 'puede entrar al libro. Asignásela en Caja y Bancos.' });
+        }
+        // Con UN solo medio el importe puede venir vacío: es todo el pago.
+        const monto = (mediosCrudos.length === 1 && !(r2(m.monto) > 0)) ? total : r2(m.monto);
+        if (!(monto > 0)) {
+          return res.status(400).json({ ok: false,
+            error: 'Poné cuánto sale de "' + cuenta.nombre + '".' });
+        }
+        const forma = val(m.forma_pago) || 'transferencia';
 
-    // ── SI SE PAGA CON CHEQUE, SE ANOTA EL CHEQUE ─────────────────────────
-    // Hasta hoy el número de cheque se escribía en "referencia": texto libre que
-    // no lo controlaba nadie. Dos cheques con el mismo número en la misma cuenta
-    // es la misma orden librada dos veces, y eso no se descubre acá, se descubre
-    // en el banco cuando presentan el segundo.
-    const formaPago = val(b.forma_pago) || 'transferencia';
-    let cheque = null;
-    if (total > 0 && formaPago === 'cheque') {
-      const chequeraId = Number(b.chequera_id);
-      const nroCheque = Number(b.nro_cheque);
-      if (!chequeraId || !nroCheque) {
-        return res.status(400).json({ ok: false,
-          error: 'Pagando con cheque hay que decir de qué chequera sale y con qué número.' });
+        // ── SI SE PAGA CON CHEQUE, SE ANOTA EL CHEQUE ───────────────────
+        // Antes el número se escribía en "referencia": texto libre que no
+        // controlaba nadie. Dos cheques con el mismo número en la misma cuenta
+        // es la misma orden librada dos veces, y eso no se descubre acá: se
+        // descubre en el banco cuando presentan el segundo.
+        let cheque = null;
+        if (forma === 'cheque') {
+          const chequeraId = Number(m.chequera_id);
+          const nroCheque = Number(m.nro_cheque);
+          if (!chequeraId || !nroCheque) {
+            return res.status(400).json({ ok: false,
+              error: 'Pagando con cheque hay que decir de qué chequera sale y con qué número.' });
+          }
+          const ch = db.prepare('SELECT * FROM sg_fin_chequeras WHERE id=? AND activo=1').get(chequeraId);
+          if (!ch) return res.status(400).json({ ok: false, error: 'Esa chequera no existe o está dada de baja' });
+          if (Number(ch.cuenta_id) !== Number(cuenta.id)) {
+            return res.status(400).json({ ok: false,
+              error: 'Esa chequera no es de la cuenta "' + cuenta.nombre + '"' });
+          }
+          if (nroCheque < ch.desde || nroCheque > ch.hasta) {
+            return res.status(400).json({ ok: false,
+              error: 'El cheque ' + nroCheque + ' no pertenece a esa chequera: va del ' + ch.desde
+                   + ' al ' + ch.hasta });
+          }
+          const usado = chequeUsado(db, ch.cuenta_id, nroCheque, null);
+          if (usado) {
+            return res.status(400).json({ ok: false,
+              error: 'El cheque N° ' + nroCheque + ' YA SE EMITIÓ el ' + (usado.fecha_emision || 's/f')
+                   + (usado.beneficiario ? ' a ' + usado.beneficiario : '') + ' (' + usado.estado + '). '
+                   + 'Un número de cheque no se usa dos veces.' });
+          }
+          // Y TAMPOCO DOS VECES EN EL MISMO PAGO. El control de arriba mira lo
+          // que ya está en la base; dos renglones del mismo pago con el mismo
+          // número todavía no están, y entrarían los dos.
+          const clave = ch.cuenta_id + '#' + nroCheque;
+          if (numerosPedidos.has(clave)) {
+            return res.status(400).json({ ok: false,
+              error: 'Estás librando el cheque N° ' + nroCheque + ' dos veces en el mismo pago.' });
+          }
+          numerosPedidos.add(clave);
+          cheque = { chequera_id: ch.id, nro: nroCheque, fecha_vto: val(m.cheque_vto) || null };
+        }
+        medios.push({ cuenta, monto, forma, cheque, referencia: val(m.referencia) || null });
       }
-      const ch = db.prepare('SELECT * FROM sg_fin_chequeras WHERE id=? AND activo=1').get(chequeraId);
-      if (!ch) return res.status(400).json({ ok: false, error: 'Esa chequera no existe o está dada de baja' });
-      if (Number(ch.cuenta_id) !== Number(cuenta.id)) {
+
+      // LOS MEDIOS TIENEN QUE SUMAR EL PAGO. Si no, o sale plata que no canceló
+      // nada, o se da por cancelado algo que no se pagó.
+      const sumaMedios = r2(medios.reduce((a, m) => a + m.monto, 0));
+      if (Math.abs(sumaMedios - total) > 0.01) {
         return res.status(400).json({ ok: false,
-          error: 'Esa chequera no es de la cuenta "' + cuenta.nombre + '"' });
+          error: 'Los medios de pago suman ' + sumaMedios + ' y el pago es de ' + total + '.' });
       }
-      if (nroCheque < ch.desde || nroCheque > ch.hasta) {
-        return res.status(400).json({ ok: false,
-          error: 'El cheque ' + nroCheque + ' no pertenece a esa chequera: va del ' + ch.desde
-               + ' al ' + ch.hasta });
-      }
-      const usado = chequeUsado(db, ch.cuenta_id, nroCheque, null);
-      if (usado) {
-        return res.status(400).json({ ok: false,
-          error: 'El cheque N° ' + nroCheque + ' YA SE EMITIÓ el ' + (usado.fecha_emision || 's/f')
-               + (usado.beneficiario ? ' a ' + usado.beneficiario : '') + ' (' + usado.estado + '). '
-               + 'Un número de cheque no se usa dos veces.' });
-      }
-      cheque = { chequera_id: ch.id, nro: nroCheque, fecha_vto: val(b.cheque_vto) || null };
     }
+    const cuenta = medios.length ? medios[0].cuenta : null;
+    const formaPago = medios.length
+      ? (medios.length === 1 ? medios[0].forma : 'varios')
+      : (val(b.forma_pago) || 'transferencia');
 
     // Lo que hay a cuenta, anticipo por anticipo y del más viejo al más nuevo:
     // se consume en ese orden para que la seña vieja no quede eternamente
@@ -6033,34 +6081,39 @@ router.post('/pagos', requireAuth, (req, res) => {
         const insL = db.prepare(`INSERT INTO sg_asientos_lineas (asiento_id, cuenta_id, debe, haber, descripcion)
           VALUES (?,?,?,?,?)`);
         insL.run(asientoId, ctaProv, total, 0, 'Proveedores');
-        insL.run(asientoId, cuenta.cta, 0, total, cuenta.nombre);
+        // UNA LÍNEA POR MEDIO: cada plata sale de su propia cuenta contable. Con
+        // una sola línea por el total, un pago mitad caja y mitad banco quedaba
+        // descargado entero contra una de las dos.
+        for (const m of medios) insL.run(asientoId, m.cuenta.cta, 0, m.monto, m.cuenta.nombre);
         db.prepare('UPDATE sg_pagos_proveedores SET asiento_id=? WHERE id=?').run(asientoId, pagoId);
       }
 
-      // El cheque queda emitido y colgado del pago: desde Caja y Bancos se ve
-      // que salió, a quién y por cuánto, y su número queda quemado para siempre.
-      let chequeId = null;
-      if (cheque) {
-        const prov2 = db.prepare('SELECT razon_social FROM sg_proveedores WHERE id=?').get(proveedorId);
-        chequeId = db.prepare(`INSERT INTO sg_fin_cheques_propios
-          (chequera_id, nro_cheque, monto, beneficiario, fecha_emision, fecha_vto, pago_id)
-          VALUES (?,?,?,?,?,?,?)`).run(cheque.chequera_id, cheque.nro, total,
-          (prov2 && prov2.razon_social) || null, fecha, cheque.fecha_vto, pagoId).lastInsertRowid;
-      }
-
-      // ── Y LA CAJA (O EL BANCO) BAJA ───────────────────────────────────
-      // Sin esto, pagabas 1.500 desde el Galicia y Caja y Bancos seguía
-      // mostrando el saldo de antes: el asiento existía, pero el saldo de la
-      // pantalla se calcula con los movimientos, no con el libro. La plata
-      // salió de una cuenta concreta y tiene que verse ahí.
-      if (total > 0) {
-        const prov3 = db.prepare('SELECT razon_social FROM sg_proveedores WHERE id=?').get(proveedorId);
+      // Cada medio deja su rastro: el cheque emitido con su número quemado, el
+      // movimiento en la cuenta de donde salió, y el renglón del medio.
+      const prov3 = db.prepare('SELECT razon_social FROM sg_proveedores WHERE id=?').get(proveedorId);
+      const nombreProv = (prov3 && prov3.razon_social) || 'proveedor';
+      const insMedio = db.prepare(`INSERT INTO sg_pagos_medios
+        (pago_id, forma_pago, cuenta_fin_id, monto, referencia, chequera_id, nro_cheque, cheque_id)
+        VALUES (?,?,?,?,?,?,?,?)`);
+      for (const m of medios) {
+        let chequeId = null;
+        if (m.cheque) {
+          chequeId = db.prepare(`INSERT INTO sg_fin_cheques_propios
+            (chequera_id, nro_cheque, monto, beneficiario, fecha_emision, fecha_vto, pago_id)
+            VALUES (?,?,?,?,?,?,?)`).run(m.cheque.chequera_id, m.cheque.nro, m.monto,
+            nombreProv, fecha, m.cheque.fecha_vto, pagoId).lastInsertRowid;
+        }
+        // ── Y LA CAJA (O EL BANCO) BAJA ─────────────────────────────────
+        // Sin esto, pagabas 1.500 desde el Galicia y Caja y Bancos seguía
+        // mostrando el saldo de antes: el asiento existía, pero el saldo de la
+        // pantalla se calcula con los movimientos, no con el libro.
         db.prepare(`INSERT INTO sg_fin_movimientos
           (cuenta_id, fecha, tipo, concepto, monto, referencia, pago_id, cheque_id, usuario_id)
-          VALUES (?,?, 'egreso', ?,?,?,?,?,?)`).run(cuenta.id, fecha,
-          'Pago a ' + ((prov3 && prov3.razon_social) || 'proveedor')
-            + (cheque ? ' — cheque N° ' + cheque.nro : ''),
-          total, nro || null, pagoId, chequeId, uid(req));
+          VALUES (?,?, 'egreso', ?,?,?,?,?,?)`).run(m.cuenta.id, fecha,
+          'Pago a ' + nombreProv + (m.cheque ? ' — cheque N° ' + m.cheque.nro : ''),
+          m.monto, m.referencia || nro || null, pagoId, chequeId, uid(req));
+        insMedio.run(pagoId, m.forma, m.cuenta.id, m.monto, m.referencia,
+          m.cheque ? m.cheque.chequera_id : null, m.cheque ? m.cheque.nro : null, chequeId);
       }
     })();
     res.json({ ok: true, data: {
@@ -6069,6 +6122,17 @@ router.post('/pagos', requireAuth, (req, res) => {
       total, aplicado_a_cuenta: usaACuenta,
     } });
   } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
+});
+
+// Con qué se pagó cada uno. Un pago con varios medios decía "varios" y nada más.
+router.get('/pagos/:id/medios', requireAuth, (req, res) => {
+  const db = getDb();
+  try {
+    const rows = db.prepare(`SELECT m.*, c.nombre AS cuenta_nombre, c.tipo AS cuenta_tipo
+      FROM sg_pagos_medios m LEFT JOIN sg_fin_cuentas c ON c.id = m.cuenta_fin_id
+      WHERE m.pago_id = ? ORDER BY m.id`).all(req.params.id);
+    res.json({ ok: true, data: rows });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
 // Lo que quedó a cuenta de cada pago: lo entregado menos lo que ya se imputó.

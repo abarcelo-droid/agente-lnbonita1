@@ -409,6 +409,34 @@ db.exec(`
   );
 `);
 
+// ── UN PAGO SE PAGA CON VARIAS COSAS ──────────────────────────────────────
+// La orden de pago tenía UNA cuenta y UNA forma: o todo en efectivo, o todo por
+// transferencia, o todo con un cheque. En la vida real un pago de 500.000 sale
+// como 100.000 de la caja, un cheque a 30 días por 300.000 y una transferencia
+// por el resto — y con una sola forma había que cargarlo como tres pagos
+// distintos, que después figuran como tres movimientos que nadie sabe que eran
+// el mismo.
+//
+// Los medios cuelgan del pago. sg_pagos_proveedores.cuenta_fin_id se conserva
+// —apunta al primer medio— para no romper lo que ya lo lee.
+try {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS sg_pagos_medios (
+      id            INTEGER PRIMARY KEY AUTOINCREMENT,
+      pago_id       INTEGER NOT NULL REFERENCES sg_pagos_proveedores(id),
+      forma_pago    TEXT NOT NULL DEFAULT 'transferencia',
+      cuenta_fin_id INTEGER NOT NULL REFERENCES sg_fin_cuentas(id),
+      monto         REAL NOT NULL,
+      referencia    TEXT,
+      chequera_id   INTEGER,
+      nro_cheque    INTEGER,
+      cheque_id     INTEGER,
+      creado_en     TEXT DEFAULT (datetime('now','localtime'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_sg_pagos_medios ON sg_pagos_medios(pago_id);
+  `);
+} catch (e) { console.error('[SG] sg_pagos_medios:', e.message); }
+
 // ── QUIÉN TOCA CADA CAJA ──────────────────────────────────────────────────
 // Una caja de efectivo la maneja una persona, no "la empresa": la de la planta
 // la toca el encargado de planta y la de administración, administración. Sin
