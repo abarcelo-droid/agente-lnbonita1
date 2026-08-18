@@ -5,4 +5,7 @@
 # binario y lo guardo con CRLF, y a partir de ahi CADA commit reescribia las
 # 51.000 lineas enteras. Un diff asi no se puede revisar y choca con cualquier
 # rama paralela. Se declara explicito.
-src/panel.html text eol=lf
+# Sin eol=: que git normalice a LF en el repositorio (que es lo que arregla el
+# diff) pero deje CRLF en el disco de Windows, como el resto de los archivos.
+# Con eol=lf este archivo quedaba con finales distintos a todos sus vecinos.
+src/panel.html text
