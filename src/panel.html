@@ -2598,11 +2598,24 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
 
     <!-- Cuenta corriente clientes -->
     <div class="sgv-sub" id="sgv-sub-cc">
-      <div style="font-size:12px;color:var(--mut);margin-bottom:8px">💡 Saldo total = saldo de apertura (al 30/6) + facturado por despachos. Cobranzas/DSO llegan en V2 (cobrado = 0 por ahora).</div>
+      <div style="font-size:12px;color:var(--mut);margin-bottom:8px">
+        Saldo = saldo de apertura + lo facturado por despachos − lo cobrado. Hacé
+        click en un cliente para ver sus comprobantes y registrarle un cobro.
+      </div>
+      <!-- Van a figurar todos: sin buscador, encontrar uno es recorrer la lista
+           con el dedo. Filtra mientras se escribe, sin ir al servidor. -->
+      <div class="sg-oc-search" style="max-width:340px;margin-bottom:10px">
+        <input id="sg-cc-q" placeholder="🔎 Buscar cliente…" oninput="sgCcClPintar()"
+               style="width:100%;box-sizing:border-box">
+      </div>
       <div class="ab-table-wrap"><table class="pa-tbl">
-        <thead><tr><th>Cliente</th><th style="text-align:right">Saldo apertura</th><th style="text-align:right">Facturado</th><th style="text-align:right">Cobrado</th><th style="text-align:right">Saldo total</th><th style="text-align:right">Límite</th></tr></thead>
-        <tbody id="sg-tb-cc"><tr><td colspan="6" class="emp">Cargando…</td></tr></tbody>
+        <thead><tr><th>Cliente</th><th style="text-align:right">Saldo apertura</th><th style="text-align:right">Facturado</th><th style="text-align:right">Cobrado</th><th style="text-align:right">Saldo total</th><th style="text-align:right">Límite</th><th style="width:150px"></th></tr></thead>
+        <tbody id="sg-tb-cc"><tr><td colspan="7" class="emp">Cargando…</td></tr></tbody>
       </table></div>
+      <!-- LA FICHA DEL CLIENTE. El listado dice cuánto debe; esto dice por qué:
+           cada comprobante con lo que le queda, y los cobros que ya se le
+           tomaron. Para discutir un saldo hace falta ver las dos cosas. -->
+      <div id="sg-ccli-ficha" style="margin-top:18px;display:none"></div>
     </div>
   </div>
   <!-- ══ Módulo Reprocesos (#reproceso): decomiso / transformación / reproceso con clasificación ══ -->
@@ -4256,6 +4269,66 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
     <div class="ab-modal-footer">
       <button class="btn bo" onclick="closeMB('sgfe-modal')">Cancelar</button>
       <button class="btn bb" onclick="sgFeGuardar()">Guardar</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── REGISTRAR UNA COBRANZA ──────────────────────────────────────────
+     Un cobro se imputa a comprobantes concretos: no es "me pagó un millón",
+     es "me pagó la factura 1-23". Es lo que después permite discutir un
+     saldo renglón por renglón. -->
+<div class="ab-modal-overlay" id="sg-cob-modal">
+  <style>
+    /* NADA DE BARRAS LATERALES — convención del proyecto (ver CLAUDE.md). */
+    #sg-cob-modal .ab-modal{max-width:min(1100px,96vw);width:96vw}
+    #sg-cob-modal .pa-tbl{width:100%;table-layout:fixed}
+    #sg-cob-modal .pa-tbl th,#sg-cob-modal .pa-tbl td{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    #sg-cob-modal .ab-table-wrap{overflow-x:hidden !important}
+    @media(max-width:900px){ #sg-cob-modal .ab-table-wrap{overflow-x:auto !important} }
+  </style>
+  <div class="ab-modal">
+    <div class="mhd"><div class="mht" id="sg-cob-tit">Registrar cobranza</div>
+      <button class="mcl" onclick="closeMB('sg-cob-modal')">×</button></div>
+    <div class="mbd">
+      <div id="sg-cob-aviso"></div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px">
+        <div class="fl"><label>Fecha</label><input type="date" id="sg-cob-fecha"></div>
+        <div class="fl"><label>En qué cuenta entra</label>
+          <select id="sg-cob-cuenta" onchange="sgCobAsientoPintar()"></select></div>
+        <div class="fl"><label>Forma de cobro</label>
+          <select id="sg-cob-forma">
+            <option value="transferencia">Transferencia</option>
+            <option value="efectivo">Efectivo</option>
+            <option value="cheque">Cheque</option>
+          </select></div>
+        <div class="fl"><label>Importe cobrado</label>
+          <input type="text" inputmode="decimal" id="sg-cob-monto" placeholder="$ 0"
+                 style="text-align:right" oninput="this.value=sgMilFmtLive(this.value);sgCobTotal()"></div>
+        <div class="fl"><label>Referencia</label>
+          <input id="sg-cob-ref" placeholder="N° de transferencia, recibo…"></div>
+      </div>
+      <div style="font-weight:700;font-size:12px;text-transform:uppercase;letter-spacing:.04em;
+           color:var(--mut);margin:14px 0 6px">Qué comprobantes cancela</div>
+      <div class="ab-table-wrap"><table class="pa-tbl">
+        <thead><tr><th style="width:110px">Tipo</th><th>Comprobante</th>
+          <th style="width:96px">Fecha</th>
+          <th style="width:130px;text-align:right">Total</th>
+          <th style="width:130px;text-align:right">Pendiente</th>
+          <th style="width:180px;text-align:right">Se imputa</th></tr></thead>
+        <tbody id="sg-cob-tb"><tr><td colspan="6" class="emp">Cargando…</td></tr></tbody>
+      </table></div>
+      <div id="sg-cob-total" style="text-align:right;font-size:15px;font-weight:700;margin-top:10px"></div>
+      <!-- Convención del proyecto: toda operación que toca rubros contables
+           muestra su asiento con el "balancea" abajo, antes de confirmar. -->
+      <div class="sg-oc-box" style="margin-top:12px">
+        <div class="sg-oc-box-tit">Cómo entra al libro</div>
+        <div id="sg-cob-asiento"></div>
+      </div>
+      <div class="fl" style="margin-top:8px"><label>Notas</label><input id="sg-cob-notas"></div>
+      <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:14px">
+        <button class="btn bo" onclick="closeMB('sg-cob-modal')">Cancelar</button>
+        <button class="btn bb" onclick="sgCobGuardar()">Registrar el cobro</button>
+      </div>
     </div>
   </div>
 </div>
@@ -12218,19 +12291,296 @@ function sgDespVer(id){
 }
 
 // ── Cuenta corriente ──
+// ── CUENTA CORRIENTE DE CLIENTES ────────────────────────────────────────
+// El listado decía cuánto debe cada uno y ahí terminaba: no había forma de ver
+// POR QUÉ debía eso, ni de tomarle un cobro. La columna "cobrado" mostraba cero
+// escrito a mano.
+var SG_CCLI = { filas: [], sel: null, ficha: null, cuentas: [] };
+
 function sgLoadCC(){
   api('/api/sg/cc-clientes').then(function(r){
-    var rows=(r&&r.ok)?r.data:[];
-    eid('sg-tb-cc').innerHTML = rows.length ? rows.map(function(c){
-      var ap=Number(c.saldo_inicial)||0;
-      // alias (nombre_comercial) como identificador principal; se busca en cacheCli por id.
-      var cc=(SG.cacheCli||[]).find(function(x){return String(x.id)===String(c.id);});
-      var nom=sgCliLabel({ nombre_comercial:cc&&cc.nombre_comercial, razon_social:c.razon_social });
-      return '<tr><td>'+esc(nom||c.razon_social)+'</td>'
-        +'<td style="text-align:right'+(ap?'':';color:var(--mut)')+'">'+(ap?sgMoney(ap):'—')+'</td>'
-        +'<td style="text-align:right">'+sgMoney(c.total_facturado)+'</td><td style="text-align:right">'+sgMoney(c.total_cobrado)+'</td>'
-        +'<td style="text-align:right;font-weight:700">'+sgMoney(c.saldo)+'</td><td style="text-align:right">'+sgMoney(c.limite_credito)+'</td></tr>';
-    }).join('') : '<tr><td colspan="6" class="emp">Sin saldos ni movimientos.</td></tr>';
+    SG_CCLI.filas = (r && r.ok) ? r.data : [];
+    sgCcClPintar();
+  });
+}
+
+function sgCcClNombre(c){
+  var cc = (SG.cacheCli || []).find(function(x){ return String(x.id) === String(c.id); });
+  return sgCliLabel({ nombre_comercial: cc && cc.nombre_comercial, razon_social: c.razon_social })
+    || c.razon_social;
+}
+
+function sgCcClPintar(){
+  var q = String((eid('sg-cc-q') || {}).value || '').toLowerCase().trim();
+  var rows = SG_CCLI.filas.filter(function(c){
+    return !q || sgCcClNombre(c).toLowerCase().indexOf(q) >= 0;
+  });
+  var tb = eid('sg-tb-cc'); if (!tb) return;
+  tb.innerHTML = rows.length ? rows.map(function(c){
+    var ap = Number(c.saldo_inicial) || 0;
+    return '<tr><td>' + escH(sgCcClNombre(c)) + '</td>'
+      + '<td style="text-align:right' + (ap ? '' : ';color:var(--mut)') + '">' + (ap ? sgMoney(ap) : '—') + '</td>'
+      + '<td style="text-align:right">' + sgMoney(c.total_facturado) + '</td>'
+      + '<td style="text-align:right">' + sgMoney(c.total_cobrado) + '</td>'
+      + '<td style="text-align:right;font-weight:700">' + sgMoney(c.saldo) + '</td>'
+      + '<td style="text-align:right">' + sgMoney(c.limite_credito) + '</td>'
+      + '<td style="text-align:right;white-space:nowrap">'
+        + '<button class="btn bo bs" onclick="sgCcClFicha(' + c.id + ')">Ver</button>'
+        + (lnbPuedeOperar('sg-ventas')
+            ? ' <button class="btn bb bs" onclick="sgCobOpen(' + c.id + ')">💵 Cobrar</button>' : '')
+      + '</td></tr>';
+  }).join('')
+    : '<tr><td colspan="7" class="emp">'
+      + (SG_CCLI.filas.length ? 'Ningún cliente coincide con la búsqueda.' : 'Sin saldos ni movimientos.')
+      + '</td></tr>';
+}
+
+// ── LA FICHA ────────────────────────────────────────────────────────────
+function sgCcClFicha(id){
+  var c = SG_CCLI.filas.filter(function(x){ return x.id === id; })[0];
+  SG_CCLI.sel = c || { id: id, razon_social: '' };
+  var cont = eid('sg-ccli-ficha'); if (!cont) return;
+  cont.style.display = '';
+  cont.innerHTML = '<div class="emp">Cargando…</div>';
+  api('/api/sg/ventas/cc/' + id).then(function(r){
+    SG_CCLI.ficha = (r && r.ok) ? r : null;
+    sgCcClFichaPintar();
+    cont.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  });
+}
+
+function sgCcClFichaPintar(){
+  var cont = eid('sg-ccli-ficha'), d = SG_CCLI.ficha;
+  if (!cont || !d) { if (cont) cont.innerHTML = '<div class="emp">No se pudo leer la ficha.</div>'; return; }
+  var c = SG_CCLI.sel;
+  var h = '<div class="ph" style="margin-bottom:10px">'
+    + '<div><div class="ph-t" style="font-size:17px">' + escH(sgCcClNombre(c)) + '</div>'
+    + '<div class="ph-s">Le quedan ' + sgMoney(d.totales.pendiente) + ' de '
+      + sgMoney(d.totales.total) + ' facturados</div></div>'
+    + '<div style="display:flex;gap:8px">'
+    + (lnbPuedeOperar('sg-ventas')
+        ? '<button class="btn bb bs" onclick="sgCobOpen(' + c.id + ')">💵 Registrar cobro</button>' : '')
+    + '<button class="btn bo bs" onclick="sgCcClCerrar()">Cerrar</button></div></div>';
+
+  h += '<div style="font-weight:700;font-size:12px;text-transform:uppercase;letter-spacing:.04em;'
+    + 'color:var(--mut);margin:10px 0 6px">Comprobantes</div>'
+    + '<div class="ab-table-wrap"><table class="pa-tbl"><thead><tr>'
+    + '<th style="width:110px">Tipo</th><th>Comprobante</th><th style="width:96px">Fecha</th>'
+    + '<th style="width:130px;text-align:right">Total</th>'
+    + '<th style="width:130px;text-align:right">Cobrado</th>'
+    + '<th style="width:130px;text-align:right">Pendiente</th></tr></thead><tbody>'
+    + ((d.docs || []).length ? d.docs.map(function(x){
+        return '<tr' + (x.pendiente <= 0.01 ? ' style="opacity:.55"' : '') + '>'
+          + '<td>' + (x.tipo_doc === 'liquidacion' ? 'Liquidación' : 'Factura') + '</td>'
+          + '<td><code>' + escH(x.numero || '') + '</code></td>'
+          + '<td>' + escH(x.fecha || '—') + '</td>'
+          + '<td style="text-align:right">' + sgMoney(x.total) + '</td>'
+          + '<td style="text-align:right">' + sgMoney(x.cobrado) + '</td>'
+          + '<td style="text-align:right"><b>' + sgMoney(x.pendiente) + '</b></td></tr>';
+      }).join('')
+      : '<tr><td colspan="6" class="emp">Sin comprobantes.</td></tr>')
+    + '</tbody></table></div>';
+
+  var puedeAnular = lnbPuedeAnular('sg-ventas');
+  h += '<div style="font-weight:700;font-size:12px;text-transform:uppercase;letter-spacing:.04em;'
+    + 'color:var(--mut);margin:14px 0 6px">Cobros tomados</div>'
+    + ((d.cobranzas || []).length
+        ? '<div class="ab-table-wrap"><table class="pa-tbl"><thead><tr>'
+          + '<th style="width:96px">Fecha</th><th style="width:130px">Forma</th>'
+          + '<th>Referencia</th><th style="width:150px">Lo tomó</th>'
+          + '<th style="width:130px;text-align:right">Importe</th>'
+          + '<th style="width:96px"></th></tr></thead><tbody>'
+          + d.cobranzas.map(function(x){
+              return '<tr><td>' + escH(x.fecha || '') + '</td>'
+                + '<td>' + escH(x.forma_pago || '—') + '</td>'
+                + '<td>' + escH(x.referencia || '—') + '</td>'
+                + '<td style="font-size:11.5px">' + escH(x.usuario_nombre || '—') + '</td>'
+                + '<td style="text-align:right"><b>' + sgMoney(x.monto) + '</b></td>'
+                + '<td style="text-align:right">'
+                  + (puedeAnular
+                      ? '<button class="btn bd bs" onclick="sgCobAnular(' + x.id + ')">Anular</button>' : '')
+                  + '</td></tr>';
+            }).join('')
+          + '</tbody></table></div>'
+        : '<div class="emp" style="padding:10px">Todavía no se le tomó ningún cobro.</div>');
+  cont.innerHTML = h;
+}
+
+function sgCcClCerrar(){
+  SG_CCLI.sel = null;
+  var c = eid('sg-ccli-ficha'); if (c) { c.style.display = 'none'; c.innerHTML = ''; }
+}
+
+function sgCobAnular(id){
+  var motivo = prompt('¿Por qué se anula este cobro?\n\nVuelve el saldo a los comprobantes, '
+    + 'la plata sale de la cuenta y el asiento queda anulado.');
+  if (motivo === null) return;
+  api('/api/sg/ventas/cobranzas/' + id + '/anular', 'POST', { motivo: motivo }).then(function(r){
+    if (!r || !r.ok) { toast((r && r.error) || 'No se pudo anular', 'er'); return; }
+    toast('Cobro anulado', 'ok');
+    sgLoadCC();
+    if (SG_CCLI.sel) sgCcClFicha(SG_CCLI.sel.id);
+  });
+}
+
+// ── REGISTRAR UN COBRO ──────────────────────────────────────────────────
+var SG_COB = { clienteId: null, docs: [], cuentas: [], ctaCliente: null };
+
+function sgCobOpen(clienteId){
+  var c = SG_CCLI.filas.filter(function(x){ return x.id === clienteId; })[0];
+  SG_COB = { clienteId: clienteId, docs: [], cuentas: [], ctaCliente: null };
+  var t = eid('sg-cob-tit');
+  if (t) t.textContent = 'Registrar cobranza — ' + (c ? sgCcClNombre(c) : '');
+  var f = eid('sg-cob-fecha'); if (f) f.value = new Date().toISOString().slice(0, 10);
+  ['sg-cob-monto', 'sg-cob-ref', 'sg-cob-notas'].forEach(function(id){
+    var e = eid(id); if (e) e.value = '';
+  });
+
+  api('/api/sg/ventas/cobranzas/cuentas').then(function(r){
+    SG_COB.cuentas = (r && r.ok) ? r.data : [];
+    var sel = eid('sg-cob-cuenta'); if (!sel) return;
+    // Sin cuenta contable la cobranza no puede entrar al libro: se muestra, pero
+    // avisando, en vez de dejar elegirla y fallar recién al guardar.
+    var usables = SG_COB.cuentas.filter(function(x){ return x.cuenta_contable_id; });
+    sel.innerHTML = SG_COB.cuentas.length
+      ? SG_COB.cuentas.map(function(x){
+          return '<option value="' + x.id + '"' + (x.cuenta_contable_id ? '' : ' disabled') + '>'
+            + esc(x.nombre) + (x.cuenta_contable_id ? '' : ' — sin cuenta contable') + '</option>';
+        }).join('')
+      : '<option value="">— no hay cuentas cargadas —</option>';
+    var av = eid('sg-cob-aviso');
+    if (av) {
+      av.innerHTML = usables.length ? '' :
+        '<div style="border:1.5px solid #e0a72e;background:rgba(224,167,46,.10);border-radius:8px;'
+        + 'padding:9px 11px;margin-bottom:10px;font-size:12.5px;color:#9a3412">'
+        + (SG_COB.cuentas.length
+            ? '⚠️ Ninguna cuenta de Caja y Bancos tiene cuenta contable asignada. Sin eso la cobranza '
+              + 'no puede entrar al libro: asignásela en Caja y Bancos.'
+            : '⚠️ Todavía no hay ninguna cuenta cargada en Caja y Bancos. Cargá el banco o la caja '
+              + 'donde entra la plata, con su cuenta contable, y volvé acá.')
+        + '</div>';
+    }
+    sgCobAsientoPintar();
+  });
+
+  api('/api/sg/ventas/cc/' + clienteId).then(function(r){
+    // Sólo lo que todavía debe algo: los comprobantes ya cobrados no se imputan.
+    SG_COB.docs = ((r && r.ok) ? r.docs : []).filter(function(x){ return x.pendiente > 0.01; });
+    SG_COB.ctaCliente = (r && r.ok) ? (r.cuenta_cliente || null) : null;
+    sgCobPintar();
+    sgModalArriba('sg-cob-modal');
+  });
+}
+
+function sgCobPintar(){
+  var tb = eid('sg-cob-tb'); if (!tb) return;
+  tb.innerHTML = SG_COB.docs.length ? SG_COB.docs.map(function(x, i){
+    return '<tr><td>' + (x.tipo_doc === 'liquidacion' ? 'Liquidación' : 'Factura') + '</td>'
+      + '<td><code>' + escH(x.numero || '') + '</code></td>'
+      + '<td>' + escH(x.fecha || '—') + '</td>'
+      + '<td style="text-align:right">' + sgMoney(x.total) + '</td>'
+      + '<td style="text-align:right"><b>' + sgMoney(x.pendiente) + '</b></td>'
+      + '<td style="text-align:right;white-space:nowrap">'
+        + '<input type="text" inputmode="decimal" id="sg-cob-i-' + i + '" placeholder="$ 0"'
+        + ' style="width:118px;text-align:right"'
+        + ' oninput="this.value=sgMilFmtLive(this.value);sgCobTotal()">'
+        + ' <button class="btn bo bs" type="button" title="Imputar todo lo pendiente"'
+        + ' onclick="sgCobTodo(' + i + ')">todo</button></td></tr>';
+  }).join('')
+    : '<tr><td colspan="6" class="emp">Este cliente no tiene comprobantes pendientes. '
+      + 'Se puede cobrar igual: queda a cuenta.</td></tr>';
+  sgCobTotal();
+}
+
+function sgCobTodo(i){
+  var d = SG_COB.docs[i]; if (!d) return;
+  var el = eid('sg-cob-i-' + i);
+  if (el) { el.value = sgMilShow(d.pendiente); sgCobTotal(); }
+}
+
+// Lo imputado contra lo que entró. La diferencia queda a cuenta: un cliente que
+// paga un número redondo es la regla, no la excepción.
+function sgCobTotal(){
+  var imp = 0;
+  SG_COB.docs.forEach(function(_, i){ imp += sgMilParse((eid('sg-cob-i-' + i) || {}).value) || 0; });
+  imp = Math.round(imp * 100) / 100;
+  var total = sgMilParse((eid('sg-cob-monto') || {}).value) || 0;
+  var el = eid('sg-cob-total');
+  if (el) {
+    var aCuenta = Math.round((total - imp) * 100) / 100;
+    el.innerHTML = !total ? ''
+      : (imp > total + 0.01
+          ? '<span style="color:#b91c1c">Estás imputando ' + sgMoney(imp) + ' y cobraste '
+            + sgMoney(total) + '</span>'
+          : 'Cobrado: ' + sgMoney(total)
+            + (aCuenta > 0.01
+                ? '<div style="font-size:12px;font-weight:400;color:var(--mut)">'
+                  + sgMoney(imp) + ' a comprobantes · ' + sgMoney(aCuenta) + ' queda a cuenta</div>'
+                : ''));
+  }
+  sgCobAsientoPintar();
+  return total;
+}
+
+// El asiento: la cuenta donde entra la plata al DEBE contra el cliente al HABER.
+// Es el espejo del asiento de la liquidación, donde el cliente va al debe.
+function sgCobAsientoPintar(){
+  var cont = eid('sg-cob-asiento'); if (!cont) return;
+  var total = sgMilParse((eid('sg-cob-monto') || {}).value) || 0;
+  if (!(total > 0)) {
+    cont.innerHTML = '<div style="font-size:12.5px;color:var(--mut)">'
+      + 'Poné cuánto se cobró y acá se muestra el asiento que va a entrar al libro.</div>';
+    return;
+  }
+  var id = (eid('sg-cob-cuenta') || {}).value;
+  var cta = SG_COB.cuentas.filter(function(x){ return String(x.id) === String(id); })[0];
+  if (!cta || !cta.cuenta_contable_id) {
+    cont.innerHTML = '<div style="font-size:12.5px;color:#9a3412">'
+      + '⚠️ Elegí una cuenta con cuenta contable asignada: sin eso la cobranza no entra al libro.</div>';
+    return;
+  }
+  var cli = SG_COB.ctaCliente;
+  if (!cli) {
+    cont.innerHTML = '<div style="font-size:12.5px;color:#9a3412">'
+      + '⚠️ Este cliente no tiene cuenta contable asignada. Sin ella no se sabe contra qué cuenta '
+      + 'corriente se cancela el cobro: asignásela en su ficha de Maestros.</div>';
+    return;
+  }
+  cont.innerHTML = sgAsientoTabla([
+    { codigo: cta.cuenta_codigo, nombre: cta.cuenta_nombre, descripcion: cta.nombre,
+      debe: total, haber: 0 },
+    { codigo: cli.codigo, nombre: cli.nombre, descripcion: 'Cuenta corriente del cliente',
+      debe: 0, haber: total }
+  ]);
+}
+
+function sgCobGuardar(){
+  var total = sgMilParse((eid('sg-cob-monto') || {}).value) || 0;
+  if (!(total > 0)) { toast('Poné cuánto se cobró', 'er'); return; }
+  var cuenta = (eid('sg-cob-cuenta') || {}).value;
+  if (!cuenta) { toast('Elegí en qué cuenta entra la plata', 'er'); return; }
+  var docs = [], imp = 0;
+  SG_COB.docs.forEach(function(d, i){
+    var v = sgMilParse((eid('sg-cob-i-' + i) || {}).value) || 0;
+    if (v > 0) { docs.push({ tipo: d.tipo_doc, doc_id: d.id, monto: v }); imp += v; }
+  });
+  if (imp > total + 0.01) {
+    toast('Estás imputando ' + sgMoney(imp) + ' y cobraste ' + sgMoney(total), 'er'); return;
+  }
+  api('/api/sg/ventas/cobranzas', 'POST', {
+    cliente_id: SG_COB.clienteId,
+    cuenta_fin_id: Number(cuenta),
+    fecha: (eid('sg-cob-fecha') || {}).value,
+    forma_pago: (eid('sg-cob-forma') || {}).value,
+    referencia: (eid('sg-cob-ref') || {}).value,
+    notas: (eid('sg-cob-notas') || {}).value,
+    monto: total, docs: docs
+  }).then(function(r){
+    if (!r || !r.ok) { toast((r && r.error) || 'No se pudo registrar el cobro', 'er'); return; }
+    toast('Cobro registrado — asiento ' + r.asiento_id, 'ok');
+    closeMB('sg-cob-modal');
+    sgLoadCC();
+    if (SG_CCLI.sel) sgCcClFicha(SG_CCLI.sel.id);
   });
 }
 

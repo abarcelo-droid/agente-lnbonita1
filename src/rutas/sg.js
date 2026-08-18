@@ -5669,23 +5669,31 @@ router.post('/gastos-servicio/valorizar', requireAdmin, (req, res) => {
   } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
 });
 
-// ── CUENTA CORRIENTE CLIENTES (V1 simple) ──────────────────────────────────────
-// total_cobrado queda en 0 en V1 (no hay cobranzas de SG todavía). // TODO V2: cobranzas/DSO.
+// ── CUENTA CORRIENTE CLIENTES ──────────────────────────────────────────────────
+// Decía "cobrado = 0" con un cero escrito a mano, y no era que faltara la
+// consulta: era que la cobranza no existía para la contabilidad —no generaba
+// asiento ni movía ninguna cuenta— así que no había nada real que restar. Con la
+// cobranza cerrada, acá se lee lo que de verdad entró.
 router.get('/cc-clientes', requireAuth, (req, res) => {
   const db = getDb();
   try {
     // BRIEF 10 — LEFT JOIN para que un cliente con SOLO saldo de apertura (sin despachos) aparezca.
     // saldo = saldo_inicial (apertura al corte) + (facturado − cobrado) post-corte. saldo_inicial va aparte.
+    //
+    // El cobrado sale de una SUBCONSULTA y no de otro JOIN: con dos LEFT JOIN
+    // sobre la misma fila, el SUM de los despachos se multiplica por la cantidad
+    // de cobranzas y el facturado sale al doble o al triple.
     const rows = db.prepare(`
       SELECT c.id, c.razon_social, c.limite_credito, COALESCE(c.saldo_inicial,0) AS saldo_inicial,
         COALESCE(SUM(di.subtotal),0) AS total_facturado,
-        0 AS total_cobrado
+        COALESCE((SELECT SUM(co.monto) FROM sg_ven_cobranzas co
+                   WHERE co.cliente_id = c.id AND co.anulada = 0), 0) AS total_cobrado
       FROM sg_clientes c
       LEFT JOIN sg_despachos d ON d.cliente_id=c.id AND d.activo=1
       LEFT JOIN sg_despacho_items di ON di.despacho_id=d.id
       WHERE c.activo=1
       GROUP BY c.id, c.razon_social, c.limite_credito, c.saldo_inicial
-      HAVING total_facturado > 0 OR saldo_inicial <> 0
+      HAVING total_facturado > 0 OR saldo_inicial <> 0 OR total_cobrado > 0
       ORDER BY (COALESCE(c.saldo_inicial,0) + COALESCE(SUM(di.subtotal),0)) DESC`).all();
     for (const r of rows) r.saldo = (r.saldo_inicial || 0) + (r.total_facturado || 0) - (r.total_cobrado || 0);
     res.json({ ok: true, data: rows });
