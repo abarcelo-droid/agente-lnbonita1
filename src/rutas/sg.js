@@ -7112,6 +7112,46 @@ router.get('/embarques/:id', requireAuth, (req, res) => {
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
+// GET /embarques/:id/ficha — todo el camión de una: datos, costos con su TC, productos,
+// documentos y —si ya entró— el resultado. Una sola llamada para un visor de solo lectura,
+// en vez de que la pantalla arme el rompecabezas con tres.
+router.get('/embarques/:id/ficha', requireAuth, (req, res) => {
+  const db = getDb();
+  try {
+    // Sin p.pais: sg_proveedores no tiene esa columna (el campo del formulario de proveedores
+    // no se persiste). El país del viaje es pais_origen del propio embarque.
+    const emb = db.prepare(`SELECT e.*, p.razon_social AS proveedor_nombre, p.origen AS proveedor_origen
+      FROM sg_embarques e LEFT JOIN sg_proveedores p ON p.id=e.proveedor_id
+      WHERE e.id=? AND e.activo=1`).get(req.params.id);
+    if (!emb) return res.status(404).json({ ok: false, error: 'Embarque no encontrado' });
+    const costos = embCostos(db, emb.id);
+    const calc = calcEmbarque(emb, costos);
+    const proy = calcEmbarque(emb, costos, true);
+    const lineas = db.prepare(`SELECT l.*, pr.nombre AS producto_nombre, pr.variedad AS producto_variedad,
+             e.nombre AS envase_nombre
+      FROM sg_embarque_lineas l
+      LEFT JOIN sg_productos pr ON pr.id=l.producto_id
+      LEFT JOIN sg_envases e ON e.id=l.envase_id
+      WHERE l.embarque_id=? AND l.activo=1 ORDER BY l.id`).all(emb.id);
+    const documentos = db.prepare(`SELECT id, tipo, nombre_original, mime, tamano_bytes, fecha_documento, observaciones
+      FROM sg_embarque_documentos WHERE embarque_id=? AND activo=1 ORDER BY id DESC`).all(emb.id);
+    const kg = lineas.reduce((a, l) => a + ((Number(l.cajas) || 0) * (Number(l.kg_por_bulto) || 0)), 0);
+    // El resultado solo existe una vez que el camión entró y generó lotes.
+    const resultado = (emb.estado === 'recibido' || emb.estado === 'cerrado') ? resultadoEmbarque(db, emb) : null;
+    res.json({ ok: true, data: {
+      embarque: emb, costos: calc.detalle, lineas, documentos, resultado,
+      totales: {
+        bruto: calc.bruto, creditos: calc.creditos, neto: calc.neto,
+        cajas: Number(emb.cantidad_cajas) || 0, kg,
+        costo_caja_neto: calc.costo_caja_neto, costo_caja_c_impuestos: calc.costo_caja_c_impuestos,
+        costo_kg_neto: kg > 0 ? calc.neto / kg : null,
+        dif_cotizacion: calc.dif_cotizacion, dif_costos: calc.dif_costos,
+        neto_proyectado: proy.neto, tc_manual: calc.tc_manual
+      }
+    } });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
 // F5 — persiste el desglose de líneas de un embarque (replace-all) y DERIVA cantidad_cajas = Σ cajas.
 // Solo reemplaza si el body trae un array `lineas` (backward-compat: un PUT sin líneas no las pisa) y
 // el embarque no fue recibido/cerrado (después ya generó lotes, las líneas quedan congeladas). Siempre

@@ -3816,6 +3816,19 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
   </div>
 </div>
 
+<!-- Visor del camión: resumen de solo lectura. Arriba el costo en pesos, que es el número
+     con el que se decide a cuánto vender. -->
+<div class="ab-modal-overlay" id="sg-emb-visor-modal">
+  <div class="ab-modal" style="max-width:920px">
+    <div class="mhd"><div class="mht" id="sg-visor-tit">🚚 Camión</div><button class="mcl" onclick="closeMB('sg-emb-visor-modal')">×</button></div>
+    <div id="sg-visor-body" style="padding:2px"></div>
+    <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:14px">
+      <button class="btn bo" id="sg-visor-editar">✏️ Editar</button>
+      <button class="btn bb" onclick="closeMB('sg-emb-visor-modal')">Cerrar</button>
+    </div>
+  </div>
+</div>
+
 <!-- Curva de TC esperado: qué esperamos del dólar mes a mes. El valor es el del CIERRE del mes. -->
 <div class="ab-modal-overlay" id="sg-curva-modal">
   <div class="ab-modal" style="max-width:720px">
@@ -22650,7 +22663,7 @@ function sgImpInit(){
         +'<td style="text-align:right">'+(e.costo_caja_neto!=null?sgMoney(Math.round(e.costo_caja_neto)):'—')+'</td>'
         +'<td style="text-align:right">'+(e.costo_caja_c_impuestos!=null?sgMoney(Math.round(e.costo_caja_c_impuestos)):'—')+'</td>'
         +'<td style="text-align:right">'+(e.costo_kg_neto!=null?sgMoney(Math.round(e.costo_kg_neto)):'—')+'</td>'
-        +'<td style="text-align:right;white-space:nowrap"><button class="btn bo bs" title="Duplicar: arranca un embarque nuevo con esta estructura de costos" onclick="sgImpDuplicar('+e.id+')">⧉</button> <button class="btn bo bs" onclick="sgImpOpen('+e.id+')">✏️</button>'+(lnbPuedeAnular('sg-importacion')?' <button class="btn bd bs" onclick="sgImpDel('+e.id+')">×</button>':'')+'</td>'
+        +'<td style="text-align:right;white-space:nowrap"><button class="btn bo bs" title="Ver el camión: costo en pesos, productos y documentos" onclick="sgImpVisor('+e.id+')">👁</button> <button class="btn bo bs" title="Duplicar: arranca un embarque nuevo con esta estructura de costos" onclick="sgImpDuplicar('+e.id+')">⧉</button> <button class="btn bo bs" onclick="sgImpOpen('+e.id+')">✏️</button>'+(lnbPuedeAnular('sg-importacion')?' <button class="btn bd bs" onclick="sgImpDel('+e.id+')">×</button>':'')+'</td>'
       +'</tr>';
     }).join('') : '<tr><td colspan="8" class="emp">Sin embarques. Creá el primero con “+ Nuevo embarque”.</td></tr>';
   });
@@ -23053,6 +23066,105 @@ function sgImpSave(){
     else toast((r&&r.error)||'Error','er');
   });
 }
+// ── VISOR DEL CAMIÓN ──────────────────────────────────────────────────────────
+// Todo el embarque de un vistazo, sin poder tocar nada. Lo primero y más grande es el costo
+// por caja y por kg EN PESOS, que es el número con el que se decide a cuánto vender.
+function sgImpVisor(id){
+  eid('sg-visor-tit').textContent='🚚 Camión';
+  eid('sg-visor-body').innerHTML='<div style="padding:24px;text-align:center;color:var(--mut)">Cargando…</div>';
+  eid('sg-visor-editar').onclick=function(){ closeMB('sg-emb-visor-modal'); sgImpOpen(id); };
+  eid('sg-emb-visor-modal').classList.add('on');
+  api('/api/sg/embarques/'+id+'/ficha').then(function(r){
+    if(!r||!r.ok){ eid('sg-visor-body').innerHTML='<div style="padding:20px;color:var(--err,#dc2626)">'+esc((r&&r.error)||'Error')+'</div>'; return; }
+    var d=r.data, e=d.embarque, t=d.totales, res=d.resultado;
+    eid('sg-visor-tit').textContent='🚚 '+(e.nombre||'Camión');
+    var money2=function(n){ return (n==null)?'—':('$'+(Number(n)||0).toLocaleString('es-AR',{minimumFractionDigits:2,maximumFractionDigits:2})); };
+    var dato=function(l,v){ return '<div><div style="font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:var(--mut)">'+l+'</div><div style="font-size:13px;margin-top:1px">'+v+'</div></div>'; };
+    var big=function(l,v,sub,bg,col){ return '<div style="flex:1;min-width:160px;padding:12px 14px;border-radius:10px;background:'+bg+'">'
+      +'<div style="font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:var(--mut)">'+l+'</div>'
+      +'<div style="font-size:22px;font-weight:700;margin-top:2px;color:'+(col||'inherit')+';font-variant-numeric:tabular-nums">'+v+'</div>'
+      +'<div style="font-size:11px;color:var(--mut)">'+sub+'</div></div>'; };
+
+    var h='';
+    // 1) Lo que se necesita para poner precio, arriba de todo.
+    h+='<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px">'
+      +big('Costo por caja', money2(t.costo_caja_neto), 'en pesos · neto de impuestos', 'rgba(16,163,74,.10)', '#16a34a')
+      +big('Costo por kg', money2(t.costo_kg_neto), t.kg?(nr(Math.round(t.kg))+' kg en total'):'sin productos cargados', 'rgba(16,163,74,.10)', '#16a34a')
+      +big('Costo total', sgMoney(Math.round(t.neto)), nr(t.cajas)+' caja'+(t.cajas===1?'':'s'), 'var(--bg2,#f5f5f5)')
+      +big('Desembolso de caja', sgMoney(Math.round(t.bruto)), 'con impuestos, antes de recuperar', 'var(--bg2,#f5f5f5)')
+      +'</div>';
+    // 2) Datos del viaje.
+    h+='<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px;padding:12px;border:1px solid var(--bor);border-radius:10px;margin-bottom:12px">'
+      +dato('Estado','<span class="bdg bok">'+esc(sgEmbEstadoLbl(e.estado))+'</span>')
+      +dato('Proveedor', esc(e.proveedor_nombre||'—'))
+      +dato('Origen', esc(e.pais_origen||'—')+(e.incoterm?(' · '+esc(e.incoterm)):''))
+      +dato('NCM', esc(e.ncm||'—'))
+      +dato('Embarca (ETD)', e.fecha_etd?esc(e.fecha_etd):'—')
+      +dato('Llega (ETA)', e.fecha_eta?esc(e.fecha_eta):'—')
+      +(t.tc_manual?dato('TC','<span title="Pisa la curva">✋ manual '+nr(e.tc_estimado)+'</span>'):dato('TC','de la curva, por rubro'))
+      +(e.cerrado_en?dato('Cerrado', esc(String(e.cerrado_en).slice(0,10))):'')
+      +'</div>';
+    // 3) Rubros, con el TC de cada uno y de dónde salió.
+    h+='<div style="font-size:12px;font-weight:600;color:var(--mut);margin-bottom:5px">COSTOS</div>'
+      +'<table class="pa-tbl" style="font-size:12px;width:100%"><thead><tr><th>Rubro</th><th>Mon.</th>'
+      +'<th style="text-align:right">Estimado</th><th style="text-align:right">Real (en $)</th>'
+      +'<th>Se paga</th><th style="text-align:right">TC</th></tr></thead><tbody>'
+      +d.costos.filter(function(c){ return c.monto_estimado!=null||c.monto_real!=null; }).map(function(c){
+        var lbl=(SG_EMB_CONCEPTOS.find(function(x){return x.k===c.concepto;})||{}).l||c.concepto;
+        return '<tr'+(c.es_credito?' style="background:rgba(16,163,74,.06)"':'')+'>'
+          +'<td>'+esc(lbl)+(c.es_credito?' <span style="font-size:10px;color:var(--ok,#16a34a)">crédito</span>':'')+'</td>'
+          +'<td>'+esc(c.moneda||'ARS')+'</td>'
+          +'<td style="text-align:right">'+(c.monto_estimado!=null?nr(c.monto_estimado):'—')+'</td>'
+          +'<td style="text-align:right">'+(c.monto_real!=null?sgMoney(Math.round(c.monto_real)):'—')+'</td>'
+          +'<td style="font-size:11px;color:var(--mut)">'+(c.fecha_pago?esc(c.fecha_pago)+(c.tc_vencido?' ⏰':''):'—')+'</td>'
+          +'<td style="text-align:right">'+(c.tc_rubro!=null?nr(Math.round(c.tc_rubro*100)/100):'—')+'</td></tr>';
+      }).join('')
+      +'</tbody><tfoot><tr style="font-weight:700;border-top:2px solid var(--bor)"><td colspan="3">Neto de impuestos</td>'
+      +'<td colspan="3" style="text-align:right">'+sgMoney(Math.round(t.neto))+'</td></tr></tfoot></table>';
+    if(t.dif_cotizacion||t.dif_costos){
+      h+='<div style="font-size:11px;color:var(--mut);margin-top:6px">Desvío contra lo proyectado — '
+        +'cotización: <b>'+(t.dif_cotizacion>=0?'+':'')+sgMoney(Math.round(t.dif_cotizacion))+'</b> · '
+        +'costos reales: <b>'+(t.dif_costos>=0?'+':'')+sgMoney(Math.round(t.dif_costos))+'</b></div>';
+    }
+    // 4) Qué trae.
+    if(d.lineas.length){
+      h+='<div style="font-size:12px;font-weight:600;color:var(--mut);margin:14px 0 5px">PRODUCTOS</div>'
+        +'<table class="pa-tbl" style="font-size:12px;width:100%"><thead><tr><th>Producto</th><th>Envase</th>'
+        +'<th style="text-align:right">Cajas</th><th style="text-align:right">kg/bulto</th><th style="text-align:right">kg</th>'
+        +'<th style="text-align:right">FOB US$/caja</th></tr></thead><tbody>'
+        +d.lineas.map(function(l){
+          var kg=(Number(l.cajas)||0)*(Number(l.kg_por_bulto)||0);
+          return '<tr><td>'+esc((l.producto_nombre||'')+(l.producto_variedad?' '+l.producto_variedad:''))+'</td>'
+            +'<td>'+esc(l.envase_nombre||'—')+'</td>'
+            +'<td style="text-align:right">'+nr(l.cajas)+'</td>'
+            +'<td style="text-align:right">'+(l.kg_por_bulto!=null?nr(l.kg_por_bulto):'—')+'</td>'
+            +'<td style="text-align:right">'+nr(Math.round(kg))+'</td>'
+            +'<td style="text-align:right">'+(l.precio_unitario_usd!=null?nr(l.precio_unitario_usd):'—')+'</td></tr>';
+        }).join('')+'</tbody></table>';
+    }
+    // 5) Cómo le fue, si ya entró.
+    if(res){
+      h+='<div style="font-size:12px;font-weight:600;color:var(--mut);margin:14px 0 5px">RESULTADO</div>'
+        +'<div style="display:flex;gap:10px;flex-wrap:wrap">'
+        +big('Vendido', sgMoney(Math.round(res.ingresos)), nr(Math.round(res.kg_vendidos))+' kg', 'var(--bg2,#f5f5f5)')
+        +big('Margen', sgMoney(Math.round(res.margen)), (res.margen_pct!=null?(Math.round(res.margen_pct*10)/10).toFixed(1)+'% sobre lo vendido':'sin ventas'), 'var(--bg2,#f5f5f5)', res.margen>=0?'#16a34a':'#dc2626')
+        +big('Queda en stock', sgMoney(Math.round(res.valor_en_stock)), nr(Math.round(res.kg_en_stock))+' kg', 'var(--bg2,#f5f5f5)')
+        +'</div>';
+    }
+    // 6) El expediente, con descarga directa.
+    h+='<div style="font-size:12px;font-weight:600;color:var(--mut);margin:14px 0 5px">DOCUMENTOS</div>';
+    h+= d.documentos.length
+      ? '<table class="pa-tbl" style="font-size:12px;width:100%"><tbody>'+d.documentos.map(function(x){
+          return '<tr><td>'+esc(sgEmbDocTipoLbl(x.tipo))+'</td><td>'+esc(x.nombre_original||'')+'</td>'
+            +'<td style="color:var(--mut)">'+(x.fecha_documento?esc(x.fecha_documento):'—')+'</td>'
+            +'<td style="text-align:right;color:var(--mut)">'+sgEmbFmtBytes(x.tamano_bytes)+'</td>'
+            +'<td style="text-align:right"><a class="btn bo bs" href="/api/sg/embarques/'+e.id+'/documentos/'+x.id+'/descargar" target="_blank" rel="noopener">Abrir</a></td></tr>';
+        }).join('')+'</tbody></table>'
+      : '<div style="font-size:12px;color:var(--mut);padding:8px 0">Sin documentos cargados. Se suben desde Editar.</div>';
+    eid('sg-visor-body').innerHTML=h;
+  });
+}
+
 // Duplicar: arranca un embarque nuevo con la ESTRUCTURA de otro (proveedor, rubros con sus
 // montos estimados y sus condiciones de pago, y opcionalmente los productos). No copia
 // montos reales, fechas del viaje, documentos ni lotes: eso era de aquel camión.
