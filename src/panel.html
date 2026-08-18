@@ -3558,7 +3558,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
 
 
   <div class="sec sg-mod" id="sec-sg-importacion">
-    <div class="ph"><div><div class="ph-t">🍅 San Gerónimo · Importación</div><div class="ph-s">Cotizador de embarque: costo neto por caja, ajuste por merma y margen proyectado. Estimado vs real.</div></div><div style="display:flex;gap:8px"><button class="btn bo" onclick="sgTcAbrir()">💱 TC esperado</button><button class="btn bb" onclick="sgImpOpen()">+ Nuevo embarque</button></div></div>
+    <div class="ph"><div><div class="ph-t">🍅 San Gerónimo · Importación</div><div class="ph-s">Cotizador de embarque: costo neto por caja, ajuste por merma y margen proyectado. Estimado vs real.</div></div><div style="display:flex;gap:8px"><button class="btn bo" onclick="sgCurvaAbrir()">📈 Curva TC</button><button class="btn bo" onclick="sgTcAbrir()">💱 TC esperado</button><button class="btn bb" onclick="sgImpOpen()">+ Nuevo embarque</button></div></div>
     <div class="ab-table-wrap"><table class="pa-tbl">
       <thead><tr><th>Embarque</th><th>Proveedor</th><th style="text-align:center">Estado</th><th style="text-align:right">Cajas</th><th style="text-align:right">Costo/caja neto</th><th style="text-align:right">Costo/caja c-imp.</th><th style="text-align:right">Margen proy.</th><th></th></tr></thead>
       <tbody id="sg-tb-embarques"><tr><td colspan="8" class="emp">Cargando…</td></tr></tbody>
@@ -3814,6 +3814,26 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
     <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:14px">
       <button class="btn bo" onclick="closeMB('sg-emb-recibir-modal')">Cancelar</button>
       <button class="btn bb" id="sg-emb-recibir-ok" onclick="sgImpConfirmarRecibir()">Confirmar recepción</button>
+    </div>
+  </div>
+</div>
+
+<!-- Curva de TC esperado: qué esperamos del dólar mes a mes. El valor es el del CIERRE del mes. -->
+<div class="ab-modal-overlay" id="sg-curva-modal">
+  <div class="ab-modal" style="max-width:720px">
+    <div class="mhd"><div class="mht">📈 Curva de tipo de cambio esperado</div><button class="mcl" onclick="closeMB('sg-curva-modal')">×</button></div>
+    <div style="font-size:12px;color:var(--mut);margin-bottom:10px">Cargá el dólar que esperás <b>al cierre de cada mes</b>, como vienen los futuros. Entre meses el sistema interpola día a día. Sirve para saber a qué dólar se va a pagar cada cosa según su fecha de pago.</div>
+    <table class="pa-tbl" style="font-size:12px;width:100%"><thead><tr>
+      <th style="width:150px">Mes</th><th style="text-align:right;width:140px">TC al cierre</th><th>Nota</th><th style="width:40px"></th>
+    </tr></thead><tbody id="sg-curva-tb"></tbody></table>
+    <button type="button" class="btn bo bs" style="margin-top:8px" onclick="sgCurvaAdd()">+ Agregar mes</button>
+    <div style="margin-top:12px;padding:10px 12px;border-radius:8px;background:var(--bg2,#f5f5f5);border:1px solid var(--bor);display:flex;gap:12px;align-items:end;flex-wrap:wrap">
+      <div class="fl" style="max-width:180px;margin:0"><label style="font-size:11px">Probá una fecha de pago</label><input type="date" id="sg-curva-probar" onchange="sgCurvaProbar()"></div>
+      <div style="font-size:13px;padding-bottom:8px" id="sg-curva-probar-res"></div>
+    </div>
+    <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:14px">
+      <button class="btn bo" onclick="closeMB('sg-curva-modal')">Cancelar</button>
+      <button class="btn bb" onclick="sgCurvaGuardar()">Guardar curva</button>
     </div>
   </div>
 </div>
@@ -23016,6 +23036,70 @@ function sgImpAbrirRecibir(){
     eid('sg-emb-recibir-ok').disabled = false;
   });
 }
+// ── CURVA DE TC ESPERADO ──────────────────────────────────────────────────────
+// Un valor por mes (el del cierre del mes, como los futuros). Entre meses interpola el
+// backend. Editor replace-all: se manda la lista completa, como las líneas del embarque.
+var SG_CURVA = [];
+function sgCurvaAbrir(){
+  eid('sg-curva-probar').value=''; eid('sg-curva-probar-res').innerHTML='';
+  eid('sg-curva-modal').classList.add('on');
+  api('/api/sg/tc-esperado/curva').then(function(r){
+    SG_CURVA = (r&&r.ok&&r.data.curva) ? r.data.curva.map(function(c){ return { mes:c.mes, valor:c.valor, nota:c.nota||'' }; }) : [];
+    if(!SG_CURVA.length){
+      // Arranca en el mes actual para que no haya que pensar el formato.
+      var m=(r&&r.ok&&r.data.mes_actual)||new Date().toISOString().slice(0,7);
+      SG_CURVA=[{mes:m,valor:'',nota:''}];
+    }
+    sgCurvaRender();
+  });
+}
+function sgCurvaRender(){
+  eid('sg-curva-tb').innerHTML = SG_CURVA.map(function(c,i){
+    return '<tr>'
+      +'<td><input type="month" value="'+esc(c.mes||'')+'" onchange="sgCurvaUpd('+i+',\'mes\',this.value)" style="width:100%"></td>'
+      +'<td><input type="number" step="0.01" min="0" value="'+esc(String(c.valor==null?'':c.valor))+'" oninput="sgCurvaUpd('+i+',\'valor\',this.value)" style="width:100%;text-align:right"></td>'
+      +'<td><input type="text" value="'+esc(c.nota||'')+'" placeholder="ej. futuro A3" oninput="sgCurvaUpd('+i+',\'nota\',this.value)" style="width:100%"></td>'
+      +'<td style="text-align:center"><button class="btn bd bs" onclick="sgCurvaDel('+i+')">×</button></td></tr>';
+  }).join('');
+}
+function sgCurvaUpd(i,f,v){ SG_CURVA[i][f]=v; }        // sin re-render: no pierde el foco
+function sgCurvaDel(i){ SG_CURVA.splice(i,1); sgCurvaRender(); }
+function sgCurvaAdd(){
+  // Sugiere el mes siguiente al último cargado, que es lo que uno va a querer casi siempre.
+  var ult=SG_CURVA.length?SG_CURVA[SG_CURVA.length-1].mes:null, prox;
+  if(ult&&/^\d{4}-\d{2}$/.test(ult)){
+    var y=parseInt(ult.slice(0,4),10), m=parseInt(ult.slice(5,7),10)+1;
+    if(m>12){ m=1; y++; }
+    prox=y+'-'+('0'+m).slice(-2);
+  } else prox=new Date().toISOString().slice(0,7);
+  SG_CURVA.push({mes:prox,valor:'',nota:''}); sgCurvaRender();
+}
+function sgCurvaProbar(){
+  var f=eid('sg-curva-probar').value;
+  if(!f){ eid('sg-curva-probar-res').innerHTML=''; return; }
+  api('/api/sg/tc-esperado/en?fecha='+encodeURIComponent(f)).then(function(r){
+    if(!r||!r.ok||r.data.tc==null){ eid('sg-curva-probar-res').innerHTML='<span style="color:var(--err,#dc2626)">Sin curva cargada</span>'; return; }
+    var d=r.data, txt={ exacto:'valor cargado de '+(d.mes||''), interpolado:'interpolado entre '+(d.entre||[]).join(' y '),
+      antes_de_la_curva:'⚠ antes del primer mes cargado, usa el de '+(d.mes||''),
+      despues_de_la_curva:'⚠ después del último mes cargado, usa el de '+(d.mes||'')+' — cargá más meses' }[d.modo]||d.modo;
+    eid('sg-curva-probar-res').innerHTML='<b style="font-size:16px">'+nr(Math.round(d.tc*100)/100)+'</b> <span style="color:var(--mut)">· '+esc(txt)+'</span>';
+  });
+}
+function sgCurvaGuardar(){
+  var filas=SG_CURVA.filter(function(c){ return c.mes && String(c.valor).trim()!==''; })
+                    .map(function(c){ return { mes:c.mes, valor:parseFloat(c.valor), nota:c.nota }; });
+  var mala=filas.find(function(c){ return !(c.valor>0); });
+  if(mala){ toast('El valor de '+mala.mes+' tiene que ser mayor a cero','er'); return; }
+  var vistos={}, dup=null;
+  filas.forEach(function(c){ if(vistos[c.mes]) dup=c.mes; vistos[c.mes]=1; });
+  if(dup){ toast('El mes '+dup+' está cargado dos veces','er'); return; }
+  filas.sort(function(a,b){ return a.mes<b.mes?-1:(a.mes>b.mes?1:0); });
+  api('/api/sg/tc-esperado/curva','PUT',{ curva:filas }).then(function(r){
+    if(r&&r.ok){ toast('Curva guardada — '+r.data.meses+' mes(es)','ok'); closeMB('sg-curva-modal'); }
+    else toast((r&&r.error)||'Error','er');
+  });
+}
+
 // ── TIPO DE CAMBIO ESPERADO (masivo) ──────────────────────────────────────────
 // Mover el TC y que los camiones abiertos se re-costeen solos, en vez de entrar uno por uno.
 var SG_TC = { debounce: null };
