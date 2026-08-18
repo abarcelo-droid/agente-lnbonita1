@@ -1881,8 +1881,10 @@ try {
     ['imp_despachante_pct', '7'],       // honorarios del despachante, % de la base imponible
     ['imp_iva_servicios_pct', '21'],    // IVA de despachante y gastos bancarios
     ['imp_tasa_maria_usd', '110'],      // Tasa María, monto fijo en dólares
-    ['imp_gastos_bancarios_pct', '0.6'] // gastos bancarios, % del invoice (90 sobre 15.000)
+    ['imp_gastos_bancarios_usd', '90']  // gastos bancarios: monto fijo por operación
   ];
+  // El % quedó de una versión anterior: los bancarios son un monto fijo, no un porcentaje.
+  try { db.prepare("DELETE FROM sg_config WHERE clave='imp_gastos_bancarios_pct'").run(); } catch(_) {}
   const ins = db.prepare('INSERT OR IGNORE INTO sg_config (clave, valor) VALUES (?,?)');
   for (const [k, v] of def) ins.run(k, v);
 } catch (e) { console.error('[DB] SG parámetros de importación:', e.message); }
