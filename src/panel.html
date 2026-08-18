@@ -3776,9 +3776,24 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
         <div><button type="button" class="btn bb" onclick="sgEmbDocSubir()">+ Subir documento</button></div>
       </div>
     </div>
-    <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:14px">
+    <div style="display:flex;justify-content:space-between;gap:8px;margin-top:14px;align-items:center">
+      <!-- Recibir: crea un lote por línea con el costo prorrateado. Solo al editar y antes de recibir. -->
+      <button class="btn bb" id="sg-emb-btn-recibir" style="display:none;background:var(--ok,#16a34a);border-color:var(--ok,#16a34a)" onclick="sgImpAbrirRecibir()">📥 Recibir embarque</button>
+      <div style="flex:1"></div>
       <button class="btn bo" onclick="closeMB('sg-emb-modal')">Cancelar</button>
       <button class="btn bb" onclick="sgImpSave()">Guardar embarque</button>
+    </div>
+  </div>
+</div>
+
+<!-- Recepción del embarque: preview de los lotes que se van a crear + fecha de ingreso. -->
+<div class="ab-modal-overlay" id="sg-emb-recibir-modal">
+  <div class="ab-modal" style="max-width:720px">
+    <div class="mhd"><div class="mht">📥 Recibir embarque</div><button class="mcl" onclick="closeMB('sg-emb-recibir-modal')">×</button></div>
+    <div id="sg-emb-recibir-body" style="padding:4px 2px"></div>
+    <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:14px">
+      <button class="btn bo" onclick="closeMB('sg-emb-recibir-modal')">Cancelar</button>
+      <button class="btn bb" id="sg-emb-recibir-ok" onclick="sgImpConfirmarRecibir()">Confirmar recepción</button>
     </div>
   </div>
 </div>
@@ -22265,7 +22280,14 @@ function sgImpFill(e){
   eid('sg-emb-moneda').value = e.moneda||'USD';
   eid('sg-emb-tc-est').value = sgImpVal(e.tc_estimado);
   eid('sg-emb-tc-real').value = sgImpVal(e.tc_real);
-  eid('sg-emb-estado').innerHTML = SG_EMB_ESTADOS.map(function(x){ return '<option value="'+x[0]+'"'+(((e.estado||'cotizacion')===x[0])?' selected':'')+'>'+x[1]+'</option>'; }).join('');
+  // "Recibido" y "Cerrado" no se eligen a mano: los pone la acción que además crea los lotes y
+  // re-costea. Se muestran (para que se vea el estado actual) pero deshabilitados.
+  var estActual = e.estado||'cotizacion';
+  eid('sg-emb-estado').innerHTML = SG_EMB_ESTADOS.map(function(x){
+    var auto = (x[0]==='recibido'||x[0]==='cerrado');
+    var sel = (estActual===x[0]);
+    return '<option value="'+x[0]+'"'+(sel?' selected':'')+((auto&&!sel)?' disabled':'')+'>'+x[1]+(auto?' (automático)':'')+'</option>';
+  }).join('');
   eid('sg-emb-cajas').value = sgImpVal(e.cantidad_cajas);
   eid('sg-emb-merma').value = sgImpVal(e.merma_esperada_pct);
   eid('sg-emb-precio-ref').value = sgImpVal(e.precio_referencia);
@@ -22279,6 +22301,9 @@ function sgImpFill(e){
   });
   sgEmbRenderLineas();
   sgImpCalc();
+  // Recibir: solo tiene sentido en un embarque ya guardado y que todavía no se recibió.
+  eid('sg-emb-btn-recibir').style.display =
+    (e.id && estActual!=='recibido' && estActual!=='cerrado') ? '' : 'none';
   sgEmbDocsInit(e.id||null);   // F6 — expediente documental (solo al editar; necesita id)
   eid('sg-emb-modal').classList.add('on');
 }
@@ -22547,6 +22572,58 @@ function sgImpSave(){
 function sgImpDel(id){
   if(!confirm('¿Eliminar este embarque?')) return;
   api('/api/sg/embarques/'+id,'DELETE').then(function(r){ if(r&&r.ok){ toast('Embarque eliminado','ok'); sgImpInit(); } else toast((r&&r.error)||'Error','er'); });
+}
+
+// ── RECEPCIÓN DEL EMBARQUE ────────────────────────────────────────────────────
+// Crea un lote por línea con el costo prorrateado (FOB propio + gastos parejos por caja).
+// Es el paso que convierte el embarque en stock real, así que primero se muestra exactamente
+// qué se va a crear: el backend calcula el preview con el mismo criterio que usa al recibir.
+function sgImpAbrirRecibir(){
+  var id = SG._embId;
+  if(!id){ toast('Guardá el embarque antes de recibirlo','er'); return; }
+  eid('sg-emb-recibir-body').innerHTML = '<div style="padding:20px;text-align:center;color:var(--mut)">Calculando…</div>';
+  eid('sg-emb-recibir-ok').disabled = true;
+  eid('sg-emb-recibir-modal').classList.add('on');
+  api('/api/sg/embarques/'+id+'/recepcion-preview').then(function(r){
+    if(!r || !r.ok){
+      eid('sg-emb-recibir-body').innerHTML =
+        '<div style="padding:14px;border:1px solid var(--err,#dc2626);border-radius:10px;color:var(--err,#dc2626);font-size:13px">'
+        + '<b>No se puede recibir todavía.</b><br>'+esc((r&&r.error)||'Error')+'</div>';
+      return;
+    }
+    var d = r.data, hoy = new Date().toISOString().slice(0,10);
+    eid('sg-emb-recibir-body').innerHTML =
+        '<div style="font-size:12px;color:var(--mut);margin-bottom:10px">Se va a crear <b>un lote por línea</b>, con el costo del embarque repartido entre ellas. Calculado sobre lo último guardado — si acabás de cambiar algo, guardá antes.</div>'
+      + (d.tc_es_estimado ? '<div style="padding:10px 12px;border-radius:8px;background:var(--bg2,#f5f5f5);border:1px solid var(--bor);font-size:12px;margin-bottom:10px">⚠️ El costo sale del <b>TC estimado</b> ('+nr(d.tc_aplicado)+'), porque todavía no hay TC real. Es un costo <b>provisorio</b>: cuando cierres el embarque se recalcula con los números finales.</div>' : '')
+      + '<table class="pa-tbl" style="font-size:12px;width:100%"><thead><tr>'
+      + '<th>Producto</th><th style="text-align:right">Cajas</th><th style="text-align:right">kg</th>'
+      + '<th style="text-align:right">Costo del lote</th><th style="text-align:right">$/kg</th></tr></thead><tbody>'
+      + d.lotes.map(function(l){
+          return '<tr><td>'+esc(l.producto)+'</td><td style="text-align:right">'+nr(l.cajas)+'</td>'
+            + '<td style="text-align:right">'+nr(l.kg)+'</td>'
+            + '<td style="text-align:right;font-weight:600">'+sgMoney(Math.round(l.costo_base))+'</td>'
+            + '<td style="text-align:right">'+(l.costo_kg!=null?sgMoney(Math.round(l.costo_kg)):'—')+'</td></tr>';
+        }).join('')
+      + '</tbody><tfoot><tr style="font-weight:700;border-top:2px solid var(--bor)">'
+      + '<td>'+d.lotes.length+' lote'+(d.lotes.length===1?'':'s')+'</td>'
+      + '<td style="text-align:right">'+nr(d.total_cajas)+'</td><td style="text-align:right">'+nr(d.total_kg)+'</td>'
+      + '<td style="text-align:right">'+sgMoney(Math.round(d.neto))+'</td><td></td></tr></tfoot></table>'
+      + '<div class="fl" style="margin-top:12px;max-width:220px"><label>Fecha de ingreso</label>'
+      + '<input type="date" id="sg-emb-recibir-fecha" value="'+hoy+'"></div>';
+    eid('sg-emb-recibir-ok').disabled = false;
+  });
+}
+function sgImpConfirmarRecibir(){
+  var id = SG._embId; if(!id) return;
+  var f = eid('sg-emb-recibir-fecha');
+  var btn = eid('sg-emb-recibir-ok'); btn.disabled = true;
+  api('/api/sg/embarques/'+id+'/recibir','POST',{ fecha_ingreso: f ? f.value : null }).then(function(r){
+    if(r && r.ok){
+      var n = (r.data && r.data.lotes || []).length;
+      toast('Embarque recibido — '+n+' lote'+(n===1?'':'s')+' creado'+(n===1?'':'s'),'ok');
+      closeMB('sg-emb-recibir-modal'); closeMB('sg-emb-modal'); sgImpInit();
+    } else { toast((r&&r.error)||'Error al recibir','er'); btn.disabled = false; }
+  });
 }
 
 // ── MÓDULO ABASTO ────────────────────────────────────────────

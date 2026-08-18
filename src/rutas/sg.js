@@ -6829,10 +6829,10 @@ function crearLoteDeEmbarque(db, { emb, linea, costoBase, fechaIngreso, userId }
   const info = db.prepare(`INSERT INTO sg_lotes
     (codigo_lote, recepcion_id, oc_item_id, producto_id, kg_reales, precio_unitario_kg, costo_base,
      calidad, calibre, origen, fecha_ingreso, fecha_vencimiento_estimada, estado, costo_final,
-     presentacion_id, bultos, kg_por_bulto, envase_id, embarque_id, creado_por)
-    VALUES (?,?,?,?,?,?,?,?,?,'importado',?,?, 'disponible', ?, NULL, ?, ?, ?, ?, ?)`)
+     presentacion_id, bultos, kg_por_bulto, envase_id, embarque_id, embarque_linea_id, creado_por)
+    VALUES (?,?,?,?,?,?,?,?,?,'importado',?,?, 'disponible', ?, NULL, ?, ?, ?, ?, ?, ?)`)
     .run(codigo, null, null, linea.producto_id, kg, precio, base,
-      val(linea.calidad), val(linea.calibre), fechaIngreso, venc, base, cajas, kpb, envId, emb.id, userId);
+      val(linea.calidad), val(linea.calibre), fechaIngreso, venc, base, cajas, kpb, envId, emb.id, linea.id, userId);
   const loteId = info.lastInsertRowid;
   recalcCostoLote(db, loteId);
   return loteId;
@@ -6968,6 +6968,16 @@ router.put('/embarques/:id', requireAdmin, (req, res) => {
     if (!emb) return res.status(404).json({ ok: false, error: 'Embarque no encontrado' });
     const b = req.body || {};
     const h = embHeaderVals(b);
+    // 'recibido' y 'cerrado' NO se ponen a mano: los setea la acción correspondiente, que además
+    // crea los lotes / re-costea. Poner "Recibido" desde el select dejaba el embarque en un estado
+    // mentiroso —sin lotes— y encima trababa la recepción real para siempre, porque POST /recibir
+    // arranca rechazando los que ya figuran como recibidos.
+    if (h.estado !== emb.estado && (h.estado === 'recibido' || h.estado === 'cerrado')) {
+      return res.status(400).json({ ok: false, error: 'El estado "' + h.estado + '" no se carga a mano: usá el botón Recibir embarque (y después Cerrar), que es lo que genera los lotes.' });
+    }
+    if ((emb.estado === 'recibido' || emb.estado === 'cerrado') && h.estado !== emb.estado) {
+      return res.status(400).json({ ok: false, error: 'Un embarque ' + emb.estado + ' no puede volver atrás de estado.' });
+    }
     const costos = embCostosDelBody(b);
     const tx = db.transaction(() => {
       db.prepare(`UPDATE sg_embarques SET ${EMB_HEADER_COLS.map(k => k + '=?').join(', ')},
@@ -7059,25 +7069,62 @@ router.put('/embarques/:id/lineas', requireAdmin, (req, res) => {
 // Transición transito→recibido. Crea un sg_lote importado por línea con costo PROVISORIO del
 // embarque (costo_caja_neto × cajas, ya en ARS). El lote entra a stock, se vende; el cierre de
 // cambio (F3, ZONA PABLO) ajustará el costo más adelante. Idempotente por estado: no recibe 2 veces.
+// Chequeos previos a recibir, compartidos por el preview y la recepción real: un solo criterio,
+// así la pantalla no puede decir que se puede recibir algo que después el POST rechaza.
+// Tira Error con el motivo; devuelve lo necesario para crear los lotes.
+function prepararRecepcionEmbarque(db, emb) {
+  if (emb.estado === 'recibido' || emb.estado === 'cerrado') throw new Error('El embarque ya fue recibido');
+  const lineas = db.prepare('SELECT * FROM sg_embarque_lineas WHERE embarque_id=? AND activo=1 ORDER BY id').all(emb.id);
+  if (!lineas.length) throw new Error('El embarque no tiene líneas de producto. Cargá el desglose de productos antes de recibir.');
+  if (lineas.some(l => !(Number(l.cajas) > 0))) throw new Error('Todas las líneas deben tener cajas > 0');
+  if (lineas.some(l => !(Number(l.kg_por_bulto) > 0)))
+    throw new Error('Todas las líneas deben tener kg por bulto > 0 (si no, el lote nace con 0 kg y no es despachable)');
+  const costos = embCostos(db, emb.id);
+  const calc = calcEmbarque(emb, costos);
+  if (calc.costo_caja_neto == null)
+    throw new Error('No se puede costear el embarque (falta cantidad de cajas o costos cargados)');
+  // F7 — costo_base por línea: FOB unitario diferencia; gastos parejos por caja; Σ = neto exacto.
+  return { lineas, calc, bases: costoBaseLineasEmbarque(emb, costos, lineas) };
+}
+
+// PREVIEW de recepción — qué lotes se van a crear y con qué costo, sin tocar nada.
+// Si algo bloquea, devuelve ok:false con el motivo (mismo texto que daría el POST).
+router.get('/embarques/:id/recepcion-preview', requireAuth, (req, res) => {
+  const db = getDb();
+  try {
+    const emb = db.prepare('SELECT * FROM sg_embarques WHERE id=? AND activo=1').get(req.params.id);
+    if (!emb) return res.status(404).json({ ok: false, error: 'Embarque no encontrado' });
+    let prep;
+    try { prep = prepararRecepcionEmbarque(db, emb); }
+    catch (e) { return res.json({ ok: false, puede_recibir: false, error: e.message }); }
+    const nombres = db.prepare('SELECT id, nombre, variedad FROM sg_productos').all()
+      .reduce((m, p) => { m[p.id] = p.nombre + (p.variedad ? ' ' + p.variedad : ''); return m; }, {});
+    const lotes = prep.lineas.map((l, i) => {
+      const cajas = Math.round(Number(l.cajas) || 0);
+      const kg = (l.kg_por_bulto != null && l.kg_por_bulto !== '') ? cajas * Number(l.kg_por_bulto) : 0;
+      const base = Number(prep.bases[i]) || 0;
+      return { linea_id: l.id, producto: nombres[l.producto_id] || ('#' + l.producto_id),
+               cajas, kg, costo_base: base, costo_kg: kg > 0 ? base / kg : null };
+    });
+    res.json({ ok: true, puede_recibir: true, data: {
+      lotes, total_cajas: lotes.reduce((a, x) => a + x.cajas, 0),
+      total_kg: lotes.reduce((a, x) => a + x.kg, 0),
+      neto: prep.calc.neto, costo_caja_neto: prep.calc.costo_caja_neto, tc_aplicado: prep.calc.tc_aplicado,
+      tc_es_estimado: emb.tc_real == null
+    } });
+  } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
+});
+
 router.post('/embarques/:id/recibir', requireAdmin, (req, res) => {
   const db = getDb();
   try {
     const emb = db.prepare('SELECT * FROM sg_embarques WHERE id=? AND activo=1').get(req.params.id);
     if (!emb) return res.status(404).json({ ok: false, error: 'Embarque no encontrado' });
-    if (emb.estado === 'recibido' || emb.estado === 'cerrado')
-      return res.status(409).json({ ok: false, error: 'El embarque ya fue recibido' });
-    const lineas = db.prepare('SELECT * FROM sg_embarque_lineas WHERE embarque_id=? AND activo=1 ORDER BY id').all(emb.id);
-    if (!lineas.length) return res.status(400).json({ ok: false, error: 'El embarque no tiene líneas de producto. Cargá el desglose de productos antes de recibir.' });
-    if (lineas.some(l => !(Number(l.cajas) > 0)))
-      return res.status(400).json({ ok: false, error: 'Todas las líneas deben tener cajas > 0' });
-    if (lineas.some(l => !(Number(l.kg_por_bulto) > 0)))
-      return res.status(400).json({ ok: false, error: 'Todas las líneas deben tener kg por bulto > 0 (si no, el lote nace con 0 kg y no es despachable)' });
-    const calc = calcEmbarque(emb, embCostos(db, emb.id));
-    if (calc.costo_caja_neto == null)
-      return res.status(400).json({ ok: false, error: 'No se puede costear el embarque (falta cantidad de cajas o costos cargados)' });
+    let prep;
+    try { prep = prepararRecepcionEmbarque(db, emb); }
+    catch (e) { return res.status(400).json({ ok: false, error: e.message }); }
+    const { lineas, calc, bases } = prep;
     const fechaIngreso = val(req.body && req.body.fecha_ingreso) || db.prepare("SELECT date('now','localtime') d").get().d;
-    // F7 — costo_base por línea: FOB unitario diferencia; gastos parejos por caja; Σ = neto exacto.
-    const bases = costoBaseLineasEmbarque(emb, embCostos(db, emb.id), lineas);
     const tx = db.transaction(() => {
       const ids = [];
       lineas.forEach((linea, i) => ids.push(crearLoteDeEmbarque(db, { emb, linea, costoBase: bases[i], fechaIngreso, userId: uid(req) })));

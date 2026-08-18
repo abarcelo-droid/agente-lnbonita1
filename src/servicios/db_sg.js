@@ -1201,6 +1201,26 @@ try {
     db.exec("ALTER TABLE sg_lotes ADD COLUMN embarque_id INTEGER");
     console.log('[DB] SG sg_lotes migrado (+embarque_id)');
   }
+  // embarque_linea_id: de QUÉ línea del embarque salió este lote. embarque_id solo dice de qué
+  // camión vino; para re-costear hay que saber la línea, porque el costo se reparte por línea
+  // (FOB unitario propio + gastos parejos por caja). Sin esto no hay forma de volver a asignar
+  // el costo a cada lote sin adivinar.
+  if (!cols.includes('embarque_linea_id')) {
+    db.exec("ALTER TABLE sg_lotes ADD COLUMN embarque_linea_id INTEGER");
+    // Backfill de los lotes que ya existen: al recibir se crea un lote por línea, en el mismo
+    // orden (ORDER BY id). Solo se aparea cuando la cantidad coincide exactamente; si no
+    // coincide, quedan en NULL y el re-costeo los saltea avisando, en vez de asignar mal.
+    const embs = db.prepare("SELECT DISTINCT embarque_id e FROM sg_lotes WHERE embarque_id IS NOT NULL").all();
+    let pareados = 0;
+    for (const { e } of embs) {
+      const lotes  = db.prepare("SELECT id FROM sg_lotes WHERE embarque_id=? ORDER BY id").all(e);
+      const lineas = db.prepare("SELECT id FROM sg_embarque_lineas WHERE embarque_id=? AND activo=1 ORDER BY id").all(e);
+      if (!lotes.length || lotes.length !== lineas.length) continue;
+      const up = db.prepare("UPDATE sg_lotes SET embarque_linea_id=? WHERE id=?");
+      lotes.forEach((l, i) => { up.run(lineas[i].id, l.id); pareados++; });
+    }
+    console.log(`[DB] SG sg_lotes migrado (+embarque_linea_id, ${pareados} lote/s apareados)`);
+  }
 } catch (e) { console.error('[DB] SG migración sg_lotes (embarque_id):', e.message); }
 
 // sg_embarque_lineas += precio_unitario_usd (F7): FOB unitario en USD/caja por línea (calibre/
