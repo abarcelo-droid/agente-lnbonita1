@@ -5366,7 +5366,7 @@ function sgCcFicha(provId){
               + (d.esperando_contabilizar.length === 1 ? '' : 's') + ' sin asiento</div>', true)
           : '')
       + '<div style="margin-left:auto;display:flex;gap:8px;align-self:center">'
-        + (sgFmEsAdmin()
+        + (lnbPuedeOperar('sg-cc-proveedores')
             ? '<button class="btn bb bs" onclick="sgPagoOpen(' + p.id + ',\''
               + esc(p.razon_social || '') + '\')">💵 Registrar pago</button>' : '')
         + '<button class="btn bo bs" onclick="sgCcFichaExportar(\'excel\')">📗 Excel</button>'
@@ -5832,10 +5832,20 @@ function sgPagoGuardar(){
 // 403 es peor que no ofrecerlo: el que lo aprieta cree que rompió algo. /me
 // devuelve el nivel por módulo y acá se mira, con la MISMA regla del servidor:
 // anular y borrar pesan igual.
+// Acepta un modulo o varios. Con varios se queda con el MAS ALTO, igual que
+// mejorNivel() del servidor: una direccion puede tener mas de un dueno, y quien
+// entra por cualquiera de ellos con nivel suficiente, pasa.
+var LNB_ORDEN = { ver: 1, operar: 2, borrar: 3, anular: 3 };
 function lnbNivel(modulo){
   if (!window.LNB_USER) return null;
   if (LNB_USER.rol === 'admin') return 'anular';
-  return (LNB_USER.niveles || {})[modulo] || null;
+  var mods = Object.prototype.toString.call(modulo) === '[object Array]' ? modulo : [modulo];
+  var mejor = null;
+  for (var i = 0; i < mods.length; i++) {
+    var n = (LNB_USER.niveles || {})[mods[i]];
+    if (n && (!mejor || (LNB_ORDEN[n] || 0) > (LNB_ORDEN[mejor] || 0))) mejor = n;
+  }
+  return mejor;
 }
 function lnbPuedeAnular(modulo){
   var n = lnbNivel(modulo);
@@ -7791,7 +7801,7 @@ function sgOcVer(id){
             var d = o.documenta
               || ((o.tipo_precio === 'pizarra' || o.tipo_fiscal === 'liquidacion') ? 'liquidacion' : 'factura');
             return (d === 'liquidacion' ? '📄 Liquidación' : '🧾 Factura de compra')
-              + (sgFmEsAdmin()
+              + (lnbPuedeOperar('sg-compras')
                   ? ' <button class="btn bo bs" style="padding:1px 6px;font-size:11px"'
                     + ' title="Cambiar a qué circuito va esta partida"'
                     + ' onclick="sgOcDocEditar(' + o.id + ',\'' + d + '\')">✏️</button>'
@@ -7922,18 +7932,22 @@ function sgOcVer(id){
       return (l.precio_unitario_kg == null
         ? '<button class="btn bb bs" onclick="sgPrecioOpen('+l.id+',\'' + esc(l.codigo_lote) + '\','+l.kg_reales+')">💲 cerrar precio</button>'
         : '')
-        + (sgFmEsAdmin()
+        // CORREGIR y ELIMINAR son dos permisos distintos: uno arregla un número
+        // mal cargado, el otro deja afuera trabajo ya hecho.
+        + (lnbPuedeOperar(['sg-compras', 'sg-stock'])
             // Se pasa SÓLO el id. Meter el lote entero serializado dentro de un
             // atributo HTML es frágil por diseño: cualquier comilla o salto de
             // línea en un campo de texto libre rompe el atributo y el botón deja
             // de responder, sin ningún error visible.
             ? ' <button class="btn bo bs" title="Corregir lo que se cargó mal"'
               + ' onclick="sgLoteEditarOpen(' + l.id + ')">✏️</button>'
-              // LA QUE SE CARGÓ DE MÁS. Pasa que la recepción se carga dos
-              // veces y la misma partida queda repetida: hasta ahora no había
-              // forma de sacarla y quedaba sumando en el stock, en el costo del
-              // período y en lo que se le debe al proveedor.
-              + ' <button class="btn bd bs" title="Eliminar esta partida"'
+            : '')
+        // LA QUE SE CARGÓ DE MÁS. Pasa que la recepción se carga dos veces y la
+        // misma partida queda repetida: hasta ahora no había forma de sacarla y
+        // quedaba sumando en el stock, en el costo del período y en lo que se le
+        // debe al proveedor.
+        + (lnbPuedeAnular(['sg-compras', 'sg-stock'])
+            ? ' <button class="btn bd bs" title="Anular esta partida"'
               + ' onclick="sgLoteEliminar(' + l.id + ',\'' + esc(l.codigo_lote) + '\')">🗑</button>'
             : '');
     };
@@ -8200,7 +8214,7 @@ function sgLiqPartidasLoad(){
           // sistema, o se cargó por el botón suelto sin decir de qué partida
           // era, esta partida no tiene forma de salir de la bandeja: se queda
           // acá para siempre. Sólo admin y con motivo.
-          + (sgFmEsAdmin()
+          + (lnbPuedeAnular('ab-liquidaciones')
               ? ' <button class="btn bo bs" title="Ya se liquidó y no hace falta cargarla acá"'
                 + ' onclick="sgLiqYaEsta(' + p.id + ',\'' + esc(p.trazabilidad || '') + '\')">✔</button>'
               : '')
@@ -8468,12 +8482,21 @@ function paRound2Fm(n){ return Math.round((Number(n) || 0) * 100) / 100; }
 
 // ¿Es admin? El selector sólo lo ve quien puede cambiarlo; el resto ve contra
 // qué se contabiliza, que igual le sirve para controlar.
+// ── ADMIN ES UN ROL; OPERAR Y ANULAR SON NIVELES ────────────────────────
+// Esto miraba la cookie y contestaba "sos admin o no". Con eso, media docena de
+// botones de San Gerónimo estaban reservados al dueño: el encargado que cargó
+// una recepción dos veces no podía sacar la partida repetida, y el que liquida
+// no podía cerrar un precio. Ahora cada botón pide el NIVEL que le corresponde
+// —la misma regla que aplica el servidor— y admin sigue pudiendo todo porque
+// lnbNivel() le devuelve el nivel máximo.
 function sgFmEsAdmin(){
-  try {
-    var raw = document.cookie.split('; ').find(function(x){ return x.indexOf('lnb_user=') === 0; });
-    if (!raw) return false;
-    return JSON.parse(decodeURIComponent(raw.split('=').slice(1).join('='))).rol === 'admin';
-  } catch(_) { return false; }
+  return !!(window.LNB_USER && LNB_USER.rol === 'admin');
+}
+
+// Nivel "operar" o más: el trabajo del día.
+function lnbPuedeOperar(modulo){
+  var n = lnbNivel(modulo);
+  return n === 'operar' || n === 'anular' || n === 'borrar';
 }
 
 function sgFmModeloGuardar(){
@@ -10346,7 +10369,7 @@ function sgOcDocEditar(ocId, actual){
 // El servidor tiene los frenos: no deja corregir una partida ya contabilizada
 // (primero se anula el asiento), ni una de la que ya se despachó mercadería.
 function sgLoteEditarOpen(loteId){
-  if (!sgFmEsAdmin()) { toast('Sólo un administrador puede corregir', 'er'); return; }
+  if (!lnbPuedeOperar(['sg-compras', 'sg-stock'])) { toast('No tenés permiso para corregir partidas', 'er'); return; }
   // El lote sale de lo que ya trajo la ficha: no hace falta volver a pedirlo ni
   // arrastrarlo por el atributo del botón.
   var l = (SG.ocVerLotes || []).filter(function(x){ return String(x.id) === String(loteId); })[0];
