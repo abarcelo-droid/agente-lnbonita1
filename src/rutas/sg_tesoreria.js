@@ -429,9 +429,11 @@ router.patch('/cheques-propios/:id/estado', requireAdmin, (req, res) => {
 router.get('/cheques-terceros', (req, res) => {
   try {
     const { estado } = req.query;
-    let sql = `SELECT ct.*, c.nombre AS cuenta_destino_nombre
+    let sql = `SELECT ct.*, c.nombre AS cuenta_destino_nombre,
+             cl.razon_social AS cliente_nombre
       FROM sg_fin_cheques_terceros ct
       LEFT JOIN sg_fin_cuentas c ON c.id = ct.cuenta_destino
+      LEFT JOIN sg_clientes cl ON cl.id = ct.cliente_id
       WHERE 1 = 1`;
     const params = [];
     if (estado) { sql += ' AND ct.estado=?'; params.push(estado); }
@@ -451,7 +453,8 @@ router.get('/cheques-terceros', (req, res) => {
 // Recibir un cheque de un cliente es OPERAR: lo hace quien atiende el mostrador,
 // no el dueño. El nivel lo decide exigirNivel por la URL.
 router.post('/cheques-terceros', requireAuth, (req, res) => {
-  const { banco, nro_cheque, librador, monto, fecha_recepcion, fecha_vto, notas, cuenta_contable_id } = req.body || {};
+  const { banco, nro_cheque, librador, monto, fecha_recepcion, fecha_vto, notas,
+          cuenta_contable_id, cliente_id } = req.body || {};
   if (!monto) return res.status(400).json({ ok: false, error: 'Monto requerido' });
   if (!(parseFloat(monto) > 0)) return res.status(400).json({ ok: false, error: 'El importe tiene que ser mayor a cero' });
   try {
@@ -468,11 +471,18 @@ router.post('/cheques-terceros', requireAuth, (req, res) => {
                + ' por ' + ya.monto + ' (' + ya.estado + ').' });
       }
     }
-    const r = db.prepare(`INSERT INTO sg_fin_cheques_terceros (banco, nro_cheque, librador, monto, fecha_recepcion, fecha_vto, notas, cuenta_contable_id)
-      VALUES (?,?,?,?,?,?,?,?)`)
+    // A quién se le cobró. Se valida que exista: un id suelto que no corresponde
+    // a ningún cliente es peor que no tener el dato, porque parece que lo tenés.
+    let cli = null;
+    if (cliente_id) {
+      cli = db.prepare('SELECT id FROM sg_clientes WHERE id=? AND activo=1').get(parseInt(cliente_id));
+      if (!cli) return res.status(400).json({ ok: false, error: 'Ese cliente no existe' });
+    }
+    const r = db.prepare(`INSERT INTO sg_fin_cheques_terceros (banco, nro_cheque, librador, monto, fecha_recepcion, fecha_vto, notas, cuenta_contable_id, cliente_id)
+      VALUES (?,?,?,?,?,?,?,?,?)`)
       .run(banco||null, nro_cheque||null, librador||null, parseFloat(monto),
            fecha_recepcion||new Date().toISOString().split('T')[0], fecha_vto||null, notas||null,
-           cuenta_contable_id?parseInt(cuenta_contable_id):null);
+           cuenta_contable_id?parseInt(cuenta_contable_id):null, cli ? cli.id : null);
     res.json({ ok: true, id: r.lastInsertRowid });
   } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
 });

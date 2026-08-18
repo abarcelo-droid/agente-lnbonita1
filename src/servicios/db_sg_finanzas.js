@@ -457,6 +457,14 @@ try {
   `);
 } catch (e) { console.error('[SG] sg_fin_cuenta_usuarios:', e.message); }
 
+// ── DE QUIÉN VINO EL CHEQUE ───────────────────────────────────────────────
+// Un cheque de tercero llega COBRANDO: se lo dio un cliente. El librador que
+// figura en el papel muchas veces no es ese cliente —le pagaron a él con ese
+// cheque y él lo endosó—, así que "librador" no alcanza para saber a quién se le
+// cobró. Sin este dato, la cartera dice qué hay pero no contra qué cuenta
+// corriente entró.
+try { db.exec("ALTER TABLE sg_fin_cheques_terceros ADD COLUMN cliente_id INTEGER"); } catch (_) {}
+
 // Si la cuenta tiene chequera. Es del banco, no del cheque: hay cuentas
 // corrientes sin chequera y cajas de ahorro que nunca la tienen.
 try { db.exec("ALTER TABLE sg_fin_cuentas ADD COLUMN tiene_chequera INTEGER NOT NULL DEFAULT 0"); } catch (_) {}
