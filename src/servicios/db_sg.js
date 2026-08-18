@@ -1193,6 +1193,32 @@ try {
   }
 } catch (e) { console.error('[DB] SG sg_tc_esperado:', e.message); }
 
+// ── PARÁMETROS DE IMPORTACIÓN ───────────────────────────────────────────────────────
+// Alícuotas y porcentajes del despacho. Son los mismos para todas las importaciones, así que
+// viven una sola vez acá y cada embarque los hereda. Se editan desde la pantalla cuando
+// cambia alguna; INSERT OR IGNORE para no pisar lo que ya ajustaron.
+try {
+  const def = [
+    ['imp_iva_pct', '10.5'],            // IVA sobre la base imponible
+    ['imp_iibb_pct', '0.69'],           // percepción IIBB sobre la base imponible
+    ['imp_despachante_pct', '7'],       // honorarios del despachante, % de la base imponible
+    ['imp_iva_servicios_pct', '21'],    // IVA de despachante y gastos bancarios
+    ['imp_tasa_maria_usd', '110']       // Tasa María, monto fijo en dólares
+  ];
+  const ins = db.prepare('INSERT OR IGNORE INTO sg_config (clave, valor) VALUES (?,?)');
+  for (const [k, v] of def) ins.run(k, v);
+} catch (e) { console.error('[DB] SG parámetros de importación:', e.message); }
+
+// Base imponible: el flete y el seguro DECLARADOS en aduana. Son base de cálculo de
+// impuestos, no costos — el costo del flete es la factura del fletero, que va aparte.
+// Sumar los dos inflaba el camión por el flete declarado entero.
+try {
+  const cols = db.prepare("PRAGMA table_info(sg_embarques)").all().map(c => c.name);
+  const nuevas = [['flete_base_usd', 'REAL'], ['seguro_usd', 'REAL']].filter(([n]) => !cols.includes(n));
+  for (const [n, t] of nuevas) db.exec(`ALTER TABLE sg_embarques ADD COLUMN ${n} ${t}`);
+  if (nuevas.length) console.log(`[DB] SG sg_embarques migrado (+${nuevas.map(x => x[0]).join(', ')})`);
+} catch (e) { console.error('[DB] SG migración sg_embarques (base imponible):', e.message); }
+
 // ── EXPEDIENTE DOCUMENTAL DEL EMBARQUE (Importación F6) ─────────────────────────────
 // La tabla FALTABA: F6 dejó los endpoints (subir/listar/descargar/borrar en rutas/sg.js)
 // pero nunca el CREATE, así que el expediente entero tiraba "no such table" y no había forma

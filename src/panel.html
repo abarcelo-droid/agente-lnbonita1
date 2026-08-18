@@ -3558,7 +3558,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
 
 
   <div class="sec sg-mod" id="sec-sg-importacion">
-    <div class="ph"><div><div class="ph-t">🍅 San Gerónimo · Importación</div><div class="ph-s">Cotizador de embarque: costo por caja en pesos según a qué dólar se paga cada rubro. Estimado vs real.</div></div><div style="display:flex;gap:8px"><button class="btn bo" onclick="sgCurvaAbrir()">📈 Curva TC</button><button class="btn bo" onclick="sgTcAbrir()">💱 TC esperado</button><button class="btn bb" onclick="sgImpOpen()">+ Nuevo embarque</button></div></div>
+    <div class="ph"><div><div class="ph-t">🍅 San Gerónimo · Importación</div><div class="ph-s">Cotizador de embarque: costo por caja en pesos según a qué dólar se paga cada rubro. Estimado vs real.</div></div><div style="display:flex;gap:8px"><button class="btn bo" onclick="sgParamsAbrir()">⚙️ Parámetros</button><button class="btn bo" onclick="sgCurvaAbrir()">📈 Curva TC</button><button class="btn bo" onclick="sgTcAbrir()">💱 TC esperado</button><button class="btn bb" onclick="sgImpOpen()">+ Nuevo embarque</button></div></div>
     <div class="ab-table-wrap"><table class="pa-tbl">
       <thead><tr><th>Embarque</th><th>Proveedor</th><th style="text-align:center">Estado</th><th style="text-align:right">Cajas</th><th style="text-align:right">Costo/caja neto</th><th style="text-align:right">Costo/caja c-imp.</th><th style="text-align:right">Costo/kg</th><th></th></tr></thead>
       <tbody id="sg-tb-embarques"><tr><td colspan="8" class="emp">Cargando…</td></tr></tbody>
@@ -3738,6 +3738,8 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
       <div class="fl"><label>NCM</label><input type="text" id="sg-emb-ncm"></div>
       <div class="fl"><label>Cert. origen Mercosur</label><label style="display:flex;align-items:center;gap:6px;font-size:13px;margin-top:4px"><input type="checkbox" id="sg-emb-cert"> Sí</label></div>
       <div class="fl"><label>Moneda embarque</label><select id="sg-emb-moneda"><option value="USD">USD</option><option value="ARS">ARS</option></select></div>
+      <div class="fl"><label>Flete p/ base imponible <span style="font-weight:400;color:var(--mut);font-size:11px">USD · declarado</span></label><input type="number" step="0.01" min="0" id="sg-emb-flete-base" oninput="sgImpCalc()" title="El flete que se declara en aduana. Sirve para calcular impuestos y despachante; NO es el costo del flete (ese es la factura del fletero)."></div>
+      <div class="fl"><label>Seguro <span style="font-weight:400;color:var(--mut);font-size:11px">USD</span></label><input type="number" step="0.01" min="0" id="sg-emb-seguro" oninput="sgImpCalc()"></div>
       <div class="fl"><label>TC manual <span style="font-weight:400;color:var(--mut);font-size:11px">(opcional — pisa la curva)</span></label><input type="number" step="0.01" id="sg-emb-tc-est" oninput="sgImpCalc()" placeholder="sale de la curva" title="Dejalo vacío y cada rubro toma el TC de la curva según su fecha de pago. Cargalo solo si este embarque tiene un TC pactado o ya pagado."></div>
       <div class="fl"><label>TC real</label><input type="number" step="0.01" id="sg-emb-tc-real" oninput="sgImpCalc()" placeholder="al cerrar" title="TC definitivo del embarque. Si cargás los montos reales en pesos, no hace falta."></div>
       <div class="fl"><label>Estado</label><select id="sg-emb-estado"></select></div>
@@ -3764,12 +3766,12 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
     </div>
     <div style="display:grid;grid-template-columns:1.4fr 1fr;gap:16px;margin-top:8px">
       <div>
-        <div style="font-size:12px;font-weight:600;color:var(--mut);margin-bottom:6px">RUBROS · estimado vs real (el gap Δ es el control central)</div>
+        <div style="font-size:12px;font-weight:600;color:var(--mut);margin-bottom:6px">MONTOS DE LA NEGOCIACIÓN · en la moneda de cada uno · el real llega con su documento</div>
         <table class="pa-tbl" style="font-size:12px"><thead><tr><th>Rubro</th><th>Mon.</th><th style="text-align:right">Estimado</th><th style="text-align:right" title="Los pesos que efectivamente salieron">Real (en $)</th><th style="text-align:right">Δ (real−est.)</th><th title="Cuándo se paga. Solo aplica a los rubros en dólares.">Se paga a</th><th style="text-align:right" title="El de la curva en la fecha de pago. ⏰ = venció sin pagar, sigue rodando al de hoy. ✋ = TC manual del embarque.">TC</th></tr></thead>
           <tbody id="sg-emb-costos"></tbody></table>
       </div>
       <div>
-        <div style="font-size:12px;font-weight:600;color:var(--mut);margin-bottom:6px">RESULTADO (en vivo)</div>
+        <div style="font-size:12px;font-weight:600;color:var(--mut);margin-bottom:6px">ESTIMADOR (en vivo)</div>
         <div id="sg-emb-result" style="border:1px solid var(--bor);border-radius:10px;padding:12px"></div>
       </div>
     </div>
@@ -3825,6 +3827,19 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
     <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:14px">
       <button class="btn bo" id="sg-visor-editar">✏️ Editar</button>
       <button class="btn bb" onclick="closeMB('sg-emb-visor-modal')">Cerrar</button>
+    </div>
+  </div>
+</div>
+
+<!-- Parámetros de importación: alícuotas y porcentajes, iguales para todos los camiones. -->
+<div class="ab-modal-overlay" id="sg-params-modal">
+  <div class="ab-modal" style="max-width:560px">
+    <div class="mhd"><div class="mht">⚙️ Parámetros de importación</div><button class="mcl" onclick="closeMB('sg-params-modal')">×</button></div>
+    <div style="font-size:12px;color:var(--mut);margin-bottom:10px">Son los mismos para todas las importaciones. Cada embarque los hereda; si cambia una alícuota se ajusta acá y vale para todos.</div>
+    <div id="sg-params-body"></div>
+    <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:14px">
+      <button class="btn bo" onclick="closeMB('sg-params-modal')">Cancelar</button>
+      <button class="btn bb" onclick="sgParamsGuardar()">Guardar</button>
     </div>
   </div>
 </div>
@@ -22636,15 +22651,12 @@ function abrirHistorico(producto, mes, event) {
 // ── MÓDULO IMPORTACIÓN (F1) — cotizador de embarque ──────────────────────────
 // Standalone: solo consume /api/sg/embarques*. El cálculo en vivo (sgImpCalc) espeja
 // calcEmbarque del server. Moneda por rubro (ARS default); USD se convierte con tc.
+// Solo los montos que se CARGAN. Impuestos, despachante y sus IVA los calcula el
+// estimador a partir de la base imponible, así que no se tipean.
 var SG_EMB_CONCEPTOS = [
-  {k:'costo_mercaderia',          l:'Costo mercadería (FOB)',    cred:false},
-  {k:'anticipo_impuesto',         l:'Anticipo de impuesto',      cred:false},
-  {k:'gastos_despachante',        l:'Gastos despachante',        cred:false},
-  {k:'fletes',                    l:'Fletes',                    cred:false},
-  {k:'gastos_bancarios',          l:'Gastos bancarios',          cred:false},
-  {k:'iva_credito_computable',    l:'IVA crédito computable',    cred:true},
-  {k:'percepcion_iva_computable', l:'Percepción IVA computable', cred:true},
-  {k:'percepcion_iibb',           l:'Percepción IIBB',           cred:true}
+  {k:'costo_mercaderia',  l:'Invoice / mercadería', cred:false},
+  {k:'fletes',            l:'Flete real',           cred:false},
+  {k:'gastos_bancarios',  l:'Gastos bancarios',     cred:false}
 ];
 var SG_EMB_ESTADOS = [['cotizacion','Cotización'],['abierto','Abierto'],['transito','En tránsito'],['recibido','Recibido'],['cerrado','Cerrado']];
 function sgEmbEstadoLbl(e){ var f=SG_EMB_ESTADOS.find(function(x){return x[0]===e;}); return f?f[1]:(e||'—'); }
@@ -22716,6 +22728,8 @@ function sgImpFill(e){
     return '<option value="'+x[0]+'"'+(sel?' selected':'')+((auto&&!sel)?' disabled':'')+'>'+x[1]+(auto?' (automático)':'')+'</option>';
   }).join('');
   eid('sg-emb-cajas').value = sgImpVal(e.cantidad_cajas);
+  eid('sg-emb-flete-base').value = sgImpVal(e.flete_base_usd);
+  eid('sg-emb-seguro').value = sgImpVal(e.seguro_usd);
   eid('sg-emb-etd').value = sgImpVal(e.fecha_etd);
   eid('sg-emb-eta').value = sgImpVal(e.fecha_eta);
   eid('sg-emb-obs').value = sgImpVal(e.observaciones);
@@ -22885,28 +22899,7 @@ function sgImpCostoRow(c){
 // F4a — dos bloques como la planilla real: COSTOS (bruto) y CRÉDITOS RECUPERABLES (se restan).
 // Cada bloque cierra con su subtotal Σestimado | Σreal | Σgap (los llena sgImpCalc en vivo).
 function sgImpRenderCostos(){
-  var grpHdr = function(txt, note){
-    return '<tr><td colspan="7" style="font-weight:700;font-size:11px;letter-spacing:.03em;color:var(--mut);padding-top:10px">'
-      +txt+(note?' <span style="font-weight:400;letter-spacing:0;text-transform:none">· '+note+'</span>':'')+'</td></tr>';
-  };
-  var subRow = function(id, lbl){
-    return '<tr style="border-top:2px solid var(--bor)">'
-      +'<td colspan="2" style="font-weight:700">'+lbl+'</td>'
-      +'<td id="'+id+'-est" style="text-align:right;font-weight:600;color:var(--mut)">—</td>'
-      +'<td id="'+id+'-real" style="text-align:right;font-weight:700">—</td>'
-      +'<td id="'+id+'-gap" style="text-align:right">—</td>'
-      +'<td colspan="2"></td>'
-    +'</tr>';
-  };
-  var costos = SG_EMB_CONCEPTOS.filter(function(c){ return !c.cred; });
-  var creds  = SG_EMB_CONCEPTOS.filter(function(c){ return  c.cred; });
-  eid('sg-emb-costos').innerHTML =
-      grpHdr('COSTOS')
-    + costos.map(sgImpCostoRow).join('')
-    + subRow('sg-emb-sub-bruto','Total Costo Mercadería (bruto)')
-    + grpHdr('CRÉDITOS RECUPERABLES','se restan del costo — crédito fiscal recuperable')
-    + creds.map(sgImpCostoRow).join('')
-    + subRow('sg-emb-sub-cred','Total Créditos');
+  eid('sg-emb-costos').innerHTML = SG_EMB_CONCEPTOS.map(sgImpCostoRow).join('');
 }
 // Espejo en el navegador de tcEsperadoEnFecha() del backend, para el preview en vivo.
 // Si se toca la fórmula allá, hay que tocarla acá: el preview tiene que mostrar lo mismo
@@ -22940,99 +22933,73 @@ function sgImpFechaPago(k){
   return d.toISOString().slice(0,10);
 }
 function sgImpCalc(){
-  // tc_estimado dejó de ser obligatorio: si está cargado pisa la curva para todo el embarque.
+  // El cálculo lo hace el BACKEND: se manda lo que hay en pantalla y se dibuja lo que vuelve.
+  // Antes esta función replicaba la fórmula entera y había que mantener las dos en sincro.
+  clearTimeout(SG._estimTimer);
+  SG._estimTimer = setTimeout(sgImpEstimar, 250);
+  // Los TC por rubro de la tabla se siguen pintando en el momento (no dependen del total).
+  sgImpPintarTcRubros();
+}
+// Pinta la columna TC de cada rubro y apaga la condición de pago en los que van en pesos.
+function sgImpPintarTcRubros(){
   var override = parseFloat(eid('sg-emb-tc-real').value) || parseFloat(eid('sg-emb-tc-est').value) || null;
   var hoy = new Date().toISOString().slice(0,10);
-  var bruto=0, cred=0;                                  // efectivo (COALESCE real,est) → alimenta el neto
-  var sinTc=[];                                         // rubros en USD sin TC: el total no se puede pasar a pesos
-  var difCot=0, difCos=0;                               // desvío de los rubros USD (cotización) vs los en pesos (costo real)
-  var sub={ bruto:{est:0,real:0}, cred:{est:0,real:0} }; // subtotales por bloque para la tabla de rubros
   SG_EMB_CONCEPTOS.forEach(function(c){
-    var mon=eid('sg-emb-mon-'+c.k).value;
-    var esUSD=(mon==='USD');
-    // TC del rubro: el de la curva en su fecha de pago. LA REGLA DEL VENCIDO: si la fecha ya
-    // pasó y no se pagó, no se congela en un dólar viejo — sigue rodando al de hoy.
+    var esUSD = eid('sg-emb-mon-'+c.k).value==='USD';
     var fPago = esUSD ? sgImpFechaPago(c.k) : null;
     var vencido = !!(fPago && fPago < hoy);
-    var fTC = (fPago && !vencido) ? fPago : hoy;
-    var tcR = esUSD ? (override!=null ? override : sgTcEnFecha(fTC)) : null;
+    var tcR = esUSD ? (override!=null ? override : sgTcEnFecha((fPago && !vencido) ? fPago : hoy)) : null;
     var celdaTC=eid('sg-emb-tc-'+c.k), celdaPago=eid('sg-emb-pago-'+c.k);
     if(celdaPago) celdaPago.style.opacity = esUSD?'1':'.35';
-    if(celdaTC){
-      if(!esUSD){ celdaTC.textContent='—'; celdaTC.style.color='var(--mut)'; }
-      else if(tcR==null){ celdaTC.textContent='sin curva'; celdaTC.style.color='var(--err,#dc2626)'; }
-      else {
-        celdaTC.textContent=nr(Math.round(tcR*100)/100)+(override!=null?' ✋':(vencido?' ⏰':''));
-        celdaTC.title = override!=null ? 'TC manual del embarque (pisa la curva)'
-          : (vencido ? 'El pago venció el '+fPago+' y sigue sin cargarse: se usa el dólar de hoy y se va a seguir moviendo'
-                     : (fPago ? 'Pago estimado el '+fPago : 'Sin condición de pago: se usa el dólar de hoy'));
-        celdaTC.style.color = vencido?'var(--err,#dc2626)':'var(--mut)';
-      }
-    }
-    // Sin TC un monto en dólares NO se puede pasar a pesos. Se marca y el resultado no
-    // muestra ningún total: sumarlo crudo daba un número mil veces menor.
-    if(esUSD && tcR==null && String(eid('sg-emb-est-'+c.k).value||'').trim()!=='') sinTc.push(c.l);
-    var aARS=function(x){ if(x==null||x==='') return null; var m=Number(x)||0; return (esUSD&&tcR)?m*tcR:m; };
-    var est=aARS(eid('sg-emb-est-'+c.k).value);
-    // El real se carga en PESOS: es lo que salió de la caja, sin convertir.
-    var rv=eid('sg-emb-real-'+c.k).value;
-    var real=(rv==null||rv==='')?null:(Number(rv)||0);
-    var efec = real!=null?real:(est!=null?est:0);
-    var bk = c.cred?sub.cred:sub.bruto;
-    if(est!=null) bk.est+=est;
-    if(real!=null) bk.real+=real;
-    if(c.cred) cred+=efec; else bruto+=efec;
-    var g=eid('sg-emb-gap-'+c.k);
-    if(real!=null&&est!=null){ var d=real-est; if(esUSD) difCot+=d; else difCos+=d; g.textContent=(d>=0?'+':'')+sgMoney(Math.round(d)); g.style.color=(d>0?'var(--err,#dc2626)':(d<0?'var(--ok,#16a34a)':'var(--mut)')); }
-    else { g.textContent='—'; g.style.color='var(--mut)'; }
+    if(!celdaTC) return;
+    if(!esUSD){ celdaTC.textContent='—'; celdaTC.style.color='var(--mut)'; return; }
+    if(tcR==null){ celdaTC.textContent='sin curva'; celdaTC.style.color='var(--err,#dc2626)'; return; }
+    celdaTC.textContent=nr(Math.round(tcR*100)/100)+(override!=null?' ✋':(vencido?' ⏰':''));
+    celdaTC.title = override!=null ? 'TC manual del embarque (pisa la curva)'
+      : (vencido ? 'El pago venció el '+fPago+' y sigue sin cargarse: se usa el dólar de hoy'
+                 : (fPago ? 'Pago estimado el '+fPago : 'Sin condición de pago: se usa el dólar de hoy'));
+    celdaTC.style.color = vencido?'var(--err,#dc2626)':'var(--mut)';
   });
-  // Subtotales de cada bloque (Σestimado | Σreal | Σgap).
-  function fillSub(id, s){
-    eid(id+'-est').textContent = sgMoney(Math.round(s.est));
-    eid(id+'-real').textContent = sgMoney(Math.round(s.real));
-    var gp=eid(id+'-gap'), d=s.real-s.est;
-    gp.textContent=(d>=0?'+':'')+sgMoney(Math.round(d));
-    gp.style.color=(d>0?'var(--err,#dc2626)':(d<0?'var(--ok,#16a34a)':'var(--mut)'));
-  }
-  fillSub('sg-emb-sub-bruto', sub.bruto);
-  fillSub('sg-emb-sub-cred', sub.cred);
-
-  var neto=bruto-cred;
-  var cajas=parseInt(eid('sg-emb-cajas').value,10)||0;
-  var kgTot=(SG._embLineas||[]).reduce(function(a,l){ return a+((parseInt(l.cajas,10)||0)*(parseFloat(l.kg_por_bulto)||0)); },0);
-  var ccn=cajas>0?neto/cajas:null;                     // el número para decidir a cuánto vender
-  var cci=cajas>0?bruto/cajas:null;                    // desembolso de caja (cash flow)
-  var ckg=kgTot>0?neto/kgTot:null;
-  // Costo/caja con 2 decimales (como la planilla: 42.747,62). Los totales van redondeados.
-  var money2 = function(n){ return (n==null)?'—':('$'+(Number(n)||0).toLocaleString('es-AR',{minimumFractionDigits:2,maximumFractionDigits:2})); };
-  function row(l,v,strong){ return '<div style="display:flex;justify-content:space-between;font-size:13px;padding:2px 0"><span style="color:var(--mut)">'+l+'</span><span style="font-variant-numeric:tabular-nums"'+(strong?' style="font-weight:700"':'')+'>'+v+'</span></div>'; }
-  // Mirada destacada: emoji + label + sublabel, con el número grande.
-  function big(emoji,l,sub,v,col,bg){ return '<div style="margin-top:6px;padding:8px 10px;border-radius:8px;background:'+bg+';display:flex;justify-content:space-between;align-items:center;gap:10px">'
-    +'<div><div style="font-weight:600">'+emoji+' '+l+'</div><div style="font-size:11px;color:var(--mut)">'+sub+'</div></div>'
-    +'<span style="font-size:18px;font-weight:700;color:'+(col||'inherit')+';font-variant-numeric:tabular-nums">'+v+'</span></div>'; }
-  // Sin TC para algún rubro en dólares, el total es una mezcla de pesos y dólares: no se
-  // muestra ningún número, se explica qué falta cargar.
-  if(sinTc.length){
+}
+function sgImpEstimar(){
+  var kg=(SG._embLineas||[]).reduce(function(a,l){ return a+((parseInt(l.cajas,10)||0)*(parseFloat(l.kg_por_bulto)||0)); },0);
+  var body=sgImpGather(); body.kg=kg;
+  api('/api/sg/embarques/estimador-preview','POST',body).then(function(r){
+    if(!r||!r.ok){ eid('sg-emb-result').innerHTML='<div style="color:var(--mut);font-size:12px">'+esc((r&&r.error)||'Sin datos')+'</div>'; return; }
+    sgImpPintarEstimador(r.data);
+  });
+}
+function sgImpPintarEstimador(d){
+  var money2=function(n){ return (n==null)?'—':('$'+(Number(n)||0).toLocaleString('es-AR',{minimumFractionDigits:2,maximumFractionDigits:2})); };
+  if(!d.convertible){
     eid('sg-emb-result').innerHTML='<div style="padding:12px;border-radius:8px;border:1px solid var(--err,#dc2626);background:rgba(220,38,38,.08);color:var(--err,#dc2626);font-size:12.5px">'
-      +'<b>No se puede pasar a pesos.</b><br>'+esc(sinTc.join(', '))+' está en dólares y no hay tipo de cambio para su fecha de pago.<br><br>'
-      +'Cargá la <b>Curva TC</b>, o la <b>condición de pago</b> del rubro (columna “Se paga a”), o un <b>TC manual</b> arriba.</div>';
+      +'<b>Falta el tipo de cambio.</b><br>'+esc((d.falta_tc||[]).join(', '))+' no tiene TC para su fecha de pago.<br><br>'
+      +'Cargá la <b>Curva TC</b>, la <b>condición de pago</b> del rubro, o un <b>TC manual</b> arriba.</div>';
     return;
   }
-  eid('sg-emb-result').innerHTML =
-     row('Total Costo Mercadería (bruto)', sgMoney(Math.round(bruto)))
-    +row('− Total Créditos', '− '+sgMoney(Math.round(cred)))
-    +row('= Costo Neto de Impuestos', sgMoney(Math.round(neto)), true)
-    +row('÷ cajas', nr(cajas)+' caja'+(cajas===1?'':'s'))
-    +'<hr style="border:none;border-top:1px solid var(--bor);margin:8px 0">'
-    +big('💰','Costo/caja NETO','en pesos — el número para poner precio', money2(ccn), '#16a34a', 'rgba(16,163,74,.10)')
-    +big('💵','Costo/caja c/impuestos','desembolso de caja (cash flow)', money2(cci), 'var(--fg,inherit)', 'var(--bg)')
-    +(ckg!=null?big('⚖️','Costo por kg','neto, sobre '+nr(Math.round(kgTot))+' kg', money2(ckg), 'var(--fg,inherit)', 'var(--bg)'):'')
-    // La diferencia de cotización no se carga: sale sola del desvío de los rubros en dólares.
-    +((difCot||difCos)
-      ? '<hr style="border:none;border-top:1px solid var(--bor);margin:8px 0">'
-        +row('Diferencia de cotización', (difCot>=0?'+':'')+sgMoney(Math.round(difCot)))
-        +row('Diferencia de costos reales', (difCos>=0?'+':'')+sgMoney(Math.round(difCos)))
-      : '');
+  var row=function(l,v,sub,fuerte){ return '<div style="display:flex;justify-content:space-between;gap:8px;font-size:12.5px;padding:3px 0'+(fuerte?';font-weight:700;border-top:1px solid var(--bor);margin-top:4px;padding-top:6px':'')+'">'
+    +'<span'+(fuerte?'':' style="color:var(--mut)"')+'>'+l+(sub?' <span style="font-size:10px;color:var(--mut)">'+sub+'</span>':'')+'</span>'
+    +'<span style="font-variant-numeric:tabular-nums;white-space:nowrap">'+v+'</span></div>'; };
+  var h='';
+  h+='<div style="padding:8px 10px;border-radius:8px;background:var(--bg2,#f5f5f5);margin-bottom:8px">'
+    +row('BASE IMPONIBLE','US$ '+nr(d.usd.base)+' · '+sgMoney(Math.round(d.base_ars)),'invoice + flete decl. + seguro',true)
+    +'<div style="font-size:10px;color:var(--mut);margin-top:2px">base de cálculo de impuestos — el flete declarado no suma al costo</div></div>';
+  h+=d.lineas.filter(function(l){ return l.ars; }).map(function(l){
+      return row(l.label, sgMoney(Math.round(l.ars)), l.usd?('US$ '+nr(l.usd)):(l.detalle||''));
+    }).join('');
+  h+=row('COSTO AL TC DE HOY', sgMoney(Math.round(d.total_contado)), '', true);
+  if(d.dif_cambio){
+    h+='<div style="margin-top:6px;padding:8px 10px;border-radius:8px;background:rgba(220,38,38,.06)">'
+      +row('Diferencia de cambio por pagar a plazo', (d.dif_cambio>=0?'+':'')+sgMoney(Math.round(d.dif_cambio)))
+      +d.dif_cambio_detalle.map(function(x){ return '<div style="display:flex;justify-content:space-between;font-size:11px;color:var(--mut)"><span>· '+esc(x.label)+'</span><span>'+(x.ars>=0?'+':'')+sgMoney(Math.round(x.ars))+'</span></div>'; }).join('')
+      +'</div>';
+  }
+  h+='<div style="margin-top:8px;padding:10px;border-radius:8px;background:rgba(16,163,74,.10)">'
+    +row('COSTO PUESTO ACÁ', sgMoney(Math.round(d.total_plazo)),'',true)
+    +row('por caja', money2(d.costo_caja), d.cajas?(nr(d.cajas)+' cajas'):'')
+    +row('por kg', money2(d.costo_kg), d.kg?(nr(Math.round(d.kg))+' kg'):'')
+    +'</div>';
+  eid('sg-emb-result').innerHTML=h;
 }
 function sgImpGather(){
   return {
@@ -23047,6 +23014,8 @@ function sgImpGather(){
     tc_real: eid('sg-emb-tc-real').value,
     estado: eid('sg-emb-estado').value,
     cantidad_cajas: eid('sg-emb-cajas').value,
+    flete_base_usd: eid('sg-emb-flete-base').value,
+    seguro_usd: eid('sg-emb-seguro').value,
     fecha_etd: eid('sg-emb-etd').value,
     fecha_eta: eid('sg-emb-eta').value,
     observaciones: eid('sg-emb-obs').value,
@@ -23109,7 +23078,7 @@ function sgImpVisor(id){
   eid('sg-emb-visor-modal').classList.add('on');
   api('/api/sg/embarques/'+id+'/ficha').then(function(r){
     if(!r||!r.ok){ eid('sg-visor-body').innerHTML='<div style="padding:20px;color:var(--err,#dc2626)">'+esc((r&&r.error)||'Error')+'</div>'; return; }
-    var d=r.data, e=d.embarque, t=d.totales, res=d.resultado;
+    var d=r.data, e=d.embarque, t=d.totales, res=d.resultado, est=d.estimador||{};
     eid('sg-visor-tit').textContent='🚚 '+(e.nombre||'Camión');
     var money2=function(n){ return (n==null)?'—':('$'+(Number(n)||0).toLocaleString('es-AR',{minimumFractionDigits:2,maximumFractionDigits:2})); };
     var dato=function(l,v){ return '<div><div style="font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:var(--mut)">'+l+'</div><div style="font-size:13px;margin-top:1px">'+v+'</div></div>'; };
@@ -23121,20 +23090,20 @@ function sgImpVisor(id){
     var h='';
     // Si algún rubro en dólares no tiene TC, el total es una mezcla de pesos y dólares y no
     // significa nada: no se muestra ningún número, se explica qué falta.
-    var conv=(t.convertible!==false);
+    var conv=(est.convertible!==false);
     if(!conv){
       h+='<div style="padding:12px 14px;border-radius:10px;border:1px solid var(--err,#dc2626);background:rgba(220,38,38,.08);color:var(--err,#dc2626);font-size:12.5px;margin-bottom:12px">'
-        +'<b>No se puede pasar a pesos todavía.</b> '+esc((t.sin_tc||[]).join(', '))
+        +'<b>No se puede pasar a pesos todavía.</b> '+esc((est.falta_tc||[]).join(', '))
         +' está en dólares y no hay tipo de cambio para su fecha de pago.<br>'
         +'Cargá la <b>Curva TC</b> (botón arriba) y la <b>condición de pago</b> del rubro, o poné un TC manual en el embarque.'
         +'</div>';
     }
     // 1) Lo que se necesita para poner precio, arriba de todo.
     h+='<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px">'
-      +big('Costo por caja', conv?money2(t.costo_caja_neto):'—', conv?'en pesos · neto de impuestos':'falta el TC', 'rgba(16,163,74,.10)', '#16a34a')
-      +big('Costo por kg', conv?money2(t.costo_kg_neto):'—', conv?(t.kg?(nr(Math.round(t.kg))+' kg en total'):'sin productos cargados'):'falta el TC', 'rgba(16,163,74,.10)', '#16a34a')
-      +big('Costo total', conv?sgMoney(Math.round(t.neto)):'—', nr(t.cajas)+' caja'+(t.cajas===1?'':'s'), 'var(--bg2,#f5f5f5)')
-      +big('Desembolso de caja', conv?sgMoney(Math.round(t.bruto)):'—', 'con impuestos, antes de recuperar', 'var(--bg2,#f5f5f5)')
+      +big('Costo por caja', conv?money2(est.costo_caja):'—', conv?'puesto acá, en pesos':'falta el TC', 'rgba(16,163,74,.10)', '#16a34a')
+      +big('Costo por kg', conv?money2(est.costo_kg):'—', conv?(est.kg?(nr(Math.round(est.kg))+' kg en total'):'sin productos cargados'):'falta el TC', 'rgba(16,163,74,.10)', '#16a34a')
+      +big('Costo puesto acá', conv?sgMoney(Math.round(est.total_plazo)):'—', nr(est.cajas||0)+' caja'+((est.cajas||0)===1?'':'s'), 'var(--bg2,#f5f5f5)')
+      +big('Al TC de hoy', conv?sgMoney(Math.round(est.total_contado)):'—', conv&&est.dif_cambio?('+'+sgMoney(Math.round(est.dif_cambio))+' por pagar a plazo'):'sin diferencia de cambio', 'var(--bg2,#f5f5f5)')
       +'</div>';
     // 2) Datos del viaje.
     h+='<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px;padding:12px;border:1px solid var(--bor);border-radius:10px;margin-bottom:12px">'
@@ -23279,6 +23248,28 @@ function sgImpAbrirRecibir(){
     eid('sg-emb-recibir-ok').disabled = false;
   });
 }
+// ── PARÁMETROS DE IMPORTACIÓN ─────────────────────────────────────────────────
+var SG_PARAMS=[];
+function sgParamsAbrir(){
+  eid('sg-params-body').innerHTML='<div style="color:var(--mut);font-size:12px">Cargando…</div>';
+  eid('sg-params-modal').classList.add('on');
+  api('/api/sg/importacion/parametros').then(function(r){
+    SG_PARAMS=(r&&r.ok)?r.data:[];
+    eid('sg-params-body').innerHTML=SG_PARAMS.map(function(p){
+      return '<div class="fl" style="margin-bottom:8px"><label>'+esc(p.label)+' <span style="font-weight:400;color:var(--mut);font-size:11px">('+esc(p.unidad)+')</span></label>'
+        +'<input type="number" step="0.01" min="0" id="sg-par-'+p.clave+'" value="'+esc(p.valor==null?'':String(p.valor))+'" style="max-width:160px"></div>';
+    }).join('');
+  });
+}
+function sgParamsGuardar(){
+  var body={};
+  SG_PARAMS.forEach(function(p){ body[p.clave]=eid('sg-par-'+p.clave).value; });
+  api('/api/sg/importacion/parametros','PUT',body).then(function(r){
+    if(r&&r.ok){ toast('Parámetros guardados','ok'); closeMB('sg-params-modal'); sgImpCalc(); }
+    else toast((r&&r.error)||'Error','er');
+  });
+}
+
 // ── CURVA DE TC ESPERADO ──────────────────────────────────────────────────────
 // Un valor por mes (el del cierre del mes, como los futuros). Entre meses interpola el
 // backend. Editor replace-all: se manda la lista completa, como las líneas del embarque.
