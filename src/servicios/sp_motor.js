@@ -334,6 +334,25 @@ export function destinosDevolucion(def, solicitud, ctx = {}) {
     });
   }
 
+  // ── DEVOLVER LA FECHA A QUIEN LA PUSO ───────────────────────────────────
+  // El que confecciona la orden es el que descubre que la fecha no cierra —cayó
+  // domingo, el proveedor pidió otra, el cheque no llega a esa fecha—. Hasta acá
+  // tenía dos salidas y las dos malas: devolverla al SOLICITANTE, que no puso esa
+  // fecha y no la puede cambiar, y que además rehace el circuito entero desde el
+  // principio; o RECHAZAR la orden, que la mata. Se rechazaba.
+  //
+  // Volviendo al paso de fechas, la autorización sigue en pie —nadie discutió el
+  // pago, sólo el día— y el que puso la fecha la corrige y sigue.
+  const fec = pasoPorHito(def, 'fechas');
+  if (fec && fec.clave !== actual && ctx.fechaPuestaPor) {
+    destinos.push({
+      clave: fec.clave,
+      etiqueta: 'Devolver para corregir la fecha',
+      quien: ctx.fechaPuestaPor.nombre || null,
+      motivo: 'fechas',
+    });
+  }
+
   // El paso de confección, sólo si alguien ya confeccionó. Antes de eso no hay a
   // quién devolverle: el paso existe en el circuito pero todavía no lo tocó nadie.
   const conf = pasoPorHito(def, 'confeccion');
