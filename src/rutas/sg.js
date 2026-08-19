@@ -7093,6 +7093,10 @@ function calcImportacion(db, emb, costos, kgOverride) {
     : sum(merc_ars, anticipos_ars, despachante_ars, iva_desp_ars, flete_ars, banc_ars, iva_banc_ars);
 
   const cajas = Number(emb.cantidad_cajas) || 0;
+  // Los productos del camión: sin ellos no hay a quién repartirle el costo.
+  const lineasProd = emb.id ? db.prepare(`SELECT l.*, pr.nombre AS producto_nombre, pr.variedad AS producto_variedad
+      FROM sg_embarque_lineas l LEFT JOIN sg_productos pr ON pr.id = l.producto_id
+      WHERE l.embarque_id=? AND l.activo=1 ORDER BY l.id`).all(emb.id) : [];
   // El preview manda los kg directo (el embarque puede no estar guardado todavía).
   const kg = kgOverride != null ? (Number(kgOverride) || 0)
     : (emb.id ? (db.prepare(`SELECT COALESCE(SUM(cajas * COALESCE(kg_por_bulto,0)),0) kg
@@ -7122,6 +7126,44 @@ function calcImportacion(db, emb, costos, kgOverride) {
       { label: 'Gastos bancarios', ars: bancarios_usd  * ((tcBanc  || tcHoy) - tcHoy) * (1 + p.iva_servicios_pct / 100) }
     ].filter(x => Math.abs(x.ars) > 0.005),
     cajas, kg,
+    // Prorrateo del costo entre los productos del camión. Dos bolsas, porque los costos no
+    // se comportan igual:
+    //   • POR VALOR: impuestos y despachante son % de la base imponible, así que una caja
+    //     que vale más paga más. Se reparten según el FOB de cada línea.
+    //   • POR CAJA: flete, Tasa María y bancarios no miran el valor de lo que viene adentro.
+    //     Se reparten parejo por caja.
+    // Repartir todo por caja aplanaría el costo y haría que el producto caro parezca barato
+    // y el barato caro — justo al revés de lo que sirve para poner precio.
+    por_producto: (() => {
+      if (!convertible || !lineasProd.length) return [];
+      const tcM = tcMerc || tcHoy;
+      const fobDe = l => (Number(l.cajas) || 0) * (Number(l.precio_unitario_usd) || 0) * (tcM || 0);
+      const fobs = lineasProd.map(fobDe);
+      const fobTot = fobs.reduce((a, b) => a + b, 0);
+      const cajasTot = lineasProd.reduce((a, l) => a + (Number(l.cajas) || 0), 0);
+      const bolsaValor = sum(anticipos_ars, despachante_ars, iva_desp_ars) - r2(tasa_maria_ars);
+      const bolsaCaja  = sum(flete_ars, banc_ars, iva_banc_ars, tasa_maria_ars);
+      const filas = lineasProd.map((l, i) => {
+        const cj = Number(l.cajas) || 0;
+        const kgL = cj * (Number(l.kg_por_bulto) || 0);
+        const pv = fobTot > 0 ? fobs[i] / fobTot : (cajasTot > 0 ? cj / cajasTot : 0);
+        const pc = cajasTot > 0 ? cj / cajasTot : 0;
+        return { linea_id: l.id, producto: l.producto_nombre || ('#' + l.producto_id),
+                 variedad: l.producto_variedad || null, cajas: cj, kg: kgL,
+                 fob_usd_caja: l.precio_unitario_usd != null ? Number(l.precio_unitario_usd) : null,
+                 fob_ars: r2(fobs[i]),
+                 impuestos_ars: r2(bolsaValor * pv), otros_ars: r2(bolsaCaja * pc),
+                 costo_ars: r2(fobs[i] + bolsaValor * pv + bolsaCaja * pc) };
+      });
+      // El último absorbe el redondeo: Σ de los productos tiene que dar el total exacto.
+      if (filas.length && total_plazo != null) {
+        const acum = filas.slice(0, -1).reduce((a, x) => a + x.costo_ars, 0);
+        filas[filas.length - 1].costo_ars = r2(total_plazo - acum);
+      }
+      return filas.map(x => ({ ...x,
+        costo_caja: x.cajas > 0 ? r2(x.costo_ars / x.cajas) : null,
+        costo_kg:   x.kg    > 0 ? r2(x.costo_ars / x.kg)    : null }));
+    })(),
     // Lo que se negoció con el proveedor, por caja: es el número con el que se habla.
     precio_caja_usd: cajas > 0 ? r2(invoice_usd / cajas) : null,
     costo_caja: (total_plazo != null && cajas > 0) ? total_plazo / cajas : null,
@@ -7145,23 +7187,21 @@ function embCostos(db, embId) {
 // mismo producto, distinto calibre). Σ costo_base = costo NETO del embarque EXACTO (el último lote absorbe
 // el redondeo). Degrada a F5 (todo parejo por caja) si ninguna línea trae precio. Devuelve un array
 // alineado con `lineas`.
+// Costo de cada lote al recibir. Usa el MISMO prorrateo que muestra el estimador
+// (calcImportacion.por_producto): si difirieran, la ficha diría un costo y el lote otro.
 function costoBaseLineasEmbarque(emb, costos, lineas) {
-  const calc = calcEmbarque(emb, costos);
-  const neto = calc.neto || 0;
-  // El FOB por línea es mercadería, así que se convierte con el TC de ESE rubro (el de su
-  // fecha de pago), no con un TC genérico del embarque, que ya no existe.
-  const tc = calc.tc_por_concepto && calc.tc_por_concepto.costo_mercaderia != null
-    ? calc.tc_por_concepto.costo_mercaderia : calc.tc_aplicado;
-  const merc = costos.find(c => c.concepto === 'costo_mercaderia');
-  const mercUSD = merc && (merc.moneda || 'ARS') === 'USD';
-  const fobConv = p => { const v = Number(p) || 0; return (mercUSD && tc) ? v * tc : v; };   // FOB USD→ARS
-  const cajasTot = lineas.reduce((s, l) => s + (Number(l.cajas) || 0), 0);
-  const fobArs = lineas.map(l => (Number(l.cajas) || 0) * fobConv(l.precio_unitario_usd));
-  const restoNeto = neto - fobArs.reduce((a, b) => a + b, 0);   // gastos netos, parejo por caja
-  const bases = lineas.map((l, i) => fobArs[i] + (cajasTot > 0 ? restoNeto * ((Number(l.cajas) || 0) / cajasTot) : 0));
-  if (bases.length) {
-    const sumButLast = bases.slice(0, -1).reduce((a, b) => a + b, 0);
-    bases[bases.length - 1] = neto - sumButLast;   // el último absorbe el redondeo → Σ = neto exacto
+  const db = getDb();
+  const est = calcImportacion(db, emb, costos);
+  const porLinea = {};
+  (est.por_producto || []).forEach(x => { porLinea[x.linea_id] = x.costo_ars; });
+  const bases = lineas.map(l => Number(porLinea[l.id]) || 0);
+  // Red de seguridad: si el estimador no pudo prorratear (sin TC, sin productos), se cae al
+  // reparto parejo por caja sobre el neto, para no dejar los lotes en cero.
+  const suma = bases.reduce((a, b) => a + b, 0);
+  const neto = est.total_plazo != null ? est.total_plazo : 0;
+  if (!(suma > 0) && neto > 0) {
+    const cajasTot = lineas.reduce((a, l) => a + (Number(l.cajas) || 0), 0);
+    return lineas.map(l => cajasTot > 0 ? r2(neto * ((Number(l.cajas) || 0) / cajasTot)) : 0);
   }
   return bases;
 }
