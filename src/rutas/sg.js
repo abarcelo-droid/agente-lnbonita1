@@ -7067,7 +7067,19 @@ function calcImportacion(db, emb, costos, kgOverride) {
     return { estimado_usd: est, confirmado_usd: con, confirmado: con != null,
              desvio_usd: (est != null && con != null) ? r2(con - est) : null };
   };
-  const invoice_usd     = usdDe(rMerc);
+  // El valor de la mercadería tiene hasta tres fuentes, y este es el orden:
+  //   1. el PAPEL (monto_confirmado del invoice), que manda sobre todo
+  //   2. el FOB de las líneas de producto (Σ cajas × precio), que es el dato más fino
+  //   3. el monto cargado a mano en el rubro
+  // Antes se usaba siempre el (3) mientras el prorrateo por producto usaba el (2): dos
+  // fuentes distintas para lo mismo, y de ahí salían costos que no cerraban.
+  const invoice_lineas = r2(lineasProd.reduce((a, l) =>
+    a + (Number(l.cajas) || 0) * (Number(l.precio_unitario_usd) || 0), 0));
+  const invoice_manual = usdDe(rMerc);
+  const invoice_confirmado = (rMerc.monto_confirmado != null && rMerc.monto_confirmado !== '')
+    ? Number(rMerc.monto_confirmado) : null;
+  const invoice_usd = invoice_confirmado != null ? invoice_confirmado
+                    : (invoice_lineas > 0 ? invoice_lineas : invoice_manual);
   const flete_base_usd  = Number(emb.flete_base_usd) || 0;
   const seguro_usd      = Number(emb.seguro_usd) || 0;
   const flete_real_usd  = usdDe(rFlete);
@@ -7122,6 +7134,12 @@ function calcImportacion(db, emb, costos, kgOverride) {
 
   return {
     parametros: p, tc_hoy: tcHoy, tc_manual: override != null, convertible, falta_tc,
+    invoice_origen: invoice_confirmado != null ? 'documento' : (invoice_lineas > 0 ? 'lineas' : 'manual'),
+    invoice_lineas,
+    // Si el papel dice una cosa y los productos suman otra, hay que mirarlo: uno de los dos
+    // está mal cargado y el costo por producto se reparte sobre el que manda.
+    invoice_discrepancia: (invoice_confirmado != null && invoice_lineas > 0
+      && Math.abs(invoice_confirmado - invoice_lineas) > 0.01) ? r2(invoice_confirmado - invoice_lineas) : null,
     usd: { invoice: invoice_usd, flete_base: flete_base_usd, seguro: seguro_usd,
            flete_real: flete_real_usd, bancarios: bancarios_usd, base: base_usd },
     base_ars,
@@ -7153,30 +7171,40 @@ function calcImportacion(db, emb, costos, kgOverride) {
     // Repartir todo por caja aplanaría el costo y haría que el producto caro parezca barato
     // y el barato caro — justo al revés de lo que sirve para poner precio.
     por_producto: (() => {
-      if (!convertible || !lineasProd.length) return [];
-      const tcM = tcMerc || tcHoy;
-      const fobDe = l => (Number(l.cajas) || 0) * (Number(l.precio_unitario_usd) || 0) * (tcM || 0);
-      const fobs = lineasProd.map(fobDe);
+      if (!convertible || !lineasProd.length || total_plazo == null) return [];
+      // El FOB de las líneas se usa como PESO RELATIVO, nunca como monto absoluto. Antes se
+      // sumaba en pesos y se dejaba que el último producto absorbiera la diferencia contra el
+      // total: si el invoice cargado no coincidía con el FOB de las líneas —que es lo normal,
+      // son dos datos distintos— esa diferencia era enorme y el último producto salía con
+      // costo NEGATIVO. Repartiendo por proporción, la suma da el total por construcción.
+      const fobs = lineasProd.map(l => (Number(l.cajas) || 0) * (Number(l.precio_unitario_usd) || 0));
       const fobTot = fobs.reduce((a, b) => a + b, 0);
       const cajasTot = lineasProd.reduce((a, l) => a + (Number(l.cajas) || 0), 0);
-      const bolsaValor = sum(anticipos_ars, despachante_ars, iva_desp_ars) - r2(tasa_maria_ars);
+      // Sin precios por línea no hay cómo distinguir por valor: se reparte todo por caja.
+      const hayValor = fobTot > 0;
+      const bolsaValor = sum(merc_ars, anticipos_ars, despachante_ars, iva_desp_ars) - r2(tasa_maria_ars);
       const bolsaCaja  = sum(flete_ars, banc_ars, iva_banc_ars, tasa_maria_ars);
       const filas = lineasProd.map((l, i) => {
         const cj = Number(l.cajas) || 0;
-        const kgL = cj * (Number(l.kg_por_bulto) || 0);
-        const pv = fobTot > 0 ? fobs[i] / fobTot : (cajasTot > 0 ? cj / cajasTot : 0);
         const pc = cajasTot > 0 ? cj / cajasTot : 0;
+        const pv = hayValor ? fobs[i] / fobTot : pc;
+        const porValor = r2(bolsaValor * pv), porCaja = r2(bolsaCaja * pc);
         return { linea_id: l.id, producto: l.producto_nombre || ('#' + l.producto_id),
-                 variedad: l.producto_variedad || null, cajas: cj, kg: kgL,
+                 variedad: l.producto_variedad || null, cajas: cj, kg: cj * (Number(l.kg_por_bulto) || 0),
                  fob_usd_caja: l.precio_unitario_usd != null ? Number(l.precio_unitario_usd) : null,
-                 fob_ars: r2(fobs[i]),
-                 impuestos_ars: r2(bolsaValor * pv), otros_ars: r2(bolsaCaja * pc),
-                 costo_ars: r2(fobs[i] + bolsaValor * pv + bolsaCaja * pc) };
+                 fob_usd: r2(fobs[i]), peso_valor: r2(pv * 100), peso_caja: r2(pc * 100),
+                 por_valor_ars: porValor, por_caja_ars: porCaja,
+                 costo_ars: r2(porValor + porCaja) };
       });
-      // El último absorbe el redondeo: Σ de los productos tiene que dar el total exacto.
-      if (filas.length && total_plazo != null) {
-        const acum = filas.slice(0, -1).reduce((a, x) => a + x.costo_ars, 0);
-        filas[filas.length - 1].costo_ars = r2(total_plazo - acum);
+      // Sobra o falta algún centavo por redondeo: lo absorbe el producto más grande, donde
+      // menos se nota. Si la diferencia fuera grande sería un error de cálculo, no redondeo,
+      // así que se deja como está y se ve — antes esto tapaba justamente eso.
+      const acum = r2(filas.reduce((a, x) => a + x.costo_ars, 0));
+      const resto = r2(total_plazo - acum);
+      if (Math.abs(resto) > 0.001 && Math.abs(resto) < 1) {
+        let mayor = 0;
+        filas.forEach((x, i) => { if (x.costo_ars > filas[mayor].costo_ars) mayor = i; });
+        filas[mayor].costo_ars = r2(filas[mayor].costo_ars + resto);
       }
       return filas.map(x => ({ ...x,
         costo_caja: x.cajas > 0 ? r2(x.costo_ars / x.cajas) : null,
