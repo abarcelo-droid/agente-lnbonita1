@@ -3657,10 +3657,23 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
 
   <div class="sec sg-mod" id="sec-sg-importacion">
     <div class="ph"><div><div class="ph-t">🍅 San Gerónimo · Importación</div><div class="ph-s">Cotizador de embarque: costo por caja en pesos según a qué dólar se paga cada rubro. Estimado vs real.</div></div><div style="display:flex;gap:8px"><button class="btn bo" onclick="sgParamsAbrir()">⚙️ Parámetros</button><button class="btn bo" onclick="sgCurvaAbrir()">📈 Curva TC</button><button class="btn bo" onclick="sgTcAbrir()">💱 TC esperado</button><button class="btn bb" onclick="sgImpOpen()">+ Nuevo embarque</button></div></div>
-    <div class="ab-table-wrap"><table class="pa-tbl">
-      <thead><tr><th>Embarque</th><th>Proveedor</th><th style="text-align:center">Estado</th><th style="text-align:right">Cajas</th><th style="text-align:right">Costo/caja puesto acá</th><th></th></tr></thead>
-      <tbody id="sg-tb-embarques"><tr><td colspan="6" class="emp">Cargando…</td></tr></tbody>
-    </table></div>
+    <!-- Solapas propias de Importación (scopeadas a esta sección, no comparten el toggler
+         genérico de catálogos para no apagar los subtabs de otras pantallas). -->
+    <div style="display:flex;gap:6px;margin-bottom:12px;border-bottom:1px solid var(--bor);padding-bottom:8px">
+      <div class="sg-subtab sg-imp-tab on" data-imp="ingresos"   onclick="sgImpTab('ingresos')">📥 Ingresos</div>
+      <div class="sg-subtab sg-imp-tab"    data-imp="calendario" onclick="sgImpTab('calendario')">📅 Calendario</div>
+      <div class="sg-subtab sg-imp-tab"    data-imp="deuda"      onclick="sgImpTab('deuda')">💵 TC y deuda</div>
+    </div>
+
+    <div class="sg-imp-pane" id="sg-imp-pane-ingresos">
+      <div class="ab-table-wrap"><table class="pa-tbl">
+        <thead><tr><th>Embarque</th><th>Proveedor</th><th style="text-align:center">Estado</th><th style="text-align:right">Cajas</th><th style="text-align:right">Costo/caja puesto acá</th><th></th></tr></thead>
+        <tbody id="sg-tb-embarques"><tr><td colspan="6" class="emp">Cargando…</td></tr></tbody>
+      </table></div>
+    </div>
+
+    <div class="sg-imp-pane" id="sg-imp-pane-calendario" style="display:none"></div>
+    <div class="sg-imp-pane" id="sg-imp-pane-deuda" style="display:none"></div>
   </div>
 
   <div class="sec sg-mod" id="sec-sg-reportes">
@@ -23268,6 +23281,111 @@ var SG_EMB_CONCEPTOS = [
   {k:'fletes',            l:'Flete real',           cred:false}
 ];
 var SG_EMB_ESTADOS = [['cotizacion','Cotización'],['abierto','Abierto'],['transito','En tránsito'],['recibido','Recibido'],['cerrado','Cerrado']];
+// ── SOLAPAS DE IMPORTACIÓN ────────────────────────────────────────────────────
+// Scopeadas a #sec-sg-importacion: el toggler genérico de catálogos apaga los subtabs de
+// todas las secciones sg-mod, y acá eso rompería las otras pantallas.
+function sgImpTab(t){
+  var sec=document.getElementById('sec-sg-importacion'); if(!sec) return;
+  sec.querySelectorAll('.sg-imp-tab').forEach(function(el){ el.classList.toggle('on', el.dataset.imp===t); });
+  sec.querySelectorAll('.sg-imp-pane').forEach(function(el){ el.style.display = (el.id==='sg-imp-pane-'+t) ? '' : 'none'; });
+  if(t==='calendario') sgImpCalendario();
+  if(t==='deuda') sgImpDeuda();
+}
+
+// Qué camiones están en viaje y cuándo llegan. Ordenado por ETA, que es la fecha que importa.
+function sgImpCalendario(){
+  var box=eid('sg-imp-pane-calendario');
+  box.innerHTML='<div style="padding:20px;color:var(--mut)">Cargando…</div>';
+  api('/api/sg/importacion/calendario').then(function(r){
+    if(!r||!r.ok){ box.innerHTML='<div style="padding:20px;color:var(--err,#dc2626)">'+esc((r&&r.error)||'Error')+'</div>'; return; }
+    var d=r.data;
+    if(!d.items.length){ box.innerHTML='<div class="emp" style="padding:30px">No hay camiones en viaje. Los recibidos y cerrados no aparecen acá.</div>'; return; }
+    // Agrupado por mes de llegada: es como se mira una agenda.
+    var meses={}, MES=['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic'];
+    d.items.forEach(function(i){
+      var k=i.fecha_eta?i.fecha_eta.slice(0,7):'zzz';
+      (meses[k]=meses[k]||[]).push(i);
+    });
+    var chip=function(dias,atras){
+      if(dias==null) return '<span style="color:var(--mut)">—</span>';
+      if(atras) return '<span class="bdg ber">atrasado '+Math.abs(dias)+' d</span>';
+      if(dias===0) return '<span class="bdg bok">llega hoy</span>';
+      return '<span style="color:var(--mut)">en '+dias+' d</span>';
+    };
+    box.innerHTML =
+        (d.atrasados?'<div style="padding:10px 14px;border-radius:8px;border:1px solid var(--err,#dc2626);background:rgba(220,38,38,.08);color:var(--err,#dc2626);font-size:12.5px;margin-bottom:12px"><b>'+d.atrasados+' camión(es) con la fecha de llegada vencida</b> y todavía sin recibir.</div>':'')
+      + (d.sin_fechas?'<div style="padding:10px 14px;border-radius:8px;background:var(--bg2,#f5f5f5);border:1px solid var(--bor);font-size:12.5px;margin-bottom:12px">'+d.sin_fechas+' sin ETD ni ETA cargadas: no se pueden planificar ni costear a plazo.</div>':'')
+      + Object.keys(meses).sort().map(function(k){
+          var titulo = k==='zzz' ? 'Sin fecha de llegada'
+            : (MES[parseInt(k.slice(5,7),10)-1]+' '+k.slice(0,4));
+          return '<div style="font-size:12px;font-weight:700;color:var(--mut);text-transform:uppercase;letter-spacing:.05em;margin:14px 0 6px">'+esc(titulo)+'</div>'
+            + '<table class="pa-tbl" style="font-size:12px;width:100%"><thead><tr>'
+            + '<th>Embarque</th><th>Proveedor</th><th>Sale (ETD)</th><th>Llega (ETA)</th>'
+            + '<th style="text-align:right">Cajas</th><th style="text-align:center">Estado</th><th style="text-align:right"></th>'
+            + '</tr></thead><tbody>'
+            + meses[k].map(function(i){
+                return '<tr'+(i.atrasado?' style="background:rgba(220,38,38,.05)"':'')+'>'
+                  +'<td><b>'+esc(i.nombre||'')+'</b>'+(i.nro_invoice?'<div class="sub2" style="color:var(--mut);font-size:11px">'+esc(i.nro_invoice)+'</div>':'')+'</td>'
+                  +'<td>'+esc(i.proveedor_nombre||'—')+'</td>'
+                  +'<td>'+(i.fecha_etd?esc(i.fecha_etd):'<span style="color:var(--mut)">—</span>')+'</td>'
+                  +'<td>'+(i.fecha_eta?esc(i.fecha_eta):'<span style="color:var(--mut)">—</span>')+' '+chip(i.dias_para_eta,i.atrasado)+'</td>'
+                  +'<td style="text-align:right">'+(i.cantidad_cajas!=null?nr(i.cantidad_cajas):'—')+'</td>'
+                  +'<td style="text-align:center"><span class="bdg bok">'+esc(sgEmbEstadoLbl(i.estado))+'</span></td>'
+                  +'<td style="text-align:right"><button class="btn bo bs" onclick="sgImpVisor('+i.id+')">👁</button></td></tr>';
+              }).join('')
+            + '</tbody></table>';
+        }).join('');
+  });
+}
+
+// Cuánto le debemos al exterior y qué pasa con esa deuda si se mueve el dólar.
+function sgImpDeuda(){
+  var box=eid('sg-imp-pane-deuda');
+  box.innerHTML='<div style="padding:20px;color:var(--mut)">Cargando…</div>';
+  var tc=(SG._deudaTc!=null&&SG._deudaTc!=='')?('?tc='+encodeURIComponent(SG._deudaTc)):'';
+  api('/api/sg/importacion/deuda'+tc).then(function(r){
+    if(!r||!r.ok){ box.innerHTML='<div style="padding:20px;color:var(--err,#dc2626)">'+esc((r&&r.error)||'Error')+'</div>'; return; }
+    var d=r.data, sim=d.simulacion;
+    var big=function(l,v,sub,bg,col){ return '<div style="flex:1;min-width:170px;padding:12px 14px;border-radius:10px;background:'+bg+'">'
+      +'<div style="font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:var(--mut)">'+l+'</div>'
+      +'<div style="font-size:22px;font-weight:700;margin-top:2px;color:'+(col||'inherit')+';font-variant-numeric:tabular-nums">'+v+'</div>'
+      +'<div style="font-size:11px;color:var(--mut)">'+sub+'</div></div>'; };
+    if(!d.items.length){ box.innerHTML='<div class="emp" style="padding:30px">No hay deuda en dólares pendiente. Los rubros ya pagados y los embarques cerrados no cuentan.</div>'; return; }
+    box.innerHTML =
+        '<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px">'
+      + big('Deuda en dólares','US$ '+nr(d.usd_total), d.items.length+' pagos pendientes', 'var(--bg2,#f5f5f5)')
+      + big('Al dólar de hoy', sgMoney(Math.round(d.ars_hoy)), d.tc_hoy?('TC '+nr(d.tc_hoy)):'sin curva', 'var(--bg2,#f5f5f5)')
+      + (d.ars_al_pago!=null ? big('Al dólar de cada vencimiento', sgMoney(Math.round(d.ars_al_pago)),
+          (d.mayor_costo_por_plazo>0?'+'+sgMoney(Math.round(d.mayor_costo_por_plazo))+' por pagar más adelante':'según la curva'),
+          'rgba(220,38,38,.08)', 'var(--err,#dc2626)') : '')
+      + '</div>'
+      + '<div style="padding:12px 14px;border:1px solid var(--bor);border-radius:10px;margin-bottom:12px">'
+        +'<div style="font-size:12px;font-weight:600;margin-bottom:8px">¿Y si el dólar salta?</div>'
+        +'<div style="display:flex;gap:10px;align-items:end;flex-wrap:wrap">'
+        +'<div class="fl" style="max-width:160px;margin:0"><label style="font-size:11px">Tipo de cambio</label>'
+        +'<input type="number" step="1" min="0" id="sg-deuda-tc" value="'+esc(SG._deudaTc==null?'':String(SG._deudaTc))+'" placeholder="'+(d.tc_hoy?nr(Math.round(d.tc_hoy*1.2)):'1800')+'"></div>'
+        +'<button class="btn bo bs" onclick="SG._deudaTc=eid(\'sg-deuda-tc\').value; sgImpDeuda();">Simular</button>'
+        + (sim ? '<div style="font-size:13px;padding-bottom:6px">A <b>'+nr(sim.tc)+'</b> la deuda pasa a <b>'+sgMoney(Math.round(sim.ars))+'</b> — '
+            +'<b style="color:'+(sim.variacion>=0?'var(--err,#dc2626)':'var(--ok,#16a34a)')+'">'+(sim.variacion>=0?'+':'')+sgMoney(Math.round(sim.variacion))
+            +(sim.variacion_pct!=null?(' ('+(sim.variacion_pct>=0?'+':'')+nr(sim.variacion_pct)+'%)'):'')+'</b></div>' : '')
+        +'</div></div>'
+      + '<table class="pa-tbl" style="font-size:12px;width:100%"><thead><tr>'
+      + '<th>Embarque</th><th>Proveedor</th><th>Concepto</th><th>Vence</th>'
+      + '<th style="text-align:right">USD</th><th style="text-align:right">TC</th><th style="text-align:right">En pesos</th>'
+      + '</tr></thead><tbody>'
+      + d.items.map(function(i){
+          return '<tr'+(i.vencido?' style="background:rgba(220,38,38,.05)"':'')+'>'
+            +'<td>'+esc(i.embarque||'')+'</td><td>'+esc(i.proveedor||'—')+'</td><td>'+esc(i.concepto||'')+'</td>'
+            +'<td>'+(i.fecha_pago?esc(i.fecha_pago):'<span style="color:var(--mut)">sin fecha</span>')+(i.vencido?' ⏰':'')+'</td>'
+            +'<td style="text-align:right">'+nr(i.usd)+'</td>'
+            +'<td style="text-align:right">'+(i.tc_pago!=null?nr(Math.round(i.tc_pago*100)/100):'—')+'</td>'
+            +'<td style="text-align:right;font-weight:600">'+(i.ars_al_pago!=null?sgMoney(Math.round(i.ars_al_pago)):'—')+'</td></tr>';
+        }).join('')
+      + '</tbody></table>'
+      + '<div style="font-size:11px;color:var(--mut);margin-top:8px">Se cuentan solo los rubros en dólares todavía sin pagar, de embarques no cerrados. ⏰ = el vencimiento ya pasó y el TC sigue corriendo al de hoy.</div>';
+  });
+}
+
 function sgEmbEstadoManual(e){ return e==='cotizacion'||e==='abierto'||e==='transito'; }
 // Cambio de estado desde el panel. Si falta la ETD para pasar a tránsito, el backend corta y
 // se ofrece cargarla ahí mismo en vez de mandar al usuario a abrir el embarque.
@@ -23290,6 +23408,8 @@ function sgImpEstado(id, estado, sel, etd){
 function sgEmbEstadoLbl(e){ var f=SG_EMB_ESTADOS.find(function(x){return x[0]===e;}); return f?f[1]:(e||'—'); }
 
 function sgImpInit(){
+  var t=document.getElementById('sec-sg-importacion');
+  if(t && !t.querySelector('.sg-imp-tab.on')) sgImpTab('ingresos');
   // La curva alimenta el preview en vivo de los TC por rubro; se cachea al entrar al módulo.
   api('/api/sg/tc-esperado/curva').then(function(r){ SG._curva=(r&&r.ok&&r.data.curva)||[]; });
   api('/api/sg/embarques').then(function(r){
