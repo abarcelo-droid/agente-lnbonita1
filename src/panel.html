@@ -3658,7 +3658,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
   <div class="sec sg-mod" id="sec-sg-importacion">
     <div class="ph"><div><div class="ph-t">🍅 San Gerónimo · Importación</div><div class="ph-s">Cotizador de embarque: costo por caja en pesos según a qué dólar se paga cada rubro. Estimado vs real.</div></div><div style="display:flex;gap:8px"><button class="btn bo" onclick="sgParamsAbrir()">⚙️ Parámetros</button><button class="btn bo" onclick="sgCurvaAbrir()">📈 Curva TC</button><button class="btn bo" onclick="sgTcAbrir()">💱 TC esperado</button><button class="btn bb" onclick="sgImpOpen()">+ Nuevo embarque</button></div></div>
     <div class="ab-table-wrap"><table class="pa-tbl">
-      <thead><tr><th>Embarque</th><th>Proveedor</th><th style="text-align:center">Estado</th><th style="text-align:right">Cajas</th><th style="text-align:right">Costo/caja c-imp.</th><th></th></tr></thead>
+      <thead><tr><th>Embarque</th><th>Proveedor</th><th style="text-align:center">Estado</th><th style="text-align:right">Cajas</th><th style="text-align:right">Costo/caja puesto acá</th><th></th></tr></thead>
       <tbody id="sg-tb-embarques"><tr><td colspan="6" class="emp">Cargando…</td></tr></tbody>
     </table></div>
   </div>
@@ -23268,6 +23268,25 @@ var SG_EMB_CONCEPTOS = [
   {k:'fletes',            l:'Flete real',           cred:false}
 ];
 var SG_EMB_ESTADOS = [['cotizacion','Cotización'],['abierto','Abierto'],['transito','En tránsito'],['recibido','Recibido'],['cerrado','Cerrado']];
+function sgEmbEstadoManual(e){ return e==='cotizacion'||e==='abierto'||e==='transito'; }
+// Cambio de estado desde el panel. Si falta la ETD para pasar a tránsito, el backend corta y
+// se ofrece cargarla ahí mismo en vez de mandar al usuario a abrir el embarque.
+function sgImpEstado(id, estado, sel, etd){
+  api('/api/sg/embarques/'+id+'/estado','PATCH',{ estado:estado, fecha_etd:etd||null }).then(function(r){
+    if(r&&r.ok){ toast('Estado: '+sgEmbEstadoLbl(estado),'ok'); sgImpInit(); return; }
+    if(r&&r.requiere_etd){
+      var f=prompt('Para pasar a "En tránsito" hace falta la fecha de embarque (ETD).\n\nPonela acá (AAAA-MM-DD):');
+      if(f && /^\d{4}-\d{2}-\d{2}$/.test(String(f).trim())){
+        // Se manda en la MISMA llamada: el PUT del embarque reescribe todo el header y con
+        // un body parcial borraría nombre, proveedor y el resto.
+        sgImpEstado(id, estado, sel, String(f).trim());
+        return;
+      }
+      if(f) toast('Fecha inválida: usá AAAA-MM-DD','er');
+    } else toast((r&&r.error)||'No se pudo cambiar el estado','er');
+    sgImpInit();                       // vuelve el selector al estado real
+  });
+}
 function sgEmbEstadoLbl(e){ var f=SG_EMB_ESTADOS.find(function(x){return x[0]===e;}); return f?f[1]:(e||'—'); }
 
 function sgImpInit(){
@@ -23279,9 +23298,21 @@ function sgImpInit(){
       return '<tr>'
         +'<td><b>'+esc(e.nombre||'')+'</b></td>'
         +'<td>'+esc(e.proveedor_nombre||'—')+'</td>'
-        +'<td style="text-align:center"><span class="bdg bok">'+esc(sgEmbEstadoLbl(e.estado))+'</span></td>'
+        // Switch rápido: solo los tres estados de la negociación. Recibido y Cerrado los
+        // ponen sus botones, que son los que generan los lotes y re-costean.
+        +'<td style="text-align:center">'
+          +(sgEmbEstadoManual(e.estado)
+            ? '<select class="sg-emb-sw" onchange="sgImpEstado('+e.id+',this.value,this)">'
+              +[['cotizacion','Cotización'],['abierto','Abierto'],['transito','En tránsito']].map(function(x){
+                  return '<option value="'+x[0]+'"'+(e.estado===x[0]?' selected':'')+'>'+x[1]+'</option>'; }).join('')
+              +'</select>'
+            : '<span class="bdg bok">'+esc(sgEmbEstadoLbl(e.estado))+'</span>')
+        +'</td>'
         +'<td style="text-align:right">'+(e.cantidad_cajas!=null?nr(e.cantidad_cajas):'—')+'</td>'
-        +'<td style="text-align:right">'+(e.costo_caja_c_impuestos!=null?sgMoney(Math.round(e.costo_caja_c_impuestos)):'—')+'</td>'
+        +'<td style="text-align:right;font-weight:600">'
+          +(e.costo_caja_puesto!=null ? sgMoney(Math.round(e.costo_caja_puesto))
+            : '<span style="color:var(--err,#dc2626);font-weight:400;font-size:11px" title="'+esc((e.falta_tc||[]).join(', '))+'">falta TC</span>')
+        +'</td>'
         +'<td style="text-align:right;white-space:nowrap"><button class="btn bo bs" title="Ver el camión: costo en pesos, productos y documentos" onclick="sgImpVisor('+e.id+')">👁</button> <button class="btn bo bs" title="Duplicar: arranca un embarque nuevo con esta estructura de costos" onclick="sgImpDuplicar('+e.id+')">⧉</button> <button class="btn bo bs" onclick="sgImpOpen('+e.id+')">✏️</button>'+(lnbPuedeAnular('sg-importacion')?' <button class="btn bd bs" onclick="sgImpDel('+e.id+')">×</button>':'')+'</td>'
       +'</tr>';
     }).join('') : '<tr><td colspan="6" class="emp">Sin embarques. Creá el primero con “+ Nuevo embarque”.</td></tr>';
@@ -23751,6 +23782,7 @@ function sgImpVisor(id){
     // 1) Lo que se necesita para poner precio, arriba de todo.
     h+='<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px">'
       +big('Costo por caja', conv?money2(est.costo_caja):'—', conv?'puesto acá, en pesos':'falta el TC', 'rgba(16,163,74,.10)', '#16a34a')
+      +big('Precio negociado', est.precio_caja_usd!=null?('US$ '+nr(est.precio_caja_usd)):'—', 'por caja, con el proveedor', 'var(--bg2,#f5f5f5)')
       +big('Costo por kg', conv?money2(est.costo_kg):'—', conv?(est.kg?(nr(Math.round(est.kg))+' kg en total'):'sin productos cargados'):'falta el TC', 'rgba(16,163,74,.10)', '#16a34a')
       +big('Costo puesto acá', conv?sgMoney(Math.round(est.total_plazo)):'—', nr(est.cajas||0)+' caja'+((est.cajas||0)===1?'':'s'), 'var(--bg2,#f5f5f5)')
       +big('Al TC de hoy', conv?sgMoney(Math.round(est.total_contado)):'—', conv&&est.dif_cambio?('+'+sgMoney(Math.round(est.dif_cambio))+' por pagar a plazo'):'sin diferencia de cambio', 'var(--bg2,#f5f5f5)')

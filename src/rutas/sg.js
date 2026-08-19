@@ -6955,7 +6955,7 @@ function calcEmbarque(emb, costos, soloEstimado) {
 // los bancarios van a plazo, así que se valorizan al TC de SU fecha de pago. La diferencia
 // entre las dos miradas es la diferencia de cambio, que se muestra desglosada.
 function paramsImportacion(db) {
-  const p = { iva_pct: 10.5, iibb_pct: 0.69, despachante_pct: 7, iva_servicios_pct: 21,
+  const p = { iva_pct: 10.5, iibb_pct: 0.69, despachante_pct: 0.7, iva_servicios_pct: 21,
               tasa_maria_usd: 110, gastos_bancarios_usd: 90 };
   const map = { imp_iva_pct: 'iva_pct', imp_iibb_pct: 'iibb_pct', imp_despachante_pct: 'despachante_pct',
                 imp_iva_servicios_pct: 'iva_servicios_pct', imp_tasa_maria_usd: 'tasa_maria_usd',
@@ -7070,6 +7070,8 @@ function calcImportacion(db, emb, costos, kgOverride) {
       { label: 'Gastos bancarios', ars: bancarios_usd  * ((tcBanc  || tcHoy) - tcHoy) * (1 + p.iva_servicios_pct / 100) }
     ].filter(x => Math.abs(x.ars) > 0.005),
     cajas, kg,
+    // Lo que se negoció con el proveedor, por caja: es el número con el que se habla.
+    precio_caja_usd: cajas > 0 ? r2(invoice_usd / cajas) : null,
     costo_caja: (total_plazo != null && cajas > 0) ? total_plazo / cajas : null,
     costo_kg:   (total_plazo != null && kg > 0)    ? total_plazo / kg    : null
   };
@@ -7147,12 +7149,12 @@ router.get('/embarques', requireAuth, (req, res) => {
       FROM sg_embarque_lineas WHERE activo=1 GROUP BY embarque_id`).all()
       .reduce((m, r) => { m[r.embarque_id] = r.kg; return m; }, {});
     const data = embs.map(e => {
-      const calc = calcEmbarque(e, embCostos(db, e.id));
-      const kg = kgPorEmb[e.id] || 0;
-      return { ...e, costo_caja_neto: calc.costo_caja_neto, costo_caja_c_impuestos: calc.costo_caja_c_impuestos,
-        costo_kg_neto: kg > 0 ? calc.neto / kg : null, kg_totales: kg,
-        dif_cotizacion: calc.dif_cotizacion, dif_costos: calc.dif_costos,
-        neto: calc.neto, bruto: calc.bruto, creditos: calc.creditos };
+      // El panel muestra el costo por caja PUESTO ACÁ, que es el número con el que se decide
+      // a cuánto vender: sale del estimador, igual que la ficha y el visor.
+      const est = calcImportacion(db, e, embCostos(db, e.id), kgPorEmb[e.id] || 0);
+      return { ...e, costo_caja_puesto: est.costo_caja, precio_caja_usd: est.precio_caja_usd,
+        total_plazo: est.total_plazo, convertible: est.convertible, falta_tc: est.falta_tc,
+        kg_totales: kgPorEmb[e.id] || 0 };
     });
     res.json({ ok: true, data });
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
@@ -7378,6 +7380,43 @@ router.get('/embarques/:id', requireAuth, (req, res) => {
       WHERE l.embarque_id=? AND l.activo=1 ORDER BY l.id`).all(emb.id);
     res.json({ ok: true, data: { ...emb, costos, lineas, calculo: calcEmbarque(emb, costos), estimador: calcImportacion(db, emb, costos) } });
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// PATCH /embarques/:id/estado — cambio rápido de estado desde el panel.
+// Solo entre los tres estados de la negociación: 'recibido' y 'cerrado' los ponen sus
+// acciones, que además crean los lotes y re-costean.
+// 'transito' exige ETD: sin fecha de embarque no hay de dónde colgar las fechas de pago, y
+// el TC de cada rubro quedaría calculado sobre la nada.
+const EMB_ESTADOS_MANUALES = new Set(['cotizacion', 'abierto', 'transito']);
+router.patch('/embarques/:id/estado', requireAdmin, express.json(), (req, res) => {
+  const db = getDb();
+  try {
+    const nuevo = val(req.body && req.body.estado);
+    if (!EMB_ESTADOS_MANUALES.has(nuevo)) {
+      return res.status(400).json({ ok: false, error: 'Estado inválido. "Recibido" y "Cerrado" se ponen con su botón, que es lo que genera los lotes.' });
+    }
+    const emb = db.prepare('SELECT * FROM sg_embarques WHERE id=? AND activo=1').get(req.params.id);
+    if (!emb) return res.status(404).json({ ok: false, error: 'Embarque no encontrado' });
+    if (!EMB_ESTADOS_MANUALES.has(emb.estado)) {
+      return res.status(400).json({ ok: false, error: 'Un embarque ' + emb.estado + ' no puede volver atrás de estado.' });
+    }
+    // La ETD se puede mandar en la misma llamada: así el panel la pide y resuelve sin
+    // rebotar por el PUT del embarque, que reescribe TODO el header y con un body parcial
+    // borraría nombre, proveedor y el resto.
+    const etdNueva = val(req.body && req.body.fecha_etd);
+    if (etdNueva && !/^\d{4}-\d{2}-\d{2}$/.test(etdNueva)) {
+      return res.status(400).json({ ok: false, error: 'Fecha de embarque inválida (se espera AAAA-MM-DD)' });
+    }
+    const etd = etdNueva || emb.fecha_etd;
+    if (nuevo === 'transito' && !etd) {
+      return res.status(400).json({ ok: false, requiere_etd: true,
+        error: 'Para pasar a "En tránsito" hace falta la fecha de embarque (ETD): de ahí cuelgan las fechas de pago y el tipo de cambio de cada rubro.' });
+    }
+    db.prepare(`UPDATE sg_embarques SET estado=?, fecha_etd=COALESCE(?, fecha_etd),
+        modificado_en=datetime('now','localtime'), modificado_por=? WHERE id=?`)
+      .run(nuevo, etdNueva || null, uid(req), emb.id);
+    res.json({ ok: true, data: { estado: nuevo, fecha_etd: etd } });
+  } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
 });
 
 // POST /embarques/estimador-preview — el estimador sobre datos sin guardar.
