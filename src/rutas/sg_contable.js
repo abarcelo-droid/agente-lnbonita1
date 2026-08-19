@@ -1625,12 +1625,22 @@ router.put('/config-impositiva', requireAdmin, (req, res) => {
   // llegue, y esa fila después aparece en la pantalla de configuración.
   const CLAVES = ['iva_credito_fiscal', 'iva_debito_fiscal', 'percepcion_iva',
                   'percepcion_iibb', 'percepcion_ganancias', 'retencion', 'ventas',
-                  'cheques_cartera'];
+                  'cheques_cartera', 'cheques_rechazados'];
   if (!CLAVES.includes(clave)) return res.status(400).json({ ok: false, error: 'clave desconocida: ' + clave });
   try {
     const cid = cuenta_id ? parseInt(cuenta_id) : null;
     if (cid && !db.prepare('SELECT 1 FROM sg_cuentas WHERE id = ?').get(cid)) {
       return res.status(400).json({ ok: false, error: 'La cuenta no existe en el plan de San Gerónimo' });
+    }
+    // Y TIENE QUE SER IMPUTABLE. Un rubro agrupador —una sección, un título— no
+    // acepta movimientos: elegirlo acá dejaba la configuración guardada y el
+    // asiento reventaba recién el día que alguien cobraba con cheque. Se
+    // controla acá, que es cuando se puede cambiar de opinión sin costo.
+    if (cid && !cuentaEsImputable(db, cid)) {
+      const c = db.prepare('SELECT codigo, nombre FROM sg_cuentas WHERE id=?').get(cid);
+      return res.status(400).json({ ok: false,
+        error: `La cuenta ${c.codigo} — ${c.nombre} no es imputable: es un rubro agrupador. `
+             + `Elegí una cuenta final.` });
     }
     // UPSERT y no UPDATE: si la clave no estaba sembrada, el UPDATE afectaba 0
     // filas y el panel igual mostraba "✓ Configuración guardada". Puente Cordón

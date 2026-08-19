@@ -454,6 +454,52 @@ try {
   `);
 } catch (e) { console.error('[SG] sg_pagos_medios:', e.message); }
 
+// ── PAGAR CON UN CHEQUE QUE NOS DIERON NO SACA PLATA DE NINGÚN LADO ───────
+// Endosar un cheque de terceros cancela deuda con el proveedor sin que salga un
+// peso del banco ni de la caja: sale de la cartera. Pero cuenta_fin_id estaba
+// declarada NOT NULL, así que ese medio no se podía ni registrar.
+//
+// La columna se afloja rehaciendo la tabla —SQLite no sabe sacar un NOT NULL— y
+// de paso se agrega de qué cheque se trata. Se hace UNA sola vez: si ya está
+// nullable, se salta.
+try {
+  const cols = db.prepare('PRAGMA table_info(sg_pagos_medios)').all();
+  const cf = cols.find((c) => c.name === 'cuenta_fin_id');
+  if (cf && cf.notnull) {
+    const fkPrev = db.pragma('foreign_keys', { simple: true });
+    db.pragma('foreign_keys = OFF');
+    db.transaction(() => {
+      db.exec(`
+        CREATE TABLE sg_pagos_medios_new (
+          id            INTEGER PRIMARY KEY AUTOINCREMENT,
+          pago_id       INTEGER NOT NULL REFERENCES sg_pagos_proveedores(id),
+          forma_pago    TEXT NOT NULL DEFAULT 'transferencia',
+          cuenta_fin_id INTEGER REFERENCES sg_fin_cuentas(id),
+          monto         REAL NOT NULL,
+          referencia    TEXT,
+          chequera_id   INTEGER,
+          nro_cheque    INTEGER,
+          cheque_id     INTEGER,
+          cheque_ter_id INTEGER,
+          creado_en     TEXT DEFAULT (datetime('now','localtime'))
+        );
+        INSERT INTO sg_pagos_medios_new
+          (id, pago_id, forma_pago, cuenta_fin_id, monto, referencia, chequera_id,
+           nro_cheque, cheque_id, creado_en)
+        SELECT id, pago_id, forma_pago, cuenta_fin_id, monto, referencia, chequera_id,
+               nro_cheque, cheque_id, creado_en FROM sg_pagos_medios;
+        DROP TABLE sg_pagos_medios;
+        ALTER TABLE sg_pagos_medios_new RENAME TO sg_pagos_medios;
+        CREATE INDEX IF NOT EXISTS idx_sg_pagos_medios ON sg_pagos_medios(pago_id);
+      `);
+    })();
+    db.pragma(`foreign_keys = ${fkPrev ? 'ON' : 'OFF'}`);
+    console.log('[SG] sg_pagos_medios: se puede pagar endosando un cheque de terceros');
+  } else {
+    try { db.exec('ALTER TABLE sg_pagos_medios ADD COLUMN cheque_ter_id INTEGER'); } catch (_) {}
+  }
+} catch (e) { console.error('[SG] sg_pagos_medios (endoso):', e.message); }
+
 // ── QUIÉN TOCA CADA CAJA ──────────────────────────────────────────────────
 // Una caja de efectivo la maneja una persona, no "la empresa": la de la planta
 // la toca el encargado de planta y la de administración, administración. Sin
@@ -481,6 +527,22 @@ try {
 // cobró. Sin este dato, la cartera dice qué hay pero no contra qué cuenta
 // corriente entró.
 try { db.exec("ALTER TABLE sg_fin_cheques_terceros ADD COLUMN cliente_id INTEGER"); } catch (_) {}
+// El CUIT del que firma el cheque: es la clave con la que se le pregunta al BCRA
+// si ese librador tiene deudas o cheques rechazados.
+try { db.exec("ALTER TABLE sg_fin_cheques_terceros ADD COLUMN cuit_librador TEXT"); } catch (_) {}
+// A quién se lo endosamos y con qué pago: sin esto, un cheque que rebota después
+// de habérselo dado a un proveedor no sabe a quién volvemos a deberle.
+try { db.exec("ALTER TABLE sg_fin_cheques_terceros ADD COLUMN endosado_a INTEGER"); } catch (_) {}
+try { db.exec("ALTER TABLE sg_fin_cheques_terceros ADD COLUMN pago_id INTEGER"); } catch (_) {}
+// El rechazo: cuándo, por qué, y DE DÓNDE volvió — del banco donde se depositó o
+// del proveedor al que se le endosó. Son dos asientos distintos.
+try { db.exec("ALTER TABLE sg_fin_cheques_terceros ADD COLUMN rechazado_en TEXT"); } catch (_) {}
+try { db.exec("ALTER TABLE sg_fin_cheques_terceros ADD COLUMN rechazado_por INTEGER"); } catch (_) {}
+try { db.exec("ALTER TABLE sg_fin_cheques_terceros ADD COLUMN rechazado_motivo TEXT"); } catch (_) {}
+try { db.exec("ALTER TABLE sg_fin_cheques_terceros ADD COLUMN rechazado_de TEXT"); } catch (_) {}
+// Y cuándo se le devolvió al cliente, que es cuando vuelve a ser deuda suya.
+try { db.exec("ALTER TABLE sg_fin_cheques_terceros ADD COLUMN devuelto_en TEXT"); } catch (_) {}
+try { db.exec("ALTER TABLE sg_fin_cheques_terceros ADD COLUMN devuelto_por INTEGER"); } catch (_) {}
 
 // Si la cuenta tiene chequera. Es del banco, no del cheque: hay cuentas
 // corrientes sin chequera y cajas de ahorro que nunca la tienen.
@@ -530,6 +592,12 @@ try { db.exec("CREATE INDEX IF NOT EXISTS idx_sg_pagos_compras ON sg_pagos_compr
     // depositar", "Cheques en cartera"— y sin ella el cobro con cheque no puede
     // asentarse sin mentir sobre el saldo del banco.
     ['cheques_cartera',      'Cheques de terceros en cartera (valores a depositar)'],
+    // UN CHEQUE RECHAZADO TAMPOCO ES PLATA. El banco lo devolvió, o el proveedor
+    // al que se lo endosamos nos lo devolvió: ya no está en cartera, todavía no
+    // volvió a ser deuda del cliente, y en el medio es un papel que tenemos
+    // nosotros. Esa etapa necesita su cuenta, o el rechazo no se puede asentar
+    // sin inventar contra qué.
+    ['cheques_rechazados',   'Cheques de terceros rechazados (a recuperar del cliente)'],
   ];
   for (const [clave, desc] of claves) ins.run(clave, desc);
 }

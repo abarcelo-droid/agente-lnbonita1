@@ -430,10 +430,12 @@ router.get('/cheques-terceros', (req, res) => {
   try {
     const { estado } = req.query;
     let sql = `SELECT ct.*, c.nombre AS cuenta_destino_nombre,
-             cl.razon_social AS cliente_nombre
+             cl.razon_social AS cliente_nombre,
+             pr.razon_social AS endosado_a_nombre
       FROM sg_fin_cheques_terceros ct
       LEFT JOIN sg_fin_cuentas c ON c.id = ct.cuenta_destino
       LEFT JOIN sg_clientes cl ON cl.id = ct.cliente_id
+      LEFT JOIN sg_proveedores pr ON pr.id = ct.endosado_a
       WHERE 1 = 1`;
     const params = [];
     if (estado) { sql += ' AND ct.estado=?'; params.push(estado); }
@@ -475,60 +477,316 @@ router.post('/cheques-terceros', requireAuth, (req, res) => {
     // a ningún cliente es peor que no tener el dato, porque parece que lo tenés.
     let cli = null;
     if (cliente_id) {
-      cli = db.prepare('SELECT id FROM sg_clientes WHERE id=? AND activo=1').get(parseInt(cliente_id));
+      cli = db.prepare('SELECT id, razon_social, cuenta_contable_id FROM sg_clientes WHERE id=? AND activo=1')
+        .get(parseInt(cliente_id));
       if (!cli) return res.status(400).json({ ok: false, error: 'Ese cliente no existe' });
     }
-    const r = db.prepare(`INSERT INTO sg_fin_cheques_terceros (banco, nro_cheque, librador, monto, fecha_recepcion, fecha_vto, notas, cuenta_contable_id, cliente_id)
-      VALUES (?,?,?,?,?,?,?,?,?)`)
-      .run(banco||null, nro_cheque||null, librador||null, parseFloat(monto),
-           fecha_recepcion||new Date().toISOString().split('T')[0], fecha_vto||null, notas||null,
-           cuenta_contable_id?parseInt(cuenta_contable_id):null, cli ? cli.id : null);
-    res.json({ ok: true, id: r.lastInsertRowid });
+
+    // ── UN CHEQUE QUE ENTRA A LA CARTERA ENTRA AL LIBRO ──────────────────
+    // Antes esta alta no asentaba nada: el cheque aparecía en la lista y para la
+    // contabilidad no existía. Después se lo depositaba o se lo endosaba, y ESAS
+    // operaciones sí descargan la cuenta de cheques en cartera — contra un saldo
+    // que nunca se había cargado. La cuenta quedaba en negativo por cada cheque
+    // que había entrado por acá.
+    //
+    // Recibir un cheque de un cliente ES una cobranza a cuenta: la cartera al
+    // debe contra la cuenta corriente del cliente. Si el cheque no viene de un
+    // cliente —una devolución, un cheque viejo que se está regularizando— hay
+    // que decir contra qué cuenta entra. Una de las dos, pero alguna.
+    const ctaCart = ctaConfig('cheques_cartera');
+    if (!ctaCart) {
+      return res.status(400).json({ ok: false,
+        error: 'Falta decir contra qué cuenta contable van los cheques en cartera. Configurala en '
+             + 'Contabilidad SG antes de cargar cheques.' });
+    }
+    const contra = (cli && cli.cuenta_contable_id) || (cuenta_contable_id ? parseInt(cuenta_contable_id) : null);
+    if (!contra) {
+      return res.status(400).json({ ok: false,
+        error: cli
+          ? `El cliente "${cli.razon_social}" no tiene cuenta contable asignada: no se sabe contra qué `
+            + `cuenta corriente entra el cheque. Asignásela en su ficha.`
+          : 'Decí de quién es el cheque —el cliente— o contra qué cuenta contable entra: sin eso no '
+            + 'puede entrar al libro, y la cuenta de cartera queda cargada con algo que nunca ingresó.' });
+    }
+    if (!db.prepare('SELECT 1 FROM sg_cuentas WHERE id=?').get(contra)) {
+      return res.status(400).json({ ok: false, error: 'Esa cuenta contable no existe en el plan de SG' });
+    }
+
+    const fRec = fecha_recepcion || new Date().toISOString().split('T')[0];
+    let id = null, asientoId = null;
+    db.transaction(() => {
+      id = db.prepare(`INSERT INTO sg_fin_cheques_terceros (banco, nro_cheque, librador, monto, fecha_recepcion, fecha_vto, notas, cuenta_contable_id, cliente_id)
+        VALUES (?,?,?,?,?,?,?,?,?)`)
+        .run(banco||null, nro_cheque||null, librador||null, parseFloat(monto),
+             fRec, fecha_vto||null, notas||null, contra, cli ? cli.id : null).lastInsertRowid;
+      const u = getUser(req);
+      asientoId = db.prepare(`INSERT INTO sg_asientos (fecha, descripcion, usuario_id, ref_codigo)
+        VALUES (?,?,?,?)`).run(fRec,
+        'Cheque de terceros N° ' + (nro_cheque || 's/n') + ' en cartera'
+          + (librador ? ' — ' + librador : ''),
+        u ? u.id : null, 'CHT-A-' + id).lastInsertRowid;
+      const insL = db.prepare(`INSERT INTO sg_asientos_lineas (asiento_id, cuenta_id, debe, haber, descripcion)
+        VALUES (?,?,?,?,?)`);
+      insL.run(asientoId, ctaCart, parseFloat(monto), 0, 'Cheques en cartera');
+      insL.run(asientoId, contra, 0, parseFloat(monto),
+        cli ? cli.razon_social : 'Contrapartida del cheque');
+    })();
+    res.json({ ok: true, id: Number(id), asiento_id: Number(asientoId) });
   } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
 router.patch('/cheques-terceros/:id/estado', requireAuth, (req, res) => {
   const { estado } = req.body || {};
-  // 'depositado' NO está: depositar mueve plata a una cuenta, y eso tiene su
-  // propia dirección. Si se pudiera marcar acá, el cheque figuraría depositado
-  // y el banco no se habría movido nunca.
-  const estados = ['en_cartera','endosado','rechazado'];
+  // NINGÚN ESTADO QUE MUEVA PLATA SE PONE ACÁ. Depositar, endosar y rechazar
+  // cambian el libro y el saldo de una cuenta: cada uno tiene su dirección, que
+  // pregunta lo que hace falta y arma el asiento. Marcar el estado a mano dejaba
+  // el cheque diciendo "endosado" con la deuda del proveedor intacta.
+  const estados = ['en_cartera'];
   if (!estados.includes(estado)) {
-    return res.status(400).json({ ok: false, error: estado === 'depositado'
-      ? 'Para depositar un cheque está el botón Depositar, que pregunta en qué cuenta entra.'
-      : (estado === 'anulado'
-          ? 'Para anular un cheque está el botón Anular, que pide el permiso correspondiente.'
-          : 'Estado inválido') });
+    const A_DONDE = {
+      depositado: 'Para depositar un cheque está el botón Depositar, que pregunta en qué cuenta entra.',
+      endosado: 'Para endosar un cheque está el botón Endosar, que pregunta a qué proveedor se le da y '
+              + 'qué facturas cancela: si no, la deuda del proveedor no baja.',
+      rechazado: 'Para marcar un cheque rechazado está el botón Rechazado, que lo saca del banco o del '
+               + 'proveedor y arma el asiento.',
+      anulado: 'Para anular un cheque está el botón Anular, que pide el permiso correspondiente.',
+    };
+    return res.status(400).json({ ok: false, error: A_DONDE[estado] || 'Estado inválido' });
   }
   try {
     const c = db.prepare('SELECT * FROM sg_fin_cheques_terceros WHERE id=?').get(req.params.id);
     if (!c) return res.status(404).json({ ok: false, error: 'Cheque no encontrado' });
-    if (c.estado === 'anulado') {
-      return res.status(400).json({ ok: false, error: 'Ese cheque está anulado: no se le cambia el estado.' });
-    }
-    if (c.estado === 'depositado' && estado !== 'rechazado') {
+    // Y TAMPOCO SE VUELVE PARA ATRÁS POR ACÁ. Un cheque depositado, endosado,
+    // rechazado o devuelto ya movió el libro: devolverlo a "en cartera" con un
+    // PATCH deshace el estado y NO deshace el asiento ni la deuda. Cada vuelta
+    // atrás tiene su camino —anular el pago, rechazar, anular la cobranza— y
+    // todos hacen las dos cosas.
+    if (c.estado !== 'en_cartera') {
+      const COMO = {
+        depositado: 'Ya se depositó y la plata entró a una cuenta. Si el banco lo devolvió, marcalo como rechazado.',
+        endosado: 'Ya se endosó y canceló facturas de un proveedor. Para deshacerlo, anulá esa orden de pago: '
+                + 'ahí el cheque vuelve solo a la cartera.',
+        rechazado: 'Ya rebotó. Lo que sigue es devolvérselo al cliente.',
+        devuelto: 'Ya se le devolvió al cliente.',
+        anulado: 'Ese cheque está anulado: no se le cambia el estado.',
+      };
       return res.status(400).json({ ok: false,
-        error: 'Ese cheque ya se depositó. Si el banco lo devolvió, marcalo como rechazado.' });
+        error: COMO[c.estado] || 'Ese cheque ya no está en cartera.' });
     }
-    db.transaction(() => {
-      db.prepare('UPDATE sg_fin_cheques_terceros SET estado=? WHERE id=?').run(estado, c.id);
-      // RECHAZADO DESPUÉS DE DEPOSITADO: el banco devolvió la plata que había
-      // acreditado. Sin sacar el movimiento, el saldo de la cuenta queda
-      // mintiendo con plata que nunca entró.
-      if (estado === 'rechazado' && c.estado === 'depositado') {
-        db.prepare("DELETE FROM sg_fin_movimientos WHERE referencia = ? AND cuenta_id = ?")
-          .run('CHT-' + c.id, c.cuenta_destino);
-        db.prepare('UPDATE sg_fin_cheques_terceros SET cuenta_destino=NULL WHERE id=?').run(c.id);
-        // Y el asiento del depósito se anula: el banco no recibió esa plata. La
-        // deuda del cliente NO vuelve sola —eso lo decide quien lo gestione—
-        // pero el libro deja de decir que el dinero entró.
-        db.prepare(`UPDATE sg_asientos SET anulado=1, anulado_en=datetime('now','localtime'),
-          descripcion = descripcion || ' — ANULADO: el banco rechazó el cheque'
-          WHERE ref_codigo=? AND COALESCE(anulado,0)=0`).run('CHT-' + c.id);
-      }
-    })();
+    db.prepare('UPDATE sg_fin_cheques_terceros SET estado=? WHERE id=?').run(estado, c.id);
     res.json({ ok: true });
   } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// ── LAS CUENTAS QUE EL CIRCUITO DEL CHEQUE NECESITA ──────────────────────
+// Las dos se parametrizan en Contabilidad SG. Ninguna se adivina: si falta, se
+// dice cuál falta y no se hace nada, porque un asiento contra una cuenta
+// inventada es peor que no tener el asiento.
+function ctaConfig(clave) {
+  const r = db.prepare('SELECT cuenta_id FROM sg_config_impositiva WHERE clave=?').get(clave);
+  return (r && r.cuenta_id) || null;
+}
+
+// De qué cuenta contable es "Proveedores": la MISMA que usa el asiento modelo de
+// las facturas de compra. Es la regla que ya sigue el circuito de pagos
+// (cuentaProveedoresDeModelo, en rutas/sg.js) — parametrizarla aparte serían dos
+// lugares para decir lo mismo, y el día que no coincidan el mayor no cierra.
+function ctaProveedoresDeModelo() {
+  try {
+    const cfg = db.prepare(
+      "SELECT valor FROM sg_config WHERE clave='asiento_modelo_factura_mercaderia'").get();
+    const id = cfg && cfg.valor ? Number(cfg.valor) : null;
+    if (!id) return null;
+    const l = db.prepare(`SELECT cuenta_id FROM sg_asientos_modelo_lineas
+      WHERE modelo_id=? AND tipo_linea='proveedores' AND cuenta_id IS NOT NULL
+      ORDER BY orden, id LIMIT 1`).get(id);
+    return l ? l.cuenta_id : null;
+  } catch (_) { return null; }
+}
+
+// ── EL BANCO LO RECHAZÓ (O EL PROVEEDOR NOS LO DEVOLVIÓ) ─────────────────
+// Un cheque que rebota no es "cambiarle el estado". Hay que sacarlo de donde
+// esté —del banco donde se depositó, o del proveedor al que se lo endosamos— y
+// eso son dos asientos distintos:
+//
+//   · depositado → Cheques rechazados al DEBE contra el BANCO al haber. Y un
+//     movimiento de egreso, porque el banco acreditó y después debitó: el
+//     extracto muestra las dos cosas y el nuestro tiene que mostrarlas también.
+//     (Borrar el ingreso original haría desaparecer un movimiento que existió.)
+//
+//   · endosado → Cheques rechazados al DEBE contra PROVEEDORES al haber: el
+//     proveedor nos devolvió el papel, así que volvemos a deberle. Y las
+//     facturas que ese cheque había cancelado vuelven a estar pendientes.
+//
+// En los dos casos el cheque queda en "rechazados", que es una etapa: todavía no
+// es deuda del cliente. Eso pasa cuando se le devuelve.
+router.post('/cheques-terceros/:id/rechazar', requireAuth, (req, res) => {
+  try {
+    const u = getUser(req);
+    const motivo = String((req.body || {}).motivo || '').trim();
+    if (!motivo) return res.status(400).json({ ok: false, error: 'Escribí por qué rebotó: queda registrado' });
+    const c = db.prepare('SELECT * FROM sg_fin_cheques_terceros WHERE id=?').get(req.params.id);
+    if (!c) return res.status(404).json({ ok: false, error: 'Cheque no encontrado' });
+    if (c.estado === 'rechazado') return res.status(400).json({ ok: false, error: 'Ese cheque ya está rechazado' });
+    if (!['depositado', 'endosado'].includes(c.estado)) {
+      return res.status(400).json({ ok: false,
+        error: 'Un cheque sólo puede rebotar donde se presentó. Éste está ' + c.estado
+             + ': si nunca se depositó ni se endosó, lo que corresponde es anularlo.' });
+    }
+    const ctaRech = ctaConfig('cheques_rechazados');
+    if (!ctaRech) {
+      return res.status(400).json({ ok: false,
+        error: 'Falta decir contra qué cuenta contable van los cheques rechazados. Configurala en '
+             + 'Contabilidad SG.' });
+    }
+    const fecha = (req.body && req.body.fecha) || db.prepare("SELECT date('now','localtime') d").get().d;
+
+    let contra = null, contraNombre = '', deDonde = '';
+    if (c.estado === 'depositado') {
+      const cta = db.prepare('SELECT * FROM sg_fin_cuentas WHERE id=?').get(c.cuenta_destino);
+      if (!cta) return res.status(400).json({ ok: false, error: 'No se sabe en qué cuenta se había depositado' });
+      if (!puedeMoverCuenta(u, cta.id)) {
+        return res.status(403).json({ ok: false,
+          error: 'La cuenta "' + cta.nombre + '" tiene usuarios asignados y no estás entre ellos.' });
+      }
+      if (!cta.cuenta_contable_id) {
+        return res.status(400).json({ ok: false,
+          error: 'La cuenta "' + cta.nombre + '" no tiene cuenta contable asociada: el rechazo no puede '
+               + 'entrar al libro.' });
+      }
+      contra = cta.cuenta_contable_id; contraNombre = cta.nombre; deDonde = 'banco';
+    } else {
+      contra = ctaProveedoresDeModelo();
+      if (!contra) {
+        return res.status(400).json({ ok: false,
+          error: 'El asiento modelo de las facturas no tiene línea de Proveedores: sin esa cuenta no se '
+               + 'sabe a quién volvemos a deberle.' });
+      }
+      const pr = c.endosado_a
+        ? db.prepare('SELECT razon_social FROM sg_proveedores WHERE id=?').get(c.endosado_a) : null;
+      contraNombre = (pr && pr.razon_social) || 'Proveedores'; deDonde = 'proveedor';
+    }
+
+    let asientoId = null;
+    const vuelven = [];
+    db.transaction(() => {
+      asientoId = db.prepare(`INSERT INTO sg_asientos (fecha, descripcion, usuario_id, ref_codigo)
+        VALUES (?,?,?,?)`).run(fecha,
+        'Cheque N° ' + c.nro_cheque + ' RECHAZADO' + (c.librador ? ' — ' + c.librador : '')
+          + ' — ' + motivo, u ? u.id : null, 'CHT-R-' + c.id).lastInsertRowid;
+      const insL = db.prepare(`INSERT INTO sg_asientos_lineas (asiento_id, cuenta_id, debe, haber, descripcion)
+        VALUES (?,?,?,?,?)`);
+      insL.run(asientoId, ctaRech, c.monto, 0, 'Cheque rechazado N° ' + c.nro_cheque);
+      insL.run(asientoId, contra, 0, c.monto, contraNombre);
+
+      if (deDonde === 'banco') {
+        db.prepare(`INSERT INTO sg_fin_movimientos
+          (cuenta_id, fecha, tipo, concepto, monto, referencia, usuario_id)
+          VALUES (?,?, 'egreso', ?,?,?,?)`).run(c.cuenta_destino, fecha,
+          'Cheque rechazado N° ' + c.nro_cheque + (c.librador ? ' — ' + c.librador : ''),
+          c.monto, 'CHT-R-' + c.id, u ? u.id : null);
+      } else {
+        // LA DEUDA CON EL PROVEEDOR VUELVE. Las facturas que ese cheque había
+        // cancelado quedan otra vez pendientes: se descuenta de la ÚLTIMA
+        // imputación hacia atrás, hasta cubrir el importe del cheque.
+        let falta = Math.round(c.monto * 100) / 100;
+        const imps = db.prepare(`SELECT * FROM sg_pagos_compras WHERE pago_id=? ORDER BY id DESC`)
+          .all(c.pago_id || -1);
+        for (const im of imps) {
+          if (falta <= 0.001) break;
+          const saca = Math.round(Math.min(im.monto, falta) * 100) / 100;
+          if (saca >= im.monto - 0.001) db.prepare('DELETE FROM sg_pagos_compras WHERE id=?').run(im.id);
+          else db.prepare('UPDATE sg_pagos_compras SET monto=ROUND(monto-?,2) WHERE id=?').run(saca, im.id);
+          db.prepare(`UPDATE sg_facturas_compra
+            SET saldo_pagado = MAX(0, ROUND(COALESCE(saldo_pagado,0) - ?, 2)),
+                modificado_en=datetime('now','localtime') WHERE id=?`).run(saca, im.compra_id);
+          const f = db.prepare('SELECT numero FROM sg_facturas_compra WHERE id=?').get(im.compra_id);
+          vuelven.push({ factura: f ? f.numero : im.compra_id, monto: saca });
+          falta = Math.round((falta - saca) * 100) / 100;
+        }
+      }
+
+      db.prepare(`UPDATE sg_fin_cheques_terceros SET estado='rechazado', rechazado_en=?, rechazado_por=?,
+        rechazado_motivo=?, rechazado_de=? WHERE id=?`)
+        .run(fecha, u ? u.id : null, motivo, deDonde, c.id);
+    })();
+    res.json({ ok: true, data: { id: Number(c.id), asiento_id: Number(asientoId),
+      de: deDonde, vuelven } });
+  } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
+});
+
+// ── Y SE LO DEVOLVEMOS AL CLIENTE ────────────────────────────────────────
+// El papel vuelve a manos del que nos lo dio, y con él vuelve la deuda: lo que
+// esa cobranza había cancelado queda otra vez pendiente.
+//
+// El asiento del cobro original NO se anula: el cobro pasó de verdad. Se
+// contra-asienta —Cliente al DEBE contra Cheques rechazados al haber— y los dos
+// asientos se cancelan entre sí, que es lo que muestra la historia completa.
+router.post('/cheques-terceros/:id/devolver', requireAuth, (req, res) => {
+  try {
+    const u = getUser(req);
+    const c = db.prepare('SELECT * FROM sg_fin_cheques_terceros WHERE id=?').get(req.params.id);
+    if (!c) return res.status(404).json({ ok: false, error: 'Cheque no encontrado' });
+    if (c.estado !== 'rechazado') {
+      return res.status(400).json({ ok: false,
+        error: 'Sólo se le devuelve al cliente un cheque rechazado. Éste está ' + c.estado + '.' });
+    }
+    const ctaRech = ctaConfig('cheques_rechazados');
+    if (!ctaRech) {
+      return res.status(400).json({ ok: false,
+        error: 'Falta la cuenta contable de cheques rechazados. Configurala en Contabilidad SG.' });
+    }
+    const cli = c.cliente_id
+      ? db.prepare('SELECT id, razon_social, cuenta_contable_id FROM sg_clientes WHERE id=?').get(c.cliente_id)
+      : null;
+    if (!cli) {
+      return res.status(400).json({ ok: false,
+        error: 'Este cheque no tiene cliente: no vino de una cobranza, así que no hay a quién devolvérselo '
+             + 'en la cuenta corriente. Anulalo.' });
+    }
+    if (!cli.cuenta_contable_id) {
+      return res.status(400).json({ ok: false,
+        error: 'El cliente "' + cli.razon_social + '" no tiene cuenta contable asignada: no se sabe contra '
+             + 'qué cuenta corriente vuelve la deuda.' });
+    }
+    const fecha = (req.body && req.body.fecha) || db.prepare("SELECT date('now','localtime') d").get().d;
+    const cob = db.prepare('SELECT * FROM sg_ven_cobranzas WHERE cheque_terceros_id=? AND anulada=0').get(c.id);
+
+    let asientoId = null;
+    const vuelven = [];
+    db.transaction(() => {
+      asientoId = db.prepare(`INSERT INTO sg_asientos (fecha, descripcion, usuario_id, ref_codigo)
+        VALUES (?,?,?,?)`).run(fecha,
+        'Cheque N° ' + c.nro_cheque + ' devuelto a ' + cli.razon_social + ' — vuelve la deuda',
+        u ? u.id : null, 'CHT-D-' + c.id).lastInsertRowid;
+      const insL = db.prepare(`INSERT INTO sg_asientos_lineas (asiento_id, cuenta_id, debe, haber, descripcion)
+        VALUES (?,?,?,?,?)`);
+      insL.run(asientoId, cli.cuenta_contable_id, c.monto, 0, cli.razon_social);
+      insL.run(asientoId, ctaRech, 0, c.monto, 'Cheque rechazado N° ' + c.nro_cheque);
+
+      // LA COBRANZA DEJA DE CONTAR. Se marca anulada —que es lo que mira la
+      // cuenta corriente para no sumarla— pero su asiento queda VIVO: ese cobro
+      // existió y lo que lo revierte es el asiento de arriba. Los comprobantes
+      // que había cancelado vuelven a estar pendientes.
+      if (cob) {
+        db.prepare(`UPDATE sg_ven_cobranzas SET anulada=1, anulada_en=datetime('now','localtime'),
+          anulada_por=?, anulada_motivo=? WHERE id=?`)
+          .run(u ? u.id : null, 'Cheque N° ' + c.nro_cheque + ' rechazado y devuelto al cliente', cob.id);
+        for (const d of db.prepare('SELECT * FROM sg_ven_cobranza_docs WHERE cobranza_id=?').all(cob.id)) {
+          const tabla = d.tipo === 'liquidacion' ? 'sg_ven_liquidaciones' : 'sg_ven_facturas';
+          const r = db.prepare(`UPDATE ${tabla} SET estado='pendiente' WHERE id=? AND estado='cobrada'`)
+            .run(d.doc_id);
+          if (r.changes) {
+            const doc = db.prepare(`SELECT numero FROM ${tabla} WHERE id=?`).get(d.doc_id);
+            vuelven.push({ doc: doc ? doc.numero : d.doc_id, monto: d.monto });
+          }
+        }
+      }
+      db.prepare(`UPDATE sg_fin_cheques_terceros SET estado='devuelto', devuelto_en=?, devuelto_por=?
+        WHERE id=?`).run(fecha, u ? u.id : null, c.id);
+    })();
+    res.json({ ok: true, data: { id: Number(c.id), asiento_id: Number(asientoId), vuelven } });
+  } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
 });
 
 // ── DEPOSITAR UN CHEQUE DE TERCEROS ─────────────────────────────────────
@@ -609,15 +867,33 @@ router.post('/cheques-terceros/:id/anular', requireAuth, (req, res) => {
     const c = db.prepare('SELECT * FROM sg_fin_cheques_terceros WHERE id=?').get(req.params.id);
     if (!c) return res.status(404).json({ ok: false, error: 'Cheque no encontrado' });
     if (c.estado === 'anulado') return res.status(400).json({ ok: false, error: 'Ya estaba anulado' });
-    if (c.estado === 'depositado') {
-      return res.status(400).json({ ok: false,
-        error: 'Ese cheque ya se depositó y la plata entró a una cuenta. Si el banco lo devolvió, '
-             + 'marcalo como rechazado: eso saca el movimiento y deja el saldo bien.' });
-    }
+    // ANULAR ES DECIR QUE NUNCA EXISTIÓ, y eso sólo vale mientras el cheque no
+    // hizo nada. Uno depositado, endosado o rechazado ya movió plata y deuda:
+    // anularlo dejaría el asiento del depósito o el pago al proveedor en pie,
+    // apoyados en un cheque que el sistema dice que no existe.
+    const NO_SE_ANULA = {
+      depositado: 'Ese cheque ya se depositó y la plata entró a una cuenta. Si el banco lo devolvió, '
+                + 'marcalo como rechazado: eso la saca y deja el saldo bien.',
+      endosado: 'Ese cheque ya se endosó y canceló facturas de un proveedor. Para deshacerlo, anulá esa '
+              + 'orden de pago: ahí el cheque vuelve solo a la cartera.',
+      rechazado: 'Ese cheque ya rebotó y su rechazo está asentado. Lo que sigue es devolvérselo al cliente.',
+      devuelto: 'Ese cheque ya se le devolvió al cliente.',
+    };
+    if (NO_SE_ANULA[c.estado]) return res.status(400).json({ ok: false, error: NO_SE_ANULA[c.estado] });
     const motivo = (req.body && req.body.motivo ? String(req.body.motivo) : '').trim();
-    db.prepare(`UPDATE sg_fin_cheques_terceros SET estado='anulado',
-      notas = TRIM(COALESCE(notas,'') || ' [ANULADO' || ? || ']') WHERE id=?`)
-      .run(motivo ? ': ' + motivo : '', c.id);
+    db.transaction(() => {
+      db.prepare(`UPDATE sg_fin_cheques_terceros SET estado='anulado',
+        notas = TRIM(COALESCE(notas,'') || ' [ANULADO' || ? || ']') WHERE id=?`)
+        .run(motivo ? ': ' + motivo : '', c.id);
+      // El asiento del alta se anula: si el cheque no existió, la cuenta de
+      // cartera no puede quedar cargada con él. (El de una COBRANZA no se toca
+      // acá — ése lo maneja anular la cobranza, que además devuelve el saldo a
+      // los comprobantes.)
+      db.prepare(`UPDATE sg_asientos SET anulado=1, anulado_en=datetime('now','localtime'),
+        descripcion = descripcion || ' — ANULADO' || ?
+        WHERE ref_codigo=? AND COALESCE(anulado,0)=0`)
+        .run(motivo ? ': ' + motivo : '', 'CHT-A-' + c.id);
+    })();
     res.json({ ok: true, data: { id: Number(c.id) } });
   } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
 });
