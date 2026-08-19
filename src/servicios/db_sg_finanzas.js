@@ -426,6 +426,35 @@ try { db.exec("ALTER TABLE sg_ven_cobranzas ADD COLUMN anulada_motivo TEXT"); } 
 try { db.exec("ALTER TABLE sg_ven_cobranzas ADD COLUMN cheque_terceros_id INTEGER"); } catch (_) {}
 try { db.exec("CREATE INDEX IF NOT EXISTS idx_sg_cob_cliente ON sg_ven_cobranzas(cliente_id)"); } catch (_) {}
 
+// ── DOS NÚMEROS DE LA MISMA OPERACIÓN ─────────────────────────────────────
+// El comprador arregla el tomate en 20.000 y la factura viene por 10.000. Al
+// proveedor se le deben 20.000; a AFIP se le informa la factura de 10.000. Los
+// dos números son ciertos y hasta ahora el sistema sólo podía guardar uno: el
+// otro terminaba en la cabeza del comprador o en una planilla.
+//
+// EL ÁMBITO VIAJA EN LA LÍNEA, NO EN EL RECIPIENTE. Un mismo asiento —un solo
+// número, el que se cita cuando se discute algo— lleva las líneas fiscales y
+// las de gestión, y CADA ÁMBITO BALANCEA POR SU CUENTA adentro de ese asiento.
+// Ponerlo en la cabecera obligaría a dos asientos con dos números para la misma
+// operación; ponerlo en la caja obligaría a partir la caja en dos.
+//
+// El motivo es obligatorio en las de gestión y sale de una lista corta (ver
+// servicios/asientos.js): una diferencia sin motivo es una diferencia que nadie
+// va a reclamar nunca.
+try { db.exec("ALTER TABLE sg_asientos_lineas ADD COLUMN ambito TEXT NOT NULL DEFAULT 'fiscal'"); } catch (_) {}
+try { db.exec("ALTER TABLE sg_asientos_lineas ADD COLUMN motivo TEXT"); } catch (_) {}
+// Quién la creó. La cabecera ya guarda quién hizo el asiento, pero una línea de
+// gestión puede agregarse después y sobre todo hay que poder MEDIR quién las
+// viene usando: de eso depende la decisión de restringir el permiso más adelante.
+try { db.exec("ALTER TABLE sg_asientos_lineas ADD COLUMN usuario_id INTEGER"); } catch (_) {}
+try { db.exec("CREATE INDEX IF NOT EXISTS idx_sg_asi_lin_ambito ON sg_asientos_lineas(ambito)"); } catch (_) {}
+
+// Y lo mismo del lado de la plata: el movimiento sabe de qué ámbito es, así una
+// misma caja puede tener los dos sin partirla en dos cajas.
+try { db.exec("ALTER TABLE sg_fin_movimientos ADD COLUMN ambito TEXT NOT NULL DEFAULT 'fiscal'"); } catch (_) {}
+try { db.exec("ALTER TABLE sg_fin_movimientos ADD COLUMN motivo TEXT"); } catch (_) {}
+try { db.exec("CREATE INDEX IF NOT EXISTS idx_sg_fin_mov_ambito ON sg_fin_movimientos(ambito)"); } catch (_) {}
+
 // ── UN PAGO SE PAGA CON VARIAS COSAS ──────────────────────────────────────
 // La orden de pago tenía UNA cuenta y UNA forma: o todo en efectivo, o todo por
 // transferencia, o todo con un cheque. En la vida real un pago de 500.000 sale

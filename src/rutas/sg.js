@@ -12,6 +12,7 @@ import { randomUUID } from 'crypto';
 import { fileURLToPath } from 'url';
 import * as XLSX from 'xlsx';
 import { subirArchivo, obtenerArchivo, storageConfigurado } from '../servicios/storage.js';
+import { crearAsiento } from '../servicios/asientos.js';
 import { getDb } from '../servicios/db.js';
 import '../servicios/db_sg.js'; // corre el DDL sg_* al importarse
 // Las condiciones de pago que se usan de verdad, y el código de trazabilidad
@@ -2967,22 +2968,24 @@ router.post('/oc/:id/contabilizar', requireAdmin, (req, res) => {
 
     let asientoId;
     db.transaction(() => {
-      asientoId = db.prepare(`INSERT INTO sg_asientos (fecha, descripcion, usuario_id, ref_compra_id, ref_codigo)
-        VALUES (?,?,?,?,?)`).run(fac.fecha_emision, desc, uid(req), fac.id, nroFac).lastInsertRowid;
-
       // El asiento va a sg_asientos_lineas, que es de donde el módulo contable
       // arma el mayor y el balance. sg_movimientos_contables existe pero no la
       // lee nadie —se creó "por paridad estructural" con Puente Cordón—, así
       // que escribir ahí sería inventar un segundo lugar para lo mismo y que
       // dentro de un año no se sepa cuál de los dos manda.
-      const insL = db.prepare(`INSERT INTO sg_asientos_lineas (asiento_id, cuenta_id, debe, haber, descripcion)
-        VALUES (?,?,?,?,?)`);
-      for (const l of conCuenta) {
-        insL.run(asientoId, l.cuenta_id,
-          l.lado === 'debe' ? l.monto : 0,
-          l.lado === 'haber' ? l.monto : 0,
-          l.descripcion || null);
-      }
+      asientoId = crearAsiento(db, {
+        fecha: fac.fecha_emision, descripcion: desc, usuario_id: uid(req),
+        ref_compra_id: fac.id, ref_codigo: nroFac,
+      }, conCuenta.map((l) => ({
+        cuenta_id: l.cuenta_id,
+        debe: l.lado === 'debe' ? l.monto : 0,
+        haber: l.lado === 'haber' ? l.monto : 0,
+        descripcion: l.descripcion || null,
+        // El ámbito viene de la línea del modelo: hoy todas son fiscales, y es
+        // por acá por donde va a entrar la parte de gestión de una factura que
+        // vino por menos de lo acordado.
+        ambito: l.ambito, motivo: l.motivo,
+      }))).id;
       db.prepare(`UPDATE sg_facturas_compra SET asiento_id=?, confirmada_en=datetime('now','localtime'),
         confirmada_por=?, modificado_en=datetime('now','localtime'), modificado_por=? WHERE id=?`)
         .run(asientoId, uid(req), uid(req), fac.id);
@@ -6170,21 +6173,21 @@ router.post('/pagos', requireAuth, (req, res) => {
           + (nro ? ' — ' + nro : '')
           + (conNueva.length ? ' — ' + conNueva.map((x) => x.f.numero).join(', ') : '')
           + (conNueva.length && aCuenta > 0 ? ' (+ ' + aCuenta + ' a cuenta)' : '');
-        asientoId = db.prepare(`INSERT INTO sg_asientos (fecha, descripcion, usuario_id, ref_codigo)
-          VALUES (?,?,?,?)`).run(fecha, desc, uid(req), nro || null).lastInsertRowid;
-        const insL = db.prepare(`INSERT INTO sg_asientos_lineas (asiento_id, cuenta_id, debe, haber, descripcion)
-          VALUES (?,?,?,?,?)`);
-        insL.run(asientoId, ctaProv, total, 0, 'Proveedores');
         // UNA LÍNEA POR MEDIO: cada plata sale de su propia cuenta contable. Con
         // una sola línea por el total, un pago mitad caja y mitad banco quedaba
         // descargado entero contra una de las dos.
-        for (const m of medios) {
-          insL.run(asientoId, m.ctaContable, 0, m.monto,
-            m.chequeTer
+        asientoId = crearAsiento(db, {
+          fecha, descripcion: desc, usuario_id: uid(req), ref_codigo: nro || null,
+        }, [
+          { cuenta_id: ctaProv, debe: total, haber: 0, descripcion: 'Proveedores' },
+          ...medios.map((m) => ({
+            cuenta_id: m.ctaContable, debe: 0, haber: m.monto,
+            descripcion: m.chequeTer
               ? ('Cheque N° ' + m.chequeTer.nro_cheque + ' endosado'
                  + (m.chequeTer.cliente_nombre ? ' (de ' + m.chequeTer.cliente_nombre + ')' : ''))
-              : m.cuenta.nombre);
-        }
+              : m.cuenta.nombre,
+          })),
+        ]).id;
         db.prepare('UPDATE sg_pagos_proveedores SET asiento_id=? WHERE id=?').run(asientoId, pagoId);
       }
 

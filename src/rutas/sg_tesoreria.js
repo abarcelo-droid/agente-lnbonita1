@@ -16,6 +16,7 @@ import express from 'express';
 import db from '../servicios/db_sg_finanzas.js';
 import { exigirEmpresa, SAN_GERONIMO } from '../servicios/sociedad_modulo.js';
 import { consultarBcra } from '../servicios/bcra.js';
+import { crearAsiento } from '../servicios/asientos.js';
 
 const router = express.Router();
 
@@ -522,16 +523,15 @@ router.post('/cheques-terceros', requireAuth, (req, res) => {
              fRec, fecha_vto||null, notas||null, contra, cli ? cli.id : null,
              String(cuit_librador || '').replace(/[^0-9]/g, '') || null).lastInsertRowid;
       const u = getUser(req);
-      asientoId = db.prepare(`INSERT INTO sg_asientos (fecha, descripcion, usuario_id, ref_codigo)
-        VALUES (?,?,?,?)`).run(fRec,
-        'Cheque de terceros N° ' + (nro_cheque || 's/n') + ' en cartera'
+      asientoId = crearAsiento(db, {
+        fecha: fRec, usuario_id: u ? u.id : null, ref_codigo: 'CHT-A-' + id,
+        descripcion: 'Cheque de terceros N° ' + (nro_cheque || 's/n') + ' en cartera'
           + (librador ? ' — ' + librador : ''),
-        u ? u.id : null, 'CHT-A-' + id).lastInsertRowid;
-      const insL = db.prepare(`INSERT INTO sg_asientos_lineas (asiento_id, cuenta_id, debe, haber, descripcion)
-        VALUES (?,?,?,?,?)`);
-      insL.run(asientoId, ctaCart, parseFloat(monto), 0, 'Cheques en cartera');
-      insL.run(asientoId, contra, 0, parseFloat(monto),
-        cli ? cli.razon_social : 'Contrapartida del cheque');
+      }, [
+        { cuenta_id: ctaCart, debe: parseFloat(monto), haber: 0, descripcion: 'Cheques en cartera' },
+        { cuenta_id: contra, debe: 0, haber: parseFloat(monto),
+          descripcion: cli ? cli.razon_social : 'Contrapartida del cheque' },
+      ]).id;
     })();
     res.json({ ok: true, id: Number(id), asiento_id: Number(asientoId) });
   } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
@@ -672,14 +672,14 @@ router.post('/cheques-terceros/:id/rechazar', requireAuth, (req, res) => {
     let asientoId = null;
     const vuelven = [];
     db.transaction(() => {
-      asientoId = db.prepare(`INSERT INTO sg_asientos (fecha, descripcion, usuario_id, ref_codigo)
-        VALUES (?,?,?,?)`).run(fecha,
-        'Cheque N° ' + c.nro_cheque + ' RECHAZADO' + (c.librador ? ' — ' + c.librador : '')
-          + ' — ' + motivo, u ? u.id : null, 'CHT-R-' + c.id).lastInsertRowid;
-      const insL = db.prepare(`INSERT INTO sg_asientos_lineas (asiento_id, cuenta_id, debe, haber, descripcion)
-        VALUES (?,?,?,?,?)`);
-      insL.run(asientoId, ctaRech, c.monto, 0, 'Cheque rechazado N° ' + c.nro_cheque);
-      insL.run(asientoId, contra, 0, c.monto, contraNombre);
+      asientoId = crearAsiento(db, {
+        fecha, usuario_id: u ? u.id : null, ref_codigo: 'CHT-R-' + c.id,
+        descripcion: 'Cheque N° ' + c.nro_cheque + ' RECHAZADO' + (c.librador ? ' — ' + c.librador : '')
+          + ' — ' + motivo,
+      }, [
+        { cuenta_id: ctaRech, debe: c.monto, haber: 0, descripcion: 'Cheque rechazado N° ' + c.nro_cheque },
+        { cuenta_id: contra, debe: 0, haber: c.monto, descripcion: contraNombre },
+      ]).id;
 
       if (deDonde === 'banco') {
         db.prepare(`INSERT INTO sg_fin_movimientos
@@ -757,14 +757,13 @@ router.post('/cheques-terceros/:id/devolver', requireAuth, (req, res) => {
     let asientoId = null;
     const vuelven = [];
     db.transaction(() => {
-      asientoId = db.prepare(`INSERT INTO sg_asientos (fecha, descripcion, usuario_id, ref_codigo)
-        VALUES (?,?,?,?)`).run(fecha,
-        'Cheque N° ' + c.nro_cheque + ' devuelto a ' + cli.razon_social + ' — vuelve la deuda',
-        u ? u.id : null, 'CHT-D-' + c.id).lastInsertRowid;
-      const insL = db.prepare(`INSERT INTO sg_asientos_lineas (asiento_id, cuenta_id, debe, haber, descripcion)
-        VALUES (?,?,?,?,?)`);
-      insL.run(asientoId, cli.cuenta_contable_id, c.monto, 0, cli.razon_social);
-      insL.run(asientoId, ctaRech, 0, c.monto, 'Cheque rechazado N° ' + c.nro_cheque);
+      asientoId = crearAsiento(db, {
+        fecha, usuario_id: u ? u.id : null, ref_codigo: 'CHT-D-' + c.id,
+        descripcion: 'Cheque N° ' + c.nro_cheque + ' devuelto a ' + cli.razon_social + ' — vuelve la deuda',
+      }, [
+        { cuenta_id: cli.cuenta_contable_id, debe: c.monto, haber: 0, descripcion: cli.razon_social },
+        { cuenta_id: ctaRech, debe: 0, haber: c.monto, descripcion: 'Cheque rechazado N° ' + c.nro_cheque },
+      ]).id;
 
       // LA COBRANZA DEJA DE CONTAR. Se marca anulada —que es lo que mira la
       // cuenta corriente para no sumarla— pero su asiento queda VIVO: ese cobro
@@ -847,14 +846,13 @@ router.post('/cheques-terceros/:id/depositar', requireAuth, (req, res) => {
           + (c.librador ? ' — ' + c.librador : ''),
         c.monto, 'CHT-' + c.id, u ? u.id : null);
       if (asienta) {
-        asientoId = db.prepare(`INSERT INTO sg_asientos (fecha, descripcion, usuario_id, ref_codigo)
-          VALUES (?,?,?,?)`).run(fecha,
-          'Depósito cheque N° ' + c.nro_cheque + (c.librador ? ' de ' + c.librador : ''),
-          u ? u.id : null, 'CHT-' + c.id).lastInsertRowid;
-        const insL = db.prepare(`INSERT INTO sg_asientos_lineas (asiento_id, cuenta_id, debe, haber, descripcion)
-          VALUES (?,?,?,?,?)`);
-        insL.run(asientoId, cuenta.cuenta_contable_id, c.monto, 0, cuenta.nombre);
-        insL.run(asientoId, ctaCartera, 0, c.monto, 'Cheques en cartera');
+        asientoId = crearAsiento(db, {
+          fecha, usuario_id: u ? u.id : null, ref_codigo: 'CHT-' + c.id,
+          descripcion: 'Depósito cheque N° ' + c.nro_cheque + (c.librador ? ' de ' + c.librador : ''),
+        }, [
+          { cuenta_id: cuenta.cuenta_contable_id, debe: c.monto, haber: 0, descripcion: cuenta.nombre },
+          { cuenta_id: ctaCartera, debe: 0, haber: c.monto, descripcion: 'Cheques en cartera' },
+        ]).id;
       }
     })();
     res.json({ ok: true, data: { id: Number(c.id), cuenta: cuenta.nombre,
