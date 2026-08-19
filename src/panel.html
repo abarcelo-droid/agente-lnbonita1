@@ -299,6 +299,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
   <div class="ni" data-sec="sg-catalogo" data-admin-only="1"></div>
   <div class="ni" data-sec="sg-reportes" data-admin-only="1"></div>
   <div class="ni" data-sec="sg-facturas-merc" data-admin-only="1"></div>
+  <div class="ni" data-sec="sg-cc-clientes" data-admin-only="1"></div>
   <div class="ni" data-sec="sg-cc-proveedores" data-admin-only="1"></div>
   <div class="ni" data-sec="sg-caja-bancos" data-admin-only="1"></div>
 
@@ -2510,7 +2511,6 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
       <div class="sgv-subtab" data-sub="facturar"      onclick="sgVenSub('facturar')">🧾 Facturar</div>
       <div class="sgv-subtab" data-sub="facturas"      onclick="sgVenSub('facturas')">📑 Facturas</div>
       <div class="sgv-subtab" data-sub="pendientes"    onclick="sgVenSub('pendientes')">📋 Pendientes de comprobante</div>
-      <div class="sgv-subtab" data-sub="cc"            onclick="sgVenSub('cc')">💳 Cuenta corriente</div>
     </div>
 
     <!-- Pedidos -->
@@ -2597,26 +2597,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
     </div>
 
     <!-- Cuenta corriente clientes -->
-    <div class="sgv-sub" id="sgv-sub-cc">
-      <div style="font-size:12px;color:var(--mut);margin-bottom:8px">
-        Saldo = saldo de apertura + lo facturado por despachos − lo cobrado. Hacé
-        click en un cliente para ver sus comprobantes y registrarle un cobro.
-      </div>
-      <!-- Van a figurar todos: sin buscador, encontrar uno es recorrer la lista
-           con el dedo. Filtra mientras se escribe, sin ir al servidor. -->
-      <div class="sg-oc-search" style="max-width:340px;margin-bottom:10px">
-        <input id="sg-cc-q" placeholder="🔎 Buscar cliente…" oninput="sgCcClPintar()"
-               style="width:100%;box-sizing:border-box">
-      </div>
-      <div class="ab-table-wrap"><table class="pa-tbl">
-        <thead><tr><th>Cliente</th><th style="text-align:right">Saldo apertura</th><th style="text-align:right">Facturado</th><th style="text-align:right">Cobrado</th><th style="text-align:right">Saldo total</th><th style="text-align:right">Límite</th><th style="width:150px"></th></tr></thead>
-        <tbody id="sg-tb-cc"><tr><td colspan="7" class="emp">Cargando…</td></tr></tbody>
-      </table></div>
-      <!-- LA FICHA DEL CLIENTE. El listado dice cuánto debe; esto dice por qué:
-           cada comprobante con lo que le queda, y los cobros que ya se le
-           tomaron. Para discutir un saldo hace falta ver las dos cosas. -->
-      <div id="sg-ccli-ficha" style="margin-top:18px;display:none"></div>
-    </div>
+
   </div>
   <!-- ══ Módulo Reprocesos (#reproceso): decomiso / transformación / reproceso con clasificación ══ -->
   <div class="sec sg-mod" id="sec-sg-reprocesos">
@@ -3176,6 +3157,41 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
         </div>
       </div>
     </div>
+  </div>
+
+  <!-- ══ San Gerónimo · CUENTA CORRIENTE DE CLIENTES ══
+       Cuánto le debe cada cliente, y de dónde sale ese número. Era una solapa
+       adentro de Salidas —la pantalla donde se CARGA la venta— y el que mira un
+       saldo o le toma un cobro a un cliente no está cargando despachos. Misma
+       decisión que se tomó con la cuenta corriente de proveedores. -->
+  <div class="sec sg-mod" id="sec-sg-cc-clientes">
+    <div class="ph">
+      <div><div class="ph-t">💳 San Gerónimo · Cuenta corriente de clientes</div>
+        <div class="ph-s">Cuánto debe cada uno, y qué se le cobró</div></div>
+      <div style="display:flex;gap:8px">
+        <button class="btn bo" onclick="sgLoadCC()">↻ Actualizar</button>
+      </div>
+    </div>
+
+      <div style="font-size:12px;color:var(--mut);margin-bottom:8px">
+        Saldo = saldo de apertura + lo facturado por despachos − lo cobrado. Hacé
+        click en un cliente para ver sus comprobantes y registrarle un cobro.
+      </div>
+      <!-- Van a figurar todos: sin buscador, encontrar uno es recorrer la lista
+           con el dedo. Filtra mientras se escribe, sin ir al servidor. -->
+      <div class="sg-oc-search" style="max-width:340px;margin-bottom:10px">
+        <input id="sg-cc-q" placeholder="🔎 Buscar cliente…" oninput="sgCcClPintar()"
+               style="width:100%;box-sizing:border-box">
+      </div>
+      <div class="ab-table-wrap"><table class="pa-tbl">
+        <thead><tr><th>Cliente</th><th style="text-align:right">Saldo apertura</th><th style="text-align:right">Facturado</th><th style="text-align:right">Cobrado</th><th style="text-align:right">Saldo total</th><th style="text-align:right">Límite</th><th style="width:150px"></th></tr></thead>
+        <tbody id="sg-tb-cc"><tr><td colspan="7" class="emp">Cargando…</td></tr></tbody>
+      </table></div>
+      <!-- LA FICHA DEL CLIENTE. El listado dice cuánto debe; esto dice por qué:
+           cada comprobante con lo que le queda, y los cobros que ya se le
+           tomaron. Para discutir un saldo hace falta ver las dos cosas. -->
+      <div id="sg-ccli-ficha" style="margin-top:18px;display:none"></div>
+    
   </div>
 
   <!-- ── LA FICHA DEL PROVEEDOR ──────────────────────────────────────────
@@ -10903,7 +10919,9 @@ function sgVenSub(s){
   else if (s==='facturar') sgFacInit();
   else if (s==='facturas') sgFacListInit();
   else if (s==='pendientes') sgPendInit();
-  else if (s==='cc') sgLoadCC();
+  // 'cc' ya no vive acá: se fue a su propia pantalla, CC clientes. Se deja el
+  // desvío para que una sesión con la solapa vieja guardada no quede en blanco.
+  else if (s==='cc') sgVenSub('pedidos');
 }
 
 // ── BRIEF E2 — Pantalla de facturación (despacho → factura AFIP) ──────────────────
@@ -19642,6 +19660,7 @@ function loadSec(s) {
     'sg-ventas':     function(){ sgVenInit(); },
     'sg-gastos-directos': function(){ sgGdsInit(); },
     'sg-facturas-merc': function(){ sgFmModeloCargar(); sgFmLoad(); sgFmSinContabilizar(); },
+    'sg-cc-clientes': function(){ sgLoadCaches(function(){ sgLoadCC(); }); },
     'sg-cc-proveedores': function(){ sgLoadCcProv(); },
     'sg-caja-bancos': function(){ sgCbInit(); },
     'sg-importacion': function(){ sgImpInit(); },
