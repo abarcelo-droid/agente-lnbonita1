@@ -3245,6 +3245,12 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
       <div><div class="ph-t">💳 San Gerónimo · Cuenta corriente de clientes</div>
         <div class="ph-s">Cuánto debe cada uno, y qué se le cobró</div></div>
       <div style="display:flex;gap:8px">
+        <!-- EL ACCESO DIRECTO. La lista de abajo muestra sólo a los clientes que
+             YA tienen movimientos, así que a uno nuevo —o a uno al que se le
+             cobra una seña antes de despacharle nada— no había por dónde
+             entrarle: la pantalla arrancaba vacía y el cobro no se podía
+             registrar. Desde acá se elige el cliente adentro del modal. -->
+        <button class="btn bb" id="sg-ccli-btn-cobrar" onclick="sgCobOpen(null)">💵 Registrar cobranza</button>
         <button class="btn bo" onclick="sgLoadCC()">↻ Actualizar</button>
       </div>
     </div>
@@ -4429,6 +4435,13 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
       <button class="mcl" onclick="closeMB('sg-cob-modal')">×</button></div>
     <div class="mbd">
       <div id="sg-cob-aviso"></div>
+      <!-- El cliente se elige ACÁ y no antes de abrir: entrando desde el acceso
+           directo todavía no hay ninguno, y entrando desde la ficha se puede
+           haber equivocado de fila. Cambiarlo recarga sus comprobantes. -->
+      <div class="fl" id="sg-cob-cli-box" style="margin-bottom:10px;display:none">
+        <label>¿A qué cliente se le cobra?</label>
+        <select id="sg-cob-cli" onchange="sgCobCliente()"></select>
+      </div>
       <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px">
         <div class="fl"><label>Fecha</label><input type="date" id="sg-cob-fecha"></div>
         <div class="fl"><label>En qué cuenta entra</label>
@@ -12845,12 +12858,16 @@ function sgCcClPintar(){
       + '<td style="text-align:right">' + sgMoney(c.limite_credito) + '</td>'
       + '<td style="text-align:right;white-space:nowrap">'
         + '<button class="btn bo bs" onclick="sgCcClFicha(' + c.id + ')">Ver</button>'
-        + (lnbPuedeOperar('sg-ventas')
+        + (lnbPuedeOperar('sg-cc-clientes')
             ? ' <button class="btn bb bs" onclick="sgCobOpen(' + c.id + ')">💵 Cobrar</button>' : '')
       + '</td></tr>';
   }).join('')
     : '<tr><td colspan="7" class="emp">'
-      + (SG_CCLI.filas.length ? 'Ningún cliente coincide con la búsqueda.' : 'Sin saldos ni movimientos.')
+      + (SG_CCLI.filas.length
+          ? 'Ningún cliente coincide con la búsqueda.'
+          : 'Todavía no hay clientes con saldo ni movimientos. Acá figuran los que ya tienen algo '
+            + 'facturado, cobrado o un saldo de apertura — para cobrarle a cualquier otro, usá '
+            + '<b>💵 Registrar cobranza</b> arriba.')
       + '</td></tr>';
 }
 
@@ -12877,7 +12894,7 @@ function sgCcClFichaPintar(){
     + '<div class="ph-s">Le quedan ' + sgMoney(d.totales.pendiente) + ' de '
       + sgMoney(d.totales.total) + ' facturados</div></div>'
     + '<div style="display:flex;gap:8px">'
-    + (lnbPuedeOperar('sg-ventas')
+    + (lnbPuedeOperar('sg-cc-clientes')
         ? '<button class="btn bb bs" onclick="sgCobOpen(' + c.id + ')">💵 Registrar cobro</button>' : '')
     + '<button class="btn bo bs" onclick="sgCcClCerrar()">Cerrar</button></div></div>';
 
@@ -12946,10 +12963,11 @@ function sgCobAnular(id){
 var SG_COB = { clienteId: null, docs: [], cuentas: [], ctaCliente: null };
 
 function sgCobOpen(clienteId){
-  var c = SG_CCLI.filas.filter(function(x){ return x.id === clienteId; })[0];
+  clienteId = clienteId ? Number(clienteId) : null;
+  var c = (SG_CCLI.filas || []).filter(function(x){ return x.id === clienteId; })[0];
   SG_COB = { clienteId: clienteId, docs: [], cuentas: [], ctaCliente: null, cartera: null };
   var t = eid('sg-cob-tit');
-  if (t) t.textContent = 'Registrar cobranza — ' + (c ? sgCcClNombre(c) : '');
+  if (t) t.textContent = 'Registrar cobranza' + (c ? ' — ' + sgCcClNombre(c) : '');
   var f = eid('sg-cob-fecha'); if (f) f.value = new Date().toISOString().slice(0, 10);
   ['sg-cob-monto', 'sg-cob-ref', 'sg-cob-notas', 'sg-cob-chq-banco', 'sg-cob-chq-nro',
    'sg-cob-chq-lib', 'sg-cob-chq-vto', 'sg-cob-chq-cuit'].forEach(function(id){
@@ -12958,6 +12976,24 @@ function sgCobOpen(clienteId){
   var pb = eid('sg-cob-chq-bcra'); if (pb) pb.innerHTML = '';
   var fp = eid('sg-cob-forma'); if (fp) fp.value = 'transferencia';
   sgCobForma();
+
+  // TODOS los clientes activos, no sólo los que ya tienen movimientos: al que
+  // todavía no se le despachó nada también se le puede cobrar una seña, y ése
+  // es justo el que no figura en la lista de atrás.
+  var box = eid('sg-cob-cli-box'); if (box) box.style.display = '';
+  var selCli = eid('sg-cob-cli');
+  if (selCli) {
+    selCli.innerHTML = '<option value="">— elegí el cliente —</option>';
+    api('/api/sg/clientes').then(function(r){
+      var cs = (r && r.ok) ? (r.data || []) : [];
+      selCli.innerHTML = '<option value="">— elegí el cliente —</option>' + cs.map(function(x){
+        return '<option value="' + x.id + '"' + (x.id === clienteId ? ' selected' : '') + '>'
+          + esc(x.razon_social) + '</option>';
+      }).join('');
+      // Son cientos: sin buscador hay que bajar con la rueda hasta encontrarlo.
+      if (typeof sgSelBuscable === 'function') { sgSelBuscable(selCli, 'Buscar cliente…'); sgSelRefrescar(selCli); }
+    });
+  }
 
   api('/api/sg/ventas/cobranzas/cuentas').then(function(r){
     SG_COB.cuentas = (r && r.ok) ? r.data : [];
@@ -12987,13 +13023,8 @@ function sgCobOpen(clienteId){
     sgCobAsientoPintar();
   });
 
-  api('/api/sg/ventas/cc/' + clienteId).then(function(r){
-    // Sólo lo que todavía debe algo: los comprobantes ya cobrados no se imputan.
-    SG_COB.docs = ((r && r.ok) ? r.docs : []).filter(function(x){ return x.pendiente > 0.01; });
-    SG_COB.ctaCliente = (r && r.ok) ? (r.cuenta_cliente || null) : null;
-    sgCobPintar();
-    sgModalArriba('sg-cob-modal');
-  });
+  sgCobCargarCliente(clienteId);
+  sgModalArriba('sg-cob-modal');
 }
 
 // COBRAR CON CHEQUE NO ELIGE CUENTA. La cuenta se elige al depositarlo, que es
@@ -13008,6 +13039,31 @@ function sgCobForma(){
   if (lbl) lbl.textContent = esChq ? 'En qué cuenta entra (al depositar)' : 'En qué cuenta entra';
   if (esChq) { var av = eid('sg-cob-aviso'); if (av) av.innerHTML = ''; }
   sgCobAsientoPintar();
+}
+
+// Los comprobantes del cliente elegido, y contra qué cuenta corriente se cancela.
+// Sin cliente todavía, la tabla lo dice en vez de quedarse en "Cargando…".
+function sgCobCargarCliente(clienteId){
+  SG_COB.clienteId = clienteId ? Number(clienteId) : null;
+  SG_COB.docs = []; SG_COB.ctaCliente = null;
+  if (!SG_COB.clienteId) {
+    var tb = eid('sg-cob-tb');
+    if (tb) tb.innerHTML = '<tr><td colspan="6" class="emp">Elegí el cliente para ver sus comprobantes.</td></tr>';
+    sgCobTotal();
+    return;
+  }
+  api('/api/sg/ventas/cc/' + SG_COB.clienteId).then(function(r){
+    // Sólo lo que todavía debe algo: los comprobantes ya cobrados no se imputan.
+    SG_COB.docs = ((r && r.ok) ? r.docs : []).filter(function(x){ return x.pendiente > 0.01; });
+    SG_COB.ctaCliente = (r && r.ok) ? (r.cuenta_cliente || null) : null;
+    sgCobPintar();
+  });
+}
+
+// Cambiar de cliente borra lo imputado: los renglones eran de los comprobantes
+// del anterior, y dejarlos escritos imputaría plata contra facturas de otro.
+function sgCobCliente(){
+  sgCobCargarCliente((eid('sg-cob-cli') || {}).value);
 }
 
 function sgCobPintar(){
@@ -13108,6 +13164,7 @@ function sgCobAsientoPintar(){
 }
 
 function sgCobGuardar(){
+  if (!SG_COB.clienteId) { toast('Elegí a qué cliente se le cobra', 'er'); return; }
   var total = sgMilParse((eid('sg-cob-monto') || {}).value) || 0;
   if (!(total > 0)) { toast('Poné cuánto se cobró', 'er'); return; }
   var forma = (eid('sg-cob-forma') || {}).value;
@@ -13148,7 +13205,9 @@ function sgCobGuardar(){
                 : 'Cobro registrado — asiento ' + r.asiento_id, 'ok');
     closeMB('sg-cob-modal');
     sgLoadCC();
-    if (SG_CCLI.sel) sgCcClFicha(SG_CCLI.sel.id);
+    // La ficha abierta se refresca sólo si es la del cliente al que se le cobró:
+    // entrando por el acceso directo puede haber otra abierta atrás.
+    if (SG_CCLI.sel && SG_CCLI.sel.id === SG_COB.clienteId) sgCcClFicha(SG_CCLI.sel.id);
   });
 }
 
@@ -20191,7 +20250,11 @@ function loadSec(s) {
     'sg-ventas':     function(){ sgVenInit(); },
     'sg-gastos-directos': function(){ sgGdsInit(); },
     'sg-facturas-merc': function(){ sgFmModeloCargar(); sgFmLoad(); sgFmSinContabilizar(); },
-    'sg-cc-clientes': function(){ sgLoadCaches(function(){ sgLoadCC(); }); },
+    'sg-cc-clientes': function(){
+      var b = eid('sg-ccli-btn-cobrar');
+      if (b) b.style.display = lnbPuedeOperar('sg-cc-clientes') ? '' : 'none';
+      sgLoadCaches(function(){ sgLoadCC(); });
+    },
     'sg-cc-proveedores': function(){ sgLoadCcProv(); },
     'sg-caja-bancos': function(){ sgCbInit(); },
     'sg-importacion': function(){ sgImpInit(); },
