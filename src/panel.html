@@ -3735,6 +3735,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
       <div class="fl" style="grid-column:span 2"><label>Proveedor (exterior)</label><select id="sg-emb-prov"></select></div>
       <div class="fl"><label>País origen</label><input type="text" id="sg-emb-pais"></div>
       <div class="fl"><label>Incoterm</label><input type="text" id="sg-emb-incoterm" value="FOB"></div>
+      <div class="fl"><label>N° de invoice</label><input type="text" id="sg-emb-nro-invoice" placeholder="lo confirma el documento"></div>
       <div class="fl"><label>NCM</label><input type="text" id="sg-emb-ncm"></div>
       <div class="fl"><label>Cert. origen Mercosur</label><label style="display:flex;align-items:center;gap:6px;font-size:13px;margin-top:4px"><input type="checkbox" id="sg-emb-cert"> Sí</label></div>
       <div class="fl"><label>Moneda embarque</label><select id="sg-emb-moneda"><option value="USD">USD</option><option value="ARS">ARS</option></select></div>
@@ -3784,10 +3785,12 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
       <table class="pa-tbl" style="font-size:12px"><thead><tr><th>Tipo</th><th>Documento</th><th>Fecha</th><th style="text-align:right">Tamaño</th><th></th></tr></thead>
         <tbody id="sg-emb-docs"></tbody></table>
       <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:10px;align-items:end">
-        <div class="fl"><label>Tipo</label><select id="sg-doc-tipo"></select></div>
+        <div class="fl"><label>Tipo</label><select id="sg-doc-tipo" onchange="sgDocTipoChange()"></select></div>
         <div class="fl"><label>Fecha documento</label><input type="date" id="sg-doc-fecha"></div>
         <div class="fl" style="grid-column:span 2"><label>Archivo (PDF/JPG/PNG · ≤10MB)</label><input type="file" id="sg-doc-file" accept="application/pdf,image/jpeg,image/png"></div>
         <div class="fl" style="grid-column:span 3"><label>Observaciones</label><input type="text" id="sg-doc-obs"></div>
+        <div class="fl sg-doc-inv" style="display:none"><label>N° de invoice *</label><input type="text" id="sg-doc-nro-invoice"></div>
+        <div class="fl sg-doc-inv" style="display:none"><label>Monto total del invoice * <span style="font-weight:400;color:var(--mut);font-size:11px">USD</span></label><input type="number" step="0.01" min="0" id="sg-doc-monto"></div>
         <div><button type="button" class="btn bb" onclick="sgEmbDocSubir()">+ Subir documento</button></div>
       </div>
     </div>
@@ -22709,6 +22712,7 @@ function sgImpFill(e){
   eid('sg-emb-pais').value = sgImpVal(e.pais_origen);
   eid('sg-emb-incoterm').value = sgImpVal(e.incoterm||'FOB');
   eid('sg-emb-ncm').value = sgImpVal(e.ncm);
+  eid('sg-emb-nro-invoice').value = sgImpVal(e.nro_invoice);
   eid('sg-emb-cert').checked = !!e.certificado_origen_mercosur;
   eid('sg-emb-moneda').value = e.moneda||'USD';
   // "Recibido" y "Cerrado" no se eligen a mano: los pone la acción que además crea los lotes y
@@ -22757,6 +22761,7 @@ function sgEmbDocsInit(embId){
   var wrap=eid('sg-emb-docs-wrap'); if(wrap) wrap.style.display=embId?'block':'none';
   if(!embId) return;
   var sel=eid('sg-doc-tipo'); if(sel) sel.innerHTML=SG_DOC_TIPOS.map(function(t){ return '<option value="'+t[0]+'">'+t[1]+'</option>'; }).join('');
+  sgDocTipoChange();
   sgEmbDocsLoad();
 }
 function sgEmbDocsLoad(){
@@ -22785,21 +22790,50 @@ function sgEmbRenderDocs(docs){
     ? '<span style="color:var(--err,#dc2626)">⚠ Faltan: </span><span style="color:var(--mut)">'+faltan.map(function(t){ return esc(t[1]); }).join(' · ')+'</span>'
     : '<span style="color:var(--ok,#16a34a)">✓ Expediente completo (todos los documentos clave cargados)</span>'; }
 }
-function sgEmbDocSubir(){
+// La factura comercial pide dos datos más: es el papel que fija el precio de la mercadería.
+function sgDocTipoChange(){
+  var esInv=(eid('sg-doc-tipo').value==='factura_comercial');
+  Array.prototype.forEach.call(document.querySelectorAll('.sg-doc-inv'), function(el){ el.style.display=esInv?'':'none'; });
+}
+function sgEmbDocSubir(forzar){
   if(!SG._embDocId){ toast('Guardá el embarque primero','er'); return; }
   var fileInp=eid('sg-doc-file'); var f=fileInp&&fileInp.files&&fileInp.files[0];
   if(!f){ toast('Elegí un archivo','er'); return; }
   if(f.size>10*1024*1024){ toast('El archivo supera 10MB','er'); return; }
+  var tipo=eid('sg-doc-tipo').value, esInv=(tipo==='factura_comercial');
+  if(esInv){
+    if(!eid('sg-doc-nro-invoice').value.trim()){ toast('Poné el N° de invoice','er'); return; }
+    if(!(parseFloat(eid('sg-doc-monto').value)>0)){ toast('Poné el monto total del invoice','er'); return; }
+  }
   var fd=new FormData();
   fd.append('archivo', f);
-  fd.append('tipo', eid('sg-doc-tipo').value);
+  fd.append('tipo', tipo);
   fd.append('fecha_documento', eid('sg-doc-fecha').value||'');
   fd.append('observaciones', eid('sg-doc-obs').value||'');
+  if(esInv){
+    fd.append('nro_invoice', eid('sg-doc-nro-invoice').value.trim());
+    fd.append('monto_total', eid('sg-doc-monto').value);
+    if(forzar) fd.append('forzar','1');
+  }
   fetch('/api/sg/embarques/'+SG._embDocId+'/documentos', { method:'POST', body:fd, credentials:'same-origin' })
     .then(function(r){ return r.json(); })
     .then(function(r){
-      if(r&&r.ok){ toast('Documento subido','ok'); if(fileInp) fileInp.value=''; eid('sg-doc-obs').value=''; sgEmbDocsLoad(); }
-      else toast((r&&r.error)||'Error al subir','er');
+      if(r&&r.ok){
+        var c=r.data&&r.data.confirmacion;
+        toast(c ? ('✓ Invoice '+c.nro_invoice+' cargado — mercadería confirmada en US$ '+nr(c.monto)) : 'Documento subido','ok');
+        if(fileInp) fileInp.value='';
+        eid('sg-doc-obs').value='';
+        if(esInv){ eid('sg-doc-nro-invoice').value=''; eid('sg-doc-monto').value=''; }
+        sgEmbDocsLoad();
+        if(c) sgImpOpen(SG._embDocId);          // recarga: el estimador ahora usa el monto del papel
+        return;
+      }
+      // El monto del invoice no coincide con lo estimado: no se guarda por las dudas, se pregunta.
+      if(r&&r.requiere_confirmacion){
+        if(confirm(r.error+'\n\n¿Confirmás que manda el invoice? El estimado se reemplaza por US$ '+nr(r.invoice)+'.')) sgEmbDocSubir(true);
+        return;
+      }
+      toast((r&&r.error)||'Error al subir','er');
     }).catch(function(e){ toast('Error al subir: '+e.message,'er'); });
 }
 function sgEmbDocDel(docId){
@@ -22995,6 +23029,7 @@ function sgImpGather(){
     pais_origen: eid('sg-emb-pais').value.trim(),
     incoterm: eid('sg-emb-incoterm').value.trim(),
     ncm: eid('sg-emb-ncm').value.trim(),
+    nro_invoice: eid('sg-emb-nro-invoice').value.trim(),
     certificado_origen_mercosur: eid('sg-emb-cert').checked?1:0,
     moneda: eid('sg-emb-moneda').value,
     estado: eid('sg-emb-estado').value,
@@ -23124,6 +23159,7 @@ function sgImpVisor(id){
       +dato('Estado','<span class="bdg bok">'+esc(sgEmbEstadoLbl(e.estado))+'</span>')
       +dato('Proveedor', esc(e.proveedor_nombre||'—'))
       +dato('Origen', esc(e.pais_origen||'—')+(e.incoterm?(' · '+esc(e.incoterm)):''))
+      +dato('N° invoice', e.nro_invoice?('<b>'+esc(e.nro_invoice)+'</b>'):'<span style="color:var(--mut)">sin cargar</span>')
       +dato('NCM', esc(e.ncm||'—'))
       +dato('Embarca (ETD)', e.fecha_etd?esc(e.fecha_etd):'—')
       +dato('Llega (ETA)', e.fecha_eta?esc(e.fecha_eta):'—')

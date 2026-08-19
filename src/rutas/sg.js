@@ -7393,7 +7393,7 @@ function embCostosDelBody(body) {
 // tc_estimado / tc_real y cantidad_cajas NO están acá a propósito: los TC salen de la curva
 // según la fecha de pago de cada rubro, y las cajas se derivan de las líneas (embSyncLineas).
 // Si estuvieran, cada guardado los pisaría con lo que mandó la pantalla — o con null.
-const EMB_HEADER_COLS = ['nombre','proveedor_id','pais_origen','incoterm','certificado_origen_mercosur','ncm','moneda','estado','flete_base_usd','seguro_usd','fecha_etd','fecha_eta','observaciones'];
+const EMB_HEADER_COLS = ['nombre','proveedor_id','pais_origen','incoterm','certificado_origen_mercosur','ncm','moneda','estado','nro_invoice','flete_base_usd','seguro_usd','fecha_etd','fecha_eta','observaciones'];
 function embHeaderVals(b) {
   return {
     nombre: val(b.nombre),
@@ -7404,6 +7404,7 @@ function embHeaderVals(b) {
     ncm: val(b.ncm),
     moneda: (b.moneda === 'ARS' ? 'ARS' : 'USD'),
     estado: EMB_ESTADOS.has(b.estado) ? b.estado : 'cotizacion',
+    nro_invoice: val(b.nro_invoice),
     flete_base_usd: (b.flete_base_usd != null && b.flete_base_usd !== '') ? Number(b.flete_base_usd) : null,
     seguro_usd: (b.seguro_usd != null && b.seguro_usd !== '') ? Number(b.seguro_usd) : null,
     fecha_etd: val(b.fecha_etd),
@@ -7888,13 +7889,68 @@ router.post('/embarques/:id/documentos', requireAdmin, uploadDoc, async (req, re
     if (!DOC_TIPOS.has(tipo)) return res.status(400).json({ ok: false, error: 'Tipo de documento inválido' });
     if (!DOC_MIMES.has(f.mimetype)) return res.status(400).json({ ok: false, error: 'Formato no permitido (solo PDF, JPG o PNG)' });
     if (f.size > DOC_MAX_BYTES) return res.status(400).json({ ok: false, error: 'El archivo supera 10MB' });
+
+    // ── La factura comercial confirma la mercadería ──────────────────────────────────
+    // El invoice es el papel que fija el precio: al subirlo se pide su número y su total en
+    // dólares, y ESE total tiene que coincidir con lo estimado. Si no coincide se corta con
+    // 409 y el detalle de la diferencia; el operador decide con `forzar` si el invoice manda
+    // (mismo patrón que el detector de duplicados de los catálogos).
+    const esInvoice = tipo === 'factura_comercial';
+    let nroInvoice = null, montoInvoice = null, rubroMerc = null;
+    if (esInvoice) {
+      nroInvoice = val(req.body.nro_invoice);
+      if (!nroInvoice) return res.status(400).json({ ok: false, error: 'Falta el número de invoice' });
+      montoInvoice = (req.body.monto_total != null && req.body.monto_total !== '') ? Number(req.body.monto_total) : null;
+      if (!(montoInvoice > 0)) return res.status(400).json({ ok: false, error: 'Falta el monto total del invoice (en dólares)' });
+
+      const dup = db.prepare(`SELECT id, nombre FROM sg_embarques
+        WHERE nro_invoice = ? AND id <> ? AND activo=1 AND eliminado_en IS NULL`).get(nroInvoice, emb.id);
+      if (dup) return res.status(409).json({ ok: false, error: 'El invoice ' + nroInvoice + ' ya está cargado en el embarque "' + dup.nombre + '"' });
+
+      rubroMerc = db.prepare("SELECT * FROM sg_embarque_costos WHERE embarque_id=? AND concepto='costo_mercaderia' AND activo=1").get(emb.id);
+      const estimado = rubroMerc && rubroMerc.monto_estimado != null ? Number(rubroMerc.monto_estimado) : null;
+      const dif = estimado != null ? r2(montoInvoice - estimado) : null;
+      if (dif != null && Math.abs(dif) > 0.009 && !(req.body.forzar === '1' || req.body.forzar === 'true' || req.body.forzar === true)) {
+        return res.status(409).json({ ok: false, requiere_confirmacion: true,
+          error: 'El invoice dice US$ ' + montoInvoice.toLocaleString('es-AR') + ' y habías estimado US$ ' + estimado.toLocaleString('es-AR')
+               + ' (' + (dif > 0 ? '+' : '') + dif.toLocaleString('es-AR') + '). Revisá cuál es el bueno antes de confirmar.',
+          estimado, invoice: montoInvoice, diferencia: dif });
+      }
+    }
+
     const key = `embarques/${emb.id}/${randomUUID()}-${sanitizarNombreDoc(f.originalname)}`;
     await subirArchivo(f.buffer, key, f.mimetype);
     const info = db.prepare(`INSERT INTO sg_embarque_documentos
       (embarque_id, tipo, storage_key, nombre_original, mime, tamano_bytes, fecha_documento, observaciones, creado_por)
       VALUES (?,?,?,?,?,?,?,?,?)`)
       .run(emb.id, tipo, key, String(f.originalname || 'documento').slice(0, 255), f.mimetype, f.size, val(req.body.fecha_documento), val(req.body.observaciones), uid(req));
-    res.json({ ok: true, data: { id: Number(info.lastInsertRowid) } });
+    const docId = Number(info.lastInsertRowid);
+
+    // Con el invoice arriba, la mercadería deja de ser una estimación: el número del papel
+    // pasa a ser el monto del rubro y queda marcado como confirmado por ese documento.
+    let confirmacion = null;
+    if (esInvoice) {
+      const estimadoPrevio = rubroMerc && rubroMerc.monto_estimado != null ? Number(rubroMerc.monto_estimado) : null;
+      db.transaction(() => {
+        db.prepare("UPDATE sg_embarques SET nro_invoice=?, modificado_en=datetime('now','localtime'), modificado_por=? WHERE id=?")
+          .run(nroInvoice, uid(req), emb.id);
+        if (rubroMerc) {
+          db.prepare(`UPDATE sg_embarque_costos SET monto_estimado=?,
+              confirmado_en=datetime('now','localtime'), confirmado_por=?, confirmado_doc_id=?,
+              modificado_en=datetime('now','localtime'), modificado_por=? WHERE id=?`)
+            .run(montoInvoice, uid(req), docId, uid(req), rubroMerc.id);
+        } else {
+          db.prepare(`INSERT INTO sg_embarque_costos
+              (embarque_id, concepto, es_credito, moneda, monto_estimado,
+               confirmado_en, confirmado_por, confirmado_doc_id, creado_por)
+              VALUES (?, 'costo_mercaderia', 0, 'USD', ?, datetime('now','localtime'), ?, ?, ?)`)
+            .run(emb.id, montoInvoice, uid(req), docId, uid(req));
+        }
+      })();
+      confirmacion = { nro_invoice: nroInvoice, monto: montoInvoice, estimado_previo: estimadoPrevio,
+                       diferencia: estimadoPrevio != null ? r2(montoInvoice - estimadoPrevio) : null };
+    }
+    res.json({ ok: true, data: { id: docId, confirmacion } });
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
