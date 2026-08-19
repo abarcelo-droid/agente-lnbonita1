@@ -23498,6 +23498,17 @@ function sgImpCalEventos(iso){
   return out;
 }
 
+// Semana ISO 8601: arranca lunes y la semana 1 es la que contiene el primer jueves del año.
+// Es la numeración con la que se habla en fruta ("llega en la 38"), y la que usa Europa.
+function sgCalSemana(iso){
+  var d=new Date(Date.parse(String(iso).slice(0,10)+'T00:00:00Z'));
+  if(isNaN(d.getTime())) return null;
+  d.setUTCDate(d.getUTCDate()-((d.getUTCDay()+6)%7)+3);      // al jueves de esa semana
+  var ene4=new Date(Date.UTC(d.getUTCFullYear(),0,4));
+  ene4.setUTCDate(ene4.getUTCDate()-((ene4.getUTCDay()+6)%7)+3);  // jueves de la semana 1
+  return 1+Math.round((d-ene4)/604800000);
+}
+
 function sgImpCalGrilla(){
   var mes=SG_CAL.mes, hoy=SG_CAL.datos.hoy;
   var y=parseInt(mes.slice(0,4),10), m=parseInt(mes.slice(5,7),10);
@@ -23506,29 +23517,50 @@ function sgImpCalGrilla(){
   var offset=(primero.getUTCDay()+6)%7;            // semana arranca lunes
   var DIAS=['Lun','Mar','Mié','Jue','Vie','Sáb','Dom'];
   var celda=function(inner,extra){ return '<div style="min-height:96px;border:1px solid var(--bor);border-radius:8px;padding:5px 6px;'+(extra||'')+'">'+inner+'</div>'; };
-  var h='<div style="display:grid;grid-template-columns:repeat(7,1fr);gap:5px;margin-bottom:5px">'
+  // Una columna extra al principio para el número de semana.
+  var COLS='grid-template-columns:46px repeat(7,1fr);gap:5px';
+  var h='<div style="display:grid;'+COLS+';margin-bottom:5px">'
+    + '<div style="text-align:center;font-size:10px;font-weight:700;color:var(--mut);text-transform:uppercase;letter-spacing:.05em">Sem</div>'
     + DIAS.map(function(x){ return '<div style="text-align:center;font-size:10px;font-weight:700;color:var(--mut);text-transform:uppercase;letter-spacing:.05em">'+x+'</div>'; }).join('')
-    + '</div><div style="display:grid;grid-template-columns:repeat(7,1fr);gap:5px">';
-  for(var i=0;i<offset;i++) h+=celda('','background:var(--bg2,#fafafa);opacity:.45');
-  for(var dia=1;dia<=diasMes;dia++){
-    var iso=mes+'-'+('0'+dia).slice(-2);
-    var esHoy=(iso===hoy);
-    var evs=sgImpCalEventos(iso);
-    var inner='<div style="font-size:11px;font-weight:'+(esHoy?'700':'600')+';color:'+(esHoy?'var(--burg,#7c1d3f)':'var(--mut)')+'">'+dia+(esHoy?' · hoy':'')+'</div>';
-    inner += evs.map(function(e){
-      var llega=(e.tipo==='llega'), atras=llega&&e.emb.atrasado;
-      var bg = atras ? 'rgba(220,38,38,.13)' : (llega?'rgba(16,163,74,.13)':'var(--bg2,#eef1f5)');
-      var col= atras ? 'var(--err,#dc2626)' : (llega?'var(--ok,#16a34a)':'var(--mut)');
-      return '<div title="'+esc((llega?'Llega':'Sale')+': '+e.emb.nombre+(e.emb.proveedor_nombre?(' · '+e.emb.proveedor_nombre):''))+'"'
-        +' onclick="sgImpVisor('+e.id+')" style="margin-top:3px;padding:2px 5px;border-radius:5px;background:'+bg+';color:'+col
-        +';font-size:10.5px;font-weight:600;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'
-        +(llega?(atras?'⚠ ':'📦 '):'🚢 ')+esc(e.emb.nombre||'')+'</div>';
-    }).join('');
-    h+=celda(inner, esHoy?'border-color:var(--burg,#7c1d3f);border-width:2px':'');
+    + '</div><div style="display:grid;'+COLS+'">';
+
+  // Se arma la lista completa de casilleros (vacíos + días) y se corta de a 7, para poder
+  // anteponer el número de semana en cada fila.
+  var casillas=[];
+  for(var i=0;i<offset;i++) casillas.push({ vacia:true });
+  for(var dia=1;dia<=diasMes;dia++) casillas.push({ dia:dia, iso:mes+'-'+('0'+dia).slice(-2) });
+  while(casillas.length%7) casillas.push({ vacia:true });
+
+  var semanaHoy=sgCalSemana(hoy);
+  for(var f=0;f<casillas.length;f+=7){
+    var fila=casillas.slice(f,f+7);
+    var conDia=fila.filter(function(c){ return c.iso; })[0];
+    var sem=conDia?sgCalSemana(conDia.iso):null;
+    var esSemHoy=(sem!=null && sem===semanaHoy && hoy.slice(0,7)===mes);
+    h+='<div title="Semana '+(sem||'')+' del año" style="display:flex;align-items:center;justify-content:center;'
+      +'font-size:12px;font-weight:700;border-radius:8px;'
+      +(esSemHoy?'background:var(--burg,#7c1d3f);color:#fff':'background:var(--bg2,#f5f5f5);color:var(--mut)')+'">'
+      +(sem!=null?sem:'')+'</div>';
+    fila.forEach(function(c){
+      if(c.vacia){ h+=celda('','background:var(--bg2,#fafafa);opacity:.45'); return; }
+      var esHoy=(c.iso===hoy);
+      var inner='<div style="font-size:11px;font-weight:'+(esHoy?'700':'600')+';color:'+(esHoy?'var(--burg,#7c1d3f)':'var(--mut)')+'">'+c.dia+(esHoy?' · hoy':'')+'</div>';
+      inner += sgImpCalEventos(c.iso).map(function(e){
+        var llega=(e.tipo==='llega'), atras=llega&&e.emb.atrasado;
+        var bg = atras ? 'rgba(220,38,38,.13)' : (llega?'rgba(16,163,74,.13)':'var(--bg2,#eef1f5)');
+        var col= atras ? 'var(--err,#dc2626)' : (llega?'var(--ok,#16a34a)':'var(--mut)');
+        return '<div title="'+esc((llega?'Llega':'Sale')+': '+e.emb.nombre+(e.emb.proveedor_nombre?(' · '+e.emb.proveedor_nombre):''))+'"'
+          +' onclick="sgImpVisor('+e.id+')" style="margin-top:3px;padding:2px 5px;border-radius:5px;background:'+bg+';color:'+col
+          +';font-size:10.5px;font-weight:600;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'
+          +(llega?(atras?'⚠ ':'📦 '):'🚢 ')+esc(e.emb.nombre||'')+'</div>';
+      }).join('');
+      h+=celda(inner, esHoy?'border-color:var(--burg,#7c1d3f);border-width:2px':'');
+    });
   }
   h+='</div>'
-    +'<div style="display:flex;gap:14px;margin-top:10px;font-size:11px;color:var(--mut)">'
+    +'<div style="display:flex;gap:14px;margin-top:10px;font-size:11px;color:var(--mut);flex-wrap:wrap">'
     +'<span>🚢 sale (ETD)</span><span>📦 llega (ETA)</span><span style="color:var(--err,#dc2626)">⚠ llegada vencida</span>'
+    +'<span>Sem = semana del año (ISO)</span>'
     +'<span style="margin-left:auto">Tocá un camión para ver su ficha</span></div>';
   return h;
 }
@@ -23544,7 +23576,7 @@ function sgImpCalLista(){
     return '<span style="color:var(--mut)">en '+dias+' d</span>';
   };
   return '<table class="pa-tbl" style="font-size:12px;width:100%"><thead><tr>'
-    +'<th>Embarque</th><th>Proveedor</th><th>Sale (ETD)</th><th>Llega (ETA)</th>'
+    +'<th>Embarque</th><th>Proveedor</th><th>Sale (ETD)</th><th style="text-align:center">Sem</th><th>Llega (ETA)</th><th style="text-align:center">Sem</th>'
     +'<th style="text-align:right">Cajas</th><th style="text-align:center">Estado</th><th></th>'
     +'</tr></thead><tbody>'
     + items.map(function(i){
@@ -23552,7 +23584,9 @@ function sgImpCalLista(){
           +'<td><b>'+esc(i.nombre||'')+'</b>'+(i.nro_invoice?'<div style="color:var(--mut);font-size:11px">'+esc(i.nro_invoice)+'</div>':'')+'</td>'
           +'<td>'+esc(i.proveedor_nombre||'—')+'</td>'
           +'<td>'+(i.fecha_etd?esc(i.fecha_etd):'<span style="color:var(--mut)">—</span>')+'</td>'
+          +'<td style="text-align:center;color:var(--mut)">'+(i.fecha_etd?sgCalSemana(i.fecha_etd):'—')+'</td>'
           +'<td>'+(i.fecha_eta?esc(i.fecha_eta):'<span style="color:var(--mut)">—</span>')+' '+chip(i.dias_para_eta,i.atrasado)+'</td>'
+          +'<td style="text-align:center;color:var(--mut)">'+(i.fecha_eta?sgCalSemana(i.fecha_eta):'—')+'</td>'
           +'<td style="text-align:right">'+(i.cantidad_cajas!=null?nr(i.cantidad_cajas):'—')+'</td>'
           +'<td style="text-align:center"><span class="bdg bok">'+esc(sgEmbEstadoLbl(i.estado))+'</span></td>'
           +'<td style="text-align:right"><button class="btn bo bs" onclick="sgImpVisor('+i.id+')">👁</button></td></tr>';
