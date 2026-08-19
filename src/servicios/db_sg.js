@@ -1249,7 +1249,11 @@ try {
     ['pago_ancla', 'TEXT'], ['pago_dias', 'INTEGER'], ['pago_fecha', 'TEXT'],
     ['moneda_real', "TEXT DEFAULT 'ARS'"],
     // Confirmación por documento: el rubro deja de ser una estimación cuando llega su papel.
-    ['confirmado_en', 'TEXT'], ['confirmado_por', 'INTEGER'], ['confirmado_doc_id', 'INTEGER']
+    ['confirmado_en', 'TEXT'], ['confirmado_por', 'INTEGER'], ['confirmado_doc_id', 'INTEGER'],
+    // monto_confirmado: lo que dice el PAPEL, en la moneda del rubro. Va al lado del estimado
+    // en vez de pisarlo: el cálculo usa el confirmado, y la diferencia entre los dos es lo que
+    // permite ver si se está cotizando bien. Tres etapas: estimado → confirmado → real (pesos).
+    ['monto_confirmado', 'REAL']
   ].filter(([n]) => !cols.includes(n));
   for (const [n, t] of nuevas) db.exec(`ALTER TABLE sg_embarque_costos ADD COLUMN ${n} ${t}`);
   if (nuevas.length) console.log(`[DB] SG sg_embarque_costos migrado (+${nuevas.map(x => x[0]).join(', ')})`);

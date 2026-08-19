@@ -6975,7 +6975,12 @@ function calcImportacion(db, emb, costos, kgOverride) {
                  : (emb.tc_estimado != null ? Number(emb.tc_estimado) : null);
   const tcHoy = override != null ? override : tcEsperadoEnFecha(db, hoy).tc;
   const rubro = k => costos.find(c => c.concepto === k) || {};
-  const usdDe = c => (c.monto_estimado != null && c.monto_estimado !== '') ? Number(c.monto_estimado) : 0;
+  // El papel manda: si el rubro ya tiene su documento, se usa el monto confirmado y no el
+  // estimado. El estimado se conserva para poder ver el desvío.
+  const usdDe = c => {
+    if (c.monto_confirmado != null && c.monto_confirmado !== '') return Number(c.monto_confirmado);
+    return (c.monto_estimado != null && c.monto_estimado !== '') ? Number(c.monto_estimado) : 0;
+  };
   // TC de un rubro a plazo: el de su fecha de pago; si venció sin pagarse, sigue rodando a hoy.
   const tcDe = (c) => {
     if (override != null) return override;
@@ -6985,6 +6990,13 @@ function calcImportacion(db, emb, costos, kgOverride) {
   };
 
   const rMerc = rubro('costo_mercaderia'), rFlete = rubro('fletes'), rBanc = rubro('gastos_bancarios');
+  // Estimado vs papel, para mostrar si la cotización afinó. Solo tiene sentido con los dos.
+  const desvioDe = (c) => {
+    const est = (c.monto_estimado != null && c.monto_estimado !== '') ? Number(c.monto_estimado) : null;
+    const con = (c.monto_confirmado != null && c.monto_confirmado !== '') ? Number(c.monto_confirmado) : null;
+    return { estimado_usd: est, confirmado_usd: con, confirmado: con != null,
+             desvio_usd: (est != null && con != null) ? r2(con - est) : null };
+  };
   const invoice_usd     = usdDe(rMerc);
   const flete_base_usd  = Number(emb.flete_base_usd) || 0;
   const seguro_usd      = Number(emb.seguro_usd) || 0;
@@ -7040,13 +7052,13 @@ function calcImportacion(db, emb, costos, kgOverride) {
            flete_real: flete_real_usd, bancarios: bancarios_usd, base: base_usd },
     base_ars,
     lineas: [
-      { k: 'mercaderia',  label: 'Mercadería (invoice)',  usd: invoice_usd,    tc: tcMerc,  ars: merc_ars,        plazo: true,  fecha_pago: fechaPagoRubro(emb, rMerc) },
+      { k: 'mercaderia',  label: 'Mercadería (invoice)',  usd: invoice_usd,    tc: tcMerc,  ars: merc_ars,        plazo: true,  fecha_pago: fechaPagoRubro(emb, rMerc), ...desvioDe(rMerc) },
       { k: 'iva',         label: 'IVA ' + p.iva_pct + '%', usd: null,          tc: tcHoy,   ars: iva_ars,         plazo: false, detalle: 'sobre la base imponible' },
       { k: 'iibb',        label: 'IIBB ' + p.iibb_pct + '%', usd: null,        tc: tcHoy,   ars: iibb_ars,        plazo: false, detalle: 'sobre la base imponible' },
       { k: 'tasa_maria',  label: 'Tasa María',            usd: p.tasa_maria_usd, tc: tcHoy, ars: tasa_maria_ars,  plazo: false },
       { k: 'despachante', label: 'Despachante ' + p.despachante_pct + '%', usd: null, tc: tcHoy, ars: despachante_ars, plazo: false, detalle: 'sobre la base imponible' },
       { k: 'iva_desp',    label: 'IVA despachante ' + p.iva_servicios_pct + '%', usd: null, tc: tcHoy, ars: iva_desp_ars, plazo: false },
-      { k: 'flete_real',  label: 'Flete real',            usd: flete_real_usd, tc: tcFlete, ars: flete_ars,       plazo: true,  fecha_pago: fechaPagoRubro(emb, rFlete) },
+      { k: 'flete_real',  label: 'Flete real',            usd: flete_real_usd, tc: tcFlete, ars: flete_ars,       plazo: true,  fecha_pago: fechaPagoRubro(emb, rFlete), ...desvioDe(rFlete) },
       { k: 'bancarios',   label: 'Gastos bancarios',      usd: bancarios_usd,  tc: tcBanc,  ars: banc_ars,        plazo: true,  detalle: 'monto fijo · al TC de la mercadería', fecha_pago: fechaPagoRubro(emb, rMerc) },
       { k: 'iva_banc',    label: 'IVA bancarios ' + p.iva_servicios_pct + '%', usd: null, tc: tcBanc, ars: iva_banc_ars, plazo: true }
     ],
@@ -7975,10 +7987,10 @@ router.post('/embarques/:id/documentos', requireAdmin, uploadDoc, async (req, re
     if (f.size > DOC_MAX_BYTES) return res.status(400).json({ ok: false, error: 'El archivo supera 10MB' });
 
     // ── La factura comercial confirma la mercadería ──────────────────────────────────
-    // El invoice es el papel que fija el precio: al subirlo se pide su número y su total en
-    // dólares, y ESE total tiene que coincidir con lo estimado. Si no coincide se corta con
-    // 409 y el detalle de la diferencia; el operador decide con `forzar` si el invoice manda
-    // (mismo patrón que el detector de duplicados de los catálogos).
+    // EL PAPEL MANDA. El invoice fija el precio, así que su monto entra como confirmado y el
+    // costeo pasa a usarlo — sin preguntar ni frenar la carga. Lo que NO se hace es pisar el
+    // estimado: se conserva al lado, y la diferencia entre los dos queda a la vista. Eso es
+    // lo que deja ver si se está cotizando bien, que es el punto de todo esto.
     const esInvoice = tipo === 'factura_comercial';
     let nroInvoice = null, montoInvoice = null, rubroMerc = null;
     if (esInvoice) {
@@ -7987,19 +7999,12 @@ router.post('/embarques/:id/documentos', requireAdmin, uploadDoc, async (req, re
       montoInvoice = (req.body.monto_total != null && req.body.monto_total !== '') ? Number(req.body.monto_total) : null;
       if (!(montoInvoice > 0)) return res.status(400).json({ ok: false, error: 'Falta el monto total del invoice (en dólares)' });
 
+      // Esto sí corta: el mismo invoice en dos embarques es un error de carga, no un desvío.
       const dup = db.prepare(`SELECT id, nombre FROM sg_embarques
         WHERE nro_invoice = ? AND id <> ? AND activo=1 AND eliminado_en IS NULL`).get(nroInvoice, emb.id);
       if (dup) return res.status(409).json({ ok: false, error: 'El invoice ' + nroInvoice + ' ya está cargado en el embarque "' + dup.nombre + '"' });
 
       rubroMerc = db.prepare("SELECT * FROM sg_embarque_costos WHERE embarque_id=? AND concepto='costo_mercaderia' AND activo=1").get(emb.id);
-      const estimado = rubroMerc && rubroMerc.monto_estimado != null ? Number(rubroMerc.monto_estimado) : null;
-      const dif = estimado != null ? r2(montoInvoice - estimado) : null;
-      if (dif != null && Math.abs(dif) > 0.009 && !(req.body.forzar === '1' || req.body.forzar === 'true' || req.body.forzar === true)) {
-        return res.status(409).json({ ok: false, requiere_confirmacion: true,
-          error: 'El invoice dice US$ ' + montoInvoice.toLocaleString('es-AR') + ' y habías estimado US$ ' + estimado.toLocaleString('es-AR')
-               + ' (' + (dif > 0 ? '+' : '') + dif.toLocaleString('es-AR') + '). Revisá cuál es el bueno antes de confirmar.',
-          estimado, invoice: montoInvoice, diferencia: dif });
-      }
     }
 
     const key = `embarques/${emb.id}/${randomUUID()}-${sanitizarNombreDoc(f.originalname)}`;
@@ -8014,25 +8019,28 @@ router.post('/embarques/:id/documentos', requireAdmin, uploadDoc, async (req, re
     // pasa a ser el monto del rubro y queda marcado como confirmado por ese documento.
     let confirmacion = null;
     if (esInvoice) {
-      const estimadoPrevio = rubroMerc && rubroMerc.monto_estimado != null ? Number(rubroMerc.monto_estimado) : null;
+      // El estimado NO se toca: el monto del papel va a monto_confirmado, al lado. El costeo
+      // pasa a usar el confirmado, y la diferencia contra el estimado queda visible.
+      const estimado = rubroMerc && rubroMerc.monto_estimado != null ? Number(rubroMerc.monto_estimado) : null;
       db.transaction(() => {
         db.prepare("UPDATE sg_embarques SET nro_invoice=?, modificado_en=datetime('now','localtime'), modificado_por=? WHERE id=?")
           .run(nroInvoice, uid(req), emb.id);
         if (rubroMerc) {
-          db.prepare(`UPDATE sg_embarque_costos SET monto_estimado=?,
+          db.prepare(`UPDATE sg_embarque_costos SET monto_confirmado=?,
               confirmado_en=datetime('now','localtime'), confirmado_por=?, confirmado_doc_id=?,
               modificado_en=datetime('now','localtime'), modificado_por=? WHERE id=?`)
             .run(montoInvoice, uid(req), docId, uid(req), rubroMerc.id);
         } else {
+          // Sin rubro previo no hay nada que comparar: el papel es también el estimado.
           db.prepare(`INSERT INTO sg_embarque_costos
-              (embarque_id, concepto, es_credito, moneda, monto_estimado,
+              (embarque_id, concepto, es_credito, moneda, monto_estimado, monto_confirmado,
                confirmado_en, confirmado_por, confirmado_doc_id, creado_por)
-              VALUES (?, 'costo_mercaderia', 0, 'USD', ?, datetime('now','localtime'), ?, ?, ?)`)
-            .run(emb.id, montoInvoice, uid(req), docId, uid(req));
+              VALUES (?, 'costo_mercaderia', 0, 'USD', ?, ?, datetime('now','localtime'), ?, ?, ?)`)
+            .run(emb.id, montoInvoice, montoInvoice, uid(req), docId, uid(req));
         }
       })();
-      confirmacion = { nro_invoice: nroInvoice, monto: montoInvoice, estimado_previo: estimadoPrevio,
-                       diferencia: estimadoPrevio != null ? r2(montoInvoice - estimadoPrevio) : null };
+      confirmacion = { nro_invoice: nroInvoice, monto: montoInvoice, estimado,
+                       diferencia: estimado != null ? r2(montoInvoice - estimado) : null };
     }
     res.json({ ok: true, data: { id: docId, confirmacion } });
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
