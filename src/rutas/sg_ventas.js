@@ -515,7 +515,13 @@ router.get('/cobranzas/cuentas', requireAuth, (req, res) => {
         cc.codigo AS cuenta_codigo, cc.nombre AS cuenta_nombre
       FROM sg_fin_cuentas c LEFT JOIN sg_cuentas cc ON cc.id = c.cuenta_contable_id
       WHERE c.activo = 1 ORDER BY c.tipo, c.nombre`).all();
-    res.json({ ok: true, data: rows });
+    // La cuenta de cheques en cartera va acá porque el cobro con cheque asienta
+    // contra ELLA, no contra un banco: la pantalla necesita el nombre para poder
+    // mostrar el asiento antes de confirmar, como todo lo que toca el libro.
+    const cartera = db.prepare(`SELECT cu.id, cu.codigo, cu.nombre
+      FROM sg_config_impositiva ci JOIN sg_cuentas cu ON cu.id = ci.cuenta_id
+      WHERE ci.clave='cheques_cartera'`).get() || null;
+    res.json({ ok: true, data: rows, cartera });
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
@@ -567,8 +573,47 @@ router.post('/cobranzas', requireAuth, (req, res) => {
       error: `Estás imputando ${imputado} y la cobranza es de ${total}.` });
   }
 
+  // ── CON CHEQUE NO ENTRA PLATA A NINGÚN BANCO ─────────────────────────
+  // Un cheque en cartera es un papel que vale el día que se deposita. Hasta
+  // entonces el banco no recibió nada: cargarlo contra una cuenta bancaria haría
+  // subir un saldo que no existe, y el día que se deposite subiría otra vez.
+  //
+  // Va contra la cuenta de "cheques en cartera" —valores a depositar—, y cuando
+  // se deposita, esa cuenta se descarga contra el banco. El cheque además entra
+  // a la CARTERA de Caja y Bancos, que es donde se lo sigue.
+  const conCheque = String(forma_pago || '') === 'cheque';
+  let ctaCartera = null, cheque = null;
+  if (conCheque) {
+    ctaCartera = (db.prepare("SELECT cuenta_id FROM sg_config_impositiva WHERE clave='cheques_cartera'")
+      .get() || {}).cuenta_id || null;
+    if (!ctaCartera) {
+      return res.status(400).json({ ok: false,
+        error: 'Falta decir contra qué cuenta contable van los cheques en cartera. Configurala en el '
+             + 'plan de cuentas (clave "cheques_cartera") antes de cobrar con cheque.' });
+    }
+    const ch = req.body?.cheque || {};
+    const nro = String(ch.nro_cheque || '').trim();
+    const librador = String(ch.librador || '').trim();
+    if (!nro || !librador) {
+      return res.status(400).json({ ok: false,
+        error: 'De un cheque hay que anotar por lo menos el número y quién lo firma.' });
+    }
+    // EL MISMO CHEQUE NO ENTRA DOS VECES. La identidad es banco + número +
+    // librador, que es lo que está impreso en el papel.
+    const ya = db.prepare(`SELECT id, estado, monto FROM sg_fin_cheques_terceros
+      WHERE COALESCE(banco,'')=COALESCE(?,'') AND nro_cheque=? AND librador=?`)
+      .get(String(ch.banco || '').trim() || null, nro, librador);
+    if (ya) {
+      return res.status(400).json({ ok: false,
+        error: `Ese cheque ya está en la cartera: N° ${nro} de ${librador} por ${ya.monto} (${ya.estado}).` });
+    }
+    cheque = { banco: String(ch.banco || '').trim() || null, nro, librador,
+               fecha_vto: ch.fecha_vto || null };
+  }
+
   // LA PLATA ENTRA A ALGÚN LADO, y ese lado tiene que tener cuenta contable: sin
-  // ella el asiento no se puede armar.
+  // ella el asiento no se puede armar. Con cheque no hace falta: no entra a
+  // ninguna cuenta todavía.
   // El id se limpia ANTES de la consulta: better-sqlite3 tira una excepción si le
   // pasan undefined, así que sin este paso "no elegí la cuenta" salía como un
   // error 500 del servidor en vez de decir qué falta.
@@ -578,11 +623,13 @@ router.post('/cobranzas', requireAuth, (req, res) => {
         LEFT JOIN sg_cuentas cc ON cc.id = c.cuenta_contable_id
         WHERE c.id=? AND c.activo=1`).get(ctaFinId)
     : null;
-  if (!cuenta) return res.status(400).json({ ok: false, error: 'Elegí en qué cuenta entra la plata' });
-  if (!cuenta.cta) {
-    return res.status(400).json({ ok: false,
-      error: `La cuenta "${cuenta.nombre}" no tiene cuenta contable asociada, así que la cobranza no `
-           + `puede entrar al libro. Asignásela en Caja y Bancos.` });
+  if (!conCheque) {
+    if (!cuenta) return res.status(400).json({ ok: false, error: 'Elegí en qué cuenta entra la plata' });
+    if (!cuenta.cta) {
+      return res.status(400).json({ ok: false,
+        error: `La cuenta "${cuenta.nombre}" no tiene cuenta contable asociada, así que la cobranza no `
+             + `puede entrar al libro. Asignásela en Caja y Bancos.` });
+    }
   }
   if (!cli.cuenta_contable_id) {
     return res.status(400).json({ ok: false,
@@ -598,7 +645,20 @@ router.post('/cobranzas', requireAuth, (req, res) => {
         (fecha, cliente_id, monto, forma_pago, referencia, notas, usuario_id, cuenta_fin_id)
         VALUES (?,?,?,?,?,?,?,?)`)
         .run(f, cli.id, total, forma_pago || 'transferencia', referencia || null, notas || null,
-             u.id, cuenta.id).lastInsertRowid;
+             u.id, conCheque ? null : cuenta.id).lastInsertRowid;
+
+      // EL CHEQUE ENTRA A LA CARTERA, que vive en Caja y Bancos. Desde ahí se lo
+      // sigue: qué hay, qué vence, y el día que se deposita entra la plata de
+      // verdad al banco. Queda con el cliente del que vino, que no siempre es
+      // quien firmó el papel: muchas veces al cliente le pagaron con ese cheque.
+      if (cheque) {
+        const chId = db.prepare(`INSERT INTO sg_fin_cheques_terceros
+          (banco, nro_cheque, librador, monto, fecha_recepcion, fecha_vto, cliente_id, notas)
+          VALUES (?,?,?,?,?,?,?,?)`).run(cheque.banco, cheque.nro, cheque.librador, total,
+          f, cheque.fecha_vto, cli.id,
+          'Cobranza ' + (referencia || '#' + cobId)).lastInsertRowid;
+        db.prepare('UPDATE sg_ven_cobranzas SET cheque_terceros_id=? WHERE id=?').run(chId, cobId);
+      }
 
       const insDoc = db.prepare('INSERT INTO sg_ven_cobranza_docs (cobranza_id, tipo, doc_id, monto) VALUES (?,?,?,?)');
       for (const d of lista) {
@@ -624,17 +684,23 @@ router.post('/cobranzas', requireAuth, (req, res) => {
         u.id, referencia || null).lastInsertRowid;
       const insL = db.prepare(`INSERT INTO sg_asientos_lineas (asiento_id, cuenta_id, debe, haber, descripcion)
         VALUES (?,?,?,?,?)`);
-      insL.run(asientoId, cuenta.cta, total, 0, cuenta.nombre);
+      insL.run(asientoId, conCheque ? ctaCartera : cuenta.cta, total, 0,
+        conCheque ? ('Cheque N° ' + cheque.nro + ' en cartera') : cuenta.nombre);
       insL.run(asientoId, cli.cuenta_contable_id, 0, total, cli.razon_social);
       db.prepare('UPDATE sg_ven_cobranzas SET asiento_id=? WHERE id=?').run(asientoId, cobId);
 
       // ── Y LA CUENTA SUBE ──────────────────────────────────────────────
       // El saldo de Caja y Bancos se calcula con los movimientos, no con el
       // libro: sin esto la plata entraba y el banco seguía igual.
-      db.prepare(`INSERT INTO sg_fin_movimientos
-        (cuenta_id, fecha, tipo, concepto, monto, referencia, usuario_id)
-        VALUES (?,?, 'ingreso', ?,?,?,?)`).run(cuenta.id, f,
-        'Cobranza de ' + cli.razon_social, total, 'COB-' + cobId, u.id);
+      //
+      // Con CHEQUE no se mueve ninguna cuenta: el banco todavía no recibió nada.
+      // El movimiento lo hace el depósito, desde la cartera.
+      if (!conCheque) {
+        db.prepare(`INSERT INTO sg_fin_movimientos
+          (cuenta_id, fecha, tipo, concepto, monto, referencia, usuario_id)
+          VALUES (?,?, 'ingreso', ?,?,?,?)`).run(cuenta.id, f,
+          'Cobranza de ' + cli.razon_social, total, 'COB-' + cobId, u.id);
+      }
     })();
     res.json({ ok: true, id: Number(cobId), asiento_id: Number(asientoId),
       total, imputado, a_cuenta: Math.round((total - imputado) * 100) / 100 });
@@ -671,6 +737,18 @@ function anularCobranza(id, motivo, usuarioId) {
       // La plata se va de la cuenta. El movimiento se BORRA en vez de marcarse:
       // el saldo se calcula sumando movimientos, y uno "anulado" seguiría sumando.
       db.prepare("DELETE FROM sg_fin_movimientos WHERE referencia=?").run('COB-' + co.id);
+      // Y si el cobro fue con cheque, ese cheque sale de la cartera. Si ya se
+      // depositó no se toca: la plata entró al banco y anular la cobranza no la
+      // saca de ahí — eso se resuelve marcando el cheque rechazado.
+      if (co.cheque_terceros_id) {
+        const ch = db.prepare('SELECT estado FROM sg_fin_cheques_terceros WHERE id=?')
+          .get(co.cheque_terceros_id);
+        if (ch && ch.estado === 'en_cartera') {
+          db.prepare(`UPDATE sg_fin_cheques_terceros SET estado='anulado',
+            notas = TRIM(COALESCE(notas,'') || ' [ANULADO con la cobranza: ' || ? || ']')
+            WHERE id=?`).run(motivo, co.cheque_terceros_id);
+        }
+      }
       if (co.asiento_id) {
         db.prepare(`UPDATE sg_asientos SET anulado=1, anulado_por=?, anulado_en=datetime('now','localtime'),
           descripcion = descripcion || ' — ANULADO: ' || ? WHERE id=?`)

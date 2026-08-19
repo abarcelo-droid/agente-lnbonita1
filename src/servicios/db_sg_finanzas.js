@@ -524,6 +524,12 @@ try { db.exec("CREATE INDEX IF NOT EXISTS idx_sg_pagos_compras ON sg_pagos_compr
     ['percepcion_ganancias', 'Percepción Ganancias'],
     ['retencion',            'Retención'],
     ['ventas',               'Cuenta de Ventas (haber)'],
+    // UN CHEQUE EN CARTERA NO ES PLATA EN EL BANCO. Cuando un cliente paga con
+    // cheque, el banco no recibió nada: recibís un papel que vale el día que lo
+    // depositás. Esa etapa intermedia necesita su propia cuenta —"Valores a
+    // depositar", "Cheques en cartera"— y sin ella el cobro con cheque no puede
+    // asentarse sin mentir sobre el saldo del banco.
+    ['cheques_cartera',      'Cheques de terceros en cartera (valores a depositar)'],
   ];
   for (const [clave, desc] of claves) ins.run(clave, desc);
 }
