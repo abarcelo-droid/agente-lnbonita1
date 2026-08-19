@@ -12,7 +12,7 @@ import { randomUUID } from 'crypto';
 import { fileURLToPath } from 'url';
 import * as XLSX from 'xlsx';
 import { subirArchivo, obtenerArchivo, storageConfigurado } from '../servicios/storage.js';
-import { crearAsiento } from '../servicios/asientos.js';
+import { crearAsiento, MOTIVOS } from '../servicios/asientos.js';
 import { getDb } from '../servicios/db.js';
 import '../servicios/db_sg.js'; // corre el DDL sg_* al importarse
 // Las condiciones de pago que se usan de verdad, y el código de trazabilidad
@@ -2405,10 +2405,27 @@ router.post('/oc/:id/factura-completa', facturaUpload.single('archivo'), require
     const ruta = req.file ? ('/data/sg/' + req.file.filename) : (prev ? prev.archivo_ruta : null);
     const nombre = req.file ? (req.file.originalname || null) : null;
 
+    // ── LO QUE SE ACORDÓ Y LO QUE VINO ──────────────────────────────────
+    // Si el comprador cerró en 20.000 y la factura llegó por 10.000, la
+    // diferencia se anota acá con su motivo. No toca el total —eso es lo que
+    // dice el comprobante— pero sí lo que se le debe al proveedor.
+    const difG = r2(b.dif_gestion);
+    const difM = val(b.dif_motivo);
+    if (difG < 0) {
+      return res.status(400).json({ ok: false,
+        error: 'La diferencia de gestión no puede ser negativa. Si la factura vino por MÁS de lo '
+             + 'acordado, eso se arregla con el proveedor: el comprobante manda.' });
+    }
+    if (difG > 0 && !MOTIVOS[difM]) {
+      return res.status(400).json({ ok: false,
+        error: 'Poné por qué la factura no coincide con lo acordado. Elegí el motivo: '
+             + Object.values(MOTIVOS).map((m) => m.label).join(', ') + '.' });
+    }
+
     const campos = [oc.id, oc.proveedor_id || null, val(b.tipo_comprobante), val(b.punto_venta),
       val(b.numero), val(b.fecha_emision), val(b.cuit_emisor), neto, numF(b.iva_alicuota), iva,
       pIva, pIibb, pGan, otros, val(b.iibb_jurisdiccion), total != null ? total : suma, val(b.cae), val(b.cae_vencimiento),
-      ruta, nombre, b.leido_por_ia ? 1 : 0, val(b.observaciones), uid(req)];
+      ruta, nombre, b.leido_por_ia ? 1 : 0, val(b.observaciones), difG, difG > 0 ? difM : null, uid(req)];
 
     let id;
     db.transaction(() => {
@@ -2417,6 +2434,7 @@ router.post('/oc/:id/factura-completa', facturaUpload.single('archivo'), require
           numero=?, fecha_emision=?, cuit_emisor=?, neto=?, iva_alicuota=?, iva_monto=?,
           percepcion_iva=?, percepcion_iibb=?, percepcion_ganancias=?, otros_conceptos=?, iibb_jurisdiccion=?, total=?,
           cae=?, cae_vencimiento=?, archivo_ruta=?, archivo_nombre=?, leido_por_ia=?, observaciones=?,
+          dif_gestion=?, dif_motivo=?,
           modificado_en=datetime('now','localtime'), modificado_por=? WHERE id=?`)
           .run(...campos.slice(1), prev.id);
         id = prev.id;
@@ -2425,8 +2443,8 @@ router.post('/oc/:id/factura-completa', facturaUpload.single('archivo'), require
           (oc_id, proveedor_id, tipo_comprobante, punto_venta, numero, fecha_emision, cuit_emisor,
            neto, iva_alicuota, iva_monto, percepcion_iva, percepcion_iibb, percepcion_ganancias,
            otros_conceptos, iibb_jurisdiccion, total, cae, cae_vencimiento, archivo_ruta, archivo_nombre,
-           leido_por_ia, observaciones, creado_por)
-          VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(...campos).lastInsertRowid;
+           leido_por_ia, observaciones, dif_gestion, dif_motivo, creado_por)
+          VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(...campos).lastInsertRowid;
       }
       // Las partidas que cubre, con lo que le toca a cada una. Se rehace entera:
       // corregir una factura puede sacar o agregar partidas.
@@ -2907,6 +2925,37 @@ router.get('/oc/:id/ediciones', requireAuth, (req, res) => {
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
+// ── LA PARTE QUE NO VINO EN LA FACTURA ───────────────────────────────────
+// Dos líneas, en el MISMO asiento, marcadas como gestión: el gasto al debe y
+// Proveedores al haber, por la diferencia entre lo acordado y lo facturado.
+//
+// Van a las MISMAS cuentas que la parte fiscal, no a una cuenta de ajuste
+// aparte: es la misma mercadería y la misma deuda con el mismo proveedor. Lo
+// único que cambia es de qué libro es cada mitad.
+//
+// Y SIN IVA. El crédito fiscal sale del comprobante y de nada más: la parte que
+// no está facturada no genera IVA, ni percepciones, ni retenciones. Por eso se
+// toma la línea de GASTO —la que se llevó el neto— y la de proveedores, y se
+// dejan afuera todas las impositivas.
+function lineasGestionFactura(lineasAsiento, fac) {
+  const dif = r2(fac && fac.dif_gestion);
+  if (!(dif > 0)) return [];
+  const TRIB = ['iva', 'percepcion_iva', 'percepcion_iibb', 'percepcion_ganancias', 'retencion'];
+  const gasto = lineasAsiento.find((l) => l.lado === 'debe' && !TRIB.includes(l.tipo_linea) && l.cuenta_id);
+  const prov = lineasAsiento.find((l) => l.tipo_linea === 'proveedores' && l.cuenta_id);
+  if (!gasto || !prov) {
+    throw new Error('El asiento modelo no tiene línea de gasto o de Proveedores: sin eso no se puede '
+      + 'registrar la diferencia con lo acordado.');
+  }
+  const motivo = fac.dif_motivo || 'ajuste_gestion';
+  return [
+    { cuenta_id: gasto.cuenta_id, debe: dif, haber: 0, ambito: 'gestion', motivo,
+      descripcion: 'Diferencia con lo acordado' },
+    { cuenta_id: prov.cuenta_id, debe: 0, haber: dif, ambito: 'gestion', motivo,
+      descripcion: 'Diferencia con lo acordado' },
+  ];
+}
+
 // ── CONTABILIZAR LA FACTURA ──────────────────────────────────────────────
 // Acá se escribe en la contabilidad. Hasta este punto todo era preparar el
 // asiento; esto lo graba.
@@ -2981,11 +3030,7 @@ router.post('/oc/:id/contabilizar', requireAdmin, (req, res) => {
         debe: l.lado === 'debe' ? l.monto : 0,
         haber: l.lado === 'haber' ? l.monto : 0,
         descripcion: l.descripcion || null,
-        // El ámbito viene de la línea del modelo: hoy todas son fiscales, y es
-        // por acá por donde va a entrar la parte de gestión de una factura que
-        // vino por menos de lo acordado.
-        ambito: l.ambito, motivo: l.motivo,
-      }))).id;
+      })).concat(lineasGestionFactura(asiento.lineas, fac))).id;
       db.prepare(`UPDATE sg_facturas_compra SET asiento_id=?, confirmada_en=datetime('now','localtime'),
         confirmada_por=?, modificado_en=datetime('now','localtime'), modificado_por=? WHERE id=?`)
         .run(asientoId, uid(req), uid(req), fac.id);
@@ -5723,7 +5768,7 @@ router.get('/cc-proveedores', requireAuth, (req, res) => {
     // ya facturada suma dos veces —su estimado y su factura—.
     const rows = db.prepare(`
       SELECT p.id, p.razon_social, COALESCE(p.saldo_inicial,0) AS saldo_inicial,
-        COALESCE((SELECT SUM(COALESCE(f.total,0) - COALESCE(f.saldo_pagado,0))
+        COALESCE((SELECT SUM(COALESCE(f.total,0) + COALESCE(f.dif_gestion,0) - COALESCE(f.saldo_pagado,0))
                     FROM sg_facturas_compra f
                     JOIN sg_asientos a ON a.id = f.asiento_id AND COALESCE(a.anulado,0) = 0
                    WHERE f.proveedor_id = p.id AND f.activo = 1),0) AS facturado,
@@ -5805,13 +5850,14 @@ router.get('/pagos/pendientes/:proveedorId', requireAuth, (req, res) => {
     const rows = db.prepare(`
       SELECT f.id, f.fecha_emision, f.tipo_comprobante, f.punto_venta, f.numero,
              f.total, COALESCE(f.saldo_pagado,0) AS pagado,
-             ROUND(COALESCE(f.total,0) - COALESCE(f.saldo_pagado,0), 2) AS pendiente,
+             COALESCE(f.dif_gestion,0) AS dif_gestion, f.dif_motivo,
+             ROUND(COALESCE(f.total,0) + COALESCE(f.dif_gestion,0) - COALESCE(f.saldo_pagado,0), 2) AS pendiente,
              COALESCE(o.trazabilidad, o.numero) AS partida
         FROM sg_facturas_compra f
         JOIN sg_asientos a ON a.id = f.asiento_id AND COALESCE(a.anulado,0) = 0
         LEFT JOIN sg_oc o ON o.id = f.oc_id
        WHERE f.proveedor_id = ? AND f.activo = 1
-         AND ROUND(COALESCE(f.total,0) - COALESCE(f.saldo_pagado,0), 2) > 0
+         AND ROUND(COALESCE(f.total,0) + COALESCE(f.dif_gestion,0) - COALESCE(f.saldo_pagado,0), 2) > 0
        ORDER BY f.fecha_emision, f.id`).all(req.params.proveedorId);
     res.json({ ok: true, data: rows });
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
@@ -6110,7 +6156,10 @@ router.post('/pagos', requireAuth, (req, res) => {
           error: 'La factura ' + f.numero + ' todavía no está contabilizada: no es deuda registrada y '
                + 'no se le puede imputar un pago.' });
       }
-      const pendiente = r2((f.total || 0) - (f.saldo_pagado || 0));
+      // Lo que le queda por pagar es lo ACORDADO menos lo pagado: el total del
+      // comprobante más lo que quedó sin facturar. Con sólo el total, pagarle
+      // los 20.000 que se le deben rebotaba con "le quedan 10.000".
+      const pendiente = r2((f.total || 0) + (f.dif_gestion || 0) - (f.saldo_pagado || 0));
       const cancela = r2(im.monto + im.desdeACuenta);
       if (cancela > pendiente + 0.01) {
         return res.status(400).json({ ok: false,
