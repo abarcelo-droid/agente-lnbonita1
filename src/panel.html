@@ -23434,49 +23434,130 @@ function sgImpTab(t){
 }
 
 // Qué camiones están en viaje y cuándo llegan. Ordenado por ETA, que es la fecha que importa.
+// Calendario de importación: grilla mensual con lo que sale y lo que llega.
+// Se pide una sola vez (son pocos camiones) y la navegación entre meses es local.
+var SG_CAL = { mes: null, datos: null, vista: 'mes' };
+
+// 'YYYY-MM-DD' → Date en UTC. Construir con new Date(str) local corre el día según la zona.
+function sgCalD(iso){ return new Date(Date.parse(String(iso).slice(0,10)+'T00:00:00Z')); }
+function sgCalISO(d){ return d.toISOString().slice(0,10); }
+function sgCalMesLbl(m){
+  var MES=['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
+  return MES[parseInt(m.slice(5,7),10)-1]+' '+m.slice(0,4);
+}
+function sgCalMover(delta){
+  var y=parseInt(SG_CAL.mes.slice(0,4),10), m=parseInt(SG_CAL.mes.slice(5,7),10)+delta;
+  while(m<1){ m+=12; y--; } while(m>12){ m-=12; y++; }
+  SG_CAL.mes=y+'-'+('0'+m).slice(-2);
+  sgImpCalPintar();
+}
+function sgImpCalVista(v){ SG_CAL.vista=v; sgImpCalPintar(); }
+
 function sgImpCalendario(){
   var box=eid('sg-imp-pane-calendario');
   box.innerHTML='<div style="padding:20px;color:var(--mut)">Cargando…</div>';
   api('/api/sg/importacion/calendario').then(function(r){
     if(!r||!r.ok){ box.innerHTML='<div style="padding:20px;color:var(--err,#dc2626)">'+esc((r&&r.error)||'Error')+'</div>'; return; }
-    var d=r.data;
-    if(!d.items.length){ box.innerHTML='<div class="emp" style="padding:30px">No hay camiones en viaje. Los recibidos y cerrados no aparecen acá.</div>'; return; }
-    // Agrupado por mes de llegada: es como se mira una agenda.
-    var meses={}, MES=['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic'];
-    d.items.forEach(function(i){
-      var k=i.fecha_eta?i.fecha_eta.slice(0,7):'zzz';
-      (meses[k]=meses[k]||[]).push(i);
-    });
-    var chip=function(dias,atras){
-      if(dias==null) return '<span style="color:var(--mut)">—</span>';
-      if(atras) return '<span class="bdg ber">atrasado '+Math.abs(dias)+' d</span>';
-      if(dias===0) return '<span class="bdg bok">llega hoy</span>';
-      return '<span style="color:var(--mut)">en '+dias+' d</span>';
-    };
-    box.innerHTML =
-        (d.atrasados?'<div style="padding:10px 14px;border-radius:8px;border:1px solid var(--err,#dc2626);background:rgba(220,38,38,.08);color:var(--err,#dc2626);font-size:12.5px;margin-bottom:12px"><b>'+d.atrasados+' camión(es) con la fecha de llegada vencida</b> y todavía sin recibir.</div>':'')
-      + (d.sin_fechas?'<div style="padding:10px 14px;border-radius:8px;background:var(--bg2,#f5f5f5);border:1px solid var(--bor);font-size:12.5px;margin-bottom:12px">'+d.sin_fechas+' sin ETD ni ETA cargadas: no se pueden planificar ni costear a plazo.</div>':'')
-      + Object.keys(meses).sort().map(function(k){
-          var titulo = k==='zzz' ? 'Sin fecha de llegada'
-            : (MES[parseInt(k.slice(5,7),10)-1]+' '+k.slice(0,4));
-          return '<div style="font-size:12px;font-weight:700;color:var(--mut);text-transform:uppercase;letter-spacing:.05em;margin:14px 0 6px">'+esc(titulo)+'</div>'
-            + '<table class="pa-tbl" style="font-size:12px;width:100%"><thead><tr>'
-            + '<th>Embarque</th><th>Proveedor</th><th>Sale (ETD)</th><th>Llega (ETA)</th>'
-            + '<th style="text-align:right">Cajas</th><th style="text-align:center">Estado</th><th style="text-align:right"></th>'
-            + '</tr></thead><tbody>'
-            + meses[k].map(function(i){
-                return '<tr'+(i.atrasado?' style="background:rgba(220,38,38,.05)"':'')+'>'
-                  +'<td><b>'+esc(i.nombre||'')+'</b>'+(i.nro_invoice?'<div class="sub2" style="color:var(--mut);font-size:11px">'+esc(i.nro_invoice)+'</div>':'')+'</td>'
-                  +'<td>'+esc(i.proveedor_nombre||'—')+'</td>'
-                  +'<td>'+(i.fecha_etd?esc(i.fecha_etd):'<span style="color:var(--mut)">—</span>')+'</td>'
-                  +'<td>'+(i.fecha_eta?esc(i.fecha_eta):'<span style="color:var(--mut)">—</span>')+' '+chip(i.dias_para_eta,i.atrasado)+'</td>'
-                  +'<td style="text-align:right">'+(i.cantidad_cajas!=null?nr(i.cantidad_cajas):'—')+'</td>'
-                  +'<td style="text-align:center"><span class="bdg bok">'+esc(sgEmbEstadoLbl(i.estado))+'</span></td>'
-                  +'<td style="text-align:right"><button class="btn bo bs" onclick="sgImpVisor('+i.id+')">👁</button></td></tr>';
-              }).join('')
-            + '</tbody></table>';
-        }).join('');
+    SG_CAL.datos=r.data;
+    // Arranca en el mes de hoy, salvo que no haya nada: ahí va al primer camión que llega.
+    if(!SG_CAL.mes){
+      var conEta=(r.data.items||[]).filter(function(i){ return i.fecha_eta; });
+      var hayEsteMes=conEta.some(function(i){ return i.fecha_eta.slice(0,7)===r.data.hoy.slice(0,7); });
+      SG_CAL.mes = hayEsteMes || !conEta.length ? r.data.hoy.slice(0,7) : conEta[0].fecha_eta.slice(0,7);
+    }
+    sgImpCalPintar();
   });
+}
+
+function sgImpCalPintar(){
+  var box=eid('sg-imp-pane-calendario'), d=SG_CAL.datos;
+  if(!box||!d) return;
+  var avisos =
+      (d.atrasados?'<div style="padding:10px 14px;border-radius:8px;border:1px solid var(--err,#dc2626);background:rgba(220,38,38,.08);color:var(--err,#dc2626);font-size:12.5px;margin-bottom:12px"><b>'+d.atrasados+' camión(es) con la fecha de llegada vencida</b> y todavía sin recibir.</div>':'')
+    + (d.sin_fechas?'<div style="padding:10px 14px;border-radius:8px;background:var(--bg2,#f5f5f5);border:1px solid var(--bor);font-size:12.5px;margin-bottom:12px">'+d.sin_fechas+' sin ETD ni ETA: no aparecen en el calendario porque no hay dónde ponerlos.</div>':'');
+  var barra =
+      '<div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;flex-wrap:wrap">'
+      +'<button class="btn bo bs" onclick="sgCalMover(-1)">‹</button>'
+      +'<div style="font-size:15px;font-weight:700;min-width:170px;text-align:center">'+esc(sgCalMesLbl(SG_CAL.mes))+'</div>'
+      +'<button class="btn bo bs" onclick="sgCalMover(1)">›</button>'
+      +'<button class="btn bo bs" onclick="SG_CAL.mes=SG_CAL.datos.hoy.slice(0,7); sgImpCalPintar();">Hoy</button>'
+      +'<div style="margin-left:auto;display:flex;gap:4px">'
+        +'<button class="btn '+(SG_CAL.vista==='mes'?'bb':'bo')+' bs" onclick="sgImpCalVista(\'mes\')">📅 Mes</button>'
+        +'<button class="btn '+(SG_CAL.vista==='lista'?'bb':'bo')+' bs" onclick="sgImpCalVista(\'lista\')">📋 Lista</button>'
+      +'</div></div>';
+  box.innerHTML = avisos + barra + (SG_CAL.vista==='mes' ? sgImpCalGrilla() : sgImpCalLista());
+}
+
+// Eventos del día: lo que SALE (ETD) y lo que LLEGA (ETA).
+function sgImpCalEventos(iso){
+  var out=[];
+  (SG_CAL.datos.items||[]).forEach(function(i){
+    if(i.fecha_etd===iso) out.push({ id:i.id, tipo:'sale', txt:i.nombre, emb:i });
+    if(i.fecha_eta===iso) out.push({ id:i.id, tipo:'llega', txt:i.nombre, emb:i });
+  });
+  return out;
+}
+
+function sgImpCalGrilla(){
+  var mes=SG_CAL.mes, hoy=SG_CAL.datos.hoy;
+  var y=parseInt(mes.slice(0,4),10), m=parseInt(mes.slice(5,7),10);
+  var primero=new Date(Date.UTC(y,m-1,1));
+  var diasMes=new Date(Date.UTC(y,m,0)).getUTCDate();
+  var offset=(primero.getUTCDay()+6)%7;            // semana arranca lunes
+  var DIAS=['Lun','Mar','Mié','Jue','Vie','Sáb','Dom'];
+  var celda=function(inner,extra){ return '<div style="min-height:96px;border:1px solid var(--bor);border-radius:8px;padding:5px 6px;'+(extra||'')+'">'+inner+'</div>'; };
+  var h='<div style="display:grid;grid-template-columns:repeat(7,1fr);gap:5px;margin-bottom:5px">'
+    + DIAS.map(function(x){ return '<div style="text-align:center;font-size:10px;font-weight:700;color:var(--mut);text-transform:uppercase;letter-spacing:.05em">'+x+'</div>'; }).join('')
+    + '</div><div style="display:grid;grid-template-columns:repeat(7,1fr);gap:5px">';
+  for(var i=0;i<offset;i++) h+=celda('','background:var(--bg2,#fafafa);opacity:.45');
+  for(var dia=1;dia<=diasMes;dia++){
+    var iso=mes+'-'+('0'+dia).slice(-2);
+    var esHoy=(iso===hoy);
+    var evs=sgImpCalEventos(iso);
+    var inner='<div style="font-size:11px;font-weight:'+(esHoy?'700':'600')+';color:'+(esHoy?'var(--burg,#7c1d3f)':'var(--mut)')+'">'+dia+(esHoy?' · hoy':'')+'</div>';
+    inner += evs.map(function(e){
+      var llega=(e.tipo==='llega'), atras=llega&&e.emb.atrasado;
+      var bg = atras ? 'rgba(220,38,38,.13)' : (llega?'rgba(16,163,74,.13)':'var(--bg2,#eef1f5)');
+      var col= atras ? 'var(--err,#dc2626)' : (llega?'var(--ok,#16a34a)':'var(--mut)');
+      return '<div title="'+esc((llega?'Llega':'Sale')+': '+e.emb.nombre+(e.emb.proveedor_nombre?(' · '+e.emb.proveedor_nombre):''))+'"'
+        +' onclick="sgImpVisor('+e.id+')" style="margin-top:3px;padding:2px 5px;border-radius:5px;background:'+bg+';color:'+col
+        +';font-size:10.5px;font-weight:600;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'
+        +(llega?(atras?'⚠ ':'📦 '):'🚢 ')+esc(e.emb.nombre||'')+'</div>';
+    }).join('');
+    h+=celda(inner, esHoy?'border-color:var(--burg,#7c1d3f);border-width:2px':'');
+  }
+  h+='</div>'
+    +'<div style="display:flex;gap:14px;margin-top:10px;font-size:11px;color:var(--mut)">'
+    +'<span>🚢 sale (ETD)</span><span>📦 llega (ETA)</span><span style="color:var(--err,#dc2626)">⚠ llegada vencida</span>'
+    +'<span style="margin-left:auto">Tocá un camión para ver su ficha</span></div>';
+  return h;
+}
+
+// La lista de siempre, por si se quiere leer todo de corrido en vez de mes a mes.
+function sgImpCalLista(){
+  var items=SG_CAL.datos.items||[];
+  if(!items.length) return '<div class="emp" style="padding:30px">No hay camiones en viaje.</div>';
+  var chip=function(dias,atras){
+    if(dias==null) return '<span style="color:var(--mut)">—</span>';
+    if(atras) return '<span class="bdg ber">atrasado '+Math.abs(dias)+' d</span>';
+    if(dias===0) return '<span class="bdg bok">llega hoy</span>';
+    return '<span style="color:var(--mut)">en '+dias+' d</span>';
+  };
+  return '<table class="pa-tbl" style="font-size:12px;width:100%"><thead><tr>'
+    +'<th>Embarque</th><th>Proveedor</th><th>Sale (ETD)</th><th>Llega (ETA)</th>'
+    +'<th style="text-align:right">Cajas</th><th style="text-align:center">Estado</th><th></th>'
+    +'</tr></thead><tbody>'
+    + items.map(function(i){
+        return '<tr'+(i.atrasado?' style="background:rgba(220,38,38,.05)"':'')+'>'
+          +'<td><b>'+esc(i.nombre||'')+'</b>'+(i.nro_invoice?'<div style="color:var(--mut);font-size:11px">'+esc(i.nro_invoice)+'</div>':'')+'</td>'
+          +'<td>'+esc(i.proveedor_nombre||'—')+'</td>'
+          +'<td>'+(i.fecha_etd?esc(i.fecha_etd):'<span style="color:var(--mut)">—</span>')+'</td>'
+          +'<td>'+(i.fecha_eta?esc(i.fecha_eta):'<span style="color:var(--mut)">—</span>')+' '+chip(i.dias_para_eta,i.atrasado)+'</td>'
+          +'<td style="text-align:right">'+(i.cantidad_cajas!=null?nr(i.cantidad_cajas):'—')+'</td>'
+          +'<td style="text-align:center"><span class="bdg bok">'+esc(sgEmbEstadoLbl(i.estado))+'</span></td>'
+          +'<td style="text-align:right"><button class="btn bo bs" onclick="sgImpVisor('+i.id+')">👁</button></td></tr>';
+      }).join('')
+    + '</tbody></table>';
 }
 
 // Cuánto le debemos al exterior y qué pasa con esa deuda si se mueve el dólar.
