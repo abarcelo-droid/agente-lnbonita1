@@ -8,6 +8,7 @@
 
 import express from 'express';
 import db from '../servicios/db_sg_finanzas.js';
+import { crearAsiento } from '../servicios/asientos.js';
 import { generarFacturaPDF } from '../servicios/facturaPDF.js';
 import * as XLSX from 'xlsx';
 import { exigirEmpresa, SAN_GERONIMO } from '../servicios/sociedad_modulo.js';
@@ -258,18 +259,24 @@ router.post('/liquidaciones', requireAuth, (req, res) => {
         const cuentaRetIibb   = configImp['percepcion_iibb'] || null;
 
         if (cuentaCliente && cuentaVentas) {
-          const asiento = db.prepare(`INSERT INTO sg_asientos (fecha, descripcion, usuario_id, ref_codigo)
-            VALUES (?,?,?,?)`)
-            .run(fechaLiq, `${numero} | ${cliente?.razon_social||''} | Liq. Producto`, u.id, numero);
-          asientoId = asiento.lastInsertRowid;
-          const ins = db.prepare(`INSERT INTO sg_asientos_lineas (asiento_id, cuenta_id, debe, haber, descripcion)
-            VALUES (?,?,?,?,?)`);
-
-          ins.run(asientoId, cuentaCliente, neto_acreditar, 0, `Neto liquidación ${numero}`);
-          if (ret_iva    > 0 && cuentaRetIva)  ins.run(asientoId, cuentaRetIva,  parseFloat(ret_iva),  0, 'Retención IVA');
-          if (ret_ganancias>0 && cuentaRetGan) ins.run(asientoId, cuentaRetGan, parseFloat(ret_ganancias), 0, 'Retención Ganancias');
-          if (ret_iibb   > 0 && cuentaRetIibb) ins.run(asientoId, cuentaRetIibb, parseFloat(ret_iibb), 0, 'Retención IIBB');
-          ins.run(asientoId, cuentaVentas, 0, precio_bruto, `Venta bruta ${numero}`);
+          const lineas = [
+            { cuenta_id: cuentaCliente, debe: neto_acreditar, haber: 0,
+              descripcion: `Neto liquidación ${numero}` },
+          ];
+          if (ret_iva > 0 && cuentaRetIva) {
+            lineas.push({ cuenta_id: cuentaRetIva, debe: parseFloat(ret_iva), haber: 0, descripcion: 'Retención IVA' });
+          }
+          if (ret_ganancias > 0 && cuentaRetGan) {
+            lineas.push({ cuenta_id: cuentaRetGan, debe: parseFloat(ret_ganancias), haber: 0, descripcion: 'Retención Ganancias' });
+          }
+          if (ret_iibb > 0 && cuentaRetIibb) {
+            lineas.push({ cuenta_id: cuentaRetIibb, debe: parseFloat(ret_iibb), haber: 0, descripcion: 'Retención IIBB' });
+          }
+          lineas.push({ cuenta_id: cuentaVentas, debe: 0, haber: precio_bruto, descripcion: `Venta bruta ${numero}` });
+          asientoId = crearAsiento(db, {
+            fecha: fechaLiq, usuario_id: u.id, ref_codigo: numero,
+            descripcion: `${numero} | ${cliente?.razon_social||''} | Liq. Producto`,
+          }, lineas).id;
 
           db.prepare('UPDATE sg_ven_liquidaciones SET asiento_id=? WHERE id=?').run(asientoId, liqId);
         }
@@ -680,16 +687,15 @@ router.post('/cobranzas', requireAuth, (req, res) => {
       // La plata entra: la cuenta del banco o de la caja al DEBE, contra la
       // cuenta corriente del cliente al HABER — que es el espejo exacto del
       // asiento de la liquidación, donde el cliente va al debe.
-      asientoId = db.prepare(`INSERT INTO sg_asientos (fecha, descripcion, usuario_id, ref_codigo)
-        VALUES (?,?,?,?)`).run(f,
-        'Cobranza de ' + cli.razon_social + (referencia ? ' — ' + referencia : '')
+      asientoId = crearAsiento(db, {
+        fecha: f, usuario_id: u.id, ref_codigo: referencia || null,
+        descripcion: 'Cobranza de ' + cli.razon_social + (referencia ? ' — ' + referencia : '')
           + (lista.length ? ' — ' + lista.length + ' comprobante(s)' : ' (a cuenta)'),
-        u.id, referencia || null).lastInsertRowid;
-      const insL = db.prepare(`INSERT INTO sg_asientos_lineas (asiento_id, cuenta_id, debe, haber, descripcion)
-        VALUES (?,?,?,?,?)`);
-      insL.run(asientoId, conCheque ? ctaCartera : cuenta.cta, total, 0,
-        conCheque ? ('Cheque N° ' + cheque.nro + ' en cartera') : cuenta.nombre);
-      insL.run(asientoId, cli.cuenta_contable_id, 0, total, cli.razon_social);
+      }, [
+        { cuenta_id: conCheque ? ctaCartera : cuenta.cta, debe: total, haber: 0,
+          descripcion: conCheque ? ('Cheque N° ' + cheque.nro + ' en cartera') : cuenta.nombre },
+        { cuenta_id: cli.cuenta_contable_id, debe: 0, haber: total, descripcion: cli.razon_social },
+      ]).id;
       db.prepare('UPDATE sg_ven_cobranzas SET asiento_id=? WHERE id=?').run(asientoId, cobId);
 
       // ── Y LA CUENTA SUBE ──────────────────────────────────────────────

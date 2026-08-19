@@ -7,6 +7,7 @@
 
 import express from 'express';
 import db from '../servicios/db_sg_finanzas.js';
+import { crearAsiento, filtroAmbito, totalesDeAsiento } from '../servicios/asientos.js';
 import { exigirEmpresa, SAN_GERONIMO } from '../servicios/sociedad_modulo.js';
 
 const router = express.Router();
@@ -1107,6 +1108,8 @@ router.delete('/:id(\\d+)', requireAdmin, (req, res) => {
   //
   // Una cuenta que NUNCA se usó no es historia, es un error de carga: se borra
   // de verdad y libera el código.
+  // ambito: todos — se pregunta si la cuenta está USADA para no dejar borrarla.
+  // Una cuenta usada sólo por líneas de gestión está igual de usada.
   const usos = db.prepare('SELECT COUNT(*) c FROM sg_asientos_lineas WHERE cuenta_id = ?').get(id).c;
   if (usos) {
     db.prepare("UPDATE sg_cuentas SET activo = 0, actualizado_en = datetime('now','localtime') WHERE id = ?").run(id);
@@ -1312,7 +1315,7 @@ router.get('/:id(\\d+)/log', (req, res) => {
 // ═══════════════════════════════════════════════════════════════════════════
 
 router.get('/asientos', (req, res) => {
-  const { desde, hasta } = req.query;
+  const { desde, hasta, ambito } = req.query;
   const incluirAnulados = req.query.anulados === '1';
   const params = [];
   let sql = `
@@ -1336,6 +1339,10 @@ router.get('/asientos', (req, res) => {
   // SELECT por asiento serían 200 consultas para pintar una tabla.
   if (asientos.length) {
     const ids = asientos.map(a => a.id);
+    // EL FILTRO DE ÁMBITO VA EN LAS LÍNEAS, no en la cabecera: un mismo asiento
+    // puede tener las dos mitades. Pidiendo 'fiscal' se ve exactamente lo que va
+    // a una presentación; sin ámbito se ve todo y la diferencia se puede medir.
+    const fa = filtroAmbito(ambito, 'l');
     const lineas = db.prepare(`
       SELECT l.*, c.codigo AS cuenta_codigo, c.nombre AS cuenta_nombre
         FROM sg_asientos_lineas l
@@ -1344,13 +1351,16 @@ router.get('/asientos', (req, res) => {
         -- descuadrado sin que nada avise. Mejor que salga sin nombre de cuenta y
         -- se vea el problema.
         LEFT JOIN sg_cuentas c ON c.id = l.cuenta_id
-       WHERE l.asiento_id IN (${ids.map(() => '?').join(',')})
-       ORDER BY l.id`).all(...ids);
+       WHERE l.asiento_id IN (${ids.map(() => '?').join(',')})${fa.sql}
+       ORDER BY l.id`).all(...ids, ...fa.params);
     const porAsiento = {};
     for (const l of lineas) (porAsiento[l.asiento_id] = porAsiento[l.asiento_id] || []).push(l);
     for (const a of asientos) a.lineas = porAsiento[a.id] || [];
   }
-  res.json({ ok: true, data: asientos });
+  // Filtrando por ámbito, un asiento sin líneas de ese ámbito no es un asiento
+  // vacío: es uno que no pertenece a ese libro y no tiene que figurar.
+  const data = ambito ? asientos.filter((a) => (a.lineas || []).length) : asientos;
+  res.json({ ok: true, data });
 });
 
 router.get('/asientos/:id(\\d+)', (req, res) => {
@@ -1362,6 +1372,8 @@ router.get('/asientos/:id(\\d+)', (req, res) => {
      WHERE a.id = ?
   `).get(id);
   if (!asiento) return res.status(404).json({ error: 'asiento no encontrado' });
+  // ambito: todos — el detalle muestra las dos mitades, cada una con su marca y
+  // su propio "balancea". Filtrar acá escondería justo lo que se viene a ver.
   const lineas = db.prepare(`
     SELECT l.*, c.codigo AS cuenta_codigo, c.nombre AS cuenta_nombre
       FROM sg_asientos_lineas l
@@ -1369,7 +1381,7 @@ router.get('/asientos/:id(\\d+)', (req, res) => {
      WHERE l.asiento_id = ?
      ORDER BY l.id
   `).all(id);
-  res.json({ ok: true, data: { ...asiento, lineas } });
+  res.json({ ok: true, data: { ...asiento, lineas, totales: totalesDeAsiento(db, id) } });
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -1553,35 +1565,23 @@ router.post('/asientos', requireAuth, (req, res) => {
   }
 
   try {
-    const tx = db.transaction(() => {
-      const r = db.prepare(`
-        INSERT INTO sg_asientos (fecha, descripcion, usuario_id)
-        VALUES (?, ?, ?)
-      `).run(
-        fecha || new Date().toISOString().slice(0, 10),
-        String(descripcion).trim(),
-        req._user?.id ?? null
-      );
-      const asientoId = r.lastInsertRowid;
-      const insLinea = db.prepare(`
-        INSERT INTO sg_asientos_lineas (asiento_id, cuenta_id, debe, haber, descripcion)
-        VALUES (?, ?, ?, ?, ?)
-      `);
-      for (const l of lineas) {
-        insLinea.run(
-          asientoId,
-          l.cuenta_id,
-          parseFloat(l.debe)  || 0,
-          parseFloat(l.haber) || 0,
-          l.descripcion ?? null
-        );
-      }
-      return asientoId;
-    });
-    const asientoId = tx();
-    res.json({ ok: true, id: asientoId });
+    const tx = db.transaction(() => crearAsiento(db, {
+      fecha: fecha || new Date().toISOString().slice(0, 10),
+      descripcion: String(descripcion).trim(),
+      usuario_id: req._user?.id ?? null,
+    }, lineas.map((l) => ({
+      cuenta_id: l.cuenta_id,
+      debe: parseFloat(l.debe) || 0,
+      haber: parseFloat(l.haber) || 0,
+      descripcion: l.descripcion ?? null,
+      ambito: l.ambito, motivo: l.motivo,
+    }))).id);
+    res.json({ ok: true, id: tx() });
   } catch (e) {
-    res.status(500).json({ error: e.message });
+    // Los errores de crearAsiento son de lo que se cargó —no balancea, falta el
+    // motivo, la cuenta no existe—, así que van como 400 y con su texto: un 500
+    // "error interno" le esconde al usuario lo único que puede corregir.
+    res.status(400).json({ error: e.message });
   }
 });
 
