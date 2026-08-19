@@ -3117,6 +3117,15 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
             <select id="cb-ct-cliente"></select></div>
           <div class="fl"><label>Librador</label>
             <input id="cb-ct-librador" placeholder="Quién firma el cheque"></div>
+          <!-- EL CUIT DEL QUE FIRMA es la única llave para preguntarle al BCRA
+               si ese librador está limpio. Es opcional: sin CUIT el cheque se
+               carga igual, sólo que a ciegas. -->
+          <div class="fl"><label>CUIT del librador</label>
+            <div style="display:flex;gap:6px">
+              <input id="cb-ct-cuit" placeholder="30-12345678-9" style="flex:1;min-width:0">
+              <button class="btn bo bs" type="button" title="Central de Deudores del BCRA"
+                      onclick="sgBcraVer('cb-ct-cuit','cb-ct-bcra')">🔍 BCRA</button>
+            </div></div>
           <div class="fl"><label>Banco</label><input id="cb-ct-banco"></div>
           <div class="fl"><label>N° de cheque</label><input id="cb-ct-nro"></div>
           <div class="fl"><label>Importe</label>
@@ -3131,6 +3140,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
              el cheque no viene de un cliente hay que decir contra qué cuenta
              entra. Sin ninguna de las dos, la cuenta de cheques en cartera
              quedaría cargada con algo que nunca ingresó al libro. -->
+        <div id="cb-ct-bcra" style="margin-top:10px"></div>
         <div class="fl" id="cb-ct-cta-box" style="margin-top:10px;display:none">
           <label>¿Contra qué cuenta contable entra?</label>
           <select id="cb-ct-cta"></select>
@@ -4449,8 +4459,15 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
           <div class="fl"><label>N° de cheque</label><input id="sg-cob-chq-nro" placeholder="00012345"></div>
           <div class="fl"><label>Librador (quién lo firma)</label>
             <input id="sg-cob-chq-lib" placeholder="Razón social del que emitió el cheque"></div>
+          <div class="fl"><label>CUIT del librador</label>
+            <div style="display:flex;gap:6px">
+              <input id="sg-cob-chq-cuit" placeholder="30-12345678-9" style="flex:1;min-width:0">
+              <button class="btn bo bs" type="button" title="Central de Deudores del BCRA"
+                      onclick="sgBcraVer('sg-cob-chq-cuit','sg-cob-chq-bcra')">🔍 BCRA</button>
+            </div></div>
           <div class="fl"><label>Vencimiento</label><input type="date" id="sg-cob-chq-vto"></div>
         </div>
+        <div id="sg-cob-chq-bcra" style="margin-top:8px"></div>
         <div style="font-size:12px;color:var(--mut);margin-top:8px">
           El cheque entra a la cartera, en Caja y Bancos. La plata recién sube al banco el día
           que se deposita.</div>
@@ -6997,7 +7014,11 @@ function sgCbTercerosPintar(){
             : '')
         + '</td>'
       + '<td>' + escH(c.banco || '—') + '</td>'
-      + '<td>' + escH(c.nro_cheque || '—') + '</td>'
+      + '<td>' + escH(c.nro_cheque || '—')
+        + (c.cuit_librador
+            ? ' <a href="#" title="Ver al librador en el BCRA" style="text-decoration:none"'
+              + ' onclick="sgBcraFicha(\'' + escH(c.cuit_librador) + '\');return false">🔍</a>' : '')
+        + '</td>'
       + '<td' + (c.vencido ? ' style="color:#b91c1c;font-weight:700"' : '') + '>'
         + escH(c.fecha_vto || '—') + '</td>'
       + '<td style="text-align:right"><b>' + sgMoney(c.monto) + '</b></td>'
@@ -7017,8 +7038,9 @@ function sgCbTercerosPintar(){
 }
 
 function sgCbCtOpen(){
-  ['cb-ct-librador', 'cb-ct-banco', 'cb-ct-nro', 'cb-ct-monto', 'cb-ct-notas', 'cb-ct-fvto']
-    .forEach(function(id){ var e = eid(id); if (e) e.value = ''; });
+  ['cb-ct-librador', 'cb-ct-banco', 'cb-ct-nro', 'cb-ct-monto', 'cb-ct-notas', 'cb-ct-fvto',
+   'cb-ct-cuit'].forEach(function(id){ var e = eid(id); if (e) e.value = ''; });
+  var pb = eid('cb-ct-bcra'); if (pb) pb.innerHTML = '';
   var f = eid('cb-ct-frec'); if (f) f.value = new Date().toISOString().slice(0, 10);
   var sel = eid('cb-ct-cliente');
   if (sel) {
@@ -7058,12 +7080,91 @@ function sgCbCtCliente(){
   var box = eid('cb-ct-cta-box'); if (box) box.style.display = hay ? 'none' : '';
 }
 
+// ── LA CENTRAL DE DEUDORES DEL BCRA ─────────────────────────────────────
+// Con el CUIT del librador se puede saber, antes de aceptar el papel, en qué
+// situación está en el sistema financiero y si tiene cheques rechazados sin
+// pagar. Es información: no frena nada. Un cheque que hay que cargar se carga,
+// conteste el BCRA o no.
+var SG_BCRA_COL = { bien: ['#166534', '#dcfce7', '#86efac'],
+                    ojo:  ['#854d0e', '#fefce8', '#fde047'],
+                    malo: ['#991b1b', '#fef2f2', '#fecaca'] };
+
+function sgBcraVer(inputId, contId){
+  var cont = eid(contId); if (!cont) return;
+  var cuit = ((eid(inputId) || {}).value || '').replace(/[^0-9]/g, '');
+  if (cuit.length !== 11) {
+    cont.innerHTML = '<div style="font-size:12px;color:#9a3412">'
+      + 'Poné el CUIT del librador (11 dígitos) para poder consultarlo.</div>';
+    return;
+  }
+  cont.innerHTML = '<div style="font-size:12px;color:var(--mut)">Consultando al BCRA…</div>';
+  api('/api/sg/tesoreria/bcra/' + cuit).then(function(r){
+    if (!r || !r.ok) {
+      // No se pudo, y eso NO es un problema del cheque: se dice y se sigue.
+      cont.innerHTML = '<div style="font-size:12px;color:var(--mut);border:1px dashed var(--bor);'
+        + 'border-radius:8px;padding:8px 10px">⚠️ ' + escH((r && r.error) || 'No se pudo consultar')
+        + '. El cheque se puede cargar igual.</div>';
+      return;
+    }
+    cont.innerHTML = sgBcraPanel(r.data);
+  });
+}
+
+function sgBcraPanel(d){
+  var col = SG_BCRA_COL[d.semaforo] || SG_BCRA_COL.ojo;
+  var titulo = d.semaforo === 'bien' ? '✅ Sin problemas en el BCRA'
+             : (d.semaforo === 'ojo' ? '⚠️ Para mirar' : '⛔ Tiene problemas en el BCRA');
+  var lineas = [];
+  if (d.sin_registros) {
+    lineas.push('El BCRA no tiene registros de este CUIT.');
+  } else {
+    if (d.deudas && d.deudas.situacion) {
+      lineas.push('<b>Situación ' + d.deudas.situacion + '</b> — ' + escH(d.deudas.situacion_texto)
+        + (d.deudas.periodo ? ' <span style="opacity:.7">(' + escH(d.deudas.periodo) + ')</span>' : '')
+        + (d.deudas.entidades && d.deudas.entidades.length
+            ? ' · en ' + d.deudas.entidades.length + ' entidad(es)' : ''));
+    } else {
+      lineas.push('Sin deudas informadas en la Central de Deudores.');
+    }
+    // Los montos de la Central vienen en MILES: decir "1.234" cuando son
+    // 1.234.000 sería el peor error posible en esta pantalla.
+    if (d.deudas && d.deudas.deuda_miles > 0) {
+      lineas.push('Deuda informada: <b>' + sgMoney(d.deudas.deuda_miles * 1000) + '</b>'
+        + ' <span style="opacity:.7">(la Central informa en miles)</span>');
+    }
+    if (d.deudas && d.deudas.banderas && d.deudas.banderas.length) {
+      lineas.push('Marcado: ' + escH(d.deudas.banderas.join(' · ')));
+    }
+    if (d.cheques && d.cheques.cantidad) {
+      lineas.push('<b>' + d.cheques.cantidad + ' cheque(s) rechazado(s)</b>'
+        + (d.cheques.impagos
+            ? ' — <b style="color:#991b1b">' + d.cheques.impagos + ' sin pagar</b>, '
+              + sgMoney(d.cheques.monto_impago)
+              + (d.cheques.causales.length ? ' (' + escH(d.cheques.causales.join(', ')) + ')' : '')
+            : ' — todos pagados'));
+    } else {
+      lineas.push('Sin cheques rechazados.');
+    }
+  }
+  var pie = (d.fuente === 'bcra' ? 'Consultado al BCRA ahora'
+           : (d.fuente === 'cache' ? 'Consultado el ' + escH(d.consultado_en || '')
+                                   : '⚠️ El BCRA no contesta: esto es lo último que se supo, del '
+                                     + escH(d.consultado_en || '')));
+  return '<div style="border:1.5px solid ' + col[2] + ';background:' + col[1] + ';border-radius:8px;'
+    + 'padding:9px 11px;color:' + col[0] + ';font-size:12.5px">'
+    + '<div style="font-weight:700;margin-bottom:4px">' + titulo
+      + (d.denominacion ? ' — ' + escH(d.denominacion) : '') + '</div>'
+    + lineas.map(function(l){ return '<div>' + l + '</div>'; }).join('')
+    + '<div style="font-size:11px;opacity:.75;margin-top:5px">' + pie + '</div></div>';
+}
+
 function sgCbCtGuardar(){
   var monto = sgMilParse((eid('cb-ct-monto') || {}).value) || 0;
   if (!(monto > 0)) { toast('Poné el importe del cheque', 'er'); return; }
   sgCbApi('/cheques-terceros', 'POST', {
     cliente_id: (eid('cb-ct-cliente') || {}).value || null,
     librador: (eid('cb-ct-librador') || {}).value,
+    cuit_librador: (eid('cb-ct-cuit') || {}).value,
     banco: (eid('cb-ct-banco') || {}).value,
     nro_cheque: (eid('cb-ct-nro') || {}).value,
     monto: monto,
@@ -7135,6 +7236,17 @@ function sgCbRechazadosPintar(){
   var nt = eid('cb-nota');
   if (nt) nt.textContent = 'Devolvérselo al cliente le vuelve a cargar la deuda en su cuenta corriente, '
     + 'y los comprobantes que ese cobro había cancelado quedan otra vez pendientes.';
+}
+
+// Desde la cartera, sin abrir nada: el panel del BCRA en un cartel.
+function sgBcraFicha(cuit){
+  var cont = eid('cb-nota'); if (!cont) return;
+  cont.innerHTML = '<div style="font-size:12px">Consultando al BCRA…</div>';
+  api('/api/sg/tesoreria/bcra/' + String(cuit).replace(/[^0-9]/g, '')).then(function(r){
+    cont.innerHTML = (r && r.ok) ? sgBcraPanel(r.data)
+      : '<div style="font-size:12px;color:var(--mut)">⚠️ '
+        + escH((r && r.error) || 'No se pudo consultar') + '</div>';
+  });
 }
 
 function sgCbRechazar(id){
@@ -12839,10 +12951,11 @@ function sgCobOpen(clienteId){
   var t = eid('sg-cob-tit');
   if (t) t.textContent = 'Registrar cobranza — ' + (c ? sgCcClNombre(c) : '');
   var f = eid('sg-cob-fecha'); if (f) f.value = new Date().toISOString().slice(0, 10);
-  ['sg-cob-monto', 'sg-cob-ref', 'sg-cob-notas',
-   'sg-cob-chq-banco', 'sg-cob-chq-nro', 'sg-cob-chq-lib', 'sg-cob-chq-vto'].forEach(function(id){
+  ['sg-cob-monto', 'sg-cob-ref', 'sg-cob-notas', 'sg-cob-chq-banco', 'sg-cob-chq-nro',
+   'sg-cob-chq-lib', 'sg-cob-chq-vto', 'sg-cob-chq-cuit'].forEach(function(id){
     var e = eid(id); if (e) e.value = '';
   });
+  var pb = eid('sg-cob-chq-bcra'); if (pb) pb.innerHTML = '';
   var fp = eid('sg-cob-forma'); if (fp) fp.value = 'transferencia';
   sgCobForma();
 
@@ -13006,6 +13119,7 @@ function sgCobGuardar(){
     chq = { banco: (eid('sg-cob-chq-banco') || {}).value,
             nro_cheque: (eid('sg-cob-chq-nro') || {}).value,
             librador: (eid('sg-cob-chq-lib') || {}).value,
+            cuit_librador: (eid('sg-cob-chq-cuit') || {}).value,
             fecha_vto: (eid('sg-cob-chq-vto') || {}).value };
     if (!String(chq.nro_cheque || '').trim() || !String(chq.librador || '').trim()) {
       toast('De un cheque hay que anotar por lo menos el número y quién lo firma', 'er'); return;

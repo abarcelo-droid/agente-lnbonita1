@@ -15,6 +15,7 @@
 import express from 'express';
 import db from '../servicios/db_sg_finanzas.js';
 import { exigirEmpresa, SAN_GERONIMO } from '../servicios/sociedad_modulo.js';
+import { consultarBcra } from '../servicios/bcra.js';
 
 const router = express.Router();
 
@@ -456,7 +457,7 @@ router.get('/cheques-terceros', (req, res) => {
 // no el dueño. El nivel lo decide exigirNivel por la URL.
 router.post('/cheques-terceros', requireAuth, (req, res) => {
   const { banco, nro_cheque, librador, monto, fecha_recepcion, fecha_vto, notas,
-          cuenta_contable_id, cliente_id } = req.body || {};
+          cuenta_contable_id, cliente_id, cuit_librador } = req.body || {};
   if (!monto) return res.status(400).json({ ok: false, error: 'Monto requerido' });
   if (!(parseFloat(monto) > 0)) return res.status(400).json({ ok: false, error: 'El importe tiene que ser mayor a cero' });
   try {
@@ -515,10 +516,11 @@ router.post('/cheques-terceros', requireAuth, (req, res) => {
     const fRec = fecha_recepcion || new Date().toISOString().split('T')[0];
     let id = null, asientoId = null;
     db.transaction(() => {
-      id = db.prepare(`INSERT INTO sg_fin_cheques_terceros (banco, nro_cheque, librador, monto, fecha_recepcion, fecha_vto, notas, cuenta_contable_id, cliente_id)
-        VALUES (?,?,?,?,?,?,?,?,?)`)
+      id = db.prepare(`INSERT INTO sg_fin_cheques_terceros (banco, nro_cheque, librador, monto, fecha_recepcion, fecha_vto, notas, cuenta_contable_id, cliente_id, cuit_librador)
+        VALUES (?,?,?,?,?,?,?,?,?,?)`)
         .run(banco||null, nro_cheque||null, librador||null, parseFloat(monto),
-             fRec, fecha_vto||null, notas||null, contra, cli ? cli.id : null).lastInsertRowid;
+             fRec, fecha_vto||null, notas||null, contra, cli ? cli.id : null,
+             String(cuit_librador || '').replace(/[^0-9]/g, '') || null).lastInsertRowid;
       const u = getUser(req);
       asientoId = db.prepare(`INSERT INTO sg_asientos (fecha, descripcion, usuario_id, ref_codigo)
         VALUES (?,?,?,?)`).run(fRec,
@@ -896,6 +898,24 @@ router.post('/cheques-terceros/:id/anular', requireAuth, (req, res) => {
     })();
     res.json({ ok: true, data: { id: Number(c.id) } });
   } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
+});
+
+// ── ¿EL QUE FIRMA ESTE CHEQUE ES BUENO? ──────────────────────────────────
+// La Central de Deudores del BCRA es pública y contesta dos cosas por CUIT: en
+// qué situación está en el sistema financiero (1 normal … 6 irrecuperable) y qué
+// cheques suyos rebotaron y siguen impagos. Es exactamente lo que uno querría
+// saber ANTES de aceptar el papel.
+//
+// Es sólo lectura y no toca nada nuestro, así que va con requireAuth y sin más
+// ceremonia. Y NUNCA bloquea: si el BCRA no contesta —se cae seguido— la
+// respuesta lo dice y el cheque se carga igual.
+router.get('/bcra/:cuit', requireAuth, async (req, res) => {
+  try {
+    const r = await consultarBcra(req.params.cuit, { forzar: req.query.forzar === '1' });
+    res.json(r.ok ? { ok: true, data: r } : { ok: false, error: r.error });
+  } catch (e) {
+    res.json({ ok: false, error: 'No se pudo consultar el BCRA: ' + e.message });
+  }
 });
 
 // ────────────────────────────────────────────────────────────────────────────

@@ -608,7 +608,10 @@ router.post('/cobranzas', requireAuth, (req, res) => {
         error: `Ese cheque ya está en la cartera: N° ${nro} de ${librador} por ${ya.monto} (${ya.estado}).` });
     }
     cheque = { banco: String(ch.banco || '').trim() || null, nro, librador,
-               fecha_vto: ch.fecha_vto || null };
+               fecha_vto: ch.fecha_vto || null,
+               // El CUIT del que firma: es la clave con la que se le pregunta al
+               // BCRA si ese librador tiene deudas o cheques rechazados.
+               cuit: String(ch.cuit_librador || '').replace(/[^0-9]/g, '') || null };
   }
 
   // LA PLATA ENTRA A ALGÚN LADO, y ese lado tiene que tener cuenta contable: sin
@@ -653,10 +656,10 @@ router.post('/cobranzas', requireAuth, (req, res) => {
       // quien firmó el papel: muchas veces al cliente le pagaron con ese cheque.
       if (cheque) {
         const chId = db.prepare(`INSERT INTO sg_fin_cheques_terceros
-          (banco, nro_cheque, librador, monto, fecha_recepcion, fecha_vto, cliente_id, notas)
-          VALUES (?,?,?,?,?,?,?,?)`).run(cheque.banco, cheque.nro, cheque.librador, total,
+          (banco, nro_cheque, librador, monto, fecha_recepcion, fecha_vto, cliente_id, notas, cuit_librador)
+          VALUES (?,?,?,?,?,?,?,?,?)`).run(cheque.banco, cheque.nro, cheque.librador, total,
           f, cheque.fecha_vto, cli.id,
-          'Cobranza ' + (referencia || '#' + cobId)).lastInsertRowid;
+          'Cobranza ' + (referencia || '#' + cobId), cheque.cuit).lastInsertRowid;
         db.prepare('UPDATE sg_ven_cobranzas SET cheque_terceros_id=? WHERE id=?').run(chId, cobId);
       }
 
