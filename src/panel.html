@@ -2848,6 +2848,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
     <!-- Van a figurar TODOS los proveedores: sin buscador, encontrar uno es
          recorrer la lista con el dedo. Filtra mientras se escribe, sin ir al
          servidor: la lista ya está entera en la pantalla. -->
+    <div id="sg-ccprov-tarjetas" style="margin-bottom:12px"></div>
     <div class="sg-oc-search" style="max-width:340px;margin-bottom:10px">
       <input id="sg-ccprov-q" placeholder="🔎 Buscar proveedor…" oninput="sgCcProvPintar()"
              style="width:100%;box-sizing:border-box">
@@ -2855,9 +2856,10 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
     <div class="ab-table-wrap"><table class="pa-tbl">
       <thead><tr><th>Proveedor</th><th style="text-align:right">Apertura</th>
         <th style="text-align:right">Contabilizado</th>
+        <th style="text-align:right">Sin facturar</th>
         <th style="text-align:right">Saldo</th>
         <th style="text-align:center">Esperando el libro</th><th></th></tr></thead>
-      <tbody id="sg-tb-ccprov"><tr><td colspan="6" class="emp">Cargando…</td></tr></tbody>
+      <tbody id="sg-tb-ccprov"><tr><td colspan="7" class="emp">Cargando…</td></tr></tbody>
     </table></div>
     <div id="sg-ccprov-n" style="font-size:11.5px;color:var(--mut);margin-top:6px"></div>
   </div>
@@ -5677,6 +5679,35 @@ function sgLoadCcProv(){
   });
 }
 
+// LAS TARJETAS DE FISCAL / GESTIÓN. Son las mismas que en Asientos Contables,
+// a propósito: el mismo dato tiene que verse igual en las dos pantallas o el que
+// las cruza no sabe si está mirando lo mismo.
+//
+// La de gestión sólo aparece si hay algo. Una tarjeta en cero repetida en todas
+// las pantallas deja de leerse a los dos días.
+function sgCcTarjetas(fiscal, gestion, rotTot){
+  var tot = Math.round((fiscal + gestion) * 100) / 100;
+  var caja = function(rot, val, col, bg, sub){
+    return '<div style="background:' + bg + ';border:1px solid ' + col + '33;border-radius:8px;'
+      + 'padding:10px 14px;min-width:140px">'
+      + '<div style="font-size:10.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;'
+      + 'color:' + col + '">' + rot + '</div>'
+      + '<div style="font-size:19px;font-weight:700;font-variant-numeric:tabular-nums;margin-top:3px">'
+      + sgMoney(val) + '</div>'
+      + (sub ? '<div style="font-size:11px;color:var(--mut);margin-top:2px">' + sub + '</div>' : '')
+      + '</div>';
+  };
+  if (!gestion) {
+    return caja(rotTot || 'Saldo', tot, '#0f5c4e', '#e4efea', 'todo con comprobante');
+  }
+  return '<div style="display:flex;gap:10px;flex-wrap:wrap">'
+    + caja(rotTot || 'Saldo', tot, '#3d4a46', 'var(--bg)', 'lo que se le debe')
+    + caja('Con comprobante', fiscal, '#0f5c4e', '#e4efea', 'es lo que está en el libro fiscal')
+    + caja('Sin facturar', gestion, '#8a5a1f', '#f6eddf',
+        tot ? Math.round((gestion / tot) * 1000) / 10 + '% del saldo' : '')
+    + '</div>';
+}
+
 function sgCcProvPintar(){
   var q = String((eid('sg-ccprov-q') || {}).value || '').trim().toLowerCase();
   // Palabra por palabra y sin importar el orden: "agrot sa" encuentra
@@ -5687,6 +5718,16 @@ function sgCcProvPintar(){
     var t = String(p.razon_social || '').toLowerCase();
     return pal.every(function(w){ return t.indexOf(w) >= 0; });
   });
+  // El total de la pantalla, arriba: cuánto se debe en total y qué parte de eso
+  // todavía no tiene comprobante.
+  var cont = eid('sg-ccprov-tarjetas');
+  if (cont) {
+    var ges = rows.reduce(function(a, p){ return a + (p.pendiente_gestion || 0); }, 0);
+    var tot = rows.reduce(function(a, p){ return a + (p.saldo || 0); }, 0);
+    ges = Math.round(ges * 100) / 100;
+    cont.innerHTML = rows.length
+      ? sgCcTarjetas(Math.round((tot - ges) * 100) / 100, ges, 'Se debe en total') : '';
+  }
   var n = eid('sg-ccprov-n');
   if (n) n.textContent = rows.length === SG_CCPROV.length
     ? (SG_CCPROV.length ? SG_CCPROV.length + ' proveedor' + (SG_CCPROV.length === 1 ? '' : 'es') : '')
@@ -5702,6 +5743,13 @@ function sgCcProvPintar(){
         +'<td><b>'+esc(p.razon_social)+'</b></td>'
         +'<td style="text-align:right">'+cero(ap)+'</td>'
         +'<td style="text-align:right">'+cero(fac)+'</td>'
+        // Qué parte de ese saldo todavía no tiene comprobante. En la fila y no
+        // sólo en el total: el que busca dónde está la diferencia la encuentra
+        // sin abrir las fichas de a una.
+        +'<td style="text-align:right">'
+          +(Number(p.pendiente_gestion) > 0
+              ? '<span style="color:#8a5a1f;font-weight:600">'+sgMoney(p.pendiente_gestion)+'</span>'
+              : '<span style="color:var(--mut)">—</span>')+'</td>'
         +'<td style="text-align:right;font-weight:700;font-size:14px">'+sgMoney(p.saldo)+'</td>'
         +'<td style="text-align:center">'
           +(esp > 0
@@ -5713,7 +5761,7 @@ function sgCcProvPintar(){
           +'</td>'
         +'<td style="text-align:right;white-space:nowrap">'
           +'<button class="btn bo bs" onclick="event.stopPropagation();sgCcFicha('+p.id+')">👁 Ver</button></td></tr>';
-    }).join('') : ('<tr><td colspan="6" class="emp">'
+    }).join('') : ('<tr><td colspan="7" class="emp">'
         + (q ? 'Ningún proveedor con ese nombre.' : 'Sin saldos ni deuda pendiente.') + '</td></tr>');
 }
 
@@ -5735,29 +5783,12 @@ function sgCcFicha(provId){
         + rot + '</div><div style="font-size:' + (chico ? '13px' : '19px')
         + ';font-weight:700;line-height:1.25">' + val + '</div></div>';
     };
-    // Cuánto de lo que se le debe está facturado y cuánto no. Sale de los
-    // renglones, que ya vienen marcados con su ámbito.
-    var fiscalGes = { fiscal: 0, gestion: 0 };
-    movs.forEach(function(m){
-      if (m.tipo === 'pago') return;                 // los pagos descuentan de los dos
-      var k = m.ambito === 'gestion' ? 'gestion' : 'fiscal';
-      fiscalGes[k] += (m.haber || 0);
-    });
-    fiscalGes.fiscal = Math.round(fiscalGes.fiscal * 100) / 100;
-    fiscalGes.gestion = Math.round(fiscalGes.gestion * 100) / 100;
-
-    var h = '<div style="display:flex;gap:30px;flex-wrap:wrap;align-items:flex-start;'
+    // Los dos saldos vienen calculados del servidor, con la misma regla que el
+    // listado: sumarlos acá con otro criterio es como se llega a que la ficha y
+    // la lista digan números distintos.
+    var h = sgCcTarjetas(d.saldo_fiscal || 0, d.saldo_gestion || 0)
+      + '<div style="display:flex;gap:30px;flex-wrap:wrap;align-items:flex-start;margin-top:12px;'
       + 'border:1px solid var(--bor);border-radius:10px;padding:12px 16px;background:var(--bg);margin-bottom:12px">'
-      + dato('Saldo', sgMoney(d.saldo))
-      // ABIERTO EN LOS DOS LIBROS. El saldo total es lo que se le debe; el de
-      // gestión es la parte que todavía no tiene comprobante. Sin esta apertura
-      // el que mira la ficha no sabe cuánto de lo que debe está documentado, que
-      // es justo la pregunta que aparece cuando hay que pagarle.
-      + (fiscalGes.gestion
-          ? dato('De eso, sin facturar',
-              '<span style="color:#8a5a1f">' + sgMoney(fiscalGes.gestion) + '</span>'
-              + '<div class="sg-oc-sub">documentado: ' + sgMoney(fiscalGes.fiscal) + '</div>', true)
-          : '')
       + dato('CUIT', '<span style="font-family:monospace">' + escH(p.cuit || '—') + '</span>', true)
       + dato('Movimientos', nr(movs.length), true)
       + (d.esperando_contabilizar && d.esperando_contabilizar.length
@@ -9477,8 +9508,33 @@ function sgFmSinContabilizar(){
         + '<td style="text-align:right;white-space:nowrap">'
           + '<button class="btn bo bs" onclick="sgOcVer(' + x.oc_id + ')">👁</button> '
           + '<button class="btn bb bs" onclick="sgFmContabilizar(' + x.oc_id + ',\'' + esc(nro) + '\')">'
-            + '📘 ' + (anul ? 'Rehacer' : 'Contabilizar') + '</button></td></tr>';
+            + '📘 ' + (anul ? 'Rehacer' : 'Contabilizar') + '</button>'
+          // ANULAR LA FACTURA. Hasta ahora no había manera: una cargada contra
+          // la partida equivocada, o que el proveedor anuló de su lado, quedaba
+          // viva moviendo la cuenta corriente para siempre.
+          + (lnbPuedeAnular('sg-compras')
+              ? ' <button class="btn bd bs" onclick="sgFmAnularFactura(' + x.id + ',\'' + esc(nro) + '\')">'
+                + 'Anular</button>' : '')
+          + '</td></tr>';
     }).join('');
+  });
+}
+
+// DAR DE BAJA LA FACTURA. Se anula el comprobante y, si estaba contabilizado, su
+// asiento: son la misma decisión, y separarlas dejaría el libro con un asiento
+// vivo apoyado en una factura que ya no existe. La partida vuelve a la bandeja
+// de pendientes de facturar.
+function sgFmAnularFactura(facturaId, nro){
+  var motivo = prompt('¿Por qué se anula la factura ' + nro + '?\n\n'
+    + 'Se da de baja el comprobante y, si ya estaba contabilizado, se anula el asiento. '
+    + 'La partida vuelve a quedar esperando factura.');
+  if (motivo === null) return;
+  if (!String(motivo).trim()) { toast('Escribí por qué se anula: queda registrado', 'er'); return; }
+  api('/api/sg/facturas-compra/' + facturaId + '/anular', 'POST', { motivo: motivo }).then(function(r){
+    if (!r || !r.ok) { toast((r && r.error) || 'No se pudo anular', 'er'); return; }
+    toast('Factura anulada' + (r.data && r.data.asiento_anulado ? ' — y su asiento' : ''), 'ok');
+    sgFmSinContabilizar();
+    sgFmLoad();
   });
 }
 

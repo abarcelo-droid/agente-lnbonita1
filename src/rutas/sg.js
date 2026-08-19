@@ -2960,6 +2960,64 @@ function lineasGestionFactura(lineasAsiento, fac) {
   ];
 }
 
+// ── ANULAR UNA FACTURA DE MERCADERÍA ─────────────────────────────────────
+// No había manera. Una factura mal cargada se podía pisar cargando otra encima,
+// pero no dar de baja: si el proveedor la anuló de su lado, o se cargó contra la
+// partida equivocada, quedaba viva moviendo la cuenta corriente para siempre.
+// Lo único que la daba de baja era cambiarle el circuito a la partida, y como
+// efecto lateral.
+//
+// Se anula con su PROPIA dirección —así el control de niveles la reconoce— y
+// con motivo obligatorio, como todo lo que deshace algo en este sistema.
+//
+// TRES FRENOS, y los tres son la misma idea: no dejar el libro colgado.
+router.post('/facturas-compra/:id/anular', requireAuth, (req, res) => {
+  const db = getDb();
+  try {
+    const motivo = val(req.body && req.body.motivo);
+    if (!motivo) return res.status(400).json({ ok: false, error: 'Escribí por qué se anula: queda registrado' });
+    const f = db.prepare('SELECT * FROM sg_facturas_compra WHERE id=?').get(req.params.id);
+    if (!f) return res.status(404).json({ ok: false, error: 'Factura no encontrada' });
+    if (!f.activo) return res.status(400).json({ ok: false, error: 'Esa factura ya está dada de baja' });
+
+    // 1. Si ya se le pagó algo, no. El pago quedaría imputado a un comprobante
+    //    que no existe, y la plata ya salió: primero se anula el pago.
+    if (r2(f.saldo_pagado) > 0) {
+      return res.status(400).json({ ok: false,
+        error: 'Esta factura tiene ' + r2(f.saldo_pagado) + ' pagados. Anulá primero esa orden de pago: '
+             + 'si no, el pago queda colgado de un comprobante que ya no está.' });
+    }
+    // 2. Y si está contabilizada, primero se anula el asiento. Se hace acá mismo
+    //    —no se manda a otra pantalla— porque son la misma decisión.
+    const asi = f.asiento_id
+      ? db.prepare('SELECT id, anulado FROM sg_asientos WHERE id=?').get(f.asiento_id) : null;
+
+    db.transaction(() => {
+      if (asi && !asi.anulado) {
+        db.prepare(`UPDATE sg_asientos SET anulado=1, anulado_por=?, anulado_en=datetime('now','localtime'),
+          descripcion = descripcion || ' — ANULADO: ' || ? WHERE id=?`).run(uid(req), motivo, asi.id);
+      }
+      db.prepare(`UPDATE sg_facturas_compra SET activo=0,
+        modificado_en=datetime('now','localtime'), modificado_por=? WHERE id=?`).run(uid(req), f.id);
+      // 3. Y la partida vuelve a estar esperando factura. El número quedaba
+      //    anotado en la recepción, que es de donde la bandeja lee que ya no
+      //    está pendiente: sin limpiarlo, la partida desaparecía del circuito.
+      const ocs = db.prepare('SELECT oc_id FROM sg_factura_compra_ocs WHERE factura_id=?').all(f.id)
+        .map((x) => x.oc_id);
+      if (f.oc_id && ocs.indexOf(f.oc_id) < 0) ocs.push(f.oc_id);
+      for (const ocId of ocs) {
+        db.prepare(`UPDATE sg_recepciones SET factura_numero=NULL,
+          modificado_en=datetime('now','localtime'), modificado_por=?
+          WHERE oc_id=? AND activo=1`).run(uid(req), ocId);
+        anotarEdicion(db, { tabla: 'sg_facturas_compra', registroId: f.id, campo: 'anulada',
+          antes: (f.punto_venta ? f.punto_venta + '-' : '') + (f.numero || ''), despues: 'dada de baja',
+          motivo, ocId, userId: uid(req) });
+      }
+    })();
+    res.json({ ok: true, data: { id: Number(f.id), asiento_anulado: !!(asi && !asi.anulado) } });
+  } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
+});
+
 // ── CONTABILIZAR LA FACTURA ──────────────────────────────────────────────
 // Acá se escribe en la contabilidad. Hasta este punto todo era preparar el
 // asiento; esto lo graba.
@@ -5776,6 +5834,20 @@ router.get('/cc-proveedores', requireAuth, (req, res) => {
                     FROM sg_facturas_compra f
                     JOIN sg_asientos a ON a.id = f.asiento_id AND COALESCE(a.anulado,0) = 0
                    WHERE f.proveedor_id = p.id AND f.activo = 1),0) AS facturado,
+        -- ── QUÉ PARTE DE LO QUE SE LE DEBE NO TIENE COMPROBANTE ──────────
+        -- UN PAGO CANCELA PROPORCIONALMENTE lo facturado y lo que no. Es una
+        -- convención y hay que elegir una: sin ella, dos facturas iguales con
+        -- el mismo pago encima podrían dar saldos de gestión distintos según el
+        -- orden en que se hubieran cargado. Prorratear es la única que no
+        -- depende del orden.
+        COALESCE((SELECT SUM(ROUND(
+                    (COALESCE(f.total,0) + COALESCE(f.dif_gestion,0) - COALESCE(f.saldo_pagado,0))
+                    * COALESCE(f.dif_gestion,0)
+                    / NULLIF(COALESCE(f.total,0) + COALESCE(f.dif_gestion,0), 0), 2))
+                    FROM sg_facturas_compra f
+                    JOIN sg_asientos a ON a.id = f.asiento_id AND COALESCE(a.anulado,0) = 0
+                   WHERE f.proveedor_id = p.id AND f.activo = 1
+                     AND COALESCE(f.dif_gestion,0) > 0),0) AS pendiente_gestion,
         -- LO QUE TODAVÍA NO ESTÁ EN EL LIBRO. Se informa aparte y NO suma al
         -- saldo: la cuenta corriente refleja la contabilidad, y hasta que no
         -- hay asiento no hay deuda registrada. Se muestra igual para que el que
@@ -6468,6 +6540,18 @@ router.get('/cc-proveedores/:id', requireAuth, (req, res) => {
       JOIN sg_asientos a ON a.id = f.asiento_id AND COALESCE(a.anulado,0) = 0
       WHERE f.proveedor_id = ? AND f.activo = 1
       ORDER BY f.fecha_emision, f.id`).all(p.id);
+    // Lo mismo que en el listado, con la misma regla: el pago cancela
+    // proporcionalmente lo facturado y lo que no. Se calcula acá para que la
+    // ficha y el listado no puedan dar números distintos — que es justo lo que
+    // pasaba antes.
+    const saldos = { fiscal: r2(p.saldo_inicial), gestion: 0 };
+    for (const f of facturas) {
+      const bruto = r2((f.total || 0) + (f.dif_gestion || 0));
+      const pend = r2(bruto - (f.pagado || 0));
+      const ges = bruto > 0 ? r2(pend * (f.dif_gestion || 0) / bruto) : 0;
+      saldos.gestion = r2(saldos.gestion + ges);
+      saldos.fiscal = r2(saldos.fiscal + r2(pend - ges));
+    }
     const TIPO = { factura_a: 'Factura A', factura_b: 'Factura B', liquidacion: 'Liquidación' };
     for (const f of facturas) {
       movs.push({ tipo: 'factura', fecha: f.fecha_emision,
@@ -6543,6 +6627,7 @@ router.get('/cc-proveedores/:id', requireAuth, (req, res) => {
     for (const m of movs) { saldo = r2(saldo + (m.haber || 0) - (m.debe || 0)); m.saldo = saldo; }
 
     res.json({ ok: true, data: { proveedor: p, movimientos: movs, saldo,
+      saldo_fiscal: saldos.fiscal, saldo_gestion: saldos.gestion,
       esperando_contabilizar: esperando,
       total_esperando: r2(esperando.reduce((a, x) => a + (Number(x.total) || 0), 0)) } });
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
