@@ -24183,10 +24183,13 @@ function sgImpVisor(id){
     }
     // 4) Qué trae.
     if(d.lineas.length){
-      h+='<div style="font-size:12px;font-weight:600;color:var(--mut);margin:14px 0 5px">PRODUCTOS</div>'
+      var pp={}; (est.por_producto||[]).forEach(function(x){ pp[x.linea_id]=x; });
+      h+='<div style="font-size:12px;font-weight:600;color:var(--mut);margin:14px 0 5px">PRODUCTOS · costo prorrateado</div>'
         +'<table class="pa-tbl" style="font-size:12px;width:100%"><thead><tr><th>Producto</th><th>Envase</th>'
         +'<th style="text-align:right">Cajas</th><th style="text-align:right">kg/bulto</th><th style="text-align:right">kg</th>'
-        +'<th style="text-align:right">FOB US$/caja</th></tr></thead><tbody>'
+        +'<th style="text-align:right">FOB US$/caja</th>'
+        +'<th style="text-align:right">Costo total</th><th style="text-align:right">Costo/caja</th><th style="text-align:right">Costo/kg</th>'
+        +'</tr></thead><tbody>'
         +d.lineas.map(function(l){
           var kg=(Number(l.cajas)||0)*(Number(l.kg_por_bulto)||0);
           return '<tr><td>'+esc((l.producto_nombre||'')+(l.producto_variedad?' '+l.producto_variedad:''))+'</td>'
@@ -24194,8 +24197,18 @@ function sgImpVisor(id){
             +'<td style="text-align:right">'+nr(l.cajas)+'</td>'
             +'<td style="text-align:right">'+(l.kg_por_bulto!=null?nr(l.kg_por_bulto):'—')+'</td>'
             +'<td style="text-align:right">'+nr(Math.round(kg))+'</td>'
-            +'<td style="text-align:right">'+(l.precio_unitario_usd!=null?nr(l.precio_unitario_usd):'—')+'</td></tr>';
-        }).join('')+'</tbody></table>';
+            +'<td style="text-align:right">'+(l.precio_unitario_usd!=null?nr(l.precio_unitario_usd):'—')+'</td>'
+            // El costo prorrateado de ESE producto: es con lo que se le pone precio.
+            +'<td style="text-align:right">'+(pp[l.id]?sgMoney(Math.round(pp[l.id].costo_ars)):'—')+'</td>'
+            +'<td style="text-align:right;font-weight:700;color:#16a34a">'+(pp[l.id]&&pp[l.id].costo_caja!=null?money2(pp[l.id].costo_caja):'—')+'</td>'
+            +'<td style="text-align:right">'+(pp[l.id]&&pp[l.id].costo_kg!=null?money2(pp[l.id].costo_kg):'—')+'</td></tr>';
+        }).join('')
+        +'</tbody><tfoot><tr style="font-weight:700;border-top:2px solid var(--bor)">'
+          +'<td colspan="4">Total</td>'
+          +'<td style="text-align:right">'+nr(Math.round(est.kg||0))+'</td><td></td>'
+          +'<td style="text-align:right">'+(conv?sgMoney(Math.round(est.total_plazo)):'—')+'</td><td colspan="2"></td>'
+        +'</tr></tfoot></table>'
+        +'<div style="font-size:11px;color:var(--mut);margin-top:5px">Impuestos y despachante se reparten <b>por valor</b> (una caja que vale más paga más); flete, Tasa María y bancarios, <b>parejo por caja</b>.</div>';
     }
     // 5) Cómo le fue, si ya entró.
     if(res){
