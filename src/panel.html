@@ -23405,7 +23405,7 @@ function sgDocTipoChange(){
   var esInv=(eid('sg-doc-tipo').value==='factura_comercial');
   Array.prototype.forEach.call(document.querySelectorAll('.sg-doc-inv'), function(el){ el.style.display=esInv?'':'none'; });
 }
-function sgEmbDocSubir(forzar){
+function sgEmbDocSubir(){
   if(!SG._embDocId){ toast('Guardá el embarque primero','er'); return; }
   var fileInp=eid('sg-doc-file'); var f=fileInp&&fileInp.files&&fileInp.files[0];
   if(!f){ toast('Elegí un archivo','er'); return; }
@@ -23423,24 +23423,24 @@ function sgEmbDocSubir(forzar){
   if(esInv){
     fd.append('nro_invoice', eid('sg-doc-nro-invoice').value.trim());
     fd.append('monto_total', eid('sg-doc-monto').value);
-    if(forzar) fd.append('forzar','1');
   }
   fetch('/api/sg/embarques/'+SG._embDocId+'/documentos', { method:'POST', body:fd, credentials:'same-origin' })
     .then(function(r){ return r.json(); })
     .then(function(r){
       if(r&&r.ok){
         var c=r.data&&r.data.confirmacion;
-        toast(c ? ('✓ Invoice '+c.nro_invoice+' cargado — mercadería confirmada en US$ '+nr(c.monto)) : 'Documento subido','ok');
+        // El papel manda: se avisa el desvío contra lo cotizado, pero el monto ya entró.
+        var msg='Documento subido';
+        if(c){
+          msg='✓ Invoice '+c.nro_invoice+' — mercadería confirmada en US$ '+nr(c.monto);
+          if(c.diferencia) msg+=' · '+(c.diferencia>0?'+':'')+nr(c.diferencia)+' vs. lo cotizado';
+        }
+        toast(msg, c&&c.diferencia ? 'warn' : 'ok');
         if(fileInp) fileInp.value='';
         eid('sg-doc-obs').value='';
         if(esInv){ eid('sg-doc-nro-invoice').value=''; eid('sg-doc-monto').value=''; }
         sgEmbDocsLoad();
         if(c) sgImpOpen(SG._embDocId);          // recarga: el estimador ahora usa el monto del papel
-        return;
-      }
-      // El monto del invoice no coincide con lo estimado: no se guarda por las dudas, se pregunta.
-      if(r&&r.requiere_confirmacion){
-        if(confirm(r.error+'\n\n¿Confirmás que manda el invoice? El estimado se reemplaza por US$ '+nr(r.invoice)+'.')) sgEmbDocSubir(true);
         return;
       }
       toast((r&&r.error)||'Error al subir','er');
@@ -23616,7 +23616,12 @@ function sgImpPintarEstimador(d){
     +row('BASE IMPONIBLE','US$ '+nr(d.usd.base)+' · '+sgMoney(Math.round(d.base_ars)),'invoice + flete decl. + seguro',true)
     +'<div style="font-size:10px;color:var(--mut);margin-top:2px">base de cálculo de impuestos — el flete declarado no suma al costo</div></div>';
   h+=d.lineas.filter(function(l){ return l.ars; }).map(function(l){
-      return row(l.label, sgMoney(Math.round(l.ars)), l.usd?('US$ '+nr(l.usd)):(l.detalle||''));
+      // 📄 = el monto salió de un papel, no de la cotización. Y si difiere de lo cotizado se
+      // muestra cuánto: ése es el control de si estamos cotizando bien.
+      var sub=l.usd?('US$ '+nr(l.usd)):(l.detalle||'');
+      if(l.confirmado) sub='📄 '+sub;
+      if(l.desvio_usd) sub+=' <span style="color:'+(l.desvio_usd>0?'var(--err,#dc2626)':'var(--ok,#16a34a)')+'">('+(l.desvio_usd>0?'+':'')+nr(l.desvio_usd)+' vs. cotizado)</span>';
+      return row(l.label, sgMoney(Math.round(l.ars)), sub);
     }).join('');
   h+=row('COSTO AL TC DE HOY', sgMoney(Math.round(d.total_contado)), '', true);
   if(d.dif_cambio){
