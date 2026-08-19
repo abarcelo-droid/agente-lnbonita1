@@ -156,3 +156,47 @@ Estas notas son del área contable/administrativa (módulos MD). Respetarlas al 
 
 ### Validación manual (no hay tests)
 - panel.html es enorme (~33k líneas). Antes de dar por terminado, validar el JS de los <script> con `new Function(...)` y los .js con `node --check`.
+
+## PARA ANDRÉS (y para quien mire el deploy) — HAY TRES RAILWAY, NO UNO
+
+Este repositorio lo escuchan **tres proyectos de Railway distintos**, cada uno con
+su entorno `production`:
+
+| Proyecto | Project ID |
+|---|---|
+| `fabulous-heart`      | `c68f77b2-1e79-4dfe-9540-bdce3cf838eb` |
+| `creative-creativity` | `da04d4f1-170f-4ff9-ba47-9ab78456c6c0` |
+| `joyful-enjoyment`    | `cf18e353-e9f5-43e5-b91f-5009f0bc47af` |
+
+**Cada merge a main dispara TRES builds**, y Railway los hace de a uno. Con
+cuatro PR seguidos eso son doce builds en cola, y el panel sigue mostrando el
+`VERSION` viejo un buen rato después de mergear. Ya pasó: el 19/8 el panel decía
+V731 cuando main estaba en V746, y no había nada roto — venía atrás.
+
+**Antes de salir a buscar un deploy fallado, mirá si simplemente está encolado.**
+
+**Pregunta abierta para Andrés:** ¿los tres son a propósito? Si alguno es de
+prueba o quedó de antes, apagarle el auto-deploy hace que todo salga tres veces
+más rápido (y deja de pagarse tres veces el mismo build). Pablo no sabe de dónde
+salieron los tres.
+
+### Cómo mirar el deploy sin entrar a Railway
+
+Railway publica el estado de cada deploy en GitHub, así que se ve con `gh`:
+
+```bash
+# Qué commit está desplegado en cada proyecto, y cómo le fue
+gh api "repos/{owner}/{repo}/deployments?per_page=12"   --jq '.[] | "\(.created_at)  \(.environment)  \(.ref[0:8])"'
+
+# El detalle de uno (success / failure / in_progress) + link al log
+gh api "repos/{owner}/{repo}/deployments/<id>/statuses"   --jq '.[] | "\(.created_at)  \(.state)  \(.log_url)"'
+```
+
+Y qué versión está sirviendo el server AHORA, que es la prueba final:
+
+```bash
+curl -s https://agente-lnbonita1-production.up.railway.app/static/sidebar-v2.js   | grep "const VERSION"
+```
+
+`/static` manda `Cache-Control: no-cache`, así que lo que devuelve ese curl es lo
+que ve el navegador: si ahí dice V746, el problema no es la caché de nadie.
