@@ -157,6 +157,10 @@ const PREFIJOS = [
   // el que se contabilizan —define cómo entra la plata de TODAS las compras— y
   // la lectura del comprobante con IA, que gasta la API key.
   ['sg-facturas-merc',   'sg/partidas-a-facturar,sg/factura-mercaderia,sg/facturas-sin-contabilizar'],
+  // Los dos prefijos de ventas son MÁS LARGOS que 'sg/ventas', que es de
+  // sg-ventas, así que le ganan: gana el prefijo más largo. La cobranza y la
+  // ficha del cliente son de esta pantalla, no de la de cargar despachos.
+  ['sg-cc-clientes',     'sg/cc-clientes,sg/ventas/cobranzas,sg/ventas/cc'],
   ['sg-cc-proveedores',  'sg/cc-proveedores,sg/pagos'],
   ['sg-caja-bancos',     'sg/tesoreria'],
 

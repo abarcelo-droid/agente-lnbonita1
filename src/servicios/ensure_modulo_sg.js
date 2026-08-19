@@ -40,6 +40,11 @@ const MODULOS_SG = [
   // la pantalla donde se CARGA la compra: el que mira cuánto se le debe a un
   // proveedor no está cargando órdenes, y tenía que entrar a Ingresos para
   // llegar. Va como pantalla propia, en el mismo grupo.
+  // Cuenta corriente de clientes. Misma razón que la de proveedores: era una
+  // solapa adentro de Salidas, que es la pantalla donde se CARGA la venta. El
+  // que mira cuánto le debe un cliente —o le va a tomar un cobro— no está
+  // cargando despachos, y tenía que entrar ahí para llegar.
+  ["sg-cc-clientes", "💳 CC clientes", 652],
   ["sg-cc-proveedores", "💳 CC proveedores", 670],
   // Caja y Bancos de San Gerónimo. El backend ya existía entero
   // —/api/sg/tesoreria sobre las tablas sg_fin_*— pero no había pantalla: la
@@ -100,6 +105,7 @@ try {
   db.prepare("UPDATE modulos_config SET label='🚜 Control Cooperativa' WHERE modulo='sg-control-coop'").run();
   db.prepare("UPDATE modulos_config SET label='🧾 Facturas por mercadería' WHERE modulo='sg-facturas-merc'").run();
   db.prepare("UPDATE modulos_config SET label='💳 CC proveedores' WHERE modulo='sg-cc-proveedores'").run();
+  db.prepare("UPDATE modulos_config SET label='💳 CC clientes' WHERE modulo='sg-cc-clientes'").run();
   db.prepare("UPDATE modulos_config SET label='🏦 Caja y Bancos' WHERE modulo='sg-caja-bancos'").run();
   db.prepare("UPDATE modulos_config SET label='📄 Liquidaciones'      WHERE modulo='ab-liquidaciones'").run();
   // ── EL MENÚ DE SAN GERÓNIMO, ORDENADO POR CÓMO SE TRABAJA ────────────────
@@ -135,6 +141,7 @@ try {
     // grupo                          orden  módulo
     ['Administración de Ventas',      650,  'sg-stock'],
     ['Administración de Ventas',      651,  'sg-ventas'],
+    ['Administración de Ventas',      652,  'sg-cc-clientes'],
 
     // ── INGRESOS: LA MERCADERÍA QUE ENTRA ────────────────────────────
     // Todo lo que pasa desde que se pacta la compra hasta que la mercadería
