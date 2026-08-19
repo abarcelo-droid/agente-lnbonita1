@@ -3667,8 +3667,8 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
 
     <div class="sg-imp-pane" id="sg-imp-pane-ingresos">
       <div class="ab-table-wrap"><table class="pa-tbl">
-        <thead><tr><th>Embarque</th><th>Proveedor</th><th style="text-align:center">Estado</th><th style="text-align:right">Cajas</th><th style="text-align:right">Costo/caja puesto acá</th><th></th></tr></thead>
-        <tbody id="sg-tb-embarques"><tr><td colspan="6" class="emp">Cargando…</td></tr></tbody>
+        <thead><tr><th>Embarque</th><th>N° invoice</th><th>Proveedor</th><th style="text-align:center">Estado</th><th style="text-align:right">Cajas</th><th style="text-align:right">Costo/caja puesto acá</th><th></th></tr></thead>
+        <tbody id="sg-tb-embarques"><tr><td colspan="7" class="emp">Cargando…</td></tr></tbody>
       </table></div>
     </div>
 
@@ -23417,6 +23417,10 @@ function sgImpInit(){
     eid('sg-tb-embarques').innerHTML = rows.length ? rows.map(function(e){
       return '<tr>'
         +'<td><b>'+esc(e.nombre||'')+'</b></td>'
+        // Sin invoice todavía no está confirmado el precio de la mercadería: se avisa.
+        +'<td>'+(e.nro_invoice
+            ? esc(e.nro_invoice)
+            : '<span style="color:var(--mut);font-size:11px">sin invoice</span>')+'</td>'
         +'<td>'+esc(e.proveedor_nombre||'—')+'</td>'
         // Switch rápido: solo los tres estados de la negociación. Recibido y Cerrado los
         // ponen sus botones, que son los que generan los lotes y re-costean.
@@ -23435,7 +23439,7 @@ function sgImpInit(){
         +'</td>'
         +'<td style="text-align:right;white-space:nowrap"><button class="btn bo bs" title="Ver el camión: costo en pesos, productos y documentos" onclick="sgImpVisor('+e.id+')">👁</button> <button class="btn bo bs" title="Duplicar: arranca un embarque nuevo con esta estructura de costos" onclick="sgImpDuplicar('+e.id+')">⧉</button> <button class="btn bo bs" onclick="sgImpOpen('+e.id+')">✏️</button>'+(lnbPuedeAnular('sg-importacion')?' <button class="btn bd bs" onclick="sgImpDel('+e.id+')">×</button>':'')+'</td>'
       +'</tr>';
-    }).join('') : '<tr><td colspan="6" class="emp">Sin embarques. Creá el primero con “+ Nuevo embarque”.</td></tr>';
+    }).join('') : '<tr><td colspan="7" class="emp">Sin embarques. Creá el primero con “+ Nuevo embarque”.</td></tr>';
   });
 }
 function sgImpVal(v){ return (v==null)?'':String(v); }
