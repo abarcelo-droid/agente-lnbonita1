@@ -519,6 +519,12 @@ router.patch('/cheques-terceros/:id/estado', requireAuth, (req, res) => {
         db.prepare("DELETE FROM sg_fin_movimientos WHERE referencia = ? AND cuenta_id = ?")
           .run('CHT-' + c.id, c.cuenta_destino);
         db.prepare('UPDATE sg_fin_cheques_terceros SET cuenta_destino=NULL WHERE id=?').run(c.id);
+        // Y el asiento del depósito se anula: el banco no recibió esa plata. La
+        // deuda del cliente NO vuelve sola —eso lo decide quien lo gestione—
+        // pero el libro deja de decir que el dinero entró.
+        db.prepare(`UPDATE sg_asientos SET anulado=1, anulado_en=datetime('now','localtime'),
+          descripcion = descripcion || ' — ANULADO: el banco rechazó el cheque'
+          WHERE ref_codigo=? AND COALESCE(anulado,0)=0`).run('CHT-' + c.id);
       }
     })();
     res.json({ ok: true });
@@ -546,6 +552,31 @@ router.post('/cheques-terceros/:id/depositar', requireAuth, (req, res) => {
         error: 'La cuenta "' + cuenta.nombre + '" tiene usuarios asignados y no estás entre ellos.' });
     }
     const fecha = (req.body && req.body.fecha) || db.prepare("SELECT date('now','localtime') d").get().d;
+    // ── EL DEPÓSITO DESCARGA LA CARTERA ─────────────────────────────────
+    // El cheque entró al libro cuando se cobró, contra la cuenta de "cheques en
+    // cartera". Depositarlo es sacarlo de ahí y meterlo en el banco: si el
+    // depósito no asentara, esa cuenta se llenaría de cheques que ya se
+    // cobraron y nunca bajaría.
+    //
+    // Sólo asienta si el cheque tiene con qué: los que se cargaron a mano en la
+    // cartera, sin pasar por una cobranza, nunca entraron al libro — para esos
+    // el depósito es sólo el movimiento, como era antes.
+    const ctaCartera = (db.prepare("SELECT cuenta_id FROM sg_config_impositiva WHERE clave='cheques_cartera'")
+      .get() || {}).cuenta_id || null;
+    const vinoDeCobranza = !!db.prepare(
+      'SELECT 1 FROM sg_ven_cobranzas WHERE cheque_terceros_id=? AND anulada=0').get(c.id);
+    if (vinoDeCobranza && (!ctaCartera || !cuenta.cuenta_contable_id)) {
+      // Este cheque SÍ está en el libro, cargado en la cuenta de cartera. Si el
+      // depósito no puede asentar, esa cuenta queda con un cheque que ya se
+      // cobró y no baja nunca. Antes de dejar un agujero así, se frena y se dice
+      // qué falta configurar.
+      return res.status(400).json({ ok: false, error: !ctaCartera
+        ? 'Falta la cuenta contable de "cheques en cartera". Configurala antes de depositar.'
+        : `La cuenta "${cuenta.nombre}" no tiene cuenta contable asociada: el depósito no puede `
+          + `entrar al libro. Asignásela en Caja y Bancos.` });
+    }
+    const asienta = !!(ctaCartera && cuenta.cuenta_contable_id && vinoDeCobranza);
+    let asientoId = null;
     db.transaction(() => {
       db.prepare("UPDATE sg_fin_cheques_terceros SET estado='depositado', cuenta_destino=? WHERE id=?")
         .run(cuenta.id, c.id);
@@ -555,8 +586,19 @@ router.post('/cheques-terceros/:id/depositar', requireAuth, (req, res) => {
         'Depósito cheque de terceros' + (c.nro_cheque ? ' N° ' + c.nro_cheque : '')
           + (c.librador ? ' — ' + c.librador : ''),
         c.monto, 'CHT-' + c.id, u ? u.id : null);
+      if (asienta) {
+        asientoId = db.prepare(`INSERT INTO sg_asientos (fecha, descripcion, usuario_id, ref_codigo)
+          VALUES (?,?,?,?)`).run(fecha,
+          'Depósito cheque N° ' + c.nro_cheque + (c.librador ? ' de ' + c.librador : ''),
+          u ? u.id : null, 'CHT-' + c.id).lastInsertRowid;
+        const insL = db.prepare(`INSERT INTO sg_asientos_lineas (asiento_id, cuenta_id, debe, haber, descripcion)
+          VALUES (?,?,?,?,?)`);
+        insL.run(asientoId, cuenta.cuenta_contable_id, c.monto, 0, cuenta.nombre);
+        insL.run(asientoId, ctaCartera, 0, c.monto, 'Cheques en cartera');
+      }
     })();
-    res.json({ ok: true, data: { id: Number(c.id), cuenta: cuenta.nombre } });
+    res.json({ ok: true, data: { id: Number(c.id), cuenta: cuenta.nombre,
+      asiento_id: asientoId ? Number(asientoId) : null } });
   } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
 });
 

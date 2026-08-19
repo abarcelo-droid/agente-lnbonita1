@@ -1624,7 +1624,8 @@ router.put('/config-impositiva', requireAdmin, (req, res) => {
   // Whitelist: el UPSERT de abajo crearía una fila nueva con cualquier clave que
   // llegue, y esa fila después aparece en la pantalla de configuración.
   const CLAVES = ['iva_credito_fiscal', 'iva_debito_fiscal', 'percepcion_iva',
-                  'percepcion_iibb', 'percepcion_ganancias', 'retencion', 'ventas'];
+                  'percepcion_iibb', 'percepcion_ganancias', 'retencion', 'ventas',
+                  'cheques_cartera'];
   if (!CLAVES.includes(clave)) return res.status(400).json({ ok: false, error: 'clave desconocida: ' + clave });
   try {
     const cid = cuenta_id ? parseInt(cuenta_id) : null;

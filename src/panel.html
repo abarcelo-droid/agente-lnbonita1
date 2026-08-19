@@ -4355,7 +4355,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
         <div class="fl"><label>En qué cuenta entra</label>
           <select id="sg-cob-cuenta" onchange="sgCobAsientoPintar()"></select></div>
         <div class="fl"><label>Forma de cobro</label>
-          <select id="sg-cob-forma">
+          <select id="sg-cob-forma" onchange="sgCobForma()">
             <option value="transferencia">Transferencia</option>
             <option value="efectivo">Efectivo</option>
             <option value="cheque">Cheque</option>
@@ -4365,6 +4365,26 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
                  style="text-align:right" oninput="this.value=sgMilFmtLive(this.value);sgCobTotal()"></div>
         <div class="fl"><label>Referencia</label>
           <input id="sg-cob-ref" placeholder="N° de transferencia, recibo…"></div>
+      </div>
+      <!-- EL CHEQUE NO ES PLATA EN EL BANCO. Cuando el cliente paga con cheque,
+           el banco no recibió nada: hay un papel que vale el día que se
+           deposita. Por eso acá no se elige cuenta —se elige más tarde, al
+           depositarlo— y se anotan los datos del papel, que es lo que después
+           permite reconocerlo en la cartera. -->
+      <div id="sg-cob-chq" style="display:none;border:1.5px solid var(--bd);border-radius:8px;
+           padding:10px 12px;margin-top:10px;background:var(--bg2)">
+        <div style="font-weight:700;font-size:12px;text-transform:uppercase;letter-spacing:.04em;
+             color:var(--mut);margin-bottom:8px">Datos del cheque</div>
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px">
+          <div class="fl"><label>Banco</label><input id="sg-cob-chq-banco" placeholder="Galicia, Nación…"></div>
+          <div class="fl"><label>N° de cheque</label><input id="sg-cob-chq-nro" placeholder="00012345"></div>
+          <div class="fl"><label>Librador (quién lo firma)</label>
+            <input id="sg-cob-chq-lib" placeholder="Razón social del que emitió el cheque"></div>
+          <div class="fl"><label>Vencimiento</label><input type="date" id="sg-cob-chq-vto"></div>
+        </div>
+        <div style="font-size:12px;color:var(--mut);margin-top:8px">
+          El cheque entra a la cartera, en Caja y Bancos. La plata recién sube al banco el día
+          que se deposita.</div>
       </div>
       <div style="font-weight:700;font-size:12px;text-transform:uppercase;letter-spacing:.04em;
            color:var(--mut);margin:14px 0 6px">Qué comprobantes cancela</div>
@@ -12489,16 +12509,20 @@ var SG_COB = { clienteId: null, docs: [], cuentas: [], ctaCliente: null };
 
 function sgCobOpen(clienteId){
   var c = SG_CCLI.filas.filter(function(x){ return x.id === clienteId; })[0];
-  SG_COB = { clienteId: clienteId, docs: [], cuentas: [], ctaCliente: null };
+  SG_COB = { clienteId: clienteId, docs: [], cuentas: [], ctaCliente: null, cartera: null };
   var t = eid('sg-cob-tit');
   if (t) t.textContent = 'Registrar cobranza — ' + (c ? sgCcClNombre(c) : '');
   var f = eid('sg-cob-fecha'); if (f) f.value = new Date().toISOString().slice(0, 10);
-  ['sg-cob-monto', 'sg-cob-ref', 'sg-cob-notas'].forEach(function(id){
+  ['sg-cob-monto', 'sg-cob-ref', 'sg-cob-notas',
+   'sg-cob-chq-banco', 'sg-cob-chq-nro', 'sg-cob-chq-lib', 'sg-cob-chq-vto'].forEach(function(id){
     var e = eid(id); if (e) e.value = '';
   });
+  var fp = eid('sg-cob-forma'); if (fp) fp.value = 'transferencia';
+  sgCobForma();
 
   api('/api/sg/ventas/cobranzas/cuentas').then(function(r){
     SG_COB.cuentas = (r && r.ok) ? r.data : [];
+    SG_COB.cartera = (r && r.ok) ? (r.cartera || null) : null;
     var sel = eid('sg-cob-cuenta'); if (!sel) return;
     // Sin cuenta contable la cobranza no puede entrar al libro: se muestra, pero
     // avisando, en vez de dejar elegirla y fallar recién al guardar.
@@ -12511,7 +12535,7 @@ function sgCobOpen(clienteId){
       : '<option value="">— no hay cuentas cargadas —</option>';
     var av = eid('sg-cob-aviso');
     if (av) {
-      av.innerHTML = usables.length ? '' :
+      av.innerHTML = (usables.length || (eid('sg-cob-forma') || {}).value === 'cheque') ? '' :
         '<div style="border:1.5px solid #e0a72e;background:rgba(224,167,46,.10);border-radius:8px;'
         + 'padding:9px 11px;margin-bottom:10px;font-size:12.5px;color:#9a3412">'
         + (SG_COB.cuentas.length
@@ -12531,6 +12555,20 @@ function sgCobOpen(clienteId){
     sgCobPintar();
     sgModalArriba('sg-cob-modal');
   });
+}
+
+// COBRAR CON CHEQUE NO ELIGE CUENTA. La cuenta se elige al depositarlo, que es
+// cuando la plata entra de verdad. Dejar el selector activo invitaría a pensar
+// que el banco sube hoy, y no sube.
+function sgCobForma(){
+  var esChq = (eid('sg-cob-forma') || {}).value === 'cheque';
+  var box = eid('sg-cob-chq'); if (box) box.style.display = esChq ? '' : 'none';
+  var sel = eid('sg-cob-cuenta');
+  if (sel) { sel.disabled = esChq; sel.style.opacity = esChq ? '.5' : ''; }
+  var lbl = sel && sel.parentNode ? sel.parentNode.querySelector('label') : null;
+  if (lbl) lbl.textContent = esChq ? 'En qué cuenta entra (al depositar)' : 'En qué cuenta entra';
+  if (esChq) { var av = eid('sg-cob-aviso'); if (av) av.innerHTML = ''; }
+  sgCobAsientoPintar();
 }
 
 function sgCobPintar(){
@@ -12593,8 +12631,23 @@ function sgCobAsientoPintar(){
       + 'Poné cuánto se cobró y acá se muestra el asiento que va a entrar al libro.</div>';
     return;
   }
-  var id = (eid('sg-cob-cuenta') || {}).value;
-  var cta = SG_COB.cuentas.filter(function(x){ return String(x.id) === String(id); })[0];
+  // Con cheque el DEBE no es el banco: es la cuenta de cheques en cartera. El
+  // banco sube el día del depósito, y ese asiento lo hace el depósito.
+  var esChq = (eid('sg-cob-forma') || {}).value === 'cheque';
+  var cta;
+  if (esChq) {
+    if (!SG_COB.cartera) {
+      cont.innerHTML = '<div style="font-size:12.5px;color:#9a3412">'
+        + '⚠️ Falta decir contra qué cuenta contable van los cheques en cartera. Configurala en el '
+        + 'plan de cuentas antes de cobrar con cheque.</div>';
+      return;
+    }
+    cta = { cuenta_contable_id: SG_COB.cartera.id, cuenta_codigo: SG_COB.cartera.codigo,
+            cuenta_nombre: SG_COB.cartera.nombre, nombre: 'Cheque de terceros — todavía no depositado' };
+  } else {
+    var id = (eid('sg-cob-cuenta') || {}).value;
+    cta = SG_COB.cuentas.filter(function(x){ return String(x.id) === String(id); })[0];
+  }
   if (!cta || !cta.cuenta_contable_id) {
     cont.innerHTML = '<div style="font-size:12.5px;color:#9a3412">'
       + '⚠️ Elegí una cuenta con cuenta contable asignada: sin eso la cobranza no entra al libro.</div>';
@@ -12618,8 +12671,20 @@ function sgCobAsientoPintar(){
 function sgCobGuardar(){
   var total = sgMilParse((eid('sg-cob-monto') || {}).value) || 0;
   if (!(total > 0)) { toast('Poné cuánto se cobró', 'er'); return; }
+  var forma = (eid('sg-cob-forma') || {}).value;
+  var esChq = forma === 'cheque';
   var cuenta = (eid('sg-cob-cuenta') || {}).value;
-  if (!cuenta) { toast('Elegí en qué cuenta entra la plata', 'er'); return; }
+  if (!esChq && !cuenta) { toast('Elegí en qué cuenta entra la plata', 'er'); return; }
+  var chq = null;
+  if (esChq) {
+    chq = { banco: (eid('sg-cob-chq-banco') || {}).value,
+            nro_cheque: (eid('sg-cob-chq-nro') || {}).value,
+            librador: (eid('sg-cob-chq-lib') || {}).value,
+            fecha_vto: (eid('sg-cob-chq-vto') || {}).value };
+    if (!String(chq.nro_cheque || '').trim() || !String(chq.librador || '').trim()) {
+      toast('De un cheque hay que anotar por lo menos el número y quién lo firma', 'er'); return;
+    }
+  }
   var docs = [], imp = 0;
   SG_COB.docs.forEach(function(d, i){
     var v = sgMilParse((eid('sg-cob-i-' + i) || {}).value) || 0;
@@ -12630,15 +12695,17 @@ function sgCobGuardar(){
   }
   api('/api/sg/ventas/cobranzas', 'POST', {
     cliente_id: SG_COB.clienteId,
-    cuenta_fin_id: Number(cuenta),
+    cuenta_fin_id: esChq ? null : Number(cuenta),
+    cheque: chq,
     fecha: (eid('sg-cob-fecha') || {}).value,
-    forma_pago: (eid('sg-cob-forma') || {}).value,
+    forma_pago: forma,
     referencia: (eid('sg-cob-ref') || {}).value,
     notas: (eid('sg-cob-notas') || {}).value,
     monto: total, docs: docs
   }).then(function(r){
     if (!r || !r.ok) { toast((r && r.error) || 'No se pudo registrar el cobro', 'er'); return; }
-    toast('Cobro registrado — asiento ' + r.asiento_id, 'ok');
+    toast(esChq ? 'Cobro registrado — el cheque quedó en la cartera'
+                : 'Cobro registrado — asiento ' + r.asiento_id, 'ok');
     closeMB('sg-cob-modal');
     sgLoadCC();
     if (SG_CCLI.sel) sgCcClFicha(SG_CCLI.sel.id);
@@ -15121,6 +15188,25 @@ function sgRepExport(){
     <div style="background:#fff;border:1px solid var(--bor);border-radius:8px;padding:12px">
       <label style="font-size:11px;font-weight:700;color:var(--mut);text-transform:uppercase;display:block;margin-bottom:6px">Retención</label>
       <select id="sgct-cfg-imp-retencion" onchange="sgctGuardarConfigImp('retencion',this.value)" style="width:100%;font-size:12px"></select>
+    </div>
+  </div>
+
+  <!-- VENTAS Y VALORES
+       Estas dos claves ya las usaba el sistema y NO tenían dónde cargarse: la de
+       Ventas decide si la liquidación genera asiento —sin ella no generaba
+       ninguno, en silencio— y la de cheques en cartera es contra qué cuenta
+       entra un cobro con cheque, que no es el banco hasta que se deposita. -->
+  <div style="font-size:10px;font-weight:700;color:var(--mut);text-transform:uppercase;letter-spacing:.08em;margin:14px 0 6px;padding-left:2px">Ventas y valores</div>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+    <div style="background:#f0fdf4;border:1px solid #86efac;border-radius:8px;padding:12px">
+      <label style="font-size:11px;font-weight:700;color:#15803d;text-transform:uppercase;display:block;margin-bottom:4px">Ventas</label>
+      <div style="font-size:10px;color:#16a34a;margin-bottom:6px">El haber de la liquidación. Sin esto la liquidación no genera asiento.</div>
+      <select id="sgct-cfg-imp-ventas" onchange="sgctGuardarConfigImp('ventas',this.value)" style="width:100%;font-size:12px"></select>
+    </div>
+    <div style="background:#fefce8;border:1px solid #fde047;border-radius:8px;padding:12px">
+      <label style="font-size:11px;font-weight:700;color:#854d0e;text-transform:uppercase;display:block;margin-bottom:4px">Cheques de terceros en cartera</label>
+      <div style="font-size:10px;color:#a16207;margin-bottom:6px">Valores a depositar. El cobro con cheque entra acá, no al banco.</div>
+      <select id="sgct-cfg-imp-cheques_cartera" onchange="sgctGuardarConfigImp('cheques_cartera',this.value)" style="width:100%;font-size:12px"></select>
     </div>
   </div>
 </div>
@@ -52254,7 +52340,8 @@ function sgctCargarConfigImp() {
       + SGCT_MOD_CUENTAS.map(function(c){
           return '<option value="'+c.id+'">'+(c.codigo?c.codigo+' — ':'')+sgctEsc(c.nombre)+'</option>';
         }).join('');
-    ['iva_credito_fiscal','iva_debito_fiscal','percepcion_iva','percepcion_iibb','percepcion_ganancias','retencion'].forEach(function(clave) {
+    ['iva_credito_fiscal','iva_debito_fiscal','percepcion_iva','percepcion_iibb',
+     'percepcion_ganancias','retencion','ventas','cheques_cartera'].forEach(function(clave) {
       var sel = document.getElementById('sgct-cfg-imp-'+clave);
       if (sel) {
         sel.innerHTML = opts;
