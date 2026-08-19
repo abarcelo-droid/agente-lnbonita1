@@ -7382,6 +7382,89 @@ router.get('/embarques/:id', requireAuth, (req, res) => {
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
+// GET /importacion/calendario — los camiones que ya salieron o están por salir y todavía no
+// llegaron. Ordenados por ETA, que es la fecha que a uno le importa: cuándo lo tengo acá.
+router.get('/importacion/calendario', requireAuth, (req, res) => {
+  const db = getDb();
+  try {
+    const hoy = db.prepare("SELECT date('now','localtime') d").get().d;
+    const rows = db.prepare(`SELECT e.id, e.nombre, e.estado, e.fecha_etd, e.fecha_eta,
+             e.cantidad_cajas, e.nro_invoice, p.razon_social AS proveedor_nombre
+      FROM sg_embarques e LEFT JOIN sg_proveedores p ON p.id = e.proveedor_id
+      WHERE e.activo=1 AND e.eliminado_en IS NULL
+        AND e.estado IN ('cotizacion','abierto','transito')
+      ORDER BY COALESCE(e.fecha_eta, e.fecha_etd, '9999-12-31'), e.id`).all();
+    const dias = (a, b) => Math.round((Date.parse(b + 'T00:00:00Z') - Date.parse(a + 'T00:00:00Z')) / 86400000);
+    const items = rows.map(r => {
+      // Atrasado = la ETA ya pasó y el camión sigue sin recibirse. Es lo que hay que perseguir.
+      const diasEta = r.fecha_eta ? dias(hoy, r.fecha_eta) : null;
+      return { ...r,
+        dias_para_etd: r.fecha_etd ? dias(hoy, r.fecha_etd) : null,
+        dias_para_eta: diasEta,
+        atrasado: diasEta != null && diasEta < 0,
+        sin_fechas: !r.fecha_etd && !r.fecha_eta };
+    });
+    res.json({ ok: true, data: { hoy, items,
+      atrasados: items.filter(i => i.atrasado).length,
+      sin_fechas: items.filter(i => i.sin_fechas).length } });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// GET /importacion/deuda[?tc=] — cuánto le debemos al exterior y qué pasa si sube el dólar.
+// La deuda son los rubros en DÓLARES todavía sin pagar (sin monto_real cargado) de los
+// embarques que no están cerrados. Cada uno vale distinto en pesos según cuándo se pague, y
+// si el dólar se mueve, la deuda se mueve con él: eso es lo que este panel hace visible.
+router.get('/importacion/deuda', requireAuth, (req, res) => {
+  const db = getDb();
+  try {
+    const hoy = db.prepare("SELECT date('now','localtime') d").get().d;
+    const tcHoy = tcEsperadoEnFecha(db, hoy).tc;
+    const tcSimulado = (req.query.tc != null && req.query.tc !== '') ? Number(req.query.tc) : null;
+
+    const embs = db.prepare(`SELECT e.*, p.razon_social AS proveedor_nombre
+      FROM sg_embarques e LEFT JOIN sg_proveedores p ON p.id = e.proveedor_id
+      WHERE e.activo=1 AND e.eliminado_en IS NULL AND e.estado <> 'cerrado'`).all();
+
+    const items = [];
+    for (const e of embs) {
+      const costos = embCostos(db, e.id);
+      const est = calcImportacion(db, e, costos);
+      for (const l of est.lineas) {
+        if (!l.plazo || !l.usd) continue;                 // solo lo que va en dólares y a plazo
+        const c = costos.find(x => x.concepto === (l.k === 'mercaderia' ? 'costo_mercaderia'
+                                   : l.k === 'flete_real' ? 'fletes' : 'gastos_bancarios'));
+        if (c && c.monto_real != null && c.monto_real !== '') continue;   // ya pagado: no es deuda
+        if (l.k === 'iva_banc') continue;                 // el IVA acompaña al rubro, no se debe aparte
+        items.push({
+          embarque_id: e.id, embarque: e.nombre, proveedor: e.proveedor_nombre,
+          concepto: l.label, usd: l.usd, fecha_pago: l.fecha_pago || null,
+          vencido: !!l.tc_vencido, tc_pago: l.tc, ars_al_pago: l.ars,
+          ars_hoy: tcHoy != null ? r2(l.usd * tcHoy) : null
+        });
+      }
+    }
+    const sum = (f) => r2(items.reduce((a, x) => a + (Number(x[f]) || 0), 0));
+    const usdTotal = sum('usd');
+    const arsHoy = sum('ars_hoy');
+    const arsPago = items.some(x => x.ars_al_pago == null) ? null : sum('ars_al_pago');
+    res.json({ ok: true, data: {
+      hoy, tc_hoy: tcHoy, items,
+      usd_total: usdTotal,
+      ars_hoy: arsHoy,
+      ars_al_pago: arsPago,
+      // Lo que la curva ya anticipa que vas a pagar de más por pagar más adelante.
+      mayor_costo_por_plazo: (arsPago != null && arsHoy != null) ? r2(arsPago - arsHoy) : null,
+      // Simulador: si el dólar salta a X, la deuda pasa a valer esto.
+      simulacion: (tcSimulado > 0 && tcHoy != null) ? {
+        tc: tcSimulado,
+        ars: r2(usdTotal * tcSimulado),
+        variacion: r2(usdTotal * tcSimulado - arsHoy),
+        variacion_pct: arsHoy > 0 ? r2((usdTotal * tcSimulado - arsHoy) / arsHoy * 100) : null
+      } : null
+    } });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
 // PATCH /embarques/:id/estado — cambio rápido de estado desde el panel.
 // Solo entre los tres estados de la negociación: 'recibido' y 'cerrado' los ponen sus
 // acciones, que además crean los lotes y re-costean.
