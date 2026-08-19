@@ -124,7 +124,10 @@ const PREFIJOS = [
   // y la partida es un lote. Sin declararlo aca, quien tiene Ingresos veia el
   // boton y comia un 403 porque el dueno de /sg/lotes era solo Stock. Con dos
   // duenos, exigirNivel se queda con el nivel MAS ALTO de los dos.
-  ['sg-compras',         'sg/recepciones,sg/oc,sg/compra-retroactiva,sg/lotes'],
+  // sg/facturas-compra: anular una factura de mercadería. Va declarada porque
+  // una ruta sin dueño NO la mira exigirNivel — moduloDeRuta devuelve null y el
+  // control la deja pasar entera.
+  ['sg-compras',         'sg/recepciones,sg/oc,sg/compra-retroactiva,sg/lotes,sg/facturas-compra'],
   ['sg-stock',           'sg/lotes,sg/disponibilidad,sg/decomisos'],
   ['sg-ventas',          'sg/despachos,sg/pedidos,sg/ventas'],
   // 'sg/presentaciones' y 'sg/clientes' faltaban, y son dos solapas de esta
