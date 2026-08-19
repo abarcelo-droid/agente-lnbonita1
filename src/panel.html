@@ -6274,25 +6274,35 @@ function sgCbPintar(){
   if (cards) {
     if (!lista.length) { cards.innerHTML = ''; }
     else if (esCaja) {
+      // EL ARQUEO SE ABRE POR EL ÁMBITO DEL MOVIMIENTO, no por el de la caja.
+      // Antes una caja marcada "interna" mandaba TODO su saldo al lado interno,
+      // aunque adentro tuviera movimientos de los dos: el número de la izquierda
+      // decía una cosa y el libro otra.
       var fis = 0, intn = 0;
       lista.forEach(function(c){
-        if (c.ambito === 'interno') intn += (c.saldo_actual || 0); else fis += (c.saldo_actual || 0);
+        fis += (c.saldo_fiscal || 0); intn += (c.saldo_gestion || 0);
       });
       cards.innerHTML =
         '<div class="cb-card"><div class="cb-c-n">Arqueo total</div>'
         + '<div class="cb-c-v">' + sgMoney(fis + intn) + '</div></div>'
         + '<div class="cb-card"><div class="cb-c-n">Fiscal</div>'
         + '<div class="cb-c-v">' + sgMoney(fis) + '</div></div>'
-        + '<div class="cb-card"><div class="cb-c-n">Interno</div>'
-        + '<div class="cb-c-v">' + sgMoney(intn) + '</div></div>'
+        + '<div class="cb-card"><div class="cb-c-n">Gestión</div>'
+        + '<div class="cb-c-v"' + (intn ? ' style="color:#8a5a1f"' : '') + '>'
+        + sgMoney(intn) + '</div></div>'
         + '<div class="cb-card"><div class="cb-c-n">Cajas</div>'
         + '<div class="cb-c-v">' + lista.length + '</div></div>';
     } else {
       var tot = lista.reduce(function(a, c){ return a + (c.saldo_actual || 0); }, 0);
+      var ges = lista.reduce(function(a, c){ return a + (c.saldo_gestion || 0); }, 0);
       var conChq = lista.filter(function(c){ return c.tiene_chequera; }).length;
       cards.innerHTML =
         '<div class="cb-card"><div class="cb-c-n">Saldo en bancos</div>'
         + '<div class="cb-c-v">' + sgMoney(tot) + '</div></div>'
+        // Un banco con saldo de gestión es raro y hay que verlo: el banco no
+        // sabe de ámbitos, así que la conciliación lo va a marcar todos los meses.
+        + (ges ? '<div class="cb-card"><div class="cb-c-n">De gestión</div>'
+                 + '<div class="cb-c-v" style="color:#8a5a1f">' + sgMoney(ges) + '</div></div>' : '')
         + '<div class="cb-card"><div class="cb-c-n">Cuentas</div>'
         + '<div class="cb-c-v">' + lista.length + '</div></div>'
         + '<div class="cb-card"><div class="cb-c-n">Con chequera</div>'
@@ -15604,6 +15614,15 @@ function sgRepExport(){
 <div class="filt" style="margin-bottom:16px">
   <label style="font-size:12px;color:var(--mut)">Desde: <input type="date" id="sgct-as-desde" onchange="sgctLoadAsientos()" style="padding:5px 8px;font-size:12px"></label>
   <label style="font-size:12px;color:var(--mut)">Hasta: <input type="date" id="sgct-as-hasta" onchange="sgctLoadAsientos()" style="padding:5px 8px;font-size:12px"></label>
+  <!-- EL LIBRO SE PIDE DE A UNO. "Sólo fiscal" es exactamente lo que va a una
+       presentación; con los dos se ve el total real y la diferencia entre ambos,
+       que es el número que hay que poder mirar. -->
+  <label style="font-size:12px;color:var(--mut)">Libro:
+    <select id="sgct-as-ambito" onchange="sgctLoadAsientos()" style="padding:5px 8px;font-size:12px">
+      <option value="">Fiscal + Gestión</option>
+      <option value="fiscal">Sólo fiscal</option>
+      <option value="gestion">Sólo gestión</option>
+    </select></label>
   <label style="display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--mut);cursor:pointer">
     <input type="checkbox" id="sgct-as-anulados" onchange="sgctLoadAsientos()" style="width:auto">
     Ver anulados
@@ -15611,6 +15630,9 @@ function sgRepExport(){
   <button class="btn bo bs" onclick="sgctLoadAsientos()">↻ Actualizar</button>
   <button class="btn bo bs" onclick="sgctExportarAsientos()" title="Exportar a Excel">📥 Excel</button>
 </div>
+
+<!-- La diferencia entre los dos libros, que es el número que hay que medir. -->
+<div id="sgct-as-totales" style="margin-bottom:12px"></div>
 
 <!-- Tabla asientos -->
 <div class="pa-wrap">
@@ -52803,17 +52825,72 @@ function sgctPcEliminarTitulo(id) {
   });
 }
 
+// LA DIFERENCIA ENTRE LOS DOS LIBROS, arriba de la tabla. Es el número que Pablo
+// pidió poder mirar: hoy no importa, pero tiene que estar en algún lado.
+//
+// Se suma sobre las LÍNEAS y no sobre los asientos, porque un mismo asiento
+// puede tener las dos mitades.
+// Un asiento con lineas de gestion se marca en la fila: si no, el importe que
+// muestra es mayor al de la factura y no se entiende por que.
+function sgctMarcaGestion(a) {
+  var n = (a.lineas || []).filter(function(l){ return l.ambito === 'gestion'; }).length;
+  if (!n) return '';
+  return ' <span class="pa-badge" style="background:#f6eddf;color:#8a5a1f" title="Este asiento tiene '
+    + n + ' línea(s) de gestión">gestión</span>';
+}
+
+function sgctAsTotales(data, ambito) {
+  var cont = document.getElementById('sgct-as-totales'); if (!cont) return;
+  var t = { fiscal: 0, gestion: 0 }, n = { fiscal: 0, gestion: 0 };
+  (data || []).forEach(function(a){
+    if (a.anulado) return;   // un asiento anulado no suma a ningún libro
+    (a.lineas || []).forEach(function(l){
+      var k = l.ambito === 'gestion' ? 'gestion' : 'fiscal';
+      t[k] += (l.debe || 0); n[k] += 1;
+    });
+  });
+  if (!t.fiscal && !t.gestion) { cont.innerHTML = ''; return; }
+
+  var caja = function(rot, val, col, bg, sub){
+    return '<div style="background:' + bg + ';border:1px solid ' + col + '33;border-radius:8px;'
+      + 'padding:10px 14px;min-width:150px">'
+      + '<div style="font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;'
+      + 'color:' + col + '">' + rot + '</div>'
+      + '<div style="font-size:20px;font-weight:700;font-variant-numeric:tabular-nums;margin-top:3px">'
+      + sgctMoney(val) + '</div>'
+      + (sub ? '<div style="font-size:11px;color:var(--mut);margin-top:2px">' + sub + '</div>' : '')
+      + '</div>';
+  };
+  var partes = [];
+  if (ambito !== 'gestion') {
+    partes.push(caja('Fiscal', t.fiscal, '#0f5c4e', '#e4efea',
+      n.fiscal + ' línea(s) — es lo que va a una presentación'));
+  }
+  if (ambito !== 'fiscal') {
+    partes.push(caja('Gestión', t.gestion, '#8a5a1f', '#f6eddf',
+      n.gestion ? n.gestion + ' línea(s) de diferencia' : 'sin diferencias'));
+  }
+  if (!ambito) {
+    partes.push(caja('Total real', t.fiscal + t.gestion, '#3d4a46', 'var(--bg)',
+      t.fiscal ? 'gestión = ' + Math.round((t.gestion / t.fiscal) * 1000) / 10 + '% de lo fiscal' : ''));
+  }
+  cont.innerHTML = '<div style="display:flex;gap:10px;flex-wrap:wrap">' + partes.join('') + '</div>';
+}
+
 function sgctLoadAsientos() {
   var desde  = document.getElementById('sgct-as-desde').value;
   var hasta  = document.getElementById('sgct-as-hasta').value;
   var anulados = document.getElementById('sgct-as-anulados').checked ? '1' : '0';
+  var ambito = (document.getElementById('sgct-as-ambito') || {}).value || '';
   var qs = [];
   if (desde)   qs.push('desde=' + desde);
   if (hasta)   qs.push('hasta=' + hasta);
   if (anulados === '1') qs.push('anulados=1');
+  if (ambito)  qs.push('ambito=' + ambito);
   sgctApi('/asientos' + (qs.length ? '?' + qs.join('&') : '')).then(function(r) {
     var data = r.data || [];
     SGCT_EXPORT.asientos = data;
+    sgctAsTotales(data, ambito);
     var tb = document.getElementById('sgct-as-tbody');
     if (!data.length) {
       tb.innerHTML = '<tr><td colspan="10" class="emp">Sin asientos en el período</td></tr>';
@@ -52847,7 +52924,7 @@ function sgctLoadAsientos() {
         + '<td><strong>'+desc+'</strong></td>'
         + '<td style="text-align:right;font-variant-numeric:tabular-nums">'+sgctMoney(totalDebe)+'</td>'
         + '<td style="text-align:right;font-variant-numeric:tabular-nums">'+sgctMoney(totalHaber)+'</td>'
-        + '<td style="text-align:center">'+estado+'</td>'
+        + '<td style="text-align:center">'+estado+sgctMarcaGestion(a)+'</td>'
         + '<td style="font-size:11px;color:var(--mut);text-align:center">'+(a.usuario_nombre||'—')+'</td>'
         + '<td style="text-align:right"><button class="btn bo bs" onclick="sgctVerAsiento('+a.id+')" style="padding:3px 8px;font-size:11px">Ver</button></td>'
         + '</tr>';
