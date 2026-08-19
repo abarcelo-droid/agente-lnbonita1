@@ -36,7 +36,7 @@ const MAX_RECIENTES = 4;
 // SE ACTUALIZA A MANO, en el mismo cambio que se mergea. Sacarlo de git en el
 // arranque sonaba mejor, pero Railway despliega desde una copia sin historial:
 // diría siempre lo mismo y mentiría, que es peor que no estar.
-const VERSION = 'V760';
+const VERSION = 'V761';
 
 let SIDEBAR_DATA = { grupos: [], modulos: [] };
 let SOCIEDADES = [];                             // array de {id, nombre, funcion}
