@@ -1885,11 +1885,14 @@ try {
   const def = [
     ['imp_iva_pct', '10.5'],            // IVA sobre la base imponible
     ['imp_iibb_pct', '0.69'],           // percepción IIBB sobre la base imponible
-    ['imp_despachante_pct', '7'],       // honorarios del despachante, % de la base imponible
+    ['imp_despachante_pct', '0.7'],     // honorarios del despachante, % de la base imponible
     ['imp_iva_servicios_pct', '21'],    // IVA de despachante y gastos bancarios
     ['imp_tasa_maria_usd', '110'],      // Tasa María, monto fijo en dólares
     ['imp_gastos_bancarios_usd', '90']  // gastos bancarios: monto fijo por operación
   ];
+  // Corrección puntual: el despachante es 0,7% y había quedado sembrado en 7% (diez veces
+  // más). Solo se corrige si sigue en el valor viejo exacto, para no pisar un ajuste manual.
+  try { db.prepare("UPDATE sg_config SET valor='0.7' WHERE clave='imp_despachante_pct' AND valor='7'").run(); } catch(_) {}
   // El % quedó de una versión anterior: los bancarios son un monto fijo, no un porcentaje.
   try { db.prepare("DELETE FROM sg_config WHERE clave='imp_gastos_bancarios_pct'").run(); } catch(_) {}
   const ins = db.prepare('INSERT OR IGNORE INTO sg_config (clave, valor) VALUES (?,?)');
