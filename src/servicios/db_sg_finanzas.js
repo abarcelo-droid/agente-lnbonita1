@@ -424,6 +424,14 @@ try { db.exec("ALTER TABLE sg_ven_cobranzas ADD COLUMN anulada_por INTEGER"); } 
 try { db.exec("ALTER TABLE sg_ven_cobranzas ADD COLUMN anulada_motivo TEXT"); } catch (_) {}
 // El cheque de terceros que entra cobrando: el vínculo con la cartera.
 try { db.exec("ALTER TABLE sg_ven_cobranzas ADD COLUMN cheque_terceros_id INTEGER"); } catch (_) {}
+// EL ESPEJO DE LA COMPRA, del lado de las ventas. Se acordó vender en 20.000 y
+// se facturaron 10.000: el cliente debe 20.000 y a AFIP se le informan 10.000.
+// Mismo criterio que en sg_facturas_compra — el total es el del comprobante y no
+// se toca, la diferencia va aparte con su motivo.
+try { db.exec("ALTER TABLE sg_ven_facturas ADD COLUMN dif_gestion REAL NOT NULL DEFAULT 0"); } catch (_) {}
+try { db.exec("ALTER TABLE sg_ven_facturas ADD COLUMN dif_motivo TEXT"); } catch (_) {}
+try { db.exec("ALTER TABLE sg_ven_liquidaciones ADD COLUMN dif_gestion REAL NOT NULL DEFAULT 0"); } catch (_) {}
+try { db.exec("ALTER TABLE sg_ven_liquidaciones ADD COLUMN dif_motivo TEXT"); } catch (_) {}
 try { db.exec("CREATE INDEX IF NOT EXISTS idx_sg_cob_cliente ON sg_ven_cobranzas(cliente_id)"); } catch (_) {}
 
 // ── DOS NÚMEROS DE LA MISMA OPERACIÓN ─────────────────────────────────────

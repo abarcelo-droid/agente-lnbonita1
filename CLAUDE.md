@@ -200,3 +200,45 @@ curl -s https://agente-lnbonita1-production.up.railway.app/static/sidebar-v2.js 
 
 `/static` manda `Cache-Control: no-cache`, así que lo que devuelve ese curl es lo
 que ve el navegador: si ahí dice V746, el problema no es la caché de nadie.
+
+### DOS NÚMEROS DE LA MISMA OPERACIÓN: FISCAL Y GESTIÓN
+
+El comprador cierra el tomate en 20.000 y la factura llega por 10.000. A AFIP se
+le informa la factura de 10.000; al proveedor se le deben 20.000. Los dos son
+ciertos.
+
+**El ámbito viaja en la LÍNEA, nunca en el recipiente.** Un solo asiento —un solo
+número, el que se cita cuando hay que discutir algo— lleva las líneas fiscales y
+las de gestión. Lo mismo del lado de la plata: el `ambito` lo lleva el
+`sg_fin_movimientos`, y el de la caja es apenas el valor que se propone. Una
+misma caja puede tener los dos sin partirla en dos cajas.
+
+**Cada ámbito balancea POR SU CUENTA dentro del asiento.** Que el total cierre no
+alcanza: lo fiscal puede estar descuadrado y lo de gestión compensarlo al revés,
+y entonces el asiento dice "balancea" con el libro fiscal mal. Se valida antes de
+escribir.
+
+**Un solo lugar escribe asientos: `servicios/asientos.js`.** Había nueve INSERT
+en cuatro archivos. El test `t-un-solo-escritor` falla si aparece otro, o si
+alguien consulta las líneas del libro sin decir qué ámbito quiere. Cuando la
+consulta necesita los dos, se declara con el marcador `ambito: todos` y su razón.
+
+**Una línea de gestión sin motivo no entra.** Cuatro motivos, no texto libre
+(`MOTIVOS` en `servicios/asientos.js`). Texto libre son cuarenta maneras de
+escribir lo mismo y ningún informe posible.
+
+**El `total` de un comprobante NO se toca**: es lo que dice el papel y es lo que
+va al libro fiscal. La diferencia vive en `dif_gestion` + `dif_motivo`, tanto en
+`sg_facturas_compra` como en `sg_ven_facturas` y `sg_ven_liquidaciones`.
+
+**Sin IVA del lado de gestión.** El crédito y el débito fiscal salen del
+comprobante y de nada más.
+
+**La DEUDA es lo acordado; el LIBRO FISCAL es lo facturado.** La cuenta corriente
+de proveedores y de clientes, lo pendiente de cada comprobante y los controles
+que frenan imputar de más miran `total + dif_gestion`.
+
+**Y EL MARGEN SE MIDE CONTRA GESTIÓN** (decisión de Pablo, 19/8/2026). La partida
+del ejemplo costó 20.000, no 10.000: `costo_base` sale de los kilos por el precio
+ACORDADO en la orden. El balance y el margen van a dar distinto siempre, y eso
+es correcto — no lo "corrijas" para que cierren.
