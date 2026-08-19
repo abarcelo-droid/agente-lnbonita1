@@ -2831,6 +2831,10 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
       <div><div class="ph-t">💳 San Gerónimo · Cuenta corriente de proveedores</div>
         <div class="ph-s">Cuánto se le debe a cada uno</div></div>
       <div style="display:flex;gap:8px">
+        <!-- El acceso directo. Para pagarle a alguien había que buscarlo en la
+             lista, abrir su ficha y recién ahí encontrar el botón — y un
+             proveedor sin movimientos ni figura. Desde acá se elige adentro. -->
+        <button class="btn bb" id="sg-ccprov-btn-pagar" onclick="sgPagoOpen(null)">💵 Emitir un pago</button>
         <button class="btn bo" onclick="sgCcExportar('excel')">📗 Excel</button>
         <button class="btn bo" onclick="sgCcExportar('pdf')">🖨 PDF</button>
         <button class="btn bo" onclick="sgLoadCcProv()">↻ Actualizar</button>
@@ -3350,6 +3354,13 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
         <button class="mcl" onclick="closeMB('sg-pago-modal')">×</button></div>
       <div class="mbd">
         <div id="sg-pago-aviso"></div>
+        <!-- El proveedor se elige ACÁ: entrando por el acceso directo todavía no
+             hay ninguno, y entrando desde una ficha se puede haber equivocado
+             de fila. Cambiarlo recarga sus facturas. -->
+        <div class="fl" id="sg-pago-prov-box" style="margin-bottom:10px;display:none">
+          <label>¿A qué proveedor se le paga?</label>
+          <select id="sg-pago-prov" onchange="sgPagoProveedor()"></select>
+        </div>
         <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px">
           <div class="fl"><label>Fecha</label><input type="date" id="sg-pago-fecha"></div>
           <div class="fl"><label>Referencia general</label>
@@ -3658,7 +3669,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
               <div class="sgfm-grid">
                 <div class="fl"><label>¿Falta parte por facturar?</label>
                   <input type="text" inputmode="decimal" id="sgfm-f-difg" placeholder="$ 0"
-                         oninput="sgFmMil(this);sgFmDifPintar()"></div>
+                         oninput="this.dataset.tocado='1';sgFmMil(this);sgFmDifPintar()"></div>
                 <div class="fl"><label>¿Por qué?</label>
                   <select id="sgfm-f-difm" onchange="sgFmDifPintar()">
                     <option value="">— elegí el motivo —</option>
@@ -5724,9 +5735,29 @@ function sgCcFicha(provId){
         + rot + '</div><div style="font-size:' + (chico ? '13px' : '19px')
         + ';font-weight:700;line-height:1.25">' + val + '</div></div>';
     };
+    // Cuánto de lo que se le debe está facturado y cuánto no. Sale de los
+    // renglones, que ya vienen marcados con su ámbito.
+    var fiscalGes = { fiscal: 0, gestion: 0 };
+    movs.forEach(function(m){
+      if (m.tipo === 'pago') return;                 // los pagos descuentan de los dos
+      var k = m.ambito === 'gestion' ? 'gestion' : 'fiscal';
+      fiscalGes[k] += (m.haber || 0);
+    });
+    fiscalGes.fiscal = Math.round(fiscalGes.fiscal * 100) / 100;
+    fiscalGes.gestion = Math.round(fiscalGes.gestion * 100) / 100;
+
     var h = '<div style="display:flex;gap:30px;flex-wrap:wrap;align-items:flex-start;'
       + 'border:1px solid var(--bor);border-radius:10px;padding:12px 16px;background:var(--bg);margin-bottom:12px">'
       + dato('Saldo', sgMoney(d.saldo))
+      // ABIERTO EN LOS DOS LIBROS. El saldo total es lo que se le debe; el de
+      // gestión es la parte que todavía no tiene comprobante. Sin esta apertura
+      // el que mira la ficha no sabe cuánto de lo que debe está documentado, que
+      // es justo la pregunta que aparece cuando hay que pagarle.
+      + (fiscalGes.gestion
+          ? dato('De eso, sin facturar',
+              '<span style="color:#8a5a1f">' + sgMoney(fiscalGes.gestion) + '</span>'
+              + '<div class="sg-oc-sub">documentado: ' + sgMoney(fiscalGes.fiscal) + '</div>', true)
+          : '')
       + dato('CUIT', '<span style="font-family:monospace">' + escH(p.cuit || '—') + '</span>', true)
       + dato('Movimientos', nr(movs.length), true)
       + (d.esperando_contabilizar && d.esperando_contabilizar.length
@@ -5744,6 +5775,12 @@ function sgCcFicha(provId){
       + '</div></div>';
 
     var ROT = { apertura: 'Saldo de apertura', factura: 'Factura', pago: 'Pago' };
+    // El renglón de lo que falta facturar se ve distinto: es deuda, pero de otra
+    // naturaleza que la del comprobante.
+    var marcaAmb = function(m){
+      return m.ambito === 'gestion'
+        ? ' <span class="cb-chip" style="background:#f6eddf;color:#8a5a1f">sin facturar</span>' : '';
+    };
     h += '<div class="ab-table-wrap"><table class="pa-tbl"><thead><tr>'
       + '<th style="width:96px">Fecha</th><th>Concepto</th>'
       + '<th style="width:120px">Comprobante</th><th style="width:20%">Partida</th>'
@@ -5752,7 +5789,8 @@ function sgCcFicha(provId){
       + '<th style="width:140px;text-align:right">Saldo</th></tr></thead><tbody>';
     h += movs.length ? movs.map(function(m){
       return '<tr><td>' + escH(m.fecha || '—') + '</td>'
-        + '<td class="cc-concepto">' + escH(ROT[m.tipo] || m.detalle || m.tipo) + '</td>'
+        + '<td class="cc-concepto">' + escH(m.tipo === 'factura' && m.ambito === 'gestion'
+            ? (m.detalle || '') : (ROT[m.tipo] || m.detalle || m.tipo)) + marcaAmb(m) + '</td>'
         + '<td style="font-family:monospace">' + escH(m.comprobante || '—') + '</td>'
         + '<td class="cc-partida" style="font-family:monospace;font-size:11.5px">'
           + escH(m.partidas || '—') + '</td>'
@@ -5975,12 +6013,31 @@ function sgPagoProximoCheque(i){
 }
 
 function sgPagoOpen(provId, nombre){
+  provId = provId ? Number(provId) : null;
   SG_PAGO = { provId: provId, facturas: [], cuentas: [], anticipos: [],
               aCuentaDisp: 0, medios: [], ctaProveedores: null };
-  var t = eid('sg-pago-tit'); if (t) t.textContent = 'Registrar pago — ' + nombre;
+  var t = eid('sg-pago-tit');
+  if (t) t.textContent = 'Registrar pago' + (nombre ? ' — ' + nombre : '');
   var f = eid('sg-pago-fecha'); if (f) f.value = new Date().toISOString().slice(0, 10);
   ['sg-pago-ref', 'sg-pago-notas', 'sg-pago-acuenta']
     .forEach(function(id){ var el = eid(id); if (el) el.value = ''; });
+
+  // TODOS los proveedores activos, no sólo los que ya tienen movimientos: a uno
+  // nuevo también se le puede entregar una seña, y ése es justo el que no
+  // figura en la lista de atrás.
+  var box = eid('sg-pago-prov-box'); if (box) box.style.display = '';
+  var selP = eid('sg-pago-prov');
+  if (selP) {
+    selP.innerHTML = '<option value="">— elegí el proveedor —</option>';
+    api('/api/sg/proveedores').then(function(r){
+      var ps = (r && r.ok) ? (r.data || []) : [];
+      selP.innerHTML = '<option value="">— elegí el proveedor —</option>' + ps.map(function(x){
+        return '<option value="' + x.id + '"' + (x.id === provId ? ' selected' : '') + '>'
+          + esc(x.razon_social) + '</option>';
+      }).join('');
+      if (typeof sgSelBuscable === 'function') { sgSelBuscable(selP, 'Buscar proveedor…'); sgSelRefrescar(selP); }
+    });
+  }
 
   api('/api/sg/pagos/cuentas').then(function(r){
     SG_PAGO.cuentas = (r && r.ok) ? r.data : [];
@@ -5988,20 +6045,39 @@ function sgPagoOpen(provId, nombre){
     sgPagoCuentasPintar();
   });
 
+  sgPagoCargarProv(provId);
+  sgModalArriba('sg-pago-modal');
+}
+
+// Las facturas del proveedor elegido y lo que tenga a cuenta. Sin proveedor
+// todavía, la tabla lo dice en vez de quedarse en "Cargando…".
+function sgPagoCargarProv(provId){
+  SG_PAGO.provId = provId ? Number(provId) : null;
+  SG_PAGO.facturas = []; SG_PAGO.anticipos = []; SG_PAGO.aCuentaDisp = 0;
+  if (!SG_PAGO.provId) {
+    var tb0 = eid('sg-pago-tb');
+    if (tb0) tb0.innerHTML = '<tr><td colspan="7" class="emp">Elegí el proveedor para ver sus facturas.</td></tr>';
+    sgPagoTotal();
+    return;
+  }
   // LO QUE YA ESTÁ A CUENTA. Si el productor tiene una seña de 500 y la factura
   // es de 2.000, esos 500 cancelan factura sin que salga un peso de nadie.
-  api('/api/sg/pagos/anticipos/' + provId).then(function(r){
+  api('/api/sg/pagos/anticipos/' + SG_PAGO.provId).then(function(r){
     SG_PAGO.anticipos = (r && r.ok) ? r.data : [];
     SG_PAGO.aCuentaDisp = SG_PAGO.anticipos.reduce(function(a, x){ return a + (x.disponible || 0); }, 0);
     SG_PAGO.aCuentaDisp = Math.round(SG_PAGO.aCuentaDisp * 100) / 100;
     sgPagoPintar();
   });
-
-  api('/api/sg/pagos/pendientes/' + provId).then(function(r){
+  api('/api/sg/pagos/pendientes/' + SG_PAGO.provId).then(function(r){
     SG_PAGO.facturas = (r && r.ok) ? r.data : [];
     sgPagoPintar();
-    sgModalArriba('sg-pago-modal');
   });
+}
+
+// Cambiar de proveedor borra lo imputado: los renglones eran de las facturas del
+// anterior, y dejarlos escritos pagaría contra la factura de otro.
+function sgPagoProveedor(){
+  sgPagoCargarProv((eid('sg-pago-prov') || {}).value);
 }
 
 function sgPagoPintar(){
@@ -9240,7 +9316,7 @@ function sgFmModeloDetalle(){
 // de qué lado va, y abajo los totales con el control de que BALANCEE. Mientras
 // no hay importes —todavía no se leyó ninguna factura— muestra la estructura:
 // qué cuentas se van a tocar y en qué lado.
-function sgFmAsientoTabla(lineas, importes){
+function sgFmAsientoTabla(lineas, importes, extra){
   if (!lineas.length) return '<div style="font-size:12.5px;color:var(--mut)">El modelo no tiene líneas.</div>';
   var totD = 0, totH = 0;
   var filas = lineas.map(function(l){
@@ -9256,12 +9332,30 @@ function sgFmAsientoTabla(lineas, importes){
       + '</tr>';
   }).join('');
 
+  // La parte que falta facturar, abajo y separada: es la misma operación pero
+  // no va al comprobante. Cada mitad cierra sola.
+  var totDx = 0, totHx = 0;
+  if (extra && extra.length) {
+    filas += '<tr><td colspan="5" style="padding-top:10px;font-size:11px;font-weight:700;'
+      + 'letter-spacing:.06em;text-transform:uppercase;color:#8a5a1f">Lo que falta por facturar</td></tr>'
+      + extra.map(function(l){
+          if (l.lado === 'debe') totDx += l.monto; else totHx += l.monto;
+          return '<tr style="background:#f6eddf">'
+            + '<td style="font-family:monospace;font-size:12px">' + escH(l.cuenta_codigo || '—') + '</td>'
+            + '<td>' + escH(l.cuenta_nombre || '') + '</td>'
+            + '<td style="font-size:11.5px;color:#8a5a1f">' + escH(l.tipo_linea) + '</td>'
+            + '<td style="text-align:right">' + (l.lado === 'debe' ? sgMoney(l.monto) : '') + '</td>'
+            + '<td style="text-align:right">' + (l.lado === 'haber' ? sgMoney(l.monto) : '') + '</td>'
+            + '</tr>';
+        }).join('');
+  }
+
   var pie = '';
   if (importes) {
     var dif = paRound2Fm(totD - totH);
     var ok = Math.abs(dif) < 0.01;
     pie = '<tr style="border-top:2px solid var(--bor);font-weight:700">'
-      + '<td colspan="3">Totales</td>'
+      + '<td colspan="3">' + (totDx ? 'Total de la factura' : 'Totales') + '</td>'
       + '<td style="text-align:right">' + sgMoney(totD) + '</td>'
       + '<td style="text-align:right">' + sgMoney(totH) + '</td></tr>'
       + '<tr><td colspan="5" style="padding-top:8px">'
@@ -9270,6 +9364,14 @@ function sgFmAsientoTabla(lineas, importes){
             : '<span style="color:var(--err);font-weight:700">✗ NO balancea — diferencia de '
               + sgMoney(Math.abs(dif)) + '</span>')
       + '</td></tr>';
+    if (totDx) {
+      pie += '<tr style="font-weight:700;color:#8a5a1f"><td colspan="3">Lo que falta por facturar</td>'
+        + '<td style="text-align:right">' + sgMoney(totDx) + '</td>'
+        + '<td style="text-align:right">' + sgMoney(totHx) + '</td></tr>'
+        + '<tr style="border-top:2px solid var(--bor);font-weight:700">'
+        + '<td colspan="3">Se le va a deber al proveedor</td>'
+        + '<td></td><td style="text-align:right">' + sgMoney(totH + totHx) + '</td></tr>';
+    }
   } else {
     pie = '<tr><td colspan="5" style="padding-top:8px;font-size:12px;color:var(--mut)">'
       + 'Los importes salen de la factura. Al cargarla se muestran acá y se controla que el asiento balancee.'
@@ -9616,6 +9718,14 @@ function sgFmRecalc(){
         + 'Si es un ajuste convenido está bien; si no, el costo de la partida va a quedar distinto del que se pactó.</div>';
     }
   }
+  // ── LO QUE FALTA, PROPUESTO ─────────────────────────────────────────
+  // La cuenta la hace el sistema. Se propone una sola vez —mientras nadie tocó
+  // el campo— para no pisarle el número al que ya lo corrigió a mano.
+  //
+  // Se mide contra el TOTAL y no contra el neto: lo que se le va a deber es
+  // total + diferencia, así que restando el neto la deuda se pasaría por el
+  // IVA. Con el total cae justo en lo acordado.
+  sgFmDifProponer(SGFMF.acordado, total || suma);
   sgFmAsientoPintar({ neto: neto, iva: iva, piva: pIva, piibb: pIibb, pgan: pGan, otros: otros, total: total || suma });
 }
 
@@ -9662,9 +9772,31 @@ function sgFmAsientoPintar(imp){
       importes[l.id] = imp.neto; gastoPuesto = true;
     } else { importes[l.id] = 0; }
   });
-  cont.innerHTML = sgFmAsientoTabla(m.lineas, importes);
+  // ── LO QUE FALTA POR FACTURAR, EN EL MISMO CUADRO ──────────────────
+  // El comprador tiene que ver ACÁ todo lo que va a pasar. Si el cuadro muestra
+  // 2.210.000 y después en la cuenta corriente aparecen 4.250.000, el teléfono
+  // suena. Son las mismas cuentas que la parte fiscal —la de gasto y la de
+  // Proveedores— porque es la misma mercadería y la misma deuda. Sin IVA.
+  var extra = [];
+  var difG = sgMilParse((eid('sgfm-f-difg') || {}).value) || 0;
+  if (difG > 0) {
+    var TRIB = ['iva', 'percepcion_iva', 'percepcion_iibb', 'percepcion_ganancias', 'retencion'];
+    var lg = (m.lineas || []).filter(function(l){
+      return l.lado === 'debe' && TRIB.indexOf(l.tipo_linea) < 0; })[0];
+    var lp = (m.lineas || []).filter(function(l){ return l.tipo_linea === 'proveedores'; })[0];
+    if (lg && lp) {
+      extra = [
+        { cuenta_codigo: lg.cuenta_codigo, cuenta_nombre: lg.cuenta_nombre, lado: 'debe',
+          tipo_linea: 'falta facturar', monto: difG },
+        { cuenta_codigo: lp.cuenta_codigo, cuenta_nombre: lp.cuenta_nombre, lado: 'haber',
+          tipo_linea: 'falta facturar', monto: difG },
+      ];
+    }
+  }
+  cont.innerHTML = sgFmAsientoTabla(m.lineas, importes, extra);
 
-  // ¿Balancea? De esto depende que se pueda grabar.
+  // ¿Balancea? Se mira SÓLO la parte fiscal: la otra se agrega en espejo y
+  // cierra sola por construcción.
   var d = 0, h = 0;
   (m.lineas || []).forEach(function(l){
     var v = Number(importes[l.id]) || 0;
@@ -9808,6 +9940,13 @@ function sgFmLeerPdf(){
 }
 
 // Lo que se le va a deber al proveedor, que no es lo que dice la factura.
+function sgFmDifProponer(acordado, totalFac){
+  var el = eid('sgfm-f-difg'); if (!el || el.dataset.tocado) return;
+  var falta = paRound2Fm((Number(acordado) || 0) - (Number(totalFac) || 0));
+  el.value = falta > 0.01 ? sgMilShow(falta) : '';
+  sgFmDifPintar();
+}
+
 function sgFmDifPintar(){
   var cont = eid('sgfm-dif-aviso'); if (!cont) return;
   var dif = _sgfmN('sgfm-f-difg') || 0;
@@ -9816,8 +9955,8 @@ function sgFmDifPintar(){
   var mot = (eid('sgfm-f-difm') || {}).value;
   cont.innerHTML = '<div style="border:1.5px solid #d6a15e;background:#f6eddf;border-radius:8px;'
     + 'padding:9px 11px;color:#854d0e">'
-    + 'A AFIP se le informa <b>' + sgMoney(tot) + '</b> — lo que dice la factura.<br>'
-    + 'Al proveedor se le deben <b>' + sgMoney(tot + dif) + '</b>, y así va a figurar en su cuenta corriente.'
+    + 'Al proveedor se le van a deber <b>' + sgMoney(tot + dif) + '</b>'
+    + ', y así va a figurar en su cuenta corriente.'
     + (mot ? '' : '<br><b>Falta decir por qué.</b>')
     + '</div>';
 }
@@ -20409,7 +20548,11 @@ function loadSec(s) {
       if (b) b.style.display = lnbPuedeOperar('sg-cc-clientes') ? '' : 'none';
       sgLoadCaches(function(){ sgLoadCC(); });
     },
-    'sg-cc-proveedores': function(){ sgLoadCcProv(); },
+    'sg-cc-proveedores': function(){
+      var b = eid('sg-ccprov-btn-pagar');
+      if (b) b.style.display = lnbPuedeOperar('sg-cc-proveedores') ? '' : 'none';
+      sgLoadCcProv();
+    },
     'sg-caja-bancos': function(){ sgCbInit(); },
     'sg-importacion': function(){ sgImpInit(); },
     'sg-catalogo':   function(){ sgLoadCaches(function(){ sgCatSub('productos'); }); },

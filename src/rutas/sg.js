@@ -13,6 +13,10 @@ import { fileURLToPath } from 'url';
 import * as XLSX from 'xlsx';
 import { subirArchivo, obtenerArchivo, storageConfigurado } from '../servicios/storage.js';
 import { crearAsiento, MOTIVOS } from '../servicios/asientos.js';
+
+// El nombre del motivo para mostrarlo en una ficha. La clave sola no le dice
+// nada a nadie.
+const MOTIVOS_TXT = (k) => (MOTIVOS[k] ? MOTIVOS[k].label : k);
 import { getDb } from '../servicios/db.js';
 import '../servicios/db_sg.js'; // corre el DDL sg_* al importarse
 // Las condiciones de pago que se usan de verdad, y el código de trazabilidad
@@ -6456,6 +6460,7 @@ router.get('/cc-proveedores/:id', requireAuth, (req, res) => {
     // abajo, para que se sepa que está esperando, pero no mueve el saldo.
     const facturas = db.prepare(`SELECT f.id, f.fecha_emision, f.tipo_comprobante, f.punto_venta,
         f.numero, f.neto, f.iva_monto, f.total, COALESCE(f.saldo_pagado,0) AS pagado,
+        COALESCE(f.dif_gestion,0) AS dif_gestion, f.dif_motivo,
         f.asiento_id, a.fecha AS asiento_fecha,
         (SELECT GROUP_CONCAT(o.trazabilidad, ' · ') FROM sg_factura_compra_ocs fo
            JOIN sg_oc o ON o.id = fo.oc_id WHERE fo.factura_id = f.id) AS partidas
@@ -6470,8 +6475,21 @@ router.get('/cc-proveedores/:id', requireAuth, (req, res) => {
         comprobante: (f.punto_venta ? f.punto_venta + '-' : '') + (f.numero || ''),
         partidas: f.partidas, neto: f.neto, iva: f.iva_monto,
         debe: 0, haber: r2(f.total), pagado: r2(f.pagado),
-        asiento_id: f.asiento_id, estado: null });
-
+        asiento_id: f.asiento_id, estado: null, ambito: 'fiscal' });
+      // ── LO QUE FALTA POR FACTURAR, EN SU PROPIO RENGLÓN ────────────────
+      // El listado ya sumaba la diferencia al saldo y la ficha no: el listado
+      // decía 4.460.000 y la ficha 2.210.000 para el mismo proveedor. Y el que
+      // discute un saldo mira la FICHA. Va como renglón aparte —no sumado al
+      // del comprobante— porque son dos cosas distintas: una está facturada y
+      // la otra no.
+      if (f.dif_gestion > 0) {
+        movs.push({ tipo: 'factura', fecha: f.fecha_emision,
+          detalle: 'Falta por facturar' + (f.dif_motivo ? ' — ' + MOTIVOS_TXT(f.dif_motivo) : ''),
+          comprobante: (f.punto_venta ? f.punto_venta + '-' : '') + (f.numero || ''),
+          partidas: f.partidas, neto: null, iva: null,
+          debe: 0, haber: r2(f.dif_gestion), pagado: 0,
+          asiento_id: f.asiento_id, estado: null, ambito: 'gestion' });
+      }
     }
 
     // Y lo que entró pero todavía no tiene comprobante: no es deuda documentada,
