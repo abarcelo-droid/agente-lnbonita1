@@ -810,6 +810,15 @@ try { db.exec("ALTER TABLE sg_oc ADD COLUMN liquidada_por INTEGER"); } catch (_)
 // decide el comprador (a cuánto se cerró, en cuántos días se paga, qué
 // documenta). Hasta hoy esas órdenes se mezclaban con las demás y no había
 // forma de saber cuáles estaban a medio hacer.
+// ── LA FACTURA VINO POR MENOS DE LO ACORDADO ──────────────────────────────
+// El comprador cierra el tomate en 20.000 y la factura llega por 10.000. Al
+// proveedor se le deben 20.000; a AFIP se le informa la factura de 10.000.
+//
+// `total` sigue siendo lo que dice el comprobante y NO se toca: es lo que va al
+// libro fiscal y a una presentación. La diferencia va aparte, con su motivo, y
+// se suma como línea de gestión en el MISMO asiento.
+try { db.exec("ALTER TABLE sg_facturas_compra ADD COLUMN dif_gestion REAL NOT NULL DEFAULT 0"); } catch (_) {}
+try { db.exec("ALTER TABLE sg_facturas_compra ADD COLUMN dif_motivo TEXT"); } catch (_) {}
 try { db.exec("ALTER TABLE sg_oc ADD COLUMN completada_en TEXT"); } catch (_) {}
 try { db.exec("ALTER TABLE sg_oc ADD COLUMN completada_por INTEGER"); } catch (_) {}
 try {
