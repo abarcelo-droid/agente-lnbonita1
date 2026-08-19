@@ -3092,6 +3092,24 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
         </div>
         <div class="fl" style="margin-top:10px"><label>Concepto</label>
           <input id="cb-mov-conc" placeholder="Qué se pagó o de dónde entró"></div>
+        <!-- EL ÁMBITO LO LLEVA EL MOVIMIENTO, no la caja: una misma caja puede
+             tener los dos. Lo que propone la caja es apenas lo habitual. -->
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px;margin-top:10px">
+          <div class="fl"><label>¿A qué libro va?</label>
+            <select id="cb-mov-ambito" onchange="sgCbMovAmbito()">
+              <option value="fiscal">Fiscal</option>
+              <option value="gestion">Gestión</option>
+            </select></div>
+          <div class="fl" id="cb-mov-motivo-box" style="display:none"><label>¿Por qué?</label>
+            <select id="cb-mov-motivo">
+              <option value="">— elegí el motivo —</option>
+              <option value="error_proveedor">Error del proveedor</option>
+              <option value="comprobante_pendiente">Comprobante pendiente</option>
+              <option value="diferencia_peso_calidad">Diferencia de peso o calidad</option>
+              <option value="ajuste_gestion">Ajuste de gestión</option>
+            </select></div>
+        </div>
+        <div id="cb-mov-aviso" style="font-size:12.5px;margin-top:8px"></div>
         <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:16px">
           <button class="btn bo" onclick="closeMB('cb-mov-modal')">Cancelar</button>
           <button class="btn bb" onclick="sgCbMovGuardar()">Guardar</button>
@@ -6518,7 +6536,15 @@ function sgCbDetallePintar(){
       + SG_CB.movs.map(function(m){
           var ing = m.tipo === 'ingreso';
           return '<tr><td>' + escH(m.fecha || '—') + '</td>'
-            + '<td class="cb-nom">' + escH(m.concepto || '') + '</td>'
+            + '<td class="cb-nom">' + escH(m.concepto || '')
+              // Sin la marca, un saldo que no coincide con el extracto no tiene
+              // explicación a la vista.
+              + (m.ambito === 'gestion'
+                  ? ' <span class="cb-chip" style="background:#f6eddf;color:#8a5a1f">gestión</span>'
+                    + (m.motivo ? '<div style="font-size:10.5px;color:var(--mut)">'
+                        + escH((SG_MOTIVOS[m.motivo] || m.motivo)) + '</div>' : '')
+                  : '')
+              + '</td>'
             + '<td style="font-size:11.5px">' + escH(m.referencia || '—') + '</td>'
             + '<td style="text-align:right;color:#0f766e">' + (ing ? sgMoney(m.monto) : '') + '</td>'
             + '<td style="text-align:right;color:#b91c1c">' + (ing ? '' : sgMoney(m.monto)) + '</td>'
@@ -6674,7 +6700,26 @@ function sgCbMovOpen(){
     var e = eid(id); if (e) e.value = '';
   });
   var tp = eid('cb-mov-tipo'); if (tp) tp.value = 'egreso';
+  // La caja PROPONE su ámbito habitual; se puede cambiar.
+  var am = eid('cb-mov-ambito');
+  if (am) am.value = SG_CB.sel.ambito === 'interno' ? 'gestion' : 'fiscal';
+  var mo = eid('cb-mov-motivo'); if (mo) mo.value = '';
+  sgCbMovAmbito();
   sgModalArriba('cb-mov-modal');
+}
+
+// El motivo sólo hace falta del lado de gestión. Y si el movimiento sale de un
+// BANCO, se avisa: el banco no sabe de ámbitos, así que ese movimiento va a
+// aparecer como diferencia en la conciliación todos los meses.
+function sgCbMovAmbito(){
+  var ges = (eid('cb-mov-ambito') || {}).value === 'gestion';
+  var box = eid('cb-mov-motivo-box'); if (box) box.style.display = ges ? '' : 'none';
+  var av = eid('cb-mov-aviso'); if (!av) return;
+  av.innerHTML = (ges && SG_CB.sel && SG_CB.sel.tipo !== 'caja')
+    ? '<div style="border:1.5px solid #d6a15e;background:#f6eddf;border-radius:8px;padding:9px 11px;'
+      + 'color:#854d0e">Este movimiento sale de un banco y va al libro de gestión. '
+      + 'El banco no sabe de ámbitos: <b>la conciliación lo va a marcar como diferencia todos los meses.</b></div>'
+    : '';
 }
 
 function sgCbMovGuardar(){
@@ -6683,13 +6728,18 @@ function sgCbMovGuardar(){
   var conc = ((eid('cb-mov-conc') || {}).value || '').trim();
   if (!(monto > 0)) { toast('Poné el importe', 'er'); return; }
   if (!conc) { toast('Poné el concepto: sin eso el movimiento no dice nada', 'er'); return; }
+  if ((eid('cb-mov-ambito') || {}).value === 'gestion' && !(eid('cb-mov-motivo') || {}).value) {
+    toast('Un movimiento de gestión tiene que decir por qué', 'er'); return;
+  }
   sgCbApi('/movimientos', 'POST', {
     cuenta_id: SG_CB.sel.id,
     fecha: (eid('cb-mov-fecha') || {}).value,
     tipo: (eid('cb-mov-tipo') || {}).value,
     concepto: conc,
     monto: monto,
-    referencia: (eid('cb-mov-ref') || {}).value
+    referencia: (eid('cb-mov-ref') || {}).value,
+    ambito: (eid('cb-mov-ambito') || {}).value,
+    motivo: (eid('cb-mov-motivo') || {}).value || null
   }).then(function(r){
     if (!r || !r.ok) { toast((r && r.error) || 'No se pudo guardar', 'er'); return; }
     toast('Movimiento cargado', 'ok');
@@ -7006,6 +7056,14 @@ function sgPagoAsientoPintar(){
 // Entran en cartera; de ahí se depositan, se endosan o el banco los rechaza.
 // Lo que importa de un vistazo es cuánto hay en cartera y qué está por vencer:
 // un cheque vencido en un cajón es plata que se dejó de cobrar.
+// Los motivos, con el mismo texto que usa el servidor (servicios/asientos.js).
+var SG_MOTIVOS = {
+  error_proveedor: 'Error del proveedor',
+  comprobante_pendiente: 'Comprobante pendiente',
+  diferencia_peso_calidad: 'Diferencia de peso o calidad',
+  ajuste_gestion: 'Ajuste de gestión',
+};
+
 var SG_CT_EST = {
   en_cartera: ['En cartera', 'si'], depositado: ['Depositado', 'si'],
   endosado: ['Endosado', 'int'], rechazado: ['Rechazado', 'no'],
@@ -7588,6 +7646,19 @@ function sgCbCcPintar(){
         ? 'Mientras la diferencia no sea cero, el saldo del sistema y el del banco no son el mismo número.'
         : '✓ El libro y el extracto dicen lo mismo.')
     + '</div>';
+
+  // LA DIFERENCIA CON NOMBRE. El banco no sabe de ámbitos: en su extracto está
+  // todo lo que pasó por la cuenta. Un movimiento de gestión queda sin par todos
+  // los meses, y quien concilia lo va a salir a buscar. Decirlo acá le ahorra
+  // esa búsqueda y explica de una parte de la diferencia de arriba.
+  var g = r.gestion;
+  if (g && g.cantidad) {
+    h += '<div style="border:1.5px solid #d6a15e;background:#f6eddf;border-radius:8px;'
+      + 'padding:9px 11px;margin-bottom:12px;font-size:12.5px;color:#854d0e">'
+      + '<b>' + g.cantidad + ' movimiento(s) de este período son del libro de gestión</b>, por '
+      + sgMoney(g.monto) + '. No están en el extracto porque el banco no los distingue: '
+      + 'de la diferencia de arriba, esa parte ya tiene explicación.</div>';
+  }
 
   var pend = (r.extracto || []).filter(function(x){ return !x.conciliado; });
   var movPend = (r.movimientos || []).filter(function(x){ return !x.conciliado; });
@@ -15674,10 +15745,13 @@ function sgRepExport(){
   </label>
   <button class="btn bo bs" onclick="sgctLoadAsientos()">↻ Actualizar</button>
   <button class="btn bo bs" onclick="sgctExportarAsientos()" title="Exportar a Excel">📥 Excel</button>
+  <button class="btn bo bs" onclick="sgctGestionResumen()"
+          title="Cuánto pasa por el libro de gestión, por motivo y por quién">📊 Medir gestión</button>
 </div>
 
 <!-- La diferencia entre los dos libros, que es el número que hay que medir. -->
 <div id="sgct-as-totales" style="margin-bottom:12px"></div>
+<div id="sgct-gestion-panel" style="margin-bottom:14px"></div>
 
 <!-- Tabla asientos -->
 <div class="pa-wrap">
@@ -52882,6 +52956,72 @@ function sgctMarcaGestion(a) {
   if (!n) return '';
   return ' <span class="pa-badge" style="background:#f6eddf;color:#8a5a1f" title="Este asiento tiene '
     + n + ' línea(s) de gestión">gestión</span>';
+}
+
+// ── CUÁNTO PASA POR EL LIBRO DE GESTIÓN ─────────────────────────────────
+// Abierto por mes, por motivo y por quién lo cargó. El de MOTIVO es el que dice
+// si esto está bajo control: "falta la nota de débito" se reclama y se cierra;
+// "no va a tener comprobante" se queda. El de USUARIO es el que después va a
+// permitir decidir a quién restringirle el permiso, mirando el dato y no a ojo.
+function sgctGestionResumen(){
+  var cont = eid('sgct-gestion-panel'); if (!cont) return;
+  if (cont.innerHTML) { cont.innerHTML = ''; return; }   // se cierra con el mismo botón
+  var d = (eid('sgct-as-desde') || {}).value, h = (eid('sgct-as-hasta') || {}).value;
+  var qs = [];
+  if (d) qs.push('desde=' + d);
+  if (h) qs.push('hasta=' + h);
+  cont.innerHTML = '<div class="emp">Midiendo…</div>';
+  sgctApi('/gestion-resumen' + (qs.length ? '?' + qs.join('&') : '')).then(function(r){
+    if (!r || !r.ok) { cont.innerHTML = '<div class="emp">No se pudo medir</div>'; return; }
+    var g = r.data, t = g.totales;
+    var tabla = function(tit, filas, col1){
+      if (!filas.length) return '';
+      var max = filas.reduce(function(a, x){ return Math.max(a, x.monto || 0); }, 0);
+      return '<div style="min-width:260px;flex:1">'
+        + '<div style="font-weight:700;font-size:11px;text-transform:uppercase;letter-spacing:.06em;'
+        + 'color:var(--mut);margin-bottom:6px">' + tit + '</div>'
+        + filas.map(function(x){
+            var v = x.monto || 0;
+            var pct = max ? Math.round((v / max) * 100) : 0;
+            return '<div style="margin-bottom:6px">'
+              + '<div style="display:flex;justify-content:space-between;font-size:12.5px">'
+              + '<span>' + escH(x[col1] || '—') + ' <span style="color:var(--mut)">· ' + x.n + '</span></span>'
+              + '<b style="font-variant-numeric:tabular-nums">' + sgctMoney(v) + '</b></div>'
+              // La barra dice de un vistazo cuál pesa: la lista de números sola
+              // obliga a compararlos de a uno.
+              + '<div style="height:4px;background:var(--bor);border-radius:2px;margin-top:2px">'
+              + '<div style="height:4px;width:' + pct + '%;background:#8a5a1f;border-radius:2px"></div></div>'
+              + '</div>';
+          }).join('')
+        + '</div>';
+    };
+    var MOT = { error_proveedor: 'Error del proveedor', comprobante_pendiente: 'Comprobante pendiente',
+                diferencia_peso_calidad: 'Diferencia de peso o calidad', ajuste_gestion: 'Ajuste de gestión' };
+    var motivos = (g.por_motivo || []).map(function(x){
+      return { motivo: MOT[x.motivo] || x.motivo || 'sin motivo', n: x.n, monto: x.monto };
+    });
+    var alarma = t.pct >= 10;
+    cont.innerHTML =
+      '<div style="border:1.5px solid ' + (alarma ? '#d6a15e' : 'var(--bor)') + ';border-radius:10px;'
+      + 'padding:14px 16px;background:' + (alarma ? '#f6eddf' : 'var(--bg)') + '">'
+      + '<div style="display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:8px">'
+      + '<div style="font-weight:700;font-size:15px">Cuánto pasa por el libro de gestión</div>'
+      + '<button class="btn bo bs" onclick="sgctGestionResumen()">Cerrar</button></div>'
+      + '<div style="font-size:26px;font-weight:700;margin:8px 0 2px;font-variant-numeric:tabular-nums">'
+      + t.pct + '% <span style="font-size:14px;font-weight:400;color:var(--mut)">de lo fiscal</span></div>'
+      + '<div style="font-size:12.5px;color:var(--mut);margin-bottom:14px">'
+      + sgctMoney(t.gestion) + ' de gestión contra ' + sgctMoney(t.fiscal) + ' declarados'
+      + (t.gestion ? '' : ' — no hay nada en el libro de gestión') + '</div>'
+      + (t.gestion
+          ? '<div style="display:flex;gap:24px;flex-wrap:wrap">'
+            + tabla('Por qué', motivos, 'motivo')
+            + tabla('Quién lo cargó', g.por_usuario || [], 'usuario')
+            + tabla('Por mes', (g.meses || []).filter(function(m){ return m.gestion; })
+                .map(function(m){ return { mes: m.mes, n: '', monto: m.gestion }; }), 'mes')
+            + '</div>'
+          : '')
+      + '</div>';
+  });
 }
 
 function sgctAsTotales(data, ambito) {

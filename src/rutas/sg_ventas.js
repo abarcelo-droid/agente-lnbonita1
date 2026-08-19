@@ -8,7 +8,7 @@
 
 import express from 'express';
 import db from '../servicios/db_sg_finanzas.js';
-import { crearAsiento } from '../servicios/asientos.js';
+import { crearAsiento, MOTIVOS } from '../servicios/asientos.js';
 import { generarFacturaPDF } from '../servicios/facturaPDF.js';
 import * as XLSX from 'xlsx';
 import { exigirEmpresa, SAN_GERONIMO } from '../servicios/sociedad_modulo.js';
@@ -273,6 +273,20 @@ router.post('/liquidaciones', requireAuth, (req, res) => {
             lineas.push({ cuenta_id: cuentaRetIibb, debe: parseFloat(ret_iibb), haber: 0, descripcion: 'Retención IIBB' });
           }
           lineas.push({ cuenta_id: cuentaVentas, debe: 0, haber: precio_bruto, descripcion: `Venta bruta ${numero}` });
+          // EL ESPEJO DE LA COMPRA. Si se acordó más de lo que se facturó, la
+          // diferencia entra como dos líneas de gestión en el MISMO asiento: el
+          // cliente al debe —debe más— contra Ventas al haber. Sin IVA: el
+          // débito fiscal sale del comprobante y de nada más.
+          const difLiq = Math.round((parseFloat(req.body.dif_gestion) || 0) * 100) / 100;
+          const difMotLiq = String(req.body.dif_motivo || '').trim();
+          if (difLiq > 0 && MOTIVOS[difMotLiq]) {
+            lineas.push({ cuenta_id: cuentaCliente, debe: difLiq, haber: 0, ambito: 'gestion',
+              motivo: difMotLiq, descripcion: 'Diferencia con lo acordado' });
+            lineas.push({ cuenta_id: cuentaVentas, debe: 0, haber: difLiq, ambito: 'gestion',
+              motivo: difMotLiq, descripcion: 'Diferencia con lo acordado' });
+            db.prepare('UPDATE sg_ven_liquidaciones SET dif_gestion=?, dif_motivo=? WHERE id=?')
+              .run(difLiq, difMotLiq, liqId);
+          }
           asientoId = crearAsiento(db, {
             fecha: fechaLiq, usuario_id: u.id, ref_codigo: numero,
             descripcion: `${numero} | ${cliente?.razon_social||''} | Liq. Producto`,
@@ -373,6 +387,18 @@ router.post('/facturas', requireAuth, (req, res) => {
       .get(nro_factura.trim(), parseInt(cliente_id));
     if (existe) return res.status(400).json({ ok: false, error: `Ya existe la factura ${nro_factura} para este cliente` });
   }
+  // Lo acordado contra lo facturado, igual que en compras.
+  const difG = Math.round((parseFloat(req.body.dif_gestion) || 0) * 100) / 100;
+  const difM = String(req.body.dif_motivo || '').trim();
+  if (difG < 0) {
+    return res.status(400).json({ ok: false,
+      error: 'La diferencia de gestión no puede ser negativa: si se facturó de MÁS, manda el comprobante.' });
+  }
+  if (difG > 0 && !MOTIVOS[difM]) {
+    return res.status(400).json({ ok: false,
+      error: 'Poné por qué la factura no coincide con lo acordado. Elegí el motivo: '
+           + Object.values(MOTIVOS).map((m) => m.label).join(', ') + '.' });
+  }
   try {
     const tx = db.transaction(() => {
       const numero = nro_factura?.trim() || generarNumFac(tipo||'A');
@@ -381,9 +407,10 @@ router.post('/facturas', requireAuth, (req, res) => {
       const iva   = parseFloat(req.body.iva)||0;
       const total = neto + iva;
 
-      const r = db.prepare(`INSERT INTO sg_ven_facturas (numero, fecha, cliente_id, tipo, concepto, neto, iva, total, notas, usuario_id)
-        VALUES (?,?,?,?,?,?,?,?,?,?)`)
-        .run(numero, fechaFac, parseInt(cliente_id), tipo||'A', concepto||null, neto, iva, total, notas||null, u.id);
+      const r = db.prepare(`INSERT INTO sg_ven_facturas (numero, fecha, cliente_id, tipo, concepto, neto, iva, total, notas, usuario_id, dif_gestion, dif_motivo)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`)
+        .run(numero, fechaFac, parseInt(cliente_id), tipo||'A', concepto||null, neto, iva, total, notas||null, u.id,
+             difG, difG > 0 ? difM : null);
       const facId = r.lastInsertRowid;
 
       for (const it of items) {
@@ -444,7 +471,9 @@ router.get('/cc/:clienteId', (req, res) => {
         COALESCE((SELECT SUM(cd.monto) FROM sg_ven_cobranza_docs cd
           JOIN sg_ven_cobranzas co ON co.id=cd.cobranza_id
           WHERE cd.tipo='liquidacion' AND cd.doc_id=l.id AND co.anulada=0), 0) as cobrado,
-        l.neto_acreditar - COALESCE((SELECT SUM(cd.monto) FROM sg_ven_cobranza_docs cd
+        COALESCE(l.dif_gestion,0) AS dif_gestion, l.dif_motivo,
+        l.neto_acreditar + COALESCE(l.dif_gestion,0)
+          - COALESCE((SELECT SUM(cd.monto) FROM sg_ven_cobranza_docs cd
           JOIN sg_ven_cobranzas co ON co.id=cd.cobranza_id
           WHERE cd.tipo='liquidacion' AND cd.doc_id=l.id AND co.anulada=0), 0) as pendiente,
         'liquidacion' as tipo_doc
@@ -456,7 +485,9 @@ router.get('/cc/:clienteId', (req, res) => {
         COALESCE((SELECT SUM(cd.monto) FROM sg_ven_cobranza_docs cd
           JOIN sg_ven_cobranzas co ON co.id=cd.cobranza_id
           WHERE cd.tipo='factura' AND cd.doc_id=f.id AND co.anulada=0), 0) as cobrado,
-        f.total - COALESCE((SELECT SUM(cd.monto) FROM sg_ven_cobranza_docs cd
+        COALESCE(f.dif_gestion,0) AS dif_gestion, f.dif_motivo,
+        f.total + COALESCE(f.dif_gestion,0)
+          - COALESCE((SELECT SUM(cd.monto) FROM sg_ven_cobranza_docs cd
           JOIN sg_ven_cobranzas co ON co.id=cd.cobranza_id
           WHERE cd.tipo='factura' AND cd.doc_id=f.id AND co.anulada=0), 0) as pendiente,
         'factura' as tipo_doc
@@ -506,13 +537,19 @@ function ctaContableCliente(clienteId) {
 function pendienteDeDoc(tipo, docId) {
   const tabla = tipo === 'liquidacion' ? 'sg_ven_liquidaciones' : 'sg_ven_facturas';
   const campo = tipo === 'liquidacion' ? 'neto_acreditar' : 'total';
-  const d = db.prepare(`SELECT id, numero, cliente_id, estado, ${campo} AS total FROM ${tabla} WHERE id=?`)
+  const d = db.prepare(`SELECT id, numero, cliente_id, estado, ${campo} AS total,
+      COALESCE(dif_gestion,0) AS dif_gestion, dif_motivo FROM ${tabla} WHERE id=?`)
     .get(docId);
   if (!d) return null;
   const cob = db.prepare(`SELECT COALESCE(SUM(cd.monto),0) t FROM sg_ven_cobranza_docs cd
     JOIN sg_ven_cobranzas co ON co.id = cd.cobranza_id
     WHERE cd.tipo=? AND cd.doc_id=? AND co.anulada=0`).get(tipo, docId).t;
-  return { ...d, cobrado: cob, pendiente: Math.round(((d.total || 0) - cob) * 100) / 100 };
+  // LO QUE EL CLIENTE DEBE ES LO ACORDADO, no lo facturado: el total del
+  // comprobante más lo que quedó sin facturar. Es el espejo exacto de lo que se
+  // le debe a un proveedor cuando su factura vino corta.
+  const acordado = (d.total || 0) + (d.dif_gestion || 0);
+  return { ...d, total: acordado, total_fiscal: d.total || 0, cobrado: cob,
+    pendiente: Math.round((acordado - cob) * 100) / 100 };
 }
 
 // Las cuentas de donde puede entrar la plata, para el desplegable de la pantalla.

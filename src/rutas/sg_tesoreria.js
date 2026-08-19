@@ -1014,8 +1014,16 @@ router.get('/conciliacion', (req, res) => {
       parseFloat(cuenta?.saldo_inicial || 0));
     const saldoExtracto = extracto.reduce((s, e) => s + (e.tipo === 'ingreso' ? e.monto : -e.monto), 0);
 
+    // ── POR QUÉ NO CIERRA ───────────────────────────────────────────────
+    // El banco no sabe de ámbitos: en su extracto está TODO lo que pasó por la
+    // cuenta, sin distinguir. Un movimiento de gestión en una cuenta bancaria
+    // va a quedar sin par todos los meses, y quien concilia va a buscarlo.
+    // Decirlo acá evita esa búsqueda: la diferencia ya tiene nombre.
+    const ges = movimientos.filter((m) => m.ambito === 'gestion');
+    const montoGes = ges.reduce((sum, m) => sum + (m.tipo === 'ingreso' ? m.monto : -m.monto), 0);
     res.json({ ok: true, movimientos, extracto, saldo_libro: saldoLibro, saldo_extracto: saldoExtracto,
-      diferencia: saldoLibro - saldoExtracto });
+      diferencia: saldoLibro - saldoExtracto,
+      gestion: { cantidad: ges.length, monto: Math.round(montoGes * 100) / 100 } });
   } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 

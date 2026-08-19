@@ -1384,6 +1384,64 @@ router.get('/asientos/:id(\\d+)', (req, res) => {
   res.json({ ok: true, data: { ...asiento, lineas, totales: totalesDeAsiento(db, id) } });
 });
 
+// ── CUÁNTO PASA POR EL LIBRO DE GESTIÓN ──────────────────────────────────────
+// El número que hay que vigilar. Hoy va a dar cerca de cero, y está bien: lo que
+// importa es que si algún día crece, se vea — y no el día que alguien pregunte,
+// sino todos los meses, en el mismo lugar.
+//
+// Se abre por mes, por motivo y por usuario. Por MOTIVO, porque no es lo mismo
+// que la diferencia sea "falta la nota de débito" —eso se reclama y se cierra—
+// que "no va a tener comprobante". Por USUARIO, porque de eso depende la
+// decisión de restringir el permiso más adelante: hoy lo puede hacer cualquiera
+// que opere, a propósito, hasta tener la medición.
+router.get('/gestion-resumen', (req, res) => {
+  try {
+    const { desde, hasta } = req.query;
+    const w = [], p = [];
+    if (desde) { w.push('a.fecha >= ?'); p.push(desde); }
+    if (hasta) { w.push('a.fecha <= ?'); p.push(hasta); }
+    // Un asiento anulado no cuenta para ningún libro.
+    const donde = 'COALESCE(a.anulado,0) = 0' + (w.length ? ' AND ' + w.join(' AND ') : '');
+
+    // El total de cada libro, mes a mes. Se toma el DEBE: en partida doble el
+    // debe y el haber de cada mitad son iguales, así que contar los dos sería
+    // contar el doble.
+    const meses = db.prepare(`
+      SELECT strftime('%Y-%m', a.fecha) AS mes,
+             ROUND(SUM(CASE WHEN l.ambito='fiscal'  THEN l.debe ELSE 0 END), 2) AS fiscal,
+             ROUND(SUM(CASE WHEN l.ambito='gestion' THEN l.debe ELSE 0 END), 2) AS gestion
+        FROM sg_asientos_lineas l JOIN sg_asientos a ON a.id = l.asiento_id
+       WHERE ${donde}
+       GROUP BY mes ORDER BY mes DESC`).all(...p);
+
+    const porMotivo = db.prepare(`
+      SELECT l.motivo, COUNT(*) AS n, ROUND(SUM(l.debe), 2) AS monto
+        FROM sg_asientos_lineas l JOIN sg_asientos a ON a.id = l.asiento_id
+       WHERE l.ambito = 'gestion' AND l.debe > 0 AND ${donde}
+       GROUP BY l.motivo ORDER BY monto DESC`).all(...p);
+
+    const porUsuario = db.prepare(`
+      SELECT COALESCE(u.nombre, 'sin usuario') AS usuario, COUNT(*) AS n,
+             ROUND(SUM(l.debe), 2) AS monto
+        FROM sg_asientos_lineas l JOIN sg_asientos a ON a.id = l.asiento_id
+        LEFT JOIN usuarios u ON u.id = COALESCE(l.usuario_id, a.usuario_id)
+       WHERE l.ambito = 'gestion' AND l.debe > 0 AND ${donde}
+       GROUP BY usuario ORDER BY monto DESC`).all(...p);
+
+    const tot = meses.reduce((acc, m) => ({
+      fiscal: acc.fiscal + (m.fiscal || 0), gestion: acc.gestion + (m.gestion || 0),
+    }), { fiscal: 0, gestion: 0 });
+    tot.fiscal = Math.round(tot.fiscal * 100) / 100;
+    tot.gestion = Math.round(tot.gestion * 100) / 100;
+    // El porcentaje se mide contra lo FISCAL y no contra el total: "la gestión es
+    // el 12% de lo declarado" se entiende; "el 10,7% del total" esconde el mismo
+    // dato detrás de una base que se mueve sola.
+    tot.pct = tot.fiscal ? Math.round((tot.gestion / tot.fiscal) * 1000) / 10 : 0;
+
+    res.json({ ok: true, data: { totales: tot, meses, por_motivo: porMotivo, por_usuario: porUsuario } });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
 // ═══════════════════════════════════════════════════════════════════════════
 // ASIENTOS MODELO — CRUD
 // ═══════════════════════════════════════════════════════════════════════════
