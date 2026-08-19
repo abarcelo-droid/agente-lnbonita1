@@ -1202,7 +1202,8 @@ try {
 // Sumar los dos inflaba el camión por el flete declarado entero.
 try {
   const cols = db.prepare("PRAGMA table_info(sg_embarques)").all().map(c => c.name);
-  const nuevas = [['flete_base_usd', 'REAL'], ['seguro_usd', 'REAL']].filter(([n]) => !cols.includes(n));
+  const nuevas = [['flete_base_usd', 'REAL'], ['seguro_usd', 'REAL'],
+                  ['nro_invoice', 'TEXT']].filter(([n]) => !cols.includes(n));
   for (const [n, t] of nuevas) db.exec(`ALTER TABLE sg_embarques ADD COLUMN ${n} ${t}`);
   if (nuevas.length) console.log(`[DB] SG sg_embarques migrado (+${nuevas.map(x => x[0]).join(', ')})`);
 } catch (e) { console.error('[DB] SG migración sg_embarques (base imponible):', e.message); }
@@ -1246,7 +1247,9 @@ try {
   const cols = db.prepare("PRAGMA table_info(sg_embarque_costos)").all().map(c => c.name);
   const nuevas = [
     ['pago_ancla', 'TEXT'], ['pago_dias', 'INTEGER'], ['pago_fecha', 'TEXT'],
-    ['moneda_real', "TEXT DEFAULT 'ARS'"]
+    ['moneda_real', "TEXT DEFAULT 'ARS'"],
+    // Confirmación por documento: el rubro deja de ser una estimación cuando llega su papel.
+    ['confirmado_en', 'TEXT'], ['confirmado_por', 'INTEGER'], ['confirmado_doc_id', 'INTEGER']
   ].filter(([n]) => !cols.includes(n));
   for (const [n, t] of nuevas) db.exec(`ALTER TABLE sg_embarque_costos ADD COLUMN ${n} ${t}`);
   if (nuevas.length) console.log(`[DB] SG sg_embarque_costos migrado (+${nuevas.map(x => x[0]).join(', ')})`);
