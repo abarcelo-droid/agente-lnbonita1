@@ -16,7 +16,7 @@ import express from 'express';
 import db from '../servicios/db_sg_finanzas.js';
 import { exigirEmpresa, SAN_GERONIMO } from '../servicios/sociedad_modulo.js';
 import { consultarBcra } from '../servicios/bcra.js';
-import { crearAsiento } from '../servicios/asientos.js';
+import { crearAsiento, AMBITOS, MOTIVOS } from '../servicios/asientos.js';
 
 const router = express.Router();
 
@@ -82,7 +82,16 @@ router.get('/cuentas', (req, res) => {
         cc.codigo AS cuenta_codigo, cc.nombre AS cuenta_nombre,
         COALESCE(c.saldo_inicial, 0) +
         COALESCE((SELECT SUM(CASE WHEN tipo='ingreso' THEN monto ELSE -monto END)
-                  FROM sg_fin_movimientos WHERE cuenta_id = c.id), 0) AS saldo_actual
+                  FROM sg_fin_movimientos WHERE cuenta_id = c.id), 0) AS saldo_actual,
+        -- EL SALDO ABIERTO POR ÁMBITO. Desde que el ámbito lo lleva el MOVIMIENTO
+        -- y no la caja, una misma caja puede tener los dos: el arqueo total no
+        -- alcanza para saber cuánto de eso es fiscal. El saldo de apertura va
+        -- entero al lado fiscal — es el punto de partida declarado.
+        COALESCE(c.saldo_inicial, 0) +
+        COALESCE((SELECT SUM(CASE WHEN tipo='ingreso' THEN monto ELSE -monto END)
+                  FROM sg_fin_movimientos WHERE cuenta_id = c.id AND ambito='fiscal'), 0) AS saldo_fiscal,
+        COALESCE((SELECT SUM(CASE WHEN tipo='ingreso' THEN monto ELSE -monto END)
+                  FROM sg_fin_movimientos WHERE cuenta_id = c.id AND ambito='gestion'), 0) AS saldo_gestion
       FROM sg_fin_cuentas c
       LEFT JOIN sg_cuentas cc ON cc.id = c.cuenta_contable_id
       WHERE c.activo = 1
@@ -922,10 +931,12 @@ router.get('/bcra/:cuit', requireAuth, async (req, res) => {
 
 router.get('/movimientos', (req, res) => {
   try {
-    const { cuentaId, desde, hasta, solo_caja } = req.query;
+    const { cuentaId, desde, hasta, solo_caja, ambito } = req.query;
     let sql = `SELECT m.*, c.nombre as cuenta_nombre, c.ambito as cuenta_ambito, c.tipo as cuenta_tipo FROM sg_fin_movimientos m JOIN sg_fin_cuentas c ON c.id=m.cuenta_id WHERE 1 = 1`;
     const params = [];
     if (cuentaId)  { sql += ' AND m.cuenta_id=?'; params.push(parseInt(cuentaId)); }
+    // El ámbito del MOVIMIENTO, no el de la caja: la caja sólo propone.
+    if (AMBITOS.includes(String(ambito || ''))) { sql += ' AND m.ambito=?'; params.push(ambito); }
     if (solo_caja === '1') { sql += " AND c.tipo='caja'"; }
     if (desde)     { sql += ' AND m.fecha>=?'; params.push(desde); }
     if (hasta)     { sql += ' AND m.fecha<=?'; params.push(hasta); }
@@ -936,14 +947,32 @@ router.get('/movimientos', (req, res) => {
 
 router.post('/movimientos', requireCuenta((req) => Number((req.body || {}).cuenta_id)), (req, res) => {
   const u = getUser(req);
-  const { cuenta_id, fecha, tipo, concepto, monto, referencia, pago_id } = req.body || {};
+  const { cuenta_id, fecha, tipo, concepto, monto, referencia, pago_id, ambito, motivo } = req.body || {};
   if (!cuenta_id || !tipo || !concepto || !monto) return res.status(400).json({ ok: false, error: 'Faltan campos requeridos' });
   try {
-    const r = db.prepare(`INSERT INTO sg_fin_movimientos (cuenta_id, fecha, tipo, concepto, monto, referencia, pago_id, usuario_id)
-      VALUES (?,?,?,?,?,?,?,?)`)
+    // ── DE QUÉ ÁMBITO ES ESTE MOVIMIENTO ────────────────────────────────
+    // Lo decide quien lo carga. Si no dice nada se toma el de la caja, que es
+    // apenas lo habitual de esa caja y no una regla: una misma caja puede tener
+    // los dos. Y uno de gestión sin motivo no entra, igual que en el libro.
+    const cta = db.prepare('SELECT ambito FROM sg_fin_cuentas WHERE id=?').get(parseInt(cuenta_id));
+    let amb = String(ambito || '').trim();
+    if (!AMBITOS.includes(amb)) {
+      amb = (cta && cta.ambito === 'interno') ? 'gestion' : 'fiscal';
+    }
+    let mot = null;
+    if (amb === 'gestion') {
+      mot = String(motivo || '').trim();
+      if (!MOTIVOS[mot]) {
+        return res.status(400).json({ ok: false,
+          error: 'Un movimiento de gestión tiene que decir por qué. Elegí el motivo: '
+               + Object.values(MOTIVOS).map((m) => m.label).join(', ') + '.' });
+      }
+    }
+    const r = db.prepare(`INSERT INTO sg_fin_movimientos (cuenta_id, fecha, tipo, concepto, monto, referencia, pago_id, usuario_id, ambito, motivo)
+      VALUES (?,?,?,?,?,?,?,?,?,?)`)
       .run(parseInt(cuenta_id), fecha||new Date().toISOString().split('T')[0], tipo, concepto.trim(),
-           parseFloat(monto), referencia||null, pago_id?parseInt(pago_id):null, u?u.id:null);
-    res.json({ ok: true, id: r.lastInsertRowid });
+           parseFloat(monto), referencia||null, pago_id?parseInt(pago_id):null, u?u.id:null, amb, mot);
+    res.json({ ok: true, id: r.lastInsertRowid, ambito: amb });
   } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
