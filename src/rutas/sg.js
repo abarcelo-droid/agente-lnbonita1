@@ -5784,6 +5784,15 @@ function cuentaProveedoresDeModelo(db) {
   return l ? l.cuenta_id : null;
 }
 
+// La cuenta donde están parados los cheques de terceros que todavía no se
+// depositaron. Endosar uno la descarga: sale de la cartera y cancela deuda.
+// Ésta SÍ se parametriza —no hay un asiento modelo del que sacarla— y se
+// configura en Contabilidad SG.
+function cuentaChequesCartera(db) {
+  const r = db.prepare("SELECT cuenta_id FROM sg_config_impositiva WHERE clave='cheques_cartera'").get();
+  return (r && r.cuenta_id) || null;
+}
+
 // Lo que le queda por pagar a cada factura contabilizada de un proveedor. Es lo
 // único a lo que se puede imputar un pago: una factura sin asiento todavía no es
 // deuda registrada.
@@ -5830,7 +5839,14 @@ router.get('/pagos/cuentas', requireAuth, (req, res) => {
     const prov = ctaProv
       ? db.prepare('SELECT id, codigo, nombre FROM sg_cuentas WHERE id=?').get(ctaProv)
       : null;
-    res.json({ ok: true, data: conDueno, proveedores: prov || null });
+    // Y la de cheques en cartera, por lo mismo: endosar un cheque descarga ESA
+    // cuenta, y la pantalla tiene que poder mostrar ese asiento antes de que se
+    // confirme.
+    const ctaCart = cuentaChequesCartera(db);
+    const cart = ctaCart
+      ? db.prepare('SELECT id, codigo, nombre FROM sg_cuentas WHERE id=?').get(ctaCart)
+      : null;
+    res.json({ ok: true, data: conDueno, proveedores: prov || null, cartera: cart || null });
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
@@ -5936,7 +5952,47 @@ router.post('/pagos', requireAuth, (req, res) => {
                + 'sabe contra qué cancelar el pago.' });
       }
       const numerosPedidos = new Set();
+      const chequesPedidos = new Set();
       for (const m of mediosCrudos) {
+        // ── ENDOSAR UN CHEQUE DE TERCEROS ─────────────────────────────
+        // No sale plata de ningún lado: sale de la CARTERA. El papel que nos dio
+        // un cliente se lo damos al proveedor, y con eso se cancela deuda. Por
+        // eso este medio no tiene cuenta de Caja y Bancos, no genera movimiento,
+        // y en el asiento va contra la cuenta de cheques en cartera.
+        if (val(m.forma_pago) === 'cheque_terceros') {
+          const ctaCart = cuentaChequesCartera(db);
+          if (!ctaCart) {
+            return res.status(400).json({ ok: false,
+              error: 'Falta decir contra qué cuenta contable van los cheques en cartera. Configurala en '
+                   + 'Contabilidad SG antes de endosar.' });
+          }
+          const ch = db.prepare(`SELECT ct.*, cl.razon_social AS cliente_nombre
+            FROM sg_fin_cheques_terceros ct
+            LEFT JOIN sg_clientes cl ON cl.id = ct.cliente_id WHERE ct.id=?`).get(m.cheque_terceros_id);
+          if (!ch) return res.status(400).json({ ok: false, error: 'Elegí qué cheque de la cartera se endosa' });
+          if (ch.estado !== 'en_cartera') {
+            return res.status(400).json({ ok: false,
+              error: 'El cheque N° ' + ch.nro_cheque + ' no está en cartera: está ' + ch.estado + '.' });
+          }
+          // UN CHEQUE SE ENDOSA ENTERO. No se puede pagar media factura con
+          // medio cheque: al proveedor se le entrega el papel completo. Si el
+          // cheque vale más que la deuda, la diferencia queda a cuenta.
+          const monto = r2(ch.monto);
+          if (r2(m.monto) > 0 && Math.abs(r2(m.monto) - monto) > 0.01) {
+            return res.status(400).json({ ok: false,
+              error: 'El cheque N° ' + ch.nro_cheque + ' es por ' + monto + ' y se endosa entero: '
+                   + 'no se puede endosar ' + r2(m.monto) + '.' });
+          }
+          if (chequesPedidos.has(ch.id)) {
+            return res.status(400).json({ ok: false,
+              error: 'Estás endosando el cheque N° ' + ch.nro_cheque + ' dos veces en el mismo pago.' });
+          }
+          chequesPedidos.add(ch.id);
+          medios.push({ cuenta: null, ctaContable: ctaCart, monto, forma: 'cheque_terceros',
+            cheque: null, chequeTer: ch,
+            referencia: val(m.referencia) || ('Cheque ' + (ch.banco ? ch.banco + ' ' : '') + ch.nro_cheque) });
+          continue;
+        }
         const cuenta = db.prepare(`SELECT c.*, cc.id AS cta FROM sg_fin_cuentas c
           LEFT JOIN sg_cuentas cc ON cc.id = c.cuenta_contable_id
           WHERE c.id=? AND c.activo=1`).get(m.cuenta_fin_id);
@@ -6000,7 +6056,8 @@ router.post('/pagos', requireAuth, (req, res) => {
           numerosPedidos.add(clave);
           cheque = { chequera_id: ch.id, nro: nroCheque, fecha_vto: val(m.cheque_vto) || null };
         }
-        medios.push({ cuenta, monto, forma, cheque, referencia: val(m.referencia) || null });
+        medios.push({ cuenta, ctaContable: cuenta.cta, monto, forma, cheque, chequeTer: null,
+          referencia: val(m.referencia) || null });
       }
 
       // LOS MEDIOS TIENEN QUE SUMAR EL PAGO. Si no, o sale plata que no canceló
@@ -6011,7 +6068,10 @@ router.post('/pagos', requireAuth, (req, res) => {
           error: 'Los medios de pago suman ' + sumaMedios + ' y el pago es de ' + total + '.' });
       }
     }
-    const cuenta = medios.length ? medios[0].cuenta : null;
+    // La cabecera guarda UNA cuenta, que es de cuando un pago tenía una sola
+    // forma. Se toma la primera que sea una cuenta de verdad: un pago endosando
+    // un cheque no sale de ninguna, y ahí queda en nulo.
+    const cuenta = medios.map((m) => m.cuenta).find(Boolean) || null;
     const formaPago = medios.length
       ? (medios.length === 1 ? medios[0].forma : 'varios')
       : (val(b.forma_pago) || 'transferencia');
@@ -6070,7 +6130,8 @@ router.post('/pagos', requireAuth, (req, res) => {
           (fecha, proveedor_id, monto, forma_pago, banco, referencia, notas, usuario_id, cuenta_fin_id)
           VALUES (?,?,?,?,?,?,?,?,?)`).run(
           fecha, proveedorId, total, formaPago,
-          cuenta.banco || null, nro || null, val(b.notas), uid(req), cuenta.id).lastInsertRowid;
+          (cuenta && cuenta.banco) || null, nro || null, val(b.notas), uid(req),
+          cuenta ? cuenta.id : null).lastInsertRowid;
         for (const x of facturas) {
           if (x.monto > 0) insImp.run(pagoId, x.f.id, x.monto);
         }
@@ -6117,7 +6178,13 @@ router.post('/pagos', requireAuth, (req, res) => {
         // UNA LÍNEA POR MEDIO: cada plata sale de su propia cuenta contable. Con
         // una sola línea por el total, un pago mitad caja y mitad banco quedaba
         // descargado entero contra una de las dos.
-        for (const m of medios) insL.run(asientoId, m.cuenta.cta, 0, m.monto, m.cuenta.nombre);
+        for (const m of medios) {
+          insL.run(asientoId, m.ctaContable, 0, m.monto,
+            m.chequeTer
+              ? ('Cheque N° ' + m.chequeTer.nro_cheque + ' endosado'
+                 + (m.chequeTer.cliente_nombre ? ' (de ' + m.chequeTer.cliente_nombre + ')' : ''))
+              : m.cuenta.nombre);
+        }
         db.prepare('UPDATE sg_pagos_proveedores SET asiento_id=? WHERE id=?').run(asientoId, pagoId);
       }
 
@@ -6126,9 +6193,20 @@ router.post('/pagos', requireAuth, (req, res) => {
       const prov3 = db.prepare('SELECT razon_social FROM sg_proveedores WHERE id=?').get(proveedorId);
       const nombreProv = (prov3 && prov3.razon_social) || 'proveedor';
       const insMedio = db.prepare(`INSERT INTO sg_pagos_medios
-        (pago_id, forma_pago, cuenta_fin_id, monto, referencia, chequera_id, nro_cheque, cheque_id)
-        VALUES (?,?,?,?,?,?,?,?)`);
+        (pago_id, forma_pago, cuenta_fin_id, monto, referencia, chequera_id, nro_cheque, cheque_id, cheque_ter_id)
+        VALUES (?,?,?,?,?,?,?,?,?)`);
       for (const m of medios) {
+        // EL ENDOSO NO MUEVE NINGUNA CUENTA. El cheque sale de la cartera y se
+        // anota a quién se le dio: el día que rebote hay que saber a quién
+        // volvemos a deberle.
+        if (m.chequeTer) {
+          db.prepare(`UPDATE sg_fin_cheques_terceros
+            SET estado='endosado', endosado_a=?, pago_id=?,
+                notas = TRIM(COALESCE(notas,'') || ' [Endosado a ' || ? || ']')
+            WHERE id=?`).run(proveedorId, pagoId, nombreProv, m.chequeTer.id);
+          insMedio.run(pagoId, m.forma, null, m.monto, m.referencia, null, null, null, m.chequeTer.id);
+          continue;
+        }
         let chequeId = null;
         if (m.cheque) {
           chequeId = db.prepare(`INSERT INTO sg_fin_cheques_propios
@@ -6146,7 +6224,7 @@ router.post('/pagos', requireAuth, (req, res) => {
           'Pago a ' + nombreProv + (m.cheque ? ' — cheque N° ' + m.cheque.nro : ''),
           m.monto, m.referencia || nro || null, pagoId, chequeId, uid(req));
         insMedio.run(pagoId, m.forma, m.cuenta.id, m.monto, m.referencia,
-          m.cheque ? m.cheque.chequera_id : null, m.cheque ? m.cheque.nro : null, chequeId);
+          m.cheque ? m.cheque.chequera_id : null, m.cheque ? m.cheque.nro : null, chequeId, null);
       }
     })();
     res.json({ ok: true, data: {
@@ -6285,6 +6363,12 @@ router.post('/pagos/:id/anular', requireAuth, (req, res) => {
       db.prepare(`UPDATE sg_fin_cheques_propios SET estado='anulado',
         notas = TRIM(COALESCE(notas,'') || ' [ANULADO con el pago: ' || ? || ']')
         WHERE pago_id=? AND estado <> 'cobrado'`).run(motivo, p.id);
+      // El cheque de TERCEROS que se endosó con ese pago es al revés: no se
+      // rompe, VUELVE a la cartera. El papel sigue existiendo y sigue siendo
+      // nuestro — lo que se deshizo es habérselo dado al proveedor.
+      db.prepare(`UPDATE sg_fin_cheques_terceros SET estado='en_cartera', endosado_a=NULL, pago_id=NULL,
+        notas = TRIM(COALESCE(notas,'') || ' [Vuelve a la cartera: se anuló el pago — ' || ? || ']')
+        WHERE pago_id=? AND estado='endosado'`).run(motivo, p.id);
     })();
     res.json({ ok: true, data: { id: Number(p.id) } });
   } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
