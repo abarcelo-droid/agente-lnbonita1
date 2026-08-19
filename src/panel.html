@@ -3359,10 +3359,25 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
         <!-- El proveedor se elige ACÁ: entrando por el acceso directo todavía no
              hay ninguno, y entrando desde una ficha se puede haber equivocado
              de fila. Cambiarlo recarga sus facturas. -->
-        <div class="fl" id="sg-pago-prov-box" style="margin-bottom:10px;display:none">
-          <label>¿A qué proveedor se le paga?</label>
-          <select id="sg-pago-prov" onchange="sgPagoProveedor()"></select>
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:10px;margin-bottom:10px">
+          <div class="fl" id="sg-pago-prov-box" style="display:none;margin:0">
+            <label>¿A qué proveedor se le paga?</label>
+            <select id="sg-pago-prov" onchange="sgPagoProveedor()"></select>
+          </div>
+          <!-- QUÉ ESTÁ CANCELANDO ESTE PAGO. Una factura puede deber dos cosas:
+               lo que dice el comprobante y lo que quedó sin facturar. De esto
+               depende en qué libro cae el asiento — un pago de la parte sin
+               comprobante NO puede aparecer en el fiscal, porque ahí esa deuda
+               nunca subió. Y le da a la contadora la manera de cerrar sólo la
+               parte interna cuando ya pasó demasiado tiempo. -->
+          <div class="fl" style="margin:0"><label>¿Qué está cancelando?</label>
+            <select id="sg-pago-ambito" onchange="sgPagoAmbito()">
+              <option value="todo">Las dos partes (proporcional)</option>
+              <option value="fiscal">Sólo lo facturado</option>
+              <option value="gestion">Sólo lo que falta facturar</option>
+            </select></div>
         </div>
+        <div id="sg-pago-ambito-aviso" style="font-size:12.5px;margin-bottom:10px"></div>
         <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px">
           <div class="fl"><label>Fecha</label><input type="date" id="sg-pago-fecha"></div>
           <div class="fl"><label>Referencia general</label>
@@ -6052,6 +6067,8 @@ function sgPagoOpen(provId, nombre){
   var f = eid('sg-pago-fecha'); if (f) f.value = new Date().toISOString().slice(0, 10);
   ['sg-pago-ref', 'sg-pago-notas', 'sg-pago-acuenta']
     .forEach(function(id){ var el = eid(id); if (el) el.value = ''; });
+  var am = eid('sg-pago-ambito'); if (am) am.value = 'todo';
+  var avAm = eid('sg-pago-ambito-aviso'); if (avAm) avAm.innerHTML = '';
 
   // TODOS los proveedores activos, no sólo los que ya tienen movimientos: a uno
   // nuevo también se le puede entregar una seña, y ése es justo el que no
@@ -6107,6 +6124,26 @@ function sgPagoCargarProv(provId){
 
 // Cambiar de proveedor borra lo imputado: los renglones eran de las facturas del
 // anterior, y dejarlos escritos pagaría contra la factura de otro.
+// Cambiar qué se cancela cambia el TOPE de cada fila, así que se repinta. Y se
+// avisa qué va a pasar, porque el asiento se arma distinto según la elección.
+function sgPagoAmbito(){
+  var a = (eid('sg-pago-ambito') || {}).value || 'todo';
+  var av = eid('sg-pago-ambito-aviso');
+  if (av) {
+    av.innerHTML = a === 'todo' ? ''
+      : '<div style="border:1.5px solid ' + (a === 'gestion' ? '#d6a15e' : '#86efac')
+        + ';background:' + (a === 'gestion' ? '#f6eddf' : '#f0fdf4') + ';border-radius:8px;'
+        + 'padding:9px 11px;color:' + (a === 'gestion' ? '#854d0e' : '#15803d') + '">'
+        + (a === 'gestion'
+            ? 'Este pago cancela <b>sólo la parte que no tiene comprobante</b>. No va a aparecer '
+              + 'en el libro fiscal, y la caja de donde salga lo va a registrar como gestión.'
+            : 'Este pago cancela <b>sólo lo que dice el comprobante</b>. Lo que falta facturar '
+              + 'queda pendiente.')
+        + '</div>';
+  }
+  sgPagoPintar();
+}
+
 function sgPagoProveedor(){
   sgPagoCargarProv((eid('sg-pago-prov') || {}).value);
 }
@@ -6133,14 +6170,29 @@ function sgPagoPintar(){
     : '';
 
   var TIPO = { factura_a: 'FA A', factura_b: 'FA B', liquidacion: 'LIQ' };
+  // El TOPE de cada fila depende de qué se esté cancelando. Si mostrara siempre
+  // el total, elegir "sólo lo facturado" y apretar «todo» cargaría más de lo que
+  // hay de ese lado, y el servidor lo rebotaría recién al guardar.
+  var amb = (eid('sg-pago-ambito') || {}).value || 'todo';
+  var tope = function(f){
+    if (amb === 'fiscal') return Number(f.pendiente_fiscal) || 0;
+    if (amb === 'gestion') return Number(f.pendiente_gestion) || 0;
+    return Number(f.pendiente) || 0;
+  };
   tb.innerHTML = SG_PAGO.facturas.length ? SG_PAGO.facturas.map(function(f, i){
     var nro = (f.punto_venta ? f.punto_venta + '-' : '') + (f.numero || '');
-    return '<tr><td>' + escH(f.fecha_emision || '—') + '</td>'
+    return '<tr' + (tope(f) <= 0 ? ' style="opacity:.45"' : '') + '><td>' + escH(f.fecha_emision || '—') + '</td>'
       + '<td>' + escH(TIPO[f.tipo_comprobante] || f.tipo_comprobante || '') + ' <code>' + escH(nro) + '</code></td>'
       + '<td class="pg-partida" style="font-family:monospace;font-size:11.5px">'
         + escH(f.partida || '—') + '</td>'
       + '<td style="text-align:right">' + sgMoney(f.total) + '</td>'
-      + '<td style="text-align:right"><b>' + sgMoney(f.pendiente) + '</b></td>'
+      + '<td style="text-align:right"><b>' + sgMoney(tope(f)) + '</b>'
+        // Cuando hay parte sin facturar se dice, aunque se esté pagando todo:
+        // es la diferencia entre lo que se le debe y lo que está documentado.
+        + (amb === 'todo' && Number(f.pendiente_gestion) > 0
+            ? '<div style="font-size:10.5px;color:#8a5a1f">'
+              + sgMoney(f.pendiente_gestion) + ' sin facturar</div>' : '')
+        + '</td>'
       + (hayAC
           ? '<td class="pg-ac" style="text-align:right;white-space:nowrap">'
             + '<input type="text" inputmode="decimal" id="sg-pago-ac-' + i + '" placeholder="$ 0"'
@@ -6171,7 +6223,11 @@ function sgPagoTodo(i){
   // Si ya se está usando saldo a cuenta contra esta factura, lo que falta es el
   // resto: si no, se pagaría dos veces la misma plata.
   var ac = sgMilParse((eid('sg-pago-ac-' + i) || {}).value) || 0;
-  var resta = Math.round(((f.pendiente || 0) - ac) * 100) / 100;
+  // Y el tope es el de lo que se está cancelando, no el total de la factura.
+  var amb2 = (eid('sg-pago-ambito') || {}).value || 'todo';
+  var pend = amb2 === 'fiscal' ? (f.pendiente_fiscal || 0)
+    : (amb2 === 'gestion' ? (f.pendiente_gestion || 0) : (f.pendiente || 0));
+  var resta = Math.round((pend - ac) * 100) / 100;
   el.value = resta > 0 ? sgMilShow(resta) : '';
   sgPagoTotal();
 }
@@ -6261,6 +6317,7 @@ function sgPagoGuardar(){
     referencia: (eid('sg-pago-ref') || {}).value,
     notas: (eid('sg-pago-notas') || {}).value,
     a_cuenta: aCuenta,
+    ambito_pago: (eid('sg-pago-ambito') || {}).value || 'todo',
     imputaciones: imputaciones
   };
   // Sólo hacen falta medios si HOY sale plata: aplicar un anticipo no mueve el

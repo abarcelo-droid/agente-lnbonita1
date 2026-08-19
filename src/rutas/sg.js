@@ -5927,6 +5927,11 @@ router.get('/pagos/pendientes/:proveedorId', requireAuth, (req, res) => {
       SELECT f.id, f.fecha_emision, f.tipo_comprobante, f.punto_venta, f.numero,
              f.total, COALESCE(f.saldo_pagado,0) AS pagado,
              COALESCE(f.dif_gestion,0) AS dif_gestion, f.dif_motivo,
+             -- Las dos mitades, cada una con lo suyo pagado. El que arma el pago
+             -- tiene que ver cuánto puede imputar a cada lado: si sólo viera el
+             -- total, elegiría "sólo lo facturado" por más de lo que hay.
+             ROUND(COALESCE(f.total,0) - (COALESCE(f.saldo_pagado,0) - COALESCE(f.saldo_pagado_gestion,0)), 2) AS pendiente_fiscal,
+             ROUND(COALESCE(f.dif_gestion,0) - COALESCE(f.saldo_pagado_gestion,0), 2) AS pendiente_gestion,
              ROUND(COALESCE(f.total,0) + COALESCE(f.dif_gestion,0) - COALESCE(f.saldo_pagado,0), 2) AS pendiente,
              COALESCE(o.trazabilidad, o.numero) AS partida
         FROM sg_facturas_compra f
@@ -6016,6 +6021,13 @@ router.post('/pagos', requireAuth, (req, res) => {
     const proveedorId = Number(b.proveedor_id);
     if (!proveedorId) return res.status(400).json({ ok: false, error: 'Elegí el proveedor' });
     const fecha = val(b.fecha) || db.prepare("SELECT date('now','localtime') d").get().d;
+    // ── QUÉ ESTÁ CANCELANDO ESTE PAGO ───────────────────────────────────
+    // 'todo' reparte en proporción, 'fiscal' va sólo contra lo que dice el
+    // comprobante y 'gestion' sólo contra lo que quedó sin facturar. De esto
+    // depende en qué libro cae el asiento: un pago de la parte sin comprobante
+    // NO puede aparecer en el fiscal, porque ahí esa deuda nunca subió.
+    const ambitoPago = ['fiscal', 'gestion'].includes(String(b.ambito_pago || ''))
+      ? String(b.ambito_pago) : 'todo';
     // Cada línea puede cancelar con DOS platas distintas: la que sale hoy del
     // banco (monto) y la que ya se le había entregado y quedó a cuenta
     // (desde_a_cuenta). La segunda no vuelve a salir de ningún lado.
@@ -6235,33 +6247,71 @@ router.post('/pagos', requireAuth, (req, res) => {
       // Lo que le queda por pagar es lo ACORDADO menos lo pagado: el total del
       // comprobante más lo que quedó sin facturar. Con sólo el total, pagarle
       // los 20.000 que se le deben rebotaba con "le quedan 10.000".
-      const pendiente = r2((f.total || 0) + (f.dif_gestion || 0) - (f.saldo_pagado || 0));
+      // ── LAS DOS MITADES DE LO QUE SE LE DEBE ──────────────────────────
+      const pendGes = r2((f.dif_gestion || 0) - (f.saldo_pagado_gestion || 0));
+      const pendFis = r2((f.total || 0) - ((f.saldo_pagado || 0) - (f.saldo_pagado_gestion || 0)));
+      const pendiente = r2(pendFis + pendGes);
       const cancela = r2(im.monto + im.desdeACuenta);
-      if (cancela > pendiente + 0.01) {
+      const tope = ambitoPago === 'fiscal' ? pendFis
+        : (ambitoPago === 'gestion' ? pendGes : pendiente);
+      if (cancela > tope + 0.01) {
         return res.status(400).json({ ok: false,
-          error: 'A la factura ' + f.numero + ' le quedan ' + pendiente + ' y le estás imputando '
-               + cancela + '.' });
+          error: 'A la factura ' + f.numero + ' le quedan ' + tope
+               + (ambitoPago === 'fiscal' ? ' facturados'
+                  : (ambitoPago === 'gestion' ? ' sin facturar' : ''))
+               + ' y le estás imputando ' + cancela + '.' });
       }
-      facturas.push({ f, monto: im.monto, desdeACuenta: im.desdeACuenta });
+      // CUÁNTO DE ESTO VA CONTRA LA PARTE SIN COMPROBANTE. Con "las dos" se
+      // reparte en proporción: es la única regla que no depende del orden en que
+      // se hayan cargado las facturas.
+      const ges = ambitoPago === 'gestion' ? cancela
+        : (ambitoPago === 'fiscal' ? 0
+           : (pendiente > 0 ? r2(cancela * pendGes / pendiente) : 0));
+      facturas.push({ f, monto: im.monto, desdeACuenta: im.desdeACuenta,
+        gestion: ges, fiscal: r2(cancela - ges) });
     }
+
+    // ── CUÁNTO DE LA PLATA QUE SALE HOY VA CONTRA LO SIN FACTURAR ───────
+    // Lo que se cubre con un anticipo no entra: esa plata salió el día del
+    // anticipo y ya tiene su asiento.
+    let gesNuevo = 0;
+    for (const x of facturas) {
+      const cancelaX = r2(x.monto + x.desdeACuenta);
+      if (cancelaX > 0 && x.monto > 0) gesNuevo = r2(gesNuevo + r2(x.gestion * x.monto / cancelaX));
+    }
+    if (aCuenta > 0 && ambitoPago === 'gestion') gesNuevo = r2(gesNuevo + aCuenta);
+    if (gesNuevo > total) gesNuevo = total;
+    // El motivo de las líneas de gestión sale de la factura que se está
+    // cancelando: es la misma diferencia, y repetirlo deja el informe por motivo
+    // sumando lo mismo de los dos lados.
+    const motivoGestion = (facturas.find((x) => x.gestion > 0 && x.f.dif_motivo) || {}).f?.dif_motivo
+      || 'ajuste_gestion';
 
     const nro = (val(b.referencia) || '').trim();
     let pagoId = null, asientoId = null;
     db.transaction(() => {
-      const insImp = db.prepare('INSERT INTO sg_pagos_compras (pago_id, compra_id, monto) VALUES (?,?,?)');
+      const insImp = db.prepare(
+        'INSERT INTO sg_pagos_compras (pago_id, compra_id, monto, monto_gestion) VALUES (?,?,?,?)');
       const subeSaldo = db.prepare(`UPDATE sg_facturas_compra
         SET saldo_pagado = ROUND(COALESCE(saldo_pagado,0) + ?, 2),
+            saldo_pagado_gestion = ROUND(COALESCE(saldo_pagado_gestion,0) + ?, 2),
             modificado_en=datetime('now','localtime'), modificado_por=? WHERE id=?`);
 
       if (total > 0) {
         pagoId = db.prepare(`INSERT INTO sg_pagos_proveedores
-          (fecha, proveedor_id, monto, forma_pago, banco, referencia, notas, usuario_id, cuenta_fin_id)
-          VALUES (?,?,?,?,?,?,?,?,?)`).run(
+          (fecha, proveedor_id, monto, forma_pago, banco, referencia, notas, usuario_id, cuenta_fin_id, ambito_pago)
+          VALUES (?,?,?,?,?,?,?,?,?,?)`).run(
           fecha, proveedorId, total, formaPago,
           (cuenta && cuenta.banco) || null, nro || null, val(b.notas), uid(req),
-          cuenta ? cuenta.id : null).lastInsertRowid;
+          cuenta ? cuenta.id : null, ambitoPago).lastInsertRowid;
         for (const x of facturas) {
-          if (x.monto > 0) insImp.run(pagoId, x.f.id, x.monto);
+          if (x.monto > 0) {
+            // Lo que sale HOY se reparte en la misma proporción que la
+            // imputación entera: el resto lo cubre el saldo a cuenta.
+            const cancela = r2(x.monto + x.desdeACuenta);
+            const gesHoy = cancela > 0 ? r2(x.gestion * x.monto / cancela) : 0;
+            insImp.run(pagoId, x.f.id, x.monto, gesHoy);
+          }
         }
       }
 
@@ -6275,7 +6325,9 @@ router.post('/pagos', requireAuth, (req, res) => {
           if (falta <= 0.001) break;
           if (a.disponible <= 0.001) continue;
           const usa = r2(Math.min(a.disponible, falta));
-          insImp.run(a.id, x.f.id, usa);
+          // La parte de gestión que le toca a lo que se cubre con el anticipo.
+          const cancelaX = r2(x.monto + x.desdeACuenta);
+          insImp.run(a.id, x.f.id, usa, cancelaX > 0 ? r2(x.gestion * usa / cancelaX) : 0);
           a.disponible = r2(a.disponible - usa);
           falta = r2(falta - usa);
         }
@@ -6284,7 +6336,7 @@ router.post('/pagos', requireAuth, (req, res) => {
 
       for (const x of facturas) {
         const cancela = r2(x.monto + x.desdeACuenta);
-        if (cancela > 0) subeSaldo.run(cancela, uid(req), x.f.id);
+        if (cancela > 0) subeSaldo.run(cancela, x.gestion, uid(req), x.f.id);
       }
 
       // EL ASIENTO. Proveedores al debe —se cancela deuda— contra la cuenta del
@@ -6301,18 +6353,39 @@ router.post('/pagos', requireAuth, (req, res) => {
         // UNA LÍNEA POR MEDIO: cada plata sale de su propia cuenta contable. Con
         // una sola línea por el total, un pago mitad caja y mitad banco quedaba
         // descargado entero contra una de las dos.
+        //
+        // ── Y CADA MITAD EN SU LIBRO ────────────────────────────────────
+        // Un pago que cancela la parte SIN comprobante no puede aparecer en el
+        // libro fiscal: ahí esa deuda nunca subió, así que la cuenta de
+        // Proveedores bajaría por algo que nunca entró. Va marcado como
+        // gestión, y el asiento cierra dos veces —una por mitad—.
+        const partes = [
+          { ambito: 'fiscal', monto: r2(total - gesNuevo), motivo: null },
+          { ambito: 'gestion', monto: gesNuevo, motivo: motivoGestion },
+        ].filter((p) => p.monto > 0.001);
+        const lineas = [];
+        for (const p of partes) {
+          lineas.push({ cuenta_id: ctaProv, debe: p.monto, haber: 0, descripcion: 'Proveedores',
+            ambito: p.ambito, motivo: p.motivo });
+          // Cada medio aporta a esta mitad en proporción a lo que puso en el
+          // pago. El último se lleva el resto, para que la mitad cierre exacta
+          // aunque los centavos no se repartan justo.
+          let queda = p.monto;
+          medios.forEach((m, i) => {
+            const parte = i === medios.length - 1 ? queda : r2(p.monto * m.monto / total);
+            queda = r2(queda - parte);
+            if (parte <= 0.001) return;
+            lineas.push({ cuenta_id: m.ctaContable, debe: 0, haber: parte,
+              ambito: p.ambito, motivo: p.motivo,
+              descripcion: m.chequeTer
+                ? ('Cheque N° ' + m.chequeTer.nro_cheque + ' endosado'
+                   + (m.chequeTer.cliente_nombre ? ' (de ' + m.chequeTer.cliente_nombre + ')' : ''))
+                : m.cuenta.nombre });
+          });
+        }
         asientoId = crearAsiento(db, {
           fecha, descripcion: desc, usuario_id: uid(req), ref_codigo: nro || null,
-        }, [
-          { cuenta_id: ctaProv, debe: total, haber: 0, descripcion: 'Proveedores' },
-          ...medios.map((m) => ({
-            cuenta_id: m.ctaContable, debe: 0, haber: m.monto,
-            descripcion: m.chequeTer
-              ? ('Cheque N° ' + m.chequeTer.nro_cheque + ' endosado'
-                 + (m.chequeTer.cliente_nombre ? ' (de ' + m.chequeTer.cliente_nombre + ')' : ''))
-              : m.cuenta.nombre,
-          })),
-        ]).id;
+        }, lineas).id;
         db.prepare('UPDATE sg_pagos_proveedores SET asiento_id=? WHERE id=?').run(asientoId, pagoId);
       }
 
@@ -6346,11 +6419,22 @@ router.post('/pagos', requireAuth, (req, res) => {
         // Sin esto, pagabas 1.500 desde el Galicia y Caja y Bancos seguía
         // mostrando el saldo de antes: el asiento existía, pero el saldo de la
         // pantalla se calcula con los movimientos, no con el libro.
-        db.prepare(`INSERT INTO sg_fin_movimientos
-          (cuenta_id, fecha, tipo, concepto, monto, referencia, pago_id, cheque_id, usuario_id)
-          VALUES (?,?, 'egreso', ?,?,?,?,?,?)`).run(m.cuenta.id, fecha,
-          'Pago a ' + nombreProv + (m.cheque ? ' — cheque N° ' + m.cheque.nro : ''),
-          m.monto, m.referencia || nro || null, pagoId, chequeId, uid(req));
+        // EL MOVIMIENTO TAMBIÉN SE PARTE. Si el pago cancela las dos mitades, la
+        // caja tiene que poder decir cuánto de lo que salió fue de cada libro:
+        // con un solo movimiento, el arqueo fiscal se lleva todo.
+        const gesMedio = total > 0 ? r2(gesNuevo * m.monto / total) : 0;
+        const insMov = db.prepare(`INSERT INTO sg_fin_movimientos
+          (cuenta_id, fecha, tipo, concepto, monto, referencia, pago_id, cheque_id, usuario_id, ambito, motivo)
+          VALUES (?,?, 'egreso', ?,?,?,?,?,?,?,?)`);
+        const conceptoMov = 'Pago a ' + nombreProv + (m.cheque ? ' — cheque N° ' + m.cheque.nro : '');
+        if (r2(m.monto - gesMedio) > 0.001) {
+          insMov.run(m.cuenta.id, fecha, conceptoMov, r2(m.monto - gesMedio),
+            m.referencia || nro || null, pagoId, chequeId, uid(req), 'fiscal', null);
+        }
+        if (gesMedio > 0.001) {
+          insMov.run(m.cuenta.id, fecha, conceptoMov + ' — parte sin facturar', gesMedio,
+            m.referencia || nro || null, pagoId, chequeId, uid(req), 'gestion', motivoGestion);
+        }
         insMedio.run(pagoId, m.forma, m.cuenta.id, m.monto, m.referencia,
           m.cheque ? m.cheque.chequera_id : null, m.cheque ? m.cheque.nro : null, chequeId, null);
       }

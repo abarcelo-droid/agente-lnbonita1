@@ -432,6 +432,18 @@ try { db.exec("ALTER TABLE sg_ven_facturas ADD COLUMN dif_gestion REAL NOT NULL 
 try { db.exec("ALTER TABLE sg_ven_facturas ADD COLUMN dif_motivo TEXT"); } catch (_) {}
 try { db.exec("ALTER TABLE sg_ven_liquidaciones ADD COLUMN dif_gestion REAL NOT NULL DEFAULT 0"); } catch (_) {}
 try { db.exec("ALTER TABLE sg_ven_liquidaciones ADD COLUMN dif_motivo TEXT"); } catch (_) {}
+
+// ── UN PAGO ELIGE QUÉ CANCELA ─────────────────────────────────────────────
+// Una factura puede deber dos cosas: lo que dice el comprobante y lo que quedó
+// sin facturar. Un pago puede ir contra una, contra la otra o contra las dos —y
+// hace falta saber cuál, porque un pago que cancela la parte sin comprobante NO
+// puede aparecer en el libro fiscal: ahí esa deuda nunca subió.
+//
+// `saldo_pagado` sigue siendo el total pagado; `saldo_pagado_gestion` es cuánto
+// de eso fue contra la parte sin facturar. Lo fiscal es la resta.
+try { db.exec("ALTER TABLE sg_facturas_compra ADD COLUMN saldo_pagado_gestion REAL NOT NULL DEFAULT 0"); } catch (_) {}
+try { db.exec("ALTER TABLE sg_pagos_compras ADD COLUMN monto_gestion REAL NOT NULL DEFAULT 0"); } catch (_) {}
+try { db.exec("ALTER TABLE sg_pagos_proveedores ADD COLUMN ambito_pago TEXT NOT NULL DEFAULT 'todo'"); } catch (_) {}
 try { db.exec("CREATE INDEX IF NOT EXISTS idx_sg_cob_cliente ON sg_ven_cobranzas(cliente_id)"); } catch (_) {}
 
 // ── DOS NÚMEROS DE LA MISMA OPERACIÓN ─────────────────────────────────────
