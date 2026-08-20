@@ -2857,9 +2857,22 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
          recorrer la lista con el dedo. Filtra mientras se escribe, sin ir al
          servidor: la lista ya está entera en la pantalla. -->
     <div id="sg-ccprov-tarjetas" style="margin-bottom:12px"></div>
-    <div class="sg-oc-search" style="max-width:340px;margin-bottom:10px">
-      <input id="sg-ccprov-q" placeholder="🔎 Buscar proveedor…" oninput="sgCcProvPintar()"
-             style="width:100%;box-sizing:border-box">
+    <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:10px">
+      <div class="sg-oc-search" style="max-width:340px;flex:1;min-width:220px">
+        <input id="sg-ccprov-q" placeholder="🔎 Buscar proveedor…" oninput="sgCcProvPintar()"
+               style="width:100%;box-sizing:border-box">
+      </div>
+      <!-- EL MISMO SELECTOR QUE EN ASIENTOS, con las mismas palabras: es el
+           mismo corte sobre los mismos datos, y llamarlo distinto en cada
+           pantalla obliga a traducir mentalmente. Acá decide qué saldo se
+           muestra en la columna Saldo y en las tarjetas de arriba. -->
+      <label style="font-size:12px;color:var(--mut)">Libro:
+        <select id="sg-ccprov-libro" onchange="sgCcProvPintar()"
+                style="padding:5px 8px;font-size:12px">
+          <option value="">Fiscal + Gestión</option>
+          <option value="fiscal">Sólo fiscal</option>
+          <option value="gestion">Sólo gestión</option>
+        </select></label>
     </div>
     <div class="ab-table-wrap"><table class="pa-tbl">
       <thead><tr><th>Proveedor</th><th style="text-align:right">Apertura</th>
@@ -5748,14 +5761,19 @@ function sgCcProvPintar(){
     return pal.every(function(w){ return t.indexOf(w) >= 0; });
   });
   // El total de la pantalla, arriba: cuánto se debe en total y qué parte de eso
-  // todavía no tiene comprobante.
+  // todavía no tiene comprobante. Con el libro filtrado se muestra sólo esa
+  // mitad, para que las tarjetas y la tabla digan lo mismo.
+  var libro = (eid('sg-ccprov-libro') || {}).value || '';
   var cont = eid('sg-ccprov-tarjetas');
   if (cont) {
     var ges = rows.reduce(function(a, p){ return a + (p.pendiente_gestion || 0); }, 0);
     var tot = rows.reduce(function(a, p){ return a + (p.saldo || 0); }, 0);
     ges = Math.round(ges * 100) / 100;
-    cont.innerHTML = rows.length
-      ? sgCcTarjetas(Math.round((tot - ges) * 100) / 100, ges, 'Se debe en total') : '';
+    var fis = Math.round((tot - ges) * 100) / 100;
+    cont.innerHTML = !rows.length ? ''
+      : (libro === 'fiscal' ? sgCcTarjetas(fis, 0, 'Se debe — con comprobante')
+        : (libro === 'gestion' ? sgCcTarjetas(0, ges, 'Se debe — sin facturar')
+          : sgCcTarjetas(fis, ges, 'Se debe en total')));
   }
   var n = eid('sg-ccprov-n');
   if (n) n.textContent = rows.length === SG_CCPROV.length
@@ -5783,7 +5801,9 @@ function sgCcProvPintar(){
           +(Number(p.pendiente_gestion) > 0
               ? '<span style="color:#8a5a1f;font-weight:600">'+sgMoney(p.pendiente_gestion)+'</span>'
               : '<span style="color:var(--mut)">—</span>')+'</td>'
-        +'<td style="text-align:right;font-weight:700;font-size:14px">'+sgMoney(p.saldo)+'</td>'
+        +'<td style="text-align:right;font-weight:700;font-size:14px">'
+          +sgMoney(libro === 'fiscal' ? fac : (libro === 'gestion' ? (Number(p.pendiente_gestion)||0) : p.saldo))
+          +'</td>'
         +'<td style="text-align:center">'
           +(esp > 0
               ? '<span class="bdg bpe" title="Facturas cargadas sin asiento: no suman al saldo">'
@@ -5841,10 +5861,9 @@ function sgCcFicha(provId){
     var ROT = { apertura: 'Saldo de apertura', factura: 'Factura', pago: 'Pago' };
     // El renglón de lo que falta facturar se ve distinto: es deuda, pero de otra
     // naturaleza que la del comprobante.
-    var marcaAmb = function(m){
-      return m.ambito === 'gestion'
-        ? ' <span class="cb-chip" style="background:#f6eddf;color:#8a5a1f">sin facturar</span>' : '';
-    };
+    // La marca en el concepto se saca: ahora está la columna Libro, y el mismo
+    // dato dos veces en la misma fila es ruido.
+    var marcaAmb = function(){ return ''; };
     // ── EL ENCABEZADO, CON FILTROS ────────────────────────────────────
     // Una cuenta corriente de un proveedor con movimiento es larga, y lo que se
     // busca casi siempre es "qué está pendiente" o "esta partida". Los filtros
@@ -5862,13 +5881,20 @@ function sgCcFicha(provId){
       + '<th style="width:120px;text-align:right">Debe</th>'
       + '<th style="width:120px;text-align:right">Haber</th>'
       + '<th style="width:130px;text-align:right">Saldo</th>'
+      + '<th style="width:88px;text-align:center">Libro</th>'
       + '<th style="width:112px;text-align:center">Estado</th></tr>'
       + '<tr style="background:var(--bg)">'
       + filtro(0, 'Fecha…') + filtro(1, 'Concepto…') + filtro(2, 'Comprob…') + filtro(3, 'Partida…')
       + '<th></th><th></th><th></th>'
+      // El MISMO corte y las MISMAS palabras que en Asientos: es el mismo dato,
+      // y llamarlo distinto en cada pantalla obliga a traducir mentalmente.
+      + '<th style="padding-top:0"><select onchange="tablaFiltrar(\'sg-ccficha-tb\',7,this.value)"'
+        + ' style="width:100%;font-size:11px;padding:3px 4px;border:1px solid var(--bor2);border-radius:4px">'
+        + '<option value="">Los dos</option><option value="fiscal">Sólo fiscal</option>'
+        + '<option value="gestión">Sólo gestión</option></select></th>'
       // El estado es una lista corta y cerrada: un desplegable evita tipear
       // "pendiente" y que no filtre por una tilde.
-      + '<th style="padding-top:0"><select onchange="tablaFiltrar(\'sg-ccficha-tb\',7,this.value)"'
+      + '<th style="padding-top:0"><select onchange="tablaFiltrar(\'sg-ccficha-tb\',8,this.value)"'
         + ' style="width:100%;font-size:11px;padding:3px 4px;border:1px solid var(--bor2);border-radius:4px">'
         + '<option value="">Todo</option><option value="pendiente">Pendiente</option>'
         + '<option value="parcial">Parcial</option><option value="pagada">Pagada</option>'
@@ -5893,9 +5919,18 @@ function sgCcFicha(provId){
         // uno quiere dar de baja cuando descubre el error— no lo tenía en
         // ningún lado. Va en el renglón del comprobante y no en el de la
         // diferencia: se anula la factura entera, con sus dos mitades.
+        // La palabra tiene que ESTAR en la celda para que el filtro la encuentre:
+        // filtrar por lo que se ve es lo único que no sorprende.
+        + '<td style="text-align:center;font-size:11px">'
+          + (m.tipo === 'pago' || m.tipo === 'apertura'
+              ? '<span style="color:var(--mut)">—</span>'
+              : (m.ambito === 'gestion'
+                  ? '<span class="cb-chip" style="background:#f6eddf;color:#8a5a1f">gestión</span>'
+                  : '<span class="cb-chip" style="background:#e4efea;color:#0f5c4e">fiscal</span>'))
+          + '</td>'
         + '<td style="text-align:center;white-space:nowrap">' + sgCcEstadoCelda(m) + '</td></tr>';
     }).join('')
-      : '<tr><td colspan="8" class="emp">Sin movimientos en la contabilidad.</td></tr>';
+      : '<tr><td colspan="9" class="emp">Sin movimientos en la contabilidad.</td></tr>';
     h += '</tbody></table></div>';
 
     // Lo que está cargado y todavía no entró al libro. No son movimientos —no
