@@ -1217,6 +1217,25 @@ try {
   if (nuevas.length) console.log(`[DB] SG sg_embarques migrado (+${nuevas.map(x => x[0]).join(', ')})`);
 } catch (e) { console.error('[DB] SG migración sg_embarques (base imponible):', e.message); }
 
+// ── QUIÉN TRAE EL CAMIÓN ────────────────────────────────────────────────────────────
+// El módulo se llama "Camión" y del camión no se sabía nada: ni la patente ni quién
+// maneja. Cuando el camión se demora, hay que llamar a alguien; cuando llega al galpón,
+// hay que saber que ES el camión que se espera. Las dos cosas se resolvían por WhatsApp
+// del comprador, o sea que vivían en un teléfono y no en el sistema.
+//
+// Son dos patentes porque en internacional el tractor y el acoplado se despachan por
+// separado y muchas veces ni siquiera son del mismo país.
+try {
+  const cols = db.prepare("PRAGMA table_info(sg_embarques)").all().map(c => c.name);
+  const nuevas = [
+    ['transporte_empresa', 'TEXT'],
+    ['camion_patente', 'TEXT'], ['camion_acoplado', 'TEXT'],
+    ['chofer_nombre', 'TEXT'], ['chofer_documento', 'TEXT'], ['chofer_telefono', 'TEXT'],
+  ].filter(([n]) => !cols.includes(n));
+  for (const [n, t] of nuevas) db.exec(`ALTER TABLE sg_embarques ADD COLUMN ${n} ${t}`);
+  if (nuevas.length) console.log(`[DB] SG sg_embarques migrado (+${nuevas.map(x => x[0]).join(', ')})`);
+} catch (e) { console.error('[DB] SG migración sg_embarques (camión y chofer):', e.message); }
+
 // ── EXPEDIENTE DOCUMENTAL DEL EMBARQUE (Importación F6) ─────────────────────────────
 // La tabla FALTABA: F6 dejó los endpoints (subir/listar/descargar/borrar en rutas/sg.js)
 // pero nunca el CREATE, así que el expediente entero tiraba "no such table" y no había forma

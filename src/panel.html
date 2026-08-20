@@ -4038,6 +4038,18 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
       <div class="fl"><label>ETA</label><input type="date" id="sg-emb-eta"></div>
       <div class="fl" style="grid-column:span 4"><label>Observaciones</label><input type="text" id="sg-emb-obs"></div>
     </div>
+    <!-- Quién trae el camión. Todo opcional: en una cotización todavía no se sabe. -->
+    <div style="margin-top:12px;border:1px solid var(--bor);border-radius:10px;padding:10px">
+      <div style="font-size:12px;font-weight:600;color:var(--mut);margin-bottom:6px">🚛 CAMIÓN Y CHOFER · para ubicarlo en viaje y reconocerlo cuando llega</div>
+      <div class="fg" style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px">
+        <div class="fl" style="grid-column:span 2"><label>Empresa de transporte</label><input type="text" id="sg-emb-transporte" placeholder="quién hace el viaje"></div>
+        <div class="fl"><label>Patente tractor</label><input type="text" id="sg-emb-patente" placeholder="AB123CD" style="text-transform:uppercase"></div>
+        <div class="fl"><label>Patente acoplado</label><input type="text" id="sg-emb-acoplado" placeholder="puede ser de otro país" style="text-transform:uppercase"></div>
+        <div class="fl" style="grid-column:span 2"><label>Chofer</label><input type="text" id="sg-emb-chofer" placeholder="nombre y apellido"></div>
+        <div class="fl"><label>Documento</label><input type="text" id="sg-emb-chofer-doc" placeholder="para el ingreso al galpón"></div>
+        <div class="fl"><label>Teléfono <span style="font-weight:400;color:var(--mut);font-size:11px">con código de país</span></label><input type="text" id="sg-emb-chofer-tel" placeholder="+56 9 1234 5678" title="Con el código de país, si no WhatsApp no lo encuentra. El chofer de una importación casi nunca tiene número argentino."></div>
+      </div>
+    </div>
     <!-- F5 — desglose de productos del embarque: un lote por línea al recibir. cantidad_cajas se deriva de Σ cajas. -->
     <div style="margin-top:12px;border:1px solid var(--bor);border-radius:10px;padding:10px">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
@@ -24516,7 +24528,12 @@ function sgImpCalGrilla(){
         var llega=(e.tipo==='llega'), atras=llega&&e.emb.atrasado;
         var bg = atras ? 'rgba(220,38,38,.13)' : (llega?'rgba(16,163,74,.13)':'var(--bg2,#eef1f5)');
         var col= atras ? 'var(--err,#dc2626)' : (llega?'var(--ok,#16a34a)':'var(--mut)');
-        return '<div title="'+esc((llega?'Llega':'Sale')+': '+e.emb.nombre+(e.emb.proveedor_nombre?(' · '+e.emb.proveedor_nombre):''))+'"'
+        // La patente y el chofer entran en el tooltip: en la celda del día no hay lugar, pero
+        // apoyando el mouse se ve qué camión es sin tener que abrir la ficha.
+        return '<div title="'+esc((llega?'Llega':'Sale')+': '+e.emb.nombre
+              +(e.emb.proveedor_nombre?(' · '+e.emb.proveedor_nombre):'')
+              +(e.emb.camion_patente?('\n🚛 '+e.emb.camion_patente):'')
+              +(e.emb.chofer_nombre?('\n👤 '+e.emb.chofer_nombre+(e.emb.chofer_telefono?(' · '+e.emb.chofer_telefono):'')):''))+'"'
           +' onclick="sgImpVisor('+e.id+')" style="margin-top:3px;padding:2px 5px;border-radius:5px;background:'+bg+';color:'+col
           +';font-size:10.5px;font-weight:600;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'
           +(llega?(atras?'⚠ ':'📦 '):'🚢 ')+esc(e.emb.nombre||'')+'</div>';
@@ -24532,6 +24549,14 @@ function sgImpCalGrilla(){
   return h;
 }
 
+// El botón para escribirle al chofer, si hay número usable. WhatsApp necesita el número en
+// dígitos y CON código de país; sin eso el link no lleva a nadie y es peor que no ofrecerlo.
+function sgCalWhats(i){
+  var d=String(i.chofer_telefono||'').replace(/\D/g,'');
+  if(d.length<10) return '';
+  return '<a class="btn bo bs" href="https://wa.me/'+esc(d)+'" target="_blank" rel="noopener" '
+    +'title="Escribirle a '+esc(i.chofer_nombre||'el chofer')+'" onclick="event.stopPropagation()">💬</a> ';
+}
 // La lista de siempre, por si se quiere leer todo de corrido en vez de mes a mes.
 function sgImpCalLista(){
   var items=SG_CAL.datos.items||[];
@@ -24548,7 +24573,14 @@ function sgImpCalLista(){
     +'</tr></thead><tbody>'
     + items.map(function(i){
         return '<tr'+(i.atrasado?' style="background:rgba(220,38,38,.05)"':'')+'>'
-          +'<td><b>'+esc(i.nombre||'')+'</b>'+(i.nro_invoice?'<div style="color:var(--mut);font-size:11px">'+esc(i.nro_invoice)+'</div>':'')+'</td>'
+          // Debajo del nombre, con qué se lo identifica de verdad: la chapa y quién maneja.
+          // Sin columna nueva — la tabla ya tiene nueve y no entra otra sin barra lateral.
+          +'<td><b>'+esc(i.nombre||'')+'</b>'
+            +(i.nro_invoice?'<div style="color:var(--mut);font-size:11px">'+esc(i.nro_invoice)+'</div>':'')
+            +((i.camion_patente||i.chofer_nombre)?'<div style="color:var(--mut);font-size:11px">'
+                +(i.camion_patente?'🚛 <span style="letter-spacing:.05em">'+esc(i.camion_patente)+'</span>':'')
+                +(i.camion_patente&&i.chofer_nombre?' · ':'')
+                +(i.chofer_nombre?esc(i.chofer_nombre):'')+'</div>':'')+'</td>'
           +'<td>'+esc(i.proveedor_nombre||'—')+'</td>'
           +'<td>'+(i.fecha_etd?esc(i.fecha_etd):'<span style="color:var(--mut)">—</span>')+'</td>'
           +'<td style="text-align:center;color:var(--mut)">'+(i.fecha_etd?sgCalSemana(i.fecha_etd):'—')+'</td>'
@@ -24556,7 +24588,10 @@ function sgImpCalLista(){
           +'<td style="text-align:center;color:var(--mut)">'+(i.fecha_eta?sgCalSemana(i.fecha_eta):'—')+'</td>'
           +'<td style="text-align:right">'+(i.cantidad_cajas!=null?nr(i.cantidad_cajas):'—')+'</td>'
           +'<td style="text-align:center"><span class="bdg bok">'+esc(sgEmbEstadoLbl(i.estado))+'</span></td>'
-          +'<td style="text-align:right"><button class="btn bo bs" onclick="sgImpVisor('+i.id+')">👁</button></td></tr>';
+          // El botón de WhatsApp acá y no sólo en la ficha: esta es la pantalla donde uno
+          // ve que un camión está atrasado, y es el momento exacto en que hay que llamar.
+          +'<td style="text-align:right;white-space:nowrap">'+sgCalWhats(i)
+            +'<button class="btn bo bs" onclick="sgImpVisor('+i.id+')">👁</button></td></tr>';
       }).join('')
     + '</tbody></table>';
 }
@@ -24639,7 +24674,10 @@ function sgImpInit(){
     var rows=(r&&r.ok)?r.data:[];
     eid('sg-tb-embarques').innerHTML = rows.length ? rows.map(function(e){
       return '<tr>'
-        +'<td><b>'+esc(e.nombre||'')+'</b></td>'
+        // La patente debajo del nombre: cuando el camión llega, lo que se tiene a mano es la
+        // chapa, no el nombre que le pusimos nosotros al embarque.
+        +'<td><b>'+esc(e.nombre||'')+'</b>'
+          +(e.camion_patente?'<div style="font-size:11px;color:var(--mut);letter-spacing:.06em">🚛 '+esc(e.camion_patente)+'</div>':'')+'</td>'
         // Sin invoice todavía no está confirmado el precio de la mercadería: se avisa.
         +'<td>'+(e.nro_invoice
             ? esc(e.nro_invoice)
@@ -24716,6 +24754,12 @@ function sgImpFill(e){
   eid('sg-emb-etd').value = sgImpVal(e.fecha_etd);
   eid('sg-emb-eta').value = sgImpVal(e.fecha_eta);
   eid('sg-emb-obs').value = sgImpVal(e.observaciones);
+  eid('sg-emb-transporte').value = sgImpVal(e.transporte_empresa);
+  eid('sg-emb-patente').value = sgImpVal(e.camion_patente);
+  eid('sg-emb-acoplado').value = sgImpVal(e.camion_acoplado);
+  eid('sg-emb-chofer').value = sgImpVal(e.chofer_nombre);
+  eid('sg-emb-chofer-doc').value = sgImpVal(e.chofer_documento);
+  eid('sg-emb-chofer-tel').value = sgImpVal(e.chofer_telefono);
   sgImpRenderCostos();
   // F5 — líneas de producto (un lote por línea). Copia liviana del detalle; [] en embarque nuevo.
   SG._embLineas = (e.lineas||[]).map(function(l){
@@ -25096,6 +25140,12 @@ function sgImpGather(){
     fecha_etd: eid('sg-emb-etd').value,
     fecha_eta: eid('sg-emb-eta').value,
     observaciones: eid('sg-emb-obs').value,
+    transporte_empresa: eid('sg-emb-transporte').value.trim(),
+    camion_patente: eid('sg-emb-patente').value.trim(),
+    camion_acoplado: eid('sg-emb-acoplado').value.trim(),
+    chofer_nombre: eid('sg-emb-chofer').value.trim(),
+    chofer_documento: eid('sg-emb-chofer-doc').value.trim(),
+    chofer_telefono: eid('sg-emb-chofer-tel').value.trim(),
     costos: SG_EMB_CONCEPTOS.map(function(c){
       return { concepto:c.k, moneda:eid('sg-emb-mon-'+c.k).value,
         monto_estimado:eid('sg-emb-est-'+c.k).value, monto_real:eid('sg-emb-real-'+c.k).value,
@@ -25231,6 +25281,35 @@ function sgImpVisor(id){
       +(t.tc_manual?dato('TC','<span title="Pisa la curva">✋ manual '+nr(e.tc_estimado)+'</span>'):dato('TC','de la curva, por rubro'))
       +(e.cerrado_en?dato('Cerrado', esc(String(e.cerrado_en).slice(0,10))):'')
       +'</div>';
+    // 2b) Quién trae el camión. Es lo que hace falta para llamarlo cuando se atrasa y para
+    // reconocerlo cuando entra al galpón. Hasta ahora vivía en el WhatsApp del comprador.
+    var tel=e.chofer_telefono||'', telD=String(tel).replace(/\D/g,'');
+    var telHref=String(tel).replace(/[^\d+]/g,'');
+    var hayTte=!!(e.camion_patente||e.camion_acoplado||e.transporte_empresa||e.chofer_nombre||tel);
+    h+='<div style="padding:12px;border:1px solid var(--bor);border-radius:10px;margin-bottom:12px">'
+      +'<div style="font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:var(--mut);margin-bottom:'+(hayTte?'8px':'4px')+'">🚛 Camión y chofer</div>';
+    if(hayTte){
+      // La patente va grande y espaciada: es lo que alguien lee de lejos contra una chapa.
+      h+='<div style="display:flex;gap:18px;flex-wrap:wrap;align-items:center">'
+        +(e.camion_patente?'<div><div style="font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:var(--mut)">Patente</div>'
+            +'<div style="font-size:20px;font-weight:700;letter-spacing:.08em;font-variant-numeric:tabular-nums">'+esc(e.camion_patente)+'</div></div>':'')
+        +(e.camion_acoplado?'<div><div style="font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:var(--mut)">Acoplado</div>'
+            +'<div style="font-size:15px;font-weight:600;letter-spacing:.06em">'+esc(e.camion_acoplado)+'</div></div>':'')
+        +(e.transporte_empresa?dato('Transporte', esc(e.transporte_empresa)):'')
+        +(e.chofer_nombre?dato('Chofer', esc(e.chofer_nombre)):'')
+        +(e.chofer_documento?dato('Documento', esc(e.chofer_documento)):'')
+        +(tel?dato('Teléfono', esc(tel)):'')
+        +(tel?'<div style="margin-left:auto;display:flex;gap:6px;flex-wrap:wrap">'
+            +'<a class="btn bo bs" href="tel:'+esc(telHref)+'">📞 Llamar</a>'
+            +(telD.length>=10?'<a class="btn bo bs" href="https://wa.me/'+esc(telD)+'" target="_blank" rel="noopener">💬 WhatsApp</a>':'')
+          +'</div>':'')
+        +'</div>'
+        // Sin código de país el link de WhatsApp no lleva a nadie: mejor no ofrecerlo y decir por qué.
+        +(tel&&telD.length<10?'<div style="font-size:11px;color:var(--mut);margin-top:6px">Al teléfono le falta el código de país, así que no se puede armar el link de WhatsApp.</div>':'');
+    } else {
+      h+='<div style="font-size:12px;color:var(--mut)">Sin cargar. Se completa desde <b>Editar</b>: es lo que sirve para llamar al chofer si el camión se atrasa y para reconocerlo cuando entra al galpón.</div>';
+    }
+    h+='</div>';
     // 3) Rubros, con el TC de cada uno y de dónde salió.
     h+='<div style="font-size:12px;font-weight:600;color:var(--mut);margin-bottom:5px">COSTOS</div>'
       +'<table class="pa-tbl sgv-costos" style="font-size:12px;width:100%"><thead><tr><th>Rubro</th><th>Mon.</th>'
@@ -25347,6 +25426,20 @@ function sgImpDel(id){
 // Crea un lote por línea con el costo prorrateado (FOB propio + gastos parejos por caja).
 // Es el paso que convierte el embarque en stock real, así que primero se muestra exactamente
 // qué se va a crear: el backend calcula el preview con el mismo criterio que usa al recibir.
+// Qué camión se espera, arriba de todo en la pantalla de recibir: el que la abre está
+// parado frente a uno. Si no hay dato cargado no se inventa nada — se dice que no lo hay,
+// que es distinto de decir que coincide.
+function sgRecCamion(c){
+  if(!c) return '';
+  var partes=[c.acoplado?('acoplado '+c.acoplado):'', c.chofer||'', c.documento?('doc. '+c.documento):'', c.transporte||'']
+    .filter(Boolean).map(esc).join(' · ');
+  if(!c.patente && !partes) return '';
+  return '<div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;padding:10px 12px;border:1px solid var(--bor);border-radius:10px;margin-bottom:10px;background:var(--bg2,#fafafa)">'
+    +'<span style="font-size:11px;color:var(--mut);text-transform:uppercase;letter-spacing:.05em">Tiene que llegar</span>'
+    +(c.patente?'<b style="font-size:18px;letter-spacing:.08em;font-variant-numeric:tabular-nums">🚛 '+esc(c.patente)+'</b>':'<span style="color:var(--mut);font-size:12px">sin patente cargada</span>')
+    +(partes?'<span style="font-size:12px;color:var(--mut)">'+partes+'</span>':'')
+    +'</div>';
+}
 function sgImpAbrirRecibir(){
   var id = SG._embId;
   if(!id){ toast('Guardá el embarque antes de recibirlo','er'); return; }
@@ -25362,7 +25455,8 @@ function sgImpAbrirRecibir(){
     }
     var d = r.data, hoy = new Date().toISOString().slice(0,10);
     eid('sg-emb-recibir-body').innerHTML =
-        '<div style="font-size:12px;color:var(--mut);margin-bottom:10px">Se va a crear <b>un lote por línea</b>, con el costo del embarque repartido entre ellas. Calculado sobre lo último guardado — si acabás de cambiar algo, guardá antes.</div>'
+        sgRecCamion(d.camion)
+      + '<div style="font-size:12px;color:var(--mut);margin-bottom:10px">Se va a crear <b>un lote por línea</b>, con el costo del embarque repartido entre ellas. Calculado sobre lo último guardado — si acabás de cambiar algo, guardá antes.</div>'
       + (d.tc_es_estimado ? '<div style="padding:10px 12px;border-radius:8px;background:var(--bg2,#f5f5f5);border:1px solid var(--bor);font-size:12px;margin-bottom:10px">⚠️ El costo sale del <b>TC estimado</b> ('+nr(d.tc_aplicado)+'), porque todavía no hay TC real. Es un costo <b>provisorio</b>: cuando cierres el embarque se recalcula con los números finales.</div>' : '')
       + '<table class="pa-tbl" style="font-size:12px;width:100%"><thead><tr>'
       + '<th>Producto</th><th style="text-align:right">Cajas</th><th style="text-align:right">kg</th>'
