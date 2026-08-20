@@ -7360,6 +7360,12 @@ function calcImportacion(db, emb, costos, kgOverride) {
     return { estimado_usd: est, confirmado_usd: con, confirmado: con != null,
              desvio_usd: (est != null && con != null) ? r2(con - est) : null };
   };
+  // Los productos del camión. Se leen ACÁ, antes de todo lo que los usa: el valor de la
+  // mercadería sale de ellos, y una const no se puede leer antes de su declaración.
+  const lineasProd = emb.id ? db.prepare(`SELECT l.*, pr.nombre AS producto_nombre, pr.variedad AS producto_variedad
+      FROM sg_embarque_lineas l LEFT JOIN sg_productos pr ON pr.id = l.producto_id
+      WHERE l.embarque_id=? AND l.activo=1 ORDER BY l.id`).all(emb.id) : [];
+
   // El valor de la mercadería tiene hasta tres fuentes, y este es el orden:
   //   1. el PAPEL (monto_confirmado del invoice), que manda sobre todo
   //   2. el FOB de las líneas de producto (Σ cajas × precio), que es el dato más fino
@@ -7416,10 +7422,6 @@ function calcImportacion(db, emb, costos, kgOverride) {
     : sum(merc_ars, anticipos_ars, despachante_ars, iva_desp_ars, flete_ars, banc_ars, iva_banc_ars);
 
   const cajas = Number(emb.cantidad_cajas) || 0;
-  // Los productos del camión: sin ellos no hay a quién repartirle el costo.
-  const lineasProd = emb.id ? db.prepare(`SELECT l.*, pr.nombre AS producto_nombre, pr.variedad AS producto_variedad
-      FROM sg_embarque_lineas l LEFT JOIN sg_productos pr ON pr.id = l.producto_id
-      WHERE l.embarque_id=? AND l.activo=1 ORDER BY l.id`).all(emb.id) : [];
   // El preview manda los kg directo (el embarque puede no estar guardado todavía).
   const kg = kgOverride != null ? (Number(kgOverride) || 0)
     : (emb.id ? (db.prepare(`SELECT COALESCE(SUM(cajas * COALESCE(kg_por_bulto,0)),0) kg
