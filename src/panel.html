@@ -5749,7 +5749,11 @@ function sgCcProvPintar(){
     : rows.length + ' de ' + SG_CCPROV.length;
   eid('sg-tb-ccprov').innerHTML = rows.length ? rows.map(function(p){
       var ap=Number(p.saldo_inicial)||0;
-      var fac=Number(p.facturado)||0;
+      // CONTABILIZADO es lo que está EN EL LIBRO, y ahí está sólo lo facturado.
+      // Mostrando el total, la columna decía 4.460.000 cuando el libro fiscal
+      // tenía 2.210.000 — y el rótulo prometía otra cosa. Ahora las columnas
+      // suman: contabilizado + sin facturar = saldo.
+      var fac=Math.round(((Number(p.facturado)||0) - (Number(p.pendiente_gestion)||0)) * 100) / 100;
       var cero=function(n){ return n ? sgMoney(n) : '<span style="color:var(--mut)">—</span>'; };
       // Lo que está cargado y todavía no entró al libro no suma al saldo, pero
       // se avisa: sin esto, el que mira la cuenta cree que no se le debe nada.
@@ -5829,10 +5833,11 @@ function sgCcFicha(provId){
     };
     h += '<div class="ab-table-wrap"><table class="pa-tbl"><thead><tr>'
       + '<th style="width:96px">Fecha</th><th>Concepto</th>'
-      + '<th style="width:120px">Comprobante</th><th style="width:20%">Partida</th>'
+      + '<th style="width:120px">Comprobante</th><th style="width:18%">Partida</th>'
       + '<th style="width:130px;text-align:right">Debe</th>'
       + '<th style="width:130px;text-align:right">Haber</th>'
-      + '<th style="width:140px;text-align:right">Saldo</th></tr></thead><tbody>';
+      + '<th style="width:140px;text-align:right">Saldo</th>'
+      + '<th style="width:86px"></th></tr></thead><tbody>';
     h += movs.length ? movs.map(function(m){
       return '<tr><td>' + escH(m.fecha || '—') + '</td>'
         + '<td class="cc-concepto">' + escH(m.tipo === 'factura' && m.ambito === 'gestion'
@@ -5842,9 +5847,21 @@ function sgCcFicha(provId){
           + escH(m.partidas || '—') + '</td>'
         + '<td style="text-align:right">' + (m.debe ? sgMoney(m.debe) : '—') + '</td>'
         + '<td style="text-align:right">' + (m.haber ? sgMoney(m.haber) : '—') + '</td>'
-        + '<td style="text-align:right;font-weight:700">' + sgMoney(m.saldo) + '</td></tr>';
+        + '<td style="text-align:right;font-weight:700">' + sgMoney(m.saldo) + '</td>'
+        // ANULAR LA FACTURA, ACÁ. Estaba sólo en la lista de las que faltaba
+        // contabilizar, así que una YA contabilizada —que es justo la que uno
+        // quiere dar de baja cuando descubre el error— no lo tenía en ningún
+        // lado. Va en el renglón del comprobante y no en el de la diferencia:
+        // se anula la factura entera, con sus dos mitades.
+        + '<td style="text-align:right;white-space:nowrap">'
+          + (m.factura_id && !m.pagado && lnbPuedeAnular('sg-compras')
+              ? '<button class="btn bd bs" onclick="sgCcAnularFactura(' + m.factura_id + ',\'' + esc(m.comprobante || '') + '\')">Anular</button>'
+              : (m.factura_id && m.pagado
+                  ? '<span style="font-size:10.5px;color:var(--mut)" title="Anulá primero la orden de pago">pagada</span>'
+                  : ''))
+          + '</td></tr>';
     }).join('')
-      : '<tr><td colspan="7" class="emp">Sin movimientos en la contabilidad.</td></tr>';
+      : '<tr><td colspan="8" class="emp">Sin movimientos en la contabilidad.</td></tr>';
     h += '</tbody></table></div>';
 
     // Lo que está cargado y todavía no entró al libro. No son movimientos —no
@@ -8065,6 +8082,23 @@ function sgCcExportar(como){
 }
 
 // La ficha del proveedor abierto, con sus movimientos.
+// Anular la factura desde la cuenta corriente, que es donde se ve el problema.
+// Lo mismo que hace el botón de la bandeja: da de baja el comprobante, anula su
+// asiento y devuelve la partida a pendientes de facturar.
+function sgCcAnularFactura(facturaId, nro){
+  var motivo = prompt('¿Por qué se anula la factura ' + nro + '?\n\n'
+    + 'Se da de baja el comprobante y se anula su asiento. La partida vuelve a quedar '
+    + 'esperando factura, y esta cuenta corriente deja de moverse por ella.');
+  if (motivo === null) return;
+  if (!String(motivo).trim()) { toast('Escribí por qué se anula: queda registrado', 'er'); return; }
+  api('/api/sg/facturas-compra/' + facturaId + '/anular', 'POST', { motivo: motivo }).then(function(r){
+    if (!r || !r.ok) { toast((r && r.error) || 'No se pudo anular', 'er'); return; }
+    toast('Factura anulada' + (r.data && r.data.asiento_anulado ? ' — y su asiento' : ''), 'ok');
+    if (SG_CCFICHA && SG_CCFICHA.proveedor) sgCcFicha(SG_CCFICHA.proveedor.id);
+    sgLoadCcProv();
+  });
+}
+
 function sgCcFichaExportar(como){
   var d = SG_CCFICHA; if (!d) return;
   var p = d.proveedor || {}, movs = d.movimientos || [];
