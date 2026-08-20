@@ -1331,9 +1331,19 @@ function circuitoDeCompra(b, tipoFiscalDefault) {
     doc = (val(b.tipo_precio) === 'pizarra' || tipoFiscalDefault === 'liquidacion')
       ? 'liquidacion' : 'factura';
   }
-  // Con factura NO hay precio de pizarra: la factura llega con el precio hecho.
-  const tipoPrecio = doc === 'factura' ? 'firme'
-    : (val(b.tipo_precio) === 'pizarra' ? 'pizarra' : 'firme');
+  // ── CÓMO SE PACTÓ EL PRECIO Y CÓMO SE DOCUMENTA SON DOS PREGUNTAS ──────
+  // Antes esto forzaba: "con factura no hay precio de pizarra". Y no es cierto
+  // —se puede acordar liquidación de venta con un productor que igual emite
+  // factura: el precio se cierra cuando la mercadería se vendió, y la factura
+  // llega después con ese número—. Esa combinación quedaba bloqueada y la orden
+  // no se podía cargar como era.
+  //
+  // Las cuatro valen:
+  //   precio cerrado      + recibimos factura
+  //   precio cerrado      + emitimos liquidación
+  //   liquidación de venta + emitimos liquidación
+  //   liquidación de venta + recibimos factura   ← ésta no se podía
+  const tipoPrecio = (val(b.tipo_precio) === 'pizarra') ? 'pizarra' : 'firme';
   // Y el comprobante tiene que decir lo mismo que el circuito. El habitual del
   // proveedor entra por atrás y si no se corrige queda la combinación imposible
   // guardada: una compra que se documenta con factura y dice comprobante
@@ -1766,11 +1776,21 @@ router.post('/oc', requireAdmin, (req, res) => {
       ? null : (b.flete_con_iva ? 1 : 0);
     const dft = defaultsProveedor(db, b.proveedor_id, b);
     const { documenta, tipoPrecio, tipoFiscal } = circuitoDeCompra(b, dft.tipo_fiscal);
-    // ── IVA Fase 2 — la OC discrimina IVA solo con Factura A + precio firme. En Liquidación
-    // (o pizarra) NO se discrimina (el IVA se resuelve después). precio_incluye_iva: el
-    // comercial define si el $/kg ya trae IVA o si se le adiciona. iva_alicuota_oc: override
-    // opcional; si es null, la alícuota sale de la familia de cada item.
-    const discrimina = (tipoFiscal === 'factura_a') && (tipoPrecio === 'firme');
+    // ── EL IVA NO ES SÓLO DE LA FACTURA ───────────────────────────────────
+    // La liquidación que emitimos también lleva IVA, así que "el precio ya
+    // incluye IVA" vale igual ahí. Antes el bloque decía "Factura A" y sólo se
+    // guardaba con factura: el que emitía liquidación no tenía dónde decirlo y
+    // el neto salía mal.
+    //
+    // Factura B queda afuera a propósito: no discrimina IVA, siempre va incluido.
+    // Y la PIZARRA también: todavía no hay precio al que aplicarle nada — se
+    // resuelve cuando se cierra.
+    //
+    // precio_incluye_iva: el comercial define si el $/kg ya trae IVA o si se le
+    // adiciona. iva_alicuota_oc: override opcional; si es null, la alícuota sale
+    // de la familia de cada item.
+    const discrimina = (tipoFiscal === 'factura_a' || tipoFiscal === 'liquidacion')
+      && (tipoPrecio === 'firme');
     const incluyeIva = b.precio_incluye_iva ? 1 : 0;
     const alicOverride = (b.iva_alicuota_oc != null && b.iva_alicuota_oc !== '') ? Number(b.iva_alicuota_oc) : null;
     const alicFamStmt = db.prepare('SELECT f.iva_alicuota AS a FROM sg_productos p LEFT JOIN sg_familias f ON f.id=p.familia_id WHERE p.id=?');
@@ -1795,8 +1815,8 @@ router.post('/oc', requireAdmin, (req, res) => {
 
       const insItem = db.prepare(`INSERT INTO sg_oc_items
         (oc_id, producto_id, presentacion_id, envase_id, kg_por_bulto, cantidad_estimada_presentaciones, kg_estimados, precio_estimado_por_kg, observaciones_item, modo_carga,
-         iva_alicuota, neto_estimado, iva_estimado)
-        VALUES (?,?,?,?,?,?,?,?,?,?, ?,?,?)`);
+         iva_alicuota, neto_estimado, iva_estimado, precio_referencia_venta)
+        VALUES (?,?,?,?,?,?,?,?,?,?, ?,?,?, ?)`);
       let totKg = 0, totMonto = 0, totNeto = 0, totIva = 0;
       for (const it of items) {
         // F1 — factor por item: kg por bulto tipeado al vuelo; fallback a la presentación
@@ -1822,8 +1842,16 @@ router.post('/oc', requireAdmin, (req, res) => {
             else            { neto = bruto;                     iva = bruto * alic / 100; } // se adiciona
           }
         }
+        // EL PRECIO DE REFERENCIA es informativo y sólo tiene sentido cuando el
+        // precio se cierra despues (liquidacion de venta). Con precio cerrado no
+        // se guarda: al lado ya esta el precio de verdad, y dos numeros
+        // parecidos en la misma linea es una manera de equivocarse.
+        const refVenta = (tipoPrecio === 'pizarra'
+          && it.precio_referencia_venta != null && it.precio_referencia_venta !== ''
+          && Number(it.precio_referencia_venta) > 0)
+          ? Number(it.precio_referencia_venta) : null;
         insItem.run(ocId, it.producto_id, it.presentacion_id || null, envaseId, kgPorBulto, cant, kg, precio, val(it.observaciones_item), modo,
-          alic, neto, iva);
+          alic, neto, iva, refVenta);
         totKg += kg;
         if (precio != null) { totMonto += neto + iva; totNeto += neto; totIva += iva; } // total con IVA = neto+iva (= bruto si no discrimina o precio incluye IVA)
       }
