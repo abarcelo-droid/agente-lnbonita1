@@ -7943,8 +7943,13 @@ router.get('/importacion/calendario', requireAuth, (req, res) => {
   const db = getDb();
   try {
     const hoy = db.prepare("SELECT date('now','localtime') d").get().d;
+    // La patente y el teléfono del chofer viajan con el calendario a propósito: el que mira
+    // esta pantalla es el que tiene que llamar cuando un camión se atrasa, y si el dato no
+    // está acá tiene que entrar a la ficha de cada uno para buscarlo.
     const rows = db.prepare(`SELECT e.id, e.nombre, e.estado, e.fecha_etd, e.fecha_eta,
-             e.cantidad_cajas, e.nro_invoice, p.razon_social AS proveedor_nombre
+             e.cantidad_cajas, e.nro_invoice, e.camion_patente, e.camion_acoplado,
+             e.transporte_empresa, e.chofer_nombre, e.chofer_telefono,
+             p.razon_social AS proveedor_nombre
       FROM sg_embarques e LEFT JOIN sg_proveedores p ON p.id = e.proveedor_id
       WHERE e.activo=1 AND e.eliminado_en IS NULL
         AND e.estado IN ('cotizacion','abierto','transito')
@@ -8166,7 +8171,15 @@ function embCostosDelBody(body) {
 // tc_estimado / tc_real y cantidad_cajas NO están acá a propósito: los TC salen de la curva
 // según la fecha de pago de cada rubro, y las cajas se derivan de las líneas (embSyncLineas).
 // Si estuvieran, cada guardado los pisaría con lo que mandó la pantalla — o con null.
-const EMB_HEADER_COLS = ['nombre','proveedor_id','pais_origen','incoterm','certificado_origen_mercosur','ncm','moneda','estado','nro_invoice','flete_base_usd','seguro_usd','fecha_etd','fecha_eta','observaciones'];
+// La patente se guarda SIN espacios ni guiones y en mayúsculas. La misma chapa se escribe
+// "AB 123 CD", "ab123cd" o "AB-123-CD" según quién la cargue, y así no hay forma de buscarla
+// ni de darse cuenta de que es el mismo camión. Se normaliza al guardar, una sola vez.
+function patente(v) {
+  const s = String(v == null ? '' : v).toUpperCase().replace(/[^A-Z0-9]/g, '');
+  return s ? s.slice(0, 15) : null;
+}
+
+const EMB_HEADER_COLS = ['nombre','proveedor_id','pais_origen','incoterm','certificado_origen_mercosur','ncm','moneda','estado','nro_invoice','flete_base_usd','seguro_usd','fecha_etd','fecha_eta','observaciones','transporte_empresa','camion_patente','camion_acoplado','chofer_nombre','chofer_documento','chofer_telefono'];
 function embHeaderVals(b) {
   return {
     nombre: val(b.nombre),
@@ -8182,7 +8195,15 @@ function embHeaderVals(b) {
     seguro_usd: (b.seguro_usd != null && b.seguro_usd !== '') ? Number(b.seguro_usd) : null,
     fecha_etd: val(b.fecha_etd),
     fecha_eta: val(b.fecha_eta),
-    observaciones: val(b.observaciones)
+    observaciones: val(b.observaciones),
+    // Quién trae el camión. Todo opcional: en una cotización todavía no se sabe, y frenar
+    // la carga por eso sería pedir un dato que nadie tiene.
+    transporte_empresa: val(b.transporte_empresa),
+    camion_patente: patente(b.camion_patente),
+    camion_acoplado: patente(b.camion_acoplado),
+    chofer_nombre: val(b.chofer_nombre),
+    chofer_documento: val(b.chofer_documento),
+    chofer_telefono: val(b.chofer_telefono),
   };
 }
 const EMB_ESTADOS = new Set(['cotizacion','abierto','transito','recibido','cerrado']);
@@ -8463,7 +8484,13 @@ router.get('/embarques/:id/recepcion-preview', requireAuth, (req, res) => {
       lotes, total_cajas: lotes.reduce((a, x) => a + x.cajas, 0),
       total_kg: lotes.reduce((a, x) => a + x.kg, 0),
       neto: prep.calc.neto, costo_caja_neto: prep.calc.costo_caja_neto, tc_aplicado: prep.calc.tc_aplicado,
-      tc_es_estimado: emb.tc_real == null
+      tc_es_estimado: emb.tc_real == null,
+      // El que aprieta "Recibir" está parado frente a un camión. Que la pantalla diga qué
+      // chapa y qué chofer se esperan es la única forma de darse cuenta a tiempo de que se
+      // está recibiendo el camión equivocado — después ya hay lotes creados.
+      camion: { patente: emb.camion_patente, acoplado: emb.camion_acoplado,
+                transporte: emb.transporte_empresa, chofer: emb.chofer_nombre,
+                documento: emb.chofer_documento }
     } });
   } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
 });
