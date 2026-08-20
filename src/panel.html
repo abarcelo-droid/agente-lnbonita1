@@ -4033,7 +4033,13 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
       <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:10px;align-items:end">
         <div class="fl"><label>Tipo</label><select id="sg-doc-tipo" onchange="sgDocTipoChange()"></select></div>
         <div class="fl"><label>Fecha documento</label><input type="date" id="sg-doc-fecha"></div>
-        <div class="fl" style="grid-column:span 2"><label>Archivo (PDF/JPG/PNG · ≤10MB)</label><input type="file" id="sg-doc-file" accept="application/pdf,image/jpeg,image/png"></div>
+        <div class="fl" style="grid-column:span 2"><label>Archivo (PDF/JPG/PNG · ≤10MB)</label><input type="file" id="sg-doc-file" accept="application/pdf,image/jpeg,image/png" onchange="sgDocLimpiarLectura()"></div>
+        <!-- Lectura con IA: llena número, fecha y monto para que el operador los revise. No sube nada. -->
+        <div style="grid-column:1/-1;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          <button type="button" class="btn bo bs" id="sg-doc-btn-leer" onclick="sgDocLeerIA()">🔍 Leer los datos del archivo</button>
+          <span style="font-size:11px;color:var(--mut)">Completa los campos para que los revises. No sube el documento.</span>
+        </div>
+        <div id="sg-doc-lectura" style="grid-column:1/-1;display:none"></div>
         <div class="fl" style="grid-column:span 3"><label>Observaciones</label><input type="text" id="sg-doc-obs"></div>
         <div class="fl sg-doc-inv" style="display:none"><label>N° de invoice *</label><input type="text" id="sg-doc-nro-invoice"></div>
         <div class="fl sg-doc-inv" style="display:none"><label>Monto total del invoice * <span style="font-weight:400;color:var(--mut);font-size:11px">USD</span></label><input type="number" step="0.01" min="0" id="sg-doc-monto"></div>
@@ -24546,6 +24552,70 @@ function sgEmbRenderDocs(docs){
 function sgDocTipoChange(){
   var esInv=(eid('sg-doc-tipo').value==='factura_comercial');
   Array.prototype.forEach.call(document.querySelectorAll('.sg-doc-inv'), function(el){ el.style.display=esInv?'':'none'; });
+  sgDocLimpiarLectura();   // lo leído era de otro tipo de papel: deja de aplicar
+}
+
+// ── LEER EL DOCUMENTO CON IA ────────────────────────────────────────────────────
+// Manda el archivo al backend, que se lo da a leer a Claude, y usa la respuesta para
+// llenar número / fecha / monto. Es una PROPUESTA: nada se sube ni se guarda acá. El
+// documento recién entra cuando el operador toca "Subir documento".
+function sgDocLimpiarLectura(){
+  var b=eid('sg-doc-lectura'); if(b){ b.style.display='none'; b.innerHTML=''; }
+}
+function sgDocLeerBtn(cargando){
+  var b=eid('sg-doc-btn-leer'); if(!b) return;
+  b.disabled=!!cargando;
+  b.textContent = cargando ? '⏳ Leyendo el documento…' : '🔍 Leer los datos del archivo';
+}
+function sgDocLeerIA(){
+  if(!SG._embDocId){ toast('Guardá el embarque primero','er'); return; }
+  var fileInp=eid('sg-doc-file'); var f=fileInp&&fileInp.files&&fileInp.files[0];
+  if(!f){ toast('Elegí un archivo primero','er'); return; }
+  if(f.size>10*1024*1024){ toast('El archivo supera 10MB','er'); return; }
+  var fd=new FormData();
+  fd.append('archivo', f);
+  fd.append('tipo', eid('sg-doc-tipo').value);
+  sgDocLeerBtn(true); sgDocLimpiarLectura();
+  fetch('/api/sg/embarques/'+SG._embDocId+'/documentos/leer', { method:'POST', body:fd, credentials:'same-origin' })
+    .then(function(r){ return r.json(); })
+    .then(function(r){
+      sgDocLeerBtn(false);
+      if(!r||!r.ok){ toast((r&&r.error)||'No se pudo leer el documento','er'); return; }
+      sgDocAplicarLectura(r.data);
+    })
+    .catch(function(e){ sgDocLeerBtn(false); toast('Error al leer: '+e.message,'er'); });
+}
+// Llena los campos y deja a la vista qué se leyó, con qué confianza y qué hay que mirar.
+function sgDocAplicarLectura(d){
+  var esInv=(d.tipo==='factura_comercial'), puestos=[];
+  if(d.fecha){ eid('sg-doc-fecha').value=d.fecha; puestos.push('fecha'); }
+  if(esInv && d.numero){ eid('sg-doc-nro-invoice').value=d.numero; puestos.push('N° de invoice'); }
+  // El campo de monto es en dólares: si el papel viene en otra moneda NO se copia el número
+  // crudo — se muestra y el operador convierte. Meterlo tal cual sería cargar un costo falso.
+  var montoOk = esInv && d.monto_total!=null && (!d.moneda || d.moneda==='USD');
+  if(montoOk){ eid('sg-doc-monto').value=d.monto_total; puestos.push('monto'); }
+
+  var fila=function(k,v){ return v==null||v===''?'':'<div><span style="color:var(--mut)">'+k+':</span> <b>'+esc(String(v))+'</b></div>'; };
+  var conf=d.confianza||'—';
+  var confCol = conf==='alta' ? 'var(--ok,#16a34a)' : (conf==='baja' ? 'var(--err,#dc2626)' : 'var(--mut)');
+  var html='<div style="border:1px solid var(--bor);border-radius:8px;padding:10px 12px;background:var(--bg2,#fafafa);font-size:12px">'
+    +'<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">'
+      +'<b>Lo que se leyó del documento</b>'
+      +'<span style="color:'+confCol+';font-size:11px">confianza '+esc(conf)+'</span>'
+      +'<span style="margin-left:auto;font-size:11px;color:var(--mut)">Revisalo contra el papel: nada se subió todavía.</span>'
+    +'</div>'
+    +'<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:4px 14px">'
+      +fila('Número', d.numero)+fila('Fecha', d.fecha)
+      +fila('Monto', d.monto_total!=null ? nr(d.monto_total)+(d.moneda?(' '+d.moneda):'') : null)
+      +fila('Bultos', d.cantidad_bultos)+fila('Emisor', d.emisor)
+    +'</div>'
+    +(d.observaciones?'<div style="margin-top:6px;color:var(--mut)">'+esc(d.observaciones)+'</div>':'')
+    +((d.avisos&&d.avisos.length)?'<div style="margin-top:6px;color:var(--err,#dc2626)">'+d.avisos.map(function(a){ return '⚠ '+esc(a); }).join('<br>')+'</div>':'')
+    +(esInv && d.monto_total!=null && !montoOk ? '<div style="margin-top:6px;color:var(--err,#dc2626)">⚠ El monto no se copió al formulario porque no está en dólares. Convertilo y cargalo a mano.</div>' : '')
+    +'</div>';
+  var box=eid('sg-doc-lectura'); box.innerHTML=html; box.style.display='';
+  toast(puestos.length ? ('Se completó: '+puestos.join(', ')+'. Revisalo antes de subir.') : 'No se pudo sacar ningún dato: cargalos a mano.',
+        puestos.length ? 'ok' : 'warn');
 }
 function sgEmbDocSubir(){
   if(!SG._embDocId){ toast('Guardá el embarque primero','er'); return; }
@@ -24580,6 +24650,7 @@ function sgEmbDocSubir(){
         toast(msg, c&&c.diferencia ? 'warn' : 'ok');
         if(fileInp) fileInp.value='';
         eid('sg-doc-obs').value='';
+        sgDocLimpiarLectura();
         if(esInv){ eid('sg-doc-nro-invoice').value=''; eid('sg-doc-monto').value=''; }
         sgEmbDocsLoad();
         if(c) sgImpOpen(SG._embDocId);          // recarga: el estimador ahora usa el monto del papel
