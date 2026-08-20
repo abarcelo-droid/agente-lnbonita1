@@ -6638,7 +6638,7 @@ router.get('/cc-proveedores/:id', requireAuth, (req, res) => {
     }
     const TIPO = { factura_a: 'Factura A', factura_b: 'Factura B', liquidacion: 'Liquidación' };
     for (const f of facturas) {
-      movs.push({ tipo: 'factura', fecha: f.fecha_emision,
+      movs.push({ tipo: 'factura', fecha: f.fecha_emision, factura_id: f.id,
         detalle: TIPO[f.tipo_comprobante] || f.tipo_comprobante || 'Comprobante',
         comprobante: (f.punto_venta ? f.punto_venta + '-' : '') + (f.numero || ''),
         partidas: f.partidas, neto: f.neto, iva: f.iva_monto,
