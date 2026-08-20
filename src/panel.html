@@ -320,6 +320,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
   <div class="ni" data-sec="sgct-asientos" data-admin-only="1"></div>
   <div class="ni" data-sec="sgct-modelos" data-admin-only="1"></div>
   <div class="ni" data-sec="sgct-iva-compras" data-admin-only="1"></div>
+  <div class="ni" data-sec="sgct-puntos-venta" data-admin-only="1"></div>
 
   <div class="ng" style="margin-top:8px">General</div>
   <div class="ni on" data-sec="inicio"><span class="dot"></span>Inicio</div>
@@ -2549,8 +2550,10 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
           </label>
           <span id="sgf-tipo-badge" style="padding-bottom:6px"></span>
           <label style="font-size:11.5px;color:var(--mut)">Punto de venta<br>
+            <!-- Los números estaban escritos acá. Ahora salen de la pantalla de
+                 Puntos de Venta: dar de alta uno dejó de ser tocar el panel. -->
             <select id="sgf-pv" style="padding:6px 8px;border-radius:6px;border:1px solid var(--bor);background:var(--card,#fff)">
-              <option value="7">7</option><option value="9">9</option><option value="11">11</option><option value="13">13</option>
+              <option value="">…</option>
             </select>
           </label>
           <label style="font-size:12px;color:var(--mut);padding-bottom:7px"><input type="checkbox" id="sgf-incluye-iva" onchange="sgFacRenderLineas()"> precio incluye IVA</label>
@@ -11954,6 +11957,8 @@ function sgVenSub(s){
 // ── BRIEF E2 — Pantalla de facturación (despacho → factura AFIP) ──────────────────
 function sgFacInit(){
   SG.facData = null; SG.facSel = {}; SG.facLineas = [];
+  // Los puntos de venta salen de su pantalla, no del HTML.
+  sgPvLlenarSelector();
   var sel = eid('sgf-cli');
   sel.innerHTML = sgCliOpts('', '', '— Elegí cliente —');
   eid('sgf-tipo-badge').innerHTML = '';
@@ -16108,6 +16113,92 @@ function sgRepExport(){
      Todas las facturas de compra CONTABILIZADAS, vengan de donde vengan. Es el
      libro que se mira para el IVA del período. Las anuladas se listan igual,
      marcadas: un libro con agujeros no se puede explicar. -->
+<!-- ══ San Gerónimo · PUNTOS DE VENTA ══
+     Estaban escritos a mano en el HTML —7, 9, 11 y 13—, así que dar de alta uno
+     era tocar el código. Y el número solo no alcanza: cada punto tiene su
+     condición de emisión y, si factura electrónicamente, un certificado que
+     VENCE. Ese vencimiento es el que se descubre tarde. -->
+<div class="sec" id="sec-sgct-puntos-venta">
+  <div class="ph">
+    <div><div class="ph-t">🏪 San Gerónimo · Puntos de venta</div>
+      <div class="ph-s">Con qué numeración sale cada comprobante, y hasta cuándo vale su certificado</div></div>
+    <div style="display:flex;gap:8px">
+      <button class="btn bb" onclick="sgPvOpen(null)">+ Nuevo punto de venta</button>
+      <button class="btn bo" onclick="sgPvLoad()">↻ Actualizar</button>
+    </div>
+  </div>
+  <div id="sg-pv-aviso" style="margin-bottom:12px"></div>
+  <div class="ab-table-wrap"><table class="pa-tbl">
+    <thead><tr><th style="width:80px">N°</th><th>Nombre</th>
+      <th style="width:130px">Emisión</th>
+      <th style="width:120px">Comprobantes</th>
+      <th style="width:150px">CUIT emisor</th>
+      <th style="width:190px">Certificado</th>
+      <th style="width:150px"></th></tr></thead>
+    <tbody id="sg-pv-tb"><tr><td colspan="7" class="emp">Cargando…</td></tr></tbody>
+  </table></div>
+  <div style="font-size:11.5px;color:var(--mut);margin-top:8px">
+    Un punto de venta no se borra: se da de baja. Los comprobantes ya emitidos quedarían sin
+    de dónde salieron.
+  </div>
+</div>
+
+<!-- ── ALTA / EDICIÓN DE UN PUNTO DE VENTA ─────────────────────────────── -->
+<div class="ab-modal-overlay" id="sg-pv-modal">
+  <div class="ab-modal" style="max-width:min(660px,96vw)">
+    <div class="mhd"><div class="mht" id="sg-pv-tit">Nuevo punto de venta</div>
+      <button class="mcl" onclick="closeMB('sg-pv-modal')">×</button></div>
+    <div class="mbd">
+      <input type="hidden" id="sg-pv-id">
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:10px">
+        <div class="fl"><label>Número</label>
+          <input type="number" id="sg-pv-numero" placeholder="7" min="1"></div>
+        <div class="fl"><label>Nombre</label>
+          <input id="sg-pv-nombre" placeholder="Depósito central"></div>
+        <div class="fl"><label>Cómo emite</label>
+          <select id="sg-pv-emision" onchange="sgPvEmision()">
+            <option value="electronica">Electrónica (AFIP)</option>
+            <option value="manual">Manual</option>
+            <option value="preimpreso">Preimpreso</option>
+          </select></div>
+        <div class="fl"><label>Comprobantes que emite</label>
+          <input id="sg-pv-comprobantes" placeholder="A,B"></div>
+        <div class="fl"><label>CUIT emisor</label>
+          <input id="sg-pv-cuit" placeholder="30-12345678-9"></div>
+        <div class="fl"><label>Domicilio</label>
+          <input id="sg-pv-domicilio"></div>
+      </div>
+      <!-- EL CERTIFICADO. Lo que se guarda es CUÁL es y HASTA CUÁNDO vale. El
+           archivo y la clave privada no van acá: el panel devuelve esta tabla
+           entera a la pantalla, y una clave privada no puede viajar por ahí. -->
+      <div id="sg-pv-cert" style="margin-top:12px;border:1px solid var(--bor);border-radius:8px;padding:12px 14px">
+        <div style="font-weight:700;font-size:12px;text-transform:uppercase;letter-spacing:.04em;
+             color:var(--mut);margin-bottom:8px">Certificado de facturación electrónica</div>
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:10px">
+          <div class="fl"><label>Ambiente</label>
+            <select id="sg-pv-ambiente">
+              <option value="produccion">Producción</option>
+              <option value="homologacion">Homologación (pruebas)</option>
+            </select></div>
+          <div class="fl"><label>Alias / nombre del certificado</label>
+            <input id="sg-pv-cert-alias" placeholder="sangeronimo-prod"></div>
+          <div class="fl"><label>Vence el</label>
+            <input type="date" id="sg-pv-cert-vence"></div>
+        </div>
+        <div style="font-size:11.5px;color:var(--mut);margin-top:8px">
+          El archivo <code>.crt</code> y la clave privada NO se cargan acá: se instalan en el
+          servidor. Esto es para saber cuál está puesto y avisar antes de que venza.
+        </div>
+      </div>
+      <div class="fl" style="margin-top:10px"><label>Notas</label><input id="sg-pv-notas"></div>
+      <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:16px">
+        <button class="btn bo" onclick="closeMB('sg-pv-modal')">Cancelar</button>
+        <button class="btn bb" onclick="sgPvGuardar()">Guardar</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <div class="sec" id="sec-sgct-iva-compras">
   <div class="ph">
     <div>
@@ -53512,6 +53603,156 @@ function sgctMarcaGestion(a) {
 // si esto está bajo control: "falta la nota de débito" se reclama y se cierra;
 // "no va a tener comprobante" se queda. El de USUARIO es el que después va a
 // permitir decidir a quién restringirle el permiso, mirando el dato y no a ojo.
+// ── PUNTOS DE VENTA ──────────────────────────────────────────
+// Estaban escritos a mano en el HTML. Acá se administran, y el selector de la
+// pantalla de facturar los toma de esta misma lista.
+var SG_PV = [];
+var SG_PV_EMI = { electronica: 'Electrónica (AFIP)', manual: 'Manual', preimpreso: 'Preimpreso' };
+
+function sgPvLoad(){
+  api('/api/sg/contable/puntos-venta?inactivos=1').then(function(r){
+    SG_PV = (r && r.ok) ? (r.data || []) : [];
+    sgPvPintar();
+  });
+}
+
+function sgPvPintar(){
+  var tb = eid('sg-pv-tb'); if (!tb) return;
+  // EL AVISO VA ARRIBA Y ANTES. Un certificado vencido no se nota hasta que AFIP
+  // rechaza un comprobante, y para entonces ya no se puede facturar.
+  var av = eid('sg-pv-aviso');
+  if (av) {
+    var mal = SG_PV.filter(function(p){ return p.activo && p.cert_vencido; });
+    var pronto = SG_PV.filter(function(p){
+      return p.activo && !p.cert_vencido && p.cert_dias != null && p.cert_dias <= 30; });
+    av.innerHTML = mal.length
+      ? '<div style="border:1.5px solid #b91c1c;background:#fef2f2;border-radius:8px;padding:10px 12px;'
+        + 'font-size:13px;color:#991b1b"><b>⛔ ' + mal.length + ' punto(s) de venta con el certificado '
+        + 'VENCIDO:</b> ' + mal.map(function(p){ return 'N° ' + p.numero; }).join(', ')
+        + '. AFIP va a rechazar esos comprobantes.</div>'
+      : (pronto.length
+          ? '<div style="border:1.5px solid #d6a15e;background:#f6eddf;border-radius:8px;padding:10px 12px;'
+            + 'font-size:13px;color:#854d0e"><b>⚠️ Certificado por vencer:</b> '
+            + pronto.map(function(p){ return 'N° ' + p.numero + ' en ' + p.cert_dias + ' día(s)'; }).join(' · ')
+            + '</div>'
+          : '');
+  }
+  tb.innerHTML = SG_PV.length ? SG_PV.map(function(p){
+    var cert = p.emision !== 'electronica'
+      ? '<span style="color:var(--mut)">—</span>'
+      : (!p.cert_vence
+          ? '<span style="color:#9a3412">sin fecha</span>'
+          : escH(p.cert_vence)
+            + (p.cert_vencido
+                ? ' <span class="cb-chip no">vencido</span>'
+                : (p.cert_dias != null && p.cert_dias <= 30
+                    ? ' <span class="cb-chip" style="background:#f6eddf;color:#8a5a1f">en '
+                      + p.cert_dias + ' d</span>' : ''))
+            + (p.cert_alias ? '<div class="sg-oc-sub">' + escH(p.cert_alias) + '</div>' : ''));
+    return '<tr' + (p.activo ? '' : ' style="opacity:.45"') + '>'
+      + '<td style="font-family:monospace;font-weight:700">' + escH(p.numero) + '</td>'
+      + '<td><b>' + escH(p.nombre || '') + '</b>'
+        + (p.activo ? '' : ' <span class="cb-chip no">de baja</span>')
+        + (p.ambiente === 'homologacion'
+            ? ' <span class="cb-chip" style="background:#f6eddf;color:#8a5a1f">homologación</span>' : '')
+        + '</td>'
+      + '<td>' + escH(SG_PV_EMI[p.emision] || p.emision) + '</td>'
+      + '<td>' + escH(p.comprobantes || '—') + '</td>'
+      + '<td style="font-family:monospace;font-size:11.5px">' + escH(p.cuit_emisor || '—') + '</td>'
+      + '<td style="font-size:12px">' + cert + '</td>'
+      + '<td style="text-align:right;white-space:nowrap">'
+        + '<button class="btn bo bs" onclick="sgPvOpen(' + p.id + ')">Editar</button>'
+        + (p.activo
+            ? ' <button class="btn bd bs" onclick="sgPvBaja(' + p.id + ')">Dar de baja</button>' : '')
+      + '</td></tr>';
+  }).join('')
+    : '<tr><td colspan="7" class="emp">No hay puntos de venta cargados.</td></tr>';
+}
+
+function sgPvOpen(id){
+  var p = SG_PV.filter(function(x){ return x.id === id; })[0] || {};
+  var t = eid('sg-pv-tit');
+  if (t) t.textContent = id ? ('Punto de venta N° ' + p.numero) : 'Nuevo punto de venta';
+  var set = function(k, v){ var e = eid(k); if (e) e.value = v == null ? '' : v; };
+  set('sg-pv-id', id || '');
+  set('sg-pv-numero', p.numero);
+  set('sg-pv-nombre', p.nombre);
+  set('sg-pv-emision', p.emision || 'electronica');
+  set('sg-pv-comprobantes', p.comprobantes || 'A,B');
+  set('sg-pv-cuit', p.cuit_emisor);
+  set('sg-pv-domicilio', p.domicilio);
+  set('sg-pv-ambiente', p.ambiente || 'produccion');
+  set('sg-pv-cert-alias', p.cert_alias);
+  set('sg-pv-cert-vence', p.cert_vence);
+  set('sg-pv-notas', p.notas);
+  sgPvEmision();
+  sgModalArriba('sg-pv-modal');
+}
+
+// El bloque del certificado sólo tiene sentido si el punto factura
+// electrónicamente: uno manual no tiene certificado que venza.
+function sgPvEmision(){
+  var box = eid('sg-pv-cert'); if (!box) return;
+  box.style.display = (eid('sg-pv-emision') || {}).value === 'electronica' ? '' : 'none';
+}
+
+function sgPvGuardar(){
+  var num = parseInt((eid('sg-pv-numero') || {}).value, 10);
+  if (!num) { toast('Poné el número del punto de venta', 'er'); return; }
+  var emi = (eid('sg-pv-emision') || {}).value;
+  if (emi === 'electronica' && !(eid('sg-pv-cert-vence') || {}).value) {
+    toast('Poné hasta cuándo vale el certificado: es lo que permite avisar antes', 'er'); return;
+  }
+  api('/api/sg/contable/puntos-venta', 'POST', {
+    id: (eid('sg-pv-id') || {}).value || null,
+    numero: num,
+    nombre: (eid('sg-pv-nombre') || {}).value,
+    emision: emi,
+    comprobantes: (eid('sg-pv-comprobantes') || {}).value,
+    cuit_emisor: (eid('sg-pv-cuit') || {}).value,
+    domicilio: (eid('sg-pv-domicilio') || {}).value,
+    ambiente: (eid('sg-pv-ambiente') || {}).value,
+    cert_alias: (eid('sg-pv-cert-alias') || {}).value,
+    cert_vence: (eid('sg-pv-cert-vence') || {}).value,
+    notas: (eid('sg-pv-notas') || {}).value
+  }).then(function(r){
+    if (!r || !r.ok) { toast((r && r.error) || 'No se pudo guardar', 'er'); return; }
+    toast('Punto de venta guardado', 'ok');
+    closeMB('sg-pv-modal');
+    sgPvLoad();
+  });
+}
+
+function sgPvBaja(id){
+  var p = SG_PV.filter(function(x){ return x.id === id; })[0] || {};
+  if (!confirm('¿Dar de baja el punto de venta N° ' + p.numero + '?\n\n'
+    + 'Deja de ofrecerse al facturar. Los comprobantes ya emitidos no se tocan.')) return;
+  api('/api/sg/contable/puntos-venta/' + id + '/baja', 'POST', {}).then(function(r){
+    if (!r || !r.ok) { toast((r && r.error) || 'No se pudo dar de baja', 'er'); return; }
+    toast('Punto de venta dado de baja', 'ok');
+    sgPvLoad();
+  });
+}
+
+// LOS PUNTOS QUE OFRECE LA PANTALLA DE FACTURAR. Salen de la misma tabla: si
+// uno se da de baja, deja de estar; si se agrega, aparece sin tocar el panel.
+function sgPvLlenarSelector(){
+  var sel = eid('sgf-pv'); if (!sel) return;
+  api('/api/sg/contable/puntos-venta').then(function(r){
+    var ps = (r && r.ok) ? (r.data || []) : [];
+    var previo = sel.value;
+    sel.innerHTML = ps.length
+      ? ps.map(function(p){
+          // El vencido se ofrece igual pero se dice: AFIP va a rechazar el
+          // comprobante, y es mejor enterarse antes de armarlo entero.
+          return '<option value="' + p.numero + '">' + escH(p.numero)
+            + (p.cert_vencido ? ' — certificado vencido' : '') + '</option>';
+        }).join('')
+      : '<option value="">— no hay puntos de venta cargados —</option>';
+    if (previo && ps.some(function(p){ return String(p.numero) === String(previo); })) sel.value = previo;
+  });
+}
+
 function sgctGestionResumen(){
   var cont = eid('sgct-gestion-panel'); if (!cont) return;
   if (cont.innerHTML) { cont.innerHTML = ''; return; }   // se cierra con el mismo botón
@@ -54167,6 +54408,7 @@ function sgctExportarAsientos(){
       sgctPcLoadGrupo(act ? act.getAttribute('data-grupo') : 'activo');
       return;
     }
+    if (s === 'sgct-puntos-venta') { sgPvLoad(); return; }
     if (s === 'sgct-asientos') { sgctCargarCuentas(); sgctLoadAsientos(); return; }
     if (s === 'sgct-modelos')  { sgctModCargarCuentas(function(){ sgctModCargar(); }); sgctCargarConfigImp(); return; }
     if (s === 'sgct-iva-compras') { sgIvaInit(); return; }

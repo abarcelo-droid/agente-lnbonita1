@@ -83,6 +83,7 @@ const PREFIJOS = [
   // El libro de IVA compras y la anulación de un asiento. La anulación además
   // pide la clave del que la hace: mueve la contabilidad.
   ['sgct-iva-compras',   'sg/diario-iva-compras,sg/asientos'],
+  ['sgct-puntos-venta',  'sg/contable/puntos-venta'],
   ['sgct-plan-cuentas',  'sg/contable,sg/contable/secciones,sg/contable/titulos,sg/contable/config-impositiva'],
   ['sgct-modelos',       'sg/contable/modelos'],
 

@@ -36,6 +36,11 @@ const MODULOS_SGCT = [
   // vengan de donde vengan. Es de donde salen los datos del período y lo que
   // después hay que informar.
   ["sgct-iva-compras",  "🧾 Diario IVA Compras SG", 673],
+  // Los puntos de venta estaban ESCRITOS A MANO en el HTML del panel: dar de
+  // alta uno nuevo era tocar el código. Y con ellos van los datos de la
+  // facturación electrónica —el certificado y su vencimiento—, que es lo que
+  // hoy no está en ningún lado y se descubre el día que AFIP rechaza.
+  ["sgct-puntos-venta", "🏪 Puntos de Venta SG", 674],
 ];
 
 try {
