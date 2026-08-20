@@ -24846,6 +24846,11 @@ function sgImpVisor(id){
     // 4) Qué trae.
     if(d.lineas.length){
       var pp={}; (est.por_producto||[]).forEach(function(x){ pp[x.linea_id]=x; });
+      if(est.invoice_discrepancia){
+        h+='<div style="padding:10px 14px;border-radius:8px;border:1px solid var(--err,#dc2626);background:rgba(220,38,38,.08);color:var(--err,#dc2626);font-size:12.5px;margin:14px 0 5px">'
+          +'<b>El invoice y los productos no coinciden.</b> El papel dice US$ '+nr(est.usd.invoice)+' y los productos suman US$ '+nr(est.invoice_lineas)
+          +' ('+(est.invoice_discrepancia>0?'+':'')+nr(est.invoice_discrepancia)+'). El costo se reparte sobre el del papel — revisá cuál está mal cargado.</div>';
+      }
       h+='<div style="font-size:12px;font-weight:600;color:var(--mut);margin:14px 0 5px">PRODUCTOS · costo prorrateado</div>'
         +'<table class="pa-tbl" style="font-size:12px;width:100%"><thead><tr><th>Producto</th><th>Envase</th>'
         +'<th style="text-align:right">Cajas</th><th style="text-align:right">kg/bulto</th><th style="text-align:right">kg</th>'
@@ -24861,7 +24866,8 @@ function sgImpVisor(id){
             +'<td style="text-align:right">'+nr(Math.round(kg))+'</td>'
             +'<td style="text-align:right">'+(l.precio_unitario_usd!=null?nr(l.precio_unitario_usd):'—')+'</td>'
             // El costo prorrateado de ESE producto: es con lo que se le pone precio.
-            +'<td style="text-align:right">'+(pp[l.id]?sgMoney(Math.round(pp[l.id].costo_ars)):'—')+'</td>'
+            +'<td style="text-align:right">'+(pp[l.id]?sgMoney(Math.round(pp[l.id].costo_ars)):'—')
+              +(pp[l.id]?'<div style="font-size:10px;color:var(--mut)">'+nr(pp[l.id].peso_valor)+'% del valor</div>':'')+'</td>'
             +'<td style="text-align:right;font-weight:700;color:#16a34a">'+(pp[l.id]&&pp[l.id].costo_caja!=null?money2(pp[l.id].costo_caja):'—')+'</td>'
             +'<td style="text-align:right">'+(pp[l.id]&&pp[l.id].costo_kg!=null?money2(pp[l.id].costo_kg):'—')+'</td></tr>';
         }).join('')
