@@ -1184,11 +1184,22 @@ function recalcCostoLote(db, loteId) {
   // que costó meter esa mercadería adentro, y los dos se reparten por kilo entre
   // los lotes de la recepción. Antes el flete de entrada no llegaba al costo del
   // lote por ningún camino: el comprador lo anotaba en la orden y ahí moría.
+  //
+  // EL FLETE QUE SAN GERÓNIMO ADELANTÓ POR EL PRODUCTOR NO ES COSTO DE LA
+  // PARTIDA. Es plata que se le recupera descontándola de su liquidación: si
+  // entrara acá, la mercadería figuraría costando más de lo que costó y el
+  // margen de todo lo que se venda de ella saldría bajo por un gasto ajeno.
+  // Se mira el flete_a_cargo de la ORDEN y no una marca en el gasto: así hay
+  // una sola verdad y no dos que se pueden contradecir.
   let descarga = 0;
   if (lote.recepcion_id) {
-    const dt = db.prepare(`SELECT COALESCE(SUM(monto),0) s FROM sg_gastos_directos
-      WHERE recepcion_id=? AND tipo_gasto IN ('descarga_ingreso','flete_entrada')
-        AND estado='valorizado' AND activo=1`).get(lote.recepcion_id).s;
+    const dt = db.prepare(`SELECT COALESCE(SUM(g.monto),0) s FROM sg_gastos_directos g
+      LEFT JOIN sg_recepciones r ON r.id = g.recepcion_id
+      LEFT JOIN sg_oc o ON o.id = r.oc_id
+      WHERE g.recepcion_id=? AND g.tipo_gasto IN ('descarga_ingreso','flete_entrada')
+        AND g.estado='valorizado' AND g.activo=1
+        AND NOT (g.tipo_gasto='flete_entrada' AND COALESCE(o.flete_a_cargo,'') = 'vendedor')`)
+      .get(lote.recepcion_id).s;
     if (dt > 0) {
       const totKgRec = db.prepare("SELECT COALESCE(SUM(kg_reales),0) s FROM sg_lotes WHERE recepcion_id=? AND activo=1").get(lote.recepcion_id).s;
       if (totKgRec > 0) descarga = dt * (lote.kg_reales / totKgRec);
@@ -1728,6 +1739,12 @@ router.post('/oc', requireAdmin, (req, res) => {
     // Flete INFORMATIVO: se guarda quién paga + el monto que carga el comercial, pero
     // NO entra al total (el total sigue saliendo solo del loop de items, más abajo).
     const fleteCargo = (b.flete_a_cargo === 'comprador' || b.flete_a_cargo === 'vendedor') ? b.flete_a_cargo : null;
+    // Quién puso la plata. Sólo aplica al flete del vendedor; en cualquier otro
+    // caso queda en null para que no quede un dato que contradice al de al lado.
+    const fletePagadoPor = (fleteCargo === 'vendedor'
+      && (b.flete_pagado_por === 'san_geronimo' || b.flete_pagado_por === 'productor'))
+      ? b.flete_pagado_por
+      : (fleteCargo === 'vendedor' ? 'productor' : null);
     // ── EL FLETE: TOTAL, POR BULTO O POR PALLET ─────────────────────────
     // El total se CALCULA acá y no se le pide al usuario: si lo multiplicara él
     // y se equivocara, el número guardado y el pacto real dirían cosas
@@ -1766,13 +1783,13 @@ router.post('/oc', requireAdmin, (req, res) => {
       const traza = codigoTrazabilidad(db, b.proveedor_id, val(b.fecha_oc)).codigo;
       const ocInfo = db.prepare(`INSERT INTO sg_oc
         (numero, modalidad, proveedor_id, tipo_fiscal, tipo_precio, condicion_pago_id, fecha_oc,
-         fecha_recepcion_estimada, comercial_id, estado, observaciones, flete_a_cargo, flete_monto,
+         fecha_recepcion_estimada, comercial_id, estado, observaciones, flete_a_cargo, flete_pagado_por, flete_monto,
          precio_incluye_iva, iva_alicuota_oc, total_estimado_kg, total_estimado_monto, creado_por,
          trazabilidad, flete_modalidad, flete_cantidad, flete_precio_unit, flete_con_iva, documenta)
-        VALUES (?,?,?,?,?,?,?,?,?, 'abierta', ?,?,?, ?,?, 0, 0, ?, ?, ?,?,?,?,?)`).run(
+        VALUES (?,?,?,?,?,?,?,?,?, 'abierta', ?,?,?,?, ?,?, 0, 0, ?, ?, ?,?,?,?,?)`).run(
         numero, val(b.modalidad) || 'normal', b.proveedor_id || null, tipoFiscal, tipoPrecio,
         dft.condicion_pago_id, val(b.fecha_oc), val(b.fecha_recepcion_estimada), b.comercial_id || null,
-        val(b.observaciones), fleteCargo, fleteMonto, (discrimina ? incluyeIva : null), alicOverride, uid(req),
+        val(b.observaciones), fleteCargo, fletePagadoPor, fleteMonto, (discrimina ? incluyeIva : null), alicOverride, uid(req),
         traza, fleteModalidad, fleteCantidad, fletePrecioUnit, fleteConIva, documenta);
       const ocId = ocInfo.lastInsertRowid;
 
@@ -3718,7 +3735,7 @@ router.put('/oc/:id', requireAdmin, (req, res) => {
     const oc = db.prepare('SELECT estado FROM sg_oc WHERE id=?').get(req.params.id);
     if (!oc) return res.status(404).json({ ok: false, error: 'No encontrado' });
     if (!['borrador', 'abierta'].includes(oc.estado)) return res.status(400).json({ ok: false, error: 'Solo se edita una OC en borrador/abierta' });
-    const campos = ['tipo_fiscal', 'condicion_pago_id', 'fecha_oc', 'fecha_recepcion_estimada', 'comercial_id', 'observaciones', 'flete_a_cargo', 'flete_monto'];
+    const campos = ['tipo_fiscal', 'condicion_pago_id', 'fecha_oc', 'fecha_recepcion_estimada', 'comercial_id', 'observaciones', 'flete_a_cargo', 'flete_pagado_por', 'flete_monto'];
     const sets = [], vals = [];
     for (const c of campos) if (req.body[c] !== undefined) { sets.push(`${c}=?`); vals.push(val(req.body[c])); }
     if (sets.length) {
@@ -5847,7 +5864,7 @@ router.get('/fletes-entrada', requireAuth, (req, res) => {
     // Una recepción por fila: el flete se paga por viaje, no por orden.
     const rows = db.prepare(`
       SELECT r.id AS recepcion_id, r.numero_recepcion, r.fecha_recepcion, r.oc_id,
-             o.trazabilidad AS partida, o.numero AS oc_numero, o.flete_a_cargo,
+             o.trazabilidad AS partida, o.numero AS oc_numero, o.flete_a_cargo, o.flete_pagado_por,
              o.flete_monto, o.flete_modalidad, o.flete_cantidad, o.flete_precio_unit,
              p.razon_social AS proveedor_nombre,
              (SELECT COALESCE(SUM(l.kg_reales),0) FROM sg_lotes l
@@ -5865,12 +5882,18 @@ router.get('/fletes-entrada', requireAuth, (req, res) => {
        WHERE o.activo = 1 AND o.estado <> 'anulada'
        ORDER BY r.fecha_recepcion DESC, r.id DESC`).all();
 
-    // EL FLETE A CARGO DEL VENDEDOR NO SE PAGA: viene en el precio. Mostrarlo
-    // en la bandeja sería mandar a administración a buscar una factura que no
-    // existe.
+    // EL FLETE DEL VENDEDOR: depende de QUIÉN LO PAGÓ.
+    //
+    //   · lo pagó el productor      → no se muestra. Mandar a administración a
+    //     buscar una factura que no existe es hacerle perder el día.
+    //   · lo adelantó San Gerónimo  → SÍ se muestra: hay que pagarle al fletero
+    //     y registrar su factura. Lo que cambia es que ese gasto NO es de San
+    //     Gerónimo —se le descuenta al productor de su liquidación— y por eso
+    //     tampoco entra al costo de la partida (ver recalcCostoLote).
+    const adelantado = (x) => x.flete_a_cargo === 'vendedor' && x.flete_pagado_por === 'san_geronimo';
     const data = rows
-      .filter((x) => x.flete_a_cargo !== 'vendedor')
-      .map((x) => ({ ...x, estimado: fleteEstimadoDeOC(x) }))
+      .filter((x) => x.flete_a_cargo !== 'vendedor' || adelantado(x))
+      .map((x) => ({ ...x, estimado: fleteEstimadoDeOC(x), a_recuperar: adelantado(x) }))
       .filter((x) => x.estimado > 0 || x.gasto_id)
       .filter((x) => (estado === 'valorizado')
         ? x.gasto_estado === 'valorizado'
@@ -5886,12 +5909,14 @@ router.post('/fletes-entrada/:recepcionId/valorizar', requireAdmin, (req, res) =
   const db = getDb();
   try {
     const b = req.body || {};
-    const rec = db.prepare(`SELECT r.*, o.id AS oc, o.trazabilidad, o.flete_a_cargo
+    const rec = db.prepare(`SELECT r.*, o.id AS oc, o.trazabilidad, o.flete_a_cargo, o.flete_pagado_por
       FROM sg_recepciones r JOIN sg_oc o ON o.id = r.oc_id WHERE r.id=?`).get(req.params.recepcionId);
     if (!rec) return res.status(404).json({ ok: false, error: 'Recepción no encontrada' });
-    if (rec.flete_a_cargo === 'vendedor') {
+    // El del vendedor sólo se valoriza si lo ADELANTÓ San Gerónimo. Si lo pagó
+    // el productor, no hay factura de fletero que cargar.
+    if (rec.flete_a_cargo === 'vendedor' && rec.flete_pagado_por !== 'san_geronimo') {
       return res.status(400).json({ ok: false,
-        error: 'Ese flete es a cargo del vendedor: viene adentro del precio y no se paga aparte.' });
+        error: 'Ese flete lo paga el productor: ya viene adentro del precio y no se paga aparte.' });
     }
     const monto = r2(b.monto);
     if (!(monto > 0)) return res.status(400).json({ ok: false, error: 'Poné lo que dice la factura del fletero' });

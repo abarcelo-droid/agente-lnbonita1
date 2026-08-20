@@ -1406,6 +1406,20 @@ try {
   const cols = db.prepare("PRAGMA table_info(sg_oc)").all().map(c => c.name);
   const faltan = [];
   if (!cols.includes('flete_a_cargo')) { db.exec('ALTER TABLE sg_oc ADD COLUMN flete_a_cargo TEXT'); faltan.push('flete_a_cargo'); }
+  // ── QUIÉN PUSO LA PLATA DEL FLETE DEL VENDEDOR ──────────────────────────
+  // "A cargo del vendedor" no dice quién lo pagó, y son dos cosas distintas:
+  //
+  //   · el productor se arregló el flete    → San Gerónimo no toca nada;
+  //   · lo adelantó San Gerónimo por él     → hay que pagarle al fletero, pero
+  //     ese gasto NO es de San Gerónimo: se le descuenta al productor de su
+  //     liquidación.
+  //
+  // Sin este dato los dos casos se cargaban igual, y el segundo no se podía ni
+  // registrar: la bandeja de fletes esconde todo lo que sea "del vendedor".
+  //
+  // Sólo tiene sentido con flete_a_cargo='vendedor'. Sin CHECK inline, que es
+  // límite del ALTER; el valor se valida en el endpoint.
+  if (!cols.includes('flete_pagado_por')) { db.exec('ALTER TABLE sg_oc ADD COLUMN flete_pagado_por TEXT'); faltan.push('flete_pagado_por'); }
   if (!cols.includes('flete_monto'))   { db.exec('ALTER TABLE sg_oc ADD COLUMN flete_monto REAL');   faltan.push('flete_monto'); }
   if (faltan.length) console.log('[DB] SG sg_oc migrado (+' + faltan.join(', +') + ')');
 } catch (e) {
