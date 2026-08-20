@@ -1656,6 +1656,89 @@ router.post('/asientos/:id(\\d+)/anular', requireAdmin, (req, res) => {
   res.json({ ok: true });
 });
 
+// ── PUNTOS DE VENTA ──────────────────────────────────────────────────────────
+// Estaban escritos a mano en el HTML. Acá se dan de alta, se les pone su
+// condición de emisión y —si facturan electrónicamente— hasta cuándo vale su
+// certificado, que es el dato que se descubre tarde: cuando vence, AFIP deja de
+// aceptar los comprobantes y se enteran el día que no pueden facturar.
+router.get('/puntos-venta', (req, res) => {
+  try {
+    const incluirInactivos = req.query.inactivos === '1';
+    const rows = db.prepare(`SELECT * FROM sg_puntos_venta
+      ${incluirInactivos ? '' : 'WHERE activo = 1'} ORDER BY numero`).all();
+    const hoy = db.prepare("SELECT date('now','localtime') d").get().d;
+    res.json({ ok: true, data: rows.map((p) => {
+      // Cuántos días le quedan al certificado. Negativo = ya venció.
+      let dias = null;
+      if (p.emision === 'electronica' && p.cert_vence) {
+        dias = Math.round(db.prepare(
+          'SELECT julianday(?) - julianday(?) d').get(p.cert_vence, hoy).d);
+      }
+      return { ...p, cert_dias: dias, cert_vencido: dias != null && dias < 0 };
+    }) });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// Dar de alta o cambiar un punto de venta es PARAMETRIZAR, no operar: define con
+// qué numeración sale un comprobante fiscal. Va con requireAdmin, igual que la
+// configuración impositiva.
+router.post('/puntos-venta', requireAdmin, (req, res) => {
+  const b = req.body || {};
+  const numero = parseInt(b.numero, 10);
+  if (!numero || numero < 1) {
+    return res.status(400).json({ ok: false, error: 'El número de punto de venta es obligatorio' });
+  }
+  // EL MISMO NÚMERO NO VA DOS VECES: la numeración de comprobantes cuelga de él,
+  // y dos puntos con el mismo número son dos series pisándose.
+  const ya = db.prepare('SELECT id FROM sg_puntos_venta WHERE numero=? AND id <> ?')
+    .get(numero, parseInt(b.id, 10) || 0);
+  if (ya) return res.status(400).json({ ok: false, error: 'Ya existe el punto de venta ' + numero });
+  const emision = ['electronica', 'manual', 'preimpreso'].includes(String(b.emision))
+    ? String(b.emision) : 'electronica';
+  // Un punto que factura electrónicamente sin fecha de vencimiento del
+  // certificado es el que después sorprende: se pide.
+  if (emision === 'electronica' && !String(b.cert_vence || '').trim()) {
+    return res.status(400).json({ ok: false,
+      error: 'Un punto de venta electrónico necesita la fecha de vencimiento del certificado: '
+           + 'es lo que permite avisar antes de que AFIP deje de aceptar los comprobantes.' });
+  }
+  const campos = [numero, String(b.nombre || '').trim() || ('Punto de venta ' + numero), emision,
+    ['produccion', 'homologacion'].includes(String(b.ambiente)) ? String(b.ambiente) : 'produccion',
+    String(b.cuit_emisor || '').replace(/[^0-9]/g, '') || null,
+    String(b.domicilio || '').trim() || null,
+    String(b.cert_alias || '').trim() || null,
+    String(b.cert_vence || '').trim() || null,
+    String(b.comprobantes || '').trim() || null,
+    String(b.notas || '').trim() || null,
+    b.activo === 0 || b.activo === false ? 0 : 1];
+  try {
+    const id = parseInt(b.id, 10);
+    if (id) {
+      db.prepare(`UPDATE sg_puntos_venta SET numero=?, nombre=?, emision=?, ambiente=?,
+        cuit_emisor=?, domicilio=?, cert_alias=?, cert_vence=?, comprobantes=?, notas=?, activo=?,
+        modificado_en=datetime('now','localtime'), modificado_por=? WHERE id=?`)
+        .run(...campos, req._user?.id ?? null, id);
+      return res.json({ ok: true, id });
+    }
+    const r = db.prepare(`INSERT INTO sg_puntos_venta
+      (numero, nombre, emision, ambiente, cuit_emisor, domicilio, cert_alias, cert_vence,
+       comprobantes, notas, activo) VALUES (?,?,?,?,?,?,?,?,?,?,?)`).run(...campos);
+    res.json({ ok: true, id: Number(r.lastInsertRowid) });
+  } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
+});
+
+// No se borra: se da de baja. Un punto de venta con comprobantes emitidos no
+// puede desaparecer — esos comprobantes quedarían sin de dónde salieron.
+router.post('/puntos-venta/:id/baja', requireAdmin, (req, res) => {
+  try {
+    const p = db.prepare('SELECT * FROM sg_puntos_venta WHERE id=?').get(req.params.id);
+    if (!p) return res.status(404).json({ ok: false, error: 'Punto de venta no encontrado' });
+    db.prepare(`UPDATE sg_puntos_venta SET activo=0, modificado_en=datetime('now','localtime'),
+      modificado_por=? WHERE id=?`).run(req._user?.id ?? null, p.id);
+    res.json({ ok: true });
+  } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
+});
+
 // ── config-impositiva ────────────────────────────────────────────────────────
 router.get('/config-impositiva', (req, res) => {
   try {

@@ -444,6 +444,50 @@ try { db.exec("ALTER TABLE sg_ven_liquidaciones ADD COLUMN dif_motivo TEXT"); } 
 try { db.exec("ALTER TABLE sg_facturas_compra ADD COLUMN saldo_pagado_gestion REAL NOT NULL DEFAULT 0"); } catch (_) {}
 try { db.exec("ALTER TABLE sg_pagos_compras ADD COLUMN monto_gestion REAL NOT NULL DEFAULT 0"); } catch (_) {}
 try { db.exec("ALTER TABLE sg_pagos_proveedores ADD COLUMN ambito_pago TEXT NOT NULL DEFAULT 'todo'"); } catch (_) {}
+
+// ── LOS PUNTOS DE VENTA ───────────────────────────────────────────────────
+// Estaban ESCRITOS A MANO en el HTML —7, 9, 11 y 13—, así que dar de alta uno
+// nuevo o dar de baja el que ya no se usa era tocar el panel. Y el número solo
+// no alcanza: cada punto de venta tiene su condición de emisión, su CUIT, y si
+// factura electrónicamente, un certificado que VENCE.
+//
+// Ese vencimiento es el que importa: cuando se pasa, AFIP deja de aceptar los
+// comprobantes y se descubre el día que no se puede facturar. Guardarlo acá
+// permite avisar antes.
+//
+// Las claves privadas NO van en esta tabla ni en ninguna que el panel devuelva:
+// lo que se guarda es de qué certificado se trata y hasta cuándo sirve.
+try {
+  db.exec(`CREATE TABLE IF NOT EXISTS sg_puntos_venta (
+    id                INTEGER PRIMARY KEY AUTOINCREMENT,
+    numero            INTEGER NOT NULL UNIQUE,
+    nombre            TEXT,
+    emision           TEXT NOT NULL DEFAULT 'electronica'
+                        CHECK(emision IN ('electronica','manual','preimpreso')),
+    ambiente          TEXT NOT NULL DEFAULT 'produccion'
+                        CHECK(ambiente IN ('produccion','homologacion')),
+    cuit_emisor       TEXT,
+    domicilio         TEXT,
+    -- Del certificado se guarda con qué se lo identifica y hasta cuándo vale.
+    -- El .crt y la clave privada NO viven acá.
+    cert_alias        TEXT,
+    cert_vence        TEXT,
+    comprobantes      TEXT,          -- 'A,B,C' — cuáles emite este punto
+    notas             TEXT,
+    activo            INTEGER NOT NULL DEFAULT 1,
+    creado_en         TEXT DEFAULT (datetime('now','localtime')),
+    modificado_en     TEXT,
+    modificado_por    INTEGER
+  )`);
+  // Los cuatro que estaban escritos en el panel, para que nada deje de andar el
+  // día que esto se despliega. Si ya hay puntos cargados, no se toca nada.
+  const hay = db.prepare('SELECT COUNT(*) c FROM sg_puntos_venta').get().c;
+  if (!hay) {
+    const ins = db.prepare("INSERT INTO sg_puntos_venta (numero, nombre, comprobantes) VALUES (?,?,'A,B')");
+    for (const n of [7, 9, 11, 13]) ins.run(n, 'Punto de venta ' + n);
+    console.log('[SG] Puntos de venta: se cargaron los 4 que estaban escritos en el panel');
+  }
+} catch (e) { console.error('[SG] sg_puntos_venta:', e.message); }
 try { db.exec("CREATE INDEX IF NOT EXISTS idx_sg_cob_cliente ON sg_ven_cobranzas(cliente_id)"); } catch (_) {}
 
 // ── DOS NÚMEROS DE LA MISMA OPERACIÓN ─────────────────────────────────────
