@@ -5835,15 +5835,13 @@ router.get('/cc-proveedores', requireAuth, (req, res) => {
                     JOIN sg_asientos a ON a.id = f.asiento_id AND COALESCE(a.anulado,0) = 0
                    WHERE f.proveedor_id = p.id AND f.activo = 1),0) AS facturado,
         -- ── QUÉ PARTE DE LO QUE SE LE DEBE NO TIENE COMPROBANTE ──────────
-        -- UN PAGO CANCELA PROPORCIONALMENTE lo facturado y lo que no. Es una
-        -- convención y hay que elegir una: sin ella, dos facturas iguales con
-        -- el mismo pago encima podrían dar saldos de gestión distintos según el
-        -- orden en que se hubieran cargado. Prorratear es la única que no
-        -- depende del orden.
+        -- Sale de lo que CADA PAGO dijo estar cancelando, no de un prorrateo:
+        -- saldo_pagado_gestion es cuánto de lo pagado fue contra la parte sin
+        -- comprobante. Antes esto se prorrateaba por la proporción original de
+        -- la factura, así que pagar SÓLO lo facturado dejaba el saldo repartido
+        -- mitad y mitad — el número total estaba bien y la apertura, mal.
         COALESCE((SELECT SUM(ROUND(
-                    (COALESCE(f.total,0) + COALESCE(f.dif_gestion,0) - COALESCE(f.saldo_pagado,0))
-                    * COALESCE(f.dif_gestion,0)
-                    / NULLIF(COALESCE(f.total,0) + COALESCE(f.dif_gestion,0), 0), 2))
+                    COALESCE(f.dif_gestion,0) - COALESCE(f.saldo_pagado_gestion,0), 2))
                     FROM sg_facturas_compra f
                     JOIN sg_asientos a ON a.id = f.asiento_id AND COALESCE(a.anulado,0) = 0
                    WHERE f.proveedor_id = p.id AND f.activo = 1
@@ -6616,6 +6614,7 @@ router.get('/cc-proveedores/:id', requireAuth, (req, res) => {
     // abajo, para que se sepa que está esperando, pero no mueve el saldo.
     const facturas = db.prepare(`SELECT f.id, f.fecha_emision, f.tipo_comprobante, f.punto_venta,
         f.numero, f.neto, f.iva_monto, f.total, COALESCE(f.saldo_pagado,0) AS pagado,
+        COALESCE(f.saldo_pagado_gestion,0) AS pagado_gestion,
         COALESCE(f.dif_gestion,0) AS dif_gestion, f.dif_motivo,
         f.asiento_id, a.fecha AS asiento_fecha,
         (SELECT GROUP_CONCAT(o.trazabilidad, ' · ') FROM sg_factura_compra_ocs fo
@@ -6628,13 +6627,14 @@ router.get('/cc-proveedores/:id', requireAuth, (req, res) => {
     // proporcionalmente lo facturado y lo que no. Se calcula acá para que la
     // ficha y el listado no puedan dar números distintos — que es justo lo que
     // pasaba antes.
+    // Cada mitad con LO SUYO pagado: el pago dice contra qué parte va, así que
+    // no hay nada que prorratear. El saldo de apertura es fiscal — es el punto
+    // de partida declarado.
     const saldos = { fiscal: r2(p.saldo_inicial), gestion: 0 };
     for (const f of facturas) {
-      const bruto = r2((f.total || 0) + (f.dif_gestion || 0));
-      const pend = r2(bruto - (f.pagado || 0));
-      const ges = bruto > 0 ? r2(pend * (f.dif_gestion || 0) / bruto) : 0;
-      saldos.gestion = r2(saldos.gestion + ges);
-      saldos.fiscal = r2(saldos.fiscal + r2(pend - ges));
+      const pagGes = r2(f.pagado_gestion);
+      saldos.gestion = r2(saldos.gestion + r2((f.dif_gestion || 0) - pagGes));
+      saldos.fiscal = r2(saldos.fiscal + r2((f.total || 0) - r2((f.pagado || 0) - pagGes)));
     }
     const TIPO = { factura_a: 'Factura A', factura_b: 'Factura B', liquidacion: 'Liquidación' };
     for (const f of facturas) {
@@ -6642,7 +6642,8 @@ router.get('/cc-proveedores/:id', requireAuth, (req, res) => {
         detalle: TIPO[f.tipo_comprobante] || f.tipo_comprobante || 'Comprobante',
         comprobante: (f.punto_venta ? f.punto_venta + '-' : '') + (f.numero || ''),
         partidas: f.partidas, neto: f.neto, iva: f.iva_monto,
-        debe: 0, haber: r2(f.total), pagado: r2(f.pagado),
+        debe: 0, haber: r2(f.total),
+        pagado: r2((f.pagado || 0) - (f.pagado_gestion || 0)),
         asiento_id: f.asiento_id, estado: null, ambito: 'fiscal' });
       // ── LO QUE FALTA POR FACTURAR, EN SU PROPIO RENGLÓN ────────────────
       // El listado ya sumaba la diferencia al saldo y la ficha no: el listado
@@ -6655,7 +6656,7 @@ router.get('/cc-proveedores/:id', requireAuth, (req, res) => {
           detalle: 'Falta por facturar' + (f.dif_motivo ? ' — ' + MOTIVOS_TXT(f.dif_motivo) : ''),
           comprobante: (f.punto_venta ? f.punto_venta + '-' : '') + (f.numero || ''),
           partidas: f.partidas, neto: null, iva: null,
-          debe: 0, haber: r2(f.dif_gestion), pagado: 0,
+          debe: 0, haber: r2(f.dif_gestion), pagado: r2(f.pagado_gestion),
           asiento_id: f.asiento_id, estado: null, ambito: 'gestion' });
       }
     }
