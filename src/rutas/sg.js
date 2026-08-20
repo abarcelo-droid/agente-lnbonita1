@@ -4135,6 +4135,15 @@ router.get('/oc/:id', requireAuth, (req, res) => {
     // Lo pactado contra lo que entró. Si algo no da, la orden recibida lo avisa
     // arriba de todo para que el comprador pueda ajustar el precio.
     oc.diferencias = diferenciasDeOC(db, req.params.id);
+    // POR QUÉ ENTRÓ DISTINTO. La explicación la escribe el que recibe, y hasta
+    // ahora moría en la recepción: el que abre la orden veía la diferencia y no
+    // el motivo, así que igual tenía que llamar por teléfono.
+    // Desde que dejó de ser obligatoria puede venir vacía — y eso también se
+    // dice, para saber cuáles hay que ir a completar.
+    oc.variacion_motivos = db.prepare(`SELECT numero_recepcion, fecha_recepcion,
+        COALESCE(variacion_motivo,'') AS motivo
+      FROM sg_recepciones WHERE oc_id=? AND COALESCE(hay_variaciones,0)=1
+      ORDER BY id`).all(req.params.id);
     res.json({ ok: true, data: oc });
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
