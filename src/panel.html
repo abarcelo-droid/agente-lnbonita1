@@ -13,6 +13,14 @@
   --gold:#f0a500;--goldl:#fff8e6;
   --ok:#16a34a;--warn:#d97706;--err:#dc2626;
   --nav:#0f2540;--nav2:#1a3a5c;
+  /* --pan y --pri las venían usando ocho reglas de las pantallas de San
+     Gerónimo y NO ESTABAN DEFINIDAS. Un var() que no resuelve no hereda ni
+     avisa: deja la propiedad en su valor inicial. El fondo quedaba
+     TRANSPARENTE —el desplegable de cuentas se leía encimado con el resto del
+     formulario— y los bordes de acento, del color del texto.
+     --pan es la superficie (la misma que --sur) y --pri el azul de acento, el
+     mismo que ya usaban los rgba(37,99,235,…) de al lado. */
+  --pan:#fff;--pri:#2563eb;
   --sans:'DM Sans',sans-serif;
 }
 *{box-sizing:border-box;margin:0;padding:0}
@@ -3339,6 +3347,12 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
          encontrar "BANCO GALICIA": hay que bajar con la rueda leyendo códigos.
          Se escribe una parte del nombre o del código y quedan tres. */
       .sg-bc{position:relative}
+      /* EL FONDO TIENE QUE SER OPACO. Decía var(--pan) y var(--pri), y esas dos
+         variables NO EXISTEN en este panel: un var() que no resuelve deja la
+         propiedad en su valor inicial, así que el fondo quedaba TRANSPARENTE y
+         por debajo de la lista se leía el resto del formulario —el texto de la
+         chequera, los botones de Cancelar y Guardar— encimado con los rubros.
+         Las buenas son --sur (la superficie, la misma del modal) y --burg. */
       .sg-bc-list{position:absolute;left:0;right:0;top:100%;z-index:60;max-height:260px;
         overflow-y:auto;background:var(--pan);border:1.5px solid var(--pri);border-top:none;
         border-radius:0 0 9px 9px;box-shadow:0 8px 22px rgba(0,0,0,.14);display:none}
@@ -5111,7 +5125,7 @@ function sgSelBuscable(sel, placeholder){
   inp.placeholder = placeholder || 'Escribí para buscar…';
   inp.setAttribute('autocomplete', 'off');
   inp.style.cssText = 'width:100%;box-sizing:border-box;margin-bottom:4px;padding:6px 8px;'
-    + 'border:1px solid var(--bor);border-radius:6px;font-size:12.5px;background:var(--pan)';
+    + 'border:1px solid var(--bor);border-radius:6px;font-size:12.5px;background:var(--sur)';
   caja.appendChild(inp);
   caja.appendChild(sel);
 
@@ -5831,13 +5845,35 @@ function sgCcFicha(provId){
       return m.ambito === 'gestion'
         ? ' <span class="cb-chip" style="background:#f6eddf;color:#8a5a1f">sin facturar</span>' : '';
     };
+    // ── EL ENCABEZADO, CON FILTROS ────────────────────────────────────
+    // Una cuenta corriente de un proveedor con movimiento es larga, y lo que se
+    // busca casi siempre es "qué está pendiente" o "esta partida". Los filtros
+    // van en la MISMA fila que el rótulo, arriba de la columna que filtran: una
+    // caja de búsqueda suelta obliga a adivinar sobre qué está buscando.
+    var filtro = function(col, ph){
+      return '<th style="padding-top:0"><input type="text" placeholder="' + ph + '"'
+        + ' oninput="tablaFiltrar(\'sg-ccficha-tb\',' + col + ',this.value)"'
+        + ' style="width:100%;font-size:11px;padding:3px 5px;border:1px solid var(--bor2);'
+        + 'border-radius:4px"></th>';
+    };
     h += '<div class="ab-table-wrap"><table class="pa-tbl"><thead><tr>'
       + '<th style="width:96px">Fecha</th><th>Concepto</th>'
-      + '<th style="width:120px">Comprobante</th><th style="width:18%">Partida</th>'
-      + '<th style="width:130px;text-align:right">Debe</th>'
-      + '<th style="width:130px;text-align:right">Haber</th>'
-      + '<th style="width:140px;text-align:right">Saldo</th>'
-      + '<th style="width:86px"></th></tr></thead><tbody>';
+      + '<th style="width:120px">Comprobante</th><th style="width:16%">Partida</th>'
+      + '<th style="width:120px;text-align:right">Debe</th>'
+      + '<th style="width:120px;text-align:right">Haber</th>'
+      + '<th style="width:130px;text-align:right">Saldo</th>'
+      + '<th style="width:112px;text-align:center">Estado</th></tr>'
+      + '<tr style="background:var(--bg)">'
+      + filtro(0, 'Fecha…') + filtro(1, 'Concepto…') + filtro(2, 'Comprob…') + filtro(3, 'Partida…')
+      + '<th></th><th></th><th></th>'
+      // El estado es una lista corta y cerrada: un desplegable evita tipear
+      // "pendiente" y que no filtre por una tilde.
+      + '<th style="padding-top:0"><select onchange="tablaFiltrar(\'sg-ccficha-tb\',7,this.value)"'
+        + ' style="width:100%;font-size:11px;padding:3px 4px;border:1px solid var(--bor2);border-radius:4px">'
+        + '<option value="">Todo</option><option value="pendiente">Pendiente</option>'
+        + '<option value="parcial">Parcial</option><option value="pagada">Pagada</option>'
+        + '</select></th>'
+      + '</tr></thead><tbody id="sg-ccficha-tb">';
     h += movs.length ? movs.map(function(m){
       return '<tr><td>' + escH(m.fecha || '—') + '</td>'
         + '<td class="cc-concepto">' + escH(m.tipo === 'factura' && m.ambito === 'gestion'
@@ -5848,18 +5884,16 @@ function sgCcFicha(provId){
         + '<td style="text-align:right">' + (m.debe ? sgMoney(m.debe) : '—') + '</td>'
         + '<td style="text-align:right">' + (m.haber ? sgMoney(m.haber) : '—') + '</td>'
         + '<td style="text-align:right;font-weight:700">' + sgMoney(m.saldo) + '</td>'
-        // ANULAR LA FACTURA, ACÁ. Estaba sólo en la lista de las que faltaba
-        // contabilizar, así que una YA contabilizada —que es justo la que uno
-        // quiere dar de baja cuando descubre el error— no lo tenía en ningún
-        // lado. Va en el renglón del comprobante y no en el de la diferencia:
-        // se anula la factura entera, con sus dos mitades.
-        + '<td style="text-align:right;white-space:nowrap">'
-          + (m.factura_id && !m.pagado && lnbPuedeAnular('sg-compras')
-              ? '<button class="btn bd bs" onclick="sgCcAnularFactura(' + m.factura_id + ',\'' + esc(m.comprobante || '') + '\')">Anular</button>'
-              : (m.factura_id && m.pagado
-                  ? '<span style="font-size:10.5px;color:var(--mut)" title="Anulá primero la orden de pago">pagada</span>'
-                  : ''))
-          + '</td></tr>';
+        // ── ESTADO ──────────────────────────────────────────────────────
+        // La palabra tiene que ESTAR en la celda para que el filtro la
+        // encuentre: filtrar por lo que se ve es lo único que no sorprende.
+        //
+        // Y el botón de anular va acá mismo. Estaba sólo en la lista de las
+        // facturas sin contabilizar, así que una YA contabilizada —justo la que
+        // uno quiere dar de baja cuando descubre el error— no lo tenía en
+        // ningún lado. Va en el renglón del comprobante y no en el de la
+        // diferencia: se anula la factura entera, con sus dos mitades.
+        + '<td style="text-align:center;white-space:nowrap">' + sgCcEstadoCelda(m) + '</td></tr>';
     }).join('')
       : '<tr><td colspan="8" class="emp">Sin movimientos en la contabilidad.</td></tr>';
     h += '</tbody></table></div>';
@@ -8085,6 +8119,28 @@ function sgCcExportar(como){
 // Anular la factura desde la cuenta corriente, que es donde se ve el problema.
 // Lo mismo que hace el botón de la bandeja: da de baja el comprobante, anula su
 // asiento y devuelve la partida a pendientes de facturar.
+// Cómo está cada renglón, en una palabra. Los pagos y la apertura no tienen
+// estado: no son deuda, son lo que la cancela o el punto de partida.
+function sgCcEstadoCelda(m){
+  if (m.tipo !== 'factura') return '<span style="color:var(--mut)">—</span>';
+  var deuda = Math.round((m.haber || 0) * 100) / 100;
+  var pag = Math.round((m.pagado || 0) * 100) / 100;
+  var est = pag <= 0.009 ? 'pendiente' : (pag >= deuda - 0.009 ? 'pagada' : 'parcial');
+  var COL = { pendiente: ['#9a3412', '#fef3c7'], parcial: ['#1e40af', '#dbeafe'],
+              pagada: ['#15803d', '#dcfce7'] };
+  var c = COL[est];
+  var chip = '<span class="cb-chip" style="background:' + c[1] + ';color:' + c[0] + '">'
+    + est + '</span>';
+  // El botón sólo donde tiene sentido: sobre el comprobante, sin pagos encima y
+  // con permiso de anular.
+  if (m.factura_id && est === 'pendiente' && lnbPuedeAnular('sg-compras')) {
+    chip += ' <button class="btn bd bs" style="padding:2px 7px;font-size:10.5px"'
+      + ' onclick="sgCcAnularFactura(' + m.factura_id + ',\'' + esc(m.comprobante || '') + '\')">'
+      + 'Anular</button>';
+  }
+  return chip;
+}
+
 function sgCcAnularFactura(facturaId, nro){
   var motivo = prompt('¿Por qué se anula la factura ' + nro + '?\n\n'
     + 'Se da de baja el comprobante y se anula su asiento. La partida vuelve a quedar '
