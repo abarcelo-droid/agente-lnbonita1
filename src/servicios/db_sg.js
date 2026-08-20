@@ -1439,6 +1439,21 @@ try {
   // Sólo tiene sentido con flete_a_cargo='vendedor'. Sin CHECK inline, que es
   // límite del ALTER; el valor se valida en el endpoint.
   if (!cols.includes('flete_pagado_por')) { db.exec('ALTER TABLE sg_oc ADD COLUMN flete_pagado_por TEXT'); faltan.push('flete_pagado_por'); }
+  // ── LO QUE EL COMERCIAL ESPERA SACAR POR ESTA MERCADERÍA ────────────────
+  // Sólo tiene sentido en Liquidación de Venta, que es el caso donde el precio
+  // se cierra DESPUÉS: hasta entonces la orden no tiene ningún número, y el
+  // comercial no tiene contra qué comparar ni con qué decidir.
+  //
+  // Es INFORMATIVO: no suma al total, no arma deuda, no toca ningún asiento.
+  // Es la expectativa con la que se trajo la mercadería, escrita donde se pueda
+  // leer después — hoy vive en un chat de WhatsApp.
+  try {
+    const colsIt = db.prepare('PRAGMA table_info(sg_oc_items)').all().map((c) => c.name);
+    if (!colsIt.includes('precio_referencia_venta')) {
+      db.exec('ALTER TABLE sg_oc_items ADD COLUMN precio_referencia_venta REAL');
+      console.log('[DB] SG sg_oc_items.precio_referencia_venta agregado');
+    }
+  } catch (e) { console.error('[DB] SG precio_referencia_venta:', e.message); }
   if (!cols.includes('flete_monto'))   { db.exec('ALTER TABLE sg_oc ADD COLUMN flete_monto REAL');   faltan.push('flete_monto'); }
   if (faltan.length) console.log('[DB] SG sg_oc migrado (+' + faltan.join(', +') + ')');
 } catch (e) {

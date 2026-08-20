@@ -4281,13 +4281,24 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
       <button class="mcl" onclick="closeMB('sg-oc-modal')">×</button>
     </div>
     <div class="fg">
-      <!-- Modalidad como tabs -->
-      <div class="fl ff"><label>Modalidad</label>
+      <!-- ══ LO PRIMERO: ¿CÓMO SE PACTÓ EL PRECIO? ══════════════════════
+           Acá estaba MODALIDAD —Normal / Rápida / Finca propia—. Rápida se
+           sacó porque no se usa, y Finca propia porque NO ES UNA COMPRA: no hay
+           proveedor a quien deberle, no entra factura y no mueve cuenta
+           corriente. Se va a hacer con su propio circuito.
+           Sin esas dos, MODALIDAD quedaba con una sola opción, y un selector de
+           una sola opción no es un selector.
+
+           En su lugar va lo que de verdad se define primero: cómo se acordó el
+           precio con el productor. El comprobante es CÓMO SE INSTRUMENTA eso, y
+           por eso viene después. Estaba al revés, y por estar al revés obligaba:
+           elegir "recibimos factura" dejaba Liquidación de Venta en gris. -->
+      <div class="fl ff"><label>¿Cómo se pactó el precio? <span style="color:var(--err)">*</span></label>
         <div class="sg-seg" role="radiogroup" style="margin-top:2px;flex-wrap:wrap">
-          <label class="sg-seg-btn"><input type="radio" name="sg-oc-mod" value="normal" checked> Normal</label>
-          <label class="sg-seg-btn"><input type="radio" name="sg-oc-mod" value="rapida"> Rápida</label>
-          <label class="sg-seg-btn"><input type="radio" name="sg-oc-mod" value="finca_propia"> Finca propia</label>
+          <label class="sg-seg-btn"><input type="radio" name="sg-oc-precio" value="firme" checked onchange="sgOcPrecioChange()"> 💰 Precio cerrado</label>
+          <label class="sg-seg-btn"><input type="radio" name="sg-oc-precio" value="pizarra" onchange="sgOcPrecioChange()"> 📊 Liquidación de venta</label>
         </div>
+        <div id="sg-oc-precio-ayuda" style="font-size:11.5px;color:var(--mut);margin-top:4px"></div>
       </div>
 
       <!-- Los tres recuadros de cabecera, en una fila que se acomoda al ancho.
@@ -4312,12 +4323,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
           </div>
           <div class="fl"><label>Proveedor <span style="color:var(--err)">*</span></label><select id="sg-oc-prov" onchange="sgOcProvChange()"></select></div>
           <div class="fl"><label>Comprobante Fiscal</label><select id="sg-oc-fiscal" onchange="sgOcFiscalChange()"></select></div>
-          <div class="fl" id="sg-oc-cond-com"><label>Condiciones Comerciales</label>
-            <div class="sg-seg" role="radiogroup" style="margin-top:2px;flex-wrap:wrap">
-              <label class="sg-seg-btn"><input type="radio" name="sg-oc-precio" value="firme" checked onchange="sgOcPrecioChange()"> Precio Cerrado</label>
-              <label class="sg-seg-btn"><input type="radio" name="sg-oc-precio" value="pizarra" onchange="sgOcPrecioChange()"> Liquidación de Venta</label>
-            </div>
-          </div>
+
           <div class="fl"><label>Condición de pago</label><select id="sg-oc-cond"></select></div>
         </div>
       </div>
@@ -4379,7 +4385,11 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
            familia del producto; acá el comercial solo dice si el $/kg ya incluye IVA o no. -->
       <div class="fl ff" id="sg-oc-iva-box" style="display:none">
         <div style="border:1px solid var(--bor);border-radius:8px;padding:10px;background:rgba(20,60,120,.05)">
-          <div style="font-weight:600;font-size:12px;margin-bottom:6px">💵 IVA — Factura A <span style="font-weight:400;color:var(--mut)">· alícuota heredada de la familia de cada producto</span></div>
+          <!-- EL IVA NO ES SÓLO DE LA FACTURA. La liquidación que emitimos
+               también lo lleva, y el rótulo fijo "Factura A" hacía pensar que
+               esto sólo contaba si recibíamos factura. Ahora dice el
+               comprobante que corresponde. -->
+          <div style="font-weight:600;font-size:12px;margin-bottom:6px">💵 IVA — <span id="sg-oc-iva-tit">Factura A</span> <span style="font-weight:400;color:var(--mut)">· alícuota heredada de la familia de cada producto</span></div>
           <label style="margin-right:18px;font-weight:500"><input type="radio" name="sg-oc-inciva" value="si" checked onchange="sgOcTotales()" style="width:auto"> El precio ya incluye IVA</label>
           <label style="font-weight:500"><input type="radio" name="sg-oc-inciva" value="no" onchange="sgOcTotales()" style="width:auto"> El precio no incluye IVA (se adiciona)</label>
         </div>
@@ -8642,7 +8652,6 @@ function sgOcOpen(){
   SG._fleteCantManual=false;
   var ivaF=document.querySelector('input[name="sg-oc-flete-iva"]:checked'); if(ivaF) ivaF.checked=false;
   sgOcFleteModo();
-  document.querySelector('input[name="sg-oc-mod"][value="normal"]').checked=true;
   document.querySelector('input[name="sg-oc-precio"][value="firme"]').checked=true;
   var docF=document.querySelector('input[name="sg-oc-doc"][value="factura"]');
   if(docF) docF.checked=true;
@@ -8693,11 +8702,15 @@ function sgOcProvChange(){
 }
 function sgOcPrecio(){ return document.querySelector('input[name="sg-oc-precio"]:checked').value; }
 
-// ── ¿LIQUIDAMOS O RECIBIMOS FACTURA? ────────────────────────────────────
-// Es lo primero que se define y de ahí sale todo: si se recibe factura, la
-// condición es SIEMPRE precio cerrado —no hay factura de compra a precio de
-// pizarra— y la partida va a "pendiente de facturar". Si se liquida, puede ser
-// a precio cerrado o de pizarra, y va a "pendiente de liquidar".
+// ── CÓMO SE DOCUMENTA LA COMPRA ─────────────────────────────────────────
+// Ya NO decide el precio. Antes forzaba: "con factura la condición es siempre
+// precio cerrado", y eso dejaba Liquidación de Venta en gris — con lo cual una
+// compra acordada a liquidación cuyo productor igual emite factura no se podía
+// cargar como era.
+//
+// Lo que sí decide es a qué bandeja va la partida cuando se recibe:
+//   recibimos factura   → Facturas por mercadería
+//   emitimos liquidación → Partidas pendientes de liquidar
 function sgOcDoc(){
   var el = document.querySelector('input[name="sg-oc-doc"]:checked');
   return el ? el.value : 'factura';
@@ -8705,24 +8718,24 @@ function sgOcDoc(){
 
 function sgOcDocChange(){
   var doc = sgOcDoc();
-  var caja = eid('sg-oc-cond-com');
   var ayuda = eid('sg-oc-doc-ayuda');
-  if (doc === 'factura') {
-    // Con factura no hay elección: precio cerrado. Se muestra igual, para que
-    // se vea con qué queda, pero no se puede tocar.
-    var firme = document.querySelector('input[name="sg-oc-precio"][value="firme"]');
-    if (firme) firme.checked = true;
-    if (caja) caja.style.opacity = '.55';
-    document.querySelectorAll('input[name="sg-oc-precio"]').forEach(function(r){ r.disabled = true; });
-    if (ayuda) ayuda.textContent = 'Con factura de compra la condición es siempre Precio Cerrado. '
-      + 'Al recibirse, la partida va a Facturas por mercadería.';
-  } else {
-    if (caja) caja.style.opacity = '';
-    document.querySelectorAll('input[name="sg-oc-precio"]').forEach(function(r){ r.disabled = false; });
-    if (ayuda) ayuda.textContent = 'Al recibirse, la partida va a Partidas pendientes de liquidar. '
-      + 'La liquidación puede ser a Precio Cerrado o a Precio de Pizarra.';
-  }
+  // Las CUATRO combinaciones son válidas. Lo único que cambia acá es a qué
+  // bandeja va la partida después de recibirse.
+  if (ayuda) ayuda.textContent = (doc === 'factura')
+    ? 'Al recibirse, la partida va a Facturas por mercadería, esperando la factura del proveedor.'
+    : 'Al recibirse, la partida va a Partidas pendientes de liquidar.';
   sgOcPrecioChange();
+}
+
+// QUÉ IMPLICA CÓMO SE PACTÓ EL PRECIO. Con precio cerrado el número está desde
+// el principio; con liquidación de venta se cierra cuando la mercadería se
+// vendió, y hasta entonces la orden no tiene monto.
+function sgOcPrecioAyuda(){
+  var ay = eid('sg-oc-precio-ayuda'); if (!ay) return;
+  ay.innerHTML = (sgOcPrecio() === 'firme')
+    ? 'El precio está acordado desde ahora: la orden ya tiene monto y vencimientos.'
+    : 'El precio se cierra <b>después</b>, cuando se vendió la mercadería. La orden entra sin monto; '
+      + 'en cada ítem se puede dejar el <b>precio de referencia</b> que espera el comercial.';
 }
 // ── EL COMPROBANTE SALE DE CÓMO SE DOCUMENTA LA COMPRA ────────────────────
 // Antes salía de la CONDICIÓN COMERCIAL, y ahí estaba la ambigüedad: Precio
@@ -8862,12 +8875,22 @@ function sgOcFleteCalc(){
     : '';
 }
 
-function sgOcPrecioChange(){ sgOcFiscalOpts(); sgOcUpdIvaBox(); sgOcRenderItems(); }
+function sgOcPrecioChange(){ sgOcPrecioAyuda(); sgOcFiscalOpts(); sgOcUpdIvaBox(); sgOcRenderItems(); }
 // ── IVA Fase 2 — helpers de discriminación en la OC ──
 // Discrimina solo con Factura A + Precio Cerrado (firme). Liquidación/pizarra: no discrimina.
-function sgOcDiscrimina(){ return sgOcPrecio()==='firme' && eid('sg-oc-fiscal').value==='factura_a'; }
+// EL IVA NO ES SÓLO DE LA FACTURA: la liquidación que emitimos también lo
+// lleva. Factura B queda afuera porque no discrimina —siempre va incluido— y la
+// pizarra también, porque todavía no hay precio al que aplicarle nada.
+function sgOcDiscrimina(){
+  var f = (eid('sg-oc-fiscal')||{}).value;
+  return sgOcPrecio()==='firme' && (f==='factura_a' || f==='liquidacion');
+}
 function sgOcIncluyeIva(){ var el=document.querySelector('input[name="sg-oc-inciva"]:checked'); return el ? el.value==='si' : true; }
-function sgOcUpdIvaBox(){ var b=eid('sg-oc-iva-box'); if(b) b.style.display=sgOcDiscrimina()?'block':'none'; }
+function sgOcUpdIvaBox(){
+  var b=eid('sg-oc-iva-box'); if(b) b.style.display=sgOcDiscrimina()?'block':'none';
+  var t=eid('sg-oc-iva-tit');
+  if(t) t.textContent = ((eid('sg-oc-fiscal')||{}).value==='liquidacion') ? 'Liquidación' : 'Factura A';
+}
 function sgOcFiscalChange(){ sgOcUpdIvaBox(); sgOcTotales(); }
 // Alícuota de IVA heredada de la familia del producto (vía familia_id → SG.cacheFam).
 function sgFamAlic(producto_id){
@@ -8876,7 +8899,7 @@ function sgFamAlic(producto_id){
   var f=(SG.cacheFam||[]).find(function(x){return String(x.id)===String(p.familia_id);});
   return (f && f.iva_alicuota!=null && f.iva_alicuota!=='') ? Number(f.iva_alicuota) : null;
 }
-function sgOcAddItem(){ SG.ocItems.push({producto_id:'',presentacion_id:'',cantidad:'',precio:'',modo:'bulto',q:''}); sgOcRenderItems(); }
+function sgOcAddItem(){ SG.ocItems.push({producto_id:'',presentacion_id:'',cantidad:'',precio:'',precio_ref:'',modo:'bulto',q:''}); sgOcRenderItems(); }
 function sgOcDelItem(i){ SG.ocItems.splice(i,1); sgOcRenderItems(); }
 function sgOcUpd(i,c,v){ SG.ocItems[i][c]=v; if(c==='producto_id')SG.ocItems[i].presentacion_id=''; sgOcRenderItems(); }
 function sgOcUpdNR(i,c,v){ SG.ocItems[i][c]=v; sgOcTotales(); }
@@ -9006,7 +9029,13 @@ function sgOcRenderItems(){
       +'<div class="sg-oc-card-bot">'
         +modoBtns
         +'<input type="text" inputmode="numeric" placeholder="'+cantPh+'" value="'+sgMilShow(it.cantidad)+'" oninput="sgOcMilInput(this,'+i+',\'cantidad\')">'
-        +(firme?'<input type="text" inputmode="numeric" placeholder="'+precioPh+'" value="'+sgMilShow(it.precio)+'" oninput="sgOcMilInput(this,'+i+',\'precio\')">':'<span style="font-size:11px;color:var(--mut)">pizarra</span>')
+        // EN LIQUIDACIÓN DE VENTA EL PRECIO SE CIERRA DESPUÉS, así que acá no
+        // hay número: en su lugar va lo que el comercial ESPERA sacar. Es
+        // informativo —no suma al total ni arma deuda— pero es el dato con el
+        // que después se compara si la operación dio lo que se pensaba. Hoy eso
+        // vive en un chat de WhatsApp.
+        +(firme?'<input type="text" inputmode="numeric" placeholder="'+precioPh+'" value="'+sgMilShow(it.precio)+'" oninput="sgOcMilInput(this,'+i+',\'precio\')">'
+               :'<input type="text" inputmode="numeric" placeholder="ref. venta '+(bulto?'$/bulto':'$/kg')+'" title="Precio de referencia de venta — informativo, no suma al total" value="'+sgMilShow(it.precio_ref)+'" oninput="sgOcMilInput(this,'+i+',\'precio_ref\')">')
         +'<span class="sg-oc-monto" id="sg-oc-sub-'+i+'"></span>'
       +'</div>'
     +'</div>';
@@ -9055,7 +9084,9 @@ function sgOcGuardar(){
   var items=SG.ocItems.filter(function(it){return it.producto_id && Number(it.cantidad)>0;});
   if(!items.length){ toast('Agregá un item con cantidad','er'); return; }
   var firme=sgOcPrecio()==='firme';
-  var body={ modalidad:document.querySelector('input[name="sg-oc-mod"]:checked').value, proveedor_id:Number(prov),
+  // MODALIDAD ya no se pregunta: toda orden cargada desde acá es normal. Las
+  // 'retroactiva' las sigue creando el ingreso sin orden, desde el backend.
+  var body={ modalidad:'normal', proveedor_id:Number(prov),
     tipo_fiscal:eid('sg-oc-fiscal').value, tipo_precio:sgOcPrecio(), documenta:sgOcDoc(), condicion_pago_id:eid('sg-oc-cond').value?Number(eid('sg-oc-cond').value):null,
     fecha_oc:eid('sg-oc-fecha').value, fecha_recepcion_estimada:eid('sg-oc-fecharec').value, observaciones:eid('sg-oc-obs').value,
     flete_a_cargo:eid('sg-oc-flete-cargo').value||null,
@@ -9076,6 +9107,9 @@ function sgOcGuardar(){
     // quedan 100% en kg. modo_carga solo registra cómo lo cargó el operador.
     items:items.map(function(it){
       var factor=sgOcFactor(it), cant=Number(it.cantidad)||0, bulto=it.modo==='bulto';
+      // Informativo: viaja para que el que liquide después sepa con qué
+      // expectativa se trajo la mercadería. No entra en ningún total.
+      var refV=(!firme && it.precio_ref!=='' && it.precio_ref!=null) ? Number(it.precio_ref) : null;
       var kg = bulto ? cant*factor : cant;
       var precio = (firme && it.precio!=='' && it.precio!=null) ? Number(it.precio) : null;
       var precioKg = precio==null ? null : (bulto ? (factor>0?precio/factor:precio) : precio);  // $/bulto → $/kg
@@ -9086,6 +9120,10 @@ function sgOcGuardar(){
         envase_id:(it.envase_id!=null && it.envase_id!=='')?Number(it.envase_id):null,
         kg_por_bulto:(it.kg_por_bulto!=null && it.kg_por_bulto!=='')?Number(it.kg_por_bulto):null,
         cantidad_estimada_presentaciones:presCant, kg_estimados:kg, precio_estimado_por_kg:precioKg,
+        // Se guarda SIEMPRE en $/kg, igual que el precio de verdad: si se
+        // guardara tal como se tipeo, uno cargado por bulto y otro por kilo
+        // serian numeros incomparables en la misma columna.
+        precio_referencia_venta: refV==null ? null : (bulto ? (factor>0?refV/factor:refV) : refV),
         modo_carga: bulto ? 'bulto' : 'kilo' }; }) };
   api('/api/sg/oc','POST',body).then(function(r){
     if(r&&r.ok){ toast('OC creada','ok'); closeMB('sg-oc-modal'); sgLoadOC(); }
