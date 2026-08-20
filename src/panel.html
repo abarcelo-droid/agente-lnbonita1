@@ -2299,7 +2299,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
       <div class="sgc-subtab" data-sub="ocrecibidas" onclick="sgComSub('ocrecibidas')">✅ OC recibidas</div>
       <!-- Lo que entró sin orden. El contador va al lado porque es una bandeja
            de trabajo pendiente: mientras tenga número, hay compras a medio hacer. -->
-      <div class="sgc-subtab" data-sub="sinorden" onclick="sgComSub('sinorden')">⚡ Ingresó sin orden<span class="liq-cnt" id="sg-so-cnt">·</span></div>
+      <div class="sgc-subtab" data-sub="sinorden" onclick="sgComSub('sinorden')">⚡ Ingresó sin orden <span class="liq-cnt" id="sg-so-cnt"></span></div>
       <div class="sgc-subtab" data-sub="gdirectos"    onclick="sgComSub('gdirectos')">🧾 Gastos directos</div>
     </div>
 
@@ -2338,7 +2338,6 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
           </select>
         </label>
         <div style="display:flex;gap:8px">
-          <button class="btn bo" onclick="sgRetroOpen()" title="Entró mercadería sin orden de compra">⚡ Recibir sin orden</button>
           <button class="btn bb" onclick="sgOcOpen()">+ Nueva OC</button>
         </div>
       </div>
@@ -2395,7 +2394,13 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
         <div style="font-weight:700;font-size:12px;text-transform:uppercase;letter-spacing:.04em;color:var(--mut)">
           ⏳ Pendientes de recibir <span id="sg-pend-n" style="font-weight:400;text-transform:none;letter-spacing:0"></span>
         </div>
-        <button class="btn bb" onclick="sgRecOpen()">+ Recibir mercadería</button>
+        <div style="display:flex;gap:8px">
+          <!-- ENTRÓ UN CAMIÓN SIN ORDEN: se recibe igual. El botón estaba en la
+               solapa de Órdenes de compra, que es la de lo que TODAVÍA NO LLEGÓ.
+               Esto es una recepción — la mercadería ya está adentro. -->
+          <button class="btn bo" onclick="sgRetroOpen()" title="Entró un camión sin orden de compra">⚡ Recibir sin orden</button>
+          <button class="btn bb" onclick="sgRecOpen()">+ Recibir mercadería</button>
+        </div>
       </div>
       <div class="ab-table-wrap" style="margin-bottom:22px"><table class="pa-tbl">
         <thead><tr><th>Partida</th><th>Fecha</th><th>Proveedor</th><th>Producto</th>
@@ -2499,6 +2504,14 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
       <label style="font-size:12px;color:var(--mut)">Categoría<br>
         <select id="sg-st-fam" onchange="sgLoadStock()" style="padding:5px 8px;border-radius:6px;border:1px solid var(--bor);background:var(--bg);min-width:130px"><option value="">Todas</option></select>
       </label>
+      <!-- EL PISO ES UN DATO DEL STOCK, no de otra pantalla. Preguntarle al
+           stock QUÉ hay y tener que ir a otro lado a preguntar DÓNDE ESTÁ es
+           partir en dos la misma respuesta. -->
+      <label style="font-size:12px;color:var(--mut)">Piso<br>
+        <select id="sg-st-piso" onchange="sgLoadStock()" style="padding:5px 8px;border-radius:6px;border:1px solid var(--bor);background:var(--bg);min-width:130px">
+          <option value="">Todos</option><option value="sin">— sin ubicar —</option>
+        </select>
+      </label>
       <label style="font-size:12px;color:var(--mut)">Vence en (días)<br>
         <input type="number" id="sg-st-venc" placeholder="ej 5" onchange="sgLoadStock()" style="width:80px;padding:5px 8px;border-radius:6px;border:1px solid var(--bor);background:var(--bg)">
       </label>
@@ -2508,8 +2521,8 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
       <button class="btn bb bs" onclick="sgApertOpen()" title="Cargar stock físico al corte (apertura)">📥 Carga inicial</button>
     </div>
     <div class="ab-table-wrap"><table class="pa-tbl">
-      <thead><tr><th style="text-align:center" title="Semáforo">🚦</th><th>Producto</th><th>Categoría</th><th style="text-align:right">Kg disp</th><th>Calidad</th><th>Vence (días)</th><th style="text-align:right">Costo/kg</th><th style="text-align:center">Estado</th><th></th></tr></thead>
-      <tbody id="sg-tb-stock"><tr><td colspan="9" class="emp">Cargando…</td></tr></tbody>
+      <thead><tr><th style="text-align:center" title="Semáforo">🚦</th><th>Producto</th><th>Categoría</th><th style="text-align:right">Kg disp</th><th>Piso</th><th>Calidad</th><th>Vence (días)</th><th style="text-align:right">Costo/kg</th><th style="text-align:center">Estado</th><th></th></tr></thead>
+      <tbody id="sg-tb-stock"><tr><td colspan="10" class="emp">Cargando…</td></tr></tbody>
     </table></div>
   </div>
   <div class="sec sg-mod" id="sec-sg-ventas">
@@ -4895,23 +4908,27 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
       <!-- EL PROVEEDOR NO ES UN DATO MÁS: el número de partida se arma con el
            proveedor y la fecha (0034.12.08.2026.03). Sin eso la descarga no se
            puede rastrear, ni facturar, ni reclamar. -->
-      <div style="font-size:12px;color:var(--mut);margin-bottom:4px">
-        Entró un camión sin orden. Se recibe igual: decí de quién es y de qué día,
-        que con eso se numera la partida. Después el comprador completa la compra
-        desde <b>Ingresó sin orden</b>.</div>
-      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">
+<!-- SE PIDE LO QUE SE SABE EN EL MOMENTO, Y NADA MÁS.
+           El que recibe a las cinco de la mañana sabe QUÉ bajó y CUÁNTO. No sabe
+           a qué precio se pactó, ni en cuántos días se paga, ni si va a venir
+           factura o se va a liquidar. Pedirle eso es pedirle que invente, y un
+           dato inventado ensucia más que un dato ausente.
+
+           EL PROVEEDOR SÍ SE PIDE: el número de partida se arma con el proveedor
+           y la fecha (0034.12.08.2026.03). Sin eso la descarga no se puede
+           rastrear, ni facturar, ni reclamar — y numerarla después le cambiaría
+           el número a una partida que ya se movió.
+
+           La FECHA es la de hoy: es el día que entró el camión, no hace falta
+           preguntarlo. -->
+      <div style="font-size:12px;color:var(--mut);margin-bottom:8px">
+        Entró un camión sin orden. Se recibe igual: alcanza con <b>de quién es</b>,
+        <b>qué bajó</b> y <b>cuánto</b>. El precio y la forma de pago los completa
+        el comprador después, desde el listado de <b>Órdenes de compra</b>.</div>
+      <div style="display:grid;grid-template-columns:1fr;gap:10px">
         <div class="fl"><label>Proveedor <span style="color:var(--err)">*</span></label><select id="sg-retro-prov"></select></div>
-        <div class="fl"><label>Tipo de precio</label>
-          <div style="display:flex;gap:14px;padding:6px 0">
-            <label style="font-weight:500"><input type="radio" name="sg-retro-precio" value="firme" checked onchange="sgRetroPrecioChange()" style="width:auto"> Firme</label>
-            <label style="font-weight:500"><input type="radio" name="sg-retro-precio" value="pizarra" onchange="sgRetroPrecioChange()" style="width:auto"> Pizarra</label>
-          </div>
-        </div>
-        <div class="fl"><label>Fecha</label><input type="date" id="sg-retro-fecha"></div>
-        <div class="fl"><label>N° remito proveedor</label><input id="sg-retro-remito"></div>
-        <div class="fl" style="grid-column:span 2"><label>Condición de pago</label><select id="sg-retro-cond"></select></div>
       </div>
-      <div class="fl ff" style="margin-top:8px"><label>Items (cada uno con sus lotes/calidades)</label>
+      <div class="fl ff" style="margin-top:8px"><label>¿Qué bajó?</label>
         <div id="sg-retro-items"></div>
         <button class="btn bo bs" style="margin-top:6px" onclick="sgRetroAddItem()">+ Agregar item</button>
       </div>
@@ -8610,6 +8627,17 @@ function sgOcImporte(o){
 // llegó la mercadería, que no es un pendiente de nadie acá.
 function sgOcSituacion(o){
   if (o.estado === 'anulada')          return ['ber', 'Anulada'];
+  // ── LO QUE ENTRÓ SIN ORDEN, ANTES QUE NADA ─────────────────────────────
+  // La mercadería ya está adentro: lo que falta no es el camión, es la parte
+  // COMERCIAL. El que recibió a las cinco de la mañana sabe qué bajó y cuánto,
+  // no a qué precio se pactó — y hasta ahora eso vivía en una solapa aparte que
+  // el comprador tenía que acordarse de mirar.
+  //
+  // Va primero porque manda sobre cualquier otro estado: mientras no tenga
+  // precio, decir "falta la factura" es mandar a facturar algo sin importe.
+  if (o.modalidad === 'retroactiva' && !o.completada_en && (Number(o.items_sin_precio) || 0) > 0) {
+    return ['bfs', '⚡ Falta completar'];
+  }
   if (o.estado === 'borrador')         return ['bpe', 'Borrador'];
   if (o.estado === 'abierta') {
     // Una orden abierta CON mercadería adentro es una que se reabrió. Decir
@@ -8674,6 +8702,12 @@ function sgOcPintar(){
   {
     eid('sg-tb-oc').innerHTML = rows.length ? rows.map(function(o){
       var acc='<button class="btn bo bs" onclick="sgOcVer('+o.id+')">👁</button> ';
+      // COMPLETARLA DESDE ACÁ. El comprador ya está mirando este listado: sacarlo
+      // a otra pantalla para poner un precio es lo que hacía que las órdenes sin
+      // orden se quedaran meses sin completar.
+      if (o.modalidad === 'retroactiva' && !o.completada_en && (Number(o.items_sin_precio) || 0) > 0) {
+        acc += '<button class="btn bb bs" onclick="sgSoOpen('+o.id+')">Completar</button> ';
+      }
       if(o.estado==='abierta'||o.estado==='recibida_parcial') acc+='<button class="btn bo bs" onclick="sgRecOpen('+o.id+')">📥</button> ';
       if(o.estado==='abierta' && lnbPuedeAnular('sg-compras'))
         acc+='<button class="btn bd bs" title="Anular la orden" onclick="sgOcAnular('+o.id+')">✖</button>';
@@ -11638,7 +11672,9 @@ function sgLoadSinOrden(){
   api('/api/sg/oc/sin-orden' + todas).then(function(r){
     SG_SO.filas = (r && r.ok) ? r.data : [];
     var cnt = eid('sg-so-cnt');
-    if (cnt) cnt.textContent = (r && r.ok) ? String(r.pendientes) : '·';
+    // EN CERO NO SE MUESTRA NADA. Pegado al nombre, el "0" se leía como parte
+    // del texto: la solapa decía "Ingresó sin orden0".
+    if (cnt) cnt.textContent = (r && r.ok && r.pendientes > 0) ? String(r.pendientes) : '';
     sgSoPintar();
   });
 }
@@ -11803,40 +11839,42 @@ function sgSoGuardar(){
 function sgRetroOpen(){
   SG.retroItems=[];
   eid('sg-retro-prov').innerHTML=sgOpts(SG.cacheProv,'razon_social','','— Elegir —');
-  eid('sg-retro-cond').innerHTML=sgOpts(SG.cacheCond,'nombre','','— Sin condición —');
-  eid('sg-retro-fecha').value=new Date().toISOString().slice(0,10);
-  eid('sg-retro-remito').value=''; eid('sg-retro-obs').value='';
-  document.querySelector('input[name="sg-retro-precio"][value="firme"]').checked=true;
+  eid('sg-retro-obs').value='';
   sgRetroAddItem();
   eid('sg-retro-modal').classList.add('on');
 }
-function sgRetroPrecio(){ return document.querySelector('input[name="sg-retro-precio"]:checked').value; }
+// El tipo de precio salio de este modal: lo define el comprador al completar la
+// orden. Se deja la funcion porque sgRetroPrecioChange sigue existiendo como
+// enganche, y devuelve el valor con el que nace la orden.
+function sgRetroPrecio(){ return 'firme'; }
 function sgRetroPrecioChange(){ sgRetroRender(); }
-function sgRetroAddItem(){ SG.retroItems.push({producto_id:'',presentacion_id:'',precio:'',lotes:[{kg_reales:'',calidad:'',calibre:'',origen:''}]}); sgRetroRender(); }
+function sgRetroAddItem(){ SG.retroItems.push({producto_id:'',lotes:[{bultos:'',kg_por_bulto:'',calidad:''}]}); sgRetroRender(); }
 function sgRetroDelItem(i){ SG.retroItems.splice(i,1); sgRetroRender(); }
 function sgRetroUpd(i,c,v){ SG.retroItems[i][c]=v; if(c==='producto_id')SG.retroItems[i].presentacion_id=''; sgRetroRender(); }
 function sgRetroUpdNR(i,c,v){ SG.retroItems[i][c]=v; }
-function sgRetroAddLote(i){ SG.retroItems[i].lotes.push({kg_reales:'',calidad:'',calibre:'',origen:''}); sgRetroRender(); }
+function sgRetroAddLote(i){ SG.retroItems[i].lotes.push({bultos:'',kg_por_bulto:'',calidad:''}); sgRetroRender(); }
 function sgRetroDelLote(i,j){ SG.retroItems[i].lotes.splice(j,1); sgRetroRender(); }
 function sgRetroUpdLote(i,j,c,v){ SG.retroItems[i].lotes[j][c]=v; }
 function sgRetroRender(){
-  var firme=sgRetroPrecio()==='firme';
   eid('sg-retro-items').innerHTML=SG.retroItems.map(function(it,i){
+    // CANTIDAD DE BULTOS Y KG POR BULTO. Los kilos se derivan: es la cuenta que
+    // hace el sistema en todos lados, y pedirle al que recibe que la haga a mano
+    // es pedirle que se equivoque. El peso ES obligatorio: una partida en 0 kg no
+    // se puede costear, no cierra la orden y queda de fantasma en la planilla.
     var lotesH=it.lotes.map(function(lt,j){
-      var calOpts=['','primera','segunda','tercera'].map(function(c){return '<option value="'+c+'"'+(c===lt.calidad?' selected':'')+'>'+(c||'(calidad)')+'</option>';}).join('');
-      return '<div style="display:grid;grid-template-columns:0.9fr 1fr 1fr 1.2fr auto;gap:6px;margin-bottom:5px">'
-        +'<input type="number" placeholder="kg" value="'+(lt.kg_reales||'')+'" onchange="sgRetroUpdLote('+i+','+j+',\'kg_reales\',this.value)">'
-        +'<select onchange="sgRetroUpdLote('+i+','+j+',\'calidad\',this.value)">'+calOpts+'</select>'
-        +'<input placeholder="calibre" value="'+(lt.calibre||'')+'" onchange="sgRetroUpdLote('+i+','+j+',\'calibre\',this.value)">'
-        +'<input placeholder="origen" value="'+(lt.origen||'')+'" onchange="sgRetroUpdLote('+i+','+j+',\'origen\',this.value)">'
+      var b=Number(lt.bultos)||0, k=Number(lt.kg_por_bulto)||0;
+      return '<div style="display:grid;grid-template-columns:1fr 1fr auto;gap:6px;margin-bottom:5px;align-items:center">'
+        +'<input type="number" placeholder="cantidad de bultos" value="'+(lt.bultos||'')+'" onchange="sgRetroUpdLote('+i+','+j+',\'bultos\',this.value)">'
+        +'<input type="number" step="0.01" placeholder="kg por bulto" value="'+(lt.kg_por_bulto||'')+'" onchange="sgRetroUpdLote('+i+','+j+',\'kg_por_bulto\',this.value)">'
         +(it.lotes.length>1?'<button class="btn bd bs" onclick="sgRetroDelLote('+i+','+j+')">×</button>':'<span></span>')
+        +'<div style="grid-column:1/-1;font-size:11px;color:var(--mut);margin-top:-2px">'
+          +((b>0&&k>0)?('= <b>'+nr(b*k)+' kg</b>'):'poné los bultos y cuánto pesa cada uno')
+        +'</div>'
         +'</div>';
     }).join('');
     return '<div style="border:1px solid var(--bor);border-radius:8px;padding:10px;margin-bottom:8px">'
-      +'<div style="display:grid;grid-template-columns:2fr 1.4fr '+(firme?'1fr ':'')+'auto;gap:6px;margin-bottom:6px;align-items:center">'
+      +'<div style="display:grid;grid-template-columns:2fr auto;gap:6px;margin-bottom:6px;align-items:center">'
       +'<select onchange="sgRetroUpd('+i+',\'producto_id\',this.value)">'+sgOpts(SG.cacheProd,'nombre',it.producto_id,'— Producto —')+'</select>'
-      +'<select onchange="sgRetroUpdNR('+i+',\'presentacion_id\',this.value)">'+sgOpts(sgPresDe(it.producto_id),'nombre',it.presentacion_id,'— Present. —')+'</select>'
-      +(firme?'<input type="number" placeholder="$/kg" value="'+(it.precio||'')+'" onchange="sgRetroUpdNR('+i+',\'precio\',this.value)">':'')
       +(SG.retroItems.length>1?'<button class="btn bd bs" onclick="sgRetroDelItem('+i+')">×</button>':'<span></span>')
       +'</div>'+lotesH
       +'<button class="btn bo bs" onclick="sgRetroAddLote('+i+')">+ dividir por calidad</button>'
@@ -11846,17 +11884,26 @@ function sgRetroRender(){
 function sgRetroGuardar(){
   var prov=eid('sg-retro-prov').value;
   if(!prov){ toast('Elegí proveedor','er'); return; }
-  var firme=sgRetroPrecio()==='firme', items=[];
+  var items=[];
   SG.retroItems.forEach(function(it){
     if(!it.producto_id) return;
-    var lotes=it.lotes.filter(function(l){return Number(l.kg_reales)>0;});
+    // LOS KILOS SE DERIVAN de bultos × kg por bulto: es la cuenta que hace el
+    // sistema en todos lados, y pedirle al que recibe que la haga a mano es
+    // pedirle que se equivoque.
+    var lotes=it.lotes.filter(function(l){ return Number(l.bultos)>0 && Number(l.kg_por_bulto)>0; });
     if(!lotes.length) return;
-    items.push({ producto_id:Number(it.producto_id), presentacion_id:it.presentacion_id?Number(it.presentacion_id):null, precio_por_kg:(firme&&it.precio!=='')?Number(it.precio):null, lotes:lotes.map(function(l){return {kg_reales:Number(l.kg_reales),calidad:l.calidad||null,calibre:l.calibre||null,origen:l.origen||null};}) });
+    items.push({ producto_id:Number(it.producto_id),
+      lotes:lotes.map(function(l){ return {
+        bultos:Number(l.bultos), kg_por_bulto:Number(l.kg_por_bulto),
+        kg_reales:+(Number(l.bultos)*Number(l.kg_por_bulto)).toFixed(4),
+        calidad:l.calidad||null }; }) });
   });
-  if(!items.length){ toast('Cargá un item con lote','er'); return; }
-  var body={ proveedor_id:Number(prov), tipo_precio:sgRetroPrecio(), condicion_pago_id:eid('sg-retro-cond').value?Number(eid('sg-retro-cond').value):null, fecha:eid('sg-retro-fecha').value, numero_remito_proveedor:eid('sg-retro-remito').value, observaciones:eid('sg-retro-obs').value, items:items };
+  if(!items.length){ toast('Poné qué bajó, cuántos bultos y cuánto pesa cada uno','er'); return; }
+  // El PRECIO, la CONDICIÓN y CÓMO SE DOCUMENTA no se piden: los completa el
+  // comprador después. La fecha es la de hoy, que es el día que entró el camión.
+  var body={ proveedor_id:Number(prov), observaciones:eid('sg-retro-obs').value, items:items };
   api('/api/sg/compra-retroactiva','POST',body).then(function(r){
-    if(r&&r.ok){ toast('Mercadería recibida — completá la orden desde «Ingresó sin orden»','ok');
+    if(r&&r.ok){ toast('Mercadería recibida — queda en Órdenes de compra para completar','ok');
       closeMB('sg-retro-modal'); sgLoadOC(); sgLoadPendientesRecibir(); sgLoadSinOrden(); }
     else toast((r&&r.error)||'Error','er');
   });
@@ -12095,11 +12142,18 @@ function sgStockInit(){
     // Categoría = familia del producto (catálogo de familias). Valor = nombre denormalizado en producto.
     var fam=eid('sg-st-fam');
     if(fam){ var fv=fam.value; fam.innerHTML='<option value="">Todas</option>'+(SG.cacheFam||[]).map(function(f){return '<option value="'+esc(f.nombre)+'">'+esc(f.nombre)+'</option>';}).join(''); fam.value=fv; }
-    sgLoadStock();
+    api('/api/sg/pisos').then(function(r){
+      var ps=(r&&r.ok)?(r.data||[]):[], sel=eid('sg-st-piso');
+      if(sel){ var pv=sel.value;
+        sel.innerHTML='<option value="">Todos</option><option value="sin">— sin ubicar —</option>'
+          + ps.map(function(p){ return '<option value="'+p.id+'">'+escH(p.nombre)+'</option>'; }).join('');
+        sel.value=pv; }
+      sgLoadStock();
+    });
   });
 }
 function sgStockReset(){
-  ['sg-st-prod','sg-st-cal','sg-st-est','sg-st-sem','sg-st-fam','sg-st-venc','sg-st-desde','sg-st-hasta'].forEach(function(id){ var el=eid(id); if(el) el.value=''; });
+  ['sg-st-prod','sg-st-cal','sg-st-est','sg-st-sem','sg-st-fam','sg-st-piso','sg-st-venc','sg-st-desde','sg-st-hasta'].forEach(function(id){ var el=eid(id); if(el) el.value=''; });
   sgLoadStock();
 }
 // BRIEF 10 — Carga inicial de inventario (lotes de apertura). Grilla de N filas; costo en total o $/kg.
@@ -12175,6 +12229,7 @@ function sgLoadStock(){
   var venc=eid('sg-st-venc').value; if(venc!=='') q.push('por_vencer='+venc);
   var d=eid('sg-st-desde').value; if(d) q.push('ingreso_desde='+d);
   var h=eid('sg-st-hasta').value; if(h) q.push('ingreso_hasta='+h);
+  var pis=(eid('sg-st-piso')||{}).value; if(pis) q.push('piso_id='+pis);
   api('/api/sg/lotes'+(q.length?('?'+q.join('&')):'')).then(function(r){
     var rows=(r&&r.ok)?r.data:[];
     eid('sg-tb-stock').innerHTML = rows.length ? rows.map(function(l){
@@ -12191,6 +12246,11 @@ function sgLoadStock(){
         +'<td>'+esc(l.producto_nombre||'')+(esGranel?' <span class="bdg bpe" style="font-size:10px" title="Granel: no se vende directo, va a reproceso">granel</span>':'')+'</td>'
         +'<td>'+esc(l.producto_familia||'—')+'</td>'
         +'<td style="text-align:right">'+nr(l.kg_disponibles!=null?l.kg_disponibles:l.kg_reales)+'</td>'
+        // DÓNDE ESTÁ. Si está repartida se ven los dos lugares; si nadie la
+        // ubicó, se dice — es lo que hay que ir a acomodar, no un dato que falta.
+        +'<td style="font-size:11.5px">'+(l.pisos
+            ? escH(l.pisos)
+            : '<span style="color:#9a3412">sin ubicar</span>')+'</td>'
         +'<td>'+(l.calidad||'—')+'</td>'
         +'<td>'+venceCell+'</td>'
         +'<td style="text-align:right">'+costoKgCell+'</td>'
@@ -12198,7 +12258,7 @@ function sgLoadStock(){
         +'<td style="text-align:right;white-space:nowrap">'
           +(esGranel?'<button class="btn bb bs" onclick="event.stopPropagation();sgrReprPrecargar('+l.id+','+l.producto_id+')" title="Convertir el granel en cajones">♻️ Reprocesar</button> ':'')
           +'<button class="btn bo bs" onclick="event.stopPropagation();sgLoteVer('+l.id+')">🔍</button></td></tr>';
-    }).join('') : '<tr><td colspan="9" class="emp">Sin lotes con esos filtros.</td></tr>';
+    }).join('') : '<tr><td colspan="10" class="emp">Sin lotes con esos filtros.</td></tr>';
   });
 }
 
