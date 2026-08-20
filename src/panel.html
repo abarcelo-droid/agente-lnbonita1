@@ -4336,12 +4336,26 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
         <div class="sg-oc-box-tit">🚚 Flete <span style="font-weight:400;text-transform:none;letter-spacing:0">(informativo, no suma al total)</span></div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
           <div class="fl"><label>A cargo de</label>
-            <select id="sg-oc-flete-cargo">
+            <select id="sg-oc-flete-cargo" onchange="sgOcFleteCargo()">
               <option value="">— Sin flete —</option>
               <option value="comprador">Comprador</option>
               <option value="vendedor">Vendedor</option>
             </select>
           </div>
+          <!-- QUIÉN PUSO LA PLATA. Sólo con flete del vendedor, y sólo ahí,
+               porque son dos circuitos distintos: si lo pagó el productor no se
+               toca nada; si lo adelantó San Gerónimo hay que pagarle al fletero
+               y recuperarlo de la liquidación del productor. -->
+          <div class="fl" id="sg-oc-flete-quien-wrap" style="display:none"><label>¿Quién lo paga?</label>
+            <select id="sg-oc-flete-quien" onchange="sgOcFleteCargo()">
+              <option value="productor">El productor directamente</option>
+              <option value="san_geronimo">Lo adelanta San Gerónimo</option>
+            </select>
+          </div>
+          <!-- QUÉ IMPLICA LO QUE SE ELIGIÓ. El que carga la orden elegía a
+               ciegas entre tres opciones con consecuencias contables distintas. -->
+          <div id="sg-oc-flete-ayuda" style="grid-column:1/-1;font-size:11.5px;line-height:1.45;
+               border-left:3px solid var(--bor);padding:2px 0 2px 10px;color:var(--mut);margin:-2px 0 2px"></div>
           <div class="fl"><label>Cómo se pactó</label>
             <select id="sg-oc-flete-modo" onchange="sgOcFleteModo()">
               <option value="total">Monto total</option>
@@ -8623,6 +8637,7 @@ function sgOcOpen(){
   eid('sg-oc-fecha').value=new Date().toISOString().slice(0,10);
   eid('sg-oc-fecharec').value=''; eid('sg-oc-obs').value='';
   eid('sg-oc-flete-cargo').value=''; eid('sg-oc-flete-monto').value='';
+  eid('sg-oc-flete-quien').value='productor'; sgOcFleteCargo();
   eid('sg-oc-flete-modo').value='total'; eid('sg-oc-flete-cant').value=''; eid('sg-oc-flete-pu').value='';
   SG._fleteCantManual=false;
   var ivaF=document.querySelector('input[name="sg-oc-flete-iva"]:checked'); if(ivaF) ivaF.checked=false;
@@ -8742,6 +8757,31 @@ function sgOcFiscalOpts(){
 // solo. Antes había un único campo de monto: el que lo pactaba por bulto tenía
 // que multiplicar a mano, y a los dos días nadie sabía si ese número era el
 // total o el precio unitario, ni sobre cuántos bultos se había hecho la cuenta.
+// ── QUÉ IMPLICA CADA OPCIÓN DE FLETE ─────────────────────────────────────
+// Las tres opciones tienen consecuencias contables distintas y el que carga la
+// orden las elegía a ciegas. Cada texto dice lo que el sistema HACE de verdad
+// con esa elección — no lo que debería hacer.
+var SG_FLETE_AYUDA = {
+  '': 'No hay flete que registrar en esta compra.',
+  'comprador': '<b>Es un gasto de San Gerónimo.</b> Queda pendiente de valorizar en '
+    + '<b>Gastos directos → Fletes de entrada</b>; cuando se carga la factura del fletero, '
+    + 'el monto <b>entra al costo de la partida</b>, repartido por kilo entre sus lotes.',
+  'vendedor|productor': '<b>Lo paga el productor.</b> Ya viene adentro del precio pactado: '
+    + 'San Gerónimo no le paga a ningún fletero y el flete <b>no entra al costo de la partida</b>. '
+    + 'No aparece en la bandeja de fletes de entrada.',
+  'vendedor|san_geronimo': '<b>Lo adelanta San Gerónimo y se le recupera al productor.</b> '
+    + 'Aparece en <b>Fletes de entrada</b> para cargar la factura del fletero, pero '
+    + '<b>NO entra al costo de la partida</b>: es plata a recuperar, se le descuenta de su liquidación.'
+};
+function sgOcFleteCargo(){
+  var cargo=(eid('sg-oc-flete-cargo')||{}).value||'';
+  var wrap=eid('sg-oc-flete-quien-wrap');
+  if(wrap) wrap.style.display = (cargo==='vendedor') ? '' : 'none';
+  var quien=(eid('sg-oc-flete-quien')||{}).value||'productor';
+  var clave = (cargo==='vendedor') ? ('vendedor|'+quien) : cargo;
+  var ay=eid('sg-oc-flete-ayuda');
+  if(ay) ay.innerHTML = SG_FLETE_AYUDA[clave] || '';
+}
 function sgOcFleteModo(){
   var modo = eid('sg-oc-flete-modo').value;
   var porUnidad = modo === 'bulto' || modo === 'pallet';
@@ -9019,6 +9059,10 @@ function sgOcGuardar(){
     tipo_fiscal:eid('sg-oc-fiscal').value, tipo_precio:sgOcPrecio(), documenta:sgOcDoc(), condicion_pago_id:eid('sg-oc-cond').value?Number(eid('sg-oc-cond').value):null,
     fecha_oc:eid('sg-oc-fecha').value, fecha_recepcion_estimada:eid('sg-oc-fecharec').value, observaciones:eid('sg-oc-obs').value,
     flete_a_cargo:eid('sg-oc-flete-cargo').value||null,
+    // Sólo viaja si el flete es del vendedor; el backend igual lo ignora en el
+    // resto de los casos, para que no quede un dato que contradice al de al lado.
+    flete_pagado_por:(eid('sg-oc-flete-cargo').value==='vendedor'
+      ? (eid('sg-oc-flete-quien').value||'productor') : null),
     flete_monto:(eid('sg-oc-flete-monto').value!==''?Number(eid('sg-oc-flete-monto').value):null),
     // El total del flete lo calcula el backend con estos tres datos: acá se
     // manda cómo se pactó, no una cuenta ya hecha.
@@ -13397,7 +13441,15 @@ function sgFePintar(){
     var dif = val ? Math.round(((x.gasto_monto || 0) - (x.estimado || 0)) * 100) / 100 : 0;
     return '<tr>'
       + '<td style="font-family:monospace;font-size:11.5px"><b>'
-        + escH(x.partida || x.oc_numero || '—') + '</b></td>'
+        + escH(x.partida || x.oc_numero || '—') + '</b>'
+        // EL ADELANTADO NO ES UN GASTO NUESTRO. Sin decirlo acá, administración
+        // lo carga igual que el propio y termina inflando el costo de la partida
+        // con plata que hay que recuperarle al productor.
+        + (x.a_recuperar
+            ? '<div style="font-size:10px;color:#8a5a1f;font-family:inherit;font-weight:600;margin-top:2px">'
+              + 'a recuperar del productor</div>'
+            : '')
+        + '</td>'
       + '<td>' + escH(x.fecha_recepcion || '—') + '</td>'
       + '<td class="cb-nom">' + escH(x.proveedor_nombre || '—') + '</td>'
       + '<td style="text-align:right">' + (x.bultos || 0) + '</td>'
