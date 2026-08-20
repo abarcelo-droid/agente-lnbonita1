@@ -1213,6 +1213,111 @@ function recalcCostoLote(db, loteId) {
   return costoFinal;
 }
 
+// ══════════════════════════════════════════════════════════════════════════
+// PISOS — DÓNDE ESTÁ LA MERCADERÍA
+// ══════════════════════════════════════════════════════════════════════════
+//
+// El piso es la APERTURA del inventario: el total sigue siendo uno y el piso lo
+// desglosa. Una partida puede estar repartida —entran 100 cajones y se guardan
+// 60 arriba y 40 abajo—, así que el saldo se lleva por (partida, piso).
+//
+// LA REGLA QUE NO SE PUEDE ROMPER: la suma de los pisos de una partida da
+// exactamente lo disponible de esa partida. Si algo sale y no se descuenta de
+// ningún piso, el total sigue bien y la apertura queda mintiendo — que es peor
+// que no tener apertura, porque nadie la va a dudar.
+//
+// Por eso TODO lo que saca mercadería pasa por descontarDeUbicacion(): el
+// despacho, el decomiso, la transformación y el reproceso. Un solo lugar.
+
+// Sumar o restar en un piso. Cantidades en bultos y kg a la vez, porque el stock
+// se cuenta en cajones pero se costea en kilos.
+function ubicMover(db, loteId, pisoId, dBultos, dKg) {
+  const ex = db.prepare('SELECT * FROM sg_lote_ubicaciones WHERE lote_id=? AND piso_id=?')
+    .get(loteId, pisoId);
+  if (!ex) {
+    db.prepare('INSERT INTO sg_lote_ubicaciones (lote_id, piso_id, bultos, kg) VALUES (?,?,?,?)')
+      .run(loteId, pisoId, r2(dBultos), r2(dKg));
+    return;
+  }
+  const b = r2((ex.bultos || 0) + dBultos), k = r2((ex.kg || 0) + dKg);
+  // La fila en cero se borra: una lista de pisos con ceros hace buscar en
+  // lugares donde no hay nada.
+  if (Math.abs(b) < 0.001 && Math.abs(k) < 0.01) {
+    db.prepare('DELETE FROM sg_lote_ubicaciones WHERE id=?').run(ex.id);
+  } else {
+    db.prepare('UPDATE sg_lote_ubicaciones SET bultos=?, kg=? WHERE id=?').run(b, k, ex.id);
+  }
+}
+
+// CUÁNTOS BULTOS SON ESOS KILOS. El decomiso y la transformación se cargan en
+// kilos, pero la ubicación lleva las dos unidades: sin esto, el saldo en kilos
+// bajaría y el de bultos quedaría intacto, y la misma partida diría dos cosas.
+// Si el lote no tiene factor conocido, devuelve 0: es preferible no mover los
+// bultos a inventar una cantidad.
+function bultosDeKg(db, loteId, kg) {
+  const l = db.prepare(`SELECT COALESCE(l.kg_por_bulto, ps.factor_conversion) AS kpb
+    FROM sg_lotes l LEFT JOIN sg_presentaciones ps ON ps.id=l.presentacion_id
+    WHERE l.id=?`).get(loteId);
+  const kpb = l && Number(l.kpb) > 0 ? Number(l.kpb) : 0;
+  return kpb > 0 ? r2(Number(kg || 0) / kpb) : 0;
+}
+const bultosDecomisados = bultosDeKg;
+
+// Dónde está una partida, ordenado como se ordenan los pisos.
+function ubicacionesDeLote(db, loteId) {
+  return db.prepare(`SELECT u.*, p.nombre AS piso_nombre, p.codigo AS piso_codigo, p.orden
+    FROM sg_lote_ubicaciones u JOIN sg_pisos p ON p.id=u.piso_id
+    WHERE u.lote_id=? ORDER BY p.orden, p.id`).all(loteId);
+}
+
+// UBICAR lo que entra. `reparto` es [{piso_id, bultos, kg}]; si no viene, entra
+// todo al piso que se indique.
+function ubicarLote(db, loteId, reparto) {
+  for (const r of (reparto || [])) {
+    const piso = Number(r.piso_id);
+    if (!piso) continue;
+    ubicMover(db, loteId, piso, Number(r.bultos) || 0, Number(r.kg) || 0);
+  }
+}
+
+// SACAR de los pisos. Si viene pisoId, sale de ahí y sólo de ahí —el que armó el
+// remito dijo de dónde lo bajó—. Si no viene, sale por orden de piso hasta
+// completar: es determinístico, así que dos personas obtienen lo mismo.
+//
+// Si la partida no está ubicada en ningún lado —lo que pasa con todo lo que se
+// recibió antes de que existieran los pisos— no se descuenta nada y no se corta:
+// la mercadería vieja no tiene por qué frenar una venta.
+function descontarDeUbicacion(db, loteId, bultos, kg, pisoId) {
+  const ubic = ubicacionesDeLote(db, loteId);
+  if (!ubic.length) return { ok: true, sinUbicar: true };
+  let restB = Number(bultos) || 0, restK = Number(kg) || 0;
+  if (pisoId) {
+    const u = ubic.find((x) => x.piso_id === Number(pisoId));
+    if (!u) {
+      return { ok: false, error: 'Esa partida no tiene mercadería en el piso elegido.' };
+    }
+    if (restB - (u.bultos || 0) > 0.001) {
+      return { ok: false,
+        error: `En ${u.piso_nombre} hay ${u.bultos} bulto(s) de esa partida y se piden ${restB}.` };
+    }
+    ubicMover(db, loteId, u.piso_id, -restB, -restK);
+    return { ok: true };
+  }
+  for (const u of ubic) {
+    if (restB <= 0.001 && restK <= 0.01) break;
+    const tomaB = Math.min(u.bultos || 0, restB);
+    // Los kilos se llevan en la misma proporción que los bultos, salvo en el
+    // último piso, donde se lleva lo que reste: así no queda un resto de
+    // decimales colgado que después nadie sabe de dónde salió.
+    const tomaK = (u.bultos > 0 && restB > 0)
+      ? Math.min(u.kg || 0, r2(restK * (tomaB / restB)))
+      : Math.min(u.kg || 0, restK);
+    ubicMover(db, loteId, u.piso_id, -tomaB, -tomaK);
+    restB = r2(restB - tomaB); restK = r2(restK - tomaK);
+  }
+  return { ok: true, faltante: (restB > 0.001 || restK > 0.01) ? { bultos: restB, kg: restK } : null };
+}
+
 // Recalcula el costo_final de todos los lotes activos de un período (al cambiar un gasto global).
 function recalcPeriodo(db, periodo) {
   if (!periodo) return;
@@ -1459,8 +1564,30 @@ function crearLotesDeItem(db, { recepcionId, ocItem, tipoPrecio, fechaIngreso, l
     const codigo = codigoLoteDePartida(db, ocItem.id);
     const info = ins.run(codigo, recepcionId, ocItem.id, ocItem.producto_id, kg, precio, costoBase,
       val(lt.calidad), val(lt.calibre), val(lt.origen), fechaIngreso, venc, costoBase, presId, bultos, kpb, envId, userId);
-    ids.push(info.lastInsertRowid);
-    _aplicarObservado(db, info.lastInsertRowid, _rec, userId);
+    const nuevoLoteId = info.lastInsertRowid;
+    // ── DONDE QUEDO LA MERCADERIA ────────────────────────────────────────
+    // El sub-lote puede traer un reparto —60 cajones arriba y 40 abajo— o un
+    // solo piso para todo. Si no viene nada, se cae al piso que PROPUSO la orden
+    // de compra: al comprar ya se suele saber donde va a ir, y el que recibe no
+    // tiene por que volver a elegirlo si no cambio.
+    //
+    // Si no hay ni una cosa ni la otra, la partida queda SIN UBICAR. No se
+    // inventa un piso: figurar en un lugar donde no esta es peor que no figurar,
+    // porque el que va a buscarla pierde el viaje.
+    let reparto = Array.isArray(lt.ubicaciones) ? lt.ubicaciones.slice() : [];
+    if (!reparto.length) {
+      const piso = (lt.piso_id != null && lt.piso_id !== '') ? Number(lt.piso_id) : (ocItem.piso_id != null ? Number(ocItem.piso_id) : null);
+      if (piso) reparto = [{ piso_id: piso, bultos: bultos || 0, kg: kg }];
+    }
+    // Lo repartido no puede sumar mas de lo que entro: si no, el piso mostraria
+    // mercaderia que no existe.
+    const sumaB = reparto.reduce((a, x) => a + (Number(x.bultos) || 0), 0);
+    if (bultos != null && sumaB - bultos > 0.001) {
+      throw new Error('El reparto por piso suma ' + sumaB + ' bulto(s) y entraron ' + bultos + '.');
+    }
+    ubicarLote(db, nuevoLoteId, reparto);
+    ids.push(nuevoLoteId);
+    _aplicarObservado(db, nuevoLoteId, _rec, userId);
   }
   return ids;
 }
@@ -1528,8 +1655,30 @@ function crearLotesSinOC(db, { recepcionId, productoId, fechaIngreso, lotes, use
     const bultos = (lt.bultos != null && lt.bultos !== '') ? Math.round(Number(lt.bultos)) : null;
     const codigo = nextNumero(db, 'SG-LT', 'sg_lotes', 'codigo_lote');
     const info = ins.run(codigo, recepcionId, productoId, kg, val(lt.calidad), val(lt.origen), fechaIngreso, venc, presId, bultos, userId);
-    ids.push(info.lastInsertRowid);
-    _aplicarObservado(db, info.lastInsertRowid, _rec, userId);
+    const nuevoLoteId = info.lastInsertRowid;
+    // ── DONDE QUEDO LA MERCADERIA ────────────────────────────────────────
+    // El sub-lote puede traer un reparto —60 cajones arriba y 40 abajo— o un
+    // solo piso para todo. Si no viene nada, se cae al piso que PROPUSO la orden
+    // de compra: al comprar ya se suele saber donde va a ir, y el que recibe no
+    // tiene por que volver a elegirlo si no cambio.
+    //
+    // Si no hay ni una cosa ni la otra, la partida queda SIN UBICAR. No se
+    // inventa un piso: figurar en un lugar donde no esta es peor que no figurar,
+    // porque el que va a buscarla pierde el viaje.
+    let reparto = Array.isArray(lt.ubicaciones) ? lt.ubicaciones.slice() : [];
+    if (!reparto.length) {
+      const piso = (lt.piso_id != null && lt.piso_id !== '') ? Number(lt.piso_id) : null;
+      if (piso) reparto = [{ piso_id: piso, bultos: bultos || 0, kg: kg }];
+    }
+    // Lo repartido no puede sumar mas de lo que entro: si no, el piso mostraria
+    // mercaderia que no existe.
+    const sumaB = reparto.reduce((a, x) => a + (Number(x.bultos) || 0), 0);
+    if (bultos != null && sumaB - bultos > 0.001) {
+      throw new Error('El reparto por piso suma ' + sumaB + ' bulto(s) y entraron ' + bultos + '.');
+    }
+    ubicarLote(db, nuevoLoteId, reparto);
+    ids.push(nuevoLoteId);
+    _aplicarObservado(db, nuevoLoteId, _rec, userId);
   }
   return ids;
 }
@@ -1559,6 +1708,16 @@ function crearLoteTransformado(db, { origen, productoDestinoId, kg, factor, pres
   db.prepare(`INSERT INTO sg_transformaciones
     (lote_origen_id, lote_destino_id, kg_transformados, factor, costo_transferido, usuario_id)
     VALUES (?,?,?,?,?,?)`).run(origen.id, destinoId, kg, factor != null ? factor : null, costoTransf, userId || null);
+  // LA MERCADERÍA NO SE TELETRANSPORTA. Lo que sale del lote madre sale del
+  // piso donde estaba, y el lote hijo nace EN ESE MISMO LUGAR: nadie lo movió,
+  // se le cambió el envase o la clasificación ahí mismo.
+  const dondeEstaba = ubicacionesDeLote(db, origen.id);
+  descontarDeUbicacion(db, origen.id, bultosDeKg(db, origen.id, kg), kg, null);
+  if (dondeEstaba.length) {
+    // Al piso donde había más de la madre: es de donde salió la mayor parte.
+    const principal = dondeEstaba.slice().sort((a, b) => (b.bultos || 0) - (a.bultos || 0))[0];
+    ubicarLote(db, destinoId, [{ piso_id: principal.piso_id, bultos: blt || 0, kg: kg }]);
+  }
   // el origen pierde el costo transferido (recalc resta Σcosto_transferido) y recalcula su estado.
   recalcCostoLote(db, origen.id);
   recalcEstadoLote(db, origen.id);
@@ -1956,6 +2115,250 @@ function partidasRecibidas(db, comoSeDocumenta) {
 //
 // El precio sigue mostrándose en la lista (lotes_sin_precio), pero como dato de
 // la partida, no como criterio.
+// ── ADMINISTRAR LOS PISOS ────────────────────────────────────────────────
+// Se dan de alta y de baja desde Stock. No se borran: una partida vieja puede
+// haber estado ahí, y borrar el piso dejaría ese historial apuntando a la nada.
+router.get('/pisos', requireAuth, (req, res) => {
+  const db = getDb();
+  try {
+    const inactivos = req.query.inactivos === '1';
+    const rows = db.prepare(`SELECT p.*,
+        (SELECT COUNT(DISTINCT u.lote_id) FROM sg_lote_ubicaciones u WHERE u.piso_id = p.id) AS partidas,
+        (SELECT COALESCE(SUM(u.bultos),0) FROM sg_lote_ubicaciones u WHERE u.piso_id = p.id) AS bultos,
+        (SELECT COALESCE(SUM(u.kg),0)     FROM sg_lote_ubicaciones u WHERE u.piso_id = p.id) AS kg
+      FROM sg_pisos p ${inactivos ? '' : 'WHERE p.activo = 1'}
+      ORDER BY p.orden, p.id`).all();
+    res.json({ ok: true, data: rows });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+router.post('/pisos', requireAuth, (req, res) => {
+  const db = getDb();
+  try {
+    const b = req.body || {};
+    const nombre = String(b.nombre || '').trim();
+    if (!nombre) return res.status(400).json({ ok: false, error: 'Poné el nombre del piso' });
+    const id = parseInt(b.id, 10);
+    // El nombre no se repite: dos "Piso 2" son dos lugares que el que busca no
+    // puede distinguir.
+    const ya = db.prepare('SELECT id FROM sg_pisos WHERE lower(nombre)=lower(?) AND id <> ?')
+      .get(nombre, id || 0);
+    if (ya) return res.status(400).json({ ok: false, error: 'Ya hay un piso con ese nombre' });
+    const campos = [nombre, String(b.codigo || '').trim() || null,
+      Number(b.orden) || 0, String(b.notas || '').trim() || null];
+    if (id) {
+      db.prepare(`UPDATE sg_pisos SET nombre=?, codigo=?, orden=?, notas=?,
+        modificado_en=datetime('now','localtime'), modificado_por=? WHERE id=?`)
+        .run(...campos, uid(req), id);
+      return res.json({ ok: true, id });
+    }
+    const r = db.prepare('INSERT INTO sg_pisos (nombre, codigo, orden, notas, creado_por) VALUES (?,?,?,?,?)')
+      .run(...campos, uid(req));
+    res.json({ ok: true, id: Number(r.lastInsertRowid) });
+  } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
+});
+
+router.post('/pisos/:id/baja', requireAuth, (req, res) => {
+  const db = getDb();
+  try {
+    const p = db.prepare('SELECT * FROM sg_pisos WHERE id=?').get(req.params.id);
+    if (!p) return res.status(404).json({ ok: false, error: 'Piso no encontrado' });
+    // CON MERCADERÍA ADENTRO NO SE DA DE BAJA. El piso desaparecería de las
+    // pantallas con la mercadería adentro, y esos kilos quedarían en el total
+    // sin lugar donde ir a buscarlos.
+    const hay = db.prepare('SELECT COALESCE(SUM(bultos),0) b, COALESCE(SUM(kg),0) k FROM sg_lote_ubicaciones WHERE piso_id=?').get(p.id);
+    if ((hay.b || 0) > 0.001 || (hay.k || 0) > 0.01) {
+      return res.status(400).json({ ok: false,
+        error: `${p.nombre} todavía tiene mercadería (${Math.round(hay.b)} bulto(s), `
+             + `${Math.round(hay.k)} kg). Trasladala a otro piso antes de darlo de baja.` });
+    }
+    db.prepare(`UPDATE sg_pisos SET activo=0, modificado_en=datetime('now','localtime'),
+      modificado_por=? WHERE id=?`).run(uid(req), p.id);
+    res.json({ ok: true });
+  } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
+});
+
+// ── EL STOCK, ABIERTO POR PISO ───────────────────────────────────────────
+// El total es el mismo de siempre; esto lo desglosa. Con ?piso_id= devuelve sólo
+// ese, que es el filtro que pide la pantalla.
+router.get('/stock-pisos', requireAuth, (req, res) => {
+  const db = getDb();
+  try {
+    const pisoId = req.query.piso_id ? Number(req.query.piso_id) : null;
+    const rows = db.prepare(`SELECT u.piso_id, p.nombre AS piso_nombre, p.codigo AS piso_codigo, p.orden,
+        u.lote_id, l.codigo_lote, l.calidad, l.semaforo, l.fecha_vencimiento_estimada,
+        l.producto_id, pr.nombre AS producto_nombre,
+        u.bultos, u.kg,
+        CAST(julianday(l.fecha_vencimiento_estimada) - julianday(date('now','localtime')) AS INTEGER) AS dias_restantes
+      FROM sg_lote_ubicaciones u
+      JOIN sg_pisos p ON p.id = u.piso_id
+      JOIN sg_lotes l ON l.id = u.lote_id AND l.activo = 1
+      LEFT JOIN sg_productos pr ON pr.id = l.producto_id
+      WHERE (u.bultos > 0.001 OR u.kg > 0.01) ${pisoId ? 'AND u.piso_id = ?' : ''}
+      ORDER BY p.orden, p.id, pr.nombre, l.fecha_vencimiento_estimada`)
+      .all(...(pisoId ? [pisoId] : []));
+    // Agrupado por piso, porque así se mira: primero cuánto hay en cada lugar y
+    // después qué es.
+    const pisos = [];
+    const mapa = new Map();
+    for (const r of rows) {
+      if (!mapa.has(r.piso_id)) {
+        const g = { piso_id: r.piso_id, piso_nombre: r.piso_nombre, piso_codigo: r.piso_codigo,
+          bultos: 0, kg: 0, partidas: [] };
+        mapa.set(r.piso_id, g); pisos.push(g);
+      }
+      const g = mapa.get(r.piso_id);
+      g.bultos = r2(g.bultos + (r.bultos || 0));
+      g.kg = r2(g.kg + (r.kg || 0));
+      g.partidas.push(r);
+    }
+    // Los pisos vacíos también van: que un lugar esté vacío es información.
+    const todos = db.prepare('SELECT * FROM sg_pisos WHERE activo=1 ORDER BY orden, id').all();
+    for (const p of todos) {
+      if (pisoId && p.id !== pisoId) continue;
+      if (!mapa.has(p.id)) {
+        pisos.push({ piso_id: p.id, piso_nombre: p.nombre, piso_codigo: p.codigo,
+          bultos: 0, kg: 0, partidas: [] });
+      }
+    }
+    pisos.sort((a, b) => (todos.findIndex((x) => x.id === a.piso_id))
+                       - (todos.findIndex((x) => x.id === b.piso_id)));
+    res.json({ ok: true, data: pisos,
+      total: { bultos: r2(pisos.reduce((a, x) => a + x.bultos, 0)),
+               kg: r2(pisos.reduce((a, x) => a + x.kg, 0)) } });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// ── EL PASE ENTRE PISOS ──────────────────────────────────────────────────
+// Mover mercadería de lugar cambia dónde hay que ir a buscarla. Queda anotado
+// con quién y cuándo: una edición silenciosa deja al depósito diciendo una cosa
+// y la pantalla otra, sin que se sepa desde cuándo.
+router.post('/lotes/:id/trasladar', requireAuth, (req, res) => {
+  const db = getDb();
+  try {
+    const b = req.body || {};
+    const lote = db.prepare('SELECT * FROM sg_lotes WHERE id=? AND activo=1').get(req.params.id);
+    if (!lote) return res.status(404).json({ ok: false, error: 'Partida no encontrada' });
+    const origen = Number(b.piso_origen_id), destino = Number(b.piso_destino_id);
+    if (!origen || !destino) return res.status(400).json({ ok: false, error: 'Elegí de qué piso a qué piso' });
+    if (origen === destino) return res.status(400).json({ ok: false, error: 'El origen y el destino son el mismo piso' });
+    const pd = db.prepare('SELECT * FROM sg_pisos WHERE id=? AND activo=1').get(destino);
+    if (!pd) return res.status(400).json({ ok: false, error: 'El piso de destino no existe o está dado de baja' });
+    const u = db.prepare('SELECT * FROM sg_lote_ubicaciones WHERE lote_id=? AND piso_id=?').get(lote.id, origen);
+    if (!u) return res.status(400).json({ ok: false, error: 'Esa partida no tiene mercadería en el piso de origen' });
+    let bultos = (b.bultos != null && b.bultos !== '') ? Number(b.bultos) : (u.bultos || 0);
+    if (!(bultos > 0)) return res.status(400).json({ ok: false, error: 'Poné cuántos bultos se pasan' });
+    if (bultos - (u.bultos || 0) > 0.001) {
+      return res.status(400).json({ ok: false,
+        error: `Hay ${u.bultos} bulto(s) en ese piso y se quieren pasar ${bultos}.` });
+    }
+    // Los kilos se van con los bultos, en proporción. Si se pasa todo, se pasa
+    // todo: así no queda un resto de decimales colgado en el piso de origen.
+    const todo = Math.abs(bultos - (u.bultos || 0)) < 0.001;
+    const kg = todo ? (u.kg || 0) : r2((u.kg || 0) * (bultos / (u.bultos || 1)));
+    db.transaction(() => {
+      ubicMover(db, lote.id, origen, -bultos, -kg);
+      ubicMover(db, lote.id, destino, bultos, kg);
+      db.prepare(`INSERT INTO sg_lote_traslados
+        (lote_id, piso_origen_id, piso_destino_id, bultos, kg, motivo, usuario_id)
+        VALUES (?,?,?,?,?,?,?)`).run(lote.id, origen, destino, bultos, kg,
+          String(b.motivo || '').trim() || null, uid(req));
+    })();
+    res.json({ ok: true, data: { bultos, kg, ubicaciones: ubicacionesDeLote(db, lote.id) } });
+  } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
+});
+
+// Dónde está una partida y su historial de pases.
+router.get('/lotes/:id/ubicaciones', requireAuth, (req, res) => {
+  const db = getDb();
+  try {
+    res.json({ ok: true, data: {
+      ubicaciones: ubicacionesDeLote(db, req.params.id),
+      traslados: db.prepare(`SELECT t.*, po.nombre AS origen_nombre, pd.nombre AS destino_nombre,
+          us.nombre AS usuario
+        FROM sg_lote_traslados t
+        LEFT JOIN sg_pisos po ON po.id = t.piso_origen_id
+        LEFT JOIN sg_pisos pd ON pd.id = t.piso_destino_id
+        LEFT JOIN usuarios us ON us.id = t.usuario_id
+        WHERE t.lote_id=? ORDER BY t.id DESC`).all(req.params.id),
+    } });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// ── EL STOCK DE UN PISO, EN PAPEL ────────────────────────────────────────
+// Se imprime todos los días y se camina con la hoja para contar contra ella.
+router.get('/stock-pisos/imprimir', requireAuth, (req, res) => {
+  const db = getDb();
+  try {
+    const pisoId = req.query.piso_id ? Number(req.query.piso_id) : null;
+    const rows = db.prepare(`SELECT p.nombre AS piso_nombre, l.codigo_lote, pr.nombre AS producto_nombre,
+        l.calidad, u.bultos, u.kg, l.fecha_vencimiento_estimada
+      FROM sg_lote_ubicaciones u
+      JOIN sg_pisos p ON p.id = u.piso_id
+      JOIN sg_lotes l ON l.id = u.lote_id AND l.activo = 1
+      LEFT JOIN sg_productos pr ON pr.id = l.producto_id
+      WHERE (u.bultos > 0.001 OR u.kg > 0.01) ${pisoId ? 'AND u.piso_id = ?' : ''}
+      ORDER BY p.orden, p.id, pr.nombre, l.fecha_vencimiento_estimada`)
+      .all(...(pisoId ? [pisoId] : []));
+    const esc = (t) => String(t == null ? '' : t)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    const nr = (n) => Number(n || 0).toLocaleString('es-AR', { maximumFractionDigits: 2 });
+    const hoy = db.prepare("SELECT datetime('now','localtime') d").get().d;
+    let u = null;
+    try { u = JSON.parse(req.cookies?.lnb_user || 'null'); } catch { u = null; }
+    let html = '', pisoAct = null, subB = 0, subK = 0;
+    const cierre = () => (pisoAct == null ? '' :
+      `<tr class="sub"><td colspan="3">Total ${esc(pisoAct)}</td>
+        <td class="n">${nr(subB)}</td><td class="n">${nr(subK)}</td><td></td><td></td></tr>`);
+    for (const r of rows) {
+      if (r.piso_nombre !== pisoAct) {
+        html += cierre();
+        pisoAct = r.piso_nombre; subB = 0; subK = 0;
+        html += `<tr class="pis"><td colspan="7">${esc(pisoAct)}</td></tr>`;
+      }
+      subB += Number(r.bultos) || 0; subK += Number(r.kg) || 0;
+      html += `<tr><td class="mono">${esc(r.codigo_lote)}</td><td>${esc(r.producto_nombre || '')}</td>
+        <td>${esc(r.calidad || '')}</td><td class="n">${nr(r.bultos)}</td><td class="n">${nr(r.kg)}</td>
+        <td>${esc(r.fecha_vencimiento_estimada || '')}</td><td class="chk"></td></tr>`;
+    }
+    html += cierre();
+    if (!rows.length) html = '<tr><td colspan="7" class="vacio">No hay mercadería ubicada.</td></tr>';
+    res.set('Content-Type', 'text/html; charset=utf-8');
+    res.send(`<!doctype html><html lang="es"><head><meta charset="utf-8">
+<title>Stock por piso</title><style>
+  *{box-sizing:border-box}
+  body{font-family:system-ui,-apple-system,'Segoe UI',sans-serif;margin:0;padding:22px;color:#111}
+  h1{font-size:17px;margin:0 0 2px}
+  .sub0{font-size:11.5px;color:#666;margin-bottom:14px}
+  table{width:100%;border-collapse:collapse;font-size:12px}
+  th{text-align:left;font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:#666;
+     border-bottom:1.5px solid #333;padding:0 6px 4px}
+  td{padding:5px 6px;border-bottom:1px solid #ddd}
+  .n{text-align:right;font-variant-numeric:tabular-nums}
+  .mono{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:11px}
+  tr.pis td{background:#f0f0f0;font-weight:700;text-transform:uppercase;font-size:11px;letter-spacing:.04em}
+  tr.sub td{font-weight:700;border-top:1px solid #333;border-bottom:2px solid #333}
+  /* Para contar contra la hoja: una casilla por renglón. */
+  .chk{width:26px}
+  td.chk::after{content:'';display:block;width:14px;height:14px;border:1px solid #999;border-radius:2px}
+  .vacio{color:#666;text-align:center;padding:18px}
+  .pie{margin-top:16px;font-size:10.5px;color:#666}
+  button{position:fixed;top:14px;right:14px;padding:8px 14px;font-size:13px;cursor:pointer;
+    border:1px solid #333;background:#fff;border-radius:6px}
+  @media print{ button{display:none} body{padding:0} tr.pis td{background:#eee} }
+</style></head><body>
+<button onclick="window.print()">Imprimir</button>
+<h1>Stock por piso</h1>
+<div class="sub0">San Gerónimo · ${esc(hoy)}${u && u.nombre ? ' · ' + esc(u.nombre) : ''}</div>
+<table><thead><tr>
+  <th>Partida</th><th>Producto</th><th>Calidad</th>
+  <th class="n">Bultos</th><th class="n">Kg</th><th>Vence</th><th class="chk"></th>
+</tr></thead><tbody>${html}</tbody></table>
+<div class="pie">Es una foto del momento: lo que entre o salga después de imprimir no está en esta hoja.</div>
+</body></html>`);
+  } catch (e) { res.status(500).send('Error: ' + e.message); }
+});
+
 router.get('/partidas-a-liquidar', requireAuth, (req, res) => {
   const db = getDb();
   try {
@@ -4596,6 +4999,11 @@ router.post('/lotes/:id/decomiso', requireAuth, (req, res) => {
     if (kg > disp + 0.01) return res.status(400).json({ ok: false, error: `No podés decomisar ${kg}kg: hay ${disp.toFixed(1)}kg disponibles` });
     db.transaction(() => {
       db.prepare('INSERT INTO sg_lote_decomisos (lote_id, kg, motivo, usuario_id) VALUES (?,?,?,?)').run(lote.id, kg, motivo, uid(req));
+      // Lo decomisado deja de estar en el piso. Si no se descontara, el que va a
+      // buscarlo encontraría vacío un lugar que la pantalla dice lleno.
+      // Los bultos se derivan de los kilos con el factor del lote: el decomiso
+      // se carga en kilos y la ubicación lleva las dos unidades.
+      descontarDeUbicacion(db, lote.id, bultosDecomisados(db, lote.id, kg), kg, null);
       // semáforo → amarillo SOLO si estaba verde (si ya amarillo/rojo, no lo cambia ni registra).
       if (lote.semaforo === 'verde') {
         db.prepare("UPDATE sg_lotes SET semaforo='amarillo', modificado_en=datetime('now','localtime') WHERE id=?").run(lote.id);
@@ -5480,8 +5888,8 @@ const postRemito = (req, res) => {
       syncGastoFleteDespacho(db, despachoId, fleteroId, val(b.fecha_despacho), uid(req));
       const ins = db.prepare(`INSERT INTO sg_despacho_items
         (despacho_id, origen, lote_id, oc_item_id, producto_id, presentacion_id, envase_id, kg_por_bulto,
-         cantidad_presentaciones, bultos, kg_despachados, precio_por_kg, nota_precio, subtotal, margen_estimado)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`);
+         cantidad_presentaciones, bultos, kg_despachados, precio_por_kg, nota_precio, subtotal, margen_estimado, piso_id)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`);
       const lotesAfectados = new Set();
       let totalBultos = 0;   // FASE 2 — bultos del despacho (para la carga de la cooperativa)
       for (const ln of lineas) {
@@ -5511,9 +5919,21 @@ const postRemito = (req, res) => {
         // como a cantidad_presentaciones (compat). presentacion_id se toma de la línea o del lote.
         const presId = it.presentacion_id != null ? it.presentacion_id : (ln.presentacionId || null);
         // F3 — snapshot inmutable del factor+envase usados en este despacho (no se re-lee del lote).
+        // DE QUE PISO SALE. Si el que arma el remito lo dijo, sale de ahi y solo
+        // de ahi. Si no, sale por orden de piso hasta completar — determinístico,
+        // asi que dos personas obtienen el mismo resultado.
+        //
+        // Sin esto la apertura por piso se despegaria de la realidad apenas se
+        // despacha algo: el total seguiria bien y el desglose mentiria.
+        const pisoLinea = (it.piso_id != null && it.piso_id !== '') ? Number(it.piso_id) : null;
         ins.run(despachoId, ln.origen, ln.loteId || null, ln.ocItemId || null, productoId, presId,
           (ln.envaseId != null ? ln.envaseId : null), (ln.kgPorBulto != null ? ln.kgPorBulto : null),
-          bultos, bultos, kg, precio, (String(it.nota_precio || '').trim() || null), subtotal, margen);
+          bultos, bultos, kg, precio, (String(it.nota_precio || '').trim() || null), subtotal, margen,
+          ln.origen === 'lote' ? pisoLinea : null);
+        if (ln.origen === 'lote') {
+          const rUb = descontarDeUbicacion(db, ln.loteId, bultos, kg, pisoLinea);
+          if (!rUb.ok) throw new Error(rUb.error);
+        }
         totalBultos += bultos;
         if (ln.origen === 'lote') lotesAfectados.add(ln.loteId);
       }
@@ -5639,6 +6059,20 @@ router.post('/despachos/:id/anular', requireAuth, (req, res) => {
       // IS NOT NULL: los renglones de mercaderia EN VIAJE no tienen lote todavia,
       // y recalcEstadoLote(null) reventaria. Lo que esos renglones reservaban del
       // camion se libera solo, porque la cuenta mira d.activo=1.
+      // ANULAR DEVUELVE LA MERCADERIA A SU PISO. El stock vuelve —eso ya lo hacia
+      // el activo=0— pero si no vuelve tambien al piso, la partida figura
+      // disponible sin estar en ningun lado, y la suma de los pisos deja de dar
+      // lo disponible. Vuelve al piso del que salio; si no se habia anotado
+      // cual, al primero que tenga esa partida.
+      for (const li of db.prepare(`SELECT lote_id, bultos, kg_despachados, piso_id
+          FROM sg_despacho_items WHERE despacho_id=? AND lote_id IS NOT NULL`).all(req.params.id)) {
+        let piso = li.piso_id;
+        if (!piso) {
+          const u = ubicacionesDeLote(db, li.lote_id)[0];
+          piso = u ? u.piso_id : null;
+        }
+        if (piso) ubicMover(db, li.lote_id, piso, Number(li.bultos) || 0, Number(li.kg_despachados) || 0);
+      }
       const lotes = db.prepare(`SELECT DISTINCT lote_id FROM sg_despacho_items
         WHERE despacho_id=? AND lote_id IS NOT NULL`).all(req.params.id).map(r => r.lote_id);
       db.prepare("UPDATE sg_despachos SET activo=0, eliminado_en=datetime('now','localtime'), eliminado_por_id=? WHERE id=?").run(uid(req), req.params.id);
