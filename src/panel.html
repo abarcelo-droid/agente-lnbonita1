@@ -2398,6 +2398,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
           <!-- ENTRÓ UN CAMIÓN SIN ORDEN: se recibe igual. El botón estaba en la
                solapa de Órdenes de compra, que es la de lo que TODAVÍA NO LLEGÓ.
                Esto es una recepción — la mercadería ya está adentro. -->
+          <button class="btn bo" onclick="sgPendImprimir()" title="La hoja para recibir con ella en la mano">🖨️ Imprimir</button>
           <button class="btn bo" onclick="sgRetroOpen()" title="Entró un camión sin orden de compra">⚡ Recibir sin orden</button>
           <button class="btn bb" onclick="sgRecOpen()">+ Recibir mercadería</button>
         </div>
@@ -4640,7 +4641,11 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
         </div>
         <div id="sg-rec-var-box" style="display:none">
           <div class="sg-oc-box">
-            <div class="sg-oc-box-tit">Justificación de las diferencias <span style="color:var(--err)">*</span></div>
+            <div class="sg-oc-box-tit">Justificación de las diferencias
+              <span style="text-transform:none;letter-spacing:0;font-weight:400;color:var(--mut)">(opcional)</span></div>
+            <div style="font-size:11.5px;color:var(--mut);margin:-4px 0 8px">
+              Si no la escribís ahora, la orden queda marcada <b>sin justificar</b> hasta que alguien la complete.
+            </div>
             <div class="fl ff"><label>¿Qué pasó?</label>
               <textarea id="sg-rec-var-motivo" rows="2" placeholder="ej. vinieron 8 bultos menos · 3 cajones con golpes · pesaron 40 kg menos que el remito" oninput="sgRecValidar()"></textarea></div>
             <div class="fl ff" style="margin-top:10px"><label>Fotos que lo respaldan</label>
@@ -9364,6 +9369,21 @@ function sgOcVer(id){
           if (d.dif_bultos) h += fila('bultos', d.bultos_pactados, d.bultos_recibidos, d.dif_bultos);
           if (Math.abs(Number(d.dif_kg) || 0) > 1) h += fila('kg', d.kg_pactados, d.kg_recibidos, d.dif_kg);
         });
+        // POR QUÉ ENTRÓ DISTINTO. Lo escribió el que recibió; sin esto, el que
+        // abre la orden ve la diferencia y no el motivo, y termina llamando.
+        var mot = (d.variacion_motivos || []);
+        if (mot.length) {
+          h += '<div style="margin-top:10px;border-top:1px dashed #e0a72e;padding-top:8px">'
+            + mot.map(function(m){
+                return '<div style="font-size:12px;margin-top:4px">'
+                  + '<span style="color:var(--mut);font-size:11px">' + escH(m.numero_recepcion || '') + '</span> '
+                  + (String(m.motivo || '').trim()
+                      ? escH(m.motivo)
+                      : '<span style="color:#9a3412;font-weight:600">sin justificar</span>')
+                  + '</div>';
+              }).join('')
+            + '</div>';
+        }
         h += '</tbody></table>'
           + '<div style="font-size:11.5px;color:var(--mut);margin-top:8px">'
           + 'La orden quedó firme por lo que entró. Si corresponde ajustar el precio, hacelo antes de liquidar o facturar.'
@@ -9527,6 +9547,63 @@ function sgOcVer(id){
 // "Pendiente" es la orden abierta o recibida a medias que todavía tiene kilos
 // sin entrar. Se calcula por ÍTEM: una orden con dos productos donde entró uno
 // solo sigue pendiente, y hay que ver cuál falta.
+// ── LA HOJA DE LO QUE FALTA RECIBIR ───────────────────────────────────────
+// Ese listado es con lo que alguien recibe camiones: se imprime y se camina con
+// la hoja. Una captura de pantalla no sirve — sale cortada y sin los números
+// alineados.
+//
+// Se arma con LO QUE YA ESTÁ EN PANTALLA, no rearmando la lista en el servidor:
+// serían dos cuentas distintas que con el tiempo dicen cosas distintas. Y así
+// respeta lo que el que imprime está viendo.
+function sgPendImprimir(){
+  var filas = SG._pendFilas || [];
+  if (!filas.length) { toast('No hay nada esperando mercadería', 'er'); return; }
+  var hoy = new Date();
+  var cuando = hoy.toLocaleDateString('es-AR') + ' ' + hoy.toLocaleTimeString('es-AR').slice(0,5);
+  var cuerpo = filas.map(function(f){
+    return '<tr>'
+      + '<td class="mono">' + escH(f.primero ? sgOcId(f.o) : '') + '</td>'
+      + '<td>' + escH(f.primero ? (f.o.fecha_oc || '') : '') + '</td>'
+      + '<td>' + escH(f.primero ? (f.o.proveedor_nombre || '') : '') + '</td>'
+      + '<td>' + escH(f.it.producto_nombre || '') + '</td>'
+      + '<td class="n">' + nr(f.it.kg_estimados) + '</td>'
+      + '<td class="n">' + nr(f.it.kg_recibidos) + '</td>'
+      + '<td class="n b">' + nr(f.falta) + '</td>'
+      + '<td class="chk"></td></tr>';
+  }).join('');
+  var w = window.open('', '_blank');
+  if (!w) { toast('El navegador bloqueó la ventana de impresión', 'er'); return; }
+  w.document.write('<!doctype html><html lang="es"><head><meta charset="utf-8">'
+    + '<title>Pendientes de recibir</title><style>'
+    + '*{box-sizing:border-box}'
+    + "body{font-family:system-ui,-apple-system,'Segoe UI',sans-serif;margin:0;padding:22px;color:#111}"
+    + 'h1{font-size:17px;margin:0 0 2px}'
+    + '.sub{font-size:11.5px;color:#666;margin-bottom:14px}'
+    + 'table{width:100%;border-collapse:collapse;font-size:12px}'
+    + 'th{text-align:left;font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:#666;'
+    + 'border-bottom:1.5px solid #333;padding:0 6px 4px}'
+    + 'td{padding:5px 6px;border-bottom:1px solid #ddd}'
+    + '.n{text-align:right;font-variant-numeric:tabular-nums}.b{font-weight:700}'
+    + '.mono{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:11px}'
+    /* Una casilla por renglón: la hoja se usa tildando mientras baja el camión. */
+    + '.chk{width:26px}td.chk::after{content:"";display:block;width:14px;height:14px;'
+    + 'border:1px solid #999;border-radius:2px}'
+    + '.pie{margin-top:16px;font-size:10.5px;color:#666}'
+    + 'button{position:fixed;top:14px;right:14px;padding:8px 14px;font-size:13px;cursor:pointer;'
+    + 'border:1px solid #333;background:#fff;border-radius:6px}'
+    + '@media print{button{display:none}body{padding:0}}'
+    + '</style></head><body>'
+    + '<button onclick="window.print()">Imprimir</button>'
+    + '<h1>Pendientes de recibir</h1>'
+    + '<div class="sub">San Ger\u00f3nimo &middot; ' + escH(cuando) + '</div>'
+    + '<table><thead><tr><th>Partida</th><th>Fecha</th><th>Proveedor</th><th>Producto</th>'
+    + '<th class="n">Kg pedidos</th><th class="n">Kg recibidos</th><th class="n">Falta</th>'
+    + '<th class="chk"></th></tr></thead><tbody>' + cuerpo + '</tbody></table>'
+    + '<div class="pie">Es una foto del momento: lo que se reciba despu\u00e9s de imprimir '
+    + 'no est\u00e1 en esta hoja.</div></body></html>');
+  w.document.close();
+}
+
 function sgLoadPendientesRecibir(){
   api('/api/sg/oc').then(function(r){
     var ocs = (r && r.ok) ? r.data : [];
@@ -9568,6 +9645,10 @@ function sgLoadPendientesRecibir(){
         var n1 = eid('sg-pend-n'); if (n1) n1.textContent = '';
         return;
       }
+      // Se guarda lo que se acaba de dibujar: la hoja que se imprime tiene que
+      // ser LA MISMA que está en pantalla. Rearmar la lista en el servidor sería
+      // dos cuentas distintas que con el tiempo dicen cosas distintas.
+      SG._pendFilas = filas;
       var nOrdenes = {};
       filas.forEach(function(f){ nOrdenes[f.o.id] = 1; });
       var cuantas = Object.keys(nOrdenes).length;
@@ -10828,11 +10909,13 @@ function sgRecFaltaEn(p){
         f.push(faltanOk === 1 ? 'confirmar 1 producto del resumen'
                               : ('confirmar ' + faltanOk + ' productos del resumen'));
       }
-      // Y si algo no da, hay que decir qué pasó. No se le pregunta si hubo
-      // diferencias: se las muestra y se le pide la explicación.
-      if (sgRecDifieren().length && !String((eid('sg-rec-var-motivo') || {}).value || '').trim()) {
-        f.push('explicar la diferencia contra la orden');
-      }
+      // LA JUSTIFICACIÓN YA NO TRABA. Era obligatoria para que una diferencia no
+      // quedara sin motivo, pero el que recibe a las cinco de la mañana con el
+      // camión esperando escribía "ok" para poder seguir — y eso es PEOR que
+      // vacío, porque parece justificado y no lo está.
+      //
+      // Ahora se puede confirmar sin escribirla, y la orden queda marcada
+      // "sin justificar" para que el que revisa después sepa cuál completar.
     }
   }
   return f;
@@ -10866,7 +10949,6 @@ function sgRecRenderPesos(){
       + '<div class="sg-oc-box-tit">' + esc(it.producto_nombre || ('Artículo ' + (i + 1)))
         + ' <span style="text-transform:none;letter-spacing:0;font-weight:400">— '
         + (bultos ? (nr(bultos) + ' bultos contados') : 'todavía sin contar')
-        + (derivado ? (' · sin pesar serían ' + nr(derivado) + ' kg') : '')
         + '</span></div>'
       + '<div class="sg-rec-grid">'
         // EL PESO ES POR BULTO, NO EL TOTAL. Es lo que hace el que recibe: pone
@@ -10878,11 +10960,18 @@ function sgRecRenderPesos(){
           + '<input type="number" min="0" step="0.01" value="' + _sgN(it.peso_bulto) + '"'
           + ' placeholder="' + (kpb ? ('la orden dice ' + nr(kpb)) : 'lo que marca la balanza') + '"'
           + ' oninput="sgRecArtUpd(' + i + ',\'peso_bulto\',this.value)">'
+          // ACÁ NO VA EL TOTAL. Mostrar los kilos de la partida mientras se
+          // tipea convierte la medición en un AJUSTE: el que pesa ve que no le
+          // cierra con lo esperado y corrige el peso unitario hasta que dé, en
+          // vez de anotar lo que marcó la balanza. Deja de ser una medición y
+          // pasa a ser una cuenta hacia atrás.
+          //
+          // El total se sigue calculando igual y se ve en el paso 5, que es
+          // donde corresponde comparar: primero se anota lo medido, después se
+          // contrasta contra lo pedido.
           + '<div style="font-size:11px;color:var(--mut);margin-top:3px">'
-            + (bultos
-                ? ('× ' + nr(bultos) + ' bultos = <b>' + nr(Number(it.peso_bulto) > 0
-                     ? Math.round(bultos * Number(it.peso_bulto)) : derivado) + ' kg</b>')
-                : 'contá los bultos en el paso 2 y acá se hace la cuenta')
+            + (bultos ? 'Lo que marcó la balanza con UN bulto arriba.'
+                      : 'contá los bultos en el paso 2')
           + '</div></div>'
         // DONDE QUEDO LA MERCADERIA. Se pregunta acá, en el mismo paso donde el
         // que recibe ya está mirando el producto: es el único momento en que
