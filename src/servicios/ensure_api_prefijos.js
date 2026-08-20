@@ -130,7 +130,25 @@ const PREFIJOS = [
   // control la deja pasar entera.
   ['sg-compras',         'sg/recepciones,sg/oc,sg/compra-retroactiva,sg/lotes,sg/facturas-compra'],
   ['sg-stock',           'sg/lotes,sg/disponibilidad,sg/decomisos'],
-  ['sg-ventas',          'sg/despachos,sg/pedidos,sg/ventas'],
+  // ── LAS DOS PANTALLAS QUE SALIERON DE SALIDAS ──────────────────────────
+  // El listado de comprobantes y los remitos pendientes se fueron a
+  // Administración de Ventas. Sus direcciones se declaran bajo la pantalla
+  // nueva Y bajo sg-ventas, que es de donde salieron: mejorNivel() toma el
+  // MAYOR nivel entre TODOS los dueños del prefijo más largo, así que quien ya
+  // tenía Salidas no se queda afuera el día que esto se despliega, y quien
+  // tenga sólo la pantalla nueva también entra.
+  //
+  // Van en la MISMA fila de sg-ventas, no en una segunda: esto se guarda con un
+  // UPDATE de la columna api_prefijos, así que un segundo ['sg-ventas', …]
+  // pisaría al primero y le borraría despachos, pedidos y ventas.
+  //
+  // 'sg/despachos-pendientes' NO estaba declarado en ningún lado, y no lo cubre
+  // 'sg/despachos': el prefijo matchea por segmento completo, y
+  // /api/sg/despachos-pendientes no empieza con /api/sg/despachos/. O sea que
+  // hasta hoy esa dirección no la miraba exigirNivel.
+  ['sg-ventas',          'sg/despachos,sg/pedidos,sg/ventas,sg/ventas/facturas,sg/despachos-pendientes'],
+  ['sg-vta-comprobantes', 'sg/ventas/facturas'],
+  ['sg-remitos-pend',     'sg/despachos-pendientes'],
   // 'sg/presentaciones' y 'sg/clientes' faltaban, y son dos solapas de esta
   // misma pantalla. Sin declararlas, moduloDeRuta devolvía null y exigirNivel
   // dejaba pasar: el día que sus escrituras dejaran de pedir admin —que es hoy—

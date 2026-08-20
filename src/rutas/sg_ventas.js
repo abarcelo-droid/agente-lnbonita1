@@ -10,6 +10,7 @@ import express from 'express';
 import db from '../servicios/db_sg_finanzas.js';
 import { crearAsiento, MOTIVOS } from '../servicios/asientos.js';
 import { generarFacturaPDF } from '../servicios/facturaPDF.js';
+import { enviarMail } from '../servicios/mail.js';
 import * as XLSX from 'xlsx';
 import { exigirEmpresa, SAN_GERONIMO } from '../servicios/sociedad_modulo.js';
 
@@ -32,7 +33,12 @@ router.use((req, res, next) => {
 // alias = nombre_comercial del cliente. solo_afip → solo comprobantes fiscales (con afip_estado).
 function buildFacturasQuery(req) {
   const { clienteId, estado, afip_estado, tipo, desde, hasta, solo_afip } = req.query;
-  let sql = `SELECT f.*, c.razon_social as cliente_nombre, c.nombre_comercial as alias
+  // El mail del cliente y el último envío viajan con cada fila: la pantalla
+  // tiene que poder decir «ésta ya se mandó» sin un pedido por renglón.
+  let sql = `SELECT f.*, c.razon_social as cliente_nombre, c.nombre_comercial as alias,
+               c.email as cliente_email,
+               (SELECT MAX(e.enviado_en) FROM sg_ven_envios e
+                 WHERE e.factura_id = f.id AND e.ok = 1) AS ultimo_envio
              FROM sg_ven_facturas f JOIN sg_clientes c ON c.id=f.cliente_id WHERE 1 = 1`;
   const params = [];
   if (clienteId)   { sql += ' AND f.cliente_id=?'; params.push(parseInt(clienteId)); }
@@ -456,6 +462,75 @@ router.get('/facturas/:id/pdf', async (req, res) => {
       'Content-Disposition': `inline; filename="comprobante-${String(f.punto_venta||0).padStart(4,'0')}-${String(f.cbte_nro||0).padStart(8,'0')}.pdf"`
     });
     res.send(pdf);
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// ── MANDAR EL COMPROBANTE POR MAIL ───────────────────────────────────────────
+// Hasta ahora el comprobante se bajaba y se mandaba desde el mail de alguien.
+// Eso funciona hasta que hay que contestar «¿se la mandamos?», y ahí no lo sabe
+// nadie: cada uno mira su propia casilla de enviados.
+//
+// Va el MISMO PDF que imprime el botón de al lado — el que tiene el CAE y el QR
+// de ARCA. No se arma otro documento para el mail: dos versiones del mismo
+// comprobante es exactamente lo que no puede pasar.
+router.post('/facturas/:id/mail', requireAuth, async (req, res) => {
+  try {
+    const f = db.prepare(`SELECT f.*, c.razon_social, c.cuit, c.categoria_fiscal, c.email,
+        c.direccion_entrega, c.localidad, c.provincia
+      FROM sg_ven_facturas f JOIN sg_clientes c ON c.id=f.cliente_id WHERE f.id=?`).get(req.params.id);
+    if (!f) return res.status(404).json({ ok: false, error: 'Factura no encontrada' });
+    // Sin CAE no hay comprobante que mandar: lo que saldría es un borrador con
+    // pinta de factura, y del otro lado lo van a registrar como si lo fuera.
+    if (f.afip_estado !== 'autorizado' || !f.cae) {
+      return res.status(400).json({ ok: false,
+        error: 'La factura no está autorizada por AFIP (sin CAE): todavía no hay comprobante que mandar.' });
+    }
+    const para = String(req.body?.to || f.email || '').trim();
+    if (!para) {
+      return res.status(400).json({ ok: false,
+        error: 'El cliente no tiene mail cargado. Poné la dirección, o cargásela en la ficha del cliente.' });
+    }
+    const num = String(f.punto_venta || 0).padStart(4, '0') + '-'
+              + String(f.cbte_nro || 0).padStart(8, '0');
+    f.cliente = { razon_social: f.razon_social, cuit: f.cuit, categoria_fiscal: f.categoria_fiscal,
+      direccion_entrega: f.direccion_entrega, localidad: f.localidad, provincia: f.provincia };
+    f.items = db.prepare('SELECT * FROM sg_ven_factura_items WHERE factura_id=? ORDER BY id').all(f.id);
+    const pdf = await generarFacturaPDF(f);
+
+    const esc = (t) => String(t == null ? '' : t)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    const asunto = 'Comprobante ' + (f.tipo || '') + ' N° ' + num + ' — San Gerónimo';
+    const cuerpo = String(req.body?.mensaje || '').trim();
+    const html = '<p>Estimados de <b>' + esc(f.razon_social) + '</b>:</p>'
+      + '<p>Adjuntamos el comprobante <b>' + esc(f.tipo) + ' N° ' + esc(num) + '</b> '
+      + 'de fecha ' + esc(f.fecha) + ' por <b>$ '
+      + Number(f.total || 0).toLocaleString('es-AR', { minimumFractionDigits: 2 }) + '</b>.</p>'
+      + (cuerpo ? '<p>' + esc(cuerpo).split('\n').join('<br>') + '</p>' : '')
+      + '<p style="color:#666;font-size:12px">CAE ' + esc(f.cae)
+      + ' — vence ' + esc(f.cae_vto) + '</p>'
+      + '<p style="color:#666;font-size:12px">San Gerónimo S.A.</p>';
+
+    const r = await enviarMail({
+      to: para, asunto, cuerpo_html: html,
+      adjuntos: [{ filename: 'comprobante-' + num + '.pdf', content: pdf.toString('base64') }],
+      sender_name: 'San Gerónimo S.A.'
+    });
+    // Se anota el intento aunque haya fallado: un rebote dice que la dirección
+    // del cliente está mal, y eso hay que poder verlo.
+    db.prepare(`INSERT INTO sg_ven_envios (factura_id, para, asunto, ok, error, usuario_id)
+      VALUES (?,?,?,?,?,?)`).run(f.id, para, asunto, r.success ? 1 : 0,
+        r.success ? null : String(r.error || '').slice(0, 300), req._user?.id ?? null);
+    if (!r.success) return res.status(502).json({ ok: false, error: r.error || 'No se pudo enviar' });
+    res.json({ ok: true, para });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// El historial de envíos de un comprobante: quién, cuándo y a dónde.
+router.get('/facturas/:id/envios', (req, res) => {
+  try {
+    res.json({ ok: true, data: db.prepare(`SELECT e.*, u.nombre AS usuario
+      FROM sg_ven_envios e LEFT JOIN usuarios u ON u.id = e.usuario_id
+      WHERE e.factura_id = ? ORDER BY e.id DESC`).all(req.params.id) });
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
