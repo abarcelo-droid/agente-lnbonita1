@@ -3837,6 +3837,22 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
 
 
   <div class="sec sg-mod" id="sec-sg-importacion">
+    <style>
+      /* El selector de estado, con forma de chapa. El color lo pone sgEmbSwPintar() desde
+         JS, porque depende del estado; acá va sólo lo que no cambia. appearance:none saca
+         el fondo gris que el navegador le pone de oficio y que tapaba el color. */
+      #sec-sg-importacion .sg-emb-sw{
+        -webkit-appearance:none;appearance:none;
+        padding:3px 22px 3px 10px;border-radius:20px;border:1px solid var(--bor);
+        font-size:11px;font-weight:600;cursor:pointer;text-align:center;
+        background-repeat:no-repeat;background-position:right 7px center;background-size:8px;
+        background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 6'><path d='M1 1l4 4 4-4' fill='none' stroke='%23666' stroke-width='1.5'/></svg>")}
+      #sec-sg-importacion .sg-emb-sw:hover{filter:brightness(.96)}
+      #sec-sg-importacion .sg-emb-sw:focus{outline:2px solid var(--burg,#7c1d3f);outline-offset:1px}
+      /* Las opciones del desplegable van con el fondo del tema: heredar el color de la
+         chapa las dejaba ilegibles (texto ámbar sobre ámbar) cuando se abre la lista. */
+      #sec-sg-importacion .sg-emb-sw option{background:var(--sur,#fff);color:var(--txt,#111);font-weight:500}
+    </style>
     <div class="ph"><div><div class="ph-t">🍅 San Gerónimo · Importación</div><div class="ph-s">Cotizador de embarque: costo por caja en pesos según a qué dólar se paga cada rubro. Estimado vs real.</div></div><div style="display:flex;gap:8px"><button class="btn bo" onclick="sgParamsAbrir()">⚙️ Parámetros</button><button class="btn bo" onclick="sgCurvaAbrir()">📈 Curva TC</button><button class="btn bo" onclick="sgTcAbrir()">💱 TC esperado</button><button class="btn bb" onclick="sgImpOpen()">+ Nuevo embarque</button></div></div>
     <!-- Solapas propias de Importación (scopeadas a esta sección, no comparten el toggler
          genérico de catálogos para no apagar los subtabs de otras pantallas). -->
@@ -24587,7 +24603,7 @@ function sgImpCalLista(){
           +'<td>'+(i.fecha_eta?esc(i.fecha_eta):'<span style="color:var(--mut)">—</span>')+' '+chip(i.dias_para_eta,i.atrasado)+'</td>'
           +'<td style="text-align:center;color:var(--mut)">'+(i.fecha_eta?sgCalSemana(i.fecha_eta):'—')+'</td>'
           +'<td style="text-align:right">'+(i.cantidad_cajas!=null?nr(i.cantidad_cajas):'—')+'</td>'
-          +'<td style="text-align:center"><span class="bdg bok">'+esc(sgEmbEstadoLbl(i.estado))+'</span></td>'
+          +'<td style="text-align:center">'+sgEmbEstadoBdg(i.estado)+'</td>'
           // El botón de WhatsApp acá y no sólo en la ficha: esta es la pantalla donde uno
           // ve que un camión está atrasado, y es el momento exacto en que hay que llamar.
           +'<td style="text-align:right;white-space:nowrap">'+sgCalWhats(i)
@@ -24665,6 +24681,35 @@ function sgImpEstado(id, estado, sel, etd){
 }
 function sgEmbEstadoLbl(e){ var f=SG_EMB_ESTADOS.find(function(x){return x[0]===e;}); return f?f[1]:(e||'—'); }
 
+// ── UN COLOR POR ESTADO ───────────────────────────────────────────────────────
+// El ciclo del camión se leía todo verde: "En tránsito" y "Recibido" tenían la misma
+// chapa, así que para saber qué estaba viajando había que leer renglón por renglón.
+// El color sigue el viaje: gris todavía es un precio · azul confirmado · ÁMBAR viajando,
+// que es lo único que hay que perseguir · verde llegó · burdeos cerrado y congelado.
+// Un solo lugar: lo usan la lista, el calendario, la ficha y el selector.
+var SG_EMB_COLOR = {
+  cotizacion: ['#f1f5f9', '#475569', '#cbd5e1'],
+  abierto:    ['#dbeafe', '#1e40af', '#93c5fd'],
+  transito:   ['#fef3c7', '#92400e', '#fcd34d'],
+  recibido:   ['#dcfce7', '#166534', '#86efac'],
+  cerrado:    ['#f5e9ef', '#7c1d3f', '#e2c3d1']
+};
+function sgEmbEstadoCol(e){ return SG_EMB_COLOR[e] || SG_EMB_COLOR.cotizacion; }
+function sgEmbEstadoBdg(e){
+  var c = sgEmbEstadoCol(e);
+  return '<span class="bdg" style="background:'+c[0]+';color:'+c[1]+'">'+esc(sgEmbEstadoLbl(e))+'</span>';
+}
+// El selector se pinta igual que la chapa. Se aplica también al cambiarlo, sin esperar a
+// que vuelva el servidor: si no, el color queda mintiendo hasta que recarga la lista.
+function sgEmbSwPintar(sel){
+  if(!sel) return;
+  var c = sgEmbEstadoCol(sel.value);
+  // backgroundColor y NO background: el shorthand borra el background-image, que es la
+  // flechita del desplegable. Se pierde el indicador de que el control se puede abrir.
+  sel.style.backgroundColor = c[0]; sel.style.color = c[1];
+  sel.style.borderColor = c[2]; sel.style.fontWeight = '600';
+}
+
 function sgImpInit(){
   var t=document.getElementById('sec-sg-importacion');
   if(t && !t.querySelector('.sg-imp-tab.on')) sgImpTab('ingresos');
@@ -24687,11 +24732,11 @@ function sgImpInit(){
         // ponen sus botones, que son los que generan los lotes y re-costean.
         +'<td style="text-align:center">'
           +(sgEmbEstadoManual(e.estado)
-            ? '<select class="sg-emb-sw" onchange="sgImpEstado('+e.id+',this.value,this)">'
+            ? '<select class="sg-emb-sw" data-estado="'+esc(e.estado)+'" onchange="sgEmbSwPintar(this);sgImpEstado('+e.id+',this.value,this)">'
               +[['cotizacion','Cotización'],['abierto','Abierto'],['transito','En tránsito']].map(function(x){
                   return '<option value="'+x[0]+'"'+(e.estado===x[0]?' selected':'')+'>'+x[1]+'</option>'; }).join('')
               +'</select>'
-            : '<span class="bdg bok">'+esc(sgEmbEstadoLbl(e.estado))+'</span>')
+            : sgEmbEstadoBdg(e.estado))
         +'</td>'
         +'<td style="text-align:right">'+(e.cantidad_cajas!=null?nr(e.cantidad_cajas):'—')+'</td>'
         +'<td style="text-align:right;font-weight:600">'
@@ -24701,6 +24746,9 @@ function sgImpInit(){
         +'<td style="text-align:right;white-space:nowrap"><button class="btn bo bs" title="Ver el camión: costo en pesos, productos y documentos" onclick="sgImpVisor('+e.id+')">👁</button> <button class="btn bo bs" title="Duplicar: arranca un embarque nuevo con esta estructura de costos" onclick="sgImpDuplicar('+e.id+')">⧉</button> <button class="btn bo bs" onclick="sgImpOpen('+e.id+')">✏️</button>'+(lnbPuedeAnular('sg-importacion')?' <button class="btn bd bs" onclick="sgImpDel('+e.id+')">×</button>':'')+'</td>'
       +'</tr>';
     }).join('') : '<tr><td colspan="7" class="emp">Sin embarques. Creá el primero con “+ Nuevo embarque”.</td></tr>';
+    // El color del selector se pinta acá y no en el HTML: un style inline en el <select>
+    // se lo comen los estilos propios del control en algunos navegadores.
+    Array.prototype.forEach.call(document.querySelectorAll('#sg-tb-embarques .sg-emb-sw'), sgEmbSwPintar);
   });
 }
 function sgImpVal(v){ return (v==null)?'':String(v); }
@@ -24749,6 +24797,11 @@ function sgImpFill(e){
     var sel = (estActual===x[0]);
     return '<option value="'+x[0]+'"'+(sel?' selected':'')+((auto&&!sel)?' disabled':'')+'>'+x[1]+(auto?' (automático)':'')+'</option>';
   }).join('');
+  // El mismo color acá adentro: el estado se elige en dos lugares y tiene que verse igual.
+  // Sólo el color, sin la forma de chapa: acá es un campo de formulario y tiene que
+  // parecerse a los de al lado, no a la chapa de la lista.
+  sgEmbSwPintar(eid('sg-emb-estado'));
+  eid('sg-emb-estado').onchange = function(){ sgEmbSwPintar(this); };
   eid('sg-emb-flete-base').value = sgImpVal(e.flete_base_usd);
   eid('sg-emb-seguro').value = sgImpVal(e.seguro_usd);
   eid('sg-emb-etd').value = sgImpVal(e.fecha_etd);
@@ -25271,7 +25324,7 @@ function sgImpVisor(id){
     }
     // 2) Datos del viaje.
     h+='<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px;padding:12px;border:1px solid var(--bor);border-radius:10px;margin-bottom:12px">'
-      +dato('Estado','<span class="bdg bok">'+esc(sgEmbEstadoLbl(e.estado))+'</span>')
+      +dato('Estado', sgEmbEstadoBdg(e.estado))
       +dato('Proveedor', esc(e.proveedor_nombre||'—'))
       +dato('Origen', esc(e.pais_origen||'—')+(e.incoterm?(' · '+esc(e.incoterm)):''))
       +dato('N° invoice', e.nro_invoice?('<b>'+esc(e.nro_invoice)+'</b>'):'<span style="color:var(--mut)">sin cargar</span>')
@@ -25596,7 +25649,7 @@ function sgTcPreview(){
         + d.items.map(function(i){
             var dl=i.delta;
             return '<tr><td><b>'+esc(i.nombre||'')+'</b>'+(i.lotes?' <span style="font-size:10px;color:var(--mut)">'+i.lotes+' lote(s)</span>':'')+'</td>'
-              + '<td>'+esc(sgEmbEstadoLbl(i.estado))+'</td>'
+              + '<td>'+sgEmbEstadoBdg(i.estado)+'</td>'
               + '<td style="text-align:right">'+(i.tc_actual!=null?nr(i.tc_actual):'—')+'</td>'
               + '<td style="text-align:right">'+(i.costo_caja_antes!=null?sgMoney(Math.round(i.costo_caja_antes)):'—')+'</td>'
               + (hay?('<td style="text-align:right;font-weight:600">'+(i.costo_caja_despues!=null?sgMoney(Math.round(i.costo_caja_despues)):'—')+'</td>'
