@@ -12,7 +12,7 @@
 // vacías) para que las FKs resuelvan desde el día 1. Las fases siguientes solo
 // agregan endpoints + UI, no esquema.
 
-import db from './db.js';
+import db, { rehacerTabla } from './db.js';
 
 // ── CATÁLOGO ──────────────────────────────────────────────────────────────────
 
@@ -2022,6 +2022,76 @@ try {
   // descargas de una cooperativa recorre la tabla entera por cada fila.
   db.exec('CREATE INDEX IF NOT EXISTS idx_sg_gd_coop ON sg_gastos_directos(cooperativa_id)');
 } catch (e) { console.error('[DB] SG cooperativa_id en gastos:', e.message); }
+
+// ── EL REMITO PUEDE ASIGNAR MERCADERÍA QUE TODAVÍA NO LLEGÓ ─────────────────
+// Un remito saca stock y se lo asigna a un cliente. Pero en este negocio se
+// compromete mercadería ANTES de que baje del camión: el comprador cerró la
+// carga, viene en viaje, y el cliente la quiere anotada a su nombre.
+//
+// Hasta ahora la línea del remito exigía `lote_id NOT NULL`, y el lote no
+// existe hasta que la mercadería se recibe. O sea: no había forma de anotarlo.
+// El único registro de esa promesa era la memoria del que la hizo.
+//
+// La línea pasa a tener DOS ORÍGENES, igual que sg_reservas —que ya usa este
+// mismo par desde el circuito de pedidos—:
+//   origen='lote'    → lote_id, mercadería que está en el depósito.
+//   origen='oc_item' → oc_item_id, mercadería de una orden que viene en viaje.
+//
+// lote_id deja de ser obligatorio. Eso NO se puede hacer con un ALTER: SQLite no
+// saca un NOT NULL, hay que rehacer la tabla. Va con rehacerTabla(), que corre
+// todo en una transacción y deja la tabla como estaba si algo falla.
+try {
+  const colsDI = db.prepare('PRAGMA table_info(sg_despacho_items)').all();
+  const tieneOrigen = colsDI.some((c) => c.name === 'origen');
+  if (!tieneOrigen) {
+    const ok = rehacerTabla('sg_despacho_items', `
+      CREATE TABLE sg_despacho_items_v2 (
+        id                      INTEGER PRIMARY KEY AUTOINCREMENT,
+        despacho_id             INTEGER NOT NULL REFERENCES sg_despachos(id),
+        -- De dónde sale la mercadería de esta línea.
+        origen                  TEXT NOT NULL DEFAULT 'lote'
+                                  CHECK(origen IN ('lote','oc_item')),
+        lote_id                 INTEGER REFERENCES sg_lotes(id),
+        oc_item_id              INTEGER REFERENCES sg_oc_items(id),
+        producto_id             INTEGER REFERENCES sg_productos(id),
+        presentacion_id         INTEGER REFERENCES sg_presentaciones(id),
+        cantidad_presentaciones REAL DEFAULT 0,
+        kg_despachados          REAL DEFAULT 0,
+        precio_por_kg           REAL DEFAULT 0,
+        -- POR QUÉ ese precio. Hoy eso vive en un chat de WhatsApp, así que el
+        -- que factura no lo tiene y llama a preguntar.
+        nota_precio             TEXT,
+        subtotal                REAL DEFAULT 0,
+        margen_estimado         REAL DEFAULT 0,
+        bultos                  INTEGER,
+        kg_por_bulto            REAL,
+        envase_id               INTEGER,
+        -- Cuando la partida en viaje se recibe, acá queda el lote que le tocó.
+        lote_recibido_id        INTEGER REFERENCES sg_lotes(id),
+        -- Una línea es de un origen O del otro, nunca de los dos ni de ninguno.
+        CHECK((origen='lote'    AND lote_id    IS NOT NULL AND oc_item_id IS NULL)
+           OR (origen='oc_item' AND oc_item_id IS NOT NULL AND lote_id    IS NULL))
+      );
+      INSERT INTO sg_despacho_items_v2
+        (id, despacho_id, origen, lote_id, producto_id, presentacion_id,
+         cantidad_presentaciones, kg_despachados, precio_por_kg, subtotal,
+         margen_estimado, bultos, kg_por_bulto, envase_id)
+        SELECT id, despacho_id, 'lote', lote_id, producto_id, presentacion_id,
+               cantidad_presentaciones, kg_despachados, precio_por_kg, subtotal,
+               margen_estimado, bultos, kg_por_bulto, envase_id
+          FROM sg_despacho_items;
+      DROP TABLE sg_despacho_items;
+      ALTER TABLE sg_despacho_items_v2 RENAME TO sg_despacho_items;
+      CREATE INDEX IF NOT EXISTS idx_sg_despacho_items_despacho ON sg_despacho_items(despacho_id);
+      CREATE INDEX IF NOT EXISTS idx_sg_despacho_items_lote     ON sg_despacho_items(lote_id);
+      CREATE INDEX IF NOT EXISTS idx_sg_despacho_items_ocitem   ON sg_despacho_items(oc_item_id);
+    `);
+    if (ok) {
+      console.log('[DB] SG remitos: la línea puede venir de una partida EN VIAJE '
+                + '(origen/oc_item_id) y lote_id dejó de ser obligatorio.');
+    }
+  }
+} catch (e) { console.error('[DB] SG remitos (origen en la línea):', e.message); }
 
 console.log('[DB] Módulo San Gerónimo (sg_*) inicializado');
 
