@@ -2857,7 +2857,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
          recorrer la lista con el dedo. Filtra mientras se escribe, sin ir al
          servidor: la lista ya está entera en la pantalla. -->
     <div id="sg-ccprov-tarjetas" style="margin-bottom:12px"></div>
-    <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:10px">
+    <div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap;margin-bottom:10px">
       <div class="sg-oc-search" style="max-width:340px;flex:1;min-width:220px">
         <input id="sg-ccprov-q" placeholder="🔎 Buscar proveedor…" oninput="sgCcProvPintar()"
                style="width:100%;box-sizing:border-box">
@@ -2866,20 +2866,17 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
            mismo corte sobre los mismos datos, y llamarlo distinto en cada
            pantalla obliga a traducir mentalmente. Acá decide qué saldo se
            muestra en la columna Saldo y en las tarjetas de arriba. -->
-      <label style="font-size:12px;color:var(--mut)">Libro:
+      <label style="font-size:12px;color:var(--mut);display:flex;flex-direction:column;gap:3px">
+        <span>Libro:</span>
         <select id="sg-ccprov-libro" onchange="sgCcProvPintar()"
-                style="padding:5px 8px;font-size:12px">
+                style="padding:7px 10px;font-size:12.5px">
           <option value="">Fiscal + Gestión</option>
           <option value="fiscal">Sólo fiscal</option>
           <option value="gestion">Sólo gestión</option>
         </select></label>
     </div>
     <div class="ab-table-wrap"><table class="pa-tbl">
-      <thead><tr><th>Proveedor</th><th style="text-align:right">Apertura</th>
-        <th style="text-align:right">Contabilizado</th>
-        <th style="text-align:right">Sin facturar</th>
-        <th style="text-align:right">Saldo</th>
-        <th style="text-align:center">Esperando el libro</th><th></th></tr></thead>
+      <thead id="sg-ccprov-th"></thead>
       <tbody id="sg-tb-ccprov"><tr><td colspan="7" class="emp">Cargando…</td></tr></tbody>
     </table></div>
     <div id="sg-ccprov-n" style="font-size:11.5px;color:var(--mut);margin-top:6px"></div>
@@ -5775,6 +5772,16 @@ function sgCcProvPintar(){
         : (libro === 'gestion' ? sgCcTarjetas(0, ges, 'Se debe — sin facturar')
           : sgCcTarjetas(fis, ges, 'Se debe en total')));
   }
+  // El encabezado se arma acá porque las columnas dependen del libro elegido:
+  // con "sólo fiscal" la de sin facturar no va, y al revés.
+  var th = eid('sg-ccprov-th');
+  if (th) {
+    th.innerHTML = '<tr><th>Proveedor</th><th style="text-align:right">Apertura</th>'
+      + (libro === 'gestion' ? '' : '<th style="text-align:right">Contabilizado</th>')
+      + (libro === 'fiscal' ? '' : '<th style="text-align:right">Sin facturar</th>')
+      + '<th style="text-align:right">Saldo</th>'
+      + '<th style="text-align:center">Esperando el libro</th><th></th></tr>';
+  }
   var n = eid('sg-ccprov-n');
   if (n) n.textContent = rows.length === SG_CCPROV.length
     ? (SG_CCPROV.length ? SG_CCPROV.length + ' proveedor' + (SG_CCPROV.length === 1 ? '' : 'es') : '')
@@ -5793,14 +5800,16 @@ function sgCcProvPintar(){
       return '<tr style="cursor:pointer" onclick="sgCcFicha('+p.id+')">'
         +'<td><b>'+esc(p.razon_social)+'</b></td>'
         +'<td style="text-align:right">'+cero(ap)+'</td>'
-        +'<td style="text-align:right">'+cero(fac)+'</td>'
+        // Con un libro elegido, la columna del OTRO no se muestra: mezclarlas es
+        // justo lo que el filtro vino a evitar.
+        +(libro === 'gestion' ? '' : '<td style="text-align:right">'+cero(fac)+'</td>')
         // Qué parte de ese saldo todavía no tiene comprobante. En la fila y no
         // sólo en el total: el que busca dónde está la diferencia la encuentra
         // sin abrir las fichas de a una.
-        +'<td style="text-align:right">'
+        +(libro === 'fiscal' ? '' : '<td style="text-align:right">'
           +(Number(p.pendiente_gestion) > 0
               ? '<span style="color:#8a5a1f;font-weight:600">'+sgMoney(p.pendiente_gestion)+'</span>'
-              : '<span style="color:var(--mut)">—</span>')+'</td>'
+              : '<span style="color:var(--mut)">—</span>')+'</td>')
         +'<td style="text-align:right;font-weight:700;font-size:14px">'
           +sgMoney(libro === 'fiscal' ? fac : (libro === 'gestion' ? (Number(p.pendiente_gestion)||0) : p.saldo))
           +'</td>'
@@ -8157,6 +8166,20 @@ function sgCcExportar(como){
 // Cómo está cada renglón, en una palabra. Los pagos y la apertura no tienen
 // estado: no son deuda, son lo que la cancela o el punto de partida.
 function sgCcEstadoCelda(m){
+  // ── LA ORDEN DE PAGO: IMPRIMIR Y ANULAR ─────────────────────────────
+  // El recibo es para que el cajero lo haga firmar por quien recibe la plata:
+  // hasta ahora la orden vivía adentro del sistema y la constancia se hacía a
+  // mano o no se hacía. Y anular tenía su ruta desde hace rato, pero ningún
+  // botón la llamaba — estaba construida y no se podía usar.
+  if (m.tipo === 'pago' || m.tipo === 'anticipo') {
+    if (!m.pago_id) return '<span style="color:var(--mut)">—</span>';
+    return '<button class="btn bo bs" style="padding:2px 7px;font-size:10.5px"'
+      + ' title="Abrir el recibo para imprimir y hacer firmar"'
+      + ' onclick="window.open(\'/api/sg/pagos/' + m.pago_id + '/recibo\',\'_blank\')">🖨</button>'
+      + (lnbPuedeAnular('sg-cc-proveedores')
+          ? ' <button class="btn bd bs" style="padding:2px 7px;font-size:10.5px"'
+            + ' onclick="sgCcAnularPago(' + m.pago_id + ')">Anular</button>' : '');
+  }
   if (m.tipo !== 'factura') return '<span style="color:var(--mut)">—</span>';
   var deuda = Math.round((m.haber || 0) * 100) / 100;
   var pag = Math.round((m.pagado || 0) * 100) / 100;
@@ -8174,6 +8197,23 @@ function sgCcEstadoCelda(m){
       + 'Anular</button>';
   }
   return chip;
+}
+
+// Anular una orden de pago: la plata vuelve a la cuenta, las facturas vuelven a
+// estar pendientes y el asiento queda anulado —no borrado—. El cheque que salió
+// con ese pago se rompe; el de terceros que se endosó vuelve a la cartera.
+function sgCcAnularPago(pagoId){
+  var motivo = prompt('¿Por qué se anula la orden de pago N° ' + pagoId + '?\n\n'
+    + 'La plata vuelve a la cuenta de donde salió, las facturas que cancelaba quedan otra vez '
+    + 'pendientes y el asiento se anula. Queda registrado quién y cuándo.');
+  if (motivo === null) return;
+  if (!String(motivo).trim()) { toast('Escribí por qué se anula: queda registrado', 'er'); return; }
+  api('/api/sg/pagos/' + pagoId + '/anular', 'POST', { motivo: motivo }).then(function(r){
+    if (!r || !r.ok) { toast((r && r.error) || 'No se pudo anular', 'er'); return; }
+    toast('Orden de pago anulada', 'ok');
+    if (SG_CCFICHA && SG_CCFICHA.proveedor) sgCcFicha(SG_CCFICHA.proveedor.id);
+    sgLoadCcProv();
+  });
 }
 
 function sgCcAnularFactura(facturaId, nro){
