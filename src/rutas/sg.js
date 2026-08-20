@@ -4003,6 +4003,18 @@ router.get('/oc', requireAuth, (req, res) => {
                WHERE i.oc_id = o.id AND l.activo = 1) AS bultos_recibidos_total,
              (SELECT COALESCE(SUM(i.cantidad_estimada_presentaciones), 0)
                 FROM sg_oc_items i WHERE i.oc_id = o.id) AS bultos_estimados,
+             -- ── LO QUE ENTRÓ SIN ORDEN, EN EL LISTADO DEL COMPRADOR ───────
+             -- La mercadería que entra sin orden crea su orden ya recibida, con
+             -- lo comercial en blanco: el que la recibió sabe QUÉ bajó y CUÁNTO,
+             -- no a qué precio se pactó ni en cuántos días se paga.
+             --
+             -- Eso lo completa el comprador, y hasta ahora tenía que acordarse
+             -- de entrar a una solapa aparte. Ahora aparece en el listado donde
+             -- ya trabaja, marcada FALTA COMPLETAR — y deja de estar marcada
+             -- cuando de verdad se completó, no cuando alguien la miró.
+             (SELECT COUNT(*) FROM sg_oc_items i
+               WHERE i.oc_id = o.id
+                 AND (i.precio_estimado_por_kg IS NULL OR i.precio_estimado_por_kg <= 0)) AS items_sin_precio,
              -- ¿La compra se pactó EN BULTOS? Cuando se carga por kilo, los
              -- "bultos estimados" salen de dividir kilos por el factor y dan
              -- números que nadie pactó (1.000 kg / 18 = 55,5 cajones). Ese
@@ -4631,7 +4643,11 @@ router.post('/recepciones/preview-calidad.pdf', sgUploadMem.array('fotos', 40), 
 });
 
 // ── COMPRA RETROACTIVA (OC + recepción + lotes en una transacción) ─────────────
-router.post('/compra-retroactiva', requireAdmin, (req, res) => {
+// Sale con requireAuth, no con requireAdmin. Entró un camión sin orden a las
+// cinco de la mañana: el que lo recibe tiene que poder anotarlo. Con requireAdmin
+// había que despertar al dueño o dejar la mercadería sin registrar, que es lo que
+// de verdad pasaba. El nivel lo decide exigirNivel mirando la dirección.
+router.post('/compra-retroactiva', requireAuth, (req, res) => {
   const db = getDb();
   try {
     const b = req.body;
@@ -4726,6 +4742,17 @@ router.get('/lotes', requireAuth, (req, res) => {
       params.push(req.query.oc_id, req.query.oc_id);
     }
     if (req.query.sin_precio === '1') where.push('l.precio_unitario_kg IS NULL');
+    // Filtrar el stock por piso: "qué tengo arriba" es una pregunta del stock,
+    // no de otra pantalla. El valor 'sin' trae lo que todavía no se ubicó, que
+    // es justamente lo que hay que ir a acomodar.
+    if (req.query.piso_id === 'sin') {
+      where.push(`NOT EXISTS (SELECT 1 FROM sg_lote_ubicaciones u WHERE u.lote_id = l.id
+        AND (u.bultos > 0.001 OR u.kg > 0.01))`);
+    } else if (Number(req.query.piso_id) > 0) {
+      where.push(`EXISTS (SELECT 1 FROM sg_lote_ubicaciones u WHERE u.lote_id = l.id
+        AND u.piso_id = ? AND (u.bultos > 0.001 OR u.kg > 0.01))`);
+      params.push(Number(req.query.piso_id));
+    }
     if (req.query.ingreso_desde) { where.push('l.fecha_ingreso>=?'); params.push(req.query.ingreso_desde); }
     if (req.query.ingreso_hasta) { where.push('l.fecha_ingreso<=?'); params.push(req.query.ingreso_hasta); }
     // Próximos a vencer: dentro de N días (incluye vencidos), y no dados de baja.
@@ -4739,7 +4766,18 @@ router.get('/lotes', requireAuth, (req, res) => {
         COALESCE(l.kg_por_bulto, ps.factor_conversion) AS kg_por_bulto,
         CAST(julianday(l.fecha_vencimiento_estimada) - julianday(date('now','localtime')) AS INTEGER) AS dias_restantes,
         ${KG_VIGENTE_STOCK} AS kg_vigente,     -- vigentes = kg_reales − decomiso − transf/reproceso
-        ${KG_DISPONIBLE} AS kg_disponibles     -- disponibles = vigentes − despachado
+        ${KG_DISPONIBLE} AS kg_disponibles,    -- disponibles = vigentes − despachado
+        -- ── DÓNDE ESTÁ ────────────────────────────────────────────────────
+        -- El piso no es otra pantalla: es un dato de la partida, como su
+        -- vencimiento o su calidad. Preguntarle al stock qué hay y tener que ir
+        -- a otro lado a preguntar dónde está es partir en dos la misma respuesta.
+        --
+        -- Una partida repartida devuelve los dos lugares: "Piso 1 (60) · Piso 2 (40)".
+        (SELECT GROUP_CONCAT(p.nombre || ' (' || CAST(ROUND(u.bultos) AS INTEGER) || ')', ' · ')
+           FROM sg_lote_ubicaciones u JOIN sg_pisos p ON p.id = u.piso_id
+          WHERE u.lote_id = l.id AND (u.bultos > 0.001 OR u.kg > 0.01)) AS pisos,
+        (SELECT COUNT(*) FROM sg_lote_ubicaciones u
+          WHERE u.lote_id = l.id AND (u.bultos > 0.001 OR u.kg > 0.01)) AS n_pisos
       FROM sg_lotes l
       LEFT JOIN sg_productos pr ON pr.id=l.producto_id
       LEFT JOIN sg_presentaciones ps ON ps.id=l.presentacion_id
