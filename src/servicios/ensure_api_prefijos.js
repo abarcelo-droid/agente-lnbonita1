@@ -146,9 +146,22 @@ const PREFIJOS = [
   // 'sg/despachos': el prefijo matchea por segmento completo, y
   // /api/sg/despachos-pendientes no empieza con /api/sg/despachos/. O sea que
   // hasta hoy esa dirección no la miraba exigirNivel.
-  ['sg-ventas',          'sg/despachos,sg/pedidos,sg/ventas,sg/ventas/facturas,sg/despachos-pendientes'],
+  //
+  // 'sg/facturas' y 'sg/facturable' NO estaban declaradas, y emitir un
+  // comprobante fiscal vivía detrás de requireAdmin justamente por eso: era la
+  // única barrera que tenía. Declaradas acá, el nivel las cuida —y facturar deja
+  // de ser trabajo del dueño, que es lo que dice la regla de este repo—.
+  //
+  // 'sg/facturas' no pisa a 'sg/facturas-compra': el prefijo matchea por
+  // segmento completo, y /api/sg/facturas-compra/9 no empieza con
+  // /api/sg/facturas/.
+  ['sg-ventas',          'sg/despachos,sg/pedidos,sg/ventas,sg/ventas/facturas,sg/despachos-pendientes,sg/facturas,sg/facturable'],
   ['sg-vta-comprobantes', 'sg/ventas/facturas'],
   ['sg-remitos-pend',     'sg/despachos-pendientes'],
+  // Pedidos y Facturar salieron de Salidas. Igual que las otras dos, sus
+  // direcciones quedan declaradas bajo la pantalla nueva Y bajo sg-ventas.
+  ['sg-pedidos',          'sg/pedidos'],
+  ['sg-facturar',         'sg/facturas,sg/facturable'],
   // 'sg/presentaciones' y 'sg/clientes' faltaban, y son dos solapas de esta
   // misma pantalla. Sin declararlas, moduloDeRuta devolvía null y exigirNivel
   // dejaba pasar: el día que sus escrituras dejaran de pedir admin —que es hoy—
