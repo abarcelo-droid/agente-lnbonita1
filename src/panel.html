@@ -4119,7 +4119,53 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
 <!-- Visor del camión: resumen de solo lectura. Arriba el costo en pesos, que es el número
      con el que se decide a cuánto vender. -->
 <div class="ab-modal-overlay" id="sg-emb-visor-modal">
-  <div class="ab-modal" style="max-width:920px">
+  <style>
+    /* SIN BARRA LATERAL. El visor tenía max-width:920px pero .ab-modal trae
+       width:560px de la clase, así que la ventana quedaba en 560 y la tabla de
+       productos —nueve columnas— se salía: para leer el costo por caja, que es
+       el número con el que se pone precio, había que arrastrar la tabla.
+       Mismo criterio que #sg-ccficha-modal: el ancho es el de la pantalla,
+       columnas fijas, y se parte sólo lo de largo variable. */
+    #sg-emb-visor-modal .ab-modal{max-width:min(1280px,98vw);width:98vw}
+    #sg-emb-visor-modal .pa-tbl{width:100%;table-layout:fixed}
+    #sg-emb-visor-modal .pa-tbl th,#sg-emb-visor-modal .pa-tbl td{
+      padding:6px 9px;font-size:12.5px;white-space:nowrap;
+      overflow:hidden;text-overflow:ellipsis}
+    /* Los nombres son lo único de largo impredecible: se parten en vez de cortarse. */
+    #sg-emb-visor-modal .pa-tbl td.sgv-txt{white-space:normal;word-break:break-word}
+    /* COSTOS — seis columnas. */
+    #sg-emb-visor-modal .sgv-costos th:nth-child(1){width:30%}
+    #sg-emb-visor-modal .sgv-costos th:nth-child(2){width:8%}
+    #sg-emb-visor-modal .sgv-costos th:nth-child(3){width:16%}
+    #sg-emb-visor-modal .sgv-costos th:nth-child(4){width:18%}
+    #sg-emb-visor-modal .sgv-costos th:nth-child(5){width:16%}
+    #sg-emb-visor-modal .sgv-costos th:nth-child(6){width:12%}
+    /* PRODUCTOS — nueve. Las tres de la derecha son las que se miran, así que
+       se les da aire; las cantidades del medio son cortas y se aprietan. */
+    #sg-emb-visor-modal .sgv-prods th:nth-child(1){width:17%}
+    #sg-emb-visor-modal .sgv-prods th:nth-child(2){width:9%}
+    #sg-emb-visor-modal .sgv-prods th:nth-child(3){width:7%}
+    #sg-emb-visor-modal .sgv-prods th:nth-child(4){width:8%}
+    #sg-emb-visor-modal .sgv-prods th:nth-child(5){width:8%}
+    #sg-emb-visor-modal .sgv-prods th:nth-child(6){width:9%}
+    #sg-emb-visor-modal .sgv-prods th:nth-child(7){width:16%}
+    #sg-emb-visor-modal .sgv-prods th:nth-child(8){width:13%}
+    #sg-emb-visor-modal .sgv-prods th:nth-child(9){width:13%}
+    /* DOCUMENTOS — sin thead: las anchuras van sobre la primera fila. */
+    #sg-emb-visor-modal .sgv-docs td:nth-child(1){width:18%}
+    #sg-emb-visor-modal .sgv-docs td:nth-child(2){width:40%}
+    #sg-emb-visor-modal .sgv-docs td:nth-child(3){width:14%}
+    #sg-emb-visor-modal .sgv-docs td:nth-child(4){width:12%}
+    #sg-emb-visor-modal .sgv-docs td:nth-child(5){width:16%}
+    /* El !important es porque .ab-table-wrap trae su propio overflow-x:auto. */
+    #sg-emb-visor-modal .ab-table-wrap{overflow-x:hidden !important}
+    @media(max-width:900px){
+      #sg-emb-visor-modal .ab-table-wrap{overflow-x:auto !important}
+      /* En un teléfono nueve columnas no entran de ninguna forma. */
+      #sg-emb-visor-modal .pa-tbl{table-layout:auto}
+    }
+  </style>
+  <div class="ab-modal">
     <div class="mhd"><div class="mht" id="sg-visor-tit">🚚 Camión</div><button class="mcl" onclick="closeMB('sg-emb-visor-modal')">×</button></div>
     <div id="sg-visor-body" style="padding:2px"></div>
     <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:14px">
@@ -25127,7 +25173,13 @@ function sgImpVisor(id){
     if(!r||!r.ok){ eid('sg-visor-body').innerHTML='<div style="padding:20px;color:var(--err,#dc2626)">'+esc((r&&r.error)||'Error')+'</div>'; return; }
     var d=r.data, e=d.embarque, t=d.totales, res=d.resultado, est=d.estimador||{};
     eid('sg-visor-tit').textContent='🚚 '+(e.nombre||'Camión');
-    var money2=function(n){ return (n==null)?'—':('$'+(Number(n)||0).toLocaleString('es-AR',{minimumFractionDigits:2,maximumFractionDigits:2})); };
+    // Los centavos sólo se muestran cuando dicen algo. En un costo por caja de $44.558 son
+    // ruido y ensanchan la columna; en un costo por kg de $5,16 son la mitad del número.
+    var money2=function(n){
+      if(n==null) return '—';
+      var v=Number(n)||0, dec=Math.abs(v)<1000?2:0;
+      return '$'+v.toLocaleString('es-AR',{minimumFractionDigits:dec,maximumFractionDigits:dec});
+    };
     var dato=function(l,v){ return '<div><div style="font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:var(--mut)">'+l+'</div><div style="font-size:13px;margin-top:1px">'+v+'</div></div>'; };
     var big=function(l,v,sub,bg,col){ return '<div style="flex:1;min-width:160px;padding:12px 14px;border-radius:10px;background:'+bg+'">'
       +'<div style="font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:var(--mut)">'+l+'</div>'
@@ -25181,13 +25233,13 @@ function sgImpVisor(id){
       +'</div>';
     // 3) Rubros, con el TC de cada uno y de dónde salió.
     h+='<div style="font-size:12px;font-weight:600;color:var(--mut);margin-bottom:5px">COSTOS</div>'
-      +'<table class="pa-tbl" style="font-size:12px;width:100%"><thead><tr><th>Rubro</th><th>Mon.</th>'
+      +'<table class="pa-tbl sgv-costos" style="font-size:12px;width:100%"><thead><tr><th>Rubro</th><th>Mon.</th>'
       +'<th style="text-align:right">Estimado</th><th style="text-align:right">Real (en $)</th>'
       +'<th>Se paga</th><th style="text-align:right">TC</th></tr></thead><tbody>'
       +d.costos.filter(function(c){ return c.monto_estimado!=null||c.monto_real!=null; }).map(function(c){
         var lbl=(SG_EMB_CONCEPTOS.find(function(x){return x.k===c.concepto;})||{}).l||c.concepto;
         return '<tr'+(c.es_credito?' style="background:rgba(16,163,74,.06)"':'')+'>'
-          +'<td>'+esc(lbl)+(c.es_credito?' <span style="font-size:10px;color:var(--ok,#16a34a)">crédito</span>':'')+'</td>'
+          +'<td class="sgv-txt">'+esc(lbl)+(c.es_credito?' <span style="font-size:10px;color:var(--ok,#16a34a)">crédito</span>':'')+'</td>'
           +'<td>'+esc(c.moneda||'ARS')+'</td>'
           +'<td style="text-align:right">'+(c.monto_estimado!=null?nr(c.monto_estimado):'—')+'</td>'
           +'<td style="text-align:right">'+(c.monto_real!=null?sgMoney(Math.round(c.monto_real)):'—')+'</td>'
@@ -25210,15 +25262,15 @@ function sgImpVisor(id){
           +' ('+(est.invoice_discrepancia>0?'+':'')+nr(est.invoice_discrepancia)+'). El costo se reparte sobre el del papel — revisá cuál está mal cargado.</div>';
       }
       h+='<div style="font-size:12px;font-weight:600;color:var(--mut);margin:14px 0 5px">PRODUCTOS · costo prorrateado</div>'
-        +'<table class="pa-tbl" style="font-size:12px;width:100%"><thead><tr><th>Producto</th><th>Envase</th>'
+        +'<table class="pa-tbl sgv-prods" style="font-size:12px;width:100%"><thead><tr><th>Producto</th><th>Envase</th>'
         +'<th style="text-align:right">Cajas</th><th style="text-align:right">kg/bulto</th><th style="text-align:right">kg</th>'
         +'<th style="text-align:right">FOB US$/caja</th>'
         +'<th style="text-align:right">Costo total</th><th style="text-align:right">Costo/caja</th><th style="text-align:right">Costo/kg</th>'
         +'</tr></thead><tbody>'
         +d.lineas.map(function(l){
           var kg=(Number(l.cajas)||0)*(Number(l.kg_por_bulto)||0);
-          return '<tr><td>'+esc((l.producto_nombre||'')+(l.producto_variedad?' '+l.producto_variedad:''))+'</td>'
-            +'<td>'+esc(l.envase_nombre||'—')+'</td>'
+          return '<tr><td class="sgv-txt">'+esc((l.producto_nombre||'')+(l.producto_variedad?' '+l.producto_variedad:''))+'</td>'
+            +'<td class="sgv-txt">'+esc(l.envase_nombre||'—')+'</td>'
             +'<td style="text-align:right">'+nr(l.cajas)+'</td>'
             +'<td style="text-align:right">'+(l.kg_por_bulto!=null?nr(l.kg_por_bulto):'—')+'</td>'
             +'<td style="text-align:right">'+nr(Math.round(kg))+'</td>'
@@ -25248,10 +25300,10 @@ function sgImpVisor(id){
     // 6) El expediente, con descarga directa.
     h+='<div style="font-size:12px;font-weight:600;color:var(--mut);margin:14px 0 5px">DOCUMENTOS</div>';
     h+= d.documentos.length
-      ? '<table class="pa-tbl" style="font-size:12px;width:100%"><tbody>'+d.documentos.map(function(x){
+      ? '<table class="pa-tbl sgv-docs" style="font-size:12px;width:100%"><tbody>'+d.documentos.map(function(x){
           var verAqui=/^(application\/pdf|image\/(jpeg|png|webp|gif))$/.test(x.mime||'');
           return '<tr'+(verAqui?' style="cursor:pointer" onclick="sgDocVer('+e.id+','+x.id+')"':'')+'>'
-            +'<td>'+(verAqui?'👁 ':'')+esc(sgEmbDocTipoLbl(x.tipo))+'</td><td>'+esc(x.nombre_original||'')+'</td>'
+            +'<td>'+(verAqui?'👁 ':'')+esc(sgEmbDocTipoLbl(x.tipo))+'</td><td class="sgv-txt">'+esc(x.nombre_original||'')+'</td>'
             +'<td style="color:var(--mut)">'+(x.fecha_documento?esc(x.fecha_documento):'—')+'</td>'
             +'<td style="text-align:right;color:var(--mut)">'+sgEmbFmtBytes(x.tamano_bytes)+'</td>'
             +'<td style="text-align:right" onclick="event.stopPropagation()">'
