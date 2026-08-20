@@ -23,6 +23,7 @@ import '../servicios/db_sg.js'; // corre el DDL sg_* al importarse
 // de las órdenes que se cargaron antes de que existiera.
 import '../servicios/sg_oc_condiciones_y_traza.js';
 import { detectarDuplicado } from '../servicios/dedup.js';
+import Anthropic from '@anthropic-ai/sdk';
 // El model ID sale SIEMPRE de config/ia.js: es la fuente única del repo.
 import { MODELO_CHAT } from '../config/ia.js';
 import { generarOcPDF } from '../servicios/ocPDF.js';
@@ -8720,6 +8721,130 @@ router.post('/embarques/:id/documentos', requireAdmin, uploadDoc, async (req, re
                        diferencia: estimado != null ? r2(montoInvoice - estimado) : null };
     }
     res.json({ ok: true, data: { id: docId, confirmacion } });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// ── LEERLE LOS DATOS AL DOCUMENTO (IA) ───────────────────────────────────────────
+// Devuelve una PROPUESTA para llenar el formulario de carga: número, fecha y monto.
+// NO guarda nada y NO sube el archivo. El operador mira lo que se leyó, corrige lo que
+// haga falta y recién ahí toca "Subir documento" — que es el endpoint de arriba, el que
+// confirma el costo. La IA acá adelanta tipeo, no decide.
+//
+// Molde: /factura-mercaderia/leer (más arriba en este archivo), con dos diferencias: usa el
+// SDK oficial (como servicios/dedup.js) y no manda el header beta de PDF, que ya no hace falta.
+
+// Qué mirar en cada papel. Sin esto la lectura de un BL y la de una póliza salen igual de vagas.
+const DOC_PISTAS = {
+  factura_comercial: 'Es un COMMERCIAL INVOICE de importación. "numero" es el N° de invoice. "monto_total" es el TOTAL del invoice (el importe final a pagar, sea FOB o CIF). "cantidad_bultos" son las cajas (cartons / packages / bultos).',
+  packing_list:      'Es un PACKING LIST. "numero" es su número, que suele coincidir con el del invoice. "cantidad_bultos" son los bultos o cajas. Casi nunca trae importe: si no hay, monto_total va en null.',
+  bl:                'Es un BL / conocimiento de embarque (Bill of Lading marítimo o CRT terrestre). "numero" es el N° de BL o de CRT y "fecha" la de emisión o de embarque. Si figura el buque o la patente del camión, ponelo en observaciones.',
+  poliza_seguro:     'Es una PÓLIZA DE SEGURO. "numero" es el N° de póliza. "monto_total" es la PRIMA, o sea lo que se paga; si solo figura la suma asegurada, poné esa y aclaralo en observaciones.',
+  despacho_aduana:   'Es un DESPACHO DE ADUANA argentino. "numero" es el N° de despacho y "fecha" la de oficialización. "monto_total" es el total de tributos liquidados, en pesos.',
+  cert_fitosanitario:'Es un CERTIFICADO FITOSANITARIO. Interesan solo el número y la fecha; monto_total va en null.',
+  cert_origen:       'Es un CERTIFICADO DE ORIGEN. Interesan solo el número y la fecha; monto_total va en null.',
+  otro:              'Es un documento de importación sin tipo definido. Sacá el número, la fecha y el importe si los tiene.',
+};
+
+router.post('/embarques/:id/documentos/leer', requireAdmin, uploadDoc, async (req, res) => {
+  const db = getDb();
+  try {
+    if (!process.env.ANTHROPIC_API_KEY) {
+      return res.status(503).json({ ok: false, error: 'La lectura automática no está configurada en este servidor' });
+    }
+    const emb = db.prepare(`SELECT e.*, p.razon_social AS proveedor_nombre
+      FROM sg_embarques e LEFT JOIN sg_proveedores p ON p.id = e.proveedor_id
+      WHERE e.id=? AND e.activo=1`).get(req.params.id);
+    if (!emb) return res.status(404).json({ ok: false, error: 'Embarque no encontrado' });
+    const f = req.file;
+    if (!f) return res.status(400).json({ ok: false, error: 'Falta el archivo' });
+    const tipo = val(req.body.tipo) || 'otro';
+    if (!DOC_TIPOS.has(tipo)) return res.status(400).json({ ok: false, error: 'Tipo de documento inválido' });
+    if (!DOC_MIMES.has(f.mimetype)) return res.status(400).json({ ok: false, error: 'Formato no permitido (solo PDF, JPG o PNG)' });
+
+    const b64 = f.buffer.toString('base64');
+    const contenido = f.mimetype === 'application/pdf'
+      ? { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: b64 } }
+      : { type: 'image', source: { type: 'base64', media_type: f.mimetype, data: b64 } };
+
+    const prompt = `Leé este documento de una importación y extraé los datos de su cabecera.
+${DOC_PISTAS[tipo] || DOC_PISTAS.otro}
+
+Respondé ÚNICAMENTE un JSON válido, sin markdown ni backticks, con estas claves:
+
+{"numero":"","fecha":"AAAA-MM-DD","monto_total":0,"moneda":"USD","cantidad_bultos":0,
+ "emisor":"","confianza":"alta|media|baja","observaciones":""}
+
+REGLAS:
+- Los montos son NÚMEROS, sin separador de miles ni símbolo de moneda. "moneda" es el código de
+  tres letras que figure en el papel (USD, EUR, ARS...). Si el documento no la dice, poné null.
+- La fecha va en AAAA-MM-DD. Ojo con el orden día/mes: los documentos de exportación suelen venir
+  en formato inglés (MM/DD/AAAA). Si no podés distinguirlo con certeza, dejala en null y decilo
+  en observaciones.
+- Lo que no puedas leer con seguridad va en null, NUNCA inventado. Si dudás de un monto o de un
+  número, poné confianza "baja" y explicá en observaciones qué es lo que no se lee.
+- "emisor" es quien emitió el papel (el exportador, la aseguradora, la naviera, según el caso).
+- "observaciones" es una línea corta en castellano para la persona que va a revisar esto.${emb.proveedor_nombre ? `
+- Este embarque es del proveedor "${emb.proveedor_nombre}". Si el emisor del documento es otro,
+  dejá igual el que leíste y avisalo en observaciones: puede ser un papel de otro embarque.` : ''}`;
+
+    const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+    const resp = await client.messages.create({
+      model: MODELO_CHAT,
+      max_tokens: 800,
+      messages: [{ role: 'user', content: [contenido, { type: 'text', text: prompt }] }],
+    });
+    const txt = (resp.content || []).filter((b) => b.type === 'text').map((b) => b.text).join('\n');
+    if (!txt) return res.status(502).json({ ok: false, error: 'La lectura no devolvió nada' });
+
+    let leido;
+    try {
+      leido = JSON.parse(txt.replace(/```json|```/g, '').trim());
+    } catch (_) {
+      // El texto crudo en el 422 deja ver QUÉ contestó. Un 500 pelado esconde el problema.
+      return res.status(422).json({ ok: false, error: 'No se pudo interpretar la lectura', raw: txt.slice(0, 800) });
+    }
+
+    // Los controles que la pantalla no puede hacer sola. Van como AVISOS, no como bloqueos:
+    // el que decide es el operador, y el bloqueo de verdad está en el endpoint de subida.
+    const avisos = [];
+    const num = leido.monto_total != null && leido.monto_total !== '' && !isNaN(Number(leido.monto_total))
+      ? Number(leido.monto_total) : null;
+    const moneda = leido.moneda ? String(leido.moneda).toUpperCase().slice(0, 3) : null;
+    if (leido.confianza === 'baja') avisos.push('La lectura no está segura: revisá los tres campos contra el papel.');
+
+    if (tipo === 'factura_comercial') {
+      // El campo del formulario es en dólares. Si el invoice viene en otra moneda, el número
+      // que se leyó NO se puede copiar tal cual: hay que convertirlo a mano.
+      if (moneda && moneda !== 'USD') {
+        avisos.push('El invoice está en ' + moneda + ', pero el campo de monto es en dólares. Convertilo antes de subir.');
+      }
+      if (leido.numero) {
+        const dup = db.prepare(`SELECT nombre FROM sg_embarques
+          WHERE nro_invoice = ? AND id <> ? AND activo=1 AND eliminado_en IS NULL`).get(String(leido.numero), emb.id);
+        if (dup) avisos.push('El invoice ' + leido.numero + ' ya figura en el embarque "' + dup.nombre + '".');
+      }
+      // El desvío contra lo cotizado, ANTES de subir: si el número está mal leído, se ve acá.
+      const rubro = db.prepare(`SELECT monto_estimado FROM sg_embarque_costos
+        WHERE embarque_id=? AND concepto='costo_mercaderia' AND activo=1`).get(emb.id);
+      const estimado = rubro && rubro.monto_estimado != null ? Number(rubro.monto_estimado) : null;
+      if (num != null && estimado != null && estimado > 0) {
+        const dif = r2(num - estimado);
+        if (dif) avisos.push('Son ' + (dif > 0 ? '+' : '') + dif.toLocaleString('es-AR') + ' USD contra lo cotizado (US$ ' + estimado.toLocaleString('es-AR') + ').');
+      }
+    }
+
+    res.json({ ok: true, data: {
+      tipo,
+      numero: leido.numero != null ? String(leido.numero).trim() : null,
+      fecha: /^\d{4}-\d{2}-\d{2}$/.test(String(leido.fecha || '')) ? leido.fecha : null,
+      monto_total: num,
+      moneda,
+      cantidad_bultos: leido.cantidad_bultos != null && !isNaN(Number(leido.cantidad_bultos)) ? Number(leido.cantidad_bultos) : null,
+      emisor: leido.emisor || null,
+      confianza: leido.confianza || null,
+      observaciones: leido.observaciones || null,
+      avisos,
+    } });
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
