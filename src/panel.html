@@ -2518,7 +2518,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
     </style>
     <div style="display:inline-flex;gap:2px;background:var(--bg);border:1px solid var(--bor);border-radius:8px;padding:3px;margin-bottom:16px;flex-wrap:wrap">
       <div class="sgv-subtab on" data-sub="pedidos"   onclick="sgVenSub('pedidos')">📝 Pedidos</div>
-      <div class="sgv-subtab" data-sub="despachos"     onclick="sgVenSub('despachos')">🚚 Despachos</div>
+      <div class="sgv-subtab" data-sub="despachos"     onclick="sgVenSub('despachos')">📄 Remitos</div>
       <div class="sgv-subtab" data-sub="facturar"      onclick="sgVenSub('facturar')">🧾 Facturar</div>
     </div>
 
@@ -2533,7 +2533,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
 
     <!-- Despachos -->
     <div class="sgv-sub" id="sgv-sub-despachos">
-      <div style="display:flex;justify-content:flex-end;margin-bottom:10px"><button class="btn bb" onclick="sgDespOpen()">+ Nuevo despacho</button></div>
+      <div style="display:flex;justify-content:flex-end;margin-bottom:10px"><button class="btn bb" onclick="sgDespOpen()">+ Nuevo remito</button></div>
       <div class="ab-table-wrap"><table class="pa-tbl">
         <thead><tr><th>N°</th><th>Fecha</th><th>Alias</th><th>Cliente</th><th>Qué se vendió</th><th style="text-align:right">Total</th><th style="text-align:center">Estado</th><th></th></tr></thead>
         <tbody id="sg-tb-despachos"><tr><td colspan="8" class="emp">Cargando…</td></tr></tbody>
@@ -4827,7 +4827,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
 <!-- Modal Crear despacho -->
 <div class="ab-modal-overlay" id="sg-desp-modal">
   <div class="ab-modal" style="width:880px;max-height:90vh;overflow-y:auto">
-    <div class="mhd"><div class="mht">Nuevo despacho</div><button class="mcl" onclick="closeMB('sg-desp-modal')">×</button></div>
+    <div class="mhd"><div class="mht">Nuevo remito</div><button class="mcl" onclick="closeMB('sg-desp-modal')">×</button></div>
     <div class="fg">
       <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">
         <div class="fl"><label>Cliente <span style="color:var(--err)">*</span></label><input type="text" placeholder="🔎 alias o razón social" oninput="sgCliFiltrar('sg-desp-cli',this.value)" autocomplete="off" style="margin-bottom:4px"><select id="sg-desp-cli"></select></div>
@@ -12134,7 +12134,7 @@ function sgPendLoad(){
     var ds=r.despachos||[];
     if(!ds.length){ eid('sgpe-tabla').innerHTML='<div style="font-size:12px;color:var(--mut)">No hay despachos pendientes de facturar.</div>'; return; }
     var body=ds.map(function(d){
-      var vendido=(d.items||[]).map(function(it){ return esc(it.producto||'—')+' '+nr(it.kg_pendiente)+'kg'; }).join(', ');
+      var vendido=(d.items||[]).map(function(it){ return (it.en_viaje?'🚚 ':'')+esc(it.producto||'—')+' '+nr(it.kg_pendiente)+'kg'; }).join(', ');
       var estB= d.estado_facturacion==='parcial' ? '<span class="bdg bpe">🟡 parcial</span>' : '<span class="bdg ber">🔴 pendiente</span>';
       return '<tr><td><b>'+esc(d.numero||('Desp '+d.despacho_id))+'</b></td><td>'+esc(d.fecha||'—')+'</td>'
         +'<td>'+esc(d.alias||'—')+'</td><td>'+esc(d.razon_social||'—')+'</td>'
@@ -12208,6 +12208,10 @@ function sgFacRebuildLineas(){
       nuevas.push({
         despacho_id: d.despacho_id, despacho_item_id: it.despacho_item_id, producto: it.producto, lote: it.lote,
         kg_pendiente: it.kg_pendiente, precio: it.precio_por_kg, alicuota: it.alicuota, exento: it.exento,
+        // Lo que dijo el que hizo el remito: el precio es una SUGERENCIA suya y
+        // acá se puede cambiar. La razón de ese precio vivía en un chat de
+        // WhatsApp, así que el que factura llamaba para preguntarla.
+        nota_precio: it.nota_precio || '', en_viaje: !!it.en_viaje, oc_numero: it.oc_numero || '',
         kg: p ? p.kg : it.kg_pendiente, incluye_iva_override: p ? p.incluye_iva_override : null
       });
     });
@@ -12224,14 +12228,23 @@ function sgFacRenderLineas(){
   cont.innerHTML = SG.facLineas.map(function(ln,i){
     var ovr = ln.incluye_iva_override===null ? '' : (ln.incluye_iva_override ? 'si' : 'no');
     var ivaTxt = ln.exento ? 'Exento' : (String(ln.alicuota).replace('.',',')+'%');
+    // Si la mercadería todavía no bajó del camión, se dice: facturar lo que no
+    // llegó se arregla después con una nota de crédito.
+    var nota = (ln.nota_precio || ln.en_viaje)
+      ? '<div style="grid-column:1/-1;font-size:11px;color:var(--mut);margin:-2px 0 4px">'
+        + (ln.en_viaje ? '<b style="color:#9a3412">🚚 todavía en viaje'+(ln.oc_numero?(' ('+esc(ln.oc_numero)+')'):'')+'</b>' : '')
+        + (ln.nota_precio ? ((ln.en_viaje?' · ':'')+'💬 '+esc(ln.nota_precio)) : '')
+        + '</div>'
+      : '';
     return '<div style="display:grid;grid-template-columns:1.4fr 0.8fr 0.7fr 0.8fr 0.8fr 0.7fr auto;gap:6px;align-items:center;margin-bottom:4px">'
-      +'<span style="font-size:12px">'+esc(ln.producto)+'</span>'
+      +'<span style="font-size:12px">'+(ln.en_viaje?'🚚 ':'')+esc(ln.producto)+'</span>'
       +'<span style="font-size:11px;color:var(--mut)"><code>'+esc(ln.lote)+'</code></span>'
       +'<span style="text-align:right;font-size:11px">'+nr(ln.kg_pendiente)+'</span>'
       +'<input type="number" value="'+(ln.kg||'')+'" onchange="sgFacUpd('+i+',\'kg\',this.value)" style="text-align:right">'
-      +'<input type="number" value="'+(ln.precio||'')+'" onchange="sgFacUpd('+i+',\'precio\',this.value)" style="text-align:right" title="$/kg del despacho (editable)">'
+      +'<input type="number" value="'+(ln.precio||'')+'" onchange="sgFacUpd('+i+',\'precio\',this.value)" style="text-align:right" title="$/kg sugerido en el remito — se puede cambiar">'
       +'<span style="text-align:right;font-size:11px" title="Override IVA: '+(ovr||'general')+'"><select onchange="sgFacOverride('+i+',this.value)" style="font-size:10px;padding:1px"><option value=""'+(ovr===''?' selected':'')+'>'+ivaTxt+'</option><option value="si"'+(ovr==='si'?' selected':'')+'>c/IVA</option><option value="no"'+(ovr==='no'?' selected':'')+'>s/IVA</option></select></span>'
       +'<button class="btn bd bs" onclick="sgFacDelLinea('+i+')">×</button>'
+      +nota
       +'</div>';
   }).join('');
   sgFacResumen();
@@ -12330,12 +12343,23 @@ function sgItemPicker(opts){
     +'</div>'
     +'<div id="'+key+'-det" style="border:1px solid var(--bor);border-radius:8px;padding:8px;background:var(--bg)"><div style="font-size:12px;color:var(--mut)">Elegí un producto.</div></div>'
     +'</div>';
-  api('/api/sg/disponibilidad?incluir_camino='+(opts.modo==='pedido'?1:0)).then(function(r){ st.productos=(r&&r.ok)?r.data:[]; sgIPRenderList(key); });
+  // EL REMITO TAMBIÉN VE LO QUE VIENE EN VIAJE. El comprador cerró la carga, el
+  // camión está en la ruta, y el cliente la quiere anotada a su nombre: eso
+  // antes no se podía escribir en ningún lado y quedaba en la memoria del que
+  // lo prometió.
+  api('/api/sg/disponibilidad?incluir_camino='+(sgIPConCamino(st)?1:0)).then(function(r){ st.productos=(r&&r.ok)?r.data:[]; sgIPRenderList(key); });
 }
+// Pedido y remito miran lo que viene en viaje; el resto no.
+function sgIPConCamino(st){ return st.modo==='pedido' || st.modo==='remito'; }
+// El REMITO se carga en CAJONES, que es lo que se sube al camión y lo que el
+// backend valida. Pedirle kg al que carga era pedirle una cuenta: escribía 500
+// y el servidor le contestaba «el despacho es por cajón entero», después de
+// haber armado el remito.
+function sgIPPorBulto(st){ return st.modo==='remito'; }
 function sgIPBuscar(key,v){ SG.itemPicker[key].q=v; sgIPRenderList(key); }
 function sgIPRenderList(key){
   var st=SG.itemPicker[key]; if(!eid(key+'-list')) return;
-  var inc=st.modo==='pedido', q=(st.q||'').toLowerCase();
+  var inc=sgIPConCamino(st), q=(st.q||'').toLowerCase();
   var lista=st.productos.filter(function(p){ return !q || String(p.nombre).toLowerCase().indexOf(q)>=0; });
   eid(key+'-list').innerHTML = lista.length ? lista.map(function(p){
     var on=st.sel&&String(st.sel)===String(p.producto_id);
@@ -12352,25 +12376,35 @@ function sgIPSel(key,pid){
 }
 // Detalle (generaliza sgPedOfertaRender): muestra 'en camino' solo en modo pedido.
 function sgIPRenderDetalle(key){
-  var st=SG.itemPicker[key]; var d=st.oferta||{}; var mostrarCamino=st.modo==='pedido';
+  var st=SG.itemPicker[key]; var d=st.oferta||{}; var mostrarCamino=sgIPConCamino(st);
+  var porBulto=sgIPPorBulto(st);
   var stock=d.stock||[], camino=d.en_camino||[], h='';
   h+='<div style="font-weight:600;font-size:12px;margin-bottom:2px">🟢 En stock</div>';
   h+= stock.length ? stock.map(function(l){
     var ck=(l.kg_vigente>0?(l.costo_final||0)/l.kg_vigente:0), venc=(l.dias_restantes!=null?l.dias_restantes+'d':'—');
+    // El remito habla en CAJONES: es lo que se carga y lo que el servidor valida.
+    var bd=(l.bultos_disponibles!=null)?Math.floor(l.bultos_disponibles):null;
+    var cant = porBulto
+      ? ((bd!=null?bd:'—')+' cj de '+nr(l.kg_por_bulto)+'kg')
+      : (nr(l.kg_disponibles)+'kg');
     return '<div style="display:grid;grid-template-columns:auto 1fr 60px auto;gap:6px;align-items:center;padding:4px 0;border-bottom:1px solid var(--bor)">'
       +'<span>'+sgSemEmoji(l.semaforo)+'</span>'
-      +'<span style="font-size:12px"><code>'+esc(l.codigo_lote)+'</code> · '+nr(l.kg_disponibles)+'kg · '+sgMoney(ck)+'/kg · '+venc+(l.kg_reservado>0?(' · <span style="color:var(--mut)">'+nr(l.kg_reservado)+'kg res.</span>'):'')+'</span>'
-      +'<input type="number" id="'+key+'-st-'+l.lote_id+'" placeholder="kg" style="width:100%;box-sizing:border-box;padding:3px 5px">'
+      +'<span style="font-size:12px"><code>'+esc(l.codigo_lote)+'</code> · '+cant+' · '+sgMoney(ck)+'/kg · '+venc+(l.kg_reservado>0?(' · <span style="color:var(--mut)">'+nr(l.kg_reservado)+'kg res.</span>'):'')+'</span>'
+      +'<input type="number" id="'+key+'-st-'+l.lote_id+'" placeholder="'+(porBulto?'cj':'kg')+'" style="width:100%;box-sizing:border-box;padding:3px 5px">'
       +'<button class="btn bb bs" onclick="sgIPAdd('+sgQ(key)+',\'lote\','+l.lote_id+','+sgQ(key+'-st-'+l.lote_id)+','+sgQ(l.codigo_lote)+','+sgQ(l.semaforo||'verde')+')">+</button>'
       +'</div>';
   }).join('') : '<div style="font-size:11px;color:var(--mut)">— sin stock —</div>';
   if(mostrarCamino){
     h+='<div style="font-weight:600;font-size:12px;margin:8px 0 2px">🚚 En camino</div>';
     h+= camino.length ? camino.map(function(o){
+      var bc=(o.bultos_camino!=null)?Math.floor(o.bultos_camino):null;
+      var cantC = porBulto
+        ? ((bc!=null?bc:'—')+' cj de '+nr(o.kg_por_bulto)+'kg')
+        : (nr(o.disponible_camino)+'kg');
       return '<div style="display:grid;grid-template-columns:auto 1fr 60px auto;gap:6px;align-items:center;padding:4px 0;border-bottom:1px solid var(--bor)">'
         +'<span>🚚</span>'
-        +'<span style="font-size:12px"><b>'+esc(o.oc_numero||'')+'</b> · '+nr(o.disponible_camino)+'kg · '+esc(o.proveedor_nombre||'')+'</span>'
-        +'<input type="number" id="'+key+'-oc-'+o.oc_item_id+'" placeholder="kg" style="width:100%;box-sizing:border-box;padding:3px 5px">'
+        +'<span style="font-size:12px"><b>'+esc(o.oc_numero||'')+'</b> · '+cantC+' · '+esc(o.proveedor_nombre||'')+'</span>'
+        +'<input type="number" id="'+key+'-oc-'+o.oc_item_id+'" placeholder="'+(porBulto?'cj':'kg')+'" style="width:100%;box-sizing:border-box;padding:3px 5px">'
         +'<button class="btn bb bs" onclick="sgIPAdd('+sgQ(key)+',\'oc_item\','+o.oc_item_id+','+sgQ(key+'-oc-'+o.oc_item_id)+','+sgQ((o.oc_numero||'')+' · '+(o.fecha_oc||''))+',null)">+</button>'
         +'</div>';
     }).join('') : '<div style="font-size:11px;color:var(--mut)">— nada en camino —</div>';
@@ -12379,12 +12413,31 @@ function sgIPRenderDetalle(key){
 }
 function sgIPAdd(key, tipo, fuenteId, inputId, label, semaforo){
   var st=SG.itemPicker[key];
-  var kg=Number(eid(inputId).value);
-  if(!(kg>0)){ toast('Poné los kg','er'); return; }
+  var porBulto=sgIPPorBulto(st);
+  var v=Number(eid(inputId).value);
+  if(!(v>0)){ toast(porBulto?'Poné los cajones':'Poné los kg','er'); return; }
   // objeto completo del lote (de /oferta) → costo/kg + kg_disponibles para la línea de despacho.
   var loteObj = tipo==='lote' ? ((st.oferta&&st.oferta.stock||[]).find(function(x){return String(x.lote_id)===String(fuenteId);})) : null;
-  var kgDisp = loteObj ? loteObj.kg_disponibles : 0;
-  var meta={ producto_id:st.sel, producto_nombre:st._prodNombre, codigo_lote:(tipo==='lote'?label:''), semaforo:semaforo, label:label, kg_disponibles:Number(kgDisp)||0, lote:loteObj };
+  var ocObj = tipo==='oc_item' ? ((st.oferta&&st.oferta.en_camino||[]).find(function(x){return String(x.oc_item_id)===String(fuenteId);})) : null;
+  var kgDisp = loteObj ? loteObj.kg_disponibles : (ocObj ? ocObj.disponible_camino : 0);
+  var fuente = loteObj || ocObj || {};
+  if(porBulto && Math.abs(v-Math.round(v))>1e-6){
+    toast('Se carga por cajón entero: no hay medio cajón','er'); return;
+  }
+  // En remito el número tipeado son CAJONES y los kg se derivan. Es la misma
+  // cuenta que hace el servidor: si el front la hiciera distinta, aceptaría
+  // renglones que después rebotan con el remito ya armado.
+  var kpb=Number(fuente.kg_por_bulto)||0;
+  if(porBulto && !(kpb>0)){ toast('Esa partida no tiene kg por bulto cargados','er'); return; }
+  var bultos = porBulto ? Math.round(v) : null;
+  var kg = porBulto ? +(bultos*kpb).toFixed(4) : v;
+  var bultosDisp = porBulto
+    ? (tipo==='lote' ? fuente.bultos_disponibles : fuente.bultos_camino)
+    : null;
+  var meta={ producto_id:st.sel, producto_nombre:st._prodNombre, codigo_lote:(tipo==='lote'?label:''),
+    semaforo:semaforo, label:label, kg_disponibles:Number(kgDisp)||0, lote:loteObj, oc:ocObj,
+    bultos:bultos, kg_por_bulto:kpb,
+    bultos_disponibles:(bultosDisp!=null?Math.floor(bultosDisp):null) };
   eid(inputId).value='';
   st.onAdd(tipo, fuenteId, kg, meta);
 }
@@ -12500,47 +12553,87 @@ function sgDespOpen(){
     eid('sg-desp-fletero').innerHTML=opts.replace('{X}','— Sin fletero —');
     eid('sg-desp-coop').innerHTML=opts.replace('{X}','— Sin carga —');
   });
-  sgItemPicker({ modo:'despacho', contenedor:'sg-desp-items', onAdd:sgDespOnAdd });
+  sgItemPicker({ modo:'remito', contenedor:'sg-desp-items', onAdd:sgDespOnAdd });
   sgDespRender();
   eid('sg-desp-modal').classList.add('on');
 }
-// onAdd del despacho → SG.despItems con la MISMA forma de antes {producto_id, lote_id, kg, precio,
-// lotes:[...]}. 🔴 lotes lleva kg_disponibles (+ kg_vigente/costo_final) para que sgDespLoteDe y la
-// validación de sobre-despacho de sgDespGuardar sigan andando. Solo stock (despacho ignora camino).
+// onAdd del remito. La línea sale del DEPÓSITO (origen 'lote') o de una partida
+// que VIENE EN VIAJE (origen 'oc_item'). La segunda no tiene lote todavía —el
+// lote nace cuando la mercadería se recibe—, así que la línea apunta a la
+// partida de la orden de compra.
 function sgDespOnAdd(tipo, fuenteId, kg, meta){
-  if(tipo!=='lote') return;
-  var l=meta.lote||{};
-  var loteLinea={ id:fuenteId, codigo_lote:(l.codigo_lote||meta.codigo_lote||meta.label),
-    kg_disponibles:(l.kg_disponibles!=null?l.kg_disponibles:meta.kg_disponibles), kg_vigente:l.kg_vigente, costo_final:l.costo_final, semaforo:(l.semaforo||meta.semaforo) };
-  SG.despItems.push({ producto_id:meta.producto_id, lote_id:fuenteId, kg:kg, precio:'', lotes:[loteLinea] });
+  var l=meta.lote||{}, o=meta.oc||{};
+  var linea={ producto_id:meta.producto_id, producto_nombre:meta.producto_nombre,
+    origen:(tipo==='oc_item'?'oc_item':'lote'), kg:kg, bultos:meta.bultos,
+    kg_por_bulto:meta.kg_por_bulto, bultos_disponibles:meta.bultos_disponibles,
+    precio:'', nota:'' };
+  if(tipo==='oc_item'){
+    linea.oc_item_id=fuenteId;
+    linea.etiqueta=(o.oc_numero||meta.label||'')+' · '+(o.proveedor_nombre||'');
+  } else {
+    linea.lote_id=fuenteId;
+    linea.etiqueta=(l.codigo_lote||meta.codigo_lote||meta.label||'');
+    linea.semaforo=(l.semaforo||meta.semaforo);
+    // kg_vigente/costo_final quedan para el margen estimado de la línea.
+    linea.lotes=[{ id:fuenteId, codigo_lote:linea.etiqueta,
+      kg_disponibles:(l.kg_disponibles!=null?l.kg_disponibles:meta.kg_disponibles),
+      kg_vigente:l.kg_vigente, costo_final:l.costo_final, semaforo:linea.semaforo }];
+  }
+  SG.despItems.push(linea);
   sgDespRender();
 }
 function sgDespDelItem(i){ SG.despItems.splice(i,1); sgDespRender(); }
 function sgDespUpdNR(i,c,v){ SG.despItems[i][c]=v; sgDespTotal(); }
 function sgDespLoteDe(it){ return (it.lotes||[]).find(function(l){return String(l.id)===String(it.lote_id);}); }
+// Los cajones son la cantidad; los kg se derivan. Cambiar los cajones recalcula
+// los kg, porque es la cuenta que hace el servidor.
+function sgDespUpdBultos(i,v){
+  var it=SG.despItems[i];
+  var b=Number(v);
+  it.bultos=b;
+  it.kg=(Number(it.kg_por_bulto)>0)?+(b*Number(it.kg_por_bulto)).toFixed(4):it.kg;
+  sgDespRender();
+}
 function sgDespRender(){
-  if(!SG.despItems.length){ eid('sg-desp-lines').innerHTML='<div style="font-size:12px;color:var(--mut)">Elegí lotes del stock 🟢 arriba con +.</div>'; sgDespTotal(); return; }
+  if(!SG.despItems.length){ eid('sg-desp-lines').innerHTML='<div style="font-size:12px;color:var(--mut)">Elegí arriba con + lo que sale: del stock 🟢 o de lo que viene en viaje 🚚.</div>'; sgDespTotal(); return; }
   eid('sg-desp-lines').innerHTML=SG.despItems.map(function(it,i){
-    var lote=sgDespLoteDe(it);
+    var enViaje=it.origen==='oc_item';
+    var lote=enViaje?null:sgDespLoteDe(it);
     var _kv=lote?(lote.kg_vigente!=null?lote.kg_vigente:lote.kg_disponibles):0;
     var costoKg=_kv>0?((lote.costo_final||0)/_kv):0;
     var kg=Number(it.kg)||0, precio=Number(it.precio)||0;
     var margen=kg*precio - kg*costoKg;
-    var pnombre=(SG.cacheProd.find(function(x){return String(x.id)===String(it.producto_id);})||{}).nombre||'';
-    var info = lote ? '<div style="font-size:11px;color:var(--mut);grid-column:1/-1;margin:-2px 0 4px">disp '+nr(lote.kg_disponibles)+'kg'+(costoKg>0?(' · costo '+sgMoney(costoKg)+'/kg · margen <b style="color:'+(margen>=0?'#16a34a':'#dc2626')+'">'+sgMoney(margen)+'</b>'):'')+'</div>' : '';
-    return '<div style="display:grid;grid-template-columns:1.7fr 0.8fr 0.8fr auto;gap:6px;align-items:center;margin-bottom:4px">'
-      +'<span style="font-size:12px">'+(lote&&lote.semaforo?sgSemEmoji(lote.semaforo)+' ':'')+esc(pnombre)+' · <code>'+esc(lote?lote.codigo_lote:'')+'</code></span>'
-      +'<input type="number" placeholder="kg" value="'+(it.kg||'')+'" onchange="sgDespUpdNR('+i+',\'kg\',this.value)">'
-      +'<input type="number" placeholder="$/kg" value="'+(it.precio||'')+'" onchange="sgDespUpdNR('+i+',\'precio\',this.value)">'
+    var pnombre=it.producto_nombre||(SG.cacheProd.find(function(x){return String(x.id)===String(it.producto_id);})||{}).nombre||'';
+    // De la mercadería en viaje todavía no se sabe el costo si la compra es a
+    // pizarra: no se muestra un margen inventado.
+    var info = enViaje
+      ? '<div style="font-size:11px;color:var(--mut);grid-column:1/-1;margin:-2px 0 4px">🚚 todavía no llegó · '+nr(kg)+'kg'+(it.bultos_disponibles!=null?(' · quedan '+it.bultos_disponibles+' cj en viaje'):'')+' · el costo se sabe al recibirla</div>'
+      : (lote ? '<div style="font-size:11px;color:var(--mut);grid-column:1/-1;margin:-2px 0 4px">'+nr(kg)+'kg'+(it.bultos_disponibles!=null?(' · disp '+it.bultos_disponibles+' cj'):'')+(costoKg>0?(' · costo '+sgMoney(costoKg)+'/kg · margen <b style="color:'+(margen>=0?'#16a34a':'#dc2626')+'">'+sgMoney(margen)+'</b>'):'')+'</div>' : '');
+    return '<div style="display:grid;grid-template-columns:1.7fr 0.7fr 0.8fr auto;gap:6px;align-items:center;margin-bottom:2px">'
+      +'<span style="font-size:12px">'+(enViaje?'🚚 ':(lote&&lote.semaforo?sgSemEmoji(lote.semaforo)+' ':''))+esc(pnombre)+' · <code>'+esc(it.etiqueta||'')+'</code></span>'
+      +'<input type="number" placeholder="cj" value="'+(it.bultos||'')+'" onchange="sgDespUpdBultos('+i+',this.value)">'
+      +'<input type="number" placeholder="$/kg sugerido" value="'+(it.precio||'')+'" onchange="sgDespUpdNR('+i+',\'precio\',this.value)">'
       +'<button class="btn bd bs" onclick="sgDespDelItem('+i+')">×</button>'
+      // POR QUÉ ESE PRECIO. Hoy eso vive en un chat de WhatsApp: el que factura
+      // no lo tiene y termina llamando para preguntar.
+      +'<input placeholder="por qué ese precio (lo ve el que factura)" value="'+esc(it.nota||'')+'" onchange="sgDespUpdNR('+i+',\'nota\',this.value)" style="grid-column:1/-1;font-size:11.5px;padding:3px 6px">'
       +info+'</div>';
   }).join('');
   sgDespTotal();
 }
 function sgDespTotal(){
-  var tot=0, marg=0;
-  SG.despItems.forEach(function(it){ var lote=sgDespLoteDe(it); var kg=Number(it.kg)||0, precio=Number(it.precio)||0; var _kv=lote?(lote.kg_vigente!=null?lote.kg_vigente:lote.kg_reales):0; var costoKg=_kv>0?((lote.costo_final||0)/_kv):0; tot+=kg*precio; marg+=kg*precio-kg*costoKg; });
-  eid('sg-desp-total').innerHTML='Total: '+sgMoney(tot)+' · Margen estimado: <span style="color:'+(marg>=0?'#16a34a':'#dc2626')+'">'+sgMoney(marg)+'</span>';
+  var tot=0, marg=0, sinCosto=0;
+  SG.despItems.forEach(function(it){
+    var kg=Number(it.kg)||0, precio=Number(it.precio)||0;
+    tot+=kg*precio;
+    if(it.origen==='oc_item'){ sinCosto++; return; }   // el costo se sabe al recibirla
+    var lote=sgDespLoteDe(it);
+    var _kv=lote?(lote.kg_vigente!=null?lote.kg_vigente:lote.kg_reales):0;
+    var costoKg=_kv>0?((lote.costo_final||0)/_kv):0;
+    marg+=kg*precio-kg*costoKg;
+  });
+  eid('sg-desp-total').innerHTML='Total: '+sgMoney(tot)+' · Margen estimado: <span style="color:'+(marg>=0?'#16a34a':'#dc2626')+'">'+sgMoney(marg)+'</span>'
+    +(sinCosto?' <span style="font-size:11px;color:var(--mut)">(sin '+sinCosto+' renglón(es) en viaje: su costo se sabe al recibirlos)</span>':'');
 }
 function sgDespGuardar(){
   var cli=eid('sg-desp-cli').value;
@@ -12548,12 +12641,22 @@ function sgDespGuardar(){
   var items=[];
   for(var i=0;i<SG.despItems.length;i++){
     var it=SG.despItems[i];
-    if(!it.lote_id || !(Number(it.kg)>0)) continue;
-    var lote=sgDespLoteDe(it);
-    if(lote && Number(it.kg)>lote.kg_disponibles+0.01){ toast('Línea '+(i+1)+': '+it.kg+'kg supera lo disponible ('+nr(lote.kg_disponibles)+'kg)','er'); return; }
-    items.push({ lote_id:Number(it.lote_id), kg_despachados:Number(it.kg), precio_por_kg:Number(it.precio||0) });
+    var b=Number(it.bultos)||0;
+    if(!(b>0)) continue;
+    if(!it.lote_id && !it.oc_item_id) continue;
+    // Se valida en CAJONES contra lo que queda, que es la misma cuenta del
+    // servidor. Antes el front miraba kg y el servidor cajones, así que aceptaba
+    // renglones que después rebotaban con el remito ya armado.
+    if(it.bultos_disponibles!=null && b>it.bultos_disponibles){
+      toast('Línea '+(i+1)+': pedís '+b+' cajón(es) y quedan '+it.bultos_disponibles,'er'); return;
+    }
+    items.push({ origen:it.origen||'lote',
+      lote_id:it.lote_id?Number(it.lote_id):null,
+      oc_item_id:it.oc_item_id?Number(it.oc_item_id):null,
+      bultos:b, kg_despachados:Number(it.kg),
+      precio_por_kg:Number(it.precio||0), nota_precio:it.nota||'' });
   }
-  if(!items.length){ toast('Cargá al menos una línea con lote y kg','er'); return; }
+  if(!items.length){ toast('Cargá al menos una línea con cajones','er'); return; }
   var body={ cliente_id:Number(cli), pedido_id:eid('sg-desp-ped').value?Number(eid('sg-desp-ped').value):null,
     fecha_despacho:eid('sg-desp-fecha').value, transporte:eid('sg-desp-transp').value,
     fletero_id:eid('sg-desp-fletero').value?Number(eid('sg-desp-fletero').value):null,
@@ -12561,7 +12664,7 @@ function sgDespGuardar(){
     cooperativa_bultos:eid('sg-desp-bultos').value!==''?Number(eid('sg-desp-bultos').value):null,
     chofer:eid('sg-desp-chofer').value, dominio:eid('sg-desp-dominio').value, observaciones:eid('sg-desp-obs').value, items:items };
   api('/api/sg/despachos','POST',body).then(function(r){
-    if(r&&r.ok){ toast('Despacho registrado','ok'); closeMB('sg-desp-modal'); sgLoadDespachos(); }
+    if(r&&r.ok){ toast('Remito registrado','ok'); closeMB('sg-desp-modal'); sgLoadDespachos(); }
     else toast((r&&r.error)||'Error','er');
   });
 }

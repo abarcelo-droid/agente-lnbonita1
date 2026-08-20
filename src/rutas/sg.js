@@ -685,12 +685,15 @@ router.get('/facturable', requireAuth, (req, res) => {
     const rows = db.prepare(`
       SELECT d.id AS despacho_id, d.numero AS despacho_numero, d.fecha_despacho,
         di.id AS despacho_item_id, di.producto_id, pr.nombre AS producto_nombre,
-        fam.iva_alicuota, di.lote_id, l.codigo_lote, di.kg_despachados, di.precio_por_kg
+        fam.iva_alicuota, di.lote_id, l.codigo_lote, di.kg_despachados, di.precio_por_kg,
+        di.origen, di.oc_item_id, di.nota_precio, di.lote_recibido_id, oc.numero AS oc_numero
       FROM sg_despachos d
       JOIN sg_despacho_items di ON di.despacho_id=d.id
       LEFT JOIN sg_productos pr ON pr.id=di.producto_id
       LEFT JOIN sg_familias fam ON fam.id=pr.familia_id
       LEFT JOIN sg_lotes l ON l.id=di.lote_id
+      LEFT JOIN sg_oc_items oi ON oi.id=di.oc_item_id
+      LEFT JOIN sg_oc oc ON oc.id=oi.oc_id
       WHERE d.activo=1 AND d.cliente_id=? AND d.estado<>'rechazado_total'
       ORDER BY d.fecha_despacho DESC, d.id, di.id`).all(clienteId);
     const mapa = new Map();
@@ -706,6 +709,15 @@ router.get('/facturable', requireAuth, (req, res) => {
           despacho_item_id: r.despacho_item_id, producto_id: r.producto_id, producto: r.producto_nombre || '',
           lote_id: r.lote_id, lote: r.codigo_lote || '', kg_despachado: kgDesp, kg_facturado: +kgFact.toFixed(2),
           kg_pendiente: kgPend, precio_por_kg: Number(r.precio_por_kg) || 0,
+          // LO QUE DIJO EL QUE HIZO EL REMITO. El precio es una SUGERENCIA suya,
+          // y la razón de ese precio vivía en un chat de WhatsApp: el que
+          // factura no la tenía y llamaba a preguntar.
+          nota_precio: r.nota_precio || '',
+          // Y si todavía no llegó, se dice. Facturar mercadería que no bajó del
+          // camión se arregla después con una nota de crédito.
+          origen: r.origen || 'lote',
+          en_viaje: r.origen === 'oc_item' && r.lote_recibido_id == null,
+          oc_numero: r.oc_numero || '',
           alicuota: r.iva_alicuota != null ? Number(r.iva_alicuota) : null, exento: r.iva_alicuota == null
         });
       }
@@ -734,6 +746,7 @@ router.get('/despachos-pendientes', requireAuth, (req, res) => {
       SELECT d.id AS despacho_id, d.numero AS despacho_numero, d.fecha_despacho, d.cliente_id,
         c.razon_social, c.nombre_comercial,
         di.id AS despacho_item_id, pr.nombre AS producto_nombre,
+        di.origen, di.lote_recibido_id,
         di.kg_despachados, di.precio_por_kg
       FROM sg_despachos d
       JOIN sg_despacho_items di ON di.despacho_id=d.id
@@ -753,7 +766,10 @@ router.get('/despachos-pendientes', requireAuth, (req, res) => {
       const g = mapa.get(r.despacho_id);
       g._fact += kgFact;
       if (kgPend > 0.01) {
-        g.items.push({ producto: r.producto_nombre || '', kg_pendiente: kgPend });
+        // El renglon dice si esa parte todavia viene en viaje: no es lo mismo
+        // deber una factura de mercaderia entregada que de una que no bajo.
+        g.items.push({ producto: r.producto_nombre || '', kg_pendiente: kgPend,
+          en_viaje: r.origen === 'oc_item' && r.lote_recibido_id == null });
         g.total_pendiente += kgPend * (Number(r.precio_por_kg) || 0);
       }
     }
@@ -5030,6 +5046,20 @@ router.get('/lotes-disponibles', requireAuth, (req, res) => {
 //   stock     = lotes disponibles (FEFO) + semáforo + costo/kg + kg_reservado (info, D1 blanda).
 //   en_camino = oc_items de OCs abiertas/parciales con disponible_camino = (estimado − recibido)
 //               − Σ reservas tipo='oc_item' activas. Ordenado FIFO por fecha de OC.
+// Lo que los REMITOS ya comprometieron de una partida que viene en viaje. Va
+// como fragmento SQL para que lo usen /oferta y /disponibilidad con la misma
+// cuenta: si cada uno la escribiera aparte, tarde o temprano dicen distinto.
+//
+// Sólo cuenta el remito VIVO (d.activo=1) y la línea que todavía no aterrizó
+// (lote_recibido_id IS NULL): una vez que la mercadería entró, lo que descuenta
+// es el lote real y no la promesa.
+const KG_COMPROMETIDO_CAMINO = `COALESCE((SELECT SUM(di.kg_despachados)
+  FROM sg_despacho_items di JOIN sg_despachos d ON d.id=di.despacho_id AND d.activo=1
+  WHERE di.oc_item_id=i.id AND di.origen='oc_item' AND di.lote_recibido_id IS NULL),0)`;
+const BULTOS_COMPROMETIDO_CAMINO = `COALESCE((SELECT SUM(di.bultos)
+  FROM sg_despacho_items di JOIN sg_despachos d ON d.id=di.despacho_id AND d.activo=1
+  WHERE di.oc_item_id=i.id AND di.origen='oc_item' AND di.lote_recibido_id IS NULL),0)`;
+
 router.get('/oferta', requireAuth, (req, res) => {
   const db = getDb();
   try {
@@ -5057,9 +5087,12 @@ router.get('/oferta', requireAuth, (req, res) => {
           COALESCE((SELECT SUM(kg_reales) FROM sg_lotes WHERE oc_item_id=i.id AND activo=1),0) AS kg_recibidos,
           COALESCE((SELECT SUM(bultos) FROM sg_lotes WHERE oc_item_id=i.id AND activo=1),0) AS bultos_recibidos,
           COALESCE((SELECT SUM(bultos) FROM sg_reservas WHERE oc_item_id=i.id AND tipo='oc_item' AND estado='activa'),0) AS bultos_reservado_camino,
+          ${BULTOS_COMPROMETIDO_CAMINO} AS bultos_comprometido_camino,
+          ${KG_COMPROMETIDO_CAMINO} AS kg_comprometido_camino,
           ( i.kg_estimados
             - COALESCE((SELECT SUM(kg_reales) FROM sg_lotes WHERE oc_item_id=i.id AND activo=1),0)
             - COALESCE((SELECT SUM(kg) FROM sg_reservas WHERE oc_item_id=i.id AND tipo='oc_item' AND estado='activa'),0)
+            - ${KG_COMPROMETIDO_CAMINO}
           ) AS disponible_camino
         FROM sg_oc_items i
         JOIN sg_oc o ON o.id=i.oc_id
@@ -5075,7 +5108,8 @@ router.get('/oferta', requireAuth, (req, res) => {
       const kpb = (r.kg_por_bulto != null && Number(r.kg_por_bulto) > 0) ? Number(r.kg_por_bulto) : null;
       r.kg_por_bulto = kpb;
       r.bultos_camino = (r.presentacion_id != null && kpb != null)
-        ? (Number(r.bultos_estimados || 0) - Number(r.bultos_recibidos || 0) - Number(r.bultos_reservado_camino || 0))
+        ? (Number(r.bultos_estimados || 0) - Number(r.bultos_recibidos || 0)
+           - Number(r.bultos_reservado_camino || 0) - Number(r.bultos_comprometido_camino || 0))
         : null;
       return r;
     });
@@ -5104,6 +5138,7 @@ router.get('/disponibilidad', requireAuth, (req, res) => {
           ( i.kg_estimados
             - COALESCE((SELECT SUM(kg_reales) FROM sg_lotes WHERE oc_item_id=i.id AND activo=1),0)
             - COALESCE((SELECT SUM(kg) FROM sg_reservas WHERE oc_item_id=i.id AND tipo='oc_item' AND estado='activa'),0)
+            - ${KG_COMPROMETIDO_CAMINO}
           ) AS disp
         FROM sg_oc_items i JOIN sg_oc o ON o.id=i.oc_id
         WHERE o.activo=1 AND o.estado IN ('abierta','recibida_parcial')
@@ -5175,21 +5210,91 @@ function syncGastoCoop(db, { tipo, despachoId, recepcionId, proveedorId, coopera
     VALUES (?,?,?,?,?,?, 'pendiente_valorizar', ?, ?)`).run(tipo, opId, proveedorId, cooperativaId || null, unidad || null, (cantidad != null ? Number(cantidad) : null), fechaServicio, userId);
 }
 
-router.post('/despachos', requireAdmin, (req, res) => {
+// EL REMITO — le asigna mercadería a un cliente.
+//
+// Sale con requireAuth, no con requireAdmin. Hacer un remito es EL TRABAJO DEL
+// DÍA: lo hace el que carga el camión. Con requireAdmin lo tenía que cargar el
+// dueño, y el que hace el trabajo terminaba dictándoselo por teléfono. El nivel
+// lo decide exigirNivel mirando la dirección, como en todo el resto.
+router.post('/despachos', requireAuth, (req, res) => {
   const db = getDb();
   try {
     const b = req.body;
     const items = Array.isArray(b.items) ? b.items : [];
     if (!b.cliente_id) return res.status(400).json({ ok: false, error: 'Falta cliente' });
-    if (!items.length) return res.status(400).json({ ok: false, error: 'El despacho necesita al menos un item' });
+    if (!items.length) return res.status(400).json({ ok: false, error: 'El remito necesita al menos un item' });
 
     // F3-B — el despacho mueve BULTOS ENTEROS (cajón indivisible). La cantidad operativa por línea
     // es bultos; kg_despachados se DERIVA = bultos × kg_por_bulto nominal (factor_conversion de la
     // presentación del lote). Se rechaza fracción de cajón y se valida contra bultosDisponibles
     // (helper F3-A). NO se acepta kg libre: si el front manda kg, se deriva el bulto y debe ser entero.
     const pedidoLote = {};   // Σ bultos por lote
-    const lineas = [];       // {it, loteId, bultos, kgPorBulto, kg}
+    const pedidoCamino = {}; // Σ bultos por partida EN VIAJE
+    const lineas = [];       // {it, origen, loteId, ocItemId, bultos, kgPorBulto, kg}
+
+    // ── LO QUE VIENE EN VIAJE ────────────────────────────────────────────
+    // El comprador cerró la carga, el camión está en la ruta, y el cliente
+    // quiere la mercadería anotada a su nombre. Hasta ahora eso no se podía
+    // escribir en ningún lado: la línea del remito exigía un lote, y el lote no
+    // existe hasta que se recibe. El único registro era la memoria del que lo
+    // prometió.
     for (const it of items) {
+      if (String(it.origen || '') !== 'oc_item') continue;
+      const ocItemId = Number(it.oc_item_id);
+      if (!ocItemId) return res.status(400).json({ ok: false, error: 'Falta la partida en viaje de una línea' });
+      const oi = db.prepare(`SELECT i.*, o.numero AS oc_numero, o.estado AS oc_estado, o.activo AS oc_activo,
+          COALESCE(i.kg_por_bulto, ps.factor_conversion) AS kpb
+        FROM sg_oc_items i JOIN sg_oc o ON o.id=i.oc_id
+        LEFT JOIN sg_presentaciones ps ON ps.id=i.presentacion_id WHERE i.id=?`).get(ocItemId);
+      if (!oi) return res.status(400).json({ ok: false, error: 'Partida en viaje inexistente: ' + ocItemId });
+      if (!oi.oc_activo || !['abierta', 'recibida_parcial'].includes(String(oi.oc_estado))) {
+        return res.status(400).json({ ok: false,
+          error: `La orden ${oi.oc_numero} está ${oi.oc_estado}: ya no hay nada en viaje que asignar.` });
+      }
+      const kpb = (Number(oi.kpb) > 0) ? Number(oi.kpb) : null;
+      if (kpb == null) {
+        return res.status(400).json({ ok: false,
+          error: `La partida de ${oi.oc_numero} no tiene kg por bulto cargados: no se puede asignar por cajón.` });
+      }
+      let bultos;
+      if (it.bultos != null && it.bultos !== '') bultos = Number(it.bultos);
+      else if (it.kg_despachados != null && it.kg_despachados !== '') bultos = Number(it.kg_despachados) / kpb;
+      else return res.status(400).json({ ok: false, error: `${oi.oc_numero}: falta la cantidad de bultos` });
+      if (!(bultos > 0)) return res.status(400).json({ ok: false, error: `${oi.oc_numero}: la cantidad debe ser > 0` });
+      if (Math.abs(bultos - Math.round(bultos)) > 1e-6) {
+        return res.status(400).json({ ok: false,
+          error: `${oi.oc_numero}: se asigna por cajón entero, no se admiten fracciones (${+bultos.toFixed(3)})` });
+      }
+      bultos = Math.round(bultos);
+      pedidoCamino[ocItemId] = (pedidoCamino[ocItemId] || 0) + bultos;
+      lineas.push({ it, origen: 'oc_item', ocItemId, bultos, kgPorBulto: kpb,
+        kg: +(bultos * kpb).toFixed(4), presentacionId: oi.presentacion_id, envaseId: oi.envase_id,
+        productoId: oi.producto_id, costoKg: (Number(oi.precio_estimado_por_kg) > 0
+          ? Number(oi.precio_estimado_por_kg) : null) });
+    }
+
+    // NO SE PROMETE DOS VECES LA MISMA CARGA. Sin esta cuenta, el segundo remito
+    // ve el camión entero libre porque el primero no descontó nada, y el día que
+    // baja la mercadería falta para uno de los dos.
+    for (const ocItemId of Object.keys(pedidoCamino)) {
+      const d = db.prepare(`SELECT i.id, o.numero AS oc_numero,
+          COALESCE(i.cantidad_estimada_presentaciones,0) AS bultos_est,
+          COALESCE((SELECT SUM(bultos) FROM sg_lotes WHERE oc_item_id=i.id AND activo=1),0) AS recibidos,
+          COALESCE((SELECT SUM(bultos) FROM sg_reservas WHERE oc_item_id=i.id AND tipo='oc_item' AND estado='activa'),0) AS reservados,
+          COALESCE((SELECT SUM(di.bultos) FROM sg_despacho_items di
+             JOIN sg_despachos d2 ON d2.id=di.despacho_id AND d2.activo=1
+            WHERE di.oc_item_id=i.id AND di.origen='oc_item' AND di.lote_recibido_id IS NULL),0) AS comprometidos
+        FROM sg_oc_items i JOIN sg_oc o ON o.id=i.oc_id WHERE i.id=?`).get(ocItemId);
+      const libre = Number(d.bultos_est) - Number(d.recibidos) - Number(d.reservados) - Number(d.comprometidos);
+      if (pedidoCamino[ocItemId] > libre) {
+        return res.status(400).json({ ok: false,
+          error: `${d.oc_numero}: pedís ${pedidoCamino[ocItemId]} cajón(es) en viaje y quedan ${libre}. `
+               + `Lo que ya está prometido en otro remito no se puede prometer de nuevo.` });
+      }
+    }
+
+    for (const it of items) {
+      if (String(it.origen || '') === 'oc_item') continue;
       const loteId = Number(it.lote_id);
       if (!loteId) return res.status(400).json({ ok: false, error: 'Cada línea necesita lote' });
       const lp = db.prepare(`SELECT l.presentacion_id, l.origen, l.envase_id, COALESCE(l.kg_por_bulto, ps.factor_conversion) AS kg_por_bulto
@@ -5215,7 +5320,8 @@ router.post('/despachos', requireAdmin, (req, res) => {
       bultos = Math.round(bultos);
       const kg = +(bultos * kgPorBulto).toFixed(4);   // kg DERIVADO (nominal), nunca input libre
       pedidoLote[loteId] = (pedidoLote[loteId] || 0) + bultos;
-      lineas.push({ it, loteId, bultos, kgPorBulto, kg, presentacionId: lp.presentacion_id, envaseId: lp.envase_id });
+      lineas.push({ it, origen: 'lote', loteId, bultos, kgPorBulto, kg,
+        presentacionId: lp.presentacion_id, envaseId: lp.envase_id });
     }
     for (const loteId of Object.keys(pedidoLote)) {
       const lote = db.prepare('SELECT estado FROM sg_lotes WHERE id=? AND activo=1').get(loteId);
@@ -5241,31 +5347,43 @@ router.post('/despachos', requireAdmin, (req, res) => {
       // PARTE B — si se asignó fletero, queda un gasto de flete de salida PENDIENTE de valorizar.
       syncGastoFleteDespacho(db, despachoId, fleteroId, val(b.fecha_despacho), uid(req));
       const ins = db.prepare(`INSERT INTO sg_despacho_items
-        (despacho_id, lote_id, producto_id, presentacion_id, envase_id, kg_por_bulto, cantidad_presentaciones, bultos, kg_despachados, precio_por_kg, subtotal, margen_estimado)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`);
+        (despacho_id, origen, lote_id, oc_item_id, producto_id, presentacion_id, envase_id, kg_por_bulto,
+         cantidad_presentaciones, bultos, kg_despachados, precio_por_kg, nota_precio, subtotal, margen_estimado)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`);
       const lotesAfectados = new Set();
       let totalBultos = 0;   // FASE 2 — bultos del despacho (para la carga de la cooperativa)
       for (const ln of lineas) {
         const it = ln.it;
-        const lote = db.prepare('SELECT producto_id, costo_final, kg_reales FROM sg_lotes WHERE id=?').get(ln.loteId);
         const kg = ln.kg;                       // DERIVADO = bultos × kg_por_bulto
         const bultos = ln.bultos;
         const precio = Number(it.precio_por_kg || 0);
         const subtotal = kg * precio;
-        // costo_final del lote es el costo TOTAL → costo/kg sobre kg VIGENTES (kg_reales − decomiso
-        // − transformado), así la merma revalúa lo despachado. (mismo cálculo que el front del modal.)
-        const kgVig = (lote.kg_reales || 0) - kgDecomisado(db, ln.loteId) - kgTransformado(db, ln.loteId);
-        const costoPorKg = kgVig > 0 ? (lote.costo_final || 0) / kgVig : 0;
-        const margen = subtotal - kg * costoPorKg;
+        let productoId = ln.productoId || null;
+        let costoPorKg = null;
+        if (ln.origen === 'lote') {
+          const lote = db.prepare('SELECT producto_id, costo_final, kg_reales FROM sg_lotes WHERE id=?').get(ln.loteId);
+          productoId = lote.producto_id;
+          // costo_final del lote es el costo TOTAL → costo/kg sobre kg VIGENTES (kg_reales − decomiso
+          // − transformado), así la merma revalúa lo despachado. (mismo cálculo que el front del modal.)
+          const kgVig = (lote.kg_reales || 0) - kgDecomisado(db, ln.loteId) - kgTransformado(db, ln.loteId);
+          costoPorKg = kgVig > 0 ? (lote.costo_final || 0) / kgVig : 0;
+        } else {
+          // EN VIAJE NO SIEMPRE HAY COSTO. Si la compra es a pizarra, el precio
+          // se cierra después: todavía no se sabe cuánto costó. El margen queda
+          // en NULL y no en cero — con costo cero el margen daría el total de la
+          // venta, que es la mentira más cara de las dos.
+          costoPorKg = ln.costoKg;              // null si la orden no tiene precio estimado
+        }
+        const margen = (costoPorKg == null) ? null : (subtotal - kg * costoPorKg);
         // bultos va tanto a la columna F3-A (sg_despacho_items.bultos, que lee bultosDisponibles)
         // como a cantidad_presentaciones (compat). presentacion_id se toma de la línea o del lote.
         const presId = it.presentacion_id != null ? it.presentacion_id : (ln.presentacionId || null);
         // F3 — snapshot inmutable del factor+envase usados en este despacho (no se re-lee del lote).
-        ins.run(despachoId, ln.loteId, lote.producto_id, presId,
+        ins.run(despachoId, ln.origen, ln.loteId || null, ln.ocItemId || null, productoId, presId,
           (ln.envaseId != null ? ln.envaseId : null), (ln.kgPorBulto != null ? ln.kgPorBulto : null),
-          bultos, bultos, kg, precio, subtotal, margen);
+          bultos, bultos, kg, precio, (String(it.nota_precio || '').trim() || null), subtotal, margen);
         totalBultos += bultos;
-        lotesAfectados.add(ln.loteId);
+        if (ln.origen === 'lote') lotesAfectados.add(ln.loteId);
       }
       for (const loteId of lotesAfectados) recalcEstadoLote(db, loteId);
       // FASE 2 — si se asignó cooperativa, queda una CARGA DE SALIDA pendiente (cobra por bulto).
@@ -5364,7 +5482,11 @@ router.post('/despachos/:id/anular', requireAuth, (req, res) => {
     const d = db.prepare('SELECT id FROM sg_despachos WHERE id=? AND activo=1').get(req.params.id);
     if (!d) return res.status(404).json({ ok: false, error: 'No encontrado o ya anulado' });
     const tx = db.transaction(() => {
-      const lotes = db.prepare('SELECT DISTINCT lote_id FROM sg_despacho_items WHERE despacho_id=?').all(req.params.id).map(r => r.lote_id);
+      // IS NOT NULL: los renglones de mercaderia EN VIAJE no tienen lote todavia,
+      // y recalcEstadoLote(null) reventaria. Lo que esos renglones reservaban del
+      // camion se libera solo, porque la cuenta mira d.activo=1.
+      const lotes = db.prepare(`SELECT DISTINCT lote_id FROM sg_despacho_items
+        WHERE despacho_id=? AND lote_id IS NOT NULL`).all(req.params.id).map(r => r.lote_id);
       db.prepare("UPDATE sg_despachos SET activo=0, eliminado_en=datetime('now','localtime'), eliminado_por_id=? WHERE id=?").run(uid(req), req.params.id);
       for (const loteId of lotes) recalcEstadoLote(db, loteId);
       // PARTE B — anular el gasto de flete PENDIENTE (no toca los ya valorizados: son deuda real).
