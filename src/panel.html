@@ -322,6 +322,8 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
   <div class="ni" data-sec="sgct-iva-compras" data-admin-only="1"></div>
   <div class="ni" data-sec="sgct-puntos-venta" data-admin-only="1"></div>
   <div class="ni" data-sec="sg-vta-comprobantes"></div>
+  <div class="ni" data-sec="sg-pedidos"></div>
+  <div class="ni" data-sec="sg-facturar"></div>
   <div class="ni" data-sec="sg-remitos-pend"></div>
 
   <div class="ng" style="margin-top:8px">General</div>
@@ -2510,29 +2512,19 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
     </table></div>
   </div>
   <div class="sec sg-mod" id="sec-sg-ventas">
-    <div class="ph"><div><div class="ph-t">🍅 San Gerónimo · Salidas</div><div class="ph-s">Pedidos, despachos y cuenta corriente de clientes</div></div></div>
+    <div class="ph"><div><div class="ph-t">🍅 San Gerónimo · Salidas</div><div class="ph-s">Lo que sale del depósito: con remito, o facturado en el acto</div></div></div>
     <style>
       .sg-mod .sgv-subtab{padding:7px 14px;cursor:pointer;font-size:12.5px;font-weight:600;border-radius:6px;color:var(--mut)}
       .sg-mod .sgv-subtab.on{background:var(--burg);color:#fff}
       .sg-mod .sgv-sub{display:none} .sg-mod .sgv-sub.on{display:block}
     </style>
     <div style="display:inline-flex;gap:2px;background:var(--bg);border:1px solid var(--bor);border-radius:8px;padding:3px;margin-bottom:16px;flex-wrap:wrap">
-      <div class="sgv-subtab on" data-sub="pedidos"   onclick="sgVenSub('pedidos')">📝 Pedidos</div>
-      <div class="sgv-subtab" data-sub="despachos"     onclick="sgVenSub('despachos')">📄 Remitos</div>
-      <div class="sgv-subtab" data-sub="facturar"      onclick="sgVenSub('facturar')">🧾 Facturar</div>
+      <div class="sgv-subtab on" data-sub="despachos" onclick="sgVenSub('despachos')">📄 Remitos</div>
+      <div class="sgv-subtab" data-sub="directa"       onclick="sgVenSub('directa')">💵 Facturación directa</div>
     </div>
 
-    <!-- Pedidos -->
-    <div class="sgv-sub on" id="sgv-sub-pedidos">
-      <div style="display:flex;justify-content:flex-end;margin-bottom:10px"><button class="btn bb" onclick="sgPedOpen()">+ Nuevo pedido</button></div>
-      <div class="ab-table-wrap"><table class="pa-tbl">
-        <thead><tr><th>N°</th><th>Fecha</th><th>Cliente</th><th style="text-align:right">Total</th><th style="text-align:center">Estado</th><th></th></tr></thead>
-        <tbody id="sg-tb-pedidos"><tr><td colspan="6" class="emp">Cargando…</td></tr></tbody>
-      </table></div>
-    </div>
-
-    <!-- Despachos -->
-    <div class="sgv-sub" id="sgv-sub-despachos">
+    <!-- Remitos -->
+    <div class="sgv-sub on" id="sgv-sub-despachos">
       <div style="display:flex;justify-content:flex-end;margin-bottom:10px"><button class="btn bb" onclick="sgDespOpen()">+ Nuevo remito</button></div>
       <div class="ab-table-wrap"><table class="pa-tbl">
         <thead><tr><th>N°</th><th>Fecha</th><th>Alias</th><th>Cliente</th><th>Qué se vendió</th><th style="text-align:right">Total</th><th style="text-align:center">Estado</th><th></th></tr></thead>
@@ -2540,8 +2532,65 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
       </table></div>
     </div>
 
+    <!-- 💵 FACTURACIÓN DIRECTA — stock → comprobante, en un paso ───────────
+         Por dentro hay remito igual: la mercadería sale del depósito y sin él
+         el lote quedaría figurando disponible después de vendido. Lo que se
+         saca es el paso a mano, no el documento. -->
+    <div class="sgv-sub" id="sgv-sub-directa">
+      <div class="sgr-card">
+        <div style="display:flex;gap:14px;align-items:flex-end;flex-wrap:wrap;margin-bottom:10px">
+          <label style="font-size:11.5px;color:var(--mut)">Cliente<br>
+            <input type="text" placeholder="🔎 alias o razón social" oninput="sgCliFiltrar('sgfd-cli',this.value)" autocomplete="off" style="min-width:240px;padding:5px 8px;border-radius:6px;border:1px solid var(--bor);background:var(--card,#fff);margin-bottom:4px;display:block">
+            <select id="sgfd-cli" onchange="sgFdCliente()" style="min-width:240px;padding:6px 8px;border-radius:6px;border:1px solid var(--bor);background:var(--card,#fff)"></select>
+          </label>
+          <span id="sgfd-tipo-badge" style="padding-bottom:6px"></span>
+          <label style="font-size:11.5px;color:var(--mut)">Punto de venta<br>
+            <select id="sgfd-pv" style="padding:6px 8px;border-radius:6px;border:1px solid var(--bor);background:var(--card,#fff)"><option value="">…</option></select>
+          </label>
+          <label style="font-size:12px;color:var(--mut);padding-bottom:7px"><input type="checkbox" id="sgfd-incluye-iva" onchange="sgFdRender()"> precio incluye IVA</label>
+        </div>
+        <div id="sgfd-items"></div>
+        <div style="font-weight:600;font-size:13px;margin:12px 0 4px">Lo que se factura</div>
+        <div id="sgfd-lines"></div>
+        <div id="sgfd-resumen" style="margin-top:12px;font-size:12.5px"></div>
+        <div style="text-align:right;margin-top:12px">
+          <button class="btn bb" id="sgfd-emitir-btn" onclick="sgFdEmitir()">Emitir comprobante</button>
+        </div>
+        <div style="font-size:11.5px;color:var(--mut);margin-top:8px">
+          Se genera el remito y el comprobante juntos. Si AFIP rechaza, el remito queda hecho
+          —la mercadería ya salió— y el comprobante se reintenta desde Remitos pendientes de comprobante.
+        </div>
+      </div>
+      <div class="sgr-confirm" id="sgfd-confirm"></div>
+    </div>
+
+    <!-- Cuenta corriente clientes -->
+
+  </div>
+    <!-- 📑 Facturas — listado de comprobantes emitidos (autorizados + rechazados) -->
+    <!-- Pedidos -->
+<!-- ══ San Gerónimo · PEDIDOS ══
+     Era una solapa de Salidas. Un pedido todavía no sale: es lo que el cliente
+     encargó, y reserva mercadería. Salidas quedó para lo que efectivamente
+     sale. -->
+<div class="sec sg-mod" id="sec-sg-pedidos">
+  <div class="ph"><div><div class="ph-t">📝 San Gerónimo · Pedidos</div>
+    <div class="ph-s">Lo que el cliente encargó, y qué mercadería le queda reservada</div></div></div>
+      <div style="display:flex;justify-content:flex-end;margin-bottom:10px"><button class="btn bb" onclick="sgPedOpen()">+ Nuevo pedido</button></div>
+      <div class="ab-table-wrap"><table class="pa-tbl">
+        <thead><tr><th>N°</th><th>Fecha</th><th>Cliente</th><th style="text-align:right">Total</th><th style="text-align:center">Estado</th><th></th></tr></thead>
+        <tbody id="sg-tb-pedidos"><tr><td colspan="6" class="emp">Cargando…</td></tr></tbody>
+      </table></div>
+    </div>
+
     <!-- Facturar (puente despacho → factura AFIP) -->
-    <div class="sgv-sub" id="sgv-sub-facturar">
+<!-- ══ San Gerónimo · FACTURAR REMITOS ══
+     El puente remito → comprobante. Vive al lado de «Remitos pendientes de
+     comprobante», que es la pantalla donde se ve qué falta facturar: el que
+     busca eso no está despachando nada. -->
+<div class="sec sg-mod" id="sec-sg-facturar">
+  <div class="ph"><div><div class="ph-t">🧾 San Gerónimo · Facturar remitos</div>
+    <div class="ph-s">Lo que salió con remito y todavía no tiene comprobante</div></div></div>
       <div class="sgr-card">
         <div style="display:flex;gap:14px;align-items:flex-end;flex-wrap:wrap;margin-bottom:10px">
           <label style="font-size:11.5px;color:var(--mut)">Cliente<br>
@@ -2570,10 +2619,6 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
       <div class="sgr-confirm" id="sgf-confirm"></div>
     </div>
 
-    <!-- Cuenta corriente clientes -->
-
-  </div>
-    <!-- 📑 Facturas — listado de comprobantes emitidos (autorizados + rechazados) -->
 <!-- ══ San Gerónimo · COMPROBANTES EMITIDOS ══
      Era una solapa adentro de Salidas, que es la pantalla donde se DESPACHA.
      El que busca una factura para reimprimirla o mandársela al cliente no está
@@ -11979,14 +12024,17 @@ SG.cacheCli = SG.cacheCli || [];
 var SG_ESTPED={borrador:'Borrador',confirmado:'Confirmado',despachado_parcial:'Desp. parcial',despachado_total:'Desp. total',facturado:'Facturado',anulado:'Anulado'};
 var SG_ESTDESP={preparado:'Preparado',despachado:'Despachado',entregado:'Entregado',rechazado_parcial:'Rech. parcial',rechazado_total:'Rech. total'};
 
-function sgVenInit(){ sgLoadCaches(function(){ sgVenSub(SG.venSub || 'pedidos'); }); }
+function sgVenInit(){ sgLoadCaches(function(){ sgVenSub(SG.venSub || 'despachos'); }); }
 function sgVenSub(s){
   SG.venSub = s;
   document.querySelectorAll('.sg-mod .sgv-subtab').forEach(function(el){ el.classList.toggle('on', el.dataset.sub===s); });
   document.querySelectorAll('.sg-mod .sgv-sub').forEach(function(el){ el.classList.toggle('on', el.id==='sgv-sub-'+s); });
-  if (s==='pedidos') sgLoadPedidos();
-  else if (s==='despachos') sgLoadDespachos();
-  else if (s==='facturar') sgFacInit();
+  if (s==='despachos') sgLoadDespachos();
+  else if (s==='directa') sgFdInit();
+  // Pedidos y Facturar se fueron a Administración de Ventas. Salidas quedó con
+  // lo que efectivamente SALE: el remito, y la venta que se factura en el acto.
+  else if (s==='pedidos'){ SG.venSub='despachos'; cmAbrirModulo('sg-pedidos'); }
+  else if (s==='facturar'){ SG.venSub='despachos'; cmAbrirModulo('sg-facturar'); }
   // Facturas y Pendientes se fueron a Administración de Ventas. El desvío es
   // para la sesión que tenga guardada la solapa vieja: sin esto abre en blanco,
   // porque SG.venSub sobrevive y el div que buscaba ya no está acá.
@@ -11998,6 +12046,129 @@ function sgVenSub(s){
 }
 
 // ── BRIEF E2 — Pantalla de facturación (despacho → factura AFIP) ──────────────────
+// ── 💵 FACTURACIÓN DIRECTA ────────────────────────────────────────────────
+// Se le factura a un cliente mercadería que está en el stock, sin armar antes un
+// remito en otra pantalla y volver.
+//
+// Por dentro hay remito igual, y tiene que haberlo: la mercadería sale del
+// depósito. Sin él, el lote quedaría figurando disponible después de vendido y
+// se perdería la trazabilidad de qué partida se le mandó a quién. Lo que se saca
+// es el paso a mano, no el documento.
+function sgFdInit(){
+  SG.fdItems=[];
+  var sel=eid('sgfd-cli'); if(sel) sel.innerHTML=sgCliOpts('','','— Elegí cliente —');
+  eid('sgfd-tipo-badge').innerHTML='';
+  eid('sgfd-confirm').classList.remove('on');
+  sgPvLlenarSelector('sgfd-pv');
+  // Sólo el stock: lo que viene en viaje se anota con un remito y se factura
+  // cuando llega. Un comprobante de mercadería que no bajó del camión se arregla
+  // después con una nota de crédito.
+  sgItemPicker({ modo:'directa', contenedor:'sgfd-items', onAdd:sgFdOnAdd });
+  sgFdRender();
+}
+function sgFdCliente(){
+  var cid=eid('sgfd-cli').value;
+  if(!cid){ eid('sgfd-tipo-badge').innerHTML=''; return; }
+  // Con CUIT va comprobante A; sin CUIT, B. Es la misma regla del backend.
+  var c=(SG.cacheCli||[]).filter(function(x){return String(x.id)===String(cid);})[0]||{};
+  var cuit=String(c.cuit||'').replace(/[^0-9]/g,'');
+  var letra=(/^[0-9]{11}$/.test(cuit) && !/^0+$/.test(cuit))?'A':'B';
+  eid('sgfd-tipo-badge').innerHTML='<span class="bdg bcc">Comprobante '+letra+'</span>';
+}
+function sgFdOnAdd(tipo, fuenteId, kg, meta){
+  if(tipo!=='lote'){ toast('La facturación directa es de mercadería en stock','er'); return; }
+  var l=meta.lote||{};
+  SG.fdItems.push({ lote_id:fuenteId, producto_id:meta.producto_id,
+    producto_nombre:meta.producto_nombre, etiqueta:(l.codigo_lote||meta.codigo_lote||meta.label||''),
+    semaforo:(l.semaforo||meta.semaforo), bultos:meta.bultos, kg:kg, kg_por_bulto:meta.kg_por_bulto,
+    bultos_disponibles:meta.bultos_disponibles,
+    kg_vigente:l.kg_vigente, costo_final:l.costo_final,
+    alicuota:(l.iva_alicuota!=null?l.iva_alicuota:null), precio:'' });
+  sgFdRender();
+}
+function sgFdDel(i){ SG.fdItems.splice(i,1); sgFdRender(); }
+function sgFdUpd(i,c,v){ SG.fdItems[i][c]=v; sgFdRender(); }
+function sgFdUpdBultos(i,v){
+  var it=SG.fdItems[i]; var b=Number(v); it.bultos=b;
+  if(Number(it.kg_por_bulto)>0) it.kg=+(b*Number(it.kg_por_bulto)).toFixed(4);
+  sgFdRender();
+}
+function sgFdRender(){
+  var cont=eid('sgfd-lines'); if(!cont) return;
+  if(!SG.fdItems.length){
+    cont.innerHTML='<div style="font-size:12px;color:var(--mut)">Elegí arriba con + las partidas del stock 🟢 que se facturan.</div>';
+    eid('sgfd-resumen').innerHTML=''; return;
+  }
+  cont.innerHTML=SG.fdItems.map(function(it,i){
+    var kg=Number(it.kg)||0, precio=Number(it.precio)||0;
+    var _kv=(it.kg_vigente!=null?it.kg_vigente:0);
+    var costoKg=_kv>0?((it.costo_final||0)/_kv):0;
+    var margen=kg*precio-kg*costoKg;
+    return '<div style="display:grid;grid-template-columns:1.7fr 0.7fr 0.8fr auto;gap:6px;align-items:center;margin-bottom:2px">'
+      +'<span style="font-size:12px">'+(it.semaforo?sgSemEmoji(it.semaforo)+' ':'')+esc(it.producto_nombre||'')+' · <code>'+esc(it.etiqueta)+'</code></span>'
+      +'<input type="number" placeholder="cj" value="'+(it.bultos||'')+'" onchange="sgFdUpdBultos('+i+',this.value)">'
+      +'<input type="number" placeholder="$/kg" value="'+(it.precio||'')+'" onchange="sgFdUpd('+i+',\'precio\',this.value)">'
+      +'<button class="btn bd bs" onclick="sgFdDel('+i+')">×</button>'
+      +'<div style="font-size:11px;color:var(--mut);grid-column:1/-1;margin:-2px 0 4px">'+nr(kg)+'kg'
+        +(it.bultos_disponibles!=null?(' · disp '+it.bultos_disponibles+' cj'):'')
+        +(costoKg>0?(' · costo '+sgMoney(costoKg)+'/kg · margen <b style="color:'+(margen>=0?'#16a34a':'#dc2626')+'">'+sgMoney(margen)+'</b>'):'')
+      +'</div></div>';
+  }).join('');
+  // El resumen espeja la cuenta del backend: si el precio incluye IVA, el neto
+  // se saca dividiendo, no restando.
+  var incl=eid('sgfd-incluye-iva')&&eid('sgfd-incluye-iva').checked;
+  var neto=0, iva=0;
+  SG.fdItems.forEach(function(it){
+    var kg=Number(it.kg)||0, p=Number(it.precio)||0;
+    var alic=(it.alicuota!=null)?Number(it.alicuota):21;
+    var pn=(incl)?p/(1+alic/100):p;
+    neto+=pn*kg; iva+=pn*kg*alic/100;
+  });
+  eid('sgfd-resumen').innerHTML='Neto '+sgMoney(neto)+' · IVA '+sgMoney(iva)
+    +' · <b>Total '+sgMoney(neto+iva)+'</b>';
+}
+function sgFdEmitir(){
+  var cid=eid('sgfd-cli').value; if(!cid){ toast('Elegí cliente','er'); return; }
+  var pv=eid('sgfd-pv').value; if(!pv){ toast('Elegí el punto de venta','er'); return; }
+  var items=[];
+  for(var i=0;i<SG.fdItems.length;i++){
+    var it=SG.fdItems[i]; var b=Number(it.bultos)||0;
+    if(!(b>0)) continue;
+    if(it.bultos_disponibles!=null && b>it.bultos_disponibles){
+      toast('Línea '+(i+1)+': pedís '+b+' cajón(es) y quedan '+it.bultos_disponibles,'er'); return;
+    }
+    if(!(Number(it.precio)>0)){ toast('Línea '+(i+1)+': falta el precio','er'); return; }
+    items.push({ origen:'lote', lote_id:Number(it.lote_id), bultos:b,
+      precio_por_kg:Number(it.precio) });
+  }
+  if(!items.length){ toast('Cargá al menos una partida con cajones','er'); return; }
+  var btn=eid('sgfd-emitir-btn'); btn.disabled=true; var prev=btn.textContent; btn.textContent='Emitiendo…';
+  api('/api/sg/facturas/directa','POST',{ cliente_id:Number(cid), punto_venta:Number(pv),
+    precio_incluye_iva:!!(eid('sgfd-incluye-iva')&&eid('sgfd-incluye-iva').checked),
+    items:items }).then(function(r){
+    btn.disabled=false; btn.textContent=prev;
+    var c=eid('sgfd-confirm');
+    if(r&&r.ok){
+      toast('Comprobante autorizado','ok');
+      c.style.borderColor='';
+      c.innerHTML='✓ <b>Comprobante '+(r.cbte_tipo===1?'A':(r.cbte_tipo===6?'B':r.cbte_tipo))+'</b> · N° '
+        +String(r.pto_vta).padStart(4,'0')+'-'+String(r.cbte_nro).padStart(8,'0')
+        +' · <b>CAE '+esc(r.cae)+'</b> · Vto '+esc(r.cae_vto||'—')
+        +(r.remito_numero?(' · remito <code>'+esc(r.remito_numero)+'</code>'):'')
+        +' &nbsp; <button class="btn bb bs" type="button" onclick="window.open(\'/api/sg/ventas/facturas/'+r.factura_id+'/pdf\',\'_blank\')">📄 Ver comprobante</button>';
+      c.classList.add('on');
+      SG.fdItems=[]; sgFdInit();
+    } else {
+      // Si AFIP rechazó, el remito YA está hecho y la mercadería salió. Decirlo
+      // acá es la diferencia entre reintentar y volver a cargar todo.
+      toast((r&&(r.obs||r.error))||'Rechazado','er');
+      c.innerHTML='⚠ Rechazado: '+esc((r&&(r.obs||r.error))||'—')
+        +((r&&r.aviso)?('<div style="margin-top:6px">'+esc(r.aviso)+'</div>'):'');
+      c.classList.add('on'); c.style.borderColor='var(--err)';
+    }
+  });
+}
+
 function sgFacInit(){
   SG.facData = null; SG.facSel = {}; SG.facLineas = [];
   // Los puntos de venta salen de su pantalla, no del HTML.
@@ -12153,8 +12324,8 @@ function sgPendLoad(){
 // hay que estar parado en Salidas, si no la solapa se marca en un div que está
 // oculto y no se ve nada.
 function sgFacPrecargar(clienteId, despachoId){
-  if (navAct !== 'sg-ventas') cmAbrirModulo('sg-ventas');
-  sgVenSub('facturar');                       // sgFacInit() resetea el form
+  if (navAct !== 'sg-facturar') cmAbrirModulo('sg-facturar');  // sgFacInit() resetea el form
+  else sgFacInit();
   var sel=eid('sgf-cli'); if(sel) sel.value=String(clienteId);
   SG._facPreDesp=despachoId;                   // despacho a tildar cuando cargue /facturable
   sgFacCliente();                              // carga despachos del cliente y aplica la precarga
@@ -12284,7 +12455,12 @@ function sgFacEmitir(){
   var porDesp = {};
   lineas.forEach(function(l){
     if(!porDesp[l.despacho_id]) porDesp[l.despacho_id]={ despacho_id:l.despacho_id, items:[] };
-    var ovr = l.incluye_iva_override; var item = { despacho_item_id:l.despacho_item_id, kg:Number(l.kg) };
+    var ovr = l.incluye_iva_override;
+    // EL PRECIO QUE SE VE ES EL QUE SALE. Hasta ahora esto mandaba sólo los kg y
+    // el servidor facturaba con el precio del remito: se editaba el $/kg, el
+    // total de abajo cambiaba, y el comprobante salía con el precio viejo.
+    var item = { despacho_item_id:l.despacho_item_id, kg:Number(l.kg),
+                 precio_por_kg:Number(l.precio)||0 };
     if(ovr!==null) item.incluye_iva = ovr;
     porDesp[l.despacho_id].items.push(item);
   });
@@ -12355,7 +12531,7 @@ function sgIPConCamino(st){ return st.modo==='pedido' || st.modo==='remito'; }
 // backend valida. Pedirle kg al que carga era pedirle una cuenta: escribía 500
 // y el servidor le contestaba «el despacho es por cajón entero», después de
 // haber armado el remito.
-function sgIPPorBulto(st){ return st.modo==='remito'; }
+function sgIPPorBulto(st){ return st.modo==='remito' || st.modo==='directa'; }
 function sgIPBuscar(key,v){ SG.itemPicker[key].q=v; sgIPRenderList(key); }
 function sgIPRenderList(key){
   var st=SG.itemPicker[key]; if(!eid(key+'-list')) return;
@@ -21128,6 +21304,8 @@ function loadSec(s) {
     // Las dos que salieron de Salidas. sgLoadCaches primero: los selectores de
     // cliente se llenan con sgCliOpts(), que lee de esa caché.
     'sg-vta-comprobantes': function(){ sgLoadCaches(function(){ sgFacListInit(); }); },
+    'sg-pedidos':          function(){ sgLoadCaches(function(){ sgLoadPedidos(); }); },
+    'sg-facturar':         function(){ sgLoadCaches(function(){ sgFacInit(); }); },
     'sg-remitos-pend':     function(){ sgLoadCaches(function(){ sgPendInit(); }); },
     'sg-gastos-directos': function(){ sgGdsInit(); },
     'sg-facturas-merc': function(){ sgFmModeloCargar(); sgFmLoad(); sgFmSinContabilizar(); },
@@ -53961,8 +54139,8 @@ function sgPvBaja(id){
 
 // LOS PUNTOS QUE OFRECE LA PANTALLA DE FACTURAR. Salen de la misma tabla: si
 // uno se da de baja, deja de estar; si se agrega, aparece sin tocar el panel.
-function sgPvLlenarSelector(){
-  var sel = eid('sgf-pv'); if (!sel) return;
+function sgPvLlenarSelector(id){
+  var sel = eid(id || 'sgf-pv'); if (!sel) return;
   api('/api/sg/contable/puntos-venta').then(function(r){
     var ps = (r && r.ok) ? (r.data || []) : [];
     var previo = sel.value;

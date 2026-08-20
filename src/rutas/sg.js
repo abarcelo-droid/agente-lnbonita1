@@ -788,7 +788,12 @@ router.get('/despachos-pendientes', requireAuth, (req, res) => {
 
 // POST /facturas/emitir → orquesta la emisión desde despachos seleccionados. Convierte el precio a
 // NETO (si incluye IVA) y llama al motor con vinculos atómicos (E1). NO toca la facturación interna.
-router.post('/facturas/emitir', requireAdmin, async (req, res) => {
+//
+// Sale con requireAuth, no con requireAdmin. Facturar es el trabajo del día, y
+// hasta ahora lo tenía que hacer el dueño. El nivel lo decide exigirNivel por la
+// dirección — que para esto hubo que DECLARARLA: 'sg/facturas' no estaba en el
+// mapa, y por eso requireAdmin era la única barrera que tenía.
+const postEmitir = async (req, res) => {
   const db = getDb();
   try {
     const b = req.body || {};
@@ -819,7 +824,14 @@ router.post('/facturas/emitir', requireAdmin, async (req, res) => {
         if (kg > kgPend + 0.01) return res.status(400).json({ ok: false, error: `Ítem ${diId}: pedís ${kg}kg pero quedan ${kgPend.toFixed(2)}kg pendientes` });
         const alic = di.iva_alicuota != null ? Number(di.iva_alicuota) : null;
         const incluyeIva = (it.incluye_iva != null) ? (it.incluye_iva === true) : facturaIncluyeIva;
-        const precioBruto = Number(di.precio_por_kg) || 0;
+        // EL PRECIO DE LA PANTALLA MANDA. El del remito es una SUGERENCIA de
+        // quien lo armó; el que factura lo puede cambiar, y hasta ahora ese
+        // cambio no llegaba: el comprobante salía con el precio viejo mientras
+        // la pantalla mostraba el total nuevo. Dos números distintos para la
+        // misma factura, y el que valía era el que no se veía.
+        const precioBruto = (it.precio_por_kg != null && Number(it.precio_por_kg) >= 0)
+          ? Number(it.precio_por_kg)
+          : (Number(di.precio_por_kg) || 0);
         const precioNeto = (incluyeIva && alic != null) ? +(precioBruto / (1 + alic / 100)).toFixed(4) : precioBruto; // al motor SIEMPRE neto
         // F5 — metadata de presentación por bulto (cajón), SOLO para el detalle local + PDF. cantidad
         // (kg) y precio (precio_kg neto) NO cambian → el payload e importes a AFIP son idénticos a hoy.
@@ -836,6 +848,78 @@ router.post('/facturas/emitir', requireAdmin, async (req, res) => {
     if (r.ok) r.pdf_url = '/api/sg/ventas/facturas/' + r.factura_id + '/pdf';
     res.json(r);
   } catch (e) { res.status(502).json({ ok: false, error: e.message }); }
+};
+router.post('/facturas/emitir', requireAuth, postEmitir);
+
+// ── FACTURACIÓN DIRECTA ──────────────────────────────────────────────────────
+// Se le factura a un cliente mercadería que está en el stock, sin tener que
+// armar antes un remito en otra pantalla y volver.
+//
+// Por dentro SÍ hay remito, y tiene que haberlo: la mercadería sale del depósito
+// igual. Sin él, el lote quedaría figurando como disponible después de haberse
+// vendido, y la trazabilidad —qué partida se le mandó a qué cliente— se
+// perdería. Lo que se saca es el paso a mano, no el documento.
+//
+// EL ORDEN IMPORTA. Primero el remito, después el comprobante. Si AFIP rechaza,
+// el remito queda hecho y aparece en «Remitos pendientes de comprobante», que es
+// exactamente donde hay que ir a buscarlo. Al revés —comprobante primero— un
+// error dejaría una factura sin mercadería descontada, y eso no se ve en ningún
+// lado hasta que no cierra el stock.
+router.post('/facturas/directa', requireAuth, async (req, res) => {
+  const db = getDb();
+  const b = req.body || {};
+  const clienteId = Number(b.cliente_id);
+  const items = Array.isArray(b.items) ? b.items : [];
+  if (!(clienteId > 0)) return res.status(400).json({ ok: false, error: 'Falta cliente_id' });
+  if (!(Number(b.punto_venta) > 0)) return res.status(400).json({ ok: false, error: 'Falta punto de venta' });
+  if (!items.length) return res.status(400).json({ ok: false, error: 'No hay nada para facturar' });
+  // Se factura lo que ESTÁ. Lo que viene en viaje se anota con un remito y se
+  // factura cuando llega: un comprobante de mercadería que no bajó del camión se
+  // arregla después con una nota de crédito.
+  if (items.some((it) => String(it.origen || 'lote') !== 'lote')) {
+    return res.status(400).json({ ok: false,
+      error: 'La facturación directa es de mercadería en stock. Lo que viene en viaje se asigna con un remito.' });
+  }
+
+  const rem = crearRemitoInterno(req, {
+    cliente_id: clienteId,
+    fecha_despacho: b.fecha || new Date().toISOString().slice(0, 10),
+    transporte: b.transporte || null, chofer: b.chofer || null, dominio: b.dominio || null,
+    fletero_id: b.fletero_id || null,
+    cooperativa_id: b.cooperativa_id || null, cooperativa_bultos: b.cooperativa_bultos,
+    observaciones: b.observaciones || 'Facturación directa',
+    items: items.map((it) => ({ origen: 'lote', lote_id: it.lote_id, bultos: it.bultos,
+      kg_despachados: it.kg_despachados, precio_por_kg: it.precio_por_kg,
+      nota_precio: it.nota_precio })),
+  });
+  if (rem.status !== 200 || !rem.body?.ok) return res.status(rem.status).json(rem.body);
+  const despachoId = Number(rem.body.data.id);
+
+  // El comprobante sale del remito recién hecho, por el mismo camino que el de
+  // siempre: mismos vínculos, mismo descuento de lo pendiente, mismo PDF.
+  const lineas = db.prepare('SELECT id, kg_despachados FROM sg_despacho_items WHERE despacho_id=? ORDER BY id')
+    .all(despachoId);
+  const fakeReq = Object.create(req);
+  fakeReq.body = {
+    cliente_id: clienteId, punto_venta: Number(b.punto_venta), es_nc: false,
+    precio_incluye_iva: b.precio_incluye_iva === true,
+    seleccion: [{ despacho_id: despachoId,
+      items: lineas.map((l) => ({ despacho_item_id: l.id, kg: Number(l.kg_despachados) })) }],
+  };
+  let salida = null;
+  const fakeRes = { _st: 200, status(c) { this._st = c; return this; },
+    json(o) { salida = { status: this._st, body: o }; return this; } };
+  await postEmitir(fakeReq, fakeRes);
+  const out = salida || { status: 502, body: { ok: false, error: 'La emisión no contestó' } };
+  // El número de remito viaja siempre: si AFIP rechazó, es el dato con el que se
+  // vuelve a intentar desde Remitos pendientes de comprobante.
+  out.body.remito_id = despachoId;
+  out.body.remito_numero = db.prepare('SELECT numero FROM sg_despachos WHERE id=?').get(despachoId)?.numero || null;
+  if (!out.body.ok && !out.body.aviso) {
+    out.body.aviso = 'El remito ' + out.body.remito_numero + ' quedó hecho y la mercadería salió del stock. '
+                   + 'El comprobante se puede volver a emitir desde Remitos pendientes de comprobante.';
+  }
+  res.status(out.status).json(out.body);
 });
 
 // BRIEF 10 — CARGA INICIAL DE INVENTARIO (lotes de apertura, sin compra/proveedor/OC).
@@ -5068,6 +5152,7 @@ router.get('/oferta', requireAuth, (req, res) => {
     const stock = db.prepare(`
       SELECT * FROM (
         SELECT l.id AS lote_id, l.codigo_lote, l.producto_id, pr.nombre AS producto_nombre, l.calidad, l.semaforo,
+          fam.iva_alicuota,
           l.costo_final, l.fecha_vencimiento_estimada, l.presentacion_id, COALESCE(l.kg_por_bulto, ps.factor_conversion) AS kg_por_bulto,
           ${KG_VIGENTE_STOCK} AS kg_vigente,
           CAST(julianday(l.fecha_vencimiento_estimada) - julianday(date('now','localtime')) AS INTEGER) AS dias_restantes,
@@ -5075,6 +5160,7 @@ router.get('/oferta', requireAuth, (req, res) => {
           COALESCE((SELECT SUM(kg) FROM sg_reservas WHERE lote_id=l.id AND estado IN ('activa','concretada')),0) AS kg_reservado,
           COALESCE((SELECT SUM(bultos) FROM sg_reservas WHERE lote_id=l.id AND estado IN ('activa','concretada')),0) AS bultos_reservado
         FROM sg_lotes l LEFT JOIN sg_productos pr ON pr.id=l.producto_id
+        LEFT JOIN sg_familias fam ON fam.id=pr.familia_id
         LEFT JOIN sg_presentaciones ps ON ps.id=l.presentacion_id
         WHERE l.activo=1 AND NOT (COALESCE(l.origen,'')='granel' AND l.presentacion_id IS NULL) AND l.estado IN ('disponible','reservado','despachado_parcial') AND l.producto_id=?
       ) WHERE kg_disponibles > 0.01
@@ -5216,7 +5302,7 @@ function syncGastoCoop(db, { tipo, despachoId, recepcionId, proveedorId, coopera
 // DÍA: lo hace el que carga el camión. Con requireAdmin lo tenía que cargar el
 // dueño, y el que hace el trabajo terminaba dictándoselo por teléfono. El nivel
 // lo decide exigirNivel mirando la dirección, como en todo el resto.
-router.post('/despachos', requireAuth, (req, res) => {
+const postRemito = (req, res) => {
   const db = getDb();
   try {
     const b = req.body;
@@ -5399,7 +5485,29 @@ router.post('/despachos', requireAuth, (req, res) => {
     });
     res.json({ ok: true, data: { id: Number(tx()) } });
   } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
-});
+};
+router.post('/despachos', requireAuth, postRemito);
+
+// Llamar al remito desde adentro, sin dar una vuelta por HTTP. El handler es
+// SÍNCRONO —arma todo y cierra con res.json— así que alcanza con darle un `res`
+// de mentira que anote lo que contestó.
+//
+// Se reusa el handler entero a propósito: la facturación directa tiene que
+// validar el stock, derivar los kg de los cajones, mover el lote y dejar el
+// gasto de flete EXACTAMENTE igual que un remito hecho a mano. Una segunda copia
+// de esas reglas es una segunda copia que se olvida de actualizar.
+function crearRemitoInterno(req, body) {
+  let salida = null;
+  const fakeRes = {
+    _st: 200,
+    status(c) { this._st = c; return this; },
+    json(o) { salida = { status: this._st, body: o }; return this; },
+  };
+  const fakeReq = Object.create(req);   // conserva cookies, _user y todo lo demás
+  fakeReq.body = body;
+  postRemito(fakeReq, fakeRes);
+  return salida || { status: 500, body: { ok: false, error: 'El remito no contestó' } };
+}
 
 router.get('/despachos', requireAuth, (req, res) => {
   const db = getDb();

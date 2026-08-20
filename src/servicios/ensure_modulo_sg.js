@@ -52,6 +52,12 @@ const MODULOS_SG = [
   // busca una factura para reimprimirla o mandarla no está despachando nada, y
   // tenía que entrar a la pantalla donde se despacha para llegar.
   ["sg-vta-comprobantes", "🧾 Comprobantes emitidos", 653],
+  // Salidas quedo con DOS botones: remitos y facturacion directa. Es lo que
+  // efectivamente SALE del deposito. Un pedido todavia no sale —es lo que el
+  // cliente encargo— y facturar un remito ya despachado es trabajo de
+  // administracion: los dos se mudan al grupo de al lado.
+  ["sg-pedidos", "📝 Pedidos", 655],
+  ["sg-facturar", "🧾 Facturar remitos", 656],
   ["sg-remitos-pend", "📋 Remitos pendientes de comprobante", 654],
   ["sg-cc-proveedores", "💳 CC proveedores", 670],
   // Caja y Bancos de San Gerónimo. El backend ya existía entero
@@ -152,6 +158,8 @@ try {
     ['Administración de Ventas',      652,  'sg-cc-clientes'],
     ['Administración de Ventas',      653,  'sg-vta-comprobantes'],
     ['Administración de Ventas',      654,  'sg-remitos-pend'],
+    ['Administración de Ventas',      655,  'sg-pedidos'],
+    ['Administración de Ventas',      656,  'sg-facturar'],
 
     // ── INGRESOS: LA MERCADERÍA QUE ENTRA ────────────────────────────
     // Todo lo que pasa desde que se pacta la compra hasta que la mercadería
