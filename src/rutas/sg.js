@@ -6018,26 +6018,101 @@ router.post('/gastos-servicio/valorizar', requireAdmin, (req, res) => {
 router.get('/cc-clientes', requireAuth, (req, res) => {
   const db = getDb();
   try {
-    // BRIEF 10 — LEFT JOIN para que un cliente con SOLO saldo de apertura (sin despachos) aparezca.
-    // saldo = saldo_inicial (apertura al corte) + (facturado − cobrado) post-corte. saldo_inicial va aparte.
+    // ── LO QUE CADA CLIENTE DEBE ─────────────────────────────────────────
     //
-    // El cobrado sale de una SUBCONSULTA y no de otro JOIN: con dos LEFT JOIN
-    // sobre la misma fila, el SUM de los despachos se multiplica por la cantidad
-    // de cobranzas y el facturado sale al doble o al triple.
+    // Esta lista y la ficha del cliente contestaban PREGUNTAS DISTINTAS, y las
+    // dos con cara de ser la respuesta:
+    //
+    //   · la lista sumaba REMITOS —lo despachado, al precio sugerido del
+    //     remito—, así que una liquidación o una factura no la movían, y lo que
+    //     se facturó de más o de menos que el remito no aparecía por ningún lado;
+    //   · la ficha sumaba COMPROBANTES —liquidaciones y facturas, con su
+    //     dif_gestion—, así que la mercadería entregada y todavía sin facturar
+    //     no figuraba.
+    //
+    // Para el mismo cliente daban números distintos. Ahora las dos miran lo
+    // mismo, con la MISMA forma que la cuenta corriente de proveedores, que es
+    // la que ya está validada:
+    //
+    //     saldo de apertura
+    //   + lo documentado y no cobrado        ← liquidaciones + facturas
+    //   + lo entregado sin comprobante       ← remitos con kg sin facturar
+    //   − lo cobrado a cuenta                ← plata que entró sin imputar
+    //
+    // LO DOCUMENTADO va por `total + dif_gestion`: lo que el cliente debe es lo
+    // ACORDADO, no lo que dice el comprobante. Es el espejo exacto de lo que se
+    // le debe a un proveedor cuando su factura vino corta.
     const rows = db.prepare(`
       SELECT c.id, c.razon_social, c.limite_credito, COALESCE(c.saldo_inicial,0) AS saldo_inicial,
-        COALESCE(SUM(di.subtotal),0) AS total_facturado,
+        -- Documentado y sin cobrar (liquidaciones)
+        COALESCE((SELECT SUM(l.neto_acreditar + COALESCE(l.dif_gestion,0)
+                    - COALESCE((SELECT SUM(cd.monto) FROM sg_ven_cobranza_docs cd
+                        JOIN sg_ven_cobranzas co2 ON co2.id=cd.cobranza_id
+                       WHERE cd.tipo='liquidacion' AND cd.doc_id=l.id AND co2.anulada=0),0))
+                    FROM sg_ven_liquidaciones l
+                   WHERE l.cliente_id=c.id AND l.estado <> 'anulada'),0)
+        + COALESCE((SELECT SUM(f.total + COALESCE(f.dif_gestion,0)
+                    - COALESCE((SELECT SUM(cd.monto) FROM sg_ven_cobranza_docs cd
+                        JOIN sg_ven_cobranzas co2 ON co2.id=cd.cobranza_id
+                       WHERE cd.tipo='factura' AND cd.doc_id=f.id AND co2.anulada=0),0))
+                    FROM sg_ven_facturas f
+                   WHERE f.cliente_id=c.id AND f.estado <> 'anulada'),0) AS documentado,
+        -- ── LO ENTREGADO QUE TODAVÍA NO TIENE COMPROBANTE ────────────────
+        -- Los kg del remito que no se facturaron, al precio del remito. Es
+        -- deuda real —la mercadería está en la casa del cliente— pero no está
+        -- en el libro fiscal, así que se muestra en su propia columna.
+        COALESCE((SELECT SUM((di.kg_despachados
+                     - COALESCE((SELECT SUM(fd.kg) FROM sg_factura_despachos fd
+                         JOIN sg_ven_facturas fv ON fv.id=fd.factura_id
+                        WHERE fd.despacho_item_id=di.id
+                          AND fv.afip_estado IN ('reservado','autorizado')),0))
+                   * COALESCE(di.precio_por_kg,0))
+                    FROM sg_despacho_items di
+                    JOIN sg_despachos d ON d.id=di.despacho_id AND d.activo=1
+                   WHERE d.cliente_id=c.id AND d.estado <> 'rechazado_total'
+                     AND (di.kg_despachados
+                          - COALESCE((SELECT SUM(fd.kg) FROM sg_factura_despachos fd
+                              JOIN sg_ven_facturas fv ON fv.id=fd.factura_id
+                             WHERE fd.despacho_item_id=di.id
+                               AND fv.afip_estado IN ('reservado','autorizado')),0)) > 0.01),0)
+          AS pendiente_comprobante,
         COALESCE((SELECT SUM(co.monto) FROM sg_ven_cobranzas co
-                   WHERE co.cliente_id = c.id AND co.anulada = 0), 0) AS total_cobrado
+                   WHERE co.cliente_id = c.id AND co.anulada = 0), 0) AS total_cobrado,
+        -- Lo cobrado que NO se imputó a ningún documento: plata que ya entró y
+        -- baja el saldo aunque no haya comprobante contra el cual aplicarla.
+        COALESCE((SELECT SUM(co.monto) FROM sg_ven_cobranzas co
+                   WHERE co.cliente_id = c.id AND co.anulada = 0), 0)
+        - COALESCE((SELECT SUM(cd.monto) FROM sg_ven_cobranza_docs cd
+                     JOIN sg_ven_cobranzas co ON co.id=cd.cobranza_id
+                    WHERE co.cliente_id = c.id AND co.anulada = 0
+                      -- Lo imputado a un documento ANULADO vuelve a estar a
+                      -- cuenta: el documento se cae, la plata no. Sin esta
+                      -- condicion la cobranza desaparecia de la cuenta y el
+                      -- cliente quedaba debiendo lo que ya pago.
+                      AND ((cd.tipo='factura' AND EXISTS (
+                              SELECT 1 FROM sg_ven_facturas f2
+                               WHERE f2.id = cd.doc_id AND f2.estado <> 'anulada'))
+                        OR (cd.tipo='liquidacion' AND EXISTS (
+                              SELECT 1 FROM sg_ven_liquidaciones l2
+                               WHERE l2.id = cd.doc_id AND l2.estado <> 'anulada')))), 0) AS a_cuenta
       FROM sg_clientes c
-      LEFT JOIN sg_despachos d ON d.cliente_id=c.id AND d.activo=1
-      LEFT JOIN sg_despacho_items di ON di.despacho_id=d.id
-      WHERE c.activo=1
-      GROUP BY c.id, c.razon_social, c.limite_credito, c.saldo_inicial
-      HAVING total_facturado > 0 OR saldo_inicial <> 0 OR total_cobrado > 0
-      ORDER BY (COALESCE(c.saldo_inicial,0) + COALESCE(SUM(di.subtotal),0)) DESC`).all();
-    for (const r of rows) r.saldo = (r.saldo_inicial || 0) + (r.total_facturado || 0) - (r.total_cobrado || 0);
-    res.json({ ok: true, data: rows });
+      WHERE c.activo=1`).all();
+    const red = (n) => Math.round((Number(n) || 0) * 100) / 100;
+    const data = rows.map((r) => ({
+      ...r,
+      documentado: red(r.documentado),
+      pendiente_comprobante: red(r.pendiente_comprobante),
+      total_cobrado: red(r.total_cobrado),
+      a_cuenta: red(r.a_cuenta),
+      // total_facturado se sigue devolviendo con el nombre de siempre para no
+      // romper a nadie que lo esté leyendo, pero ahora dice lo DOCUMENTADO.
+      total_facturado: red(r.documentado),
+      saldo: red((r.saldo_inicial || 0) + Number(r.documentado || 0)
+                 + Number(r.pendiente_comprobante || 0) - Number(r.a_cuenta || 0)),
+    })).filter((r) => r.saldo_inicial !== 0 || r.documentado !== 0
+                   || r.pendiente_comprobante !== 0 || r.total_cobrado !== 0)
+      .sort((a, b) => b.saldo - a.saldo);
+    res.json({ ok: true, data });
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
