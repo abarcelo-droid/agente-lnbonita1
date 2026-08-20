@@ -6445,6 +6445,129 @@ router.post('/pagos', requireAuth, (req, res) => {
   } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
 });
 
+// ── EL RECIBO, PARA IMPRIMIR Y HACER FIRMAR ──────────────────────────────
+// El cajero entrega la plata y necesita un papel con la firma del que la recibe.
+// Hasta ahora no había ninguno: la orden de pago vivía adentro del sistema y la
+// constancia se hacía a mano o no se hacía.
+//
+// Sale como HTML listo para imprimir y no como PDF: no hace falta ninguna
+// librería nueva, se abre en una pestaña, sale por la impresora de siempre y —lo
+// que importa— el que lo mira ve exactamente lo que va a salir en papel.
+//
+// Va POR DUPLICADO en la misma hoja: uno queda en la carpeta y el otro se lo
+// lleva quien cobró. Es como se hace, y partirlo en dos impresiones es como se
+// pierde el segundo.
+router.get('/pagos/:id/recibo', requireAuth, (req, res) => {
+  const db = getDb();
+  try {
+    const p = db.prepare(`SELECT pg.*, pr.razon_social, pr.cuit,
+        u.nombre AS usuario_nombre
+      FROM sg_pagos_proveedores pg
+      LEFT JOIN sg_proveedores pr ON pr.id = pg.proveedor_id
+      LEFT JOIN usuarios u ON u.id = pg.usuario_id
+      WHERE pg.id = ?`).get(req.params.id);
+    if (!p) return res.status(404).send('Orden de pago no encontrada');
+
+    const medios = db.prepare(`SELECT m.*, c.nombre AS cuenta_nombre
+      FROM sg_pagos_medios m LEFT JOIN sg_fin_cuentas c ON c.id = m.cuenta_fin_id
+      WHERE m.pago_id = ? ORDER BY m.id`).all(p.id);
+    const imp = db.prepare(`SELECT pc.monto, COALESCE(pc.monto_gestion,0) AS monto_gestion,
+        f.punto_venta, f.numero, f.fecha_emision,
+        (SELECT GROUP_CONCAT(o.trazabilidad, ' · ') FROM sg_factura_compra_ocs fo
+           JOIN sg_oc o ON o.id = fo.oc_id WHERE fo.factura_id = f.id) AS partidas
+      FROM sg_pagos_compras pc JOIN sg_facturas_compra f ON f.id = pc.compra_id
+      WHERE pc.pago_id = ? ORDER BY f.fecha_emision, f.id`).all(p.id);
+
+    const $ = (v) => String(v == null ? '' : v)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    const money = (n) => '$ ' + (Math.round((Number(n) || 0) * 100) / 100)
+      .toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    const FP = { efectivo: 'Efectivo', transferencia: 'Transferencia', cheque: 'Cheque',
+                 cheque_terceros: 'Cheque de terceros endosado', varios: 'Varios medios' };
+
+    const cuerpo = (copia) => `
+      <div class="recibo">
+        <div class="cab">
+          <div><div class="tit">Recibo de pago</div>
+            <div class="sub">San Ger&oacute;nimo SA</div></div>
+          <div class="der"><div class="nro">N&deg; ${p.id}</div>
+            <div class="sub">${$(p.fecha)}</div>
+            <div class="copia">${copia}</div></div>
+        </div>
+        <table class="datos">
+          <tr><th>Recib&iacute; de</th><td>San Ger&oacute;nimo SA</td></tr>
+          <tr><th>La suma de</th><td class="grande">${money(p.monto)}</td></tr>
+          <tr><th>Que se paga a</th><td><b>${$(p.razon_social || '')}</b>${
+            p.cuit ? ' &middot; CUIT ' + $(p.cuit) : ''}</td></tr>
+          ${p.referencia ? `<tr><th>Referencia</th><td>${$(p.referencia)}</td></tr>` : ''}
+        </table>
+        ${imp.length ? `<div class="rot">Cancela</div>
+        <table class="lista"><thead><tr><th>Comprobante</th><th>Partida</th>
+          <th class="num">Importe</th></tr></thead><tbody>
+          ${imp.map((x) => `<tr>
+            <td>${$((x.punto_venta ? x.punto_venta + '-' : '') + (x.numero || ''))}</td>
+            <td class="chico">${$(x.partidas || '')}</td>
+            <td class="num">${money(x.monto)}</td></tr>`).join('')}
+        </tbody></table>` : '<div class="rot">A cuenta &mdash; sin imputar a comprobantes</div>'}
+        ${medios.length ? `<div class="rot">Con qu&eacute; se paga</div>
+        <table class="lista"><tbody>
+          ${medios.map((m) => `<tr>
+            <td>${$(FP[m.forma_pago] || m.forma_pago)}${
+              m.cuenta_nombre ? ' &middot; ' + $(m.cuenta_nombre) : ''}${
+              m.nro_cheque ? ' &middot; cheque N&deg; ' + $(m.nro_cheque) : ''}</td>
+            <td class="num">${money(m.monto)}</td></tr>`).join('')}
+        </tbody></table>` : ''}
+        ${p.notas ? `<div class="notas">${$(p.notas)}</div>` : ''}
+        <div class="firmas">
+          <div class="firma"><div class="linea"></div>Firma y aclaraci&oacute;n de quien recibe</div>
+          <div class="firma"><div class="linea"></div>${
+            $(p.usuario_nombre || 'Entreg&oacute;')}</div>
+        </div>
+      </div>`;
+
+    res.type('html').send(`<!doctype html><html lang="es"><head><meta charset="utf-8">
+<title>Recibo N&deg; ${p.id} &mdash; ${$(p.razon_social || '')}</title>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:Georgia,'Times New Roman',serif;color:#16211f;background:#f4f6f5;padding:16px}
+  .recibo{background:#fff;border:1px solid #c3cec8;padding:22px 26px;max-width:19cm;margin:0 auto 14px}
+  .cab{display:flex;justify-content:space-between;align-items:flex-start;
+    border-bottom:2px solid #16211f;padding-bottom:10px;margin-bottom:14px}
+  .tit{font-size:22px;font-weight:700}
+  .sub{font-size:12px;color:#6b7772}
+  .der{text-align:right}
+  .nro{font-size:16px;font-weight:700;font-variant-numeric:tabular-nums}
+  .copia{font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:#6b7772;margin-top:4px}
+  table{width:100%;border-collapse:collapse}
+  .datos th{text-align:left;width:130px;font-size:11px;letter-spacing:.06em;text-transform:uppercase;
+    color:#6b7772;font-weight:600;padding:5px 0;vertical-align:top}
+  .datos td{padding:5px 0;font-size:14px}
+  .grande{font-size:22px;font-weight:700;font-variant-numeric:tabular-nums}
+  .rot{font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:#6b7772;
+    font-weight:600;margin:14px 0 5px}
+  .lista th{text-align:left;font-size:10.5px;text-transform:uppercase;letter-spacing:.05em;
+    color:#6b7772;border-bottom:1px solid #dce3df;padding:4px 0}
+  .lista td{padding:4px 0;border-bottom:1px solid #eef1ef;font-size:13px}
+  .num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+  .chico{font-size:11px;color:#6b7772}
+  .notas{margin-top:12px;font-size:12.5px;color:#3d4a46;font-style:italic}
+  .firmas{display:flex;gap:40px;margin-top:38px}
+  .firma{flex:1;font-size:10.5px;color:#6b7772;text-align:center}
+  .linea{border-top:1px solid #16211f;margin-bottom:5px}
+  .imprimir{max-width:19cm;margin:0 auto 12px;text-align:right}
+  .imprimir button{font:inherit;font-size:13px;padding:7px 16px;border:1px solid #16211f;
+    background:#16211f;color:#fff;border-radius:6px;cursor:pointer}
+  /* En papel no van ni el botón ni el fondo: la hoja es la hoja. */
+  @media print{ body{background:#fff;padding:0} .imprimir{display:none}
+    .recibo{border:0;margin:0;padding:14px 0} }
+</style></head><body>
+<div class="imprimir"><button onclick="window.print()">Imprimir</button></div>
+${cuerpo('Original')}
+${cuerpo('Duplicado')}
+</body></html>`);
+  } catch (e) { res.status(500).send('No se pudo armar el recibo: ' + e.message); }
+});
+
 // Con qué se pagó cada uno. Un pago con varios medios decía "varios" y nada más.
 router.get('/pagos/:id/medios', requireAuth, (req, res) => {
   const db = getDb();
