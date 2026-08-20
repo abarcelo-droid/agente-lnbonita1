@@ -2141,6 +2141,104 @@ try {
   }
 } catch (e) { console.error('[DB] SG remitos (origen en la línea):', e.message); }
 
+// ── LOS PISOS: DÓNDE ESTÁ LA MERCADERÍA ───────────────────────────────────
+// Hasta ahora una partida estaba "en stock" y nada más. El total salía de sumar
+// lo que quedaba de cada una, y no había forma de contestar dónde está — que es
+// lo primero que necesita el que la va a buscar.
+//
+// El piso es la APERTURA del inventario, no una cuenta contable: el total sigue
+// siendo uno y el piso lo desglosa. Un traslado entre pisos no genera asiento;
+// la mercadería no cambió de dueño ni de valor, cambió de lugar.
+//
+// UNA PARTIDA PUEDE ESTAR REPARTIDA. Entran 100 cajones y se guardan 60 en un
+// piso y 40 en otro: es lo que pasa de verdad, así que el saldo se lleva por
+// (partida, piso) y no por partida.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS sg_pisos (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    nombre        TEXT NOT NULL,
+    codigo        TEXT,
+    orden         INTEGER NOT NULL DEFAULT 0,
+    notas         TEXT,
+    activo        INTEGER NOT NULL DEFAULT 1,
+    creado_en     TEXT DEFAULT (datetime('now','localtime')),
+    creado_por    INTEGER,
+    modificado_en TEXT,
+    modificado_por INTEGER
+  );
+
+  -- CUÁNTO DE CADA PARTIDA HAY EN CADA PISO. Es un SALDO, no un histórico: sube
+  -- cuando entra o llega un traslado, baja cuando sale mercadería.
+  --
+  -- LA REGLA QUE NO SE PUEDE ROMPER: la suma de los pisos de una partida tiene
+  -- que dar exactamente lo disponible de esa partida. Si se despacha sin
+  -- descontar de un piso, el total sigue bien y la apertura queda mintiendo —
+  -- que es peor que no tener apertura, porque nadie la va a dudar.
+  CREATE TABLE IF NOT EXISTS sg_lote_ubicaciones (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    lote_id    INTEGER NOT NULL REFERENCES sg_lotes(id),
+    piso_id    INTEGER NOT NULL REFERENCES sg_pisos(id),
+    bultos     REAL NOT NULL DEFAULT 0,
+    kg         REAL NOT NULL DEFAULT 0,
+    UNIQUE(lote_id, piso_id)
+  );
+  CREATE INDEX IF NOT EXISTS idx_sg_lote_ubic_lote ON sg_lote_ubicaciones(lote_id);
+  CREATE INDEX IF NOT EXISTS idx_sg_lote_ubic_piso ON sg_lote_ubicaciones(piso_id);
+
+  -- EL PASE ENTRE PISOS. Queda registrado con quién y cuándo: mover mercadería
+  -- de lugar cambia dónde hay que ir a buscarla, y una edición silenciosa deja
+  -- al depósito diciendo una cosa y la pantalla otra sin que se sepa cuándo
+  -- empezó a pasar.
+  CREATE TABLE IF NOT EXISTS sg_lote_traslados (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    lote_id         INTEGER NOT NULL REFERENCES sg_lotes(id),
+    piso_origen_id  INTEGER NOT NULL REFERENCES sg_pisos(id),
+    piso_destino_id INTEGER NOT NULL REFERENCES sg_pisos(id),
+    bultos          REAL NOT NULL DEFAULT 0,
+    kg              REAL NOT NULL DEFAULT 0,
+    motivo          TEXT,
+    usuario_id      INTEGER,
+    creado_en       TEXT DEFAULT (datetime('now','localtime'))
+  );
+  CREATE INDEX IF NOT EXISTS idx_sg_traslados_lote ON sg_lote_traslados(lote_id);
+`);
+
+// Los tres con los que arranca. Se pueden renombrar, dar de baja y agregar más
+// desde la pantalla: acá sólo se siembra para que el sistema no arranque sin
+// ningún lugar donde poner la mercadería.
+try {
+  if (!db.prepare('SELECT COUNT(*) c FROM sg_pisos').get().c) {
+    const ins = db.prepare('INSERT INTO sg_pisos (nombre, codigo, orden) VALUES (?,?,?)');
+    ins.run('Piso 1', 'P1', 1);
+    ins.run('Piso 2', 'P2', 2);
+    ins.run('Piso 3', 'P3', 3);
+    console.log('[DB] SG pisos: se sembraron los 3 iniciales');
+  }
+} catch (e) { console.error('[DB] SG pisos:', e.message); }
+
+// EL PISO QUE SE PROPONE DESDE LA ORDEN. Al comprar ya se suele saber dónde va a
+// ir la mercadería, pero el dato FÍSICO recién existe cuando el camión descarga:
+// por eso acá es una propuesta y en la recepción se confirma. Si sólo se eligiera
+// en la orden, el primer día que la carga vaya a otro lado el sistema diría una
+// cosa y el depósito otra.
+try {
+  const colsIt = db.prepare('PRAGMA table_info(sg_oc_items)').all().map((c) => c.name);
+  if (!colsIt.includes('piso_id')) {
+    db.exec('ALTER TABLE sg_oc_items ADD COLUMN piso_id INTEGER');
+    console.log('[DB] SG sg_oc_items.piso_id agregado (piso propuesto en la orden)');
+  }
+} catch (e) { console.error('[DB] SG oc_items.piso_id:', e.message); }
+
+// De qué piso salió lo que se despachó. Null en los remitos viejos y en las
+// líneas de mercadería en viaje, que todavía no está en ningún piso.
+try {
+  const colsDI = db.prepare('PRAGMA table_info(sg_despacho_items)').all().map((c) => c.name);
+  if (!colsDI.includes('piso_id')) {
+    db.exec('ALTER TABLE sg_despacho_items ADD COLUMN piso_id INTEGER');
+    console.log('[DB] SG sg_despacho_items.piso_id agregado');
+  }
+} catch (e) { console.error('[DB] SG despacho_items.piso_id:', e.message); }
+
 console.log('[DB] Módulo San Gerónimo (sg_*) inicializado');
 
 export default db;

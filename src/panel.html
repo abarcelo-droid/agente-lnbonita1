@@ -322,6 +322,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
   <div class="ni" data-sec="sgct-iva-compras" data-admin-only="1"></div>
   <div class="ni" data-sec="sgct-puntos-venta" data-admin-only="1"></div>
   <div class="ni" data-sec="sg-vta-comprobantes"></div>
+  <div class="ni" data-sec="sg-pisos"></div>
   <div class="ni" data-sec="sg-pedidos"></div>
   <div class="ni" data-sec="sg-facturar"></div>
   <div class="ni" data-sec="sg-remitos-pend"></div>
@@ -2569,6 +2570,83 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
   </div>
     <!-- 📑 Facturas — listado de comprobantes emitidos (autorizados + rechazados) -->
     <!-- Pedidos -->
+<!-- ══ San Gerónimo · PISOS ══
+     El stock deja de ser un total y se abre por dónde está la mercadería. El
+     total sigue siendo uno: el piso lo desglosa. -->
+<div class="sec sg-mod" id="sec-sg-pisos">
+  <div class="ph">
+    <div><div class="ph-t">🏢 San Gerónimo · Pisos</div>
+      <div class="ph-s">Dónde está cada partida, y cuánto hay en cada lugar</div></div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <select id="sg-pi-filtro" onchange="sgPiLoad()" style="padding:6px 8px;border-radius:6px;border:1px solid var(--bor);background:var(--card,#fff)">
+        <option value="">Todos los pisos</option>
+      </select>
+      <button class="btn bo" onclick="sgPiImprimir()" title="La hoja para contar contra ella">🖨️ Imprimir</button>
+      <button class="btn bo" onclick="sgPiAdmin()">⚙️ Administrar</button>
+    </div>
+  </div>
+  <div id="sg-pi-tot" style="margin-bottom:12px"></div>
+  <div id="sg-pi-cuerpo"><div class="emp">Cargando…</div></div>
+</div>
+
+<!-- ── ADMINISTRAR LOS PISOS ────────────────────────────────────────────── -->
+<div class="ab-modal-overlay" id="sg-piadm-modal">
+  <div class="ab-modal" style="max-width:min(680px,96vw)">
+    <div class="mhd"><div class="mht">🏢 Pisos</div>
+      <button class="mcl" onclick="closeMB('sg-piadm-modal')">×</button></div>
+    <div class="mbd">
+      <div class="ab-table-wrap"><table class="pa-tbl">
+        <thead><tr><th style="width:60px">Orden</th><th>Nombre</th><th style="width:90px">Código</th>
+          <th style="text-align:right;width:90px">Bultos</th><th style="text-align:right;width:90px">Kg</th>
+          <th style="width:110px"></th></tr></thead>
+        <tbody id="sg-piadm-tb"></tbody>
+      </table></div>
+      <div style="font-size:11.5px;color:var(--mut);margin-top:8px">
+        Un piso con mercadería adentro no se puede dar de baja: desaparecería de las pantallas
+        y esos kilos quedarían sin lugar donde ir a buscarlos.
+      </div>
+      <div class="sg-oc-box" style="margin-top:14px">
+        <div class="sg-oc-box-tit" id="sg-piadm-tit">Nuevo piso</div>
+        <input type="hidden" id="sg-pi-id">
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px">
+          <div class="fl"><label>Nombre</label><input id="sg-pi-nombre" placeholder="Piso 4"></div>
+          <div class="fl"><label>Código</label><input id="sg-pi-codigo" placeholder="P4"></div>
+          <div class="fl"><label>Orden</label><input type="number" id="sg-pi-orden" value="0"></div>
+        </div>
+        <div class="fl" style="margin-top:8px"><label>Notas</label><input id="sg-pi-notas"></div>
+        <div style="text-align:right;margin-top:10px">
+          <button class="btn bo bs" onclick="sgPiNuevo()">Limpiar</button>
+          <button class="btn bb bs" onclick="sgPiGuardar()">Guardar</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ── EL PASE ENTRE PISOS ──────────────────────────────────────────────── -->
+<div class="ab-modal-overlay" id="sg-pipase-modal">
+  <div class="ab-modal" style="max-width:min(520px,96vw)">
+    <div class="mhd"><div class="mht" id="sg-pipase-tit">Pasar a otro piso</div>
+      <button class="mcl" onclick="closeMB('sg-pipase-modal')">×</button></div>
+    <div class="mbd">
+      <input type="hidden" id="sg-pipase-lote"><input type="hidden" id="sg-pipase-origen">
+      <div id="sg-pipase-info" style="font-size:12.5px;margin-bottom:10px"></div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+        <div class="fl"><label>Bultos a pasar</label><input type="number" id="sg-pipase-bultos"></div>
+        <div class="fl"><label>A qué piso</label><select id="sg-pipase-destino"></select></div>
+      </div>
+      <div class="fl" style="margin-top:8px"><label>Motivo (opcional)</label><input id="sg-pipase-motivo" placeholder="ej. se liberó lugar arriba"></div>
+      <div style="font-size:11.5px;color:var(--mut);margin-top:8px">
+        Los kilos se van con los bultos. El pase queda anotado con quién y cuándo.
+      </div>
+      <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:14px">
+        <button class="btn bo" onclick="closeMB('sg-pipase-modal')">Cancelar</button>
+        <button class="btn bb" onclick="sgPiPasar()">Pasar</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <!-- ══ San Gerónimo · PEDIDOS ══
      Era una solapa de Salidas. Un pedido todavía no sale: es lo que el cliente
      encargó, y reserva mercadería. Salidas quedó para lo que efectivamente
@@ -10731,6 +10809,14 @@ function sgRecFaltaEn(p){
 // era de ninguno de los dos, y la foto no probaba nada.
 function sgRecRenderPesos(){
   var cont = eid('sg-rec-pesos'); if (!cont) return;
+  // Se piden una sola vez y se vuelve a pintar cuando llegan.
+  if (!SG._pisos) {
+    SG._pisos = [];
+    api('/api/sg/pisos').then(function(r){
+      SG._pisos = (r && r.ok) ? (r.data || []) : [];
+      if (SG._pisos.length) sgRecRenderPesos();
+    });
+  }
   if (!(SG.recItems || []).length) {
     cont.innerHTML = '<div class="emp">Elegí una orden de compra en el paso 1.</div>';
     return;
@@ -10764,6 +10850,18 @@ function sgRecRenderPesos(){
                      ? Math.round(bultos * Number(it.peso_bulto)) : derivado) + ' kg</b>')
                 : 'contá los bultos en el paso 2 y acá se hace la cuenta')
           + '</div></div>'
+        // DONDE QUEDO LA MERCADERIA. Se pregunta acá, en el mismo paso donde el
+        // que recibe ya está mirando el producto: es el único momento en que
+        // sabe de verdad dónde la dejaron. Si queda sin elegir, la partida entra
+        // SIN UBICAR y se ve así en Pisos — inventar un lugar es peor, porque el
+        // que va a buscarla pierde el viaje.
+        + '<div class="fl"><label>¿En qué piso quedó?</label>'
+          + '<select onchange="sgRecArtUpd(' + i + ',\'piso_id\',this.value)">'
+            + '<option value="">— sin ubicar —</option>'
+            + (SG._pisos||[]).map(function(p){
+                return '<option value="'+p.id+'"'+(String(it.piso_id)===String(p.id)?' selected':'')+'>'
+                  + escH(p.nombre)+'</option>'; }).join('')
+          + '</select></div>'
         + '<div class="fl"><label>Foto de la balanza</label>'
           + '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;padding-top:2px">'
             + '<button class="btn bb bs" type="button" onclick="eid(\'sg-rec-bal-' + i + '-cam\').click()">📷 Cámara</button>'
@@ -11403,7 +11501,11 @@ function sgRecBuildBody(requireItems){
         kg_reales:(Number(l.kg_reales)>0)?Number(l.kg_reales):null,
         calidad:l.calidad||null,
         kg_por_bulto:(it.kg_por_bulto!=null&&it.kg_por_bulto!=='')?Number(it.kg_por_bulto):null,
-        bultos:(l.bultos===''||l.bultos==null)?null:Number(l.bultos)};}) };
+        bultos:(l.bultos===''||l.bultos==null)?null:Number(l.bultos),
+        // DONDE QUEDO. Viaja el piso elegido en el paso de la balanza; si no se
+        // eligio, el backend cae al que propuso la orden de compra, y si tampoco
+        // hay, la partida entra SIN UBICAR y se ve asi en Pisos.
+        piso_id:(it.piso_id===''||it.piso_id==null)?null:Number(it.piso_id)};}) };
     if(sinOc) item.producto_id=Number(it.producto_id); else item.oc_item_id=it.oc_item_id;
     items.push(item);
   }
@@ -12217,6 +12319,158 @@ function sgVenSub(s){
 // depósito. Sin él, el lote quedaría figurando disponible después de vendido y
 // se perdería la trazabilidad de qué partida se le mandó a quién. Lo que se saca
 // es el paso a mano, no el documento.
+// ── 🏢 PISOS ──────────────────────────────────────────────────────────────
+// El stock deja de ser un total y se abre por dónde está la mercadería. El total
+// sigue siendo uno: el piso lo desglosa.
+var SG_PI = { pisos: [], vista: [] };
+
+function sgPiLoad(){
+  var filtro = (eid('sg-pi-filtro')||{}).value || '';
+  api('/api/sg/pisos').then(function(r){
+    SG_PI.pisos = (r && r.ok) ? (r.data || []) : [];
+    var sel = eid('sg-pi-filtro');
+    if (sel) {
+      var prev = sel.value;
+      sel.innerHTML = '<option value="">Todos los pisos</option>'
+        + SG_PI.pisos.map(function(p){ return '<option value="'+p.id+'">'+escH(p.nombre)+'</option>'; }).join('');
+      sel.value = prev;
+    }
+    return api('/api/sg/stock-pisos' + (filtro ? ('?piso_id='+filtro) : ''));
+  }).then(function(r){
+    SG_PI.vista = (r && r.ok) ? (r.data || []) : [];
+    SG_PI.total = (r && r.ok) ? r.total : { bultos:0, kg:0 };
+    sgPiPintar();
+  });
+}
+
+function sgPiPintar(){
+  var tot = eid('sg-pi-tot');
+  if (tot) {
+    tot.innerHTML = '<div style="display:flex;gap:18px;flex-wrap:wrap;align-items:baseline">'
+      + '<div style="font-size:20px;font-weight:800">' + nr(SG_PI.total.kg) + ' kg</div>'
+      + '<div style="font-size:13px;color:var(--mut)">' + nr(SG_PI.total.bultos) + ' bultos ubicados</div>'
+      + '</div>';
+  }
+  var c = eid('sg-pi-cuerpo'); if (!c) return;
+  if (!SG_PI.vista.length) { c.innerHTML = '<div class="emp">No hay pisos cargados.</div>'; return; }
+  c.innerHTML = SG_PI.vista.map(function(p){
+    // UN PISO VACÍO TAMBIÉN SE MUESTRA: que un lugar esté vacío es información,
+    // y esconderlo hace pensar que el piso no existe.
+    var filas = (p.partidas||[]).length
+      ? (p.partidas||[]).map(function(x){
+          var venc = (x.dias_restantes!=null)
+            ? (x.dias_restantes + 'd' + (x.dias_restantes < 0 ? ' ⚠' : '')) : '—';
+          return '<tr><td><code>'+escH(x.codigo_lote||'')+'</code></td>'
+            + '<td>'+(x.semaforo?sgSemEmoji(x.semaforo)+' ':'')+escH(x.producto_nombre||'')+'</td>'
+            + '<td>'+escH(x.calidad||'—')+'</td>'
+            + '<td style="text-align:right">'+nr(x.bultos)+'</td>'
+            + '<td style="text-align:right">'+nr(x.kg)+'</td>'
+            + '<td style="font-size:11.5px;color:var(--mut)">'+venc+'</td>'
+            + '<td style="text-align:right"><button class="btn bo bs" onclick="sgPiPaseOpen('
+              + x.lote_id + ',' + p.piso_id + ')">↔ Pasar</button></td></tr>';
+        }).join('')
+      : '<tr><td colspan="7" class="emp" style="padding:14px">Vacío.</td></tr>';
+    return '<div style="margin-bottom:18px">'
+      + '<div style="display:flex;justify-content:space-between;align-items:baseline;gap:10px;margin-bottom:6px">'
+        + '<div style="font-weight:700;font-size:12.5px;text-transform:uppercase;letter-spacing:.04em">'
+          + escH(p.piso_nombre) + (p.piso_codigo?(' <span style="color:var(--mut);font-weight:400">'+escH(p.piso_codigo)+'</span>'):'')
+        + '</div>'
+        + '<div style="font-size:12.5px;font-weight:700">'+nr(p.kg)+' kg <span style="font-weight:400;color:var(--mut)">· '+nr(p.bultos)+' bultos</span></div>'
+      + '</div>'
+      + '<div class="ab-table-wrap"><table class="pa-tbl">'
+        + '<thead><tr><th style="width:150px">Partida</th><th>Producto</th><th style="width:90px">Calidad</th>'
+        + '<th style="text-align:right;width:80px">Bultos</th><th style="text-align:right;width:90px">Kg</th>'
+        + '<th style="width:70px">Vence</th><th style="width:100px"></th></tr></thead>'
+        + '<tbody>'+filas+'</tbody></table></div>'
+      + '</div>';
+  }).join('');
+}
+
+function sgPiImprimir(){
+  var f = (eid('sg-pi-filtro')||{}).value || '';
+  window.open('/api/sg/stock-pisos/imprimir' + (f ? ('?piso_id='+f) : ''), '_blank');
+}
+
+// ── ADMINISTRAR ───────────────────────────────────────────────────────────
+function sgPiAdmin(){ sgPiNuevo(); sgPiAdmPintar(); sgModalArriba('sg-piadm-modal'); }
+function sgPiAdmPintar(){
+  var tb = eid('sg-piadm-tb'); if (!tb) return;
+  tb.innerHTML = SG_PI.pisos.map(function(p){
+    var conStock = Number(p.bultos) > 0 || Number(p.kg) > 0;
+    return '<tr><td style="text-align:center">'+escH(p.orden)+'</td>'
+      + '<td><b>'+escH(p.nombre)+'</b></td><td>'+escH(p.codigo||'—')+'</td>'
+      + '<td style="text-align:right">'+nr(p.bultos)+'</td>'
+      + '<td style="text-align:right">'+nr(p.kg)+'</td>'
+      + '<td style="text-align:right;white-space:nowrap">'
+        + '<button class="btn bo bs" onclick="sgPiEditar('+p.id+')">Editar</button>'
+        // Con mercadería adentro no se ofrece: el servidor lo rechaza igual, y
+        // ofrecer un botón que va a rebotar hace creer que se rompió algo.
+        + (conStock ? '' : ' <button class="btn bd bs" onclick="sgPiBaja('+p.id+')">Baja</button>')
+      + '</td></tr>';
+  }).join('');
+}
+function sgPiNuevo(){
+  eid('sg-piadm-tit').textContent='Nuevo piso';
+  eid('sg-pi-id').value=''; eid('sg-pi-nombre').value=''; eid('sg-pi-codigo').value='';
+  eid('sg-pi-orden').value=String((SG_PI.pisos.length||0)+1); eid('sg-pi-notas').value='';
+}
+function sgPiEditar(id){
+  var p = SG_PI.pisos.filter(function(x){return x.id===id;})[0]||{};
+  eid('sg-piadm-tit').textContent='Editar '+(p.nombre||'piso');
+  eid('sg-pi-id').value=id; eid('sg-pi-nombre').value=p.nombre||'';
+  eid('sg-pi-codigo').value=p.codigo||''; eid('sg-pi-orden').value=p.orden||0;
+  eid('sg-pi-notas').value=p.notas||'';
+}
+function sgPiGuardar(){
+  var n=(eid('sg-pi-nombre').value||'').trim();
+  if(!n){ toast('Poné el nombre del piso','er'); return; }
+  api('/api/sg/pisos','POST',{ id:eid('sg-pi-id').value||null, nombre:n,
+    codigo:eid('sg-pi-codigo').value, orden:Number(eid('sg-pi-orden').value)||0,
+    notas:eid('sg-pi-notas').value }).then(function(r){
+    if(!r||!r.ok){ toast((r&&r.error)||'No se pudo guardar','er'); return; }
+    toast('Piso guardado','ok');
+    sgPiLoad(); setTimeout(function(){ sgPiNuevo(); sgPiAdmPintar(); }, 300);
+  });
+}
+function sgPiBaja(id){
+  var p = SG_PI.pisos.filter(function(x){return x.id===id;})[0]||{};
+  if(!confirm('¿Dar de baja '+(p.nombre||'el piso')+'?')) return;
+  api('/api/sg/pisos/'+id+'/baja','POST',{}).then(function(r){
+    if(!r||!r.ok){ toast((r&&r.error)||'No se pudo','er'); return; }
+    toast('Piso dado de baja','ok');
+    sgPiLoad(); setTimeout(sgPiAdmPintar, 300);
+  });
+}
+
+// ── EL PASE ───────────────────────────────────────────────────────────────
+function sgPiPaseOpen(loteId, pisoOrigen){
+  var piso = (SG_PI.vista||[]).filter(function(p){return p.piso_id===pisoOrigen;})[0]||{};
+  var part = (piso.partidas||[]).filter(function(x){return x.lote_id===loteId;})[0]||{};
+  eid('sg-pipase-tit').textContent='Pasar de '+(piso.piso_nombre||'');
+  eid('sg-pipase-lote').value=loteId; eid('sg-pipase-origen').value=pisoOrigen;
+  eid('sg-pipase-info').innerHTML='<code>'+escH(part.codigo_lote||'')+'</code> · '
+    + escH(part.producto_nombre||'') + ' · hay <b>'+nr(part.bultos)+'</b> bulto(s) en '
+    + escH(piso.piso_nombre||'');
+  eid('sg-pipase-bultos').value=part.bultos||'';
+  eid('sg-pipase-motivo').value='';
+  eid('sg-pipase-destino').innerHTML = SG_PI.pisos
+    .filter(function(p){ return p.id!==pisoOrigen; })
+    .map(function(p){ return '<option value="'+p.id+'">'+escH(p.nombre)+'</option>'; }).join('');
+  sgModalArriba('sg-pipase-modal');
+}
+function sgPiPasar(){
+  var b=Number(eid('sg-pipase-bultos').value);
+  if(!(b>0)){ toast('Poné cuántos bultos se pasan','er'); return; }
+  api('/api/sg/lotes/'+eid('sg-pipase-lote').value+'/trasladar','POST',{
+    piso_origen_id:Number(eid('sg-pipase-origen').value),
+    piso_destino_id:Number(eid('sg-pipase-destino').value),
+    bultos:b, motivo:eid('sg-pipase-motivo').value }).then(function(r){
+    if(!r||!r.ok){ toast((r&&r.error)||'No se pudo pasar','er'); return; }
+    toast('Mercadería pasada','ok');
+    closeMB('sg-pipase-modal'); sgPiLoad();
+  });
+}
+
 function sgFdInit(){
   SG.fdItems=[];
   var sel=eid('sgfd-cli'); if(sel) sel.innerHTML=sgCliOpts('','','— Elegí cliente —');
@@ -21480,6 +21734,7 @@ function loadSec(s) {
     // Las dos que salieron de Salidas. sgLoadCaches primero: los selectores de
     // cliente se llenan con sgCliOpts(), que lee de esa caché.
     'sg-vta-comprobantes': function(){ sgLoadCaches(function(){ sgFacListInit(); }); },
+    'sg-pisos':            function(){ sgPiLoad(); },
     'sg-pedidos':          function(){ sgLoadCaches(function(){ sgLoadPedidos(); }); },
     'sg-facturar':         function(){ sgLoadCaches(function(){ sgFacInit(); }); },
     'sg-remitos-pend':     function(){ sgLoadCaches(function(){ sgPendInit(); }); },

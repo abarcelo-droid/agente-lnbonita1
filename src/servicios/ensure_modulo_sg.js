@@ -56,6 +56,9 @@ const MODULOS_SG = [
   // efectivamente SALE del deposito. Un pedido todavia no sale —es lo que el
   // cliente encargo— y facturar un remito ya despachado es trabajo de
   // administracion: los dos se mudan al grupo de al lado.
+  // LOS PISOS. El stock deja de ser un total y se abre por dónde está la
+  // mercadería. Va al lado de Stock porque es su apertura, no otra cosa.
+  ["sg-pisos", "🏢 Pisos", 649],
   ["sg-pedidos", "📝 Pedidos", 655],
   ["sg-facturar", "🧾 Facturar remitos", 656],
   ["sg-remitos-pend", "📋 Remitos pendientes de comprobante", 654],
@@ -153,6 +156,7 @@ try {
   // grupo viejo: "Abasto SG" desaparece solo cuando se queda sin pantallas.
   const MENU_SG = [
     // grupo                          orden  módulo
+    ['Administración de Ventas',      649,  'sg-pisos'],
     ['Administración de Ventas',      650,  'sg-stock'],
     ['Administración de Ventas',      651,  'sg-ventas'],
     ['Administración de Ventas',      652,  'sg-cc-clientes'],

@@ -130,6 +130,9 @@ const PREFIJOS = [
   // control la deja pasar entera.
   ['sg-compras',         'sg/recepciones,sg/oc,sg/compra-retroactiva,sg/lotes,sg/facturas-compra'],
   ['sg-stock',           'sg/lotes,sg/disponibilidad,sg/decomisos'],
+  // Los pisos son la apertura del stock: quien administra el stock los maneja,
+  // y la pantalla propia tambien.
+  ['sg-pisos',           'sg/pisos,sg/stock-pisos'],
   // ── LAS DOS PANTALLAS QUE SALIERON DE SALIDAS ──────────────────────────
   // El listado de comprobantes y los remitos pendientes se fueron a
   // Administración de Ventas. Sus direcciones se declaran bajo la pantalla
