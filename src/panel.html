@@ -321,6 +321,8 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
   <div class="ni" data-sec="sgct-modelos" data-admin-only="1"></div>
   <div class="ni" data-sec="sgct-iva-compras" data-admin-only="1"></div>
   <div class="ni" data-sec="sgct-puntos-venta" data-admin-only="1"></div>
+  <div class="ni" data-sec="sg-vta-comprobantes"></div>
+  <div class="ni" data-sec="sg-remitos-pend"></div>
 
   <div class="ng" style="margin-top:8px">General</div>
   <div class="ni on" data-sec="inicio"><span class="dot"></span>Inicio</div>
@@ -2518,8 +2520,6 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
       <div class="sgv-subtab on" data-sub="pedidos"   onclick="sgVenSub('pedidos')">📝 Pedidos</div>
       <div class="sgv-subtab" data-sub="despachos"     onclick="sgVenSub('despachos')">🚚 Despachos</div>
       <div class="sgv-subtab" data-sub="facturar"      onclick="sgVenSub('facturar')">🧾 Facturar</div>
-      <div class="sgv-subtab" data-sub="facturas"      onclick="sgVenSub('facturas')">📑 Facturas</div>
-      <div class="sgv-subtab" data-sub="pendientes"    onclick="sgVenSub('pendientes')">📋 Pendientes de comprobante</div>
     </div>
 
     <!-- Pedidos -->
@@ -2570,8 +2570,17 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
       <div class="sgr-confirm" id="sgf-confirm"></div>
     </div>
 
+    <!-- Cuenta corriente clientes -->
+
+  </div>
     <!-- 📑 Facturas — listado de comprobantes emitidos (autorizados + rechazados) -->
-    <div class="sgv-sub" id="sgv-sub-facturas">
+<!-- ══ San Gerónimo · COMPROBANTES EMITIDOS ══
+     Era una solapa adentro de Salidas, que es la pantalla donde se DESPACHA.
+     El que busca una factura para reimprimirla o mandársela al cliente no está
+     sacando mercadería, y tenía que entrar ahí para llegar. -->
+<div class="sec sg-mod" id="sec-sg-vta-comprobantes">
+  <div class="ph"><div><div class="ph-t">🧾 San Gerónimo · Comprobantes emitidos</div>
+    <div class="ph-s">Lo que ya se facturó: volver a imprimirlo o mandárselo al cliente</div></div></div>
       <div class="sgr-card">
         <div style="display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap;margin-bottom:12px">
           <label style="font-size:11.5px;color:var(--mut)">Cliente<br>
@@ -2592,7 +2601,12 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
     </div>
 
     <!-- 📋 Pendientes de comprobante — despachos con kg sin facturar -->
-    <div class="sgv-sub" id="sgv-sub-pendientes">
+<!-- ══ San Gerónimo · REMITOS PENDIENTES DE COMPROBANTE ══
+     La mercadería que salió y todavía no tiene factura. Es una pregunta de
+     administración —¿qué falta facturar?—, no de despacho. -->
+<div class="sec sg-mod" id="sec-sg-remitos-pend">
+  <div class="ph"><div><div class="ph-t">📋 San Gerónimo · Remitos pendientes de comprobante</div>
+    <div class="ph-s">Salió la mercadería y todavía no se facturó</div></div></div>
       <div class="sgr-card">
         <div style="display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap;margin-bottom:12px">
           <label style="font-size:11.5px;color:var(--mut)">Cliente<br>
@@ -2607,9 +2621,35 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
       </div>
     </div>
 
-    <!-- Cuenta corriente clientes -->
 
+<!-- ── MANDARLE EL COMPROBANTE AL CLIENTE ─────────────────────────────────
+     Va el MISMO PDF que imprime el botón de al lado: el que tiene el CAE y el
+     QR de ARCA. Dos versiones del mismo comprobante circulando es exactamente
+     lo que no puede pasar. -->
+<div class="ab-modal-overlay" id="sg-mailfac-modal">
+  <div class="ab-modal" style="max-width:min(560px,96vw)">
+    <div class="mhd"><div class="mht" id="sg-mailfac-tit">Enviar comprobante</div>
+      <button class="mcl" onclick="closeMB('sg-mailfac-modal')">×</button></div>
+    <div class="mbd">
+      <input type="hidden" id="sg-mailfac-id">
+      <div class="fl"><label>Para</label>
+        <input id="sg-mailfac-to" placeholder="cliente@ejemplo.com"></div>
+      <div style="font-size:11.5px;color:var(--mut);margin-top:4px" id="sg-mailfac-hint"></div>
+      <div class="fl" style="margin-top:10px"><label>Mensaje (opcional)</label>
+        <textarea id="sg-mailfac-msg" rows="3" placeholder="Se agrega arriba del pie del mail"
+          style="width:100%;box-sizing:border-box;padding:6px 8px;border-radius:6px;border:1px solid var(--bor);background:var(--card,#fff)"></textarea></div>
+      <div style="font-size:11.5px;color:var(--mut);margin-top:8px">
+        Se adjunta el PDF del comprobante con su CAE. Queda anotado quién lo mandó y a qué dirección.
+      </div>
+      <div id="sg-mailfac-hist" style="margin-top:10px"></div>
+      <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:16px">
+        <button class="btn bo" onclick="closeMB('sg-mailfac-modal')">Cancelar</button>
+        <button class="btn bb" id="sg-mailfac-btn" onclick="sgFacMailEnviar()">Enviar</button>
+      </div>
+    </div>
   </div>
+</div>
+
   <!-- ══ Módulo Reprocesos (#reproceso): decomiso / transformación / reproceso con clasificación ══ -->
   <div class="sec sg-mod" id="sec-sg-reprocesos">
     <div class="ph"><div><div class="ph-t">🍅 San Gerónimo · Reprocesos</div><div class="ph-s">Decomiso parcial, transformación de unidad y reproceso con clasificación de lotes</div></div></div>
@@ -11947,8 +11987,11 @@ function sgVenSub(s){
   if (s==='pedidos') sgLoadPedidos();
   else if (s==='despachos') sgLoadDespachos();
   else if (s==='facturar') sgFacInit();
-  else if (s==='facturas') sgFacListInit();
-  else if (s==='pendientes') sgPendInit();
+  // Facturas y Pendientes se fueron a Administración de Ventas. El desvío es
+  // para la sesión que tenga guardada la solapa vieja: sin esto abre en blanco,
+  // porque SG.venSub sobrevive y el div que buscaba ya no está acá.
+  else if (s==='facturas'){ SG.venSub='pedidos'; cmAbrirModulo('sg-vta-comprobantes'); }
+  else if (s==='pendientes'){ SG.venSub='pedidos'; cmAbrirModulo('sg-remitos-pend'); }
   // 'cc' ya no vive acá: se fue a su propia pantalla, CC clientes. Se deja el
   // desvío para que una sesión con la solapa vieja guardada no quede en blanco.
   else if (s==='cc') sgVenSub('pedidos');
@@ -11987,26 +12030,91 @@ function sgFacListLoad(){
     if(!r||!r.ok){ eid('sgfl-tabla').innerHTML='<div style="color:var(--err)">'+esc((r&&r.error)||'Error')+'</div>'; return; }
     var fs=r.data||[];
     if(!fs.length){ eid('sgfl-tabla').innerHTML='<div style="font-size:12px;color:var(--mut)">Sin facturas para los filtros elegidos.</div>'; return; }
+    // Mandar el comprobante ES operar. No se ofrece el botón al que va a comer
+    // un 403: el que lo aprieta cree que lo mandó.
+    var puedeMandar = lnbPuedeOperar('sg-vta-comprobantes') || lnbPuedeOperar('sg-ventas');
+    SG._facList = {};
+    fs.forEach(function(f){ SG._facList[f.id]=f; });
     var body=fs.map(function(f){
       var num=String(f.punto_venta||0).padStart(4,'0')+'-'+String(f.cbte_nro||0).padStart(8,'0');
       var tipoB='<span class="bdg bcc">'+esc(f.tipo||'—')+'</span>';
       var estB= f.afip_estado==='autorizado' ? '<span class="bdg bok">✓ autorizado</span>'
               : '<span class="bdg ber">✗ '+esc(f.afip_estado||'—')+'</span>';
-      var pdf= f.afip_estado==='autorizado'
-        ? '<button class="btn bs" onclick="window.open(\'/api/sg/ventas/facturas/'+f.id+'/pdf\',\'_blank\')">📄</button>' : '—';
+      // Sólo el autorizado se imprime y se manda: sin CAE lo que saldría es un
+      // borrador con pinta de factura, y del otro lado lo registran igual.
+      var listo = f.afip_estado==='autorizado';
+      var pdf= listo
+        ? '<button class="btn bs" title="Imprimir / ver el PDF" onclick="window.open(\'/api/sg/ventas/facturas/'+f.id+'/pdf\',\'_blank\')">📄</button>' : '—';
+      var mail = (listo && puedeMandar)
+        ? '<button class="btn bs" title="Enviar por mail al cliente" onclick="sgFacMailOpen('+f.id+')">✉️</button>'
+        : '—';
+      // Si ya salió, se dice CUÁNDO. Sin esto la pregunta «¿ya se la mandamos?»
+      // la contestan dos personas distintas y las dos la mandan de nuevo.
+      var env = f.ultimo_envio
+        ? '<span class="bdg bok" title="Último envío">✉ '+esc(String(f.ultimo_envio).slice(0,16))+'</span>'
+        : '<span style="color:var(--mut)">—</span>';
       return '<tr><td>'+esc(num)+'</td><td>'+esc(f.fecha||'—')+'</td><td>'+tipoB+'</td>'
         +'<td>'+esc(f.alias||'—')+'</td><td>'+esc(f.cliente_nombre||'—')+'</td>'
         +'<td style="text-align:right">'+sgMoney(f.total)+'</td><td>'+estB+'</td>'
         +'<td>'+esc(f.cae||'—')+'</td><td>'+esc(f.cae_vto||'—')+'</td>'
-        +'<td style="text-align:center">'+pdf+'</td></tr>';
+        +'<td style="text-align:center;white-space:nowrap">'+pdf+' '+mail+'</td>'
+        +'<td style="font-size:11px">'+env+'</td></tr>';
     }).join('');
     eid('sgfl-tabla').innerHTML='<table class="pa-tbl"><thead><tr>'
       +'<th>N°</th><th>Fecha</th><th>Tipo</th><th>Alias</th><th>Cliente</th>'
-      +'<th style="text-align:right">Total</th><th>Estado</th><th>CAE</th><th>Vto CAE</th><th style="text-align:center">PDF</th>'
+      +'<th style="text-align:right">Total</th><th>Estado</th><th>CAE</th><th>Vto CAE</th>'
+      +'<th style="text-align:center">Imprimir / enviar</th><th>Enviado</th>'
       +'</tr></thead><tbody>'+body+'</tbody></table>';
   });
 }
 function sgFacListExport(){ window.open('/api/sg/ventas/facturas/export.xlsx?'+sgFacListQS(),'_blank'); }
+
+// ── MANDARLE EL COMPROBANTE AL CLIENTE ───────────────────────────────────
+// Antes se bajaba el PDF y se mandaba desde el mail de alguien. Funciona hasta
+// que hay que contestar «¿se la mandamos?»: ahí cada uno mira su propia casilla
+// de enviados y no lo sabe nadie.
+function sgFacMailOpen(id){
+  var f=(SG._facList||{})[id]||{};
+  var num=String(f.punto_venta||0).padStart(4,'0')+'-'+String(f.cbte_nro||0).padStart(8,'0');
+  eid('sg-mailfac-tit').textContent='Enviar comprobante '+(f.tipo||'')+' N° '+num;
+  eid('sg-mailfac-id').value=id;
+  eid('sg-mailfac-to').value=f.cliente_email||'';
+  eid('sg-mailfac-msg').value='';
+  eid('sg-mailfac-hint').innerHTML = f.cliente_email
+    ? 'Es el mail de la ficha de '+esc(f.cliente_nombre||'')+'. Se puede cambiar sólo para este envío.'
+    : '<span style="color:#9a3412">'+esc(f.cliente_nombre||'El cliente')+' no tiene mail cargado en su ficha.</span>';
+  eid('sg-mailfac-hist').innerHTML='';
+  eid('sg-mailfac-btn').disabled=false;
+  // El historial: quién lo mandó, cuándo y a dónde. Incluye los que fallaron —
+  // un rebote dice que la dirección del cliente está mal.
+  api('/api/sg/ventas/facturas/'+id+'/envios').then(function(r){
+    var es=(r&&r.ok)?(r.data||[]):[];
+    if(!es.length) return;
+    eid('sg-mailfac-hist').innerHTML='<div style="font-size:11.5px;color:var(--mut);margin-bottom:4px">Envíos anteriores</div>'
+      +es.map(function(e){
+        return '<div style="font-size:11.5px;padding:3px 0;border-top:1px solid var(--bor)">'
+          +(e.ok?'✓ ':'<span style="color:var(--err)">✗ </span>')+esc(e.enviado_en||'')+' → '+esc(e.para||'')
+          +(e.usuario?' <span style="color:var(--mut)">('+esc(e.usuario)+')</span>':'')
+          +(e.ok?'':'<div style="color:var(--err)">'+esc(e.error||'')+'</div>')+'</div>';
+      }).join('');
+  });
+  sgModalArriba('sg-mailfac-modal');
+}
+
+function sgFacMailEnviar(){
+  var id=eid('sg-mailfac-id').value;
+  var to=(eid('sg-mailfac-to').value||'').trim();
+  if(!to){ toast('Poné a qué dirección va','er'); return; }
+  var b=eid('sg-mailfac-btn'); b.disabled=true; b.textContent='Enviando…';
+  api('/api/sg/ventas/facturas/'+id+'/mail','POST',{to:to,mensaje:eid('sg-mailfac-msg').value})
+    .then(function(r){
+      b.disabled=false; b.textContent='Enviar';
+      if(!r||!r.ok){ toast((r&&r.error)||'No se pudo enviar','er'); return; }
+      toast('Comprobante enviado a '+to,'ok');
+      closeMB('sg-mailfac-modal');
+      sgFacListLoad();
+    });
+}
 // Export del catálogo de productos SG a XLSX (server-side) para limpiarlo fuera del sistema.
 function sgProductosExport(){ window.open('/api/sg/productos/export.xlsx','_blank'); }
 
@@ -12041,7 +12149,11 @@ function sgPendLoad(){
   });
 }
 // "Facturar" → ir a la sub-tab 🧾 Facturar con cliente + despacho precargados.
+// Desde que Pendientes es su propia pantalla, esto CRUZA DE PANTALLA: primero
+// hay que estar parado en Salidas, si no la solapa se marca en un div que está
+// oculto y no se ve nada.
 function sgFacPrecargar(clienteId, despachoId){
+  if (navAct !== 'sg-ventas') cmAbrirModulo('sg-ventas');
   sgVenSub('facturar');                       // sgFacInit() resetea el form
   var sel=eid('sgf-cli'); if(sel) sel.value=String(clienteId);
   SG._facPreDesp=despachoId;                   // despacho a tildar cuando cargue /facturable
@@ -20910,6 +21022,10 @@ function loadSec(s) {
     'sg-stock':      function(){ sgStockInit(); },
     'sg-reprocesos': function(){ sgReprocesosInit(); },
     'sg-ventas':     function(){ sgVenInit(); },
+    // Las dos que salieron de Salidas. sgLoadCaches primero: los selectores de
+    // cliente se llenan con sgCliOpts(), que lee de esa caché.
+    'sg-vta-comprobantes': function(){ sgLoadCaches(function(){ sgFacListInit(); }); },
+    'sg-remitos-pend':     function(){ sgLoadCaches(function(){ sgPendInit(); }); },
     'sg-gastos-directos': function(){ sgGdsInit(); },
     'sg-facturas-merc': function(){ sgFmModeloCargar(); sgFmLoad(); sgFmSinContabilizar(); },
     'sg-cc-clientes': function(){

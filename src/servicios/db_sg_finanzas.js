@@ -445,6 +445,27 @@ try { db.exec("ALTER TABLE sg_facturas_compra ADD COLUMN saldo_pagado_gestion RE
 try { db.exec("ALTER TABLE sg_pagos_compras ADD COLUMN monto_gestion REAL NOT NULL DEFAULT 0"); } catch (_) {}
 try { db.exec("ALTER TABLE sg_pagos_proveedores ADD COLUMN ambito_pago TEXT NOT NULL DEFAULT 'todo'"); } catch (_) {}
 
+// ── A QUIÉN SE LE MANDÓ CADA COMPROBANTE ──────────────────────────────────
+// Mandar la factura por mail sin dejar rastro deja una sola pregunta sin
+// respuesta, y es la que siempre se hace: «esta factura, ¿se la mandaron?». Sin
+// esto la contestan dos personas distintas y las dos la mandan de nuevo.
+//
+// Se anota el INTENTO, no sólo el éxito: un mail que rebotó es información —
+// probablemente la dirección del cliente está mal y hay que corregirla.
+try {
+  db.exec(`CREATE TABLE IF NOT EXISTS sg_ven_envios (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    factura_id    INTEGER NOT NULL,
+    para          TEXT NOT NULL,
+    asunto        TEXT,
+    ok            INTEGER NOT NULL DEFAULT 1,
+    error         TEXT,
+    usuario_id    INTEGER,
+    enviado_en    TEXT DEFAULT (datetime('now','localtime'))
+  )`);
+  db.exec('CREATE INDEX IF NOT EXISTS ix_sg_ven_envios_fac ON sg_ven_envios(factura_id)');
+} catch (e) { console.error('[SG] sg_ven_envios:', e.message); }
+
 // ── LOS PUNTOS DE VENTA ───────────────────────────────────────────────────
 // Estaban ESCRITOS A MANO en el HTML —7, 9, 11 y 13—, así que dar de alta uno
 // nuevo o dar de baja el que ya no se usa era tocar el panel. Y el número solo

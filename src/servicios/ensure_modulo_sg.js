@@ -45,6 +45,14 @@ const MODULOS_SG = [
   // que mira cuánto le debe un cliente —o le va a tomar un cobro— no está
   // cargando despachos, y tenía que entrar ahí para llegar.
   ["sg-cc-clientes", "💳 CC clientes", 652],
+  // ── LO QUE SALÍA DE ADENTRO DE SALIDAS ─────────────────────────────────
+  // Salidas tenía cinco solapas: pedidos, despachos, facturar, el LISTADO de
+  // comprobantes emitidos y los despachos pendientes de facturar. Las dos
+  // últimas no son parte de sacar mercadería: son de administración. El que
+  // busca una factura para reimprimirla o mandarla no está despachando nada, y
+  // tenía que entrar a la pantalla donde se despacha para llegar.
+  ["sg-vta-comprobantes", "🧾 Comprobantes emitidos", 653],
+  ["sg-remitos-pend", "📋 Remitos pendientes de comprobante", 654],
   ["sg-cc-proveedores", "💳 CC proveedores", 670],
   // Caja y Bancos de San Gerónimo. El backend ya existía entero
   // —/api/sg/tesoreria sobre las tablas sg_fin_*— pero no había pantalla: la
@@ -142,6 +150,8 @@ try {
     ['Administración de Ventas',      650,  'sg-stock'],
     ['Administración de Ventas',      651,  'sg-ventas'],
     ['Administración de Ventas',      652,  'sg-cc-clientes'],
+    ['Administración de Ventas',      653,  'sg-vta-comprobantes'],
+    ['Administración de Ventas',      654,  'sg-remitos-pend'],
 
     // ── INGRESOS: LA MERCADERÍA QUE ENTRA ────────────────────────────
     // Todo lo que pasa desde que se pacta la compra hasta que la mercadería
