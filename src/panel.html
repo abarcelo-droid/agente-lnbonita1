@@ -3792,8 +3792,19 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
       <div class="sg-rec-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
         <div class="fl"><label>Kilos</label><input type="number" step="0.01" id="sg-loteed-kg"></div>
         <div class="fl"><label>Bultos</label><input type="number" id="sg-loteed-bultos"></div>
-        <div class="fl"><label>Calidad</label><input id="sg-loteed-calidad" placeholder="primera, segunda…"></div>
-        <div class="fl"><label>Precio por kg</label><input type="number" step="0.01" id="sg-loteed-precio"></div>
+        <div class="fl"><label>Calidad</label>
+          <select id="sg-loteed-calidad">
+            <option value="">— sin calificar —</option>
+            <option value="primera">Primera</option>
+            <option value="segunda">Segunda</option>
+            <option value="tercera">Tercera</option>
+          </select></div>
+        <!-- EL PRECIO ES DE ADMINISTRACIÓN: cambia lo que costó la mercadería y
+             lo que se le debe al proveedor. El servidor lo rechaza igual; acá se
+             muestra apagado para que no se ofrezca algo que va a rebotar. -->
+        <div class="fl"><label>Precio por kg</label><input type="number" step="0.01" id="sg-loteed-precio">
+          <div id="sg-loteed-precio-nota" style="font-size:11px;color:var(--mut);margin-top:3px;display:none">
+            Lo corrige un administrador.</div></div>
       </div>
       <div class="fl ff" style="margin-top:10px"><label>Por qué se corrige <span style="color:var(--err)">*</span></label>
         <textarea id="sg-loteed-motivo" rows="2" placeholder="ej. se habían contado 100 bultos y eran 90"></textarea></div>
@@ -10292,7 +10303,15 @@ function sgFmAgrupables(){
   api('/api/sg/oc/' + SGFMF.ocId + '/agrupables').then(function(r){
     var rows = (r && r.ok) ? r.data : [];
     SGFMF.agrupables = rows;
-    if (!rows.length) { cont.innerHTML = ''; return; }
+    // SI NO HAY NADA, SE DICE. Antes no mostraba nada, así que la función era
+    // invisible justo cuando uno mira si existe — y no se podía saber si el
+    // sistema no la tiene o si simplemente no hay partidas para agrupar.
+    if (!rows.length) {
+      cont.innerHTML = '<div style="font-size:11.5px;color:var(--mut);margin-bottom:12px">'
+        + 'No hay otras partidas de este proveedor esperando factura. '
+        + 'Si las hubiera, acá se podrían tildar para meterlas en este mismo comprobante.</div>';
+      return;
+    }
     cont.innerHTML = '<div style="border:1px solid var(--bor);border-radius:8px;padding:10px 12px;margin-bottom:12px;background:var(--bg)">'
       + '<div style="font-size:12.5px;font-weight:600;margin-bottom:6px">'
         + '📦 Este proveedor tiene ' + rows.length + ' partida' + (rows.length === 1 ? '' : 's')
@@ -12114,6 +12133,14 @@ function sgLoteEditarOpen(loteId){
   eid('sg-loteed-bultos').value = l.bultos != null ? l.bultos : '';
   eid('sg-loteed-calidad').value = l.calidad || '';
   eid('sg-loteed-precio').value = l.precio_unitario_kg != null ? l.precio_unitario_kg : '';
+  // EL CONTEO LO CORRIGE EL OPERADOR; el peso y el precio, administración. Los
+  // kilos se recalculan solos con el kg por bulto, así que el que corrige el
+  // conteo no tiene que hacer ninguna cuenta.
+  var admin = !!(window.LNB_USER && window.LNB_USER.rol === 'admin');
+  ['sg-loteed-precio', 'sg-loteed-kg'].forEach(function(id){
+    var e = eid(id); if (e) { e.disabled = !admin; e.title = admin ? '' : 'Lo corrige un administrador'; }
+  });
+  var nota = eid('sg-loteed-precio-nota'); if (nota) nota.style.display = admin ? 'none' : '';
   eid('sg-loteed-motivo').value = '';
   sgModalArriba('sg-loteed-modal');
 }

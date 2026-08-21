@@ -3265,10 +3265,62 @@ router.delete('/lotes/:id', requireAuth, (req, res) => {
   } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
 });
 
-// Corregir un lote: kilos, bultos, calidad y precio. Sólo admin.
-// CORREGIR ES OPERAR. Los frenos de verdad no son el rol: no se corrige una
-// partida ya contabilizada —primero se anula el asiento— ni una de la que ya se
-// despachó mercadería, y eso lo controla frenosDeEdicionLote() acá abajo.
+// ── LA CALIDAD LA CORRIGE EL QUE LA DESCUBRE ─────────────────────────────
+// Se abre un cajón dos días después y no era primera. El que se da cuenta está
+// en el depósito, no es el dueño — y mandarlo a pedir que se lo corrijan es lo
+// que hace que nadie lo corrija.
+//
+// La calidad es una OBSERVACIÓN: no mueve kilos, ni costo, ni lo que se le debe
+// al proveedor. Por eso no pasa por los frenos de la corrección de cantidades y
+// se puede tocar aunque la partida ya esté contabilizada.
+//
+// PERO SÓLO MIENTRAS ESTÉ EN STOCK. Una vez vendida, su costo ya viajó a la
+// venta y al margen: cambiarle la calidad ahí atrás es reescribir el pasado de
+// algo cerrado. Y queda registrado quién y cuándo, igual que cualquier otra
+// corrección.
+router.put('/lotes/:id/calidad', requireAuth, (req, res) => {
+  const db = getDb();
+  try {
+    const l = db.prepare(`SELECT l.*, i.oc_id FROM sg_lotes l
+      LEFT JOIN sg_oc_items i ON i.id = l.oc_item_id
+      WHERE l.id=? AND l.activo=1`).get(req.params.id);
+    if (!l) return res.status(404).json({ ok: false, error: 'Partida no encontrada' });
+    const nueva = val(req.body?.calidad);
+    if (nueva && !['primera', 'segunda', 'tercera'].includes(nueva)) {
+      return res.status(400).json({ ok: false, error: 'Calidad inválida' });
+    }
+    const disp = (l.kg_reales || 0) - kgDespachados(db, l.id)
+               - kgDecomisado(db, l.id) - kgTransformado(db, l.id);
+    if (!(disp > 0.01)) {
+      return res.status(400).json({ ok: false,
+        error: 'Esta partida ya no está en stock: salió entera. Su costo ya viajó a la venta, '
+             + 'así que cambiarle la calidad ahora sería reescribir algo cerrado.' });
+    }
+    if (String(l.calidad || '') === String(nueva || '')) return res.json({ ok: true, sin_cambios: true });
+    db.transaction(() => {
+      anotarEdicion(db, { tabla: 'sg_lotes', registroId: l.id, campo: 'calidad',
+        antes: l.calidad, despues: nueva, motivo: val(req.body?.motivo) || 'Corrección de calidad',
+        ocId: l.oc_id, userId: uid(req) });
+      db.prepare(`UPDATE sg_lotes SET calidad=?, modificado_en=datetime('now','localtime'),
+        modificado_por=? WHERE id=?`).run(nueva, uid(req), l.id);
+    })();
+    res.json({ ok: true, data: { id: Number(l.id), calidad: nueva } });
+  } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
+});
+
+// ── CORREGIR LAS CANTIDADES DE UNA PARTIDA ───────────────────────────────
+// Los frenos de verdad no son el rol: no se corrige una partida ya contabilizada
+// —primero se anula el asiento— ni una de la que ya se despachó mercadería, y eso
+// lo controla frenosDeEdicionLote(). El rol decide QUÉ se puede tocar:
+//
+//   · EL CONTEO DE BULTOS lo corrige el operador. "Conté 100 y eran 90" es lo que
+//     pasa de verdad, y el que se da cuenta está en el depósito. Los kilos se
+//     recalculan solos con el kg por bulto de la partida: no se le pide que haga
+//     la cuenta, porque el sistema ya la hace en todos lados.
+//
+//   · EL PESO LIBRE Y EL PRECIO son de administración. Ahí no se está corrigiendo
+//     un conteo: se está cambiando lo que costó la mercadería y lo que se le debe
+//     al proveedor.
 router.put('/lotes/:id/corregir', requireAuth, (req, res) => {
   const db = getDb();
   try {
@@ -3280,6 +3332,37 @@ router.put('/lotes/:id/corregir', requireAuth, (req, res) => {
     if (chk.error) return res.status(400).json({ ok: false, error: chk.error });
 
     const prev = db.prepare('SELECT * FROM sg_lotes WHERE id=?').get(req.params.id);
+    // El factor de la partida: con él, corregir el conteo alcanza para que los
+    // kilos queden bien solos.
+    const kpbPrev = (prev.kg_por_bulto != null && prev.kg_por_bulto > 0)
+      ? Number(prev.kg_por_bulto)
+      : (prev.presentacion_id
+          ? (db.prepare('SELECT factor_conversion f FROM sg_presentaciones WHERE id=?')
+               .get(prev.presentacion_id) || {}).f
+          : null);
+    // ── QUÉ ESTÁ TOCANDO, Y SI PUEDE ──────────────────────────────────────
+    const esAdmin = (req.user && req.user.rol) === 'admin';
+    const tocaPrecio = b.precio_unitario_kg !== undefined
+      && numF(b.precio_unitario_kg) !== prev.precio_unitario_kg;
+    const bultosPedidos = (b.bultos === '' || b.bultos == null) ? null : Math.round(Number(b.bultos));
+    // El peso es "libre" cuando NO sale del conteo: o la partida no tiene factor,
+    // o los kilos que mandan no son los que dan esos bultos. Eso es cambiar la
+    // balanza, no el conteo.
+    const kgPedidos = numF(b.kg_reales);
+    const kgDelConteo = (bultosPedidos != null && kpbPrev > 0) ? r2(bultosPedidos * kpbPrev) : null;
+    const tocaPesoLibre = kgPedidos != null && kgPedidos !== prev.kg_reales
+      && !(kgDelConteo != null && Math.abs(r2(kgPedidos - kgDelConteo)) <= 1);
+    if (!esAdmin && (tocaPrecio || tocaPesoLibre)) {
+      return res.status(403).json({ ok: false,
+        error: tocaPrecio
+          ? 'El precio de la partida lo corrige un administrador: cambia lo que costó la mercadería '
+            + 'y lo que se le debe al proveedor.'
+          : 'El peso lo corrige un administrador. Vos podés corregir el CONTEO de bultos, y los '
+            + 'kilos se recalculan solos con el kg por bulto de la partida.' });
+    }
+    // Si corrige el conteo y no manda kilos, se derivan: es la cuenta que el
+    // sistema hace en todos lados, y pedírsela a mano es pedirle que se equivoque.
+    if (!esAdmin && kgDelConteo != null && kgPedidos == null) b.kg_reales = kgDelConteo;
     const nuevo = {
       kg_reales: numF(b.kg_reales) != null ? numF(b.kg_reales) : prev.kg_reales,
       bultos: (b.bultos === '' || b.bultos == null) ? prev.bultos : Math.round(Number(b.bultos)),
