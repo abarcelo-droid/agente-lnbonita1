@@ -2600,7 +2600,8 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
       <div class="ab-table-wrap"><table class="pa-tbl">
         <thead><tr><th style="width:60px">Orden</th><th>Nombre</th><th style="width:90px">Código</th>
           <th style="text-align:right;width:90px">Bultos</th><th style="text-align:right;width:90px">Kg</th>
-          <th style="width:110px"></th></tr></thead>
+          <th style="width:150px">Quién lo toca</th>
+          <th style="width:150px"></th></tr></thead>
         <tbody id="sg-piadm-tb"></tbody>
       </table></div>
       <div style="font-size:11.5px;color:var(--mut);margin-top:8px">
@@ -3249,6 +3250,30 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
        Una caja la maneja una persona, no "la empresa". Sin nadie asignado la
        caja sigue siendo sólo de admin: asignar a alguien es lo que le abre esa
        caja Y NINGUNA OTRA. -->
+  <!-- DE QUIÉN ES CADA PISO. Misma regla que la de las cuentas de tesorería:
+       si tiene gente asignada lo tocan sólo ellos; si no tiene a nadie, lo toca
+       cualquiera que tenga permiso en el módulo. Esa segunda mitad es la que
+       hace que el día del despliegue todo siga funcionando. -->
+  <div class="ab-modal-overlay" id="sg-piusr-modal">
+    <div class="ab-modal" style="max-width:min(560px,96vw)">
+      <div class="mhd"><div class="mht" id="sg-piusr-tit">Quiénes tocan este piso</div>
+        <button class="mcl" onclick="closeMB('sg-piusr-modal')">×</button></div>
+      <div class="mbd">
+        <div style="font-size:12px;color:var(--mut);margin-bottom:10px">
+          Los que tildes van a poder recibir en este piso, pasarle mercadería y
+          sacarla. Y cuando reciban, el piso les va a salir solo: no lo eligen.
+          <b>Si no tildás a nadie, el piso lo puede usar cualquiera</b> que tenga
+          permiso en Ingresos.
+        </div>
+        <div id="sg-piusr-lista" style="max-height:46vh;overflow-y:auto"></div>
+        <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:14px">
+          <button class="btn bo" onclick="closeMB('sg-piusr-modal')">Cancelar</button>
+          <button class="btn bb" onclick="sgPiUsrGuardar()">Guardar</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <div class="ab-modal-overlay" id="cb-usr-modal">
     <div class="ab-modal" style="max-width:min(560px,96vw)">
       <div class="mhd"><div class="mht" id="cb-usr-tit">Quiénes tocan esta caja</div>
@@ -11069,8 +11094,14 @@ function sgRecRenderPesos(){
   // Se piden una sola vez y se vuelve a pintar cuando llegan.
   if (!SG._pisos) {
     SG._pisos = [];
-    api('/api/sg/pisos').then(function(r){
-      SG._pisos = (r && r.ok) ? (r.data || []) : [];
+    // LOS MÍOS, no todos. El que recibe en Empaque no tenía por qué ver San
+    // Pedro en la lista: elegirlo por error deja la mercadería contada en un
+    // lugar donde no está, y eso no se descubre hasta que alguien va a buscarla.
+    api('/api/sg/mis-pisos').then(function(r){
+      var d = (r && r.ok) ? (r.data || {}) : {};
+      SG._pisos = d.pisos || [];
+      SG._pisoAuto = d.automatico || null;
+      SG._pisoSinConf = !!d.sin_configurar;
       if (SG._pisos.length) sgRecRenderPesos();
     });
   }
@@ -11118,13 +11149,25 @@ function sgRecRenderPesos(){
         // sabe de verdad dónde la dejaron. Si queda sin elegir, la partida entra
         // SIN UBICAR y se ve así en Pisos — inventar un lugar es peor, porque el
         // que va a buscarla pierde el viaje.
-        + '<div class="fl"><label>¿En qué piso quedó?</label>'
-          + '<select onchange="sgRecArtUpd(' + i + ',\'piso_id\',this.value)">'
-            + '<option value="">— sin ubicar —</option>'
-            + (SG._pisos||[]).map(function(p){
-                return '<option value="'+p.id+'"'+(String(it.piso_id)===String(p.id)?' selected':'')+'>'
-                  + escH(p.nombre)+'</option>'; }).join('')
-          + '</select></div>'
+        // EL PISO SALE DEL USUARIO. Si trabaja en uno solo va directo y no se
+        // le pregunta: se muestra cuál es, para que vea dónde se está cargando.
+        // Si trabaja en varios, ahí sí corresponde el selector, con los suyos.
+        + (SG._pisoAuto
+            ? (function(){
+                var mio = (SG._pisos||[]).filter(function(p){ return p.id===SG._pisoAuto; })[0];
+                if (String(it.piso_id||'') !== String(SG._pisoAuto)) it.piso_id = SG._pisoAuto;
+                return '<div class="fl"><label>Piso</label>'
+                  + '<div style="padding-top:7px;font-weight:600">' + escH(mio ? mio.nombre : '')
+                  + '<span style="font-weight:400;color:var(--mut);font-size:11px"> · es tu piso</span>'
+                  + '</div></div>';
+              })()
+            : '<div class="fl"><label>¿En qué piso quedó?</label>'
+              + '<select onchange="sgRecArtUpd(' + i + ',\'piso_id\',this.value)">'
+                + '<option value="">— sin ubicar —</option>'
+                + (SG._pisos||[]).map(function(p){
+                    return '<option value="'+p.id+'"'+(String(it.piso_id)===String(p.id)?' selected':'')+'>'
+                      + escH(p.nombre)+'</option>'; }).join('')
+              + '</select></div>')
         + '<div class="fl"><label>Foto de la balanza</label>'
           + '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;padding-top:2px">'
             + '<button class="btn bb bs" type="button" onclick="eid(\'sg-rec-bal-' + i + '-cam\').click()">📷 Cámara</button>'
@@ -12706,7 +12749,15 @@ function sgPiAdmPintar(){
       + '<td><b>'+escH(p.nombre)+'</b></td><td>'+escH(p.codigo||'—')+'</td>'
       + '<td style="text-align:right">'+nr(p.bultos)+'</td>'
       + '<td style="text-align:right">'+nr(p.kg)+'</td>'
+      // QUIÉN LO TOCA, a la vista. Sin esto hay que abrir cada piso para saber
+      // si tiene dueño, y un piso sin dueño no se distingue de uno cerrado.
+      + '<td style="font-size:11.5px">'
+        + ((p.usuarios||[]).length
+            ? (p.usuarios||[]).map(function(u){ return escH(u.nombre); }).join(', ')
+            : '<span style="color:var(--mut)">cualquiera</span>')
+      + '</td>'
       + '<td style="text-align:right;white-space:nowrap">'
+        + '<button class="btn bo bs" onclick="sgPiUsrOpen('+p.id+')">👤 Quién</button> '
         + '<button class="btn bo bs" onclick="sgPiEditar('+p.id+')">Editar</button>'
         // Con mercadería adentro no se ofrece: el servidor lo rechaza igual, y
         // ofrecer un botón que va a rebotar hace creer que se rompió algo.
@@ -12714,6 +12765,45 @@ function sgPiAdmPintar(){
       + '</td></tr>';
   }).join('');
 }
+function sgPiUsrOpen(id){
+  var p = SG_PI.pisos.filter(function(x){ return x.id === id; })[0];
+  if (!p) return;
+  SG_PI.usrPiso = id;
+  var t = eid('sg-piusr-tit'); if (t) t.textContent = 'Quiénes tocan — ' + p.nombre;
+  var cont = eid('sg-piusr-lista'); if (cont) cont.innerHTML = '<div class="emp">Cargando…</div>';
+  sgModalArriba('sg-piusr-modal');
+  api('/api/sg/pisos/' + id + '/usuarios').then(function(r){
+    if (!r || !r.ok) { if (cont) cont.innerHTML = '<div class="emp">No se pudo leer</div>'; return; }
+    var asign = {};
+    (r.data.asignados || []).forEach(function(u){ asign[u.usuario_id] = 1; });
+    var todos = r.data.todos || [];
+    if (cont) cont.innerHTML = todos.length ? todos.map(function(u){
+      return '<label style="display:flex;align-items:center;gap:9px;padding:7px 4px;'
+        + 'border-bottom:1px solid var(--bor);font-size:13px;cursor:pointer">'
+        + '<input type="checkbox" class="sg-piusr-ck" value="' + u.id + '"'
+        + (asign[u.id] ? ' checked' : '') + ' style="width:16px;height:16px">'
+        + '<span><b>' + escH(u.nombre) + '</b>'
+        + '<span style="color:var(--mut);font-size:11.5px"> — ' + escH(u.rol || '') + '</span></span>'
+        + '</label>';
+    }).join('') : '<div class="emp">No hay usuarios activos</div>';
+  });
+}
+
+function sgPiUsrGuardar(){
+  var ids = [].slice.call(document.querySelectorAll('.sg-piusr-ck'))
+    .filter(function(x){ return x.checked; })
+    .map(function(x){ return Number(x.value); });
+  api('/api/sg/pisos/' + SG_PI.usrPiso + '/usuarios', 'POST', { usuarios: ids }).then(function(r){
+    if (!r || !r.ok) { toast((r && r.error) || 'No se pudo guardar', 'er'); return; }
+    // SIN NADIE NO ES UN CANDADO. Se dice así para que no se lea como que el
+    // piso quedó cerrado: queda abierto a cualquiera con permiso en el módulo.
+    toast(ids.length ? ('Este piso lo tocan ' + ids.length + ' persona(s)')
+                     : 'Sin nadie asignado: el piso lo puede usar cualquiera con permiso', 'ok');
+    closeMB('sg-piusr-modal');
+    sgPiLoad(); setTimeout(sgPiAdmPintar, 300);
+  });
+}
+
 function sgPiNuevo(){
   eid('sg-piadm-tit').textContent='Nuevo piso';
   eid('sg-pi-id').value=''; eid('sg-pi-nombre').value=''; eid('sg-pi-codigo').value='';

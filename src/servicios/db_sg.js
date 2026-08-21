@@ -2289,6 +2289,25 @@ db.exec(`
     creado_en       TEXT DEFAULT (datetime('now','localtime'))
   );
   CREATE INDEX IF NOT EXISTS idx_sg_traslados_lote ON sg_lote_traslados(lote_id);
+
+  -- DE QUIÉN ES CADA PISO. El que recibe en Empaque tenía que acordarse de no
+  -- elegir San Pedro, y si se equivocaba la mercadería quedaba contada en un
+  -- lugar donde no estaba — cosa que no se descubre hasta que alguien va a
+  -- buscarla.
+  --
+  -- La regla es la MISMA que la de las cuentas de tesorería
+  -- (sg_fin_cuenta_usuarios + puedeMoverCuenta): si tiene gente asignada lo
+  -- tocan sólo ellos; si no tiene a nadie, lo toca cualquiera que tenga permiso
+  -- en el módulo. Eso resuelve el arranque: el día que esto se despliega ningún
+  -- piso tiene usuarios, y con "sólo los asignados" nadie podría recibir hasta
+  -- terminar de configurarlo.
+  CREATE TABLE IF NOT EXISTS sg_piso_usuarios (
+    piso_id    INTEGER NOT NULL REFERENCES sg_pisos(id),
+    usuario_id INTEGER NOT NULL,
+    creado_en  TEXT DEFAULT (datetime('now','localtime')),
+    PRIMARY KEY (piso_id, usuario_id)
+  );
+  CREATE INDEX IF NOT EXISTS idx_sg_piso_us_us ON sg_piso_usuarios(usuario_id);
 `);
 
 // Los tres con los que arranca. Se pueden renombrar, dar de baja y agregar más

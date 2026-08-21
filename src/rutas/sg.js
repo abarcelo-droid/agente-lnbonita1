@@ -1529,7 +1529,7 @@ function codigoLoteDePartida(db, ocItemId) {
   return nextNumero(db, 'SG-LT', 'sg_lotes', 'codigo_lote');
 }
 
-function crearLotesDeItem(db, { recepcionId, ocItem, tipoPrecio, fechaIngreso, lotes, userId }) {
+function crearLotesDeItem(db, { recepcionId, ocItem, tipoPrecio, fechaIngreso, lotes, userId, req }) {
   const prod = db.prepare('SELECT vida_util_dias_default FROM sg_productos WHERE id=?').get(ocItem.producto_id);
   const vida = (prod && prod.vida_util_dias_default) || 0;
   const _rec = _recObservada(db, recepcionId);
@@ -1600,8 +1600,10 @@ function crearLotesDeItem(db, { recepcionId, ocItem, tipoPrecio, fechaIngreso, l
     // porque el que va a buscarla pierde el viaje.
     let reparto = Array.isArray(lt.ubicaciones) ? lt.ubicaciones.slice() : [];
     if (!reparto.length) {
-      const piso = (lt.piso_id != null && lt.piso_id !== '') ? Number(lt.piso_id) : (ocItem.piso_id != null ? Number(ocItem.piso_id) : null);
-      if (piso) reparto = [{ piso_id: piso, bultos: bultos || 0, kg: kg }];
+      const pedido = (lt.piso_id != null && lt.piso_id !== '') ? Number(lt.piso_id) : (ocItem.piso_id != null ? Number(ocItem.piso_id) : null);
+      const elec = pisoParaRecibir(db, req, pedido);
+      if (elec.error) throw new Error(elec.error);
+      if (elec.piso) reparto = [{ piso_id: elec.piso, bultos: bultos || 0, kg: kg }];
     }
     // Lo repartido no puede sumar mas de lo que entro: si no, el piso mostraria
     // mercaderia que no existe.
@@ -1658,7 +1660,7 @@ function concretarReservasOcItem(db, ocItemId, nuevosLoteIds, userId) {
 // Lotes de una recepción SIN OC: producto elegido a mano, sin oc_item_id y SIN precio
 // (costo pendiente). precio_unitario_kg=NULL → recalcCostoLote los deja en costo_final=0 y
 // los reportes los marcan "costo pendiente". Se completa al vincular la OC (baja el precio).
-function crearLotesSinOC(db, { recepcionId, productoId, fechaIngreso, lotes, userId }) {
+function crearLotesSinOC(db, { recepcionId, productoId, fechaIngreso, lotes, userId, req }) {
   const prod = db.prepare('SELECT vida_util_dias_default FROM sg_productos WHERE id=?').get(productoId);
   if (!prod) throw new Error('Producto inválido: ' + productoId);
   const vida = prod.vida_util_dias_default || 0;
@@ -1691,8 +1693,10 @@ function crearLotesSinOC(db, { recepcionId, productoId, fechaIngreso, lotes, use
     // porque el que va a buscarla pierde el viaje.
     let reparto = Array.isArray(lt.ubicaciones) ? lt.ubicaciones.slice() : [];
     if (!reparto.length) {
-      const piso = (lt.piso_id != null && lt.piso_id !== '') ? Number(lt.piso_id) : null;
-      if (piso) reparto = [{ piso_id: piso, bultos: bultos || 0, kg: kg }];
+      const pedido = (lt.piso_id != null && lt.piso_id !== '') ? Number(lt.piso_id) : null;
+      const elec = pisoParaRecibir(db, req, pedido);
+      if (elec.error) throw new Error(elec.error);
+      if (elec.piso) reparto = [{ piso_id: elec.piso, bultos: bultos || 0, kg: kg }];
     }
     // Lo repartido no puede sumar mas de lo que entro: si no, el piso mostraria
     // mercaderia que no existe.
@@ -2142,6 +2146,89 @@ function partidasRecibidas(db, comoSeDocumenta) {
 // ── ADMINISTRAR LOS PISOS ────────────────────────────────────────────────
 // Se dan de alta y de baja desde Stock. No se borran: una partida vieja puede
 // haber estado ahí, y borrar el piso dejaría ese historial apuntando a la nada.
+// ── DE QUIÉN ES CADA PISO ────────────────────────────────────────────────
+// UNA sola regla, la misma que la de las cuentas de tesorería
+// (puedeMoverCuenta en rutas/sg_tesoreria.js): si tiene gente asignada lo tocan
+// sólo ellos; si no tiene a nadie, lo toca cualquiera que tenga permiso en el
+// módulo. Esa segunda mitad es la que resuelve el arranque — el día que esto se
+// despliega ningún piso tiene usuarios, y con "sólo los asignados" nadie podría
+// recibir hasta terminar de configurarlo.
+//
+// VER NO SE LIMITA, MOVER SÍ. El stock de todos los pisos se sigue viendo
+// entero: mirar dónde está la mercadería no hace daño, y esconderlo obliga a
+// preguntar por teléfono. Lo que se limita es tocar.
+function puedeMoverPiso(db, req, pisoId) {
+  const u = req.user;
+  if (!u || !u.id) return false;
+  if (u.rol === 'admin') return true;
+  const n = db.prepare('SELECT COUNT(*) c FROM sg_piso_usuarios WHERE piso_id=?').get(pisoId).c;
+  if (!n) return true;
+  return !!db.prepare('SELECT 1 FROM sg_piso_usuarios WHERE piso_id=? AND usuario_id=?')
+    .get(pisoId, u.id);
+}
+
+// EL PISO SALE DEL USUARIO. Antes se elegía a mano de una lista con TODOS, y
+// el que recibe en Empaque tenía que acordarse de no elegir San Pedro.
+//
+// Si está asignado a UNO solo, ese va directo y no se le pregunta nada. Si
+// trabaja en varios, elige él --ahí sí corresponde el selector--. Y si no está
+// asignado a ninguno, sigue como hasta hoy: elige, y la regla de arriba decide
+// si ese piso lo puede tocar.
+function pisosAsignados(db, req) {
+  const u = req.user;
+  if (!u || !u.id) return [];
+  return db.prepare(`SELECT pu.piso_id FROM sg_piso_usuarios pu
+    JOIN sg_pisos p ON p.id = pu.piso_id AND p.activo = 1
+    WHERE pu.usuario_id = ? ORDER BY p.orden, p.id`).all(u.id).map((x) => x.piso_id);
+}
+
+// LO QUE LA RECEPCIÓN NECESITA SABER ANTES DE PREGUNTAR NADA. Con un solo piso
+// asignado no hay nada que elegir; con varios, la lista es la de los suyos.
+router.get('/mis-pisos', requireAuth, (req, res) => {
+  const db = getDb();
+  try {
+    const asignados = pisosAsignados(db, req);
+    const puedo = pisosDeUsuario(db, req);
+    const pisos = db.prepare('SELECT id, nombre, codigo FROM sg_pisos WHERE activo=1 ORDER BY orden, id')
+      .all().filter((p) => puedo.includes(p.id));
+    res.json({ ok: true, data: {
+      pisos,
+      // El que va solo, sin preguntar. Null cuando hay que elegir.
+      automatico: (asignados.length === 1) ? asignados[0] : null,
+      asignados: asignados.length,
+      // Sin asignaciones la lista son TODOS los pisos: no es un permiso amplio,
+      // es que todavía no se configuró. La pantalla lo dice distinto.
+      sin_configurar: asignados.length ? 0 : 1,
+    } });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// Qué piso usar para lo que entra. Devuelve {piso} o {error}.
+function pisoParaRecibir(db, req, pedido) {
+  if (pedido) {
+    const no = exigirPiso(db, req, Number(pedido), 'recibir');
+    return no ? { error: no } : { piso: Number(pedido) };
+  }
+  const mios = pisosAsignados(db, req);
+  return { piso: (mios.length === 1) ? mios[0] : null };
+}
+
+// El freno, con el nombre del piso adentro: "no tenés permiso" sin decir sobre
+// qué manda a adivinar.
+function exigirPiso(db, req, pisoId, verbo) {
+  if (puedeMoverPiso(db, req, pisoId)) return null;
+  const p = db.prepare('SELECT nombre FROM sg_pisos WHERE id=?').get(pisoId);
+  return (p ? p.nombre : 'Ese piso') + ' lo maneja otra persona: no podés ' + verbo
+       + ' ahí. Se cambia en Pisos.';
+}
+
+// Los pisos que este usuario SÍ puede tocar. La recepción lo usa para no
+// ofrecer una lista donde la mayoría de las opciones van a rebotar.
+function pisosDeUsuario(db, req) {
+  return db.prepare('SELECT id FROM sg_pisos WHERE activo=1 ORDER BY orden, id')
+    .all().filter((p) => puedeMoverPiso(db, req, p.id)).map((p) => p.id);
+}
+
 router.get('/pisos', requireAuth, (req, res) => {
   const db = getDb();
   try {
@@ -2152,6 +2239,16 @@ router.get('/pisos', requireAuth, (req, res) => {
         (SELECT COALESCE(SUM(u.kg),0)     FROM sg_lote_ubicaciones u WHERE u.piso_id = p.id) AS kg
       FROM sg_pisos p ${inactivos ? '' : 'WHERE p.activo = 1'}
       ORDER BY p.orden, p.id`).all();
+    const quienes = db.prepare(`SELECT pu.piso_id, pu.usuario_id, u.nombre
+      FROM sg_piso_usuarios pu LEFT JOIN usuarios u ON u.id = pu.usuario_id
+      ORDER BY u.nombre COLLATE NOCASE`).all();
+    for (const p of rows) {
+      p.usuarios = quienes.filter((x) => x.piso_id === p.id)
+        .map((x) => ({ id: x.usuario_id, nombre: x.nombre || ('#' + x.usuario_id) }));
+      // `puedo` para que la pantalla no ofrezca lo que va a contestar 403: el
+      // que aprieta un botón que rebota cree que rompió algo.
+      p.puedo = puedeMoverPiso(db, req, p.id) ? 1 : 0;
+    }
     res.json({ ok: true, data: rows });
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
@@ -2179,6 +2276,46 @@ router.post('/pisos', requireAuth, (req, res) => {
     const r = db.prepare('INSERT INTO sg_pisos (nombre, codigo, orden, notas, creado_por) VALUES (?,?,?,?,?)')
       .run(...campos, uid(req));
     res.json({ ok: true, id: Number(r.lastInsertRowid) });
+  } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
+});
+
+// ── QUIÉN TOCA ESTE PISO ─────────────────────────────────────────────────
+// Va con requireAdmin porque esto PARAMETRIZA: decidir de quién es un piso es
+// la misma clase de decisión que dar de alta una cuenta bancaria y elegir quién
+// la mueve. El trabajo del día —recibir, trasladar— sigue con requireAuth.
+// Quiénes están asignados y entre quiénes elegir. Mismo par que el de las
+// cuentas de tesorería (sgCbUsrOpen), para que la pantalla se parezca.
+router.get('/pisos/:id/usuarios', requireAuth, (req, res) => {
+  const db = getDb();
+  try {
+    const asignados = db.prepare(`SELECT pu.usuario_id, u.nombre FROM sg_piso_usuarios pu
+      LEFT JOIN usuarios u ON u.id = pu.usuario_id WHERE pu.piso_id = ?`).all(req.params.id);
+    const todos = db.prepare(`SELECT id, nombre, rol FROM usuarios
+      WHERE COALESCE(activo,1) = 1 ORDER BY nombre COLLATE NOCASE`).all();
+    res.json({ ok: true, data: { asignados, todos } });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+router.post('/pisos/:id/usuarios', requireAdmin, (req, res) => {
+  const db = getDb();
+  try {
+    const p = db.prepare('SELECT id, nombre FROM sg_pisos WHERE id=?').get(req.params.id);
+    if (!p) return res.status(404).json({ ok: false, error: 'Piso no encontrado' });
+    const ids = Array.isArray(req.body && req.body.usuarios)
+      ? [...new Set(req.body.usuarios.map(Number).filter((x) => x > 0))] : [];
+    for (const u of ids) {
+      if (!db.prepare('SELECT 1 FROM usuarios WHERE id=?').get(u)) {
+        return res.status(400).json({ ok: false, error: 'Hay un usuario que no existe (#' + u + ')' });
+      }
+    }
+    db.transaction(() => {
+      db.prepare('DELETE FROM sg_piso_usuarios WHERE piso_id=?').run(p.id);
+      const ins = db.prepare('INSERT INTO sg_piso_usuarios (piso_id, usuario_id) VALUES (?,?)');
+      for (const u of ids) ins.run(p.id, u);
+    })();
+    // SIN NADIE NO ES "NADIE PUEDE": es "lo puede cualquiera con permiso". Se
+    // contesta explícito para que la pantalla lo diga y no parezca un candado.
+    res.json({ ok: true, data: { piso_id: p.id, usuarios: ids, abierto: ids.length ? 0 : 1 } });
   } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
 });
 
@@ -2268,6 +2405,14 @@ router.post('/lotes/:id/trasladar', requireAuth, (req, res) => {
     if (origen === destino) return res.status(400).json({ ok: false, error: 'El origen y el destino son el mismo piso' });
     const pd = db.prepare('SELECT * FROM sg_pisos WHERE id=? AND activo=1').get(destino);
     if (!pd) return res.status(400).json({ ok: false, error: 'El piso de destino no existe o está dado de baja' });
+    // LOS DOS EXTREMOS. Si sólo se controlara el origen, se podría meter
+    // mercadería en el piso de otro; si sólo el destino, sacarla del de otro.
+    // Y sin el pase controlado, cerrar la recepción no sirve de nada: alcanza
+    // con recibir en el piso propio y pasarlo al ajeno.
+    for (const [pid, verbo] of [[origen, 'sacar de ahí'], [destino, 'meter mercadería']]) {
+      const no = exigirPiso(db, req, pid, verbo);
+      if (no) return res.status(403).json({ ok: false, error: no });
+    }
     const u = db.prepare('SELECT * FROM sg_lote_ubicaciones WHERE lote_id=? AND piso_id=?').get(lote.id, origen);
     if (!u) return res.status(400).json({ ok: false, error: 'Esa partida no tiene mercadería en el piso de origen' });
     let bultos = (b.bultos != null && b.bultos !== '') ? Number(b.bultos) : (u.bultos || 0);
@@ -4637,12 +4782,12 @@ router.post('/recepciones', sgUpload.array('fotos', 40), requireAdmin, (req, res
       const nuevosLotes = [];
       for (const it of items) {
         if (sinOC) {
-          const ids = crearLotesSinOC(db, { recepcionId: recId, productoId: Number(it.producto_id), fechaIngreso, lotes: it.lotes, userId: uid(req) });
+          const ids = crearLotesSinOC(db, { recepcionId: recId, productoId: Number(it.producto_id), fechaIngreso, lotes: it.lotes, userId: uid(req), req });
           nuevosLotes.push(...ids);
         } else {
           const ocItem = db.prepare('SELECT * FROM sg_oc_items WHERE id=? AND oc_id=?').get(it.oc_item_id, b.oc_id);
           if (!ocItem) throw new Error('Item de OC inválido: ' + it.oc_item_id);
-          const ids = crearLotesDeItem(db, { recepcionId: recId, ocItem, tipoPrecio: oc.tipo_precio, fechaIngreso, lotes: it.lotes, userId: uid(req) });
+          const ids = crearLotesDeItem(db, { recepcionId: recId, ocItem, tipoPrecio: oc.tipo_precio, fechaIngreso, lotes: it.lotes, userId: uid(req), req });
           nuevosLotes.push(...ids);
           concretarReservasOcItem(db, ocItem.id, ids, uid(req));   // BRIEF 8 — reservas oc_item → lote (FIFO×FEFO)
         }
@@ -4894,7 +5039,7 @@ router.post('/compra-retroactiva', requireAuth, (req, res) => {
         const precio = tipoPrecio === 'pizarra' ? null : (it.precio_por_kg != null ? Number(it.precio_por_kg) : null);
         const itInfo = insItem.run(ocId, it.producto_id, it.presentacion_id || null, lotes.length, kgItem, precio, val(it.observaciones_item));
         const ocItem = { id: itInfo.lastInsertRowid, producto_id: it.producto_id, precio_estimado_por_kg: precio, presentacion_id: it.presentacion_id || null };
-        crearLotesDeItem(db, { recepcionId: recId, ocItem, tipoPrecio, fechaIngreso, lotes, userId: uid(req) });
+        crearLotesDeItem(db, { recepcionId: recId, ocItem, tipoPrecio, fechaIngreso, lotes, userId: uid(req), req });
         totKg += kgItem;
         if (precio != null) totMonto += kgItem * precio;
       }
@@ -6157,6 +6302,14 @@ const postRemito = (req, res) => {
           bultos, bultos, kg, precio, (String(it.nota_precio || '').trim() || null), subtotal, margen,
           ln.origen === 'lote' ? pisoLinea : null);
         if (ln.origen === 'lote') {
+          // SACAR DEL PISO DE OTRO TAMPOCO. Si sólo se controlara recibir, se
+          // podría vaciar el piso ajeno armando un remito. Cuando la línea no
+          // dice de qué piso sale, descontarDeUbicacion reparte por orden de
+          // piso y no hay un dueño a quien preguntarle: eso queda como está.
+          if (pisoLinea) {
+            const no = exigirPiso(db, req, pisoLinea, 'sacar mercadería');
+            if (no) throw new Error(no);
+          }
           const rUb = descontarDeUbicacion(db, ln.loteId, bultos, kg, pisoLinea);
           if (!rUb.ok) throw new Error(rUb.error);
         }
