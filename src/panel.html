@@ -21133,6 +21133,9 @@ function sgRepExport(){
     .fp-mes-fila:hover td { background:#f1f5f9 }
     .fp-mas { display:inline-block; width:14px; font-weight:800; color:var(--burg) }
     #sec-fp-flujo .pa-tbl th { white-space:nowrap }
+    /* La celda que se puede abrir tiene que parecerlo antes de que la aprieten. */
+    #sec-fp-flujo .fp-abrible { cursor:pointer; text-decoration:underline dotted; text-underline-offset:3px }
+    #sec-fp-flujo .fp-abrible:hover { background:rgba(20,60,120,.08) }
   </style>
 
   <div style="display:flex;gap:2px;border-bottom:1px solid var(--bor);margin-bottom:14px">
@@ -21365,6 +21368,19 @@ function sgRepExport(){
 </div>
 
 <!-- Modal: importar cheques -->
+<!-- ── LOS CHEQUES DE UNA SEMANA DEL FLUJO ─────────────────────────────
+     La celda decía "2.884,7M" y ahí terminaba. Un total que no se puede abrir
+     no se puede discutir con nadie. -->
+<div class="ab-modal-overlay" id="fp-mb-semana">
+<div class="ab-modal" style="max-width:min(860px,96vw)">
+  <div class="mhd">
+    <div class="mht" id="fp-sem-tit">Cheques de la semana</div>
+    <button class="mcl" onclick="document.getElementById('fp-mb-semana').classList.remove('on')">×</button>
+  </div>
+  <div class="mbd" id="fp-sem-cuerpo"></div>
+</div>
+</div>
+
 <div class="ab-modal-overlay" id="fp-mb-import">
 <div class="ab-modal" style="width:720px">
   <div class="mhd">
@@ -53651,6 +53667,12 @@ function fpEsc(s) {
   return String(s === null || s === undefined ? '' : s)
     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
+// La fecha como se lee: 2026-01-20 -> 20/01/2026. La pantalla mostraba ISO,
+// que en una lista de vencimientos obliga a leer al reves.
+function fpFecha(f) {
+  var m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(f || ''));
+  return m ? (m[3] + '/' + m[2] + '/' + m[1]) : String(f || '');
+}
 function fpN(n, dec) {
   var v = Number(n) || 0;
   var d = (dec === undefined) ? 0 : dec;
@@ -53842,6 +53864,13 @@ function fpPintarGrilla() {
           h += '<td class="fp-num"><input class="fp-cel" value="' + (m ? fpN(m) : '') + '"' +
                ' data-c="' + f.concepto_id + '" data-s="' + p.semanas[i] + '"' +
                ' onchange="fpCelda(this)" onfocus="this.select()"></td>';
+        } else if (f.origen === 'cheques' && m) {
+          // UN TOTAL QUE NO SE PUEDE ABRIR NO SE PUEDE DISCUTIR. La celda decía
+          // "2.884,7M" y ahí terminaba: para saber de qué estaba hecho había que
+          // ir a la otra solapa y filtrar por fechas a mano.
+          h += '<td class="fp-num fp-calc fp-abrible" title="Ver los cheques de esta semana"'
+             + ' onclick="fpChequesDeSemana(' + i + ',' + (f.naturaleza === 'ingreso' ? 1 : 0) + ')">'
+             + fpM(m) + '</td>';
         } else {
           h += '<td class="fp-num fp-calc" title="' + fpEsc(fpDetalleTxt(f.detalle[i])) + '">' + fpM(m) + '</td>';
         }
@@ -54537,12 +54566,65 @@ function fpImportar(preview) {
         '<b>' + r.nuevos + '</b> cheques nuevos · <b>' + r.ya_estaban + '</b> ya estaban cargados' +
         (r.con_cambios ? ' (' + r.con_cambios + ' con monto o fecha distintos, se actualizan)' : '') +
         (r.ya_pagados_intactos ? '<br>' + r.ya_pagados_intactos + ' ya los tenías marcados <b>pagados</b>: el import no los toca.' : '') +
-        '</div>';
+        '</div>' +
+        // LO ÚNICO QUE ESTE IMPORT DESTRUYE. Va aparte y en rojo: es lo que hay
+        // que mirar antes de apretar Importar.
+        (r.se_dan_de_baja
+          ? '<div style="background:#fef2f2;border:1px solid #fca5a5;border-radius:8px;padding:10px 13px;'
+            + 'font-size:12px;margin-top:8px"><b>Se dan de baja ' + r.se_dan_de_baja + ' cheque(s)</b> '
+            + 'por ' + fpM(r.se_dan_de_baja_monto) + ': estaban cargados, siguen pendientes y '
+            + '<b>ya no vienen en este archivo</b>. El Excel del banco es la foto completa del día, '
+            + 'así que se toman por cobrados, anulados o cambiados.'
+            + '<div style="margin-top:4px">Los marcados <b>pagados</b> y los cargados a mano no se tocan.</div>'
+            + '</div>'
+          : '');
       return;
     }
-    toast(r.nuevos + ' nuevos, ' + r.ya_estaban + ' actualizados');
+    toast(r.nuevos + ' nuevos, ' + r.ya_estaban + ' actualizados'
+          + (r.se_dan_de_baja ? ', ' + r.se_dan_de_baja + ' dados de baja' : ''));
     document.getElementById('fp-mb-import').classList.remove('on');
     fpChequesCargar();
+  });
+}
+
+// ── LOS CHEQUES DE UNA SEMANA ────────────────────────────────────────────
+// La primera semana arrastra todo lo vencido de antes: así lo arma la
+// proyección, y el cartel amarillo de arriba ya lo dice. Por eso ahí se piden
+// también los anteriores — si no, el detalle mostraría menos que el total y
+// parecería que falta plata.
+function fpChequesDeSemana(i, esIngreso) {
+  var p = FP.proy; if (!p || !p.semanas || !p.semanas[i]) return;
+  var desde = p.semanas[i];
+  // El fin de semana: el día anterior a la que sigue, o +6 si es la última.
+  var hasta = p.semanas[i + 1]
+    ? new Date(new Date(p.semanas[i + 1] + 'T00:00:00').getTime() - 86400000).toISOString().slice(0, 10)
+    : new Date(new Date(desde + 'T00:00:00').getTime() + 6 * 86400000).toISOString().slice(0, 10);
+  var tipo = esIngreso ? 'recibido' : 'emitido';
+  var cont = document.getElementById('fp-sem-cuerpo');
+  document.getElementById('fp-sem-tit').textContent =
+    (esIngreso ? 'Cheques a cobrar' : 'Cheques a pagar') + ' · semana del ' + fpFecha(desde);
+  cont.innerHTML = '<div class="fp-vacio">Cargando…</div>';
+  document.getElementById('fp-mb-semana').classList.add('on');
+  fpApi('/cheques/semana?desde=' + desde + '&hasta=' + hasta + '&tipo=' + tipo
+        + (i === 0 ? '&incluir_anteriores=1' : '')).then(function(r) {
+    if (!r.ok) { cont.innerHTML = '<div class="fp-vacio">' + fpEsc(r.error || 'Error') + '</div>'; return; }
+    var f = r.data || [];
+    if (!f.length) { cont.innerHTML = '<div class="fp-vacio">No hay cheques en esta semana.</div>'; return; }
+    cont.innerHTML = '<div class="fp-chica" style="margin-bottom:8px">'
+      + '<b>' + f.length + '</b> cheque(s) · total <b>' + fpM(r.total) + '</b>'
+      + (i === 0 ? ' — incluye los vencidos de antes, que la proyección suma en la primera semana' : '')
+      + '</div>'
+      + '<div class="ab-table-wrap"><table class="pa-tbl"><thead><tr>'
+      + '<th>N°</th><th>Banco</th><th>Beneficiario</th><th>Fecha</th><th style="text-align:right">Monto</th>'
+      + '</tr></thead><tbody>'
+      + f.map(function(c) {
+          return '<tr><td style="font-family:ui-monospace,Consolas,monospace">' + fpEsc(c.numero) + '</td>'
+            + '<td>' + fpEsc(c.banco || '—') + '</td>'
+            + '<td>' + fpEsc(c.beneficiario || '—') + '</td>'
+            + '<td>' + fpFecha(c.fecha_pago) + '</td>'
+            + '<td class="fp-num">' + fpM(c.monto) + '</td></tr>';
+        }).join('')
+      + '</tbody></table></div>';
   });
 }
 
