@@ -3918,7 +3918,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
                  motivo, para que no termine en la cabeza del comprador. -->
             <div style="margin-top:12px;border-top:1px dashed var(--bor);padding-top:10px">
               <div class="sgfm-grid">
-                <div class="fl"><label>¿Falta parte por facturar?</label>
+                <div class="fl"><label id="sgfm-f-difg-lbl">¿Falta parte por facturar?</label>
                   <input type="text" inputmode="decimal" id="sgfm-f-difg" placeholder="$ 0"
                          oninput="this.dataset.tocado='1';sgFmMil(this);sgFmDifPintar()"></div>
                 <div class="fl"><label>¿Por qué?</label>
@@ -10674,7 +10674,7 @@ function sgFmAsientoPintar(imp){
   // suena. Son las mismas cuentas que la parte fiscal —la de gasto y la de
   // Proveedores— porque es la misma mercadería y la misma deuda. Sin IVA.
   var extra = [];
-  var difG = sgMilParse((eid('sgfm-f-difg') || {}).value) || 0;
+  var difG = sgFmDifValor();
   if (difG > 0) {
     var TRIB = ['iva', 'percepcion_iva', 'percepcion_iibb', 'percepcion_ganancias', 'retencion'];
     var lg = (m.lineas || []).filter(function(l){
@@ -10835,24 +10835,46 @@ function sgFmLeerPdf(){
   fr.readAsDataURL(f);
 }
 
+// EL SIGNO NO SE TIPEA. sgMilParse limpia todo lo que no sea dígito --incluido
+// el "-"-- y lo usa medio sistema, así que no se toca. El sentido de la
+// diferencia lo pone la propuesta y viaja en el dataset: el que carga escribe
+// un número y la pantalla le dice qué significa.
+function sgFmDifSigno(){
+  var el = eid('sgfm-f-difg');
+  return (el && el.dataset.signo === '-') ? -1 : 1;
+}
+function sgFmDifValor(){
+  return paRound2Fm((_sgfmN('sgfm-f-difg') || 0) * sgFmDifSigno());
+}
+
 // Lo que se le va a deber al proveedor, que no es lo que dice la factura.
 function sgFmDifProponer(acordado, totalFac){
   var el = eid('sgfm-f-difg'); if (!el || el.dataset.tocado) return;
   var falta = paRound2Fm((Number(acordado) || 0) - (Number(totalFac) || 0));
-  el.value = falta > 0.01 ? sgMilShow(falta) : '';
+  // Negativa es la factura por MÁS de lo acordado. Antes se descartaba y el que
+  // lo tenía adelante no tenía dónde ponerlo: la deuda quedaba por el total del
+  // comprobante, que no es lo que se cerró.
+  el.dataset.signo = (falta < -0.01) ? '-' : '+';
+  el.value = Math.abs(falta) > 0.01 ? sgMilShow(Math.abs(falta)) : '';
+  var lbl = eid('sgfm-f-difg-lbl');
+  if (lbl) lbl.textContent = (falta < -0.01) ? '¿Facturó de más?' : '¿Falta parte por facturar?';
   sgFmDifPintar();
 }
 
 function sgFmDifPintar(){
   var cont = eid('sgfm-dif-aviso'); if (!cont) return;
-  var dif = _sgfmN('sgfm-f-difg') || 0;
+  var dif = sgFmDifValor();
   var tot = _sgfmN('sgfm-f-total') || 0;
-  if (!(dif > 0)) { cont.innerHTML = ''; return; }
+  if (!dif) { cont.innerHTML = ''; return; }
   var mot = (eid('sgfm-f-difm') || {}).value;
   cont.innerHTML = '<div style="border:1.5px solid #d6a15e;background:#f6eddf;border-radius:8px;'
     + 'padding:9px 11px;color:#854d0e">'
-    + 'Al proveedor se le van a deber <b>' + sgMoney(tot + dif) + '</b>'
-    + ', y así va a figurar en su cuenta corriente.'
+    + (dif < 0
+        ? 'La factura vino por <b>' + sgMoney(Math.abs(dif)) + '</b> más de lo acordado. '
+          + 'Al proveedor se le van a deber <b>' + sgMoney(tot + dif) + '</b>, que es lo que se cerró. '
+          + 'El total de la factura no se toca: es lo que va al libro fiscal.'
+        : 'Al proveedor se le van a deber <b>' + sgMoney(tot + dif) + '</b>'
+          + ', y así va a figurar en su cuenta corriente.')
     + (mot ? '' : '<br><b>Falta decir por qué.</b>')
     + '</div>';
 }
@@ -10881,13 +10903,13 @@ function sgFmGuardar(){
     percepciones_iibb: (SGFMF.iibb || []).filter(function(p){ return Number(p.monto) > 0; }),
     ocs: SGFMF.ocs || [],
     total: _sgfmN('sgfm-f-total'),
-    dif_gestion: _sgfmN('sgfm-f-difg'),
+    dif_gestion: sgFmDifValor(),
     dif_motivo: (eid('sgfm-f-difm') || {}).value || null,
   };
   // El motivo se pide ACÁ y no al guardar del lado del servidor: el que carga
   // la factura tiene el dato fresco, y volver a buscarlo mañana es lo que hace
   // que estas diferencias terminen sin explicación.
-  if (payload.dif_gestion > 0 && !payload.dif_motivo) {
+  if (payload.dif_gestion && !payload.dif_motivo) {
     toast('Poné por qué la factura no coincide con lo acordado', 'er'); return;
   }
   var fd = new FormData();
