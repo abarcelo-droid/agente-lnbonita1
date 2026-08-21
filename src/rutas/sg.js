@@ -1812,7 +1812,26 @@ function actualizarEstadoOC(db, ocId) {
 // Lo pactado contra lo que entró, por ítem. Es lo que dibuja la tabla de la
 // orden recibida y lo que dispara la alerta de diferencia: el comprador la ve y
 // decide si ajusta el precio.
+//
+// Y NO SE INFORMA NADA HASTA QUE LA ORDEN SE RECEPCIONÓ. Sobre una orden que
+// todavía no recibió nada, "faltan 1.000 kg" no es una diferencia: es la orden
+// entera esperando el camión. El comprador ve una alerta roja sobre algo que
+// no pasó, y el día que la alerta importa de verdad ya aprendió a no mirarla.
+//
+// EL CORTE ES "TIENE AL MENOS UNA RECEPCIÓN", que es lo que pidió Pablo.
+// Se probó con `cerrada_en` --dar la orden por terminada-- y es MÁS estricto de
+// lo que se pidió: rompe el caso normal de recibir y mirar el detalle sin haber
+// cerrado nada.
+//
+// LO QUE ESTO NO TAPA, y hay que decirlo: con recepciones parciales la alerta
+// aparece desde el primer camión, porque después de la primera entrada ya no hay
+// forma de distinguir "falta" de "todavía no llegó". El estado tampoco ayuda:
+// actualizarEstadoOC() pone 'recibida_total' apenas hay UNA recepción. Para
+// cortarlo del todo habría que mirar `cerrada_en`, y eso es otra decisión.
 function diferenciasDeOC(db, ocId) {
+  const recibida = db.prepare(`SELECT COUNT(*) c FROM sg_recepciones
+    WHERE oc_id = ? AND activo = 1`).get(ocId).c;
+  if (!recibida) return [];
   const items = db.prepare(`SELECT i.id, i.kg_estimados, i.cantidad_estimada_presentaciones,
       i.kg_por_bulto, i.presentacion_id, pr.nombre AS producto_nombre,
       (SELECT COALESCE(SUM(kg_reales),0) FROM sg_lotes WHERE oc_item_id=i.id AND activo=1) AS kg_recibidos,
@@ -3047,14 +3066,35 @@ router.post('/oc/:id/factura-completa', facturaUpload.single('archivo'), require
     // La misma cuenta que muestra la pantalla: BULTOS por el precio del bulto,
     // que es como se pactó y como el comprador la controla. A kilos sólo se cae
     // cuando la mercadería entró pesada, sin contar bultos.
+    //
+    // Y SE COMPARA CONTRA EL LADO QUE CORRESPONDE. Si el precio de la orden YA
+    // INCLUYE IVA, lo acordado viene con IVA adentro: contra el neto nunca iba a
+    // dar, y el aviso saltaba en facturas perfectas por exactamente el 21% o el
+    // 10,5%. Ahí se compara contra el TOTAL, que es lo que pidió Pablo.
     let avisoAcordado = null;
     const acordadoPorOc = {};
     for (const id of ocIds) acordadoPorOc[id] = acordadoDeOC(db, id).total;
     const acordado = r2(Object.values(acordadoPorOc).reduce((a, x) => a + x, 0));
-    if (acordado > 0 && Math.abs(r2(neto - acordado)) > 0.01) {
-      avisoAcordado = 'El neto de la factura (' + r2(neto) + ') no da contra lo acordado por lo que entró ('
-        + acordado + (ocIds.length > 1 ? ', sumando las ' + ocIds.length + ' partidas' : '')
-        + '). Diferencia: ' + r2(neto - acordado) + '.';
+    // Con varias partidas puede haber de las dos: ahí no hay un lado único contra
+    // el que comparar, se usa el neto y el aviso lo dice.
+    const conIva = db.prepare(`SELECT COUNT(*) n,
+        SUM(CASE WHEN COALESCE(precio_incluye_iva,0) = 1 THEN 1 ELSE 0 END) c
+      FROM sg_oc WHERE id IN (${ocIds.map(() => '?').join(',')})`).get(...ocIds);
+    const todasConIva = conIva.n > 0 && conIva.c === conIva.n;
+    const mezcla = conIva.c > 0 && conIva.c < conIva.n;
+    const ladoFac = todasConIva ? r2(total != null ? total : suma) : r2(neto);
+    const comoFac = todasConIva ? 'total' : 'neto';
+    if (acordado > 0 && Math.abs(r2(ladoFac - acordado)) > 0.01) {
+      // LA LEYENDA NOMBRA LOS DOS LADOS Y DICE SI LLEVAN IVA. Antes decía "no da
+      // contra lo acordado" sin aclarar contra qué estaba comparando, y el que la
+      // leía no tenía cómo saber si el error era suyo o de la cuenta.
+      const conSin = todasConIva ? 'con IVA' : 'sin IVA';
+      avisoAcordado = 'El ' + comoFac + ' de la factura (' + ladoFac + ', ' + conSin + ') no da contra '
+        + 'lo acordado en la orden por lo que entró (' + acordado + ', ' + conSin + ')'
+        + (ocIds.length > 1 ? ', sumando las ' + ocIds.length + ' partidas' : '')
+        + '. Diferencia: ' + r2(ladoFac - acordado) + '.'
+        + (mezcla ? ' Ojo: hay partidas con el precio con IVA y otras sin IVA, así que se compara '
+                  + 'contra el neto y la diferencia puede ser sólo el IVA de las primeras.' : '');
     }
 
     // ── CUÁNTO LE TOCA A CADA PARTIDA ────────────────────────────────────
