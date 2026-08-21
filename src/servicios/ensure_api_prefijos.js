@@ -128,7 +128,23 @@ const PREFIJOS = [
   // sg/facturas-compra: anular una factura de mercadería. Va declarada porque
   // una ruta sin dueño NO la mira exigirNivel — moduloDeRuta devuelve null y el
   // control la deja pasar entera.
-  ['sg-compras',         'sg/recepciones,sg/oc,sg/compra-retroactiva,sg/lotes,sg/facturas-compra'],
+  // sg/facturas-compra SALIÓ de Ingresos: anular la factura de una partida es
+  // trabajo de administración, y el que descarga el camión no la ve más. Es la
+  // parte del permiso que SÍ se puede partir hoy sin romper nada.
+  ['sg-compras',         'sg/recepciones,sg/oc,sg/compra-retroactiva,sg/lotes'],
+  // ── ÓRDENES DE COMPRA (Administración de Compras) ──────────────────────
+  // sg/oc queda declarado en los DOS: mejorNivel() toma el mayor nivel entre
+  // todos los dueños del prefijo, así que quien ya tenía Ingresos no se queda
+  // afuera el día que esto se despliega, y quien tenga sólo la pantalla nueva
+  // también entra. Es lo mismo que se hizo con las dos pantallas que salieron
+  // de Salidas, y por la misma razón.
+  //
+  // OJO, ESTO NO SEPARA EMITIR DE RECIBIR: quien tenga Ingresos con nivel
+  // operar sigue pudiendo emitir una orden por API, porque las dos cosas viven
+  // bajo el mismo /sg/oc. Separarlas de verdad pide mover las direcciones de
+  // recepción a su propio prefijo, y eso se mide y se hace aparte. Lo que esto
+  // separa hoy es la PANTALLA y quién ve la plata.
+  ['sg-ordenes',         'sg/oc,sg/facturas-compra'],
   ['sg-stock',           'sg/lotes,sg/disponibilidad,sg/decomisos'],
   // Los pisos son la apertura del stock: quien administra el stock los maneja,
   // y la pantalla propia tambien.

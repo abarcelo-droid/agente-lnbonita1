@@ -298,6 +298,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
        secciones SG aparecen vacías → no los toques. -->
   <div class="ni" data-sec="sg-dashboard" data-admin-only="1"></div>
   <div class="ni" data-sec="sg-compras" data-admin-only="1"></div>
+  <div class="ni" data-sec="sg-ordenes" data-admin-only="1"></div>
   <div class="ni" data-sec="sg-gvariables" data-admin-only="1"></div>
   <div class="ni" data-sec="sg-stock" data-admin-only="1"></div>
   <div class="ni" data-sec="sg-reprocesos" data-admin-only="1"></div>
@@ -2294,16 +2295,73 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
       @media(max-width:560px){.sg-oc-card-top{grid-template-columns:1fr}.sg-oc-card-bot input{width:100%}}
     </style>
     <div style="display:inline-flex;gap:2px;background:var(--bg);border:1px solid var(--bor);border-radius:8px;padding:3px;margin-bottom:16px;flex-wrap:wrap">
-      <div class="sgc-subtab on" data-sub="oc"        onclick="sgComSub('oc')">📋 Órdenes de compra</div>
-      <div class="sgc-subtab" data-sub="recepciones"  onclick="sgComSub('recepciones')">⏳ Recepciones pendientes</div>
-      <div class="sgc-subtab" data-sub="ocrecibidas" onclick="sgComSub('ocrecibidas')">✅ OC recibidas</div>
-      <!-- Lo que entró sin orden. El contador va al lado porque es una bandeja
-           de trabajo pendiente: mientras tenga número, hay compras a medio hacer. -->
-      <div class="sgc-subtab" data-sub="sinorden" onclick="sgComSub('sinorden')">⚡ Ingresó sin orden <span class="liq-cnt" id="sg-so-cnt"></span></div>
-      <div class="sgc-subtab" data-sub="gdirectos"    onclick="sgComSub('gdirectos')">🧾 Gastos directos</div>
+      <div class="sgc-subtab on" data-sub="recepciones" onclick="sgComSub('recepciones')">⏳ Recepciones pendientes</div>
+      <!-- LO QUE SE RECIBIÓ, EN CANTIDADES. Esta pantalla era "OC recibidas" y
+           mostraba el importe de cada partida al lado de los bultos. El importe se
+           fue con las órdenes a Administración de Compras: al que descarga el
+           camión no le sirve, y no tiene por qué verlo. -->
+      <div class="sgc-subtab" data-sub="recibidas" onclick="sgComSub('recibidas')">✅ Recepciones</div>
     </div>
 
     <!-- Órdenes de compra -->
+    <!-- Recepciones: lo que efectivamente entró, en cantidades -->
+    <div class="sgc-sub" id="sgc-sub-recibidas">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;gap:10px;flex-wrap:wrap">
+        <div style="font-weight:700;font-size:12px;text-transform:uppercase;letter-spacing:.04em;color:var(--mut)">✅ Recepciones</div>
+        <input id="sg-rec-q" placeholder="Buscar partida, proveedor o remito…" oninput="sgRecListPintar()" style="max-width:280px">
+      </div>
+      <div class="ab-table-wrap"><table class="pa-tbl" style="table-layout:fixed">
+        <thead><tr><th style="width:15%">Partida</th><th style="width:10%">Fecha</th>
+          <th style="width:20%">Proveedor</th><th style="width:22%">Producto</th>
+          <th style="width:9%;text-align:right">Bultos</th>
+          <th style="width:10%;text-align:right">Kilos</th>
+          <th style="width:14%">Remito prov.</th></tr></thead>
+        <tbody id="sg-tb-reclist"><tr><td colspan="7" class="emp">Cargando…</td></tr></tbody>
+      </table></div>
+    </div>
+
+    <div class="sgc-sub" id="sgc-sub-recepciones">
+      <!-- ── LO QUE FALTA RECIBIR, ARRIBA DE TODO ────────────────────────
+           La solapa mostraba sólo las recepciones ya hechas: el operador
+           entraba, veía "Sin recepciones" y no tenía de dónde agarrarse. Lo
+           que necesita es la lista de órdenes que están esperando mercadería,
+           con el botón para recibir cada una al lado. -->
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;gap:10px;flex-wrap:wrap">
+        <div style="font-weight:700;font-size:12px;text-transform:uppercase;letter-spacing:.04em;color:var(--mut)">
+          ⏳ Pendientes de recibir <span id="sg-pend-n" style="font-weight:400;text-transform:none;letter-spacing:0"></span>
+        </div>
+        <div style="display:flex;gap:8px">
+          <!-- ENTRÓ UN CAMIÓN SIN ORDEN: se recibe igual. El botón estaba en la
+               solapa de Órdenes de compra, que es la de lo que TODAVÍA NO LLEGÓ.
+               Esto es una recepción — la mercadería ya está adentro. -->
+          <button class="btn bo" onclick="sgPendImprimir()" title="La hoja para recibir con ella en la mano">🖨️ Imprimir</button>
+          <button class="btn bo" onclick="sgRetroOpen()" title="Entró un camión sin orden de compra">⚡ Recibir sin orden</button>
+          <button class="btn bb" onclick="sgRecOpen()">+ Recibir mercadería</button>
+        </div>
+      </div>
+      <div class="ab-table-wrap" style="margin-bottom:22px"><table class="pa-tbl">
+        <thead><tr><th>Partida</th><th>Fecha</th><th>Proveedor</th><th>Producto</th>
+          <th style="text-align:right">Kg pedidos</th><th style="text-align:right">Kg recibidos</th>
+          <th style="text-align:right">Falta</th><th></th></tr></thead>
+        <tbody id="sg-tb-pendientes"><tr><td colspan="8" class="emp">Cargando…</td></tr></tbody>
+      </table></div>
+
+    </div>
+
+    <!-- Lo ya recibido, todo junto: las órdenes cerradas arriba y, debajo, cada
+         entrada de mercadería. Antes las entradas colgaban de la solapa de
+         pendientes, que es la bandeja de lo que FALTA hacer: lo hecho y lo que
+         falta en la misma pantalla es la forma más rápida de no ver ninguno de
+         los dos. -->
+   <!-- ══ ÓRDENES DE COMPRA (Administración de Compras) ══
+        Emitir la orden y mirar las recibidas. Salió de Ingresos, que quedó con las
+        dos pantallas del depósito. Acá SI se muestra el importe: es la pantalla del
+        comprador y de administración. -->
+   <div class="sec sg-mod" id="sec-sg-ordenes">
+    <div style="display:inline-flex;gap:2px;background:var(--bg);border:1px solid var(--bor);border-radius:8px;padding:3px;margin-bottom:16px;flex-wrap:wrap">
+      <div class="sgc-subtab on" data-sub="oc" onclick="sgOrdSub('oc')">📋 Emisión de órdenes</div>
+      <div class="sgc-subtab" data-sub="ocrecibidas" onclick="sgOrdSub('ocrecibidas')">✅ Órdenes recibidas</div>
+    </div>
     <div class="sgc-sub on" id="sgc-sub-oc">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;gap:10px;flex-wrap:wrap">
         <!-- ── RASTREAR UNA PARTIDA ────────────────────────────────────
@@ -2356,67 +2414,6 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
          partida. Pero esa orden nace a medias — le falta lo que decide el
          comprador. Antes se mezclaban con el resto y se descubrían recién
          cuando había que facturar. -->
-    <div class="sgc-sub" id="sgc-sub-sinorden">
-      <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;
-           flex-wrap:wrap;margin-bottom:10px">
-        <div style="font-size:12px;color:var(--mut);max-width:640px">
-          Entró la mercadería y la partida ya está numerada. Falta que el comprador
-          cierre la compra: a cuánto, en cuántos días se paga y qué documenta.
-        </div>
-        <div style="display:flex;gap:8px;align-items:center">
-          <label style="font-size:12px;color:var(--mut);display:flex;gap:5px;align-items:center">
-            <input type="checkbox" id="sg-so-todas" onchange="sgLoadSinOrden()" style="width:15px;height:15px">
-            Ver también las ya completadas
-          </label>
-          <button class="btn bo" onclick="sgRetroOpen()">⚡ Recibir sin orden</button>
-        </div>
-      </div>
-      <div class="ab-table-wrap"><table class="pa-tbl">
-        <thead><tr><th style="width:170px">Partida</th><th style="width:96px">Fecha</th>
-          <th>Proveedor</th><th style="width:180px">Producto</th>
-          <th style="width:84px;text-align:right">Bultos</th>
-          <th style="width:130px;text-align:right">Importe</th>
-          <th style="width:230px">Qué falta</th>
-          <th style="width:110px"></th></tr></thead>
-        <tbody id="sg-tb-sinorden"><tr><td colspan="8" class="emp">Cargando…</td></tr></tbody>
-      </table></div>
-      <div id="sg-so-n" style="font-size:11.5px;color:var(--mut);margin-top:6px"></div>
-    </div>
-
-    <!-- Recepciones -->
-    <div class="sgc-sub" id="sgc-sub-recepciones">
-      <!-- ── LO QUE FALTA RECIBIR, ARRIBA DE TODO ────────────────────────
-           La solapa mostraba sólo las recepciones ya hechas: el operador
-           entraba, veía "Sin recepciones" y no tenía de dónde agarrarse. Lo
-           que necesita es la lista de órdenes que están esperando mercadería,
-           con el botón para recibir cada una al lado. -->
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;gap:10px;flex-wrap:wrap">
-        <div style="font-weight:700;font-size:12px;text-transform:uppercase;letter-spacing:.04em;color:var(--mut)">
-          ⏳ Pendientes de recibir <span id="sg-pend-n" style="font-weight:400;text-transform:none;letter-spacing:0"></span>
-        </div>
-        <div style="display:flex;gap:8px">
-          <!-- ENTRÓ UN CAMIÓN SIN ORDEN: se recibe igual. El botón estaba en la
-               solapa de Órdenes de compra, que es la de lo que TODAVÍA NO LLEGÓ.
-               Esto es una recepción — la mercadería ya está adentro. -->
-          <button class="btn bo" onclick="sgPendImprimir()" title="La hoja para recibir con ella en la mano">🖨️ Imprimir</button>
-          <button class="btn bo" onclick="sgRetroOpen()" title="Entró un camión sin orden de compra">⚡ Recibir sin orden</button>
-          <button class="btn bb" onclick="sgRecOpen()">+ Recibir mercadería</button>
-        </div>
-      </div>
-      <div class="ab-table-wrap" style="margin-bottom:22px"><table class="pa-tbl">
-        <thead><tr><th>Partida</th><th>Fecha</th><th>Proveedor</th><th>Producto</th>
-          <th style="text-align:right">Kg pedidos</th><th style="text-align:right">Kg recibidos</th>
-          <th style="text-align:right">Falta</th><th></th></tr></thead>
-        <tbody id="sg-tb-pendientes"><tr><td colspan="8" class="emp">Cargando…</td></tr></tbody>
-      </table></div>
-
-    </div>
-
-    <!-- Lo ya recibido, todo junto: las órdenes cerradas arriba y, debajo, cada
-         entrada de mercadería. Antes las entradas colgaban de la solapa de
-         pendientes, que es la bandeja de lo que FALTA hacer: lo hecho y lo que
-         falta en la misma pantalla es la forma más rápida de no ver ninguno de
-         los dos. -->
     <div class="sgc-sub" id="sgc-sub-ocrecibidas">
       <div style="font-weight:700;font-size:12px;text-transform:uppercase;letter-spacing:.04em;color:var(--mut);margin-bottom:8px">
         ✅ Órdenes recibidas
@@ -2447,25 +2444,8 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
       </div>
     </div>
 
-    <!-- Gastos directos -->
-    <div class="sgc-sub" id="sgc-sub-gdirectos">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;gap:10px;flex-wrap:wrap">
-        <label style="font-size:12px;color:var(--mut)">Lote
-          <select id="sg-gd-filtro" onchange="sgLoadGDirectos()" style="padding:5px 8px;border-radius:6px;border:1px solid var(--bor);background:var(--bg);min-width:180px"><option value="">— Todos —</option></select>
-        </label>
-        <button class="btn bb" onclick="sgGdOpen()">+ Nuevo gasto directo</button>
-      </div>
-      <div class="ab-table-wrap"><table class="pa-tbl">
-        <thead><tr><th>Lote</th><th>Tipo</th><th>Proveedor del gasto</th><th>Fecha</th><th style="text-align:right">Monto</th><th></th></tr></thead>
-        <tbody id="sg-tb-gdirectos"><tr><td colspan="6" class="emp">Cargando…</td></tr></tbody>
-      </table></div>
-    </div>
+   </div>
 
-
-  </div>
-
-  <!-- Gastos Fijos del Período (ex "Gastos Variables" / "Gastos globales" en Compras) — módulo propio del sidebar.
-       CG1 (#505) sacó estos gastos del costo del lote: van a RESULTADO, ya NO se prorratean. -->
   <div class="sec sg-mod" id="sec-sg-gvariables">
     <div class="ph"><div><div class="ph-t">🍅 San Gerónimo · Gastos Fijos del Período</div><div class="ph-s">Gastos fijos/estructura del período — van a resultado, NO al costo del lote</div></div></div>
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;gap:10px;flex-wrap:wrap">
@@ -3012,8 +2992,11 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
        más los vencimientos impagos de sus órdenes; una factura cargada rehace
        esos vencimientos por lo que dice el comprobante, así que se ve acá.
 
-       No lleva clase sgc-sub: sgComSub() apaga TODOS los ".sg-mod .sgc-sub" del
-       documento al navegar por Ingresos, y esta pantalla desaparecería. -->
+       No lleva clase sgc-sub. Cuando esto se escribió era porque sgComSub()
+       apagaba TODOS los ".sg-mod .sgc-sub" del documento; ahora el selector se
+       acota a su propia sección (sgSubtabs), así que el peligro es otro y menor:
+       una clase de solapa acá la dejaría a merced de la pantalla que la
+       contenga. Sigue sin llevarla. -->
   <div class="sec sg-mod" id="sec-sg-cc-proveedores">
     <div class="ph">
       <div><div class="ph-t">💳 San Gerónimo · Cuenta corriente de proveedores</div>
@@ -6095,17 +6078,72 @@ function sgDelete(entity, id){
 }
 
 // ════ FASE 2 — COMPRAS (frontend) ════════════════════════════════════════════
-function sgComInit(){ sgLoadCaches(function(){ sgComSub(SG.comSub || 'oc'); sgLoadSinOrden(); }); }
+// ── INGRESOS: LO QUE FALTA RECIBIR Y LO QUE SE RECIBIÓ ───────────────────
+// Tenía cinco solapas y ahora tiene dos. Emitir órdenes y verlas recibidas se
+// fueron a Administración de Compras; gastos directos ya era pantalla propia del
+// menú y estaba duplicado acá; y lo que entró sin orden se partió: el botón de
+// recibir queda acá, la bandeja de completarla vive en el listado de órdenes,
+// con el filtro "⚡ Falta completar".
+function sgComInit(){ sgLoadCaches(function(){ sgComSub(SG.comSub || 'recepciones'); }); }
+
+// EL SELECTOR DE SOLAPAS SE ACOTA A SU SECCIÓN. Mientras Ingresos era la única
+// pantalla con subtabs, un querySelectorAll('.sg-mod …') global no molestaba.
+// Con dos secciones que las usan, apagaría las de la otra.
+function sgSubtabs(sec, s){
+  var raiz = eid(sec); if (!raiz) return;
+  raiz.querySelectorAll('.sgc-subtab').forEach(function(el){ el.classList.toggle('on', el.dataset.sub===s); });
+  raiz.querySelectorAll('.sgc-sub').forEach(function(el){ el.classList.toggle('on', el.id==='sgc-sub-'+s); });
+}
+
 function sgComSub(s){
   SG.comSub = s;
-  document.querySelectorAll('.sg-mod .sgc-subtab').forEach(function(el){ el.classList.toggle('on', el.dataset.sub===s); });
-  document.querySelectorAll('.sg-mod .sgc-sub').forEach(function(el){ el.classList.toggle('on', el.id==='sgc-sub-'+s); });
-  if (s==='oc') sgLoadOC();
-  else if (s==='recepciones') sgLoadPendientesRecibir();
-  else if (s==='ocrecibidas') { sgLoadOcRecibidas(); sgLoadRecepciones(); }
-  else if (s==='sinorden') sgLoadSinOrden();
-  else if (s==='gdirectos') sgLoadGDirectos();
+  sgSubtabs('sec-sg-compras', s);
+  if (s==='recepciones') sgLoadPendientesRecibir();
+  else if (s==='recibidas') sgLoadRecList();
+}
 
+// ── ADMINISTRACIÓN DE COMPRAS: EMITIR Y CONTROLAR ───────────────────────
+function sgOrdInit(){ sgLoadCaches(function(){ sgOrdSub(SG.ordSub || 'oc'); }); }
+function sgOrdSub(s){
+  SG.ordSub = s;
+  sgSubtabs('sec-sg-ordenes', s);
+  if (s==='oc') sgLoadOC();
+  else if (s==='ocrecibidas') { sgLoadOcRecibidas(); sgLoadRecepciones(); }
+}
+
+// LO QUE ENTRÓ, EN CANTIDADES. Sin importe, sin condición de pago y sin
+// situación: al que descarga el camión le sirven la partida, el proveedor, el
+// producto y cuánto entró.
+var SG_RECLIST = [];
+function sgLoadRecList(){
+  api('/api/sg/recepciones').then(function(r){
+    SG_RECLIST = (r && r.ok) ? r.data : [];
+    sgRecListPintar();
+  });
+}
+function sgRecListPintar(){
+  var q = String((eid('sg-rec-q')||{}).value || '').toLowerCase().trim();
+  var filas = SG_RECLIST.filter(function(x){
+    if (!q) return true;
+    return ((x.partida||'') + ' ' + (x.proveedor_nombre||'') + ' ' + (x.productos||'')
+      + ' ' + (x.numero_remito_proveedor||'')).toLowerCase().indexOf(q) >= 0;
+  });
+  var tb = eid('sg-tb-reclist'); if (!tb) return;
+  tb.innerHTML = filas.length ? filas.map(function(x){
+    return '<tr>'
+      + '<td style="font-family:monospace;font-size:11.5px;overflow:hidden;text-overflow:ellipsis">'
+        + '<b>' + escH(x.partida || x.oc_numero || '—') + '</b></td>'
+      + '<td style="white-space:nowrap">' + escH(x.fecha_recepcion || '—') + '</td>'
+      + '<td class="cb-nom" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'
+        + escH(x.proveedor_nombre || '—') + '</td>'
+      + '<td style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'
+        + escH(x.productos || '—') + '</td>'
+      + '<td style="text-align:right">' + (x.bultos ? nr(x.bultos)
+          : '<span style="color:var(--mut)">—</span>') + '</td>'
+      + '<td style="text-align:right">' + nr(Math.round(x.kg || 0)) + '</td>'
+      + '<td style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'
+        + escH(x.numero_remito_proveedor || '—') + '</td></tr>';
+  }).join('') : '<tr><td colspan="7" class="emp">Todavía no se recibió ninguna partida.</td></tr>';
 }
 // BRIEF 10 — CC proveedores: saldo apertura + vencimientos pendientes.
 var SG_CCPROV = [];
@@ -11848,6 +11886,11 @@ function sgRecPreviewPDF(){
 var SG_SO = { filas: [], sel: null, items: [] };
 
 function sgLoadSinOrden(){
+  // LA BANDEJA DEJÓ DE SER UNA SOLAPA. Lo que entró sin orden ya aparece en
+  // el listado de órdenes con "⚡ Falta completar", que es donde el comprador
+  // la va a buscar. Los que llaman acá son los circuitos que la refrescaban;
+  // sin tabla no hay nada que pintar.
+  if (!eid('sg-tb-sinorden')) return;
   var todas = (eid('sg-so-todas') || {}).checked ? '?todas=1' : '';
   api('/api/sg/oc/sin-orden' + todas).then(function(r){
     SG_SO.filas = (r && r.ok) ? r.data : [];
@@ -12253,6 +12296,9 @@ function sgPrecioGuardar(){
 
 // ── Gastos directos ──
 function sgLoadGDirectos(){
+  // Gastos Directos era una solapa de Ingresos Y una pantalla propia del menú.
+  // Quedó la pantalla propia: es valorización, no recepción.
+  if (!eid('sg-tb-gdirectos')) return;
   var sel=eid('sg-gd-filtro');
   api('/api/sg/lotes').then(function(rl){
     var lotes=(rl&&rl.ok)?rl.data:[];
@@ -22005,6 +22051,7 @@ function loadSec(s) {
     'pa-campanias':  function(){ paCampInit(); },
     'sg-dashboard':  function(){ sgDashInit(); },
     'sg-compras':    function(){ sgComInit(); },
+    'sg-ordenes':    function(){ sgOrdInit(); },
     'sg-gvariables': function(){ sgLoadGGlobales(); },
     'sg-stock':      function(){ sgStockInit(); },
     'sg-reprocesos': function(){ sgReprocesosInit(); },
