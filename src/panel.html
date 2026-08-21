@@ -21383,12 +21383,15 @@ function sgRepExport(){
   <div style="margin-top:10px">
     <label style="font-size:12px;font-weight:600">…o pegá directo desde el Excel (Ctrl+C, Ctrl+V acá)</label>
     <div class="fp-chica" style="margin:3px 0 5px">
-      Columnas, en este orden: <b>Número · Banco · Fecha de pago · Monto · Beneficiario</b>.
-      Fechas dd/mm/aaaa y montos con punto de miles y coma decimal.
+      Se reconocen las columnas <b>por el nombre del encabezado</b> —Cheque, Banco, FechaVto,
+      Egreso, Destino, Importe— en el orden que vengan y con el título del banco arriba.
+      Si no hay encabezado, se leen en este orden:
+      <b>Número · Banco · Fecha de pago · Monto · Beneficiario</b>.
     </div>
     <textarea id="fp-imp-texto" rows="8" style="width:100%;font-family:ui-monospace,Consolas,monospace;font-size:12px"
       placeholder="00012345&#9;Galicia&#9;14/08/2026&#9;1.250.000,00&#9;Proveedor SA"></textarea>
   </div>
+  <div id="fp-imp-cols" style="margin-top:8px"></div>
   <div id="fp-imp-resultado" style="margin-top:10px"></div>
   <div class="ab-modal-footer">
     <button class="btn bo" onclick="document.getElementById('fp-mb-import').classList.remove('on')">Cancelar</button>
@@ -54335,21 +54338,152 @@ function fpImportAbrir() {
   document.getElementById('fp-mb-import').classList.add('on');
 }
 
+// ── EL IMPORTADOR LEE EL ENCABEZADO, NO CUENTA COLUMNAS ──────────────────
+// Antes tomaba la columna 1 como número, la 3 como fecha y la 4 como monto, sin
+// mirar qué decían. Con el Excel del banco —Codigo · Banco · Cheque · Egreso ·
+// FechaVto · Destino · Importe— en la posición de la fecha había un número de
+// cheque, y las 1672 filas fallaban con "Fecha de pago es obligatorio".
+//
+// Peor todavía era el caso que no fallaba: si las columnas hubieran entrado
+// corridas pero con datos del tipo correcto, se importaba MAL y en silencio.
+//
+// Ahora se busca la fila de encabezado y se mapea por NOMBRE. Si no hay
+// encabezado reconocible se cae a las posiciones de siempre, así que lo que
+// funcionaba sigue funcionando.
+
+// Cómo se puede llamar cada columna. Se compara sin acentos, sin espacios y en
+// minúscula, así "N° Cheque", "nro cheque" y "NroCheque" son lo mismo.
+var FP_COLS = {
+  numero:       ['cheque', 'numero', 'nro', 'nrocheque', 'numerocheque', 'ncheque', 'nrodecheque'],
+  banco:        ['banco', 'entidad'],
+  // Dos fechas distintas: cuándo se entregó y cuándo se cobra. Para el flujo de
+  // fondos importa la SEGUNDA — es el día que la plata sale de la cuenta.
+  fecha_vto:    ['fechavto', 'vencimiento', 'fechavencimiento', 'fechadevencimiento', 'vto', 'fechadecobro'],
+  fecha_egreso: ['egreso', 'fechaegreso', 'emision', 'fechaemision', 'fechadeemision', 'fechadeegreso'],
+  fecha_pago:   ['fechadepago', 'fechapago', 'pago', 'fecha'],
+  monto:        ['importe', 'monto', 'total', 'valor'],
+  beneficiario: ['destino', 'beneficiario', 'proveedor', 'afavorde', 'razonsocial', 'titular'],
+};
+
+function fpNorm(v) {
+  return String(v == null ? '' : v)
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')   // saca acentos
+    .replace(/[^a-z0-9]/gi, '').toLowerCase();
+}
+
+// Si esta fila es un encabezado, devuelve qué columna es cada cosa. Si no, null.
+// Pide al menos DOS coincidencias: una sola puede ser una fila de datos que por
+// casualidad dice "Banco".
+function fpMapaDeEncabezado(fila) {
+  if (!fila || !fila.length) return null;
+  var mapa = {}, encontradas = 0;
+  for (var i = 0; i < fila.length; i++) {
+    var n = fpNorm(fila[i]);
+    if (!n) continue;
+    for (var campo in FP_COLS) {
+      if (mapa[campo] !== undefined) continue;
+      if (FP_COLS[campo].indexOf(n) >= 0) { mapa[campo] = i; encontradas++; break; }
+    }
+  }
+  return encontradas >= 2 ? mapa : null;
+}
+
+// QUÉ FECHA USAR. Si el archivo trae las dos, manda el VENCIMIENTO: el flujo de
+// fondos se arma con el día en que la plata sale de la cuenta, no con el día en
+// que se firmó el papel. Queda dicho en pantalla y se puede cambiar.
+function fpCampoFecha(mapa) {
+  var pref = (document.getElementById('fp-imp-fecha') || {}).value || '';
+  if (pref && mapa[pref] !== undefined) return pref;
+  if (mapa.fecha_vto !== undefined) return 'fecha_vto';
+  if (mapa.fecha_pago !== undefined) return 'fecha_pago';
+  if (mapa.fecha_egreso !== undefined) return 'fecha_egreso';
+  return null;
+}
+
+// Muestra el selector de fecha sólo cuando el archivo trae más de una, que es
+// justo cuando hay algo que elegir.
+function fpAvisarColumnas(mapa, usada) {
+  var box = document.getElementById('fp-imp-cols');
+  if (!box) return;
+  if (!mapa) { box.innerHTML = ''; return; }
+  var fechas = ['fecha_vto', 'fecha_egreso', 'fecha_pago'].filter(function(k){ return mapa[k] !== undefined; });
+  var lbl = { fecha_vto: 'Vencimiento (cuándo se cobra)', fecha_egreso: 'Egreso (cuándo se entregó)',
+              fecha_pago: 'Fecha de pago' };
+  var h = '<div class="fp-chica" style="background:#ecfdf5;border:1px solid #a7f3d0;border-radius:8px;padding:8px 11px">'
+    + '✓ Se reconocieron las columnas por su nombre.';
+  if (fechas.length > 1) {
+    h += ' El archivo trae <b>' + fechas.length + ' fechas</b>: '
+      + '<select id="fp-imp-fecha" onchange="fpImportReMapear()" style="margin-left:4px;padding:2px 6px;border-radius:6px">'
+      + fechas.map(function(k){
+          return '<option value="' + k + '"' + (k === usada ? ' selected' : '') + '>' + lbl[k] + '</option>';
+        }).join('')
+      + '</select>'
+      + '<div style="margin-top:4px">Para el flujo de fondos va el <b>vencimiento</b>: es el día que la plata sale de la cuenta.</div>';
+  } else if (usada) {
+    h += ' La fecha sale de <b>' + lbl[usada] + '</b>.';
+  }
+  box.innerHTML = h + '</div>';
+}
+
+// Arma las filas a partir de una matriz (del Excel o del pegado).
+function fpFilasDeMatriz(matriz) {
+  var mapa = null, desde = 0;
+  // El encabezado puede no ser la primera fila: los Excel del banco suelen traer
+  // un título arriba ("Cheques Emitidos · Por Fecha de Egreso").
+  for (var i = 0; i < Math.min(matriz.length, 12); i++) {
+    var m = fpMapaDeEncabezado(matriz[i]);
+    if (m) { mapa = m; desde = i + 1; break; }
+  }
+  var campoFecha = mapa ? fpCampoFecha(mapa) : null;
+  FP.impMapa = mapa;
+  fpAvisarColumnas(mapa, campoFecha);
+  var out = [];
+  for (var j = desde; j < matriz.length; j++) {
+    var c = matriz[j];
+    if (!c || !c.length) continue;
+    var reg;
+    if (mapa) {
+      var g = function(k){ return mapa[k] === undefined ? '' : c[mapa[k]]; };
+      reg = { numero: String(g('numero') == null ? '' : g('numero')).trim(),
+              banco: String(g('banco') == null ? '' : g('banco')).trim(),
+              fecha_pago: campoFecha ? fpParseFecha(c[mapa[campoFecha]]) : '',
+              monto: fpParseNum(g('monto')),
+              beneficiario: String(g('beneficiario') == null ? '' : g('beneficiario')).trim() };
+    } else {
+      // Sin encabezado reconocible: las posiciones de siempre.
+      reg = { numero: String(c[0] == null ? '' : c[0]).trim(),
+              banco: String(c[1] == null ? '' : c[1]).trim(),
+              fecha_pago: fpParseFecha(c[2]), monto: fpParseNum(c[3]),
+              beneficiario: String(c[4] == null ? '' : c[4]).trim() };
+    }
+    if (reg.numero || reg.monto) out.push(reg);
+  }
+  // Sin encabezado, la primera fila puede ser el título: se descarta si no tiene
+  // ni fecha ni monto.
+  if (!mapa && out.length && !out[0].fecha_pago && !out[0].monto) out.shift();
+  return out;
+}
+
+// Cambiar qué fecha se usa rehace la lectura con la matriz que ya se leyó: no
+// hace falta volver a subir el archivo.
+function fpImportReMapear() {
+  if (!FP.impMatriz) return;
+  FP.impFilas = fpFilasDeMatriz(FP.impMatriz);
+  var cont = document.getElementById('fp-imp-resultado');
+  if (cont) cont.innerHTML = '<div class="fp-chica">Leídas <b>' + FP.impFilas.length
+    + '</b> filas. Apretá <b>Previsualizar</b> para ver qué va a pasar.</div>';
+}
+
 function fpImportFilasDeTexto(txt) {
-  var filas = [];
+  var matriz = [];
   String(txt || '').split(/\r?\n/).forEach(function(linea) {
     if (!linea.trim()) return;
     var c = linea.split('\t');
     if (c.length < 2) c = linea.split(';');
-    filas.push({
-      numero: (c[0] || '').trim(), banco: (c[1] || '').trim(),
-      fecha_pago: fpParseFecha(c[2]), monto: fpParseNum(c[3]),
-      beneficiario: (c[4] || '').trim()
-    });
+    matriz.push(c);
   });
-  // Encabezado: si la primera fila no tiene fecha ni monto, es el título de columnas.
-  if (filas.length && !filas[0].fecha_pago && !filas[0].monto) filas.shift();
-  return filas;
+  FP.impMatriz = matriz;
+  return fpFilasDeMatriz(matriz);
 }
 
 // SheetJS ya viene cargado en el panel (script con defer), pero el guard es
@@ -54364,17 +54498,8 @@ function fpImportArchivo(inp) {
       var wb = XLSX.read(new Uint8Array(e.target.result), { type: 'array' });
       var hoja = wb.Sheets[wb.SheetNames[0]];
       var filas = XLSX.utils.sheet_to_json(hoja, { header: 1, raw: true, defval: '' });
-      var out = [];
-      filas.forEach(function(c) {
-        if (!c || !c.length) return;
-        var reg = {
-          numero: String(c[0] === undefined ? '' : c[0]).trim(), banco: String(c[1] === undefined ? '' : c[1]).trim(),
-          fecha_pago: fpParseFecha(c[2]), monto: fpParseNum(c[3]),
-          beneficiario: String(c[4] === undefined ? '' : c[4]).trim()
-        };
-        if (reg.numero || reg.monto) out.push(reg);
-      });
-      if (out.length && !out[0].fecha_pago && !out[0].monto) out.shift();
+      FP.impMatriz = filas;
+      var out = fpFilasDeMatriz(filas);
       FP.impFilas = out;
       document.getElementById('fp-imp-resultado').innerHTML =
         '<div class="fp-chica">Leídas <b>' + out.length + '</b> filas de ' + fpEsc(file.name) +
