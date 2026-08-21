@@ -164,4 +164,32 @@ export function totalesDeAsiento(db, asientoId) {
   return out;
 }
 
-export default { crearAsiento, filtroAmbito, totalesDeAsiento, AMBITOS, MOTIVOS };
+// ── EL ASIENTO DE UNA FACTURA DE COMPRA NO SE ANULA POR SU CUENTA ──────
+//
+// REGLA DE ORO: no hay factura de compra sin su asiento. Anular el asiento y
+// dejar la factura viva la deja fuera del libro --una deuda que existe para el
+// proveedor y no existe para la contabilidad-- y, peor, sin vuelta: la partida
+// sigue marcada como facturada, así que tampoco se le puede cargar otra.
+//
+// La factura es el HECHO y el asiento su CONSECUENCIA. Se deshace el hecho.
+//
+// ESTO VIVE ACÁ, Y NO EN LA RUTA, PORQUE HAY DOS PANTALLAS QUE ANULAN ASIENTOS:
+// la de San Gerónimo (rutas/sg.js) y la de Contabilidad SG (rutas/sg_contable.js).
+// En la V793 el freno se puso en la primera y la segunda quedó abierta; por ahí
+// se coló un asiento de compra el 21/8/2026. Una sola regla, un solo lugar.
+export function frenoAsientoDeCompra(db, asientoId) {
+  const a = db.prepare('SELECT ref_compra_id FROM sg_asientos WHERE id=?').get(asientoId);
+  if (!a || !a.ref_compra_id) return null;
+  const fc = db.prepare(`SELECT id, punto_venta, numero, activo
+    FROM sg_facturas_compra WHERE id=?`).get(a.ref_compra_id);
+  // Si la factura ya está dada de baja, su asiento no traba nada.
+  if (!fc || !fc.activo) return null;
+  const nro = (fc.punto_venta ? fc.punto_venta + '-' : '') + (fc.numero || '');
+  return { factura_id: fc.id, factura_numero: nro,
+    error: 'Este asiento es de la factura de compra ' + nro + '. Se anula DESDE LA FACTURA, '
+         + 'en Facturas por mercadería: ahí se da de baja el comprobante y su asiento juntos, '
+         + 'y la partida vuelve a esperar factura. Anular sólo el asiento dejaría la factura '
+         + 'fuera del libro y la partida sin poder recibir otra.' };
+}
+
+export default { crearAsiento, filtroAmbito, totalesDeAsiento, frenoAsientoDeCompra, AMBITOS, MOTIVOS };

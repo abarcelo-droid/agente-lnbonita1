@@ -7,7 +7,7 @@
 
 import express from 'express';
 import db from '../servicios/db_sg_finanzas.js';
-import { crearAsiento, filtroAmbito, totalesDeAsiento } from '../servicios/asientos.js';
+import { crearAsiento, filtroAmbito, totalesDeAsiento, frenoAsientoDeCompra } from '../servicios/asientos.js';
 import { exigirEmpresa, SAN_GERONIMO } from '../servicios/sociedad_modulo.js';
 
 const router = express.Router();
@@ -1648,9 +1648,17 @@ router.post('/asientos/:id(\\d+)/anular', requireAdmin, (req, res) => {
   const asiento = db.prepare('SELECT * FROM sg_asientos WHERE id = ?').get(id);
   if (!asiento) return res.status(404).json({ error: 'asiento no encontrado' });
   if (asiento.anulado) return res.status(400).json({ error: 'el asiento ya está anulado' });
+  // REGLA DE ORO: el asiento de una factura de compra se anula desde la factura.
+  // Esta pantalla no tenía el freno --se puso sólo en la de San Gerónimo-- y por
+  // acá se coló un asiento de compra el 21/8/2026, dejando la factura fuera del
+  // libro y la partida sin poder recibir otra. La regla vive en asientos.js.
+  const freno = frenoAsientoDeCompra(db, id);
+  if (freno) return res.status(400).json({ ok: false, error: freno.error,
+    factura_id: freno.factura_id, factura_numero: freno.factura_numero });
   db.prepare(`
     UPDATE sg_asientos
-       SET anulado = 1, anulado_por = ?, anulado_en = datetime('now','localtime')
+       SET anulado = 1, anulado_por = ?, anulado_en = datetime('now','localtime'),
+           descripcion = descripcion || ' — ANULADO'
      WHERE id = ?
   `).run(req._user?.id ?? null, id);
   res.json({ ok: true });

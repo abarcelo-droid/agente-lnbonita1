@@ -12,7 +12,7 @@ import { randomUUID } from 'crypto';
 import { fileURLToPath } from 'url';
 import * as XLSX from 'xlsx';
 import { subirArchivo, obtenerArchivo, storageConfigurado } from '../servicios/storage.js';
-import { crearAsiento, MOTIVOS } from '../servicios/asientos.js';
+import { crearAsiento, MOTIVOS, frenoAsientoDeCompra } from '../servicios/asientos.js';
 
 // El nombre del motivo para mostrarlo en una ficha. La clave sola no le dice
 // nada a nadie.
@@ -3978,19 +3978,11 @@ router.post('/asientos/:id/anular', requireAuth, async (req, res) => {
     // hecho y la consecuencia lo sigue: anular la factura ya da de baja el
     // comprobante, anula su asiento, limpia el número de la recepción y devuelve
     // la partida a "esperando factura". Una sola puerta, un solo camino.
-    if (a.ref_compra_id) {
-      const fc = db.prepare(`SELECT f.id, f.punto_venta, f.numero, f.activo
-        FROM sg_facturas_compra f WHERE f.id=?`).get(a.ref_compra_id);
-      if (fc && fc.activo) {
-        const nro = (fc.punto_venta ? fc.punto_venta + '-' : '') + (fc.numero || '');
-        return res.status(400).json({ ok: false,
-          error: 'Este asiento es de la factura de compra ' + nro + '. Se anula DESDE LA FACTURA, '
-               + 'en Facturas por mercadería: ahí se da de baja el comprobante y su asiento juntos, '
-               + 'y la partida vuelve a esperar factura. Anular sólo el asiento dejaría la factura '
-               + 'fuera del libro y la partida sin poder recibir otra.',
-          factura_id: fc.id, factura_numero: nro });
-      }
-    }
+    // El freno vive en servicios/asientos.js: hay DOS pantallas que anulan
+    // asientos y la regla tiene que ser una sola. Ver frenoAsientoDeCompra.
+    const freno = frenoAsientoDeCompra(db, a.id);
+    if (freno) return res.status(400).json({ ok: false, error: freno.error,
+      factura_id: freno.factura_id, factura_numero: freno.factura_numero });
 
     db.transaction(() => {
       // El asiento NO se borra: queda con su marca de anulado, quién y cuándo,
@@ -4103,7 +4095,16 @@ router.get('/facturas-sin-contabilizar', requireAuth, (req, res) => {
         FROM sg_facturas_compra f
         LEFT JOIN sg_proveedores p ON p.id = f.proveedor_id
         LEFT JOIN sg_oc o ON o.id = f.oc_id
-       WHERE f.activo = 1 AND f.asiento_id IS NULL
+       -- SIN ASIENTO VIGENTE, no sólo sin asiento_id. La pantalla de
+       -- Contabilidad SG anulaba el asiento sin limpiar el puntero de la
+       -- factura, así que quedaba apuntando a uno anulado: no entraba acá --el
+       -- asiento_id no era NULL-- ni en pendientes de facturar --ya tenía
+       -- factura--. La partida desaparecía del circuito y no había forma de
+       -- volver a facturarla.
+       WHERE f.activo = 1
+         AND (f.asiento_id IS NULL
+              OR NOT EXISTS (SELECT 1 FROM sg_asientos a
+                              WHERE a.id = f.asiento_id AND COALESCE(a.anulado,0) = 0))
        ORDER BY f.fecha_emision DESC, f.id DESC`).all();
     res.json({ ok: true, data: rows });
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
