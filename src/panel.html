@@ -3949,7 +3949,8 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
          chapa las dejaba ilegibles (texto ámbar sobre ámbar) cuando se abre la lista. */
       #sec-sg-importacion .sg-emb-sw option{background:var(--sur,#fff);color:var(--txt,#111);font-weight:500}
     </style>
-    <div class="ph"><div><div class="ph-t">🍅 San Gerónimo · Importación</div><div class="ph-s">Cotizador de embarque: costo por caja en pesos según a qué dólar se paga cada rubro. Estimado vs real.</div></div><div style="display:flex;gap:8px"><button class="btn bo" onclick="sgParamsAbrir()">⚙️ Parámetros</button><button class="btn bo" onclick="sgCurvaAbrir()">📈 Curva TC</button><button class="btn bo" onclick="sgTcAbrir()">💱 TC esperado</button><button class="btn bb" onclick="sgImpOpen()">+ Nuevo embarque</button></div></div>
+    <div class="ph"><div><div class="ph-t">🍅 San Gerónimo · Importación</div><div class="ph-s">Cotizador de embarque: costo por caja en pesos según a qué dólar se paga cada rubro. Estimado vs real.</div></div><div style="display:flex;gap:8px"><button class="btn bo" onclick="sgParamsAbrir()">⚙️ Parámetros</button><button class="btn bo" onclick="sgCurvaAbrir()">📈 Curva TC</button><button class="btn bo" onclick="sgTcAbrir()">💱 TC esperado</button><button class="btn bo" onclick="sgImpDesdeFactura()" title="Subí la factura del proveedor y se carga el embarque con sus productos. Se revisa antes de guardar.">📄 Desde la factura</button><button class="btn bb" onclick="sgImpOpen()">+ Nuevo embarque</button></div></div>
+    <input type="file" id="sg-emb-factura-file" accept="application/pdf,image/jpeg,image/png" style="display:none" onchange="sgImpFacturaElegida(this)">
     <!-- Solapas propias de Importación (scopeadas a esta sección, no comparten el toggler
          genérico de catálogos para no apagar los subtabs de otras pantallas). -->
     <div style="display:flex;gap:6px;margin-bottom:12px;border-bottom:1px solid var(--bor);padding-bottom:8px">
@@ -4162,6 +4163,8 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
   <div class="ab-modal" style="width:900px;max-height:92vh;overflow-y:auto">
     <div class="mhd"><div class="mht" id="sg-emb-modal-tit">📥 Nuevo embarque</div><button class="mcl" onclick="closeMB('sg-emb-modal')">×</button></div>
     <input type="hidden" id="sg-emb-id">
+    <!-- Qué se leyó de la factura y qué hay que mirar. Sólo aparece si el embarque nació de un papel. -->
+    <div id="sg-emb-factura-aviso" style="display:none;margin-bottom:10px;padding:9px 12px;border-radius:8px;border:1px solid rgba(16,163,74,.3);background:rgba(16,163,74,.07);font-size:12px"></div>
     <div class="fg" style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px">
       <div class="fl" style="grid-column:span 2"><label>Nombre del embarque</label><input type="text" id="sg-emb-nombre" placeholder="Camión 87 - Paltas Hass"></div>
       <div class="fl" style="grid-column:span 2"><label>Proveedor (exterior)</label><select id="sg-emb-prov"></select></div>
@@ -25446,6 +25449,7 @@ function sgImpProvOpts(sel){
 function sgImpOpen(id){
   sgLoadCaches(function(){
     SG._embId = id || null; SG._embCostos = {};
+    sgImpFacturaLimpiar();   // abrir el formulario a mano descarta una factura a medio cargar
     if(id){
       api('/api/sg/embarques/'+id).then(function(r){
         if(!r||!r.ok){ toast((r&&r.error)||'Error','er'); return; }
@@ -25985,7 +25989,14 @@ function sgImpSave(){
   if(badLine){ toast('Cada producto necesita kg/bulto y cajas mayores a 0','er'); return; }
   var id=SG._embId;
   (id ? api('/api/sg/embarques/'+id,'PUT',b) : api('/api/sg/embarques','POST',b)).then(function(r){
-    if(r&&r.ok){ toast(id?'Embarque actualizado':'Embarque creado','ok'); closeMB('sg-emb-modal'); sgImpInit(); }
+    if(r&&r.ok){
+      toast(id?'Embarque actualizado':'Embarque creado','ok');
+      // Si el embarque nació de una factura, el papel se adjunta ahora: el expediente
+      // necesita el id, que recién existe acá.
+      if(!id && r.data && r.data.id) sgImpSubirFacturaPendiente(r.data.id, SG._facturaData);
+      sgImpFacturaLimpiar();
+      closeMB('sg-emb-modal'); sgImpInit();
+    }
     else toast((r&&r.error)||'Error','er');
   });
 }
@@ -26024,6 +26035,112 @@ function sgVisorDetalle(){
   box.innerHTML=tmp.innerHTML;
   tmp.remove();
   if(prev) prev.id='sg-emb-result';
+}
+
+// ── ARRANCAR UN EMBARQUE DESDE LA FACTURA ─────────────────────────────────────────────
+// A veces lo primero que aparece de un camión es el invoice. Esto lo lee, llena el
+// formulario de siempre con lo que dice, y guarda con el botón de siempre: no hay un
+// segundo camino para crear embarques, así que toda la validación del alta sigue valiendo.
+function sgImpDesdeFactura(){
+  var inp=eid('sg-emb-factura-file'); if(!inp) return;
+  inp.value='';          // sin esto, elegir el mismo archivo dos veces no dispara el change
+  inp.click();
+}
+function sgImpFacturaElegida(inp){
+  var f=inp.files&&inp.files[0]; if(!f) return;
+  if(f.size>10*1024*1024){ toast('El archivo supera 10MB','er'); return; }
+  toast('Leyendo la factura…','ok');
+  var fd=new FormData(); fd.append('archivo', f);
+  fetch('/api/sg/embarques/leer-factura',{method:'POST',body:fd,credentials:'same-origin'})
+    .then(function(r){ return r.json(); })
+    .then(function(r){
+      if(!r||!r.ok){ toast((r&&r.error)||'No se pudo leer la factura','er'); return; }
+      // El archivo queda guardado para subirlo al expediente APENAS exista el embarque: el
+      // papel del que salió todo tiene que quedar adjunto, y si no se hace acá no se hace.
+      SG._facturaPendiente=f;
+      sgImpAplicarFactura(r.data);
+    })
+    .catch(function(e){ toast('Error al leer: '+e.message,'er'); });
+}
+function sgImpAplicarFactura(d){
+  sgLoadCaches(function(){
+    sgImpFill(null);                       // formulario limpio: es un embarque nuevo
+    eid('sg-emb-modal').classList.add('on');
+    var set=function(id,v){ if(v!=null && v!=='' && eid(id)) eid(id).value=v; };
+    set('sg-emb-nombre', d.nombre);
+    set('sg-emb-nro-invoice', d.nro_invoice);
+    set('sg-emb-pais', d.pais_origen);
+    set('sg-emb-incoterm', d.incoterm);
+    set('sg-emb-flete-base', d.flete_base_usd);
+    set('sg-emb-seguro', d.seguro_usd);
+    if(d.proveedor) eid('sg-emb-prov').value=d.proveedor.id;
+    // La fecha del invoice NO se pone como ETD: son cosas distintas y confundirlas corre
+    // todas las fechas de pago, que es de donde sale el TC de cada rubro.
+    SG._embLineas=(d.lineas||[]).map(function(l){
+      return { producto_id: l.producto?l.producto.id:'', envase_id: l.envase?l.envase.id:'',
+               kg_por_bulto: l.kg_por_bulto!=null?l.kg_por_bulto:'',
+               cajas: l.cajas!=null?l.cajas:'',
+               precio_unitario_usd: l.precio_unitario_usd!=null?l.precio_unitario_usd:'' };
+    });
+    sgEmbRenderLineas();
+    // El rubro de mercadería con el total del papel, para que el estimador arranque con algo.
+    if(d.total_usd!=null){ SG._embCostos=SG._embCostos||{}; SG._embCostos.costo_mercaderia={monto_estimado:d.total_usd, moneda:'USD'}; sgImpRenderCostos(); }
+    sgImpCalc();
+    SG._facturaData=d;                     // hace falta al guardar, para adjuntar el papel
+    sgImpFacturaAviso(d);
+  });
+}
+// Lo que se leyó y lo que hay que mirar, arriba del formulario. Sin esto la persona no
+// sabe qué salió de la IA y qué escribió ella, que es lo único que importa antes de guardar.
+function sgImpFacturaAviso(d){
+  var box=eid('sg-emb-factura-aviso'); if(!box) return;
+  var sinProd=(d.lineas||[]).filter(function(l){ return !l.producto; }).length;
+  var h='<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:5px">'
+    +'<b>📄 Cargado desde la factura</b>'
+    +'<span style="font-size:11px;color:var(--mut)">'+(d.lineas||[]).length+' producto(s) · '
+      +((d.lineas||[]).length-sinProd)+' reconocidos</span>'
+    +(d.confianza?'<span style="font-size:11px;color:'+(d.confianza==='baja'?'var(--err,#dc2626)':'var(--mut)')+'">confianza '+esc(d.confianza)+'</span>':'')
+    +'<span style="margin-left:auto;font-size:11px;color:var(--mut)">Nada se guardó todavía: revisá y guardá.</span></div>';
+  if(d.proveedor) h+='<div style="font-size:11.5px">Proveedor: <b>'+esc(d.proveedor.nombre)+'</b> <span style="color:var(--mut)">('+d.proveedor.score+'% de parecido con "'+esc(d.exportador||'')+'")</span></div>';
+  // Cada producto que no enganchó, con el texto tal cual vino: es lo que hay que buscar
+  // en el catálogo, y decir sólo "no se reconoció" obliga a volver al papel.
+  var sueltos=(d.lineas||[]).filter(function(l){ return !l.producto; });
+  if(sueltos.length) h+='<div style="font-size:11.5px;margin-top:3px">Sin producto: '
+    +sueltos.map(function(l){ return '<span style="color:var(--err,#dc2626)">“'+esc(l.descripcion||'?')+'”</span>'; }).join(' · ')+'</div>';
+  if(d.observaciones) h+='<div style="font-size:11.5px;color:var(--mut);margin-top:3px">'+esc(d.observaciones)+'</div>';
+  if(d.avisos&&d.avisos.length) h+='<div style="font-size:11.5px;color:var(--err,#dc2626);margin-top:4px">'
+    +d.avisos.map(function(a){ return '⚠ '+esc(a); }).join('<br>')+'</div>';
+  box.innerHTML=h; box.style.display='';
+}
+function sgImpFacturaLimpiar(){
+  SG._facturaPendiente=null;
+  var b=eid('sg-emb-factura-aviso'); if(b){ b.style.display='none'; b.innerHTML=''; }
+}
+// Sube la factura al expediente del embarque recién creado. Va después del alta porque el
+// expediente necesita el id; si falla, el embarque igual quedó bien y se avisa para subirla
+// a mano — perder el adjunto es molesto, perder el embarque sería peor.
+function sgImpSubirFacturaPendiente(embId, d){
+  var f=SG._facturaPendiente; if(!f||!embId) return;
+  SG._facturaPendiente=null;                       // se intenta una vez y no se reintenta solo
+  // El endpoint del expediente EXIGE número y monto del invoice, porque con eso confirma el
+  // costo de la mercadería. Si la IA no los pudo leer no se manda un upload que va a rebotar:
+  // se dice qué falta y el papel se sube a mano desde Editar.
+  if(!(d&&d.nro_invoice) || !(d&&d.total_usd>0)){
+    toast('El embarque se creó. La factura no se adjuntó sola porque falta el N° o el monto: subila desde Editar','warn');
+    return;
+  }
+  var fd=new FormData();
+  fd.append('archivo', f);
+  fd.append('tipo','factura_comercial');
+  fd.append('nro_invoice', d.nro_invoice);
+  fd.append('monto_total', d.total_usd);
+  fetch('/api/sg/embarques/'+embId+'/documentos',{method:'POST',body:fd,credentials:'same-origin'})
+    .then(function(r){ return r.json(); })
+    .then(function(r){
+      if(r&&r.ok) toast('Factura adjuntada al expediente y mercadería confirmada','ok');
+      else toast('El embarque se creó, pero la factura no se adjuntó ('+((r&&r.error)||'error')+'): subila desde Editar','er');
+    })
+    .catch(function(){ toast('El embarque se creó, pero la factura no se adjuntó: subila desde Editar','er'); });
 }
 
 // ── PRECIO ESPERADO DE VENTA Y AVISO A LOS COMERCIALES ────────────────────────────────
