@@ -3050,9 +3050,48 @@ router.post('/oc/:id/factura-completa', facturaUpload.single('archivo'), require
       // una factura de un millón y medio no movía un peso en la cuenta del
       // proveedor.
       for (const ocId of ocIds) generarVencimientos(db, Number(ocId));
+
+      // ── REGLA DE ORO: NO HAY FACTURA SIN SU ASIENTO ───────────────────
+      // Antes esto eran DOS pasos: se guardaba la factura y después alguien
+      // apretaba "Contabilizar". El segundo paso podía no correr nunca, y
+      // quedaba una factura viva fuera del libro: una deuda que existe para el
+      // proveedor y no existe para la contabilidad.
+      //
+      // Eso no se descubre solo. El mayor cierra —le falta un asiento que nunca
+      // estuvo— y la diferencia aparece cuando alguien concilia contra el
+      // proveedor, meses después.
+      //
+      // Ahora va TODO EN LA MISMA TRANSACCIÓN. Si el asiento no se puede
+      // escribir, no se guarda la factura tampoco: es preferible que la carga
+      // se corte y diga qué falta, a que entre a medias.
+      const conCuenta = asiento.lineas.filter((l) => l.monto > 0);
+      if (conCuenta.some((l) => !l.cuenta_id)) {
+        throw new Error('Hay líneas del asiento con importe y sin cuenta. '
+          + 'Revisá el asiento modelo antes de cargar la factura: no se guarda nada.');
+      }
+      const partidasTraza = db.prepare(`SELECT o.trazabilidad FROM sg_factura_compra_ocs fo
+        JOIN sg_oc o ON o.id=fo.oc_id WHERE fo.factura_id=?`).all(id).map((x) => x.trazabilidad);
+      const nroFacAs = (val(b.punto_venta) ? val(b.punto_venta) + '-' : '') + (val(b.numero) || '');
+      const facParaGestion = db.prepare('SELECT * FROM sg_facturas_compra WHERE id=?').get(id);
+      const asientoId = crearAsiento(db, {
+        fecha: val(b.fecha_emision), usuario_id: uid(req),
+        descripcion: 'Compra de mercadería — Factura ' + nroFacAs
+          + (partidasTraza.length
+              ? ' — Partida' + (partidasTraza.length > 1 ? 's ' : ' ') + partidasTraza.join(', ') : ''),
+        ref_compra_id: id, ref_codigo: nroFacAs,
+      }, conCuenta.map((l) => ({
+        cuenta_id: l.cuenta_id,
+        debe: l.lado === 'debe' ? l.monto : 0,
+        haber: l.lado === 'haber' ? l.monto : 0,
+        descripcion: l.descripcion || null,
+      })).concat(lineasGestionFactura(asiento.lineas, facParaGestion))).id;
+      db.prepare(`UPDATE sg_facturas_compra SET asiento_id=?, confirmada_en=datetime('now','localtime'),
+        confirmada_por=?, modificado_en=datetime('now','localtime'), modificado_por=? WHERE id=?`)
+        .run(asientoId, uid(req), uid(req), id);
+      asiento.id = asientoId;
     })();
     res.json({ ok: true, data: { id: Number(id), archivo_ruta: ruta,
-      asiento, aviso_acordado: avisoAcordado } });
+      asiento, asiento_id: asiento.id, aviso_acordado: avisoAcordado } });
   } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
 });
 
@@ -3779,9 +3818,32 @@ router.post('/asientos/:id/anular', requireAuth, async (req, res) => {
       return res.status(403).json({ ok: false, error: 'La clave no es correcta' });
     }
 
-    const a = db.prepare('SELECT id, anulado FROM sg_asientos WHERE id=?').get(req.params.id);
+    const a = db.prepare('SELECT id, anulado, ref_compra_id FROM sg_asientos WHERE id=?').get(req.params.id);
     if (!a) return res.status(404).json({ ok: false, error: 'Asiento no encontrado' });
     if (a.anulado) return res.status(400).json({ ok: false, error: 'Ese asiento ya está anulado' });
+
+    // ── EL ASIENTO DE UNA FACTURA NO SE ANULA POR SU CUENTA ──────────────
+    // Anularlo desde acá dejaba la factura VIVA y fuera del libro —la regla de
+    // oro rota— y, peor, sin vuelta: la partida seguía marcada como facturada,
+    // así que tampoco se podía cargar otra factura.
+    //
+    // La factura es el HECHO y el asiento es su CONSECUENCIA. Se deshace el
+    // hecho y la consecuencia lo sigue: anular la factura ya da de baja el
+    // comprobante, anula su asiento, limpia el número de la recepción y devuelve
+    // la partida a "esperando factura". Una sola puerta, un solo camino.
+    if (a.ref_compra_id) {
+      const fc = db.prepare(`SELECT f.id, f.punto_venta, f.numero, f.activo
+        FROM sg_facturas_compra f WHERE f.id=?`).get(a.ref_compra_id);
+      if (fc && fc.activo) {
+        const nro = (fc.punto_venta ? fc.punto_venta + '-' : '') + (fc.numero || '');
+        return res.status(400).json({ ok: false,
+          error: 'Este asiento es de la factura de compra ' + nro + '. Se anula DESDE LA FACTURA, '
+               + 'en Facturas por mercadería: ahí se da de baja el comprobante y su asiento juntos, '
+               + 'y la partida vuelve a esperar factura. Anular sólo el asiento dejaría la factura '
+               + 'fuera del libro y la partida sin poder recibir otra.',
+          factura_id: fc.id, factura_numero: nro });
+      }
+    }
 
     db.transaction(() => {
       // El asiento NO se borra: queda con su marca de anulado, quién y cuándo,
