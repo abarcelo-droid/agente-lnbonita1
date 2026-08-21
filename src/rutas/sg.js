@@ -3133,12 +3133,18 @@ router.post('/oc/:id/factura-completa', facturaUpload.single('archivo'), require
     // dice el comprobante— pero sí lo que se le debe al proveedor.
     const difG = r2(b.dif_gestion);
     const difM = val(b.dif_motivo);
-    if (difG < 0) {
-      return res.status(400).json({ ok: false,
-        error: 'La diferencia de gestión no puede ser negativa. Si la factura vino por MÁS de lo '
-             + 'acordado, eso se arregla con el proveedor: el comprobante manda.' });
-    }
-    if (difG > 0 && !MOTIVOS[difM]) {
+    // LA FACTURA TAMBIÉN PUEDE VENIR POR MÁS. Acá se rechazaba: "eso se arregla
+    // con el proveedor". Pero el caso existe y no se podía registrar, así que el
+    // que lo tenía adelante no tenía dónde ponerlo y la deuda quedaba corta.
+    //
+    // Decisión de Pablo (21/8/2026): se acepta, se corrige la orden hacia arriba
+    // y la diferencia de gestión puede ser NEGATIVA. El total sigue sin tocarse:
+    // es lo que dice el papel y es lo que va al libro fiscal.
+    //
+    // Lo que cambia es la DEUDA, que es total + dif_gestion. Con dif negativa
+    // da menos que el comprobante, que es justamente lo acordado: se le debe
+    // lo que se cerró, no lo que facturó de más. Y queda escrito con su motivo.
+    if (difG !== 0 && !MOTIVOS[difM]) {
       return res.status(400).json({ ok: false,
         error: 'Poné por qué la factura no coincide con lo acordado. Elegí el motivo: '
              + Object.values(MOTIVOS).map((m) => m.label).join(', ') + '.' });
@@ -3783,7 +3789,7 @@ router.get('/oc/:id/ediciones', requireAuth, (req, res) => {
 // dejan afuera todas las impositivas.
 function lineasGestionFactura(lineasAsiento, fac) {
   const dif = r2(fac && fac.dif_gestion);
-  if (!(dif > 0)) return [];
+  if (!dif) return [];
   const TRIB = ['iva', 'percepcion_iva', 'percepcion_iibb', 'percepcion_ganancias', 'retencion'];
   const gasto = lineasAsiento.find((l) => l.lado === 'debe' && !TRIB.includes(l.tipo_linea) && l.cuenta_id);
   const prov = lineasAsiento.find((l) => l.tipo_linea === 'proveedores' && l.cuenta_id);
@@ -3792,11 +3798,22 @@ function lineasGestionFactura(lineasAsiento, fac) {
       + 'registrar la diferencia con lo acordado.');
   }
   const motivo = fac.dif_motivo || 'ajuste_gestion';
+  // FALTÓ FACTURAR (dif > 0): la compra vale más de lo que dice el papel, así
+  // que el gasto sube y la deuda con el proveedor sube.
+  //
+  // FACTURÓ DE MÁS (dif < 0): al revés. El gasto BAJA y la deuda baja, porque lo
+  // acordado es menos que lo facturado. Las mismas dos cuentas, los lados
+  // cruzados: un asiento con importes negativos no lo lee nadie, y varias
+  // pantallas los suman como si fueran positivos.
+  const m = Math.abs(dif);
+  const sube = dif > 0;
+  const texto = sube ? 'Falta facturar contra lo acordado'
+                     : 'Facturado de más contra lo acordado';
   return [
-    { cuenta_id: gasto.cuenta_id, debe: dif, haber: 0, ambito: 'gestion', motivo,
-      descripcion: 'Diferencia con lo acordado' },
-    { cuenta_id: prov.cuenta_id, debe: 0, haber: dif, ambito: 'gestion', motivo,
-      descripcion: 'Diferencia con lo acordado' },
+    { cuenta_id: gasto.cuenta_id, debe: sube ? m : 0, haber: sube ? 0 : m,
+      ambito: 'gestion', motivo, descripcion: texto },
+    { cuenta_id: prov.cuenta_id, debe: sube ? 0 : m, haber: sube ? m : 0,
+      ambito: 'gestion', motivo, descripcion: texto },
   ];
 }
 
@@ -7094,7 +7111,7 @@ router.get('/cc-proveedores', requireAuth, (req, res) => {
                     FROM sg_facturas_compra f
                     JOIN sg_asientos a ON a.id = f.asiento_id AND COALESCE(a.anulado,0) = 0
                    WHERE f.proveedor_id = p.id AND f.activo = 1
-                     AND COALESCE(f.dif_gestion,0) > 0),0) AS pendiente_gestion,
+                     AND COALESCE(f.dif_gestion,0) <> 0),0) AS pendiente_gestion,
         -- LO QUE TODAVÍA NO ESTÁ EN EL LIBRO. Se informa aparte y NO suma al
         -- saldo: la cuenta corriente refleja la contabilidad, y hasta que no
         -- hay asiento no hay deuda registrada. Se muestra igual para que el que
@@ -8023,12 +8040,17 @@ router.get('/cc-proveedores/:id', requireAuth, (req, res) => {
       // discute un saldo mira la FICHA. Va como renglón aparte —no sumado al
       // del comprobante— porque son dos cosas distintas: una está facturada y
       // la otra no.
-      if (f.dif_gestion > 0) {
+      // En las DOS direcciones. Con la factura por más de lo acordado el renglón
+      // va al debe: le debemos menos de lo que dice el comprobante.
+      if (f.dif_gestion) {
+        const dg = r2(f.dif_gestion);
         movs.push({ tipo: 'factura', fecha: f.fecha_emision,
-          detalle: 'Falta por facturar' + (f.dif_motivo ? ' — ' + MOTIVOS_TXT(f.dif_motivo) : ''),
+          detalle: (dg > 0 ? 'Falta por facturar' : 'Facturado de más')
+                 + (f.dif_motivo ? ' — ' + MOTIVOS_TXT(f.dif_motivo) : ''),
           comprobante: (f.punto_venta ? f.punto_venta + '-' : '') + (f.numero || ''),
           partidas: f.partidas, neto: null, iva: null,
-          debe: 0, haber: r2(f.dif_gestion), pagado: r2(f.pagado_gestion),
+          debe: dg > 0 ? 0 : Math.abs(dg), haber: dg > 0 ? dg : 0,
+          pagado: r2(f.pagado_gestion),
           asiento_id: f.asiento_id, estado: null, ambito: 'gestion' });
       }
     }
