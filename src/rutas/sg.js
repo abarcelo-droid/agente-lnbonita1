@@ -22,7 +22,9 @@ import '../servicios/db_sg.js'; // corre el DDL sg_* al importarse
 // Las condiciones de pago que se usan de verdad, y el código de trazabilidad
 // de las órdenes que se cargaron antes de que existiera.
 import '../servicios/sg_oc_condiciones_y_traza.js';
-import { detectarDuplicado } from '../servicios/dedup.js';
+// normalizar/ratio: el mismo fuzzy del detector de duplicados, reusado para enganchar los
+// textos libres de una factura con el catálogo (productos, envases, proveedores).
+import { detectarDuplicado, normalizar, ratio } from '../servicios/dedup.js';
 import Anthropic from '@anthropic-ai/sdk';
 // El model ID sale SIEMPRE de config/ia.js: es la fuente única del repo.
 import { MODELO_CHAT } from '../config/ia.js';
@@ -9006,6 +9008,170 @@ function embHeaderVals(b) {
 const EMB_ESTADOS = new Set(['cotizacion','abierto','transito','recibido','cerrado']);
 
 // CREAR — cabecera + rubros en una transacción (patrón POST /oc).
+// ── ARRANCAR UN EMBARQUE DESDE LA FACTURA ───────────────────────────────────────────
+// Muchas veces lo primero que aparece de un camión es el invoice del proveedor: antes que
+// el embarque exista, antes de que nadie cargue nada. Hasta ahora había que tipear a mano
+// la cabecera y producto por producto, y recién después subir el papel del que salió todo.
+//
+// Esto lee la factura y devuelve una PROPUESTA de embarque completo, con sus líneas. No
+// escribe NADA: la pantalla llena el formulario de siempre, la persona corrige lo que haga
+// falta y guarda con el mismo botón de siempre. Toda la validación del alta sigue estando
+// donde estaba — acá no hay un segundo camino para crear embarques.
+//
+// Lo que la IA lee son textos libres ("UVA BLANCA CAJA 8KG"), no ids. El enganche con el
+// catálogo lo hace un fuzzy contra sg_productos / sg_envases / sg_proveedores y viaja como
+// SUGERENCIA con su puntaje: lo elige una persona, no el parecido de dos strings.
+router.post('/embarques/leer-factura', requireAdmin, uploadDoc, async (req, res) => {
+  const db = getDb();
+  try {
+    if (!process.env.ANTHROPIC_API_KEY) {
+      return res.status(503).json({ ok: false, error: 'La lectura automática no está configurada en este servidor' });
+    }
+    const f = req.file;
+    if (!f) return res.status(400).json({ ok: false, error: 'Falta el archivo' });
+    if (!DOC_MIMES.has(f.mimetype)) return res.status(400).json({ ok: false, error: 'Formato no permitido (solo PDF, JPG o PNG)' });
+
+    const b64 = f.buffer.toString('base64');
+    const contenido = f.mimetype === 'application/pdf'
+      ? { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: b64 } }
+      : { type: 'image', source: { type: 'base64', media_type: f.mimetype, data: b64 } };
+
+    const prompt = 'Leé este COMMERCIAL INVOICE de una importación de fruta y extraé la cabecera y el '
+      + 'detalle de productos. Respondé ÚNICAMENTE un JSON válido, sin markdown ni backticks:\n\n'
+      + '{"numero":"","fecha":"AAAA-MM-DD","exportador":"","pais_origen":"","incoterm":"",'
+      + '"moneda":"USD","total_usd":0,"flete_usd":null,"seguro_usd":null,'
+      + '"lineas":[{"descripcion":"","cajas":0,"kg_por_caja":null,"precio_unitario_usd":0,"importe_usd":0}],'
+      + '"confianza":"alta|media|baja","observaciones":""}\n\n'
+      + 'REGLAS:\n'
+      + '- "numero" es el N° de invoice. "exportador" es quién emite (el proveedor del exterior).\n'
+      + '- Una línea POR PRODUCTO. "descripcion" tal cual figura en el papel, sin traducir ni "arreglar":\n'
+      + '  ese texto se usa después para engancharlo con el catálogo.\n'
+      + '- "cajas" es la cantidad de bultos/cartons de esa línea. "precio_unitario_usd" es el precio POR CAJA.\n'
+      + '  Si el papel cotiza por kilo y no por caja, poné el precio por caja sólo si podés calcularlo con\n'
+      + '  seguridad; si no, dejalo en null y decilo en observaciones.\n'
+      + '- "kg_por_caja" es el peso neto de UNA caja. Suele estar en la descripción ("8 KG", "CX 8,2 KGS").\n'
+      + '  Si sólo figura el peso total de la línea, dividilo por las cajas. Si no se puede, null.\n'
+      + '- "incoterm" es FOB, CIF, CFR, etc., si figura.\n'
+      + '- Los montos son NÚMEROS, sin separador de miles ni símbolo.\n'
+      + '- Lo que no puedas leer con seguridad va en null, NUNCA inventado. Si dudás, poné confianza\n'
+      + '  "baja" y explicá en observaciones qué no se lee.\n'
+      + '- La suma de los importe_usd tiene que dar el total_usd. Si no da, decilo en observaciones en\n'
+      + '  vez de forzar los números.';
+
+    const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+    const resp = await client.messages.create({
+      model: MODELO_CHAT,
+      max_tokens: 3000,
+      messages: [{ role: 'user', content: [contenido, { type: 'text', text: prompt }] }],
+    });
+    const txt = (resp.content || []).filter(b => b.type === 'text').map(b => b.text).join('\n');
+    if (!txt) return res.status(502).json({ ok: false, error: 'La lectura no devolvió nada' });
+
+    let leido;
+    try { leido = JSON.parse(txt.replace(/```json|```/g, '').trim()); }
+    catch (_) { return res.status(422).json({ ok: false, error: 'No se pudo interpretar la lectura', raw: txt.slice(0, 800) }); }
+
+    // ── Enganche con el catálogo ────────────────────────────────────────────────────
+    // Fuzzy sobre el nombre normalizado, el mismo que usa el detector de duplicados. El
+    // umbral es MÁS BAJO que el de dedup a propósito: allá un falso positivo BLOQUEA un
+    // alta, acá sólo propone algo que una persona va a mirar. Igual viaja el puntaje, para
+    // poder mostrar cuáles son dudosas.
+    const UMBRAL_SUGERENCIA = 0.55;
+    // Dos señales, y la de contención va primero. En una factura el nombre del catálogo
+    // viene ADENTRO de una descripción más larga —"UVA BLANCA CX 8,2KG" contra "Uva Blanca",
+    // "CAJA 8 KG" contra "Caja"—, y comparando los strings enteros eso da un parecido bajísimo
+    // aunque sea obviamente el mismo. Si todas las palabras del catálogo están en la
+    // descripción, es él; si no, se cae al parecido de siempre, que agarra los typos.
+    const mejor = (texto, filas) => {
+      const cand = normalizar(texto);
+      if (!cand) return null;
+      const tokens = cand.split(' ');
+      let top = null, score = 0;
+      for (const r of filas) {
+        const nom = normalizar(r._t);
+        if (!nom) continue;
+        // 0.99 y no 1: deja distinguir "está contenido" de "es idéntico" al mostrar el puntaje.
+        const contenido = nom.split(' ').every(t => tokens.includes(t));
+        const s = contenido ? Math.max(0.99, ratio(cand, nom)) : ratio(cand, nom);
+        if (s > score) { score = s; top = r; }
+      }
+      return (top && score >= UMBRAL_SUGERENCIA) ? { id: top.id, nombre: top._t, score: r2(score * 100) } : null;
+    };
+
+    const provs = db.prepare("SELECT id, razon_social, origen FROM sg_proveedores WHERE activo=1").all()
+      .map(p => ({ ...p, _t: p.razon_social || '' }));
+    // Primero se busca entre los del exterior, que es lo que puede ser: si no aparece, se
+    // prueba contra todos, porque un proveedor mal clasificado es un error de carga y no
+    // una razón para no sugerir nada.
+    const prov = mejor(leido.exportador || '', provs.filter(p => p.origen === 'extranjero'))
+              || mejor(leido.exportador || '', provs);
+
+    const prods = db.prepare('SELECT id, nombre, variedad FROM sg_productos WHERE activo=1').all()
+      .map(p => ({ ...p, _t: (p.nombre || '') + (p.variedad ? ' ' + p.variedad : '') }));
+    const envs = db.prepare('SELECT id, nombre FROM sg_envases WHERE activo=1').all()
+      .map(e => ({ ...e, _t: e.nombre || '' }));
+
+    const num = v => (v != null && v !== '' && !isNaN(Number(v))) ? Number(v) : null;
+    const lineas = (Array.isArray(leido.lineas) ? leido.lineas : []).map(l => {
+      const desc = String(l.descripcion || '').trim();
+      return {
+        descripcion: desc,
+        producto: mejor(desc, prods),
+        envase: mejor(desc, envs),
+        cajas: num(l.cajas),
+        kg_por_bulto: num(l.kg_por_caja),
+        precio_unitario_usd: num(l.precio_unitario_usd),
+        importe_usd: num(l.importe_usd),
+      };
+    });
+
+    // ── Avisos: lo que hay que mirar antes de guardar ────────────────────────────────
+    const avisos = [];
+    if (leido.confianza === 'baja') avisos.push('La lectura no está segura: revisá todo contra el papel.');
+    if (!prov) avisos.push('No se reconoció al proveedor "' + (leido.exportador || '?') + '". Elegilo a mano o dalo de alta primero.');
+    else if (prov.score < 80) avisos.push('El proveedor se sugiere por parecido (' + prov.score + '%): confirmá que sea el correcto.');
+
+    const sinProd = lineas.filter(l => !l.producto).length;
+    if (sinProd) avisos.push(sinProd + ' producto(s) no se reconocieron en el catálogo: elegilos a mano.');
+    const sinKg = lineas.filter(l => l.kg_por_bulto == null).length;
+    if (sinKg) avisos.push(sinKg + ' línea(s) sin kg por caja. Sin ese dato el lote nace con 0 kg y no se puede despachar.');
+
+    // El control que la pantalla no puede hacer: que el detalle cierre contra el total.
+    const sumaLineas = r2(lineas.reduce((a, l) => a + ((l.cajas || 0) * (l.precio_unitario_usd || 0)), 0));
+    const total = num(leido.total_usd);
+    if (total != null && sumaLineas > 0 && Math.abs(total - sumaLineas) > 0.5) {
+      avisos.push('Los productos suman US$ ' + sumaLineas + ' y el invoice dice US$ ' + total
+        + '. Revisá cuál está mal leído antes de guardar.');
+    }
+    // El mismo invoice dos veces es un error de carga, y conviene saberlo ANTES de cargar todo.
+    if (leido.numero) {
+      const dup = db.prepare('SELECT nombre FROM sg_embarques WHERE nro_invoice=? AND activo=1 AND eliminado_en IS NULL')
+        .get(String(leido.numero));
+      if (dup) avisos.push('El invoice ' + leido.numero + ' ya está cargado en el embarque "' + dup.nombre + '".');
+    }
+
+    res.json({ ok: true, data: {
+      // El nombre se propone; es lo primero que se cambia y no hay forma de adivinarlo bien.
+      nombre: [leido.exportador, leido.numero].filter(Boolean).join(' ').slice(0, 80) || 'Embarque',
+      nro_invoice: leido.numero ? String(leido.numero).trim() : null,
+      fecha: /^\d{4}-\d{2}-\d{2}$/.test(String(leido.fecha || '')) ? leido.fecha : null,
+      proveedor: prov,
+      exportador: leido.exportador || null,
+      pais_origen: leido.pais_origen || null,
+      incoterm: leido.incoterm || null,
+      moneda: leido.moneda ? String(leido.moneda).toUpperCase().slice(0, 3) : 'USD',
+      total_usd: total,
+      suma_lineas_usd: sumaLineas,
+      flete_base_usd: num(leido.flete_usd),
+      seguro_usd: num(leido.seguro_usd),
+      lineas,
+      confianza: leido.confianza || null,
+      observaciones: leido.observaciones || null,
+      avisos,
+    } });
+  } catch (e) { res.status(e.status || 500).json({ ok: false, error: e.message }); }
+});
+
 router.post('/embarques', requireAdmin, (req, res) => {
   const db = getDb();
   try {
