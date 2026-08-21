@@ -25923,6 +25923,9 @@ function sgAvisoDatos(){
     var c=pp[l.id]||{};
     return { producto:(l.producto_nombre||'')+(l.producto_variedad?' '+l.producto_variedad:''),
              cajas:Number(l.cajas)||0,
+             // kg POR CAJA: al comercial le sirve el formato del envase para cotizar, no
+             // los kilos totales del producto. El total del camión ya está en el encabezado.
+             kgCaja:(l.kg_por_bulto!=null?Number(l.kg_por_bulto):null),
              kg:Math.round((Number(l.cajas)||0)*(Number(l.kg_por_bulto)||0)),
              costo:c.costo_caja!=null?c.costo_caja:null,
              precio:pv[l.producto_id]!=null?Number(pv[l.producto_id]):null };
@@ -25969,15 +25972,15 @@ function sgAvisoCanvas(){
   x.fillText(num(D.cajas)+' cajas  ·  '+num(D.kg)+' kg', 28, 158);
 
   // Encabezado de la tabla
-  var cx=[28, 470, 580, 730, 952];      // producto | cajas | kg | costo | precio
+  var cx=[28, 500, 620, 790, 952];      // producto | kg x caja | cajas | costo caja | precio
   x.fillStyle='#f3f4f6'; x.fillRect(0,top-30,W,34);
   x.fillStyle='#6b7280';
   x.font='700 13px system-ui,-apple-system,Segoe UI,Roboto,sans-serif';
   x.textAlign='left';   x.fillText('PRODUCTO', cx[0], top-8);
-  x.textAlign='right';  x.fillText('CAJAS', cx[1], top-8);
-  x.fillText('KG', cx[2], top-8);
-  x.fillText('COSTO/CAJA', cx[3], top-8);
-  x.fillText('PRECIO EST.', cx[4], top-8);
+  x.textAlign='right';  x.fillText('KG X CAJA', cx[1], top-8);
+  x.fillText('CAJAS', cx[2], top-8);
+  x.fillText('COSTO CAJA', cx[3], top-8);
+  x.fillText('PRECIO ESTIM', cx[4], top-8);
 
   D.filas.forEach(function(r,i){
     var y=top+FIL*i+32;
@@ -25985,14 +25988,18 @@ function sgAvisoCanvas(){
     x.textAlign='left';
     x.fillStyle='#111827'; x.font='600 18px system-ui,-apple-system,Segoe UI,Roboto,sans-serif';
     // El nombre largo se corta con puntos: si no, se monta sobre la columna de cajas.
-    var nom=r.producto, max=410;
+    // 395 y no más: la columna de kg por caja termina en 500 y "12,5 kg" ocupa unos 60px,
+    // así que arranca cerca de 440. Un nombre más largo se le monta encima.
+    var nom=r.producto, max=395;
     while(x.measureText(nom).width>max && nom.length>4) nom=nom.slice(0,-2);
     if(nom!==r.producto) nom+='…';
     x.fillText(nom, cx[0], y);
     x.textAlign='right'; x.font='400 17px system-ui,-apple-system,Segoe UI,Roboto,sans-serif';
     x.fillStyle='#374151';
-    x.fillText(num(r.cajas), cx[1], y);
-    x.fillText(num(r.kg), cx[2], y);
+    // Sin kg por caja se pone raya y no un 0: un envase sin formato cargado es un dato
+    // que falta, y un "0 kg" en el aviso lo leerían como que la caja va vacía.
+    x.fillText(r.kgCaja!=null?(num(r.kgCaja)+' kg'):'—', cx[1], y);
+    x.fillText(num(r.cajas), cx[2], y);
     x.fillText(money(r.costo), cx[3], y);
     x.font='700 18px system-ui,-apple-system,Segoe UI,Roboto,sans-serif';
     x.fillStyle=r.precio!=null?'#166534':'#9ca3af';
