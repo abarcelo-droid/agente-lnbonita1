@@ -544,6 +544,28 @@ router.get('/_tmp_counts_articulos', requireAdmin, (req, res) => {
 // ── ENVASES (catálogo editable: cajón, bolsa, bin, IFCO…) ─────────────────────────
 // CRUD completo vía helper (GET/POST/PUT/DELETE). El dropdown de presentaciones lo
 // lee por GET; el alta al vuelo usa POST. nombre es UNIQUE → duplicado da 400.
+// ── LOS ENVASES, CON EN CUÁNTO SE USA CADA UNO ───────────────────────────
+// Dar de baja un envase a ciegas es lo que deja el maestro peor de lo que
+// estaba: el que limpia no sabe si "Cajón" se usa en tres presentaciones o en
+// ninguna, así que no toca nada — o borra el que estaba en uso.
+//
+// Se declara ANTES que el GET genérico de montarCRUD para que gane esta ruta.
+// (Express toma la primera que matchea, y ésta es más específica.)
+router.get('/envases/uso', requireAuth, (req, res) => {
+  const db = getDb();
+  try {
+    const rows = db.prepare(`SELECT e.*,
+        (SELECT COUNT(*) FROM sg_presentaciones ps
+          WHERE ps.envase_id = e.id AND ps.activo = 1) AS presentaciones,
+        (SELECT COUNT(*) FROM sg_oc_items i WHERE i.envase_id = e.id) AS en_ordenes,
+        (SELECT COUNT(*) FROM sg_lotes l WHERE l.envase_id = e.id AND l.activo = 1) AS en_partidas
+      FROM sg_envases e
+      WHERE ${req.query.todos === '1' ? '1=1' : 'e.activo = 1'}
+      ORDER BY e.nombre COLLATE NOCASE`).all();
+    res.json({ ok: true, data: rows });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
 montarCRUD('envases', 'sg_envases', ['nombre'], { orderBy: 'nombre COLLATE NOCASE', dedup: 'nombre' });
 
 // ── PRESENTACIONES (filtra por producto_id) ──────────────────────────────────────
