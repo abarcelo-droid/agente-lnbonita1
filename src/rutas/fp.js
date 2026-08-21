@@ -487,11 +487,35 @@ router.post('/cheques/importar', wrap((req, res) => {
     }
   });
 
+  // ── LOS QUE YA NO ESTÁN EN EL ARCHIVO ───────────────────────────────────
+  // El Excel del banco se rehace TODOS LOS DÍAS y es la foto completa de lo que
+  // hay pendiente. Así que un cheque que estaba y ya no viene, no está más:
+  // se cobró, se anuló o se cambió. Si se quedara, la proyección seguiría
+  // contando plata que no va a salir — y el flujo de fondos se arma justamente
+  // para saber cuánta sale.
+  //
+  // PERO NO SE BORRA CUALQUIER COSA. Sólo se dan de baja los que:
+  //   · son del MISMO TIPO que se está importando (emitidos o recibidos): subir
+  //     los emitidos no puede llevarse puestos los recibidos;
+  //   · están PENDIENTES — los marcados pagados son historia y se quedan;
+  //   · vinieron de una importación (`importado_en`), no cargados a mano. El que
+  //     anotó un cheque a mano no lo pierde porque el banco no lo lista.
+  const enArchivo = new Set([...vistos]);
+  const candidatos = db.prepare(`SELECT id, numero, banco, monto FROM fp_cheques
+     WHERE sociedad_id = ? AND tipo = ? AND estado = 'pendiente'
+       AND importado_en IS NOT NULL AND eliminado_en IS NULL`).all(soc, tipoDefault);
+  const aBorrar = candidatos.filter((c) =>
+    !enArchivo.has([tipoDefault, String(c.banco || '').toLowerCase(), String(c.numero).toLowerCase()].join('|')));
+
   const resumen = {
     nuevos: nuevos.length,
     ya_estaban: actualizados.length,
     con_cambios: actualizados.filter(a => a.cambia).length,
     ya_pagados_intactos: actualizados.filter(a => a.estado_actual === 'pagado').length,
+    // Cuántos deja de haber y por cuánta plata: es lo primero que hay que mirar
+    // antes de apretar Importar, porque es lo único que este cambio DESTRUYE.
+    se_dan_de_baja: aBorrar.length,
+    se_dan_de_baja_monto: Math.round(aBorrar.reduce((a, c) => a + (Number(c.monto) || 0), 0) * 100) / 100,
     errores,
   };
 
@@ -508,10 +532,41 @@ router.post('/cheques/importar', wrap((req, res) => {
     const upd = db.prepare(`UPDATE fp_cheques SET fecha_emision=?, fecha_pago=?, monto=?, beneficiario=?,
       importado_en=${AHORA}, actualizado_en=${AHORA}, actualizado_por_id=? WHERE id=?`);
     for (const r of actualizados) upd.run(r.fecha_emision, r.fecha_pago, r.monto, r.beneficiario, req.user.id, r.id);
+    // Baja lógica, no DELETE: si el archivo del día vino cortado, lo borrado se
+    // puede mirar y volver.
+    if (aBorrar.length) {
+      const del = db.prepare(`UPDATE fp_cheques SET eliminado_en=${AHORA}, eliminado_por_id=? WHERE id=?`);
+      for (const c of aBorrar) del.run(req.user.id, c.id);
+    }
   })();
 
   logFp('cheques', null, 'import', resumen, req.user.id);
   res.json({ ok: true, ...resumen });
+}));
+
+// ── QUÉ CHEQUES CAEN EN UNA SEMANA ───────────────────────────────────────
+// El flujo muestra "2.884,7M" en una celda y hasta ahora ahí terminaba: para
+// saber de qué estaba hecho ese número había que ir a la solapa de cheques y
+// filtrar a mano por fechas. Un total que no se puede abrir no se puede
+// discutir con nadie.
+//
+// desde/hasta vienen de la grilla, que ya sabe dónde empieza y termina cada
+// semana. La PRIMERA semana arrastra todo lo vencido de antes —así lo arma la
+// proyección— y por eso acepta `incluir_anteriores`.
+router.get('/cheques/semana', wrap((req, res) => {
+  const soc = getSociedadId(req);
+  const desde = vFecha(req.query.desde, 'Desde', { req: true });
+  const hasta = vFecha(req.query.hasta, 'Hasta', { req: true });
+  const tipo = vEnum(req.query.tipo, 'Tipo', ['emitido', 'recibido'], 'emitido');
+  const anteriores = req.query.incluir_anteriores === '1';
+  const filas = db.prepare(`SELECT id, numero, banco, beneficiario, fecha_pago, monto, estado
+      FROM fp_cheques
+     WHERE sociedad_id = ? AND tipo = ? AND estado = 'pendiente' AND eliminado_en IS NULL
+       AND fecha_pago <= ? AND (${anteriores ? '1=1' : 'fecha_pago >= ?'})
+     ORDER BY fecha_pago, monto DESC`)
+    .all(...(anteriores ? [soc, tipo, hasta] : [soc, tipo, hasta, desde]));
+  res.json({ ok: true, data: filas,
+    total: Math.round(filas.reduce((a, c) => a + (Number(c.monto) || 0), 0) * 100) / 100 });
 }));
 
 router.patch('/cheques/:id', wrap((req, res) => {
