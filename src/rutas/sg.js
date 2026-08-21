@@ -8897,8 +8897,13 @@ router.get('/embarques/:id/ficha', requireAuth, (req, res) => {
     const kg = lineas.reduce((a, l) => a + ((Number(l.cajas) || 0) * (Number(l.kg_por_bulto) || 0)), 0);
     // El resultado solo existe una vez que el camión entró y generó lotes.
     const resultado = (emb.estado === 'recibido' || emb.estado === 'cerrado') ? resultadoEmbarque(db, emb) : null;
+    // El precio esperado de venta de cada producto, para el cuadro y para el aviso a los
+    // comerciales. Va por producto y no por línea porque vive en su propia tabla: las
+    // líneas se borran y se reinsertan en cada guardado del embarque.
+    const precios = db.prepare('SELECT producto_id, precio_caja FROM sg_embarque_precios WHERE embarque_id=?')
+      .all(emb.id).reduce((m, r) => { m[r.producto_id] = r.precio_caja; return m; }, {});
     res.json({ ok: true, data: {
-      embarque: emb, costos: calc.detalle, lineas, documentos, resultado,
+      embarque: emb, costos: calc.detalle, lineas, documentos, resultado, precios,
       estimador: calcImportacion(db, emb, costos),
       totales: {
         bruto: calc.bruto, creditos: calc.creditos, neto: calc.neto,
@@ -9830,6 +9835,43 @@ router.delete('/embarques/:id/documentos/:docId', requireAuth, (req, res) => {
       WHERE id=? AND embarque_id=? AND activo=1`).run(uid(req), req.params.docId, req.params.id);
     if (info.changes === 0) return res.status(404).json({ ok: false, error: 'Documento no encontrado' });
     res.json({ ok: true });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// ── PRECIO ESPERADO DE VENTA POR PRODUCTO ───────────────────────────────────────────
+// Lo carga el que mira la ficha del camión, para poder avisarle a los comerciales a cuánto
+// sale y a cuánto se piensa vender. Es una expectativa, no un precio de lista: no toca
+// ninguna venta ni ninguna orden.
+//
+// requireAuth y no requireAdmin: poner un precio de referencia es trabajo del día
+// (CLAUDE.md — OPERAR NO ES SER ADMIN).
+router.patch('/embarques/:id/precios-venta', requireAuth, express.json(), (req, res) => {
+  const db = getDb();
+  try {
+    const emb = db.prepare('SELECT id FROM sg_embarques WHERE id=? AND activo=1').get(req.params.id);
+    if (!emb) return res.status(404).json({ ok: false, error: 'Embarque no encontrado' });
+    const items = Array.isArray(req.body && req.body.precios) ? req.body.precios : [];
+    // Upsert por (embarque, producto). Un precio vacío BORRA la fila en vez de guardar 0:
+    // "todavía no sé a cuánto lo vendo" y "lo regalo" no son lo mismo, y un 0 guardado
+    // saldría como precio en el aviso a los comerciales.
+    const up = db.prepare('INSERT INTO sg_embarque_precios (embarque_id, producto_id, precio_caja, usuario_id)'
+      + ' VALUES (?,?,?,?)'
+      + ' ON CONFLICT(embarque_id, producto_id) DO UPDATE SET'
+      + '   precio_caja=excluded.precio_caja, usuario_id=excluded.usuario_id,'
+      + "   modificado_en=datetime('now','localtime')");
+    const del = db.prepare('DELETE FROM sg_embarque_precios WHERE embarque_id=? AND producto_id=?');
+    let guardados = 0, borrados = 0;
+    db.transaction(() => {
+      for (const it of items) {
+        const pid = Number(it && it.producto_id);
+        if (!(pid > 0)) continue;
+        const v = (it.precio_caja != null && it.precio_caja !== '') ? Number(it.precio_caja) : null;
+        if (v == null || !(v > 0)) { del.run(emb.id, pid); borrados++; continue; }
+        up.run(emb.id, pid, v, uid(req));
+        guardados++;
+      }
+    })();
+    res.json({ ok: true, data: { guardados, borrados } });
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 

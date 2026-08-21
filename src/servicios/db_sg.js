@@ -1434,6 +1434,35 @@ try {
   }
 } catch (e) { console.error('[DB] SG migración sg_embarque_lineas (precio_unitario_usd):', e.message); }
 
+// ── PRECIO ESPERADO DE VENTA, POR PRODUCTO DEL CAMIÓN ───────────────────────────────
+// A cuánto se piensa vender cada producto de un camión que viene en camino. Es lo que le
+// falta al aviso que se les manda a los comerciales: el costo por caja ya se calcula, pero
+// sin un precio al lado no dice si conviene o no.
+//
+// TABLA APARTE y no una columna en sg_embarque_lineas a propósito: embSyncLineas() BORRA y
+// vuelve a insertar todas las líneas cada vez que se guarda el embarque, así que una columna
+// ahí se perdería en el próximo guardado —y encima los id de línea cambian, con lo cual no
+// se puede ni referenciar. Esto es dato comercial, no la composición del camión: tiene que
+// sobrevivir a que alguien corrija los kilos.
+//
+// La clave es (embarque_id, producto_id): si el camión trae el mismo producto en dos líneas
+// —dos calibres, por ejemplo— comparten precio, que es como se lo comunica igual.
+try {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS sg_embarque_precios (
+      id             INTEGER PRIMARY KEY AUTOINCREMENT,
+      embarque_id    INTEGER NOT NULL REFERENCES sg_embarques(id),
+      producto_id    INTEGER NOT NULL,
+      precio_caja    REAL,                -- en PESOS, por caja: la misma unidad que el costo
+      usuario_id     INTEGER,
+      creado_en      TEXT DEFAULT (datetime('now','localtime')),
+      modificado_en  TEXT
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS ux_sg_emb_precios
+      ON sg_embarque_precios(embarque_id, producto_id);
+  `);
+} catch (e) { console.error('[DB] SG sg_embarque_precios:', e.message); }
+
 // ── FASE 2 (cargas y descargas, cooperativa): unidad de cobro + cantidad ────────
 // La cooperativa cobra por 'bulto' o 'pallet' (variable). Se guarda la unidad + la cantidad
 // (de sg_recepciones.bultos/pallets_recibidos para descarga_ingreso, o bultos del despacho
