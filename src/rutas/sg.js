@@ -4664,7 +4664,17 @@ router.get('/recepciones', requireAuth, (req, res) => {
     if (req.query.oc_id) { where.push('r.oc_id=?'); params.push(req.query.oc_id); }
     const rows = db.prepare(`
       SELECT r.*, o.numero AS oc_numero, o.trazabilidad AS partida, p.razon_social AS proveedor_nombre,
-        (SELECT COUNT(*) FROM sg_lotes WHERE recepcion_id=r.id AND activo=1) AS lotes
+        (SELECT COUNT(*) FROM sg_lotes WHERE recepcion_id=r.id AND activo=1) AS lotes,
+        -- LO QUE MIRA EL QUE RECIBE: cantidades. La pantalla de Ingresos no
+        -- muestra plata, así que estos son los números con los que trabaja.
+        (SELECT COALESCE(SUM(l.bultos),0) FROM sg_lotes l
+          WHERE l.recepcion_id=r.id AND l.activo=1) AS bultos,
+        (SELECT COALESCE(SUM(l.kg_reales),0) FROM sg_lotes l
+          WHERE l.recepcion_id=r.id AND l.activo=1) AS kg,
+        (SELECT GROUP_CONCAT(x.nombre, ' · ') FROM (
+           SELECT DISTINCT pr.nombre AS nombre FROM sg_lotes l
+             JOIN sg_productos pr ON pr.id=l.producto_id
+            WHERE l.recepcion_id=r.id AND l.activo=1 ORDER BY pr.nombre) x) AS productos
       FROM sg_recepciones r
       LEFT JOIN sg_oc o ON o.id=r.oc_id
       LEFT JOIN sg_proveedores p ON p.id=o.proveedor_id

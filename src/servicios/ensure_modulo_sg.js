@@ -12,6 +12,18 @@ import db from "./db.js";
 const MODULOS_SG = [
   ["sg-dashboard",  "📊 Dash",            650],
   ["sg-compras",    "📥 Ingresos",        651],
+  // ── EL QUE RECIBE NO MIRA PLATA ────────────────────────────────────────
+  // Ingresos tenía cinco solapas: órdenes de compra, recepciones pendientes,
+  // OC recibidas, ingresó sin orden y gastos directos. Ahí buscaban en la misma
+  // lista el comprador que emite, el del depósito que descarga el camión y
+  // administración que valoriza. El importe, la factura y la condición de pago
+  // son del comprador; en la pantalla del que recibe son ruido, y además le
+  // muestran plata a quien no tiene por qué verla.
+  //
+  // Emitir órdenes y mirar las recibidas se van a Administración de Compras,
+  // que ya existe como grupo. En Ingresos quedan las dos pantallas del depósito:
+  // lo que falta recibir y lo que se recibió.
+  ["sg-ordenes",    "📋 Órdenes de Compra", 669],
   // Gastos Fijos del Período (ex "Gastos Variables" / "Gastos globales" de Compras): modulo propio.
   // CG1 (#505) los sacó del costo del lote → van a resultado, no se prorratean. Orden 656.
   ["sg-gvariables", "💸 Gastos Fijos", 656],
@@ -190,6 +202,9 @@ try {
     ['Ingresos',                      665,  'sg-reprocesos'],
 
     // ── ADMINISTRACIÓN DE COMPRAS: EL PAPEL Y LA PLATA ───────────────
+    // Emitir la orden y mirar las recibidas encabezan el grupo: es donde
+    // empieza la compra, y de ahí salen la liquidación y la factura.
+    ['Administración de Compras',     669,  'sg-ordenes'],
     ['Administración de Compras',     670,  'ab-liquidaciones'],
     ['Administración de Compras',     671,  'sg-facturas-merc'],
     ['Administración de Compras',     672,  'sg-cc-proveedores'],
