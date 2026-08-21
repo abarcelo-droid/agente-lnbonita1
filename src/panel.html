@@ -4274,15 +4274,23 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
     #sg-emb-visor-modal .sgv-costos th:nth-child(6){width:12%}
     /* PRODUCTOS — nueve. Las tres de la derecha son las que se miran, así que
        se les da aire; las cantidades del medio son cortas y se aprietan. */
-    #sg-emb-visor-modal .sgv-prods th:nth-child(1){width:17%}
-    #sg-emb-visor-modal .sgv-prods th:nth-child(2){width:9%}
-    #sg-emb-visor-modal .sgv-prods th:nth-child(3){width:7%}
-    #sg-emb-visor-modal .sgv-prods th:nth-child(4){width:8%}
-    #sg-emb-visor-modal .sgv-prods th:nth-child(5){width:8%}
-    #sg-emb-visor-modal .sgv-prods th:nth-child(6){width:9%}
-    #sg-emb-visor-modal .sgv-prods th:nth-child(7){width:16%}
-    #sg-emb-visor-modal .sgv-prods th:nth-child(8){width:13%}
-    #sg-emb-visor-modal .sgv-prods th:nth-child(9){width:13%}
+    /* Once columnas: entran igual sin barra lateral, apretando las cantidades —que son
+       cortas— y dejando aire en las tres de plata, que son las que se leen. */
+    #sg-emb-visor-modal .sgv-prods th:nth-child(1){width:14%}
+    #sg-emb-visor-modal .sgv-prods th:nth-child(2){width:7%}
+    #sg-emb-visor-modal .sgv-prods th:nth-child(3){width:6%}
+    #sg-emb-visor-modal .sgv-prods th:nth-child(4){width:6%}
+    #sg-emb-visor-modal .sgv-prods th:nth-child(5){width:7%}
+    #sg-emb-visor-modal .sgv-prods th:nth-child(6){width:7%}
+    #sg-emb-visor-modal .sgv-prods th:nth-child(7){width:13%}
+    #sg-emb-visor-modal .sgv-prods th:nth-child(8){width:10%}
+    #sg-emb-visor-modal .sgv-prods th:nth-child(9){width:9%}
+    #sg-emb-visor-modal .sgv-prods th:nth-child(10){width:11%}
+    #sg-emb-visor-modal .sgv-prods th:nth-child(11){width:10%}
+    /* El input del precio no puede desbordar su celda: con table-layout:fixed, un input
+       más ancho que la columna es exactamente lo que vuelve a traer la barra lateral. */
+    #sg-emb-visor-modal .sgv-prods td{overflow:visible}
+    #sg-emb-visor-modal .sg-pv{max-width:100%;box-sizing:border-box}
     /* DOCUMENTOS — sin thead: las anchuras van sobre la primera fila. */
     #sg-emb-visor-modal .sgv-docs td:nth-child(1){width:18%}
     #sg-emb-visor-modal .sgv-docs td:nth-child(2){width:40%}
@@ -4303,6 +4311,21 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
     <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:14px">
       <button class="btn bo" id="sg-visor-editar">✏️ Editar</button>
       <button class="btn bb" onclick="closeMB('sg-emb-visor-modal')">Cerrar</button>
+    </div>
+  </div>
+</div>
+
+<!-- El aviso para los comerciales: la imagen se ve ANTES de mandarla. Nadie manda a ciegas
+     algo que lleva precios adentro. -->
+<div class="ab-modal-overlay" id="sg-aviso-modal">
+  <div class="ab-modal" style="max-width:min(760px,96vw);width:96vw">
+    <div class="mhd"><div class="mht">📢 Aviso para comerciales</div><button class="mcl" onclick="closeMB('sg-aviso-modal')">×</button></div>
+    <div style="font-size:12px;color:var(--mut);margin-bottom:8px">Copiala y pegala en WhatsApp. Los productos sin precio cargado salen como <b>“a definir”</b>.</div>
+    <div id="sg-aviso-img"></div>
+    <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:12px">
+      <button class="btn bo" onclick="closeMB('sg-aviso-modal')">Cerrar</button>
+      <button class="btn bo" onclick="sgAvisoBajar()">⬇️ Descargar</button>
+      <button class="btn bb" onclick="sgAvisoCopiar()">📋 Copiar imagen</button>
     </div>
   </div>
 </div>
@@ -25854,6 +25877,169 @@ function sgVisorDetalle(){
   if(prev) prev.id='sg-emb-result';
 }
 
+// ── PRECIO ESPERADO DE VENTA Y AVISO A LOS COMERCIALES ────────────────────────────────
+// El costo por caja ya se calculaba; lo que faltaba era poner al lado a cuánto se piensa
+// vender, y poder mandárselo a los comerciales sin que tengan que entrar al sistema.
+
+// El margen, escrito para leerlo de un vistazo: plata y porcentaje, en rojo si se pierde.
+function sgMargenTxt(precio, costo){
+  var p=Number(precio), c=Number(costo);
+  if(!(p>0) || !(c>0)) return '<span style="color:var(--mut)">—</span>';
+  var m=p-c, pct=m/p*100;
+  var col = m>0 ? '#16a34a' : 'var(--err,#dc2626)';
+  return '<span style="color:'+col+';font-weight:600">'+(m>0?'+':'')+sgMoney(Math.round(m))+'</span>'
+    +'<div style="font-size:10px;color:'+col+'">'+(pct>0?'+':'')+(Math.round(pct*10)/10).toFixed(1)+'%</div>';
+}
+// Recalcula el margen de una fila al tipear, sin ir al servidor.
+function sgPvMargen(inp){
+  var celda=document.querySelector('#sg-emb-visor-modal .sg-pv-mg[data-prod="'+inp.dataset.prod+'"]');
+  if(celda) celda.innerHTML=sgMargenTxt(inp.value, inp.dataset.costo);
+}
+// Guarda todos los precios de la ficha de una. Un campo vacío borra el precio de ese
+// producto: no es lo mismo "todavía no sé" que "vale cero".
+function sgPreciosGuardar(){
+  var id=SG._visorEmbId; if(!id){ toast('Abrí la ficha de un camión','er'); return; }
+  var precios=[];
+  Array.prototype.forEach.call(document.querySelectorAll('#sg-emb-visor-modal .sg-pv'), function(i){
+    precios.push({ producto_id: Number(i.dataset.prod), precio_caja: i.value });
+  });
+  api('/api/sg/embarques/'+id+'/precios-venta','PATCH',{precios:precios}).then(function(r){
+    if(r&&r.ok) toast('Precios guardados','ok');
+    else toast((r&&r.error)||'No se pudieron guardar','er');
+  });
+}
+
+// ── LA IMAGEN PARA LOS COMERCIALES ────────────────────────────────────────────────────
+// Se dibuja en un <canvas> con JS pelado: sin librerías, sin pedirle nada al servidor y
+// sin depender de internet. Lo que sale es un PNG que se pega en WhatsApp.
+//
+// Lleva ETD y también ETA: al comercial le sirve más cuándo LLEGA que cuándo salió, y si
+// sólo pusiéramos la fecha de salida tendría que calcular el resto de memoria.
+function sgAvisoDatos(){
+  var d=SG._visorFicha; if(!d) return null;
+  var e=d.embarque, pv=d.precios||{};
+  var pp={}; ((d.estimador&&d.estimador.por_producto)||[]).forEach(function(x){ pp[x.linea_id]=x; });
+  var filas=(d.lineas||[]).map(function(l){
+    var c=pp[l.id]||{};
+    return { producto:(l.producto_nombre||'')+(l.producto_variedad?' '+l.producto_variedad:''),
+             cajas:Number(l.cajas)||0,
+             kg:Math.round((Number(l.cajas)||0)*(Number(l.kg_por_bulto)||0)),
+             costo:c.costo_caja!=null?c.costo_caja:null,
+             precio:pv[l.producto_id]!=null?Number(pv[l.producto_id]):null };
+  });
+  return { nombre:e.nombre||'Camión', etd:e.fecha_etd||null, eta:e.fecha_eta||null,
+           patente:e.camion_patente||null, proveedor:e.proveedor_nombre||null,
+           origen:e.pais_origen||null, filas:filas,
+           cajas:filas.reduce(function(a,x){return a+x.cajas;},0),
+           kg:filas.reduce(function(a,x){return a+x.kg;},0) };
+}
+function sgAvisoCanvas(){
+  var D=sgAvisoDatos(); if(!D) return null;
+  var W=980, FIL=52, top=190, foot=64;
+  var H=top+FIL*Math.max(D.filas.length,1)+foot;
+  var cv=document.createElement('canvas');
+  // Se dibuja al DOBLE y se muestra a la mitad: en un teléfono un PNG a 1x se ve borroso.
+  var R=2; cv.width=W*R; cv.height=H*R;
+  var x=cv.getContext('2d'); x.scale(R,R);
+  var money=function(n){ return n==null?'—':('$'+Math.round(n).toLocaleString('es-AR')); };
+  var num=function(n){ return (Number(n)||0).toLocaleString('es-AR'); };
+
+  x.fillStyle='#ffffff'; x.fillRect(0,0,W,H);
+  x.fillStyle='#7c1d3f'; x.fillRect(0,0,W,96);              // franja de la casa
+  x.fillStyle='#ffffff';
+  x.font='700 30px system-ui,-apple-system,Segoe UI,Roboto,sans-serif';
+  x.fillText('🚚 '+D.nombre, 28, 42);
+  x.font='400 16px system-ui,-apple-system,Segoe UI,Roboto,sans-serif';
+  x.fillStyle='rgba(255,255,255,.88)';
+  var sub=[];
+  if(D.proveedor) sub.push(D.proveedor);
+  if(D.origen) sub.push(D.origen);
+  if(D.patente) sub.push('Patente '+D.patente);
+  x.fillText(sub.join('  ·  '), 28, 72);
+
+  // Las fechas, arriba de todo: es el dato por el que se manda el aviso.
+  x.font='700 17px system-ui,-apple-system,Segoe UI,Roboto,sans-serif';
+  x.fillStyle='#111827';
+  var f=[];
+  if(D.etd) f.push('Sale (ETD): '+D.etd);
+  if(D.eta) f.push('Llega (ETA): '+D.eta);
+  x.fillText(f.length?f.join('        '):'Sin fechas cargadas', 28, 132);
+  x.font='400 15px system-ui,-apple-system,Segoe UI,Roboto,sans-serif';
+  x.fillStyle='#6b7280';
+  x.fillText(num(D.cajas)+' cajas  ·  '+num(D.kg)+' kg', 28, 158);
+
+  // Encabezado de la tabla
+  var cx=[28, 470, 580, 730, 952];      // producto | cajas | kg | costo | precio
+  x.fillStyle='#f3f4f6'; x.fillRect(0,top-30,W,34);
+  x.fillStyle='#6b7280';
+  x.font='700 13px system-ui,-apple-system,Segoe UI,Roboto,sans-serif';
+  x.textAlign='left';   x.fillText('PRODUCTO', cx[0], top-8);
+  x.textAlign='right';  x.fillText('CAJAS', cx[1], top-8);
+  x.fillText('KG', cx[2], top-8);
+  x.fillText('COSTO/CAJA', cx[3], top-8);
+  x.fillText('PRECIO EST.', cx[4], top-8);
+
+  D.filas.forEach(function(r,i){
+    var y=top+FIL*i+32;
+    if(i%2) { x.fillStyle='#fafafa'; x.fillRect(0,top+FIL*i,W,FIL); }
+    x.textAlign='left';
+    x.fillStyle='#111827'; x.font='600 18px system-ui,-apple-system,Segoe UI,Roboto,sans-serif';
+    // El nombre largo se corta con puntos: si no, se monta sobre la columna de cajas.
+    var nom=r.producto, max=410;
+    while(x.measureText(nom).width>max && nom.length>4) nom=nom.slice(0,-2);
+    if(nom!==r.producto) nom+='…';
+    x.fillText(nom, cx[0], y);
+    x.textAlign='right'; x.font='400 17px system-ui,-apple-system,Segoe UI,Roboto,sans-serif';
+    x.fillStyle='#374151';
+    x.fillText(num(r.cajas), cx[1], y);
+    x.fillText(num(r.kg), cx[2], y);
+    x.fillText(money(r.costo), cx[3], y);
+    x.font='700 18px system-ui,-apple-system,Segoe UI,Roboto,sans-serif';
+    x.fillStyle=r.precio!=null?'#166534':'#9ca3af';
+    x.fillText(r.precio!=null?money(r.precio):'a definir', cx[4], y);
+    x.strokeStyle='#e5e7eb'; x.beginPath(); x.moveTo(0,top+FIL*(i+1)); x.lineTo(W,top+FIL*(i+1)); x.stroke();
+  });
+
+  x.textAlign='left';
+  x.fillStyle='#9ca3af'; x.font='400 13px system-ui,-apple-system,Segoe UI,Roboto,sans-serif';
+  x.fillText('Costo puesto acá, en pesos. Precio estimado de venta, sujeto a confirmación.', 28, H-34);
+  x.fillText('La Nueva Bonita  ·  generado el '+new Date().toISOString().slice(0,10), 28, H-14);
+  return cv;
+}
+// Abre la vista previa: se ve la imagen ANTES de mandarla. Nadie manda a ciegas algo que
+// lleva precios adentro.
+function sgAvisoAbrir(){
+  var cv=sgAvisoCanvas();
+  if(!cv){ toast('Abrí la ficha del camión primero','er'); return; }
+  var cont=eid('sg-aviso-img'); if(!cont) return;
+  cont.innerHTML='';
+  cv.style.width='100%'; cv.style.height='auto'; cv.style.borderRadius='8px'; cv.style.border='1px solid var(--bor)';
+  cont.appendChild(cv);
+  SG._avisoCanvas=cv;
+  eid('sg-aviso-modal').classList.add('on');
+}
+function sgAvisoBajar(){
+  var cv=SG._avisoCanvas; if(!cv) return;
+  var a=document.createElement('a');
+  a.download='camion-'+String((SG._visorFicha&&SG._visorFicha.embarque.nombre)||'aviso').replace(/[^A-Za-z0-9]+/g,'-').toLowerCase()+'.png';
+  a.href=cv.toDataURL('image/png');
+  a.click();
+}
+// Copiar al portapapeles es lo que de verdad se usa: se pega directo en WhatsApp sin pasar
+// por la carpeta de descargas. Necesita HTTPS; si el navegador no lo soporta, se avisa y
+// queda el botón de descargar, que anda siempre.
+function sgAvisoCopiar(){
+  var cv=SG._avisoCanvas; if(!cv) return;
+  if(!(navigator.clipboard && window.ClipboardItem)){
+    toast('Este navegador no deja copiar imágenes: usá Descargar','er'); return;
+  }
+  cv.toBlob(function(b){
+    navigator.clipboard.write([new ClipboardItem({'image/png':b})]).then(function(){
+      toast('Imagen copiada — pegala en WhatsApp','ok');
+    }).catch(function(){ toast('No se pudo copiar: usá Descargar','er'); });
+  });
+}
+
 // ── VISOR DEL CAMIÓN ──────────────────────────────────────────────────────────
 // Todo el embarque de un vistazo, sin poder tocar nada. Lo primero y más grande es el costo
 // por caja y por kg EN PESOS, que es el número con el que se decide a cuánto vender.
@@ -25983,14 +26169,24 @@ function sgImpVisor(id){
           +'<b>El invoice y los productos no coinciden.</b> El papel dice US$ '+nr(est.usd.invoice)+' y los productos suman US$ '+nr(est.invoice_lineas)
           +' ('+(est.invoice_discrepancia>0?'+':'')+nr(est.invoice_discrepancia)+'). El costo se reparte sobre el del papel — revisá cuál está mal cargado.</div>';
       }
-      h+='<div style="font-size:12px;font-weight:600;color:var(--mut);margin:14px 0 5px">PRODUCTOS · costo prorrateado</div>'
+      // El precio esperado se carga ACÁ, al lado del costo por caja. Es el único lugar donde
+      // los dos números están juntos, que es lo que hace falta para decidir a cuánto vender.
+      var pv=d.precios||{};
+      h+='<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:14px 0 5px">'
+        +'<div style="font-size:12px;font-weight:600;color:var(--mut)">PRODUCTOS · costo prorrateado y precio esperado</div>'
+        +'<button class="btn bb bs" onclick="sgPreciosGuardar()">Guardar precios</button>'
+        +'<button class="btn bo bs" onclick="sgAvisoAbrir()" title="Arma una imagen con lo que viene en el camión, para mandarles a los comerciales">📢 Aviso para comerciales</button>'
+        +'</div>'
         +'<table class="pa-tbl sgv-prods" style="font-size:12px;width:100%"><thead><tr><th>Producto</th><th>Envase</th>'
         +'<th style="text-align:right">Cajas</th><th style="text-align:right">kg/bulto</th><th style="text-align:right">kg</th>'
         +'<th style="text-align:right">FOB US$/caja</th>'
         +'<th style="text-align:right">Costo total</th><th style="text-align:right">Costo/caja</th><th style="text-align:right">Costo/kg</th>'
+        +'<th style="text-align:right">Precio venta</th><th style="text-align:right">Margen</th>'
         +'</tr></thead><tbody>'
         +d.lineas.map(function(l){
           var kg=(Number(l.cajas)||0)*(Number(l.kg_por_bulto)||0);
+          var pcaja=(pp[l.id]&&pp[l.id].costo_caja!=null)?pp[l.id].costo_caja:null;
+          var prec=pv[l.producto_id];
           return '<tr><td class="sgv-txt">'+esc((l.producto_nombre||'')+(l.producto_variedad?' '+l.producto_variedad:''))+'</td>'
             +'<td class="sgv-txt">'+esc(l.envase_nombre||'—')+'</td>'
             +'<td style="text-align:right">'+nr(l.cajas)+'</td>'
@@ -26000,15 +26196,22 @@ function sgImpVisor(id){
             // El costo prorrateado de ESE producto: es con lo que se le pone precio.
             +'<td style="text-align:right">'+(pp[l.id]?sgMoney(Math.round(pp[l.id].costo_ars)):'—')
               +(pp[l.id]?'<div style="font-size:10px;color:var(--mut)">'+nr(pp[l.id].peso_valor)+'% del valor</div>':'')+'</td>'
-            +'<td style="text-align:right;font-weight:700;color:#16a34a">'+(pp[l.id]&&pp[l.id].costo_caja!=null?money2(pp[l.id].costo_caja):'—')+'</td>'
-            +'<td style="text-align:right">'+(pp[l.id]&&pp[l.id].costo_kg!=null?money2(pp[l.id].costo_kg):'—')+'</td></tr>';
+            +'<td style="text-align:right;font-weight:700;color:#16a34a">'+(pcaja!=null?money2(pcaja):'—')+'</td>'
+            +'<td style="text-align:right">'+(pp[l.id]&&pp[l.id].costo_kg!=null?money2(pp[l.id].costo_kg):'—')+'</td>'
+            // El input guarda el producto y el costo en el dato del elemento: el margen se
+            // recalcula al tipear, sin ir al servidor ni volver a buscar la fila.
+            +'<td style="text-align:right"><input type="number" step="0.01" min="0" class="sg-pv"'
+              +' data-prod="'+esc(String(l.producto_id))+'" data-costo="'+(pcaja!=null?pcaja:'')+'"'
+              +' value="'+(prec!=null?prec:'')+'" placeholder="$/caja" oninput="sgPvMargen(this)"'
+              +' style="width:100%;text-align:right;padding:3px 5px;border-radius:6px;border:1px solid var(--bor);background:var(--bg);font-size:12px"></td>'
+            +'<td style="text-align:right" class="sg-pv-mg" data-prod="'+esc(String(l.producto_id))+'">'+sgMargenTxt(prec,pcaja)+'</td></tr>';
         }).join('')
         +'</tbody><tfoot><tr style="font-weight:700;border-top:2px solid var(--bor)">'
           +'<td colspan="4">Total</td>'
           +'<td style="text-align:right">'+nr(Math.round(est.kg||0))+'</td><td></td>'
-          +'<td style="text-align:right">'+(conv?sgMoney(Math.round(est.total_plazo)):'—')+'</td><td colspan="2"></td>'
+          +'<td style="text-align:right">'+(conv?sgMoney(Math.round(est.total_plazo)):'—')+'</td><td colspan="4"></td>'
         +'</tr></tfoot></table>'
-        +'<div style="font-size:11px;color:var(--mut);margin-top:5px">Impuestos y despachante se reparten <b>por valor</b> (una caja que vale más paga más); flete, Tasa María y bancarios, <b>parejo por caja</b>.</div>';
+        +'<div style="font-size:11px;color:var(--mut);margin-top:5px">Impuestos y despachante se reparten <b>por valor</b> (una caja que vale más paga más); flete, Tasa María y bancarios, <b>parejo por caja</b>. El precio de venta es una <b>expectativa</b>: no toca ninguna venta.</div>';
     }
     // 5) Cómo le fue, si ya entró.
     if(res){
@@ -26040,7 +26243,9 @@ function sgImpVisor(id){
           +'<div id="sg-doc-visor-cont" style="background:#525659;min-height:420px"></div></div>'
       : '<div style="font-size:12px;color:var(--mut);padding:8px 0">Sin documentos cargados. Se suben desde Editar.</div>';
     eid('sg-visor-body').innerHTML=h;
-    SG._visorDocs=d.documentos; SG._visorEst=est;
+    // La ficha entera queda a mano: de acá salen el precio esperado y la imagen del aviso,
+    // sin volver a pedirla al servidor.
+    SG._visorDocs=d.documentos; SG._visorEst=est; SG._visorFicha=d; SG._visorEmbId=id;
   });
 }
 
