@@ -9238,6 +9238,14 @@ router.get('/embarques/export', requireAuth, (req, res) => {
       const porProd = (est.por_producto || []).reduce((m, x) => { m[x.linea_id] = x; return m; }, {});
       const rub = k => (est.lineas || []).find(x => x.k === k) || {};
       const nn = v => (v == null ? '' : v);
+      // El precio esperado de venta, por producto. Sin esto el archivo tiene el costo pero
+      // no con qué compararlo, que es la mitad de para qué se baja.
+      const precios = db.prepare('SELECT producto_id, precio_caja FROM sg_embarque_precios WHERE embarque_id=?')
+        .all(e.id).reduce((m, r) => { m[r.producto_id] = r.precio_caja; return m; }, {});
+      // Qué rubros ya salen de un papel y cuáles siguen estimados. Un costo confirmado y uno
+      // proyectado no se pueden promediar juntos sin saber cuál es cuál.
+      const conPapel = est.reales_cargados || [];
+      const esPapel = k => (rub(k).real ? 'papel' : 'estimado');
 
       // Lo que no depende del producto se arma una vez y se repite en cada fila: eso es lo
       // que permite filtrar por cualquier cosa y seguir teniendo el costeo al lado.
@@ -9286,6 +9294,12 @@ router.get('/embarques/export', requireAuth, (req, res) => {
         ars_flete_real: nn(rub('flete_real').ars),
         ars_bancarios: nn(rub('bancarios').ars),
         ars_iva_bancarios: nn(rub('iva_banc').ars),
+        papeles_cargados: conPapel.length,
+        papeles_rubros: conPapel.join(' / '),
+        origen_mercaderia: esPapel('mercaderia'), origen_iva: esPapel('iva'),
+        origen_iibb: esPapel('iibb'), origen_tasa_maria: esPapel('tasa_maria'),
+        origen_despachante: esPapel('despachante'), origen_flete: esPapel('flete_real'),
+        origen_bancarios: esPapel('bancarios'),
         ars_total_contado: nn(est.total_contado),
         ars_total_plazo: nn(est.total_plazo),
         ars_dif_cambio: est.dif_cambio != null ? r2(est.dif_cambio) : '',
@@ -9320,6 +9334,14 @@ router.get('/embarques/export', requireAuth, (req, res) => {
           ars_costo_por_caja_prorrateo: nn(pp.por_caja_ars),
           ars_costo_caja: nn(pp.costo_caja),
           ars_costo_kg: nn(pp.costo_kg),
+          // Precio esperado y margen. El margen se calcula acá y no en Excel para que sea
+          // el mismo número que muestra la ficha: dos fórmulas para lo mismo terminan
+          // dando distinto y nadie sabe cuál mirar.
+          ars_precio_venta_esperado: nn(precios[l.producto_id]),
+          ars_margen_caja: (precios[l.producto_id] != null && pp.costo_caja != null)
+            ? r2(Number(precios[l.producto_id]) - pp.costo_caja) : '',
+          margen_pct: (precios[l.producto_id] > 0 && pp.costo_caja != null)
+            ? r2((Number(precios[l.producto_id]) - pp.costo_caja) / Number(precios[l.producto_id]) * 100) : '',
         });
       }
     }
@@ -9332,12 +9354,16 @@ router.get('/embarques/export', requireAuth, (req, res) => {
       'transporte_empresa','camion_patente','camion_acoplado','chofer_nombre','chofer_documento','chofer_telefono',
       'producto','variedad','envase','cajas','kg_por_bulto','kg','fob_usd_caja','fob_usd_total',
       'pct_del_valor','pct_de_cajas',
-      'ars_costo_total','ars_costo_caja','ars_costo_kg','ars_costo_por_valor','ars_costo_por_caja_prorrateo',
+      'ars_costo_total','ars_costo_caja','ars_costo_kg',
+      'ars_precio_venta_esperado','ars_margen_caja','margen_pct',
+      'ars_costo_por_valor','ars_costo_por_caja_prorrateo',
       'moneda','tc_aplicado','tc_manual','costeo_completo','falta_tc','invoice_origen',
       'usd_invoice','usd_flete_base','usd_seguro','usd_flete_real','usd_bancarios','usd_base_imponible',
       'ars_base_imponible','ars_mercaderia','ars_iva','ars_iibb','ars_tasa_maria','ars_despachante',
       'ars_iva_despachante','ars_flete_real','ars_bancarios','ars_iva_bancarios',
       'ars_total_contado','ars_total_plazo','ars_dif_cambio',
+      'papeles_cargados','papeles_rubros','origen_mercaderia','origen_iva','origen_iibb',
+      'origen_tasa_maria','origen_despachante','origen_flete','origen_bancarios',
       'camion_cajas','camion_kg','ars_costo_caja_camion','ars_costo_kg_camion',
       'observaciones','creado_en'];
 
