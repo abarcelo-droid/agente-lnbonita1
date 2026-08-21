@@ -4058,6 +4058,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
     <div class="ph"><div><div class="ph-t">🍅 San Gerónimo · Maestros</div><div class="ph-s">Productos, presentaciones, proveedores, clientes y condiciones de pago</div></div></div>
     <div style="display:inline-flex;gap:2px;background:var(--bg);border:1px solid var(--bor);border-radius:8px;padding:3px;margin-bottom:16px;flex-wrap:wrap">
       <div class="sg-subtab on" data-sub="productos"     onclick="sgCatSub('productos')">🥦 Productos</div>
+      <div class="sg-subtab" data-sub="envases"       onclick="sgCatSub('envases')">🧺 Envases</div>
       <div class="sg-subtab" data-sub="presentaciones" onclick="sgCatSub('presentaciones')">📦 Presentaciones</div>
       <div class="sg-subtab" data-sub="proveedores"    onclick="sgCatSub('proveedores')">🚜 Proveedores</div>
       <div class="sg-subtab" data-sub="clientes"       onclick="sgCatSub('clientes')">🏪 Clientes</div>
@@ -4071,6 +4072,33 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
         <thead id="sg-th-productos"><tr><th>Código</th><th>Especie</th><th>Variedad</th><th>Familia</th><th>Envase</th><th>Presentaciones</th><th></th></tr></thead>
         <tbody id="sg-tb-productos"><tr><td colspan="7" class="emp">Cargando…</td></tr></tbody>
       </table></div>
+    </div>
+
+    <!-- ══ ENVASES ══
+         No tenían pantalla. Se creaban con un prompt() en medio de cargar una
+         orden —"Nombre del nuevo envase"— y no había dónde darlos de baja: así
+         es como el maestro termina con "Cajón", "cajon" y "CAJON 20" siendo tres
+         envases distintos para cualquier informe. -->
+    <div class="sg-sub" id="sg-sub-envases">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;gap:10px;flex-wrap:wrap">
+        <div style="font-size:12px;color:var(--mut)">
+          El envase es el cajón, la caja o el bin. Acá se dan de alta, se renombran y se dan de baja.
+        </div>
+        <button class="btn bb" onclick="sgOpenModal('envases')">+ Nuevo envase</button>
+      </div>
+      <div class="ab-table-wrap"><table class="pa-tbl">
+        <thead><tr><th>Envase</th>
+          <th style="text-align:right;width:130px">Presentaciones</th>
+          <th style="text-align:right;width:110px">Órdenes</th>
+          <th style="text-align:right;width:110px">Partidas</th>
+          <th style="width:110px"></th></tr></thead>
+        <tbody id="sg-tb-envases"><tr><td colspan="5" class="emp">Cargando…</td></tr></tbody>
+      </table></div>
+      <div style="font-size:11.5px;color:var(--mut);margin-top:8px">
+        Un envase no se borra: se da de baja. Deja de ofrecerse al cargar, y las órdenes y partidas
+        que ya lo usan lo siguen mostrando — si desapareciera, esa mercadería quedaría sin decir
+        en qué vino.
+      </div>
     </div>
 
     <div class="sg-sub" id="sg-sub-presentaciones">
@@ -5223,6 +5251,12 @@ var SG_SCHEMA = {
       {k:'familia', l:'Familia', t:'select', o:SG_FAMILIA}
     ]
   },
+  envases: {
+    titulo:'envase', path:'envases',
+    fields:[
+      {k:'nombre', l:'Nombre del envase', t:'text', req:1, ph:'Cajón 20 kg'}
+    ]
+  },
   presentaciones: {
     titulo:'presentación', path:'presentaciones',
     fields:[
@@ -5582,6 +5616,7 @@ function sgLbl(opts, v){ var f = (opts||[]).find(function(o){ return o[0]===v; }
 function sgLoad(entity){
   if (entity==='condiciones'){ return sgLoadCondiciones(); }
   if (entity==='familias'){ return sgLoadFamilias(); }   // IVA Fase 2
+  if (entity==='envases'){ return sgLoadEnvases(); }
   var path = SG_SCHEMA[entity].path;
   var url = '/api/sg/'+path;
   if (entity==='presentaciones'){
@@ -5619,6 +5654,28 @@ function sgFamGuardarAlic(id){
     if(r&&r.ok){ toast('Alícuota actualizada','ok');
       var f=(SG.cacheFam||[]).find(function(x){return String(x.id)===String(id);}); if(f) f.iva_alicuota=alic;
     } else toast((r&&r.error)||'Error','er');
+  });
+}
+
+// ── EL MAESTRO DE ENVASES ────────────────────────────────────────────────
+// Con EN CUÁNTO SE USA cada uno al lado. Dar de baja a ciegas es lo que deja el
+// maestro peor de lo que estaba: el que limpia no sabe si "Cajón" está en tres
+// presentaciones o en ninguna, así que no toca nada — o saca el que se usaba.
+function sgLoadEnvases(){
+  api('/api/sg/envases/uso').then(function(r){
+    var rows=(r&&r.ok)?(r.data||[]):[];
+    SG.cacheEnv = rows;
+    var tb=eid('sg-tb-envases'); if(!tb) return;
+    tb.innerHTML = rows.length ? rows.map(function(e){
+      var usos = Number(e.presentaciones||0) + Number(e.en_ordenes||0) + Number(e.en_partidas||0);
+      var cel = function(n){ return '<td style="text-align:right'
+        + (Number(n) ? '' : ';color:var(--mut)') + '">' + (Number(n) || '—') + '</td>'; };
+      return '<tr><td><b>'+escH(e.nombre)+'</b>'
+        + (usos ? '' : ' <span class="bdg bpe" style="font-size:10px" title="Nadie lo usó todavía">sin uso</span>')
+        + '</td>'
+        + cel(e.presentaciones) + cel(e.en_ordenes) + cel(e.en_partidas)
+        + sgActions('envases', e.id) + '</tr>';
+    }).join('') : '<tr><td colspan="5" class="emp">Sin envases. Creá el primero con el botón de arriba.</td></tr>';
   });
 }
 
