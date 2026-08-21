@@ -4097,10 +4097,22 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
           <button type="button" class="btn bo bs" id="sg-doc-btn-leer" onclick="sgDocLeerIA()">🔍 Leer los datos del archivo</button>
           <span style="font-size:11px;color:var(--mut)">Completa los campos para que los revises. No sube el documento.</span>
         </div>
+        <div id="sg-doc-aviso-costo" style="grid-column:1/-1;display:none;font-size:11.5px;padding:7px 10px;border-radius:8px;background:rgba(16,163,74,.09);border:1px solid rgba(16,163,74,.25)"></div>
         <div id="sg-doc-lectura" style="grid-column:1/-1;display:none"></div>
         <div class="fl" style="grid-column:span 3"><label>Observaciones</label><input type="text" id="sg-doc-obs"></div>
         <div class="fl sg-doc-inv" style="display:none"><label>N° de invoice *</label><input type="text" id="sg-doc-nro-invoice"></div>
         <div class="fl sg-doc-inv" style="display:none"><label>Monto total del invoice * <span style="font-weight:400;color:var(--mut);font-size:11px">USD</span></label><input type="number" step="0.01" min="0" id="sg-doc-monto"></div>
+        <!-- DESPACHO: los tributos vienen en dólares y el papel trae su propia cotización.
+             Lo que el despacho marca con X no se paga: va en CERO, no se deja vacío. -->
+        <div class="fl sg-doc-desp" style="display:none"><label>Cotización oficialización * <span style="font-weight:400;color:var(--mut);font-size:11px">$/USD</span></label><input type="number" step="0.01" min="0" id="sg-doc-tc-of" title="La cotización del día de oficialización que figura en el despacho. Es la que pasa los tributos a pesos."></div>
+        <div class="fl sg-doc-desp" style="display:none"><label>IVA <span style="font-weight:400;color:var(--mut);font-size:11px">USD</span></label><input type="number" step="0.01" min="0" id="sg-doc-iva-usd" placeholder="0 si está con X"></div>
+        <div class="fl sg-doc-desp" style="display:none"><label>Tasa María <span style="font-weight:400;color:var(--mut);font-size:11px">USD</span></label><input type="number" step="0.01" min="0" id="sg-doc-tasa-usd" placeholder="0 si está con X"></div>
+        <div class="fl sg-doc-desp" style="display:none"><label>IIBB <span style="font-weight:400;color:var(--mut);font-size:11px">USD</span></label><input type="number" step="0.01" min="0" id="sg-doc-iibb-usd" placeholder="0 si está con X"></div>
+        <!-- FACTURAS EN PESOS: van enteras al costo, con el IVA adentro. -->
+        <div class="fl sg-doc-ars" style="display:none"><label>Importe total * <span style="font-weight:400;color:var(--mut);font-size:11px">$ · con IVA</span></label><input type="number" step="0.01" min="0" id="sg-doc-importe-ars" title="El total de la factura. Va entero al costo: no le descuentes el IVA."></div>
+        <!-- SWIFT: acá desaparece la estimación de TC de la mercadería. -->
+        <div class="fl sg-doc-swift" style="display:none"><label>Mercadería pagada * <span style="font-weight:400;color:var(--mut);font-size:11px">$</span></label><input type="number" step="0.01" min="0" id="sg-doc-swift-merc" title="Lo que salió por la mercadería, en pesos. Reemplaza la estimación de tipo de cambio."></div>
+        <div class="fl sg-doc-swift" style="display:none"><label>Gastos e intereses bancarios <span style="font-weight:400;color:var(--mut);font-size:11px">$</span></label><input type="number" step="0.01" min="0" id="sg-doc-swift-banc" placeholder="0 si no hubo"></div>
         <div><button type="button" class="btn bb" onclick="sgEmbDocSubir()">+ Subir documento</button></div>
       </div>
     </div>
@@ -24783,9 +24795,13 @@ function sgImpFill(e){
 var SG_DOC_TIPOS=[
   ['factura_comercial','Factura comercial'],['packing_list','Packing list'],
   ['bl','BL (conocimiento de embarque)'],['poliza_seguro','Póliza de seguro'],
-  ['despacho_aduana','Despacho de aduana'],['cert_fitosanitario','Cert. fitosanitario'],
+  ['despacho_aduana','Despacho de aduana'],['factura_despachante','Factura del despachante'],
+  ['factura_flete','Factura del flete'],['swift','Swift (pago al exterior)'],
+  ['cert_fitosanitario','Cert. fitosanitario'],
   ['cert_origen','Cert. de origen'],['otro','Otro']
 ];
+// Los papeles que FIJAN EL COSTO. Los demás sólo se archivan.
+var SG_DOC_COSTO={ factura_comercial:1, despacho_aduana:1, factura_despachante:1, factura_flete:1, swift:1 };
 function sgEmbDocTipoLbl(t){ var f=SG_DOC_TIPOS.find(function(x){return x[0]===t;}); return f?f[1]:(t||'—'); }
 function sgEmbFmtBytes(n){ n=Number(n)||0; if(n<1024) return n+' B'; if(n<1048576) return Math.round(n/1024)+' KB'; return (n/1048576).toFixed(1)+' MB'; }
 function sgEmbDocsInit(embId){
@@ -24824,8 +24840,26 @@ function sgEmbRenderDocs(docs){
 }
 // La factura comercial pide dos datos más: es el papel que fija el precio de la mercadería.
 function sgDocTipoChange(){
-  var esInv=(eid('sg-doc-tipo').value==='factura_comercial');
-  Array.prototype.forEach.call(document.querySelectorAll('.sg-doc-inv'), function(el){ el.style.display=esInv?'':'none'; });
+  var t=eid('sg-doc-tipo').value;
+  var ver=function(cls,on){ Array.prototype.forEach.call(document.querySelectorAll(cls), function(el){ el.style.display=on?'':'none'; }); };
+  ver('.sg-doc-inv',   t==='factura_comercial');
+  ver('.sg-doc-desp',  t==='despacho_aduana');
+  ver('.sg-doc-ars',   t==='factura_despachante'||t==='factura_flete');
+  ver('.sg-doc-swift', t==='swift');
+  // Qué rubro va a tocar este papel, dicho antes de subirlo. Cargar un despacho cambia el
+  // costo del camión, y eso tiene que estar a la vista y no ser una sorpresa.
+  var av=eid('sg-doc-aviso-costo');
+  if(av){
+    var txt={
+      factura_comercial:'Confirma la <b>mercadería</b> en dólares.',
+      despacho_aduana:'Confirma <b>IVA, Tasa María e IIBB</b>. Lo que el despacho marque con <b>X</b> va en <b>cero</b>: cargá 0, no lo dejes vacío.',
+      factura_despachante:'Confirma el <b>despachante</b>. Va entera al costo, con el IVA adentro.',
+      factura_flete:'Confirma el <b>flete real</b>. Va entera al costo, con el IVA adentro.',
+      swift:'Confirma la <b>mercadería</b> y los <b>gastos bancarios</b> en pesos. Desaparece la estimación de tipo de cambio.'
+    }[t];
+    av.innerHTML = txt ? ('💰 '+txt) : '';
+    av.style.display = txt ? '' : 'none';
+  }
   sgDocLimpiarLectura();   // lo leído era de otro tipo de papel: deja de aplicar
 }
 
@@ -24868,6 +24902,21 @@ function sgDocAplicarLectura(d){
   // crudo — se muestra y el operador convierte. Meterlo tal cual sería cargar un costo falso.
   var montoOk = esInv && d.monto_total!=null && (!d.moneda || d.moneda==='USD');
   if(montoOk){ eid('sg-doc-monto').value=d.monto_total; puestos.push('monto'); }
+  // Los campos propios de cada papel. Un tributo que la IA no pudo leer se deja VACÍO a
+  // propósito: poner 0 sería afirmar que no se paga, y eso lo dice el despacho, no la IA.
+  var poner=function(id,val,lbl){ if(val!=null && eid(id)){ eid(id).value=val; puestos.push(lbl); } };
+  if(d.tipo==='despacho_aduana'){
+    poner('sg-doc-tc-of', d.tc_oficializacion, 'cotización');
+    var t=d.tributos||{};
+    poner('sg-doc-iva-usd',  t.iva_usd,        'IVA');
+    poner('sg-doc-tasa-usd', t.tasa_maria_usd, 'Tasa María');
+    poner('sg-doc-iibb-usd', t.iibb_usd,       'IIBB');
+  }
+  if(d.tipo==='factura_despachante'||d.tipo==='factura_flete') poner('sg-doc-importe-ars', d.monto_total, 'importe');
+  if(d.tipo==='swift'){
+    poner('sg-doc-swift-merc', d.monto_total,     'mercadería');
+    poner('sg-doc-swift-banc', d.gastos_bancarios,'bancarios');
+  }
 
   var fila=function(k,v){ return v==null||v===''?'':'<div><span style="color:var(--mut)">'+k+':</span> <b>'+esc(String(v))+'</b></div>'; };
   var conf=d.confianza||'—';
@@ -24897,9 +24946,22 @@ function sgEmbDocSubir(){
   if(!f){ toast('Elegí un archivo','er'); return; }
   if(f.size>10*1024*1024){ toast('El archivo supera 10MB','er'); return; }
   var tipo=eid('sg-doc-tipo').value, esInv=(tipo==='factura_comercial');
+  var v=function(id){ return eid(id) ? eid(id).value : ''; };
+  var pos=function(id){ return parseFloat(v(id))>0; };
   if(esInv){
     if(!eid('sg-doc-nro-invoice').value.trim()){ toast('Poné el N° de invoice','er'); return; }
     if(!(parseFloat(eid('sg-doc-monto').value)>0)){ toast('Poné el monto total del invoice','er'); return; }
+  }
+  // Sin la cotización de oficialización los tributos del despacho no se pueden pasar a pesos.
+  if(tipo==='despacho_aduana' && !pos('sg-doc-tc-of')){ toast('Poné la cotización del día de oficialización','er'); return; }
+  if((tipo==='factura_despachante'||tipo==='factura_flete') && !pos('sg-doc-importe-ars')){ toast('Poné el importe total de la factura','er'); return; }
+  if(tipo==='swift' && !pos('sg-doc-swift-merc')){ toast('Poné el monto de mercadería que pagó el swift','er'); return; }
+  // Un tributo vacío NO es cero: si el despacho lo liquida y queda sin cargar, el camión sale
+  // más barato de lo que es y nadie se entera. Se pregunta antes de subir.
+  if(tipo==='despacho_aduana'){
+    var vacios=[['sg-doc-iva-usd','IVA'],['sg-doc-tasa-usd','Tasa María'],['sg-doc-iibb-usd','IIBB']]
+      .filter(function(x){ return String(v(x[0])).trim()===''; }).map(function(x){ return x[1]; });
+    if(vacios.length && !confirm('Quedan sin cargar: '+vacios.join(', ')+'. '+'Si el despacho los marca con X poné 0. Si los dejás vacíos se toman como CERO igual, y el costo del camión va a salir más barato de lo que es. ¿Subir así?')) return;
   }
   var fd=new FormData();
   fd.append('archivo', f);
@@ -24909,6 +24971,17 @@ function sgEmbDocSubir(){
   if(esInv){
     fd.append('nro_invoice', eid('sg-doc-nro-invoice').value.trim());
     fd.append('monto_total', eid('sg-doc-monto').value);
+  }
+  if(tipo==='despacho_aduana'){
+    fd.append('tc_oficializacion', v('sg-doc-tc-of'));
+    fd.append('iva_usd', v('sg-doc-iva-usd'));
+    fd.append('tasa_maria_usd', v('sg-doc-tasa-usd'));
+    fd.append('iibb_usd', v('sg-doc-iibb-usd'));
+  }
+  if(tipo==='factura_despachante'||tipo==='factura_flete') fd.append('importe_ars', v('sg-doc-importe-ars'));
+  if(tipo==='swift'){
+    fd.append('mercaderia_ars', v('sg-doc-swift-merc'));
+    fd.append('bancarios_ars', v('sg-doc-swift-banc'));
   }
   fetch('/api/sg/embarques/'+SG._embDocId+'/documentos', { method:'POST', body:fd, credentials:'same-origin' })
     .then(function(r){ return r.json(); })
@@ -24926,8 +24999,17 @@ function sgEmbDocSubir(){
         eid('sg-doc-obs').value='';
         sgDocLimpiarLectura();
         if(esInv){ eid('sg-doc-nro-invoice').value=''; eid('sg-doc-monto').value=''; }
+        ['sg-doc-tc-of','sg-doc-iva-usd','sg-doc-tasa-usd','sg-doc-iibb-usd',
+         'sg-doc-importe-ars','sg-doc-swift-merc','sg-doc-swift-banc'].forEach(function(id){ if(eid(id)) eid(id).value=''; });
+        // Qué rubros quedaron fijados por este papel. Es el efecto que importa del upload.
+        var rs=(r.data&&r.data.reales)||[];
+        if(rs.length){
+          var lbl={mercaderia:'mercadería',iva:'IVA',iibb:'IIBB',tasa_maria:'Tasa María',
+                   despachante:'despachante',flete_real:'flete',bancarios:'bancarios'};
+          toast('Costo real fijado: '+rs.map(function(x){ return (lbl[x.rubro]||x.rubro)+' '+sgMoney(Math.round(x.monto_ars)); }).join(' · '),'ok');
+        }
         sgEmbDocsLoad();
-        if(c) sgImpOpen(SG._embDocId);          // recarga: el estimador ahora usa el monto del papel
+        if(c || (r.data&&r.data.reales&&r.data.reales.length)) sgImpOpen(SG._embDocId);   // el estimador ya usa el papel
         return;
       }
       toast((r&&r.error)||'Error al subir','er');
@@ -25102,14 +25184,28 @@ function sgImpPintarEstimador(d){
   h+='<div style="padding:8px 10px;border-radius:8px;background:var(--bg2,#f5f5f5);margin-bottom:8px">'
     +row('BASE IMPONIBLE','US$ '+nr(d.usd.base)+' · '+sgMoney(Math.round(d.base_ars)),'invoice + flete decl. + seguro',true)
     +'<div style="font-size:10px;color:var(--mut);margin-top:2px">base de cálculo de impuestos — el flete declarado no suma al costo</div></div>';
-  h+=d.lineas.filter(function(l){ return l.ars; }).map(function(l){
+  // Un rubro en CERO se muestra igual si el cero lo puso un papel: es un dato del despacho
+  // ("esto no se paga"), no una línea vacía. Esconderlo sería tapar la mitad de la noticia.
+  h+=d.lineas.filter(function(l){ return l.ars || l.real; }).map(function(l){
       // 📄 = el monto salió de un papel, no de la cotización. Y si difiere de lo cotizado se
       // muestra cuánto: ése es el control de si estamos cotizando bien.
       var sub=l.usd?('US$ '+nr(l.usd)):(l.detalle||'');
-      if(l.confirmado) sub='📄 '+sub;
+      if(l.confirmado||l.real) sub='📄 '+sub;
+      if(l.real && l.real_moneda==='USD' && l.real_tc) sub+=' <span style="color:var(--mut)">('+nr(l.real_monto)+' USD × '+nr(l.real_tc)+')</span>';
       if(l.desvio_usd) sub+=' <span style="color:'+(l.desvio_usd>0?'var(--err,#dc2626)':'var(--ok,#16a34a)')+'">('+(l.desvio_usd>0?'+':'')+nr(l.desvio_usd)+' vs. cotizado)</span>';
-      return row(l.label, sgMoney(Math.round(l.ars)), sub);
+      // El desvío en pesos contra lo que se había estimado: es el número que dice si la
+      // cotización sirvió o no, y sólo se puede saber cuando llegó el papel.
+      if(l.real && l.desvio_ars) sub+=' <span style="color:'+(l.desvio_ars>0?'var(--err,#dc2626)':'var(--ok,#16a34a)')+'">('+(l.desvio_ars>0?'+':'')+sgMoney(Math.round(l.desvio_ars))+' vs. estimado)</span>';
+      var val=sgMoney(Math.round(l.ars||0));
+      if(l.real && !l.ars) val='<span style="color:var(--mut)">'+val+'</span>';
+      return row(l.label, val, sub);
     }).join('');
+  // Cuántos papeles ya fijaron el costo. Sin esto no hay forma de saber, mirando el cuadro,
+  // si el número es definitivo o todavía se va a mover.
+  var nR=(d.reales_cargados||[]).length;
+  h+='<div style="font-size:10.5px;color:var(--mut);margin-top:4px">'
+    +(nR? ('📄 '+nR+' rubro'+(nR===1?'':'s')+' ya salen de un papel; el resto sigue estimado.')
+        : 'Todavía no llegó ningún papel: todo el cuadro es estimación.')+'</div>';
   h+=row('COSTO AL TC DE HOY', sgMoney(Math.round(d.total_contado)), '', true);
   if(d.dif_cambio){
     h+='<div style="margin-top:6px;padding:8px 10px;border-radius:8px;background:rgba(220,38,38,.06)">'

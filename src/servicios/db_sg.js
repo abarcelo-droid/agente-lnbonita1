@@ -1287,6 +1287,65 @@ try {
   if (nuevas.length) console.log(`[DB] SG sg_embarque_costos migrado (+${nuevas.map(x => x[0]).join(', ')})`);
 } catch (e) { console.error('[DB] SG migración sg_embarque_costos (pago):', e.message); }
 
+// ── LO QUE DICE EL PAPEL, RUBRO POR RUBRO ───────────────────────────────────────────
+// El estimador calcula IVA, IIBB, Tasa María y despachante con porcentajes sobre la base
+// imponible. Eso sirve para COTIZAR, cuando todavía no llegó nada. Pero después llegan los
+// papeles y traen el número de verdad, y hasta ahora no había dónde ponerlo: el costo del
+// camión seguía siendo una estimación para siempre.
+//
+// Una fila por (embarque, rubro). Si existe, EL PAPEL LE GANA AL CÁLCULO. Si no existe, se
+// sigue estimando. Esa es toda la regla.
+//
+// Tabla aparte y no columnas nuevas en sg_embarque_costos por dos razones: esa tabla tiene
+// un CHECK sobre 'concepto' que no incluye iva ni tasa_maria (y SQLite no deja ampliar un
+// CHECK sin recrear la tabla), y los rubros de acá son los del ESTIMADOR —los mismos que
+// muestra el cuadro—, que no son uno a uno con los conceptos de aquella.
+//
+// monto_ars se guarda CALCULADO y no se deriva al leer: el TC de un despacho es el del día
+// de oficialización, y ese dato es del papel. Si mañana se corrige la curva de TC, el costo
+// que ya se confirmó no se tiene que mover.
+try {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS sg_embarque_reales (
+      id            INTEGER PRIMARY KEY AUTOINCREMENT,
+      embarque_id   INTEGER NOT NULL REFERENCES sg_embarques(id),
+      rubro         TEXT NOT NULL,      -- mercaderia|iva|iibb|tasa_maria|despachante|flete_real|bancarios
+      monto         REAL NOT NULL,      -- como figura en el papel, en su moneda
+      moneda        TEXT NOT NULL DEFAULT 'ARS',
+      tc            REAL,               -- sólo si moneda='USD' (despacho: el de oficialización)
+      monto_ars     REAL NOT NULL,      -- lo que entra al costo. Congelado a propósito.
+      documento_id  INTEGER,            -- qué papel lo confirmó (sg_embarque_documentos)
+      origen        TEXT,               -- tipo de documento, para poder explicarlo en pantalla
+      observaciones TEXT,
+      usuario_id    INTEGER,
+      creado_en     TEXT DEFAULT (datetime('now','localtime')),
+      activo        INTEGER NOT NULL DEFAULT 1
+    );
+    -- Un solo real vigente por rubro: si vuelve a llegar el papel, se reemplaza.
+    CREATE UNIQUE INDEX IF NOT EXISTS ux_sg_emb_reales
+      ON sg_embarque_reales(embarque_id, rubro) WHERE activo=1;
+  `);
+} catch (e) { console.error('[DB] SG sg_embarque_reales:', e.message); }
+
+// El invoice ya venía confirmando la mercadería en sg_embarque_costos.monto_confirmado.
+// Se copia a la tabla nueva para que el estimador tenga UN SOLO lugar de dónde leer: con
+// dos mecanismos conviviendo, tarde o temprano dicen cosas distintas.
+try {
+  const pend = db.prepare(`SELECT c.embarque_id, c.monto_confirmado, c.confirmado_doc_id
+    FROM sg_embarque_costos c
+    WHERE c.concepto='costo_mercaderia' AND c.activo=1 AND c.monto_confirmado IS NOT NULL
+      AND NOT EXISTS (SELECT 1 FROM sg_embarque_reales r
+                      WHERE r.embarque_id=c.embarque_id AND r.rubro='mercaderia' AND r.activo=1)`).all();
+  const ins = db.prepare(`INSERT INTO sg_embarque_reales
+    (embarque_id, rubro, monto, moneda, tc, monto_ars, documento_id, origen, observaciones)
+    VALUES (?, 'mercaderia', ?, 'USD', NULL, ?, ?, 'factura_comercial', 'migrado del invoice ya cargado')`);
+  // monto_ars queda igual al monto en USD: el TC de la mercadería lo sigue poniendo la curva
+  // por fecha de pago, que es como funcionaba hasta ahora. Se marca con moneda='USD' para
+  // que el estimador sepa que TIENE que convertirlo y no lo tome por pesos.
+  for (const r of pend) ins.run(r.embarque_id, r.monto_confirmado, r.monto_confirmado, r.confirmado_doc_id);
+  if (pend.length) console.log(`[DB] SG sg_embarque_reales: ${pend.length} invoice(s) migrados`);
+} catch (e) { console.error('[DB] SG migración invoice → reales:', e.message); }
+
 // ── MÓDULO IMPORTACIÓN (F3) — cierre del embarque ───────────────────────────────────
 // Al cerrar se congela la foto de lo PROYECTADO (estimados + tc estimado) contra lo REAL
 // (COALESCE(real, estimado) + tc real). Es la única forma de aprender si cotizás bien: sin
