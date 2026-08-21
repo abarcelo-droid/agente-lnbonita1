@@ -3749,8 +3749,10 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
         <span class="liq-cnt" id="sgfm-sc-cnt">·</span>
       </div>
       <div style="font-size:11.5px;color:var(--mut);margin-bottom:8px">
-        El comprobante está cargado pero todavía no entró al libro. Las que
-        tienen el asiento anulado se rehacen desde acá.
+        El comprobante está cargado pero no entró al libro. Hoy una factura
+        nueva ya no puede quedar así —se contabiliza al guardarla—, así que acá
+        sólo caen las de antes y las que quedaron con el asiento anulado. Se
+        rehacen desde acá; si la factura está mal, se anula.
       </div>
       <div class="ab-table-wrap"><table class="pa-tbl">
         <thead><tr><th>Fecha</th><th>Comprobante</th><th>Proveedor</th><th>Partida</th>
@@ -10835,22 +10837,13 @@ function sgFmGuardar(){
     .then(function(r){
       if (!r || !r.ok) { toast((r && r.error) || 'No se pudo guardar', 'er'); return; }
       var av = r.data && r.data.aviso_acordado;
-      // GUARDAR NO ES CONTABILIZAR. Se pregunta aparte porque escribir en la
-      // contabilidad es lo único que después no se deshace: se anula, con clave
-      // de administrador, y queda a la vista.
-      var msg = 'Factura guardada.' + (av ? '\n\n⚠️ ' + av : '')
-        + '\n\n¿Contabilizarla ahora?\n\nEl asiento se graba con fecha ' + (payload.fecha_emision || 'de la factura')
-        + '. Un asiento no se borra: si está mal, se anula con clave de administrador y queda registrado.';
-      if (confirm(msg)) {
-        api('/api/sg/oc/' + SGFMF.ocId + '/contabilizar', 'POST', {}).then(function(r2){
-          if (!r2 || !r2.ok) { toast((r2 && r2.error) || 'No se pudo contabilizar', 'er'); return; }
-          toast('Contabilizada — asiento ' + r2.data.asiento_id + ' del ' + r2.data.fecha, 'ok');
-          closeMB('sgfm-modal');
-          sgFmLoad();
-        });
-        return;
-      }
-      toast('Factura guardada, sin contabilizar', 'ok');
+      // REGLA DE ORO: NO HAY FACTURA SIN SU ASIENTO. Antes esto preguntaba
+      // "¿la contabilizamos ahora?" y se podía decir que no: quedaba una deuda
+      // que existía para el proveedor y no existía para la contabilidad, y no
+      // se descubría sola. Ahora guardar es contabilizar, en la misma
+      // transacción: o entran las dos cosas o no entra ninguna.
+      if (av) alert('⚠️ ' + av);
+      toast('Contabilizada — asiento ' + ((r.data && r.data.asiento_id) || '') , 'ok');
       closeMB('sgfm-modal');
       sgFmLoad();
     })
