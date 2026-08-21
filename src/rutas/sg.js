@@ -9449,24 +9449,202 @@ const DOC_TIPOS = new Set(['factura_comercial','packing_list','bl','poliza_segur
 
 // ── LOS PAPELES QUE FIJAN EL COSTO ──────────────────────────────────────────────────
 // Qué rubro confirma cada documento. Fuera de esta tabla, un documento sólo se archiva.
+//   despacho_aduana      -> IVA, IIBB y Tasa María, en dólares, con la cotización de
+//                           oficialización que trae el propio despacho.
+//   factura_despachante  -> despachante, la factura ENTERA con IVA adentro, en pesos.
+//   factura_flete        -> flete real, la factura entera, en pesos.
+//   swift                -> mercadería y gastos bancarios, en pesos. Acá desaparece la
+//                           estimación de TC: es lo que efectivamente salió.
+//   factura_comercial    -> mercadería en dólares (el TC lo sigue poniendo la curva).
+const DOC_RUBROS = {
+  despacho_aduana:     ['iva', 'iibb', 'tasa_maria'],
+  factura_despachante: ['despachante'],
+  factura_flete:       ['flete_real'],
+  swift:               ['mercaderia', 'bancarios'],
+};
+
+// Escribe (o reemplaza) el real de un rubro. Reemplaza en vez de acumular: si el papel se
+// vuelve a cargar —porque estaba mal leído, o porque llegó una nota de crédito— vale el
+// último. Dos filas activas del mismo rubro se sumarían al costo sin que nadie lo pida.
+function guardarReal(db, { embarqueId, rubro, monto, moneda, tc, docId, origen, obs, userId }) {
+  const m = Number(monto) || 0;
+  const ars = moneda === 'ARS' ? m : (tc != null ? r2(m * Number(tc)) : m);
+  db.prepare('UPDATE sg_embarque_reales SET activo=0 WHERE embarque_id=? AND rubro=? AND activo=1')
+    .run(embarqueId, rubro);
+  db.prepare('INSERT INTO sg_embarque_reales'
+    + ' (embarque_id, rubro, monto, moneda, tc, monto_ars, documento_id, origen, observaciones, usuario_id)'
+    + ' VALUES (?,?,?,?,?,?,?,?,?,?)')
+    .run(embarqueId, rubro, m, moneda, tc != null ? Number(tc) : null, ars, docId || null,
+         origen || null, obs || null, userId || null);
+  return { rubro, monto: m, moneda, tc: tc != null ? Number(tc) : null, monto_ars: ars };
+}
+const DOC_MIMES = new Set(['application/pdf','image/jpeg','image/png']);
+const DOC_MAX_BYTES = 10 * 1024 * 1024;
+const uploadDocMem = multer({ storage: multer.memoryStorage(), limits: { fileSize: DOC_MAX_BYTES } });
+
+// Sanitiza el nombre para usarlo en la storage_key: sin separadores de path ni '..', solo
+// alfanumérico + . _ - (evita path traversal y keys raras). El nombre_original SÍ se guarda tal cual.
+function sanitizarNombreDoc(n) {
+  return String(n || 'documento')
+    .replace(/[\/\\]/g, '_')       // sin separadores de path
+    .replace(/\.{2,}/g, '_')       // sin '..' (traversal)
+    .replace(/[^A-Za-z0-9._-]/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .slice(0, 120) || 'documento';
+}
+
+// Envuelve multer para devolver JSON limpio si el archivo excede el límite (en vez del HTML 500 de express).
+function uploadDoc(req, res, next) {
+  uploadDocMem.single('archivo')(req, res, (err) => {
+    if (err) return res.status(400).json({ ok: false, error: err.code === 'LIMIT_FILE_SIZE' ? 'El archivo supera 10MB' : err.message });
+    next();
+  });
+}
+
+// SUBIR — multer en memoria → R2 → INSERT. requireAdmin.
+router.post('/embarques/:id/documentos', requireAdmin, uploadDoc, async (req, res) => {
+  const db = getDb();
+  try {
+    if (!storageConfigurado()) return res.status(503).json({ ok: false, error: 'Almacenamiento R2 no configurado (faltan credenciales)' });
+    const emb = db.prepare('SELECT id FROM sg_embarques WHERE id=? AND activo=1').get(req.params.id);
+    if (!emb) return res.status(404).json({ ok: false, error: 'Embarque no encontrado' });
+    const f = req.file;
+    if (!f) return res.status(400).json({ ok: false, error: 'Falta el archivo' });
+    const tipo = val(req.body.tipo);
+    if (!DOC_TIPOS.has(tipo)) return res.status(400).json({ ok: false, error: 'Tipo de documento inválido' });
+    if (!DOC_MIMES.has(f.mimetype)) return res.status(400).json({ ok: false, error: 'Formato no permitido (solo PDF, JPG o PNG)' });
+    if (f.size > DOC_MAX_BYTES) return res.status(400).json({ ok: false, error: 'El archivo supera 10MB' });
+
+    // ── La factura comercial confirma la mercadería ──────────────────────────────────
+    // EL PAPEL MANDA. El invoice fija el precio, así que su monto entra como confirmado y el
+    // costeo pasa a usarlo — sin preguntar ni frenar la carga. Lo que NO se hace es pisar el
+    // estimado: se conserva al lado, y la diferencia entre los dos queda a la vista. Eso es
+    // lo que deja ver si se está cotizando bien, que es el punto de todo esto.
+    const esInvoice = tipo === 'factura_comercial';
+    let nroInvoice = null, montoInvoice = null, rubroMerc = null;
+    if (esInvoice) {
+      nroInvoice = val(req.body.nro_invoice);
+      if (!nroInvoice) return res.status(400).json({ ok: false, error: 'Falta el número de invoice' });
+      montoInvoice = (req.body.monto_total != null && req.body.monto_total !== '') ? Number(req.body.monto_total) : null;
+      if (!(montoInvoice > 0)) return res.status(400).json({ ok: false, error: 'Falta el monto total del invoice (en dólares)' });
+
+      // Esto sí corta: el mismo invoice en dos embarques es un error de carga, no un desvío.
+      const dup = db.prepare(`SELECT id, nombre FROM sg_embarques
+        WHERE nro_invoice = ? AND id <> ? AND activo=1 AND eliminado_en IS NULL`).get(nroInvoice, emb.id);
+      if (dup) return res.status(409).json({ ok: false, error: 'El invoice ' + nroInvoice + ' ya está cargado en el embarque "' + dup.nombre + '"' });
+
+      rubroMerc = db.prepare("SELECT * FROM sg_embarque_costos WHERE embarque_id=? AND concepto='costo_mercaderia' AND activo=1").get(emb.id);
+    }
+
+    // ── Los otros papeles que fijan el costo ─────────────────────────────────────────
+    // Se valida ANTES de subir a R2: si falta un dato, que no quede el archivo arriba y la
+    // confirmación a medias. Un documento a medio confirmar es peor que uno que no entró.
+    const numOp = v => (v != null && v !== '') ? Number(v) : null;
+    const pedir = (v, msg) => { if (!(v > 0)) throw Object.assign(new Error(msg), { status: 400 }); return v; };
+    const confirmar = [];
+    if (tipo === 'despacho_aduana') {
+      // El despacho liquida en dólares y trae la cotización del día de oficialización.
+      const tcOf = pedir(numOp(req.body.tc_oficializacion), 'Falta la cotización del día de oficialización del despacho');
+      // CERO EXPLÍCITO para lo que el despacho no liquida (decisión de Andy, 20/8/2026): los
+      // tributos marcados con X, o que no figuran, no se pagan. Se escribe la fila igual —en
+      // cero— para que el cuadro muestre de dónde salió ese cero y no parezca un olvido.
+      for (const [rubro, campo] of [['iva', 'iva_usd'], ['iibb', 'iibb_usd'], ['tasa_maria', 'tasa_maria_usd']]) {
+        confirmar.push({ rubro, monto: numOp(req.body[campo]) || 0, moneda: 'USD', tc: tcOf });
+      }
+    } else if (tipo === 'factura_despachante') {
+      confirmar.push({ rubro: 'despachante', moneda: 'ARS', tc: null,
+        monto: pedir(numOp(req.body.importe_ars), 'Falta el importe de la factura del despachante (en pesos)') });
+    } else if (tipo === 'factura_flete') {
+      confirmar.push({ rubro: 'flete_real', moneda: 'ARS', tc: null,
+        monto: pedir(numOp(req.body.importe_ars), 'Falta el importe de la factura del flete (en pesos)') });
+    } else if (tipo === 'swift') {
+      confirmar.push({ rubro: 'mercaderia', moneda: 'ARS', tc: null,
+        monto: pedir(numOp(req.body.mercaderia_ars), 'Falta el monto de la mercadería que pagó el swift (en pesos)') });
+      // Los bancarios pueden ser cero (una transferencia sin gastos): no se exigen.
+      confirmar.push({ rubro: 'bancarios', moneda: 'ARS', tc: null, monto: numOp(req.body.bancarios_ars) || 0 });
+    }
+
+    const key = `embarques/${emb.id}/${randomUUID()}-${sanitizarNombreDoc(f.originalname)}`;
+    await subirArchivo(f.buffer, key, f.mimetype);
+    const info = db.prepare(`INSERT INTO sg_embarque_documentos
+      (embarque_id, tipo, storage_key, nombre_original, mime, tamano_bytes, fecha_documento, observaciones, creado_por)
+      VALUES (?,?,?,?,?,?,?,?,?)`)
+      .run(emb.id, tipo, key, String(f.originalname || 'documento').slice(0, 255), f.mimetype, f.size, val(req.body.fecha_documento), val(req.body.observaciones), uid(req));
+    const docId = Number(info.lastInsertRowid);
+
+    // Con el invoice arriba, la mercadería deja de ser una estimación: el número del papel
+    // pasa a ser el monto del rubro y queda marcado como confirmado por ese documento.
+    let confirmacion = null;
+    if (esInvoice) {
+      // El estimado NO se toca: el monto del papel va a monto_confirmado, al lado. El costeo
+      // pasa a usar el confirmado, y la diferencia contra el estimado queda visible.
+      const estimado = rubroMerc && rubroMerc.monto_estimado != null ? Number(rubroMerc.monto_estimado) : null;
+      db.transaction(() => {
+        db.prepare("UPDATE sg_embarques SET nro_invoice=?, modificado_en=datetime('now','localtime'), modificado_por=? WHERE id=?")
+          .run(nroInvoice, uid(req), emb.id);
+        if (rubroMerc) {
+          db.prepare(`UPDATE sg_embarque_costos SET monto_confirmado=?,
+              confirmado_en=datetime('now','localtime'), confirmado_por=?, confirmado_doc_id=?,
+              modificado_en=datetime('now','localtime'), modificado_por=? WHERE id=?`)
+            .run(montoInvoice, uid(req), docId, uid(req), rubroMerc.id);
+        } else {
+          // Sin rubro previo no hay nada que comparar: el papel es también el estimado.
+          db.prepare(`INSERT INTO sg_embarque_costos
+              (embarque_id, concepto, es_credito, moneda, monto_estimado, monto_confirmado,
+               confirmado_en, confirmado_por, confirmado_doc_id, creado_por)
+              VALUES (?, 'costo_mercaderia', 0, 'USD', ?, ?, datetime('now','localtime'), ?, ?, ?)`)
+            .run(emb.id, montoInvoice, montoInvoice, uid(req), docId, uid(req));
+        }
+      })();
+      confirmacion = { nro_invoice: nroInvoice, monto: montoInvoice, estimado,
+                       diferencia: estimado != null ? r2(montoInvoice - estimado) : null };
+      // También a la tabla de reales, que es de donde lee el estimador. La mercadería del
+      // invoice queda en DÓLARES y sin TC propio: su cotización la sigue poniendo la curva
+      // según la fecha de pago, hasta que llegue el swift y diga lo que salió de verdad.
+      db.transaction(() => guardarReal(db, { embarqueId: emb.id, rubro: 'mercaderia',
+        monto: montoInvoice, moneda: 'USD', tc: null, docId, origen: 'factura_comercial',
+        userId: uid(req) }))();
+    }
+
+    // Los demás papeles escriben su rubro y listo: el estimador los lee de ahí y deja de
+    // estimarlo. Todo en una transacción para no dejar el despacho con dos tributos de tres.
+    const reales = [];
+    if (confirmar.length) {
+      db.transaction(() => {
+        for (const c of confirmar) {
+          reales.push(guardarReal(db, { embarqueId: emb.id, rubro: c.rubro, monto: c.monto,
+            moneda: c.moneda, tc: c.tc, docId, origen: tipo, userId: uid(req) }));
+        }
+      })();
+    }
+    res.json({ ok: true, data: { id: docId, confirmacion, reales } });
+  } catch (e) { res.status(e.status || 500).json({ ok: false, error: e.message }); }
+});
+
+// ── LEERLE LOS DATOS AL DOCUMENTO (IA) ───────────────────────────────────────────
+// Devuelve una PROPUESTA para llenar el formulario de carga: número, fecha y monto.
+// NO guarda nada y NO sube el archivo. El operador mira lo que se leyó, corrige lo que
+// haga falta y recién ahí toca "Subir documento" — que es el endpoint de arriba, el que
+// confirma el costo. La IA acá adelanta tipeo, no decide.
 //
-//   despacho_aduana      → IVA, IIBB y Tasa María. Vienen en dólares y el despacho trae su
-//                          propia cotización, la del día de oficialización.
-//   factura_despachante  → despachante, la factura ENTERA con IVA adentro, en pesos.
-//   factura_flete        → flete real, la factura entera, en pesos.
-//   swift                → mercadería y gastos bancarios, en pesos. Acá desaparece la
-//                          estimación de TC: es lo que efectivamente salió.
-//   factura_comercial    → mercadería en dólares (el TC lo sigue poniendo la curva).
-const DOC_CONFIRMA = {
+// Molde: /factura-mercaderia/leer (más arriba en este archivo), con dos diferencias: usa el
+// SDK oficial (como servicios/dedup.js) y no manda el header beta de PDF, que ya no hace falta.
+
+// Qué mirar en cada papel. Sin esto la lectura de un BL y la de una póliza salen igual de vagas.
+const DOC_PISTAS = {
+  factura_comercial: 'Es un COMMERCIAL INVOICE de importación. "numero" es el N° de invoice. "monto_total" es el TOTAL del invoice (el importe final a pagar, sea FOB o CIF). "cantidad_bultos" son las cajas (cartons / packages / bultos).',
+  packing_list:      'Es un PACKING LIST. "numero" es su número, que suele coincidir con el del invoice. "cantidad_bultos" son los bultos o cajas. Casi nunca trae importe: si no hay, monto_total va en null.',
+  bl:                'Es un BL / conocimiento de embarque (Bill of Lading marítimo o CRT terrestre). "numero" es el N° de BL o de CRT y "fecha" la de emisión o de embarque. Si figura el buque o la patente del camión, ponelo en observaciones.',
+  poliza_seguro:     'Es una PÓLIZA DE SEGURO. "numero" es el N° de póliza. "monto_total" es la PRIMA, o sea lo que se paga; si solo figura la suma asegurada, poné esa y aclaralo en observaciones.',
   despacho_aduana:
-    'Es un DESPACHO DE ADUANA argentino. "numero" es el N de despacho y "fecha" la de OFICIALIZACION. ' +
-    'De la LIQUIDACION DE TRIBUTOS sacá tres importes, EN DOLARES, y ponelos en "tributos": IVA, ' +
+    'Es un DESPACHO DE ADUANA argentino. "numero" es el N° de despacho y "fecha" la de OFICIALIZACIÓN. ' +
+    'De la LIQUIDACIÓN DE TRIBUTOS sacá tres importes, EN DÓLARES, y ponelos en "tributos": IVA, ' +
     'Tasa de Estadística / Tasa María, e Ingresos Brutos (IIBB). ' +
     'REGLA DE LA FORMA DE PAGO: cada tributo tiene una columna con una letra que dice cómo se paga. ' +
-    'Tomá SOLO los marcados con "P" (se paga). Los marcados con "X" NO se pagan —exento o no ' +
+    'Tomá SÓLO los marcados con "P" (se paga). Los marcados con "X" NO se pagan —exento o no ' +
     'corresponde—: esos van en 0. No los omitas ni los dejes en null: poné 0 y aclaralo en observaciones. ' +
-    'Poné además "tc_oficializacion": la cotización del dólar del día de oficialización que figura en el ' +
-    'despacho. Es la que pasa esos dólares a pesos, así que si no la encontrás dejala en null y avisá.',
+    'Poné además "tc_oficializacion": la cotización del dólar del día de oficialización que figura en ' +
+    'el despacho. Es la que pasa esos dólares a pesos; si no la encontrás dejala en null y avisá.',
   factura_despachante:
     'Es la FACTURA DEL DESPACHANTE de aduana, en pesos. "monto_total" es el TOTAL de la factura, CON ' +
     'IVA incluido: va entera al costo. No descuentes el IVA ni lo separes.',
@@ -9475,7 +9653,7 @@ const DOC_CONFIRMA = {
     'con IVA incluido: va entera al costo.',
   swift:
     'Es un SWIFT o comprobante de transferencia al exterior, en PESOS. Interesan dos importes: ' +
-    '"monto_total" es lo que se pagó por la MERCADERIA en pesos, y "gastos_bancarios" el total de ' +
+    '"monto_total" es lo que se pagó por la MERCADERÍA en pesos, y "gastos_bancarios" el total de ' +
     'gastos, comisiones e intereses bancarios de la operación, también en pesos. Si el comprobante ' +
     'muestra el tipo de cambio aplicado, ponelo en observaciones.',
   cert_fitosanitario:'Es un CERTIFICADO FITOSANITARIO. Interesan solo el número y la fecha; monto_total va en null.',
