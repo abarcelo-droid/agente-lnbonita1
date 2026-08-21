@@ -6524,13 +6524,67 @@ router.post('/control-coop/:id/cooperativa', requireAdmin, (req, res) => {
 // tenía contra qué compararse. Acá se PISA lo que estimó el comprador con lo que
 // dice la factura, y recién ese número es el que va al costo.
 
-// Lo que el comprador dejó anotado en la orden. Sale de las columnas flete_* de
-// sg_oc, que ya existían y no las miraba nadie.
-function fleteEstimadoDeOC(oc) {
-  if (!oc) return 0;
-  if (oc.flete_monto != null && oc.flete_monto > 0) return r2(oc.flete_monto);
-  const cant = Number(oc.flete_cantidad || 0), pu = Number(oc.flete_precio_unit || 0);
-  return (cant > 0 && pu > 0) ? r2(cant * pu) : 0;
+// EL FLETE SE PAGA POR VIAJE, Y LOS BULTOS DEL VIAJE LOS SABE LA RECEPCIÓN.
+//
+// En la orden el comprador pacta el PRECIO POR BULTO; la cantidad que escribía
+// ahí era una estimación —los bultos que pensaba pedir— y con esa estimación se
+// valorizaba el flete. Si bajaron cien bultos de más, al fletero se le paga por
+// cien más y el costo de la partida quedaba con el flete de lo que se suponía.
+// Y como el flete de entrada se reparte por kilo entre los lotes, ese error no
+// se queda quieto: se propaga al margen de todo lo que se venda de esa partida.
+//
+// Ahora la cantidad sale de los bultos REALES de esa recepción.
+//
+// Las otras dos modalidades no tienen un dato real que las reemplace —nadie
+// cuenta pallets al recibir, y un monto total es de la orden entera—, así que se
+// PRORRATEAN por bultos entre los viajes. Con un solo viaje da lo mismo de
+// antes; con dos, cada uno se lleva la parte que trajo.
+function fleteDeViaje(oc, viaje, pesoOrden) {
+  const NADA = { monto: 0, base: '', prorrateado: 0 };
+  if (!oc) return NADA;
+  const bv = Number(viaje.bultos || 0);
+  const pu = Number(oc.flete_precio_unit || 0);
+
+  // Lo que pidió Pablo: por bulto, con los bultos que bajaron de ESTE camión.
+  //
+  // SALVO que esta recepción no tenga los bultos cargados. Eso pasa con las
+  // viejas, de antes de que se pidiera el dato. Ahí no hay con qué hacer la
+  // cuenta, y poner cero —o contar los lotes, que era lo de antes— sería
+  // inventar un número más creíble que un vacío. Se cae a lo pactado en la
+  // orden y la pantalla lo dice.
+  if (oc.flete_modalidad === 'bulto' && pu > 0 && bv > 0) {
+    return { monto: r2(bv * pu), prorrateado: 0,
+      base: 'los bultos de este viaje por el precio pactado en la orden' };
+  }
+  const sinBultos = (oc.flete_modalidad === 'bulto' && pu > 0 && bv === 0);
+  // El reparto entre viajes se hace por bultos; si no hay, por kilos, que
+  // siempre están. Sin eso, dos viajes se llevarían el monto entero cada uno.
+  const parte = (pesoOrden > 0) ? (pesoDeViaje(viaje) / pesoOrden) : 1;
+  const repartido = parte < 1 ? 1 : 0;
+  if (sinBultos) {
+    const cant = Number(oc.flete_cantidad || 0);
+    const monto = (cant > 0) ? cant * pu : Number(oc.flete_monto || 0);
+    if (!(monto > 0)) return NADA;
+    return { monto: r2(monto * parte), prorrateado: repartido,
+      base: 'esta recepción no tiene los bultos cargados: se usa lo estimado en la orden' };
+  }
+  if (oc.flete_monto != null && oc.flete_monto > 0) {
+    return { monto: r2(Number(oc.flete_monto) * parte), prorrateado: repartido,
+      base: repartido ? 'la parte de este viaje del monto pactado en la orden'
+                      : 'el monto pactado en la orden' };
+  }
+  const cant = Number(oc.flete_cantidad || 0);
+  if (cant > 0 && pu > 0) {
+    return { monto: r2(cant * pu * parte), prorrateado: repartido,
+      base: repartido ? 'la parte de este viaje de lo pactado en la orden'
+                      : 'lo pactado en la orden' };
+  }
+  return NADA;
+}
+// Con qué se reparte entre viajes lo que se pactó por la orden entera. Bultos si
+// están; si no, kilos; si no hay ninguno de los dos, cada viaje cuenta uno.
+function pesoDeViaje(v) {
+  return Number(v.bultos || 0) || Number(v.kg || 0) || 1;
 }
 
 router.get('/fletes-entrada', requireAuth, (req, res) => {
@@ -6545,7 +6599,16 @@ router.get('/fletes-entrada', requireAuth, (req, res) => {
              p.razon_social AS proveedor_nombre,
              (SELECT COALESCE(SUM(l.kg_reales),0) FROM sg_lotes l
                WHERE l.recepcion_id = r.id AND l.activo = 1) AS kg,
-             (SELECT COUNT(*) FROM sg_lotes l WHERE l.recepcion_id = r.id AND l.activo = 1) AS bultos,
+             -- BULTOS, NO LOTES. Esto era COUNT(*) y contaba lotes: una recepción
+             -- que entró en 3 lotes de 40 bultos decía 3 donde eran 120. No se
+             -- notaba porque el número era decorativo; ahora valoriza el flete.
+             -- Sólo se suman los que tienen el dato: un lote viejo sin cargar no
+             -- es "un bulto", es que no se sabe. Se cuentan aparte para poder
+             -- decirlo en vez de hacer una cuenta con un número inventado.
+             (SELECT COALESCE(SUM(l.bultos),0) FROM sg_lotes l
+               WHERE l.recepcion_id = r.id AND l.activo = 1) AS bultos,
+             (SELECT COUNT(*) FROM sg_lotes l
+               WHERE l.recepcion_id = r.id AND l.activo = 1 AND l.bultos IS NULL) AS lotes_sin_bultos,
              g.id AS gasto_id, g.estado AS gasto_estado, g.monto AS gasto_monto,
              g.proveedor_servicio_id, g.cuenta_ref, g.fecha_valorizacion,
              pv.razon_social AS fletero_nombre
@@ -6555,7 +6618,10 @@ router.get('/fletes-entrada', requireAuth, (req, res) => {
         LEFT JOIN sg_gastos_directos g ON g.recepcion_id = r.id
              AND g.tipo_gasto = 'flete_entrada' AND g.activo = 1 AND g.estado <> 'anulado'
         LEFT JOIN sg_proveedores pv ON pv.id = g.proveedor_servicio_id
-       WHERE o.activo = 1 AND o.estado <> 'anulada'
+       -- La recepción anulada no se filtraba: seguía en la bandeja pidiendo la
+       -- factura de un viaje que no existe. No molestaba mientras el estimado
+       -- salía de la orden; ahora, además, se llevaría su parte del reparto.
+       WHERE o.activo = 1 AND o.estado <> 'anulada' AND r.activo = 1
        ORDER BY r.fecha_recepcion DESC, r.id DESC`).all();
 
     // EL FLETE DEL VENDEDOR: depende de QUIÉN LO PAGÓ.
@@ -6567,9 +6633,19 @@ router.get('/fletes-entrada', requireAuth, (req, res) => {
     //     Gerónimo —se le descuenta al productor de su liquidación— y por eso
     //     tampoco entra al costo de la partida (ver recalcCostoLote).
     const adelantado = (x) => x.flete_a_cargo === 'vendedor' && x.flete_pagado_por === 'san_geronimo';
+    // Los bultos de TODA la orden, para repartir entre viajes lo que se pactó
+    // por la orden entera. Se cuenta sobre rows, que ya trae todas sus
+    // recepciones: el filtro por estado es de acá para abajo.
+    const pesoPorOC = {};
+    for (const x of rows) pesoPorOC[x.oc_id] = (pesoPorOC[x.oc_id] || 0) + pesoDeViaje(x);
     const data = rows
       .filter((x) => x.flete_a_cargo !== 'vendedor' || adelantado(x))
-      .map((x) => ({ ...x, estimado: fleteEstimadoDeOC(x), a_recuperar: adelantado(x) }))
+      .map((x) => {
+        const f = fleteDeViaje(x, x, pesoPorOC[x.oc_id] || 0);
+        return { ...x, estimado: f.monto, estimado_base: f.base, prorrateado: f.prorrateado,
+          viajes_de_la_orden: rows.filter((y) => y.oc_id === x.oc_id).length,
+          a_recuperar: adelantado(x) };
+      })
       .filter((x) => x.estimado > 0 || x.gasto_id)
       .filter((x) => (estado === 'valorizado')
         ? x.gasto_estado === 'valorizado'
