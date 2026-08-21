@@ -9474,7 +9474,7 @@ function sgOcVer(id){
         });
         // POR QUÉ ENTRÓ DISTINTO. Lo escribió el que recibió; sin esto, el que
         // abre la orden ve la diferencia y no el motivo, y termina llamando.
-        var mot = (d.variacion_motivos || []);
+        var mot = (o.variacion_motivos || []);
         if (mot.length) {
           h += '<div style="margin-top:10px;border-top:1px dashed #e0a72e;padding-top:8px">'
             + mot.map(function(m){
