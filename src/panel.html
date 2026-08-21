@@ -2353,6 +2353,14 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
          pendientes, que es la bandeja de lo que FALTA hacer: lo hecho y lo que
          falta en la misma pantalla es la forma más rápida de no ver ninguno de
          los dos. -->
+  </div>
+
+  <!-- El </div> de arriba cierra Ingresos. Se había perdido al sacar de acá
+       la solapa de Gastos directos: el corte se llevó también el cierre de la
+       sección, y todo lo que seguía quedó ANIDADO adentro de Ingresos, que
+       está oculta salvo cuando se navega ahí. Resultado: Órdenes de Compra,
+       Facturas por mercadería y todas las secciones posteriores abrían en
+       blanco. -->
    <!-- ══ ÓRDENES DE COMPRA (Administración de Compras) ══
         Emitir la orden y mirar las recibidas. Salió de Ingresos, que quedó con las
         dos pantallas del depósito. Acá SI se muestra el importe: es la pantalla del
