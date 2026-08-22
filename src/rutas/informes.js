@@ -14,7 +14,7 @@
 // 'operar' o más. Admin ve todo (nivelEnModulo le devuelve 'anular').
 import express from 'express';
 import db from '../servicios/db.js';
-import { estadoSync } from '../servicios/sheets.js';
+import { estadoSync, diagnostico } from '../servicios/sheets.js';
 import { nivelEnModulo } from '../servicios/permisos.js';
 
 const router = express.Router();
@@ -170,6 +170,20 @@ router.get('/ventas/evolucion', requireAuth, (req, res) => {
     `).all(...params);
     res.json({ ok: true, data: { filas, ve_margen: margen } });
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// GET /api/informes/diagnostico — por qué el informe muestra lo que muestra.
+// Lee los TÍTULOS de la planilla en vivo y los compara contra el mapeo del código, cuenta
+// las filas guardadas y marca los campos que quedaron 100% vacíos. Con eso se ve si el
+// problema es un corrimiento de columnas, un sync que no corrió, o un dato que no se carga.
+//
+// Sólo admin: pega contra Google (gasta cuota) y muestra la estructura de la planilla.
+router.get('/diagnostico', requireAuth, async (req, res) => {
+  if (!req.user || req.user.rol !== 'admin') {
+    return res.status(403).json({ ok: false, error: 'Solo administradores' });
+  }
+  try { res.json({ ok: true, data: await diagnostico() }); }
+  catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
 export default router;

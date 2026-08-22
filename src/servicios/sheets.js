@@ -575,6 +575,115 @@ export function debugCalendario() {
   return { sample, counts };
 }
 
+// ── QUÉ COLUMNA DE LA PLANILLA VA A QUÉ CAMPO ───────────────────────────────────────
+// El sync lee POR POSICIÓN: r[4] es el cliente porque el cliente está en la quinta columna.
+// Eso funciona hasta que alguien inserta, mueve o borra una columna en la planilla — y ahí
+// todo lo que está a la derecha se lee corrido, EN SILENCIO. No falla nada: simplemente el
+// vendedor pasa a guardarse en el campo del cliente y los informes salen mal.
+//
+// Estas dos tablas existen para poder DETECTARLO: el diagnóstico compara este mapeo contra
+// los títulos reales de la planilla y dice exactamente qué columna se corrió.
+// Cada entrada es [índice de columna, campo, cómo se llama (o se llamaba) el título].
+export const MAPA_COMPRAS = [
+  [0, 'partida', 'PARTIDA'], [2, 'fecha', 'FECHA'], [3, 'nro_comprob', 'COMPROB'],
+  [4, 'deposito', 'DEPOSITO'], [5, 'proveedor', 'PROVEEDOR'], [6, 'guia', 'GUIA'],
+  [9, 'articulo', 'ARTICULO'], [10, 'envase', 'ENVASE'], [11, 'ingreso', 'INGRESO'],
+  [12, 'convertidos', 'CONVERTIDOS'], [13, 'mermas', 'MERMAS'], [14, 'vendidos', 'VENDIDOS'],
+  [15, 'promedio', 'PROMEDIO'], [16, 'tot_ventas', 'TOT VENTAS'],
+];
+export const MAPA_VENTAS = [
+  [0, 'id_venta', 'ID'], [1, 'fecha', 'FECHA'], [2, 'nro_comprob', 'COMPROB'],
+  [3, 'cod_cli', 'COD CLI'], [4, 'cliente', 'CLIENTE'], [5, 'alias', 'ALIAS'],
+  [6, 'cod_vend', 'COD VEND'], [7, 'vendedor', 'VENDEDOR'], [8, 'cod_art', 'COD ART'],
+  [9, 'articulo', 'ARTICULO'], [10, 'cantidad', 'CANTIDAD'], [11, 'precio', 'PRECIO'],
+  [12, 'total', 'TOTAL'], [13, 'partida', 'PARTIDA'], [14, 'partida_ok', 'PARTIDA OK'],
+  [15, 'sem', 'SEM'], [16, 'mes', 'MES'], [17, 'anio', 'AÑO'], [18, 'cod_fecha', 'COD FECHA'],
+  [19, 'precio_ok', 'PRECIO OK'], [20, 'total_ok', 'TOTAL OK'], [21, 'dol_dia', 'DOL DIA'],
+  [22, 'prec_dol', 'PREC DOL'], [23, 'tot_dol', 'TOT DOL'], [24, 'periodo', 'PERIODO'],
+  [25, 'producto', 'PRODUCTO'], [26, 'kilaje', 'KILAJE'], [27, 'kilos_tot', 'KILOS TOT'],
+  [28, 'categoria', 'CATEGORIA'], [29, 'costeo', 'COSTEO'], [30, 'cate_clie', 'CATE CLIE'],
+  [31, 'subcategoria', 'SUBCATEGORIA'], [32, 'boni', 'BONI'], [33, 'proveedor', 'PROVEEDOR'],
+  [34, 'rent', 'RENT'], [35, 'rent_dol', 'RENT DOL'], [36, 'mes_ok', 'MES OK'],
+  [37, 'des', 'DES'], [38, 'flete_largo', 'FLETE LARGO'], [39, 'descargas', 'DESCARGAS'],
+  [40, 'ifco', 'IFCO'], [41, 'flete_super', 'FLETE SUPER'], [42, 'pct', 'PCT'],
+  [43, 'cat_pro', 'CAT PRO'],
+];
+
+// Letra de columna de Excel a partir del índice: 0→A, 25→Z, 26→AA. Sirve para poder decir
+// "mirá la columna AC de la planilla" en vez de "el índice 28", que no le sirve a nadie.
+function letraCol(i) {
+  let s = '', n = i;
+  do { s = String.fromCharCode(65 + (n % 26)) + s; n = Math.floor(n / 26) - 1; } while (n >= 0);
+  return s;
+}
+
+// ── DIAGNÓSTICO ────────────────────────────────────────────────────────────────────
+// Contesta "por qué el informe muestra cualquier cosa" con datos y no con hipótesis:
+//   1. los TÍTULOS REALES de la planilla, leídos en vivo, contra lo que el código espera
+//   2. cuántas filas hay y de cuándo
+//   3. qué porcentaje de cada campo quedó VACÍO — una columna 100% vacía que en la planilla
+//      tiene datos es la firma de un corrimiento
+//   4. una fila de ejemplo: lo crudo al lado de lo guardado
+export async function diagnostico() {
+  const out = { sheet_id_configurado: !!SHEET_ID, hojas: {}, tablas: {}, avisos: [] };
+  if (!SHEET_ID) { out.avisos.push('No hay GOOGLE_SHEET_ID configurado: el sync nunca corre.'); return out; }
+
+  // 1 y 4 — los títulos y una fila real, en vivo desde Google.
+  let token = null;
+  try { token = await getGoogleToken(); }
+  catch (e) { out.avisos.push('No se pudo autenticar contra Google: ' + e.message); }
+
+  const hojas = [['compras', 'B COMPRAS', 'Q', MAPA_COMPRAS], ['ventas', 'B VENTAS', 'AR', MAPA_VENTAS]];
+  for (const [key, hoja, ultima, mapa] of hojas) {
+    const info = { hoja, columnas: [], error: null };
+    if (token) {
+      try {
+        const filas = await leerRango(token, `${hoja}!A1:${ultima}2`);
+        const titulos = filas[0] || [];
+        const ejemplo = filas[1] || [];
+        info.columnas = mapa.map(([i, campo, esperado]) => {
+          const real = (titulos[i] || '').trim();
+          const norm = s => String(s || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+          return { col: letraCol(i), indice: i, campo,
+                   titulo_esperado: esperado, titulo_real: real || '(vacío)',
+                   coincide: norm(real) === norm(esperado),
+                   ejemplo: ejemplo[i] != null ? String(ejemplo[i]).slice(0, 40) : '' };
+        });
+        const corridas = info.columnas.filter(c => !c.coincide);
+        if (corridas.length) {
+          out.avisos.push(`${hoja}: ${corridas.length} columna(s) no coinciden con lo que espera el código. `
+            + 'Si se movió una columna en la planilla, todo lo que está a su derecha se está guardando en el campo equivocado. '
+            + 'Primera: ' + corridas[0].col + ' dice "' + corridas[0].titulo_real + '" y el código la lee como ' + corridas[0].campo + '.');
+        }
+      } catch (e) { info.error = e.message; out.avisos.push(`${hoja}: ${e.message}`); }
+    }
+    out.hojas[key] = info;
+  }
+
+  // 2 y 3 — qué quedó guardado, y qué tan vacío.
+  for (const [key, tabla, mapa] of [['compras', 'sheet_compras', MAPA_COMPRAS], ['ventas', 'sheet_ventas', MAPA_VENTAS]]) {
+    try {
+      const n = db.prepare(`SELECT COUNT(*) c FROM ${tabla}`).get().c;
+      const campos = mapa.map(m => m[1]);
+      // Porcentaje de filas con el campo vacío. Un 100% acá, con la planilla llena, es
+      // corrimiento de columnas; un 100% con la planilla vacía es que ese dato no se carga.
+      const sel = campos.map(c => `ROUND(SUM(CASE WHEN ${c} IS NULL OR ${c}='' OR ${c}=0 THEN 1 ELSE 0 END)*100.0/NULLIF(COUNT(*),0),1) AS ${c}`).join(', ');
+      const vacios = n ? db.prepare(`SELECT ${sel} FROM ${tabla}`).get() : {};
+      const muestra = n ? db.prepare(`SELECT * FROM ${tabla} LIMIT 1`).get() : null;
+      out.tablas[key] = { filas: n, vacios,
+        sospechosos: Object.entries(vacios).filter(([, v]) => v === 100).map(([k]) => k),
+        muestra };
+      if (n === 0) out.avisos.push(`${tabla} está VACÍA: o nunca corrió el sync, o el último falló.`);
+      const sosp = out.tablas[key].sospechosos || [];
+      if (sosp.length) out.avisos.push(`${tabla}: campos 100% vacíos → ${sosp.join(', ')}. `
+        + 'Si en la planilla esas columnas tienen datos, el mapeo está corrido.');
+    } catch (e) { out.tablas[key] = { error: e.message }; }
+  }
+
+  out.sync = estadoSync();
+  return out;
+}
+
 export function estadoSync() {
   const compras = db.prepare("SELECT COUNT(*) as n, MAX(sync_fecha) as ultimo FROM sheet_compras").get();
   const ventas  = db.prepare("SELECT COUNT(*) as n, MAX(sync_fecha) as ultimo FROM sheet_ventas").get();
