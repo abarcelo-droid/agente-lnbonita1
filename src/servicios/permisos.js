@@ -279,6 +279,12 @@ const LECTURA_CONTROLADA = new Set([
   '/api/pli',           // planificación de insumos
   '/api/ven',           // ventas de Puente Cordón
   '/api/pa/personal',   // el padrón, las tarifas, las liquidaciones: los SUELDOS
+  // Informes comerciales: qué le vendimos a cada cliente, a cuánto y cuánto dejó.
+  // Entra en la lista por la misma razón que las de arriba — es plata — y porque
+  // esta pantalla la abren los comerciales: sin declararlo, el que no tiene el
+  // módulo igual llega escribiendo la dirección, que es el agujero que la lista existe
+  // para tapar. El margen tiene ADEMÁS su propio corte por nivel adentro del router.
+  '/api/informes',
 ]);
 
 // Cuando una pantalla necesita LEER algo de otro módulo. Va aparte de

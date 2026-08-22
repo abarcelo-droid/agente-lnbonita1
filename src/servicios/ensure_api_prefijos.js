@@ -49,6 +49,10 @@ import "./db_permisos.js";
 // si tiene un :id antes del último tramo, declaralo hasta el tramo anterior y
 // asumí que se comparte. Es lo que se hizo con 'abasto/partidas'.
 const PREFIJOS = [
+  // ── Informes comerciales (sobre BASE VENTA) ────────────────────────────
+  // Prefijo propio: el router sirve un solo módulo, así que se puede declarar
+  // pelado sin llevarse pantallas de otros.
+  ['informes-comercial', 'informes'],
   // ── Contabilidad de Puente Cordón ──────────────────────────────────────
   ['adm-asientos',       'pa/cuentas/asientos'],
   ['adm-plan-cuentas',   'pa/cuentas,pa/cuentas/secciones,pa/cuentas/titulos,pa/cuentas/config-impositiva'],

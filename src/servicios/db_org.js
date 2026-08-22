@@ -385,6 +385,7 @@ import "./ensure_modulo_personal.js";
 import "./ensure_modulo_actividad.js";
 import "./ensure_modulo_pli.js";
 import "./ensure_modulo_sp.js";
+import "./ensure_modulo_informes.js";
 import "./ensure_modulo_transporte.js";
 import "./ensure_modulo_fp.js";
 import "./ensure_modulo_bt.js";

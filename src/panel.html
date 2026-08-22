@@ -264,6 +264,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
   <div class="ni-grp" data-grp="pa-comerc">Comercialización<span class="ni-caret">▾</span></div>
   <div class="ni-grp-items">
     <div class="ni" data-sec="pa-despachos"><span class="dot dc"></span>🚚 Despachos</div>
+    <div class="ni" data-sec="informes-comercial"><span class="dot da"></span>📊 Informes comerciales</div>
   </div>
 
   <div class="ni-grp" data-grp="ven-ventas">Administración de Ventas<span class="ni-caret">▾</span></div>
@@ -3927,6 +3928,57 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
   </div>
 
 
+
+<!-- ══ INFORMES COMERCIALES ══════════════════════════════════════════════════
+     Un explorador sobre BASE VENTA: se elige por qué agrupar y por qué filtrar, y
+     la misma pantalla contesta "quién compra", "qué producto rinde" y "cómo va cada
+     vendedor". Un informe fijo por pregunta obliga a desarrollar cada pregunta nueva.
+     La rentabilidad sólo aparece si el nivel del módulo alcanza: esta pantalla la
+     abren los comerciales. -->
+<div class="sec sg-mod" id="sec-informes-comercial">
+  <style>
+    #sec-informes-comercial .inf-f{display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;margin-bottom:12px}
+    #sec-informes-comercial .inf-f label{font-size:11px;color:var(--mut);display:block;margin-bottom:3px}
+    #sec-informes-comercial .inf-f select,#sec-informes-comercial .inf-f input{
+      padding:5px 8px;border:1px solid var(--bor);border-radius:6px;background:var(--bg);font-size:12.5px}
+    #sec-informes-comercial .inf-kpi{flex:1;min-width:150px;padding:11px 14px;border-radius:10px;background:var(--bg2,#f5f5f5)}
+    #sec-informes-comercial .inf-kpi b{display:block;font-size:21px;font-weight:700;font-variant-numeric:tabular-nums;margin-top:2px}
+    /* Sin barra lateral: anchos fijos y se parte sólo el nombre, que es lo de largo variable. */
+    #sec-informes-comercial .pa-tbl{table-layout:fixed;width:100%}
+    #sec-informes-comercial .pa-tbl th,#sec-informes-comercial .pa-tbl td{
+      white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding:6px 9px;font-size:12.5px}
+    #sec-informes-comercial .pa-tbl td.inf-nom{white-space:normal;word-break:break-word}
+    #sec-informes-comercial .ab-table-wrap{overflow-x:hidden !important}
+    @media(max-width:900px){ #sec-informes-comercial .ab-table-wrap{overflow-x:auto !important}
+                             #sec-informes-comercial .pa-tbl{table-layout:auto} }
+  </style>
+  <div class="ph"><div><div class="ph-t">📊 Informes comerciales</div>
+    <div class="ph-s">Ventas por cliente, producto o vendedor — sobre la base que se sincroniza todos los días</div></div>
+    <div style="display:flex;gap:8px"><button class="btn bo" onclick="infExportar()">⬇️ Excel</button></div></div>
+
+  <!-- De cuándo es el dato. El sync corre una vez por día: sin esto, un total de
+       anteayer se lee igual que uno de recién. -->
+  <div id="inf-sync" style="font-size:11.5px;margin-bottom:10px"></div>
+
+  <div class="inf-f">
+    <div><label>Agrupar por</label><select id="inf-agrupar" onchange="infCargar()"></select></div>
+    <div><label>Desde</label><input type="month" id="inf-desde" onchange="infCargar()"></div>
+    <div><label>Hasta</label><input type="month" id="inf-hasta" onchange="infCargar()"></div>
+    <div><label>Cliente</label><select id="inf-filtro-cliente" onchange="infCargar()"></select></div>
+    <div><label>Vendedor</label><select id="inf-filtro-vendedor" onchange="infCargar()"></select></div>
+    <div><label>Producto</label><select id="inf-filtro-producto" onchange="infCargar()"></select></div>
+    <div><label>Categoría</label><select id="inf-filtro-categoria" onchange="infCargar()"></select></div>
+    <div><label>Buscar</label><input type="text" id="inf-q" placeholder="cliente o producto" oninput="infDebounce()"></div>
+    <div><button class="btn bo bs" onclick="infLimpiar()">Limpiar</button></div>
+  </div>
+
+  <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px" id="inf-kpis"></div>
+  <div id="inf-grafico" style="margin-bottom:12px"></div>
+  <div class="ab-table-wrap"><table class="pa-tbl">
+    <thead id="inf-thead"></thead><tbody id="inf-tbody"><tr><td class="emp">Elegí un período.</td></tr></tbody>
+  </table></div>
+  <div id="inf-nota" style="font-size:11px;color:var(--mut);margin-top:6px"></div>
+</div>
 
   <div class="sec sg-mod" id="sec-sg-importacion">
     <style>
@@ -21936,6 +21988,7 @@ function loadSec(s) {
     },
     'sg-caja-bancos': function(){ sgCbInit(); },
     'sg-importacion': function(){ sgImpInit(); },
+    'informes-comercial': function(){ infInit(); },
     'sg-catalogo':   function(){ sgLoadCaches(function(){ sgCatSub('productos'); }); },
     'sg-reportes':   function(){ sgRepInit(); },
     'personal-padron':     function(){ ppOpenModulo('padron'); },
@@ -26038,6 +26091,189 @@ function sgAvisoCopiar(){
       toast('Imagen copiada — pegala en WhatsApp','ok');
     }).catch(function(){ toast('No se pudo copiar: usá Descargar','er'); });
   });
+}
+
+// ── INFORMES COMERCIALES ──────────────────────────────────────────────────────────────
+// Un explorador sobre BASE VENTA. Los filtros y la agrupación viajan al servidor: agrupar
+// en el navegador obligaría a bajar la tabla entera, que son cientos de miles de filas.
+var INF = { opts:null, orden:'facturacion_usd', desc:true, filas:[], veMargen:false, t:null };
+
+function infInit(){
+  if(INF.opts){ infCargar(); return; }
+  api('/api/informes/ventas/opciones').then(function(r){
+    if(!r||!r.ok){ eid('inf-tbody').innerHTML='<tr><td class="emp">'+esc((r&&r.error)||'Sin acceso')+'</td></tr>'; return; }
+    INF.opts=r.data; INF.veMargen=!!r.data.ve_margen;
+    eid('inf-agrupar').innerHTML=(r.data.dimensiones||[]).map(function(d){
+      return '<option value="'+esc(d.k)+'"'+(d.k==='cliente'?' selected':'')+'>'+esc(d.label)+'</option>'; }).join('');
+    ['cliente','vendedor','producto','categoria'].forEach(function(k){
+      var el=eid('inf-filtro-'+k); if(!el) return;
+      el.innerHTML='<option value="">— todos —</option>'+(r.data[k]||[]).map(function(v){
+        return '<option value="'+esc(v)+'">'+esc(v)+'</option>'; }).join('');
+    });
+    // Arranca en los últimos 12 meses de datos que HAY, no en los últimos 12 del calendario:
+    // si la planilla va atrasada, un rango por fecha de hoy abriría la pantalla vacía.
+    var p=r.data.periodo||{};
+    if(p.max){
+      eid('inf-hasta').value=infPerAInput(p.max);
+      // p.max-100 sobre un AAAAMM retrocede un año exacto (202608 → 202508). Se topea con
+      // el mínimo que hay cargado para no pedir un período anterior a la base.
+      eid('inf-desde').value=infPerAInput(Math.max(p.min||p.max, p.max-100));
+    }
+    infCargar();
+  });
+}
+// 202608 ↔ '2026-08'
+function infPerAInput(p){ p=String(p); return p.slice(0,4)+'-'+p.slice(4,6); }
+function infInputAPer(v){ return v ? Number(String(v).replace('-','')) : ''; }
+function infDebounce(){ clearTimeout(INF.t); INF.t=setTimeout(infCargar, 400); }
+function infLimpiar(){
+  ['cliente','vendedor','producto','categoria'].forEach(function(k){ var e=eid('inf-filtro-'+k); if(e) e.value=''; });
+  eid('inf-q').value=''; infCargar();
+}
+function infParams(){
+  var p=['agrupar='+encodeURIComponent(eid('inf-agrupar').value||'cliente'),
+         'desde='+infInputAPer(eid('inf-desde').value),
+         'hasta='+infInputAPer(eid('inf-hasta').value)];
+  ['cliente','vendedor','producto','categoria'].forEach(function(k){
+    var v=(eid('inf-filtro-'+k)||{}).value; if(v) p.push('filtro_'+k+'='+encodeURIComponent(v));
+  });
+  var q=(eid('inf-q')||{}).value; if(q) p.push('q='+encodeURIComponent(q));
+  return p.join('&');
+}
+function infCargar(){
+  eid('inf-tbody').innerHTML='<tr><td class="emp">Calculando…</td></tr>';
+  var qs=infParams();
+  api('/api/informes/ventas?'+qs).then(function(r){
+    if(!r||!r.ok){ eid('inf-tbody').innerHTML='<tr><td class="emp">'+esc((r&&r.error)||'Error')+'</td></tr>'; return; }
+    INF.filas=r.data.filas||[]; INF.veMargen=!!r.data.ve_margen;
+    infPintarSync(r.data.sync);
+    infPintarKpis(r.data.total);
+    infPintarTabla(r.data);
+  });
+  api('/api/informes/ventas/evolucion?'+qs).then(function(r){
+    if(r&&r.ok) infPintarGrafico(r.data.filas||[]);
+  });
+}
+function infPintarSync(s){
+  var box=eid('inf-sync'); if(!box||!s) return;
+  // Si el último sync falló, lo que se está mirando es de antes. Decirlo importa más que
+  // el número: un total viejo se lee igual que uno fresco.
+  box.innerHTML = s.desactualizado
+    ? '<span style="color:var(--err,#dc2626)">⚠ El último sync con la planilla falló. Estos datos son del '+esc(s.ultimo_ok||'?')+'.</span>'
+    : '<span style="color:var(--mut)">Datos al '+esc(s.ultimo_ok||'—')+' · '+nr(s.filas_ventas||0)+' operaciones en la base. Se sincroniza todas las noches.</span>';
+}
+function infPintarKpis(t){
+  if(!t){ eid('inf-kpis').innerHTML=''; return; }
+  var k=function(l,v,sub){ return '<div class="inf-kpi"><div style="font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:var(--mut)">'+l+'</div>'
+    +'<b>'+v+'</b><div style="font-size:11px;color:var(--mut)">'+(sub||'')+'</div></div>'; };
+  var h=k('Facturación','US$ '+nr(t.facturacion_usd||0), sgMoney(Math.round(t.facturacion_ars||0)))
+    + k('Kilos', nr(t.kilos||0), (t.usd_por_kg!=null?('US$ '+nr(t.usd_por_kg)+'/kg'):''))
+    + k('Operaciones', nr(t.operaciones||0), nr(t.clientes||0)+' cliente(s)');
+  // El margen sólo si el nivel alcanza. El backend directamente no lo manda si no.
+  if(INF.veMargen && t.rent_pct!=null){
+    var col=t.rent_pct>=0?'#16a34a':'var(--err,#dc2626)';
+    h+='<div class="inf-kpi" style="background:rgba(16,163,74,.10)"><div style="font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:var(--mut)">Rentabilidad</div>'
+      +'<b style="color:'+col+'">'+nr(t.rent_pct)+'%</b><div style="font-size:11px;color:var(--mut)">US$ '+nr(t.rent_dol||0)+'</div></div>';
+  }
+  eid('inf-kpis').innerHTML=h;
+}
+function infCols(){
+  var c=[['clave','',  'left'], ['kilos','Kilos','right'], ['facturacion_usd','US$','right'],
+         ['facturacion_ars','$','right'], ['usd_por_kg','US$/kg','right'], ['operaciones','Oper.','right']];
+  if(INF.veMargen) c.push(['rent_dol','Rent. US$','right'], ['rent_pct','Rent. %','right']);
+  return c;
+}
+function infOrdenar(col){
+  if(INF.orden===col) INF.desc=!INF.desc; else { INF.orden=col; INF.desc=true; }
+  infPintarTabla({ label:eid('inf-agrupar').selectedOptions[0].textContent, filas:INF.filas });
+}
+function infPintarTabla(d){
+  var cols=infCols();
+  var filas=(d.filas||INF.filas).slice().sort(function(a,b){
+    var x=a[INF.orden], y=b[INF.orden];
+    if(typeof x==='string'||typeof y==='string') return (INF.desc?-1:1)*String(y||'').localeCompare(String(x||''));
+    return (INF.desc?-1:1)*((Number(x)||0)-(Number(y)||0));
+  });
+  eid('inf-thead').innerHTML='<tr>'+cols.map(function(c){
+    var lbl=c[0]==='clave'?(d.label||'Clave'):c[1];
+    var flecha=INF.orden===c[0]?(INF.desc?' ▼':' ▲'):'';
+    return '<th style="text-align:'+c[2]+';cursor:pointer" onclick="infOrdenar(\''+c[0]+'\')">'+esc(lbl)+flecha+'</th>';
+  }).join('')+'</tr>';
+  eid('inf-tbody').innerHTML = filas.length ? filas.map(function(f){
+    return '<tr>'+cols.map(function(c){
+      var v=f[c[0]];
+      if(c[0]==='clave') return '<td class="inf-nom">'+esc(v||'')+'</td>';
+      if(c[0]==='facturacion_ars') return '<td style="text-align:right">'+sgMoney(Math.round(v||0))+'</td>';
+      if(c[0]==='rent_pct'){
+        var col=(v||0)>=0?'#16a34a':'var(--err,#dc2626)';
+        return '<td style="text-align:right;color:'+col+';font-weight:600">'+(v!=null?nr(v)+'%':'—')+'</td>';
+      }
+      return '<td style="text-align:right">'+(v!=null?nr(v):'—')+'</td>';
+    }).join('')+'</tr>';
+  }).join('') : '<tr><td colspan="'+cols.length+'" class="emp">No hay ventas con esos filtros.</td></tr>';
+  eid('inf-nota').innerHTML = d.truncado
+    ? '⚠ Se muestran las 500 primeras. Los totales de arriba SÍ incluyen todo — se calculan en el servidor, no sumando la tabla.'
+    : '';
+}
+// Evolución mes a mes, en canvas y sin librerías. Barras de facturación y, si el nivel
+// alcanza, la línea de rentabilidad encima: es la comparación que se quiere hacer.
+function infPintarGrafico(filas){
+  var box=eid('inf-grafico'); if(!box) return;
+  if(!filas.length){ box.innerHTML=''; return; }
+  var W=Math.max(box.clientWidth||900, 600), H=190, PAD=34, R=2;
+  var cv=document.createElement('canvas'); cv.width=W*R; cv.height=H*R;
+  cv.style.width='100%'; cv.style.height=H+'px';
+  var x=cv.getContext('2d'); x.scale(R,R);
+  x.clearRect(0,0,W,H);
+  var max=Math.max.apply(null, filas.map(function(f){ return f.facturacion_usd||0; }))||1;
+  var bw=Math.max(4, Math.min(46, (W-PAD*2)/filas.length-6));
+  filas.forEach(function(f,i){
+    var px=PAD+i*((W-PAD*2)/filas.length)+3;
+    var h=Math.max(1,((f.facturacion_usd||0)/max)*(H-58));
+    x.fillStyle='#7c1d3f'; x.fillRect(px, H-28-h, bw, h);
+    if(filas.length<=18){
+      x.fillStyle='var(--mut)'; x.fillStyle='#6b7280';
+      x.font='10px system-ui,sans-serif'; x.textAlign='center';
+      x.fillText(String(f.mes)+'/'+String(f.anio).slice(2), px+bw/2, H-14);
+    }
+  });
+  // La línea de rentabilidad va sobre su propia escala 0–100%: mezclarla con la de dólares
+  // haría que una de las dos quedara pegada al piso y no se pudiera leer.
+  if(INF.veMargen && filas.some(function(f){ return f.rent_pct!=null; })){
+    x.strokeStyle='#16a34a'; x.lineWidth=2; x.beginPath();
+    filas.forEach(function(f,i){
+      var px=PAD+i*((W-PAD*2)/filas.length)+3+bw/2;
+      var py=H-28-((Math.max(0,Math.min(100,f.rent_pct||0))/100)*(H-58));
+      i?x.lineTo(px,py):x.moveTo(px,py);
+    });
+    x.stroke();
+  }
+  box.innerHTML='';
+  box.appendChild(cv);
+  var leyenda=document.createElement('div');
+  leyenda.style.cssText='font-size:11px;color:var(--mut);margin-top:2px';
+  leyenda.innerHTML='<span style="color:#7c1d3f">▇</span> facturación US$ por mes'
+    + (INF.veMargen?' · <span style="color:#16a34a">━</span> rentabilidad % (escala 0–100)':'');
+  box.appendChild(leyenda);
+}
+// El Excel se arma con lo que se está viendo: mismos filtros, misma agrupación.
+function infExportar(){
+  var cols=infCols();
+  var filas=INF.filas||[];
+  if(!filas.length){ toast('No hay nada para exportar','er'); return; }
+  var lbl=eid('inf-agrupar').selectedOptions[0].textContent;
+  var head=cols.map(function(c){ return c[0]==='clave'?lbl:(c[1]||c[0]); });
+  // CSV con BOM y punto y coma: es lo que Excel en español abre sin pedir nada.
+  var esc2=function(v){ return '"'+String(v==null?'':v).replace(/"/g,'""')+'"'; };
+  var csv=[head.map(esc2).join(';')].concat(filas.map(function(f){
+    return cols.map(function(c){ return esc2(f[c[0]]); }).join(';');
+  })).join('\r\n');
+  var blob=new Blob(['﻿'+csv], {type:'text/csv;charset=utf-8'});
+  var a=document.createElement('a');
+  a.href=URL.createObjectURL(blob);
+  a.download='informe-'+(eid('inf-agrupar').value||'ventas')+'.csv';
+  a.click();
+  setTimeout(function(){ URL.revokeObjectURL(a.href); }, 2000);
 }
 
 // ── VISOR DEL CAMIÓN ──────────────────────────────────────────────────────────

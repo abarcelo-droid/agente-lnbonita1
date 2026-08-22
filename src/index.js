@@ -42,6 +42,7 @@ import btRouter            from "./rutas/bt.js";
 import { programarProcesoCola as spProgramarCola } from "./servicios/sp_outbox.js";
 import { guardarSnapshotCRM } from "./servicios/db.js";
 import { syncSheets } from "./servicios/sheets.js";
+import informesRouter      from "./rutas/informes.js";
 
 // Scheduler: snapshot CRM + sync sheets a medianoche
 function programarSnapshotCRM() {
@@ -224,6 +225,7 @@ app.post("/webhook", async (req, res) => {
 });
 
 // APIs
+app.use("/api/informes", informesRouter);
 app.use("/api", panelRouter);
 app.use("/api", nuevosRouter);
 app.use("/api", cobranzaRouter);
