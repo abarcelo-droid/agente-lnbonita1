@@ -209,13 +209,18 @@ async function syncCompras(token) {
   let fila = 2; // empieza en 2 (sin header)
   let total = 0;
   const stmt = db.prepare(`
-    INSERT OR IGNORE INTO sheet_compras
+    INSERT OR IGNORE INTO sheet_compras_tmp
     (partida,fecha,nro_comprob,deposito,proveedor,guia,articulo,envase,ingreso,convertidos,mermas,vendidos,promedio,tot_ventas,raw)
     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
   `);
 
-  // Limpiar tabla antes de sync completo
-  db.exec("DELETE FROM sheet_compras");
+  // PRIMERO SE TRAE, DESPUÉS SE REEMPLAZA. Antes esto era un DELETE seguido de la carga:
+  // si Google se cortaba en el medio —y se corta— la tabla quedaba a la mitad, o vacía si el
+  // corte era justo después del DELETE. Nada se rompía a la vista: los informes mostraban
+  // menos ventas y parecían buenos. Ahora se carga a una tabla aparte y el reemplazo pasa
+  // recién cuando bajó todo; si falla, quedan los datos de ayer.
+  db.exec("DROP TABLE IF EXISTS sheet_compras_tmp");
+  db.exec("CREATE TABLE sheet_compras_tmp AS SELECT * FROM sheet_compras WHERE 0");
 
   while (true) {
     const rango = `B COMPRAS!A${fila}:Q${fila + BLOQUE - 1}`;
@@ -250,6 +255,14 @@ async function syncCompras(token) {
     if (rows.length < BLOQUE) break;
   }
 
+  // El swap, en UNA transacción: o queda todo lo nuevo o queda todo lo viejo, nunca la mezcla.
+  // Si la descarga falló antes de llegar acá, la excepción sube y la tabla buena ni se tocó.
+  db.transaction(() => {
+    db.exec("DELETE FROM sheet_compras");
+    db.exec("INSERT INTO sheet_compras (partida,fecha,nro_comprob,deposito,proveedor,guia,articulo,envase,ingreso,convertidos,mermas,vendidos,promedio,tot_ventas,raw) SELECT partida,fecha,nro_comprob,deposito,proveedor,guia,articulo,envase,ingreso,convertidos,mermas,vendidos,promedio,tot_ventas,raw FROM sheet_compras_tmp");
+    db.exec("DROP TABLE sheet_compras_tmp");
+  })();
+
   const dur = Date.now() - t0;
   db.prepare("INSERT INTO sheet_sync_log (tipo,filas,duracion_ms) VALUES (?,?,?)").run('compras', total, dur);
   console.log(`[Sheets] Sync compras: ${total} filas en ${dur}ms`);
@@ -265,7 +278,7 @@ async function syncVentas(token) {
   let fila = 2;
   let total = 0;
   const stmt = db.prepare(`
-    INSERT OR IGNORE INTO sheet_ventas
+    INSERT OR IGNORE INTO sheet_ventas_tmp
     (id_venta,fecha,nro_comprob,cod_cli,cliente,alias,cod_vend,vendedor,cod_art,articulo,cantidad,precio,total,partida,
      partida_ok,sem,mes,anio,cod_fecha,precio_ok,total_ok,dol_dia,prec_dol,tot_dol,periodo,producto,kilaje,kilos_tot,
      categoria,costeo,cate_clie,subcategoria,boni,proveedor,rent,rent_dol,mes_ok,des,flete_largo,descargas,ifco,flete_super,pct,cat_pro,raw)
@@ -274,7 +287,8 @@ async function syncVentas(token) {
             ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
   `);
 
-  db.exec("DELETE FROM sheet_ventas");
+  db.exec("DROP TABLE IF EXISTS sheet_ventas_tmp");
+  db.exec("CREATE TABLE sheet_ventas_tmp AS SELECT * FROM sheet_ventas WHERE 0");
 
   while (true) {
     const rango = `B VENTAS!A${fila}:AR${fila + BLOQUE - 1}`;
@@ -338,6 +352,12 @@ async function syncVentas(token) {
     fila += BLOQUE;
     if (rows.length < BLOQUE) break;
   }
+
+  db.transaction(() => {
+    db.exec("DELETE FROM sheet_ventas");
+    db.exec("INSERT INTO sheet_ventas (id_venta,fecha,nro_comprob,cod_cli,cliente,alias,cod_vend,vendedor,cod_art,articulo,cantidad,precio,total,partida,partida_ok,sem,mes,anio,cod_fecha,precio_ok,total_ok,dol_dia,prec_dol,tot_dol,periodo,producto,kilaje,kilos_tot,categoria,costeo,cate_clie,subcategoria,boni,proveedor,rent,rent_dol,mes_ok,des,flete_largo,descargas,ifco,flete_super,pct,cat_pro,raw) SELECT id_venta,fecha,nro_comprob,cod_cli,cliente,alias,cod_vend,vendedor,cod_art,articulo,cantidad,precio,total,partida,partida_ok,sem,mes,anio,cod_fecha,precio_ok,total_ok,dol_dia,prec_dol,tot_dol,periodo,producto,kilaje,kilos_tot,categoria,costeo,cate_clie,subcategoria,boni,proveedor,rent,rent_dol,mes_ok,des,flete_largo,descargas,ifco,flete_super,pct,cat_pro,raw FROM sheet_ventas_tmp");
+    db.exec("DROP TABLE sheet_ventas_tmp");
+  })();
 
   const dur = Date.now() - t0;
   db.prepare("INSERT INTO sheet_sync_log (tipo,filas,duracion_ms) VALUES (?,?,?)").run('ventas', total, dur);
@@ -559,5 +579,15 @@ export function estadoSync() {
   const compras = db.prepare("SELECT COUNT(*) as n, MAX(sync_fecha) as ultimo FROM sheet_compras").get();
   const ventas  = db.prepare("SELECT COUNT(*) as n, MAX(sync_fecha) as ultimo FROM sheet_ventas").get();
   const log     = db.prepare("SELECT * FROM sheet_sync_log ORDER BY id DESC LIMIT 5").all();
-  return { compras, ventas, log };
+  // El sync corre una vez por día: cualquier informe armado sobre esto muestra la foto de
+  // esta madrugada, no la de recién. Sin decir DE CUÁNDO es el dato, un total viejo se lee
+  // igual que uno fresco — y si el último intento falló, más todavía.
+  const ok = db.prepare("SELECT MAX(creado_en) f FROM sheet_sync_log WHERE tipo<>'error'").get();
+  const ultimoError = db.prepare("SELECT creado_en, error FROM sheet_sync_log WHERE tipo='error' ORDER BY id DESC LIMIT 1").get();
+  const falloDespues = !!(ultimoError && ok && ok.f && ultimoError.creado_en > ok.f);
+  return { compras, ventas, log,
+    ultimo_ok: (ok && ok.f) || null,
+    ultimo_error: ultimoError || null,
+    // true = el último intento se cayó, así que lo que se está mostrando es de antes.
+    datos_desactualizados: falloDespues };
 }
