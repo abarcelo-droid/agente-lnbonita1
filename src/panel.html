@@ -4288,8 +4288,30 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
     </div>
     <div style="display:grid;grid-template-columns:1.4fr 1fr;gap:16px;margin-top:8px">
       <div>
+        <style>
+          /* Los controles toman el ancho de SU CELDA. Con anchos fijos en px se desbordaban
+             de la columna y volvía la barra lateral. */
+          .sg-costos-tbl td,.sg-costos-tbl th{padding:5px 7px;vertical-align:middle}
+          .sg-costos-tbl input,.sg-costos-tbl select{
+            width:100%;box-sizing:border-box;padding:4px 6px;font-size:12px;
+            border:1px solid var(--bor);border-radius:6px;background:var(--bg)}
+          /* Días + ancla, uno al lado del otro: los días fijos y el ancla se lleva el resto. */
+          .sg-costos-tbl .sg-pago{display:flex;gap:5px;align-items:center}
+          .sg-costos-tbl .sg-pago input{width:56px;flex:none;text-align:right}
+          .sg-costos-tbl .sg-pago .sg-dias{font-size:11px;color:var(--mut);flex:none}
+          .sg-costos-tbl .sg-pago select{flex:1;min-width:0}
+        </style>
         <div style="font-size:12px;font-weight:600;color:var(--mut);margin-bottom:6px">MONTOS DE LA NEGOCIACIÓN · en la moneda de cada uno · el real llega con su documento</div>
-        <table class="pa-tbl" style="font-size:12px"><thead><tr><th>Rubro</th><th>Mon.</th><th style="text-align:right">Estimado</th><th style="text-align:right" title="Los pesos que efectivamente salieron">Real (en $)</th><th style="text-align:right">Δ (real−est.)</th><th title="Cuándo se paga. Solo aplica a los rubros en dólares.">Se paga a</th><th style="text-align:right" title="El de la curva en la fecha de pago. ⏰ = venció sin pagar, sigue rodando al de hoy. ✋ = TC manual del embarque.">TC</th></tr></thead>
+        <!-- Anchos fijos por columna: sin esto la tabla los reparte por contenido y a "Se
+             paga a" —que lleva dos controles— le tocaban 60px, con el número de días cortado
+             y el placeholder mostrando "di". Los importes se aprietan porque son cortos. -->
+        <table class="pa-tbl sg-costos-tbl" style="font-size:12px;table-layout:fixed;width:100%"><thead><tr>
+          <th style="width:16%">Rubro</th><th style="width:10%">Mon.</th>
+          <th style="width:15%;text-align:right">Estimado</th>
+          <th style="width:15%;text-align:right" title="Los pesos que efectivamente salieron">Real (en $)</th>
+          <th style="width:10%;text-align:right">Δ</th>
+          <th style="width:24%" title="Cuándo se paga. Solo cambia el costo en los rubros en dólares, que son los que hay que valuar a un tipo de cambio.">Se paga a</th>
+          <th style="width:10%;text-align:right" title="El de la curva en la fecha de pago. ⏰ = venció sin pagar, sigue rodando al de hoy. ✋ = TC manual del embarque.">TC</th></tr></thead>
           <tbody id="sg-emb-costos"></tbody></table>
       </div>
       <div>
@@ -25969,17 +25991,20 @@ function sgImpCostoRow(c){
   return '<tr'+(c.cred?' style="background:rgba(16,163,74,.06)"':'')+'>'
     +'<td>'+esc(c.l)+'</td>'
     +'<td><select id="sg-emb-mon-'+c.k+'" onchange="sgImpCalc()"><option value="ARS"'+(mon==='ARS'?' selected':'')+'>ARS</option><option value="USD"'+(mon==='USD'?' selected':'')+'>USD</option></select></td>'
-    +'<td><input type="number" step="0.01" min="0" id="sg-emb-est-'+c.k+'" value="'+sgImpVal(v.monto_estimado)+'" oninput="sgImpCalc()" style="width:120px;text-align:right"></td>'
-    +'<td><input type="number" step="0.01" min="0" id="sg-emb-real-'+c.k+'" value="'+sgImpVal(v.monto_real)+'" oninput="sgImpCalc()" style="width:120px;text-align:right" title="Los pesos que efectivamente salieron"></td>'
+    +'<td><input type="number" step="0.01" min="0" id="sg-emb-est-'+c.k+'" value="'+sgImpVal(v.monto_estimado)+'" oninput="sgImpCalc()" style="text-align:right"></td>'
+    +'<td><input type="number" step="0.01" min="0" id="sg-emb-real-'+c.k+'" value="'+sgImpVal(v.monto_real)+'" oninput="sgImpCalc()" style="text-align:right" title="Los pesos que efectivamente salieron"></td>'
     +'<td id="sg-emb-gap-'+c.k+'" style="text-align:right;color:var(--mut)">—</td>'
-    // Condición de pago: solo se habilita en los rubros en dólares, que son los únicos que
-    // necesitan saber a qué TC se van a liquidar. En pesos queda apagada.
-    +'<td id="sg-emb-pago-'+c.k+'" style="white-space:nowrap">'
-      +'<input type="number" step="1" id="sg-emb-pdias-'+c.k+'" value="'+sgImpVal(v.pago_dias)+'" oninput="sgImpCalc()" style="width:52px;text-align:right" placeholder="días">'
-      +' <select id="sg-emb-panc-'+c.k+'" onchange="sgImpCalc()" style="width:auto">'
+    // Condición de pago: sólo cambia el costo en los rubros en dólares, que son los que hay
+    // que valuar a un tipo de cambio. En pesos el monto es el monto y la fecha no lo mueve.
+    // "días" va como etiqueta al lado y no como placeholder: el placeholder se corta cuando
+    // el campo es angosto, y encima desaparece apenas se escribe un número.
+    +'<td id="sg-emb-pago-'+c.k+'"><div class="sg-pago">'
+      +'<input type="number" step="1" id="sg-emb-pdias-'+c.k+'" value="'+sgImpVal(v.pago_dias)+'" oninput="sgImpCalc()" placeholder="0">'
+      +'<span class="sg-dias">días</span>'
+      +'<select id="sg-emb-panc-'+c.k+'" onchange="sgImpCalc()">'
         +'<option value="eta"'+((v.pago_ancla||'eta')==='eta'?' selected':'')+'>de la llegada</option>'
         +'<option value="etd"'+(v.pago_ancla==='etd'?' selected':'')+'>del embarque</option>'
-      +'</select></td>'
+      +'</select></div></td>'
     +'<td id="sg-emb-tc-'+c.k+'" style="text-align:right;color:var(--mut);white-space:nowrap">—</td>'
   +'</tr>';
 }
@@ -26033,6 +26058,8 @@ function sgImpPintarTcRubros(){
   var override = null;
   var hoy = new Date().toISOString().slice(0,10);
   SG_EMB_CONCEPTOS.forEach(function(c){
+    // La moneda del rubro manda: en pesos no hay TC que mostrar ni condición de pago que
+    // cambie el costo. Es el mismo criterio que aplica el backend.
     var esUSD = eid('sg-emb-mon-'+c.k).value==='USD';
     var fPago = esUSD ? sgImpFechaPago(c.k) : null;
     var vencido = !!(fPago && fPago < hoy);
@@ -26701,8 +26728,10 @@ function sgImpVisor(id){
     // Los dólares de la negociación: es en lo que se habla con el proveedor.
     if(est.usd){
       h+='<div style="display:flex;gap:14px;flex-wrap:wrap;padding:10px 14px;border:1px solid var(--bor);border-radius:10px;margin-bottom:12px;font-size:12.5px">'
+        // Un flete facturado en pesos no va en el bloque de dólares: ahí se lee lo que se
+        // negocia con el exterior, y ponerlo mezclaría dos monedas en la misma fila.
         +[['Invoice',est.usd.invoice],['Flete declarado',est.usd.flete_base],['Seguro',est.usd.seguro],
-          ['Flete real',est.usd.flete_real],['Gastos bancarios',est.usd.bancarios]]
+          ['Flete real',est.flete_en_pesos?null:est.usd.flete_real],['Gastos bancarios',est.usd.bancarios]]
           .filter(function(x){ return x[1]; })
           .map(function(x){ return '<span><span style="color:var(--mut)">'+x[0]+'</span> <b>US$ '+nr(x[1])+'</b></span>'; }).join('')
         +'<span style="margin-left:auto"><span style="color:var(--mut)">Base imponible</span> <b>US$ '+nr(est.usd.base)+'</b></span></div>';

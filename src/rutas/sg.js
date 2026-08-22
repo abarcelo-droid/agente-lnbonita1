@@ -8716,7 +8716,12 @@ function calcImportacion(db, emb, costos, kgOverride) {
                     : (invoice_lineas > 0 ? invoice_lineas : invoice_manual);
   const flete_base_usd  = Number(emb.flete_base_usd) || 0;
   const seguro_usd      = Number(emb.seguro_usd) || 0;
-  const flete_real_usd  = usdDe(rFlete);
+  // El flete puede pagarse EN PESOS: un fletero local factura en pesos, y ahí no hay nada
+  // que valuar a ningún tipo de cambio. Antes se multiplicaba igual por el TC y el costo del
+  // camión salía mil veces más caro sin que nada lo avisara.
+  const flete_en_pesos  = rFlete.moneda === 'ARS';
+  const flete_real_usd  = flete_en_pesos ? 0 : usdDe(rFlete);
+  const flete_real_ars_directo = flete_en_pesos ? r2(usdDe(rFlete)) : null;
   // Los gastos bancarios no se tipean: son un monto FIJO en dólares por operación (no un
   // porcentaje del invoice), y se pagan junto con la mercadería, así que se valorizan al
   // mismo TC que ella.
@@ -8752,7 +8757,7 @@ function calcImportacion(db, emb, costos, kgOverride) {
   const pagadoEnPesos = k => !!(reales[k] && reales[k].moneda === 'ARS');
   const falta_tc = [];
   if (invoice_usd    && !pagadoEnPesos('mercaderia') && tcMerc  == null) falta_tc.push('Mercadería');
-  if (flete_real_usd && !pagadoEnPesos('flete_real') && tcFlete == null) falta_tc.push('Flete real');
+  if (flete_real_usd && !flete_en_pesos && !pagadoEnPesos('flete_real') && tcFlete == null) falta_tc.push('Flete real');
   // Los impuestos sólo necesitan el TC de hoy mientras se estimen. Con el despacho cargado
   // salen del papel y su cotización de oficialización.
   const impuestosDelPapel = esReal('iva') && esReal('iibb') && esReal('tasa_maria') && esReal('despachante');
@@ -8764,7 +8769,9 @@ function calcImportacion(db, emb, costos, kgOverride) {
   const rMercR = realDe('mercaderia', tcMerc), rFleteR = realDe('flete_real', tcFlete);
   const rBancR = realDe('bancarios', tcBanc);
   const merc_ars  = rMercR  ? rMercR.ars  : (tcMerc  == null ? null : r2(invoice_usd    * tcMerc));
-  const flete_ars = rFleteR ? rFleteR.ars : (tcFlete == null ? null : r2(flete_real_usd * tcFlete));
+  const flete_ars = rFleteR ? rFleteR.ars
+    : (flete_en_pesos ? flete_real_ars_directo
+    : (tcFlete == null ? null : r2(flete_real_usd * tcFlete)));
   // El swift trae el TOTAL de gastos e intereses bancarios, con su IVA adentro: mismo
   // criterio que el despachante.
   const banc_ars = rBancR ? rBancR.ars : (tcBanc == null ? null : r2(bancarios_usd * tcBanc));
@@ -8779,7 +8786,7 @@ function calcImportacion(db, emb, costos, kgOverride) {
   const contadoDe = (real, usd, arsCalc) => real ? real.ars : (usd != null ? r2(usd * tcHoy) : arsCalc);
   const total_contado = !convertible ? null
     : sum(contadoDe(rMercR, invoice_usd, merc_ars), anticipos_ars, despachante_ars, iva_desp_ars,
-          contadoDe(rFleteR, flete_real_usd, flete_ars),
+          contadoDe(rFleteR, flete_en_pesos ? null : flete_real_usd, flete_ars),
           rBancR ? rBancR.ars : r2(bancarios_usd * tcHoy),
           rBancR ? 0 : r2((bancarios_usd * tcHoy) * (p.iva_servicios_pct / 100)));
   const total_plazo = !convertible ? null
@@ -8799,6 +8806,7 @@ function calcImportacion(db, emb, costos, kgOverride) {
     // está mal cargado y el costo por producto se reparte sobre el que manda.
     invoice_discrepancia: (invoice_confirmado != null && invoice_lineas > 0
       && Math.abs(invoice_confirmado - invoice_lineas) > 0.01) ? r2(invoice_confirmado - invoice_lineas) : null,
+    flete_en_pesos,
     usd: { invoice: invoice_usd, flete_base: flete_base_usd, seguro: seguro_usd,
            flete_real: flete_real_usd, bancarios: bancarios_usd, base: base_usd },
     base_ars,
@@ -8825,7 +8833,7 @@ function calcImportacion(db, emb, costos, kgOverride) {
       { k: 'tasa_maria',  label: 'Tasa María',            usd: rTasa ? null : p.tasa_maria_usd, tc: tcHoy, ars: tasa_maria_ars,  plazo: false, detalle: rTasa ? 'liquidada en el despacho' : null, ...papel(rTasa, estTasa) },
       { k: 'despachante', label: 'Despachante' + (rDesp ? ' (factura)' : ' ' + p.despachante_pct + '%'), usd: null, tc: tcHoy, ars: despachante_ars, plazo: false, detalle: rDesp ? 'la factura entera, con IVA adentro' : 'sobre la base imponible', ...papel(rDesp, estDesp) },
       { k: 'iva_desp',    label: 'IVA despachante ' + (rDesp ? '' : p.iva_servicios_pct + '%'), usd: null, tc: tcHoy, ars: iva_desp_ars, plazo: false, detalle: rDesp ? 'ya incluido en la factura de arriba' : null, real: !!rDesp },
-      { k: 'flete_real',  label: 'Flete real',            usd: flete_real_usd, tc: tcFlete, ars: flete_ars,       plazo: true,  fecha_pago: fechaPagoRubro(emb, rFlete), ...desvioDe(rFlete), ...papel(rFleteR, tcFlete == null ? null : r2(flete_real_usd * tcFlete)) },
+      { k: 'flete_real',  label: 'Flete real',            usd: flete_en_pesos ? null : flete_real_usd, tc: flete_en_pesos ? null : tcFlete, ars: flete_ars, plazo: !flete_en_pesos, detalle: flete_en_pesos ? 'facturado en pesos' : null, fecha_pago: flete_en_pesos ? null : fechaPagoRubro(emb, rFlete), ...desvioDe(rFlete), ...papel(rFleteR, tcFlete == null ? null : r2(flete_real_usd * tcFlete)) },
       { k: 'bancarios',   label: 'Gastos bancarios',      usd: rBancR ? null : bancarios_usd,  tc: tcBanc,  ars: banc_ars,        plazo: true,  detalle: rBancR ? 'del swift, con intereses e IVA adentro' : 'monto fijo · al TC de la mercadería', fecha_pago: fechaPagoRubro(emb, rMerc), ...papel(rBancR, tcBanc == null ? null : r2(bancarios_usd * tcBanc)) },
       { k: 'iva_banc',    label: 'IVA bancarios ' + (rBancR ? '' : p.iva_servicios_pct + '%'), usd: null, tc: tcBanc, ars: iva_banc_ars, plazo: true, detalle: rBancR ? 'ya incluido en el swift' : null, real: !!rBancR }
       ];
@@ -8838,7 +8846,7 @@ function calcImportacion(db, emb, costos, kgOverride) {
     // un desvío inventado sobre plata que ya salió.
     dif_cambio_detalle: !convertible ? [] : [
       { label: 'Mercadería',       ars: rMercR  ? 0 : invoice_usd    * ((tcMerc  || tcHoy) - tcHoy) },
-      { label: 'Flete real',       ars: rFleteR ? 0 : flete_real_usd * ((tcFlete || tcHoy) - tcHoy) },
+      { label: 'Flete real',       ars: (rFleteR || flete_en_pesos) ? 0 : flete_real_usd * ((tcFlete || tcHoy) - tcHoy) },
       { label: 'Gastos bancarios', ars: rBancR  ? 0 : bancarios_usd  * ((tcBanc  || tcHoy) - tcHoy) * (1 + p.iva_servicios_pct / 100) }
     ].filter(x => Math.abs(x.ars) > 0.005),
     cajas, kg,
