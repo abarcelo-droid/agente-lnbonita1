@@ -3983,7 +3983,9 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
   </style>
   <div class="ph"><div><div class="ph-t">📊 Informes comerciales</div>
     <div class="ph-s">Ventas por cliente, producto o vendedor — sobre la base que se sincroniza todos los días</div></div>
-    <div style="display:flex;gap:8px"><button class="btn bo" onclick="infExportar()">⬇️ Excel</button></div></div>
+    <div style="display:flex;gap:8px">
+      <button class="btn bo" onclick="infDiagnostico()" title="Compara los títulos de la planilla contra lo que espera el código. Sirve cuando los números no cierran.">🔎 Diagnóstico</button>
+      <button class="btn bo" onclick="infExportar()">⬇️ Excel</button></div></div>
 
   <!-- De cuándo es el dato. El sync corre una vez por día: sin esto, un total de
        anteayer se lee igual que uno de recién. -->
@@ -4007,6 +4009,17 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
     <thead id="inf-thead"></thead><tbody id="inf-tbody"><tr><td class="emp">Elegí un período.</td></tr></tbody>
   </table></div>
   <div id="inf-nota" style="font-size:11px;color:var(--mut);margin-top:6px"></div>
+</div>
+
+<!-- Diagnóstico: los títulos reales de la planilla contra lo que el código espera. -->
+<div class="ab-modal-overlay" id="inf-diag-modal">
+  <div class="ab-modal" style="max-width:min(1100px,96vw);width:96vw">
+    <div class="mhd"><div class="mht">🔎 Diagnóstico de la base</div>
+      <button class="mcl" onclick="closeMB('inf-diag-modal')">×</button></div>
+    <div id="inf-diag-body"></div>
+    <div style="display:flex;justify-content:flex-end;margin-top:12px">
+      <button class="btn bb" onclick="closeMB('inf-diag-modal')">Cerrar</button></div>
+  </div>
 </div>
 
   <div class="sec sg-mod" id="sec-sg-importacion">
@@ -26496,6 +26509,65 @@ function sgAvisoCopiar(){
       toast('Imagen copiada — pegala en WhatsApp','ok');
     }).catch(function(){ toast('No se pudo copiar: usá Descargar','er'); });
   });
+}
+
+// ── DIAGNÓSTICO DE LA BASE ────────────────────────────────────────────────────────────
+// "No lee bien la base" puede ser tres cosas muy distintas: que el sync no corrió, que la
+// planilla movió una columna y todo se guarda corrido, o que ese dato no se carga en la
+// planilla. Esto las distingue, con los títulos reales de la hoja al lado de lo que el
+// código espera — así no hay que adivinar cuál de las tres es.
+function infDiagnostico(){
+  eid('inf-diag-body').innerHTML='<div style="padding:20px;text-align:center;color:var(--mut)">Leyendo la planilla…</div>';
+  eid('inf-diag-modal').classList.add('on');
+  api('/api/informes/diagnostico').then(function(r){
+    if(!r||!r.ok){ eid('inf-diag-body').innerHTML='<div style="padding:16px;color:var(--err,#dc2626)">'+esc((r&&r.error)||'Error')+'</div>'; return; }
+    eid('inf-diag-body').innerHTML=infDiagPintar(r.data);
+  });
+}
+function infDiagPintar(d){
+  var h='';
+  if(d.avisos&&d.avisos.length){
+    h+='<div style="padding:11px 13px;border-radius:8px;border:1px solid var(--err,#dc2626);background:rgba(220,38,38,.07);margin-bottom:12px;font-size:12.5px">'
+      +d.avisos.map(function(a){ return '⚠ '+esc(a); }).join('<br>')+'</div>';
+  } else {
+    h+='<div style="padding:11px 13px;border-radius:8px;border:1px solid rgba(16,163,74,.3);background:rgba(16,163,74,.07);margin-bottom:12px;font-size:12.5px">'
+      +'✓ Los títulos de la planilla coinciden con lo que espera el código y las tablas tienen datos.</div>';
+  }
+  // Cuántas filas hay y de cuándo: si esto está en cero, el problema no es el mapeo.
+  var s=d.sync||{};
+  h+='<div style="font-size:12px;color:var(--mut);margin-bottom:12px">'
+    +'Compras: <b>'+nr((d.tablas&&d.tablas.compras&&d.tablas.compras.filas)||0)+'</b> filas · '
+    +'Ventas: <b>'+nr((d.tablas&&d.tablas.ventas&&d.tablas.ventas.filas)||0)+'</b> filas · '
+    +'último sync OK: <b>'+esc(s.ultimo_ok||'nunca')+'</b>'
+    +(s.ultimo_error?(' · último error: '+esc(s.ultimo_error.error||'')+' ('+esc(s.ultimo_error.creado_en||'')+')'):'')
+    +'</div>';
+
+  ['ventas','compras'].forEach(function(k){
+    var hoja=(d.hojas||{})[k]; if(!hoja) return;
+    var tabla=(d.tablas||{})[k]||{};
+    h+='<div style="font-size:12px;font-weight:600;color:var(--mut);margin:14px 0 5px">HOJA "'+esc(hoja.hoja||k)+'"</div>';
+    if(hoja.error){ h+='<div style="color:var(--err,#dc2626);font-size:12px">'+esc(hoja.error)+'</div>'; return; }
+    if(!hoja.columnas||!hoja.columnas.length){ h+='<div style="color:var(--mut);font-size:12px">No se pudo leer la planilla.</div>'; return; }
+    h+='<table class="pa-tbl" style="font-size:12px;width:100%"><thead><tr>'
+      +'<th style="width:8%">Col</th><th style="width:22%">Campo</th><th style="width:22%">Título esperado</th>'
+      +'<th style="width:22%">Título real</th><th style="width:18%">Ejemplo</th><th style="width:8%"></th></tr></thead><tbody>'
+      +hoja.columnas.map(function(c){
+        // La fila en rojo es el dato: ahí el código y la planilla dicen cosas distintas.
+        var vacio=(tabla.vacios||{})[c.campo];
+        return '<tr'+(c.coincide?'':' style="background:rgba(220,38,38,.07)"')+'>'
+          +'<td><code>'+esc(c.col)+'</code></td>'
+          +'<td>'+esc(c.campo)+(vacio===100?' <span style="color:var(--err,#dc2626);font-size:10px">100% vacío</span>':'')+'</td>'
+          +'<td style="color:var(--mut)">'+esc(c.titulo_esperado)+'</td>'
+          +'<td'+(c.coincide?'':' style="font-weight:600;color:var(--err,#dc2626)"')+'>'+esc(c.titulo_real)+'</td>'
+          +'<td style="color:var(--mut)">'+esc(c.ejemplo||'')+'</td>'
+          +'<td style="text-align:center">'+(c.coincide?'✓':'✗')+'</td></tr>';
+      }).join('')+'</tbody></table>';
+  });
+  h+='<div style="font-size:11.5px;color:var(--mut);margin-top:10px">'
+    +'Las filas en rojo son columnas donde la planilla y el código no dicen lo mismo. '
+    +'Si se movió una columna, <b>todo lo que está a su derecha se guarda en el campo equivocado</b>: '
+    +'pasame esta pantalla y ajusto el mapeo.</div>';
+  return h;
 }
 
 // ── INFORMES COMERCIALES ──────────────────────────────────────────────────────────────
