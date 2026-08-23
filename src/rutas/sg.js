@@ -9191,6 +9191,200 @@ router.post('/embarques/tc-esperado', requireAdmin, (req, res) => {
   } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
 });
 
+// ── ARCHIVO PLANO DE CAMIONES (Excel) ───────────────────────────────────────────────
+// UNA FILA POR PRODUCTO DE CADA CAMIÓN, con todo el cabezal repetido al lado. Es la forma
+// más plana posible: se abre en Excel, se filtra por lo que sea y se arma una tabla
+// dinámica sin cruzar nada a mano.
+//
+// El grano es el PRODUCTO y no el camión porque el costo por caja —el número por el que
+// existe este módulo— es por producto. Un archivo con una fila por camión no lo puede
+// mostrar; y con este grano igual se saca el total del camión sumando o filtrando.
+//
+// Van TODAS las columnas a propósito: sobra información y se esconde la que no sirve, que
+// es más fácil que pedir un export nuevo cada vez que falta un dato. Los importes salen
+// como NÚMERO, sin símbolo ni separador de miles: con formato de texto Excel no los suma,
+// y un archivo que no se puede sumar no sirve para esto.
+
+// Semana ISO de una fecha, en UTC para que no se corra un día por zona horaria.
+// Misma regla que sgCalSemana() del panel: la semana es la del jueves.
+function semanaIso(iso) {
+  if (!iso) return '';
+  const d = new Date(Date.parse(String(iso).slice(0, 10) + 'T00:00:00Z'));
+  if (isNaN(d.getTime())) return '';
+  d.setUTCDate(d.getUTCDate() - ((d.getUTCDay() + 6) % 7) + 3);
+  const ene4 = new Date(Date.UTC(d.getUTCFullYear(), 0, 4));
+  ene4.setUTCDate(ene4.getUTCDate() - ((ene4.getUTCDay() + 6) % 7) + 3);
+  return 1 + Math.round((d - ene4) / 604800000);
+}
+
+router.get('/embarques/export', requireAuth, (req, res) => {
+  const db = getDb();
+  try {
+    const soloId = req.query.embarque_id ? Number(req.query.embarque_id) : null;
+    const embs = db.prepare(`SELECT e.*, p.razon_social AS proveedor_nombre
+      FROM sg_embarques e LEFT JOIN sg_proveedores p ON p.id=e.proveedor_id
+      WHERE e.activo=1 AND e.eliminado_en IS NULL ${soloId ? 'AND e.id=?' : ''}
+      ORDER BY e.id DESC`).all(...(soloId ? [soloId] : []));
+
+    const filas = [];
+    for (const e of embs) {
+      const est = calcImportacion(db, e, embCostos(db, e.id));
+      const lineas = db.prepare(`SELECT l.*, pr.nombre AS producto_nombre, pr.variedad AS producto_variedad,
+               en.nombre AS envase_nombre
+        FROM sg_embarque_lineas l
+        LEFT JOIN sg_productos pr ON pr.id=l.producto_id
+        LEFT JOIN sg_envases en ON en.id=l.envase_id
+        WHERE l.embarque_id=? AND l.activo=1 ORDER BY l.id`).all(e.id);
+      const porProd = (est.por_producto || []).reduce((m, x) => { m[x.linea_id] = x; return m; }, {});
+      const rub = k => (est.lineas || []).find(x => x.k === k) || {};
+      const nn = v => (v == null ? '' : v);
+      // El precio esperado de venta, por producto. Sin esto el archivo tiene el costo pero
+      // no con qué compararlo, que es la mitad de para qué se baja.
+      const precios = db.prepare('SELECT producto_id, precio_caja FROM sg_embarque_precios WHERE embarque_id=?')
+        .all(e.id).reduce((m, r) => { m[r.producto_id] = r.precio_caja; return m; }, {});
+      // Qué rubros ya salen de un papel y cuáles siguen estimados. Un costo confirmado y uno
+      // proyectado no se pueden promediar juntos sin saber cuál es cuál.
+      const conPapel = est.reales_cargados || [];
+      const esPapel = k => (rub(k).real ? 'papel' : 'estimado');
+
+      // Lo que no depende del producto se arma una vez y se repite en cada fila: eso es lo
+      // que permite filtrar por cualquier cosa y seguir teniendo el costeo al lado.
+      const cab = {
+        camion_id: e.id,
+        camion: e.nombre || '',
+        estado: e.estado || '',
+        proveedor: e.proveedor_nombre || '',
+        pais_origen: e.pais_origen || '',
+        incoterm: e.incoterm || '',
+        ncm: e.ncm || '',
+        cert_origen_mercosur: e.certificado_origen_mercosur ? 'si' : 'no',
+        nro_invoice: e.nro_invoice || '',
+        fecha_etd: e.fecha_etd || '',
+        fecha_eta: e.fecha_eta || '',
+        semana_etd: semanaIso(e.fecha_etd),
+        semana_eta: semanaIso(e.fecha_eta),
+        transporte_empresa: e.transporte_empresa || '',
+        camion_patente: e.camion_patente || '',
+        camion_acoplado: e.camion_acoplado || '',
+        chofer_nombre: e.chofer_nombre || '',
+        chofer_documento: e.chofer_documento || '',
+        chofer_telefono: e.chofer_telefono || '',
+        moneda: e.moneda || 'USD',
+        tc_aplicado: nn(est.tc_hoy),
+        tc_manual: est.tc_manual ? 'si' : 'no',
+        // Si falta algún TC, el costo en pesos es una mezcla de pesos y dólares y no
+        // significa nada: se deja vacío y se dice cuál falta, en vez de exportar un número
+        // que alguien va a sumar creyendo que es plata.
+        costeo_completo: est.convertible ? 'si' : 'no',
+        falta_tc: (est.falta_tc || []).join(' / '),
+        invoice_origen: est.invoice_origen || '',
+        usd_invoice: est.usd.invoice || 0,
+        usd_flete_base: est.usd.flete_base || 0,
+        usd_seguro: est.usd.seguro || 0,
+        usd_flete_real: est.usd.flete_real || 0,
+        usd_bancarios: est.usd.bancarios || 0,
+        usd_base_imponible: est.usd.base || 0,
+        ars_base_imponible: nn(est.base_ars),
+        ars_mercaderia: nn(rub('mercaderia').ars),
+        ars_iva: nn(rub('iva').ars),
+        ars_iibb: nn(rub('iibb').ars),
+        ars_tasa_maria: nn(rub('tasa_maria').ars),
+        ars_despachante: nn(rub('despachante').ars),
+        ars_iva_despachante: nn(rub('iva_desp').ars),
+        ars_flete_real: nn(rub('flete_real').ars),
+        ars_bancarios: nn(rub('bancarios').ars),
+        ars_iva_bancarios: nn(rub('iva_banc').ars),
+        papeles_cargados: conPapel.length,
+        papeles_rubros: conPapel.join(' / '),
+        origen_mercaderia: esPapel('mercaderia'), origen_iva: esPapel('iva'),
+        origen_iibb: esPapel('iibb'), origen_tasa_maria: esPapel('tasa_maria'),
+        origen_despachante: esPapel('despachante'), origen_flete: esPapel('flete_real'),
+        origen_bancarios: esPapel('bancarios'),
+        ars_total_contado: nn(est.total_contado),
+        ars_total_plazo: nn(est.total_plazo),
+        ars_dif_cambio: est.dif_cambio != null ? r2(est.dif_cambio) : '',
+        camion_cajas: est.cajas || 0,
+        camion_kg: r2(est.kg || 0),
+        ars_costo_caja_camion: est.costo_caja != null ? r2(est.costo_caja) : '',
+        ars_costo_kg_camion: est.costo_kg != null ? r2(est.costo_kg) : '',
+        observaciones: e.observaciones || '',
+        creado_en: e.creado_en || '',
+      };
+
+      // Un camión sin productos cargados sale igual, con la fila marcada: si lo salteo,
+      // desaparece del archivo y nadie se entera de que le falta la carga.
+      if (!lineas.length) { filas.push({ ...cab, producto: '(sin productos cargados)' }); continue; }
+
+      for (const l of lineas) {
+        const pp = porProd[l.id] || {};
+        const cajas = Number(l.cajas) || 0;
+        filas.push({ ...cab,
+          producto: l.producto_nombre || '',
+          variedad: l.producto_variedad || '',
+          envase: l.envase_nombre || '',
+          cajas,
+          kg_por_bulto: l.kg_por_bulto != null ? Number(l.kg_por_bulto) : '',
+          kg: r2(cajas * (Number(l.kg_por_bulto) || 0)),
+          fob_usd_caja: l.precio_unitario_usd != null ? Number(l.precio_unitario_usd) : '',
+          fob_usd_total: nn(pp.fob_usd),
+          pct_del_valor: nn(pp.peso_valor),
+          pct_de_cajas: nn(pp.peso_caja),
+          ars_costo_total: nn(pp.costo_ars),
+          ars_costo_por_valor: nn(pp.por_valor_ars),
+          ars_costo_por_caja_prorrateo: nn(pp.por_caja_ars),
+          ars_costo_caja: nn(pp.costo_caja),
+          ars_costo_kg: nn(pp.costo_kg),
+          // Precio esperado y margen. El margen se calcula acá y no en Excel para que sea
+          // el mismo número que muestra la ficha: dos fórmulas para lo mismo terminan
+          // dando distinto y nadie sabe cuál mirar.
+          ars_precio_venta_esperado: nn(precios[l.producto_id]),
+          ars_margen_caja: (precios[l.producto_id] != null && pp.costo_caja != null)
+            ? r2(Number(precios[l.producto_id]) - pp.costo_caja) : '',
+          margen_pct: (precios[l.producto_id] > 0 && pp.costo_caja != null)
+            ? r2((Number(precios[l.producto_id]) - pp.costo_caja) / Number(precios[l.producto_id]) * 100) : '',
+        });
+      }
+    }
+
+    // El header explícito fija el ORDEN de las columnas. Sin esto json_to_sheet toma las
+    // claves de la primera fila, y si esa fila es un camión sin productos se pierden todas
+    // las columnas del producto — justo las que se vienen a buscar.
+    const header = ['camion_id','camion','estado','proveedor','pais_origen','incoterm','ncm',
+      'cert_origen_mercosur','nro_invoice','fecha_etd','fecha_eta','semana_etd','semana_eta',
+      'transporte_empresa','camion_patente','camion_acoplado','chofer_nombre','chofer_documento','chofer_telefono',
+      'producto','variedad','envase','cajas','kg_por_bulto','kg','fob_usd_caja','fob_usd_total',
+      'pct_del_valor','pct_de_cajas',
+      'ars_costo_total','ars_costo_caja','ars_costo_kg',
+      'ars_precio_venta_esperado','ars_margen_caja','margen_pct',
+      'ars_costo_por_valor','ars_costo_por_caja_prorrateo',
+      'moneda','tc_aplicado','tc_manual','costeo_completo','falta_tc','invoice_origen',
+      'usd_invoice','usd_flete_base','usd_seguro','usd_flete_real','usd_bancarios','usd_base_imponible',
+      'ars_base_imponible','ars_mercaderia','ars_iva','ars_iibb','ars_tasa_maria','ars_despachante',
+      'ars_iva_despachante','ars_flete_real','ars_bancarios','ars_iva_bancarios',
+      'ars_total_contado','ars_total_plazo','ars_dif_cambio',
+      'papeles_cargados','papeles_rubros','origen_mercaderia','origen_iva','origen_iibb',
+      'origen_tasa_maria','origen_despachante','origen_flete','origen_bancarios',
+      'camion_cajas','camion_kg','ars_costo_caja_camion','ars_costo_kg_camion',
+      'observaciones','creado_en'];
+
+    const ws = XLSX.utils.json_to_sheet(filas, { header });
+    // Filtros en la fila de títulos y las dos primeras columnas fijas: con 60+ columnas,
+    // sin esto no se sabe de qué camión es la fila que se está mirando.
+    ws['!autofilter'] = { ref: XLSX.utils.encode_range(
+      { s: { c: 0, r: 0 }, e: { c: header.length - 1, r: Math.max(filas.length, 1) } }) };
+    ws['!freeze'] = { xSplit: 2, ySplit: 1 };
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Camiones');
+    const buf = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+    const hoy = db.prepare("SELECT date('now','localtime') d").get().d;
+    res.set({
+      'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'Content-Disposition': `attachment; filename="camiones-sg-${hoy}.xlsx"`,
+    });
+    res.send(buf);
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
 router.get('/embarques/:id', requireAuth, (req, res) => {
   const db = getDb();
   try {
