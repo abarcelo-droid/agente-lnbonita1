@@ -47,22 +47,40 @@ const DIMENSIONES = {
   categoria:    { col: 'categoria',    label: 'Categoría' },
   subcategoria: { col: 'subcategoria', label: 'Subcategoría' },
   proveedor:    { col: 'proveedor',    label: 'Proveedor' },
-  anio:         { col: 'anio',         label: 'Año' },
-  mes:          { col: 'mes',          label: 'Mes' },
+  // EL AÑO COMERCIAL VA DE JULIO A JUNIO, no de enero a diciembre. Por eso se agrupa por
+  // 'periodo' (2025-2026) y por 'mes_ok' (01-JULIO … 12-JUN), que son las columnas que la
+  // planilla ya trae calculadas. Agrupar por el año calendario parte cada campaña al medio
+  // y hace que los totales no se parezcan a nada de lo que el equipo mira.
+  periodo:      { col: 'periodo',      label: 'Período (jul–jun)' },
+  mes_ok:       { col: 'mes_ok',       label: 'Mes comercial' },
+  anio:         { col: 'anio',         label: 'Año calendario' },
+  mes:          { col: 'mes',          label: 'Mes calendario' },
 };
 
-// El período se arma con anio y mes y NO con la columna fecha: fecha viene de la planilla
-// como texto y no hay garantía de su formato, mientras que anio/mes son numéricos y son los
-// que ya usa el calendario estacional. Un filtro de fechas mal parseado no falla: devuelve
-// menos filas y parece un mes flojo.
-const periodoSQL = "(CAST(anio AS INTEGER) * 100 + CAST(mes AS INTEGER))";
+// mes_ok viene como '01-JULIO', '02-AGOSTO' … '12-JUN': ordenar por el texto ya da el orden
+// comercial correcto, porque el número va adelante. Por eso estas dos dimensiones se ordenan
+// por su clave y no por facturación, que es lo que se quiere en una serie de tiempo.
+const DIM_CRONOLOGICAS = new Set(['periodo', 'mes_ok', 'anio', 'mes']);
 
+// El filtro NO usa la columna fecha: viene de la planilla como texto y sin formato
+// garantizado, y un filtro de fechas mal parseado no falla — devuelve menos filas y parece
+// un mes flojo. Se usa 'periodo', que la planilla ya trae calculado con el criterio del
+// negocio (julio a junio), y es además la unidad con la que el equipo compara campañas.
 function armarWhere(q) {
-  const cond = ["anio IS NOT NULL AND anio <> ''", "mes IS NOT NULL AND mes <> '' AND mes <> '0'"];
+  // Sólo se exige que la fila tenga período: es la unidad con la que se mira el negocio.
+  // Antes se exigía anio y mes calendario y se descartaba mes='0', que dejaba afuera filas
+  // perfectamente buenas del período en curso.
+  const cond = ["periodo IS NOT NULL AND periodo <> ''"];
   const params = [];
-  const desde = Number(q.desde), hasta = Number(q.hasta);   // formato AAAAMM
-  if (desde > 0) { cond.push(`${periodoSQL} >= ?`); params.push(desde); }
-  if (hasta > 0) { cond.push(`${periodoSQL} <= ?`); params.push(hasta); }
+  // Uno o varios períodos: varios es lo que permite comparar campañas, que es como se mira.
+  const pers = String(q.periodos || '').split(',').map(x => x.trim()).filter(Boolean);
+  if (pers.length) {
+    cond.push('periodo IN (' + pers.map(() => '?').join(',') + ')');
+    params.push(...pers);
+  }
+  // Un mes comercial puntual, si se quiere mirar sólo julio de cada campaña.
+  const mok = String(q.mes_ok || '').trim();
+  if (mok) { cond.push('mes_ok = ?'); params.push(mok); }
   // Filtros por dimensión: llegan como filtro_<dim>=valor
   for (const [k, d] of Object.entries(DIMENSIONES)) {
     const v = q['filtro_' + k];
@@ -102,7 +120,7 @@ router.get('/ventas', requireAuth, (req, res) => {
       FROM sheet_ventas
       ${where}
       GROUP BY clave
-      ORDER BY facturacion_usd DESC
+      ORDER BY ${DIM_CRONOLOGICAS.has(dimKey) ? 'clave ASC' : 'facturacion_usd DESC'}
       LIMIT 500
     `).all(...params);
 
@@ -138,16 +156,20 @@ router.get('/ventas/opciones', requireAuth, (req, res) => {
       `SELECT DISTINCT ${col} v FROM sheet_ventas
        WHERE ${col} IS NOT NULL AND ${col} <> '' ORDER BY ${col} LIMIT 400`
     ).all().map(r => r.v);
-    const rango = db.prepare(`
-      SELECT MIN(${periodoSQL}) AS min, MAX(${periodoSQL}) AS max FROM sheet_ventas
-      WHERE anio IS NOT NULL AND anio <> '' AND mes IS NOT NULL AND mes <> '' AND mes <> '0'
-    `).get();
+    // Los períodos comerciales que hay cargados, del más nuevo al más viejo: es lo primero
+    // que se elige al entrar, y el más nuevo es el que se está mirando.
+    const periodos = db.prepare(
+      "SELECT DISTINCT periodo v FROM sheet_ventas WHERE periodo IS NOT NULL AND periodo <> '' ORDER BY periodo DESC"
+    ).all().map(r => r.v);
+    const meses = db.prepare(
+      "SELECT DISTINCT mes_ok v FROM sheet_ventas WHERE mes_ok IS NOT NULL AND mes_ok <> '' ORDER BY mes_ok"
+    ).all().map(r => r.v);
     res.json({ ok: true, data: {
       dimensiones: Object.entries(DIMENSIONES).map(([k, d]) => ({ k, label: d.label })),
       cliente: lista('cliente'), vendedor: lista('vendedor'),
       producto: lista('producto'), categoria: lista('categoria'),
       proveedor: lista('proveedor'), cate_clie: lista('cate_clie'),
-      periodo: rango, ve_margen: puedeVerMargen(req.user),
+      periodos, meses, ve_margen: puedeVerMargen(req.user),
     } });
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
@@ -159,14 +181,17 @@ router.get('/ventas/evolucion', requireAuth, (req, res) => {
   try {
     const { where, params } = armarWhere(req.query);
     const margen = puedeVerMargen(req.user);
+    // La serie va por MES COMERCIAL dentro de cada período: el gráfico tiene que arrancar en
+    // julio, como la campaña. Ordenar por período y después por mes_ok da justo eso, porque
+    // mes_ok trae el número adelante ('01-JULIO').
     const filas = db.prepare(`
-      SELECT ${periodoSQL} AS periodo,
-             CAST(anio AS INTEGER) AS anio, CAST(mes AS INTEGER) AS mes,
+      SELECT periodo, mes_ok,
              ROUND(SUM(kilos_tot), 0) AS kilos,
              ROUND(SUM(tot_dol), 0) AS facturacion_usd
              ${margen ? ', ROUND(SUM(rent_dol) * 100.0 / NULLIF(SUM(tot_dol),0), 1) AS rent_pct' : ''}
       FROM sheet_ventas ${where}
-      GROUP BY periodo ORDER BY periodo
+
+      GROUP BY periodo, mes_ok ORDER BY periodo, mes_ok
     `).all(...params);
     res.json({ ok: true, data: { filas, ve_margen: margen } });
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
@@ -184,6 +209,70 @@ router.get('/diagnostico', requireAuth, async (req, res) => {
   }
   try { res.json({ ok: true, data: await diagnostico() }); }
   catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// GET /api/informes/ventas/comparar — la MISMA agrupación, con una columna por período.
+// Es la tabla que el equipo ya arma en la planilla: MES OK en las filas, los períodos en las
+// columnas, y la suma de tot_dol adentro. Sirve para cualquier dimensión, no sólo el mes:
+// clientes comparando campañas, productos comparando campañas.
+//
+// El pivot se arma en JS y no con SQL dinámico: los períodos son datos, y meterlos en el
+// texto de la consulta para generar una columna por cada uno es exactamente cómo se abre un
+// agujero de inyección en una pantalla que sólo tiene que leer.
+router.get('/ventas/comparar', requireAuth, (req, res) => {
+  try {
+    const dimKey = DIMENSIONES[req.query.agrupar] ? req.query.agrupar : 'mes_ok';
+    const dim = DIMENSIONES[dimKey];
+    const { where, params } = armarWhere(req.query);
+    const margen = puedeVerMargen(req.user);
+    const cm = margen ? ', ROUND(SUM(rent_dol),0) AS rent_dol,'
+      + ' ROUND(SUM(rent_dol)*100.0/NULLIF(SUM(tot_dol),0),1) AS rent_pct' : '';
+
+    const filas = db.prepare(`
+      SELECT COALESCE(NULLIF(${dim.col}, ''), '(sin dato)') AS clave,
+             periodo,
+             ROUND(SUM(kilos_tot), 0) AS kilos,
+             ROUND(SUM(tot_dol), 0) AS facturacion_usd,
+             ROUND(SUM(total), 0) AS facturacion_ars
+             ${cm}
+      FROM sheet_ventas ${where}
+      GROUP BY clave, periodo
+    `).all(...params);
+
+    // Las columnas salen de los datos y van ordenadas: '2025-2026' antes que '2026-2027'.
+    const periodos = [...new Set(filas.map(f => f.periodo))].sort();
+    const mapa = new Map();
+    for (const f of filas) {
+      if (!mapa.has(f.clave)) mapa.set(f.clave, { clave: f.clave, por_periodo: {} });
+      mapa.get(f.clave).por_periodo[f.periodo] = f;
+    }
+    let salida = [...mapa.values()];
+
+    // Las dimensiones de tiempo van en orden cronológico; el resto, por el período MÁS
+    // NUEVO de mayor a menor — que es el que se está mirando cuando se compara contra el
+    // anterior. Ordenar por el viejo dejaría arriba a los que ya no compran.
+    const ultimo = periodos[periodos.length - 1];
+    salida.sort(DIM_CRONOLOGICAS.has(dimKey)
+      ? (a, b) => String(a.clave).localeCompare(String(b.clave))
+      : (a, b) => ((b.por_periodo[ultimo] || {}).facturacion_usd || 0)
+                - ((a.por_periodo[ultimo] || {}).facturacion_usd || 0));
+    const truncado = salida.length > 300;
+    salida = salida.slice(0, 300);
+
+    // Totales por período, de su propia consulta: sumando la tabla recortada darían de menos.
+    const totales = db.prepare(`
+      SELECT periodo, ROUND(SUM(kilos_tot),0) AS kilos, ROUND(SUM(tot_dol),0) AS facturacion_usd,
+             ROUND(SUM(total),0) AS facturacion_ars ${cm}
+      FROM sheet_ventas ${where} GROUP BY periodo ORDER BY periodo
+    `).all(...params).reduce((m, r) => { m[r.periodo] = r; return m; }, {});
+
+    const est = estadoSync();
+    res.json({ ok: true, data: {
+      agrupar: dimKey, label: dim.label, periodos, filas: salida, totales, truncado,
+      ve_margen: margen,
+      sync: { ultimo_ok: est.ultimo_ok, desactualizado: est.datos_desactualizados },
+    } });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
 export default router;
