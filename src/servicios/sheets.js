@@ -185,6 +185,55 @@ async function getGoogleToken() {
 }
 
 // ── Leer rango del sheet ───────────────────────────────────────────────────
+// ── LEER UN NÚMERO DE LA PLANILLA ────────────────────────────────────────────────────
+// La API de Sheets devuelve el valor COMO SE VE, no el número crudo. Una celda de dólares
+// formateada como "U$ 510.704" llega así, con el prefijo adentro, y parseFloat() de eso da
+// NaN → 0. Los pesos entraban bien sólo porque esa columna no tiene prefijo: por eso el
+// informe mostraba la facturación en pesos correcta y los dólares todos en cero.
+//
+// Además hay que decidir qué es el separador decimal, y eso no es obvio:
+//   "510.704"    → 510704      (punto de miles, es-AR)
+//   "1.234,56"   → 1234.56     (coma decimal, es-AR)
+//   "1,234.56"   → 1234.56     (coma de miles, en-US)
+//   "12,5"       → 12.5        (coma decimal)
+// La regla: si están los dos separadores, el ÚLTIMO es el decimal. Si hay uno solo, es
+// decimal salvo que venga seguido de exactamente tres dígitos al final, que es la firma del
+// separador de miles. Equivocarse acá no da error: da un número mil veces más grande o más
+// chico, que es peor.
+export function num(v) {
+  if (v == null || v === '') return 0;
+  if (typeof v === 'number') return isFinite(v) ? v : 0;
+  let s = String(v).trim();
+  if (!s) return 0;
+  // Contabilidad: (1.234) es negativo.
+  const negParen = /^\(.*\)$/.test(s);
+  // Se van el prefijo de moneda, los espacios (incluido el fino que mete Excel) y el %.
+  s = s.replace(/[()]/g, '').replace(/[^\d.,\-]/g, '');
+  if (!s || s === '-') return 0;
+  const neg = negParen || s.startsWith('-');
+  s = s.replace(/-/g, '');
+
+  const ultPunto = s.lastIndexOf('.');
+  const ultComa = s.lastIndexOf(',');
+  let dec = -1;
+  if (ultPunto >= 0 && ultComa >= 0) {
+    dec = Math.max(ultPunto, ultComa);                 // el último manda
+  } else if (ultPunto >= 0 || ultComa >= 0) {
+    const p = Math.max(ultPunto, ultComa);
+    const sep = s[p];
+    const decimales = s.length - p - 1;
+    const veces = s.split(sep).length - 1;
+    // Un solo separador seguido de 3 dígitos: son miles ("510.704"). Si aparece más de una
+    // vez, son miles seguro ("1.000.000").
+    dec = (veces === 1 && decimales !== 3) ? p : -1;
+  }
+  const entera = (dec >= 0 ? s.slice(0, dec) : s).replace(/[.,]/g, '');
+  const frac = dec >= 0 ? s.slice(dec + 1).replace(/[.,]/g, '') : '';
+  const n = Number(entera + (frac ? '.' + frac : ''));
+  if (!isFinite(n)) return 0;
+  return neg ? -n : n;
+}
+
 async function leerRango(token, rango) {
   const url = `https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/${encodeURIComponent(rango)}`;
   const resp = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
@@ -239,12 +288,12 @@ async function syncCompras(token) {
           r[6]||null,  // guia
           r[9]||null,  // articulo (col J)
           r[10]||null, // envase
-          parseFloat(r[11])||0, // ingreso
-          parseFloat(r[12])||0, // convertidos
-          parseFloat(r[13])||0, // mermas
-          parseFloat(r[14])||0, // vendidos
-          parseFloat(r[15])||0, // promedio
-          parseFloat(r[16])||0, // tot_ventas
+          num(r[11]), // ingreso
+          num(r[12]), // convertidos
+          num(r[13]), // mermas
+          num(r[14]), // vendidos
+          num(r[15]), // promedio
+          num(r[16]), // tot_ventas
           JSON.stringify(r)
         );
         total++;
@@ -309,39 +358,39 @@ async function syncVentas(token) {
           r[7]||null,  // vendedor
           r[8]||null,  // cod_art
           r[9]||null,  // articulo
-          parseFloat(r[10])||0,  // cantidad
-          parseFloat(r[11])||0,  // precio
-          parseFloat(r[12])||0,  // total
+          num(r[10]),  // cantidad
+          num(r[11]),  // precio
+          num(r[12]),  // total
           r[13]||null,           // partida
           r[14]||null,           // partida_ok  (O)
           r[15]||null,           // sem         (P)
           r[16]||null,           // mes         (Q)
           r[17]||null,           // anio        (R)
           r[18]||null,           // cod_fecha   (S)
-          parseFloat(r[19])||0,  // precio_ok   (T)
-          parseFloat(r[20])||0,  // total_ok    (U)
-          parseFloat(r[21])||0,  // dol_dia     (V)
-          parseFloat(r[22])||0,  // prec_dol    (W)
-          parseFloat(r[23])||0,  // tot_dol     (X)
+          num(r[19]),  // precio_ok   (T)
+          num(r[20]),  // total_ok    (U)
+          num(r[21]),  // dol_dia     (V)
+          num(r[22]),  // prec_dol    (W)
+          num(r[23]),  // tot_dol     (X)
           r[24]||null,           // periodo     (Y)
           r[25]||null,           // producto    (Z)
           r[26]||null,           // kilaje      (AA)
-          parseFloat(r[27])||0,  // kilos_tot   (AB)
+          num(r[27]),  // kilos_tot   (AB)
           r[28]||null,           // categoria   (AC)
-          parseFloat(r[29])||0,  // costeo      (AD)
+          num(r[29]),  // costeo      (AD)
           r[30]||null,           // cate_clie   (AE)
           r[31]||null,           // subcategoria(AF)
-          parseFloat(r[32])||0,  // boni        (AG)
+          num(r[32]),  // boni        (AG)
           r[33]||null,           // proveedor   (AH)
-          parseFloat(r[34])||0,  // rent        (AI)
-          parseFloat(r[35])||0,  // rent_dol    (AJ)
+          num(r[34]),  // rent        (AI)
+          num(r[35]),  // rent_dol    (AJ)
           r[36]||null,           // mes_ok      (AK)
-          parseFloat(r[37])||0,  // des         (AL)
-          parseFloat(r[38])||0,  // flete_largo (AM)
-          parseFloat(r[39])||0,  // descargas   (AN)
-          parseFloat(r[40])||0,  // ifco        (AO)
-          parseFloat(r[41])||0,  // flete_super (AP)
-          parseFloat(r[42])||0,  // pct         (AQ)
+          num(r[37]),  // des         (AL)
+          num(r[38]),  // flete_largo (AM)
+          num(r[39]),  // descargas   (AN)
+          num(r[40]),  // ifco        (AO)
+          num(r[41]),  // flete_super (AP)
+          num(r[42]),  // pct         (AQ)
           r[43]||null,           // cat_pro     (AR)
           JSON.stringify(r)
         );
@@ -674,6 +723,17 @@ export async function diagnostico() {
         sospechosos: Object.entries(vacios).filter(([, v]) => v === 100).map(([k]) => k),
         muestra };
       if (n === 0) out.avisos.push(`${tabla} está VACÍA: o nunca corrió el sync, o el último falló.`);
+      // Un campo numérico SIEMPRE en cero, con la planilla llena, es formato de celda: la API
+      // devuelve el valor como se ve ("U$ 510.704") y el número queda adentro de un texto.
+      // Es lo que tenía en cero toda la columna de dólares mientras los pesos entraban bien.
+      const numericos = ['tot_dol', 'rent_dol', 'total', 'kilos_tot', 'prec_dol', 'total_ok',
+                         'ingreso', 'mermas', 'vendidos', 'tot_ventas'];
+      const enCero = numericos.filter(c => (vacios || {})[c] === 100);
+      if (n > 0 && enCero.length) {
+        out.avisos.push(`${tabla}: ${enCero.join(', ')} está(n) SIEMPRE en cero. Si en la planilla `
+          + 'tienen valores, es el formato de la celda: mirá la columna "Ejemplo" acá abajo — si el '
+          + 'dato viene con símbolo de moneda adentro, el número no se está pudiendo leer.');
+      }
       const sosp = out.tablas[key].sospechosos || [];
       if (sosp.length) out.avisos.push(`${tabla}: campos 100% vacíos → ${sosp.join(', ')}. `
         + 'Si en la planilla esas columnas tienen datos, el mapeo está corrido.');
