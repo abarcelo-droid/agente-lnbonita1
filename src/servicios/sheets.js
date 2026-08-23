@@ -200,6 +200,14 @@ async function getGoogleToken() {
 // decimal salvo que venga seguido de exactamente tres dígitos al final, que es la firma del
 // separador de miles. Equivocarse acá no da error: da un número mil veces más grande o más
 // chico, que es peor.
+// AHORA ES LA RED, NO EL CAMINO. Con UNFORMATTED_VALUE los números llegan como números y esta
+// función sale por la primera línea sin interpretar nada. Se queda igual porque una celda que
+// en la planilla es TEXTO —un "1.234" tipeado a mano, un "s/d", una fórmula que devuelve
+// string— sigue llegando como string, y sin esto entraría como 0.
+//
+// De la mitad para abajo esto ADIVINA cuál separador es el decimal. Adivinar mal no da error:
+// da un número mil veces más grande, que fue lo que dejó a un cliente con pesos negativos.
+// Por eso dejó de ser el camino normal.
 export function num(v) {
   if (v == null || v === '') return 0;
   if (typeof v === 'number') return isFinite(v) ? v : 0;
@@ -234,8 +242,19 @@ export function num(v) {
   return neg ? -n : n;
 }
 
+// EL NÚMERO CRUDO, NO EL QUE SE VE. Por defecto la API devuelve el valor FORMATEADO: una
+// celda de dólares sale "U$ 510.704" y una de pesos "1.234.567,89". De ese texto hay que
+// adivinar cuál separador es el decimal, y adivinar mal no da error — da un número MIL VECES
+// más grande. Fue lo que dejó a un cliente con pesos negativos y a otro con un tipo de cambio
+// implícito de 16.000.
+//
+// UNFORMATTED_VALUE devuelve el número tal cual está en la celda, sin símbolo ni separadores:
+// no hay nada que interpretar. Y dateTimeRenderOption=FORMATTED_STRING mantiene las fechas
+// como texto legible — sin eso volverían como el número de serie de Excel (45678) y las
+// pantallas que muestran la fecha del último movimiento quedarían mostrando eso.
 async function leerRango(token, rango) {
-  const url = `https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/${encodeURIComponent(rango)}`;
+  const url = `https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/${encodeURIComponent(rango)}`
+    + '?valueRenderOption=UNFORMATTED_VALUE&dateTimeRenderOption=FORMATTED_STRING';
   const resp = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
   const text = await resp.text();
   let data;
@@ -746,6 +765,29 @@ export async function diagnostico() {
         + 'Si en la planilla esas columnas tienen datos, el mapeo está corrido.');
     } catch (e) { out.tablas[key] = { error: e.message }; }
   }
+
+  // ── ¿Los pesos y los dólares se condicen? ────────────────────────────────────────
+  // Cada fila tiene su importe en pesos y en dólares. Dividirlos da el tipo de cambio de esa
+  // operación: si da negativo o se va de rango, uno de los dos números está mal leído. Es lo
+  // que delató el problema del formato — un cliente con pesos negativos y dólares positivos
+  // es aritméticamente imposible si las dos columnas describen lo mismo.
+  try {
+    const raras = db.prepare(`
+      SELECT cliente, periodo, ROUND(SUM(total),0) ars, ROUND(SUM(tot_dol),0) usd,
+             ROUND(SUM(total) / NULLIF(SUM(tot_dol), 0), 0) AS tc_implicito
+      FROM sheet_ventas
+      WHERE tot_dol <> 0 OR total <> 0
+      GROUP BY cliente, periodo
+      HAVING tc_implicito IS NULL OR tc_implicito < 100 OR tc_implicito > 5000
+      ORDER BY ABS(ars) DESC LIMIT 20
+    `).all();
+    out.coherencia = { fuera_de_rango: raras };
+    if (raras.length) {
+      out.avisos.push(`${raras.length} cliente(s) con un tipo de cambio implícito imposible `
+        + '(pesos ÷ dólares). Si alguno da NEGATIVO o miles de veces el dólar real, uno de los '
+        + 'dos importes se está leyendo mal. El primero: ' + raras[0].cliente + ' → ' + raras[0].tc_implicito + '.');
+    }
+  } catch (e) { out.coherencia = { error: e.message }; }
 
   out.sync = estadoSync();
   return out;
