@@ -26635,9 +26635,43 @@ function infPintarSync(s){
   var box=eid('inf-sync'); if(!box||!s) return;
   // Si el último sync falló, lo que se está mirando es de antes. Decirlo importa más que
   // el número: un total viejo se lee igual que uno fresco.
+  // Decir QUE falló sin decir POR QUÉ no sirve de nada: el motivo ya está guardado en el log,
+  // sólo había que mostrarlo. Y el botón para reintentar va acá, que es donde uno se entera.
+  var err=s.ultimo_error||null;
   box.innerHTML = s.desactualizado
-    ? '<span style="color:var(--err,#dc2626)">⚠ El último sync con la planilla falló. Estos datos son del '+esc(s.ultimo_ok||'?')+'.</span>'
-    : '<span style="color:var(--mut)">Datos al '+esc(s.ultimo_ok||'—')+' · '+nr(s.filas_ventas||0)+' operaciones en la base. Se sincroniza todas las noches.</span>';
+    ? '<div style="padding:9px 12px;border-radius:8px;border:1px solid var(--err,#dc2626);background:rgba(220,38,38,.07)">'
+      +'<div style="color:var(--err,#dc2626)"><b>⚠ El último sync con la planilla falló.</b> '
+      +'Estos datos son del '+esc(s.ultimo_ok||'?')+'.</div>'
+      +(err&&err.error?'<div style="color:var(--err,#dc2626);font-size:11.5px;margin-top:3px">Motivo: <code>'+esc(err.error)+'</code>'
+        +(err.creado_en?(' <span style="color:var(--mut)">('+esc(err.creado_en)+')</span>'):'')+'</div>':'')
+      +'<button class="btn bo bs" style="margin-top:6px" onclick="infSync()">🔄 Sincronizar ahora</button></div>'
+    : '<span style="color:var(--mut)">Datos al '+esc(s.ultimo_ok||'—')+' · '+nr(s.filas_ventas||0)+' operaciones en la base. '
+      +'Se sincroniza todas las noches. <a href="#" onclick="infSync();return false;">Sincronizar ahora</a></span>';
+}
+// Dispara el sync y ESPERA a que termine. Puede tardar: son cientos de miles de filas, así
+// que se avisa antes y se bloquea el botón para que no se dispare dos veces en paralelo.
+function infSync(){
+  if(INF.sincronizando) return;
+  INF.sincronizando=true;
+  toast('Sincronizando con la planilla… puede tardar un minuto','ok');
+  api('/api/informes/sync','POST',{}).then(function(r){
+    INF.sincronizando=false;
+    if(r&&r.ok){
+      toast('Sync OK — '+nr((r.data&&r.data.ventas)||0)+' ventas y '+nr((r.data&&r.data.compras)||0)+' compras','ok');
+      infCargar();
+      return;
+    }
+    // El motivo se muestra completo y no se resume: es lo único que permite arreglarlo.
+    var m=(r&&r.error)||'Error desconocido';
+    toast('El sync falló: '+m,'er');
+    var box=eid('inf-sync');
+    if(box) box.innerHTML='<div style="padding:9px 12px;border-radius:8px;border:1px solid var(--err,#dc2626);background:rgba(220,38,38,.07);color:var(--err,#dc2626)">'
+      +'<b>El sync falló.</b><div style="font-size:11.5px;margin-top:3px">Motivo: <code>'+esc(m)+'</code></div>'
+      +'<button class="btn bo bs" style="margin-top:6px" onclick="infSync()">🔄 Reintentar</button></div>';
+  }).catch(function(e){
+    INF.sincronizando=false;
+    toast('El sync falló: '+e.message,'er');
+  });
 }
 function infPintarKpis(t){
   if(!t){ eid('inf-kpis').innerHTML=''; return; }

@@ -693,7 +693,13 @@ export function estadoSync() {
   // igual que uno fresco — y si el último intento falló, más todavía.
   const ok = db.prepare("SELECT MAX(creado_en) f FROM sheet_sync_log WHERE tipo<>'error'").get();
   const ultimoError = db.prepare("SELECT creado_en, error FROM sheet_sync_log WHERE tipo='error' ORDER BY id DESC LIMIT 1").get();
-  const falloDespues = !!(ultimoError && ok && ok.f && ultimoError.creado_en > ok.f);
+  // Se compara por ID y no por fecha: creado_en tiene precisión de SEGUNDOS, y una corrida
+  // escribe la línea buena y la del error casi juntas. Con fechas empatadas, "el error es
+  // posterior" daba falso y la pantalla decía que todo estaba bien con el sync caído.
+  // El último renglón del log manda: si syncCompras falla, syncVentas ni corre, así que el
+  // error queda último.
+  const ultimo = db.prepare('SELECT tipo FROM sheet_sync_log ORDER BY id DESC LIMIT 1').get();
+  const falloDespues = !!(ultimo && ultimo.tipo === 'error');
   return { compras, ventas, log,
     ultimo_ok: (ok && ok.f) || null,
     ultimo_error: ultimoError || null,
