@@ -2666,6 +2666,10 @@ const r2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
 const _stmtAcordado = new WeakMap();
 function acordadoDeOC(db, ocId) {
   if (!_stmtAcordado.has(db)) _stmtAcordado.set(db, db.prepare(`SELECT i.id, i.precio_estimado_por_kg,
+      -- LA UNIDAD EN QUE SE PACTÓ. Es lo que el comprador eligió al cargar la
+      -- orden, y es lo que manda cuando hay diferencias: si compró bultos, la
+      -- orden se rehace por bultos; si compró kilos, por kilos.
+      i.modo_carga,
       COALESCE(i.kg_por_bulto, ps.factor_conversion) AS kg_por_bulto,
       (SELECT COALESCE(SUM(kg_reales),0) FROM sg_lotes WHERE oc_item_id=i.id AND activo=1) AS kg_recibidos,
       (SELECT COALESCE(SUM(bultos),0)    FROM sg_lotes WHERE oc_item_id=i.id AND activo=1) AS bultos_recibidos,
@@ -2696,7 +2700,17 @@ function acordadoDeOC(db, ocId) {
       // Ahora los cajones se pagan por cajón y el resto por kilo, que es
       // exactamente como se pactó cada parte.
       const kgSueltos = Math.max(0, r2(Number(it.kg_recibidos) - Number(it.kg_con_bultos)));
-      if (bultos > 0 && precioBulto != null) {
+      // Y LA BASE SALE DE LO QUE PACTÓ EL COMPRADOR, no de si alguien contó
+      // bultos. Antes: "si hay aunque sea un bulto contado, se cobra por bulto".
+      // Eso decidía por él. Un ítem comprado POR KILO se paga por kilo aunque haya
+      // entrado en cajones --el cajonó es cómo vino, no cómo se compró--.
+      //
+      // Si el ítem es viejo y no tiene modo_carga, se cae al comportamiento de
+      // antes: no hay dato de qué eligió, y suponer "kilo" cambiaría la cuenta de
+      // órdenes ya cerradas.
+      const porBulto = (it.modo_carga === 'bulto')
+        || (it.modo_carga == null && bultos > 0);
+      if (porBulto && bultos > 0 && precioBulto != null) {
         importe = r2(bultos * precioBulto + kgSueltos * pk);
         base = kgSueltos > 0 ? 'mixto' : 'bulto';
       } else {
@@ -3266,9 +3280,15 @@ router.post('/oc/:id/factura-completa', facturaUpload.single('archivo'), require
         JOIN sg_oc o ON o.id=fo.oc_id WHERE fo.factura_id=?`).all(id).map((x) => x.trazabilidad);
       const nroFacAs = (val(b.punto_venta) ? val(b.punto_venta) + '-' : '') + (val(b.numero) || '');
       const facParaGestion = db.prepare('SELECT * FROM sg_facturas_compra WHERE id=?').get(id);
+      // EL NOMBRE DEL PROVEEDOR EN LA DESCRIPCIÓN. El listado de Asientos
+      // Contables muestra número de factura y partida, que son códigos: para
+      // saber de quién era el asiento había que abrirlo uno por uno.
+      const provNom = (db.prepare(`SELECT p.razon_social r FROM sg_proveedores p
+        JOIN sg_oc o ON o.proveedor_id = p.id WHERE o.id = ?`).get(oc.id) || {}).r;
       const asientoId = crearAsiento(db, {
         fecha: val(b.fecha_emision), usuario_id: uid(req),
-        descripcion: 'Compra de mercadería — Factura ' + nroFacAs
+        descripcion: 'Compra de mercadería' + (provNom ? ' — ' + provNom : '')
+          + ' — Factura ' + nroFacAs
           + (partidasTraza.length
               ? ' — Partida' + (partidasTraza.length > 1 ? 's ' : ' ') + partidasTraza.join(', ') : ''),
         ref_compra_id: id, ref_codigo: nroFacAs,
@@ -3567,14 +3587,19 @@ router.put('/lotes/:id/calidad', requireAuth, (req, res) => {
 // —primero se anula el asiento— ni una de la que ya se despachó mercadería, y eso
 // lo controla frenosDeEdicionLote(). El rol decide QUÉ se puede tocar:
 //
-//   · EL CONTEO DE BULTOS lo corrige el operador. "Conté 100 y eran 90" es lo que
-//     pasa de verdad, y el que se da cuenta está en el depósito. Los kilos se
-//     recalculan solos con el kg por bulto de la partida: no se le pide que haga
-//     la cuenta, porque el sistema ya la hace en todos lados.
+// LOS BULTOS RECIBIDOS NO SE CORRIGEN. Decisión de Pablo: los bultos son lo que
+// se contó al bajar el camión, y es el número con el que el comprador cierra la
+// compra. Si entraron 100 de más, no se "corrige" el conteo: se arregla la ORDEN
+// por el precio del bulto, que es otra pantalla y otra decisión.
 //
-//   · EL PESO LIBRE Y EL PRECIO son de administración. Ahí no se está corrigiendo
-//     un conteo: se está cambiando lo que costó la mercadería y lo que se le debe
-//     al proveedor.
+// Los KILOS sí --la balanza se tipea mal-- y la CALIDAD también, por su camino.
+//
+// Y EL PERMISO YA NO SE MIRA POR CAMPO. En la V788 esto preguntaba si el usuario
+// era admin para dejarlo tocar el precio o el peso. Desde la V795 las cantidades
+// se corrigen en Ingresos y el precio en la orden, que son dos pantallas de dos
+// módulos distintos: el permiso lo decide exigirNivel mirando la dirección, como
+// en todo el resto del repo. Un `if (rol === 'admin')` suelto acá adentro era el
+// mismo candado escrito dos veces, y el de adentro no lo administra nadie.
 router.put('/lotes/:id/corregir', requireAuth, (req, res) => {
   const db = getDb();
   try {
@@ -3594,32 +3619,20 @@ router.put('/lotes/:id/corregir', requireAuth, (req, res) => {
           ? (db.prepare('SELECT factor_conversion f FROM sg_presentaciones WHERE id=?')
                .get(prev.presentacion_id) || {}).f
           : null);
-    // ── QUÉ ESTÁ TOCANDO, Y SI PUEDE ──────────────────────────────────────
-    const esAdmin = (req.user && req.user.rol) === 'admin';
-    const tocaPrecio = b.precio_unitario_kg !== undefined
-      && numF(b.precio_unitario_kg) !== prev.precio_unitario_kg;
+    // ── LOS BULTOS NO SE TOCAN ────────────────────────────────────────────
+    // Se rechaza en vez de ignorarlo en silencio: quien mandó el número cree que
+    // lo cambió, y descubrirlo un mes después es peor que un error ahora.
     const bultosPedidos = (b.bultos === '' || b.bultos == null) ? null : Math.round(Number(b.bultos));
-    // El peso es "libre" cuando NO sale del conteo: o la partida no tiene factor,
-    // o los kilos que mandan no son los que dan esos bultos. Eso es cambiar la
-    // balanza, no el conteo.
-    const kgPedidos = numF(b.kg_reales);
-    const kgDelConteo = (bultosPedidos != null && kpbPrev > 0) ? r2(bultosPedidos * kpbPrev) : null;
-    const tocaPesoLibre = kgPedidos != null && kgPedidos !== prev.kg_reales
-      && !(kgDelConteo != null && Math.abs(r2(kgPedidos - kgDelConteo)) <= 1);
-    if (!esAdmin && (tocaPrecio || tocaPesoLibre)) {
-      return res.status(403).json({ ok: false,
-        error: tocaPrecio
-          ? 'El precio de la partida lo corrige un administrador: cambia lo que costó la mercadería '
-            + 'y lo que se le debe al proveedor.'
-          : 'El peso lo corrige un administrador. Vos podés corregir el CONTEO de bultos, y los '
-            + 'kilos se recalculan solos con el kg por bulto de la partida.' });
+    if (bultosPedidos != null && bultosPedidos !== prev.bultos) {
+      return res.status(400).json({ ok: false,
+        error: 'Los bultos recibidos no se corrigen: son los que se contaron al bajar el camión. '
+             + 'Si entraron ' + Math.abs(bultosPedidos - (prev.bultos || 0)) + ' de '
+             + (bultosPedidos > (prev.bultos || 0) ? 'más' : 'menos') + ', lo que se arregla es la '
+             + 'ORDEN DE COMPRA, por el precio del bulto. Acá se corrigen los kilos.' });
     }
-    // Si corrige el conteo y no manda kilos, se derivan: es la cuenta que el
-    // sistema hace en todos lados, y pedírsela a mano es pedirle que se equivoque.
-    if (!esAdmin && kgDelConteo != null && kgPedidos == null) b.kg_reales = kgDelConteo;
     const nuevo = {
       kg_reales: numF(b.kg_reales) != null ? numF(b.kg_reales) : prev.kg_reales,
-      bultos: (b.bultos === '' || b.bultos == null) ? prev.bultos : Math.round(Number(b.bultos)),
+      bultos: prev.bultos,   // no se corrigen: ver arriba
       calidad: b.calidad !== undefined ? val(b.calidad) : prev.calidad,
       precio_unitario_kg: b.precio_unitario_kg !== undefined
         ? numF(b.precio_unitario_kg) : prev.precio_unitario_kg,
@@ -3647,16 +3660,22 @@ router.put('/lotes/:id/corregir', requireAuth, (req, res) => {
           ? (db.prepare('SELECT factor_conversion f FROM sg_presentaciones WHERE id=?')
                .get(prev.presentacion_id) || {}).f
           : null);
-    if (nuevo.bultos > 0 && kpb > 0) {
-      const kgQueDanLosBultos = r2(nuevo.bultos * kpb);
-      if (Math.abs(r2(nuevo.kg_reales - kgQueDanLosBultos)) > 1) {
-        return res.status(400).json({ ok: false,
-          error: nuevo.bultos + ' bultos de ' + kpb + ' kg dan ' + kgQueDanLosBultos + ' kg, y estás '
-               + 'poniendo ' + nuevo.kg_reales + '. Corregí los dos: el despacho descuenta por bultos '
-               + 'y el costo por kilos, y si no cierran entre sí el stock queda mal.',
-          kg_sugeridos: kgQueDanLosBultos,
-          bultos_sugeridos: Math.round(nuevo.kg_reales / kpb) });
-      }
+    // AHORA QUE LOS BULTOS NO SE TOCAN, ESTO NO PUEDE SER UN RECHAZO. Si los
+    // 100 cajones pesaron 1.900 y no 2.000, el que está mal no es ninguno de los
+    // dos números: es el KG POR BULTO, que era una estimación. Los cajones pesan
+    // lo que pesan.
+    //
+    // Se recalcula el factor del lote (kilos / bultos) y la correspondencia
+    // sigue cerrando, que es lo que este freno defiende: el despacho descuenta
+    // por bultos y el costo por kilos, y si no cierran entre sí el stock se va a
+    // negativo en una unidad mientras la otra dice cero.
+    //
+    // Rechazar dejaba los kilos CLAVADOS: sin poder tocar los bultos, no había
+    // forma de escribir un peso distinto al que daba la cuenta vieja.
+    let kpbNuevo = null;
+    if (nuevo.bultos > 0 && kpb > 0
+        && Math.abs(r2(nuevo.kg_reales - r2(nuevo.bultos * kpb))) > 1) {
+      kpbNuevo = +(nuevo.kg_reales / nuevo.bultos).toFixed(4);
     }
 
     db.transaction(() => {
@@ -3669,9 +3688,15 @@ router.put('/lotes/:id/corregir', requireAuth, (req, res) => {
       const costoBase = nuevo.precio_unitario_kg != null
         ? r2(nuevo.kg_reales * nuevo.precio_unitario_kg) : 0;
       db.prepare(`UPDATE sg_lotes SET kg_reales=?, bultos=?, calidad=?, precio_unitario_kg=?,
-        costo_base=?, modificado_en=datetime('now','localtime'), modificado_por=? WHERE id=?`)
+        costo_base=?, kg_por_bulto=COALESCE(?, kg_por_bulto),
+        modificado_en=datetime('now','localtime'), modificado_por=? WHERE id=?`)
         .run(nuevo.kg_reales, nuevo.bultos, nuevo.calidad, nuevo.precio_unitario_kg,
-             costoBase, uid(req), prev.id);
+             costoBase, kpbNuevo, uid(req), prev.id);
+      // El factor nuevo se anota: es un dato que cambió, no un detalle interno.
+      if (kpbNuevo != null) {
+        anotarEdicion(db, { tabla: 'sg_lotes', registroId: prev.id, campo: 'kg_por_bulto',
+          antes: kpb, despues: kpbNuevo, motivo: motivo, ocId: prev.oc_id, userId: uid(req) });
+      }
       // Y lo que cuelga de esos kilos: el costo con sus gastos, y el período.
       recalcCostoLote(db, prev.id);
       if (prev.fecha_ingreso) recalcPeriodo(db, String(prev.fecha_ingreso).slice(0, 7));
@@ -3971,7 +3996,12 @@ router.post('/oc/:id/contabilizar', requireAdmin, (req, res) => {
     const partidas = db.prepare(`SELECT o.trazabilidad FROM sg_factura_compra_ocs fo
       JOIN sg_oc o ON o.id=fo.oc_id WHERE fo.factura_id=?`).all(fac.id).map((x) => x.trazabilidad);
     const nroFac = (fac.punto_venta ? fac.punto_venta + '-' : '') + (fac.numero || '');
-    const desc = 'Compra de mercadería — Factura ' + nroFac
+    // El nombre del proveedor va en la descripción: sin él, el listado de
+    // Asientos Contables es una lista de códigos y hay que abrir uno por uno.
+    const provNom2 = (db.prepare('SELECT razon_social r FROM sg_proveedores WHERE id=?')
+      .get(fac.proveedor_id) || {}).r;
+    const desc = 'Compra de mercadería' + (provNom2 ? ' — ' + provNom2 : '')
+      + ' — Factura ' + nroFac
       + (partidas.length ? ' — Partida' + (partidas.length > 1 ? 's ' : ' ') + partidas.join(', ') : '');
 
     let asientoId;
