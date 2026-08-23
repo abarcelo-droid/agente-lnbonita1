@@ -26578,6 +26578,15 @@ function infDiagPintar(d){
 // en el navegador obligaría a bajar la tabla entera, que son cientos de miles de filas.
 var INF = { opts:null, orden:'facturacion_usd', desc:true, filas:[], veMargen:false, t:null };
 
+// nr() redondea a entero, y lo usa TODO el panel: no se toca. Pero hay dos columnas donde el
+// entero borra el dato — US$/kg mostraba 0 y 1 cuando el valor real es 1,15 o 0,87, y la
+// rentabilidad mostraba 11 en vez de 11,2. El backend ya los manda redondeados (2 y 1
+// decimales); lo que faltaba era no aplastarlos al pintar.
+function nrDec(n, d){
+  if(n==null || n==='' || isNaN(parseFloat(n))) return '—';
+  return parseFloat(n).toLocaleString('es-AR',{minimumFractionDigits:d, maximumFractionDigits:d});
+}
+
 function infInit(){
   if(INF.opts){ infCargar(); return; }
   api('/api/informes/ventas/opciones').then(function(r){
@@ -26710,7 +26719,7 @@ function infPintarKpis(t){
   var k=function(l,v,sub){ return '<div class="inf-kpi"><div style="font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:var(--mut)">'+l+'</div>'
     +'<b>'+v+'</b><div style="font-size:11px;color:var(--mut)">'+(sub||'')+'</div></div>'; };
   var h=k('Facturación','US$ '+nr(t.facturacion_usd||0), sgMoney(Math.round(t.facturacion_ars||0)))
-    + k('Kilos', nr(t.kilos||0), (t.usd_por_kg!=null?('US$ '+nr(t.usd_por_kg)+'/kg'):''))
+    + k('Kilos', nr(t.kilos||0), (t.usd_por_kg!=null?('US$ '+nrDec(t.usd_por_kg,2)+'/kg'):''))
     + k('Operaciones', nr(t.operaciones||0), nr(t.clientes||0)+' cliente(s)');
   // El margen sólo si el nivel alcanza. El backend directamente no lo manda si no.
   if(INF.veMargen && t.rent_pct!=null){
@@ -26749,8 +26758,10 @@ function infPintarTabla(d){
       if(c[0]==='facturacion_ars') return '<td style="text-align:right">'+sgMoney(Math.round(v||0))+'</td>';
       if(c[0]==='rent_pct'){
         var col=(v||0)>=0?'#16a34a':'var(--err,#dc2626)';
-        return '<td style="text-align:right;color:'+col+';font-weight:600">'+(v!=null?nr(v)+'%':'—')+'</td>';
+        return '<td style="text-align:right;color:'+col+';font-weight:600">'+(v!=null?nrDec(v,1)+'%':'—')+'</td>';
       }
+      // US$/kg es el único importe chico de la tabla: con entero, 1,15 se ve 1 y 0,87 se ve 1.
+      if(c[0]==='usd_por_kg') return '<td style="text-align:right">'+nrDec(v,2)+'</td>';
       return '<td style="text-align:right">'+(v!=null?nr(v):'—')+'</td>';
     }).join('')+'</tr>';
   }).join('') : '<tr><td colspan="'+cols.length+'" class="emp">No hay ventas con esos filtros.</td></tr>';
