@@ -14,7 +14,7 @@
 // 'operar' o más. Admin ve todo (nivelEnModulo le devuelve 'anular').
 import express from 'express';
 import db from '../servicios/db.js';
-import { estadoSync, diagnostico } from '../servicios/sheets.js';
+import { estadoSync, diagnostico, syncSheets } from '../servicios/sheets.js';
 import { nivelEnModulo } from '../servicios/permisos.js';
 
 const router = express.Router();
@@ -142,7 +142,7 @@ router.get('/ventas', requireAuth, (req, res) => {
       truncado: filas.length >= 500,
       ve_margen: margen,
       // De cuándo es el dato. Un informe sin esto se lee como si fuera de recién.
-      sync: { ultimo_ok: est.ultimo_ok, desactualizado: est.datos_desactualizados,
+      sync: { ultimo_ok: est.ultimo_ok, desactualizado: est.datos_desactualizados, ultimo_error: est.ultimo_error,
               filas_ventas: est.ventas && est.ventas.n },
     } });
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
@@ -150,6 +150,37 @@ router.get('/ventas', requireAuth, (req, res) => {
 
 // GET /api/informes/ventas/opciones — qué poner en cada desplegable de filtro, y el rango
 // de períodos que hay cargado. Se pide una vez al entrar y no en cada consulta.
+// POST /api/informes/sync — correr el sync AHORA y decir cómo le fue.
+//
+// El que ya existía (POST /api/buscar/sync) contesta "iniciado en background" y se guarda el
+// error en la consola del servidor. O sea: el que aprieta el botón nunca se entera de por qué
+// falló, que es justo lo único que necesita saber. Este espera a que termine y devuelve el
+// motivo si se cayó.
+//
+// Sólo admin: pega contra Google y reescribe las dos tablas.
+router.post('/sync', requireAuth, express.json(), async (req, res) => {
+  if (!req.user || req.user.rol !== 'admin') {
+    return res.status(403).json({ ok: false, error: 'Solo administradores' });
+  }
+  try {
+    const antes = db.prepare('SELECT MAX(id) m FROM sheet_sync_log').get().m || 0;
+    await syncSheets();
+    // syncSheets() atrapa su propio error y lo deja en el log en vez de tirarlo: por eso el
+    // resultado se lee del log y no de un try/catch. Se miran sólo las filas NUEVAS, para no
+    // reportar un error viejo como si fuera de esta corrida.
+    const nuevas = db.prepare('SELECT tipo, filas, duracion_ms, error, creado_en FROM sheet_sync_log WHERE id > ? ORDER BY id').all(antes);
+    const err = nuevas.find(x => x.tipo === 'error');
+    if (err) return res.status(502).json({ ok: false, error: err.error || 'El sync falló sin dejar motivo', log: nuevas });
+    const est = estadoSync();
+    res.json({ ok: true, data: {
+      log: nuevas,
+      compras: est.compras && est.compras.n,
+      ventas: est.ventas && est.ventas.n,
+      ultimo_ok: est.ultimo_ok,
+    } });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
 router.get('/ventas/opciones', requireAuth, (req, res) => {
   try {
     const lista = (col) => db.prepare(
