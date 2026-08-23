@@ -3993,8 +3993,11 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
 
   <div class="inf-f">
     <div><label>Agrupar por</label><select id="inf-agrupar" onchange="infCargar()"></select></div>
-    <div><label>Desde</label><input type="month" id="inf-desde" onchange="infCargar()"></div>
-    <div><label>Hasta</label><input type="month" id="inf-hasta" onchange="infCargar()"></div>
+    <!-- El año comercial va de julio a junio: se elige el PERÍODO, no un rango de meses
+         calendario. Se pueden marcar varios para compararlos, que es como se mira acá. -->
+    <div style="min-width:220px"><label>Períodos <span style="color:var(--mut)">(varios = comparar)</span></label>
+      <div id="inf-periodos" style="display:flex;gap:5px;flex-wrap:wrap"></div></div>
+    <div><label>Mes comercial</label><select id="inf-mes-ok" onchange="infCargar()"></select></div>
     <div><label>Cliente</label><select id="inf-filtro-cliente" onchange="infCargar()"></select></div>
     <div><label>Vendedor</label><select id="inf-filtro-vendedor" onchange="infCargar()"></select></div>
     <div><label>Producto</label><select id="inf-filtro-producto" onchange="infCargar()"></select></div>
@@ -26587,21 +26590,35 @@ function infInit(){
       el.innerHTML='<option value="">— todos —</option>'+(r.data[k]||[]).map(function(v){
         return '<option value="'+esc(v)+'">'+esc(v)+'</option>'; }).join('');
     });
-    // Arranca en los últimos 12 meses de datos que HAY, no en los últimos 12 del calendario:
-    // si la planilla va atrasada, un rango por fecha de hoy abriría la pantalla vacía.
-    var p=r.data.periodo||{};
-    if(p.max){
-      eid('inf-hasta').value=infPerAInput(p.max);
-      // p.max-100 sobre un AAAAMM retrocede un año exacto (202608 → 202508). Se topea con
-      // el mínimo que hay cargado para no pedir un período anterior a la base.
-      eid('inf-desde').value=infPerAInput(Math.max(p.min||p.max, p.max-100));
-    }
+    // Los períodos como botones: arranca con los DOS más nuevos marcados, que es la
+    // comparación que se hace siempre (la campaña en curso contra la anterior).
+    INF.periodos=r.data.periodos||[];
+    INF.sel=INF.periodos.slice(0,2);
+    infPintarPeriodos();
+    var mo=eid('inf-mes-ok');
+    if(mo) mo.innerHTML='<option value="">— todos —</option>'+(r.data.meses||[]).map(function(m){
+      return '<option value="'+esc(m)+'">'+esc(m)+'</option>'; }).join('');
     infCargar();
   });
 }
-// 202608 ↔ '2026-08'
-function infPerAInput(p){ p=String(p); return p.slice(0,4)+'-'+p.slice(4,6); }
-function infInputAPer(v){ return v ? Number(String(v).replace('-','')) : ''; }
+// Un botón por período comercial. Marcar más de uno pasa a la vista COMPARATIVA, que es la
+// tabla que el equipo ya arma en la planilla: los meses en las filas y las campañas en las
+// columnas.
+function infPintarPeriodos(){
+  var box=eid('inf-periodos'); if(!box) return;
+  box.innerHTML=(INF.periodos||[]).map(function(p){
+    var on=(INF.sel||[]).indexOf(p)>=0;
+    return '<button type="button" class="btn '+(on?'bb':'bo')+' bs" onclick="infTogglePeriodo(\''+esc(p)+'\')">'+esc(p)+'</button>';
+  }).join('');
+}
+function infTogglePeriodo(p){
+  INF.sel=INF.sel||[];
+  var i=INF.sel.indexOf(p);
+  if(i>=0){ if(INF.sel.length===1) return; INF.sel.splice(i,1); }   // al menos uno marcado
+  else INF.sel.push(p);
+  INF.sel.sort();
+  infPintarPeriodos(); infCargar();
+}
 function infDebounce(){ clearTimeout(INF.t); INF.t=setTimeout(infCargar, 400); }
 function infLimpiar(){
   ['cliente','vendedor','producto','categoria'].forEach(function(k){ var e=eid('inf-filtro-'+k); if(e) e.value=''; });
@@ -26609,8 +26626,8 @@ function infLimpiar(){
 }
 function infParams(){
   var p=['agrupar='+encodeURIComponent(eid('inf-agrupar').value||'cliente'),
-         'desde='+infInputAPer(eid('inf-desde').value),
-         'hasta='+infInputAPer(eid('inf-hasta').value)];
+         'periodos='+encodeURIComponent((INF.sel||[]).join(','))];
+  var mo=(eid('inf-mes-ok')||{}).value; if(mo) p.push('mes_ok='+encodeURIComponent(mo));
   ['cliente','vendedor','producto','categoria'].forEach(function(k){
     var v=(eid('inf-filtro-'+k)||{}).value; if(v) p.push('filtro_'+k+'='+encodeURIComponent(v));
   });
@@ -26620,6 +26637,21 @@ function infParams(){
 function infCargar(){
   eid('inf-tbody').innerHTML='<tr><td class="emp">Calculando…</td></tr>';
   var qs=infParams();
+  // Con más de un período marcado se pide la comparativa; con uno solo, la tabla de siempre.
+  INF.comparando=(INF.sel||[]).length>1;
+  if(INF.comparando){
+    api('/api/informes/ventas/comparar?'+qs).then(function(r){
+      if(!r||!r.ok){ eid('inf-tbody').innerHTML='<tr><td class="emp">'+esc((r&&r.error)||'Error')+'</td></tr>'; return; }
+      INF.veMargen=!!r.data.ve_margen;
+      infPintarSync(r.data.sync);
+      eid('inf-kpis').innerHTML='';
+      infPintarComparativa(r.data);
+    });
+    api('/api/informes/ventas/evolucion?'+qs).then(function(r){
+      if(r&&r.ok) infPintarGrafico(r.data.filas||[]);
+    });
+    return;
+  }
   api('/api/informes/ventas?'+qs).then(function(r){
     if(!r||!r.ok){ eid('inf-tbody').innerHTML='<tr><td class="emp">'+esc((r&&r.error)||'Error')+'</td></tr>'; return; }
     INF.filas=r.data.filas||[]; INF.veMargen=!!r.data.ve_margen;
@@ -26692,6 +26724,52 @@ function infPintarTabla(d){
     ? '⚠ Se muestran las 500 primeras. Los totales de arriba SÍ incluyen todo — se calculan en el servidor, no sumando la tabla.'
     : '';
 }
+// La tabla comparativa: una columna por período, más la variación contra el anterior. Es la
+// misma que el equipo arma en la planilla (MES OK en las filas, las campañas en las columnas,
+// la suma de tot_dol adentro), pero sirve para cualquier dimensión, no sólo el mes.
+function infPintarComparativa(d){
+  var pers=d.periodos||[];
+  var money=function(v){ return v==null?'—':('US$ '+nr(v)); };
+  eid('inf-thead').innerHTML='<tr><th style="text-align:left">'+esc(d.label||'')+'</th>'
+    + pers.map(function(p){ return '<th style="text-align:right">'+esc(p)+'</th>'; }).join('')
+    // La variación sólo tiene sentido con exactamente dos períodos: con tres, "contra cuál"
+    // deja de ser obvio y un número ambiguo es peor que ninguno.
+    + (pers.length===2?'<th style="text-align:right">Var.</th>':'')
+    + '</tr>';
+  var celda=function(f,p){ var x=(f.por_periodo||{})[p]; return x?x.facturacion_usd:null; };
+  eid('inf-tbody').innerHTML=(d.filas||[]).map(function(f){
+    var h='<tr><td class="inf-nom">'+esc(f.clave||'')+'</td>'
+      + pers.map(function(p){
+          var v=celda(f,p);
+          // Sin dato en ese período se pone raya y no cero: "no vendió" y "no hay fila" son
+          // cosas distintas, y un cero hace que la variación diga -100% cuando no corresponde.
+          return '<td style="text-align:right">'+(v!=null?money(v):'<span style="color:var(--mut)">—</span>')+'</td>';
+        }).join('');
+    if(pers.length===2){
+      var a=celda(f,pers[0]), b=celda(f,pers[1]);
+      if(a!=null&&b!=null&&a!==0){
+        var pct=Math.round((b-a)/Math.abs(a)*1000)/10;
+        var col=pct>=0?'#16a34a':'var(--err,#dc2626)';
+        h+='<td style="text-align:right;color:'+col+';font-weight:600">'+(pct>=0?'+':'')+nr(pct)+'%</td>';
+      } else h+='<td style="text-align:right;color:var(--mut)">—</td>';
+    }
+    return h+'</tr>';
+  }).join('') || '<tr><td class="emp" colspan="'+(pers.length+2)+'">No hay ventas con esos filtros.</td></tr>';
+
+  // El total por período, de su propia consulta: sumando la tabla recortada daría de menos.
+  var t=d.totales||{};
+  var tot='<tr style="font-weight:700;border-top:2px solid var(--bor)"><td>TOTAL</td>'
+    + pers.map(function(p){ return '<td style="text-align:right">'+money((t[p]||{}).facturacion_usd)+'</td>'; }).join('');
+  if(pers.length===2){
+    var ta=(t[pers[0]]||{}).facturacion_usd, tb=(t[pers[1]]||{}).facturacion_usd;
+    var tp=(ta&&tb!=null)?Math.round((tb-ta)/Math.abs(ta)*1000)/10:null;
+    tot+='<td style="text-align:right;color:'+((tp||0)>=0?'#16a34a':'var(--err,#dc2626)')+'">'
+      +(tp!=null?((tp>=0?'+':'')+nr(tp)+'%'):'—')+'</td>';
+  }
+  eid('inf-tbody').innerHTML+=tot+'</tr>';
+  eid('inf-nota').innerHTML = (d.truncado?'⚠ Se muestran las 300 primeras filas. El TOTAL sí incluye todo. ':'')
+    + 'Comparando '+pers.length+' períodos · importes en dólares (suma de TOT DOL).';
+}
 // Evolución mes a mes, en canvas y sin librerías. Barras de facturación y, si el nivel
 // alcanza, la línea de rentabilidad encima: es la comparación que se quiere hacer.
 function infPintarGrafico(filas){
@@ -26709,9 +26787,12 @@ function infPintarGrafico(filas){
     var h=Math.max(1,((f.facturacion_usd||0)/max)*(H-58));
     x.fillStyle='#7c1d3f'; x.fillRect(px, H-28-h, bw, h);
     if(filas.length<=18){
-      x.fillStyle='var(--mut)'; x.fillStyle='#6b7280';
+      x.fillStyle='#6b7280';
       x.font='10px system-ui,sans-serif'; x.textAlign='center';
-      x.fillText(String(f.mes)+'/'+String(f.anio).slice(2), px+bw/2, H-14);
+      // mes_ok viene '01-JULIO': se muestran las tres primeras letras del nombre, que es lo
+      // que entra abajo de una barra angosta.
+      var et=String(f.mes_ok||'').split('-')[1]||String(f.mes_ok||'');
+      x.fillText(et.slice(0,3), px+bw/2, H-14);
     }
   });
   // La línea de rentabilidad va sobre su propia escala 0–100%: mezclarla con la de dólares
@@ -26737,6 +26818,9 @@ function infPintarGrafico(filas){
 function infExportar(){
   var cols=infCols();
   var filas=INF.filas||[];
+  // La comparativa tiene otra forma (una columna por período): exportarla con estas columnas
+  // daría un archivo vacío. Se avisa en vez de bajar algo que no sirve.
+  if(INF.comparando){ toast('Para bajar a Excel, dejá marcado un solo período','er'); return; }
   if(!filas.length){ toast('No hay nada para exportar','er'); return; }
   var lbl=eid('inf-agrupar').selectedOptions[0].textContent;
   var head=cols.map(function(c){ return c[0]==='clave'?lbl:(c[1]||c[0]); });
