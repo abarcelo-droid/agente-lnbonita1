@@ -208,19 +208,24 @@ async function syncCompras(token) {
   const BLOQUE = 5000;
   let fila = 2; // empieza en 2 (sin header)
   let total = 0;
-  const stmt = db.prepare(`
-    INSERT OR IGNORE INTO sheet_compras_tmp
-    (partida,fecha,nro_comprob,deposito,proveedor,guia,articulo,envase,ingreso,convertidos,mermas,vendidos,promedio,tot_ventas,raw)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-  `);
-
   // PRIMERO SE TRAE, DESPUÉS SE REEMPLAZA. Antes esto era un DELETE seguido de la carga:
   // si Google se cortaba en el medio —y se corta— la tabla quedaba a la mitad, o vacía si el
   // corte era justo después del DELETE. Nada se rompía a la vista: los informes mostraban
   // menos ventas y parecían buenos. Ahora se carga a una tabla aparte y el reemplazo pasa
   // recién cuando bajó todo; si falla, quedan los datos de ayer.
+  //
+  // LA TABLA SE CREA ANTES DEL prepare(). db.prepare() COMPILA el SQL en el momento, así que
+  // preparar un INSERT contra una tabla que todavía no existe tira "no such table" y el sync
+  // no arranca nunca. Con el INSERT apuntando a sheet_compras —que siempre existe— el orden
+  // daba igual; contra la temporal, no.
   db.exec("DROP TABLE IF EXISTS sheet_compras_tmp");
   db.exec("CREATE TABLE sheet_compras_tmp AS SELECT * FROM sheet_compras WHERE 0");
+
+  const stmt = db.prepare(`
+    INSERT OR IGNORE INTO sheet_compras_tmp
+    (partida,fecha,nro_comprob,deposito,proveedor,guia,articulo,envase,ingreso,convertidos,mermas,vendidos,promedio,tot_ventas,raw)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+  `);
 
   while (true) {
     const rango = `B COMPRAS!A${fila}:Q${fila + BLOQUE - 1}`;
@@ -277,6 +282,11 @@ async function syncVentas(token) {
   const BLOQUE = 5000;
   let fila = 2;
   let total = 0;
+  // La temporal se crea ANTES del prepare, por lo mismo que en compras: db.prepare() compila
+  // el SQL en el momento y contra una tabla inexistente tira "no such table".
+  db.exec("DROP TABLE IF EXISTS sheet_ventas_tmp");
+  db.exec("CREATE TABLE sheet_ventas_tmp AS SELECT * FROM sheet_ventas WHERE 0");
+
   const stmt = db.prepare(`
     INSERT OR IGNORE INTO sheet_ventas_tmp
     (id_venta,fecha,nro_comprob,cod_cli,cliente,alias,cod_vend,vendedor,cod_art,articulo,cantidad,precio,total,partida,
@@ -286,9 +296,6 @@ async function syncVentas(token) {
             ?,?,?,?,?,?,?,?,?,?,?,?,?,?,
             ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
   `);
-
-  db.exec("DROP TABLE IF EXISTS sheet_ventas_tmp");
-  db.exec("CREATE TABLE sheet_ventas_tmp AS SELECT * FROM sheet_ventas WHERE 0");
 
   while (true) {
     const rango = `B VENTAS!A${fila}:AR${fila + BLOQUE - 1}`;
