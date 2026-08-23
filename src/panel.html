@@ -13116,19 +13116,26 @@ function sgFdRender(){
     eid('sgfd-resumen').innerHTML=''; return;
   }
   cont.innerHTML=SG.fdItems.map(function(it,i){
-    var kg=Number(it.kg)||0, precio=Number(it.precio)||0;
-    var _kv=(it.kg_vigente!=null?it.kg_vigente:0);
-    var costoKg=_kv>0?((it.costo_final||0)/_kv):0;
-    var margen=kg*precio-kg*costoKg;
+    var kg=Number(it.kg)||0;
+    // EL PRODUCTO ARRIBA Y GRANDE; LA PARTIDA Y LOS KILOS ABAJO Y CHICOS.
+    // Antes iban en el mismo renglón, con el código de partida compitiendo con el
+    // nombre: el que factura tiene que ver QUÉ está facturando de un vistazo.
+    //
+    // Y SIN COSTO NI MARGEN. El margen salía en rojo porque todavía no se puso el
+    // precio: una alarma sobre algo que la persona está por hacer. El costo,
+    // además, es información de la compra en la pantalla del que vende.
     return '<div style="display:grid;grid-template-columns:1.7fr 0.7fr 0.8fr auto;gap:6px;align-items:center;margin-bottom:2px">'
-      +'<span style="font-size:12px">'+(it.semaforo?sgSemEmoji(it.semaforo)+' ':'')+esc(it.producto_nombre||'')+' · <code>'+esc(it.etiqueta)+'</code></span>'
+      +'<div>'
+        +'<div style="font-size:13.5px;font-weight:600;line-height:1.2">'
+          +(it.semaforo?sgSemEmoji(it.semaforo)+' ':'')+esc(it.producto_nombre||'')+'</div>'
+        +'<div style="font-size:11px;color:var(--mut);font-family:ui-monospace,monospace;margin-top:1px">'
+          +esc(it.etiqueta)+' · '+nr(kg)+' kg'
+          +(it.bultos_disponibles!=null?(' · disp '+it.bultos_disponibles+' cj'):'')+'</div>'
+      +'</div>'
       +'<input type="number" placeholder="cj" value="'+(it.bultos||'')+'" onchange="sgFdUpdBultos('+i+',this.value)">'
       +'<input type="number" placeholder="$/kg" value="'+(it.precio||'')+'" onchange="sgFdUpd('+i+',\'precio\',this.value)">'
       +'<button class="btn bd bs" onclick="sgFdDel('+i+')">×</button>'
-      +'<div style="font-size:11px;color:var(--mut);grid-column:1/-1;margin:-2px 0 4px">'+nr(kg)+'kg'
-        +(it.bultos_disponibles!=null?(' · disp '+it.bultos_disponibles+' cj'):'')
-        +(costoKg>0?(' · costo '+sgMoney(costoKg)+'/kg · margen <b style="color:'+(margen>=0?'#16a34a':'#dc2626')+'">'+sgMoney(margen)+'</b>'):'')
-      +'</div></div>';
+      +'</div>';
   }).join('');
   // El resumen espeja la cuenta del backend: si el precio incluye IVA, el neto
   // se saca dividiendo, no restando.
@@ -13796,18 +13803,26 @@ function sgDespRender(){
   eid('sg-desp-lines').innerHTML=SG.despItems.map(function(it,i){
     var enViaje=it.origen==='oc_item';
     var lote=enViaje?null:sgDespLoteDe(it);
-    var _kv=lote?(lote.kg_vigente!=null?lote.kg_vigente:lote.kg_disponibles):0;
-    var costoKg=_kv>0?((lote.costo_final||0)/_kv):0;
-    var kg=Number(it.kg)||0, precio=Number(it.precio)||0;
-    var margen=kg*precio - kg*costoKg;
+    var kg=Number(it.kg)||0;
     var pnombre=it.producto_nombre||(SG.cacheProd.find(function(x){return String(x.id)===String(it.producto_id);})||{}).nombre||'';
     // De la mercadería en viaje todavía no se sabe el costo si la compra es a
     // pizarra: no se muestra un margen inventado.
+    // EL PRODUCTO ARRIBA Y GRANDE; LA PARTIDA Y LOS KILOS ABAJO. Y SIN COSTO NI
+    // MARGEN: en el remito no se decide con el margen —sale en rojo porque
+    // todavía no hay precio— y el costo es información de la compra.
+    var sub = esc(it.etiqueta||'') + ' · ' + nr(kg) + ' kg'
+      + (enViaje
+          ? (it.bultos_disponibles!=null?(' · quedan '+it.bultos_disponibles+' cj en viaje'):'')
+          : (it.bultos_disponibles!=null?(' · disp '+it.bultos_disponibles+' cj'):''));
     var info = enViaje
-      ? '<div style="font-size:11px;color:var(--mut);grid-column:1/-1;margin:-2px 0 4px">🚚 todavía no llegó · '+nr(kg)+'kg'+(it.bultos_disponibles!=null?(' · quedan '+it.bultos_disponibles+' cj en viaje'):'')+' · el costo se sabe al recibirla</div>'
-      : (lote ? '<div style="font-size:11px;color:var(--mut);grid-column:1/-1;margin:-2px 0 4px">'+nr(kg)+'kg'+(it.bultos_disponibles!=null?(' · disp '+it.bultos_disponibles+' cj'):'')+(costoKg>0?(' · costo '+sgMoney(costoKg)+'/kg · margen <b style="color:'+(margen>=0?'#16a34a':'#dc2626')+'">'+sgMoney(margen)+'</b>'):'')+'</div>' : '');
+      ? '<div style="font-size:11px;color:var(--mut);grid-column:1/-1;margin:-2px 0 4px">🚚 Todavía no llegó: sale del depósito cuando se reciba</div>'
+      : '';
     return '<div style="display:grid;grid-template-columns:1.7fr 0.7fr 0.8fr auto;gap:6px;align-items:center;margin-bottom:2px">'
-      +'<span style="font-size:12px">'+(enViaje?'🚚 ':(lote&&lote.semaforo?sgSemEmoji(lote.semaforo)+' ':''))+esc(pnombre)+' · <code>'+esc(it.etiqueta||'')+'</code></span>'
+      +'<div>'
+        +'<div style="font-size:13.5px;font-weight:600;line-height:1.2">'
+          +(enViaje?'🚚 ':(lote&&lote.semaforo?sgSemEmoji(lote.semaforo)+' ':''))+esc(pnombre)+'</div>'
+        +'<div style="font-size:11px;color:var(--mut);font-family:ui-monospace,monospace;margin-top:1px">'+sub+'</div>'
+      +'</div>'
       +'<input type="number" placeholder="cj" value="'+(it.bultos||'')+'" onchange="sgDespUpdBultos('+i+',this.value)">'
       +'<input type="number" placeholder="$/kg sugerido" value="'+(it.precio||'')+'" onchange="sgDespUpdNR('+i+',\'precio\',this.value)">'
       +'<button class="btn bd bs" onclick="sgDespDelItem('+i+')">×</button>'
@@ -13818,19 +13833,18 @@ function sgDespRender(){
   }).join('');
   sgDespTotal();
 }
+// EL PIE DEL REMITO YA NO MUESTRA MARGEN. Salía en rojo mientras no hubiera
+// precio cargado —"Margen estimado: -$675.000"—, o sea una alarma sobre algo que
+// la persona recién está empezando a hacer. En el remito importa qué sale del
+// depósito; el margen se mira en Informes, con la venta cerrada.
 function sgDespTotal(){
-  var tot=0, marg=0, sinCosto=0;
+  var tot=0, enViaje=0;
   SG.despItems.forEach(function(it){
-    var kg=Number(it.kg)||0, precio=Number(it.precio)||0;
-    tot+=kg*precio;
-    if(it.origen==='oc_item'){ sinCosto++; return; }   // el costo se sabe al recibirla
-    var lote=sgDespLoteDe(it);
-    var _kv=lote?(lote.kg_vigente!=null?lote.kg_vigente:lote.kg_reales):0;
-    var costoKg=_kv>0?((lote.costo_final||0)/_kv):0;
-    marg+=kg*precio-kg*costoKg;
+    tot += (Number(it.kg)||0) * (Number(it.precio)||0);
+    if(it.origen==='oc_item') enViaje++;
   });
-  eid('sg-desp-total').innerHTML='Total: '+sgMoney(tot)+' · Margen estimado: <span style="color:'+(marg>=0?'#16a34a':'#dc2626')+'">'+sgMoney(marg)+'</span>'
-    +(sinCosto?' <span style="font-size:11px;color:var(--mut)">(sin '+sinCosto+' renglón(es) en viaje: su costo se sabe al recibirlos)</span>':'');
+  eid('sg-desp-total').innerHTML='Total: '+sgMoney(tot)
+    +(enViaje?' <span style="font-size:11px;color:var(--mut)">('+enViaje+' renglón(es) todavía en viaje)</span>':'');
 }
 function sgDespGuardar(){
   var cli=eid('sg-desp-cli').value;
