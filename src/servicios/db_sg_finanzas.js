@@ -507,6 +507,15 @@ try {
   )`);
   // Los cuatro que estaban escritos en el panel, para que nada deje de andar el
   // día que esto se despliega. Si ya hay puntos cargados, no se toca nada.
+  // UN PUNTO DE VENTA DE PRUEBA. Sirve para recorrer el circuito entero
+  // —registrar, imprimir, ver el asiento y la cuenta corriente— SIN informarle
+  // nada a AFIP. Los comprobantes que salgan de él no son fiscales, así que
+  // tienen que poder dejarse afuera de los saldos y los informes.
+  try { db.exec("ALTER TABLE sg_puntos_venta ADD COLUMN es_prueba INTEGER NOT NULL DEFAULT 0"); } catch (_) {}
+  // Y la factura se queda con la marca: el punto de venta puede cambiar
+  // después, y lo que hay que saber es si ESE comprobante fue una prueba.
+  try { db.exec("ALTER TABLE sg_ven_facturas ADD COLUMN es_prueba INTEGER NOT NULL DEFAULT 0"); } catch (_) {}
+
   const hay = db.prepare('SELECT COUNT(*) c FROM sg_puntos_venta').get().c;
   if (!hay) {
     const ins = db.prepare("INSERT INTO sg_puntos_venta (numero, nombre, comprobantes) VALUES (?,?,'A,B')");

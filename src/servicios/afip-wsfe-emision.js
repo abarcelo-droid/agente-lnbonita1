@@ -193,21 +193,55 @@ function serializar(key, fn) {
   return run;
 }
 
-function persistirReservada(database, { comprobante, ptoVta, cbteTipo, cbteNro, ambiente, fecha, userId }) {
+// ── EL PUNTO DE VENTA DECIDE SI SE LLAMA A AFIP ───────────────────
+//
+// Hasta acá la emisión NO miraba la tabla de puntos de venta: recibía el número,
+// armaba el comprobante y llamaba a AFIP siempre. Los campos `emision` y
+// `ambiente` existían y no los leía nadie.
+//
+// Un punto de venta MANUAL numera solo y no le informa nada a AFIP. Sirve para
+// recorrer el circuito entero —remito, asiento, cuenta corriente, PDF— antes de
+// tener los certificados y los puntos de venta reales dados de alta.
+//
+// El PDF sale sin CAE ni QR, que es lo correcto: un comprobante sin CAE no es
+// fiscal, y hacerlo parecer uno sería peor que no tenerlo.
+export function puntoDeVenta(database, ptoVta) {
+  try {
+    return database.prepare(`SELECT numero, nombre, emision, ambiente, es_prueba
+      FROM sg_puntos_venta WHERE numero = ?`).get(Number(ptoVta)) || null;
+  } catch (_) { return null; }
+}
+export function esManual(pv) {
+  return !!pv && (pv.emision === 'manual' || pv.emision === 'preimpreso');
+}
+
+// El siguiente número de un punto de venta manual. Sale de lo que ya se emitió
+// acá —no hay a quién preguntarle— y por eso arranca en 1.
+export function proximoNumeroManual(database, ptoVta, cbteTipo) {
+  const r = database.prepare(`SELECT MAX(cbte_nro) n FROM sg_ven_facturas
+    WHERE punto_venta = ? AND cbte_tipo = ?`).get(Number(ptoVta), Number(cbteTipo));
+  return (r && r.n ? Number(r.n) : 0) + 1;
+}
+
+function persistirReservada(database, { comprobante, ptoVta, cbteTipo, cbteNro, ambiente, fecha, userId, manual, esPrueba }) {
   const tipoLetra = (cbteTipo === 1 || cbteTipo === 3) ? 'A' : 'B';
   // Identificador interno único (NO es el número fiscal: ese es PV + cbte_nro + CAE). Prefijo
   // ambiente-aware: AFIPH- en homologación (test), AFIP- en producción.
-  const prefijo = ambiente === 'homologacion' ? 'AFIPH-' : 'AFIP-';
+  // MANUAL- para que se distinga de un vistazo en cualquier listado: no salió de
+  // AFIP y no tiene CAE.
+  const prefijo = manual ? 'MANUAL-' : (ambiente === 'homologacion' ? 'AFIPH-' : 'AFIP-');
   const numero = prefijo + ptoVta + '-' + cbteTipo + '-' + cbteNro + '-' + Date.now().toString(36);
   let facturaId;
   database.transaction(() => {
     const info = database.prepare(`INSERT INTO sg_ven_facturas
       (numero, fecha, cliente_id, tipo, concepto, neto, iva, total, estado,
-       punto_venta, cbte_tipo, cbte_nro, ambiente, afip_estado, notas, usuario_id)
-      VALUES (?,?,?,?,?,?,?,?, 'pendiente', ?,?,?,?, 'reservado', ?, ?)`).run(
+       punto_venta, cbte_tipo, cbte_nro, ambiente, afip_estado, notas, usuario_id, es_prueba)
+      VALUES (?,?,?,?,?,?,?,?, 'pendiente', ?,?,?,?, 'reservado', ?, ?, ?)`).run(
       numero, fecha, comprobante.cliente.id, tipoLetra, 'Productos',
       comprobante.imp_neto, comprobante.imp_iva, comprobante.imp_total,
-      ptoVta, cbteTipo, cbteNro, ambiente, 'PRUEBA emisión homologación', userId || null);
+      ptoVta, cbteTipo, cbteNro, ambiente,
+      manual ? 'Comprobante manual — no se informó a AFIP' : 'PRUEBA emisión homologación',
+      userId || null, esPrueba ? 1 : 0);
     facturaId = info.lastInsertRowid;
     const insItem = database.prepare(`INSERT INTO sg_ven_factura_items
       (factura_id, descripcion, cantidad, precio_unitario, subtotal, producto_id, alicuota_id, bultos, kg_por_bulto, precio_por_bulto, unidad)
@@ -248,6 +282,40 @@ function confirmarAutorizada(database, facturaId, campos, vinculos) {
 export async function emitir(database, { ptoVta, clienteId, items, esNC, userId, vinculos }) {
   const comprobante = construirComprobante(database, { clienteId, items, esNC });
   const cbteTipo = comprobante.cbte_tipo;
+
+  // ── EL CORTE: UN PUNTO DE VENTA MANUAL NO LLAMA A AFIP ─────────────────
+  //
+  // Va ANTES de todo lo demás. Si estuviera después de pedir el último número
+  // autorizado, ya habría una llamada hecha — y el punto de todo esto es que no
+  // haya ninguna.
+  //
+  // El comprobante sale sin CAE, que es lo correcto: uno sin CAE no es fiscal, y
+  // hacerlo parecer uno sería peor que no tenerlo.
+  const pv = puntoDeVenta(database, ptoVta);
+  if (esManual(pv)) {
+    return serializar(ptoVta + ':' + cbteTipo, async () => {
+      const fecha = fechaHoyAR();
+      const cbteNro = proximoNumeroManual(database, ptoVta, cbteTipo);
+      const facturaId = persistirReservada(database, { comprobante, ptoVta, cbteTipo,
+        cbteNro, ambiente: 'manual', fecha, userId, manual: true,
+        esPrueba: !!(pv && pv.es_prueba) });
+      // La MISMA función que el camino de AFIP: cierra la factura y ata los
+      // despachos en una sola transacción. Escribir eso de nuevo acá sería dos
+      // maneras de hacer lo mismo, y una de las dos se olvidaría de algo.
+      confirmarAutorizada(database, facturaId, {
+        // NO se toca `estado`: queda en 'pendiente', que es lo que significa —
+        // el comprobante está emitido y todavía no se cobró. Es lo mismo que
+        // hace el camino de AFIP, que sólo escribe afip_estado. Poner 'emitida'
+        // rompía el CHECK de la tabla, que sólo admite pendiente/cobrada/anulada.
+        afip_estado: 'MANUAL — sin AFIP',
+      }, vinculos);
+      return { ok: true, factura_id: facturaId, pto_vta: Number(ptoVta),
+        cbte_tipo: cbteTipo, cbte_nro: cbteNro, cae: null, cae_vto: null,
+        manual: true, es_prueba: !!(pv && pv.es_prueba),
+        aviso: 'Comprobante MANUAL: no se le informó nada a AFIP y no tiene CAE.' };
+    });
+  }
+
   return serializar(ptoVta + ':' + cbteTipo, async () => {
     const ambiente = ambienteActual();
     const fecha = fechaHoyAR();
