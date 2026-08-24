@@ -580,9 +580,19 @@ router.get('/facturas/:id/pdf', async (req, res) => {
         c.direccion_entrega, c.localidad, c.provincia
       FROM sg_ven_facturas f JOIN sg_clientes c ON c.id=f.cliente_id WHERE f.id=?`).get(req.params.id);
     if (!f) return res.status(404).json({ ok: false, error: 'Factura no encontrada' });
-    if (f.afip_estado !== 'autorizado' || !f.cae) {
+    // EL COMPROBANTE MANUAL TAMBIÉN SE IMPRIME. Antes esto pedía CAE siempre, así
+    // que un comprobante emitido desde un punto de venta manual no se podía ver
+    // ni mandar — y sin eso no se puede probar el circuito, que es para lo que
+    // existe ese punto de venta.
+    //
+    // Lo que NO se hace es disfrazarlo: sale sin CAE ni QR, y con la leyenda de
+    // que no es un comprobante fiscal. Un papel que parece una factura y no lo
+    // es, es peor que no tenerlo.
+    const esManual = String(f.afip_estado || '').startsWith('MANUAL');
+    if (!esManual && (f.afip_estado !== 'autorizado' || !f.cae)) {
       return res.status(400).json({ ok: false, error: 'La factura no está autorizada por AFIP (sin CAE)' });
     }
+    f.sin_valor_fiscal = esManual ? 1 : 0;
     f.cliente = { razon_social: f.razon_social, cuit: f.cuit, categoria_fiscal: f.categoria_fiscal,
       direccion_entrega: f.direccion_entrega, localidad: f.localidad, provincia: f.provincia };
     f.items = db.prepare('SELECT * FROM sg_ven_factura_items WHERE factura_id=? ORDER BY id').all(f.id);
