@@ -2938,6 +2938,9 @@ router.get('/partidas/:id/venta', requireAuth, (req, res) => {
     //
     // flete_con_iva dice si el monto YA lo trae adentro: sin esa distinción se le
     // cobraría el IVA dos veces o ninguna.
+    // La alícuota de los servicios que le cobramos. La comisión va al 10,5 y la
+    // maneja la pantalla; acá sólo se prellenan la descarga y el flete, que van
+    // al 21.
     const IVA_SERVICIOS = 21;
     const fMonto = r2(oc.flete_monto);
     const fConIva = oc.flete_con_iva ? 1 : 0;

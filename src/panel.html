@@ -890,17 +890,36 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
   </div>
 
   <div class="sgc-sub" id="liq-sub-liqs" style="display:none">
+  <!-- ── LO MISMO QUE EN COMPRAS ─────────────────────────────────
+       Pablo: "arriba necesito lo mismo que en compras... filtros para separar
+       fiscal y gestión".
+       Las mismas tarjetas (sgCcTarjetas) y el mismo selector con las mismas
+       palabras que la cuenta corriente de proveedores: es el mismo corte sobre
+       los mismos datos, y llamarlo distinto en cada pantalla obliga a traducir
+       mentalmente. -->
+  <div id="liq-tarjetas" style="margin-bottom:12px"></div>
+  <div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap;margin-bottom:10px">
+    <div class="sg-oc-search" style="max-width:340px;flex:1;min-width:220px">
+      <input id="liq-q" placeholder="🔎 Buscar por número o remitente…" oninput="liqPintar()"
+             style="width:100%;box-sizing:border-box">
+    </div>
+    <label style="font-size:12px;color:var(--mut);display:flex;flex-direction:column;gap:3px">
+      <span>Libro:</span>
+      <select id="liq-libro" onchange="liqPintar()" style="padding:7px 10px;font-size:12.5px">
+        <option value="">Fiscal + Gestión</option>
+        <option value="fiscal">Sólo fiscal</option>
+        <option value="gestion">Sólo gestión</option>
+      </select></label>
+  </div>
   <div class="ab-card">
     <div class="ab-table-wrap">
       <table class="ab-table">
-        <thead><tr>
-          <th>N°</th><th>Fecha</th><th>Remitente</th>
-          <th style="text-align:right">Neto</th><th style="text-align:right">Total</th><th></th>
-        </tr></thead>
-        <tbody id="liq-tbody"><tr><td colspan="6"><div class="ab-empty">Cargando...</div></td></tr></tbody>
+        <thead id="liq-thead"></thead>
+        <tbody id="liq-tbody"><tr><td colspan="7"><div class="ab-empty">Cargando...</div></td></tr></tbody>
       </table>
     </div>
   </div>
+  <div id="liq-n" style="font-size:11.5px;color:var(--mut);margin-top:6px"></div>
   </div>
 </div>
 
@@ -10412,9 +10431,13 @@ function liqSub(cual){
   for (var i = 0; i < tabs.length; i++) {
     tabs[i].classList.toggle('on', tabs[i].getAttribute('data-sub') === cual);
   }
+  // SE ALTERNA CON LA CLASE, no con el style. El CSS de esta pantalla es
+  // `.sgc-sub{display:none}` y `.sgc-sub.on{display:block}`: poner style=''
+  // devuelve el control al CSS, y el CSS la vuelve a esconder. Por eso la solapa
+  // de Liquidaciones emitidas mostraba el contador y abajo NADA.
   var a = eid('liq-sub-liqs'), b = eid('liq-sub-partidas');
-  if (a) a.style.display = (cual === 'liqs') ? '' : 'none';
-  if (b) b.style.display = (cual === 'partidas') ? '' : 'none';
+  if (a) { a.classList.toggle('on', cual === 'liqs'); a.style.display = ''; }
+  if (b) { b.classList.toggle('on', cual === 'partidas'); b.style.display = ''; }
   // Las dos se recargan al entrar: los contadores de las solapas tienen que
   // decir la verdad, y liquidar una partida mueve las dos listas a la vez.
   if (cual === 'partidas') sgLiqPartidasLoad(); else liqCargar();
@@ -29320,27 +29343,96 @@ function _liqEsc(s){ return String(s==null?'':s).replace(/[&<>"']/g, c=>({'&':'&
 function _liqMoney(n){ if(n==null||isNaN(n))return ''; return '$ '+Number(n).toLocaleString('es-AR',{minimumFractionDigits:2,maximumFractionDigits:2}); }
 function _liqFecha(s){ if(!s)return''; var p=String(s).split('-'); return p.length===3?p[2]+'/'+p[1]+'/'+p[0]:s; }
 
+var LIQ_EMI = [];
 function liqCargar() {
   fetch('/api/liquidaciones', { credentials:'include' }).then(r=>r.json()).then(function(rows){
-    var tb = document.getElementById('liq-tbody');
-    if (typeof liqCnt === 'function') liqCnt('liq-cnt-emi', (rows && rows.length) || 0);
-    if (!rows || !rows.length) { tb.innerHTML = '<tr><td colspan="6"><div class="ab-empty"><div class="ab-empty-icon">📄</div>Sin liquidaciones emitidas. Se emiten desde una partida pendiente.</div></td></tr>'; return; }
-    tb.innerHTML = rows.map(function(r){
-      return '<tr>' +
-        '<td style="font-family:monospace"><b>'+_liqEsc(r.n_liquidacion)+'</b></td>' +
-        '<td>'+_liqFecha(r.fecha)+'</td>' +
-        '<td>'+_liqEsc(r.remitente_nombre||'')+'</td>' +
-        '<td style="text-align:right;font-variant-numeric:tabular-nums">'+_liqMoney(r.neto)+'</td>' +
-        '<td style="text-align:right;font-variant-numeric:tabular-nums"><b>'+_liqMoney(r.total)+'</b></td>' +
-        '<td style="display:flex;gap:4px">' +
-          '<button class="btn bo bs" onclick="window.open(\'/api/liquidaciones/'+r.id+'/pdf\',\'_blank\')" title="Ver PDF">📄</button>' +
-          '<button class="btn bo bs" onclick="liqEliminar('+r.id+')" style="color:#991b1b" title="Eliminar">🗑️</button>' +
-        '</td>' +
-      '</tr>';
-    }).join('');
+    LIQ_EMI = rows || [];
+    if (typeof liqCnt === 'function') liqCnt('liq-cnt-emi', LIQ_EMI.length);
+    liqPintar();
   });
 }
 
+// ── LAS EMITIDAS, CON EL MISMO CORTE QUE COMPRAS ────────────────────
+//
+// Pablo: "liquidaciones emitidas me debería permitir ver y reimprimir las
+// liquidaciones. Y arriba necesito lo mismo que en compras: filtros para
+// separar fiscal y gestión".
+//
+// El TOTAL de la liquidación es lo fiscal — es lo que dice el papel. La parte
+// de gestión vive en dif_gestion, igual que en la factura de compra.
+function liqPintar() {
+  var tb = document.getElementById('liq-tbody'); if (!tb) return;
+  var q = String((document.getElementById('liq-q') || {}).value || '').toLowerCase().trim();
+  var libro = (document.getElementById('liq-libro') || {}).value || '';
+  var rows = LIQ_EMI.filter(function(r){
+    if (!q) return true;
+    return String(r.n_liquidacion || '').toLowerCase().indexOf(q) >= 0
+        || String(r.remitente_nombre || '').toLowerCase().indexOf(q) >= 0;
+  });
+
+  // Las tarjetas: la MISMA función que la cuenta corriente de proveedores.
+  var cont = document.getElementById('liq-tarjetas');
+  if (cont) {
+    var ges = Math.round(rows.reduce(function(a, r){ return a + (Number(r.dif_gestion) || 0); }, 0) * 100) / 100;
+    var fis = Math.round(rows.reduce(function(a, r){ return a + (Number(r.total) || 0); }, 0) * 100) / 100;
+    cont.innerHTML = !rows.length ? ''
+      : (libro === 'fiscal' ? sgCcTarjetas(fis, 0, 'Liquidado — con comprobante')
+        : (libro === 'gestion' ? sgCcTarjetas(0, ges, 'Liquidado — sin comprobante')
+          : sgCcTarjetas(fis, ges, 'Liquidado en total')));
+  }
+
+  // Con un libro elegido, la columna del OTRO no se muestra: mezclarlas es
+  // justo lo que el filtro vino a evitar.
+  var th = document.getElementById('liq-thead');
+  if (th) {
+    th.innerHTML = '<tr><th>N°</th><th>Fecha</th><th>Remitente</th>'
+      + (libro === 'gestion' ? '' : '<th style="text-align:right">Fiscal</th>')
+      + (libro === 'fiscal' ? '' : '<th style="text-align:right" title="Lo acordado que no lleva comprobante">Gestión</th>')
+      + '<th style="text-align:center">Asiento</th><th style="width:110px"></th></tr>';
+  }
+  var cols = 5 + (libro ? 1 : 2);
+
+  var n = document.getElementById('liq-n');
+  if (n) n.textContent = rows.length === LIQ_EMI.length
+    ? (LIQ_EMI.length ? LIQ_EMI.length + ' liquidación(es)' : '')
+    : rows.length + ' de ' + LIQ_EMI.length;
+
+  if (!rows.length) {
+    tb.innerHTML = '<tr><td colspan="' + cols + '"><div class="ab-empty"><div class="ab-empty-icon">📄</div>'
+      + (LIQ_EMI.length ? 'Ninguna coincide con la búsqueda.'
+          : 'Sin liquidaciones emitidas. Se emiten desde una partida pendiente.')
+      + '</div></td></tr>';
+    return;
+  }
+  tb.innerHTML = rows.map(function(r){
+    var g = Number(r.dif_gestion) || 0;
+    // UNA LIQUIDACIÓN SIN ASIENTO TIENE QUE GRITAR. Si se emitió y no entró al
+    // libro, el mayor no cierra tres meses después y nadie sabe por qué.
+    var asi = r.asiento_id
+      ? '<span class="bdg bok" title="Asiento #' + r.asiento_id + '">✓ #' + r.asiento_id + '</span>'
+      : '<span class="bdg ber" title="Se emitió y no entró al libro">sin asiento</span>';
+    return '<tr>' +
+      '<td style="font-family:monospace"><b>'+_liqEsc(r.n_liquidacion)+'</b>' +
+        (r.modo_precio === 'cerrado' ? ' <span class="bdg bcc" style="font-size:10px">cerrado</span>' : '') +
+      '</td>' +
+      '<td>'+_liqFecha(r.fecha)+'</td>' +
+      '<td>'+_liqEsc(r.remitente_nombre||'')+'</td>' +
+      (libro === 'gestion' ? '' :
+        '<td style="text-align:right;font-variant-numeric:tabular-nums"><b>'+_liqMoney(r.total)+'</b></td>') +
+      (libro === 'fiscal' ? '' :
+        '<td style="text-align:right;font-variant-numeric:tabular-nums">' +
+          (g ? '<span style="color:#8a5a1f;font-weight:600">'+_liqMoney(g)+'</span>'
+             : '<span style="color:var(--mut)">—</span>') + '</td>') +
+      '<td style="text-align:center">' + asi + '</td>' +
+      '<td style="display:flex;gap:4px">' +
+        // VER y REIMPRIMIR es el mismo PDF: se abre en una pestaña, y de ahí se
+        // imprime o se guarda. Dos botones para el mismo archivo no agregan nada.
+        '<button class="btn bo bs" onclick="window.open(\'/api/liquidaciones/'+r.id+'/pdf\',\'_blank\')" title="Ver / imprimir el PDF">📄 Ver</button>' +
+        '<button class="btn bo bs" onclick="liqEliminar('+r.id+')" style="color:#991b1b" title="Eliminar">🗑️</button>' +
+      '</td>' +
+    '</tr>';
+  }).join('');
+}
 function liqEliminar(id) {
   if (!confirm('¿Eliminar esta liquidación?')) return;
   fetch('/api/liquidaciones/'+id, { method:'DELETE', credentials:'include' })
@@ -29419,13 +29511,24 @@ function liqUnidad() {
 //
 // El espejo del backend está en servicios/asiento-liquidacion.js (FILAS_LIQ).
 // Si cambia una, cambian las dos o el preview miente.
+// LA ALÍCUOTA ES POR FILA, NO UNA SOLA. Pablo: "el IVA de la comisión es 10,5
+// también" — la comisión sigue la alícuota de la mercadería que se vendió, y la
+// descarga, el flete y los gastos administrativos van al 21%.
+//
+// `alic: null` en ventas quiere decir "sale del comprobante": puede ser 21 o 10,5
+// según el producto, y ahí no se escribe ninguna ni se calcula nada.
 var LIQ_FILAS = [
-  { k:'ventas',       label:'Ventas',                 iva:'credito', gestion:true },
-  { k:'comision',     label:'Comisión',               iva:'debito',  gestion:true },
-  { k:'descarga',     label:'Descarga',                iva:'debito',  gestion:true },
-  { k:'flete',        label:'Flete',                   iva:'debito',  gestion:true },
-  { k:'gastos_admin', label:'Gastos administrativos',  iva:'debito',  gestion:true }
+  { k:'ventas',       label:'Ventas',                 iva:'credito', alic:null, gestion:true },
+  { k:'comision',     label:'Comisión',               iva:'debito',  alic:10.5, gestion:true },
+  { k:'descarga',     label:'Descarga',                iva:'debito',  alic:21,   gestion:true },
+  { k:'flete',        label:'Flete',                   iva:'debito',  alic:21,   gestion:true },
+  { k:'gastos_admin', label:'Gastos administrativos',  iva:'debito',  alic:21,   gestion:true }
 ];
+// La alícuota de una fila, para calcular y para escribir en pantalla.
+function liqAlic(k){
+  var f = LIQ_FILAS.filter(function(x){ return x.k === k; })[0];
+  return (f && f.alic != null) ? f.alic : null;
+}
 
 // El resumen del remitente, para el <summary> plegado. Los ocho campos siguen
 // estando — se imprimen y se pueden corregir — pero plegados: ocho recuadros
@@ -29584,7 +29687,7 @@ function liqGrillaPintar(){
       + '<tr><td style="padding-left:18px;color:var(--mut);font-size:12px">IVA de '
         + escH(f.label.toLowerCase())
         + ' <span style="font-size:10.5px">(' + (f.iva === 'credito' ? 'crédito' : 'débito')
-        + (f.k === 'ventas' ? '' : ' · ' + (LIQ.ivaPct || 21) + '%') + ')</span></td>'
+        + (f.alic != null ? ' · ' + String(f.alic).replace('.', ',') + '%' : '') + ')</span></td>'
       + '<td>' + inp('iva_' + f.k, 'f') + '</td>'
       // Sin columna de gestión, y se dice por qué en vez de dejar un hueco.
       + '<td style="text-align:center;color:var(--mut);font-size:11px" '
@@ -29629,7 +29732,7 @@ function liqComisionCalcular(){
   var vF = eid('liq-g-f-ventas'), cF = eid('liq-g-f-comision');
   if (vF && cF) {
     liqNumPoner(cF, m2(liqNum(vF) * pct / 100));
-    liqNumPoner(eid('liq-g-f-iva_comision'), m2(liqNum(cF) * (LIQ.ivaPct || 21) / 100));
+    liqNumPoner(eid('liq-g-f-iva_comision'), m2(liqNum(cF) * liqAlic('comision') / 100));
   }
   var vG = eid('liq-g-g-ventas'), cG = eid('liq-g-g-comision');
   if (vG && cG) liqNumPoner(cG, m2(liqNum(vG) * pct / 100));
@@ -29642,8 +29745,9 @@ function liqComisionCalcular(){
 // hasta que el importe vuelva a cambiar.
 function liqIvaServicio(k){
   var m = eid('liq-g-f-' + k), iv = eid('liq-g-f-iva_' + k);
-  if (m && iv) {
-    liqNumPoner(iv, Math.round(liqNum(m) * (LIQ.ivaPct || 21) / 100 * 100) / 100);
+  var a = liqAlic(k);
+  if (m && iv && a != null) {
+    liqNumPoner(iv, Math.round(liqNum(m) * a / 100 * 100) / 100);
   }
   liqTotales();
 }
