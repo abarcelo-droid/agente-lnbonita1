@@ -7174,6 +7174,15 @@ router.get('/cc-clientes', requireAuth, (req, res) => {
                              WHERE fd.despacho_item_id=di.id
                                AND ${facturaCuenta('fv')}),0)) > 0.01),0)
           AS pendiente_comprobante,
+        -- ── LA MITAD DE GESTIÓN, EN SU PROPIA COLUMNA ────────────────────
+        -- Ya estaba SUMADA adentro de «documentado» —por eso el saldo cerraba—
+        -- pero no se podía ver: la pantalla mostraba $659.999 y no había forma
+        -- de saber que $150.000 de eso son descuentos acordados y no una
+        -- factura. Un saldo que no se puede explicar no se puede discutir.
+        COALESCE((SELECT SUM(COALESCE(l.dif_gestion,0)) FROM sg_ven_liquidaciones l
+                   WHERE l.cliente_id=c.id AND l.estado <> 'anulada'),0)
+        + COALESCE((SELECT SUM(COALESCE(f.dif_gestion,0)) FROM sg_ven_facturas f
+                   WHERE f.cliente_id=c.id AND f.estado <> 'anulada'),0) AS gestion,
         COALESCE((SELECT SUM(co.monto) FROM sg_ven_cobranzas co
                    WHERE co.cliente_id = c.id AND co.anulada = 0), 0) AS total_cobrado,
         -- Lo cobrado que NO se imputó a ningún documento: plata que ya entró y
