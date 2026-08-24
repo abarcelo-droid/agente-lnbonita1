@@ -1815,7 +1815,7 @@ router.put('/config-impositiva', requireAdmin, (req, res) => {
                   // Las tres de la liquidación. Sin la clave acá el PUT la
                   // rechaza: la whitelist es lo único que controla qué se puede
                   // configurar, porque la tabla no tiene CHECK.
-                  'liq_comision', 'liq_descarga', 'liq_gastos_admin'];
+                  'liq_comision', 'liq_descarga', 'liq_flete', 'liq_gastos_admin'];
   if (!CLAVES.includes(clave)) return res.status(400).json({ ok: false, error: 'clave desconocida: ' + clave });
   try {
     const cid = cuenta_id ? parseInt(cuenta_id) : null;

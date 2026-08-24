@@ -2747,8 +2747,9 @@ router.get('/partidas/:id/venta', requireAuth, (req, res) => {
     // nombre de ese productor, y tipear a mano el CUIT de un comprobante que uno
     // emite es la forma más barata de emitirlo mal.
     const oc = db.prepare(`SELECT o.id, o.trazabilidad, o.numero, o.fecha_oc,
+        o.flete_a_cargo, o.flete_monto, o.flete_con_iva,
         p.id AS prov_id, p.razon_social, p.cuit, p.localidad, p.provincia,
-        p.codigo_postal, p.categoria_fiscal
+        p.codigo_postal, p.categoria_fiscal, p.comision_pct
         FROM sg_oc o LEFT JOIN sg_proveedores p ON p.id = o.proveedor_id
        WHERE o.id = ?`).get(ocId);
     if (!oc) return res.status(404).json({ ok: false, error: 'Partida inexistente' });
@@ -2910,6 +2911,47 @@ router.get('/partidas/:id/venta', requireAuth, (req, res) => {
       };
     });
 
+    // ── LO QUE SE LE DESCUENTA, TRAÍDO DE DONDE YA VIVE ────────────────
+    //
+    // Pablo: "la descarga debe venir de la recepción de mercadería que se hizo, si
+    // tuvo descarga, tenemos que traerla automática de la recepción... lo mismo
+    // que el flete: si el flete está a cargo del comprador, debemos traer el flete
+    // que se cargó en la orden de compra con su IVA correspondiente".
+    //
+    // Tipearlo a mano cuando el dato ya está cargado es pedirle al operador que
+    // copie un número de otra pantalla — y ahí es donde se equivoca.
+
+    // LA DESCARGA sale de sg_gastos_directos de las recepciones de esta partida.
+    // Sólo la VALORIZADA: una pendiente de valorizar no tiene monto todavía, y
+    // ponerla en cero sería cobrarle cero por algo que se hizo.
+    const desc = db.prepare(`
+      SELECT COALESCE(SUM(CASE WHEN g.estado='valorizado' THEN g.monto ELSE 0 END),0) AS monto,
+        SUM(CASE WHEN g.estado='pendiente_valorizar' THEN 1 ELSE 0 END) AS sin_valorizar,
+        COUNT(*) AS n
+        FROM sg_gastos_directos g
+        JOIN sg_recepciones r ON r.id = g.recepcion_id AND r.activo = 1
+       WHERE r.oc_id = ? AND g.tipo_gasto = 'descarga_ingreso' AND g.activo = 1`).get(ocId);
+
+    // EL FLETE sale de la orden. Se trae sólo si está a cargo del COMPRADOR, que
+    // es lo que pidió Pablo; si está a cargo del vendedor igual se informa con su
+    // rótulo, para que el que liquida vea que existe y decida.
+    //
+    // flete_con_iva dice si el monto YA lo trae adentro: sin esa distinción se le
+    // cobraría el IVA dos veces o ninguna.
+    const IVA_SERVICIOS = 21;
+    const fMonto = r2(oc.flete_monto);
+    const fConIva = oc.flete_con_iva ? 1 : 0;
+    const fNeto = fConIva ? r2(fMonto / (1 + IVA_SERVICIOS / 100)) : fMonto;
+    const flete = {
+      a_cargo: oc.flete_a_cargo || null,
+      monto: fMonto,
+      con_iva: fConIva,
+      neto: fNeto,
+      iva: r2(fConIva ? (fMonto - fNeto) : (fMonto * IVA_SERVICIOS / 100)),
+      // Se prellena sólo cuando corresponde; el resto es información.
+      se_cobra: oc.flete_a_cargo === 'comprador' && fMonto > 0 ? 1 : 0,
+    };
+
     const bultosIn = r2(tot && tot.bultos);
     const bultosOut = r2(sal && sal.bultos);
     // TERMINADO = lo que ya no está en el depósito: vendido + merma. Es lo que
@@ -2921,6 +2963,19 @@ router.get('/partidas/:id/venta', requireAuth, (req, res) => {
       // En qué unidad se liquida. La pantalla la usa para rotular la columna y
       // para no ofrecer kilos donde se pactaron cajones.
       unidad,
+      // Lo que se le descuenta al productor, traído de donde ya vive.
+      //
+      // La comisión es un PORCENTAJE, no un monto: sale de la ficha del proveedor
+      // si la tiene cargada, y si no del 12% que Pablo puso como norma. Es
+      // editable en la pantalla — hay proveedores con comisiones distintas.
+      comision_pct: (oc.comision_pct != null && oc.comision_pct !== '')
+        ? Number(oc.comision_pct) : 12,
+      comision_pct_de_proveedor: (oc.comision_pct != null && oc.comision_pct !== '') ? 1 : 0,
+      iva_servicios_pct: IVA_SERVICIOS,
+      descarga: { monto: r2(desc && desc.monto), n: (desc && desc.n) || 0,
+                  sin_valorizar: (desc && desc.sin_valorizar) || 0,
+                  iva: r2((desc && desc.monto) * IVA_SERVICIOS / 100) },
+      flete,
       // Lo que la pantalla necesita para armar el comprobante sin tipear nada.
       proveedor: {
         id: oc.prov_id, razon_social: oc.razon_social, cuit: oc.cuit,

@@ -736,6 +736,7 @@ try { db.exec("CREATE INDEX IF NOT EXISTS idx_sg_pagos_compras ON sg_pagos_compr
     // que alguien las elija, la liquidación avisa y no se contabiliza.
     ['liq_comision',         'Liquidaciones · Comisión que le cobramos al productor'],
     ['liq_descarga',         'Liquidaciones · Descarga que le cobramos al productor'],
+    ['liq_flete',            'Liquidaciones · Flete que le cobramos al productor'],
     ['liq_gastos_admin',     'Liquidaciones · Gastos administrativos que le cobramos'],
   ];
   for (const [clave, desc] of claves) ins.run(clave, desc);
