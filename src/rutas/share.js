@@ -273,7 +273,10 @@ router.get('/resumen', requireAuth, (req, res) => {
 
     // Top 10 por volumen, con nuestra parte en cada uno.
     const top = [...porArt.values()].sort((a, b) => b.total - a.total).slice(0, 10)
-      .map(x => ({ id: x.id, desc: x.desc, familia: x.familia, total: r2(x.total), nuestros: r2(x.nuestros), share: x.share, lider: x.lider }));
+      // lider_es_nuestro viaja también acá: la pantalla marca distinto los artículos donde el
+      // líder somos nosotros, y sin este campo el Top 10 los mostraría como si los liderara
+      // un competidor.
+      .map(x => ({ id: x.id, desc: x.desc, familia: x.familia, total: r2(x.total), nuestros: r2(x.nuestros), share: x.share, lider: x.lider, lider_es_nuestro: x.lider_es_nuestro }));
 
     // Ranking de proveedores por volumen total del período.
     const acum = new Map();
