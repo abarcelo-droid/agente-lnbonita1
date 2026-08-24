@@ -790,7 +790,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
     <button class="btn bo" onclick="liqSub('partidas')">↻ Actualizar</button>
   </div>
   <!-- ── LAS PARTIDAS QUE ESPERAN QUE SE LES CIERRE EL PRECIO ─────────────
-       Una compra de Liquidación de Venta se recibe y ahí queda: el precio se
+       Una compra de Precio Abierto se recibe y ahí queda: el precio se
        define cuando la mercadería se vende. Hasta ahora la orden se recibía y
        desaparecía del circuito, sin ninguna bandeja que dijera "a estas les
        falta liquidar". -->
@@ -3530,21 +3530,38 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
            trabaja sobre una cuenta, la pantalla es esa cuenta. -->
       <div id="sg-ccli-listado">
       <div style="font-size:12px;color:var(--mut);margin-bottom:8px">
-        Saldo = saldo de apertura + lo documentado (liquidaciones y facturas) + lo entregado
-        sin comprobante − lo cobrado. Lo documentado va por lo <b>acordado</b>: incluye la
-        parte de gestión —descuentos comerciales y diferencias contra lo pactado—, que se
-        muestra al lado para poder separarla. Hacé click en un cliente para ver sus
-        comprobantes y registrarle un cobro.
+        El saldo es lo que dice la CONTABILIDAD: saldo de apertura + los comprobantes que ya
+        tienen su asiento, menos lo cobrado. Aparte va la mercadería entregada con remito que
+        todavía no se facturó. Hacé click en un cliente para ver sus comprobantes y
+        registrarle un cobro.
       </div>
-      <!-- Van a figurar todos: sin buscador, encontrar uno es recorrer la lista
-           con el dedo. Filtra mientras se escribe, sin ir al servidor. -->
-      <div class="sg-oc-search" style="max-width:340px;margin-bottom:10px">
-        <input id="sg-cc-q" placeholder="🔎 Buscar cliente…" oninput="sgCcClPintar()"
-               style="width:100%;box-sizing:border-box">
+      <!-- LA MISMA FORMA QUE LA CUENTA CORRIENTE DE PROVEEDORES. Pablo:
+           "documentado = saldo total ??? una parte gestión? está difícil de
+           entender... repliquemos el modelo que tenemos en las compras".
+           Tenía razón: "Documentado" y "Saldo total" daban el MISMO número
+           —$1.889.050 en las dos columnas— y en el medio una columna de gestión
+           que no se sabía si sumaba o no. Ahora las columnas SUMAN:
+           contabilizado + sin facturar = saldo, igual que en compras. -->
+      <div id="sg-ccli-tarjetas" style="margin-bottom:12px"></div>
+      <div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap;margin-bottom:10px">
+        <div class="sg-oc-search" style="max-width:340px;flex:1;min-width:220px">
+          <input id="sg-cc-q" placeholder="🔎 Buscar cliente…" oninput="sgCcClPintar()"
+                 style="width:100%;box-sizing:border-box">
+        </div>
+        <!-- EL MISMO SELECTOR QUE EN ASIENTOS Y EN PROVEEDORES, con las mismas
+             palabras: es el mismo corte sobre los mismos datos. -->
+        <label style="font-size:12px;color:var(--mut);display:flex;flex-direction:column;gap:3px">
+          <span>Libro:</span>
+          <select id="sg-ccli-libro" onchange="sgCcClPintar()"
+                  style="padding:7px 10px;font-size:12.5px">
+            <option value="">Fiscal + Gestión</option>
+            <option value="fiscal">Sólo fiscal</option>
+            <option value="gestion">Sólo gestión</option>
+          </select></label>
       </div>
       <div class="ab-table-wrap"><table class="pa-tbl">
-        <thead><tr><th>Cliente</th><th style="text-align:right">Saldo apertura</th><th style="text-align:right">Documentado</th><th style="text-align:right" title="Lo que la venta vale de verdad y no lleva comprobante: descuentos comerciales acordados y diferencias contra lo pactado. Ya está sumado en Documentado.">De eso, gestión</th><th style="text-align:right" title="Mercadería entregada con remito que todavía no se facturó">Sin comprobante</th><th style="text-align:right">Cobrado</th><th style="text-align:right">Saldo total</th><th style="text-align:right">Límite</th><th style="width:170px"></th></tr></thead>
-        <tbody id="sg-tb-cc"><tr><td colspan="9" class="emp">Cargando…</td></tr></tbody>
+        <thead id="sg-ccli-th"></thead>
+        <tbody id="sg-tb-cc"><tr><td colspan="8" class="emp">Cargando…</td></tr></tbody>
       </table></div>
       </div><!-- /sg-ccli-listado -->
       <!-- LA FICHA DEL CLIENTE. El listado dice cuánto debe; esto dice por qué:
@@ -4629,7 +4646,15 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
       <div class="fl ff"><label>¿Cómo se pactó el precio? <span style="color:var(--err)">*</span></label>
         <div class="sg-seg" role="radiogroup" style="margin-top:2px;flex-wrap:wrap">
           <label class="sg-seg-btn"><input type="radio" name="sg-oc-precio" value="firme" checked onchange="sgOcPrecioChange()"> 💰 Precio cerrado</label>
-          <label class="sg-seg-btn"><input type="radio" name="sg-oc-precio" value="pizarra" onchange="sgOcPrecioChange()"> 📊 Liquidación de venta</label>
+          <!-- SE LLAMABA "LIQUIDACIÓN DE VENTA" Y ESO ERA EL PROBLEMA. Acá se
+               contesta CÓMO SE PACTÓ EL PRECIO, y abajo, en "¿cómo se documenta
+               esta compra?", hay una opción que se llama "Emitimos liquidación".
+               Dos preguntas distintas con la misma palabra en la respuesta: el
+               que la lee cree que eligiendo una ya eligió la otra, y no es así
+               —las cuatro combinaciones son válidas—.
+               Acá la pregunta es sólo si el precio está cerrado o queda abierto.
+               El circuito lo decide la de abajo. (Pablo, 24/8/2026) -->
+          <label class="sg-seg-btn"><input type="radio" name="sg-oc-precio" value="pizarra" onchange="sgOcPrecioChange()"> 📊 Precio abierto</label>
         </div>
         <div id="sg-oc-precio-ayuda" style="font-size:11.5px;color:var(--mut);margin-top:4px"></div>
       </div>
@@ -9186,7 +9211,7 @@ function sgOcPintar(){
     if (!pal.length) return true;
     // El texto donde se busca: todo lo que identifica la partida en la fila.
     var t = [sgOcId(o), o.proveedor_nombre, o.fecha_oc, o.numero,
-             o.tipo_precio === 'pizarra' ? 'liquidación de venta pizarra' : 'precio cerrado']
+             o.tipo_precio === 'pizarra' ? 'precio abierto pizarra' : 'precio cerrado']
       .join(' ').toLowerCase();
     return pal.every(function(w){ return t.indexOf(w) >= 0; });
   });
@@ -9215,7 +9240,7 @@ function sgOcPintar(){
       // propia, retroactiva— se aclara acá abajo: es una rareza que conviene
       // ver, pero no merecía una columna propia diciendo "normal" en todas las
       // filas. Y con su nombre, no con el valor crudo de la base.
-      var mod = (o.tipo_precio === 'pizarra' ? 'Liquidación de Venta' : 'Precio Cerrado')
+      var mod = (o.tipo_precio === 'pizarra' ? 'Precio abierto' : 'Precio Cerrado')
         + (o.modalidad && o.modalidad !== 'normal'
             ? '<div class="sg-oc-sub">' + esc(sgLbl(SG_OCMOD, o.modalidad)) + '</div>' : '');
 
@@ -9340,8 +9365,9 @@ function sgOcPrecioAyuda(){
   var ay = eid('sg-oc-precio-ayuda'); if (!ay) return;
   ay.innerHTML = (sgOcPrecio() === 'firme')
     ? 'El precio está acordado desde ahora: la orden ya tiene monto y vencimientos.'
-    : 'El precio se cierra <b>después</b>, cuando se vendió la mercadería. La orden entra sin monto; '
-      + 'en cada ítem se puede dejar el <b>precio de referencia</b> que espera el comercial.';
+    : 'El precio queda <b>abierto</b>: se cierra cuando se vendió la mercadería. La orden entra sin '
+      + 'monto; en cada ítem se puede dejar el <b>precio de referencia</b> que espera el comercial. '
+      + 'Esto no decide el comprobante — eso lo elige «cómo se documenta esta compra».';
 }
 // ── EL COMPROBANTE SALE DE CÓMO SE DOCUMENTA LA COMPRA ────────────────────
 // Antes salía de la CONDICIÓN COMERCIAL, y ahí estaba la ambigüedad: Precio
@@ -9649,7 +9675,7 @@ function sgOcTotales(){
     }
   });
   var el=eid('sg-oc-totales');
-  if(!firme){ el.innerHTML='Total estimado: '+nr(tk)+' kg · (Liquidación de Venta — precio a definir)'; return; }
+  if(!firme){ el.innerHTML='Total estimado: '+nr(tk)+' kg · (Precio abierto — a definir cuando se venda)'; return; }
   if(disc){
     var tTotal=tNeto+tIva;
     el.innerHTML='Total estimado: '+nr(tk)+' kg'
@@ -9778,7 +9804,7 @@ function sgOcVer(id){
                     + ' onclick="sgOcDocEditar(' + o.id + ',\'' + d + '\')">✏️</button>'
                   : '');
           })(), 165)
-        + ficha('Condición comercial', (o.tipo_precio === 'pizarra' ? 'Liquidación de Venta' : 'Precio Cerrado'), 150)
+        + ficha('Cómo se pactó el precio', (o.tipo_precio === 'pizarra' ? 'Precio abierto' : 'Precio Cerrado'), 170)
         + ficha('Comprobante', esc(sgLbl(SG_FISCAL, o.tipo_fiscal) || '—'), 110)
         + ficha('Condición de pago', esc(sgCondNombre(o.condicion_pago_id)), 140)
         + (o.flete_a_cargo
@@ -12567,7 +12593,7 @@ var SG_ED_CAMPO = {
 function sgEdValor(campo, v){
   if (v === null || v === undefined || v === '') return '—';
   if (campo === 'documenta') return v === 'liquidacion' ? 'Liquidación' : 'Factura de compra';
-  if (campo === 'tipo_precio') return v === 'pizarra' ? 'Liquidación de Venta' : 'Precio Cerrado';
+  if (campo === 'tipo_precio') return v === 'pizarra' ? 'Precio abierto' : 'Precio Cerrado';
   if (campo === 'tipo_fiscal') return sgLbl(SG_FISCAL, v) || String(v);
   return String(v);
 }
@@ -15313,34 +15339,79 @@ function sgCcClPintar(){
   var rows = SG_CCLI.filas.filter(function(c){
     return !q || sgCcClNombre(c).toLowerCase().indexOf(q) >= 0;
   });
+
+  // LA MISMA FORMA QUE PROVEEDORES. Las columnas SUMAN:
+  //     contabilizado + sin facturar = saldo
+  // Antes había un "Documentado" que daba lo mismo que "Saldo total" y en el
+  // medio una columna de gestión de la que no se sabía si estaba sumada o no.
+  //
+  // CONTABILIZADO es lo que está EN EL LIBRO FISCAL: lo documentado menos la
+  // parte de gestión, que por definición no tiene comprobante.
+  var libro = (eid('sg-ccli-libro') || {}).value || '';
+  var fisDe = function(c){
+    var doc = Number(c.documentado != null ? c.documentado : c.total_facturado) || 0;
+    return Math.round((doc - (Number(c.gestion) || 0)) * 100) / 100;
+  };
+
+  var cont = eid('sg-ccli-tarjetas');
+  if (cont) {
+    var ges = rows.reduce(function(a, c){ return a + (Number(c.gestion) || 0); }, 0);
+    var fis = rows.reduce(function(a, c){ return a + fisDe(c); }, 0);
+    ges = Math.round(ges * 100) / 100; fis = Math.round(fis * 100) / 100;
+    cont.innerHTML = !rows.length ? ''
+      : (libro === 'fiscal' ? sgCcTarjetas(fis, 0, 'Nos deben — con comprobante')
+        : (libro === 'gestion' ? sgCcTarjetas(0, ges, 'Nos deben — sin facturar')
+          : sgCcTarjetas(fis, ges, 'Nos deben en total')));
+  }
+
+  // El encabezado se arma acá porque las columnas dependen del libro elegido:
+  // con "sólo fiscal" la de sin facturar no va, y al revés.
+  var th = eid('sg-ccli-th');
+  if (th) {
+    th.innerHTML = '<tr><th>Cliente</th><th style="text-align:right">Apertura</th>'
+      + (libro === 'gestion' ? '' : '<th style="text-align:right" title="Lo que está en el libro fiscal: comprobantes con su asiento, menos lo cobrado">Contabilizado</th>')
+      + (libro === 'fiscal' ? '' : '<th style="text-align:right" title="La parte de lo que nos deben que no tiene comprobante: descuentos comerciales acordados y diferencias contra lo pactado">Sin facturar</th>')
+      + '<th style="text-align:right">Saldo</th>'
+      // DESPUÉS DEL SALDO van las de referencia, que NO entran en la suma. El
+      // bloque que suma es apertura + contabilizado + sin facturar = saldo, y
+      // meter algo en el medio invita a sumarlo también.
+      + '<th style="text-align:right" title="Mercadería entregada con remito que todavía no se facturó. No está en el libro y se avisa aparte.">Mercadería entregada</th>'
+      + '<th style="text-align:right">Cobrado</th>'
+      + '<th style="text-align:right">Límite</th><th style="width:170px"></th></tr>';
+  }
+  var cols = 6 + (libro ? 1 : 2);
+
   var tb = eid('sg-tb-cc'); if (!tb) return;
   tb.innerHTML = rows.length ? rows.map(function(c){
     var ap = Number(c.saldo_inicial) || 0;
-    return '<tr><td>' + escH(sgCcClNombre(c)) + '</td>'
-      + '<td style="text-align:right' + (ap ? '' : ';color:var(--mut)') + '">' + (ap ? sgMoney(ap) : '—') + '</td>'
-      + '<td style="text-align:right">' + sgMoney(c.documentado != null ? c.documentado : c.total_facturado) + '</td>'
-      // LA MITAD DE GESTIÓN ya estaba sumada adentro de Documentado —por eso el
-      // saldo cerraba— pero no se veía: la pantalla decía $659.999 y no había
-      // forma de saber que $150.000 de eso son descuentos acordados y no una
-      // factura. Se muestra al lado, no aparte, para que se lea como lo que es:
-      // una porción de ese número.
-      + '<td style="text-align:right' + (Number(c.gestion) ? ';color:#9a3412' : ';color:var(--mut)') + '">'
-        + (Number(c.gestion) ? sgMoney(c.gestion) : '—') + '</td>'
+    var ges = Number(c.gestion) || 0;
+    var fis = fisDe(c);
+    var cero = function(n){ return n ? sgMoney(n) : '<span style="color:var(--mut)">—</span>'; };
+    return '<tr><td><b>' + escH(sgCcClNombre(c)) + '</b></td>'
+      + '<td style="text-align:right">' + cero(ap) + '</td>'
+      // Con un libro elegido, la columna del OTRO no se muestra: mezclarlas es
+      // justo lo que el filtro vino a evitar.
+      + (libro === 'gestion' ? '' : '<td style="text-align:right">' + cero(fis) + '</td>')
+      + (libro === 'fiscal' ? '' : '<td style="text-align:right">'
+          + (ges ? '<span style="color:#8a5a1f;font-weight:600">' + sgMoney(ges) + '</span>'
+                 : '<span style="color:var(--mut)">—</span>') + '</td>')
+      + '<td style="text-align:right;font-weight:700;font-size:14px">'
+        + sgMoney(libro === 'fiscal' ? fis : (libro === 'gestion' ? ges : c.saldo)) + '</td>'
       // LO ENTREGADO SIN COMPROBANTE va en su propia columna y no mezclado con
       // lo documentado: es deuda real —la mercadería está en la casa del
       // cliente— pero todavía no está en el libro fiscal.
       + '<td style="text-align:right' + (Number(c.pendiente_comprobante) ? ';color:#9a3412' : ';color:var(--mut)') + '">'
         + (Number(c.pendiente_comprobante) ? sgMoney(c.pendiente_comprobante) : '—') + '</td>'
+      // LO COBRADO DE VERDAD, no un cero escrito a mano: ya se rompió una vez.
       + '<td style="text-align:right">' + sgMoney(c.total_cobrado) + '</td>'
-      + '<td style="text-align:right;font-weight:700">' + sgMoney(c.saldo) + '</td>'
-      + '<td style="text-align:right">' + sgMoney(c.limite_credito) + '</td>'
+      + '<td style="text-align:right">' + cero(Number(c.limite_credito)) + '</td>'
       + '<td style="text-align:right;white-space:nowrap">'
         + '<button class="btn bo bs" onclick="sgCcClFicha(' + c.id + ')">Ver</button>'
         + (lnbPuedeOperar('sg-cc-clientes')
             ? ' <button class="btn bb bs" onclick="sgCobOpen(' + c.id + ')">💵 Cobrar</button>' : '')
       + '</td></tr>';
   }).join('')
-    : '<tr><td colspan="9" class="emp">'
+    : '<tr><td colspan="' + cols + '" class="emp">'
       + (SG_CCLI.filas.length
           ? 'Ningún cliente coincide con la búsqueda.'
           : 'Todavía no hay clientes con saldo ni movimientos. Acá figuran los que ya tienen algo '
