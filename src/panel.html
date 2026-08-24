@@ -5277,7 +5277,11 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
   <div class="ab-modal" style="width:min(1040px,96vw);max-width:96vw;max-height:90vh;overflow-y:auto;overflow-x:hidden">
     <div class="mhd"><div class="mht">Nuevo remito</div><button class="mcl" onclick="closeMB('sg-desp-modal')">×</button></div>
     <div class="fg">
-      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px">
+      <!-- grid-column:1/-1 (la clase .ff) porque el contenedor .fg ES una grilla
+           de DOS columnas: sin esto, toda esta grilla quedaba metida en una de
+           las dos y usaba media pantalla. Con el ancho completo entran cuatro
+           campos por fila y el formulario deja de ser una tira vertical. -->
+      <div class="ff" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:12px 14px">
         <div class="fl"><label>Cliente <span style="color:var(--err)">*</span></label><input type="text" placeholder="🔎 alias o razón social" oninput="sgCliFiltrar('sg-desp-cli',this.value)" autocomplete="off" style="margin-bottom:4px"><select id="sg-desp-cli"></select></div>
         <div class="fl"><label>Pedido <span style="font-weight:400;color:var(--mut);font-size:11px">opcional</span></label><select id="sg-desp-ped"><option value="">— Sin pedido —</option></select></div>
         <div class="fl"><label>Fecha de despacho</label><input type="date" id="sg-desp-fecha"></div>
@@ -5702,6 +5706,22 @@ function sgCliUnico(selectId){
   // el click nunca llegaría a su destino.
   inp.onblur = function(){ setTimeout(cerrar, 120); };
   inp.onkeydown = function(ev){ if (ev.key === 'Escape') cerrar(); };
+}
+
+// PONER EL CLIENTE POR CÓDIGO TIENE QUE VERSE. Con el control único, el <select>
+// está escondido: asignarle .value elige bien por dentro pero deja el campo de
+// texto VACÍO, así que el que mira la pantalla no ve ningún cliente elegido.
+//
+// Esto lo setea en los dos lados. Si el control único no está montado, hace lo
+// de siempre y no molesta.
+function sgCliElegir(selectId, clienteId){
+  var sel = eid(selectId); if (!sel) return;
+  sel.innerHTML = sgCliOpts('', clienteId);
+  sel.value = String(clienteId || '');
+  var c = (SG.cacheCli || []).filter(function(x){ return String(x.id) === String(clienteId); })[0];
+  var inp = sel.parentNode && sel.parentNode.querySelector
+    ? sel.parentNode.querySelector('input') : null;
+  if (inp && sel._unico) inp.value = c ? sgCliLabel(c) : '';
 }
 
 // Prende el control único en todos los selects de cliente que haya en pantalla.
@@ -13442,7 +13462,9 @@ function sgPendLoad(){
 function sgFacPrecargar(clienteId, despachoId){
   if (navAct !== 'sg-facturar') cmAbrirModulo('sg-facturar');  // sgFacInit() resetea el form
   else sgFacInit();
-  var sel=eid('sgf-cli'); if(sel) sel.value=String(clienteId);
+  // EL CLIENTE VIENE SUGERIDO DEL REMITO. Ya se sabe quién es: volver a
+  // elegírlo es pedir dos veces el mismo dato, y equivocarse acá factura a otro.
+  sgCliElegir('sgf-cli', clienteId);
   SG._facPreDesp=despachoId;                   // despacho a tildar cuando cargue /facturable
   sgFacCliente();                              // carga despachos del cliente y aplica la precarga
 }
