@@ -2541,7 +2541,13 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
          el lote quedaría figurando disponible después de vendido. Lo que se
          saca es el paso a mano, no el documento. -->
     <div class="sgv-sub" id="sgv-sub-directa">
-      <div class="sgr-card">
+      <style>
+        /* Nada se desplaza de costado, y los campos no se desbordan de su caja. */
+        #sgv-sub-directa .ab-table-wrap{overflow-x:hidden !important}
+        #sgv-sub-directa input,#sgv-sub-directa select{max-width:100%;box-sizing:border-box}
+        @media(max-width:900px){ #sgv-sub-directa .ab-table-wrap{overflow-x:auto !important} }
+      </style>
+      <div class="sgr-card" style="max-width:98vw;overflow-x:hidden">
         <div style="display:flex;gap:14px;align-items:flex-end;flex-wrap:wrap;margin-bottom:10px">
           <label style="font-size:11.5px;color:var(--mut)">Cliente<br>
             <input type="text" placeholder="🔎 alias o razón social" oninput="sgCliFiltrar('sgfd-cli',this.value)" autocomplete="off" style="min-width:240px;padding:5px 8px;border-radius:6px;border:1px solid var(--bor);background:var(--card,#fff);margin-bottom:4px;display:block">
@@ -5261,20 +5267,46 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
 
 <!-- Modal Crear despacho -->
 <div class="ab-modal-overlay" id="sg-desp-modal">
-  <div class="ab-modal" style="width:880px;max-height:90vh;overflow-y:auto">
+  <!-- EL ANCHO ERA FIJO Y LA GRILLA RÍGIDA. 880px sin max-width: en una pantalla
+       de portátil el modal era más ancho que la ventana. Y tres columnas iguales
+       hacían que cada campo quedara más angosto que su propio rótulo, así que las
+       etiquetas se partían en tres renglones y el formulario se leía a los
+       tropezones.
+       Ahora el ancho se adapta y las columnas se acomodan solas: entran las que
+       entren con 220px cada una, y en un teléfono queda una sola. -->
+  <div class="ab-modal" style="width:min(1040px,96vw);max-width:96vw;max-height:90vh;overflow-y:auto;overflow-x:hidden">
     <div class="mhd"><div class="mht">Nuevo remito</div><button class="mcl" onclick="closeMB('sg-desp-modal')">×</button></div>
     <div class="fg">
-      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px">
         <div class="fl"><label>Cliente <span style="color:var(--err)">*</span></label><input type="text" placeholder="🔎 alias o razón social" oninput="sgCliFiltrar('sg-desp-cli',this.value)" autocomplete="off" style="margin-bottom:4px"><select id="sg-desp-cli"></select></div>
-        <div class="fl"><label>Pedido (opcional)</label><select id="sg-desp-ped"><option value="">— Sin pedido —</option></select></div>
-        <div class="fl"><label>Fecha despacho</label><input type="date" id="sg-desp-fecha"></div>
+        <div class="fl"><label>Pedido <span style="font-weight:400;color:var(--mut);font-size:11px">opcional</span></label><select id="sg-desp-ped"><option value="">— Sin pedido —</option></select></div>
+        <div class="fl"><label>Fecha de despacho</label><input type="date" id="sg-desp-fecha"></div>
         <div class="fl"><label>Transporte</label><select id="sg-desp-transp"><option value="">—</option><option value="propio">Propio</option><option value="cliente">Cliente</option><option value="tercero">Tercero</option></select></div>
-        <div class="fl"><label>Fletero <span style="font-weight:400;color:var(--mut);font-size:11px">(genera gasto pendiente)</span></label><select id="sg-desp-fletero"><option value="">— Sin fletero —</option></select></div>
-        <div class="fl"><label>Chofer / Dominio</label><input id="sg-desp-chofer" placeholder="chofer"><input id="sg-desp-dominio" placeholder="dominio" style="margin-top:4px"></div>
-        <div class="fl"><label>Cooperativa (carga) <span style="font-weight:400;color:var(--mut);font-size:11px">cobra por bulto</span></label><select id="sg-desp-coop"><option value="">— Sin carga —</option></select></div>
-        <div class="fl"><label>Bultos cargados <span style="font-weight:400;color:var(--mut);font-size:11px">(si hay cooperativa)</span></label><input type="number" min="0" id="sg-desp-bultos" placeholder="nº de bultos"></div>
+        <div class="fl"><label>Fletero</label><select id="sg-desp-fletero"><option value="">— Sin fletero —</option></select>
+          <div style="font-size:11px;color:var(--mut);margin-top:3px">Si ponés uno, queda un gasto esperando su factura</div></div>
+        <div class="fl"><label>Chofer y dominio</label><input id="sg-desp-chofer" placeholder="chofer"><input id="sg-desp-dominio" placeholder="dominio" style="margin-top:4px"></div>
+        <!-- LOS DOS DE LA COOPERATIVA VAN JUNTOS: el segundo sólo tiene sentido
+             si se eligió el primero, y separados por la grilla parecían datos
+             sueltos. La aclaración baja del rótulo, que es lo que lo partía. -->
+        <div class="fl" style="grid-column:span 2;min-width:0">
+          <label>Cooperativa de carga</label>
+          <div style="display:grid;grid-template-columns:1fr 130px;gap:8px">
+            <select id="sg-desp-coop"><option value="">— Sin carga —</option></select>
+            <input type="number" min="0" id="sg-desp-bultos" placeholder="bultos">
+          </div>
+          <div style="font-size:11px;color:var(--mut);margin-top:3px">Cobra por bulto: poné cuántos cargaron</div>
+        </div>
       </div>
-      <div class="fl ff"><label>Elegí lotes del stock 🟢 (FEFO sugiere el que vence antes)</label>
+      <style>
+        /* NADA SE DESPLAZA DE COSTADO. .ab-table-wrap trae su propio overflow-x
+           desde la clase, así que hace falta el !important para ganarle. Se deja
+           auto sólo en teléfono, donde no hay ancho para otra cosa. */
+        #sg-desp-modal .ab-table-wrap{overflow-x:hidden !important}
+        #sg-desp-modal .fl{min-width:0}
+        #sg-desp-modal input,#sg-desp-modal select,#sg-desp-modal textarea{max-width:100%;box-sizing:border-box}
+        @media(max-width:900px){ #sg-desp-modal .ab-table-wrap{overflow-x:auto !important} }
+      </style>
+      <div class="fl ff"><label>Elegí lotes del stock 🟢 <span style="font-weight:400;color:var(--mut);font-size:11px">se sugiere primero el que vence antes</span></label>
         <div id="sg-desp-items"></div>
         <div style="font-weight:600;font-size:12px;margin:10px 0 4px">Líneas a despachar</div>
         <div id="sg-desp-lines"></div>
