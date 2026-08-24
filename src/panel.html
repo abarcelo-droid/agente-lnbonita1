@@ -2023,17 +2023,23 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
 </style>
 <div class="pa-wrap"><div class="ab-table-wrap"><table class="pa-tbl">
   <thead><tr>
+    <th style="width:30px"></th>
     <th class="sortable" onclick="paSortBy('nombre')">Nombre <span class="sort-ind" id="pa-sort-nombre"></span></th>
     <th class="sortable" onclick="paSortBy('componente_madre')">Principio activo <span class="sort-ind" id="pa-sort-componente_madre"></span></th>
     <th class="sortable" onclick="paSortBy('categoria')">Categoría <span class="sort-ind" id="pa-sort-categoria"></span></th>
     <th class="sortable" onclick="paSortBy('unidad')">Unidad <span class="sort-ind" id="pa-sort-unidad"></span></th>
     <th class="sortable" style="text-align:right" onclick="paSortBy('stock_actual')">Stock actual <span class="sort-ind" id="pa-sort-stock_actual"></span></th>
+    <!-- LO COMPRADO, AGRUPADO POR INSUMO. Pablo: "si no lo veo como muy repartido
+         y no sé cuánto es el total que hay que comprar para pasarle un detalle al
+         proveedor". La compra vivía repartida en facturas: para saber cuánto lleva
+         un insumo había que abrir el historial de a uno y sumar a mano. -->
+    <th class="sortable" style="text-align:right" onclick="paSortBy('comprado_cantidad')" title="Todo lo que se compró de este insumo, sumado. El + de la izquierda abre la curva: cada compra con su fecha, proveedor y precio.">Comprado <span class="sort-ind" id="pa-sort-comprado_cantidad"></span></th>
     <th class="sortable" style="text-align:right" onclick="paSortBy('precio_ref_usd')">Último precio <span class="sort-ind" id="pa-sort-precio_ref_usd"></span></th>
     <th style="text-align:center">Cuenta contable</th>
     <th class="sortable" onclick="paSortBy('estado')">Estado <span class="sort-ind" id="pa-sort-estado"></span></th>
     <th></th>
   </tr></thead>
-  <tbody id="pa-ins-tbody"><tr><td colspan="9" class="emp">Cargando...</td></tr></tbody>
+  <tbody id="pa-ins-tbody"><tr><td colspan="11" class="emp">Cargando...</td></tr></tbody>
 </table></div></div>
 </div>
 
@@ -33428,7 +33434,9 @@ function paSortBy(col){
     PA._insSort.dir = 'asc';
   }
   // Actualizar indicadores visuales en todos los headers
-  ['nombre','componente_madre','categoria','unidad','stock_actual','precio_ref_usd','estado'].forEach(function(c){
+  // 'comprado_cantidad' va en la lista o su flechita nunca se apaga al ordenar
+  // por otra columna, y quedan dos encabezados diciendo que ordenan.
+  ['nombre','componente_madre','categoria','unidad','stock_actual','comprado_cantidad','precio_ref_usd','estado'].forEach(function(c){
     var el = document.getElementById('pa-sort-' + c);
     if (el) el.textContent = (PA._insSort.col === c) ? (PA._insSort.dir === 'asc' ? '▲' : '▼') : '';
   });
@@ -33445,7 +33453,7 @@ function paLoadInsumos(){
   if(sinCuenta && sinCuenta.checked) qs.push('sin_cuenta=1');
   paF('/api/pa/insumos'+(qs.length?'?'+qs.join('&'):'')).then(function(r){
     PA.insumos=r.data||[];var tb=document.getElementById('pa-ins-tbody');
-    if(!PA.insumos.length){tb.innerHTML='<tr><td colspan="9" class="emp">Sin insumos</td></tr>';return;}
+    if(!PA.insumos.length){tb.innerHTML='<tr><td colspan="11" class="emp">Sin insumos</td></tr>';return;}
     // Helper local: redondea floats a N decimales sin la basura típica de JS
     // (4.610000000000001 → 4.61). Si es entero, no muestra decimales.
     var paFmtStock = function(n) {
@@ -33553,12 +33561,32 @@ function paLoadInsumos(){
         ? '<span class="pa-badge pa-verde-bg" style="font-size:10px" title="'+i.cuenta_codigo+'">✓ Sí</span>'
         : '<span class="pa-badge" style="background:#fee2e2;color:#991b1b;font-size:10px">✗ Falta</span>';
       var rowStyle = i.activo ? (critico ? ' style="background:#fef2f2"' : '') : ' style="opacity:0.5"';
-      return'<tr'+rowStyle+'>'
-        +'<td><span title="'+(i.categoria_v2||i.categoria_principal||'agroinsumos')+'" style="margin-right:4px">'+catIco+'</span><strong style="cursor:pointer;color:var(--burg)" onclick="paVerHistorialCompras('+i.id+',\''+i.nombre.replace(/'/g,"\\'")+'\',\'producto\')">'+i.nombre+'</strong>'+(ficha?'<br>'+ficha:'')+'</td>'
+      // LO COMPRADO. Sin compras se dice —no se deja en blanco—: un renglón vacío
+      // se lee como "no sé", y acá sí se sabe.
+      var compTxt;
+      if (Number(i.comprado_veces) > 0) {
+        compTxt = '<strong>'+paFmtStock(i.comprado_cantidad)+' '+i.unidad+'</strong>'
+          + '<br><span style="font-size:10px;color:var(--mut)">$'
+          + Number(i.comprado_monto||0).toLocaleString('es-AR')
+          + ' · '+i.comprado_veces+' compra'+(i.comprado_veces===1?'':'s')+'</span>';
+      } else {
+        compTxt = '<span style="color:var(--mut)">—</span>';
+      }
+      // EL "+" ABRE LA CURVA ABAJO, en la misma pantalla. Antes el historial se
+      // abría en un modal: para comparar dos insumos había que abrir, cerrar y
+      // volver a abrir, y el total nunca se veía al lado del de al lado.
+      var mas = Number(i.comprado_veces) > 0
+        ? '<button class="btn bo bs" id="pa-ins-mas-'+i.id+'" title="Ver la curva de compras de este insumo"'
+          + ' onclick="paInsCurva('+i.id+')" style="padding:2px 8px;font-size:13px;line-height:1.2">+</button>'
+        : '';
+      return'<tr'+rowStyle+' id="pa-ins-fila-'+i.id+'">'
+        +'<td style="text-align:center">'+mas+'</td>'
+        +'<td><span title="'+(i.categoria_v2||i.categoria_principal||'agroinsumos')+'" style="margin-right:4px">'+catIco+'</span><strong style="cursor:pointer;color:var(--burg)" onclick="paInsCurva('+i.id+')">'+i.nombre+'</strong>'+(ficha?'<br>'+ficha:'')+'</td>'
         +'<td>'+princip+'</td>'
         +'<td>'+catTxt+'</td>'
         +'<td>'+i.unidad+'</td>'
         +'<td style="text-align:right">'+stockTxt+'</td>'
+        +'<td style="text-align:right">'+compTxt+'</td>'
         +'<td style="text-align:right;font-size:12px">'+precioUsd+'</td>'
         +'<td style="text-align:center">'+cuentaBadge+'</td>'
         +'<td>'+estadoBadge+'</td>'
@@ -33666,6 +33694,83 @@ function paOnSubcatCambio(){
     'Gastos Generales':'otro','Movilidad y Viáticos':'otro','Oficina':'otro','Varios':'otro','Limpieza':'otro'
   };
   document.getElementById('pa-ins-tipo').value = mapTipoLegacy[subcat] || 'otro';
+}
+
+// ── LA CURVA DE COMPRAS DE UN INSUMO, ABAJO DE SU RENGLÓN ─────────────
+//
+// Pablo: "se me ocurre podemos armar por insumo y abajo como un detalle
+// apretando un '+' la curva de compras que tenemos con el proveedor".
+//
+// El historial ya existía pero se abría en un MODAL: para comparar dos insumos
+// había que abrir, cerrar y volver a abrir, y el total de uno nunca se veía al
+// lado del de al lado. Acá se despliega en la misma tabla y se pueden dejar
+// varios abiertos, que es lo que hace falta para armarle el pedido al proveedor.
+function paInsCurva(insumoId){
+  var fila = document.getElementById('pa-ins-fila-' + insumoId);
+  if (!fila) return;
+  var det = document.getElementById('pa-ins-curva-' + insumoId);
+  var btn = document.getElementById('pa-ins-mas-' + insumoId);
+  if (det) {                       // ya estaba abierto: se cierra
+    det.parentNode.removeChild(det);
+    if (btn) btn.textContent = '+';
+    return;
+  }
+  var cols = fila.children.length;
+  var tr = document.createElement('tr');
+  tr.id = 'pa-ins-curva-' + insumoId;
+  tr.innerHTML = '<td colspan="' + cols + '" style="background:var(--bg);padding:10px 14px">'
+    + '<span style="font-size:12px;color:var(--mut)">Buscando las compras…</span></td>';
+  fila.parentNode.insertBefore(tr, fila.nextSibling);
+  if (btn) btn.textContent = '−';
+
+  paF('/api/pa/insumos/historial?insumo_id=' + insumoId).then(function(r){
+    var celda = tr.firstChild;
+    var data = (r && r.data) ? r.data : [];
+    if (!data.length) {
+      celda.innerHTML = '<span style="font-size:12px;color:var(--mut)">Sin compras registradas.</span>';
+      return;
+    }
+    // POR PROVEEDOR, que es a quién hay que pedirle. Un listado plano por fecha
+    // no contesta "cuánto le compré a éste", que es la pregunta de Pablo.
+    var porProv = {};
+    var totCant = 0, totMonto = 0;
+    data.forEach(function(c){
+      var k = c.proveedor || '— sin proveedor —';
+      if (!porProv[k]) porProv[k] = { compras: [], cant: 0, monto: 0 };
+      porProv[k].compras.push(c);
+      porProv[k].cant += Number(c.cantidad) || 0;
+      porProv[k].monto += Number(c.subtotal) || 0;
+      totCant += Number(c.cantidad) || 0;
+      totMonto += Number(c.subtotal) || 0;
+    });
+    var provs = Object.keys(porProv).sort(function(a, b){ return porProv[b].cant - porProv[a].cant; });
+    var uni = data[0] ? (data[0].unidad || '') : '';
+    var pl = function(n){ return Number(n || 0).toLocaleString('es-AR'); };
+    var n2 = function(n){ var x = Math.round((Number(n)||0)*100)/100; return (x % 1 === 0) ? String(x) : x.toFixed(2); };
+
+    var h = '<div style="font-weight:700;font-size:11.5px;text-transform:uppercase;letter-spacing:.04em;'
+      + 'color:var(--mut);margin-bottom:6px">Curva de compras · ' + n2(totCant) + ' ' + uni
+      + ' · $' + pl(Math.round(totMonto)) + '</div>';
+    provs.forEach(function(p){
+      var g = porProv[p];
+      h += '<div style="margin-bottom:8px">'
+        + '<div style="font-size:12.5px;font-weight:600;margin-bottom:3px">' + escH(p)
+        + ' <span style="font-weight:400;color:var(--mut)">· ' + n2(g.cant) + ' ' + uni
+        + ' · $' + pl(Math.round(g.monto)) + '</span></div>'
+        + '<table class="pa-tbl" style="width:100%"><tbody>'
+        + g.compras.map(function(c){
+            return '<tr>'
+              + '<td style="width:100px;font-size:12px">' + escH(paFecha(c.fecha)) + '</td>'
+              + '<td style="font-size:11px;color:var(--mut)">' + escH(c.nro_factura || '—') + '</td>'
+              + '<td style="width:120px;text-align:right;font-size:12px">' + n2(c.cantidad) + ' ' + escH(c.unidad || '') + '</td>'
+              + '<td style="width:120px;text-align:right;font-size:12px">$' + pl(c.precio_unit) + '/' + escH(c.unidad || '') + '</td>'
+              + '<td style="width:120px;text-align:right;font-size:12px">$' + pl(c.subtotal) + '</td>'
+              + '</tr>';
+          }).join('')
+        + '</tbody></table></div>';
+    });
+    celda.innerHTML = h;
+  });
 }
 
 function paVerHistorialCompras(insumoId, nombre, modo) {
