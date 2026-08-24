@@ -30128,6 +30128,14 @@ function admModValidarDoble() {
     div.style.background = 'rgba(239,68,68,.12)';
     div.style.color = 'var(--err)';
     div.textContent = '❌ El modelo necesita al menos 1 línea en el DEBE y 1 en el HABER';
+  } else if (esVenta) {
+    // ES UN MODELO DE VENTA: no lleva línea de Proveedores y no hay nada que
+    // avisar. El cálculo de esVenta ya estaba, pero esta rama faltaba, así que
+    // se calculaba y no se usaba — y el aviso seguía apareciendo igual.
+    div.style.background = 'rgba(74,222,128,.12)';
+    div.style.color = 'var(--ok)';
+    div.textContent = '✅ Modelo de VENTA — partida doble. El deudor al debe y la venta al haber; '
+      + 'el IVA lo pone la Configuración impositiva, como en compras.';
   } else if (!tieneProv) {
     div.style.background = 'rgba(245,158,11,.14)';
     div.style.color = '#92400e';
@@ -57421,6 +57429,14 @@ function sgctModValidarDoble() {
     div.style.background = 'rgba(239,68,68,.12)';
     div.style.color = 'var(--err)';
     div.textContent = '❌ El modelo necesita al menos 1 línea en el DEBE y 1 en el HABER';
+  } else if (esVenta) {
+    // ES UN MODELO DE VENTA: no lleva línea de Proveedores y no hay nada que
+    // avisar. El cálculo de esVenta ya estaba, pero esta rama faltaba, así que
+    // se calculaba y no se usaba — y el aviso seguía apareciendo igual.
+    div.style.background = 'rgba(74,222,128,.12)';
+    div.style.color = 'var(--ok)';
+    div.textContent = '✅ Modelo de VENTA — partida doble. El deudor al debe y la venta al haber; '
+      + 'el IVA lo pone la Configuración impositiva, como en compras.';
   } else if (!tieneProv) {
     div.style.background = 'rgba(245,158,11,.14)';
     div.style.color = '#92400e';
