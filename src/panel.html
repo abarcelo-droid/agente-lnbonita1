@@ -4482,12 +4482,24 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
       <b>«la vendemos»</b>: es el filtro de Oportunidades, y sin él la lista arranca con productos que nunca
       podríamos proveer.</div>
     <div style="font-size:12px;font-weight:700;margin-bottom:6px">Artículos pendientes de revisión</div>
+    <div class="sh-f" style="margin-bottom:8px">
+      <div><label>Buscar</label><input type="text" id="sh-map-q" placeholder="artículo" oninput="shMapDeb()"></div>
+      <div><label>Familia</label><select id="sh-map-fam" onchange="shMapeos()">
+        <option value="">— todas —</option><option>FRUTA</option><option>VERDURA</option>
+        <option>HOJA</option><option>HONGO</option><option>OTRO</option></select></div>
+      <div><label>&nbsp;</label><button class="btn bo bs" onclick="shMapTodos(true)">Seleccionar todo lo que se ve</button></div>
+    </div>
+    <div id="sh-map-resu" class="sh-aviso" style="margin:0 0 6px"></div>
+    <!-- Aparece sólo con algo seleccionado: una barra de acciones vacía invita a apretarla
+         sin haber elegido nada. -->
+    <div id="sh-map-acciones" style="display:none;gap:8px;flex-wrap:wrap;align-items:center;padding:8px 10px;margin-bottom:8px;border:1px solid var(--bor);border-radius:8px;background:var(--bg2,#f5f5f5);font-size:12.5px"></div>
     <div class="ab-table-wrap"><table class="pa-tbl">
-      <thead><tr><th class="sh-nom" style="width:27%">Artículo</th><th style="text-align:right;width:10%">Bultos</th>
-        <th style="text-align:center;width:11%">La vendemos</th><th style="width:13%">Familia</th>
-        <th style="width:12%">Unidad</th><th style="text-align:right;width:9%">Kg/bulto</th>
-        <th style="width:11%">Rubro</th><th style="width:7%"></th></tr></thead>
-      <tbody id="sh-tb-map"><tr><td colspan="8" class="emp">Cargando…</td></tr></tbody></table></div>
+      <thead><tr><th style="width:4%;text-align:center"><input type="checkbox" id="sh-map-todos" onchange="shMapTodos(this.checked)" title="Seleccionar todo lo que se ve"></th>
+        <th class="sh-nom" style="width:24%">Artículo</th><th style="text-align:right;width:9%">Bultos</th>
+        <th style="text-align:center;width:10%">La vendemos</th><th style="width:12%">Familia</th>
+        <th style="width:11%">Unidad</th><th style="text-align:right;width:9%">Kg/bulto</th>
+        <th style="width:14%">Rubro</th><th style="width:7%"></th></tr></thead>
+      <tbody id="sh-tb-map"><tr><td colspan="9" class="emp">Cargando…</td></tr></tbody></table></div>
 
     <div style="font-size:12px;font-weight:700;margin:18px 0 6px">Proveedores pendientes</div>
     <div class="ab-table-wrap"><table class="pa-tbl">
@@ -29062,18 +29074,41 @@ function shReactivar(id){
 var SH_FAM = ['FRUTA', 'VERDURA', 'HOJA', 'HONGO', 'OTRO'];
 var SH_UNI = ['KG', 'UNIDAD', 'ATADO', 'PAQUETE', 'PACK_GR', 'SIN_DEFINIR'];
 
+// ── MAPEOS: revisar de a muchos ─────────────────────────────────────────────────────────
+// Con el histórico cargado la cola arranca en varios cientos de artículos, y casi todos
+// necesitan lo mismo: "revisado, así está bien". De a uno son cientos de clics, y lo que pasa
+// en la práctica es que la cola no se revisa nunca — y sin «la vendemos» marcado,
+// Oportunidades no sirve para nada.
+//
+// La unidad y el factor de kilos NO se pueden tocar en lote a propósito: son propios de cada
+// artículo, y ponerle 1 kg por bulto a cien productos de un saque daría un total en kilos
+// perfectamente creíble y falso.
+var SH_MAP = { sel: {}, filas: [] };
+
 function shMapeos(){
   eid('sh-filtro-extra').innerHTML = '';
-  api('/api/share/pendientes').then(function(r){
-    if (!r || !r.ok) { eid('sh-tb-map').innerHTML = '<tr><td colspan="8" class="emp">' + escH((r && r.error) || 'Error') + '</td></tr>'; return; }
-    var d = r.data;
-    var op = SH.puedeOperar;
+  SH_MAP.sel = {};
+  var q = [];
+  var b = (eid('sh-map-q') || {}).value; if (b) q.push('q=' + encodeURIComponent(b));
+  var f = (eid('sh-map-fam') || {}).value; if (f) q.push('familia=' + encodeURIComponent(f));
+  api('/api/share/pendientes' + (q.length ? '?' + q.join('&') : '')).then(function(r){
+    if (!r || !r.ok) { eid('sh-tb-map').innerHTML = '<tr><td colspan="9" class="emp">' + escH((r && r.error) || 'Error') + '</td></tr>'; return; }
+    var d = r.data, op = SH.puedeOperar;
+    SH_MAP.filas = d.articulos;
+    eid('sh-map-resu').innerHTML = d.total_articulos
+      ? 'Mostrando <b>' + d.mostrados + '</b> de <b>' + d.total_articulos + '</b> pendientes' +
+        (d.total_articulos > d.mostrados ? ' (los de más volumen primero; achicá con el buscador)' : '') +
+        (d.pendientes_todos !== d.total_articulos ? ' · ' + d.pendientes_todos + ' en total sin filtrar' : '')
+      : 'No queda nada pendiente con esos filtros.';
+
     eid('sh-tb-map').innerHTML = d.articulos.length ? d.articulos.map(function(a){
       var sel = function(id, vals, act){
         return '<select id="' + id + '"' + (op ? '' : ' disabled') + ' style="width:100%;padding:3px 5px;border:1px solid var(--bor);border-radius:5px;background:var(--bg);font-size:12px">' +
           vals.map(function(v){ return '<option value="' + esc(v) + '"' + (v === act ? ' selected' : '') + '>' + escH(v) + '</option>'; }).join('') + '</select>';
       };
-      return '<tr><td class="sh-nom">' + escH(a.desc_canonica) +
+      return '<tr id="shm-tr-' + a.id + '">' +
+        '<td style="text-align:center"><input type="checkbox" id="shm-sel-' + a.id + '" onchange="shMapMarcar(' + a.id + ')"' + (op ? '' : ' disabled') + '></td>' +
+        '<td class="sh-nom">' + escH(a.desc_canonica) +
           '<div class="sh-aviso" style="margin:1px 0 0">desde ' + escH(a.primera || '—') + '</div></td>' +
         '<td style="text-align:right">' + nr(a.bultos) + '</td>' +
         '<td style="text-align:center"><input type="checkbox" id="shm-lv-' + a.id + '"' + (a.la_vendemos ? ' checked' : '') + (op ? '' : ' disabled') + '></td>' +
@@ -29084,7 +29119,8 @@ function shMapeos(){
         '<td><input type="text" id="shm-ru-' + a.id + '" value="' + esc(a.rubro || '') + '"' + (op ? '' : ' disabled') +
           ' style="width:100%;padding:3px 5px;border:1px solid var(--bor);border-radius:5px;background:var(--bg);font-size:12px"></td>' +
         '<td>' + (op ? '<button class="btn bb bs" onclick="shGuardarArt(' + a.id + ')">OK</button>' : '') + '</td></tr>';
-    }).join('') : '<tr><td colspan="8" class="emp">Nada pendiente. 👌</td></tr>';
+    }).join('') : '<tr><td colspan="9" class="emp">Nada pendiente acá. 👌</td></tr>';
+    shMapBarra();
 
     eid('sh-tb-mapprov').innerHTML = d.proveedores.length ? d.proveedores.map(function(p){
       return '<tr><td class="sh-nom">' + escH(p.nombre_canonico) + '</td>' +
@@ -29092,7 +29128,8 @@ function shMapeos(){
         '<td><select id="shp-tipo-' + p.id + '"' + (op ? '' : ' disabled') + ' style="width:100%;padding:3px 5px;border:1px solid var(--bor);border-radius:5px;background:var(--bg);font-size:12px">' +
           ['competidor', 'nosotros', 'importacion_propia'].map(function(t){
             return '<option value="' + t + '"' + (t === p.tipo ? ' selected' : '') + '>' + t + '</option>'; }).join('') + '</select></td>' +
-        '<td>' + (op ? '<button class="btn bb bs" onclick="shGuardarProv(' + p.id + ')">OK</button>' : '') + '</td></tr>';
+        '<td>' + (op ? '<button class="btn bb bs" onclick="shGuardarProv(' + p.id + ')">OK</button>' : '') +
+          (op && d.proveedores.length > 1 ? ' <button class="btn bo bs" onclick="shMapProvTodos()">OK a todos</button>' : '') + '</td></tr>';
     }).join('') : '<tr><td colspan="4" class="emp">Nada pendiente.</td></tr>';
   });
 
@@ -29104,6 +29141,86 @@ function shMapeos(){
       return '<option value="' + a.id + '">' + escH(a.desc) + ' (' + nr(a.total) + ')</option>'; }).join('');
     eid('sh-fus-destino').innerHTML = ops;
     eid('sh-fus-origen').innerHTML = ops;
+  });
+}
+var shMapT; function shMapDeb(){ clearTimeout(shMapT); shMapT = setTimeout(shMapeos, 400); }
+
+// ── Selección ───────────────────────────────────────────────────────────────────────────
+function shMapMarcar(id){
+  var c = eid('shm-sel-' + id);
+  if (c && c.checked) SH_MAP.sel[id] = 1; else delete SH_MAP.sel[id];
+  var tr = eid('shm-tr-' + id);
+  if (tr) tr.style.background = (c && c.checked) ? 'var(--bg2,#f5f5f5)' : '';
+  shMapBarra();
+}
+function shMapTodos(marcar){
+  SH_MAP.sel = {};
+  SH_MAP.filas.forEach(function(a){
+    var c = eid('shm-sel-' + a.id); if (c) c.checked = !!marcar;
+    var tr = eid('shm-tr-' + a.id); if (tr) tr.style.background = marcar ? 'var(--bg2,#f5f5f5)' : '';
+    if (marcar) SH_MAP.sel[a.id] = 1;
+  });
+  var t = eid('sh-map-todos'); if (t) t.checked = !!marcar;
+  shMapBarra();
+}
+function shMapIds(){ return Object.keys(SH_MAP.sel).map(Number); }
+
+function shMapBarra(){
+  var n = shMapIds().length;
+  var box = eid('sh-map-acciones'); if (!box) return;
+  if (!n || !SH.puedeOperar) { box.innerHTML = ''; box.style.display = 'none'; return; }
+  box.style.display = '';
+  box.innerHTML =
+    '<b>' + n + ' seleccionado' + (n === 1 ? '' : 's') + '</b>' +
+    '<button class="btn bb bs" onclick="shMapLote(1)">✓ Sí la vendemos · dar OK</button>' +
+    '<button class="btn bo bs" onclick="shMapLote(0)">✗ No la vendemos · dar OK</button>' +
+    '<button class="btn bo bs" onclick="shMapLote(null)">Dar OK sin cambiar nada</button>' +
+    '<span style="color:var(--mut);font-size:11.5px">Familia:</span>' +
+    '<select id="sh-map-famlote" style="padding:4px 7px;border:1px solid var(--bor);border-radius:6px;background:var(--bg);font-size:12px">' +
+      '<option value="">— sin cambiar —</option>' +
+      SH_FAM.map(function(f){ return '<option value="' + f + '">' + f + '</option>'; }).join('') +
+    '</select>' +
+    '<button class="btn bo bs" onclick="shMapTodos(false)">Deseleccionar</button>';
+}
+
+// vendemos: 1 = marcar que sí, 0 = marcar que no, null = no tocar (sólo sacar de la cola).
+function shMapLote(vendemos){
+  var ids = shMapIds();
+  if (!ids.length) return;
+  var cambios = { pendiente_revision: 0 };
+  if (vendemos !== null) cambios.la_vendemos = vendemos;
+  var fam = (eid('sh-map-famlote') || {}).value;
+  if (fam) cambios.familia = fam;
+
+  var qué = vendemos === 1 ? 'marcarlos como «la vendemos»' : (vendemos === 0 ? 'marcarlos como que NO la vendemos' : 'darles el OK sin cambiar nada');
+  if (!confirm('Vas a ' + qué + ' y sacarlos de la cola de revisión.\n\n' + ids.length + ' artículo(s)' +
+      (fam ? '\nAdemás se les pone la familia ' + fam + '.' : '') +
+      '\n\nSe puede deshacer artículo por artículo desde la tabla de Artículos.')) return;
+
+  api('/api/share/articulos', 'PATCH', { ids: ids, cambios: cambios }).then(function(r){
+    if (!r || !r.ok) { toast((r && r.error) || 'Error', 'err'); return; }
+    toast(r.data.actualizados + ' artículo(s) listos · quedan ' + r.data.pendientes);
+    SH_MAP.sel = {};
+    var t = eid('sh-map-todos'); if (t) t.checked = false;
+    shMapeos(); shInit();
+  });
+}
+
+// Los proveedores son ~41 y lo único que hay que decidir es el tipo, que el importador ya
+// acierta salvo excepción: darles el OK a todos de una es lo normal.
+function shMapProvTodos(){
+  // Se vuelven a pedir en vez de leerlos del DOM: si alguien tocó un select y no guardó, el
+  // tipo que vale es el que está en la base, no el que quedó a medias en la pantalla.
+  api('/api/share/pendientes').then(function(r){
+    if (!r || !r.ok) return;
+    var ids = r.data.proveedores.map(function(p){ return p.id; });
+    if (!ids.length) return;
+    if (!confirm('Dar el OK a los ' + ids.length + ' proveedores pendientes, con el tipo que tienen ahora?')) return;
+    api('/api/share/proveedores', 'PATCH', { ids: ids, cambios: {} }).then(function(x){
+      if (!x || !x.ok) { toast((x && x.error) || 'Error', 'err'); return; }
+      toast(x.data.actualizados + ' proveedor(es) listos');
+      shMapeos(); shInit();
+    });
   });
 }
 
