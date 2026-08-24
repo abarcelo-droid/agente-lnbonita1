@@ -52747,7 +52747,11 @@ function spTablaHtml(arr, vista) {
     if (s.estado_global === 'aprobada_final') badge = '<span class="sp-bad sp-ok">completada</span>';
     else if (s.estado_global === 'rechazada') badge = '<span class="sp-bad sp-err">rechazada</span>';
     else if (s.estado_global === 'cancelada') badge = '<span class="sp-bad sp-gris">cancelada</span>';
-    else badge = '<span class="sp-bad ' + (s.vencida ? 'sp-err' : 'sp-warn') + '">' + spEsc(s.paso_nombre) + '</span>';
+    // EL PASO SE PINTA IGUAL ESTÉ HACE CUÁNTO ESTÉ. El rojo decía lo mismo que
+    // la palabra "vencido" que se sacó de al lado, y un rojo sin explicación
+    // confunde más todavía: el operador no sabe si hizo algo mal o si la orden
+    // está mal. El paso es el paso; hace cuánto está se lee en su columna.
+    else badge = '<span class="sp-bad sp-warn">' + spEsc(s.paso_nombre) + '</span>';
 
     // Los botones que dibuja el front son EXACTAMENTE los que el backend dijo que
     // este usuario puede usar en este paso. Sin eso, la bandeja no dice qué hacer.
@@ -52757,7 +52761,7 @@ function spTablaHtml(arr, vista) {
         + ' onclick="spAccionAbrir(' + s.id + ',\'' + spEsc(a.accion) + '\',\'' + spEsc(a.destino || '') + '\')">' + spEsc(a.etiqueta) + '</button>';
     }).join('');
 
-    html += '<tr class="' + (s.vencida && s.estado_global === 'en_curso' ? 'sp-fila-venc' : '') + '">'
+    html += '<tr>'
       + '<td><strong>' + spEsc(s.numero) + '</strong>'
         + (s.prioridad === 'urgente' ? ' <span class="sp-bad sp-err">urgente</span>' : '') + '</td>'
       // La cuenta va en monoespaciada y rotulada: se lee como código, que es lo que
@@ -52771,7 +52775,14 @@ function spTablaHtml(arr, vista) {
       + '<td>' + badge
         + (s.fecha_pago_confirmada ? '<div class="sp-chica">pago: ' + spEsc(s.fecha_pago_confirmada) + '</div>' : '') + '</td>'
       + '<td class="sp-chica">' + spEsc(String(s.paso_actual_desde || '').slice(0, 16))
-        + (s.vencida ? '<div style="color:var(--err);font-weight:600">vencido</div>' : '')
+        // SIN "VENCIDO" EN EL SEGUIMIENTO DE ÓRDENES DE PAGO. Acá la columna
+        // dice desde cuándo la orden está esperando en su paso, y el cartel rojo
+        // se leía como si la DEUDA estuviera vencida — que es otra cosa— o como
+        // si el operador hubiera dejado pasar algo. Confundía a quien la mira
+        // para trabajar, que es todo el día.
+        //
+        // La fecha sigue estando: quien quiera saber hace cuánto está parada, la
+        // lee. Lo que se saca es el juicio, no el dato.
         // A quién se le pidió el OK, y a quién le toca de verdad. Es lo primero que
         // se pregunta el que no puede actuar.
         + (s.autorizador_nombre && s.paso_actual_hito === 'autorizacion'
