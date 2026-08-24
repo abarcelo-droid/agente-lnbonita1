@@ -13171,6 +13171,12 @@ function sgPiPasar(){
 function sgFdInit(){
   sgFdModeloCargar();
   SG.fdItems=[];
+  // NADA DE LA VENTA ANTERIOR SOBREVIVE. El cuadro del asiento vive en un div
+  // aparte: si no se vacía acá, al volver a entrar se ve el asiento de una venta
+  // que quedó sin emitir, con sus importes y su "balancea".
+  SG._fdResignado=0;
+  if (eid('sgfd-asiento')) eid('sgfd-asiento').innerHTML='';
+  if (eid('sgfd-resumen')) eid('sgfd-resumen').innerHTML='';
   var sel=eid('sgfd-cli'); if(sel) sel.innerHTML=sgCliOpts('','','— Elegí cliente —');
   sgCliUnico('sgfd-cli');
   eid('sgfd-tipo-badge').innerHTML='';
@@ -13290,7 +13296,14 @@ function sgFdRender(){
   var cont=eid('sgfd-lines'); if(!cont) return;
   if(!SG.fdItems.length){
     cont.innerHTML='<div style="font-size:12px;color:var(--mut)">Elegí arriba con + las partidas del stock 🟢 que se facturan.</div>';
-    eid('sgfd-resumen').innerHTML=''; return;
+    eid('sgfd-resumen').innerHTML='';
+    // Y EL CUADRO DEL ASIENTO TAMBIÉN SE BORRA. Este return salía antes de
+    // llegar a la línea que lo repinta, así que el asiento de la venta anterior
+    // quedaba en pantalla con la lista de líneas vacía: mostraba importes de
+    // algo que ya no existía, y encima cuadraba, que es lo que lo hace creíble.
+    SG._fdResignado = 0;
+    if (eid('sgfd-asiento')) eid('sgfd-asiento').innerHTML = '';
+    return;
   }
   cont.innerHTML=SG.fdItems.map(function(it,i){
     var kg=Number(it.kg)||0;
