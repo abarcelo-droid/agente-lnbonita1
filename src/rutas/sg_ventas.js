@@ -76,6 +76,17 @@ function requireAuth(req, res, next) {
   next();
 }
 
+// PARAMETRIZAR ES DE ADMIN. Elegir con qué asiento modelo se contabilizan TODAS
+// las ventas es la misma clase de decisión que dar de alta una cuenta bancaria:
+// no es el trabajo del día, es la forma en que ese trabajo queda registrado.
+function requireAdmin(req, res, next) {
+  const u = getUser(req);
+  if (!u) return res.status(401).json({ ok: false, error: 'no autenticado' });
+  if (u.rol !== 'admin') return res.status(403).json({ ok: false, error: 'Solo administradores' });
+  req._user = u;
+  next();
+}
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // PADRÓN DE CLIENTES — opera sobre sg_clientes (#401 Camino A; sg_ven_clientes DEPRECADA)
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -382,6 +393,82 @@ router.get('/facturas/export.xlsx', (req, res) => {
   } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
+// ── EL ASIENTO MODELO DE VENTA ──────────────────────────────
+//
+// Mismo mecanismo que en compras: Pablo arma el modelo en Contabilidad SG, elige
+// cuál se usa, y las facturas se contabilizan contra él. Antes esto sacaba las
+// cuentas de la configuración impositiva y de la ficha del cliente —y esa ficha
+// ni siquiera tenía dónde cargarla—.
+//
+// Cada línea del modelo dice QUÉ ES, no cuánto:
+//
+//   clientes   → el DEBE por el total: lo que el cliente queda debiendo
+//   ventas     → el HABER por el neto
+//   iva        → el HABER por el IVA débito fiscal
+//   descuento  → opcional: contra qué cuenta se mide lo resignado por los
+//                acuerdos. Si el modelo no la trae, se usa la de ventas.
+//
+// Los importes los pone la factura; el modelo pone las cuentas. Igual que en
+// compras: un modelo no es un asiento, es la forma del asiento.
+const CLAVE_MODELO_VENTA = 'asiento_modelo_venta';
+
+function modeloVentaLineas(db) {
+  const cfg = db.prepare('SELECT valor FROM sg_config WHERE clave=?').get(CLAVE_MODELO_VENTA);
+  const id = cfg && cfg.valor ? Number(cfg.valor) : null;
+  if (!id) return { id: null, lineas: [] };
+  const m = db.prepare('SELECT id FROM sg_asientos_modelo WHERE id=? AND activo=1').get(id);
+  if (!m) return { id: null, perdido: id, lineas: [] };
+  const lineas = db.prepare(`SELECT l.*, c.codigo AS cuenta_codigo, c.nombre AS cuenta_nombre
+    FROM sg_asientos_modelo_lineas l
+    LEFT JOIN sg_cuentas c ON c.id = l.cuenta_id
+    WHERE l.modelo_id=? ORDER BY l.orden, l.id`).all(id);
+  return { id, lineas };
+}
+
+// Qué le falta al modelo para poder contabilizar una venta. Se avisa ANTES de
+// que haya una factura cargada y alguien esperando.
+function modeloVentaFaltan(lineas) {
+  const faltan = [];
+  if (!lineas.length) return ['no hay ningún asiento modelo de venta elegido'];
+  const tiene = (t) => lineas.some((l) => l.tipo_linea === t);
+  if (!tiene('clientes')) faltan.push('la línea de Clientes, que es el debe de la venta');
+  if (!tiene('ventas')) faltan.push('la línea de Ventas, que es el haber');
+  const sinCuenta = lineas.filter((l) => !l.cuenta_codigo).length;
+  if (sinCuenta) faltan.push(sinCuenta + ' línea(s) apuntan a una cuenta que ya no existe');
+  return faltan;
+}
+
+// El modelo elegido, con sus líneas y con la verificación de que sirve.
+router.get('/modelo-venta', requireAuth, (req, res) => {
+  try {
+    const m = modeloVentaLineas(db);
+    if (!m.id) {
+      return res.json({ ok: true, data: { modelo: null, id_perdido: m.perdido || null } });
+    }
+    const cab = db.prepare('SELECT * FROM sg_asientos_modelo WHERE id=?').get(m.id);
+    cab.lineas = m.lineas;
+    res.json({ ok: true, data: { modelo: cab, faltan: modeloVentaFaltan(m.lineas) } });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// Elegir con qué modelo se contabilizan las ventas. Sólo admin: define cómo entra
+// la plata de TODAS las ventas.
+router.put('/modelo-venta', requireAdmin, (req, res) => {
+  try {
+    const modeloId = req.body && req.body.modelo_id ? Number(req.body.modelo_id) : null;
+    if (modeloId) {
+      const m = db.prepare('SELECT id FROM sg_asientos_modelo WHERE id=? AND activo=1').get(modeloId);
+      if (!m) return res.status(400).json({ ok: false, error: 'Ese asiento modelo no existe o está dado de baja' });
+    }
+    db.prepare(`INSERT INTO sg_config (clave, valor, modificado_en, modificado_por)
+      VALUES (?,?,datetime('now','localtime'),?)
+      ON CONFLICT(clave) DO UPDATE SET valor=excluded.valor,
+        modificado_en=excluded.modificado_en, modificado_por=excluded.modificado_por`)
+      .run(CLAVE_MODELO_VENTA, modeloId == null ? null : String(modeloId), req._user?.id || null);
+    res.json({ ok: true, data: { modelo_id: modeloId } });
+  } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
+});
+
 // ── EL ASIENTO DE UNA FACTURA DE VENTA ──────────────────────────────────
 //
 // La factura de venta NO generaba asiento. La columna asiento_id existía y se
@@ -408,39 +495,48 @@ router.get('/facturas/export.xlsx', (req, res) => {
 // Devuelve {lineas, falta} — `falta` dice qué cuenta no está parametrizada, para
 // que la pantalla lo diga en vez de guardar un asiento a medias.
 function lineasAsientoVenta(db, { clienteId, neto, iva, total, descuento, numero }) {
-  const cfg = {};
-  db.prepare('SELECT clave, cuenta_id FROM sg_config_impositiva WHERE cuenta_id IS NOT NULL')
-    .all().forEach((r) => { cfg[r.clave] = r.cuenta_id; });
-  const cli = db.prepare('SELECT razon_social, cuenta_contable_id FROM sg_clientes WHERE id=?')
-    .get(clienteId) || {};
+  const mod = modeloVentaLineas(db);
+  const faltan = modeloVentaFaltan(mod.lineas);
+  if (faltan.length) return { lineas: [], falta: faltan, modelo_id: mod.id };
 
-  const falta = [];
-  if (!cli.cuenta_contable_id) falta.push('la cuenta contable de ' + (cli.razon_social || 'el cliente'));
-  if (!cfg.ventas) falta.push('la cuenta de Ventas');
-  if (r2v(iva) > 0 && !cfg.iva_debito_fiscal) falta.push('la cuenta de IVA Débito Fiscal');
-  if (falta.length) return { lineas: [], falta };
+  const de = (t) => mod.lineas.find((l) => l.tipo_linea === t);
+  const lCli = de('clientes'), lVta = de('ventas'), lIva = de('iva');
+
+  // El IVA sólo se pide cuando lo hay: una factura B no lo discrimina, y exigir
+  // la cuenta ahí frenaría ventas que no la necesitan.
+  if (r2v(iva) > 0 && !lIva) {
+    return { lineas: [],
+      falta: ['la línea de IVA en el asiento modelo, y esta factura lo discrimina'],
+      modelo_id: mod.id };
+  }
 
   const lineas = [
-    { cuenta_id: cli.cuenta_contable_id, debe: r2v(total), haber: 0,
-      descripcion: 'Factura ' + numero },
-    { cuenta_id: cfg.ventas, debe: 0, haber: r2v(neto), descripcion: 'Venta ' + numero },
+    { cuenta_id: lCli.cuenta_id, debe: r2v(total), haber: 0,
+      descripcion: lCli.descripcion || ('Factura ' + numero) },
+    { cuenta_id: lVta.cuenta_id, debe: 0, haber: r2v(neto),
+      descripcion: lVta.descripcion || ('Venta ' + numero) },
   ];
   if (r2v(iva) > 0) {
-    lineas.push({ cuenta_id: cfg.iva_debito_fiscal, debe: 0, haber: r2v(iva),
-      descripcion: 'IVA Débito Fiscal' });
+    lineas.push({ cuenta_id: lIva.cuenta_id, debe: 0, haber: r2v(iva),
+      descripcion: lIva.descripcion || 'IVA Débito Fiscal' });
   }
-  // El descuento comercial, en gestión. El cliente "debería" lo de lista y la
-  // venta de gestión es la de lista: la diferencia queda medida en su cuenta.
+  // EL DESCUENTO COMERCIAL, EN GESTIÓN. El cliente "debería" lo de lista y la
+  // venta de gestión es la de lista: la diferencia queda medida.
+  //
+  // Si el modelo trae una línea 'descuento', se mide contra esa cuenta —así se
+  // puede sumar por período sin desarmar el mayor de Ventas—. Si no la trae, va
+  // contra Ventas, que es lo mínimo que hace falta para que el ajuste exista.
   const d = r2v(descuento);
   if (d > 0) {
-    lineas.push({ cuenta_id: cli.cuenta_contable_id, debe: d, haber: 0,
+    const lDesc = de('descuento');
+    lineas.push({ cuenta_id: lCli.cuenta_id, debe: d, haber: 0,
       ambito: 'gestion', motivo: 'ajuste_gestion',
       descripcion: 'Descuento comercial acordado' });
-    lineas.push({ cuenta_id: cfg.ventas, debe: 0, haber: d,
+    lineas.push({ cuenta_id: (lDesc ? lDesc.cuenta_id : lVta.cuenta_id), debe: 0, haber: d,
       ambito: 'gestion', motivo: 'ajuste_gestion',
       descripcion: 'Descuento comercial acordado' });
   }
-  return { lineas, falta: [] };
+  return { lineas, falta: [], modelo_id: mod.id };
 }
 const r2v = (x) => Math.round((Number(x) || 0) * 100) / 100;
 
@@ -534,7 +630,7 @@ router.post('/facturas', requireAuth, (req, res) => {
         neto, iva, total, descuento: desc, numero });
       if (arm.falta.length) {
         throw new Error('No se puede contabilizar la venta: falta ' + arm.falta.join(' y ')
-          + '. Se carga en Configuración impositiva y en la ficha del cliente.');
+          + '. Se arregla en el asiento modelo de venta, en Contabilidad SG.');
       }
       const cliNom = (db.prepare('SELECT razon_social r FROM sg_clientes WHERE id=?')
         .get(parseInt(cliente_id)) || {}).r;
