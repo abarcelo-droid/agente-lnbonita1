@@ -228,7 +228,8 @@ export function proximoNumeroManual(database, ptoVta, cbteTipo) {
   return (r && r.n ? Number(r.n) : 0) + 1;
 }
 
-function persistirReservada(database, { comprobante, ptoVta, cbteTipo, cbteNro, ambiente, fecha, userId, manual, esPrueba }) {
+function persistirReservada(database, { comprobante, ptoVta, cbteTipo, cbteNro, ambiente, fecha,
+                                        userId, manual, esPrueba, descuentoGestion }) {
   const tipoLetra = (cbteTipo === 1 || cbteTipo === 3) ? 'A' : 'B';
   // Identificador interno único (NO es el número fiscal: ese es PV + cbte_nro + CAE). Prefijo
   // ambiente-aware: AFIPH- en homologación (test), AFIP- en producción.
@@ -240,13 +241,25 @@ function persistirReservada(database, { comprobante, ptoVta, cbteTipo, cbteNro, 
   database.transaction(() => {
     const info = database.prepare(`INSERT INTO sg_ven_facturas
       (numero, fecha, cliente_id, tipo, concepto, neto, iva, total, estado,
-       punto_venta, cbte_tipo, cbte_nro, ambiente, afip_estado, notas, usuario_id, es_prueba)
-      VALUES (?,?,?,?,?,?,?,?, 'pendiente', ?,?,?,?, 'reservado', ?, ?, ?)`).run(
+       punto_venta, cbte_tipo, cbte_nro, ambiente, afip_estado, notas, usuario_id, es_prueba,
+       dif_gestion, dif_motivo)
+      VALUES (?,?,?,?,?,?,?,?, 'pendiente', ?,?,?,?, 'reservado', ?, ?, ?, ?, ?)`).run(
       numero, fecha, comprobante.cliente.id, tipoLetra, 'Productos',
       comprobante.imp_neto, comprobante.imp_iva, comprobante.imp_total,
       ptoVta, cbteTipo, cbteNro, ambiente,
       manual ? 'Comprobante manual — no se informó a AFIP' : 'PRUEBA emisión homologación',
-      userId || null, esPrueba ? 1 : 0);
+      userId || null, esPrueba ? 1 : 0,
+      // LO RESIGNADO POR LOS ACUERDOS, guardado desde el primer momento y en LA
+      // MISMA COLUMNA QUE TODO LO DEMÁS. Se escribe acá —y no después— porque
+      // asentarVenta() lo lee de la factura: si llegara más tarde, el asiento ya
+      // salió sin la parte de gestión.
+      //
+      // Va a dif_gestion, no a una columna propia: la cuenta corriente, lo
+      // pendiente de cada comprobante y los controles miran dif_gestion. Una
+      // segunda columna para lo mismo es una parte de gestión que existe en el
+      // asiento y que la pantalla del saldo no ve.
+      Math.round((Number(descuentoGestion) || 0) * 100) / 100,
+      (Number(descuentoGestion) || 0) > 0 ? 'ajuste_gestion' : null);
     facturaId = info.lastInsertRowid;
     const insItem = database.prepare(`INSERT INTO sg_ven_factura_items
       (factura_id, descripcion, cantidad, precio_unitario, subtotal, producto_id, alicuota_id, bultos, kg_por_bulto, precio_por_bulto, unidad)
@@ -278,13 +291,13 @@ function actualizarFactura(database, facturaId, campos) {
 // Si al modelo le falta algo, se corta y lo dice: no se guarda una venta a
 // medias. Y si ya tiene asiento —un reintento— no se escribe dos veces.
 function asentarVenta(database, facturaId, comprobante, ptoVta, cbteNro) {
-  const ya = database.prepare('SELECT asiento_id, numero, fecha, descuento_gestion FROM sg_ven_facturas WHERE id=?').get(facturaId);
+  const ya = database.prepare('SELECT asiento_id, numero, fecha, dif_gestion FROM sg_ven_facturas WHERE id=?').get(facturaId);
   if (ya && ya.asiento_id) return ya.asiento_id;
   const nro = String(ptoVta).padStart(4, '0') + '-' + String(cbteNro).padStart(8, '0');
   const arm = lineasAsientoVenta(database, {
     clienteId: comprobante.cliente.id,
     neto: comprobante.imp_neto, iva: comprobante.imp_iva, total: comprobante.imp_total,
-    descuento: (ya && ya.descuento_gestion) || 0, numero: nro,
+    descuento: (ya && ya.dif_gestion) || 0, numero: nro,
   });
   if (arm.falta.length) {
     throw new Error('No se puede contabilizar la venta: falta ' + arm.falta.join(' y ')
@@ -316,7 +329,8 @@ function confirmarAutorizada(database, facturaId, campos, vinculos) {
 // Emite un comprobante: reserva número (lock PV+tipo) → persiste 'reservado' → FECAESolicitar →
 // A: guarda cae/cae_vto/autorizado + puente factura↔despacho (atómico) · R: guarda obs/rechazado
 // (sin puente) · timeout: FECompConsultar. vinculos (opcional): [{despacho_id, despacho_item_id, kg}].
-export async function emitir(database, { ptoVta, clienteId, items, esNC, userId, vinculos }) {
+export async function emitir(database, { ptoVta, clienteId, items, esNC, userId, vinculos,
+                                         descuentoGestion }) {
   const comprobante = construirComprobante(database, { clienteId, items, esNC });
   const cbteTipo = comprobante.cbte_tipo;
 
@@ -335,7 +349,7 @@ export async function emitir(database, { ptoVta, clienteId, items, esNC, userId,
       const cbteNro = proximoNumeroManual(database, ptoVta, cbteTipo);
       const facturaId = persistirReservada(database, { comprobante, ptoVta, cbteTipo,
         cbteNro, ambiente: 'manual', fecha, userId, manual: true,
-        esPrueba: !!(pv && pv.es_prueba) });
+        descuentoGestion, esPrueba: !!(pv && pv.es_prueba) });
       // La MISMA función que el camino de AFIP: cierra la factura y ata los
       // despachos en una sola transacción. Escribir eso de nuevo acá sería dos
       // maneras de hacer lo mismo, y una de las dos se olvidaría de algo.
@@ -359,7 +373,8 @@ export async function emitir(database, { ptoVta, clienteId, items, esNC, userId,
     const fecha = fechaHoyAR();
     const ult = await ultimoComprobante(ptoVta, cbteTipo);     // FECompUltimoAutorizado
     const cbteNro = (Number(ult.ultimo_nro) || 0) + 1;
-    const facturaId = persistirReservada(database, { comprobante, ptoVta, cbteTipo, cbteNro, ambiente, fecha, userId });
+    const facturaId = persistirReservada(database, { comprobante, ptoVta, cbteTipo, cbteNro,
+      ambiente, fecha, userId, descuentoGestion });
 
     let resp;
     try {

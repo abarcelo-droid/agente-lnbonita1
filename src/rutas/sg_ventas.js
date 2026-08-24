@@ -506,8 +506,15 @@ router.post('/facturas', requireAuth, (req, res) => {
     if (existe) return res.status(400).json({ ok: false, error: `Ya existe la factura ${nro_factura} para este cliente` });
   }
   // Lo acordado contra lo facturado, igual que en compras.
-  const difG = Math.round((parseFloat(req.body.dif_gestion) || 0) * 100) / 100;
-  const difM = String(req.body.dif_motivo || '').trim();
+  //
+  // EL DESCUENTO COMERCIAL ES UNA DIFERENCIA DE GESTIÓN, no una cosa aparte: la
+  // factura sale por menos de lo que vale la venta, y esa parte se mide. Tenía
+  // columna propia (descuento_gestion) y por eso la cuenta corriente no lo veía:
+  // toda la pantalla —saldo, pendiente, controles— lee dif_gestion.
+  const desc = Math.round((parseFloat(req.body.descuento_gestion) || 0) * 100) / 100;
+  const difG = Math.round(((parseFloat(req.body.dif_gestion) || 0) + desc) * 100) / 100;
+  // Un descuento acordado no va a tener comprobante nunca: ese es su motivo.
+  const difM = String(req.body.dif_motivo || (desc > 0 ? 'ajuste_gestion' : '')).trim();
   if (difG < 0) {
     return res.status(400).json({ ok: false,
       error: 'La diferencia de gestión no puede ser negativa: si se facturó de MÁS, manda el comprobante.' });
@@ -540,9 +547,8 @@ router.post('/facturas', requireAuth, (req, res) => {
       // EL ASIENTO, EN LA MISMA TRANSACCIÓN. O entran la factura y su asiento, o
       // no entra ninguno: una venta fuera del libro es plata que el cliente debe
       // y que la contabilidad no sabe que existe.
-      const desc = Math.round((parseFloat(req.body.descuento_gestion) || 0) * 100) / 100;
       const arm = lineasAsientoVenta(db, { clienteId: parseInt(cliente_id),
-        neto, iva, total, descuento: desc, numero });
+        neto, iva, total, descuento: difG, numero });
       if (arm.falta.length) {
         throw new Error('No se puede contabilizar la venta: falta ' + arm.falta.join(' y ')
           + '. Se arregla en el asiento modelo de venta, en Contabilidad SG.');
@@ -553,8 +559,7 @@ router.post('/facturas', requireAuth, (req, res) => {
         fecha: fechaFac, usuario_id: u.id, ref_codigo: numero,
         descripcion: 'Venta — ' + (cliNom || '') + ' — Factura ' + numero,
       }, arm.lineas).id;
-      db.prepare('UPDATE sg_ven_facturas SET asiento_id=?, descuento_gestion=? WHERE id=?')
-        .run(asientoId, desc || null, facId);
+      db.prepare('UPDATE sg_ven_facturas SET asiento_id=? WHERE id=?').run(asientoId, facId);
       return { facId, numero, asientoId };
     });
     const result = tx();
@@ -697,6 +702,7 @@ router.get('/cc/:clienteId', (req, res) => {
 
     const facturas = db.prepare(`
       SELECT f.id, f.numero, f.fecha, f.total, f.estado,
+        f.punto_venta, f.cbte_tipo, f.cbte_nro, f.cae, f.ambiente,
         COALESCE((SELECT SUM(cd.monto) FROM sg_ven_cobranza_docs cd
           JOIN sg_ven_cobranzas co ON co.id=cd.cobranza_id
           WHERE cd.tipo='factura' AND cd.doc_id=f.id AND co.anulada=0), 0) as cobrado,
@@ -712,10 +718,15 @@ router.get('/cc/:clienteId', (req, res) => {
     const docs = [...liquidaciones, ...facturas].sort((a,b) => a.fecha < b.fecha ? 1 : -1);
     const totales = docs.reduce((acc, d) => {
       acc.total    += d.total;
+      // La parte de gestión se suma aparte y se muestra aparte: el total del
+      // comprobante es lo que dice el papel y no se toca. Lo que el cliente debe
+      // es total + gestión, y hay que poder ver las dos mitades por separado o
+      // el saldo no se puede explicar.
+      acc.gestion  += (d.dif_gestion || 0);
       acc.cobrado  += d.cobrado;
       acc.pendiente+= d.pendiente;
       return acc;
-    }, { total: 0, cobrado: 0, pendiente: 0 });
+    }, { total: 0, gestion: 0, cobrado: 0, pendiente: 0 });
 
     const cobranzas = db.prepare(`
       SELECT co.*, u.nombre as usuario_nombre
