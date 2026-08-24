@@ -51,6 +51,11 @@ export const FILAS_LIQ = [
     clave_cuenta: 'liq_comision', ayuda: 'Lo que le cobramos por vender' },
   { clave: 'descarga', label: 'Descarga', lado: 'haber', iva: 'debito',
     clave_cuenta: 'liq_descarga', ayuda: 'Lo que le cobramos por descargar' },
+  // EL FLETE. Pablo lo pidió después: "flete lo estoy agregando ya que me lo
+  // había olvidado". Es un servicio más que le cobramos — lo adelantamos
+  // nosotros y se lo descontamos de lo que le pagamos.
+  { clave: 'flete', label: 'Flete', lado: 'haber', iva: 'debito',
+    clave_cuenta: 'liq_flete', ayuda: 'Lo que le cobramos por traer la mercadería' },
   { clave: 'gastos_admin', label: 'Gastos administrativos', lado: 'haber', iva: 'debito',
     clave_cuenta: 'liq_gastos_admin', ayuda: 'Lo que le cobramos por administrar la operación' },
 ];

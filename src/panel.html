@@ -10772,7 +10772,62 @@ function liqDesdePartida(r){
   pg('liq-g-f-ventas', r.neto);
   pg('liq-g-f-iva_ventas', r.iva);
   pg('liq-g-g-ventas', r.gestion);
-  liqTotales();
+
+  // ── LO QUE SE LE DESCUENTA, TRAÍDO DE DONDE YA VIVE ────────────────
+  //
+  // Pablo: "la descarga debe venir de la recepción de mercadería que se hizo...
+  // lo mismo que el flete: si el flete está a cargo del comprador, debemos traer
+  // el flete que se cargó en la orden de compra con su IVA correspondiente".
+  //
+  // Todo queda EDITABLE: se completa lo que está vacío. Y cada fila dice de dónde
+  // salió su número, porque un importe que apareció solo es un importe que el
+  // operador no puede defender cuando el productor pregunta.
+  LIQ.ivaPct = Number(r.iva_servicios_pct) || 21;
+  LIQ.origen = {};
+
+  // LA COMISIÓN es un %: de la ficha del proveedor si la tiene, y si no el 12%
+  // que Pablo puso como norma.
+  if (LIQ.comisionPct == null) LIQ.comisionPct = Number(r.comision_pct) || 12;
+  LIQ.origen.comision = r.comision_pct_de_proveedor
+    ? 'del ' + LIQ.comisionPct + '% de la ficha del proveedor'
+    : 'del ' + LIQ.comisionPct + '% por defecto — la ficha del proveedor no la tiene';
+
+  // LA DESCARGA sale de la recepción. Si quedó alguna sin valorizar se avisa: un
+  // cero ahí sería cobrarle cero por algo que se hizo.
+  var d = r.descarga || {};
+  if (Number(d.monto)) {
+    pg('liq-g-f-descarga', d.monto);
+    pg('liq-g-f-iva_descarga', d.iva);
+    LIQ.origen.descarga = 'de la recepción de la mercadería';
+  } else if (Number(d.sin_valorizar)) {
+    LIQ.origen.descarga = '<span style="color:#9a3412">hay descarga en la recepción SIN VALORIZAR: '
+      + 'valorizala o ponela a mano</span>';
+  } else {
+    LIQ.origen.descarga = 'la recepción no registró descarga — a mano si corresponde';
+  }
+
+  // EL FLETE sale de la orden, y sólo si está a cargo del comprador. Si está a
+  // cargo del vendedor se dice igual, con su monto: que exista y no se cobre es
+  // una decisión, no un olvido, y el que liquida tiene que poder verla.
+  var fl = r.flete || {};
+  if (fl.se_cobra) {
+    pg('liq-g-f-flete', fl.neto);
+    pg('liq-g-f-iva_flete', fl.iva);
+    LIQ.origen.flete = 'de la orden de compra' + (fl.con_iva ? ' (el monto venía con IVA)' : '');
+  } else if (Number(fl.monto)) {
+    LIQ.origen.flete = 'la orden tiene ' + sgMoney(fl.monto) + ' a cargo del '
+      + escH(fl.a_cargo || '—') + ' — no se le cobra al productor';
+  } else {
+    LIQ.origen.flete = 'la orden no registró flete — a mano si corresponde';
+  }
+
+  LIQ.origen.ventas = 'de lo que la partida vendió, arriba';
+  LIQ.origen.gastos_admin = 'a mano';
+
+  // Se repinta para que los rótulos de origen y el % entren, y después se calcula
+  // la comisión sobre las ventas que se acaban de poner.
+  liqGrillaPintar();
+  liqComisionCalcular();
 }
 
 function liqBultosAvance(){
@@ -18941,7 +18996,7 @@ function sgRepExport(){
        — el crédito es de la mercadería que le compramos, que es la otra mitad
        de la misma liquidación. -->
   <div style="font-size:10px;font-weight:700;color:var(--mut);text-transform:uppercase;letter-spacing:.08em;margin:14px 0 6px;padding-left:2px">Liquidaciones · lo que le cobramos al productor</div>
-  <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
     <div style="background:#f0fdf4;border:1px solid #86efac;border-radius:8px;padding:12px">
       <label style="font-size:11px;font-weight:700;color:#15803d;text-transform:uppercase;display:block;margin-bottom:4px">Comisión</label>
       <div style="font-size:10px;color:#16a34a;margin-bottom:6px">Lo que le cobramos por vender su mercadería. Es ingreso nuestro y va con IVA débito.</div>
@@ -18951,6 +19006,11 @@ function sgRepExport(){
       <label style="font-size:11px;font-weight:700;color:#15803d;text-transform:uppercase;display:block;margin-bottom:4px">Descarga</label>
       <div style="font-size:10px;color:#16a34a;margin-bottom:6px">Lo que le cobramos por bajar la mercadería del camión.</div>
       <select id="sgct-cfg-imp-liq_descarga" onchange="sgctGuardarConfigImp('liq_descarga',this.value)" style="width:100%;font-size:12px"></select>
+    </div>
+    <div style="background:#f0fdf4;border:1px solid #86efac;border-radius:8px;padding:12px">
+      <label style="font-size:11px;font-weight:700;color:#15803d;text-transform:uppercase;display:block;margin-bottom:4px">Flete</label>
+      <div style="font-size:10px;color:#16a34a;margin-bottom:6px">Lo que le cobramos por traer la mercadería. Sale de la orden de compra cuando el flete está a cargo del comprador.</div>
+      <select id="sgct-cfg-imp-liq_flete" onchange="sgctGuardarConfigImp('liq_flete',this.value)" style="width:100%;font-size:12px"></select>
     </div>
     <div style="background:#f0fdf4;border:1px solid #86efac;border-radius:8px;padding:12px">
       <label style="font-size:11px;font-weight:700;color:#15803d;text-transform:uppercase;display:block;margin-bottom:4px">Gastos administrativos</label>
@@ -29312,6 +29372,10 @@ function liqRellenarForm() {
   // productor lo que se acordó con otro es el peor error de acá.
   LIQ.grilla = {};
   LIQ.unidad = '';
+  // El % de la liquidación anterior no puede quedar puesto: cada proveedor tiene
+  // el suyo, y cobrarle a uno la comisión de otro es plata.
+  LIQ.comisionPct = null;
+  LIQ.origen = {};
   liqGrillaPintar();
   liqRemResumen();
   liqModoCambio();
@@ -29359,6 +29423,7 @@ var LIQ_FILAS = [
   { k:'ventas',       label:'Ventas',                 iva:'credito', gestion:true },
   { k:'comision',     label:'Comisión',               iva:'debito',  gestion:true },
   { k:'descarga',     label:'Descarga',                iva:'debito',  gestion:true },
+  { k:'flete',        label:'Flete',                   iva:'debito',  gestion:true },
   { k:'gastos_admin', label:'Gastos administrativos',  iva:'debito',  gestion:true }
 ];
 
@@ -29403,15 +29468,48 @@ function liqModoCambio(){
 // gestión — el crédito y el débito fiscal salen del comprobante y de nada más.
 function liqGrillaPintar(){
   var tb = eid('liq-grilla-body'); if (!tb) return;
+  // Se conserva lo que ya esté tipeado: la grilla se repinta cuando cambian los
+  // rótulos de origen, y borrar los importes en ese momento sería perder lo que el
+  // operador acaba de cargar.
+  if (tb.innerHTML) {
+    var act = liqGrillaLeer();
+    LIQ.grilla = LIQ.grilla || {};
+    LIQ_FILAS.forEach(function(x){
+      if (act.fiscal[x.k]) LIQ.grilla['f_' + x.k] = act.fiscal[x.k];
+      if (act.fiscal['iva_' + x.k]) LIQ.grilla['f_iva_' + x.k] = act.fiscal['iva_' + x.k];
+      if (act.gestion[x.k]) LIQ.grilla['g_' + x.k] = act.gestion[x.k];
+    });
+  }
   var v = (LIQ && LIQ.grilla) ? LIQ.grilla : {};
   var inp = function(k, amb){
+    // Tocar las VENTAS recalcula la comisión: es un % sobre ellas, y dejarla
+    // calculada sobre el número viejo es cobrarle mal sin que se note.
+    var ev = (k === 'ventas' && amb === 'f') ? 'liqComisionCalcular()' : 'liqTotales()';
     return '<input type="number" step="0.01" id="liq-g-' + amb + '-' + k + '"'
       + ' value="' + (v[amb + '_' + k] != null ? v[amb + '_' + k] : '') + '"'
-      + ' oninput="liqTotales()" style="width:100%;text-align:right;box-sizing:border-box">';
+      + ' oninput="' + ev + '" style="width:100%;text-align:right;box-sizing:border-box">';
   };
   var h = '';
+  var org = (LIQ && LIQ.origen) ? LIQ.origen : {};
   LIQ_FILAS.forEach(function(f){
-    h += '<tr><td><strong>' + escH(f.label) + '</strong></td>'
+    // EL ORIGEN, ABAJO DEL NOMBRE. Un número que apareció solo y no dice de dónde
+    // salió es un número que el operador no puede defender cuando el productor
+    // pregunta. Acá cada fila dice si vino de la recepción, de la orden o a mano.
+    var sub = org[f.k]
+      ? '<div style="font-size:10.5px;color:var(--mut)">' + org[f.k] + '</div>' : '';
+    // LA COMISIÓN SE CALCULA CON UN %. Pablo: "la comisión por default es 12% en
+    // precio abierto, aunque tiene que haber un box donde podamos editarla — hay
+    // proveedores que tienen distintas comisiones".
+    var pct = '';
+    if (f.k === 'comision') {
+      pct = '<div style="display:flex;gap:5px;align-items:center;margin-top:3px">'
+        + '<input type="number" step="0.01" id="liq-comision-pct" value="'
+        + ((LIQ && LIQ.comisionPct != null) ? LIQ.comisionPct : 12) + '"'
+        + ' oninput="liqComisionCalcular()" title="Sobre las ventas"'
+        + ' style="width:70px;text-align:right;padding:2px 5px">'
+        + '<span style="font-size:11px;color:var(--mut)">% sobre las ventas</span></div>';
+    }
+    h += '<tr><td><strong>' + escH(f.label) + '</strong>' + sub + pct + '</td>'
       + '<td>' + inp(f.k, 'f') + '</td>'
       + '<td>' + inp(f.k, 'g') + '</td>'
       + '<td style="text-align:right" id="liq-t-' + f.k + '" class="pli-num">—</td></tr>'
@@ -29435,6 +29533,24 @@ function liqGrillaPintar(){
 
 // Lee la grilla. Devuelve los dos ámbitos por separado, como los quiere el
 // backend.
+// La comisión sale del % sobre las ventas FISCALES. Si el operador escribe el
+// monto a mano, manda lo que escribió: el % es una ayuda, no una cárcel.
+function liqComisionCalcular(){
+  var p = eid('liq-comision-pct');
+  var v = eid('liq-g-f-ventas');
+  var c = eid('liq-g-f-comision');
+  var iv = eid('liq-g-f-iva_comision');
+  if (!p || !v || !c) return;
+  var pct = parseFloat(p.value);
+  var ventas = parseFloat(v.value);
+  if (isNaN(pct) || isNaN(ventas)) { liqTotales(); return; }
+  var m2 = function(x){ return Math.round((Number(x) || 0) * 100) / 100; };
+  c.value = m2(ventas * pct / 100);
+  if (iv) iv.value = m2(Number(c.value) * (LIQ.ivaPct || 21) / 100);
+  if (LIQ) LIQ.comisionPct = pct;
+  liqTotales();
+}
+
 function liqGrillaLeer(){
   var num = function(id){ var e = eid(id); return e ? (parseFloat(e.value) || 0) : 0; };
   var f = {}, g = {};
@@ -58505,7 +58621,7 @@ function sgctCargarConfigImp() {
      'cheques_rechazados',
      // Las tres de la liquidación. Si la clave no está en esta lista el select
      // queda vacío y no se puede elegir nada, aunque exista en la pantalla.
-     'liq_comision','liq_descarga','liq_gastos_admin'].forEach(function(clave) {
+     'liq_comision','liq_descarga','liq_flete','liq_gastos_admin'].forEach(function(clave) {
       var sel = document.getElementById('sgct-cfg-imp-'+clave);
       if (sel) {
         sel.innerHTML = opts;
