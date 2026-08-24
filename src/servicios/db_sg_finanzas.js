@@ -429,6 +429,11 @@ try { db.exec("ALTER TABLE sg_ven_cobranzas ADD COLUMN cheque_terceros_id INTEGE
 // Mismo criterio que en sg_facturas_compra — el total es el del comprobante y no
 // se toca, la diferencia va aparte con su motivo.
 try { db.exec("ALTER TABLE sg_ven_facturas ADD COLUMN dif_gestion REAL NOT NULL DEFAULT 0"); } catch (_) {}
+// El descuento comercial que se le aplicó a esta factura. Es la parte que NO
+// se facturó por el acuerdo con el proveedor de esa mercadería, y que va al
+// asiento como venta de gestión. Se guarda en el comprobante para poder
+// sumarlo por período sin volver a recorrer los asientos.
+try { db.exec("ALTER TABLE sg_ven_facturas ADD COLUMN descuento_gestion REAL"); } catch (_) {}
 try { db.exec("ALTER TABLE sg_ven_facturas ADD COLUMN dif_motivo TEXT"); } catch (_) {}
 try { db.exec("ALTER TABLE sg_ven_liquidaciones ADD COLUMN dif_gestion REAL NOT NULL DEFAULT 0"); } catch (_) {}
 try { db.exec("ALTER TABLE sg_ven_liquidaciones ADD COLUMN dif_motivo TEXT"); } catch (_) {}

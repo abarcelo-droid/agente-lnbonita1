@@ -382,6 +382,107 @@ router.get('/facturas/export.xlsx', (req, res) => {
   } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
+// ── EL ASIENTO DE UNA FACTURA DE VENTA ──────────────────────────────────
+//
+// La factura de venta NO generaba asiento. La columna asiento_id existía y se
+// usaba para anular, pero nadie la escribía: la venta salía del depósito, el
+// cliente quedaba debiendo, y en el libro no pasaba nada.
+//
+// NO SE COPIA EL MOLDE DE LA LIQUIDACIÓN. La liquidación es cómo se le paga al
+// productor —es un instrumento de COMPRA, aunque en este sistema viva del lado
+// de ventas—. Una factura de venta lleva su propio asiento de ventas.
+//
+//   DEBE    Deudores por ventas (la cuenta del cliente)      total
+//   HABER   Ventas                                            neto
+//   HABER   IVA Débito Fiscal                                  iva
+//
+// Y EL DESCUENTO COMERCIAL VA EN GESTIÓN, igual que la diferencia de la compra.
+// Si al proveedor de esa mercadería se le acordó un 30%, la factura sale por el
+// 70% —eso es lo que va al libro fiscal— y el 30% restante se registra como
+// venta de gestión: es lo que la empresa pone sobre la mesa en cada acuerdo, y
+// sin medirlo no hay con qué sentarse a renegociarlo.
+//
+// SIN IVA del lado de gestión: el débito fiscal sale del comprobante y de nada
+// más. Misma regla que en compras.
+//
+// Devuelve {lineas, falta} — `falta` dice qué cuenta no está parametrizada, para
+// que la pantalla lo diga en vez de guardar un asiento a medias.
+function lineasAsientoVenta(db, { clienteId, neto, iva, total, descuento, numero }) {
+  const cfg = {};
+  db.prepare('SELECT clave, cuenta_id FROM sg_config_impositiva WHERE cuenta_id IS NOT NULL')
+    .all().forEach((r) => { cfg[r.clave] = r.cuenta_id; });
+  const cli = db.prepare('SELECT razon_social, cuenta_contable_id FROM sg_clientes WHERE id=?')
+    .get(clienteId) || {};
+
+  const falta = [];
+  if (!cli.cuenta_contable_id) falta.push('la cuenta contable de ' + (cli.razon_social || 'el cliente'));
+  if (!cfg.ventas) falta.push('la cuenta de Ventas');
+  if (r2v(iva) > 0 && !cfg.iva_debito_fiscal) falta.push('la cuenta de IVA Débito Fiscal');
+  if (falta.length) return { lineas: [], falta };
+
+  const lineas = [
+    { cuenta_id: cli.cuenta_contable_id, debe: r2v(total), haber: 0,
+      descripcion: 'Factura ' + numero },
+    { cuenta_id: cfg.ventas, debe: 0, haber: r2v(neto), descripcion: 'Venta ' + numero },
+  ];
+  if (r2v(iva) > 0) {
+    lineas.push({ cuenta_id: cfg.iva_debito_fiscal, debe: 0, haber: r2v(iva),
+      descripcion: 'IVA Débito Fiscal' });
+  }
+  // El descuento comercial, en gestión. El cliente "debería" lo de lista y la
+  // venta de gestión es la de lista: la diferencia queda medida en su cuenta.
+  const d = r2v(descuento);
+  if (d > 0) {
+    lineas.push({ cuenta_id: cli.cuenta_contable_id, debe: d, haber: 0,
+      ambito: 'gestion', motivo: 'ajuste_gestion',
+      descripcion: 'Descuento comercial acordado' });
+    lineas.push({ cuenta_id: cfg.ventas, debe: 0, haber: d,
+      ambito: 'gestion', motivo: 'ajuste_gestion',
+      descripcion: 'Descuento comercial acordado' });
+  }
+  return { lineas, falta: [] };
+}
+const r2v = (x) => Math.round((Number(x) || 0) * 100) / 100;
+
+// EL CUADRO ANTES DE GUARDAR. Regla del repo: toda operación que asienta
+// muestra el asiento, con sus totales y el cartel de si balancea. El asiento se
+// arma en el backend y el usuario lo veía recién después, entrando a Asientos
+// Contables — y si estaba mal, ya estaba hecho. El cuadro es el único momento
+// en que se puede frenar.
+//
+// Devuelve EXACTAMENTE lo que se va a escribir: es la misma función.
+router.post('/facturas/preview-asiento', requireAuth, (req, res) => {
+  try {
+    const b = req.body || {};
+    const neto = r2v(b.neto), iva = r2v(b.iva);
+    const arm = lineasAsientoVenta(db, {
+      clienteId: parseInt(b.cliente_id), neto, iva,
+      total: (b.total != null ? r2v(b.total) : r2v(neto + iva)),
+      descuento: r2v(b.descuento_gestion), numero: String(b.numero || '—'),
+    });
+    // Los nombres de las cuentas, para que el cuadro se lea sin buscarlas.
+    const nom = db.prepare('SELECT id, codigo, nombre FROM sg_cuentas');
+    const mapa = {};
+    try { nom.all().forEach((c) => { mapa[c.id] = c; }); } catch (_) {}
+    const lineas = arm.lineas.map((l) => Object.assign({}, l, {
+      cuenta_codigo: (mapa[l.cuenta_id] || {}).codigo || null,
+      cuenta_nombre: (mapa[l.cuenta_id] || {}).nombre || null,
+      ambito: l.ambito || 'fiscal',
+    }));
+    // El balance se informa POR ÁMBITO: que el total cierre no alcanza —lo
+    // fiscal puede estar descuadrado y lo de gestión compensarlo al revés.
+    const tot = {};
+    for (const l of lineas) {
+      const a = l.ambito;
+      tot[a] = tot[a] || { debe: 0, haber: 0 };
+      tot[a].debe = r2v(tot[a].debe + (l.debe || 0));
+      tot[a].haber = r2v(tot[a].haber + (l.haber || 0));
+    }
+    for (const k of Object.keys(tot)) tot[k].balancea = Math.abs(tot[k].debe - tot[k].haber) < 0.01;
+    res.json({ ok: true, data: { lineas, totales: tot, falta: arm.falta } });
+  } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
+});
+
 router.post('/facturas', requireAuth, (req, res) => {
   const u = req._user;
   const { fecha, cliente_id, tipo, concepto, items, notas, nro_factura } = req.body || {};
@@ -425,10 +526,28 @@ router.post('/facturas', requireAuth, (req, res) => {
           .run(facId, it.descripcion||'', parseFloat(it.cantidad)||1,
                parseFloat(it.precio_unitario)||0, parseFloat(it.subtotal)||0);
       }
-      return { facId, numero };
+      // EL ASIENTO, EN LA MISMA TRANSACCIÓN. O entran la factura y su asiento, o
+      // no entra ninguno: una venta fuera del libro es plata que el cliente debe
+      // y que la contabilidad no sabe que existe.
+      const desc = Math.round((parseFloat(req.body.descuento_gestion) || 0) * 100) / 100;
+      const arm = lineasAsientoVenta(db, { clienteId: parseInt(cliente_id),
+        neto, iva, total, descuento: desc, numero });
+      if (arm.falta.length) {
+        throw new Error('No se puede contabilizar la venta: falta ' + arm.falta.join(' y ')
+          + '. Se carga en Configuración impositiva y en la ficha del cliente.');
+      }
+      const cliNom = (db.prepare('SELECT razon_social r FROM sg_clientes WHERE id=?')
+        .get(parseInt(cliente_id)) || {}).r;
+      const asientoId = crearAsiento(db, {
+        fecha: fechaFac, usuario_id: u.id, ref_codigo: numero,
+        descripcion: 'Venta — ' + (cliNom || '') + ' — Factura ' + numero,
+      }, arm.lineas).id;
+      db.prepare('UPDATE sg_ven_facturas SET asiento_id=?, descuento_gestion=? WHERE id=?')
+        .run(asientoId, desc || null, facId);
+      return { facId, numero, asientoId };
     });
     const result = tx();
-    res.json({ ok: true, id: result.facId, numero: result.numero });
+    res.json({ ok: true, id: result.facId, numero: result.numero, asiento_id: result.asientoId });
   } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 

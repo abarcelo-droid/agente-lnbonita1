@@ -5428,11 +5428,10 @@ var SG_SCHEMA = {
       {k:'provincia', l:'Provincia', t:'text'},
       {k:'telefono', l:'Teléfono', t:'text'},
       {k:'email', l:'Email', t:'text'},
-      // EL ACUERDO COMERCIAL. Lo cierra la dirección con el proveedor y decide
-      // a cuánto sale su mercadería cuando la vendemos: el precio se multiplica
-      // por (1 - este porcentaje). La diferencia se mide como venta de gestión,
-      // que es lo que la empresa pone sobre la mesa en cada acuerdo.
-      {k:'descuento_pct', l:'Descuento comercial (%) — al vender su mercadería', t:'number'},
+      // El descuento comercial NO va acá. Esta lista es una definición vieja que
+      // el maestro de proveedores ya no usa: el formulario que se abre lo arma
+      // sgOpenProvModal() a mano, y es el que tiene Origen, Nombre comercial,
+      // CBU y Alias CBU. Poner el campo acá no lo hacía aparecer en pantalla.
       {k:'saldo_inicial', l:'Saldo inicial al corte 30/6 ($)', t:'number'},
       {k:'observaciones', l:'Observaciones', t:'textarea'}
     ]
@@ -6074,7 +6073,20 @@ function sgOpenProvModal(id){
   var fiscalOpts = SG_FISCAL.map(function(o){ return opt(o[0],o[1]); }).join('');   // A/B/Liq, sin Invoice
   var condOpts   = '<option value="">—</option>' + SG.cacheCond.map(function(c){ return opt(c.id,c.nombre); }).join('');
   var provOpts   = '<option value="">—</option>' + SG_PROVINCIAS.map(function(p){ return opt(p,p); }).join('');
-  var ff = function(label, inner, rowId){ return '<div class="fl ff"'+(rowId?(' id="'+rowId+'"'):'')+'><label>'+label+'</label>'+inner+'</div>'; };
+  // CADA CAMPO OCUPABA EL ANCHO COMPLETO (la clase .ff = grid-column:1/-1), así
+  // que el formulario era una tira de quince renglones y había que bajar con la
+  // rueda para llegar a Guardar. Ahora se acomodan en columnas: entran las que
+  // entren con 210px, y en un teléfono queda una sola.
+  //
+  // El segundo argumento opcional `ancho` deja pedir el ancho completo para lo
+  // que de verdad lo necesita, como las observaciones.
+  var ff = function(label, inner, rowId, ancho){
+    return '<div class="fl'+(ancho?' ff':'')+'"'+(rowId?(' id="'+rowId+'"'):'')
+      +' style="min-width:0"><label>'+label+'</label>'+inner+'</div>';
+  };
+  eid('sg-modal-body').style.display = 'grid';
+  eid('sg-modal-body').style.gridTemplateColumns = 'repeat(auto-fit,minmax(210px,1fr))';
+  eid('sg-modal-body').style.gap = '12px 14px';
   eid('sg-modal-body').innerHTML =
       ff('Origen <span style="color:var(--err)">*</span>',
          '<select id="sg-f-origen" onchange="sgProvOrigen()">'+opt('nacional','Nacional')+opt('extranjero','Extranjero')+'</select>')
@@ -6093,7 +6105,14 @@ function sgOpenProvModal(id){
     + ff('País', '<input id="sg-f-pais" type="text" placeholder="Brasil">', 'sg-prov-pais-row')
     + ff('Teléfono', '<input id="sg-f-telefono" type="text">')
     + ff('Email', '<input id="sg-f-email" type="text">')
-    + ff('Observaciones', '<textarea id="sg-f-observaciones" rows="2"></textarea>');
+    // EL ACUERDO COMERCIAL CON ESTE PROVEEDOR. Decide a cuánto sale su mercadería
+    // cuando la vendemos: el precio se multiplica por (1 - este porcentaje), y la
+    // diferencia se mide como venta de gestión. Es lo que la empresa pone sobre
+    // la mesa en cada acuerdo.
+    + ff('Descuento comercial (%)',
+         '<input id="sg-f-descuento_pct" type="number" min="0" max="100" step="0.01" placeholder="0">'
+         + '<div style="font-size:11px;color:var(--mut);margin-top:3px">Se aplica al vender su mercadería</div>')
+    + ff('Observaciones', '<textarea id="sg-f-observaciones" rows="2"></textarea>', null, 1);
   // Valores (edición). País y Provincia comparten la columna provincia: el toggle muestra el que corresponde.
   if (row){
     eid('sg-f-origen').value             = row.origen || 'nacional';
@@ -6106,6 +6125,7 @@ function sgOpenProvModal(id){
     if (row.condicion_pago_habitual_id)  eid('sg-f-condicion_pago_habitual_id').value = row.condicion_pago_habitual_id;
     eid('sg-f-cbu').value                = row.cbu || '';
     eid('sg-f-alias_cbu').value          = row.alias_cbu || '';
+    eid('sg-f-descuento_pct').value      = (row.descuento_pct != null ? row.descuento_pct : '');
     eid('sg-f-localidad').value          = row.localidad || '';
     eid('sg-f-provincia').value          = row.provincia || '';   // si no matchea una provincia AR queda en —
     eid('sg-f-pais').value               = row.provincia || '';
@@ -6147,6 +6167,7 @@ function sgSaveProv(){
     condicion_pago_habitual_id: cond ? Number(cond) : null,
     cbu: pv('sg-f-cbu'),
     alias_cbu: pv('sg-f-alias_cbu'),
+    descuento_pct: (pv('sg-f-descuento_pct') === null ? null : Number(pv('sg-f-descuento_pct'))),
     localidad: pv('sg-f-localidad'),
     telefono: pv('sg-f-telefono'),
     email: pv('sg-f-email'),
