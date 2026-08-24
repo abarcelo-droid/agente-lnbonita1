@@ -2558,11 +2558,20 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
             <select id="sgfd-pv" style="padding:6px 8px;border-radius:6px;border:1px solid var(--bor);background:var(--card,#fff)"><option value="">…</option></select>
           </label>
           <label style="font-size:12px;color:var(--mut);padding-bottom:7px"><input type="checkbox" id="sgfd-incluye-iva" onchange="sgFdRender()"> precio incluye IVA</label>
+          <!-- APLICAR O NO LOS ACUERDOS. Viene tildado: el acuerdo con el
+               proveedor es la regla, y no aplicarlo es la excepción. -->
+          <label style="font-size:12px;color:var(--mut);padding-bottom:7px" title="Cada partida sale por el precio menos el descuento acordado con SU proveedor">
+            <input type="checkbox" id="sgfd-aplicar-desc" checked onchange="sgFdRender()"> aplicar descuentos por proveedor</label>
         </div>
         <div id="sgfd-items"></div>
         <div style="font-weight:600;font-size:13px;margin:12px 0 4px">Lo que se factura</div>
         <div id="sgfd-lines"></div>
         <div id="sgfd-resumen" style="margin-top:12px;font-size:12.5px"></div>
+        <!-- TODA OPERACIÓN QUE ASIENTA MUESTRA EL ASIENTO. El asiento se arma en
+             el backend y el usuario lo veía recién después, entrando a Asientos
+             Contables — y si estaba mal, ya estaba hecho. El cuadro es el único
+             momento en que se puede frenar. -->
+        <div id="sgfd-asiento" style="margin-top:14px"></div>
         <div style="text-align:right;margin-top:12px">
           <button class="btn bb" id="sgfd-emitir-btn" onclick="sgFdEmitir()">Emitir comprobante</button>
         </div>
@@ -13177,6 +13186,12 @@ function sgFdOnAdd(tipo, fuenteId, kg, meta){
     semaforo:(l.semaforo||meta.semaforo), bultos:meta.bultos, kg:kg, kg_por_bulto:meta.kg_por_bulto,
     bultos_disponibles:meta.bultos_disponibles,
     kg_vigente:l.kg_vigente, costo_final:l.costo_final,
+    // El descuento es del PROVEEDOR de esta partida, no del producto ni del
+    // cliente: viaja con el lote para no ir a buscarlo línea por línea.
+    proveedor_id:(l.proveedor_id!=null?l.proveedor_id:meta.proveedor_id),
+    proveedor_nombre:(l.proveedor_nombre||meta.proveedor_nombre||''),
+    descuento_pct:(l.proveedor_descuento_pct!=null?Number(l.proveedor_descuento_pct)
+                   :(meta.proveedor_descuento_pct!=null?Number(meta.proveedor_descuento_pct):0)),
     alicuota:(l.iva_alicuota!=null?l.iva_alicuota:null), precio:'' });
   sgFdRender();
 }
@@ -13198,6 +13213,38 @@ function sgFdUpd(i,c,v){ SG.fdItems[i][c]=v; sgFdRender(); }
 // sistema: es lo único que cambia.
 //
 // Sin kg por bulto no hay cómo convertir, así que esa línea queda en kilo.
+// ── EL DESCUENTO COMERCIAL, AL FACTURAR ─────────────────────────
+//
+// El precio que se escribe es el de LISTA. Lo que se factura es ese precio menos
+// el descuento acordado con el proveedor de esa partida: si son 100 y el acuerdo
+// es 30%, la factura sale por 70.
+//
+// La diferencia —los 30— no se pierde: va al asiento como venta de GESTIÓN. Es
+// lo que la empresa pone sobre la mesa en cada acuerdo, y sin medirlo no hay con
+// qué sentarse a renegociarlo.
+//
+// EL OPERADOR PUEDE APAGARLOS. Hay ventas donde el acuerdo no corre, y ahí se
+// factura por el precio de lista. Es un solo interruptor para toda la factura:
+// apagarlo línea por línea sería decidir por proveedor, y eso ya lo decidió la
+// dirección cuando cerró el acuerdo.
+function sgFdDescuentosOn(){
+  var el = eid('sgfd-aplicar-desc');
+  return !el || el.checked;               // por defecto, se aplican
+}
+function sgFdDescDe(it){
+  if (!sgFdDescuentosOn()) return 0;
+  var d = Number(it && it.descuento_pct) || 0;
+  return (d > 0 && d < 100) ? d : 0;
+}
+// Lo que se factura de esta línea, y lo que queda del lado de gestión.
+function sgFdMontos(it){
+  var kg = Number(it.kg) || 0, pk = Number(it.precio) || 0;
+  var lista = paRound2Fm(kg * pk);
+  var d = sgFdDescDe(it);
+  var facturado = paRound2Fm(lista * (1 - d / 100));
+  return { lista: lista, facturado: facturado, resignado: paRound2Fm(lista - facturado), pct: d };
+}
+
 function sgFdKpb(it){ return Number(it && it.kg_por_bulto) || 0; }
 function sgFdUnidad(it){
   return (it.unidad === 'kilo' || !sgFdKpb(it)) ? 'kilo' : 'bulto';
@@ -13234,7 +13281,7 @@ function sgFdRender(){
   }
   cont.innerHTML=SG.fdItems.map(function(it,i){
     var kg=Number(it.kg)||0;
-    var u=sgFdUnidad(it), kpb=sgFdKpb(it);
+    var u=sgFdUnidad(it), kpb=sgFdKpb(it), m=sgFdMontos(it);
     // EL PRODUCTO ARRIBA Y GRANDE; LA PARTIDA Y LOS KILOS ABAJO Y CHICOS.
     // Antes iban en el mismo renglón, con el código de partida compitiendo con el
     // nombre: el que factura tiene que ver QUÉ está facturando de un vistazo.
@@ -13262,13 +13309,22 @@ function sgFdRender(){
         +'</select>'
       +'</div>'
       +'<button class="btn bd bs" onclick="sgFdDel('+i+')">×</button>'
-      // Se muestra la otra cara de la cuenta: el que factura ve el $/kg que va a
-      // quedar guardado, que es contra lo que después se lee el margen.
-      +((Number(it.precio)>0 && kpb>0)
+      // La otra cara de la cuenta, y el descuento del proveedor de esta partida.
+      +((Number(it.precio)>0 || m.pct>0)
           ? '<div style="grid-column:1/-1;font-size:11px;color:var(--mut);margin:-2px 0 4px">'
-            + (u==='bulto'
-                ? ('= '+sgMoney(Number(it.precio))+'/kg')
-                : ('= '+sgMoney(Number(it.precio)*kpb)+' el bulto de '+nr(kpb)+' kg'))
+            + ((Number(it.precio)>0 && kpb>0)
+                ? (u==='bulto'
+                    ? ('= '+sgMoney(Number(it.precio))+'/kg')
+                    : ('= '+sgMoney(Number(it.precio)*kpb)+' el bulto de '+nr(kpb)+' kg'))
+                : '')
+            // EL DESCUENTO, DICHO EN LA LÍNEA. Sin esto el operador ve un total más
+            // bajo que la cuenta que hizo de cabeza y no sabe por qué.
+            + (m.pct>0
+                ? ((Number(it.precio)>0 && kpb>0 ? ' · ' : '')
+                   + '<b style="color:#8a5a1f">−'+m.pct+'% '+escH(it.proveedor_nombre||'del proveedor')+'</b>'
+                   + ' · lista '+sgMoney(m.lista)+' → factura '+sgMoney(m.facturado))
+                : (Number(it.descuento_pct)>0 && !sgFdDescuentosOn()
+                    ? '<span style="color:var(--mut)">'+it.descuento_pct+'% acordado, sin aplicar</span>' : ''))
             + '</div>'
           : '')
       +'</div>';
@@ -13276,16 +13332,103 @@ function sgFdRender(){
   // El resumen espeja la cuenta del backend: si el precio incluye IVA, el neto
   // se saca dividiendo, no restando.
   var incl=eid('sgfd-incluye-iva')&&eid('sgfd-incluye-iva').checked;
-  var neto=0, iva=0;
+  var neto=0, iva=0, resignado=0;
   SG.fdItems.forEach(function(it){
-    var kg=Number(it.kg)||0, p=Number(it.precio)||0;
+    var mm=sgFdMontos(it);
     var alic=(it.alicuota!=null)?Number(it.alicuota):21;
-    var pn=(incl)?p/(1+alic/100):p;
-    neto+=pn*kg; iva+=pn*kg*alic/100;
+    // EL NETO SALE DE LO FACTURADO, o sea con el descuento ya aplicado: es lo
+    // que va al comprobante y al libro fiscal.
+    var base=(incl)?mm.facturado/(1+alic/100):mm.facturado;
+    neto+=base; iva+=base*alic/100;
+    resignado+=mm.resignado;
   });
+  SG._fdResignado=paRound2Fm(resignado);
+  // El cuadro se rehace con cada cambio: es el asiento de LO QUE SE VE ahora.
+  if (typeof sgFdAsientoPreview === 'function') sgFdAsientoPreview();
   eid('sgfd-resumen').innerHTML='Neto '+sgMoney(neto)+' · IVA '+sgMoney(iva)
-    +' · <b>Total '+sgMoney(neto+iva)+'</b>';
+    +' · <b>Total '+sgMoney(neto+iva)+'</b>'
+    // LO RESIGNADO, A LA VISTA. Es lo que la empresa pone sobre la mesa en este
+    // comprobante: no va a la factura, pero sí al asiento como venta de gestión.
+    + (resignado>0
+        ? '<div style="margin-top:6px;padding:7px 10px;border:1px solid #d6a15e;background:#f6eddf;'
+          + 'border-radius:8px;color:#854d0e;font-size:12.5px">'
+          + 'Descuentos comerciales aplicados: <b>'+sgMoney(resignado)+'</b>. '
+          + 'No van en la factura — se registran como venta de gestión.</div>'
+        : '');
 }
+// ── EL CUADRO DEL ASIENTO ──────────────────────────────────
+//
+// Lo pide al backend, que devuelve EXACTAMENTE lo que va a escribir: es la misma
+// función que corre al guardar. Si el front hiciera su propia cuenta, tarde o
+// temprano diría una cosa distinta de la que quedó en el libro.
+//
+// El balance se muestra POR ÁMBITO. Que el total cierre no alcanza: lo fiscal
+// puede estar descuadrado y lo de gestión compensarlo al revés, y el cuadro
+// diría "balancea" con el libro fiscal mal.
+function sgFdAsientoPreview(){
+  var cont = eid('sgfd-asiento'); if (!cont) return;
+  var cid = eid('sgfd-cli') && eid('sgfd-cli').value;
+  if (!cid || !SG.fdItems.length) { cont.innerHTML = ''; return; }
+  var incl = eid('sgfd-incluye-iva') && eid('sgfd-incluye-iva').checked;
+  var neto = 0, iva = 0;
+  SG.fdItems.forEach(function(it){
+    var mm = sgFdMontos(it);
+    var alic = (it.alicuota != null) ? Number(it.alicuota) : 21;
+    var base = incl ? mm.facturado / (1 + alic / 100) : mm.facturado;
+    neto += base; iva += base * alic / 100;
+  });
+  if (!(neto > 0)) { cont.innerHTML = ''; return; }
+  api('/api/sg/ventas/facturas/preview-asiento', 'POST', {
+    cliente_id: Number(cid), neto: paRound2Fm(neto), iva: paRound2Fm(iva),
+    total: paRound2Fm(neto + iva), descuento_gestion: SG._fdResignado || 0,
+    numero: 'a emitir',
+  }).then(function(r){
+    if (!r || !r.ok) { cont.innerHTML = ''; return; }
+    cont.innerHTML = sgAsientoCuadro(r.data);
+  });
+}
+
+// EL CUADRO, EN UNA FUNCIÓN APARTE porque lo va a usar también Facturar remitos:
+// la misma operación contable se muestra igual en las dos pantallas.
+function sgAsientoCuadro(d){
+  if (d.falta && d.falta.length) {
+    return '<div style="border:1.5px solid #dc2626;background:#fef2f2;border-radius:8px;'
+      + 'padding:10px 12px;color:#991b1b;font-size:12.5px">'
+      + '<b>No se va a poder contabilizar.</b> Falta ' + escH(d.falta.join(' y '))
+      + '. Se carga en Configuración impositiva y en la ficha del cliente.</div>';
+  }
+  if (!d.lineas || !d.lineas.length) return '';
+  var fil = d.lineas.map(function(l){
+    var ges = l.ambito === 'gestion';
+    return '<tr' + (ges ? ' style="background:#faf6ee"' : '') + '>'
+      + '<td style="font-family:ui-monospace,monospace;font-size:11.5px">' + escH(l.cuenta_codigo || '') + '</td>'
+      + '<td>' + escH(l.cuenta_nombre || '') + (ges ? ' <span class="bdg bcc">gestión</span>' : '') + '</td>'
+      + '<td style="font-size:11.5px;color:var(--mut)">' + escH(l.descripcion || '') + '</td>'
+      + '<td style="text-align:right">' + (l.debe ? sgMoney(l.debe) : '—') + '</td>'
+      + '<td style="text-align:right">' + (l.haber ? sgMoney(l.haber) : '—') + '</td></tr>';
+  }).join('');
+  var tot = Object.keys(d.totales || {}).map(function(a){
+    var t = d.totales[a];
+    return '<tr style="font-weight:700;border-top:2px solid var(--bor)">'
+      + '<td colspan="3">' + (a === 'gestion' ? 'Gestión' : 'Fiscal') + '</td>'
+      + '<td style="text-align:right">' + sgMoney(t.debe) + '</td>'
+      + '<td style="text-align:right">' + sgMoney(t.haber) + '</td></tr>'
+      + '<tr><td colspan="5" style="text-align:right;font-size:12px;padding-bottom:6px;color:'
+      + (t.balancea ? '#16a34a' : '#dc2626') + '">'
+      + (t.balancea ? '✓ balancea'
+                    : '⚠ NO balancea · diferencia ' + sgMoney(Math.abs(t.debe - t.haber)))
+      + '</td></tr>';
+  }).join('');
+  return '<div style="font-weight:700;font-size:12px;text-transform:uppercase;letter-spacing:.04em;'
+    + 'color:var(--mut);margin-bottom:6px">📒 Asiento contable de esta venta</div>'
+    + '<div class="ab-table-wrap"><table class="pa-tbl" style="table-layout:fixed">'
+    + '<thead><tr><th style="width:14%">Código</th><th style="width:30%">Cuenta</th>'
+    + '<th style="width:28%">Descripción</th>'
+    + '<th style="width:14%;text-align:right">Debe</th>'
+    + '<th style="width:14%;text-align:right">Haber</th></tr></thead>'
+    + '<tbody>' + fil + tot + '</tbody></table></div>';
+}
+
 function sgFdEmitir(){
   var cid=eid('sgfd-cli').value; if(!cid){ toast('Elegí cliente','er'); return; }
   var pv=eid('sgfd-pv').value; if(!pv){ toast('Elegí el punto de venta','er'); return; }
@@ -13297,13 +13440,23 @@ function sgFdEmitir(){
       toast('Línea '+(i+1)+': pedís '+b+' cajón(es) y quedan '+it.bultos_disponibles,'er'); return;
     }
     if(!(Number(it.precio)>0)){ toast('Línea '+(i+1)+': falta el precio','er'); return; }
+    // EL PRECIO QUE VIAJA ES EL DESCONTADO. El de lista es el que escribe el
+    // operador; lo que se factura —y lo que va al libro fiscal— es ese precio
+    // menos el acuerdo con el proveedor de esa partida.
+    var d=sgFdDescDe(it);
     items.push({ origen:'lote', lote_id:Number(it.lote_id), bultos:b,
-      precio_por_kg:Number(it.precio) });
+      precio_por_kg: paRound2Fm(Number(it.precio) * (1 - d/100)),
+      precio_lista_por_kg: Number(it.precio), descuento_pct: d });
   }
   if(!items.length){ toast('Cargá al menos una partida con cajones','er'); return; }
   var btn=eid('sgfd-emitir-btn'); btn.disabled=true; var prev=btn.textContent; btn.textContent='Emitiendo…';
   api('/api/sg/facturas/directa','POST',{ cliente_id:Number(cid), punto_venta:Number(pv),
     precio_incluye_iva:!!(eid('sgfd-incluye-iva')&&eid('sgfd-incluye-iva').checked),
+    // Lo que NO se facturó por los acuerdos. Va al asiento como venta de
+    // gestión: es lo que la empresa pone sobre la mesa, y hay que poder sumarlo
+    // por período para sentarse a renegociar.
+    descuento_gestion: SG._fdResignado || 0,
+    aplica_descuentos: sgFdDescuentosOn() ? 1 : 0,
     items:items }).then(function(r){
     btn.disabled=false; btn.textContent=prev;
     var c=eid('sgfd-confirm');

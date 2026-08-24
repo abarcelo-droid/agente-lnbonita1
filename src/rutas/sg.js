@@ -932,6 +932,13 @@ router.post('/facturas/directa', requireAuth, async (req, res) => {
   fakeReq.body = {
     cliente_id: clienteId, punto_venta: Number(b.punto_venta), es_nc: false,
     precio_incluye_iva: b.precio_incluye_iva === true,
+    // LO RESIGNADO POR LOS ACUERDOS. El precio de cada línea ya viene con el
+    // descuento aplicado —eso es lo que se factura y lo que va al libro
+    // fiscal— y esto es la diferencia contra el precio de lista, que entra al
+    // asiento como venta de GESTIÓN: es lo que la empresa pone sobre la mesa
+    // en cada acuerdo con un proveedor.
+    descuento_gestion: Number(b.descuento_gestion) || 0,
+    aplica_descuentos: b.aplica_descuentos ? 1 : 0,
     seleccion: [{ despacho_id: despachoId,
       items: lineas.map((l) => ({ despacho_item_id: l.id, kg: Number(l.kg_despachados) })) }],
   };
@@ -6070,6 +6077,12 @@ router.get('/oferta', requireAuth, (req, res) => {
       SELECT * FROM (
         SELECT l.id AS lote_id, l.codigo_lote, l.producto_id, pr.nombre AS producto_nombre, l.calidad, l.semaforo,
           fam.iva_alicuota,
+          -- DE QUIÉN ES ESTA MERCADERÍA, Y QUÉ SE LE ACORDÓ. El descuento comercial
+          -- es del PROVEEDOR, así que una factura con mercadería de tres lleva los
+          -- tres descuentos, cada línea con el suyo. Viaja con el lote para que la
+          -- pantalla no tenga que ir a buscarlo de a uno.
+          o.proveedor_id, prov.razon_social AS proveedor_nombre,
+          prov.descuento_pct AS proveedor_descuento_pct,
           l.costo_final, l.fecha_vencimiento_estimada, l.presentacion_id, COALESCE(l.kg_por_bulto, ps.factor_conversion) AS kg_por_bulto,
           ${KG_VIGENTE_STOCK} AS kg_vigente,
           CAST(julianday(l.fecha_vencimiento_estimada) - julianday(date('now','localtime')) AS INTEGER) AS dias_restantes,
@@ -6078,6 +6091,9 @@ router.get('/oferta', requireAuth, (req, res) => {
           COALESCE((SELECT SUM(bultos) FROM sg_reservas WHERE lote_id=l.id AND estado IN ('activa','concretada')),0) AS bultos_reservado
         FROM sg_lotes l LEFT JOIN sg_productos pr ON pr.id=l.producto_id
         LEFT JOIN sg_familias fam ON fam.id=pr.familia_id
+        LEFT JOIN sg_recepciones rec ON rec.id = l.recepcion_id
+        LEFT JOIN sg_oc o ON o.id = rec.oc_id
+        LEFT JOIN sg_proveedores prov ON prov.id = o.proveedor_id
         LEFT JOIN sg_presentaciones ps ON ps.id=l.presentacion_id
         WHERE l.activo=1 AND NOT (COALESCE(l.origen,'')='granel' AND l.presentacion_id IS NULL) AND l.estado IN ('disponible','reservado','despachado_parcial') AND l.producto_id=?
       ) WHERE kg_disponibles > 0.01
