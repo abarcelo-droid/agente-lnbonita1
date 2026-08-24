@@ -1811,7 +1811,11 @@ router.put('/config-impositiva', requireAdmin, (req, res) => {
   // llegue, y esa fila después aparece en la pantalla de configuración.
   const CLAVES = ['iva_credito_fiscal', 'iva_debito_fiscal', 'percepcion_iva',
                   'percepcion_iibb', 'percepcion_ganancias', 'retencion', 'ventas',
-                  'cheques_cartera', 'cheques_rechazados'];
+                  'cheques_cartera', 'cheques_rechazados',
+                  // Las tres de la liquidación. Sin la clave acá el PUT la
+                  // rechaza: la whitelist es lo único que controla qué se puede
+                  // configurar, porque la tabla no tiene CHECK.
+                  'liq_comision', 'liq_descarga', 'liq_gastos_admin'];
   if (!CLAVES.includes(clave)) return res.status(400).json({ ok: false, error: 'clave desconocida: ' + clave });
   try {
     const cid = cuenta_id ? parseInt(cuenta_id) : null;
