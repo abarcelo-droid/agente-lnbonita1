@@ -2541,6 +2541,16 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
          el lote quedaría figurando disponible después de vendido. Lo que se
          saca es el paso a mano, no el documento. -->
     <div class="sgv-sub" id="sgv-sub-directa">
+      <!-- CONTRA QUÉ SE CONTABILIZA, arriba y a la vista. Es la misma tarjeta que
+           tiene Facturas por mercadería para las compras: el que factura ve con
+           qué asiento se va a registrar, y si falta elegirlo lo sabe ANTES de
+           cargar nada. -->
+      <div id="sgfd-modelo-box" style="border:1px solid var(--bor);border-radius:10px;padding:12px 14px;margin-bottom:16px;background:var(--bg)">
+        <div style="font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--mut);margin-bottom:6px">
+          Asiento contable de venta
+        </div>
+        <div id="sgfd-modelo-cuerpo" style="font-size:13px">Cargando…</div>
+      </div>
       <style>
         /* Nada se desplaza de costado, y los campos no se desbordan de su caja. */
         #sgv-sub-directa .ab-table-wrap{overflow-x:hidden !important}
@@ -13157,6 +13167,7 @@ function sgPiPasar(){
 }
 
 function sgFdInit(){
+  sgFdModeloCargar();
   SG.fdItems=[];
   var sel=eid('sgfd-cli'); if(sel) sel.innerHTML=sgCliOpts('','','— Elegí cliente —');
   sgCliUnico('sgfd-cli');
@@ -13365,6 +13376,70 @@ function sgFdRender(){
 // El balance se muestra POR ÁMBITO. Que el total cierre no alcanza: lo fiscal
 // puede estar descuadrado y lo de gestión compensarlo al revés, y el cuadro
 // diría "balancea" con el libro fiscal mal.
+// ── CONTRA QUÉ SE CONTABILIZA ──────────────────────────────
+// Calcado de sgFmModeloCargar(), que hace lo mismo para las compras: la misma
+// decisión se toma en el mismo lugar y se ve igual en las dos pantallas.
+function sgFdModeloCargar(){
+  var box = eid('sgfd-modelo-cuerpo'); if (!box) return;
+  Promise.all([
+    api('/api/sg/ventas/modelo-venta'),
+    api('/api/sg/contable/modelos'),
+  ]).then(function(res){
+    var r = res[0], lista = (res[1] && res[1].ok) ? res[1].data : [];
+    var m = (r && r.ok) ? r.data.modelo : null;
+    var faltan = (r && r.ok) ? (r.data.faltan || []) : [];
+    var esAdmin = (typeof sgFmEsAdmin === 'function') ? sgFmEsAdmin() : true;
+
+    var sel = '';
+    if (esAdmin) {
+      sel = '<select id="sgfd-modelo-sel" onchange="sgFdModeloGuardar()" style="padding:6px 8px;'
+        + 'border-radius:6px;border:1px solid var(--bor);background:var(--pan);min-width:260px">'
+        + '<option value="">— Elegí el asiento modelo —</option>'
+        + lista.map(function(x){
+            return '<option value="' + x.id + '"' + (m && x.id === m.id ? ' selected' : '') + '>'
+              + escH(x.nombre) + '</option>';
+          }).join('')
+        + '</select>';
+    }
+
+    if (!m) {
+      box.innerHTML = '<div style="color:#9a3412;font-weight:600;margin-bottom:8px">'
+        + '⚠️ Todavía no se eligió con qué asiento se contabilizan las ventas.'
+        + (r && r.ok && r.data.id_perdido ? ' (El que estaba elegido se dio de baja.)' : '')
+        + '</div>'
+        + (esAdmin ? sel
+                   : '<div style="font-size:12px;color:var(--mut)">Pedile a un administrador que lo configure.</div>');
+      return;
+    }
+    var cuentas = (m.lineas || []).map(function(l){
+      return escH(l.cuenta_codigo || '?') + ' ' + escH(l.cuenta_nombre || '');
+    });
+    box.innerHTML = '<div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap">'
+      + '<div style="font-weight:700;font-size:14px">' + escH(m.nombre) + '</div>'
+      + '<span style="font-size:12px;color:var(--mut)">' + cuentas.length + ' cuentas</span>'
+      + (esAdmin ? sel : '')
+      + '</div>'
+      + '<div style="font-size:11.5px;color:var(--mut);margin-top:5px">' + cuentas.join(' · ') + '</div>'
+      // LO QUE LE FALTA AL MODELO, dicho acá y no cuando ya hay una factura
+      // cargada y alguien esperando.
+      + (faltan.length
+          ? '<div style="margin-top:8px;color:#9a3412;font-size:12.5px">⚠️ Le falta '
+            + escH(faltan.join(' y ')) + '</div>'
+          : '');
+  });
+}
+
+function sgFdModeloGuardar(){
+  var sel = eid('sgfd-modelo-sel'); if (!sel) return;
+  api('/api/sg/ventas/modelo-venta', 'PUT', { modelo_id: sel.value ? Number(sel.value) : null })
+    .then(function(r){
+      if (!r || !r.ok) { toast((r && r.error) || 'No se pudo guardar', 'er'); return; }
+      toast(sel.value ? 'Las ventas se contabilizan con ese asiento' : 'Sin asiento modelo', 'ok');
+      sgFdModeloCargar();
+      sgFdRender();          // el cuadro de abajo se rehace con el modelo nuevo
+    });
+}
+
 function sgFdAsientoPreview(){
   var cont = eid('sgfd-asiento'); if (!cont) return;
   var cid = eid('sgfd-cli') && eid('sgfd-cli').value;
@@ -13390,12 +13465,21 @@ function sgFdAsientoPreview(){
 
 // EL CUADRO, EN UNA FUNCIÓN APARTE porque lo va a usar también Facturar remitos:
 // la misma operación contable se muestra igual en las dos pantallas.
+// "Falta no hay ningún asiento modelo elegido" no es una frase. Cuando lo que
+// falta ya viene redactado como oración, se usa tal cual.
+function sgFraseFalta(falta){
+  var t = (falta || []).join(' y ');
+  if (!t) return '';
+  return /^(no |todavía|hay )/i.test(t) ? (t.charAt(0).toUpperCase() + t.slice(1) + '.')
+                                          : ('Falta ' + t + '.');
+}
+
 function sgAsientoCuadro(d){
   if (d.falta && d.falta.length) {
     return '<div style="border:1.5px solid #dc2626;background:#fef2f2;border-radius:8px;'
       + 'padding:10px 12px;color:#991b1b;font-size:12.5px">'
-      + '<b>No se va a poder contabilizar.</b> Falta ' + escH(d.falta.join(' y '))
-      + '. Se carga en Configuración impositiva y en la ficha del cliente.</div>';
+      + '<b>No se va a poder contabilizar.</b> ' + escH(sgFraseFalta(d.falta))
+      + ' Se arregla en el asiento modelo de venta, arriba.</div>';
   }
   if (!d.lineas || !d.lineas.length) return '';
   var fil = d.lineas.map(function(l){
@@ -13882,7 +13966,16 @@ function sgIPRenderDetalle(key){
       : (nr(l.kg_disponibles)+'kg');
     return '<div style="display:grid;grid-template-columns:auto 1fr 60px auto;gap:6px;align-items:center;padding:4px 0;border-bottom:1px solid var(--bor)">'
       +'<span>'+sgSemEmoji(l.semaforo)+'</span>'
-      +'<span style="font-size:12px"><code>'+esc(l.codigo_lote)+'</code> · '+cant+' · '+sgMoney(ck)+'/kg · '+venc+(l.kg_reservado>0?(' · <span style="color:var(--mut)">'+nr(l.kg_reservado)+'kg res.</span>'):'')+'</span>'
+      // EL PROVEEDOR, AL LADO DE LA PARTIDA. Cuando hay durazno de tres
+      // proveedores, el código solo no alcanza para saber cuál se está
+      // eligiendo —y el descuento que se va a aplicar es el de ESE proveedor.
+      //
+      // Y SIN EL COSTO: es información de la compra en la pantalla del que
+      // vende, y lo que importa acá es qué hay y de quién es.
+      +'<span style="font-size:12px"><code>'+esc(l.codigo_lote)+'</code>'
+        +(l.proveedor_nombre?(' · <b>'+escH(l.proveedor_nombre)+'</b>'):'')
+        +' · '+cant+' · '+venc
+        +(l.kg_reservado>0?(' · <span style="color:var(--mut)">'+nr(l.kg_reservado)+'kg res.</span>'):'')+'</span>'
       +'<input type="number" id="'+key+'-st-'+l.lote_id+'" placeholder="'+(porBulto?'cj':'kg')+'" style="width:100%;box-sizing:border-box;padding:3px 5px">'
       +'<button class="btn bb bs" onclick="sgIPAdd('+sgQ(key)+',\'lote\','+l.lote_id+','+sgQ(key+'-st-'+l.lote_id)+','+sgQ(l.codigo_lote)+','+sgQ(l.semaforo||'verde')+')">+</button>'
       +'</div>';
