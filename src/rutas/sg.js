@@ -2725,7 +2725,17 @@ router.get('/partidas/:id/venta', requireAuth, (req, res) => {
   const db = getDb();
   try {
     const ocId = Number(req.params.id);
-    const oc = db.prepare('SELECT id, trazabilidad, numero FROM sg_oc WHERE id=?').get(ocId);
+    // ── EL PROVEEDOR SALE DE LA PARTIDA ───────────────────────────
+    //
+    // Pablo: "en la liquidación los datos del proveedor los debe traer automáticos
+    // de la partida". Y no es comodidad: la liquidación la EMITIMOS nosotros a
+    // nombre de ese productor, y tipear a mano el CUIT de un comprobante que uno
+    // emite es la forma más barata de emitirlo mal.
+    const oc = db.prepare(`SELECT o.id, o.trazabilidad, o.numero, o.fecha_oc,
+        p.id AS prov_id, p.razon_social, p.cuit, p.localidad, p.provincia,
+        p.codigo_postal, p.categoria_fiscal
+        FROM sg_oc o LEFT JOIN sg_proveedores p ON p.id = o.proveedor_id
+       WHERE o.id = ?`).get(ocId);
     if (!oc) return res.status(404).json({ ok: false, error: 'Partida inexistente' });
 
     // Lo que entró y lo que salió, en bultos y en kg.
@@ -2761,10 +2771,17 @@ router.get('/partidas/:id/venta', requireAuth, (req, res) => {
     const mermaKg = r2(mermas.reduce((a, m) => a + (Number(m.kg) || 0), 0));
 
     // LOS RENGLONES DE ESTA PARTIDA. Uno por línea facturada, con sus pesos.
+    //
+    // `renglones_factura` es cuántos renglones tiene la factura ENTERA, no sólo los
+    // de esta partida. Es lo que decide si los números de la factura son de esta
+    // partida o hay que repartirlos — y repartir no se hace.
     const lineas = db.prepare(`
       SELECT fd.id, fd.kg, fd.neto, fd.iva, fd.gestion,
         di.precio_por_kg, di.precio_lista_por_kg,
         f.id AS factura_id, f.fecha, f.numero, f.punto_venta, f.cbte_nro,
+        COALESCE(f.neto,0) AS f_neto, COALESCE(f.iva,0) AS f_iva,
+        COALESCE(f.dif_gestion,0) AS f_gestion,
+        (SELECT COUNT(*) FROM sg_factura_despachos fd2 WHERE fd2.factura_id = f.id) AS renglones_factura,
         pr.nombre AS producto
         FROM sg_factura_despachos fd
         JOIN sg_ven_facturas f ON f.id = fd.factura_id
@@ -2775,23 +2792,41 @@ router.get('/partidas/:id/venta', requireAuth, (req, res) => {
        WHERE i.oc_id = ? AND ${facturaCuenta('f')}
        ORDER BY f.fecha, f.id, fd.id`).all(ocId);
 
-    let neto = 0, iva = 0, gestion = 0, estimadas = 0;
+    let neto = 0, iva = 0, gestion = 0, estimadas = 0, sinAtribuir = 0;
     const detalle = [];
     for (const x of lineas) {
-      // Si el renglón es anterior a este cambio no tiene pesos guardados. Se usa
-      // SU precio —no el de otra línea, no un promedio— y se cuenta aparte.
+      // ── EL RENGLÓN VIEJO ───────────────────────────────────
+      //
+      // Los emitidos antes de que se guardaran los pesos por renglón no los
+      // tienen. Pero si la factura tiene UN SOLO renglón, sus números son de esta
+      // partida y de ninguna otra: tomarlos enteros es EXACTO, no un reparto.
+      //
+      // Acá se perdía la parte de gestión: la factura la tenía en dif_gestion y
+      // esta cuenta miraba sólo el renglón, así que salía 0 y la liquidación
+      // pagaba de menos sin decirlo. El IVA, igual.
       const exacto = x.neto != null;
-      const n = exacto ? r2(x.neto) : r2(Number(x.kg) * (Number(x.precio_por_kg) || 0));
-      const v = exacto ? r2(x.iva) : 0;
-      const g = exacto ? r2(x.gestion)
-        : r2(Number(x.kg) * Math.max(0, (Number(x.precio_lista_por_kg) || 0) - (Number(x.precio_por_kg) || 0)));
+      const solo = Number(x.renglones_factura) === 1;
+      let n, v, g, comoSale;
+      if (exacto) {
+        n = r2(x.neto); v = r2(x.iva); g = r2(x.gestion); comoSale = 'renglon';
+      } else if (solo) {
+        n = r2(x.f_neto); v = r2(x.f_iva); g = r2(x.f_gestion); comoSale = 'factura';
+      } else {
+        // Factura vieja Y compartida con otra partida: no hay forma exacta de
+        // separarla. Se dice —no se reparte y no se calla—: el neto sale del
+        // precio del renglón, y el IVA y la gestión quedan SIN ATRIBUIR.
+        n = r2(Number(x.kg) * (Number(x.precio_por_kg) || 0));
+        v = 0; g = 0; comoSale = 'estimado';
+        sinAtribuir += r2(x.f_gestion) > 0 ? 1 : 0;
+      }
       if (!exacto) estimadas++;
       neto += n; iva += v; gestion += g;
       detalle.push({ factura_id: x.factura_id, fecha: x.fecha,
         numero: (x.punto_venta != null && x.cbte_nro != null)
           ? String(x.punto_venta).padStart(4, '0') + '-' + String(x.cbte_nro).padStart(8, '0')
           : x.numero,
-        producto: x.producto, kg: r2(x.kg), neto: n, iva: v, gestion: g, exacto: exacto ? 1 : 0 });
+        producto: x.producto, kg: r2(x.kg), neto: n, iva: v, gestion: g,
+        exacto: exacto ? 1 : 0, como_sale: comoSale });
     }
 
     // LO QUE SALIÓ Y TODAVÍA NO SE FACTURÓ. No entra en las tres filas —esas son
@@ -2809,6 +2844,36 @@ router.get('/partidas/:id/venta', requireAuth, (req, res) => {
         JOIN sg_oc_items i ON i.id = l.oc_item_id
        WHERE i.oc_id = ?`).get(ocId);
 
+    // ── LOS ARTÍCULOS DE LA PARTIDA ─────────────────────────────
+    //
+    // Pablo: "los artículos y las mermas vienen en la partida".
+    //
+    // Es lo que se le liquida: qué producto salió, cuánto y a cuánto. Agrupado por
+    // producto —no un renglón por despacho— porque la liquidación es un
+    // comprobante, no un extracto: al productor se le dice "tu durazno rindió
+    // tanto", no las once salidas que hubo.
+    //
+    // El precio de cada renglón es el promedio PONDERADO por kilos, que es el
+    // único que multiplicado por la cantidad da el importe real. El simple daría
+    // otro número y el comprobante no cerraría.
+    const arts = db.prepare(`
+      SELECT COALESCE(pr.nombre, 'Sin producto') AS articulo,
+        COALESCE(SUM(di.kg_despachados),0) AS kg,
+        COALESCE(SUM(di.bultos),0) AS bultos,
+        COALESCE(SUM(di.kg_despachados * COALESCE(di.precio_por_kg,0)),0) AS importe
+        FROM sg_despacho_items di
+        JOIN sg_despachos d ON d.id = di.despacho_id AND d.activo = 1
+        JOIN sg_lotes l ON l.id = di.lote_id AND l.activo = 1
+        JOIN sg_oc_items i ON i.id = l.oc_item_id
+        LEFT JOIN sg_productos pr ON pr.id = di.producto_id
+       WHERE i.oc_id = ? GROUP BY pr.nombre ORDER BY pr.nombre`).all(ocId);
+    const articulos = arts.map((a) => ({
+      articulo: a.articulo,
+      cantidad: r2(a.kg), bultos: r2(a.bultos),
+      precio: Number(a.kg) > 0 ? Math.round((a.importe / a.kg) * 10000) / 10000 : 0,
+      importe: r2(a.importe),
+    }));
+
     const bultosIn = r2(tot && tot.bultos);
     const bultosOut = r2(sal && sal.bultos);
     // TERMINADO = lo que ya no está en el depósito: vendido + merma. Es lo que
@@ -2817,6 +2882,13 @@ router.get('/partidas/:id/venta', requireAuth, (req, res) => {
     const terminado = r2(bultosOut + mermaBultos);
     res.json({ ok: true,
       partida: oc.trazabilidad || oc.numero,
+      // Lo que la pantalla necesita para armar el comprobante sin tipear nada.
+      proveedor: {
+        id: oc.prov_id, razon_social: oc.razon_social, cuit: oc.cuit,
+        localidad: oc.localidad, provincia: oc.provincia,
+        cp: oc.codigo_postal, iva: oc.categoria_fiscal,
+      },
+      articulos,
       bultos_ingresados: bultosIn, bultos_vendidos: bultosOut,
       bultos_merma: mermaBultos, kg_merma: mermaKg, mermas,
       bultos_terminados: terminado,
@@ -2825,7 +2897,7 @@ router.get('/partidas/:id/venta', requireAuth, (req, res) => {
       avance: bultosIn > 0 ? Math.round((terminado / bultosIn) * 1000) / 10 : 0,
       neto: r2(neto), gestion: r2(gestion), iva: r2(iva),
       sin_facturar: r2(sinFac && sinFac.monto),
-      lineas_estimadas: estimadas,
+      lineas_estimadas: estimadas, lineas_sin_atribuir: sinAtribuir,
       lineas: detalle });
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });

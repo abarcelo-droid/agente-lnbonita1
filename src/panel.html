@@ -10435,16 +10435,7 @@ function liqVentaCab(ocId){
       return;
     }
     LIQ.venta = r;
-    // LA COMPRA DE GESTIÓN SALE DE LA VENTA DE GESTIÓN. Si la venta no llevó
-    // comprobante, la compra tampoco lo va a llevar: viene puesto, y se puede
-    // corregir. Sin esto habría que ir a buscarlo a otra pantalla y tipearlo.
-    var g = eid('liq-gestion');
-    if (g && !g.value && Number(r.gestion) > 0) {
-      g.value = r.gestion;
-      var mo = eid('liq-gestion-motivo');
-      if (mo) { mo.disabled = false; mo.value = 'ajuste_gestion'; }
-    }
-    if (typeof liqGestionMotivo === 'function') liqGestionMotivo();
+    liqDesdePartida(r);
     var fila = function(rot, val, ayuda, fuerte){
       return '<tr><td style="padding:6px 10px;font-size:12.5px">' + rot
         + (ayuda ? '<div style="font-size:11px;color:var(--mut)">' + ayuda + '</div>' : '') + '</td>'
@@ -10539,8 +10530,16 @@ function liqVentaCab(ocId){
     // tiene que firmar una liquidación creyendo que todo salió del comprobante.
     if (Number(r.lineas_estimadas) > 0) {
       h += '<div style="margin-top:6px;font-size:11.5px;color:#9a3412">≈ '
-        + r.lineas_estimadas + ' renglón(es) son anteriores a que se guardaran los pesos del '
-        + 'comprobante: salen de kg × su precio, y no llevan IVA.</div>';
+        + r.lineas_estimadas + ' renglón(es) son anteriores a que se guardaran los pesos por '
+        + 'renglón. Los de una factura de una sola partida salen de la factura — exactos.</div>';
+    }
+    // Y lo que NO se pudo atribuir se dice fuerte: una factura vieja compartida
+    // entre partidas no se puede separar sin repartir, y repartir no se hace.
+    if (Number(r.lineas_sin_atribuir) > 0) {
+      h += '<div style="margin-top:6px;font-size:12px;color:var(--err);font-weight:600">⚠ '
+        + r.lineas_sin_atribuir + ' renglón(es) vienen de una factura vieja compartida con otra '
+        + 'partida: su IVA y su parte de gestión NO se pueden separar sin repartir, así que no '
+        + 'están sumados arriba. Revisalos antes de liquidar.</div>';
     }
     h += '</div>';
     c.innerHTML = h;
@@ -10633,6 +10632,70 @@ function liqModeloGuardar(){
     toast(sel.value ? 'Asiento modelo parametrizado' : 'Se quitó el asiento modelo', 'ok');
     liqModeloCargar();
   });
+}
+
+// ── LA LIQUIDACIÓN SE ARMA SOLA CON LO QUE TIENE LA PARTIDA ────────────
+//
+// Pablo: "en la liquidación los datos del proveedor los debe traer automáticos de
+// la partida... los artículos y las mermas vienen en la partida".
+//
+// El formulario arrancaba en blanco: el que liquida tenía que ir a buscar el CUIT
+// del productor a otra pantalla y transcribir a mano lo que la partida vendió.
+// Tipear a mano un comprobante que uno mismo emite es la forma más barata de
+// emitirlo mal.
+//
+// NO PISA lo que ya se escribió: se completa lo vacío. El que corrige un dato no
+// puede perderlo porque la pantalla se refrescó.
+function liqDesdePartida(r){
+  var poner = function(id, val){
+    var e = eid(id);
+    if (e && !String(e.value || '').trim() && val != null && val !== '') e.value = val;
+  };
+  var p = r.proveedor || {};
+  poner('liq-r-nombre', p.razon_social);
+  poner('liq-r-cuit', p.cuit);
+  poner('liq-r-loc', p.localidad);
+  poner('liq-r-prov', p.provincia);
+  poner('liq-r-cp', p.cp);
+  poner('liq-r-iva', p.iva);
+
+  // Los artículos: qué producto salió, cuánto y a cuánto. Se cargan sólo si la
+  // lista está vacía — si alguien ya tocó un renglón, manda lo que tocó.
+  if ((r.articulos || []).length && !_liqLeerArt().length) {
+    liqRenderArt(r.articulos.map(function(a){
+      return { articulo: a.articulo, nro_camion: '',
+        cantidad: a.cantidad, precio: a.precio, importe: a.importe };
+    }));
+  }
+  // Y las mermas, con su motivo: el productor cobra por lo que se vendió y tiene
+  // derecho a ver qué pasó con el resto.
+  if ((r.mermas || []).length && !_liqLeerMermas().length) {
+    liqRenderMermas(r.mermas.map(function(m){
+      return { descripcion: (m.producto ? m.producto + ' — ' : '') + (m.motivo || 'merma'),
+        cantidad: m.kg, fecha: m.fecha, tipo: 'merma' };
+    }));
+  }
+
+  // Los totales. El neto y el IVA salen de los comprobantes de la partida, no de
+  // una cuenta aparte: son los mismos números que muestra el cuadro de arriba.
+  poner('liq-neto', r.neto);
+  poner('liq-total', Math.round(((Number(r.neto) || 0) + (Number(r.iva) || 0)) * 100) / 100);
+  // EL IVA, en un concepto propio. Es como sale en la factura de compra: cada
+  // dato fiscal en su línea, porque un total no se puede imputar.
+  if (Number(r.iva) > 0 && !_liqLeerConc().length) {
+    liqRenderConc([{ concepto: 'IVA', porcentaje: (Number(r.neto) > 0
+      ? Math.round((Number(r.iva) / Number(r.neto)) * 10000) / 100 : null), importe: r.iva }]);
+  }
+
+  // LA COMPRA DE GESTIÓN SALE DE LA VENTA DE GESTIÓN. Si la venta no llevó
+  // comprobante, la compra tampoco lo va a llevar.
+  var g = eid('liq-gestion');
+  if (g && !g.value && Number(r.gestion) > 0) {
+    g.value = r.gestion;
+    var mo = eid('liq-gestion-motivo');
+    if (mo) { mo.disabled = false; mo.value = 'ajuste_gestion'; }
+  }
+  if (typeof liqGestionMotivo === 'function') liqGestionMotivo();
 }
 
 function liqBultosAvance(){
