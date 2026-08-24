@@ -2036,6 +2036,13 @@ function bucketsDesdeSnapshot(plan) {
     for (const l of r.lineas) {
       m.set(l.insumo_id, {
         buckets: l.buckets || [],
+        // EL PLAZO DE ENTREGA VIAJA. pli_plan_resultado no tiene esa columna, así
+        // que en un plan confirmado la línea salía sin lead_time_dias y la pantalla
+        // lo tapaba con un 0: el mismo insumo decía "15 d" en borrador y "0 d"
+        // después de confirmar, al lado de una fecha límite calculada JUSTAMENTE
+        // con esos 15 días. Un número que no se puede explicar, y con el que el
+        // comprador negocia la entrega.
+        lead_time_dias: l.lead_time_dias,
         ya_comprado_bultos: l.ya_comprado_bultos || 0,
         bultos_a_comprar: l.bultos_a_comprar || 0,
         // La necesidad sale de ACÁ y no de la fila congelada: así necesidad,
@@ -2172,6 +2179,10 @@ function resultadoMaterializado(plan) {
       // son el respaldo por si no hay snapshot para reconstruir.
       buckets: (v && v.buckets.length) ? v.buckets
              : (f.buckets_json ? JSON.parse(f.buckets_json) : []),
+      // El plazo de entrega: del recálculo si está, y si no del primer bucket
+      // congelado, que lo lleva desde que se calculó. Queda null si no hay de
+      // dónde sacarlo — y null se muestra como «—», no como cero.
+      lead_time_dias: leadTimeDe(v, f),
       // Los números que mira el comprador, normalizados para que la pantalla no
       // tenga que saber si el plan está confirmado o en borrador.
       requerido_bultos: requerido,
@@ -2211,6 +2222,18 @@ function resultadoMaterializado(plan) {
 // Son los proveedores de HOY incluso en un plan confirmado, y eso es lo correcto:
 // el snapshot congela con qué se costeó, pero la compra se hace ahora y con los
 // precios de ahora.
+// De dónde sale el plazo de entrega de una línea ya confirmada. La tabla del
+// snapshot no lo guarda, pero cada bucket sí, en los dos caminos: el recálculo
+// vivo y el buckets_json congelado.
+function leadTimeDe(v, f) {
+  if (v && v.lead_time_dias != null) return v.lead_time_dias;
+  if (f.lead_time_dias != null) return f.lead_time_dias;
+  const bs = (v && v.buckets && v.buckets.length) ? v.buckets
+           : (f.buckets_json ? JSON.parse(f.buckets_json) : []);
+  const b = bs.find((x) => x && x.lead_time_dias != null);
+  return b ? b.lead_time_dias : null;
+}
+
 function adjuntarProveedores(lineas) {
   const ids = [...new Set(lineas.map(l => l.insumo_id).filter(Boolean))];
   const { tc, origen } = tcParaFecha(hoyISO());

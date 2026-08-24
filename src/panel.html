@@ -21825,6 +21825,29 @@ function sgRepExport(){
     .pli-inp-num::-webkit-inner-spin-button { -webkit-appearance:none; margin:0 }
     .pli-inp-num[type=number] { -moz-appearance:textfield }
     #sec-pli-planificacion .pa-tbl th { white-space:nowrap }
+    /* NADA DE BARRA LATERAL (regla del repo), pero SÓLO EN LA VISTA NUEVA.
+       La primera versión de esto apuntaba a `#pli-pane-comprar .ab-table-wrap`,
+       que es el pane ENTERO: le apagaba la barra también a la agenda, a por
+       semana y a compras registradas — tres tablas escritas contando con que la
+       barra estaba. Y como .pa-tbl no tiene table-layout:fixed, lo que sobraba
+       no se cortaba con puntos suspensivos: se cortaba y listo. En una ventana a
+       media pantalla desaparecían columnas enteras sin nada que avisara, y en
+       Compras registradas se iban los botones de editar y borrar.
+       Acá se recorta sólo la tabla de la vista Por insumo, y con el trio completo
+       que usa el resto del repo: fixed + ellipsis + nowrap, con el nombre del
+       insumo como lo único que se parte. */
+    #pli-pane-comprar .pli-cmp-ins { overflow-x:hidden }
+    #pli-pane-comprar .pli-cmp-ins table.pa-tbl { width:100%; table-layout:fixed }
+    #pli-pane-comprar .pli-cmp-ins .pa-tbl th,
+    #pli-pane-comprar .pli-cmp-ins .pa-tbl td {
+      overflow:hidden; text-overflow:ellipsis; white-space:nowrap }
+    #pli-pane-comprar .pli-cmp-ins .pli-ins-nom { white-space:normal; word-break:break-word }
+    /* La tabla del «+» va anidada adentro de la otra, así que le caería el fixed y
+       el nowrap encima. Sus columnas ya tienen ancho propio y el renglón de la
+       semana de cosecha tiene que leerse entero. */
+    #pli-pane-comprar .pli-cmp-ins .pli-ins-det { table-layout:auto }
+    #pli-pane-comprar .pli-cmp-ins .pli-ins-det td { white-space:normal; overflow:visible }
+    @media(max-width:900px){ #pli-pane-comprar .pli-cmp-ins { overflow-x:auto } }
     .pli-grp-head td { background:var(--bg2,#f1f5f9); font-weight:700; font-size:12px; padding:7px 10px }
     /* Grilla de objetivos: encabezado y totales fijos, y la columna de la semana
        pegada a la izquierda. Con 50 semanas y 6 productos, sin esto uno se pierde
@@ -21969,7 +21992,17 @@ function sgRepExport(){
       <span class="pli-cel-chica">Plan:</span>
       <select id="pli-cmp-plan" class="pli-inp" onchange="pliCmpCargar()" style="min-width:220px"></select>
       <div style="display:flex;border:1px solid var(--bor);border-radius:8px;overflow:hidden">
-        <div class="pli-vista on" data-pli-vista="agenda" onclick="pliCmpVista('agenda')"
+        <!-- POR INSUMO VA PRIMERA Y ARRANCA ABIERTA. Pablo: "agrupame la compra
+             por nombre de insumo, porque si no lo veo como muy repartido y no sé
+             cuánto es el total que hay que comprar para pasarle un detalle al
+             proveedor".
+             La agenda muestra un renglón por insumo Y POR SEMANA: para saber
+             cuánto pedirle a CARTOCOR había que sumar a mano nueve renglones
+             salteados. Acá es un renglón por insumo con el total, y el «+» abre
+             el escalonamiento — que es el dato del comprás, no del pedido. -->
+        <div class="pli-vista on" data-pli-vista="insumo" onclick="pliCmpVista('insumo')"
+             style="padding:6px 12px;cursor:pointer;font-size:12px;font-weight:600">📦 Por insumo</div>
+        <div class="pli-vista" data-pli-vista="agenda" onclick="pliCmpVista('agenda')"
              style="padding:6px 12px;cursor:pointer;font-size:12px;font-weight:600">📅 Agenda de pedidos</div>
         <div class="pli-vista" data-pli-vista="semanas" onclick="pliCmpVista('semanas')"
              style="padding:6px 12px;cursor:pointer;font-size:12px;font-weight:600">🍈 Por semana de cosecha</div>
@@ -50136,7 +50169,9 @@ var PLI = {
   prodCargados: false,
   orden: 'insumo',        // orden de la lista de compra: insumo | costo | proveedor | categoria
   semanasExtra: [],       // semanas agregadas en la grilla que todavía no tienen cantidades
-  cmpPlanId: null, cmpCalculo: null, cmpCompras: [], cmpVista: 'agenda',
+  // Arranca en POR INSUMO: la pregunta al entrar es cuánto pedirle a cada
+  // proveedor, no en qué semana cae cada pedazo.
+  cmpPlanId: null, cmpCalculo: null, cmpCompras: [], cmpVista: 'insumo',
   seq: 0
 };
 
@@ -52779,10 +52814,205 @@ function pliHoyISO() {
 function pliCmpRender() {
   var cont = document.getElementById('pli-cmp-cont');
   if (!cont || !PLI.cmpCalculo) return;
-  var v = PLI.cmpVista || 'agenda';
+  var v = PLI.cmpVista || 'insumo';
   if (v === 'hechas') return pliCmpRenderHechas(cont);
   if (v === 'semanas') return pliCmpRenderSemanas(cont);
-  pliCmpRenderAgenda(cont);
+  if (v === 'agenda') return pliCmpRenderAgenda(cont);
+  pliCmpRenderPorInsumo(cont);
+}
+
+// ── VISTA 0: POR INSUMO ──────────────────────────────────────
+//
+// UN RENGLÓN POR INSUMO, CON EL TOTAL. La agenda tiene un renglón por insumo Y
+// POR SEMANA: MO COSECHA - CEBOLLA aparece nueve veces con 3.000 cada una. Para
+// pedirle a un proveedor hay que sumar a mano renglones salteados por toda la
+// tabla, y eso no es un pedido, es una cuenta que alguien puede errar.
+//
+// AGRUPADO POR PROVEEDOR, porque el pedido se le hace a UNO: así el bloque de
+// CARTOCOR se lee entero y se copia. Los que no tienen proveedor cargado van
+// juntos al final — no se esconden: son justamente los que hay que resolver
+// antes de poder pedir nada.
+//
+// El total es Σ de lo que falta comprar de cada semana, que es lo que queda
+// pendiente. Lo ya comprado no está: se pide lo que falta, no lo que se necesitó.
+function pliCmpRenderPorInsumo(cont) {
+  var hoy = pliHoyISO();
+  var porInsumo = {};
+  (PLI.cmpCalculo.lineas || []).forEach(function(l) {
+    (l.buckets || []).forEach(function(b) {
+      if (!(b.bultos_a_comprar > 0)) return;
+      var k = String(l.insumo_id);
+      if (!porInsumo[k]) porInsumo[k] = { l: l, total: 0, buckets: [], limite: null };
+      porInsumo[k].total += Number(b.bultos_a_comprar) || 0;
+      porInsumo[k].buckets.push(b);
+      // La fecha que manda es la MÁS TEMPRANA: es la primera que se vence.
+      var lim = b.fecha_pedido_limite;
+      if (lim && (!porInsumo[k].limite || lim < porInsumo[k].limite)) porInsumo[k].limite = lim;
+    });
+  });
+  var claves = Object.keys(porInsumo);
+
+  if (!claves.length) {
+    // Sin desglose semanal no hay NADA que agendar, y eso NO es lo mismo que
+    // "ya está todo pedido": cantar el visto bueno verde ahí manda al comprador
+    // a no comprar nada.
+    var sinDatos = !(PLI.cmpCalculo.lineas || []).some(function(l) { return (l.buckets || []).length; });
+    cont.innerHTML = pliCmpAvisoBuckets()
+      + (sinDatos
+          ? '<div class="emp" style="padding:24px;text-align:center">No hay desglose por semana para agendar los pedidos.</div>'
+          : '<div class="pli-badge pli-ok" style="display:block;padding:12px">'
+            + '✔ No queda nada por pedir para este plan.</div>');
+    return;
+  }
+
+  // ── POR PROVEEDOR, Y EL DE HOY ─────────────────────────────────
+  //
+  // proveedor_texto se CONGELA al confirmar el plan. Acá el proveedor no es un
+  // dato informativo: es el título del bloque, o sea la respuesta a "¿a quién le
+  // pido esto?". Si alguien le cambió el proveedor al insumo la semana pasada,
+  // agrupar por el congelado manda el pedido al proveedor equivocado.
+  //
+  // El vivo está en la misma línea: l.proveedores viene de pli_insumo_proveedores
+  // ordenado por preferido, y el backend lo trae A PROPÓSITO incluso en planes
+  // confirmados — "el snapshot congela con qué se costeó, pero la compra se hace
+  // ahora". El modal de Registrar ya usaba el vivo: esta vista era la única que
+  // miraba el otro.
+  var provDe = function(l) {
+    var ps = l.proveedores || [];
+    if (ps.length && ps[0] && ps[0].nombre) return String(ps[0].nombre).trim();
+    return String(l.proveedor_texto || '').trim();
+  };
+  // MAYÚSCULAS Y MINÚSCULAS SON EL MISMO PROVEEDOR. Es texto libre: "Cartocor" y
+  // "CARTOCOR" partían el bloque en dos y el comprador manda dos pedidos. Se
+  // agrupa por la clave normalizada y se muestra la primera forma que aparece.
+  var porProv = {}, rotulo = {};
+  claves.forEach(function(k) {
+    var g = porInsumo[k];
+    var p = provDe(g.l);
+    var key = p ? p.toLowerCase() : '—sin—';
+    if (!porProv[key]) { porProv[key] = []; rotulo[key] = p || '— sin proveedor —'; }
+    porProv[key].push(g);
+  });
+  var provs = Object.keys(porProv).sort(function(a, b) {
+    // El "sin proveedor" al final: es lo que hay que resolver, no lo que se pide.
+    var sa = a === '—sin—', sb = b === '—sin—';
+    if (sa !== sb) return sa ? 1 : -1;
+    return a.localeCompare(b, 'es');
+  });
+
+  var vencidas = claves.filter(function(k) {
+    return porInsumo[k].limite && porInsumo[k].limite < hoy;
+  }).length;
+  var html = pliCmpAvisoBuckets();
+  if (vencidas) {
+    html += '<div style="background:rgba(239,68,68,.1);border:1px solid var(--err);border-radius:8px;'
+      + 'padding:10px 12px;font-size:13px;margin-bottom:10px">'
+      + '<strong style="color:var(--err)">' + vencidas + ' insumo(s) con la fecha límite pasada.</strong> '
+      + 'Si no se piden ya, no llegan para esa semana de cosecha.</div>';
+  }
+
+  provs.forEach(function(p) {
+    var filas = porProv[p].sort(function(x, y) {
+      var fx = x.limite || '9999-99-99', fy = y.limite || '9999-99-99';
+      return fx.localeCompare(fy)
+        || String(x.l.insumo_nombre).localeCompare(String(y.l.insumo_nombre), 'es');
+    });
+    html += '<div style="margin-bottom:14px">'
+      + '<div style="font-weight:700;font-size:13px;margin-bottom:5px">' + pliEsc(rotulo[p])
+      + ' <span class="pli-cel-chica" style="font-weight:400">· ' + filas.length
+      + ' insumo(s) por pedir</span></div>'
+      // Anchos por columna, no min-width: con table-layout:fixed el min-width no
+      // hace nada y confunde al que venga después.
+      + '<div class="ab-table-wrap pli-cmp-ins"><table class="pa-tbl" style="font-size:12px"><thead><tr>'
+      + '<th style="width:34px"></th><th>Insumo</th>'
+      + '<th style="text-align:right;width:130px">Total a pedir</th>'
+      + '<th style="width:150px">Primera fecha límite</th>'
+      + '<th style="text-align:right;width:70px">Plazo</th>'
+      + '<th style="text-align:right;width:95px">En</th><th style="width:110px"></th>'
+      + '</tr></thead><tbody>';
+    filas.forEach(function(g) {
+      var lim = g.limite;
+      var clase = '', etiqueta = '';
+      if (!lim) { etiqueta = '<span class="pli-badge pli-gris">sin fecha</span>'; }
+      else if (lim < hoy) { clase = 'pli-sem-vencida'; etiqueta = '<span class="pli-badge pli-err">vencida</span>'; }
+      else if (lim <= pliMasDias(hoy, 7)) { clase = 'pli-sem-urgente'; etiqueta = '<span class="pli-badge pli-warn">esta semana</span>'; }
+      var id = g.l.insumo_id;
+      html += '<tr class="' + clase + '" id="pli-ins-fila-' + id + '">'
+        + '<td style="text-align:center"><button class="btn bo bs" id="pli-ins-mas-' + id + '"'
+          + ' title="Ver en cuántas veces se pide y para cuándo"'
+          + ' onclick="pliCmpDetalle(' + id + ')" style="padding:2px 8px;font-size:13px;line-height:1.2">+</button></td>'
+        + '<td class="pli-ins-nom"><strong>' + pliEsc(g.l.insumo_nombre) + '</strong></td>'
+        // EL TOTAL, que es el número que se le dice al proveedor.
+        + '<td class="pli-num"><strong style="font-size:15px">' + pliN(g.total) + '</strong> '
+          + '<span class="pli-cel-chica">' + pliEsc(g.l.unidad_compra) + '</span></td>'
+        + '<td><strong>' + (lim ? pliEsc(lim) : '—') + '</strong> ' + etiqueta + '</td>'
+        // UN PLAZO QUE NO SE SABE NO ES CERO. Taparlo con 0 ponía "0 d" al lado de
+        // una fecha límite calculada con quince días de plazo — y el comprador
+        // negocia la entrega con ese número.
+        + '<td class="pli-num pli-cel-chica">'
+          + (g.l.lead_time_dias != null ? (g.l.lead_time_dias + ' d') : '—') + '</td>'
+        // En cuántas entregas se escalona. Es el aviso de que hay un «+» que abrir.
+        + '<td class="pli-num pli-cel-chica">' + g.buckets.length + ' entrega(s)</td>'
+        + '<td><button class="btn bo bs" style="font-size:11px;padding:3px 8px"'
+          + ' onclick="pliCompraDesdeAgenda(' + id + ',' + g.total + ')">Registrar</button></td>'
+        + '</tr>';
+    });
+    html += '</tbody></table></div></div>';
+  });
+
+  html += '<div class="pli-cel-chica">El total es lo que <strong>falta</strong> pedir: lo que ya '
+    + 'registraste como comprado no está sumado. El «+» abre en cuántas entregas se escalona '
+    + 'y para qué semana de cosecha es cada una.</div>';
+  cont.innerHTML = html;
+}
+
+// El escalonamiento de un insumo, abajo de su renglón. El total dice CUÁNTO
+// pedir; esto dice CUÁNDO, que es lo que se negocia con el proveedor.
+function pliCmpDetalle(insumoId) {
+  var fila = document.getElementById('pli-ins-fila-' + insumoId);
+  if (!fila) return;
+  var det = document.getElementById('pli-ins-det-' + insumoId);
+  var btn = document.getElementById('pli-ins-mas-' + insumoId);
+  if (det) {
+    det.parentNode.removeChild(det);
+    if (btn) btn.textContent = '+';
+    return;
+  }
+  var l = (PLI.cmpCalculo.lineas || []).filter(function(x) { return x.insumo_id === insumoId; })[0];
+  if (!l) return;
+  var hoy = pliHoyISO();
+  var bs = (l.buckets || []).filter(function(b) { return b.bultos_a_comprar > 0; })
+    .sort(function(x, y) {
+      return String(x.fecha_pedido_limite || '9999-99-99')
+        .localeCompare(String(y.fecha_pedido_limite || '9999-99-99'));
+    });
+  var tr = document.createElement('tr');
+  tr.id = 'pli-ins-det-' + insumoId;
+  var acum = 0;
+  tr.innerHTML = '<td colspan="' + fila.children.length + '" style="background:var(--bg);padding:10px 14px">'
+    + '<div style="font-weight:700;font-size:11.5px;text-transform:uppercase;letter-spacing:.04em;'
+    + 'color:var(--mut);margin-bottom:6px">Cómo se escalona</div>'
+    + '<table class="pa-tbl pli-ins-det" style="width:100%;font-size:12px"><tbody>'
+    + bs.map(function(b) {
+        acum += Number(b.bultos_a_comprar) || 0;
+        var venc = b.fecha_pedido_limite && b.fecha_pedido_limite < hoy;
+        return '<tr>'
+          + '<td style="width:150px">Pedir hasta <strong'
+            + (venc ? ' style="color:var(--err)"' : '') + '>'
+            + pliEsc(b.fecha_pedido_limite || '—') + '</strong></td>'
+          + '<td style="width:130px;text-align:right"><strong>' + pliN(b.bultos_a_comprar) + '</strong> '
+            + '<span class="pli-cel-chica">' + pliEsc(l.unidad_compra) + '</span></td>'
+          + '<td>' + (b.fecha_necesidad
+              ? 'para <strong>' + pliEsc(pliRotuloSemana(b.fecha_necesidad).corto) + '</strong> '
+                + '<span class="pli-cel-chica">' + pliEsc(pliRotuloSemana(b.fecha_necesidad).largo) + '</span>'
+              : '<em class="pli-cel-chica">sin fecha de cosecha</em>') + '</td>'
+          // El acumulado: sirve para cortar el pedido donde uno quiera.
+          + '<td style="width:120px;text-align:right" class="pli-cel-chica">acum. ' + pliN(acum) + '</td>'
+          + '</tr>';
+      }).join('')
+    + '</tbody></table></td>';
+  fila.parentNode.insertBefore(tr, fila.nextSibling);
+  if (btn) btn.textContent = '−';
 }
 
 // Los planes confirmados antes de que se guardara el desglose semanal muestran
