@@ -4454,15 +4454,17 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
 
   <!-- ── CARGA ────────────────────────────────────────────────────────────────────── -->
   <div class="sh-pane" id="sh-pane-carga">
-    <div class="sh-drop" id="sh-drop" onclick="document.getElementById('sh-file').click()">
+    <div class="sh-drop" id="sh-drop" onclick="document.getElementById('sh-file').click()"
+         ondragover="shDragOver(event)" ondragleave="shDragLeave(event)" ondrop="shDrop(event)">
       <div style="font-size:30px">📄</div>
-      <div style="font-weight:700;margin-top:4px">Subí el planning del día (.xlsx)</div>
+      <div style="font-weight:700;margin-top:4px">Arrastrá acá los planning (.xlsx) — o hacé clic para elegirlos</div>
       <div class="sh-aviso" style="margin-top:4px">Hoja <b>Detallado</b>, con las columnas Proveedor_Origen_Desc, FECHA ENTREGA, DESC y BULTOS.<br>
         La fecha se toma <b>de las filas</b>, no del nombre del archivo. Primero se muestra un resumen y recién después se confirma.</div>
     </div>
-    <input type="file" id="sh-file" accept=".xlsx,.xls" style="display:none" onchange="shArchivoElegido(this)">
-    <div class="sh-aviso" style="margin-top:8px">¿Tenés muchos archivos viejos? Se cargan todos juntos desde la consola:
-      <code>npm run share:import -- "C:\ruta\a\la\carpeta"</code> — se puede repetir sin duplicar nada.</div>
+    <input type="file" id="sh-file" accept=".xlsx,.xls" multiple style="display:none" onchange="shArchivoElegido(this)">
+    <div class="sh-aviso" style="margin-top:8px"><b>¿Tenés el backlog histórico?</b> Soltá los 100 archivos de una: se suben
+      de a uno y en orden cronológico, y los que ya estén cargados se saltean solos (la comparación es por contenido,
+      así que se puede repetir sin duplicar nada).</div>
 
     <div style="font-size:12px;font-weight:700;margin:18px 0 6px">Plannings cargados</div>
     <div class="ab-table-wrap"><table class="pa-tbl">
@@ -4512,6 +4514,19 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
     <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:14px">
       <button class="btn bo" onclick="closeMB('sh-prev-modal')">Cancelar</button>
       <button class="btn bb" id="sh-prev-ok" onclick="shConfirmarCarga()">Cargar</button>
+    </div>
+  </div>
+</div>
+
+<!-- Carga masiva: la lista de archivos con el estado de cada uno, en vivo. -->
+<div class="ab-modal-overlay" id="sh-lote-modal">
+  <div class="ab-modal" style="max-width:min(820px,96vw);width:96vw">
+    <div class="mhd"><div class="mht" id="sh-lote-tit">Cargar plannings</div>
+      <button class="mcl" onclick="shLoteCerrar()">×</button></div>
+    <div id="sh-lote-body"></div>
+    <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:14px">
+      <button class="btn bo" id="sh-lote-cerrar" onclick="shLoteCerrar()">Cancelar</button>
+      <button class="btn bb" id="sh-lote-ok" onclick="shLoteCorrer()">Cargar</button>
     </div>
   </div>
 </div>
@@ -28780,10 +28795,187 @@ function shCargas(){
   });
 }
 
+// ── CARGA MASIVA DESDE EL NAVEGADOR ─────────────────────────────────────────────────────
+// El script de consola (share_import_masivo.js) sólo sirve corrido DONDE ESTÁ LA BASE, y la
+// base vive en el volume de Railway: desde una notebook crearía una base nueva y vacía. Para
+// el backlog histórico, entonces, el camino es este — el navegador ya está hablando con el
+// servidor que tiene la base buena.
+//
+// LOS ARCHIVOS VAN DE A UNO Y EN ORDEN. En paralelo serían más rápidos y estarían mal: cuando
+// dos plannings cubren el mismo día, el que entra después reemplaza al anterior, así que el
+// orden decide cuál queda activo. Y además son escrituras sobre el mismo SQLite.
+var SH_LOTE = { archivos: [], i: 0, corriendo: false, res: null };
+
+// La fecha que sugiere el nombre (PLANNING_FF_VV_24_08.xlsx → 24/08), sólo para ORDENAR.
+// La que se guarda sale siempre de las filas del archivo, que es lo que decide el servidor.
+function shFechaNombre(n){
+  var m = String(n || '').match(/(\d{1,2})[_\-.](\d{1,2})(?:[_\-.](\d{2,4}))?(?=\D*$)/);
+  if (!m) return null;
+  var dd = parseInt(m[1], 10), mm = parseInt(m[2], 10);
+  if (mm < 1 || mm > 12 || dd < 1 || dd > 31) return null;
+  var y = m[3] ? parseInt(m[3], 10) : null;
+  if (y != null && y < 100) y += y < 70 ? 2000 : 1900;
+  return { y: y, mm: mm, dd: dd, conAnio: y != null };
+}
+
 function shArchivoElegido(input){
-  var f = input.files && input.files[0];
+  var arch = Array.prototype.slice.call(input.files || []);
   input.value = '';
-  if (!f) return;
+  if (!arch.length) return;
+  if (arch.length === 1) return shPreviewUno(arch[0]);
+  shLoteAbrir(arch);
+}
+// Arrastrar y soltar: con 105 archivos, elegirlos en el diálogo es un suplicio.
+function shDragOver(ev){ ev.preventDefault(); eid('sh-drop').style.borderColor = 'var(--burg)'; }
+function shDragLeave(ev){ ev.preventDefault(); eid('sh-drop').style.borderColor = ''; }
+function shDrop(ev){
+  ev.preventDefault(); eid('sh-drop').style.borderColor = '';
+  var arch = Array.prototype.slice.call((ev.dataTransfer && ev.dataTransfer.files) || [])
+    .filter(function(f){ return /\.xlsx?$/i.test(f.name) && f.name.charAt(0) !== '~'; });
+  if (!arch.length) { toast('Ahí no había ningún .xlsx', 'err'); return; }
+  if (arch.length === 1) return shPreviewUno(arch[0]);
+  shLoteAbrir(arch);
+}
+
+function shLoteAbrir(arch){
+  // Orden cronológico por el nombre. Los que traen año se ordenan por fecha completa; los que
+  // sólo dicen DD_MM no se pueden ubicar en el tiempo, así que van por nombre y quedan
+  // A LA VISTA en la lista de abajo — el orden sólo cambia algo si dos archivos cubren el
+  // MISMO día de entrega, y en ese caso decide cuál queda activo.
+  var sinAnio = 0;
+  arch.forEach(function(f){ var d = shFechaNombre(f.name); if (!d || !d.conAnio) sinAnio++; });
+  arch.sort(function(a, b){
+    var da = shFechaNombre(a.name), dbb = shFechaNombre(b.name);
+    var ka = (da && da.conAnio) ? (da.y * 10000 + da.mm * 100 + da.dd) : null;
+    var kb = (dbb && dbb.conAnio) ? (dbb.y * 10000 + dbb.mm * 100 + dbb.dd) : null;
+    if (ka != null && kb != null && ka !== kb) return ka - kb;
+    return a.name.localeCompare(b.name, 'es', { numeric: true });
+  });
+
+  // DOS ARCHIVOS PARA EL MISMO DÍA: el que va último gana, porque reemplaza al anterior. Pasa
+  // con los "…_v2" y los "…_copia", y ordenarlos por nombre no adivina cuál es la corrección:
+  // "_copia" ordena ANTES que el original. En vez de inventar una regla, se muestra.
+  var porDia = {}, repetidos = [];
+  arch.forEach(function(f){
+    var d = shFechaNombre(f.name); if (!d) return;
+    var k = (d.conAnio ? d.y : '????') + '-' + ('0' + d.mm).slice(-2) + '-' + ('0' + d.dd).slice(-2);
+    (porDia[k] = porDia[k] || []).push(f.name);
+  });
+  Object.keys(porDia).sort().forEach(function(k){ if (porDia[k].length > 1) repetidos.push(k + ': ' + porDia[k].join(' → ')); });
+
+  SH_LOTE = { archivos: arch, i: 0, corriendo: false, res: { ok: 0, dup: 0, conf: 0, err: 0 } };
+  var peso = arch.reduce(function(s, f){ return s + f.size; }, 0);
+  eid('sh-lote-tit').textContent = '📤 Cargar ' + arch.length + ' plannings';
+  eid('sh-lote-body').innerHTML =
+    '<div style="font-size:13px;line-height:1.6;margin-bottom:10px">' +
+      'Se van a subir <b>' + arch.length + ' archivos</b> (' + (peso / 1048576).toFixed(1) + ' MB), ' +
+      '<b>de a uno y en este orden</b>. Cada uno se procesa igual que si lo subieras a mano: ' +
+      'los que ya estén cargados se saltean solos.' +
+    '</div>' +
+    (sinAnio ? '<div style="padding:9px 12px;border-radius:8px;background:#fff8e1;color:#8a6d00;font-size:12.5px;line-height:1.55;margin-bottom:10px">' +
+      '⚠ <b>' + sinAnio + ' archivo(s) no dicen el año en el nombre</b>, así que no se pueden ubicar en el tiempo y van ordenados alfabéticamente.<br>' +
+      'La fecha que se guarda igual sale <b>de las filas del archivo</b>, así que los datos van a quedar bien. ' +
+      'El orden sólo importa si dos archivos cubren el mismo día de entrega: ahí decide cuál queda activo. ' +
+      'Mirá la lista y, si ves alguno fuera de lugar, subilo aparte después.</div>' : '') +
+    (repetidos.length ? '<div style="padding:9px 12px;border-radius:8px;background:#fff8e1;color:#8a6d00;font-size:12.5px;line-height:1.55;margin-bottom:10px">' +
+      '⚠ <b>Hay ' + repetidos.length + ' día(s) con más de un archivo.</b> Se cargan los dos, pero <b>el que va último queda activo</b> ' +
+      'y el otro pasa a «reemplazada» (no se borra: se puede reactivar).<br>' +
+      repetidos.map(escH).join('<br>') +
+      '<br>Si el que tiene que quedar no es el último, subí ese solo al final.</div>' : '') +
+    '<div id="sh-lote-lista" style="max-height:300px;overflow:auto;border:1px solid var(--bor);border-radius:8px;font-size:12px">' +
+      arch.map(function(f, i){
+        var d = shFechaNombre(f.name);
+        return '<div id="sh-lt-' + i + '" style="display:flex;gap:8px;padding:4px 9px;border-bottom:1px solid var(--bor)">' +
+          '<span style="width:26px;color:var(--mut);text-align:right">' + (i + 1) + '</span>' +
+          '<span style="width:82px;color:var(--mut)">' + (d ? (d.conAnio ? d.y + '-' : '') + ('0' + d.mm).slice(-2) + '-' + ('0' + d.dd).slice(-2) : '—') + '</span>' +
+          '<span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + escH(f.name) + '</span>' +
+          '<span style="width:190px;text-align:right" class="sh-lt-est">en espera</span></div>';
+      }).join('') +
+    '</div>' +
+    '<div id="sh-lote-barra" style="height:6px;border-radius:4px;background:var(--bor);margin-top:10px;overflow:hidden">' +
+      '<i id="sh-lote-prog" style="display:block;height:100%;width:0%;background:var(--burg)"></i></div>' +
+    '<div id="sh-lote-resu" class="sh-aviso" style="margin-top:8px"></div>';
+  eid('sh-lote-ok').style.display = SH.puedeOperar ? '' : 'none';
+  eid('sh-lote-ok').disabled = false;
+  eid('sh-lote-ok').textContent = 'Cargar ' + arch.length + ' archivos';
+  eid('sh-lote-cerrar').textContent = 'Cancelar';
+  eid('sh-lote-modal').classList.add('on');
+}
+
+function shLoteEstado(i, txt, color){
+  var fila = eid('sh-lt-' + i); if (!fila) return;
+  var e = fila.querySelector('.sh-lt-est');
+  if (e) { e.innerHTML = txt; e.style.color = color || ''; }
+  // Que la fila que se está procesando quede siempre a la vista.
+  if (fila.scrollIntoView) fila.scrollIntoView({ block: 'nearest' });
+}
+
+function shLoteCorrer(){
+  if (SH_LOTE.corriendo || !SH_LOTE.archivos.length) return;
+  SH_LOTE.corriendo = true;
+  eid('sh-lote-ok').disabled = true;
+  eid('sh-lote-ok').textContent = 'Cargando…';
+  eid('sh-lote-cerrar').textContent = 'Detener';
+  shLoteSiguiente();
+}
+
+// Encadenado, no en paralelo: ver el comentario de arriba.
+function shLoteSiguiente(){
+  var L = SH_LOTE;
+  if (!L.corriendo) return;
+  if (L.i >= L.archivos.length) return shLoteFin();
+
+  var i = L.i, f = L.archivos[i];
+  shLoteEstado(i, 'subiendo…', 'var(--mut)');
+  eid('sh-lote-prog').style.width = ((i / L.archivos.length) * 100).toFixed(1) + '%';
+
+  var fd = new FormData(); fd.append('archivo', f);
+  fetch('/api/share/cargas?confirmar=1', { method: 'POST', body: fd })
+    .then(function(r){ return r.json().catch(function(){ return { ok: false, error: 'respuesta ilegible (' + r.status + ')' }; }); })
+    .then(function(r){
+      if (r && r.salteado === 'duplicado') { L.res.dup++; shLoteEstado(i, 'ya estaba', 'var(--mut)'); }
+      else if (r && r.ok) {
+        L.res.ok++;
+        var a = r.analisis || {};
+        var extra = (a.reemplaza && a.reemplaza.length) ? ' ↻' : '';
+        shLoteEstado(i, '✓ ' + nr(a.filas || 0) + ' filas' + extra, '#1a7f37');
+      } else if (r && r.salteado === 'conflicto') {
+        L.res.conf++; shLoteEstado(i, '! se pisa a medias', '#b3261e');
+      } else {
+        L.res.err++; shLoteEstado(i, '✗ ' + escH(String((r && r.error) || 'error').slice(0, 60)), '#b3261e');
+      }
+    })
+    .catch(function(e){ L.res.err++; shLoteEstado(i, '✗ ' + escH(e.message.slice(0, 60)), '#b3261e'); })
+    // Pase lo que pase se sigue con el próximo: un archivo roto no puede frenar los otros 104.
+    .then(function(){ L.i++; shLoteSiguiente(); });
+}
+
+function shLoteFin(){
+  var L = SH_LOTE, R = L.res;
+  L.corriendo = false;
+  eid('sh-lote-prog').style.width = '100%';
+  eid('sh-lote-ok').style.display = 'none';
+  eid('sh-lote-cerrar').textContent = 'Cerrar';
+  eid('sh-lote-resu').innerHTML =
+    '<b>Terminó.</b> Cargados: <b>' + R.ok + '</b> · Ya estaban: ' + R.dup +
+    ' · Se pisan a medias: ' + R.conf + ' · Con error: ' + R.err +
+    (R.conf ? '<br>Los que se pisan a medias no entraron a propósito: dá de baja la carga que se superpone en la lista de abajo y volvé a subir ese archivo solo.' : '') +
+    (R.err ? '<br>Los que fallaron suelen tener otro formato de hoja o de columnas. Subí uno solo para ver el mensaje completo.' : '') +
+    '<br>Ahora conviene pasar por <b>Mapeos</b> y marcar «la vendemos»: es el filtro de Oportunidades.';
+  toast(R.ok + ' planning(s) cargados');
+  shInit(); shCargas();
+}
+
+function shLoteCerrar(){
+  // Si está corriendo, "Detener" corta después del archivo en curso. Lo ya cargado queda:
+  // cada archivo es su propia transacción, así que no hay nada a medias que deshacer.
+  if (SH_LOTE.corriendo) { SH_LOTE.corriendo = false; shLoteFin(); return; }
+  closeMB('sh-lote-modal');
+}
+
+// El camino de UN archivo: muestra el resumen y espera la confirmación. Con varios no se usa
+// —serían 105 modales— y por eso el lote va derecho con ?confirmar=1.
+function shPreviewUno(f){
   SH.archivo = f;
   var fd = new FormData(); fd.append('archivo', f);
   eid('sh-prev-body').innerHTML = '<div class="emp">Leyendo el archivo…</div>';
