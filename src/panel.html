@@ -18241,9 +18241,17 @@ function sgRepExport(){
 <div class="ab-modal" style="width:min(1180px,96vw);max-width:96vw;max-height:90vh;overflow-y:auto;overflow-x:hidden">
   <style>
     /* Con table-layout:fixed los campos tienen que respetar su celda. */
-    #sgct-mb-modelo td,#adm-mb-modelo td{overflow:hidden}
     #sgct-mb-modelo input,#sgct-mb-modelo select,
     #adm-mb-modelo input,#adm-mb-modelo select{max-width:100%;box-sizing:border-box}
+    /* EL DESPLEGABLE DE RUBROS NO SE PUEDE CORTAR. Acá había un
+       overflow:hidden en los td para que los campos no se desbordaran, y
+       también cortaba la lista del buscador — que es un div posicionado
+       ADENTRO de la celda. Se veía media lista y el resto tapado por la fila
+       de abajo. Los campos ya no se desbordan por el max-width de arriba. */
+    #sgct-mb-modelo td,#adm-mb-modelo td{overflow:visible}
+    #sgct-mb-modelo tr,#adm-mb-modelo tr{position:relative}
+    /* Y la lista va por encima de todo lo que venga después. */
+    #sgct-mb-modelo .pa-ac-list,#adm-mb-modelo .pa-ac-list{z-index:80}
   </style>
   <div class="mhd">
     <div><div class="mht" id="sgct-mod-tit">Nuevo Asiento Modelo</div></div>
@@ -18852,9 +18860,17 @@ function sgRepExport(){
 <div class="ab-modal" style="width:min(1180px,96vw);max-width:96vw;max-height:90vh;overflow-y:auto;overflow-x:hidden">
   <style>
     /* Con table-layout:fixed los campos tienen que respetar su celda. */
-    #sgct-mb-modelo td,#adm-mb-modelo td{overflow:hidden}
     #sgct-mb-modelo input,#sgct-mb-modelo select,
     #adm-mb-modelo input,#adm-mb-modelo select{max-width:100%;box-sizing:border-box}
+    /* EL DESPLEGABLE DE RUBROS NO SE PUEDE CORTAR. Acá había un
+       overflow:hidden en los td para que los campos no se desbordaran, y
+       también cortaba la lista del buscador — que es un div posicionado
+       ADENTRO de la celda. Se veía media lista y el resto tapado por la fila
+       de abajo. Los campos ya no se desbordan por el max-width de arriba. */
+    #sgct-mb-modelo td,#adm-mb-modelo td{overflow:visible}
+    #sgct-mb-modelo tr,#adm-mb-modelo tr{position:relative}
+    /* Y la lista va por encima de todo lo que venga después. */
+    #sgct-mb-modelo .pa-ac-list,#adm-mb-modelo .pa-ac-list{z-index:80}
   </style>
   <div class="mhd">
     <div><div class="mht" id="adm-mod-tit">Nuevo Asiento Modelo</div></div>

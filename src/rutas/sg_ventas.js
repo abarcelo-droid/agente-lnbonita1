@@ -431,8 +431,15 @@ function modeloVentaFaltan(lineas) {
   const faltan = [];
   if (!lineas.length) return ['no hay ningún asiento modelo de venta elegido'];
   const tiene = (t) => lineas.some((l) => l.tipo_linea === t);
-  if (!tiene('clientes')) faltan.push('la línea de Clientes, que es el debe de la venta');
-  if (!tiene('ventas')) faltan.push('la línea de Ventas, que es el haber');
+  // Una línea sin marcar cuenta si es la única de su lado: ver lineasAsientoVenta.
+  const sola = (lado) => lineas.filter((l) =>
+    l.lado === lado && (!l.tipo_linea || l.tipo_linea === 'libre')).length === 1;
+  if (!tiene('clientes') && !sola('debe')) {
+    faltan.push('marcar cuál es la línea de Clientes / Deudores: hay varias en el debe');
+  }
+  if (!tiene('ventas') && !sola('haber')) {
+    faltan.push('marcar cuál es la línea de Ventas: hay varias en el haber');
+  }
   const sinCuenta = lineas.filter((l) => !l.cuenta_codigo).length;
   if (sinCuenta) faltan.push(sinCuenta + ' línea(s) apuntan a una cuenta que ya no existe');
   return faltan;
@@ -499,8 +506,19 @@ function lineasAsientoVenta(db, { clienteId, neto, iva, total, descuento, numero
   const faltan = modeloVentaFaltan(mod.lineas);
   if (faltan.length) return { lineas: [], falta: faltan, modelo_id: mod.id };
 
+  // "LIBRE" TAMBIÉN SIRVE, como en compras. Allá la línea del neto se marca
+  // Libre y nadie le pide más; pedir un tipo explícito acá y no allá es la misma
+  // pantalla con dos reglas.
+  //
+  // Si no hay una línea marcada, se toma la ÚNICA que quede de ese lado: con dos
+  // renglones —uno al debe y otro al haber— no hay ambigüedad posible. Con más
+  // de una sí la hay, y ahí sí hace falta marcarlas.
   const de = (t) => mod.lineas.find((l) => l.tipo_linea === t);
-  const lCli = de('clientes'), lVta = de('ventas');
+  const sueltas = (lado) => mod.lineas.filter((l) =>
+    l.lado === lado && (!l.tipo_linea || l.tipo_linea === 'libre'));
+  const unica = (lado) => (sueltas(lado).length === 1 ? sueltas(lado)[0] : null);
+  const lCli = de('clientes') || unica('debe');
+  const lVta = de('ventas') || unica('haber');
 
   // EL IVA SALE DE LA CONFIGURACIÓN GENERAL, no del modelo — igual que en
   // compras, donde el modelo lleva mercadería y proveedores, y el IVA y las
