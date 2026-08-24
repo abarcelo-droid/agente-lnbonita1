@@ -710,6 +710,29 @@ router.get('/insumos', requireAuth, (req, res) => {
     query += " ORDER BY categoria_principal, tipo, nombre";
     let data = db.prepare(query).all(...params);
 
+    // ── LO COMPRADO DE CADA INSUMO, EN SU RENGLÓN ───────────────────
+    //
+    // Pablo: "necesito que me agrupes la compra por nombre de insumo también,
+    // porque si no lo veo como muy repartido y no sé cuánto es el total que hay
+    // que comprar para pasarle un detalle al proveedor".
+    //
+    // La compra estaba SIEMPRE repartida en facturas: para saber cuánto lleva un
+    // insumo había que abrir el historial de a uno y sumar a mano. Se pide UNA
+    // consulta para todos y se pega a cada renglón — pedir el total por insumo
+    // sería una consulta por fila.
+    const compras = db.prepare(`
+      SELECT ci.insumo_id AS id,
+        COALESCE(SUM(ci.cantidad),0) AS cantidad,
+        COALESCE(SUM(ci.subtotal),0) AS monto,
+        COUNT(*) AS veces,
+        MAX(c.fecha) AS ultima,
+        COUNT(DISTINCT COALESCE(c.proveedor_id, c.proveedor_txt)) AS proveedores
+        FROM pa_compras_items ci
+        JOIN pa_compras c ON c.id = ci.compra_id
+       GROUP BY ci.insumo_id`).all();
+    const porInsumo = {};
+    for (const c of compras) porInsumo[c.id] = c;
+
     // Adjuntar asiento modelo de cada insumo (vive en dbPa: mapeo pa_insumo_modelo)
     const mapRows = dbPa.prepare('SELECT insumo_id, asiento_modelo_id FROM pa_insumo_modelo').all();
     const mapById = {};
@@ -726,6 +749,16 @@ router.get('/insumos', requireAuth, (req, res) => {
       }
     });
     data.forEach(i => { i.asiento_modelo_lineas = i.asiento_modelo_id ? (lineasPorModelo[i.asiento_modelo_id] || []) : []; });
+    data.forEach(i => {
+      const c = porInsumo[i.id];
+      // Sin compras van en CERO, no en null: un renglón vacío se lee como "no sé",
+      // y acá sí se sabe — nunca se compró.
+      i.comprado_cantidad = c ? Math.round(c.cantidad * 100) / 100 : 0;
+      i.comprado_monto = c ? Math.round(c.monto * 100) / 100 : 0;
+      i.comprado_veces = c ? c.veces : 0;
+      i.comprado_proveedores = c ? c.proveedores : 0;
+      i.ultima_compra = c ? c.ultima : null;
+    });
 
     if (sin_modelo === '1') data = data.filter(i => !i.tiene_modelo);
 
