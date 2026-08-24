@@ -53,6 +53,8 @@ const PREFIJOS = [
   // Prefijo propio: el router sirve un solo módulo, así que se puede declarar
   // pelado sin llevarse pantallas de otros.
   ['informes-comercial', 'informes'],
+  // SHARE (participacion en el CD de Carrefour). Router propio de un solo modulo.
+  ['share', 'share'],
   // ── Contabilidad de Puente Cordón ──────────────────────────────────────
   ['adm-asientos',       'pa/cuentas/asientos'],
   ['adm-plan-cuentas',   'pa/cuentas,pa/cuentas/secciones,pa/cuentas/titulos,pa/cuentas/config-impositiva'],

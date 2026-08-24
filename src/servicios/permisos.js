@@ -285,6 +285,11 @@ const LECTURA_CONTROLADA = new Set([
   // módulo igual llega escribiendo la dirección, que es el agujero que la lista existe
   // para tapar. El margen tiene ADEMÁS su propio corte por nivel adentro del router.
   '/api/informes',
+  // SHARE: qué le compra Carrefour a cada uno de nuestros competidores, con nombre y
+  // volumen. No es plata nuestra, pero es información de terceros que llegó por un canal
+  // comercial: no corresponde que la vea cualquiera que tenga usuario, y menos que se la
+  // pueda bajar en Excel. Entra en la lista por eso.
+  '/api/share',
 ]);
 
 // Cuando una pantalla necesita LEER algo de otro módulo. Va aparte de
