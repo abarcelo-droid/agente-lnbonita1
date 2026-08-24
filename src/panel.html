@@ -977,6 +977,38 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
         </div>
         <span id="liq-modo-ayuda" style="font-size:11.5px;color:var(--mut)"></span>
       </div>
+      <!-- ── A PRECIO CERRADO: EL PRECIO YA ESTÁ Y LA COMISIÓN SE DESPEJA ────
+           Pablo: "la variable a ajustar es la comisión... el modelo de liquidación
+           debe reconstruir la liquidación hacia arriba tal que la comisión
+           (variable) dé un precio final a pagar por bulto de $15.000".
+           Fondo gris para que no se confunda con la de precio abierto, que es la
+           misma pantalla haciendo otra cosa. -->
+      <div id="liq-cerrado-box" style="display:none;background:#f1f5f9;border:1px solid var(--bor);
+           border-radius:10px;padding:12px 14px;margin-bottom:12px">
+        <div style="font-weight:700;font-size:12px;text-transform:uppercase;letter-spacing:.04em;
+             color:var(--mut);margin-bottom:8px">💰 El precio ya estaba cerrado</div>
+        <div style="display:flex;gap:14px;flex-wrap:wrap;align-items:flex-end">
+          <label style="font-size:11.5px;color:var(--mut)">Precio acordado por <span id="liq-cerr-uni">bulto</span><br>
+            <input id="liq-cerr-precio" type="text" inputmode="decimal"
+                   onfocus="liqNumFoco(this)" onblur="liqNumSalida(this)" oninput="liqCerradoResolver()"
+                   style="width:150px;text-align:right;padding:6px 8px;border-radius:6px;border:1px solid var(--bor)"></label>
+          <label style="font-size:11.5px;color:var(--mut)">× <span id="liq-cerr-cant-lbl">bultos</span> a liquidar<br>
+            <input id="liq-cerr-cant" type="number" step="0.01"
+                   oninput="liqCerradoResolver()"
+                   style="width:120px;text-align:right;padding:6px 8px;border-radius:6px;border:1px solid var(--bor)"></label>
+          <div style="align-self:flex-end;padding-bottom:6px">
+            <div style="font-size:11px;color:var(--mut)">Total a pagar al productor</div>
+            <div id="liq-cerr-total" style="font-weight:700;font-size:18px">—</div>
+          </div>
+          <div id="liq-cerr-resultado" style="flex:1;min-width:260px;align-self:flex-end;
+               font-size:12px;padding-bottom:6px"></div>
+        </div>
+        <div style="font-size:11px;color:var(--mut);margin-top:8px">
+          El precio acordado es lo que el productor cobra por bulto, con IVA. Las ventas, sus IVA
+          y los gastos vienen de la partida y no se tocan: lo que se despeja es la
+          <b>comisión</b>, que es la variable.
+        </div>
+      </div>
       <div id="liq-venta-cab" style="display:none;margin-bottom:12px"></div>
       <!-- SE FUE EL «PEGÁ EL TEXTO Y LA IA LO LEE». Pablo, 24/8/2026: "esto de
            acá abajo lo podés borrar porque no tiene ningún sentido, la liquidación
@@ -10847,10 +10879,45 @@ function liqDesdePartida(r){
   LIQ.origen.ventas = 'de lo que la partida vendió, arriba';
   LIQ.origen.gastos_admin = 'a mano';
 
+  // ── SI LA PARTIDA ES A PRECIO CERRADO, LA PANTALLA ARRANCA AHÍ ─────────
+  //
+  // Pablo: "si la pantalla dice que es precio cerrado y efectivamente la partida
+  // tiene el precio cerrado, debe llevarte a la opción de precio cerrado".
+  //
+  // Es lo que la orden ya decidió: obligar a elegirlo de nuevo es pedir que
+  // repita un dato que el sistema tiene, y dejar que se liquide a precio abierto
+  // una partida cerrada es liquidarla mal.
+  if (r.es_precio_cerrado) {
+    var rad = document.querySelector('input[name="liq-modo"][value="cerrado"]');
+    if (rad && !rad.checked) rad.checked = true;
+    LIQ.origen.comision = 'se despeja para llegar al precio acordado';
+  }
+  var ac = r.acordado || {};
+  // El precio pactado y los bultos, puestos. El precio por bulto sólo si TODOS
+  // los ítems comparten uno: con precios distintos no hay UN precio por bulto y
+  // poner el de uno sería inventar los otros.
+  var pc = eid('liq-cerr-precio'), cc = eid('liq-cerr-cant');
+  if (pc && !String(pc.value || '').trim() && Number(ac.precio_por_bulto)) {
+    liqNumPoner(pc, ac.precio_por_bulto);
+  }
+  if (cc && !String(cc.value || '').trim()) {
+    cc.value = Number(r.bultos_vendidos) || Number(r.bultos_ingresados) || '';
+  }
+  var ul = eid('liq-cerr-uni'), cl = eid('liq-cerr-cant-lbl');
+  if (ul) ul.textContent = (r.unidad === 'bulto') ? 'bulto' : 'kilo';
+  if (cl) cl.textContent = (r.unidad === 'bulto') ? 'bultos' : 'kilos';
+  if (cc && r.unidad !== 'bulto' && !String(cc.value || '').trim()) {
+    cc.value = Number(r.kg_vendidos) || '';
+  }
+
   // Se repinta para que los rótulos de origen y el % entren, y después se calcula
   // la comisión sobre las ventas que se acaban de poner.
   liqGrillaPintar();
-  liqComisionCalcular();
+  // El modo va DESPUÉS de pintar la grilla: liqModoCambio toca campos que la
+  // grilla acaba de crear, y a precio cerrado dispara el despeje con los importes
+  // ya cargados.
+  liqModoCambio();
+  if (liqModo() !== 'cerrado') liqComisionCalcular();
 }
 
 function liqBultosAvance(){
@@ -29550,19 +29617,114 @@ function liqModo(){
   return el ? el.value : 'abierto';
 }
 function liqModoCambio(){
-  var a = eid('liq-modo-ayuda');
   var cerrado = liqModo() === 'cerrado';
+  var a = eid('liq-modo-ayuda');
   if (a) {
     a.innerHTML = cerrado
-      ? '<span style="color:#9a3412">El precio ya estaba pactado en la orden. '
-        + 'El circuito de precio cerrado todavía no está armado: los importes se '
-        + 'cargan a mano.</span>'
-      : 'Lo que se le paga sale de lo que su mercadería vendió, arriba.';
+      ? 'El precio ya estaba pactado. Se despeja la <b>comisión</b> para llegar a él.'
+      : 'Lo que se le paga sale de lo que su mercadería vendió, y la comisión es un %.';
   }
-  // El cuadro de ventas sólo tiene sentido a precio abierto: a precio cerrado
-  // el número no sale de ahí y mostrarlo invita a copiarlo.
+  // EL FONDO GRIS. Pablo: "el formato de pantalla debe ser el mismo, nada más que
+  // vamos a ponerlo un gris al fondo así se diferencia una pantalla de la otra".
+  // Es la misma pantalla haciendo otra cosa, y eso hay que poder verlo de un
+  // vistazo: la mitad de los errores caros salen de creer que se está en la otra.
+  var m = eid('liq-modal');
+  if (m) {
+    var caja = m.querySelector('.ab-modal');
+    if (caja) caja.style.background = cerrado ? '#f8fafc' : '';
+  }
+  var cb = eid('liq-cerrado-box');
+  if (cb) cb.style.display = cerrado ? '' : 'none';
+
+  // El cuadro de ventas SIGUE a la vista: a precio cerrado las ventas son
+  // justamente el punto de partida del despeje. Esconderlo dejaba al operador
+  // firmando una comisión sin ver contra qué se calculó.
   var vc = eid('liq-venta-cab');
-  if (vc && vc.innerHTML) vc.style.display = cerrado ? 'none' : '';
+  if (vc && vc.innerHTML) vc.style.display = '';
+
+  // El % de comisión se tipea a precio abierto y se DESPEJA a precio cerrado:
+  // dejarlo editable ahí sería ofrecer cambiar el resultado de una cuenta.
+  var pct = eid('liq-comision-pct');
+  if (pct) {
+    pct.readOnly = cerrado;
+    pct.style.background = cerrado ? 'var(--bg)' : '';
+    pct.title = cerrado ? 'A precio cerrado sale de la cuenta, no se tipea' : 'Sobre las ventas';
+  }
+  if (cerrado) liqCerradoResolver(); else liqTotales();
+}
+
+// ── EL DESPEJE ───────────────────────────────────────────
+//
+// A precio cerrado se sabe lo que el productor tiene que cobrar y hay que
+// reconstruir la liquidación hacia arriba. Todo lo demás viene de la partida
+// —las ventas, su IVA, la descarga, el flete— y no se toca. La ÚNICA variable es
+// la comisión.
+//
+// La cuenta, escrita entera:
+//
+//   fiscal:   V_f + IVA_v − C_f·(1+a) − Σ(servicio_f + su IVA)
+//   gestión:  V_g − C_g − Σ(servicio_g)
+//   los dos juntos tienen que dar T
+//
+// La comisión es UN porcentaje que pega en los dos ámbitos —C_f = V_f·p y
+// C_g = V_g·p— porque así lo pidió Pablo: se cobra sobre todo lo que vendió. Y la
+// de gestión va sin IVA. Despejando p:
+//
+//        V_f + IVA_v + V_g − S − T
+//   p = ───────────────────────────────────        con a = alícuota de la comisión
+//              V_f·(1+a) + V_g                     S = todos los servicios con su IVA
+//
+// Si p sale NEGATIVO, para pagar eso habría que poner plata en vez de cobrar
+// comisión: se dice en rojo y no se escribe nada. Un número imposible escrito en
+// la grilla es peor que el aviso.
+function liqCerradoResolver(){
+  var pre = eid('liq-cerr-precio'), cant = eid('liq-cerr-cant');
+  var out = eid('liq-cerr-resultado'), tot = eid('liq-cerr-total');
+  if (!pre || !cant || !out) return;
+  var m2 = function(x){ return Math.round((Number(x) || 0) * 100) / 100; };
+  var T = m2(liqNum(pre) * (parseFloat(cant.value) || 0));
+  if (tot) tot.textContent = T ? liqPlata(T) : '—';
+
+  var d = liqGrillaLeer();
+  var Vf = d.fiscal.ventas, IVAv = d.fiscal.iva_ventas, Vg = d.gestion.ventas;
+  // Todo lo que NO es comisión ni ventas: se le descuenta igual y no depende del
+  // despeje.
+  var S = 0;
+  LIQ_FILAS.forEach(function(x){
+    if (x.k === 'ventas' || x.k === 'comision') return;
+    S += d.fiscal[x.k] + d.fiscal['iva_' + x.k] + d.gestion[x.k];
+  });
+  var a = (liqAlic('comision') || 0) / 100;
+  var den = Vf * (1 + a) + Vg;
+
+  if (!T) {
+    out.innerHTML = '<span style="color:var(--mut)">Poné el precio acordado y los bultos.</span>';
+    return;
+  }
+  if (den <= 0) {
+    out.innerHTML = '<span style="color:var(--err)">Sin ventas cargadas no hay sobre qué '
+      + 'calcular la comisión.</span>';
+    return;
+  }
+  var p = (Vf + IVAv + Vg - S - T) / den;
+  if (p < 0) {
+    out.innerHTML = '<span style="color:var(--err)"><b>No cierra.</b> Para pagarle ' + liqPlata(T)
+      + ' habría que poner ' + liqPlata(-(p * den)) + ', no cobrar comisión. '
+      + 'Revisá el precio o los gastos.</span>';
+    return;
+  }
+  var pct = Math.round(p * 10000) / 100;          // dos decimales, como pidió Pablo
+  var cF = m2(Vf * p), cG = m2(Vg * p);
+  liqNumPoner(eid('liq-g-f-comision'), cF);
+  liqNumPoner(eid('liq-g-f-iva_comision'), m2(cF * a));
+  liqNumPoner(eid('liq-g-g-comision'), cG);
+  var pIn = eid('liq-comision-pct');
+  if (pIn) pIn.value = pct;
+  if (LIQ) LIQ.comisionPct = pct;
+  out.innerHTML = 'Comisión despejada: <b style="font-size:14px">'
+    + String(pct.toFixed(2)).replace('.', ',') + '%</b> · ' + liqPlata(m2(cF + cG))
+    + '<div style="color:var(--mut);font-size:11px">'
+    + liqPlata(cF) + ' fiscal + ' + liqPlata(cG) + ' de gestión</div>';
   liqTotales();
 }
 

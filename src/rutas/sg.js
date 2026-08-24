@@ -2746,7 +2746,7 @@ router.get('/partidas/:id/venta', requireAuth, (req, res) => {
     // de la partida". Y no es comodidad: la liquidación la EMITIMOS nosotros a
     // nombre de ese productor, y tipear a mano el CUIT de un comprobante que uno
     // emite es la forma más barata de emitirlo mal.
-    const oc = db.prepare(`SELECT o.id, o.trazabilidad, o.numero, o.fecha_oc,
+    const oc = db.prepare(`SELECT o.id, o.trazabilidad, o.numero, o.fecha_oc, o.tipo_precio,
         o.flete_a_cargo, o.flete_monto, o.flete_con_iva,
         p.id AS prov_id, p.razon_social, p.cuit, p.localidad, p.provincia,
         p.codigo_postal, p.categoria_fiscal, p.comision_pct
@@ -2966,6 +2966,26 @@ router.get('/partidas/:id/venta', requireAuth, (req, res) => {
       // En qué unidad se liquida. La pantalla la usa para rotular la columna y
       // para no ofrecer kilos donde se pactaron cajones.
       unidad,
+      // ── SI EL PRECIO YA ESTABA CERRADO ────────────────────────────
+      //
+      // Pablo: "si la pantalla dice que es precio cerrado y efectivamente la
+      // partida tiene el precio cerrado, debe llevarte a la opción de precio
+      // cerrado".
+      //
+      // Se manda lo que la orden pactó: el total y, si todos los ítems comparten
+      // uno, el precio por bulto. Con ítems a precios distintos no hay UN precio
+      // por bulto — se manda null y la pantalla trabaja con el total.
+      tipo_precio: oc.tipo_precio || null,
+      es_precio_cerrado: oc.tipo_precio !== 'pizarra' ? 1 : 0,
+      acordado: (function(){
+        const a = acordadoDeOC(db, ocId);
+        const precios = (a.detalle || []).map((d) => d.precio_por_bulto)
+          .filter((x) => x != null);
+        const unico = precios.length && precios.every((x) => x === precios[0]) ? precios[0] : null;
+        return { total: r2(a.total), precio_por_bulto: unico,
+                 base: (a.detalle[0] || {}).base || null,
+                 items: (a.detalle || []).length };
+      })(),
       // Lo que se le descuenta al productor, traído de donde ya vive.
       //
       // La comisión es un PORCENTAJE, no un monto: sale de la ficha del proveedor
