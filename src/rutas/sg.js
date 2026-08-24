@@ -884,14 +884,20 @@ router.post('/facturas/emitir', requireAuth, postEmitir);
 // Se le factura a un cliente mercadería que está en el stock, sin tener que
 // armar antes un remito en otra pantalla y volver.
 //
-// Por dentro SÍ hay remito, y tiene que haberlo: la mercadería sale del depósito
-// igual. Sin él, el lote quedaría figurando como disponible después de haberse
-// vendido, y la trazabilidad —qué partida se le mandó a qué cliente— se
-// perdería. Lo que se saca es el paso a mano, no el documento.
+// Por dentro SÍ hay una SALIDA, y tiene que haberla: la mercadería sale del
+// depósito igual. Sin ella, el lote quedaría figurando como disponible después
+// de haberse vendido, y la trazabilidad —qué partida se le mandó a qué
+// cliente— se perdería.
 //
-// EL ORDEN IMPORTA. Primero el remito, después el comprobante. Si AFIP rechaza,
-// el remito queda hecho y aparece en «Remitos pendientes de comprobante», que es
-// exactamente donde hay que ir a buscarlo. Al revés —comprobante primero— un
+// PERO NO TODA VENTA EMITE UN REMITO NUEVO (Pablo, 24/8/2026). Acá el papel que
+// acompaña la mercadería es la FACTURA: emitir además un remito propio son dos
+// documentos del mismo viaje y el operador no sabe cuál mostrar. Así que la
+// salida se registra con sin_remito=1 salvo que pidan lo contrario
+// (`emitir_remito`), para el caso en que el cliente exige su remito aparte.
+//
+// EL ORDEN IMPORTA. Primero la salida, después el comprobante. Si AFIP rechaza,
+// la salida queda hecha y aparece en «Remitos pendientes de comprobante», que es
+// exactamente donde hay que ir a buscarla. Al revés —comprobante primero— un
 // error dejaría una factura sin mercadería descontada, y eso no se ve en ningún
 // lado hasta que no cierra el stock.
 router.post('/facturas/directa', requireAuth, async (req, res) => {
@@ -910,7 +916,9 @@ router.post('/facturas/directa', requireAuth, async (req, res) => {
       error: 'La facturación directa es de mercadería en stock. Lo que viene en viaje se asigna con un remito.' });
   }
 
+  const emiteRemito = b.emitir_remito === true || b.emitir_remito === 1 || b.emitir_remito === '1';
   const rem = crearRemitoInterno(req, {
+    sin_remito: emiteRemito ? 0 : 1,
     cliente_id: clienteId,
     fecha_despacho: b.fecha || new Date().toISOString().slice(0, 10),
     transporte: b.transporte || null, chofer: b.chofer || null, dominio: b.dominio || null,
@@ -947,12 +955,17 @@ router.post('/facturas/directa', requireAuth, async (req, res) => {
     json(o) { salida = { status: this._st, body: o }; return this; } };
   await postEmitir(fakeReq, fakeRes);
   const out = salida || { status: 502, body: { ok: false, error: 'La emisión no contestó' } };
-  // El número de remito viaja siempre: si AFIP rechazó, es el dato con el que se
-  // vuelve a intentar desde Remitos pendientes de comprobante.
+  // El número de la salida viaja siempre: si AFIP rechazó, es el dato con el que
+  // se vuelve a intentar desde Remitos pendientes de comprobante. Que no se haya
+  // emitido el remito no significa que no haya salida — la hay, y hay que poder
+  // nombrarla. Lo que cambia es cómo se la llama en pantalla.
   out.body.remito_id = despachoId;
-  out.body.remito_numero = db.prepare('SELECT numero FROM sg_despachos WHERE id=?').get(despachoId)?.numero || null;
+  out.body.salida_numero = db.prepare('SELECT numero FROM sg_despachos WHERE id=?').get(despachoId)?.numero || null;
+  out.body.emitio_remito = emiteRemito ? 1 : 0;
+  // Sólo se anuncia como remito si de verdad se emitió uno.
+  out.body.remito_numero = emiteRemito ? out.body.salida_numero : null;
   if (!out.body.ok && !out.body.aviso) {
-    out.body.aviso = 'El remito ' + out.body.remito_numero + ' quedó hecho y la mercadería salió del stock. '
+    out.body.aviso = 'La salida ' + out.body.salida_numero + ' quedó hecha y la mercadería salió del stock. '
                    + 'El comprobante se puede volver a emitir desde Remitos pendientes de comprobante.';
   }
   res.status(out.status).json(out.body);
@@ -6356,12 +6369,15 @@ const postRemito = (req, res) => {
     const tx = db.transaction(() => {
       const numero = nextNumero(db, 'SG-DESP', 'sg_despachos', 'numero');
       const fleteroId = b.fletero_id ? Number(b.fletero_id) : null;
+      // sin_remito: la salida existe igual —descuenta stock, guarda la
+      // trazabilidad— pero no se emite el remito como documento, porque el papel
+      // que viaja con la mercadería es la factura. Ver A2b en db_sg.js.
       const info = db.prepare(`INSERT INTO sg_despachos
-        (numero, pedido_id, cliente_id, comercial_id, fecha_despacho, transporte, transportista, chofer, dominio, fletero_id, estado, observaciones, creado_por)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
+        (numero, pedido_id, cliente_id, comercial_id, fecha_despacho, transporte, transportista, chofer, dominio, fletero_id, estado, observaciones, sin_remito, creado_por)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
         numero, b.pedido_id || null, b.cliente_id, b.comercial_id || null, val(b.fecha_despacho),
         val(b.transporte), val(b.transportista), val(b.chofer), val(b.dominio), fleteroId,
-        val(b.estado) || 'despachado', val(b.observaciones), uid(req));
+        val(b.estado) || 'despachado', val(b.observaciones), b.sin_remito ? 1 : 0, uid(req));
       const despachoId = info.lastInsertRowid;
       // PARTE B — si se asignó fletero, queda un gasto de flete de salida PENDIENTE de valorizar.
       syncGastoFleteDespacho(db, despachoId, fleteroId, val(b.fecha_despacho), uid(req));
