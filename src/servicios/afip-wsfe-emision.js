@@ -290,7 +290,7 @@ function actualizarFactura(database, facturaId, campos) {
 //
 // Si al modelo le falta algo, se corta y lo dice: no se guarda una venta a
 // medias. Y si ya tiene asiento —un reintento— no se escribe dos veces.
-function asentarVenta(database, facturaId, comprobante, ptoVta, cbteNro) {
+function asentarVenta(database, facturaId, comprobante, ptoVta, cbteNro, userId) {
   const ya = database.prepare('SELECT asiento_id, numero, fecha, dif_gestion FROM sg_ven_facturas WHERE id=?').get(facturaId);
   if (ya && ya.asiento_id) return ya.asiento_id;
   const nro = String(ptoVta).padStart(4, '0') + '-' + String(cbteNro).padStart(8, '0');
@@ -306,7 +306,10 @@ function asentarVenta(database, facturaId, comprobante, ptoVta, cbteNro) {
   const cli = database.prepare('SELECT razon_social r FROM sg_clientes WHERE id=?')
     .get(comprobante.cliente.id) || {};
   const asientoId = crearAsiento(database, {
-    fecha: (ya && ya.fecha) || null, usuario_id: null, ref_codigo: nro,
+    // QUIÉN LO CARGÓ. Acá iba `null` escrito a mano, y en Asientos Contables las
+    // ventas salían con un guión en "Cargado por" mientras todo lo demás decía el
+    // nombre. Un asiento sin dueño es un asiento que nadie tiene que explicar.
+    fecha: (ya && ya.fecha) || null, usuario_id: userId || null, ref_codigo: nro,
     descripcion: 'Venta — ' + (cli.r || '') + ' — Comprobante ' + nro,
   }, arm.lineas).id;
   database.prepare('UPDATE sg_ven_facturas SET asiento_id=? WHERE id=?').run(asientoId, facturaId);
@@ -353,7 +356,7 @@ export async function emitir(database, { ptoVta, clienteId, items, esNC, userId,
       // La MISMA función que el camino de AFIP: cierra la factura y ata los
       // despachos en una sola transacción. Escribir eso de nuevo acá sería dos
       // maneras de hacer lo mismo, y una de las dos se olvidaría de algo.
-      asentarVenta(database, facturaId, comprobante, ptoVta, cbteNro);
+      asentarVenta(database, facturaId, comprobante, ptoVta, cbteNro, userId);
       confirmarAutorizada(database, facturaId, {
         // NO se toca `estado`: queda en 'pendiente', que es lo que significa —
         // el comprobante está emitido y todavía no se cobró. Es lo mismo que
@@ -396,7 +399,7 @@ export async function emitir(database, { ptoVta, clienteId, items, esNC, userId,
     if (resp.resultado === 'A' && resp.cae) {
       // Atómico: estado autorizado + CAE + puente factura↔despacho en una sola transacción.
       // La venta autorizada entra al libro en el mismo acto.
-      asentarVenta(database, facturaId, comprobante, ptoVta, cbteNro);
+      asentarVenta(database, facturaId, comprobante, ptoVta, cbteNro, userId);
       confirmarAutorizada(database, facturaId,
         { cae: resp.cae, cae_vto: resp.cae_vto, afip_resultado: 'A', afip_estado: 'autorizado', afip_obs: resp.obs },
         vinculos);

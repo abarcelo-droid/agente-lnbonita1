@@ -3531,8 +3531,10 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
       <div id="sg-ccli-listado">
       <div style="font-size:12px;color:var(--mut);margin-bottom:8px">
         Saldo = saldo de apertura + lo documentado (liquidaciones y facturas) + lo entregado
-        sin comprobante − lo cobrado. Hacé click en un cliente para ver sus comprobantes y
-        registrarle un cobro.
+        sin comprobante − lo cobrado. Lo documentado va por lo <b>acordado</b>: incluye la
+        parte de gestión —descuentos comerciales y diferencias contra lo pactado—, que se
+        muestra al lado para poder separarla. Hacé click en un cliente para ver sus
+        comprobantes y registrarle un cobro.
       </div>
       <!-- Van a figurar todos: sin buscador, encontrar uno es recorrer la lista
            con el dedo. Filtra mientras se escribe, sin ir al servidor. -->
@@ -3541,8 +3543,8 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
                style="width:100%;box-sizing:border-box">
       </div>
       <div class="ab-table-wrap"><table class="pa-tbl">
-        <thead><tr><th>Cliente</th><th style="text-align:right">Saldo apertura</th><th style="text-align:right">Documentado</th><th style="text-align:right" title="Mercadería entregada con remito que todavía no se facturó">Sin comprobante</th><th style="text-align:right">Cobrado</th><th style="text-align:right">Saldo total</th><th style="text-align:right">Límite</th><th style="width:170px"></th></tr></thead>
-        <tbody id="sg-tb-cc"><tr><td colspan="8" class="emp">Cargando…</td></tr></tbody>
+        <thead><tr><th>Cliente</th><th style="text-align:right">Saldo apertura</th><th style="text-align:right">Documentado</th><th style="text-align:right" title="Lo que la venta vale de verdad y no lleva comprobante: descuentos comerciales acordados y diferencias contra lo pactado. Ya está sumado en Documentado.">De eso, gestión</th><th style="text-align:right" title="Mercadería entregada con remito que todavía no se facturó">Sin comprobante</th><th style="text-align:right">Cobrado</th><th style="text-align:right">Saldo total</th><th style="text-align:right">Límite</th><th style="width:170px"></th></tr></thead>
+        <tbody id="sg-tb-cc"><tr><td colspan="9" class="emp">Cargando…</td></tr></tbody>
       </table></div>
       </div><!-- /sg-ccli-listado -->
       <!-- LA FICHA DEL CLIENTE. El listado dice cuánto debe; esto dice por qué:
@@ -15317,6 +15319,13 @@ function sgCcClPintar(){
     return '<tr><td>' + escH(sgCcClNombre(c)) + '</td>'
       + '<td style="text-align:right' + (ap ? '' : ';color:var(--mut)') + '">' + (ap ? sgMoney(ap) : '—') + '</td>'
       + '<td style="text-align:right">' + sgMoney(c.documentado != null ? c.documentado : c.total_facturado) + '</td>'
+      // LA MITAD DE GESTIÓN ya estaba sumada adentro de Documentado —por eso el
+      // saldo cerraba— pero no se veía: la pantalla decía $659.999 y no había
+      // forma de saber que $150.000 de eso son descuentos acordados y no una
+      // factura. Se muestra al lado, no aparte, para que se lea como lo que es:
+      // una porción de ese número.
+      + '<td style="text-align:right' + (Number(c.gestion) ? ';color:#9a3412' : ';color:var(--mut)') + '">'
+        + (Number(c.gestion) ? sgMoney(c.gestion) : '—') + '</td>'
       // LO ENTREGADO SIN COMPROBANTE va en su propia columna y no mezclado con
       // lo documentado: es deuda real —la mercadería está en la casa del
       // cliente— pero todavía no está en el libro fiscal.
@@ -15331,7 +15340,7 @@ function sgCcClPintar(){
             ? ' <button class="btn bb bs" onclick="sgCobOpen(' + c.id + ')">💵 Cobrar</button>' : '')
       + '</td></tr>';
   }).join('')
-    : '<tr><td colspan="8" class="emp">'
+    : '<tr><td colspan="9" class="emp">'
       + (SG_CCLI.filas.length
           ? 'Ningún cliente coincide con la búsqueda.'
           : 'Todavía no hay clientes con saldo ni movimientos. Acá figuran los que ya tienen algo '
