@@ -266,7 +266,11 @@ const PREFIJOS = [
   // cargando por ahí, mirando los datos. Primero se reparte el acceso, después
   // se cierra la puerta.
   ['ab-ifcos',           'ifco'],
-  ['ab-liquidaciones',   'liquidaciones'],
+  // 'sg/liquidacion' es la parametrización del asiento con el que se contabilizan
+  // —define cómo entra al libro la plata de TODAS las liquidaciones— y va con la
+  // pantalla que la usa, igual que 'sg/factura-mercaderia' del lado de compras.
+  // 'sg/partidas' es la venta que trae cada partida al liquidarla.
+  ['ab-liquidaciones',   'liquidaciones,sg/liquidacion,sg/partidas'],
 
   // ── Comercial ─────────────────────────────────────────────────────────
   // Las seis pantallas de clientes son literalmente la misma función

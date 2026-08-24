@@ -2190,6 +2190,17 @@ function partidasRecibidas(db, comoSeDocumenta) {
               JOIN sg_lotes l ON l.id = di.lote_id AND l.activo = 1
               JOIN sg_oc_items i ON i.id = l.oc_item_id
              WHERE i.oc_id = o.id) AS bultos_vendidos,
+           -- LA MERMA TAMBIÉN TERMINA LA PARTIDA. Pablo, 24/8/2026: "lo que tiene
+           -- que estar terminada es la partida: en una de 60 bultos ingresados
+           -- puede pasar que tengamos vendidos 55 y 5 sean merma. Obviamente esos
+           -- 5 van a precio de venta 0 — están 'vendidos' pero suman cero."
+           --
+           -- Sin esto, una partida que salió entera —parte vendida, parte tirada—
+           -- se veía en rojo para siempre y nunca daba "lista para liquidar".
+           (SELECT COALESCE(SUM(dc.bultos),0) FROM sg_lote_decomisos dc
+              JOIN sg_lotes l ON l.id = dc.lote_id AND l.activo = 1
+              JOIN sg_oc_items i ON i.id = l.oc_item_id
+             WHERE i.oc_id = o.id) AS bultos_merma,
            (SELECT COUNT(*) FROM sg_lotes l
               JOIN sg_oc_items i ON i.id = l.oc_item_id
              WHERE i.oc_id = o.id AND l.activo = 1 AND l.precio_unitario_kg IS NULL) AS lotes_sin_precio,
@@ -2620,6 +2631,73 @@ router.get('/stock-pisos/imprimir', requireAuth, (req, res) => {
   } catch (e) { res.status(500).send('Error: ' + e.message); }
 });
 
+// ── EL ASIENTO CON EL QUE SE CONTABILIZA UNA LIQUIDACIÓN ─────────────
+//
+// Pablo: "arriba necesito el selector de asiento tal como existe en facturas de
+// compra de mercadería".
+//
+// Mismo mecanismo, misma razón: todas las liquidaciones se contabilizan IGUAL,
+// así que el modelo se elige UNA vez y queda parametrizado para el módulo. No
+// se elige liquidación por liquidación — eso abriría la puerta a que dos
+// iguales entren con asientos distintos según quién las cargó, y a los tres
+// meses el mayor no cierra y nadie sabe por qué.
+//
+// Es OTRA clave que la de facturas: una liquidación la EMITIMOS nosotros y una
+// factura de mercadería la recibimos. Compartir el modelo sería contabilizar
+// dos operaciones distintas con las mismas cuentas.
+const CLAVE_MODELO_LIQ = 'asiento_modelo_liquidacion';
+
+router.get('/liquidacion/modelo', requireAuth, (req, res) => {
+  const db = getDb();
+  try {
+    const id = db.prepare('SELECT valor FROM sg_config WHERE clave=?').get(CLAVE_MODELO_LIQ);
+    const modeloId = id && id.valor ? Number(id.valor) : null;
+    if (!modeloId) return res.json({ ok: true, data: { modelo: null } });
+    const m = db.prepare('SELECT * FROM sg_asientos_modelo WHERE id=? AND activo=1').get(modeloId);
+    // El modelo elegido se dio de baja: hay que avisar, no devolver null como
+    // si nunca se hubiera elegido uno.
+    if (!m) return res.json({ ok: true, data: { modelo: null, id_perdido: modeloId } });
+
+    m.lineas = db.prepare(`SELECT l.*, c.codigo AS cuenta_codigo, c.nombre AS cuenta_nombre
+      FROM sg_asientos_modelo_lineas l
+      LEFT JOIN sg_cuentas c ON c.id = l.cuenta_id
+      WHERE l.modelo_id=? ORDER BY l.orden, l.id`).all(modeloId);
+
+    // Qué le falta para poder contabilizar. Se avisa acá y no cuando ya está la
+    // liquidación cargada y el proveedor esperando.
+    const faltan = [];
+    if (!m.lineas.length) faltan.push('no tiene ninguna línea');
+    if (!m.lineas.some((l) => l.tipo_linea === 'proveedores')) {
+      faltan.push('no tiene la línea de Proveedores, que es lo que se le queda debiendo al productor');
+    }
+    if (!m.lineas.some((l) => l.lado === 'debe')) faltan.push('no tiene ninguna línea en el debe');
+    if (!m.lineas.some((l) => l.lado === 'haber')) faltan.push('no tiene ninguna línea en el haber');
+    const sinCuenta = m.lineas.filter((l) => !l.cuenta_codigo).length;
+    if (sinCuenta) faltan.push(sinCuenta + ' línea(s) apuntan a una cuenta que ya no existe');
+
+    res.json({ ok: true, data: { modelo: m, faltan } });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// Sólo admin: define cómo entra al libro la plata de TODAS las liquidaciones.
+// Parametrizar no es operar (ver OPERAR NO ES SER ADMIN en CLAUDE.md).
+router.put('/liquidacion/modelo', requireAdmin, (req, res) => {
+  const db = getDb();
+  try {
+    const modeloId = req.body && req.body.modelo_id ? Number(req.body.modelo_id) : null;
+    if (modeloId) {
+      const m = db.prepare('SELECT id FROM sg_asientos_modelo WHERE id=? AND activo=1').get(modeloId);
+      if (!m) return res.status(400).json({ ok: false, error: 'Ese asiento modelo no existe o está dado de baja' });
+    }
+    db.prepare(`INSERT INTO sg_config (clave, valor, modificado_en, modificado_por)
+      VALUES (?,?,datetime('now','localtime'),?)
+      ON CONFLICT(clave) DO UPDATE SET valor=excluded.valor,
+        modificado_en=excluded.modificado_en, modificado_por=excluded.modificado_por`)
+      .run(CLAVE_MODELO_LIQ, modeloId == null ? null : String(modeloId), uid(req));
+    res.json({ ok: true, data: { modelo_id: modeloId } });
+  } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
+});
+
 // ── CUÁNTO VENDIÓ ESTA PARTIDA ───────────────────────────────
 //
 // Pablo, 24/8/2026 — y es norma contable, no preferencia:
@@ -2662,6 +2740,25 @@ router.get('/partidas/:id/venta', requireAuth, (req, res) => {
         JOIN sg_lotes l ON l.id = di.lote_id AND l.activo = 1
         JOIN sg_oc_items i ON i.id = l.oc_item_id
        WHERE i.oc_id = ?`).get(ocId);
+
+    // ── LA MERMA, CON SU DETALLE ─────────────────────────────────
+    //
+    // Pablo: "en el caso que existan mermas se deben explicitar en la
+    // liquidación". Y tiene que ser así: el productor va a cobrar por 55 de sus
+    // 60 bultos, y la diferencia no es un error de cuenta — es mercadería que se
+    // tiró, y él tiene derecho a saber cuánta y por qué.
+    //
+    // Van a precio 0: están terminadas, no vendidas.
+    const mermas = db.prepare(`
+      SELECT dc.id, dc.fecha, COALESCE(dc.bultos,0) AS bultos, COALESCE(dc.kg,0) AS kg,
+        dc.motivo, l.codigo_lote, pr.nombre AS producto
+        FROM sg_lote_decomisos dc
+        JOIN sg_lotes l ON l.id = dc.lote_id AND l.activo = 1
+        JOIN sg_oc_items i ON i.id = l.oc_item_id
+        LEFT JOIN sg_productos pr ON pr.id = l.producto_id
+       WHERE i.oc_id = ? ORDER BY dc.fecha, dc.id`).all(ocId);
+    const mermaBultos = r2(mermas.reduce((a, m) => a + (Number(m.bultos) || 0), 0));
+    const mermaKg = r2(mermas.reduce((a, m) => a + (Number(m.kg) || 0), 0));
 
     // LOS RENGLONES DE ESTA PARTIDA. Uno por línea facturada, con sus pesos.
     const lineas = db.prepare(`
@@ -2714,11 +2811,18 @@ router.get('/partidas/:id/venta', requireAuth, (req, res) => {
 
     const bultosIn = r2(tot && tot.bultos);
     const bultosOut = r2(sal && sal.bultos);
+    // TERMINADO = lo que ya no está en el depósito: vendido + merma. Es lo que
+    // decide si la partida se puede liquidar, porque lo que queda adentro
+    // todavía no se sabe cuánto va a rendir.
+    const terminado = r2(bultosOut + mermaBultos);
     res.json({ ok: true,
       partida: oc.trazabilidad || oc.numero,
       bultos_ingresados: bultosIn, bultos_vendidos: bultosOut,
+      bultos_merma: mermaBultos, kg_merma: mermaKg, mermas,
+      bultos_terminados: terminado,
+      bultos_en_deposito: r2(Math.max(0, bultosIn - terminado)),
       kg_ingresados: r2(tot && tot.kg), kg_vendidos: r2(sal && sal.kg),
-      avance: bultosIn > 0 ? Math.round((bultosOut / bultosIn) * 1000) / 10 : 0,
+      avance: bultosIn > 0 ? Math.round((terminado / bultosIn) * 1000) / 10 : 0,
       neto: r2(neto), gestion: r2(gestion), iva: r2(iva),
       sin_facturar: r2(sinFac && sinFac.monto),
       lineas_estimadas: estimadas,

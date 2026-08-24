@@ -909,24 +909,26 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
            remitos y facturas de a uno, con el proveedor esperando del otro lado
            del teléfono. -->
       <div id="liq-venta-cab" style="display:none;margin-bottom:12px"></div>
-      <!-- Paso 1: pegar texto -->
-      <div id="liq-step1">
-        <div style="background:var(--bg);border-radius:8px;padding:14px 16px;margin-bottom:12px;font-size:13px;line-height:1.5">
-          📋 Pegá abajo el texto de la liquidación (escaneado/OCR/manual). La IA va a extraer automáticamente fecha, remitente, artículos, mermas y conceptos.<br>
-          <span style="color:var(--mut)">Después podés editar cualquier campo antes de guardar.</span>
-        </div>
-        <textarea id="liq-texto" placeholder="Pegá acá el texto..." style="width:100%;height:280px;padding:12px;border:1px solid var(--bor);border-radius:8px;font-family:'Courier New',monospace;font-size:12px;resize:vertical"></textarea>
-        <div style="margin-top:12px;display:flex;justify-content:flex-end;gap:8px">
-          <button class="btn bo" onclick="document.getElementById('liq-modal').classList.remove('on')">Cancelar</button>
-          <button class="btn bb" id="liq-btn-parse" onclick="liqProcesar()">Procesar texto</button>
-        </div>
+      <!-- CONTRA QUÉ SE CONTABILIZA, ANTES DE EMPEZAR. Pablo: "arriba necesito el
+           selector de asiento tal como existe en facturas de compra de
+           mercadería". Mismo mecanismo y por la misma razón: se elige UNA vez
+           para el módulo, no liquidación por liquidación. Si se eligiera cada
+           vez, dos iguales entrarían con asientos distintos según quién las
+           cargó, y a los tres meses el mayor no cierra. -->
+      <div id="liq-modelo-box" style="border:1px solid var(--bor);border-radius:10px;
+           padding:12px 14px;margin-bottom:12px;background:var(--bg)">
+        <div style="font-weight:700;font-size:12px;text-transform:uppercase;letter-spacing:.04em;
+             color:var(--mut);margin-bottom:6px">📒 Con qué asiento se contabiliza</div>
+        <div id="liq-modelo-cuerpo" style="font-size:13px">Cargando…</div>
       </div>
-      <!-- Paso 2: loading -->
-      <div id="liq-step-loading" style="display:none;padding:40px;text-align:center;color:var(--mut)">
-        🤖 Leyendo el texto…
-      </div>
-      <!-- Paso 3: editar -->
-      <div id="liq-step2" style="display:none">
+      <!-- SE FUE EL «PEGÁ EL TEXTO Y LA IA LO LEE». Pablo, 24/8/2026: "esto de
+           acá abajo lo podés borrar porque no tiene ningún sentido, la liquidación
+           la vamos a construir a medida que la hacemos".
+           Y es cierto: la liquidación NO se transcribe de un papel que llega — la
+           emitimos nosotros, con lo que la partida vendió, que ya está arriba.
+           Leer con IA un documento que uno mismo genera es trabajo al pedo y una
+           fuente de errores de más. El formulario se abre directo. -->
+      <div id="liq-step2">
         <div class="ab-card" style="margin-bottom:12px">
           <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">
             <div class="fl"><label>N° liquidación *</label><input id="liq-numero" type="text" style="font-family:monospace"></div>
@@ -977,7 +979,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
           </div>
         </div>
         <div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--bor);display:flex;justify-content:flex-end;gap:8px">
-          <button class="btn bo" onclick="document.getElementById('liq-step1').style.display='block';document.getElementById('liq-step2').style.display='none'">← Volver al texto</button>
+          <button class="btn bo" onclick="document.getElementById('liq-modal').classList.remove('on')">Cancelar</button>
           <button class="btn bb" onclick="liqGuardar()">💾 Guardar y descargar PDF</button>
         </div>
       </div>
@@ -10260,24 +10262,37 @@ function sgLoadOcRecibidas(){
 // sabe cuánto va a rendir.
 //
 // En BULTOS, que es como se cuenta el camión y como lo cuenta el proveedor.
-function sgAvanceBarra(vendidos, ingresados){
-  var v = Number(vendidos) || 0, i = Number(ingresados) || 0;
+function sgAvanceBarra(vendidos, ingresados, merma){
+  // LO QUE CUENTA ES QUE LA PARTIDA ESTÉ TERMINADA, no sólo vendida.
+  //
+  // Pablo, 24/8/2026: "en una partida de 60 bultos ingresados puede pasar que
+  // tengamos vendidos 55 y 5 sean merma. Obviamente esos 5 van a precio de venta
+  // 0 — están 'vendidos' pero suman cero."
+  //
+  // Sin esto, una partida que salió entera —parte vendida, parte tirada— se veía
+  // en rojo para siempre y nunca daba "lista para liquidar". Lo que decide es que
+  // no quede nada en el depósito: adentro todavía no se sabe cuánto va a rendir.
+  var v = Number(vendidos) || 0, i = Number(ingresados) || 0, mm = Number(merma) || 0;
   if (!(i > 0)) {
     return '<span style="color:var(--mut);font-size:11.5px">sin bultos cargados</span>';
   }
-  var pct = Math.round((v / i) * 1000) / 10;
+  var term = v + mm;
+  var pct = Math.round((term / i) * 1000) / 10;
   // Verde / amarillo / rojo. El corte en 80 es de Pablo.
   var col = pct >= 100 ? '#16a34a' : (pct >= 80 ? '#d19a1a' : '#dc2626');
   var fondo = pct >= 100 ? '#dcfce7' : (pct >= 80 ? '#fefce8' : '#fef2f2');
   // La barra se topea al 100% para dibujar, pero el número se dice como es: si
   // salió más de lo que entró hay algo mal cargado y hay que poder verlo.
   var ancho = Math.max(0, Math.min(100, pct));
-  return '<div title="' + nr(v) + ' de ' + nr(i) + ' bultos vendidos">'
+  // La merma se NOMBRA, no se esconde adentro del porcentaje: el que mira tiene
+  // que saber que esos bultos salieron pero no los va a cobrar nadie.
+  var det = nr(v) + ' de ' + nr(i) + ' bultos'
+    + (mm ? ' + ' + nr(mm) + ' de merma' : '');
+  return '<div title="' + det + (mm ? ' (la merma sale a precio 0)' : '') + '">'
     + '<div style="height:8px;border-radius:6px;background:' + fondo + ';overflow:hidden">'
       + '<div style="height:100%;width:' + ancho + '%;background:' + col + '"></div></div>'
     + '<div style="font-size:11px;color:' + col + ';font-weight:600;margin-top:2px">'
-      + pct + '% · <span style="color:var(--mut);font-weight:400">'
-      + nr(v) + ' de ' + nr(i) + ' bultos</span></div></div>';
+      + pct + '% · <span style="color:var(--mut);font-weight:400">' + det + '</span></div></div>';
 }
 
 function sgPartFila(p, extra){
@@ -10323,7 +10338,7 @@ function sgLiqPartidasLoad(){
       // una compra a Precio Cerrado que se documenta con liquidación llega con
       // el precio puesto y también espera su liquidación.
       return sgPartFila(p,
-        '<td>' + sgAvanceBarra(p.bultos_vendidos, p.bultos_recibidos) + '</td>'
+        '<td>' + sgAvanceBarra(p.bultos_vendidos, p.bultos_recibidos, p.bultos_merma) + '</td>'
         + '<td style="text-align:center">'
         + (p.lotes_sin_precio > 0
             ? '<b>' + nr(p.lotes_sin_precio) + '</b> de ' + nr(p.lotes) + ' sin cerrar'
@@ -10419,6 +10434,36 @@ function liqVentaCab(ocId){
       + fila('<b>Total</b>', (Number(r.neto) || 0) + (Number(r.gestion) || 0) + (Number(r.iva) || 0), '', true)
       + '</table>';
 
+    // ── LA MERMA, EXPLÍCITA ────────────────────────────────────
+    //
+    // Pablo: "en el caso que existan mermas se deben explicitar en la
+    // liquidación". El productor va a cobrar por 55 de sus 60 bultos, y la
+    // diferencia no es un error de cuenta: es mercadería que se tiró, y tiene
+    // derecho a saber cuánta y por qué. Van a precio 0 — terminadas, no vendidas.
+    if ((r.mermas || []).length) {
+      h += '<div style="margin-top:10px;border:1px solid #e0a72e;background:rgba(224,167,46,.10);'
+        + 'border-radius:8px;padding:10px 12px">'
+        + '<div style="font-weight:700;font-size:12px;color:#8a5a1f;margin-bottom:6px">'
+        + '🗑️ Merma · ' + nr(r.bultos_merma) + ' bulto(s) · ' + nr(r.kg_merma) + ' kg '
+        + '<span style="font-weight:400">— salen a precio 0</span></div>'
+        + r.mermas.map(function(m){
+            return '<div style="font-size:12px">• ' + escH(m.fecha || '') + ' · '
+              + escH(m.producto || m.codigo_lote || '') + ' · <b>' + nr(m.bultos) + ' cj</b> ('
+              + nr(m.kg) + ' kg)'
+              // El motivo va SIEMPRE: un kilo tirado sin motivo no se le explica a nadie.
+              + (m.motivo ? ' — ' + escH(m.motivo)
+                          : ' — <span style="color:#9a3412">sin motivo cargado</span>') + '</div>';
+          }).join('')
+        + '</div>';
+    }
+    // Y lo que TODAVÍA ESTÁ EN EL DEPÓSITO frena la liquidación: a precio abierto
+    // no se le puede poner precio a lo que no se sabe cuánto va a rendir.
+    if (Number(r.bultos_en_deposito) > 0) {
+      h += '<div style="margin-top:8px;font-size:12px;color:#9a3412">⚠ Quedan '
+        + nr(r.bultos_en_deposito) + ' bulto(s) en el depósito: la partida todavía no está '
+        + 'terminada. Se liquida cuando se vendió o se dio de baja todo.</div>';
+    }
+
     // LO QUE SALIÓ Y NO SE FACTURÓ no está en las tres filas —esas son el
     // comprobante— pero liquidar sin contarlo es liquidar de menos, y el
     // productor se entera después.
@@ -10464,11 +10509,96 @@ function liqVentaCab(ocId){
 
 // La barra sigue a lo que se tipea: si se corrige el conteo de bultos, el color
 // tiene que moverse con él y no quedar mostrando el número viejo.
+// ── CONTRA QUÉ SE CONTABILIZA UNA LIQUIDACIÓN ─────────────────────
+//
+// Calcado del de facturas por mercadería (sgFmModeloCargar), que es lo que pidió
+// Pablo: "el selector de asiento tal como existe en facturas de compra de
+// mercadería". Mismas palabras y mismo comportamiento — llamarlo distinto en
+// cada pantalla obliga a traducir mentalmente.
+//
+// El selector sólo lo ve un admin: parametrizar define cómo entra al libro la
+// plata de TODAS las liquidaciones. Operarlas no requiere ser admin.
+var LIQ_MODELO = { modelo: null };
+function liqModeloCargar(){
+  var box = eid('liq-modelo-cuerpo'); if (!box) return;
+  box.innerHTML = 'Cargando…';
+  Promise.all([
+    api('/api/sg/liquidacion/modelo'),
+    api('/api/sg/contable/modelos'),
+  ]).then(function(res){
+    box = eid('liq-modelo-cuerpo'); if (!box) return;
+    var r = res[0], lista = (res[1] && res[1].ok) ? res[1].data : [];
+    var m = (r && r.ok) ? r.data.modelo : null;
+    var faltan = (r && r.ok) ? (r.data.faltan || []) : [];
+    LIQ_MODELO.modelo = m;
+    // La MISMA función que usa compras: si un día cambia quién parametriza,
+    // cambia en un solo lugar.
+    var esAdmin = sgFmEsAdmin();
+
+    var sel = '';
+    if (esAdmin) {
+      sel = '<select id="liq-modelo-sel" onchange="liqModeloGuardar()" style="padding:6px 8px;'
+        + 'border-radius:6px;border:1px solid var(--bor);background:var(--pan);min-width:260px">'
+        + '<option value="">— Elegí el asiento modelo —</option>'
+        + lista.map(function(x){
+            return '<option value="' + x.id + '"' + (m && x.id === m.id ? ' selected' : '') + '>'
+              + escH(x.nombre) + (x.tiene_linea_proveedores ? '' : ' (sin línea de Proveedores)') + '</option>';
+          }).join('')
+        + '</select>';
+    }
+
+    if (!m) {
+      box.innerHTML = '<div style="color:#9a3412;font-weight:600;margin-bottom:8px">'
+        + '⚠️ Todavía no se eligió con qué asiento se contabilizan las liquidaciones.'
+        + (r && r.ok && r.data.id_perdido ? ' (El que estaba elegido se dio de baja.)' : '')
+        + '</div>'
+        + (esAdmin ? sel
+                   : '<div style="font-size:12px;color:var(--mut)">Pedile a un administrador que lo configure.</div>');
+      return;
+    }
+
+    // Una línea con contra qué se contabiliza; el detalle, cuando lo piden.
+    var cuentas = (m.lineas || []).map(function(l){
+      return escH(l.cuenta_codigo || '?') + ' ' + escH(l.cuenta_nombre || '');
+    });
+    box.innerHTML = '<div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap">'
+        + '<div style="font-weight:700;font-size:14px">' + escH(m.nombre) + '</div>'
+        + '<span style="font-size:12px;color:var(--mut)">' + cuentas.length + ' cuentas</span>'
+        + '<button class="btn bo bs" type="button" onclick="liqModeloDetalle()">Ver detalle</button>'
+        + sel
+      + '</div>'
+      + (faltan.length
+          ? '<div style="border:1.5px solid #e0a72e;background:rgba(224,167,46,.10);border-radius:8px;'
+            + 'padding:9px 12px;margin-top:9px;font-size:12.5px;color:#9a3412">'
+            + '⚠️ Este modelo todavía no sirve para contabilizar: ' + faltan.map(escH).join(' · ') + '</div>'
+          : '<div style="font-size:12px;color:var(--mut);margin-top:6px">' + cuentas.join(' · ') + '</div>')
+      + '<div id="liq-modelo-det" style="display:none;margin-top:10px"></div>';
+  });
+}
+
+function liqModeloDetalle(){
+  var d = eid('liq-modelo-det'); if (!d || !LIQ_MODELO.modelo) return;
+  var abierto = d.style.display !== 'none';
+  d.style.display = abierto ? 'none' : '';
+  // La MISMA tabla que en compras, no una copia: si el cuadro cambia, cambia
+  // en los dos lados o queda uno mintiendo.
+  d.innerHTML = abierto ? '' : sgFmAsientoTabla(LIQ_MODELO.modelo.lineas || []);
+}
+
+function liqModeloGuardar(){
+  var sel = eid('liq-modelo-sel'); if (!sel) return;
+  api('/api/sg/liquidacion/modelo', 'PUT', { modelo_id: sel.value || null }).then(function(r){
+    if (!r || !r.ok) { toast((r && r.error) || 'No se pudo guardar', 'er'); return; }
+    toast(sel.value ? 'Asiento modelo parametrizado' : 'Se quitó el asiento modelo', 'ok');
+    liqModeloCargar();
+  });
+}
+
 function liqBultosAvance(){
   var a = eid('liq-avance'); if (!a) return;
   var i = Number((eid('liq-bultos-in') || {}).value) || 0;
   var v = Number((eid('liq-bultos-liq') || {}).value) || 0;
-  a.innerHTML = sgAvanceBarra(v, i);
+  a.innerHTML = sgAvanceBarra(v, i, (LIQ.venta || {}).bultos_merma);
 }
 
 function liqDePartida(ocId, partida, proveedor){
@@ -10484,6 +10614,7 @@ function liqDePartida(ocId, partida, proveedor){
       + (proveedor ? ' · ' + escH(proveedor) : '');
   }
   liqVentaCab(ocId);
+  liqModeloCargar();
 }
 
 function sgFmSub(){ /* una sola solapa por ahora; existe para que el patrón no cambie después */ }
@@ -28917,11 +29048,10 @@ function liqEliminar(id) {
 }
 
 async function liqAbrirNueva() {
-  document.getElementById('liq-step1').style.display = 'block';
-  document.getElementById('liq-step-loading').style.display = 'none';
-  document.getElementById('liq-step2').style.display = 'none';
-  document.getElementById('liq-texto').value = '';
-  LIQ.datos = null;
+  // Ya no hay pasos: el formulario ES la pantalla. Se limpia entero, porque la
+  // liquidación anterior no puede dejar un remitente ni un artículo colgado.
+  LIQ.datos = {};
+  liqRellenarForm();
   // Arranca SIN partida. Si se entra desde la bandeja, liqDePartida la pone
   // después; si se entra por el botón de siempre, no puede quedar pegada la
   // partida de la vez anterior y liquidarle la liquidación equivocada.
@@ -28934,33 +29064,6 @@ async function liqAbrirNueva() {
   var vc = eid('liq-venta-cab');
   if (vc) { vc.style.display = 'none'; vc.innerHTML = ''; }
   document.getElementById('liq-modal').classList.add('on');
-}
-
-async function liqProcesar() {
-  const texto = document.getElementById('liq-texto').value.trim();
-  if (!texto) { alert('Pegá el texto primero'); return; }
-  document.getElementById('liq-step1').style.display = 'none';
-  document.getElementById('liq-step-loading').style.display = 'block';
-  try {
-    const r = await fetch('/api/liquidaciones/parse', {
-      method:'POST', credentials:'include',
-      headers:{'Content-Type':'application/json'}, body: JSON.stringify({ texto: texto })
-    });
-    const data = await r.json();
-    if (!r.ok) throw new Error(data.error || 'Error '+r.status);
-    LIQ.datos = data.datos || {};
-    LIQ.datos._textoOriginal = texto;
-    // Pedir próximo número
-    const px = await fetch('/api/liquidaciones/proximo-numero', { credentials:'include' }).then(x=>x.json()).catch(_=>({proximo:''}));
-    LIQ.datos._proximo = px.proximo;
-    liqRellenarForm();
-    document.getElementById('liq-step-loading').style.display = 'none';
-    document.getElementById('liq-step2').style.display = 'block';
-  } catch(e) {
-    alert('Error: ' + e.message);
-    document.getElementById('liq-step-loading').style.display = 'none';
-    document.getElementById('liq-step1').style.display = 'block';
-  }
 }
 
 function liqRellenarForm() {
