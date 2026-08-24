@@ -422,6 +422,25 @@ function modeloVentaLineas(db) {
     FROM sg_asientos_modelo_lineas l
     LEFT JOIN sg_cuentas c ON c.id = l.cuenta_id
     WHERE l.modelo_id=? ORDER BY l.orden, l.id`).all(id);
+
+  // LAS LÍNEAS EFECTIVAS: las del modelo MÁS las que completa la configuración
+  // impositiva global. Es exactamente igual a lineasModeloFactura() del lado de
+  // compras, y por la misma razón: si la pantalla mostrara sólo las del modelo,
+  // el asiento que se ve no sería el que se graba.
+  //
+  // El IVA Débito Fiscal va al HABER: en una venta es deuda con AFIP.
+  const DE_CONFIG = [['iva_debito_fiscal', 'iva', 'haber']];
+  let extra = -1;   // id negativo: son líneas que no existen en la tabla
+  for (const [clave, tipo, lado] of DE_CONFIG) {
+    if (lineas.some((l) => l.tipo_linea === tipo)) continue;   // el modelo ya la tiene
+    const c = db.prepare(`SELECT ci.cuenta_id, cu.codigo, cu.nombre
+      FROM sg_config_impositiva ci LEFT JOIN sg_cuentas cu ON cu.id = ci.cuenta_id
+      WHERE ci.clave = ? AND ci.cuenta_id IS NOT NULL`).get(clave);
+    if (!c) continue;
+    lineas.push({ id: extra--, modelo_id: id, cuenta_id: c.cuenta_id, lado,
+      descripcion: c.nombre, orden: 900, tipo_linea: tipo,
+      cuenta_codigo: c.codigo, cuenta_nombre: c.nombre, de_config_global: 1 });
+  }
   return { id, lineas };
 }
 
@@ -527,12 +546,11 @@ function lineasAsientoVenta(db, { clienteId, neto, iva, total, descuento, numero
   // Es una cuenta sola para toda la empresa: repetirla en cada modelo es pedir
   // el mismo dato muchas veces y que un día dos modelos apunten a cuentas
   // distintas. Si el modelo la trae igual, esa gana: alguien la puso a propósito.
-  let ctaIva = (de('iva') || {}).cuenta_id || null;
-  if (!ctaIva) {
-    const c = db.prepare(`SELECT cuenta_id FROM sg_config_impositiva
-      WHERE clave='iva_debito_fiscal' AND cuenta_id IS NOT NULL`).get();
-    ctaIva = c ? c.cuenta_id : null;
-  }
+  // Ya viene en las líneas: si el modelo no la trae, modeloVentaLineas() la
+  // agregó desde la configuración global — igual que lineasModeloFactura() en
+  // compras. Buscarla acá de nuevo era hacer dos veces el mismo trabajo, y que
+  // la pantalla pudiera mostrar una cosa distinta de la que se graba.
+  const ctaIva = (de('iva') || {}).cuenta_id || null;
   if (r2v(iva) > 0 && !ctaIva) {
     return { lineas: [],
       falta: ['la cuenta de IVA Débito Fiscal en Configuración impositiva, '

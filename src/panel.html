@@ -13416,9 +13416,13 @@ function sgFdModeloCargar(){
     var cuentas = (m.lineas || []).map(function(l){
       return escH(l.cuenta_codigo || '?') + ' ' + escH(l.cuenta_nombre || '');
     });
+    SGFD_MODELO = m;
     box.innerHTML = '<div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap">'
       + '<div style="font-weight:700;font-size:14px">' + escH(m.nombre) + '</div>'
       + '<span style="font-size:12px;color:var(--mut)">' + cuentas.length + ' cuentas</span>'
+      // EL MISMO BOTÓN QUE COMPRAS, y la misma tabla: es la misma pregunta
+      // —qué cuentas toca este asiento— y se responde igual en las dos pantallas.
+      + '<button class="btn bo bs" type="button" onclick="sgFdModeloDetalle()">Ver detalle</button>'
       + (esAdmin ? sel : '')
       + '</div>'
       + '<div style="font-size:11.5px;color:var(--mut);margin-top:5px">' + cuentas.join(' · ') + '</div>'
@@ -13427,8 +13431,21 @@ function sgFdModeloCargar(){
       + (faltan.length
           ? '<div style="margin-top:8px;color:#9a3412;font-size:12.5px">⚠️ Le falta '
             + escH(faltan.join(' y ')) + '</div>'
-          : '');
+          : '')
+      + '<div id="sgfd-modelo-det" style="display:none;margin-top:10px"></div>';
   });
+}
+
+// El detalle completo, con la MISMA tabla que compras: cada línea con su cuenta,
+// su tipo y de qué lado va. Incluye las que pone la Configuración impositiva —
+// el IVA Débito no está en el modelo y tiene que verse igual, porque va a estar
+// en el asiento.
+var SGFD_MODELO = null;
+function sgFdModeloDetalle(){
+  var d = eid('sgfd-modelo-det'); if (!d || !SGFD_MODELO) return;
+  var abierto = d.style.display !== 'none';
+  d.style.display = abierto ? 'none' : '';
+  d.innerHTML = abierto ? '' : sgFmAsientoTabla(SGFD_MODELO.lineas || []);
 }
 
 function sgFdModeloGuardar(){
@@ -30086,6 +30103,26 @@ function admModValidarDoble() {
   // Antes acá decía "✅ Modelo válido" igual, y el problema recién aparecía al
   // cargar la factura — que es donde no se puede arreglar.
   var tieneProv = lineas.some(function(l){ return l.tipo_linea === 'proveedores'; });
+  // ¿ES UN MODELO DE VENTA? Pedirle una línea de Proveedores a un asiento de
+  // ventas no tiene sentido: el que debe es el cliente. Se reconoce por lo que
+  // dicen las cuentas — igual que el tipo, que ya se deduce de ahí.
+  //
+  // Se lee el TEXTO del campo, que es lo que el usuario tiene a la vista, y no
+  // el catálogo de cuentas: hay dos editores de modelo y cada uno guarda el suyo
+  // en una variable distinta.
+  var esVenta = (function(){
+    if (lineas.some(function(l){ return l.tipo_linea === 'clientes' || l.tipo_linea === 'ventas'; })) return true;
+    var campos = div && div.closest ? div.closest('.ab-modal') : null;
+    if (!campos) return false;
+    var filas = [].slice.call(campos.querySelectorAll('tbody tr'));
+    return filas.some(function(tr){
+      var inp = tr.querySelector('input[type="text"]');
+      var sel = tr.querySelector('select');
+      var t = ((inp && inp.value) || '').toLowerCase();
+      var lado = (sel && sel.value) || '';
+      return /deudor/.test(t) || (/ventas/.test(t) && lado === 'haber');
+    });
+  })();
   div.style.display = '';
   if (!ok) {
     div.style.background = 'rgba(239,68,68,.12)';
@@ -57359,6 +57396,26 @@ function sgctModValidarDoble() {
   // Antes acá decía "✅ Modelo válido" igual, y el problema recién aparecía al
   // cargar la factura — que es donde no se puede arreglar.
   var tieneProv = lineas.some(function(l){ return l.tipo_linea === 'proveedores'; });
+  // ¿ES UN MODELO DE VENTA? Pedirle una línea de Proveedores a un asiento de
+  // ventas no tiene sentido: el que debe es el cliente. Se reconoce por lo que
+  // dicen las cuentas — igual que el tipo, que ya se deduce de ahí.
+  //
+  // Se lee el TEXTO del campo, que es lo que el usuario tiene a la vista, y no
+  // el catálogo de cuentas: hay dos editores de modelo y cada uno guarda el suyo
+  // en una variable distinta.
+  var esVenta = (function(){
+    if (lineas.some(function(l){ return l.tipo_linea === 'clientes' || l.tipo_linea === 'ventas'; })) return true;
+    var campos = div && div.closest ? div.closest('.ab-modal') : null;
+    if (!campos) return false;
+    var filas = [].slice.call(campos.querySelectorAll('tbody tr'));
+    return filas.some(function(tr){
+      var inp = tr.querySelector('input[type="text"]');
+      var sel = tr.querySelector('select');
+      var t = ((inp && inp.value) || '').toLowerCase();
+      var lado = (sel && sel.value) || '';
+      return /deudor/.test(t) || (/ventas/.test(t) && lado === 'haber');
+    });
+  })();
   div.style.display = '';
   if (!ok) {
     div.style.background = 'rgba(239,68,68,.12)';
