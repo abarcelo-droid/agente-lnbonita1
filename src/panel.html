@@ -15359,6 +15359,13 @@ function sgCcClFicha(id){
   });
 }
 
+// Los cuatro motivos de asientos.js, en criollo. No es texto libre: son estos.
+var SG_MOTIVO_G = {
+  error_proveedor: 'Error del proveedor',
+  comprobante_pendiente: 'Comprobante pendiente',
+  diferencia_peso_calidad: 'Diferencia de peso o calidad',
+  ajuste_gestion: 'Ajuste de gestión — no va a tener comprobante'
+};
 function sgCcClFichaPintar(){
   var cont = eid('sg-ccli-ficha'), d = SG_CCLI.ficha;
   if (!cont || !d) { if (cont) cont.innerHTML = '<div class="emp">No se pudo leer la ficha.</div>'; return; }
@@ -15366,7 +15373,15 @@ function sgCcClFichaPintar(){
   var h = '<div class="ph" style="margin-bottom:10px">'
     + '<div><div class="ph-t" style="font-size:17px">' + escH(sgCcClNombre(c)) + '</div>'
     + '<div class="ph-s">Le quedan ' + sgMoney(d.totales.pendiente) + ' de '
-      + sgMoney(d.totales.total) + ' facturados</div></div>'
+      + sgMoney(d.totales.total) + ' facturados'
+      // LAS DOS MITADES, SIEMPRE JUNTAS. Lo facturado es lo que fue al libro
+      // fiscal; lo de gestión es lo que la venta vale de verdad y no lleva
+      // comprobante. Ver un saldo sin poder explicar de dónde sale la diferencia
+      // es la discusión que nadie puede cerrar.
+      + (d.totales.gestion
+          ? ' + ' + sgMoney(d.totales.gestion) + ' de gestión'
+          : '')
+      + '</div></div>'
     + '<div style="display:flex;gap:8px">'
     + (lnbPuedeOperar('sg-cc-clientes')
         ? '<button class="btn bb bs" onclick="sgCobOpen(' + c.id + ')">💵 Registrar cobro</button>' : '')
@@ -15375,20 +15390,37 @@ function sgCcClFichaPintar(){
   h += '<div style="font-weight:700;font-size:12px;text-transform:uppercase;letter-spacing:.04em;'
     + 'color:var(--mut);margin:10px 0 6px">Comprobantes</div>'
     + '<div class="ab-table-wrap"><table class="pa-tbl"><thead><tr>'
-    + '<th style="width:110px">Tipo</th><th>Comprobante</th><th style="width:96px">Fecha</th>'
-    + '<th style="width:130px;text-align:right">Total</th>'
-    + '<th style="width:130px;text-align:right">Cobrado</th>'
-    + '<th style="width:130px;text-align:right">Pendiente</th></tr></thead><tbody>'
+    + '<th style="width:100px">Tipo</th><th>Comprobante</th><th style="width:92px">Fecha</th>'
+    + '<th style="width:120px;text-align:right">Facturado</th>'
+    + '<th style="width:120px;text-align:right" title="Lo que la venta vale de verdad y no lleva comprobante: descuentos acordados y diferencias contra lo pactado">Gestión</th>'
+    + '<th style="width:120px;text-align:right">Cobrado</th>'
+    + '<th style="width:120px;text-align:right">Pendiente</th></tr></thead><tbody>'
     + ((d.docs || []).length ? d.docs.map(function(x){
+        // EL NÚMERO QUE SE CITA ES EL FISCAL. Acá salía el identificador interno
+        // —"AFIPH-7-1-4-mt7eikzy"— que no le sirve a nadie: el cliente reclama por
+        // 0007-00000004 y el operador no tenía cómo encontrarlo.
+        var nro = (x.punto_venta && x.cbte_nro)
+          ? (String(x.punto_venta).length >= 4 ? String(x.punto_venta) : ('000'+x.punto_venta).slice(-4))
+            + '-' + ('0000000'+x.cbte_nro).slice(-8)
+          : (x.numero || '');
         return '<tr' + (x.pendiente <= 0.01 ? ' style="opacity:.55"' : '') + '>'
           + '<td>' + (x.tipo_doc === 'liquidacion' ? 'Liquidación' : 'Factura') + '</td>'
-          + '<td><code>' + escH(x.numero || '') + '</code></td>'
+          + '<td><code>' + escH(nro) + '</code>'
+            // Una emisión de homologación tiene CAE y pinta de factura, y no vale
+            // nada. Si no se dice acá, se descubre cuando el cliente la rechaza.
+            + (x.ambiente === 'homologacion'
+                ? ' <span class="bdg" style="background:var(--bor);color:var(--mut)" title="Emitido contra el AFIP de PRUEBA (homologación): no tiene valor fiscal">prueba</span>' : '')
+            + '</td>'
           + '<td>' + escH(x.fecha || '—') + '</td>'
           + '<td style="text-align:right">' + sgMoney(x.total) + '</td>'
+          + '<td style="text-align:right">' + (x.dif_gestion
+              ? '<span title="' + escH(SG_MOTIVO_G[x.dif_motivo] || x.dif_motivo || '') + '">'
+                + sgMoney(x.dif_gestion) + '</span>'
+              : '<span style="color:var(--mut)">—</span>') + '</td>'
           + '<td style="text-align:right">' + sgMoney(x.cobrado) + '</td>'
           + '<td style="text-align:right"><b>' + sgMoney(x.pendiente) + '</b></td></tr>';
       }).join('')
-      : '<tr><td colspan="6" class="emp">Sin comprobantes.</td></tr>')
+      : '<tr><td colspan="7" class="emp">Sin comprobantes.</td></tr>')
     + '</tbody></table></div>';
 
   var puedeAnular = lnbPuedeAnular('sg-ventas');

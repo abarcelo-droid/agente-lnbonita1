@@ -12,6 +12,7 @@ import { randomUUID } from 'crypto';
 import { fileURLToPath } from 'url';
 import * as XLSX from 'xlsx';
 import { subirArchivo, obtenerArchivo, storageConfigurado } from '../servicios/storage.js';
+import { facturaCuenta } from '../servicios/factura-cuenta.js';
 import { crearAsiento, MOTIVOS, frenoAsientoDeCompra } from '../servicios/asientos.js';
 
 // El nombre del motivo para mostrarlo en una ficha. La clave sola no le dice
@@ -694,12 +695,17 @@ router.post('/afip/emitir-test', requireAdmin, async (req, res) => {
 });
 
 // ── FACTURACIÓN (puente despacho → factura) ───────────────────────────────────────
-// kg ya facturados de un despacho_item = Σ kg de sg_factura_despachos cuyas facturas están
-// reservadas o autorizadas (las rechazadas no cuentan → ese kg sigue pendiente).
+// kg ya facturados de un despacho_item. Lo que NO cuenta es una factura que se
+// cayó —rechazada por AFIP o anulada—: esos kg vuelven a estar pendientes.
+//
+// Acá había una lista de estados escrita a mano que no incluía el comprobante
+// manual, y entonces los kg de una venta YA FACTURADA volvían a aparecer
+// disponibles: nada frenaba una segunda factura por la misma mercadería. La
+// regla vive ahora en servicios/factura-cuenta.js, una sola vez.
 function kgFacturadoItem(db, despachoItemId) {
   return db.prepare(`SELECT COALESCE(SUM(fd.kg),0) s FROM sg_factura_despachos fd
     JOIN sg_ven_facturas f ON f.id=fd.factura_id
-    WHERE fd.despacho_item_id=? AND f.afip_estado IN ('reservado','autorizado')`).get(despachoItemId).s;
+    WHERE fd.despacho_item_id=? AND ${facturaCuenta('f')}`).get(despachoItemId).s;
 }
 // GET /facturable?cliente_id=X → despachos pendientes/parciales del cliente (solo kg_pendiente > 0).
 router.get('/facturable', requireAuth, (req, res) => {
@@ -873,7 +879,14 @@ const postEmitir = async (req, res) => {
       }
     }
     if (!items.length) return res.status(400).json({ ok: false, error: 'No hay líneas válidas para facturar' });
-    const r = await afipEmitir(db, { ptoVta: pv, clienteId, items, esNC: b.es_nc === true, userId: uid(req), vinculos });
+    // LA MITAD DE GESTIÓN VIAJA HASTA EL FINAL. Acá se cortaba: la pantalla
+    // mandaba lo resignado por los acuerdos, este handler lo leía —y no se lo
+    // pasaba a nadie—. La columna quedaba en NULL y el asiento salía con las tres
+    // líneas fiscales, sin la parte de gestión. El preview mostraba cinco líneas
+    // y el libro guardaba tres: exactamente lo que el preview promete no hacer.
+    const r = await afipEmitir(db, { ptoVta: pv, clienteId, items, esNC: b.es_nc === true,
+      userId: uid(req), vinculos,
+      descuentoGestion: Number(b.descuento_gestion) || 0 });
     if (r.ok) r.pdf_url = '/api/sg/ventas/facturas/' + r.factura_id + '/pdf';
     res.json(r);
   } catch (e) { res.status(502).json({ ok: false, error: e.message }); }
@@ -7140,7 +7153,7 @@ router.get('/cc-clientes', requireAuth, (req, res) => {
                      - COALESCE((SELECT SUM(fd.kg) FROM sg_factura_despachos fd
                          JOIN sg_ven_facturas fv ON fv.id=fd.factura_id
                         WHERE fd.despacho_item_id=di.id
-                          AND fv.afip_estado IN ('reservado','autorizado')),0))
+                          AND ${facturaCuenta('fv')}),0))
                    * COALESCE(di.precio_por_kg,0))
                     FROM sg_despacho_items di
                     JOIN sg_despachos d ON d.id=di.despacho_id AND d.activo=1
@@ -7149,7 +7162,7 @@ router.get('/cc-clientes', requireAuth, (req, res) => {
                           - COALESCE((SELECT SUM(fd.kg) FROM sg_factura_despachos fd
                               JOIN sg_ven_facturas fv ON fv.id=fd.factura_id
                              WHERE fd.despacho_item_id=di.id
-                               AND fv.afip_estado IN ('reservado','autorizado')),0)) > 0.01),0)
+                               AND ${facturaCuenta('fv')}),0)) > 0.01),0)
           AS pendiente_comprobante,
         COALESCE((SELECT SUM(co.monto) FROM sg_ven_cobranzas co
                    WHERE co.cliente_id = c.id AND co.anulada = 0), 0) AS total_cobrado,
