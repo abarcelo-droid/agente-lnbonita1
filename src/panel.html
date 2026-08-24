@@ -5371,7 +5371,9 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
 
 <!-- Modal Ver pedido / Ver despacho (detalle + traza forward) -->
 <div class="ab-modal-overlay" id="sg-venver-modal">
-  <div class="ab-modal" style="width:720px;max-height:90vh;overflow-y:auto">
+  <!-- EL ANCHO SE ADAPTA en vez de ser 720px fijos, que en un portátil
+     desbordaban la ventana. -->
+<div class="ab-modal" style="width:min(1180px,96vw);max-width:96vw;max-height:90vh;overflow-y:auto;overflow-x:hidden">
     <div class="mhd"><div class="mht" id="sg-venver-tit">Detalle</div><button class="mcl" onclick="closeMB('sg-venver-modal')">×</button></div>
     <div class="fg" id="sg-venver-body"></div>
     <div class="ab-modal-footer"><button class="btn bo" onclick="closeMB('sg-venver-modal')">Cerrar</button></div>
@@ -18232,7 +18234,17 @@ function sgRepExport(){
      dejo afuera y el boton de nuevo modelo no hacia absolutamente nada — ni
      modal ni error visible, solo un TypeError en la consola. -->
 <div class="ab-modal-overlay" id="sgct-mb-modelo">
-<div class="ab-modal" style="width:720px;max-height:90vh;overflow-y:auto">
+<!-- EL ANCHO SE ADAPTA. Eran 720px fijos y la columna de la cuenta contable
+     no tenía ancho propio: "[5.01.00.0003] Compra de Mercaderia" entraba
+     cortado en "[5.01.00.0003] Comp" y había que adivinar cuál era. Un
+     asiento modelo se lee por el NOMBRE de sus cuentas, no por el código. -->
+<div class="ab-modal" style="width:min(1180px,96vw);max-width:96vw;max-height:90vh;overflow-y:auto;overflow-x:hidden">
+  <style>
+    /* Con table-layout:fixed los campos tienen que respetar su celda. */
+    #sgct-mb-modelo td,#adm-mb-modelo td{overflow:hidden}
+    #sgct-mb-modelo input,#sgct-mb-modelo select,
+    #adm-mb-modelo input,#adm-mb-modelo select{max-width:100%;box-sizing:border-box}
+  </style>
   <div class="mhd">
     <div><div class="mht" id="sgct-mod-tit">Nuevo Asiento Modelo</div></div>
     <button class="mcl" onclick="document.getElementById('sgct-mb-modelo').classList.remove('on')">×</button>
@@ -18249,13 +18261,15 @@ function sgRepExport(){
       <div style="font-size:12px;font-weight:600;color:var(--txt)">Líneas del modelo</div>
       <button class="btn bo bs" onclick="sgctModAgregarLinea()" style="font-size:11px;padding:4px 10px">+ Línea</button>
     </div>
-    <table class="pa-tbl" style="font-size:12px">
+    <table class="pa-tbl" style="font-size:12px;table-layout:fixed;width:100%">
       <thead><tr>
-        <th>Cuenta Contable</th>
-        <th style="width:100px;text-align:center">Lado</th>
-        <th style="width:180px">Tipo de línea</th>
-        <th style="width:140px">Descripción</th>
-        <th style="width:40px"></th>
+        <!-- LA CUENTA SE LLEVA LO QUE SOBRA: es el dato que hay que leer
+             entero para saber si el modelo está bien armado. -->
+        <th style="width:40%">Cuenta Contable</th>
+        <th style="width:95px;text-align:center">Lado</th>
+        <th style="width:185px">Tipo de línea</th>
+        <th>Descripción</th>
+        <th style="width:44px"></th>
       </tr></thead>
       <tbody id="sgct-mod-lineas"></tbody>
     </table>
@@ -18831,7 +18845,17 @@ function sgRepExport(){
 </div>
 </div>
 <div class="ab-modal-overlay" id="adm-mb-modelo">
-<div class="ab-modal" style="width:720px;max-height:90vh;overflow-y:auto">
+<!-- EL ANCHO SE ADAPTA. Eran 720px fijos y la columna de la cuenta contable
+     no tenía ancho propio: "[5.01.00.0003] Compra de Mercaderia" entraba
+     cortado en "[5.01.00.0003] Comp" y había que adivinar cuál era. Un
+     asiento modelo se lee por el NOMBRE de sus cuentas, no por el código. -->
+<div class="ab-modal" style="width:min(1180px,96vw);max-width:96vw;max-height:90vh;overflow-y:auto;overflow-x:hidden">
+  <style>
+    /* Con table-layout:fixed los campos tienen que respetar su celda. */
+    #sgct-mb-modelo td,#adm-mb-modelo td{overflow:hidden}
+    #sgct-mb-modelo input,#sgct-mb-modelo select,
+    #adm-mb-modelo input,#adm-mb-modelo select{max-width:100%;box-sizing:border-box}
+  </style>
   <div class="mhd">
     <div><div class="mht" id="adm-mod-tit">Nuevo Asiento Modelo</div></div>
     <button class="mcl" onclick="document.getElementById('adm-mb-modelo').classList.remove('on')">×</button>
@@ -18848,13 +18872,15 @@ function sgRepExport(){
       <div style="font-size:12px;font-weight:600;color:var(--txt)">Líneas del modelo</div>
       <button class="btn bo bs" onclick="admModAgregarLinea()" style="font-size:11px;padding:4px 10px">+ Línea</button>
     </div>
-    <table class="pa-tbl" style="font-size:12px">
+    <table class="pa-tbl" style="font-size:12px;table-layout:fixed;width:100%">
       <thead><tr>
-        <th>Cuenta Contable</th>
-        <th style="width:100px;text-align:center">Lado</th>
-        <th style="width:180px">Tipo de línea</th>
-        <th style="width:140px">Descripción</th>
-        <th style="width:40px"></th>
+        <!-- LA CUENTA SE LLEVA LO QUE SOBRA: es el dato que hay que leer
+             entero para saber si el modelo está bien armado. -->
+        <th style="width:40%">Cuenta Contable</th>
+        <th style="width:95px;text-align:center">Lado</th>
+        <th style="width:185px">Tipo de línea</th>
+        <th>Descripción</th>
+        <th style="width:44px"></th>
       </tr></thead>
       <tbody id="adm-mod-lineas"></tbody>
     </table>
@@ -29998,12 +30024,19 @@ function admModAgregarLinea(lado, cuentaId, desc, tipoLinea) {
   var cuTxt = cuIni ? admModCuTexto(cuIni).replace(/"/g,'&quot;') : '';
   var tipoOpts = [
     ['libre',                '— Libre (neto/compras) —'],
-    ['iva',                  'IVA Crédito Fiscal'],
+    ['iva',                  'IVA (crédito en compras · débito en ventas)'],
     ['percepcion_iva',       'Percepción IVA'],
     ['percepcion_iibb',      'Percepción IIBB'],
     ['percepcion_ganancias', 'Percepción Ganancias'],
     ['retencion',            'Retención'],
-    ['proveedores',          'Proveedores (Haber)']
+    ['proveedores',          'Proveedores (Haber) — compras'],
+    // LOS TIPOS DE VENTA. El selector sólo tenía los de compra, así que el
+    // modelo de venta no se podía armar: no había cómo marcar cuál era la línea
+    // de Clientes ni la de Ventas, que es lo que la factura necesita para saber
+    // dónde poner cada importe.
+    ['clientes',             'Clientes / Deudores (Debe) — ventas'],
+    ['ventas',               'Ventas (Haber) — ventas'],
+    ['descuento',            'Descuentos comerciales — ventas, gestión']
   ].map(function(t){ return '<option value="' + t[0] + '"' + (t[0]===tipoLinea?' selected':'') + '>' + t[1] + '</option>'; }).join('');
   var tr = document.createElement('tr');
   tr.innerHTML = '<td>'
@@ -57184,6 +57217,37 @@ function sgctModCuBuscar(lid){
   box.style.display='';
 }
 
+// ── EL TIPO DE LÍNEA SE DEDUCE DE LA CUENTA ──────────────────────
+//
+// Pablo: "¿por qué me hacés elegir un tipo de línea? Con elegir si un rubro va al
+// debe o al haber alcanza, ¿o no?"
+//
+// No alcanza, y vale la pena que quede escrito por qué: el tipo no describe la
+// línea, le dice al sistema QUÉ IMPORTE poner ahí. En una venta de $121.000 con
+// $21.000 de IVA, Ventas se lleva 100.000 y el IVA 21.000 — y las dos van al
+// HABER. Con el lado solo no hay cómo saber cuál es cuál.
+//
+// Pero pedirlo a mano sí sobra: la cuenta ya lo dice. "VENTAS" al haber es la
+// línea de ventas; "Deudores por ventas" al debe es la de clientes. Se completa
+// solo y queda a la vista, para corregirlo cuando el nombre no alcance.
+function sgctTipoSugerido(cuenta, lado){
+  if (!cuenta) return null;
+  var t = ((cuenta.codigo || '') + ' ' + (cuenta.nombre || '')).toLowerCase();
+  var esDebe = lado === 'debe';
+  // El orden importa: "iva credito" y "iva debito" contienen los dos "iva", y
+  // "percepcion iva" contiene "iva" pero no es la línea del impuesto.
+  if (/percep\w*\s+iva|percepcion de iva/.test(t)) return 'percepcion_iva';
+  if (/percep\w*\s+(iibb|ingresos brutos)/.test(t)) return 'percepcion_iibb';
+  if (/percep\w*\s+(ganancias|gcias)/.test(t)) return 'percepcion_ganancias';
+  if (/retenc/.test(t)) return 'retencion';
+  if (/\biva\b/.test(t)) return 'iva';
+  if (/proveedor/.test(t)) return 'proveedores';
+  if (/deudor|cliente/.test(t) && esDebe) return 'clientes';
+  if (/^4\.|ventas/.test(t) && !esDebe) return 'ventas';
+  if (/descuento|bonificac/.test(t)) return 'descuento';
+  return null;
+}
+
 function sgctModCuPick(lid, cuentaId){
   var c = SGCT_MOD_CUENTAS.find(function(x){ return x.id == cuentaId; });
   if (!c || c.imputable === 0) return;
@@ -57193,6 +57257,14 @@ function sgctModCuPick(lid, cuentaId){
   if (hid) hid.value = c.id;
   if (inp) inp.value = sgctModCuTexto(c);
   if (box) box.style.display='none';
+  // El tipo se completa solo con lo que dice la cuenta. NO se pisa lo que el
+  // usuario ya eligió: si lo tocó a mano, es porque el nombre no alcanzaba.
+  var lado = document.getElementById('sgct-mod-lado-' + lid);
+  var tipo = document.getElementById('sgct-mod-tipo-' + lid);
+  if (tipo && (!tipo.value || tipo.value === 'libre')) {
+    var sug = sgctTipoSugerido(c, lado ? lado.value : 'debe');
+    if (sug) tipo.value = sug;
+  }
   sgctModValidarDoble();
 }
 
@@ -57225,12 +57297,19 @@ function sgctModAgregarLinea(lado, cuentaId, desc, tipoLinea) {
   var cuTxt = cuIni ? sgctModCuTexto(cuIni).replace(/"/g,'&quot;') : '';
   var tipoOpts = [
     ['libre',                '— Libre (neto/compras) —'],
-    ['iva',                  'IVA Crédito Fiscal'],
+    ['iva',                  'IVA (crédito en compras · débito en ventas)'],
     ['percepcion_iva',       'Percepción IVA'],
     ['percepcion_iibb',      'Percepción IIBB'],
     ['percepcion_ganancias', 'Percepción Ganancias'],
     ['retencion',            'Retención'],
-    ['proveedores',          'Proveedores (Haber)']
+    ['proveedores',          'Proveedores (Haber) — compras'],
+    // LOS TIPOS DE VENTA. El selector sólo tenía los de compra, así que el
+    // modelo de venta no se podía armar: no había cómo marcar cuál era la línea
+    // de Clientes ni la de Ventas, que es lo que la factura necesita para saber
+    // dónde poner cada importe.
+    ['clientes',             'Clientes / Deudores (Debe) — ventas'],
+    ['ventas',               'Ventas (Haber) — ventas'],
+    ['descuento',            'Descuentos comerciales — ventas, gestión']
   ].map(function(t){ return '<option value="' + t[0] + '"' + (t[0]===tipoLinea?' selected':'') + '>' + t[1] + '</option>'; }).join('');
   var tr = document.createElement('tr');
   tr.innerHTML = '<td>'
