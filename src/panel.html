@@ -861,6 +861,21 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
     <div class="sgc-subtab" data-sub="liqs" onclick="liqSub('liqs')">📄 Liquidaciones emitidas<span class="liq-cnt" id="liq-cnt-emi">·</span></div>
   </div>
 
+  <!-- ── CON QUÉ ASIENTO SE CONTABILIZAN LAS LIQUIDACIONES ─────────────
+       Pablo: "el asiento modelo que utilizamos debe estar en el general de las
+       liquidaciones, ponelo afuera. Ver cómo funciona en la parte de compras con
+       facturas: debe funcionar de la misma manera."
+       Tenía razón y era un error mío: adentro del modal parecía una decisión DE
+       ESA liquidación, cuando es del módulo entero. Acá arriba —mismo lugar y
+       misma forma que en Facturas por mercadería— se lee como lo que es: una
+       parametrización que ya está hecha antes de empezar a trabajar. -->
+  <div id="liq-modelo-box" style="border:1px solid var(--bor);border-radius:10px;
+       padding:12px 14px;margin-bottom:16px;background:var(--bg)">
+    <div style="font-weight:700;font-size:12px;text-transform:uppercase;letter-spacing:.04em;
+         color:var(--mut);margin-bottom:6px">📒 Con qué asiento se contabilizan las liquidaciones</div>
+    <div id="liq-modelo-cuerpo" style="font-size:13px">Cargando…</div>
+  </div>
+
   <div class="sgc-sub on" id="liq-sub-partidas">
     <div style="font-weight:700;font-size:12px;text-transform:uppercase;letter-spacing:.04em;color:var(--mut);margin-bottom:8px">
       ⏳ Pendientes de liquidar <span id="liq-part-n" style="font-weight:400;text-transform:none;letter-spacing:0"></span>
@@ -909,18 +924,6 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
            remitos y facturas de a uno, con el proveedor esperando del otro lado
            del teléfono. -->
       <div id="liq-venta-cab" style="display:none;margin-bottom:12px"></div>
-      <!-- CONTRA QUÉ SE CONTABILIZA, ANTES DE EMPEZAR. Pablo: "arriba necesito el
-           selector de asiento tal como existe en facturas de compra de
-           mercadería". Mismo mecanismo y por la misma razón: se elige UNA vez
-           para el módulo, no liquidación por liquidación. Si se eligiera cada
-           vez, dos iguales entrarían con asientos distintos según quién las
-           cargó, y a los tres meses el mayor no cierra. -->
-      <div id="liq-modelo-box" style="border:1px solid var(--bor);border-radius:10px;
-           padding:12px 14px;margin-bottom:12px;background:var(--bg)">
-        <div style="font-weight:700;font-size:12px;text-transform:uppercase;letter-spacing:.04em;
-             color:var(--mut);margin-bottom:6px">📒 Con qué asiento se contabiliza</div>
-        <div id="liq-modelo-cuerpo" style="font-size:13px">Cargando…</div>
-      </div>
       <!-- SE FUE EL «PEGÁ EL TEXTO Y LA IA LO LEE». Pablo, 24/8/2026: "esto de
            acá abajo lo podés borrar porque no tiene ningún sentido, la liquidación
            la vamos a construir a medida que la hacemos".
@@ -977,6 +980,28 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
             <div class="fl"><label>Neto $</label><input id="liq-neto" type="number" step="0.01" style="text-align:right"></div>
             <div class="fl"><label>Total $</label><input id="liq-total" type="number" step="0.01" style="text-align:right"></div>
           </div>
+          <!-- ── LA PARTE DE GESTIÓN ──────────────────────────────
+               Pablo: "así como existen ventas de gestión también existe la compra
+               mediante liquidación de gestión".
+               El TOTAL de arriba es lo que dice el papel y no se toca — va al
+               libro fiscal. Esto es lo que se le reconoce al productor por
+               fuera del comprobante, y viene puesto con lo que la partida
+               vendió en gestión: si la venta no llevó comprobante, la compra
+               tampoco lo va a llevar. -->
+          <div style="display:grid;grid-template-columns:1fr 2fr;gap:10px;margin-top:10px;
+               border-top:1px dashed var(--bor);padding-top:10px">
+            <div class="fl"><label>De gestión $ <span style="font-weight:400;color:var(--mut)">(fuera del comprobante)</span></label>
+              <input id="liq-gestion" type="number" step="0.01" style="text-align:right" oninput="liqGestionMotivo()"></div>
+            <div class="fl"><label>Motivo</label>
+              <select id="liq-gestion-motivo" disabled onchange="liqGestionMotivo()">
+                <option value="">— Elegí el motivo —</option>
+                <option value="ajuste_gestion">Ajuste de gestión — no va a tener comprobante</option>
+                <option value="comprobante_pendiente">Comprobante pendiente</option>
+                <option value="error_proveedor">Error del proveedor</option>
+                <option value="diferencia_peso_calidad">Diferencia de peso o calidad</option>
+              </select></div>
+          </div>
+          <div id="liq-gestion-ayuda" style="font-size:11.5px;color:var(--mut);margin-top:4px"></div>
         </div>
         <div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--bor);display:flex;justify-content:flex-end;gap:8px">
           <button class="btn bo" onclick="document.getElementById('liq-modal').classList.remove('on')">Cancelar</button>
@@ -10410,6 +10435,16 @@ function liqVentaCab(ocId){
       return;
     }
     LIQ.venta = r;
+    // LA COMPRA DE GESTIÓN SALE DE LA VENTA DE GESTIÓN. Si la venta no llevó
+    // comprobante, la compra tampoco lo va a llevar: viene puesto, y se puede
+    // corregir. Sin esto habría que ir a buscarlo a otra pantalla y tipearlo.
+    var g = eid('liq-gestion');
+    if (g && !g.value && Number(r.gestion) > 0) {
+      g.value = r.gestion;
+      var mo = eid('liq-gestion-motivo');
+      if (mo) { mo.disabled = false; mo.value = 'ajuste_gestion'; }
+    }
+    if (typeof liqGestionMotivo === 'function') liqGestionMotivo();
     var fila = function(rot, val, ayuda, fuerte){
       return '<tr><td style="padding:6px 10px;font-size:12.5px">' + rot
         + (ayuda ? '<div style="font-size:11px;color:var(--mut)">' + ayuda + '</div>' : '') + '</td>'
@@ -10620,7 +10655,6 @@ function liqDePartida(ocId, partida, proveedor){
       + (proveedor ? ' · ' + escH(proveedor) : '');
   }
   liqVentaCab(ocId);
-  liqModeloCargar();
 }
 
 function sgFmSub(){ /* una sola solapa por ahora; existe para que el patrón no cambie después */ }
@@ -23334,7 +23368,8 @@ function loadSec(s) {
     'ab-gastos': abCargarGastos,
     // Arranca en la bandeja de partidas pendientes, que es el trabajo del día.
     // Las emitidas son el archivo: se consultan, no se cargan.
-    'ab-liquidaciones': function(){ liqSub('partidas'); liqCargar(); },
+    // El asiento modelo se carga al ENTRAR: es del módulo, no de una liquidación.
+    'ab-liquidaciones': function(){ liqModeloCargar(); liqSub('partidas'); liqCargar(); },
     'pa-dashboard':  function(){ paLoadDash(); },
     'pa-clima':      function(){ paLoadClimaSeccion(); },
     'pa-calendario': function(){ paCalAbrir(); },
@@ -29074,6 +29109,12 @@ async function liqAbrirNueva() {
 
 function liqRellenarForm() {
   const d = LIQ.datos || {};
+  // La parte de gestión de la liquidación anterior no puede quedar puesta:
+  // pagarle a un productor lo que se acordó con otro es el peor error de acá.
+  var _g = document.getElementById('liq-gestion'); if (_g) _g.value = '';
+  var _gm = document.getElementById('liq-gestion-motivo');
+  if (_gm) { _gm.value = ''; _gm.disabled = true; }
+  if (typeof liqGestionMotivo === 'function') liqGestionMotivo();
   document.getElementById('liq-numero').value   = d._proximo || '';
   document.getElementById('liq-fecha').value    = d.fecha || '';
   document.getElementById('liq-letra').value    = d.iva_letra || 'A';
@@ -29167,6 +29208,21 @@ function _liqLeerConc() {
   });
 }
 
+function liqGestionMotivo(){
+  var m = eid('liq-gestion-motivo'), a = eid('liq-gestion-ayuda');
+  var v = Number((eid('liq-gestion') || {}).value) || 0;
+  if (m) m.disabled = !(v > 0);
+  // SIN MOTIVO NO ENTRA, y se dice acá y no cuando ya se apretó guardar. Son
+  // cuatro motivos, no texto libre: cuarenta maneras de escribir lo mismo no dan
+  // ningún informe.
+  if (a) {
+    a.textContent = (v > 0 && !(m && m.value))
+      ? 'Elegí por qué hay una parte fuera del comprobante — sin motivo no se guarda.'
+      : '';
+    a.style.color = (v > 0 && !(m && m.value)) ? 'var(--err)' : 'var(--mut)';
+  }
+}
+
 async function liqGuardar() {
   const body = {
     n_liquidacion:        document.getElementById('liq-numero').value.trim(),
@@ -29185,6 +29241,9 @@ async function liqGuardar() {
     conceptos:            _liqLeerConc(),
     neto:                 parseFloat(document.getElementById('liq-neto').value)  || 0,
     total:                parseFloat(document.getElementById('liq-total').value) || 0,
+    // El total NO se toca: es lo que dice el papel. Lo de gestión va aparte.
+    dif_gestion:          parseFloat((document.getElementById('liq-gestion')||{}).value) || 0,
+    dif_motivo:           ((document.getElementById('liq-gestion-motivo')||{}).value) || null,
     texto_original:       (LIQ.datos && LIQ.datos._textoOriginal) || '',
     // De qué partida es. Sólo viaja si la liquidación se abrió desde la bandeja;
     // es lo que después saca a la partida de "pendientes de liquidar".

@@ -70,6 +70,19 @@ db.exec(`
 // saber si una partida ya tenía su liquidación, y la bandeja no se vaciaba.
 // Sin FK: sg_oc es de otro módulo y una FK acá le rompería los DELETE.
 try { db.exec("ALTER TABLE liquidaciones ADD COLUMN oc_id INTEGER"); } catch(_){}
+// ── LA PARTE DE GESTIÓN DE UNA LIQUIDACIÓN ────────────────────────
+//
+// Pablo, 24/8/2026: "tener en cuenta que también debe traer las ventas de
+// gestión, porque así como existen ventas de gestión también existe la compra
+// mediante liquidación de gestión".
+//
+// Es el espejo exacto de sg_facturas_compra.dif_gestion: el TOTAL de la
+// liquidación es lo que dice el papel y no se toca —va al libro fiscal—, y lo
+// que se le reconoce al productor por fuera del comprobante vive acá, con su
+// motivo. Sin motivo no entra: cuatro motivos, no texto libre, o no hay informe
+// posible (ver MOTIVOS en servicios/asientos.js).
+try { db.exec("ALTER TABLE liquidaciones ADD COLUMN dif_gestion REAL NOT NULL DEFAULT 0"); } catch(_){}
+try { db.exec("ALTER TABLE liquidaciones ADD COLUMN dif_motivo TEXT"); } catch(_){}
 try { db.exec("CREATE INDEX IF NOT EXISTS idx_liq_oc ON liquidaciones(oc_id)"); } catch(_){}
 try { db.exec("CREATE INDEX IF NOT EXISTS idx_liq_fecha ON liquidaciones(fecha)"); } catch(_){}
 try { db.exec("CREATE INDEX IF NOT EXISTS idx_liq_n     ON liquidaciones(n_liquidacion)"); } catch(_){}
@@ -271,6 +284,17 @@ router.post('/', function(req, res) {
   const d = req.body || {};
   if (!d.n_liquidacion) return res.status(400).json({ error: 'Falta N° de liquidación' });
   if (!d.fecha)         return res.status(400).json({ error: 'Falta la fecha' });
+  // UNA PARTE DE GESTIÓN SIN MOTIVO NO ENTRA. Texto libre son cuarenta maneras de
+  // escribir lo mismo y ningún informe posible: son cuatro motivos y se elige uno.
+  const MOTIVOS_LIQ = ['error_proveedor', 'comprobante_pendiente',
+                       'diferencia_peso_calidad', 'ajuste_gestion'];
+  const difG = Math.round((parseFloat(d.dif_gestion) || 0) * 100) / 100;
+  if (difG < 0) {
+    return res.status(400).json({ error: 'La parte de gestión no puede ser negativa.' });
+  }
+  if (difG > 0 && MOTIVOS_LIQ.indexOf(String(d.dif_motivo || '').trim()) < 0) {
+    return res.status(400).json({ error: 'Poné por qué hay una parte de gestión en esta liquidación.' });
+  }
 
   // Verificar duplicado
   const dup = db.prepare("SELECT id FROM liquidaciones WHERE n_liquidacion = ? AND eliminado_en IS NULL").get(d.n_liquidacion);
@@ -282,8 +306,9 @@ router.post('/', function(req, res) {
         n_liquidacion, fecha, fecha_ingreso, prov_codigo,
         remitente_nombre, remitente_cuit, remitente_localidad, remitente_provincia, remitente_cp, remitente_iva,
         iva_letra, articulos, mermas, conceptos, neto, total,
-        cai_numero, cai_vencimiento, codigo_barras, texto_original, creado_por_id, oc_id
-      ) VALUES (?, ?, ?, ?,  ?, ?, ?, ?, ?, ?,  ?, ?, ?, ?, ?, ?,  ?, ?, ?, ?, ?, ?)
+        cai_numero, cai_vencimiento, codigo_barras, texto_original, creado_por_id, oc_id,
+        dif_gestion, dif_motivo
+      ) VALUES (?, ?, ?, ?,  ?, ?, ?, ?, ?, ?,  ?, ?, ?, ?, ?, ?,  ?, ?, ?, ?, ?, ?,  ?, ?)
     `).run(
       d.n_liquidacion, d.fecha, d.fecha_ingreso || null, d.prov_codigo || null,
       d.remitente_nombre || null, d.remitente_cuit || null, d.remitente_localidad || null,
@@ -297,7 +322,11 @@ router.post('/', function(req, res) {
       d.cai_numero || null, d.cai_vencimiento || null, d.codigo_barras || null,
       d.texto_original || null,
       (req.user && req.user.id) || null,
-      (d.oc_id != null && d.oc_id !== '') ? Number(d.oc_id) : null
+      (d.oc_id != null && d.oc_id !== '') ? Number(d.oc_id) : null,
+      // Lo que se le reconoce al productor por fuera del comprobante. El TOTAL no
+      // se toca: es lo que dice el papel y es lo que va al libro fiscal.
+      Math.round((parseFloat(d.dif_gestion) || 0) * 100) / 100,
+      (parseFloat(d.dif_gestion) || 0) > 0 ? (String(d.dif_motivo || '').trim() || null) : null
     );
     res.json({ ok: true, id: r.lastInsertRowid });
   } catch(e) { res.status(500).json({ error: e.message }); }
