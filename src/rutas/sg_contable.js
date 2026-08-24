@@ -1752,19 +1752,22 @@ router.post('/puntos-venta', requireAdmin, (req, res) => {
     String(b.cert_vence || '').trim() || null,
     String(b.comprobantes || '').trim() || null,
     String(b.notas || '').trim() || null,
-    b.activo === 0 || b.activo === false ? 0 : 1];
+    b.activo === 0 || b.activo === false ? 0 : 1,
+    // DE PRUEBA: sus comprobantes no son fiscales y se pueden dejar afuera de
+    // los saldos y los informes. Se marca acá, no se adivina por el número.
+    b.es_prueba ? 1 : 0];
   try {
     const id = parseInt(b.id, 10);
     if (id) {
       db.prepare(`UPDATE sg_puntos_venta SET numero=?, nombre=?, emision=?, ambiente=?,
         cuit_emisor=?, domicilio=?, cert_alias=?, cert_vence=?, comprobantes=?, notas=?, activo=?,
-        modificado_en=datetime('now','localtime'), modificado_por=? WHERE id=?`)
+        es_prueba=?, modificado_en=datetime('now','localtime'), modificado_por=? WHERE id=?`)
         .run(...campos, req._user?.id ?? null, id);
       return res.json({ ok: true, id });
     }
     const r = db.prepare(`INSERT INTO sg_puntos_venta
       (numero, nombre, emision, ambiente, cuit_emisor, domicilio, cert_alias, cert_vence,
-       comprobantes, notas, activo) VALUES (?,?,?,?,?,?,?,?,?,?,?)`).run(...campos);
+       comprobantes, notas, activo, es_prueba) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`).run(...campos);
     res.json({ ok: true, id: Number(r.lastInsertRowid) });
   } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
 });
