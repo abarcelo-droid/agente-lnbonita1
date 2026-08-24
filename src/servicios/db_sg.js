@@ -667,6 +667,18 @@ try {
   const add = [];
   if (!cols.includes('trabaja_consignacion')) { db.exec('ALTER TABLE sg_proveedores ADD COLUMN trabaja_consignacion INTEGER'); add.push('trabaja_consignacion'); }
   if (!cols.includes('comision_pct'))         { db.exec('ALTER TABLE sg_proveedores ADD COLUMN comision_pct REAL');         add.push('comision_pct'); }
+  // EL DESCUENTO COMERCIAL DEL PROVEEDOR. Es un acuerdo de alto nivel que
+  // cierra la dirección con cada proveedor: va de 0% a más del 50%.
+  //
+  // Al facturar una venta, el precio se multiplica por (1 - descuento). La
+  // factura sale por ese precio, y la diferencia se registra como venta de
+  // GESTIÓN: es lo que la empresa pone sobre la mesa en cada acuerdo, y sin
+  // medirlo no hay cómo sentarse a renegociarlo.
+  //
+  // VA EN EL PROVEEDOR, no en el producto ni en el cliente: una factura con
+  // mercadería de tres proveedores lleva los tres descuentos, cada línea con
+  // el suyo.
+  if (!cols.includes('descuento_pct'))        { db.exec('ALTER TABLE sg_proveedores ADD COLUMN descuento_pct REAL');        add.push('descuento_pct'); }
   if (add.length) console.log('[DB] SG sg_proveedores migrado (+' + add.join(', +') + ')');
 } catch (e) {
   console.error('[DB] SG migración sg_proveedores (consignacion):', e.message);

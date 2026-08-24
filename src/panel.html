@@ -5428,6 +5428,11 @@ var SG_SCHEMA = {
       {k:'provincia', l:'Provincia', t:'text'},
       {k:'telefono', l:'Teléfono', t:'text'},
       {k:'email', l:'Email', t:'text'},
+      // EL ACUERDO COMERCIAL. Lo cierra la dirección con el proveedor y decide
+      // a cuánto sale su mercadería cuando la vendemos: el precio se multiplica
+      // por (1 - este porcentaje). La diferencia se mide como venta de gestión,
+      // que es lo que la empresa pone sobre la mesa en cada acuerdo.
+      {k:'descuento_pct', l:'Descuento comercial (%) — al vender su mercadería', t:'number'},
       {k:'saldo_inicial', l:'Saldo inicial al corte 30/6 ($)', t:'number'},
       {k:'observaciones', l:'Observaciones', t:'textarea'}
     ]
