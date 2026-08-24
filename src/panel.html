@@ -43819,6 +43819,82 @@ function ifcoCerrarLightbox() {
   lb.style.display = 'none';
   document.getElementById('ifco-lightbox-img').src = '';
 }
+// ── DOBLE CLICK EN UNA FECHA = HOY ─────────────────────────────
+//
+// Pablo: "haciendo doble click en las fechas ponés la fecha de hoy... si lo
+// podemos agregar para todo sería bárbaro".
+//
+// Hay 124 campos de fecha en el panel y la enorme mayoría se llenan con la de
+// hoy. Con el datepicker eso son tres clicks; acá es uno doble, en cualquier
+// pantalla, sin tocar ninguna de las 124.
+//
+// UN SOLO OYENTE, delegado en el documento. Enganchar 124 no sólo es peor: la
+// mitad de esos campos los dibuja el JS después, y ninguno lo tendría.
+//
+// Sirve para date, datetime-local, month, week y time — los cinco que el
+// navegador sabe llenar con "ahora".
+(function(){
+  var dd = function(n){ return String(n).padStart(2, '0'); };
+  var ahora = function(tipo){
+    var d = new Date();
+    var fecha = d.getFullYear() + '-' + dd(d.getMonth() + 1) + '-' + dd(d.getDate());
+    var hora = dd(d.getHours()) + ':' + dd(d.getMinutes());
+    if (tipo === 'date') return fecha;
+    if (tipo === 'datetime-local') return fecha + 'T' + hora;
+    if (tipo === 'month') return fecha.slice(0, 7);
+    if (tipo === 'time') return hora;
+    if (tipo === 'week') {
+      // La semana ISO: el jueves de esta semana decide a qué año pertenece.
+      var j = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
+      j.setUTCDate(j.getUTCDate() + 4 - (j.getUTCDay() || 7));
+      var ini = new Date(Date.UTC(j.getUTCFullYear(), 0, 1));
+      var n = Math.ceil((((j - ini) / 86400000) + 1) / 7);
+      return j.getUTCFullYear() + '-W' + dd(n);
+    }
+    return null;
+  };
+
+  document.addEventListener('dblclick', function(ev){
+    var el = ev.target;
+    if (!el || el.tagName !== 'INPUT') return;
+    var v = ahora(String(el.type || '').toLowerCase());
+    if (v == null) return;
+    // Un campo bloqueado está bloqueado también para esto: si la pantalla decidió
+    // que esa fecha no se toca, un atajo no es una excepción.
+    if (el.disabled || el.readOnly) return;
+    var antes = el.value;
+    if (antes === v) return;                       // ya estaba en hoy
+    el.value = v;
+    // LOS HANDLERS TIENEN QUE CORRER. Muchas de estas fechas recalculan algo al
+    // cambiar —el código de la partida, los vencimientos, un filtro— y asignar
+    // .value a mano NO dispara nada. Sin esto, la pantalla mostraría la fecha
+    // nueva con los números de la vieja.
+    try {
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+      el.dispatchEvent(new Event('change', { bubbles: true }));
+    } catch (_) {
+      if (typeof el.onchange === 'function') el.onchange();
+    }
+    // SI HABÍA ALGO, SE DICE QUÉ HABÍA. Pisar sin avisar una fecha que alguien
+    // cargó —o que vino de un registro que se está editando— es perderla sin
+    // que se note. Con el aviso, se vuelve a tipear.
+    if (antes && typeof toast === 'function') {
+      toast('Fecha de hoy · antes decía ' + antes, 'ok');
+    }
+  });
+
+  // Y QUE SE SEPA QUE EXISTE. Un atajo que nadie descubre no le sirve a nadie:
+  // el cartelito aparece al pasar por encima. Se pone al vuelo porque la mitad
+  // de estos campos los dibuja el JS después de cargar la página.
+  document.addEventListener('mouseover', function(ev){
+    var el = ev.target;
+    if (!el || el.tagName !== 'INPUT' || el.title) return;
+    if (el.disabled || el.readOnly) return;
+    if (ahora(String(el.type || '').toLowerCase()) == null) return;
+    el.title = 'Doble click = hoy';
+  });
+})();
+
 // Esc cierra lightbox y modal de detalle
 document.addEventListener('keydown', function(ev){
   if (ev.key !== 'Escape') return;
