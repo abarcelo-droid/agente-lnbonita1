@@ -5,6 +5,12 @@
 // en DB y generar el PDF formateado.
 
 import express from 'express';
+// El asiento de la liquidación vive del lado SG: mismo archivo SQLite, otro
+// handle lógico. Se importan acá porque `liquidaciones` es de abasto y el libro
+// es de SG — JOINs y lecturas cruzadas sí, FKs entre módulos no.
+import dbSg from '../servicios/db_sg_finanzas.js';
+import { crearAsiento } from '../servicios/asientos.js';
+import { lineasAsientoLiquidacion } from '../servicios/asiento-liquidacion.js';
 import path    from 'path';
 import fs      from 'fs';
 import { fileURLToPath } from 'url';
@@ -49,7 +55,7 @@ db.exec(`
     remitente_cp         TEXT,
     remitente_iva        TEXT,
     iva_letra      TEXT DEFAULT 'A',
-    articulos      TEXT,                              -- JSON [{articulo,nro_camion,cantidad,precio,importe}]
+    articulos      TEXT,                              -- JSON [{articulo,cantidad,unidad,precio,importe}]
     mermas         TEXT,                              -- JSON [{descripcion,cantidad,fecha,tipo}]
     conceptos      TEXT,                              -- JSON [{concepto,porcentaje,importe}]
     neto           REAL DEFAULT 0,
@@ -83,6 +89,29 @@ try { db.exec("ALTER TABLE liquidaciones ADD COLUMN oc_id INTEGER"); } catch(_){
 // posible (ver MOTIVOS en servicios/asientos.js).
 try { db.exec("ALTER TABLE liquidaciones ADD COLUMN dif_gestion REAL NOT NULL DEFAULT 0"); } catch(_){}
 try { db.exec("ALTER TABLE liquidaciones ADD COLUMN dif_motivo TEXT"); } catch(_){}
+// ── LO QUE LA LIQUIDACIÓN NECESITA PARA ENTRAR AL LIBRO ────────────────
+//
+// Pablo: "una vez que se emite la liquidación se contabiliza". Es la regla de
+// oro del repo, la misma que ya rige en compras y en ventas: una operación que
+// mueve la cuenta corriente y no entra al libro es plata que se debe y que la
+// contabilidad no sabe que existe.
+//
+// SIN FK hacia sg_asientos: `liquidaciones` es de db.js y los asientos son del
+// lado SG. Con foreign_keys=ON una FK entre módulos hace fallar los DELETE del
+// otro. JOINs de lectura sí, FKs no.
+try { db.exec("ALTER TABLE liquidaciones ADD COLUMN asiento_id INTEGER"); } catch(_){}
+// CÓMO SE LIQUIDÓ: a precio abierto (lo que rindió) o cerrado (lo pactado en la
+// orden). Son dos orígenes distintos para el mismo número y hay que saber cuál
+// se usó cuando alguien discuta el importe seis meses después.
+try { db.exec("ALTER TABLE liquidaciones ADD COLUMN modo_precio TEXT"); } catch(_){}
+// Y POR CUÁNTOS BULTOS. Se tipeaban en la cabecera y no se guardaban en ningún
+// lado: si la liquidación era parcial, no quedaba registro de por cuántos fue.
+try { db.exec("ALTER TABLE liquidaciones ADD COLUMN bultos_ingresados REAL"); } catch(_){}
+try { db.exec("ALTER TABLE liquidaciones ADD COLUMN bultos_liquidados REAL"); } catch(_){}
+// La grilla completa —las cuatro filas con su IVA y su parte de gestión— tal
+// como se cargó. El asiento sale de acá, así que tiene que quedar guardado o no
+// hay forma de explicar el asiento después.
+try { db.exec("ALTER TABLE liquidaciones ADD COLUMN grilla_json TEXT"); } catch(_){}
 try { db.exec("CREATE INDEX IF NOT EXISTS idx_liq_oc ON liquidaciones(oc_id)"); } catch(_){}
 try { db.exec("CREATE INDEX IF NOT EXISTS idx_liq_fecha ON liquidaciones(fecha)"); } catch(_){}
 try { db.exec("CREATE INDEX IF NOT EXISTS idx_liq_n     ON liquidaciones(n_liquidacion)"); } catch(_){}
@@ -204,7 +233,7 @@ router.post('/parse', async function(req, res) {
       '  "remitente_iva": "R.I." | "MONOTRIBUTO" | etc,',
       '  "iva_letra": "A" | "B" | "C",            // letra del comprobante',
       '  "articulos": [',
-      '    { "articulo": "ZAPALLO ANCO ... BOLSON BOLSA", "nro_camion": "9902", "cantidad": 750, "precio": 4973.76, "importe": 3730316.78 }',
+      '    { "articulo": "ZAPALLO ANCO ... BOLSON BOLSA", "cantidad": 750, "precio": 4973.76, "importe": 3730316.78 }',
       '  ],',
       '  "mermas": [',
       '    { "descripcion": "ZAPALLO ANCO ... BOLSON", "cantidad": 18, "fecha": "YYYY-MM-DD", "tipo": "REPASO" }',
@@ -307,8 +336,8 @@ router.post('/', function(req, res) {
         remitente_nombre, remitente_cuit, remitente_localidad, remitente_provincia, remitente_cp, remitente_iva,
         iva_letra, articulos, mermas, conceptos, neto, total,
         cai_numero, cai_vencimiento, codigo_barras, texto_original, creado_por_id, oc_id,
-        dif_gestion, dif_motivo
-      ) VALUES (?, ?, ?, ?,  ?, ?, ?, ?, ?, ?,  ?, ?, ?, ?, ?, ?,  ?, ?, ?, ?, ?, ?,  ?, ?)
+        dif_gestion, dif_motivo, modo_precio, bultos_ingresados, bultos_liquidados, grilla_json
+      ) VALUES (?, ?, ?, ?,  ?, ?, ?, ?, ?, ?,  ?, ?, ?, ?, ?, ?,  ?, ?, ?, ?, ?, ?,  ?, ?, ?, ?, ?, ?)
     `).run(
       d.n_liquidacion, d.fecha, d.fecha_ingreso || null, d.prov_codigo || null,
       d.remitente_nombre || null, d.remitente_cuit || null, d.remitente_localidad || null,
@@ -326,9 +355,49 @@ router.post('/', function(req, res) {
       // Lo que se le reconoce al productor por fuera del comprobante. El TOTAL no
       // se toca: es lo que dice el papel y es lo que va al libro fiscal.
       Math.round((parseFloat(d.dif_gestion) || 0) * 100) / 100,
-      (parseFloat(d.dif_gestion) || 0) > 0 ? (String(d.dif_motivo || '').trim() || null) : null
+      (parseFloat(d.dif_gestion) || 0) > 0 ? (String(d.dif_motivo || '').trim() || null) : null,
+      d.modo_precio === 'cerrado' ? 'cerrado' : 'abierto',
+      d.bultos_ingresados != null && d.bultos_ingresados !== '' ? Number(d.bultos_ingresados) : null,
+      d.bultos_liquidados != null && d.bultos_liquidados !== '' ? Number(d.bultos_liquidados) : null,
+      d.grilla ? JSON.stringify(d.grilla) : null
     );
-    res.json({ ok: true, id: r.lastInsertRowid });
+    // ── Y ENTRA AL LIBRO ────────────────────────────────────
+    //
+    // Pablo: "una vez que se emite la liquidación se contabiliza". La liquidación
+    // ya está guardada acá: si el asiento falla, se dice y la liquidación queda
+    // SIN contabilizar en vez de perderse. El asiento se puede volver a generar;
+    // el comprobante emitido con su número, no.
+    //
+    // Con el mismo servicio que armó el preview: la pantalla mostró exactamente
+    // esto y no otra cosa.
+    const id = r.lastInsertRowid;
+    let asientoId = null, asientoError = null;
+    if (d.grilla && (d.grilla.fiscal || d.grilla.gestion)) {
+      try {
+        const arm = lineasAsientoLiquidacion(dbSg, {
+          numero: d.n_liquidacion, fecha: d.fecha,
+          fiscal: d.grilla.fiscal, gestion: d.grilla.gestion,
+          motivo_gestion: d.dif_motivo,
+        });
+        if (arm.falta.length) {
+          asientoError = 'Falta ' + arm.falta.join(' y ') + '.';
+        } else if (arm.lineas.length) {
+          asientoId = crearAsiento(dbSg, {
+            fecha: d.fecha, usuario_id: (req.user && req.user.id) || null,
+            ref_codigo: d.n_liquidacion,
+            descripcion: 'Liquidación ' + d.n_liquidacion
+              + (d.remitente_nombre ? ' — ' + d.remitente_nombre : ''),
+          }, arm.lineas).id;
+          db.prepare('UPDATE liquidaciones SET asiento_id=? WHERE id=?').run(asientoId, id);
+        }
+      } catch (e) {
+        // NO SE SILENCIA. Una liquidación sin asiento tiene que gritar, o el mayor
+        // no cierra tres meses después y nadie sabe por qué.
+        asientoError = e.message;
+        console.error('[LIQ] no se pudo contabilizar la liquidación', id, e.message);
+      }
+    }
+    res.json({ ok: true, id, asiento_id: asientoId, asiento_error: asientoError });
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -510,19 +579,20 @@ router.get('/:id/pdf', async function(req, res) {
     // ═══════════════════════════════════════════════════════════════════════
     y += 6;
     const tblTop = y;
+    // SE FUE LA COLUMNA "NRO CAMION". Pablo: "camión no es dato, sacalo". Salía
+    // vacía en todas y se comía el 16% del ancho útil entre Artículo y Cantidad,
+    // que son las dos que se leen. Ese ancho vuelve al nombre del artículo.
     const cArt  = L + 3;
-    const cCam  = L + innerW * 0.46;
-    const cCant = L + innerW * 0.62;
-    const cPre  = L + innerW * 0.76;
+    const cCant = L + innerW * 0.58;
+    const cPre  = L + innerW * 0.74;
     const cImp  = R - 3;
 
     doc.setLineWidth(0.4);
     doc.line(L, y - 1, R, y - 1);   // línea superior tabla
     setF(9, true);
     doc.text('Articulo',   cArt,  y + 4);
-    doc.text('Nro Camion', cCam,  y + 4);
     doc.text('Cantidad',   cCant, y + 4);
-    doc.text('P.',         cPre,  y + 4);
+    doc.text('Precio',     cPre,  y + 4);
     doc.text('Importe',    cImp,  y + 4, { align: 'right' });
     y += 6;
     doc.line(L, y, R, y);
@@ -531,8 +601,9 @@ router.get('/:id/pdf', async function(req, res) {
     setF(10, false);
     for (const a of r.articulos) {
       doc.text(String(a.articulo || ''),    cArt,  y);
-      doc.text(String(a.nro_camion || ''),  cCam,  y);
-      doc.text(String(a.cantidad || ''),    cCant, y);
+      // La cantidad va con su unidad: si la partida entró por bultos, se liquidan
+      // bultos, y el papel donde el productor cobra tiene que decir cuál es.
+      doc.text(String(a.cantidad || '') + (a.unidad ? ' ' + a.unidad : ''), cCant, y);
       doc.text(moneyFmt(a.precio),          cPre,  y);
       doc.text(dollarFmt(a.importe),        cImp,  y, { align: 'right' });
       y += 5;

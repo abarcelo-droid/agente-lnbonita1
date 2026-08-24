@@ -13,6 +13,7 @@ import { fileURLToPath } from 'url';
 import * as XLSX from 'xlsx';
 import { subirArchivo, obtenerArchivo, storageConfigurado } from '../servicios/storage.js';
 import { facturaCuenta } from '../servicios/factura-cuenta.js';
+import { previewAsientoLiquidacion, lineasAsientoLiquidacion } from '../servicios/asiento-liquidacion.js';
 import { crearAsiento, MOTIVOS, frenoAsientoDeCompra } from '../servicios/asientos.js';
 
 // El nombre del motivo para mostrarlo en una ficha. La clave sola no le dice
@@ -2647,6 +2648,20 @@ router.get('/stock-pisos/imprimir', requireAuth, (req, res) => {
 // dos operaciones distintas con las mismas cuentas.
 const CLAVE_MODELO_LIQ = 'asiento_modelo_liquidacion';
 
+// ── EL ASIENTO DE LA LIQUIDACIÓN, ANTES DE EMITIRLA ──────────────────
+//
+// Pablo: "abajo de todo, asiento resumen con lo de si empre balancea o no".
+//
+// Lo arma el MISMO servicio que lo va a escribir cuando se emita. La pantalla
+// muestra, no calcula: si los dos calcularan, un día no van a coincidir y va a
+// ganar el que nadie mira.
+router.post('/liquidacion/preview-asiento', requireAuth, (req, res) => {
+  const db = getDb();
+  try {
+    res.json(previewAsientoLiquidacion(db, req.body || {}));
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
 router.get('/liquidacion/modelo', requireAuth, (req, res) => {
   const db = getDb();
   try {
@@ -2737,6 +2752,20 @@ router.get('/partidas/:id/venta', requireAuth, (req, res) => {
         FROM sg_oc o LEFT JOIN sg_proveedores p ON p.id = o.proveedor_id
        WHERE o.id = ?`).get(ocId);
     if (!oc) return res.status(404).json({ ok: false, error: 'Partida inexistente' });
+
+    // ── LA UNIDAD LA MANDA LA ORDEN DE COMPRA ───────────────────────
+    //
+    // Pablo: "si la partida ingresó por bultos se liquidan BULTOS, no kilos... la
+    // orden de compra manda". Al productor se le paga como se le compró:
+    // liquidarle kilos una compra pactada por cajón es cambiarle la unidad del
+    // trato en el papel donde cobra.
+    //
+    // Sale de sg_oc_items.modo_carga, que es donde ya vive esa decisión (la misma
+    // que usa acordadoDeOC). Si los ítems no coinciden entre sí manda el bulto:
+    // es la unidad más gruesa y la que el productor cuenta.
+    const modos = db.prepare(`SELECT DISTINCT COALESCE(modo_carga,'kilo') AS m
+      FROM sg_oc_items WHERE oc_id = ?`).all(ocId).map((x) => x.m);
+    const unidad = modos.includes('bulto') ? 'bulto' : 'kilo';
 
     // Lo que entró y lo que salió, en bultos y en kg.
     const tot = db.prepare(`SELECT
@@ -2867,12 +2896,19 @@ router.get('/partidas/:id/venta', requireAuth, (req, res) => {
         JOIN sg_oc_items i ON i.id = l.oc_item_id
         LEFT JOIN sg_productos pr ON pr.id = di.producto_id
        WHERE i.oc_id = ? GROUP BY pr.nombre ORDER BY pr.nombre`).all(ocId);
-    const articulos = arts.map((a) => ({
-      articulo: a.articulo,
-      cantidad: r2(a.kg), bultos: r2(a.bultos),
-      precio: Number(a.kg) > 0 ? Math.round((a.importe / a.kg) * 10000) / 10000 : 0,
-      importe: r2(a.importe),
-    }));
+    // La CANTIDAD del renglón va en la unidad de la orden, y el precio se
+    // recalcula contra esa cantidad para que precio × cantidad siga dando el
+    // importe. Cambiar la unidad y dejar el precio por kilo daría un renglón que
+    // no cierra consigo mismo.
+    const articulos = arts.map((a) => {
+      const cant = unidad === 'bulto' ? r2(a.bultos) : r2(a.kg);
+      return {
+        articulo: a.articulo, unidad,
+        cantidad: cant, bultos: r2(a.bultos), kg: r2(a.kg),
+        precio: cant > 0 ? Math.round((a.importe / cant) * 10000) / 10000 : 0,
+        importe: r2(a.importe),
+      };
+    });
 
     const bultosIn = r2(tot && tot.bultos);
     const bultosOut = r2(sal && sal.bultos);
@@ -2882,6 +2918,9 @@ router.get('/partidas/:id/venta', requireAuth, (req, res) => {
     const terminado = r2(bultosOut + mermaBultos);
     res.json({ ok: true,
       partida: oc.trazabilidad || oc.numero,
+      // En qué unidad se liquida. La pantalla la usa para rotular la columna y
+      // para no ofrecer kilos donde se pactaron cajones.
+      unidad,
       // Lo que la pantalla necesita para armar el comprobante sin tipear nada.
       proveedor: {
         id: oc.prov_id, razon_social: oc.razon_social, cuit: oc.cuit,

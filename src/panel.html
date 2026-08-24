@@ -906,7 +906,24 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
 
 <!-- Modal: Nueva liquidación (3 pasos: pegar texto → editar → guardar) -->
 <div class="ab-modal-overlay" id="liq-modal">
-  <div class="ab-modal" style="width:920px;max-height:90vh;display:flex;flex-direction:column">
+  <style>
+    /* NADA DE BARRA LATERAL (regla del repo). El modal tiene ahora tres tablas
+       —la grilla, los artículos y el cuadro del asiento— y el asiento son cinco
+       columnas: sin esto aparece la barra que el repo prohíbe. Se fijan anchos
+       por columna y se trunca lo de largo variable; sólo el nombre de la cuenta
+       y la descripción se parten. En teléfono se deja arrastrar, como siempre. */
+    #liq-modal .pa-tbl { width:100%; table-layout:fixed }
+    #liq-modal .pa-tbl th, #liq-modal .pa-tbl td {
+      padding:6px 9px; font-size:12.5px; white-space:nowrap;
+      overflow:hidden; text-overflow:ellipsis }
+    #liq-modal .ab-table-wrap { overflow-x:hidden !important }
+    @media(max-width:900px){ #liq-modal .ab-table-wrap { overflow-x:auto !important } }
+  </style>
+  <!-- MÁS ANCHA. Pablo: "armá la pantalla de liquidación un poco más ancha".
+       Con 920px la grilla de fiscal/gestión entra apretada y los artículos
+       quedaban en campitos de 80px. 96vw con techo: en un monitor grande no se
+       estira hasta ser ilegible, y en una laptop usa lo que hay. -->
+  <div class="ab-modal" style="width:min(1280px,96vw);max-width:96vw;max-height:92vh;display:flex;flex-direction:column">
     <div class="mhd">
       <div class="mht">📄 Nueva liquidación</div>
       <button class="mcl" onclick="document.getElementById('liq-modal').classList.remove('on')">×</button>
@@ -923,6 +940,24 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
            que su mercadería rindió. Hasta ahora había que armarlo a mano mirando
            remitos y facturas de a uno, con el proveedor esperando del otro lado
            del teléfono. -->
+      <!-- ── A PRECIO ABIERTO O A PRECIO CERRADO ─────────────────────
+           Pablo: "arriba debemos tener un selector para ver si la liquidación es
+           a precio abierto (con los datos de las ventas) o a precio cerrado
+           (dato de la orden de compra)".
+           A precio ABIERTO el productor cobra lo que su mercadería rindió, y eso
+           sale de las ventas. A precio CERRADO ya estaba pactado en la orden, y
+           lo que rindió no cambia lo que se le paga. Son dos orígenes distintos
+           para el mismo número: por eso se elige antes de mirarlo. -->
+      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:12px">
+        <span style="font-size:12px;color:var(--mut)">Cómo se liquida:</span>
+        <div class="sg-seg" role="radiogroup">
+          <label class="sg-seg-btn"><input type="radio" name="liq-modo" value="abierto" checked
+                 onchange="liqModoCambio()"> 📈 Precio abierto</label>
+          <label class="sg-seg-btn"><input type="radio" name="liq-modo" value="cerrado"
+                 onchange="liqModoCambio()"> 💰 Precio cerrado</label>
+        </div>
+        <span id="liq-modo-ayuda" style="font-size:11.5px;color:var(--mut)"></span>
+      </div>
       <div id="liq-venta-cab" style="display:none;margin-bottom:12px"></div>
       <!-- SE FUE EL «PEGÁ EL TEXTO Y LA IA LO LEE». Pablo, 24/8/2026: "esto de
            acá abajo lo podés borrar porque no tiene ningún sentido, la liquidación
@@ -941,19 +976,33 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
             </div>
           </div>
         </div>
-        <div class="ab-card" style="margin-bottom:12px">
-          <div style="font-weight:600;margin-bottom:8px">Remitente</div>
-          <div style="display:grid;grid-template-columns:2fr 1fr;gap:10px">
-            <div class="fl"><label>Nombre</label><input id="liq-r-nombre" type="text"></div>
-            <div class="fl"><label>CUIT</label><input id="liq-r-cuit" type="text"></div>
-            <div class="fl"><label>Localidad</label><input id="liq-r-loc" type="text"></div>
-            <div class="fl"><label>Provincia</label><input id="liq-r-prov" type="text"></div>
-            <div class="fl"><label>CP</label><input id="liq-r-cp" type="text"></div>
-            <div class="fl"><label>IVA</label><input id="liq-r-iva" type="text" placeholder="R.I."></div>
+        <!-- ── EL REMITENTE, EN UNA LÍNEA ───────────────────────────
+             Pablo: "los datos del remitente no hace falta que ocupen tanto lugar,
+             ya que los conocemos del maestro de proveedores. Sí los vamos a
+             necesitar para imprimir, pero el operador no tiene que tener tanta
+             info".
+             Los campos SIGUEN ESTANDO — se imprimen, y se pueden corregir si el
+             maestro tiene algo mal. Lo que cambia es que están plegados: ocho
+             recuadros para datos que nadie va a tocar es media pantalla gastada
+             en confirmar lo que ya se sabía. -->
+        <details class="ab-card" id="liq-remitente" style="margin-bottom:12px">
+          <summary style="cursor:pointer;display:flex;gap:10px;align-items:baseline;flex-wrap:wrap">
+            <span style="font-weight:600">Remitente</span>
+            <span id="liq-r-resumen" style="font-size:12.5px;color:var(--mut)">—</span>
+            <span style="font-size:11.5px;color:var(--mut);margin-left:auto">ver / corregir</span>
+          </summary>
+          <div style="display:grid;grid-template-columns:2fr 1fr 1fr;gap:10px;margin-top:10px">
+            <div class="fl"><label>Nombre</label><input id="liq-r-nombre" type="text" oninput="liqRemResumen()"></div>
+            <div class="fl"><label>CUIT</label><input id="liq-r-cuit" type="text" maxlength="13" inputmode="numeric"
+                 oninput="cuitMask(this);liqRemResumen()"></div>
+            <div class="fl"><label>IVA</label><input id="liq-r-iva" type="text" placeholder="R.I." oninput="liqRemResumen()"></div>
+            <div class="fl"><label>Localidad</label><input id="liq-r-loc" type="text" oninput="liqRemResumen()"></div>
+            <div class="fl"><label>Provincia</label><input id="liq-r-prov" type="text" oninput="liqRemResumen()"></div>
+            <div class="fl"><label>CP</label><input id="liq-r-cp" type="text" oninput="liqRemResumen()"></div>
             <div class="fl"><label>Fecha ingreso</label><input id="liq-fing" type="date"></div>
             <div class="fl"><label>Cód. Proveedor</label><input id="liq-prov-cod" type="text" style="font-family:monospace"></div>
           </div>
-        </div>
+        </details>
         <div class="ab-card" style="margin-bottom:12px">
           <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
             <div style="font-weight:600">Artículos</div>
@@ -968,40 +1017,62 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
           </div>
           <div id="liq-mermas"></div>
         </div>
+        <!-- ── LA GRILLA: FISCAL Y GESTIÓN, FILA POR FILA ─────────────────
+             Pablo: "vamos a armar 2 columnas, una para lo fiscal y otra para lo
+             de gestión. Y filas: Ventas, IVA de las ventas, Comisión, IVA de la
+             comisión, Descarga, IVA de la descarga, Gastos Administrativos, IVA
+             de los gastos administrativos".
+             Acá antes había un «Conceptos» de texto libre donde cada uno
+             escribía "Comision", "COMISION", "Comisión s/venta"… y después no
+             hay informe posible ni cuenta a la cual imputar. Ahora son cuatro
+             filas fijas, cada una con su cuenta configurada.
+             LAS FILAS DE IVA NO TIENEN COLUMNA DE GESTIÓN: el crédito y el
+             débito fiscal salen del comprobante y de nada más (regla del repo).
+             -->
         <div class="ab-card" style="margin-bottom:12px">
-          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
-            <div style="font-weight:600">Conceptos (IVA, comisión, etc.)</div>
-            <button class="btn bo bs" onclick="liqAddConc()">+ Agregar</button>
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;gap:12px;flex-wrap:wrap">
+            <div style="font-weight:600">La liquidación</div>
+            <div id="liq-modo-aviso" style="font-size:11.5px;color:var(--mut)"></div>
           </div>
-          <div id="liq-conceptos"></div>
-        </div>
-        <div class="ab-card" style="margin-top:12px">
-          <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
-            <div class="fl"><label>Neto $</label><input id="liq-neto" type="number" step="0.01" style="text-align:right"></div>
-            <div class="fl"><label>Total $</label><input id="liq-total" type="number" step="0.01" style="text-align:right"></div>
-          </div>
-          <!-- ── LA PARTE DE GESTIÓN ──────────────────────────────
-               Pablo: "así como existen ventas de gestión también existe la compra
-               mediante liquidación de gestión".
-               El TOTAL de arriba es lo que dice el papel y no se toca — va al
-               libro fiscal. Esto es lo que se le reconoce al productor por
-               fuera del comprobante, y viene puesto con lo que la partida
-               vendió en gestión: si la venta no llevó comprobante, la compra
-               tampoco lo va a llevar. -->
-          <div style="display:grid;grid-template-columns:1fr 2fr;gap:10px;margin-top:10px;
-               border-top:1px dashed var(--bor);padding-top:10px">
-            <div class="fl"><label>De gestión $ <span style="font-weight:400;color:var(--mut)">(fuera del comprobante)</span></label>
-              <input id="liq-gestion" type="number" step="0.01" style="text-align:right" oninput="liqGestionMotivo()"></div>
-            <div class="fl"><label>Motivo</label>
-              <select id="liq-gestion-motivo" disabled onchange="liqGestionMotivo()">
-                <option value="">— Elegí el motivo —</option>
+          <div class="ab-table-wrap"><table class="pa-tbl" id="liq-grilla">
+            <thead><tr>
+              <th style="width:36%">Concepto</th>
+              <th style="width:22%;text-align:right">Fiscal</th>
+              <th style="width:22%;text-align:right" title="Lo acordado que no lleva comprobante. El IVA no tiene columna acá: sale del comprobante y de nada más.">Gestión</th>
+              <th style="width:20%;text-align:right">Total</th>
+            </tr></thead>
+            <tbody id="liq-grilla-body"></tbody>
+          </table></div>
+          <div id="liq-gestion-motivo-fila" style="display:none;margin-top:10px">
+            <div class="fl" style="max-width:420px"><label>Motivo de la parte de gestión</label>
+              <select id="liq-gestion-motivo" onchange="liqTotales()">
                 <option value="ajuste_gestion">Ajuste de gestión — no va a tener comprobante</option>
                 <option value="comprobante_pendiente">Comprobante pendiente</option>
                 <option value="error_proveedor">Error del proveedor</option>
                 <option value="diferencia_peso_calidad">Diferencia de peso o calidad</option>
               </select></div>
           </div>
-          <div id="liq-gestion-ayuda" style="font-size:11.5px;color:var(--mut);margin-top:4px"></div>
+        </div>
+
+        <!-- ── EL ASIENTO, ABAJO DE TODO ─────────────────────────────
+             Pablo: "por último abajo de todo, asiento resumen con lo de si empre
+             balancea o no. Una vez que se emite la liquidación se contabiliza".
+             Es la regla del repo: toda operación que asienta muestra el asiento
+             ANTES, porque después ya está hecho. -->
+        <div class="ab-card" style="margin-bottom:12px" id="liq-asiento-card">
+          <div id="liq-asiento">
+            <div style="font-size:12px;color:var(--mut)">Cargá los importes para ver el asiento.</div>
+          </div>
+        </div>
+        <!-- Neto y Total quedan, pero ESCONDIDOS y calculados: son lo que se
+             guarda y lo que imprime el PDF, y ahora salen de la grilla. Dejarlos
+             a mano al lado de una grilla que los calcula es invitar a que digan
+             dos cosas distintas. -->
+        <div class="ab-card" style="margin-top:12px;display:none" id="liq-totales-viejos">
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+            <div class="fl"><label>Neto $</label><input id="liq-neto" type="number" step="0.01" style="text-align:right"></div>
+            <div class="fl"><label>Total $</label><input id="liq-total" type="number" step="0.01" style="text-align:right"></div>
+          </div>
         </div>
         <div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--bor);display:flex;justify-content:flex-end;gap:8px">
           <button class="btn bo" onclick="document.getElementById('liq-modal').classList.remove('on')">Cancelar</button>
@@ -10647,6 +10718,10 @@ function liqModeloGuardar(){
 // NO PISA lo que ya se escribió: se completa lo vacío. El que corrige un dato no
 // puede perderlo porque la pantalla se refrescó.
 function liqDesdePartida(r){
+  // LA UNIDAD LA MANDA LA ORDEN DE COMPRA. La usa liqRenderArt para rotular las
+  // columnas: liquidarle kilos a una compra pactada por cajón es cambiarle la
+  // unidad del trato en el papel donde cobra.
+  LIQ.unidad = r.unidad || '';
   var poner = function(id, val){
     var e = eid(id);
     if (e && !String(e.value || '').trim() && val != null && val !== '') e.value = val;
@@ -10663,7 +10738,9 @@ function liqDesdePartida(r){
   // lista está vacía — si alguien ya tocó un renglón, manda lo que tocó.
   if ((r.articulos || []).length && !_liqLeerArt().length) {
     liqRenderArt(r.articulos.map(function(a){
-      return { articulo: a.articulo, nro_camion: '',
+      // La unidad viaja con el renglón: la manda la orden de compra y el PDF la
+      // imprime. El productor cobra en la unidad en la que se le compró.
+      return { articulo: a.articulo, unidad: a.unidad || '',
         cantidad: a.cantidad, precio: a.precio, importe: a.importe };
     }));
   }
@@ -10680,22 +10757,22 @@ function liqDesdePartida(r){
   // una cuenta aparte: son los mismos números que muestra el cuadro de arriba.
   poner('liq-neto', r.neto);
   poner('liq-total', Math.round(((Number(r.neto) || 0) + (Number(r.iva) || 0)) * 100) / 100);
-  // EL IVA, en un concepto propio. Es como sale en la factura de compra: cada
-  // dato fiscal en su línea, porque un total no se puede imputar.
-  if (Number(r.iva) > 0 && !_liqLeerConc().length) {
-    liqRenderConc([{ concepto: 'IVA', porcentaje: (Number(r.neto) > 0
-      ? Math.round((Number(r.iva) / Number(r.neto)) * 10000) / 100 : null), importe: r.iva }]);
-  }
-
-  // LA COMPRA DE GESTIÓN SALE DE LA VENTA DE GESTIÓN. Si la venta no llevó
-  // comprobante, la compra tampoco lo va a llevar.
-  var g = eid('liq-gestion');
-  if (g && !g.value && Number(r.gestion) > 0) {
-    g.value = r.gestion;
-    var mo = eid('liq-gestion-motivo');
-    if (mo) { mo.disabled = false; mo.value = 'ajuste_gestion'; }
-  }
-  if (typeof liqGestionMotivo === 'function') liqGestionMotivo();
+  // ── LA GRILLA SE LLENA CON LO QUE LA PARTIDA VENDIÓ ────────────────
+  //
+  // La fila VENTAS es lo que rindió, y su IVA es el del comprobante. La parte de
+  // gestión de la venta es la de la compra: es la misma operación vista de los
+  // dos lados — si la venta no llevó comprobante, la compra tampoco.
+  //
+  // Comisión, descarga y gastos administrativos quedan en blanco: son lo que
+  // cobramos nosotros y no sale de ninguna venta.
+  var pg = function(id, val){
+    var e = eid(id);
+    if (e && !String(e.value || '').trim() && Number(val)) e.value = val;
+  };
+  pg('liq-g-f-ventas', r.neto);
+  pg('liq-g-f-iva_ventas', r.iva);
+  pg('liq-g-g-ventas', r.gestion);
+  liqTotales();
 }
 
 function liqBultosAvance(){
@@ -14006,12 +14083,12 @@ function sgFraseFalta(falta){
                                           : ('Falta ' + t + '.');
 }
 
-function sgAsientoCuadro(d){
+function sgAsientoCuadro(d, titulo, donde){
   if (d.falta && d.falta.length) {
     return '<div style="border:1.5px solid #dc2626;background:#fef2f2;border-radius:8px;'
       + 'padding:10px 12px;color:#991b1b;font-size:12.5px">'
       + '<b>No se va a poder contabilizar.</b> ' + escH(sgFraseFalta(d.falta))
-      + ' Se arregla en el asiento modelo de venta, arriba.</div>';
+      + ' Se arregla en ' + escH(donde || 'el asiento modelo de venta, arriba') + '.</div>';
   }
   if (!d.lineas || !d.lineas.length) return '';
   var fil = d.lineas.map(function(l){
@@ -14036,7 +14113,7 @@ function sgAsientoCuadro(d){
       + '</td></tr>';
   }).join('');
   return '<div style="font-weight:700;font-size:12px;text-transform:uppercase;letter-spacing:.04em;'
-    + 'color:var(--mut);margin-bottom:6px">📒 Asiento contable de esta venta</div>'
+    + 'color:var(--mut);margin-bottom:6px">📒 ' + escH(titulo || 'Asiento contable de esta venta') + '</div>'
     + '<div class="ab-table-wrap"><table class="pa-tbl" style="table-layout:fixed">'
     + '<thead><tr><th style="width:14%">Código</th><th style="width:30%">Cuenta</th>'
     + '<th style="width:28%">Descripción</th>'
@@ -18853,6 +18930,32 @@ function sgRepExport(){
       <label style="font-size:11px;font-weight:700;color:#991b1b;text-transform:uppercase;display:block;margin-bottom:4px">Cheques de terceros rechazados</label>
       <div style="font-size:10px;color:#b91c1c;margin-bottom:6px">Los que rebotaron. Etapa intermedia: salieron del banco o del proveedor y todavía no volvieron a ser deuda del cliente.</div>
       <select id="sgct-cfg-imp-cheques_rechazados" onchange="sgctGuardarConfigImp('cheques_rechazados',this.value)" style="width:100%;font-size:12px"></select>
+    </div>
+  </div>
+  <!-- ── LO QUE LE COBRAMOS AL PRODUCTOR EN LA LIQUIDACIÓN ──────────────
+       Pablo: "tenés que permitirme configurar a qué rubro imputamos las
+       COMISIONES, DESCARGAS, GASTOS ADMINISTRATIVOS, así podemos armar bien el
+       asiento".
+       Son INGRESOS nuestros: le vendemos un servicio al productor y se lo
+       descontamos de lo que le pagamos. Por eso llevan IVA DÉBITO, no crédito
+       — el crédito es de la mercadería que le compramos, que es la otra mitad
+       de la misma liquidación. -->
+  <div style="font-size:10px;font-weight:700;color:var(--mut);text-transform:uppercase;letter-spacing:.08em;margin:14px 0 6px;padding-left:2px">Liquidaciones · lo que le cobramos al productor</div>
+  <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">
+    <div style="background:#f0fdf4;border:1px solid #86efac;border-radius:8px;padding:12px">
+      <label style="font-size:11px;font-weight:700;color:#15803d;text-transform:uppercase;display:block;margin-bottom:4px">Comisión</label>
+      <div style="font-size:10px;color:#16a34a;margin-bottom:6px">Lo que le cobramos por vender su mercadería. Es ingreso nuestro y va con IVA débito.</div>
+      <select id="sgct-cfg-imp-liq_comision" onchange="sgctGuardarConfigImp('liq_comision',this.value)" style="width:100%;font-size:12px"></select>
+    </div>
+    <div style="background:#f0fdf4;border:1px solid #86efac;border-radius:8px;padding:12px">
+      <label style="font-size:11px;font-weight:700;color:#15803d;text-transform:uppercase;display:block;margin-bottom:4px">Descarga</label>
+      <div style="font-size:10px;color:#16a34a;margin-bottom:6px">Lo que le cobramos por bajar la mercadería del camión.</div>
+      <select id="sgct-cfg-imp-liq_descarga" onchange="sgctGuardarConfigImp('liq_descarga',this.value)" style="width:100%;font-size:12px"></select>
+    </div>
+    <div style="background:#f0fdf4;border:1px solid #86efac;border-radius:8px;padding:12px">
+      <label style="font-size:11px;font-weight:700;color:#15803d;text-transform:uppercase;display:block;margin-bottom:4px">Gastos administrativos</label>
+      <div style="font-size:10px;color:#16a34a;margin-bottom:6px">Lo que le cobramos por administrar la operación.</div>
+      <select id="sgct-cfg-imp-liq_gastos_admin" onchange="sgctGuardarConfigImp('liq_gastos_admin',this.value)" style="width:100%;font-size:12px"></select>
     </div>
   </div>
 </div>
@@ -29205,12 +29308,13 @@ async function liqAbrirNueva() {
 
 function liqRellenarForm() {
   const d = LIQ.datos || {};
-  // La parte de gestión de la liquidación anterior no puede quedar puesta:
-  // pagarle a un productor lo que se acordó con otro es el peor error de acá.
-  var _g = document.getElementById('liq-gestion'); if (_g) _g.value = '';
-  var _gm = document.getElementById('liq-gestion-motivo');
-  if (_gm) { _gm.value = ''; _gm.disabled = true; }
-  if (typeof liqGestionMotivo === 'function') liqGestionMotivo();
+  // La grilla de la liquidación anterior no puede quedar puesta: pagarle a un
+  // productor lo que se acordó con otro es el peor error de acá.
+  LIQ.grilla = {};
+  LIQ.unidad = '';
+  liqGrillaPintar();
+  liqRemResumen();
+  liqModoCambio();
   document.getElementById('liq-numero').value   = d._proximo || '';
   document.getElementById('liq-fecha').value    = d.fecha || '';
   document.getElementById('liq-letra').value    = d.iva_letra || 'A';
@@ -29226,22 +29330,223 @@ function liqRellenarForm() {
   document.getElementById('liq-total').value    = d.total != null ? d.total : '';
   liqRenderArt(d.articulos || []);
   liqRenderMermas(d.mermas || []);
-  liqRenderConc(d.conceptos || []);
+}
+
+// ── LOS ARTÍCULOS DE LA LIQUIDACIÓN ──────────────────────────────
+//
+// SE FUE EL CAMIÓN. Pablo: "camión no es dato, sacalo". No lo era: quedaba
+// vacío en todas y ocupaba una columna al lado de la cantidad, que sí importa.
+//
+// Y LA UNIDAD LA MANDA LA ORDEN DE COMPRA. Pablo: "si la partida ingresó por
+// bultos se liquidan BULTOS, no kilos... la orden de compra manda". Al productor
+// se le paga como se le compró: liquidarle kilos una compra pactada por cajón es
+// cambiarle la unidad del trato en el papel donde cobra.
+//
+// LIQ.unidad la pone liqDesdePartida con lo que dice la partida. Si no se sabe,
+// se muestra la que traiga el renglón — nunca se inventa una.
+function liqUnidad() {
+  return (LIQ && LIQ.unidad) ? LIQ.unidad : '';
+}
+// ── LAS FILAS DE LA LIQUIDACIÓN ──────────────────────────────
+//
+// Son estas cuatro y no otras, con su IVA cada una. Antes vivían como texto
+// libre en «Conceptos»: cada uno escribía "Comision", "COMISION", "Comisión
+// s/venta"… y después no hay informe posible ni cuenta a la cual imputar.
+//
+// El espejo del backend está en servicios/asiento-liquidacion.js (FILAS_LIQ).
+// Si cambia una, cambian las dos o el preview miente.
+var LIQ_FILAS = [
+  { k:'ventas',       label:'Ventas',                 iva:'credito', gestion:true },
+  { k:'comision',     label:'Comisión',               iva:'debito',  gestion:true },
+  { k:'descarga',     label:'Descarga',                iva:'debito',  gestion:true },
+  { k:'gastos_admin', label:'Gastos administrativos',  iva:'debito',  gestion:true }
+];
+
+// El resumen del remitente, para el <summary> plegado. Los ocho campos siguen
+// estando — se imprimen y se pueden corregir — pero plegados: ocho recuadros
+// para datos que nadie va a tocar es media pantalla gastada en confirmar lo que
+// ya se sabía.
+function liqRemResumen(){
+  var e = eid('liq-r-resumen'); if (!e) return;
+  var v = function(id){ var x = eid(id); return x ? String(x.value || '').trim() : ''; };
+  var partes = [v('liq-r-nombre'), v('liq-r-cuit'), v('liq-r-iva'),
+    [v('liq-r-loc'), v('liq-r-prov')].filter(Boolean).join(', ')].filter(Boolean);
+  e.textContent = partes.length ? partes.join(' · ') : '—';
+}
+
+// A precio ABIERTO el productor cobra lo que su mercadería rindió; a precio
+// CERRADO ya estaba pactado en la orden. Son dos orígenes distintos para el
+// mismo número.
+function liqModo(){
+  var el = document.querySelector('input[name="liq-modo"]:checked');
+  return el ? el.value : 'abierto';
+}
+function liqModoCambio(){
+  var a = eid('liq-modo-ayuda');
+  var cerrado = liqModo() === 'cerrado';
+  if (a) {
+    a.innerHTML = cerrado
+      ? '<span style="color:#9a3412">El precio ya estaba pactado en la orden. '
+        + 'El circuito de precio cerrado todavía no está armado: los importes se '
+        + 'cargan a mano.</span>'
+      : 'Lo que se le paga sale de lo que su mercadería vendió, arriba.';
+  }
+  // El cuadro de ventas sólo tiene sentido a precio abierto: a precio cerrado
+  // el número no sale de ahí y mostrarlo invita a copiarlo.
+  var vc = eid('liq-venta-cab');
+  if (vc && vc.innerHTML) vc.style.display = cerrado ? 'none' : '';
+  liqTotales();
+}
+
+// ── LA GRILLA ──────────────────────────────────────────────
+// Ocho renglones: cada concepto y su IVA. Las filas de IVA NO tienen columna de
+// gestión — el crédito y el débito fiscal salen del comprobante y de nada más.
+function liqGrillaPintar(){
+  var tb = eid('liq-grilla-body'); if (!tb) return;
+  var v = (LIQ && LIQ.grilla) ? LIQ.grilla : {};
+  var inp = function(k, amb){
+    return '<input type="number" step="0.01" id="liq-g-' + amb + '-' + k + '"'
+      + ' value="' + (v[amb + '_' + k] != null ? v[amb + '_' + k] : '') + '"'
+      + ' oninput="liqTotales()" style="width:100%;text-align:right;box-sizing:border-box">';
+  };
+  var h = '';
+  LIQ_FILAS.forEach(function(f){
+    h += '<tr><td><strong>' + escH(f.label) + '</strong></td>'
+      + '<td>' + inp(f.k, 'f') + '</td>'
+      + '<td>' + inp(f.k, 'g') + '</td>'
+      + '<td style="text-align:right" id="liq-t-' + f.k + '" class="pli-num">—</td></tr>'
+      + '<tr><td style="padding-left:18px;color:var(--mut);font-size:12px">IVA de '
+        + escH(f.label.toLowerCase())
+        + ' <span style="font-size:10.5px">(' + (f.iva === 'credito' ? 'crédito' : 'débito') + ')</span></td>'
+      + '<td>' + inp('iva_' + f.k, 'f') + '</td>'
+      // Sin columna de gestión, y se dice por qué en vez de dejar un hueco.
+      + '<td style="text-align:center;color:var(--mut);font-size:11px" '
+        + 'title="El IVA sale del comprobante y de nada más">sin IVA en gestión</td>'
+      + '<td style="text-align:right" id="liq-t-iva_' + f.k + '" class="pli-num">—</td></tr>';
+  });
+  h += '<tr style="font-weight:700;border-top:2px solid var(--bor)">'
+    + '<td>Neto a pagar al productor</td>'
+    + '<td style="text-align:right" id="liq-t-pagar-f">—</td>'
+    + '<td style="text-align:right" id="liq-t-pagar-g">—</td>'
+    + '<td style="text-align:right" id="liq-t-pagar">—</td></tr>';
+  tb.innerHTML = h;
+  liqTotales();
+}
+
+// Lee la grilla. Devuelve los dos ámbitos por separado, como los quiere el
+// backend.
+function liqGrillaLeer(){
+  var num = function(id){ var e = eid(id); return e ? (parseFloat(e.value) || 0) : 0; };
+  var f = {}, g = {};
+  LIQ_FILAS.forEach(function(x){
+    f[x.k] = num('liq-g-f-' + x.k);
+    f['iva_' + x.k] = num('liq-g-f-iva_' + x.k);
+    g[x.k] = num('liq-g-g-' + x.k);
+  });
+  return { fiscal: f, gestion: g };
+}
+
+// ── LOS TOTALES Y EL ASIENTO ─────────────────────────────────
+//
+// El neto a pagar es lo que vendió más su IVA, menos todo lo que le cobramos.
+// Puede dar NEGATIVO si se le cobró más de lo que vendió: en ese caso él nos
+// debe a nosotros, y eso se muestra en rojo en vez de taparse con un cero.
+var LIQ_PREV = null;
+function liqTotales(){
+  var d = liqGrillaLeer();
+  var m2 = function(x){ return Math.round((Number(x) || 0) * 100) / 100; };
+  var pon = function(id, val, rojo){
+    var e = eid(id); if (!e) return;
+    e.innerHTML = val ? sgMoney(val) : '<span style="color:var(--mut)">—</span>';
+    e.style.color = (rojo && val < 0) ? 'var(--err)' : '';
+  };
+  var pagarF = 0, pagarG = 0;
+  LIQ_FILAS.forEach(function(x){
+    var signo = (x.k === 'ventas') ? 1 : -1;
+    pon('liq-t-' + x.k, m2(d.fiscal[x.k] + d.gestion[x.k]));
+    pon('liq-t-iva_' + x.k, m2(d.fiscal['iva_' + x.k]));
+    pagarF += signo * (d.fiscal[x.k] + d.fiscal['iva_' + x.k]);
+    pagarG += signo * d.gestion[x.k];
+  });
+  pagarF = m2(pagarF); pagarG = m2(pagarG);
+  pon('liq-t-pagar-f', pagarF, true);
+  pon('liq-t-pagar-g', pagarG, true);
+  pon('liq-t-pagar', m2(pagarF + pagarG), true);
+
+  // El motivo de gestión sólo se pide si hay gestión: pedirlo en cero es pedir
+  // un dato que no existe.
+  var fila = eid('liq-gestion-motivo-fila');
+  var hayG = LIQ_FILAS.some(function(x){ return d.gestion[x.k] !== 0; });
+  if (fila) fila.style.display = hayG ? '' : 'none';
+
+  // Neto y total, que es lo que se guarda y lo que imprime el PDF.
+  var neto = eid('liq-neto'), tot = eid('liq-total');
+  var netoV = m2(d.fiscal.ventas - d.fiscal.comision - d.fiscal.descarga - d.fiscal.gastos_admin);
+  if (neto) neto.value = netoV;
+  if (tot) tot.value = pagarF;
+
+  liqAsientoPreview(d);
+}
+
+// EL ASIENTO LO ARMA EL BACKEND. La pantalla lo muestra, no lo calcula: si los
+// dos lo calcularan, un día no van a coincidir y va a ganar el que nadie mira.
+var _liqPrevT = null;
+function liqAsientoPreview(d){
+  if (_liqPrevT) clearTimeout(_liqPrevT);
+  _liqPrevT = setTimeout(function(){
+    var c = eid('liq-asiento'); if (!c) return;
+    var hay = LIQ_FILAS.some(function(x){
+      return d.fiscal[x.k] || d.fiscal['iva_' + x.k] || d.gestion[x.k]; });
+    if (!hay) {
+      LIQ_PREV = null;
+      c.innerHTML = '<div style="font-size:12px;color:var(--mut)">Cargá los importes para ver el asiento.</div>';
+      return;
+    }
+    var mo = eid('liq-gestion-motivo');
+    api('/api/sg/liquidacion/preview-asiento', 'POST', {
+      fiscal: d.fiscal, gestion: d.gestion,
+      motivo_gestion: mo ? mo.value : 'ajuste_gestion',
+      numero: (eid('liq-numero') || {}).value || ''
+    }).then(function(r){
+      c = eid('liq-asiento'); if (!c) return;
+      if (!r || !r.ok) { c.innerHTML = '<div style="color:var(--err);font-size:12px">No se pudo armar el asiento.</div>'; return; }
+      LIQ_PREV = r;
+      c.innerHTML = sgAsientoCuadro({ falta: r.falta, lineas: r.lineas, totales: r.totales },
+        'Asiento de esta liquidación', 'el asiento modelo de liquidación, arriba');
+    });
+  }, 250);
 }
 
 function liqRenderArt(arts) {
   const c = document.getElementById('liq-articulos');
-  c.innerHTML = arts.map((a,i) =>
-    '<div class="liq-art-row" style="display:grid;grid-template-columns:3fr 1fr 1fr 1fr 1.4fr 30px;gap:6px;margin-bottom:6px;align-items:center">' +
+  const u = liqUnidad();
+  c.innerHTML =
+    '<div style="display:grid;grid-template-columns:3fr 1.2fr 1.2fr 1.5fr 30px;gap:6px;'
+    + 'font-size:11px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;'
+    + 'color:var(--mut);margin-bottom:4px">'
+    + '<div>Artículo</div><div>Cantidad' + (u ? ' (' + _liqEsc(u) + ')' : '') + '</div>'
+    + '<div>Precio' + (u ? ' por ' + _liqEsc(u) : '') + '</div>'
+    + '<div style="text-align:right">Importe</div><div></div></div>'
+    + arts.map((a,i) =>
+    '<div class="liq-art-row" style="display:grid;grid-template-columns:3fr 1.2fr 1.2fr 1.5fr 30px;gap:6px;margin-bottom:6px;align-items:center">' +
       '<input data-k="articulo"  value="'+_liqEsc(a.articulo||'')+'" placeholder="Artículo">' +
-      '<input data-k="nro_camion" value="'+_liqEsc(a.nro_camion||'')+'" placeholder="Camión">' +
-      '<input data-k="cantidad"  type="number" value="'+(a.cantidad||'')+'" placeholder="Cant.">' +
-      '<input data-k="precio"    type="number" step="0.01" value="'+(a.precio||'')+'" placeholder="Precio">' +
-      '<input data-k="importe"   type="number" step="0.01" value="'+(a.importe||'')+'" placeholder="Importe" style="text-align:right">' +
-      '<button class="btn bo bs" onclick="this.parentNode.remove()" style="color:#991b1b">×</button>' +
+      '<input data-k="cantidad"  type="number" step="0.01" value="'+(a.cantidad||'')+'" placeholder="Cant." oninput="liqArtImporte(this)">' +
+      '<input data-k="precio"    type="number" step="0.01" value="'+(a.precio||'')+'" placeholder="Precio" oninput="liqArtImporte(this)">' +
+      '<input data-k="importe"   type="number" step="0.01" value="'+(a.importe||'')+'" placeholder="Importe" style="text-align:right" oninput="liqTotales()">' +
+      '<button class="btn bo bs" onclick="this.parentNode.remove();liqTotales()" style="color:#991b1b">×</button>' +
     '</div>').join('');
+  liqTotales();
 }
-function liqAddArt() { liqRenderArt(_liqLeerArt().concat([{articulo:'',nro_camion:'',cantidad:'',precio:'',importe:''}])); }
+// Cantidad × precio = importe. El operador tipea dos y el tercero sale solo; si
+// lo corrige a mano, manda lo que corrigió — el papel puede tener un redondeo.
+function liqArtImporte(inp) {
+  const row = inp.parentNode;
+  const g = (k) => row.querySelector('input[data-k="' + k + '"]');
+  const c = parseFloat(g('cantidad').value), p = parseFloat(g('precio').value);
+  if (!isNaN(c) && !isNaN(p)) g('importe').value = Math.round(c * p * 100) / 100;
+  liqTotales();
+}
+function liqAddArt() { liqRenderArt(_liqLeerArt().concat([{articulo:'',cantidad:'',precio:'',importe:''}])); }
 function _liqLeerArt() {
   return Array.from(document.querySelectorAll('#liq-articulos .liq-art-row')).map(row => {
     const o = {};
@@ -29276,49 +29581,40 @@ function _liqLeerMermas() {
   });
 }
 
-function liqRenderConc(cs) {
-  const c = document.getElementById('liq-conceptos');
-  c.innerHTML = cs.map(x =>
-    '<div class="liq-con-row" style="display:grid;grid-template-columns:3fr 1fr 1.4fr 30px;gap:6px;margin-bottom:6px;align-items:center">' +
-      '<input data-k="concepto" value="'+_liqEsc(x.concepto||'')+'" placeholder="Concepto">' +
-      '<input data-k="porcentaje" type="number" step="0.01" value="'+(x.porcentaje!=null?x.porcentaje:'')+'" placeholder="%">' +
-      '<input data-k="importe" type="number" step="0.01" value="'+(x.importe||'')+'" placeholder="Importe" style="text-align:right">' +
-      '<button class="btn bo bs" onclick="this.parentNode.remove()" style="color:#991b1b">×</button>' +
-    '</div>').join('');
-}
-function liqAddConc(){ liqRenderConc(_liqLeerConc().concat([{concepto:'',porcentaje:'',importe:''}])); }
+// ── LOS CONCEPTOS DEL PDF SALEN DE LA GRILLA ─────────────────────
+//
+// Ya no se tipean: eran texto libre —"Comision", "COMISION", "Comisión
+// s/venta"…— y así no hay informe posible ni cuenta a la cual imputar. Ahora
+// son las cuatro filas fijas de la grilla.
+//
+// Pero el PDF los sigue imprimiendo, y tiene que hacerlo: es el detalle de lo
+// que se le descuenta al productor. Así que se DERIVAN de la grilla en vez de
+// pedirse dos veces. Los descuentos van con importe NEGATIVO, que es como los
+// lee el PDF desde siempre.
 function _liqLeerConc() {
-  return Array.from(document.querySelectorAll('#liq-conceptos .liq-con-row')).map(row => {
-    const o = {};
-    row.querySelectorAll('input[data-k]').forEach(inp => {
-      const k = inp.getAttribute('data-k');
-      if (k === 'porcentaje') {
-        o[k] = inp.value === '' ? null : parseFloat(inp.value);
-      } else if (k === 'importe') {
-        o[k] = parseFloat(inp.value) || 0;
-      } else {
-        o[k] = inp.value;
-      }
-    });
-    return o;
+  var d = liqGrillaLeer();
+  var out = [];
+  var m2 = function(x){ return Math.round((Number(x) || 0) * 100) / 100; };
+  // El IVA de las ventas es CRÉDITO nuestro: suma a lo que se le paga, no resta.
+  if (m2(d.fiscal.iva_ventas)) out.push({ concepto: 'IVA de las ventas', porcentaje: null,
+    importe: m2(d.fiscal.iva_ventas) });
+  LIQ_FILAS.forEach(function(f){
+    if (f.k === 'ventas') return;
+    var m = m2(d.fiscal[f.k]);
+    if (m) out.push({ concepto: f.label, porcentaje: null, importe: -m });
+    var iv = m2(d.fiscal['iva_' + f.k]);
+    if (iv) out.push({ concepto: 'IVA de ' + f.label.toLowerCase(), porcentaje: null, importe: -iv });
   });
+  // Y la parte de gestión, marcada: el productor tiene que ver que hay algo
+  // acordado que no lleva comprobante.
+  LIQ_FILAS.forEach(function(f){
+    var m = m2(d.gestion[f.k]);
+    if (!m) return;
+    out.push({ concepto: f.label + ' (de gestión)', porcentaje: null,
+      importe: f.k === 'ventas' ? m : -m });
+  });
+  return out;
 }
-
-function liqGestionMotivo(){
-  var m = eid('liq-gestion-motivo'), a = eid('liq-gestion-ayuda');
-  var v = Number((eid('liq-gestion') || {}).value) || 0;
-  if (m) m.disabled = !(v > 0);
-  // SIN MOTIVO NO ENTRA, y se dice acá y no cuando ya se apretó guardar. Son
-  // cuatro motivos, no texto libre: cuarenta maneras de escribir lo mismo no dan
-  // ningún informe.
-  if (a) {
-    a.textContent = (v > 0 && !(m && m.value))
-      ? 'Elegí por qué hay una parte fuera del comprobante — sin motivo no se guarda.'
-      : '';
-    a.style.color = (v > 0 && !(m && m.value)) ? 'var(--err)' : 'var(--mut)';
-  }
-}
-
 async function liqGuardar() {
   const body = {
     n_liquidacion:        document.getElementById('liq-numero').value.trim(),
@@ -29337,9 +29633,21 @@ async function liqGuardar() {
     conceptos:            _liqLeerConc(),
     neto:                 parseFloat(document.getElementById('liq-neto').value)  || 0,
     total:                parseFloat(document.getElementById('liq-total').value) || 0,
-    // El total NO se toca: es lo que dice el papel. Lo de gestión va aparte.
-    dif_gestion:          parseFloat((document.getElementById('liq-gestion')||{}).value) || 0,
+    // ── LA GRILLA ENTERA VIAJA ────────────────────────────────
+    // De acá sale el asiento, así que tiene que quedar guardada: sin la grilla no
+    // hay forma de explicar el asiento seis meses después.
+    grilla:               liqGrillaLeer(),
+    // El total NO se toca: es lo que dice el papel. La gestión va aparte, y ahora
+    // es la SUMA de las cuatro filas de gestión, no un número suelto al pie.
+    dif_gestion:          (function(){ var g = liqGrillaLeer().gestion;
+                            return Math.round((LIQ_FILAS.reduce(function(a,x){
+                              return a + (Number(g[x.k]) || 0); }, 0)) * 100) / 100; })(),
     dif_motivo:           ((document.getElementById('liq-gestion-motivo')||{}).value) || null,
+    modo_precio:          liqModo(),
+    // Por cuántos bultos se liquidó. Se tipeaban arriba y no se guardaban en
+    // ningún lado: si la liquidación era parcial, no quedaba registro.
+    bultos_ingresados:    (document.getElementById('liq-bultos-in')||{}).value || null,
+    bultos_liquidados:    (document.getElementById('liq-bultos-liq')||{}).value || null,
     texto_original:       (LIQ.datos && LIQ.datos._textoOriginal) || '',
     // De qué partida es. Sólo viaja si la liquidación se abrió desde la bandeja;
     // es lo que después saca a la partida de "pendientes de liquidar".
@@ -58194,7 +58502,10 @@ function sgctCargarConfigImp() {
         }).join('');
     ['iva_credito_fiscal','iva_debito_fiscal','percepcion_iva','percepcion_iibb',
      'percepcion_ganancias','retencion','ventas','cheques_cartera',
-     'cheques_rechazados'].forEach(function(clave) {
+     'cheques_rechazados',
+     // Las tres de la liquidación. Si la clave no está en esta lista el select
+     // queda vacío y no se puede elegir nada, aunque exista en la pantalla.
+     'liq_comision','liq_descarga','liq_gastos_admin'].forEach(function(clave) {
       var sel = document.getElementById('sgct-cfg-imp-'+clave);
       if (sel) {
         sel.innerHTML = opts;

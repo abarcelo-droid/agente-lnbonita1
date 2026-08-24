@@ -726,6 +726,17 @@ try { db.exec("CREATE INDEX IF NOT EXISTS idx_sg_pagos_compras ON sg_pagos_compr
     // nosotros. Esa etapa necesita su cuenta, o el rechazo no se puede asentar
     // sin inventar contra qué.
     ['cheques_rechazados',   'Cheques de terceros rechazados (a recuperar del cliente)'],
+    // ── LAS TRES DE LA LIQUIDACIÓN ───────────────────────────────
+    // Pablo: "tenés que permitirme configurar a qué rubro imputamos las
+    // COMISIONES, DESCARGAS, GASTOS ADMINISTRATIVOS, así podemos armar bien el
+    // asiento".
+    // No son impuestos, pero viven acá por la misma razón que el resto: son UNA
+    // cuenta para toda la empresa, se eligen una vez, y el asiento las toma de
+    // acá en vez de que cada liquidación invente la suya. Nacen en NULL: hasta
+    // que alguien las elija, la liquidación avisa y no se contabiliza.
+    ['liq_comision',         'Liquidaciones · Comisión que le cobramos al productor'],
+    ['liq_descarga',         'Liquidaciones · Descarga que le cobramos al productor'],
+    ['liq_gastos_admin',     'Liquidaciones · Gastos administrativos que le cobramos'],
   ];
   for (const [clave, desc] of claves) ins.run(clave, desc);
 }
