@@ -500,13 +500,25 @@ function lineasAsientoVenta(db, { clienteId, neto, iva, total, descuento, numero
   if (faltan.length) return { lineas: [], falta: faltan, modelo_id: mod.id };
 
   const de = (t) => mod.lineas.find((l) => l.tipo_linea === t);
-  const lCli = de('clientes'), lVta = de('ventas'), lIva = de('iva');
+  const lCli = de('clientes'), lVta = de('ventas');
 
-  // El IVA sólo se pide cuando lo hay: una factura B no lo discrimina, y exigir
-  // la cuenta ahí frenaría ventas que no la necesitan.
-  if (r2v(iva) > 0 && !lIva) {
+  // EL IVA SALE DE LA CONFIGURACIÓN GENERAL, no del modelo — igual que en
+  // compras, donde el modelo lleva mercadería y proveedores, y el IVA y las
+  // percepciones las completa la config impositiva.
+  //
+  // Es una cuenta sola para toda la empresa: repetirla en cada modelo es pedir
+  // el mismo dato muchas veces y que un día dos modelos apunten a cuentas
+  // distintas. Si el modelo la trae igual, esa gana: alguien la puso a propósito.
+  let ctaIva = (de('iva') || {}).cuenta_id || null;
+  if (!ctaIva) {
+    const c = db.prepare(`SELECT cuenta_id FROM sg_config_impositiva
+      WHERE clave='iva_debito_fiscal' AND cuenta_id IS NOT NULL`).get();
+    ctaIva = c ? c.cuenta_id : null;
+  }
+  if (r2v(iva) > 0 && !ctaIva) {
     return { lineas: [],
-      falta: ['la línea de IVA en el asiento modelo, y esta factura lo discrimina'],
+      falta: ['la cuenta de IVA Débito Fiscal en Configuración impositiva, '
+            + 'y esta factura lo discrimina'],
       modelo_id: mod.id };
   }
 
@@ -517,8 +529,8 @@ function lineasAsientoVenta(db, { clienteId, neto, iva, total, descuento, numero
       descripcion: lVta.descripcion || ('Venta ' + numero) },
   ];
   if (r2v(iva) > 0) {
-    lineas.push({ cuenta_id: lIva.cuenta_id, debe: 0, haber: r2v(iva),
-      descripcion: lIva.descripcion || 'IVA Débito Fiscal' });
+    lineas.push({ cuenta_id: ctaIva, debe: 0, haber: r2v(iva),
+      descripcion: 'IVA Débito Fiscal' });
   }
   // EL DESCUENTO COMERCIAL, EN GESTIÓN. El cliente "debería" lo de lista y la
   // venta de gestión es la de lista: la diferencia queda medida.

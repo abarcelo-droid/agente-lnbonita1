@@ -1494,7 +1494,24 @@ router.post('/modelos', requireAdmin, (req, res) => {
     return res.status(400).json({ error: 'El modelo no puede tener más de una línea de tipo "Proveedores".' });
   if (_prov.length === 1 && _prov[0].lado !== 'haber')
     return res.status(400).json({ error: 'La línea de tipo "Proveedores" tiene que ir en el HABER.' });
-  if (_prov.length === 0 && req.body.permitir_sin_proveedores !== true)
+  // UN MODELO DE VENTA NO TIENE LÍNEA DE PROVEEDORES, y hasta acá no se podía
+  // guardar ninguno: la validación daba por hecho que todo modelo era de compra.
+  // Se reconoce por sus propias líneas —Clientes y Ventas— y se valida con la
+  // regla que le corresponde.
+  const _cli = lineas.filter(l => l.tipo_linea === 'clientes');
+  const _vta = lineas.filter(l => l.tipo_linea === 'ventas');
+  if (_cli.length > 0 || _vta.length > 0) {
+    if (_prov.length) return res.status(400).json({
+      error: 'Un modelo de venta no lleva línea de Proveedores. Es una venta: el que debe es el cliente.' });
+    if (_cli.length !== 1) return res.status(400).json({
+      error: 'El modelo de venta necesita UNA línea de Clientes / Deudores, y tiene ' + _cli.length + '.' });
+    if (_cli[0].lado !== 'debe') return res.status(400).json({
+      error: 'La línea de Clientes / Deudores va en el DEBE: es lo que el cliente queda debiendo.' });
+    if (_vta.length !== 1) return res.status(400).json({
+      error: 'El modelo de venta necesita UNA línea de Ventas, y tiene ' + _vta.length + '.' });
+    if (_vta[0].lado !== 'haber') return res.status(400).json({
+      error: 'La línea de Ventas va en el HABER.' });
+  } else if (_prov.length === 0 && req.body.permitir_sin_proveedores !== true)
     return res.status(400).json({
       codigo: 'SIN_LINEA_PROVEEDORES',
       error: 'El modelo no tiene ninguna línea marcada como "Proveedores (Haber)". Sin ella no se pueden registrar facturas de compra ni emitir órdenes de pago con este modelo.'
@@ -1544,7 +1561,24 @@ router.put('/modelos/:id', requireAdmin, (req, res) => {
     return res.status(400).json({ error: 'El modelo no puede tener más de una línea de tipo "Proveedores".' });
   if (_prov.length === 1 && _prov[0].lado !== 'haber')
     return res.status(400).json({ error: 'La línea de tipo "Proveedores" tiene que ir en el HABER.' });
-  if (_prov.length === 0 && req.body.permitir_sin_proveedores !== true)
+  // UN MODELO DE VENTA NO TIENE LÍNEA DE PROVEEDORES, y hasta acá no se podía
+  // guardar ninguno: la validación daba por hecho que todo modelo era de compra.
+  // Se reconoce por sus propias líneas —Clientes y Ventas— y se valida con la
+  // regla que le corresponde.
+  const _cli = lineas.filter(l => l.tipo_linea === 'clientes');
+  const _vta = lineas.filter(l => l.tipo_linea === 'ventas');
+  if (_cli.length > 0 || _vta.length > 0) {
+    if (_prov.length) return res.status(400).json({
+      error: 'Un modelo de venta no lleva línea de Proveedores. Es una venta: el que debe es el cliente.' });
+    if (_cli.length !== 1) return res.status(400).json({
+      error: 'El modelo de venta necesita UNA línea de Clientes / Deudores, y tiene ' + _cli.length + '.' });
+    if (_cli[0].lado !== 'debe') return res.status(400).json({
+      error: 'La línea de Clientes / Deudores va en el DEBE: es lo que el cliente queda debiendo.' });
+    if (_vta.length !== 1) return res.status(400).json({
+      error: 'El modelo de venta necesita UNA línea de Ventas, y tiene ' + _vta.length + '.' });
+    if (_vta[0].lado !== 'haber') return res.status(400).json({
+      error: 'La línea de Ventas va en el HABER.' });
+  } else if (_prov.length === 0 && req.body.permitir_sin_proveedores !== true)
     return res.status(400).json({
       codigo: 'SIN_LINEA_PROVEEDORES',
       error: 'El modelo no tiene ninguna línea marcada como "Proveedores (Haber)". Sin ella no se pueden registrar facturas de compra ni emitir órdenes de pago con este modelo.'
