@@ -10767,7 +10767,7 @@ function liqDesdePartida(r){
   // cobramos nosotros y no sale de ninguna venta.
   var pg = function(id, val){
     var e = eid(id);
-    if (e && !String(e.value || '').trim() && Number(val)) e.value = val;
+    if (e && !String(e.value || '').trim() && Number(val)) liqNumPoner(e, val);
   };
   pg('liq-g-f-ventas', r.neto);
   pg('liq-g-f-iva_ventas', r.iva);
@@ -29466,6 +29466,62 @@ function liqModoCambio(){
 // ── LA GRILLA ──────────────────────────────────────────────
 // Ocho renglones: cada concepto y su IVA. Las filas de IVA NO tienen columna de
 // gestión — el crédito y el débito fiscal salen del comprobante y de nada más.
+// ── LA PLATA SE ESCRIBE COMO PLATA ─────────────────────────────
+//
+// Pablo: "poneme además los signos pesos y los puntos de los miles porque si no
+// me confundo".
+//
+// Y es cierto: "750002.4" al lado de "78750.25" son dos números que hay que
+// contar con el dedo para saber cuál es más grande. Con $750.002,40 se ve.
+//
+// Un <input type=number> NO se puede formatear — el navegador no lo permite —
+// así que los campos pasan a type=text: al ENTRAR muestran el número pelado para
+// poder tipear, y al SALIR lo muestran como plata. Lo que se lee siempre pasa por
+// liqNum(), así que el punto de mil nunca llega a una cuenta.
+function liqNum(el){
+  if (!el) return 0;
+  var t = String(el.value == null ? '' : el.value).trim();
+  if (!t) return 0;
+  t = t.replace(/[$\s]/g, '');
+  // ¿EL PUNTO ES DE MIL O ES EL DECIMAL? Las dos cosas aparecen acá: el campo
+  // muestra $1.500.002,40 y al entrar lo pela a 1500002.4 para poder tipear. Si
+  // se sacaran todos los puntos, ese 1500002.4 se volvería 15000024 al salir
+  // — diez veces la plata, sin que nadie toque nada.
+  //
+  // La regla: si hay COMA, la coma es el decimal y los puntos son de mil. Si no
+  // hay coma, un punto seguido de exactamente tres dígitos es de mil (1.500) y
+  // cualquier otro es el decimal (1500002.4).
+  if (t.indexOf(',') >= 0) {
+    t = t.replace(/\./g, '').replace(',', '.');
+  } else if (/^-?\d{1,3}(\.\d{3})+$/.test(t)) {
+    t = t.replace(/\./g, '');
+  }
+  var n = parseFloat(t);
+  return isNaN(n) ? 0 : n;
+}
+function liqPlata(n){
+  var x = Math.round((Number(n) || 0) * 100) / 100;
+  return '$' + x.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+// Al entrar, el número pelado y seleccionado: el que va a tipear encima no tiene
+// que borrar un formato primero.
+function liqNumFoco(el){
+  var n = liqNum(el);
+  el.value = n ? String(n) : '';
+  try { el.select(); } catch (_) {}
+}
+function liqNumSalida(el){
+  var n = liqNum(el);
+  el.value = n ? liqPlata(n) : '';
+}
+// Para escribir un valor desde el código. Si el campo está en foco se deja pelado:
+// formatearlo abajo del cursor mueve el cursor.
+function liqNumPoner(el, n){
+  if (!el) return;
+  var v = Math.round((Number(n) || 0) * 100) / 100;
+  el.value = (document.activeElement === el) ? (v ? String(v) : '') : (v ? liqPlata(v) : '');
+}
+
 function liqGrillaPintar(){
   var tb = eid('liq-grilla-body'); if (!tb) return;
   // Se conserva lo que ya esté tipeado: la grilla se repinta cuando cambian los
@@ -29483,10 +29539,17 @@ function liqGrillaPintar(){
   var v = (LIQ && LIQ.grilla) ? LIQ.grilla : {};
   var inp = function(k, amb){
     // Tocar las VENTAS recalcula la comisión: es un % sobre ellas, y dejarla
-    // calculada sobre el número viejo es cobrarle mal sin que se note.
-    var ev = (k === 'ventas' && amb === 'f') ? 'liqComisionCalcular()' : 'liqTotales()';
-    return '<input type="number" step="0.01" id="liq-g-' + amb + '-' + k + '"'
-      + ' value="' + (v[amb + '_' + k] != null ? v[amb + '_' + k] : '') + '"'
+    // calculada sobre el número viejo es cobrarle mal sin que se note. Y tocar el
+    // importe de un servicio recalcula SU IVA al 21%.
+    var ev = (k === 'ventas') ? 'liqComisionCalcular()'
+      : (k === 'descarga' || k === 'flete' || k === 'gastos_admin') && amb === 'f'
+          ? 'liqIvaServicio(\'' + k + '\')'
+          : 'liqTotales()';
+    var val = (v[amb + '_' + k] != null && v[amb + '_' + k] !== '')
+      ? liqPlata(v[amb + '_' + k]) : '';
+    return '<input type="text" inputmode="decimal" id="liq-g-' + amb + '-' + k + '"'
+      + ' value="' + val + '"'
+      + ' onfocus="liqNumFoco(this)" onblur="liqNumSalida(this)"'
       + ' oninput="' + ev + '" style="width:100%;text-align:right;box-sizing:border-box">';
   };
   var h = '';
@@ -29513,9 +29576,15 @@ function liqGrillaPintar(){
       + '<td>' + inp(f.k, 'f') + '</td>'
       + '<td>' + inp(f.k, 'g') + '</td>'
       + '<td style="text-align:right" id="liq-t-' + f.k + '" class="pli-num">—</td></tr>'
+      // LA ALÍCUOTA, ESCRITA. Pablo: "la alícuota del IVA de la descarga, del flete
+      // y de los gastos administrativos es el 21%... agregalo ahí, que siempre está
+      // bueno tenerlo chequeado y a mano para saber lo que estamos calculando".
+      // El del IVA de ventas NO se escribe: ese sale del comprobante de la venta y
+      // puede ser 10,5 según el producto — poner un 21% ahí sería mentir.
       + '<tr><td style="padding-left:18px;color:var(--mut);font-size:12px">IVA de '
         + escH(f.label.toLowerCase())
-        + ' <span style="font-size:10.5px">(' + (f.iva === 'credito' ? 'crédito' : 'débito') + ')</span></td>'
+        + ' <span style="font-size:10.5px">(' + (f.iva === 'credito' ? 'crédito' : 'débito')
+        + (f.k === 'ventas' ? '' : ' · ' + (LIQ.ivaPct || 21) + '%') + ')</span></td>'
       + '<td>' + inp('iva_' + f.k, 'f') + '</td>'
       // Sin columna de gestión, y se dice por qué en vez de dejar un hueco.
       + '<td style="text-align:center;color:var(--mut);font-size:11px" '
@@ -29533,26 +29602,56 @@ function liqGrillaPintar(){
 
 // Lee la grilla. Devuelve los dos ámbitos por separado, como los quiere el
 // backend.
-// La comisión sale del % sobre las ventas FISCALES. Si el operador escribe el
-// monto a mano, manda lo que escribió: el % es una ayuda, no una cárcel.
+// ── LA COMISIÓN SE COBRA SOBRE TODO LO QUE VENDIÓ ───────────────────
+//
+// Pablo: "la comisión debe afectar tanto a la parte fiscal como a la parte de
+// gestión, no así la descarga y el flete".
+//
+// Y tiene sentido: la comisión es un PORCENTAJE de lo que se vendió, y se vendió
+// las dos mitades. La descarga y el flete son costos de una sola operación
+// física — el camión vino una vez y se descargó una vez —, así que no se duplican.
+//
+// La de gestión va SIN IVA, como todo lo de gestión: el débito fiscal sale del
+// comprobante y de nada más.
+//
+// Si el operador escribe el monto a mano, manda lo que escribió: el % es una
+// ayuda, no una cárcel.
 function liqComisionCalcular(){
   var p = eid('liq-comision-pct');
-  var v = eid('liq-g-f-ventas');
-  var c = eid('liq-g-f-comision');
-  var iv = eid('liq-g-f-iva_comision');
-  if (!p || !v || !c) return;
+  if (!p) return;
+  // El % NO es plata: sigue siendo un type=number con el punto como decimal.
+  // Pasarlo por liqNum le sacaría el punto y un 12.5 se volvería 125.
   var pct = parseFloat(p.value);
-  var ventas = parseFloat(v.value);
-  if (isNaN(pct) || isNaN(ventas)) { liqTotales(); return; }
-  var m2 = function(x){ return Math.round((Number(x) || 0) * 100) / 100; };
-  c.value = m2(ventas * pct / 100);
-  if (iv) iv.value = m2(Number(c.value) * (LIQ.ivaPct || 21) / 100);
+  if (isNaN(pct)) { liqTotales(); return; }
   if (LIQ) LIQ.comisionPct = pct;
+  var m2 = function(x){ return Math.round((Number(x) || 0) * 100) / 100; };
+
+  var vF = eid('liq-g-f-ventas'), cF = eid('liq-g-f-comision');
+  if (vF && cF) {
+    liqNumPoner(cF, m2(liqNum(vF) * pct / 100));
+    liqNumPoner(eid('liq-g-f-iva_comision'), m2(liqNum(cF) * (LIQ.ivaPct || 21) / 100));
+  }
+  var vG = eid('liq-g-g-ventas'), cG = eid('liq-g-g-comision');
+  if (vG && cG) liqNumPoner(cG, m2(liqNum(vG) * pct / 100));
+  liqTotales();
+}
+
+// EL IVA DE UN SERVICIO SALE DE SU IMPORTE, AL 21%. Pablo: "la alícuota del IVA de
+// la descarga, del flete y de los gastos administrativos es el 21%". Se recalcula
+// al tocar el importe; si después se corrige el IVA a mano, queda lo corregido
+// hasta que el importe vuelva a cambiar.
+function liqIvaServicio(k){
+  var m = eid('liq-g-f-' + k), iv = eid('liq-g-f-iva_' + k);
+  if (m && iv) {
+    liqNumPoner(iv, Math.round(liqNum(m) * (LIQ.ivaPct || 21) / 100 * 100) / 100);
+  }
   liqTotales();
 }
 
 function liqGrillaLeer(){
-  var num = function(id){ var e = eid(id); return e ? (parseFloat(e.value) || 0) : 0; };
+  // Por liqNum: los campos ahora muestran $1.500.002,40 y un parseFloat de eso
+  // devuelve 1 — el punto de mil nunca puede llegar a una cuenta.
+  var num = function(id){ return liqNum(eid(id)); };
   var f = {}, g = {};
   LIQ_FILAS.forEach(function(x){
     f[x.k] = num('liq-g-f-' + x.k);
@@ -29596,8 +29695,11 @@ function liqTotales(){
   if (fila) fila.style.display = hayG ? '' : 'none';
 
   // Neto y total, que es lo que se guarda y lo que imprime el PDF.
+  // Neto y total van en campos escondidos que se guardan y que imprime el PDF:
+  // esos SÍ van pelados, porque los lee el backend.
   var neto = eid('liq-neto'), tot = eid('liq-total');
-  var netoV = m2(d.fiscal.ventas - d.fiscal.comision - d.fiscal.descarga - d.fiscal.gastos_admin);
+  var netoV = m2(d.fiscal.ventas - d.fiscal.comision - d.fiscal.descarga
+                 - d.fiscal.flete - d.fiscal.gastos_admin);
   if (neto) neto.value = netoV;
   if (tot) tot.value = pagarF;
 
