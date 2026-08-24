@@ -789,11 +789,21 @@ router.get('/competencia/:id', requireAuth, (req, res) => {
 
 router.get('/pendientes', requireAuth, (req, res) => {
   try {
+    // Con el backlog histórico cargado la cola arranca en varios cientos de artículos, así
+    // que se puede buscar y filtrar por familia: revisar 400 filas de corrido no lo hace
+    // nadie, y una cola que no se puede recortar termina sin revisarse nunca.
+    const q = norm(req.query.q || '');
+    const fam = FAMILIAS_OK.has(String(req.query.familia)) ? req.query.familia : null;
+    const cond = ['a.pendiente_revision=1'], par = [];
+    if (q) { cond.push("a.desc_canonica LIKE ? ESCAPE '\\'"); par.push('%' + q.replace(/[%_\\]/g, '\\$&') + '%'); }
+    if (fam) { cond.push('a.familia=?'); par.push(fam); }
+
+    const total = db.prepare(`SELECT COUNT(*) n FROM share_articulos a WHERE ${cond.join(' AND ')}`).get(...par).n;
     const arts = db.prepare(`
       SELECT a.*, (SELECT COALESCE(SUM(bultos),0) FROM share_v v WHERE v.articulo_id=a.id) bultos,
              (SELECT MIN(fecha_entrega) FROM share_v v WHERE v.articulo_id=a.id) primera
-        FROM share_articulos a WHERE a.pendiente_revision=1
-       ORDER BY bultos DESC LIMIT 500`).all();
+        FROM share_articulos a WHERE ${cond.join(' AND ')}
+       ORDER BY bultos DESC LIMIT 400`).all(...par);
     const provs = db.prepare(`
       SELECT p.*, (SELECT COALESCE(SUM(bultos),0) FROM share_v v WHERE v.proveedor_id=p.id) bultos
         FROM share_proveedores p WHERE p.pendiente_revision=1
@@ -803,12 +813,83 @@ router.get('/pendientes', requireAuth, (req, res) => {
              (SELECT COALESCE(SUM(bultos),0) FROM share_v v WHERE v.articulo_id=a.id) bultos
         FROM share_articulos a WHERE a.unidad='SIN_DEFINIR' OR a.unidad IS NULL
        ORDER BY bultos DESC LIMIT 300`).all();
-    res.json({ ok: true, data: { articulos: arts, proveedores: provs, sin_unidad: sinUnidad } });
+    res.json({
+      ok: true,
+      data: {
+        articulos: arts, proveedores: provs, sin_unidad: sinUnidad,
+        total_articulos: total, mostrados: arts.length,
+        // El total SIN filtrar, para que el contador de la solapa no cambie según lo que se
+        // esté buscando en ese momento.
+        pendientes_todos: db.prepare('SELECT COUNT(*) n FROM share_articulos WHERE pendiente_revision=1').get().n,
+      },
+    });
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
 const UNIDADES_OK = new Set(['KG', 'UNIDAD', 'ATADO', 'PAQUETE', 'PACK_GR', 'SIN_DEFINIR']);
 const FAMILIAS_OK = new Set(['FRUTA', 'VERDURA', 'HOJA', 'HONGO', 'OTRO']);
+
+// ── DAR OK A VARIOS DE UNA ────────────────────────────────────────────────────────────
+// Después de cargar el histórico la cola tiene cientos de artículos y casi todos necesitan lo
+// mismo: "revisado, así está bien". De a uno son cientos de clics y el resultado práctico es
+// que la cola no se revisa nunca — y sin «la vendemos» marcado, Oportunidades no sirve.
+//
+// VA ANTES DE /articulos/:id: si no, Express no llega nunca acá, porque un PATCH a
+// /articulos sin id no matchea /:id pero el orden entre rutas hermanas es lo que decide
+// cuando alguna es más general.
+router.patch('/articulos', requireAuth, (req, res) => {
+  try {
+    if (!puedeOperar(req.user)) return res.status(403).json({ ok: false, error: 'Tu acceso a SHARE es de solo lectura.' });
+    const b = req.body || {};
+    const ids = (Array.isArray(b.ids) ? b.ids : []).map(x => parseInt(x, 10)).filter(x => x > 0);
+    if (!ids.length) return res.status(400).json({ ok: false, error: 'No llegó ningún artículo.' });
+    if (ids.length > 1000) return res.status(400).json({ ok: false, error: 'Son demasiados de una vez (máximo 1000).' });
+    const c = b.cambios || {};
+
+    if (c.familia !== undefined && c.familia !== null && !FAMILIAS_OK.has(String(c.familia)))
+      return res.status(400).json({ ok: false, error: 'Familia inválida.' });
+    if (c.unidad !== undefined && c.unidad !== null && !UNIDADES_OK.has(String(c.unidad)))
+      return res.status(400).json({ ok: false, error: 'Unidad inválida.' });
+
+    const set = [], par = [];
+    const campo = (k, v) => { set.push(k + '=?'); par.push(v); };
+    // Sólo lo que tiene sentido aplicar a un montón junto. La unidad y el factor de kilos NO
+    // entran: son propios de cada artículo y ponerle 1 kg por bulto a cien productos de un
+    // saque daría un total en kilos perfectamente creíble y falso.
+    if (c.la_vendemos !== undefined) campo('la_vendemos', c.la_vendemos ? 1 : 0);
+    if (c.familia !== undefined) campo('familia', c.familia || null);
+    if (c.rubro !== undefined) campo('rubro', c.rubro ? String(c.rubro).trim() : null);
+    if (c.activo !== undefined) campo('activo', c.activo ? 1 : 0);
+    // Por defecto, tocar en lote es dar el OK: sacarlo de la cola de revisión.
+    campo('pendiente_revision', c.pendiente_revision === undefined ? 0 : (c.pendiente_revision ? 1 : 0));
+
+    const marcas = ids.map(() => '?').join(',');
+    const correr = db.transaction(() => db.prepare(
+      `UPDATE share_articulos SET ${set.join(', ')} WHERE id IN (${marcas})`).run(...par, ...ids).changes);
+    const n = correr();
+    res.json({ ok: true, data: { actualizados: n, pendientes: db.prepare('SELECT COUNT(*) n FROM share_articulos WHERE pendiente_revision=1').get().n } });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+router.patch('/proveedores', requireAuth, (req, res) => {
+  try {
+    if (!puedeOperar(req.user)) return res.status(403).json({ ok: false, error: 'Tu acceso a SHARE es de solo lectura.' });
+    const b = req.body || {};
+    const ids = (Array.isArray(b.ids) ? b.ids : []).map(x => parseInt(x, 10)).filter(x => x > 0);
+    if (!ids.length) return res.status(400).json({ ok: false, error: 'No llegó ningún proveedor.' });
+    const c = b.cambios || {};
+    const set = ['pendiente_revision=?'], par = [c.pendiente_revision === undefined ? 0 : (c.pendiente_revision ? 1 : 0)];
+    if (c.tipo !== undefined) {
+      if (!TIPOS_PROV.has(String(c.tipo))) return res.status(400).json({ ok: false, error: 'Tipo inválido.' });
+      // es_nosotros y tipo son la misma decisión escrita dos veces: se mueven juntos.
+      set.unshift('tipo=?', 'es_nosotros=?'); par.unshift(c.tipo, c.tipo === 'nosotros' ? 1 : 0);
+    }
+    const marcas = ids.map(() => '?').join(',');
+    const correr = db.transaction(() => db.prepare(
+      `UPDATE share_proveedores SET ${set.join(', ')} WHERE id IN (${marcas})`).run(...par, ...ids).changes);
+    res.json({ ok: true, data: { actualizados: correr() } });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
 
 router.patch('/articulos/:id', requireAuth, (req, res) => {
   try {
