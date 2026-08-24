@@ -14189,13 +14189,11 @@ function sgPedVer(id){
 
 // ── Despachos ──
 function sgLoadDespachos(){
-  api('/api/sg/despachos').then(function(r){
+  // solo_remitos: la lista de REMITOS no lista las salidas de una venta directa.
+  api('/api/sg/despachos?solo_remitos=1').then(function(r){
     var rows=(r&&r.ok)?r.data:[];
     eid('sg-tb-despachos').innerHTML = rows.length ? rows.map(function(d){
-      // La salida existe siempre; el REMITO no. Si no se emitió —porque el papel
-      // que viajó fue la factura— se dice acá, para que nadie lo vaya a buscar.
-      var _sr = d.sin_remito ? ' <span class="bdg" style="background:var(--bor);color:var(--mut)" title="La mercadería viajó con la factura: no se emitió remito aparte">sin remito</span>' : '';
-      return '<tr><td><code>'+esc(d.numero||'')+'</code>'+_sr+'</td><td>'+(d.fecha_despacho||'—')+'</td><td>'+esc(d.cliente_alias||'—')+'</td><td>'+esc(d.cliente_nombre||'—')+'</td><td>'+esc(d.vendido||'—')+'</td><td style="text-align:right">'+sgMoney(d.total)+'</td><td style="text-align:center"><span class="bdg bok">'+(SG_ESTDESP[d.estado]||d.estado)+'</span></td><td style="text-align:right;white-space:nowrap"><button class="btn bo bs" onclick="sgDespVer('+d.id+')">🔍</button>'+(lnbPuedeAnular('sg-ventas')?' <button class="btn bd bs" title="Anular el despacho" onclick="sgDespAnular('+d.id+')">✖</button>':'')+'</td></tr>';
+      return '<tr><td><code>'+esc(d.numero||'')+'</code></td><td>'+(d.fecha_despacho||'—')+'</td><td>'+esc(d.cliente_alias||'—')+'</td><td>'+esc(d.cliente_nombre||'—')+'</td><td>'+esc(d.vendido||'—')+'</td><td style="text-align:right">'+sgMoney(d.total)+'</td><td style="text-align:center"><span class="bdg bok">'+(SG_ESTDESP[d.estado]||d.estado)+'</span></td><td style="text-align:right;white-space:nowrap"><button class="btn bo bs" onclick="sgDespVer('+d.id+')">🔍</button>'+(lnbPuedeAnular('sg-ventas')?' <button class="btn bd bs" title="Anular el despacho" onclick="sgDespAnular('+d.id+')">✖</button>':'')+'</td></tr>';
     }).join('') : '<tr><td colspan="8" class="emp">Sin despachos.</td></tr>';
   });
 }

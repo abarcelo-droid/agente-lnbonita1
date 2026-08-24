@@ -6497,6 +6497,16 @@ router.get('/despachos', requireAuth, (req, res) => {
     const where = ['d.activo=1'], params = [];
     if (req.query.cliente_id) { where.push('d.cliente_id=?'); params.push(req.query.cliente_id); }
     if (req.query.estado) { where.push('d.estado=?'); params.push(req.query.estado); }
+    // LA PANTALLA DE REMITOS MUESTRA REMITOS. Una venta directa deja una salida
+    // —descuenta stock, guarda de qué partida salió— pero su documento es la
+    // factura: listarla acá es un renglón más por cada venta, con un número que
+    // nadie va a citar nunca. Pablo: "si no vamos a llenar el sistema de info
+    // que no vale la pena".
+    //
+    // El dato no se pierde: la salida sigue existiendo, y si AFIP rechazó la
+    // factura aparece en «Remitos pendientes de comprobante», que es de dónde
+    // hay que sacarla.
+    if (req.query.solo_remitos) where.push('COALESCE(d.sin_remito,0)=0');
     const rows = db.prepare(`
       SELECT d.*, c.razon_social AS cliente_nombre, c.nombre_comercial AS cliente_alias,
         p.numero AS pedido_numero,
