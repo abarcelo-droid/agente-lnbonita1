@@ -284,7 +284,9 @@ router.post('/parse', async function(req, res) {
 // ─────────────────────────────────────────────────────────────────────────────
 router.get('/', function(req, res) {
   const rows = db.prepare(`
-    SELECT id, n_liquidacion, fecha, remitente_nombre, neto, total, creado_en
+    SELECT id, n_liquidacion, fecha, remitente_nombre, neto, total, creado_en,
+      COALESCE(dif_gestion,0) AS dif_gestion, dif_motivo, asiento_id, modo_precio,
+      oc_id, bultos_liquidados
     FROM liquidaciones
     WHERE eliminado_en IS NULL
     ORDER BY fecha DESC, id DESC
