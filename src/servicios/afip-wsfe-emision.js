@@ -7,6 +7,11 @@ import db from './db.js';
 import './db_sg_finanzas.js'; // asegura que sg_ven_facturas / sg_ven_factura_items existan
 import { ambienteActual, soapCall, authXml, pick, pickAll, extraerErrores } from './afip-wsfe.js';
 import { ultimoComprobante } from './afip-wsfe.js';
+// LA VENTA TIENE QUE QUEDAR EN EL LIBRO. Este camino —el de facturación
+// directa— no generaba ningún asiento: la mercadería salía, el cliente quedaba
+// debiendo, y en la contabilidad no pasaba nada. Misma regla que en compras.
+import { lineasAsientoVenta } from './asiento-venta.js';
+import { crearAsiento } from './asientos.js';
 
 // ── Migraciones aditivas (no se tocan los archivos de Pablo) ──────────────────────
 function _alter(tabla, col, ddl) {
@@ -263,6 +268,38 @@ function actualizarFactura(database, facturaId, campos) {
 // (sg_factura_despachos) en LA MISMA transacción. Atómico: una factura autorizada SIEMPRE queda
 // con su puente; nunca queda autorizada sin él (lo que haría reaparecer los kg como pendientes →
 // doble facturación). En rechazo NO se llama → no se escriben vínculos.
+// ── LA VENTA ENTRA AL LIBRO ───────────────────────────────
+//
+// Se llama con la factura ya escrita y ANTES de darla por cerrada, para que el
+// asiento entre en el mismo acto. Es la regla de oro de compras, del lado de
+// ventas: una venta fuera del libro es plata que el cliente debe y que la
+// contabilidad no sabe que existe.
+//
+// Si al modelo le falta algo, se corta y lo dice: no se guarda una venta a
+// medias. Y si ya tiene asiento —un reintento— no se escribe dos veces.
+function asentarVenta(database, facturaId, comprobante, ptoVta, cbteNro) {
+  const ya = database.prepare('SELECT asiento_id, numero, fecha, descuento_gestion FROM sg_ven_facturas WHERE id=?').get(facturaId);
+  if (ya && ya.asiento_id) return ya.asiento_id;
+  const nro = String(ptoVta).padStart(4, '0') + '-' + String(cbteNro).padStart(8, '0');
+  const arm = lineasAsientoVenta(database, {
+    clienteId: comprobante.cliente.id,
+    neto: comprobante.imp_neto, iva: comprobante.imp_iva, total: comprobante.imp_total,
+    descuento: (ya && ya.descuento_gestion) || 0, numero: nro,
+  });
+  if (arm.falta.length) {
+    throw new Error('No se puede contabilizar la venta: falta ' + arm.falta.join(' y ')
+      + '. Se arregla en el asiento modelo de venta, en Contabilidad SG.');
+  }
+  const cli = database.prepare('SELECT razon_social r FROM sg_clientes WHERE id=?')
+    .get(comprobante.cliente.id) || {};
+  const asientoId = crearAsiento(database, {
+    fecha: (ya && ya.fecha) || null, usuario_id: null, ref_codigo: nro,
+    descripcion: 'Venta — ' + (cli.r || '') + ' — Comprobante ' + nro,
+  }, arm.lineas).id;
+  database.prepare('UPDATE sg_ven_facturas SET asiento_id=? WHERE id=?').run(asientoId, facturaId);
+  return asientoId;
+}
+
 function confirmarAutorizada(database, facturaId, campos, vinculos) {
   database.transaction(() => {
     actualizarFactura(database, facturaId, campos);
@@ -302,6 +339,7 @@ export async function emitir(database, { ptoVta, clienteId, items, esNC, userId,
       // La MISMA función que el camino de AFIP: cierra la factura y ata los
       // despachos en una sola transacción. Escribir eso de nuevo acá sería dos
       // maneras de hacer lo mismo, y una de las dos se olvidaría de algo.
+      asentarVenta(database, facturaId, comprobante, ptoVta, cbteNro);
       confirmarAutorizada(database, facturaId, {
         // NO se toca `estado`: queda en 'pendiente', que es lo que significa —
         // el comprobante está emitido y todavía no se cobró. Es lo mismo que
@@ -342,6 +380,8 @@ export async function emitir(database, { ptoVta, clienteId, items, esNC, userId,
 
     if (resp.resultado === 'A' && resp.cae) {
       // Atómico: estado autorizado + CAE + puente factura↔despacho en una sola transacción.
+      // La venta autorizada entra al libro en el mismo acto.
+      asentarVenta(database, facturaId, comprobante, ptoVta, cbteNro);
       confirmarAutorizada(database, facturaId,
         { cae: resp.cae, cae_vto: resp.cae_vto, afip_resultado: 'A', afip_estado: 'autorizado', afip_obs: resp.obs },
         vinculos);
