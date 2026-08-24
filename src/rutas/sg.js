@@ -847,7 +847,8 @@ const postEmitir = async (req, res) => {
       for (const it of (Array.isArray(sel.items) ? sel.items : [])) {
         const diId = Number(it.despacho_item_id), kg = Number(it.kg);
         if (!(kg > 0)) continue;
-        const di = db.prepare(`SELECT di.id, di.producto_id, di.kg_despachados, di.precio_por_kg, di.presentacion_id,
+        const di = db.prepare(`SELECT di.id, di.producto_id, di.kg_despachados, di.precio_por_kg,
+            di.precio_lista_por_kg, di.presentacion_id,
             COALESCE(di.kg_por_bulto, ps.factor_conversion) AS kg_por_bulto, fam.iva_alicuota
           FROM sg_despacho_items di
           LEFT JOIN sg_productos pr ON pr.id=di.producto_id
@@ -875,7 +876,23 @@ const postEmitir = async (req, res) => {
         const precioPorBulto = kpb != null ? +(precioNeto * kpb).toFixed(4) : null; // = precio_kg neto × kg_por_bulto
         items.push({ producto_id: Number(di.producto_id), cantidad: kg, precio: precioNeto,
           bultos: bultosLinea, kg_por_bulto: kpb, precio_por_bulto: precioPorBulto, unidad: kpb != null ? 'cajón' : null });
-        vinculos.push({ despacho_id: despachoId, despacho_item_id: diId, kg });
+        // ── LOS PESOS DE ESTA LÍNEA, GUARDADOS ACÁ Y NO RECALCULADOS DESPUÉS ──
+        //
+        // Este es el único momento en que se sabe si el precio tipeado traía IVA
+        // adentro. Reconstruirlo más tarde sería adivinar, y de esto sale la
+        // liquidación del productor.
+        const netoLinea = r2(kg * precioNeto);
+        const ivaLinea = alic != null ? r2(netoLinea * (alic / 100)) : 0;
+        // Lo resignado por el acuerdo con el proveedor DE ESTA partida. Se mide
+        // contra el precio de lista de la misma línea, con la misma conversión de
+        // IVA: comparar un precio con IVA contra uno sin IVA da una diferencia
+        // que no existe.
+        const listaBruto = (di.precio_lista_por_kg != null && Number(di.precio_lista_por_kg) > precioBruto)
+          ? Number(di.precio_lista_por_kg) : precioBruto;
+        const listaNeto = (incluyeIva && alic != null) ? +(listaBruto / (1 + alic / 100)).toFixed(4) : listaBruto;
+        const gestionLinea = r2(kg * (listaNeto - precioNeto));
+        vinculos.push({ despacho_id: despachoId, despacho_item_id: diId, kg,
+          neto: netoLinea, iva: ivaLinea, gestion: gestionLinea > 0 ? gestionLinea : 0 });
       }
     }
     if (!items.length) return res.status(400).json({ ok: false, error: 'No hay líneas válidas para facturar' });
@@ -884,9 +901,14 @@ const postEmitir = async (req, res) => {
     // pasaba a nadie—. La columna quedaba en NULL y el asiento salía con las tres
     // líneas fiscales, sin la parte de gestión. El preview mostraba cinco líneas
     // y el libro guardaba tres: exactamente lo que el preview promete no hacer.
+    // EL TOTAL DE GESTIÓN SALE DE LAS LÍNEAS, no del número que manda la pantalla.
+    // La pantalla muestra un preview; el backend es el que decide. Si los dos
+    // calcularan por su cuenta, un día no van a coincidir y va a ganar el que
+    // nadie mira.
+    const gestionLineas = r2(vinculos.reduce((a, v) => a + (Number(v.gestion) || 0), 0));
     const r = await afipEmitir(db, { ptoVta: pv, clienteId, items, esNC: b.es_nc === true,
       userId: uid(req), vinculos,
-      descuentoGestion: Number(b.descuento_gestion) || 0 });
+      descuentoGestion: gestionLineas || (Number(b.descuento_gestion) || 0) });
     if (r.ok) r.pdf_url = '/api/sg/ventas/facturas/' + r.factura_id + '/pdf';
     res.json(r);
   } catch (e) { res.status(502).json({ ok: false, error: e.message }); }
@@ -940,6 +962,10 @@ router.post('/facturas/directa', requireAuth, async (req, res) => {
     observaciones: b.observaciones || 'Facturación directa',
     items: items.map((it) => ({ origen: 'lote', lote_id: it.lote_id, bultos: it.bultos,
       kg_despachados: it.kg_despachados, precio_por_kg: it.precio_por_kg,
+      // EL PRECIO DE LISTA VIAJA HASTA LA LÍNEA. Acá se caía: lo resignado llegaba
+      // sólo como un total de la factura, y después no había forma de decir cuánto
+      // resignó CADA partida — que es lo que hay que liquidarle a cada productor.
+      precio_lista_por_kg: it.precio_lista_por_kg,
       nota_precio: it.nota_precio })),
   });
   if (rem.status !== 200 || !rem.body?.ok) return res.status(rem.status).json(rem.body);
@@ -2594,17 +2620,29 @@ router.get('/stock-pisos/imprimir', requireAuth, (req, res) => {
   } catch (e) { res.status(500).send('Error: ' + e.message); }
 });
 
-// ── CUÁNTO SE VENDIÓ DE ESTA PARTIDA ──────────────────────────────
+// ── CUÁNTO VENDIÓ ESTA PARTIDA ───────────────────────────────
 //
-// Es el número con el que se liquida: a precio abierto el productor cobra lo que
-// su mercadería rindió, y hasta ahora ese total había que armarlo a mano mirando
-// remitos y facturas de a uno.
+// Pablo, 24/8/2026 — y es norma contable, no preferencia:
 //
-// CÓMO SE REPARTE UNA FACTURA ENTRE PARTIDAS. Una factura suele llevar
-// mercadería de varias partidas, y el neto/IVA que tiene son de la factura
-// entera. Se prorratea por el VALOR de lo que aportó cada una —kg facturados por
-// su precio—, no por los kilos: dos partidas de distinto producto pesan igual y
-// valen muy distinto, y prorratear por kilo le regalaría plata a la barata.
+//   "la venta que debe traer la partida es la venta EXACTA en pesos que tuvo
+//    esa partida. No hay que ni dividirla por kilos ni cuestiones raras: hay
+//    que traer la venta tal como está en las partidas. Esta va a ser la norma
+//    en PRECIO ABIERTO documento liquidación."
+//
+// La primera versión de esto prorrateaba el neto de cada factura entre las
+// partidas que la componían. Estaba mal: un prorrateo es un reparto inventado
+// sobre un total, y al productor se le liquida lo que SU mercadería vendió.
+// Cuando el dato exacto existe —y existe, cada renglón del remito tiene su
+// precio— repartir es elegir aproximar.
+//
+// De dónde sale ahora: sg_factura_despachos guarda, POR RENGLÓN, los pesos que
+// fueron al comprobante. Se escriben al emitir, que es el único momento en que
+// se sabe si el precio tipeado traía IVA adentro. Acá sólo se suman.
+//
+// Para los renglones anteriores a este cambio no hay pesos guardados: se caen a
+// kg × precio del renglón, que sigue siendo SU precio y no el de otro — y se
+// dice cuántos son, para que nadie firme una liquidación creyendo que todo el
+// número salió del comprobante.
 router.get('/partidas/:id/venta', requireAuth, (req, res) => {
   const db = getDb();
   try {
@@ -2625,47 +2663,38 @@ router.get('/partidas/:id/venta', requireAuth, (req, res) => {
         JOIN sg_oc_items i ON i.id = l.oc_item_id
        WHERE i.oc_id = ?`).get(ocId);
 
-    // Las facturas que tocaron esta partida, con cuánto valor aportó ella y
-    // cuánto vale la factura entera. La segunda cuenta NO se filtra por partida:
-    // es el denominador del prorrateo.
-    const facs = db.prepare(`
-      SELECT f.id, f.numero, f.punto_venta, f.cbte_nro, f.fecha,
-        COALESCE(f.neto,0) AS neto, COALESCE(f.iva,0) AS iva,
-        COALESCE(f.dif_gestion,0) AS gestion,
-        (SELECT COALESCE(SUM(fd2.kg * COALESCE(di2.precio_por_kg,0)),0)
-           FROM sg_factura_despachos fd2
-           JOIN sg_despacho_items di2 ON di2.id = fd2.despacho_item_id
-           JOIN sg_lotes l2 ON l2.id = di2.lote_id AND l2.activo = 1
-           JOIN sg_oc_items i2 ON i2.id = l2.oc_item_id
-          WHERE fd2.factura_id = f.id AND i2.oc_id = :oc) AS base_partida,
-        (SELECT COALESCE(SUM(fd3.kg * COALESCE(di3.precio_por_kg,0)),0)
-           FROM sg_factura_despachos fd3
-           JOIN sg_despacho_items di3 ON di3.id = fd3.despacho_item_id
-          WHERE fd3.factura_id = f.id) AS base_total
-        FROM sg_ven_facturas f
-       WHERE ${facturaCuenta('f')}
-         AND EXISTS (SELECT 1 FROM sg_factura_despachos fd
-                       JOIN sg_despacho_items di ON di.id = fd.despacho_item_id
-                       JOIN sg_lotes l ON l.id = di.lote_id AND l.activo = 1
-                       JOIN sg_oc_items i ON i.id = l.oc_item_id
-                      WHERE fd.factura_id = f.id AND i.oc_id = :oc)
-       ORDER BY f.fecha, f.id`).all({ oc: ocId });
+    // LOS RENGLONES DE ESTA PARTIDA. Uno por línea facturada, con sus pesos.
+    const lineas = db.prepare(`
+      SELECT fd.id, fd.kg, fd.neto, fd.iva, fd.gestion,
+        di.precio_por_kg, di.precio_lista_por_kg,
+        f.id AS factura_id, f.fecha, f.numero, f.punto_venta, f.cbte_nro,
+        pr.nombre AS producto
+        FROM sg_factura_despachos fd
+        JOIN sg_ven_facturas f ON f.id = fd.factura_id
+        JOIN sg_despacho_items di ON di.id = fd.despacho_item_id
+        JOIN sg_lotes l ON l.id = di.lote_id AND l.activo = 1
+        JOIN sg_oc_items i ON i.id = l.oc_item_id
+        LEFT JOIN sg_productos pr ON pr.id = di.producto_id
+       WHERE i.oc_id = ? AND ${facturaCuenta('f')}
+       ORDER BY f.fecha, f.id, fd.id`).all(ocId);
 
-    let neto = 0, iva = 0, gestion = 0;
+    let neto = 0, iva = 0, gestion = 0, estimadas = 0;
     const detalle = [];
-    for (const f of facs) {
-      // Si el denominador es cero —una factura sin precios cargados— se toma
-      // entera antes que dividir por cero y perder la venta en silencio.
-      const parte = Number(f.base_total) > 0 ? Number(f.base_partida) / Number(f.base_total) : 1;
-      const n = r2(Number(f.neto) * parte);
-      const v = r2(Number(f.iva) * parte);
-      const g = r2(Number(f.gestion) * parte);
+    for (const x of lineas) {
+      // Si el renglón es anterior a este cambio no tiene pesos guardados. Se usa
+      // SU precio —no el de otra línea, no un promedio— y se cuenta aparte.
+      const exacto = x.neto != null;
+      const n = exacto ? r2(x.neto) : r2(Number(x.kg) * (Number(x.precio_por_kg) || 0));
+      const v = exacto ? r2(x.iva) : 0;
+      const g = exacto ? r2(x.gestion)
+        : r2(Number(x.kg) * Math.max(0, (Number(x.precio_lista_por_kg) || 0) - (Number(x.precio_por_kg) || 0)));
+      if (!exacto) estimadas++;
       neto += n; iva += v; gestion += g;
-      detalle.push({ factura_id: f.id, fecha: f.fecha,
-        numero: (f.punto_venta != null && f.cbte_nro != null)
-          ? String(f.punto_venta).padStart(4, '0') + '-' + String(f.cbte_nro).padStart(8, '0')
-          : f.numero,
-        parte: Math.round(parte * 10000) / 100, neto: n, iva: v, gestion: g });
+      detalle.push({ factura_id: x.factura_id, fecha: x.fecha,
+        numero: (x.punto_venta != null && x.cbte_nro != null)
+          ? String(x.punto_venta).padStart(4, '0') + '-' + String(x.cbte_nro).padStart(8, '0')
+          : x.numero,
+        producto: x.producto, kg: r2(x.kg), neto: n, iva: v, gestion: g, exacto: exacto ? 1 : 0 });
     }
 
     // LO QUE SALIÓ Y TODAVÍA NO SE FACTURÓ. No entra en las tres filas —esas son
@@ -2692,9 +2721,11 @@ router.get('/partidas/:id/venta', requireAuth, (req, res) => {
       avance: bultosIn > 0 ? Math.round((bultosOut / bultosIn) * 1000) / 10 : 0,
       neto: r2(neto), gestion: r2(gestion), iva: r2(iva),
       sin_facturar: r2(sinFac && sinFac.monto),
-      facturas: detalle });
+      lineas_estimadas: estimadas,
+      lineas: detalle });
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
+
 router.get('/partidas-a-liquidar', requireAuth, (req, res) => {
   const db = getDb();
   try {
@@ -6615,10 +6646,15 @@ const postRemito = (req, res) => {
       const despachoId = info.lastInsertRowid;
       // PARTE B — si se asignó fletero, queda un gasto de flete de salida PENDIENTE de valorizar.
       syncGastoFleteDespacho(db, despachoId, fleteroId, val(b.fecha_despacho), uid(req));
+      // precio_lista_por_kg: el precio ANTES del descuento acordado con el
+      // proveedor de esa partida. Sin él, lo resignado sólo existe como un total
+      // de la factura y no se puede decir cuánto resignó CADA partida — que es
+      // justo lo que hay que liquidarle a cada productor.
       const ins = db.prepare(`INSERT INTO sg_despacho_items
         (despacho_id, origen, lote_id, oc_item_id, producto_id, presentacion_id, envase_id, kg_por_bulto,
-         cantidad_presentaciones, bultos, kg_despachados, precio_por_kg, nota_precio, subtotal, margen_estimado, piso_id)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`);
+         cantidad_presentaciones, bultos, kg_despachados, precio_por_kg, precio_lista_por_kg,
+         nota_precio, subtotal, margen_estimado, piso_id)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`);
       const lotesAfectados = new Set();
       let totalBultos = 0;   // FASE 2 — bultos del despacho (para la carga de la cooperativa)
       for (const ln of lineas) {
@@ -6655,9 +6691,15 @@ const postRemito = (req, res) => {
         // Sin esto la apertura por piso se despegaria de la realidad apenas se
         // despacha algo: el total seguiria bien y el desglose mentiria.
         const pisoLinea = (it.piso_id != null && it.piso_id !== '') ? Number(it.piso_id) : null;
+        // El de lista sólo se guarda si de verdad hay descuento: escribir el
+        // mismo número dos veces cuando no lo hay hace creer que hubo acuerdo.
+        const pLista = (it.precio_lista_por_kg != null && it.precio_lista_por_kg !== ''
+                        && Number(it.precio_lista_por_kg) > Number(precio))
+          ? Number(it.precio_lista_por_kg) : null;
         ins.run(despachoId, ln.origen, ln.loteId || null, ln.ocItemId || null, productoId, presId,
           (ln.envaseId != null ? ln.envaseId : null), (ln.kgPorBulto != null ? ln.kgPorBulto : null),
-          bultos, bultos, kg, precio, (String(it.nota_precio || '').trim() || null), subtotal, margen,
+          bultos, bultos, kg, precio, pLista,
+          (String(it.nota_precio || '').trim() || null), subtotal, margen,
           ln.origen === 'lote' ? pisoLinea : null);
         if (ln.origen === 'lote') {
           // SACAR DEL PISO DE OTRO TAMPOCO. Si sólo se controlara recibir, se
