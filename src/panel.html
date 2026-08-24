@@ -13639,11 +13639,19 @@ function sgFacListLoad(){
     var body=fs.map(function(f){
       var num=String(f.punto_venta||0).padStart(4,'0')+'-'+String(f.cbte_nro||0).padStart(8,'0');
       var tipoB='<span class="bdg bcc">'+esc(f.tipo||'—')+'</span>';
+      // EL MANUAL NO ES UN RECHAZO. Salía con la cruz roja de error, cuando en
+      // realidad se emitió bien: lo que pasa es que no se le informó a AFIP
+      // porque su punto de venta es manual.
       var estB= f.afip_estado==='autorizado' ? '<span class="bdg bok">✓ autorizado</span>'
+              : String(f.afip_estado||'').indexOf('MANUAL')===0
+                  ? '<span class="bdg bcc">● manual — sin AFIP</span>'
               : '<span class="bdg ber">✗ '+esc(f.afip_estado||'—')+'</span>';
-      // Sólo el autorizado se imprime y se manda: sin CAE lo que saldría es un
-      // borrador con pinta de factura, y del otro lado lo registran igual.
-      var listo = f.afip_estado==='autorizado';
+      // Se imprime y se manda el autorizado Y el manual. Lo que NO se hace es
+      // disfrazarlo: el PDF del manual sale sin CAE ni QR y con la leyenda de
+      // que no tiene valor fiscal. Un borrador con pinta de factura sería peor;
+      // uno que dice lo que es, sirve — y sin él no se puede probar el circuito.
+      var esManual = String(f.afip_estado||'').indexOf('MANUAL')===0;
+      var listo = f.afip_estado==='autorizado' || esManual;
       var pdf= listo
         ? '<button class="btn bs" title="Imprimir / ver el PDF" onclick="window.open(\'/api/sg/ventas/facturas/'+f.id+'/pdf\',\'_blank\')">📄</button>' : '—';
       var mail = (listo && puedeMandar)

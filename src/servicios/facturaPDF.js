@@ -166,6 +166,20 @@ export async function generarFacturaPDF(factura) {
 
   // ── CAE + QR ──
   const yFoot = Math.max(y + 6, 262);
+  // ── UN COMPROBANTE MANUAL NO SE DISFRAZA DE FISCAL ────────────────────
+  // Sin CAE no hay QR que generar —el de ARCA se arma CON el CAE— ni
+  // "Comprobante Autorizado" que poner: no lo autorizó nadie. Y la leyenda de
+  // AFIP tampoco corresponde, porque AFIP no vio esta operación.
+  //
+  // Un papel que parece una factura y no lo es, es peor que no tenerlo.
+  if (factura.sin_valor_fiscal) {
+    doc.setTextColor(...GRIS).setFont('helvetica', 'bold').setFontSize(11)
+      .text('SIN VALOR FISCAL', 196, yFoot + 6, { align: 'right' });
+    doc.setFont('helvetica', 'normal').setFontSize(8.5)
+      .text('Comprobante interno: no fue informado a AFIP y no tiene CAE.', 196, yFoot + 12, { align: 'right' });
+    doc.setFontSize(8)
+      .text('Sirve para revisar la operación, no para respaldarla.', 196, yFoot + 17.5, { align: 'right' });
+  } else {
   const url = qrUrl(factura, rcpt);
   try {
     const qrImg = await QRCode.toDataURL(url, { margin: 1, width: 220, errorCorrectionLevel: 'M' });
@@ -175,6 +189,7 @@ export async function generarFacturaPDF(factura) {
   doc.setFont('helvetica', 'normal').setFontSize(9).text('Vto. CAE: ' + fmtFechaCae(factura.cae_vto), 196, yFoot + 12, { align: 'right' });
   doc.setTextColor(...AZUL).setFont('helvetica', 'bold').setFontSize(9).text('Comprobante Autorizado', 196, yFoot + 19, { align: 'right' });
   doc.setTextColor(...GRIS).setFont('helvetica', 'italic').setFontSize(7).text('Esta Administración Federal no se responsabiliza por los datos ingresados en el detalle de la operación.', 46, yFoot + 28, { maxWidth: 156 });
+  }
 
   // ── Marca de agua de homologación ──
   if (String(factura.ambiente || '').toLowerCase() === 'homologacion') {
