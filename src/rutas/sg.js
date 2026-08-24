@@ -5200,6 +5200,15 @@ router.get('/lotes', requireAuth, (req, res) => {
       params.push(req.query.oc_id, req.query.oc_id);
     }
     if (req.query.sin_precio === '1') where.push('l.precio_unitario_kg IS NULL');
+    // STOCK ES LO QUE HAY. Pablo: "la lista debería mostrar sólo lo que hay en
+    // stock, no agregaría «agotados»: que directamente se vaya a consultar la
+    // partida". Una partida en cero ocupa un renglón y no se puede vender; para
+    // rastrearla se entra por su código, que es lo que uno tiene en la mano.
+    //
+    // Va como parámetro y no por defecto: /lotes lo usan también la ficha de la
+    // orden y el selector de gastos, donde una partida agotada SÍ tiene que
+    // aparecer —ahí la pregunta es qué entró, no qué queda—.
+    if (req.query.con_stock === '1') where.push(`${KG_DISPONIBLE} > 0.01`);
     // Filtrar el stock por piso: "qué tengo arriba" es una pregunta del stock,
     // no de otra pantalla. El valor 'sin' trae lo que todavía no se ubicó, que
     // es justamente lo que hay que ir a acomodar.
@@ -5425,6 +5434,107 @@ router.patch('/lotes/:id/semaforo', requireAuth, (req, res) => {
 });
 
 // Trazabilidad backward: proveedor → OC → recepción → gastos → (despachos: F4) → clientes.
+// ── QUÉ LE PASÓ A ESTA PARTIDA ───────────────────────────────────
+//
+// Pablo: "de los que están en stock, haciendo click en el detalle, mostrá las
+// variaciones de stock que tuvimos —altas y bajas de esa partida—: ingresaron 10,
+// salieron 2 en la factura tal, 3 en la factura tal, 1 merma, el resto stock".
+//
+// Hasta ahora la ficha decía "quedan 310 kg" y no había cómo verificarlo: mostraba
+// los despachos donde se usó y nada más —ni cuánto entró, ni las mermas, ni si
+// los números cerraban—. Un saldo que no se puede recorrer no se puede discutir,
+// que es lo mismo que ya se había arreglado en la cuenta corriente.
+//
+// LAS BAJAS SON CUATRO Y SÓLO CUATRO. Salen de las MISMAS tablas que la fórmula
+// del stock (SUM_DESPACHADO, SUM_DECOMISO, SUM_TRANSF), así que el saldo de este
+// listado y el kg disponible de la pantalla son el mismo número por construcción:
+// si alguien cambia la fórmula y no toca esto, el test lo cachetea.
+router.get('/lotes/:id/movimientos', requireAuth, (req, res) => {
+  const db = getDb();
+  try {
+    const id = Number(req.params.id);
+    const lote = db.prepare(`SELECT l.id, l.codigo_lote, l.kg_reales, l.fecha_ingreso,
+        l.kg_por_bulto, l.bultos, pr.nombre AS producto_nombre,
+        r.numero_recepcion, pv.razon_social AS proveedor_nombre, o.numero AS oc_numero
+      FROM sg_lotes l
+      LEFT JOIN sg_productos pr ON pr.id = l.producto_id
+      LEFT JOIN sg_recepciones r ON r.id = l.recepcion_id
+      LEFT JOIN sg_oc o ON o.id = r.oc_id
+      LEFT JOIN sg_proveedores pv ON pv.id = o.proveedor_id
+      WHERE l.id = ?`).get(id);
+    if (!lote) return res.status(404).json({ ok: false, error: 'Partida inexistente' });
+
+    const movs = [];
+    // EL ALTA. Una sola: la partida entra con lo que se recibió.
+    movs.push({ tipo: 'alta', fecha: lote.fecha_ingreso, kg: Number(lote.kg_reales) || 0,
+      detalle: 'Ingreso' + (lote.proveedor_nombre ? ' — ' + lote.proveedor_nombre : ''),
+      ref: lote.numero_recepcion || lote.oc_numero || null });
+
+    // LAS SALIDAS AL CLIENTE. Se nombra el COMPROBANTE si ya se facturó, porque
+    // es por lo que el cliente reclama; si todavía no, el remito, que es lo único
+    // que hay. Decir siempre el remito obligaba a cruzarlo a mano.
+    for (const d of db.prepare(`
+      SELECT di.id, di.kg_despachados AS kg, di.bultos, d.numero AS remito, d.fecha_despacho AS fecha,
+        c.razon_social AS cliente,
+        (SELECT f.punto_venta || '-' || f.cbte_nro FROM sg_factura_despachos fd
+           JOIN sg_ven_facturas f ON f.id = fd.factura_id
+          WHERE fd.despacho_item_id = di.id AND ${facturaCuenta('f')}
+            AND f.punto_venta IS NOT NULL AND f.cbte_nro IS NOT NULL
+          ORDER BY f.id LIMIT 1) AS comprobante
+        FROM sg_despacho_items di
+        JOIN sg_despachos d ON d.id = di.despacho_id AND d.activo = 1
+        LEFT JOIN sg_clientes c ON c.id = d.cliente_id
+       WHERE di.lote_id = ? ORDER BY d.fecha_despacho, di.id`).all(id)) {
+      const nro = d.comprobante
+        ? d.comprobante.split('-').map((x, i) => String(x).padStart(i ? 8 : 4, '0')).join('-')
+        : null;
+      movs.push({ tipo: 'salida', fecha: d.fecha, kg: -(Number(d.kg) || 0), bultos: d.bultos,
+        detalle: (nro ? 'Facturado' : 'Entregado sin facturar')
+               + (d.cliente ? ' — ' + d.cliente : ''),
+        ref: nro || d.remito });
+    }
+
+    // LA MERMA. Lo que se tiró, con su motivo: sin el motivo es un número que no
+    // se le puede reclamar a nadie.
+    for (const x of db.prepare(`SELECT kg, bultos, motivo, fecha FROM sg_lote_decomisos
+       WHERE lote_id = ? ORDER BY fecha, id`).all(id)) {
+      movs.push({ tipo: 'merma', fecha: x.fecha, kg: -(Number(x.kg) || 0), bultos: x.bultos,
+        detalle: 'Merma' + (x.motivo ? ' — ' + x.motivo : ''), ref: null });
+    }
+
+    // LO QUE SE FUE A OTRA PARTIDA. Baja acá y alta allá: sin esta línea el kg
+    // aparece como perdido cuando en realidad se mudó.
+    for (const x of db.prepare(`SELECT t.kg_transformados AS kg, t.bultos_transformados AS bultos,
+        t.fecha, ld.codigo_lote AS destino
+        FROM sg_transformaciones t
+        LEFT JOIN sg_lotes ld ON ld.id = t.lote_destino_id
+       WHERE t.lote_origen_id = ? ORDER BY t.fecha, t.id`).all(id)) {
+      movs.push({ tipo: 'transformacion', fecha: x.fecha, kg: -(Number(x.kg) || 0), bultos: x.bultos,
+        detalle: 'Pasó a otra partida', ref: x.destino });
+    }
+    for (const x of db.prepare(`SELECT kg_procesados AS kg, bultos_procesados AS bultos, kg_merma, fecha
+        FROM sg_reprocesos WHERE lote_madre_id = ? AND estado = 'activo' ORDER BY fecha, id`).all(id)) {
+      movs.push({ tipo: 'reproceso', fecha: x.fecha, kg: -(Number(x.kg) || 0), bultos: x.bultos,
+        detalle: 'Reprocesado' + (Number(x.kg_merma) ? ' (merma en el proceso: '
+                 + (Math.round(Number(x.kg_merma) * 100) / 100) + ' kg)' : ''), ref: null });
+    }
+
+    // Por fecha, y el alta siempre primero: nada puede salir antes de entrar.
+    movs.sort((a, b) => (a.tipo === 'alta' ? -1 : b.tipo === 'alta' ? 1
+      : String(a.fecha || '').localeCompare(String(b.fecha || ''))));
+    let saldo = 0;
+    for (const m of movs) { saldo = Math.round((saldo + m.kg) * 100) / 100; m.saldo = saldo; }
+
+    // EL CONTROL. Este saldo tiene que dar lo MISMO que el kg disponible de la
+    // pantalla de stock —sale de las mismas tablas—. Si alguna vez no da, es que
+    // hay una baja que este listado no conoce, y eso se dice en vez de callarse:
+    // un listado que no cierra y no avisa es peor que no tenerlo.
+    const disp = db.prepare(`SELECT ${KG_DISPONIBLE} AS kg FROM sg_lotes l WHERE l.id=?`).get(id);
+    const kgDisp = Math.round((Number(disp && disp.kg) || 0) * 100) / 100;
+    res.json({ ok: true, lote, movimientos: movs, saldo,
+      kg_disponibles: kgDisp, cierra: Math.abs(saldo - kgDisp) < 0.01 });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
 router.get('/lotes/:id/trazabilidad', requireAuth, (req, res) => {
   const db = getDb();
   try {
