@@ -3393,7 +3393,8 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
                carga igual, sólo que a ciegas. -->
           <div class="fl"><label>CUIT del librador</label>
             <div style="display:flex;gap:6px">
-              <input id="cb-ct-cuit" placeholder="30-12345678-9" style="flex:1;min-width:0">
+              <input id="cb-ct-cuit" placeholder="30-12345678-9" maxlength="13" inputmode="numeric"
+                     oninput="cuitMask(this)" style="flex:1;min-width:0">
               <button class="btn bo bs" type="button" title="Central de Deudores del BCRA"
                       onclick="sgBcraVer('cb-ct-cuit','cb-ct-bcra')">🔍 BCRA</button>
             </div></div>
@@ -3947,8 +3948,8 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
                    contando dígitos: el que estaba dejaba guardar "30-1234569782-42",
                    que no es un CUIT, y así llega al libro de IVA. -->
               <div class="fl"><label>CUIT del emisor</label>
-                <input id="sgfm-f-cuit" placeholder="30-12345678-9" maxlength="13"
-                       oninput="cuitValidarInput('sgfm-f-cuit','sgfm-f-cuit-ok')">
+                <input id="sgfm-f-cuit" placeholder="30-12345678-9" maxlength="13" inputmode="numeric"
+                       oninput="cuitMaskValidar(this,'sgfm-f-cuit-ok')">
                 <div id="sgfm-f-cuit-ok" style="font-size:11px;margin-top:2px"></div></div>
               <div class="fl"><label>CAE</label><input id="sgfm-f-cae"></div>
             </div>
@@ -5134,7 +5135,8 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
             <input id="sg-cob-chq-lib" placeholder="Razón social del que emitió el cheque"></div>
           <div class="fl"><label>CUIT del librador</label>
             <div style="display:flex;gap:6px">
-              <input id="sg-cob-chq-cuit" placeholder="30-12345678-9" style="flex:1;min-width:0">
+              <input id="sg-cob-chq-cuit" placeholder="30-12345678-9" maxlength="13" inputmode="numeric"
+                     oninput="cuitMask(this)" style="flex:1;min-width:0">
               <button class="btn bo bs" type="button" title="Central de Deudores del BCRA"
                       onclick="sgBcraVer('sg-cob-chq-cuit','sg-cob-chq-bcra')">🔍 BCRA</button>
             </div></div>
@@ -6169,7 +6171,7 @@ function sgOpenProvModal(id){
          '<select id="sg-f-origen" onchange="sgProvOrigen()">'+opt('nacional','Nacional')+opt('extranjero','Extranjero')+'</select>')
     + ff('Razón social <span style="color:var(--err)">*</span>', '<input id="sg-f-razon_social" type="text">')
     + ff('Nombre comercial', '<input id="sg-f-nombre_comercial" type="text" placeholder="Nombre de fantasía">')
-    + ff('<span id="sg-prov-cuit-lbl">CUIT</span>', '<input id="sg-f-cuit" type="text" placeholder="20-12345678-9">', 'sg-prov-cuit-row')
+    + ff('<span id="sg-prov-cuit-lbl">CUIT</span>', '<input id="sg-f-cuit" type="text" placeholder="20-12345678-9" maxlength="13" inputmode="numeric" oninput="cuitMask(this)">', 'sg-prov-cuit-row')
     + ff('Tipo', '<select id="sg-f-tipo">'+tipoOpts+'</select>')
     + ff('Categoría fiscal', '<select id="sg-f-categoria_fiscal">'+catOpts+'</select>', 'sg-prov-catfisc-row')
     + ff('Tipo fiscal habitual', '<select id="sg-f-tipo_fiscal_habitual">'+fiscalOpts+'</select>', 'sg-prov-fiscal-nac-row')
@@ -12877,6 +12879,10 @@ function sgLoadStock(){
   var d=eid('sg-st-desde').value; if(d) q.push('ingreso_desde='+d);
   var h=eid('sg-st-hasta').value; if(h) q.push('ingreso_hasta='+h);
   var pis=(eid('sg-st-piso')||{}).value; if(pis) q.push('piso_id='+pis);
+  // STOCK ES LO QUE HAY. Las partidas agotadas se consultan por su código, no
+  // ocupando un renglón acá. Salvo que se pida un estado puntual —por ejemplo
+  // "bajado"—, que es justamente ir a buscar lo que ya no está.
+  if(!est) q.push('con_stock=1');
   api('/api/sg/lotes'+(q.length?('?'+q.join('&')):'')).then(function(r){
     var rows=(r&&r.ok)?r.data:[];
     eid('sg-tb-stock').innerHTML = rows.length ? rows.map(function(l){
@@ -12914,6 +12920,7 @@ function sgLoteVer(id){
     if(!r||!r.ok){ toast('Error','er'); return; }
     var d=r.data, l=d.lote;
     eid('sg-lote-tit').textContent='Lote '+l.codigo_lote;
+    sgLoteMovs(id);
     var h='';
     // resumen
     h+='<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:10px">'
@@ -12938,12 +12945,15 @@ function sgLoteVer(id){
       d.gastos_directos.forEach(function(g){ h+='&nbsp;&nbsp;• '+(g.tipo_gasto||'')+': '+sgMoney(g.monto)+'<br>'; });
     } else h+='🧾 <b>Gastos directos:</b> ninguno<br>';
     if(d.prorrateo){ h+='🏭 <b>Prorrateo global '+d.prorrateo.periodo+':</b> '+sgMoney(d.prorrateo.share)+' (de '+sgMoney(d.prorrateo.total_global)+' sobre '+nr(d.prorrateo.kg_periodo)+'kg)<br>'; }
-    // forward (despachos) — F4
-    if((d.despachos||[]).length){
-      h+='🚚 <b>Despachos donde se usó:</b><br>';
-      d.despachos.forEach(function(x){ h+='&nbsp;&nbsp;• '+esc(x.despacho_numero||'')+' → '+esc(x.cliente_nombre||'')+' ('+nr(x.kg_despachados)+'kg)<br>'; });
-    } else h+='🚚 <b>Despachos:</b> ninguno aún';
     h+='</div></details>';
+
+    // ── QUÉ LE PASÓ A ESTA PARTIDA ──────────────────────────────
+    // Acá iba una línea con "Despachos donde se usó", que decía a dónde fue
+    // parte de la mercadería y nada más: ni cuánto entró, ni las mermas, ni si
+    // los números cerraban. El listado de abajo la reemplaza y la incluye.
+    h+='<details open style="margin-bottom:10px"><summary style="cursor:pointer;font-weight:700;font-size:13px">'
+      +'📦 Movimientos de la partida</summary>'
+      +'<div id="sg-lote-movs" style="margin-top:8px;font-size:12.5px;color:var(--mut)">Cargando…</div></details>';
 
     // Editar (si no está bajado)
     if(l.estado!=='bajado'){
@@ -12972,6 +12982,58 @@ function sgLoteVer(id){
 function sgLoteBajaToggle(){
   var dest=eid('sg-lb-destino').value;
   eid('sg-lb-receptor-wrap').style.display = (dest==='donacion') ? 'block' : 'none';
+}
+// EL MOVIMIENTO DE UNA PARTIDA: UNA LÍNEA POR CADA ALTA Y CADA BAJA.
+//
+// Pablo: "ingresaron 10, salieron 2 en la factura tal, 3 en la factura tal, 1
+// merma, el resto stock". Eso es lo que convierte "quedan 310 kg" en un número
+// que se puede recorrer y discutir.
+//
+// El saldo de la última línea tiene que dar lo mismo que el kg disponible de la
+// pantalla de stock. Lo calcula el servidor y lo dice; si NO cierra, se avisa en
+// rojo: un listado que no cuadra y se calla es peor que no tenerlo.
+var SG_MOV_ICONO = { alta:'📥', salida:'🚚', merma:'🗑️',
+                     transformacion:'♻️', reproceso:'♻️' };
+function sgLoteMovs(id){
+  var c = eid('sg-lote-movs'); if (!c) return;
+  api('/api/sg/lotes/' + id + '/movimientos').then(function(r){
+    c = eid('sg-lote-movs'); if (!c) return;
+    if (!r || !r.ok) { c.innerHTML = '<span style="color:var(--err)">No se pudo leer el movimiento.</span>'; return; }
+    var ms = r.movimientos || [];
+    var kpb = Number(r.lote && r.lote.kg_por_bulto) || 0;
+    // Los bultos entre paréntesis: el depósito cuenta cajones, no kilos.
+    var cj = function(m){
+      var b = (m.bultos != null && m.bultos !== '') ? Math.abs(Number(m.bultos))
+            : (kpb > 0 ? Math.abs(m.kg) / kpb : null);
+      return (b != null && b > 0) ? ' <span style="color:var(--mut)">· ' + nr(Math.round(b*100)/100) + ' cj</span>' : '';
+    };
+    var h = '<div class="ab-table-wrap"><table class="pa-tbl"><thead><tr>'
+      + '<th style="width:92px">Fecha</th><th>Qué pasó</th>'
+      + '<th style="width:140px">Comprobante</th>'
+      + '<th style="width:110px;text-align:right">Kg</th>'
+      + '<th style="width:110px;text-align:right">Quedan</th></tr></thead><tbody>'
+      + ms.map(function(m){
+          var alta = m.kg >= 0;
+          return '<tr><td>' + escH(m.fecha || '—') + '</td>'
+            + '<td>' + (SG_MOV_ICONO[m.tipo] || '') + ' ' + escH(m.detalle || '') + cj(m) + '</td>'
+            + '<td>' + (m.ref ? '<code>' + escH(m.ref) + '</code>' : '<span style="color:var(--mut)">—</span>') + '</td>'
+            + '<td style="text-align:right;color:' + (alta ? '#0f5c4e' : '#9a3412') + '">'
+              + (alta ? '+' : '') + nr(m.kg) + '</td>'
+            + '<td style="text-align:right">' + nr(m.saldo) + '</td></tr>';
+        }).join('')
+      + '</tbody><tfoot><tr style="font-weight:700;border-top:2px solid var(--bor)">'
+      + '<td colspan="4">Queda en stock</td>'
+      + '<td style="text-align:right">' + nr(r.saldo) + '</td></tr></tfoot></table></div>';
+    // SI NO CIERRA, SE DICE. El saldo de este listado y el kg disponible de la
+    // pantalla salen de las mismas tablas: que no coincidan significa que hay una
+    // baja que este listado no conoce, y esconderlo es peor.
+    if (!r.cierra) {
+      h += '<div style="margin-top:8px;color:var(--err);font-size:12px">⚠ Este listado suma '
+        + nr(r.saldo) + ' kg y el stock dice ' + nr(r.kg_disponibles) + ' kg. '
+        + 'Hay un movimiento que no está apareciendo acá — avisá antes de vender esta partida.</div>';
+    }
+    c.innerHTML = h;
+  });
 }
 function sgLoteGuardar(id){
   var body={ fecha_vencimiento_estimada:eid('sg-le-venc').value||null, calidad:eid('sg-le-cal').value||null, calibre:eid('sg-le-calibre').value, origen:eid('sg-le-origen').value };
@@ -17713,7 +17775,8 @@ function sgRepExport(){
     <div class="fl ff"><label>Razón Social *</label><input id="adm-prov-razon" placeholder="Ej: SOLMIX SA"></div>
     <div class="fl ff"><label>Nombre Comercial</label><input id="adm-prov-nombre-com" placeholder="Ej: Solmix"></div>
     <div class="fl"><label>CUIT <span style="color:var(--err)">*</span></label>
-      <input id="adm-prov-cuit" placeholder="20-12345678-9" oninput="cuitValidarInput('adm-prov-cuit','adm-prov-cuit-fb')" onblur="cuitValidarInput('adm-prov-cuit','adm-prov-cuit-fb')">
+      <input id="adm-prov-cuit" placeholder="20-12345678-9" maxlength="13" inputmode="numeric"
+             oninput="cuitMaskValidar(this,'adm-prov-cuit-fb')" onblur="cuitValidarInput('adm-prov-cuit','adm-prov-cuit-fb')">
       <div id="adm-prov-cuit-fb" style="font-size:11px;margin-top:3px;font-weight:600"></div>
     </div>
     <div class="fl"><label>Condición IVA <span style="color:var(--err)">*</span></label>
@@ -47565,6 +47628,41 @@ function validarCuit(cuit) {
   // Formatear: XX-XXXXXXXX-X
   var fmt = limpio.substring(0,2) + '-' + limpio.substring(2,10) + '-' + limpio[10];
   return { valido: true, msg: '✅ CUIT válido', cuit_formateado: fmt };
+}
+
+// ── LOS GUIONES DEL CUIT LOS PONE LA PANTALLA ──────────────────────────
+//
+// Pablo: "adaptemos el CUIT al formato con guiones... dejamos los guiones fijos
+// donde corresponden así se escriben sólo los números".
+//
+// Antes había que tipearlos, y cada uno los ponía donde quería: 30606..., con
+// espacios, con puntos. El validador después reformateaba —pero recién al
+// terminar, así que hasta ahí el campo mostraba cualquier cosa—.
+//
+// El cursor se reubica contando DÍGITOS, no caracteres: si se contaran
+// caracteres, corregir el medio del número saltaba al final en cada tecla.
+function cuitMask(el){
+  if (!el) return;
+  var antes = el.value;
+  var pos = (el.selectionStart == null) ? antes.length : el.selectionStart;
+  var digAntes = antes.slice(0, pos).replace(/[^0-9]/g, '').length;
+  var d = antes.replace(/[^0-9]/g, '').slice(0, 11);
+  var out = d.slice(0, 2);
+  if (d.length > 2) out += '-' + d.slice(2, 10);
+  if (d.length > 10) out += '-' + d.slice(10, 11);
+  if (out === antes) return;                 // nada que reacomodar
+  el.value = out;
+  var i = 0, n = 0;
+  while (i < out.length && n < digAntes) { if (out[i] >= '0' && out[i] <= '9') n++; i++; }
+  while (i < out.length && out[i] === '-') i++;   // nadie quiere escribir antes del guión
+  try { el.setSelectionRange(i, i); } catch (_) {}
+}
+// Cuando el campo además valida, se hacen las dos cosas: primero se acomoda el
+// texto y después se juzga. Al revés, valida lo que el usuario tipeó y no lo que
+// termina viendo.
+function cuitMaskValidar(el, feedbackId){
+  cuitMask(el);
+  if (el && feedbackId) cuitValidarInput(el.id, feedbackId);
 }
 
 function cuitValidarInput(inputId, feedbackId) {
