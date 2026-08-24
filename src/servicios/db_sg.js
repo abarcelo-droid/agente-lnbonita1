@@ -1105,6 +1105,25 @@ try {
   }
 } catch (e) { console.error('[DB] SG migración sg_despachos (fletero_id):', e.message); }
 
+// A2b) NO TODA VENTA EMITE UN REMITO NUEVO (Pablo, 24/8/2026).
+//
+// En facturación directa la mercadería sale y la FACTURA es el papel que la
+// acompaña. Emitir además un remito propio es un segundo documento del mismo
+// viaje: dos números para una sola salida, y el operador no sabe cuál mostrar.
+//
+// La SALIDA sigue existiendo siempre —el despacho descuenta stock y es lo que
+// dice qué partida se le mandó a qué cliente; sin eso el lote figura disponible
+// después de vendido—. Lo que se vuelve opcional es EMITIR EL REMITO como
+// documento: con sin_remito=1 la salida no se ofrece para imprimir ni se nombra
+// como remito en ningún lado, porque el comprobante que viaja es la factura.
+try {
+  const cols = db.prepare("PRAGMA table_info(sg_despachos)").all().map(c => c.name);
+  if (!cols.includes('sin_remito')) {
+    db.exec('ALTER TABLE sg_despachos ADD COLUMN sin_remito INTEGER NOT NULL DEFAULT 0');
+    console.log('[DB] SG sg_despachos.sin_remito agregado');
+  }
+} catch (e) { console.error('[DB] SG migración sg_despachos (sin_remito):', e.message); }
+
 // A3) Tabla nueva sg_gastos_directos (genérica, FK polimórfica). Esta fase usa despacho_id;
 //     recepcion_id / lote_id quedan previstas (nullable) para fases futuras (ingreso/repaso).
 try {

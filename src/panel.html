@@ -2572,6 +2572,13 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
                proveedor es la regla, y no aplicarlo es la excepción. -->
           <label style="font-size:12px;color:var(--mut);padding-bottom:7px" title="Cada partida sale por el precio menos el descuento acordado con SU proveedor">
             <input type="checkbox" id="sgfd-aplicar-desc" checked onchange="sgFdRender()"> aplicar descuentos por proveedor</label>
+          <!-- NO TODA VENTA EMITE UN REMITO NUEVO. Acá el papel que acompaña la
+               mercadería es la factura: emitir además un remito propio son dos
+               documentos del mismo viaje. Viene DESTILDADO. La salida se registra
+               igual —descuenta stock y guarda de qué partida salió—; lo que se
+               tilda acá es el documento, para el cliente que lo exige aparte. -->
+          <label style="font-size:12px;color:var(--mut);padding-bottom:7px" title="La salida se registra siempre. Tildá esto sólo si además de la factura hace falta un remito propio.">
+            <input type="checkbox" id="sgfd-emitir-remito"> emitir remito aparte</label>
         </div>
         <div id="sgfd-items"></div>
         <div style="font-weight:600;font-size:13px;margin:12px 0 4px">Lo que se factura</div>
@@ -3519,6 +3526,9 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
       </div>
     </div>
 
+      <!-- EL LISTADO Y LA FICHA SE TURNAN. Nunca los dos a la vez: mientras se
+           trabaja sobre una cuenta, la pantalla es esa cuenta. -->
+      <div id="sg-ccli-listado">
       <div style="font-size:12px;color:var(--mut);margin-bottom:8px">
         Saldo = saldo de apertura + lo documentado (liquidaciones y facturas) + lo entregado
         sin comprobante − lo cobrado. Hacé click en un cliente para ver sus comprobantes y
@@ -3534,10 +3544,29 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
         <thead><tr><th>Cliente</th><th style="text-align:right">Saldo apertura</th><th style="text-align:right">Documentado</th><th style="text-align:right" title="Mercadería entregada con remito que todavía no se facturó">Sin comprobante</th><th style="text-align:right">Cobrado</th><th style="text-align:right">Saldo total</th><th style="text-align:right">Límite</th><th style="width:170px"></th></tr></thead>
         <tbody id="sg-tb-cc"><tr><td colspan="8" class="emp">Cargando…</td></tr></tbody>
       </table></div>
+      </div><!-- /sg-ccli-listado -->
       <!-- LA FICHA DEL CLIENTE. El listado dice cuánto debe; esto dice por qué:
            cada comprobante con lo que le queda, y los cobros que ya se le
            tomaron. Para discutir un saldo hace falta ver las dos cosas. -->
-      <div id="sg-ccli-ficha" style="margin-top:18px;display:none"></div>
+      <!-- LA FICHA VIVE EN SU PROPIA PANTALLA. Estaba inline, debajo del
+           listado: se abría un cliente, se cerraba, se abría otro, y lo de antes
+           quedaba en la página hasta que alguien lo limpiara. Pablo: "si estamos
+           operando sobre alguna cuenta corriente, que nos abra una pantalla
+           donde trabajar, me parece más ordenado".
+           Y es la misma idea que arregló el asiento fantasma: los datos de una
+           operación no se quedan viviendo sueltos en la pantalla. -->
+      <style>
+        /* NADA DE BARRA LATERAL (regla del repo). El ancho se reparte por columna
+           y lo único de largo variable —el número de comprobante, la referencia
+           del cobro— se trunca. Un saldo no se lee arrastrando la tabla. */
+        #sg-ccli-ficha .pa-tbl{width:100%;table-layout:fixed}
+        #sg-ccli-ficha .pa-tbl th,#sg-ccli-ficha .pa-tbl td{
+          padding:6px 9px;font-size:12.5px;white-space:nowrap;
+          overflow:hidden;text-overflow:ellipsis}
+        #sg-ccli-ficha .ab-table-wrap{overflow-x:hidden !important}
+        @media(max-width:900px){ #sg-ccli-ficha .ab-table-wrap{overflow-x:auto !important} }
+      </style>
+      <div id="sg-ccli-ficha" style="display:none"></div>
     
   </div>
 
@@ -13568,6 +13597,8 @@ function sgFdEmitir(){
   var btn=eid('sgfd-emitir-btn'); btn.disabled=true; var prev=btn.textContent; btn.textContent='Emitiendo…';
   api('/api/sg/facturas/directa','POST',{ cliente_id:Number(cid), punto_venta:Number(pv),
     precio_incluye_iva:!!(eid('sgfd-incluye-iva')&&eid('sgfd-incluye-iva').checked),
+    // Por defecto NO: viaja la factura. Ver el comentario del checkbox.
+    emitir_remito:!!(eid('sgfd-emitir-remito')&&eid('sgfd-emitir-remito').checked),
     // Lo que NO se facturó por los acuerdos. Va al asiento como venta de
     // gestión: es lo que la empresa pone sobre la mesa, y hay que poder sumarlo
     // por período para sentarse a renegociar.
@@ -13582,7 +13613,9 @@ function sgFdEmitir(){
       c.innerHTML='✓ <b>Comprobante '+(r.cbte_tipo===1?'A':(r.cbte_tipo===6?'B':r.cbte_tipo))+'</b> · N° '
         +String(r.pto_vta).padStart(4,'0')+'-'+String(r.cbte_nro).padStart(8,'0')
         +' · <b>CAE '+esc(r.cae)+'</b> · Vto '+esc(r.cae_vto||'—')
-        +(r.remito_numero?(' · remito <code>'+esc(r.remito_numero)+'</code>'):'')
+        +(r.remito_numero
+            ? (' · remito <code>'+esc(r.remito_numero)+'</code>')
+            : ' · <span style="color:var(--mut)">viaja con la factura, sin remito aparte</span>')
         +' &nbsp; <button class="btn bb bs" type="button" onclick="window.open(\'/api/sg/ventas/facturas/'+r.factura_id+'/pdf\',\'_blank\')">📄 Ver comprobante</button>';
       c.classList.add('on');
       SG.fdItems=[]; sgFdInit();
@@ -14159,7 +14192,10 @@ function sgLoadDespachos(){
   api('/api/sg/despachos').then(function(r){
     var rows=(r&&r.ok)?r.data:[];
     eid('sg-tb-despachos').innerHTML = rows.length ? rows.map(function(d){
-      return '<tr><td><code>'+esc(d.numero||'')+'</code></td><td>'+(d.fecha_despacho||'—')+'</td><td>'+esc(d.cliente_alias||'—')+'</td><td>'+esc(d.cliente_nombre||'—')+'</td><td>'+esc(d.vendido||'—')+'</td><td style="text-align:right">'+sgMoney(d.total)+'</td><td style="text-align:center"><span class="bdg bok">'+(SG_ESTDESP[d.estado]||d.estado)+'</span></td><td style="text-align:right;white-space:nowrap"><button class="btn bo bs" onclick="sgDespVer('+d.id+')">🔍</button>'+(lnbPuedeAnular('sg-ventas')?' <button class="btn bd bs" title="Anular el despacho" onclick="sgDespAnular('+d.id+')">✖</button>':'')+'</td></tr>';
+      // La salida existe siempre; el REMITO no. Si no se emitió —porque el papel
+      // que viajó fue la factura— se dice acá, para que nadie lo vaya a buscar.
+      var _sr = d.sin_remito ? ' <span class="bdg" style="background:var(--bor);color:var(--mut)" title="La mercadería viajó con la factura: no se emitió remito aparte">sin remito</span>' : '';
+      return '<tr><td><code>'+esc(d.numero||'')+'</code>'+_sr+'</td><td>'+(d.fecha_despacho||'—')+'</td><td>'+esc(d.cliente_alias||'—')+'</td><td>'+esc(d.cliente_nombre||'—')+'</td><td>'+esc(d.vendido||'—')+'</td><td style="text-align:right">'+sgMoney(d.total)+'</td><td style="text-align:center"><span class="bdg bok">'+(SG_ESTDESP[d.estado]||d.estado)+'</span></td><td style="text-align:right;white-space:nowrap"><button class="btn bo bs" onclick="sgDespVer('+d.id+')">🔍</button>'+(lnbPuedeAnular('sg-ventas')?' <button class="btn bd bs" title="Anular el despacho" onclick="sgDespAnular('+d.id+')">✖</button>':'')+'</td></tr>';
     }).join('') : '<tr><td colspan="8" class="emp">Sin despachos.</td></tr>';
   });
 }
@@ -15311,12 +15347,15 @@ function sgCcClFicha(id){
   var c = SG_CCLI.filas.filter(function(x){ return x.id === id; })[0];
   SG_CCLI.sel = c || { id: id, razon_social: '' };
   var cont = eid('sg-ccli-ficha'); if (!cont) return;
+  // SE TRABAJA SOBRE UNA CUENTA A LA VEZ. El listado se esconde mientras dure:
+  // así no quedan dos cosas en pantalla y el que opera sabe sobre quién está.
+  sgCcClListado(false);
   cont.style.display = '';
   cont.innerHTML = '<div class="emp">Cargando…</div>';
   api('/api/sg/ventas/cc/' + id).then(function(r){
     SG_CCLI.ficha = (r && r.ok) ? r : null;
     sgCcClFichaPintar();
-    cont.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    window.scrollTo({ top: 0, behavior: 'smooth' });
   });
 }
 
@@ -15331,7 +15370,7 @@ function sgCcClFichaPintar(){
     + '<div style="display:flex;gap:8px">'
     + (lnbPuedeOperar('sg-cc-clientes')
         ? '<button class="btn bb bs" onclick="sgCobOpen(' + c.id + ')">💵 Registrar cobro</button>' : '')
-    + '<button class="btn bo bs" onclick="sgCcClCerrar()">Cerrar</button></div></div>';
+    + '<button class="btn bo bs" onclick="sgCcClCerrar()">← Volver al listado</button></div></div>';
 
   h += '<div style="font-weight:700;font-size:12px;text-transform:uppercase;letter-spacing:.04em;'
     + 'color:var(--mut);margin:10px 0 6px">Comprobantes</div>'
@@ -15377,9 +15416,22 @@ function sgCcClFichaPintar(){
   cont.innerHTML = h;
 }
 
+// Prende o apaga el listado. Va junto con la ficha: una de las dos, nunca las
+// dos. El botón de cobrar de la cabecera pertenece al listado —adentro de una
+// ficha ya hay uno, y el de arriba abre el de OTRO cliente: dos botones de cobro
+// en la misma pantalla, apuntando a clientes distintos, es cómo se cobra mal.
+function sgCcClListado(ver){
+  var l = eid('sg-ccli-listado'); if (l) l.style.display = ver ? '' : 'none';
+  var b = eid('sg-ccli-btn-cobrar');
+  // Al volver reaparece SÓLO si el permiso lo permite — la misma regla que aplica
+  // el menú al entrar. Devolver el botón a secas se lo daba a quien no lo tiene.
+  if (b) b.style.display = (ver && lnbPuedeOperar('sg-cc-clientes')) ? '' : 'none';
+}
+
 function sgCcClCerrar(){
   SG_CCLI.sel = null;
   var c = eid('sg-ccli-ficha'); if (c) { c.style.display = 'none'; c.innerHTML = ''; }
+  sgCcClListado(true);          // al cerrar la ficha vuelve el listado
 }
 
 function sgCobAnular(id){
@@ -22854,8 +22906,7 @@ function loadSec(s) {
     'sg-gastos-directos': function(){ sgGdsInit(); },
     'sg-facturas-merc': function(){ sgFmModeloCargar(); sgFmLoad(); sgFmSinContabilizar(); },
     'sg-cc-clientes': function(){
-      var b = eid('sg-ccli-btn-cobrar');
-      if (b) b.style.display = lnbPuedeOperar('sg-cc-clientes') ? '' : 'none';
+      sgCcClCerrar();          // se entra siempre por el listado, nunca a la ficha de la visita anterior
       sgLoadCaches(function(){ sgLoadCC(); });
     },
     'sg-cc-proveedores': function(){
