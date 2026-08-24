@@ -20,6 +20,25 @@ function _alter(tabla, col, ddl) {
     if (!cols.includes(col)) { db.exec(`ALTER TABLE ${tabla} ADD COLUMN ${ddl}`); }
   } catch (e) { console.error(`[AFIP] ALTER ${tabla}.${col}:`, e.message); }
 }
+// ── LO QUE VENDIÓ CADA LÍNEA, EN PESOS Y EN SU PROPIO RENGLÓN ─────────
+//
+// Pablo, 24/8/2026: "a la hora de hacer la liquidación, la venta que debe traer
+// la partida es la venta EXACTA en pesos que tuvo esa partida. No hay que
+// dividirla por kilos ni cuestiones raras: hay que traer la venta tal como está
+// en las partidas. Esta va a ser la norma en PRECIO ABIERTO documento
+// liquidación."
+//
+// Y tiene razón: al productor se le liquida lo que SU mercadería vendió. Un
+// prorrateo —por kilos o por valor— es un reparto inventado sobre el total de
+// una factura, y no hay norma contable que lo respalde cuando el dato exacto
+// existe. Existe: cada renglón del remito tiene su precio.
+//
+// Se guardan al EMITIR, que es el único momento en que se sabe si el precio
+// tipeado traía IVA adentro o no. Recalcularlos después sería adivinar.
+_alter('sg_factura_despachos', 'neto', 'neto REAL');
+_alter('sg_factura_despachos', 'iva', 'iva REAL');
+_alter('sg_factura_despachos', 'gestion', 'gestion REAL');
+
 // sg_ven_facturas += columnas fiscales (AFIP)
 _alter('sg_ven_facturas', 'punto_venta', 'punto_venta INTEGER');
 _alter('sg_ven_facturas', 'cbte_tipo', 'cbte_tipo INTEGER');
@@ -320,10 +339,18 @@ function confirmarAutorizada(database, facturaId, campos, vinculos) {
   database.transaction(() => {
     actualizarFactura(database, facturaId, campos);
     if (Array.isArray(vinculos) && vinculos.length) {
-      const ins = database.prepare(`INSERT INTO sg_factura_despachos (factura_id, despacho_id, despacho_item_id, kg) VALUES (?,?,?,?)`);
+      const ins = database.prepare(`INSERT INTO sg_factura_despachos
+        (factura_id, despacho_id, despacho_item_id, kg, neto, iva, gestion)
+        VALUES (?,?,?,?,?,?,?)`);
       for (const v of vinculos) {
         if (!v || v.despacho_id == null) continue;
-        ins.run(facturaId, Number(v.despacho_id), v.despacho_item_id != null ? Number(v.despacho_item_id) : null, v.kg != null ? Number(v.kg) : null);
+        ins.run(facturaId, Number(v.despacho_id),
+          v.despacho_item_id != null ? Number(v.despacho_item_id) : null,
+          v.kg != null ? Number(v.kg) : null,
+          // Los pesos de ESE renglón, tal como fueron al comprobante.
+          v.neto != null ? Number(v.neto) : null,
+          v.iva != null ? Number(v.iva) : null,
+          v.gestion != null ? Number(v.gestion) : null);
       }
     }
   })();

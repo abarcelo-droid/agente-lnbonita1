@@ -1124,6 +1124,25 @@ try {
   }
 } catch (e) { console.error('[DB] SG migración sg_despachos (sin_remito):', e.message); }
 
+// A2c) EL PRECIO DE LISTA DE CADA LÍNEA, antes del descuento acordado con el
+//      proveedor de esa partida.
+//
+//      Pablo, 24/8/2026: "la venta que debe traer la partida es la venta EXACTA
+//      en pesos que tuvo esa partida. No hay que dividirla por kilos ni
+//      cuestiones raras: hay que traer la venta tal como está en las partidas."
+//
+//      Lo resignado existía sólo como un total de la factura, así que para saber
+//      cuánto resignó UNA partida había que repartir ese total —y repartir es
+//      inventar cuando el dato exacto existe—. Existe: cada renglón del remito
+//      tiene su precio, y ahora también el de lista contra el que se mide.
+try {
+  const cols = db.prepare("PRAGMA table_info(sg_despacho_items)").all().map(c => c.name);
+  if (!cols.includes('precio_lista_por_kg')) {
+    db.exec('ALTER TABLE sg_despacho_items ADD COLUMN precio_lista_por_kg REAL');
+    console.log('[DB] SG sg_despacho_items.precio_lista_por_kg agregado');
+  }
+} catch (e) { console.error('[DB] SG migración sg_despacho_items (precio_lista_por_kg):', e.message); }
+
 // A3) Tabla nueva sg_gastos_directos (genérica, FK polimórfica). Esta fase usa despacho_id;
 //     recepcion_id / lote_id quedan previstas (nullable) para fases futuras (ingreso/repaso).
 try {
