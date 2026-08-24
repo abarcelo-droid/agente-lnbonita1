@@ -2154,6 +2154,16 @@ function partidasRecibidas(db, comoSeDocumenta) {
            (SELECT COUNT(*) FROM sg_lotes l
               JOIN sg_oc_items i ON i.id = l.oc_item_id
              WHERE i.oc_id = o.id AND l.activo = 1) AS lotes,
+           -- ── CUÁNTO DE ESTA PARTIDA YA SALIÓ ────────────────────────
+           -- Una partida a precio abierto se liquida cuando se vendió: liquidar
+           -- con la mitad en el depósito es fijarle precio a lo que todavía no
+           -- se sabe cuánto va a rendir. En BULTOS, que es como se cuenta el
+           -- camión y como lo cuenta el proveedor.
+           (SELECT COALESCE(SUM(di.bultos),0) FROM sg_despacho_items di
+              JOIN sg_despachos d ON d.id = di.despacho_id AND d.activo = 1
+              JOIN sg_lotes l ON l.id = di.lote_id AND l.activo = 1
+              JOIN sg_oc_items i ON i.id = l.oc_item_id
+             WHERE i.oc_id = o.id) AS bultos_vendidos,
            (SELECT COUNT(*) FROM sg_lotes l
               JOIN sg_oc_items i ON i.id = l.oc_item_id
              WHERE i.oc_id = o.id AND l.activo = 1 AND l.precio_unitario_kg IS NULL) AS lotes_sin_precio,
@@ -2584,6 +2594,107 @@ router.get('/stock-pisos/imprimir', requireAuth, (req, res) => {
   } catch (e) { res.status(500).send('Error: ' + e.message); }
 });
 
+// ── CUÁNTO SE VENDIÓ DE ESTA PARTIDA ──────────────────────────────
+//
+// Es el número con el que se liquida: a precio abierto el productor cobra lo que
+// su mercadería rindió, y hasta ahora ese total había que armarlo a mano mirando
+// remitos y facturas de a uno.
+//
+// CÓMO SE REPARTE UNA FACTURA ENTRE PARTIDAS. Una factura suele llevar
+// mercadería de varias partidas, y el neto/IVA que tiene son de la factura
+// entera. Se prorratea por el VALOR de lo que aportó cada una —kg facturados por
+// su precio—, no por los kilos: dos partidas de distinto producto pesan igual y
+// valen muy distinto, y prorratear por kilo le regalaría plata a la barata.
+router.get('/partidas/:id/venta', requireAuth, (req, res) => {
+  const db = getDb();
+  try {
+    const ocId = Number(req.params.id);
+    const oc = db.prepare('SELECT id, trazabilidad, numero FROM sg_oc WHERE id=?').get(ocId);
+    if (!oc) return res.status(404).json({ ok: false, error: 'Partida inexistente' });
+
+    // Lo que entró y lo que salió, en bultos y en kg.
+    const tot = db.prepare(`SELECT
+        COALESCE(SUM(l.bultos),0) AS bultos, COALESCE(SUM(l.kg_reales),0) AS kg
+        FROM sg_lotes l JOIN sg_oc_items i ON i.id = l.oc_item_id
+       WHERE i.oc_id = ? AND l.activo = 1`).get(ocId);
+    const sal = db.prepare(`SELECT
+        COALESCE(SUM(di.bultos),0) AS bultos, COALESCE(SUM(di.kg_despachados),0) AS kg
+        FROM sg_despacho_items di
+        JOIN sg_despachos d ON d.id = di.despacho_id AND d.activo = 1
+        JOIN sg_lotes l ON l.id = di.lote_id AND l.activo = 1
+        JOIN sg_oc_items i ON i.id = l.oc_item_id
+       WHERE i.oc_id = ?`).get(ocId);
+
+    // Las facturas que tocaron esta partida, con cuánto valor aportó ella y
+    // cuánto vale la factura entera. La segunda cuenta NO se filtra por partida:
+    // es el denominador del prorrateo.
+    const facs = db.prepare(`
+      SELECT f.id, f.numero, f.punto_venta, f.cbte_nro, f.fecha,
+        COALESCE(f.neto,0) AS neto, COALESCE(f.iva,0) AS iva,
+        COALESCE(f.dif_gestion,0) AS gestion,
+        (SELECT COALESCE(SUM(fd2.kg * COALESCE(di2.precio_por_kg,0)),0)
+           FROM sg_factura_despachos fd2
+           JOIN sg_despacho_items di2 ON di2.id = fd2.despacho_item_id
+           JOIN sg_lotes l2 ON l2.id = di2.lote_id AND l2.activo = 1
+           JOIN sg_oc_items i2 ON i2.id = l2.oc_item_id
+          WHERE fd2.factura_id = f.id AND i2.oc_id = :oc) AS base_partida,
+        (SELECT COALESCE(SUM(fd3.kg * COALESCE(di3.precio_por_kg,0)),0)
+           FROM sg_factura_despachos fd3
+           JOIN sg_despacho_items di3 ON di3.id = fd3.despacho_item_id
+          WHERE fd3.factura_id = f.id) AS base_total
+        FROM sg_ven_facturas f
+       WHERE ${facturaCuenta('f')}
+         AND EXISTS (SELECT 1 FROM sg_factura_despachos fd
+                       JOIN sg_despacho_items di ON di.id = fd.despacho_item_id
+                       JOIN sg_lotes l ON l.id = di.lote_id AND l.activo = 1
+                       JOIN sg_oc_items i ON i.id = l.oc_item_id
+                      WHERE fd.factura_id = f.id AND i.oc_id = :oc)
+       ORDER BY f.fecha, f.id`).all({ oc: ocId });
+
+    let neto = 0, iva = 0, gestion = 0;
+    const detalle = [];
+    for (const f of facs) {
+      // Si el denominador es cero —una factura sin precios cargados— se toma
+      // entera antes que dividir por cero y perder la venta en silencio.
+      const parte = Number(f.base_total) > 0 ? Number(f.base_partida) / Number(f.base_total) : 1;
+      const n = r2(Number(f.neto) * parte);
+      const v = r2(Number(f.iva) * parte);
+      const g = r2(Number(f.gestion) * parte);
+      neto += n; iva += v; gestion += g;
+      detalle.push({ factura_id: f.id, fecha: f.fecha,
+        numero: (f.punto_venta != null && f.cbte_nro != null)
+          ? String(f.punto_venta).padStart(4, '0') + '-' + String(f.cbte_nro).padStart(8, '0')
+          : f.numero,
+        parte: Math.round(parte * 10000) / 100, neto: n, iva: v, gestion: g });
+    }
+
+    // LO QUE SALIÓ Y TODAVÍA NO SE FACTURÓ. No entra en las tres filas —esas son
+    // el comprobante— pero hay que decirlo: liquidar sin contarlo es liquidar de
+    // menos, y el productor se entera después.
+    const sinFac = db.prepare(`
+      SELECT COALESCE(SUM((di.kg_despachados
+          - COALESCE((SELECT SUM(fd.kg) FROM sg_factura_despachos fd
+              JOIN sg_ven_facturas fv ON fv.id = fd.factura_id
+             WHERE fd.despacho_item_id = di.id AND ${facturaCuenta('fv')}),0))
+        * COALESCE(di.precio_por_kg,0)),0) AS monto
+        FROM sg_despacho_items di
+        JOIN sg_despachos d ON d.id = di.despacho_id AND d.activo = 1
+        JOIN sg_lotes l ON l.id = di.lote_id AND l.activo = 1
+        JOIN sg_oc_items i ON i.id = l.oc_item_id
+       WHERE i.oc_id = ?`).get(ocId);
+
+    const bultosIn = r2(tot && tot.bultos);
+    const bultosOut = r2(sal && sal.bultos);
+    res.json({ ok: true,
+      partida: oc.trazabilidad || oc.numero,
+      bultos_ingresados: bultosIn, bultos_vendidos: bultosOut,
+      kg_ingresados: r2(tot && tot.kg), kg_vendidos: r2(sal && sal.kg),
+      avance: bultosIn > 0 ? Math.round((bultosOut / bultosIn) * 1000) / 10 : 0,
+      neto: r2(neto), gestion: r2(gestion), iva: r2(iva),
+      sin_facturar: r2(sinFac && sinFac.monto),
+      facturas: detalle });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
 router.get('/partidas-a-liquidar', requireAuth, (req, res) => {
   const db = getDb();
   try {

@@ -868,8 +868,9 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
     <div class="ab-table-wrap"><table class="pa-tbl">
       <thead><tr><th>Partida</th><th>Recibida</th><th>Proveedor</th>
         <th style="text-align:right">Bultos</th><th style="text-align:right">Kg</th>
+        <th style="width:190px" title="Bultos vendidos sobre bultos ingresados. A precio abierto se liquida lo que se vendió: con la mitad en el depósito todavía no se sabe cuánto va a rendir.">Vendido</th>
         <th style="text-align:center">Precio</th><th></th></tr></thead>
-      <tbody id="liq-tb-partidas"><tr><td colspan="7" class="emp">Cargando…</td></tr></tbody>
+      <tbody id="liq-tb-partidas"><tr><td colspan="8" class="emp">Cargando…</td></tr></tbody>
     </table></div>
   </div>
 
@@ -900,6 +901,14 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
            pegaba el texto no tenía contra qué controlarlo. -->
       <div id="liq-partida-cab" style="display:none;background:rgba(224,167,46,.12);border:1px solid #e0a72e;
            border-radius:8px;padding:10px 14px;margin-bottom:12px;font-size:13px;font-weight:600"></div>
+      <!-- ── LO QUE ESA PARTIDA VENDIÓ ──────────────────────────
+           Pablo: "cuando apretamos liquidar, arriba de todo debe traer la venta
+           total que tiene esa partida".
+           Es EL número de la liquidación: a precio abierto el productor cobra lo
+           que su mercadería rindió. Hasta ahora había que armarlo a mano mirando
+           remitos y facturas de a uno, con el proveedor esperando del otro lado
+           del teléfono. -->
+      <div id="liq-venta-cab" style="display:none;margin-bottom:12px"></div>
       <!-- Paso 1: pegar texto -->
       <div id="liq-step1">
         <div style="background:var(--bg);border-radius:8px;padding:14px 16px;margin-bottom:12px;font-size:13px;line-height:1.5">
@@ -10238,6 +10247,39 @@ function sgLoadOcRecibidas(){
 // facturarla. Son dos bandejas distintas para dos trabajos distintos.
 
 // La fila es la misma en las dos: la partida, cuándo entró, de quién, y cuánto.
+// ── CUÁNTO DE LA PARTIDA YA SE VENDIÓ ────────────────────────────
+//
+// Pablo: "lo primero que necesitamos es una barra de grado de avance: cantidad
+// de bultos vendidos vs cantidad de bultos ingresados. Mientras más bultos
+// vendidos, mejor. 100% verde, 80-99 amarillo, menos de 80% rojo. Para que
+// sepamos que está en condiciones de liquidar."
+//
+// El color no es decoración: es la respuesta a «¿ya puedo liquidar esta?» sin
+// abrir nada. A precio abierto el productor cobra lo que su mercadería rindió, y
+// liquidar con la mitad todavía en el depósito es ponerle precio a lo que no se
+// sabe cuánto va a rendir.
+//
+// En BULTOS, que es como se cuenta el camión y como lo cuenta el proveedor.
+function sgAvanceBarra(vendidos, ingresados){
+  var v = Number(vendidos) || 0, i = Number(ingresados) || 0;
+  if (!(i > 0)) {
+    return '<span style="color:var(--mut);font-size:11.5px">sin bultos cargados</span>';
+  }
+  var pct = Math.round((v / i) * 1000) / 10;
+  // Verde / amarillo / rojo. El corte en 80 es de Pablo.
+  var col = pct >= 100 ? '#16a34a' : (pct >= 80 ? '#d19a1a' : '#dc2626');
+  var fondo = pct >= 100 ? '#dcfce7' : (pct >= 80 ? '#fefce8' : '#fef2f2');
+  // La barra se topea al 100% para dibujar, pero el número se dice como es: si
+  // salió más de lo que entró hay algo mal cargado y hay que poder verlo.
+  var ancho = Math.max(0, Math.min(100, pct));
+  return '<div title="' + nr(v) + ' de ' + nr(i) + ' bultos vendidos">'
+    + '<div style="height:8px;border-radius:6px;background:' + fondo + ';overflow:hidden">'
+      + '<div style="height:100%;width:' + ancho + '%;background:' + col + '"></div></div>'
+    + '<div style="font-size:11px;color:' + col + ';font-weight:600;margin-top:2px">'
+      + pct + '% · <span style="color:var(--mut);font-weight:400">'
+      + nr(v) + ' de ' + nr(i) + ' bultos</span></div></div>';
+}
+
 function sgPartFila(p, extra){
   return '<tr>'
     + '<td><code>' + esc(p.trazabilidad || p.numero || '—') + '</code></td>'
@@ -10281,7 +10323,8 @@ function sgLiqPartidasLoad(){
       // una compra a Precio Cerrado que se documenta con liquidación llega con
       // el precio puesto y también espera su liquidación.
       return sgPartFila(p,
-        '<td style="text-align:center">'
+        '<td>' + sgAvanceBarra(p.bultos_vendidos, p.bultos_recibidos) + '</td>'
+        + '<td style="text-align:center">'
         + (p.lotes_sin_precio > 0
             ? '<b>' + nr(p.lotes_sin_precio) + '</b> de ' + nr(p.lotes) + ' sin cerrar'
             : '<span class="bdg bok">cerrado</span>')
@@ -10301,7 +10344,7 @@ function sgLiqPartidasLoad(){
                 + ' onclick="sgLiqYaEsta(' + p.id + ',\'' + esc(p.trazabilidad || '') + '\')">✔</button>'
               : '')
         + '</td>');
-    }).join('') : '<tr><td colspan="7" class="emp">No hay partidas esperando liquidación. '
+    }).join('') : '<tr><td colspan="8" class="emp">No hay partidas esperando liquidación. '
         + 'Las que se documentan con liquidación aparecen acá apenas se reciben, '
         + 'y salen cuando se les carga la liquidación.</td></tr>';
   });
@@ -10325,6 +10368,92 @@ function sgLiqYaEsta(ocId, partida){
 // Liquidar ESTA partida. El modal es el mismo de siempre, pero ya no arranca en
 // blanco: sabe de qué partida se está hablando y lo dice arriba, así el que pega
 // el texto puede controlarlo contra la mercadería que entró.
+// LA VENTA DE LA PARTIDA, ARRIBA DE TODO.
+//
+// Tres filas, que son las que pidió Pablo y en ese orden:
+//   1. VENTAS sin IVA fiscales — lo que dicen los comprobantes
+//   2. Ventas de gestión       — lo acordado que no lleva comprobante
+//   3. IVA
+//
+// Y arriba, los dos datos que se ingresan: bultos ingresados (viene puesto,
+// sale de lo que se recibió) y bultos a liquidar, que es lo que el que liquida
+// decide — no siempre se liquida todo de una.
+function liqVentaCab(ocId){
+  var c = eid('liq-venta-cab'); if (!c) return;
+  c.style.display = '';
+  c.innerHTML = '<div style="font-size:12px;color:var(--mut)">Buscando lo que vendió esta partida…</div>';
+  api('/api/sg/partidas/' + ocId + '/venta').then(function(r){
+    c = eid('liq-venta-cab'); if (!c) return;
+    if (!r || !r.ok) {
+      c.innerHTML = '<div style="font-size:12px;color:var(--err)">No se pudo leer la venta de la partida.</div>';
+      return;
+    }
+    LIQ.venta = r;
+    var fila = function(rot, val, ayuda, fuerte){
+      return '<tr><td style="padding:6px 10px;font-size:12.5px">' + rot
+        + (ayuda ? '<div style="font-size:11px;color:var(--mut)">' + ayuda + '</div>' : '') + '</td>'
+        + '<td style="padding:6px 10px;text-align:right;font-variant-numeric:tabular-nums;'
+        + (fuerte ? 'font-weight:700;font-size:14px' : '') + '">' + sgMoney(val) + '</td></tr>';
+    };
+    var h = '<div style="border:1px solid var(--bor);border-radius:10px;padding:12px 14px;background:var(--card,#fff)">'
+      + '<div style="font-weight:700;font-size:12px;text-transform:uppercase;letter-spacing:.04em;'
+      + 'color:var(--mut);margin-bottom:8px">💰 Lo que vendió esta partida</div>';
+
+    // Los dos datos que se ingresan. Ingresados viene puesto y se puede
+    // corregir: si el conteo del depósito no coincide con el remito, manda el
+    // conteo — pero que quede escrito cuál se usó.
+    h += '<div style="display:flex;gap:14px;flex-wrap:wrap;margin-bottom:10px">'
+      + '<label style="font-size:11.5px;color:var(--mut)">Bultos ingresados<br>'
+        + '<input id="liq-bultos-in" type="number" step="1" min="0" value="' + (r.bultos_ingresados || 0) + '"'
+        + ' oninput="liqBultosAvance()" style="width:130px;padding:6px 8px;border-radius:6px;border:1px solid var(--bor)"></label>'
+      + '<label style="font-size:11.5px;color:var(--mut)">Bultos a liquidar<br>'
+        + '<input id="liq-bultos-liq" type="number" step="1" min="0" value="' + (r.bultos_vendidos || 0) + '"'
+        + ' oninput="liqBultosAvance()" style="width:130px;padding:6px 8px;border-radius:6px;border:1px solid var(--bor)"></label>'
+      + '<div style="flex:1;min-width:200px;align-self:flex-end" id="liq-avance"></div></div>';
+
+    h += '<table style="width:100%;border-collapse:collapse">'
+      + fila('<b>VENTAS sin IVA</b> · fiscales', r.neto, 'Lo que dicen los comprobantes', true)
+      + fila('Ventas de gestión', r.gestion, 'Lo acordado que no lleva comprobante')
+      + fila('IVA', r.iva)
+      + '<tr><td colspan="2" style="border-top:1px solid var(--bor);padding:0"></td></tr>'
+      + fila('<b>Total</b>', (Number(r.neto) || 0) + (Number(r.gestion) || 0) + (Number(r.iva) || 0), '', true)
+      + '</table>';
+
+    // LO QUE SALIÓ Y NO SE FACTURÓ no está en las tres filas —esas son el
+    // comprobante— pero liquidar sin contarlo es liquidar de menos, y el
+    // productor se entera después.
+    if (Number(r.sin_facturar) > 0.01) {
+      h += '<div style="margin-top:8px;font-size:12px;color:#9a3412">⚠ Además salió '
+        + sgMoney(r.sin_facturar) + ' de mercadería que todavía no se facturó. '
+        + 'No está en los números de arriba.</div>';
+    }
+    if ((r.facturas || []).length) {
+      h += '<details style="margin-top:8px"><summary style="cursor:pointer;font-size:12px;color:var(--mut)">'
+        + 'De qué comprobantes sale</summary><div style="font-size:12px;margin-top:6px">'
+        + r.facturas.map(function(f){
+            // Una factura suele llevar varias partidas: se dice qué parte de
+            // cada una se contó acá, o el total no se puede verificar.
+            return '• <code>' + escH(f.numero || '') + '</code> · ' + escH(f.fecha || '')
+              + ' — ' + sgMoney(f.neto) + (f.parte < 99.95
+                  ? ' <span style="color:var(--mut)">(' + f.parte + '% de esa factura es de esta partida)</span>' : '');
+          }).join('<br>')
+        + '</div></details>';
+    }
+    h += '</div>';
+    c.innerHTML = h;
+    liqBultosAvance();
+  });
+}
+
+// La barra sigue a lo que se tipea: si se corrige el conteo de bultos, el color
+// tiene que moverse con él y no quedar mostrando el número viejo.
+function liqBultosAvance(){
+  var a = eid('liq-avance'); if (!a) return;
+  var i = Number((eid('liq-bultos-in') || {}).value) || 0;
+  var v = Number((eid('liq-bultos-liq') || {}).value) || 0;
+  a.innerHTML = sgAvanceBarra(v, i);
+}
+
 function liqDePartida(ocId, partida, proveedor){
   liqAbrirNueva();
   // DESPUÉS de abrir: liqAbrirNueva limpia la partida para el caso del botón
@@ -10337,6 +10466,7 @@ function liqDePartida(ocId, partida, proveedor){
     cab.innerHTML = '🍅 Liquidando la partida <code>' + escH(partida) + '</code>'
       + (proveedor ? ' · ' + escH(proveedor) : '');
   }
+  liqVentaCab(ocId);
 }
 
 function sgFmSub(){ /* una sola solapa por ahora; existe para que el patrón no cambie después */ }
@@ -28781,6 +28911,11 @@ async function liqAbrirNueva() {
   LIQ.partida = null;
   var cab = eid('liq-partida-cab');
   if (cab) { cab.style.display = 'none'; cab.innerHTML = ''; }
+  // Y la venta tampoco puede quedar de la vez anterior: liquidar mirando el
+  // total de OTRA partida es el error más caro que se puede cometer acá.
+  LIQ.venta = null;
+  var vc = eid('liq-venta-cab');
+  if (vc) { vc.style.display = 'none'; vc.innerHTML = ''; }
   document.getElementById('liq-modal').classList.add('on');
 }
 
