@@ -9,17 +9,45 @@
 // SE PUEDE VOLVER A CORRER LAS VECES QUE HAGA FALTA: la idempotencia es por hash del
 // contenido, así que un archivo ya cargado se saltea aunque lo hayan renombrado.
 //
-//   npm run share:import -- "C:\ruta\a\los\plannings"
-//   npm run share:import -- "C:\ruta" --dry          (no escribe: sólo dice qué haría)
+//   npm run share:import -- "/ruta/a/los/plannings"
+//   npm run share:import -- "/ruta" --dry          (no escribe: sólo dice qué haría)
+//
+// ── ESTO SÓLO SIRVE DONDE ESTÁ LA BASE ────────────────────────────────────────────────
+// `data/clientes.db` vive en el volume de Railway, NO en la máquina de nadie. Corrido desde
+// una notebook, db.js hace mkdir + new Database() y CREA una base nueva y vacía: los archivos
+// entrarían ahí y no los vería nadie, sin un solo mensaje de error. Por eso lo primero que
+// hace el script es verificar que la base exista, y si no está manda a la carga masiva de la
+// pantalla, que le habla al servidor que sí la tiene.
 //
 // El orden CRONOLÓGICO importa: cuando dos archivos cubren el mismo día, el que se carga
 // después reemplaza al anterior. Cargarlos en el orden del directorio dejaría activo el
 // planning viejo y el corregido marcado como reemplazado — al revés de lo que corresponde.
 import fs from 'fs';
 import path from 'path';
-import db from '../src/servicios/db_share.js';
-import { importar, analizar } from '../src/servicios/share_import.js';
-import { fechaDelNombre } from '../src/servicios/share_parser.js';
+import { fileURLToPath } from 'url';
+
+const BASE = path.join(path.dirname(fileURLToPath(import.meta.url)), '../data/clientes.db');
+if (!fs.existsSync(BASE)) {
+  console.error(`
+No encuentro la base de datos:
+  ${BASE}
+
+Este script escribe DIRECTO sobre el archivo SQLite, así que hay que correrlo donde ese
+archivo está — en Railway. Desde una máquina de escritorio crearía una base nueva y vacía, y
+los planning entrarían en un archivo que no mira nadie.
+
+Para cargar el backlog histórico desde tu máquina:
+  Panel → SHARE Carrefour → solapa Carga → arrastrá todos los .xlsx de una.
+  Se suben de a uno y en orden, y los que ya estén cargados se saltean solos.
+`);
+  process.exit(1);
+}
+
+// El import va DESPUÉS del chequeo a propósito: db.js crea el archivo apenas se lo importa,
+// así que importarlo arriba haría que la verificación de recién nunca falle.
+const { default: db } = await import('../src/servicios/db_share.js');
+const { importar, analizar } = await import('../src/servicios/share_import.js');
+const { fechaDelNombre } = await import('../src/servicios/share_parser.js');
 
 const args = process.argv.slice(2);
 const dry = args.includes('--dry');
