@@ -43,6 +43,7 @@ import { programarProcesoCola as spProgramarCola } from "./servicios/sp_outbox.j
 import { guardarSnapshotCRM } from "./servicios/db.js";
 import { syncSheets } from "./servicios/sheets.js";
 import informesRouter      from "./rutas/informes.js";
+import shareRouter         from "./rutas/share.js";
 
 // Scheduler: snapshot CRM + sync sheets a medianoche
 function programarSnapshotCRM() {
@@ -226,6 +227,7 @@ app.post("/webhook", async (req, res) => {
 
 // APIs
 app.use("/api/informes", informesRouter);
+app.use("/api/share", shareRouter);
 app.use("/api", panelRouter);
 app.use("/api", nuevosRouter);
 app.use("/api", cobranzaRouter);

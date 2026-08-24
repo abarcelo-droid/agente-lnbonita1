@@ -265,6 +265,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
   <div class="ni-grp-items">
     <div class="ni" data-sec="pa-despachos"><span class="dot dc"></span>🚚 Despachos</div>
     <div class="ni" data-sec="informes-comercial"><span class="dot da"></span>📊 Informes comerciales</div>
+    <div class="ni" data-sec="share"><span class="dot db"></span>🛒 SHARE Carrefour</div>
   </div>
 
   <div class="ni-grp" data-grp="ven-ventas">Administración de Ventas<span class="ni-caret">▾</span></div>
@@ -4262,6 +4263,270 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
       <button class="btn bb" onclick="closeMB('inf-diag-modal')">Cerrar</button></div>
   </div>
 </div>
+
+<div class="sec sg-mod" id="sec-share">
+  <style>
+    /* SIN BARRA DE DESPLAZAMIENTO LATERAL (CLAUDE.md): anchos fijos, se parte sólo el nombre
+       del artículo —lo único de largo variable— y el resto se trunca con ellipsis. En el
+       teléfono sí se deja arrastrar, porque ahí no hay ancho que alcance. */
+    #sec-share .pa-tbl{table-layout:fixed;width:100%;max-width:98vw}
+    #sec-share .pa-tbl th,#sec-share .pa-tbl td{
+      white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding:6px 8px;font-size:12.5px}
+    #sec-share .pa-tbl td.sh-nom,#sec-share .pa-tbl th.sh-nom{white-space:normal;word-break:break-word}
+    #sec-share .ab-table-wrap{overflow-x:hidden !important}
+    @media(max-width:900px){ #sec-share .ab-table-wrap{overflow-x:auto !important}
+                             #sec-share .pa-tbl{table-layout:auto} }
+    #sec-share .sh-tab{padding:7px 13px;cursor:pointer;font-size:12.5px;font-weight:600;border-radius:6px;color:var(--mut)}
+    #sec-share .sh-tab.on{background:var(--burg);color:#fff}
+    #sec-share .sh-tab .sh-cnt{margin-left:5px;background:var(--bor);border-radius:9px;padding:0 6px;font-size:10.5px}
+    #sec-share .sh-tab.on .sh-cnt{background:rgba(255,255,255,.25);color:#fff}
+    #sec-share .sh-f{display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;margin-bottom:12px}
+    #sec-share .sh-f label{font-size:11px;color:var(--mut);display:block;margin-bottom:3px}
+    #sec-share .sh-f input,#sec-share .sh-f select{
+      padding:5px 8px;border:1px solid var(--bor);border-radius:6px;background:var(--bg);font-size:12.5px}
+    #sec-share .sh-kpi{flex:1;min-width:145px;padding:11px 14px;border-radius:10px;background:var(--bg2,#f5f5f5)}
+    #sec-share .sh-kpi b{display:block;font-size:21px;font-weight:700;font-variant-numeric:tabular-nums;margin-top:2px}
+    #sec-share .sh-kpi .sh-sub{font-size:11px;color:var(--mut)}
+    #sec-share .sh-up{color:#1a7f37} #sec-share .sh-dn{color:#b3261e}
+    /* La barra de participación: nuestra parte pintada sobre el total del artículo. Es la
+       forma más rápida de ver dónde pesamos sin leer el número. */
+    #sec-share .sh-bar{position:relative;height:15px;border-radius:4px;background:var(--bor);overflow:hidden}
+    #sec-share .sh-bar i{position:absolute;left:0;top:0;bottom:0;background:var(--burg);display:block}
+    #sec-share .sh-bar span{position:absolute;right:4px;top:0;font-size:10px;line-height:15px;font-weight:700}
+    #sec-share .sh-chip{display:inline-block;padding:1px 7px;border-radius:9px;font-size:10.5px;font-weight:600}
+    #sec-share .sh-ch-nos{background:#e6f4ea;color:#1a7f37}
+    #sec-share .sh-ch-ip{background:#fdecec;color:#b3261e}
+    #sec-share .sh-ch-comp{background:var(--bor);color:var(--mut)}
+    #sec-share .sh-aviso{font-size:11.5px;color:var(--mut);margin-top:6px;line-height:1.5}
+    #sec-share .sh-drop{border:2px dashed var(--bor);border-radius:12px;padding:26px;text-align:center;cursor:pointer}
+    #sec-share .sh-drop:hover{border-color:var(--burg);background:var(--bg2,#fafafa)}
+    #sec-share .sh-mtx td{text-align:right;font-variant-numeric:tabular-nums}
+    #sec-share .sh-mtx td.sh-nom{text-align:left}
+    #sec-share .sh-pane{display:none} #sec-share .sh-pane.on{display:block}
+  </style>
+
+  <div class="ph">
+    <div><div class="ph-t">🛒 SHARE · CD de Carrefour</div>
+      <div class="ph-s">Qué compra Carrefour todos los días, a quién, y dónde no estamos. <b>Todo en bultos</b>: el planning no trae precios.</div></div>
+    <div style="display:flex;gap:8px">
+      <button class="btn bo" onclick="shExport()">⬇️ Excel</button>
+      <button class="btn bb" onclick="shTab('carga')">📤 Cargar planning</button></div>
+  </div>
+
+  <!-- De cuándo son los datos. Sin esto, una base que hace tres semanas que nadie actualiza
+       se lee igual que una de esta mañana. -->
+  <div id="sh-estado" style="font-size:11.5px;margin-bottom:10px"></div>
+
+  <div style="display:inline-flex;gap:2px;background:var(--bg);border:1px solid var(--bor);border-radius:8px;padding:3px;margin-bottom:14px;flex-wrap:wrap">
+    <div class="sh-tab on" data-t="dash"    onclick="shTab('dash')">📊 Dashboard</div>
+    <div class="sh-tab"    data-t="arts"    onclick="shTab('arts')">🍎 Artículos</div>
+    <div class="sh-tab"    data-t="opor"    onclick="shTab('opor')">🎯 Oportunidades</div>
+    <div class="sh-tab"    data-t="huecos"  onclick="shTab('huecos')">🕳️ Huecos</div>
+    <div class="sh-tab"    data-t="comp"    onclick="shTab('comp')">⚔️ Competencia</div>
+    <div class="sh-tab"    data-t="busc"    onclick="shTab('busc')">🔎 Buscador</div>
+    <div class="sh-tab"    data-t="carga"   onclick="shTab('carga')">📤 Carga</div>
+    <div class="sh-tab"    data-t="mapeos"  onclick="shTab('mapeos')">🏷️ Mapeos<span class="sh-cnt" id="sh-cnt-pend">·</span></div>
+  </div>
+
+  <!-- Un solo filtro de fechas para todas las solapas que lo usan: si cada una tuviera el
+       suyo, al cambiar de pestaña el número cambiaría sin que nadie tocara nada. -->
+  <div class="sh-f" id="sh-filtro">
+    <div><label>Desde</label><input type="date" id="sh-desde" onchange="shRecargar()"></div>
+    <div><label>Hasta</label><input type="date" id="sh-hasta" onchange="shRecargar()"></div>
+    <div><label>&nbsp;</label><div style="display:flex;gap:4px">
+      <button class="btn bo bs" onclick="shPreset(7)">7 días</button>
+      <button class="btn bo bs" onclick="shPreset(30)">30 días</button>
+      <button class="btn bo bs" onclick="shPreset(90)">90 días</button>
+      <button class="btn bo bs" onclick="shPreset(0)">Todo</button>
+    </div></div>
+    <div id="sh-filtro-extra" style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end"></div>
+  </div>
+
+  <!-- ── DASHBOARD ────────────────────────────────────────────────────────────────── -->
+  <div class="sh-pane on" id="sh-pane-dash">
+    <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px" id="sh-kpis"></div>
+    <div id="sh-grafico" style="margin-bottom:14px"></div>
+    <div style="display:flex;gap:14px;flex-wrap:wrap;align-items:flex-start">
+      <div style="flex:1;min-width:290px">
+        <div style="font-size:12px;font-weight:700;margin-bottom:6px">Participación por familia</div>
+        <div class="ab-table-wrap"><table class="pa-tbl">
+          <thead><tr><th style="width:26%">Familia</th><th style="text-align:right;width:22%">Carrefour</th>
+            <th style="text-align:right;width:20%">Nuestro</th><th style="width:32%">Share</th></tr></thead>
+          <tbody id="sh-tb-fam"><tr><td colspan="4" class="emp">—</td></tr></tbody></table></div>
+      </div>
+      <div style="flex:1;min-width:290px">
+        <div style="font-size:12px;font-weight:700;margin-bottom:6px">Ranking de proveedores</div>
+        <div class="ab-table-wrap"><table class="pa-tbl">
+          <thead><tr><th style="width:9%">#</th><th class="sh-nom" style="width:47%">Proveedor</th>
+            <th style="text-align:right;width:22%">Bultos</th><th style="text-align:right;width:22%">Share</th></tr></thead>
+          <tbody id="sh-tb-rank"><tr><td colspan="4" class="emp">—</td></tr></tbody></table></div>
+      </div>
+    </div>
+    <div style="font-size:12px;font-weight:700;margin:14px 0 6px">Top 10 artículos por volumen</div>
+    <div class="ab-table-wrap"><table class="pa-tbl">
+      <thead><tr><th class="sh-nom" style="width:34%">Artículo</th><th style="width:12%">Familia</th>
+        <th style="text-align:right;width:13%">Carrefour</th><th style="text-align:right;width:13%">Nuestro</th>
+        <th style="width:14%">Share</th><th class="sh-nom" style="width:14%">Líder</th></tr></thead>
+      <tbody id="sh-tb-top"><tr><td colspan="6" class="emp">—</td></tr></tbody></table></div>
+  </div>
+
+  <!-- ── ARTÍCULOS ────────────────────────────────────────────────────────────────── -->
+  <div class="sh-pane" id="sh-pane-arts">
+    <div class="ab-table-wrap"><table class="pa-tbl">
+      <thead><tr>
+        <th class="sh-nom" style="width:24%">Artículo</th><th style="width:9%">Familia</th>
+        <th style="text-align:right;width:10%">Carrefour</th><th style="text-align:right;width:10%">Nuestro</th>
+        <th style="width:11%">Share</th><th style="text-align:right;width:10%">No capturado</th>
+        <th style="text-align:center;width:7%">Puesto</th><th class="sh-nom" style="width:12%">Líder</th>
+        <th style="text-align:center;width:7%">Días</th></tr></thead>
+      <tbody id="sh-tb-arts"><tr><td colspan="9" class="emp">Cargando…</td></tr></tbody></table></div>
+    <div class="sh-aviso" id="sh-arts-nota"></div>
+  </div>
+
+  <!-- ── OPORTUNIDADES ────────────────────────────────────────────────────────────── -->
+  <div class="sh-pane" id="sh-pane-opor">
+    <div style="display:inline-flex;gap:2px;background:var(--bg);border:1px solid var(--bor);border-radius:8px;padding:3px;margin-bottom:12px;flex-wrap:wrap">
+      <div class="sh-tab on" data-o="no_capturado"    onclick="shOporVista('no_capturado')">📦 Volumen no capturado</div>
+      <div class="sh-tab"    data-o="share_bajo"      onclick="shOporVista('share_bajo')">📉 Share bajo</div>
+      <div class="sh-tab"    data-o="proveedor_unico" onclick="shOporVista('proveedor_unico')">☝️ Proveedor único</div>
+      <div class="sh-tab"    data-o="import_propia"   onclick="shOporVista('import_propia')">🌍 Importación propia</div>
+    </div>
+    <div class="sh-aviso" id="sh-opor-expl" style="margin:0 0 10px"></div>
+    <div class="ab-table-wrap"><table class="pa-tbl">
+      <thead><tr><th class="sh-nom" style="width:26%">Artículo</th><th style="width:9%">Familia</th>
+        <th style="text-align:right;width:11%">Carrefour</th><th style="text-align:right;width:11%">Nuestro</th>
+        <th style="text-align:right;width:12%">No capturado</th><th style="width:10%">Share</th>
+        <th class="sh-nom" style="width:21%">Se lo compra hoy a</th></tr></thead>
+      <tbody id="sh-tb-opor"><tr><td colspan="7" class="emp">Cargando…</td></tr></tbody></table></div>
+  </div>
+
+  <!-- ── HUECOS ───────────────────────────────────────────────────────────────────── -->
+  <div class="sh-pane" id="sh-pane-huecos">
+    <div style="display:inline-flex;gap:2px;background:var(--bg);border:1px solid var(--bor);border-radius:8px;padding:3px;margin-bottom:12px;flex-wrap:wrap">
+      <div class="sh-tab on" data-h="duro"           onclick="shHuecoVista('duro')">🚫 Hueco duro</div>
+      <div class="sh-tab"    data-h="perdido"        onclick="shHuecoVista('perdido')">📉 Share perdido</div>
+      <div class="sh-tab"    data-h="nuevo"          onclick="shHuecoVista('nuevo')">🆕 Artículos nuevos</div>
+      <div class="sh-tab"    data-h="discontinuado"  onclick="shHuecoVista('discontinuado')">🪦 Discontinuados</div>
+      <div class="sh-tab"    data-h="dias_huerfanos" onclick="shHuecoVista('dias_huerfanos')">📅 Días huérfanos</div>
+    </div>
+    <div class="sh-aviso" id="sh-hueco-expl" style="margin:0 0 10px"></div>
+    <div class="ab-table-wrap"><table class="pa-tbl">
+      <thead id="sh-th-huecos"></thead>
+      <tbody id="sh-tb-huecos"><tr><td colspan="7" class="emp">Cargando…</td></tr></tbody></table></div>
+  </div>
+
+  <!-- ── COMPETENCIA ──────────────────────────────────────────────────────────────── -->
+  <div class="sh-pane" id="sh-pane-comp">
+    <div style="font-size:12px;font-weight:700;margin-bottom:6px">Quién es quién</div>
+    <div class="ab-table-wrap"><table class="pa-tbl">
+      <thead><tr><th style="width:6%">#</th><th class="sh-nom" style="width:28%">Proveedor</th>
+        <th style="width:11%">Tipo</th><th style="text-align:right;width:12%">Bultos</th>
+        <th style="text-align:right;width:9%">Share</th><th style="text-align:center;width:9%">Artíc.</th>
+        <th style="text-align:center;width:9%">Líder en</th><th style="width:16%">Nos cruza en</th></tr></thead>
+      <tbody id="sh-tb-comp"><tr><td colspan="8" class="emp">Cargando…</td></tr></tbody></table></div>
+    <div style="font-size:12px;font-weight:700;margin:16px 0 6px">Matriz proveedor × artículo <span style="font-weight:400;color:var(--mut)">(los más grandes de cada lado)</span></div>
+    <div class="ab-table-wrap" id="sh-matriz"></div>
+  </div>
+
+  <!-- ── BUSCADOR SEMANAL ─────────────────────────────────────────────────────────── -->
+  <div class="sh-pane" id="sh-pane-busc">
+    <div class="sh-f">
+      <div style="min-width:320px;position:relative">
+        <label>Artículo</label>
+        <input type="text" id="sh-busc-q" placeholder="escribí y elegí…" autocomplete="off"
+               oninput="shBuscSug()" onkeydown="if(event.key==='Escape')shBuscCerrar()" style="width:100%">
+        <div id="sh-busc-sug" style="display:none;position:absolute;z-index:40;left:0;right:0;top:100%;background:var(--sur,#fff);border:1px solid var(--bor);border-radius:8px;max-height:280px;overflow:auto;box-shadow:0 6px 18px rgba(0,0,0,.12)"></div>
+      </div>
+      <div><label>Semanas</label><select id="sh-busc-sem" onchange="shBuscCargar()">
+        <option value="13">13</option><option value="26" selected>26</option>
+        <option value="52">52</option><option value="104">104</option></select></div>
+      <div><label>&nbsp;</label><button class="btn bo bs" onclick="shBuscExcel()">⬇️ Excel</button></div>
+    </div>
+    <div id="sh-busc-cab" style="margin-bottom:10px"></div>
+    <div id="sh-busc-graf" style="margin-bottom:12px"></div>
+    <div class="ab-table-wrap"><table class="pa-tbl">
+      <thead><tr><th style="width:14%">Semana</th><th style="width:16%">Del … al</th>
+        <th style="text-align:right;width:13%">Carrefour</th><th style="text-align:right;width:13%">Nuestro</th>
+        <th style="width:12%">Share</th><th style="text-align:right;width:11%">Δ vs ant.</th>
+        <th class="sh-nom" style="width:21%">Líder</th></tr></thead>
+      <tbody id="sh-tb-busc"><tr><td colspan="7" class="emp">Elegí un artículo.</td></tr></tbody></table></div>
+  </div>
+
+  <!-- ── CARGA ────────────────────────────────────────────────────────────────────── -->
+  <div class="sh-pane" id="sh-pane-carga">
+    <div class="sh-drop" id="sh-drop" onclick="document.getElementById('sh-file').click()">
+      <div style="font-size:30px">📄</div>
+      <div style="font-weight:700;margin-top:4px">Subí el planning del día (.xlsx)</div>
+      <div class="sh-aviso" style="margin-top:4px">Hoja <b>Detallado</b>, con las columnas Proveedor_Origen_Desc, FECHA ENTREGA, DESC y BULTOS.<br>
+        La fecha se toma <b>de las filas</b>, no del nombre del archivo. Primero se muestra un resumen y recién después se confirma.</div>
+    </div>
+    <input type="file" id="sh-file" accept=".xlsx,.xls" style="display:none" onchange="shArchivoElegido(this)">
+    <div class="sh-aviso" style="margin-top:8px">¿Tenés muchos archivos viejos? Se cargan todos juntos desde la consola:
+      <code>npm run share:import -- "C:\ruta\a\la\carpeta"</code> — se puede repetir sin duplicar nada.</div>
+
+    <div style="font-size:12px;font-weight:700;margin:18px 0 6px">Plannings cargados</div>
+    <div class="ab-table-wrap"><table class="pa-tbl">
+      <thead><tr><th style="width:11%">Entrega</th><th class="sh-nom" style="width:27%">Archivo</th>
+        <th style="text-align:right;width:9%">Filas</th><th style="text-align:right;width:12%">Bultos</th>
+        <th style="width:13%">Cargado</th><th style="width:10%">Por</th>
+        <th style="text-align:center;width:10%">Estado</th><th style="width:8%"></th></tr></thead>
+      <tbody id="sh-tb-cargas"><tr><td colspan="8" class="emp">Cargando…</td></tr></tbody></table></div>
+  </div>
+
+  <!-- ── MAPEOS ───────────────────────────────────────────────────────────────────── -->
+  <div class="sh-pane" id="sh-pane-mapeos">
+    <div class="sh-aviso" style="margin:0 0 10px">
+      Todo lo que el importador crea solo entra acá hasta que alguien lo revisa. Lo que más rinde marcar es
+      <b>«la vendemos»</b>: es el filtro de Oportunidades, y sin él la lista arranca con productos que nunca
+      podríamos proveer.</div>
+    <div style="font-size:12px;font-weight:700;margin-bottom:6px">Artículos pendientes de revisión</div>
+    <div class="ab-table-wrap"><table class="pa-tbl">
+      <thead><tr><th class="sh-nom" style="width:27%">Artículo</th><th style="text-align:right;width:10%">Bultos</th>
+        <th style="text-align:center;width:11%">La vendemos</th><th style="width:13%">Familia</th>
+        <th style="width:12%">Unidad</th><th style="text-align:right;width:9%">Kg/bulto</th>
+        <th style="width:11%">Rubro</th><th style="width:7%"></th></tr></thead>
+      <tbody id="sh-tb-map"><tr><td colspan="8" class="emp">Cargando…</td></tr></tbody></table></div>
+
+    <div style="font-size:12px;font-weight:700;margin:18px 0 6px">Proveedores pendientes</div>
+    <div class="ab-table-wrap"><table class="pa-tbl">
+      <thead><tr><th class="sh-nom" style="width:42%">Proveedor</th><th style="text-align:right;width:14%">Bultos</th>
+        <th style="width:26%">Tipo</th><th style="width:18%"></th></tr></thead>
+      <tbody id="sh-tb-mapprov"><tr><td colspan="4" class="emp">Cargando…</td></tr></tbody></table></div>
+
+    <div style="font-size:12px;font-weight:700;margin:18px 0 6px">Fusionar dos artículos duplicados</div>
+    <div class="sh-aviso" style="margin:0 0 8px">Las líneas del absorbido pasan al que queda y se deja un alias, para que la próxima carga no lo vuelva a crear.</div>
+    <div class="sh-f">
+      <div><label>Se queda</label><select id="sh-fus-destino" style="min-width:240px"></select></div>
+      <div><label>Se absorbe</label><select id="sh-fus-origen" style="min-width:240px"></select></div>
+      <div><label>&nbsp;</label><button class="btn bb bs" onclick="shFusionar()">Fusionar</button></div>
+    </div>
+  </div>
+</div>
+
+<!-- Resumen de lo que se va a cargar, ANTES de escribir nada. -->
+<div class="ab-modal-overlay" id="sh-prev-modal">
+  <div class="ab-modal" style="max-width:min(900px,96vw);width:96vw">
+    <div class="mhd"><div class="mht">📤 Antes de cargar</div>
+      <button class="mcl" onclick="closeMB('sh-prev-modal')">×</button></div>
+    <div id="sh-prev-body"></div>
+    <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:14px">
+      <button class="btn bo" onclick="closeMB('sh-prev-modal')">Cancelar</button>
+      <button class="btn bb" id="sh-prev-ok" onclick="shConfirmarCarga()">Cargar</button>
+    </div>
+  </div>
+</div>
+
+<!-- Ficha de un competidor. -->
+<div class="ab-modal-overlay" id="sh-prov-modal">
+  <div class="ab-modal" style="max-width:min(1050px,96vw);width:96vw">
+    <div class="mhd"><div class="mht" id="sh-prov-tit">Proveedor</div>
+      <button class="mcl" onclick="closeMB('sh-prov-modal')">×</button></div>
+    <div id="sh-prov-body"></div>
+    <div style="display:flex;justify-content:flex-end;margin-top:12px">
+      <button class="btn bb" onclick="closeMB('sh-prov-modal')">Cerrar</button></div>
+  </div>
+</div>
+
 
   <div class="sec sg-mod" id="sec-sg-importacion">
     <style>
@@ -23758,6 +24023,7 @@ function loadSec(s) {
     'sg-caja-bancos': function(){ sgCbInit(); },
     'sg-importacion': function(){ sgImpInit(); },
     'informes-comercial': function(){ infInit(); },
+    'share': function(){ shInit(); },
     'sg-catalogo':   function(){ sgLoadCaches(function(){ sgCatSub('productos'); }); },
     'sg-reportes':   function(){ sgRepInit(); },
     'personal-padron':     function(){ ppOpenModulo('padron'); },
@@ -28052,6 +28318,641 @@ var INF = { opts:null, orden:'facturacion_usd', desc:true, filas:[], veMargen:fa
 function nrDec(n, d){
   if(n==null || n==='' || isNaN(parseFloat(n))) return '—';
   return parseFloat(n).toLocaleString('es-AR',{minimumFractionDigits:d, maximumFractionDigits:d});
+}
+
+
+// ═══════════════════════════════════════════════════════════════════════════════════════
+// SHARE — participación en el CD de Carrefour
+// ═══════════════════════════════════════════════════════════════════════════════════════
+// Todo lo que se muestra acá está en BULTOS. El planning no trae precios, así que no hay —ni
+// puede haber— un solo número en pesos en esta pantalla.
+//
+// El filtro de fechas es UNO SOLO para todas las solapas. Con un filtro por pestaña, cambiar
+// de solapa movería los números sin que nadie hubiera tocado nada.
+var SH = { tab: 'dash', opor: 'no_capturado', hueco: 'duro', rango: null, art: null, puedeOperar: 0 };
+
+function shPct(v, d){ return (v == null) ? '—' : (v * 100).toLocaleString('es-AR', { minimumFractionDigits: d == null ? 1 : d, maximumFractionDigits: d == null ? 1 : d }) + '%'; }
+function shDelta(v){
+  if (v == null) return '';
+  var c = v > 0 ? 'sh-up' : (v < 0 ? 'sh-dn' : '');
+  return '<span class="' + c + '">' + (v > 0 ? '▲' : (v < 0 ? '▼' : '')) + ' ' + shPct(Math.abs(v)) + '</span>';
+}
+// La barra de participación. El número va adentro para no gastar una columna en repetirlo.
+function shBar(share){
+  var p = Math.max(0, Math.min(1, share || 0)) * 100;
+  return '<div class="sh-bar"><i style="width:' + p.toFixed(1) + '%"></i><span>' + shPct(share) + '</span></div>';
+}
+function shChip(tipo){
+  if (tipo === 'nosotros') return '<span class="sh-chip sh-ch-nos">nosotros</span>';
+  if (tipo === 'importacion_propia') return '<span class="sh-chip sh-ch-ip">import. propia</span>';
+  return '<span class="sh-chip sh-ch-comp">competidor</span>';
+}
+function shParams(extra){
+  var p = [];
+  var d = elv('sh-desde'), h = elv('sh-hasta');
+  if (d) p.push('desde=' + d);
+  if (h) p.push('hasta=' + h);
+  if (extra) p.push(extra);
+  return p.join('&');
+}
+
+function shInit(){
+  api('/api/share/estado').then(function(r){
+    if (!r || !r.ok) { eid('sh-estado').innerHTML = '<span style="color:#b3261e">' + escH((r && r.error) || 'Sin acceso al módulo.') + '</span>'; return; }
+    SH.rango = r.data.rango; SH.puedeOperar = r.data.puede_operar;
+    var e = eid('sh-cnt-pend'); if (e) e.textContent = r.data.pendientes || '0';
+    if (!r.data.rango.max) {
+      eid('sh-estado').innerHTML = '<span style="color:#8a6d00">Todavía no hay ningún planning cargado.</span>';
+      shTab('carga'); shCargas(); return;
+    }
+    eid('sh-estado').innerHTML = 'Datos del <b>' + escH(r.data.rango.min) + '</b> al <b>' + escH(r.data.rango.max) + '</b> · ' +
+      r.data.cargas_activas + ' planning(s) · ' + r.data.articulos + ' artículos · ' + r.data.proveedores + ' proveedores' +
+      (r.data.pendientes ? ' · <a href="#" onclick="shTab(\'mapeos\');return false" style="color:#8a6d00">' + r.data.pendientes + ' sin revisar</a>' : '');
+    // Arranca en los últimos 30 días CON DATOS, no del calendario: si hace una semana que
+    // nadie carga, los últimos 30 del calendario mostrarían una caída que no existe.
+    if (!elv('sh-desde')) shPreset(30);
+    else shRecargar();
+  });
+}
+
+function shPreset(dias){
+  if (!SH.rango || !SH.rango.max) return;
+  elv('sh-hasta', SH.rango.max);
+  if (!dias) elv('sh-desde', SH.rango.min);
+  else {
+    var d = new Date(SH.rango.max + 'T00:00:00Z');
+    d.setUTCDate(d.getUTCDate() - (dias - 1));
+    var iso = d.toISOString().slice(0, 10);
+    elv('sh-desde', iso < SH.rango.min ? SH.rango.min : iso);
+  }
+  shRecargar();
+}
+
+function shTab(t){
+  SH.tab = t;
+  var sec = eid('sec-share'); if (!sec) return;
+  sec.querySelectorAll('.sh-tab[data-t]').forEach(function(el){ el.classList.toggle('on', el.dataset.t === t); });
+  sec.querySelectorAll('.sh-pane').forEach(function(el){ el.classList.toggle('on', el.id === 'sh-pane-' + t); });
+  // Carga y Mapeos no dependen del rango de fechas: mostrar el filtro ahí invita a moverlo
+  // creyendo que hace algo.
+  eid('sh-filtro').style.display = (t === 'carga' || t === 'mapeos' || t === 'busc') ? 'none' : '';
+  shRecargar();
+}
+
+function shRecargar(){
+  if (!SH.rango || !SH.rango.max) { if (SH.tab === 'carga') shCargas(); return; }
+  if (SH.tab === 'dash') shDash();
+  else if (SH.tab === 'arts') shArts();
+  else if (SH.tab === 'opor') shOpor();
+  else if (SH.tab === 'huecos') shHuecos();
+  else if (SH.tab === 'comp') shComp();
+  else if (SH.tab === 'carga') shCargas();
+  else if (SH.tab === 'mapeos') shMapeos();
+}
+
+// ── Gráfico ─────────────────────────────────────────────────────────────────────────────
+// SVG a mano, sin librerías: barras para el volumen total con la parte nuestra pintada
+// encima, y la línea de share sobre un eje propio. Ver el share solo no alcanza — puede
+// subir porque crecimos o porque el mercado se achicó, y las barras lo distinguen.
+function shSvgSerie(filas, titulo){
+  if (!filas || !filas.length) return '<div class="emp">Sin datos en el rango.</div>';
+  var W = 1000, H = 190, PL = 8, PR = 8, PT = 14, PB = 26;
+  var n = filas.length, maxT = Math.max.apply(null, filas.map(function(f){ return f.total || 0; })) || 1;
+  var bw = (W - PL - PR) / n, w = Math.max(1, bw * 0.72);
+  var barras = '', linea = [], marcas = '';
+  for (var i = 0; i < n; i++){
+    var f = filas[i];
+    var x = PL + i * bw + (bw - w) / 2;
+    var hT = (H - PT - PB) * ((f.total || 0) / maxT);
+    var hN = (H - PT - PB) * ((f.nuestros || 0) / maxT);
+    barras += '<rect x="' + x.toFixed(1) + '" y="' + (H - PB - hT).toFixed(1) + '" width="' + w.toFixed(1) + '" height="' + hT.toFixed(1) + '" fill="currentColor" opacity=".16" rx="1.5"></rect>';
+    if (hN > 0) barras += '<rect x="' + x.toFixed(1) + '" y="' + (H - PB - hN).toFixed(1) + '" width="' + w.toFixed(1) + '" height="' + hN.toFixed(1) + '" fill="#7c1d3f" rx="1.5"><title>' + escH(f.k) + ': ' + nr(f.nuestros) + ' de ' + nr(f.total) + ' (' + shPct(f.share) + ')</title></rect>';
+    linea.push((x + w / 2).toFixed(1) + ',' + (PT + (H - PT - PB) * (1 - Math.max(0, Math.min(1, f.share || 0)))).toFixed(1));
+    // Con muchos puntos no entran todas las etiquetas: se muestra una de cada tantas.
+    var cada = Math.ceil(n / 12);
+    if (i % cada === 0 || i === n - 1)
+      marcas += '<text x="' + (x + w / 2).toFixed(1) + '" y="' + (H - 8) + '" font-size="10" text-anchor="middle" fill="currentColor" opacity=".65">' + escH(String(f.k).slice(-5)) + '</text>';
+  }
+  return '<div style="border:1px solid var(--bor);border-radius:10px;padding:10px 12px">' +
+    '<div style="font-size:12px;font-weight:700;margin-bottom:2px">' + escH(titulo) + '</div>' +
+    '<div class="sh-aviso" style="margin:0 0 4px">Barra clara: total Carrefour. Barra oscura: lo nuestro. Línea: share % (0 abajo, 100 arriba).</div>' +
+    '<svg viewBox="0 0 ' + W + ' ' + H + '" style="width:100%;height:auto;display:block" preserveAspectRatio="none">' +
+    barras + '<polyline points="' + linea.join(' ') + '" fill="none" stroke="#1a7f37" stroke-width="2" vector-effect="non-scaling-stroke"></polyline>' +
+    marcas + '</svg></div>';
+}
+
+// ── Dashboard ───────────────────────────────────────────────────────────────────────────
+function shDash(){
+  eid('sh-filtro-extra').innerHTML = '';
+  api('/api/share/resumen?' + shParams()).then(function(r){
+    if (!r || !r.ok) { eid('sh-kpis').innerHTML = '<div class="emp">' + escH((r && r.error) || 'Error') + '</div>'; return; }
+    var d = r.data;
+    if (d.vacio) { eid('sh-kpis').innerHTML = '<div class="emp">Todavía no hay datos.</div>'; return; }
+    var k = d.kpi;
+    var kpi = function(t, v, s){ return '<div class="sh-kpi"><div style="font-size:11px;color:var(--mut)">' + t + '</div><b>' + v + '</b><div class="sh-sub">' + (s || '') + '</div></div>'; };
+    eid('sh-kpis').innerHTML =
+      kpi('Compró Carrefour', nr(k.bultos_total) + ' <span style="font-size:12px;font-weight:400">bultos</span>',
+          k.dias_con_datos + ' días · ' + k.articulos + ' artículos · ' + k.proveedores + ' proveedores') +
+      kpi('Le vendimos nosotros', nr(k.bultos_nuestros), d.delta.hubo_datos ? shDelta(d.delta.bultos_nuestros / Math.max(1, k.bultos_nuestros - d.delta.bultos_nuestros)) + ' vs período anterior' : 'sin período anterior para comparar') +
+      kpi('Nuestro share', shPct(k.share), d.delta.hubo_datos ? shDelta(d.delta.share) + ' en puntos' : '—') +
+      kpi('Nuestro puesto', d.nuestro_puesto ? ('#' + d.nuestro_puesto + ' <span style="font-size:12px;font-weight:400">de ' + d.proveedores_total + '</span>') : '—', 'por volumen del período') +
+      kpi('Importación propia', shPct(k.share_import_propia), nr(k.bultos_import_propia) + ' bultos que Carrefour se trae solo');
+
+    api('/api/share/serie?granularidad=' + (k.dias_con_datos > 45 ? 'semana' : 'dia') + '&' + shParams()).then(function(s){
+      eid('sh-grafico').innerHTML = (s && s.ok)
+        ? shSvgSerie(s.data.filas, s.data.granularidad === 'semana' ? 'Evolución semanal' : 'Evolución diaria')
+        : '';
+    });
+
+    eid('sh-tb-fam').innerHTML = d.familias.length ? d.familias.map(function(f){
+      return '<tr><td>' + escH(f.familia) + '</td><td style="text-align:right">' + nr(f.total) + '</td>' +
+        '<td style="text-align:right">' + nr(f.nuestros) + '</td><td>' + shBar(f.share) + '</td></tr>';
+    }).join('') : '<tr><td colspan="4" class="emp">—</td></tr>';
+
+    eid('sh-tb-rank').innerHTML = d.ranking.map(function(p){
+      return '<tr' + (p.es_nosotros ? ' style="font-weight:700;background:var(--bg2,#f5f5f5)"' : '') + '>' +
+        '<td>' + p.puesto + '</td><td class="sh-nom">' + escH(p.nombre) + ' ' + (p.tipo !== 'competidor' ? shChip(p.tipo) : '') + '</td>' +
+        '<td style="text-align:right">' + nr(p.bultos) + '</td><td style="text-align:right">' + shPct(p.share) + '</td></tr>';
+    }).join('');
+
+    eid('sh-tb-top').innerHTML = d.top.map(function(a){
+      return '<tr><td class="sh-nom"><a href="#" onclick="shVerArticulo(' + a.id + ');return false">' + escH(a.desc) + '</a></td>' +
+        '<td>' + escH(a.familia) + '</td><td style="text-align:right">' + nr(a.total) + '</td>' +
+        '<td style="text-align:right">' + nr(a.nuestros) + '</td><td>' + shBar(a.share) + '</td>' +
+        '<td class="sh-nom">' + escH(a.lider || '—') + '</td></tr>';
+    }).join('');
+  });
+}
+
+// ── Artículos ───────────────────────────────────────────────────────────────────────────
+function shArts(){
+  eid('sh-tb-arts').innerHTML = '<tr><td colspan="9" class="emp">Calculando…</td></tr>';
+  var ex = eid('sh-filtro-extra');
+  if (SH.tab === 'arts' && !eid('sh-arts-fam')) {
+    ex.innerHTML = '<div><label>Familia</label><select id="sh-arts-fam" onchange="shArts()"><option value="">— todas —</option></select></div>' +
+      '<div><label>Buscar</label><input type="text" id="sh-arts-q" placeholder="artículo" oninput="shArtsDeb()"></div>' +
+      '<div><label>&nbsp;</label><label style="font-size:12px;display:flex;gap:5px;align-items:center;padding:5px 0">' +
+      '<input type="checkbox" id="sh-arts-lv" onchange="shArts()"> sólo lo que vendemos</label></div>' +
+      '<div><label>Ordenar por</label><select id="sh-arts-ord" onchange="shArts()">' +
+      '<option value="total">Volumen Carrefour</option><option value="no_capturado">No capturado</option>' +
+      '<option value="share">Share (mayor)</option><option value="share_asc">Share (menor)</option>' +
+      '<option value="nuestros">Volumen nuestro</option><option value="desc">Nombre</option></select></div>';
+  }
+  var q = [];
+  var f = (eid('sh-arts-fam') || {}).value; if (f) q.push('familia=' + encodeURIComponent(f));
+  var b = (eid('sh-arts-q') || {}).value; if (b) q.push('q=' + encodeURIComponent(b));
+  if ((eid('sh-arts-lv') || {}).checked) q.push('solo_vendemos=1');
+  var o = (eid('sh-arts-ord') || {}).value; if (o) q.push('orden=' + o);
+
+  api('/api/share/articulos?' + shParams(q.join('&'))).then(function(r){
+    if (!r || !r.ok) { eid('sh-tb-arts').innerHTML = '<tr><td colspan="9" class="emp">' + escH((r && r.error) || 'Error') + '</td></tr>'; return; }
+    var sel = eid('sh-arts-fam');
+    if (sel && sel.options.length <= 1)
+      sel.innerHTML = '<option value="">— todas —</option>' + (r.data.familias || []).map(function(x){ return '<option value="' + esc(x) + '">' + escH(x) + '</option>'; }).join('');
+
+    eid('sh-tb-arts').innerHTML = r.data.filas.length ? r.data.filas.map(function(a){
+      return '<tr><td class="sh-nom"><a href="#" onclick="shVerArticulo(' + a.id + ');return false">' + escH(a.desc) + '</a>' +
+        (a.la_vendemos ? ' <span class="sh-chip sh-ch-nos">la vendemos</span>' : '') + '</td>' +
+        '<td>' + escH(a.familia) + '</td><td style="text-align:right">' + nr(a.total) + '</td>' +
+        '<td style="text-align:right">' + nr(a.nuestros) + '</td><td>' + shBar(a.share) + '</td>' +
+        '<td style="text-align:right">' + nr(a.no_capturado) + '</td>' +
+        '<td style="text-align:center">' + (a.ranking ? a.ranking + '/' + a.proveedores : '—') + '</td>' +
+        '<td class="sh-nom">' + escH(a.lider || '—') + (a.lider_es_nuestro ? ' ✓' : '') + '</td>' +
+        '<td style="text-align:center">' + a.nuestros_dias + '/' + a.dias + '</td></tr>';
+    }).join('') : '<tr><td colspan="9" class="emp">Nada con esos filtros.</td></tr>';
+    eid('sh-arts-nota').innerHTML = r.data.filas.length + ' de ' + r.data.total_filas + ' artículos. ' +
+      '«Días» es en cuántos días le vendimos nosotros sobre los días que Carrefour lo compró: mide constancia, no volumen.';
+  });
+}
+var shArtsT; function shArtsDeb(){ clearTimeout(shArtsT); shArtsT = setTimeout(shArts, 400); }
+
+// Desde cualquier tabla se salta al detalle semanal del artículo, que es la pregunta que
+// sigue siempre: "¿y esto cómo viene?".
+function shVerArticulo(id){
+  SH.art = id;
+  shTab('busc');
+  api('/api/share/articulos/' + id + '/semanal?semanas=' + ((eid('sh-busc-sem') || {}).value || 26)).then(shBuscPintar);
+}
+
+// ── Oportunidades ───────────────────────────────────────────────────────────────────────
+var SH_OPOR_EXPL = {
+  no_capturado: 'Lo que Carrefour compra y <b>no nos compra a nosotros</b>, de mayor a menor. Es la lista para salir a ofrecer.',
+  share_bajo: 'Artículos donde <b>ya estamos adentro pero pesamos menos del 20%</b>. Suele ser más fácil crecer donde ya nos compran que entrar de cero.',
+  proveedor_unico: 'Artículos que hoy Carrefour le compra a <b>un solo proveedor</b>. Para ellos es un riesgo de abastecimiento; para nosotros, una puerta.',
+  import_propia: 'Acá no perdemos contra un competidor: <b>Carrefour lo importa por su cuenta</b>. Es una amenaza de otra naturaleza y se discute distinto.',
+};
+function shOporVista(v){
+  SH.opor = v;
+  eid('sec-share').querySelectorAll('.sh-tab[data-o]').forEach(function(el){ el.classList.toggle('on', el.dataset.o === v); });
+  shOpor();
+}
+function shOpor(){
+  eid('sh-opor-expl').innerHTML = SH_OPOR_EXPL[SH.opor] || '';
+  var ex = eid('sh-filtro-extra');
+  if (SH.tab === 'opor' && !eid('sh-opor-lv'))
+    ex.innerHTML = '<div><label>&nbsp;</label><label style="font-size:12px;display:flex;gap:5px;align-items:center;padding:5px 0">' +
+      '<input type="checkbox" id="sh-opor-lv" checked onchange="shOpor()"> sólo lo que podríamos proveer</label></div>';
+  var lv = eid('sh-opor-lv') ? (eid('sh-opor-lv').checked ? '1' : '0') : '1';
+  eid('sh-tb-opor').innerHTML = '<tr><td colspan="7" class="emp">Calculando…</td></tr>';
+  api('/api/share/oportunidades?' + shParams('vista=' + SH.opor + '&solo_vendemos=' + lv)).then(function(r){
+    if (!r || !r.ok) { eid('sh-tb-opor').innerHTML = '<tr><td colspan="7" class="emp">' + escH((r && r.error) || 'Error') + '</td></tr>'; return; }
+    eid('sh-tb-opor').innerHTML = r.data.filas.length ? r.data.filas.map(function(a){
+      var t3 = a.top3.map(function(p){ return escH(p.nombre) + ' ' + shPct(p.share, 0) + (p.tipo === 'importacion_propia' ? ' ⚠' : ''); }).join(' · ');
+      return '<tr><td class="sh-nom"><a href="#" onclick="shVerArticulo(' + a.id + ');return false">' + escH(a.desc) + '</a></td>' +
+        '<td>' + escH(a.familia) + '</td><td style="text-align:right">' + nr(a.total) + '</td>' +
+        '<td style="text-align:right">' + nr(a.nuestros) + '</td>' +
+        '<td style="text-align:right;font-weight:700">' + nr(a.no_capturado) + '</td>' +
+        '<td>' + shBar(a.share) + '</td><td class="sh-nom" title="' + esc(t3) + '">' + t3 + '</td></tr>';
+    }).join('') : '<tr><td colspan="7" class="emp">Nada para mostrar. Si la lista está vacía, revisá en Mapeos que estén marcados los artículos que sí vendemos.</td></tr>';
+  });
+}
+
+// ── Huecos ──────────────────────────────────────────────────────────────────────────────
+var SH_HUECO = {
+  duro: {
+    expl: 'Artículos con volumen real donde <b>nuestro share es CERO en todo el período</b>. No es que bajamos: es que no estamos.',
+    cols: ['Artículo|sh-nom|30', 'Familia||10', 'Carrefour|r|12', 'Días||8', 'Proveedores||10', 'Líder|sh-nom|18', 'Concentración|r|12'],
+    fila: function(f){ return ['<a href="#" onclick="shVerArticulo(' + f.id + ');return false">' + escH(f.desc) + '</a>' + (f.la_vendemos ? ' <span class="sh-chip sh-ch-nos">la vendemos</span>' : ''),
+      escH(f.familia), nr(f.total), f.dias, f.proveedores, escH(f.lider || '—'), shPct(f.hhi)]; },
+  },
+  perdido: {
+    expl: 'Teníamos participación y <b>cayó más del 50%</b> contra las 4 semanas anteriores. La última columna dice <b>qué proveedor creció</b> en la misma ventana — es el que nos desplazó. Si «mercado» también cayó fuerte, no nos sacaron nada: Carrefour compró menos.',
+    cols: ['Artículo|sh-nom|26', 'Nuestro antes|r|13', 'Nuestro ahora|r|13', 'Caída|r|10', 'Mercado|r|10', 'Última venta||12', 'Nos desplazó|sh-nom|16'],
+    fila: function(f){ return ['<a href="#" onclick="shVerArticulo(' + f.id + ');return false">' + escH(f.desc) + '</a>',
+      nr(f.nuestros_previos), nr(f.nuestros_recientes), '<b class="sh-dn">' + shPct(f.caida) + '</b>',
+      shPct(f.mercado_cayo), escH(f.ultima_venta || '—'),
+      f.desplazo ? escH(f.desplazo) + ' <span class="sh-up">+' + nr(f.desplazo_crecio) + '</span>' : '—']; },
+  },
+  nuevo: {
+    expl: 'Descripciones que <b>aparecen por primera vez</b> en toda la base en los últimos 30 días. Carrefour sumó un producto y quizá ni nos enteramos.',
+    cols: ['Artículo|sh-nom|32', 'Familia||11', 'Apareció||12', 'Carrefour|r|13', 'Nuestro|r|13', 'Share||10', 'Prov.||9'],
+    fila: function(f){ return ['<a href="#" onclick="shVerArticulo(' + f.id + ');return false">' + escH(f.desc) + '</a>',
+      escH(f.familia), escH(f.primera), nr(f.total), nr(f.nuestros), shBar(f.share), f.proveedores]; },
+  },
+  discontinuado: {
+    expl: 'Venían con compras regulares y <b>hace más de 14 días que no aparecen</b> en ningún planning.',
+    cols: ['Artículo|sh-nom|34', 'Familia||12', 'Última vez||13', 'Días sin aparecer|r|14', 'Carrefour|r|14', 'Nuestro|r|13'],
+    fila: function(f){ return ['<a href="#" onclick="shVerArticulo(' + f.id + ');return false">' + escH(f.desc) + '</a>',
+      escH(f.familia), escH(f.ultima), f.dias_sin_aparecer, nr(f.total), nr(f.nuestros)]; },
+  },
+  dias_huerfanos: {
+    expl: 'Días en que Carrefour compró un artículo que <b>nosotros proveemos</b> y ese día no le vendimos nada. Mide <b>constancia</b>: se puede tener 40% de share del mes y haberse perdido la mitad de los días.',
+    cols: ['Artículo|sh-nom|30', 'Familia||11', 'Días que lo compró|r|14', 'Días sin nosotros|r|14', 'Cobertura||12', 'Bultos perdidos|r|19'],
+    fila: function(f){ return ['<a href="#" onclick="shVerArticulo(' + f.id + ');return false">' + escH(f.desc) + '</a>' +
+      (f.fechas && f.fechas.length ? '<div class="sh-aviso" style="margin:2px 0 0">' + escH(f.fechas.join(', ')) + (f.huerfanos > f.fechas.length ? '…' : '') + '</div>' : ''),
+      escH(f.familia), f.dias, '<b>' + f.huerfanos + '</b>', shBar(f.cobertura), nr(f.bultos_perdidos)]; },
+  },
+};
+function shHuecoVista(v){
+  SH.hueco = v;
+  eid('sec-share').querySelectorAll('.sh-tab[data-h]').forEach(function(el){ el.classList.toggle('on', el.dataset.h === v); });
+  shHuecos();
+}
+function shHuecos(){
+  var cfg = SH_HUECO[SH.hueco];
+  eid('sh-hueco-expl').innerHTML = cfg.expl;
+  eid('sh-th-huecos').innerHTML = '<tr>' + cfg.cols.map(function(c){
+    var p = c.split('|');
+    return '<th class="' + (p[1] === 'sh-nom' ? 'sh-nom' : '') + '" style="width:' + p[2] + '%' + (p[1] === 'r' ? ';text-align:right' : '') + '">' + escH(p[0]) + '</th>';
+  }).join('') + '</tr>';
+  eid('sh-tb-huecos').innerHTML = '<tr><td colspan="' + cfg.cols.length + '" class="emp">Calculando…</td></tr>';
+  eid('sh-filtro-extra').innerHTML = '';
+  api('/api/share/huecos?' + shParams('tipo=' + SH.hueco)).then(function(r){
+    if (!r || !r.ok) { eid('sh-tb-huecos').innerHTML = '<tr><td colspan="' + cfg.cols.length + '" class="emp">' + escH((r && r.error) || 'Error') + '</td></tr>'; return; }
+    eid('sh-tb-huecos').innerHTML = r.data.filas.length ? r.data.filas.map(function(f){
+      return '<tr>' + cfg.fila(f).map(function(v, i){
+        var p = cfg.cols[i].split('|');
+        return '<td class="' + (p[1] === 'sh-nom' ? 'sh-nom' : '') + '"' + (p[1] === 'r' ? ' style="text-align:right"' : '') + '>' + v + '</td>';
+      }).join('') + '</tr>';
+    }).join('') : '<tr><td colspan="' + cfg.cols.length + '" class="emp">Nada para mostrar acá. Buena señal.</td></tr>';
+  });
+}
+
+// ── Competencia ─────────────────────────────────────────────────────────────────────────
+function shComp(){
+  eid('sh-filtro-extra').innerHTML = '';
+  eid('sh-tb-comp').innerHTML = '<tr><td colspan="8" class="emp">Calculando…</td></tr>';
+  api('/api/share/competencia?' + shParams()).then(function(r){
+    if (!r || !r.ok) { eid('sh-tb-comp').innerHTML = '<tr><td colspan="8" class="emp">' + escH((r && r.error) || 'Error') + '</td></tr>'; return; }
+    eid('sh-tb-comp').innerHTML = r.data.ranking.map(function(p){
+      return '<tr' + (p.es_nosotros ? ' style="font-weight:700;background:var(--bg2,#f5f5f5)"' : '') + '>' +
+        '<td>' + p.puesto + '</td>' +
+        '<td class="sh-nom"><a href="#" onclick="shProvFicha(' + p.id + ');return false">' + escH(p.nombre) + '</a></td>' +
+        '<td>' + shChip(p.tipo) + '</td><td style="text-align:right">' + nr(p.bultos) + '</td>' +
+        '<td style="text-align:right">' + shPct(p.share) + '</td><td style="text-align:center">' + p.articulos + '</td>' +
+        '<td style="text-align:center">' + p.lider_en + '</td>' +
+        '<td>' + (p.es_nosotros ? '—' : shBar(p.solapamiento)) + '</td></tr>';
+    }).join('');
+
+    // La matriz. Sin scroll lateral: las columnas se reparten el ancho disponible y el nombre
+    // del proveedor va en vertical, que es lo único que entra en una columna angosta.
+    var m = r.data.matriz, anchoNom = 22;
+    var wCol = ((100 - anchoNom) / Math.max(1, m.proveedores.length)).toFixed(2);
+    var html = '<table class="pa-tbl sh-mtx"><thead><tr><th class="sh-nom" style="width:' + anchoNom + '%">Artículo</th>' +
+      m.proveedores.map(function(p){
+        return '<th style="width:' + wCol + '%;text-align:right" title="' + esc(p.nombre) + '">' +
+          '<div style="writing-mode:vertical-rl;transform:rotate(180deg);height:96px;margin-left:auto;font-size:10.5px;font-weight:600' +
+          (p.es_nosotros ? ';color:#7c1d3f' : (p.tipo === 'importacion_propia' ? ';color:#b3261e' : '')) + '">' +
+          escH(p.nombre.length > 24 ? p.nombre.slice(0, 23) + '…' : p.nombre) + '</div></th>';
+      }).join('') + '</tr></thead><tbody>' +
+      m.filas.map(function(f){
+        var max = Math.max.apply(null, f.celdas.concat([1]));
+        return '<tr><td class="sh-nom" title="' + esc(f.desc) + '">' + escH(f.desc) + '</td>' +
+          f.celdas.map(function(c, i){
+            // La intensidad del fondo dice de un vistazo dónde se concentra cada artículo.
+            var op = c ? (0.10 + 0.55 * (c / max)) : 0;
+            var nos = m.proveedores[i].es_nosotros;
+            return '<td style="' + (c ? 'background:rgba(' + (nos ? '124,29,63' : '90,90,90') + ',' + op.toFixed(2) + ')' : '') + '">' + (c ? nr(c) : '') + '</td>';
+          }).join('') + '</tr>';
+      }).join('') + '</tbody></table>';
+    eid('sh-matriz').innerHTML = html;
+  });
+}
+
+function shProvFicha(id){
+  eid('sh-prov-body').innerHTML = '<div class="emp">Cargando…</div>';
+  eid('sh-prov-modal').classList.add('on');
+  api('/api/share/competencia/' + id + '?' + shParams()).then(function(r){
+    if (!r || !r.ok) { eid('sh-prov-body').innerHTML = '<div class="emp">' + escH((r && r.error) || 'Error') + '</div>'; return; }
+    var d = r.data;
+    eid('sh-prov-tit').textContent = d.proveedor.nombre_canonico;
+    var kpi = function(t, v, s){ return '<div class="sh-kpi"><div style="font-size:11px;color:var(--mut)">' + t + '</div><b>' + v + '</b><div class="sh-sub">' + (s || '') + '</div></div>'; };
+    eid('sh-prov-body').innerHTML =
+      '<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px">' +
+        kpi('Volumen', nr(d.bultos), d.rango.desde + ' al ' + d.rango.hasta) +
+        kpi('Artículos', d.articulos_n, 'líder en ' + d.lider_en) +
+        kpi('Nos cruza en', d.compite_en + ' artículos', 'de los que nosotros también proveemos') +
+        kpi('Solapamiento', shPct(d.solapamiento), 'de SU volumen está en nuestra cancha') +
+      '</div>' +
+      '<div class="sh-aviso" style="margin:0 0 10px">El <b>solapamiento</b> es lo que separa a un competidor real de uno que juega en otra cancha: dos proveedores del mismo tamaño pueden estar peleando con nosotros todos los días o no cruzarse nunca.</div>' +
+      shSvgSerie(d.evolucion.map(function(e){ return { k: e.sem, total: e.bultos, nuestros: 0, share: 0 }; }), 'Su evolución semanal') +
+      '<div style="font-size:12px;font-weight:700;margin:14px 0 6px">Mix por familia</div>' +
+      '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px">' + d.mix.map(function(m){
+        return '<span class="sh-chip sh-ch-comp">' + escH(m.familia) + ' ' + shPct(m.share, 0) + '</span>'; }).join('') + '</div>' +
+      '<div class="ab-table-wrap"><table class="pa-tbl"><thead><tr>' +
+        '<th class="sh-nom" style="width:34%">Artículo</th><th style="text-align:right;width:13%">Suyos</th>' +
+        '<th style="text-align:right;width:13%">Nuestros</th><th style="text-align:right;width:13%">Total</th>' +
+        '<th style="width:14%">Su share</th><th style="width:13%">Nuestro</th></tr></thead><tbody>' +
+        d.articulos.map(function(a){
+          return '<tr><td class="sh-nom">' + escH(a.desc) + (a.es_lider ? ' <span class="sh-chip sh-ch-comp">líder</span>' : '') + '</td>' +
+            '<td style="text-align:right">' + nr(a.suyos) + '</td><td style="text-align:right">' + nr(a.nuestros) + '</td>' +
+            '<td style="text-align:right">' + nr(a.total) + '</td><td>' + shBar(a.su_share) + '</td><td>' + shBar(a.nuestro_share) + '</td></tr>';
+        }).join('') + '</tbody></table></div>';
+  });
+}
+
+// ── Buscador semanal ────────────────────────────────────────────────────────────────────
+var shBuscT;
+function shBuscSug(){
+  clearTimeout(shBuscT);
+  shBuscT = setTimeout(function(){
+    var q = elv('sh-busc-q');
+    if (q.length < 2) { shBuscCerrar(); return; }
+    api('/api/share/articulos/buscar?q=' + encodeURIComponent(q)).then(function(r){
+      var box = eid('sh-busc-sug');
+      if (!r || !r.ok || !r.data.length) { box.style.display = 'none'; return; }
+      box.innerHTML = r.data.map(function(a){
+        return '<div style="padding:7px 10px;cursor:pointer;font-size:12.5px;border-bottom:1px solid var(--bor)" ' +
+          'onmouseover="this.style.background=\'var(--bg2,#f5f5f5)\'" onmouseout="this.style.background=\'\'" ' +
+          'onclick="shBuscElegir(' + a.id + ',\'' + esc(a.desc_canonica) + '\')">' +
+          escH(a.desc_canonica) + ' <span style="color:var(--mut)">· ' + escH(a.familia || '') + ' · ' + nr(a.bultos) + ' bultos</span></div>';
+      }).join('');
+      box.style.display = '';
+    });
+  }, 300);
+}
+function shBuscCerrar(){ var b = eid('sh-busc-sug'); if (b) b.style.display = 'none'; }
+function shBuscElegir(id, nombre){ elv('sh-busc-q', nombre); shBuscCerrar(); SH.art = id; shBuscCargar(); }
+function shBuscCargar(){
+  if (!SH.art) return;
+  eid('sh-tb-busc').innerHTML = '<tr><td colspan="7" class="emp">Calculando…</td></tr>';
+  api('/api/share/articulos/' + SH.art + '/semanal?semanas=' + elv('sh-busc-sem')).then(shBuscPintar);
+}
+function shBuscPintar(r){
+  if (!r || !r.ok) { eid('sh-tb-busc').innerHTML = '<tr><td colspan="7" class="emp">' + escH((r && r.error) || 'Error') + '</td></tr>'; return; }
+  var d = r.data, a = d.articulo;
+  SH.art = a.id;
+  elv('sh-busc-q', a.desc_canonica);
+  var tot = d.filas.reduce(function(s, f){ return s + f.total; }, 0);
+  var nue = d.filas.reduce(function(s, f){ return s + f.nuestros; }, 0);
+  eid('sh-busc-cab').innerHTML =
+    '<div style="display:flex;gap:10px;flex-wrap:wrap">' +
+    '<div class="sh-kpi"><div style="font-size:11px;color:var(--mut)">Artículo</div><b style="font-size:15px">' + escH(a.desc_canonica) + '</b>' +
+      '<div class="sh-sub">' + escH(a.familia || '—') + ' · unidad ' + escH(a.unidad || '—') + (a.la_vendemos ? ' · la vendemos' : ' · NO marcado como nuestro') + '</div></div>' +
+    '<div class="sh-kpi"><div style="font-size:11px;color:var(--mut)">En el período mostrado</div><b>' + shPct(tot ? nue / tot : 0) + '</b>' +
+      '<div class="sh-sub">' + nr(nue) + ' de ' + nr(tot) + ' bultos · ' + d.filas.length + ' semanas</div></div></div>';
+  eid('sh-busc-graf').innerHTML = shSvgSerie(d.filas.map(function(f){ return { k: f.sem, total: f.total, nuestros: f.nuestros, share: f.share }; }), 'Últimas ' + d.filas.length + ' semanas');
+
+  eid('sh-tb-busc').innerHTML = d.filas.length ? d.filas.slice().reverse().map(function(f){
+    var det = f.provs.map(function(p){ return escH(p.nombre) + ': ' + nr(p.bultos); }).join(' · ');
+    return '<tr><td><b>' + escH(f.sem) + '</b></td><td style="font-size:11.5px;color:var(--mut)">' + escH(f.desde) + ' → ' + escH(f.hasta) + '</td>' +
+      '<td style="text-align:right">' + nr(f.total) + '</td><td style="text-align:right">' + nr(f.nuestros) + '</td>' +
+      '<td>' + shBar(f.share) + '</td>' +
+      '<td style="text-align:right">' + (f.delta_total == null ? '—' : (f.delta_total > 0 ? '<span class="sh-up">+' : '<span class="sh-dn">') + nr(f.delta_total) + '</span>') + '</td>' +
+      '<td class="sh-nom" title="' + esc(det) + '">' + escH(f.lider || '—') + '</td></tr>';
+  }).join('') : '<tr><td colspan="7" class="emp">Ese artículo no aparece en el período.</td></tr>';
+}
+function shBuscExcel(){
+  if (!SH.art) { toast('Elegí un artículo primero', 'err'); return; }
+  window.location = '/api/share/export.xlsx?vista=lineas&' + shParams();
+}
+
+// ── Carga ───────────────────────────────────────────────────────────────────────────────
+function shCargas(){
+  api('/api/share/cargas').then(function(r){
+    if (!r || !r.ok) { eid('sh-tb-cargas').innerHTML = '<tr><td colspan="8" class="emp">' + escH((r && r.error) || 'Error') + '</td></tr>'; return; }
+    eid('sh-tb-cargas').innerHTML = r.data.length ? r.data.map(function(c){
+      var act = c.estado === 'activa';
+      var w = (c.warnings && c.warnings.warnings) || [];
+      return '<tr' + (act ? '' : ' style="opacity:.5"') + '>' +
+        '<td>' + escH(c.fecha_entrega) + (c.fecha_desde !== c.fecha_hasta ? '<div class="sh-aviso" style="margin:0">→ ' + escH(c.fecha_hasta) + '</div>' : '') + '</td>' +
+        '<td class="sh-nom" title="' + esc(c.archivo_nombre) + '">' + escH(c.archivo_nombre) +
+          (w.length ? '<div class="sh-aviso" style="margin:1px 0 0;color:#8a6d00">⚠ ' + escH(w.join(' · ')) + '</div>' : '') + '</td>' +
+        '<td style="text-align:right">' + nr(c.filas) + '</td><td style="text-align:right">' + nr(c.bultos_total) + '</td>' +
+        '<td style="font-size:11.5px">' + escH(String(c.cargado_at || '').slice(0, 16)) + '</td>' +
+        '<td style="font-size:11.5px">' + escH(c.cargado_por || '—') + '</td>' +
+        '<td style="text-align:center">' + (act ? '<span class="sh-chip sh-ch-nos">activa</span>' : '<span class="sh-chip sh-ch-comp">reemplazada</span>') + '</td>' +
+        '<td>' + (SH.puedeOperar
+          ? (act ? '<button class="btn bo bs" onclick="shBajaCarga(' + c.id + ')">Dar de baja</button>'
+                 : '<button class="btn bo bs" onclick="shReactivar(' + c.id + ')">Reactivar</button>')
+          : '') + '</td></tr>';
+    }).join('') : '<tr><td colspan="8" class="emp">Todavía no se cargó ningún planning.</td></tr>';
+  });
+}
+
+function shArchivoElegido(input){
+  var f = input.files && input.files[0];
+  input.value = '';
+  if (!f) return;
+  SH.archivo = f;
+  var fd = new FormData(); fd.append('archivo', f);
+  eid('sh-prev-body').innerHTML = '<div class="emp">Leyendo el archivo…</div>';
+  eid('sh-prev-ok').style.display = 'none';
+  eid('sh-prev-modal').classList.add('on');
+  fetch('/api/share/cargas', { method: 'POST', body: fd }).then(function(r){ return r.json(); }).then(function(r){
+    if (!r || !r.ok) { eid('sh-prev-body').innerHTML = '<div style="color:#b3261e;font-size:13px;line-height:1.6">' + escH((r && r.error) || 'No se pudo leer el archivo.') + '</div>'; return; }
+    shPreviewPintar(r.data);
+  }).catch(function(e){ eid('sh-prev-body').innerHTML = '<div style="color:#b3261e">' + escH(e.message) + '</div>'; });
+}
+
+function shPreviewPintar(d){
+  var h = '';
+  if (d.duplicado) {
+    h += '<div style="padding:10px 12px;border-radius:8px;background:#fff8e1;color:#8a6d00;margin-bottom:12px">' +
+      '<b>Este archivo ya está cargado</b> (carga #' + d.duplicado.id + ', ' + escH(d.duplicado.archivo_nombre) + ', ' + escH(String(d.duplicado.cargado_at || '').slice(0, 16)) + ').<br>' +
+      'La comparación es por contenido, así que da igual cómo se llame el archivo.</div>';
+  }
+  if (d.conflictos && d.conflictos.length) {
+    h += '<div style="padding:10px 12px;border-radius:8px;background:#fdecec;color:#b3261e;margin-bottom:12px">' +
+      '<b>Se pisa a medias con una carga que ya está.</b><br>' +
+      d.conflictos.map(function(c){ return 'La carga #' + c.id + ' (' + escH(c.archivo_nombre) + ') cubre ' + escH(c.fechas.join(', ')) + ' y comparte ' + escH(c.comunes.join(', ')) + '.'; }).join('<br>') +
+      '<br>Reemplazarla perdería los días que este archivo no trae; dejarla contaría dos veces los compartidos. ' +
+      'Dá de baja esa carga desde la lista de abajo si ya no vale, y volvé a subir este archivo.</div>';
+  }
+  var kpi = function(t, v){ return '<div class="sh-kpi"><div style="font-size:11px;color:var(--mut)">' + t + '</div><b>' + v + '</b></div>'; };
+  h += '<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px">' +
+    kpi('Fecha de entrega', escH(d.fecha_entrega) + (d.fechas.length > 1 ? ' <span style="font-size:12px;font-weight:400">+' + (d.fechas.length - 1) + ' días</span>' : '')) +
+    kpi('Filas', nr(d.filas)) + kpi('Bultos', nr(d.bultos_total)) +
+    kpi('Proveedores', d.proveedores) + kpi('Artículos', d.articulos) + '</div>';
+
+  if (d.reemplaza && d.reemplaza.length)
+    h += '<div style="padding:9px 12px;border-radius:8px;background:var(--bg2,#f5f5f5);margin-bottom:10px;font-size:12.5px">' +
+      '↻ Reemplaza ' + d.reemplaza.length + ' carga(s) del mismo día: ' +
+      d.reemplaza.map(function(c){ return '#' + c.id + ' ' + escH(c.archivo_nombre); }).join(', ') +
+      '. <span style="color:var(--mut)">No se borran, quedan marcadas como reemplazadas.</span></div>';
+
+  if (d.articulos_nuevos.length || d.proveedores_nuevos.length) {
+    h += '<div style="font-size:12.5px;margin-bottom:10px">';
+    if (d.proveedores_nuevos.length) h += '<b>' + d.proveedores_nuevos.length + ' proveedor(es) nuevo(s):</b> ' + escH(d.proveedores_nuevos.join(' · ')) + '<br>';
+    if (d.articulos_nuevos.length) h += '<b>' + d.articulos_nuevos.length + ' artículo(s) nuevo(s):</b> ' +
+      escH(d.articulos_nuevos.slice(0, 20).join(' · ')) + (d.articulos_nuevos.length > 20 ? ' … y ' + (d.articulos_nuevos.length - 20) + ' más' : '');
+    h += '<div class="sh-aviso">Entran solos y quedan en Mapeos para revisar.</div></div>';
+  }
+  if (d.warnings && d.warnings.length)
+    h += '<div style="padding:9px 12px;border-radius:8px;background:#fff8e1;color:#8a6d00;font-size:12.5px;line-height:1.6">⚠ ' +
+      d.warnings.map(escH).join('<br>⚠ ') + '</div>';
+
+  eid('sh-prev-body').innerHTML = h;
+  var btn = eid('sh-prev-ok');
+  btn.style.display = (d.puede_cargar && SH.puedeOperar) ? '' : 'none';
+  btn.textContent = 'Cargar ' + nr(d.filas) + ' filas';
+}
+
+function shConfirmarCarga(){
+  if (!SH.archivo) return;
+  var btn = eid('sh-prev-ok'); btn.disabled = true; btn.textContent = 'Cargando…';
+  var fd = new FormData(); fd.append('archivo', SH.archivo);
+  fetch('/api/share/cargas?confirmar=1', { method: 'POST', body: fd }).then(function(r){ return r.json(); }).then(function(r){
+    btn.disabled = false;
+    if (!r || !r.ok) { toast((r && r.error) || 'No se pudo cargar', 'err'); btn.textContent = 'Cargar'; return; }
+    closeMB('sh-prev-modal');
+    SH.archivo = null;
+    toast('Planning cargado');
+    shInit(); shCargas();
+  });
+}
+
+function shBajaCarga(id){
+  if (!confirm('Dar de baja esta carga? Los datos no se borran: dejan de contarse y se puede reactivar.')) return;
+  api('/api/share/cargas/' + id, 'DELETE').then(function(r){
+    if (!r || !r.ok) { toast((r && r.error) || 'Error', 'err'); return; }
+    toast('Carga dada de baja'); shInit(); shCargas();
+  });
+}
+function shReactivar(id){
+  api('/api/share/cargas/' + id + '/reactivar', 'POST').then(function(r){
+    if (!r || !r.ok) { toast((r && r.error) || 'Error', 'err'); return; }
+    toast('Carga reactivada'); shInit(); shCargas();
+  });
+}
+
+// ── Mapeos ──────────────────────────────────────────────────────────────────────────────
+var SH_FAM = ['FRUTA', 'VERDURA', 'HOJA', 'HONGO', 'OTRO'];
+var SH_UNI = ['KG', 'UNIDAD', 'ATADO', 'PAQUETE', 'PACK_GR', 'SIN_DEFINIR'];
+
+function shMapeos(){
+  eid('sh-filtro-extra').innerHTML = '';
+  api('/api/share/pendientes').then(function(r){
+    if (!r || !r.ok) { eid('sh-tb-map').innerHTML = '<tr><td colspan="8" class="emp">' + escH((r && r.error) || 'Error') + '</td></tr>'; return; }
+    var d = r.data;
+    var op = SH.puedeOperar;
+    eid('sh-tb-map').innerHTML = d.articulos.length ? d.articulos.map(function(a){
+      var sel = function(id, vals, act){
+        return '<select id="' + id + '"' + (op ? '' : ' disabled') + ' style="width:100%;padding:3px 5px;border:1px solid var(--bor);border-radius:5px;background:var(--bg);font-size:12px">' +
+          vals.map(function(v){ return '<option value="' + esc(v) + '"' + (v === act ? ' selected' : '') + '>' + escH(v) + '</option>'; }).join('') + '</select>';
+      };
+      return '<tr><td class="sh-nom">' + escH(a.desc_canonica) +
+          '<div class="sh-aviso" style="margin:1px 0 0">desde ' + escH(a.primera || '—') + '</div></td>' +
+        '<td style="text-align:right">' + nr(a.bultos) + '</td>' +
+        '<td style="text-align:center"><input type="checkbox" id="shm-lv-' + a.id + '"' + (a.la_vendemos ? ' checked' : '') + (op ? '' : ' disabled') + '></td>' +
+        '<td>' + sel('shm-fam-' + a.id, SH_FAM, a.familia) + '</td>' +
+        '<td>' + sel('shm-uni-' + a.id, SH_UNI, a.unidad) + '</td>' +
+        '<td><input type="number" step="0.001" min="0" id="shm-fk-' + a.id + '" value="' + (a.factor_kg == null ? '' : a.factor_kg) + '"' + (op ? '' : ' disabled') +
+          ' style="width:100%;text-align:right;padding:3px 5px;border:1px solid var(--bor);border-radius:5px;background:var(--bg);font-size:12px"></td>' +
+        '<td><input type="text" id="shm-ru-' + a.id + '" value="' + esc(a.rubro || '') + '"' + (op ? '' : ' disabled') +
+          ' style="width:100%;padding:3px 5px;border:1px solid var(--bor);border-radius:5px;background:var(--bg);font-size:12px"></td>' +
+        '<td>' + (op ? '<button class="btn bb bs" onclick="shGuardarArt(' + a.id + ')">OK</button>' : '') + '</td></tr>';
+    }).join('') : '<tr><td colspan="8" class="emp">Nada pendiente. 👌</td></tr>';
+
+    eid('sh-tb-mapprov').innerHTML = d.proveedores.length ? d.proveedores.map(function(p){
+      return '<tr><td class="sh-nom">' + escH(p.nombre_canonico) + '</td>' +
+        '<td style="text-align:right">' + nr(p.bultos) + '</td>' +
+        '<td><select id="shp-tipo-' + p.id + '"' + (op ? '' : ' disabled') + ' style="width:100%;padding:3px 5px;border:1px solid var(--bor);border-radius:5px;background:var(--bg);font-size:12px">' +
+          ['competidor', 'nosotros', 'importacion_propia'].map(function(t){
+            return '<option value="' + t + '"' + (t === p.tipo ? ' selected' : '') + '>' + t + '</option>'; }).join('') + '</select></td>' +
+        '<td>' + (op ? '<button class="btn bb bs" onclick="shGuardarProv(' + p.id + ')">OK</button>' : '') + '</td></tr>';
+    }).join('') : '<tr><td colspan="4" class="emp">Nada pendiente.</td></tr>';
+  });
+
+  // Los dos selectores de fusión: se llenan con TODOS los artículos, no sólo los pendientes,
+  // porque el duplicado que hay que absorber suele ser uno viejo ya revisado.
+  api('/api/share/articulos?limite=2000&' + shParams()).then(function(r){
+    if (!r || !r.ok) return;
+    var ops = '<option value="">—</option>' + r.data.filas.map(function(a){
+      return '<option value="' + a.id + '">' + escH(a.desc) + ' (' + nr(a.total) + ')</option>'; }).join('');
+    eid('sh-fus-destino').innerHTML = ops;
+    eid('sh-fus-origen').innerHTML = ops;
+  });
+}
+
+function shGuardarArt(id){
+  var fk = elv('shm-fk-' + id);
+  api('/api/share/articulos/' + id, 'PATCH', {
+    la_vendemos: eid('shm-lv-' + id).checked ? 1 : 0,
+    familia: elv('shm-fam-' + id),
+    unidad: elv('shm-uni-' + id),
+    factor_kg: fk === '' ? null : Number(fk),
+    rubro: elv('shm-ru-' + id),
+    pendiente_revision: 0,
+  }).then(function(r){
+    if (!r || !r.ok) { toast((r && r.error) || 'Error', 'err'); return; }
+    toast('Guardado'); shMapeos(); shInit();
+  });
+}
+function shGuardarProv(id){
+  api('/api/share/proveedores/' + id, 'PATCH', { tipo: elv('shp-tipo-' + id), pendiente_revision: 0 }).then(function(r){
+    if (!r || !r.ok) { toast((r && r.error) || 'Error', 'err'); return; }
+    toast('Guardado'); shMapeos(); shInit();
+  });
+}
+function shFusionar(){
+  var dst = elv('sh-fus-destino'), org = elv('sh-fus-origen');
+  if (!dst || !org) { toast('Elegí los dos artículos', 'err'); return; }
+  if (dst === org) { toast('Son el mismo artículo', 'err'); return; }
+  var nd = eid('sh-fus-destino').selectedOptions[0].text, no = eid('sh-fus-origen').selectedOptions[0].text;
+  if (!confirm('Fusionar?\n\nSe queda:  ' + nd + '\nSe absorbe: ' + no + '\n\nLas líneas del absorbido pasan al que queda y se deja un alias para que no se vuelva a crear.')) return;
+  api('/api/share/articulos/' + dst + '/fusionar', 'POST', { alias_de_id: Number(org) }).then(function(r){
+    if (!r || !r.ok) { toast((r && r.error) || 'Error', 'err'); return; }
+    toast('Fusionados'); shMapeos(); shInit();
+  });
+}
+
+// ── Excel ───────────────────────────────────────────────────────────────────────────────
+// Cada solapa baja LO QUE ESTÁ MIRANDO. Un único Excel "de todo" obliga a filtrar de nuevo
+// afuera lo que ya se filtró adentro.
+function shExport(){
+  var v = SH.tab === 'opor' ? 'oportunidades' : (SH.tab === 'comp' ? 'competencia' : (SH.tab === 'busc' || SH.tab === 'carga' ? 'lineas' : 'articulos'));
+  window.location = '/api/share/export.xlsx?vista=' + v + '&' + shParams();
 }
 
 function infInit(){
