@@ -7106,12 +7106,16 @@ router.get('/cc-clientes', requireAuth, (req, res) => {
                         JOIN sg_ven_cobranzas co2 ON co2.id=cd.cobranza_id
                        WHERE cd.tipo='factura' AND cd.doc_id=f.id AND co2.anulada=0),0))
                     FROM sg_ven_facturas f
-                   -- LOS DE PRUEBA NO SON DEUDA. Un comprobante emitido desde un
-                   -- punto de venta de prueba no se le informó a AFIP y no tiene
-                   -- CAE: si sumara acá, el saldo del cliente diría que debe plata
-                   -- por algo que nunca existió.
-                   WHERE f.cliente_id=c.id AND f.estado <> 'anulada'
-                     AND COALESCE(f.es_prueba,0) = 0),0) AS documentado,
+                   -- LOS DE PRUEBA SÍ SUMAN AL SALDO. Se habían dejado afuera para
+                   -- que no ensuciaran la cuenta corriente, y eso rompía el motivo
+                   -- de tenerlos: Pablo los va a usar para probar el circuito
+                   -- ENTERO — cuenta corriente, cobranzas, imputaciones— y con el
+                   -- saldo en cero no hay nada que probar.
+                   --
+                   -- La marca es_prueba se queda igual: sirve para reconocerlos y
+                   -- borrarlos cuando las pruebas terminen. Lo que no hace es
+                   -- esconderlos mientras tanto.
+                   WHERE f.cliente_id=c.id AND f.estado <> 'anulada'),0) AS documentado,
         -- ── LO ENTREGADO QUE TODAVÍA NO TIENE COMPROBANTE ────────────────
         -- Los kg del remito que no se facturaron, al precio del remito. Es
         -- deuda real —la mercadería está en la casa del cliente— pero no está
