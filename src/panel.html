@@ -13136,6 +13136,45 @@ function sgFdOnAdd(tipo, fuenteId, kg, meta){
 }
 function sgFdDel(i){ SG.fdItems.splice(i,1); sgFdRender(); }
 function sgFdUpd(i,c,v){ SG.fdItems[i][c]=v; sgFdRender(); }
+
+// ── EL PRECIO SE PONE POR BULTO ─────────────────────────────────────────
+// Pablo: "en general cuando es facturación directa hacemos facturación por
+// BULTO, no por kilo" — y después: "tenés que poner un selector donde el precio
+// es por kilo o por bulto".
+//
+// La cantidad ya se carga en cajones. El precio pedía $/kg, así que el que
+// factura tenía que dividir de cabeza: cobrar $9.000 el cajón de 20 kg era
+// escribir 450.
+//
+// POR DENTRO SE SIGUE GUARDANDO EL $/KG. El costo, el margen y los informes
+// corren por kilo; si se guardara el precio del cajón, ninguno de esos números
+// se podría comparar con nada. Se escribe por bulto y la cuenta la hace el
+// sistema: es lo único que cambia.
+//
+// Sin kg por bulto no hay cómo convertir, así que esa línea queda en kilo.
+function sgFdKpb(it){ return Number(it && it.kg_por_bulto) || 0; }
+function sgFdUnidad(it){
+  return (it.unidad === 'kilo' || !sgFdKpb(it)) ? 'kilo' : 'bulto';
+}
+// Lo que se muestra en el campo, en la unidad elegida.
+function sgFdPrecioVista(it){
+  var pk = Number(it.precio) || 0;
+  if (!pk) return '';
+  return (sgFdUnidad(it) === 'bulto') ? +(pk * sgFdKpb(it)).toFixed(2) : pk;
+}
+function sgFdSetUnidad(i, u){
+  var it = SG.fdItems[i];
+  it.unidad = (u === 'kilo') ? 'kilo' : 'bulto';
+  sgFdRender();               // el precio guardado no cambia: cambia cómo se lee
+}
+function sgFdSetPrecio(i, v){
+  var it = SG.fdItems[i];
+  var n = Number(v);
+  if (!v || isNaN(n)) { it.precio = ''; sgFdRender(); return; }
+  var kpb = sgFdKpb(it);
+  it.precio = (sgFdUnidad(it) === 'bulto' && kpb > 0) ? +(n / kpb).toFixed(6) : n;
+  sgFdRender();
+}
 function sgFdUpdBultos(i,v){
   var it=SG.fdItems[i]; var b=Number(v); it.bultos=b;
   if(Number(it.kg_por_bulto)>0) it.kg=+(b*Number(it.kg_por_bulto)).toFixed(4);
@@ -13149,6 +13188,7 @@ function sgFdRender(){
   }
   cont.innerHTML=SG.fdItems.map(function(it,i){
     var kg=Number(it.kg)||0;
+    var u=sgFdUnidad(it), kpb=sgFdKpb(it);
     // EL PRODUCTO ARRIBA Y GRANDE; LA PARTIDA Y LOS KILOS ABAJO Y CHICOS.
     // Antes iban en el mismo renglón, con el código de partida compitiendo con el
     // nombre: el que factura tiene que ver QUÉ está facturando de un vistazo.
@@ -13165,8 +13205,26 @@ function sgFdRender(){
           +(it.bultos_disponibles!=null?(' · disp '+it.bultos_disponibles+' cj'):'')+'</div>'
       +'</div>'
       +'<input type="number" placeholder="cj" value="'+(it.bultos||'')+'" onchange="sgFdUpdBultos('+i+',this.value)">'
-      +'<input type="number" placeholder="$/kg" value="'+(it.precio||'')+'" onchange="sgFdUpd('+i+',\'precio\',this.value)">'
+      // EL PRECIO Y SU UNIDAD, JUNTOS. El selector al lado del campo y no arriba:
+      // es lo que le da sentido al número que se está escribiendo.
+      +'<div style="display:grid;grid-template-columns:1fr 74px;gap:4px">'
+        +'<input type="number" placeholder="'+(u==='bulto'?'$/bulto':'$/kg')+'" value="'+sgFdPrecioVista(it)+'"'
+          +' onchange="sgFdSetPrecio('+i+',this.value)">'
+        +'<select onchange="sgFdSetUnidad('+i+',this.value)"'+(kpb?'':' disabled title="Esta partida no tiene kg por bulto cargados"')+'>'
+          +'<option value="bulto"'+(u==='bulto'?' selected':'')+'>bulto</option>'
+          +'<option value="kilo"'+(u==='kilo'?' selected':'')+'>kilo</option>'
+        +'</select>'
+      +'</div>'
       +'<button class="btn bd bs" onclick="sgFdDel('+i+')">×</button>'
+      // Se muestra la otra cara de la cuenta: el que factura ve el $/kg que va a
+      // quedar guardado, que es contra lo que después se lee el margen.
+      +((Number(it.precio)>0 && kpb>0)
+          ? '<div style="grid-column:1/-1;font-size:11px;color:var(--mut);margin:-2px 0 4px">'
+            + (u==='bulto'
+                ? ('= '+sgMoney(Number(it.precio))+'/kg')
+                : ('= '+sgMoney(Number(it.precio)*kpb)+' el bulto de '+nr(kpb)+' kg'))
+            + '</div>'
+          : '')
       +'</div>';
   }).join('');
   // El resumen espeja la cuenta del backend: si el precio incluye IVA, el neto
