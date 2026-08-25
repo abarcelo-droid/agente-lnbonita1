@@ -5754,6 +5754,17 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
         <label>¿A qué cliente se le cobra?</label>
         <select id="sg-cob-cli" onchange="sgCobCliente()"></select>
       </div>
+      <!-- ══ ¿QUÉ SE ESTÁ COBRANDO? ═════════════════════════════
+           El espejo del pago a proveedores, que ya lo tenía. Lo que el cliente debe
+           es lo ACORDADO: el comprobante más lo que quedó sin facturar. De esto
+           depende en qué libro cae el asiento — un cobro de la parte sin comprobante
+           NO puede aparecer en el fiscal, porque ahí esa deuda nunca subió. -->
+      <div class="fl" style="margin-bottom:10px"><label>¿Qué está cobrando?</label>
+        <select id="sg-cob-ambito" onchange="sgCobAmbito()">
+          <option value="todo">Las dos partes (proporcional)</option>
+          <option value="fiscal">Sólo lo facturado</option>
+          <option value="gestion">Sólo lo que falta facturar</option>
+        </select></div>
       <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px">
         <div class="fl"><label>Fecha</label><input type="date" id="sg-cob-fecha"></div>
         <div class="fl"><label>En qué cuenta entra</label>
@@ -17312,6 +17323,22 @@ function sgCobCliente(){
   sgCobCargarCliente((eid('sg-cob-cli') || {}).value);
 }
 
+// Qué mitad se está cobrando, y cuánto queda de ella. El backend valida contra
+// esto mismo: si la pantalla ofreciera otro número, el cobro rebotaría.
+function sgCobAmb(){ return (eid('sg-cob-ambito') || {}).value || 'todo'; }
+function sgCobPend(x){
+  var a = sgCobAmb();
+  if (a === 'fiscal') return Number(x.pendiente_fiscal != null ? x.pendiente_fiscal : x.pendiente) || 0;
+  if (a === 'gestion') return Number(x.pendiente_gestion) || 0;
+  return Number(x.pendiente) || 0;
+}
+// Cambiar de mitad borra lo imputado: los importes eran contra el pendiente de la
+// otra, y dejarlos escritos imputa plata contra un tope que ya no existe.
+function sgCobAmbito(){
+  SG_COB.docs.forEach(function(_, i){ var e = eid('sg-cob-i-' + i); if (e) e.value = ''; });
+  sgCobPintar();
+}
+
 function sgCobPintar(){
   var tb = eid('sg-cob-tb'); if (!tb) return;
   tb.innerHTML = SG_COB.docs.length ? SG_COB.docs.map(function(x, i){
@@ -17319,7 +17346,15 @@ function sgCobPintar(){
       + '<td><code>' + escH(x.numero || '') + '</code></td>'
       + '<td>' + escH(x.fecha || '—') + '</td>'
       + '<td style="text-align:right">' + sgMoney(x.total) + '</td>'
-      + '<td style="text-align:right"><b>' + sgMoney(x.pendiente) + '</b></td>'
+      // EL PENDIENTE DE LA MITAD QUE SE ESTÁ COBRANDO. Con «sólo lo facturado»
+      // mostrar el total acordado sería ofrecer imputar contra algo que el
+      // backend va a rechazar.
+      + '<td style="text-align:right"><b>' + sgMoney(sgCobPend(x)) + '</b>'
+        + (sgCobAmb() === 'todo' && Number(x.pendiente_gestion)
+            ? '<div style="font-size:10.5px;color:var(--mut)">'
+              + sgMoney(x.pendiente_fiscal) + ' facturado + '
+              + sgMoney(x.pendiente_gestion) + ' sin facturar</div>' : '')
+        + '</td>'
       + '<td style="text-align:right;white-space:nowrap">'
         + '<input type="text" inputmode="decimal" id="sg-cob-i-' + i + '" placeholder="$ 0"'
         + ' style="width:118px;text-align:right"'
@@ -17332,10 +17367,11 @@ function sgCobPintar(){
   sgCobTotal();
 }
 
+// «Todo» es todo lo de ESTA mitad, no el acordado entero.
 function sgCobTodo(i){
   var d = SG_COB.docs[i]; if (!d) return;
   var el = eid('sg-cob-i-' + i);
-  if (el) { el.value = sgMilShow(d.pendiente); sgCobTotal(); }
+  if (el) { el.value = sgMilShow(sgCobPend(d)); sgCobTotal(); }
 }
 
 // Lo imputado contra lo que entró. La diferencia queda a cuenta: un cliente que
@@ -17444,7 +17480,9 @@ function sgCobGuardar(){
     forma_pago: forma,
     referencia: (eid('sg-cob-ref') || {}).value,
     notas: (eid('sg-cob-notas') || {}).value,
-    monto: total, docs: docs
+    monto: total, docs: docs,
+    // Contra qué mitad se cobra: de esto depende en qué libro cae el asiento.
+    ambito: sgCobAmb()
   }).then(function(r){
     if (!r || !r.ok) { toast((r && r.error) || 'No se pudo registrar el cobro', 'er'); return; }
     toast(esChq ? 'Cobro registrado — el cheque quedó en la cartera'

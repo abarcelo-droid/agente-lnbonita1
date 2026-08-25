@@ -571,6 +571,14 @@ try { db.exec("CREATE INDEX IF NOT EXISTS idx_sg_asi_lin_ambito ON sg_asientos_l
 // Y lo mismo del lado de la plata: el movimiento sabe de qué ámbito es, así una
 // misma caja puede tener los dos sin partirla en dos cajas.
 try { db.exec("ALTER TABLE sg_fin_movimientos ADD COLUMN ambito TEXT NOT NULL DEFAULT 'fiscal'"); } catch (_) {}
+// ══ LA COBRANZA TAMBIÉN SE PARTE EN DOS ══════════════════════════
+// Es el espejo del pago a proveedores, y ese ya lo tenía. La pantalla dejaba
+// imputar hasta lo ACORDADO --comprobante + lo que quedó sin facturar-- pero el
+// asiento le acreditaba al cliente el 100% en el libro FISCAL: ahí esa parte de la
+// deuda nunca subió, así que la cuenta corriente bajaba por plata que no había
+// entrado, y la columna «Sin facturar» no bajaba nunca aunque el cliente ya hubiera
+// pagado.
+try { db.exec("ALTER TABLE sg_ven_cobranza_docs ADD COLUMN monto_gestion REAL NOT NULL DEFAULT 0"); } catch (_) {}
 try { db.exec("ALTER TABLE sg_fin_movimientos ADD COLUMN motivo TEXT"); } catch (_) {}
 try { db.exec("CREATE INDEX IF NOT EXISTS idx_sg_fin_mov_ambito ON sg_fin_movimientos(ambito)"); } catch (_) {}
 
