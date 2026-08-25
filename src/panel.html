@@ -1088,7 +1088,10 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
           </div>
           <div class="ab-table-wrap"><table class="pa-tbl" id="liq-grilla">
             <thead><tr>
-              <th style="width:36%">Concepto</th>
+              <th style="width:36%">Concepto
+                <span style="font-weight:400;text-transform:none;letter-spacing:0;font-size:10.5px;color:var(--mut)">
+                  · <span style="color:#16a34a;font-weight:700">+</span> le suma al productor,
+                  <span style="color:#dc2626;font-weight:700">−</span> se le descuenta</span></th>
               <th style="width:22%;text-align:right">Fiscal</th>
               <th style="width:22%;text-align:right" title="Lo acordado que no lleva comprobante. El IVA no tiene columna acá: sale del comprobante y de nada más.">Gestión</th>
               <th style="width:20%;text-align:right">Total</th>
@@ -30704,7 +30707,15 @@ function liqPintar() {
       '<td style="display:flex;gap:4px">' +
         // VER y REIMPRIMIR es el mismo PDF: se abre en una pestaña, y de ahí se
         // imprime o se guarda. Dos botones para el mismo archivo no agregan nada.
-        '<button class="btn bo bs" onclick="window.open(\'/api/liquidaciones/'+r.id+'/pdf\',\'_blank\')" title="Ver / imprimir el PDF">📄 Ver</button>' +
+        // EL LIBRO ELEGIDO VIAJA AL PDF. Con «Sólo fiscal» sale el comprobante del
+        // productor; con gestión sale la copia interna, sellada. Sin parámetro el
+        // backend imprime fiscal, que es el único defecto seguro: los números de
+        // gestión son internos y el proveedor no los ve.
+        '<button class="btn bo bs" onclick="window.open(\'/api/liquidaciones/' + r.id
+          + '/pdf?libro=' + (libro || 'todo') + '\',\'_blank\')" title="'
+          + (libro === 'fiscal' ? 'Imprimir el comprobante del productor (sólo fiscal)'
+                                : 'COPIA INTERNA: incluye los valores de gestión')
+          + '">📄 Ver</button>' +
         '<button class="btn bo bs" onclick="liqEliminar('+r.id+')" style="color:#991b1b" title="Eliminar">🗑️</button>' +
       '</td>' +
     '</tr>';
@@ -31165,7 +31176,15 @@ function liqGrillaPintar(){
         + ' style="width:70px;text-align:right;padding:2px 5px">'
         + '<span style="font-size:11px;color:var(--mut)">% sobre las ventas</span></div>';
     }
-    h += '<tr><td><strong>' + escH(f.label) + '</strong>' + sub + pct + '</td>'
+    // EL SIGNO, ADELANTE DEL NOMBRE. Pablo: "le agregaría los signos nada más que
+    // para que el operador entienda que hay cosas que suman y cosas que restan".
+    // Las ventas y su IVA son lo que el productor cobra; todo lo demás se le
+    // descuenta. Un renglón que no dice para qué lado va es un renglón que se lee
+    // dos veces.
+    var sg = (f.k === 'ventas')
+      ? '<span style="color:#16a34a;font-weight:700;margin-right:5px">+</span>'
+      : '<span style="color:#dc2626;font-weight:700;margin-right:5px">−</span>';
+    h += '<tr><td>' + sg + '<strong>' + escH(f.label) + '</strong>' + sub + pct + '</td>'
       + '<td>' + inp(f.k, 'f') + '</td>'
       + '<td>' + inp(f.k, 'g') + '</td>'
       + '<td style="text-align:right" id="liq-t-' + f.k + '" class="pli-num">—</td></tr>'
@@ -31174,8 +31193,8 @@ function liqGrillaPintar(){
       // bueno tenerlo chequeado y a mano para saber lo que estamos calculando".
       // El del IVA de ventas NO se escribe: ese sale del comprobante de la venta y
       // puede ser 10,5 según el producto — poner un 21% ahí sería mentir.
-      + '<tr><td style="padding-left:18px;color:var(--mut);font-size:12px">IVA de '
-        + escH(f.label.toLowerCase())
+      + '<tr><td style="padding-left:18px;color:var(--mut);font-size:12px">' + sg
+        + 'IVA de ' + escH(f.label.toLowerCase())
         + ' <span style="font-size:10.5px">(' + (f.iva === 'credito' ? 'crédito' : 'débito')
         + (f.alic != null ? ' · ' + String(f.alic).replace('.', ',') + '%' : '') + ')</span></td>'
       + '<td>' + inp('iva_' + f.k, 'f') + '</td>'
@@ -31417,12 +31436,16 @@ function _liqLeerConc() {
     var iv = m2(d.fiscal['iva_' + f.k]);
     if (iv) out.push({ concepto: 'IVA de ' + f.label.toLowerCase(), porcentaje: null, importe: -iv });
   });
-  // Y la parte de gestión, marcada: el productor tiene que ver que hay algo
-  // acordado que no lleva comprobante.
+  // Y la parte de gestión, MARCADA CON SU ÁMBITO. No alcanza con ponerle
+  // "(de gestión)" al texto: el PDF tiene que poder filtrarla, y filtrar por el
+  // nombre de un concepto es filtrar por una cadena que alguien puede cambiar.
+  //
+  // Pablo: "los números de gestión son números internos... es info que el
+  // proveedor no sabe".
   LIQ_FILAS.forEach(function(f){
     var m = m2(d.gestion[f.k]);
     if (!m) return;
-    out.push({ concepto: f.label + ' (de gestión)', porcentaje: null,
+    out.push({ concepto: f.label + ' (de gestión)', porcentaje: null, ambito: 'gestion',
       importe: f.k === 'ventas' ? m : -m });
   });
   return out;
