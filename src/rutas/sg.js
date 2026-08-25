@@ -239,11 +239,45 @@ router.get('/familias', requireAuth, (req, res) => {
     res.json({ ok: true, data: db.prepare(`SELECT * FROM sg_familias WHERE ${where} ORDER BY codigo`).all() });
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
+// ── EN CUÁNTO SE USA CADA FAMILIA, AL LADO DEL NOMBRE ────────────────────────
+// Mismo criterio que el maestro de envases: el que está ordenando el catálogo
+// necesita saber ANTES de tocar si "Frutas de pepita" cuelga de dos especies o
+// de ochenta productos. Sin ese número, borrar es adivinar: se aprieta, vuelve
+// un 409, y el que lo apretó cree que rompió algo.
+// Va declarada ANTES que cualquier /familias/:id para que ':id' no se coma 'uso'.
+router.get('/familias/uso', requireAuth, (req, res) => {
+  const db = getDb();
+  try {
+    res.json({ ok: true, data: db.prepare(`
+      SELECT f.*,
+        (SELECT COUNT(*) FROM sg_especies  e WHERE e.familia_id=f.id AND e.activo=1) AS especies,
+        (SELECT COUNT(*) FROM sg_productos p WHERE p.familia_id=f.id AND p.activo=1) AS productos
+      FROM sg_familias f WHERE f.activo=1 ORDER BY f.codigo`).all() });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+// ¿Ya hay una familia que se llama así? Son cinco o seis filas: se comparan en
+// JS con normalizar(), que es lo mismo que usan los otros maestros del módulo.
+function familiaConNombre(db, nombre, exceptoId) {
+  const buscado = normalizar(nombre);
+  return db.prepare('SELECT id, codigo, nombre FROM sg_familias WHERE activo=1').all()
+    .find((f) => (exceptoId == null || String(f.id) !== String(exceptoId))
+              && normalizar(f.nombre || '') === buscado) || null;
+}
+
 router.post('/familias', requireAdmin, (req, res) => {
   const db = getDb();
   try {
     const nombre = val(req.body.nombre);
     if (!nombre) return res.status(400).json({ ok: false, error: 'Falta nombre' });
+    // Dos familias con el mismo nombre son dos categorías comerciales que en los
+    // informes se leen como una sola y no se pueden distinguir. El código las
+    // separa, pero nadie lee el código en un informe: lee "Frutas".
+    // Se compara NORMALIZADO, no con lower(): el lower() de SQLite pliega sólo
+    // A-Z ASCII, así que "CÍTRICOS" y "Cítricos" entraban las dos. normalizar()
+    // saca los acentos, baja a minúsculas y colapsa espacios -- y de paso agarra
+    // el caso más común: "Citricos" sin tilde contra "Cítricos".
+    const rep = familiaConNombre(db, nombre, null);
+    if (rep) return res.status(400).json({ ok: false, error: `Ya existe la familia "${rep.nombre}" (código ${pad2(rep.codigo)})` });
     const n = nextCodigoNivel(db, 'sg_familias', '', []);
     insertConCodigo(db, req, res, 'sg_familias', n, '', [], ['nombre'], [nombre]);
   } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
@@ -257,10 +291,14 @@ router.patch('/familias/:id', requireAdmin, (req, res) => {
     const fam = db.prepare('SELECT id FROM sg_familias WHERE id=? AND activo=1').get(req.params.id);
     if (!fam) return res.status(404).json({ ok: false, error: 'Familia no encontrada' });
     const sets = [], vals = [];
+    let nombreNuevo = null;
     if (req.body.nombre !== undefined) {
       const nombre = val(req.body.nombre);
       if (!nombre) return res.status(400).json({ ok: false, error: 'Nombre vacío' });
+      const rep = familiaConNombre(db, nombre, req.params.id);
+      if (rep) return res.status(400).json({ ok: false, error: `Ya existe la familia "${rep.nombre}" (código ${pad2(rep.codigo)})` });
       sets.push('nombre=?'); vals.push(nombre);
+      nombreNuevo = nombre;
     }
     if (req.body.iva_alicuota !== undefined) {
       const a = req.body.iva_alicuota;
@@ -270,7 +308,17 @@ router.patch('/familias/:id', requireAdmin, (req, res) => {
     }
     if (!sets.length) return res.status(400).json({ ok: false, error: 'Nada para actualizar' });
     sets.push(`modificado_en=datetime('now','localtime')`, 'modificado_por=?'); vals.push(uid(req), req.params.id);
-    db.prepare(`UPDATE sg_familias SET ${sets.join(',')} WHERE id=?`).run(...vals);
+    // RENOMBRAR LA FAMILIA TIENE QUE LLEGAR A LOS PRODUCTOS. sg_productos.familia
+    // está DENORMALIZADO (db_sg.js:88) y es lo que leen la grilla de Maestros y los
+    // informes que agrupan por pr.familia. Si sólo se toca sg_familias, la pantalla
+    // sigue diciendo "Frutas de pepita" y el que renombró piensa que no guardó.
+    const renombrar = db.transaction(() => {
+      db.prepare(`UPDATE sg_familias SET ${sets.join(',')} WHERE id=?`).run(...vals);
+      if (nombreNuevo !== null) {
+        db.prepare('UPDATE sg_productos SET familia=? WHERE familia_id=?').run(nombreNuevo, Number(req.params.id));
+      }
+    });
+    renombrar();
     res.json({ ok: true, data: db.prepare('SELECT * FROM sg_familias WHERE id=?').get(req.params.id) });
   } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
 });
