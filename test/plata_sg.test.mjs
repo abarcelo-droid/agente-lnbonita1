@@ -298,9 +298,37 @@ test('facturar 64 cajones a $9.000 da $576.000 y no $531.000', () => {
 });
 
 // ── 5. LO QUE SE COMPARA AL CENTAVO SE MUESTRA AL CENTAVO ──────────────────
-test('el cartel no puede decir "diferencia $0" cuando hay diferencia', () => {
+test('el formateador con centavos muestra los centavos', () => {
   const sgMoney2 = new Function(extraer(PANEL, 'sgMoney2') + '; return sgMoney2;')();
   assert.equal(sgMoney2(0.02), '$0,02');
   assert.equal(sgMoney2(0.49), '$0,49');
   assert.equal(sgMoney2(2789999.98), '$2.789.999,98');
+});
+
+// Y ESTE ES EL QUE IMPORTA. Que la función EXISTA no prueba nada: los carteles
+// pueden seguir usando la de pesos enteros al lado de una comparación al centavo,
+// que es como estaban. Acá se mira el código de cada cartel.
+test('ningún cartel compara al centavo y muestra al peso', () => {
+  // sgMoney y paMoney redondean a pesos enteros (Math.round). Un cartel que se
+  // dispara con 0,01 y muestra con ellos dice "diferencia $0".
+  const ENTEROS = /\b(sgMoney|paMoney)\(/;
+  const casos = [
+    // Ojo con enganchar el COMENTARIO en vez del código: el texto del cartel
+    // también está escrito arriba de sgMoney2, contando la historia. Se ancla en
+    // el cierre de etiqueta, que sólo está en el código.
+    ['el cartel de la liquidación a precio cerrado', /NO da lo acordado<\/span>'[\s\S]{0,500}?<\/span>';/],
+    ['el cuadro de asiento de pagos y cobranzas',    /✗ NO balancea — diferencia de[\s\S]{0,200}?'\)/],
+    ['el cuadro de asiento por ámbito',              /⚠ NO balancea · diferencia[\s\S]{0,120}?\)\)/],
+    ['el control de la factura de compra',           /no da contra lo acordado[\s\S]{0,300}?<\/span>'/],
+    ['el aviso de "vino por más de lo acordado"',    /vino por <b>[\s\S]{0,400}?cuenta corriente\.'\)/],
+    ['el reparto de costo del reproceso',            /Σ asignado[\s\S]{0,220}?<\/div>';/],
+    ['la conciliación bancaria',                     /difEl\.textContent = \w+\(dif\);/],
+  ];
+  for (const [nombre, re] of casos) {
+    const m = PANEL.match(re);
+    assert.ok(m, `no encontré ${nombre} — ¿se reescribió? el test dejó de cubrirlo`);
+    assert.doesNotMatch(m[0], ENTEROS,
+      `${nombre} muestra con un formateador de pesos enteros mientras compara al `
+      + `centavo: va a decir "diferencia $0" con el cartel en rojo.`);
+  }
 });
