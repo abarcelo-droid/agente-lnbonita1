@@ -255,6 +255,15 @@ router.get('/familias/uso', requireAuth, (req, res) => {
       FROM sg_familias f WHERE f.activo=1 ORDER BY f.codigo`).all() });
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
+// ¿Ya hay una familia que se llama así? Son cinco o seis filas: se comparan en
+// JS con normalizar(), que es lo mismo que usan los otros maestros del módulo.
+function familiaConNombre(db, nombre, exceptoId) {
+  const buscado = normalizar(nombre);
+  return db.prepare('SELECT id, codigo, nombre FROM sg_familias WHERE activo=1').all()
+    .find((f) => (exceptoId == null || String(f.id) !== String(exceptoId))
+              && normalizar(f.nombre || '') === buscado) || null;
+}
+
 router.post('/familias', requireAdmin, (req, res) => {
   const db = getDb();
   try {
@@ -263,8 +272,12 @@ router.post('/familias', requireAdmin, (req, res) => {
     // Dos familias con el mismo nombre son dos categorías comerciales que en los
     // informes se leen como una sola y no se pueden distinguir. El código las
     // separa, pero nadie lee el código en un informe: lee "Frutas".
-    const rep = db.prepare('SELECT id, codigo FROM sg_familias WHERE activo=1 AND lower(nombre)=lower(?)').get(nombre);
-    if (rep) return res.status(400).json({ ok: false, error: `Ya existe la familia "${nombre}" (código ${pad2(rep.codigo)})` });
+    // Se compara NORMALIZADO, no con lower(): el lower() de SQLite pliega sólo
+    // A-Z ASCII, así que "CÍTRICOS" y "Cítricos" entraban las dos. normalizar()
+    // saca los acentos, baja a minúsculas y colapsa espacios -- y de paso agarra
+    // el caso más común: "Citricos" sin tilde contra "Cítricos".
+    const rep = familiaConNombre(db, nombre, null);
+    if (rep) return res.status(400).json({ ok: false, error: `Ya existe la familia "${rep.nombre}" (código ${pad2(rep.codigo)})` });
     const n = nextCodigoNivel(db, 'sg_familias', '', []);
     insertConCodigo(db, req, res, 'sg_familias', n, '', [], ['nombre'], [nombre]);
   } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
@@ -282,8 +295,8 @@ router.patch('/familias/:id', requireAdmin, (req, res) => {
     if (req.body.nombre !== undefined) {
       const nombre = val(req.body.nombre);
       if (!nombre) return res.status(400).json({ ok: false, error: 'Nombre vacío' });
-      const rep = db.prepare('SELECT id, codigo FROM sg_familias WHERE activo=1 AND id<>? AND lower(nombre)=lower(?)').get(req.params.id, nombre);
-      if (rep) return res.status(400).json({ ok: false, error: `Ya existe la familia "${nombre}" (código ${pad2(rep.codigo)})` });
+      const rep = familiaConNombre(db, nombre, req.params.id);
+      if (rep) return res.status(400).json({ ok: false, error: `Ya existe la familia "${rep.nombre}" (código ${pad2(rep.codigo)})` });
       sets.push('nombre=?'); vals.push(nombre);
       nombreNuevo = nombre;
     }

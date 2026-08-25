@@ -4687,7 +4687,9 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
     </div>
 
     <div class="sg-sub on" id="sg-sub-productos">
-      <div style="display:flex;justify-content:flex-end;gap:8px;margin-bottom:10px"><button class="btn bo" onclick="sgCatSub('familias')" title="Dar de alta, renombrar y dar de baja las familias comerciales">🏷️ Parametrizar familias</button><button class="btn bo" onclick="sgProductosExport()" title="Exportar el catálogo a Excel para limpiarlo">📥 Exportar productos</button><button class="btn bb" onclick="sgOpenModal('productos')">+ Nuevo producto</button></div>
+      <!-- flex-wrap: son tres botones y en una ventana angosta se desbordaban
+           hacia afuera del panel. -->
+      <div style="display:flex;justify-content:flex-end;gap:8px;margin-bottom:10px;flex-wrap:wrap"><button class="btn bo" onclick="sgCatSub('familias')" title="Dar de alta, renombrar y dar de baja las familias comerciales">🏷️ Parametrizar familias</button><button class="btn bo" onclick="sgProductosExport()" title="Exportar el catálogo a Excel para limpiarlo">📥 Exportar productos</button><button class="btn bb" onclick="sgOpenModal('productos')">+ Nuevo producto</button></div>
       <div class="ab-table-wrap"><table class="pa-tbl">
         <thead id="sg-th-productos"><tr><th>Familia</th><th>Código</th><th>Especie</th><th>Variedad</th><th></th></tr></thead>
         <tbody id="sg-tb-productos"><tr><td colspan="5" class="emp">Cargando…</td></tr></tbody>
@@ -4769,6 +4771,20 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
          biológica: "Frutas de pepita" y "Frutas de carozo" separan dos cosas que
          para vender son la misma, y ningún informe las junta después.
          Acá se dan de alta, se renombran y se dan de baja. -->
+    <!-- SIN BARRA LATERAL, PERO CON SALIDA EN EL TELÉFONO (convención del repo).
+         Esto estaba como `style="overflow-x:hidden !important"` en el div: un
+         !important inline le gana a CUALQUIER hoja de estilos, así que abajo de
+         900px la tabla quedaba cortada y sin forma de llegar a los botones. La
+         convención dice hidden en pantalla grande y `auto` en el teléfono, y eso
+         sólo se puede escribir desde el CSS. -->
+    <style>
+      #sg-sub-familias .sg-fam-tabla{overflow-x:hidden !important}
+      #sg-sub-familias .sg-fam-tabla table{table-layout:fixed;width:100%;max-width:98vw}
+      /* Lo de ancho variable se corta con puntos suspensivos en vez de empujar. */
+      #sg-sub-familias .sg-fam-tabla td,
+      #sg-sub-familias .sg-fam-tabla th{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+      @media(max-width:900px){ #sg-sub-familias .sg-fam-tabla{overflow-x:auto !important} }
+    </style>
     <div class="sg-sub" id="sg-sub-familias">
       <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px;gap:10px;flex-wrap:wrap">
         <div style="font-size:12px;color:var(--mut);max-width:640px">
@@ -4778,7 +4794,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
         </div>
         <button class="btn bb" id="sg-fam-nueva" onclick="sgFamNueva()">+ Nueva familia</button>
       </div>
-      <div class="ab-table-wrap" style="overflow-x:hidden !important"><table class="pa-tbl" style="table-layout:fixed;width:100%;max-width:98vw">
+      <div class="ab-table-wrap sg-fam-tabla"><table class="pa-tbl">
         <thead><tr>
           <th style="width:70px">Código</th>
           <th>Familia</th>
@@ -6096,7 +6112,17 @@ function sgGridHead(entity){
     }
     if (c.filtro==='enum'){
       var cur = st.filtros[c.k]||'';
-      var opts = '<option value="">Todos</option>' + sgGridEnumOpts(entity,c).map(function(v){ return '<option value="'+esc(v)+'"'+(String(v)===String(cur)?' selected':'')+'>'+esc(v)+'</option>'; }).join('');
+      // UN FILTRO QUE YA NO EXISTE SE DESCARTA. El valor guardado es el TEXTO
+      // ("Frutas"), no un id: si alguien renombra la familia, ese texto deja de
+      // coincidir con ninguna fila y la grilla sale VACÍA -- mientras el
+      // desplegable dice "Todos", porque ninguna opción queda selected. El
+      // usuario ve el catálogo en blanco y cree que lo borró.
+      //
+      // Va acá y no en el renombrar: cubre también el envase renombrado y
+      // cualquier enum que se edite después.
+      var _ops = sgGridEnumOpts(entity,c);
+      if (cur && _ops.map(String).indexOf(String(cur)) < 0) { st.filtros[c.k] = ''; cur = ''; }
+      var opts = '<option value="">Todos</option>' + _ops.map(function(v){ return '<option value="'+esc(v)+'"'+(String(v)===String(cur)?' selected':'')+'>'+esc(v)+'</option>'; }).join('');
       return '<th style="padding:2px 6px 8px"><select onchange="sgGridFilter(\''+entity+'\',\''+c.k+'\',this.value)" style="'+inSty+'">'+opts+'</select></th>';
     }
     return '<th></th>';
@@ -6462,6 +6488,15 @@ function sgEmpty(entity){
 // 3 especies y 40 productos, eso se ve antes de apretar borrar y no después, en
 // un 409.
 function sgLoadFamilias(){
+  // LO QUE ESTÁ TIPEADO Y SIN GUARDAR NO SE PIERDE. Acá se repinta la tabla
+  // entera, y el admin que corrige tres nombres de corrido y aprieta Guardar en
+  // el primero veía volver los otros dos al valor viejo -- con el cartel diciendo
+  // "Familia actualizada". Se anota lo tipeado antes de repintar y se devuelve
+  // después, marcando en ámbar lo que sigue sin guardar.
+  var _tipeado = {};
+  Array.prototype.forEach.call(
+    document.querySelectorAll('#sg-tb-familias input[id^="sg-fam-"]'),
+    function(i){ _tipeado[i.id] = i.value; });
   api('/api/sg/familias/uso').then(function(r){
     var rows=(r&&r.ok)?(r.data||[]):[]; SG.cacheFam=rows;
     var tb=eid('sg-tb-familias'); if(!tb) return;
@@ -6495,6 +6530,17 @@ function sgLoadFamilias(){
         + btnDel + '</td>'
         + '</tr>';
     }).join('') : '<tr><td colspan="6" class="emp">Sin familias. Creá la primera con el botón de arriba.</td></tr>';
+    // Y se devuelve lo que estaba tipeado, sólo donde difiere de lo que trajo el
+    // servidor: la fila recién guardada ya coincide, así que no se marca.
+    Array.prototype.forEach.call(
+      document.querySelectorAll('#sg-tb-familias input[id^="sg-fam-"]'),
+      function(i){
+        var v = _tipeado[i.id];
+        if (v === undefined || String(v) === String(i.value)) return;
+        i.value = v;
+        i.style.borderColor = '#e0a72e';
+        i.title = 'Sin guardar';
+      });
   });
 }
 // Guarda nombre + alícuota de una fila. El nombre viaja SIEMPRE que cambió: el
@@ -6569,7 +6615,7 @@ function sgActions(entity, id){
 function sgRow(entity, r){
   if (entity==='productos'){
     // Mismo orden que SG_GRID.productos: Familia · Código · Especie · Variedad.
-    return '<tr><td>'+esc(r.familia||'—')+'</td><td><code>'+esc(r.codigo)+'</code></td><td>'+esc(r.nombre)+'</td><td>'+esc(r.variedad||'—')+'</td>'
+    return '<tr><td>'+escH(r.familia||'—')+'</td><td><code>'+escH(r.codigo)+'</code></td><td>'+escH(r.nombre)+'</td><td>'+escH(r.variedad||'—')+'</td>'
       +sgActions(entity,r.id)+'</tr>';
   }
   if (entity==='presentaciones'){
