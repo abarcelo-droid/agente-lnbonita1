@@ -7902,8 +7902,14 @@ function sgPagoPintar(){
   };
   tb.innerHTML = SG_PAGO.facturas.length ? SG_PAGO.facturas.map(function(f, i){
     var nro = (f.punto_venta ? f.punto_venta + '-' : '') + (f.numero || '');
+    // UNA PARTIDA SE DOCUMENTA CON FACTURA O CON LIQUIDACIÓN, y las dos se pagan.
+    // La liquidación no tiene punto de venta ni tipo de comprobante fiscal: sin
+    // decir cuál es, en la lista parece una factura rara.
+    var esLiq = f.tipo === 'liquidacion';
     return '<tr' + (tope(f) <= 0 ? ' style="opacity:.45"' : '') + '><td>' + escH(f.fecha_emision || '—') + '</td>'
-      + '<td>' + escH(TIPO[f.tipo_comprobante] || f.tipo_comprobante || '') + ' <code>' + escH(nro) + '</code></td>'
+      + '<td>' + (esLiq ? '<span class="bdg bcc">Liquidación</span>'
+                        : escH(TIPO[f.tipo_comprobante] || f.tipo_comprobante || ''))
+        + ' <code>' + escH(nro) + '</code></td>'
       + '<td class="pg-partida" style="font-family:monospace;font-size:11.5px">'
         + escH(f.partida || '—') + '</td>'
       + '<td style="text-align:right">' + sgMoney(f.total) + '</td>'
@@ -8018,7 +8024,7 @@ function sgPagoGuardar(){
     var v  = sgMilParse((eid('sg-pago-imp-' + i) || {}).value) || 0;
     var ac = sgMilParse((eid('sg-pago-ac-'  + i) || {}).value) || 0;
     if (v > 0 || ac > 0) {
-      imputaciones.push({ factura_id: f.id, monto: v, desde_a_cuenta: ac });
+      imputaciones.push({ factura_id: f.id, tipo: f.tipo || 'factura', monto: v, desde_a_cuenta: ac });
       sale += v; usaAC += ac;
     }
   });

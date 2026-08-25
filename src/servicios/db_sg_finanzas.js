@@ -468,6 +468,11 @@ try { db.exec("ALTER TABLE sg_ven_liquidaciones ADD COLUMN dif_motivo TEXT"); } 
 // de eso fue contra la parte sin facturar. Lo fiscal es la resta.
 try { db.exec("ALTER TABLE sg_facturas_compra ADD COLUMN saldo_pagado_gestion REAL NOT NULL DEFAULT 0"); } catch (_) {}
 try { db.exec("ALTER TABLE sg_pagos_compras ADD COLUMN monto_gestion REAL NOT NULL DEFAULT 0"); } catch (_) {}
+// CONTRA QUÉ COMPROBANTE SE IMPUTÓ. Una partida se documenta con factura O con
+// liquidación, y las dos son deuda con el productor. Sin esta columna, compra_id
+// significaba siempre "factura de compra" y la liquidación no se podía pagar.
+// Default 'factura': todo lo que ya está cargado es eso.
+try { db.exec("ALTER TABLE sg_pagos_compras ADD COLUMN tipo TEXT NOT NULL DEFAULT 'factura'"); } catch (_) {}
 try { db.exec("ALTER TABLE sg_pagos_proveedores ADD COLUMN ambito_pago TEXT NOT NULL DEFAULT 'todo'"); } catch (_) {}
 
 // ── A QUIÉN SE LE MANDÓ CADA COMPROBANTE ──────────────────────────────────
