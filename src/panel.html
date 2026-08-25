@@ -4387,6 +4387,19 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
     #sec-share .sh-ch-nos{background:#e6f4ea;color:#1a7f37}
     #sec-share .sh-ch-ip{background:#fdecec;color:#b3261e}
     #sec-share .sh-ch-comp{background:var(--bor);color:var(--mut)}
+    /* EL LÍDER VA EN DORADO. Es a quién hay que desplazar para crecer en ese artículo: es lo
+       primero que se busca en la fila y en texto gris se pierde entre las demás columnas.
+       Va con ellipsis propio porque los nombres de proveedor son largos y la columna angosta;
+       el nombre completo queda en el title. */
+    #sec-share .sh-lid{display:inline-block;max-width:100%;padding:1px 8px;border-radius:9px;
+      font-size:11.5px;font-weight:700;vertical-align:bottom;
+      white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+      background:linear-gradient(180deg,#fdf3d6,#f6e2a8);color:#6b4f00;border:1px solid #e7cd86}
+    /* Cuando el líder somos nosotros el dorado es más fuerte y cambia la marca: en una tabla
+       de veinte filas hay que poder ver de un vistazo en cuáles vamos ganando. */
+    #sec-share .sh-lid.sh-lid-nos{background:linear-gradient(180deg,#fbead0,#f0cf86);
+      color:#5a3d00;border-color:#d7ae4e}
+    #sec-share .sh-lid-n{color:#8a6d00;font-weight:700}
     #sec-share .sh-aviso{font-size:11.5px;color:var(--mut);margin-top:6px;line-height:1.5}
     #sec-share .sh-drop{border:2px dashed var(--bor);border-radius:12px;padding:26px;text-align:center;cursor:pointer}
     #sec-share .sh-drop:hover{border-color:var(--burg);background:var(--bg2,#fafafa)}
@@ -28904,6 +28917,13 @@ function shBar(share){
   var p = Math.max(0, Math.min(1, share || 0)) * 100;
   return '<div class="sh-bar"><i style="width:' + p.toFixed(1) + '%"></i><span>' + shPct(share) + '</span></div>';
 }
+// El proveedor que hoy se lleva más volumen de ese artículo. Se dibuja siempre igual —acá y
+// no en cada tabla— para que el dorado signifique lo mismo en las cinco pantallas donde sale.
+function shLider(nombre, esNuestro){
+  if (!nombre) return '<span style="color:var(--mut)">—</span>';
+  return '<span class="sh-lid' + (esNuestro ? ' sh-lid-nos' : '') + '" title="' + esc(nombre) + '">' +
+    (esNuestro ? '★ ' : '🥇 ') + escH(nombre) + '</span>';
+}
 function shChip(tipo){
   if (tipo === 'nosotros') return '<span class="sh-chip sh-ch-nos">nosotros</span>';
   if (tipo === 'importacion_propia') return '<span class="sh-chip sh-ch-ip">import. propia</span>';
@@ -29041,7 +29061,7 @@ function shDash(){
       return '<tr><td class="sh-nom"><a href="#" onclick="shVerArticulo(' + a.id + ');return false">' + escH(a.desc) + '</a></td>' +
         '<td>' + escH(a.familia) + '</td><td style="text-align:right">' + nr(a.total) + '</td>' +
         '<td style="text-align:right">' + nr(a.nuestros) + '</td><td>' + shBar(a.share) + '</td>' +
-        '<td class="sh-nom">' + escH(a.lider || '—') + '</td></tr>';
+        '<td class="sh-nom">' + shLider(a.lider, a.lider_es_nuestro) + '</td></tr>';
     }).join('');
   });
 }
@@ -29079,7 +29099,7 @@ function shArts(){
         '<td style="text-align:right">' + nr(a.nuestros) + '</td><td>' + shBar(a.share) + '</td>' +
         '<td style="text-align:right">' + nr(a.no_capturado) + '</td>' +
         '<td style="text-align:center">' + (a.ranking ? a.ranking + '/' + a.proveedores : '—') + '</td>' +
-        '<td class="sh-nom">' + escH(a.lider || '—') + (a.lider_es_nuestro ? ' ✓' : '') + '</td>' +
+        '<td class="sh-nom">' + shLider(a.lider, a.lider_es_nuestro) + '</td>' +
         '<td style="text-align:center">' + a.nuestros_dias + '/' + a.dias + '</td></tr>';
     }).join('') : '<tr><td colspan="9" class="emp">Nada con esos filtros.</td></tr>';
     eid('sh-arts-nota').innerHTML = r.data.filas.length + ' de ' + r.data.total_filas + ' artículos. ' +
@@ -29135,7 +29155,7 @@ var SH_HUECO = {
     expl: 'Artículos con volumen real donde <b>nuestro share es CERO en todo el período</b>. No es que bajamos: es que no estamos.',
     cols: ['Artículo|sh-nom|30', 'Familia||10', 'Carrefour|r|12', 'Días||8', 'Proveedores||10', 'Líder|sh-nom|18', 'Concentración|r|12'],
     fila: function(f){ return ['<a href="#" onclick="shVerArticulo(' + f.id + ');return false">' + escH(f.desc) + '</a>' + (f.la_vendemos ? ' <span class="sh-chip sh-ch-nos">la vendemos</span>' : ''),
-      escH(f.familia), nr(f.total), f.dias, f.proveedores, escH(f.lider || '—'), shPct(f.hhi)]; },
+      escH(f.familia), nr(f.total), f.dias, f.proveedores, shLider(f.lider, 0), shPct(f.hhi)]; },
   },
   perdido: {
     expl: 'Teníamos participación y <b>cayó más del 50%</b> contra las 4 semanas anteriores. La última columna dice <b>qué proveedor creció</b> en la misma ventana — es el que nos desplazó. Si «mercado» también cayó fuerte, no nos sacaron nada: Carrefour compró menos.',
@@ -29202,7 +29222,7 @@ function shComp(){
         '<td class="sh-nom"><a href="#" onclick="shProvFicha(' + p.id + ');return false">' + escH(p.nombre) + '</a></td>' +
         '<td>' + shChip(p.tipo) + '</td><td style="text-align:right">' + nr(p.bultos) + '</td>' +
         '<td style="text-align:right">' + shPct(p.share) + '</td><td style="text-align:center">' + p.articulos + '</td>' +
-        '<td style="text-align:center">' + p.lider_en + '</td>' +
+        '<td style="text-align:center">' + (p.lider_en ? '<span class="sh-lid-n">' + p.lider_en + '</span>' : '<span style="color:var(--mut)">0</span>') + '</td>' +
         '<td>' + (p.es_nosotros ? '—' : shBar(p.solapamiento)) + '</td></tr>';
     }).join('');
 
@@ -29242,7 +29262,7 @@ function shProvFicha(id){
     eid('sh-prov-body').innerHTML =
       '<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px">' +
         kpi('Volumen', nr(d.bultos), d.rango.desde + ' al ' + d.rango.hasta) +
-        kpi('Artículos', d.articulos_n, 'líder en ' + d.lider_en) +
+        kpi('Artículos', d.articulos_n, 'líder en <span class="sh-lid-n">' + d.lider_en + '</span>') +
         kpi('Nos cruza en', d.compite_en + ' artículos', 'de los que nosotros también proveemos') +
         kpi('Solapamiento', shPct(d.solapamiento), 'de SU volumen está en nuestra cancha') +
       '</div>' +
@@ -29256,7 +29276,7 @@ function shProvFicha(id){
         '<th style="text-align:right;width:13%">Nuestros</th><th style="text-align:right;width:13%">Total</th>' +
         '<th style="width:14%">Su share</th><th style="width:13%">Nuestro</th></tr></thead><tbody>' +
         d.articulos.map(function(a){
-          return '<tr><td class="sh-nom">' + escH(a.desc) + (a.es_lider ? ' <span class="sh-chip sh-ch-comp">líder</span>' : '') + '</td>' +
+          return '<tr><td class="sh-nom">' + escH(a.desc) + (a.es_lider ? ' <span class="sh-chip sh-lid">🥇 líder</span>' : '') + '</td>' +
             '<td style="text-align:right">' + nr(a.suyos) + '</td><td style="text-align:right">' + nr(a.nuestros) + '</td>' +
             '<td style="text-align:right">' + nr(a.total) + '</td><td>' + shBar(a.su_share) + '</td><td>' + shBar(a.nuestro_share) + '</td></tr>';
         }).join('') + '</tbody></table></div>';
@@ -29311,7 +29331,7 @@ function shBuscPintar(r){
       '<td style="text-align:right">' + nr(f.total) + '</td><td style="text-align:right">' + nr(f.nuestros) + '</td>' +
       '<td>' + shBar(f.share) + '</td>' +
       '<td style="text-align:right">' + (f.delta_total == null ? '—' : (f.delta_total > 0 ? '<span class="sh-up">+' : '<span class="sh-dn">') + nr(f.delta_total) + '</span>') + '</td>' +
-      '<td class="sh-nom" title="' + esc(det) + '">' + escH(f.lider || '—') + '</td></tr>';
+      '<td class="sh-nom">' + shLider(f.lider, f.provs[0] && f.provs[0].es_nosotros) + '</td></tr>';
   }).join('') : '<tr><td colspan="7" class="emp">Ese artículo no aparece en el período.</td></tr>';
 }
 function shBuscExcel(){
