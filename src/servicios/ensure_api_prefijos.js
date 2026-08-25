@@ -182,7 +182,12 @@ const PREFIJOS = [
   // /api/sg/facturas/.
   ['sg-ventas',          'sg/despachos,sg/pedidos,sg/ventas,sg/ventas/facturas,sg/despachos-pendientes,sg/facturas,sg/facturable'],
   ['sg-vta-comprobantes', 'sg/ventas/facturas'],
-  ['sg-remitos-pend',     'sg/despachos-pendientes'],
+  // EL EDITOR DE COMPROBANTE SE MUDÓ ACÁ ADENTRO, así que sus direcciones tienen
+  // que colgar de esta pantalla: quien tenga sólo Remitos pendientes tildado
+  // comería un 403 al apretar Emitir. 'sg-facturar' queda declarado igual más
+  // abajo —la fila del módulo se esconde pero no se borra, porque es el permiso
+  // de quien ya lo tenía— y el nivel se resuelve con el MÁS ALTO de los dueños.
+  ['sg-remitos-pend',     'sg/despachos-pendientes,sg/facturas,sg/facturable,sg/ventas/liquidaciones'],
   // Pedidos y Facturar salieron de Salidas. Igual que las otras dos, sus
   // direcciones quedan declaradas bajo la pantalla nueva Y bajo sg-ventas.
   ['sg-pedidos',          'sg/pedidos'],

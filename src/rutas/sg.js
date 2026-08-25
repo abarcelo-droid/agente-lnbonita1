@@ -751,10 +751,35 @@ router.post('/afip/emitir-test', requireAdmin, async (req, res) => {
 // manual, y entonces los kg de una venta YA FACTURADA volvían a aparecer
 // disponibles: nada frenaba una segunda factura por la misma mercadería. La
 // regla vive ahora en servicios/factura-cuenta.js, una sola vez.
-function kgFacturadoItem(db, despachoItemId) {
-  return db.prepare(`SELECT COALESCE(SUM(fd.kg),0) s FROM sg_factura_despachos fd
+// ══ UN REMITO SE DOCUMENTA CON FACTURA **O** CON LIQUIDACIÓN ═══════════
+//
+// Pablo, 24/8/2026: "dentro de remitos pendientes de comprobante necesitamos
+// poder facturar un remito o recibir una liquidación".
+//
+// Antes esta cuenta miraba SÓLO las facturas. Una liquidación recibida no
+// descontaba nada: el remito quedaba pendiente para siempre y, peor, nada frenába
+// que se le emitiera ADEMÁS una factura por los mismos kilos. Los dos documentos
+// consumen del mismo remito, así que se cuentan juntos y en UN SOLO LUGAR.
+//
+// El nombre cambió a propósito: "facturado" ya no era cierto.
+let _hayLiqDesp = null;
+function kgDocumentadoItem(db, despachoItemId) {
+  const fac = db.prepare(`SELECT COALESCE(SUM(fd.kg),0) s FROM sg_factura_despachos fd
     JOIN sg_ven_facturas f ON f.id=fd.factura_id
     WHERE fd.despacho_item_id=? AND ${facturaCuenta('f')}`).get(despachoItemId).s;
+  // La tabla puente la crea el módulo de ventas al arrancar. Si por orden de carga
+  // todavía no existe, se cuenta lo facturado y nada más: es preferible un remito
+  // de más en la bandeja que una pantalla en error.
+  if (_hayLiqDesp === null) {
+    _hayLiqDesp = !!db.prepare(
+      "SELECT 1 FROM sqlite_master WHERE type='table' AND name='sg_liquidacion_despachos'").get();
+  }
+  if (!_hayLiqDesp) return fac;
+  // Una liquidación anulada devuelve sus kilos, igual que una factura anulada.
+  const liq = db.prepare(`SELECT COALESCE(SUM(ld.kg),0) s FROM sg_liquidacion_despachos ld
+    JOIN sg_ven_liquidaciones l ON l.id=ld.liquidacion_id
+    WHERE ld.despacho_item_id=? AND COALESCE(l.estado,'') <> 'anulada'`).get(despachoItemId).s;
+  return r2(fac + liq);
 }
 // GET /facturable?cliente_id=X → despachos pendientes/parciales del cliente (solo kg_pendiente > 0).
 router.get('/facturable', requireAuth, (req, res) => {
@@ -782,7 +807,7 @@ router.get('/facturable', requireAuth, (req, res) => {
       ORDER BY d.fecha_despacho DESC, d.id, di.id`).all(clienteId);
     const mapa = new Map();
     for (const r of rows) {
-      const kgFact = kgFacturadoItem(db, r.despacho_item_id);
+      const kgFact = kgDocumentadoItem(db, r.despacho_item_id);
       const kgDesp = Number(r.kg_despachados) || 0;
       const kgPend = +(kgDesp - kgFact).toFixed(2);
       if (!mapa.has(r.despacho_id)) mapa.set(r.despacho_id, { despacho_id: r.despacho_id, numero: r.despacho_numero, fecha: r.fecha_despacho, _desp: 0, _fact: 0, items: [] });
@@ -840,7 +865,7 @@ router.get('/despachos-pendientes', requireAuth, (req, res) => {
       ORDER BY d.fecha_despacho DESC, d.id, di.id`).all(...params);
     const mapa = new Map();
     for (const r of rows) {
-      const kgFact = kgFacturadoItem(db, r.despacho_item_id);
+      const kgFact = kgDocumentadoItem(db, r.despacho_item_id);
       const kgDesp = Number(r.kg_despachados) || 0;
       const kgPend = +(kgDesp - kgFact).toFixed(2);
       if (!mapa.has(r.despacho_id)) mapa.set(r.despacho_id, {
@@ -905,7 +930,7 @@ const postEmitir = async (req, res) => {
           LEFT JOIN sg_presentaciones ps ON ps.id=di.presentacion_id
           WHERE di.id=? AND di.despacho_id=?`).get(diId, despachoId);
         if (!di) return res.status(400).json({ ok: false, error: 'Ítem de despacho inválido: ' + diId });
-        const kgPend = (Number(di.kg_despachados) || 0) - kgFacturadoItem(db, diId);
+        const kgPend = (Number(di.kg_despachados) || 0) - kgDocumentadoItem(db, diId);
         if (kg > kgPend + 0.01) return res.status(400).json({ ok: false, error: `Ítem ${diId}: pedís ${kg}kg pero quedan ${kgPend.toFixed(2)}kg pendientes` });
         const alic = di.iva_alicuota != null ? Number(di.iva_alicuota) : null;
         const incluyeIva = (it.incluye_iva != null) ? (it.incluye_iva === true) : facturaIncluyeIva;
@@ -7784,14 +7809,23 @@ router.get('/cc-clientes', requireAuth, (req, res) => {
                    -- esconderlos mientras tanto.
                    WHERE f.cliente_id=c.id AND f.estado <> 'anulada'),0) AS documentado,
         -- ── LO ENTREGADO QUE TODAVÍA NO TIENE COMPROBANTE ────────────────
-        -- Los kg del remito que no se facturaron, al precio del remito. Es
+        -- Los kg del remito que no se DOCUMENTARON, al precio del remito. Es
         -- deuda real —la mercadería está en la casa del cliente— pero no está
         -- en el libro fiscal, así que se muestra en su propia columna.
+        --
+        -- DOCUMENTAR ES FACTURAR **O** RECIBIR UNA LIQUIDACIÓN. Acá se restaban
+        -- sólo las facturas: un remito documentado con la liquidación del cliente
+        -- seguía contando entero como "sin facturar", y esa plata quedaba sumada
+        -- dos veces en la pantalla —una en el saldo y otra acá—.
         COALESCE((SELECT SUM((di.kg_despachados
                      - COALESCE((SELECT SUM(fd.kg) FROM sg_factura_despachos fd
                          JOIN sg_ven_facturas fv ON fv.id=fd.factura_id
                         WHERE fd.despacho_item_id=di.id
-                          AND ${facturaCuenta('fv')}),0))
+                          AND ${facturaCuenta('fv')}),0)
+                     - COALESCE((SELECT SUM(ld.kg) FROM sg_liquidacion_despachos ld
+                         JOIN sg_ven_liquidaciones lq ON lq.id=ld.liquidacion_id
+                        WHERE ld.despacho_item_id=di.id
+                          AND COALESCE(lq.estado,'') <> 'anulada'),0))
                    * COALESCE(di.precio_por_kg,0))
                     FROM sg_despacho_items di
                     JOIN sg_despachos d ON d.id=di.despacho_id AND d.activo=1
@@ -7800,7 +7834,11 @@ router.get('/cc-clientes', requireAuth, (req, res) => {
                           - COALESCE((SELECT SUM(fd.kg) FROM sg_factura_despachos fd
                               JOIN sg_ven_facturas fv ON fv.id=fd.factura_id
                              WHERE fd.despacho_item_id=di.id
-                               AND ${facturaCuenta('fv')}),0)) > 0.01),0)
+                               AND ${facturaCuenta('fv')}),0)
+                          - COALESCE((SELECT SUM(ld.kg) FROM sg_liquidacion_despachos ld
+                              JOIN sg_ven_liquidaciones lq ON lq.id=ld.liquidacion_id
+                             WHERE ld.despacho_item_id=di.id
+                               AND COALESCE(lq.estado,'') <> 'anulada'),0)) > 0.01),0)
           AS pendiente_comprobante,
         -- ── LA MITAD DE GESTIÓN, EN SU PROPIA COLUMNA ────────────────────
         -- Ya estaba SUMADA adentro de «documentado» —por eso el saldo cerraba—

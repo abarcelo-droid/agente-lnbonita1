@@ -72,7 +72,6 @@ const MODULOS_SG = [
   // mercadería. Va al lado de Stock porque es su apertura, no otra cosa.
   ["sg-pisos", "🏢 Pisos", 649],
   ["sg-pedidos", "📝 Pedidos", 655],
-  ["sg-facturar", "🧾 Facturar remitos", 656],
   ["sg-remitos-pend", "📋 Remitos pendientes de comprobante", 654],
   ["sg-cc-proveedores", "💳 CC proveedores", 670],
   // Caja y Bancos de San Gerónimo. El backend ya existía entero
@@ -175,7 +174,6 @@ try {
     ['Administración de Ventas',      653,  'sg-vta-comprobantes'],
     ['Administración de Ventas',      654,  'sg-remitos-pend'],
     ['Administración de Ventas',      655,  'sg-pedidos'],
-    ['Administración de Ventas',      656,  'sg-facturar'],
 
     // ── INGRESOS: LA MERCADERÍA QUE ENTRA ────────────────────────────
     // Todo lo que pasa desde que se pacta la compra hasta que la mercadería
@@ -236,6 +234,18 @@ try {
   // Y NO se borra la fila: es el permiso. Borrarla le sacaría el acceso a quien
   // lo tenga tildado, y sus direcciones también cuelgan de sg-gastos-directos.
   db.prepare("UPDATE modulos_config SET oculto=1 WHERE modulo='sg-control-coop'").run();
+
+  // ── Y «FACTURAR REMITOS» TAMPOCO SE BORRA ───────────────────────────────
+  // Pablo, 24/8/2026: "el otro, Facturar remitos, eliminalo, porque dentro de
+  // remitos pendientes de comprobante necesitamos poder facturar un remito o
+  // recibir una liquidación". El editor se mudó adentro de esa pantalla; el
+  // renglón del menú sobra.
+  //
+  // Misma razón que arriba para esconderlo en vez de borrarlo: la fila ES el
+  // permiso, y sus direcciones (sg/facturas, sg/facturable) cuelgan de ella. Al
+  // que lo tenga tildado no se le saca nada — ahora esas direcciones también
+  // están declaradas bajo sg-remitos-pend, que es de donde se usan.
+  db.prepare("UPDATE modulos_config SET oculto=1 WHERE modulo='sg-facturar'").run();
 
   console.log("[ORG] Labels Abasto SG (con emoji) verificados en modulos_config");
 } catch (e) { console.error("[ORG] Error ensureModuloSG:", e.message); }
