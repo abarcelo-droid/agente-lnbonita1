@@ -313,9 +313,11 @@ export function origenDeAsiento(db, asientoId, origenes = ORIGENES_SG, tablaCab 
     const que = o.que(fila);
     return {
       modulo: o.modulo, tabla: o.tabla, registro_id: fila.id,
-      comprobante: que, pantalla: o.pantalla, como_se_deshace: o.como,
+      comprobante: que, numero: _nro(fila), pantalla: o.pantalla, como_se_deshace: o.como,
       // Compatibilidad con lo que ya devolvían las rutas para la factura de compra.
-      factura_id: fila.id, factura_numero: que,
+      // factura_numero es el NÚMERO pelado --lo que se busca en una pantalla--,
+      // no la frase entera: la frase va en `comprobante` y en el cartel.
+      factura_id: fila.id, factura_numero: _nro(fila),
       error: 'Este asiento es de ' + que + '. No se anula desde acá: se deshace en '
            + o.pantalla + ', y ' + o.como + '. Anular sólo el asiento deja la '
            + 'operación viva y fuera del libro, y después no hay forma de rehacerlo.',
