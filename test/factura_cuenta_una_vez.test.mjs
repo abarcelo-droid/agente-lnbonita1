@@ -54,6 +54,45 @@ test('y no vuelve a aparecer una lista de estados escrita a mano', () => {
     + 'copias son tres lugares donde puede faltar un estado.');
 });
 
+// ══ LA MITAD DE ABAJO DE LA REGLA ══════════════════════════════════════
+//
+// El test de arriba busca el patrón "afip_estado IN (…)" — la forma vieja del
+// error. Pero la regla tiene DOS mitades y sólo se estaba vigilando una: la de
+// AFIP. La otra se seguía escribiendo a mano como "estado <> 'anulada'", y por
+// ahí volvió el doble conteo, con más plata que la primera vez.
+//
+// Una factura RECHAZADA por AFIP queda en la tabla con estado 'pendiente' y sus
+// importes escritos. La cuenta corriente la sumaba entera como deuda —porque
+// 'pendiente' no es 'anulada'— y al mismo tiempo los kg de esa venta volvían a
+// "entregado sin comprobante", porque ESA consulta sí usaba facturaCuenta. La
+// misma venta, dos veces, y el cliente figurando debiendo casi el doble.
+//
+// Este test mira las consultas SOBRE sg_ven_facturas: si una filtra por estado a
+// mano en vez de usar la regla, falla.
+test('nadie filtra sg_ven_facturas por estado a mano: se usa la regla completa', () => {
+  const patron = /sg_ven_facturas\s+(\w+)(?![\s\S]{0,400}?facturaCuenta)[\s\S]{0,400}?\1\.estado\s*(<>|!=)\s*'anulada'/gi;
+  const culpables = [];
+  for (const f of FUENTES) {
+    if (f.rel === DUENO) continue;
+    // Se mira consulta por consulta: FROM sg_ven_facturas <alias> … y qué hace
+    // con el estado de ESE alias antes de que aparezca la regla compartida.
+    const re = /FROM\s+sg_ven_facturas\s+(\w+)/gi;
+    let m;
+    while ((m = re.exec(f.txt))) {
+      const alias = m[1];
+      const tramo = f.txt.slice(m.index, m.index + 600);
+      const aMano = new RegExp('\\b' + alias + "\\.estado\\s*(<>|!=)\\s*'anulada'").test(tramo);
+      const conRegla = tramo.includes('facturaCuenta') || tramo.includes(alias + '.afip_estado');
+      if (aMano && !conRegla) culpables.push(f.rel + ' (alias ' + alias + ')');
+    }
+  }
+  assert.deepEqual(culpables, [],
+    'Filtran las facturas por estado a mano, sin mirar si AFIP las rechazó: '
+    + culpables.join(', ') + '. Una rechazada no es deuda, y si una consulta la '
+    + 'cuenta y la de al lado no, la misma venta se suma dos veces. Usá '
+    + 'facturaCuenta(alias).');
+});
+
 test('los que deciden si un remito ya está documentado usan la regla compartida', () => {
   const sg = FUENTES.find((f) => f.rel === path.join('rutas', 'sg.js'));
   assert.ok(sg, 'no encontré rutas/sg.js');

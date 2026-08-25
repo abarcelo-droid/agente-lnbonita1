@@ -7960,7 +7960,19 @@ router.get('/cc-clientes', requireAuth, (req, res) => {
                    -- La marca es_prueba se queda igual: sirve para reconocerlos y
                    -- borrarlos cuando las pruebas terminen. Lo que no hace es
                    -- esconderlos mientras tanto.
-                   WHERE f.cliente_id=c.id AND f.estado <> 'anulada'),0) AS documentado,
+                   --
+                   -- ══ UNA FACTURA RECHAZADA POR AFIP NO ES DEUDA ══════════
+                   -- Acá decía "estado distinto de anulada" escrito a mano, y una factura
+                   -- que AFIP RECHAZÓ queda en la tabla con estado 'pendiente' y sus
+                   -- importes escritos: sumaba entera. Y catorce líneas más abajo, los
+                   -- kg de esa misma venta vuelven a "entregado sin comprobante" —esa
+                   -- consulta sí usa facturaCuenta, que excluye 'rechazado'—, así que
+                   -- la MISMA venta se contaba DOS VECES y el cliente figuraba debiendo
+                   -- casi el doble.
+                   -- Es exactamente el doble conteo que factura-cuenta.js dice haber
+                   -- venido a matar: la regla estaba centralizada arriba y escrita a
+                   -- mano abajo.
+                   WHERE f.cliente_id=c.id AND ${facturaCuenta('f')}),0) AS documentado,
         -- ── LO ENTREGADO QUE TODAVÍA NO TIENE COMPROBANTE ────────────────
         -- Los kg del remito que no se DOCUMENTARON, al precio del remito. Es
         -- deuda real —la mercadería está en la casa del cliente— pero no está
@@ -8004,8 +8016,11 @@ router.get('/cc-clientes', requireAuth, (req, res) => {
         -- --«Contabilizado»-- se comía toda la baja y podía dar negativa.
         COALESCE((SELECT SUM(COALESCE(l.dif_gestion,0)) FROM sg_ven_liquidaciones l
                    WHERE l.cliente_id=c.id AND l.estado <> 'anulada'),0)
+        -- Misma regla que arriba: la parte de gestión de una factura rechazada
+        -- tampoco es deuda. Si acá quedara la lista escrita a mano, la columna
+        -- diría un número y el saldo del que sale, otro.
         + COALESCE((SELECT SUM(COALESCE(f.dif_gestion,0)) FROM sg_ven_facturas f
-                   WHERE f.cliente_id=c.id AND f.estado <> 'anulada'),0)
+                   WHERE f.cliente_id=c.id AND ${facturaCuenta('f')}),0)
         - COALESCE((SELECT SUM(COALESCE(cd.monto_gestion,0)) FROM sg_ven_cobranza_docs cd
                      JOIN sg_ven_cobranzas co ON co.id=cd.cobranza_id
                     WHERE co.cliente_id = c.id AND co.anulada = 0),0) AS gestion,
@@ -8018,13 +8033,17 @@ router.get('/cc-clientes', requireAuth, (req, res) => {
         - COALESCE((SELECT SUM(cd.monto) FROM sg_ven_cobranza_docs cd
                      JOIN sg_ven_cobranzas co ON co.id=cd.cobranza_id
                     WHERE co.cliente_id = c.id AND co.anulada = 0
-                      -- Lo imputado a un documento ANULADO vuelve a estar a
+                      -- Lo imputado a un documento CAIDO vuelve a estar a
                       -- cuenta: el documento se cae, la plata no. Sin esta
                       -- condicion la cobranza desaparecia de la cuenta y el
                       -- cliente quedaba debiendo lo que ya pago.
+                      -- Y un comprobante se cae de DOS maneras: anulado, o
+                      -- rechazado por AFIP. Aca se miraba solo la primera, asi que
+                      -- la plata imputada a una factura rechazada se quedaba
+                      -- pegada a un documento que ya no existe para nadie mas.
                       AND ((cd.tipo='factura' AND EXISTS (
                               SELECT 1 FROM sg_ven_facturas f2
-                               WHERE f2.id = cd.doc_id AND f2.estado <> 'anulada'))
+                               WHERE f2.id = cd.doc_id AND ${facturaCuenta('f2')}))
                         OR (cd.tipo='liquidacion' AND EXISTS (
                               SELECT 1 FROM sg_ven_liquidaciones l2
                                WHERE l2.id = cd.doc_id AND l2.estado <> 'anulada')))), 0) AS a_cuenta
