@@ -4557,7 +4557,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
     </div>
 
     <div class="sh-csub" id="sh-csub-matriz">
-      <div class="sh-aviso" style="margin:0 0 8px">Cuántos bultos le compra Carrefour a cada proveedor de cada artículo — los más grandes de cada lado. Cuanto más oscura la celda, más concentrado está ahí ese artículo; <b>lo nuestro va en bordó</b>.</div>
+      <div class="sh-aviso" style="margin:0 0 8px">Qué parte de cada artículo se lleva cada proveedor — los más grandes de cada lado. El número es el <b>% sobre el total del artículo</b> (la columna Total dice de cuántos bultos estamos hablando); pasá el mouse por una celda para ver los bultos. Cuanto más oscura, más concentrado; <b>lo nuestro va en bordó</b>.<br>Los porcentajes de una fila no suman 100: lo que se llevan los proveedores más chicos queda fuera de la tabla.</div>
       <div class="ab-table-wrap" id="sh-matriz"></div>
     </div>
 
@@ -29313,23 +29313,55 @@ function shComp(){
 
     // La matriz. Sin scroll lateral: las columnas se reparten el ancho disponible y el nombre
     // del proveedor va en vertical, que es lo único que entra en una columna angosta.
-    var m = r.data.matriz, anchoNom = 22;
-    var wCol = ((100 - anchoNom) / Math.max(1, m.proveedores.length)).toFixed(2);
-    var html = '<table class="pa-tbl sh-mtx"><thead><tr><th class="sh-nom" style="width:' + anchoNom + '%">Artículo</th>' +
+    //
+    // ── LAS CELDAS VAN EN PORCENTAJE ────────────────────────────────────────────────
+    // Antes iban los bultos: "276.000" en una columna de sesenta píxeles no se lee, y
+    // comparar 276.000 contra 91.000 de una fila a otra obliga a hacer la cuenta. El
+    // porcentaje es sobre el total del ARTÍCULO, que es la pregunta de esta pantalla —
+    // cuánto de esa cebolla se lleva cada uno— y entra en dos caracteres.
+    //
+    // Los bultos no se pierden: van en la columna Total (el tamaño de la fila, sin el cual
+    // un 38% de la palta y un 38% de la lechuga parecen lo mismo) y en el globo de cada celda.
+    //
+    // Los porcentajes de una fila NO suman 100: la tabla muestra los proveedores más grandes,
+    // y lo que se llevan los demás queda afuera a propósito.
+    var m = r.data.matriz, anchoNom = 20, anchoTot = 8;
+    var wCol = ((100 - anchoNom - anchoTot) / Math.max(1, m.proveedores.length)).toFixed(2);
+    var pctCelda = function(v){
+      var p = v * 100;
+      // El menor-que va ESCAPADO: '<1%' crudo en el HTML arranca lo que un parser lee
+      // como una etiqueta y se come la celda entera.
+      return p < 1 ? '&lt;1%' : Math.round(p) + '%';
+    };
+    var html = '<table class="pa-tbl sh-mtx"><thead><tr>' +
+      '<th class="sh-nom" style="width:' + anchoNom + '%">Artículo</th>' +
+      '<th style="width:' + anchoTot + '%;text-align:right">Total</th>' +
       m.proveedores.map(function(p){
+        // El nombre se corta con ellipsis por CSS y no a mano: la altura de la celda es fija,
+        // así que cortar por cantidad de letras dejaba nombres partidos al medio ("PUTRUELE
+        // HNOS ;"). El nombre completo queda en el globo.
         return '<th style="width:' + wCol + '%;text-align:right" title="' + esc(p.nombre) + '">' +
-          '<div style="writing-mode:vertical-rl;transform:rotate(180deg);height:96px;margin-left:auto;font-size:10.5px;font-weight:600' +
+          '<div style="writing-mode:vertical-rl;transform:rotate(180deg);height:104px;margin-left:auto;' +
+          'overflow:hidden;white-space:nowrap;text-overflow:ellipsis;font-size:10.5px;font-weight:600' +
           (p.es_nosotros ? ';color:#7c1d3f' : (p.tipo === 'importacion_propia' ? ';color:#b3261e' : '')) + '">' +
-          escH(p.nombre.length > 24 ? p.nombre.slice(0, 23) + '…' : p.nombre) + '</div></th>';
+          escH(p.nombre) + '</div></th>';
       }).join('') + '</tr></thead><tbody>' +
       m.filas.map(function(f){
-        var max = Math.max.apply(null, f.celdas.concat([1]));
+        var tot = f.total || 0;
         return '<tr><td class="sh-nom" title="' + esc(f.desc) + '">' + escH(f.desc) + '</td>' +
+          '<td style="color:var(--mut)">' + nr(tot) + '</td>' +
           f.celdas.map(function(c, i){
-            // La intensidad del fondo dice de un vistazo dónde se concentra cada artículo.
-            var op = c ? (0.10 + 0.55 * (c / max)) : 0;
+            if (!c) return '<td></td>';
+            var sh = tot ? c / tot : 0;
+            // La intensidad sale del MISMO porcentaje que el número, para que el color y la
+            // cifra digan lo mismo. Antes se calculaba contra el máximo de la fila, así que
+            // un 30% podía verse más oscuro que un 60% de la fila de al lado.
+            // La raíz levanta el rango medio: en lineal, casi toda la tabla queda pálida.
+            var op = 0.08 + 0.62 * Math.pow(sh, 0.65);
             var nos = m.proveedores[i].es_nosotros;
-            return '<td style="' + (c ? 'background:rgba(' + (nos ? '124,29,63' : '90,90,90') + ',' + op.toFixed(2) + ')' : '') + '">' + (c ? nr(c) : '') + '</td>';
+            return '<td style="background:rgba(' + (nos ? '124,29,63' : '90,90,90') + ',' + op.toFixed(2) + ')" ' +
+              'title="' + esc(m.proveedores[i].nombre + ' · ' + f.desc) + ': ' + nr(c) + ' de ' + nr(tot) + ' bultos">' +
+              pctCelda(sh) + '</td>';
           }).join('') + '</tr>';
       }).join('') + '</tbody></table>';
     eid('sh-matriz').innerHTML = html;
