@@ -4683,14 +4683,14 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
       <div class="sg-subtab" data-sub="proveedores"    onclick="sgCatSub('proveedores')">🚜 Proveedores</div>
       <div class="sg-subtab" data-sub="clientes"       onclick="sgCatSub('clientes')">🏪 Clientes</div>
       <div class="sg-subtab" data-sub="condiciones"    onclick="sgCatSub('condiciones')">💳 Condiciones de pago</div>
-      <div class="sg-subtab" data-sub="familias"       onclick="sgCatSub('familias')">🏷️ Familias (IVA)</div>
+      <div class="sg-subtab" data-sub="familias"       onclick="sgCatSub('familias')">🏷️ Familias</div>
     </div>
 
     <div class="sg-sub on" id="sg-sub-productos">
-      <div style="display:flex;justify-content:flex-end;gap:8px;margin-bottom:10px"><button class="btn bo" onclick="sgProductosExport()" title="Exportar el catálogo a Excel para limpiarlo">📥 Exportar productos</button><button class="btn bb" onclick="sgOpenModal('productos')">+ Nuevo producto</button></div>
+      <div style="display:flex;justify-content:flex-end;gap:8px;margin-bottom:10px"><button class="btn bo" onclick="sgCatSub('familias')" title="Dar de alta, renombrar y dar de baja las familias comerciales">🏷️ Parametrizar familias</button><button class="btn bo" onclick="sgProductosExport()" title="Exportar el catálogo a Excel para limpiarlo">📥 Exportar productos</button><button class="btn bb" onclick="sgOpenModal('productos')">+ Nuevo producto</button></div>
       <div class="ab-table-wrap"><table class="pa-tbl">
-        <thead id="sg-th-productos"><tr><th>Código</th><th>Especie</th><th>Variedad</th><th>Familia</th><th>Envase</th><th>Presentaciones</th><th></th></tr></thead>
-        <tbody id="sg-tb-productos"><tr><td colspan="7" class="emp">Cargando…</td></tr></tbody>
+        <thead id="sg-th-productos"><tr><th>Familia</th><th>Código</th><th>Especie</th><th>Variedad</th><th></th></tr></thead>
+        <tbody id="sg-tb-productos"><tr><td colspan="5" class="emp">Cargando…</td></tr></tbody>
       </table></div>
     </div>
 
@@ -4762,13 +4762,40 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
       </table></div>
     </div>
 
-    <!-- IVA Fase 2 — ABM de alícuota por familia (el producto la hereda vía familia_id). -->
+    <!-- ══ FAMILIAS ══
+         La familia es la CATEGORÍA COMERCIAL con la que se mira el negocio —lo
+         que agrupa un informe de stock o de margen— y de paso la que define la
+         alícuota de IVA que el producto hereda. No es una clasificación
+         biológica: "Frutas de pepita" y "Frutas de carozo" separan dos cosas que
+         para vender son la misma, y ningún informe las junta después.
+         Acá se dan de alta, se renombran y se dan de baja. -->
     <div class="sg-sub" id="sg-sub-familias">
-      <div style="font-size:12px;color:var(--mut);margin-bottom:10px">La alícuota de IVA la define la <b>familia</b>; el producto la hereda. Editá el % de cada una (vacío = sin definir → se resuelve en recepción/liquidación). Seed: 01–04 = 10,5%.</div>
-      <div class="ab-table-wrap"><table class="pa-tbl">
-        <thead><tr><th>Código</th><th>Familia</th><th style="text-align:right">Alícuota IVA (%)</th><th></th></tr></thead>
-        <tbody id="sg-tb-familias"><tr><td colspan="4" class="emp">Cargando…</td></tr></tbody>
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px;gap:10px;flex-wrap:wrap">
+        <div style="font-size:12px;color:var(--mut);max-width:640px">
+          La familia es la <b>categoría comercial</b> del producto: con ella se agrupan los informes y de ella
+          sale la <b>alícuota de IVA</b> que el producto hereda (vacío = sin definir → se resuelve en
+          recepción/liquidación). Renombrar una familia cambia también lo que muestran los productos.
+        </div>
+        <button class="btn bb" id="sg-fam-nueva" onclick="sgFamNueva()">+ Nueva familia</button>
+      </div>
+      <div class="ab-table-wrap" style="overflow-x:hidden !important"><table class="pa-tbl" style="table-layout:fixed;width:100%;max-width:98vw">
+        <thead><tr>
+          <th style="width:70px">Código</th>
+          <th>Familia</th>
+          <th style="width:130px;text-align:right">IVA (%)</th>
+          <th style="width:90px;text-align:right">Especies</th>
+          <th style="width:95px;text-align:right">Productos</th>
+          <th style="width:175px"></th>
+        </tr></thead>
+        <tbody id="sg-tb-familias"><tr><td colspan="6" class="emp">Cargando…</td></tr></tbody>
       </table></div>
+      <div id="sg-fam-solo-lectura" style="display:none;font-size:11.5px;color:var(--mut);margin-top:8px">
+        🔒 Dar de alta y renombrar familias lo hace el administrador. Acá las ves como están.
+      </div>
+      <div style="font-size:11.5px;color:var(--mut);margin-top:8px">
+        Una familia con especies o productos colgando no se puede dar de baja: quedarían sin categoría.
+        Primero movelos —desde el producto, cambiándole la familia— y después dala de baja.
+      </div>
     </div>
   </div>
 
@@ -6003,14 +6030,16 @@ var SG_SCHEMA = {
 // (sgGridHead/sgGridApply) filtra+ordena SG.last[entity] EN MEMORIA y re-pinta el tbody con el
 // sgRow existente. Estado en SG.gridState[entity], persiste al navegar entre subtabs.
 var SG_GRID = {
+  // EL CATÁLOGO SE LEE POR FAMILIA, NO POR CÓDIGO. La familia es la categoría
+  // comercial: es por donde se busca ("mostrame las frutas") y por donde agrupan
+  // los informes, así que va primera. Envase y Presentaciones salieron: ninguna
+  // de las dos es del producto —salen de sus presentaciones, que tienen su propia
+  // solapa— y ocupaban dos columnas para mostrar un guión en casi todas las filas.
   productos: [
+    {k:'familia',  l:'Familia',  sort:true,  filtro:'enum',  disp:function(r){ return r.familia||''; }},
     {k:'codigo',   l:'Código',   sort:true,  filtro:'texto'},
     {k:'nombre',   l:'Especie',  sort:true,  filtro:'texto'},
-    {k:'variedad', l:'Variedad', sort:true,  filtro:'texto', disp:function(r){ return r.variedad||''; }},
-    {k:'familia',  l:'Familia',  sort:true,  filtro:'enum',  disp:function(r){ return r.familia||''; }},
-    {k:'envase',   l:'Envase',   sort:true,  filtro:'texto', disp:function(r){ var p=sgPresDe(r.id); return p.length?sgEnvNombre(p[0].envase_id):''; }},
-    // Columna informativa (item 2): factor+unidad de cada presentación. No editable, sin sort/filtro.
-    {k:'presentaciones', l:'Presentaciones', sort:false, filtro:null, disp:function(r){ return sgPresStr(r.id); }}
+    {k:'variedad', l:'Variedad', sort:true,  filtro:'texto', disp:function(r){ return r.variedad||''; }}
   ],
   presentaciones: [
     {k:'producto_id',       l:'Producto',             sort:true, filtro:'texto', disp:function(r){ return sgProdLabel(r.producto_id); }},
@@ -6048,15 +6077,6 @@ function sgGridEnumOpts(entity, c){
   var seen = {}, out = [];
   (SG.last[entity]||[]).forEach(function(r){ var v = sgGridVal(c, r); if (v!=null && v!=='' && v!=='—' && !seen[v]){ seen[v]=1; out.push(v); } });
   return out.sort(function(a,b){ return String(a).localeCompare(String(b),'es',{numeric:true}); });
-}
-// Factor+unidad de cada presentación del producto, unidos por coma ("20kg, 14kg"). "—" si ninguna.
-function sgPresStr(prodId){
-  var ps = sgPresDe(prodId);
-  if (!ps.length) return '—';
-  return ps.map(function(p){
-    var f = (p.factor_conversion!=null && p.factor_conversion!=='') ? p.factor_conversion : '';
-    return f + (/unidad/i.test(p.nombre||'') ? 'u' : 'kg');
-  }).join(', ');
 }
 // Pinta el thead dinámico: fila de headers clickeables (flecha ▲/▼) + fila de filtros (input/select).
 // Se re-pinta solo al cargar y al ordenar (NO al tipear → el input vive en el thead y no pierde foco).
@@ -6428,28 +6448,88 @@ function sgLoad(entity){
 }
 
 function sgEmpty(entity){
-  var cols = {productos:7, presentaciones:6, proveedores:6, clientes:7, condiciones:4};
+  var cols = {productos:5, presentaciones:6, proveedores:6, clientes:7, condiciones:4};
   return '<tr><td colspan="'+(cols[entity]||6)+'" class="emp">Sin registros. Creá el primero con el botón de arriba.</td></tr>';
 }
-// IVA Fase 2 — ABM de alícuota por familia. Refresca SG.cacheFam para que la OC use el valor al día.
+// ── EL MAESTRO DE FAMILIAS (CATEGORÍAS COMERCIALES) ──────────────────────
+// Era una lista de sólo lectura con un campo de alícuota al costado: se podía
+// tocar el IVA pero no el NOMBRE, y el nombre es lo único que decide si el
+// catálogo está ordenado por cómo se vende o por botánica. Renombrar sólo se
+// podía desde el modal de un producto, y dar de alta con un prompt().
+//
+// Ahora se renombra, se pone el IVA y se da de baja desde acá, con EN CUÁNTO SE
+// USA cada una al lado (mismo criterio que envases): si "Frutas de pepita" tiene
+// 3 especies y 40 productos, eso se ve antes de apretar borrar y no después, en
+// un 409.
 function sgLoadFamilias(){
-  api('/api/sg/familias').then(function(r){
-    var rows=(r&&r.ok)?r.data:[]; SG.cacheFam=rows;
-    eid('sg-tb-familias').innerHTML = rows.length ? rows.map(function(f){
-      return '<tr><td><code>'+esc(sgPad2(f.codigo))+'</code></td><td>'+esc(f.nombre)+'</td>'
-        +'<td style="text-align:right"><input id="sg-fam-alic-'+f.id+'" type="number" min="0" max="100" step="0.1" value="'+(f.iva_alicuota!=null?f.iva_alicuota:'')+'" placeholder="—" style="width:90px;text-align:right;padding:4px 6px;border-radius:6px;border:1px solid var(--bor);background:var(--bg)"></td>'
-        +'<td style="text-align:right"><button class="btn bb bs" onclick="sgFamGuardarAlic('+f.id+')">Guardar</button></td></tr>';
-    }).join('') : '<tr><td colspan="4" class="emp">Sin familias.</td></tr>';
+  api('/api/sg/familias/uso').then(function(r){
+    var rows=(r&&r.ok)?(r.data||[]):[]; SG.cacheFam=rows;
+    var tb=eid('sg-tb-familias'); if(!tb) return;
+    // PARAMETRIZAR ES DEL ADMIN, ANULAR ES UN NIVEL (CLAUDE.md). El alta y la
+    // edición van con requireAdmin en el backend, así que al que no es admin no
+    // se le ofrecen: vería un campo editable y un Guardar que contesta 403.
+    var esAdmin = !!(window.LNB_USER && window.LNB_USER.rol === 'admin');
+    var puedeBorrar = esAdmin || lnbPuedeAnular('sg-catalogo');
+    var btnNueva = eid('sg-fam-nueva'); if(btnNueva) btnNueva.style.display = esAdmin ? '' : 'none';
+    var avisoRO = eid('sg-fam-solo-lectura'); if(avisoRO) avisoRO.style.display = esAdmin ? 'none' : '';
+    var inSty='width:100%;box-sizing:border-box;padding:4px 6px;border-radius:6px;border:1px solid var(--bor);background:var(--bg)';
+    tb.innerHTML = rows.length ? rows.map(function(f){
+      var usos = Number(f.especies||0) + Number(f.productos||0);
+      var cel = function(n){ return '<td style="text-align:right'+(Number(n)?'':';color:var(--mut)')+'">'+(Number(n)||'—')+'</td>'; };
+      // Sin uso → se puede dar de baja. Con uso → el botón no se ofrece y el
+      // título dice por qué, en vez de dejar apretar algo que va a rebotar.
+      var btnDel = !puedeBorrar ? ''
+        : (usos ? '<button class="btn bd bs" disabled style="opacity:.4;cursor:not-allowed" title="La usan '+usos+' registro(s): primero reasignalos">🗑️</button>'
+                : '<button class="btn bd bs" onclick="sgFamBorrar('+f.id+')" title="Dar de baja esta familia">🗑️</button>');
+      var celNom = esAdmin
+        ? '<td><input id="sg-fam-nom-'+f.id+'" type="text" value="'+escH(f.nombre||'')+'" placeholder="Categoría comercial" style="'+inSty+'"></td>'
+        : '<td>'+escH(f.nombre||'')+'</td>';
+      var celAlic = esAdmin
+        ? '<td style="text-align:right"><input id="sg-fam-alic-'+f.id+'" type="number" min="0" max="100" step="0.1" value="'+(f.iva_alicuota!=null?f.iva_alicuota:'')+'" placeholder="—" style="'+inSty+';text-align:right"></td>'
+        : '<td style="text-align:right'+(f.iva_alicuota!=null?'':';color:var(--mut)')+'">'+(f.iva_alicuota!=null?f.iva_alicuota:'—')+'</td>';
+      return '<tr>'
+        + '<td><code>'+escH(sgPad2(f.codigo))+'</code></td>'
+        + celNom + celAlic + cel(f.especies) + cel(f.productos)
+        + '<td style="text-align:right;white-space:nowrap">'
+        + (esAdmin ? '<button class="btn bb bs" onclick="sgFamGuardar('+f.id+')">Guardar</button> ' : '')
+        + btnDel + '</td>'
+        + '</tr>';
+    }).join('') : '<tr><td colspan="6" class="emp">Sin familias. Creá la primera con el botón de arriba.</td></tr>';
   });
 }
-function sgFamGuardarAlic(id){
+// Guarda nombre + alícuota de una fila. El nombre viaja SIEMPRE que cambió: el
+// backend lo propaga a sg_productos.familia, que es lo que lee la grilla.
+function sgFamGuardar(id){
+  var f=(SG.cacheFam||[]).find(function(x){return String(x.id)===String(id);});
+  var nombre=(eid('sg-fam-nom-'+id).value||'').trim();
+  if(!nombre){ toast('La familia necesita un nombre','er'); eid('sg-fam-nom-'+id).focus(); return; }
   var v=eid('sg-fam-alic-'+id).value;
   var alic = (v==='') ? null : Number(v);
   if(alic!==null && (isNaN(alic)||alic<0||alic>100)){ toast('Alícuota inválida (0–100)','er'); return; }
-  api('/api/sg/familias/'+id,'PATCH',{iva_alicuota:alic}).then(function(r){
-    if(r&&r.ok){ toast('Alícuota actualizada','ok');
-      var f=(SG.cacheFam||[]).find(function(x){return String(x.id)===String(id);}); if(f) f.iva_alicuota=alic;
-    } else toast((r&&r.error)||'Error','er');
+  var body={ iva_alicuota:alic };
+  if(!f || nombre!==String(f.nombre||'')) body.nombre=nombre;
+  api('/api/sg/familias/'+id,'PATCH',body).then(function(r){
+    if(!r||!r.ok) return toast((r&&r.error)||'Error','er');
+    toast('Familia actualizada','ok');
+    // El nombre viejo quedó pegado en SG.cacheProd (denormalizado) y en la grilla
+    // de productos: se recargan las dos o la pantalla sigue mostrando el anterior.
+    sgLoadCaches(function(){ sgLoadFamilias(); });
+  });
+}
+function sgFamNueva(){
+  var nombre=(prompt('Nombre de la nueva familia (categoría comercial):')||'').trim(); if(!nombre) return;
+  api('/api/sg/familias','POST',{nombre:nombre}).then(function(r){
+    if(!r||!r.ok) return toast((r&&r.error)||'Error','er');
+    toast('Familia creada','ok'); sgLoadCaches(function(){ sgLoadFamilias(); });
+  });
+}
+function sgFamBorrar(id){
+  if(!lnbPuedeAnular('sg-catalogo')){ toast('No tenés permiso para anular en Maestros','er'); return; }
+  var f=(SG.cacheFam||[]).find(function(x){return String(x.id)===String(id);});
+  if(!confirm('¿Dar de baja la familia "'+(f?f.nombre:'')+'"?')) return;
+  api('/api/sg/familias/'+id,'DELETE').then(function(r){
+    if(!r||!r.ok) return toast((r&&r.error)||'No se pudo dar de baja','er');
+    toast('Familia dada de baja','ok'); sgLoadCaches(function(){ sgLoadFamilias(); });
   });
 }
 
@@ -6488,11 +6568,9 @@ function sgActions(entity, id){
 
 function sgRow(entity, r){
   if (entity==='productos'){
-    // Envase: derivado de las presentaciones del producto (cache) → último segmento del código.
-    var _prs = sgPresDe(r.id);
-    var _env = _prs.length ? sgEnvNombre(_prs[0].envase_id) : '—';
-    return '<tr><td><code>'+esc(r.codigo)+'</code></td><td>'+esc(r.nombre)+'</td><td>'+esc(r.variedad||'—')+'</td><td>'+esc(r.familia||'—')
-      +'</td><td>'+esc(_env)+'</td><td>'+esc(sgPresStr(r.id))+'</td>'+sgActions(entity,r.id)+'</tr>';
+    // Mismo orden que SG_GRID.productos: Familia · Código · Especie · Variedad.
+    return '<tr><td>'+esc(r.familia||'—')+'</td><td><code>'+esc(r.codigo)+'</code></td><td>'+esc(r.nombre)+'</td><td>'+esc(r.variedad||'—')+'</td>'
+      +sgActions(entity,r.id)+'</tr>';
   }
   if (entity==='presentaciones'){
     return '<tr><td>'+esc(sgProdLabel(r.producto_id))+'</td><td>'+esc(r.nombre)+'</td><td style="text-align:right">'+(r.factor_conversion||0)+'</td><td>'+esc(sgEnvNombre(r.envase_id))+'</td><td style="text-align:right">'+(r.paletizado!=null&&r.paletizado!==''?r.paletizado:'—')+'</td>'+sgActions(entity,r.id)+'</tr>';
