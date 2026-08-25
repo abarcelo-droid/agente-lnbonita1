@@ -327,7 +327,6 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
   <div class="ni" data-sec="sg-vta-comprobantes"></div>
   <div class="ni" data-sec="sg-pisos"></div>
   <div class="ni" data-sec="sg-pedidos"></div>
-  <div class="ni" data-sec="sg-facturar"></div>
   <div class="ni" data-sec="sg-remitos-pend"></div>
 
   <div class="ng" style="margin-top:8px">General</div>
@@ -2870,42 +2869,6 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
       </table></div>
     </div>
 
-    <!-- Facturar (puente despacho → factura AFIP) -->
-<!-- ══ San Gerónimo · FACTURAR REMITOS ══
-     El puente remito → comprobante. Vive al lado de «Remitos pendientes de
-     comprobante», que es la pantalla donde se ve qué falta facturar: el que
-     busca eso no está despachando nada. -->
-<div class="sec sg-mod" id="sec-sg-facturar">
-  <div class="ph"><div><div class="ph-t">🧾 San Gerónimo · Facturar remitos</div>
-    <div class="ph-s">Lo que salió con remito y todavía no tiene comprobante</div></div></div>
-      <div class="sgr-card">
-        <div style="display:flex;gap:14px;align-items:flex-end;flex-wrap:wrap;margin-bottom:10px">
-          <label style="font-size:11.5px;color:var(--mut)">Cliente<br>
-            <input type="text" placeholder="🔎 alias o razón social" oninput="sgCliFiltrar('sgf-cli',this.value)" autocomplete="off" style="min-width:240px;padding:5px 8px;border-radius:6px;border:1px solid var(--bor);background:var(--card,#fff);margin-bottom:4px;display:block">
-            <select id="sgf-cli" onchange="sgFacCliente()" style="min-width:240px;padding:6px 8px;border-radius:6px;border:1px solid var(--bor);background:var(--card,#fff)"></select>
-          </label>
-          <span id="sgf-tipo-badge" style="padding-bottom:6px"></span>
-          <label style="font-size:11.5px;color:var(--mut)">Punto de venta<br>
-            <!-- Los números estaban escritos acá. Ahora salen de la pantalla de
-                 Puntos de Venta: dar de alta uno dejó de ser tocar el panel. -->
-            <select id="sgf-pv" style="padding:6px 8px;border-radius:6px;border:1px solid var(--bor);background:var(--card,#fff)">
-              <option value="">…</option>
-            </select>
-          </label>
-          <label style="font-size:12px;color:var(--mut);padding-bottom:7px"><input type="checkbox" id="sgf-incluye-iva" onchange="sgFacRenderLineas()"> precio incluye IVA</label>
-        </div>
-        <div id="sgf-despachos"><div style="font-size:12px;color:var(--mut)">Elegí un cliente para ver sus despachos facturables.</div></div>
-        <div style="font-weight:600;font-size:13px;margin:12px 0 4px">Ítems a facturar</div>
-        <div style="display:grid;grid-template-columns:1.4fr 0.8fr 0.7fr 0.8fr 0.8fr 0.7fr auto;gap:6px;font-size:11px;color:var(--mut);padding:0 2px 4px">
-          <div>Producto</div><div>Lote</div><div style="text-align:right">kg pend.</div><div style="text-align:right">kg facturar</div><div style="text-align:right">$/kg</div><div style="text-align:right">%IVA</div><div></div>
-        </div>
-        <div id="sgf-lineas"></div>
-        <div id="sgf-resumen" style="margin-top:12px;font-size:12.5px"></div>
-        <div style="text-align:right;margin-top:12px"><button class="btn bb" id="sgf-emitir-btn" onclick="sgFacEmitir()">Emitir comprobante</button></div>
-      </div>
-      <div class="sgr-confirm" id="sgf-confirm"></div>
-    </div>
-
 <!-- ══ San Gerónimo · COMPROBANTES EMITIDOS ══
      Era una solapa adentro de Salidas, que es la pantalla donde se DESPACHA.
      El que busca una factura para reimprimirla o mandársela al cliente no está
@@ -2957,6 +2920,119 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
         </div>
         <div class="ab-table-wrap" id="sgpe-tabla"><div style="font-size:12px;color:var(--mut)">Cargando…</div></div>
       </div>
+
+  <!-- ══ FACTURAR EL REMITO, SIN CAMBIAR DE PANTALLA ═══════════════════
+       Pablo, 24/8/2026: "dentro de administración de ventas tenemos Remitos
+       pendientes de comprobante... y ese es el que queda. El otro, Facturar
+       remitos, eliminalo, porque dentro de remitos pendientes de comprobante
+       necesitamos poder facturar un remito o recibir una liquidación".
+
+       Eran dos pantallas para una sola pregunta. La lista de pendientes no
+       facturaba: su único botón saltaba a la otra, que era donde de verdad vivía
+       el editor --punto de venta, varios despachos en un comprobante, kg y precio
+       editables, IVA incluido, y el CAE con su PDF--. Se mudó entero acá: es el
+       MISMO código y los mismos ids, movidos de lugar, no una copia. -->
+
+  <!-- ══ RECIBIR LA LIQUIDACIÓN DEL CLIENTE ═══════════════════════
+       El otro camino para documentar un remito. La factura la emitimos nosotros;
+       la liquidación nos la manda el cliente --el mercado, la cooperativa-- con
+       lo que vendió, lo que nos descuenta y lo que nos retiene.
+
+       Hasta ahora el backend existía entero y no tenía pantalla, y aunque la
+       hubiera tenido no habría servido: la liquidación guardaba el remito como
+       TEXTO LIBRE, así que sus kilos no se descontaban de ningún lado. -->
+  <div class="ab-modal-overlay" id="sg-liqrec-modal">
+    <!-- width:96vw JUNTO al max-width, como todos los modales anchos del proyecto.
+         .ab-modal declara width:560px: el max-width TOPEA pero no ensancha, así que
+         sin esto el modal sale de 560px, la grilla de renglones se aplasta a unos
+         80px por columna y aparece la barra de desplazamiento lateral adentro del
+         modal — justo lo que la convención prohíbe. -->
+    <div class="ab-modal" style="width:96vw;max-width:min(1000px,96vw)">
+      <div class="mhd"><div class="mht" id="sg-liqrec-tit">📥 Recibir liquidación</div>
+        <button class="mcl" onclick="closeMB('sg-liqrec-modal')">×</button></div>
+      <div class="mbd">
+        <div class="sgr-card">
+          <div style="display:grid;grid-template-columns:1.4fr 1fr 1fr;gap:10px;margin-bottom:10px">
+            <div class="fl"><label>Cliente</label>
+              <input id="sg-liqrec-cli-nom" type="text" readonly style="background:#e2e8f0"></div>
+            <div class="fl"><label>N° de la liquidación del cliente</label>
+              <input id="sg-liqrec-nro" type="text" placeholder="el que trae el papel" style="font-family:monospace"></div>
+            <div class="fl"><label>Fecha</label><input id="sg-liqrec-fecha" type="date"></div>
+          </div>
+          <div style="font-weight:600;font-size:13px;margin:4px 0 6px">Lo que se liquidó</div>
+          <div id="sg-liqrec-items"></div>
+        </div>
+
+        <div class="sgr-card">
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:18px">
+            <div>
+              <div style="font-weight:600;font-size:13px;margin-bottom:6px">Lo que nos descuenta</div>
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+                <div class="fl"><label>Comisión</label><input id="sg-liqrec-com" type="number" step="0.01" oninput="sgLiqRecTotales()"></div>
+                <div class="fl"><label>Flete</label><input id="sg-liqrec-flete" type="number" step="0.01" oninput="sgLiqRecTotales()"></div>
+                <div class="fl"><label>Carga y descarga</label><input id="sg-liqrec-carga" type="number" step="0.01" oninput="sgLiqRecTotales()"></div>
+                <div class="fl"><label>Otros</label><input id="sg-liqrec-otros" type="number" step="0.01" oninput="sgLiqRecTotales()"></div>
+              </div>
+            </div>
+            <div>
+              <div style="font-weight:600;font-size:13px;margin-bottom:6px">Lo que nos retiene</div>
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+                <div class="fl"><label>IVA</label><input id="sg-liqrec-riva" type="number" step="0.01" oninput="sgLiqRecTotales()"></div>
+                <div class="fl"><label>Ganancias</label><input id="sg-liqrec-rgan" type="number" step="0.01" oninput="sgLiqRecTotales()"></div>
+                <div class="fl"><label>Ingresos Brutos</label><input id="sg-liqrec-riibb" type="number" step="0.01" oninput="sgLiqRecTotales()"></div>
+                <div class="fl"><label>Otras</label><input id="sg-liqrec-rotras" type="number" step="0.01" oninput="sgLiqRecTotales()"></div>
+              </div>
+            </div>
+          </div>
+          <div id="sg-liqrec-totales" style="margin-top:12px;font-size:13px"></div>
+        </div>
+
+        <!-- EL CUADRO DEL ASIENTO, ANTES DE GRABAR (convención del repo). El
+             asiento lo arma el backend; acá se muestra lo que va a quedar, que es
+             el único momento en que se puede frenar. -->
+        <div id="sg-liqrec-asiento" style="margin-bottom:12px"></div>
+
+        <div style="display:flex;justify-content:flex-end;gap:8px">
+          <button class="btn bo" onclick="closeMB('sg-liqrec-modal')">Cancelar</button>
+          <button class="btn bb" id="sg-liqrec-btn" onclick="sgLiqRecGuardar()">Registrar la liquidación</button>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="ab-modal-overlay" id="sg-fac-modal">
+    <div class="ab-modal" style="width:96vw;max-width:min(1100px,96vw)">
+      <div class="mhd"><div class="mht" id="sg-fac-tit">🧾 Facturar el remito</div>
+        <button class="mcl" onclick="closeMB('sg-fac-modal')">×</button></div>
+      <div class="mbd">
+      <div class="sgr-card">
+        <div style="display:flex;gap:14px;align-items:flex-end;flex-wrap:wrap;margin-bottom:10px">
+          <label style="font-size:11.5px;color:var(--mut)">Cliente<br>
+            <input type="text" placeholder="🔎 alias o razón social" oninput="sgCliFiltrar('sgf-cli',this.value)" autocomplete="off" style="min-width:240px;padding:5px 8px;border-radius:6px;border:1px solid var(--bor);background:var(--card,#fff);margin-bottom:4px;display:block">
+            <select id="sgf-cli" onchange="sgFacCliente()" style="min-width:240px;padding:6px 8px;border-radius:6px;border:1px solid var(--bor);background:var(--card,#fff)"></select>
+          </label>
+          <span id="sgf-tipo-badge" style="padding-bottom:6px"></span>
+          <label style="font-size:11.5px;color:var(--mut)">Punto de venta<br>
+            <!-- Los números estaban escritos acá. Ahora salen de la pantalla de
+                 Puntos de Venta: dar de alta uno dejó de ser tocar el panel. -->
+            <select id="sgf-pv" style="padding:6px 8px;border-radius:6px;border:1px solid var(--bor);background:var(--card,#fff)">
+              <option value="">…</option>
+            </select>
+          </label>
+          <label style="font-size:12px;color:var(--mut);padding-bottom:7px"><input type="checkbox" id="sgf-incluye-iva" onchange="sgFacRenderLineas()"> precio incluye IVA</label>
+        </div>
+        <div id="sgf-despachos"><div style="font-size:12px;color:var(--mut)">Elegí un cliente para ver sus despachos facturables.</div></div>
+        <div style="font-weight:600;font-size:13px;margin:12px 0 4px">Ítems a facturar</div>
+        <div style="display:grid;grid-template-columns:1.4fr 0.8fr 0.7fr 0.8fr 0.8fr 0.7fr auto;gap:6px;font-size:11px;color:var(--mut);padding:0 2px 4px">
+          <div>Producto</div><div>Lote</div><div style="text-align:right">kg pend.</div><div style="text-align:right">kg facturar</div><div style="text-align:right">$/kg</div><div style="text-align:right">%IVA</div><div></div>
+        </div>
+        <div id="sgf-lineas"></div>
+        <div id="sgf-resumen" style="margin-top:12px;font-size:12.5px"></div>
+        <div style="text-align:right;margin-top:12px"><button class="btn bb" id="sgf-emitir-btn" onclick="sgFacEmitir()">Emitir comprobante</button></div>
+      </div>
+      <div class="sgr-confirm" id="sgf-confirm"></div>
+      </div>
+    </div>
+  </div>
     </div>
 
 
@@ -14170,7 +14246,9 @@ function sgVenSub(s){
   // Pedidos y Facturar se fueron a Administración de Ventas. Salidas quedó con
   // lo que efectivamente SALE: el remito, y la venta que se factura en el acto.
   else if (s==='pedidos'){ SG.venSub='despachos'; cmAbrirModulo('sg-pedidos'); }
-  else if (s==='facturar'){ SG.venSub='despachos'; cmAbrirModulo('sg-facturar'); }
+  // «Facturar remitos» se fue: el editor vive adentro de Remitos pendientes. Una
+  // sesión vieja con esa solapa guardada tenía que ir a parar a alguna parte.
+  else if (s==='facturar'){ SG.venSub='pedidos'; cmAbrirModulo('sg-remitos-pend'); }
   // Facturas y Pendientes se fueron a Administración de Ventas. El desvío es
   // para la sesión que tenga guardada la solapa vieja: sin esto abre en blanco,
   // porque SG.venSub sobrevive y el div que buscaba ya no está acá.
@@ -15001,6 +15079,186 @@ function sgFacMailEnviar(){
 // Export del catálogo de productos SG a XLSX (server-side) para limpiarlo fuera del sistema.
 function sgProductosExport(){ window.open('/api/sg/productos/export.xlsx','_blank'); }
 
+
+// ══ RECIBIR LA LIQUIDACIÓN QUE NOS MANDÓ EL CLIENTE ═════════════════
+//
+// El espejo de facturar. Los renglones salen del remito --no se tipean-- y los
+// kilos que se liquidan descuentan del despacho, igual que los de una factura:
+// así el remito sale de «pendientes» y nadie le emite además un comprobante por
+// la misma mercadería.
+var SGLR = { clienteId: null, despachoId: null, items: [] };
+
+function sgLiqRecAbrir(clienteId, despachoId, numero){
+  SGLR = { clienteId: clienteId, despachoId: despachoId, numero: numero || '', items: [] };
+  var t = eid('sg-liqrec-tit');
+  if (t) t.textContent = '\uD83D\uDCE5 Recibir la liquidaci\u00f3n del remito' + (numero ? ' ' + numero : '');
+  ['sg-liqrec-nro','sg-liqrec-com','sg-liqrec-flete','sg-liqrec-carga','sg-liqrec-otros',
+   'sg-liqrec-riva','sg-liqrec-rgan','sg-liqrec-riibb','sg-liqrec-rotras'].forEach(function(id){
+    var e = eid(id); if (e) e.value = '';
+  });
+  var f = eid('sg-liqrec-fecha'); if (f) f.value = new Date().toISOString().slice(0,10);
+  var cn = eid('sg-liqrec-cli-nom');
+  // El nombre sale del cache de clientes con la MISMA etiqueta que usan los
+  // selectores: alias primero, que es como el operador los conoce.
+  var cli = (SG.cacheCli || []).filter(function(x){ return String(x.id) === String(clienteId); })[0];
+  if (cn) cn.value = sgCliLabel(cli) || '';
+  eid('sg-liqrec-items').innerHTML = '<div style="font-size:12px;color:var(--mut)">Cargando el remito\u2026</div>';
+  eid('sg-liqrec-asiento').innerHTML = '';
+  eid('sg-liqrec-modal').classList.add('on');
+  // LOS RENGLONES SALEN DEL REMITO. Tipearlos a mano cuando el sistema ya sabe
+  // qué salió es pedirle al operador que copie de otra pantalla, y ahí se
+  // equivoca. El precio queda editable: el que manda es el del papel del cliente.
+  api('/api/sg/facturable?cliente_id=' + clienteId).then(function(r){
+    var d = ((r && r.despachos) || []).filter(function(x){
+      return String(x.despacho_id) === String(despachoId); })[0];
+    if (!d || !(d.items||[]).length) {
+      eid('sg-liqrec-items').innerHTML = '<div style="color:var(--err);font-size:12px">'
+        + 'Este remito ya no tiene kilos pendientes.</div>';
+      return;
+    }
+    SGLR.items = d.items.map(function(it){
+      return { despacho_item_id: it.despacho_item_id, producto: it.producto, lote: it.lote,
+        kg_pendiente: it.kg_pendiente, kg: it.kg_pendiente,
+        precio: it.precio_por_kg != null ? it.precio_por_kg : 0 };
+    });
+    sgLiqRecPintar();
+  });
+}
+
+function sgLiqRecPintar(){
+  var c = eid('sg-liqrec-items'); if (!c) return;
+  c.innerHTML = '<div style="display:grid;grid-template-columns:1.6fr 1fr 0.9fr 0.9fr 1fr;gap:6px;'
+    + 'font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:var(--mut);'
+    + 'padding:0 2px 4px"><div>Producto</div><div>Lote</div><div style="text-align:right">kg pend.</div>'
+    + '<div style="text-align:right">kg liquidados</div><div style="text-align:right">$/kg</div></div>'
+    + SGLR.items.map(function(it, i){
+        return '<div style="display:grid;grid-template-columns:1.6fr 1fr 0.9fr 0.9fr 1fr;gap:6px;'
+          + 'align-items:center;margin-bottom:5px;font-size:12.5px">'
+          + '<div>' + escH(it.producto || '\u2014') + '</div>'
+          + '<div style="color:var(--mut)">' + escH(it.lote || '\u2014') + '</div>'
+          + '<div style="text-align:right;color:var(--mut)">' + nr(it.kg_pendiente) + '</div>'
+          // min-width:0 o el input congela su pista de la grilla en su ancho
+          // intrínseco —unos 160px— y el renglón se desalinea contra su encabezado,
+          // que es otra grilla con las mismas fracciones pero sin inputs.
+          + '<input type="number" step="0.01" min="0" value="' + it.kg + '" style="text-align:right;min-width:0"'
+          + ' oninput="sgLiqRecUpd(' + i + ',\'kg\',this.value)">'
+          + '<input type="number" step="0.01" min="0" value="' + it.precio + '" style="text-align:right;min-width:0"'
+          + ' oninput="sgLiqRecUpd(' + i + ',\'precio\',this.value)">'
+          + '</div>';
+      }).join('');
+  sgLiqRecTotales();
+}
+function sgLiqRecUpd(i, campo, v){ SGLR.items[i][campo] = Number(v) || 0; sgLiqRecTotales(); }
+
+function sgLiqRecDatos(){
+  var v = function(id){ return Number((eid(id)||{}).value) || 0; };
+  var bruto = SGLR.items.reduce(function(a,it){ return a + (Number(it.kg)||0) * (Number(it.precio)||0); }, 0);
+  bruto = Math.round(bruto * 100) / 100;
+  var desc = v('sg-liqrec-com') + v('sg-liqrec-flete') + v('sg-liqrec-carga') + v('sg-liqrec-otros');
+  var ret  = v('sg-liqrec-riva') + v('sg-liqrec-rgan') + v('sg-liqrec-riibb') + v('sg-liqrec-rotras');
+  return { cliente_id: SGLR.clienteId, numero: (eid('sg-liqrec-nro')||{}).value || '(sin n\u00famero)',
+    precio_bruto: bruto, desc_comision: v('sg-liqrec-com'), desc_flete: v('sg-liqrec-flete'),
+    desc_carga_descarga: v('sg-liqrec-carga'), desc_otros: v('sg-liqrec-otros'),
+    ret_iva: v('sg-liqrec-riva'), ret_ganancias: v('sg-liqrec-rgan'),
+    ret_iibb: v('sg-liqrec-riibb'), ret_otras: v('sg-liqrec-rotras'),
+    _descuentos: Math.round(desc*100)/100, _retenciones: Math.round(ret*100)/100,
+    neto_acreditar: Math.round((bruto - desc - ret) * 100) / 100 };
+}
+
+// Lo último que dijo el preview. Si falta una cuenta, el botón no deja apretar:
+// que el backend lo rechace está bien —es el cerrojo— pero enterarse recién ahí,
+// con la liquidación entera cargada, es hacerle perder el trabajo al operador.
+var SGLR_FALTA = [];
+var _sglrT = null;
+function sgLiqRecTotales(){
+  var d = sgLiqRecDatos();
+  var t = eid('sg-liqrec-totales');
+  if (t) {
+    // EL NETO PUEDE DAR NEGATIVO: si nos descontaron más de lo que se vendió,
+    // le debemos nosotros. Se muestra en rojo en vez de taparse con un cero.
+    t.innerHTML = '<div style="display:flex;gap:18px;flex-wrap:wrap">'
+      + '<span>Bruto liquidado <b>' + sgMoney(d.precio_bruto) + '</b></span>'
+      + '<span style="color:#dc2626">\u2212 descuentos <b>' + sgMoney(d._descuentos) + '</b></span>'
+      + '<span style="color:#dc2626">\u2212 retenciones <b>' + sgMoney(d._retenciones) + '</b></span>'
+      + '<span style="margin-left:auto">Neto a acreditar <b style="font-size:15px'
+      + (d.neto_acreditar < 0 ? ';color:var(--err)' : '') + '">' + sgMoney(d.neto_acreditar) + '</b></span>'
+      + '</div>';
+  }
+  // El cuadro del asiento, con un respiro para no pegarle al backend en cada tecla.
+  clearTimeout(_sglrT);
+  _sglrT = setTimeout(function(){
+    var c = eid('sg-liqrec-asiento'); if (!c) return;
+    if (!(d.precio_bruto > 0)) { c.innerHTML = ''; return; }
+    api('/api/sg/ventas/liquidaciones/preview-asiento', 'POST', d).then(function(r){
+      c = eid('sg-liqrec-asiento'); if (!c) return;
+      if (!r || !r.ok) { c.innerHTML = '<div style="color:var(--err);font-size:12px">No se pudo armar el asiento.</div>'; return; }
+      SGLR_FALTA = r.falta || [];
+      c.innerHTML = sgAsientoCuadro({ falta: r.falta, lineas: r.lineas, totales: r.totales },
+        'Asiento de esta liquidaci\u00f3n', 'la configuraci\u00f3n impositiva y la ficha del cliente');
+      var b = eid('sg-liqrec-btn');
+      if (b) {
+        b.disabled = SGLR_FALTA.length > 0;
+        b.title = SGLR_FALTA.length
+          ? 'No se va a poder contabilizar: falta ' + SGLR_FALTA.join(' y ') : '';
+      }
+    });
+  }, 300);
+}
+
+function sgLiqRecGuardar(){
+  var d = sgLiqRecDatos();
+  if (SGLR_FALTA.length) {
+    toast('No se va a poder contabilizar: falta ' + SGLR_FALTA.join(' y '), 'er'); return;
+  }
+  if (!SGLR.items.length) { toast('El remito no tiene kilos para liquidar', 'er'); return; }
+  if (!(d.precio_bruto > 0)) { toast('El bruto liquidado está en cero', 'er'); return; }
+  // EL NETO NO PUEDE DAR NEGATIVO: un asiento no admite un importe negativo, así que
+  // el escritor rechazaría el asiento entero. Se avisa acá, con el número a la vista,
+  // en vez de que reviente al guardar.
+  if (d.neto_acreditar < 0) {
+    toast('El neto a acreditar da negativo (' + sgMoney(d.neto_acreditar) + '): los descuentos '
+      + 'y las retenciones superan lo liquidado. Revisá los importes.', 'er'); return;
+  }
+  var pasado = SGLR.items.filter(function(it){ return (Number(it.kg)||0) > (Number(it.kg_pendiente)||0) + 0.01; });
+  if (pasado.length) { toast('Hay renglones con m\u00e1s kilos de los que quedan pendientes', 'er'); return; }
+  var body = {
+    fecha: (eid('sg-liqrec-fecha')||{}).value || null,
+    cliente_id: SGLR.clienteId,
+    nro_liquidacion: ((eid('sg-liqrec-nro')||{}).value || '').trim() || null,
+    // EL NÚMERO DEL REMITO, no el título del modal: acá se guardaba
+    // "📥 Recibir la liquidación del remito 0001-00000012" entero, y eso es lo que
+    // después se imprime en el comprobante y lo que alguien va a buscar.
+    nro_remito: SGLR.numero || null,
+    desc_comision: d.desc_comision, desc_flete: d.desc_flete,
+    desc_carga_descarga: d.desc_carga_descarga, desc_otros: d.desc_otros,
+    ret_iva: d.ret_iva, ret_ganancias: d.ret_ganancias,
+    ret_iibb: d.ret_iibb, ret_otras: d.ret_otras,
+    items: SGLR.items.filter(function(it){ return (Number(it.kg)||0) > 0; }).map(function(it){
+      return { descripcion: it.producto || '', kilos: Number(it.kg)||0,
+        precio_unitario: Number(it.precio)||0,
+        subtotal: Math.round((Number(it.kg)||0) * (Number(it.precio)||0) * 100) / 100 };
+    }),
+    // Lo que ata la liquidación al remito: sin esto los kilos no se descuentan.
+    vinculos: SGLR.items.filter(function(it){ return (Number(it.kg)||0) > 0; }).map(function(it){
+      return { despacho_id: SGLR.despachoId, despacho_item_id: it.despacho_item_id, kg: Number(it.kg)||0 };
+    })
+  };
+  if (!body.items.length) { toast('Pon\u00e9 los kilos de al menos un rengl\u00f3n', 'er'); return; }
+  var btn = eid('sg-liqrec-btn'); btn.disabled = true; var prev = btn.textContent; btn.textContent = 'Registrando\u2026';
+  api('/api/sg/ventas/liquidaciones', 'POST', body).then(function(r){
+    btn.disabled = false; btn.textContent = prev;
+    if (!r || !r.ok) { toast((r && r.error) || 'No se pudo registrar', 'er'); return; }
+    // SI EL BACKEND RECHAZÓ, EL MODAL NO SE CIERRA: lo cargado no se pierde y el
+    // cuadro del asiento queda a la vista mientras se corrige. Y ya no existe el
+    // caso «se guardó pero sin asiento»: el backend tira y revierte, porque una
+    // venta guardada fuera del libro consume los kilos del remito --lo saca de
+    // pendientes-- y no hay ninguna pantalla que después la liste para volver a ella.
+    toast('Liquidación ' + (r.numero || '') + ' registrada', 'ok');
+    closeMB('sg-liqrec-modal');
+    sgPendLoad();
+  });
+}
+
 // ── 📋 Pendientes de comprobante (despachos con kg sin facturar) ──
 function sgPendInit(){
   var sel=eid('sgpe-cli'); if(sel) sel.innerHTML=sgCliOpts('','','— Todos —');
@@ -15017,6 +15275,10 @@ function sgPendLoad(){
     if(!r||!r.ok){ eid('sgpe-tabla').innerHTML='<div style="color:var(--err)">'+esc((r&&r.error)||'Error')+'</div>'; return; }
     var ds=r.despachos||[];
     if(!ds.length){ eid('sgpe-tabla').innerHTML='<div style="font-size:12px;color:var(--mut)">No hay despachos pendientes de facturar.</div>'; return; }
+    // FACTURAR Y RECIBIR UNA LIQUIDACIÓN SON OPERAR. No se le ofrece el botón al
+    // que va a comer un 403: el que lo aprieta cree que rompió algo. Misma regla
+    // que usa Comprobantes emitidos para el botón de mandar por mail.
+    var puedeDoc = lnbPuedeOperar('sg-remitos-pend') || lnbPuedeOperar('sg-ventas');
     var body=ds.map(function(d){
       var vendido=(d.items||[]).map(function(it){ return (it.en_viaje?'🚚 ':'')+esc(it.producto||'—')+' '+nr(it.kg_pendiente)+'kg'; }).join(', ');
       var estB= d.estado_facturacion==='parcial' ? '<span class="bdg bpe">🟡 parcial</span>' : '<span class="bdg ber">🔴 pendiente</span>';
@@ -15024,7 +15286,15 @@ function sgPendLoad(){
         +'<td>'+esc(d.alias||'—')+'</td><td>'+esc(d.razon_social||'—')+'</td>'
         +'<td>'+vendido+'</td><td style="text-align:right">'+sgMoney(d.total_pendiente)+'</td>'
         +'<td>'+estB+'</td>'
-        +'<td style="text-align:center"><button class="btn bb bs" onclick="sgFacPrecargar('+d.cliente_id+','+d.despacho_id+')">Facturar</button></td></tr>';
+        +'<td style="text-align:center;white-space:nowrap">'
+        +(!puedeDoc ? '<span style="color:var(--mut);font-size:11.5px">sin permiso para documentar</span>' : ''
+        +'<button class="btn bb bs" onclick="sgFacPrecargar('+d.cliente_id+','+d.despacho_id+',\''+esc(d.numero||'')+'\')" title="Emitir nuestro comprobante por este remito">Facturar</button>'
+        // LAS DOS FORMAS DE DOCUMENTAR EL MISMO REMITO. Pablo: "necesitamos poder
+        // facturar un remito o recibir una liquidación". No son alternativas del
+        // mismo botón: son dos comprobantes distintos --uno lo emitimos nosotros,
+        // el otro nos lo manda el cliente-- y los dos consumen los kilos del remito.
+        +' <button class="btn bo bs" onclick="sgLiqRecAbrir('+d.cliente_id+','+d.despacho_id+',\''+esc(d.numero||'')+'\')" title="Cargar la liquidaci\u00f3n que nos mand\u00f3 el cliente por este remito">\uD83D\uDCE5 Recibir liquidaci\u00f3n</button>')
+        +'</td></tr>';
     }).join('');
     eid('sgpe-tabla').innerHTML='<table class="pa-tbl"><thead><tr>'
       +'<th>N° despacho</th><th>Fecha</th><th>Alias</th><th>Cliente</th><th>Qué se vendió</th>'
@@ -15036,9 +15306,14 @@ function sgPendLoad(){
 // Desde que Pendientes es su propia pantalla, esto CRUZA DE PANTALLA: primero
 // hay que estar parado en Salidas, si no la solapa se marca en un div que está
 // oculto y no se ve nada.
-function sgFacPrecargar(clienteId, despachoId){
-  if (navAct !== 'sg-facturar') cmAbrirModulo('sg-facturar');  // sgFacInit() resetea el form
-  else sgFacInit();
+function sgFacPrecargar(clienteId, despachoId, numero){
+  // SE ABRE ACÍ MISMO. Antes esto saltaba a la pantalla «Facturar remitos», que ya
+  // no existe: el editor vive en este modal. El que está mirando qué falta
+  // facturar no tiene que perder de vista la lista para facturar uno.
+  sgFacInit();
+  var t = eid('sg-fac-tit');
+  if (t) t.textContent = '\uD83E\uDDFE Facturar el remito' + (numero ? ' ' + numero : '');
+  var m = eid('sg-fac-modal'); if (m) m.classList.add('on');
   // EL CLIENTE VIENE SUGERIDO DEL REMITO. Ya se sabe quién es: volver a
   // elegírlo es pedir dos veces el mismo dato, y equivocarse acá factura a otro.
   sgCliElegir('sgf-cli', clienteId);
@@ -15189,6 +15464,9 @@ function sgFacEmitir(){
       toast('Comprobante autorizado','ok');
       var fid = r.factura_id;
       sgFacCliente();   // refresca /facturable PRIMERO (sgFacCliente oculta el confirm) y recién pintamos el panel
+      // Y LA LISTA DE ATRÁS TAMBIÉN. El remito recién facturado tiene que
+      // desaparecer de «pendientes»: si sigue ahí, alguien lo factura de nuevo.
+      if (typeof sgPendLoad === 'function' && eid('sgpe-tabla')) sgPendLoad();
       var c=eid('sgf-confirm');
       c.innerHTML = '✓ <b>Comprobante '+(r.cbte_tipo===1?'A':(r.cbte_tipo===6?'B':r.cbte_tipo))+'</b> · N° '
         +String(r.pto_vta).padStart(4,'0')+'-'+String(r.cbte_nro).padStart(8,'0')
@@ -24290,8 +24568,9 @@ function loadSec(s) {
     'sg-vta-comprobantes': function(){ sgLoadCaches(function(){ sgFacListInit(); }); },
     'sg-pisos':            function(){ sgPiLoad(); },
     'sg-pedidos':          function(){ sgLoadCaches(function(){ sgLoadPedidos(); }); },
-    'sg-facturar':         function(){ sgLoadCaches(function(){ sgFacInit(); }); },
-    'sg-remitos-pend':     function(){ sgLoadCaches(function(){ sgPendInit(); }); },
+    // sgFacInit va JUNTO: el editor de comprobante ahora vive acá adentro y
+    // necesita el selector de clientes y el de puntos de venta cargados.
+    'sg-remitos-pend':     function(){ sgLoadCaches(function(){ sgPendInit(); sgFacInit(); }); },
     'sg-gastos-directos': function(){ sgGdsInit(); },
     'sg-facturas-merc': function(){ sgFmModeloCargar(); sgFmLoad(); sgFmSinContabilizar(); },
     'sg-cc-clientes': function(){

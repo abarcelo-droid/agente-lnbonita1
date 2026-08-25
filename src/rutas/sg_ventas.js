@@ -220,6 +220,116 @@ router.get('/liquidaciones/:id', (req, res) => {
   } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
+// ══ LAS LÍNEAS DEL ASIENTO DE UNA LIQUIDACIÓN RECIBIDA ════════════════
+//
+// Estaban escritas adentro del POST, dentro de un try que se comía el error con
+// un console.error: si al cliente le faltaba la cuenta contable, la liquidación
+// se guardaba igual y NO entraba al libro -- sin que nadie se enterara.
+//
+// Ahora salen de acá y las usan las dos: el preview que muestra la pantalla antes
+// de emitir (convención del repo: toda operación que asienta muestra el asiento) y
+// el POST que lo graba. Así lo que se ve es lo que se guarda.
+//
+// El cliente va al DEBE por el neto a acreditar --nos debe eso-- más las
+// retenciones que nos practicó, contra Ventas al haber por el bruto.
+export function armarLineasLiq(db, d) {
+  const falta = [];
+  const cliente = db.prepare('SELECT id, razon_social, cuenta_contable_id FROM sg_clientes WHERE id=?')
+    .get(parseInt(d.cliente_id));
+  const configImp = {};
+  db.prepare('SELECT clave, cuenta_id FROM sg_config_impositiva WHERE cuenta_id IS NOT NULL').all()
+    .forEach((row) => { configImp[row.clave] = row.cuenta_id; });
+
+  const cuentaCliente = (cliente && cliente.cuenta_contable_id) || null;
+  const cuentaVentas  = configImp['ventas'] || null;
+  if (!cuentaCliente) falta.push('la cuenta contable del cliente ' + ((cliente && cliente.razon_social) || ''));
+  if (!cuentaVentas)  falta.push('la cuenta de Ventas en la configuración impositiva');
+
+  const n = (x) => Math.round(((parseFloat(x) || 0)) * 100) / 100;
+  const ret = { percepcion_iva: n(d.ret_iva), percepcion_ganancias: n(d.ret_ganancias),
+                percepcion_iibb: n(d.ret_iibb) };
+  const rotulo = { percepcion_iva: 'Retención IVA', percepcion_ganancias: 'Retención Ganancias',
+                   percepcion_iibb: 'Retención IIBB' };
+  for (const k of Object.keys(ret)) {
+    if (ret[k] > 0 && !configImp[k]) falta.push('la cuenta de ' + rotulo[k]);
+  }
+  // Lo que falta se junta y se dice TODO junto, más abajo: avisar de a una cuenta
+  // por vez obliga a cargar, guardar, volver y descubrir la siguiente.
+  const lineas = [
+    { cuenta_id: cuentaCliente, debe: n(d.neto_acreditar), haber: 0,
+      descripcion: `Neto liquidación ${d.numero}` },
+  ];
+  for (const k of Object.keys(ret)) {
+    if (ret[k] > 0 && configImp[k]) {
+      lineas.push({ cuenta_id: configImp[k], debe: ret[k], haber: 0, descripcion: rotulo[k] });
+    }
+  }
+  // CADA COSA A SU CUENTA, Y SI NO ESTÁ SE AVISA. Acá había un "si no existe la
+  // cuenta de gastos, usá la de percepción de IVA": una comisión imputada a una
+  // cuenta de retenciones descuadra el libro impositivo y nadie lo mira hasta que
+  // no cierra. Un asiento que no se puede armar bien no se arma.
+  const otras = n(d.ret_otras);
+  if (otras > 0 && !configImp['retencion']) falta.push('la cuenta de Retenciones');
+  // Comisión, flete y carga los cobra el cliente: para nosotros son GASTO.
+  const gastos = n(d.desc_comision) + n(d.desc_flete) + n(d.desc_carga_descarga) + n(d.desc_otros);
+  if (gastos > 0 && !configImp['liq_recibida_gastos']) {
+    falta.push('la cuenta de Gastos de liquidaciones recibidas '
+      + '(se elige en Contabilidad SG → Configuración impositiva)');
+  }
+  if (falta.length) return { lineas: [], falta };
+  if (otras > 0)  lineas.push({ cuenta_id: configImp['retencion'], debe: otras, haber: 0,
+    descripcion: 'Otras retenciones' });
+  if (gastos > 0) lineas.push({ cuenta_id: configImp['liq_recibida_gastos'], debe: gastos, haber: 0,
+    descripcion: 'Descuentos de la liquidación' });
+
+  lineas.push({ cuenta_id: cuentaVentas, debe: 0, haber: n(d.precio_bruto),
+    descripcion: `Venta bruta ${d.numero}` });
+
+  // EL ESPEJO DE LA COMPRA. Si se acordó más de lo que dice el comprobante, la
+  // diferencia entra como dos líneas de gestión en el MISMO asiento: el cliente al
+  // debe --debe más-- contra Ventas al haber. Sin IVA: el débito fiscal sale del
+  // comprobante y de nada más.
+  const dif = n(d.dif_gestion);
+  const mot = String(d.dif_motivo || '').trim();
+  if (dif > 0 && MOTIVOS[mot]) {
+    lineas.push({ cuenta_id: cuentaCliente, debe: dif, haber: 0, ambito: 'gestion',
+      motivo: mot, descripcion: 'Diferencia con lo acordado' });
+    lineas.push({ cuenta_id: cuentaVentas, debe: 0, haber: dif, ambito: 'gestion',
+      motivo: mot, descripcion: 'Diferencia con lo acordado' });
+  }
+  return { lineas, falta: [] };
+}
+
+// El cuadro que la pantalla muestra ANTES de emitir. Espeja lo que arma el
+// backend porque es literalmente la misma función.
+router.post('/liquidaciones/preview-asiento', requireAuth, (req, res) => {
+  try {
+    const b = req.body || {};
+    const arm = armarLineasLiq(db, b);
+    if (arm.falta.length) return res.json({ ok: true, falta: arm.falta, lineas: [], totales: {} });
+    const conNombre = arm.lineas.map((l) => {
+      const c = db.prepare('SELECT codigo, nombre FROM sg_cuentas WHERE id=?').get(l.cuenta_id) || {};
+      return { ...l, ambito: l.ambito || 'fiscal',
+        cuenta_codigo: c.codigo || '', cuenta_nombre: c.nombre || '' };
+    });
+    const totales = {};
+    for (const l of conNombre) {
+      const t = (totales[l.ambito] = totales[l.ambito] || { debe: 0, haber: 0 });
+      t.debe = Math.round((t.debe + (l.debe || 0)) * 100) / 100;
+      t.haber = Math.round((t.haber + (l.haber || 0)) * 100) / 100;
+    }
+    // EL FLAG QUE MIRA LA PANTALLA. Sin él, sgAsientoCuadro cae siempre en la rama
+    // roja y el cuadro grita "NO balancea · diferencia $0" en TODAS las
+    // liquidaciones, incluso en las que cierran perfecto. Un cartel que grita
+    // siempre deja de ser señal a los dos días, y el día que de verdad descuadre
+    // nadie lo va a mirar. Es la misma línea que usa el preview de facturas.
+    for (const k of Object.keys(totales)) {
+      totales[k].balancea = Math.abs(totales[k].debe - totales[k].haber) < 0.01;
+    }
+    res.json({ ok: true, falta: [], lineas: conNombre, totales });
+  } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
+});
+
 router.post('/liquidaciones', requireAuth, (req, res) => {
   const u = req._user;
   const { fecha, cliente_id, nro_remito, observaciones, items,
@@ -267,63 +377,93 @@ router.post('/liquidaciones', requireAuth, (req, res) => {
                parseFloat(it.precio_unitario)||null, parseFloat(it.subtotal)||0);
       }
 
+      // ══ QUÉ REMITO DOCUMENTA ══════════════════════════════
+      // Sin esto, los kilos del remito no se descontaban nunca: el despacho
+      // quedaba pendiente para siempre y después se le podía emitir ADEMÁS una
+      // factura por la misma mercadería.
+      const vinculos = Array.isArray(req.body.vinculos) ? req.body.vinculos : [];
+      if (vinculos.length) {
+        const insV = db.prepare(`INSERT INTO sg_liquidacion_despachos
+          (liquidacion_id, despacho_id, despacho_item_id, kg) VALUES (?,?,?,?)`);
+        for (const v of vinculos) {
+          if (!v || v.despacho_id == null) continue;
+          const kg = v.kg != null ? Number(v.kg) : null;
+          const diId = v.despacho_item_id != null ? Number(v.despacho_item_id) : null;
+          // NO SE LIQUIDA MÁS DE LO QUE SALIÓ. El control estaba sólo en la
+          // pantalla, y un control que vive sólo en el front no es un control:
+          // basta con otra pestaña abierta --o alguien que facturó el mismo remito
+          // hace un minuto-- para documentar dos veces los mismos kilos. La
+          // transacción se cae entera, así que no queda media liquidación.
+          if (diId != null && kg > 0) {
+            const di = db.prepare('SELECT kg_despachados FROM sg_despacho_items WHERE id=?').get(diId);
+            if (!di) throw new Error('El renglón ' + diId + ' del remito no existe');
+            const yaFac = db.prepare(`SELECT COALESCE(SUM(fd.kg),0) s FROM sg_factura_despachos fd
+              JOIN sg_ven_facturas f ON f.id=fd.factura_id
+              WHERE fd.despacho_item_id=? AND COALESCE(f.afip_estado,'') <> 'rechazado'
+                AND COALESCE(f.estado,'') <> 'anulada'`).get(diId).s;
+            const yaLiq = db.prepare(`SELECT COALESCE(SUM(ld.kg),0) s FROM sg_liquidacion_despachos ld
+              JOIN sg_ven_liquidaciones l ON l.id=ld.liquidacion_id
+              WHERE ld.despacho_item_id=? AND COALESCE(l.estado,'') <> 'anulada'`).get(diId).s;
+            const pend = Math.round(((Number(di.kg_despachados) || 0) - yaFac - yaLiq) * 100) / 100;
+            if (kg > pend + 0.01) {
+              throw new Error('Ese renglón del remito tiene ' + pend + ' kg pendientes y se '
+                + 'quieren liquidar ' + kg + '. Puede que lo hayan facturado desde otra pantalla.');
+            }
+          }
+          insV.run(liqId, Number(v.despacho_id), diId, kg);
+        }
+      }
+
       // Generar asiento contable automático (libros SG)
       let asientoId = null;
       try {
         const cliente = db.prepare('SELECT * FROM sg_clientes WHERE id=?').get(parseInt(cliente_id));
-        const configImp = {};
-        db.prepare('SELECT clave, cuenta_id FROM sg_config_impositiva WHERE cuenta_id IS NOT NULL').all()
-          .forEach(row => { configImp[row.clave] = row.cuenta_id; });
-
-        const cuentaCliente   = cliente?.cuenta_contable_id || null;
-        const cuentaVentas    = configImp['ventas']          || null;
-        const cuentaRetIva    = configImp['percepcion_iva']  || null;
-        const cuentaRetGan    = configImp['percepcion_ganancias'] || null;
-        const cuentaRetIibb   = configImp['percepcion_iibb'] || null;
-
-        if (cuentaCliente && cuentaVentas) {
-          const lineas = [
-            { cuenta_id: cuentaCliente, debe: neto_acreditar, haber: 0,
-              descripcion: `Neto liquidación ${numero}` },
-          ];
-          if (ret_iva > 0 && cuentaRetIva) {
-            lineas.push({ cuenta_id: cuentaRetIva, debe: parseFloat(ret_iva), haber: 0, descripcion: 'Retención IVA' });
-          }
-          if (ret_ganancias > 0 && cuentaRetGan) {
-            lineas.push({ cuenta_id: cuentaRetGan, debe: parseFloat(ret_ganancias), haber: 0, descripcion: 'Retención Ganancias' });
-          }
-          if (ret_iibb > 0 && cuentaRetIibb) {
-            lineas.push({ cuenta_id: cuentaRetIibb, debe: parseFloat(ret_iibb), haber: 0, descripcion: 'Retención IIBB' });
-          }
-          lineas.push({ cuenta_id: cuentaVentas, debe: 0, haber: precio_bruto, descripcion: `Venta bruta ${numero}` });
-          // EL ESPEJO DE LA COMPRA. Si se acordó más de lo que se facturó, la
-          // diferencia entra como dos líneas de gestión en el MISMO asiento: el
-          // cliente al debe —debe más— contra Ventas al haber. Sin IVA: el
-          // débito fiscal sale del comprobante y de nada más.
+        const arm = armarLineasLiq(db, {
+          cliente_id, numero, precio_bruto, neto_acreditar,
+          desc_comision, desc_flete, desc_carga_descarga, desc_otros,
+          ret_iva, ret_ganancias, ret_iibb, ret_otras,
+          dif_gestion: req.body.dif_gestion, dif_motivo: req.body.dif_motivo,
+        });
+        if (arm.falta.length) {
+          // NO SE GUARDA UNA VENTA FUERA DEL LIBRO. Acá el catch escribía en la
+          // consola del servidor y devolvía ok:true, y eso ahora es peor que antes:
+          // los kilos del remito SE CONSUMEN igual, así que el despacho sale de
+          // «pendientes», no queda asiento, y no hay ninguna pantalla que liste las
+          // liquidaciones sin contabilizar para volver a ellas.
+          //
+          // Se tira, y la transacción se cae entera: no queda ni la liquidación ni
+          // el vínculo. La pantalla ya avisó lo mismo en el cuadro del asiento
+          // antes de apretar; esto es el cerrojo.
+          throw new Error('No se puede contabilizar: falta ' + arm.falta.join(' y ')
+            + '. La liquidación NO se guardó.');
+        } else {
           const difLiq = Math.round((parseFloat(req.body.dif_gestion) || 0) * 100) / 100;
           const difMotLiq = String(req.body.dif_motivo || '').trim();
           if (difLiq > 0 && MOTIVOS[difMotLiq]) {
-            lineas.push({ cuenta_id: cuentaCliente, debe: difLiq, haber: 0, ambito: 'gestion',
-              motivo: difMotLiq, descripcion: 'Diferencia con lo acordado' });
-            lineas.push({ cuenta_id: cuentaVentas, debe: 0, haber: difLiq, ambito: 'gestion',
-              motivo: difMotLiq, descripcion: 'Diferencia con lo acordado' });
             db.prepare('UPDATE sg_ven_liquidaciones SET dif_gestion=?, dif_motivo=? WHERE id=?')
               .run(difLiq, difMotLiq, liqId);
           }
           asientoId = crearAsiento(db, {
             fecha: fechaLiq, usuario_id: u.id, ref_codigo: numero,
             descripcion: `${numero} | ${cliente?.razon_social||''} | Liq. Producto`,
-          }, lineas).id;
-
+          }, arm.lineas).id;
           db.prepare('UPDATE sg_ven_liquidaciones SET asiento_id=? WHERE id=?').run(asientoId, liqId);
         }
-      } catch(eA) { console.error('[SG-VEN] Error asiento liq:', eA.message); }
+      } catch(eA) {
+        // TAMPOCO SE TRAGA UN ERROR DE crearAsiento. Un neto negativo --al
+        // productor le descontaron más de lo que vendió-- o un asiento en cero
+        // hacen fallar el escritor, y antes eso quedaba en la consola del
+        // servidor mientras la liquidación se guardaba igual.
+        console.error('[SG-VEN] Error asiento liq:', eA.message);
+        throw new Error('No se pudo contabilizar: ' + eA.message + '. La liquidación NO se guardó.');
+      }
 
-      return { liqId, numero };
+      return { liqId, numero, asientoId };
     });
 
     const result = tx();
-    res.json({ ok: true, id: result.liqId, numero: result.numero });
+    res.json({ ok: true, id: result.liqId, numero: result.numero,
+      asiento_id: result.asientoId });
   } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 

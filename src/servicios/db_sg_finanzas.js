@@ -196,6 +196,26 @@ db.exec(`
     creado_en           TEXT DEFAULT (datetime('now','localtime'))
   );
 
+  -- ══ QUÉ REMITO DOCUMENTA ESTA LIQUIDACIÓN ════════════════════════
+  -- Espejo de sg_factura_despachos. Sin esto, nro_remito era texto libre: los
+  -- kilos del remito NUNCA se descontaban, el despacho quedaba pendiente para
+  -- siempre y nada frenába que después se le emitiera ADEMÁS una factura por la
+  -- misma mercadería -- que es exactamente el problema que documenta
+  -- servicios/factura-cuenta.js, del otro lado del mostrador.
+  --
+  -- despacho_id/despacho_item_id van sin FK a propósito: los despachos son del
+  -- módulo de abasto y una FK hacia allá hace fallar sus DELETE (CLAUDE.md).
+  CREATE TABLE IF NOT EXISTS sg_liquidacion_despachos (
+    id               INTEGER PRIMARY KEY AUTOINCREMENT,
+    liquidacion_id   INTEGER NOT NULL REFERENCES sg_ven_liquidaciones(id),
+    despacho_id      INTEGER NOT NULL,
+    despacho_item_id INTEGER,
+    kg               REAL,
+    creado_en        TEXT DEFAULT (datetime('now','localtime'))
+  );
+  CREATE INDEX IF NOT EXISTS idx_sg_liq_desp_liq  ON sg_liquidacion_despachos(liquidacion_id);
+  CREATE INDEX IF NOT EXISTS idx_sg_liq_desp_item ON sg_liquidacion_despachos(despacho_item_id);
+
   CREATE TABLE IF NOT EXISTS sg_ven_liquidacion_items (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
     liquidacion_id  INTEGER NOT NULL REFERENCES sg_ven_liquidaciones(id),
@@ -714,6 +734,11 @@ try { db.exec("CREATE INDEX IF NOT EXISTS idx_sg_pagos_compras ON sg_pagos_compr
     ['percepcion_ganancias', 'Percepción Ganancias'],
     ['retencion',            'Retención'],
     ['ventas',               'Cuenta de Ventas (haber)'],
+    // LOS GASTOS DE UNA LIQUIDACIÓN RECIBIDA. Cuando el remito lo documenta una
+    // liquidación que nos emite el cliente --el mercado, la cooperativa--, él se
+    // descuenta comisión, flete y carga: para nosotros eso es un GASTO, no una
+    // retención. Sin esta cuenta el asiento no se puede armar sin mentir.
+    ['liq_recibida_gastos',  'Gastos de liquidaciones recibidas (comisión, flete, carga)'],
     // UN CHEQUE EN CARTERA NO ES PLATA EN EL BANCO. Cuando un cliente paga con
     // cheque, el banco no recibió nada: recibís un papel que vale el día que lo
     // depositás. Esa etapa intermedia necesita su propia cuenta —"Valores a
