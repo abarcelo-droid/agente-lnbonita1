@@ -11,6 +11,8 @@
 // el freno en una sola— y se arregla igual: la regla vive acá y los dos la usan.
 import db from './db.js';
 import './db_sg_finanzas.js';
+// La lista corta de motivos: un motivo que no esté acá no entra al asiento.
+import { MOTIVOS } from './asientos.js';
 
 export const r2v = (x) => Math.round((Number(x) || 0) * 100) / 100;
 // ── EL ASIENTO MODELO DE VENTA ──────────────────────────────
@@ -84,7 +86,17 @@ export function modeloVentaFaltan(lineas) {
   return faltan;
 }
 
-export function lineasAsientoVenta(db, { clienteId, neto, iva, total, descuento, numero }) {
+// EL MOTIVO VIENE DE AFUERA. Estaba escrito 'ajuste_gestion' a mano en las dos
+// líneas de gestión: la factura guardaba bien el motivo que eligió el operador
+// --"error del proveedor", "comprobante pendiente"-- y el asiento salía marcado
+// como otra cosa. El informe de Medir gestión abre por motivo justamente para
+// saber qué se puede reclamar y qué no, así que contaba mal esas ventas.
+//
+// Se cae a 'ajuste_gestion' sólo si no viene ninguno o si viene uno que no está
+// en la lista: crearAsiento rechaza un motivo desconocido, y tirar el asiento
+// entero de una venta ya emitida por un motivo mal escrito sería peor.
+export function lineasAsientoVenta(db, { clienteId, neto, iva, total, descuento, numero, motivo }) {
+  const motivoGes = MOTIVOS[String(motivo || '').trim()] ? String(motivo).trim() : 'ajuste_gestion';
   const mod = modeloVentaLineas(db);
   const faltan = modeloVentaFaltan(mod.lineas);
   if (faltan.length) return { lineas: [], falta: faltan, modelo_id: mod.id };
@@ -142,10 +154,10 @@ export function lineasAsientoVenta(db, { clienteId, neto, iva, total, descuento,
   if (d > 0) {
     const lDesc = de('descuento');
     lineas.push({ cuenta_id: lCli.cuenta_id, debe: d, haber: 0,
-      ambito: 'gestion', motivo: 'ajuste_gestion',
+      ambito: 'gestion', motivo: motivoGes,
       descripcion: 'Descuento comercial acordado' });
     lineas.push({ cuenta_id: (lDesc ? lDesc.cuenta_id : lVta.cuenta_id), debe: 0, haber: d,
-      ambito: 'gestion', motivo: 'ajuste_gestion',
+      ambito: 'gestion', motivo: motivoGes,
       descripcion: 'Descuento comercial acordado' });
   }
   return { lineas, falta: [], modelo_id: mod.id };

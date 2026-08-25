@@ -7,9 +7,10 @@
 // cuenta, y una línea de gestión sin motivo no entra— y nueve copias de una
 // regla son nueve lugares donde puede estar mal una.
 //
-// Así que el asiento se arma acá y sólo acá. Hay un test (`t-un-solo-escritor`)
-// que falla si aparece un INSERT nuevo en cualquier otro archivo: no depende de
-// que el próximo que toque esto se acuerde.
+// Así que el asiento se arma acá y sólo acá. El test
+// `test/un_solo_escritor.test.mjs` --corre con `npm test`-- falla si aparece un
+// INSERT nuevo en cualquier otro archivo, o si alguien lee las líneas del libro
+// sin decir qué ámbito quiere. No depende de que el próximo se acuerde.
 //
 // ── POR QUÉ EXISTEN DOS ÁMBITOS ─────────────────────────────────────────────
 //
@@ -354,24 +355,5 @@ export function origenDeAsientoPa(db, asientoId) {
   return origenDeAsiento(db, asientoId, ORIGENES_PA, 'pa_asientos');
 }
 
-// ── EL ASIENTO DE UNA FACTURA DE COMPRA NO SE ANULA POR SU CUENTA ──────
-//
-// REGLA DE ORO: no hay factura de compra sin su asiento. Anular el asiento y
-// dejar la factura viva la deja fuera del libro --una deuda que existe para el
-// proveedor y no existe para la contabilidad-- y, peor, sin vuelta: la partida
-// sigue marcada como facturada, así que tampoco se le puede cargar otra.
-//
-// La factura es el HECHO y el asiento su CONSECUENCIA. Se deshace el hecho.
-//
-// ESTO VIVE ACÁ, Y NO EN LA RUTA, PORQUE HAY DOS PANTALLAS QUE ANULAN ASIENTOS:
-// la de San Gerónimo (rutas/sg.js) y la de Contabilidad SG (rutas/sg_contable.js).
-// En la V793 el freno se puso en la primera y la segunda quedó abierta; por ahí
-// se coló un asiento de compra el 21/8/2026. Una sola regla, un solo lugar.
-// El nombre viejo, que ahora pregunta por CUALQUIER origen y no sólo por la compra.
-// Se deja para que nadie quede con el freno parcial por no haberse enterado.
-export function frenoAsientoDeCompra(db, asientoId) {
-  return origenDeAsiento(db, asientoId);
-}
-
-export default { crearAsiento, filtroAmbito, totalesDeAsiento, frenoAsientoDeCompra,
+export default { crearAsiento, filtroAmbito, totalesDeAsiento,
   origenDeAsiento, origenDeAsientoPa, ORIGENES_SG, ORIGENES_PA, AMBITOS, MOTIVOS };

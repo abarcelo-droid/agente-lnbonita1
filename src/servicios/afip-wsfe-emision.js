@@ -310,7 +310,8 @@ function asientoAnulado(database, asientoId) {
 // del mismo comprobante.
 export function recontabilizarVenta(database, facturaId, userId) {
   const f = database.prepare(`SELECT id, cliente_id, neto, iva, total, fecha, numero,
-      punto_venta, cbte_nro, estado, asiento_id, COALESCE(dif_gestion,0) AS dif_gestion
+      punto_venta, cbte_nro, estado, asiento_id, COALESCE(dif_gestion,0) AS dif_gestion,
+      dif_motivo
     FROM sg_ven_facturas WHERE id=?`).get(facturaId);
   if (!f) throw new Error('El comprobante no existe');
   if (String(f.estado || '') === 'anulada') {
@@ -324,7 +325,7 @@ export function recontabilizarVenta(database, facturaId, userId) {
     : String(f.numero || f.id);
   const arm = lineasAsientoVenta(database, {
     clienteId: f.cliente_id, neto: f.neto, iva: f.iva, total: f.total,
-    descuento: f.dif_gestion, numero: nro,
+    descuento: f.dif_gestion, numero: nro, motivo: f.dif_motivo,
   });
   if (arm.falta.length) {
     throw new Error('No se puede contabilizar la venta: falta ' + arm.falta.join(' y ')
@@ -365,7 +366,8 @@ function actualizarFactura(database, facturaId, campos) {
 // Si al modelo le falta algo, se corta y lo dice: no se guarda una venta a
 // medias. Y si ya tiene asiento —un reintento— no se escribe dos veces.
 function asentarVenta(database, facturaId, comprobante, ptoVta, cbteNro, userId) {
-  const ya = database.prepare('SELECT asiento_id, numero, fecha, dif_gestion FROM sg_ven_facturas WHERE id=?').get(facturaId);
+  const ya = database.prepare(`SELECT asiento_id, numero, fecha, dif_gestion, dif_motivo
+    FROM sg_ven_facturas WHERE id=?`).get(facturaId);
   // TENER UN PUNTERO NO ES ESTAR EN EL LIBRO. Acá alcanzaba con que asiento_id
   // tuviera algo: si ese asiento estaba ANULADO, esta función devolvía su id y no
   // escribía nada. La venta quedaba fuera del libro para siempre y sin forma de
@@ -375,7 +377,7 @@ function asentarVenta(database, facturaId, comprobante, ptoVta, cbteNro, userId)
   const arm = lineasAsientoVenta(database, {
     clienteId: comprobante.cliente.id,
     neto: comprobante.imp_neto, iva: comprobante.imp_iva, total: comprobante.imp_total,
-    descuento: (ya && ya.dif_gestion) || 0, numero: nro,
+    descuento: (ya && ya.dif_gestion) || 0, numero: nro, motivo: ya && ya.dif_motivo,
   });
   if (arm.falta.length) {
     throw new Error('No se puede contabilizar la venta: falta ' + arm.falta.join(' y ')

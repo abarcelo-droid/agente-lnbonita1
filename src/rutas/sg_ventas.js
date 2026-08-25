@@ -665,6 +665,9 @@ router.post('/facturas/preview-asiento', requireAuth, (req, res) => {
       clienteId: parseInt(b.cliente_id), neto, iva,
       total: (b.total != null ? r2v(b.total) : r2v(neto + iva)),
       descuento: r2v(b.descuento_gestion), numero: String(b.numero || '—'),
+      // El preview tiene que espejar lo que se graba, motivo incluido: si acá
+      // dijera otro, el cuadro y el libro se leerían distinto.
+      motivo: b.dif_motivo || b.motivo_gestion,
     });
     // Los nombres de las cuentas, para que el cuadro se lea sin buscarlas.
     const nom = db.prepare('SELECT id, codigo, nombre FROM sg_cuentas');
@@ -743,7 +746,7 @@ router.post('/facturas', requireAuth, (req, res) => {
       // no entra ninguno: una venta fuera del libro es plata que el cliente debe
       // y que la contabilidad no sabe que existe.
       const arm = lineasAsientoVenta(db, { clienteId: parseInt(cliente_id),
-        neto, iva, total, descuento: difG, numero });
+        neto, iva, total, descuento: difG, numero, motivo: difM });
       if (arm.falta.length) {
         throw new Error('No se puede contabilizar la venta: falta ' + arm.falta.join(' y ')
           + '. Se arregla en el asiento modelo de venta, en Contabilidad SG.');
