@@ -219,8 +219,16 @@ function _vivo(db, o) {
   return partes.length ? partes.join(' AND ') : '1=1';
 }
 
-const _nro = (r) => (r.punto_venta ? String(r.punto_venta) + '-' : '')
-                  + (r.cbte_nro != null ? String(r.cbte_nro) : (r.numero || r.n_liquidacion || r.id));
+// Cómo se nombra el comprobante en el cartel. El fiscal va con su formato de
+// siempre --0004-00000006--: si el cartel dice "9999-6" el que lo lee no lo
+// encuentra en ninguna pantalla.
+const _nro = (r) => {
+  if (r.punto_venta != null && r.cbte_nro != null) {
+    return String(r.punto_venta).padStart(4, '0') + '-' + String(r.cbte_nro).padStart(8, '0');
+  }
+  return (r.punto_venta ? String(r.punto_venta) + '-' : '')
+       + (r.numero || r.n_liquidacion || r.id);
+};
 
 // LOS ORÍGENES. Un renglón por módulo. `que` es cómo se nombra el comprobante en el
 // cartel; `pantalla` es adónde hay que ir; `como` explica qué pasa cuando se
