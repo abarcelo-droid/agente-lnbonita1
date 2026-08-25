@@ -3801,8 +3801,13 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
              registrar. Desde acá se elige el cliente adentro del modal. -->
         <button class="btn bb" id="sg-ccli-btn-cobrar" onclick="sgCobOpen(null)">💵 Registrar cobranza</button>
         <button class="btn bo" onclick="sgLoadCC()">↻ Actualizar</button>
+        <!-- SÓLO MIRA. La corrección es otra cosa y todavía no existe: primero hay
+             que poder ver de cuánto estamos hablando. -->
+        <button class="btn bo" id="sg-ccli-btn-diag" style="display:none"
+                onclick="sgGestionViejaDiag()" title="Revisar qué comprobantes quedaron con el descuento registrado de menos">🔍 Revisar descuentos viejos</button>
       </div>
     </div>
+    <div id="sg-ccli-diag" style="display:none;margin-bottom:12px"></div>
 
       <!-- EL LISTADO Y LA FICHA SE TURNAN. Nunca los dos a la vez: mientras se
            trabaja sobre una cuenta, la pantalla es esa cuenta. -->
@@ -17174,9 +17179,110 @@ function sgCcClFiltro(){
 }
 
 function sgLoadCC(){
+  var bd = eid('sg-ccli-btn-diag');
+  if (bd) bd.style.display = (window.LNB_USER && window.LNB_USER.rol === 'admin') ? '' : 'none';
   api('/api/sg/cc-clientes').then(function(r){
     SG_CCLI.filas = (r && r.ok) ? r.data : [];
     sgCcClPintar();
+  });
+}
+
+// ══ LA FOTO DE LOS DESCUENTOS VIEJOS ═══════════════════════════════════
+//
+// Hasta el #879, lo resignado en una venta se guardaba con el IVA descontado: un
+// descuento acordado de $810.000 quedaba escrito como $733.031. El cálculo ya está
+// arreglado; esto muestra QUÉ QUEDÓ ESCRITO ANTES.
+//
+// NO TOCA NADA. Es a propósito: corregir historia contable se decide mirando de
+// cuánto se trata y qué arrastra, no apretando un botón que diga "arreglar".
+function sgGestionViejaDiag(){
+  var cont = eid('sg-ccli-diag'); if (!cont) return;
+  if (cont.style.display !== 'none') { cont.style.display = 'none'; cont.innerHTML = ''; return; }
+  cont.style.display = ''; cont.innerHTML = '<div class="emp" style="padding:12px">Revisando…</div>';
+  api('/api/sg/gestion-vieja/diagnostico').then(function(r){
+    if (!r || !r.ok) { cont.innerHTML = '<div class="emp" style="padding:12px">'
+      + escH((r && r.error) || 'No se pudo revisar') + '</div>'; return; }
+    var d = r.data, s = d.resumen || {};
+    var h = '<div style="border:1.5px solid #d6a15e;background:#fdfaf4;border-radius:10px;padding:14px 16px">'
+      + '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;flex-wrap:wrap">'
+      + '<div><div style="font-weight:700;font-size:13.5px">Descuentos registrados de menos</div>'
+      + '<div style="font-size:12px;color:var(--mut);max-width:640px;margin-top:3px">'
+      + 'Antes del arreglo, lo resignado en una venta se guardaba con el IVA descontado. '
+      + 'Esto sólo mira: no cambia nada.</div></div>'
+      + '<button class="btn bo bs" onclick="sgGestionViejaDiag()">Cerrar</button></div>';
+
+    if (!s.corregibles && !s.a_mano && !s.huerfanas) {
+      cont.innerHTML = h + '<div style="margin-top:10px;color:#166534;font-weight:600">'
+        + '✓ No quedó ningún comprobante con el descuento mal registrado.</div>'
+        + '<div style="font-size:11.5px;color:var(--mut);margin-top:4px">Se revisaron '
+        + s.comprobantes_mirados + ' comprobantes y ' + s.renglones_mirados + ' renglones.</div></div>';
+      return;
+    }
+
+    h += '<div style="display:flex;gap:18px;flex-wrap:wrap;margin:12px 0 4px">'
+      + '<div><div style="font-size:11px;color:var(--mut);text-transform:uppercase">Se registró de menos</div>'
+      + '<div style="font-size:20px;font-weight:800;color:#8a5a1f">' + sgMoney2(s.diferencia_total) + '</div>'
+      + '<div style="font-size:11px;color:var(--mut)">en ' + s.corregibles + ' comprobante'
+      + (s.corregibles === 1 ? '' : 's') + '</div></div>'
+      + (s.a_mano ? '<div><div style="font-size:11px;color:var(--mut);text-transform:uppercase">Hay que mirarlos a mano</div>'
+          + '<div style="font-size:20px;font-weight:800;color:#b91c1c">' + s.a_mano + '</div>'
+          + '<div style="font-size:11px;color:var(--mut)">el precio del remito se pisó al facturar</div></div>' : '')
+      + (s.huerfanas ? '<div><div style="font-size:11px;color:var(--mut);text-transform:uppercase">Sin renglones</div>'
+          + '<div style="font-size:20px;font-weight:800">' + s.huerfanas + '</div>'
+          + '<div style="font-size:11px;color:var(--mut)">rechazadas por AFIP</div></div>' : '')
+      + '</div>';
+
+    // LO QUE NO SE ARREGLA CON UN UPDATE, ARRIBA DE TODO.
+    if (s.liquidaciones_afectadas) {
+      h += '<div style="margin-top:10px;padding:9px 11px;border:1.5px solid #dc2626;background:#fef2f2;'
+        + 'border-radius:8px;color:#991b1b;font-size:12.5px">'
+        + '<b>' + s.liquidaciones_afectadas + ' liquidación'
+        + (s.liquidaciones_afectadas === 1 ? '' : 'es') + ' al productor</b> se armó con este número corto. '
+        + 'Eso es un comprobante ya emitido a un tercero: no se corrige por dentro. '
+        + (Array.isArray(d.liquidaciones) ? d.liquidaciones.filter(function(l){return !l.error;})
+            .map(function(l){ return escH(l.n_liquidacion || ('#' + l.id)); }).join(' · ') : '')
+        + '</div>';
+    }
+    if (s.saldos_que_reabren) {
+      h += '<div style="margin-top:8px;padding:9px 11px;border:1px solid #d6a15e;background:#f6eddf;'
+        + 'border-radius:8px;color:#854d0e;font-size:12.5px">'
+        + '<b>' + s.saldos_que_reabren + '</b> factura' + (s.saldos_que_reabren === 1 ? '' : 's')
+        + ' figura' + (s.saldos_que_reabren === 1 ? '' : 'n') + ' como cobrada'
+        + (s.saldos_que_reabren === 1 ? '' : 's') + ' y volvería'
+        + (s.saldos_que_reabren === 1 ? '' : 'n') + ' a tener saldo. Habría que devolverlas a '
+        + 'pendiente o la deuda queda sin aparecer en ninguna pantalla de cobro.</div>';
+    }
+
+    var filas = (d.comprobantes || []).filter(function(c){ return c.accion !== 'ya_esta_bien'; });
+    h += '<div class="ab-table-wrap" style="margin-top:10px"><table class="pa-tbl">'
+      + '<thead><tr><th style="width:150px">Comprobante</th><th>Cliente</th>'
+      + '<th style="width:95px">Fecha</th>'
+      + '<th style="width:130px;text-align:right">Está</th>'
+      + '<th style="width:130px;text-align:right">Debería</th>'
+      + '<th style="width:130px;text-align:right">Diferencia</th></tr></thead><tbody>'
+      + filas.map(function(c){
+          var aMano = c.accion === 'revisar_a_mano';
+          return '<tr><td><code>' + escH(c.numero || '') + '</code></td>'
+            + '<td>' + escH(c.cliente || '') + '</td>'
+            + '<td>' + escH(c.fecha || '') + '</td>'
+            + '<td style="text-align:right">' + sgMoney2(c.dif_gestion) + '</td>'
+            + '<td style="text-align:right">' + (aMano
+                ? '<span style="color:#b91c1c">a mano</span>' : sgMoney2(c.dif_gestion_nueva)) + '</td>'
+            + '<td style="text-align:right' + (aMano ? '' : ';color:#8a5a1f;font-weight:600') + '">'
+              + (aMano ? '<span style="color:var(--mut)">—</span>' : '+' + sgMoney2(c.diferencia)) + '</td></tr>';
+        }).join('')
+      + (d.huerfanas || []).map(function(f){
+          return '<tr style="background:#fafafa"><td><code>' + escH(f.numero || '') + '</code></td>'
+            + '<td>' + escH(f.cliente || '') + '</td><td>' + escH(f.fecha || '') + '</td>'
+            + '<td style="text-align:right">' + sgMoney2(f.dif_gestion) + '</td>'
+            + '<td colspan="2" style="font-size:11.5px;color:var(--mut)">AFIP la rechazó: no tiene renglones con qué reconstruirla</td></tr>';
+        }).join('')
+      + '</tbody></table></div>'
+      + '<div style="font-size:11.5px;color:var(--mut);margin-top:8px">'
+      + 'Se revisaron ' + s.comprobantes_mirados + ' comprobantes y ' + s.renglones_mirados
+      + ' renglones. Los que ya estaban bien (' + s.ya_estaban_bien + ') no se listan.</div>'
+      + '</div>';
+    cont.innerHTML = h;
   });
 }
 
