@@ -164,6 +164,186 @@ export function totalesDeAsiento(db, asientoId) {
   return out;
 }
 
+// ══ EL ASIENTO QUE NACIÓ EN UN MÓDULO SE DESHACE DESDE EL MÓDULO ═══════════
+//
+// REGLA (Pablo, 24/8/2026): "los asientos que se generan por algún módulo deben
+// anularse desde el módulo, no desde asientos... si no podemos eliminar cosas que
+// están mal".
+//
+// La operación es el HECHO y el asiento su CONSECUENCIA. Anular el asiento y dejar
+// la operación viva la deja fuera del libro --una deuda o un cobro que existe para
+// el cliente y no existe para la contabilidad-- y, peor, sin vuelta atrás: los
+// kilos siguen consumidos, el comprobante sigue emitido, y no hay ninguna pantalla
+// que rehaga el asiento. Es exactamente lo que pasó con una factura de venta.
+//
+// HABÍA UN FRENO Y CONOCÍA UN SOLO ORIGEN. Miraba únicamente sg_asientos.ref_compra_id
+// --la factura de COMPRA-- y de los trece lugares que crean asientos sólo dos lo
+// escriben. Todo lo demás pasaba de largo: la factura de venta, la liquidación, la
+// cobranza, el pago a proveedor, los cheques de terceros y la liquidación de abasto.
+//
+// Ahora el origen se declara en una LISTA y la función es una sola. Cuando aparezca
+// un módulo nuevo hay que agregarle su renglón acá, que es justo el modo en que
+// falló el freno anterior --por eso el renglón es DECLARATIVO y se lee de un
+// vistazo, en vez de estar escondido dentro de un if en una ruta.
+//
+// Hay tres formas distintas de vincular un asiento con su operación y las tres
+// existen en la base, así que las tres se cubren:
+//   ref_compra_id → el asiento apunta al comprobante  (compras)
+//   asiento_id    → el comprobante apunta al asiento  (ventas, pagos, liquidaciones)
+//   ref_codigo    → sólo hay un código convenido      (cheques de terceros)
+
+// Qué columnas tiene cada tabla, preguntado una sola vez por base. Varias de estas
+// columnas se agregaron con ALTER TABLE y pueden faltar en una base vieja: una
+// consulta contra una columna inexistente tiraría al anular, y el freno tiene que
+// ser lo más robusto del archivo, no lo más frágil.
+const _cacheCols = new WeakMap();
+function _cols(db, tabla) {
+  let porBase = _cacheCols.get(db);
+  if (!porBase) { porBase = new Map(); _cacheCols.set(db, porBase); }
+  if (!porBase.has(tabla)) {
+    let set = null;
+    try {
+      const filas = db.prepare(`PRAGMA table_info(${tabla})`).all();
+      if (filas && filas.length) set = new Set(filas.map((f) => f.name));
+    } catch (_) { set = null; }   // la tabla no existe en esta base
+    porBase.set(tabla, set);
+  }
+  return porBase.get(tabla);
+}
+
+// El "sigue viva" de cada tabla, sin romperse si la columna no está.
+function _vivo(db, o) {
+  const cols = _cols(db, o.tabla);
+  if (!cols) return null;
+  const partes = (o.vivo || []).filter((c) => cols.has(c.col)).map((c) => c.sql);
+  return partes.length ? partes.join(' AND ') : '1=1';
+}
+
+const _nro = (r) => (r.punto_venta ? String(r.punto_venta) + '-' : '')
+                  + (r.cbte_nro != null ? String(r.cbte_nro) : (r.numero || r.n_liquidacion || r.id));
+
+// LOS ORÍGENES. Un renglón por módulo. `que` es cómo se nombra el comprobante en el
+// cartel; `pantalla` es adónde hay que ir; `como` explica qué pasa cuando se
+// deshace ahí, que es lo que convence de no buscarle la vuelta.
+export const ORIGENES_SG = [
+  { modulo: 'compras', tabla: 'sg_facturas_compra', via: 'ref_compra_id',
+    vivo: [{ col: 'activo', sql: 'COALESCE(activo,1) = 1' }],
+    que: (r) => 'la factura de compra ' + _nro(r),
+    pantalla: 'Facturas por mercadería',
+    como: 'ahí se da de baja el comprobante y su asiento juntos, y la partida vuelve a esperar factura' },
+
+  { modulo: 'ventas', tabla: 'sg_ven_facturas', via: 'asiento_id',
+    vivo: [{ col: 'estado', sql: "COALESCE(estado,'') <> 'anulada'" }],
+    que: (r) => 'la factura de venta ' + _nro(r),
+    pantalla: 'Comprobantes emitidos',
+    como: 'ahí se anula el comprobante, y con él su asiento; los kilos del remito vuelven a quedar pendientes de facturar' },
+
+  { modulo: 'ventas', tabla: 'sg_ven_liquidaciones', via: 'asiento_id',
+    vivo: [{ col: 'estado', sql: "COALESCE(estado,'') <> 'anulada'" }],
+    que: (r) => 'la liquidación de venta ' + _nro(r),
+    pantalla: 'Ventas → Liquidaciones',
+    como: 'ahí se anula la liquidación, y con ella su asiento y las cobranzas imputadas' },
+
+  { modulo: 'cobranzas', tabla: 'sg_ven_cobranzas', via: 'asiento_id',
+    vivo: [{ col: 'anulada', sql: 'COALESCE(anulada,0) = 0' }],
+    que: (r) => 'la cobranza #' + r.id,
+    pantalla: 'Ventas → Cobranzas',
+    como: 'ahí se anula la cobranza y se libera lo que tenía imputado' },
+
+  { modulo: 'pagos', tabla: 'sg_pagos_proveedores', via: 'asiento_id',
+    vivo: [{ col: 'anulado', sql: 'COALESCE(anulado,0) = 0' }],
+    que: (r) => 'el pago a proveedor #' + r.id,
+    pantalla: 'Tesorería → Pagos',
+    como: 'ahí se anula el pago y se libera lo que tenía imputado' },
+
+  { modulo: 'abasto', tabla: 'liquidaciones', via: 'asiento_id',
+    vivo: [{ col: 'eliminado_en', sql: 'eliminado_en IS NULL' }],
+    que: (r) => 'la liquidación ' + (r.n_liquidacion || ('#' + r.id)),
+    pantalla: 'Liquidaciones emitidas',
+    como: 'ahí se da de baja la liquidación junto con su asiento' },
+
+  // El código va ANCLADO. 'CHT-' es prefijo de 'CHT-A-', 'CHT-R-' y 'CHT-D-', así
+  // que un LIKE se llevaría puestos los cuatro asientos del mismo cheque.
+  { modulo: 'tesorería', tabla: 'sg_fin_cheques_terceros', via: 'ref_codigo',
+    codigo: /^CHT-(?:A-|R-|D-)?(\d+)$/,
+    vivo: [{ col: 'estado', sql: "COALESCE(estado,'') <> 'anulado'" }],
+    que: (r) => 'el cheque de terceros ' + (r.nro_cheque || ('#' + r.id)),
+    pantalla: 'Tesorería → Cheques de terceros',
+    como: 'ahí se deshace el movimiento del cheque con su contra-asiento' },
+];
+
+// De qué operación nació este asiento. null = nació a mano, y ese SÍ se anula desde
+// la pantalla de asientos, que es para lo que está el botón.
+export function origenDeAsiento(db, asientoId, origenes = ORIGENES_SG, tablaCab = 'sg_asientos') {
+  const cols = _cols(db, tablaCab);
+  if (!cols) return null;
+  const campos = ['id'];
+  if (cols.has('ref_compra_id')) campos.push('ref_compra_id');
+  if (cols.has('ref_codigo')) campos.push('ref_codigo');
+  const a = db.prepare(`SELECT ${campos.join(', ')} FROM ${tablaCab} WHERE id=?`).get(asientoId);
+  if (!a) return null;
+
+  for (const o of origenes) {
+    const vivo = _vivo(db, o);
+    if (vivo == null) continue;                       // la tabla no existe acá
+    const cs = _cols(db, o.tabla);
+    let fila = null;
+    try {
+      if (o.via === 'ref_compra_id') {
+        if (!a.ref_compra_id) continue;
+        fila = db.prepare(`SELECT * FROM ${o.tabla} WHERE id=? AND (${vivo})`).get(a.ref_compra_id);
+      } else if (o.via === 'asiento_id') {
+        if (!cs.has('asiento_id')) continue;
+        fila = db.prepare(`SELECT * FROM ${o.tabla} WHERE asiento_id=? AND (${vivo})`).get(a.id);
+      } else if (o.via === 'ref_codigo') {
+        const m = o.codigo.exec(String(a.ref_codigo || '').trim());
+        if (!m) continue;
+        fila = db.prepare(`SELECT * FROM ${o.tabla} WHERE id=? AND (${vivo})`).get(Number(m[1]));
+      }
+    } catch (_) { continue; }
+    if (!fila) continue;
+    const que = o.que(fila);
+    return {
+      modulo: o.modulo, tabla: o.tabla, registro_id: fila.id,
+      comprobante: que, pantalla: o.pantalla, como_se_deshace: o.como,
+      // Compatibilidad con lo que ya devolvían las rutas para la factura de compra.
+      factura_id: fila.id, factura_numero: que,
+      error: 'Este asiento es de ' + que + '. No se anula desde acá: se deshace en '
+           + o.pantalla + ', y ' + o.como + '. Anular sólo el asiento deja la '
+           + 'operación viva y fuera del libro, y después no hay forma de rehacerlo.',
+    };
+  }
+  return null;
+}
+
+// El mismo criterio para Puente Cordón, que vive en pa_asientos y tenía CERO frenos.
+export const ORIGENES_PA = [
+  { modulo: 'compras PC', tabla: 'pa_compras', via: 'ref_compra_id',
+    vivo: [{ col: 'eliminado_en', sql: 'eliminado_en IS NULL' }],
+    que: (r) => 'la compra ' + (r.numero_factura || r.numero || ('#' + r.id)),
+    pantalla: 'Compras', como: 'ahí se da de baja la compra con su asiento' },
+  { modulo: 'ventas PC', tabla: 'ven_liquidaciones', via: 'asiento_id',
+    vivo: [{ col: 'estado', sql: "COALESCE(estado,'') <> 'anulada'" }],
+    que: (r) => 'la liquidación de venta ' + (r.numero || ('#' + r.id)),
+    pantalla: 'Liquidaciones de Producto', como: 'ahí se anula la liquidación con su asiento' },
+  { modulo: 'ventas PC', tabla: 'ven_facturas', via: 'asiento_id',
+    vivo: [{ col: 'estado', sql: "COALESCE(estado,'') <> 'anulada'" }],
+    que: (r) => 'la factura de venta ' + (r.numero || ('#' + r.id)),
+    pantalla: 'Facturas de venta', como: 'ahí se anula el comprobante con su asiento' },
+  { modulo: 'tesorería PC', tabla: 'fin_ordenes_pago', via: 'asiento_id',
+    vivo: [{ col: 'anulada', sql: 'COALESCE(anulada,0) = 0' }],
+    que: (r) => 'la orden de pago ' + (r.numero || ('#' + r.id)),
+    pantalla: 'Órdenes de pago', como: 'ahí se anula la orden con su asiento' },
+  { modulo: 'personal PC', tabla: 'pa_liquidaciones_pago', via: 'asiento_id',
+    vivo: [{ col: 'anulada', sql: 'COALESCE(anulada,0) = 0' }],
+    que: (r) => 'la liquidación de pago de personal #' + r.id,
+    pantalla: 'Personal → Liquidaciones', como: 'ahí se revierte la liquidación con su contra-asiento' },
+];
+
+export function origenDeAsientoPa(db, asientoId) {
+  return origenDeAsiento(db, asientoId, ORIGENES_PA, 'pa_asientos');
+}
+
 // ── EL ASIENTO DE UNA FACTURA DE COMPRA NO SE ANULA POR SU CUENTA ──────
 //
 // REGLA DE ORO: no hay factura de compra sin su asiento. Anular el asiento y
@@ -177,19 +357,11 @@ export function totalesDeAsiento(db, asientoId) {
 // la de San Gerónimo (rutas/sg.js) y la de Contabilidad SG (rutas/sg_contable.js).
 // En la V793 el freno se puso en la primera y la segunda quedó abierta; por ahí
 // se coló un asiento de compra el 21/8/2026. Una sola regla, un solo lugar.
+// El nombre viejo, que ahora pregunta por CUALQUIER origen y no sólo por la compra.
+// Se deja para que nadie quede con el freno parcial por no haberse enterado.
 export function frenoAsientoDeCompra(db, asientoId) {
-  const a = db.prepare('SELECT ref_compra_id FROM sg_asientos WHERE id=?').get(asientoId);
-  if (!a || !a.ref_compra_id) return null;
-  const fc = db.prepare(`SELECT id, punto_venta, numero, activo
-    FROM sg_facturas_compra WHERE id=?`).get(a.ref_compra_id);
-  // Si la factura ya está dada de baja, su asiento no traba nada.
-  if (!fc || !fc.activo) return null;
-  const nro = (fc.punto_venta ? fc.punto_venta + '-' : '') + (fc.numero || '');
-  return { factura_id: fc.id, factura_numero: nro,
-    error: 'Este asiento es de la factura de compra ' + nro + '. Se anula DESDE LA FACTURA, '
-         + 'en Facturas por mercadería: ahí se da de baja el comprobante y su asiento juntos, '
-         + 'y la partida vuelve a esperar factura. Anular sólo el asiento dejaría la factura '
-         + 'fuera del libro y la partida sin poder recibir otra.' };
+  return origenDeAsiento(db, asientoId);
 }
 
-export default { crearAsiento, filtroAmbito, totalesDeAsiento, frenoAsientoDeCompra, AMBITOS, MOTIVOS };
+export default { crearAsiento, filtroAmbito, totalesDeAsiento, frenoAsientoDeCompra,
+  origenDeAsiento, origenDeAsientoPa, ORIGENES_SG, ORIGENES_PA, AMBITOS, MOTIVOS };
