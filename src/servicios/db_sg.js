@@ -1612,6 +1612,36 @@ try {
   db.exec("UPDATE sg_familias SET iva_alicuota=10.5 WHERE codigo IN (1,2,3,4) AND iva_alicuota IS NULL");
 } catch (e) { console.error('[DB] SG migración sg_familias (iva_alicuota):', e.message); }
 
+// ══ LA ALÍCUOTA DE IVA VIVE EN EL PRODUCTO Y ES OBLIGATORIA ═════════════
+//
+// Pablo, 25/8/2026: "la alícuota debe cargarse en el producto como dato
+// obligatorio, de esta manera aseguramos que se contabilice".
+//
+// Antes vivía sólo en la familia y el producto la heredaba. El problema no era la
+// herencia: era que una familia podía quedarse SIN alícuota --se da de alta con el
+// nombre nada más-- y nada avisaba. Y a partir de ahí, en Facturación directa la
+// pantalla calculaba el 21% mientras AFIP recibía la operación como EXENTA: el
+// operador veía un total y firmaba otro.
+//
+// Ahora el dato es del producto. La familia sigue sirviendo como VALOR PROPUESTO
+// al dar de alta --se hereda una vez, al crearlo-- pero lo que manda después es lo
+// que tiene el producto.
+try {
+  const cols = db.prepare('PRAGMA table_info(sg_productos)').all().map((c) => c.name);
+  if (!cols.includes('iva_alicuota')) {
+    db.exec('ALTER TABLE sg_productos ADD COLUMN iva_alicuota REAL');
+    // Y se llena con la de su familia, que es lo que hasta hoy se estaba usando:
+    // migrar a null cambiaría de un día para el otro lo que factura un producto.
+    const n = db.prepare(`UPDATE sg_productos
+      SET iva_alicuota = (SELECT f.iva_alicuota FROM sg_familias f WHERE f.id = sg_productos.familia_id)
+      WHERE iva_alicuota IS NULL`).run().changes;
+    const sin = db.prepare(`SELECT COUNT(*) c FROM sg_productos
+      WHERE activo = 1 AND eliminado_en IS NULL AND iva_alicuota IS NULL`).get().c;
+    console.log(`[SG] sg_productos.iva_alicuota: ${n} heredadas de su familia`
+      + (sin ? `, ${sin} SIN ALÍCUOTA — esos productos no se van a poder facturar hasta cargarla` : ''));
+  }
+} catch (e) { console.error('[SG] iva_alicuota en productos:', e.message); }
+
 // 2) Discriminación en la cabecera de la OC: flag precio_incluye_iva + override opcional
 //    de alícuota por OC + total NETO e IVA por separado (el total con IVA = neto+iva, se
 //    deriva y se guarda en total_estimado_monto). Nullable: las OCs viejas quedan sin
