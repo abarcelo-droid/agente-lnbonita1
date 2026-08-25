@@ -324,3 +324,34 @@ test('oferta: las filas incompletas se informan con el número de fila del Excel
   assert.equal(r.rechazadas.length, 2);
   assert.deepEqual(r.rechazadas.map(x => x.linea), [3, 5]);
 });
+
+test('oferta: lo que va entre paréntesis nunca es el nombre del producto', () => {
+  // Calibre, variedades, origen y envase. Con el paréntesis adentro, ninguno de estos cruza
+  // contra el nombre de Carrefour y el padrón se llena de artículos que ya existían.
+  const pares = [
+    ['LIMÓN x kg (88-113)', 'LIMON X KG'],
+    ['LIMÓN COMERCIAL x kg (125-138)', 'LIMON COMERCIAL X KG'],
+    ['CIRUELA x kg (50 a 60mm)', 'CIRUELA X KG'],
+    ['UVA ROSADA x kg (cardinal-cereza-california)', 'UVA ROSADA X KG'],
+    ['PIÑA COMERCIAL x kg (ECUADOR)', 'PINA COMERCIAL X KG'],
+    ['RAIZ DE GENGIBRE FRESCA x kg. (CAJA X 5 KG)', 'RAIZ DE GENGIBRE FRESCA X KG'],
+  ];
+  for (const [oferta, esperado] of pares) {
+    assert.equal(parseDescOferta(oferta).desc_canonica, esperado, oferta);
+  }
+});
+
+test('oferta: un calibre suelto detrás de la unidad tampoco', () => {
+  assert.equal(parseDescOferta('MANGO X UNI 350-450 grs').desc_canonica, 'MANGO X UNIDAD');
+  assert.equal(parseDescOferta('MANZANA X KG 120').desc_canonica, 'MANZANA X KG');
+  // Pero una palabra SÍ es parte del nombre y se conserva: la regla pide que lo que queda
+  // detrás no tenga más letras que una medida.
+  assert.equal(parseDescOferta('ZAPALLO JAPONES x kg. / CABUTIAN').desc_canonica, 'ZAPALLO JAPONES CABUTIAN X KG');
+  assert.equal(parseDescOferta('UVA x kg RED GLOBE').desc_canonica, 'UVA RED GLOBE X KG');
+});
+
+test('el planning sigue leyéndose sin tocar los paréntesis', () => {
+  // parseDesc NO cambió: si el planning trajera un paréntesis, sigue formando parte del
+  // nombre. Tocarlo renombraría artículos ya cargados.
+  assert.equal(parseDesc('MANZANA (ROJA) X KG').desc_canonica, 'MANZANA (ROJA) X KG');
+});

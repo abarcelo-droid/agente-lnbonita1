@@ -4729,6 +4729,16 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
         <th style="width:26%">Tipo</th><th style="width:18%"></th></tr></thead>
       <tbody id="sh-tb-mapprov"><tr><td colspan="4" class="emp">Cargando…</td></tr></tbody></table></div>
 
+    <div style="font-size:12px;font-weight:700;margin:18px 0 6px">Equivalencias con nuestra oferta</div>
+    <div class="sh-aviso" style="margin:0 0 8px">Cómo se llama cada producto en <b>nuestra oferta</b> y con cuál del
+      planning de Carrefour cruza. Se anotan solas al cargar una oferta, o a mano desde el desplegable del preview.
+      Las de tipo <b>EAN</b> son las que aguantan que mañana el nombre se escriba distinto.</div>
+    <div class="ab-table-wrap"><table class="pa-tbl">
+      <thead><tr><th style="width:11%">Por</th><th class="sh-nom" style="width:34%">En nuestra oferta</th>
+        <th class="sh-nom" style="width:34%">Es este de Carrefour</th>
+        <th style="text-align:right;width:12%">Líneas</th><th style="width:9%"></th></tr></thead>
+      <tbody id="sh-tb-equiv"><tr><td colspan="5" class="emp">Cargando…</td></tr></tbody></table></div>
+
     <div style="font-size:12px;font-weight:700;margin:18px 0 6px">Fusionar dos artículos duplicados</div>
     <div class="sh-aviso" style="margin:0 0 8px">Las líneas del absorbido pasan al que queda y se deja un alias, para que la próxima carga no lo vuelva a crear.</div>
     <div class="sh-f">
@@ -29654,6 +29664,39 @@ function shOfArchivo(input){
   eid('sh-of-previo').innerHTML = '<div class="sh-aviso">Archivo elegido: <b>' + escH(f.name) + '</b>. Tocá «Revisar antes de cargar».</div>';
 }
 
+// El padrón de Carrefour para los desplegables. Se pide una vez y queda: son unos cientos de
+// artículos y armar el <option> por fila es más rápido que un autocompletar por renglón.
+var SH_OF_PADRON = null;
+function shOfCargarPadron(cb){
+  if (SH_OF_PADRON) { cb && cb(); return; }
+  api('/api/share/articulos/padron').then(function(r){
+    SH_OF_PADRON = (r && r.ok) ? r.data : [];
+    cb && cb();
+  });
+}
+function shOfPadronOpts(){
+  return (SH_OF_PADRON || []).map(function(a){
+    return '<option value="' + a.id + '">' + escH(a.desc_canonica) + (a.bultos ? ' (' + nr(a.bultos) + ')' : '') + '</option>';
+  }).join('');
+}
+
+// "Este producto nuestro es este otro de Carrefour". Se guarda por el texto y por el EAN, y
+// se vuelve a leer el archivo para que se vea cruzado antes de confirmar la carga.
+function shOfEquiv(sel, texto, ean){
+  var destino = sel.value;
+  if (!destino) return;
+  var nombre = sel.options[sel.selectedIndex].text;
+  if (!confirm('¿Anotar que "' + texto + '" es el mismo artículo que "' + nombre + '"?\n\n' +
+      'Queda guardado: la próxima oferta lo cruza solo.')) { sel.value = ''; return; }
+  sel.disabled = true;
+  api('/api/share/oferta/equivalencias', 'POST', { texto: texto, ean: ean || null, articulo_id: Number(destino) })
+    .then(function(r){
+      if (!r || !r.ok) { toast((r && r.error) || 'Error', 'err'); sel.disabled = false; sel.value = ''; return; }
+      toast('Anotado');
+      shOfPrevio();          // se relee el archivo: ahora esa fila cruza
+    });
+}
+
 function shOfEnviar(confirmar){
   var fecha = elv('sh-of-fecha');
   if (!fecha) { toast('Elegí la fecha de la oferta', 'err'); return null; }
@@ -29670,6 +29713,8 @@ function shOfEnviar(confirmar){
 // Siempre se muestra el resumen antes de escribir: la oferta define qué se marca como
 // «la vendemos», así que conviene mirar qué entendió antes de confirmar.
 function shOfPrevio(){
+  // El padrón primero: sin él los desplegables saldrían vacíos.
+  if (!SH_OF_PADRON) { shOfCargarPadron(function(){ shOfPrevio(); }); return; }
   var p = shOfEnviar(false); if (!p) return;
   eid('sh-of-previo').innerHTML = '<div class="emp">Leyendo…</div>';
   p.then(function(r){
@@ -29697,6 +29742,10 @@ function shOfPrevio(){
       '↻ Ya había una oferta cargada para el ' + escH(d.fecha) + ' (' + d.reemplaza.filas + ' artículos). ' +
       'Queda como historia y manda la nueva.</div>';
     if (d.repetidos) h += '<div class="sh-aviso">' + d.repetidos + ' artículo(s) venían en más de una línea: se sumaron.</div>';
+    if (d.nuevos) h += '<div style="padding:9px 12px;border-radius:8px;background:#fff8e1;color:#8a6d00;font-size:12.5px;line-height:1.55;margin-bottom:8px">' +
+      '<b>' + d.nuevos + ' producto(s) no cruzan con ningún artículo de Carrefour.</b> Si los cargás así, entran al padrón como ' +
+      'artículos nuevos y la comparación los va a mostrar siempre como «no lo compró nadie».<br>' +
+      'Abajo, en la columna del medio, elegí con cuál de ellos va cada uno. <b>Se anota una sola vez</b> — la próxima oferta ya cruza sola.</div>';
     if (d.rechazadas && d.rechazadas.length) h += '<div style="padding:9px 12px;border-radius:8px;background:#fff8e1;color:#8a6d00;font-size:12.5px;margin-bottom:8px">' +
       '⚠ ' + d.rechazadas.length + ' línea(s) que no pude leer y quedan afuera:<br>' +
       d.rechazadas.slice(0, 6).map(function(x){ return 'línea ' + x.linea + ': ' + escH(x.texto); }).join('<br>') + '</div>';
@@ -29709,11 +29758,20 @@ function shOfPrevio(){
       '<th style="text-align:right;width:11%">Bultos</th><th style="text-align:right;width:9%">Precio</th>' +
       '<th style="width:7%"></th></tr></thead><tbody>' +
       d.items.map(function(it){
+        // Cuando no cruza, en vez de resignarse a crear un artículo nuevo se ofrece el
+        // desplegable para decir con cuál de Carrefour va. Se anota una vez y no se pregunta
+        // más: el alias queda por el texto Y por el EAN.
         var comoCruza = it.nuevo
-          ? '<span class="sh-chip" style="background:#fff4d6;color:#7a5c00">nuevo en el padrón</span>'
+          ? '<span class="sh-chip" style="background:#fff4d6;color:#7a5c00">nuevo</span> ' +
+            '<select onchange="shOfEquiv(this,\'' + esc(it.articulo_raw) + '\',\'' + esc(it.ean || '') + '\')" ' +
+            'style="max-width:100%;margin-top:3px;padding:2px 4px;border:1px solid var(--bor);border-radius:5px;background:var(--bg);font-size:11.5px">' +
+            '<option value="">— o cruzalo con uno de Carrefour —</option>' + shOfPadronOpts() + '</select>'
           : escH(it.cruza_con || it.desc_canonica);
         return '<tr><td style="font-size:11px;color:var(--mut)">' + escH(it.ean || '—') + '</td>' +
-          '<td class="sh-nom">' + escH(it.articulo_raw) + '</td>' +
+          '<td class="sh-nom">' + escH(it.articulo_raw) +
+            ((it.raws && it.raws.length > 1)
+              ? '<div class="sh-aviso" style="margin:1px 0 0">+ ' + (it.raws.length - 1) + ' línea(s) que van al mismo artículo y se sumaron: ' +
+                escH(it.raws.slice(1).join(' · ')) + '</div>' : '') + '</td>' +
           '<td class="sh-nom">' + comoCruza + '</td>' +
           '<td style="text-align:right">' + nr(it.cantidad) + '</td>' +
           '<td style="text-align:right">' + (it.precio ? '$' + nr(it.precio) : '<span class="sh-pod-x">—</span>') + '</td>' +
@@ -30314,6 +30372,8 @@ function shMapeos(){
     }).join('') : '<tr><td colspan="4" class="emp">Nada pendiente.</td></tr>';
   });
 
+  shOfEquivLista();
+
   // Los dos selectores de fusión: se llenan con TODOS los artículos, no sólo los pendientes,
   // porque el duplicado que hay que absorber suele ser uno viejo ya revisado.
   api('/api/share/articulos?limite=2000&' + shParams()).then(function(r){
@@ -30325,6 +30385,28 @@ function shMapeos(){
   });
 }
 var shMapT; function shMapDeb(){ clearTimeout(shMapT); shMapT = setTimeout(shMapeos, 400); }
+
+function shOfEquivLista(){
+  api('/api/share/oferta/equivalencias').then(function(r){
+    if (!r || !r.ok) { eid('sh-tb-equiv').innerHTML = '<tr><td colspan="5" class="emp">' + escH((r && r.error) || 'Error') + '</td></tr>'; return; }
+    eid('sh-tb-equiv').innerHTML = r.data.length ? r.data.map(function(e){
+      return '<tr><td>' + (e.tipo === 'ean'
+          ? '<span class="sh-chip sh-ch-comp">EAN</span>'
+          : '<span class="sh-chip" style="background:var(--bor);color:var(--mut)">nombre</span>') + '</td>' +
+        '<td class="sh-nom" style="font-size:11.5px">' + escH(e.alias_raw) + '</td>' +
+        '<td class="sh-nom">' + escH(e.destino || '(artículo borrado)') + '</td>' +
+        '<td style="text-align:right">' + nr(e.usos) + '</td>' +
+        '<td>' + (SH.puedeOperar ? '<button class="btn bo bs" onclick="shOfEquivBorrar(' + e.id + ')">Quitar</button>' : '') + '</td></tr>';
+    }).join('') : '<tr><td colspan="5" class="emp">Todavía no hay ninguna. Se van anotando al cargar las ofertas.</td></tr>';
+  });
+}
+function shOfEquivBorrar(id){
+  if (!confirm('Quitar esta equivalencia? Las líneas ya cargadas no cambian; la próxima oferta va a volver a preguntar.')) return;
+  api('/api/share/oferta/equivalencias/' + id, 'DELETE').then(function(r){
+    if (!r || !r.ok) { toast((r && r.error) || 'Error', 'err'); return; }
+    toast('Quitada'); shOfEquivLista();
+  });
+}
 
 // ── Selección ───────────────────────────────────────────────────────────────────────────
 function shMapMarcar(id){

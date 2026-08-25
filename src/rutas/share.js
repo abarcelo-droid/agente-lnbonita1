@@ -983,6 +983,75 @@ router.post('/ofertas', requireAuth, subida.single('archivo'), (req, res) => {
   } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
 });
 
+// ── LAS EQUIVALENCIAS ────────────────────────────────────────────────────────────────
+// "Este producto de nuestra oferta es este otro del planning de Carrefour". Es la respuesta
+// al problema de fondo: los dos catálogos nombran distinto lo mismo, y el parseo acomoda lo
+// que tiene forma de regla (el calibre, el paréntesis, la unidad en el medio) pero no puede
+// adivinar que nuestra UVA NEGRA es la UVA de ellos. Eso lo sabe una persona, se anota UNA
+// vez y queda.
+//
+// Se guardan dos alias por equivalencia: uno por el TEXTO tal como lo escribimos y otro por
+// el EAN. El del EAN es el que aguanta que mañana alguien escriba el nombre distinto.
+router.get('/oferta/equivalencias', requireAuth, (req, res) => {
+  try {
+    const filas = db.prepare(`
+      SELECT a.id, a.tipo, a.alias_raw, a.destino_id, a.creado_en,
+             ar.desc_canonica AS destino, ar.familia,
+             (SELECT COUNT(*) FROM share_oferta_lineas l
+               WHERE l.articulo_id = a.destino_id
+                 AND (a.tipo <> 'ean' OR l.ean = a.alias_raw)) AS usos
+        FROM share_alias a
+        LEFT JOIN share_articulos ar ON ar.id = a.destino_id
+       WHERE a.tipo IN ('articulo','ean')
+       ORDER BY ar.desc_canonica, a.tipo, a.alias_raw`).all();
+    res.json({ ok: true, data: filas });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+router.post('/oferta/equivalencias', requireAuth, (req, res) => {
+  try {
+    if (!puedeOperar(req.user)) return res.status(403).json({ ok: false, error: 'Tu acceso a SHARE es de solo lectura.' });
+    const b = req.body || {};
+    const destino = parseInt(b.articulo_id, 10);
+    const texto = b.texto ? norm(b.texto) : null;
+    const ean = b.ean ? String(b.ean).replace(/[^\d]/g, '') : null;
+    if (!destino) return res.status(400).json({ ok: false, error: 'Falta el artículo de Carrefour.' });
+    if (!texto && !ean) return res.status(400).json({ ok: false, error: 'Falta el producto de la oferta.' });
+    const art = db.prepare('SELECT id, desc_canonica FROM share_articulos WHERE id=?').get(destino);
+    if (!art) return res.status(404).json({ ok: false, error: 'Ese artículo no existe.' });
+
+    const correr = db.transaction(() => {
+      if (texto) db.prepare("INSERT OR REPLACE INTO share_alias (tipo, alias_raw, destino_id) VALUES ('articulo', ?, ?)").run(texto, destino);
+      if (ean) db.prepare("INSERT OR REPLACE INTO share_alias (tipo, alias_raw, destino_id) VALUES ('ean', ?, ?)").run(ean, destino);
+      // Si lo ofrecemos, lo vendemos. Es el mismo criterio que usa la carga de la oferta.
+      db.prepare('UPDATE share_articulos SET la_vendemos=1 WHERE id=? AND la_vendemos=0').run(destino);
+    });
+    correr();
+    res.json({ ok: true, data: { destino: art.desc_canonica } });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+router.delete('/oferta/equivalencias/:id', requireAuth, (req, res) => {
+  try {
+    if (!puedeOperar(req.user)) return res.status(403).json({ ok: false, error: 'Tu acceso a SHARE es de solo lectura.' });
+    const r = db.prepare("DELETE FROM share_alias WHERE id=? AND tipo IN ('articulo','ean')").run(req.params.id);
+    if (!r.changes) return res.status(404).json({ ok: false, error: 'No existe.' });
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// El padrón entero para los desplegables de equivalencia. Sin filtro de fechas: el artículo
+// contra el que hay que cruzar puede no haberse comprado en el rango que esté mirando.
+router.get('/articulos/padron', requireAuth, (req, res) => {
+  try {
+    res.json({ ok: true, data: db.prepare(`
+      SELECT a.id, a.desc_canonica, a.familia,
+             (SELECT COALESCE(SUM(bultos),0) FROM share_v v WHERE v.articulo_id=a.id) AS bultos
+        FROM share_articulos a WHERE a.activo=1
+       ORDER BY bultos DESC, a.desc_canonica LIMIT 3000`).all() });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
 router.delete('/ofertas/:id', requireAuth, (req, res) => {
   try {
     if (!puedeOperar(req.user)) return res.status(403).json({ ok: false, error: 'Tu acceso a SHARE es de solo lectura.' });
