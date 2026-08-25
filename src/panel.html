@@ -30745,6 +30745,9 @@ function liqRellenarForm() {
   // el suyo, y cobrarle a uno la comisión de otro es plata.
   LIQ.comisionPct = null;
   LIQ.origen = {};
+  // La base manual de gastos administrativos tampoco: el ajuste de la
+  // liquidación anterior se sumaría encima del de ésta.
+  LIQ.cerrado = { gastosManual: null, gastosEscrito: null };
   liqGrillaPintar();
   liqRemResumen();
   liqModoCambio();
@@ -30887,6 +30890,46 @@ function liqModoCambio(){
 // Si p sale NEGATIVO, para pagar eso habría que poner plata en vez de cobrar
 // comisión: se dice en rojo y no se escribe nada. Un número imposible escrito en
 // la grilla es peor que el aviso.
+// Los topes de la comisión, que son de Pablo:
+//
+//   "a veces es difícil decirle a un productor que la comisión es 21,26%. En
+//    general las comisiones van de 0,5% a 20%... si la comisión calculada supera
+//    el 20%, la diferencia para llegar al precio final la descontamos como gastos
+//    administrativos + IVA... y se me ocurre también que las comisiones deberían
+//    ser en múltiplos de 0,5%: es raro una comisión del 16,23, debería redondear a
+//    16 y los 0,23 enviarse a gasto administrativo".
+var LIQ_COM_TOPE = 20;     // no se le dice a un productor "te cobro 21,26%"
+var LIQ_COM_PASO = 0.5;    // y se le dice en medios puntos, no en decimales sueltos
+
+// ── EL DESPEJE, QUE SE REHACE CON CADA DATO ────────────────────────
+//
+// Pablo: "una vez que tenemos los precios objetivos, los precios finales
+// permanecen inalterables... si agregamos descargas o fletes automáticamente
+// tenemos que recalcular el % de comisión".
+//
+// EL PRECIO FINAL ES EL DATO. Todo lo demás se acomoda alrededor: cada vez que
+// se toca un gasto, la comisión se vuelve a despejar. Si no, el operador carga
+// una descarga y el productor cobra de menos sin que nadie lo note.
+//
+// LA CUENTA, EN TRES PASOS:
+//
+//   1. El % exacto que haría cerrar todo:
+//
+//            V_f + IVA_v + V_g − S − T
+//        p = ───────────────────────────        a = alícuota de la comisión
+//               V_f·(1+a) + V_g               S = servicios con su IVA
+//
+//   2. Se BAJA al múltiplo de 0,5 y se topea en 20. Se baja y no se redondea
+//      al más cercano a propósito: subir dejaría un sobrante NEGATIVO, o sea
+//      habría que restar de gastos administrativos, y eso es un gasto que no
+//      existe. Bajando, lo que queda siempre es plata que falta descontar.
+//
+//   3. Lo que falta para llegar al precio va a GASTOS ADMINISTRATIVOS + IVA:
+//
+//        falta = (p − p_final) · denominador
+//        gastos_ajuste = falta / (1 + IVA de gastos)
+//
+// Y cierra exacto: el neto a pagar da T al peso, sea cual sea el redondeo.
 function liqCerradoResolver(){
   var pre = eid('liq-cerr-precio'), cant = eid('liq-cerr-cant');
   var out = eid('liq-cerr-resultado'), tot = eid('liq-cerr-total');
@@ -30897,15 +30940,30 @@ function liqCerradoResolver(){
 
   var d = liqGrillaLeer();
   var Vf = d.fiscal.ventas, IVAv = d.fiscal.iva_ventas, Vg = d.gestion.ventas;
-  // Todo lo que NO es comisión ni ventas: se le descuenta igual y no depende del
-  // despeje.
+  var aCom = (liqAlic('comision') || 0) / 100;
+  var aGas = (liqAlic('gastos_admin') || 0) / 100;
+
+  // LOS SERVICIOS QUE SE CARGARON A MANO. Los gastos administrativos son el caso
+  // delicado: adentro de ese campo conviven lo que tipeó el operador y el ajuste
+  // que ponemos nosotros. Si se leyera el campo entero como "lo manual", el
+  // ajuste entraría en la cuenta que lo genera y se duplicaría solo.
+  //
+  // Por eso se guarda aparte cuánto es lo manual. Y si todavía no se sabe —la
+  // primera vez, o porque el campo venía cargado de antes— se adopta lo que haya:
+  // vaciarlo sería borrar un gasto que alguien puso.
+  LIQ.cerrado = LIQ.cerrado || {};
+  if (LIQ.cerrado.gastosManual == null) {
+    LIQ.cerrado.gastosManual = liqNum(eid('liq-g-f-gastos_admin'));
+  }
+  var gastoManual = Number(LIQ.cerrado.gastosManual) || 0;
   var S = 0;
   LIQ_FILAS.forEach(function(x){
-    if (x.k === 'ventas' || x.k === 'comision') return;
+    if (x.k === 'ventas' || x.k === 'comision' || x.k === 'gastos_admin') return;
     S += d.fiscal[x.k] + d.fiscal['iva_' + x.k] + d.gestion[x.k];
   });
-  var a = (liqAlic('comision') || 0) / 100;
-  var den = Vf * (1 + a) + Vg;
+  S += gastoManual * (1 + aGas) + d.gestion.gastos_admin;
+
+  var den = Vf * (1 + aCom) + Vg;
 
   if (!T) {
     out.innerHTML = '<span style="color:var(--mut)">Poné el precio acordado y los bultos.</span>';
@@ -30916,6 +30974,7 @@ function liqCerradoResolver(){
       + 'calcular la comisión.</span>';
     return;
   }
+
   var p = (Vf + IVAv + Vg - S - T) / den;
   if (p < 0) {
     out.innerHTML = '<span style="color:var(--err)"><b>No cierra.</b> Para pagarle ' + liqPlata(T)
@@ -30923,24 +30982,83 @@ function liqCerradoResolver(){
       + 'Revisá el precio o los gastos.</span>';
     return;
   }
-  var pct = Math.round(p * 10000) / 100;          // dos decimales, como pidió Pablo
-  var cF = m2(Vf * p), cG = m2(Vg * p);
+
+  // El % que se le dice al productor: en medios puntos y sin pasar del tope.
+  var pctExacto = p * 100;
+  var pct = Math.floor(pctExacto / LIQ_COM_PASO) * LIQ_COM_PASO;
+  var topeado = pct > LIQ_COM_TOPE;
+  if (topeado) pct = LIQ_COM_TOPE;
+  var pFin = pct / 100;
+
+  var cF = m2(Vf * pFin), cG = m2(Vg * pFin);
+  var ivaC = m2(cF * aCom);
+  // Lo que falta para llegar al precio, después de redondear la comisión.
+  var falta = m2((Vf + IVAv + Vg - S) - (cF + ivaC + cG) - T);
+  var gAjuste = falta > 0 ? m2(falta / (1 + aGas)) : 0;
+  var gTotal = m2(gastoManual + gAjuste);
+
   liqNumPoner(eid('liq-g-f-comision'), cF);
-  liqNumPoner(eid('liq-g-f-iva_comision'), m2(cF * a));
+  liqNumPoner(eid('liq-g-f-iva_comision'), ivaC);
   liqNumPoner(eid('liq-g-g-comision'), cG);
+  liqNumPoner(eid('liq-g-f-gastos_admin'), gTotal);
+  liqNumPoner(eid('liq-g-f-iva_gastos_admin'), m2(gTotal * aGas));
+  // Se anota QUÉ dejó escrito esta cuenta. Si el próximo disparo encuentra ese
+  // mismo valor, el operador no tipeó nada y lo manual sigue siendo lo de antes.
+  LIQ.cerrado.gastosEscrito = gTotal;
   var pIn = eid('liq-comision-pct');
   if (pIn) pIn.value = pct;
   if (LIQ) LIQ.comisionPct = pct;
-  out.innerHTML = 'Comisión despejada: <b style="font-size:14px">'
+
+  var h = 'Comisión: <b style="font-size:14px">'
     + String(pct.toFixed(2)).replace('.', ',') + '%</b> · ' + liqPlata(m2(cF + cG))
     + '<div style="color:var(--mut);font-size:11px">'
     + liqPlata(cF) + ' fiscal + ' + liqPlata(cG) + ' de gestión</div>';
+  if (gAjuste > 0) {
+    // SE DICE DE DÓNDE SALE EL AJUSTE. Un gasto administrativo que aparece solo
+    // y no dice por qué es un gasto que el productor va a preguntar y nadie va a
+    // saber contestar.
+    h += '<div style="margin-top:4px;color:#8a5a1f;font-size:11.5px">'
+      + (topeado
+          ? 'La cuenta daba ' + String(pctExacto.toFixed(2)).replace('.', ',')
+            + '%, arriba del tope del ' + LIQ_COM_TOPE + '%. '
+          : 'La cuenta daba ' + String(pctExacto.toFixed(2)).replace('.', ',')
+            + '% y la comisión va en múltiplos de ' + String(LIQ_COM_PASO).replace('.', ',') + '%. ')
+      + 'La diferencia —' + liqPlata(gAjuste) + ' + IVA— va a gastos administrativos.</div>';
+  }
+  out.innerHTML = h;
+
+  if (LIQ) {
+    LIQ.origen = LIQ.origen || {};
+    LIQ.origen.gastos_admin = gAjuste > 0
+      ? ((gastoManual ? liqPlata(gastoManual) + ' a mano + ' : '')
+         + liqPlata(gAjuste) + ' de ajuste para llegar al precio')
+      : 'a mano';
+  }
   liqTotales();
 }
 
-// ── LA GRILLA ──────────────────────────────────────────────
-// Ocho renglones: cada concepto y su IVA. Las filas de IVA NO tienen columna de
-// gestión — el crédito y el débito fiscal salen del comprobante y de nada más.
+// Cualquier cambio en la grilla vuelve a despejar, porque el precio final es el
+// dato y todo lo demás se acomoda alrededor.
+function liqCambioGrilla(k, amb){
+  // Lo que el operador tipea en gastos administrativos es la base MANUAL: el
+  // ajuste se le suma encima y no puede volver a entrar en la cuenta.
+  if (k === 'gastos_admin' && amb === 'f') {
+    LIQ.cerrado = LIQ.cerrado || {};
+    var v = liqNum(eid('liq-g-f-gastos_admin'));
+    // SÓLO si el valor cambió respecto de lo que dejó la cuenta: así un disparo
+    // que no viene de una tecla no convierte el ajuste en "manual" y lo duplica
+    // en la pasada siguiente.
+    if (LIQ.cerrado.gastosEscrito == null || v !== LIQ.cerrado.gastosEscrito) {
+      LIQ.cerrado.gastosManual = v;
+    }
+  }
+  if (k === 'descarga' || k === 'flete' || k === 'gastos_admin') {
+    if (amb === 'f') liqIvaServicio(k);
+  }
+  if (liqModo() === 'cerrado') liqCerradoResolver();
+  else if (k === 'ventas') liqComisionCalcular();
+  else liqTotales();
+}
 // ── LA PLATA SE ESCRIBE COMO PLATA ─────────────────────────────
 //
 // Pablo: "poneme además los signos pesos y los puntos de los miles porque si no
@@ -31016,10 +31134,10 @@ function liqGrillaPintar(){
     // Tocar las VENTAS recalcula la comisión: es un % sobre ellas, y dejarla
     // calculada sobre el número viejo es cobrarle mal sin que se note. Y tocar el
     // importe de un servicio recalcula SU IVA al 21%.
-    var ev = (k === 'ventas') ? 'liqComisionCalcular()'
-      : (k === 'descarga' || k === 'flete' || k === 'gastos_admin') && amb === 'f'
-          ? 'liqIvaServicio(\'' + k + '\')'
-          : 'liqTotales()';
+    // UN SOLO DESPACHADOR. Antes cada celda decidía sola a quién llamar y las de
+    // gastos no rehacían el despeje: se cargaba una descarga y el productor
+    // cobraba de menos sin que nadie lo notara.
+    var ev = 'liqCambioGrilla(\'' + k + '\',\'' + amb + '\')';
     var val = (v[amb + '_' + k] != null && v[amb + '_' + k] !== '')
       ? liqPlata(v[amb + '_' + k]) : '';
     return '<input type="text" inputmode="decimal" id="liq-g-' + amb + '-' + k + '"'
