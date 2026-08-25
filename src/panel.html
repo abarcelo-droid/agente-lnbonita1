@@ -996,7 +996,8 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
           <label style="font-size:11.5px;color:var(--mut)">× <span id="liq-cerr-cant-lbl">bultos</span> a liquidar<br>
             <input id="liq-cerr-cant" type="number" step="0.01"
                    oninput="liqCerradoResolver()"
-                   style="width:120px;text-align:right;padding:6px 8px;border-radius:6px;border:1px solid var(--bor)"></label>
+                   style="width:120px;text-align:right;padding:6px 8px;border-radius:6px;border:1px solid var(--bor)">
+            <span id="liq-cerr-cant-hint" style="display:block;font-size:10.5px"></span></label>
           <div style="align-self:flex-end;padding-bottom:6px">
             <div style="font-size:11px;color:var(--mut)">Total a pagar al productor</div>
             <div id="liq-cerr-total" style="font-weight:700;font-size:18px">—</div>
@@ -1004,6 +1005,10 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
           <div id="liq-cerr-resultado" style="flex:1;min-width:260px;align-self:flex-end;
                font-size:12px;padding-bottom:6px"></div>
         </div>
+        <!-- LO QUE PACTÓ LA ORDEN, AL LADO. El backend ya lo manda (acordado.total)
+             y no se mostraba en ningún lado, así que nada avisaba cuando el precio
+             por el que se está liquidando no da contra el de la orden. -->
+        <div id="liq-cerr-acordado" style="font-size:11.5px;margin-top:6px"></div>
         <div style="font-size:11px;color:var(--mut);margin-top:8px">
           El precio acordado es lo que el productor cobra por bulto, con IVA. Las ventas, sus IVA
           y los gastos vienen de la partida y no se tocan: lo que se despeja es la
@@ -10876,7 +10881,7 @@ function liqVentaCab(ocId){
         + ' oninput="liqBultosAvance()" style="width:130px;padding:6px 8px;border-radius:6px;border:1px solid var(--bor)"></label>'
       + '<label style="font-size:11.5px;color:var(--mut)">Bultos a liquidar<br>'
         + '<input id="liq-bultos-liq" type="number" step="1" min="0" value="' + (r.bultos_vendidos || 0) + '"'
-        + ' oninput="liqBultosAvance()" style="width:130px;padding:6px 8px;border-radius:6px;border:1px solid var(--bor)"></label>'
+        + ' oninput="liqBultosCambio()" style="width:130px;padding:6px 8px;border-radius:6px;border:1px solid var(--bor)"></label>'
       + '<div style="flex:1;min-width:200px;align-self:flex-end" id="liq-avance"></div></div>';
 
     h += '<table style="width:100%;border-collapse:collapse">'
@@ -11067,6 +11072,16 @@ function liqModeloGuardar(){
 //
 // NO PISA lo que ya se escribió: se completa lo vacío. El que corrige un dato no
 // puede perderlo porque la pantalla se refrescó.
+var LIQ_IVA_SIGLA = {
+  resp_inscripto: 'R.I.', monotributista: 'Monotributo',
+  exento: 'Exento', no_inscripto: 'No inscripto',
+};
+function liqIvaSigla(v){
+  var k = String(v || '').trim();
+  if (!k) return '';
+  return LIQ_IVA_SIGLA[k] || k;
+}
+
 function liqDesdePartida(r){
   // LA UNIDAD LA MANDA LA ORDEN DE COMPRA. La usa liqRenderArt para rotular las
   // columnas: liquidarle kilos a una compra pactada por cajón es cambiarle la
@@ -11082,7 +11097,11 @@ function liqDesdePartida(r){
   poner('liq-r-loc', p.localidad);
   poner('liq-r-prov', p.provincia);
   poner('liq-r-cp', p.cp);
-  poner('liq-r-iva', p.iva);
+  // LA CONDICIÓN DE IVA VIENE EN CLAVE. El endpoint manda categoria_fiscal, que
+  // es el valor de la base ('resp_inscripto'), y ese texto se imprimía tal cual en
+  // el comprobante del productor. Acá se traduce a la sigla que se usa en un
+  // papel; lo que no se reconoce pasa como vino, para no tapar un dato nuevo.
+  poner('liq-r-iva', liqIvaSigla(p.iva));
 
   // Los artículos: qué producto salió, cuánto y a cuánto. Se cargan sólo si la
   // lista está vacía — si alguien ya tocó un renglón, manda lo que tocó.
@@ -11097,9 +11116,14 @@ function liqDesdePartida(r){
   // Y las mermas, con su motivo: el productor cobra por lo que se vendió y tiene
   // derecho a ver qué pasó con el resto.
   if ((r.mermas || []).length && !_liqLeerMermas().length) {
+    // EN LA MISMA UNIDAD QUE LOS ARTÍCULOS. Los artículos salen en bultos cuando la
+    // orden se pactó por bulto, y las mermas salían SIEMPRE en kilos: el mismo
+    // comprobante mostraba 56 arriba y 90 abajo sin que ninguna columna dijera de
+    // qué estaba hablando. La orden manda para las dos cosas.
+    var enBultos = (r.unidad === 'bulto');
     liqRenderMermas(r.mermas.map(function(m){
       return { descripcion: (m.producto ? m.producto + ' — ' : '') + (m.motivo || 'merma'),
-        cantidad: m.kg, fecha: m.fecha, tipo: 'merma' };
+        cantidad: enBultos ? m.bultos : m.kg, fecha: m.fecha, tipo: 'merma' };
     }));
   }
 
@@ -11204,6 +11228,34 @@ function liqDesdePartida(r){
   if (cc && r.unidad !== 'bulto' && !String(cc.value || '').trim()) {
     cc.value = Number(r.kg_vendidos) || '';
   }
+  // ── EL CAMPO DE LA CAJA GRIS ESPEJA AL DE LA PARTIDA ────────────────
+  // Cuando hay partida, los bultos se ponen abajo --que es donde está la barra de
+  // avance y donde se ve contra cuántos entraron-- y éste los repite de sólo
+  // lectura. Dos campos editables con el mismo rótulo son dos números distintos
+  // esperando.
+  var bl = eid('liq-bultos-liq'), hint = eid('liq-cerr-cant-hint');
+  if (cc && bl) {
+    cc.value = bl.value;
+    cc.readOnly = true;
+    cc.style.background = '#e2e8f0';
+    if (hint) hint.innerHTML = '<span style="color:var(--mut)">se pone abajo, '
+      + 'en «bultos a liquidar»</span>';
+  }
+  // ── Y LO QUE PACTÓ LA ORDEN, A LA VISTA ─────────────────────────────
+  // El total acordado ya viajaba y no se mostraba en ningún lado. Sin él, un
+  // precio por bulto mal tipeado da un total redondo y perfectamente creíble.
+  var acEl = eid('liq-cerr-acordado');
+  if (acEl) {
+    acEl.innerHTML = Number(ac.total)
+      ? '<span style="color:var(--mut)">La orden pactó </span><b>' + sgMoney(ac.total) + '</b>'
+        + '<span style="color:var(--mut)"> por ' + nr(r.bultos_ingresados)
+        + ' ' + ((r.unidad === 'bulto') ? 'bultos' : 'kilos') + ' recibidos'
+        + (Number(ac.precio_por_bulto)
+            ? ' · ' + sgMoney(ac.precio_por_bulto) + ' por ' + ((r.unidad === 'bulto') ? 'bulto' : 'kilo')
+            : '')
+        + '</span>'
+      : '';
+  }
 
   // Se repinta para que los rótulos de origen y el % entren, y después se calcula
   // la comisión sobre las ventas que se acaban de poner.
@@ -11213,6 +11265,25 @@ function liqDesdePartida(r){
   // ya cargados.
   liqModoCambio();
   if (liqModo() !== 'cerrado') liqComisionCalcular();
+}
+
+// ── UN SOLO NÚMERO DE BULTOS ─────────────────────────────────────────
+//
+// Había DOS campos con el mismo rótulo: uno en la caja del precio cerrado
+// (#liq-cerr-cant) y otro en la de la partida (#liq-bultos-liq). No se hablaban,
+// se llenaban de fuentes distintas y decían cosas distintas -- 90 arriba, 56
+// abajo. Peor: el que movía la plata era el de arriba y el que se GUARDABA era
+// el de abajo, así que se podía emitir una liquidación cobrada sobre 90 bultos y
+// archivada como "56 bultos liquidados".
+//
+// Ahora manda el de la partida y el de la caja gris lo espeja, de sólo lectura.
+// Cuando no hay partida --liquidación suelta-- el de la caja gris no existe del
+// otro lado, así que queda editable y es el único.
+function liqBultosCambio(){
+  var b = eid('liq-bultos-liq'), c = eid('liq-cerr-cant');
+  if (b && c) c.value = b.value;
+  liqBultosAvance();
+  if (liqModo() === 'cerrado') liqCerradoResolver();
 }
 
 function liqBultosAvance(){
@@ -30759,6 +30830,26 @@ function liqRellenarForm() {
   // La base manual de gastos administrativos tampoco: el ajuste de la
   // liquidación anterior se sumaría encima del de ésta.
   LIQ.cerrado = { gastosManual: null, gastosEscrito: null };
+  // ── Y LA PANTALLA SE VACÍA DE VERDAD ───────────────────────────────
+  //
+  // Faltaban dos cosas: la caja del precio cerrado y el cuerpo de la grilla. Y
+  // como liqDesdePartida sólo escribe donde está VACÍO --para no pisar lo que el
+  // operador acaba de tipear--, lo que quedó de la liquidación anterior le GANABA
+  // a lo que trae la partida: se abría una partida de 56 bultos a $50.000 y la
+  // pantalla seguía diciendo 90 bultos a $15.000, con su total y su comisión
+  // despejada. Todo consistente entre sí y de otra partida.
+  //
+  // La grilla se limpia por el DOM y no por LIQ.grilla: liqGrillaPintar arranca
+  // releéndose a sí misma del <tbody> --para no perder lo tipeado cuando se
+  // repintan los rótulos-- y eso deshacía el LIQ.grilla = {} de arriba.
+  var _e;
+  if ((_e = eid('liq-cerr-precio')))    _e.value = '';
+  if ((_e = eid('liq-cerr-cant')))      { _e.value = ''; _e.readOnly = false; }
+  if ((_e = eid('liq-cerr-total')))     _e.textContent = '—';
+  if ((_e = eid('liq-cerr-resultado'))) _e.innerHTML = '';
+  if ((_e = eid('liq-cerr-acordado')))  _e.innerHTML = '';
+  if ((_e = eid('liq-cerr-cant-hint'))) _e.innerHTML = '';
+  if ((_e = eid('liq-grilla-body')))    _e.innerHTML = '';
   liqGrillaPintar();
   liqRemResumen();
   liqModoCambio();
@@ -30770,7 +30861,11 @@ function liqRellenarForm() {
   document.getElementById('liq-r-loc').value    = d.remitente_localidad|| '';
   document.getElementById('liq-r-prov').value   = d.remitente_provincia|| '';
   document.getElementById('liq-r-cp').value     = d.remitente_cp       || '';
-  document.getElementById('liq-r-iva').value    = d.remitente_iva      || 'R.I.';
+  // VACÍO, NO 'R.I.'. El default se escribía acá y después liqDesdePartida sólo
+  // completa lo que está vacío: la condición del productor se descartaba SIEMPRE y
+  // todas las liquidaciones salían diciendo Responsable Inscripto, incluso las de
+  // un monotributista. El default vive en el PDF, que es donde hace falta.
+  document.getElementById('liq-r-iva').value    = d.remitente_iva      || '';
   document.getElementById('liq-fing').value     = d.fecha_ingreso      || '';
   document.getElementById('liq-prov-cod').value = d.prov_codigo        || '';
   document.getElementById('liq-neto').value     = d.neto  != null ? d.neto  : '';
@@ -31474,9 +31569,19 @@ async function liqGuardar() {
     grilla:               liqGrillaLeer(),
     // El total NO se toca: es lo que dice el papel. La gestión va aparte, y ahora
     // es la SUMA de las cuatro filas de gestión, no un número suelto al pie.
+    // CON SU SIGNO. Las ventas de gestión SUMAN a lo que el productor cobra y la
+    // comisión, la descarga, el flete y los gastos RESTAN. Acá se sumaban las cinco
+    // con el mismo signo, así que se guardaba una gestión más grande que la que
+    // muestra la propia pantalla en «Neto a pagar al productor» -- y de este número
+    // sale la cuenta corriente del productor. A precio cerrado el despeje SIEMPRE
+    // escribe una comisión de gestión, así que las dos cuentas nunca coincidían.
+    //
+    // Es el mismo signo que usa liqTotales: uno solo, o la pantalla y el libro
+    // dicen cosas distintas.
     dif_gestion:          (function(){ var g = liqGrillaLeer().gestion;
                             return Math.round((LIQ_FILAS.reduce(function(a,x){
-                              return a + (Number(g[x.k]) || 0); }, 0)) * 100) / 100; })(),
+                              var signo = (x.k === 'ventas') ? 1 : -1;
+                              return a + signo * (Number(g[x.k]) || 0); }, 0)) * 100) / 100; })(),
     dif_motivo:           ((document.getElementById('liq-gestion-motivo')||{}).value) || null,
     modo_precio:          liqModo(),
     // Por cuántos bultos se liquidó. Se tipeaban arriba y no se guardaban en
