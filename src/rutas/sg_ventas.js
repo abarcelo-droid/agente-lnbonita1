@@ -15,6 +15,10 @@ import { crearAsiento, MOTIVOS } from '../servicios/asientos.js';
 import { modeloVentaLineas, modeloVentaFaltan, lineasAsientoVenta, r2v }
   from '../servicios/asiento-venta.js';
 import { recontabilizarVenta } from '../servicios/afip-wsfe-emision.js';
+// QUÉ FACTURA CUENTA: una sola definición, la misma que usa la cuenta corriente.
+// Escribir la lista a mano acá es lo que dejó una factura RECHAZADA figurando como
+// deuda viva en la ficha del cliente y cobrable desde la pantalla de cobranzas.
+import { facturaCuenta } from '../servicios/factura-cuenta.js';
 import { generarFacturaPDF } from '../servicios/facturaPDF.js';
 import { enviarMail } from '../servicios/mail.js';
 import * as XLSX from 'xlsx';
@@ -869,6 +873,61 @@ router.post('/facturas/:id/mail', requireAuth, async (req, res) => {
 });
 
 // El historial de envíos de un comprobante: quién, cuándo y a dónde.
+// ══ QUÉ SE LE VENDIÓ EN ESE COMPROBANTE ════════════════════════════════
+//
+// Pablo, 25/8/2026: "haciendo click en cada renglón que me muestre el detalle de
+// lo que se vendió, precio, partida, etc."
+//
+// La cuenta corriente decía cuánto debe y de qué comprobante, y ahí se terminaba:
+// para saber QUÉ tenía adentro la factura había que salir a otra pantalla y
+// buscarla por número. Discutir un saldo con el cliente enfrente así no se puede.
+//
+// Dos niveles, porque son dos preguntas distintas: los RENGLONES son lo que dice
+// el papel —lo que el cliente ve—, y las PARTIDAS son de qué lote salió cada kilo,
+// con el proveedor y lo que se resignó. La segunda es la que contesta "¿por qué
+// este precio?" y la que ata la venta con la liquidación al productor.
+router.get('/facturas/:id/detalle', (req, res) => {
+  try {
+    const f = db.prepare(`SELECT f.id, f.numero, f.fecha, f.total, f.neto, f.iva, f.estado,
+        f.afip_estado, f.cae, f.punto_venta, f.cbte_tipo, f.cbte_nro,
+        COALESCE(f.dif_gestion,0) AS dif_gestion, f.dif_motivo,
+        c.razon_social AS cliente
+      FROM sg_ven_facturas f LEFT JOIN sg_clientes c ON c.id=f.cliente_id
+      WHERE f.id=?`).get(req.params.id);
+    if (!f) return res.status(404).json({ ok: false, error: 'Comprobante no encontrado' });
+    // Los renglones tal como salieron impresos.
+    const items = db.prepare(`SELECT descripcion, cantidad, precio_unitario, subtotal,
+        alicuota_id, bultos, kg_por_bulto, precio_por_bulto, unidad
+      FROM sg_ven_factura_items WHERE factura_id=? ORDER BY id`).all(f.id);
+    // Y de qué partida salió cada kilo. sg_factura_despachos es el puente, y ahí
+    // están además el neto, el IVA y lo resignado DE ESE RENGLÓN — que es de donde
+    // sale la liquidación del productor.
+    const partidas = db.prepare(`SELECT fd.kg, fd.neto, fd.iva, fd.gestion,
+        l.codigo_lote, pr.nombre AS producto, pr.variedad,
+        di.precio_por_kg, di.precio_lista_por_kg,
+        COALESCE(di.kg_por_bulto, ps.factor_conversion) AS kg_por_bulto,
+        d.numero AS remito, prov.razon_social AS proveedor
+      FROM sg_factura_despachos fd
+      LEFT JOIN sg_despacho_items di ON di.id = fd.despacho_item_id
+      LEFT JOIN sg_despachos d ON d.id = fd.despacho_id
+      LEFT JOIN sg_lotes l ON l.id = di.lote_id
+      LEFT JOIN sg_productos pr ON pr.id = di.producto_id
+      LEFT JOIN sg_presentaciones ps ON ps.id = di.presentacion_id
+      LEFT JOIN sg_recepciones rec ON rec.id = l.recepcion_id
+      LEFT JOIN sg_oc o ON o.id = rec.oc_id
+      LEFT JOIN sg_proveedores prov ON prov.id = o.proveedor_id
+      WHERE fd.factura_id = ? ORDER BY fd.id`).all(f.id);
+    // Y qué se le cobró contra este comprobante, que es la otra mitad de la
+    // pregunta cuando se está discutiendo un saldo.
+    const cobros = db.prepare(`SELECT co.id, co.fecha, co.forma_pago, co.referencia,
+        cd.monto, COALESCE(cd.monto_gestion,0) AS monto_gestion
+      FROM sg_ven_cobranza_docs cd JOIN sg_ven_cobranzas co ON co.id = cd.cobranza_id
+      WHERE cd.tipo='factura' AND cd.doc_id = ? AND co.anulada = 0
+      ORDER BY co.fecha, co.id`).all(f.id);
+    res.json({ ok: true, data: { doc: f, items, partidas, cobros } });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
 router.get('/facturas/:id/envios', (req, res) => {
   try {
     res.json({ ok: true, data: db.prepare(`SELECT e.*, u.nombre AS usuario
@@ -928,7 +987,11 @@ router.get('/cc/:clienteId', (req, res) => {
             FROM sg_ven_cobranza_docs cd JOIN sg_ven_cobranzas co ON co.id=cd.cobranza_id
            WHERE cd.tipo='factura' AND cd.doc_id=f.id AND co.anulada=0), 0) as pendiente_gestion,
         'factura' as tipo_doc
-      FROM sg_ven_facturas f WHERE f.cliente_id=? AND f.estado != 'anulada'
+      -- MISMA REGLA QUE EL LISTADO: una factura RECHAZADA por AFIP no es deuda.
+      -- Acá estaba escrita a mano y por eso una rechazada figuraba en la ficha como
+      -- documento vivo, con su pendiente, y se la podía tildar para cobrarla — contra
+      -- una deuda que nunca subió al libro, porque sin autorización no hay asiento.
+      FROM sg_ven_facturas f WHERE f.cliente_id=? AND ${facturaCuenta('f')}
     `).all(cid);
 
     const docs = [...liquidaciones, ...facturas].sort((a,b) => a.fecha < b.fecha ? 1 : -1);
@@ -979,7 +1042,10 @@ function ctaContableCliente(clienteId) {
 function pendienteDeDoc(tipo, docId) {
   const tabla = tipo === 'liquidacion' ? 'sg_ven_liquidaciones' : 'sg_ven_facturas';
   const campo = tipo === 'liquidacion' ? 'neto_acreditar' : 'total';
-  const d = db.prepare(`SELECT id, numero, cliente_id, estado, ${campo} AS total,
+  // afip_estado sólo existe en las facturas: una liquidación la emite el cliente y
+  // no pasa por AFIP. Se pide sólo donde está, para no romper la consulta.
+  const colAfip = tipo === 'liquidacion' ? "'' AS afip_estado" : 'afip_estado';
+  const d = db.prepare(`SELECT id, numero, cliente_id, estado, ${colAfip}, ${campo} AS total,
       COALESCE(dif_gestion,0) AS dif_gestion, dif_motivo FROM ${tabla} WHERE id=?`)
     .get(docId);
   if (!d) return null;
@@ -1062,6 +1128,18 @@ router.post('/cobranzas', requireAuth, (req, res) => {
     if (doc.estado === 'anulada') {
       return res.status(400).json({ ok: false,
         error: `El comprobante ${doc.numero} está anulado: no se le puede imputar un cobro.` });
+    }
+    // ── NI CONTRA UNA QUE AFIP RECHAZÓ ────────────────────────────────────
+    // Una factura rechazada no tiene asiento —asentarVenta sólo corre con el
+    // resultado 'A'—, así que esa deuda nunca subió al libro. Cobrar contra ella
+    // acredita la cuenta corriente del cliente por algo que nadie debía y deja el
+    // mayor del cliente acreedor. El pago a proveedores ya tiene el freno
+    // equivalente y lo dice con todas las letras: "todavía no está contabilizada,
+    // no es deuda registrada".
+    if (String(doc.afip_estado || '') === 'rechazado') {
+      return res.status(400).json({ ok: false,
+        error: `AFIP rechazó el comprobante ${doc.numero}: no está contabilizado y no es deuda `
+             + `registrada. Volvé a emitirlo desde Remitos pendientes de comprobante.` });
     }
     // EL TOPE ES EL DE LA MITAD QUE SE ESTÁ COBRANDO. Con «sólo lo facturado» no
     // se puede imputar contra la parte que no lleva comprobante, y al revés.

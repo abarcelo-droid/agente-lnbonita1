@@ -3808,10 +3808,10 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
            trabaja sobre una cuenta, la pantalla es esa cuenta. -->
       <div id="sg-ccli-listado">
       <div style="font-size:12px;color:var(--mut);margin-bottom:8px">
-        El saldo es lo que dice la CONTABILIDAD: saldo de apertura + los comprobantes que ya
-        tienen su asiento, menos lo cobrado. Aparte va la mercadería entregada con remito que
-        todavía no se facturó. Hacé click en un cliente para ver sus comprobantes y
-        registrarle un cobro.
+        <b>Saldo</b> es todo lo que nos debe el cliente: apertura + comprobantes − cobrado,
+        con la parte acordada sin comprobante incluida. Aparte va la <b>mercadería entregada</b>
+        con remito que todavía no se facturó. Hacé click en un cliente para ver el desglose
+        fiscal / gestión, comprobante por comprobante, y registrarle un cobro.
       </div>
       <!-- LA MISMA FORMA QUE LA CUENTA CORRIENTE DE PROVEEDORES. Pablo:
            "documentado = saldo total ??? una parte gestión? está difícil de
@@ -3836,11 +3836,17 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
             <option value="fiscal">Sólo fiscal</option>
             <option value="gestion">Sólo gestión</option>
           </select></label>
+        <!-- La pregunta de esta pantalla es quién debe. Los que no deben nada se
+             pueden ver destildando, y el pie dice cuántos quedaron afuera. -->
+        <label style="font-size:12px;display:flex;align-items:center;gap:6px;padding-bottom:8px;cursor:pointer">
+          <input type="checkbox" id="sg-ccli-deben" checked onchange="sgCcClFiltro()">
+          <span>sólo los que deben</span></label>
       </div>
       <div class="ab-table-wrap"><table class="pa-tbl">
         <thead id="sg-ccli-th"></thead>
-        <tbody id="sg-tb-cc"><tr><td colspan="8" class="emp">Cargando…</td></tr></tbody>
+        <tbody id="sg-tb-cc"><tr><td colspan="6" class="emp">Cargando…</td></tr></tbody>
       </table></div>
+      <div id="sg-ccli-cuenta" style="font-size:11.5px;color:var(--mut);margin-top:8px"></div>
       </div><!-- /sg-ccli-listado -->
       <!-- LA FICHA DEL CLIENTE. El listado dice cuánto debe; esto dice por qué:
            cada comprobante con lo que le queda, y los cobros que ya se le
@@ -6559,6 +6565,22 @@ function sgCliFiltrar(selectId, q){ var el=eid(selectId); if(el) el.innerHTML=sg
 function sgPresDe(prodId){ return SG.cachePres.filter(function(p){ return String(p.producto_id)===String(prodId); }); }
 function sgFactor(presId){ var p = SG.cachePres.find(function(x){ return String(x.id)===String(presId); }); return p ? Number(p.factor_conversion) : 1; }
 function sgMoney(n){ return '$'+nr(n); }
+// ══ LA PLATA QUE SE CONTROLA AL CENTAVO SE MUESTRA AL CENTAVO ═══════════
+//
+// sgMoney redondea a pesos enteros (nr → Math.round). Eso está bien para un total
+// grande, y está MAL en cualquier cartel que se dispare comparando contra 0,01: el
+// aviso salta y los tres números que muestra salen iguales.
+//
+// Pablo, 25/8/2026, sobre la liquidación: "este mensaje que me mostrás está mal" —
+// «⚠ El neto a pagar NO da lo acordado — acordado $1.680.000, da $1.680.000
+// (diferencia $0)». El cartel tenía razón en alarmarse y mentía al explicar.
+//
+// Son nueve carteles con el mismo defecto: los cuadros de asiento, los controles de
+// cuadre y la conciliación. Todos comparan al centavo y todos mostraban al peso.
+function sgMoney2(n){
+  var x = Math.round((Number(n) || 0) * 100) / 100;
+  return '$' + x.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
 
 // ── UN BUSCADOR ADENTRO DE LA LISTA DESPLEGABLE ─────────────────────────
 // El plan de cuentas tiene cientos de rubros. Buscar "BANCO GALICIA" bajando
@@ -17131,7 +17153,25 @@ function sgDespVer(id){
 // El listado decía cuánto debe cada uno y ahí terminaba: no había forma de ver
 // POR QUÉ debía eso, ni de tomarle un cobro. La columna "cobrado" mostraba cero
 // escrito a mano.
-var SG_CCLI = { filas: [], sel: null, ficha: null, cuentas: [] };
+var SG_CCLI = { filas: [], sel: null, ficha: null, cuentas: [],
+  // Orden de la tabla. Arranca por saldo de mayor a menor: la pregunta de esta
+  // pantalla es "quién me debe", y esa se contesta de arriba para abajo.
+  orden: 'saldo', desc: true, soloDeben: true };
+
+// ── ORDENAR POR COLUMNA ─────────────────────────────────────────────────
+// Click en el título ordena; el mismo click de nuevo da vuelta el sentido. Los
+// números van de mayor a menor la primera vez —que es como se los mira— y los
+// textos de la A a la Z.
+function sgCcClOrden(col){
+  if (SG_CCLI.orden === col) { SG_CCLI.desc = !SG_CCLI.desc; }
+  else { SG_CCLI.orden = col; SG_CCLI.desc = (col !== 'cliente'); }
+  sgCcClPintar();
+}
+function sgCcClFiltro(){
+  var el = eid('sg-ccli-deben');
+  SG_CCLI.soloDeben = el ? !!el.checked : true;
+  sgCcClPintar();
+}
 
 function sgLoadCC(){
   api('/api/sg/cc-clientes').then(function(r){
@@ -17148,7 +17188,7 @@ function sgCcClNombre(c){
 
 function sgCcClPintar(){
   var q = String((eid('sg-cc-q') || {}).value || '').toLowerCase().trim();
-  var rows = SG_CCLI.filas.filter(function(c){
+  var todas = SG_CCLI.filas.filter(function(c){
     return !q || sgCcClNombre(c).toLowerCase().indexOf(q) >= 0;
   });
 
@@ -17164,60 +17204,104 @@ function sgCcClPintar(){
     var doc = Number(c.documentado != null ? c.documentado : c.total_facturado) || 0;
     return Math.round((doc - (Number(c.gestion) || 0)) * 100) / 100;
   };
+  // El saldo según el libro elegido. Es EL número de esta pantalla.
+  var saldoDe = function(c){
+    return Number(libro === 'fiscal' ? fisDe(c)
+      : (libro === 'gestion' ? (Number(c.gestion) || 0) : c.saldo)) || 0;
+  };
 
   var cont = eid('sg-ccli-tarjetas');
   if (cont) {
-    var ges = rows.reduce(function(a, c){ return a + (Number(c.gestion) || 0); }, 0);
-    var fis = rows.reduce(function(a, c){ return a + fisDe(c); }, 0);
-    ges = Math.round(ges * 100) / 100; fis = Math.round(fis * 100) / 100;
-    cont.innerHTML = !rows.length ? ''
-      : (libro === 'fiscal' ? sgCcTarjetas(fis, 0, 'Nos deben — con comprobante')
-        : (libro === 'gestion' ? sgCcTarjetas(0, ges, 'Nos deben — sin facturar')
-          : sgCcTarjetas(fis, ges, 'Nos deben en total')));
+    var gesT = todas.reduce(function(a, c){ return a + (Number(c.gestion) || 0); }, 0);
+    var fisT = todas.reduce(function(a, c){ return a + fisDe(c); }, 0);
+    gesT = Math.round(gesT * 100) / 100; fisT = Math.round(fisT * 100) / 100;
+    cont.innerHTML = !todas.length ? ''
+      : (libro === 'fiscal' ? sgCcTarjetas(fisT, 0, 'Nos deben — con comprobante')
+        : (libro === 'gestion' ? sgCcTarjetas(0, gesT, 'Nos deben — sin facturar')
+          : sgCcTarjetas(fisT, gesT, 'Nos deben en total')));
   }
 
-  // El encabezado se arma acá porque las columnas dependen del libro elegido:
-  // con "sólo fiscal" la de sin facturar no va, y al revés.
+  // ══ EL LISTADO MUESTRA EL TOTAL; EL DESGLOSE VA ADENTRO ════════════════
+  //
+  // Pablo, 25/8/2026: "mejor mostrar el total de lo que debe el cliente en la
+  // pantalla general; dentro de la cuenta corriente sí me interesa ver cuánto en
+  // fiscal y cuánto en gestión".
+  //
+  // Acá había cinco columnas de plata --apertura, contabilizado, sin facturar,
+  // saldo, mercadería entregada-- y para leer cuánto debe uno había que decidir
+  // cuál de las cinco era la respuesta. La ficha ya abre las dos mitades y cada
+  // comprobante: es el lugar donde eso se discute.
+  //
+  // "Sin facturar" además nombraba DOS cosas distintas en la misma pantalla: la
+  // parte de gestión (que ya está facturada, sólo que sin comprobante por el
+  // descuento) y la mercadería entregada sin facturar, que es otra cosa. Queda
+  // una sola con su nombre.
+  var soloDeben = SG_CCLI.soloDeben;
+  var rows = todas.filter(function(c){
+    if (!soloDeben) return true;
+    return Math.abs(saldoDe(c)) > 0.01 || Math.abs(Number(c.pendiente_comprobante) || 0) > 0.01;
+  });
+
+  // ORDEN. El valor de cada columna, en un solo lugar, para que ordenar y pintar
+  // no puedan discrepar.
+  var valor = {
+    cliente: function(c){ return sgCcClNombre(c).toLowerCase(); },
+    saldo: saldoDe,
+    entregada: function(c){ return Number(c.pendiente_comprobante) || 0; },
+    cobrado: function(c){ return Number(c.total_cobrado) || 0; },
+    limite: function(c){ return Number(c.limite_credito) || 0; },
+  };
+  var vOrden = valor[SG_CCLI.orden] || valor.saldo;
+  rows = rows.slice().sort(function(a, b){
+    var x = vOrden(a), y = vOrden(b);
+    var cmp = (typeof x === 'string') ? x.localeCompare(y, 'es') : (x - y);
+    if (!cmp) cmp = sgCcClNombre(a).localeCompare(sgCcClNombre(b), 'es');
+    return SG_CCLI.desc ? -cmp : cmp;
+  });
+
   var th = eid('sg-ccli-th');
   if (th) {
-    th.innerHTML = '<tr><th>Cliente</th><th style="text-align:right">Apertura</th>'
-      + (libro === 'gestion' ? '' : '<th style="text-align:right" title="Lo que está en el libro fiscal: comprobantes con su asiento, menos lo cobrado">Contabilizado</th>')
-      + (libro === 'fiscal' ? '' : '<th style="text-align:right" title="La parte de lo que nos deben que no tiene comprobante: descuentos comerciales acordados y diferencias contra lo pactado">Sin facturar</th>')
-      + '<th style="text-align:right">Saldo</th>'
-      // DESPUÉS DEL SALDO van las de referencia, que NO entran en la suma. El
-      // bloque que suma es apertura + contabilizado + sin facturar = saldo, y
-      // meter algo en el medio invita a sumarlo también.
-      + '<th style="text-align:right" title="Mercadería entregada con remito que todavía no se facturó. No está en el libro y se avisa aparte.">Mercadería entregada</th>'
-      + '<th style="text-align:right">Cobrado</th>'
-      + '<th style="text-align:right">Límite</th><th style="width:170px"></th></tr>';
+    var thCol = function(col, txt, ancho, tit){
+      var act = SG_CCLI.orden === col;
+      return '<th style="text-align:' + (col === 'cliente' ? 'left' : 'right')
+        + (ancho ? ';width:' + ancho : '') + ';cursor:pointer;user-select:none"'
+        + ' onclick="sgCcClOrden(' + sgQ(col) + ')"'
+        + (tit ? ' title="' + escH(tit) + '"' : '') + '>'
+        + escH(txt) + (act ? ' <span style="color:var(--burd)">' + (SG_CCLI.desc ? '▼' : '▲') + '</span>'
+                           : ' <span style="color:var(--bor)">↕</span>') + '</th>';
+    };
+    th.innerHTML = '<tr>'
+      + thCol('cliente', 'Cliente')
+      + thCol('saldo', libro === 'fiscal' ? 'Saldo (fiscal)' : (libro === 'gestion' ? 'Saldo (gestión)' : 'Saldo'),
+              '150px', 'Todo lo que nos debe. El desglose fiscal / gestión está adentro de la ficha.')
+      + thCol('entregada', 'Mercadería entregada', '160px',
+              'Mercadería que salió con remito y todavía no se facturó. No está en el libro.')
+      + thCol('cobrado', 'Cobrado', '130px')
+      + thCol('limite', 'Límite', '120px')
+      + '<th style="width:170px"></th></tr>';
   }
-  var cols = 6 + (libro ? 1 : 2);
+  var cols = 6;
 
   var tb = eid('sg-tb-cc'); if (!tb) return;
   tb.innerHTML = rows.length ? rows.map(function(c){
-    var ap = Number(c.saldo_inicial) || 0;
-    var ges = Number(c.gestion) || 0;
-    var fis = fisDe(c);
+    var saldo = saldoDe(c);
+    var lim = Number(c.limite_credito) || 0;
+    // PASADO DE LÍMITE, A LA VISTA. Es el dato por el que se mira esta pantalla
+    // antes de despachar, y estaba en una columna al lado sin relacionarse con nada.
+    var pasado = lim > 0 && saldo > lim;
     var cero = function(n){ return n ? sgMoney(n) : '<span style="color:var(--mut)">—</span>'; };
-    return '<tr><td><b>' + escH(sgCcClNombre(c)) + '</b></td>'
-      + '<td style="text-align:right">' + cero(ap) + '</td>'
-      // Con un libro elegido, la columna del OTRO no se muestra: mezclarlas es
-      // justo lo que el filtro vino a evitar.
-      + (libro === 'gestion' ? '' : '<td style="text-align:right">' + cero(fis) + '</td>')
-      + (libro === 'fiscal' ? '' : '<td style="text-align:right">'
-          + (ges ? '<span style="color:#8a5a1f;font-weight:600">' + sgMoney(ges) + '</span>'
-                 : '<span style="color:var(--mut)">—</span>') + '</td>')
-      + '<td style="text-align:right;font-weight:700;font-size:14px">'
-        + sgMoney(libro === 'fiscal' ? fis : (libro === 'gestion' ? ges : c.saldo)) + '</td>'
-      // LO ENTREGADO SIN COMPROBANTE va en su propia columna y no mezclado con
-      // lo documentado: es deuda real —la mercadería está en la casa del
-      // cliente— pero todavía no está en el libro fiscal.
+    return '<tr style="cursor:pointer" onclick="sgCcClFicha(' + c.id + ')">'
+      + '<td><b>' + escH(sgCcClNombre(c)) + '</b></td>'
+      + '<td style="text-align:right;font-weight:700;font-size:14px'
+        + (pasado ? ';color:#b91c1c' : '') + '">' + sgMoney(saldo)
+        + (pasado ? ' <span class="bdg bpe" style="font-size:10px" title="El saldo pasó el límite de crédito">sobre el límite</span>' : '')
+        + '</td>'
       + '<td style="text-align:right' + (Number(c.pendiente_comprobante) ? ';color:#9a3412' : ';color:var(--mut)') + '">'
         + (Number(c.pendiente_comprobante) ? sgMoney(c.pendiente_comprobante) : '—') + '</td>'
       // LO COBRADO DE VERDAD, no un cero escrito a mano: ya se rompió una vez.
       + '<td style="text-align:right">' + sgMoney(c.total_cobrado) + '</td>'
-      + '<td style="text-align:right">' + cero(Number(c.limite_credito)) + '</td>'
-      + '<td style="text-align:right;white-space:nowrap">'
+      + '<td style="text-align:right">' + cero(lim) + '</td>'
+      + '<td style="text-align:right;white-space:nowrap" onclick="event.stopPropagation()">'
         + '<button class="btn bo bs" onclick="sgCcClFicha(' + c.id + ')">Ver</button>'
         + (lnbPuedeOperar('sg-cc-clientes')
             ? ' <button class="btn bb bs" onclick="sgCobOpen(' + c.id + ')">💵 Cobrar</button>' : '')
@@ -17225,11 +17309,24 @@ function sgCcClPintar(){
   }).join('')
     : '<tr><td colspan="' + cols + '" class="emp">'
       + (SG_CCLI.filas.length
-          ? 'Ningún cliente coincide con la búsqueda.'
+          ? (soloDeben && todas.length
+              ? 'Ninguno de esos clientes debe nada. Destildá «sólo los que deben» para verlos igual.'
+              : 'Ningún cliente coincide con la búsqueda.')
           : 'Todavía no hay clientes con saldo ni movimientos. Acá figuran los que ya tienen algo '
             + 'facturado, cobrado o un saldo de apertura — para cobrarle a cualquier otro, usá '
             + '<b>💵 Registrar cobranza</b> arriba.')
       + '</td></tr>';
+
+  // CUÁNTOS SE ESTÁN VIENDO Y CUÁNTOS HAY. Un filtro que esconde filas sin decir
+  // cuántas esconde es un filtro que un día hace tomar una decisión con la mitad
+  // de los datos.
+  var pie = eid('sg-ccli-cuenta');
+  if (pie) {
+    pie.innerHTML = !SG_CCLI.filas.length ? ''
+      : ('Mostrando <b>' + rows.length + '</b> de ' + SG_CCLI.filas.length + ' cliente'
+         + (SG_CCLI.filas.length === 1 ? '' : 's')
+         + (rows.length < todas.length ? ' · ' + (todas.length - rows.length) + ' sin saldo, ocultos' : ''));
+  }
 }
 
 // ── LA FICHA ────────────────────────────────────────────────────────────
@@ -17293,8 +17390,14 @@ function sgCcClFichaPintar(){
           ? (String(x.punto_venta).length >= 4 ? String(x.punto_venta) : ('000'+x.punto_venta).slice(-4))
             + '-' + ('0000000'+x.cbte_nro).slice(-8)
           : (x.numero || '');
-        return '<tr' + (x.pendiente <= 0.01 ? ' style="opacity:.55"' : '') + '>'
-          + '<td>' + (x.tipo_doc === 'liquidacion' ? 'Liquidación' : 'Factura') + '</td>'
+        // CLICK EN EL RENGLÓN = QUÉ SE VENDIÓ. Para saber qué tenía adentro un
+        // comprobante había que salir a otra pantalla y buscarlo por número, que
+        // es justo lo que no se puede hacer con el cliente esperando al teléfono.
+        var abre = x.tipo_doc === 'liquidacion' ? '' :
+          ' style="cursor:pointer" onclick="sgCcClVerDoc(' + x.id + ')" title="Ver qué se vendió"';
+        return '<tr' + (x.pendiente <= 0.01 ? ' style="opacity:.55"' : '') + abre + '>'
+          + '<td>' + (x.tipo_doc === 'liquidacion' ? 'Liquidación' : 'Factura')
+            + (x.tipo_doc === 'liquidacion' ? '' : ' <span style="color:var(--mut)">🔎</span>') + '</td>'
           + '<td><code>' + escH(nro) + '</code>'
             // Una emisión de homologación tiene CAE y pinta de factura, y no vale
             // nada. Si no se dice acá, se descubre cuando el cliente la rechaza.
@@ -17311,7 +17414,8 @@ function sgCcClFichaPintar(){
           + '<td style="text-align:right"><b>' + sgMoney(x.pendiente) + '</b></td></tr>';
       }).join('')
       : '<tr><td colspan="7" class="emp">Sin comprobantes.</td></tr>')
-    + '</tbody></table></div>';
+    + '</tbody></table></div>'
+    + '<div id="sg-ccli-doc" style="margin-top:10px"></div>';
 
   var puedeAnular = lnbPuedeAnular('sg-ventas');
   h += '<div style="font-weight:700;font-size:12px;text-transform:uppercase;letter-spacing:.04em;'
@@ -17369,6 +17473,105 @@ function sgCobAnular(id){
 }
 
 // ── REGISTRAR UN COBRO ──────────────────────────────────────────────────
+// ══ QUÉ SE VENDIÓ EN ESE COMPROBANTE ═══════════════════════════════════
+//
+// Se abre DEBAJO de la lista de comprobantes, no en un modal: la pregunta que se
+// está contestando es "¿por qué este saldo?", y taparle al que pregunta la lista
+// de la que salió el renglón es perder el hilo. El mismo click lo cierra.
+//
+// Dos bloques, porque son dos preguntas: los RENGLONES son lo que dice el papel,
+// y las PARTIDAS de qué lote salió cada kilo y qué se resignó — que es lo que ata
+// esta venta con la liquidación al productor.
+function sgCcClVerDoc(id){
+  var cont = eid('sg-ccli-doc'); if (!cont) return;
+  if (String(SG_CCLI.docAbierto || '') === String(id)) {  // el mismo click lo cierra
+    SG_CCLI.docAbierto = null; cont.innerHTML = ''; return;
+  }
+  SG_CCLI.docAbierto = id;
+  cont.innerHTML = '<div class="emp" style="padding:10px">Cargando…</div>';
+  api('/api/sg/ventas/facturas/' + id + '/detalle').then(function(r){
+    if (!r || !r.ok) { cont.innerHTML = '<div class="emp" style="padding:10px">'
+      + escH((r && r.error) || 'No se pudo abrir el comprobante') + '</div>'; return; }
+    var d = r.data, doc = d.doc || {};
+    var cant = function(x){
+      // El renglón se lee en la unidad en que se vendió: si salió por cajón, en
+      // cajones. Los kilos van al lado, que es lo que pesa.
+      return (x.bultos != null && x.kg_por_bulto)
+        ? (nr(x.bultos) + ' ' + escH(x.unidad || 'cajón') + (x.bultos == 1 ? '' : 'es')
+           + ' <span style="color:var(--mut)">de ' + nr(x.kg_por_bulto) + 'kg · ' + nr(x.cantidad) + 'kg</span>')
+        : (nr(x.cantidad) + ' kg');
+    };
+    var h = '<div style="border:1px solid var(--bor);border-radius:10px;padding:12px 14px;background:var(--bg)">'
+      + '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;flex-wrap:wrap">'
+      + '<div style="font-weight:700;font-size:13px">Qué se vendió · <code>' + escH(doc.numero || '') + '</code>'
+        + ' <span style="font-weight:400;color:var(--mut)">' + escH(doc.fecha || '') + '</span></div>'
+      + '<button class="btn bo bs" onclick="sgCcClVerDoc(' + id + ')">Cerrar</button></div>';
+
+    h += '<div class="ab-table-wrap" style="margin-top:8px"><table class="pa-tbl">'
+      + '<thead><tr><th>Producto</th><th style="width:220px">Cantidad</th>'
+      + '<th style="width:130px;text-align:right">Precio</th>'
+      + '<th style="width:130px;text-align:right">Importe</th></tr></thead><tbody>'
+      + ((d.items || []).length ? d.items.map(function(x){
+          return '<tr><td>' + escH(x.descripcion || '') + '</td>'
+            + '<td>' + cant(x) + '</td>'
+            + '<td style="text-align:right">'
+              + ((x.precio_por_bulto != null && x.bultos != null)
+                  ? sgMoney2(x.precio_por_bulto) + ' <span style="color:var(--mut)">/cajón</span>'
+                  : sgMoney2(x.precio_unitario) + ' <span style="color:var(--mut)">/kg</span>') + '</td>'
+            + '<td style="text-align:right">' + sgMoney2(x.subtotal) + '</td></tr>';
+        }).join('') : '<tr><td colspan="4" class="emp">Sin renglones.</td></tr>')
+      + '<tr style="border-top:2px solid var(--bor);font-weight:700">'
+      + '<td colspan="3" style="text-align:right">Neto ' + sgMoney2(doc.neto)
+        + ' · IVA ' + sgMoney2(doc.iva) + ' · Total</td>'
+      + '<td style="text-align:right">' + sgMoney2(doc.total) + '</td></tr>'
+      + (doc.dif_gestion ? '<tr style="background:#faf6ee"><td colspan="3" style="text-align:right">'
+          + 'Acordado sin comprobante <span class="bdg bcc">gestión</span>'
+          + (doc.dif_motivo ? ' <span style="color:var(--mut)">' + escH(SG_MOTIVO_G[doc.dif_motivo] || doc.dif_motivo) + '</span>' : '')
+          + '</td><td style="text-align:right"><b>' + sgMoney2(doc.dif_gestion) + '</b></td></tr>' : '')
+      + '</tbody></table></div>';
+
+    if ((d.partidas || []).length) {
+      h += '<div style="font-weight:700;font-size:12px;margin:12px 0 4px">De qué partidas salió</div>'
+        + '<div class="ab-table-wrap"><table class="pa-tbl">'
+        + '<thead><tr><th style="width:170px">Partida</th><th>Producto</th>'
+        + '<th style="width:110px">Proveedor</th><th style="width:90px;text-align:right">Kg</th>'
+        + '<th style="width:120px;text-align:right">Precio/kg</th>'
+        + '<th style="width:120px;text-align:right" title="Lo que se resignó en este renglón por el acuerdo con el proveedor de esa partida">Resignado</th>'
+        + '</tr></thead><tbody>'
+        + d.partidas.map(function(p){
+            return '<tr><td><code>' + escH(p.codigo_lote || '—') + '</code>'
+              + (p.remito ? '<div style="font-size:10.5px;color:var(--mut)">' + escH(p.remito) + '</div>' : '') + '</td>'
+              + '<td>' + escH(p.producto || '') + (p.variedad ? ' ' + escH(p.variedad) : '') + '</td>'
+              + '<td style="font-size:11.5px">' + escH(p.proveedor || '—') + '</td>'
+              + '<td style="text-align:right">' + nr(p.kg) + '</td>'
+              + '<td style="text-align:right">' + sgMoney2(p.precio_por_kg) + '</td>'
+              + '<td style="text-align:right">' + (Number(p.gestion)
+                  ? '<span style="color:#8a5a1f;font-weight:600">' + sgMoney2(p.gestion) + '</span>'
+                  : '<span style="color:var(--mut)">—</span>') + '</td></tr>';
+          }).join('')
+        + '</tbody></table></div>';
+    }
+
+    if ((d.cobros || []).length) {
+      h += '<div style="font-weight:700;font-size:12px;margin:12px 0 4px">Cobros imputados</div>'
+        + '<div class="ab-table-wrap"><table class="pa-tbl">'
+        + '<thead><tr><th style="width:100px">Fecha</th><th>Forma</th>'
+        + '<th style="width:130px;text-align:right">Monto</th>'
+        + '<th style="width:130px;text-align:right">De gestión</th></tr></thead><tbody>'
+        + d.cobros.map(function(c){
+            return '<tr><td>' + escH(c.fecha || '') + '</td>'
+              + '<td>' + escH(c.forma_pago || '—')
+                + (c.referencia ? ' <span style="color:var(--mut)">' + escH(c.referencia) + '</span>' : '') + '</td>'
+              + '<td style="text-align:right">' + sgMoney2(c.monto) + '</td>'
+              + '<td style="text-align:right">' + (Number(c.monto_gestion) ? sgMoney2(c.monto_gestion)
+                  : '<span style="color:var(--mut)">—</span>') + '</td></tr>';
+          }).join('')
+        + '</tbody></table></div>';
+    }
+    cont.innerHTML = h + '</div>';
+  });
+}
+
 var SG_COB = { clienteId: null, docs: [], cuentas: [], ctaCliente: null };
 
 function sgCobOpen(clienteId){
