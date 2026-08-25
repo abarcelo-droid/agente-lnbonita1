@@ -26,8 +26,8 @@ import express from 'express';
 import multer from 'multer';
 import * as XLSX from 'xlsx';
 import db from '../servicios/db_share.js';
-import { importar, analizar, recalcularKg } from '../servicios/share_import.js';
-import { norm, FAMILIAS_VALIDAS } from '../servicios/share_parser.js';
+import { importar, analizar, recalcularKg, analizarOferta, importarOferta } from '../servicios/share_import.js';
+import { norm, FAMILIAS_VALIDAS, parseOfertaTexto, detectarColumnasOferta, parseBultos } from '../servicios/share_parser.js';
 import { nivelEnModulo } from '../servicios/permisos.js';
 
 const router = express.Router();
@@ -783,6 +783,207 @@ router.get('/competencia/:id', requireAuth, (req, res) => {
         evolucion, articulos: arts.slice(0, 300),
       },
     });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// ══════════════════════════════════════════════════════════════════════════════════════
+// OFERTA — lo que le mandamos a Carrefour, contra lo que terminó comprando
+// ══════════════════════════════════════════════════════════════════════════════════════
+// El planning contesta "qué compró". Sin la oferta no se puede contestar la que importa:
+// de lo que le ofrecimos, ¿qué nos aceptó? Y sobre todo, ¿qué le ofrecimos, compró, y se lo
+// compró a otro? Ese caso es el único que se puede ir a discutir con nombre y apellido.
+//
+// Sin la oferta, un artículo que no nos compró y uno que ni le mostramos se ven idénticos
+// —cero bultos nuestros— y son dos problemas completamente distintos.
+
+// Cómo le fue a cada artículo ofrecido. El nombre del resultado es el que se usa en la
+// pantalla y en el Excel: una sola palabra para cada situación, para poder filtrar por ella.
+const OF_RESULTADO = {
+  vendido:      'Nos compró',
+  perdido:      'Compró, pero a otro',
+  sin_demanda:  'Ese día no lo compró nadie',
+  no_ofrecido:  'No lo ofrecimos y compró',
+};
+
+function ofertaVsCompra(desde, hasta) {
+  const { arts, provs } = padrones();
+
+  const of = db.prepare(`
+    SELECT articulo_id AS aid, SUM(cantidad) AS ofrecido, COUNT(DISTINCT fecha) AS dias_ofrecido
+      FROM share_oferta_v WHERE fecha BETWEEN ? AND ? GROUP BY articulo_id`).all(desde, hasta);
+
+  const co = db.prepare(`
+    SELECT v.articulo_id AS aid,
+           SUM(v.bultos) AS total,
+           SUM(CASE WHEN p.es_nosotros=1 THEN v.bultos ELSE 0 END) AS nuestros,
+           COUNT(DISTINCT v.fecha_entrega) AS dias_comprado
+      FROM share_v v LEFT JOIN share_proveedores p ON p.id = v.proveedor_id
+     WHERE v.fecha_entrega BETWEEN ? AND ?
+     GROUP BY v.articulo_id`).all(desde, hasta);
+
+  // Quién se lo llevó, para los que ofrecimos y fueron a otro. Sin esto el aviso dice que
+  // perdimos y no contra quién, que es lo único con lo que se puede hacer algo.
+  const lider = new Map();
+  for (const r of db.prepare(`
+    SELECT articulo_id AS aid, proveedor_id AS pid, SUM(bultos) AS b
+      FROM share_v WHERE fecha_entrega BETWEEN ? AND ?
+     GROUP BY articulo_id, proveedor_id`).all(desde, hasta)) {
+    const p = provs.get(r.pid) || {};
+    if (p.es_nosotros) continue;
+    const prev = lider.get(r.aid);
+    if (!prev || r.b > prev.bultos) lider.set(r.aid, { nombre: p.nombre_canonico || '(sin nombre)', tipo: p.tipo, bultos: r.b });
+  }
+
+  const m = new Map();
+  const traer = (aid) => {
+    let x = m.get(aid);
+    if (!x) {
+      const a = arts.get(aid) || {};
+      x = { id: aid, desc: a.desc_canonica || '(sin nombre)', familia: a.familia || 'OTRO',
+            unidad: a.unidad, la_vendemos: a.la_vendemos ? 1 : 0,
+            ofrecido: 0, dias_ofrecido: 0, total: 0, nuestros: 0, dias_comprado: 0 };
+      m.set(aid, x);
+    }
+    return x;
+  };
+  for (const r of of) { const x = traer(r.aid); x.ofrecido = r.ofrecido; x.dias_ofrecido = r.dias_ofrecido; }
+  for (const r of co) { const x = traer(r.aid); x.total = r.total; x.nuestros = r.nuestros; x.dias_comprado = r.dias_comprado; }
+
+  const filas = [...m.values()].map(x => {
+    let res;
+    if (!x.ofrecido) res = x.total > 0 ? 'no_ofrecido' : 'sin_demanda';
+    else if (x.nuestros > 0) res = 'vendido';
+    else if (x.total > 0) res = 'perdido';
+    else res = 'sin_demanda';
+    const l = lider.get(x.id);
+    return {
+      ...x,
+      ofrecido: r2(x.ofrecido), total: r2(x.total), nuestros: r2(x.nuestros),
+      resultado: res, resultado_label: OF_RESULTADO[res],
+      // Cuánto de lo ofrecido quedó sin colocar. Se corta en cero: si nos compró MÁS de lo
+      // que habíamos ofrecido (pasa, se completa después), no es un sobrante negativo.
+      sin_colocar: Math.max(0, r2(x.ofrecido - x.nuestros)),
+      conversion: x.ofrecido ? Math.min(1, x.nuestros / x.ofrecido) : null,
+      share: x.total ? x.nuestros / x.total : null,
+      se_lo_llevo: (res === 'perdido' && l) ? l.nombre : null,
+      se_lo_llevo_bultos: (res === 'perdido' && l) ? r2(l.bultos) : null,
+    };
+  });
+
+  const suma = (f, k) => filas.filter(f).reduce((s, x) => s + (x[k] || 0), 0);
+  const esOfrecido = (x) => x.ofrecido > 0;
+  const kpi = {
+    ofrecido: r2(suma(esOfrecido, 'ofrecido')),
+    vendido: r2(suma(x => x.resultado === 'vendido', 'nuestros')),
+    perdido: r2(suma(x => x.resultado === 'perdido', 'ofrecido')),
+    sin_demanda: r2(suma(x => x.resultado === 'sin_demanda' && x.ofrecido > 0, 'ofrecido')),
+    no_ofrecido: r2(suma(x => x.resultado === 'no_ofrecido', 'total')),
+    articulos_ofrecidos: filas.filter(esOfrecido).length,
+    articulos_vendidos: filas.filter(x => x.resultado === 'vendido').length,
+    articulos_perdidos: filas.filter(x => x.resultado === 'perdido').length,
+    articulos_no_ofrecidos: filas.filter(x => x.resultado === 'no_ofrecido').length,
+  };
+  // La conversión se calcula sobre los BULTOS ofrecidos, no promediando los porcentajes de
+  // cada artículo: si no, ofrecer 10 bultos de perejil y colocarlos pesa lo mismo que ofrecer
+  // 4.000 de papa y no colocar ninguno.
+  kpi.conversion = kpi.ofrecido ? kpi.vendido / kpi.ofrecido : null;
+
+  const dias = db.prepare('SELECT COUNT(DISTINCT fecha) d FROM share_oferta_v WHERE fecha BETWEEN ? AND ?').get(desde, hasta).d;
+  return { filas, kpi, dias_con_oferta: dias };
+}
+
+// GET /oferta — la comparación. `resultado` filtra por una de las cuatro situaciones.
+router.get('/oferta', requireAuth, (req, res) => {
+  try {
+    const { desde, hasta } = resolverRango(req.query);
+    if (!desde) return res.json({ ok: true, data: { filas: [], kpi: {}, sin_datos: true } });
+    const d = ofertaVsCompra(desde, hasta);
+    const filtro = OF_RESULTADO[String(req.query.resultado)] ? String(req.query.resultado) : null;
+    const q = norm(req.query.q || '');
+    let filas = d.filas;
+    if (filtro) filas = filas.filter(x => x.resultado === filtro);
+    if (q) filas = filas.filter(x => norm(x.desc).includes(q));
+    const ORD = {
+      perdido: (a, b) => b.ofrecido - a.ofrecido,
+      ofrecido: (a, b) => b.ofrecido - a.ofrecido,
+      sin_colocar: (a, b) => b.sin_colocar - a.sin_colocar,
+      total: (a, b) => b.total - a.total,
+    };
+    filas = filas.slice().sort(ORD[String(req.query.orden)] || ORD.sin_colocar);
+    res.json({ ok: true, data: { rango: { desde, hasta }, kpi: d.kpi, dias_con_oferta: d.dias_con_oferta,
+      resultados: OF_RESULTADO, filas: filas.slice(0, 400), total_filas: filas.length } });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// GET /ofertas — las que se cargaron, para poder ver y dar de baja.
+router.get('/ofertas', requireAuth, (req, res) => {
+  try {
+    res.json({ ok: true, data: db.prepare(`
+      SELECT o.*, (SELECT COUNT(*) FROM share_oferta_lineas l WHERE l.oferta_id=o.id) lineas
+        FROM share_ofertas o ORDER BY o.fecha DESC, o.id DESC LIMIT 200`).all() });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// POST /ofertas — carga la oferta de un día. Acepta texto pegado o un .xlsx.
+// Sin ?confirmar=1 es sólo preview: dice qué va a pasar y no escribe nada.
+router.post('/ofertas', requireAuth, subida.single('archivo'), (req, res) => {
+  try {
+    if (!puedeOperar(req.user)) return res.status(403).json({ ok: false, error: 'Tu acceso a SHARE es de solo lectura.' });
+    const fecha = String(req.body?.fecha || '').slice(0, 10);
+    let filas = [], origen = 'texto', nombre = null;
+
+    if (req.file) {
+      origen = 'excel'; nombre = req.file.originalname || 'oferta.xlsx';
+      const wb = XLSX.read(req.file.buffer, { type: 'buffer', cellDates: true });
+      const ws = wb.Sheets[wb.SheetNames[0]];
+      if (!ws) return res.status(400).json({ ok: false, error: 'El archivo no tiene ninguna hoja.' });
+      const aoa = XLSX.utils.sheet_to_json(ws, { header: 1, raw: true, defval: null, blankrows: false });
+      if (!aoa.length) return res.status(400).json({ ok: false, error: 'La hoja está vacía.' });
+      const cols = detectarColumnasOferta(aoa[0]);
+      let cArt = cols.articulo, cCant = cols.cantidad, desde0 = cols.hayTitulos ? 1 : 0;
+      if (!cols.hayTitulos) {
+        // Sin títulos reconocibles: la primera columna con texto y la primera con números.
+        // Es como está armada cualquier lista de disponibles, y adivinar eso es mejor que
+        // exigir un formato que nadie tiene.
+        const fila = aoa.find(r => r && r.some(v => v != null)) || [];
+        cArt = fila.findIndex(v => typeof v === 'string' && v.trim() && parseBultos(v) == null);
+        cCant = fila.findIndex((v, i) => i !== cArt && parseBultos(v) != null);
+        if (cArt < 0 || cCant < 0) return res.status(400).json({ ok: false,
+          error: 'No encuentro una columna de artículo y otra de cantidad. Poné títulos "Artículo" y "Cantidad", o pegá la lista como texto.' });
+      }
+      for (let i = desde0; i < aoa.length; i++) {
+        const r = aoa[i] || [];
+        const art = r[cArt], cant = parseBultos(r[cCant]);
+        if (!art || String(art).trim() === '' || cant == null || cant <= 0) continue;
+        filas.push({ articulo_raw: String(art).trim(), cantidad: cant });
+      }
+    } else {
+      const t = parseOfertaTexto(req.body?.texto || '');
+      filas = t.filas;
+      if (!filas.length) {
+        return res.status(400).json({ ok: false,
+          error: 'No pude leer ninguna línea. Se espera "artículo" y la cantidad al final: "MANZANA X KG   500".',
+          rechazadas: t.rechazadas });
+      }
+      req._rechazadas = t.rechazadas;
+    }
+
+    if (String(req.query.confirmar || '') !== '1') {
+      const a = analizarOferta(db, { filas, fecha });
+      return res.json({ ok: true, preview: true, data: { ...a, rechazadas: req._rechazadas || [] } });
+    }
+    const r = importarOferta(db, { filas, fecha, origen, nombre,
+      notas: req.body?.notas || null, usuario: req.user?.nombre || null, usuarioId: req.user?.id || null });
+    res.json({ ok: true, oferta_id: r.oferta_id, data: r.analisis });
+  } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
+});
+
+router.delete('/ofertas/:id', requireAuth, (req, res) => {
+  try {
+    if (!puedeOperar(req.user)) return res.status(403).json({ ok: false, error: 'Tu acceso a SHARE es de solo lectura.' });
+    const r = db.prepare("UPDATE share_ofertas SET estado='reemplazada', reemplazada_en=datetime('now','localtime') WHERE id=? AND estado='activa'").run(req.params.id);
+    if (!r.changes) return res.status(404).json({ ok: false, error: 'No existe o ya estaba dada de baja.' });
+    res.json({ ok: true });
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 

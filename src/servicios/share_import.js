@@ -320,3 +320,88 @@ export function recalcularKg(db, articuloId) {
     : db.prepare('UPDATE share_lineas SET unidad=?, kg_equiv=bultos*? WHERE articulo_id=?').run(a.unidad, Number(a.factor_kg), articuloId);
   return r.changes;
 }
+
+// ── LA OFERTA DEL DÍA ─────────────────────────────────────────────────────────────────
+// Se resuelve el artículo con EL MISMO camino que el planning —alias, forma canónica, y si no
+// existe se crea— porque de eso depende que la comparación cruce. Si la oferta creara sus
+// propios artículos, "MANZANA X KG" ofrecida y "MANZANA X KG" comprada serían dos cosas y no
+// habría con qué compararlas.
+//
+// OFRECER UN ARTÍCULO ES LA PRUEBA DE QUE LO VENDEMOS, así que cargar la oferta marca
+// `la_vendemos` en todo lo que trae. Ese es el filtro de Oportunidades, y es la lista que
+// nadie tiene ganas de mantener a mano: acá se mantiene sola.
+export function analizarOferta(db, { filas, fecha }) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(fecha || ''))) {
+    throw new Error('Falta la fecha de la oferta (AAAA-MM-DD).');
+  }
+  if (!filas || !filas.length) throw new Error('No hay ninguna línea con artículo y cantidad.');
+
+  // Un mismo artículo puede venir en dos renglones (dos calidades escritas distinto que
+  // canonizan igual): se suman en vez de quedarse con el último.
+  const porArt = new Map();
+  for (const f of filas) {
+    const a = parseDesc(f.articulo_raw);
+    const prev = porArt.get(a.desc_canonica);
+    if (prev) { prev.cantidad += f.cantidad; prev.repetido = true; }
+    else porArt.set(a.desc_canonica, { parse: a, articulo_raw: f.articulo_raw, cantidad: f.cantidad });
+  }
+
+  const items = [...porArt.values()].map(x => {
+    const id = resolverArticulo(db, x.parse, false);
+    const ya = id ? db.prepare('SELECT desc_canonica, la_vendemos FROM share_articulos WHERE id=?').get(id) : null;
+    return {
+      articulo_raw: x.articulo_raw,
+      desc_canonica: x.parse.desc_canonica,
+      cantidad: x.cantidad,
+      repetido: !!x.repetido,
+      articulo_id: id || null,
+      // Nuevo = Carrefour nunca lo compró (o lo escribe distinto). No es un error: es
+      // exactamente lo que hay que mirar, porque significa que estamos ofreciendo algo que
+      // el CD no registra comprando.
+      nuevo: !id,
+      ya_marcado: !!(ya && ya.la_vendemos),
+    };
+  }).sort((a, b) => b.cantidad - a.cantidad);
+
+  const previa = db.prepare("SELECT id, archivo_nombre, creado_en, filas FROM share_ofertas WHERE fecha=? AND estado='activa'").get(fecha);
+  return {
+    fecha,
+    filas: items.length,
+    bultos_total: Math.round(items.reduce((s, x) => s + x.cantidad, 0) * 1000) / 1000,
+    nuevos: items.filter(x => x.nuevo).length,
+    repetidos: items.filter(x => x.repetido).length,
+    reemplaza: previa || null,
+    items,
+  };
+}
+
+export function importarOferta(db, { filas, fecha, origen, nombre, notas, usuario, usuarioId }) {
+  const a = analizarOferta(db, { filas, fecha });
+
+  const correr = db.transaction(() => {
+    // Una sola oferta activa por día. La anterior no se borra: queda para poder mirar qué se
+    // había ofrecido antes de corregirla.
+    if (a.reemplaza) {
+      db.prepare("UPDATE share_ofertas SET estado='reemplazada', reemplazada_en=datetime('now','localtime') WHERE id=?").run(a.reemplaza.id);
+    }
+    const r = db.prepare(`INSERT INTO share_ofertas
+      (fecha, origen, archivo_nombre, filas, bultos_total, notas, cargado_por, cargado_por_id)
+      VALUES (?,?,?,?,?,?,?,?)`).run(
+      fecha, origen || 'texto', nombre || null, a.filas, a.bultos_total,
+      notas || null, usuario || null, usuarioId || null);
+    const ofertaId = Number(r.lastInsertRowid);
+    if (a.reemplaza) db.prepare('UPDATE share_ofertas SET reemplazada_por=? WHERE id=?').run(ofertaId, a.reemplaza.id);
+
+    const ins = db.prepare('INSERT INTO share_oferta_lineas (oferta_id, fecha, articulo_raw, articulo_id, cantidad) VALUES (?,?,?,?,?)');
+    const marcar = db.prepare('UPDATE share_articulos SET la_vendemos=1 WHERE id=? AND la_vendemos=0');
+    for (const it of a.items) {
+      const parse = parseDesc(it.articulo_raw);
+      const aid = it.articulo_id || resolverArticulo(db, parse, true);
+      ins.run(ofertaId, fecha, it.articulo_raw, aid, it.cantidad);
+      marcar.run(aid);
+    }
+    return ofertaId;
+  });
+
+  return { ok: true, oferta_id: correr(), analisis: a };
+}

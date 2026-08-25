@@ -9,7 +9,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   norm, parseDesc, parseProveedor, parseFecha, parseBultos, fechaDelNombre,
-  clasificarFamilia, FAMILIAS_VALIDAS,
+  clasificarFamilia, FAMILIAS_VALIDAS, parseOfertaTexto, detectarColumnasOferta,
 } from '../src/servicios/share_parser.js';
 
 test('normalizar: mayúsculas, sin acentos, sin espacios de más', () => {
@@ -195,4 +195,43 @@ test('las familias válidas son cinco y OTRO es una de ellas', () => {
   // no está, el router lo rechazaría como familia inválida al intentar corregirlo a mano.
   for (const x of ['MANZANA', 'PAPA', 'TOMATE', 'LECHUGA', 'CHAMPIGNON', 'COSA RARA'])
     assert.ok(FAMILIAS_VALIDAS.includes(clasificarFamilia(x)), x);
+});
+
+test('oferta pegada: la cantidad es el ÚLTIMO número de la línea', () => {
+  // Los nombres traen números adentro. Buscar "el número" agarraría el del nombre.
+  const r = parseOfertaTexto([
+    'MANZANA X KG\t500',
+    'TOMATE REDONDO X KG, 300',
+    'ZAPALLITO LARGO 200',
+    'PALTA X UNIDAD;120',
+    'FRUTILLA EN CUBETA X 250 GRS  80',
+    'MANZANA CAL 100   45',
+  ].join('\n'));
+  assert.equal(r.filas.length, 6);
+  assert.deepEqual(r.filas.map(f => f.cantidad), [500, 300, 200, 120, 80, 45]);
+  // El gramaje y el calibre quedan en el nombre, que es donde van.
+  assert.equal(r.filas[4].articulo_raw, 'FRUTILLA EN CUBETA X 250 GRS');
+  assert.equal(r.filas[5].articulo_raw, 'MANZANA CAL 100');
+});
+
+test('oferta pegada: lo que no se entiende se informa, no se descarta en silencio', () => {
+  const r = parseOfertaTexto('MANZANA X KG 10\n\nrenglon sin cantidad\n   \nPERA X KG abc');
+  assert.equal(r.filas.length, 1);
+  // Las líneas vacías no son un problema; las otras dos sí y viajan con el motivo.
+  assert.equal(r.rechazadas.length, 2);
+  assert.ok(r.rechazadas.every(x => x.linea && x.texto && x.motivo));
+});
+
+test('oferta pegada: el punto es separador de miles, igual que en el planning', () => {
+  const r = parseOfertaTexto('PAPA X KG\t4.000');
+  assert.equal(r.filas[0].cantidad, 4000);
+});
+
+test('oferta en Excel: se reconocen los títulos habituales', () => {
+  assert.deepEqual(detectarColumnasOferta(['Articulo', 'Cantidad']), { articulo: 0, cantidad: 1, hayTitulos: true });
+  assert.deepEqual(detectarColumnasOferta(['Producto', 'Bultos']), { articulo: 0, cantidad: 1, hayTitulos: true });
+  assert.deepEqual(detectarColumnasOferta(['Descripción', 'Disponibles']), { articulo: 0, cantidad: 1, hayTitulos: true });
+  // Sin títulos reconocibles avisa que no los hay, y el router cae a "primera de texto,
+  // primera de números" en vez de exigir un formato que nadie tiene.
+  assert.equal(detectarColumnasOferta(['MANZANA X KG', 500]).hayTitulos, false);
 });
