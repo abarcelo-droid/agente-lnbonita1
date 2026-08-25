@@ -4840,8 +4840,8 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
            hacia afuera del panel. -->
       <div style="display:flex;justify-content:flex-end;gap:8px;margin-bottom:10px;flex-wrap:wrap"><button class="btn bo" onclick="sgCatSub('familias')" title="Dar de alta, renombrar y dar de baja las familias comerciales">🏷️ Parametrizar familias</button><button class="btn bo" onclick="sgProductosExport()" title="Exportar el catálogo a Excel para limpiarlo">📥 Exportar productos</button><button class="btn bb" onclick="sgOpenModal('productos')">+ Nuevo producto</button></div>
       <div class="ab-table-wrap"><table class="pa-tbl">
-        <thead id="sg-th-productos"><tr><th>Familia</th><th>Código</th><th>Especie</th><th>Variedad</th><th></th></tr></thead>
-        <tbody id="sg-tb-productos"><tr><td colspan="5" class="emp">Cargando…</td></tr></tbody>
+        <thead id="sg-th-productos"><tr><th>Familia</th><th>Código</th><th>Especie</th><th>Variedad</th><th style="text-align:right">IVA %</th><th></th></tr></thead>
+        <tbody id="sg-tb-productos"><tr><td colspan="6" class="emp">Cargando…</td></tr></tbody>
       </table></div>
     </div>
 
@@ -6204,7 +6204,12 @@ var SG_GRID = {
     {k:'familia',  l:'Familia',  sort:true,  filtro:'enum',  disp:function(r){ return r.familia||''; }},
     {k:'codigo',   l:'Código',   sort:true,  filtro:'texto'},
     {k:'nombre',   l:'Especie',  sort:true,  filtro:'texto'},
-    {k:'variedad', l:'Variedad', sort:true,  filtro:'texto', disp:function(r){ return r.variedad||''; }}
+    {k:'variedad', l:'Variedad', sort:true,  filtro:'texto', disp:function(r){ return r.variedad||''; }},
+    // LA ALÍCUOTA, A LA VISTA. Es obligatoria desde ahora, pero los productos que ya
+    // estaban pueden no tenerla: el que ordena el catálogo necesita ver cuál le falta
+    // sin abrir uno por uno, porque ésos no se pueden facturar.
+    {k:'iva_alicuota', l:'IVA %', sort:true, filtro:null,
+     disp:function(r){ return r.iva_alicuota != null ? String(r.iva_alicuota) : ''; }}
   ],
   presentaciones: [
     {k:'producto_id',       l:'Producto',             sort:true, filtro:'texto', disp:function(r){ return sgProdLabel(r.producto_id); }},
@@ -6623,7 +6628,7 @@ function sgLoad(entity){
 }
 
 function sgEmpty(entity){
-  var cols = {productos:5, presentaciones:6, proveedores:6, clientes:7, condiciones:4};
+  var cols = {productos:6, presentaciones:6, proveedores:6, clientes:7, condiciones:4};
   return '<tr><td colspan="'+(cols[entity]||6)+'" class="emp">Sin registros. Creá el primero con el botón de arriba.</td></tr>';
 }
 // ── EL MAESTRO DE FAMILIAS (CATEGORÍAS COMERCIALES) ──────────────────────
@@ -6754,9 +6759,13 @@ function sgActions(entity, id){
   // ANULAR ES UN NIVEL, NO UN ROL (CLAUDE.md). Borrar un maestro deja afuera
   // algo que ya se usó en órdenes y lotes: lo ve quien tiene "anular" en
   // Maestros, y el que sólo carga catálogo no.
+  // Y EDITAR ES DE ADMIN. El backend pide requireAdmin para los maestros; el lápiz
+  // se le mostraba a cualquiera y le contestaba 403. El que lo aprieta cree que
+  // rompió algo.
+  var esAdmin = !!(window.LNB_USER && window.LNB_USER.rol === 'admin');
   return '<td style="text-align:right;white-space:nowrap">'
-    + '<button class="btn bo bs" onclick="sgOpenModal(\''+entity+'\','+id+')">✏️</button> '
-    + (lnbPuedeAnular('sg-catalogo')
+    + (esAdmin ? '<button class="btn bo bs" onclick="sgOpenModal(\''+entity+'\','+id+')">✏️</button> ' : '')
+    + ((esAdmin || lnbPuedeAnular('sg-catalogo'))
         ? '<button class="btn bd bs" onclick="sgDelete(\''+entity+'\','+id+')">🗑️</button>' : '')
     + '</td>';
 }
@@ -6764,8 +6773,13 @@ function sgActions(entity, id){
 function sgRow(entity, r){
   if (entity==='productos'){
     // Mismo orden que SG_GRID.productos: Familia · Código · Especie · Variedad.
+    // Sin alícuota va en rojo y lo dice: ese producto no se puede facturar.
+    var al = (r.iva_alicuota != null)
+      ? '<td style="text-align:right">'+escH(String(r.iva_alicuota).replace('.',','))+'%</td>'
+      : '<td style="text-align:right;color:var(--err);font-weight:700" '
+        + 'title="Sin alícuota no se puede facturar: la pantalla calcularía un IVA y el comprobante saldría con otro">falta</td>';
     return '<tr><td>'+escH(r.familia||'—')+'</td><td><code>'+escH(r.codigo)+'</code></td><td>'+escH(r.nombre)+'</td><td>'+escH(r.variedad||'—')+'</td>'
-      +sgActions(entity,r.id)+'</tr>';
+      +al+sgActions(entity,r.id)+'</tr>';
   }
   if (entity==='presentaciones'){
     return '<tr><td>'+esc(sgProdLabel(r.producto_id))+'</td><td>'+esc(r.nombre)+'</td><td style="text-align:right">'+(r.factor_conversion||0)+'</td><td>'+esc(sgEnvNombre(r.envase_id))+'</td><td style="text-align:right">'+(r.paletizado!=null&&r.paletizado!==''?r.paletizado:'—')+'</td>'+sgActions(entity,r.id)+'</tr>';
@@ -7020,13 +7034,30 @@ function sgOpenProdModal(id){
   eid('sg-modal-body').innerHTML =
       ff('Código', '<input id="sg-p-codigo" type="text" readonly placeholder="se genera solo" style="background:var(--bg2,#f3f4f6);font-family:monospace;font-weight:700">')
     + ff('Familia <span style="color:var(--err)">*</span>',
-         withAdd('<select id="sg-p-familia" onchange="sgProdFamChange()" style="flex:1">'+famOpts+'</select>', 'sgProdAddFam()', 'Nueva familia', 'sgProdDelFam()', 'Borrar familia seleccionada'))
+         withAdd('<select id="sg-p-familia" onchange="sgProdFamChange();sgProdFamAlicProponer()" style="flex:1">'+famOpts+'</select>', 'sgProdAddFam()', 'Nueva familia', 'sgProdDelFam()', 'Borrar familia seleccionada'))
     + ff('Especie <span style="color:var(--err)">*</span>',
          withAdd('<select id="sg-p-especie" onchange="sgProdEspChange()" style="flex:1"><option value="">— Elegí familia primero —</option></select>', 'sgProdAddEsp()', 'Nueva especie', 'sgProdDelEsp()', 'Borrar especie seleccionada'))
     + ff('Variedad <span style="color:var(--mut);font-weight:400">(opcional)</span>',
-         withAdd('<select id="sg-p-variedad" onchange="sgProdPreview()" style="flex:1"><option value="">— Sin variedad (00) —</option></select>', 'sgProdAddVar()', 'Nueva variedad', 'sgProdDelVar()', 'Borrar variedad seleccionada'));
+         withAdd('<select id="sg-p-variedad" onchange="sgProdPreview()" style="flex:1"><option value="">— Sin variedad (00) —</option></select>', 'sgProdAddVar()', 'Nueva variedad', 'sgProdDelVar()', 'Borrar variedad seleccionada'))
+    // ══ LA ALÍCUOTA, OBLIGATORIA ═══════════════════════════════
+    // Pablo, 25/8/2026: "la alícuota debe cargarse en el producto como dato
+    // obligatorio, de esta manera aseguramos que se contabilice".
+    //
+    // Vivía sólo en la familia, y una familia podía quedarse sin ella. A partir de
+    // ahí la Facturación directa calculaba el 21% y AFIP recibía la operación como
+    // EXENTA: el operador veía un total y firmaba otro. Acá se corta.
+    + ff('Alícuota de IVA <span style="color:var(--err)">*</span>',
+         '<div style="display:flex;gap:8px;align-items:center">'
+         + '<input id="sg-p-alicuota" type="number" step="0.1" min="0" max="100" oninput="sgProdAlicNota()" '
+         + 'placeholder="10,5 ó 21" style="width:110px;text-align:right">'
+         + '<span style="color:var(--mut)">%</span>'
+         + '<span id="sg-p-alic-nota" style="font-size:11.5px;color:var(--mut)"></span></div>');
   eid('sg-modal').classList.add('on');
   if (row){
+    // Lo que tiene el producto. Si es viejo y no tiene, queda vacío y hay que
+    // cargarlo: es justamente el que no se puede facturar sin mentir.
+    if (row.iva_alicuota != null) eid('sg-p-alicuota').value = row.iva_alicuota;
+    sgProdAlicNota();
     eid('sg-p-familia').value = row.familia_id || '';
     sgProdLoadEsp(row.familia_id, function(){
       eid('sg-p-especie').value = row.especie_id || '';
@@ -7037,6 +7068,37 @@ function sgOpenProdModal(id){
     });
   } else { sgProdPreview(); }
 }
+// LA FAMILIA PROPONE, EL PRODUCTO DECIDE. Al elegir familia se ofrece su alícuota
+// --que es lo habitual y evita tipearla en cada alta-- pero queda editable: lo que
+// se guarda y lo que después factura es lo del producto.
+function sgProdFamAlicProponer(){
+  var e = eid('sg-p-alicuota'); if (!e) return;
+  var fid = eid('sg-p-familia') && eid('sg-p-familia').value;
+  var fam = (SG.cacheFam || []).filter(function(f){ return String(f.id) === String(fid); })[0];
+  if (!String(e.value || '').trim() && fam && fam.iva_alicuota != null) {
+    e.value = fam.iva_alicuota;
+  }
+  sgProdAlicNota();
+}
+function sgProdAlicNota(){
+  var n = eid('sg-p-alic-nota'); if (!n) return;
+  var fid = eid('sg-p-familia') && eid('sg-p-familia').value;
+  var fam = (SG.cacheFam || []).filter(function(f){ return String(f.id) === String(fid); })[0];
+  var v = String((eid('sg-p-alicuota') || {}).value || '').trim();
+  if (v === '') {
+    n.innerHTML = '<span style="color:#9a3412">Sin al\u00edcuota el producto no se va a poder facturar.</span>';
+    return;
+  }
+  if (Number(v) === 0) {
+    n.innerHTML = '<span style="color:#8a5a1f">0% = exento. El comprobante va a salir sin IVA.</span>';
+    return;
+  }
+  n.innerHTML = (fam && fam.iva_alicuota != null && Number(fam.iva_alicuota) !== Number(v))
+    ? '<span style="color:#8a5a1f">La familia ' + escH(fam.nombre || '') + ' usa '
+      + String(fam.iva_alicuota).replace('.', ',') + '%.</span>'
+    : '';
+}
+
 function sgProdLoadEsp(familiaId, cb){
   var sel = eid('sg-p-especie');
   if (!familiaId){ SG._prodEsp=[]; sel.innerHTML='<option value="">— Elegí familia primero —</option>'; if(cb)cb(); return; }
@@ -7129,7 +7191,18 @@ function sgSaveProd(){
   var familia_id = eid('sg-p-familia').value, especie_id = eid('sg-p-especie').value, variedad_id = eid('sg-p-variedad').value;
   if (!familia_id){ toast('Falta: Familia', 'er'); return; }
   if (!especie_id){ toast('Falta: Especie', 'er'); return; }
-  var body = { familia_id:Number(familia_id), especie_id:Number(especie_id), variedad_id: variedad_id?Number(variedad_id):null };
+  // La alícuota es obligatoria. 0 es un valor VÁLIDO --hay mercadería exenta-- y es
+  // distinto de \"no la cargaron\": por eso se mira el campo vacío, no el número.
+  var alicTxt = String((eid('sg-p-alicuota') || {}).value || '').trim();
+  if (alicTxt === ''){
+    toast('Falta la al\u00edcuota de IVA: sin ella el producto no se puede facturar', 'er');
+    if (eid('sg-p-alicuota')) eid('sg-p-alicuota').focus();
+    return;
+  }
+  var alicNum = Number(alicTxt);
+  if (isNaN(alicNum) || alicNum < 0 || alicNum > 100){ toast('Al\u00edcuota inv\u00e1lida (0 a 100)', 'er'); return; }
+  var body = { familia_id:Number(familia_id), especie_id:Number(especie_id),
+    variedad_id: variedad_id?Number(variedad_id):null, iva_alicuota: alicNum };
   var path = '/api/sg/productos' + (id?('/'+id):'');
   api(path, id?'PUT':'POST', body).then(function(r){
     if (r && r.ok){ toast(id?'Actualizado':'Creado', 'ok'); closeMB('sg-modal'); sgLoadCaches(); sgLoad('productos'); }
@@ -14729,7 +14802,11 @@ function sgFdRender(){
   var neto=0, iva=0, resignado=0;
   SG.fdItems.forEach(function(it){
     var mm=sgFdMontos(it);
-    var alic=(it.alicuota!=null)?Number(it.alicuota):21;
+    // SIN ALÍCUOTA NO SE INVENTA UN 21%. Acá estaba escrito 21 a mano, y el
+    // backend manda la operación a AFIP como EXENTA cuando el producto no tiene
+    // alícuota: la pantalla mostraba un total y salía otro comprobante. Ahora se
+    // trata como lo que el backend va a hacer --exento-- y el renglón lo grita.
+    var alic=(it.alicuota!=null)?Number(it.alicuota):0;
     // EL NETO SALE DE LO FACTURADO, o sea con el descuento ya aplicado: es lo
     // que va al comprobante y al libro fiscal.
     var base=(incl)?mm.facturado/(1+alic/100):mm.facturado;
@@ -14848,7 +14925,9 @@ function sgFdAsientoPreview(){
   var neto = 0, iva = 0;
   SG.fdItems.forEach(function(it){
     var mm = sgFdMontos(it);
-    var alic = (it.alicuota != null) ? Number(it.alicuota) : 21;
+    // Mismo criterio que el resumen: sin alícuota es EXENTO, que es lo que va a
+    // recibir AFIP. El cuadro del asiento tiene que espejar lo que se graba.
+    var alic = (it.alicuota != null) ? Number(it.alicuota) : 0;
     var base = incl ? mm.facturado / (1 + alic / 100) : mm.facturado;
     neto += base; iva += base * alic / 100;
   });

@@ -502,15 +502,34 @@ router.get('/productos/:id', requireAuth, (req, res) => {
     res.json({ ok: true, data: row });
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
+// LA ALÍCUOTA ES OBLIGATORIA (Pablo, 25/8/2026). Sin ella el producto se puede
+// dar de alta y después no se puede facturar sin mentir: la pantalla calcula un 21%
+// y AFIP recibe la operación como exenta. Se pide acá, que es donde se sabe.
+//
+// 0 es un valor VÁLIDO --hay mercadería exenta-- y es distinto de "no lo cargaron".
+// Por eso se compara contra null/vacío y no con un truthy.
+function alicuotaDeProducto(body) {
+  const a = body.iva_alicuota;
+  if (a === undefined || a === null || a === '') {
+    return { error: 'Falta la alícuota de IVA. Es obligatoria: sin ella el producto no se '
+      + 'puede facturar — la pantalla calcularía un IVA y el comprobante saldría con otro.' };
+  }
+  const n = Number(a);
+  if (isNaN(n) || n < 0 || n > 100) return { error: 'Alícuota inválida (0 a 100)' };
+  return { alic: n };
+}
+
 router.post('/productos', requireAdmin, (req, res) => {
   const db = getDb();
   try {
     const r = resolverProducto(db, req.body || {});
     if (r.error) return res.status(400).json({ ok: false, error: r.error });
+    const al = alicuotaDeProducto(req.body || {});
+    if (al.error) return res.status(400).json({ ok: false, error: al.error });
     try {
       const info = db.prepare(`INSERT INTO sg_productos
-        (codigo, familia_id, especie_id, variedad_id, nombre, variedad, familia, creado_por)
-        VALUES (?,?,?,?,?,?,?,?)`).run(r.codigo, r.familia_id, r.especie_id, r.variedad_id, r.nombre, r.variedad, r.familia, uid(req));
+        (codigo, familia_id, especie_id, variedad_id, nombre, variedad, familia, iva_alicuota, creado_por)
+        VALUES (?,?,?,?,?,?,?,?,?)`).run(r.codigo, r.familia_id, r.especie_id, r.variedad_id, r.nombre, r.variedad, r.familia, al.alic, uid(req));
       res.json({ ok: true, data: db.prepare('SELECT * FROM sg_productos WHERE id=?').get(info.lastInsertRowid) });
     } catch (e) {
       if (String(e.message).includes('UNIQUE')) return res.status(400).json({ ok: false, error: `Ya existe un producto con código ${r.codigo} (misma familia/especie/variedad)` });
@@ -523,11 +542,14 @@ router.put('/productos/:id', requireAdmin, (req, res) => {
   try {
     const r = resolverProducto(db, req.body || {});
     if (r.error) return res.status(400).json({ ok: false, error: r.error });
+    const al = alicuotaDeProducto(req.body || {});
+    if (al.error) return res.status(400).json({ ok: false, error: al.error });
     try {
       const info = db.prepare(`UPDATE sg_productos SET
         codigo=?, familia_id=?, especie_id=?, variedad_id=?, nombre=?, variedad=?, familia=?,
+        iva_alicuota=?,
         modificado_en=datetime('now','localtime'), modificado_por=?
-        WHERE id=?`).run(r.codigo, r.familia_id, r.especie_id, r.variedad_id, r.nombre, r.variedad, r.familia, uid(req), req.params.id);
+        WHERE id=?`).run(r.codigo, r.familia_id, r.especie_id, r.variedad_id, r.nombre, r.variedad, r.familia, al.alic, uid(req), req.params.id);
       if (!info.changes) return res.status(404).json({ ok: false, error: 'No encontrado' });
       res.json({ ok: true, data: db.prepare('SELECT * FROM sg_productos WHERE id=?').get(req.params.id) });
     } catch (e) {
@@ -794,7 +816,10 @@ router.get('/facturable', requireAuth, (req, res) => {
     const rows = db.prepare(`
       SELECT d.id AS despacho_id, d.numero AS despacho_numero, d.fecha_despacho,
         di.id AS despacho_item_id, di.producto_id, pr.nombre AS producto_nombre,
-        fam.iva_alicuota, di.lote_id, l.codigo_lote, di.kg_despachados, di.precio_por_kg,
+        -- LA DEL PRODUCTO MANDA; la de la familia queda de respaldo para las filas
+        -- viejas que la migración no pudo llenar (familia sin alícuota cargada).
+        COALESCE(pr.iva_alicuota, fam.iva_alicuota) AS iva_alicuota,
+        di.lote_id, l.codigo_lote, di.kg_despachados, di.precio_por_kg,
         di.origen, di.oc_item_id, di.nota_precio, di.lote_recibido_id, oc.numero AS oc_numero
       FROM sg_despachos d
       JOIN sg_despacho_items di ON di.despacho_id=d.id
@@ -923,7 +948,8 @@ const postEmitir = async (req, res) => {
         if (!(kg > 0)) continue;
         const di = db.prepare(`SELECT di.id, di.producto_id, di.kg_despachados, di.precio_por_kg,
             di.precio_lista_por_kg, di.presentacion_id,
-            COALESCE(di.kg_por_bulto, ps.factor_conversion) AS kg_por_bulto, fam.iva_alicuota
+            COALESCE(di.kg_por_bulto, ps.factor_conversion) AS kg_por_bulto,
+            COALESCE(pr.iva_alicuota, fam.iva_alicuota) AS iva_alicuota
           FROM sg_despacho_items di
           LEFT JOIN sg_productos pr ON pr.id=di.producto_id
           LEFT JOIN sg_familias fam ON fam.id=pr.familia_id
@@ -2145,7 +2171,8 @@ router.post('/oc', requireAdmin, (req, res) => {
       && (tipoPrecio === 'firme');
     const incluyeIva = b.precio_incluye_iva ? 1 : 0;
     const alicOverride = (b.iva_alicuota_oc != null && b.iva_alicuota_oc !== '') ? Number(b.iva_alicuota_oc) : null;
-    const alicFamStmt = db.prepare('SELECT f.iva_alicuota AS a FROM sg_productos p LEFT JOIN sg_familias f ON f.id=p.familia_id WHERE p.id=?');
+    const alicFamStmt = db.prepare(`SELECT COALESCE(p.iva_alicuota, f.iva_alicuota) AS a
+      FROM sg_productos p LEFT JOIN sg_familias f ON f.id=p.familia_id WHERE p.id=?`);
 
     const tx = db.transaction(() => {
       const numero = nextNumero(db, 'SG-OC', 'sg_oc', 'numero');
@@ -3466,10 +3493,11 @@ router.get('/oc/:id/para-facturar', requireAuth, (req, res) => {
     // una factura perfecta, que es exactamente el 10,5% de IVA.
     const alicOC = (oc.iva_alicuota_oc != null && oc.iva_alicuota_oc !== '')
       ? Number(oc.iva_alicuota_oc)
-      : (db.prepare(`SELECT f.iva_alicuota a FROM sg_oc_items i
+      : (db.prepare(`SELECT COALESCE(p.iva_alicuota, f.iva_alicuota) a FROM sg_oc_items i
            LEFT JOIN sg_productos p ON p.id = i.producto_id
            LEFT JOIN sg_familias f ON f.id = p.familia_id
-          WHERE i.oc_id = ? AND f.iva_alicuota IS NOT NULL LIMIT 1`).get(oc.id) || {}).a;
+          WHERE i.oc_id = ? AND COALESCE(p.iva_alicuota, f.iva_alicuota) IS NOT NULL
+          LIMIT 1`).get(oc.id) || {}).a;
     res.json({ ok: true, data: { oc, items,
       total_acordado: oc.tipo_precio === 'pizarra' ? null : total,
       acordado_incluye_iva: oc.precio_incluye_iva == null ? null : (oc.precio_incluye_iva ? 1 : 0),
@@ -6750,7 +6778,10 @@ router.get('/oferta', requireAuth, (req, res) => {
     const stock = db.prepare(`
       SELECT * FROM (
         SELECT l.id AS lote_id, l.codigo_lote, l.producto_id, pr.nombre AS producto_nombre, l.calidad, l.semaforo,
-          fam.iva_alicuota,
+          -- LA DEL PRODUCTO MANDA. De acá sale la alícuota de la Facturación
+          -- directa: leyendo sólo la de la familia, un producto con alícuota
+          -- propia facturaba con la de su familia.
+          COALESCE(pr.iva_alicuota, fam.iva_alicuota) AS iva_alicuota,
           -- DE QUIÉN ES ESTA MERCADERÍA, Y QUÉ SE LE ACORDÓ. El descuento comercial
           -- es del PROVEEDOR, así que una factura con mercadería de tres lleva los
           -- tres descuentos, cada línea con el suyo. Viaja con el lote para que la
