@@ -60301,32 +60301,150 @@ function sgctGuardarAsiento() {
   });
 }
 
-function sgctVerAsiento(id) {
+// ── EL DETALLE MUESTRA EL LIBRO QUE SE PIDIÓ, Y CADA MITAD POR SEPARADO ──────
+//
+// Traía las dos mitades pegadas una abajo de la otra, sin decir cuál era cuál y
+// con un solo TOTALES que las sumaba. Un asiento que en la lista figuraba por
+// 900.000,02 se abría mostrando 1.714.479,68: la misma compra aparecía dos veces
+// y ese total no era el de ningún libro. Y con «Sólo fiscal» elegido arriba se
+// veían igual las líneas de gestión, que es exactamente lo que ese filtro
+// promete no mostrar.
+//
+// Los datos siempre estuvieron bien —cada mitad cierra sola, el backend no la
+// deja entrar si no—: lo que estaba mal era leerlas juntas y sin marca.
+//
+// Ahora el detalle recibe el MISMO libro que la lista, cada ámbito va en su
+// propio cuadro con su propio "balancea" (convención del proyecto: toda
+// operación que asienta muestra el asiento), y lo que el filtro deja afuera se
+// avisa con el monto — un asiento que se lee de menos sin saberlo es peor que
+// uno que se lee de más.
+var SGCT_LIBROS = {
+  fiscal:  { rot: 'Fiscal',  pie: 'es lo que va a una presentación',
+             adj: 'fiscales', del: 'fiscal',
+             col: '#166534', bg: '#f0fdf4', bor: '#bbf7d0' },
+  gestion: { rot: 'Gestión', pie: 'interno — no va a una presentación',
+             adj: 'de gestión', del: 'de gestión',
+             col: '#8a5a1f', bg: '#f6eddf', bor: '#e0c9a6' },
+};
+
+// La columna es NOT NULL DEFAULT 'fiscal', pero el default se decide en un solo
+// lugar igual: si algún día entra un valor raro, que caiga del lado fiscal y se
+// vea, y no que desaparezca de los dos cuadros.
+function sgctAmbitoDe(l) { return l.ambito === 'gestion' ? 'gestion' : 'fiscal'; }
+
+function sgctAsientoCuadro(a, amb) {
+  var meta = SGCT_LIBROS[amb];
+  var lineas = (a.lineas || []).filter(function(l){ return sgctAmbitoDe(l) === amb; });
+  if (!lineas.length) return '';
+  // Los totales salen del backend (totalesDeAsiento, ya abierto por ámbito) y no
+  // de una suma en JS: el "balancea" que se muestra tiene que ser el MISMO número
+  // que el servidor valida antes de guardar, no una segunda opinión que puede
+  // diferir por redondeo. La suma local queda sólo de respaldo.
+  var t = (a.totales || {})[amb];
+  var totD = 0, totH = 0;
+  if (t) { totD = t.debe || 0; totH = t.haber || 0; }
+  else lineas.forEach(function(l){ totD += l.debe || 0; totH += l.haber || 0; });
+  var dif = Math.round((totD - totH) * 100) / 100;
+  var ok  = Math.abs(dif) < 0.005;
+
+  var rows = lineas.map(function(l){
+    // El motivo va pegado a la línea de gestión: una diferencia sin el porqué al
+    // lado es un número que nadie va a poder explicar en seis meses.
+    var motivo = (amb === 'gestion' && l.motivo)
+      ? '<div style="font-size:10.5px;color:var(--mut)">'
+        + sgctEsc((window.SG_MOTIVOS || {})[l.motivo] || l.motivo) + '</div>'
+      : '';
+    return '<tr>'
+      + '<td style="font-family:monospace;font-size:12px">' + sgctEsc(l.cuenta_codigo || '—') + '</td>'
+      + '<td class="sgct-cu-nom">' + sgctEsc(l.cuenta_nombre || '—') + motivo + '</td>'
+      + '<td style="text-align:right;font-variant-numeric:tabular-nums">' + (l.debe > 0 ? sgctMoney(l.debe) : '—') + '</td>'
+      + '<td style="text-align:right;font-variant-numeric:tabular-nums">' + (l.haber > 0 ? sgctMoney(l.haber) : '—') + '</td>'
+      + '</tr>';
+  }).join('');
+
+  return '<div style="border:1px solid ' + meta.bor + ';border-radius:10px;overflow:hidden;margin-bottom:14px">'
+    + '<div style="background:' + meta.bg + ';padding:7px 12px;font-size:12.5px;font-weight:700;color:' + meta.col + '">'
+      + meta.rot + ' <span style="font-weight:400;color:var(--mut)">— ' + meta.pie + '</span></div>'
+    + '<table class="pa-tbl">'
+    + '<thead><tr><th style="width:96px">Código</th><th>Cuenta</th>'
+      + '<th style="text-align:right;width:118px">Debe</th>'
+      + '<th style="text-align:right;width:118px">Haber</th></tr></thead>'
+    + '<tbody>' + rows + '</tbody>'
+    + '<tfoot><tr style="font-weight:700;background:var(--bg)">'
+      + '<td colspan="2" style="text-align:right;padding:8px 12px">Totales ' + meta.rot.toLowerCase() + '</td>'
+      + '<td style="text-align:right;padding:8px 12px;font-variant-numeric:tabular-nums">' + sgctMoney(totD) + '</td>'
+      + '<td style="text-align:right;padding:8px 12px;font-variant-numeric:tabular-nums">' + sgctMoney(totH) + '</td>'
+      + '</tr></tfoot>'
+    + '</table>'
+    + '<div style="padding:7px 12px;text-align:right;font-size:12.5px;font-weight:700;'
+      + 'color:' + (ok ? 'var(--ok)' : '#b91c1c') + ';background:' + (ok ? 'transparent' : '#fef2f2') + '">'
+      + (ok ? '✓ balancea' : '⚠ NO balancea — diferencia ' + sgctMoney(Math.abs(dif))) + '</div>'
+    + '</div>';
+}
+
+function sgctVerAsiento(id, libroForzado) {
+  // El libro es el de la pantalla, salvo que el botón "Ver los dos" lo fuerce.
+  var libro = (libroForzado != null)
+    ? libroForzado
+    : ((document.getElementById('sgct-as-ambito') || {}).value || '');
+  if (libro !== 'fiscal' && libro !== 'gestion') libro = '';
   sgctApi('/asientos/' + id).then(function(r){
     if (!r.ok) return toast(r.error||'Error', 'er');
     var a = r.data;
     SGCT.asientoActualId = a.id;
+    // QUÉ LIBRO SE ESTÁ MIRANDO, EN EL ENCABEZADO. Sin esto, dos personas mirando
+    // el mismo asiento con distinto filtro ven distintos números y ninguna de las
+    // dos pantallas dice por qué.
     document.getElementById('sgct-as-det-tit').textContent = 'Asiento #' + a.id;
-    document.getElementById('sgct-as-det-sub').textContent = paFecha(a.fecha) + ' — ' + a.descripcion;
-    var totD = 0, totH = 0;
-    var rows = (a.lineas||[]).map(function(l){
-      totD += l.debe||0; totH += l.haber||0;
-      return '<tr>'
-        + '<td style="font-family:monospace;font-size:12px">'+l.cuenta_codigo+'</td>'
-        + '<td>'+sgctEsc(l.cuenta_nombre)+'</td>'
-        + '<td style="text-align:right;font-variant-numeric:tabular-nums">'+(l.debe>0 ? sgctMoney(l.debe) : '—')+'</td>'
-        + '<td style="text-align:right;font-variant-numeric:tabular-nums">'+(l.haber>0 ? sgctMoney(l.haber) : '—')+'</td>'
-        + '</tr>';
-    }).join('');
-    var html = '<table class="pa-tbl" style="margin-bottom:14px">'
-      + '<thead><tr><th style="width:80px">Código</th><th>Cuenta</th><th style="text-align:right;width:130px">Debe</th><th style="text-align:right;width:130px">Haber</th></tr></thead>'
-      + '<tbody>' + rows + '</tbody>'
-      + '<tfoot><tr style="font-weight:700;background:var(--bg)">'
-      + '<td colspan="2" style="text-align:right;padding:8px 12px">TOTALES</td>'
-      + '<td style="text-align:right;padding:8px 12px">'+sgctMoney(totD)+'</td>'
-      + '<td style="text-align:right;padding:8px 12px">'+sgctMoney(totH)+'</td>'
-      + '</tr></tfoot>'
-      + '</table>'
+    document.getElementById('sgct-as-det-sub').textContent = paFecha(a.fecha) + ' — ' + a.descripcion
+      + ' · Libro: ' + (libro ? 'sólo ' + SGCT_LIBROS[libro].rot.toLowerCase() : 'fiscal + gestión');
+
+    var n = { fiscal: 0, gestion: 0 }, monto = { fiscal: 0, gestion: 0 };
+    (a.lineas || []).forEach(function(l){
+      var k = sgctAmbitoDe(l);
+      n[k] += 1; monto[k] += (l.debe || 0);
+    });
+
+    var cuadros = (libro ? [libro] : ['fiscal','gestion'])
+      .map(function(k){ return sgctAsientoCuadro(a, k); }).join('');
+    if (!cuadros) {
+      cuadros = '<div style="border:1px dashed var(--bor2);border-radius:8px;padding:14px;'
+        + 'font-size:13px;color:var(--mut);text-align:center;margin-bottom:14px">'
+        + 'Este asiento no tiene líneas en el libro ' + (libro ? SGCT_LIBROS[libro].del : 'elegido') + '.</div>';
+    }
+
+    var nota = function(txt, btn){
+      return '<div style="border:1px dashed var(--bor2);border-radius:8px;padding:9px 12px;font-size:12px;'
+        + 'color:var(--mut);margin-bottom:12px;display:flex;justify-content:space-between;'
+        + 'align-items:center;gap:10px;flex-wrap:wrap"><span>' + txt + '</span>' + (btn || '') + '</div>';
+    };
+    var arriba = '', abajo = '';
+    if (libro) {
+      var otro = libro === 'fiscal' ? 'gestion' : 'fiscal';
+      if (n[otro]) {
+        abajo = nota('Este asiento además tiene <strong>' + n[otro] + ' línea(s) '
+            + SGCT_LIBROS[otro].adj + '</strong> por ' + sgctMoney(monto[otro])
+            + ', que el libro elegido no muestra.',
+          '<button class="btn bo bs" onclick="sgctVerAsiento(' + a.id + ',\'\')" '
+            + 'style="padding:3px 8px;font-size:11px;white-space:nowrap">Ver los dos</button>');
+      }
+    } else if (n.fiscal && n.gestion) {
+      // Con los dos a la vista lo único que hay que evitar es que alguien los sume:
+      // no son un total, son la misma operación anotada en dos libros.
+      arriba = nota('Los dos cuadros <strong>no se suman</strong>: son la misma operación en dos libros y '
+        + 'cada uno cierra por su cuenta. A una presentación va solamente el fiscal ('
+        + sgctMoney(monto.fiscal) + ').');
+    }
+
+    // NADA DE BARRAS LATERALES (ver CLAUDE.md): anchos fijos por columna y el
+    // único de largo variable —el nombre de la cuenta— es el que se parte.
+    var html = '<style>'
+      + '#sgct-as-det-body .pa-tbl{width:100%;table-layout:fixed;margin:0}'
+      + '#sgct-as-det-body .pa-tbl th,#sgct-as-det-body .pa-tbl td{'
+        + 'overflow:hidden;text-overflow:ellipsis;white-space:nowrap}'
+      + '#sgct-as-det-body .sgct-cu-nom{white-space:normal;word-break:break-word}'
+      + '</style>'
+      + arriba + cuadros + abajo
       + (a.anulado ? '<div style="background:#fef2f2;border:1px solid #fca5a5;border-radius:8px;padding:10px 14px;font-size:13px;color:#991b1b">⚠ Asiento anulado el '+(a.anulado_en||'').slice(0,10)+'</div>' : '');
     document.getElementById('sgct-as-det-body').innerHTML = html;
     // Anular un asiento es lo más delicado de todo: se muestra sólo a quien
@@ -60742,19 +60860,28 @@ function sgctExportarAsientos(){
     var usuario = a.usuario_nombre || '';
     var lineas  = a.lineas || [];
     if (!lineas.length) {
-      filas.push([a.id, fmtFecha(a.fecha), ref, nroFact, prov, '', '', '', '', estado, usuario]);
+      // OJO CON LA CANTIDAD DE COLUMNAS: acá iban 11 valores contra 12
+      // encabezados y la planilla salía corrida —el estado caía abajo de
+      // "Haber"—. Si se agrega una columna, se agrega el vacío de este lado.
+      filas.push([a.id, fmtFecha(a.fecha), ref, nroFact, prov, '', '', '', '', '', '', '', estado, usuario]);
     } else {
       lineas.forEach(function(l){
         filas.push([
           a.id, fmtFecha(a.fecha), ref, nroFact, prov,
           l.cuenta_codigo||'', l.cuenta_nombre||'', l.descripcion||'',
           fmtNum(l.debe), fmtNum(l.haber),
+          // EL LIBRO VIAJA EN LA PLANILLA. Sin esta columna, un Excel bajado con
+          // "Fiscal + Gestión" lleva las dos mitades mezcladas y sin marca: el
+          // que sume la columna Debe obtiene un número que no es el de ningún
+          // libro, y afuera del sistema ya no hay manera de darse cuenta.
+          SGCT_LIBROS[sgctAmbitoDe(l)].rot,
+          (sgctAmbitoDe(l) === 'gestion' ? ((window.SG_MOTIVOS || {})[l.motivo] || l.motivo || '') : ''),
           estado, usuario
         ]);
       });
     }
   });
-  var cols = ['ID Asiento','Fecha','Referencia','Nro. Factura','Proveedor','Cta. Código','Cta. Nombre','Descripción Línea','Debe','Haber','Estado','Usuario'];
+  var cols = ['ID Asiento','Fecha','Referencia','Nro. Factura','Proveedor','Cta. Código','Cta. Nombre','Descripción Línea','Debe','Haber','Libro','Motivo','Estado','Usuario'];
   var tab='\t', nl='\r\n';
   var contenido = '\uFEFF' + cols.join(tab) + nl + filas.map(function(r){ return r.join(tab); }).join(nl);
   var blob = new Blob([contenido], { type: 'text/tab-separated-values;charset=utf-8' });
