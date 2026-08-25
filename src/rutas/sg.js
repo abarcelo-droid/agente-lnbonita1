@@ -3809,7 +3809,13 @@ router.post('/oc/:id/factura-completa', facturaUpload.single('archivo'), require
     const campos = [oc.id, oc.proveedor_id || null, val(b.tipo_comprobante), val(b.punto_venta),
       val(b.numero), val(b.fecha_emision), val(b.cuit_emisor), neto, numF(b.iva_alicuota), iva,
       pIva, pIibb, pGan, otros, val(b.iibb_jurisdiccion), total != null ? total : suma, val(b.cae), val(b.cae_vencimiento),
-      ruta, nombre, b.leido_por_ia ? 1 : 0, val(b.observaciones), difG, difG > 0 ? difM : null, uid(req)];
+      // EL MOTIVO SE GUARDA SIEMPRE QUE HAYA DIFERENCIA, para los dos lados. Se
+      // exige con `difG !== 0` tres líneas más arriba y después se guardaba sólo si
+      // era positiva: con una factura que vino por MÁS, el operador elegía "error
+      // del proveedor" y la factura quedaba sin motivo, el asiento salía marcado
+      // como "ajuste de gestión", y el informe de Medir gestión --que abre por
+      // motivo justamente para saber qué se puede reclamar-- contaba mal esos casos.
+      ruta, nombre, b.leido_por_ia ? 1 : 0, val(b.observaciones), difG, difG !== 0 ? difM : null, uid(req)];
 
     let id;
     db.transaction(() => {
@@ -8383,9 +8389,14 @@ router.post('/pagos', requireAuth, (req, res) => {
       // CUÁNTO DE ESTO VA CONTRA LA PARTE SIN COMPROBANTE. Con "las dos" se
       // reparte en proporción: es la única regla que no depende del orden en que
       // se hayan cargado las facturas.
-      const ges = ambitoPago === 'gestion' ? cancela
+      // Y NUNCA NEGATIVO. Si la factura vino por MÁS de lo acordado, pendGes es
+      // negativo —se le debe menos que lo que dice el papel— y este reparto daba
+      // una parte de gestión al revés que después se restaba de la salida de
+      // caja. Un pago no cancela una deuda negativa: eso es una nota de crédito.
+      const gesCrudo = ambitoPago === 'gestion' ? cancela
         : (ambitoPago === 'fiscal' ? 0
            : (pendiente > 0 ? r2(cancela * pendGes / pendiente) : 0));
+      const ges = gesCrudo > 0 ? gesCrudo : 0;
       facturas.push({ f, monto: im.monto, desdeACuenta: im.desdeACuenta,
         gestion: ges, fiscal: r2(cancela - ges) });
     }
@@ -8400,6 +8411,24 @@ router.post('/pagos', requireAuth, (req, res) => {
     }
     if (aCuenta > 0 && ambitoPago === 'gestion') gesNuevo = r2(gesNuevo + aCuenta);
     if (gesNuevo > total) gesNuevo = total;
+    // ── Y NO PUEDE SER NEGATIVO ─────────────────────────────────────────
+    //
+    // Desde que se acepta que la factura venga por MÁS de lo acordado, la
+    // diferencia de gestión queda NEGATIVA: se le debe menos que lo que dice el
+    // papel. Al pagar esa factura con «las dos» —que es la opción por defecto—
+    // la parte de gestión daba negativa, y de ahí salían dos números al revés:
+    //
+    //   fiscal = total − gesNuevo   →   con gesNuevo negativo, MÁS que el total
+    //   el movimiento de caja       →   m.monto − gesMedio, también de más
+    //
+    // Con una factura de 10.000 y 8.000 acordados se pagaban 8.000 y Caja y
+    // Bancos registraba una salida de 10.000: el saldo de la cuenta quedaba
+    // 2.000 más bajo que el del banco, y la mitad de gestión no se cancelaba
+    // nunca porque la línea se filtraba por `monto > 0`.
+    //
+    // Un pago no cancela una deuda negativa: eso se arregla con una nota de
+    // crédito del proveedor, no repartiendo la plata que sale hoy.
+    if (gesNuevo < 0) gesNuevo = 0;
     // El motivo de las líneas de gestión sale de la factura que se está
     // cancelando: es la misma diferencia, y repetirlo deja el informe por motivo
     // sumando lo mismo de los dos lados.

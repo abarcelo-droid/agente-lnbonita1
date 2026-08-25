@@ -12334,17 +12334,27 @@ function sgFmAsientoPintar(imp){
   // Proveedores— porque es la misma mercadería y la misma deuda. Sin IVA.
   var extra = [];
   var difG = sgFmDifValor();
-  if (difG > 0) {
+  // LOS DOS SENTIDOS, COMO LOS GRABA EL BACKEND. Acá decía `if (difG > 0)`: con una
+  // factura que vino por MÁS de lo acordado el cuadro no mostraba nada y el backend
+  // igual grababa las dos líneas, con los lados cruzados. El que carga la factura
+  // veía un asiento y se grababa otro, justo en el caso raro donde más falta mirarlo.
+  //
+  // Faltó facturar (dif > 0): el gasto SUBE y la deuda sube.
+  // Facturó de más (dif < 0): al revs. Las mismas dos cuentas, los lados cruzados
+  // --un asiento con importes negativos no lo lee nadie--.
+  if (difG) {
     var TRIB = ['iva', 'percepcion_iva', 'percepcion_iibb', 'percepcion_ganancias', 'retencion'];
     var lg = (m.lineas || []).filter(function(l){
       return l.lado === 'debe' && TRIB.indexOf(l.tipo_linea) < 0; })[0];
     var lp = (m.lineas || []).filter(function(l){ return l.tipo_linea === 'proveedores'; })[0];
     if (lg && lp) {
+      var mg = Math.abs(difG), sube = difG > 0;
+      var rot = sube ? 'falta facturar' : 'facturado de más';
       extra = [
-        { cuenta_codigo: lg.cuenta_codigo, cuenta_nombre: lg.cuenta_nombre, lado: 'debe',
-          tipo_linea: 'falta facturar', monto: difG },
-        { cuenta_codigo: lp.cuenta_codigo, cuenta_nombre: lp.cuenta_nombre, lado: 'haber',
-          tipo_linea: 'falta facturar', monto: difG },
+        { cuenta_codigo: lg.cuenta_codigo, cuenta_nombre: lg.cuenta_nombre,
+          lado: sube ? 'debe' : 'haber', tipo_linea: rot, monto: mg },
+        { cuenta_codigo: lp.cuenta_codigo, cuenta_nombre: lp.cuenta_nombre,
+          lado: sube ? 'haber' : 'debe', tipo_linea: rot, monto: mg },
       ];
     }
   }
