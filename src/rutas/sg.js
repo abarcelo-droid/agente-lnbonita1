@@ -2830,6 +2830,10 @@ router.get('/partidas/:id/venta', requireAuth, (req, res) => {
     // emite es la forma más barata de emitirlo mal.
     const oc = db.prepare(`SELECT o.id, o.trazabilidad, o.numero, o.fecha_oc, o.tipo_precio,
         o.flete_a_cargo, o.flete_monto, o.flete_con_iva,
+        -- ¿EL PRECIO PACTADO TRAE EL IVA ADENTRO? Es la diferencia entre pagarle al
+        -- productor lo que dice el papel o eso más un 10,5% -- y la pantalla lo
+        -- daba por supuesto sin decirlo en ningún lado.
+        o.precio_incluye_iva, o.iva_alicuota_oc,
         p.id AS prov_id, p.razon_social, p.cuit, p.localidad, p.provincia,
         p.codigo_postal, p.categoria_fiscal, p.comision_pct
         FROM sg_oc o LEFT JOIN sg_proveedores p ON p.id = o.proveedor_id
@@ -3075,7 +3079,14 @@ router.get('/partidas/:id/venta', requireAuth, (req, res) => {
         const unico = precios.length && precios.every((x) => x === precios[0]) ? precios[0] : null;
         return { total: r2(a.total), precio_por_bulto: unico,
                  base: (a.detalle[0] || {}).base || null,
-                 items: (a.detalle || []).length };
+                 items: (a.detalle || []).length,
+                 // 1 = el precio ya trae el IVA; 0 = es neto; null = la orden es
+                 // vieja y no lo dice. La pantalla asume CON IVA, que es lo
+                 // habitual (Pablo, 25/8/2026), y lo deja cambiar.
+                 precio_incluye_iva: oc.precio_incluye_iva == null ? null
+                   : (oc.precio_incluye_iva ? 1 : 0),
+                 iva_alicuota: (oc.iva_alicuota_oc != null && oc.iva_alicuota_oc !== '')
+                   ? Number(oc.iva_alicuota_oc) : null };
       })(),
       // Lo que se le descuenta al productor, traído de donde ya vive.
       //

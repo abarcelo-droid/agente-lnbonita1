@@ -1008,10 +1008,26 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
              y no se mostraba en ningún lado, así que nada avisaba cuando el precio
              por el que se está liquidando no da contra el de la orden. -->
         <div id="liq-cerr-acordado" style="font-size:11.5px;margin-top:6px"></div>
+        <!-- ══ ¿EL PRECIO PACTADO TRAE IVA? ═════════════════════════
+             Pablo, 25/8/2026: "el precio acordado en la orden en general es CON IVA,
+             pero podemos ponerle un selector o un cartel grande para que sepan que es
+             con IVA". Es las dos cosas: el cartel dice qué se está asumiendo y el
+             selector deja corregirlo. La diferencia entre una cosa y la otra es un
+             10,5% sobre lo que cobra el productor. -->
+        <div style="margin-top:10px;border:1px solid #0369a1;background:rgba(3,105,161,.07);
+             border-radius:8px;padding:9px 12px;display:flex;gap:12px;align-items:center;flex-wrap:wrap">
+          <span style="font-weight:700;font-size:12.5px;color:#075985">El precio acordado es</span>
+          <select id="liq-cerr-iva" onchange="liqCerradoResolver()"
+                  style="padding:5px 8px;border-radius:6px;border:1px solid var(--bor);font-weight:700">
+            <option value="con">FINAL, con IVA incluido</option>
+            <option value="sin">NETO, hay que sumarle el IVA</option>
+          </select>
+          <span id="liq-cerr-iva-nota" style="font-size:11.5px;color:var(--mut)"></span>
+        </div>
         <div style="font-size:11px;color:var(--mut);margin-top:8px">
-          El precio acordado es lo que el productor cobra por bulto, con IVA. Las ventas, sus IVA
-          y los gastos vienen de la partida y no se tocan: lo que se despeja es la
-          <b>comisión</b>, que es la variable.
+          Las ventas, sus IVA y los gastos vienen de la partida y no se tocan: lo que se
+          despeja es la <b>comisión</b>, que es la variable. La última línea de la
+          liquidación tiene que dar exactamente el precio acordado por la cantidad.
         </div>
       </div>
       <div id="liq-venta-cab" style="display:none;margin-bottom:12px"></div>
@@ -1102,6 +1118,12 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
             </tr></thead>
             <tbody id="liq-grilla-body"></tbody>
           </table></div>
+          <!-- A PRECIO CERRADO, ACÁ SE VE SI LA ÚLTIMA LÍNEA DIO LO ACORDADO.
+               Pablo: "la última línea de la liquidación debe dar el precio acordado
+               por la cantidad". El despeje está hecho para eso, pero cuando se corta
+               —comisión negativa, partida sin ventas— la grilla se queda con lo
+               anterior y el neto es otro sin que nada lo diga. -->
+          <div id="liq-t-cierre" style="margin-top:8px;font-size:12.5px"></div>
           <div id="liq-gestion-motivo-fila" style="display:none;margin-top:10px">
             <div class="fl" style="max-width:420px"><label>Motivo de la parte de gestión</label>
               <select id="liq-gestion-motivo" onchange="liqTotales()">
@@ -11450,6 +11472,13 @@ function liqDesdePartida(r){
     if (hint) hint.innerHTML = '<span style="color:var(--mut)">se pone abajo, '
       + 'en «bultos a liquidar»</span>';
   }
+  // ── ¿EL PRECIO PACTADO TRAE IVA? LO QUE DIGA LA ORDEN ───────────────
+  // Y si la orden no lo dice —las viejas no lo guardaban—, CON IVA, que es lo
+  // habitual (Pablo, 25/8/2026). Queda a la vista y se puede cambiar: la
+  // diferencia entre una cosa y la otra es un 10,5% sobre lo que cobra.
+  var selIvaAc = eid('liq-cerr-iva');
+  if (selIvaAc) selIvaAc.value = (ac.precio_incluye_iva === 0) ? 'sin' : 'con';
+
   // ── Y LO QUE PACTÓ LA ORDEN, A LA VISTA ─────────────────────────────
   // El total acordado ya viajaba y no se mostraba en ningún lado. Sin él, un
   // precio por bulto mal tipeado da un total redondo y perfectamente creíble.
@@ -31309,7 +31338,7 @@ function liqRellenarForm() {
   LIQ.origen = {};
   // La base manual de gastos administrativos tampoco: el ajuste de la
   // liquidación anterior se sumaría encima del de ésta.
-  LIQ.cerrado = { gastosManual: null, gastosEscrito: null };
+  LIQ.cerrado = { gastosManual: null, gastosEscrito: null, objetivo: 0 };
   // ── Y LA PANTALLA SE VACÍA DE VERDAD ───────────────────────────────
   //
   // Faltaban dos cosas: la caja del precio cerrado y el cuerpo de la grilla. Y
@@ -31521,10 +31550,50 @@ function liqCerradoResolver(){
   var out = eid('liq-cerr-resultado'), tot = eid('liq-cerr-total');
   if (!pre || !cant || !out) return;
   var m2 = function(x){ return Math.round((Number(x) || 0) * 100) / 100; };
-  var T = m2(liqNum(pre) * (parseFloat(cant.value) || 0));
-  if (tot) tot.textContent = T ? liqPlata(T) : '—';
 
-  var d = liqGrillaLeer();
+  // ── ¿EL PRECIO PACTADO TRAE IVA? ────────────────────────────────────
+  //
+  // Pablo, 25/8/2026: "el precio acordado en la orden en general es CON IVA".
+  // Se asume eso, se dice en grande, y el selector deja corregirlo cuando la orden
+  // se cargó al revés — la diferencia es un 10,5% sobre lo que cobra el productor.
+  //
+  // El objetivo T es SIEMPRE el precio FINAL: si lo que se tipeó es neto, se le
+  // suma el IVA acá. Del alícuota manda la de la orden; si la orden no la dice, la
+  // que sale de las ventas de la partida (IVA sobre neto), que es la del producto.
+  var ac = (LIQ.venta && LIQ.venta.acordado) || {};
+  var dv = liqGrillaLeer();
+  var alicVta = (dv.fiscal.ventas > 0)
+    ? Math.round((dv.fiscal.iva_ventas / dv.fiscal.ventas) * 1000) / 10 : null;
+  var alicAc = (ac.iva_alicuota != null) ? Number(ac.iva_alicuota)
+             : (alicVta != null && alicVta > 0 ? alicVta : 10.5);
+  var selIva = eid('liq-cerr-iva');
+  var conIva = !selIva || selIva.value !== 'sin';
+  var base = m2(liqNum(pre) * (parseFloat(cant.value) || 0));
+  var T = conIva ? base : m2(base * (1 + alicAc / 100));
+  if (tot) tot.textContent = T ? liqPlata(T) : '—';
+  // EL OBJETIVO QUEDA GUARDADO acá arriba, antes de cualquier corte: los caminos
+  // en que el despeje se rinde —comisión negativa, partida sin ventas— también
+  // tienen que quedar marcados abajo, y no salir en silencio con la grilla vieja.
+  LIQ.cerrado = LIQ.cerrado || {};
+  LIQ.cerrado.objetivo = T;
+
+  // Y se dice qué se está asumiendo, con el número que sale de asumirlo.
+  var nota = eid('liq-cerr-iva-nota');
+  if (nota) {
+    var loQueDice = (ac.precio_incluye_iva === 1) ? 'con IVA'
+                  : (ac.precio_incluye_iva === 0) ? 'sin IVA' : null;
+    nota.innerHTML = (conIva
+        ? 'El productor cobra ' + (base ? liqPlata(base) : '—') + ' y no se le suma nada.'
+        : 'Se le suma el ' + String(alicAc).replace('.', ',') + '% de IVA: cobra '
+          + (T ? liqPlata(T) : '—') + '.')
+      // Si la orden lo dice y no coincide con lo elegido, se avisa: uno de los dos
+      // está mal y son un 10,5% de diferencia.
+      + (loQueDice && loQueDice !== (conIva ? 'con IVA' : 'sin IVA')
+          ? ' <b style="color:#9a3412">La orden dice que se pactó ' + loQueDice + '.</b>'
+          : loQueDice ? ' <span style="color:#166534">Coincide con la orden.</span>' : '');
+  }
+
+  var d = dv;   // ya leída arriba para sacar la alícuota de las ventas
   var Vf = d.fiscal.ventas, IVAv = d.fiscal.iva_ventas, Vg = d.gestion.ventas;
   var aCom = (liqAlic('comision') || 0) / 100;
   var aGas = (liqAlic('gastos_admin') || 0) / 100;
@@ -31553,11 +31622,13 @@ function liqCerradoResolver(){
 
   if (!T) {
     out.innerHTML = '<span style="color:var(--mut)">Poné el precio acordado y los bultos.</span>';
+    liqTotales();
     return;
   }
   if (den <= 0) {
     out.innerHTML = '<span style="color:var(--err)">Sin ventas cargadas no hay sobre qué '
       + 'calcular la comisión.</span>';
+    liqTotales();
     return;
   }
 
@@ -31566,6 +31637,7 @@ function liqCerradoResolver(){
     out.innerHTML = '<span style="color:var(--err)"><b>No cierra.</b> Para pagarle ' + liqPlata(T)
       + ' habría que poner ' + liqPlata(-(p * den)) + ', no cobrar comisión. '
       + 'Revisá el precio o los gastos.</span>';
+    liqTotales();
     return;
   }
 
@@ -31875,6 +31947,31 @@ function liqTotales(){
   pon('liq-t-pagar-f', pagarF, true);
   pon('liq-t-pagar-g', pagarG, true);
   pon('liq-t-pagar', m2(pagarF + pagarG), true);
+
+  // ── A PRECIO CERRADO, LA ÚLTIMA LÍNEA TIENE QUE DAR LO ACORDADO ─────
+  //
+  // Pablo, 25/8/2026: "la última línea de la liquidación debe dar el precio
+  // acordado por la cantidad".
+  //
+  // El despeje está hecho para que cierre al peso, pero eso no se veía en ningún
+  // lado — y hay casos en los que NO cierra y la pantalla no lo decía: cuando el
+  // despeje se corta porque la comisión daría negativa o porque la partida no
+  // tiene ventas cargadas, la grilla se queda con lo anterior y el neto es otro.
+  // Acá se compara contra el objetivo y se dice, con el número.
+  var cie = eid('liq-t-cierre');
+  if (cie) {
+    var obj = (liqModo() === 'cerrado' && LIQ.cerrado) ? Number(LIQ.cerrado.objetivo) : 0;
+    if (!obj) { cie.innerHTML = ''; }
+    else {
+      var dif = m2(m2(pagarF + pagarG) - obj);
+      cie.innerHTML = Math.abs(dif) < 0.01
+        ? '<span style="color:#166534;font-weight:700">✓ El neto a pagar da el precio acordado</span>'
+          + '<span style="color:var(--mut)"> — ' + sgMoney(obj) + '</span>'
+        : '<span style="color:var(--err);font-weight:700">⚠ El neto a pagar NO da lo acordado</span>'
+          + '<span style="color:var(--mut)"> — acordado ' + sgMoney(obj) + ', da '
+          + sgMoney(m2(pagarF + pagarG)) + ' (diferencia ' + sgMoney(dif) + ')</span>';
+    }
+  }
 
   // El motivo de gestión sólo se pide si hay gestión: pedirlo en cero es pedir
   // un dato que no existe.
