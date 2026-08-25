@@ -599,6 +599,9 @@
   };
   window.__ifco2Preview = function (input) {
     var f = input.files && input.files[0]; if (!f) return;
+    // El archivo se guarda para poder pedir el informe sin volver a elegirlo: el cruce se
+    // calcula CONTRA el Excel, no hay nada guardado en la base de donde sacarlo después.
+    window.__ifco2ConsolFile = f;
     var box = document.getElementById('ifco2-consol-preview');
     box.innerHTML = loading('Procesando ' + esc(f.name) + '…'); icons();
     var fd = new FormData(); fd.append('archivo', f);
@@ -622,11 +625,56 @@
             + (coincide ? '<span class="tag consol">' + ic('check') + ' coincide</span>'
                         : '<b style="color:var(--i-err)">Δ ' + nf(b.diferencia || 0) + '</b>')
             + '</span></div>'; }
-        box.innerHTML = '<div class="sectlabel">A consolidar · ya · no encontrados</div>' + grp('Despachos', d.despachos) + grp('Ingresos', d.ingresos) + grp('Altas R22', d.r22)
-          + '<div class="sectlabel" style="margin-top:12px">Balance archivo vs sistema</div>' + bal('Egresos', d.balance_egresos) + bal('Ingresos', d.balance_ingresos)
-          + '<button class="btn btn-pri btn-sm" style="margin-top:12px;width:100%;justify-content:center" onclick="__ifco2Legacy(\'ifcoConsolidarDesdeCruce\')">' + ic('check-check') + ' Abrir consolidación (revisar y aplicar)</button>';
+        // Qué archivo y qué período. Sin esto la vista previa mostraba números sueltos y la
+        // zona de arrastre seguía diciendo "arrastrá el Excel", así que parecía que no se
+        // había subido nada.
+        var per = d.periodo || {};
+        var fd2 = function (x) { if (!x) return '?'; var p = String(x).slice(0, 10).split('-'); return p[2] + '/' + p[1] + '/' + p[0]; };
+        var cab = '<div class="sectlabel">Archivo</div>'
+          + '<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--i-line)"><span>' + esc(d.archivo || f.name) + '</span>'
+          + '<span class="tnum muted">' + (per.desde ? fd2(per.desde) + ' al ' + fd2(per.hasta) : 'sin fechas') + '</span></div>';
+        // Las filas que faltaban: el lado del sistema y las diferencias de cantidad.
+        var fila = function (lbl, cant, cajones, color) {
+          return '<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--i-line)"><span>' + lbl + '</span>'
+            + '<span class="tnum"><b' + (cant && color ? ' style="color:' + color + '"' : '') + '>' + nf(cant) + '</b>'
+            + (cajones != null ? ' <span class="muted">· ' + nf(cajones) + ' caj.</span>' : '') + '</span></div>'; };
+        var sumar = function (arr, k) { return (arr || []).reduce(function (t, x) { return t + (parseInt(x[k]) || 0); }, 0); };
+        box.innerHTML = cab
+          + '<div class="sectlabel" style="margin-top:12px">A consolidar · ya · no encontrados</div>' + grp('Despachos', d.despachos) + grp('Ingresos', d.ingresos) + grp('Altas R22', d.r22)
+          + '<div class="sectlabel" style="margin-top:12px">Diferencias a trabajar con IFCO</div>'
+          + fila('Está en el sistema y no en IFCO', (d.sobran_sistema || []).length, sumar(d.sobran_sistema, 'cantidad'), 'var(--i-err)')
+          + fila('Mismo remito, distinta cantidad', (d.dif_cantidad || []).length, sumar(d.dif_cantidad, 'diferencia'), 'var(--i-err)')
+          + fila('Nuestro, sin N° de remito usable', (d.sin_numero || []).length, sumar(d.sin_numero, 'cantidad'), null)
+          + fila('N° de remito repetido', (d.duplicados || []).length, null, null)
+          + '<div class="sectlabel" style="margin-top:12px">Balance del período</div>' + bal('Egresos', d.balance_egresos) + bal('Ingresos', d.balance_ingresos)
+          + '<button class="btn btn-pri btn-sm" style="margin-top:12px;width:100%;justify-content:center" onclick="__ifco2Legacy(\'ifcoConsolidarDesdeCruce\')">' + ic('check-check') + ' Abrir consolidación (revisar y aplicar)</button>'
+          + '<button class="btn btn-sm" style="margin-top:8px;width:100%;justify-content:center" onclick="__ifco2InformeConsol(this)">' + ic('file-spreadsheet') + ' Bajar informe para IFCO (Excel)</button>';
         icons();
       }).catch(function () { box.innerHTML = empty('Error de red al procesar el archivo'); });
+  };
+
+  // El informe se pide con el mismo archivo que se subió recién. Va en Excel y no en PDF
+  // porque es una planilla de TRABAJO: se filtra, se ordena y se tacha renglón por renglón
+  // con el del otro lado del mostrador.
+  window.__ifco2InformeConsol = function (btn) {
+    var f = window.__ifco2ConsolFile;
+    if (!f) { alert('Subí primero el Excel de IFCO.'); return; }
+    var txt = btn.innerHTML;
+    btn.disabled = true; btn.innerHTML = 'Armando el informe…';
+    var fd = new FormData(); fd.append('archivo', f);
+    fetch(API + '/consolidar/informe.xlsx', { method: 'POST', credentials: 'include', body: fd })
+      .then(function (r) {
+        if (!r.ok) return r.json().then(function (e) { throw new Error((e && e.error) || 'Error ' + r.status); });
+        return r.blob();
+      })
+      .then(function (b) {
+        var u = URL.createObjectURL(b), a = document.createElement('a');
+        a.href = u; a.download = 'consolidacion-ifco.xlsx';
+        document.body.appendChild(a); a.click(); a.remove();
+        setTimeout(function () { URL.revokeObjectURL(u); }, 4000);
+        btn.disabled = false; btn.innerHTML = txt; icons();
+      })
+      .catch(function (e) { alert('No se pudo armar el informe: ' + e.message); btn.disabled = false; btn.innerHTML = txt; icons(); });
   };
 
   // =========================================================================
