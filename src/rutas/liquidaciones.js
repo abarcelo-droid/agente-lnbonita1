@@ -112,6 +112,18 @@ try { db.exec("ALTER TABLE liquidaciones ADD COLUMN bultos_liquidados REAL"); } 
 // como se cargó. El asiento sale de acá, así que tiene que quedar guardado o no
 // hay forma de explicar el asiento después.
 try { db.exec("ALTER TABLE liquidaciones ADD COLUMN grilla_json TEXT"); } catch(_){}
+// ══ UNA LIQUIDACIÓN ES DEUDA CON EL PRODUCTOR, Y SE PAGA ══════════════
+//
+// Una partida se documenta con factura O con liquidación. Si se documenta con
+// liquidación, el asiento se generaba bien --acredita Proveedores, con su mitad de
+// gestión y todo-- pero la cuenta corriente de proveedores y la pantalla de pagos
+// leían SÓLO las facturas de compra: esa deuda estaba en el mayor de Proveedores y
+// no estaba en la pantalla donde se la mira, y no había forma de imputarle un pago.
+//
+// Las dos columnas son el espejo exacto de sg_facturas_compra: cuánto se pagó en
+// total y cuánto de eso fue contra la parte que no lleva comprobante.
+try { db.exec("ALTER TABLE liquidaciones ADD COLUMN saldo_pagado REAL NOT NULL DEFAULT 0"); } catch(_){}
+try { db.exec("ALTER TABLE liquidaciones ADD COLUMN saldo_pagado_gestion REAL NOT NULL DEFAULT 0"); } catch(_){}
 try { db.exec("CREATE INDEX IF NOT EXISTS idx_liq_oc ON liquidaciones(oc_id)"); } catch(_){}
 try { db.exec("CREATE INDEX IF NOT EXISTS idx_liq_fecha ON liquidaciones(fecha)"); } catch(_){}
 try { db.exec("CREATE INDEX IF NOT EXISTS idx_liq_n     ON liquidaciones(n_liquidacion)"); } catch(_){}

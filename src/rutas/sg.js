@@ -7967,7 +7967,18 @@ router.get('/cc-proveedores', requireAuth, (req, res) => {
         COALESCE((SELECT SUM(COALESCE(f.total,0) + COALESCE(f.dif_gestion,0) - COALESCE(f.saldo_pagado,0))
                     FROM sg_facturas_compra f
                     JOIN sg_asientos a ON a.id = f.asiento_id AND COALESCE(a.anulado,0) = 0
-                   WHERE f.proveedor_id = p.id AND f.activo = 1),0) AS facturado,
+                   WHERE f.proveedor_id = p.id AND f.activo = 1),0)
+        -- ── Y LAS LIQUIDACIONES, QUE SON LA OTRA FORMA DE DOCUMENTAR ──────
+        -- Una partida se documenta con factura O con liquidación. La liquidación
+        -- generaba su asiento --acreditando Proveedores-- y no aparecía acá: la
+        -- deuda estaba en el mayor y no en la pantalla donde se la mira, así que
+        -- los dos tenían que dar distinto por fuerza.
+        -- El proveedor sale de la orden, que es de donde cuelga la liquidación.
+        + COALESCE((SELECT SUM(COALESCE(lq.total,0) + COALESCE(lq.dif_gestion,0) - COALESCE(lq.saldo_pagado,0))
+                    FROM liquidaciones lq
+                    JOIN sg_oc oc2 ON oc2.id = lq.oc_id
+                    JOIN sg_asientos a2 ON a2.id = lq.asiento_id AND COALESCE(a2.anulado,0) = 0
+                   WHERE oc2.proveedor_id = p.id AND lq.eliminado_en IS NULL),0) AS facturado,
         -- ── QUÉ PARTE DE LO QUE SE LE DEBE NO TIENE COMPROBANTE ──────────
         -- Sale de lo que CADA PAGO dijo estar cancelando, no de un prorrateo:
         -- saldo_pagado_gestion es cuánto de lo pagado fue contra la parte sin
@@ -7979,7 +7990,14 @@ router.get('/cc-proveedores', requireAuth, (req, res) => {
                     FROM sg_facturas_compra f
                     JOIN sg_asientos a ON a.id = f.asiento_id AND COALESCE(a.anulado,0) = 0
                    WHERE f.proveedor_id = p.id AND f.activo = 1
-                     AND COALESCE(f.dif_gestion,0) <> 0),0) AS pendiente_gestion,
+                     AND COALESCE(f.dif_gestion,0) <> 0),0)
+        + COALESCE((SELECT SUM(ROUND(
+                    COALESCE(lq.dif_gestion,0) - COALESCE(lq.saldo_pagado_gestion,0), 2))
+                    FROM liquidaciones lq
+                    JOIN sg_oc oc3 ON oc3.id = lq.oc_id
+                    JOIN sg_asientos a3 ON a3.id = lq.asiento_id AND COALESCE(a3.anulado,0) = 0
+                   WHERE oc3.proveedor_id = p.id AND lq.eliminado_en IS NULL
+                     AND COALESCE(lq.dif_gestion,0) <> 0),0) AS pendiente_gestion,
         -- LO QUE TODAVÍA NO ESTÁ EN EL LIBRO. Se informa aparte y NO suma al
         -- saldo: la cuenta corriente refleja la contabilidad, y hasta que no
         -- hay asiento no hay deuda registrada. Se muestra igual para que el que
@@ -8065,13 +8083,38 @@ router.get('/pagos/pendientes/:proveedorId', requireAuth, (req, res) => {
              ROUND(COALESCE(f.total,0) - (COALESCE(f.saldo_pagado,0) - COALESCE(f.saldo_pagado_gestion,0)), 2) AS pendiente_fiscal,
              ROUND(COALESCE(f.dif_gestion,0) - COALESCE(f.saldo_pagado_gestion,0), 2) AS pendiente_gestion,
              ROUND(COALESCE(f.total,0) + COALESCE(f.dif_gestion,0) - COALESCE(f.saldo_pagado,0), 2) AS pendiente,
-             COALESCE(o.trazabilidad, o.numero) AS partida
+             COALESCE(o.trazabilidad, o.numero) AS partida,
+             'factura' AS tipo
         FROM sg_facturas_compra f
         JOIN sg_asientos a ON a.id = f.asiento_id AND COALESCE(a.anulado,0) = 0
         LEFT JOIN sg_oc o ON o.id = f.oc_id
        WHERE f.proveedor_id = ? AND f.activo = 1
          AND ROUND(COALESCE(f.total,0) + COALESCE(f.dif_gestion,0) - COALESCE(f.saldo_pagado,0), 2) > 0
        ORDER BY f.fecha_emision, f.id`).all(req.params.proveedorId);
+
+    // ── Y LAS LIQUIDACIONES, QUE TAMBIÉN HAY QUE PAGARLAS ─────────────
+    // Mismas columnas y mismo criterio que las facturas, para que la pantalla no
+    // tenga que saber de cuál de las dos vino cada renglón. El número es el de la
+    // liquidación y el tipo dice qué es, que es lo que después decide contra qué
+    // tabla se imputa el pago.
+    const liqs = db.prepare(`
+      SELECT lq.id, lq.fecha AS fecha_emision, 'LIQ' AS tipo_comprobante,
+             NULL AS punto_venta, lq.n_liquidacion AS numero,
+             lq.total, COALESCE(lq.saldo_pagado,0) AS pagado,
+             COALESCE(lq.dif_gestion,0) AS dif_gestion, lq.dif_motivo,
+             ROUND(COALESCE(lq.total,0) - (COALESCE(lq.saldo_pagado,0) - COALESCE(lq.saldo_pagado_gestion,0)), 2) AS pendiente_fiscal,
+             ROUND(COALESCE(lq.dif_gestion,0) - COALESCE(lq.saldo_pagado_gestion,0), 2) AS pendiente_gestion,
+             ROUND(COALESCE(lq.total,0) + COALESCE(lq.dif_gestion,0) - COALESCE(lq.saldo_pagado,0), 2) AS pendiente,
+             COALESCE(o.trazabilidad, o.numero) AS partida,
+             'liquidacion' AS tipo
+        FROM liquidaciones lq
+        JOIN sg_oc o ON o.id = lq.oc_id
+        JOIN sg_asientos a ON a.id = lq.asiento_id AND COALESCE(a.anulado,0) = 0
+       WHERE o.proveedor_id = ? AND lq.eliminado_en IS NULL
+         AND ROUND(COALESCE(lq.total,0) + COALESCE(lq.dif_gestion,0) - COALESCE(lq.saldo_pagado,0), 2) > 0
+       ORDER BY lq.fecha, lq.id`).all(req.params.proveedorId);
+    rows.push(...liqs);
+    rows.sort((a, b) => String(a.fecha_emision || '').localeCompare(String(b.fecha_emision || '')));
     res.json({ ok: true, data: rows });
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
@@ -8166,6 +8209,11 @@ router.post('/pagos', requireAuth, (req, res) => {
     const imputaciones = (Array.isArray(b.imputaciones) ? b.imputaciones : [])
       .map((x) => ({
         factura_id: Number(x.factura_id),
+        // CONTRA QUÉ COMPROBANTE. Una partida se documenta con factura O con
+        // liquidación, y las dos son deuda con el productor. Sin esto sólo se
+        // podía pagar la factura: la liquidación quedaba en el mayor de
+        // Proveedores sin forma de imputarle un peso.
+        tipo: String(x.tipo || '') === 'liquidacion' ? 'liquidacion' : 'factura',
         monto: r2(x.monto),
         desdeACuenta: r2(x.desde_a_cuenta),
       }))
@@ -8364,12 +8412,26 @@ router.post('/pagos', requireAuth, (req, res) => {
     // proveedor y sin pasarse de lo que le queda pendiente.
     const facturas = [];
     for (const im of imputaciones) {
-      const f = db.prepare(`SELECT f.*, a.anulado AS asiento_anulado FROM sg_facturas_compra f
-        LEFT JOIN sg_asientos a ON a.id = f.asiento_id
-        WHERE f.id=? AND f.activo=1`).get(im.factura_id);
-      if (!f) return res.status(400).json({ ok: false, error: 'Una de las facturas no existe' });
+      // LA MISMA FORMA PARA LAS DOS. La liquidación no tiene proveedor propio
+      // --cuelga de la orden-- ni la columna `activo`: se normaliza ací para que
+      // todo lo que viene después no tenga que saber de cuál de las dos vino.
+      const f = im.tipo === 'liquidacion'
+        ? db.prepare(`SELECT lq.id, lq.n_liquidacion AS numero, lq.total,
+              COALESCE(lq.dif_gestion,0) AS dif_gestion, lq.dif_motivo,
+              COALESCE(lq.saldo_pagado,0) AS saldo_pagado,
+              COALESCE(lq.saldo_pagado_gestion,0) AS saldo_pagado_gestion,
+              lq.asiento_id, oc.proveedor_id, a.anulado AS asiento_anulado
+            FROM liquidaciones lq
+            JOIN sg_oc oc ON oc.id = lq.oc_id
+            LEFT JOIN sg_asientos a ON a.id = lq.asiento_id
+            WHERE lq.id=? AND lq.eliminado_en IS NULL`).get(im.factura_id)
+        : db.prepare(`SELECT f.*, a.anulado AS asiento_anulado FROM sg_facturas_compra f
+            LEFT JOIN sg_asientos a ON a.id = f.asiento_id
+            WHERE f.id=? AND f.activo=1`).get(im.factura_id);
+      if (!f) return res.status(400).json({ ok: false, error: 'Uno de los comprobantes no existe' });
+      f._tipo = im.tipo;
       if (Number(f.proveedor_id) !== proveedorId) {
-        return res.status(400).json({ ok: false, error: 'La factura ' + f.numero + ' es de otro proveedor' });
+        return res.status(400).json({ ok: false, error: 'El comprobante ' + f.numero + ' es de otro proveedor' });
       }
       if (!f.asiento_id || f.asiento_anulado) {
         return res.status(400).json({ ok: false,
@@ -8446,11 +8508,18 @@ router.post('/pagos', requireAuth, (req, res) => {
     let pagoId = null, asientoId = null;
     db.transaction(() => {
       const insImp = db.prepare(
-        'INSERT INTO sg_pagos_compras (pago_id, compra_id, monto, monto_gestion) VALUES (?,?,?,?)');
+        'INSERT INTO sg_pagos_compras (pago_id, compra_id, monto, monto_gestion, tipo) VALUES (?,?,?,?,?)');
       const subeSaldo = db.prepare(`UPDATE sg_facturas_compra
         SET saldo_pagado = ROUND(COALESCE(saldo_pagado,0) + ?, 2),
             saldo_pagado_gestion = ROUND(COALESCE(saldo_pagado_gestion,0) + ?, 2),
             modificado_en=datetime('now','localtime'), modificado_por=? WHERE id=?`);
+      // El espejo para la liquidación. Los parámetros son los mismos y en el mismo
+      // orden --el último se ignora, la tabla no tiene modificado_por-- para que el
+      // llamador no tenga que saber cuál está usando.
+      const subeSaldoLiq = db.prepare(`UPDATE liquidaciones
+        SET saldo_pagado = ROUND(COALESCE(saldo_pagado,0) + ?, 2),
+            saldo_pagado_gestion = ROUND(COALESCE(saldo_pagado_gestion,0) + ?, 2)
+        WHERE ? IS NOT NULL AND id=?`);
 
       if (total > 0) {
         pagoId = db.prepare(`INSERT INTO sg_pagos_proveedores
@@ -8465,7 +8534,7 @@ router.post('/pagos', requireAuth, (req, res) => {
             // imputación entera: el resto lo cubre el saldo a cuenta.
             const cancela = r2(x.monto + x.desdeACuenta);
             const gesHoy = cancela > 0 ? r2(x.gestion * x.monto / cancela) : 0;
-            insImp.run(pagoId, x.f.id, x.monto, gesHoy);
+            insImp.run(pagoId, x.f.id, x.monto, gesHoy, x.f._tipo || 'factura');
           }
         }
       }
@@ -8482,7 +8551,8 @@ router.post('/pagos', requireAuth, (req, res) => {
           const usa = r2(Math.min(a.disponible, falta));
           // La parte de gestión que le toca a lo que se cubre con el anticipo.
           const cancelaX = r2(x.monto + x.desdeACuenta);
-          insImp.run(a.id, x.f.id, usa, cancelaX > 0 ? r2(x.gestion * usa / cancelaX) : 0);
+          insImp.run(a.id, x.f.id, usa, cancelaX > 0 ? r2(x.gestion * usa / cancelaX) : 0,
+            x.f._tipo || 'factura');
           a.disponible = r2(a.disponible - usa);
           falta = r2(falta - usa);
         }
@@ -8491,7 +8561,12 @@ router.post('/pagos', requireAuth, (req, res) => {
 
       for (const x of facturas) {
         const cancela = r2(x.monto + x.desdeACuenta);
-        if (cancela > 0) subeSaldo.run(cancela, x.gestion, uid(req), x.f.id);
+        // A SU TABLA. Las dos columnas de saldo son las mismas de los dos lados,
+        // así que cambia el nombre de la tabla y nada más.
+        if (cancela > 0) {
+          (x.f._tipo === 'liquidacion' ? subeSaldoLiq : subeSaldo)
+            .run(cancela, x.gestion, uid(req), x.f.id);
+        }
       }
 
       // EL ASIENTO. Proveedores al debe —se cancela deuda— contra la cuenta del
