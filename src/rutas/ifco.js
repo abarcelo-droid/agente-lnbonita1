@@ -3605,25 +3605,10 @@ function _diferenciasEnvioPendientes(provId) {
   }
 }
 
-// Stock FÍSICO actual del proveedor: lo que debería estar en su depósito ahora.
-// Se descuenta del saldo oficial los despachos "sin sellar" (estado='despachado'),
-// porque esas cajas ya salieron del depósito del proveedor aunque el remito
-// todavía no esté sellado por el súper.
-function _stockFisicoProveedor(provId) {
-  const saldo = _calcSaldoProveedor(provId);
-  let sinSellar = 0;
-  try {
-    sinSellar = (db.prepare(`
-      SELECT COALESCE(SUM(cantidad_despachada), 0) AS total
-      FROM ifco_remitos_super
-      WHERE proveedor_origen_id = ?
-        AND origen = 'proveedor_directo'
-        AND estado = 'despachado'
-        AND eliminado_en IS NULL
-    `).get(provId) || {}).total || 0;
-  } catch(_) {}
-  return saldo - sinSellar;
-}
+// El "stock físico" del proveedor (saldo menos los despachos sin sellar) vivía acá y se sacó:
+// no lo usa nadie. El informe del galpón muestra UN solo número, de qué se hace cargo, y ese
+// es _calcSaldoProveedor. Si alguna vez hace falta el físico para cuadrar contra un conteo,
+// es una resta: saldo − SUM(cantidad_despachada) de los directos en estado 'despachado'.
 
 router.get('/saldo-proveedor/:id', function(req, res) {
   const provId = parseInt(req.params.id);
@@ -3664,9 +3649,10 @@ router.get('/despachos-por-mes', function(req, res) {
 });
 
 // Helper: arma la lista cronológica de movimientos de un proveedor.
-// El saldo físico acumulado se calcula sobre TODA la historia (anclado a
-// _stockFisicoProveedor) y recién después se filtra por fecha, para que cada
-// fila conserve su saldo físico histórico real.
+// El saldo acumulado se calcula sobre TODA la historia (anclado a _calcSaldoProveedor) y
+// recién después se filtra por fecha, para que cada fila conserve su saldo histórico real:
+// si se acumulara sólo sobre el período, la primera fila arrancaría en cero y el informe
+// diría que el galpón no debe nada.
 function _movimientosProveedor(provId, desde, hasta) {
   const envios = db.prepare(`
     SELECT 'envio' AS tipo, id, fecha_envio AS fecha, n_remito_interno AS detalle,
@@ -3701,11 +3687,22 @@ function _movimientosProveedor(provId, desde, hasta) {
     return (a.fecha||'') < (b.fecha||'') ? -1 : 1;
   });
 
-  // Calcular delta (columna "Cant." visible, sin tocar) y delta_fisico (interno,
-  // para el saldo físico acumulado que cierra con _stockFisicoProveedor).
+  // Calcular delta (columna "Cant." visible, sin tocar) y delta_saldo (interno, para el
+  // acumulado que cierra con _calcSaldoProveedor).
+  //
+  // ── POR QUÉ EL ACUMULADO SIGUE AL SALDO Y NO AL FÍSICO ────────────────────────────
+  // El informe muestra UN solo número, "en poder del proveedor". Si la columna SALDO se
+  // acumulara con el criterio físico, la última fila no daría ese número y el informe se
+  // contradiría solo: encabezado 1.128, última fila −3.223.
+  //
+  // La diferencia entre los dos criterios es UNA sola cosa: el despacho directo que salió
+  // del galpón pero cuyo remito todavía no volvió sellado. Físicamente ya no está; de
+  // responsabilidad sigue siendo suyo, porque sin el remito sellado no hay con qué probar
+  // que llegó al súper. El informe habla de responsabilidad, así que no lo descuenta — y la
+  // columna ESTADO dice "sin sellar" para que se entienda por qué el saldo no se movió.
   const conDelta = all.map(function(m) {
     let delta = 0;
-    let delta_fisico = 0;
+    let delta_saldo = 0;
     if (m.tipo === 'envio') {
       // Cant. (visible): lo que SG despachó en ese remito, tal cual.
       delta = +m.cantidad;
@@ -3716,12 +3713,12 @@ function _movimientosProveedor(provId, desde, hasta) {
       //   'recibido' → recibida = enviada → lo mismo
       //   'parcial'  → solo lo confirmado
       //   'anulado'  → no llegó a salir
-      delta_fisico = (m.estado === 'enviado' || m.estado === 'parcial' || m.estado === 'recibido')
+      delta_saldo = (m.estado === 'enviado' || m.estado === 'parcial' || m.estado === 'recibido')
         ? (m.cantidad_recibida != null ? m.cantidad_recibida : m.cantidad)
         : 0;
     } else if (m.tipo === 'recepcion') {
       delta = -m.cantidad;
-      delta_fisico = -m.cantidad;
+      delta_saldo = -m.cantidad;
     } else if (m.tipo === 'despacho_directo') {
       if (m.estado === 'sellado' || m.estado === 'enviado' || m.estado === 'presentado') {
         const recib = m.cantidad_recibida != null ? m.cantidad_recibida : m.cantidad;
@@ -3734,30 +3731,32 @@ function _movimientosProveedor(provId, desde, hasta) {
           delta = -recib;
         }
       } else if (m.estado === 'despachado') {
-        // Despachado pero sin sellar todavía: las cajas físicamente ya salieron del proveedor.
-        // Restamos el total despachado. Cuando se selle se recalcula con recibida/rechazada.
+        // Despachado pero sin sellar: las cajas ya salieron, y por eso la columna Cant. lo
+        // muestra. El SALDO no se mueve hasta que el remito vuelva sellado — es lo único que
+        // prueba que llegaron al súper, y hasta entonces son responsabilidad del galpón.
         delta = -(m.cantidad || 0);
       } else {
         delta = 0;
       }
-      // Los directos ya cierran con el físico (mismo criterio que _stockFisicoProveedor).
-      delta_fisico = delta;
+      // Sellado / enviado / presentado descuentan; "sin sellar" todavía no.
+      delta_saldo = (m.estado === 'sellado' || m.estado === 'enviado' || m.estado === 'presentado') ? delta : 0;
     }
     // Etiqueta legible para el campo estado: "sin sellar" si despachado, agrega "rechazado" si hubo
     let estado_label = (m.estado === 'despachado') ? 'sin sellar' : (m.estado || '-');
     if ((m.cantidad_rechazada || 0) > 0) estado_label = estado_label + ' · rechazado';
-    return Object.assign({}, m, { delta: delta, delta_fisico: delta_fisico, estado_label: estado_label });
+    return Object.assign({}, m, { delta: delta, delta_saldo: delta_saldo, estado_label: estado_label });
   });
 
-  // Saldo físico acumulado, anclado: la fila más reciente == _stockFisicoProveedor.
-  // saldo_inicial absorbe flujos no listados como movimiento (ej. traspasos salientes),
-  // así que arranca en 0 cuando todo cierra y delata la diferencia cuando no.
-  let stockFisico = 0;
-  try { stockFisico = _stockFisicoProveedor(provId); } catch(_) {}
-  const sumaDeltaFisico = conDelta.reduce(function(acc,m){ return acc + (m.delta_fisico || 0); }, 0);
-  let acum = stockFisico - sumaDeltaFisico;
+  // Saldo acumulado, anclado: la fila más reciente == _calcSaldoProveedor, que es el número
+  // que muestra el informe. El ancla absorbe los flujos que no se listan como movimiento
+  // (los traspasos salientes, por ejemplo), así que arranca en 0 cuando todo cierra y delata
+  // la diferencia cuando no.
+  let saldoActual = 0;
+  try { saldoActual = _calcSaldoProveedor(provId); } catch(_) {}
+  const sumaDeltaSaldo = conDelta.reduce(function(acc,m){ return acc + (m.delta_saldo || 0); }, 0);
+  let acum = saldoActual - sumaDeltaSaldo;
   const conSaldo = conDelta.map(function(m) {
-    acum += (m.delta_fisico || 0);
+    acum += (m.delta_saldo || 0);
     return Object.assign({}, m, { saldo_acumulado: acum });
   });
 
@@ -3785,8 +3784,7 @@ router.get('/proveedores/:id/movimientos', function(req, res) {
 
   const movimientos = _movimientosProveedor(provId);
   const saldo = _calcSaldoProveedor(provId);
-  const stock_fisico = _stockFisicoProveedor(provId);
-  res.json({ proveedor: p, movimientos: movimientos, saldo: saldo, stock_fisico: stock_fisico });
+  res.json({ proveedor: p, movimientos: movimientos, saldo: saldo });
 });
 
 // PDF con los movimientos del proveedor (mismo contenido que el modal)
@@ -3837,7 +3835,6 @@ router.get('/proveedores/:id/movimientos.pdf', async function(req, res) {
 
     const movimientos = _movimientosProveedor(provId, desde, hasta);
     const saldo = _calcSaldoProveedor(provId);
-    const stockFisico = _stockFisicoProveedor(provId);
 
     const doc = new jsPDF({ unit: 'mm', format: 'a4' });
     const W = 210, H = 297, M = 14;
@@ -3888,15 +3885,11 @@ router.get('/proveedores/:id/movimientos.pdf', async function(req, res) {
     doc.text(fmt(saldo) + ' caj.', R - 4, y + 12, { align: 'right' });
     doc.setTextColor(0);
 
-    // (2) STOCK QUE TIENE QUE TENER (físico real, descuenta despachos sin sellar)
-    setF(7, false);
-    doc.setTextColor(110);
-    doc.text('STOCK QUE TIENE QUE TENER', R - 4, y + 19, { align: 'right' });
-    const cf = colorRGB(stockFisico);
-    doc.setTextColor(cf[0], cf[1], cf[2]);
-    setF(13, true);
-    doc.text(fmt(stockFisico) + ' caj.', R - 4, y + 26, { align: 'right' });
-    doc.setTextColor(0);
+    // UN SOLO NÚMERO. Antes había un segundo, el stock físico, que descontaba los remitos
+    // sin sellar. Mostrar los dos obligaba a explicar la diferencia en cada conversación, y
+    // el físico podía dar NEGATIVO —imposible: no se puede tener menos de cero cajones—
+    // porque delata cargas que faltan. El informe se manda al galpón: va el número del que
+    // se habla con él, que es de qué se hace cargo.
 
     y += boxH + 6;
     setF(9, false);
@@ -4059,13 +4052,12 @@ router.get('/proveedores/:id/movimientos.xlsx', async function(req, res) {
 
     const movimientos = _movimientosProveedor(provId, desde, hasta);
     const saldo = _calcSaldoProveedor(provId);
-    const stockFisico = _stockFisicoProveedor(provId);
     const fmtN = (n) => Number(n || 0).toLocaleString('es-AR');
 
     const titulo = 'Movimientos de cajones IFCO — ' + (p.nombre || ('Proveedor ' + provId));
     const lineasSaldo = [
-      'Stock que tiene que tener (físico): ' + fmtN(stockFisico) + ' caj.',
-      'En poder del proveedor (oficial): ' + fmtN(saldo) + ' caj.'
+      'En poder del proveedor: ' + fmtN(saldo) + ' caj.',
+      'Los remitos sin sellar no descuentan del saldo hasta que vuelven sellados.'
     ];
     if (desde || hasta) lineasSaldo.push('Período: ' + (desde || 'inicio') + ' a ' + (hasta || 'hoy'));
     const labelTipo = (t) => t === 'envio' ? 'Envío' : t === 'recepcion' ? 'Recepción' : 'Directo súper';

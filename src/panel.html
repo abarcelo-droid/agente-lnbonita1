@@ -49830,17 +49830,16 @@ async function ifcoVerMovimientosProveedor(provId) {
     const p = data.proveedor;
     const movs = data.movimientos || [];
     const saldo = data.saldo;
-    const stockFisico = (data.stock_fisico != null) ? data.stock_fisico : saldo;
 
     tit.textContent = '📋 Movimientos — ' + (p.nombre || '');
 
     let saldoColor, saldoLbl;
-    if (saldo > 0)      { saldoColor = '#92400e'; saldoLbl = 'En poder del proveedor (oficial)'; }
+    if (saldo > 0)      { saldoColor = '#92400e'; saldoLbl = 'En poder del proveedor'; }
     else if (saldo < 0) { saldoColor = '#991b1b'; saldoLbl = 'Exceso entregado al proveedor'; }
-    else                { saldoColor = '#065f46'; saldoLbl = 'En poder del proveedor (oficial)'; }
-    const fisColor = stockFisico > 0 ? '#065f46' : (stockFisico < 0 ? '#991b1b' : 'var(--mut)');
-
-    // Header con saldo oficial + stock físico (este último es lo que el proveedor cuenta en el galpón)
+    else                { saldoColor = '#065f46'; saldoLbl = 'En poder del proveedor'; }
+    // UN SOLO NUMERO: de cuantos cajones se hace cargo el galpon. El segundo que habia —el
+    // stock fisico, que descontaba los remitos sin sellar— obligaba a explicar la diferencia
+    // en cada conversacion, y podia dar negativo, que es imposible.
     let html = '<div style="display:flex;align-items:center;gap:16px;padding:12px 14px;background:var(--bg);border-radius:8px;margin-bottom:14px;flex-wrap:wrap">' +
                  '<div>' +
                    '<div style="font-size:14px;font-weight:600">'+_ifcoEsc(p.nombre||'?')+'</div>' +
@@ -49848,11 +49847,7 @@ async function ifcoVerMovimientosProveedor(provId) {
                  '</div>' +
                  '<div style="margin-left:auto;text-align:right">' +
                    '<div style="font-size:10px;color:var(--mut);text-transform:uppercase">'+saldoLbl+'</div>' +
-                   '<div style="font-size:18px;font-weight:600;color:'+saldoColor+';font-variant-numeric:tabular-nums">'+(saldo>0?'+':'')+saldo+' caj.</div>' +
-                 '</div>' +
-                 '<div style="text-align:right">' +
-                   '<div style="font-size:10px;color:var(--mut);text-transform:uppercase">Stock que tiene que tener</div>' +
-                   '<div style="font-size:22px;font-weight:700;color:'+fisColor+';font-variant-numeric:tabular-nums">'+(stockFisico>0?'+':'')+stockFisico+' caj.</div>' +
+                   '<div style="font-size:22px;font-weight:700;color:'+saldoColor+';font-variant-numeric:tabular-nums">'+(saldo>0?'+':'')+saldo+' caj.</div>' +
                  '</div>' +
                '</div>';
 
@@ -49886,7 +49881,7 @@ async function ifcoVerMovimientosProveedor(provId) {
       const abs = Math.abs(v).toLocaleString('es-AR');
       return (v > 0 ? '+' : v < 0 ? '-' : '') + abs;
     }
-    // Más reciente arriba: la primera fila tiene el saldo físico final (= "Stock que tiene que tener").
+    // Más reciente arriba: la primera fila tiene el saldo actual (= "En poder del proveedor").
     html += movs.slice().reverse().map(function(m) {
       const deltaTxt = m.delta > 0 ? ('+' + m.delta) : (m.delta === 0 ? '0' : String(m.delta));
       const deltaColor = m.delta > 0 ? '#92400e' : (m.delta < 0 ? '#065f46' : 'var(--mut)');
@@ -49905,9 +49900,10 @@ async function ifcoVerMovimientosProveedor(provId) {
 
     html += '</tbody></table></div>';
     html += '<div style="font-size:11px;color:var(--mut);margin-top:8px;line-height:1.5">' +
-            'La columna <b>SALDO</b> es el stock físico que debería estar en el galpón en cada fecha; ' +
-            'la fila más reciente coincide con "Stock que tiene que tener". ' +
-            '<b>Cant.</b> es el movimiento de cada operación.' +
+            'La columna <b>SALDO</b> es de cuántos cajones se hacía cargo el galpón en cada fecha; ' +
+            'la fila más reciente coincide con <b>En poder del proveedor</b>. ' +
+            '<b>Cant.</b> es lo que movió cada operación: un remito <b>sin sellar</b> ya salió del galpón, ' +
+            'pero no descuenta del saldo hasta que vuelve sellado — es lo único que prueba que llegó al súper.' +
             '</div>';
     body.innerHTML = html;
   } catch(e) {
