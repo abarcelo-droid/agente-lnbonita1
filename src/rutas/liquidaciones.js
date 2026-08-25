@@ -473,6 +473,19 @@ router.get('/:id/pdf', async function(req, res) {
     try { r.mermas    = JSON.parse(r.mermas    || '[]'); } catch(_){ r.mermas = []; }
     try { r.conceptos = JSON.parse(r.conceptos || '[]'); } catch(_){ r.conceptos = []; }
 
+    // ── QUÉ LIBRO SE IMPRIME ───────────────────────────────────
+    //
+    // Pablo: "si en el selector tenemos 'solo fiscal' debe imprimir la liquidación
+    // sólo fiscal... los números de gestión son números internos para saber qué
+    // porcentajes de descuentos aplicamos, pero es info que el proveedor no sabe".
+    //
+    // POR DEFECTO SALE FISCAL. Sin parámetro, con un link viejo, con un pdf que
+    // alguien reenvió: fiscal. Es el único defecto seguro — el que se equivoca no
+    // puede terminar entregándole al productor un papel con los descuentos
+    // internos. La copia con gestión hay que PEDIRLA, y sale sellada.
+    const incluyeGestion = String(req.query.libro || '') === 'todo'
+                        || String(req.query.libro || '') === 'gestion';
+
     const jsPDF = await _getJsPDF();
     if (!jsPDF) return res.status(503).json({ error: 'jspdf no disponible' });
 
@@ -643,13 +656,33 @@ router.get('/:id/pdf', async function(req, res) {
     const cConDesc = L + 65;
     const cConPct  = L + 130;
     const cConImp  = R - 3;
+    // ── LOS NÚMEROS DE GESTIÓN NO VAN EN EL PAPEL DEL PRODUCTOR ──────────
+    //
+    // Pablo: "los números de gestión son números internos para saber qué
+    // porcentajes de descuentos aplicamos, pero es info que el proveedor no sabe".
+    //
+    // Por eso el PDF sale FISCAL por defecto: es el comprobante. La copia con
+    // gestión hay que pedirla, y sale marcada — ver el sello más abajo.
     for (const c of r.conceptos) {
+      if (!incluyeGestion && c.ambito === 'gestion') continue;
       doc.text(String(c.concepto || ''), cConDesc, y);
       if (c.porcentaje != null && c.porcentaje !== '') {
         doc.text(String(c.porcentaje), cConPct, y);
       }
       doc.text(moneyFmt(c.importe), cConImp, y, { align: 'right' });
       y += 5;
+    }
+
+    // EL SELLO DE LA COPIA INTERNA. Si el papel lleva los números de gestión, tiene
+    // que decirlo grande: es la diferencia entre una copia de trabajo y un
+    // comprobante entregado con los descuentos internos a la vista.
+    if (incluyeGestion) {
+      y += 6;
+      setF(11, true);
+      doc.setTextColor(180, 30, 30);
+      doc.text('COPIA INTERNA · incluye valores de gestión — NO ENTREGAR AL PRODUCTOR',
+               L + 3, y);
+      doc.setTextColor(0, 0, 0);
     }
 
     // ═══════════════════════════════════════════════════════════════════════
