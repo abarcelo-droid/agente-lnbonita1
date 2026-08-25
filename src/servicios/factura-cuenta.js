@@ -25,8 +25,8 @@
 // rechazó, o alguien la anuló—. Escrita así, un estado nuevo entra contando, que
 // es lo correcto: un comprobante que existe es un comprobante.
 //
-// El test t-factura-cuenta-una-vez falla si vuelve a aparecer una lista de
-// estados escrita a mano.
+// El test `test/factura_cuenta_una_vez.test.mjs` --corre con `npm test`-- falla
+// si vuelve a aparecer una lista de estados escrita a mano.
 
 // Fragmento SQL. `a` es el alias de sg_ven_facturas en la consulta que lo use.
 export const facturaCuenta = (a = 'f') =>
