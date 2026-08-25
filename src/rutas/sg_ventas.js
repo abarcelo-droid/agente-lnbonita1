@@ -339,6 +339,18 @@ router.post('/liquidaciones', requireAuth, (req, res) => {
   if (!cliente_id) return res.status(400).json({ ok: false, error: 'cliente_id requerido' });
   if (!items?.length) return res.status(400).json({ ok: false, error: 'Ingresá al menos un ítem' });
 
+  // UNA DIFERENCIA DE GESTIÓN SIN MOTIVO NO ENTRA, y tampoco se descarta callada.
+  // Acá el único control era `if (dif > 0 && MOTIVOS[mot])` adentro del armado del
+  // asiento: con un motivo vacío o mal escrito, la diferencia desaparecía ENTERA
+  // —ni líneas en el asiento ni número guardado— sin decir nada. La factura de
+  // compra y la de venta cortan con un 400 pidiendo el motivo; ésta no.
+  const difLiqIn = Math.round((parseFloat(req.body.dif_gestion) || 0) * 100) / 100;
+  if (difLiqIn !== 0 && !MOTIVOS[String(req.body.dif_motivo || '').trim()]) {
+    return res.status(400).json({ ok: false,
+      error: 'Poné por qué la liquidación no coincide con lo acordado. Elegí el motivo: '
+           + Object.values(MOTIVOS).map((m) => m.label).join(', ') + '.' });
+  }
+
   if (nro_liquidacion?.trim()) {
     const existe = db.prepare('SELECT id FROM sg_ven_liquidaciones WHERE numero=? AND cliente_id=?')
       .get(nro_liquidacion.trim(), parseInt(cliente_id));
