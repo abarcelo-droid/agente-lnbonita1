@@ -18,7 +18,7 @@
 // CLAUDE.md). Acá no hay nada que cruzar de todos modos: el padrón de artículos de Carrefour
 // no es el nuestro.
 import db from './db.js';
-import { crearEsquema } from './share_ddl.js';
+import { crearTablas, crearVistas } from './share_ddl.js';
 // share_import.js NO importa este archivo, así que no hay ciclo: puede ser un import normal.
 // Con `await import(...)` acá adentro, este módulo pasaría a ser asíncrono y arrastraría a
 // todo lo que cuelga de él, incluido el router.
@@ -27,7 +27,7 @@ import { reclasificarFamilias } from './share_import.js';
 // El SQL vive en share_ddl.js, no acá: este archivo abre la base real con better-sqlite3 y
 // por eso ningún test lo puede importar. Con el DDL en un módulo aparte, la prueba crea el
 // esquema DE VERDAD sobre node:sqlite en lugar de contra una copia que se desactualiza.
-crearEsquema(db);
+crearTablas(db);
 
 // Migraciones de columnas: mismo patrón que el resto del repo. Correr esto cien veces no
 // tiene que romper nada, así que cada ALTER se prueba contra el PRAGMA primero.
@@ -50,6 +50,11 @@ agregarCol('share_proveedores', 'pendiente_revision', 'INTEGER NOT NULL DEFAULT 
 agregarCol('share_articulos', 'ean', 'TEXT');
 for (const c of [['ean', 'TEXT'], ['precio', 'REAL'], ['variedad', 'TEXT'], ['zona', 'TEXT'], ['observacion', 'TEXT']])
   agregarCol('share_oferta_lineas', c[0], c[1]);
+
+// LAS VISTAS, RECIEN AHORA. share_oferta_v nombra ean/precio/variedad/zona/observacion, y en
+// una base que ya existia esas columnas acaban de llegar por ALTER: crear la vista antes dejo
+// el servidor sin levantar con "no such column: ean".
+crearVistas(db);
 
 // Las familias cambiaron (VERDURA y HONGO → HORTALIZA PESADA / LIVIANA): los artículos que
 // se cargaron antes se quedaron con la etiqueta vieja y hay que traerlos al vocabulario

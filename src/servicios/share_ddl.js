@@ -120,7 +120,6 @@ export const DDL = `
   CREATE INDEX IF NOT EXISTS ix_share_of_fecha ON share_oferta_lineas(fecha);
   CREATE INDEX IF NOT EXISTS ix_share_of_art   ON share_oferta_lineas(articulo_id, fecha);
   CREATE INDEX IF NOT EXISTS ix_share_of_carga ON share_oferta_lineas(oferta_id);
-  CREATE INDEX IF NOT EXISTS ix_share_art_ean    ON share_articulos(ean);
   CREATE INDEX IF NOT EXISTS ix_share_ofertas_est ON share_ofertas(estado, fecha);
 
   CREATE INDEX IF NOT EXISTS ix_share_lineas_fecha ON share_lineas(fecha_entrega);
@@ -154,8 +153,26 @@ export const VISTA_OFERTA = `
      WHERE o.estado = 'activa';
 `;
 
-export function crearEsquema(db) {
+// LAS TABLAS Y LAS VISTAS VAN POR SEPARADO, Y NO ES UN DETALLE.
+// Una vista que nombra una columna nueva NO SE PUEDE CREAR hasta que la columna exista, y en
+// una base que ya venia andando la columna llega por ALTER. Creando todo junto, el CREATE
+// VIEW se ejecuta antes que el ALTER y el servidor no levanta: "no such column: ean".
+// El orden correcto lo arma db_share.js: tablas -> ALTERs -> vistas.
+export function crearTablas(db) {
   db.exec(DDL);
+}
+
+// Todo lo que DEPENDE de columnas que llegan por ALTER: las vistas y el indice sobre ean.
+// Un CREATE INDEX sobre una columna que todavia no existe falla igual que un CREATE VIEW, y
+// asi fue como se cayo el arranque en produccion.
+export function crearVistas(db) {
   db.exec(VISTA);
   db.exec(VISTA_OFERTA);
+  db.exec('CREATE INDEX IF NOT EXISTS ix_share_art_ean ON share_articulos(ean);');
+}
+
+// Para los tests y para una base nueva, donde las columnas ya vienen en el CREATE TABLE.
+export function crearEsquema(db) {
+  crearTablas(db);
+  crearVistas(db);
 }
