@@ -337,22 +337,36 @@ export function recalcularKg(db, articuloId) {
 //
 // Y al revés: cuando un artículo se resuelve por nombre y la línea trae EAN, se le graba el
 // EAN al artículo. Así la primera carga enseña y las siguientes ya cruzan solas.
+// Deja anotado que ese EAN es de ese artículo. La primera carga enseña y las siguientes ya
+// cruzan solas, aunque a alguien se le dé por escribir el nombre distinto.
+export function recordarEan(db, ean, articuloId) {
+  if (!ean || !articuloId) return;
+  db.prepare("INSERT OR IGNORE INTO share_alias (tipo, alias_raw, destino_id) VALUES ('ean', ?, ?)")
+    .run(String(ean), articuloId);
+  // La columna del artículo queda como referencia rápida: el primer EAN que se le vio.
+  db.prepare("UPDATE share_articulos SET ean = ? WHERE id = ? AND (ean IS NULL OR ean = '')")
+    .run(String(ean), articuloId);
+}
+
 function resolverArticuloOferta(db, linea, crear) {
   const p = parseDescOferta(linea.articulo_raw);
   const ean = linea.ean ? String(linea.ean).replace(/[^\d]/g, '') : null;
 
+  // El EAN se busca en la tabla de alias y no en una columna del artículo, porque la relación
+  // es de MUCHOS a UNO: la uva negra y la uva blanca tienen cada una su EAN y las dos pueden
+  // ir contra la misma "UVA X KG" de Carrefour. En una columna sola se pisarían.
   if (ean) {
-    const porEan = db.prepare('SELECT id FROM share_articulos WHERE ean = ?').get(ean);
-    if (porEan) return { id: porEan.id, parse: p, ean, via: 'ean' };
+    const al = db.prepare("SELECT destino_id FROM share_alias WHERE tipo='ean' AND alias_raw=?").get(ean);
+    if (al) return { id: al.destino_id, parse: p, ean, via: 'ean' };
+    // Compatibilidad con lo que ya se cargó cuando el EAN vivía sólo en la columna.
+    const porCol = db.prepare('SELECT id FROM share_articulos WHERE ean = ?').get(ean);
+    if (porCol) return { id: porCol.id, parse: p, ean, via: 'ean' };
   }
   const id = resolverArticulo(db, p, false);
-  if (id) {
-    if (ean) db.prepare('UPDATE share_articulos SET ean = ? WHERE id = ? AND (ean IS NULL OR ean = \'\')').run(ean, id);
-    return { id, parse: p, ean, via: 'nombre' };
-  }
+  if (id) { if (ean) recordarEan(db, ean, id); return { id, parse: p, ean, via: 'nombre' }; }
   if (!crear) return { id: null, parse: p, ean, via: null };
   const nuevo = resolverArticulo(db, p, true);
-  if (ean) db.prepare('UPDATE share_articulos SET ean = ? WHERE id = ?').run(ean, nuevo);
+  if (ean) recordarEan(db, ean, nuevo);
   return { id: nuevo, parse: p, ean, via: 'nuevo' };
 }
 
@@ -373,9 +387,10 @@ export function analizarOferta(db, { filas, fecha }) {
     const prev = porArt.get(clave);
     if (prev) {
       prev.cantidad += f.cantidad; prev.repetido = true;
+      prev.raws.push(f.articulo_raw);
       if (!prev.precio && f.precio) prev.precio = f.precio;
     } else {
-      porArt.set(clave, { resuelto: r, parse: r.parse, articulo_raw: f.articulo_raw, cantidad: f.cantidad,
+      porArt.set(clave, { resuelto: r, parse: r.parse, articulo_raw: f.articulo_raw, raws: [f.articulo_raw], cantidad: f.cantidad,
         ean: r.ean, precio: f.precio || null, variedad: f.variedad || null, zona: f.zona || null,
         observacion: f.observacion || null });
     }
@@ -396,6 +411,9 @@ export function analizarOferta(db, { filas, fecha }) {
       precio: x.precio, variedad: x.variedad, zona: x.zona, observacion: x.observacion,
       cantidad: x.cantidad,
       repetido: !!x.repetido,
+      // Los nombres que se juntaron en esta fila. Sin esto, dos lineas que cruzan al mismo
+      // articulo se ven como una sola y parece que el archivo perdio un renglon.
+      raws: x.raws || [x.articulo_raw],
       articulo_id: id || null,
       // Nuevo = Carrefour nunca lo compró (o lo escribe distinto). No es un error: es
       // exactamente lo que hay que mirar, porque significa que estamos ofreciendo algo que

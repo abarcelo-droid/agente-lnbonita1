@@ -362,7 +362,15 @@ const RUIDO_OFERTA = [
 ];
 
 export function normalizarDescOferta(raw) {
-  const t = norm(raw);
+  // ── LO QUE VA ENTRE PARÉNTESIS NUNCA ES EL NOMBRE DEL PRODUCTO ────────────────────
+  // Es el calibre con el que lo pedimos, las variedades que entran, el origen o el envase:
+  //   LIMON x kg (88-113) · UVA ROSADA x kg (cardinal-cereza-california)
+  //   CIRUELA x kg (50 a 60mm) · PIÑA COMERCIAL x kg (ECUADOR)
+  // Con el paréntesis adentro, ninguno de esos cruza contra el nombre de Carrefour y el
+  // padrón se llena de artículos nuevos que son el mismo de siempre.
+  //
+  // Se saca sólo del lado de la OFERTA. parseDesc, que lee el planning, no se toca.
+  const t = norm(raw).replace(/\([^)]*\)?/g, ' ').replace(/\s+/g, ' ').trim();
   if (!t) return '';
   const m = t.match(RE_UNIDAD_MEDIO);
   if (!m) return t;                       // sin unidad reconocible: que lo resuelva parseDesc
@@ -370,6 +378,12 @@ export function normalizarDescOferta(raw) {
   const antes = t.slice(0, m.index).trim();
   let despues = t.slice(m.index + m[0].length).trim();
   for (const re of RUIDO_OFERTA) despues = despues.replace(re, ' ');
+  // Y si lo que quedó detrás de la unidad son SÓLO números y una medida —"350-450 GRS",
+  // "120", "50 A 60 MM"— es el calibre, no el producto. Se pide que no tenga ninguna otra
+  // letra: así "CABUTIAN" o "CARDINAL" se conservan, que sí forman parte del nombre.
+  if (/^[\d\s\-/.,]*(?:A\s*[\d\s\-/.,]+)?\s*(?:GRS?|GRAMOS?|G|MM|CM|KG|K)?\.?$/.test(despues.trim())) {
+    despues = '';
+  }
   // La barra que separa la variedad ("x kg. / CABUTIAN") no es parte del nombre.
   despues = despues.replace(/[/\-]+/g, ' ').replace(/\s+/g, ' ').trim();
 
