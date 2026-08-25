@@ -4995,8 +4995,9 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
 
     <!-- ══ FAMILIAS ══
          La familia es la CATEGORÍA COMERCIAL con la que se mira el negocio —lo
-         que agrupa un informe de stock o de margen— y de paso la que define la
-         alícuota de IVA que el producto hereda. No es una clasificación
+         que agrupa un informe de stock o de margen— y la que PROPONE la alícuota
+         de IVA al dar de alta un producto. Desde el #870 la alícuota vive en el
+         PRODUCTO: la familia se hereda una sola vez, al crearlo. No es una clasificación
          biológica: "Frutas de pepita" y "Frutas de carozo" separan dos cosas que
          para vender son la misma, y ningún informe las junta después.
          Acá se dan de alta, se renombran y se dan de baja. -->
@@ -5017,9 +5018,10 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
     <div class="sg-sub" id="sg-sub-familias">
       <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px;gap:10px;flex-wrap:wrap">
         <div style="font-size:12px;color:var(--mut);max-width:640px">
-          La familia es la <b>categoría comercial</b> del producto: con ella se agrupan los informes y de ella
-          sale la <b>alícuota de IVA</b> que el producto hereda (vacío = sin definir → se resuelve en
-          recepción/liquidación). Renombrar una familia cambia también lo que muestran los productos.
+          La familia es la <b>categoría comercial</b> del producto: con ella se agrupan los informes, y su
+          <b>alícuota de IVA</b> es la que se <b>propone</b> al dar de alta un producto nuevo. Lo que factura
+          después es la alícuota <b>del producto</b>: un producto sin alícuota propia no se puede facturar,
+          aunque su familia tenga una. Renombrar una familia cambia también lo que muestran los productos.
         </div>
         <button class="btn bb" id="sg-fam-nueva" onclick="sgFamNueva()">+ Nueva familia</button>
       </div>
@@ -5479,7 +5481,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
                también lo lleva, y el rótulo fijo "Factura A" hacía pensar que
                esto sólo contaba si recibíamos factura. Ahora dice el
                comprobante que corresponde. -->
-          <div style="font-weight:600;font-size:12px;margin-bottom:6px">💵 IVA — <span id="sg-oc-iva-tit">Factura A</span> <span style="font-weight:400;color:var(--mut)">· alícuota heredada de la familia de cada producto</span></div>
+          <div style="font-weight:600;font-size:12px;margin-bottom:6px">💵 IVA — <span id="sg-oc-iva-tit">Factura A</span> <span style="font-weight:400;color:var(--mut)">· alícuota de cada producto (la familia es el respaldo)</span></div>
           <label style="margin-right:18px;font-weight:500"><input type="radio" name="sg-oc-inciva" value="si" checked onchange="sgOcTotales()" style="width:auto"> El precio ya incluye IVA</label>
           <label style="font-weight:500"><input type="radio" name="sg-oc-inciva" value="no" onchange="sgOcTotales()" style="width:auto"> El precio no incluye IVA (se adiciona)</label>
         </div>
@@ -8245,7 +8247,7 @@ function sgPagoGuardar(){
     // LOS MEDIOS TIENEN QUE SUMAR EL PAGO. Se avisa acá para no mandar un
     // pedido que el servidor va a rechazar por lo mismo.
     if (Math.abs(Math.round((suma - saleHoy) * 100) / 100) > 0.01) {
-      toast('Los medios suman ' + sgMoney(suma) + ' y el pago es de ' + sgMoney(saleHoy), 'er');
+      toast('Los medios suman ' + sgMoney2(suma) + ' y el pago es de ' + sgMoney2(saleHoy), 'er');
       return;
     }
   }
@@ -9034,13 +9036,13 @@ function sgAsientoTabla(lineas, nota){
     + filas
     + '<tr style="border-top:2px solid var(--bor);font-weight:700">'
       + '<td colspan="3">Totales</td>'
-      + '<td style="text-align:right">' + sgMoney(totD) + '</td>'
-      + '<td style="text-align:right">' + sgMoney(totH) + '</td></tr>'
+      + '<td style="text-align:right">' + sgMoney2(totD) + '</td>'
+      + '<td style="text-align:right">' + sgMoney2(totH) + '</td></tr>'
     + '<tr><td colspan="5" style="padding-top:8px">'
       + (ok
           ? '<span style="color:#166534;font-weight:700">✓ El asiento balancea</span>'
           : '<span style="color:var(--err);font-weight:700">✗ NO balancea — diferencia de '
-            + sgMoney(Math.abs(dif)) + '</span>')
+            + sgMoney2(Math.abs(dif)) + '</span>')
       + (nota ? '<div style="font-size:11.5px;color:var(--mut);margin-top:4px">' + escH(nota) + '</div>' : '')
     + '</td></tr>'
     + '</tbody></table></div>';
@@ -9110,7 +9112,7 @@ function sgPagoAsientoPintar(){
       + 'el día del anticipo.'
     : '';
   if (Math.abs(Math.round((repartido - total) * 100) / 100) > 0.01) {
-    nota = 'Los medios suman ' + sgMoney(repartido) + ' y el pago es de ' + sgMoney(total)
+    nota = 'Los medios suman ' + sgMoney2(repartido) + ' y el pago es de ' + sgMoney2(total)
       + '. Mientras no coincidan, el pago no se registra.' + (nota ? ' ' + nota : '');
   }
   cont.innerHTML = sgAsientoTabla(lineas, nota);
@@ -10497,10 +10499,22 @@ function sgOcUpdIvaBox(){
   if(t) t.textContent = ((eid('sg-oc-fiscal')||{}).value==='liquidacion') ? 'Liquidación' : 'Factura A';
 }
 function sgOcFiscalChange(){ sgOcUpdIvaBox(); sgOcTotales(); }
-// Alícuota de IVA heredada de la familia del producto (vía familia_id → SG.cacheFam).
+// LA ALÍCUOTA ES LA DEL PRODUCTO; LA FAMILIA ES EL RESPALDO.
+//
+// Esta función leía SÓLO la familia, y de ella sale el neto/IVA que muestra el pie
+// del alta de orden de compra. El backend que graba esa misma orden usa
+// COALESCE(producto, familia) desde el #870, así que la pantalla mostraba un número
+// y en sg_oc_items quedaba otro — y con un producto al 21% en una familia sin
+// alícuota, la línea se mostraba directamente sin IVA.
+//
+// p.iva_alicuota YA VIENE en el caché (GET /api/sg/productos hace SELECT *): sólo
+// había que mirarla. 0 es un valor válido —mercadería al 0%— así que se compara
+// contra null/vacío y no con un truthy.
 function sgFamAlic(producto_id){
   var p=(SG.cacheProd||[]).find(function(x){return String(x.id)===String(producto_id);});
-  if(!p||!p.familia_id) return null;
+  if(!p) return null;
+  if(p.iva_alicuota!=null && p.iva_alicuota!=='') return Number(p.iva_alicuota);
+  if(!p.familia_id) return null;
   var f=(SG.cacheFam||[]).find(function(x){return String(x.id)===String(p.familia_id);});
   return (f && f.iva_alicuota!=null && f.iva_alicuota!=='') ? Number(f.iva_alicuota) : null;
 }
@@ -12068,13 +12082,13 @@ function sgFmAsientoTabla(lineas, importes, extra){
     var ok = Math.abs(dif) < 0.01;
     pie = '<tr style="border-top:2px solid var(--bor);font-weight:700">'
       + '<td colspan="3">' + (totDx ? 'Total de la factura' : 'Totales') + '</td>'
-      + '<td style="text-align:right">' + sgMoney(totD) + '</td>'
-      + '<td style="text-align:right">' + sgMoney(totH) + '</td></tr>'
+      + '<td style="text-align:right">' + sgMoney2(totD) + '</td>'
+      + '<td style="text-align:right">' + sgMoney2(totH) + '</td></tr>'
       + '<tr><td colspan="5" style="padding-top:8px">'
         + (ok
             ? '<span style="color:#166534;font-weight:700">✓ El asiento balancea</span>'
             : '<span style="color:var(--err);font-weight:700">✗ NO balancea — diferencia de '
-              + sgMoney(Math.abs(dif)) + '</span>')
+              + sgMoney2(Math.abs(dif)) + '</span>')
       + '</td></tr>';
     if (totDx) {
       pie += '<tr style="font-weight:700;color:#8a5a1f"><td colspan="3">Lo que falta por facturar</td>'
@@ -12427,7 +12441,7 @@ function sgFmRecalc(){
       av.innerHTML = '<span style="color:#166534;font-weight:700">✓ El total da contra el desglose: ' + sgMoney(suma) + '</span>';
     } else {
       av.innerHTML = '<span style="color:var(--err);font-weight:700">✗ El total dice ' + sgMoney(total)
-        + ' y el desglose suma ' + sgMoney(suma) + '</span>';
+        + ' y el desglose suma ' + sgMoney2(suma) + '</span>';
     }
   }
   // La factura contra lo que se acordó pagar por lo que entró. Se compara el
@@ -12456,8 +12470,8 @@ function sgFmRecalc(){
         + comoSeCompara;
     } else {
       vs.innerHTML = '<span style="color:#9a3412;font-weight:700">⚠️ El neto de la factura ('
-        + sgMoney(neto) + ') no da contra lo acordado (' + sgMoney(acordadoNeto) + '). '
-        + 'Diferencia: ' + sgMoney(paRound2Fm(neto - acordadoNeto)) + '</span>'
+        + sgMoney2(neto) + ') no da contra lo acordado (' + sgMoney2(acordadoNeto) + '). '
+        + 'Diferencia: ' + sgMoney2(paRound2Fm(neto - acordadoNeto)) + '</span>'
         + comoSeCompara
         + '<div style="color:var(--mut);font-size:11.5px;margin-top:2px">'
         + 'Si es un ajuste convenido está bien; si no, el costo de la partida va a quedar distinto del que se pactó.</div>';
@@ -12728,11 +12742,14 @@ function sgFmDifPintar(){
   var mot = (eid('sgfm-f-difm') || {}).value;
   cont.innerHTML = '<div style="border:1.5px solid #d6a15e;background:#f6eddf;border-radius:8px;'
     + 'padding:9px 11px;color:#854d0e">'
+    // CON CENTAVOS: el campo de la diferencia se llena con sgMilShow, que los
+    // muestra, y este cartel que lo explica los borraba. Dos números de la misma
+    // cosa, uno al lado del otro, con distinta precisión.
     + (dif < 0
-        ? 'La factura vino por <b>' + sgMoney(Math.abs(dif)) + '</b> más de lo acordado. '
-          + 'Al proveedor se le van a deber <b>' + sgMoney(tot + dif) + '</b>, que es lo que se cerró. '
+        ? 'La factura vino por <b>' + sgMoney2(Math.abs(dif)) + '</b> más de lo acordado. '
+          + 'Al proveedor se le van a deber <b>' + sgMoney2(tot + dif) + '</b>, que es lo que se cerró. '
           + 'El total de la factura no se toca: es lo que va al libro fiscal.'
-        : 'Al proveedor se le van a deber <b>' + sgMoney(tot + dif) + '</b>'
+        : 'Al proveedor se le van a deber <b>' + sgMoney2(tot + dif) + '</b>'
           + ', y así va a figurar en su cuenta corriente.')
     + (mot ? '' : '<br><b>Falta decir por qué.</b>')
     + '</div>';
@@ -14999,18 +15016,23 @@ function sgFdRender(){
   // El resumen espeja la cuenta del backend: si el precio incluye IVA, el neto
   // se saca dividiendo, no restando.
   var incl=eid('sgfd-incluye-iva')&&eid('sgfd-incluye-iva').checked;
-  var neto=0, iva=0, resignado=0;
-  SG.fdItems.forEach(function(it){
+  var neto=0, iva=0, resignado=0, sinAlic=[];
+  SG.fdItems.forEach(function(it,ix){
     var mm=sgFdMontos(it);
-    // SIN ALÍCUOTA NO SE INVENTA UN 21%. Acá estaba escrito 21 a mano, y el
-    // backend manda la operación a AFIP como EXENTA cuando el producto no tiene
-    // alícuota: la pantalla mostraba un total y salía otro comprobante. Ahora se
-    // trata como lo que el backend va a hacer --exento-- y el renglón lo grita.
+    // SIN ALÍCUOTA NO SE INVENTA NADA Y NO SE SIGUE DE LARGO. Antes acá había un
+    // 21% escrito a mano; después se cambió por un 0 "porque el backend lo manda
+    // exento", con la promesa de que el renglón lo gritaba — y no lo gritaba nadie.
+    // Ahora el backend FRENA la emisión (un dato que falta no es una exención), así
+    // que la pantalla tiene que decirlo acá, que es cuando todavía se puede ir a
+    // cargarla, y no al apretar Emitir.
+    if(it.alicuota==null){ sinAlic.push(ix+1); }
     var alic=(it.alicuota!=null)?Number(it.alicuota):0;
     // EL NETO SALE DE LO FACTURADO, o sea con el descuento ya aplicado: es lo
-    // que va al comprobante y al libro fiscal.
-    var base=(incl)?mm.facturado/(1+alic/100):mm.facturado;
-    neto+=base; iva+=base*alic/100;
+    // que va al comprobante y al libro fiscal. Y el IVA sale POR DIFERENCIA
+    // contra ese mismo importe, igual que en el backend: si se lo calculara
+    // multiplicando, los dos números empezarían a separarse por centavos.
+    var base=(incl)?paRound2Fm(mm.facturado/(1+alic/100)):mm.facturado;
+    neto+=base; iva+=(incl)?paRound2Fm(mm.facturado-base):paRound2Fm(base*alic/100);
     resignado+=mm.resignado;
   });
   SG._fdResignado=paRound2Fm(resignado);
@@ -15018,6 +15040,13 @@ function sgFdRender(){
   if (typeof sgFdAsientoPreview === 'function') sgFdAsientoPreview();
   eid('sgfd-resumen').innerHTML='Neto '+sgMoney(neto)+' · IVA '+sgMoney(iva)
     +' · <b>Total '+sgMoney(neto+iva)+'</b>'
+    + (sinAlic.length
+        ? '<div style="margin-top:6px;padding:7px 10px;border:1px solid #dc2626;background:#fef2f2;'
+          + 'border-radius:8px;color:#991b1b;font-size:12.5px">'
+          + (sinAlic.length===1 ? 'La línea ' : 'Las líneas ') + sinAlic.join(', ')
+          + (sinAlic.length===1 ? ' no tiene' : ' no tienen') + ' alícuota de IVA cargada: '
+          + 'así no se puede emitir. Cargala en <b>Maestros → Productos</b>.</div>'
+        : '')
     // LO RESIGNADO, A LA VISTA. Es lo que la empresa pone sobre la mesa en este
     // comprobante: no va a la factura, pero sí al asiento como venta de gestión.
     + (resignado>0
@@ -15125,11 +15154,13 @@ function sgFdAsientoPreview(){
   var neto = 0, iva = 0;
   SG.fdItems.forEach(function(it){
     var mm = sgFdMontos(it);
-    // Mismo criterio que el resumen: sin alícuota es EXENTO, que es lo que va a
-    // recibir AFIP. El cuadro del asiento tiene que espejar lo que se graba.
+    // MISMA CUENTA QUE EL RESUMEN Y QUE EL BACKEND, renglón por renglón: el neto
+    // sale del importe de la línea y el IVA POR DIFERENCIA. Esta cuenta está
+    // escrita dos veces en el archivo (acá y en el resumen) y las dos tienen que
+    // decir lo mismo que la emisión, o el cuadro que se aprueba no es el que se graba.
     var alic = (it.alicuota != null) ? Number(it.alicuota) : 0;
-    var base = incl ? mm.facturado / (1 + alic / 100) : mm.facturado;
-    neto += base; iva += base * alic / 100;
+    var base = incl ? paRound2Fm(mm.facturado / (1 + alic / 100)) : mm.facturado;
+    neto += base; iva += incl ? paRound2Fm(mm.facturado - base) : paRound2Fm(base * alic / 100);
   });
   if (!(neto > 0)) { cont.innerHTML = ''; return; }
   api('/api/sg/ventas/facturas/preview-asiento', 'POST', {
@@ -15167,19 +15198,19 @@ function sgAsientoCuadro(d, titulo, donde){
       + '<td style="font-family:ui-monospace,monospace;font-size:11.5px">' + escH(l.cuenta_codigo || '') + '</td>'
       + '<td>' + escH(l.cuenta_nombre || '') + (ges ? ' <span class="bdg bcc">gestión</span>' : '') + '</td>'
       + '<td style="font-size:11.5px;color:var(--mut)">' + escH(l.descripcion || '') + '</td>'
-      + '<td style="text-align:right">' + (l.debe ? sgMoney(l.debe) : '—') + '</td>'
-      + '<td style="text-align:right">' + (l.haber ? sgMoney(l.haber) : '—') + '</td></tr>';
+      + '<td style="text-align:right">' + (l.debe ? sgMoney2(l.debe) : '—') + '</td>'
+      + '<td style="text-align:right">' + (l.haber ? sgMoney2(l.haber) : '—') + '</td></tr>';
   }).join('');
   var tot = Object.keys(d.totales || {}).map(function(a){
     var t = d.totales[a];
     return '<tr style="font-weight:700;border-top:2px solid var(--bor)">'
       + '<td colspan="3">' + (a === 'gestion' ? 'Gestión' : 'Fiscal') + '</td>'
-      + '<td style="text-align:right">' + sgMoney(t.debe) + '</td>'
-      + '<td style="text-align:right">' + sgMoney(t.haber) + '</td></tr>'
+      + '<td style="text-align:right">' + sgMoney2(t.debe) + '</td>'
+      + '<td style="text-align:right">' + sgMoney2(t.haber) + '</td></tr>'
       + '<tr><td colspan="5" style="text-align:right;font-size:12px;padding-bottom:6px;color:'
       + (t.balancea ? '#16a34a' : '#dc2626') + '">'
       + (t.balancea ? '✓ balancea'
-                    : '⚠ NO balancea · diferencia ' + sgMoney(Math.abs(t.debe - t.haber)))
+                    : '⚠ NO balancea · diferencia ' + sgMoney2(Math.abs(t.debe - t.haber)))
       + '</td></tr>';
   }).join('');
   return '<div style="font-weight:700;font-size:12px;text-transform:uppercase;letter-spacing:.04em;'
@@ -15203,13 +15234,30 @@ function sgFdEmitir(){
       toast('Línea '+(i+1)+': pedís '+b+' cajón(es) y quedan '+it.bultos_disponibles,'er'); return;
     }
     if(!(Number(it.precio)>0)){ toast('Línea '+(i+1)+': falta el precio','er'); return; }
-    // EL PRECIO QUE VIAJA ES EL DESCONTADO. El de lista es el que escribe el
-    // operador; lo que se factura —y lo que va al libro fiscal— es ese precio
-    // menos el acuerdo con el proveedor de esa partida.
+    // SIN ALÍCUOTA NO SE EMITE. El backend frena; acá se avisa antes de apretar,
+    // que es cuando todavía se puede ir a cargarla.
+    if(it.alicuota==null){
+      toast('Línea '+(i+1)+': el producto no tiene alícuota de IVA cargada. Cargala en Maestros → Productos.','er'); return;
+    }
+    // ══ LO QUE VIAJA ES EL IMPORTE DE LA LÍNEA, NO UN PRECIO REDONDEADO ══
+    //
+    // Acá se mandaba precio × (1 − descuento) CORTADO A 2 DECIMALES, y el backend
+    // reconstruía el total multiplicando por los kilos: sobre 20.000 kg eso son
+    // pesos de diferencia contra lo que esta misma pantalla muestra. Y el descuento
+    // se aplica sobre el TOTAL de la línea (sgFdMontos), no sobre el precio por
+    // kilo, así que reconstruirlo desde el unitario nunca iba a dar igual.
+    //
+    // Se manda el importe --el mismo que se ve arriba-- y el precio por kilo sale
+    // de ahí, sin redondear: es una vista del importe, no su origen.
     var d=sgFdDescDe(it);
+    var mm=sgFdMontos(it);
+    var kgLinea=Number(it.kg)||0;
     items.push({ origen:'lote', lote_id:Number(it.lote_id), bultos:b,
-      precio_por_kg: paRound2Fm(Number(it.precio) * (1 - d/100)),
-      precio_lista_por_kg: Number(it.precio), descuento_pct: d });
+      precio_por_kg: kgLinea>0 ? (mm.facturado/kgLinea) : 0,
+      precio_lista_por_kg: Number(it.precio), descuento_pct: d,
+      // Los dos importes de la línea, tal cual los muestra la pantalla. De la
+      // diferencia sale la venta de gestión, y va SIN tocarle el IVA.
+      importe_bruto: mm.facturado, importe_lista: mm.lista });
   }
   if(!items.length){ toast('Cargá al menos una partida con cajones','er'); return; }
   var btn=eid('sgfd-emitir-btn'); btn.disabled=true; var prev=btn.textContent; btn.textContent='Emitiendo…';
@@ -15773,16 +15821,38 @@ function sgFacResumen(){
   });
   var iva = Object.keys(ivaPorAlic).reduce(function(a,k){return a+ivaPorAlic[k];},0);
   var total = neto + iva + exento;
+  // ══ LO QUE FIGURA COMO "EXENTO" ACÁ ES, EN REALIDAD, SIN CARGAR ══════
+  //
+  // /facturable manda exento:true cuando el producto no tiene alícuota en ningún
+  // lado, y esta pantalla lo mostraba como una operación exenta más. Nunca fue
+  // exento: era un dato que faltaba, y el comprobante salía sin IVA.
+  //
+  // Desde que la emisión frena por eso, dejar el botón habilitado es ofrecer algo
+  // que va a contestar 400 — y encima es la pantalla por la que pasan los remitos
+  // de mercadería QUE YA SALIÓ del depósito. Se avisa acá, con el nombre del
+  // producto, que es donde todavía se puede ir a cargarlo.
+  var sinAlic = [];
+  SG.facLineas.forEach(function(ln){
+    if((Number(ln.kg)||0) > 0 && (ln.exento || ln.alicuota==null)) sinAlic.push(ln.producto||('línea '+(sinAlic.length+1)));
+  });
   var letra = (SG.facData && SG.facData.tipo_cbte_sugerido===1) ? 'A' : 'B';
   var h = '<div style="display:flex;justify-content:space-between;border-top:1px solid var(--bor);padding-top:8px">'
     +'<div><span class="bdg bcc">Comprobante '+letra+'</span> <span class="bdg bok">PV '+(eid('sgf-pv')?eid('sgf-pv').value:'7')+'</span></div>'
     +'<div style="text-align:right">'
       +'Neto gravado: <b>'+sgMoney(neto)+'</b>';
   Object.keys(ivaPorAlic).map(Number).sort(function(a,b){return a-b;}).forEach(function(al){ h+=' · IVA '+String(al).replace('.',',')+'%: '+sgMoney(ivaPorAlic[al]); });
-  if(exento>0.001) h+=' · Exento: '+sgMoney(exento);
+  if(exento>0.001) h+=' · Sin alícuota: '+sgMoney(exento);
   h+='<div style="font-size:15px;font-weight:700;margin-top:3px">Total: '+sgMoney(total)+'</div></div></div>';
+  if(sinAlic.length){
+    h+='<div style="margin-top:8px;padding:8px 11px;border:1.5px solid #dc2626;background:#fef2f2;'
+      +'border-radius:8px;color:#991b1b;font-size:12.5px">'
+      +'<b>'+escH(sinAlic.join(', '))+'</b>: sin alícuota de IVA cargada. Así no se puede emitir '
+      +'—el comprobante saldría sin IVA—. Cargala en <b>Maestros → Productos</b> y volvé. '
+      +'La mercadería ya salió: el remito te espera acá.</div>';
+  }
   eid('sgf-resumen').innerHTML = h;
-  var btn=eid('sgf-emitir-btn'); var valid = SG.facLineas.some(function(l){return Number(l.kg)>0;});
+  var btn=eid('sgf-emitir-btn');
+  var valid = SG.facLineas.some(function(l){return Number(l.kg)>0;}) && !sinAlic.length;
   if(btn){ btn.disabled=!valid; btn.style.opacity=valid?'1':'.5'; btn.style.cursor=valid?'pointer':'not-allowed'; }
 }
 function sgFacEmitir(){
@@ -16446,7 +16516,7 @@ function sgrReprRenderMeta(){
   if(m.madreBulto) h+='<div>'+nr(m.bproc)+' cajones × '+nr(m.madreFactor)+'kg = <b>'+nr(m.kgProc)+'kg</b> procesados</div>';
   h+='<div'+(m.madreBulto?' style="margin-top:3px"':'')+'>Costo madre consumido <b>'+sgMoney(m.costoMadre)+'</b> ('+nr(m.kgProc)+'kg × '+sgMoney(m.costoKgMadre)+'/kg) + gasto '+sgMoney(m.gasto)+' = <b>'+sgMoney(m.total)+'</b> a repartir'+(m.todosHijoBulto?' · <span style="color:var(--ok,#16a34a)">costeo plano por cajón</span>':'')+'</div>';
   if(!m.madreBulto) h+='<div style="margin-top:3px">Merma <b style="color:'+(mermaOk?'var(--mut)':'#dc2626')+'">'+nr(m.merma)+'kg</b> = '+nr(m.kgProc)+' procesados − '+nr(m.sumaKg)+' aprovechables'+(mermaOk?'':' · ⚠ los hijos superan lo procesado')+(dentroDisp?'':' · ⚠ procesás más que el disponible ('+nr(m.dispMadre)+'kg)')+'</div>';
-  h+='<div style="margin-top:3px">Σ asignado <b>'+sgMoney(sumaCosto)+'</b> / '+sgMoney(m.total)+' — <b style="color:'+(cuadra?'var(--ok,#16a34a)':'#dc2626')+'">'+(cuadra?'✓ cuadra':'⚠ diferencia '+sgMoney(dif))+'</b></div>';
+  h+='<div style="margin-top:3px">Σ asignado <b>'+sgMoney2(sumaCosto)+'</b> / '+sgMoney2(m.total)+' — <b style="color:'+(cuadra?'var(--ok,#16a34a)':'#dc2626')+'">'+(cuadra?'✓ cuadra':'⚠ diferencia '+sgMoney2(dif))+'</b></div>';
   eid('sgr-rep-meta').innerHTML=h;
   var hijosOk=SG.reprHijos.filter(function(x){return Number(x.kg)>0;}).length>0;
   var valid=cuadra && mermaOk && dentroDisp && m.kgProc>0 && hijosOk && (!m.madreBulto || (bultosOk && bDentro));
@@ -16615,7 +16685,7 @@ function sgGdsValResumen(){
   var extra='';
   if(document.querySelector('input[name="sg-val-modo"]:checked').value==='total'){
     var total=Number(eid('sg-val-total').value)||0, dif=Math.round((total-suma)*100)/100;
-    extra=' · objetivo '+sgMoney(total)+(Math.abs(dif)>=0.01?(' · dif '+sgMoney(dif)):' ✓');
+    extra=' · objetivo '+sgMoney(total)+(Math.abs(dif)>=0.01?(' · dif '+sgMoney2(dif)):' ✓');
   }
   eid('sg-val-resumen').innerHTML='Total a valorizar: '+sgMoney(Math.round(suma*100)/100)+extra;
 }
@@ -16706,7 +16776,7 @@ function sgFePintar(){
         + (val
             ? '<b>' + sgMoney(x.gasto_monto) + '</b>'
               + (dif ? '<div style="font-size:10.5px;color:' + (dif > 0 ? '#b91c1c' : '#0f766e') + '">'
-                  + (dif > 0 ? '+' : '−') + sgMoney(Math.abs(dif)) + '</div>' : '')
+                  + (dif > 0 ? '+' : '−') + sgMoney2(Math.abs(dif)) + '</div>' : '')
             : '<span style="color:#9a3412">falta</span>')
         + '</td>'
       + '<td style="text-align:right">'
@@ -32976,8 +33046,12 @@ function liqTotales(){
         ? '<span style="color:#166534;font-weight:700">✓ El neto a pagar da el precio acordado</span>'
           + '<span style="color:var(--mut)"> — ' + sgMoney(obj) + '</span>'
         : '<span style="color:var(--err);font-weight:700">⚠ El neto a pagar NO da lo acordado</span>'
-          + '<span style="color:var(--mut)"> — acordado ' + sgMoney(obj) + ', da '
-          + sgMoney(m2(pagarF + pagarG)) + ' (diferencia ' + sgMoney(dif) + ')</span>';
+          // CON CENTAVOS. Este cartel compara al centavo (0,01) y mostraba con
+          // sgMoney, que redondea a pesos: gritaba "NO da lo acordado" y a la vez
+          // decía "diferencia $0". liqPlata es el mismo formateador que usa el
+          // despeje de arriba en esta misma pantalla.
+          + '<span style="color:var(--mut)"> — acordado ' + liqPlata(obj) + ', da '
+          + liqPlata(m2(pagarF + pagarG)) + ' (diferencia ' + liqPlata(dif) + ')</span>';
     }
   }
 
@@ -51332,7 +51406,9 @@ function finConciliaCargar() {
     document.getElementById('fin-conc-saldo-ext').textContent   = paMoney(r.saldo_extracto||0);
     var dif = r.diferencia || 0;
     var difEl = document.getElementById('fin-conc-diferencia');
-    difEl.textContent = paMoney(dif);
+    // paMoney2, no paMoney: la conciliación se pinta en rojo a partir de UN CENTAVO
+    // de diferencia y paMoney redondea a pesos enteros — quedaba en rojo diciendo $0.
+    difEl.textContent = paMoney2(dif);
     difEl.style.color = Math.abs(dif) < 0.01 ? 'var(--ok)' : 'var(--err)';
     finConciliaRenderExtracto();
     finConciliaRenderMovim();

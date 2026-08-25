@@ -1034,6 +1034,66 @@ router.get('/despachos-pendientes', requireAuth, (req, res) => {
 // hasta ahora lo tenía que hacer el dueño. El nivel lo decide exigirNivel por la
 // dirección — que para esto hubo que DECLARARLA: 'sg/facturas' no estaba en el
 // mapa, y por eso requireAdmin era la única barrera que tenía.
+// ══ LOS IMPORTES DE UNA LÍNEA DE VENTA ═════════════════════════════════
+//
+// PURA y con nombre propio a propósito: es la cuenta que dejó un asiento en
+// $2.789.999,98 contra un papel que decía $2.790.000, y una cuenta así tiene que
+// poder probarse sola. La prueba está en test/plata_sg.test.mjs.
+//
+// EL DATO ES EL IMPORTE BRUTO DE LA LÍNEA, no el precio por kilo. Antes se sacaba
+// el unitario neto (precioBruto / 1,105) CORTADO A 4 DECIMALES y de ahí se
+// reconstruía todo; ese corte, multiplicado por miles de kilos, se ve en centavos.
+//
+// Y el IVA sale POR DIFERENCIA: así neto + iva da exactamente el bruto, siempre,
+// sin residuo posible. Es el patrón que el repo ya usa para el flete de la
+// liquidación.
+//
+// `importeBruto` lo manda la facturación directa, que aplica el descuento sobre el
+// TOTAL de la línea y no sobre el precio por kilo; si no viene, se arma desde
+// kg × precio, que es el camino de Facturar remitos.
+function importesDeLinea({ kg, precioBruto, alicuota, incluyeIva, importeBruto }) {
+  const bruto = (importeBruto != null && Number(importeBruto) >= 0)
+    ? r2(Number(importeBruto))
+    : r2(Number(kg || 0) * Number(precioBruto || 0));
+  const alic = Number(alicuota) || 0;
+  const neto = incluyeIva ? r2(bruto / (1 + alic / 100)) : bruto;
+  const iva  = incluyeIva ? r2(bruto - neto) : r2(neto * (alic / 100));
+  return { bruto, neto, iva };
+}
+
+// ══ LO RESIGNADO EN UNA LÍNEA: PESOS PELADOS, SIN IVA ══════════════════
+//
+// Pablo, 25/8/2026: "le estás sacando el IVA a la parte de gestión??? por qué?"
+// 45 cajas a $60.000 con 30% de descuento: se factura $1.890.000 y lo resignado son
+// $810.000. Acá se pasaban a NETO los dos precios antes de restarlos, y el acuerdo
+// quedaba guardado como $733.031.
+//
+// Del lado de gestión NO HAY IVA (CLAUDE.md): no hay débito ni crédito fiscal, así
+// que tampoco hay un IVA que descontar. El número es, simplemente, los PESOS que la
+// empresa puso sobre la mesa — igual que en compras, donde dif_gestion es la resta
+// cruda de lo acordado contra el total del comprobante. Y es lo que la cuenta
+// corriente necesita para que la deuda sea lo acordado.
+//
+// EL REDONDEO DECIDE SI HUBO ACUERDO; LOS IMPORTES SALEN DE LOS PRECIOS CRUDOS, LOS
+// DOS. El precio de lista se guarda con muchos decimales (el precio por bulto
+// dividido por los kilos del bulto) y por debajo del centavo por kilo no hay
+// acuerdo: hay redondeo. Eso ya había aparecido una vez como "$3 de venta de gestión
+// que nadie acordó". Pero armar el importe facturado con el precio CRUDO y el de
+// lista con el REDONDEADO reabre el mismo agujero por el otro lado: sin ningún
+// descuento, el reintento desde "Remitos pendientes de comprobante" guardaba $25 de
+// gestión, con su motivo y su línea en el libro. Sin acuerdo, la diferencia tiene
+// que dar cero POR CONSTRUCCIÓN, no por suerte.
+function gestionDeLinea({ kg, precioBruto, precioLista, brutoLinea, importeLista }) {
+  const listaR2 = precioLista != null ? r2(Number(precioLista)) : null;
+  const brutoR2 = r2(Number(precioBruto || 0));
+  const hayAcuerdo = listaR2 != null && listaR2 > brutoR2;
+  const brutoLista = (importeLista != null && Number(importeLista) >= 0)
+    ? r2(Number(importeLista))
+    : (hayAcuerdo ? r2(Number(kg || 0) * Number(precioLista)) : Number(brutoLinea));
+  const g = r2(brutoLista - Number(brutoLinea));
+  return g > 0 ? g : 0;
+}
+
 const postEmitir = async (req, res) => {
   const db = getDb();
   try {
@@ -1054,7 +1114,7 @@ const postEmitir = async (req, res) => {
         const diId = Number(it.despacho_item_id), kg = Number(it.kg);
         if (!(kg > 0)) continue;
         const di = db.prepare(`SELECT di.id, di.producto_id, di.kg_despachados, di.precio_por_kg,
-            di.precio_lista_por_kg, di.presentacion_id,
+            di.precio_lista_por_kg, di.presentacion_id, pr.nombre AS producto_nombre,
             COALESCE(di.kg_por_bulto, ps.factor_conversion) AS kg_por_bulto,
             COALESCE(pr.iva_alicuota, fam.iva_alicuota) AS iva_alicuota
           FROM sg_despacho_items di
@@ -1075,40 +1135,34 @@ const postEmitir = async (req, res) => {
         const precioBruto = (it.precio_por_kg != null && Number(it.precio_por_kg) >= 0)
           ? Number(it.precio_por_kg)
           : (Number(di.precio_por_kg) || 0);
-        const precioNeto = (incluyeIva && alic != null) ? +(precioBruto / (1 + alic / 100)).toFixed(4) : precioBruto; // al motor SIEMPRE neto
-        // F5 — metadata de presentación por bulto (cajón), SOLO para el detalle local + PDF. cantidad
-        // (kg) y precio (precio_kg neto) NO cambian → el payload e importes a AFIP son idénticos a hoy.
+        // SIN ALÍCUOTA NO SE FACTURA (Pablo, 25/8/2026). El motor también frena,
+        // pero acá se sabe QUÉ renglón es y se contesta 400 --dato que falta-- en
+        // vez del 502 del catch, que suena a que se cayó AFIP.
+        if (alic == null) {
+          return res.status(400).json({ ok: false, error:
+            `"${di.producto_nombre || 'El producto del renglón ' + diId}" no tiene alícuota de IVA `
+            + `cargada. Cargala en el maestro de productos: sin ella el comprobante saldría exento `
+            + `y la pantalla te está mostrando otro número.` });
+        }
+        const { bruto: brutoLinea, neto: netoLinea, iva: ivaLinea } =
+          importesDeLinea({ kg, precioBruto, alicuota: alic, incluyeIva, importeBruto: it.importe_bruto });
+        // El unitario NETO que se muestra en el PDF sale del importe, no al revés:
+        // con seis decimales, cantidad × precio vuelve a dar el importe impreso.
+        const precioNeto = kg > 0 ? +(netoLinea / kg).toFixed(6) : 0;
+        // F5 — metadata de presentación por bulto (cajón), SOLO para el detalle local + PDF.
         const kpb = (di.kg_por_bulto != null && Number(di.kg_por_bulto) > 0) ? Number(di.kg_por_bulto) : null;
         const bultosLinea = kpb != null ? +(kg / kpb).toFixed(4) : null;          // bultos facturados (display)
-        const precioPorBulto = kpb != null ? +(precioNeto * kpb).toFixed(4) : null; // = precio_kg neto × kg_por_bulto
+        const precioPorBulto = kpb != null ? +(precioNeto * kpb).toFixed(6) : null; // = precio_kg neto × kg_por_bulto
+        // Los importes viajan HECHOS al motor, junto con la alícuota que se resolvió
+        // acá: el comprobante no vuelve a calcular nada ni a resolver la alícuota por
+        // su cuenta. Dos cuentas de lo mismo terminan dando distinto.
         items.push({ producto_id: Number(di.producto_id), cantidad: kg, precio: precioNeto,
+          alicuota: alic, importe_neto: netoLinea, importe_iva: ivaLinea,
           bultos: bultosLinea, kg_por_bulto: kpb, precio_por_bulto: precioPorBulto, unidad: kpb != null ? 'cajón' : null });
-        // ── LOS PESOS DE ESTA LÍNEA, GUARDADOS ACÁ Y NO RECALCULADOS DESPUÉS ──
-        //
-        // Este es el único momento en que se sabe si el precio tipeado traía IVA
-        // adentro. Reconstruirlo más tarde sería adivinar, y de esto sale la
-        // liquidación del productor.
-        const netoLinea = r2(kg * precioNeto);
-        const ivaLinea = alic != null ? r2(netoLinea * (alic / 100)) : 0;
-        // Lo resignado por el acuerdo con el proveedor DE ESTA partida. Se mide
-        // contra el precio de lista de la misma línea, con la misma conversión de
-        // IVA: comparar un precio con IVA contra uno sin IVA da una diferencia
-        // que no existe.
-        // LOS DOS PRECIOS SE COMPARAN REDONDEADOS. El de lista se guarda con seis
-        // decimales (el precio por bulto dividido por los kilos del bulto) y el
-        // facturado con dos, así que el de lista quedaba MAYOR aunque el descuento
-        // fuera cero -- por milésimas de centavo. Multiplicado por mil kilos, eso
-        // apareció en la liquidación como "$3 de venta de gestión": una diferencia
-        // que nadie acordó, con su motivo y su línea en el libro.
-        //
-        // Por debajo del centavo por kilo no hay acuerdo: hay redondeo.
-        const listaR2 = di.precio_lista_por_kg != null ? r2(Number(di.precio_lista_por_kg)) : null;
-        const brutoR2 = r2(precioBruto);
-        const listaBruto = (listaR2 != null && listaR2 > brutoR2) ? listaR2 : brutoR2;
-        const listaNeto = (incluyeIva && alic != null) ? +(listaBruto / (1 + alic / 100)).toFixed(4) : listaBruto;
-        const gestionLinea = r2(kg * (listaNeto - precioNeto));
+        const gestionLinea = gestionDeLinea({ kg, precioBruto,
+          precioLista: di.precio_lista_por_kg, brutoLinea, importeLista: it.importe_lista });
         vinculos.push({ despacho_id: despachoId, despacho_item_id: diId, kg,
-          neto: netoLinea, iva: ivaLinea, gestion: gestionLinea > 0 ? gestionLinea : 0 });
+          neto: netoLinea, iva: ivaLinea, gestion: gestionLinea });
       }
     }
     if (!items.length) return res.status(400).json({ ok: false, error: 'No hay líneas válidas para facturar' });
@@ -1191,6 +1245,13 @@ router.post('/facturas/directa', requireAuth, async (req, res) => {
   // siempre: mismos vínculos, mismo descuento de lo pendiente, mismo PDF.
   const lineas = db.prepare('SELECT id, kg_despachados FROM sg_despacho_items WHERE despacho_id=? ORDER BY id')
     .all(despachoId);
+  // LOS IMPORTES DE CADA LÍNEA VIAJAN HASTA LA EMISIÓN. El remito guarda un precio
+  // POR KILO, y reconstruir el total desde ahí es lo que perdía pesos: el descuento
+  // se acordó sobre el importe de la línea, no sobre el precio del kilo. Se pasan
+  // por posición --el remito se arma con un map 1:1 de estos mismos items-- y sólo
+  // si las dos listas tienen el mismo largo; si no coinciden se deja que la emisión
+  // los recalcule desde kg × precio, que es el camino de Facturar remitos.
+  const mismoLargo = lineas.length === items.length;
   const fakeReq = Object.create(req);
   fakeReq.body = {
     cliente_id: clienteId, punto_venta: Number(b.punto_venta), es_nc: false,
@@ -1203,7 +1264,12 @@ router.post('/facturas/directa', requireAuth, async (req, res) => {
     descuento_gestion: Number(b.descuento_gestion) || 0,
     aplica_descuentos: b.aplica_descuentos ? 1 : 0,
     seleccion: [{ despacho_id: despachoId,
-      items: lineas.map((l) => ({ despacho_item_id: l.id, kg: Number(l.kg_despachados) })) }],
+      items: lineas.map((l, ix) => {
+        const orig = mismoLargo ? items[ix] : null;
+        return { despacho_item_id: l.id, kg: Number(l.kg_despachados),
+          importe_bruto: (orig && orig.importe_bruto != null) ? Number(orig.importe_bruto) : null,
+          importe_lista: (orig && orig.importe_lista != null) ? Number(orig.importe_lista) : null };
+      }) }],
   };
   let salida = null;
   const fakeRes = { _st: 200, status(c) { this._st = c; return this; },
@@ -1552,16 +1618,50 @@ function ubicMover(db, loteId, pisoId, dBultos, dKg) {
   }
 }
 
+// ══ EL KILO POR BULTO EFECTIVO: EL QUE PESÓ LA BALANZA ══════════════════
+//
+// Pablo, 25/8/2026: entraron 64 cajones que pesaron 1.184 kg cuando lo pactado eran
+// 20 kg por cajón, y la pantalla de venta ofrecía 59. Decidió que MANDA EL CONTEO.
+//
+// De los tres números que guarda el lote --64 bultos, 1.184 kg, 20 kg por bulto--
+// los dos primeros se MIDIERON y el tercero era una ESTIMACIÓN de la orden. Cuando
+// no cierran, el que está mal es el factor: los cajones pesaron 18,5. Dividir los
+// kilos por el factor nominal daba 59,2 cajones, el front truncaba a 59, y cinco
+// cajones que están en el depósito no aparecían en ninguna pantalla ni se podían
+// facturar.
+//
+// El factor efectivo es kg_reales / bultos, y con él TODAS las cuentas cierran
+// solas: 1.184/18,5 = 64 exacto para mostrar, y 64 × 18,5 = 1.184 exacto para
+// despachar. Las dos puntas importan: mostrar 64 y seguir despachando a 20 dejaría
+// el stock en −96 kg, que es la otra mitad del mismo problema.
+//
+// LO PACTADO NO SE TOCA. sg_oc_items.kg_por_bulto sigue siendo 20 y de ahí sale lo
+// que se le debe al productor (acordadoDeOC): se pactaron 64 cajones a $X el cajón,
+// y que hayan pesado menos no cambia el trato. Esto es del LOTE, no de la orden.
+//
+// Y las facturas ya emitidas tampoco se mueven: el despacho congela su propio
+// factor en di.kg_por_bulto.
+function kpbEfectivo(row) {
+  const b = Number(row && row.bultos) || 0;
+  const kgr = Number(row && row.kg_reales) || 0;
+  // Seis decimales: con un factor irracional (1.184/59 de un lote viejo) el
+  // producto vuelve a dar los kilos que hay, sin pasarse ni por un gramo.
+  if (b > 0 && kgr > 0) return Math.round((kgr / b) * 1e6) / 1e6;
+  const nominal = Number(row && row.kg_por_bulto) || 0;
+  return nominal > 0 ? nominal : 0;
+}
+
 // CUÁNTOS BULTOS SON ESOS KILOS. El decomiso y la transformación se cargan en
 // kilos, pero la ubicación lleva las dos unidades: sin esto, el saldo en kilos
 // bajaría y el de bultos quedaría intacto, y la misma partida diría dos cosas.
 // Si el lote no tiene factor conocido, devuelve 0: es preferible no mover los
 // bultos a inventar una cantidad.
 function bultosDeKg(db, loteId, kg) {
-  const l = db.prepare(`SELECT COALESCE(l.kg_por_bulto, ps.factor_conversion) AS kpb
+  const l = db.prepare(`SELECT l.bultos, l.kg_reales,
+      COALESCE(l.kg_por_bulto, ps.factor_conversion) AS kg_por_bulto
     FROM sg_lotes l LEFT JOIN sg_presentaciones ps ON ps.id=l.presentacion_id
     WHERE l.id=?`).get(loteId);
-  const kpb = l && Number(l.kpb) > 0 ? Number(l.kpb) : 0;
+  const kpb = kpbEfectivo(l);
   return kpb > 0 ? r2(Number(kg || 0) / kpb) : 0;
 }
 const bultosDecomisados = bultosDeKg;
@@ -1861,8 +1961,23 @@ function crearLotesDeItem(db, { recepcionId, ocItem, tipoPrecio, fechaIngreso, l
     // F2 — herencia del factor tipeado y el envase desde el oc_item (F1). kg_por_bulto: sub-lote
     // o, en su defecto, el del oc_item; envase: el del oc_item. Ambos null si no se conocen (legacy
     // con presentación → las lecturas caen a la presentación vía COALESCE).
-    const kpb = (lt.kg_por_bulto != null && lt.kg_por_bulto !== '') ? Number(lt.kg_por_bulto)
+    let kpb = (lt.kg_por_bulto != null && lt.kg_por_bulto !== '') ? Number(lt.kg_por_bulto)
       : (ocItem.kg_por_bulto != null ? Number(ocItem.kg_por_bulto) : null);
+    // ══ SI SE CONTÓ Y SE PESÓ, EL KG/BULTO SALE DE AHÍ ═════════════════
+    //
+    // Este es el único momento en que el conteo y la balanza entran juntos, y era
+    // el único lugar donde se podía frenar: el lote nacía diciendo tres cosas que
+    // no pueden ser ciertas a la vez --64 bultos, 1.184 kg y 20 kg por bulto-- y
+    // nadie las cruzaba. De ahí para abajo, todo lo que dividía por 20 perdía
+    // cinco cajones y todo lo que multiplicaba por 20 inventaba 96 kilos.
+    //
+    // El que estaba mal no era ninguno de los dos números medidos: era el FACTOR,
+    // que venía de la orden como estimación. La regla ya existía escrita y
+    // argumentada en /lotes/:id/corregir; lo que faltaba era correrla acá, en el
+    // alta. Un kilo de tolerancia, que es el error de una balanza de camión.
+    if (bultos > 0 && kg > 0 && (kpb == null || Math.abs(kg - bultos * kpb) > 1)) {
+      kpb = Math.round((kg / bultos) * 1e6) / 1e6;
+    }
     const envId = (ocItem.envase_id != null && ocItem.envase_id !== '') ? Number(ocItem.envase_id) : null;
     const codigo = codigoLoteDePartida(db, ocItem.id);
     const info = ins.run(codigo, recepcionId, ocItem.id, ocItem.producto_id, kg, precio, costoBase,
@@ -2112,7 +2227,7 @@ function diferenciasDeOC(db, ocId) {
     WHERE oc_id = ? AND activo = 1`).get(ocId).c;
   if (!recibida) return [];
   const items = db.prepare(`SELECT i.id, i.kg_estimados, i.cantidad_estimada_presentaciones,
-      i.kg_por_bulto, i.presentacion_id, pr.nombre AS producto_nombre,
+      i.kg_por_bulto, i.presentacion_id, i.modo_carga, pr.nombre AS producto_nombre,
       (SELECT COALESCE(SUM(kg_reales),0) FROM sg_lotes WHERE oc_item_id=i.id AND activo=1) AS kg_recibidos,
       (SELECT COALESCE(SUM(bultos),0)    FROM sg_lotes WHERE oc_item_id=i.id AND activo=1) AS bultos_recibidos
     FROM sg_oc_items i LEFT JOIN sg_productos pr ON pr.id=i.producto_id
@@ -2123,6 +2238,22 @@ function diferenciasDeOC(db, ocId) {
     const bultosRec = Number(it.bultos_recibidos) || 0;
     const kgPact = it.kg_estimados || 0;
     const kgRec = Number(it.kg_recibidos) || 0;
+    // ══ NO SE COMPARAN KILOS QUE NADIE PACTÓ ═══════════════════════════
+    //
+    // Cuando la compra se cerró POR CAJÓN, kg_estimados no es un compromiso: lo
+    // calcula la propia pantalla como cajones × kg por cajón (64 × 20 = 1.280).
+    // Entraron los 64 cajones pedidos y pesaron 1.184, y la orden avisaba
+    // "entró distinto de lo que se había pedido: −96 kg" contra un número que
+    // nadie acordó. El pacto era 64 cajones y entraron 64 cajones.
+    //
+    // El criterio ya estaba escrito en el front de la recepción --"los kilos
+    // derivados de los bultos no son una medición"-- y el dato para aplicarlo,
+    // modo_carga, estaba acá al lado sin que nadie lo mirara.
+    //
+    // Si se pactó por cajón y se contaron cajones, lo que manda es el conteo. Los
+    // kilos se informan igual, como dato, pero no disparan el aviso.
+    const pactadoPorBulto = (it.modo_carga === 'bulto')
+      || (it.modo_carga == null && bultosPact > 0);
 
     // ── NO SE CUENTAN BULTOS QUE NADIE CONTÓ ───────────────────────────
     // Si la mercadería entró PESADA y sin contar cajones, bultos_recibidos es
@@ -2136,7 +2267,9 @@ function diferenciasDeOC(db, ocId) {
     const difKg = +(kgRec - kgPact).toFixed(2);
 
     // Un kilo de más o de menos en una balanza de camión no es una diferencia.
-    const hayDifKg = Math.abs(difKg) > 1;
+    // Y si se pactó por cajón y se contaron cajones, los kilos no avisan nada:
+    // lo pactado eran cajones y el conteo ya dice si entraron todos.
+    const hayDifKg = Math.abs(difKg) > 1 && !(pactadoPorBulto && seContaron);
     const sinContar = !seContaron && bultosPact > 0 && kgRec > 0;
     if (!hayDifKg && !difBultos && !sinContar) continue;
 
@@ -6685,17 +6818,38 @@ const KG_VIGENTE_STOCK = `(l.kg_reales - ${SUM_DECOMISO} - ${SUM_TRANSF})`;
 // kg disponibles (vendibles) = kg vigentes − Σ despachado.
 const KG_DISPONIBLE = `(l.kg_reales - ${SUM_DECOMISO} - ${SUM_TRANSF} - ${SUM_DESPACHADO})`;
 
-// F2 — bultos derivados de kg (DISPLAY, no altera kg). kg_por_bulto = factor_conversion de la
-// presentación del lote (null si no hay presentacion_id). bultos_* = kg_* / kg_por_bulto SIN
-// redondear (puede dar fracción — esperado en F2; F3 lo corrige). Muta y devuelve la fila.
+// Bultos derivados de kg (DISPLAY, no altera kg). Muta y devuelve la fila.
+//
+// EL FACTOR ES EL EFECTIVO, NO EL NOMINAL (ver kpbEfectivo). Acá se dividía por el
+// kg/bulto pactado y de una partida de 64 cajones que pesaron 1.184 kg salía 59,2;
+// el front truncaba a 59 y esos cinco cajones dejaban de existir para la venta. El
+// comentario original decía "puede dar fracción — esperado en F2; F3 lo corrige", y
+// F3 no lo corrigió: le puso al lado una segunda cuenta (bultosDisponibles, que
+// parte del conteo real) para VALIDAR, mientras la pantalla seguía OFRECIENDO la
+// derivada. Dos verdades sobre el mismo cajón.
+//
+// Con el factor efectivo las dos cuentas dan lo mismo y la fracción desaparece:
+// mientras el lote no se toque, kg_disponibles / kpbEfectivo es exactamente el
+// conteo que quedó.
+//
+// Y `kg_por_bulto` sale de acá con el efectivo a propósito: es el factor que usa la
+// pantalla para pasar de $ por cajón a $ por kilo. Con el nominal, tipear "$9.000 el
+// cajón" facturaba 59 × 20 × 450 = $531.000 por 64 cajones que valían $576.000.
 function derivarBultosLote(row) {
-  const kpb = (row.kg_por_bulto != null && Number(row.kg_por_bulto) > 0) ? Number(row.kg_por_bulto) : null;
+  const ef = kpbEfectivo(row);
+  const kpb = ef > 0 ? ef : null;
   row.kg_por_bulto = kpb;
-  row.bultos_vigente     = (kpb != null && row.kg_vigente     != null) ? Number(row.kg_vigente)     / kpb : null;
-  row.bultos_disponibles = (kpb != null && row.kg_disponibles != null) ? Number(row.kg_disponibles) / kpb : null;
+  // NI UN CAJÓN POR UNA MILLONÉSIMA. El front trunca hacia abajo (medio cajón no
+  // existe), así que un 58,999999 --el residuo de dividir 1.184 por un factor de
+  // seis decimales-- se convierte en 58 y vuelve a esconder un cajón, que es el
+  // problema que se está arreglando. Por debajo de la diezmilésima de cajón no hay
+  // mercadería: hay coma flotante.
+  const cajones = (kg) => (kpb == null || kg == null) ? null : Math.round((Number(kg) / kpb) * 1e4) / 1e4;
+  row.bultos_vigente     = cajones(row.kg_vigente);
+  row.bultos_disponibles = cajones(row.kg_disponibles);
   // bultos_reservado: si el SQL ya lo trae (F3-D: Σ bultos reservas), se respeta; si no (callers sin
   // esa columna), se deriva de kg_reservado / kg_por_bulto como en F2 (fallback legacy).
-  if (row.bultos_reservado == null && row.kg_reservado != null) row.bultos_reservado = (kpb != null) ? Number(row.kg_reservado) / kpb : null;
+  if (row.bultos_reservado == null && row.kg_reservado != null) row.bultos_reservado = cajones(row.kg_reservado);
   return row;
 }
 
@@ -6851,7 +7005,9 @@ router.get('/lotes-disponibles', requireAuth, (req, res) => {
     const rows = db.prepare(`
       SELECT * FROM (
         SELECT l.id, l.codigo_lote, l.producto_id, pr.nombre AS producto_nombre, l.calidad, l.semaforo,
-          l.costo_final, l.kg_reales, l.presentacion_id, COALESCE(l.kg_por_bulto, ps.factor_conversion) AS kg_por_bulto,
+          -- l.bultos + l.kg_reales: de esos dos sale el kg/bulto EFECTIVO (kpbEfectivo).
+          l.costo_final, l.kg_reales, l.bultos, l.presentacion_id,
+          COALESCE(l.kg_por_bulto, ps.factor_conversion) AS kg_por_bulto,
           ${KG_VIGENTE_STOCK} AS kg_vigente,
           l.precio_unitario_kg, l.fecha_vencimiento_estimada,
           CAST(julianday(l.fecha_vencimiento_estimada) - julianday(date('now','localtime')) AS INTEGER) AS dias_restantes,
@@ -6901,7 +7057,9 @@ router.get('/oferta', requireAuth, (req, res) => {
           -- pantalla no tenga que ir a buscarlo de a uno.
           o.proveedor_id, prov.razon_social AS proveedor_nombre,
           prov.descuento_pct AS proveedor_descuento_pct,
-          l.costo_final, l.fecha_vencimiento_estimada, l.presentacion_id, COALESCE(l.kg_por_bulto, ps.factor_conversion) AS kg_por_bulto,
+          l.costo_final, l.fecha_vencimiento_estimada, l.presentacion_id,
+          -- l.bultos + l.kg_reales: de esos dos sale el kg/bulto EFECTIVO (kpbEfectivo).
+          l.bultos, l.kg_reales, COALESCE(l.kg_por_bulto, ps.factor_conversion) AS kg_por_bulto,
           ${KG_VIGENTE_STOCK} AS kg_vigente,
           CAST(julianday(l.fecha_vencimiento_estimada) - julianday(date('now','localtime')) AS INTEGER) AS dias_restantes,
           ${KG_DISPONIBLE} AS kg_disponibles,
@@ -7134,13 +7292,19 @@ const postRemito = (req, res) => {
       if (String(it.origen || '') === 'oc_item') continue;
       const loteId = Number(it.lote_id);
       if (!loteId) return res.status(400).json({ ok: false, error: 'Cada línea necesita lote' });
-      const lp = db.prepare(`SELECT l.presentacion_id, l.origen, l.envase_id, COALESCE(l.kg_por_bulto, ps.factor_conversion) AS kg_por_bulto
+      const lp = db.prepare(`SELECT l.presentacion_id, l.origen, l.envase_id, l.bultos, l.kg_reales,
+          COALESCE(l.kg_por_bulto, ps.factor_conversion) AS kg_por_bulto
         FROM sg_lotes l LEFT JOIN sg_presentaciones ps ON ps.id=l.presentacion_id WHERE l.id=? AND l.activo=1`).get(loteId);
       if (!lp) return res.status(400).json({ ok: false, error: 'Lote inexistente: ' + loteId });
       // F3 — el gate del despacho por bulto ahora es el FACTOR (kg por bulto coalesced: tipeado al
       // vuelo o heredado de la presentación), NO la presentación en sí. Lotes al-vuelo (sin
       // presentación pero con kg_por_bulto) pasan a despachables; para legacy el resultado es idéntico.
-      const kgPorBulto = (Number(lp.kg_por_bulto) > 0) ? Number(lp.kg_por_bulto) : null;
+      //
+      // EL FACTOR ES EL EFECTIVO, EL MISMO CON EL QUE LA PANTALLA OFRECIÓ LOS CAJONES.
+      // Si la pantalla ofrece 64 (kg_disponibles / 18,5) y acá se descontaran
+      // 64 × 20 = 1.280 kg de un lote que tiene 1.184, el stock en kilos se iría a
+      // −96. Las dos puntas tienen que dividir y multiplicar por el mismo número.
+      const kgPorBulto = kpbEfectivo(lp) > 0 ? kpbEfectivo(lp) : null;
       // F4-C2 — el granel-de-entrada (origen='granel' sin factor conocido) no se vende directo: entra a
       // la venta como hijos-bulto post-reproceso (que SÍ tienen factor, aunque hereden el origen).
       if (String(lp.origen || '') === 'granel' && kgPorBulto == null) return res.status(400).json({ ok: false, error: `Lote ${loteId} es GRANEL: no se despacha directo, primero reprocesalo a cajones` });

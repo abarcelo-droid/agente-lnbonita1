@@ -19,6 +19,12 @@ const CBTE = {
 };
 // alicuota_id AFIP → % (para reconstruir el desglose de IVA desde los ítems).
 const ID_A_PCT = { 3: 0, 4: 10.5, 5: 21, 6: 27, 8: 5, 9: 2.5 };
+// Los kilos de un cajón, para LEER: hasta dos decimales, con coma y sin ceros de
+// relleno. 20 → "20", 18,5 → "18,5", 18,546875 → "18,55".
+function kgTxt(n) {
+  const x = Math.round((Number(n) || 0) * 100) / 100;
+  return x.toLocaleString('es-AR', { minimumFractionDigits: 0, maximumFractionDigits: 2 });
+}
 
 const soloDig = (s) => String(s || '').replace(/\D/g, '');
 const cuitValido = (c) => /^\d{11}$/.test(c) && !/^0+$/.test(c);
@@ -134,7 +140,12 @@ export async function generarFacturaPDF(factura) {
     const cantTxt = enBulto ? String(Number(it.bultos)) : String(Number(it.cantidad) || 0);
     const uMed = enBulto ? (it.unidad || 'cajón') : 'kg';
     const pUnit = enBulto ? money(it.precio_por_bulto) : money(it.precio_unitario);
-    const desc = enBulto ? (String(it.descripcion || '') + ' × ' + Number(kpb) + 'kg') : String(it.descripcion || '');
+    // EL KILAJE DEL CAJÓN, LEGIBLE. Desde que el kg por bulto es el EFECTIVO
+    // (kg pesados ÷ cajones contados), casi nunca da redondo: un lote de 64
+    // cajones que pesó 1.187 kg da 18,546875, y el renglón de un comprobante
+    // fiscal salía «Tomate × 18.546875kg». Es una etiqueta, no un importe —los
+    // importes salen del subtotal guardado— así que se muestra como se lee.
+    const desc = enBulto ? (String(it.descripcion || '') + ' × ' + kgTxt(kpb) + 'kg') : String(it.descripcion || '');
     const fila = [
       String(it.producto_id || ''),
       desc,
@@ -157,9 +168,36 @@ export async function generarFacturaPDF(factura) {
     doc.setFont('helvetica', bold ? 'bold' : 'normal').setFontSize(bold ? 10 : 8.5).setTextColor(...(bold ? AZUL : GRIS));
     doc.text(lbl, lx, y); doc.text(money(val), tx, y, { align: 'right' }); y += bold ? 6.5 : 5.2;
   };
-  const netoGrav = Object.values(grav).reduce((a, g) => a + g.base, 0);
+  // ══ EL PAPEL DICE LO QUE SE LE INFORMÓ A AFIP, NO UNA CUENTA PROPIA ═════
+  //
+  // Acá el IVA se recalculaba multiplicando la base por la alícuota. Mientras el
+  // motor hacía esa misma multiplicación, coincidían siempre. Ahora el motor lo
+  // saca POR DIFERENCIA contra el importe bruto --que es lo que hace que el total
+  // dé exacto-- y las dos cuentas se separan por un centavo: el PDF imprimía
+  // «Neto $463.406,33 · IVA $48.657,66 · Total $512.064,00», que no suma, y con un
+  // IVA distinto del que AFIP tiene registrado. El cliente se toma un crédito
+  // fiscal que no es el del comprobante.
+  //
+  // El comprobante ya está emitido: sus importes son los guardados. Las bases por
+  // alícuota salen de los renglones (son sumas exactas de subtotales) y el IVA se
+  // reparte entre ellas dejando el resto en la última, que es el patrón que el
+  // repo ya usa para prorratear: así la suma de las partes da el total informado.
+  const r2pdf = (n) => Math.round((Number(n) || 0) * 100) / 100;
+  const pcts = Object.keys(grav).map(Number).sort((a, b) => a - b);
+  const ivaInformado = (factura && factura.iva != null) ? Number(factura.iva) : null;
+  if (ivaInformado != null && pcts.length) {
+    let repartido = 0;
+    pcts.forEach((pct, ix) => {
+      grav[pct].iva = (ix === pcts.length - 1) ? r2pdf(ivaInformado - repartido)
+                                               : r2pdf(grav[pct].base * pct / 100);
+      repartido = r2pdf(repartido + grav[pct].iva);
+    });
+  }
+  const netoGrav = (factura && factura.neto != null && pcts.length)
+    ? Number(factura.neto)
+    : Object.values(grav).reduce((a, g) => a + g.base, 0);
   linea('Neto Gravado:', netoGrav);
-  for (const pct of Object.keys(grav).map(Number).sort((a, b) => a - b)) linea('IVA ' + String(pct).replace('.', ',') + '%:', grav[pct].iva);
+  for (const pct of pcts) linea('IVA ' + String(pct).replace('.', ',') + '%:', grav[pct].iva);
   if (totExento > 0.001) linea('Importe Exento:', totExento);
   doc.setDrawColor(...GRIS).setLineWidth(0.3).line(lx, y, tx, y); y += 5;
   linea('Importe Total:', factura.total, true);
