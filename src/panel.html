@@ -4379,10 +4379,20 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
     #sec-share .sh-kpi .sh-sub{font-size:11px;color:var(--mut)}
     #sec-share .sh-up{color:#1a7f37} #sec-share .sh-dn{color:#b3261e}
     /* La barra de participación: nuestra parte pintada sobre el total del artículo. Es la
-       forma más rápida de ver dónde pesamos sin leer el número. */
+       forma más rápida de ver dónde pesamos sin leer el número.
+       EL NÚMERO SE ESCRIBE DOS VECES, una arriba del fondo y otra arriba del relleno, y la
+       de arriba del relleno se recorta junto con él. Antes había un solo número, a la
+       derecha: cuando la barra pasaba el 75% el relleno oscuro le quedaba encima y un 96%
+       era ilegible — justo los casos que más importa leer. Las dos capas ocupan la misma
+       caja, así que los números caen exactos uno sobre otro a cualquier ancho de columna. */
     #sec-share .sh-bar{position:relative;height:15px;border-radius:4px;background:var(--bor);overflow:hidden}
-    #sec-share .sh-bar i{position:absolute;left:0;top:0;bottom:0;background:var(--burg);display:block}
-    #sec-share .sh-bar span{position:absolute;right:4px;top:0;font-size:10px;line-height:15px;font-weight:700}
+    #sec-share .sh-bar-t{position:absolute;right:4px;top:0;font-size:10px;line-height:15px;font-weight:700}
+    #sec-share .sh-bar-f{position:absolute;left:0;top:0;right:0;bottom:0}
+    #sec-share .sh-bar-f i{position:absolute;left:0;top:0;right:0;bottom:0;background:var(--burg)}
+    #sec-share .sh-bar-tf{color:#fff}
+    /* Las sub-vistas de Competencia. Mismo mecanismo que las solapas de Oportunidades y
+       Huecos, para que se manejen igual. */
+    #sec-share .sh-csub{display:none} #sec-share .sh-csub.on{display:block}
     #sec-share .sh-chip{display:inline-block;padding:1px 7px;border-radius:9px;font-size:10.5px;font-weight:600}
     #sec-share .sh-ch-nos{background:#e6f4ea;color:#1a7f37}
     #sec-share .sh-ch-ip{background:#fdecec;color:#b3261e}
@@ -4527,15 +4537,37 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
 
   <!-- ── COMPETENCIA ──────────────────────────────────────────────────────────────── -->
   <div class="sh-pane" id="sh-pane-comp">
-    <div style="font-size:12px;font-weight:700;margin-bottom:6px">Quién es quién</div>
-    <div class="ab-table-wrap"><table class="pa-tbl">
-      <thead><tr><th style="width:6%">#</th><th class="sh-nom" style="width:28%">Proveedor</th>
-        <th style="width:11%">Tipo</th><th style="text-align:right;width:12%">Bultos</th>
-        <th style="text-align:right;width:9%">Share</th><th style="text-align:center;width:9%">Artíc.</th>
-        <th style="text-align:center;width:9%">Líder en</th><th style="width:16%">Nos cruza en</th></tr></thead>
-      <tbody id="sh-tb-comp"><tr><td colspan="8" class="emp">Cargando…</td></tr></tbody></table></div>
-    <div style="font-size:12px;font-weight:700;margin:16px 0 6px">Matriz proveedor × artículo <span style="font-weight:400;color:var(--mut)">(los más grandes de cada lado)</span></div>
-    <div class="ab-table-wrap" id="sh-matriz"></div>
+    <!-- Tres vistas, no tres pantallas apiladas: la matriz vivía abajo de todo y la ficha
+         se abría en una ventana que, una vez cerrada, no había forma de volver a abrir sin
+         buscar la fila del proveedor de nuevo. -->
+    <div style="display:inline-flex;gap:2px;background:var(--bg);border:1px solid var(--bor);border-radius:8px;padding:3px;margin-bottom:12px;flex-wrap:wrap">
+      <div class="sh-tab on" data-c="quien"  onclick="shCompVista('quien')">👥 Quién es quién</div>
+      <div class="sh-tab"    data-c="matriz" onclick="shCompVista('matriz')">🔲 Matriz</div>
+      <div class="sh-tab"    data-c="ficha"  onclick="shCompVista('ficha')">🔎 Ficha de proveedor</div>
+    </div>
+
+    <div class="sh-csub on" id="sh-csub-quien">
+      <div class="sh-aviso" style="margin:0 0 8px">Tocá un proveedor para ver su ficha.</div>
+      <div class="ab-table-wrap"><table class="pa-tbl">
+        <thead><tr><th style="width:6%">#</th><th class="sh-nom" style="width:28%">Proveedor</th>
+          <th style="width:11%">Tipo</th><th style="text-align:right;width:12%">Bultos</th>
+          <th style="text-align:right;width:9%">Share</th><th style="text-align:center;width:9%">Artíc.</th>
+          <th style="text-align:center;width:9%">Líder en</th><th style="width:16%">Nos cruza en</th></tr></thead>
+        <tbody id="sh-tb-comp"><tr><td colspan="8" class="emp">Cargando…</td></tr></tbody></table></div>
+    </div>
+
+    <div class="sh-csub" id="sh-csub-matriz">
+      <div class="sh-aviso" style="margin:0 0 8px">Cuántos bultos le compra Carrefour a cada proveedor de cada artículo — los más grandes de cada lado. Cuanto más oscura la celda, más concentrado está ahí ese artículo; <b>lo nuestro va en bordó</b>.</div>
+      <div class="ab-table-wrap" id="sh-matriz"></div>
+    </div>
+
+    <div class="sh-csub" id="sh-csub-ficha">
+      <div class="sh-f">
+        <div style="min-width:320px"><label>Proveedor</label>
+          <select id="sh-prov-sel" onchange="shProvFicha(this.value)" style="width:100%"></select></div>
+      </div>
+      <div id="sh-prov-body"></div>
+    </div>
   </div>
 
   <!-- ── BUSCADOR SEMANAL ─────────────────────────────────────────────────────────── -->
@@ -4649,17 +4681,6 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
       <button class="btn bo" id="sh-lote-cerrar" onclick="shLoteCerrar()">Cancelar</button>
       <button class="btn bb" id="sh-lote-ok" onclick="shLoteCorrer()">Cargar</button>
     </div>
-  </div>
-</div>
-
-<!-- Ficha de un competidor. -->
-<div class="ab-modal-overlay" id="sh-prov-modal">
-  <div class="ab-modal" style="max-width:min(1050px,96vw);width:96vw">
-    <div class="mhd"><div class="mht" id="sh-prov-tit">Proveedor</div>
-      <button class="mcl" onclick="closeMB('sh-prov-modal')">×</button></div>
-    <div id="sh-prov-body"></div>
-    <div style="display:flex;justify-content:flex-end;margin-top:12px">
-      <button class="btn bb" onclick="closeMB('sh-prov-modal')">Cerrar</button></div>
   </div>
 </div>
 
@@ -28910,7 +28931,7 @@ function nrDec(n, d){
 //
 // El filtro de fechas es UNO SOLO para todas las solapas. Con un filtro por pestaña, cambiar
 // de solapa movería los números sin que nadie hubiera tocado nada.
-var SH = { tab: 'dash', opor: 'no_capturado', hueco: 'duro', rango: null, art: null, puedeOperar: 0 };
+var SH = { tab: 'dash', opor: 'no_capturado', hueco: 'duro', comp: 'quien', rango: null, art: null, puedeOperar: 0 };
 
 function shPct(v, d){ return (v == null) ? '—' : (v * 100).toLocaleString('es-AR', { minimumFractionDigits: d == null ? 1 : d, maximumFractionDigits: d == null ? 1 : d }) + '%'; }
 function shDelta(v){
@@ -28918,10 +28939,15 @@ function shDelta(v){
   var c = v > 0 ? 'sh-up' : (v < 0 ? 'sh-dn' : '');
   return '<span class="' + c + '">' + (v > 0 ? '▲' : (v < 0 ? '▼' : '')) + ' ' + shPct(Math.abs(v)) + '</span>';
 }
-// La barra de participación. El número va adentro para no gastar una columna en repetirlo.
+// La barra de participación. El número va adentro para no gastar una columna en repetirlo, y
+// se dibuja DOS VECES: una sobre el fondo y otra sobre el relleno, recortada con él. Con un
+// solo número, en cuanto la barra pasaba el 75% el relleno oscuro se lo comía.
 function shBar(share){
   var p = Math.max(0, Math.min(1, share || 0)) * 100;
-  return '<div class="sh-bar"><i style="width:' + p.toFixed(1) + '%"></i><span>' + shPct(share) + '</span></div>';
+  var t = shPct(share);
+  return '<div class="sh-bar"><span class="sh-bar-t">' + t + '</span>' +
+    '<span class="sh-bar-f" style="clip-path:inset(0 ' + (100 - p).toFixed(1) + '% 0 0)">' +
+    '<i></i><span class="sh-bar-t sh-bar-tf">' + t + '</span></span></div>';
 }
 // El proveedor que hoy se lleva más volumen de ese artículo. Se dibuja siempre igual —acá y
 // no en cada tabla— para que el dorado signifique lo mismo en las cinco pantallas donde sale.
@@ -29242,8 +29268,23 @@ function shHuecos(){
 }
 
 // ── Competencia ─────────────────────────────────────────────────────────────────────────
+// Cuál de las tres vistas de Competencia está abierta.
+function shCompVista(v){
+  SH.comp = v;
+  var sec = eid('sec-share'); if (!sec) return;
+  sec.querySelectorAll('.sh-tab[data-c]').forEach(function(el){ el.classList.toggle('on', el.dataset.c === v); });
+  sec.querySelectorAll('.sh-csub').forEach(function(el){ el.classList.toggle('on', el.id === 'sh-csub-' + v); });
+  // Entrar a la ficha sin nada elegido dejaba la pantalla en blanco, que es justo la
+  // sensación de "no sé cómo llegar acá". Se abre el primer competidor de la lista.
+  if (v === 'ficha' && !elv('sh-prov-sel') && (SH.compProvs || []).length) {
+    var p = SH.compProvs.filter(function(x){ return !x.es_nosotros; })[0] || SH.compProvs[0];
+    if (p) shProvFicha(p.id);
+  }
+}
+
 function shComp(){
   eid('sh-filtro-extra').innerHTML = '';
+  shCompVista(SH.comp || 'quien');
   eid('sh-tb-comp').innerHTML = '<tr><td colspan="8" class="emp">Calculando…</td></tr>';
   api('/api/share/competencia?' + shParams()).then(function(r){
     if (!r || !r.ok) { eid('sh-tb-comp').innerHTML = '<tr><td colspan="8" class="emp">' + escH((r && r.error) || 'Error') + '</td></tr>'; return; }
@@ -29256,6 +29297,19 @@ function shComp(){
         '<td style="text-align:center">' + (p.lider_en ? '<b>' + p.lider_en + '</b>' : '<span class="sh-pod-x">0</span>') + '</td>' +
         '<td>' + (p.es_nosotros ? '—' : shBar(p.solapamiento)) + '</td></tr>';
     }).join('');
+
+    // El selector de la ficha se llena con el MISMO ranking que la tabla: así ofrece
+    // exactamente los proveedores del período elegido, ordenados por volumen, y no un padrón
+    // que incluya a los que no aparecieron.
+    SH.compProvs = r.data.ranking;
+    var sel = eid('sh-prov-sel'), antes = sel ? sel.value : '';
+    if (sel) {
+      sel.innerHTML = '<option value="">— elegí un proveedor —</option>' + r.data.ranking.map(function(p){
+        return '<option value="' + p.id + '">' + escH(p.nombre) + (p.es_nosotros ? ' (nosotros)' : '') + ' · ' + nr(p.bultos) + '</option>';
+      }).join('');
+      // Si ya había uno abierto se mantiene al cambiar el rango de fechas.
+      if (antes && r.data.ranking.some(function(p){ return String(p.id) === String(antes); })) sel.value = antes;
+    }
 
     // La matriz. Sin scroll lateral: las columnas se reparten el ancho disponible y el nombre
     // del proveedor va en vertical, que es lo único que entra en una columna angosta.
@@ -29283,14 +29337,18 @@ function shComp(){
 }
 
 function shProvFicha(id){
+  if (!id) { eid('sh-prov-body').innerHTML = '<div class="emp">Elegí un proveedor arriba.</div>'; return; }
+  var sel = eid('sh-prov-sel'); if (sel) sel.value = id;
+  shCompVista('ficha');
   eid('sh-prov-body').innerHTML = '<div class="emp">Cargando…</div>';
-  eid('sh-prov-modal').classList.add('on');
   api('/api/share/competencia/' + id + '?' + shParams()).then(function(r){
     if (!r || !r.ok) { eid('sh-prov-body').innerHTML = '<div class="emp">' + escH((r && r.error) || 'Error') + '</div>'; return; }
     var d = r.data;
-    eid('sh-prov-tit').textContent = d.proveedor.nombre_canonico;
     var kpi = function(t, v, s){ return '<div class="sh-kpi"><div style="font-size:11px;color:var(--mut)">' + t + '</div><b>' + v + '</b><div class="sh-sub">' + (s || '') + '</div></div>'; };
     eid('sh-prov-body').innerHTML =
+      '<div style="display:flex;align-items:baseline;gap:8px;margin-bottom:8px">' +
+        '<div style="font-size:16px;font-weight:700">' + escH(d.proveedor.nombre_canonico) + '</div>' +
+        shChip(d.proveedor.tipo) + '</div>' +
       '<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px">' +
         kpi('Volumen', nr(d.bultos), d.rango.desde + ' al ' + d.rango.hasta) +
         kpi('Artículos', d.articulos_n, 'líder en ' + d.lider_en) +
