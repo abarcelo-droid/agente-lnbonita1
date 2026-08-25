@@ -333,6 +333,107 @@ router.get('/especies', requireAuth, (req, res) => {
     res.json({ ok: true, data: db.prepare(`SELECT * FROM sg_especies WHERE ${where} ORDER BY codigo`).all(...params) });
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
+// ¿YA HAY UNA CON ESE NOMBRE ACÁ ADENTRO? Se compara NORMALIZADO --sin acentos,
+// sin mayúsculas, sin espacios de más--: con lower() a secas entraban «Perita» y
+// «perita», y el maestro termina con el mismo artículo escrito de tres maneras y
+// ningún informe que los junte. Es la misma regla que ya usan familias y envases.
+function taxConNombre(db, tabla, padreCol, padreId, nombre, exceptoId) {
+  const buscado = normalizar(nombre);
+  return db.prepare(`SELECT id, codigo, nombre FROM ${tabla} WHERE activo=1 AND ${padreCol}=?`)
+    .all(padreId)
+    .find((x) => (exceptoId == null || String(x.id) !== String(exceptoId))
+              && normalizar(x.nombre || '') === buscado) || null;
+}
+
+// ══ RENOMBRAR Y MOVER ══════════════════════════════════════
+//
+// De especie y variedad sólo se podía crear y borrar. Un nombre mal escrito no se
+// corregía: había que crear el nuevo, mover producto por producto y borrar el
+// viejo. Y mover una especie de familia era imposible, lo que hacía imposible
+// también lo que promete la pantalla de Familias ("primero movelos y después dala
+// de baja").
+//
+// EL NOMBRE ESTÁ DENORMALIZADO EN sg_productos --nombre = especie, variedad =
+// variedad, familia = familia-- y es lo que leen la grilla y los informes: si sólo
+// se tocara la tabla del maestro, la pantalla seguiría diciendo lo de antes y el
+// que renombró pensaría que no guardó.
+router.patch('/especies/:id', requireAdmin, (req, res) => {
+  const db = getDb();
+  try {
+    const esp = db.prepare('SELECT * FROM sg_especies WHERE id=? AND activo=1').get(req.params.id);
+    if (!esp) return res.status(404).json({ ok: false, error: 'Especie no encontrada' });
+    const sets = [], vals = [];
+    let nombreNuevo = null, familiaNueva = null;
+
+    if (req.body.nombre !== undefined) {
+      const nombre = val(req.body.nombre);
+      if (!nombre) return res.status(400).json({ ok: false, error: 'Nombre vacío' });
+      const destino = req.body.familia_id !== undefined ? Number(req.body.familia_id) : esp.familia_id;
+      const rep2 = taxConNombre(db, 'sg_especies', 'familia_id', destino, nombre, esp.id);
+      if (rep2) return res.status(400).json({ ok: false, error: `Ya existe la especie "${rep2.nombre}" en esa familia` });
+      sets.push('nombre=?'); vals.push(nombre); nombreNuevo = nombre;
+    }
+
+    if (req.body.familia_id !== undefined && Number(req.body.familia_id) !== Number(esp.familia_id)) {
+      const fam = db.prepare('SELECT id, nombre FROM sg_familias WHERE id=? AND activo=1').get(req.body.familia_id);
+      if (!fam) return res.status(400).json({ ok: false, error: 'La familia destino no existe' });
+      const nom = nombreNuevo || esp.nombre;
+      const rep3 = taxConNombre(db, 'sg_especies', 'familia_id', fam.id, nom, esp.id);
+      if (rep3) return res.status(400).json({ ok: false, error: `La familia destino ya tiene una especie "${rep3.nombre}"` });
+      // EL CÓDIGO SE REHACE. El código del producto es FF.EE.VV: al cambiar de
+      // familia cambia el primer tramo, y el correlativo de la especie tiene que
+      // ser el siguiente LIBRE de la familia nueva, no el que tenía en la vieja.
+      sets.push('familia_id=?', 'codigo=?');
+      vals.push(fam.id, nextCodigoNivel(db, 'sg_especies', 'familia_id=?', [fam.id]));
+      familiaNueva = fam;
+    }
+
+    if (!sets.length) return res.status(400).json({ ok: false, error: 'Nada para actualizar' });
+    sets.push(`modificado_en=datetime('now','localtime')`, 'modificado_por=?');
+    vals.push(uid(req), esp.id);
+
+    db.transaction(() => {
+      db.prepare(`UPDATE sg_especies SET ${sets.join(',')} WHERE id=?`).run(...vals);
+      // Y LOS PRODUCTOS QUE CUELGAN. El nombre del producto ES el de la especie.
+      if (nombreNuevo !== null) {
+        db.prepare('UPDATE sg_productos SET nombre=? WHERE especie_id=?').run(nombreNuevo, esp.id);
+      }
+      if (familiaNueva) {
+        db.prepare('UPDATE sg_productos SET familia_id=?, familia=? WHERE especie_id=?')
+          .run(familiaNueva.id, familiaNueva.nombre, esp.id);
+        // Y el código del producto, que arranca con el de la familia.
+        for (const pr of db.prepare('SELECT id FROM sg_productos WHERE especie_id=?').all(esp.id)) {
+          const r = resolverProducto(db, { id: pr.id, familia_id: familiaNueva.id,
+            especie_id: esp.id,
+            variedad_id: (db.prepare('SELECT variedad_id v FROM sg_productos WHERE id=?').get(pr.id) || {}).v });
+          if (!r.error) db.prepare('UPDATE sg_productos SET codigo=? WHERE id=?').run(r.codigo, pr.id);
+        }
+      }
+    })();
+    res.json({ ok: true, data: db.prepare('SELECT * FROM sg_especies WHERE id=?').get(esp.id) });
+  } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
+});
+
+router.patch('/variedades/:id', requireAdmin, (req, res) => {
+  const db = getDb();
+  try {
+    const v = db.prepare('SELECT * FROM sg_variedades WHERE id=? AND activo=1').get(req.params.id);
+    if (!v) return res.status(404).json({ ok: false, error: 'Variedad no encontrada' });
+    const nombre = val(req.body.nombre);
+    if (!nombre) return res.status(400).json({ ok: false, error: 'Nombre vacío' });
+    const rep4 = taxConNombre(db, 'sg_variedades', 'especie_id', v.especie_id, nombre, v.id);
+    if (rep4) return res.status(400).json({ ok: false, error: `Ya existe la variedad "${rep4.nombre}" en esa especie` });
+    db.transaction(() => {
+      db.prepare(`UPDATE sg_variedades SET nombre=?,
+        modificado_en=datetime('now','localtime'), modificado_por=? WHERE id=?`)
+        .run(nombre, uid(req), v.id);
+      // La variedad también está denormalizada en el producto.
+      db.prepare('UPDATE sg_productos SET variedad=? WHERE variedad_id=?').run(nombre, v.id);
+    })();
+    res.json({ ok: true, data: db.prepare('SELECT * FROM sg_variedades WHERE id=?').get(v.id) });
+  } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
+});
+
 router.post('/especies', requireAdmin, (req, res) => {
   const db = getDb();
   try {
@@ -340,6 +441,8 @@ router.post('/especies', requireAdmin, (req, res) => {
     if (!familia_id) return res.status(400).json({ ok: false, error: 'Falta familia_id' });
     if (!nombre) return res.status(400).json({ ok: false, error: 'Falta nombre' });
     if (!db.prepare('SELECT id FROM sg_familias WHERE id=?').get(familia_id)) return res.status(400).json({ ok: false, error: 'familia_id inválido' });
+    const dup = taxConNombre(db, 'sg_especies', 'familia_id', familia_id, nombre, null);
+    if (dup) return res.status(400).json({ ok: false, error: `Ya existe la especie "${dup.nombre}" en esa familia` });
     const n = nextCodigoNivel(db, 'sg_especies', 'familia_id=?', [familia_id]);
     insertConCodigo(db, req, res, 'sg_especies', n, '', [], ['familia_id', 'nombre'], [familia_id, nombre]);
   } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
@@ -362,6 +465,8 @@ router.post('/variedades', requireAdmin, (req, res) => {
     if (!especie_id) return res.status(400).json({ ok: false, error: 'Falta especie_id' });
     if (!nombre) return res.status(400).json({ ok: false, error: 'Falta nombre' });
     if (!db.prepare('SELECT id FROM sg_especies WHERE id=?').get(especie_id)) return res.status(400).json({ ok: false, error: 'especie_id inválido' });
+    const dup = taxConNombre(db, 'sg_variedades', 'especie_id', especie_id, nombre, null);
+    if (dup) return res.status(400).json({ ok: false, error: `Ya existe la variedad "${dup.nombre}" en esa especie` });
     const n = nextCodigoNivel(db, 'sg_variedades', 'especie_id=?', [especie_id]);
     insertConCodigo(db, req, res, 'sg_variedades', n, '', [], ['especie_id', 'nombre'], [especie_id, nombre]);
   } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
