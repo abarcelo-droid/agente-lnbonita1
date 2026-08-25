@@ -14,7 +14,7 @@ import * as XLSX from 'xlsx';
 import { subirArchivo, obtenerArchivo, storageConfigurado } from '../servicios/storage.js';
 import { facturaCuenta } from '../servicios/factura-cuenta.js';
 import { previewAsientoLiquidacion, lineasAsientoLiquidacion } from '../servicios/asiento-liquidacion.js';
-import { crearAsiento, MOTIVOS, frenoAsientoDeCompra } from '../servicios/asientos.js';
+import { crearAsiento, MOTIVOS, origenDeAsiento } from '../servicios/asientos.js';
 
 // El nombre del motivo para mostrarlo en una ficha. La clave sola no le dice
 // nada a nadie.
@@ -936,8 +936,17 @@ const postEmitir = async (req, res) => {
         // contra el precio de lista de la misma línea, con la misma conversión de
         // IVA: comparar un precio con IVA contra uno sin IVA da una diferencia
         // que no existe.
-        const listaBruto = (di.precio_lista_por_kg != null && Number(di.precio_lista_por_kg) > precioBruto)
-          ? Number(di.precio_lista_por_kg) : precioBruto;
+        // LOS DOS PRECIOS SE COMPARAN REDONDEADOS. El de lista se guarda con seis
+        // decimales (el precio por bulto dividido por los kilos del bulto) y el
+        // facturado con dos, así que el de lista quedaba MAYOR aunque el descuento
+        // fuera cero -- por milésimas de centavo. Multiplicado por mil kilos, eso
+        // apareció en la liquidación como "$3 de venta de gestión": una diferencia
+        // que nadie acordó, con su motivo y su línea en el libro.
+        //
+        // Por debajo del centavo por kilo no hay acuerdo: hay redondeo.
+        const listaR2 = di.precio_lista_por_kg != null ? r2(Number(di.precio_lista_por_kg)) : null;
+        const brutoR2 = r2(precioBruto);
+        const listaBruto = (listaR2 != null && listaR2 > brutoR2) ? listaR2 : brutoR2;
         const listaNeto = (incluyeIva && alic != null) ? +(listaBruto / (1 + alic / 100)).toFixed(4) : listaBruto;
         const gestionLinea = r2(kg * (listaNeto - precioNeto));
         vinculos.push({ despacho_id: despachoId, despacho_item_id: diId, kg,
@@ -3003,6 +3012,13 @@ router.get('/partidas/:id/venta', requireAuth, (req, res) => {
       se_cobra: oc.flete_a_cargo === 'comprador' && fMonto > 0 ? 1 : 0,
     };
 
+    // LA FECHA EN QUE ENTRÓ LA MERCADERÍA. El comprobante la imprime ("Fecha de
+    // Ingreso") y salía en blanco siempre porque este endpoint no la mandaba: había
+    // que ir a buscarla a la recepción y tipearla. Es la PRIMERA recepción de la
+    // partida: si entró en dos viajes, la partida empezó con el primero.
+    const ing = db.prepare(`SELECT MIN(fecha_recepcion) AS f FROM sg_recepciones
+       WHERE oc_id = ? AND activo = 1 AND fecha_recepcion IS NOT NULL`).get(ocId);
+
     const bultosIn = r2(tot && tot.bultos);
     const bultosOut = r2(sal && sal.bultos);
     // TERMINADO = lo que ya no está en el depósito: vendido + merma. Es lo que
@@ -3011,6 +3027,8 @@ router.get('/partidas/:id/venta', requireAuth, (req, res) => {
     const terminado = r2(bultosOut + mermaBultos);
     res.json({ ok: true,
       partida: oc.trazabilidad || oc.numero,
+      fecha_oc: oc.fecha_oc || null,
+      fecha_ingreso: (ing && ing.f) || null,
       // En qué unidad se liquida. La pantalla la usa para rotular la columna y
       // para no ofrecer kilos donde se pactaron cajones.
       unidad,
@@ -4585,9 +4603,10 @@ router.post('/asientos/:id/anular', requireAuth, async (req, res) => {
     // hecho y la consecuencia lo sigue: anular la factura ya da de baja el
     // comprobante, anula su asiento, limpia el número de la recepción y devuelve
     // la partida a "esperando factura". Una sola puerta, un solo camino.
-    // El freno vive en servicios/asientos.js: hay DOS pantallas que anulan
-    // asientos y la regla tiene que ser una sola. Ver frenoAsientoDeCompra.
-    const freno = frenoAsientoDeCompra(db, a.id);
+    // El freno vive en servicios/asientos.js: hay TRES pantallas que anulan
+    // asientos y la regla tiene que ser una sola. Ver origenDeAsiento -- pregunta
+    // por CUALQUIER origen, no sólo por la factura de compra.
+    const freno = origenDeAsiento(db, a.id);
     if (freno) return res.status(400).json({ ok: false, error: freno.error,
       factura_id: freno.factura_id, factura_numero: freno.factura_numero });
 
@@ -7034,9 +7053,14 @@ const postRemito = (req, res) => {
         const pisoLinea = (it.piso_id != null && it.piso_id !== '') ? Number(it.piso_id) : null;
         // El de lista sólo se guarda si de verdad hay descuento: escribir el
         // mismo número dos veces cuando no lo hay hace creer que hubo acuerdo.
+        // Y SE COMPARAN REDONDEADOS, por lo mismo: el de lista llega con seis
+        // decimales y el facturado con dos. Sin redondear, un remito sin ningún
+        // descuento guardaba igual un precio de lista "mayor", y de ahí salía una
+        // diferencia de gestión inventada al facturar.
+        const _r2p = (n) => Math.round((Number(n) || 0) * 100) / 100;
         const pLista = (it.precio_lista_por_kg != null && it.precio_lista_por_kg !== ''
-                        && Number(it.precio_lista_por_kg) > Number(precio))
-          ? Number(it.precio_lista_por_kg) : null;
+                        && _r2p(it.precio_lista_por_kg) > _r2p(precio))
+          ? _r2p(it.precio_lista_por_kg) : null;
         ins.run(despachoId, ln.origen, ln.loteId || null, ln.ocItemId || null, productoId, presId,
           (ln.envaseId != null ? ln.envaseId : null), (ln.kgPorBulto != null ? ln.kgPorBulto : null),
           bultos, bultos, kg, precio, pLista,

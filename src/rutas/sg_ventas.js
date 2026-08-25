@@ -14,6 +14,7 @@ import { crearAsiento, MOTIVOS } from '../servicios/asientos.js';
 // no lo usaba: esas ventas salían sin asiento.
 import { modeloVentaLineas, modeloVentaFaltan, lineasAsientoVenta, r2v }
   from '../servicios/asiento-venta.js';
+import { recontabilizarVenta } from '../servicios/afip-wsfe-emision.js';
 import { generarFacturaPDF } from '../servicios/facturaPDF.js';
 import { enviarMail } from '../servicios/mail.js';
 import * as XLSX from 'xlsx';
@@ -366,6 +367,48 @@ router.get('/facturas', (req, res) => {
     }
     res.json({ ok: true, data: facs });
   } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// ══ LAS VENTAS QUE SE CAYERON DEL LIBRO ════════════════════════════
+//
+// El espejo de «Facturas cargadas sin contabilizar» de compras. Un comprobante
+// emitido cuyo asiento se anuló --o que nunca llegó a tenerlo porque al modelo de
+// venta le faltaba una cuenta-- es una venta que el cliente debe y que la
+// contabilidad no sabe que existe. Hasta ahora no había ninguna pantalla que lo
+// mostrara, así que se enteraba el que cerraba el mes.
+//
+// Ruta LITERAL: va antes que cualquier /facturas/:id.
+router.get('/facturas-sin-asiento', requireAuth, (req, res) => {
+  try {
+    const rows = db.prepare(`
+      SELECT f.id, f.numero, f.fecha, f.punto_venta, f.cbte_nro, f.total, f.estado,
+             f.asiento_id, c.razon_social AS cliente,
+             CASE WHEN f.asiento_id IS NULL THEN 'nunca se contabilizó'
+                  ELSE 'su asiento se anuló' END AS por_que
+        FROM sg_ven_facturas f
+        LEFT JOIN sg_clientes c ON c.id = f.cliente_id
+       WHERE COALESCE(f.estado,'') <> 'anulada'
+         AND (f.asiento_id IS NULL
+              OR EXISTS (SELECT 1 FROM sg_asientos a
+                          WHERE a.id = f.asiento_id AND a.anulado = 1))
+       ORDER BY f.fecha DESC, f.id DESC`).all();
+    res.json({ ok: true, data: rows });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// Y la vuelta: se le arma un asiento NUEVO con los importes del mismo
+// comprobante. El anulado queda donde está --con su marca, su motivo y sus
+// líneas--, que es la prueba de qué decía. Un asiento no se resucita: se rehace.
+router.post('/facturas/:id(\\d+)/recontabilizar', requireAuth, (req, res) => {
+  try {
+    const u = req._user || req.user || {};
+    const r = recontabilizarVenta(db, parseInt(req.params.id, 10), u.id || null);
+    res.json({ ok: true, data: r });
+  } catch (e) {
+    // Son todos errores de lo que falta configurar o del estado del comprobante:
+    // van con su texto, que es lo único que el usuario puede corregir.
+    res.status(400).json({ ok: false, error: e.message });
+  }
 });
 
 // GET /facturas/export.xlsx → genera el XLSX EN EL SERVIDOR (lib xlsx) respetando los mismos

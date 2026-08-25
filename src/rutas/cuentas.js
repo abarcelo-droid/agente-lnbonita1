@@ -9,6 +9,11 @@ import db from '../servicios/db.js';
 // logica y todas ADIVINABAN cuando no les llegaba el dato: siete caian a
 // Puente Cordon y dos a San Geronimo. El por que esta en el servicio.
 import { exigirEmpresa, empresaFija, PUENTE_CORDON } from '../servicios/sociedad_modulo.js';
+// LA MISMA REGLA QUE EN SAN GERÓNIMO. Esta pantalla no tenía NINGÚN freno: se
+// anulaba el asiento de una compra, de una liquidación de venta, de una orden de
+// pago o de una liquidación de personal, y la operación seguía viva y fuera del
+// libro. Una sola regla para las tres pantallas que anulan asientos.
+import { origenDeAsientoPa } from '../servicios/asientos.js';
 
 const router = express.Router();
 
@@ -1190,6 +1195,11 @@ router.post('/asientos/:id(\\d+)/anular', requireAdmin, (req, res) => {
   const asiento = db.prepare('SELECT * FROM pa_asientos WHERE id = ?').get(id);
   if (!asiento) return res.status(404).json({ error: 'asiento no encontrado' });
   if (asiento.anulado) return res.status(400).json({ error: 'el asiento ya está anulado' });
+  // EL ASIENTO QUE NACIÓ EN UN MÓDULO SE DESHACE DESDE EL MÓDULO. Acá se anulaba
+  // cualquier cosa sin preguntar nada.
+  const freno = origenDeAsientoPa(db, id);
+  if (freno) return res.status(400).json({ ok: false, error: freno.error,
+    modulo: freno.modulo, pantalla: freno.pantalla, comprobante: freno.comprobante });
   db.prepare(`
     UPDATE pa_asientos
        SET anulado = 1, anulado_por = ?, anulado_en = datetime('now','localtime')

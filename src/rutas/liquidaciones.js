@@ -407,8 +407,27 @@ router.post('/', function(req, res) {
 // DELETE /:id — soft delete
 // ─────────────────────────────────────────────────────────────────────────────
 router.delete('/:id', function(req, res) {
-  db.prepare("UPDATE liquidaciones SET eliminado_en = datetime('now','localtime') WHERE id = ?").run(req.params.id);
-  res.json({ ok: true });
+  // Y CON ELLA SU ASIENTO. Acá se daba de baja la liquidación y su asiento
+  // quedaba en pie: la liquidación desaparecía de la pantalla y sus cuentas
+  // seguían movidas en el libro. Es el mismo error que el otro --anular el
+  // asiento y dejar viva la operación-- dado vuelta, y con el mismo resultado:
+  // el libro y la operación dicen cosas distintas.
+  //
+  // El asiento no se borra: queda marcado, que es la prueba de qué decía.
+  const liq = db.prepare('SELECT id, asiento_id, n_liquidacion FROM liquidaciones WHERE id = ?')
+    .get(req.params.id);
+  if (!liq) return res.status(404).json({ error: 'La liquidación no existe' });
+  db.transaction(function(){
+    if (liq.asiento_id) {
+      dbSg.prepare(`UPDATE sg_asientos
+         SET anulado = 1, anulado_en = datetime('now','localtime'),
+             descripcion = descripcion || ' — ANULADO: se dio de baja la liquidación '
+                        || ?
+       WHERE id = ? AND COALESCE(anulado,0) = 0`).run(liq.n_liquidacion || ('#' + liq.id), liq.asiento_id);
+    }
+    db.prepare("UPDATE liquidaciones SET eliminado_en = datetime('now','localtime') WHERE id = ?").run(liq.id);
+  })();
+  res.json({ ok: true, asiento_anulado: liq.asiento_id || null });
 });
 
 // ─────────────────────────────────────────────────────────────────────────────

@@ -288,6 +288,61 @@ function persistirReservada(database, { comprobante, ptoVta, cbteTipo, cbteNro, 
   })();
   return facturaId;
 }
+// ¿Ese asiento sigue en pie? Un asiento anulado está en la base y NO está en el
+// libro: para todo lo que viene después, es como si no existiera.
+function asientoAnulado(database, asientoId) {
+  if (!asientoId) return false;
+  const a = database.prepare('SELECT anulado FROM sg_asientos WHERE id=?').get(asientoId);
+  return !a || !!a.anulado;
+}
+
+// ══ LA VUELTA: UNA VENTA QUE PERDIÓ SU ASIENTO VUELVE AL LIBRO ═════════════
+//
+// Del lado de COMPRAS esto existía desde siempre («Facturas cargadas sin
+// contabilizar», con su botón Contabilizar). Del lado de VENTAS no: una factura a
+// la que le anularon el asiento quedaba en un callejón sin salida --el comprobante
+// emitido con su CAE, los kilos del remito consumidos, y ninguna pantalla que
+// rehiciera el asiento--. Pablo, 24/8/2026: "ahora no puedo volver a facturar esa
+// partida ni reflotar el asiento".
+//
+// El asiento anulado NO se resucita: queda donde está, con su marca y su motivo,
+// que es la prueba de qué decía. Se escribe uno NUEVO, con la fecha y los importes
+// del mismo comprobante.
+export function recontabilizarVenta(database, facturaId, userId) {
+  const f = database.prepare(`SELECT id, cliente_id, neto, iva, total, fecha, numero,
+      punto_venta, cbte_nro, estado, asiento_id, COALESCE(dif_gestion,0) AS dif_gestion
+    FROM sg_ven_facturas WHERE id=?`).get(facturaId);
+  if (!f) throw new Error('El comprobante no existe');
+  if (String(f.estado || '') === 'anulada') {
+    throw new Error('El comprobante está anulado: un comprobante anulado no vuelve al libro');
+  }
+  if (f.asiento_id && !asientoAnulado(database, f.asiento_id)) {
+    return { asiento_id: f.asiento_id, ya_estaba: true };
+  }
+  const nro = (f.punto_venta != null && f.cbte_nro != null)
+    ? String(f.punto_venta).padStart(4, '0') + '-' + String(f.cbte_nro).padStart(8, '0')
+    : String(f.numero || f.id);
+  const arm = lineasAsientoVenta(database, {
+    clienteId: f.cliente_id, neto: f.neto, iva: f.iva, total: f.total,
+    descuento: f.dif_gestion, numero: nro,
+  });
+  if (arm.falta.length) {
+    throw new Error('No se puede contabilizar la venta: falta ' + arm.falta.join(' y ')
+      + '. Se arregla en el asiento modelo de venta, en Contabilidad SG.');
+  }
+  const cli = database.prepare('SELECT razon_social r FROM sg_clientes WHERE id=?').get(f.cliente_id) || {};
+  const id = database.transaction(() => {
+    const asientoId = crearAsiento(database, {
+      fecha: f.fecha || null, usuario_id: userId || null, ref_codigo: nro,
+      descripcion: 'Venta — ' + (cli.r || '') + ' — Comprobante ' + nro
+                 + (f.asiento_id ? ' (rehecho: el anterior se anuló)' : ''),
+    }, arm.lineas).id;
+    database.prepare('UPDATE sg_ven_facturas SET asiento_id=? WHERE id=?').run(asientoId, f.id);
+    return asientoId;
+  })();
+  return { asiento_id: id, ya_estaba: false };
+}
+
 function actualizarFactura(database, facturaId, campos) {
   const sets = [], vals = [];
   for (const k of Object.keys(campos)) { sets.push(`${k}=?`); vals.push(campos[k]); }
@@ -311,7 +366,11 @@ function actualizarFactura(database, facturaId, campos) {
 // medias. Y si ya tiene asiento —un reintento— no se escribe dos veces.
 function asentarVenta(database, facturaId, comprobante, ptoVta, cbteNro, userId) {
   const ya = database.prepare('SELECT asiento_id, numero, fecha, dif_gestion FROM sg_ven_facturas WHERE id=?').get(facturaId);
-  if (ya && ya.asiento_id) return ya.asiento_id;
+  // TENER UN PUNTERO NO ES ESTAR EN EL LIBRO. Acá alcanzaba con que asiento_id
+  // tuviera algo: si ese asiento estaba ANULADO, esta función devolvía su id y no
+  // escribía nada. La venta quedaba fuera del libro para siempre y sin forma de
+  // rehacerla, porque el único camino de vuelta pasa por acá.
+  if (ya && ya.asiento_id && !asientoAnulado(database, ya.asiento_id)) return ya.asiento_id;
   const nro = String(ptoVta).padStart(4, '0') + '-' + String(cbteNro).padStart(8, '0');
   const arm = lineasAsientoVenta(database, {
     clienteId: comprobante.cliente.id,
