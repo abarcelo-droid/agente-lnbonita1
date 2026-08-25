@@ -75,6 +75,42 @@ export const DDL = `
     UNIQUE(tipo, alias_raw)
   );
 
+  -- ── LO QUE NOSOTROS OFRECEMOS ──────────────────────────────────────────────────────
+  -- El planning dice qué COMPRÓ Carrefour. Esto dice qué le OFRECIMOS ese día, que es la
+  -- otra mitad: sin la oferta, un artículo que no nos compró y uno que ni le mostramos se
+  -- ven exactamente igual — cero bultos nuestros — y son dos problemas distintos.
+  CREATE TABLE IF NOT EXISTS share_ofertas (
+    id                INTEGER PRIMARY KEY AUTOINCREMENT,
+    fecha             TEXT NOT NULL,
+    origen            TEXT,                   -- 'excel' | 'texto'
+    archivo_nombre    TEXT,
+    filas             INTEGER,
+    bultos_total      REAL,
+    notas             TEXT,
+    cargado_por       TEXT,
+    cargado_por_id    INTEGER,
+    creado_en         TEXT DEFAULT (datetime('now','localtime')),
+    -- Una sola oferta activa por día: si se vuelve a cargar, la anterior queda de historia.
+    estado            TEXT NOT NULL DEFAULT 'activa',
+    reemplazada_por   INTEGER,
+    reemplazada_en    TEXT
+  );
+
+  CREATE TABLE IF NOT EXISTS share_oferta_lineas (
+    id                INTEGER PRIMARY KEY AUTOINCREMENT,
+    oferta_id         INTEGER NOT NULL REFERENCES share_ofertas(id) ON DELETE CASCADE,
+    fecha             TEXT NOT NULL,
+    articulo_raw      TEXT NOT NULL,
+    articulo_id       INTEGER REFERENCES share_articulos(id),
+    cantidad          REAL NOT NULL,
+    notas             TEXT
+  );
+
+  CREATE INDEX IF NOT EXISTS ix_share_of_fecha ON share_oferta_lineas(fecha);
+  CREATE INDEX IF NOT EXISTS ix_share_of_art   ON share_oferta_lineas(articulo_id, fecha);
+  CREATE INDEX IF NOT EXISTS ix_share_of_carga ON share_oferta_lineas(oferta_id);
+  CREATE INDEX IF NOT EXISTS ix_share_ofertas_est ON share_ofertas(estado, fecha);
+
   CREATE INDEX IF NOT EXISTS ix_share_lineas_fecha ON share_lineas(fecha_entrega);
   CREATE INDEX IF NOT EXISTS ix_share_lineas_art   ON share_lineas(articulo_id, fecha_entrega);
   CREATE INDEX IF NOT EXISTS ix_share_lineas_prov  ON share_lineas(proveedor_id, fecha_entrega);
@@ -96,7 +132,17 @@ export const VISTA = `
      WHERE c.estado = 'activa';
 `;
 
+export const VISTA_OFERTA = `
+  DROP VIEW IF EXISTS share_oferta_v;
+  CREATE VIEW share_oferta_v AS
+    SELECT l.id, l.oferta_id, l.fecha, l.articulo_raw, l.articulo_id, l.cantidad
+      FROM share_oferta_lineas l
+      JOIN share_ofertas o ON o.id = l.oferta_id
+     WHERE o.estado = 'activa';
+`;
+
 export function crearEsquema(db) {
   db.exec(DDL);
   db.exec(VISTA);
+  db.exec(VISTA_OFERTA);
 }

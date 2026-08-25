@@ -4415,6 +4415,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
     /* Las sub-vistas de Competencia. Mismo mecanismo que las solapas de Oportunidades y
        Huecos, para que se manejen igual. */
     #sec-share .sh-csub{display:none} #sec-share .sh-csub.on{display:block}
+    #sec-share .sh-osub{display:none} #sec-share .sh-osub.on{display:block}
     #sec-share .sh-chip{display:inline-block;padding:1px 7px;border-radius:9px;font-size:10.5px;font-weight:600}
     #sec-share .sh-ch-nos{background:#e6f4ea;color:#1a7f37}
     #sec-share .sh-ch-ip{background:#fdecec;color:#b3261e}
@@ -4464,6 +4465,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
     <div class="sh-tab"    data-t="arts"    onclick="shTab('arts')">🍎 Artículos</div>
     <div class="sh-tab"    data-t="opor"    onclick="shTab('opor')">🎯 Oportunidades</div>
     <div class="sh-tab"    data-t="huecos"  onclick="shTab('huecos')">🕳️ Huecos</div>
+    <div class="sh-tab"    data-t="oferta"  onclick="shTab('oferta')">📤 Oferta vs compra</div>
     <div class="sh-tab"    data-t="comp"    onclick="shTab('comp')">⚔️ Competencia</div>
     <div class="sh-tab"    data-t="busc"    onclick="shTab('busc')">🔎 Buscador</div>
     <div class="sh-tab"    data-t="carga"   onclick="shTab('carga')">📤 Carga</div>
@@ -4555,6 +4557,58 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
     <div class="ab-table-wrap"><table class="pa-tbl">
       <thead id="sh-th-huecos"></thead>
       <tbody id="sh-tb-huecos"><tr><td colspan="7" class="emp">Cargando…</td></tr></tbody></table></div>
+  </div>
+
+  <!-- ── OFERTA vs COMPRA ─────────────────────────────────────────────────────────── -->
+  <div class="sh-pane" id="sh-pane-oferta">
+    <div style="display:inline-flex;gap:2px;background:var(--bg);border:1px solid var(--bor);border-radius:8px;padding:3px;margin-bottom:12px;flex-wrap:wrap">
+      <div class="sh-tab on" data-of="comparar" onclick="shOfVista('comparar')">📊 Cómo nos fue</div>
+      <div class="sh-tab"    data-of="cargar"   onclick="shOfVista('cargar')">📤 Cargar la oferta del día</div>
+    </div>
+
+    <div class="sh-osub on" id="sh-osub-comparar">
+      <div class="sh-aviso" style="margin:0 0 10px">
+        De lo que le ofrecimos a Carrefour, qué nos aceptó. <b>Sin la oferta cargada</b>, un artículo que
+        no nos compró y uno que ni le mostramos se ven idénticos —cero bultos nuestros— y son dos
+        problemas distintos.</div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px" id="sh-of-kpis"></div>
+      <div style="display:inline-flex;gap:2px;background:var(--bg);border:1px solid var(--bor);border-radius:8px;padding:3px;margin-bottom:10px;flex-wrap:wrap" id="sh-of-filtros"></div>
+      <div class="ab-table-wrap"><table class="pa-tbl">
+        <thead><tr>
+          <th class="sh-nom" style="width:25%">Artículo</th><th style="width:9%">Familia</th>
+          <th style="text-align:right;width:10%">Ofrecimos</th><th style="text-align:right;width:11%">Compró Carrefour</th>
+          <th style="text-align:right;width:10%">Nos compró</th><th style="text-align:right;width:10%">Sin colocar</th>
+          <th style="width:11%">Resultado</th><th class="sh-nom" style="width:14%">Se lo llevó</th></tr></thead>
+        <tbody id="sh-tb-of"><tr><td colspan="8" class="emp">Cargando…</td></tr></tbody></table></div>
+      <div class="sh-aviso" id="sh-of-nota"></div>
+    </div>
+
+    <div class="sh-osub" id="sh-osub-cargar">
+      <div class="sh-f">
+        <div><label>Fecha de la oferta</label><input type="date" id="sh-of-fecha"></div>
+        <div><label>&nbsp;</label><button class="btn bo bs" onclick="document.getElementById('sh-of-file').click()">📄 Subir un Excel</button>
+          <input type="file" id="sh-of-file" accept=".xlsx,.xls" style="display:none" onchange="shOfArchivo(this)"></div>
+      </div>
+      <div style="font-size:12px;font-weight:700;margin:6px 0 4px">Pegá la lista de disponibles</div>
+      <div class="sh-aviso" style="margin:0 0 6px">Un artículo por línea, con la <b>cantidad al final</b>. Sirve tal como sale del
+        WhatsApp: separada por tabulación, coma, punto y coma o espacios.<br>
+        <code>MANZANA X KG&nbsp;&nbsp;&nbsp;500</code> · <code>TOMATE REDONDO X KG, 300</code></div>
+      <textarea id="sh-of-texto" rows="10" placeholder="MANZANA X KG   500&#10;TOMATE REDONDO X KG   300&#10;ZAPALLITO LARGO   200"
+        style="width:100%;max-width:98vw;padding:9px 11px;border:1px solid var(--bor);border-radius:8px;background:var(--bg);font-family:ui-monospace,monospace;font-size:12.5px"></textarea>
+      <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap">
+        <button class="btn bb" onclick="shOfPrevio()">Revisar antes de cargar</button>
+        <button class="btn bo" onclick="shOfLimpiar()">Limpiar</button>
+      </div>
+      <div id="sh-of-previo" style="margin-top:12px"></div>
+
+      <div style="font-size:12px;font-weight:700;margin:20px 0 6px">Ofertas cargadas</div>
+      <div class="ab-table-wrap"><table class="pa-tbl">
+        <thead><tr><th style="width:13%">Fecha</th><th style="width:12%">Origen</th>
+          <th style="text-align:right;width:11%">Artículos</th><th style="text-align:right;width:13%">Bultos</th>
+          <th style="width:17%">Cargada</th><th style="width:13%">Por</th>
+          <th style="text-align:center;width:11%">Estado</th><th style="width:10%"></th></tr></thead>
+        <tbody id="sh-tb-ofertas"><tr><td colspan="8" class="emp">Cargando…</td></tr></tbody></table></div>
+    </div>
   </div>
 
   <!-- ── COMPETENCIA ──────────────────────────────────────────────────────────────── -->
@@ -29170,7 +29224,7 @@ function nrDec(n, d){
 //
 // El filtro de fechas es UNO SOLO para todas las solapas. Con un filtro por pestaña, cambiar
 // de solapa movería los números sin que nadie hubiera tocado nada.
-var SH = { tab: 'dash', opor: 'no_capturado', hueco: 'duro', comp: 'quien', rango: null, art: null, puedeOperar: 0 };
+var SH = { tab: 'dash', opor: 'no_capturado', hueco: 'duro', comp: 'quien', ofv: 'comparar', ofRes: null, rango: null, art: null, puedeOperar: 0 };
 
 function shPct(v, d){ return (v == null) ? '—' : (v * 100).toLocaleString('es-AR', { minimumFractionDigits: d == null ? 1 : d, maximumFractionDigits: d == null ? 1 : d }) + '%'; }
 function shDelta(v){
@@ -29283,6 +29337,7 @@ function shRecargar(){
   else if (SH.tab === 'arts') shArts();
   else if (SH.tab === 'opor') shOpor();
   else if (SH.tab === 'huecos') shHuecos();
+  else if (SH.tab === 'oferta') shOfVista(SH.ofv || 'comparar');
   else if (SH.tab === 'comp') shComp();
   else if (SH.tab === 'carga') shCargas();
   else if (SH.tab === 'mapeos') shMapeos();
@@ -29503,6 +29558,175 @@ function shHuecos(){
         return '<td class="' + (p[1] === 'sh-nom' ? 'sh-nom' : '') + '"' + (p[1] === 'r' ? ' style="text-align:right"' : '') + '>' + v + '</td>';
       }).join('') + '</tr>';
     }).join('') : '<tr><td colspan="' + cfg.cols.length + '" class="emp">Nada para mostrar acá. Buena señal.</td></tr>';
+  });
+}
+
+// ── OFERTA vs COMPRA ────────────────────────────────────────────────────────────────────
+// Lo que le mandamos a Carrefour contra lo que terminó comprando. El caso que justifica toda
+// la pantalla es "se lo ofrecimos, lo compró, y se lo compró a otro": es el único que se
+// puede ir a discutir con nombre y apellido.
+var SH_OF_COLOR = {
+  vendido:     { bg: '#e6f4ea', tx: '#1a7f37' },
+  perdido:     { bg: '#fdecec', tx: '#b3261e' },
+  sin_demanda: { bg: 'var(--bor)', tx: 'var(--mut)' },
+  no_ofrecido: { bg: '#fff4d6', tx: '#7a5c00' },
+};
+function shOfChapa(res, label){
+  var c = SH_OF_COLOR[res] || SH_OF_COLOR.sin_demanda;
+  return '<span class="sh-chip" style="background:' + c.bg + ';color:' + c.tx + '">' + escH(label || res) + '</span>';
+}
+
+function shOfVista(v){
+  SH.ofv = v;
+  var sec = eid('sec-share'); if (!sec) return;
+  sec.querySelectorAll('.sh-tab[data-of]').forEach(function(el){ el.classList.toggle('on', el.dataset.of === v); });
+  sec.querySelectorAll('.sh-osub').forEach(function(el){ el.classList.toggle('on', el.id === 'sh-osub-' + v); });
+  // El filtro de fechas es de la comparación; en la carga no hace nada y confunde tenerlo.
+  eid('sh-filtro').style.display = (v === 'cargar') ? 'none' : '';
+  if (v === 'cargar') { if (!elv('sh-of-fecha') && SH.rango) elv('sh-of-fecha', SH.rango.max); shOfLista(); }
+  else shOferta();
+}
+
+function shOferta(){
+  eid('sh-filtro-extra').innerHTML = '';
+  eid('sh-tb-of').innerHTML = '<tr><td colspan="8" class="emp">Calculando…</td></tr>';
+  var q = [];
+  if (SH.ofRes) q.push('resultado=' + SH.ofRes);
+  api('/api/share/oferta?' + shParams(q.join('&'))).then(function(r){
+    if (!r || !r.ok) { eid('sh-tb-of').innerHTML = '<tr><td colspan="8" class="emp">' + escH((r && r.error) || 'Error') + '</td></tr>'; return; }
+    var d = r.data;
+    if (d.sin_datos) { eid('sh-tb-of').innerHTML = '<tr><td colspan="8" class="emp">Todavía no hay planning cargado.</td></tr>'; return; }
+    var k = d.kpi || {};
+    var kpi = function(t, v, s, col){ return '<div class="sh-kpi"><div style="font-size:11px;color:var(--mut)">' + t + '</div>' +
+      '<b' + (col ? ' style="color:' + col + '"' : '') + '>' + v + '</b><div class="sh-sub">' + (s || '') + '</div></div>'; };
+    eid('sh-of-kpis').innerHTML =
+      kpi('Ofrecimos', nr(k.ofrecido) + ' <span style="font-size:12px;font-weight:400">bultos</span>',
+          (k.articulos_ofrecidos || 0) + ' artículos en ' + (d.dias_con_oferta || 0) + ' día(s) con oferta cargada') +
+      kpi('Nos compró', nr(k.vendido), k.conversion == null ? '—' : 'conversión ' + shPct(k.conversion), '#1a7f37') +
+      kpi('Compró, pero a otro', nr(k.perdido), (k.articulos_perdidos || 0) + ' artículos que ofrecimos y perdimos', '#b3261e') +
+      kpi('No lo compró nadie', nr(k.sin_demanda), 'ofrecido y sin demanda ese día') +
+      kpi('Ni se lo ofrecimos', nr(k.no_ofrecido), (k.articulos_no_ofrecidos || 0) + ' artículos que compró y no mostramos', '#7a5c00');
+
+    // Los cuatro resultados como filtro. Es la forma natural de trabajar la lista: primero
+    // los perdidos, que es donde hay algo que hacer.
+    var res = d.resultados || {};
+    eid('sh-of-filtros').innerHTML =
+      '<div class="sh-tab' + (SH.ofRes ? '' : ' on') + '" onclick="shOfFiltro(\'\')">Todos</div>' +
+      Object.keys(res).map(function(kk){
+        return '<div class="sh-tab' + (SH.ofRes === kk ? ' on' : '') + '" onclick="shOfFiltro(\'' + kk + '\')">' + escH(res[kk]) + '</div>';
+      }).join('');
+
+    eid('sh-tb-of').innerHTML = d.filas.length ? d.filas.map(function(f){
+      return '<tr><td class="sh-nom"><a href="#" onclick="shVerArticulo(' + f.id + ');return false">' + escH(f.desc) + '</a></td>' +
+        '<td>' + shFam(f.familia) + '</td>' +
+        '<td style="text-align:right">' + (f.ofrecido ? nr(f.ofrecido) : '<span class="sh-pod-x">—</span>') + '</td>' +
+        '<td style="text-align:right">' + nr(f.total) + '</td>' +
+        '<td style="text-align:right">' + (f.nuestros ? nr(f.nuestros) : '<span class="sh-pod-x">—</span>') + '</td>' +
+        '<td style="text-align:right">' + (f.sin_colocar ? '<b>' + nr(f.sin_colocar) + '</b>' : '<span class="sh-pod-x">—</span>') + '</td>' +
+        '<td>' + shOfChapa(f.resultado, f.resultado_label) + '</td>' +
+        '<td class="sh-nom">' + (f.se_lo_llevo ? escH(f.se_lo_llevo) + ' <span class="sh-pod-x">' + nr(f.se_lo_llevo_bultos) + '</span>' : '<span class="sh-pod-x">—</span>') + '</td></tr>';
+    }).join('') : '<tr><td colspan="8" class="emp">Nada con ese filtro. Si no cargaste ninguna oferta, empezá por la otra solapa.</td></tr>';
+    eid('sh-of-nota').innerHTML = d.filas.length + ' de ' + d.total_filas + ' artículos. ' +
+      '«Sin colocar» es lo que ofrecimos y no nos compraron. La conversión se calcula sobre los bultos, no promediando porcentajes.';
+  });
+}
+function shOfFiltro(r){ SH.ofRes = r || null; shOferta(); }
+
+// ── Cargar la oferta ────────────────────────────────────────────────────────────────────
+function shOfLimpiar(){ elv('sh-of-texto', ''); eid('sh-of-previo').innerHTML = ''; SH.ofArchivo = null; }
+
+function shOfArchivo(input){
+  var f = input.files && input.files[0];
+  input.value = '';
+  if (!f) return;
+  SH.ofArchivo = f;
+  eid('sh-of-previo').innerHTML = '<div class="sh-aviso">Archivo elegido: <b>' + escH(f.name) + '</b>. Tocá «Revisar antes de cargar».</div>';
+}
+
+function shOfEnviar(confirmar){
+  var fecha = elv('sh-of-fecha');
+  if (!fecha) { toast('Elegí la fecha de la oferta', 'err'); return null; }
+  var url = '/api/share/ofertas' + (confirmar ? '?confirmar=1' : '');
+  if (SH.ofArchivo) {
+    var fd = new FormData(); fd.append('archivo', SH.ofArchivo); fd.append('fecha', fecha);
+    return fetch(url, { method: 'POST', body: fd }).then(function(r){ return r.json(); });
+  }
+  var txt = elv('sh-of-texto');
+  if (!txt) { toast('Pegá la lista o elegí un Excel', 'err'); return null; }
+  return api(url, 'POST', { fecha: fecha, texto: txt });
+}
+
+// Siempre se muestra el resumen antes de escribir: la oferta define qué se marca como
+// «la vendemos», así que conviene mirar qué entendió antes de confirmar.
+function shOfPrevio(){
+  var p = shOfEnviar(false); if (!p) return;
+  eid('sh-of-previo').innerHTML = '<div class="emp">Leyendo…</div>';
+  p.then(function(r){
+    if (!r || !r.ok) {
+      eid('sh-of-previo').innerHTML = '<div style="padding:10px 12px;border-radius:8px;background:#fdecec;color:#b3261e;font-size:12.5px;line-height:1.6">' +
+        escH((r && r.error) || 'No se pudo leer') +
+        ((r && r.rechazadas && r.rechazadas.length) ? '<br>' + r.rechazadas.slice(0, 6).map(function(x){
+          return 'línea ' + x.linea + ': ' + escH(x.texto) + ' — ' + escH(x.motivo); }).join('<br>') : '') + '</div>';
+      return;
+    }
+    var d = r.data;
+    var kpi = function(t, v){ return '<div class="sh-kpi"><div style="font-size:11px;color:var(--mut)">' + t + '</div><b>' + v + '</b></div>'; };
+    var h = '<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:10px">' +
+      kpi('Fecha', escH(d.fecha)) + kpi('Artículos', d.filas) + kpi('Bultos', nr(d.bultos_total)) +
+      (d.nuevos ? kpi('Nuevos en el padrón', d.nuevos) : '') + '</div>';
+    if (d.reemplaza) h += '<div style="padding:9px 12px;border-radius:8px;background:#fff8e1;color:#8a6d00;font-size:12.5px;margin-bottom:8px">' +
+      '↻ Ya había una oferta cargada para el ' + escH(d.fecha) + ' (' + d.reemplaza.filas + ' artículos). ' +
+      'Queda como historia y manda la nueva.</div>';
+    if (d.repetidos) h += '<div class="sh-aviso">' + d.repetidos + ' artículo(s) venían en más de una línea: se sumaron.</div>';
+    if (d.rechazadas && d.rechazadas.length) h += '<div style="padding:9px 12px;border-radius:8px;background:#fff8e1;color:#8a6d00;font-size:12.5px;margin-bottom:8px">' +
+      '⚠ ' + d.rechazadas.length + ' línea(s) que no pude leer y quedan afuera:<br>' +
+      d.rechazadas.slice(0, 6).map(function(x){ return 'línea ' + x.linea + ': ' + escH(x.texto); }).join('<br>') + '</div>';
+    h += '<div class="ab-table-wrap"><table class="pa-tbl"><thead><tr>' +
+      '<th class="sh-nom" style="width:52%">Artículo</th><th style="text-align:right;width:18%">Bultos</th>' +
+      '<th style="width:30%">En el padrón</th></tr></thead><tbody>' +
+      d.items.map(function(it){
+        return '<tr><td class="sh-nom">' + escH(it.desc_canonica) +
+          (it.articulo_raw !== it.desc_canonica ? '<div class="sh-aviso" style="margin:1px 0 0">tal cual lo escribiste: ' + escH(it.articulo_raw) + '</div>' : '') + '</td>' +
+          '<td style="text-align:right">' + nr(it.cantidad) + '</td>' +
+          '<td>' + (it.nuevo ? '<span class="sh-chip" style="background:#fff4d6;color:#7a5c00">nuevo</span>' : '<span class="sh-chip sh-ch-comp">ya estaba</span>') + '</td></tr>';
+      }).join('') + '</tbody></table></div>';
+    h += '<div class="sh-aviso">Cargar la oferta marca estos artículos como <b>«la vendemos»</b>: ofrecerlos es la prueba de que los vendemos, y ese es el filtro de Oportunidades.</div>';
+    h += '<div style="display:flex;justify-content:flex-end;margin-top:10px">' +
+      '<button class="btn bb" onclick="shOfConfirmar(this)">Cargar la oferta del ' + escH(d.fecha) + '</button></div>';
+    eid('sh-of-previo').innerHTML = h;
+  });
+}
+
+function shOfConfirmar(btn){
+  var p = shOfEnviar(true); if (!p) return;
+  btn.disabled = true; btn.textContent = 'Cargando…';
+  p.then(function(r){
+    if (!r || !r.ok) { toast((r && r.error) || 'Error', 'err'); btn.disabled = false; btn.textContent = 'Reintentar'; return; }
+    toast('Oferta cargada');
+    shOfLimpiar(); shOfLista(); shInit();
+  });
+}
+
+function shOfLista(){
+  api('/api/share/ofertas').then(function(r){
+    if (!r || !r.ok) { eid('sh-tb-ofertas').innerHTML = '<tr><td colspan="8" class="emp">' + escH((r && r.error) || 'Error') + '</td></tr>'; return; }
+    eid('sh-tb-ofertas').innerHTML = r.data.length ? r.data.map(function(o){
+      var act = o.estado === 'activa';
+      return '<tr' + (act ? '' : ' style="opacity:.5"') + '><td><b>' + escH(o.fecha) + '</b></td>' +
+        '<td>' + (o.origen === 'excel' ? '📄 ' + escH(o.archivo_nombre || 'Excel') : '⌨️ pegada') + '</td>' +
+        '<td style="text-align:right">' + nr(o.filas) + '</td><td style="text-align:right">' + nr(o.bultos_total) + '</td>' +
+        '<td style="font-size:11.5px">' + escH(String(o.creado_en || '').slice(0, 16)) + '</td>' +
+        '<td style="font-size:11.5px">' + escH(o.cargado_por || '—') + '</td>' +
+        '<td style="text-align:center">' + (act ? '<span class="sh-chip sh-ch-nos">activa</span>' : '<span class="sh-chip sh-ch-comp">reemplazada</span>') + '</td>' +
+        '<td>' + (act && SH.puedeOperar ? '<button class="btn bo bs" onclick="shOfBaja(' + o.id + ')">Dar de baja</button>' : '') + '</td></tr>';
+    }).join('') : '<tr><td colspan="8" class="emp">Todavía no se cargó ninguna oferta.</td></tr>';
+  });
+}
+function shOfBaja(id){
+  if (!confirm('Dar de baja esta oferta? Deja de contar en la comparación; los datos no se borran.')) return;
+  api('/api/share/ofertas/' + id, 'DELETE').then(function(r){
+    if (!r || !r.ok) { toast((r && r.error) || 'Error', 'err'); return; }
+    toast('Oferta dada de baja'); shOfLista();
   });
 }
 

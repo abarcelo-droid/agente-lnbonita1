@@ -286,3 +286,51 @@ export function parseBultos(v) {
   const n = parseFloat(limpio);
   return isFinite(n) ? n : null;
 }
+
+// ── LA OFERTA DEL DÍA ─────────────────────────────────────────────────────────────────
+// Lo que le mandamos a Carrefour: artículo y cuántos bultos tenemos disponibles. Llega de dos
+// formas y las dos terminan acá, porque el nombre del artículo hay que normalizarlo igual que
+// el del planning — si no, "MANZANA X KG" de la oferta y "MANZANA X KG" del planning serían
+// dos artículos distintos y la comparación no cruzaría nada.
+//
+// El texto pegado importa tanto como el Excel: la oferta se manda por WhatsApp y copiar y
+// pegar esa lista es más rápido que armar una planilla para después subirla.
+//
+// LA CANTIDAD ES EL ÚLTIMO NÚMERO DE LA LÍNEA. Los nombres traen números adentro ("PALTA X
+// 250 GRS", "MANZANA CAL 100"), así que buscar "el número" agarraría el del nombre. El último
+// es el que se escribe al final, después del artículo.
+export function parseOfertaTexto(txt) {
+  const filas = [], rechazadas = [];
+  const lineas = String(txt == null ? '' : txt).split(/\r?\n/);
+  for (let i = 0; i < lineas.length; i++) {
+    const cruda = lineas[i];
+    const l = cruda.trim();
+    if (!l) continue;
+    // Separadores habituales de una lista pegada: tabulación, punto y coma, coma o espacios.
+    const m = l.match(/^(.*?)[\s;,\t|]+([\d.,]+)\s*$/);
+    if (!m || !m[1].trim()) { rechazadas.push({ linea: i + 1, texto: l, motivo: 'no encuentro "artículo + cantidad"' }); continue; }
+    const cant = parseBultos(m[2]);
+    if (cant == null || cant <= 0) { rechazadas.push({ linea: i + 1, texto: l, motivo: 'cantidad ilegible' }); continue; }
+    filas.push({ articulo_raw: m[1].trim().replace(/[\s;,:\-]+$/, ''), cantidad: cant });
+  }
+  return { filas, rechazadas };
+}
+
+// Los títulos con los que puede venir cada columna en un Excel de oferta. Se busca por
+// nombre y, si no aparece ninguno, se cae a "la primera columna de texto y la primera de
+// números", que es como está armada cualquier lista de disponibles.
+const OF_COL_ART = ['articulo', 'artículo', 'producto', 'descripcion', 'descripción', 'desc', 'detalle', 'item'];
+const OF_COL_CANT = ['cantidad', 'bultos', 'disponible', 'disponibles', 'cant', 'stock', 'kg', 'unidades'];
+
+export function detectarColumnasOferta(filaTitulos) {
+  const norm2 = (v) => String(v == null ? '' : v).normalize('NFD').replace(/\p{M}/gu, '')
+    .toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+  let cArt = -1, cCant = -1;
+  (filaTitulos || []).forEach((v, i) => {
+    const t = norm2(v);
+    if (!t) return;
+    if (cArt < 0 && OF_COL_ART.some(k => t === norm2(k) || t.startsWith(norm2(k)))) cArt = i;
+    if (cCant < 0 && OF_COL_CANT.some(k => t === norm2(k) || t.startsWith(norm2(k)))) cCant = i;
+  });
+  return { articulo: cArt, cantidad: cCant, hayTitulos: cArt >= 0 && cCant >= 0 };
+}
