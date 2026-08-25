@@ -891,6 +891,15 @@ router.get('/cc/:clienteId', (req, res) => {
           - COALESCE((SELECT SUM(cd.monto) FROM sg_ven_cobranza_docs cd
           JOIN sg_ven_cobranzas co ON co.id=cd.cobranza_id
           WHERE cd.tipo='liquidacion' AND cd.doc_id=l.id AND co.anulada=0), 0) as pendiente,
+        -- ABIERTO POR MITAD. La pantalla de cobro necesita saber cuánto queda de
+        -- lo facturado y cuánto de lo que no lleva comprobante: son dos libros
+        -- distintos y el asiento del cobro cae en uno o en el otro.
+        l.neto_acreditar - COALESCE((SELECT SUM(cd.monto - COALESCE(cd.monto_gestion,0))
+            FROM sg_ven_cobranza_docs cd JOIN sg_ven_cobranzas co ON co.id=cd.cobranza_id
+           WHERE cd.tipo='liquidacion' AND cd.doc_id=l.id AND co.anulada=0), 0) as pendiente_fiscal,
+        COALESCE(l.dif_gestion,0) - COALESCE((SELECT SUM(COALESCE(cd.monto_gestion,0))
+            FROM sg_ven_cobranza_docs cd JOIN sg_ven_cobranzas co ON co.id=cd.cobranza_id
+           WHERE cd.tipo='liquidacion' AND cd.doc_id=l.id AND co.anulada=0), 0) as pendiente_gestion,
         'liquidacion' as tipo_doc
       FROM sg_ven_liquidaciones l WHERE l.cliente_id=? AND l.estado != 'anulada'
     `).all(cid);
@@ -906,6 +915,15 @@ router.get('/cc/:clienteId', (req, res) => {
           - COALESCE((SELECT SUM(cd.monto) FROM sg_ven_cobranza_docs cd
           JOIN sg_ven_cobranzas co ON co.id=cd.cobranza_id
           WHERE cd.tipo='factura' AND cd.doc_id=f.id AND co.anulada=0), 0) as pendiente,
+        -- ABIERTO POR MITAD. La pantalla de cobro necesita saber cuánto queda de
+        -- lo facturado y cuánto de lo que no lleva comprobante: son dos libros
+        -- distintos y el asiento del cobro cae en uno o en el otro.
+        f.total - COALESCE((SELECT SUM(cd.monto - COALESCE(cd.monto_gestion,0))
+            FROM sg_ven_cobranza_docs cd JOIN sg_ven_cobranzas co ON co.id=cd.cobranza_id
+           WHERE cd.tipo='factura' AND cd.doc_id=f.id AND co.anulada=0), 0) as pendiente_fiscal,
+        COALESCE(f.dif_gestion,0) - COALESCE((SELECT SUM(COALESCE(cd.monto_gestion,0))
+            FROM sg_ven_cobranza_docs cd JOIN sg_ven_cobranzas co ON co.id=cd.cobranza_id
+           WHERE cd.tipo='factura' AND cd.doc_id=f.id AND co.anulada=0), 0) as pendiente_gestion,
         'factura' as tipo_doc
       FROM sg_ven_facturas f WHERE f.cliente_id=? AND f.estado != 'anulada'
     `).all(cid);
@@ -962,15 +980,25 @@ function pendienteDeDoc(tipo, docId) {
       COALESCE(dif_gestion,0) AS dif_gestion, dif_motivo FROM ${tabla} WHERE id=?`)
     .get(docId);
   if (!d) return null;
-  const cob = db.prepare(`SELECT COALESCE(SUM(cd.monto),0) t FROM sg_ven_cobranza_docs cd
+  const c = db.prepare(`SELECT COALESCE(SUM(cd.monto),0) t,
+      COALESCE(SUM(cd.monto_gestion),0) g FROM sg_ven_cobranza_docs cd
     JOIN sg_ven_cobranzas co ON co.id = cd.cobranza_id
-    WHERE cd.tipo=? AND cd.doc_id=? AND co.anulada=0`).get(tipo, docId).t;
+    WHERE cd.tipo=? AND cd.doc_id=? AND co.anulada=0`).get(tipo, docId);
+  const cob = c.t, cobGes = c.g || 0;
   // LO QUE EL CLIENTE DEBE ES LO ACORDADO, no lo facturado: el total del
   // comprobante más lo que quedó sin facturar. Es el espejo exacto de lo que se
   // le debe a un proveedor cuando su factura vino corta.
   const acordado = (d.total || 0) + (d.dif_gestion || 0);
+  const r2c = (n) => Math.round((Number(n) || 0) * 100) / 100;
+  // Y ABIERTO POR MITAD, porque de eso depende en qué libro cae el asiento del
+  // cobro: lo que se cobra de la parte sin comprobante no puede aparecer en el
+  // fiscal, donde esa deuda nunca subió.
+  const pendFis = r2c((d.total || 0) - (cob - cobGes));
+  const pendGes = r2c((d.dif_gestion || 0) - cobGes);
   return { ...d, total: acordado, total_fiscal: d.total || 0, cobrado: cob,
-    pendiente: Math.round((acordado - cob) * 100) / 100 };
+    cobrado_gestion: cobGes,
+    pendiente_fiscal: pendFis, pendiente_gestion: pendGes,
+    pendiente: r2c(acordado - cob) };
 }
 
 // Las cuentas de donde puede entrar la plata, para el desplegable de la pantalla.
@@ -1002,6 +1030,11 @@ router.get('/cobranzas/cuentas', requireAuth, (req, res) => {
 router.post('/cobranzas', requireAuth, (req, res) => {
   const u = req._user;
   const { fecha, cliente_id, monto, forma_pago, referencia, notas, docs } = req.body || {};
+  // CONTRA QUÉ SE COBRA. Igual que en el pago a proveedores: lo facturado, lo que
+  // quedó sin comprobante, o las dos en proporción --que es la única regla que no
+  // depende del orden en que se hayan cargado los comprobantes--.
+  const ambitoCobro = ['fiscal', 'gestion'].includes(String(req.body?.ambito || ''))
+    ? String(req.body.ambito) : 'todo';
   const cli = ctaContableCliente(parseInt(cliente_id));
   if (!cli) return res.status(400).json({ ok: false, error: 'Elegí el cliente' });
   const total = Math.round(parseFloat(monto || 0) * 100) / 100;
@@ -1027,10 +1060,24 @@ router.post('/cobranzas', requireAuth, (req, res) => {
       return res.status(400).json({ ok: false,
         error: `El comprobante ${doc.numero} está anulado: no se le puede imputar un cobro.` });
     }
-    if (d.monto > doc.pendiente + 0.01) {
+    // EL TOPE ES EL DE LA MITAD QUE SE ESTÁ COBRANDO. Con «sólo lo facturado» no
+    // se puede imputar contra la parte que no lleva comprobante, y al revés.
+    const tope = ambitoCobro === 'fiscal' ? doc.pendiente_fiscal
+      : (ambitoCobro === 'gestion' ? doc.pendiente_gestion : doc.pendiente);
+    if (d.monto > tope + 0.01) {
       return res.status(400).json({ ok: false,
-        error: `Al comprobante ${doc.numero} le quedan ${doc.pendiente} y le estás imputando ${d.monto}.` });
+        error: `Al comprobante ${doc.numero} le quedan ${tope}`
+             + (ambitoCobro === 'fiscal' ? ' facturados'
+                : (ambitoCobro === 'gestion' ? ' sin facturar' : ''))
+             + ` y le estás imputando ${d.monto}.` });
     }
+    // Cuánto de esto va contra la parte SIN comprobante. Nunca negativo: si el
+    // comprobante salió por más de lo acordado, esa mitad no se cancela cobrando.
+    const crudo = ambitoCobro === 'gestion' ? d.monto
+      : (ambitoCobro === 'fiscal' ? 0
+         : (doc.pendiente > 0 ? Math.round(d.monto * doc.pendiente_gestion / doc.pendiente * 100) / 100 : 0));
+    d.gestion = crudo > 0 ? crudo : 0;
+    d.motivo = doc.dif_motivo || null;
   }
   const imputado = Math.round(lista.reduce((a, d) => a + d.monto, 0) * 100) / 100;
   if (imputado > total + 0.01) {
@@ -1128,9 +1175,10 @@ router.post('/cobranzas', requireAuth, (req, res) => {
         db.prepare('UPDATE sg_ven_cobranzas SET cheque_terceros_id=? WHERE id=?').run(chId, cobId);
       }
 
-      const insDoc = db.prepare('INSERT INTO sg_ven_cobranza_docs (cobranza_id, tipo, doc_id, monto) VALUES (?,?,?,?)');
+      const insDoc = db.prepare(`INSERT INTO sg_ven_cobranza_docs
+        (cobranza_id, tipo, doc_id, monto, monto_gestion) VALUES (?,?,?,?,?)`);
       for (const d of lista) {
-        insDoc.run(cobId, d.tipo, d.doc_id, d.monto);
+        insDoc.run(cobId, d.tipo, d.doc_id, d.monto, d.gestion || 0);
         // El documento queda cobrado cuando no le falta nada. Se recalcula con
         // TODAS las cobranzas vivas, no con la de ahora: puede haberse cobrado
         // en tres veces.
@@ -1145,15 +1193,39 @@ router.post('/cobranzas', requireAuth, (req, res) => {
       // La plata entra: la cuenta del banco o de la caja al DEBE, contra la
       // cuenta corriente del cliente al HABER — que es el espejo exacto del
       // asiento de la liquidación, donde el cliente va al debe.
+      // ── Y CADA MITAD EN SU LIBRO ─────────────────────────────
+      // Un cobro que cancela la parte SIN comprobante no puede aparecer en el
+      // libro fiscal: ahí esa deuda nunca subió, así que la cuenta corriente del
+      // cliente bajaría por algo que nunca entró --y podía quedar acreedor--. Va
+      // marcado como gestión, y el asiento cierra dos veces, una por mitad.
+      //
+      // Lo que se cobra a cuenta --sin imputar a ningún comprobante-- es fiscal
+      // salvo que se haya elegido expresamente cobrar lo de gestión.
+      const gesTotal = Math.round(lista.reduce((a, d) => a + (d.gestion || 0), 0) * 100) / 100;
+      const aCuenta = Math.round((total - imputado) * 100) / 100;
+      let ges = gesTotal;
+      if (aCuenta > 0 && ambitoCobro === 'gestion') ges = Math.round((ges + aCuenta) * 100) / 100;
+      if (ges > total) ges = total;
+      if (ges < 0) ges = 0;
+      const motivoGes = (lista.find((d) => (d.gestion || 0) > 0 && d.motivo) || {}).motivo
+        || 'ajuste_gestion';
+      const partes = [
+        { ambito: 'fiscal', monto: Math.round((total - ges) * 100) / 100, motivo: null },
+        { ambito: 'gestion', monto: ges, motivo: motivoGes },
+      ].filter((x) => x.monto > 0.001);
+      const lineasCob = [];
+      for (const x of partes) {
+        lineasCob.push({ cuenta_id: conCheque ? ctaCartera : cuenta.cta, debe: x.monto, haber: 0,
+          ambito: x.ambito, motivo: x.motivo,
+          descripcion: conCheque ? ('Cheque N° ' + cheque.nro + ' en cartera') : cuenta.nombre });
+        lineasCob.push({ cuenta_id: cli.cuenta_contable_id, debe: 0, haber: x.monto,
+          ambito: x.ambito, motivo: x.motivo, descripcion: cli.razon_social });
+      }
       asientoId = crearAsiento(db, {
         fecha: f, usuario_id: u.id, ref_codigo: referencia || null,
         descripcion: 'Cobranza de ' + cli.razon_social + (referencia ? ' — ' + referencia : '')
           + (lista.length ? ' — ' + lista.length + ' comprobante(s)' : ' (a cuenta)'),
-      }, [
-        { cuenta_id: conCheque ? ctaCartera : cuenta.cta, debe: total, haber: 0,
-          descripcion: conCheque ? ('Cheque N° ' + cheque.nro + ' en cartera') : cuenta.nombre },
-        { cuenta_id: cli.cuenta_contable_id, debe: 0, haber: total, descripcion: cli.razon_social },
-      ]).id;
+      }, lineasCob).id;
       db.prepare('UPDATE sg_ven_cobranzas SET asiento_id=? WHERE id=?').run(asientoId, cobId);
 
       // ── Y LA CUENTA SUBE ──────────────────────────────────────────────
@@ -1162,11 +1234,16 @@ router.post('/cobranzas', requireAuth, (req, res) => {
       //
       // Con CHEQUE no se mueve ninguna cuenta: el banco todavía no recibió nada.
       // El movimiento lo hace el depósito, desde la cartera.
+      // Y EL MOVIMIENTO TAMBIÉN SE PARTE, para que el arqueo fiscal no se lleve
+      // lo que entró por la parte sin comprobante.
       if (!conCheque) {
-        db.prepare(`INSERT INTO sg_fin_movimientos
-          (cuenta_id, fecha, tipo, concepto, monto, referencia, usuario_id)
-          VALUES (?,?, 'ingreso', ?,?,?,?)`).run(cuenta.id, f,
-          'Cobranza de ' + cli.razon_social, total, 'COB-' + cobId, u.id);
+        const insMovC = db.prepare(`INSERT INTO sg_fin_movimientos
+          (cuenta_id, fecha, tipo, concepto, monto, referencia, usuario_id, ambito, motivo)
+          VALUES (?,?, 'ingreso', ?,?,?,?,?,?)`);
+        for (const x of partes) {
+          insMovC.run(cuenta.id, f, 'Cobranza de ' + cli.razon_social, x.monto,
+            'COB-' + cobId, u.id, x.ambito, x.motivo);
+        }
       }
     })();
     res.json({ ok: true, id: Number(cobId), asiento_id: Number(asientoId),

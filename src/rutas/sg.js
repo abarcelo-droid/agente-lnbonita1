@@ -7893,10 +7893,17 @@ router.get('/cc-clientes', requireAuth, (req, res) => {
         -- pero no se podía ver: la pantalla mostraba $659.999 y no había forma
         -- de saber que $150.000 de eso son descuentos acordados y no una
         -- factura. Un saldo que no se puede explicar no se puede discutir.
+        -- Y MENOS LO QUE YA SE COBRÓ DE ESA MITAD. Acá era la suma cruda de las
+        -- diferencias: la columna «Sin facturar» no bajaba NUNCA aunque el cliente
+        -- ya hubiera pagado, y como el saldo sí bajaba, la resta de las dos
+        -- --«Contabilizado»-- se comía toda la baja y podía dar negativa.
         COALESCE((SELECT SUM(COALESCE(l.dif_gestion,0)) FROM sg_ven_liquidaciones l
                    WHERE l.cliente_id=c.id AND l.estado <> 'anulada'),0)
         + COALESCE((SELECT SUM(COALESCE(f.dif_gestion,0)) FROM sg_ven_facturas f
-                   WHERE f.cliente_id=c.id AND f.estado <> 'anulada'),0) AS gestion,
+                   WHERE f.cliente_id=c.id AND f.estado <> 'anulada'),0)
+        - COALESCE((SELECT SUM(COALESCE(cd.monto_gestion,0)) FROM sg_ven_cobranza_docs cd
+                     JOIN sg_ven_cobranzas co ON co.id=cd.cobranza_id
+                    WHERE co.cliente_id = c.id AND co.anulada = 0),0) AS gestion,
         COALESCE((SELECT SUM(co.monto) FROM sg_ven_cobranzas co
                    WHERE co.cliente_id = c.id AND co.anulada = 0), 0) AS total_cobrado,
         -- Lo cobrado que NO se imputó a ningún documento: plata que ya entró y
