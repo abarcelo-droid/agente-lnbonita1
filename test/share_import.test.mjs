@@ -8,7 +8,7 @@ import assert from 'node:assert/strict';
 import { DatabaseSync } from 'node:sqlite';
 import * as XLSX from 'xlsx';
 import { crearEsquema } from '../src/servicios/share_ddl.js';
-import { importar, analizar, recalcularKg } from '../src/servicios/share_import.js';
+import { importar, analizar, recalcularKg, reclasificarFamilias } from '../src/servicios/share_import.js';
 
 // node:sqlite no tiene db.transaction() como better-sqlite3. El adaptador le da la misma
 // forma para que el importador que se prueba sea EL MISMO que corre en producción, sin
@@ -198,4 +198,56 @@ test('analizar no escribe nada: es el preview', () => {
   // Ni una fila en la base.
   assert.equal(db.prepare('SELECT COUNT(*) c FROM share_cargas').get().c, 0);
   assert.equal(db.prepare('SELECT COUNT(*) c FROM share_articulos').get().c, 0);
+});
+
+test('migrar familias: lo que quedó con la etiqueta vieja se reclasifica solo', () => {
+  const db = abrir();
+  importar(db, { buffer: planilla([
+    [SG, '2026-08-24', 'PAPA BLANCA LAVADA X KG', 100],
+    [SG, '2026-08-24', 'TOMATE REDONDO X KG', 100],
+    [SG, '2026-08-24', 'CHAMPIGNON X 200 GRS', 100],
+    [SG, '2026-08-24', 'MANZANA X KG', 100],
+    [SG, '2026-08-24', 'LECHUGA X UNIDAD', 100],
+  ]), nombre: 'a.xlsx' });
+
+  // Se simula la base como quedó con la taxonomía vieja.
+  const poner = (like, fam) => db.prepare('UPDATE share_articulos SET familia=? WHERE desc_canonica LIKE ?').run(fam, like);
+  poner('PAPA%', 'VERDURA');
+  poner('TOMATE%', 'VERDURA');
+  poner('CHAMPIGNON%', 'HONGO');
+  poner('MANZANA%', 'FRUTA');
+  poner('LECHUGA%', 'HOJA');
+
+  const r = reclasificarFamilias(db);
+  const fam = (like) => db.prepare('SELECT familia f FROM share_articulos WHERE desc_canonica LIKE ?').get(like).f;
+
+  // Las dos que eran VERDURA se parten según cómo se mueven.
+  assert.equal(fam('PAPA%'), 'HORTALIZA PESADA');
+  assert.equal(fam('TOMATE%'), 'HORTALIZA LIVIANA');
+  // HONGO ya no existe como familia: cae en OTRO.
+  assert.equal(fam('CHAMPIGNON%'), 'OTRO');
+  // FRUTA y HOJA significan lo mismo en las dos taxonomías: no se tocan.
+  assert.equal(fam('MANZANA%'), 'FRUTA');
+  assert.equal(fam('LECHUGA%'), 'HOJA');
+  assert.equal(r.migrados, 3, 'sólo las tres que estaban fuera del vocabulario nuevo');
+});
+
+test('migrar familias: correr diez veces es lo mismo que correr una', () => {
+  const db = abrir();
+  importar(db, { buffer: planilla([[SG, '2026-08-24', 'PAPA BLANCA X KG', 100]]), nombre: 'a.xlsx' });
+  db.prepare("UPDATE share_articulos SET familia='VERDURA'").run();
+
+  assert.equal(reclasificarFamilias(db).migrados, 1);
+  for (let i = 0; i < 9; i++) assert.equal(reclasificarFamilias(db).migrados, 0, 'la corrida ' + (i + 2));
+  assert.equal(db.prepare('SELECT familia f FROM share_articulos').get().f, 'HORTALIZA PESADA');
+});
+
+test('migrar familias: una corrección a mano NO se pisa', () => {
+  const db = abrir();
+  importar(db, { buffer: planilla([[SG, '2026-08-24', 'PAPA BLANCA X KG', 100]]), nombre: 'a.xlsx' });
+  // Alguien decidió que esta papa va en OTRO. El clasificador diría HORTALIZA PESADA, pero
+  // OTRO ya es una familia válida, así que la migración no la mira.
+  db.prepare("UPDATE share_articulos SET familia='OTRO', pendiente_revision=0").run();
+  assert.equal(reclasificarFamilias(db).migrados, 0);
+  assert.equal(db.prepare('SELECT familia f FROM share_articulos').get().f, 'OTRO');
 });

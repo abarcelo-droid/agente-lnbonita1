@@ -8,7 +8,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  norm, parseDesc, parseProveedor, parseFecha, parseBultos, fechaDelNombre, clasificarFamilia,
+  norm, parseDesc, parseProveedor, parseFecha, parseBultos, fechaDelNombre,
+  clasificarFamilia, FAMILIAS_VALIDAS,
 } from '../src/servicios/share_parser.js';
 
 test('normalizar: mayúsculas, sin acentos, sin espacios de más', () => {
@@ -146,13 +147,52 @@ test('bultos: el punto es separador de miles, no decimal', () => {
   assert.equal(parseBultos(null), null);
 });
 
-test('familia: la primera pasada automática acierta lo evidente', () => {
+test('familia: las hortalizas se parten por cómo se mueven, no por botánica', () => {
+  // BOLSA de 20-25 kg. Son los cuatro que nombró Andy.
+  for (const x of ['CEBOLLA', 'PAPA BLANCA LAVADA', 'BATATA', 'ZAPALLO JAPONES CABUTIAN'])
+    assert.equal(clasificarFamilia(x), 'HORTALIZA PESADA', x);
+  // Boniato es batata, calabaza y anco son zapallo: el mismo bulto con otro nombre.
+  for (const x of ['BONIATO HUELLA NATURAL', 'CALABAZA ANCO', 'ZANAHORIA'])
+    assert.equal(clasificarFamilia(x), 'HORTALIZA PESADA', x);
+
+  // CAJÓN. También los tres que nombró Andy.
+  for (const x of ['TOMATE REDONDO', 'BERENJENA NEGRA', 'ZAPALLITO REDONDO', 'ZAPALLITO LARGO'])
+    assert.equal(clasificarFamilia(x), 'HORTALIZA LIVIANA', x);
+  // El ajo es un bulbo como la cebolla y va en LIVIANA igual: nadie lo mueve en bolsa de 25 kg.
+  assert.equal(clasificarFamilia('AJO'), 'HORTALIZA LIVIANA');
+  assert.equal(clasificarFamilia('PIMIENTO VERDE'), 'HORTALIZA LIVIANA');
+
   assert.equal(clasificarFamilia('MANZANA'), 'FRUTA');
-  assert.equal(clasificarFamilia('ZAPALLO JAPONES CABUTIAN'), 'VERDURA');
   assert.equal(clasificarFamilia('LECHUGA MANTECOSA'), 'HOJA');
-  assert.equal(clasificarFamilia('CHAMPIGNON'), 'HONGO');
   assert.equal(clasificarFamilia('ALGO QUE NO ESTA EN LA LISTA'), 'OTRO');
-  // Cebolla es verdura, pero cebolla DE VERDEO es hoja: el orden de la lista lo resuelve.
-  assert.equal(clasificarFamilia('CEBOLLA'), 'VERDURA');
+  // Los hongos NO tienen familia propia en esta taxonomía: caen en OTRO.
+  assert.equal(clasificarFamilia('CHAMPIGNON'), 'OTRO');
+});
+
+test('familia: se busca por palabra entera, no por pedazo de texto', () => {
+  // ESTE ES EL QUE IMPORTA. Buscando "PAPA" adentro del texto, PAPAYA es una hortaliza
+  // pesada. Con la lista vieja no se notaba porque FRUTA se evaluaba antes y la atajaba de
+  // casualidad; al cambiar el orden de las familias esa casualidad se termina.
+  assert.equal(clasificarFamilia('PAPAYA'), 'FRUTA');
+  // Y ZAPALLO contra ZAPALLITO, que ahora van a familias DISTINTAS.
+  assert.equal(clasificarFamilia('ZAPALLO'), 'HORTALIZA PESADA');
+  assert.equal(clasificarFamilia('ZAPALLITO'), 'HORTALIZA LIVIANA');
+  // El plural sí tiene que entrar: la planilla los escribe de las dos formas.
+  assert.equal(clasificarFamilia('PAPAS NEGRAS'), 'HORTALIZA PESADA');
+  assert.equal(clasificarFamilia('ZAPALLOS'), 'HORTALIZA PESADA');
+});
+
+test('familia: cebolla de verdeo es HOJA aunque diga cebolla', () => {
+  // El orden de la lista es lo que lo resuelve: HOJA se evalúa antes que las hortalizas.
+  assert.equal(clasificarFamilia('CEBOLLA'), 'HORTALIZA PESADA');
   assert.equal(clasificarFamilia('CEBOLLA DE VERDEO'), 'HOJA');
+  assert.equal(clasificarFamilia('PUERRO'), 'HOJA');
+});
+
+test('las familias válidas son cinco y OTRO es una de ellas', () => {
+  assert.deepEqual(FAMILIAS_VALIDAS, ['FRUTA', 'HOJA', 'HORTALIZA PESADA', 'HORTALIZA LIVIANA', 'OTRO']);
+  // Todo lo que el clasificador devuelve tiene que estar en la lista: si devolviera algo que
+  // no está, el router lo rechazaría como familia inválida al intentar corregirlo a mano.
+  for (const x of ['MANZANA', 'PAPA', 'TOMATE', 'LECHUGA', 'CHAMPIGNON', 'COSA RARA'])
+    assert.ok(FAMILIAS_VALIDAS.includes(clasificarFamilia(x)), x);
 });

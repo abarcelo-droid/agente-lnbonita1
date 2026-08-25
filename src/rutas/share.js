@@ -27,7 +27,7 @@ import multer from 'multer';
 import * as XLSX from 'xlsx';
 import db from '../servicios/db_share.js';
 import { importar, analizar, recalcularKg } from '../servicios/share_import.js';
-import { norm } from '../servicios/share_parser.js';
+import { norm, FAMILIAS_VALIDAS } from '../servicios/share_parser.js';
 import { nivelEnModulo } from '../servicios/permisos.js';
 
 const router = express.Router();
@@ -830,7 +830,10 @@ router.get('/pendientes', requireAuth, (req, res) => {
 });
 
 const UNIDADES_OK = new Set(['KG', 'UNIDAD', 'ATADO', 'PAQUETE', 'PACK_GR', 'SIN_DEFINIR']);
-const FAMILIAS_OK = new Set(['FRUTA', 'VERDURA', 'HOJA', 'HONGO', 'OTRO']);
+// La lista sale del parser y no se repite aca: dos listas de familias es una sola cosa
+// escrita dos veces, y la que se olvida de actualizar rechaza como invalida a la familia que
+// el propio importador acaba de asignar.
+const FAMILIAS_OK = new Set(FAMILIAS_VALIDAS);
 
 // ── DAR OK A VARIOS DE UNA ────────────────────────────────────────────────────────────
 // Después de cargar el histórico la cola tiene cientos de artículos y casi todos necesitan lo
@@ -1081,6 +1084,10 @@ router.get('/estado', requireAuth, (req, res) => {
         cargas: c.n || 0, cargas_activas: c.act || 0,
         articulos: db.prepare('SELECT COUNT(*) n FROM share_articulos').get().n,
         proveedores: db.prepare('SELECT COUNT(*) n FROM share_proveedores').get().n,
+        // La lista de familias viaja al front para que no la repita: si estuvieran las dos y
+        // alguien agrega una, el desplegable de la pantalla ofrece una familia menos que la que
+        // el importador asigna, y esa familia queda sin forma de filtrarse.
+        familias: FAMILIAS_VALIDAS,
         pendientes: db.prepare('SELECT COUNT(*) n FROM share_articulos WHERE pendiente_revision=1').get().n
                   + db.prepare('SELECT COUNT(*) n FROM share_proveedores WHERE pendiente_revision=1').get().n,
         puede_operar: puedeOperar(req.user) ? 1 : 0,
