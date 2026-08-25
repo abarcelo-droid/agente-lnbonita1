@@ -10,6 +10,7 @@ import assert from 'node:assert/strict';
 import {
   norm, parseDesc, parseProveedor, parseFecha, parseBultos, fechaDelNombre,
   clasificarFamilia, FAMILIAS_VALIDAS, parseOfertaTexto, detectarColumnasOferta,
+  parseDescOferta, parseFechaEntrega, parseOfertaExcel,
 } from '../src/servicios/share_parser.js';
 
 test('normalizar: mayúsculas, sin acentos, sin espacios de más', () => {
@@ -234,4 +235,92 @@ test('oferta en Excel: se reconocen los títulos habituales', () => {
   // Sin títulos reconocibles avisa que no los hay, y el router cae a "primera de texto,
   // primera de números" en vez de exigir un formato que nadie tiene.
   assert.equal(detectarColumnasOferta(['MANZANA X KG', 500]).hayTitulos, false);
+});
+
+test('oferta: los nombres de NUESTRO archivo cruzan con los del planning', () => {
+  // Las cuatro filas de un archivo real. Con el parseo genérico, tres de las cuatro NO
+  // cruzaban: la unidad viene en el medio y atrás cuelga información que es nuestra
+  // (con qué calibre lo pedimos, qué días ingresa) y no del artículo.
+  const pares = [
+    ['CEBOLLA X KG calibre 4', 'CEBOLLA X KG'],
+    ['PAPA BLANCA LAVADA IMPORTADA X KG', 'PAPA BLANCA LAVADA IMPORTADA X KG'],
+    ['ZAPALLO JAPONES x kg. / CABUTIAN', 'ZAPALLO JAPONES CABUTIAN X KG'],
+    ['ZANAHORIA IC X KG ingresa L M V', 'ZANAHORIA X KG'],
+  ];
+  for (const [oferta, planning] of pares) {
+    assert.equal(parseDescOferta(oferta).desc_canonica, parseDesc(planning).desc_canonica, oferta);
+  }
+});
+
+test('oferta: el planning se sigue leyendo igual que siempre', () => {
+  // parseDesc NO se tocó. Si cambiara, los artículos ya cargados se renombrarían y se
+  // partiría su historia en dos.
+  assert.equal(parseDesc('ZAPALLO JAPONES CABUTIAN X KG').desc_canonica, 'ZAPALLO JAPONES CABUTIAN X KG');
+  assert.equal(parseDesc('MANZANA X KG. COMERCIAL').desc_canonica, 'MANZANA COMERCIAL X KG');
+  assert.equal(parseDesc('FRUTILLA EN CUBETA X 250 GRS.').unidad, 'PACK_GR');
+});
+
+test('oferta: la unidad se reconoce aunque esté en el medio', () => {
+  assert.equal(parseDescOferta('CEBOLLA X KG calibre 4').unidad, 'KG');
+  assert.equal(parseDescOferta('ZAPALLO JAPONES x kg. / CABUTIAN').unidad, 'KG');
+  assert.equal(parseDescOferta('LECHUGA X UNIDAD a pedido').unidad, 'UNIDAD');
+  // Y lo que no tiene unidad reconocible sigue cayendo en SIN_DEFINIR, no se inventa.
+  assert.equal(parseDescOferta('PRODUCTO RARO').unidad, 'SIN_DEFINIR');
+});
+
+test('oferta: "FECHA DE ENTREGA: MARTES 25/8" sale con año', () => {
+  assert.equal(parseFechaEntrega('FECHA DE ENTREGA:  MARTES 25/8', '2026-08-24'), '2026-08-25');
+  assert.equal(parseFechaEntrega('MIERCOLES 26/8', '2026-08-24'), '2026-08-26');
+  // Se elige el año que deja la fecha MÁS CERCA de la referencia: un "28/12" cargado a
+  // principios de enero es de diciembre pasado, no del que viene.
+  assert.equal(parseFechaEntrega('LUNES 28/12', '2027-01-05'), '2026-12-28');
+  // Si el archivo trae el año, manda el archivo.
+  assert.equal(parseFechaEntrega('VIERNES 25/8/2025', '2026-08-24'), '2025-08-25');
+  assert.equal(parseFechaEntrega('sin fecha acá', '2026-08-24'), null);
+});
+
+test('oferta: el Excel real, con encabezado y todo', () => {
+  const aoa = [
+    [null, null, 'PROVEEDOR (NOMBRE Y N°):', 'SAN GERÓNIMO S.A. (N° 6531)'],
+    [null, null, 'FECHA DE ENTREGA:', 'MARTES 25/8'],
+    [],
+    [],
+    ['EAN', 'ARTICULO', 'CANTIDAD', 'PRECIO', 'VARIEDAD', 'ZONA DE PRODUCCIÓN', 'OBSERVACIÓN ( FINAL-COMIENZO-BACHE )'],
+    ['2320056000006', 'CEBOLLA X KG calibre 4', 8000, 1600, null, 'BRASIL', null],
+    ['2304748000000', 'ZANAHORIA IC X KG ingresa L M V', 1100, 1100, 'CUBITO', 'nacional', null],
+    [],
+  ];
+  const r = parseOfertaExcel(aoa, '2026-08-24');
+  assert.equal(r.fecha, '2026-08-25');
+  assert.match(r.proveedor, /SAN GER/);
+  // La fila de títulos se BUSCA: cuántas filas ocupa el encabezado cambia de archivo en archivo.
+  assert.equal(r.fila_titulos, 5);
+  assert.equal(r.filas.length, 2);
+  assert.equal(r.filas[0].cantidad, 8000);
+  assert.equal(r.filas[0].precio, 1600);
+  assert.equal(r.filas[0].zona, 'BRASIL');
+  assert.equal(r.filas[1].variedad, 'CUBITO');
+  // El EAN va como TEXTO: son 13 dígitos y como número perdería los ceros de adelante.
+  assert.equal(r.filas[0].ean, '2320056000006');
+  assert.equal(typeof r.filas[0].ean, 'string');
+});
+
+test('oferta: sin la fila de títulos, lo dice en vez de adivinar', () => {
+  const r = parseOfertaExcel([['hola', 'que tal'], ['a', 'b']], '2026-08-24');
+  assert.ok(r.error);
+  assert.match(r.error, /títulos/);
+});
+
+test('oferta: las filas incompletas se informan con el número de fila del Excel', () => {
+  const aoa = [
+    ['EAN', 'ARTICULO', 'CANTIDAD'],
+    ['1', 'MANZANA X KG', 100],
+    ['2', 'PERA X KG', null],      // fila 3 del Excel
+    [],                            // relleno: no es un problema
+    ['3', null, 50],               // fila 5
+  ];
+  const r = parseOfertaExcel(aoa, '2026-08-24');
+  assert.equal(r.filas.length, 1);
+  assert.equal(r.rechazadas.length, 2);
+  assert.deepEqual(r.rechazadas.map(x => x.linea), [3, 5]);
 });

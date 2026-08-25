@@ -334,3 +334,155 @@ export function detectarColumnasOferta(filaTitulos) {
   });
   return { articulo: cArt, cantidad: cCant, hayTitulos: cArt >= 0 && cCant >= 0 };
 }
+
+// ── EL NOMBRE DEL ARTÍCULO EN *NUESTRA* OFERTA ────────────────────────────────────────
+// La oferta y el planning de Carrefour nombran lo mismo distinto, y si no se los acerca no
+// cruza nada. Los cuatro casos de un archivo real:
+//
+//   CEBOLLA X KG calibre 4              →  CEBOLLA X KG
+//   ZAPALLO JAPONES x kg. / CABUTIAN    →  ZAPALLO JAPONES CABUTIAN X KG
+//   ZANAHORIA IC X KG ingresa L M V     →  ZANAHORIA X KG
+//   PAPA BLANCA LAVADA IMPORTADA X KG   →  (ya coincide)
+//
+// Dos diferencias de forma: la unidad viene EN EL MEDIO y no al final, y atrás cuelgan datos
+// que son nuestros y no del artículo (con qué calibre lo pedimos, qué días ingresa).
+//
+// NO se toca parseDesc: el planning se sigue leyendo igual que siempre. Esto acomoda el texto
+// ANTES de pasárselo, así que un cambio acá no puede renombrar un artículo ya cargado.
+const RE_UNIDAD_MEDIO = /(?:^|\s)(?:IC\s+)?X\s*(KGS?|UNIDADES?|UNIDAD|UNID|UNI|ATADOS?|PAQUETES?|PAQ|\d+\s*(?:GRS?|GRAMOS?|G))\.?(?=\s|$)/i;
+// Lo que va detrás de la unidad y NO describe al artículo: con qué calibre lo pedimos, qué
+// días entra, si es a pedido. Sacarlo es lo que hace que "CEBOLLA X KG calibre 4" y la
+// "CEBOLLA X KG" que compra Carrefour sean el mismo artículo.
+const RUIDO_OFERTA = [
+  /\bCALIBRES?\s*[\d/\-]+/g,
+  /\bCAL\.?\s*[\d/\-]+/g,
+  /\bINGRESA\b.*$/g,
+  /\bA\s+PEDIDO\b/g,
+  /\bSUJETO\s+A\b.*$/g,
+];
+
+export function normalizarDescOferta(raw) {
+  const t = norm(raw);
+  if (!t) return '';
+  const m = t.match(RE_UNIDAD_MEDIO);
+  if (!m) return t;                       // sin unidad reconocible: que lo resuelva parseDesc
+
+  const antes = t.slice(0, m.index).trim();
+  let despues = t.slice(m.index + m[0].length).trim();
+  for (const re of RUIDO_OFERTA) despues = despues.replace(re, ' ');
+  // La barra que separa la variedad ("x kg. / CABUTIAN") no es parte del nombre.
+  despues = despues.replace(/[/\-]+/g, ' ').replace(/\s+/g, ' ').trim();
+
+  // La unidad, escrita como la escribe el planning: al final y con la X adelante.
+  const u = m[1].toUpperCase().replace(/\s+/g, ' ').trim();
+  const base = [antes, despues].filter(Boolean).join(' ').replace(/\s+/g, ' ').trim();
+  if (!base) return t;
+  return base + ' X ' + u;
+}
+
+// El nombre de la oferta, leído con la misma cabeza que el del planning.
+export function parseDescOferta(raw) {
+  const p = parseDesc(normalizarDescOferta(raw));
+  p.raw = String(raw == null ? '' : raw);
+  return p;
+}
+
+// ── "FECHA DE ENTREGA: MARTES 25/8" ───────────────────────────────────────────────────
+// La fecha viene en el encabezado del archivo, con el día de la semana adelante y SIN AÑO.
+// Se toma un año de referencia (la última fecha con datos) y se elige el que deja la fecha
+// más cerca: un "25/12" cargado en enero es de diciembre pasado, no del que viene. La
+// pantalla la muestra igual para confirmarla — adivinar un año en silencio es la clase de
+// error que después nadie encuentra.
+export function parseFechaEntrega(txt, refIso) {
+  const s = norm(txt).replace(/^.*?FECHA\s+DE\s+ENTREGA\s*:?/i, '').trim();
+  const m = s.match(/(\d{1,2})\s*[/\-.]\s*(\d{1,2})(?:\s*[/\-.]\s*(\d{2,4}))?/);
+  if (!m) return null;
+  const dd = +m[1], mm = +m[2];
+  if (mm < 1 || mm > 12 || dd < 1 || dd > 31) return null;
+  if (m[3]) {
+    let y = +m[3]; if (y < 100) y += y < 70 ? 2000 : 1900;
+    return iso(y, mm, dd);
+  }
+  const ref = (refIso && /^\d{4}-\d{2}-\d{2}$/.test(refIso)) ? refIso : new Date().toISOString().slice(0, 10);
+  const anioRef = +ref.slice(0, 4);
+  let mejor = null, dist = Infinity;
+  for (const y of [anioRef - 1, anioRef, anioRef + 1]) {
+    const cand = iso(y, mm, dd);
+    if (!cand) continue;
+    const d = Math.abs(Date.parse(cand + 'T00:00:00Z') - Date.parse(ref + 'T00:00:00Z'));
+    if (d < dist) { dist = d; mejor = cand; }
+  }
+  return mejor;
+}
+
+// ── EL EXCEL DE LA OFERTA ─────────────────────────────────────────────────────────────
+// Formato real: unas filas de encabezado (proveedor y fecha de entrega) y después la tabla
+// EAN | ARTICULO | CANTIDAD | PRECIO | VARIEDAD | ZONA DE PRODUCCIÓN | OBSERVACIÓN.
+//
+// El EAN es lo más valioso del archivo: es el mismo número siempre, aunque a alguien se le dé
+// por escribir el artículo distinto. Se guarda y pasa a ser la PRIMERA llave del cruce.
+const OF_TIT = {
+  ean:         ['ean', 'codigo', 'cod'],
+  articulo:    ['articulo', 'producto', 'descripcion', 'detalle'],
+  cantidad:    ['cantidad', 'cant', 'bultos', 'disponible', 'disponibles'],
+  precio:      ['precio', 'importe'],
+  variedad:    ['variedad', 'variedades'],
+  zona:        ['zona de produccion', 'zona', 'origen', 'procedencia'],
+  observacion: ['observacion', 'obs', 'nota', 'notas', 'comentario'],
+};
+const titOf = (v) => norm(v).replace(/[^A-Z0-9 ]+/g, ' ').replace(/\s+/g, ' ').trim().toLowerCase();
+
+export function parseOfertaExcel(aoa, refIso) {
+  const crudas = aoa || [];
+  // La fila de títulos es la primera que tiene ARTICULO y CANTIDAD. Se busca en vez de
+  // asumir la primera: arriba viven el proveedor y la fecha, y cuántas filas ocupan cambia.
+  let hdr = -1, col = {};
+  for (let i = 0; i < Math.min(crudas.length, 40); i++) {
+    const f = crudas[i] || [];
+    const c = {};
+    f.forEach((v, j) => {
+      const t = titOf(v);
+      if (!t) return;
+      for (const k of Object.keys(OF_TIT)) {
+        if (c[k] !== undefined) continue;
+        if (OF_TIT[k].some(x => t === x || t.startsWith(x + ' '))) c[k] = j;
+      }
+    });
+    if (c.articulo !== undefined && c.cantidad !== undefined) { hdr = i; col = c; break; }
+  }
+  if (hdr < 0) return { error: 'No encuentro la fila de títulos. Se esperan al menos las columnas ARTICULO y CANTIDAD.' };
+
+  // La fecha y el proveedor, de las filas de arriba.
+  let fecha = null, proveedor = null;
+  for (let i = 0; i < hdr; i++) {
+    const texto = (crudas[i] || []).map(v => (v instanceof Date ? v.toISOString().slice(0, 10) : String(v == null ? '' : v))).join(' ');
+    if (!fecha && /FECHA\s+DE\s+ENTREGA/i.test(norm(texto))) fecha = parseFechaEntrega(texto, refIso);
+    if (!proveedor && /PROVEEDOR/i.test(norm(texto))) {
+      const m = texto.match(/:\s*(.+)$/);
+      if (m) proveedor = m[1].trim();
+    }
+  }
+
+  const filas = [], rechazadas = [];
+  for (let i = hdr + 1; i < crudas.length; i++) {
+    const f = crudas[i] || [];
+    const art = col.articulo !== undefined ? f[col.articulo] : null;
+    const cant = parseBultos(col.cantidad !== undefined ? f[col.cantidad] : null);
+    const vacia = (art == null || String(art).trim() === '');
+    if (vacia && cant == null) continue;                       // fila de relleno
+    if (vacia) { rechazadas.push({ linea: i + 1, texto: String(f.join(' ')).slice(0, 60), motivo: 'sin artículo' }); continue; }
+    if (cant == null || cant <= 0) { rechazadas.push({ linea: i + 1, texto: String(art).slice(0, 60), motivo: 'cantidad ilegible o cero' }); continue; }
+    const dame = (k) => (col[k] !== undefined && f[col[k]] != null && String(f[col[k]]).trim() !== '') ? String(f[col[k]]).trim() : null;
+    filas.push({
+      articulo_raw: String(art).trim(),
+      cantidad: cant,
+      // El EAN se guarda como TEXTO: son 13 dígitos y como número pierde los ceros de adelante.
+      ean: col.ean !== undefined && f[col.ean] != null ? (String(f[col.ean]).replace(/[^\d]/g, '') || null) : null,
+      precio: col.precio !== undefined ? parseBultos(f[col.precio]) : null,
+      variedad: dame('variedad'),
+      zona: dame('zona'),
+      observacion: dame('observacion'),
+    });
+  }
+  return { fecha, proveedor, filas, rechazadas, columnas: col, fila_titulos: hdr + 1 };
+}

@@ -9,7 +9,7 @@
 // única forma de probar esto antes de subirlo es con node:sqlite.
 import crypto from 'crypto';
 import * as XLSX from 'xlsx';
-import { norm, parseDesc, parseProveedor, parseFecha, parseBultos, fechaDelNombre, clasificarFamilia, FAMILIAS_VALIDAS } from './share_parser.js';
+import { norm, parseDesc, parseProveedor, parseFecha, parseBultos, fechaDelNombre, clasificarFamilia, FAMILIAS_VALIDAS, parseDescOferta } from './share_parser.js';
 
 const HOJA = 'Detallado';
 
@@ -330,6 +330,32 @@ export function recalcularKg(db, articuloId) {
 // OFRECER UN ARTÍCULO ES LA PRUEBA DE QUE LO VENDEMOS, así que cargar la oferta marca
 // `la_vendemos` en todo lo que trae. Ese es el filtro de Oportunidades, y es la lista que
 // nadie tiene ganas de mantener a mano: acá se mantiene sola.
+// EL EAN MANDA. Es el mismo número siempre, así que cruza aunque alguien escriba el artículo
+// distinto de un día para el otro — y eso pasa: "CEBOLLA X KG calibre 4" un martes y "CEBOLLA
+// X KG cal 4" el jueves. Recién si no hay EAN conocido se cae al nombre, con el mismo camino
+// del planning (alias → forma canónica → crear).
+//
+// Y al revés: cuando un artículo se resuelve por nombre y la línea trae EAN, se le graba el
+// EAN al artículo. Así la primera carga enseña y las siguientes ya cruzan solas.
+function resolverArticuloOferta(db, linea, crear) {
+  const p = parseDescOferta(linea.articulo_raw);
+  const ean = linea.ean ? String(linea.ean).replace(/[^\d]/g, '') : null;
+
+  if (ean) {
+    const porEan = db.prepare('SELECT id FROM share_articulos WHERE ean = ?').get(ean);
+    if (porEan) return { id: porEan.id, parse: p, ean, via: 'ean' };
+  }
+  const id = resolverArticulo(db, p, false);
+  if (id) {
+    if (ean) db.prepare('UPDATE share_articulos SET ean = ? WHERE id = ? AND (ean IS NULL OR ean = \'\')').run(ean, id);
+    return { id, parse: p, ean, via: 'nombre' };
+  }
+  if (!crear) return { id: null, parse: p, ean, via: null };
+  const nuevo = resolverArticulo(db, p, true);
+  if (ean) db.prepare('UPDATE share_articulos SET ean = ? WHERE id = ?').run(ean, nuevo);
+  return { id: nuevo, parse: p, ean, via: 'nuevo' };
+}
+
 export function analizarOferta(db, { filas, fecha }) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(String(fecha || ''))) {
     throw new Error('Falta la fecha de la oferta (AAAA-MM-DD).');
@@ -340,18 +366,34 @@ export function analizarOferta(db, { filas, fecha }) {
   // canonizan igual): se suman en vez de quedarse con el último.
   const porArt = new Map();
   for (const f of filas) {
-    const a = parseDesc(f.articulo_raw);
-    const prev = porArt.get(a.desc_canonica);
-    if (prev) { prev.cantidad += f.cantidad; prev.repetido = true; }
-    else porArt.set(a.desc_canonica, { parse: a, articulo_raw: f.articulo_raw, cantidad: f.cantidad });
+    const r = resolverArticuloOferta(db, f, false);
+    // Se agrupa por el artículo YA RESUELTO (por EAN o por nombre) y no por el texto: dos
+    // renglones escritos distinto que son el mismo artículo tienen que sumarse, no competir.
+    const clave = r.id ? 'id:' + r.id : 'txt:' + r.parse.desc_canonica;
+    const prev = porArt.get(clave);
+    if (prev) {
+      prev.cantidad += f.cantidad; prev.repetido = true;
+      if (!prev.precio && f.precio) prev.precio = f.precio;
+    } else {
+      porArt.set(clave, { resuelto: r, parse: r.parse, articulo_raw: f.articulo_raw, cantidad: f.cantidad,
+        ean: r.ean, precio: f.precio || null, variedad: f.variedad || null, zona: f.zona || null,
+        observacion: f.observacion || null });
+    }
   }
 
   const items = [...porArt.values()].map(x => {
-    const id = resolverArticulo(db, x.parse, false);
+    const id = x.resuelto.id;
     const ya = id ? db.prepare('SELECT desc_canonica, la_vendemos FROM share_articulos WHERE id=?').get(id) : null;
     return {
       articulo_raw: x.articulo_raw,
       desc_canonica: x.parse.desc_canonica,
+      // Con qué nombre quedó cruzado. Cuando el de la oferta y el del planning no son iguales
+      // —que es lo normal— la pantalla tiene que mostrar los dos, o no hay forma de saber si
+      // cruzó donde correspondía.
+      cruza_con: ya ? ya.desc_canonica : null,
+      via: x.resuelto.via,
+      ean: x.ean || null,
+      precio: x.precio, variedad: x.variedad, zona: x.zona, observacion: x.observacion,
       cantidad: x.cantidad,
       repetido: !!x.repetido,
       articulo_id: id || null,
@@ -392,12 +434,15 @@ export function importarOferta(db, { filas, fecha, origen, nombre, notas, usuari
     const ofertaId = Number(r.lastInsertRowid);
     if (a.reemplaza) db.prepare('UPDATE share_ofertas SET reemplazada_por=? WHERE id=?').run(ofertaId, a.reemplaza.id);
 
-    const ins = db.prepare('INSERT INTO share_oferta_lineas (oferta_id, fecha, articulo_raw, articulo_id, cantidad) VALUES (?,?,?,?,?)');
+    const ins = db.prepare(`INSERT INTO share_oferta_lineas
+      (oferta_id, fecha, articulo_raw, articulo_id, cantidad, ean, precio, variedad, zona, observacion)
+      VALUES (?,?,?,?,?,?,?,?,?,?)`);
     const marcar = db.prepare('UPDATE share_articulos SET la_vendemos=1 WHERE id=? AND la_vendemos=0');
     for (const it of a.items) {
-      const parse = parseDesc(it.articulo_raw);
-      const aid = it.articulo_id || resolverArticulo(db, parse, true);
-      ins.run(ofertaId, fecha, it.articulo_raw, aid, it.cantidad);
+      const aid = it.articulo_id || resolverArticuloOferta(db, it, true).id;
+      ins.run(ofertaId, fecha, it.articulo_raw, aid, it.cantidad,
+        it.ean || null, it.precio == null ? null : Number(it.precio),
+        it.variedad || null, it.zona || null, it.observacion || null);
       marcar.run(aid);
     }
     return ofertaId;

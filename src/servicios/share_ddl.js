@@ -40,6 +40,10 @@ export const DDL = `
   CREATE TABLE IF NOT EXISTS share_articulos (
     id                 INTEGER PRIMARY KEY AUTOINCREMENT,
     desc_canonica      TEXT NOT NULL UNIQUE,
+    -- El EAN de NUESTRO archivo de oferta. Es el mismo numero siempre, asi que cruza aunque
+    -- alguien escriba el articulo distinto. El planning de Carrefour no lo trae: por eso es
+    -- llave de la oferta y no del planning.
+    ean                TEXT,
     articulo_base      TEXT,
     calidad            TEXT,
     familia            TEXT,
@@ -103,12 +107,20 @@ export const DDL = `
     articulo_raw      TEXT NOT NULL,
     articulo_id       INTEGER REFERENCES share_articulos(id),
     cantidad          REAL NOT NULL,
+    -- Lo demas que trae el archivo. El precio es NUESTRO (el planning no tiene precios) y es la
+    -- primera pregunta cuando un articulo se lo termina comprando a otro.
+    ean               TEXT,
+    precio            REAL,
+    variedad          TEXT,
+    zona              TEXT,
+    observacion       TEXT,
     notas             TEXT
   );
 
   CREATE INDEX IF NOT EXISTS ix_share_of_fecha ON share_oferta_lineas(fecha);
   CREATE INDEX IF NOT EXISTS ix_share_of_art   ON share_oferta_lineas(articulo_id, fecha);
   CREATE INDEX IF NOT EXISTS ix_share_of_carga ON share_oferta_lineas(oferta_id);
+  CREATE INDEX IF NOT EXISTS ix_share_art_ean    ON share_articulos(ean);
   CREATE INDEX IF NOT EXISTS ix_share_ofertas_est ON share_ofertas(estado, fecha);
 
   CREATE INDEX IF NOT EXISTS ix_share_lineas_fecha ON share_lineas(fecha_entrega);
@@ -135,7 +147,8 @@ export const VISTA = `
 export const VISTA_OFERTA = `
   DROP VIEW IF EXISTS share_oferta_v;
   CREATE VIEW share_oferta_v AS
-    SELECT l.id, l.oferta_id, l.fecha, l.articulo_raw, l.articulo_id, l.cantidad
+    SELECT l.id, l.oferta_id, l.fecha, l.articulo_raw, l.articulo_id, l.cantidad,
+           l.ean, l.precio, l.variedad, l.zona, l.observacion
       FROM share_oferta_lineas l
       JOIN share_ofertas o ON o.id = l.oferta_id
      WHERE o.estado = 'activa';
