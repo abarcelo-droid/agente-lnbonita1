@@ -2154,7 +2154,10 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
 <!-- ─── PA INSUMOS ────────────────────────────────────────────── -->
 <div class="sec" id="sec-pa-insumos">
 <div class="ph"><div><div class="ph-t">🧪 Fertilizantes e Insumos</div><div class="ph-s">Stock actual y maestro de productos</div></div>
-<button class="btn bb" onclick="paAbrirNuevoInsumo()">+ Nuevo insumo</button></div>
+<div style="display:flex;gap:8px">
+  <button class="btn bo" onclick="paInsExportarExcel()" title="Bajar el stock a Excel (respeta los filtros y la búsqueda)" style="border-color:#107c41;color:#107c41">📥 Excel</button>
+  <button class="btn bb" onclick="paAbrirNuevoInsumo()">+ Nuevo insumo</button>
+</div></div>
 <div class="filt">
   <!-- Selector de categoría con 2 botones (default: Agroinsumos). Mantenemos un input
        hidden con el valor actual para no tener que tocar paLoadInsumos() ni el resto del flow. -->
@@ -2193,6 +2196,10 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
   .pa-pill:hover { background:#f3f4f6 }
   .pa-pill.on { background:var(--burg); color:#fff; border-color:var(--burg) }
   .pa-pill.on:hover { background:var(--burg); opacity:0.9 }
+  /* Inputs de la fila de búsqueda: tienen que poder achicarse hasta el ancho
+     de su columna, o la tabla se va de ancho y aparece la barra lateral. */
+  .pa-ins-filtro { width:100%; min-width:0; box-sizing:border-box; font-size:11px;
+                   padding:3px 5px; border:1px solid var(--bor2); border-radius:4px }
   /* Headers ordenables */
   .pa-tbl th.sortable { cursor:pointer; user-select:none; white-space:nowrap }
   .pa-tbl th.sortable:hover { background:#f3f4f6 }
@@ -2214,6 +2221,20 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
     <th class="sortable" style="text-align:right" onclick="paSortBy('precio_ref_usd')">Último precio <span class="sort-ind" id="pa-sort-precio_ref_usd"></span></th>
     <th style="text-align:center">Cuenta contable</th>
     <th class="sortable" onclick="paSortBy('estado')">Estado <span class="sort-ind" id="pa-sort-estado"></span></th>
+    <th></th>
+  </tr>
+  <!-- Fila de búsqueda por columna, igual que en Compras. Acá los filtros se
+       cruzan entre sí (nombre Y categoría), no se pisan: ver paFiltroFila().
+       size="1" + min-width:0 es lo que evita la barra de desplazamiento: sin
+       eso el input pide ~20 caracteres de ancho y ensancha la columna. -->
+  <tr style="background:var(--bg)" id="pa-ins-filtros">
+    <th></th>
+    <th><input type="text" size="1" placeholder="🔍 Nombre" data-col="1" oninput="paFiltroFila(this)" class="pa-ins-filtro"></th>
+    <th><input type="text" size="1" placeholder="🔍 Principio activo" data-col="2" oninput="paFiltroFila(this)" class="pa-ins-filtro"></th>
+    <th><input type="text" size="1" placeholder="🔍 Categoría" data-col="3" oninput="paFiltroFila(this)" class="pa-ins-filtro"></th>
+    <th><input type="text" size="1" placeholder="🔍 Unidad" data-col="4" oninput="paFiltroFila(this)" class="pa-ins-filtro"></th>
+    <th></th><th></th><th></th><th></th>
+    <th><input type="text" size="1" placeholder="🔍 Estado" data-col="9" oninput="paFiltroFila(this)" class="pa-ins-filtro"></th>
     <th></th>
   </tr></thead>
   <tbody id="pa-ins-tbody"><tr><td colspan="11" class="emp">Cargando...</td></tr></tbody>
@@ -2311,8 +2332,8 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
 <!-- Resumen por cultivo -->
 <div style="font-size:11px;font-weight:700;color:var(--mut);text-transform:uppercase;margin:14px 0 8px">Por cultivo</div>
 <div class="pa-wrap" style="margin-bottom:18px"><div class="ab-table-wrap"><table class="pa-tbl">
-  <thead><tr><th>Cultivo</th><th style="text-align:right">Lotes</th><th style="text-align:right">Hectáreas</th><th style="text-align:right">Costo total</th><th style="text-align:right">$/ha</th></tr></thead>
-  <tbody id="pa-cos-cult-tbody"><tr><td colspan="5" class="emp">Cargando...</td></tr></tbody>
+  <thead><tr><th>Cultivo</th><th>Destino</th><th style="text-align:right">Lotes</th><th style="text-align:right">Hectáreas</th><th style="text-align:right">Costo total</th><th style="text-align:right">$/ha</th></tr></thead>
+  <tbody id="pa-cos-cult-tbody"><tr><td colspan="6" class="emp">Cargando...</td></tr></tbody>
 </table></div></div>
 <!-- Resumen por sector (cards) -->
 <div style="font-size:11px;font-weight:700;color:var(--mut);text-transform:uppercase;margin:14px 0 8px">Por sector</div>
@@ -37170,7 +37191,97 @@ function paLoadInsumos(){
         +'</td>'
         +'</tr>';
     }).join('');
+    paInsReaplicarFiltros();
   });
+}
+
+// BUSCADOR POR COLUMNA QUE NO SE PISA. tablaFiltrar() decide fila por fila
+// mirando UNA sola columna: con dos filtros escritos, el segundo vuelve a
+// mostrar lo que el primero había escondido. Acá se juntan todos los inputs de
+// la fila de filtros y la fila tiene que cumplirlos a TODOS.
+function paFiltroFila(inp){
+  var tr = inp.closest('tr');
+  var tabla = inp.closest('table');
+  if(!tr || !tabla) return;
+  var tbody = tabla.querySelector('tbody');
+  if(!tbody) return;
+  var criterios = [];
+  tr.querySelectorAll('input[data-col]').forEach(function(el){
+    var v = (el.value||'').toLowerCase().trim();
+    if(v) criterios.push({ col: parseInt(el.getAttribute('data-col'),10), v: v });
+  });
+  tbody.querySelectorAll('tr').forEach(function(fila){
+    var celdas = fila.querySelectorAll('td');
+    if(!celdas.length) return;
+    var ok = criterios.every(function(c){
+      var celda = celdas[c.col];
+      return celda ? celda.textContent.toLowerCase().indexOf(c.v) >= 0 : true;
+    });
+    fila.style.display = ok ? '' : 'none';
+  });
+}
+// Vuelve a aplicar los filtros escritos después de redibujar el tbody (si no,
+// recargar la lista los deja escritos pero sin efecto).
+function paInsReaplicarFiltros(){
+  var fila = document.getElementById('pa-ins-filtros');
+  if(!fila) return;
+  var alguno = fila.querySelector('input[data-col]');
+  if(alguno) paFiltroFila(alguno);
+}
+// Los insumos que están a la vista ahora mismo: los filtros de arriba ya
+// achicaron PA.insumos del lado del server, y la búsqueda por columna esconde
+// filas del lado del navegador. El Excel tiene que bajar lo que se ve.
+function paInsVisibles(){
+  var tb = document.getElementById('pa-ins-tbody');
+  var lista = PA.insumos || [];
+  if(!tb) return lista;
+  var visibles = {};
+  var hayFilas = false;
+  tb.querySelectorAll('tr[id^=pa-ins-fila-]').forEach(function(tr){
+    hayFilas = true;
+    if(tr.style.display !== 'none') visibles[tr.id.replace('pa-ins-fila-','')] = true;
+  });
+  if(!hayFilas) return lista;
+  return lista.filter(function(i){ return visibles[String(i.id)]; });
+}
+function paInsExportarExcel(){
+  if(typeof XLSX==='undefined'){toast('La librería de Excel aún no cargó, reintentá','er');return;}
+  var lista = paInsVisibles();
+  if(!lista.length){toast('No hay insumos para exportar con esos filtros','er');return;}
+  var catLabel={agroinsumos:'Agroinsumos',combustibles:'Combustibles',panol:'Pañol',embalajes:'Embalajes',otros:'Otros'};
+  var r2=function(n){var x=Math.round((Number(n)||0)*100)/100;return x;};
+  var data=lista.map(function(i){
+    var critico=Number(i.stock_actual)<0;
+    var bajo=!critico && i.stock_minimo>0 && i.stock_actual<=i.stock_minimo;
+    var estado=!i.activo?'Desactivado':(critico?'STOCK CRÍTICO':(bajo?'Bajo':'OK'));
+    return{
+      'Nombre':            i.nombre||'',
+      'Principio activo':  i.componente_madre||'',
+      'Categoría':         catLabel[i.categoria_v2]||i.categoria_v2||i.categoria_principal||'',
+      'Subcategoría':      i.subcategoria||'',
+      'Tipo':              i.tipo||'',
+      'Unidad':            i.unidad||'',
+      'Stock actual':      r2(i.stock_actual),
+      'Stock mínimo':      r2(i.stock_minimo),
+      'Presentación':      i.presentacion_base?r2(i.presentacion_base):'',
+      'Comprado (cant.)':  r2(i.comprado_cantidad),
+      'Comprado ($)':      Math.round(Number(i.comprado_monto)||0),
+      'Compras':           Number(i.comprado_veces)||0,
+      'Último precio USD': i.precio_ref_usd?r2(i.precio_ref_usd):'',
+      'Cuenta contable':   i.cuenta_codigo||'',
+      'Estado':            estado
+    };
+  });
+  var ws=XLSX.utils.json_to_sheet(data);
+  ws['!cols']=Object.keys(data[0]).map(function(k){
+    var max=k.length;
+    data.forEach(function(row){var v=String(row[k]==null?'':row[k]);if(v.length>max)max=v.length;});
+    return{wch:Math.min(max+2,42)};
+  });
+  var wb=XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb,ws,'Stock');
+  var hoy=new Date().toISOString().slice(0,10);
+  XLSX.writeFile(wb,'stock-insumos-'+hoy+'.xlsx');
 }
 
 function paDesactivarInsumo(id, nombre){
@@ -38186,6 +38297,9 @@ function paAgregarItemServicio(){
       +'<div>'
         +'<div style="font-size:10px;color:var(--mut);margin-bottom:2px">Lote afectado <span style="color:var(--mut);font-weight:400">(opcional)</span></div>'
         +'<select id="pa-cs-lote-'+n+'" style="width:100%;font-size:12px">'+optsLotes+'</select>'
+        // Si elige lote, el neto de este concepto pasa a ser costo de ese lote
+        // (y por lo tanto del cultivo que tiene sembrado). Conviene decirlo acá.
+        +'<div style="font-size:10px;color:var(--mut);margin-top:3px">Con lote elegido, el monto neto de este concepto se suma al costo de ese lote y del cultivo que tiene sembrado.</div>'
       +'</div>'
     +'</div>';
   document.getElementById('pa-comp-items-srv').appendChild(row);
@@ -39073,6 +39187,15 @@ function paOrdRenderTablaOrdenes(data){
     +'</tr>';
   }).join('');
 }
+// CUÁNTO PRODUCTO SE USÓ. La orden dice la dosis planificada; lo que salió de
+// verdad es la suma de las aplicaciones (item.cantidad_aplicada, que arma el
+// backend). Sin ejecutar todavía → 0, y el Excel muestra "—".
+function paOrdCantItem(i){
+  var c=Number(i&&i.cantidad_aplicada)||0;
+  if(!c)return'—';
+  var r=Math.round(c*100)/100;
+  return (r%1===0?r.toString():r.toFixed(2))+' '+(i.unidad||'');
+}
 // Exporta a XLSX las órdenes actualmente filtradas (mismo patrón que IFCO)
 function paOrdExportarExcel(){
   if(typeof XLSX==='undefined'){alert('La librería de Excel todavía está cargando. Probá de nuevo en unos segundos.');return;}
@@ -39080,6 +39203,7 @@ function paOrdExportarExcel(){
   if(!rows.length){alert('No hay órdenes para exportar con esos filtros');return;}
   var estadoLbl={borrador:'Borrador',emitida:'Emitida',en_ejecucion:'En ejecución',ejecutada:'Ejecutada',parcial:'Parcial',anulada:'Anulada'};
   var data=rows.map(function(o){
+    var its=o.items||[];
     return{
       'N° Orden':   o.nro_orden||'',
       'Fecha':      paFecha(o.fecha_orden),
@@ -39087,21 +39211,55 @@ function paOrdExportarExcel(){
       'Finca':      (o.finca_nombres||[]).join(', '),
       'Lote(s)':    (o.lotes||[]).map(function(l){return l.lote_nombre;}).join(', '),
       'Cultivo(s)': o.cultivo || (o.cultivos||[]).join(', '),
-      'Productos':  (o.items||[]).map(function(i){return i.insumo_nombre;}).join(', '),
+      'Productos':  its.map(function(i){return i.insumo_nombre;}).join(', '),
+      // Misma cantidad de entradas y el mismo orden que "Productos": se leen
+      // de a pares, producto contra cantidad.
+      'Cantidad usada': its.map(paOrdCantItem).join(', '),
       'Costo':      o.costo_total||0,
       'Asignado a': o.asignado_nombre||'',
       'Estado':     estadoLbl[o.estado]||o.estado||''
     };
   });
+  var anchos=function(arr){
+    var ks=Object.keys(arr[0]);
+    return ks.map(function(k){
+      var max=k.length;
+      arr.forEach(function(row){var v=String(row[k]==null?'':row[k]);if(v.length>max)max=v.length;});
+      return{wch:Math.min(max+2,50)};
+    });
+  };
   var ws=XLSX.utils.json_to_sheet(data);
-  var cols=Object.keys(data[0]);
-  ws['!cols']=cols.map(function(k){
-    var max=k.length;
-    data.forEach(function(row){var v=String(row[k]||'');if(v.length>max)max=v.length;});
-    return{wch:Math.min(max+2,50)};
-  });
+  ws['!cols']=anchos(data);
   var wb=XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb,ws,'Órdenes');
+  // Hoja 2 — UNA FILA POR PRODUCTO. La hoja 1 mete todos los productos de la
+  // orden en una celda: sirve para leer, no para sumar. Acá cada producto es
+  // una fila, así se puede hacer una tabla dinámica de consumo por insumo.
+  var det=[];
+  rows.forEach(function(o){
+    (o.items||[]).forEach(function(i){
+      det.push({
+        'N° Orden':  o.nro_orden||'',
+        'Fecha':     paFecha(o.fecha_orden),
+        'Tipo':      o.tipo_aplicacion||'',
+        'Finca':     (o.finca_nombres||[]).join(', '),
+        'Lote(s)':   (o.lotes||[]).map(function(l){return l.lote_nombre;}).join(', '),
+        'Cultivo':   o.cultivo || (o.cultivos||[]).join(', '),
+        'Producto':  i.insumo_nombre||'',
+        'Cantidad usada': Math.round((Number(i.cantidad_aplicada)||0)*100)/100,
+        'Unidad':    i.unidad||'',
+        'Dosis planificada': i.dosis||0,
+        'Unidad dosis': i.unidad_dosis||'',
+        'Costo':     Math.round(Number(i.costo_aplicado)||0),
+        'Estado':    estadoLbl[o.estado]||o.estado||''
+      });
+    });
+  });
+  if(det.length){
+    var ws2=XLSX.utils.json_to_sheet(det);
+    ws2['!cols']=anchos(det);
+    XLSX.utils.book_append_sheet(wb,ws2,'Por producto');
+  }
   var hoy=new Date().toISOString().slice(0,10);
   XLSX.writeFile(wb,'ordenes-aplicacion-'+hoy+'.xlsx');
 }
@@ -39676,14 +39834,28 @@ var PA_COS_TIPO_COLOR={
   'Insumos':'#16a34a',
   'Combustible':'#f59e0b',
   'Mano de obra':'#3b82f6',
+  'Servicios':'#8b5cf6',
   'Tractor / Maquinaria':'#a16207',
   'Otros':'#9ca3af'
 };
 var PA_COS_TIPO_EMOJI={
-  'Insumos':'🌱','Combustible':'⛽','Mano de obra':'👷','Tractor / Maquinaria':'🚜','Otros':'📦'
+  'Insumos':'🌱','Combustible':'⛽','Mano de obra':'👷','Servicios':'🛠️','Tractor / Maquinaria':'🚜','Otros':'📦'
 };
+// INVERSIÓN vs PRODUCCIÓN. El lote marcado "en desarrollo" todavía no produce:
+// lo que se le gasta es inversión en la plantación, no costo de la campaña. El
+// backend manda destino='inversion'|'produccion' en cada lote y en cada cultivo.
+function paCosDestinoBadge(destino){
+  return destino==='inversion'
+    ? '<span class="pa-badge" style="background:#f3e8ff;color:#6b21a8;font-weight:600" title="Lote en desarrollo: todavía no produce, lo gastado es inversión">🏗️ Inversión</span>'
+    : '<span class="pa-badge pa-verde-bg" title="Lote en producción: lo gastado es costo de la campaña">🌱 Producción</span>';
+}
+// Etiqueta única cultivo+destino: el mismo cultivo puede estar en las dos
+// columnas y el donut necesita distinguirlas.
+function paCosCultKey(c){
+  return c.cultivo + (c.destino==='inversion' ? ' (inversión)' : '');
+}
 // Estado de la sección Costos: respuesta cruda + filtro drill-down por cultivo.
-PA._cos=PA._cos||{resp:null,drillCultivo:null,charts:{}};
+PA._cos=PA._cos||{resp:null,drillCultivo:null,drillDestino:null,charts:{}};
 
 // Al ENTRAR al módulo Costos, posicionar los selectores de campaña en la VIGENTE (activa=1)
 // — anual y estacional —, no en la que hubiera quedado de antes. paPoblarSelectsCampaña ya
@@ -39706,6 +39878,7 @@ function paLoadCostos(){
   paF('/api/pa/costos'+(qs.length?'?'+qs.join('&'):'')).then(function(r){
     PA._cos.resp=r;
     PA._cos.drillCultivo=null; // al recargar filtros, limpiar drill-down
+    PA._cos.drillDestino=null;
     var cults=r.por_cultivo||[],sects=r.por_sector||[],tipos=r.por_tipo_gasto||[];
     // Poblar select de sector (preservando selección actual)
     paCosPoblarSectores(r.sectores||[],sector);
@@ -39714,7 +39887,7 @@ function paLoadCostos(){
     // Tabla de cultivos
     var ctbody=document.getElementById('pa-cos-cult-tbody');
     if(!cults.length){
-      ctbody.innerHTML='<tr><td colspan="5" class="emp">Sin costos para esta campaña</td></tr>';
+      ctbody.innerHTML='<tr><td colspan="6" class="emp">Sin costos para esta campaña</td></tr>';
     } else {
       ctbody.innerHTML=cults.map(function(c){
         var nombreCult=c.cultivo;
@@ -39723,6 +39896,7 @@ function paLoadCostos(){
         var badge='<span style="background:'+col.bg+';color:'+col.fg+';padding:3px 10px;border-radius:10px;font-size:12px;font-weight:600">'+nombreCult+'</span>';
         return'<tr>'
           +'<td>'+badge+'</td>'
+          +'<td>'+paCosDestinoBadge(c.destino)+'</td>'
           +'<td style="text-align:right">'+(c.lotes_count||0)+'</td>'
           +'<td style="text-align:right">'+(c.hectareas_total||0).toFixed(1)+' ha</td>'
           +'<td style="text-align:right"><strong>'+paMoney(c.costo_total)+'</strong></td>'
@@ -39762,29 +39936,47 @@ function paCosRenderTotales(t){
   // Título: anual, estacional, o "anual — estacional" según lo seleccionado.
   var camps=[campAnual,campEstac].filter(Boolean).join(' — ');
   if(titEl)titEl.textContent='💰 Total campaña'+(camps?' '+camps:'')+(sector?' · '+sector:'');
-  function kpi(val,lbl){
-    return'<div><div style="font-size:22px;font-weight:800;color:var(--burg,#7a1f2b)">'+val+'</div>'
+  function kpi(val,lbl,color,titulo){
+    return'<div'+(titulo?' title="'+titulo+'"':'')+'><div style="font-size:22px;font-weight:800;color:'+(color||'var(--burg,#7a1f2b)')+'">'+val+'</div>'
       +'<div style="font-size:11px;color:var(--mut);text-transform:uppercase;letter-spacing:.3px">'+lbl+'</div></div>';
   }
   var html=kpi(paMoney(t.costo_total),'Costo total')
+    // Lo mismo abierto en dos: lo que se gastó en lo que produce, y lo que se
+    // invirtió en las plantaciones que todavía no.
+    +kpi(paMoney(t.costo_produccion||0),'🌱 Producción ('+(t.lotes_produccion||0)+' lotes)','#15803d',
+         'Lotes que ya producen: esto es costo de la campaña')
+    +kpi(paMoney(t.costo_inversion||0),'🏗️ Inversión ('+(t.lotes_inversion||0)+' lotes)','#7e22ce',
+         'Lotes en desarrollo: todavía no producen, esto es inversión en la plantación')
     +kpi((t.hectareas_totales||0).toFixed(1)+' ha','Hectáreas')
     +kpi(paMoney(t.costo_por_ha),'$/ha promedio')
     +kpi((t.lotes_count||0),'Lotes activos')
     +kpi((t.cultivos_count||0),'Cultivos');
+  // Si no hay ni un lote en inversión, decir DÓNDE se marca. Sin esto la
+  // pantalla contesta "$0" y no se entiende si es que no hay o si falta cargarlo.
+  if(!(t.lotes_inversion>0) && (t.lotes_count||0)>0){
+    html+='<div style="flex-basis:100%;font-size:11px;color:var(--mut);margin-top:6px">'
+      +'Ningún lote figura como inversión. Un lote pasa a inversión con el tick '
+      +'<b>🌱 En desarrollo</b> de su campaña, en Lotes → editar el lote (aparece en los frutales y la vid).</div>';
+  }
   document.getElementById('pa-cos-tot-kpis').innerHTML=html;
 }
 
 function paCosRenderDonuts(cults,tipos){
   if(typeof Chart==='undefined')return; // CDN aún no cargó
-  // Donut A — por cultivo
-  var labA=cults.map(function(c){return c.cultivo;});
+  // Donut A — por cultivo. La etiqueta lleva el destino cuando es inversión:
+  // "DAMASCO" y "DAMASCO (inversión)" son dos porciones distintas.
+  var labA=cults.map(paCosCultKey);
   var datA=cults.map(function(c){return Math.round(c.costo_total||0);});
   var colA=cults.map(function(c){
     var esSinCult=/Sin cultivo/i.test(c.cultivo);
-    return(typeof cultColor==='function'&&!esSinCult)?cultColor(c.cultivo).bg:'#e5e7eb';
+    var col=(typeof cultColor==='function'&&!esSinCult)?cultColor(c.cultivo):{bg:'#e5e7eb',fg:'#9ca3af'};
+    // Mismo cultivo, dos porciones: la de inversión va con el tono oscuro del
+    // cultivo. Si las dos fueran del mismo color no se distinguirían.
+    return c.destino==='inversion'?col.fg:col.bg;
   });
-  paCosDibujarDonut('pa-cos-donut-cultivo','cultivo',labA,datA,colA,function(label){
-    paCosSetDrill(label);
+  paCosDibujarDonut('pa-cos-donut-cultivo','cultivo',labA,datA,colA,function(label,idx){
+    var c=cults[idx]||{};
+    paCosSetDrill(c.cultivo,c.destino);
   });
   // Donut B — por tipo de gasto (informativo)
   var labB=tipos.map(function(t){return(PA_COS_TIPO_EMOJI[t.tipo]||'')+' '+t.tipo;});
@@ -39817,24 +40009,28 @@ function paCosDibujarDonut(canvasId,key,labels,data,colors,onClick){
         }}}
       },
       onClick:onClick?function(evt,els){
-        if(els&&els.length){onClick(labels[els[0].index]);}
+        if(els&&els.length){onClick(labels[els[0].index],els[0].index);}
       }:undefined
     }
   });
   if(onClick)cv.style.cursor='pointer';
 }
 
-function paCosSetDrill(cultivo){
-  // El label del donut A es el nombre del cultivo tal cual la tabla por_cultivo.
+function paCosSetDrill(cultivo,destino){
+  // El label del donut A es el nombre del cultivo tal cual la tabla por_cultivo,
+  // más el destino: el mismo cultivo puede tener lotes en producción y lotes en
+  // inversión, y son dos porciones separadas.
   PA._cos.drillCultivo=cultivo||null;
+  PA._cos.drillDestino=destino||null;
   paCosRenderDetalle();
 }
-function paCosClearDrill(){PA._cos.drillCultivo=null;paCosRenderDetalle();}
+function paCosClearDrill(){PA._cos.drillCultivo=null;PA._cos.drillDestino=null;paCosRenderDetalle();}
 
 function paCosRenderDetalle(){
   var resp=PA._cos.resp||{};
   var data=resp.data||[];
   var drill=PA._cos.drillCultivo;
+  var drillDest=PA._cos.drillDestino;
   var chip=document.getElementById('pa-cos-drill-chip');
   // Resolver el filtro: el donut agrupa "— Sin cultivo asignado —"; en el
   // detalle eso son lotes con cultivo_actual vacío.
@@ -39843,14 +40039,17 @@ function paCosRenderDetalle(){
   if(drill){
     filtradas=data.filter(function(l){
       var c=(l.cultivo_actual||'').trim();
-      return esSinCult?!c:c===drill;
+      var okCult=esSinCult?!c:c===drill;
+      if(!okCult)return false;
+      return drillDest?((l.destino||'produccion')===drillDest):true;
     });
   }
   if(chip){
     if(drill){
       var col=(typeof cultColor==='function'&&!esSinCult)?cultColor(drill):{bg:'#f3f4f6',fg:'#6b7280'};
+      var sufDest=drillDest==='inversion'?' · inversión':(drillDest?' · producción':'');
       chip.style.display='inline-flex';
-      chip.innerHTML='<span style="display:inline-flex;align-items:center;gap:6px;background:'+col.bg+';color:'+col.fg+';padding:3px 10px;border-radius:12px;font-size:12px;font-weight:600">Cultivo: '+drill
+      chip.innerHTML='<span style="display:inline-flex;align-items:center;gap:6px;background:'+col.bg+';color:'+col.fg+';padding:3px 10px;border-radius:12px;font-size:12px;font-weight:600">Cultivo: '+drill+sufDest
         +' <span onclick="paCosClearDrill()" title="Quitar filtro" style="cursor:pointer;font-weight:700">✕</span></span>';
     } else { chip.style.display='none';chip.innerHTML=''; }
   }
@@ -39864,6 +40063,11 @@ function paCosRenderDetalle(){
       cultCell='<span style="background:'+col.bg+';color:'+col.fg+';padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600">'+cult+'</span>';
     } else {
       cultCell='<span style="color:var(--mut);font-size:11px;font-style:italic">sin cultivo</span>';
+    }
+    // El lote en desarrollo se marca acá mismo —sin columna nueva, que obligaría
+    // a arrastrar la tabla para llegar al total—.
+    if(l.destino==='inversion'){
+      cultCell+=' <span style="background:#f3e8ff;color:#6b21a8;padding:2px 7px;border-radius:10px;font-size:10px;font-weight:700" title="Lote en desarrollo: lo gastado es inversión, no costo de la campaña">🏗️ inversión</span>';
     }
     return'<tr>'
       +'<td style="font-size:12px;color:var(--mut)">'+l.sector_nombre+'</td>'
@@ -39897,14 +40101,18 @@ function paCostosExportExcel(){
   aoa.push([]);
   aoa.push(['KPIs Globales']);
   aoa.push(['Costo total',num(t.costo_total)]);
+  aoa.push(['— Producción (lotes que ya producen)',num(t.costo_produccion)]);
+  aoa.push(['— Inversión (lotes en desarrollo)',num(t.costo_inversion)]);
   aoa.push(['Hectáreas totales',Math.round((t.hectareas_totales||0)*10)/10]);
+  aoa.push(['— Hectáreas en producción',Math.round((t.hectareas_produccion||0)*10)/10]);
+  aoa.push(['— Hectáreas en inversión',Math.round((t.hectareas_inversion||0)*10)/10]);
   aoa.push(['$/ha promedio',num(t.costo_por_ha)]);
   aoa.push(['Lotes activos',t.lotes_count||0]);
   aoa.push(['Cultivos distintos',t.cultivos_count||0]);
   aoa.push([]);
   aoa.push(['POR CULTIVO']);
-  aoa.push(['Cultivo','Lotes','Hectáreas','Costo Total','$/ha']);
-  cults.forEach(function(c){aoa.push([c.cultivo,c.lotes_count||0,Math.round((c.hectareas_total||0)*10)/10,num(c.costo_total),num(c.costo_por_ha)]);});
+  aoa.push(['Cultivo','Destino','Lotes','Hectáreas','Costo Total','$/ha']);
+  cults.forEach(function(c){aoa.push([c.cultivo,c.destino==='inversion'?'Inversión':'Producción',c.lotes_count||0,Math.round((c.hectareas_total||0)*10)/10,num(c.costo_total),num(c.costo_por_ha)]);});
   aoa.push([]);
   aoa.push(['POR SECTOR']);
   aoa.push(['Sector','Costo Total','Hectáreas','$/ha']);
@@ -39914,7 +40122,7 @@ function paCostosExportExcel(){
   aoa.push(['Tipo','Costo Total','% del total']);
   tipos.forEach(function(tp){aoa.push([tp.tipo,num(tp.costo),tp.porcentaje]);});
   var ws1=XLSX.utils.aoa_to_sheet(aoa);
-  ws1['!cols']=[{wch:28},{wch:14},{wch:14},{wch:16},{wch:14}];
+  ws1['!cols']=[{wch:36},{wch:14},{wch:14},{wch:14},{wch:16},{wch:14}];
   // ── Hoja 2: Detalle por Lote ──
   var detData=lotes.map(function(l){
     return{
@@ -39922,6 +40130,7 @@ function paCostosExportExcel(){
       'Lote':l.lote_nombre||'',
       'Ha':l.hectareas||0,
       'Cultivo':l.cultivo_actual||'',
+      'Destino':l.destino==='inversion'?'Inversión':'Producción',
       'Costo Total':num(l.costo_total),
       '$/ha':num(l.costo_por_ha),
       'Fecha primera aplicación':l.fecha_primera||'',

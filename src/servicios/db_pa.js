@@ -1692,6 +1692,59 @@ db.exec(`
   } catch(e) { console.error('[PA] Error migrando pa_costos_lote.origen:', e.message); }
 })();
 
+// ── BACKFILL: servicios facturados con lote → costo de ese lote ────────────
+// La factura de servicios deja elegir un lote (pa_compras_items.lote_id) y ahí
+// se quedaba: el reporte de Costos lee pa_costos_lote y las compras nunca
+// escribían ahí. Desde ahora POST /compras la escribe; esto recupera las que ya
+// estaban cargadas (la siembra neumática de Granadino, por ejemplo).
+// Idempotente por el NOT EXISTS, y sólo mira facturas ACTIVAS: si alguien
+// desactiva una factura se le borra el costo, y este backfill no se lo devuelve.
+(function backfillCostosServicioLote() {
+  try {
+    const tablas = db.prepare(
+      "SELECT name FROM sqlite_master WHERE type='table' AND name IN ('pa_costos_lote','pa_compras','pa_compras_items')"
+    ).all().map(r => r.name);
+    if (tablas.length < 3) return;
+    const cols = db.prepare("PRAGMA table_info(pa_compras_items)").all().map(c => c.name);
+    if (!cols.includes('lote_id') || !cols.includes('precio_modo')) return;
+
+    const pendientes = db.prepare(`
+      SELECT ci.id, ci.lote_id, ci.concepto, ci.subtotal_neto,
+             c.fecha, c.proveedor_txt,
+             c.campaña_id, c.campaña_anual_id, c.campaña_estacional_id
+        FROM pa_compras_items ci
+        JOIN pa_compras c ON c.id = ci.compra_id
+       WHERE ci.precio_modo = 'servicio'
+         AND ci.lote_id IS NOT NULL
+         AND ci.subtotal_neto > 0
+         AND (c.activo IS NULL OR c.activo = 1)
+         AND COALESCE(c.campaña_anual_id, c.campaña_id, c.campaña_estacional_id) IS NOT NULL
+         AND NOT EXISTS (SELECT 1 FROM pa_costos_lote cl
+                          WHERE cl.origen = 'compra_servicio' AND cl.referencia_id = ci.id)
+    `).all();
+    if (!pendientes.length) return;
+
+    const ins = db.prepare(`
+      INSERT INTO pa_costos_lote
+        (lote_id, campaña_id, campaña_anual_id, campaña_estacional_id,
+         categoria, origen, referencia_id, fecha, monto, descripcion)
+      VALUES (?,?,?,?,'labor_contratada','compra_servicio',?,?,?,?)
+    `);
+    const tx = db.transaction(() => {
+      for (const p of pendientes) {
+        const anual = p.campaña_anual_id || p.campaña_id || null;
+        const estac = p.campaña_estacional_id || null;
+        const desc = 'Servicio' + (p.proveedor_txt ? ` ${p.proveedor_txt}` : '')
+          + (p.concepto ? `: ${p.concepto}` : '');
+        ins.run(p.lote_id, anual || estac, anual, estac, p.id, p.fecha,
+                Math.round((Number(p.subtotal_neto) || 0) * 100) / 100, desc);
+      }
+    });
+    tx();
+    console.log(`[PA] ${pendientes.length} servicio(s) facturados con lote imputados al costo del lote.`);
+  } catch(e) { console.error('[PA] Error en backfill de costos de servicio:', e.message); }
+})();
+
 // ── SEED: 20 rubros contables (tal cual contabilidad) ──────────────────────
 (function seedRubrosContables() {
   try {

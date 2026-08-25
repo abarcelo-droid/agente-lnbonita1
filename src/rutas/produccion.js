@@ -62,6 +62,72 @@ function campañasActivas(db) {
 // ── Redondeo contable a 2 decimales ─────────────────────────────────────────
 function round2(n) { return Math.round((Number(n) || 0) * 100) / 100; }
 
+// ── EL SERVICIO CONTRATADO PARA UN LOTE ES COSTO DE ESE LOTE ───────────────
+// Una factura de servicios se le asigna un lote (pa_compras_items.lote_id) y ahí
+// terminaba: el reporte de Costos lee pa_costos_lote, así que la siembra
+// neumática facturada por Granadino no llegaba nunca al costo de la cebolla.
+// Acá se escribe esa fila. Marcada con origen='compra_servicio' y
+// referencia_id = id del ítem, para poder deshacerla si la factura se desactiva.
+const COSTO_ORIGEN_SERVICIO = 'compra_servicio';
+function registrarCostoServicio(db, d) {
+  const monto = round2(d.monto);
+  if (!d.lote_id || !(monto > 0)) return null;
+  // pa_costos_lote.campaña_id es NOT NULL. Sin campaña no hay dónde imputarlo.
+  const campAnual = d.campaña_anual_id || null;
+  const campEstac = d.campaña_estacional_id || null;
+  const campaña = campAnual || campEstac;
+  if (!campaña) return null;
+  const desc = 'Servicio' + (d.proveedor ? ` ${d.proveedor}` : '')
+    + (d.concepto ? `: ${d.concepto}` : '');
+  return db.prepare(`
+    INSERT INTO pa_costos_lote
+      (lote_id, campaña_id, campaña_anual_id, campaña_estacional_id,
+       categoria, origen, referencia_id, fecha, monto, descripcion)
+    VALUES (?,?,?,?,'labor_contratada',?,?,?,?,?)
+  `).run(d.lote_id, campaña, campAnual, campEstac,
+         COSTO_ORIGEN_SERVICIO, d.compra_items_id,
+         d.fecha || new Date().toISOString().slice(0,10), monto, desc);
+}
+// Borra los costos por lote generados por los servicios de una factura.
+function borrarCostosServicio(db, compraId) {
+  return db.prepare(`
+    DELETE FROM pa_costos_lote
+     WHERE origen = ?
+       AND referencia_id IN (SELECT id FROM pa_compras_items WHERE compra_id = ?)
+  `).run(COSTO_ORIGEN_SERVICIO, compraId).changes;
+}
+// Vuelve a escribirlos (reactivar una factura desactivada). Idempotente: no
+// duplica si la fila ya está.
+function recrearCostosServicio(db, compraId) {
+  const c = db.prepare(`
+    SELECT fecha, proveedor_txt, campaña_id, campaña_anual_id, campaña_estacional_id
+      FROM pa_compras WHERE id = ?
+  `).get(compraId);
+  if (!c) return 0;
+  const items = db.prepare(`
+    SELECT ci.id, ci.lote_id, ci.concepto, ci.subtotal_neto
+      FROM pa_compras_items ci
+     WHERE ci.compra_id = ? AND ci.lote_id IS NOT NULL AND ci.precio_modo = 'servicio'
+       AND NOT EXISTS (SELECT 1 FROM pa_costos_lote cl
+                        WHERE cl.origen = ? AND cl.referencia_id = ci.id)
+  `).all(compraId, COSTO_ORIGEN_SERVICIO);
+  let n = 0;
+  for (const it of items) {
+    const r = registrarCostoServicio(db, {
+      compra_items_id: it.id,
+      lote_id: it.lote_id,
+      campaña_anual_id: c.campaña_anual_id || c.campaña_id || null,
+      campaña_estacional_id: c.campaña_estacional_id || null,
+      fecha: c.fecha,
+      monto: it.subtotal_neto,
+      proveedor: c.proveedor_txt,
+      concepto: it.concepto
+    });
+    if (r) n++;
+  }
+  return n;
+}
+
 // ── DE QUÉ EMPRESA ES ESTA CONTABILIDAD ───────────────────────────────────
 // Las tablas pa_*/adm_* son la contabilidad de Puente Cordón: los 70 asientos,
 // las 268 cuentas del plan y los 32 proveedores que hay cargados son suyos, sin
@@ -1341,7 +1407,7 @@ router.post('/compras', requireAuth, (req, res) => {
         const cantidadBase = it._stockASumar;
         const precioBase = cantidadBase > 0 ? (it._montoNeto / cantidadBase) : Number(it.precio_unit);
 
-        db.prepare(`
+        const itemRes = db.prepare(`
           INSERT INTO pa_compras_items
             (compra_id, insumo_id, cantidad, precio_unit, subtotal, iva_porcentaje, iva_monto, subtotal_neto,
              presentacion_base, cant_bultos, precio_modo,
@@ -1362,8 +1428,25 @@ router.post('/compras', requireAuth, (req, res) => {
                (esServicio || it.lote_id) ? (it.lote_id || null) : null,
                (esServicio || it.cuenta_codigo) ? (it.cuenta_codigo || null) : null);
 
-        // En servicios no toca stock ni crea pañol — saltar el resto del loop
-        if (esServicio) continue;
+        // En servicios no toca stock ni crea pañol. Pero SI el concepto tiene un
+        // lote, el monto es costo de ese lote —y por lo tanto del cultivo que
+        // está sembrado ahí—. Antes moría en pa_compras_items: la siembra
+        // neumática del lote 26-31 no aparecía en el costo de la cebolla.
+        if (esServicio) {
+          if (it.lote_id) {
+            registrarCostoServicio(db, {
+              compra_items_id: itemRes.lastInsertRowid,
+              lote_id: Number(it.lote_id),
+              campaña_anual_id: anualFinal,
+              campaña_estacional_id: estacionalFinal,
+              fecha: fecha || new Date().toISOString().slice(0,10),
+              monto: it._montoNeto,
+              proveedor: proveedorNombre,
+              concepto: String(it.concepto || '').trim()
+            });
+          }
+          continue;
+        }
 
         // Determinar si el insumo es de pañol (en cuyo caso NO se suma stock,
         // se crean N unidades en pa_panol_unidades en su lugar)
@@ -1556,8 +1639,15 @@ router.get('/ordenes', requireAuth, (req, res) => {
         AND cl.campaña = (SELECT nombre FROM pa_campañas WHERE activa = 1 LIMIT 1)
       WHERE ol.orden_id = ?
     `);
+    // La orden dice la DOSIS planificada; lo que REALMENTE salió del galpón está
+    // en pa_aplicaciones (una fila por lote). cantidad_aplicada suma esas filas
+    // por insumo: es el número que el Excel de órdenes tiene que mostrar.
     const getItems = db.prepare(`
-      SELECT oi.*, i.nombre as insumo_nombre, i.unidad
+      SELECT oi.*, i.nombre as insumo_nombre, i.unidad,
+             (SELECT COALESCE(SUM(a.cantidad_real), 0) FROM pa_aplicaciones a
+               WHERE a.orden_id = oi.orden_id AND a.insumo_id = oi.insumo_id) AS cantidad_aplicada,
+             (SELECT COALESCE(SUM(a.costo_total), 0) FROM pa_aplicaciones a
+               WHERE a.orden_id = oi.orden_id AND a.insumo_id = oi.insumo_id) AS costo_aplicado
       FROM pa_ordenes_items oi
       JOIN pa_insumos i ON i.id = oi.insumo_id
       WHERE oi.orden_id = ?
@@ -1698,10 +1788,10 @@ router.get('/compras/buscar-para-reasignacion', requireAdmin, (req, res) => {
 });
 
 // Reasignación bulk de campaña sobre compras seleccionadas (transaccional).
-// NOTA: las compras NO generan filas en pa_costos_lote (las únicas fuentes de costos
-// son aplicaciones fert/agro, combustible y partes de MO; ver INSERTs en este archivo).
-// El reporte de Costos por Lote (/costos) lee solo de pa_costos_lote, así que reasignar
-// la campaña de una compra no afecta ese reporte → no hay nada que propagar acá.
+// NOTA: de las compras, las únicas que dejan costo por lote son los conceptos de
+// SERVICIO con lote asignado (origen='compra_servicio'). Esos SÍ hay que
+// propagarlos: si no, el costo queda colgado de la campaña vieja y el reporte de
+// Costos lo sigue mostrando donde ya no va.
 router.post('/compras/reasignar-bulk', requireAdmin, (req, res) => {
   const db = getDb();
   const { compra_ids, campaña_anual_id, campaña_estacional_id, limpiar_estacional } = req.body;
@@ -1719,8 +1809,29 @@ router.post('/compras/reasignar-bulk', requireAdmin, (req, res) => {
 
     const ph = ids.map(() => '?').join(',');
     const stmt = db.prepare(`UPDATE pa_compras SET ${sets.join(', ')} WHERE id IN (${ph}) AND (activo IS NULL OR activo = 1)`);
+    // Los costos por lote de los servicios siguen a la campaña de su factura.
+    const propagarCostosSrv = db.prepare(`
+      UPDATE pa_costos_lote
+         SET campaña_anual_id      = (SELECT c.campaña_anual_id FROM pa_compras c
+                                        JOIN pa_compras_items ci ON ci.compra_id = c.id
+                                       WHERE ci.id = pa_costos_lote.referencia_id),
+             campaña_estacional_id = (SELECT c.campaña_estacional_id FROM pa_compras c
+                                        JOIN pa_compras_items ci ON ci.compra_id = c.id
+                                       WHERE ci.id = pa_costos_lote.referencia_id),
+             campaña_id            = COALESCE(
+                                       (SELECT c.campaña_anual_id FROM pa_compras c
+                                          JOIN pa_compras_items ci ON ci.compra_id = c.id
+                                         WHERE ci.id = pa_costos_lote.referencia_id),
+                                       (SELECT c.campaña_estacional_id FROM pa_compras c
+                                          JOIN pa_compras_items ci ON ci.compra_id = c.id
+                                         WHERE ci.id = pa_costos_lote.referencia_id),
+                                       pa_costos_lote.campaña_id)
+       WHERE origen = '${COSTO_ORIGEN_SERVICIO}'
+         AND referencia_id IN (SELECT id FROM pa_compras_items WHERE compra_id IN (${ph}))
+    `);
     const tx = db.transaction(() => {
       const info = stmt.run(...baseParams, ...ids);
+      propagarCostosSrv.run(...ids);
       _logCampañaBulk(db, req, { entidad: 'compra', cantidad: info.changes, campaña_anual_id, campaña_estacional_id, limpiar_estacional, ids });
       return info.changes;
     });
@@ -2312,6 +2423,8 @@ router.get('/costos', requireAuth, (req, res) => {
         s.tipo as sector_tipo,
         ca.nombre as campaña_nombre,
         cu.cultivo as cultivo_actual,
+        COALESCE(cu.en_desarrollo, 0) as en_desarrollo,
+        CASE WHEN COALESCE(cu.en_desarrollo,0) = 1 THEN 'inversion' ELSE 'produccion' END as destino,
         SUM(cl.monto) as costo_total,
         SUM(cl.monto) / NULLIF(l.hectareas, 0) as costo_por_ha,
         GROUP_CONCAT(DISTINCT cl.categoria) as categorias,
@@ -2349,9 +2462,15 @@ router.get('/costos', requireAuth, (req, res) => {
     // Lotes sin cultivo asignado se agrupan en "Sin cultivo asignado".
     // Para evitar duplicar hectáreas si un lote tiene varios costos, calculamos
     // las ha sumando solo una vez por lote (con DISTINCT en subquery).
+    //
+    // Y SE ABRE POR DESTINO. Un lote marcado "en desarrollo" no produce todavía:
+    // lo que se le gasta es INVERSIÓN, no costo de la campaña. Un mismo cultivo
+    // puede aparecer dos veces (damasco en producción y damasco en inversión) y
+    // eso es lo correcto: son dos plata distintas y no se suman entre sí.
     const porCultivo = db.prepare(`
       SELECT
         COALESCE(NULLIF(TRIM(cu.cultivo),''), '— Sin cultivo asignado —') AS cultivo,
+        CASE WHEN COALESCE(cu.en_desarrollo,0) = 1 THEN 'inversion' ELSE 'produccion' END AS destino,
         SUM(t.monto)        AS costo_total,
         SUM(t.hectareas)    AS hectareas_total,
         SUM(t.monto) / NULLIF(SUM(t.hectareas), 0) AS costo_por_ha,
@@ -2368,7 +2487,7 @@ router.get('/costos', requireAuth, (req, res) => {
         GROUP BY l.id
       ) t
       LEFT JOIN pa_cultivos_lote cu ON cu.lote_id = t.lote_id AND cu.campaña = ?
-      GROUP BY cultivo
+      GROUP BY cultivo, destino
       ORDER BY costo_total DESC
     `).all(...aggPrm, campañaNombre || '');
 
@@ -2380,6 +2499,7 @@ router.get('/costos', requireAuth, (req, res) => {
     // BY contra esa columna real en vez del alias de salida.
     const tipoGastoCase = `
       CASE
+        WHEN cl.origen = 'compra_servicio' THEN 'Servicios'
         WHEN cl.categoria IN ('fertilizante','agroquimico','semilla') THEN 'Insumos'
         WHEN cl.categoria IN ('labor_propia','labor_contratada','cosecha') THEN 'Mano de obra'
         WHEN cl.categoria = 'otros' AND cl.descripcion LIKE 'Combustible%' THEN 'Combustible'
@@ -2408,12 +2528,23 @@ router.get('/costos', requireAuth, (req, res) => {
     const cultivosSet = new Set(
       resumen.map(l => (l.cultivo_actual || '').trim()).filter(Boolean)
     );
+    // El total sigue siendo el total —no se toca—, pero abierto: cuánto de eso
+    // es costo de lo que produce y cuánto es inversión en lo que todavía no.
+    const enInversion = resumen.filter(l => l.destino === 'inversion');
+    const enProduccion = resumen.filter(l => l.destino !== 'inversion');
+    const suma = (arr, k) => arr.reduce((a, l) => a + (l[k] || 0), 0);
     const totales = {
       costo_total: costoTotalGlobal,
       hectareas_totales: hectareasTotales,
       costo_por_ha: hectareasTotales > 0 ? costoTotalGlobal / hectareasTotales : 0,
       lotes_count: resumen.length,
-      cultivos_count: cultivosSet.size
+      cultivos_count: cultivosSet.size,
+      costo_produccion: suma(enProduccion, 'costo_total'),
+      costo_inversion: suma(enInversion, 'costo_total'),
+      hectareas_produccion: suma(enProduccion, 'hectareas'),
+      hectareas_inversion: suma(enInversion, 'hectareas'),
+      lotes_produccion: enProduccion.length,
+      lotes_inversion: enInversion.length
     };
 
     // Lista de sectores para poblar el filtro (independiente de los filtros).
@@ -5576,6 +5707,8 @@ router.delete('/compras/:id', requireAuth, (req, res) => {
       }
       db.prepare("DELETE FROM pa_movimientos_stock WHERE motivo = 'compra' AND referencia_id = ?")
         .run(req.params.id);
+      // Si la factura era de servicios imputados a un lote, ese costo se va con ella
+      borrarCostosServicio(db, req.params.id);
       db.prepare("UPDATE pa_compras SET activo = 0 WHERE id = ?").run(req.params.id);
       // Anular el asiento contable asociado a esta compra (si existe)
       const asiento = db.prepare("SELECT id FROM pa_asientos WHERE ref_compra_id = ? AND anulado = 0").get(req.params.id);
@@ -5607,6 +5740,8 @@ router.post('/compras/:id/reactivar', requireAuth, (req, res) => {
           .run(cur.fecha, it.insumo_id, 'entrada', it.cantidad, 'compra', req.params.id);
       }
       db.prepare("UPDATE pa_compras SET activo = 1 WHERE id = ?").run(req.params.id);
+      // Y vuelve el costo por lote de los servicios que tenían lote asignado
+      recrearCostosServicio(db, req.params.id);
     });
     reactivar();
     res.json({ ok: true, msg: 'Compra reactivada y stock sumado' });
@@ -5641,13 +5776,17 @@ router.post('/compras/:id/hard-delete', requireAuth, (req, res) => {
       // Movimientos de stock de la compra (NO se revierte el stock a propósito)
       const movsBorrados = db.prepare("DELETE FROM pa_movimientos_stock WHERE motivo = 'compra' AND referencia_id = ?").run(compraId).changes;
 
+      // Costos por lote de los servicios — ANTES de borrar los ítems, que son
+      // los que dicen cuáles son (el DELETE cruza contra pa_compras_items).
+      const costosBorrados = borrarCostosServicio(db, compraId);
+
       // Ítems de la compra
       const itemsBorrados = db.prepare("DELETE FROM pa_compras_items WHERE compra_id = ?").run(compraId).changes;
 
       // La compra
       db.prepare("DELETE FROM pa_compras WHERE id = ?").run(compraId);
 
-      return { itemsBorrados, movsBorrados, asientosBorrados, asientoLineasBorradas };
+      return { itemsBorrados, movsBorrados, asientosBorrados, asientoLineasBorradas, costosBorrados };
     });
 
     const detalle = tx();
@@ -5655,7 +5794,8 @@ router.post('/compras/:id/hard-delete', requireAuth, (req, res) => {
       `[PA][HARD-DELETE] usuario=${req.user.id} (${req.user.nombre || req.user.email || '?'}, rol=${req.user.rol}) ` +
       `borró DEFINITIVO compra #${compraId} (nro_factura=${compra.nro_factura || '—'}, total=${compra.total}) | ` +
       `items=${detalle.itemsBorrados} movs_stock=${detalle.movsBorrados} ` +
-      `asientos=${detalle.asientosBorrados} asiento_lineas=${detalle.asientoLineasBorradas}`
+      `asientos=${detalle.asientosBorrados} asiento_lineas=${detalle.asientoLineasBorradas} ` +
+      `costos_lote=${detalle.costosBorrados}`
     );
     res.json({ ok: true, eliminada: detalle });
   } catch(e) {
