@@ -7037,9 +7037,15 @@ function sgOpenProdModal(id){
   SG._prodEsp = []; SG._prodVar = [];
   var famOpts = '<option value="">— Elegir —</option>' + (SG.cacheFam||[]).map(function(f){ return '<option value="'+f.id+'">'+esc(sgPad2(f.codigo)+' · '+f.nombre)+'</option>'; }).join('');
   var ff = function(label, inner){ return '<div class="fl ff"><label>'+label+'</label>'+inner+'</div>'; };
-  var withAdd = function(sel, fn, title, delFn, delTitle){
+  // RENOMBRAR TAMBIÉN. De especie y variedad sólo se podía crear y borrar: un nombre
+  // mal escrito obligaba a crear el nuevo, mover producto por producto y borrar el
+  // viejo. `edFn` es opcional para que Familia siga como estaba --se renombra desde
+  // su propia solapa, que además muestra en cuántos lugares se usa--.
+  var withAdd = function(sel, fn, title, delFn, delTitle, edFn, edTitle, extraFn, extraTxt, extraTitle){
     return '<div style="display:flex;gap:6px">'+sel
       + '<button class="btn bo bs" type="button" onclick="'+fn+'" title="'+title+'">＋</button>'
+      + (edFn ? '<button class="btn bo bs" type="button" onclick="'+edFn+'" title="'+edTitle+'">✏️</button>' : '')
+      + (extraFn ? '<button class="btn bo bs" type="button" onclick="'+extraFn+'" title="'+extraTitle+'">'+extraTxt+'</button>' : '')
       + '<button class="btn bd bs" type="button" onclick="'+delFn+'" title="'+delTitle+'">🗑️</button></div>';
   };
   eid('sg-modal-body').innerHTML =
@@ -7047,9 +7053,14 @@ function sgOpenProdModal(id){
     + ff('Familia <span style="color:var(--err)">*</span>',
          withAdd('<select id="sg-p-familia" onchange="sgProdFamChange();sgProdFamAlicProponer()" style="flex:1">'+famOpts+'</select>', 'sgProdAddFam()', 'Nueva familia', 'sgProdDelFam()', 'Borrar familia seleccionada'))
     + ff('Especie <span style="color:var(--err)">*</span>',
-         withAdd('<select id="sg-p-especie" onchange="sgProdEspChange()" style="flex:1"><option value="">— Elegí familia primero —</option></select>', 'sgProdAddEsp()', 'Nueva especie', 'sgProdDelEsp()', 'Borrar especie seleccionada'))
+         withAdd('<select id="sg-p-especie" onchange="sgProdEspChange()" style="flex:1"><option value="">— Elegí familia primero —</option></select>',
+                 'sgProdAddEsp()', 'Nueva especie', 'sgProdDelEsp()', 'Borrar especie seleccionada',
+                 'sgProdEditEsp()', 'Renombrar esta especie (cambia el nombre de todos sus productos)',
+                 'sgProdMoverEsp()', '⇄', 'Mover esta especie a otra familia'))
     + ff('Variedad <span style="color:var(--mut);font-weight:400">(opcional)</span>',
-         withAdd('<select id="sg-p-variedad" onchange="sgProdPreview()" style="flex:1"><option value="">— Sin variedad (00) —</option></select>', 'sgProdAddVar()', 'Nueva variedad', 'sgProdDelVar()', 'Borrar variedad seleccionada'))
+         withAdd('<select id="sg-p-variedad" onchange="sgProdPreview()" style="flex:1"><option value="">— Sin variedad (00) —</option></select>',
+                 'sgProdAddVar()', 'Nueva variedad', 'sgProdDelVar()', 'Borrar variedad seleccionada',
+                 'sgProdEditVar()', 'Renombrar esta variedad'))
     // ══ LA ALÍCUOTA, OBLIGATORIA ═══════════════════════════════
     // Pablo, 25/8/2026: "la alícuota debe cargarse en el producto como dato
     // obligatorio, de esta manera aseguramos que se contabilice".
@@ -7163,6 +7174,72 @@ function sgProdAddVar(){
   });
 }
 // ── Borrado de niveles de taxonomía (el back rechaza si hay productos/hijos usándolo) ──
+// ══ RENOMBRAR Y MOVER ═════════════════════════════════════
+//
+// El nombre del producto ES el de su especie, y la variedad la de su variedad: por
+// eso el backend propaga el cambio a los productos que cuelgan. Acá se avisa, para
+// que nadie renombre "Tomate" pensando que toca una fila sola.
+function sgProdEditEsp(){
+  var id = eid('sg-p-especie').value;
+  if (!id) return toast('Eleg\u00ed una especie para renombrar', 'er');
+  var e = (SG._prodEsp || []).filter(function(x){ return String(x.id) === String(id); })[0];
+  var nombre = (prompt('Nuevo nombre de la especie:', (e && e.nombre) || '') || '').trim();
+  if (!nombre || nombre === ((e && e.nombre) || '')) return;
+  api('/api/sg/especies/' + id, 'PATCH', { nombre: nombre }).then(function(r){
+    if (!r || !r.ok) return toast((r && r.error) || 'Error', 'er');
+    toast('Especie renombrada \u2014 tambi\u00e9n en sus productos', 'ok');
+    sgProdLoadEsp(eid('sg-p-familia').value, function(){
+      eid('sg-p-especie').value = id; sgProdEspChange();
+    });
+    sgLoadCaches();
+  });
+}
+// MOVER UNA ESPECIE DE FAMILIA. Es lo que la pantalla de Familias promete cuando
+// dice "primero movelos y después dala de baja" -- y hasta ahora no se podía:
+// había que crear la especie nueva y pasar los productos de a uno.
+//
+// El código del producto es FF.EE.VV, así que al cambiar de familia cambia; el
+// backend lo rehace. Se avisa antes, porque un código que cambia se nota.
+function sgProdMoverEsp(){
+  var id = eid('sg-p-especie').value;
+  if (!id) return toast('Eleg\u00ed una especie para mover', 'er');
+  var e = (SG._prodEsp || []).filter(function(x){ return String(x.id) === String(id); })[0];
+  var actual = eid('sg-p-familia').value;
+  var opciones = (SG.cacheFam || []).filter(function(f){ return String(f.id) !== String(actual); });
+  if (!opciones.length) return toast('No hay otra familia a la que moverla', 'er');
+  var txt = 'Mover la especie "' + ((e && e.nombre) || '') + '" a qu\u00e9 familia?\n\n'
+    + opciones.map(function(f){ return sgPad2(f.codigo) + ' \u00b7 ' + f.nombre; }).join('\n')
+    + '\n\nEscrib\u00ed el c\u00f3digo de dos d\u00edgitos:';
+  var cod = (prompt(txt) || '').trim();
+  if (!cod) return;
+  var dest = opciones.filter(function(f){ return sgPad2(f.codigo) === sgPad2(cod); })[0];
+  if (!dest) return toast('No hay ninguna familia con el c\u00f3digo ' + cod, 'er');
+  if (!confirm('Se mueve la especie y TODOS sus productos a "' + dest.nombre + '".\n'
+    + 'El c\u00f3digo de esos productos cambia, porque empieza con el de la familia.')) return;
+  api('/api/sg/especies/' + id, 'PATCH', { familia_id: Number(dest.id) }).then(function(r){
+    if (!r || !r.ok) return toast((r && r.error) || 'Error', 'er');
+    toast('Especie movida a ' + dest.nombre, 'ok');
+    eid('sg-p-familia').value = dest.id;
+    sgProdLoadEsp(dest.id, function(){ eid('sg-p-especie').value = id; sgProdEspChange(); });
+    sgLoadCaches();
+  });
+}
+function sgProdEditVar(){
+  var id = eid('sg-p-variedad').value;
+  if (!id) return toast('Eleg\u00ed una variedad para renombrar', 'er');
+  var v = (SG._prodVar || []).filter(function(x){ return String(x.id) === String(id); })[0];
+  var nombre = (prompt('Nuevo nombre de la variedad:', (v && v.nombre) || '') || '').trim();
+  if (!nombre || nombre === ((v && v.nombre) || '')) return;
+  api('/api/sg/variedades/' + id, 'PATCH', { nombre: nombre }).then(function(r){
+    if (!r || !r.ok) return toast((r && r.error) || 'Error', 'er');
+    toast('Variedad renombrada \u2014 tambi\u00e9n en sus productos', 'ok');
+    sgProdLoadVar(eid('sg-p-especie').value, function(){
+      eid('sg-p-variedad').value = id; sgProdPreview();
+    });
+    sgLoadCaches();
+  });
+}
+
 function sgProdDelVar(){
   var id = eid('sg-p-variedad').value;
   if(!id) return toast('Elegí una variedad para borrar','er');
