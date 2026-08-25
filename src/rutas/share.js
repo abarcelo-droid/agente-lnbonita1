@@ -27,7 +27,7 @@ import multer from 'multer';
 import * as XLSX from 'xlsx';
 import db from '../servicios/db_share.js';
 import { importar, analizar, recalcularKg, analizarOferta, importarOferta } from '../servicios/share_import.js';
-import { norm, FAMILIAS_VALIDAS, parseOfertaTexto, detectarColumnasOferta, parseBultos } from '../servicios/share_parser.js';
+import { norm, FAMILIAS_VALIDAS, parseOfertaTexto, parseOfertaExcel, parseBultos } from '../servicios/share_parser.js';
 import { nivelEnModulo } from '../servicios/permisos.js';
 
 const router = express.Router();
@@ -808,8 +808,12 @@ const OF_RESULTADO = {
 function ofertaVsCompra(desde, hasta) {
   const { arts, provs } = padrones();
 
+  // El precio con el que lo ofrecimos la ULTIMA vez. En SQLite, poner MAX(fecha) en un GROUP
+  // BY hace que las columnas sueltas salgan de ESA fila, asi que precio y ean son los del dia
+  // mas reciente y no un promedio, que no querria decir nada.
   const of = db.prepare(`
-    SELECT articulo_id AS aid, SUM(cantidad) AS ofrecido, COUNT(DISTINCT fecha) AS dias_ofrecido
+    SELECT articulo_id AS aid, SUM(cantidad) AS ofrecido, COUNT(DISTINCT fecha) AS dias_ofrecido,
+           MAX(fecha) AS ultima_oferta, precio, ean
       FROM share_oferta_v WHERE fecha BETWEEN ? AND ? GROUP BY articulo_id`).all(desde, hasta);
 
   const co = db.prepare(`
@@ -840,13 +844,16 @@ function ofertaVsCompra(desde, hasta) {
     if (!x) {
       const a = arts.get(aid) || {};
       x = { id: aid, desc: a.desc_canonica || '(sin nombre)', familia: a.familia || 'OTRO',
-            unidad: a.unidad, la_vendemos: a.la_vendemos ? 1 : 0,
-            ofrecido: 0, dias_ofrecido: 0, total: 0, nuestros: 0, dias_comprado: 0 };
+            unidad: a.unidad, la_vendemos: a.la_vendemos ? 1 : 0, ean: a.ean || null,
+            ofrecido: 0, dias_ofrecido: 0, total: 0, nuestros: 0, dias_comprado: 0,
+            precio: null, ultima_oferta: null };
       m.set(aid, x);
     }
     return x;
   };
-  for (const r of of) { const x = traer(r.aid); x.ofrecido = r.ofrecido; x.dias_ofrecido = r.dias_ofrecido; }
+  for (const r of of) { const x = traer(r.aid); x.ofrecido = r.ofrecido; x.dias_ofrecido = r.dias_ofrecido;
+    x.precio = r.precio == null ? null : Number(r.precio); x.ultima_oferta = r.ultima_oferta;
+    if (!x.ean && r.ean) x.ean = r.ean; }
   for (const r of co) { const x = traer(r.aid); x.total = r.total; x.nuestros = r.nuestros; x.dias_comprado = r.dias_comprado; }
 
   const filas = [...m.values()].map(x => {
@@ -929,7 +936,7 @@ router.get('/ofertas', requireAuth, (req, res) => {
 router.post('/ofertas', requireAuth, subida.single('archivo'), (req, res) => {
   try {
     if (!puedeOperar(req.user)) return res.status(403).json({ ok: false, error: 'Tu acceso a SHARE es de solo lectura.' });
-    const fecha = String(req.body?.fecha || '').slice(0, 10);
+    let fecha = String(req.body?.fecha || '').slice(0, 10);
     let filas = [], origen = 'texto', nombre = null;
 
     if (req.file) {
@@ -937,26 +944,23 @@ router.post('/ofertas', requireAuth, subida.single('archivo'), (req, res) => {
       const wb = XLSX.read(req.file.buffer, { type: 'buffer', cellDates: true });
       const ws = wb.Sheets[wb.SheetNames[0]];
       if (!ws) return res.status(400).json({ ok: false, error: 'El archivo no tiene ninguna hoja.' });
-      const aoa = XLSX.utils.sheet_to_json(ws, { header: 1, raw: true, defval: null, blankrows: false });
+      // blankrows:true a proposito: asi el indice de cada fila es EL NUMERO DE FILA DEL EXCEL.
+      // Con las vacias descartadas, un aviso de "linea 7" manda a mirar otra fila.
+      const aoa = XLSX.utils.sheet_to_json(ws, { header: 1, raw: true, defval: null, blankrows: true });
       if (!aoa.length) return res.status(400).json({ ok: false, error: 'La hoja está vacía.' });
-      const cols = detectarColumnasOferta(aoa[0]);
-      let cArt = cols.articulo, cCant = cols.cantidad, desde0 = cols.hayTitulos ? 1 : 0;
-      if (!cols.hayTitulos) {
-        // Sin títulos reconocibles: la primera columna con texto y la primera con números.
-        // Es como está armada cualquier lista de disponibles, y adivinar eso es mejor que
-        // exigir un formato que nadie tiene.
-        const fila = aoa.find(r => r && r.some(v => v != null)) || [];
-        cArt = fila.findIndex(v => typeof v === 'string' && v.trim() && parseBultos(v) == null);
-        cCant = fila.findIndex((v, i) => i !== cArt && parseBultos(v) != null);
-        if (cArt < 0 || cCant < 0) return res.status(400).json({ ok: false,
-          error: 'No encuentro una columna de artículo y otra de cantidad. Poné títulos "Artículo" y "Cantidad", o pegá la lista como texto.' });
-      }
-      for (let i = desde0; i < aoa.length; i++) {
-        const r = aoa[i] || [];
-        const art = r[cArt], cant = parseBultos(r[cCant]);
-        if (!art || String(art).trim() === '' || cant == null || cant <= 0) continue;
-        filas.push({ articulo_raw: String(art).trim(), cantidad: cant });
-      }
+      // La fecha de referencia para completar el año que el archivo no trae: la última con
+      // planning cargado, que es contra la que se va a comparar.
+      const ex = parseOfertaExcel(aoa, rangoBase().max);
+      if (ex.error) return res.status(400).json({ ok: false, error: ex.error });
+      if (!ex.filas.length) return res.status(400).json({ ok: false, error: 'No hay ninguna fila con artículo y cantidad.', rechazadas: ex.rechazadas });
+      filas = ex.filas;
+      req._rechazadas = ex.rechazadas;
+      req._delArchivo = { fecha: ex.fecha, proveedor: ex.proveedor, fila_titulos: ex.fila_titulos };
+      // LA FECHA SALE DEL ARCHIVO si el operador no eligió una. El archivo la trae en el
+      // encabezado ("FECHA DE ENTREGA: MARTES 25/8") y es más confiable que acordarse de
+      // ponerla a mano — pero la pantalla la muestra para confirmarla, porque el año no viene
+      // y se deduce.
+      if (!fecha && ex.fecha) fecha = ex.fecha;
     } else {
       const t = parseOfertaTexto(req.body?.texto || '');
       filas = t.filas;
@@ -970,7 +974,8 @@ router.post('/ofertas', requireAuth, subida.single('archivo'), (req, res) => {
 
     if (String(req.query.confirmar || '') !== '1') {
       const a = analizarOferta(db, { filas, fecha });
-      return res.json({ ok: true, preview: true, data: { ...a, rechazadas: req._rechazadas || [] } });
+      return res.json({ ok: true, preview: true,
+        data: { ...a, rechazadas: req._rechazadas || [], del_archivo: req._delArchivo || null } });
     }
     const r = importarOferta(db, { filas, fecha, origen, nombre,
       notas: req.body?.notas || null, usuario: req.user?.nombre || null, usuarioId: req.user?.id || null });

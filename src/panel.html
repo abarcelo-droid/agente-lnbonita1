@@ -4575,21 +4575,26 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
       <div style="display:inline-flex;gap:2px;background:var(--bg);border:1px solid var(--bor);border-radius:8px;padding:3px;margin-bottom:10px;flex-wrap:wrap" id="sh-of-filtros"></div>
       <div class="ab-table-wrap"><table class="pa-tbl">
         <thead><tr>
-          <th class="sh-nom" style="width:25%">Artículo</th><th style="width:9%">Familia</th>
-          <th style="text-align:right;width:10%">Ofrecimos</th><th style="text-align:right;width:11%">Compró Carrefour</th>
-          <th style="text-align:right;width:10%">Nos compró</th><th style="text-align:right;width:10%">Sin colocar</th>
-          <th style="width:11%">Resultado</th><th class="sh-nom" style="width:14%">Se lo llevó</th></tr></thead>
-        <tbody id="sh-tb-of"><tr><td colspan="8" class="emp">Cargando…</td></tr></tbody></table></div>
+          <th class="sh-nom" style="width:23%">Artículo</th><th style="width:8%">Familia</th>
+          <th style="text-align:right;width:10%">Ofrecimos</th><th style="text-align:right;width:8%">Precio</th>
+          <th style="text-align:right;width:10%">Compró Carrefour</th>
+          <th style="text-align:right;width:9%">Nos compró</th><th style="text-align:right;width:9%">Sin colocar</th>
+          <th style="width:10%">Resultado</th><th class="sh-nom" style="width:13%">Se lo llevó</th></tr></thead>
+        <tbody id="sh-tb-of"><tr><td colspan="9" class="emp">Cargando…</td></tr></tbody></table></div>
       <div class="sh-aviso" id="sh-of-nota"></div>
     </div>
 
     <div class="sh-osub" id="sh-osub-cargar">
       <div class="sh-f">
-        <div><label>Fecha de la oferta</label><input type="date" id="sh-of-fecha"></div>
+        <div><label>Fecha de la oferta <span style="color:var(--mut)">(la saca del archivo)</span></label><input type="date" id="sh-of-fecha"></div>
         <div><label>&nbsp;</label><button class="btn bo bs" onclick="document.getElementById('sh-of-file').click()">📄 Subir un Excel</button>
           <input type="file" id="sh-of-file" accept=".xlsx,.xls" style="display:none" onchange="shOfArchivo(this)"></div>
       </div>
-      <div style="font-size:12px;font-weight:700;margin:6px 0 4px">Pegá la lista de disponibles</div>
+      <div class="sh-aviso" style="margin:0 0 10px">El Excel de la oferta se lee tal cual sale: el encabezado con
+        <b>FECHA DE ENTREGA</b> y la tabla con EAN, ARTICULO, CANTIDAD, PRECIO, VARIEDAD y ZONA. La fecha la toma del
+        archivo —si no elegís una— y el <b>EAN</b> pasa a ser la llave: aunque el artículo se escriba distinto otro día,
+        cruza igual.</div>
+      <div style="font-size:12px;font-weight:700;margin:6px 0 4px">O pegá la lista de disponibles</div>
       <div class="sh-aviso" style="margin:0 0 6px">Un artículo por línea, con la <b>cantidad al final</b>. Sirve tal como sale del
         WhatsApp: separada por tabulación, coma, punto y coma o espacios.<br>
         <code>MANZANA X KG&nbsp;&nbsp;&nbsp;500</code> · <code>TOMATE REDONDO X KG, 300</code></div>
@@ -29589,13 +29594,13 @@ function shOfVista(v){
 
 function shOferta(){
   eid('sh-filtro-extra').innerHTML = '';
-  eid('sh-tb-of').innerHTML = '<tr><td colspan="8" class="emp">Calculando…</td></tr>';
+  eid('sh-tb-of').innerHTML = '<tr><td colspan="9" class="emp">Calculando…</td></tr>';
   var q = [];
   if (SH.ofRes) q.push('resultado=' + SH.ofRes);
   api('/api/share/oferta?' + shParams(q.join('&'))).then(function(r){
-    if (!r || !r.ok) { eid('sh-tb-of').innerHTML = '<tr><td colspan="8" class="emp">' + escH((r && r.error) || 'Error') + '</td></tr>'; return; }
+    if (!r || !r.ok) { eid('sh-tb-of').innerHTML = '<tr><td colspan="9" class="emp">' + escH((r && r.error) || 'Error') + '</td></tr>'; return; }
     var d = r.data;
-    if (d.sin_datos) { eid('sh-tb-of').innerHTML = '<tr><td colspan="8" class="emp">Todavía no hay planning cargado.</td></tr>'; return; }
+    if (d.sin_datos) { eid('sh-tb-of').innerHTML = '<tr><td colspan="9" class="emp">Todavía no hay planning cargado.</td></tr>'; return; }
     var k = d.kpi || {};
     var kpi = function(t, v, s, col){ return '<div class="sh-kpi"><div style="font-size:11px;color:var(--mut)">' + t + '</div>' +
       '<b' + (col ? ' style="color:' + col + '"' : '') + '>' + v + '</b><div class="sh-sub">' + (s || '') + '</div></div>'; };
@@ -29617,17 +29622,23 @@ function shOferta(){
       }).join('');
 
     eid('sh-tb-of').innerHTML = d.filas.length ? d.filas.map(function(f){
-      return '<tr><td class="sh-nom"><a href="#" onclick="shVerArticulo(' + f.id + ');return false">' + escH(f.desc) + '</a></td>' +
+      return '<tr><td class="sh-nom"><a href="#" onclick="shVerArticulo(' + f.id + ');return false">' + escH(f.desc) + '</a>' +
+        (f.ean ? '<div class="sh-aviso" style="margin:1px 0 0">EAN ' + escH(f.ean) + '</div>' : '') + '</td>' +
         '<td>' + shFam(f.familia) + '</td>' +
         '<td style="text-align:right">' + (f.ofrecido ? nr(f.ofrecido) : '<span class="sh-pod-x">—</span>') + '</td>' +
+        // A qué precio lo habíamos ofrecido. Es la primera pregunta cuando un artículo se lo
+        // terminó comprando a otro, y el único número en pesos de todo el módulo: es NUESTRO,
+        // no sale del planning.
+        '<td style="text-align:right">' + (f.precio ? '$' + nr(f.precio) : '<span class="sh-pod-x">—</span>') + '</td>' +
         '<td style="text-align:right">' + nr(f.total) + '</td>' +
         '<td style="text-align:right">' + (f.nuestros ? nr(f.nuestros) : '<span class="sh-pod-x">—</span>') + '</td>' +
         '<td style="text-align:right">' + (f.sin_colocar ? '<b>' + nr(f.sin_colocar) + '</b>' : '<span class="sh-pod-x">—</span>') + '</td>' +
         '<td>' + shOfChapa(f.resultado, f.resultado_label) + '</td>' +
         '<td class="sh-nom">' + (f.se_lo_llevo ? escH(f.se_lo_llevo) + ' <span class="sh-pod-x">' + nr(f.se_lo_llevo_bultos) + '</span>' : '<span class="sh-pod-x">—</span>') + '</td></tr>';
-    }).join('') : '<tr><td colspan="8" class="emp">Nada con ese filtro. Si no cargaste ninguna oferta, empezá por la otra solapa.</td></tr>';
+    }).join('') : '<tr><td colspan="9" class="emp">Nada con ese filtro. Si no cargaste ninguna oferta, empezá por la otra solapa.</td></tr>';
     eid('sh-of-nota').innerHTML = d.filas.length + ' de ' + d.total_filas + ' artículos. ' +
-      '«Sin colocar» es lo que ofrecimos y no nos compraron. La conversión se calcula sobre los bultos, no promediando porcentajes.';
+      '«Sin colocar» es lo que ofrecimos y no nos compraron. La conversión se calcula sobre los bultos, no promediando porcentajes. ' +
+      'El precio es el de la última oferta y es <b>nuestro</b>: el planning de Carrefour no trae precios.';
   });
 }
 function shOfFiltro(r){ SH.ofRes = r || null; shOferta(); }
@@ -29671,7 +29682,15 @@ function shOfPrevio(){
     }
     var d = r.data;
     var kpi = function(t, v){ return '<div class="sh-kpi"><div style="font-size:11px;color:var(--mut)">' + t + '</div><b>' + v + '</b></div>'; };
-    var h = '<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:10px">' +
+    var h = '';
+    if (d.del_archivo && (d.del_archivo.fecha || d.del_archivo.proveedor)) {
+      h += '<div class="sh-aviso" style="margin:0 0 8px">Leído del encabezado del archivo: ' +
+        (d.del_archivo.proveedor ? '<b>' + escH(d.del_archivo.proveedor) + '</b> · ' : '') +
+        (d.del_archivo.fecha ? 'entrega <b>' + escH(d.del_archivo.fecha) + '</b>' : 'sin fecha') +
+        ' · títulos en la fila ' + d.del_archivo.fila_titulos +
+        '<br><b>Mirá que la fecha sea la correcta</b>: el archivo dice el día y el mes, el año lo deduce el sistema.</div>';
+    }
+    h += '<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:10px">' +
       kpi('Fecha', escH(d.fecha)) + kpi('Artículos', d.filas) + kpi('Bultos', nr(d.bultos_total)) +
       (d.nuevos ? kpi('Nuevos en el padrón', d.nuevos) : '') + '</div>';
     if (d.reemplaza) h += '<div style="padding:9px 12px;border-radius:8px;background:#fff8e1;color:#8a6d00;font-size:12.5px;margin-bottom:8px">' +
@@ -29681,14 +29700,24 @@ function shOfPrevio(){
     if (d.rechazadas && d.rechazadas.length) h += '<div style="padding:9px 12px;border-radius:8px;background:#fff8e1;color:#8a6d00;font-size:12.5px;margin-bottom:8px">' +
       '⚠ ' + d.rechazadas.length + ' línea(s) que no pude leer y quedan afuera:<br>' +
       d.rechazadas.slice(0, 6).map(function(x){ return 'línea ' + x.linea + ': ' + escH(x.texto); }).join('<br>') + '</div>';
+    // La columna que importa es "cruza con": el nombre de la oferta y el del planning casi
+    // nunca son iguales, así que hay que poder ver contra QUÉ artículo quedó cruzada cada
+    // línea antes de confirmar. Si cruzó mal, se corrige después fusionando desde Mapeos.
     h += '<div class="ab-table-wrap"><table class="pa-tbl"><thead><tr>' +
-      '<th class="sh-nom" style="width:52%">Artículo</th><th style="text-align:right;width:18%">Bultos</th>' +
-      '<th style="width:30%">En el padrón</th></tr></thead><tbody>' +
+      '<th style="width:13%">EAN</th><th class="sh-nom" style="width:31%">Como lo escribimos</th>' +
+      '<th class="sh-nom" style="width:29%">Cruza con (el nombre de Carrefour)</th>' +
+      '<th style="text-align:right;width:11%">Bultos</th><th style="text-align:right;width:9%">Precio</th>' +
+      '<th style="width:7%"></th></tr></thead><tbody>' +
       d.items.map(function(it){
-        return '<tr><td class="sh-nom">' + escH(it.desc_canonica) +
-          (it.articulo_raw !== it.desc_canonica ? '<div class="sh-aviso" style="margin:1px 0 0">tal cual lo escribiste: ' + escH(it.articulo_raw) + '</div>' : '') + '</td>' +
+        var comoCruza = it.nuevo
+          ? '<span class="sh-chip" style="background:#fff4d6;color:#7a5c00">nuevo en el padrón</span>'
+          : escH(it.cruza_con || it.desc_canonica);
+        return '<tr><td style="font-size:11px;color:var(--mut)">' + escH(it.ean || '—') + '</td>' +
+          '<td class="sh-nom">' + escH(it.articulo_raw) + '</td>' +
+          '<td class="sh-nom">' + comoCruza + '</td>' +
           '<td style="text-align:right">' + nr(it.cantidad) + '</td>' +
-          '<td>' + (it.nuevo ? '<span class="sh-chip" style="background:#fff4d6;color:#7a5c00">nuevo</span>' : '<span class="sh-chip sh-ch-comp">ya estaba</span>') + '</td></tr>';
+          '<td style="text-align:right">' + (it.precio ? '$' + nr(it.precio) : '<span class="sh-pod-x">—</span>') + '</td>' +
+          '<td style="text-align:center">' + (it.via === 'ean' ? '<span class="sh-chip sh-ch-comp" title="cruzó por el código EAN">EAN</span>' : '') + '</td></tr>';
       }).join('') + '</tbody></table></div>';
     h += '<div class="sh-aviso">Cargar la oferta marca estos artículos como <b>«la vendemos»</b>: ofrecerlos es la prueba de que los vendemos, y ese es el filtro de Oportunidades.</div>';
     h += '<div style="display:flex;justify-content:flex-end;margin-top:10px">' +

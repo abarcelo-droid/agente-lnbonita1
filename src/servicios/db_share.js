@@ -45,6 +45,11 @@ agregarCol('share_cargas', 'reemplazada_por', 'INTEGER');
 agregarCol('share_cargas', 'reemplazada_en', 'TEXT');
 agregarCol('share_articulos', 'pendiente_revision', 'INTEGER NOT NULL DEFAULT 0');
 agregarCol('share_proveedores', 'pendiente_revision', 'INTEGER NOT NULL DEFAULT 0');
+// El EAN y el resto de lo que trae el archivo de oferta. Las tablas de oferta ya existian sin
+// estas columnas, asi que van por ALTER.
+agregarCol('share_articulos', 'ean', 'TEXT');
+for (const c of [['ean', 'TEXT'], ['precio', 'REAL'], ['variedad', 'TEXT'], ['zona', 'TEXT'], ['observacion', 'TEXT']])
+  agregarCol('share_oferta_lineas', c[0], c[1]);
 
 // Las familias cambiaron (VERDURA y HONGO → HORTALIZA PESADA / LIVIANA): los artículos que
 // se cargaron antes se quedaron con la etiqueta vieja y hay que traerlos al vocabulario
