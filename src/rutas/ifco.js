@@ -4869,199 +4869,459 @@ router.post('/ocr/lookup-sellado', function(req, res) {
 
 // POST /consolidar/preview — recibe el .xlsx, parsea y matchea contra la DB en 3 categorías
 // Devuelve: { despachos, ingresos, r22 }, cada una con { a_marcar, ya_consolidados, no_encontrados }
+// ── EL CRUCE CONTRA EL ARCHIVO DE IFCO, EN UN SOLO LUGAR ──────────────────
+// Lo usan la vista previa de la pantalla y el informe en Excel. Si cada uno tuviera el suyo,
+// el informe que se manda a IFCO diría una cosa y la pantalla otra, y la discusión pasaría a
+// ser sobre cuál de los dos está bien.
+//
+// Devuelve TRES cosas que antes no existían y son justamente las que hacen falta para
+// sentarse con IFCO:
+//
+//   · sobran_sistema     movimientos que TENEMOS y el archivo de IFCO no trae. El cruce viejo
+//                        sólo recorría el archivo buscando en el sistema, así que este lado
+//                        no se veía nunca: el balance decía "faltan 21.313 cajones" y no
+//                        había una sola fila que lo explicara.
+//   · dif_cantidad       remitos que SÍ están de los dos lados pero por distinta cantidad.
+//                        Antes un despacho de 100 contra uno de 90 matcheaba igual y se
+//                        consolidaba —quedando bloqueado— sin que nadie viera la diferencia.
+//   · sin_numero         lo nuestro sin número de remito usable (vacío o de menos de 8
+//                        dígitos). No puede matchear NUNCA, así que iba a "no encontrado"
+//                        para siempre sin que se entendiera por qué.
+function _cruzarConIFCO(parsed) {
+  // ── Índices del sistema ───────────────────────────────────────────────
+  const sysDesp = db.prepare(`
+    SELECT id, n_remito_ifco, n_remito_sg, fecha_emision, fecha_sellado, fecha_enviado, fecha_presentado,
+           empresa, sucursal, cantidad_despachada, cantidad_recibida, cantidad_rechazada,
+           estado, origen, proveedor_origen_id
+    FROM ifco_remitos_super WHERE eliminado_en IS NULL
+  `).all();
+  const sysPerdidas = db.prepare(`
+    SELECT id, n_remito, fecha, cantidad, notas, consolidado_en
+    FROM ifco_movimientos WHERE eliminado_en IS NULL AND tipo = 'perdida'
+  `).all();
+  const sysIng = db.prepare(`
+    SELECT id, n_remito, fecha, cantidad, sucursal_ifco, modelo, consolidado_en
+    FROM ifco_movimientos WHERE eliminado_en IS NULL AND tipo = 'retiro'
+  `).all();
+  const sysR22 = db.prepare(`
+    SELECT r.id, r.n_remito_proveedor, r.fecha_recepcion, r.cantidad, r.proveedor_id, r.consolidado_en,
+           p.nombre AS proveedor_nombre
+    FROM ifco_recepciones_proveedor r
+    LEFT JOIN proveedores p ON p.id = r.proveedor_id
+    WHERE r.eliminado_en IS NULL AND r.es_r22 = 1
+  `).all();
+
+  const idxDesp = {}, idxPerd = {}, idxIng = {}, idxR22 = {};
+  const sinNumero = [];
+  const indexar = function(filas, idx, campoNum, tipo, campoFecha, campoCant, etiqueta) {
+    filas.forEach(function(r) {
+      const k = _normalizarNumeroRemito(r[campoNum]);
+      if (!k) {
+        sinNumero.push({ tipo: tipo, id: r.id, n_remito: r[campoNum] || '', fecha: r[campoFecha],
+                         cantidad: r[campoCant], detalle: etiqueta(r) });
+        return;
+      }
+      // Un mismo número puede estar cargado dos veces. El índice se queda con uno solo —así
+      // matchea el archivo— pero se anota el duplicado, porque es un error de carga que hay
+      // que ver: dos remitos con el mismo número significan cajones contados dos veces.
+      if (idx[k]) (idx[k]._duplicados = idx[k]._duplicados || []).push(r);
+      else idx[k] = r;
+    });
+  };
+  indexar(sysDesp, idxDesp, 'n_remito_ifco', 'despacho', 'fecha_emision', 'cantidad_despachada',
+          function(r){ return [r.empresa, r.sucursal].filter(Boolean).join(' · '); });
+  indexar(sysPerdidas, idxPerd, 'n_remito', 'perdida', 'fecha', 'cantidad',
+          function(r){ return r.notas || 'Pérdida'; });
+  indexar(sysIng, idxIng, 'n_remito', 'retiro', 'fecha', 'cantidad',
+          function(r){ return [r.sucursal_ifco, r.modelo].filter(Boolean).join(' · '); });
+  indexar(sysR22, idxR22, 'n_remito_proveedor', 'r22', 'fecha_recepcion', 'cantidad',
+          function(r){ return r.proveedor_nombre || 'R22'; });
+
+  // ── Todas las claves que trae el archivo ──────────────────────────────
+  // Para decidir si algo NUESTRO le falta a IFCO se mira contra el archivo ENTERO, no contra
+  // su categoría. El archivo clasifica por el texto del detalle ("Retiros de Cajas IFCO" o
+  // no), así que un retiro nuestro puede venir catalogado como R22; buscándolo sólo entre los
+  // ingresos aparecería como faltante cuando en realidad está.
+  const keysArchivo = new Set();
+  const filaArchivo = {};
+  ['despachos', 'ingresos', 'r22'].forEach(function(cat) {
+    (parsed[cat] || []).forEach(function(a) {
+      keysArchivo.add(a.n_remito_normalizado);
+      if (!filaArchivo[a.n_remito_normalizado]) filaArchivo[a.n_remito_normalizado] = Object.assign({ _cat: cat }, a);
+    });
+  });
+
+  // ── Categoría por categoría, mirando del archivo hacia el sistema ─────
+  const difCantidad = [];
+  const anotarDif = function(tipo, arch, sis, cantSis, ref) {
+    const cA = parseInt(arch.cantidad) || 0, cS = parseInt(cantSis) || 0;
+    if (cA === cS) return;
+    difCantidad.push({ tipo: tipo, n_remito_archivo: arch.n_remito_archivo, n_remito_sistema: ref,
+      fecha_archivo: arch.fecha, detalle: arch.detalle, cant_archivo: cA, cant_sistema: cS,
+      diferencia: cA - cS, consolidado: !!sis.consolidado_en });
+  };
+
+  const desp = { a_marcar: [], ya_consolidados: [], no_encontrados: [] };
+  parsed.despachos.forEach(function(arch) {
+    const sisDesp = idxDesp[arch.n_remito_normalizado];
+    if (sisDesp) {
+      anotarDif('despacho', arch, { consolidado_en: sisDesp.estado === 'presentado' ? sisDesp.fecha_presentado || 1 : null },
+        sisDesp.cantidad_despachada, sisDesp.n_remito_ifco);
+      if (sisDesp.estado === 'presentado') desp.ya_consolidados.push({ archivo: arch, sistema: sisDesp });
+      else desp.a_marcar.push({ archivo: arch, sistema: sisDesp });
+      return;
+    }
+    const sisPerd = idxPerd[arch.n_remito_normalizado];
+    if (sisPerd) {
+      anotarDif('pérdida', arch, sisPerd, sisPerd.cantidad, sisPerd.n_remito);
+      const conMarca = Object.assign({}, sisPerd, { _es_perdida: true });
+      if (sisPerd.consolidado_en) desp.ya_consolidados.push({ archivo: arch, sistema: conMarca });
+      else desp.a_marcar.push({ archivo: arch, sistema: conMarca });
+      return;
+    }
+    desp.no_encontrados.push({
+      n_remito_archivo: arch.n_remito_archivo, n_remito_sistema: arch.n_remito_sistema,
+      fecha: arch.fecha, detalle: arch.detalle, cantidad: arch.cantidad,
+      direccion: arch.direccion, es_devolucion: arch.es_devolucion,
+      cadena_sugerida: _matchCadenaIFCO(arch.detalle)
+    });
+  });
+
+  const ing = { a_marcar: [], ya_consolidados: [], no_encontrados: [] };
+  parsed.ingresos.forEach(function(arch) {
+    const sis = idxIng[arch.n_remito_normalizado];
+    if (!sis) {
+      ing.no_encontrados.push({
+        n_remito_archivo: arch.n_remito_archivo, n_remito_sistema: arch.n_remito_sistema,
+        fecha: arch.fecha, detalle: arch.detalle, cantidad: arch.cantidad,
+        direccion: arch.direccion, es_devolucion: arch.es_devolucion });
+      return;
+    }
+    anotarDif('retiro', arch, sis, sis.cantidad, sis.n_remito);
+    if (sis.consolidado_en) ing.ya_consolidados.push({ archivo: arch, sistema: sis });
+    else ing.a_marcar.push({ archivo: arch, sistema: sis });
+  });
+
+  const r22out = { a_marcar: [], ya_consolidados: [], no_encontrados: [] };
+  parsed.r22.forEach(function(arch) {
+    const sis = idxR22[arch.n_remito_normalizado];
+    if (!sis) {
+      r22out.no_encontrados.push({
+        n_remito_archivo: arch.n_remito_archivo, n_remito_sistema: arch.n_remito_sistema,
+        fecha: arch.fecha, detalle: arch.detalle, cantidad: arch.cantidad,
+        direccion: arch.direccion, es_devolucion: arch.es_devolucion });
+      return;
+    }
+    anotarDif('R22', arch, sis, sis.cantidad, sis.n_remito_proveedor);
+    if (sis.consolidado_en) r22out.ya_consolidados.push({ archivo: arch, sistema: sis });
+    else r22out.a_marcar.push({ archivo: arch, sistema: sis });
+  });
+
+  // ── El lado que faltaba: del sistema hacia el archivo ─────────────────
+  const periodo = (function() {
+    let min = null, max = null;
+    ['despachos', 'ingresos', 'r22'].forEach(function(cat) {
+      (parsed[cat] || []).forEach(function(a) {
+        if (!a.fecha) return;
+        if (!min || a.fecha < min) min = a.fecha;
+        if (!max || a.fecha > max) max = a.fecha;
+      });
+    });
+    return { desde: min, hasta: max };
+  })();
+  // Sólo se reclama lo que cae DENTRO del período del archivo. Sin esto, un despacho de hace
+  // dos años aparecería como "falta en IFCO" contra un archivo del mes pasado, y la lista
+  // sería impracticable.
+  const enPeriodo = function(f) {
+    if (!f) return false;
+    const d = String(f).slice(0, 10);
+    if (periodo.desde && d < periodo.desde) return false;
+    if (periodo.hasta && d > periodo.hasta) return false;
+    return true;
+  };
+  const sobran = [];
+  // yaConsolidado se pasa por parametro porque cada tabla lo marca distinto: el despacho por
+  // su estado (presentado), los movimientos y las recepciones por la columna consolidado_en.
+  const revisarSobrantes = function(filas, campoNum, campoFecha, campoCant, tipo, lado, etiqueta, yaConsolidado) {
+    filas.forEach(function(r) {
+      const k = _normalizarNumeroRemito(r[campoNum]);
+      if (!k || keysArchivo.has(k)) return;
+      if (!enPeriodo(r[campoFecha])) return;
+      sobran.push({ tipo: tipo, lado: lado, id: r.id, n_remito: r[campoNum],
+        fecha: r[campoFecha] ? String(r[campoFecha]).slice(0, 10) : null,
+        cantidad: parseInt(r[campoCant]) || 0, detalle: etiqueta(r),
+        estado: r.estado || null, consolidado: !!yaConsolidado(r) });
+    });
+  };
+  revisarSobrantes(sysDesp, 'n_remito_ifco', 'fecha_emision', 'cantidad_despachada', 'despacho', 'egreso',
+    function(r){ return [r.empresa, r.sucursal].filter(Boolean).join(' · '); },
+    function(r){ return r.estado === 'presentado'; });
+  revisarSobrantes(sysPerdidas, 'n_remito', 'fecha', 'cantidad', 'pérdida', 'egreso',
+    function(r){ return r.notas || 'Pérdida'; }, function(r){ return r.consolidado_en; });
+  revisarSobrantes(sysIng, 'n_remito', 'fecha', 'cantidad', 'retiro', 'ingreso',
+    function(r){ return [r.sucursal_ifco, r.modelo].filter(Boolean).join(' · '); }, function(r){ return r.consolidado_en; });
+  revisarSobrantes(sysR22, 'n_remito_proveedor', 'fecha_recepcion', 'cantidad', 'R22', 'ingreso',
+    function(r){ return r.proveedor_nombre || 'R22'; }, function(r){ return r.consolidado_en; });
+
+  // Duplicados de número dentro del sistema (los juntó indexar()).
+  const duplicados = [];
+  [[idxDesp, 'despacho', 'n_remito_ifco', 'fecha_emision', 'cantidad_despachada'],
+   [idxPerd, 'pérdida', 'n_remito', 'fecha', 'cantidad'],
+   [idxIng, 'retiro', 'n_remito', 'fecha', 'cantidad'],
+   [idxR22, 'R22', 'n_remito_proveedor', 'fecha_recepcion', 'cantidad']].forEach(function(x) {
+    const idx = x[0];
+    for (const k in idx) {
+      if (!idx[k]._duplicados) continue;
+      [idx[k]].concat(idx[k]._duplicados).forEach(function(r) {
+        duplicados.push({ tipo: x[1], clave: k, id: r.id, n_remito: r[x[2]],
+          fecha: r[x[3]] ? String(r[x[3]]).slice(0, 10) : null, cantidad: parseInt(r[x[4]]) || 0 });
+      });
+    }
+  });
+
+  // ── BALANCE ───────────────────────────────────────────────────────────
+  // Se suma de la TABLA, no del índice. El cálculo anterior sumaba recorriendo el índice de
+  // remitos, así que se comía los duplicados (un número repetido pisaba al otro) y dejaba
+  // afuera todo lo que no tiene número usable. El "total del sistema" que mostraba no era el
+  // total del sistema: era el de lo que se podía cruzar.
+  //
+  // Y se calcula DOS veces: sobre todo el histórico y sobre el período que cubre el archivo.
+  // La comparación honesta es la del período; la del histórico sólo sirve si el Excel es la
+  // historia completa. Antes se mostraba la del histórico contra el archivo del mes y la
+  // diferencia no significaba nada.
+  const totales = function(desde, hasta) {
+    const rango = desde && hasta;
+    const fDesp = rango ? ' AND date(fecha_emision) BETWEEN ? AND ?' : '';
+    const fMov  = rango ? ' AND date(fecha) BETWEEN ? AND ?' : '';
+    const fRec  = rango ? ' AND date(fecha_recepcion) BETWEEN ? AND ?' : '';
+    const p = rango ? [desde, hasta] : [];
+    const q = function(sql) { const row = rango ? db.prepare(sql).get(desde, hasta) : db.prepare(sql).get(); return (row && row.total) || 0; };
+    const despachos = q('SELECT COALESCE(SUM(cantidad_despachada),0) total FROM ifco_remitos_super WHERE eliminado_en IS NULL' + fDesp);
+    const perdidas  = q("SELECT COALESCE(SUM(cantidad),0) total FROM ifco_movimientos WHERE eliminado_en IS NULL AND tipo='perdida'" + fMov);
+    const retiros   = q("SELECT COALESCE(SUM(cantidad),0) total FROM ifco_movimientos WHERE eliminado_en IS NULL AND tipo='retiro'" + fMov);
+    const r22       = q('SELECT COALESCE(SUM(cantidad),0) total FROM ifco_recepciones_proveedor WHERE eliminado_en IS NULL AND es_r22=1' + fRec);
+    return { despachos: despachos, perdidas: perdidas, retiros: retiros, r22: r22,
+             egresos: despachos + perdidas, ingresos: retiros + r22 };
+  };
+  const sisTodo = totales(null, null);
+  const sisPer  = periodo.desde && periodo.hasta ? totales(periodo.desde, periodo.hasta) : sisTodo;
+
+  const arcIng = parsed.totalBrutoIngresos || 0;
+  const arcEgr = parsed.totalBrutoEgresos || 0;
+  const bal = function(archivo, sistema, desg) {
+    return { total_archivo: archivo, total_sistema: sistema, total_sistema_desg: desg,
+             diferencia: archivo - sistema, coincide: archivo === sistema };
+  };
+
+  return {
+    despachos: desp, ingresos: ing, r22: r22out,
+    // El balance que mira la pantalla es el del PERÍODO del archivo, que es el comparable.
+    balance_ingresos: bal(arcIng, sisPer.ingresos, { retiros: sisPer.retiros, r22: sisPer.r22 }),
+    balance_egresos:  bal(arcEgr, sisPer.egresos,  { despachos: sisPer.despachos, perdidas: sisPer.perdidas }),
+    balance_historico: {
+      ingresos: bal(arcIng, sisTodo.ingresos, { retiros: sisTodo.retiros, r22: sisTodo.r22 }),
+      egresos:  bal(arcEgr, sisTodo.egresos,  { despachos: sisTodo.despachos, perdidas: sisTodo.perdidas })
+    },
+    periodo: periodo,
+    sobran_sistema: sobran.sort(function(a, b){ return String(a.fecha).localeCompare(String(b.fecha)); }),
+    dif_cantidad: difCantidad,
+    sin_numero: sinNumero,
+    duplicados: duplicados
+  };
+}
+
+// Lee el .xlsx que subió el navegador y borra el temporal pase lo que pase. Lo comparten la
+// vista previa y el informe: son la misma lectura y el mismo archivo.
+async function _leerExcelSubido(file) {
+  const ExcelJS = await _getExcelJS();
+  if (!ExcelJS) { try { fs.unlinkSync(path.join(UPLOAD_DIR, file.filename)); } catch(_){}
+    const e = new Error('Librería exceljs no disponible en el servidor'); e.status = 503; throw e; }
+  const filePath = path.join(UPLOAD_DIR, file.filename);
+  try {
+    const buf = fs.readFileSync(filePath);
+    const parsed = await _parsearExcelIFCO(buf);
+    if (!parsed) { const e = new Error('No se reconoció el formato del archivo'); e.status = 400; throw e; }
+    return parsed;
+  } catch (e) {
+    if (!e.status) { e.status = 400; e.message = 'Error parseando el archivo: ' + e.message; }
+    throw e;
+  } finally {
+    try { fs.unlinkSync(filePath); } catch(_){}
+  }
+}
+
+// POST /consolidar/preview — recibe el .xlsx, lo cruza contra la base y devuelve el resultado
+// completo: las tres categorías del archivo, lo que sobra del lado del sistema, las
+// diferencias de cantidad y el balance del período.
 router.post('/consolidar/preview', upload.single('archivo'), async function(req, res) {
   console.log('[IFCO][consolidar/preview] inicio. file=', req.file && req.file.originalname);
   try {
     if (!req.file) return res.status(400).json({ error: 'Falta el archivo "archivo"' });
-
-    const ExcelJS = await _getExcelJS();
-    if (!ExcelJS) {
-      try { fs.unlinkSync(path.join(UPLOAD_DIR, req.file.filename)); } catch(_){}
-      return res.status(503).json({ error: 'Librería exceljs no disponible en el servidor' });
-    }
-
-    const filePath = path.join(UPLOAD_DIR, req.file.filename);
-    let parsed;
-    try {
-      const buf = fs.readFileSync(filePath);
-      parsed = await _parsearExcelIFCO(buf);
-      console.log('[IFCO][consolidar/preview] parsed: despachos=', parsed.despachos.length, 'ingresos=', parsed.ingresos.length, 'r22=', parsed.r22.length);
-    } catch(e) {
-      try { fs.unlinkSync(filePath); } catch(_){}
-      return res.status(400).json({ error: 'Error parseando el archivo: ' + e.message });
-    }
-    try { fs.unlinkSync(filePath); } catch(_){}
-
-    // ── DESPACHOS / EGRESOS: matchea contra ifco_remitos_super (despachos) Y contra ifco_movimientos tipo='perdida'
-    // Los egresos del archivo IFCO (también llamados "Retiros" en el header) representan TODO lo que sale del depo.
-    // En el sistema eso son los despachos (ifco_remitos_super) + las pérdidas (ifco_movimientos tipo='perdida').
-    const sysDesp = db.prepare(`
-      SELECT id, n_remito_ifco, n_remito_sg, fecha_emision, fecha_sellado, fecha_enviado, fecha_presentado,
-             empresa, sucursal, cantidad_despachada, cantidad_recibida, cantidad_rechazada,
-             estado, origen, proveedor_origen_id
-      FROM ifco_remitos_super WHERE eliminado_en IS NULL
-    `).all();
-    const sysPerdidas = db.prepare(`
-      SELECT id, n_remito, fecha, cantidad, consolidado_en
-      FROM ifco_movimientos
-      WHERE eliminado_en IS NULL AND tipo = 'perdida'
-    `).all();
-    const idxDesp = {};
-    sysDesp.forEach(function(r){ const k = _normalizarNumeroRemito(r.n_remito_ifco); if (k) idxDesp[k] = r; });
-    const idxPerd = {};
-    sysPerdidas.forEach(function(r){ const k = _normalizarNumeroRemito(r.n_remito); if (k) idxPerd[k] = r; });
-    const desp = { a_marcar: [], ya_consolidados: [], no_encontrados: [] };
-    parsed.despachos.forEach(function(arch) {
-      // Primero busca como despacho normal
-      const sisDesp = idxDesp[arch.n_remito_normalizado];
-      if (sisDesp) {
-        if (sisDesp.estado === 'presentado') {
-          desp.ya_consolidados.push({ archivo: arch, sistema: sisDesp });
-        } else {
-          desp.a_marcar.push({ archivo: arch, sistema: sisDesp });
-        }
-        return;
-      }
-      // Si no es despacho, buscar en pérdidas (cajones perdidos = egreso del depo)
-      const sisPerd = idxPerd[arch.n_remito_normalizado];
-      if (sisPerd) {
-        // Lo tratamos como "ya consolidado" si tiene consolidado_en, sino como "a_marcar"
-        if (sisPerd.consolidado_en) {
-          desp.ya_consolidados.push({ archivo: arch, sistema: Object.assign({}, sisPerd, { _es_perdida: true }) });
-        } else {
-          desp.a_marcar.push({ archivo: arch, sistema: Object.assign({}, sisPerd, { _es_perdida: true }) });
-        }
-        return;
-      }
-      // No encontrado en ningún lado
-      desp.no_encontrados.push({
-        n_remito_archivo: arch.n_remito_archivo, n_remito_sistema: arch.n_remito_sistema,
-        fecha: arch.fecha, detalle: arch.detalle, cantidad: arch.cantidad,
-        direccion: arch.direccion, es_devolucion: arch.es_devolucion,
-        cadena_sugerida: _matchCadenaIFCO(arch.detalle)
-      });
-    });
-
-    // ── INGRESOS: matchea contra ifco_movimientos (tipo='retiro') por n_remito_normalizado
-    // Los ingresos del archivo IFCO se corresponden con retiros del sistema (cajones que volvieron).
-    // Las pérdidas NO se incluyen acá — son egresos y se matchean contra los egresos del archivo.
-    const sysIng = db.prepare(`
-      SELECT id, n_remito, fecha, cantidad, sucursal_ifco, modelo, consolidado_en
-      FROM ifco_movimientos
-      WHERE eliminado_en IS NULL AND tipo = 'retiro'
-    `).all();
-    const idxIng = {};
-    sysIng.forEach(function(r){ const k = _normalizarNumeroRemito(r.n_remito); if (k) idxIng[k] = r; });
-    const ing = { a_marcar: [], ya_consolidados: [], no_encontrados: [] };
-    parsed.ingresos.forEach(function(arch) {
-      const sis = idxIng[arch.n_remito_normalizado];
-      if (!sis) {
-        ing.no_encontrados.push({
-          n_remito_archivo: arch.n_remito_archivo, n_remito_sistema: arch.n_remito_sistema,
-          fecha: arch.fecha, detalle: arch.detalle, cantidad: arch.cantidad,
-          direccion: arch.direccion, es_devolucion: arch.es_devolucion
-        });
-      } else if (sis.consolidado_en) {
-        ing.ya_consolidados.push({ archivo: arch, sistema: sis });
-      } else {
-        ing.a_marcar.push({ archivo: arch, sistema: sis });
-      }
-    });
-
-    // ── R22: matchea contra ifco_recepciones_proveedor (es_r22=1) por n_remito_proveedor
-    const sysR22 = db.prepare(`
-      SELECT id, n_remito_proveedor, fecha_recepcion, cantidad, proveedor_id, consolidado_en
-      FROM ifco_recepciones_proveedor
-      WHERE eliminado_en IS NULL AND es_r22 = 1
-    `).all();
-    const idxR22 = {};
-    sysR22.forEach(function(r){ const k = _normalizarNumeroRemito(r.n_remito_proveedor); if (k) idxR22[k] = r; });
-    const r22out = { a_marcar: [], ya_consolidados: [], no_encontrados: [] };
-    parsed.r22.forEach(function(arch) {
-      const sis = idxR22[arch.n_remito_normalizado];
-      if (!sis) {
-        r22out.no_encontrados.push({
-          n_remito_archivo: arch.n_remito_archivo, n_remito_sistema: arch.n_remito_sistema,
-          fecha: arch.fecha, detalle: arch.detalle, cantidad: arch.cantidad,
-          direccion: arch.direccion, es_devolucion: arch.es_devolucion
-        });
-      } else if (sis.consolidado_en) {
-        r22out.ya_consolidados.push({ archivo: arch, sistema: sis });
-      } else {
-        r22out.a_marcar.push({ archivo: arch, sistema: sis });
-      }
-    });
-
+    const parsed = await _leerExcelSubido(req.file);
+    console.log('[IFCO][consolidar/preview] parsed: despachos=', parsed.despachos.length,
+      'ingresos=', parsed.ingresos.length, 'r22=', parsed.r22.length);
+    const cruce = _cruzarConIFCO(parsed);
     console.log('[IFCO][consolidar/preview] resultado:',
-      'despachos[a/ya/no]=', desp.a_marcar.length, desp.ya_consolidados.length, desp.no_encontrados.length,
-      'ingresos[a/ya/no]=', ing.a_marcar.length, ing.ya_consolidados.length, ing.no_encontrados.length,
-      'r22[a/ya/no]=', r22out.a_marcar.length, r22out.ya_consolidados.length, r22out.no_encontrados.length);
+      'despachos[a/ya/no]=', cruce.despachos.a_marcar.length, cruce.despachos.ya_consolidados.length, cruce.despachos.no_encontrados.length,
+      'ingresos[a/ya/no]=', cruce.ingresos.a_marcar.length, cruce.ingresos.ya_consolidados.length, cruce.ingresos.no_encontrados.length,
+      'r22[a/ya/no]=', cruce.r22.a_marcar.length, cruce.r22.ya_consolidados.length, cruce.r22.no_encontrados.length,
+      'sobran=', cruce.sobran_sistema.length, 'difCant=', cruce.dif_cantidad.length);
 
-    // ── BALANCE AGREGADO (red de seguridad si el match fila-por-fila falla) ──────
-    // INGRESOS:  total archivo (ingresos) vs total sistema (retiros + R22)
-    // EGRESOS:   total archivo (despachos) vs total sistema (despachos + perdidas)
-    const sumArr = function(arr, key) {
-      return (arr || []).reduce(function(s, x){ return s + (parseInt(x[key]) || 0); }, 0);
-    };
-    // Total del archivo IFCO (sumando TODAS las filas, sin filtrar nada — Ajustes, IC, etc incluidos)
-    const totalArchivoIng = parsed.totalBrutoIngresos || 0;
-    const totalArchivoEgr = parsed.totalBrutoEgresos || 0;
-    // Total sistema lado ingresos: retiros (idxIng) + R22 (sumamos directo de DB porque no hay índice)
-    const totalSistemaRetiros = (function(){
-      let total = 0;
-      for (const k in idxIng) total += (parseInt(idxIng[k].cantidad) || 0);
-      return total;
-    })();
-    const totalSistemaR22 = db.prepare(`
-      SELECT COALESCE(SUM(cantidad), 0) AS total FROM ifco_recepciones_proveedor
-      WHERE eliminado_en IS NULL AND es_r22 = 1
-    `).get().total || 0;
-    const totalSistemaIng = totalSistemaRetiros + totalSistemaR22;
-    // Total sistema lado egresos: despachos + perdidas
-    const totalSistemaDespachos = (function(){
-      let total = 0;
-      for (const k in idxDesp) total += (parseInt(idxDesp[k].cantidad_despachada) || 0);
-      return total;
-    })();
-    const totalSistemaPerdidas = (function(){
-      let total = 0;
-      for (const k in idxPerd) total += (parseInt(idxPerd[k].cantidad) || 0);
-      return total;
-    })();
-    const totalSistemaEgr = totalSistemaDespachos + totalSistemaPerdidas;
-
-    const balanceIng = {
-      total_archivo:        totalArchivoIng,
-      total_sistema:        totalSistemaIng,
-      total_sistema_desg:   { retiros: totalSistemaRetiros, r22: totalSistemaR22 },
-      diferencia:           totalArchivoIng - totalSistemaIng,
-      coincide:             totalArchivoIng === totalSistemaIng
-    };
-    const balanceEgr = {
-      total_archivo:        totalArchivoEgr,
-      total_sistema:        totalSistemaEgr,
-      total_sistema_desg:   { despachos: totalSistemaDespachos, perdidas: totalSistemaPerdidas },
-      diferencia:           totalArchivoEgr - totalSistemaEgr,
-      coincide:             totalArchivoEgr === totalSistemaEgr
-    };
-
-    res.json({
+    res.json(Object.assign({
       ok: true,
-      totales: {
-        despachos: parsed.despachos.length,
-        ingresos:  parsed.ingresos.length,
-        r22:       parsed.r22.length
-      },
-      despachos: desp,
-      ingresos:  ing,
-      r22:       r22out,
-      balance_ingresos: balanceIng,
-      balance_egresos:  balanceEgr
-    });
+      archivo: req.file.originalname || null,
+      totales: { despachos: parsed.despachos.length, ingresos: parsed.ingresos.length, r22: parsed.r22.length }
+    }, cruce));
   } catch(e) {
     console.error('[IFCO][consolidar/preview] EXCEPCION:', e);
     if (req.file) try { fs.unlinkSync(path.join(UPLOAD_DIR, req.file.filename)); } catch(_){}
-    res.status(500).json({ error: 'Error interno: ' + e.message });
+    res.status(e.status || 500).json({ error: e.status ? e.message : ('Error interno: ' + e.message) });
+  }
+});
+
+// ── EL INFORME PARA SENTARSE CON IFCO ────────────────────────────────────
+// Va en Excel y no en PDF a propósito: es una planilla de TRABAJO. Se filtra, se ordena y se
+// tacha renglón por renglón con el del otro lado del mostrador, y eso un PDF no lo deja hacer.
+// Además IFCO manda Excel; devolverle Excel evita que alguien tenga que recopiar.
+//
+// Una hoja por tipo de problema, porque cada una se resuelve distinto y con gente distinta:
+// lo que nos falta cargar es trabajo nuestro; lo que le falta a IFCO es un reclamo.
+function _buildConsolidacionXlsx(XLSX, cruce, nombreArchivo) {
+  const fmt = function(s) {
+    if (!s) return '';
+    const p = String(s).slice(0, 10).split('-');
+    return p.length === 3 ? p[2] + '/' + p[1] + '/' + p[0] : String(s);
+  };
+  const wb = XLSX.utils.book_new();
+  const hoja = function(nombre, aoa, anchos) {
+    const ws = XLSX.utils.aoa_to_sheet(aoa);
+    if (anchos) ws['!cols'] = anchos.map(function(w){ return { wch: w }; });
+    XLSX.utils.book_append_sheet(wb, ws, nombre);
+    return ws;
+  };
+
+  // ── 1) RESUMEN ────────────────────────────────────────────────────────
+  const bE = cruce.balance_egresos, bI = cruce.balance_ingresos;
+  const per = cruce.periodo || {};
+  const nf = function(n){ return Number(n) || 0; };
+  const resumen = [
+    ['CONSOLIDACIÓN DE CAJONES IFCO — SAN GERÓNIMO S.A.'],
+    ['Archivo de IFCO', nombreArchivo || ''],
+    ['Período que cubre el archivo', per.desde ? fmt(per.desde) + ' al ' + fmt(per.hasta) : 'no se pudo determinar'],
+    ['Generado', fmt(new Date().toISOString())],
+    [],
+    ['BALANCE DEL PERÍODO', 'ARCHIVO IFCO', 'SISTEMA SG', 'DIFERENCIA', ''],
+    ['Egresos (salidas)', nf(bE.total_archivo), nf(bE.total_sistema), nf(bE.diferencia),
+      bE.coincide ? 'coincide' : 'a revisar'],
+    ['   · despachos a cadenas', '', nf(bE.total_sistema_desg && bE.total_sistema_desg.despachos), '', ''],
+    ['   · pérdidas', '', nf(bE.total_sistema_desg && bE.total_sistema_desg.perdidas), '', ''],
+    ['Ingresos (entradas)', nf(bI.total_archivo), nf(bI.total_sistema), nf(bI.diferencia),
+      bI.coincide ? 'coincide' : 'a revisar'],
+    ['   · retiros de IFCO', '', nf(bI.total_sistema_desg && bI.total_sistema_desg.retiros), '', ''],
+    ['   · altas R22', '', nf(bI.total_sistema_desg && bI.total_sistema_desg.r22), '', ''],
+    [],
+    ['La diferencia es ARCHIVO menos SISTEMA. Positiva = IFCO cuenta más que nosotros.'],
+    ['El sistema se suma sobre el mismo período que cubre el archivo, para que sean comparables.'],
+    [],
+    ['QUÉ HAY QUE RESOLVER', 'FILAS', 'CAJONES', 'DE QUIÉN ES EL TRABAJO'],
+  ];
+  const sumCant = function(arr, campo) {
+    return (arr || []).reduce(function(s, x){ return s + (parseInt(x[campo]) || 0); }, 0);
+  };
+  const faltanSistema = []
+    .concat((cruce.despachos.no_encontrados || []).map(function(x){ return Object.assign({ _tipo: 'Despacho / egreso' }, x); }))
+    .concat((cruce.ingresos.no_encontrados || []).map(function(x){ return Object.assign({ _tipo: 'Ingreso / retiro' }, x); }))
+    .concat((cruce.r22.no_encontrados || []).map(function(x){ return Object.assign({ _tipo: 'Alta R22' }, x); }));
+
+  resumen.push(['Está en IFCO y falta cargar en el sistema', faltanSistema.length, sumCant(faltanSistema, 'cantidad'), 'Nuestro: cargarlo']);
+  resumen.push(['Está en el sistema y no figura en IFCO', (cruce.sobran_sistema || []).length, sumCant(cruce.sobran_sistema, 'cantidad'), 'Reclamo a IFCO']);
+  resumen.push(['Mismo remito, distinta cantidad', (cruce.dif_cantidad || []).length, sumCant(cruce.dif_cantidad, 'diferencia'), 'A conciliar entre los dos']);
+  resumen.push(['Nuestro, sin N° de remito usable', (cruce.sin_numero || []).length, sumCant(cruce.sin_numero, 'cantidad'), 'Nuestro: completar el número']);
+  resumen.push(['N° de remito repetido en el sistema', (cruce.duplicados || []).length, sumCant(cruce.duplicados, 'cantidad'), 'Nuestro: corregir la carga']);
+  resumen.push([]);
+  resumen.push(['Ya cruzado y coincidente (no requiere acción)',
+    (cruce.despachos.ya_consolidados.length + cruce.ingresos.ya_consolidados.length + cruce.r22.ya_consolidados.length), '', '']);
+  hoja('Resumen', resumen, [46, 16, 16, 16, 26]);
+
+  // ── 2) FALTA EN EL SISTEMA ────────────────────────────────────────────
+  const a2 = [['LO QUE IFCO REGISTRA Y NOSOTROS NO TENEMOS CARGADO'],
+    ['Cada fila es un movimiento del archivo de IFCO sin remito equivalente en el sistema.'], [],
+    ['TIPO', 'N° REMITO (IFCO)', 'N° EQUIVALENTE SG', 'FECHA', 'DETALLE', 'CANTIDAD', 'CADENA SUGERIDA', 'ES DEVOLUCIÓN']];
+  faltanSistema.sort(function(a, b){ return String(a.fecha).localeCompare(String(b.fecha)); })
+    .forEach(function(x) {
+      a2.push([x._tipo, x.n_remito_archivo || '', x.n_remito_sistema || '', fmt(x.fecha),
+        x.detalle || '', Number(x.cantidad) || 0, x.cadena_sugerida || '', x.es_devolucion ? 'SÍ' : '']);
+    });
+  if (faltanSistema.length === 0) a2.push(['— nada pendiente —']);
+  hoja('Falta en sistema', a2, [20, 20, 20, 12, 40, 11, 22, 14]);
+
+  // ── 3) FALTA EN IFCO ──────────────────────────────────────────────────
+  const a3 = [['LO QUE NOSOTROS REGISTRAMOS Y NO FIGURA EN EL ARCHIVO DE IFCO'],
+    ['Sólo movimientos DENTRO del período del archivo. Es la lista para reclamar.'], [],
+    ['TIPO', 'LADO', 'N° REMITO', 'FECHA', 'DETALLE', 'CANTIDAD', 'ESTADO', 'YA CONSOLIDADO']];
+  (cruce.sobran_sistema || []).forEach(function(x) {
+    a3.push([x.tipo, x.lado, x.n_remito || '', fmt(x.fecha), x.detalle || '',
+      Number(x.cantidad) || 0, x.estado || '', x.consolidado ? 'SÍ' : '']);
+  });
+  if (!(cruce.sobran_sistema || []).length) a3.push(['— nada pendiente —']);
+  hoja('Falta en IFCO', a3, [14, 10, 20, 12, 40, 11, 16, 16]);
+
+  // ── 4) DIFIEREN EN CANTIDAD ───────────────────────────────────────────
+  const a4 = [['MISMO REMITO DE LOS DOS LADOS, DISTINTA CANTIDAD'],
+    ['Estos cruzaban igual y se consolidaban sin que la diferencia se viera. Diferencia = IFCO menos sistema.'], [],
+    ['TIPO', 'N° REMITO (IFCO)', 'N° REMITO (SG)', 'FECHA', 'DETALLE', 'CANT. IFCO', 'CANT. SG', 'DIFERENCIA', 'YA CONSOLIDADO']];
+  (cruce.dif_cantidad || []).sort(function(a, b){ return Math.abs(b.diferencia) - Math.abs(a.diferencia); })
+    .forEach(function(x) {
+      a4.push([x.tipo, x.n_remito_archivo || '', x.n_remito_sistema || '', fmt(x.fecha_archivo),
+        x.detalle || '', Number(x.cant_archivo) || 0, Number(x.cant_sistema) || 0,
+        Number(x.diferencia) || 0, x.consolidado ? 'SÍ' : '']);
+    });
+  if (!(cruce.dif_cantidad || []).length) a4.push(['— ninguna —']);
+  hoja('Difieren cantidad', a4, [14, 20, 20, 12, 34, 12, 11, 12, 16]);
+
+  // ── 5) SIN NÚMERO USABLE ──────────────────────────────────────────────
+  const a5 = [['NUESTRO, SIN N° DE REMITO QUE SE PUEDA CRUZAR'],
+    ['El cruce usa los últimos 8 dígitos del número. Sin número, o con menos de 8 dígitos, no puede matchear nunca.'], [],
+    ['TIPO', 'ID', 'N° CARGADO', 'FECHA', 'DETALLE', 'CANTIDAD']];
+  (cruce.sin_numero || []).forEach(function(x) {
+    a5.push([x.tipo, x.id, x.n_remito || '(vacío)', fmt(x.fecha), x.detalle || '', Number(x.cantidad) || 0]);
+  });
+  if (!(cruce.sin_numero || []).length) a5.push(['— ninguno —']);
+  hoja('Sin N usable', a5, [14, 8, 20, 12, 40, 11]);
+
+  // ── 6) DUPLICADOS ─────────────────────────────────────────────────────
+  const a6 = [['N° DE REMITO REPETIDO EN EL SISTEMA'],
+    ['Dos registros con el mismo número: uno de los dos está cargado de más y suma cajones que no existen.'], [],
+    ['TIPO', 'CLAVE (8 DÍG.)', 'ID', 'N° REMITO', 'FECHA', 'CANTIDAD']];
+  (cruce.duplicados || []).sort(function(a, b){ return String(a.clave).localeCompare(String(b.clave)); })
+    .forEach(function(x) { a6.push([x.tipo, x.clave, x.id, x.n_remito || '', fmt(x.fecha), Number(x.cantidad) || 0]); });
+  if (!(cruce.duplicados || []).length) a6.push(['— ninguno —']);
+  hoja('N repetido', a6, [14, 16, 8, 20, 12, 11]);
+
+  return Buffer.from(XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' }));
+}
+
+// POST /consolidar/informe.xlsx — el mismo cruce que la vista previa, en una planilla.
+// Va por POST y con el archivo adjunto porque el cruce se calcula contra el Excel de IFCO:
+// no hay nada guardado en la base de donde sacarlo después.
+router.post('/consolidar/informe.xlsx', upload.single('archivo'), async function(req, res) {
+  try {
+    if (!req.file) return res.status(400).json({ error: 'Falta el archivo "archivo"' });
+    const XLSX = await _getXLSX();
+    if (!XLSX) { try { fs.unlinkSync(path.join(UPLOAD_DIR, req.file.filename)); } catch(_){}
+      return res.status(503).json({ error: 'xlsx (SheetJS) no disponible' }); }
+    const nombre = req.file.originalname || 'ifco.xlsx';
+    const parsed = await _leerExcelSubido(req.file);
+    const cruce = _cruzarConIFCO(parsed);
+    const buf = _buildConsolidacionXlsx(XLSX, cruce, nombre);
+    const hoy = new Date().toISOString().slice(0, 10);
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', 'attachment; filename="consolidacion-ifco-' + hoy + '.xlsx"');
+    res.send(buf);
+  } catch(e) {
+    console.error('[IFCO][consolidar/informe] error:', e);
+    if (req.file) try { fs.unlinkSync(path.join(UPLOAD_DIR, req.file.filename)); } catch(_){}
+    res.status(e.status || 500).json({ error: e.status ? e.message : ('Error interno: ' + e.message) });
   }
 });
 
