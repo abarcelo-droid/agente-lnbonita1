@@ -19,6 +19,10 @@
 // no es el nuestro.
 import db from './db.js';
 import { crearEsquema } from './share_ddl.js';
+// share_import.js NO importa este archivo, así que no hay ciclo: puede ser un import normal.
+// Con `await import(...)` acá adentro, este módulo pasaría a ser asíncrono y arrastraría a
+// todo lo que cuelga de él, incluido el router.
+import { reclasificarFamilias } from './share_import.js';
 
 // El SQL vive en share_ddl.js, no acá: este archivo abre la base real con better-sqlite3 y
 // por eso ningún test lo puede importar. Con el DDL en un módulo aparte, la prueba crea el
@@ -41,6 +45,17 @@ agregarCol('share_cargas', 'reemplazada_por', 'INTEGER');
 agregarCol('share_cargas', 'reemplazada_en', 'TEXT');
 agregarCol('share_articulos', 'pendiente_revision', 'INTEGER NOT NULL DEFAULT 0');
 agregarCol('share_proveedores', 'pendiente_revision', 'INTEGER NOT NULL DEFAULT 0');
+
+// Las familias cambiaron (VERDURA y HONGO → HORTALIZA PESADA / LIVIANA): los artículos que
+// se cargaron antes se quedaron con la etiqueta vieja y hay que traerlos al vocabulario
+// nuevo. Corre en cada arranque y no hace nada cuando ya está todo migrado.
+try {
+  const r = reclasificarFamilias(db);
+  if (r.migrados) {
+    console.log(`[SHARE] Familias migradas: ${r.migrados} artículo(s) → ` +
+      Object.entries(r.detalle).map(([f, n]) => `${f}: ${n}`).join(', '));
+  }
+} catch (e) { console.error('[SHARE] reclasificarFamilias:', e.message); }
 
 console.log('[SHARE] Esquema verificado.');
 

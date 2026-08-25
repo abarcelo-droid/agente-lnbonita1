@@ -9,7 +9,7 @@
 // única forma de probar esto antes de subirlo es con node:sqlite.
 import crypto from 'crypto';
 import * as XLSX from 'xlsx';
-import { norm, parseDesc, parseProveedor, parseFecha, parseBultos, fechaDelNombre } from './share_parser.js';
+import { norm, parseDesc, parseProveedor, parseFecha, parseBultos, fechaDelNombre, clasificarFamilia, FAMILIAS_VALIDAS } from './share_parser.js';
 
 const HOJA = 'Detallado';
 
@@ -272,6 +272,37 @@ export function importar(db, { buffer, nombre, usuario, usuarioId, forzar }) {
 
   const cargaId = correr();
   return { ok: true, carga_id: cargaId, analisis: a };
+}
+
+// ── Migrar los artículos que quedaron con una familia que ya no existe ────────────────
+// Las familias cambiaron: donde había VERDURA y HONGO ahora hay HORTALIZA PESADA (lo que va
+// en bolsa) y HORTALIZA LIVIANA (lo que va en cajón). Los artículos ya cargados se quedaron
+// con la etiqueta vieja, y una familia que no está en la lista es peor que ninguna: el filtro
+// no la ofrece, el share por familia la muestra como un renglón fantasma y no hay forma de
+// corregirla desde la pantalla porque el desplegable no la tiene.
+//
+// SÓLO toca lo que quedó fuera del vocabulario nuevo. Un artículo que ya dice FRUTA, HOJA u
+// OTRO no se mira: si alguien lo corrigió a mano, esa decisión manda sobre el clasificador.
+// Y por eso mismo es idempotente — después de la primera corrida no queda nada que migrar.
+export function reclasificarFamilias(db) {
+  const validas = new Set(FAMILIAS_VALIDAS);
+  const filas = db.prepare('SELECT id, desc_canonica, articulo_base, familia FROM share_articulos').all();
+  const pendientes = filas.filter(a => !validas.has(a.familia));
+  if (!pendientes.length) return { migrados: 0, detalle: {} };
+
+  const upd = db.prepare('UPDATE share_articulos SET familia=? WHERE id=?');
+  const detalle = {};
+  const correr = db.transaction(() => {
+    for (const a of pendientes) {
+      // Se reclasifica desde el NOMBRE, no desde la familia vieja: traducir VERDURA→algo
+      // sería adivinar, y el nombre es el dato que sí distingue una papa de un tomate.
+      const f = clasificarFamilia(a.articulo_base || a.desc_canonica);
+      upd.run(f, a.id);
+      detalle[f] = (detalle[f] || 0) + 1;
+    }
+  });
+  correr();
+  return { migrados: pendientes.length, detalle };
 }
 
 // ── Recalcular kg_equiv de un artículo ────────────────────────────────────────────────

@@ -4588,8 +4588,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
     <div class="sh-f" style="margin-bottom:8px">
       <div><label>Buscar</label><input type="text" id="sh-map-q" placeholder="artículo" oninput="shMapDeb()"></div>
       <div><label>Familia</label><select id="sh-map-fam" onchange="shMapeos()">
-        <option value="">— todas —</option><option>FRUTA</option><option>VERDURA</option>
-        <option>HOJA</option><option>HONGO</option><option>OTRO</option></select></div>
+        <option value="">— todas —</option></select></div>
       <div><label>&nbsp;</label><button class="btn bo bs" onclick="shMapTodos(true)">Seleccionar todo lo que se ve</button></div>
     </div>
     <div id="sh-map-resu" class="sh-aviso" style="margin:0 0 6px"></div>
@@ -28942,6 +28941,7 @@ function shInit(){
   api('/api/share/estado').then(function(r){
     if (!r || !r.ok) { eid('sh-estado').innerHTML = '<span style="color:#b3261e">' + escH((r && r.error) || 'Sin acceso al módulo.') + '</span>'; return; }
     SH.rango = r.data.rango; SH.puedeOperar = r.data.puede_operar;
+    if (r.data.familias && r.data.familias.length) SH_FAM = r.data.familias;
     var e = eid('sh-cnt-pend'); if (e) e.textContent = r.data.pendientes || '0';
     if (!r.data.rango.max) {
       eid('sh-estado').innerHTML = '<span style="color:#8a6d00">Todavía no hay ningún planning cargado.</span>';
@@ -29626,7 +29626,10 @@ function shReactivar(id){
 }
 
 // ── Mapeos ──────────────────────────────────────────────────────────────────────────────
-var SH_FAM = ['FRUTA', 'VERDURA', 'HOJA', 'HONGO', 'OTRO'];
+// Las familias las manda el servidor en /estado; esto es sólo el respaldo por si esa llamada
+// falla, para que los desplegables de Mapeos no queden vacíos. Dos listas que hay que
+// acordarse de actualizar juntas terminan distintas siempre.
+var SH_FAM = ['FRUTA', 'HOJA', 'HORTALIZA PESADA', 'HORTALIZA LIVIANA', 'OTRO'];
 var SH_UNI = ['KG', 'UNIDAD', 'ATADO', 'PAQUETE', 'PACK_GR', 'SIN_DEFINIR'];
 
 // ── MAPEOS: revisar de a muchos ─────────────────────────────────────────────────────────
@@ -29650,6 +29653,16 @@ function shMapeos(){
     if (!r || !r.ok) { eid('sh-tb-map').innerHTML = '<tr><td colspan="9" class="emp">' + escH((r && r.error) || 'Error') + '</td></tr>'; return; }
     var d = r.data, op = SH.puedeOperar;
     SH_MAP.filas = d.articulos;
+    // El filtro de familia se llena una sola vez, con la misma lista que los desplegables de
+    // cada fila. Se conserva lo elegido: recargar la cola después de dar un OK no puede
+    // devolverte a "todas" y hacerte perder la tanda que estabas revisando.
+    var selFam = eid('sh-map-fam');
+    if (selFam && selFam.options.length <= 1) {
+      var eraFam = selFam.value;
+      selFam.innerHTML = '<option value="">— todas —</option>' +
+        SH_FAM.map(function(f){ return '<option value="' + esc(f) + '">' + escH(f) + '</option>'; }).join('');
+      selFam.value = eraFam;
+    }
     eid('sh-map-resu').innerHTML = d.total_articulos
       ? 'Mostrando <b>' + d.mostrados + '</b> de <b>' + d.total_articulos + '</b> pendientes' +
         (d.total_articulos > d.mostrados ? ' (los de más volumen primero; achicá con el buscador)' : '') +

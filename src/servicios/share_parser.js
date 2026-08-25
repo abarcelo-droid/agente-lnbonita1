@@ -68,34 +68,62 @@ const CALIDADES = [
 
 // ── Familia ───────────────────────────────────────────────────────────────────────────
 // Clasificación automática para que el dashboard tenga algo el primer día. Es una PRIMERA
-// PASADA, no la verdad: la pantalla de Mapeos deja corregirla a mano y esa corrección no se
-// pisa nunca (el importador sólo clasifica artículos que está creando).
+// PASADA, no la verdad: la pantalla de Mapeos deja corregirla a mano, y el importador sólo
+// clasifica los artículos que está CREANDO — nunca pisa una corrección.
 //
-// El orden de la lista es el orden en que se evalúa, y por eso HOJA va antes que VERDURA:
-// "CEBOLLA DE VERDEO" tiene que caer en HOJA aunque contenga CEBOLLA.
+// ── LAS DOS HORTALIZAS SE SEPARAN POR CÓMO SE MUEVEN, NO POR BOTÁNICA ────────────────
+// PESADA es lo que va en BOLSA de 20-25 kg: papa, cebolla, batata, zapallo. LIVIANA es lo
+// que va en CAJÓN: tomate, berenjena, zapallito. Ese es el criterio que dio Andy con sus
+// ejemplos y es el que decide los casos que él no nombró — por eso el ajo, que es un bulbo
+// como la cebolla, cae en LIVIANA: nadie mueve ajo en bolsa de 25 kg.
+//
+// El tomate y la berenjena son frutos y están en hortalizas igual, porque acá "FRUTA" es la
+// góndola de fruta, no la definición del manual.
+//
+// El orden de la lista es el orden en que se evalúa, y por eso HOJA va primero: "CEBOLLA DE
+// VERDEO" tiene que caer en HOJA aunque diga CEBOLLA.
 const FAMILIAS = [
-  ['HONGO', ['CHAMPIGNON', 'CHAMPINON', 'GIRGOLA', 'PORTOBELLO', 'PORTOBELO', 'HONGO', 'SHIITAKE', 'SETA']],
-  ['HOJA', ['VERDEO', 'LECHUGA', 'RUCULA', 'ESPINACA', 'ACELGA', 'RADICHETA', 'BERRO', 'ESCAROLA',
-            'ENDIVIA', 'KALE', 'ACHICORIA', 'MIZUNA', 'PEREJIL', 'ALBAHACA', 'CILANTRO',
-            'CIBOULETTE', 'CIBOULET', 'MENTA', 'ROMERO', 'TOMILLO', 'SALVIA', 'ENELDO',
-            'MIX DE HOJAS', 'BROTES', 'REPOLLO']],
+  ['HOJA', ['VERDEO', 'PUERRO', 'APIO', 'LECHUGA', 'RUCULA', 'ESPINACA', 'ACELGA', 'RADICHETA',
+            'BERRO', 'ESCAROLA', 'ENDIVIA', 'KALE', 'ACHICORIA', 'MIZUNA', 'PEREJIL',
+            'ALBAHACA', 'CILANTRO', 'CIBOULETTE', 'CIBOULET', 'MENTA', 'ROMERO', 'TOMILLO',
+            'SALVIA', 'ENELDO', 'MIX DE HOJAS', 'BROTE', 'REPOLLO', 'PENCA', 'CARDO']],
   ['FRUTA', ['MANZANA', 'PERA', 'BANANA', 'NARANJA', 'MANDARINA', 'LIMON', 'LIMA', 'POMELO',
              'UVA', 'DURAZNO', 'PELON', 'NECTARIN', 'CIRUELA', 'DAMASCO', 'CEREZA', 'FRUTILLA',
              'ARANDANO', 'FRAMBUESA', 'MORA', 'KIWI', 'ANANA', 'MANGO', 'PAPAYA', 'MELON',
              'SANDIA', 'HIGO', 'MEMBRILLO', 'GRANADA', 'CAQUI', 'NISPERO', 'MARACUYA',
              'CARAMBOLA', 'GUAYABA', 'LICHI', 'PITAYA', 'COCO', 'DATIL', 'PALTA']],
-  ['VERDURA', ['TOMATE', 'PAPA', 'CEBOLLA', 'ZANAHORIA', 'ZAPALLITO', 'ZAPALLO', 'CALABAZA',
-               'BATATA', 'MORRON', 'PIMIENTO', 'AJI', 'BERENJENA', 'PEPINO', 'CHOCLO',
-               'ARVEJA', 'CHAUCHA', 'BROCOLI', 'COLIFLOR', 'REMOLACHA', 'NABO', 'RABANITO',
-               'RABANO', 'AJO', 'ZUCCHINI', 'ZUCHINI', 'HINOJO', 'ESPARRAGO', 'ALCAUCIL',
-               'MANDIOCA', 'JENGIBRE', 'PUERRO', 'APIO', 'PENCA', 'CARDO', 'HABA', 'LENTEJA',
-               'PALMITO', 'RUIBARBO']],
+  // Bolsa: raíces, tubérculos, bulbos grandes y zapallos.
+  ['HORTALIZA PESADA', ['PAPA', 'CEBOLLA', 'BATATA', 'BONIATO', 'ZAPALLO', 'CALABAZA', 'ANCO',
+                        'CABUTIA', 'CABUTIAN', 'MANDIOCA', 'ZANAHORIA', 'REMOLACHA']],
+  // Cajón: frutos, flores y todo lo que se golpea.
+  ['HORTALIZA LIVIANA', ['TOMATE', 'BERENJENA', 'ZAPALLITO', 'ZUCCHINI', 'ZUCHINI', 'MORRON',
+                         'PIMIENTO', 'AJI', 'PEPINO', 'CHAUCHA', 'CHOCLO', 'BROCOLI',
+                         'COLIFLOR', 'ARVEJA', 'ALCAUCIL', 'ESPARRAGO', 'HINOJO', 'RABANITO',
+                         'RABANO', 'AJO', 'NABO', 'JENGIBRE', 'PALMITO', 'HABA', 'RUIBARBO']],
 ];
+
+// Las cinco familias válidas. OTRO no es un descuido: es dónde caen los hongos y todo lo que
+// no encaja, y tener ese cajón es lo que evita meter algo en la familia equivocada — un
+// artículo mal clasificado ensucia el share por familia del dashboard y nadie lo nota.
+export const FAMILIAS_VALIDAS = ['FRUTA', 'HOJA', 'HORTALIZA PESADA', 'HORTALIZA LIVIANA', 'OTRO'];
+
+// ── SE BUSCA POR PALABRA ENTERA, NO POR PEDAZO DE TEXTO ───────────────────────────────
+// Buscar "PAPA" adentro del texto hace que PAPAYA sea una hortaliza pesada. Con la lista
+// vieja no se notaba porque FRUTA se evaluaba antes y la atajaba de casualidad; al cambiar el
+// orden de las familias, esa casualidad se termina. Lo mismo con ZAPALLO y ZAPALLITO, que
+// ahora van a familias distintas.
+//
+// Se acepta el plural (PAPAS, ZAPALLOS) porque la planilla los escribe de las dos formas.
+// Se precompila: la migración recorre cientos de artículos contra un centenar de palabras.
+const RE_FAMILIAS = FAMILIAS.map(([fam, claves]) => [
+  fam,
+  claves.map(k => new RegExp('\\b' + k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '(?:ES|S)?\\b')),
+]);
 
 export function clasificarFamilia(base) {
   const t = norm(base);
-  for (const [fam, claves] of FAMILIAS) {
-    for (const k of claves) if (t.includes(k)) return fam;
+  for (const [fam, res] of RE_FAMILIAS) {
+    for (const re of res) if (re.test(t)) return fam;
   }
   return 'OTRO';
 }
