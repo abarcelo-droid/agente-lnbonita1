@@ -708,10 +708,25 @@ router.post('/cheques-terceros/:id/rechazar', requireAuth, (req, res) => {
           const saca = Math.round(Math.min(im.monto, falta) * 100) / 100;
           if (saca >= im.monto - 0.001) db.prepare('DELETE FROM sg_pagos_compras WHERE id=?').run(im.id);
           else db.prepare('UPDATE sg_pagos_compras SET monto=ROUND(monto-?,2) WHERE id=?').run(saca, im.id);
-          db.prepare(`UPDATE sg_facturas_compra
-            SET saldo_pagado = MAX(0, ROUND(COALESCE(saldo_pagado,0) - ?, 2)),
-                modificado_en=datetime('now','localtime') WHERE id=?`).run(saca, im.compra_id);
-          const f = db.prepare('SELECT numero FROM sg_facturas_compra WHERE id=?').get(im.compra_id);
+          // LA DEUDA VUELVE AL COMPROBANTE QUE SE PAGÓ, sea factura o liquidación.
+          // Acá se la devolvía siempre a sg_facturas_compra, sin mirar la columna
+          // `tipo`: si el cheque había cancelado una liquidación al productor, la
+          // deuda volvía a la factura de compra que tuviera ese mismo id —de otro
+          // proveedor— y el cartel que le avisa al usuario nombraba un comprobante
+          // que ese cheque nunca pagó. Es la misma falla que la anulación de un pago.
+          const esLiq = String(im.tipo || '') === 'liquidacion';
+          if (esLiq) {
+            db.prepare(`UPDATE liquidaciones
+              SET saldo_pagado = MAX(0, ROUND(COALESCE(saldo_pagado,0) - ?, 2)) WHERE id=?`)
+              .run(saca, im.compra_id);
+          } else {
+            db.prepare(`UPDATE sg_facturas_compra
+              SET saldo_pagado = MAX(0, ROUND(COALESCE(saldo_pagado,0) - ?, 2)),
+                  modificado_en=datetime('now','localtime') WHERE id=?`).run(saca, im.compra_id);
+          }
+          const f = esLiq
+            ? db.prepare('SELECT n_liquidacion AS numero FROM liquidaciones WHERE id=?').get(im.compra_id)
+            : db.prepare('SELECT numero FROM sg_facturas_compra WHERE id=?').get(im.compra_id);
           vuelven.push({ factura: f ? f.numero : im.compra_id, monto: saca });
           falta = Math.round((falta - saca) * 100) / 100;
         }

@@ -2041,7 +2041,28 @@ function crearLotesDeItem(db, { recepcionId, ocItem, tipoPrecio, fechaIngreso, l
         + '": cargá el peso de la balanza, o poné los kg por bulto en la orden de compra.');
     }
     const precio = tipoPrecio === 'firme' ? (ocItem.precio_estimado_por_kg != null ? Number(ocItem.precio_estimado_por_kg) : null) : null;
-    const costoBase = precio != null ? kg * precio : 0;
+    // ══ EL IVA NO ES COSTO ═════════════════════════════════════════════
+    //
+    // El lote se valorizaba con el precio TAL COMO SE PACTÓ, y cuando la orden se
+    // cargó con "el precio incluye IVA" ese precio trae el impuesto adentro. El IVA
+    // es crédito fiscal recuperable: no es costo de la mercadería.
+    //
+    // Con 10,5% eso deja el inventario, el costo por kilo y EL MARGEN DE TODOS LOS
+    // REPORTES un 10,5% arriba — que es el número con el que se decide a cuánto
+    // vender. Y en el margen entra dos veces mal: el costo lleva IVA si la ORDEN se
+    // cargó con precio bruto, y el precio de venta lleva IVA si la FACTURA se emitió
+    // con precio bruto. Dos banderas independientes que nadie ve en el reporte.
+    //
+    // El neto por kilo se saca acá y no se lee de sg_oc_items.neto_estimado porque
+    // ése es el total de la línea, no el unitario — y además hoy no lo lee nadie.
+    const ocCab = ocItem.oc_id
+      ? db.prepare('SELECT precio_incluye_iva FROM sg_oc WHERE id=?').get(ocItem.oc_id) : null;
+    const alicItem = (ocItem.iva_alicuota != null && ocItem.iva_alicuota !== '')
+      ? Number(ocItem.iva_alicuota) : null;
+    const precioNetoKg = (precio != null && ocCab && Number(ocCab.precio_incluye_iva) === 1 && alicItem != null)
+      ? +(precio / (1 + alicItem / 100)).toFixed(6)
+      : precio;
+    const costoBase = precioNetoKg != null ? kg * precioNetoKg : 0;
     let venc = val(lt.fecha_vencimiento_estimada);
     if (!venc && fechaIngreso && vida) venc = db.prepare('SELECT date(?, ?) d').get(fechaIngreso, `+${vida} days`).d;
     // Identidad de bulto (aditivo): presentación del sub-lote o, en su defecto, la del ítem de OC;
@@ -2071,7 +2092,10 @@ function crearLotesDeItem(db, { recepcionId, ocItem, tipoPrecio, fechaIngreso, l
     }
     const envId = (ocItem.envase_id != null && ocItem.envase_id !== '') ? Number(ocItem.envase_id) : null;
     const codigo = codigoLoteDePartida(db, ocItem.id);
-    const info = ins.run(codigo, recepcionId, ocItem.id, ocItem.producto_id, kg, precio, costoBase,
+    // El precio unitario que se guarda es el NETO, el mismo del que sale costoBase:
+    // si uno llevara IVA y el otro no, el costo por kilo de la pantalla no daría
+    // contra el costo total de la partida.
+    const info = ins.run(codigo, recepcionId, ocItem.id, ocItem.producto_id, kg, precioNetoKg, costoBase,
       val(lt.calidad), val(lt.calibre), val(lt.origen), fechaIngreso, venc, costoBase, presId, bultos, kpb, envId, userId);
     const nuevoLoteId = info.lastInsertRowid;
     // ── DONDE QUEDO LA MERCADERIA ────────────────────────────────────────
@@ -7697,8 +7721,31 @@ router.get('/despachos/:id/trazabilidad', requireAuth, (req, res) => {
 router.post('/despachos/:id/anular', requireAuth, (req, res) => {
   const db = getDb();
   try {
-    const d = db.prepare('SELECT id FROM sg_despachos WHERE id=? AND activo=1').get(req.params.id);
+    const d = db.prepare('SELECT id, numero FROM sg_despachos WHERE id=? AND activo=1').get(req.params.id);
     if (!d) return res.status(404).json({ ok: false, error: 'No encontrado o ya anulado' });
+    // ══ UN REMITO YA FACTURADO NO SE ANULA A SECAS ═════════════════════
+    //
+    // Esto devolvía la mercadería al piso y marcaba el remito inactivo sin preguntar
+    // si ya tenía comprobante. Las filas de sg_factura_despachos sobreviven, la
+    // factura sigue viva y el cliente sigue debiendo, pero los kilos vuelven al
+    // stock: LA MISMA MERCADERÍA SE PUEDE VENDER Y FACTURAR DOS VECES.
+    //
+    // Y como todas las consultas de venta filtran por d.activo=1, el remito
+    // desaparece de la cuenta corriente y de los reportes de margen mientras el
+    // comprobante sigue en el libro: la venta queda sin costo.
+    //
+    // La anulación de la factura de compra ya tenía el freno equivalente. Éste no.
+    // Primero se anula el comprobante —que es lo que decide si hay que emitir una
+    // nota de crédito— y recién después el remito.
+    const fact = db.prepare(`SELECT f.numero, f.id
+        FROM sg_factura_despachos fd JOIN sg_ven_facturas f ON f.id = fd.factura_id
+       WHERE fd.despacho_id = ? AND ${facturaCuenta('f')} LIMIT 1`).get(d.id);
+    if (fact) {
+      return res.status(409).json({ ok: false, error:
+        `El remito ${d.numero || d.id} ya está facturado con el comprobante ${fact.numero}. `
+        + `Si se anula acá, la mercadería vuelve al stock y la factura sigue viva: se podría `
+        + `vender dos veces lo mismo. Anulá primero el comprobante.` });
+    }
     const tx = db.transaction(() => {
       // IS NOT NULL: los renglones de mercaderia EN VIAJE no tienen lote todavia,
       // y recalcEstadoLote(null) reventaria. Lo que esos renglones reservaban del
@@ -9359,11 +9406,36 @@ router.post('/pagos/:id/anular', requireAuth, (req, res) => {
     if (p.anulado) return res.status(400).json({ ok: false, error: 'Ese pago ya está anulado' });
 
     db.transaction(() => {
+      // ══ LA DEUDA VUELVE AL COMPROBANTE QUE SE PAGÓ ═══════════════════
+      //
+      // Esto le devolvía el saldo SIEMPRE a sg_facturas_compra, sin mirar la columna
+      // `tipo` que el propio circuito de pago escribe ('factura' o 'liquidacion').
+      // Si el pago se había imputado a una LIQUIDACIÓN al productor, el UPDATE le
+      // devolvía la deuda a la factura de compra que tuviera ese mismo id —de otro
+      // proveedor, de otro mes— y la liquidación quedaba pagada para siempre: la
+      // cuenta corriente la sigue leyendo por saldo_pagado y nunca vuelve a lo
+      // pendiente. Dos proveedores mal de un saque.
+      //
+      // Y FALTABA saldo_pagado_gestion. El pago escribe las DOS columnas; al anular
+      // volvía una sola. Con la fórmula de la cuenta corriente
+      // —pendiente = total − (saldo_pagado − saldo_pagado_gestion)— el comprobante
+      // quedaba con saldo_pagado en 0 y saldo_pagado_gestion en X, o sea pendiente =
+      // total + X: la pantalla ofrecía pagar MÁS que el total. Se anulaba un pago y
+      // el proveedor pasaba a figurar debiéndosele más que antes de pagarle.
       const imps = db.prepare('SELECT * FROM sg_pagos_compras WHERE pago_id=?').all(p.id);
       const baja = db.prepare(`UPDATE sg_facturas_compra
         SET saldo_pagado = MAX(0, ROUND(COALESCE(saldo_pagado,0) - ?, 2)),
+            saldo_pagado_gestion = MAX(0, ROUND(COALESCE(saldo_pagado_gestion,0) - ?, 2)),
             modificado_en=datetime('now','localtime'), modificado_por=? WHERE id=?`);
-      for (const im of imps) baja.run(im.monto, uid(req), im.compra_id);
+      const bajaLiq = db.prepare(`UPDATE liquidaciones
+        SET saldo_pagado = MAX(0, ROUND(COALESCE(saldo_pagado,0) - ?, 2)),
+            saldo_pagado_gestion = MAX(0, ROUND(COALESCE(saldo_pagado_gestion,0) - ?, 2))
+        WHERE id=?`);
+      for (const im of imps) {
+        const g = Number(im.monto_gestion) || 0;
+        if (String(im.tipo || '') === 'liquidacion') bajaLiq.run(im.monto, g, im.compra_id);
+        else baja.run(im.monto, g, uid(req), im.compra_id);
+      }
       db.prepare(`UPDATE sg_pagos_proveedores SET anulado=1, anulado_en=datetime('now','localtime'),
         anulado_por=?, anulado_motivo=? WHERE id=?`).run(uid(req), motivo, p.id);
       if (p.asiento_id) {
