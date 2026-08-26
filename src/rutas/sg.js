@@ -12,8 +12,9 @@ import { randomUUID } from 'crypto';
 import { fileURLToPath } from 'url';
 import * as XLSX from 'xlsx';
 import { subirArchivo, obtenerArchivo, storageConfigurado } from '../servicios/storage.js';
-import { facturaCuenta, deudaFactura, deudaGestionFactura, noEsNotaDeCredito }
+import { facturaCuenta, deudaFactura, deudaGestionFactura, noEsNotaDeCredito, signoFactura }
   from '../servicios/factura-cuenta.js';
+import { acordadoDeOC, precioUnicoDeOC } from '../servicios/sg_acordado.js';
 // La foto de lo que quedó guardado con la venta de gestión vieja. Sólo lee.
 import { diagnosticoGestion } from '../servicios/sg_gestion_vieja.js';
 // Los dos libros de IVA. El de ventas no existía; el de compras estaba corto.
@@ -1262,6 +1263,10 @@ const postEmitir = async (req, res) => {
         // su cuenta. Dos cuentas de lo mismo terminan dando distinto.
         items.push({ producto_id: Number(di.producto_id), cantidad: kg, precio: precioNeto,
           alicuota: alic, importe_neto: netoLinea, importe_iva: ivaLinea,
+          // DE QUÉ RENGLÓN DE REMITO SALE. Queda guardado con el renglón del
+          // comprobante para que una nota de crédito parcial sepa a qué remito
+          // devolverle los kilos. Antes se sabía sólo por la POSICIÓN en el array.
+          despacho_item_id: diId,
           bultos: bultosLinea, kg_por_bulto: kpb, precio_por_bulto: precioPorBulto, unidad: kpb != null ? 'cajón' : null });
         const gestionLinea = gestionDeLinea({ kg, precioBruto,
           precioLista: di.precio_lista_por_kg, brutoLinea, importeLista: it.importe_lista });
@@ -3297,6 +3302,11 @@ router.get('/partidas/:id/venta', requireAuth, (req, res) => {
         f.id AS factura_id, f.fecha, f.numero, f.punto_venta, f.cbte_nro,
         COALESCE(f.neto,0) AS f_neto, COALESCE(f.iva,0) AS f_iva,
         COALESCE(f.dif_gestion,0) AS f_gestion,
+        -- Con SIGNO: si el comprobante es una NOTA DE CRÉDITO, sus números RESTAN de
+        -- lo que la partida vendió. Sin esto, acreditar una factura vieja —de las que
+        -- no guardaron los pesos por renglón— hacía figurar la venta DOS veces y se le
+        -- liquidaba de más al productor.
+        ${signoFactura('f')} AS signo,
         (SELECT COUNT(*) FROM sg_factura_despachos fd2 WHERE fd2.factura_id = f.id) AS renglones_factura,
         pr.nombre AS producto
         FROM sg_factura_despachos fd
@@ -3326,7 +3336,8 @@ router.get('/partidas/:id/venta', requireAuth, (req, res) => {
       if (exacto) {
         n = r2(x.neto); v = r2(x.iva); g = r2(x.gestion); comoSale = 'renglon';
       } else if (solo) {
-        n = r2(x.f_neto); v = r2(x.f_iva); g = r2(x.f_gestion); comoSale = 'factura';
+        const sg = Number(x.signo) || 1;
+        n = r2(sg * x.f_neto); v = r2(sg * x.f_iva); g = r2(sg * x.f_gestion); comoSale = 'factura';
       } else {
         // Factura vieja Y compartida con otra partida: no hay forma exacta de
         // separarla. Se dice —no se reparte y no se calla—: el neto sale del
@@ -3473,13 +3484,10 @@ router.get('/partidas/:id/venta', requireAuth, (req, res) => {
       tipo_precio: oc.tipo_precio || null,
       es_precio_cerrado: oc.tipo_precio !== 'pizarra' ? 1 : 0,
       acordado: (function(){
-        const a = acordadoDeOC(db, ocId);
-        const precios = (a.detalle || []).map((d) => d.precio_por_bulto)
-          .filter((x) => x != null);
-        const unico = precios.length && precios.every((x) => x === precios[0]) ? precios[0] : null;
-        return { total: r2(a.total), precio_por_bulto: unico,
-                 base: (a.detalle[0] || {}).base || null,
-                 items: (a.detalle || []).length,
+        const u = precioUnicoDeOC(db, ocId);
+        return { total: u.total, precio_por_bulto: u.precio,
+                 base: u.base,
+                 items: u.items,
                  // 1 = el precio ya trae el IVA; 0 = es neto; null = la orden es
                  // vieja y no lo dice. La pantalla asume CON IVA, que es lo
                  // habitual (Pablo, 25/8/2026), y lo deja cambiar.
@@ -3622,81 +3630,9 @@ const numF = (v) => (v != null && v !== '' && !isNaN(Number(v))) ? Number(v) : n
 const r2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
 
 // ── CUÁNTO SE ACORDÓ PAGAR POR UNA PARTIDA ───────────────────────────────
-// LA CUENTA SE HACE EN BULTOS. La compra se pacta en bultos y a tanto el bulto
-// —"100 cajones a $15.000"— y así la controla el comprador contra la factura,
-// no multiplicando kilos por $/kg. El sistema costea en kilos, pero eso es
-// asunto suyo: acá manda la unidad en la que se cerró el trato.
-//
-// Si la mercadería entró pesada y sin contar bultos, no hay con qué: ahí se cae
-// a kilos. Cada ítem dice cuál de las dos cuentas se le hizo.
-//
-// Está en UNA sola función porque la usan tres lugares —la pantalla de carga, el
-// control contra la factura y el listado de partidas agrupables— y si cada uno
-// la calculara por su cuenta, alcanzaría con tocar una para que el aviso de "no
-// da contra lo acordado" empezara a mentir.
-// La consulta se compila UNA vez por base y se reusa: el listado de órdenes la
-// llama una vez por fila, y compilar la misma sentencia doscientas veces para
-// pintar una pantalla es trabajo que no hace falta.
-const _stmtAcordado = new WeakMap();
-function acordadoDeOC(db, ocId) {
-  if (!_stmtAcordado.has(db)) _stmtAcordado.set(db, db.prepare(`SELECT i.id, i.precio_estimado_por_kg,
-      -- LA UNIDAD EN QUE SE PACTÓ. Es lo que el comprador eligió al cargar la
-      -- orden, y es lo que manda cuando hay diferencias: si compró bultos, la
-      -- orden se rehace por bultos; si compró kilos, por kilos.
-      i.modo_carga,
-      COALESCE(i.kg_por_bulto, ps.factor_conversion) AS kg_por_bulto,
-      (SELECT COALESCE(SUM(kg_reales),0) FROM sg_lotes WHERE oc_item_id=i.id AND activo=1) AS kg_recibidos,
-      (SELECT COALESCE(SUM(bultos),0)    FROM sg_lotes WHERE oc_item_id=i.id AND activo=1) AS bultos_recibidos,
-      -- LOS KILOS DE LOS BULTOS QUE SÍ SE CONTARON, aparte. Es lo que separa un
-      -- ítem que entró todo contado de uno que entró mitad y mitad.
-      (SELECT COALESCE(SUM(kg_reales),0) FROM sg_lotes
-        WHERE oc_item_id=i.id AND activo=1 AND bultos IS NOT NULL AND bultos > 0) AS kg_con_bultos
-    FROM sg_oc_items i
-    LEFT JOIN sg_presentaciones ps ON ps.id=i.presentacion_id
-    WHERE i.oc_id=?`));
-  const its = _stmtAcordado.get(db).all(ocId);
-  let total = 0;
-  const detalle = [];
-  for (const it of its) {
-    const pk = it.precio_estimado_por_kg != null ? Number(it.precio_estimado_por_kg) : null;
-    const kpb = Number(it.kg_por_bulto) || 0;
-    const bultos = Number(it.bultos_recibidos) || 0;
-    const precioBulto = (pk != null && kpb > 0) ? r2(pk * kpb) : null;
-    let importe = null, base = null;
-    if (pk != null) {
-      // ── CADA LOTE SE PAGA CON LA BASE QUE LE CORRESPONDE ────────────────
-      // Antes la base se elegía UNA vez por ítem: si había aunque fuera un
-      // bulto contado, se cobraba TODO por bulto y los lotes que entraron
-      // pesados —sin contar cajones— no se pagaban. Un camión que descarga 60
-      // cajones y después 800 kg a granel del mismo producto se liquidaba por
-      // los 60 cajones y los 800 kg desaparecían de la cuenta.
-      //
-      // Ahora los cajones se pagan por cajón y el resto por kilo, que es
-      // exactamente como se pactó cada parte.
-      const kgSueltos = Math.max(0, r2(Number(it.kg_recibidos) - Number(it.kg_con_bultos)));
-      // Y LA BASE SALE DE LO QUE PACTÓ EL COMPRADOR, no de si alguien contó
-      // bultos. Antes: "si hay aunque sea un bulto contado, se cobra por bulto".
-      // Eso decidía por él. Un ítem comprado POR KILO se paga por kilo aunque haya
-      // entrado en cajones --el cajonó es cómo vino, no cómo se compró--.
-      //
-      // Si el ítem es viejo y no tiene modo_carga, se cae al comportamiento de
-      // antes: no hay dato de qué eligió, y suponer "kilo" cambiaría la cuenta de
-      // órdenes ya cerradas.
-      const porBulto = (it.modo_carga === 'bulto')
-        || (it.modo_carga == null && bultos > 0);
-      if (porBulto && bultos > 0 && precioBulto != null) {
-        importe = r2(bultos * precioBulto + kgSueltos * pk);
-        base = kgSueltos > 0 ? 'mixto' : 'bulto';
-      } else {
-        importe = r2(it.kg_recibidos * pk);
-        base = 'kilo';
-      }
-      total = r2(total + importe);
-    }
-    detalle.push({ oc_item_id: it.id, precio_por_bulto: precioBulto, importe, base });
-  }
-  return { total, detalle };
-}
+// Vive en servicios/sg_acordado.js: la usan las tres pantallas de este router Y
+// el que guarda la liquidación, que es de otro módulo. Dos copias de esta cuenta
+// son dos respuestas a «¿cuánto le debemos?», y gana la que nadie mira.
 
 // ── EL ASIENTO DE UNA FACTURA DE MERCADERÍA ──────────────────────────────
 // Reparte los importes de la factura entre las líneas del asiento modelo, cada
@@ -7265,7 +7201,12 @@ router.get('/oferta', requireAuth, (req, res) => {
           -- pantalla no tenga que ir a buscarlo de a uno.
           o.proveedor_id, prov.razon_social AS proveedor_nombre,
           prov.descuento_pct AS proveedor_descuento_pct,
-          l.costo_final, l.fecha_vencimiento_estimada, l.presentacion_id,
+          -- SIN costo_final. Es lo que nos costó la partida, y esta dirección la
+          -- consume el selector de mercadería de Pedidos, Remitos y Facturación:
+          -- pantallas de VENTA. La pantalla no lo mostraba —lo calculaba y lo
+          -- tiraba— así que viajaba en cada pedido para nada, y quedaba en el
+          -- historial del navegador de cualquiera que abriera un remito.
+          l.fecha_vencimiento_estimada, l.presentacion_id,
           -- l.bultos + l.kg_reales: de esos dos sale el kg/bulto EFECTIVO (kpbEfectivo).
           l.bultos, l.kg_reales, COALESCE(l.kg_por_bulto, ps.factor_conversion) AS kg_por_bulto,
           ${KG_VIGENTE_STOCK} AS kg_vigente,

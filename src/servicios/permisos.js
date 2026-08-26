@@ -290,6 +290,18 @@ const LECTURA_CONTROLADA = new Set([
   // comercial: no corresponde que la vea cualquiera que tenga usuario, y menos que se la
   // pueda bajar en Excel. Entra en la lista por eso.
   '/api/share',
+  // LA OFERTA DE SAN GERÓNIMO: qué partidas hay, de QUÉ PROVEEDOR es cada una y
+  // qué descuento comercial tiene ese proveedor. Es la lista de compras de la
+  // casa. Estaba abierta a cualquiera que tuviera usuario —el menú escondía la
+  // pantalla y la dirección se escribía igual— y devolvía además el costo de la
+  // partida, que ya no viaja.
+  //
+  // Se cierra sólo esta dirección y no '/api/sg' entero: hay pantallas de otros
+  // módulos que leen del universo sg para trabajar, y cerrarlas todas de una
+  // rompe el día sin que nadie entienda por qué. Los que la necesitan la tienen
+  // declarada en api_lectura (ensure_api_prefijos.js), que da leer y no escribir.
+  '/api/sg/oferta',
+  '/api/sg/disponibilidad',
 ]);
 
 // Cuando una pantalla necesita LEER algo de otro módulo. Va aparte de

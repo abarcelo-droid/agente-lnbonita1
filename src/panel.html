@@ -1009,11 +1009,13 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
              y no se mostraba en ningún lado, así que nada avisaba cuando el precio
              por el que se está liquidando no da contra el de la orden. -->
         <div id="liq-cerr-acordado" style="font-size:11.5px;margin-top:6px"></div>
-        <!-- A precio cerrado el operador CONFIRMA. Que se vea por qué los campos
-             están grises, en vez de que parezca que la pantalla se colgó. -->
+        <!-- PRECIO CERRADO ES PRECIO CERRADO (Pablo, 26/8/2026). El número sale de la
+             orden y no se corrige acá — tampoco siendo administrador. Que se vea por
+             qué el campo está gris, y a dónde hay que ir si cambió la condición. -->
         <div id="liq-cerr-solo-admin" style="display:none;font-size:11.5px;color:var(--mut);margin-top:6px">
-          🔒 El precio ya está pactado y el resto lo calcula el despeje: acá se confirma.
-          Los números los edita el administrador. Lo que sí elegís vos es <b>cuántos bultos se liquidan</b>.
+          🔒 El precio sale de la <b>orden de compra</b> y acá no se toca: éste es el papel donde
+          el productor cobra. Si cambió la condición, <b>se modifica la orden</b>.
+          Lo que sí elegís vos es <b>cuántos bultos se liquidan</b>.
         </div>
         <!-- ══ ¿EL PRECIO PACTADO TRAE IVA? ═════════════════════════
              Pablo, 25/8/2026: "el precio acordado en la orden en general es CON IVA,
@@ -3107,6 +3109,68 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
      Va el MISMO PDF que imprime el botón de al lado: el que tiene el CAE y el
      QR de ARCA. Dos versiones del mismo comprobante circulando es exactamente
      lo que no puede pasar. -->
+<!-- ══ NOTA DE CRÉDITO ═══════════════════════════════════════════════════
+     Un comprobante con CAE no se anula: se le hace una nota de crédito. Puede ser
+     por TODO o por PARTE, y son dos cosas distintas:
+
+       · DEVOLUCIÓN — la mercadería vuelve. Los kilos regresan al remito como
+         «entregado sin comprobante» y se pueden volver a facturar.
+       · AJUSTE DE PRECIO — la mercadería NO vuelve: está en la casa del cliente.
+         Se le acredita plata sobre los mismos kilos.
+
+     Confundirlas hace aparecer mercadería vendible que no existe, así que se elige
+     explícitamente y la pantalla dice qué pasa con cada una.
+
+     SIN BARRA LATERAL (CLAUDE.md): table-layout fijo, anchos por columna, y lo
+     único que parte es la descripción. -->
+<div class="ab-modal-overlay" id="sg-nc-modal">
+  <div class="ab-modal" style="max-width:min(880px,96vw)">
+    <div class="mhd"><div class="mht" id="sg-nc-tit">Nota de crédito</div>
+      <button class="mcl" onclick="closeMB('sg-nc-modal')">×</button></div>
+    <div class="mbd">
+      <input type="hidden" id="sg-nc-id">
+      <div id="sg-nc-cab" style="font-size:12px;color:var(--mut);margin-bottom:10px"></div>
+
+      <div style="display:flex;gap:16px;flex-wrap:wrap;align-items:center;margin-bottom:10px">
+        <label style="font-size:12.5px;display:flex;gap:6px;align-items:center;cursor:pointer">
+          <input type="radio" name="sg-nc-modo" value="devolucion" checked onchange="sgNcModo()">
+          <b>Devolución de mercadería</b></label>
+        <label style="font-size:12.5px;display:flex;gap:6px;align-items:center;cursor:pointer">
+          <input type="radio" name="sg-nc-modo" value="precio" onchange="sgNcModo()">
+          <b>Ajuste de precio</b></label>
+        <span id="sg-nc-modo-ayuda" style="font-size:11.5px;color:var(--mut);flex:1;min-width:240px"></span>
+      </div>
+
+      <div class="ab-table-wrap" style="overflow-x:hidden !important">
+        <table class="pa-tbl" id="sg-nc-tabla" style="table-layout:fixed;width:100%;max-width:98vw">
+          <thead><tr>
+            <th style="width:36px"></th>
+            <th>Renglón</th>
+            <th style="width:96px;text-align:right">Facturado</th>
+            <th style="width:96px;text-align:right">Ya acreditado</th>
+            <th style="width:120px;text-align:right" id="sg-nc-th-cant">Se devuelve</th>
+            <th style="width:110px;text-align:right">Importe</th>
+          </tr></thead>
+          <tbody id="sg-nc-body"></tbody>
+          <tfoot><tr>
+            <th colspan="5" style="text-align:right">Total de la nota</th>
+            <th style="text-align:right" id="sg-nc-total">$ 0,00</th>
+          </tr></tfoot>
+        </table>
+      </div>
+
+      <div class="fl" style="margin-top:12px"><label>Motivo</label>
+        <input id="sg-nc-motivo" placeholder="Devolución de mercadería"
+          style="width:100%;box-sizing:border-box"></div>
+      <div style="font-size:11.5px;color:var(--mut);margin-top:6px" id="sg-nc-pie"></div>
+      <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:16px">
+        <button class="btn bo" onclick="closeMB('sg-nc-modal')">Cancelar</button>
+        <button class="btn bb" id="sg-nc-btn" onclick="sgNcEmitir()">Emitir nota de crédito</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <div class="ab-modal-overlay" id="sg-mailfac-modal">
   <div class="ab-modal" style="max-width:min(560px,96vw)">
     <div class="mhd"><div class="mht" id="sg-mailfac-tit">Enviar comprobante</div>
@@ -11970,6 +12034,12 @@ function liqDesdePartida(r){
   if (r.es_precio_cerrado) {
     var rad = document.querySelector('input[name="liq-modo"][value="cerrado"]');
     if (rad && !rad.checked) rad.checked = true;
+    // Y NO SE PUEDE MOVER. La condición se pactó en la orden: un clic en «Precio
+    // abierto» sobre una partida firme salteaba entero el control del servidor —que
+    // sólo corría con el modo en 'cerrado'— y dejaba la puerta con la llave puesta al
+    // lado. El servidor ahora lo contrasta igual; esto es para que nadie lo intente.
+    var abi = document.querySelector('input[name="liq-modo"][value="abierto"]');
+    if (abi) { abi.disabled = true; abi.title = 'La partida se compró a precio cerrado'; }
     LIQ.origen.comision = 'se despeja para llegar al precio acordado';
   }
   var ac = r.acordado || {};
@@ -15149,7 +15219,7 @@ function sgFdOnAdd(tipo, fuenteId, kg, meta){
     producto_nombre:meta.producto_nombre, etiqueta:(l.codigo_lote||meta.codigo_lote||meta.label||''),
     semaforo:(l.semaforo||meta.semaforo), bultos:meta.bultos, kg:kg, kg_por_bulto:meta.kg_por_bulto,
     bultos_disponibles:meta.bultos_disponibles,
-    kg_vigente:l.kg_vigente, costo_final:l.costo_final,
+    kg_vigente:l.kg_vigente,
     // El descuento es del PROVEEDOR de esta partida, no del producto ni del
     // cliente: viaja con el lote para no ir a buscarlo línea por línea.
     proveedor_id:(l.proveedor_id!=null?l.proveedor_id:meta.proveedor_id),
@@ -15923,12 +15993,25 @@ function sgFacListLoad(){
             + esc(String(f.nc_de_numero).split('-')[0].padStart(4,'0')+'-'
                   +String(f.nc_de_numero).split('-')[1].padStart(8,'0'))+'</span>'
           : '';
-      } else if (f.nc_id) {
-        nc = '<span class="bdg" style="background:#fee2e2;color:#991b1b" title="Se le hizo una nota de crédito">acreditada</span>';
-      } else if (listo && puedeMandar && f.punto_venta && f.cbte_nro
-                 && String(f.estado||'')!=='anulada') {
-        nc = '<button class="btn bs" title="Hacerle una nota de crédito" '
-           + 'onclick="sgNcOpen('+f.id+')">🧾 NC</button>';
+      } else {
+        // ACREDITADA DEL TODO O EN PARTE, que no es lo mismo. Con el flag binario, la
+        // primera nota parcial apagaba el botón y el resto de la devolución no se
+        // podía hacer nunca. Mientras quede saldo, se puede seguir acreditando.
+        var acord = (Number(f.total)||0) + Math.abs(Number(f.dif_gestion)||0);
+        var acred = Number(f.nc_acreditado)||0;
+        var queda = Math.round((acord - acred)*100)/100;
+        var puede = listo && puedeMandar && f.punto_venta && f.cbte_nro
+                    && String(f.estado||'')!=='anulada';
+        if (acred > 0.009 && queda <= 0.009) {
+          nc = '<span class="bdg" style="background:#fee2e2;color:#991b1b" title="Acreditada entera">acreditada</span>';
+        } else if (acred > 0.009) {
+          nc = '<span class="bdg" style="background:#fef3c7;color:#92400e" title="Acreditada en parte">'
+             + 'acreditada ' + sgMoney(acred) + '</span>'
+             + (puede ? ' <button class="btn bs" title="Acreditar el saldo" onclick="sgNcOpen('+f.id+')">🧾</button>' : '');
+        } else if (puede) {
+          nc = '<button class="btn bs" title="Hacerle una nota de crédito" '
+             + 'onclick="sgNcOpen('+f.id+')">🧾 NC</button>';
+        }
       }
       return '<tr><td>'+esc(num)+'</td><td>'+esc(f.fecha||'—')+'</td><td>'+tipoB+'</td>'
         +'<td>'+esc(f.alias||'—')+'</td><td>'+esc(f.cliente_nombre||'—')+'</td>'
@@ -15954,19 +16037,134 @@ function sgFacListExport(){ window.open('/api/sg/ventas/facturas/export.xlsx?'+s
 // otra cosa y todavía no está.
 function sgNcOpen(id){
   var f=(SG._facList||{})[id]||{};
-  var num=String(f.punto_venta||0).padStart(4,'0')+'-'+String(f.cbte_nro||0).padStart(8,'0');
-  var motivo=prompt('NOTA DE CRÉDITO por el TOTAL del comprobante '+(f.tipo||'')+' N° '+num+'\n'
-    +'Cliente: '+(f.cliente_nombre||'')+'  ·  Total: '+sgMoney(f.total)+'\n\n'
-    +'Se emite un comprobante nuevo asociado a éste. Baja la deuda del cliente, '
-    +'devuelve los kilos del remito a «entregado sin comprobante» y deja el asiento invertido.\n\n'
-    +'Motivo (se guarda con la nota):','Devolución de mercadería');
-  if(motivo===null) return;
-  motivo=String(motivo).trim();
-  if(motivo.length<3){ alert('Poné el motivo: es lo que después explica el asiento.'); return; }
-  api('/api/sg/ventas/facturas/'+id+'/nota-credito','POST',{motivo:motivo}).then(function(r){
-    if(!r||!r.ok){ alert('No se pudo emitir la nota de crédito.\n\n'+((r&&(r.error||r.obs))||'Error')); sgFacListLoad(); return; }
-    alert('Nota de crédito emitida.\n\nN° '+String(r.pto_vta||0).padStart(4,'0')+'-'
-      +String(r.cbte_nro||0).padStart(8,'0')+(r.cae?('\nCAE '+r.cae):'\n(comprobante manual, sin CAE)'));
+  SG.nc={ id:id, base:null };
+  eid('sg-nc-id').value=id;
+  eid('sg-nc-tit').textContent='Nota de crédito — comprobante '+(f.tipo||'')+' N° '
+    +String(f.punto_venta||0).padStart(4,'0')+'-'+String(f.cbte_nro||0).padStart(8,'0');
+  eid('sg-nc-motivo').value='Devolución de mercadería';
+  eid('sg-nc-body').innerHTML='<tr><td colspan="6" style="font-size:12px;color:var(--mut)">Cargando…</td></tr>';
+  eid('sg-nc-cab').textContent='';
+  eid('sg-nc-pie').textContent='';
+  var rad=document.querySelector('input[name="sg-nc-modo"][value="devolucion"]');
+  if(rad) rad.checked=true;
+  sgModalArriba('sg-nc-modal');
+  api('/api/sg/ventas/facturas/'+id+'/nota-credito/base').then(function(r){
+    if(!r||!r.ok){ eid('sg-nc-body').innerHTML='<tr><td colspan="6" style="color:var(--err)">'
+      +esc((r&&r.error)||'Error')+'</td></tr>'; return; }
+    SG.nc.base=r.data;
+    eid('sg-nc-cab').innerHTML='<b>'+esc(f.cliente_nombre||'')+'</b> · lo acordado '
+      +sgMoney(r.data.acordado)
+      +(r.data.acreditado>0.009
+          ? ' · <span style="color:#b91c1c">ya acreditado '+sgMoney(r.data.acreditado)+'</span>'
+            +' · <b>queda '+sgMoney(r.data.pendiente)+'</b>'
+          : '')
+      // LOS COMPROBANTES VIEJOS NO DICEN DE QUÉ REMITO SALE CADA RENGLÓN. Ahí la
+      // devolución parcial no puede saber a dónde devolver los kilos, y decirlo es
+      // mejor que devolverlos al renglón equivocado.
+      +(r.data.alineado===false
+          ? '<div style="color:#9a3412;margin-top:4px">⚠ Este comprobante es anterior al '
+            +'vínculo por renglón: la devolución parcial no puede saber a qué remito '
+            +'devolverle los kilos, así que van a quedar como entregados. Para que vuelvan, '
+            +'hacé la nota por el total.</div>'
+          : '')
+      +(r.data.notas_sin_renglon>0.009
+          ? '<div style="color:#9a3412;margin-top:4px">⚠ Ya tiene una nota por '
+            +sgMoney(r.data.notas_sin_renglon)+' emitida sin detalle por renglón: '
+            +'lo que quede se controla contra el total.</div>'
+          : '');
+    sgNcModo();
+  });
+}
+// Qué hace cada modo, dicho donde se elige. La diferencia importa: una devolución
+// hace volver mercadería al stock vendible y un ajuste de precio no.
+function sgNcModo(){
+  var m=sgNcModoVal();
+  var a=eid('sg-nc-modo-ayuda');
+  if(a) a.innerHTML = (m==='precio')
+    ? 'La mercadería <b>no vuelve</b>: sigue en la casa del cliente. Se le acredita plata sobre los mismos kilos.'
+    : 'La mercadería <b>vuelve</b>: esos kilos regresan al remito como «entregado sin comprobante» y se pueden volver a facturar.';
+  var th=eid('sg-nc-th-cant');
+  if(th) th.textContent = (m==='precio') ? 'Kilos (no vuelven)' : 'Se devuelve';
+  sgNcRender();
+}
+function sgNcModoVal(){
+  var el=document.querySelector('input[name="sg-nc-modo"]:checked');
+  return el ? el.value : 'devolucion';
+}
+function sgNcRender(){
+  var b=(SG.nc&&SG.nc.base)||null; if(!b) return;
+  var precio = sgNcModoVal()==='precio';
+  eid('sg-nc-body').innerHTML=(b.renglones||[]).map(function(l,i){
+    var agotado = precio ? !(l.neto_pendiente>0.009) : !(l.cantidad_pendiente>1e-6);
+    var val = precio ? (l.neto_pendiente||0) : (l.cantidad_pendiente||0);
+    return '<tr'+(agotado?' style="opacity:.5"':'')+'>'
+      +'<td style="text-align:center"><input type="checkbox" id="sg-nc-ck-'+i+'"'
+        +(agotado?' disabled':' checked')+' onchange="sgNcTotal()"></td>'
+      +'<td style="overflow:hidden;text-overflow:ellipsis">'+esc(l.descripcion||'')+'</td>'
+      +'<td style="text-align:right">'+nr(l.cantidad)+(precio?'':'')+'</td>'
+      +'<td style="text-align:right">'+(precio?sgMoney(l.neto_acreditado):nr(l.cantidad_acreditada))+'</td>'
+      +'<td style="text-align:right">'+(precio
+          ? nr(l.cantidad)
+          : '<input type="number" step="0.01" min="0" id="sg-nc-cant-'+i+'" value="'+val+'"'
+            +(agotado?' disabled':'')+' oninput="sgNcTotal()" style="width:100%;box-sizing:border-box;text-align:right">')
+        +'</td>'
+      +'<td style="text-align:right">'+(precio
+          ? '<input type="number" step="0.01" min="0" id="sg-nc-imp-'+i+'" value="'+val+'"'
+            +(agotado?' disabled':'')+' oninput="sgNcTotal()" style="width:100%;box-sizing:border-box;text-align:right">'
+          : '<span id="sg-nc-imp-txt-'+i+'"></span>')
+        +'</td></tr>';
+  }).join('');
+  sgNcTotal();
+}
+// El neto de la nota, con la misma cuenta que hace el servidor: la proporción de
+// kilos sobre el neto del renglón. Si los dos la hicieran distinta, la pantalla
+// mostraría un número y el comprobante saldría con otro.
+function sgNcTotal(){
+  var b=(SG.nc&&SG.nc.base)||null; if(!b) return;
+  var precio = sgNcModoVal()==='precio', tot=0;
+  (b.renglones||[]).forEach(function(l,i){
+    var ck=eid('sg-nc-ck-'+i); if(!ck||!ck.checked) { var t0=eid('sg-nc-imp-txt-'+i); if(t0) t0.textContent='—'; return; }
+    var neto=0;
+    if(precio){ neto=Number((eid('sg-nc-imp-'+i)||{}).value)||0; }
+    else {
+      var c=Number((eid('sg-nc-cant-'+i)||{}).value)||0;
+      var entero = Math.abs(c-(l.cantidad_pendiente||0))<1e-6 && Math.abs((l.cantidad_pendiente||0)-l.cantidad)<1e-6;
+      neto = entero ? l.neto : Math.round((l.cantidad>0 ? l.neto*(c/l.cantidad) : 0)*100)/100;
+      neto = Math.min(neto, l.neto_pendiente||0);
+      var t=eid('sg-nc-imp-txt-'+i); if(t) t.textContent=sgMoney(neto);
+    }
+    tot += neto*(1+(Number(l.alicuota)||0)/100);
+  });
+  eid('sg-nc-total').textContent=sgMoney(Math.round(tot*100)/100);
+  var pie=eid('sg-nc-pie');
+  if(pie) pie.innerHTML='Sale un comprobante nuevo, con su propio número y su propio CAE, '
+    +'asociado a éste. Baja la deuda del cliente y deja el asiento invertido.'
+    +(sgNcModoVal()==='precio' ? '' : ' Los kilos vuelven a estar pendientes de comprobante.');
+}
+function sgNcEmitir(){
+  var b=(SG.nc&&SG.nc.base)||null; if(!b) return;
+  var motivo=String(eid('sg-nc-motivo').value||'').trim();
+  if(motivo.length<3){ toast('Poné el motivo: es lo que después explica el asiento.','er'); return; }
+  var precio = sgNcModoVal()==='precio', items=[];
+  (b.renglones||[]).forEach(function(l,i){
+    var ck=eid('sg-nc-ck-'+i); if(!ck||!ck.checked) return;
+    if(precio){
+      var imp=Number((eid('sg-nc-imp-'+i)||{}).value)||0;
+      if(imp>0) items.push({ id:l.id, importe:imp });
+    } else {
+      var c=Number((eid('sg-nc-cant-'+i)||{}).value)||0;
+      if(c>0) items.push({ id:l.id, cantidad:c });
+    }
+  });
+  if(!items.length){ toast('Elegí al menos un renglón','er'); return; }
+  var btn=eid('sg-nc-btn'); btn.disabled=true;
+  api('/api/sg/ventas/facturas/'+SG.nc.id+'/nota-credito','POST',
+      { motivo:motivo, modo:(precio?'precio':'devolucion'), items:items }).then(function(r){
+    btn.disabled=false;
+    if(!r||!r.ok){ alert('No se pudo emitir la nota de crédito.\n\n'+((r&&(r.error||r.obs))||'Error')); return; }
+    closeMB('sg-nc-modal');
+    toast('Nota de crédito '+String(r.pto_vta||0).padStart(4,'0')+'-'
+      +String(r.cbte_nro||0).padStart(8,'0')+(r.cae?'':' (manual, sin CAE)'),'ok');
     sgFacListLoad();
     if(r.pdf_url) window.open(r.pdf_url,'_blank');
   });
@@ -16544,7 +16742,9 @@ function sgIPRenderDetalle(key){
   var stock=d.stock||[], camino=d.en_camino||[], h='';
   h+='<div style="font-weight:600;font-size:12px;margin-bottom:2px">🟢 En stock</div>';
   h+= stock.length ? stock.map(function(l){
-    var ck=(l.kg_vigente>0?(l.costo_final||0)/l.kg_vigente:0), venc=(l.dias_restantes!=null?l.dias_restantes+'d':'—');
+    // El costo por kg se calculaba acá y no se usaba en ningún lado: el renglón
+    // muestra proveedor, cantidad y vencimiento. Ya no viene del servidor.
+    var venc=(l.dias_restantes!=null?l.dias_restantes+'d':'—');
     // El remito habla en CAJONES: es lo que se carga y lo que el servidor valida.
     var bd=(l.bultos_disponibles!=null)?Math.floor(l.bultos_disponibles):null;
     var cant = porBulto
@@ -16749,10 +16949,11 @@ function sgDespOnAdd(tipo, fuenteId, kg, meta){
     linea.lote_id=fuenteId;
     linea.etiqueta=(l.codigo_lote||meta.codigo_lote||meta.label||'');
     linea.semaforo=(l.semaforo||meta.semaforo);
-    // kg_vigente/costo_final quedan para el margen estimado de la línea.
+    // El COSTO ya no viaja desde /oferta —es información de la compra y esta
+    // pantalla no lo muestra—, así que tampoco se guarda acá.
     linea.lotes=[{ id:fuenteId, codigo_lote:linea.etiqueta,
       kg_disponibles:(l.kg_disponibles!=null?l.kg_disponibles:meta.kg_disponibles),
-      kg_vigente:l.kg_vigente, costo_final:l.costo_final, semaforo:linea.semaforo }];
+      kg_vigente:l.kg_vigente, semaforo:linea.semaforo }];
   }
   SG.despItems.push(linea);
   sgDespRender();
@@ -33147,12 +33348,37 @@ function liqRemResumen(){
 // A precio ABIERTO el productor cobra lo que su mercadería rindió; a precio
 // CERRADO ya estaba pactado en la orden. Son dos orígenes distintos para el
 // mismo número.
-// ── ¿ESTA LIQUIDACIÓN SE EDITA O SE CONFIRMA? ───────────────────────────
-// A precio cerrado, sólo el administrador toca los números: el resto los confirma.
-// Se pregunta en un solo lugar para que la grilla, el precio acordado y el selector
-// de IVA no puedan quedar con criterios distintos.
+// ── ¿LA GRILLA SE EDITA O SE CONFIRMA? ──────────────────────────────────
+// A precio cerrado, sólo el administrador toca los IMPORTES de la grilla —las
+// ventas, la descarga, el flete, los gastos—: el resto los confirma. Eso es de la
+// operatoria del día y a veces hay que corregirlo (una descarga que entró mal).
+// Se pregunta en un solo lugar para que la grilla y el selector de IVA no puedan
+// quedar con criterios distintos.
 function liqCerradoBloquea(){
   return liqModo() === 'cerrado' && !(window.LNB_USER && window.LNB_USER.rol === 'admin');
+}
+
+// ── Y EL PRECIO, QUE NO ES LO MISMO ─────────────────────────────────────
+//
+// Pablo, 26/8/2026: *"liquidación a precio cerrado ES precio cerrado; si hay cambio
+// de condición va por MODIFICACIÓN DE LA ORDEN DE COMPRA"*.
+//
+// El precio pactado NO es un importe de la operatoria: es la condición del trato, y
+// vive en la orden de compra. Acá no se corrige — tampoco siendo administrador,
+// porque el administrador es justamente el que podría cambiarlo sin que quede
+// rastro en el lugar donde se pactó. Se cambia la orden, y la liquidación lo
+// refleja.
+//
+// Se bloquea SÓLO cuando hay de dónde sacarlo: con una liquidación suelta —sin
+// partida, o con la orden a precios distintos— no hay precio de la orden que
+// imponer, y trabar el campo dejaría al operador sin poder armarla.
+//
+// El servidor exige lo mismo al guardar (rutas/liquidaciones.js): esto es para que
+// nadie tipee diez minutos algo que va a rebotar, no para reemplazarlo.
+function liqPrecioDeLaOrden(){
+  if (liqModo() !== 'cerrado') return false;
+  var ac = (LIQ.venta && LIQ.venta.acordado) || {};
+  return !!(LIQ.partida && LIQ.partida.oc_id && Number(ac.precio_por_bulto));
 }
 function liqModo(){
   var el = document.querySelector('input[name="liq-modo"]:checked');
@@ -33183,15 +33409,28 @@ function liqModoCambio(){
   // esta pantalla. "Bultos a liquidar" NO se bloquea: ésa es la decisión operativa
   // —cuántos se liquidan ahora— y trabarla dejaría al operador sin poder armar la
   // liquidación, contra "OPERAR NO ES SER ADMIN".
-  var bloq = liqCerradoBloquea();
-  ['liq-cerr-precio', 'liq-cerr-iva'].forEach(function(id){
+  // EL PRECIO se traba si sale de la orden. El SELECTOR DE IVA, sólo si la orden
+  // además dice si ese precio lo traía: las órdenes viejas no lo guardaron, y ese
+  // selector existe justamente para corregirlas. Trabarlo también dejaba una orden
+  // vieja pactada SIN IVA imposible de liquidar — la pantalla asume «con IVA» y no
+  // había forma de decirle que no.
+  var bloq = liqPrecioDeLaOrden();
+  var acIva = ((LIQ.venta && LIQ.venta.acordado) || {}).precio_incluye_iva;
+  var bloqIva = bloq && (acIva === 0 || acIva === 1);
+  var e0 = eid('liq-cerr-iva');
+  if (e0) {
+    e0.disabled = bloqIva;
+    e0.style.background = bloqIva ? 'var(--bor2,#f1f5f9)' : '';
+    e0.title = bloqIva ? 'Lo dice la orden de compra' : 'La orden no lo dice: elegí cómo se pactó';
+  }
+  ['liq-cerr-precio'].forEach(function(id){
     var e = eid(id); if (!e) return;
     if (e.tagName === 'SELECT') { e.disabled = bloq; }
     else { e.readOnly = bloq; e.tabIndex = bloq ? -1 : 0; }
     e.style.background = bloq ? 'var(--bor2,#f1f5f9)' : '';
     e.style.color = bloq ? 'var(--mut)' : '';
     e.style.cursor = bloq ? 'not-allowed' : '';
-    e.title = bloq ? 'Sale del acuerdo con el productor: lo edita el administrador' : '';
+    e.title = bloq ? 'Sale de la orden de compra. Si cambió la condición, se modifica la orden.' : '';
   });
   var av = eid('liq-cerr-solo-admin');
   if (av) av.style.display = bloq ? '' : 'none';
@@ -33300,7 +33539,18 @@ function liqCerradoResolver(){
              : (alicVta != null && alicVta > 0 ? alicVta : 10.5);
   var selIva = eid('liq-cerr-iva');
   var conIva = !selIva || selIva.value !== 'sin';
-  var base = m2(liqNum(pre) * (parseFloat(cant.value) || 0));
+  var _cant = parseFloat(cant.value) || 0;
+  var base = m2(liqNum(pre) * _cant);
+  // ── LIQUIDANDO TODO, EL OBJETIVO ES EL TOTAL DE LA ORDEN ────────────────
+  // La pantalla multiplica el precio por CAJÓN por los cajones; la orden, cuando se
+  // pactó por kilo, se cobra por los kilos REALES —que nunca son los nominales del
+  // cajón—. Los dos números salen de la orden y no coinciden. Cuando se liquida la
+  // partida entera hay uno solo que es el de verdad: el que calculó la orden, y es
+  // el que el servidor va a exigir.
+  var _recib = Number((eid('liq-bultos-in') || {}).value) || 0;
+  if (Number(ac.total) && _cant > 0 && _recib > 0 && Math.abs(_cant - _recib) < 1e-6) {
+    base = m2(ac.total);
+  }
   var T = conIva ? base : m2(base * (1 + alicAc / 100));
   if (tot) tot.textContent = T ? liqPlata(T) : '—';
   // EL OBJETIVO QUEDA GUARDADO acá arriba, antes de cualquier corte: los caminos
@@ -33924,6 +34174,11 @@ async function liqGuardar() {
                               return a + signo * (Number(g[x.k]) || 0); }, 0)) * 100) / 100; })(),
     dif_motivo:           ((document.getElementById('liq-gestion-motivo')||{}).value) || null,
     modo_precio:          liqModo(),
+    // Qué leyó la pantalla cuando la orden no dice si el precio pactado trae IVA.
+    // El servidor controla el precio cerrado contra la orden: sin este dato, el
+    // selector de la pantalla no serviría para corregir una orden vieja.
+    precio_incluye_iva:   (function(){ var e = eid('liq-cerr-iva');
+                            return (liqModo() === 'cerrado' && e) ? (e.value !== 'sin') : null; })(),
     // Por cuántos bultos se liquidó. Se tipeaban arriba y no se guardaban en
     // ningún lado: si la liquidación era parcial, no quedaba registro.
     bultos_ingresados:    (document.getElementById('liq-bultos-in')||{}).value || null,
@@ -33935,6 +34190,21 @@ async function liqGuardar() {
   };
   if (!body.n_liquidacion) { alert('Falta el N° de liquidación'); return; }
   if (!body.fecha)         { alert('Falta la fecha'); return; }
+  // ── NO SE MANDA LO QUE YA SABEMOS QUE VA A REBOTAR ──────────────────────
+  // A precio cerrado el servidor exige que el neto a pagar dé el precio de la
+  // orden. La pantalla ya lo compara y lo dice en rojo al pie; sin esto, el
+  // operador armaba la liquidación entera y se enteraba recién al guardar.
+  if (liqModo() === 'cerrado' && LIQ.cerrado && Number(LIQ.cerrado.objetivo)) {
+    var _pagar = Math.round(((Number(body.total) || 0) + (Number(body.dif_gestion) || 0)) * 100) / 100;
+    var _dif = Math.round((_pagar - Number(LIQ.cerrado.objetivo)) * 100) / 100;
+    if (Math.abs(_dif) >= 0.01) {
+      alert('El neto a pagar no da el precio acordado.\n\n'
+        + 'Acordado ' + liqPlata(LIQ.cerrado.objetivo) + ' · da ' + liqPlata(_pagar)
+        + ' (diferencia ' + liqPlata(_dif) + ').\n\n'
+        + 'Precio cerrado es precio cerrado: si cambió la condición, se modifica la orden de compra.');
+      return;
+    }
+  }
   try {
     const r = await fetch('/api/liquidaciones', {
       method:'POST', credentials:'include',

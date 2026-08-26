@@ -11,6 +11,7 @@ import express from 'express';
 import dbSg from '../servicios/db_sg_finanzas.js';
 import { crearAsiento } from '../servicios/asientos.js';
 import { lineasAsientoLiquidacion } from '../servicios/asiento-liquidacion.js';
+import { objetivoCerrado, cierraContraLoAcordado } from '../servicios/sg_acordado.js';
 import path    from 'path';
 import fs      from 'fs';
 import { fileURLToPath } from 'url';
@@ -337,6 +338,88 @@ router.post('/', function(req, res) {
   }
   if (difG > 0 && MOTIVOS_LIQ.indexOf(String(d.dif_motivo || '').trim()) < 0) {
     return res.status(400).json({ error: 'Poné por qué hay una parte de gestión en esta liquidación.' });
+  }
+
+  // ══ PRECIO CERRADO ES PRECIO CERRADO ═══════════════════════════════════
+  //
+  // Pablo, 26/8/2026: «liquidación a precio cerrado ES precio cerrado; si hay
+  // cambio de condición va por MODIFICACIÓN DE LA ORDEN DE COMPRA».
+  //
+  // Hasta acá esto se cuidaba SÓLO en la pantalla: los campos del precio quedaban
+  // grises y el servidor guardaba cualquier número que le llegara. Un campo gris no
+  // es un control —la dirección se escribe igual— y además dejaba la puerta
+  // entreabierta para el administrador, que es justamente el que no debería
+  // corregir un precio pactado desde el papel donde el productor cobra.
+  //
+  // Lo que se compara es el NETO A PAGAR (fiscal + gestión) contra el precio de la
+  // orden por la cantidad liquidada: es exactamente el cartel que la pantalla ya
+  // muestra al pie («el neto a pagar da el precio acordado»), ahora del lado que
+  // decide.
+  const ocIdBody = (d.oc_id != null && d.oc_id !== '') ? Number(d.oc_id) : null;
+  // ── LA CONDICIÓN LA DICE LA ORDEN, NO EL RADIO DE LA PANTALLA ───────────
+  // El cerrojo corría sólo si el cliente decía 'cerrado'. Un clic en «Precio abierto»
+  // sobre una partida firme lo saltaba entero: la pantalla marca el modo al abrir
+  // pero no lo traba, así que la puerta que esto viene a cerrar quedaba con la llave
+  // puesta al lado. Ahora se contrasta contra sg_oc.tipo_precio, que es donde la
+  // condición se pactó.
+  if (ocIdBody && String(d.modo_precio || '') !== 'cerrado') {
+    const oc = db.prepare('SELECT tipo_precio FROM sg_oc WHERE id = ?').get(ocIdBody);
+    if (oc && oc.tipo_precio && oc.tipo_precio !== 'pizarra') {
+      return res.status(400).json({ error:
+        'Esa partida se compró a PRECIO CERRADO, así que no se puede liquidar a precio abierto. '
+        + 'Si cambió la condición, se modifica la orden de compra.' });
+    }
+  }
+  if (String(d.modo_precio || '') === 'cerrado') {
+    const ocId = ocIdBody;
+    if (!ocId) {
+      return res.status(400).json({ error:
+        'Una liquidación a precio cerrado tiene que salir de una partida: el precio lo pone '
+        + 'la orden de compra. Abrila desde la bandeja de partidas a liquidar.' });
+    }
+    const obj = objetivoCerrado(db, {
+      ocId,
+      cantidad: (d.bultos_liquidados != null && d.bultos_liquidados !== '')
+        ? Number(d.bultos_liquidados) : null,
+      // Qué leyó la PANTALLA cuando la orden no lo dice. El selector existe para
+      // corregir una orden vieja cargada al revés; si el servidor lo ignorara,
+      // corregirla no serviría de nada.
+      incluyeIvaElegido: (d.precio_incluye_iva == null) ? null : !!d.precio_incluye_iva,
+    });
+    if (!obj.ok) return res.status(400).json({ error: obj.motivo });
+    // Lo que el productor cobra: el comprobante MÁS lo que se le reconoce por
+    // fuera. Es la misma suma que la cuenta corriente del proveedor (total +
+    // dif_gestion) y la misma que muestra la pantalla.
+    const pagar = Math.round(((parseFloat(d.total) || 0) + difG) * 100) / 100;
+    // ── Y ENTRE TODAS LAS LIQUIDACIONES DE ESA PARTIDA, TAMPOCO ──────────
+    // El cerrojo miraba cada liquidación aislada: dos parciales de 60 cajones sobre
+    // una partida de 100 pasaban las dos, y al productor se le pagaba por 120.
+    const yaLiq = db.prepare(`SELECT COALESCE(SUM(COALESCE(total,0) + COALESCE(dif_gestion,0)),0) AS t,
+          COALESCE(SUM(COALESCE(bultos_liquidados,0)),0) AS b
+        FROM liquidaciones WHERE oc_id = ? AND eliminado_en IS NULL`).get(ocId);
+    const yaPagado = Math.round((Number(yaLiq.t) || 0) * 100) / 100;
+    const topeTotal = Math.max(...(obj.admitidos || [obj.objetivo]));
+    if (yaPagado > 0.009) {
+      const plata0 = (x) => '$' + Number(x).toLocaleString('es-AR',
+        { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      if (Math.round((yaPagado + pagar - topeTotal) * 100) / 100 > 0.01) {
+        return res.status(400).json({ error:
+          'Esa partida ya tiene liquidaciones por ' + plata0(yaPagado) + ' y se pactó en '
+          + plata0(topeTotal) + '. Con ésta le estarías pagando ' + plata0(yaPagado + pagar) + '.' });
+      }
+    }
+    if (!cierraContraLoAcordado(pagar, obj)) {
+      const plata = (x) => '$' + Number(x).toLocaleString('es-AR',
+        { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      return res.status(400).json({ error:
+        'Esta partida se compró a PRECIO CERRADO: el productor cobra '
+        + plata(obj.objetivo)
+        + (obj.entera ? ' por la partida entera'
+                      : ' (' + plata(obj.precio) + ' × ' + obj.cantidad + ')')
+        + (obj.dice_iva ? ', precio ' + obj.dice_iva : '')
+        + '. Esta liquidación le paga ' + plata(pagar) + '. '
+        + 'Si cambió la condición, se modifica LA ORDEN DE COMPRA — no el papel donde cobra.' });
+    }
   }
 
   // Verificar duplicado
