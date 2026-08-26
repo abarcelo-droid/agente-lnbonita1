@@ -27,6 +27,7 @@ import { estadoSync, diagnostico, syncSheets, verificarPlanilla } from '../servi
 import { nivelEnModulo } from '../servicios/permisos.js';
 import { detectar, sinMargen, TIPOS, UMBRALES } from '../servicios/oportunidades.js';
 import { generarOportunidadesPDF } from '../servicios/oportunidadesPDF.js';
+import { detallePorProducto, detalleClientesPerdidos } from '../servicios/interanualDetalle.js';
 
 const router = express.Router();
 
@@ -574,12 +575,30 @@ router.get('/oportunidades.pdf', requireAuth, (req, res) => {
     // Cuántas entran. Un informe de doscientas hojas no lo lee nadie; el pedido era "las más
     // importantes", y son las primeras de una lista que ya viene ordenada por plata en juego.
     const tope = Math.min(Math.max(parseInt(req.query.tope, 10) || 25, 1), 200);
-    const buf = generarOportunidadesPDF(r.data, {
-      tope,
-      hoy: new Date().toLocaleDateString('es-AR'),
-    });
+
+    // Las otras dos miradas del mismo mes. Se piden acá y no dentro del generador para que el
+    // PDF siga siendo una función que dibuja lo que le dan: sin base adentro, se puede probar
+    // sin levantar nada.
+    //
+    // Y SALEN DE LA MISMA VENTANA Y EL MISMO WHERE que las oportunidades. Si cada sección
+    // armara su propio recorte, el informe podría decir "perdimos a COTO" en una hoja y no
+    // tenerlo en la otra, y nadie sabría cuál de las dos mirar.
     const v = r.data.ventana;
-    const nombre = 'oportunidades-' + String(v.mes || '').replace(/[^w]/g, '') + '-' + v.actual + '.pdf';
+    const { where, params } = whereVentana(req.query, v);
+    const por_producto = detallePorProducto(db, where, params, v, {
+      tope: Math.min(Math.max(parseInt(req.query.productos, 10) || 8, 1), 40),
+    });
+    const clientes_perdidos = detalleClientesPerdidos(db, where, params, v, {
+      tope: Math.min(Math.max(parseInt(req.query.perdidos, 10) || 10, 1), 60),
+    });
+
+    const buf = generarOportunidadesPDF(
+      Object.assign({}, r.data, { por_producto, clientes_perdidos }),
+      { tope, hoy: new Date().toLocaleDateString('es-AR') }
+    );
+    // La barra de la clase se había perdido al escribir el archivo y quedaba [^w], que borra
+    // TODO menos la letra w: el nombre salía 'oportunidades--2026-2027.pdf', sin el mes.
+    const nombre = 'oportunidades-' + String(v.mes || '').replace(/[^0-9A-Za-z]/g, '') + '-' + v.actual + '.pdf';
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', 'attachment; filename="' + nombre + '"');
     res.send(buf);

@@ -1,13 +1,26 @@
 // src/servicios/oportunidadesPDF.js
 // ── EL RADAR, EN PAPEL, PARA SALIR A TRABAJAR ────────────────────────────────────────
 // El informe del comercial. No es la pantalla impresa: la pantalla ordena por plata y sirve
-// para decidir a qué apuntar; el papel se lleva a una visita, así que va AGRUPADO POR
-// CLIENTE. Una visita es un cliente, y tenerlo desparramado en doce renglones de una lista
-// ordenada por importe obliga a rearmarlo a mano antes de salir.
+// para decidir a qué apuntar; el papel se lleva a una visita.
 //
-// Y explica. El que lo recibe no estuvo en la conversación donde se definieron las reglas:
-// cada tipo lleva qué significa y QUÉ HACER con eso. Un listado de nombres y números sin
-// eso se lee como un reproche, no como una herramienta.
+// Tiene tres cuerpos, porque son tres formas distintas de mirar el mismo mes y cada una
+// contesta una pregunta que las otras no:
+//
+//   1. POR CLIENTE — las oportunidades más importantes, agrupadas. Una visita es un cliente,
+//      y tenerlas desparramadas en una lista ordenada por importe obliga a rearmarlas a mano
+//      antes de salir.
+//   2. POR PRODUCTO — el foco puesto en la mercadería: de este producto, a quién le dejamos
+//      de vender, a quién le vendemos menos, y de qué proveedor dejó de venir. Es la mirada
+//      del que compra, no la del que vende.
+//   3. CLIENTES PERDIDOS EN DETALLE — el que no compró nada, abierto en qué llevaba y de qué
+//      proveedor era. Es lo que hace falta para saber si reponerlo es posible ANTES de ir.
+//
+// Y LA LEYENDA VA AL FINAL. Es de consulta: se lee una vez y después se vuelve a ella cuando
+// algo no se entiende. Adelante empujaba hacia abajo lo único que se mira todos los días.
+//
+// El que lo recibe no estuvo en la conversación donde se definieron las reglas, así que cada
+// sección abre diciendo cómo se lee. Un listado de nombres y números sin eso se lee como un
+// reproche, no como una herramienta.
 //
 // Mismo motor y misma identidad visual que el resto de los PDF del sistema (ocPDF,
 // recepcionCalidadPDF): logo, paleta azul/gris, emisor.
@@ -190,40 +203,59 @@ export function generarOportunidadesPDF(data, opciones) {
   doc.setTextColor(...NEGRO);
   y += 28;
 
-  // ── La guía: qué significa cada cosa y qué hacer ───────────────────────────────
   const presentes = [...new Set(items.map(x => x.tipo))];
-  if (presentes.length) {
-    espacio(14);
-    doc.setFont("helvetica", "bold").setFontSize(10).setTextColor(...AZUL);
-    doc.text("Qué significa cada cosa, y qué hacer", M, y); y += 6;
-    for (const t of presentes) {
-      const g = GUIA[t]; if (!g) continue;
-      const lq = doc.splitTextToSize(g.que, W - 2 * M - 6);
-      const lh = doc.splitTextToSize("Qué hacer: " + g.hacer, W - 2 * M - 6);
-      const alto = 6 + lq.length * 4 + lh.length * 4 + 4;
-      espacio(alto);
-      doc.setDrawColor(...g.color); doc.setLineWidth(1.4);
-      doc.line(M, y - 1, M, y + alto - 6);
-      doc.setLineWidth(0.2);
-      doc.setFont("helvetica", "bold").setFontSize(9).setTextColor(...g.color);
-      doc.text(g.label, M + 4, y + 2.5);
-      doc.setFont("helvetica", "normal").setFontSize(8.5).setTextColor(...NEGRO);
-      doc.text(lq, M + 4, y + 7);
-      doc.setTextColor(...GRIS);
-      doc.text(lh, M + 4, y + 7 + lq.length * 4);
-      doc.setTextColor(...NEGRO);
-      y += alto;
-    }
-    y += 2;
-  }
 
-  // ── Cliente por cliente ────────────────────────────────────────────────────────
+  // Helpers de sección, para que las tres se vean iguales y expliquen igual.
+  const titulo = (txt, bajada) => {
+    espacio(bajada ? 20 : 13);
+    doc.setFont("helvetica", "bold").setFontSize(11).setTextColor(...AZUL);
+    doc.text(txt, M, y); y += 5;
+    if (bajada) {
+      doc.setFont("helvetica", "normal").setFontSize(8.5).setTextColor(...GRIS);
+      const l = doc.splitTextToSize(bajada, W - 2 * M);
+      doc.text(l, M, y); y += l.length * 3.9 + 2;
+    }
+    doc.setTextColor(...NEGRO);
+    doc.setDrawColor(...AZUL); doc.setLineWidth(0.4);
+    doc.line(M, y, W - M, y); y += 5;
+    doc.setLineWidth(0.2);
+  };
+  // Una lista chica con rótulo. Cuando está vacía se DICE que está vacía: un espacio en
+  // blanco se lee como "no lo calculamos", y "no perdimos ninguno" es una buena noticia.
+  const listita = (rotulo, color, filas, vacia) => {
+    const alto = 5 + Math.max(1, filas.length) * 4.2;
+    espacio(alto + 2);
+    doc.setFont("helvetica", "bold").setFontSize(8).setTextColor(...color);
+    doc.text(rotulo, M + 4, y); y += 4.4;
+    doc.setFont("helvetica", "normal").setFontSize(8).setTextColor(...NEGRO);
+    if (!filas.length) {
+      doc.setTextColor(...GRIS);
+      doc.text(vacia || "Ninguno.", M + 8, y); y += 4.6;
+      doc.setTextColor(...NEGRO);
+      return;
+    }
+    for (const f of filas) {
+      espacio(6);
+      const der = f.der || "";
+      const izq = doc.splitTextToSize(String(f.izq), W - 2 * M - 20 - doc.getTextWidth(der));
+      doc.text(izq[0], M + 8, y);
+      if (der) {
+        doc.setFont("helvetica", "bold");
+        doc.text(der, W - M - 3, y, { align: "right" });
+        doc.setFont("helvetica", "normal");
+      }
+      y += 4.2;
+    }
+    y += 1;
+  };
+
+  // ── 1. Cliente por cliente ─────────────────────────────────────────────────────
   const grupos = armado.grupos;
 
-  espacio(14);
-  doc.setFont("helvetica", "bold").setFontSize(10).setTextColor(...AZUL);
-  doc.text("Cliente por cliente — las " + items.length + " más importantes", M, y); y += 7;
-  doc.setTextColor(...NEGRO);
+  titulo("1 · Cliente por cliente — las " + items.length + " más importantes",
+    "Cada cliente con lo que hay en juego con él, para poder trabajarlo de una sola vez. "
+    + "El color de la barra dice de qué tipo es cada punto; qué significa cada tipo y qué "
+    + "hacer con él está en la última página.");
 
   for (const g of grupos) {
     espacio(20);
@@ -271,6 +303,141 @@ export function generarOportunidadesPDF(data, opciones) {
     y += 4;
   }
 
+  // ── 2. POR PRODUCTO ────────────────────────────────────────────────────────────
+  // La mirada de la mercadería: acá el sujeto es el producto y los clientes son el detalle.
+  // Es la vuelta exacta de la sección 1, y por eso vale la pena tenerlas las dos: la misma
+  // caída se ve como "perdimos a COTO" o como "la cebolla se cayó", y no se actúa igual.
+  const prods = data.por_producto || [];
+  if (prods.length) {
+    titulo("2 · Por producto — de dónde viene y a dónde va",
+      "Los " + prods.length + " productos que más se movieron contra el año pasado, para "
+      + "arriba o para abajo. De cada uno: a qué cliente le dejamos de vender, a cuál le "
+      + "vendemos bastante menos, y de qué proveedor dejó de venir la mercadería.");
+
+    for (const p of prods) {
+      espacio(30);
+      const sube = (p.var_usd || 0) >= 0;
+      doc.setFillColor(...AZUL_CL);
+      doc.rect(M, y - 4.5, W - 2 * M, 8, "F");
+      doc.setFont("helvetica", "bold").setFontSize(10).setTextColor(...AZUL);
+      doc.text(String(p.producto).slice(0, 40), M + 3, y + 1);
+      doc.setFont("helvetica", "bold").setFontSize(9).setTextColor(...(sube ? VERDE : ROJO));
+      doc.text((sube ? "+" : "") + usd(p.var_usd) + (p.var_usd_pct != null ? "  (" + (sube ? "+" : "") + p.var_usd_pct + "%)" : ""),
+        W - M - 3, y + 1, { align: "right" });
+      doc.setTextColor(...NEGRO);
+      y += 8.5;
+
+      // La línea de contexto: los dos años, en plata, kilos y cuántos clientes. Sin los
+      // clientes no se distingue "vendemos menos a los mismos" de "nos quedamos sin clientes".
+      doc.setFont("helvetica", "normal").setFontSize(8).setTextColor(...GRIS);
+      doc.text(v.anterior + ": " + usd(p.usd_ant) + " · " + kg(p.kg_ant) + " · " + p.clientes_ant + " cliente(s)"
+        + "     |     " + v.actual + ": " + usd(p.usd_act) + " · " + kg(p.kg_act) + " · " + p.clientes_act + " cliente(s)",
+        M + 4, y);
+      doc.setTextColor(...NEGRO);
+      y += 5.5;
+
+      listita("Clientes que dejaron de llevarlo", ROJO,
+        p.clientes_perdidos.map(c => ({ izq: c.cliente + "  ·  llevaba " + kg(c.kg_ant), der: usd(c.usd_ant) })),
+        "Ninguno: los que lo compraban, lo siguen comprando.");
+      listita("Clientes que llevan bastante menos", AMBAR,
+        p.clientes_menos.map(c => ({
+          izq: c.cliente + "  ·  " + kg(c.kg_ant) + " → " + kg(c.kg_act) + "  (" + c.caida_pct + "%)",
+          der: usd(c.usd_ant) + " → " + usd(c.usd_act) })),
+        "Ninguno cayó más del umbral.");
+      listita("Proveedores que dejaron de traerlo", AZULC,
+        p.proveedores_perdidos.map(x => ({ izq: x.proveedor + "  ·  traía " + kg(x.kg_ant), der: usd(x.usd_ant) })),
+        "Ninguno: la mercadería sigue viniendo de los mismos.");
+      if (p.proveedores_hoy.length) {
+        listita("De quién viene hoy", VERDE,
+          p.proveedores_hoy.map(x => ({ izq: x.proveedor + (x.es_nuevo ? "  ·  NUEVO este año" : ""), der: usd(x.usd_act) + " · " + kg(x.kg_act) })));
+      }
+      y += 3;
+    }
+  }
+
+  // ── 3. CLIENTES PERDIDOS, EN DETALLE ───────────────────────────────────────────
+  const perdidos = data.clientes_perdidos || [];
+  if (perdidos.length) {
+    titulo("3 · Clientes perdidos — qué llevaban y de quién era",
+      "Los que compraban en este mes del año pasado y este año no compraron nada. Abierto en "
+      + "qué se llevaban y de qué proveedor venía esa mercadería: es lo que hace falta para "
+      + "saber si reponerlo es posible ANTES de ir a buscarlo.");
+
+    for (const c of perdidos) {
+      espacio(24);
+      doc.setFillColor(254, 226, 226);
+      doc.rect(M, y - 4.5, W - 2 * M, 8, "F");
+      doc.setFont("helvetica", "bold").setFontSize(10).setTextColor(...ROJO);
+      doc.text(String(c.cliente).slice(0, 44), M + 3, y + 1);
+      doc.setFont("helvetica", "bold").setFontSize(9);
+      doc.text(usd(c.usd) + "  ·  " + kg(c.kg), W - M - 3, y + 1, { align: "right" });
+      doc.setTextColor(...NEGRO);
+      y += 8.5;
+      if (c.vendedor) {
+        doc.setFont("helvetica", "normal").setFontSize(8).setTextColor(...GRIS);
+        doc.text("Lo atendía " + c.vendedor + " · " + mes(v.mes) + " de " + v.anterior, M + 4, y);
+        doc.setTextColor(...NEGRO);
+        y += 5;
+      }
+      // Encabezado de las tres columnas: sin rótulo, "GIGLIO" al lado de "CEBOLLA" no dice
+      // si es otro producto o de dónde vino.
+      doc.setFont("helvetica", "bold").setFontSize(7.5).setTextColor(...GRIS);
+      doc.text("PRODUCTO", M + 8, y);
+      doc.text("VENÍA DE", M + 68, y);
+      doc.text("KILOS", W - M - 42, y, { align: "right" });
+      doc.text("USD", W - M - 3, y, { align: "right" });
+      doc.setTextColor(...NEGRO);
+      y += 4;
+      doc.setFont("helvetica", "normal").setFontSize(8);
+      for (const l of c.lineas) {
+        espacio(6);
+        doc.text(String(l.producto).slice(0, 30), M + 8, y);
+        doc.setTextColor(...GRIS);
+        doc.text(String(l.proveedor).slice(0, 26), M + 68, y);
+        doc.setTextColor(...NEGRO);
+        doc.text(kg(l.kg), W - M - 42, y, { align: "right" });
+        doc.setFont("helvetica", "bold");
+        doc.text(usd(l.usd), W - M - 3, y, { align: "right" });
+        doc.setFont("helvetica", "normal");
+        y += 4.3;
+      }
+      y += 4;
+    }
+  }
+
+  // ── ÚLTIMA PÁGINA: la leyenda ──────────────────────────────────────────────────
+  // Va sola y al final, con salto de página forzado. Es material de consulta: se lee una vez
+  // y se vuelve a ella cuando algo no se entiende. Adelante empujaba hacia abajo lo único
+  // que se mira todos los días, y la primera hoja de un informe es la que se mira.
+  pie();
+  doc.addPage(); pagina++;
+  membrete("Cómo se lee este informe");
+
+  doc.setFont("helvetica", "bold").setFontSize(11).setTextColor(...AZUL);
+  doc.text("Qué significa cada cosa, y qué hacer", M, y); y += 6;
+  doc.setTextColor(...NEGRO);
+  // Los cinco tipos, aparezcan o no en este informe: es una hoja de referencia, y el mes que
+  // viene el que la guardó se va a encontrar con los que hoy no salieron.
+  for (const t of Object.keys(GUIA)) {
+    const g = GUIA[t];
+    const lq = doc.splitTextToSize(g.que, W - 2 * M - 6);
+    const lh = doc.splitTextToSize("Qué hacer: " + g.hacer, W - 2 * M - 6);
+    const alto = 6 + lq.length * 4 + lh.length * 4 + 4;
+    espacio(alto);
+    doc.setDrawColor(...g.color); doc.setLineWidth(1.4);
+    doc.line(M, y - 1, M, y + alto - 6);
+    doc.setLineWidth(0.2);
+    doc.setFont("helvetica", "bold").setFontSize(9).setTextColor(...g.color);
+    doc.text(g.label + (presentes.includes(t) ? "" : "   (no aparece en este informe)"), M + 4, y + 2.5);
+    doc.setFont("helvetica", "normal").setFontSize(8.5).setTextColor(...NEGRO);
+    doc.text(lq, M + 4, y + 7);
+    doc.setTextColor(...GRIS);
+    doc.text(lh, M + 4, y + 7 + lq.length * 4);
+    doc.setTextColor(...NEGRO);
+    y += alto;
+  }
+  y += 3;
+
   // ── De dónde salen estos números ───────────────────────────────────────────────
   espacio(34);
   doc.setFont("helvetica", "bold").setFontSize(9).setTextColor(...AZUL);
@@ -288,6 +455,7 @@ export function generarOportunidadesPDF(data, opciones) {
   if (presentes.includes("CROSS_SELL")) {
     notas.push("«No le vendemos» pide al menos " + (u.cross_min_clientes || 0) + " clientes del mismo rubro comprando ese producto, y el valor estimado se ajusta por el tamaño del cliente.");
   }
+  notas.push("El PROVEEDOR sale de la base de VENTAS: es de dónde vino la mercadería que vendimos. No es un libro de compras — «dejó de traerlo» quiere decir que ese mes no apareció mercadería suya en lo que vendimos.");
   if (conMargen) notas.push("El orden es por margen en juego, no por facturación: una venta grande de margen fino puede valer menos que una chica de margen bueno.");
   else notas.push("El orden pesa el margen de cada operación. Tu nivel no muestra esos importes, pero la lista y el orden son los mismos que ve la dirección.");
   doc.setFont("helvetica", "normal").setFontSize(8).setTextColor(...GRIS);
