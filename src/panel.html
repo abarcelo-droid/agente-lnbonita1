@@ -20613,22 +20613,16 @@ function sgRepExport(){
 <div style="overflow-x:auto;border:1px solid var(--bor);border-radius:10px">
   <table style="width:100%;border-collapse:collapse;font-size:13px">
     <thead>
-      <tr style="background:var(--bg);border-bottom:1px solid var(--bor)">
-        <th style="padding:9px 12px;text-align:left;font-size:10px;color:var(--mut);text-transform:uppercase">Nro.</th>
-        <th style="padding:9px 12px;text-align:left;font-size:10px;color:var(--mut);text-transform:uppercase">Fecha</th>
-        <th style="padding:9px 12px;text-align:left;font-size:10px;color:var(--mut);text-transform:uppercase">Proveedor</th>
-        <th style="padding:9px 12px;text-align:left;font-size:10px;color:var(--mut);text-transform:uppercase">Forma de Pago</th>
-        <th style="padding:9px 12px;text-align:right;font-size:10px;color:var(--mut);text-transform:uppercase">Monto</th>
-        <th style="padding:9px 12px;text-align:center;font-size:10px;color:var(--mut);text-transform:uppercase">Estado</th>
-        <th style="width:80px"></th>
+      <tr id="op-thead-orden" style="background:var(--bg);border-bottom:1px solid var(--bor)">
+<!-- Los títulos los arma opPintarCabecera(): tienen que llevar la flecha del orden. -->
       </tr>
-      <tr style="background:var(--bg)">
-        <th><input type="text" placeholder="🔍" oninput="tablaFiltrar('op-tbody',0,this.value)" style="width:100%;font-size:11px;padding:3px 5px;border:1px solid var(--bor2);border-radius:4px"></th>
-        <th><input type="text" placeholder="🔍" oninput="tablaFiltrar('op-tbody',1,this.value)" style="width:100%;font-size:11px;padding:3px 5px;border:1px solid var(--bor2);border-radius:4px"></th>
-        <th><input type="text" placeholder="🔍" oninput="tablaFiltrar('op-tbody',2,this.value)" style="width:100%;font-size:11px;padding:3px 5px;border:1px solid var(--bor2);border-radius:4px"></th>
-        <th><input type="text" placeholder="🔍" oninput="tablaFiltrar('op-tbody',3,this.value)" style="width:100%;font-size:11px;padding:3px 5px;border:1px solid var(--bor2);border-radius:4px"></th>
+      <tr id="op-thead-filtros" style="background:var(--bg)">
+        <th><input type="text" placeholder="🔍" data-col="0" oninput="tablaFiltrar('op-tbody',0,this.value)" style="width:100%;font-size:11px;padding:3px 5px;border:1px solid var(--bor2);border-radius:4px"></th>
+        <th><input type="text" placeholder="🔍" data-col="1" oninput="tablaFiltrar('op-tbody',1,this.value)" style="width:100%;font-size:11px;padding:3px 5px;border:1px solid var(--bor2);border-radius:4px"></th>
+        <th><input type="text" placeholder="🔍" data-col="2" oninput="tablaFiltrar('op-tbody',2,this.value)" style="width:100%;font-size:11px;padding:3px 5px;border:1px solid var(--bor2);border-radius:4px"></th>
+        <th><input type="text" placeholder="🔍" data-col="3" oninput="tablaFiltrar('op-tbody',3,this.value)" style="width:100%;font-size:11px;padding:3px 5px;border:1px solid var(--bor2);border-radius:4px"></th>
         <th></th>
-        <th><input type="text" placeholder="🔍" oninput="tablaFiltrar('op-tbody',5,this.value)" style="width:100%;font-size:11px;padding:3px 5px;border:1px solid var(--bor2);border-radius:4px"></th>
+        <th><input type="text" placeholder="🔍" data-col="5" oninput="tablaFiltrar('op-tbody',5,this.value)" style="width:100%;font-size:11px;padding:3px 5px;border:1px solid var(--bor2);border-radius:4px"></th>
         <th></th>
       </tr>
     </thead>
@@ -51433,9 +51427,65 @@ function opCargar() {
   if (estado) params.push('estado='+estado);
   if (provId) params.push('proveedorId='+provId);
   opApi('/'+(params.length?'?'+params.join('&'):'')).then(function(r) {
-    var data = r.data || [];
-    EXPORT_DATA.op = data;
+    EXPORT_DATA.op = r.data || [];
+    opPintar();
+  });
+}
+
+// ── ORDENAR LA TABLA ────────────────────────────────────────────────────────────────
+// Se ordena EXPORT_DATA.op, que es el dato tal como vino, y se repinta. Ordenar las filas
+// del HTML obligaría a leer "$ 1.234,56" del texto de la celda y volver a interpretarlo:
+// la misma adivinanza de separadores que ya costó caro acá. Y de paso no hace falta volver
+// a pedirle los datos al servidor para cambiar el orden.
+var OP_ORD = { col: null, dir: 1 };
+var OP_COLS = {
+  numero:    function(o){ return o.numero || ''; },
+  fecha:     function(o){ return o.fecha || ''; },            // ISO: ordena como texto
+  proveedor: function(o){ return o.proveedor_nombre || ''; },
+  forma:     function(o){ return o.forma_pago || ''; },
+  monto:     function(o){ return Number(o.monto_total) || 0; },
+  estado:    function(o){ return o.estado || ''; },
+};
+// Un clic ordena ascendente; el mismo de nuevo lo da vuelta; el tercero vuelve al orden
+// original, para poder salir sin recargar.
+function opOrdenar(col) {
+  if (OP_ORD.col !== col)     { OP_ORD.col = col; OP_ORD.dir = 1; }
+  else if (OP_ORD.dir === 1)  { OP_ORD.dir = -1; }
+  else                        { OP_ORD.col = null; OP_ORD.dir = 1; }
+  opPintar();
+}
+// La flecha en el encabezado: sin ella, dos clics dan dos resultados distintos y no hay
+// forma de saber cuál se está viendo.
+function opFlecha(col) {
+  var act = OP_ORD.col === col;
+  return '<span style="opacity:' + (act ? '1' : '.25') + ';margin-left:4px">' + (act && OP_ORD.dir < 0 ? '▼' : '▲') + '</span>';
+}
+function opPintarCabecera() {
+  var defs = [['numero','Nro.','left'],['fecha','Fecha','left'],['proveedor','Proveedor','left'],
+              ['forma','Forma de Pago','left'],['monto','Monto','right'],['estado','Estado','center']];
+  var fila = document.getElementById('op-thead-orden');
+  if (!fila) return;
+  fila.innerHTML = defs.map(function(d){
+    return '<th style="padding:9px 12px;text-align:' + d[2] + ';font-size:10px;color:var(--mut);text-transform:uppercase;cursor:pointer;user-select:none"'
+      + ' title="Ordenar por ' + d[1] + '" onclick="opOrdenar(\'' + d[0] + '\')">' + d[1] + opFlecha(d[0]) + '</th>';
+  }).join('') + '<th style="width:80px"></th>';
+}
+
+function opPintar() {
+    var data = (EXPORT_DATA.op || []).slice();
     var tbody = document.getElementById('op-tbody');
+    if (!tbody) return;
+    opPintarCabecera();
+    if (OP_ORD.col && OP_COLS[OP_ORD.col]) {
+      var get = OP_COLS[OP_ORD.col];
+      data.sort(function(a, b) {
+        var va = get(a), vb = get(b);
+        var c = (typeof va === 'number' && typeof vb === 'number')
+          ? va - vb
+          : String(va).localeCompare(String(vb), 'es', { numeric: true, sensitivity: 'base' });
+        return c * OP_ORD.dir;
+      });
+    }
     if (!data.length) { tbody.innerHTML = '<tr><td colspan="7" class="emp">Sin órdenes de pago.</td></tr>'; return; }
     var formas = { transferencia:'Transferencia', efectivo:'Efectivo', cheque_propio:'Cheque Propio', cheque_tercero:'Cheque Tercero' };
     tbody.innerHTML = data.map(function(op) {
@@ -51454,6 +51504,17 @@ function opCargar() {
             : '')
         + '</td></tr>';
     }).join('');
+    opReaplicarFiltros();
+}
+
+// Los filtros por columna esconden filas del HTML. Cuando se repinta el tbody —al ordenar—
+// esas filas vuelven, pero el texto sigue en el cuadro: habría un filtro puesto que no
+// filtra. Se vuelven a aplicar los que tengan algo escrito.
+function opReaplicarFiltros() {
+  var fila = document.getElementById('op-thead-filtros');
+  if (!fila) return;
+  fila.querySelectorAll('input[data-col]').forEach(function(inp) {
+    if (inp.value.trim()) tablaFiltrar('op-tbody', parseInt(inp.dataset.col, 10), inp.value);
   });
 }
 

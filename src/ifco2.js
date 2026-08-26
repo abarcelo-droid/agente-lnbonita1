@@ -8,7 +8,9 @@
 (function () {
   'use strict';
   var API = '/api/ifco';
-  var st = { view: null, resumen: null, provNombre: {}, search: '00015-01', despEstado: '', soloSeguimiento: false };
+  var st = { view: null, resumen: null, provNombre: {}, search: '00015-01', despEstado: '', soloSeguimiento: false,
+    // Orden de la tabla de despachos. col=null es el orden que manda el servidor.
+    despOrd: { col: null, dir: 1 } };
 
   // ---------- helpers ----------
   function fetchJSON(url, opts) {
@@ -199,6 +201,55 @@
   // =========================================================================
   // 2) DESPACHOS (estrella)
   // =========================================================================
+  // ── ORDENAR LA TABLA ──────────────────────────────────────────────────────────────
+  // Se ordena el ARREGLO, no las filas del HTML. Ordenar el DOM obligaría a leer "1.234"
+  // o "$ 1.234,56" del texto de la celda y volver a interpretarlo, que es exactamente el
+  // tipo de adivinanza que ya costó caro en este repo. Acá el dato todavía es un número.
+  //
+  // El ESTADO no se ordena alfabéticamente: es un circuito (despachado → sellado → enviado
+  // → presentado) y alfabéticamente "anulado" quedaría primero y "sellado" antes que
+  // "presentado", que no significa nada para el que mira.
+  var ORDEN_ESTADO = { despachado: 1, sellado: 2, enviado: 3, presentado: 4, anulado: 9 };
+  var COLS_DESP = {
+    ifco:    function (r) { return r.ifco || ''; },
+    cadena:  function (r) { return r.cadena || ''; },
+    emi:     function (r) { return r.emi || ''; },          // ISO: ordena como texto
+    desp:    function (r) { return r.desp || 0; },
+    estado:  function (r) { return ORDEN_ESTADO[r.estado] || 99; },
+    usuario: function (r) { return r.usuario || ''; },
+  };
+  function ordenarDesp(R) {
+    var o = st.despOrd;
+    if (!o.col || !COLS_DESP[o.col]) return R;
+    var get = COLS_DESP[o.col];
+    return R.slice().sort(function (a, b) {
+      var va = get(a), vb = get(b);
+      var c = (typeof va === 'number' && typeof vb === 'number')
+        ? va - vb
+        // numeric:true para que "00015-9" vaya antes que "00015-10".
+        : String(va).localeCompare(String(vb), 'es', { numeric: true, sensitivity: 'base' });
+      return c * o.dir;
+    });
+  }
+  // El encabezado dice con qué está ordenado y hacia dónde. Sin la flecha, dos clics dan
+  // dos resultados distintos y no hay forma de saber cuál es cuál.
+  function thOrd(col, label, clase) {
+    var o = st.despOrd, act = o.col === col;
+    return '<th' + (clase ? ' class="' + clase + '"' : '') + ' style="cursor:pointer;user-select:none"'
+      + ' title="Ordenar por ' + label.replace(/<[^>]*>/g, '') + '"'
+      + ' onclick="__ifco2Ord(\'' + col + '\')">' + label
+      + '<span style="opacity:' + (act ? '1' : '.25') + ';margin-left:4px">' + (act && o.dir < 0 ? '▼' : '▲') + '</span></th>';
+  }
+  // Un clic ordena ascendente; el mismo clic de nuevo lo da vuelta; el tercero vuelve al
+  // orden original, para poder salir sin recargar la pantalla.
+  window.__ifco2Ord = function (col) {
+    var o = st.despOrd;
+    if (o.col !== col)      { o.col = col; o.dir = 1; }
+    else if (o.dir === 1)   { o.dir = -1; }
+    else                    { o.col = null; o.dir = 1; }
+    nav('despachos');
+  };
+
   RENDER.despachos = function (h) {
     var qs = new URLSearchParams();
     if (st.search) qs.set('search', st.search);
@@ -218,6 +269,7 @@
       var nSeg = R.filter(function (r) { return r.seg; }).length;
       segs += '<button class="' + (st.soloSeguimiento ? 'on' : '') + '" style="color:#b45309" onclick="__ifco2SegV(\'soloSeguimiento\',\'despachos\',' + (st.soloSeguimiento ? 'false' : 'true') + ')">🚩 Seguimiento<span class="n">' + nSeg + '</span></button>';
 
+      R = ordenarDesp(R);
       var rowsHtml = R.length ? R.map(function (r) {
         var dchip = (r.estado === 'despachado') ? diasChip(r.dias, 15, 30) : (r.estado === 'sellado') ? diasChip(r.dias, 20, 25) : '<span class="dias ok">' + r.dias + '&thinsp;d</span>';
         var origenSub = r.origen === 'proveedor_directo' ? '<div class="sub2" style="color:var(--i-plum)">Directo · ' + esc(r.prov || '') + '</div>' : '';
@@ -259,7 +311,9 @@
         + '<div class="filters"><div class="seg">' + segs + '</div>'
         + '<span class="chip-count"><b>' + R.length + '</b> remitos · <b>' + nf(totDesp) + '</b> caj. despachados · <b class="num-neg">' + totRech + '</b> rech.</span></div>'
         + '<div class="card"><div class="card-b flush"><div class="tbl-wrap"><table class="dt"><thead><tr>'
-        + '<th>N° IFCO</th><th>Cadena</th><th>Emisión</th><th class="r">Despacho · cuadre</th><th>Estado · antigüedad</th><th class="c">Usuario</th><th></th>'
+        + thOrd('ifco', 'N° IFCO') + thOrd('cadena', 'Cadena') + thOrd('emi', 'Emisión')
+        + thOrd('desp', 'Despacho · cuadre', 'r') + thOrd('estado', 'Estado · antigüedad')
+        + thOrd('usuario', 'Usuario', 'c') + '<th></th>'
         + '</tr></thead><tbody>' + rowsHtml + '</tbody></table></div></div></div>'
         + '<div class="foot-note">' + ic('mouse-pointer-click') + ' Hacé click en un remito para abrir su trazabilidad. El sellado se carga desde la app móvil del operador o por foto del remito firmado (OCR).</div>';
     });
