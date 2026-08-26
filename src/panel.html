@@ -2789,6 +2789,46 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
              Contables — y si estaba mal, ya estaba hecho. El cuadro es el único
              momento en que se puede frenar. -->
         <div id="sgfd-asiento" style="margin-top:14px"></div>
+
+        <!-- ══ SE COBRA EN LA VENTANILLA ═══════════════════════════════
+             Pablo, 25/8/2026: "puede ser que al hacer una factura se cobre en el
+             mismo momento; entonces debemos dar la opción de esa venta por
+             ventanilla cobrarla ahí con efectivo (caja), transferencia o cheque".
+
+             SON DOS PREGUNTAS DISTINTAS SOBRE LA MISMA VENTA. Una es fiscal —a quién
+             se le informa el comprobante—; la otra es comercial —si la plata entra
+             ahora o queda en la cuenta corriente—. Se combinan libres: un cliente que
+             no es responsable inscripto recibe una Factura B Y tiene cuenta corriente
+             igual. Hasta ahora estaban atadas.
+
+             El cobro puede ser PARCIAL: lo que no entra queda en la cuenta corriente. -->
+        <div style="margin-top:14px;border:1px solid var(--bor);border-radius:10px;padding:12px 14px;background:var(--bg)">
+          <label style="display:flex;align-items:center;gap:7px;cursor:pointer;font-weight:600;font-size:13px">
+            <input type="checkbox" id="sgfd-cobrar" onchange="sgFdCobroToggle()">
+            <span>💵 Se cobra ahora</span>
+            <span style="font-weight:400;font-size:11.5px;color:var(--mut)">— venta de ventanilla</span>
+          </label>
+          <div id="sgfd-cobro-box" style="display:none;margin-top:10px">
+            <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end">
+              <label style="font-size:11.5px;color:var(--mut)">Cómo<br>
+                <select id="sgfd-cobro-forma" onchange="sgFdCobroForma()" style="padding:6px 8px;font-size:12.5px">
+                  <option value="efectivo">Efectivo</option>
+                  <option value="transferencia">Transferencia</option>
+                  <option value="cheque">Cheque de tercero</option>
+                </select></label>
+              <label style="font-size:11.5px;color:var(--mut)" id="sgfd-cobro-cta-lbl">A qué cuenta<br>
+                <select id="sgfd-cobro-cta" style="padding:6px 8px;font-size:12.5px;min-width:200px"></select></label>
+              <label style="font-size:11.5px;color:var(--mut)">Cuánto entra<br>
+                <input id="sgfd-cobro-monto" type="text" inputmode="decimal"
+                       style="padding:6px 8px;font-size:12.5px;width:150px;text-align:right"></label>
+              <label style="font-size:11.5px;color:var(--mut)">Referencia<br>
+                <input id="sgfd-cobro-ref" type="text" placeholder="nº de cheque, comprobante…"
+                       style="padding:6px 8px;font-size:12.5px;width:180px"></label>
+            </div>
+            <div id="sgfd-cobro-nota" style="font-size:11.5px;color:var(--mut);margin-top:7px"></div>
+          </div>
+        </div>
+
         <div style="text-align:right;margin-top:12px">
           <button class="btn bb" id="sgfd-emitir-btn" onclick="sgFdEmitir()">Emitir comprobante</button>
         </div>
@@ -15392,6 +15432,115 @@ function sgAsientoCuadro(d, titulo, donde){
     + '<tbody>' + fil + tot + '</tbody></table></div>', titulo || 'Asiento contable de esta operación');
 }
 
+// ══ LA VENTA DE VENTANILLA ═════════════════════════════════════════════
+//
+// Facturar y cobrar son dos cosas, y hasta ahora había que hacerlas en dos pantallas:
+// se emitía acá y se iba a Cuenta corriente a tomar el cobro. Para una venta de
+// mostrador —que se paga y se va— eso es un viaje de ida y vuelta por cada cliente.
+//
+// El cobro REUSA el circuito de cobranzas que ya existe: ahí están la caja, el banco,
+// el cheque en cartera y el asiento. Escribir una segunda forma de cobrar sería tener
+// dos, y una de las dos se olvidaría de algo.
+//
+// Y va DESPUÉS de emitir, no antes: si el cobro falla, el comprobante ya existe y se
+// cobra desde Cuenta corriente. Al revés —cobrar y después emitir— dejaría plata
+// entrada contra una factura que no salió.
+var SG_FD_CTAS = [];
+function sgFdCobroToggle(){
+  var on = eid('sgfd-cobrar') && eid('sgfd-cobrar').checked;
+  var box = eid('sgfd-cobro-box'); if (box) box.style.display = on ? '' : 'none';
+  if (!on) return;
+  if (!SG_FD_CTAS.length) {
+    api('/api/sg/tesoreria/cuentas').then(function(r){
+      SG_FD_CTAS = (r && r.ok) ? (r.data || []) : [];
+      sgFdCobroForma();
+    });
+  } else { sgFdCobroForma(); }
+  sgFdCobroMonto();
+}
+// La cuenta que corresponde a la forma de cobro: efectivo entra a una CAJA,
+// transferencia a un BANCO. El cheque no entra a ninguna cuenta: queda en cartera
+// hasta que se deposite, y eso ya lo resuelve el circuito de cobranzas.
+function sgFdCobroForma(){
+  var forma = (eid('sgfd-cobro-forma') || {}).value || 'efectivo';
+  var lbl = eid('sgfd-cobro-cta-lbl'), sel = eid('sgfd-cobro-cta');
+  if (!sel) return;
+  if (forma === 'cheque') {
+    if (lbl) lbl.style.display = 'none';
+    eid('sgfd-cobro-nota').innerHTML = 'El cheque queda <b>en cartera</b> hasta que se deposite o se endose. '
+      + 'Eso se hace desde Tesorería.';
+    return;
+  }
+  if (lbl) lbl.style.display = '';
+  var quiere = forma === 'efectivo' ? 'caja' : 'banco';
+  // `puedo` lo devuelve el backend: una cuenta con dueño la tocan sólo sus dueños.
+  // No ofrecer lo que va a rebotar es la misma regla del botón anular.
+  var aptas = SG_FD_CTAS.filter(function(c){
+    return String(c.tipo) === quiere && c.activo !== 0 && c.puedo !== 0;
+  });
+  sel.innerHTML = aptas.length
+    ? aptas.map(function(c){
+        return '<option value="' + c.id + '">' + escH(c.nombre)
+          + (c.ambito ? ' · ' + escH(c.ambito) : '') + '</option>'; }).join('')
+    : '<option value="">— no hay ' + (quiere === 'caja' ? 'cajas' : 'cuentas') + ' que puedas tocar —</option>';
+  eid('sgfd-cobro-nota').innerHTML = aptas.length ? ''
+    : '<span style="color:#b91c1c">Sin una ' + (quiere === 'caja' ? 'caja' : 'cuenta bancaria')
+      + ' asignada no se puede registrar el cobro. Se puede emitir igual y cobrarlo después.</span>';
+}
+// Lo que se propone cobrar es el total del comprobante. Se puede bajar: lo que no
+// entra queda en la cuenta corriente del cliente, que es exactamente lo que Pablo
+// pidió cuando dijo que el cobro puede ser parcial.
+function sgFdCobroMonto(){
+  var e = eid('sgfd-cobro-monto'); if (!e || String(e.value || '').trim()) return;
+  var incl = eid('sgfd-incluye-iva') && eid('sgfd-incluye-iva').checked;
+  var t = 0;
+  SG.fdItems.forEach(function(it){
+    var mm = sgFdMontos(it);
+    var alic = (it.alicuota != null) ? Number(it.alicuota) : 0;
+    t += incl ? mm.facturado : paRound2Fm(mm.facturado * (1 + alic / 100));
+  });
+  if (t > 0) e.value = liqPlata(paRound2Fm(t)).replace('$', '').trim();
+}
+
+// Toma el cobro contra el comprobante recién emitido, por el circuito de cobranzas
+// de siempre: él resuelve la caja, el banco, el cheque en cartera y el asiento.
+function sgFdCobrarAhora(r, cont){
+  if (!(eid('sgfd-cobrar') && eid('sgfd-cobrar').checked)) return;
+  var forma = (eid('sgfd-cobro-forma') || {}).value || 'efectivo';
+  var monto = liqNum(eid('sgfd-cobro-monto'));
+  var cta = (eid('sgfd-cobro-cta') || {}).value || null;
+  var aviso = function(txt, mal){
+    cont.innerHTML += '<div style="margin-top:8px;font-size:12.5px;color:' + (mal ? '#b91c1c' : '#166534') + '">' + txt + '</div>';
+  };
+  var limpiar = function(){
+    var chk = eid('sgfd-cobrar'); if (chk) chk.checked = false;
+    var box = eid('sgfd-cobro-box'); if (box) box.style.display = 'none';
+    ['sgfd-cobro-monto', 'sgfd-cobro-ref'].forEach(function(id){ var e = eid(id); if (e) e.value = ''; });
+  };
+  if (!(monto > 0)) { aviso('⚠ No se tomó el cobro: faltaba el monto. Cobralo desde Cuenta corriente.', true); limpiar(); return; }
+  if (forma !== 'cheque' && !cta) {
+    aviso('⚠ No se tomó el cobro: faltaba la cuenta. Cobralo desde Cuenta corriente.', true); limpiar(); return;
+  }
+  api('/api/sg/ventas/cobranzas', 'POST', {
+    cliente_id: Number(eid('sgfd-cli').value), monto: monto, forma_pago: forma,
+    cuenta_fin_id: cta ? Number(cta) : null,
+    referencia: (eid('sgfd-cobro-ref') || {}).value || null,
+    notas: 'Venta de ventanilla',
+    // Se imputa AL COMPROBANTE que se acaba de emitir: si no, la plata queda "a
+    // cuenta" y el comprobante figura impago al lado de una cobranza suelta.
+    docs: [{ tipo: 'factura', doc_id: r.factura_id, monto: monto }],
+  }).then(function(rc){
+    if (rc && rc.ok) {
+      aviso('✓ Cobrado ' + sgMoney2(monto) + ' por ' + escH(forma)
+        + (forma === 'cheque' ? ' — el cheque queda en cartera' : ''));
+    } else {
+      aviso('⚠ El comprobante salió bien, pero el cobro no se registró: '
+        + escH((rc && rc.error) || 'error') + '. Tomalo desde Cuenta corriente de clientes.', true);
+    }
+  });
+  limpiar();
+}
+
 function sgFdEmitir(){
   var cid=eid('sgfd-cli').value; if(!cid){ toast('Elegí cliente','er'); return; }
   var pv=eid('sgfd-pv').value; if(!pv){ toast('Elegí el punto de venta','er'); return; }
@@ -15453,6 +15602,10 @@ function sgFdEmitir(){
             : ' · <span style="color:var(--mut)">viaja con la factura, sin remito aparte</span>')
         +' &nbsp; <button class="btn bb bs" type="button" onclick="window.open(\'/api/sg/ventas/facturas/'+r.factura_id+'/pdf\',\'_blank\')">📄 Ver comprobante</button>';
       c.classList.add('on');
+      // EL COBRO VA DESPUÉS DE EMITIR. Si falla, el comprobante ya existe y se cobra
+      // desde Cuenta corriente: se avisa y no se pierde nada. Al revés —cobrar y
+      // después emitir— dejaría plata entrada contra una factura que no salió.
+      sgFdCobrarAhora(r, c);
       SG.fdItems=[]; sgFdInit();
     } else {
       // Si AFIP rechazó, el remito YA está hecho y la mercadería salió. Decirlo
