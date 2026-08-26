@@ -390,6 +390,22 @@ const LECTURA = [
   // dependencia queda declarada: el día que /api/sg se cierre para lectura,
   // esta pantalla no se abre vacía sin que nadie entienda por qué.
   ['sg-control-coop',       'sg/proveedores-servicio'],
+
+  // ── EL SELECTOR DE MERCADERÍA LO USAN TRES PANTALLAS ────────────────────
+  // sgItemPicker (panel.html) pide /sg/disponibilidad para la lista de productos
+  // y /sg/oferta para las partidas de uno. Lo abren Pedidos (modo 'pedido'),
+  // Remitos (modo 'remito') y Facturación directa (modo 'directa').
+  //
+  // Desde que esas dos direcciones son lectura controlada (permisos.js), sin
+  // esto el selector se abre VACÍO para el que no tenga además Stock — que es el
+  // dueño de /sg/disponibilidad—. Va en api_lectura y no en api_prefijos porque
+  // el selector sólo LEE: la mercadería la mueve el remito, no el selector.
+  ['sg-pedidos',            'sg/oferta,sg/disponibilidad'],
+  ['sg-ventas',             'sg/oferta,sg/disponibilidad'],
+  ['sg-facturar',           'sg/oferta,sg/disponibilidad'],
+  ['sg-vta-comprobantes',   'sg/oferta,sg/disponibilidad'],
+  ['sg-remitos-pend',       'sg/oferta,sg/disponibilidad'],
+  ['sg-stock',              'sg/oferta'],
 ];
 
 try {

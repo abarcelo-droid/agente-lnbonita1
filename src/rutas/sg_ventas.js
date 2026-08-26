@@ -43,6 +43,22 @@ router.use((req, res, next) => {
 
 // Filtros compartidos por GET /facturas y GET /facturas/export.xlsx. Devuelve {sql, params}.
 // alias = nombre_comercial del cliente. solo_afip → solo comprobantes fiscales (con afip_estado).
+// ══ DIEZ LECTURAS QUE NO PEDÍAN SESIÓN ═════════════════════════════════════
+//
+// Estos diez GET no tenían requireAuth: el libro de ventas entero en Excel
+// (/facturas/export.xlsx), la cuenta corriente de cualquier cliente con su CUIT
+// (/cc/:clienteId), el PDF de cualquier comprobante. No estaban abiertos a
+// internet —el portón de index.js exige sesión para todo /api— pero sí a
+// cualquiera con usuario, sin importar qué módulos tenga.
+//
+// Es la misma puerta que se acaba de cerrar en /sg/oferta, del otro lado del
+// pasillo. Poner requireAuth no cambia nada para el que trabaja: el panel manda
+// la cookie en cada pedido. Lo que cambia es que deja de contestar sin ella.
+//
+// FALTA la otra mitad, y queda anotada: el control por NIVEL de módulo sobre
+// estas lecturas necesita agregarlas a LECTURA_CONTROLADA (servicios/permisos.js)
+// y relevar qué pantallas las leen, una por una — igual que se hizo con /oferta.
+// Declararlas de memoria dejaría pantallas vacías sin mensaje.
 function buildFacturasQuery(req) {
   const { clienteId, estado, afip_estado, tipo, desde, hasta, solo_afip } = req.query;
   // El mail del cliente y el último envío viajan con cada fila: la pantalla
@@ -51,8 +67,12 @@ function buildFacturasQuery(req) {
                c.email as cliente_email,
                (SELECT MAX(e.enviado_en) FROM sg_ven_envios e
                  WHERE e.factura_id = f.id AND e.ok = 1) AS ultimo_envio,
-               -- Si ya tiene nota de crédito, la pantalla no vuelve a ofrecer el botón
-               -- y muestra que está acreditada. Sin esto se le hacen dos.
+               -- CUÁNTO SE LE ACREDITÓ YA. No alcanza con «tiene o no tiene nota»:
+               -- desde que la nota puede ser PARCIAL, una factura acreditada a medias
+               -- sigue teniendo saldo y sigue pudiendo recibir otra nota. Con el flag
+               -- binario, la primera nota parcial apagaba el botón y el resto de la
+               -- devolución no se podía hacer nunca.
+               ${ncAplicadas('f')} AS nc_acreditado,
                (SELECT n.id FROM sg_ven_facturas n
                  WHERE n.nc_de_factura_id = f.id AND ${facturaCuenta('n')} LIMIT 1) AS nc_id,
                (SELECT o.punto_venta || '-' || o.cbte_nro FROM sg_ven_facturas o
@@ -121,7 +141,7 @@ function condIvaToCatFiscal(v) {
   return m[String(v || '').trim().toLowerCase()] || null;
 }
 
-router.get('/clientes', (req, res) => {
+router.get('/clientes', requireAuth, (req, res) => {
   try {
     const { q, incluir_inactivos } = req.query;
     let sql = `SELECT c.*, pc.nombre as cuenta_nombre
@@ -137,7 +157,7 @@ router.get('/clientes', (req, res) => {
   } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
-router.get('/clientes/:id', (req, res) => {
+router.get('/clientes/:id', requireAuth, (req, res) => {
   try {
     const c = db.prepare('SELECT * FROM sg_clientes WHERE id=?').get(req.params.id);
     if (!c) return res.status(404).json({ ok: false, error: 'Cliente no encontrado' });
@@ -203,7 +223,7 @@ function generarNumLiq() {
   return `LIQ-${año}-${String(n).padStart(4,'0')}`;
 }
 
-router.get('/liquidaciones', (req, res) => {
+router.get('/liquidaciones', requireAuth, (req, res) => {
   try {
     const { clienteId, estado } = req.query;
     let sql = `SELECT l.*, c.razon_social as cliente_nombre
@@ -222,7 +242,7 @@ router.get('/liquidaciones', (req, res) => {
   } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
-router.get('/liquidaciones/:id', (req, res) => {
+router.get('/liquidaciones/:id', requireAuth, (req, res) => {
   try {
     const l = db.prepare(`SELECT l.*, c.razon_social as cliente_nombre, c.cuit as cliente_cuit
       FROM sg_ven_liquidaciones l JOIN sg_clientes c ON c.id=l.cliente_id WHERE l.id=?`).get(req.params.id);
@@ -522,7 +542,7 @@ function generarNumFac(tipo) {
   return `${prefix}-${String(n).padStart(4,'0')}`;
 }
 
-router.get('/facturas', (req, res) => {
+router.get('/facturas', requireAuth, (req, res) => {
   try {
     const { sql, params } = buildFacturasQuery(req);
     const facs = db.prepare(sql).all(...params);
@@ -578,7 +598,7 @@ router.post('/facturas/:id(\\d+)/recontabilizar', requireAuth, (req, res) => {
 // GET /facturas/export.xlsx → genera el XLSX EN EL SERVIDOR (lib xlsx) respetando los mismos
 // filtros que el listado. Columnas = las de la tabla del front. Ruta literal: NO choca con
 // /facturas/:id/pdf (3 segmentos) ni /facturas/:id (handlers con :id).
-router.get('/facturas/export.xlsx', (req, res) => {
+router.get('/facturas/export.xlsx', requireAuth, (req, res) => {
   try {
     const { sql, params } = buildFacturasQuery(req);
     const facs = db.prepare(sql).all(...params);
@@ -778,6 +798,128 @@ router.post('/facturas', requireAuth, (req, res) => {
 });
 
 
+const r2n = (x) => Math.round((Number(x) || 0) * 100) / 100;
+
+// ══ QUÉ QUEDA POR ACREDITAR DE UN COMPROBANTE ══════════════════════════════
+//
+// Una nota de crédito puede ser PARCIAL —vuelven 300 de los 1.000 kg, o se corrige
+// el precio de un renglón— y puede haber varias sobre la misma factura. Lo único que
+// no puede pasar es que entre todas se le devuelva al cliente más de lo que compró:
+// ahí la deuda queda a favor del cliente y el mayor de Deudores, acreedor.
+//
+// Así que la cuenta se lleva POR RENGLÓN: cuántas unidades y cuánta plata de cada uno
+// ya se acreditaron. La atadura es `nc_de_item_id`, que cada renglón de nota escribe
+// apuntando al renglón de la factura que corrige.
+//
+// Y de paso trae el renglón del REMITO del que salió (`despacho_item_id`), que es a
+// dónde hay que devolverle los kilos. En los comprobantes viejos esa columna está en
+// NULL: ahí se cae a la correspondencia POSICIONAL, que es como se emitieron —ítem y
+// vínculo se empujan en la misma vuelta del for de postEmitir— y sólo si las dos
+// listas tienen el mismo largo. Adivinar con largos distintos sería devolverle kilos
+// al remito equivocado.
+function baseDeNotaCredito(facturaId) {
+  const f = db.prepare('SELECT * FROM sg_ven_facturas WHERE id=?').get(facturaId);
+  const items = db.prepare('SELECT * FROM sg_ven_factura_items WHERE factura_id=? ORDER BY id')
+    .all(facturaId);
+  const puente = db.prepare(`SELECT despacho_id, despacho_item_id, kg, neto, iva, gestion
+     FROM sg_factura_despachos WHERE factura_id=? ORDER BY rowid`).all(facturaId);
+  const porDesp = new Map();
+  for (const v of puente) if (v.despacho_item_id != null) porDesp.set(Number(v.despacho_item_id), v);
+  const alineado = puente.length === items.length;
+
+  // Lo ya acreditado, renglón por renglón, mirando sólo las notas que siguen en pie.
+  //
+  // LA PLATA SE CUENTA SIEMPRE; LOS KILOS, SÓLO SI VOLVIERON. Un ajuste de precio se
+  // emite con la cantidad ENTERA del renglón —eso es lo que ARCA espera— pero la
+  // mercadería sigue en la casa del cliente. Contarla como devuelta dejaba la
+  // devolución de verdad bloqueada para siempre: "de este renglón ya volvió todo".
+  const yaPorItem = new Map();
+  for (const n of db.prepare(`SELECT ni.nc_de_item_id AS ref,
+        SUM(CASE WHEN COALESCE(ni.nc_modo,'') = 'precio' THEN 0 ELSE ni.cantidad END) AS cant,
+        SUM(ni.subtotal) AS neto
+      FROM sg_ven_factura_items ni
+      JOIN sg_ven_facturas nf ON nf.id = ni.factura_id
+     WHERE nf.nc_de_factura_id = ? AND ${facturaCuenta('nf')} AND ni.nc_de_item_id IS NOT NULL
+     GROUP BY ni.nc_de_item_id`).all(facturaId)) {
+    yaPorItem.set(Number(n.ref), { cant: Number(n.cant) || 0, neto: r2n(n.neto) });
+  }
+  // Las notas VIEJAS —las que se emitieron por el total antes de que existiera el
+  // puntero por renglón— no dicen a qué renglón corresponden. Se cuentan enteras
+  // contra el comprobante, que es lo que eran.
+  const sinRef = db.prepare(`SELECT COALESCE(SUM(nf.total),0) AS total,
+        COALESCE(SUM(nf.dif_gestion),0) AS gestion
+      FROM sg_ven_facturas nf
+     WHERE nf.nc_de_factura_id = ? AND ${facturaCuenta('nf')}
+       AND NOT EXISTS (SELECT 1 FROM sg_ven_factura_items ni
+                        WHERE ni.factura_id = nf.id AND ni.nc_de_item_id IS NOT NULL)`)
+    .get(facturaId);
+
+  let netoTotal = 0, netoAcreditado = 0;
+  const renglones = items.map((it, ix) => {
+    const v = (it.despacho_item_id != null ? porDesp.get(Number(it.despacho_item_id)) : null)
+      || (alineado ? puente[ix] : null);
+    const ya = yaPorItem.get(Number(it.id)) || { cant: 0, neto: 0 };
+    const cantidad = Number(it.cantidad) || 0;
+    const neto = r2n(it.subtotal);
+    netoTotal = r2n(netoTotal + neto);
+    netoAcreditado = r2n(netoAcreditado + ya.neto);
+    return {
+      id: it.id, descripcion: it.descripcion, producto_id: it.producto_id,
+      cantidad, neto, precio_unitario: Number(it.precio_unitario) || 0,
+      alicuota: pctDeAlicuotaId(it.alicuota_id),
+      bultos: it.bultos, kg_por_bulto: it.kg_por_bulto, unidad: it.unidad,
+      despacho_id: v ? v.despacho_id : null,
+      despacho_item_id: v ? v.despacho_item_id : (it.despacho_item_id != null ? Number(it.despacho_item_id) : null),
+      kg_documentados: v ? Math.abs(Number(v.kg) || 0) : 0,
+      gestion: v ? Math.abs(Number(v.gestion) || 0) : 0,
+      // CERO NO ES LO MISMO QUE «NO SE SABE». Un renglón sin acuerdo tiene gestión 0
+      // —es el caso normal— y un renglón viejo no tiene la columna. Si el que decide
+      // mira el VALOR, devolver un renglón sin acuerdo se lleva gestión ajena.
+      gestion_conocida: !!(v && v.gestion != null),
+      // El IVA que ESE renglón le puso a la factura, tal como se emitió. Rehacerlo
+      // desde el neto y la alícuota da distinto por centavos cuando el precio se
+      // tipeó CON IVA (ahí el IVA salió por diferencia, no de multiplicar).
+      iva_documentado: (v && v.iva != null) ? Math.abs(Number(v.iva)) : null,
+      cantidad_acreditada: ya.cant, neto_acreditado: ya.neto,
+      cantidad_pendiente: Math.max(0, +(cantidad - ya.cant).toFixed(6)),
+      neto_pendiente: Math.max(0, r2n(neto - ya.neto)),
+    };
+  });
+  // Lo que queda del comprobante entero: lo acordado (total + gestión) menos todo lo
+  // que las notas —con puntero y sin él— ya devolvieron.
+  const acordado = r2n((Number(f.total) || 0) + Math.abs(Number(f.dif_gestion) || 0));
+  const devuelto = r2n(db.prepare(`SELECT COALESCE(SUM(nf.total + COALESCE(nf.dif_gestion,0)),0) AS t
+      FROM sg_ven_facturas nf
+     WHERE nf.nc_de_factura_id = ? AND ${facturaCuenta('nf')}`).get(facturaId).t);
+  return { factura: f, renglones, alineado,
+    neto_total: netoTotal, neto_acreditado: netoAcreditado,
+    gestion_acreditada: r2n(db.prepare(`SELECT COALESCE(SUM(nf.dif_gestion),0) AS g
+        FROM sg_ven_facturas nf
+       WHERE nf.nc_de_factura_id = ? AND ${facturaCuenta('nf')}`).get(facturaId).g),
+    acordado, acreditado: devuelto, pendiente: r2n(acordado - devuelto),
+    notas_sin_renglon: r2n(sinRef.total) };
+}
+
+// Lo que la pantalla necesita para armar la nota: los renglones con lo que queda de
+// cada uno. Es el MISMO cálculo que usa el POST — si fueran dos, un día la pantalla
+// ofrecería devolver algo que el servidor rechaza.
+router.get('/facturas/:id(\\d+)/nota-credito/base', requireAuth, (req, res) => {
+  try {
+    const b = baseDeNotaCredito(parseInt(req.params.id, 10));
+    if (!b.factura) return res.status(404).json({ ok: false, error: 'Comprobante no encontrado' });
+    res.json({ ok: true, data: {
+      numero: (b.factura.punto_venta && b.factura.cbte_nro)
+        ? String(b.factura.punto_venta).padStart(4, '0') + '-' + String(b.factura.cbte_nro).padStart(8, '0')
+        : b.factura.numero,
+      tipo: b.factura.tipo, total: b.factura.total,
+      dif_gestion: Math.abs(Number(b.factura.dif_gestion) || 0),
+      acordado: b.acordado, acreditado: b.acreditado, pendiente: b.pendiente,
+      renglones: b.renglones, alineado: b.alineado,
+      notas_sin_renglon: b.notas_sin_renglon,
+    } });
+  } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
+});
+
 // ══ UN COMPROBANTE CON CAE NO SE ANULA: SE ACREDITA ═══════════════════════
 //
 // Hasta acá la única salida era «anular», que marcaba estado='anulada' y anulaba el
@@ -815,46 +957,145 @@ router.post('/facturas/:id(\\d+)/nota-credito', requireAuth, async (req, res) =>
       return res.status(400).json({ ok: false, error:
         'Poné el motivo de la nota de crédito: es lo que después explica el asiento.' });
     }
-    // ¿Ya se le hizo una? Dos notas por la misma factura le devuelven al cliente el
-    // doble de lo que compró.
-    const ya = db.prepare(`SELECT COUNT(*) AS cuantas FROM sg_ven_facturas n
-       WHERE n.nc_de_factura_id = ? AND ${facturaCuenta('n')}`).get(f.id);
-    if (ya && ya.cuantas > 0) {
+    const modo = (String(req.body?.modo || '') === 'precio') ? 'precio' : 'devolucion';
+    const base = baseDeNotaCredito(f.id);
+    if (!base.renglones.length) {
+      return res.status(400).json({ ok: false, error: 'El comprobante no tiene renglones' });
+    }
+    if (!(base.pendiente > 0.009)) {
       return res.status(400).json({ ok: false, error:
-        'Ese comprobante ya tiene una nota de crédito. Si esa nota está mal, anulala primero.' });
+        'Ese comprobante ya está acreditado entero: no queda nada para devolver.' });
     }
-    const items = db.prepare('SELECT * FROM sg_ven_factura_items WHERE factura_id=? ORDER BY id').all(f.id);
-    if (!items.length) return res.status(400).json({ ok: false, error: 'El comprobante no tiene renglones' });
 
-    // EL IVA DE CADA RENGLÓN NO SE GUARDÓ: se guardó el neto y el id de alícuota. Se
-    // recalcula, y el RESIDUO va al último para que la nota dé EXACTAMENTE el mismo
-    // total que la factura. Un peso de diferencia deja al cliente debiendo un peso
-    // para siempre, y nadie va a saber de dónde salió.
-    const r2n = (x) => Math.round((Number(x) || 0) * 100) / 100;
-    const lineas = items.map((it) => {
-      const alic = pctDeAlicuotaId(it.alicuota_id);
-      if (alic == null) throw new Error('El renglón "' + (it.descripcion || it.id)
-        + '" quedó guardado con una alícuota que no se reconoce; no se puede rehacer la nota.');
-      const neto = r2n(it.subtotal);
-      return { producto_id: it.producto_id, cantidad: Number(it.cantidad) || 0,
-        precio: Number(it.precio_unitario) || 0, alicuota: alic,
-        importe_neto: neto, importe_iva: r2n(neto * alic / 100),
-        bultos: it.bultos, kg_por_bulto: it.kg_por_bulto,
-        precio_por_bulto: it.precio_por_bulto, unidad: it.unidad };
-    });
-    const ivaSuma = lineas.reduce((a, l) => r2n(a + l.importe_iva), 0);
-    const resto = r2n(r2n(f.iva) - ivaSuma);
-    if (resto !== 0) {
-      const ult = lineas[lineas.length - 1];
-      ult.importe_iva = r2n(ult.importe_iva + resto);
+    // ── QUÉ RENGLONES ENTRAN, Y POR CUÁNTO ────────────────────────────────
+    // Sin lista, la nota es por TODO lo que queda: es el caso de siempre (la venta
+    // se cayó entera) y no hay que hacerle elegir nada a nadie.
+    const pedido = Array.isArray(req.body?.items) ? req.body.items : null;
+    const porId = new Map(base.renglones.map((r) => [Number(r.id), r]));
+    const elegidos = [];
+    for (const p of (pedido || base.renglones.map((r) => ({ id: r.id })))) {
+      const ren = porId.get(Number(p && p.id));
+      if (!ren) return res.status(400).json({ ok: false, error:
+        'Ese renglón no es de este comprobante: ' + (p && p.id) });
+      if (elegidos.some((x) => x.ren.id === ren.id)) {
+        return res.status(400).json({ ok: false, error:
+          'El renglón "' + ren.descripcion + '" está dos veces en la nota.' });
+      }
+      if (modo === 'precio') {
+        // AJUSTE DE PRECIO: la mercadería NO vuelve. Se acredita plata sobre los
+        // mismos kilos, que siguen entregados y siguen documentados.
+        const neto = (p && p.importe != null) ? r2n(p.importe) : ren.neto_pendiente;
+        if (!(neto > 0.009)) continue;
+        if (neto > ren.neto_pendiente + 0.009) {
+          return res.status(400).json({ ok: false, error:
+            'De "' + ren.descripcion + '" quedan $' + ren.neto_pendiente.toFixed(2)
+            + ' por acreditar y estás pidiendo $' + neto.toFixed(2) + '.' });
+        }
+        elegidos.push({ ren, cantidad: ren.cantidad, neto, devuelveKg: false });
+      } else {
+        // DEVOLUCIÓN: vuelven kilos, y con ellos la parte de plata que les toca.
+        const cant = (p && p.cantidad != null) ? Number(p.cantidad) : ren.cantidad_pendiente;
+        if (!(cant > 0)) continue;
+        if (cant > ren.cantidad_pendiente + 1e-6) {
+          return res.status(400).json({ ok: false, error:
+            'De "' + ren.descripcion + '" quedan ' + ren.cantidad_pendiente
+            + ' sin acreditar y estás devolviendo ' + cant + '. '
+            + 'Devolver más de lo que salió del depósito lo dejaría figurando como disponible.' });
+        }
+        // El neto sale de la PROPORCIÓN de kilos, salvo que vuelva el renglón
+        // entero: ahí es el número exacto que se facturó, sin residuo de división.
+        const entero = Math.abs(cant - ren.cantidad_pendiente) < 1e-6
+          && Math.abs(ren.cantidad_pendiente - ren.cantidad) < 1e-6;
+        const neto = entero ? ren.neto : r2n(ren.neto * (cant / ren.cantidad));
+        if (!(neto > 0.009)) continue;
+        elegidos.push({ ren, cantidad: cant, neto: Math.min(neto, ren.neto_pendiente),
+          devuelveKg: true });
+      }
     }
-    // Los MISMOS renglones de remito que documentó la factura. Van en positivo: el
-    // que los da vuelta es confirmarAutorizada, que sabe que esto es una nota.
-    const vinculos = db.prepare(`SELECT despacho_id, despacho_item_id, kg, neto, iva, gestion
-       FROM sg_factura_despachos WHERE factura_id=?`).all(f.id)
-      .map((v) => ({ despacho_id: v.despacho_id, despacho_item_id: v.despacho_item_id,
-        kg: Math.abs(Number(v.kg) || 0), neto: Math.abs(Number(v.neto) || 0),
-        iva: Math.abs(Number(v.iva) || 0), gestion: Math.abs(Number(v.gestion) || 0) }));
+    if (!elegidos.length) {
+      return res.status(400).json({ ok: false, error:
+        'No elegiste nada para acreditar. Poné la cantidad o el importe de al menos un renglón.' });
+    }
+
+    // ── EL IVA DE CADA RENGLÓN ────────────────────────────────────────────
+    // Sale del IVA que ESE renglón le puso a la factura, guardado en el puente
+    // (`fd.iva`), por la parte que vuelve. Rehacerlo desde el neto y la alícuota da
+    // distinto por centavos cuando el precio se tipeó CON IVA: ahí el IVA salió por
+    // DIFERENCIA contra el bruto —no de multiplicar— y una nota por el total dejaba
+    // un centavo pegado a la factura para siempre.
+    // Sin puente (renglón viejo) se multiplica, que es lo único que hay.
+    const ivaDe = (e) => {
+      const doc = e.ren.iva_documentado;
+      if (doc == null || !(e.ren.neto > 0)) return r2n(e.neto * e.ren.alicuota / 100);
+      return r2n(doc * (e.neto / e.ren.neto));
+    };
+
+    // ── LOS RENGLONES DE LA NOTA ──────────────────────────────────────────
+    const lineas = elegidos.map((e) => {
+      const alic = e.ren.alicuota;
+      if (alic == null) throw new Error('El renglón "' + e.ren.descripcion
+        + '" quedó guardado con una alícuota que no se reconoce; no se puede rehacer la nota.');
+      // A precio, la cantidad es la misma y lo que cambia es el unitario: es lo que
+      // ARCA espera de una nota de ajuste, y deja el renglón legible en el papel.
+      const precio = e.cantidad > 0 ? +(e.neto / e.cantidad).toFixed(6) : 0;
+      const kpb = (e.ren.kg_por_bulto != null && Number(e.ren.kg_por_bulto) > 0)
+        ? Number(e.ren.kg_por_bulto) : null;
+      return { producto_id: e.ren.producto_id, cantidad: e.cantidad, precio, alicuota: alic,
+        importe_neto: e.neto, importe_iva: ivaDe(e),
+        bultos: kpb != null ? +(e.cantidad / kpb).toFixed(4) : null,
+        kg_por_bulto: kpb,
+        precio_por_bulto: kpb != null ? +(precio * kpb).toFixed(6) : null,
+        unidad: e.ren.unidad, despacho_item_id: e.ren.despacho_item_id,
+        nc_de_item_id: e.ren.id,
+        // De qué tipo es este renglón de nota. Lo lee baseDeNotaCredito para no
+        // contar como devueltos los kilos de un ajuste de precio.
+        nc_modo: modo,
+        descripcion: (modo === 'precio' ? 'Ajuste de precio — ' : '') + e.ren.descripcion };
+    });
+
+    // ── EL PUENTE: LA PLATA SIEMPRE, LOS KILOS SÓLO SI VUELVEN ────────────
+    //
+    // El puente factura↔despacho hace DOS cosas a la vez, y la nota de crédito las
+    // separa: dice cuántos kilos de un remito tienen comprobante, y dice cuánta plata
+    // le entró a esa partida —de ahí sale lo que se le liquida al productor—.
+    //
+    // Una DEVOLUCIÓN mueve las dos: vuelven los kilos y vuelve la plata.
+    // Un AJUSTE DE PRECIO mueve sólo la plata: la mercadería está en la casa del
+    // cliente y sigue documentada, pero se cobró menos. Por eso se escribe igual una
+    // fila, con kg = 0: si no se escribiera ninguna, al productor se le liquidaría
+    // sobre plata que ya se le devolvió al cliente.
+    const vinculos = [];
+    for (const e of elegidos) {
+      if (e.ren.despacho_item_id == null || e.ren.despacho_id == null) continue;
+      const prop = e.ren.neto > 0 ? (e.neto / e.ren.neto) : 0;
+      vinculos.push({ despacho_id: e.ren.despacho_id, despacho_item_id: e.ren.despacho_item_id,
+        // NUNCA MÁS KILOS DE LOS QUE ESA FACTURA DOCUMENTÓ. Si se pasara, el
+        // pendiente del remito quedaría por encima de lo despachado y se podría
+        // facturar mercadería que nunca salió del depósito.
+        kg: e.devuelveKg ? Math.min(e.cantidad, e.ren.kg_documentados) : 0,
+        neto: e.neto, iva: ivaDe(e),
+        gestion: r2n(e.ren.gestion * prop) });
+    }
+
+    // ── LA PARTE DE GESTIÓN QUE VUELVE ────────────────────────────────────
+    // Sale de la columna `gestion` de CADA renglón del puente, que es lo que se
+    // resignó en ESE renglón — no de un prorrateo del total de la factura.
+    //
+    // Y el que decide es si la columna EXISTE, no si vale cero: un renglón sin
+    // acuerdo tiene gestión 0 y es el caso normal. Mirando el valor, devolver un
+    // renglón sin acuerdo se llevaba gestión del renglón de al lado, que el cliente
+    // sigue teniendo. Sólo se prorratea cuando NINGUNO de los renglones elegidos
+    // tiene la columna — comprobantes anteriores a que se guardara.
+    const conocidos = elegidos.filter((e) => e.ren.gestion_conocida).length;
+    const gesRenglones = r2n(vinculos.reduce((a, v) => a + (Number(v.gestion) || 0), 0));
+    const netoNota = r2n(elegidos.reduce((a, e) => a + e.neto, 0));
+    const difFactura = Math.abs(Number(f.dif_gestion) || 0);
+    const tope = r2n(difFactura - base.gestion_acreditada);
+    const gestionNota = conocidos > 0
+      ? Math.min(gesRenglones, tope)
+      : (base.neto_total > 0
+          ? Math.min(r2n(difFactura * (netoNota / base.neto_total)), tope)
+          : 0);
 
     const r = await afipEmitir(db, {
       ptoVta: Number(f.punto_venta), clienteId: f.cliente_id, items: lineas,
@@ -862,7 +1103,7 @@ router.post('/facturas/:id(\\d+)/nota-credito', requireAuth, async (req, res) =>
       // La parte de GESTIÓN también vuelve: si la venta se resignó 30.000 por un
       // acuerdo, la devolución los devuelve. Dejarla afuera haría que la deuda de
       // gestión sobreviviera a una venta que ya no existe.
-      descuentoGestion: Math.abs(Number(f.dif_gestion) || 0),
+      descuentoGestion: Math.max(0, gestionNota),
       identificacion: req.body?.identificacion || null,
       asociado: { cbte_tipo: f.cbte_tipo, punto_venta: f.punto_venta, cbte_nro: f.cbte_nro,
         fecha: f.fecha },
@@ -894,7 +1135,7 @@ router.patch('/facturas/:id/anular', requireAuth, (req, res) => {
 });
 
 // PDF del comprobante fiscal AFIP (RG 1415 + QR ARCA). Solo si AFIP lo autorizó (tiene CAE).
-router.get('/facturas/:id/pdf', async (req, res) => {
+router.get('/facturas/:id/pdf', requireAuth, async (req, res) => {
   try {
     const f = db.prepare(`SELECT f.*, c.razon_social, c.cuit, c.categoria_fiscal,
         c.direccion_entrega, c.localidad, c.provincia,
@@ -1001,7 +1242,7 @@ router.post('/facturas/:id/mail', requireAuth, async (req, res) => {
 // el papel —lo que el cliente ve—, y las PARTIDAS son de qué lote salió cada kilo,
 // con el proveedor y lo que se resignó. La segunda es la que contesta "¿por qué
 // este precio?" y la que ata la venta con la liquidación al productor.
-router.get('/facturas/:id/detalle', (req, res) => {
+router.get('/facturas/:id/detalle', requireAuth, (req, res) => {
   try {
     const f = db.prepare(`SELECT f.id, f.numero, f.fecha, f.total, f.neto, f.iva, f.estado,
         f.afip_estado, f.cae, f.punto_venta, f.cbte_tipo, f.cbte_nro,
@@ -1043,7 +1284,7 @@ router.get('/facturas/:id/detalle', (req, res) => {
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
-router.get('/facturas/:id/envios', (req, res) => {
+router.get('/facturas/:id/envios', requireAuth, (req, res) => {
   try {
     res.json({ ok: true, data: db.prepare(`SELECT e.*, u.nombre AS usuario
       FROM sg_ven_envios e LEFT JOIN usuarios u ON u.id = e.usuario_id
@@ -1055,7 +1296,7 @@ router.get('/facturas/:id/envios', (req, res) => {
 // CUENTA CORRIENTE CLIENTES
 // ═══════════════════════════════════════════════════════════════════════════════
 
-router.get('/cc/:clienteId', (req, res) => {
+router.get('/cc/:clienteId', requireAuth, (req, res) => {
   try {
     const cid = parseInt(req.params.clienteId);
     const liquidaciones = db.prepare(`
@@ -1181,16 +1422,28 @@ function pendienteDeDoc(tipo, docId) {
     JOIN sg_ven_cobranzas co ON co.id = cd.cobranza_id
     WHERE cd.tipo=? AND cd.doc_id=? AND co.anulada=0`).get(tipo, docId);
   const cob = c.t, cobGes = c.g || 0;
+  // ── Y LO QUE LA NOTA DE CRÉDITO YA DEVOLVIÓ NO SE COBRA ────────────────
+  // Una factura acreditada —entera o en parte— seguía ofreciéndose para imputar un
+  // cobro por todo su importe: se le reclamaba al cliente algo que ya se le había
+  // devuelto, y la plata quedaba pegada a un comprobante que no debía eso.
+  // Las liquidaciones no tienen notas de crédito: son del cliente, no nuestras.
+  const nc = (tipo === 'factura')
+    ? db.prepare(`SELECT COALESCE(SUM(n.total),0) AS fiscal,
+           COALESCE(SUM(n.dif_gestion),0) AS gestion
+        FROM sg_ven_facturas n
+       WHERE n.nc_de_factura_id = ? AND ${facturaCuenta('n')}`).get(docId)
+    : { fiscal: 0, gestion: 0 };
   // LO QUE EL CLIENTE DEBE ES LO ACORDADO, no lo facturado: el total del
   // comprobante más lo que quedó sin facturar. Es el espejo exacto de lo que se
   // le debe a un proveedor cuando su factura vino corta.
-  const acordado = (d.total || 0) + (d.dif_gestion || 0);
-  const r2c = (n) => Math.round((Number(n) || 0) * 100) / 100;
+  const r2c = (n2) => Math.round((Number(n2) || 0) * 100) / 100;
+  const acordado = r2c((d.total || 0) + (d.dif_gestion || 0)
+    - (Number(nc.fiscal) || 0) - (Number(nc.gestion) || 0));
   // Y ABIERTO POR MITAD, porque de eso depende en qué libro cae el asiento del
   // cobro: lo que se cobra de la parte sin comprobante no puede aparecer en el
   // fiscal, donde esa deuda nunca subió.
-  const pendFis = r2c((d.total || 0) - (cob - cobGes));
-  const pendGes = r2c((d.dif_gestion || 0) - cobGes);
+  const pendFis = r2c((d.total || 0) - (Number(nc.fiscal) || 0) - (cob - cobGes));
+  const pendGes = r2c((d.dif_gestion || 0) - (Number(nc.gestion) || 0) - cobGes);
   return { ...d, total: acordado, total_fiscal: d.total || 0, cobrado: cob,
     cobrado_gestion: cobGes,
     pendiente_fiscal: pendFis, pendiente_gestion: pendGes,

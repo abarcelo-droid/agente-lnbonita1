@@ -56,6 +56,22 @@ _alter('sg_ven_facturas', 'afip_estado', 'afip_estado TEXT');           // borra
 // suelto: no se sabe qué anuló, y la factura no sabe que ya no se cobra.
 _alter('sg_ven_facturas', 'nc_de_factura_id', 'nc_de_factura_id INTEGER');
 _alter('sg_ven_facturas', 'nc_motivo', 'nc_motivo TEXT');
+// DE QUÉ RENGLÓN DE REMITO SALIÓ ESTE RENGLÓN DEL COMPROBANTE.
+// La correspondencia existía pero era POSICIONAL: postEmitir empuja el ítem y su
+// vínculo en la misma vuelta del for, y nada los ataba. Con la nota de crédito
+// PARCIAL hace falta poder decir "de este renglón vuelven 300 de los 1.000 kg" y
+// saber a qué remito devolvérselos. Por posición andaba de casualidad.
+_alter('sg_ven_factura_items', 'despacho_item_id', 'despacho_item_id INTEGER');
+// Y qué renglón de la factura corrige este renglón de la nota. Es lo que permite
+// llevar la cuenta de cuánto se le acreditó ya a cada uno, y por lo tanto emitir
+// varias notas parciales sin pasarse.
+_alter('sg_ven_factura_items', 'nc_de_item_id', 'nc_de_item_id INTEGER');
+// DEVOLVER NO ES AJUSTAR EL PRECIO, y la diferencia hay que poder leerla después.
+// Un ajuste de precio se emite con la cantidad ENTERA del renglón —es lo que ARCA
+// espera y lo que deja el papel legible— pero esos kilos NO volvieron. Sin esta
+// marca, la cuenta de "cuánto se devolvió de este renglón" los daba por devueltos y
+// la devolución de verdad quedaba bloqueada para siempre.
+_alter('sg_ven_factura_items', 'nc_modo', 'nc_modo TEXT');
 _alter('sg_ven_factura_items', 'producto_id', 'producto_id INTEGER');
 _alter('sg_ven_factura_items', 'alicuota_id', 'alicuota_id INTEGER');
 // F5 — metadata de PRESENTACIÓN por bulto (cajón). NO afecta importes: cantidad/precio_unitario/
@@ -185,7 +201,12 @@ export function construirComprobante(database, { clienteId, items, esNC, identif
       bultos:           it.bultos != null ? it.bultos : null,
       kg_por_bulto:     it.kg_por_bulto != null ? it.kg_por_bulto : null,
       precio_por_bulto: it.precio_por_bulto != null ? it.precio_por_bulto : null,
-      unidad:           it.unidad || null
+      unidad:           it.unidad || null,
+      // Los dos punteros de la nota de crédito parcial: de qué renglón de remito
+      // salió, y a qué renglón de la factura corrige.
+      despacho_item_id: it.despacho_item_id != null ? Number(it.despacho_item_id) : null,
+      nc_de_item_id:    it.nc_de_item_id != null ? Number(it.nc_de_item_id) : null,
+      nc_modo:          it.nc_modo || null,
     };
     const id = alicuotaId(alic);
     if (id === undefined) throw new Error('Alícuota de IVA no soportada para ' + prod.nombre + ': ' + alic + '%');
@@ -197,7 +218,8 @@ export function construirComprobante(database, { clienteId, items, esNC, identif
     if (!ivaMap[id]) ivaMap[id] = { base: 0, importe: 0 };
     ivaMap[id].base = r2(ivaMap[id].base + neto);
     ivaMap[id].importe = r2(ivaMap[id].importe + iva);
-    detalle.push({ producto_id: prod.id, descripcion: prod.nombre, cantidad: cant, precio_unitario: precio, subtotal: neto, alicuota_id: id, ...bultoMeta });
+    detalle.push({ producto_id: prod.id, descripcion: it.descripcion || prod.nombre,
+      cantidad: cant, precio_unitario: precio, subtotal: neto, alicuota_id: id, ...bultoMeta });
   }
   if (!detalle.length) throw new Error('El comprobante necesita al menos un ítem');
   const impTotal = r2(impNeto + impIva + impOpEx);
@@ -360,10 +382,14 @@ function persistirReservada(database, { comprobante, ptoVta, cbteTipo, cbteNro, 
         .run(Number(ncDeFacturaId), ncMotivo || null, facturaId);
     }
     const insItem = database.prepare(`INSERT INTO sg_ven_factura_items
-      (factura_id, descripcion, cantidad, precio_unitario, subtotal, producto_id, alicuota_id, bultos, kg_por_bulto, precio_por_bulto, unidad)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?)`);
+      (factura_id, descripcion, cantidad, precio_unitario, subtotal, producto_id, alicuota_id, bultos, kg_por_bulto, precio_por_bulto, unidad,
+       despacho_item_id, nc_de_item_id, nc_modo)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`);
     for (const d of comprobante.detalle) insItem.run(facturaId, d.descripcion, d.cantidad, d.precio_unitario, d.subtotal, d.producto_id, d.alicuota_id,
-      d.bultos != null ? d.bultos : null, d.kg_por_bulto != null ? d.kg_por_bulto : null, d.precio_por_bulto != null ? d.precio_por_bulto : null, d.unidad || null);
+      d.bultos != null ? d.bultos : null, d.kg_por_bulto != null ? d.kg_por_bulto : null, d.precio_por_bulto != null ? d.precio_por_bulto : null, d.unidad || null,
+      d.despacho_item_id != null ? d.despacho_item_id : null,
+      d.nc_de_item_id != null ? d.nc_de_item_id : null,
+      d.nc_modo || null);
   })();
   return facturaId;
 }

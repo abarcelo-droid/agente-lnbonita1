@@ -269,10 +269,13 @@ test('un comprobante con CAE ya no se puede «anular» a mano', () => {
     'y decir cuál es la salida, que es lo único que el usuario puede hacer');
 });
 
-test('no se emiten dos notas por la misma factura', () => {
+test('se puede acreditar de a poco, pero nunca más de lo que se compró', () => {
   assert.match(VENTAS, /nota-credito/, 'existe el camino para emitirla');
-  assert.match(VENTAS, /ya tiene una nota de crédito/i,
-    'dos notas le devuelven al cliente el doble de lo que compró');
+  // El cerrojo dejó de ser «ya tiene una nota» —eso impedía terminar una devolución
+  // empezada— y pasó a ser por SALDO: mientras quede algo se puede seguir, y ni un
+  // peso más. Ver test/nota_credito_parcial.test.mjs.
+  assert.match(VENTAS, /ya está acreditado entero/i,
+    'lo que frena es que no quede saldo, no que exista una nota');
   assert.match(VENTAS, /No se le hace una nota de crédito a una nota de crédito/i);
 });
 
