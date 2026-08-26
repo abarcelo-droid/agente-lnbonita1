@@ -2353,6 +2353,23 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
     .sg-mod .sg-ph-ph{padding:48px 20px;text-align:center;color:var(--mut);font-size:14px;background:var(--burl,#faf5f0);border:1px dashed var(--bor2,#e0d5cc);border-radius:12px}
   </style>
   <div class="ph"><div><div class="ph-t">🍅 San Gerónimo · Dashboard</div><div class="ph-s">KPIs y resumen operativo — PUENTE CORDON SA · MCBA Nave 4</div></div></div>
+  <!-- ══ EL INTERRUPTOR DE LOS BOTONES DE BORRAR ═══════════════════════════
+       Vive acá y no en cada pantalla: es UNO, y apagarlo al lanzar tiene que ser un
+       solo gesto. Sólo lo ve un administrador, y cuando está apagado no hay ninguna
+       otra puerta — los endpoints contestan que no existen. -->
+  <div id="sg-lim-switch" style="display:none;margin:0 0 14px;padding:10px 14px;border-radius:10px;
+       border:1px solid #fecaca;background:#fef2f2">
+    <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap">
+      <label style="display:flex;gap:8px;align-items:center;cursor:pointer;font-size:13px;font-weight:600">
+        <input type="checkbox" id="sg-lim-check" onchange="sgLimSwitch(this.checked)">
+        🗑️ Botones para borrar datos de prueba
+      </label>
+      <span style="font-size:11.5px;color:#991b1b;flex:1;min-width:280px">
+        Encendido, cada pantalla de San Gerónimo muestra un botón que borra <b>sus datos</b> —nunca
+        la configuración—. <b>Apagalo antes de lanzar.</b>
+      </span>
+    </div>
+  </div>
     <style>
       .sg-mod .sgd-cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-bottom:18px}
       .sg-mod .sgd-card{background:var(--bg);border:1px solid var(--bor);border-radius:12px;padding:14px 16px}
@@ -16489,6 +16506,44 @@ function sgLimpiezaMontar(secId){
   else { cont.style.margin = '0 0 10px'; sec.insertBefore(cont, sec.firstChild); }
 }
 
+// ── EL INTERRUPTOR ───────────────────────────────────────────────────────
+// Se dibuja sólo para el administrador y sólo en el Dashboard. Es el único lugar
+// desde donde se enciende y se apaga: no existía ninguna pantalla que escribiera la
+// configuración de San Gerónimo, así que la clave no había forma de tocarla.
+function sgLimSwitchMontar(){
+  var caja = eid('sg-lim-switch'); if (!caja) return;
+  var esAdmin = !!(window.LNB_USER && window.LNB_USER.rol === 'admin');
+  caja.style.display = esAdmin ? '' : 'none';
+  if (!esAdmin) return;
+  var pintar = function(){
+    var chk = eid('sg-lim-check');
+    if (chk) chk.checked = !!(SG.cfg && String(SG.cfg.limpieza_habilitada) === '1');
+  };
+  // Si la configuración todavía no llegó, se pide: el tilde tiene que mostrar el
+  // estado de verdad, no uno apagado por defecto que invite a encenderlo de nuevo.
+  if (SG.cfg) { pintar(); return; }
+  api('/api/sg/config').then(function(r){
+    SG.cfg = (r && r.ok) ? (r.data || {}) : {};
+    pintar();
+  });
+}
+
+function sgLimSwitch(on){
+  api('/api/sg/config', 'PUT', { limpieza_habilitada: on ? '1' : '0' }).then(function(r){
+    if (!r || !r.ok) {
+      alert('No se pudo cambiar.' + String.fromCharCode(10,10) + ((r && r.error) || 'Error'));
+      var c = eid('sg-lim-check'); if (c) c.checked = !on;
+      return;
+    }
+    SG.cfg = SG.cfg || {};
+    SG.cfg.limpieza_habilitada = on ? '1' : '0';
+    toast(on ? 'Botones de borrar ENCENDIDOS' : 'Botones de borrar apagados', on ? 'er' : 'ok');
+    // Al apagar hay que sacar los botones que ya se dibujaron; al encender, dibujarlos.
+    document.querySelectorAll('[data-limpieza]').forEach(function(n){ n.remove(); });
+    if (on && typeof navAct !== 'undefined') sgLimpiezaMontar('sec-' + navAct);
+  });
+}
+
 function sgLimOpen(clave){
   eid('sg-lim-mod').value = clave;
   eid('sg-lim-clave').textContent = clave;
@@ -26691,6 +26746,7 @@ function loadSec(s) {
   // desde catorce encabezados: uno solo que se olvide de sacarlo al lanzar y queda
   // un botón de borrar en producción.
   try { sgLimpiezaMontar('sec-' + s); } catch (_) { /* pantalla sin limpieza */ }
+  if (s === 'sg-dashboard') { try { sgLimSwitchMontar(); } catch (_) { /* todavía sin config */ } }
   var m = {
     inicio: loadInicio, pedidos: loadPedidos, logistica: loadLog,
     preparacion: prepCargar,
