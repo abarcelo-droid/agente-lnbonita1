@@ -25,6 +25,7 @@ import express from 'express';
 import db from '../servicios/db.js';
 import { estadoSync, diagnostico, syncSheets, verificarPlanilla } from '../servicios/sheets.js';
 import { nivelEnModulo } from '../servicios/permisos.js';
+import { detectar, sinMargen, TIPOS, UMBRALES } from '../servicios/oportunidades.js';
 
 const router = express.Router();
 
@@ -376,6 +377,176 @@ router.get('/ventas/comparar', requireAuth, (req, res) => {
       ve_margen: margen,
       sync: { ultimo_ok: est.ultimo_ok, desactualizado: est.datos_desactualizados },
     } });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// ══════════════════════════════════════════════════════════════════════════════════════
+// COMPARATIVO INTERANUAL
+// ══════════════════════════════════════════════════════════════════════════════════════
+// "Qué vendimos el año pasado en este mes, y si estamos ganando o perdiendo espacio."
+//
+// Se compara EL MISMO MES COMERCIAL de dos campañas, no la campaña entera. Una campaña en
+// curso contra una terminada da siempre una caída, y la caída es del calendario. Mes contra
+// mes es lo único que se puede leer sin hacer cuentas de cabeza — y además respeta la
+// estacionalidad: un cliente que compra en enero no está perdido en agosto.
+
+// El mes viene '01-JULIO' … '12-JUN'. El número está para ordenar; para leerlo estorba.
+function mesTexto(m) {
+  const x = String(m || '');
+  const p = /^\d\d-(.+)$/.exec(x);
+  return p ? p[1] : x;
+}
+
+// La ventana: qué campaña es "esta", cuál es "la del año pasado" y qué mes se mira. Todo
+// sale de lo que hay CARGADO, para que la pantalla no ofrezca un año vacío.
+function ventanaInteranual(q) {
+  const periodos = db.prepare(
+    "SELECT DISTINCT periodo v FROM sheet_ventas WHERE periodo IS NOT NULL AND periodo <> '' ORDER BY periodo DESC"
+  ).all().map(r => r.v);
+  const actual = periodos.includes(q.periodo_actual) ? q.periodo_actual : periodos[0];
+  const i = periodos.indexOf(actual);
+  const anterior = (periodos.includes(q.periodo_anterior) && q.periodo_anterior !== actual)
+    ? q.periodo_anterior : periodos[i + 1];
+  const meses = actual ? db.prepare(
+    "SELECT DISTINCT mes_ok v FROM sheet_ventas WHERE periodo = ? AND mes_ok IS NOT NULL AND mes_ok <> '' ORDER BY mes_ok"
+  ).all(actual).map(r => r.v) : [];
+  const mes = meses.includes(q.mes_ok) ? q.mes_ok : meses[meses.length - 1];
+  // EL ÚLTIMO MES DE LA CAMPAÑA MÁS NUEVA CASI SIEMPRE ESTÁ A MEDIO FACTURAR. Compararlo
+  // entero contra el del año pasado pinta todo de rojo, y esa caída es del almanaque. Se
+  // avisa; no se corrige sola, porque no hay con qué: la fecha de la planilla es texto sin
+  // formato garantizado y el informe no la usa para nada.
+  const en_curso = !!(mes && actual === periodos[0] && mes === meses[meses.length - 1]);
+  return { periodos, meses, actual, anterior, mes, mesTexto: mesTexto(mes), en_curso };
+}
+
+// El WHERE de la ventana: las dos campañas y el mes, más los filtros que tenga puesta la
+// pantalla. Se reusa armarWhere; el criterio julio-junio no se reimplementa acá.
+function whereVentana(q, v) {
+  return armarWhere(Object.assign({}, q, {
+    periodos: [v.actual, v.anterior].filter(Boolean).join(','),
+    mes_ok: v.mes,
+  }));
+}
+
+// GET /api/informes/interanual — la tabla de este mes contra el mismo mes del año pasado.
+router.get('/interanual', requireAuth, (req, res) => {
+  try {
+    const dimKey = DIMENSIONES[req.query.agrupar] ? req.query.agrupar : 'cliente';
+    // Agrupar por tiempo no significa nada acá: el eje del informe YA es el tiempo.
+    if (DIM_CRONOLOGICAS.has(dimKey)) {
+      return res.status(400).json({ ok: false,
+        error: 'El interanual ya compara tiempo contra tiempo: elegí cliente, producto, categoría, vendedor o proveedor.' });
+    }
+    const dim = DIMENSIONES[dimKey];
+    const v = ventanaInteranual(req.query);
+    if (!v.actual) return res.json({ ok: true, data: { ventana: v, filas: [], resumen: {}, estados: {}, ve_margen: false, vacio: true } });
+    if (!v.anterior) {
+      return res.status(400).json({ ok: false,
+        error: 'Hay una sola campaña cargada (' + v.actual + '): no hay año pasado contra el cual comparar.' });
+    }
+    const margen = puedeVerMargen(req.user);
+    const { where, params } = whereVentana(req.query, v);
+    const umbral = Math.min(Math.max(parseInt(req.query.umbral, 10) || 10, 1), 90);
+
+    const crudo = db.prepare(`
+      SELECT COALESCE(NULLIF(${dim.col}, ''), '(sin dato)') AS clave, periodo,
+             ROUND(SUM(kilos_tot), 0) AS kilos,
+             ROUND(SUM(tot_dol), 0) AS usd
+             ${margen ? ', ROUND(SUM(rent_dol),0) AS rent_dol, ROUND(SUM(rent_dol)*100.0/NULLIF(SUM(tot_dol),0),1) AS rent_pct' : ''}
+      FROM sheet_ventas ${where}
+      GROUP BY clave, periodo
+    `).all(...params);
+
+    const mapa = new Map();
+    for (const f of crudo) {
+      if (!mapa.has(f.clave)) mapa.set(f.clave, { clave: f.clave, act: null, ant: null });
+      mapa.get(f.clave)[f.periodo === v.actual ? 'act' : 'ant'] = f;
+    }
+    const estados = { nuevo: 0, perdido: 0, crece: 0, cae: 0, estable: 0 };
+    let filas = [...mapa.values()].map(x => {
+      const a = x.act, b = x.ant;
+      const usd_act = a ? a.usd : null, usd_ant = b ? b.usd : null;
+      const kg_act = a ? a.kilos : null, kg_ant = b ? b.kilos : null;
+      // Nada de ceros donde no hubo fila: "no vendió" y "no existe" son cosas distintas, y
+      // un cero hace que la variación diga −100% cuando lo correcto es no decir nada.
+      const var_usd = (usd_act != null && usd_ant != null) ? usd_act - usd_ant : null;
+      const var_pct = (var_usd != null && usd_ant) ? Math.round(var_usd * 1000 / Math.abs(usd_ant)) / 10 : null;
+      const var_kg = (kg_act != null && kg_ant != null) ? kg_act - kg_ant : null;
+      const var_kg_pct = (var_kg != null && kg_ant) ? Math.round(var_kg * 1000 / Math.abs(kg_ant)) / 10 : null;
+      let estado;
+      if (usd_ant == null) estado = 'nuevo';
+      else if (usd_act == null) estado = 'perdido';
+      else if (var_pct != null && var_pct >= umbral) estado = 'crece';
+      else if (var_pct != null && var_pct <= -umbral) estado = 'cae';
+      else estado = 'estable';
+      estados[estado]++;
+      const fila = { clave: x.clave, estado, usd_act, usd_ant, kilos_act: kg_act, kilos_ant: kg_ant,
+                     var_usd, var_usd_pct: var_pct, var_kilos: var_kg, var_kilos_pct: var_kg_pct,
+                     // Cuánto movió esta fila el total, con signo. Es el orden por defecto:
+                     // lo que más cambió es lo que hay que mirar.
+                     impacto: (usd_act || 0) - (usd_ant || 0) };
+      if (margen) {
+        fila.rent_pct_act = a ? a.rent_pct : null;
+        fila.rent_pct_ant = b ? b.rent_pct : null;
+        fila.rent_dol_act = a ? a.rent_dol : null;
+        fila.rent_dol_ant = b ? b.rent_dol : null;
+      }
+      return fila;
+    });
+    filas.sort((x, y) => Math.abs(y.impacto) - Math.abs(x.impacto));
+    const truncado = filas.length > 300;
+    filas = filas.slice(0, 300);
+
+    // El resumen sale de su propia consulta: sumando la tabla recortada daría de menos.
+    const tot = db.prepare(`
+      SELECT periodo, ROUND(SUM(kilos_tot),0) AS kilos, ROUND(SUM(tot_dol),0) AS usd,
+             COUNT(DISTINCT cliente) AS clientes
+             ${margen ? ', ROUND(SUM(rent_dol),0) AS rent_dol, ROUND(SUM(rent_dol)*100.0/NULLIF(SUM(tot_dol),0),1) AS rent_pct' : ''}
+      FROM sheet_ventas ${where} GROUP BY periodo
+    `).all(...params).reduce((m, r) => { m[r.periodo] = r; return m; }, {});
+    const A = tot[v.actual] || { kilos: 0, usd: 0, clientes: 0 };
+    const B = tot[v.anterior] || { kilos: 0, usd: 0, clientes: 0 };
+    const resumen = { actual: A, anterior: B,
+      var_usd: (A.usd || 0) - (B.usd || 0),
+      var_usd_pct: B.usd ? Math.round(((A.usd || 0) - B.usd) * 1000 / Math.abs(B.usd)) / 10 : null,
+      var_kilos: (A.kilos || 0) - (B.kilos || 0),
+      var_kilos_pct: B.kilos ? Math.round(((A.kilos || 0) - B.kilos) * 1000 / Math.abs(B.kilos)) / 10 : null };
+
+    const est = estadoSync();
+    res.json({ ok: true, data: {
+      agrupar: dimKey, label: dim.label, ventana: v, umbral,
+      resumen, estados, filas, truncado, ve_margen: margen,
+      sync: { ultimo_ok: est.ultimo_ok, desactualizado: est.datos_desactualizados },
+    } });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// GET /api/informes/oportunidades — el radar. Las reglas viven en servicios/oportunidades.js.
+router.get('/oportunidades', requireAuth, (req, res) => {
+  try {
+    const v = ventanaInteranual(req.query);
+    if (!v.actual || !v.anterior) {
+      return res.status(400).json({ ok: false,
+        error: 'Hacen falta dos campañas cargadas para buscar oportunidades.' });
+    }
+    const { where, params } = whereVentana(req.query, v);
+    const pedidos = String(req.query.tipos || '').split(',').map(x => x.trim()).filter(Boolean);
+    const tipos = pedidos.filter(t => TIPOS[t]);
+    // Pidió filtrar por tipo y ninguno existe. Devolver la lista COMPLETA haría creer que el
+    // filtro anduvo; devolver cero, que no hay nada que hacer. Las dos mienten, así que se
+    // dice qué tipos hay.
+    if (pedidos.length && !tipos.length) {
+      return res.status(400).json({ ok: false,
+        error: 'Tipo desconocido: ' + pedidos.join(', ') + '. Los que hay son ' + Object.keys(TIPOS).join(', ') + '.' });
+    }
+    const data = detectar(db, where, params, v, { tipos, limite: req.query.limite });
+    const margen = puedeVerMargen(req.user);
+    const est = estadoSync();
+    res.json({ ok: true, data: Object.assign(
+      margen ? data : sinMargen(data),
+      { ventana: v, ve_margen: margen, tipos: TIPOS, umbrales: UMBRALES,
+        sync: { ultimo_ok: est.ultimo_ok, desactualizado: est.datos_desactualizados } }
+    ) });
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
