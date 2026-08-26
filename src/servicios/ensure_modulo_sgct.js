@@ -41,6 +41,11 @@ const MODULOS_SGCT = [
   // facturación electrónica —el certificado y su vencimiento—, que es lo que
   // hoy no está en ningún lado y se descubre el día que AFIP rechaza.
   ["sgct-puntos-venta", "🏪 Puntos de Venta SG", 674],
+  // Y EL LIBRO DE IVA VENTAS, que no existía. El débito fiscal se calculaba en
+  // cada emisión, se le informaba a AFIP, se guardaba y se asentaba — y no se
+  // sumaba en ninguna pantalla del módulo. La declaración jurada de IVA no se
+  // podía armar desde acá.
+  ["sgct-iva-ventas",   "🧾 Diario IVA Ventas SG", 675],
 ];
 
 try {
