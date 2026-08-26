@@ -4453,7 +4453,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
                              #sec-informes-comercial .pa-tbl{table-layout:auto} }
   </style>
   <div class="ph"><div><div class="ph-t">📊 Informes comerciales</div>
-    <div class="ph-s">Ventas por cliente, producto o vendedor — sobre la base que se sincroniza todos los días</div></div>
+    <div class="ph-s">Ventas por cliente, producto o vendedor, <b>en dólares</b> — sobre la base que se sincroniza todos los días</div></div>
     <div style="display:flex;gap:8px">
       <button class="btn bo" onclick="infDiagnostico()" title="Compara los títulos de la planilla contra lo que espera el código. Sirve cuando los números no cierran.">🔎 Diagnóstico</button>
       <!-- TEMPORAL: se saca al cerrar el proyecto de informes. Abre el JSON en otra pestaña
@@ -31942,9 +31942,10 @@ function infPintarKpis(t){
   if(!t){ eid('inf-kpis').innerHTML=''; return; }
   var k=function(l,v,sub){ return '<div class="inf-kpi"><div style="font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:var(--mut)">'+l+'</div>'
     +'<b>'+v+'</b><div style="font-size:11px;color:var(--mut)">'+(sub||'')+'</div></div>'; };
-  var h=k('Facturación','US$ '+nr(t.facturacion_usd||0), sgMoney(Math.round(t.facturacion_ars||0)))
-    + k('Kilos', nr(t.kilos||0), (t.usd_por_kg!=null?('US$ '+nrDec(t.usd_por_kg,2)+'/kg'):''))
-    + k('Operaciones', nr(t.operaciones||0), nr(t.clientes||0)+' cliente(s)');
+  // Tres tarjetas y todas en dólares. La de operaciones se fue con su número; la cuenta de
+  // clientes, que era su subtítulo y sí se entiende sola, pasa abajo de la facturación.
+  var h=k('Facturación','US$ '+nr(t.facturacion_usd||0), 'de '+nr(t.clientes||0)+' cliente(s)')
+    + k('Kilos', nr(t.kilos||0), (t.usd_por_kg!=null?('US$ '+nrDec(t.usd_por_kg,2)+'/kg'):''));
   // El margen sólo si el nivel alcanza. El backend directamente no lo manda si no.
   if(INF.veMargen && t.rent_pct!=null){
     var col=t.rent_pct>=0?'#16a34a':'var(--err,#dc2626)';
@@ -31953,9 +31954,13 @@ function infPintarKpis(t){
   }
   eid('inf-kpis').innerHTML=h;
 }
+// TODO EN DÓLARES, y sin la columna de operaciones. El peso repetía el mismo número en otra
+// moneda —y entre campañas dos importes en pesos ni se pueden restar—; las operaciones
+// contaban renglones de la planilla, no pedidos. Las dos ocupaban ancho y ninguna se usaba
+// para decidir. (Pablo, 26/8/2026.)
 function infCols(){
   var c=[['clave','',  'left'], ['kilos','Kilos','right'], ['facturacion_usd','US$','right'],
-         ['facturacion_ars','$','right'], ['usd_por_kg','US$/kg','right'], ['operaciones','Oper.','right']];
+         ['usd_por_kg','US$/kg','right']];
   if(INF.veMargen) c.push(['rent_dol','Rent. US$','right'], ['rent_pct','Rent. %','right']);
   return c;
 }
@@ -31987,7 +31992,6 @@ function infPintarTabla(d){
     return '<tr style="cursor:pointer" title="Abrir el detalle de '+esc(f.clave||'')+'" onclick="infDrillAbrir('+i+')">'+cols.map(function(c){
       var v=f[c[0]];
       if(c[0]==='clave') return '<td class="inf-nom">'+esc(v||'')+'</td>';
-      if(c[0]==='facturacion_ars') return '<td style="text-align:right">'+sgMoney(Math.round(v||0))+'</td>';
       if(c[0]==='rent_pct'){
         var col=(v||0)>=0?'#16a34a':'var(--err,#dc2626)';
         return '<td style="text-align:right;color:'+col+';font-weight:600">'+(v!=null?nrDec(v,1)+'%':'—')+'</td>';
@@ -32155,7 +32159,6 @@ function infDrillPintar(d){
     return '<tr>'+cols.map(function(c){
       var v=f[c[0]];
       if(c[0]==='clave') return '<td class="inf-nom" style="overflow:hidden;text-overflow:ellipsis">'+esc(v||'')+'</td>';
-      if(c[0]==='facturacion_ars') return '<td style="text-align:right">'+sgMoney(Math.round(v||0))+'</td>';
       if(c[0]==='rent_pct'){
         var col=(v||0)>=0?'#16a34a':'var(--err,#dc2626)';
         return '<td style="text-align:right;color:'+col+';font-weight:600">'+(v!=null?nrDec(v,1)+'%':'—')+'</td>';

@@ -8,6 +8,15 @@
 // sincroniza UNA VEZ POR DÍA, así que todo lo que sale de acá es la foto de la madrugada:
 // por eso cada respuesta viaja con la fecha del último sync, para que la pantalla lo diga.
 //
+// TODO EN DÓLARES. El peso salía al lado de cada número y no se usaba para nada: se compara
+// entre campañas, y con la inflación de por medio dos importes en pesos de años distintos no
+// se pueden ni restar. El peso está en la planilla para quien lo necesite; acá estorba.
+// (Pablo, 26/8/2026: "pesos tampoco, mejor hagamos todo directamente en dólares".)
+//
+// LAS OPERACIONES TAMPOCO. Contaban filas de la planilla, no pedidos: dos renglones del
+// mismo remito son dos. Un número que parece un KPI y no lo es se termina citando en una
+// reunión. Se saca. La cantidad de CLIENTES sí queda: esa se entiende sola.
+//
 // LA RENTABILIDAD NO LA VE CUALQUIERA. Los comerciales entran a este informe, y la tabla
 // trae margen y costeo. Se gobierna con el nivel del módulo, que es el mecanismo que ya usa
 // el resto del sistema: 'ver' alcanza para volumen y facturación; para el margen hace falta
@@ -110,10 +119,8 @@ router.get('/ventas', requireAuth, (req, res) => {
 
     const filas = db.prepare(`
       SELECT COALESCE(NULLIF(${dim.col}, ''), '(sin dato)') AS clave,
-             COUNT(*) AS operaciones,
              COUNT(DISTINCT cliente) AS clientes,
              ROUND(SUM(kilos_tot), 0) AS kilos,
-             ROUND(SUM(total), 0) AS facturacion_ars,
              ROUND(SUM(tot_dol), 0) AS facturacion_usd,
              ROUND(SUM(tot_dol) / NULLIF(SUM(kilos_tot), 0), 2) AS usd_por_kg
              ${colsMargen}
@@ -127,9 +134,8 @@ router.get('/ventas', requireAuth, (req, res) => {
     // El total NO se suma en el navegador desde las filas: el LIMIT 500 dejaría afuera la
     // cola larga y el total daría menos que la realidad, sin que se note.
     const tot = db.prepare(`
-      SELECT COUNT(*) AS operaciones, COUNT(DISTINCT cliente) AS clientes,
+      SELECT COUNT(DISTINCT cliente) AS clientes,
              ROUND(SUM(kilos_tot), 0) AS kilos,
-             ROUND(SUM(total), 0) AS facturacion_ars,
              ROUND(SUM(tot_dol), 0) AS facturacion_usd,
              ROUND(SUM(tot_dol) / NULLIF(SUM(kilos_tot), 0), 2) AS usd_por_kg
              ${colsMargen}
@@ -311,10 +317,8 @@ router.get('/ventas/comparar', requireAuth, (req, res) => {
     const filas = db.prepare(`
       SELECT COALESCE(NULLIF(${dim.col}, ''), '(sin dato)') AS clave,
              COALESCE(NULLIF(${colDim.col}, ''), '(sin dato)') AS col,
-             COUNT(*) AS operaciones,
              ROUND(SUM(kilos_tot), 0) AS kilos,
              ROUND(SUM(tot_dol), 0) AS facturacion_usd,
-             ROUND(SUM(total), 0) AS facturacion_ars,
              ROUND(SUM(tot_dol) / NULLIF(SUM(kilos_tot), 0), 2) AS usd_por_kg
              ${cm}
       FROM sheet_ventas ${where}
@@ -351,9 +355,7 @@ router.get('/ventas/comparar', requireAuth, (req, res) => {
     const totales = db.prepare(`
       SELECT COALESCE(NULLIF(${colDim.col}, ''), '(sin dato)') AS col,
              ROUND(SUM(kilos_tot),0) AS kilos, ROUND(SUM(tot_dol),0) AS facturacion_usd,
-             ROUND(SUM(total),0) AS facturacion_ars,
-             ROUND(SUM(tot_dol) / NULLIF(SUM(kilos_tot), 0), 2) AS usd_por_kg,
-             COUNT(*) AS operaciones ${cm}
+             ROUND(SUM(tot_dol) / NULLIF(SUM(kilos_tot), 0), 2) AS usd_por_kg ${cm}
       FROM sheet_ventas ${where} GROUP BY col ORDER BY col
     `).all(...params).reduce((m, r) => { m[r.col] = r; return m; }, {});
 
