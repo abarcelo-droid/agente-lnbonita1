@@ -29,8 +29,8 @@ import { crearAsiento, MOTIVOS, origenDeAsiento } from '../servicios/asientos.js
 const MOTIVOS_TXT = (k) => (MOTIVOS[k] ? MOTIVOS[k].label : k);
 import { getDb, dbPath } from '../servicios/db.js';
 // Borrar los datos de prueba, módulo por módulo. Va detrás de un interruptor.
-import { MODULOS, moduloDeLimpieza, contar, contarTodo, limpiar, limpiezaHabilitada,
-  CLAVE_HABILITADA } from '../servicios/sg_limpieza.js';
+import { MODULOS, moduloDeLimpieza, contar, contarTodo, limpiar, limpiarTodo,
+  limpiezaHabilitada, CLAVE_HABILITADA } from '../servicios/sg_limpieza.js';
 import '../servicios/sg_limpieza_mapa.js';   // registra los módulos
 import '../servicios/db_sg.js'; // corre el DDL sg_* al importarse
 // Las condiciones de pago que se usan de verdad, y el código de trazabilidad
@@ -911,6 +911,23 @@ router.get('/limpieza', requireAdmin, (req, res) => {
   try {
     res.json({ ok: true, data: { habilitada: true, modulos: contarTodo(db) } });
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// ══ BORRAR TODO ════════════════════════════════════════════════════════════
+// Es lo que hace falta para dejar el sistema listo para lanzar. Los botones por
+// pantalla sirven para un caso puntual; para limpiar entero obligan a apretar
+// dieciséis veces adivinando el orden.
+//
+// VA ANTES de /limpieza/:modulo: si no, Express lee «todo» como el nombre de un
+// módulo y contesta que no existe.
+router.post('/limpieza/todo/borrar', requireAdmin, (req, res) => {
+  const db = limpiezaViva(req, res); if (!db) return;
+  try {
+    const r = limpiarTodo(db, { confirmacion: req.body && req.body.confirmacion });
+    if (!r.ok) return res.status(400).json(r);
+    console.log('[SG][limpieza] TODO filas=' + r.total + ' usuario=' + (uid(req) || '?'));
+    res.json({ ok: true, data: r });
+  } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
 });
 
 // Lo que se va de UN módulo, con el detalle por tabla. Es lo que se le muestra al que

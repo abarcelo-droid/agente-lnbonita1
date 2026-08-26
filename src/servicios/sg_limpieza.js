@@ -95,7 +95,7 @@ export function contar(db, modulo) {
     } catch (_) { /* la tabla no existe */ }
   }
   return { clave: m.clave, pantalla: m.pantalla, filas, total, quedan,
-    no_se_tocan: m.no_se_tocan || [], aviso: m.aviso || null };
+    no_se_tocan: m.no_se_tocan || [], aviso: m.aviso || null, tambien: m.tambien || null };
 }
 
 // ── Y SE BORRA ─────────────────────────────────────────────────────────────
@@ -160,5 +160,66 @@ export function limpiar(db, modulo, { confirmacion } = {}) {
 
 // Todo junto, para el resumen de la pantalla de administración.
 export function contarTodo(db) {
-  return MODULOS.map((m) => contar(db, m)).filter(Boolean);
+  return enOrden().map((m) => contar(db, m)).filter(Boolean);
+}
+
+// Los módulos en el orden en que hay que borrarlos. El `orden` no es cosmético: con
+// las claves foráneas encendidas, apretar uno antes que otro del que depende falla.
+export function enOrden() {
+  return MODULOS.slice().sort((a, b) => (a.orden || 0) - (b.orden || 0));
+}
+
+// ══ BORRAR TODO, DE UNA Y EN ORDEN ═════════════════════════════════════════
+//
+// Es lo que hace falta de verdad para dejar el sistema listo para lanzar. Los botones
+// por pantalla sirven para un caso puntual —«borrame las cobranzas y nada más»— pero
+// para limpiar entero obligan a apretar dieciséis veces, adivinando el orden, y con
+// pantallas que muestran datos de OTRO módulo y por lo tanto parecen no borrar nada.
+//
+// Va TODO en una sola transacción: o queda limpio o queda como estaba. Un borrado a
+// medias —los comprobantes sin sus asientos, los remitos sin sus partidas— es peor que
+// no haber empezado, porque cada pantalla muestra un número que no cierra con la de al
+// lado y no hay forma de saber dónde se cortó.
+export function limpiarTodo(db, { confirmacion } = {}) {
+  if (String(confirmacion || '').trim().toUpperCase() !== 'BORRAR TODO') {
+    return { ok: false, error: 'Para borrar todo hay que escribir «BORRAR TODO».' };
+  }
+  const orden = enOrden();
+  const antes = orden.map((m) => contar(db, m));
+  const porModulo = [];
+  db.exec('BEGIN');
+  try {
+    for (const m of orden) {
+      for (const sql of (m.previo || [])) {
+        try { db.prepare(sql).run(); }
+        catch (e) { if (!/no such table|no such column/i.test(e.message)) throw e; }
+      }
+      let n = 0;
+      for (const t of m.tablas) {
+        try {
+          const r = db.prepare('DELETE FROM ' + t.tabla + (t.donde ? ' WHERE ' + t.donde : '')).run();
+          n += r.changes || 0;
+        } catch (e) {
+          if (/no such table/i.test(e.message)) continue;
+          // Se dice EN QUÉ MÓDULO se cortó: «FOREIGN KEY constraint failed» a secas no
+          // le sirve a nadie.
+          throw new Error('Al borrar ' + m.pantalla + ' (' + t.tabla + '): ' + e.message);
+        }
+      }
+      for (const c of (m.contadores || [])) {
+        try { db.prepare('DELETE FROM sqlite_sequence WHERE name=?').run(c); } catch (_) { /* sin AUTOINCREMENT */ }
+      }
+      if (n) porModulo.push({ clave: m.clave, pantalla: m.pantalla, filas: n });
+    }
+    db.exec('COMMIT');
+  } catch (e) {
+    try { db.exec('ROLLBACK'); } catch (_) { /* ya cerró */ }
+    return { ok: false, error: e.message };
+  }
+  const quedan = [];
+  for (const m of orden) {
+    for (const q of (contar(db, m).quedan || [])) quedan.push(q);
+  }
+  return { ok: true, total: porModulo.reduce((a, x) => a + x.filas, 0),
+    contadas_antes: antes.reduce((a, x) => a + x.total, 0), modulos: porModulo, quedan };
 }

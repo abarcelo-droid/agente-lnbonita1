@@ -21,7 +21,7 @@ import { DatabaseSync } from 'node:sqlite';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { MODULOS, contar, limpiar, limpiezaHabilitada, CLAVE_HABILITADA }
+import { MODULOS, contar, limpiar, limpiarTodo, enOrden, limpiezaHabilitada, CLAVE_HABILITADA }
   from '../src/servicios/sg_limpieza.js';
 import '../src/servicios/sg_limpieza_mapa.js';
 
@@ -262,6 +262,63 @@ test('sin escribir el nombre del módulo no se borra nada', () => {
     assert.equal(r.ok, false);
   }
   assert.equal(db.prepare('SELECT COUNT(*) n FROM sg_ven_cobranzas').get().n, antes);
+});
+
+test('BORRAR TODO deja el sistema limpio de una, y en orden', () => {
+  // Es lo que hace falta de verdad para lanzar. Apretar dieciséis botones adivinando
+  // el orden no sirve — y encima hay pantallas que muestran datos de OTRO módulo, así
+  // que su botón dice «no hay nada» sobre una pantalla llena y parece roto.
+  const db = baseReal();
+  db.exec('PRAGMA foreign_keys = OFF');
+  const sembradas = [];
+  for (const t of tablasDeDatos()) if (sembrar(db, t)) sembradas.push(t);
+  db.exec('PRAGMA foreign_keys = ON');
+  assert.ok(sembradas.length > 30);
+
+  const r = limpiarTodo(db, { confirmacion: 'BORRAR TODO' });
+  assert.equal(r.ok, true, r.error || '');
+  assert.ok(r.total > 30, 'se borraron ' + r.total);
+  for (const m of MODULOS) {
+    for (const t of m.tablas) {
+      const n = db.prepare('SELECT COUNT(*) c FROM ' + t.tabla
+        + (t.donde ? ' WHERE ' + t.donde : '')).get().c;
+      assert.equal(n, 0, 'quedaron ' + n + ' en ' + t.tabla);
+    }
+  }
+});
+
+test('BORRAR TODO es todo o nada, y pide escribirlo', () => {
+  const db = baseReal();
+  db.exec('PRAGMA foreign_keys = OFF'); sembrar(db, 'sg_ven_cobranzas'); db.exec('PRAGMA foreign_keys = ON');
+  const antes = db.prepare('SELECT COUNT(*) n FROM sg_ven_cobranzas').get().n;
+  for (const mal of ['', 'si', 'BORRAR', 'borrar-todo']) {
+    assert.equal(limpiarTodo(db, { confirmacion: mal }).ok, false);
+  }
+  assert.equal(db.prepare('SELECT COUNT(*) n FROM sg_ven_cobranzas').get().n, antes);
+  // Minúsculas sí: lo que se cuida es que se escriba, no la tecla de bloqueo.
+  assert.equal(limpiarTodo(db, { confirmacion: 'borrar todo' }).ok, true);
+});
+
+test('el orden de borrado sale del mapa, no de cómo estén escritos', () => {
+  const o = enOrden().map((m) => m.clave);
+  assert.equal(o[o.length - 1], 'sg-asientos', 'los asientos van últimos, sí o sí');
+  assert.ok(o.indexOf('sg-cc-proveedores') < o.indexOf('sg-tesoreria'),
+    'pagos antes que caja y bancos');
+  assert.ok(o.indexOf('sg-salidas') < o.indexOf('sg-stock'),
+    'los remitos antes que las partidas');
+  assert.ok(o.indexOf('sg-comprobantes-emitidos') < o.indexOf('sg-salidas'));
+});
+
+test('cada pantalla dice DÓNDE vive lo que muestra y no borra', () => {
+  // «Partidas pendientes de facturar» son ÓRDENES, no facturas. El botón decía «no hay
+  // nada que borrar» sobre una pantalla con siete renglones, y se leyó como una falla.
+  const fac = MODULOS.find((m) => m.clave === 'sg-facturas-compra');
+  assert.match(fac.tambien, /ÓRDENES DE COMPRA/);
+  const liq = MODULOS.find((m) => m.clave === 'sg-liquidaciones-productor');
+  assert.match(liq.tambien, /ÓRDENES DE COMPRA/);
+  assert.match(PANEL, /Esta pantalla no tiene datos propios para borrar/);
+  assert.match(PANEL, /Borrar TODOS los datos de San Gerónimo/);
+  assert.match(PANEL, /function sgLimTodo\(\)/);
 });
 
 test('el interruptor arranca APAGADO y se apaga con un solo valor', () => {

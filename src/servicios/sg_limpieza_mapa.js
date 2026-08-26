@@ -26,6 +26,8 @@ registrar({
   clave: 'sg-cc-clientes', orden: 10,
   pantalla: 'Cuenta corriente de clientes',
   requiere: [],
+  tambien: 'El saldo de cada cliente sale de sus comprobantes: se va a cero cuando se '
+    + 'borren desde Comprobantes emitidos.',
   aviso: 'La cuenta corriente no guarda un saldo: lo calcula en vivo con los comprobantes '
     + 'menos lo cobrado. Se va a cero sola cuando se borren las cobranzas y los comprobantes.',
   tablas: [
@@ -62,6 +64,8 @@ registrar({
   clave: 'sg-remitos-pendientes', orden: 30,
   pantalla: 'Remitos pendientes de comprobante',
   requiere: ['sg-cc-clientes'],
+  tambien: 'Los remitos que ves acá se borran desde Salidas. Esta pantalla sólo se '
+    + 'lleva las liquidaciones que emitió el cliente.',
   aviso: 'Esta pantalla no guarda nada: es la lista de remitos cuyos kilos todavía no están '
     + 'en ningún comprobante. Lo que se borra acá son las LIQUIDACIONES QUE EMITE EL '
     + 'CLIENTE, que se reciben desde esta misma pantalla.',
@@ -155,6 +159,7 @@ registrar({
   clave: 'sg-pisos', orden: 75,
   pantalla: 'Pisos',
   requiere: ['sg-stock'],
+  tambien: 'Lo que ves ubicado se borra junto con las partidas, en Stock.',
   aviso: 'Dónde está ubicada cada partida se borra junto con las partidas, en Stock. El ALTA '
     + 'de los pisos es configuración y no se toca.',
   tablas: [],
@@ -181,6 +186,11 @@ registrar({
   clave: 'sg-facturas-compra', orden: 90,
   pantalla: 'Facturas por mercadería',
   requiere: ['sg-ingresos'],
+  // La pantalla muestra sobre todo PARTIDAS esperando factura, que no son facturas:
+  // son órdenes. Sin decirlo, el botón parece roto cuando dice que no hay nada.
+  tambien: 'Las «partidas pendientes de facturar» que ves acá son ÓRDENES DE COMPRA, '
+    + 'no facturas: se borran desde Órdenes de compra. Y las de precio abierto, desde '
+    + 'Liquidaciones.',
   aviso: 'Los archivos adjuntos de la factura quedan en el disco. Los pagos a proveedores se '
     + 'borran en Cuenta corriente de proveedores, y los asientos al final.',
   tablas: [
@@ -196,6 +206,8 @@ registrar({
   clave: 'sg-liquidaciones-productor', orden: 100,
   pantalla: 'Liquidaciones (al productor)',
   requiere: ['sg-ingresos'],
+  tambien: 'Las «partidas pendientes de liquidar» son ÓRDENES DE COMPRA, no '
+    + 'liquidaciones: se borran desde Órdenes de compra.',
   // LA TABLA ES COMPARTIDA CON ABASTO. Las liquidaciones que se cargan sueltas —fuera
   // de la bandeja de partidas de San Gerónimo— tienen oc_id en NULL y NO son de acá.
   // Un DELETE sin filtro se llevaría las de abasto también.
@@ -251,6 +263,8 @@ registrar({
   clave: 'sg-cc-proveedores', orden: 120,
   pantalla: 'Cuenta corriente de proveedores (pagos)',
   requiere: ['sg-facturas-compra', 'sg-liquidaciones-productor'],
+  tambien: 'El saldo sale de las facturas y liquidaciones: se va a cero cuando se '
+    + 'borren desde sus pantallas. Acá sólo se van los pagos.',
   aviso: 'La cuenta corriente no guarda un saldo: lo calcula en vivo. La PLATA del pago —el '
     + 'movimiento de caja o banco y el cheque— se borra en Caja y Bancos, que va después.',
   tablas: [

@@ -16579,7 +16579,7 @@ function sgLimOpen(clave){
     // PRIMERO CUÁNTO SE VA, tabla por tabla. Es lo que hay que poder mirar antes de
     // decidir, y es la diferencia entre apretar un botón y decidir.
     if (!d.total) {
-      h += '<div style="color:var(--mut)">No hay nada que borrar en esta pantalla.</div>';
+      h += '<div style="color:var(--mut)">Esta pantalla no tiene datos propios para borrar.</div>';
     } else {
       h += '<div style="font-weight:600;margin-bottom:6px">Se van a borrar '
         + nr(d.total) + ' registro(s):</div>'
@@ -16609,9 +16609,75 @@ function sgLimOpen(clave){
       h += '<div style="margin-top:10px;padding:8px 10px;border-radius:8px;'
         + 'background:#fef3c7;color:#92400e;font-size:11.5px">⚠ ' + esc(d.aviso) + '</div>';
     }
+    // ── LO QUE VES ACÁ Y NO SE BORRA ACÁ ─────────────────────────────────
+    // Varias pantallas muestran sobre todo datos de OTRO módulo: «partidas pendientes
+    // de facturar» son órdenes, no facturas. Sin decirlo, el botón parece roto.
+    if (d.tambien) {
+      h += '<div style="margin-top:10px;padding:8px 10px;border-radius:8px;'
+        + 'background:#eff6ff;color:#1e40af;font-size:11.5px">ℹ ' + esc(d.tambien) + '</div>';
+    }
     h += '<div style="margin-top:10px;font-size:11.5px;color:var(--mut)">'
       + 'Esto no se puede deshacer. Bajate una copia de la base antes del primer borrado.</div>';
+    // ── Y EL ATAJO QUE HACE FALTA DE VERDAD ──────────────────────────────
+    // Para dejar el sistema listo para lanzar no sirve apretar dieciséis botones
+    // adivinando el orden: sirve uno.
+    h += '<div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--bor)">'
+      + '<button class="btn bo bs" style="color:#b91c1c;border-color:#fecaca"'
+      + ' onclick="sgLimTodo()">🧹 Borrar TODOS los datos de San Gerónimo</button>'
+      + '<div style="font-size:11px;color:var(--mut);margin-top:4px">Las dieciséis pantallas, '
+      + 'en el orden correcto y de una sola vez. La configuración no se toca.</div></div>';
     eid('sg-lim-cuerpo').innerHTML = h;
+  });
+}
+
+// ── BORRAR TODO ──────────────────────────────────────────────────────────
+// Las dieciséis pantallas, en el orden correcto, en UNA transacción: o queda limpio o
+// queda como estaba. Un borrado a medias es peor que no haber empezado, porque cada
+// pantalla muestra un número que no cierra con la de al lado.
+function sgLimTodo(){
+  var conf = prompt('BORRAR TODOS LOS DATOS DE SAN GERÓNIMO' + String.fromCharCode(10,10)
+    + 'Se van órdenes, recepciones, partidas, remitos, comprobantes, liquidaciones, '
+    + 'cobranzas, pagos, movimientos de caja y banco, cheques y asientos.' + String.fromCharCode(10,10)
+    + 'NO se toca la configuración: productos, clientes, proveedores, plan de cuentas, '
+    + 'puntos de venta, cajas y bancos, pisos.' + String.fromCharCode(10,10)
+    + 'Bajate una copia de la base antes si no lo hiciste.' + String.fromCharCode(10,10)
+    + 'Escribí BORRAR TODO para confirmar:', '');
+  if (conf === null) return;
+  if (String(conf).trim().toUpperCase() !== 'BORRAR TODO') {
+    toast('Escribí BORRAR TODO para confirmar','er'); return;
+  }
+  eid('sg-lim-cuerpo').innerHTML = '<div style="font-size:13px">Borrando…</div>';
+  api('/api/sg/limpieza/todo/borrar','POST',{ confirmacion:'BORRAR TODO' }).then(function(r){
+    if (!r || !r.ok) {
+      eid('sg-lim-cuerpo').innerHTML = '<div style="color:var(--err);font-weight:600">'
+        + 'No se pudo borrar</div><div style="font-size:12px;margin-top:6px">'
+        + esc((r && r.error) || 'Error') + '</div>'
+        + '<div style="font-size:11.5px;color:var(--mut);margin-top:8px">No se borró nada: '
+        + 'va todo junto o nada.</div>';
+      return;
+    }
+    var d = r.data;
+    var h = '<div style="font-weight:700;color:#166534;font-size:14px">✓ Se borraron '
+      + nr(d.total) + ' registro(s) en total</div>';
+    if ((d.modulos||[]).length) {
+      h += '<div class="ab-table-wrap" style="overflow-x:hidden !important;margin-top:8px">'
+        + '<table class="pa-tbl" style="table-layout:fixed;width:100%"><tbody>'
+        + d.modulos.map(function(m){
+            return '<tr><td style="overflow:hidden;text-overflow:ellipsis">' + esc(m.pantalla)
+              + '</td><td style="width:90px;text-align:right">' + nr(m.filas) + '</td></tr>'; }).join('')
+        + '</tbody></table></div>';
+    }
+    if ((d.quedan||[]).length) {
+      h += '<div style="margin-top:12px;padding:8px 10px;border-radius:8px;background:#f1f5f9;'
+        + 'font-size:11.5px"><b>Quedó a propósito:</b> ' + d.quedan.map(function(q){
+            return nr(q.filas) + ' en ' + esc(q.tabla)
+              + (q.por_que ? ' — ' + esc(q.por_que) : ''); }).join(' · ') + '</div>';
+    }
+    h += '<div style="margin-top:14px;text-align:right">'
+      + '<button class="btn bb" onclick="location.reload()">Listo, refrescar</button></div>';
+    eid('sg-lim-cuerpo').innerHTML = h;
+    var c = eid('sg-lim-conf'); if (c && c.parentElement) c.parentElement.style.display = 'none';
+    var b = eid('sg-lim-btn'); if (b) b.style.display = 'none';
   });
 }
 
