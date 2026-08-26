@@ -23148,7 +23148,24 @@ function sgRepExport(){
       <div class="mht">🔏 Cargar sellado del supermercado</div>
       <button class="mcl" onclick="document.getElementById('ifco-mb-sellar').classList.remove('on')">x</button>
     </div>
-    <div id="ifco-sellar-info" style="background:var(--bg);border-radius:8px;padding:10px 12px;margin-bottom:14px;font-size:12px;color:var(--mut)"></div>
+    <div id="ifco-sellar-info" style="background:var(--bg);border-radius:8px;padding:10px 12px;margin-bottom:6px;font-size:12px;color:var(--mut)"></div>
+
+    <!-- El N° lo lee la IA de la foto y no siempre acierta. Corregirlo NO puede ser editar un
+         texto: el guardado va contra /api/ifco/remitos/:id/sellar, así que hay que APUNTAR el
+         modal a otro remito. Un campo editable sería peor que nada — se vería el número
+         corregido en pantalla y el sellado se guardaría igual en el remito equivocado. -->
+    <div style="margin-bottom:14px">
+      <a href="#" id="ifco-s-cambiar-link" onclick="ifcoAbrirCambiarRemito();return false" style="font-size:11px;color:var(--mut);text-decoration:underline">✎ No es este remito — buscar el correcto</a>
+      <div id="ifco-s-cambiar-box" style="display:none;background:var(--bg);border:1px solid var(--bor);border-radius:8px;padding:10px 12px">
+        <div style="font-size:11px;color:var(--mut);margin-bottom:7px">Buscá el remito al que hay que cargarle ESTE sellado. La foto y lo que ya cargaste se conservan.</div>
+        <div style="display:flex;gap:6px;align-items:center">
+          <input id="ifco-s-cambiar-q" type="text" placeholder="N° de remito — alcanzan los últimos dígitos" onkeydown="if(event.key==='Enter'){ifcoBuscarRemitoSellado();return false}" style="flex:1;padding:7px 10px;border-radius:7px;border:1px solid var(--bor);background:var(--pan);font-size:12px">
+          <button class="btn bb" style="font-size:12px;padding:7px 14px" onclick="ifcoBuscarRemitoSellado()">Buscar</button>
+          <button class="btn bo" style="font-size:12px;padding:7px 12px" onclick="ifcoCerrarCambiarRemito()">Cancelar</button>
+        </div>
+        <div id="ifco-s-cambiar-res" style="margin-top:8px;font-size:12px"></div>
+      </div>
+    </div>
 
     <!-- PASO 1: subir foto del remito sellado -->
     <div id="ifco-s-step1">
@@ -48348,9 +48365,8 @@ async function ifcoAbrirSellar(id, fromCargarSellado) {
   try {
     const r = await _ifcoFetch('/api/ifco/remitos/' + id);
     IFCO._selRemito = r;
-    document.getElementById('ifco-sellar-info').innerHTML =
-      '<b>'+_ifcoEsc(r.n_remito_ifco)+'</b> — '+_ifcoEsc(r.empresa||'')+' '+_ifcoEsc(r.sucursal||'')+'<br>' +
-      'Despachado: <b>'+r.cantidad_despachada+'</b> cajones el '+_ifcoFecha(r.fecha_emision);
+    _ifcoPintarCabeceraSellar(r);
+    ifcoCerrarCambiarRemito();
     document.getElementById('ifco-s-fecha').value = r.fecha_sellado || _ifcoToday();
     document.getElementById('ifco-s-recib').value = r.cantidad_recibida != null ? r.cantidad_recibida : r.cantidad_despachada;
     document.getElementById('ifco-s-rech').value  = r.cantidad_rechazada != null ? r.cantidad_rechazada : 0;
@@ -48395,6 +48411,120 @@ async function ifcoAbrirSellar(id, fromCargarSellado) {
       document.getElementById('ifco-s-btn-guardar').style.display = 'none';
     }
     document.getElementById('ifco-mb-sellar').classList.add('on');
+  } catch(e) { alert('Error: ' + e.message); }
+}
+
+function _ifcoPintarCabeceraSellar(r) {
+  document.getElementById('ifco-sellar-info').innerHTML =
+    '<b>'+_ifcoEsc(r.n_remito_ifco)+'</b> — '+_ifcoEsc(r.empresa||'')+' '+_ifcoEsc(r.sucursal||'')+'<br>' +
+    'Despachado: <b>'+r.cantidad_despachada+'</b> cajones el '+_ifcoFecha(r.fecha_emision);
+}
+
+// ── CORREGIR A QUÉ REMITO SE LE CARGA EL SELLADO ──────────────────────────────────
+// Pablo, 26/8/2026: "me tiene que permitir cambiar el número de remito porque no siempre lo
+// lee bien". La IA saca el N° de la foto y a veces se equivoca en un dígito, y entonces el
+// modal se abre apuntando a OTRO despacho: mismo formato de número, otra cadena, otra
+// cantidad. Guardar así sella el remito equivocado y deja los dos mal — el que se selló sin
+// haber vuelto, y el que volvió y sigue figurando en tránsito.
+//
+// Por eso esto NO es un campo de texto editable. Se busca el remito de verdad y se apunta el
+// modal a ÉL; el número que se ve en pantalla siempre es el del remito al que se va a
+// escribir. Un input libre mostraría el número corregido y guardaría igual en el otro.
+function ifcoAbrirCambiarRemito() {
+  const box = document.getElementById('ifco-s-cambiar-box');
+  if (!box) return;
+  box.style.display = 'block';
+  document.getElementById('ifco-s-cambiar-link').style.display = 'none';
+  document.getElementById('ifco-s-cambiar-res').innerHTML = '';
+  const q = document.getElementById('ifco-s-cambiar-q');
+  q.value = '';
+  q.focus();
+}
+
+function ifcoCerrarCambiarRemito() {
+  const box = document.getElementById('ifco-s-cambiar-box');
+  if (!box) return;
+  box.style.display = 'none';
+  document.getElementById('ifco-s-cambiar-link').style.display = 'inline';
+  document.getElementById('ifco-s-cambiar-res').innerHTML = '';
+}
+
+async function ifcoBuscarRemitoSellado() {
+  const q = (document.getElementById('ifco-s-cambiar-q').value || '').trim();
+  const cont = document.getElementById('ifco-s-cambiar-res');
+  // Con uno o dos dígitos matchea media base y la lista no ayuda a nadie.
+  if (q.length < 3) { cont.innerHTML = '<span style="color:var(--mut)">Escribí al menos 3 caracteres del número.</span>'; return; }
+  cont.innerHTML = '<span style="color:var(--mut)">Buscando…</span>';
+  try {
+    const rows = (await _ifcoFetch('/api/ifco/remitos?search=' + encodeURIComponent(q))) || [];
+    if (!rows.length) {
+      cont.innerHTML = '<span style="color:#991b1b">Ningún remito con ese número.</span> ' +
+        '<span style="color:var(--mut)">Probá con menos dígitos, o con la cadena.</span>';
+      return;
+    }
+    const actual = IFCO._selRemito ? IFCO._selRemito.id : null;
+    const MAX = 8;
+    const caja = 'padding:7px 9px;border-radius:6px;margin-bottom:5px;';
+    cont.innerHTML = rows.slice(0, MAX).map(function(r) {
+      const linea = '<b>' + _ifcoEsc(r.n_remito_ifco || '—') + '</b> — ' + _ifcoEsc(r.empresa || '?') +
+        (r.sucursal ? ' · ' + _ifcoEsc(r.sucursal) : '') +
+        '<div style="color:var(--mut);font-size:11px">Despachado: ' + (r.cantidad_despachada || 0) +
+        ' cajones el ' + _ifcoFecha(r.fecha_emision) + ' · ' + _ifcoEsc(r.estado || '') + '</div>';
+      if (r.id === actual) {
+        return '<div style="' + caja + 'background:var(--bg);opacity:.65">' + linea +
+          '<div style="font-size:11px;color:var(--mut)">Es el que ya está abierto.</div></div>';
+      }
+      // Presentado o anulado no se pueden sellar. Se listan igual, y dicho por qué: si
+      // desaparecieran, el operador creería que el remito no existe y saldría a cargarlo
+      // de nuevo, que es como nacen los duplicados.
+      if (r.estado === 'presentado' || r.estado === 'anulado') {
+        return '<div style="' + caja + 'background:var(--bg);opacity:.65">' + linea +
+          '<div style="font-size:11px;color:#92400e">No se le puede cargar el sellado: está ' + _ifcoEsc(r.estado) + '.</div></div>';
+      }
+      return '<div style="' + caja + 'border:1px solid var(--bor);cursor:pointer" onclick="ifcoUsarRemitoSellado(' + r.id + ')">' + linea +
+        '<div style="font-size:11px;color:var(--burg);font-weight:600">Cargarle el sellado a este →</div></div>';
+    }).join('') +
+    (rows.length > MAX
+      ? '<div style="color:var(--mut);font-size:11px">Hay ' + rows.length + ' resultados y se muestran los primeros ' + MAX + '. Poné más dígitos.</div>'
+      : '');
+  } catch(e) {
+    cont.innerHTML = '<span style="color:#991b1b">Error: ' + _ifcoEsc(e.message) + '</span>';
+  }
+}
+
+// Apunta el modal a otro remito SIN pisar lo que ya está cargado: la fecha, las cantidades y
+// el encargado salieron de la MISMA foto y siguen valiendo. Lo único que estaba mal era a
+// qué remito se le imputa.
+async function ifcoUsarRemitoSellado(id) {
+  try {
+    const r = await _ifcoFetch('/api/ifco/remitos/' + id);
+    const anterior = IFCO._selRemito ? IFCO._selRemito.n_remito_ifco : null;
+    IFCO._selRemito = r;
+    _ifcoPintarCabeceraSellar(r);
+    ifcoCerrarCambiarRemito();
+    // El aviso del OCR quedaba diciendo que la foto era de otro remito: ya no aplica.
+    document.getElementById('ifco-s-ocr-error').style.display = 'none';
+    // La cantidad recibida venía prellenada con lo despachado por el remito ANTERIOR. Si no
+    // coincide con el nuevo, se dice — es el error que este cambio existe para evitar.
+    const recib = parseInt(document.getElementById('ifco-s-recib').value || '0');
+    const rech  = parseInt(document.getElementById('ifco-s-rech').value || '0');
+    const descuadra = (recib + rech) !== r.cantidad_despachada;
+    const av = document.getElementById('ifco-s-ocr-aviso');
+    av.style.display = 'block';
+    if (descuadra) {
+      av.style.background = '#fef3c7'; av.style.borderColor = '#fcd34d'; av.style.color = '#92400e';
+      av.innerHTML = '⚠ El sellado se le va a cargar a <b>' + _ifcoEsc(r.n_remito_ifco) + '</b>' +
+        (anterior ? ' (antes decía ' + _ifcoEsc(anterior) + ')' : '') + '. ' +
+        'Este remito despachó <b>' + r.cantidad_despachada + '</b> cajones y abajo dice ' + recib +
+        ' recibidos' + (rech ? ' + ' + rech + ' rechazados' : '') + '. Revisá antes de guardar.';
+    } else {
+      av.style.background = '#d1fae5'; av.style.borderColor = '#6ee7b7'; av.style.color = '#065f46';
+      av.innerHTML = '✓ El sellado se le va a cargar a <b>' + _ifcoEsc(r.n_remito_ifco) + '</b>' +
+        (anterior ? ' (antes decía ' + _ifcoEsc(anterior) + ')' : '') + '. Las cantidades cierran.';
+    }
+    if (r.estado === 'sellado') {
+      av.innerHTML += '<div style="margin-top:5px">Ojo: este remito <b>ya estaba sellado</b>. Guardar pisa el sellado anterior.</div>';
+    }
   } catch(e) { alert('Error: ' + e.message); }
 }
 
