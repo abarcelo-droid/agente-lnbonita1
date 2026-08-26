@@ -111,26 +111,11 @@ registrar({
   no_se_tocan: ['sg_clientes', 'sg_productos'],
 });
 
-// ── 6 · PEDIDOS ────────────────────────────────────────────────────────────
-registrar({
-  clave: 'sg-pedidos', orden: 60,
-  pantalla: 'Pedidos',
-  requiere: ['sg-salidas'],
-  aviso: 'Borrar una reserva no toca el stock: la reserva compromete, no descuenta. Lo que '
-    + 'descuenta es el remito.',
-  tablas: [
-    { tabla: 'sg_reservas', que_es: 'las reservas del pedido contra una partida o contra lo que viene en camino' },
-    { tabla: 'sg_pedido_items', que_es: 'los renglones del pedido' },
-    { tabla: 'sg_pedidos', que_es: 'los pedidos' },
-  ],
-  no_se_tocan: ['sg_clientes'],
-});
-
 // ── 7 · STOCK ──────────────────────────────────────────────────────────────
 registrar({
   clave: 'sg-stock', orden: 70,
   pantalla: 'Stock (partidas, vencimientos y trazabilidad)',
-  requiere: ['sg-salidas', 'sg-pedidos', 'sg-gastos-directos'],
+  requiere: ['sg-salidas', 'sg-gastos-directos'],
   // EL CICLO. sg_lotes.reproceso_id apunta a sg_reprocesos y sg_reprocesos.lote_madre_id
   // apunta a sg_lotes: ningún orden de borrado funciona. Se rompe poniendo el vínculo
   // en NULL, y recién ahí los DELETE pasan. Lo mismo con transformado_de, que apunta a
@@ -141,6 +126,9 @@ registrar({
   ],
   aviso: 'Se lleva también dónde estaba ubicada cada partida. El ALTA de los pisos no se toca.',
   tablas: [
+    // Las reservas de un pedido contra una partida. Viven acá porque BLOQUEAN el
+    // borrado de las partidas — y porque los PEDIDOS no entran en esta limpieza.
+    { tabla: 'sg_reservas', que_es: 'las reservas de pedidos contra una partida' },
     { tabla: 'sg_lote_traslados', que_es: 'los pases de un piso a otro' },
     { tabla: 'sg_lote_ubicaciones', que_es: 'cuánto hay de cada partida en cada piso' },
     { tabla: 'sg_lote_decomisos', que_es: 'los decomisos parciales' },
@@ -225,7 +213,7 @@ registrar({
 registrar({
   clave: 'sg-ordenes', orden: 110,
   pantalla: 'Órdenes de compra (emisión y recibidas)',
-  requiere: ['sg-ingresos', 'sg-facturas-compra', 'sg-liquidaciones-productor', 'sg-pedidos'],
+  requiere: ['sg-ingresos', 'sg-facturas-compra', 'sg-liquidaciones-productor'],
   aviso: 'Se lleva también el rastro de correcciones de precios y kilos. El número de orden '
     + 'vuelve solo al 0001: sale de la propia tabla, no de un contador guardado.',
   tablas: [
@@ -235,24 +223,6 @@ registrar({
     { tabla: 'sg_ediciones', que_es: 'el rastro de correcciones con su motivo' },
   ],
   no_se_tocan: ['sg_proveedores', 'sg_productos', 'sg_condiciones_pago', 'sg_presentaciones'],
-});
-
-// ── 13 · IMPORTACIÓN ───────────────────────────────────────────────────────
-registrar({
-  clave: 'sg-importacion', orden: 115,
-  pantalla: 'Importación (embarques)',
-  requiere: ['sg-stock'],
-  aviso: 'Los documentos del embarque quedan en el almacenamiento externo: se borra la fila '
-    + 'que los nombra, no el archivo.',
-  tablas: [
-    { tabla: 'sg_embarque_precios', que_es: 'los precios del cotizador' },
-    { tabla: 'sg_embarque_reales', que_es: 'lo que realmente llegó' },
-    { tabla: 'sg_embarque_documentos', que_es: 'los documentos del embarque' },
-    { tabla: 'sg_embarque_lineas', que_es: 'los renglones del embarque' },
-    { tabla: 'sg_embarque_costos', que_es: 'los costos del embarque' },
-    { tabla: 'sg_embarques', que_es: 'los embarques' },
-  ],
-  no_se_tocan: ['sg_tc_esperado (el tipo de cambio esperado, que es parametrización)'],
 });
 
 // ── 14 · PAGOS A PROVEEDORES ───────────────────────────────────────────────
@@ -318,5 +288,13 @@ registrar({
     'sg_asientos_modelo y sus líneas', 'sg_config_impositiva'],
 });
 
-// Los dos Diarios de IVA no tienen botón: no guardan una sola fila propia. Se arman
-// leyendo los comprobantes y las liquidaciones, así que se vacían solos.
+// ══ LO QUE NO ENTRA EN ESTA LIMPIEZA, Y POR QUÉ ════════════════════════════
+//
+// · IMPORTACIÓN (embarques) y PEDIDOS. Pablo definió el alcance con capturas de las
+//   pantallas que había que limpiar, y estas dos NO estaban. Se habían agregado por
+//   iniciativa propia a partir del relevamiento —«caen acá»— y eso costó los datos de
+//   embarques de una base real. El alcance de un borrado lo define quien va a perder
+//   los datos; el relevamiento dice qué existe, no qué se borra.
+//
+// · Los dos Diarios de IVA: no guardan una sola fila propia. Se arman leyendo los
+//   comprobantes y las liquidaciones, así que se vacían solos.

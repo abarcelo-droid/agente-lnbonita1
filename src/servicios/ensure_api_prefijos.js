@@ -90,6 +90,9 @@ const PREFIJOS = [
   // pide la clave del que la hace: mueve la contabilidad.
   ['sgct-iva-compras',   'sg/diario-iva-compras,sg/asientos'],
   ['sgct-iva-ventas',    'sg/diario-iva-ventas'],
+  // La pantalla que borra los datos de prueba. Los endpoints son ademas
+  // requireAdmin y viven detras del interruptor: esto es la tercera puerta.
+  ['sgct-limpieza',      'sg/limpieza,sg/limpieza-backup'],
   ['sgct-puntos-venta',  'sg/contable/puntos-venta'],
   ['sgct-plan-cuentas',  'sg/contable,sg/contable/secciones,sg/contable/titulos,sg/contable/config-impositiva'],
   ['sgct-modelos',       'sg/contable/modelos'],
