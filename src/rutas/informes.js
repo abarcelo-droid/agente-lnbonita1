@@ -14,7 +14,7 @@
 // 'operar' o más. Admin ve todo (nivelEnModulo le devuelve 'anular').
 import express from 'express';
 import db from '../servicios/db.js';
-import { estadoSync, diagnostico, syncSheets } from '../servicios/sheets.js';
+import { estadoSync, diagnostico, syncSheets, verificarPlanilla } from '../servicios/sheets.js';
 import { nivelEnModulo } from '../servicios/permisos.js';
 
 const router = express.Router();
@@ -240,6 +240,28 @@ router.get('/diagnostico', requireAuth, async (req, res) => {
   }
   try { res.json({ ok: true, data: await diagnostico() }); }
   catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// GET /api/informes/verificar-kilos — TEMPORAL, se saca al cerrar el proyecto de informes.
+//
+// Contesta si lo que quedó guardado despues del resync coincide con lo que dice la planilla
+// HOY. El "antes" no existe: el sync es un reemplazo atomico y no guarda historico, asi que
+// comparar antes/despues no se puede — y ademas no es lo que decide si se puede construir
+// agregados encima. Compara kilos_tot, tot_dol y rent_dol celda por celda, muestra la columna
+// sem (que bloquea el grafico semanal) y las columnas de B COMPRAS que el sync lee sin mapear.
+//
+// Solo admin: pega contra Google, recorre la planilla entera y gasta cuota.
+router.get('/verificar-kilos', requireAuth, async (req, res) => {
+  if (!req.user || req.user.rol !== 'admin') {
+    return res.status(403).json({ ok: false, error: 'Solo administradores' });
+  }
+  try {
+    const n = Math.min(Math.max(parseInt(req.query.n, 10) || 10, 1), 50);
+    res.json({ ok: true, data: await verificarPlanilla(n) });
+  } catch (e) {
+    console.error('[Informes][verificar-kilos]', e);
+    res.status(500).json({ ok: false, error: e.message });
+  }
 });
 
 // GET /api/informes/ventas/comparar — la MISMA agrupación, con una columna por período.

@@ -184,63 +184,10 @@ async function getGoogleToken() {
   return data.access_token;
 }
 
-// ── Leer rango del sheet ───────────────────────────────────────────────────
-// ── LEER UN NÚMERO DE LA PLANILLA ────────────────────────────────────────────────────
-// La API de Sheets devuelve el valor COMO SE VE, no el número crudo. Una celda de dólares
-// formateada como "U$ 510.704" llega así, con el prefijo adentro, y parseFloat() de eso da
-// NaN → 0. Los pesos entraban bien sólo porque esa columna no tiene prefijo: por eso el
-// informe mostraba la facturación en pesos correcta y los dólares todos en cero.
-//
-// Además hay que decidir qué es el separador decimal, y eso no es obvio:
-//   "510.704"    → 510704      (punto de miles, es-AR)
-//   "1.234,56"   → 1234.56     (coma decimal, es-AR)
-//   "1,234.56"   → 1234.56     (coma de miles, en-US)
-//   "12,5"       → 12.5        (coma decimal)
-// La regla: si están los dos separadores, el ÚLTIMO es el decimal. Si hay uno solo, es
-// decimal salvo que venga seguido de exactamente tres dígitos al final, que es la firma del
-// separador de miles. Equivocarse acá no da error: da un número mil veces más grande o más
-// chico, que es peor.
-// AHORA ES LA RED, NO EL CAMINO. Con UNFORMATTED_VALUE los números llegan como números y esta
-// función sale por la primera línea sin interpretar nada. Se queda igual porque una celda que
-// en la planilla es TEXTO —un "1.234" tipeado a mano, un "s/d", una fórmula que devuelve
-// string— sigue llegando como string, y sin esto entraría como 0.
-//
-// De la mitad para abajo esto ADIVINA cuál separador es el decimal. Adivinar mal no da error:
-// da un número mil veces más grande, que fue lo que dejó a un cliente con pesos negativos.
-// Por eso dejó de ser el camino normal.
-export function num(v) {
-  if (v == null || v === '') return 0;
-  if (typeof v === 'number') return isFinite(v) ? v : 0;
-  let s = String(v).trim();
-  if (!s) return 0;
-  // Contabilidad: (1.234) es negativo.
-  const negParen = /^\(.*\)$/.test(s);
-  // Se van el prefijo de moneda, los espacios (incluido el fino que mete Excel) y el %.
-  s = s.replace(/[()]/g, '').replace(/[^\d.,\-]/g, '');
-  if (!s || s === '-') return 0;
-  const neg = negParen || s.startsWith('-');
-  s = s.replace(/-/g, '');
-
-  const ultPunto = s.lastIndexOf('.');
-  const ultComa = s.lastIndexOf(',');
-  let dec = -1;
-  if (ultPunto >= 0 && ultComa >= 0) {
-    dec = Math.max(ultPunto, ultComa);                 // el último manda
-  } else if (ultPunto >= 0 || ultComa >= 0) {
-    const p = Math.max(ultPunto, ultComa);
-    const sep = s[p];
-    const decimales = s.length - p - 1;
-    const veces = s.split(sep).length - 1;
-    // Un solo separador seguido de 3 dígitos: son miles ("510.704"). Si aparece más de una
-    // vez, son miles seguro ("1.000.000").
-    dec = (veces === 1 && decimales !== 3) ? p : -1;
-  }
-  const entera = (dec >= 0 ? s.slice(0, dec) : s).replace(/[.,]/g, '');
-  const frac = dec >= 0 ? s.slice(dec + 1).replace(/[.,]/g, '') : '';
-  const n = Number(entera + (frac ? '.' + frac : ''));
-  if (!isFinite(n)) return 0;
-  return neg ? -n : n;
-}
+// num() se mudó a sheets_num.js para poder testearla sin arrastrar la base (ver ese
+// archivo). Se re-exporta para no romper a quien la importa desde acá.
+export { num } from './sheets_num.js';
+import { num } from './sheets_num.js';
 
 // EL NÚMERO CRUDO, NO EL QUE SE VE. Por defecto la API devuelve el valor FORMATEADO: una
 // celda de dólares sale "U$ 510.704" y una de pesos "1.234.567,89". De ese texto hay que
@@ -814,4 +761,164 @@ export function estadoSync() {
     ultimo_error: ultimoError || null,
     // true = el último intento se cayó, así que lo que se está mostrando es de antes.
     datos_desactualizados: falloDespues };
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════════════
+// VERIFICACIÓN CONTRA LA PLANILLA — TEMPORAL
+// ═══════════════════════════════════════════════════════════════════════════════════════
+// Después del resync del #810 los kilos bajaron 938.000 y los dólares subieron 79.000. El
+// sync es un reemplazo atómico y no guarda histórico, así que el "antes" no existe en ningún
+// lado: preguntarse si el valor cambió no se puede contestar.
+//
+// La pregunta que SÍ se puede contestar, y que además es la que importa antes de construir
+// agregados encima, es otra: ¿lo que quedó guardado coincide con lo que dice la planilla HOY?
+//
+// ── CÓMO SE APAREA CADA FILA ──────────────────────────────────────────────────────────
+// Por id_venta (columna A), NO por posición. El sync saltea las filas con la A vacía
+// (`if (!r[0]) continue`), así que la fila N de la base no es la fila N+1 de la planilla, y
+// comparar por índice compararía celdas de operaciones distintas — que es la forma más rápida
+// de "encontrar" un error que no existe.
+//
+// Se recorre la planilla en bloques, quedándose SÓLO con las filas buscadas: son 111.000
+// filas y no hay por qué traerlas todas a memoria para mirar veinte.
+//
+// ESTO SE BORRA cuando cerremos el proyecto de informes. Es de sólo lectura y no toca nada.
+
+const COLS_VENTAS = { kilos_tot: 27, tot_dol: 23, rent_dol: 35 };   // AB, X, AJ
+const LETRA = { 27: 'AB', 23: 'X', 35: 'AJ' };
+
+// Quién más consume kilos_tot. Si el valor estuviera mal, estas pantallas venían mostrando
+// mal — va en la respuesta para no tener que salir a buscarlo después.
+const CONSUMIDORES_KILOS = [
+  'sheets.js → rentPorMes, rentPorProducto, rentPorCategoria, rentPorVendedor, rentPorProveedor',
+  'sheets.js → calendarioEstacional, proveedoresPorProductoMes, debugCalendario',
+  'rutas/informes.js → la tabla agrupada, los KPIs y el Excel (7 usos)',
+  'rutas/buscar.js → la búsqueda por producto/año (11 usos)',
+];
+
+export async function verificarPlanilla(n = 10) {
+  if (!SHEET_ID) throw new Error('GOOGLE_SHEET_ID no está configurado.');
+  const token = await getGoogleToken();
+  const salida = { generado: new Date().toISOString().slice(0, 19).replace('T', ' ') };
+
+  // ── A + B) La muestra ────────────────────────────────────────────────────────────
+  // Mitad al azar y mitad de los kilos más altos: el error de 1000× se nota en las grandes,
+  // y una muestra puramente al azar puede no agarrar ninguna.
+  const azar = db.prepare(`
+    SELECT id_venta, fecha, cliente, articulo, kilos_tot, tot_dol, rent_dol
+      FROM sheet_ventas WHERE id_venta IS NOT NULL AND id_venta <> ''
+     ORDER BY RANDOM() LIMIT ?`).all(n);
+  const grandes = db.prepare(`
+    SELECT id_venta, fecha, cliente, articulo, kilos_tot, tot_dol, rent_dol
+      FROM sheet_ventas WHERE id_venta IS NOT NULL AND id_venta <> ''
+     ORDER BY kilos_tot DESC LIMIT ?`).all(n);
+
+  const buscadas = new Map();
+  for (const f of azar)    buscadas.set(String(f.id_venta), { ...f, _muestra: 'al azar' });
+  for (const f of grandes) if (!buscadas.has(String(f.id_venta))) buscadas.set(String(f.id_venta), { ...f, _muestra: 'kilos altos' });
+
+  // ── Barrido de la planilla ───────────────────────────────────────────────────────
+  const encontradas = new Map();
+  let fila = 2, leidas = 0, bloques = 0;
+  const BLOQUE = 5000;
+  while (encontradas.size < buscadas.size) {
+    const rows = await leerRango(token, `B VENTAS!A${fila}:AR${fila + BLOQUE - 1}`);
+    bloques++;
+    if (!rows.length) break;
+    for (let i = 0; i < rows.length; i++) {
+      const r = rows[i];
+      if (!r[0]) continue;
+      const k = String(r[0]);
+      if (!buscadas.has(k) || encontradas.has(k)) continue;
+      encontradas.set(k, {
+        fila_planilla: fila + i,
+        crudo: { kilos_tot: r[27], tot_dol: r[23], rent_dol: r[35] },
+      });
+    }
+    leidas += rows.length;
+    fila += BLOQUE;
+    if (rows.length < BLOQUE) break;
+  }
+
+  const comparar = (base, crudo) => {
+    const b = Number(base) || 0;
+    // num() es lo que aplica el sync. Si el crudo llega como número, sale igual.
+    const c = num(crudo);
+    const dif = Math.round((c - b) * 1000) / 1000;
+    return {
+      base: b,
+      planilla: crudo,
+      tipo_planilla: crudo === null || crudo === undefined ? 'vacío' : typeof crudo,
+      // Con UNFORMATTED_VALUE la planilla manda números. Si acá aparece "string", esa celda
+      // es texto de verdad y sigue pasando por el adivinador de separadores.
+      interpretado: c,
+      diferencia: dif,
+      // El ratio delata el 1000× de un saque: 0,001 o 1000 y no un decimal cualquiera.
+      ratio: b !== 0 ? Math.round((c / b) * 10000) / 10000 : null,
+      coincide: Math.abs(dif) < 0.01,
+    };
+  };
+
+  const filas = [];
+  for (const [k, f] of buscadas) {
+    const e = encontradas.get(k);
+    if (!e) { filas.push({ id_venta: k, muestra: f._muestra, error: 'no la encontré en la planilla' }); continue; }
+    filas.push({
+      id_venta: k, muestra: f._muestra, fila_planilla: e.fila_planilla,
+      fecha: f.fecha, cliente: f.cliente, articulo: f.articulo,
+      kilos_tot: comparar(f.kilos_tot, e.crudo.kilos_tot),
+      tot_dol:   comparar(f.tot_dol,   e.crudo.tot_dol),
+      rent_dol:  comparar(f.rent_dol,  e.crudo.rent_dol),
+    });
+  }
+
+  const conDato = filas.filter(f => !f.error);
+  const resumen = {};
+  for (const col of Object.keys(COLS_VENTAS)) {
+    const malas = conDato.filter(f => !f[col].coincide);
+    resumen[col] = {
+      columna: LETRA[COLS_VENTAS[col]],
+      revisadas: conDato.length,
+      coinciden: conDato.length - malas.length,
+      no_coinciden: malas.length,
+      // Cuántas celdas llegan como TEXTO: son las que todavía dependen de adivinar el
+      // separador, aunque el resto de la planilla ya venga como número.
+      celdas_texto: conDato.filter(f => f[col].tipo_planilla === 'string').length,
+      veredicto: malas.length === 0 ? 'OK — lo guardado es lo que dice la planilla'
+                                    : 'REVISAR — hay ' + malas.length + ' fila(s) que no coinciden',
+    };
+  }
+
+  salida.a_y_b_columnas = { resumen, filas, bloques_leidos: bloques, filas_recorridas: leidas };
+
+  // ── C) La columna sem ────────────────────────────────────────────────────────────
+  // Bloquea el gráfico semanal: hay que saber si es semana ISO calendario o semana de
+  // campaña, y si reinicia en enero o en julio. El rango de fechas de cada valor lo dice.
+  const sem = db.prepare(`
+    SELECT sem, COUNT(*) AS operaciones, MIN(fecha) AS desde, MAX(fecha) AS hasta,
+           COUNT(DISTINCT periodo) AS periodos, MIN(mes_ok) AS mes_min, MAX(mes_ok) AS mes_max
+      FROM sheet_ventas WHERE sem IS NOT NULL AND sem <> ''
+     GROUP BY sem ORDER BY CAST(sem AS INTEGER), sem`).all();
+  salida.c_columna_sem = {
+    valores_distintos: sem.length,
+    // Si llega a 52/53 y arranca en 1, es semana calendario. Si el 1 cae en julio, es de
+    // campaña. Y si hay más de 53 valores, no es una semana del año.
+    pista: sem.length ? `va de "${sem[0].sem}" a "${sem[sem.length - 1].sem}"` : 'sin datos',
+    detalle: sem,
+  };
+
+  // ── D) Las columnas de B COMPRAS que el sync lee y no mapea ──────────────────────
+  // Se leen de A a Q pero B, H e I no van a ninguna columna: quedan sólo en raw. Quedó
+  // pendiente del relevamiento del Radar y es la misma lectura de planilla.
+  const compras = await leerRango(token, 'B COMPRAS!A2:Q21');
+  salida.d_compras_sin_mapear = {
+    nota: 'El sync lee A..Q y mapea 14 columnas. B, H e I no se guardan en ninguna columna propia.',
+    filas: compras.filter(r => r && r[0]).map(r => ({
+      A_partida: r[0], B_sin_mapear: r[1], C_fecha: r[2],
+      H_sin_mapear: r[7], I_sin_mapear: r[8], J_articulo: r[9],
+    })),
+  };
+
+  salida.alcance_si_kilos_esta_mal = CONSUMIDORES_KILOS;
+  return salida;
 }

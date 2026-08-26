@@ -4347,6 +4347,9 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
     <div class="ph-s">Ventas por cliente, producto o vendedor — sobre la base que se sincroniza todos los días</div></div>
     <div style="display:flex;gap:8px">
       <button class="btn bo" onclick="infDiagnostico()" title="Compara los títulos de la planilla contra lo que espera el código. Sirve cuando los números no cierran.">🔎 Diagnóstico</button>
+      <!-- TEMPORAL: se saca al cerrar el proyecto de informes. Abre el JSON en otra pestaña
+           para poder copiarlo y pegarlo. -->
+      <button class="btn bo" onclick="window.open('/api/informes/verificar-kilos?n=10','_blank')" title="Compara kilos, dólares y rentabilidad contra la planilla en vivo, fila por fila. Sólo admin; tarda porque recorre la planilla entera.">🧪 Verificar contra la planilla</button>
       <button class="btn bo" onclick="infExportar()">⬇️ Excel</button></div></div>
 
   <!-- De cuándo es el dato. El sync corre una vez por día: sin esto, un total de
