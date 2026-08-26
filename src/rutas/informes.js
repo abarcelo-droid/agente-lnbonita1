@@ -26,6 +26,7 @@ import db from '../servicios/db.js';
 import { estadoSync, diagnostico, syncSheets, verificarPlanilla } from '../servicios/sheets.js';
 import { nivelEnModulo } from '../servicios/permisos.js';
 import { detectar, sinMargen, TIPOS, UMBRALES } from '../servicios/oportunidades.js';
+import { generarOportunidadesPDF } from '../servicios/oportunidadesPDF.js';
 
 const router = express.Router();
 
@@ -521,33 +522,71 @@ router.get('/interanual', requireAuth, (req, res) => {
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
+// El radar, armado una sola vez. La pantalla y el PDF piden LO MISMO: si cada uno lo armara
+// por su lado, un día el papel diría algo distinto de lo que se ve y nadie sabría cuál de los
+// dos mirar. Devuelve { error } cuando no se puede, para que cada ruta lo conteste a su modo
+// (JSON o PDF).
+function armarOportunidades(req) {
+  const v = ventanaInteranual(req.query);
+  if (!v.actual || !v.anterior) {
+    return { error: 'Hacen falta dos campañas cargadas para buscar oportunidades.' };
+  }
+  const { where, params } = whereVentana(req.query, v);
+  const pedidos = String(req.query.tipos || '').split(',').map(x => x.trim()).filter(Boolean);
+  const tipos = pedidos.filter(t => TIPOS[t]);
+  // Pidió filtrar por tipo y ninguno existe. Devolver la lista COMPLETA haría creer que el
+  // filtro anduvo; devolver cero, que no hay nada que hacer. Las dos mienten, así que se
+  // dice qué tipos hay.
+  if (pedidos.length && !tipos.length) {
+    return { error: 'Tipo desconocido: ' + pedidos.join(', ') + '. Los que hay son ' + Object.keys(TIPOS).join(', ') + '.' };
+  }
+  const data = detectar(db, where, params, v, { tipos, limite: req.query.limite });
+  const margen = puedeVerMargen(req.user);
+  const est = estadoSync();
+  return { data: Object.assign(
+    margen ? data : sinMargen(data),
+    { ventana: v, ve_margen: margen, tipos: TIPOS, umbrales: UMBRALES,
+      sync: { ultimo_ok: est.ultimo_ok, desactualizado: est.datos_desactualizados } }
+  ) };
+}
+
 // GET /api/informes/oportunidades — el radar. Las reglas viven en servicios/oportunidades.js.
 router.get('/oportunidades', requireAuth, (req, res) => {
   try {
-    const v = ventanaInteranual(req.query);
-    if (!v.actual || !v.anterior) {
-      return res.status(400).json({ ok: false,
-        error: 'Hacen falta dos campañas cargadas para buscar oportunidades.' });
-    }
-    const { where, params } = whereVentana(req.query, v);
-    const pedidos = String(req.query.tipos || '').split(',').map(x => x.trim()).filter(Boolean);
-    const tipos = pedidos.filter(t => TIPOS[t]);
-    // Pidió filtrar por tipo y ninguno existe. Devolver la lista COMPLETA haría creer que el
-    // filtro anduvo; devolver cero, que no hay nada que hacer. Las dos mienten, así que se
-    // dice qué tipos hay.
-    if (pedidos.length && !tipos.length) {
-      return res.status(400).json({ ok: false,
-        error: 'Tipo desconocido: ' + pedidos.join(', ') + '. Los que hay son ' + Object.keys(TIPOS).join(', ') + '.' });
-    }
-    const data = detectar(db, where, params, v, { tipos, limite: req.query.limite });
-    const margen = puedeVerMargen(req.user);
-    const est = estadoSync();
-    res.json({ ok: true, data: Object.assign(
-      margen ? data : sinMargen(data),
-      { ventana: v, ve_margen: margen, tipos: TIPOS, umbrales: UMBRALES,
-        sync: { ultimo_ok: est.ultimo_ok, desactualizado: est.datos_desactualizados } }
-    ) });
+    const r = armarOportunidades(req);
+    if (r.error) return res.status(400).json({ ok: false, error: r.error });
+    res.json({ ok: true, data: r.data });
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// GET /api/informes/oportunidades.pdf — el mismo radar, en papel, para salir a visitar.
+//
+// Va agrupado por CLIENTE y no ordenado por plata como la pantalla: una visita es un cliente.
+// Y lleva la explicación de qué significa cada tipo y qué hacer con él, porque el que lo
+// recibe no estuvo en la conversación donde se definieron las reglas.
+//
+// El recorte por nivel es el MISMO que el de la pantalla —lo hace armarOportunidades— así que
+// un PDF no puede filtrar margen para alguien que en pantalla no lo ve.
+router.get('/oportunidades.pdf', requireAuth, (req, res) => {
+  try {
+    const r = armarOportunidades(req);
+    if (r.error) return res.status(400).json({ ok: false, error: r.error });
+    // Cuántas entran. Un informe de doscientas hojas no lo lee nadie; el pedido era "las más
+    // importantes", y son las primeras de una lista que ya viene ordenada por plata en juego.
+    const tope = Math.min(Math.max(parseInt(req.query.tope, 10) || 25, 1), 200);
+    const buf = generarOportunidadesPDF(r.data, {
+      tope,
+      hoy: new Date().toLocaleDateString('es-AR'),
+    });
+    const v = r.data.ventana;
+    const nombre = 'oportunidades-' + String(v.mes || '').replace(/[^w]/g, '') + '-' + v.actual + '.pdf';
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', 'attachment; filename="' + nombre + '"');
+    res.send(buf);
+  } catch (e) {
+    console.error('[Informes][oportunidades.pdf]', e);
+    res.status(500).json({ ok: false, error: e.message });
+  }
 });
 
 export default router;
