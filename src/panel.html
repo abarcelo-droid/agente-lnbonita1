@@ -9015,6 +9015,47 @@ function sgBcPoner(pref, id){
 //
 // Recibe [{codigo, nombre, descripcion, debe, haber}]. No decide nada: espeja lo
 // que arma el backend, que sigue siendo el único que asienta.
+// ══ EL ASIENTO CONTABLE ES PARA EL QUE CONTABILIZA ═════════════════════
+//
+// Pablo, 25/8/2026: "los asientos deben ser visibles sólo para administradores;
+// dejalo como una flechita para abajo para que los administradores lo podamos
+// desplegar".
+//
+// El que factura no tiene por qué ver un cuadro de debe y haber: no es su trabajo,
+// le ocupa media pantalla y no puede hacer nada con él. El administrador sí, y lo
+// despliega cuando quiere.
+//
+// ESTO ACOTA UNA REGLA DEL REPO, no la contradice por accidente. CLAUDE.md decía
+// "TODA OPERACIÓN QUE ASIENTA MUESTRA EL ASIENTO ... el cuadro es el único momento
+// en que se puede frenar". Sigue siendo cierto: el cuadro se muestra y se puede
+// frenar, pero al que puede hacer algo con él. Se actualizó la regla en el mismo
+// cambio para que no queden las dos frases conviviendo.
+//
+// Se envuelve DENTRO de los tres armadores de cuadro y no en las diez pantallas que
+// los llaman: una sola puerta, y ninguna pantalla nueva puede olvidarse de cerrarla.
+function sgAsientoEsAdmin(){
+  return !!(window.LNB_USER && window.LNB_USER.rol === 'admin');
+}
+function sgAsientoPlegado(html, titulo){
+  if (!html) return '';
+  if (!sgAsientoEsAdmin()) return '';
+  return '<details class="sg-asiento-det" style="margin-top:6px">'
+    + '<summary style="cursor:pointer;font-size:11.5px;color:var(--mut);'
+    + 'user-select:none;padding:4px 0">▸ ' + escH(titulo || 'Asiento contable')
+    + ' <span style="font-size:10.5px">(sólo lo ves vos)</span></summary>'
+    + '<div style="margin-top:6px">' + html + '</div></details>';
+}
+// ── Y LOS BLOQUES DE "CONTRA QUÉ SE CONTABILIZA" ─────────────────────────
+// Elegir el asiento modelo es PARAMETRIZAR, que por la regla del repo es de admin.
+// Se esconde el bloque entero —título incluido— y no sólo su tabla: dejar el título
+// "Asiento contable de venta" colgado arriba de un hueco no le sirve a nadie.
+function sgAsientoModeloVisible(){
+  var admin = sgAsientoEsAdmin();
+  ['sgfd-modelo-box', 'sgfm-modelo-box', 'liq-modelo-box'].forEach(function(id){
+    var e = document.getElementById(id);
+    if (e) e.style.display = admin ? '' : 'none';
+  });
+}
 function sgAsientoTabla(lineas, nota){
   lineas = lineas || [];
   if (!lineas.length) {
@@ -9034,7 +9075,7 @@ function sgAsientoTabla(lineas, nota){
   }).join('');
   var dif = Math.round((totD - totH) * 100) / 100;
   var ok = Math.abs(dif) < 0.01;
-  return '<div class="ab-table-wrap"><table class="pa-tbl">'
+  return sgAsientoPlegado('<div class="ab-table-wrap"><table class="pa-tbl">'
     + '<thead><tr><th style="width:130px">Código</th><th>Cuenta</th>'
     + '<th style="width:170px">Detalle</th>'
     + '<th style="width:130px;text-align:right">Debe</th>'
@@ -9051,7 +9092,7 @@ function sgAsientoTabla(lineas, nota){
             + sgMoney2(Math.abs(dif)) + '</span>')
       + (nota ? '<div style="font-size:11.5px;color:var(--mut);margin-top:4px">' + escH(nota) + '</div>' : '')
     + '</td></tr>'
-    + '</tbody></table></div>';
+    + '</tbody></table></div>', 'Asiento contable');
 }
 
 // El asiento del pago: Proveedores al DEBE —se cancela deuda— contra la cuenta
@@ -11562,6 +11603,7 @@ function liqVentaCab(ocId){
 // plata de TODAS las liquidaciones. Operarlas no requiere ser admin.
 var LIQ_MODELO = { modelo: null };
 function liqModeloCargar(){
+  sgAsientoModeloVisible();
   var box = eid('liq-modelo-cuerpo'); if (!box) return;
   box.innerHTML = 'Cargando…';
   Promise.all([
@@ -12007,6 +12049,7 @@ function sgIvaTodo(desde, hasta){
 var SGFM = { modelo: null };
 
 function sgFmModeloCargar(){
+  sgAsientoModeloVisible();
   var box = eid('sgfm-modelo-cuerpo'); if (!box) return;
   Promise.all([
     api('/api/sg/factura-mercaderia/modelo'),
@@ -12135,10 +12178,10 @@ function sgFmAsientoTabla(lineas, importes, extra){
       + '</td></tr>';
   }
 
-  return '<div class="ab-table-wrap"><table class="pa-tbl">'
+  return sgAsientoPlegado('<div class="ab-table-wrap"><table class="pa-tbl">'
     + '<thead><tr><th>Código</th><th>Cuenta</th><th>Tipo</th>'
     + '<th style="text-align:right">Debe</th><th style="text-align:right">Haber</th></tr></thead>'
-    + '<tbody>' + filas + pie + '</tbody></table></div>';
+    + '<tbody>' + filas + pie + '</tbody></table></div>', 'Asiento contable');
 }
 
 function paRound2Fm(n){ return Math.round((Number(n) || 0) * 100) / 100; }
@@ -15100,6 +15143,7 @@ function sgFdRender(){
 // Calcado de sgFmModeloCargar(), que hace lo mismo para las compras: la misma
 // decisión se toma en el mismo lugar y se ve igual en las dos pantallas.
 function sgFdModeloCargar(){
+  sgAsientoModeloVisible();
   var box = eid('sgfd-modelo-cuerpo'); if (!box) return;
   Promise.all([
     api('/api/sg/ventas/modelo-venta'),
@@ -15244,14 +15288,14 @@ function sgAsientoCuadro(d, titulo, donde){
                     : '⚠ NO balancea · diferencia ' + sgMoney2(Math.abs(t.debe - t.haber)))
       + '</td></tr>';
   }).join('');
-  return '<div style="font-weight:700;font-size:12px;text-transform:uppercase;letter-spacing:.04em;'
+  return sgAsientoPlegado('<div style="font-weight:700;font-size:12px;text-transform:uppercase;letter-spacing:.04em;'
     + 'color:var(--mut);margin-bottom:6px">📒 ' + escH(titulo || 'Asiento contable de esta venta') + '</div>'
     + '<div class="ab-table-wrap"><table class="pa-tbl" style="table-layout:fixed">'
     + '<thead><tr><th style="width:14%">Código</th><th style="width:30%">Cuenta</th>'
     + '<th style="width:28%">Descripción</th>'
     + '<th style="width:14%;text-align:right">Debe</th>'
     + '<th style="width:14%;text-align:right">Haber</th></tr></thead>'
-    + '<tbody>' + fil + tot + '</tbody></table></div>';
+    + '<tbody>' + fil + tot + '</tbody></table></div>', titulo || 'Asiento contable de esta operación');
 }
 
 function sgFdEmitir(){
