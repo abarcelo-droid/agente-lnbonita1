@@ -3242,11 +3242,15 @@ router.get('/resumen', function(req, res) {
   // nuestros frente a IFCO, así que van aparte para que el total cierre.
   const dif_pendientes = _diferenciasEnvioPendientes();
 
-  const en_transito_sg = get(`
+  // Cajones viajando a una cadena con el remito todavía sin sellar. Toma los DOS orígenes:
+  // los que salieron del piso de SG y los que salieron directo de un galpón. Los directos
+  // vivían en el saldo del galpón hasta que el remito volvía sellado; desde el 26/8/2026 el
+  // saldo los descuenta al despacharlos, así que si no entraran acá se caerían del total que
+  // le rendimos a IFCO — y ese total no puede achicarse porque falte un papel.
+  const en_transito = get(`
     SELECT COALESCE(SUM(cantidad_despachada),0) AS total
     FROM ifco_remitos_super
     WHERE estado = 'despachado'
-      AND origen = 'san_geronimo'
       AND eliminado_en IS NULL
   `);
 
@@ -3256,7 +3260,7 @@ router.get('/resumen', function(req, res) {
   const piso = _calcStockSG();
   // Total a rendir a IFCO: los dos pisos + lo que está viajando + las diferencias sin
   // resolver (que no están en ningún piso, pero IFCO nos las sigue contando).
-  const bajo_responsabilidad = piso + en_proveedores + en_transito_sg + dif_pendientes.total;
+  const bajo_responsabilidad = piso + en_proveedores + en_transito + dif_pendientes.total;
 
   // Alertas — sellados >= 25 días sin presentar
   const urgentes_presentar = db.prepare(`
@@ -3343,7 +3347,7 @@ router.get('/resumen', function(req, res) {
     stock: {
       piso: piso,
       en_proveedores: en_proveedores,
-      en_transito: en_transito_sg,
+      en_transito: en_transito,
       dif_pendientes: dif_pendientes.total,
       bajo_responsabilidad: bajo_responsabilidad,
       perdidas_acumuladas: perdido,
@@ -3517,7 +3521,7 @@ router.get('/clientes-dedicados', function(req, res) {
 // Saldo del proveedor:
 //   + cajones que SG envió al proveedor (envío entero; en recepción parcial, lo confirmado)
 //   - cajones que SG recibió del proveedor en su depósito (recepciones de mercadería)
-//   - cajones despachados a súper como "directo desde este proveedor" Y SELLADOS
+//   - cajones despachados a súper como "directo desde este proveedor" (desde que SALEN)
 //
 // Todos los cálculos excluyen registros eliminados (papelera).
 function _calcSaldoProveedor(provId) {
@@ -3553,8 +3557,18 @@ function _calcSaldoProveedor(provId) {
       AND (estado IS NULL OR estado = 'recibido')
   `).get(provId).total || 0;
 
-  // Cajones despachados directos desde su galpón a una cadena (resta)
-  const directosSellados = db.prepare(`
+  // Cajones que salieron del galpón directo a una cadena (resta).
+  //
+  // Descuentan desde que se DESPACHAN, no desde que el remito vuelve sellado (Pablo,
+  // 26/8/2026: "tiene que restarle al proveedor los que ya despachó independientemente si
+  // están sellados o no"). El galpón entregó los cajones y no los tiene más; que el papel
+  // todavía no haya vuelto firmado es un problema de papeles, no de dónde están los cajones.
+  // Antes, un galpón que despachaba seguido acumulaba en su saldo cajones que ya no tenía, y
+  // el conteo físico daba corto contra el sistema todas las semanas sin explicación visible.
+  //
+  // Los cajones NO desaparecen del total que le rendimos a IFCO: pasan al bucket "en tránsito
+  // a súper", que ahora toma los directos además de los despachos de SG.
+  const directosSalidos = db.prepare(`
     SELECT COALESCE(SUM(
       COALESCE(cantidad_recibida, cantidad_despachada) +
       CASE WHEN rechazo_destino = 'san_geronimo' THEN COALESCE(cantidad_rechazada, 0) ELSE 0 END
@@ -3562,7 +3576,7 @@ function _calcSaldoProveedor(provId) {
     FROM ifco_remitos_super
     WHERE proveedor_origen_id = ?
       AND origen = 'proveedor_directo'
-      AND estado IN ('sellado','enviado','presentado')
+      AND estado IN ('despachado','sellado','enviado','presentado')
       AND eliminado_en IS NULL
   `).get(provId).total || 0;
 
@@ -3575,7 +3589,7 @@ function _calcSaldoProveedor(provId) {
       AND estado IN ('enviado','parcial','recibido')
   `).get(provId).total || 0;
 
-  return enviado - recibidoEnSG - directosSellados - traspasosEnviados;
+  return enviado - recibidoEnSG - directosSalidos - traspasosEnviados;
 }
 
 // ── Diferencias de recepción pendientes de revisión ────────────────────────────
@@ -3616,8 +3630,9 @@ function _diferenciasEnvioPendientes(provId) {
 }
 
 // El "stock físico" del proveedor (saldo menos los despachos sin sellar) vivía acá y se sacó:
-// no lo usa nadie. El informe del galpón muestra UN solo número, de qué se hace cargo, y ese
-// es _calcSaldoProveedor. Si alguna vez hace falta el físico para cuadrar contra un conteo,
+// no lo usa nadie, y desde el 26/8/2026 ya no habría diferencia que calcular — el saldo
+// descuenta el directo al despacharlo, así que _calcSaldoProveedor ES el físico. Si alguna
+// vez hace falta separarlos de nuevo para cuadrar contra un conteo,
 // es una resta: saldo − SUM(cantidad_despachada) de los directos en estado 'despachado'.
 
 router.get('/saldo-proveedor/:id', function(req, res) {
@@ -3700,16 +3715,16 @@ function _movimientosProveedor(provId, desde, hasta) {
   // Calcular delta (columna "Cant." visible, sin tocar) y delta_saldo (interno, para el
   // acumulado que cierra con _calcSaldoProveedor).
   //
-  // ── POR QUÉ EL ACUMULADO SIGUE AL SALDO Y NO AL FÍSICO ────────────────────────────
-  // El informe muestra UN solo número, "en poder del proveedor". Si la columna SALDO se
-  // acumulara con el criterio físico, la última fila no daría ese número y el informe se
-  // contradiría solo: encabezado 1.128, última fila −3.223.
+  // ── LA COLUMNA SALDO CIERRA CON "EN PODER DEL PROVEEDOR" ──────────────────────────
+  // El informe muestra UN solo número, y la fila más reciente tiene que dar ESE número. Por
+  // eso delta_saldo usa exactamente el mismo criterio que _calcSaldoProveedor: si los dos se
+  // separan, el informe se contradice solo — encabezado 1.128, última fila −3.223.
   //
-  // La diferencia entre los dos criterios es UNA sola cosa: el despacho directo que salió
-  // del galpón pero cuyo remito todavía no volvió sellado. Físicamente ya no está; de
-  // responsabilidad sigue siendo suyo, porque sin el remito sellado no hay con qué probar
-  // que llegó al súper. El informe habla de responsabilidad, así que no lo descuenta — y la
-  // columna ESTADO dice "sin sellar" para que se entienda por qué el saldo no se movió.
+  // Los dos criterios eran uno solo hasta el 26/8/2026, salvo por el despacho directo sin
+  // sellar: salía del galpón pero seguía en su saldo. Ahora descuenta desde que sale, así
+  // que Cant. y Saldo se mueven juntos y no hay nada que explicar. El remito sin sellar
+  // sigue marcado en la columna ESTADO, porque es un pendiente administrativo —falta el
+  // papel firmado— aunque los cajones ya no estén.
   const conDelta = all.map(function(m) {
     let delta = 0;
     let delta_saldo = 0;
@@ -3730,28 +3745,23 @@ function _movimientosProveedor(provId, desde, hasta) {
       delta = -m.cantidad;
       delta_saldo = -m.cantidad;
     } else if (m.tipo === 'despacho_directo') {
-      if (m.estado === 'sellado' || m.estado === 'enviado' || m.estado === 'presentado') {
+      // Todo lo que salió del galpón descuenta. Sólo 'anulado' no llegó a salir.
+      if (m.estado === 'anulado' || !m.estado) {
+        delta = 0;
+      } else {
+        // cantidad_recibida es lo que el súper firmó al sellar; mientras el remito esté sin
+        // sellar todavía es NULL y vale lo despachado, que es lo que efectivamente salió.
         const recib = m.cantidad_recibida != null ? m.cantidad_recibida : m.cantidad;
         const rech  = m.cantidad_rechazada || 0;
-        // Si el rechazo volvió a SG, también sale del proveedor (= todo lo despachado)
-        // Si el rechazo se quedó con el proveedor (o NULL), solo sale lo recibido por el súper
-        if (m.rechazo_destino === 'san_geronimo') {
-          delta = -(recib + rech);
-        } else {
-          delta = -recib;
-        }
-      } else if (m.estado === 'despachado') {
-        // Despachado pero sin sellar: las cajas ya salieron, y por eso la columna Cant. lo
-        // muestra. El SALDO no se mueve hasta que el remito vuelva sellado — es lo único que
-        // prueba que llegaron al súper, y hasta entonces son responsabilidad del galpón.
-        delta = -(m.cantidad || 0);
-      } else {
-        delta = 0;
+        // Si el rechazo volvió a SG, también sale del proveedor (= todo lo despachado).
+        // Si el rechazo se quedó en el galpón (o es NULL), sólo sale lo que recibió el súper.
+        delta = (m.rechazo_destino === 'san_geronimo') ? -(recib + rech) : -recib;
       }
-      // Sellado / enviado / presentado descuentan; "sin sellar" todavía no.
-      delta_saldo = (m.estado === 'sellado' || m.estado === 'enviado' || m.estado === 'presentado') ? delta : 0;
+      // Cant. y Saldo se mueven juntos: lo que salió del galpón, salió.
+      delta_saldo = delta;
     }
-    // Etiqueta legible para el campo estado: "sin sellar" si despachado, agrega "rechazado" si hubo
+    // "sin sellar" NO significa que los cajones sigan en el galpón: significa que falta el
+    // remito firmado. El saldo ya los descontó; lo que queda pendiente es el papel.
     let estado_label = (m.estado === 'despachado') ? 'sin sellar' : (m.estado || '-');
     if ((m.cantidad_rechazada || 0) > 0) estado_label = estado_label + ' · rechazado';
     return Object.assign({}, m, { delta: delta, delta_saldo: delta_saldo, estado_label: estado_label });
@@ -3895,11 +3905,10 @@ router.get('/proveedores/:id/movimientos.pdf', async function(req, res) {
     doc.text(fmt(saldo) + ' caj.', R - 4, y + 12, { align: 'right' });
     doc.setTextColor(0);
 
-    // UN SOLO NÚMERO. Antes había un segundo, el stock físico, que descontaba los remitos
-    // sin sellar. Mostrar los dos obligaba a explicar la diferencia en cada conversación, y
-    // el físico podía dar NEGATIVO —imposible: no se puede tener menos de cero cajones—
-    // porque delata cargas que faltan. El informe se manda al galpón: va el número del que
-    // se habla con él, que es de qué se hace cargo.
+    // UN SOLO NÚMERO, y desde el 26/8/2026 hay uno solo posible: el saldo ya descuenta el
+    // despacho directo al salir del galpón, así que coincide con lo que el galpón cuenta
+    // cuando mira sus pilas. El informe se manda al galpón y es el número del que se habla
+    // con él.
 
     y += boxH + 6;
     setF(9, false);
@@ -4067,7 +4076,7 @@ router.get('/proveedores/:id/movimientos.xlsx', async function(req, res) {
     const titulo = 'Movimientos de cajones IFCO — ' + (p.nombre || ('Proveedor ' + provId));
     const lineasSaldo = [
       'En poder del proveedor: ' + fmtN(saldo) + ' caj.',
-      'Los remitos sin sellar no descuentan del saldo hasta que vuelven sellados.'
+      'Los despachos directos descuentan del saldo desde que salen del galpón, esté sellado el remito o no.'
     ];
     if (desde || hasta) lineasSaldo.push('Período: ' + (desde || 'inicio') + ' a ' + (hasta || 'hoy'));
     const labelTipo = (t) => t === 'envio' ? 'Envío' : t === 'recepcion' ? 'Recepción' : 'Directo súper';
@@ -6207,8 +6216,8 @@ function _desgloseProveedores() {
       ayuda: 'Todo lo que SG mandó a un galpón (más los traspasos que recibió de otro). En recepción parcial cuenta solo lo que el galpón confirmó: la diferencia queda pendiente de revisión.' },
     { signo: '-', label: 'Devuelto con mercadería', valor: get("SELECT COALESCE(SUM(cantidad),0) AS total FROM ifco_recepciones_proveedor WHERE eliminado_en IS NULL AND (es_r22 IS NULL OR es_r22 = 0) AND (estado IS NULL OR estado='recibido') AND proveedor_id IN (SELECT id FROM proveedores)"),
       ayuda: 'Cajones que volvieron a SG con producto. No incluye las altas R22 (cajones nuevos que el galpón le compró a IFCO), que no bajan su saldo.' },
-    { signo: '-', label: 'Despachado directo a cadenas', valor: get("SELECT COALESCE(SUM(COALESCE(cantidad_recibida, cantidad_despachada) + CASE WHEN rechazo_destino='san_geronimo' THEN COALESCE(cantidad_rechazada,0) ELSE 0 END),0) AS total FROM ifco_remitos_super WHERE origen='proveedor_directo' AND estado IN ('sellado','enviado','presentado') AND eliminado_en IS NULL AND proveedor_origen_id IN (SELECT id FROM proveedores)"),
-      ayuda: 'Cajones que salieron del galpón directo a una cadena y ya están sellados.' },
+    { signo: '-', label: 'Despachado directo a cadenas', valor: get("SELECT COALESCE(SUM(COALESCE(cantidad_recibida, cantidad_despachada) + CASE WHEN rechazo_destino='san_geronimo' THEN COALESCE(cantidad_rechazada,0) ELSE 0 END),0) AS total FROM ifco_remitos_super WHERE origen='proveedor_directo' AND estado IN ('despachado','sellado','enviado','presentado') AND eliminado_en IS NULL AND proveedor_origen_id IN (SELECT id FROM proveedores)"),
+      ayuda: 'Cajones que salieron del galpón directo a una cadena. Descuentan desde que se despachan, esté sellado el remito o no: el galpón ya no los tiene. Mientras el remito no vuelva sellado, los vas a encontrar en "En tránsito a súper".' },
     { signo: '-', label: 'Traspasado a otro galpón', valor: get("SELECT COALESCE(SUM(cantidad_enviada),0) AS total FROM ifco_envios_proveedor WHERE origen_proveedor_id IS NOT NULL AND eliminado_en IS NULL AND estado IN ('enviado','parcial','recibido') AND origen_proveedor_id IN (SELECT id FROM proveedores)"),
       ayuda: 'Cajones que un galpón le pasó a otro. Salen del origen y entran al destino, así que en el total se compensan.' }
   ];
@@ -6223,28 +6232,38 @@ function _desgloseProveedores() {
   return { total: total, componentes: componentes, items: items, items_titulo: 'Galpón por galpón' };
 }
 
-// Desglose de los cajones en tránsito a las cadenas: remitos despachados desde SG que
-// todavía no fueron sellados por el súper.
+// Desglose de los cajones en tránsito a las cadenas: remitos despachados que la cadena
+// todavía no selló. Van los DOS orígenes —los que salieron del piso de SG y los que salieron
+// directo de un galpón—, porque desde el 26/8/2026 el saldo del galpón descuenta el directo
+// al despacharlo. Si acá sólo entraran los de SG, esos cajones no estarían en ningún bucket
+// y el total a rendir a IFCO se achicaría por falta de un papel.
 function _desgloseTransito() {
   const items = db.prepare(`
-    SELECT id, n_remito_ifco, fecha_emision, empresa, sucursal, cantidad_despachada,
-           CAST(julianday('now','localtime') - julianday(fecha_emision) AS INTEGER) AS dias
-    FROM ifco_remitos_super
-    WHERE estado = 'despachado' AND origen = 'san_geronimo' AND eliminado_en IS NULL
-    ORDER BY fecha_emision ASC
+    SELECT r.id, r.n_remito_ifco, r.fecha_emision, r.empresa, r.sucursal,
+           r.cantidad_despachada, r.origen, pori.nombre AS galpon,
+           CAST(julianday('now','localtime') - julianday(r.fecha_emision) AS INTEGER) AS dias
+    FROM ifco_remitos_super r
+    LEFT JOIN proveedores pori ON pori.id = r.proveedor_origen_id
+    WHERE r.estado = 'despachado' AND r.eliminado_en IS NULL
+    ORDER BY r.fecha_emision ASC
   `).all();
-  const total = items.reduce(function(a, r){ return a + (r.cantidad_despachada || 0); }, 0);
+  const suma = function(arr){ return arr.reduce(function(a, r){ return a + (r.cantidad_despachada || 0); }, 0); };
+  const esSG = function(r){ return r.origen !== 'proveedor_directo'; };
+  const totalSG  = suma(items.filter(esSG));
+  const totalDir = suma(items.filter(function(r){ return !esSG(r); }));
   return {
-    total: total,
+    total: totalSG + totalDir,
     componentes: [
-      { signo: '+', label: 'Despachados sin sellar', valor: total,
-        ayuda: 'Remitos emitidos desde SG que la cadena todavía no selló. Ya salieron del piso pero siguen siendo nuestros hasta que se presenten a IFCO.' }
+      { signo: '+', label: 'Despachados desde SG sin sellar', valor: totalSG,
+        ayuda: 'Remitos emitidos desde el piso de San Gerónimo que la cadena todavía no selló. Ya salieron del piso pero siguen siendo nuestros hasta que se presenten a IFCO.' },
+      { signo: '+', label: 'Directos de galpón sin sellar', valor: totalDir,
+        ayuda: 'Remitos que salieron directo de un galpón a la cadena y todavía no volvieron sellados. Ya no están en el galpón —su saldo los descontó al despacharlos— y todavía no se pueden presentar a IFCO, así que esperan acá.' }
     ],
     items: items.map(function(r){
       return {
         id: r.id,
         label: (r.n_remito_ifco || '—') + ' → ' + (r.empresa || '?') + (r.sucursal ? ' (' + r.sucursal + ')' : ''),
-        sub: r.dias + ' días sin sellar',
+        sub: r.dias + ' días sin sellar · ' + (esSG(r) ? 'desde SG' : 'directo de ' + (r.galpon || 'galpón')),
         valor: r.cantidad_despachada || 0
       };
     }),

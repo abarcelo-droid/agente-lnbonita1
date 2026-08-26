@@ -50977,9 +50977,10 @@ async function ifcoVerMovimientosProveedor(provId) {
     if (saldo > 0)      { saldoColor = '#92400e'; saldoLbl = 'En poder del proveedor'; }
     else if (saldo < 0) { saldoColor = '#991b1b'; saldoLbl = 'Exceso entregado al proveedor'; }
     else                { saldoColor = '#065f46'; saldoLbl = 'En poder del proveedor'; }
-    // UN SOLO NUMERO: de cuantos cajones se hace cargo el galpon. El segundo que habia —el
-    // stock fisico, que descontaba los remitos sin sellar— obligaba a explicar la diferencia
-    // en cada conversacion, y podia dar negativo, que es imposible.
+    // UN SOLO NUMERO: de cuantos cajones se hace cargo el galpon. Desde el 26/8/2026 hay uno
+    // solo posible — el saldo descuenta el despacho directo al salir, asi que ya coincide con
+    // lo que el galpon cuenta mirando sus pilas. Antes habia un segundo numero, el "fisico",
+    // que restaba los remitos sin sellar y podia dar negativo, que es imposible.
     let html = '<div style="display:flex;align-items:center;gap:16px;padding:12px 14px;background:var(--bg);border-radius:8px;margin-bottom:14px;flex-wrap:wrap">' +
                  '<div>' +
                    '<div style="font-size:14px;font-weight:600">'+_ifcoEsc(p.nombre||'?')+'</div>' +
@@ -51042,8 +51043,10 @@ async function ifcoVerMovimientosProveedor(provId) {
     html += '<div style="font-size:11px;color:var(--mut);margin-top:8px;line-height:1.5">' +
             'La columna <b>SALDO</b> es de cuántos cajones se hacía cargo el galpón en cada fecha; ' +
             'la fila más reciente coincide con <b>En poder del proveedor</b>. ' +
-            '<b>Cant.</b> es lo que movió cada operación: un remito <b>sin sellar</b> ya salió del galpón, ' +
-            'pero no descuenta del saldo hasta que vuelve sellado — es lo único que prueba que llegó al súper.' +
+            '<b>Cant.</b> es lo que movió cada operación: un despacho descuenta del saldo <b>desde que sale</b> ' +
+            'del galpón, esté sellado el remito o no — el galpón ya no tiene esos cajones. ' +
+            'El estado <b>sin sellar</b> marca que falta el remito firmado, no que los cajones sigan ahí: ' +
+            'hasta que vuelva, los vas a ver en <b>En tránsito a súper</b>.' +
             '</div>';
     body.innerHTML = html;
   } catch(e) {
