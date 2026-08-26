@@ -112,16 +112,30 @@ test('lleva el membrete de la casa y de qué ventana habla', () => {
   assert.ok(t.includes('2026-2027') && t.includes('2025-2026'));
 });
 
-test('explica cada tipo que aparece, y sólo esos', () => {
-  const t = texto(generarOportunidadesPDF(DATA, { tope: 25, hoy: '26/08/2026' }));
-  assert.ok(t.includes('Cliente perdido'));
-  assert.ok(t.includes('No le vendemos'));
-  assert.ok(t.includes('hacer'), 'no aparece el "qué hacer"');
-  // Con un solo tipo en la lista, la guía no explica los otros cuatro: sería relleno.
+test('la leyenda explica los CINCO tipos, aparezcan o no en este informe', () => {
+  // Cambió a propósito: la leyenda pasó a la última página y es una hoja de REFERENCIA. El
+  // que la guarda se va a encontrar el mes que viene con los tipos que hoy no salieron, así
+  // que están todos — y los que no aparecen se marcan, para no hacerlos buscar en el informe.
   const uno = texto(generarOportunidadesPDF(
     Object.assign({}, DATA, { items: [ITEMS[0]] }), { tope: 25, hoy: '26/08/2026' }));
-  assert.ok(uno.includes('Cliente perdido'));
-  assert.ok(!uno.includes('No le vendemos'));
+  for (const g of Object.values(GUIA)) assert.ok(uno.includes(g.label), 'falta ' + g.label);
+  assert.ok(uno.includes('no aparece en este informe'));
+  assert.ok(uno.includes('hacer'), 'no aparece el "qué hacer"');
+});
+
+test('la leyenda va DESPUÉS de todo lo demás', () => {
+  // Es de consulta: adelante empujaba hacia abajo lo único que se mira todos los días, y la
+  // primera hoja de un informe es la que se mira.
+  const t = texto(generarOportunidadesPDF(Object.assign({}, DATA, {
+    por_producto: [{ producto: 'CEBOLLA', usd_act: 100, usd_ant: 900, kg_act: 10, kg_ant: 90,
+      clientes_act: 1, clientes_ant: 3, var_usd: -800, var_usd_pct: -88.9, var_kg: -80, var_kg_pct: -88.9,
+      clientes_perdidos: [{ cliente: 'COTO', usd_ant: 800, kg_ant: 80 }],
+      clientes_menos: [], proveedores_perdidos: [], proveedores_hoy: [] }],
+  }), { tope: 25, hoy: '26/08/2026' }));
+  const iSecciones = t.indexOf('Por producto');
+  const iLeyenda = t.indexOf('significa cada cosa');
+  assert.ok(iSecciones > 0, 'no salió la sección por producto');
+  assert.ok(iLeyenda > iSecciones, 'la leyenda quedó antes de las secciones');
 });
 
 test('avisa del mes en curso, y no lo hace cuando el mes está cerrado', () => {
