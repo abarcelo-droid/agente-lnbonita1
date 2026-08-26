@@ -296,6 +296,21 @@ test('el conteo dice qué se va y qué NO se toca', () => {
   assert.ok(c.aviso, 'y qué tiene que saber antes');
 });
 
+test('el interruptor tiene DÓNDE tocarse', () => {
+  // No alcanza con que el valor exista: no había una sola pantalla en el panel que
+  // escribiera la configuración de San Gerónimo, así que la clave no se podía tocar
+  // desde ningún lado. Un interruptor sin dónde apretarlo es un interruptor que no
+  // existe.
+  assert.match(PANEL, /function sgLimSwitch\(on\)/);
+  assert.match(PANEL, /api\('\/api\/sg\/config', 'PUT', \{ limpieza_habilitada:/);
+  assert.match(PANEL, /id="sg-lim-switch"/);
+  assert.match(PANEL, /function sgLimSwitchMontar\(\)/);
+  // Y sólo lo ve un administrador.
+  assert.match(PANEL, /var esAdmin = !!\(window\.LNB_USER && window\.LNB_USER\.rol === 'admin'\);/);
+  // Al apagarlo, los botones que ya estaban dibujados se sacan.
+  assert.match(PANEL, /querySelectorAll\('\[data-limpieza\]'\)\.forEach\(function\(n\)\{ n\.remove\(\); \}\);/);
+});
+
 test('los dos Diarios de IVA no tienen botón', () => {
   // No guardan una sola fila propia: se arman leyendo los comprobantes y las
   // liquidaciones. Un botón ahí sería un botón que no hace nada.
