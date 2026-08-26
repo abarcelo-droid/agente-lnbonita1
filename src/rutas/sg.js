@@ -27,7 +27,11 @@ import { crearAsiento, MOTIVOS, origenDeAsiento } from '../servicios/asientos.js
 // El nombre del motivo para mostrarlo en una ficha. La clave sola no le dice
 // nada a nadie.
 const MOTIVOS_TXT = (k) => (MOTIVOS[k] ? MOTIVOS[k].label : k);
-import { getDb } from '../servicios/db.js';
+import { getDb, dbPath } from '../servicios/db.js';
+// Borrar los datos de prueba, módulo por módulo. Va detrás de un interruptor.
+import { MODULOS, moduloDeLimpieza, contar, contarTodo, limpiar, limpiezaHabilitada,
+  CLAVE_HABILITADA } from '../servicios/sg_limpieza.js';
+import '../servicios/sg_limpieza_mapa.js';   // registra los módulos
 import '../servicios/db_sg.js'; // corre el DDL sg_* al importarse
 // Las condiciones de pago que se usan de verdad, y el código de trazabilidad
 // de las órdenes que se cargaron antes de que existiera.
@@ -881,6 +885,75 @@ router.get('/proveedores-servicio', requireAuth, (req, res) => {
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
+
+// ══ BORRAR LOS DATOS DE PRUEBA ═════════════════════════════════════════════
+//
+// Pablo, 26/8/2026: un botón por módulo, sólo para administradores, y que se pueda
+// sacar cuando se lance. El mapa de qué se borra vive en servicios/sg_limpieza_mapa.js
+// y la mecánica en servicios/sg_limpieza.js: acá sólo están las puertas.
+//
+// ── EL INTERRUPTOR ─────────────────────────────────────────────────────────
+// Con `limpieza_habilitada` apagado esto contesta 404 —no 403—: para el que no tiene
+// que verlo, la función no existe. Y el panel no dibuja el botón. Un 403 le diría a
+// cualquiera que hay una puerta ahí.
+function limpiezaViva(req, res) {
+  const db = getDb();
+  if (!limpiezaHabilitada(db)) {
+    res.status(404).json({ ok: false, error: 'No encontrado' });
+    return null;
+  }
+  return db;
+}
+
+// Qué se puede borrar y cuánto hay. Sólo cuenta: no toca nada.
+router.get('/limpieza', requireAdmin, (req, res) => {
+  const db = limpiezaViva(req, res); if (!db) return;
+  try {
+    res.json({ ok: true, data: { habilitada: true, modulos: contarTodo(db) } });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// Lo que se va de UN módulo, con el detalle por tabla. Es lo que se le muestra al que
+// aprieta, ANTES de que apriete.
+router.get('/limpieza/:modulo', requireAdmin, (req, res) => {
+  const db = limpiezaViva(req, res); if (!db) return;
+  try {
+    const c = contar(db, req.params.modulo);
+    if (!c) return res.status(404).json({ ok: false, error: 'Ese módulo no existe.' });
+    res.json({ ok: true, data: c });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// Y el borrado. Pide la confirmación tipeada y va por su PROPIA dirección, para que
+// el nivel se reconozca por la URL — aunque además sea requireAdmin.
+router.post('/limpieza/:modulo/borrar', requireAdmin, (req, res) => {
+  const db = limpiezaViva(req, res); if (!db) return;
+  try {
+    const r = limpiar(db, req.params.modulo, { confirmacion: req.body && req.body.confirmacion });
+    if (!r.ok) return res.status(400).json(r);
+    console.log('[SG][limpieza] módulo=' + r.clave + ' filas=' + r.total
+      + ' usuario=' + (uid(req) || '?'));
+    res.json({ ok: true, data: r });
+  } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
+});
+
+// ── LA COPIA, ANTES DE BORRAR NADA ─────────────────────────────────────────
+//
+// Es la diferencia entre «nos equivocamos» y «perdimos el día». Se baja el archivo
+// entero de la base, con el WAL ya volcado: sin el checkpoint, lo último que se
+// escribió vive en el -wal y la copia sale vieja justo en lo que más importa.
+//
+// Va con el mismo interruptor: es parte del mismo trabajo y no tiene por qué quedar
+// abierta después.
+router.get('/limpieza-backup/clientes.db', requireAdmin, (req, res) => {
+  const db = limpiezaViva(req, res); if (!db) return;
+  try {
+    try { db.pragma('wal_checkpoint(TRUNCATE)'); } catch (_) { /* sin WAL, no hace falta */ }
+    const hoy = new Date().toISOString().slice(0, 10);
+    res.download(dbPath, 'clientes-' + hoy + '.db');
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
 // ── CONFIG SG (clave/valor) — BRIEF 10: fecha_corte del corte operativo (apertura) ──
 function getConfig(db, clave, def) {
   const r = db.prepare('SELECT valor FROM sg_config WHERE clave=?').get(clave);
@@ -892,6 +965,9 @@ router.get('/config', requireAuth, (req, res) => {
     const rows = db.prepare('SELECT clave, valor FROM sg_config').all();
     const cfg = {}; for (const r of rows) cfg[r.clave] = r.valor;
     if (cfg.fecha_corte == null) cfg.fecha_corte = '2026-06-30';
+    // Si los botones de borrar datos de prueba están encendidos. Viaja con la config
+    // para que el panel no tenga que preguntar aparte en cada pantalla.
+    cfg[CLAVE_HABILITADA] = limpiezaHabilitada(db) ? '1' : '0';
     res.json({ ok: true, data: cfg });
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
