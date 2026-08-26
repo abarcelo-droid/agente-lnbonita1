@@ -73,10 +73,12 @@ db.exec(`
 `);
 
 // ── Mapeos fiscales ───────────────────────────────────────────────────────────────
-// Alícuota de IVA (% de la familia) → Id de AFIP. 0%=3, 10.5%=4, 21%=5, 27%=6, 5%=8, 2.5%=9.
+// Alícuota de IVA (% del PRODUCTO) → Id de AFIP. 0%=3, 10.5%=4, 21%=5, 27%=6, 5%=8, 2.5%=9.
 const IVA_PCT_A_ID = { 0: 3, 10.5: 4, 21: 5, 27: 6, 5: 8, 2.5: 9 };
 function alicuotaId(pct) {
-  if (pct == null || pct === '') return null;       // sin alícuota → exento (ImpOpEx)
+  // null ya no llega hasta acá: construirComprobante frena antes y dice qué producto
+  // es. Un dato que falta no es una exención, y salir exento en silencio era el bug.
+  if (pct == null || pct === '') return null;
   const p = Number(pct);
   return Object.prototype.hasOwnProperty.call(IVA_PCT_A_ID, p) ? IVA_PCT_A_ID[p] : undefined; // undefined = no soportada
 }
@@ -109,8 +111,32 @@ function condicionIvaReceptorId(cliente) {
 function r2(n) { return Math.round((Number(n) || 0) * 100) / 100; }
 function fechaHoyAR() { return new Date(Date.now() - 3 * 3600 * 1000).toISOString().slice(0, 10); }
 
-// Construye el comprobante (totales + array Iva) desde cliente + ítems. El IVA sale de
-// producto → familia → sg_familias.iva_alicuota (misma alícuota que compra). Exento → ImpOpEx.
+// ══ EL IVA SALE DEL PRODUCTO, Y LOS IMPORTES LOS TRAE EL LLAMADOR ═══════
+//
+// Dos arreglos que van juntos porque los dos nacían en el mismo SELECT.
+//
+// 1) LA ALÍCUOTA ES LA DEL PRODUCTO. Acá decía `f.iva_alicuota` --sólo la de la
+//    familia-- y la dejaba llamándose igual, así que todo el archivo creía estar
+//    leyendo la del producto. Desde el #870 la alícuota VIVE EN EL PRODUCTO y la
+//    familia es apenas el valor propuesto al darlo de alta. Con este SELECT, un
+//    producto al 21% en una familia al 10,5 le informaba a AFIP la mitad del
+//    débito fiscal mientras la pantalla mostraba 21 — y un producto en una familia
+//    SIN alícuota salía EXENTO en silencio, que es exactamente lo que el #870 vino
+//    a arreglar. El resto del módulo ya usaba COALESCE(producto, familia); faltaba
+//    el único lugar por el que sale un comprobante.
+//
+// 2) SIN ALÍCUOTA NO SE EMITE (decisión de Pablo, 25/8/2026). Antes, alícuota nula
+//    mandaba el neto a ImpOpEx: la operación salía EXENTA sin que nadie lo
+//    decidiera. Un dato que falta no es una exención. Ahora frena y dice qué
+//    producto es. Ojo: 0 SIGUE SIENDO VÁLIDO --hay mercadería al 0%-- y va gravado
+//    al 0% (Id 3), que es distinto de exento. Por eso se compara contra null y no
+//    con un truthy.
+//
+// 3) LOS IMPORTES DE LA LÍNEA VIENEN HECHOS. Si el llamador ya sabe el neto y el
+//    IVA de cada renglón --porque él es el que sabe si el precio tipeado traía IVA
+//    adentro-- los manda y acá no se recalculan. Reconstruir el total desde un
+//    precio unitario redondeado es lo que dejaba el comprobante en $2.789.999,98
+//    cuando el papel decía $2.790.000. Sin esos campos, se calcula como siempre.
 export function construirComprobante(database, { clienteId, items, esNC }) {
   const cliente = database.prepare('SELECT id, razon_social, cuit, categoria_fiscal FROM sg_clientes WHERE id=?').get(clienteId);
   if (!cliente) throw new Error('Cliente inexistente: ' + clienteId);
@@ -120,12 +146,22 @@ export function construirComprobante(database, { clienteId, items, esNC }) {
   let impNeto = 0, impIva = 0, impOpEx = 0;
   const detalle = [];
   for (const it of (items || [])) {
-    const prod = database.prepare(`SELECT p.id, p.nombre, p.familia_id, f.iva_alicuota
+    const prod = database.prepare(`SELECT p.id, p.nombre, p.familia_id,
+        COALESCE(p.iva_alicuota, f.iva_alicuota) AS iva_alicuota
       FROM sg_productos p LEFT JOIN sg_familias f ON f.id=p.familia_id WHERE p.id=?`).get(it.producto_id);
     if (!prod) throw new Error('Producto inexistente: ' + it.producto_id);
     const cant = Number(it.cantidad) || 0, precio = Number(it.precio) || 0;
     if (!(cant > 0)) throw new Error('Cantidad inválida en ' + (prod.nombre || it.producto_id));
-    const neto = r2(cant * precio);                    // precio = unitario NETO (sin IVA)
+    // La alícuota que decidió el llamador gana sobre el catálogo: la línea de un
+    // remito lleva la que se resolvió cuando se armó, no la que tenga el producto hoy.
+    const alic = (it.alicuota != null && it.alicuota !== '') ? Number(it.alicuota)
+               : (prod.iva_alicuota != null ? Number(prod.iva_alicuota) : null);
+    if (alic == null || isNaN(alic)) {
+      throw new Error(`"${prod.nombre}" no tiene alícuota de IVA cargada. Cargala en el maestro `
+        + `de productos antes de facturarlo: sin ella el comprobante saldría exento y la pantalla `
+        + `estaría mostrando otro número.`);
+    }
+    const neto = (it.importe_neto != null) ? r2(it.importe_neto) : r2(cant * precio);
     // F5 — metadata de presentación por bulto (cajón). NO interviene en el cálculo de importes:
     // el subtotal sigue siendo neto = cant(kg) × precio(kg). Solo viaja al detalle local para el PDF.
     const bultoMeta = {
@@ -134,19 +170,17 @@ export function construirComprobante(database, { clienteId, items, esNC }) {
       precio_por_bulto: it.precio_por_bulto != null ? it.precio_por_bulto : null,
       unidad:           it.unidad || null
     };
-    const id = alicuotaId(prod.iva_alicuota);
-    if (id === undefined) throw new Error('Alícuota de IVA no soportada para ' + prod.nombre + ': ' + prod.iva_alicuota + '%');
-    if (id === null) {                                  // exento → ImpOpEx
-      impOpEx = r2(impOpEx + neto);
-      detalle.push({ producto_id: prod.id, descripcion: prod.nombre, cantidad: cant, precio_unitario: precio, subtotal: neto, alicuota_id: null, ...bultoMeta });
-    } else {
-      const iva = r2(neto * Number(prod.iva_alicuota) / 100);
-      impNeto = r2(impNeto + neto); impIva = r2(impIva + iva);
-      if (!ivaMap[id]) ivaMap[id] = { base: 0, importe: 0 };
-      ivaMap[id].base = r2(ivaMap[id].base + neto);
-      ivaMap[id].importe = r2(ivaMap[id].importe + iva);
-      detalle.push({ producto_id: prod.id, descripcion: prod.nombre, cantidad: cant, precio_unitario: precio, subtotal: neto, alicuota_id: id, ...bultoMeta });
-    }
+    const id = alicuotaId(alic);
+    if (id === undefined) throw new Error('Alícuota de IVA no soportada para ' + prod.nombre + ': ' + alic + '%');
+    // El IVA de la línea, si el llamador lo trae, sale POR DIFERENCIA contra el
+    // bruto que se tipeó y no de multiplicar el neto: así neto + iva da exacto
+    // el importe que se vio en pantalla, sin residuo.
+    const iva = (it.importe_iva != null) ? r2(it.importe_iva) : r2(neto * alic / 100);
+    impNeto = r2(impNeto + neto); impIva = r2(impIva + iva);
+    if (!ivaMap[id]) ivaMap[id] = { base: 0, importe: 0 };
+    ivaMap[id].base = r2(ivaMap[id].base + neto);
+    ivaMap[id].importe = r2(ivaMap[id].importe + iva);
+    detalle.push({ producto_id: prod.id, descripcion: prod.nombre, cantidad: cant, precio_unitario: precio, subtotal: neto, alicuota_id: id, ...bultoMeta });
   }
   if (!detalle.length) throw new Error('El comprobante necesita al menos un ítem');
   const impTotal = r2(impNeto + impIva + impOpEx);
