@@ -81,7 +81,20 @@ export function contar(db, modulo) {
     if (n > 0) filas.push({ tabla: t.tabla, que_es: t.que_es, filas: n });
     total += n;
   }
-  return { clave: m.clave, pantalla: m.pantalla, filas, total,
+  // ── Y LO QUE QUEDA, QUE ES LA OTRA MITAD DE LA VERDAD ──────────────────
+  // Una tabla con filtro no se vacía: `liquidaciones` es compartida con Abasto y sólo
+  // se lleva las que salieron de una partida de San Gerónimo. Sin decir cuántas
+  // quedan y por qué, la pantalla parece no haber borrado nada.
+  const quedan = [];
+  for (const t of m.tablas) {
+    if (!t.donde) continue;
+    try {
+      const n = db.prepare('SELECT COUNT(*) c FROM ' + t.tabla
+        + ' WHERE NOT (' + t.donde + ')').get().c;
+      if (n > 0) quedan.push({ tabla: t.tabla, filas: n, por_que: t.queda_porque || null });
+    } catch (_) { /* la tabla no existe */ }
+  }
+  return { clave: m.clave, pantalla: m.pantalla, filas, total, quedan,
     no_se_tocan: m.no_se_tocan || [], aviso: m.aviso || null };
 }
 
@@ -136,7 +149,13 @@ export function limpiar(db, modulo, { confirmacion } = {}) {
     try { db.exec('ROLLBACK'); } catch (_) { /* ya cerró */ }
     return { ok: false, error: e.message };
   }
-  return { ok: true, clave: m.clave, pantalla: m.pantalla, total: antes.total, borradas };
+  // LO QUE SE BORRÓ DE VERDAD, no el conteo de antes. Son el mismo número casi
+  // siempre — pero cuando no lo son, el que importa es éste, y es el que hay que
+  // mostrar: decir «se borraron 12» cuando se fueron 4 es peor que no decir nada.
+  const borradoReal = borradas.reduce((a, b) => a + b.filas, 0);
+  return { ok: true, clave: m.clave, pantalla: m.pantalla,
+    total: borradoReal, contadas_antes: antes.total, borradas,
+    quedan: contar(db, m).quedan };
 }
 
 // Todo junto, para el resumen de la pantalla de administración.
