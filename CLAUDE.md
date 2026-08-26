@@ -12,7 +12,12 @@
 ## Workflow de cambios
 - Branch nueva siempre: `andy/feat-...` o `andy/fix-...`
 - Commits con Conventional Commits: `feat(scope):`, `fix(scope):`, `refactor(scope):`
-- Push + abrir PR siempre, NO mergees a main directo
+- Push + abrir PR siempre. NO pushear a main directo, pero **el squash-merge del PR
+  lo hacés vos** (Pablo, 25/8/2026: "abrí el link solo y hacé el squash y merge
+  vos"). `gh pr merge <n> --squash --delete-branch`, y avisá qué quedó en main.
+- **NO pushees nada a un PR después de darlo por listo.** Se mergea al toque y lo
+  que llegue después queda afuera — ya pasó dos veces (#874 y #885). Si hace falta
+  un cambio más, va en un PR nuevo.
 - Pegame el link del PR al terminar
 - Apenas crees un PR, abrí su URL en el navegador automáticamente (`Start-Process <url-del-PR>`), sin que lo pida
 
