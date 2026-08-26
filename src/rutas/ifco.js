@@ -1798,17 +1798,27 @@ router.get('/remitos', function(req, res) {
   if (f.desde)      { q += " AND r.fecha_emision >= ?"; p.push(f.desde); }
   if (f.hasta)      { q += " AND r.fecha_emision <= ?"; p.push(f.hasta); }
   if (f.search)     {
-    // Búsqueda flexible: matchea (1) el N° literal, (2) la empresa, (3) el N° sin ceros leading.
-    // Esto evita que el usuario tenga que tipear los ceros del prefijo de serie:
-    // "1579690" encuentra "00015-01579690", "15-1579" encuentra "00015-01579690", etc.
+    // Busca por TODO lo que identifica a un despacho, que es lo que el cartel de la pantalla
+    // venía prometiendo sin cumplir: decía "número, cadena, sucursal o proveedor" y sólo
+    // miraba el número y la cadena. Buscar un galpón o una sucursal no devolvía nada, y desde
+    // afuera eso se lee como "ese despacho no existe", no como "no lo estoy buscando".
+    //
+    // Los ceros del prefijo de serie no hay que tipearlos: "1579690" encuentra
+    // "00015-01579690", y "15-1579" también.
     q += ` AND (
       r.n_remito_ifco LIKE ?
-      OR r.empresa LIKE ?
       OR REPLACE(r.n_remito_ifco, '-', '') LIKE ?
       OR CAST(CAST(SUBSTR(r.n_remito_ifco, INSTR(r.n_remito_ifco,'-')+1) AS INTEGER) AS TEXT) LIKE ?
+      OR r.n_remito_sg LIKE ?
+      OR r.empresa LIKE ?
+      OR r.sucursal LIKE ?
+      -- El galpón asociado: en un directo, de dónde salieron los cajones. El JOIN con
+      -- proveedores ya estaba para traer el nombre; ahora también se busca por él.
+      OR pori.nombre LIKE ?
+      OR pori.razon_social LIKE ?
     )`;
     const wild = '%' + f.search + '%';
-    p.push(wild, wild, wild, wild);
+    p.push(wild, wild, wild, wild, wild, wild, wild, wild);
   }
   q += " ORDER BY r.fecha_emision DESC, r.id DESC LIMIT " + (esExport ? '10000' : '500');
   res.json(db.prepare(q).all(...p));

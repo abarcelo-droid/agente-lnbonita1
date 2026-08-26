@@ -303,8 +303,8 @@
         + '<button class="btn btn-pri btn-sm" onclick="__ifco2Reuse(\'ifcoAbrirNuevoRemito\')">' + ic('plus') + ' Nuevo despacho</button></div></div>'
         + '<div class="kpis" style="grid-template-columns:1.5fr 1fr 1fr">'
         + '<div class="search-hero"><div class="sh-box">' + ic('search')
-        + '<input id="ifco2-search" value="' + esc(st.search) + '" placeholder="Buscar N° de remito IFCO o SG, proveedor, cadena o sucursal…" onkeydown="if(event.key===\'Enter\')__ifco2Search(this.value)"><kbd>↵</kbd></div>'
-        + '<div class="sh-hint">' + ic('info') + ' Buscá por número, cadena, sucursal o proveedor en todos los despachos</div></div>'
+        + '<input id="ifco2-search" value="' + esc(st.search) + '" placeholder="Buscar N° de remito IFCO o SG, galpón, cadena o sucursal…" onkeydown="if(event.key===\'Enter\')__ifco2Search(this.value)"><kbd>↵</kbd></div>'
+        + '<div class="sh-hint">' + ic('info') + ' Buscá por N° de remito (IFCO o SG), cadena, sucursal o <b>galpón asociado</b> en todos los despachos</div></div>'
         + '<div class="kpi acc-gold"><div class="k-top"><div class="k-lbl">Sellados a presentar</div><div class="k-ic">' + ic('stamp') + '</div></div><div class="k-val">' + sellTot + '<span class="u">rem.</span></div><div class="k-sub"' + (urg ? ' style="color:var(--i-err)"' : '') + '>' + (urg ? ic('alert-triangle') + ' ' + urg + ' urgentes (+25 d)' : 'al día') + '</div></div>'
         + '<div class="kpi acc-warn"><div class="k-top"><div class="k-lbl">En tránsito (sin sellar)</div><div class="k-ic">' + ic('truck') + '</div></div><div class="k-val">' + nf(enTransito) + '<span class="u">caj.</span></div><div class="k-sub">' + ic('clock') + ' ' + cnt('despachado') + ' remitos abiertos</div></div>'
         + '</div>'
