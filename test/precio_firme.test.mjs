@@ -1,0 +1,177 @@
+// ══ PARTIDA PERFECCIONADA = PRECIO FIRME ═══════════════════════════════════
+//
+// Pablo, 26/8/2026, al pie de la letra:
+//
+//   «una vez que se perfecciona la orden de compra con una FACTURA o una
+//    LIQUIDACIÓN, ya no se puede modificar la orden de compra y ese precio queda
+//    FIRME. La única manera de modificarlo es anular la factura recibida o la
+//    liquidación emitida y cambiar el precio.»
+//
+// La regla ya se estaba violando por TRES puertas, y ninguna avisaba:
+//
+//   1. frenosDeEdicionLote miraba SÓLO la factura, y encima exigía asiento vivo. Una
+//      partida ya LIQUIDADA se corregía sin que nadie chistara.
+//   2. POST /oc/:id/completar repreciaba una orden retroactiva entera sin mirar nada,
+//      con el papel del proveedor ya cargado.
+//   3. POST /lotes/:id/cerrar-precio le fijaba el precio a una partida de pizarra sin
+//      mirar si ya estaba documentada.
+//
+// Y dos precisiones de Pablo que cambian el criterio:
+//   · «factura cargada y contabilizada debería ser lo mismo: si está cargada, se debe
+//     haber disparado el asiento» → alcanza con que la factura esté VIVA. No se pide
+//     el asiento, que era la ventana por la que se colaba el caso.
+//   · «vale para todas las partidas» → también las de precio abierto.
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { DatabaseSync } from 'node:sqlite';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { perfeccionamientoDeOC, motivoPrecioFirme, frenoPrecioFirme }
+  from '../src/servicios/sg_perfeccionada.js';
+
+const RAIZ = process.env.LNB_RAIZ
+  || path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const SG = fs.readFileSync(path.join(RAIZ, 'src/rutas/sg.js'), 'utf8');
+const LIQ = fs.readFileSync(path.join(RAIZ, 'src/rutas/liquidaciones.js'), 'utf8');
+const PANEL = fs.readFileSync(path.join(RAIZ, 'src/panel.html'), 'utf8');
+
+function base() {
+  const db = new DatabaseSync(':memory:');
+  db.exec(`
+    CREATE TABLE sg_oc (id INTEGER PRIMARY KEY, liquidada_en TEXT);
+    CREATE TABLE sg_facturas_compra (id INTEGER PRIMARY KEY, numero TEXT, oc_id INTEGER,
+      activo INTEGER DEFAULT 1, asiento_id INTEGER);
+    CREATE TABLE sg_factura_compra_ocs (factura_id INTEGER, oc_id INTEGER);
+    CREATE TABLE liquidaciones (id INTEGER PRIMARY KEY, n_liquidacion TEXT, oc_id INTEGER,
+      asiento_id INTEGER, eliminado_en TEXT);
+    INSERT INTO sg_oc (id) VALUES (1),(2),(3);
+  `);
+  return db;
+}
+
+test('una partida sin factura ni liquidación está libre', () => {
+  assert.equal(perfeccionamientoDeOC(base(), 1), null);
+  assert.equal(frenoPrecioFirme(base(), 1, 'cambiar el precio'), null);
+});
+
+test('la factura CARGADA ya deja el precio firme, sin pedirle el asiento', () => {
+  // Es la precisión de Pablo: «si está cargada, se debe haber disparado el asiento».
+  // Con el criterio viejo —asiento vivo— una factura cargada y todavía sin
+  // contabilizar dejaba el precio editable justo cuando ya hay papel del proveedor.
+  const db = base();
+  db.prepare("INSERT INTO sg_facturas_compra (id,numero,oc_id,activo,asiento_id) VALUES (9,'A-0001-99',1,1,NULL)").run();
+  const p = perfeccionamientoDeOC(db, 1);
+  assert.equal(p.como, 'factura');
+  assert.equal(p.numero, 'A-0001-99');
+  assert.match(motivoPrecioFirme(p), /FIRME/);
+  assert.match(motivoPrecioFirme(p), /anulá primero esa factura/i, 'y dice cuál es la salida');
+});
+
+test('la factura que cubre VARIAS partidas las traba a todas', () => {
+  // Si sólo se mirara f.oc_id, las partidas secundarias —las de
+  // sg_factura_compra_ocs— quedaban libres con su comprobante ya cargado.
+  const db = base();
+  db.prepare("INSERT INTO sg_facturas_compra (id,numero,oc_id,activo) VALUES (9,'A-0001-99',1,1)").run();
+  db.prepare('INSERT INTO sg_factura_compra_ocs VALUES (9,2)').run();
+  assert.equal(perfeccionamientoDeOC(db, 2).como, 'factura');
+  assert.equal(perfeccionamientoDeOC(db, 3), null, 'la que no está en la factura sigue libre');
+});
+
+test('la LIQUIDACIÓN emitida también perfecciona — y eso no lo miraba nadie', () => {
+  const db = base();
+  db.prepare("INSERT INTO liquidaciones (id,n_liquidacion,oc_id) VALUES (5,'1-205',1)").run();
+  const p = perfeccionamientoDeOC(db, 1);
+  assert.equal(p.como, 'liquidacion');
+  assert.equal(p.numero, '1-205');
+  assert.match(motivoPrecioFirme(p), /anulá primero esa liquidación/i);
+});
+
+test('anulada la factura o la liquidación, la partida vuelve a quedar libre', () => {
+  // Es la vuelta que Pablo describe: «la única manera es anular y cambiar el precio».
+  const db = base();
+  db.prepare("INSERT INTO sg_facturas_compra (id,numero,oc_id,activo) VALUES (9,'A-1',1,1)").run();
+  assert.ok(perfeccionamientoDeOC(db, 1));
+  db.prepare('UPDATE sg_facturas_compra SET activo=0 WHERE id=9').run();
+  assert.equal(perfeccionamientoDeOC(db, 1), null);
+
+  db.prepare("INSERT INTO liquidaciones (id,n_liquidacion,oc_id) VALUES (5,'1-205',1)").run();
+  assert.ok(perfeccionamientoDeOC(db, 1));
+  db.prepare("UPDATE liquidaciones SET eliminado_en=datetime('now') WHERE id=5").run();
+  assert.equal(perfeccionamientoDeOC(db, 1), null);
+});
+
+test('y la marca a mano de «liquidada» también cuenta', () => {
+  const db = base();
+  db.prepare("UPDATE sg_oc SET liquidada_en='2026-08-20' WHERE id=1").run();
+  const p = perfeccionamientoDeOC(db, 1);
+  assert.equal(p.como, 'marca');
+  assert.match(motivoPrecioFirme(p), /marcada como liquidada/i);
+});
+
+// ── LAS TRES PUERTAS ────────────────────────────────────────────────────────
+test('la respuesta es UNA, no una consulta copiada en cada endpoint', () => {
+  // Estaba escrita a mano en tres lugares de sg.js, con criterios distintos entre sí
+  // y ninguno miraba la liquidación. Una cuarta copia garantizaba que el día que
+  // cambiara el criterio, alguna quedara vieja.
+  assert.match(SG, /import \{ frenoPrecioFirme \} from '\.\.\/servicios\/sg_perfeccionada\.js'/);
+  const usos = (SG.match(/frenoPrecioFirme\(db,/g) || []).length;
+  assert.equal(usos, 3, 'las tres puertas usan la misma función');
+});
+
+test('corregir un lote de una partida documentada se frena', () => {
+  const i = SG.indexOf('function frenosDeEdicionLote(');
+  assert.ok(i > 0);
+  const cuerpo = SG.slice(i, i + 1600);
+  assert.match(cuerpo, /frenoPrecioFirme\(db, l\.oc_id, 'corregir los kilos o el precio'\)/);
+  // Y ya no queda la consulta vieja, que miraba sólo la factura y pedía asiento vivo.
+  assert.doesNotMatch(cuerpo, /f\.activo=1 AND f\.asiento_id IS NOT NULL/);
+});
+
+test('repreciar una orden retroactiva ya documentada se frena', () => {
+  const i = SG.indexOf("router.post('/oc/:id/completar'");
+  assert.ok(i > 0);
+  const cuerpo = SG.slice(i, i + 1800);
+  assert.match(cuerpo, /frenoPrecioFirme\(db, oc\.id, 'cambiar el precio'\)/);
+  assert.match(cuerpo, /res\.status\(409\)/, 'conflicto, no un error de datos');
+});
+
+test('cerrarle el precio a una partida de pizarra ya documentada se frena', () => {
+  // «Vale para todas»: acá el precio no vive en la orden sino en el lote, pero la
+  // regla es la misma.
+  const i = SG.indexOf("router.post('/lotes/:id/cerrar-precio'");
+  assert.ok(i > 0);
+  const cuerpo = SG.slice(i, i + 1600);
+  assert.match(cuerpo, /frenoPrecioFirme\(db, ocDelLote\.oc_id, 'cerrarle el precio'\)/);
+});
+
+// ── LA PUERTA DE VUELTA ─────────────────────────────────────────────────────
+test('anular una liquidación pide MOTIVO, como la factura de compra', () => {
+  // Es la puerta oficial para destrabar un precio firme y era la más floja de las
+  // dos: se daba de baja con un DELETE pelado y no quedaba escrito por qué.
+  assert.match(LIQ, /router\.post\('\/:id\/anular'/, 'y por su propia dirección');
+  assert.match(LIQ, /function anularLiquidacion\(id, motivo, usuarioId\)/);
+  assert.match(LIQ, /Poné por qué se anula/);
+  assert.match(LIQ, /ALTER TABLE liquidaciones ADD COLUMN anulado_motivo TEXT/);
+  // El DELETE de siempre queda, pero pasa por la MISMA función: dos maneras de
+  // anular, una sin rastro, es exactamente lo que esto viene a corregir.
+  assert.match(LIQ, /router\.delete\('\/:id', function \(req, res\) \{\s*\r?\n\s*const r = anularLiquidacion/);
+});
+
+test('una liquidación ya pagada no se anula', () => {
+  // La plata al productor ya salió: darla de baja deja el pago colgado de un
+  // comprobante que no existe. Es el mismo freno que tiene la factura de compra.
+  assert.match(LIQ, /pagados al productor\. Anulá primero el pago/);
+});
+
+test('el asiento se anula CON la liquidación y con el motivo pegado', () => {
+  assert.match(LIQ, /descripcion \|\| ' — ANULADO: se dio de baja la liquidación '/);
+  assert.match(LIQ, /\|\| \? \|\| ' — ' \|\| \?/, 'el motivo queda en la descripción del asiento');
+});
+
+test('la pantalla pide el motivo y avisa que la partida queda libre', () => {
+  assert.match(PANEL, /\/anular', 'POST', \{ motivo: motivo \}\)/);
+  assert.match(PANEL, /su precio se va a poder/);
+  assert.doesNotMatch(PANEL, /fetch\('\/api\/liquidaciones\/'\+id, \{ method:'DELETE'/,
+    'ya no se anula por el camino sin motivo');
+});

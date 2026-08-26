@@ -33962,11 +33962,25 @@ function liqPintar() {
     '</tr>';
   }).join('');
 }
+// ── ANULAR UNA LIQUIDACIÓN ─────────────────────────
+// Se pide el MOTIVO, como en la factura de compra. No es burocracia: la
+// liquidación es lo que documenta la partida, y anularla DESTRABA un precio que
+// estaba firme. Sin el motivo, dentro de seis meses no hay forma de explicar por
+// qué cambió un precio cerrado.
 function liqEliminar(id) {
-  if (!confirm('¿Eliminar esta liquidación?')) return;
-  fetch('/api/liquidaciones/'+id, { method:'DELETE', credentials:'include' })
-    .then(r=>r.json()).then(_=>liqCargar());
+  var motivo = prompt('ANULAR la liquidación' + String.fromCharCode(10, 10)
+    + 'Se anula también su asiento, y la partida queda libre: su precio se va a poder '
+    + 'volver a cambiar.' + String.fromCharCode(10, 10) + 'Motivo (queda guardado con la anulación):', '');
+  if (motivo === null) return;
+  motivo = String(motivo).trim();
+  if (motivo.length < 3) { toast('Poné por qué se anula', 'er'); return; }
+  api('/api/liquidaciones/' + id + '/anular', 'POST', { motivo: motivo }).then(function(r){
+    if (!r || !r.ok) { alert('No se pudo anular.' + String.fromCharCode(10, 10) + ((r && r.error) || 'Error')); return; }
+    toast(r.aviso || 'Liquidación anulada', 'ok');
+    liqCargar();
+  });
 }
+
 
 async function liqAbrirNueva() {
   // Ya no hay pasos: el formulario ES la pantalla. Se limpia entero, porque la

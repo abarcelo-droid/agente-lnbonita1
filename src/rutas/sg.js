@@ -15,6 +15,8 @@ import { subirArchivo, obtenerArchivo, storageConfigurado } from '../servicios/s
 import { facturaCuenta, deudaFactura, deudaGestionFactura, noEsNotaDeCredito, signoFactura }
   from '../servicios/factura-cuenta.js';
 import { acordadoDeOC, precioUnicoDeOC } from '../servicios/sg_acordado.js';
+// Una partida documentada con factura o liquidación tiene el precio FIRME.
+import { frenoPrecioFirme } from '../servicios/sg_perfeccionada.js';
 // La foto de lo que quedó guardado con la venta de gestión vieja. Sólo lee.
 import { diagnosticoGestion } from '../servicios/sg_gestion_vieja.js';
 // Los dos libros de IVA. El de ventas no existía; el de compras estaba corto.
@@ -4345,19 +4347,14 @@ function frenosDeEdicionLote(db, loteId) {
   if (!l) return { error: 'Lote no encontrado' };
 
   if (l.oc_id) {
-    // La factura puede cubrir VARIAS partidas: si sólo se mira f.oc_id, las que
-    // entraron como secundarias —las que viven en sg_factura_compra_ocs— quedan
-    // editables aunque su asiento ya esté en el libro.
-    const fac = db.prepare(`SELECT f.id, f.asiento_id, a.anulado FROM sg_facturas_compra f
-      LEFT JOIN sg_asientos a ON a.id = f.asiento_id
-      WHERE f.activo=1 AND f.asiento_id IS NOT NULL
-        AND (f.oc_id = ? OR EXISTS (SELECT 1 FROM sg_factura_compra_ocs fo
-                                     WHERE fo.factura_id = f.id AND fo.oc_id = ?))`).get(l.oc_id, l.oc_id);
-    if (fac && !fac.anulado) {
-      return { error: 'Esta partida ya está contabilizada en el asiento ' + fac.asiento_id
-        + '. Anulá el asiento primero: si se corrigen los kilos o el precio, el asiento que está en el '
-        + 'libro deja de corresponder con el dato.' };
-    }
+    // ── PARTIDA PERFECCIONADA = NO SE TOCA ─────────────────────────────────
+    // Acá había una consulta escrita a mano que miraba SÓLO la factura, y encima
+    // exigía asiento vivo. Le faltaban las dos mitades de la regla de Pablo: la
+    // LIQUIDACIÓN también perfecciona, y una factura CARGADA ya alcanza —si está
+    // cargada, el asiento se tiene que haber disparado—. Con lo de antes, una
+    // partida ya liquidada se podía corregir sin que nadie chistara.
+    const freno = frenoPrecioFirme(db, l.oc_id, 'corregir los kilos o el precio');
+    if (freno) return { error: freno };
   }
   const desp = db.prepare(`SELECT COALESCE(SUM(di.kg_despachados),0) s FROM sg_despacho_items di
     JOIN sg_despachos d ON d.id=di.despacho_id AND d.activo=1 WHERE di.lote_id=?`).get(loteId).s;
@@ -5266,6 +5263,11 @@ router.post('/oc/:id/completar', requireAdmin, (req, res) => {
         error: 'Esta orden no nació de una descarga sin orden: se edita desde la orden misma.' });
     }
     if (oc.estado === 'anulada') return res.status(400).json({ ok: false, error: 'Esa orden está anulada' });
+    // Este endpoint REPRECIA la orden, y una partida ya documentada tiene el precio
+    // firme. Hasta acá no miraba nada: una retroactiva ya facturada se podía
+    // repreciar entera, con el papel del proveedor ya cargado.
+    const freno = frenoPrecioFirme(db, oc.id, 'cambiar el precio');
+    if (freno) return res.status(409).json({ ok: false, error: freno });
 
     const precios = (Array.isArray(b.items) ? b.items : [])
       .map((x) => ({ id: Number(x.oc_item_id), precio: Number(x.precio_por_kg) }))
@@ -6186,6 +6188,14 @@ router.post('/lotes/:id/cerrar-precio', requireAuth, (req, res) => {
     if (!(precio > 0)) return res.status(400).json({ ok: false, error: 'Precio inválido' });
     const lote = db.prepare('SELECT * FROM sg_lotes WHERE id=? AND activo=1').get(req.params.id);
     if (!lote) return res.status(404).json({ ok: false, error: 'Lote no encontrado' });
+    // ── Y VALE TAMBIÉN PARA LA PARTIDA DE PRECIO ABIERTO ───────────────────
+    // Pablo: «vale para todas». Acá el precio no vive en la orden sino en el lote,
+    // pero la regla es la misma: si esa partida ya se documentó, su precio quedó
+    // firme. Este endpoint no miraba nada.
+    const ocDelLote = db.prepare('SELECT i.oc_id FROM sg_oc_items i WHERE i.id=?').get(lote.oc_item_id);
+    const freno = ocDelLote && ocDelLote.oc_id
+      ? frenoPrecioFirme(db, ocDelLote.oc_id, 'cerrarle el precio') : null;
+    if (freno) return res.status(409).json({ ok: false, error: freno });
     const tx = db.transaction(() => {
       const costoBase = (lote.kg_reales || 0) * precio;
       db.prepare("UPDATE sg_lotes SET precio_unitario_kg=?, costo_base=?, modificado_en=datetime('now','localtime'), modificado_por=? WHERE id=?")
