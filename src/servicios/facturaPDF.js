@@ -7,6 +7,7 @@
 import { jsPDF } from 'jspdf';
 import QRCode from 'qrcode';
 import { AZUL, GRIS, GRIS_CL, EMISOR, money, getLogo } from './pdfComun.js';
+import { discriminaIva } from './sg_fiscal.js';
 
 // cbte_tipo → letra / código / etiqueta.
 const CBTE = {
@@ -112,7 +113,30 @@ export async function generarFacturaPDF(factura) {
 
   // ── Detalle de ítems ──
   y += 24;
-  const cols = [
+  // ══ UNA FACTURA B NO DISCRIMINA EL IVA ═════════════════════
+  //
+  // El papel discriminaba el impuesto SIEMPRE, sin mirar la letra: columna "% IVA"
+  // en el detalle y "Neto Gravado + IVA" en los totales. En una B eso está mal por
+  // RG 1415: el impuesto va ADENTRO del precio y abajo va un solo total.
+  //
+  // Casi no se notaba porque la B sólo salía cuando el cliente no tenía CUIT, que
+  // eran pocos. Desde que la letra sale de la categoría fiscal, TODOS los
+  // monotributistas y exentos pasan a B — en un mayorista del Mercado Central, media
+  // cartera. Sin esto, cada uno recibe por mail un papel que dice B y está impreso
+  // como A; lo lleva a su contador y el contador nos lo devuelve.
+  //
+  // El XML a AFIP NO cambia: ahí ImpNeto e ImpIVA van desglosados también en la B, y
+  // así tiene que ser. Lo que cambia es el papel.
+  const discrimina = discriminaIva(factura.cbte_tipo);
+  const colsB = [
+    { x: 10,  w: 18, t: 'Código',  a: 'left' },
+    { x: 28,  w: 86, t: 'Descripción', a: 'left' },
+    { x: 114, w: 16, t: 'Cant.', a: 'right' },
+    { x: 130, w: 14, t: 'U.med.', a: 'left' },
+    { x: 144, w: 28, t: 'P. Unit.', a: 'right' },
+    { x: 172, w: 28, t: 'Importe', a: 'right' }
+  ];
+  const cols = discrimina ? [
     { x: 10,  w: 18, t: 'Código',  a: 'left' },
     { x: 28,  w: 78, t: 'Descripción', a: 'left' },
     { x: 106, w: 16, t: 'Cant.', a: 'right' },
@@ -120,7 +144,7 @@ export async function generarFacturaPDF(factura) {
     { x: 136, w: 24, t: 'P. Unit.', a: 'right' },
     { x: 160, w: 14, t: '% IVA', a: 'right' },
     { x: 174, w: 26, t: 'Importe', a: 'right' }
-  ];
+  ] : colsB;
   doc.setFillColor(...AZUL).rect(8, y, 194, 7, 'F');
   doc.setTextColor(255, 255, 255).setFont('helvetica', 'bold').setFontSize(7.5);
   for (const c of cols) doc.text(c.t, c.a === 'right' ? c.x + c.w - 1 : c.x + 1, y + 5, { align: c.a });
@@ -146,7 +170,11 @@ export async function generarFacturaPDF(factura) {
     // fiscal salía «Tomate × 18.546875kg». Es una etiqueta, no un importe —los
     // importes salen del subtotal guardado— así que se muestra como se lee.
     const desc = enBulto ? (String(it.descripcion || '') + ' × ' + kgTxt(kpb) + 'kg') : String(it.descripcion || '');
-    const fila = [
+    // EN LA B, EL PRECIO Y EL IMPORTE VAN CON EL IVA ADENTRO, y no hay columna de
+    // alícuota. El total del comprobante no cambia —es el mismo—: lo que cambia es
+    // cómo se reparte entre las columnas del papel.
+    const conIva = (n) => (pct == null ? Number(n) : Number(n) * (1 + pct / 100));
+    const fila = discrimina ? [
       String(it.producto_id || ''),
       desc,
       cantTxt,
@@ -154,6 +182,13 @@ export async function generarFacturaPDF(factura) {
       pUnit,
       pct == null ? 'Exento' : (pct + '%'),
       money(sub)
+    ] : [
+      String(it.producto_id || ''),
+      desc,
+      cantTxt,
+      uMed,
+      money(conIva(enBulto ? it.precio_por_bulto : it.precio_unitario)),
+      money(conIva(sub))
     ];
     if (y > 250) { doc.addPage(); y = 16; }
     fila.forEach((v, i) => { const c = cols[i]; doc.text(String(v), c.a === 'right' ? c.x + c.w - 1 : c.x + 1, y + 4, { align: c.a, maxWidth: c.w - 1 }); });
@@ -196,10 +231,13 @@ export async function generarFacturaPDF(factura) {
   const netoGrav = (factura && factura.neto != null && pcts.length)
     ? Number(factura.neto)
     : Object.values(grav).reduce((a, g) => a + g.base, 0);
-  linea('Neto Gravado:', netoGrav);
-  for (const pct of pcts) linea('IVA ' + String(pct).replace('.', ',') + '%:', grav[pct].iva);
-  if (totExento > 0.001) linea('Importe Exento:', totExento);
-  doc.setDrawColor(...GRIS).setLineWidth(0.3).line(lx, y, tx, y); y += 5;
+  // En la B no va ni el neto ni el IVA: un solo total, con el impuesto adentro.
+  if (discrimina) {
+    linea('Neto Gravado:', netoGrav);
+    for (const pct of pcts) linea('IVA ' + String(pct).replace('.', ',') + '%:', grav[pct].iva);
+    if (totExento > 0.001) linea('Importe Exento:', totExento);
+    doc.setDrawColor(...GRIS).setLineWidth(0.3).line(lx, y, tx, y); y += 5;
+  }
   linea('Importe Total:', factura.total, true);
 
   // ── CAE + QR ──
