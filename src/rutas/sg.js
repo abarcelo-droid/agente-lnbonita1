@@ -15,6 +15,8 @@ import { subirArchivo, obtenerArchivo, storageConfigurado } from '../servicios/s
 import { facturaCuenta } from '../servicios/factura-cuenta.js';
 // La foto de lo que quedó guardado con la venta de gestión vieja. Sólo lee.
 import { diagnosticoGestion } from '../servicios/sg_gestion_vieja.js';
+// Los dos libros de IVA. El de ventas no existía; el de compras estaba corto.
+import { libroIvaVentas, comprasDeLiquidaciones, totalizar as totalizarIva } from '../servicios/sg_libros_iva.js';
 import { previewAsientoLiquidacion, lineasAsientoLiquidacion } from '../servicios/asiento-liquidacion.js';
 import { crearAsiento, MOTIVOS, origenDeAsiento } from '../servicios/asientos.js';
 
@@ -5061,6 +5063,24 @@ router.post('/asientos/:id/anular', requireAuth, async (req, res) => {
 //
 // Las anuladas se listan igual, marcadas: un libro con agujeros no se puede
 // explicar. Por eso también se ven las que perdieron su asiento.
+// ══ EL LIBRO DE IVA VENTAS ═════════════════════════════════════════════
+//
+// No existía. El débito fiscal se calculaba en cada emisión, se le informaba a AFIP,
+// se guardaba y se asentaba — y no se sumaba en ninguna pantalla del módulo. La
+// declaración jurada de IVA no se podía armar desde acá.
+//
+// Incluye la mitad de DÉBITO de cada liquidación al productor: los servicios que le
+// cobramos (comisión, descarga, flete, gastos administrativos). Es el mismo papel que
+// aporta crédito por la mercadería al libro de compras, y las dos mitades se declaran.
+router.get('/diario-iva-ventas', requireAuth, (req, res) => {
+  const db = getDb();
+  try {
+    const r = libroIvaVentas(db, { desde: req.query.desde, hasta: req.query.hasta,
+      facturaCuentaSql: facturaCuenta('f') });
+    res.json({ ok: true, data: r });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
 router.get('/diario-iva-compras', requireAuth, (req, res) => {
   const db = getDb();
   try {
@@ -5114,7 +5134,28 @@ router.get('/diario-iva-compras', requireAuth, (req, res) => {
         FROM sg_facturas_compra f WHERE f.activo=1 AND f.asiento_id IS NOT NULL`).get();
       fuera = o.c || 0; primera = o.p; ultima = o.u;
     }
-    res.json({ ok: true, data: { filas: rows, totales: t, fuera_del_periodo: fuera, primera, ultima } });
+    // ══ Y LAS LIQUIDACIONES AL PRODUCTOR ═══════════════════════════════
+    //
+    // Este libro leía SÓLO sg_facturas_compra. La liquidación es la otra forma de
+    // documentar una compra en este módulo —la cuenta corriente de proveedores la
+    // trata como deuda documentada y su asiento genera IVA Crédito Fiscal— y no
+    // figuraba en ningún libro. El total que este endpoint devuelve "para comparar
+    // contra la declaración" estaba corto por todo el IVA de las liquidaciones del
+    // período.
+    //
+    // Van marcadas con su origen para que la pantalla las distinga: el papel es otro
+    // y el número de comprobante no se lee igual.
+    const liqs = verAnulados ? [] : comprasDeLiquidaciones(db,
+      { desde: req.query.desde, hasta: req.query.hasta });
+    for (const l of liqs) {
+      t.neto = r2(t.neto + l.neto);
+      t.iva = r2(t.iva + l.iva);
+      t.total = r2(t.total + l.total);
+    }
+    const filas = rows.map((x) => ({ ...x, origen: 'factura' })).concat(liqs)
+      .sort((a, b) => String(b.fecha_emision || b.fecha).localeCompare(String(a.fecha_emision || a.fecha)));
+    res.json({ ok: true, data: { filas, totales: t, fuera_del_periodo: fuera, primera, ultima,
+      liquidaciones: liqs.length } });
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
