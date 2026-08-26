@@ -1008,6 +1008,12 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
              y no se mostraba en ningún lado, así que nada avisaba cuando el precio
              por el que se está liquidando no da contra el de la orden. -->
         <div id="liq-cerr-acordado" style="font-size:11.5px;margin-top:6px"></div>
+        <!-- A precio cerrado el operador CONFIRMA. Que se vea por qué los campos
+             están grises, en vez de que parezca que la pantalla se colgó. -->
+        <div id="liq-cerr-solo-admin" style="display:none;font-size:11.5px;color:var(--mut);margin-top:6px">
+          🔒 El precio ya está pactado y el resto lo calcula el despeje: acá se confirma.
+          Los números los edita el administrador. Lo que sí elegís vos es <b>cuántos bultos se liquidan</b>.
+        </div>
         <!-- ══ ¿EL PRECIO PACTADO TRAE IVA? ═════════════════════════
              Pablo, 25/8/2026: "el precio acordado en la orden en general es CON IVA,
              pero podemos ponerle un selector o un cartel grande para que sepan que es
@@ -10227,7 +10233,19 @@ function sgOcPintar(){
       if (o.modalidad === 'retroactiva' && !o.completada_en && (Number(o.items_sin_precio) || 0) > 0) {
         acc += '<button class="btn bb bs" onclick="sgSoOpen('+o.id+')">Completar</button> ';
       }
-      if(o.estado==='abierta'||o.estado==='recibida_parcial') acc+='<button class="btn bo bs" onclick="sgRecOpen('+o.id+')">📥</button> ';
+      // ── LA MERCADERÍA SE RECIBE EN RECEPCIÓN, NO ACÁ ──────────────────
+      //
+      // Pablo, 25/8/2026: "desde emisión de órdenes no se puede recepcionar
+      // mercadería, se debe hacer desde el menú de recepción".
+      //
+      // Acá había un 📥 que abría el asistente de recepción de cinco pasos con la
+      // orden ya elegida. Emitir una orden y recibir un camión son dos trabajos de
+      // dos personas distintas, y el atajo los mezclaba en la pantalla del comprador.
+      //
+      // No queda ningún circuito sin entrada: en Ingresos → "Recepciones pendientes"
+      // están los dos caminos —el botón "+ Recibir mercadería", cuyo desplegable
+      // lista todas las órdenes abiertas, y el "Recibir" de cada fila de la bandeja—
+      // y son los mismos que usaba este botón.
       if(o.estado==='abierta' && lnbPuedeAnular('sg-compras'))
         acc+='<button class="btn bd bs" title="Anular la orden" onclick="sgOcAnular('+o.id+')">✖</button>';
 
@@ -11417,13 +11435,26 @@ function liqVentaCab(ocId){
       + '<div style="font-weight:700;font-size:12px;text-transform:uppercase;letter-spacing:.04em;'
       + 'color:var(--mut);margin-bottom:8px">💰 Lo que vendió esta partida</div>';
 
-    // Los dos datos que se ingresan. Ingresados viene puesto y se puede
-    // corregir: si el conteo del depósito no coincide con el remito, manda el
-    // conteo — pero que quede escrito cuál se usó.
+    // ── LO QUE ENTRÓ ES UN HECHO; ACÁ SÓLO SE DECIDE CUÁNTO SE LIQUIDA ──
+    //
+    // Pablo, 25/8/2026: "una vez que tenemos una partida para liquidar no deberías
+    // dejar mover los bultos ingresados, ni arriba ni en artículos".
+    //
+    // Los bultos ingresados son los que se contaron al bajar el camión. Acá estaban
+    // editables "por si el conteo del depósito no coincide con el remito", pero ese
+    // no es el lugar para arreglarlo: la corrección de un lote ya tiene su puerta
+    // (/lotes/:id/corregir), y ahí el propio repo dice que los bultos NO se corrigen
+    // —"son los que se contaron al bajar el camión"— y que el que cede es el kilo
+    // por bulto. Dejarlo editable acá era una segunda verdad sobre el mismo cajón.
+    //
+    // El de al lado, BULTOS A LIQUIDAR, sigue editable: ésa sí es la decisión de
+    // esta pantalla.
     h += '<div style="display:flex;gap:14px;flex-wrap:wrap;margin-bottom:10px">'
       + '<label style="font-size:11.5px;color:var(--mut)">Bultos ingresados<br>'
         + '<input id="liq-bultos-in" type="number" step="1" min="0" value="' + (r.bultos_ingresados || 0) + '"'
-        + ' oninput="liqBultosAvance()" style="width:130px;padding:6px 8px;border-radius:6px;border:1px solid var(--bor)"></label>'
+        + ' readonly tabindex="-1" title="Es el conteo de la recepción: no se corrige desde acá"'
+        + ' style="width:130px;padding:6px 8px;border-radius:6px;border:1px solid var(--bor);'
+        + 'background:var(--bor2,#f1f5f9);color:var(--mut);cursor:not-allowed"></label>'
       + '<label style="font-size:11.5px;color:var(--mut)">Bultos a liquidar<br>'
         + '<input id="liq-bultos-liq" type="number" step="1" min="0" value="' + (r.bultos_vendidos || 0) + '"'
         + ' oninput="liqBultosCambio()" style="width:130px;padding:6px 8px;border-radius:6px;border:1px solid var(--bor)"></label>'
@@ -32553,6 +32584,13 @@ function liqRemResumen(){
 // A precio ABIERTO el productor cobra lo que su mercadería rindió; a precio
 // CERRADO ya estaba pactado en la orden. Son dos orígenes distintos para el
 // mismo número.
+// ── ¿ESTA LIQUIDACIÓN SE EDITA O SE CONFIRMA? ───────────────────────────
+// A precio cerrado, sólo el administrador toca los números: el resto los confirma.
+// Se pregunta en un solo lugar para que la grilla, el precio acordado y el selector
+// de IVA no puedan quedar con criterios distintos.
+function liqCerradoBloquea(){
+  return liqModo() === 'cerrado' && !(window.LNB_USER && window.LNB_USER.rol === 'admin');
+}
 function liqModo(){
   var el = document.querySelector('input[name="liq-modo"]:checked');
   return el ? el.value : 'abierto';
@@ -32576,6 +32614,24 @@ function liqModoCambio(){
   }
   var cb = eid('liq-cerrado-box');
   if (cb) cb.style.display = cerrado ? '' : 'none';
+
+  // ── Y LOS DOS DE ARRIBA, CON EL MISMO CRITERIO ────────────────────────
+  // El precio acordado y la alícuota salen del acuerdo con el productor, no de
+  // esta pantalla. "Bultos a liquidar" NO se bloquea: ésa es la decisión operativa
+  // —cuántos se liquidan ahora— y trabarla dejaría al operador sin poder armar la
+  // liquidación, contra "OPERAR NO ES SER ADMIN".
+  var bloq = liqCerradoBloquea();
+  ['liq-cerr-precio', 'liq-cerr-iva'].forEach(function(id){
+    var e = eid(id); if (!e) return;
+    if (e.tagName === 'SELECT') { e.disabled = bloq; }
+    else { e.readOnly = bloq; e.tabIndex = bloq ? -1 : 0; }
+    e.style.background = bloq ? 'var(--bor2,#f1f5f9)' : '';
+    e.style.color = bloq ? 'var(--mut)' : '';
+    e.style.cursor = bloq ? 'not-allowed' : '';
+    e.title = bloq ? 'Sale del acuerdo con el productor: lo edita el administrador' : '';
+  });
+  var av = eid('liq-cerr-solo-admin');
+  if (av) av.style.display = bloq ? '' : 'none';
 
   // El cuadro de ventas SIGUE a la vista: a precio cerrado las ventas son
   // justamente el punto de partida del despeje. Esconderlo dejaba al operador
@@ -32901,7 +32957,28 @@ function liqGrillaPintar(){
     });
   }
   var v = (LIQ && LIQ.grilla) ? LIQ.grilla : {};
+  var bloqueado = liqCerradoBloquea();
   var inp = function(k, amb){
+    // ══ A PRECIO CERRADO EL OPERADOR CONFIRMA, NO CALCULA ═════════════
+    //
+    // Pablo, 25/8/2026: "a la hora de hacer las liquidaciones precio cerrado vamos
+    // a bloquear los campos para que no los puedan editar; los únicos que pueden
+    // editar van a ser administradores".
+    //
+    // El número ya está pactado y el despeje lo resuelve solo: la última línea
+    // TIENE que dar el precio acordado por la cantidad. Tocar una celda a mano
+    // rompe ese cierre sin que nadie lo pida, y el que firma abajo es el productor.
+    //
+    // Precio ABIERTO sigue editable para todos: ahí la comisión y los gastos son
+    // justamente lo que hay que cargar.
+    var val0 = (v[amb + '_' + k] != null && v[amb + '_' + k] !== '')
+      ? liqPlata(v[amb + '_' + k]) : '';
+    if (bloqueado) {
+      return '<input type="text" id="liq-g-' + amb + '-' + k + '" value="' + val0 + '"'
+        + ' readonly tabindex="-1" title="Precio cerrado: el número sale del acuerdo y del despeje"'
+        + ' style="width:100%;text-align:right;box-sizing:border-box;'
+        + 'background:var(--bor2,#f1f5f9);color:var(--mut);cursor:not-allowed;border:1px solid var(--bor)">';
+    }
     // Tocar las VENTAS recalcula la comisión: es un % sobre ellas, y dejarla
     // calculada sobre el número viejo es cobrarle mal sin que se note. Y tocar el
     // importe de un servicio recalcula SU IVA al 21%.
