@@ -96,7 +96,9 @@ test('nadie filtra sg_ven_facturas por estado a mano: se usa la regla completa',
 test('los que deciden si un remito ya está documentado usan la regla compartida', () => {
   const sg = FUENTES.find((f) => f.rel === path.join('rutas', 'sg.js'));
   assert.ok(sg, 'no encontré rutas/sg.js');
-  assert.match(sg.txt, /import \{ facturaCuenta \}/,
+  // El nombre puede venir acompañado de otros del mismo módulo (deudaFactura, el
+  // signo de la nota de crédito): lo que se cuida es que la regla se IMPORTE.
+  assert.match(sg.txt, /import \{[^}]*\bfacturaCuenta\b[^}]*\}\s*from '\.\.\/servicios\/factura-cuenta\.js'/s,
     'sg.js tiene que importar la regla, no reescribirla');
   // La cuenta de kg documentados es la que decide si se puede volver a facturar.
   assert.match(sg.txt, /function kgDocumentadoItem\(/,

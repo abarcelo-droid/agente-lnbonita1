@@ -15882,7 +15882,13 @@ function sgFacListLoad(){
     fs.forEach(function(f){ SG._facList[f.id]=f; });
     var body=fs.map(function(f){
       var num=String(f.punto_venta||0).padStart(4,'0')+'-'+String(f.cbte_nro||0).padStart(8,'0');
-      var tipoB='<span class="bdg bcc">'+esc(f.tipo||'—')+'</span>';
+      // UNA NOTA DE CRÉDITO NO ES UNA FACTURA MÁS. Vive en la misma tabla y salía
+      // en el listado igual que cualquier otra: el que miraba veía dos comprobantes
+      // por la misma venta y ninguno decía que uno anulaba al otro.
+      var esNC = (f.cbte_tipo==3 || f.cbte_tipo==8);
+      var tipoB= esNC
+        ? '<span class="bdg" style="background:#fef3c7;color:#92400e">NC '+esc(f.tipo||'')+'</span>'
+        : '<span class="bdg bcc">'+esc(f.tipo||'—')+'</span>';
       // EL MANUAL NO ES UN RECHAZO. Salía con la cruz roja de error, cuando en
       // realidad se emitió bien: lo que pasa es que no se le informó a AFIP
       // porque su punto de venta es manual.
@@ -15906,21 +15912,65 @@ function sgFacListLoad(){
       var env = f.ultimo_envio
         ? '<span class="bdg bok" title="Último envío">✉ '+esc(String(f.ultimo_envio).slice(0,16))+'</span>'
         : '<span style="color:var(--mut)">—</span>';
+      // ── LA SALIDA DE UN COMPROBANTE CON CAE ──────────────────────────────
+      // No hay «anular»: ARCA ya lo tiene. Lo que se hace es la nota de crédito,
+      // que baja la deuda del cliente, devuelve los kilos del remito a pendiente
+      // de comprobante y deja el asiento invertido.
+      var nc = '';
+      if (esNC) {
+        nc = f.nc_de_numero
+          ? '<span class="bdg" style="background:#fef3c7;color:#92400e" title="Comprobante que corrige">↩ de '
+            + esc(String(f.nc_de_numero).split('-')[0].padStart(4,'0')+'-'
+                  +String(f.nc_de_numero).split('-')[1].padStart(8,'0'))+'</span>'
+          : '';
+      } else if (f.nc_id) {
+        nc = '<span class="bdg" style="background:#fee2e2;color:#991b1b" title="Se le hizo una nota de crédito">acreditada</span>';
+      } else if (listo && puedeMandar && f.punto_venta && f.cbte_nro
+                 && String(f.estado||'')!=='anulada') {
+        nc = '<button class="btn bs" title="Hacerle una nota de crédito" '
+           + 'onclick="sgNcOpen('+f.id+')">🧾 NC</button>';
+      }
       return '<tr><td>'+esc(num)+'</td><td>'+esc(f.fecha||'—')+'</td><td>'+tipoB+'</td>'
         +'<td>'+esc(f.alias||'—')+'</td><td>'+esc(f.cliente_nombre||'—')+'</td>'
         +'<td style="text-align:right">'+sgMoney(f.total)+'</td><td>'+estB+'</td>'
         +'<td>'+esc(f.cae||'—')+'</td><td>'+esc(f.cae_vto||'—')+'</td>'
-        +'<td style="text-align:center;white-space:nowrap">'+pdf+' '+mail+'</td>'
+        +'<td style="text-align:center;white-space:nowrap">'+pdf+' '+mail+' '+nc+'</td>'
         +'<td style="font-size:11px">'+env+'</td></tr>';
     }).join('');
     eid('sgfl-tabla').innerHTML='<table class="pa-tbl"><thead><tr>'
       +'<th>N°</th><th>Fecha</th><th>Tipo</th><th>Alias</th><th>Cliente</th>'
       +'<th style="text-align:right">Total</th><th>Estado</th><th>CAE</th><th>Vto CAE</th>'
-      +'<th style="text-align:center">Imprimir / enviar</th><th>Enviado</th>'
+      +'<th style="text-align:center">Imprimir / enviar / acreditar</th><th>Enviado</th>'
       +'</tr></thead><tbody>'+body+'</tbody></table>';
   });
 }
 function sgFacListExport(){ window.open('/api/sg/ventas/facturas/export.xlsx?'+sgFacListQS(),'_blank'); }
+
+// ── NOTA DE CRÉDITO ──────────────────────────────────────────────────────
+// Un comprobante con CAE no se borra: se le hace una nota de crédito, que es otro
+// comprobante con su propio número y su propio CAE. Se emite ENTERA —por el total
+// de la factura— porque eso es lo que resuelve el caso real: la venta se cayó, la
+// mercadería volvió, y hay que dejar la factura sin efecto. Una nota parcial es
+// otra cosa y todavía no está.
+function sgNcOpen(id){
+  var f=(SG._facList||{})[id]||{};
+  var num=String(f.punto_venta||0).padStart(4,'0')+'-'+String(f.cbte_nro||0).padStart(8,'0');
+  var motivo=prompt('NOTA DE CRÉDITO por el TOTAL del comprobante '+(f.tipo||'')+' N° '+num+'\n'
+    +'Cliente: '+(f.cliente_nombre||'')+'  ·  Total: '+sgMoney(f.total)+'\n\n'
+    +'Se emite un comprobante nuevo asociado a éste. Baja la deuda del cliente, '
+    +'devuelve los kilos del remito a «entregado sin comprobante» y deja el asiento invertido.\n\n'
+    +'Motivo (se guarda con la nota):','Devolución de mercadería');
+  if(motivo===null) return;
+  motivo=String(motivo).trim();
+  if(motivo.length<3){ alert('Poné el motivo: es lo que después explica el asiento.'); return; }
+  api('/api/sg/ventas/facturas/'+id+'/nota-credito','POST',{motivo:motivo}).then(function(r){
+    if(!r||!r.ok){ alert('No se pudo emitir la nota de crédito.\n\n'+((r&&(r.error||r.obs))||'Error')); sgFacListLoad(); return; }
+    alert('Nota de crédito emitida.\n\nN° '+String(r.pto_vta||0).padStart(4,'0')+'-'
+      +String(r.cbte_nro||0).padStart(8,'0')+(r.cae?('\nCAE '+r.cae):'\n(comprobante manual, sin CAE)'));
+    sgFacListLoad();
+    if(r.pdf_url) window.open(r.pdf_url,'_blank');
+  });
+}
 
 // ── MANDARLE EL COMPROBANTE AL CLIENTE ───────────────────────────────────
 // Antes se bajaba el PDF y se mandaba desde el mail de alguien. Funciona hasta

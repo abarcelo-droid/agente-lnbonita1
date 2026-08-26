@@ -13,6 +13,7 @@ import { ultimoComprobante } from './afip-wsfe.js';
 import { fiscalDeCliente } from './sg_fiscal.js';
 import { lineasAsientoVenta } from './asiento-venta.js';
 import { crearAsiento } from './asientos.js';
+import { esNotaDeCredito } from './factura-cuenta.js';
 
 // ── Migraciones aditivas (no se tocan los archivos de Pablo) ──────────────────────
 function _alter(tabla, col, ddl) {
@@ -51,6 +52,10 @@ _alter('sg_ven_facturas', 'afip_obs', 'afip_obs TEXT');
 _alter('sg_ven_facturas', 'ambiente', 'ambiente TEXT');
 _alter('sg_ven_facturas', 'afip_estado', 'afip_estado TEXT');           // borrador/reservado/autorizado/rechazado
 // sg_ven_factura_items += producto + alícuota (para desglosar IVA)
+// De qué factura es esta nota de crédito. Sin este puntero la nota es un papel
+// suelto: no se sabe qué anuló, y la factura no sabe que ya no se cobra.
+_alter('sg_ven_facturas', 'nc_de_factura_id', 'nc_de_factura_id INTEGER');
+_alter('sg_ven_facturas', 'nc_motivo', 'nc_motivo TEXT');
 _alter('sg_ven_factura_items', 'producto_id', 'producto_id INTEGER');
 _alter('sg_ven_factura_items', 'alicuota_id', 'alicuota_id INTEGER');
 // F5 — metadata de PRESENTACIÓN por bulto (cajón). NO afecta importes: cantidad/precio_unitario/
@@ -76,6 +81,13 @@ db.exec(`
 // ── Mapeos fiscales ───────────────────────────────────────────────────────────────
 // Alícuota de IVA (% del PRODUCTO) → Id de AFIP. 0%=3, 10.5%=4, 21%=5, 27%=6, 5%=8, 2.5%=9.
 const IVA_PCT_A_ID = { 0: 3, 10.5: 4, 21: 5, 27: 6, 5: 8, 2.5: 9 };
+// La vuelta: del id de alícuota al porcentaje. La hace falta para rehacer un
+// comprobante a partir de lo guardado —una nota de crédito copia los renglones de su
+// factura, y ahí lo que quedó escrito es el id, no el %—.
+export function pctDeAlicuotaId(id) {
+  const e = Object.entries(IVA_PCT_A_ID).find(([, v]) => Number(v) === Number(id));
+  return e ? Number(e[0]) : null;
+}
 function alicuotaId(pct) {
   // null ya no llega hasta acá: construirComprobante frena antes y dice qué producto
   // es. Un dato que falta no es una exención, y salir exento en silencio era el bug.
@@ -138,7 +150,7 @@ function fechaHoyAR() { return new Date(Date.now() - 3 * 3600 * 1000).toISOStrin
 //    adentro-- los manda y acá no se recalculan. Reconstruir el total desde un
 //    precio unitario redondeado es lo que dejaba el comprobante en $2.789.999,98
 //    cuando el papel decía $2.790.000. Sin esos campos, se calcula como siempre.
-export function construirComprobante(database, { clienteId, items, esNC, identificacion }) {
+export function construirComprobante(database, { clienteId, items, esNC, identificacion, asociado }) {
   const cliente = database.prepare('SELECT id, razon_social, cuit, categoria_fiscal FROM sg_clientes WHERE id=?').get(clienteId);
   if (!cliente) throw new Error('Cliente inexistente: ' + clienteId);
   // La LETRA se necesita antes de recorrer los renglones (define la serie), pero si
@@ -197,10 +209,26 @@ export function construirComprobante(database, { clienteId, items, esNC, identif
   const iva = Object.keys(ivaMap).map(id => ({ Id: Number(id), BaseImp: ivaMap[id].base, Importe: ivaMap[id].importe }));
   return { cliente, cbte_tipo: cbteTipo, doc_tipo, doc_nro, cond_iva_receptor: fisc.cond_iva, letra_fiscal: fisc.letra,
     pide_identificacion: !!fisc.pide_identificacion,
+    // EL COMPROBANTE ASOCIADO. Una nota de crédito sin la factura que corrige es un
+    // papel suelto: ARCA la rechaza y el cliente no sabe qué se le está acreditando.
+    asociado: asociado || null,
     imp_neto: impNeto, imp_iva: impIva, imp_opex: impOpEx, imp_total: impTotal, iva, detalle, concepto: 1 };
 }
 
 // XML interno de FECAESolicitar (un comprobante). 'auth' = bloque <ar:Auth>.
+// El comprobante que una nota de crédito corrige. Va DESPUÉS de
+// CondicionIVAReceptorId y ANTES de Iva (orden del XSD de FEv1).
+export function asocXml(a) {
+  if (!a || !a.cbte_tipo || !a.punto_venta || !a.cbte_nro) return '';
+  return '<ar:CbtesAsoc><ar:CbteAsoc>'
+    + '<ar:Tipo>' + Number(a.cbte_tipo) + '</ar:Tipo>'
+    + '<ar:PtoVta>' + Number(a.punto_venta) + '</ar:PtoVta>'
+    + '<ar:Nro>' + Number(a.cbte_nro) + '</ar:Nro>'
+    + (a.cuit ? '<ar:Cuit>' + String(a.cuit).replace(/\D/g, '') + '</ar:Cuit>' : '')
+    + (a.fecha ? '<ar:CbteFch>' + String(a.fecha).replace(/-/g, '') + '</ar:CbteFch>' : '')
+    + '</ar:CbteAsoc></ar:CbtesAsoc>';
+}
+
 export function xmlFECAESolicitar(auth, { ptoVta, cbteTipo, cbteNro, comprobante, fecha }) {
   const c = comprobante;
   const fch = String(fecha).replace(/-/g, '');         // YYYYMMDD
@@ -224,6 +252,7 @@ export function xmlFECAESolicitar(auth, { ptoVta, cbteTipo, cbteNro, comprobante
     + '<ar:MonId>PES</ar:MonId><ar:MonCotiz>1</ar:MonCotiz>'
     // RG 5616 — Condición frente al IVA del receptor. Va DESPUÉS de MonCotiz y ANTES de Iva (orden XSD).
     + '<ar:CondicionIVAReceptorId>' + (c.cond_iva_receptor || 5) + '</ar:CondicionIVAReceptorId>'
+    + asocXml(c.asociado)
     + ivaXml
     + '</ar:FECAEDetRequest></ar:FeDetReq>'
     + '</ar:FeCAEReq>';
@@ -293,7 +322,8 @@ export function proximoNumeroManual(database, ptoVta, cbteTipo) {
 }
 
 function persistirReservada(database, { comprobante, ptoVta, cbteTipo, cbteNro, ambiente, fecha,
-                                        userId, manual, esPrueba, descuentoGestion }) {
+                                        userId, manual, esPrueba, descuentoGestion,
+                                        ncDeFacturaId, ncMotivo }) {
   const tipoLetra = (cbteTipo === 1 || cbteTipo === 3) ? 'A' : 'B';
   // Identificador interno único (NO es el número fiscal: ese es PV + cbte_nro + CAE). Prefijo
   // ambiente-aware: AFIPH- en homologación (test), AFIP- en producción.
@@ -325,6 +355,10 @@ function persistirReservada(database, { comprobante, ptoVta, cbteTipo, cbteNro, 
       Math.round((Number(descuentoGestion) || 0) * 100) / 100,
       (Number(descuentoGestion) || 0) > 0 ? 'ajuste_gestion' : null);
     facturaId = info.lastInsertRowid;
+    if (ncDeFacturaId) {
+      database.prepare('UPDATE sg_ven_facturas SET nc_de_factura_id=?, nc_motivo=? WHERE id=?')
+        .run(Number(ncDeFacturaId), ncMotivo || null, facturaId);
+    }
     const insItem = database.prepare(`INSERT INTO sg_ven_factura_items
       (factura_id, descripcion, cantidad, precio_unitario, subtotal, producto_id, alicuota_id, bultos, kg_por_bulto, precio_por_bulto, unidad)
       VALUES (?,?,?,?,?,?,?,?,?,?,?)`);
@@ -354,9 +388,12 @@ function asientoAnulado(database, asientoId) {
 // que es la prueba de qué decía. Se escribe uno NUEVO, con la fecha y los importes
 // del mismo comprobante.
 export function recontabilizarVenta(database, facturaId, userId) {
+  // cbte_tipo va en el SELECT porque es lo ÚNICO que dice si esto era una nota de
+  // crédito. Sin él, rehacer el asiento de una nota lo rehacía como el de una
+  // factura: la deuda que la nota había bajado volvía a subir.
   const f = database.prepare(`SELECT id, cliente_id, neto, iva, total, fecha, numero,
-      punto_venta, cbte_nro, estado, asiento_id, COALESCE(dif_gestion,0) AS dif_gestion,
-      dif_motivo
+      punto_venta, cbte_nro, cbte_tipo, estado, asiento_id,
+      COALESCE(dif_gestion,0) AS dif_gestion, dif_motivo
     FROM sg_ven_facturas WHERE id=?`).get(facturaId);
   if (!f) throw new Error('El comprobante no existe');
   if (String(f.estado || '') === 'anulada') {
@@ -371,6 +408,9 @@ export function recontabilizarVenta(database, facturaId, userId) {
   const arm = lineasAsientoVenta(database, {
     clienteId: f.cliente_id, neto: f.neto, iva: f.iva, total: f.total,
     descuento: f.dif_gestion, numero: nro, motivo: f.dif_motivo,
+    // La nota de crédito se reconoce por el tipo de comprobante, que es lo único
+    // que quedó guardado: 3 = NC A, 8 = NC B.
+    esNC: esNotaDeCredito(f.cbte_tipo),
   });
   if (arm.falta.length) {
     throw new Error('No se puede contabilizar la venta: falta ' + arm.falta.join(' y ')
@@ -380,7 +420,8 @@ export function recontabilizarVenta(database, facturaId, userId) {
   const id = database.transaction(() => {
     const asientoId = crearAsiento(database, {
       fecha: f.fecha || null, usuario_id: userId || null, ref_codigo: nro,
-      descripcion: 'Venta — ' + (cli.r || '') + ' — Comprobante ' + nro
+      descripcion: (esNotaDeCredito(f.cbte_tipo) ? 'Nota de crédito — ' : 'Venta — ')
+                 + (cli.r || '') + ' — Comprobante ' + nro
                  + (f.asiento_id ? ' (rehecho: el anterior se anuló)' : ''),
     }, arm.lineas).id;
     database.prepare('UPDATE sg_ven_facturas SET asiento_id=? WHERE id=?').run(asientoId, f.id);
@@ -423,6 +464,7 @@ function asentarVenta(database, facturaId, comprobante, ptoVta, cbteNro, userId)
     clienteId: comprobante.cliente.id,
     neto: comprobante.imp_neto, iva: comprobante.imp_iva, total: comprobante.imp_total,
     descuento: (ya && ya.dif_gestion) || 0, numero: nro, motivo: ya && ya.dif_motivo,
+    esNC: esNotaDeCredito(comprobante.cbte_tipo),
   });
   if (arm.falta.length) {
     throw new Error('No se puede contabilizar la venta: falta ' + arm.falta.join(' y ')
@@ -435,15 +477,26 @@ function asentarVenta(database, facturaId, comprobante, ptoVta, cbteNro, userId)
     // ventas salían con un guión en "Cargado por" mientras todo lo demás decía el
     // nombre. Un asiento sin dueño es un asiento que nadie tiene que explicar.
     fecha: (ya && ya.fecha) || null, usuario_id: userId || null, ref_codigo: nro,
-    descripcion: 'Venta — ' + (cli.r || '') + ' — Comprobante ' + nro,
+    descripcion: (esNotaDeCredito(comprobante.cbte_tipo) ? 'Nota de crédito — ' : 'Venta — ')
+      + (cli.r || '') + ' — Comprobante ' + nro,
   }, arm.lineas).id;
   database.prepare('UPDATE sg_ven_facturas SET asiento_id=? WHERE id=?').run(asientoId, facturaId);
   return asientoId;
 }
 
-function confirmarAutorizada(database, facturaId, campos, vinculos) {
+// ── UNA NOTA DE CRÉDITO DEVUELVE LOS KILOS ─────────────────────────────────
+// El puente factura↔despacho es lo que dice qué kg de un remito ya tienen
+// comprobante. Una nota de crédito escribe ahí igual, pero con los kg en
+// NEGATIVO: lo que hace es sacarle el comprobante a esa mercadería, que vuelve a
+// figurar "entregada sin documentar" y se puede volver a facturar.
+//
+// Si entrara en positivo como una factura, la nota TAPARÍA el remito: los kilos
+// contarían dos veces como documentados y la partida quedaría trabada para
+// siempre — devuelta y sin poder volver a salir.
+function confirmarAutorizada(database, facturaId, campos, vinculos, esNC) {
   database.transaction(() => {
     actualizarFactura(database, facturaId, campos);
+    const sg = esNC ? -1 : 1;
     if (Array.isArray(vinculos) && vinculos.length) {
       const ins = database.prepare(`INSERT INTO sg_factura_despachos
         (factura_id, despacho_id, despacho_item_id, kg, neto, iva, gestion)
@@ -452,11 +505,11 @@ function confirmarAutorizada(database, facturaId, campos, vinculos) {
         if (!v || v.despacho_id == null) continue;
         ins.run(facturaId, Number(v.despacho_id),
           v.despacho_item_id != null ? Number(v.despacho_item_id) : null,
-          v.kg != null ? Number(v.kg) : null,
+          v.kg != null ? sg * Math.abs(Number(v.kg)) : null,
           // Los pesos de ESE renglón, tal como fueron al comprobante.
-          v.neto != null ? Number(v.neto) : null,
-          v.iva != null ? Number(v.iva) : null,
-          v.gestion != null ? Number(v.gestion) : null);
+          v.neto != null ? sg * Math.abs(Number(v.neto)) : null,
+          v.iva != null ? sg * Math.abs(Number(v.iva)) : null,
+          v.gestion != null ? sg * Math.abs(Number(v.gestion)) : null);
       }
     }
   })();
@@ -466,8 +519,9 @@ function confirmarAutorizada(database, facturaId, campos, vinculos) {
 // A: guarda cae/cae_vto/autorizado + puente factura↔despacho (atómico) · R: guarda obs/rechazado
 // (sin puente) · timeout: FECompConsultar. vinculos (opcional): [{despacho_id, despacho_item_id, kg}].
 export async function emitir(database, { ptoVta, clienteId, items, esNC, userId, vinculos,
-                                         descuentoGestion, identificacion }) {
-  const comprobante = construirComprobante(database, { clienteId, items, esNC, identificacion });
+                                         descuentoGestion, identificacion, asociado,
+                                         ncDeFacturaId, ncMotivo }) {
+  const comprobante = construirComprobante(database, { clienteId, items, esNC, identificacion, asociado });
   const cbteTipo = comprobante.cbte_tipo;
 
   // ── EL CORTE: UN PUNTO DE VENTA MANUAL NO LLAMA A AFIP ─────────────────
@@ -485,7 +539,7 @@ export async function emitir(database, { ptoVta, clienteId, items, esNC, userId,
       const cbteNro = proximoNumeroManual(database, ptoVta, cbteTipo);
       const facturaId = persistirReservada(database, { comprobante, ptoVta, cbteTipo,
         cbteNro, ambiente: 'manual', fecha, userId, manual: true,
-        descuentoGestion, esPrueba: !!(pv && pv.es_prueba) });
+        descuentoGestion, esPrueba: !!(pv && pv.es_prueba), ncDeFacturaId, ncMotivo });
       // La MISMA función que el camino de AFIP: cierra la factura y ata los
       // despachos en una sola transacción. Escribir eso de nuevo acá sería dos
       // maneras de hacer lo mismo, y una de las dos se olvidaría de algo.
@@ -496,7 +550,7 @@ export async function emitir(database, { ptoVta, clienteId, items, esNC, userId,
         // hace el camino de AFIP, que sólo escribe afip_estado. Poner 'emitida'
         // rompía el CHECK de la tabla, que sólo admite pendiente/cobrada/anulada.
         afip_estado: 'MANUAL — sin AFIP',
-      }, vinculos);
+      }, vinculos, !!esNC);
       return { ok: true, factura_id: facturaId, pto_vta: Number(ptoVta),
         cbte_tipo: cbteTipo, cbte_nro: cbteNro, cae: null, cae_vto: null,
         manual: true, es_prueba: !!(pv && pv.es_prueba),
@@ -510,7 +564,7 @@ export async function emitir(database, { ptoVta, clienteId, items, esNC, userId,
     const ult = await ultimoComprobante(ptoVta, cbteTipo);     // FECompUltimoAutorizado
     const cbteNro = (Number(ult.ultimo_nro) || 0) + 1;
     const facturaId = persistirReservada(database, { comprobante, ptoVta, cbteTipo, cbteNro,
-      ambiente, fecha, userId, descuentoGestion });
+      ambiente, fecha, userId, descuentoGestion, ncDeFacturaId, ncMotivo });
 
     let resp;
     try {
@@ -535,7 +589,7 @@ export async function emitir(database, { ptoVta, clienteId, items, esNC, userId,
       asentarVenta(database, facturaId, comprobante, ptoVta, cbteNro, userId);
       confirmarAutorizada(database, facturaId,
         { cae: resp.cae, cae_vto: resp.cae_vto, afip_resultado: 'A', afip_estado: 'autorizado', afip_obs: resp.obs },
-        vinculos);
+        vinculos, !!esNC);
       return { ok: true, factura_id: facturaId, ambiente, pto_vta: ptoVta, cbte_tipo: cbteTipo, cbte_nro: cbteNro, cae: resp.cae, cae_vto: resp.cae_vto, imp_total: comprobante.imp_total, vinculos: Array.isArray(vinculos) ? vinculos.length : 0 };
     }
     actualizarFactura(database, facturaId, { afip_resultado: resp.resultado || 'R', afip_estado: 'rechazado', afip_obs: resp.obs });

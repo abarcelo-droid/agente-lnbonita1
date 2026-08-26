@@ -14,11 +14,13 @@ import { crearAsiento, MOTIVOS } from '../servicios/asientos.js';
 // no lo usaba: esas ventas salían sin asiento.
 import { modeloVentaLineas, modeloVentaFaltan, lineasAsientoVenta, r2v }
   from '../servicios/asiento-venta.js';
-import { recontabilizarVenta } from '../servicios/afip-wsfe-emision.js';
+import { recontabilizarVenta, emitir as afipEmitir, pctDeAlicuotaId }
+  from '../servicios/afip-wsfe-emision.js';
 // QUÉ FACTURA CUENTA: una sola definición, la misma que usa la cuenta corriente.
 // Escribir la lista a mano acá es lo que dejó una factura RECHAZADA figurando como
 // deuda viva en la ficha del cliente y cobrable desde la pantalla de cobranzas.
-import { facturaCuenta } from '../servicios/factura-cuenta.js';
+import { facturaCuenta, noEsNotaDeCredito, ncAplicadas, ncAplicadasFiscal,
+  ncAplicadasGestion, esNotaDeCredito } from '../servicios/factura-cuenta.js';
 import { generarFacturaPDF } from '../servicios/facturaPDF.js';
 import { enviarMail } from '../servicios/mail.js';
 import * as XLSX from 'xlsx';
@@ -48,7 +50,13 @@ function buildFacturasQuery(req) {
   let sql = `SELECT f.*, c.razon_social as cliente_nombre, c.nombre_comercial as alias,
                c.email as cliente_email,
                (SELECT MAX(e.enviado_en) FROM sg_ven_envios e
-                 WHERE e.factura_id = f.id AND e.ok = 1) AS ultimo_envio
+                 WHERE e.factura_id = f.id AND e.ok = 1) AS ultimo_envio,
+               -- Si ya tiene nota de crédito, la pantalla no vuelve a ofrecer el botón
+               -- y muestra que está acreditada. Sin esto se le hacen dos.
+               (SELECT n.id FROM sg_ven_facturas n
+                 WHERE n.nc_de_factura_id = f.id AND ${facturaCuenta('n')} LIMIT 1) AS nc_id,
+               (SELECT o.punto_venta || '-' || o.cbte_nro FROM sg_ven_facturas o
+                 WHERE o.id = f.nc_de_factura_id) AS nc_de_numero
              FROM sg_ven_facturas f JOIN sg_clientes c ON c.id=f.cliente_id WHERE 1 = 1`;
   const params = [];
   if (clienteId)   { sql += ' AND f.cliente_id=?'; params.push(parseInt(clienteId)); }
@@ -769,11 +777,116 @@ router.post('/facturas', requireAuth, (req, res) => {
   } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
+
+// ══ UN COMPROBANTE CON CAE NO SE ANULA: SE ACREDITA ═══════════════════════
+//
+// Hasta acá la única salida era «anular», que marcaba estado='anulada' y anulaba el
+// asiento. Para un comprobante MANUAL está bien: no salió de ARCA y no existe para
+// nadie más. Para uno con CAE es imposible: ARCA ya lo tiene, el cliente ya lo tiene
+// y el número se declaró. Lo que corresponde es emitir una NOTA DE CRÉDITO, que es
+// otro comprobante —con su propio número y su propio CAE— y dice cuánto de aquél se
+// devuelve.
+//
+// La nota copia los renglones de su factura, sale por el MISMO punto de venta, va
+// asociada a ella (CbtesAsoc) y arrastra tres cosas para atrás:
+//   · el ASIENTO invertido —Deudores al haber: la deuda del cliente BAJA—,
+//   · los KILOS del remito, que vuelven a figurar entregados sin comprobante y se
+//     pueden volver a facturar,
+//   · lo PENDIENTE de la factura, que deja de ofrecerse para cobrar.
+router.post('/facturas/:id(\\d+)/nota-credito', requireAuth, async (req, res) => {
+  try {
+    const u = req._user || req.user || {};
+    const f = db.prepare('SELECT * FROM sg_ven_facturas WHERE id=?').get(parseInt(req.params.id, 10));
+    if (!f) return res.status(404).json({ ok: false, error: 'Comprobante no encontrado' });
+    if (esNotaDeCredito(f.cbte_tipo)) {
+      return res.status(400).json({ ok: false, error:
+        'Esto ya es una nota de crédito. No se le hace una nota de crédito a una nota de crédito.' });
+    }
+    if (String(f.estado || '') === 'anulada' || String(f.afip_estado || '') === 'rechazado') {
+      return res.status(400).json({ ok: false, error:
+        'Ese comprobante no está vivo: no hay nada que acreditar.' });
+    }
+    if (!f.punto_venta || !f.cbte_nro) {
+      return res.status(400).json({ ok: false, error:
+        'El comprobante no tiene número fiscal, así que no se lo puede asociar a una nota.' });
+    }
+    const motivo = String(req.body?.motivo || '').trim();
+    if (motivo.length < 3) {
+      return res.status(400).json({ ok: false, error:
+        'Poné el motivo de la nota de crédito: es lo que después explica el asiento.' });
+    }
+    // ¿Ya se le hizo una? Dos notas por la misma factura le devuelven al cliente el
+    // doble de lo que compró.
+    const ya = db.prepare(`SELECT COUNT(*) AS cuantas FROM sg_ven_facturas n
+       WHERE n.nc_de_factura_id = ? AND ${facturaCuenta('n')}`).get(f.id);
+    if (ya && ya.cuantas > 0) {
+      return res.status(400).json({ ok: false, error:
+        'Ese comprobante ya tiene una nota de crédito. Si esa nota está mal, anulala primero.' });
+    }
+    const items = db.prepare('SELECT * FROM sg_ven_factura_items WHERE factura_id=? ORDER BY id').all(f.id);
+    if (!items.length) return res.status(400).json({ ok: false, error: 'El comprobante no tiene renglones' });
+
+    // EL IVA DE CADA RENGLÓN NO SE GUARDÓ: se guardó el neto y el id de alícuota. Se
+    // recalcula, y el RESIDUO va al último para que la nota dé EXACTAMENTE el mismo
+    // total que la factura. Un peso de diferencia deja al cliente debiendo un peso
+    // para siempre, y nadie va a saber de dónde salió.
+    const r2n = (x) => Math.round((Number(x) || 0) * 100) / 100;
+    const lineas = items.map((it) => {
+      const alic = pctDeAlicuotaId(it.alicuota_id);
+      if (alic == null) throw new Error('El renglón "' + (it.descripcion || it.id)
+        + '" quedó guardado con una alícuota que no se reconoce; no se puede rehacer la nota.');
+      const neto = r2n(it.subtotal);
+      return { producto_id: it.producto_id, cantidad: Number(it.cantidad) || 0,
+        precio: Number(it.precio_unitario) || 0, alicuota: alic,
+        importe_neto: neto, importe_iva: r2n(neto * alic / 100),
+        bultos: it.bultos, kg_por_bulto: it.kg_por_bulto,
+        precio_por_bulto: it.precio_por_bulto, unidad: it.unidad };
+    });
+    const ivaSuma = lineas.reduce((a, l) => r2n(a + l.importe_iva), 0);
+    const resto = r2n(r2n(f.iva) - ivaSuma);
+    if (resto !== 0) {
+      const ult = lineas[lineas.length - 1];
+      ult.importe_iva = r2n(ult.importe_iva + resto);
+    }
+    // Los MISMOS renglones de remito que documentó la factura. Van en positivo: el
+    // que los da vuelta es confirmarAutorizada, que sabe que esto es una nota.
+    const vinculos = db.prepare(`SELECT despacho_id, despacho_item_id, kg, neto, iva, gestion
+       FROM sg_factura_despachos WHERE factura_id=?`).all(f.id)
+      .map((v) => ({ despacho_id: v.despacho_id, despacho_item_id: v.despacho_item_id,
+        kg: Math.abs(Number(v.kg) || 0), neto: Math.abs(Number(v.neto) || 0),
+        iva: Math.abs(Number(v.iva) || 0), gestion: Math.abs(Number(v.gestion) || 0) }));
+
+    const r = await afipEmitir(db, {
+      ptoVta: Number(f.punto_venta), clienteId: f.cliente_id, items: lineas,
+      esNC: true, userId: u.id || null, vinculos,
+      // La parte de GESTIÓN también vuelve: si la venta se resignó 30.000 por un
+      // acuerdo, la devolución los devuelve. Dejarla afuera haría que la deuda de
+      // gestión sobreviviera a una venta que ya no existe.
+      descuentoGestion: Math.abs(Number(f.dif_gestion) || 0),
+      identificacion: req.body?.identificacion || null,
+      asociado: { cbte_tipo: f.cbte_tipo, punto_venta: f.punto_venta, cbte_nro: f.cbte_nro,
+        fecha: f.fecha },
+      ncDeFacturaId: f.id, ncMotivo: motivo,
+    });
+    if (r.ok) r.pdf_url = '/api/sg/ventas/facturas/' + r.factura_id + '/pdf';
+    res.json(r);
+  } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
+});
+
 router.patch('/facturas/:id/anular', requireAuth, (req, res) => {
   try {
     const f = db.prepare('SELECT * FROM sg_ven_facturas WHERE id=?').get(req.params.id);
     if (!f) return res.status(404).json({ ok: false, error: 'No encontrada' });
     if (f.estado === 'anulada') return res.json({ ok: true });
+    // ── LO QUE TIENE CAE NO SE BORRA ────────────────────────────────────
+    // Marcarlo 'anulada' acá lo sacaba de la cuenta corriente y del libro de este
+    // sistema, y ARCA seguía teniéndolo igual: los dos libros dejaban de decir lo
+    // mismo y no quedaba rastro de la diferencia. La salida es la nota de crédito.
+    if (f.cae && !esNotaDeCredito(f.cbte_tipo)) {
+      return res.status(400).json({ ok: false, error:
+        'Ese comprobante tiene CAE: ARCA ya lo tiene y no se puede borrar de acá. '
+        + 'Para dejarlo sin efecto hacele una NOTA DE CRÉDITO.' });
+    }
     if (f.asiento_id) db.prepare("UPDATE sg_asientos SET anulado=1 WHERE id=?").run(f.asiento_id);
     db.prepare("UPDATE sg_ven_facturas SET estado='anulada' WHERE id=?").run(f.id);
     res.json({ ok: true });
@@ -784,7 +897,9 @@ router.patch('/facturas/:id/anular', requireAuth, (req, res) => {
 router.get('/facturas/:id/pdf', async (req, res) => {
   try {
     const f = db.prepare(`SELECT f.*, c.razon_social, c.cuit, c.categoria_fiscal,
-        c.direccion_entrega, c.localidad, c.provincia
+        c.direccion_entrega, c.localidad, c.provincia,
+        (SELECT printf('%04d-%08d', o.punto_venta, o.cbte_nro) FROM sg_ven_facturas o
+          WHERE o.id = f.nc_de_factura_id) AS asociado_numero
       FROM sg_ven_facturas f JOIN sg_clientes c ON c.id=f.cliente_id WHERE f.id=?`).get(req.params.id);
     if (!f) return res.status(404).json({ ok: false, error: 'Factura no encontrada' });
     // EL COMPROBANTE MANUAL TAMBIÉN SE IMPRIME. Antes esto pedía CAE siempre, así
@@ -973,17 +1088,24 @@ router.get('/cc/:clienteId', (req, res) => {
           JOIN sg_ven_cobranzas co ON co.id=cd.cobranza_id
           WHERE cd.tipo='factura' AND cd.doc_id=f.id AND co.anulada=0), 0) as cobrado,
         COALESCE(f.dif_gestion,0) AS dif_gestion, f.dif_motivo,
-        f.total + COALESCE(f.dif_gestion,0)
+        -- ── LO QUE LA NOTA DE CRÉDITO YA DEVOLVIÓ NO SE COBRA ─────────────
+        -- Una factura acreditada entera seguía figurando con todo su pendiente y
+        -- se la podía tildar para cobrar: se le reclamaba al cliente algo que ya
+        -- se le había devuelto.
+        ${ncAplicadas('f')} AS acreditado,
+        f.total + COALESCE(f.dif_gestion,0) - ${ncAplicadas('f')}
           - COALESCE((SELECT SUM(cd.monto) FROM sg_ven_cobranza_docs cd
           JOIN sg_ven_cobranzas co ON co.id=cd.cobranza_id
           WHERE cd.tipo='factura' AND cd.doc_id=f.id AND co.anulada=0), 0) as pendiente,
         -- ABIERTO POR MITAD. La pantalla de cobro necesita saber cuánto queda de
         -- lo facturado y cuánto de lo que no lleva comprobante: son dos libros
         -- distintos y el asiento del cobro cae en uno o en el otro.
-        f.total - COALESCE((SELECT SUM(cd.monto - COALESCE(cd.monto_gestion,0))
+        f.total - ${ncAplicadasFiscal('f')}
+          - COALESCE((SELECT SUM(cd.monto - COALESCE(cd.monto_gestion,0))
             FROM sg_ven_cobranza_docs cd JOIN sg_ven_cobranzas co ON co.id=cd.cobranza_id
            WHERE cd.tipo='factura' AND cd.doc_id=f.id AND co.anulada=0), 0) as pendiente_fiscal,
-        COALESCE(f.dif_gestion,0) - COALESCE((SELECT SUM(COALESCE(cd.monto_gestion,0))
+        COALESCE(f.dif_gestion,0) - ${ncAplicadasGestion('f')}
+          - COALESCE((SELECT SUM(COALESCE(cd.monto_gestion,0))
             FROM sg_ven_cobranza_docs cd JOIN sg_ven_cobranzas co ON co.id=cd.cobranza_id
            WHERE cd.tipo='factura' AND cd.doc_id=f.id AND co.anulada=0), 0) as pendiente_gestion,
         'factura' as tipo_doc
@@ -991,7 +1113,12 @@ router.get('/cc/:clienteId', (req, res) => {
       -- Acá estaba escrita a mano y por eso una rechazada figuraba en la ficha como
       -- documento vivo, con su pendiente, y se la podía tildar para cobrarla — contra
       -- una deuda que nunca subió al libro, porque sin autorización no hay asiento.
-      FROM sg_ven_facturas f WHERE f.cliente_id=? AND ${facturaCuenta('f')}
+      -- LA NOTA DE CRÉDITO NO ES UN DOCUMENTO A COBRAR. Vive en esta misma tabla,
+      -- así que sin este filtro aparecía como un renglón más con su pendiente en
+      -- POSITIVO: algo para ir a cobrarle al cliente. Lo que hace la nota es bajar
+      -- lo pendiente de la factura que corrige, arriba.
+      FROM sg_ven_facturas f
+       WHERE f.cliente_id=? AND ${facturaCuenta('f')} AND ${noEsNotaDeCredito('f')}
     `).all(cid);
 
     const docs = [...liquidaciones, ...facturas].sort((a,b) => a.fecha < b.fecha ? 1 : -1);

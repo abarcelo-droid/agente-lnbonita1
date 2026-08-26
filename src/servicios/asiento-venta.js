@@ -95,7 +95,16 @@ export function modeloVentaFaltan(lineas) {
 // Se cae a 'ajuste_gestion' sólo si no viene ninguno o si viene uno que no está
 // en la lista: crearAsiento rechaza un motivo desconocido, y tirar el asiento
 // entero de una venta ya emitida por un motivo mal escrito sería peor.
-export function lineasAsientoVenta(db, { clienteId, neto, iva, total, descuento, numero, motivo }) {
+// ══ Y LA NOTA DE CRÉDITO VA AL REVÉS ═══════════════════════════════════
+//
+// `esNC` invierte el asiento entero: Deudores al HABER —la deuda del cliente BAJA— y
+// Ventas y el IVA Débito al DEBE.
+//
+// Hasta ahora una NC armaba el MISMO asiento que una factura: aumentaba la deuda del
+// cliente y aumentaba el débito fiscal, o sea hacía exactamente lo contrario de lo
+// que existe para hacer. Y no se arreglaba pasando importes negativos: el escritor de
+// asientos los rechaza. Lo que se invierte son los LADOS.
+export function lineasAsientoVenta(db, { clienteId, neto, iva, total, descuento, numero, motivo, esNC }) {
   const motivoGes = MOTIVOS[String(motivo || '').trim()] ? String(motivo).trim() : 'ajuste_gestion';
   const mod = modeloVentaLineas(db);
   const faltan = modeloVentaFaltan(mod.lineas);
@@ -134,15 +143,22 @@ export function lineasAsientoVenta(db, { clienteId, neto, iva, total, descuento,
       modelo_id: mod.id };
   }
 
+  // El signo de la operación: una factura carga la deuda del cliente, una nota de
+  // crédito la descarga. Es un solo lugar y de acá salen todos los lados.
+  const nc = !!esNC;
+  const doc = (nc ? 'Nota de crédito ' : 'Factura ') + numero;
+  const lado = (monto) => nc ? { debe: 0, haber: r2v(monto) } : { debe: r2v(monto), haber: 0 };
+  const contra = (monto) => nc ? { debe: r2v(monto), haber: 0 } : { debe: 0, haber: r2v(monto) };
+
   const lineas = [
-    { cuenta_id: lCli.cuenta_id, debe: r2v(total), haber: 0,
-      descripcion: lCli.descripcion || ('Factura ' + numero) },
-    { cuenta_id: lVta.cuenta_id, debe: 0, haber: r2v(neto),
-      descripcion: lVta.descripcion || ('Venta ' + numero) },
+    { cuenta_id: lCli.cuenta_id, ...lado(total),
+      descripcion: lCli.descripcion || doc },
+    { cuenta_id: lVta.cuenta_id, ...contra(neto),
+      descripcion: lVta.descripcion || ((nc ? 'Devolución ' : 'Venta ') + numero) },
   ];
   if (r2v(iva) > 0) {
-    lineas.push({ cuenta_id: ctaIva, debe: 0, haber: r2v(iva),
-      descripcion: 'IVA Débito Fiscal' });
+    lineas.push({ cuenta_id: ctaIva, ...contra(iva),
+      descripcion: 'IVA Débito Fiscal' + (nc ? ' (nota de crédito)' : '') });
   }
   // EL DESCUENTO COMERCIAL, EN GESTIÓN. El cliente "debería" lo de lista y la
   // venta de gestión es la de lista: la diferencia queda medida.
@@ -153,12 +169,14 @@ export function lineasAsientoVenta(db, { clienteId, neto, iva, total, descuento,
   const d = r2v(descuento);
   if (d > 0) {
     const lDesc = de('descuento');
-    lineas.push({ cuenta_id: lCli.cuenta_id, debe: d, haber: 0,
+    // La mitad de gestión se invierte igual que la fiscal: si la NC devuelve una
+    // venta que llevaba descuento acordado, ese descuento también se deshace.
+    lineas.push({ cuenta_id: lCli.cuenta_id, ...lado(d),
       ambito: 'gestion', motivo: motivoGes,
-      descripcion: 'Descuento comercial acordado' });
-    lineas.push({ cuenta_id: (lDesc ? lDesc.cuenta_id : lVta.cuenta_id), debe: 0, haber: d,
+      descripcion: 'Descuento comercial acordado' + (nc ? ' (nota de crédito)' : '') });
+    lineas.push({ cuenta_id: (lDesc ? lDesc.cuenta_id : lVta.cuenta_id), ...contra(d),
       ambito: 'gestion', motivo: motivoGes,
-      descripcion: 'Descuento comercial acordado' });
+      descripcion: 'Descuento comercial acordado' + (nc ? ' (nota de crédito)' : '') });
   }
   return { lineas, falta: [], modelo_id: mod.id };
 }
