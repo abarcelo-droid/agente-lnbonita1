@@ -46,6 +46,13 @@ const MODULOS_SGCT = [
   // sumaba en ninguna pantalla del módulo. La declaración jurada de IVA no se
   // podía armar desde acá.
   ["sgct-iva-ventas",   "🧾 Diario IVA Ventas SG", 675],
+  // ── LIMPIEZA DE DATOS DE PRUEBA ─────────────────────────────────────
+  // Vive acá, en una pantalla propia, y no como un boton en cada una de las
+  // dieciseis. Dos razones: el que borra tiene que ver TODO lo que se va antes de
+  // apretar —y no una rebanada por pantalla—, y sacarlo el dia que se lance es
+  // sacar un renglon del menu, no ir a buscar catorce botones y confiar en que
+  // nadie se olvide de uno.
+  ["sgct-limpieza",     "🧹 Limpiar datos de prueba", 690],
 ];
 
 try {

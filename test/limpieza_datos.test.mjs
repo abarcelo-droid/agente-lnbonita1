@@ -309,18 +309,6 @@ test('el orden de borrado sale del mapa, no de cómo estén escritos', () => {
   assert.ok(o.indexOf('sg-comprobantes-emitidos') < o.indexOf('sg-salidas'));
 });
 
-test('cada pantalla dice DÓNDE vive lo que muestra y no borra', () => {
-  // «Partidas pendientes de facturar» son ÓRDENES, no facturas. El botón decía «no hay
-  // nada que borrar» sobre una pantalla con siete renglones, y se leyó como una falla.
-  const fac = MODULOS.find((m) => m.clave === 'sg-facturas-compra');
-  assert.match(fac.tambien, /ÓRDENES DE COMPRA/);
-  const liq = MODULOS.find((m) => m.clave === 'sg-liquidaciones-productor');
-  assert.match(liq.tambien, /ÓRDENES DE COMPRA/);
-  assert.match(PANEL, /Esta pantalla no tiene datos propios para borrar/);
-  assert.match(PANEL, /Borrar TODOS los datos de San Gerónimo/);
-  assert.match(PANEL, /function sgLimTodo\(\)/);
-});
-
 test('el interruptor arranca APAGADO y se apaga con un solo valor', () => {
   const db = baseReal();
   assert.equal(limpiezaHabilitada(db), false, 'sin el valor, apagado');
@@ -393,32 +381,66 @@ test('el resultado se queda en la pantalla, no en un cartel que se va', () => {
   assert.doesNotMatch(PANEL, /toast\('Se borraron '/);
 });
 
-test('el interruptor tiene DÓNDE tocarse', () => {
-  // No alcanza con que el valor exista: no había una sola pantalla en el panel que
-  // escribiera la configuración de San Gerónimo, así que la clave no se podía tocar
-  // desde ningún lado. Un interruptor sin dónde apretarlo es un interruptor que no
-  // existe.
-  assert.match(PANEL, /function sgLimSwitch\(on\)/);
-  assert.match(PANEL, /api\('\/api\/sg\/config', 'PUT', \{ limpieza_habilitada:/);
-  assert.match(PANEL, /caja\.id = 'sg-lim-switch';/);
-  // Y se ve en TODAS las pantallas que tienen algo que borrar, no en una sola. Estaba
-  // en el Dashboard —que en el menú se llama «Dash» y cuelga de Informes— y ahí no lo
-  // encontró nadie. Un control que no se encuentra es un control que no existe.
-  assert.match(PANEL, /function sgLimSwitchMontar\(secId\)/);
-  assert.match(PANEL, /if \(!SG_LIMPIEZA_PANTALLAS\[secId\]\) return;/);
-  assert.match(PANEL, /sgLimSwitchMontar\('sec-' \+ s\)/, 'se monta al cambiar de pantalla');
-  // Un solo nodo: se MUEVE a la pantalla abierta, no se clona.
-  assert.equal((PANEL.match(/id: 'sg-lim-switch'|id="sg-lim-switch"/g) || []).length, 0);
-  // Y sólo lo ve un administrador.
-  assert.match(PANEL, /var esAdmin = !!\(window\.LNB_USER && window\.LNB_USER\.rol === 'admin'\);/);
-  // Al apagarlo, los botones que ya estaban dibujados se sacan.
-  assert.match(PANEL, /querySelectorAll\('\[data-limpieza\]'\)\.forEach\(function\(n\)\{ n\.remove\(\); \}\);/);
+test('los dos Diarios de IVA no están en la limpieza', () => {
+  // No guardan una sola fila propia: se arman leyendo los comprobantes y las
+  // liquidaciones. Se vacían solos.
+  assert.equal(MODULOS.find((m) => /iva/i.test(m.clave)), undefined);
 });
 
-test('los dos Diarios de IVA no tienen botón', () => {
-  // No guardan una sola fila propia: se arman leyendo los comprobantes y las
-  // liquidaciones. Un botón ahí sería un botón que no hace nada.
-  assert.equal(MODULOS.find((m) => /iva/i.test(m.clave)), undefined);
-  assert.match(PANEL, /sgLimpiezaBoton|sg-limpieza/,
-    'el panel tiene el botón compartido');
+// ── LA PANTALLA, Y LAS TRES PUERTAS ─────────────────────────────────────────
+test('el borrado vive en UNA pantalla, no en un botón por pantalla', () => {
+  // Con un botón por pantalla el que borra veía una rebanada, y varias pantallas
+  // muestran datos de OTRO módulo: su botón decía «no hay nada» sobre una pantalla
+  // llena y se leía como una falla.
+  assert.match(PANEL, /id="sec-sgct-limpieza"/);
+  assert.match(PANEL, /function sgLimInit\(\)/);
+  assert.match(PANEL, /function sgLimCargar\(\)/);
+  // Y no queda ni un rastro de los botones por pantalla.
+  assert.doesNotMatch(PANEL, /sgLimpiezaBoton/);
+  assert.doesNotMatch(PANEL, /SG_LIMPIEZA_PANTALLAS/);
+  assert.doesNotMatch(PANEL, /sgLimpiezaMontar/);
+  assert.doesNotMatch(PANEL, /data-limpieza/);
+  // Una sola definición de cada función: las duplicadas se ganan entre sí en silencio.
+  for (const f of ['sgLimInit', 'sgLimCargar', 'sgLimSwitch', 'sgLimBackup', 'sgLimTodo']) {
+    const n = (PANEL.match(new RegExp('function ' + f + '\\(', 'g')) || []).length;
+    assert.equal(n, 1, f + ' está definida ' + n + ' veces');
+  }
+});
+
+test('LA COPIA DE LA BASE ES UN REQUISITO, no una sugerencia al pie', () => {
+  // Es la puerta que faltaba, y su ausencia costó los embarques de una base real:
+  // el aviso estaba, en letra chica, y nadie bajó la copia.
+  assert.match(PANEL, /var SG_LIM_BK = false;/);
+  assert.match(PANEL, /if \(!SG_LIM_BK\) \{ toast\('Bajá la copia de la base primero'/);
+  assert.match(PANEL, /id="sg-lim-go" disabled/, 'el botón nace deshabilitado');
+  assert.match(PANEL, /b\.disabled = false; b\.style\.opacity = '1';/);
+});
+
+test('la pantalla dice qué NO entra en la limpieza', () => {
+  assert.match(PANEL, /<b>No entran<\/b> Importación ni Pedidos/);
+  assert.match(PANEL, /<b>No se toca<\/b> la configuración/);
+});
+
+test('Importación y Pedidos NO están en el mapa', () => {
+  // Pablo definió el alcance con capturas de las pantallas a limpiar y estas dos no
+  // estaban. Se habían agregado por iniciativa propia a partir del relevamiento —«caen
+  // acá»— y eso borró los embarques de una base real. El alcance lo define quien va a
+  // perder los datos.
+  assert.equal(MODULOS.find((m) => m.clave === 'sg-importacion'), undefined);
+  assert.equal(MODULOS.find((m) => m.clave === 'sg-pedidos'), undefined);
+  const t = new Set();
+  for (const m of MODULOS) for (const x of m.tablas) t.add(x.tabla);
+  for (const prohibida of ['sg_embarques', 'sg_embarque_lineas', 'sg_embarque_costos',
+    'sg_embarque_precios', 'sg_embarque_reales', 'sg_embarque_documentos',
+    'sg_pedidos', 'sg_pedido_items']) {
+    assert.ok(!t.has(prohibida), prohibida + ' no tiene que estar en el mapa');
+  }
+  assert.equal(MODULOS.length, 14, 'las catorce pantallas de las capturas');
+});
+
+test('la pantalla está en el menú de Contabilidad y con su prefijo', () => {
+  const MOD = fs.readFileSync(path.join(RAIZ, 'src/servicios/ensure_modulo_sgct.js'), 'utf8');
+  assert.match(MOD, /\["sgct-limpieza",/);
+  const PRE = fs.readFileSync(path.join(RAIZ, 'src/servicios/ensure_api_prefijos.js'), 'utf8');
+  assert.match(PRE, /\['sgct-limpieza',\s*'sg\/limpieza,sg\/limpieza-backup'\]/);
 });

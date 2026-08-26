@@ -3130,33 +3130,6 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
      No sale de los renglones de la factura —eso es la nota de crédito—: son
      CONCEPTOS nuevos, cada uno con su importe y su alícuota. Y la mercadería no se
      mueve: no vuelven ni salen kilos. -->
-<!-- ══ BORRAR LOS DATOS DE PRUEBA ═══════════════════════════════════════
-     Un solo modal para las catorce pantallas. Primero DICE cuánto se va, tabla por
-     tabla, y qué queda en pie; recién con el nombre del módulo tipeado, borra.
-
-     Todo esto vive detrás de un interruptor (limpieza_habilitada). Apagado, el botón
-     no se dibuja y los endpoints contestan que no existen. -->
-<div class="ab-modal-overlay" id="sg-lim-modal">
-  <div class="ab-modal" style="max-width:min(680px,96vw)">
-    <div class="mhd"><div class="mht" id="sg-lim-tit">Borrar datos de prueba</div>
-      <button class="mcl" onclick="closeMB('sg-lim-modal')">×</button></div>
-    <div class="mbd">
-      <input type="hidden" id="sg-lim-mod">
-      <div id="sg-lim-cuerpo" style="font-size:12.5px">Cargando…</div>
-      <div class="fl" style="margin-top:14px"><label>Escribí <b id="sg-lim-clave"></b> para confirmar</label>
-        <input id="sg-lim-conf" autocomplete="off" style="width:100%;box-sizing:border-box"></div>
-      <div style="display:flex;justify-content:space-between;gap:8px;margin-top:16px;align-items:center">
-        <button class="btn bo bs" onclick="sgLimBackup()">💾 Bajar una copia de la base</button>
-        <div style="display:flex;gap:8px">
-          <button class="btn bo" onclick="closeMB('sg-lim-modal')">Cancelar</button>
-          <button class="btn" id="sg-lim-btn" style="background:#b91c1c;color:#fff"
-            onclick="sgLimBorrar()">Borrar</button>
-        </div>
-      </div>
-    </div>
-  </div>
-</div>
-
 <div class="ab-modal-overlay" id="sg-nd-modal">
   <div class="ab-modal" style="max-width:min(780px,96vw)">
     <div class="mhd"><div class="mht" id="sg-nd-tit">Nota de débito</div>
@@ -16421,126 +16394,64 @@ function sgFacListExport(){ window.open('/api/sg/ventas/facturas/export.xlsx?'+s
 // renglones de la factura: son conceptos nuevos, cada uno con su alícuota — sin
 // producto no hay de dónde sacarla, así que se elige.
 var SG_ND_ALIC = [21, 10.5, 27, 0];
-// ══ BORRAR LOS DATOS DE PRUEBA ═══════════════════════════════════════════
+// ══ LIMPIAR LOS DATOS DE PRUEBA ══════════════════════════════════════════
 //
-// Pablo, 26/8/2026: un botón por módulo, sólo para administradores, y que se pueda
-// sacar cuando se lance.
+// Una pantalla propia en Contabilidad, no un botón en cada una de las catorce. El
+// que borra tiene que ver TODO lo que se va antes de apretar — con un botón por
+// pantalla veía una rebanada, y varias pantallas muestran datos de OTRO módulo, así
+// que su botón decía «no hay nada» sobre una pantalla llena.
 //
-// EL BOTÓN ES UNO SOLO, compartido: cada pantalla lo pide con su clave de módulo y el
-// resto —el conteo, la confirmación, el aviso de qué queda en pie— es el mismo código.
-// Catorce botones escritos a mano son catorce oportunidades de que uno borre de más.
+// Y sacarlo el día que se lance es sacar un renglón del menú.
 //
-// Y SE APAGA CON UN SOLO INTERRUPTOR: si `limpieza_habilitada` no está en 1, esto
-// devuelve cadena vacía y no se dibuja nada. El servidor además contesta que los
-// endpoints no existen, así que no alcanza con esconder el botón.
-function sgLimpiezaBoton(clave){
-  if (!(SG.cfg && String(SG.cfg.limpieza_habilitada) === '1')) return '';
-  if (!(window.LNB_USER && window.LNB_USER.rol === 'admin')) return '';
-  return '<button class="btn bo bs" style="color:#b91c1c;border-color:#fecaca"'
-    + ' title="Borrar los datos de prueba de esta pantalla"'
-    + ' onclick="sgLimOpen(' + sgQ(clave) + ')">🗑️ Datos de prueba</button>';
-}
+// TRES PUERTAS antes de borrar: el módulo asignado, el interruptor encendido, y la
+// COPIA DE LA BASE bajada. La tercera es la que faltaba — y su ausencia costó los
+// embarques de una base real.
+var SG_LIM_BK = false;      // si ya se bajó la copia en esta sesión
 
-// ── DÓNDE VA EL BOTÓN ────────────────────────────────────────────────────
-//
-// Qué módulo de limpieza le corresponde a cada pantalla. Se inyecta desde acá y no se
-// escribe en los catorce encabezados: uno solo que se olvide de sacarlo al lanzar y
-// queda un botón de borrar datos en producción.
-//
-// «Ingresos» y «Órdenes» son dos vistas del mismo circuito y tienen módulos distintos:
-// el de recepciones y el de órdenes. Los dos Diarios de IVA no están, porque no
-// guardan una sola fila propia.
-var SG_LIMPIEZA_PANTALLAS = {
-  'sec-sgct-asientos':      'sg-asientos',
-  'sec-sg-ordenes':         'sg-ordenes',
-  'sec-sg-compras':         'sg-ingresos',
-  'sec-sg-stock':           'sg-stock',
-  'sec-sg-pisos':           'sg-pisos',
-  'sec-sg-gastos-directos': 'sg-gastos-directos',
-  'sec-sg-facturas-merc':   'sg-facturas-compra',
-  'sec-ab-liquidaciones':   'sg-liquidaciones-productor',
-  'sec-sg-cc-proveedores':  'sg-cc-proveedores',
-  'sec-sg-ventas':          'sg-salidas',
-  'sec-sg-pedidos':         'sg-pedidos',
-  'sec-sg-vta-comprobantes':'sg-comprobantes-emitidos',
-  'sec-sg-remitos-pend':    'sg-remitos-pendientes',
-  'sec-sg-cc-clientes':     'sg-cc-clientes',
-  'sec-sg-caja-bancos':     'sg-tesoreria',
-  'sec-sg-importacion':     'sg-importacion'
-};
-
-// Lo cuelga del encabezado de la pantalla que se está mostrando. Se llama al cambiar
-// de sección: si el interruptor está apagado, sgLimpiezaBoton devuelve vacío y no se
-// dibuja nada.
-function sgLimpiezaMontar(secId){
-  var clave = SG_LIMPIEZA_PANTALLAS[secId];
-  if (!clave) return;
-  var sec = eid(secId); if (!sec) return;
-  if (sec.querySelector('[data-limpieza]')) return;      // ya está
-  var html = sgLimpiezaBoton(clave);
-  if (!html) return;
-  // Va en el encabezado si lo hay; si no, arriba de todo de la sección.
-  var ph = sec.querySelector('.ph');
-  var cont = document.createElement('div');
-  cont.setAttribute('data-limpieza', clave);
-  cont.style.cssText = 'margin-left:auto;padding-left:8px';
-  cont.innerHTML = html;
-  if (ph) { ph.style.display = 'flex'; ph.style.alignItems = 'center'; ph.appendChild(cont); }
-  else { cont.style.margin = '0 0 10px'; sec.insertBefore(cont, sec.firstChild); }
-}
-
-// ── EL INTERRUPTOR ───────────────────────────────────────────────────────
-// Se dibuja sólo para el administrador y sólo en el Dashboard. Es el único lugar
-// desde donde se enciende y se apaga: no existía ninguna pantalla que escribiera la
-// configuración de San Gerónimo, así que la clave no había forma de tocarla.
-// ── DÓNDE SE VE EL INTERRUPTOR ───────────────────────────────────────────
-//
-// En CUALQUIER pantalla de San Gerónimo que tenga botón de borrar. Estaba sólo en el
-// Dashboard —que en el menú se llama «Dash» y cuelga de Informes— y ahí no lo
-// encuentra nadie: es el último lugar donde uno buscaría un interruptor de
-// mantenimiento. Un control que no se encuentra es un control que no existe, que es
-// exactamente el problema que este arreglo ya tuvo una vez.
-//
-// Y sigue siendo UNO: se mueve el mismo nodo a la pantalla que esté abierta. Apagarlo
-// antes de lanzar es un gesto, desde donde uno esté.
-var SG_LIM_SWITCH_HTML = ''
-  + '<div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap">'
-  + '<label style="display:flex;gap:8px;align-items:center;cursor:pointer;font-size:13px;font-weight:600">'
-  + '<input type="checkbox" id="sg-lim-check" onchange="sgLimSwitch(this.checked)">'
-  + ' 🗑️ Botones para borrar datos de prueba</label>'
-  + '<span style="font-size:11.5px;color:#991b1b;flex:1;min-width:280px">'
-  + 'Encendido, cada pantalla de San Ger\u00f3nimo muestra un bot\u00f3n que borra <b>sus datos</b> '
-  + '\u2014nunca la configuraci\u00f3n\u2014. <b>Apagalo antes de lanzar.</b></span></div>';
-
-function sgLimSwitchMontar(secId){
-  var esAdmin = !!(window.LNB_USER && window.LNB_USER.rol === 'admin');
-  if (!esAdmin) return;
-  // Sólo en las pantallas que tienen algo que borrar: en el resto sería ruido.
-  if (!SG_LIMPIEZA_PANTALLAS[secId]) return;
-  var sec = eid(secId); if (!sec) return;
-  var caja = eid('sg-lim-switch');
-  if (!caja) {
-    caja = document.createElement('div');
-    caja.id = 'sg-lim-switch';
-    caja.style.cssText = 'margin:0 0 14px;padding:10px 14px;border-radius:10px;'
-      + 'border:1px solid #fecaca;background:#fef2f2';
-    caja.innerHTML = SG_LIM_SWITCH_HTML;
-  }
-  // Se MUEVE: appendChild sobre un nodo que ya está en el documento lo saca de donde
-  // estaba. Así nunca hay dos.
-  var ph = sec.querySelector('.ph');
-  if (ph && ph.nextSibling) sec.insertBefore(caja, ph.nextSibling);
-  else sec.insertBefore(caja, sec.firstChild);
+function sgLimInit(){
+  SG_LIM_BK = false;
+  var chk = eid('sg-lim-check');
   var pintar = function(){
-    var chk = eid('sg-lim-check');
-    if (chk) chk.checked = !!(SG.cfg && String(SG.cfg.limpieza_habilitada) === '1');
+    var on = !!(SG.cfg && String(SG.cfg.limpieza_habilitada) === '1');
+    if (chk) chk.checked = on;
+    eid('sg-lim-panel').style.display = on ? '' : 'none';
+    eid('sg-lim-off').style.display = on ? 'none' : '';
+    if (on) sgLimCargar();
   };
-  // Si la configuración todavía no llegó, se pide: el tilde tiene que mostrar el
-  // estado de verdad, no uno apagado por defecto que invite a encenderlo de nuevo.
   if (SG.cfg) { pintar(); return; }
-  api('/api/sg/config').then(function(r){
-    SG.cfg = (r && r.ok) ? (r.data || {}) : {};
-    pintar();
+  api('/api/sg/config').then(function(r){ SG.cfg = (r && r.ok) ? (r.data || {}) : {}; pintar(); });
+}
+
+// QUÉ HAY, ANTES DE TOCAR NADA. Las catorce pantallas con su cuenta, para poder
+// mirarlo entero y decidir.
+function sgLimCargar(){
+  eid('sg-lim-tb').innerHTML = '<tr><td colspan="2" class="emp">Contando…</td></tr>';
+  api('/api/sg/limpieza').then(function(r){
+    if (!r || !r.ok) {
+      eid('sg-lim-tb').innerHTML = '<tr><td colspan="2" style="color:var(--err)">'
+        + esc((r && r.error) || 'Error') + '</td></tr>';
+      return;
+    }
+    var ms = (r.data && r.data.modulos) || [], tot = 0, notas = [];
+    eid('sg-lim-tb').innerHTML = ms.map(function(m){
+      tot += m.total;
+      return '<tr' + (m.total ? '' : ' style="opacity:.45"') + '>'
+        + '<td style="overflow:hidden;text-overflow:ellipsis">' + esc(m.pantalla) + '</td>'
+        + '<td style="text-align:right">' + (m.total ? nr(m.total) : '—') + '</td></tr>';
+    }).join('') || '<tr><td colspan="2" class="emp">No hay nada cargado.</td></tr>';
+    eid('sg-lim-tot').textContent = nr(tot);
+    // Lo que queda a propósito, dicho ANTES: si no, tres filas que el filtro respeta
+    // se leen como que no borró nada.
+    ms.forEach(function(m){
+      (m.quedan || []).forEach(function(q){
+        notas.push('Quedan ' + nr(q.filas) + ' en ' + esc(q.tabla)
+          + (q.por_que ? ' — ' + esc(q.por_que) : ''));
+      });
+    });
+    notas.push('<b>No se toca</b> la configuración: productos, clientes, proveedores, '
+      + 'plan de cuentas, puntos de venta, cajas y bancos, pisos, cooperativas.');
+    notas.push('<b>No entran</b> Importación ni Pedidos.');
+    eid('sg-lim-notas').innerHTML = notas.join('<br>');
   });
 }
 
@@ -16553,112 +16464,51 @@ function sgLimSwitch(on){
     }
     SG.cfg = SG.cfg || {};
     SG.cfg.limpieza_habilitada = on ? '1' : '0';
-    toast(on ? 'Botones de borrar ENCENDIDOS' : 'Botones de borrar apagados', on ? 'er' : 'ok');
-    // Al apagar hay que sacar los botones que ya se dibujaron; al encender, dibujarlos.
-    document.querySelectorAll('[data-limpieza]').forEach(function(n){ n.remove(); });
-    if (on && typeof navAct !== 'undefined') sgLimpiezaMontar('sec-' + navAct);
+    eid('sg-lim-panel').style.display = on ? '' : 'none';
+    eid('sg-lim-off').style.display = on ? 'none' : '';
+    toast(on ? 'Borrado HABILITADO' : 'Borrado apagado', on ? 'er' : 'ok');
+    if (on) sgLimCargar();
   });
 }
 
-function sgLimOpen(clave){
-  eid('sg-lim-mod').value = clave;
-  eid('sg-lim-clave').textContent = clave;
-  eid('sg-lim-conf').value = '';
-  eid('sg-lim-cuerpo').innerHTML = 'Contando…';
-  eid('sg-lim-tit').textContent = 'Borrar datos de prueba';
-  sgModalArriba('sg-lim-modal');
-  api('/api/sg/limpieza/' + encodeURIComponent(clave)).then(function(r){
-    if (!r || !r.ok) {
-      eid('sg-lim-cuerpo').innerHTML = '<div style="color:var(--err)">'
-        + esc((r && r.error) || 'No se pudo contar') + '</div>';
-      return;
-    }
-    var d = r.data;
-    eid('sg-lim-tit').textContent = 'Borrar datos de prueba — ' + d.pantalla;
-    var h = '';
-    // PRIMERO CUÁNTO SE VA, tabla por tabla. Es lo que hay que poder mirar antes de
-    // decidir, y es la diferencia entre apretar un botón y decidir.
-    if (!d.total) {
-      h += '<div style="color:var(--mut)">Esta pantalla no tiene datos propios para borrar.</div>';
-    } else {
-      h += '<div style="font-weight:600;margin-bottom:6px">Se van a borrar '
-        + nr(d.total) + ' registro(s):</div>'
-        + '<div class="ab-table-wrap" style="overflow-x:hidden !important">'
-        + '<table class="pa-tbl" style="table-layout:fixed;width:100%">'
-        + '<thead><tr><th>Qué</th><th style="width:90px;text-align:right">Registros</th></tr></thead><tbody>'
-        + (d.filas||[]).map(function(f){
-            return '<tr><td style="overflow:hidden;text-overflow:ellipsis">' + esc(f.que_es)
-              + '</td><td style="text-align:right">' + nr(f.filas) + '</td></tr>'; }).join('')
-        + '</tbody></table></div>';
-    }
-    // Y DESPUÉS QUÉ QUEDA EN PIE. Sin esto, el que aprieta no sabe si se lleva puesto
-    // el maestro de productos.
-    // Y LO QUE VA A QUEDAR aunque se apriete. Sin esto, tres liquidaciones de Abasto
-    // que el filtro respeta a propósito se leen como «no borró nada».
-    if ((d.quedan||[]).length) {
-      h += '<div style="margin-top:10px;font-size:11.5px;color:var(--mut)">'
-        + '<b>Van a quedar:</b> ' + d.quedan.map(function(q){
-            return nr(q.filas) + ' en ' + esc(q.tabla)
-              + (q.por_que ? ' (' + esc(q.por_que) + ')' : ''); }).join(' · ') + '</div>';
-    }
-    if ((d.no_se_tocan||[]).length) {
-      h += '<div style="margin-top:10px;font-size:11.5px;color:var(--mut)">'
-        + '<b>No se toca:</b> ' + d.no_se_tocan.map(esc).join(' · ') + '</div>';
-    }
-    if (d.aviso) {
-      h += '<div style="margin-top:10px;padding:8px 10px;border-radius:8px;'
-        + 'background:#fef3c7;color:#92400e;font-size:11.5px">⚠ ' + esc(d.aviso) + '</div>';
-    }
-    // ── LO QUE VES ACÁ Y NO SE BORRA ACÁ ─────────────────────────────────
-    // Varias pantallas muestran sobre todo datos de OTRO módulo: «partidas pendientes
-    // de facturar» son órdenes, no facturas. Sin decirlo, el botón parece roto.
-    if (d.tambien) {
-      h += '<div style="margin-top:10px;padding:8px 10px;border-radius:8px;'
-        + 'background:#eff6ff;color:#1e40af;font-size:11.5px">ℹ ' + esc(d.tambien) + '</div>';
-    }
-    h += '<div style="margin-top:10px;font-size:11.5px;color:var(--mut)">'
-      + 'Esto no se puede deshacer. Bajate una copia de la base antes del primer borrado.</div>';
-    // ── Y EL ATAJO QUE HACE FALTA DE VERDAD ──────────────────────────────
-    // Para dejar el sistema listo para lanzar no sirve apretar dieciséis botones
-    // adivinando el orden: sirve uno.
-    h += '<div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--bor)">'
-      + '<button class="btn bo bs" style="color:#b91c1c;border-color:#fecaca"'
-      + ' onclick="sgLimTodo()">🧹 Borrar TODOS los datos de San Gerónimo</button>'
-      + '<div style="font-size:11px;color:var(--mut);margin-top:4px">Las dieciséis pantallas, '
-      + 'en el orden correcto y de una sola vez. La configuración no se toca.</div></div>';
-    eid('sg-lim-cuerpo').innerHTML = h;
-  });
+// LA COPIA ES UN REQUISITO, NO UNA SUGERENCIA AL PIE. Hasta que no se baja, el botón
+// de borrar no se habilita. Es la puerta que faltaba.
+function sgLimBackup(){
+  window.open('/api/sg/limpieza-backup/clientes.db', '_blank');
+  SG_LIM_BK = true;
+  eid('sg-lim-bkok').style.display = '';
+  var b = eid('sg-lim-go');
+  b.disabled = false; b.style.opacity = '1';
+  eid('sg-lim-falta').textContent = 'Guardá el archivo en un lugar seguro antes de seguir';
 }
 
 // ── BORRAR TODO ──────────────────────────────────────────────────────────
-// Las dieciséis pantallas, en el orden correcto, en UNA transacción: o queda limpio o
-// queda como estaba. Un borrado a medias es peor que no haber empezado, porque cada
-// pantalla muestra un número que no cierra con la de al lado.
+// Las catorce pantallas, en el orden correcto, en UNA transacción: o queda limpio o
+// queda como estaba. Un borrado a medias es peor que no haber empezado.
 function sgLimTodo(){
+  if (!SG_LIM_BK) { toast('Bajá la copia de la base primero','er'); return; }
   var conf = prompt('BORRAR TODOS LOS DATOS DE SAN GERÓNIMO' + String.fromCharCode(10,10)
     + 'Se van órdenes, recepciones, partidas, remitos, comprobantes, liquidaciones, '
     + 'cobranzas, pagos, movimientos de caja y banco, cheques y asientos.' + String.fromCharCode(10,10)
-    + 'NO se toca la configuración: productos, clientes, proveedores, plan de cuentas, '
-    + 'puntos de venta, cajas y bancos, pisos.' + String.fromCharCode(10,10)
-    + 'Bajate una copia de la base antes si no lo hiciste.' + String.fromCharCode(10,10)
+    + 'NO se tocan: la configuración, Importación ni Pedidos.' + String.fromCharCode(10,10)
     + 'Escribí BORRAR TODO para confirmar:', '');
   if (conf === null) return;
   if (String(conf).trim().toUpperCase() !== 'BORRAR TODO') {
     toast('Escribí BORRAR TODO para confirmar','er'); return;
   }
-  eid('sg-lim-cuerpo').innerHTML = '<div style="font-size:13px">Borrando…</div>';
+  var b = eid('sg-lim-go'); b.disabled = true; b.style.opacity = '.5';
+  eid('sg-lim-result').innerHTML = '<div style="font-size:13px">Borrando…</div>';
   api('/api/sg/limpieza/todo/borrar','POST',{ confirmacion:'BORRAR TODO' }).then(function(r){
     if (!r || !r.ok) {
-      eid('sg-lim-cuerpo').innerHTML = '<div style="color:var(--err);font-weight:600">'
-        + 'No se pudo borrar</div><div style="font-size:12px;margin-top:6px">'
-        + esc((r && r.error) || 'Error') + '</div>'
-        + '<div style="font-size:11.5px;color:var(--mut);margin-top:8px">No se borró nada: '
-        + 'va todo junto o nada.</div>';
+      eid('sg-lim-result').innerHTML = '<div style="color:var(--err);font-weight:600">No se pudo borrar</div>'
+        + '<div style="font-size:12px;margin-top:6px">' + esc((r && r.error) || 'Error') + '</div>'
+        + '<div style="font-size:11.5px;color:var(--mut);margin-top:8px">No se borró nada: va todo junto o nada.</div>';
+      b.disabled = false; b.style.opacity = '1';
       return;
     }
     var d = r.data;
-    var h = '<div style="font-weight:700;color:#166534;font-size:14px">✓ Se borraron '
-      + nr(d.total) + ' registro(s) en total</div>';
+    var h = '<div style="padding:12px 14px;border-radius:10px;background:#f0fdf4;border:1px solid #bbf7d0">'
+      + '<div style="font-weight:700;color:#166534;font-size:14px">✓ Se borraron ' + nr(d.total) + ' registro(s)</div>';
     if ((d.modulos||[]).length) {
       h += '<div class="ab-table-wrap" style="overflow-x:hidden !important;margin-top:8px">'
         + '<table class="pa-tbl" style="table-layout:fixed;width:100%"><tbody>'
@@ -16668,24 +16518,16 @@ function sgLimTodo(){
         + '</tbody></table></div>';
     }
     if ((d.quedan||[]).length) {
-      h += '<div style="margin-top:12px;padding:8px 10px;border-radius:8px;background:#f1f5f9;'
-        + 'font-size:11.5px"><b>Quedó a propósito:</b> ' + d.quedan.map(function(q){
-            return nr(q.filas) + ' en ' + esc(q.tabla)
-              + (q.por_que ? ' — ' + esc(q.por_que) : ''); }).join(' · ') + '</div>';
+      h += '<div style="margin-top:10px;font-size:11.5px;color:var(--mut)"><b>Quedó a propósito:</b> '
+        + d.quedan.map(function(q){ return nr(q.filas) + ' en ' + esc(q.tabla)
+            + (q.por_que ? ' — ' + esc(q.por_que) : ''); }).join(' · ') + '</div>';
     }
-    h += '<div style="margin-top:14px;text-align:right">'
-      + '<button class="btn bb" onclick="location.reload()">Listo, refrescar</button></div>';
-    eid('sg-lim-cuerpo').innerHTML = h;
-    var c = eid('sg-lim-conf'); if (c && c.parentElement) c.parentElement.style.display = 'none';
-    var b = eid('sg-lim-btn'); if (b) b.style.display = 'none';
+    h += '<div style="margin-top:12px"><button class="btn bb" onclick="location.reload()">Listo, refrescar</button></div></div>';
+    eid('sg-lim-result').innerHTML = h;
+    sgLimCargar();
   });
 }
 
-function sgLimBackup(){
-  // Con el checkpoint hecho del lado del servidor: sin eso, lo último que se escribió
-  // vive en un archivo aparte y la copia sale vieja justo en lo que más importa.
-  window.open('/api/sg/limpieza-backup/clientes.db', '_blank');
-}
 
 function sgLimBorrar(){
   var clave = eid('sg-lim-mod').value;
@@ -22059,6 +21901,67 @@ function sgRepExport(){
   </table></div>
 </div>
 
+<!-- ══ LIMPIAR LOS DATOS DE PRUEBA ═══════════════════════════════════════
+     Una pantalla, no un botón en cada una de las catorce. El que borra tiene que ver
+     TODO lo que se va antes de apretar —no una rebanada por pantalla— y sacarlo el
+     día que se lance es sacar un renglón del menú.
+
+     Tres puertas antes de borrar: el módulo tiene que estar asignado, el interruptor
+     encendido, y la copia de la base bajada. La tercera es la que faltó. -->
+<div class="sec sg-mod" id="sec-sgct-limpieza">
+  <div class="ph"><div><div class="ph-t">🧹 Limpiar datos de prueba</div>
+    <div class="ph-s">Borra lo cargado durante las pruebas. La configuración no se toca.</div></div></div>
+
+  <div id="sg-lim-off" style="display:none;padding:14px;border-radius:10px;background:var(--bg);
+       border:1px solid var(--bor);font-size:13px;color:var(--mut)">
+    Los borrados están <b>apagados</b>. Encendelos para ver qué hay y poder borrar.
+  </div>
+
+  <div style="padding:10px 14px;border-radius:10px;border:1px solid #fecaca;background:#fef2f2;margin-bottom:14px">
+    <label style="display:flex;gap:8px;align-items:center;cursor:pointer;font-size:13px;font-weight:600">
+      <input type="checkbox" id="sg-lim-check" onchange="sgLimSwitch(this.checked)">
+      Habilitar el borrado de datos de prueba
+    </label>
+    <div style="font-size:11.5px;color:#991b1b;margin-top:4px">
+      <b>Apagalo cuando lancen.</b> Apagado, esto no borra nada aunque se llame por otra vía.
+    </div>
+  </div>
+
+  <div id="sg-lim-panel" style="display:none">
+    <!-- LA COPIA ES OBLIGATORIA. No es una recomendación al pie que nadie lee: el
+         botón de borrar no se habilita hasta que se baja. -->
+    <div style="padding:12px 14px;border-radius:10px;border:1px solid #fde68a;background:#fffbeb;margin-bottom:14px">
+      <div style="font-weight:700;font-size:13px;color:#92400e">1 · Bajá una copia de la base</div>
+      <div style="font-size:11.5px;color:#92400e;margin:4px 0 8px">
+        Esto no se puede deshacer y no hay vuelta atrás sin la copia.
+      </div>
+      <button class="btn bb bs" onclick="sgLimBackup()">💾 Bajar la copia</button>
+      <span id="sg-lim-bkok" style="display:none;margin-left:10px;font-size:12px;color:#166534">✓ bajada</span>
+    </div>
+
+    <div style="font-weight:700;font-size:13px;margin-bottom:6px">2 · Esto es lo que se va</div>
+    <div class="ab-table-wrap" style="overflow-x:hidden !important">
+      <table class="pa-tbl" style="table-layout:fixed;width:100%;max-width:98vw">
+        <thead><tr><th>Pantalla</th><th style="width:110px;text-align:right">Registros</th></tr></thead>
+        <tbody id="sg-lim-tb"><tr><td colspan="2" class="emp">Cargando…</td></tr></tbody>
+        <tfoot><tr><th style="text-align:right">Total</th>
+          <th style="text-align:right" id="sg-lim-tot">—</th></tr></tfoot>
+      </table>
+    </div>
+    <div id="sg-lim-notas" style="font-size:11.5px;color:var(--mut);margin-top:10px"></div>
+
+    <div style="margin-top:16px;padding-top:14px;border-top:1px solid var(--bor)">
+      <div style="font-weight:700;font-size:13px;margin-bottom:6px">3 · Borrar</div>
+      <button class="btn" id="sg-lim-go" disabled
+        style="background:#b91c1c;color:#fff;opacity:.5" onclick="sgLimTodo()">
+        🧹 Borrar TODOS los datos de San Gerónimo</button>
+      <span id="sg-lim-falta" style="margin-left:10px;font-size:12px;color:var(--mut)">
+        Bajá la copia primero</span>
+    </div>
+    <div id="sg-lim-result" style="margin-top:16px"></div>
+  </div>
+</div>
+
 <div class="sec" id="sec-sgct-iva-ventas">
   <div class="ph">
     <div>
@@ -26859,8 +26762,7 @@ function loadSec(s) {
   // EL BOTÓN DE BORRAR DATOS DE PRUEBA, si está encendido. Se monta desde acá y no
   // desde catorce encabezados: uno solo que se olvide de sacarlo al lanzar y queda
   // un botón de borrar en producción.
-  try { sgLimpiezaMontar('sec-' + s); } catch (_) { /* pantalla sin limpieza */ }
-  try { sgLimSwitchMontar('sec-' + s); } catch (_) { /* todavía sin config */ }
+  if (s === 'sgct-limpieza') { try { sgLimInit(); } catch (_) { /* todavía sin config */ } }
   var m = {
     inicio: loadInicio, pedidos: loadPedidos, logistica: loadLog,
     preparacion: prepCargar,
