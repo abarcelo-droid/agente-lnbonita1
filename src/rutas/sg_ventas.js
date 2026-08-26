@@ -807,6 +807,23 @@ router.post('/facturas', requireAuth, (req, res) => {
 
 const r2n = (x) => Math.round((Number(x) || 0) * 100) / 100;
 
+// ══ A QUIÉN SE LE INFORMÓ LA FACTURA, PARA REUSARLO EN SU NOTA ═════════════
+//
+// Si la venta superó el umbral de la RG 5700/2025 y salió a consumidor final, hubo
+// que pedirle el documento al comprador. Ese dato ahora queda guardado con el
+// comprobante, así que la nota que lo corrige NO tiene que volver a pedirlo: el
+// operador tendría que ir a buscar el papel de una venta de hace un mes.
+//
+// ARCA: 80 = CUIT, 86 = CUIL, 96 = DNI. El 99 es «sin identificar» y no es un
+// documento: ahí no hay nada que reusar.
+const DOC_TIPO_CLAVE = { 80: 'cuit', 86: 'cuil', 96: 'dni' };
+function identificacionDe(f) {
+  const t = (f && f.doc_tipo != null) ? Number(f.doc_tipo) : null;
+  const clave = t != null ? DOC_TIPO_CLAVE[t] : null;
+  if (!clave || !f.doc_nro) return null;
+  return { tipo: clave, numero: String(f.doc_nro) };
+}
+
 // ══ QUÉ QUEDA POR ACREDITAR DE UN COMPROBANTE ══════════════════════════════
 //
 // Una nota de crédito puede ser PARCIAL —vuelven 300 de los 1.000 kg, o se corrige
@@ -1003,7 +1020,7 @@ router.post('/facturas/:id(\\d+)/nota-debito', requireAuth, async (req, res) => 
       vinculos: [],
       // Ni parte de gestión: lo que se le cobra de más está EN el comprobante.
       descuentoGestion: 0,
-      identificacion: req.body?.identificacion || null,
+      identificacion: req.body?.identificacion || identificacionDe(f),
       // Servicios: intereses, fletes y gastos no son productos, y con este concepto
       // ARCA pide además el período, que el motor completa con la fecha del día.
       concepto: 2,
@@ -1201,7 +1218,7 @@ router.post('/facturas/:id(\\d+)/nota-credito', requireAuth, async (req, res) =>
       // acuerdo, la devolución los devuelve. Dejarla afuera haría que la deuda de
       // gestión sobreviviera a una venta que ya no existe.
       descuentoGestion: Math.max(0, gestionNota),
-      identificacion: req.body?.identificacion || null,
+      identificacion: req.body?.identificacion || identificacionDe(f),
       asociado: { cbte_tipo: f.cbte_tipo, punto_venta: f.punto_venta, cbte_nro: f.cbte_nro,
         fecha: f.fecha },
       ncDeFacturaId: f.id, ncMotivo: motivo,

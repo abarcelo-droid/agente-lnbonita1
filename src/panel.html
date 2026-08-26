@@ -6041,6 +6041,48 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
 <!-- ── COMPLETAR LA COMPRA QUE YA ENTRÓ ────────────────────────────────
      Lo que pone el comprador cuando se sienta a cerrar una descarga que
      entró sin orden. -->
+<!-- ══ CAMBIARLE EL PRECIO A UNA ORDEN ═══════════════════════════════════
+     Se puede mientras la partida NO esté perfeccionada. Una vez que hay factura
+     recibida o liquidación emitida, el precio queda firme y para cambiarlo hay que
+     anular primero (Pablo, 26/8/2026).
+
+     El precio baja al costo de cada partida, así que se dice qué se va a recostear
+     y se pide el motivo — es lo que después explica una diferencia contra el papel
+     del proveedor. -->
+<div class="ab-modal-overlay" id="sg-ocp-modal">
+  <div class="ab-modal" style="max-width:min(720px,96vw)">
+    <div class="mhd"><div class="mht" id="sg-ocp-tit">Cambiar el precio de la orden</div>
+      <button class="mcl" onclick="closeMB('sg-ocp-modal')">×</button></div>
+    <div class="mbd">
+      <input type="hidden" id="sg-ocp-id">
+      <div id="sg-ocp-cab" style="font-size:12px;color:var(--mut);margin-bottom:10px"></div>
+      <div class="ab-table-wrap" style="overflow-x:hidden !important">
+        <table class="pa-tbl" style="table-layout:fixed;width:100%;max-width:98vw">
+          <thead><tr>
+            <th>Producto</th>
+            <th style="width:110px;text-align:right">Recibido</th>
+            <th style="width:120px;text-align:right" id="sg-ocp-th">$ / kg</th>
+            <th style="width:120px;text-align:right">Se le paga</th>
+          </tr></thead>
+          <tbody id="sg-ocp-body"></tbody>
+          <tfoot><tr>
+            <th colspan="3" style="text-align:right">Total acordado</th>
+            <th style="text-align:right" id="sg-ocp-total">$ 0,00</th>
+          </tr></tfoot>
+        </table>
+      </div>
+      <div class="fl" style="margin-top:12px"><label>Motivo del cambio</label>
+        <input id="sg-ocp-motivo" placeholder="Se renegoció el precio con el productor"
+          style="width:100%;box-sizing:border-box"></div>
+      <div style="font-size:11.5px;color:var(--mut);margin-top:6px" id="sg-ocp-pie"></div>
+      <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:16px">
+        <button class="btn bo" onclick="closeMB('sg-ocp-modal')">Cancelar</button>
+        <button class="btn bb" id="sg-ocp-btn" onclick="sgOcpGuardar()">Guardar el precio</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <div class="ab-modal-overlay" id="sg-so-modal">
   <div class="ab-modal" style="width:760px;max-width:96vw;max-height:90vh;overflow-y:auto">
     <div class="mhd"><div class="mht" id="sg-so-tit">Completar la orden</div>
@@ -11215,7 +11257,16 @@ function sgOcVer(id){
                     + ' onclick="sgOcDocEditar(' + o.id + ',\'' + d + '\')">✏️</button>'
                   : '');
           })(), 165)
-        + ficha('Cómo se pactó el precio', (o.tipo_precio === 'pizarra' ? 'Precio abierto' : 'Precio Cerrado'), 170)
+        + ficha('Cómo se pactó el precio', (o.tipo_precio === 'pizarra' ? 'Precio abierto' : 'Precio Cerrado')
+            // EL PRECIO SE PUEDE CORREGIR MIENTRAS LA PARTIDA ESTÉ LIBRE. Hasta acá
+            // no había ninguna pantalla que editara los ítems de una orden ya
+            // cargada: el comprador se equivocaba al cargar y no había vuelta.
+            // A precio abierto no se ofrece: ahí el precio vive en cada partida.
+            + ((o.tipo_precio !== 'pizarra' && lnbPuedeOperar('sg-compras'))
+                ? ' <button class="btn bo bs" style="padding:1px 6px;font-size:11px"'
+                  + ' title="Cambiar el precio pactado con el productor"'
+                  + ' onclick="sgOcpOpen(' + o.id + ')">✏️</button>'
+                : ''), 170)
         + ficha('Comprobante', esc(sgLbl(SG_FISCAL, o.tipo_fiscal) || '—'), 110)
         + ficha('Condición de pago', esc(sgCondNombre(o.condicion_pago_id)), 140)
         + (o.flete_a_cargo
@@ -14685,6 +14736,119 @@ function sgOcEdiciones(ocId){
 // Cambiar de circuito una partida: de facturar a liquidar o al revés. Pasa
 // cuando el comprador se equivoca al cargar la orden. Sólo admin, con motivo,
 // y queda registrado como cualquier otra corrección.
+// ── CAMBIARLE EL PRECIO A UNA ORDEN ──────────────────────────────────────
+// Mientras la partida no esté perfeccionada. El servidor exige lo mismo y con el
+// mismo mensaje: esto es para que nadie tipee de gusto, no para reemplazarlo.
+function sgOcpOpen(ocId){
+  SG.ocp = { id: ocId, items: [], oc: null };
+  eid('sg-ocp-id').value = ocId;
+  eid('sg-ocp-motivo').value = '';
+  eid('sg-ocp-body').innerHTML = '<tr><td colspan="4" style="font-size:12px;color:var(--mut)">Cargando…</td></tr>';
+  eid('sg-ocp-cab').textContent = '';
+  eid('sg-ocp-pie').textContent = '';
+  sgModalArriba('sg-ocp-modal');
+  api('/api/sg/oc/' + ocId).then(function(r){
+    if(!r || !r.ok){ eid('sg-ocp-body').innerHTML = '<tr><td colspan="4" style="color:var(--err)">'
+      + esc((r && r.error) || 'Error') + '</td></tr>'; return; }
+    var o = r.data || {};
+    SG.ocp.oc = o;
+    SG.ocp.items = (o.items || []).map(function(it){
+      var recibKg = Number(it.kg_recibidos) || 0;
+      return { oc_item_id: it.id, nombre: it.producto_nombre || ('#' + it.producto_id),
+        // Lo que entró. Si el camión todavía no llegó, lo estimado — que es contra
+        // lo que se pactó y lo único que hay para mostrar.
+        kg: recibKg > 0 ? recibKg : (Number(it.kg_estimados) || 0),
+        recibido: recibKg > 0,
+        bultos: Number(it.bultos_recibidos) || 0,
+        // EL IMPORTE LO CALCULA EL SERVIDOR (acordadoDeOC): por bulto lo que se pactó
+        // por bulto, por kilo lo que entró pesado, y mixto cuando el mismo ítem tuvo
+        // las dos cosas. Acá sólo se ESCALA, que es exacto porque el importe es
+        // lineal en el precio. Rehacer la cuenta en el navegador daba otro número.
+        precio_base: (it.precio_estimado_por_kg != null) ? Number(it.precio_estimado_por_kg) : null,
+        importe_base: (it.acordado_importe != null) ? Number(it.acordado_importe) : null,
+        precio: (it.precio_estimado_por_kg != null) ? Number(it.precio_estimado_por_kg) : '' };
+    });
+    eid('sg-ocp-tit').textContent = 'Cambiar el precio — ' + (o.numero || o.trazabilidad || ('orden ' + ocId));
+    eid('sg-ocp-cab').innerHTML = '<b>' + esc(o.proveedor_nombre || '') + '</b>'
+      + (o.precio_incluye_iva === 1
+          ? ' · <span style="color:#92400e">el precio pactado incluye IVA</span>' : '');
+    sgOcpRender();
+  });
+}
+function sgOcpUpd(i, v){ SG.ocp.items[i].precio = v; sgOcpTotal(); }
+function sgOcpRender(){
+  eid('sg-ocp-body').innerHTML = (SG.ocp.items || []).map(function(it, i){
+    var recib = (it.bultos > 0
+        ? (nr(it.bultos) + ' bultos · ' + nr(it.kg) + ' kg')
+        : (nr(it.kg) + ' kg'))
+      + (it.recibido ? '' : ' <span style="color:var(--mut)">(estimado)</span>');
+    return '<tr>'
+      + '<td style="overflow:hidden;text-overflow:ellipsis">' + esc(it.nombre) + '</td>'
+      + '<td style="text-align:right;font-size:11.5px;color:var(--mut)">' + recib + '</td>'
+      + '<td><input type="number" step="0.000001" min="0" id="sg-ocp-p-' + i + '"'
+        + ' value="' + (it.precio === '' ? '' : it.precio) + '"'
+        + ' oninput="sgOcpUpd(' + i + ',this.value)"'
+        + ' style="width:100%;box-sizing:border-box;text-align:right"></td>'
+      + '<td style="text-align:right" id="sg-ocp-t-' + i + '">—</td>'
+      + '</tr>';
+  }).join('');
+  sgOcpTotal();
+}
+// ── LO QUE SE LE VA A PAGAR AL PRODUCTOR ─────────────────────────────────
+//
+// El importe lo calcula el SERVIDOR (acordadoDeOC) y viaja con la orden. Acá sólo se
+// ESCALA por el precio nuevo, que es exacto: el importe es lineal en el precio, sea
+// por bulto, por kilo o mixto.
+//
+// Antes esta cuenta se rehacía en el navegador con `bultos × precio × kg_por_bulto`,
+// y daba otro número: ignoraba modo_carga —un ítem comprado por kilo se mostraba
+// cobrado por cajón— y se olvidaba de los kilos que entraron a granel. El comprador
+// veía un total que no era el que iba a cobrar el productor.
+//
+// Sin importe de base —una orden que todavía no tiene precio— no hay proporción que
+// hacer, y se dice, en vez de inventar un número.
+function sgOcpTotal(){
+  var tot = 0, incompleto = false;
+  (SG.ocp.items || []).forEach(function(it, i){
+    var p = Number(it.precio) || 0;
+    var c = eid('sg-ocp-t-' + i);
+    var puede = p > 0 && it.importe_base != null && Number(it.precio_base) > 0;
+    if (!puede) {
+      if (c) c.textContent = p > 0 ? '—' : '—';
+      if (p > 0) incompleto = true;
+      return;
+    }
+    var imp = Math.round(it.importe_base * (p / it.precio_base) * 100) / 100;
+    if (c) c.textContent = sgMoney(imp);
+    tot += imp;
+  });
+  eid('sg-ocp-total').textContent = incompleto
+    ? 'se calcula al guardar'
+    : sgMoney(Math.round(tot * 100) / 100);
+  var pie = eid('sg-ocp-pie');
+  if (pie) pie.innerHTML = 'Se recalcula el costo de cada partida de esta orden y el cronograma '
+    + 'de deuda con el proveedor. Si la partida ya tiene factura o liquidación, el precio está '
+    + '<b>firme</b> y hay que anular primero.';
+}
+function sgOcpGuardar(){
+  var motivo = String(eid('sg-ocp-motivo').value || '').trim();
+  if (motivo.length < 3) { toast('Poné por qué cambia el precio', 'er'); return; }
+  var items = (SG.ocp.items || []).filter(function(it){ return Number(it.precio) >= 0 && it.precio !== ''; })
+    .map(function(it){ return { oc_item_id: it.oc_item_id, precio_por_kg: Number(it.precio) }; });
+  if (!items.length) { toast('Poné al menos un precio', 'er'); return; }
+  var btn = eid('sg-ocp-btn'); btn.disabled = true;
+  api('/api/sg/oc/' + SG.ocp.id + '/precios', 'PUT', { items: items, motivo: motivo }).then(function(r){
+    btn.disabled = false;
+    if (!r || !r.ok) { alert('No se pudo cambiar el precio.' + String.fromCharCode(10,10)
+      + ((r && r.error) || 'Error')); return; }
+    closeMB('sg-ocp-modal');
+    toast('Precio actualizado' + (r.data && r.data.lotes_recosteados
+      ? ' · ' + r.data.lotes_recosteados + ' partida(s) recosteadas' : ''), 'ok');
+    if (r.data && r.data.aviso) alert(r.data.aviso);
+    sgOcVer(SG.ocp.id);
+  });
+}
+
 function sgOcDocEditar(ocId, actual){
   var otro = actual === 'liquidacion' ? 'factura' : 'liquidacion';
   var nombre = function(d){ return d === 'liquidacion' ? 'emitimos LIQUIDACIÓN' : 'recibimos FACTURA de compra'; };
