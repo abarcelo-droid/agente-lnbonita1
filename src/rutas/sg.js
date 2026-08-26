@@ -6818,6 +6818,33 @@ const KG_VIGENTE_STOCK = `(l.kg_reales - ${SUM_DECOMISO} - ${SUM_TRANSF})`;
 // kg disponibles (vendibles) = kg vigentes − Σ despachado.
 const KG_DISPONIBLE = `(l.kg_reales - ${SUM_DECOMISO} - ${SUM_TRANSF} - ${SUM_DESPACHADO})`;
 
+// ══ EL KILO POR BULTO EFECTIVO, EN SQL ══════════════════════════════════
+//
+// Espejo EXACTO de kpbEfectivo() (más arriba en este archivo). Existe porque el
+// filtro de la lista de venta tiene que poder razonar en CAJONES, y hasta ahora
+// sólo podía razonar en kilos: los cajones se derivaban en JS, después de la
+// consulta. Resultado: una partida a la que le quedaban 0,4 kg sueltos pasaba el
+// filtro y se ofrecía como "0 cj" con el puntito verde — y si alguien la apretaba,
+// el servidor la rechazaba, porque el remito valida en cajones enteros.
+//
+// SI ESTE FRAGMENTO Y kpbEfectivo() DICEN DISTINTO, la lista vuelve a ofrecer lo
+// que la validación rechaza. Es el mismo número escrito dos veces y hay que
+// tocarlos juntos.
+//
+// El *1.0 no es decoración: con dos INTEGER, SQLite hace división entera y
+// 1.184/64 daría 18 en vez de 18,5. Y acá NO va el redondeo a seis decimales que
+// sí tiene la versión de JS: allá el número se muestra, acá sólo se compara.
+const KPB_EFECTIVO_SQL = `(CASE WHEN l.bultos > 0 AND l.kg_reales > 0
+  THEN l.kg_reales*1.0/l.bultos ELSE COALESCE(l.kg_por_bulto, ps.factor_conversion) END)`;
+
+// Y la regla de "esto se puede vender": queda al menos UN cajón entero. Para la
+// partida sin factor conocido no se puede hablar de cajones, así que ahí manda la
+// regla vieja de kilos — esconderla sí sería esconder mercadería.
+// El 0.9999 es la misma tolerancia de un diezmilésimo de cajón que usa
+// derivarBultosLote, para que un cajón exacto que en punto flotante da 18,499999
+// no desaparezca de la lista.
+const HAY_UN_BULTO = `(kpb_ef IS NULL OR kpb_ef <= 0 OR kg_disponibles >= kpb_ef * 0.9999)`;
+
 // Bultos derivados de kg (DISPLAY, no altera kg). Muta y devuelve la fila.
 //
 // EL FACTOR ES EL EFECTIVO, NO EL NOMINAL (ver kpbEfectivo). Acá se dividía por el
@@ -7063,6 +7090,7 @@ router.get('/oferta', requireAuth, (req, res) => {
           ${KG_VIGENTE_STOCK} AS kg_vigente,
           CAST(julianday(l.fecha_vencimiento_estimada) - julianday(date('now','localtime')) AS INTEGER) AS dias_restantes,
           ${KG_DISPONIBLE} AS kg_disponibles,
+          ${KPB_EFECTIVO_SQL} AS kpb_ef,
           COALESCE((SELECT SUM(kg) FROM sg_reservas WHERE lote_id=l.id AND estado IN ('activa','concretada')),0) AS kg_reservado,
           COALESCE((SELECT SUM(bultos) FROM sg_reservas WHERE lote_id=l.id AND estado IN ('activa','concretada')),0) AS bultos_reservado
         FROM sg_lotes l LEFT JOIN sg_productos pr ON pr.id=l.producto_id
@@ -7072,7 +7100,13 @@ router.get('/oferta', requireAuth, (req, res) => {
         LEFT JOIN sg_proveedores prov ON prov.id = o.proveedor_id
         LEFT JOIN sg_presentaciones ps ON ps.id=l.presentacion_id
         WHERE l.activo=1 AND NOT (COALESCE(l.origen,'')='granel' AND l.presentacion_id IS NULL) AND l.estado IN ('disponible','reservado','despachado_parcial') AND l.producto_id=?
-      ) WHERE kg_disponibles > 0.01
+      -- NO SE OFRECE LO QUE NO SE PUEDE VENDER. Pablo, 25/8/2026: "a la hora de
+      -- facturar no deberías traer productos con stock en 0". El filtro miraba sólo
+      -- los KILOS, así que una partida con 0,4 kg sueltos entraba y se dibujaba como
+      -- "0 cj" con el puntito verde — y al apretarla, el servidor la rechazaba,
+      -- porque el remito valida en cajones enteros. Se ofrecía lo que la validación
+      -- ya sabía que iba a rebotar.
+      ) WHERE kg_disponibles > 0.01 AND ${HAY_UN_BULTO}
       ORDER BY fecha_vencimiento_estimada ASC, lote_id ASC`).all(pid);
     const en_camino = db.prepare(`
       SELECT * FROM (
@@ -7119,14 +7153,24 @@ router.get('/disponibilidad', requireAuth, (req, res) => {
   const db = getDb();
   try {
     const incluirCamino = req.query.incluir_camino === '1' || req.query.incluir_camino === 'true';
+    // LA VARIEDAD Y EL CÓDIGO VIAJAN. Pablo vio tres "Durazno" en la lista de venta
+    // y pensó que se estaba abriendo por proveedor: son tres PRODUCTOS distintos, y
+    // el renglón se dibujaba sólo con el nombre de la especie. Sin la variedad, tres
+    // duraznos distintos son tres renglones iguales.
+    // Y el mismo filtro de "al menos un cajón" que /oferta: si el maestro ofrece un
+    // producto y el detalle no tiene ninguna partida vendible, el que busca lo elige
+    // y se encuentra con la lista vacía.
     const stock = db.prepare(`
-      SELECT producto_id, nombre, SUM(kg_disp) AS kg_stock, COUNT(*) AS n_lotes FROM (
-        SELECT l.producto_id, pr.nombre,
-          ${KG_DISPONIBLE} AS kg_disp
+      SELECT producto_id, nombre, variedad, codigo, SUM(kg_disp) AS kg_stock, COUNT(*) AS n_lotes FROM (
+        SELECT l.producto_id, pr.nombre, pr.variedad, pr.codigo,
+          ${KG_DISPONIBLE} AS kg_disp,
+          ${KPB_EFECTIVO_SQL} AS kpb_ef
         FROM sg_lotes l LEFT JOIN sg_productos pr ON pr.id=l.producto_id
+        LEFT JOIN sg_presentaciones ps ON ps.id=l.presentacion_id
         WHERE l.activo=1 AND NOT (COALESCE(l.origen,'')='granel' AND l.presentacion_id IS NULL) AND l.estado IN ('disponible','reservado','despachado_parcial')
       ) WHERE kg_disp > 0.01
-      GROUP BY producto_id, nombre`).all();
+        AND (kpb_ef IS NULL OR kpb_ef <= 0 OR kg_disp >= kpb_ef * 0.9999)
+      GROUP BY producto_id, nombre, variedad, codigo`).all();
     const camino = incluirCamino ? db.prepare(`
       SELECT producto_id, SUM(disp) AS kg_camino FROM (
         SELECT i.producto_id,
@@ -7140,15 +7184,26 @@ router.get('/disponibilidad', requireAuth, (req, res) => {
       ) WHERE disp > 0.01
       GROUP BY producto_id`).all() : [];
     const mapa = new Map();
-    for (const s of stock) mapa.set(s.producto_id, { producto_id: s.producto_id, nombre: s.nombre || '', kg_stock: +Number(s.kg_stock).toFixed(2), kg_camino: 0, n_lotes: s.n_lotes });
+    for (const s of stock) mapa.set(s.producto_id, { producto_id: s.producto_id, nombre: s.nombre || '',
+      variedad: s.variedad || null, codigo: s.codigo || null,
+      kg_stock: +Number(s.kg_stock).toFixed(2), kg_camino: 0, n_lotes: s.n_lotes });
     for (const c of camino) {
       let e = mapa.get(c.producto_id);
-      if (!e) { const pr = db.prepare('SELECT nombre FROM sg_productos WHERE id=?').get(c.producto_id); e = { producto_id: c.producto_id, nombre: (pr && pr.nombre) || '', kg_stock: 0, kg_camino: 0, n_lotes: 0 }; mapa.set(c.producto_id, e); }
+      if (!e) {
+        const pr = db.prepare('SELECT nombre, variedad, codigo FROM sg_productos WHERE id=?').get(c.producto_id);
+        e = { producto_id: c.producto_id, nombre: (pr && pr.nombre) || '',
+          variedad: (pr && pr.variedad) || null, codigo: (pr && pr.codigo) || null,
+          kg_stock: 0, kg_camino: 0, n_lotes: 0 };
+        mapa.set(c.producto_id, e);
+      }
       e.kg_camino = +Number(c.kg_camino).toFixed(2);
     }
+    // Se ordena por nombre Y VARIEDAD: si no, los tres duraznos salen en un orden
+    // que cambia solo, y el que busca uno no sabe cuál agarró la vez anterior.
     const data = [...mapa.values()]
       .filter(e => e.kg_stock > 0.01 || (incluirCamino && e.kg_camino > 0.01))
-      .sort((a, b) => String(a.nombre).localeCompare(String(b.nombre), 'es'));
+      .sort((a, b) => String(a.nombre).localeCompare(String(b.nombre), 'es')
+        || String(a.variedad || '').localeCompare(String(b.variedad || ''), 'es'));
     res.json({ ok: true, data });
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });

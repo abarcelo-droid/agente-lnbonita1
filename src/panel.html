@@ -15975,19 +15975,49 @@ function sgIPConCamino(st){ return st.modo==='pedido' || st.modo==='remito'; }
 // haber armado el remito.
 function sgIPPorBulto(st){ return st.modo==='remito' || st.modo==='directa'; }
 function sgIPBuscar(key,v){ SG.itemPicker[key].q=v; sgIPRenderList(key); }
+// ── EL RENGLÓN DICE QUÉ PRODUCTO ES ─────────────────────────────────────
+//
+// Pablo, 25/8/2026: "¿por qué a la hora de facturar me mostrás muchas veces el
+// mismo item? La distinción por proveedor la hacemos desde la derecha con partidas".
+//
+// No era por proveedor: eran tres PRODUCTOS distintos —tres variedades de durazno—
+// y el renglón se dibujaba sólo con el nombre de la especie. Tres duraznos
+// distintos, tres renglones idénticos, y lo único que los diferenciaba eran los
+// kilos. Ahora va la variedad y el código, que es lo que los identifica de verdad.
+//
+// Y el buscador mira las tres cosas: antes filtraba sólo por especie, así que
+// escribir la variedad no encontraba nada.
+//
+// Ojo con escH y no esc: esc() escapa comillas para meter texto en un onclick, no
+// escapa < ni &. El nombre y la variedad los tipea el operador en Maestros.
 function sgIPRenderList(key){
   var st=SG.itemPicker[key]; if(!eid(key+'-list')) return;
   var inc=sgIPConCamino(st), q=(st.q||'').toLowerCase();
-  var lista=st.productos.filter(function(p){ return !q || String(p.nombre).toLowerCase().indexOf(q)>=0; });
+  var lista=st.productos.filter(function(p){
+    if(!q) return true;
+    return (String(p.nombre||'')+' '+String(p.variedad||'')+' '+String(p.codigo||''))
+      .toLowerCase().indexOf(q)>=0;
+  });
   eid(key+'-list').innerHTML = lista.length ? lista.map(function(p){
     var on=st.sel&&String(st.sel)===String(p.producto_id);
-    var sub=nr(p.kg_stock)+'kg'+(inc&&p.kg_camino>0?(' +'+nr(p.kg_camino)+'🚚'):'')+' · '+p.n_lotes+'L';
-    return '<div onclick="sgIPSel('+sgQ(key)+','+p.producto_id+')" style="padding:5px 7px;cursor:pointer;border-radius:6px;font-size:12.5px;'+(on?'background:var(--burl,#e8f0f8)':'')+'"><b>'+esc(p.nombre)+'</b> <span style="font-size:11px;color:var(--mut)">'+sub+'</span></div>';
+    // "L" es la cantidad de LOTES, no una variedad: se aclara, porque leído al
+    // lado de un nombre de producto parecía "Durazno 3L".
+    var sub=nr(p.kg_stock)+'kg'+(inc&&p.kg_camino>0?(' +'+nr(p.kg_camino)+'🚚'):'')
+      +' · '+p.n_lotes+(p.n_lotes==1?' partida':' partidas');
+    return '<div onclick="sgIPSel('+sgQ(key)+','+p.producto_id+')" style="padding:5px 7px;cursor:pointer;border-radius:6px;font-size:12.5px;'+(on?'background:var(--burl,#e8f0f8)':'')+'">'
+      +'<b>'+escH(p.nombre)+'</b>'
+      +(p.variedad?' <span style="color:var(--tx)">'+escH(p.variedad)+'</span>':'')
+      +(p.codigo?' <code style="font-size:10.5px;color:var(--mut)">'+escH(p.codigo)+'</code>':'')
+      +'<div style="font-size:11px;color:var(--mut)">'+sub+'</div></div>';
   }).join('') : '<div style="font-size:11px;color:var(--mut);padding:6px">— sin coincidencias —</div>';
 }
 function sgIPSel(key,pid){
   var st=SG.itemPicker[key]; st.sel=String(pid); st.oferta=null;
-  st._prodNombre=(st.productos.find(function(x){return String(x.producto_id)===String(pid);})||{}).nombre||'';
+  // El nombre que queda "elegido" también lleva la variedad: es el que después
+  // aparece en el renglón de lo que se factura, y ahí "Durazno" a secas tampoco
+  // alcanza para saber cuál de los tres se eligió.
+  var _p=st.productos.find(function(x){return String(x.producto_id)===String(pid);})||{};
+  st._prodNombre=((_p.nombre||'')+(_p.variedad?(' '+_p.variedad):'')).trim();
   sgIPRenderList(key);
   eid(key+'-det').innerHTML='<div style="font-size:11px;color:var(--mut)">Cargando…</div>';
   api('/api/sg/oferta?producto_id='+pid).then(function(r){ st.oferta=(r&&r.ok)?r.data:{stock:[],en_camino:[]}; sgIPRenderDetalle(key); });
