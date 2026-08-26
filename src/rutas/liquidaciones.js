@@ -124,6 +124,12 @@ try { db.exec("ALTER TABLE liquidaciones ADD COLUMN grilla_json TEXT"); } catch(
 // Las dos columnas son el espejo exacto de sg_facturas_compra: cuánto se pagó en
 // total y cuánto de eso fue contra la parte que no lleva comprobante.
 try { db.exec("ALTER TABLE liquidaciones ADD COLUMN saldo_pagado REAL NOT NULL DEFAULT 0"); } catch(_){}
+// POR QUÉ SE ANULÓ. La liquidación es la puerta oficial para destrabar el precio de
+// una partida ya documentada, y se daba de baja con un DELETE pelado: un precio firme
+// se destrababa sin que quedara escrito por qué. La factura de compra lo pide desde
+// siempre; acá faltaba.
+try { db.exec("ALTER TABLE liquidaciones ADD COLUMN anulado_motivo TEXT"); } catch(_){}
+try { db.exec("ALTER TABLE liquidaciones ADD COLUMN anulado_por INTEGER"); } catch(_){}
 try { db.exec("ALTER TABLE liquidaciones ADD COLUMN saldo_pagado_gestion REAL NOT NULL DEFAULT 0"); } catch(_){}
 try { db.exec("CREATE INDEX IF NOT EXISTS idx_liq_oc ON liquidaciones(oc_id)"); } catch(_){}
 try { db.exec("CREATE INDEX IF NOT EXISTS idx_liq_fecha ON liquidaciones(fecha)"); } catch(_){}
@@ -498,31 +504,77 @@ router.post('/', function(req, res) {
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
-// ─────────────────────────────────────────────────────────────────────────────
-// DELETE /:id — soft delete
-// ─────────────────────────────────────────────────────────────────────────────
-router.delete('/:id', function(req, res) {
-  // Y CON ELLA SU ASIENTO. Acá se daba de baja la liquidación y su asiento
-  // quedaba en pie: la liquidación desaparecía de la pantalla y sus cuentas
-  // seguían movidas en el libro. Es el mismo error que el otro --anular el
-  // asiento y dejar viva la operación-- dado vuelta, y con el mismo resultado:
-  // el libro y la operación dicen cosas distintas.
-  //
-  // El asiento no se borra: queda marcado, que es la prueba de qué decía.
-  const liq = db.prepare('SELECT id, asiento_id, n_liquidacion FROM liquidaciones WHERE id = ?')
-    .get(req.params.id);
-  if (!liq) return res.status(404).json({ error: 'La liquidación no existe' });
-  db.transaction(function(){
+// ══ ANULAR UNA LIQUIDACIÓN, A LA ALTURA DE LA FACTURA DE COMPRA ════════════
+//
+// Pablo, 26/8/2026: *«se empareja liquidación con factura»*.
+//
+// La liquidación es la puerta oficial para destrabar el precio de una partida ya
+// documentada —«la única manera de modificarlo es anular la factura recibida o la
+// liquidación emitida»—, y era la más floja de las dos: la factura de compra pide
+// MOTIVO obligatorio y deja rastro; la liquidación se daba de baja con un DELETE
+// pelado. Un precio que estaba firme se destrababa sin que quedara escrito POR QUÉ,
+// que es justamente lo que hay que poder explicar seis meses después.
+//
+// Y VA POR SU PROPIA DIRECCIÓN. `exigirNivel` reconoce la anulación mirando la URL
+// (CLAUDE.md): con un DELETE genérico queda en la misma bolsa que borrar cualquier
+// otra cosa.
+//
+// EL ASIENTO NO SE BORRA: queda marcado, con el motivo pegado a su descripción, que
+// es la prueba de qué decía. Y se anula CON la liquidación, en la misma transacción:
+// darla de baja dejando el asiento en pie es el mismo error al revés — la liquidación
+// desaparece de la pantalla y sus cuentas siguen movidas en el libro.
+function anularLiquidacion(id, motivo, usuarioId) {
+  const liq = db.prepare(`SELECT id, asiento_id, n_liquidacion, oc_id, eliminado_en,
+      COALESCE(saldo_pagado,0) AS saldo_pagado
+    FROM liquidaciones WHERE id = ?`).get(id);
+  if (!liq) return { status: 404, body: { ok: false, error: 'La liquidación no existe' } };
+  if (liq.eliminado_en) return { status: 200, body: { ok: true, ya_estaba: true } };
+  const razon = String(motivo || '').trim();
+  if (razon.length < 3) {
+    return { status: 400, body: { ok: false, error:
+      'Poné por qué se anula: esta liquidación es lo que documenta la partida, y anularla '
+      + 'destraba un precio que estaba firme.' } };
+  }
+  // NO SE ANULA UNA YA PAGADA. Si se le pagó algo al productor contra ella, la plata
+  // salió: darla de baja deja el pago colgado de un comprobante que ya no existe. Es
+  // el mismo freno que tiene la factura de compra.
+  const pagado = Math.round((Number(liq.saldo_pagado) || 0) * 100) / 100;
+  if (pagado > 0.009) {
+    return { status: 409, body: { ok: false, error:
+      'Esta liquidación ya tiene $' + pagado.toLocaleString('es-AR')
+      + ' pagados al productor. Anulá primero el pago.' } };
+  }
+  db.transaction(function () {
     if (liq.asiento_id) {
       dbSg.prepare(`UPDATE sg_asientos
          SET anulado = 1, anulado_en = datetime('now','localtime'),
              descripcion = descripcion || ' — ANULADO: se dio de baja la liquidación '
-                        || ?
-       WHERE id = ? AND COALESCE(anulado,0) = 0`).run(liq.n_liquidacion || ('#' + liq.id), liq.asiento_id);
+                        || ? || ' — ' || ?
+       WHERE id = ? AND COALESCE(anulado,0) = 0`)
+        .run(liq.n_liquidacion || ('#' + liq.id), razon, liq.asiento_id);
     }
-    db.prepare("UPDATE liquidaciones SET eliminado_en = datetime('now','localtime') WHERE id = ?").run(liq.id);
+    db.prepare(`UPDATE liquidaciones
+       SET eliminado_en = datetime('now','localtime'), anulado_motivo = ?, anulado_por = ?
+     WHERE id = ?`).run(razon, usuarioId || null, liq.id);
   })();
-  res.json({ ok: true, asiento_anulado: liq.asiento_id || null });
+  return { status: 200, body: { ok: true, asiento_anulado: liq.asiento_id || null,
+    oc_id: liq.oc_id || null,
+    aviso: liq.oc_id ? 'La partida quedó libre: su precio se puede volver a cambiar.' : null } };
+}
+
+router.post('/:id/anular', function (req, res) {
+  const r = anularLiquidacion(parseInt(req.params.id, 10),
+    req.body && req.body.motivo, (req.user && req.user.id) || null);
+  res.status(r.status).json(r.body);
+});
+
+// El DELETE de siempre queda, pero pasa por la MISMA función y pide el motivo igual.
+// Dos maneras de anular, una sin rastro, es exactamente lo que esto viene a corregir.
+router.delete('/:id', function (req, res) {
+  const r = anularLiquidacion(parseInt(req.params.id, 10),
+    (req.body && req.body.motivo) || (req.query && req.query.motivo),
+    (req.user && req.user.id) || null);
+  res.status(r.status).json(r.body);
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
