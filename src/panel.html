@@ -4546,9 +4546,9 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
          otro". Es el mismo pivot mirado desde los dos lados. -->
     <div><label>Comparar por</label><select id="inf-columnas" onchange="infCargar()"></select></div>
     <div><label>Ver</label><select id="inf-metrica" onchange="infRepintarComparativa()">
-      <option value="facturacion_usd">US$ facturados</option>
+      <option value="facturacion_usd">Facturación (USD)</option>
       <option value="kilos">Kilos</option>
-      <option value="usd_por_kg">US$ por kilo</option>
+      <option value="usd_por_kg">USD por kilo</option>
     </select></div>
     <div><label>Cliente</label><select id="inf-filtro-cliente" onchange="infCargar()"></select></div>
     <div><label>Vendedor</label><select id="inf-filtro-vendedor" onchange="infCargar()"></select></div>
@@ -32153,24 +32153,46 @@ function infPintarKpis(t){
     +'<b>'+v+'</b><div style="font-size:11px;color:var(--mut)">'+(sub||'')+'</div></div>'; };
   // Tres tarjetas y todas en dólares. La de operaciones se fue con su número; la cuenta de
   // clientes, que era su subtítulo y sí se entiende sola, pasa abajo de la facturación.
-  var h=k('Facturación','US$ '+nr(t.facturacion_usd||0), 'de '+nr(t.clientes||0)+' cliente(s)')
-    + k('Kilos', nr(t.kilos||0), (t.usd_por_kg!=null?('US$ '+nrDec(t.usd_por_kg,2)+'/kg'):''));
+  var h=k('Facturación', infUsd(t.facturacion_usd||0), 'de '+nr(t.clientes||0)+' cliente(s)')
+    + k('Kilos', infKg(t.kilos||0), (t.usd_por_kg!=null?(infUsd(t.usd_por_kg,2)+' por kilo'):''));
   // El margen sólo si el nivel alcanza. El backend directamente no lo manda si no.
   if(INF.veMargen && t.rent_pct!=null){
     var col=t.rent_pct>=0?'#16a34a':'var(--err,#dc2626)';
     h+='<div class="inf-kpi" style="background:rgba(16,163,74,.10)"><div style="font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:var(--mut)">Rentabilidad</div>'
-      +'<b style="color:'+col+'">'+nr(t.rent_pct)+'%</b><div style="font-size:11px;color:var(--mut)">US$ '+nr(t.rent_dol||0)+'</div></div>';
+      +'<b style="color:'+col+'">'+nr(t.rent_pct)+'%</b><div style="font-size:11px;color:var(--mut)">'+infUsd(t.rent_dol||0)+'</div></div>';
   }
   eid('inf-kpis').innerHTML=h;
 }
+// ── LA UNIDAD VA PEGADA AL NÚMERO ─────────────────────────────────────────────────────
+// "USD 552.488" y "736.203 K", no un "552.488" suelto bajo un título que dice US$. Una celda
+// se lee de reojo, se copia a un mail, se dicta por teléfono: sola tiene que decir de qué
+// habla. Y con la unidad en el número, el TÍTULO puede ser corto — que era el otro pedido.
+//
+// En el Excel NO van: ahí los números tienen que entrar como números o no se pueden sumar.
+function infUsd(v, dec){
+  if(v==null) return '<span style="color:var(--mut)">—</span>';
+  return 'USD ' + (dec ? nrDec(v, dec) : nr(v));
+}
+function infKg(v){
+  if(v==null) return '<span style="color:var(--mut)">—</span>';
+  return nr(v) + ' K';
+}
+// '2026-2027' se lee '26/27'. En el encabezado de una tabla de ocho columnas, el año entero
+// se come el ancho que necesitan los números; el completo queda en el title.
+function infCampCorta(p){
+  var m=/^(\d{2})(\d{2})-(\d{2})(\d{2})$/.exec(String(p||''));
+  return m ? (m[2]+'/'+m[4]) : String(p||'');
+}
+
 // TODO EN DÓLARES, y sin la columna de operaciones. El peso repetía el mismo número en otra
 // moneda —y entre campañas dos importes en pesos ni se pueden restar—; las operaciones
 // contaban renglones de la planilla, no pedidos. Las dos ocupaban ancho y ninguna se usaba
 // para decidir. (Pablo, 26/8/2026.)
+// Los títulos NO repiten la unidad: ya viene en cada número.
 function infCols(){
-  var c=[['clave','',  'left'], ['kilos','Kilos','right'], ['facturacion_usd','US$','right'],
-         ['usd_por_kg','US$/kg','right']];
-  if(INF.veMargen) c.push(['rent_dol','Rent. US$','right'], ['rent_pct','Rent. %','right']);
+  var c=[['clave','',  'left'], ['kilos','Kilos','right'], ['facturacion_usd','Facturación','right'],
+         ['usd_por_kg','Por kilo','right']];
+  if(INF.veMargen) c.push(['rent_dol','Rentabilidad','right'], ['rent_pct','Margen','right']);
   return c;
 }
 function infOrdenar(col){
@@ -32205,9 +32227,10 @@ function infPintarTabla(d){
         var col=(v||0)>=0?'#16a34a':'var(--err,#dc2626)';
         return '<td style="text-align:right;color:'+col+';font-weight:600">'+(v!=null?nrDec(v,1)+'%':'—')+'</td>';
       }
-      // US$/kg es el único importe chico de la tabla: con entero, 1,15 se ve 1 y 0,87 se ve 1.
-      if(c[0]==='usd_por_kg') return '<td style="text-align:right">'+nrDec(v,2)+'</td>';
-      return '<td style="text-align:right">'+(v!=null?nr(v):'—')+'</td>';
+      if(c[0]==='kilos') return '<td style="text-align:right">'+infKg(v)+'</td>';
+      // Por kilo es el único importe chico de la tabla: con entero, 1,15 se ve 1 y 0,87 se ve 1.
+      if(c[0]==='usd_por_kg') return '<td style="text-align:right">'+infUsd(v,2)+'</td>';
+      return '<td style="text-align:right">'+infUsd(v)+'</td>';
     }).join('')+'</tr>';
   }).join('') : '<tr><td colspan="'+cols.length+'" class="emp">No hay ventas con esos filtros.</td></tr>';
   eid('inf-nota').innerHTML = (d.truncado
@@ -32223,9 +32246,9 @@ function infPintarTabla(d){
 // La métrica se cambia SIN volver a pedir nada: cada celda ya trae kilos, dólares y US$/kg.
 // Volver al servidor para cambiar de unidad haría esperar por un dato que ya está.
 var INF_METRICAS={
-  facturacion_usd:{ label:'US$ facturados', unidad:'US$', fmt:function(v){ return nr(v); } },
-  kilos:          { label:'Kilos',          unidad:'kg',  fmt:function(v){ return nr(v); } },
-  usd_por_kg:     { label:'US$ por kilo',   unidad:'US$/kg', fmt:function(v){ return nrDec(v,2); } },
+  facturacion_usd:{ label:'Facturación', fmt:function(v){ return infUsd(v); } },
+  kilos:          { label:'Kilos',       fmt:function(v){ return infKg(v); } },
+  usd_por_kg:     { label:'Por kilo',    fmt:function(v){ return infUsd(v,2); } },
 };
 function infRepintarComparativa(){ if(INF.comp) infPintarComparativa(INF.comp); }
 // '01-JULIO' se muestra 'JULIO': el número está para ordenar, no para leerlo.
@@ -32249,7 +32272,7 @@ function infPintarComparativa(d){
   var anchoNom=cols.length>6?'22%':'34%';
 
   eid('inf-thead').innerHTML='<tr><th style="text-align:left;width:'+anchoNom+'">'+esc(d.label||'')+'</th>'
-    + cols.map(function(c){ return '<th style="text-align:right" title="'+esc(c)+'">'+esc(infEtiquetaCol(c))+'</th>'; }).join('')
+    + cols.map(function(c){ return '<th style="text-align:right" title="'+esc(c)+'">'+esc(infCampCorta(infEtiquetaCol(c)))+'</th>'; }).join('')
     // La variación sólo tiene sentido con exactamente dos columnas: con tres, "contra cuál"
     // deja de ser obvio y un número ambiguo es peor que ninguno.
     + (cols.length===2?'<th style="text-align:right;width:9%">Var.</th>':'')
@@ -32372,8 +32395,9 @@ function infDrillPintar(d){
         var col=(v||0)>=0?'#16a34a':'var(--err,#dc2626)';
         return '<td style="text-align:right;color:'+col+';font-weight:600">'+(v!=null?nrDec(v,1)+'%':'—')+'</td>';
       }
-      if(c[0]==='usd_por_kg') return '<td style="text-align:right">'+nrDec(v,2)+'</td>';
-      return '<td style="text-align:right">'+(v!=null?nr(v):'—')+'</td>';
+      if(c[0]==='kilos') return '<td style="text-align:right">'+infKg(v)+'</td>';
+      if(c[0]==='usd_por_kg') return '<td style="text-align:right">'+infUsd(v,2)+'</td>';
+      return '<td style="text-align:right">'+infUsd(v)+'</td>';
     }).join('')+'</tr>';
   }).join('') : '<tr><td colspan="'+cols.length+'" class="emp">Sin ventas.</td></tr>';
 
@@ -32384,12 +32408,12 @@ function infDrillPintar(d){
   var du=Math.round((t.facturacion_usd||0)-(e.facturacion_usd||0));
   var cierra=Math.abs(dk)<=tol && Math.abs(du)<=tol;
   eid('inf-drill-cuadre').innerHTML = cierra
-    ? '<span style="color:#166534">✓ Cierra con la fila de arriba: '+nr(t.kilos||0)+' kg · US$ '+nr(t.facturacion_usd||0)
+    ? '<span style="color:#166534">✓ Cierra con la fila de arriba: '+infKg(t.kilos||0)+' · '+infUsd(t.facturacion_usd||0)
       + ' en '+nr((d.filas||[]).length)+' '+esc(String(d.label||'').toLowerCase())+'.</span>'
     : '<span style="color:var(--err,#dc2626)">⚠ El detalle NO cierra con la fila de arriba. '
-      + 'Arriba: '+nr(e.kilos||0)+' kg / US$ '+nr(e.facturacion_usd||0)+' · '
-      + 'acá: '+nr(t.kilos||0)+' kg / US$ '+nr(t.facturacion_usd||0)+' · '
-      + 'diferencia '+nr(dk)+' kg / US$ '+nr(du)+'.</span>';
+      + 'Arriba: '+infKg(e.kilos||0)+' / '+infUsd(e.facturacion_usd||0)+' · '
+      + 'acá: '+infKg(t.kilos||0)+' / '+infUsd(t.facturacion_usd||0)+' · '
+      + 'diferencia '+infKg(dk)+' / '+infUsd(du)+'.</span>';
 }
 
 // Los meses de esa fila, en SVG y sin librerías. Es el "mes a mes" de un solo cliente o de
@@ -32399,13 +32423,13 @@ function infDrillMeses(filas){
   if(!filas.length){ box.innerHTML=''; return; }
   var max=Math.max.apply(null, filas.map(function(f){ return f.facturacion_usd||0; }))||1;
   var W=100/filas.length;
-  box.innerHTML='<div style="font-size:11px;color:var(--mut);margin-bottom:3px">Mes a mes · US$ facturados</div>'
+  box.innerHTML='<div style="font-size:11px;color:var(--mut);margin-bottom:3px">Mes a mes · facturación en USD</div>'
     + '<svg viewBox="0 0 100 26" preserveAspectRatio="none" style="width:100%;height:64px;display:block">'
     + filas.map(function(f,i){
         var h=Math.max(0.4, ((f.facturacion_usd||0)/max)*22);
         return '<rect x="'+(i*W+W*0.15)+'" y="'+(22-h)+'" width="'+(W*0.7)+'" height="'+h+'"'
           + ' fill="#7c1d3f"><title>'+esc(infEtiquetaCol(f.mes_ok))+' '+esc(f.periodo||'')
-          + ': US$ '+nr(f.facturacion_usd||0)+' · '+nr(f.kilos||0)+' kg</title></rect>';
+          + ': USD '+nr(f.facturacion_usd||0)+' · '+nr(f.kilos||0)+' K</title></rect>';
       }).join('')
     + '</svg>'
     + '<div style="display:flex;font-size:9.5px;color:var(--mut)">'
@@ -32485,7 +32509,7 @@ function infPintarGrafico(filas){
   box.appendChild(cv);
   var leyenda=document.createElement('div');
   leyenda.style.cssText='font-size:11px;color:var(--mut);margin-top:2px';
-  leyenda.innerHTML='<span style="color:#7c1d3f">▇</span> facturación US$ por mes'
+  leyenda.innerHTML='<span style="color:#7c1d3f">▇</span> facturación USD por mes'
     + (INF.veMargen?' · <span style="color:#16a34a">━</span> rentabilidad % (escala 0–100)':'');
   box.appendChild(leyenda);
 }
@@ -32602,10 +32626,10 @@ function iaResumen(d){
   var pc=function(x){ if(x==null) return '—'; var c=x>=0?'#16a34a':'var(--err,#dc2626)';
     return '<span style="color:'+c+';font-weight:700">'+(x>=0?'+':'')+nrDec(x,1)+'%</span>'; };
   eid('ia-resumen').innerHTML =
-      k(esc(iaMes(v.mes))+' '+esc(v.actual), 'US$ '+nr(A.usd||0), nr(A.kilos||0)+' kg · '+nr(A.clientes||0)+' cliente(s)')
-    + k(esc(iaMes(v.mes))+' '+esc(v.anterior), 'US$ '+nr(B.usd||0), nr(B.kilos||0)+' kg · '+nr(B.clientes||0)+' cliente(s)')
-    + k('Variación US$', pc(R.var_usd_pct), (R.var_usd>=0?'+':'')+'US$ '+nr(R.var_usd||0))
-    + k('Variación kilos', pc(R.var_kilos_pct), (R.var_kilos>=0?'+':'')+nr(R.var_kilos||0)+' kg');
+      k(esc(iaMes(v.mes))+' '+esc(v.actual),   infUsd(A.usd||0), infKg(A.kilos||0)+' · '+nr(A.clientes||0)+' cliente(s)')
+    + k(esc(iaMes(v.mes))+' '+esc(v.anterior), infUsd(B.usd||0), infKg(B.kilos||0)+' · '+nr(B.clientes||0)+' cliente(s)')
+    + k('Variación', pc(R.var_usd_pct), (R.var_usd>=0?'+':'')+infUsd(R.var_usd||0))
+    + k('Variación kilos', pc(R.var_kilos_pct), (R.var_kilos>=0?'+':'')+infKg(R.var_kilos||0));
 
   // Los contadores son también el filtro: el que ve "12 perdidos" quiere ver cuáles.
   var e=d.estados||{};
@@ -32631,29 +32655,31 @@ function iaFilas(){
 function iaPintar(){
   var d=IA.data; if(!d) return;
   var m=d.ve_margen, v=d.ventana;
-  var actLbl=iaMes(v.mes)+' '+v.actual, antLbl=iaMes(v.mes)+' '+v.anterior;
+  // El mes está arriba —en el resumen y en el selector— así que no se repite en los cuatro
+  // títulos: gastaba el ancho que necesitan los números. Queda la campaña, corta, con la
+  // completa en el title.
+  var ta=function(p){ return ' title="'+esc(iaMes(v.mes)+' de '+p)+'"'; };
   eid('ia-thead').innerHTML='<tr>'
     + '<th style="text-align:left;width:26%">'+esc(d.label||'')+'</th>'
-    + '<th style="text-align:right">kg '+esc(antLbl)+'</th>'
-    + '<th style="text-align:right">kg '+esc(actLbl)+'</th>'
-    + '<th style="text-align:right">US$ '+esc(antLbl)+'</th>'
-    + '<th style="text-align:right">US$ '+esc(actLbl)+'</th>'
-    + '<th style="text-align:right;width:10%">Var. US$</th>'
-    + (m?'<th style="text-align:right;width:9%">Rent. %</th>':'')
+    + '<th style="text-align:right"'+ta(v.anterior)+'>Kilos '+esc(infCampCorta(v.anterior))+'</th>'
+    + '<th style="text-align:right"'+ta(v.actual)+'>Kilos '+esc(infCampCorta(v.actual))+'</th>'
+    + '<th style="text-align:right"'+ta(v.anterior)+'>Fact. '+esc(infCampCorta(v.anterior))+'</th>'
+    + '<th style="text-align:right"'+ta(v.actual)+'>Fact. '+esc(infCampCorta(v.actual))+'</th>'
+    + '<th style="text-align:right;width:11%">Variación</th>'
+    + (m?'<th style="text-align:right;width:9%">Margen</th>':'')
     + '<th style="text-align:center;width:10%">Estado</th></tr>';
-  var num=function(x){ return x==null?'<span style="color:var(--mut)">—</span>':nr(x); };
   var filas=iaFilas();
   eid('ia-tbody').innerHTML = filas.length ? filas.map(function(f){
     var col=(f.var_usd||0)>=0?'#16a34a':'var(--err,#dc2626)';
     var pct=f.var_usd_pct!=null?((f.var_usd_pct>=0?'+':'')+nrDec(f.var_usd_pct,1)+'%'):'';
     return '<tr>'
       + '<td class="inf-nom">'+esc(f.clave||'')+'</td>'
-      + '<td style="text-align:right">'+num(f.kilos_ant)+'</td>'
-      + '<td style="text-align:right">'+num(f.kilos_act)+'</td>'
-      + '<td style="text-align:right">'+num(f.usd_ant)+'</td>'
-      + '<td style="text-align:right">'+num(f.usd_act)+'</td>'
+      + '<td style="text-align:right">'+infKg(f.kilos_ant)+'</td>'
+      + '<td style="text-align:right">'+infKg(f.kilos_act)+'</td>'
+      + '<td style="text-align:right">'+infUsd(f.usd_ant)+'</td>'
+      + '<td style="text-align:right">'+infUsd(f.usd_act)+'</td>'
       + '<td style="text-align:right;color:'+col+';font-weight:600">'
-        + (f.var_usd!=null?((f.var_usd>=0?'+':'')+nr(f.var_usd)+(pct?'<div style="font-size:10px;font-weight:400">'+pct+'</div>':'')):'<span style="color:var(--mut)">—</span>')
+        + (f.var_usd!=null?((f.var_usd>=0?'+':'')+infUsd(f.var_usd)+(pct?'<div style="font-size:10px;font-weight:400">'+pct+'</div>':'')):'<span style="color:var(--mut)">—</span>')
       + '</td>'
       + (m?('<td style="text-align:right">'+(f.rent_pct_act!=null?nrDec(f.rent_pct_act,1)+'%':'—')
           +'<div style="font-size:10px;color:var(--mut)">'+(f.rent_pct_ant!=null?nrDec(f.rent_pct_ant,1)+'%':'—')+' antes</div></td>'):'')
@@ -32666,13 +32692,16 @@ function iaPintar(){
     + 'Crece/cae a partir de ±'+esc(String(d.umbral))+'%.';
 }
 
+// En el Excel los números van PELADOS, sin USD ni K. Con la unidad pegada, Excel los toma
+// como texto y no se pueden sumar ni ordenar — que es para lo que se baja el Excel. La
+// unidad va en el título de la columna, que ahí sí sobra el ancho.
 function iaExportar(){
   var d=IA.data, filas=iaFilas();
   if(!filas.length){ toast('No hay nada para exportar','er'); return; }
   var v=d.ventana, m=d.ve_margen;
-  var head=[d.label,'kg '+iaMes(v.mes)+' '+v.anterior,'kg '+iaMes(v.mes)+' '+v.actual,
-            'US$ '+iaMes(v.mes)+' '+v.anterior,'US$ '+iaMes(v.mes)+' '+v.actual,
-            'Var US$','Var %','Estado'].concat(m?['Rent % actual','Rent % anterior']:[]);
+  var head=[d.label,'Kilos '+iaMes(v.mes)+' '+v.anterior,'Kilos '+iaMes(v.mes)+' '+v.actual,
+            'USD '+iaMes(v.mes)+' '+v.anterior,'USD '+iaMes(v.mes)+' '+v.actual,
+            'Variación USD','Variación %','Estado'].concat(m?['Margen % actual','Margen % anterior']:[]);
   var e2=function(x){ return '"'+String(x==null?'':x).replace(/"/g,'""')+'"'; };
   var csv=[head.map(e2).join(';')].concat(filas.map(function(f){
     var r=[f.clave,f.kilos_ant,f.kilos_act,f.usd_ant,f.usd_act,f.var_usd,f.var_usd_pct,f.estado];
@@ -32725,7 +32754,7 @@ function opoPintar(d){
   // venta, no se inventa nada — pero el ORDEN de la lista es el mismo para todos.
   eid('opo-resumen').innerHTML='<div style="padding:10px 12px;border-radius:8px;background:var(--bg);font-size:13px">'
     + '<b>'+nr(d.total||0)+'</b> oportunidades en '+esc(iaMes(v.mes))+', '+esc(v.actual)+' contra '+esc(v.anterior)+'. '
-    + (m ? 'Hay <b>US$ '+nr(d.margen_en_juego_total||0)+'</b> de margen sobre la mesa '
+    + (m ? 'Hay <b>'+infUsd(d.margen_en_juego_total||0)+'</b> de margen sobre la mesa '
          + '<span style="color:var(--mut)">(al '+nrDec((d.tasa_margen_global||0)*100,1)+'% de margen promedio de la ventana)</span>.'
        : '<span style="color:var(--mut)">Ordenadas por la plata en juego.</span>')
     + '</div>';
@@ -32735,8 +32764,8 @@ function opoPintar(d){
     + '<th style="text-align:left;width:20%">Cliente</th>'
     + '<th style="text-align:left;width:14%">Producto</th>'
     + '<th style="text-align:left">Por qué está acá</th>'
-    + '<th style="text-align:right;width:11%">US$ en juego</th>'
-    + (m?'<th style="text-align:right;width:11%">Margen en juego</th>':'')
+    + '<th style="text-align:right;width:11%">En juego</th>'
+    + (m?'<th style="text-align:right;width:11%">Margen</th>':'')
     + '</tr>';
   eid('opo-tbody').innerHTML=(d.items||[]).length ? d.items.map(function(x){
     var def=(d.tipos||{})[x.tipo]||{label:x.tipo,color:''};
@@ -32746,15 +32775,15 @@ function opoPintar(d){
       + '<td class="inf-nom">'+esc(x.titulo||'')+'</td>'
       + '<td class="inf-nom">'+esc(x.detalle||'')+'</td>'
       + '<td class="inf-nom" style="font-size:11.5px;color:var(--mut)">'+esc(x.regla||'')+'</td>'
-      + '<td style="text-align:right;font-weight:600">'+nr(x.usd_en_juego||0)+'</td>'
-      + (m?('<td style="text-align:right;font-weight:700">'+nr(x.margen_en_juego||0)
+      + '<td style="text-align:right;font-weight:600">'+infUsd(x.usd_en_juego||0)+'</td>'
+      + (m?('<td style="text-align:right;font-weight:700">'+infUsd(x.margen_en_juego||0)
           + (x.tasa_propia===false?'<div style="font-size:10px;font-weight:400;color:var(--mut)" title="No se conoce el margen de esta fila: se usó el promedio de la ventana">al promedio</div>':'')
           + '</td>'):'')
       + '</tr>';
   }).join('') : '<tr><td class="emp" colspan="6">No hay oportunidades con esos filtros. '
       + 'Puede ser buena noticia — o que la ventana esté vacía.</td></tr>';
   eid('opo-nota').innerHTML=(d.truncado?'⚠ Se muestran las '+nr((d.items||[]).length)+' de mayor impacto, de '+nr(d.total||0)+'. ':'')
-    + 'Por debajo de US$ '+nr((d.umbrales||{}).piso_usd||0)+' no entra nada (es ruido). '
+    + 'Por debajo de '+infUsd((d.umbrales||{}).piso_usd||0)+' no entra nada (es ruido). '
     + '“Caída fuerte” arranca en −'+nr((d.umbrales||{}).caida_pct||0)+'%. '
     + '“No le vendemos” pide al menos '+nr((d.umbrales||{}).cross_min_clientes||0)+' clientes del mismo rubro comprándolo.'
     + (m?'':' <span style="color:var(--mut)">El orden pesa el margen; tu nivel no lo muestra, pero la lista es la misma para todos.</span>');
@@ -32764,7 +32793,7 @@ function opoExportar(){
   var d=IA.opo;
   if(!d||!(d.items||[]).length){ toast('No hay nada para exportar','er'); return; }
   var m=d.ve_margen;
-  var head=['Qué pasa','Cliente','Producto','Por qué','US$ en juego'].concat(m?['Margen en juego']:[]);
+  var head=['Qué pasa','Cliente','Producto','Por qué','USD en juego'].concat(m?['Margen USD en juego']:[]);
   var e2=function(x){ return '"'+String(x==null?'':x).replace(/"/g,'""')+'"'; };
   var csv=[head.map(e2).join(';')].concat(d.items.map(function(x){
     var r=[((d.tipos||{})[x.tipo]||{}).label||x.tipo, x.titulo, x.detalle, x.regla, x.usd_en_juego];
