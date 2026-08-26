@@ -203,7 +203,8 @@ registrar({
     + 'que se cargaron sueltas son de Abasto y quedan donde están.',
   tablas: [
     { tabla: 'liquidaciones', que_es: 'las liquidaciones emitidas al productor',
-      donde: 'oc_id IS NOT NULL' },
+      donde: 'oc_id IS NOT NULL',
+      queda_porque: 'se cargaron sueltas, sin partida: son de Abasto' },
   ],
   no_se_tocan: ['sg_proveedores', 'las liquidaciones de Abasto (sin partida)'],
 });

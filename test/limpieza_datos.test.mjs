@@ -296,6 +296,46 @@ test('el conteo dice qué se va y qué NO se toca', () => {
   assert.ok(c.aviso, 'y qué tiene que saber antes');
 });
 
+test('dice lo que se borró DE VERDAD, y lo que quedó a propósito', () => {
+  // El caso real: 7 liquidaciones, 4 de una partida de San Gerónimo y 3 sueltas de
+  // Abasto. Se borran 4, quedan 3 — y apretando otra vez son 0, con razón.
+  //
+  // Eso pasó y se leyó como «no funciona»: el resultado estaba en un cartel que se iba
+  // solo, así que la primera vez no se vio, y la segunda dijo cero. Un resultado que
+  // se va solo no es un resultado.
+  const db = baseReal();
+  for (let i = 1; i <= 4; i++) {
+    db.prepare('INSERT INTO liquidaciones (n_liquidacion,fecha,oc_id) VALUES (?,?,?)')
+      .run('SG-' + i, '2026-08-25', i);
+  }
+  for (let i = 1; i <= 3; i++) {
+    db.prepare('INSERT INTO liquidaciones (n_liquidacion,fecha,oc_id) VALUES (?,?,NULL)')
+      .run('AB-' + i, '2026-08-25');
+  }
+  const antes = contar(db, 'sg-liquidaciones-productor');
+  assert.equal(antes.total, 4, 'se van las 4 que salieron de una partida');
+  assert.equal(antes.quedan[0].filas, 3, 'y se avisa que quedan 3 ANTES de apretar');
+  assert.match(antes.quedan[0].por_que, /Abasto/);
+
+  const r = limpiar(db, 'sg-liquidaciones-productor', { confirmacion: 'sg-liquidaciones-productor' });
+  assert.equal(r.total, 4, 'informa lo que se borró de verdad');
+  assert.equal(r.quedan[0].filas, 3);
+  // Y apretando otra vez: cero, porque ya no queda nada suyo. Es correcto, y ahora se
+  // explica en vez de parecer una falla.
+  const r2 = limpiar(db, 'sg-liquidaciones-productor', { confirmacion: 'sg-liquidaciones-productor' });
+  assert.equal(r2.total, 0);
+  assert.equal(r2.quedan[0].filas, 3);
+});
+
+test('el resultado se queda en la pantalla, no en un cartel que se va', () => {
+  assert.match(PANEL, /Se borraron '\s*\+ nr\(d\.total\)/);
+  assert.match(PANEL, /No había nada que borrar/);
+  assert.match(PANEL, /Quedó a propósito:/);
+  assert.match(PANEL, /Listo, refrescar/, 'la recarga la decide el que mira, no un temporizador');
+  // Y ya no se informa el conteo previo como si fuera lo borrado.
+  assert.doesNotMatch(PANEL, /toast\('Se borraron '/);
+});
+
 test('el interruptor tiene DÓNDE tocarse', () => {
   // No alcanza con que el valor exista: no había una sola pantalla en el panel que
   // escribiera la configuración de San Gerónimo, así que la clave no se podía tocar
