@@ -6776,6 +6776,22 @@ function sgLoadFamilias(){
     function(i){ _tipeado[i.id] = i.value; });
   api('/api/sg/familias/uso').then(function(r){
     var rows=(r&&r.ok)?(r.data||[]):[]; SG.cacheFam=rows;
+    // ── LO QUE ESTÁ ESPERANDO FAMILIA, A LA VISTA ─────────────────────────
+    // La sala de espera sólo sirve si alguien la mira. Un producto estacionado en
+    // «Sin clasificar» sigue vendiéndose y facturándose igual, así que sin este
+    // aviso se queda ahí para siempre y la limpieza que motivó todo esto no pasa.
+    var tr = rows.filter(function(f){ return f.transitoria; })[0];
+    var av = eid('sg-fam-pendientes');
+    if (av) {
+      var esperando = tr ? (Number(tr.especies||0) + Number(tr.productos||0)) : 0;
+      av.style.display = esperando ? '' : 'none';
+      av.innerHTML = esperando
+        ? '⏳ Hay <b>' + (Number(tr.productos)||0) + ' producto' + ((Number(tr.productos)||0)===1?'':'s')
+          + '</b> y <b>' + (Number(tr.especies)||0) + ' especie' + ((Number(tr.especies)||0)===1?'':'s')
+          + '</b> esperando familia en «' + escH(tr.nombre) + '». '
+          + 'Se reasignan desde <b>Productos → Especie → Mover de familia</b>.'
+        : '';
+    }
     var tb=eid('sg-tb-familias'); if(!tb) return;
     // PARAMETRIZAR ES DEL ADMIN, ANULAR ES UN NIVEL (CLAUDE.md). El alta y la
     // edición van con requireAdmin en el backend, así que al que no es admin no
@@ -7409,18 +7425,21 @@ function sgProdDelEsp(){
     else toast((r&&r.error)||'No se pudo borrar','er');
   });
 }
+// EL MISMO CAMINO QUE EL MAESTRO. Acá había una copia del borrado con su propio
+// mensaje —"no se puede si tiene especies hijas"— que desde este cambio es falso: sí
+// se puede, y lo que colgaba se estaciona. Dos borrados con dos textos distintos
+// para la misma acción es la forma de que uno de los dos quede viejo, y quedó.
 function sgProdDelFam(){
   var id = eid('sg-p-familia').value;
   if(!id) return toast('Elegí una familia para borrar','er');
-  var f = (SG.cacheFam||[]).find(function(x){ return String(x.id)===String(id); });
-  if(!confirm('¿Borrar la familia "'+(f?f.nombre:'')+'"? No se puede si tiene especies hijas o productos que la usan.')) return;
-  api('/api/sg/familias/'+id,'DELETE').then(function(r){
-    if(r&&r.ok){
-      toast('Familia borrada','ok');
-      SG.cacheFam = (SG.cacheFam||[]).filter(function(x){ return String(x.id)!==String(id); });
-      eid('sg-p-familia').innerHTML = '<option value="">— Elegir —</option>' + SG.cacheFam.map(function(x){ return '<option value="'+x.id+'">'+esc(sgPad2(x.codigo)+' · '+x.nombre)+'</option>'; }).join('');
-      sgProdFamChange();
-    } else toast((r&&r.error)||'No se pudo borrar','er');
+  sgFamBorrar(id, function(){
+    SG.cacheFam = (SG.cacheFam||[]).filter(function(x){ return String(x.id)!==String(id); });
+    eid('sg-p-familia').innerHTML = '<option value="">— Elegir —</option>' + SG.cacheFam.map(function(x){ return '<option value="'+x.id+'">'+esc(sgPad2(x.codigo)+' · '+x.nombre)+'</option>'; }).join('');
+    sgProdFamChange();
+    // El caché de productos quedó con la familia vieja pegada (está denormalizada),
+    // así que se recarga: si no, la grilla sigue mostrando el nombre de una familia
+    // que ya no existe.
+    sgLoadCaches();
   });
 }
 function sgSaveProd(){

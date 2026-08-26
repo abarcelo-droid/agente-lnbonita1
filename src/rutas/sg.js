@@ -621,9 +621,22 @@ router.delete('/familias/:id', requireAuth, (req, res) => {
         db.prepare(`UPDATE sg_especies SET familia_id=?, codigo=?,
             modificado_en=datetime('now','localtime'), modificado_por=? WHERE id=?`)
           .run(dest.id, nextCodigoNivel(db, 'sg_especies', 'familia_id=?', [dest.id]), uid(req), esp.id);
-        db.prepare('UPDATE sg_productos SET familia_id=?, familia=? WHERE especie_id=?').run(dest.id, dest.nombre, esp.id);
+        // ── SÓLO LOS PRODUCTOS DE ESTA FAMILIA ──────────────────────────
+        // Acá faltaba el AND familia_id, y no es un detalle. Un producto puede tener
+        // su especie en la familia que muere y su familia_id apuntando a OTRA —pasa
+        // cuando una especie se movió de familia y ese producto quedó atrás—. Sin el
+        // filtro, este UPDATE lo arrancaba de su familia legítima, que sigue viva, y
+        // lo estacionaba en la sala de espera.
+        // Peor: al paso 1 tampoco lo alcanzaba (filtra por familia_id), así que se
+        // quedaba sin alícuota propia y sin la de su familia. Desde el #879 eso ya no
+        // sale exento en silencio: FRENA la emisión. Un producto que se facturaba
+        // bien dejaba de poder facturarse por dar de baja una familia ajena.
+        db.prepare('UPDATE sg_productos SET familia_id=?, familia=? WHERE especie_id=? AND familia_id=?')
+          .run(dest.id, dest.nombre, esp.id, id);
         // Y el código del producto, que es FF.EE.VV y arranca con el de la familia.
-        for (const pr of db.prepare('SELECT id, variedad_id FROM sg_productos WHERE especie_id=?').all(esp.id)) {
+        // Sólo el de los que efectivamente se mudaron: al que se quedó en su familia
+        // hay que dejarle el suyo.
+        for (const pr of db.prepare('SELECT id, variedad_id FROM sg_productos WHERE especie_id=? AND familia_id=?').all(esp.id, dest.id)) {
           const nuevo = resolverProducto(db, { familia_id: dest.id, especie_id: esp.id, variedad_id: pr.variedad_id });
           if (!nuevo.error) db.prepare('UPDATE sg_productos SET codigo=? WHERE id=?').run(nuevo.codigo, pr.id);
         }
