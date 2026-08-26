@@ -17281,26 +17281,51 @@ function sgGestionViejaDiag(){
       + 'Esto sólo mira: no cambia nada.</div></div>'
       + '<button class="btn bo bs" onclick="sgGestionViejaDiag()">Cerrar</button></div>';
 
-    if (!s.corregibles && !s.a_mano && !s.huerfanas) {
+    // ══ LO FISCAL PRIMERO, Y SEPARADO DE LAS PRUEBAS ═══════════════════
+    //
+    // La primera corrida mostró "$308.438,86 registrados de menos" en letras
+    // grandes, y eran TODOS comprobantes del circuito de prueba: punto de venta
+    // manual y homologación. Esa plata no era de ningún cliente. Un número que
+    // asusta y no es de nadie hace perder el tiempo la primera vez y hace ignorar
+    // el cartel la vez que sí importa.
+    var hayFiscal = s.corregibles || s.a_mano || s.huerfanas;
+    if (!hayFiscal && !s.corregibles_prueba) {
       cont.innerHTML = h + '<div style="margin-top:10px;color:#166534;font-weight:600">'
         + '✓ No quedó ningún comprobante con el descuento mal registrado.</div>'
         + '<div style="font-size:11.5px;color:var(--mut);margin-top:4px">Se revisaron '
         + s.comprobantes_mirados + ' comprobantes y ' + s.renglones_mirados + ' renglones.</div></div>';
       return;
     }
-
-    h += '<div style="display:flex;gap:18px;flex-wrap:wrap;margin:12px 0 4px">'
-      + '<div><div style="font-size:11px;color:var(--mut);text-transform:uppercase">Se registró de menos</div>'
-      + '<div style="font-size:20px;font-weight:800;color:#8a5a1f">' + sgMoney2(s.diferencia_total) + '</div>'
-      + '<div style="font-size:11px;color:var(--mut)">en ' + s.corregibles + ' comprobante'
-      + (s.corregibles === 1 ? '' : 's') + '</div></div>'
-      + (s.a_mano ? '<div><div style="font-size:11px;color:var(--mut);text-transform:uppercase">Hay que mirarlos a mano</div>'
-          + '<div style="font-size:20px;font-weight:800;color:#b91c1c">' + s.a_mano + '</div>'
-          + '<div style="font-size:11px;color:var(--mut)">el precio del remito se pisó al facturar</div></div>' : '')
-      + (s.huerfanas ? '<div><div style="font-size:11px;color:var(--mut);text-transform:uppercase">Sin renglones</div>'
-          + '<div style="font-size:20px;font-weight:800">' + s.huerfanas + '</div>'
-          + '<div style="font-size:11px;color:var(--mut)">rechazadas por AFIP</div></div>' : '')
-      + '</div>';
+    if (!hayFiscal) {
+      h += '<div style="margin-top:10px;color:#166534;font-weight:600">'
+        + '✓ Ninguna factura fiscal quedó con el descuento mal registrado.</div>'
+        + '<div style="font-size:12.5px;color:var(--mut);margin-top:4px">'
+        + 'Hay <b>' + s.corregibles_prueba + '</b> comprobante'
+        + (s.corregibles_prueba === 1 ? '' : 's') + ' del circuito de prueba con diferencias por '
+        + sgMoney2(s.diferencia_prueba) + ' —punto de venta manual u homologación—, que no son '
+        + 'plata de nadie. Se listan abajo por si querés mirarlos.</div>';
+    } else {
+      h += '<div style="display:flex;gap:18px;flex-wrap:wrap;margin:12px 0 4px">'
+        + '<div><div style="font-size:11px;color:var(--mut);text-transform:uppercase">Se registró de menos</div>'
+        + '<div style="font-size:20px;font-weight:800;color:#8a5a1f">' + sgMoney2(s.diferencia_total) + '</div>'
+        + '<div style="font-size:11px;color:var(--mut)">en ' + s.corregibles + ' factura'
+        + (s.corregibles === 1 ? '' : 's') + ' fiscal' + (s.corregibles === 1 ? '' : 'es') + '</div></div>'
+        + (s.a_mano ? '<div><div style="font-size:11px;color:var(--mut);text-transform:uppercase">Hay que mirarlos a mano</div>'
+            + '<div style="font-size:20px;font-weight:800;color:#b91c1c">' + s.a_mano + '</div>'
+            + '<div style="font-size:11px;color:var(--mut)">el precio del remito se pisó al facturar</div></div>' : '')
+        + (s.huerfanas ? '<div><div style="font-size:11px;color:var(--mut);text-transform:uppercase">Sin renglones</div>'
+            + '<div style="font-size:20px;font-weight:800">' + s.huerfanas + '</div>'
+            + '<div style="font-size:11px;color:var(--mut)">rechazadas por AFIP</div></div>' : '')
+        + (s.corregibles_prueba ? '<div><div style="font-size:11px;color:var(--mut);text-transform:uppercase">Del circuito de prueba</div>'
+            + '<div style="font-size:20px;font-weight:800;color:var(--mut)">' + s.corregibles_prueba + '</div>'
+            + '<div style="font-size:11px;color:var(--mut)">' + sgMoney2(s.diferencia_prueba) + ' que no son de nadie</div></div>' : '')
+        + '</div>';
+    }
+    if (s.a_mano_en_cero) {
+      h += '<div style="font-size:11.5px;color:var(--mut);margin-top:2px">'
+        + 'Hay ' + s.a_mano_en_cero + ' más que no se pueden reconstruir pero tienen $0 guardado: '
+        + 'no hay nada que corregir en ellos.</div>';
+    }
 
     // LO QUE NO SE ARREGLA CON UN UPDATE, ARRIBA DE TODO.
     if (s.liquidaciones_afectadas) {
@@ -17332,14 +17357,24 @@ function sgGestionViejaDiag(){
       + '<th style="width:130px;text-align:right">Diferencia</th></tr></thead><tbody>'
       + filas.map(function(c){
           var aMano = c.accion === 'revisar_a_mano';
-          return '<tr><td><code>' + escH(c.numero || '') + '</code></td>'
+          return '<tr' + (c.fiscal ? '' : ' style="opacity:.6"') + '>'
+            + '<td><code>' + escH(c.numero || '') + '</code>'
+              + (c.fiscal ? '' : '<div><span class="bdg" style="background:var(--bor);color:var(--mut);font-size:10px"'
+                  + ' title="Punto de venta manual u homologación: no es una factura fiscal">prueba</span></div>') + '</td>'
             + '<td>' + escH(c.cliente || '') + '</td>'
             + '<td>' + escH(c.fecha || '') + '</td>'
             + '<td style="text-align:right">' + sgMoney2(c.dif_gestion) + '</td>'
             + '<td style="text-align:right">' + (aMano
                 ? '<span style="color:#b91c1c">a mano</span>' : sgMoney2(c.dif_gestion_nueva)) + '</td>'
-            + '<td style="text-align:right' + (aMano ? '' : ';color:#8a5a1f;font-weight:600') + '">'
-              + (aMano ? '<span style="color:var(--mut)">—</span>' : '+' + sgMoney2(c.diferencia)) + '</td></tr>';
+            // EL SIGNO SALE DEL NÚMERO, NO ESCRITO A MANO. Con un '+' fijo, un
+            // renglón que se registró de MÁS salía "+$-3,12". Y los hay: es el
+            // caso del "$3 de venta de gestión que nadie acordó" — un descuento
+            // que nunca existió, nacido de comparar dos precios redondeados
+            // distinto. Ese se corrige a cero, y baja en vez de subir.
+            + '<td style="text-align:right' + (aMano ? '' : ';color:'
+                + ((c.diferencia || 0) < 0 ? '#0e7490' : '#8a5a1f') + ';font-weight:600') + '">'
+              + (aMano ? '<span style="color:var(--mut)">—</span>'
+                       : ((c.diferencia > 0 ? '+' : '') + sgMoney2(c.diferencia))) + '</td></tr>';
         }).join('')
       + (d.huerfanas || []).map(function(f){
           return '<tr style="background:#fafafa"><td><code>' + escH(f.numero || '') + '</code></td>'

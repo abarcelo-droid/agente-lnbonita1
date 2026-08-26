@@ -64,6 +64,28 @@ export function modoDeLinea({ kg, neto, precio_por_kg, alicuota }) {
   return 'no_reconstruible';
 }
 
+// ══ ¿ESTE COMPROBANTE VALE PLATA DE VERDAD? ════════════════════════════
+//
+// La primera corrida de esto le mostró a Pablo "$308.438,86 registrados de menos"
+// en letras grandes, y eran TODOS comprobantes de prueba: punto de venta manual
+// (no le informa nada a AFIP, no tiene CAE) y homologación (el AFIP de prueba).
+// Ninguno era una factura fiscal. La plata no era de ningún cliente.
+//
+// Un diagnóstico que mezcla las dos cosas es peor que no tenerlo: la primera vez
+// asusta de más, y la vez que de verdad haya una diferencia real escondida entre
+// veinte pruebas, no se va a ver.
+//
+// Fiscal de verdad es: emitido contra el AFIP de producción y autorizado con CAE.
+// Todo lo demás —manual, homologación, marcado como prueba— es del circuito.
+export function esFiscalReal(f) {
+  if (Number(f.es_prueba) === 1) return false;
+  const est = String(f.afip_estado || '');
+  if (est.startsWith('MANUAL')) return false;
+  if (String(f.ambiente || '') === 'homologacion') return false;
+  if (String(f.numero || '').startsWith('AFIPH-') || String(f.numero || '').startsWith('MANUAL-')) return false;
+  return est === 'autorizado' && !!f.cae;
+}
+
 // ── EL DIAGNÓSTICO ──────────────────────────────────────────────────────────
 // Recibe la base por parámetro: así se puede correr contra una de prueba sin
 // levantar el servidor (test/gestion_vieja.test.mjs).
@@ -74,7 +96,8 @@ export function diagnosticoGestion(db) {
            di.precio_por_kg, di.precio_lista_por_kg,
            COALESCE(pr.iva_alicuota, fam.iva_alicuota) AS alicuota,
            pr.nombre AS producto, l.codigo_lote,
-           f.numero, f.fecha, f.estado, f.afip_estado, f.total,
+           f.numero, f.fecha, f.estado, f.afip_estado, f.total, f.ambiente,
+           COALESCE(f.es_prueba,0) AS es_prueba, f.cae,
            COALESCE(f.dif_gestion,0) AS dif_gestion, f.dif_motivo, f.asiento_id,
            c.id AS cliente_id, c.razon_social AS cliente
       FROM sg_factura_despachos fd
@@ -104,6 +127,7 @@ export function diagnosticoGestion(db) {
         asiento_id: r.asiento_id, renglones: [], suma_nueva: 0, hay_dudoso: false });
     }
     const f = porFactura.get(r.factura_id);
+    if (f.fiscal === undefined) f.fiscal = esFiscalReal(r);
     f.renglones.push(fila);
     if (nueva == null) f.hay_dudoso = true; else f.suma_nueva = r2(f.suma_nueva + nueva);
   }
@@ -162,9 +186,14 @@ export function diagnosticoGestion(db) {
   // cobro. La deuda existiría y nadie la vería.
   const reabren = corregibles.filter((c) => (c.diferencia || 0) > 0.01 && c.estado === 'cobrada')
     .map((c) => ({ factura_id: c.factura_id, numero: c.numero, cliente: c.cliente,
-      reabre: c.diferencia }));
+      reabre: c.diferencia, fiscal: c.fiscal }));
 
   const suma = (xs, k) => r2(xs.reduce((a, x) => a + (Number(x[k]) || 0), 0));
+  // LA PLATA SE CUENTA SEPARADA. La de los comprobantes fiscales es la que le
+  // corresponde a alguien; la del circuito de prueba no es de nadie.
+  const corrFiscal = corregibles.filter((c) => c.fiscal);
+  const corrPrueba = corregibles.filter((c) => !c.fiscal);
+  const aMano = comprobantes.filter((c) => c.accion === 'revisar_a_mano');
   return {
     renglones: filas,
     comprobantes,
@@ -174,16 +203,22 @@ export function diagnosticoGestion(db) {
     resumen: {
       renglones_mirados: filas.length,
       comprobantes_mirados: comprobantes.length,
-      corregibles: corregibles.length,
-      a_mano: comprobantes.filter((c) => c.accion === 'revisar_a_mano').length,
+      corregibles: corrFiscal.length,
+      corregibles_prueba: corrPrueba.length,
+      // "A mano" con CERO guardado no es un problema: no hay nada que corregir
+      // salvo que debiera haber tenido un descuento, y eso no lo sabe nadie.
+      // Contarlos juntos con los que sí tienen plata infla la alarma.
+      a_mano: aMano.filter((c) => Math.abs(Number(c.dif_gestion) || 0) > 0.01).length,
+      a_mano_en_cero: aMano.filter((c) => Math.abs(Number(c.dif_gestion) || 0) <= 0.01).length,
       ya_estaban_bien: comprobantes.filter((c) => c.accion === 'ya_esta_bien').length,
       huerfanas: huerfanas.length,
       // Cuánta plata está en juego: lo que se registró de menos como resignado, y
       // que es lo que el cliente debía de más y lo que al productor se le liquidó
       // de menos.
-      diferencia_total: suma(corregibles, 'diferencia'),
+      diferencia_total: suma(corrFiscal, 'diferencia'),
+      diferencia_prueba: suma(corrPrueba, 'diferencia'),
       liquidaciones_afectadas: Array.isArray(liquidaciones) ? liquidaciones.filter((l) => !l.error).length : 0,
-      saldos_que_reabren: reabren.length,
+      saldos_que_reabren: reabren.filter((r) => r.fiscal).length,
     },
   };
 }
