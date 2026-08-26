@@ -4472,6 +4472,15 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
     <div style="min-width:220px"><label>Períodos <span style="color:var(--mut)">(varios = comparar)</span></label>
       <div id="inf-periodos" style="display:flex;gap:5px;flex-wrap:wrap"></div></div>
     <div><label>Mes comercial</label><select id="inf-mes-ok" onchange="infCargar()"></select></div>
+    <!-- El eje de la COMPARATIVA. Con las columnas por mes se lee "cómo viene este cliente
+         mes a mes"; dejando el producto en las filas, "cómo se compara un producto contra
+         otro". Es el mismo pivot mirado desde los dos lados. -->
+    <div><label>Comparar por</label><select id="inf-columnas" onchange="infCargar()"></select></div>
+    <div><label>Ver</label><select id="inf-metrica" onchange="infRepintarComparativa()">
+      <option value="facturacion_usd">US$ facturados</option>
+      <option value="kilos">Kilos</option>
+      <option value="usd_por_kg">US$ por kilo</option>
+    </select></div>
     <div><label>Cliente</label><select id="inf-filtro-cliente" onchange="infCargar()"></select></div>
     <div><label>Vendedor</label><select id="inf-filtro-vendedor" onchange="infCargar()"></select></div>
     <div><label>Producto</label><select id="inf-filtro-producto" onchange="infCargar()"></select></div>
@@ -4486,6 +4495,38 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
     <thead id="inf-thead"></thead><tbody id="inf-tbody"><tr><td class="emp">Elegí un período.</td></tr></tbody>
   </table></div>
   <div id="inf-nota" style="font-size:11px;color:var(--mut);margin-top:6px"></div>
+</div>
+
+<!-- Abrir una fila: de qué está hecho ese cliente (o ese producto, o ese mes). Se pide con
+     los MISMOS filtros de la pantalla más uno: el de la fila que se tocó. Por eso los
+     totales cierran contra la fila de arriba en vez de parecerse — y el cartel de abajo lo
+     comprueba a la vista, que es la única forma de que se note si algún día dejan de cerrar. -->
+<div class="ab-modal-overlay" id="inf-drill-modal">
+  <div class="ab-modal" style="max-width:min(1100px,96vw);width:96vw;max-height:92vh;display:flex;flex-direction:column">
+    <div class="mhd">
+      <div><div class="mht" id="inf-drill-tit">Detalle</div>
+        <div class="ph-s" id="inf-drill-sub" style="font-size:11.5px"></div></div>
+      <button class="mcl" onclick="closeMB('inf-drill-modal')">×</button>
+    </div>
+    <div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap;margin-bottom:10px">
+      <div><label style="font-size:11px;color:var(--mut);text-transform:uppercase">Abrir por</label><br>
+        <select id="inf-drill-dim" onchange="infDrillCargar()" style="padding:7px 10px;border-radius:7px;border:1px solid var(--bor);background:var(--bg)"></select></div>
+      <div style="margin-left:auto;display:flex;gap:8px">
+        <button class="btn bo bs" onclick="infDrillFijar()" title="Deja este filtro puesto en la pantalla de atrás y cierra">Filtrar la pantalla por esto</button>
+        <button class="btn bo bs" onclick="infDrillExportar()">⬇️ Excel</button>
+      </div>
+    </div>
+    <div id="inf-drill-meses" style="margin-bottom:10px"></div>
+    <div style="overflow-y:auto;flex:1">
+      <div class="ab-table-wrap" style="overflow-x:hidden !important">
+        <table class="pa-tbl" style="width:100%;table-layout:fixed">
+          <thead id="inf-drill-thead"></thead>
+          <tbody id="inf-drill-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+    <div id="inf-drill-cuadre" style="font-size:11.5px;margin-top:8px"></div>
+  </div>
 </div>
 
 <!-- Diagnóstico: los títulos reales de la planilla contra lo que el código espera. -->
@@ -31773,6 +31814,11 @@ function infInit(){
     var mo=eid('inf-mes-ok');
     if(mo) mo.innerHTML='<option value="">— todos —</option>'+(r.data.meses||[]).map(function(m){
       return '<option value="'+esc(m)+'">'+esc(m)+'</option>'; }).join('');
+    // Las columnas de la comparativa las publica el servidor, para que la lista no viva en
+    // dos lados y se desactualice sola.
+    var cx=eid('inf-columnas');
+    if(cx) cx.innerHTML=(r.data.columnas||[{k:'periodo',label:'Período (jul–jun)'}]).map(function(c){
+      return '<option value="'+esc(c.k)+'"'+(c.k==='periodo'?' selected':'')+'>'+esc(c.label)+'</option>'; }).join('');
     infCargar();
   });
 }
@@ -31799,21 +31845,33 @@ function infLimpiar(){
   ['cliente','vendedor','producto','categoria'].forEach(function(k){ var e=eid('inf-filtro-'+k); if(e) e.value=''; });
   eid('inf-q').value=''; infCargar();
 }
-function infParams(){
-  var p=['agrupar='+encodeURIComponent(eid('inf-agrupar').value||'cliente'),
-         'periodos='+encodeURIComponent((INF.sel||[]).join(','))];
-  var mo=(eid('inf-mes-ok')||{}).value; if(mo) p.push('mes_ok='+encodeURIComponent(mo));
+// Los filtros SIN el agrupamiento. El detalle de una fila los reusa tal cual y le agrega
+// uno: el de la fila que se tocó. Por eso los totales del detalle cierran contra la fila de
+// arriba en vez de parecerse — es la misma consulta con una condición más.
+// 'omitir' saca un filtro puntual: si la pantalla ya está filtrada por cliente y se abre una
+// fila de clientes, mandar el filtro dos veces deja la condición en "cliente = 'a,b'" y no
+// devuelve nada. Pisarlo es lo correcto: la fila que se tocó es más específica.
+function infParamsBase(omitir){
+  var p=['periodos='+encodeURIComponent((INF.sel||[]).join(','))];
+  var mo=(eid('inf-mes-ok')||{}).value; if(mo && omitir!=='mes_ok') p.push('mes_ok='+encodeURIComponent(mo));
   ['cliente','vendedor','producto','categoria'].forEach(function(k){
+    if(k===omitir) return;
     var v=(eid('inf-filtro-'+k)||{}).value; if(v) p.push('filtro_'+k+'='+encodeURIComponent(v));
   });
   var q=(eid('inf-q')||{}).value; if(q) p.push('q='+encodeURIComponent(q));
   return p.join('&');
 }
+function infParams(){
+  return 'agrupar='+encodeURIComponent(eid('inf-agrupar').value||'cliente')
+    + '&columnas='+encodeURIComponent((eid('inf-columnas')||{}).value||'periodo')
+    + '&' + infParamsBase();
+}
 function infCargar(){
   eid('inf-tbody').innerHTML='<tr><td class="emp">Calculando…</td></tr>';
   var qs=infParams();
-  // Con más de un período marcado se pide la comparativa; con uno solo, la tabla de siempre.
-  INF.comparando=(INF.sel||[]).length>1;
+  // Se pide la comparativa cuando hay algo que comparar: varios períodos marcados, o las
+  // columnas puestas en el mes comercial (que es "mes a mes" aunque el período sea uno solo).
+  INF.comparando=(INF.sel||[]).length>1 || ((eid('inf-columnas')||{}).value==='mes_ok');
   if(INF.comparando){
     api('/api/informes/ventas/comparar?'+qs).then(function(r){
       if(!r||!r.ok){ eid('inf-tbody').innerHTML='<tr><td class="emp">'+esc((r&&r.error)||'Error')+'</td></tr>'; return; }
@@ -31917,8 +31975,16 @@ function infPintarTabla(d){
     var flecha=INF.orden===c[0]?(INF.desc?' ▼':' ▲'):'';
     return '<th style="text-align:'+c[2]+';cursor:pointer" onclick="infOrdenar(\''+c[0]+'\')">'+esc(lbl)+flecha+'</th>';
   }).join('')+'</tr>';
-  eid('inf-tbody').innerHTML = filas.length ? filas.map(function(f){
-    return '<tr>'+cols.map(function(c){
+  // Sin table-layout fijo, porque acá las columnas son pocas y anchas. La comparativa sí lo
+  // necesita y se lo pone ella: son la misma tabla usada de dos formas.
+  var tb=eid('inf-thead').parentNode;
+  tb.style.tableLayout=''; tb.style.width='';
+  if(tb.parentNode) tb.parentNode.style.overflowX='';
+  // Las filas se abren: el índice va en el onclick y no el nombre, porque un cliente que se
+  // llama "COTO C.I.C. S.A." o lleva un apóstrofo rompería el atributo.
+  INF.pintadas=filas;
+  eid('inf-tbody').innerHTML = filas.length ? filas.map(function(f,i){
+    return '<tr style="cursor:pointer" title="Abrir el detalle de '+esc(f.clave||'')+'" onclick="infDrillAbrir('+i+')">'+cols.map(function(c){
       var v=f[c[0]];
       if(c[0]==='clave') return '<td class="inf-nom">'+esc(v||'')+'</td>';
       if(c[0]==='facturacion_ars') return '<td style="text-align:right">'+sgMoney(Math.round(v||0))+'</td>';
@@ -31931,55 +31997,241 @@ function infPintarTabla(d){
       return '<td style="text-align:right">'+(v!=null?nr(v):'—')+'</td>';
     }).join('')+'</tr>';
   }).join('') : '<tr><td colspan="'+cols.length+'" class="emp">No hay ventas con esos filtros.</td></tr>';
-  eid('inf-nota').innerHTML = d.truncado
-    ? '⚠ Se muestran las 500 primeras. Los totales de arriba SÍ incluyen todo — se calculan en el servidor, no sumando la tabla.'
-    : '';
+  eid('inf-nota').innerHTML = (d.truncado
+    ? '⚠ Se muestran las 500 primeras. Los totales de arriba SÍ incluyen todo — se calculan en el servidor, no sumando la tabla. '
+    : '') + '👆 Tocá una fila para abrirla por producto, cliente o mes.';
 }
-// La tabla comparativa: una columna por período, más la variación contra el anterior. Es la
-// misma que el equipo arma en la planilla (MES OK en las filas, las campañas en las columnas,
-// la suma de tot_dol adentro), pero sirve para cualquier dimensión, no sólo el mes.
+// ── LA COMPARATIVA ────────────────────────────────────────────────────────────────
+// Un pivot con las dos puntas elegibles: en las filas cualquier dimensión (cliente,
+// producto, vendedor) y en las columnas el período o el MES COMERCIAL. De ahí salen las dos
+// preguntas de todos los días: cómo viene alguien MES A MES, y cómo se compara un PRODUCTO
+// CONTRA OTRO en la misma ventana.
+//
+// La métrica se cambia SIN volver a pedir nada: cada celda ya trae kilos, dólares y US$/kg.
+// Volver al servidor para cambiar de unidad haría esperar por un dato que ya está.
+var INF_METRICAS={
+  facturacion_usd:{ label:'US$ facturados', unidad:'US$', fmt:function(v){ return nr(v); } },
+  kilos:          { label:'Kilos',          unidad:'kg',  fmt:function(v){ return nr(v); } },
+  usd_por_kg:     { label:'US$ por kilo',   unidad:'US$/kg', fmt:function(v){ return nrDec(v,2); } },
+};
+function infRepintarComparativa(){ if(INF.comp) infPintarComparativa(INF.comp); }
+// '01-JULIO' se muestra 'JULIO': el número está para ordenar, no para leerlo.
+function infEtiquetaCol(v){
+  var s=String(v||''); var m=/^\d\d-(.+)$/.exec(s);
+  return m?m[1]:s;
+}
 function infPintarComparativa(d){
-  var pers=d.periodos||[];
-  var money=function(v){ return v==null?'—':('US$ '+nr(v)); };
-  eid('inf-thead').innerHTML='<tr><th style="text-align:left">'+esc(d.label||'')+'</th>'
-    + pers.map(function(p){ return '<th style="text-align:right">'+esc(p)+'</th>'; }).join('')
-    // La variación sólo tiene sentido con exactamente dos períodos: con tres, "contra cuál"
-    // deja de ser obvio y un número ambiguo es peor que ninguno.
-    + (pers.length===2?'<th style="text-align:right">Var.</th>':'')
-    + '</tr>';
-  var celda=function(f,p){ var x=(f.por_periodo||{})[p]; return x?x.facturacion_usd:null; };
-  eid('inf-tbody').innerHTML=(d.filas||[]).map(function(f){
-    var h='<tr><td class="inf-nom">'+esc(f.clave||'')+'</td>'
-      + pers.map(function(p){
-          var v=celda(f,p);
-          // Sin dato en ese período se pone raya y no cero: "no vendió" y "no hay fila" son
-          // cosas distintas, y un cero hace que la variación diga -100% cuando no corresponde.
-          return '<td style="text-align:right">'+(v!=null?money(v):'<span style="color:var(--mut)">—</span>')+'</td>';
-        }).join('');
-    if(pers.length===2){
-      var a=celda(f,pers[0]), b=celda(f,pers[1]);
-      if(a!=null&&b!=null&&a!==0){
-        var pct=Math.round((b-a)/Math.abs(a)*1000)/10;
-        var col=pct>=0?'#16a34a':'var(--err,#dc2626)';
-        h+='<td style="text-align:right;color:'+col+';font-weight:600">'+(pct>=0?'+':'')+nr(pct)+'%</td>';
-      } else h+='<td style="text-align:right;color:var(--mut)">—</td>';
-    }
-    return h+'</tr>';
-  }).join('') || '<tr><td class="emp" colspan="'+(pers.length+2)+'">No hay ventas con esos filtros.</td></tr>';
+  INF.comp=d;
+  var cols=d.cols||[];
+  var mk=(eid('inf-metrica')||{}).value||'facturacion_usd';
+  var M=INF_METRICAS[mk]||INF_METRICAS.facturacion_usd;
+  var val=function(f,c){ var x=(f.por_col||{})[c]; return x?x[mk]:null; };
 
-  // El total por período, de su propia consulta: sumando la tabla recortada daría de menos.
+  // NADA DE BARRA HORIZONTAL (regla del proyecto). Con las columnas por mes son doce, así
+  // que el ancho se reparte fijo y el nombre de la fila es lo único que puede partirse: el
+  // número de la última columna es justamente el que se vino a mirar.
+  var tb=eid('inf-thead').parentNode;
+  tb.style.tableLayout='fixed'; tb.style.width='100%';
+  if(tb.parentNode) tb.parentNode.style.overflowX='hidden';
+  var anchoNom=cols.length>6?'22%':'34%';
+
+  eid('inf-thead').innerHTML='<tr><th style="text-align:left;width:'+anchoNom+'">'+esc(d.label||'')+'</th>'
+    + cols.map(function(c){ return '<th style="text-align:right" title="'+esc(c)+'">'+esc(infEtiquetaCol(c))+'</th>'; }).join('')
+    // La variación sólo tiene sentido con exactamente dos columnas: con tres, "contra cuál"
+    // deja de ser obvio y un número ambiguo es peor que ninguno.
+    + (cols.length===2?'<th style="text-align:right;width:9%">Var.</th>':'')
+    + '</tr>';
+
+  var varCelda=function(a,b){
+    if(a==null||b==null||a===0) return '<td style="text-align:right;color:var(--mut)">—</td>';
+    var pct=Math.round((b-a)/Math.abs(a)*1000)/10;
+    var col=pct>=0?'#16a34a':'var(--err,#dc2626)';
+    return '<td style="text-align:right;color:'+col+';font-weight:600">'+(pct>=0?'+':'')+nr(pct)+'%</td>';
+  };
+
+  INF.pintadas=d.filas||[];
+  eid('inf-tbody').innerHTML=(d.filas||[]).map(function(f,i){
+    var h='<tr style="cursor:pointer" title="Abrir el detalle de '+esc(f.clave||'')+'" onclick="infDrillAbrir('+i+')">'
+      + '<td class="inf-nom" style="overflow:hidden;text-overflow:ellipsis">'+esc(f.clave||'')+'</td>'
+      + cols.map(function(c){
+          var v=val(f,c);
+          // Sin dato en esa columna va raya y no cero: "no vendió" y "no hay fila" son cosas
+          // distintas, y un cero hace que la variación diga -100% cuando no corresponde.
+          return '<td style="text-align:right">'+(v!=null?M.fmt(v):'<span style="color:var(--mut)">—</span>')+'</td>';
+        }).join('');
+    if(cols.length===2) h+=varCelda(val(f,cols[0]), val(f,cols[1]));
+    return h+'</tr>';
+  }).join('') || '<tr><td class="emp" colspan="'+(cols.length+2)+'">No hay ventas con esos filtros.</td></tr>';
+
+  // El total por columna sale de su propia consulta: sumando la tabla recortada daría de
+  // menos, y con US$/kg sumar las celdas directamente sería un promedio de promedios.
   var t=d.totales||{};
   var tot='<tr style="font-weight:700;border-top:2px solid var(--bor)"><td>TOTAL</td>'
-    + pers.map(function(p){ return '<td style="text-align:right">'+money((t[p]||{}).facturacion_usd)+'</td>'; }).join('');
-  if(pers.length===2){
-    var ta=(t[pers[0]]||{}).facturacion_usd, tb=(t[pers[1]]||{}).facturacion_usd;
-    var tp=(ta&&tb!=null)?Math.round((tb-ta)/Math.abs(ta)*1000)/10:null;
-    tot+='<td style="text-align:right;color:'+((tp||0)>=0?'#16a34a':'var(--err,#dc2626)')+'">'
-      +(tp!=null?((tp>=0?'+':'')+nr(tp)+'%'):'—')+'</td>';
-  }
+    + cols.map(function(c){ var x=t[c]; var v=x?x[mk]:null;
+        return '<td style="text-align:right">'+(v!=null?M.fmt(v):'—')+'</td>'; }).join('');
+  if(cols.length===2) tot+=varCelda((t[cols[0]]||{})[mk], (t[cols[1]]||{})[mk]);
   eid('inf-tbody').innerHTML+=tot+'</tr>';
+
   eid('inf-nota').innerHTML = (d.truncado?'⚠ Se muestran las 300 primeras filas. El TOTAL sí incluye todo. ':'')
-    + 'Comparando '+pers.length+' períodos · importes en dólares (suma de TOT DOL).';
+    + (d.mezcla_periodos
+        // Doce columnas de meses con dos campañas marcadas: cada celda es la suma de las dos.
+        // A veces es lo que se quiere, pero no se puede leer sin saberlo.
+        ? '<span style="color:#92400e">⚠ Cada mes suma los '+nr(d.periodos_en_juego||0)+' períodos marcados. '
+          + 'Dejá marcado uno solo para ver una campaña sola.</span> '
+        : '')
+    + esc(d.columnas_label||'')+' en las columnas · '+esc(M.label)+' adentro · '
+    + '👆 tocá una fila para abrirla.';
+}
+
+// ── ABRIR UNA FILA ────────────────────────────────────────────────────────────────
+// De qué está hecha esa fila. Se pide con los MISMOS filtros de la pantalla más uno, el de
+// la fila tocada: por eso los totales cierran contra la fila de arriba en vez de parecerse.
+// El cartel del pie lo comprueba a la vista — si algún día dejan de cerrar, se ve.
+function infDrillAbrir(i){
+  var f=(INF.pintadas||[])[i]; if(!f) return;
+  var clave=f.clave;
+  // '(sin dato)' junta todas las filas donde esa columna vino vacía. No hay filtro que las
+  // vuelva a separar, así que no se abre en vez de mostrar una tabla vacía sin explicación.
+  if(clave==='(sin dato)'){ toast('Esa fila junta todo lo que vino sin ese dato: no se puede abrir','er'); return; }
+  var dim=eid('inf-agrupar').value||'cliente';
+  var dimLabel=eid('inf-agrupar').selectedOptions[0].textContent;
+
+  // Lo que la fila de arriba dice que tiene que dar. En la comparativa se suman las celdas,
+  // así que se tolera el redondeo de cada una.
+  var esperado, tol=1;
+  if(f.por_col){
+    esperado={ kilos:0, facturacion_usd:0 };
+    Object.keys(f.por_col).forEach(function(c){
+      esperado.kilos+=(f.por_col[c].kilos||0);
+      esperado.facturacion_usd+=(f.por_col[c].facturacion_usd||0);
+    });
+    tol=Math.max(1, Object.keys(f.por_col).length);
+  } else {
+    esperado={ kilos:f.kilos||0, facturacion_usd:f.facturacion_usd||0 };
+  }
+  INF.drill={ dim:dim, dimLabel:dimLabel, clave:clave, esperado:esperado, tol:tol };
+
+  eid('inf-drill-tit').textContent=clave;
+  eid('inf-drill-sub').textContent=dimLabel+' · '+((INF.sel||[]).join(', ')||'sin período');
+  var sel=eid('inf-drill-dim');
+  sel.innerHTML=((INF.opts||{}).dimensiones||[]).filter(function(x){ return x.k!==dim; })
+    .map(function(x){ return '<option value="'+esc(x.k)+'">'+esc(x.label)+'</option>'; }).join('');
+  // Por producto es lo que se pregunta casi siempre: "de qué le vendí a este cliente".
+  sel.value = (dim==='producto'||dim==='articulo') ? 'cliente' : 'producto';
+  eid('inf-drill-modal').classList.add('on');
+  infDrillCargar();
+}
+
+function infDrillParams(){
+  var d=INF.drill;
+  return infParamsBase(d.dim)
+    + '&filtro_'+encodeURIComponent(d.dim)+'='+encodeURIComponent(d.clave);
+}
+
+function infDrillCargar(){
+  var d=INF.drill; if(!d) return;
+  var dimDrill=(eid('inf-drill-dim')||{}).value||'producto';
+  eid('inf-drill-tbody').innerHTML='<tr><td class="emp">Calculando…</td></tr>';
+  eid('inf-drill-cuadre').innerHTML='';
+  var qs='agrupar='+encodeURIComponent(dimDrill)+'&'+infDrillParams();
+  api('/api/informes/ventas?'+qs).then(function(r){
+    if(!r||!r.ok){ eid('inf-drill-tbody').innerHTML='<tr><td class="emp">'+esc((r&&r.error)||'Error')+'</td></tr>'; return; }
+    INF.drillFilas=r.data.filas||[];
+    INF.drillLabel=r.data.label||'';
+    infDrillPintar(r.data);
+  });
+  api('/api/informes/ventas/evolucion?'+qs).then(function(r){
+    if(r&&r.ok) infDrillMeses(r.data.filas||[]);
+  });
+}
+
+function infDrillPintar(d){
+  var cols=infCols();
+  eid('inf-drill-thead').innerHTML='<tr>'+cols.map(function(c){
+    var lbl=c[0]==='clave'?(d.label||'Clave'):c[1];
+    return '<th style="text-align:'+c[2]+(c[0]==='clave'?';width:30%':'')+'">'+esc(lbl)+'</th>';
+  }).join('')+'</tr>';
+  eid('inf-drill-tbody').innerHTML=(d.filas||[]).length ? d.filas.map(function(f){
+    return '<tr>'+cols.map(function(c){
+      var v=f[c[0]];
+      if(c[0]==='clave') return '<td class="inf-nom" style="overflow:hidden;text-overflow:ellipsis">'+esc(v||'')+'</td>';
+      if(c[0]==='facturacion_ars') return '<td style="text-align:right">'+sgMoney(Math.round(v||0))+'</td>';
+      if(c[0]==='rent_pct'){
+        var col=(v||0)>=0?'#16a34a':'var(--err,#dc2626)';
+        return '<td style="text-align:right;color:'+col+';font-weight:600">'+(v!=null?nrDec(v,1)+'%':'—')+'</td>';
+      }
+      if(c[0]==='usd_por_kg') return '<td style="text-align:right">'+nrDec(v,2)+'</td>';
+      return '<td style="text-align:right">'+(v!=null?nr(v):'—')+'</td>';
+    }).join('')+'</tr>';
+  }).join('') : '<tr><td colspan="'+cols.length+'" class="emp">Sin ventas.</td></tr>';
+
+  // EL CUADRE. El detalle y la fila de arriba tienen que dar lo mismo: es la misma consulta
+  // con una condición más. Decirlo a la vista es lo que hace que se note el día que no.
+  var e=INF.drill.esperado||{}, t=d.total||{}, tol=INF.drill.tol||1;
+  var dk=Math.round((t.kilos||0)-(e.kilos||0));
+  var du=Math.round((t.facturacion_usd||0)-(e.facturacion_usd||0));
+  var cierra=Math.abs(dk)<=tol && Math.abs(du)<=tol;
+  eid('inf-drill-cuadre').innerHTML = cierra
+    ? '<span style="color:#166534">✓ Cierra con la fila de arriba: '+nr(t.kilos||0)+' kg · US$ '+nr(t.facturacion_usd||0)
+      + ' en '+nr((d.filas||[]).length)+' '+esc(String(d.label||'').toLowerCase())+'.</span>'
+    : '<span style="color:var(--err,#dc2626)">⚠ El detalle NO cierra con la fila de arriba. '
+      + 'Arriba: '+nr(e.kilos||0)+' kg / US$ '+nr(e.facturacion_usd||0)+' · '
+      + 'acá: '+nr(t.kilos||0)+' kg / US$ '+nr(t.facturacion_usd||0)+' · '
+      + 'diferencia '+nr(dk)+' kg / US$ '+nr(du)+'.</span>';
+}
+
+// Los meses de esa fila, en SVG y sin librerías. Es el "mes a mes" de un solo cliente o de
+// un solo producto, que es lo que se mira después de abrirlo.
+function infDrillMeses(filas){
+  var box=eid('inf-drill-meses'); if(!box) return;
+  if(!filas.length){ box.innerHTML=''; return; }
+  var max=Math.max.apply(null, filas.map(function(f){ return f.facturacion_usd||0; }))||1;
+  var W=100/filas.length;
+  box.innerHTML='<div style="font-size:11px;color:var(--mut);margin-bottom:3px">Mes a mes · US$ facturados</div>'
+    + '<svg viewBox="0 0 100 26" preserveAspectRatio="none" style="width:100%;height:64px;display:block">'
+    + filas.map(function(f,i){
+        var h=Math.max(0.4, ((f.facturacion_usd||0)/max)*22);
+        return '<rect x="'+(i*W+W*0.15)+'" y="'+(22-h)+'" width="'+(W*0.7)+'" height="'+h+'"'
+          + ' fill="#7c1d3f"><title>'+esc(infEtiquetaCol(f.mes_ok))+' '+esc(f.periodo||'')
+          + ': US$ '+nr(f.facturacion_usd||0)+' · '+nr(f.kilos||0)+' kg</title></rect>';
+      }).join('')
+    + '</svg>'
+    + '<div style="display:flex;font-size:9.5px;color:var(--mut)">'
+    + filas.map(function(f){
+        return '<div style="flex:1;text-align:center;overflow:hidden">'+esc(infEtiquetaCol(f.mes_ok).slice(0,3))+'</div>';
+      }).join('')
+    + '</div>';
+}
+
+// Dejar el filtro puesto en la pantalla de atrás. Es el paso siguiente natural: se abrió una
+// fila, se vio de qué está hecha, y ahora se quiere seguir mirando ESO.
+function infDrillFijar(){
+  var d=INF.drill; if(!d) return;
+  var dimDrill=(eid('inf-drill-dim')||{}).value||'producto';
+  var caja=eid('inf-filtro-'+d.dim);
+  if(caja){ caja.value=d.clave; }
+  else if(d.dim==='mes_ok' && eid('inf-mes-ok')){ eid('inf-mes-ok').value=d.clave; }
+  else { toast('Por '+esc(d.dimLabel)+' no hay filtro en la pantalla; se cambia el agrupamiento nomás','ok'); }
+  eid('inf-agrupar').value=dimDrill;
+  closeMB('inf-drill-modal');
+  infCargar();
+}
+
+function infDrillExportar(){
+  var filas=INF.drillFilas||[];
+  if(!filas.length){ toast('No hay nada para exportar','er'); return; }
+  var cols=infCols();
+  var head=cols.map(function(c){ return c[0]==='clave'?(INF.drillLabel||'Clave'):(c[1]||c[0]); });
+  var esc2=function(v){ return '"'+String(v==null?'':v).replace(/"/g,'""')+'"'; };
+  var csv=[head.map(esc2).join(';')].concat(filas.map(function(f){
+    return cols.map(function(c){ return esc2(f[c[0]]); }).join(';');
+  })).join('\r\n');
+  var blob=new Blob(['\ufeff'+csv], {type:'text/csv;charset=utf-8'});
+  var a=document.createElement('a');
+  a.href=URL.createObjectURL(blob);
+  a.download='detalle-'+String(INF.drill.clave||'').replace(/[^a-z0-9]+/gi,'_').slice(0,40)+'.csv';
+  a.click();
+  URL.revokeObjectURL(a.href);
 }
 // Evolución mes a mes, en canvas y sin librerías. Barras de facturación y, si el nivel
 // alcanza, la línea de rentabilidad encima: es la comparación que se quiere hacer.

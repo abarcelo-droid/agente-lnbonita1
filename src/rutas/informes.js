@@ -181,6 +181,8 @@ router.post('/sync', requireAuth, express.json(), async (req, res) => {
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
+// Las opciones de la comparativa se publican acá y no se escriben en el panel: una lista
+// duplicada se desactualiza sola.
 router.get('/ventas/opciones', requireAuth, (req, res) => {
   try {
     const lista = (col) => db.prepare(
@@ -197,6 +199,7 @@ router.get('/ventas/opciones', requireAuth, (req, res) => {
     ).all().map(r => r.v);
     res.json({ ok: true, data: {
       dimensiones: Object.entries(DIMENSIONES).map(([k, d]) => ({ k, label: d.label })),
+      columnas: Object.entries(COLUMNAS).map(([k, d]) => ({ k, label: d.label })),
       cliente: lista('cliente'), vendedor: lista('vendedor'),
       producto: lista('producto'), categoria: lista('categoria'),
       proveedor: lista('proveedor'), cate_clie: lista('cate_clie'),
@@ -264,64 +267,110 @@ router.get('/verificar-kilos', requireAuth, async (req, res) => {
   }
 });
 
-// GET /api/informes/ventas/comparar — la MISMA agrupación, con una columna por período.
-// Es la tabla que el equipo ya arma en la planilla: MES OK en las filas, los períodos en las
-// columnas, y la suma de tot_dol adentro. Sirve para cualquier dimensión, no sólo el mes:
-// clientes comparando campañas, productos comparando campañas.
+// Qué puede ir en las COLUMNAS de la comparativa. Lista blanca por lo mismo que DIMENSIONES:
+// el nombre entra directo al SQL.
 //
-// El pivot se arma en JS y no con SQL dinámico: los períodos son datos, y meterlos en el
-// texto de la consulta para generar una columna por cada uno es exactamente cómo se abre un
-// agujero de inyección en una pantalla que sólo tiene que leer.
+// Las dos ordenan bien como TEXTO y por eso no hace falta un ORDER BY especial: los períodos
+// son '2025-2026' y los meses comerciales '01-JULIO' … '12-JUN', con el número adelante
+// justamente para que el orden alfabético dé el orden del negocio.
+const COLUMNAS = {
+  periodo: { col: 'periodo', label: 'Período (jul–jun)' },
+  mes_ok:  { col: 'mes_ok',  label: 'Mes comercial' },
+};
+
+// GET /api/informes/ventas/comparar — la MISMA agrupación, pivoteada: una columna por
+// período o por mes comercial, y la métrica adentro.
+//
+// Es la tabla que el equipo ya arma en la planilla (MES OK en las filas, las campañas en las
+// columnas), generalizada en los dos ejes: en las filas va cualquier dimensión —clientes,
+// productos, vendedores— y en las columnas el período o el mes. De ahí salen las dos
+// preguntas que se hacen todo el tiempo: cómo viene un cliente MES A MES, y cómo se compara
+// un PRODUCTO CONTRA OTRO en la misma ventana de tiempo.
+//
+// El pivot se arma en JS y no con SQL dinámico: los valores de la columna son DATOS, y
+// meterlos en el texto de la consulta para generar una columna por cada uno es exactamente
+// cómo se abre un agujero de inyección en una pantalla que sólo tiene que leer.
 router.get('/ventas/comparar', requireAuth, (req, res) => {
   try {
     const dimKey = DIMENSIONES[req.query.agrupar] ? req.query.agrupar : 'mes_ok';
     const dim = DIMENSIONES[dimKey];
+    const colKey = COLUMNAS[req.query.columnas] ? req.query.columnas : 'periodo';
+    const colDim = COLUMNAS[colKey];
     const { where, params } = armarWhere(req.query);
     const margen = puedeVerMargen(req.user);
     const cm = margen ? ', ROUND(SUM(rent_dol),0) AS rent_dol,'
       + ' ROUND(SUM(rent_dol)*100.0/NULLIF(SUM(tot_dol),0),1) AS rent_pct' : '';
 
+    // Filas y columnas por la MISMA dimensión daría una diagonal y nada más. Se avisa en vez
+    // de devolver una tabla que parece rota.
+    if (dim.col === colDim.col) {
+      return res.status(400).json({ ok: false,
+        error: 'Las filas y las columnas no pueden ser lo mismo (' + dim.label + ').' });
+    }
+
     const filas = db.prepare(`
       SELECT COALESCE(NULLIF(${dim.col}, ''), '(sin dato)') AS clave,
-             periodo,
+             COALESCE(NULLIF(${colDim.col}, ''), '(sin dato)') AS col,
+             COUNT(*) AS operaciones,
              ROUND(SUM(kilos_tot), 0) AS kilos,
              ROUND(SUM(tot_dol), 0) AS facturacion_usd,
-             ROUND(SUM(total), 0) AS facturacion_ars
+             ROUND(SUM(total), 0) AS facturacion_ars,
+             ROUND(SUM(tot_dol) / NULLIF(SUM(kilos_tot), 0), 2) AS usd_por_kg
              ${cm}
       FROM sheet_ventas ${where}
-      GROUP BY clave, periodo
+      GROUP BY clave, col
     `).all(...params);
 
-    // Las columnas salen de los datos y van ordenadas: '2025-2026' antes que '2026-2027'.
-    const periodos = [...new Set(filas.map(f => f.periodo))].sort();
+    const cols = [...new Set(filas.map(f => f.col))].sort();
     const mapa = new Map();
     for (const f of filas) {
-      if (!mapa.has(f.clave)) mapa.set(f.clave, { clave: f.clave, por_periodo: {} });
-      mapa.get(f.clave).por_periodo[f.periodo] = f;
+      if (!mapa.has(f.clave)) mapa.set(f.clave, { clave: f.clave, por_col: {} });
+      mapa.get(f.clave).por_col[f.col] = f;
     }
     let salida = [...mapa.values()];
 
-    // Las dimensiones de tiempo van en orden cronológico; el resto, por el período MÁS
-    // NUEVO de mayor a menor — que es el que se está mirando cuando se compara contra el
-    // anterior. Ordenar por el viejo dejaría arriba a los que ya no compran.
-    const ultimo = periodos[periodos.length - 1];
+    // Las dimensiones de tiempo van en orden cronológico. El resto se ordena por facturación,
+    // pero POR CUÁL depende del eje:
+    //
+    //   · columnas = PERÍODO → por el período más nuevo. Es contra el que se compara, y
+    //     ordenar por el viejo dejaría arriba a los que ya no compran.
+    //   · columnas = MES     → por el TOTAL de la fila. Acá "la última columna" es apenas el
+    //     último mes cargado, y ordenar por él pone primero al que casualmente compró en
+    //     septiembre aunque sea el más chico de todos. La fila entera es el volumen real.
+    const ultima = cols[cols.length - 1];
+    const peso = colKey === 'mes_ok'
+      ? (f) => cols.reduce((t, c) => t + ((f.por_col[c] || {}).facturacion_usd || 0), 0)
+      : (f) => (f.por_col[ultima] || {}).facturacion_usd || 0;
     salida.sort(DIM_CRONOLOGICAS.has(dimKey)
       ? (a, b) => String(a.clave).localeCompare(String(b.clave))
-      : (a, b) => ((b.por_periodo[ultimo] || {}).facturacion_usd || 0)
-                - ((a.por_periodo[ultimo] || {}).facturacion_usd || 0));
+      : (a, b) => peso(b) - peso(a));
     const truncado = salida.length > 300;
     salida = salida.slice(0, 300);
 
-    // Totales por período, de su propia consulta: sumando la tabla recortada darían de menos.
+    // Totales por columna, de su propia consulta: sumando la tabla recortada darían de menos.
     const totales = db.prepare(`
-      SELECT periodo, ROUND(SUM(kilos_tot),0) AS kilos, ROUND(SUM(tot_dol),0) AS facturacion_usd,
-             ROUND(SUM(total),0) AS facturacion_ars ${cm}
-      FROM sheet_ventas ${where} GROUP BY periodo ORDER BY periodo
-    `).all(...params).reduce((m, r) => { m[r.periodo] = r; return m; }, {});
+      SELECT COALESCE(NULLIF(${colDim.col}, ''), '(sin dato)') AS col,
+             ROUND(SUM(kilos_tot),0) AS kilos, ROUND(SUM(tot_dol),0) AS facturacion_usd,
+             ROUND(SUM(total),0) AS facturacion_ars,
+             ROUND(SUM(tot_dol) / NULLIF(SUM(kilos_tot), 0), 2) AS usd_por_kg,
+             COUNT(*) AS operaciones ${cm}
+      FROM sheet_ventas ${where} GROUP BY col ORDER BY col
+    `).all(...params).reduce((m, r) => { m[r.col] = r; return m; }, {});
+
+    // Con las columnas por MES y varios períodos marcados, cada celda suma el mismo mes de
+    // todas las campañas. No está mal —a veces es lo que se quiere— pero no se puede leer
+    // sin saberlo, así que se dice. Silenciarlo haría que julio de dos años pareciera uno.
+    const nPeriodos = new Set(filas.length
+      ? db.prepare(`SELECT DISTINCT periodo FROM sheet_ventas ${where}`).all(...params).map(r => r.periodo)
+      : []).size;
+    const mezcla_periodos = colKey === 'mes_ok' && nPeriodos > 1;
 
     const est = estadoSync();
     res.json({ ok: true, data: {
-      agrupar: dimKey, label: dim.label, periodos, filas: salida, totales, truncado,
+      agrupar: dimKey, label: dim.label,
+      columnas: colKey, columnas_label: colDim.label,
+      cols, filas: salida, totales, truncado,
+      mezcla_periodos, periodos_en_juego: nPeriodos,
       ve_margen: margen,
       sync: { ultimo_ok: est.ultimo_ok, desactualizado: est.datos_desactualizados },
     } });
