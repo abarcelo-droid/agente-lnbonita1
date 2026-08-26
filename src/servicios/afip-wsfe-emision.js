@@ -95,10 +95,19 @@ function alicuotaId(pct) {
 //
 // La regla completa vive en servicios/sg_fiscal.js, que es PURO: se puede leer
 // entera de un saque y probar sin levantar nada. Acá sólo se la aplica.
-function fiscalDe(cliente, esNC) {
-  const f = fiscalDeCliente(cliente, { esNC: !!esNC });
+function fiscalDe(cliente, esNC, ctx) {
+  const f = fiscalDeCliente(cliente, { esNC: !!esNC, ...(ctx || {}) });
   if (!f.ok) throw new Error(f.error);
   return f;
+}
+// El umbral desde el que hay que identificar al consumidor final (RG 5700/2025).
+// Sale de la configuración y no del código: se mueve con la inflación.
+function umbralIdentificacion(database) {
+  try {
+    const r = database.prepare("SELECT valor FROM sg_config WHERE clave='umbral_identificar_cf'").get();
+    const n = Number(r && r.valor);
+    return n > 0 ? n : null;
+  } catch (_) { return null; }
 }
 function r2(n) { return Math.round((Number(n) || 0) * 100) / 100; }
 function fechaHoyAR() { return new Date(Date.now() - 3 * 3600 * 1000).toISOString().slice(0, 10); }
@@ -129,12 +138,15 @@ function fechaHoyAR() { return new Date(Date.now() - 3 * 3600 * 1000).toISOStrin
 //    adentro-- los manda y acá no se recalculan. Reconstruir el total desde un
 //    precio unitario redondeado es lo que dejaba el comprobante en $2.789.999,98
 //    cuando el papel decía $2.790.000. Sin esos campos, se calcula como siempre.
-export function construirComprobante(database, { clienteId, items, esNC }) {
+export function construirComprobante(database, { clienteId, items, esNC, identificacion }) {
   const cliente = database.prepare('SELECT id, razon_social, cuit, categoria_fiscal FROM sg_clientes WHERE id=?').get(clienteId);
   if (!cliente) throw new Error('Cliente inexistente: ' + clienteId);
-  const fisc = fiscalDe(cliente, esNC);
-  const cbteTipo = fisc.cbte_tipo;
-  const doc_tipo = fisc.doc_tipo, doc_nro = fisc.doc_nro;
+  // La LETRA se necesita antes de recorrer los renglones (define la serie), pero si
+  // hay que IDENTIFICAR al comprador depende del total, que recién se sabe al final.
+  // Se resuelve dos veces con la misma función: la primera para la letra, la segunda
+  // —ya con el total— para el documento.
+  const fisc0 = fiscalDe(cliente, esNC);
+  const cbteTipo = fisc0.cbte_tipo;
   const ivaMap = {};
   let impNeto = 0, impIva = 0, impOpEx = 0;
   const detalle = [];
@@ -177,8 +189,14 @@ export function construirComprobante(database, { clienteId, items, esNC }) {
   }
   if (!detalle.length) throw new Error('El comprobante necesita al menos un ítem');
   const impTotal = r2(impNeto + impIva + impOpEx);
+  // AHORA SÍ, con el total en la mano: ¿hay que identificar al comprador? Si el
+  // comprobante supera el umbral y va a consumidor final, ARCA exige DNI o CUIT.
+  const fisc = fiscalDe(cliente, esNC, { total: impTotal,
+    umbral: umbralIdentificacion(database), identificacion });
+  const doc_tipo = fisc.doc_tipo, doc_nro = fisc.doc_nro;
   const iva = Object.keys(ivaMap).map(id => ({ Id: Number(id), BaseImp: ivaMap[id].base, Importe: ivaMap[id].importe }));
   return { cliente, cbte_tipo: cbteTipo, doc_tipo, doc_nro, cond_iva_receptor: fisc.cond_iva, letra_fiscal: fisc.letra,
+    pide_identificacion: !!fisc.pide_identificacion,
     imp_neto: impNeto, imp_iva: impIva, imp_opex: impOpEx, imp_total: impTotal, iva, detalle, concepto: 1 };
 }
 
@@ -448,8 +466,8 @@ function confirmarAutorizada(database, facturaId, campos, vinculos) {
 // A: guarda cae/cae_vto/autorizado + puente factura↔despacho (atómico) · R: guarda obs/rechazado
 // (sin puente) · timeout: FECompConsultar. vinculos (opcional): [{despacho_id, despacho_item_id, kg}].
 export async function emitir(database, { ptoVta, clienteId, items, esNC, userId, vinculos,
-                                         descuentoGestion }) {
-  const comprobante = construirComprobante(database, { clienteId, items, esNC });
+                                         descuentoGestion, identificacion }) {
+  const comprobante = construirComprobante(database, { clienteId, items, esNC, identificacion });
   const cbteTipo = comprobante.cbte_tipo;
 
   // ── EL CORTE: UN PUNTO DE VENTA MANUAL NO LLAMA A AFIP ─────────────────

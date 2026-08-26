@@ -54,11 +54,34 @@ const CBTE = { A: { factura: 1, nc: 3 }, B: { factura: 6, nc: 8 } };
 // Tipos de documento de AFIP: 80 = CUIT, 99 = consumidor final sin identificar.
 const DOC_CUIT = 80, DOC_SIN_IDENTIFICAR = 99;
 
+// ══ ¿HAY QUE IDENTIFICAR AL CONSUMIDOR FINAL? ══════════════════════════
+//
+// RG 5700/2025 de ARCA, art. 1° inc. d): desde $10.000.000 hay que identificar al
+// comprador que reviste el carácter de consumidor final —CUIT, CUIL, CDI o DNI—.
+// Por debajo, la factura sale "A CONSUMIDOR FINAL" sin ningún dato: eso es lo que
+// ahorra el trabajo de cargar una ficha por cada venta de mostrador.
+//
+// Vigente desde el 29/5/2025, y desde esa misma resolución YA NO DEPENDE DEL MEDIO
+// DE PAGO (antes eran dos topes: $417.288 electrónico y $208.644 el resto).
+//
+// El umbral llega por parámetro y sale de la configuración, no de acá: es un número
+// que se mueve con la inflación.
+export function pideIdentificacion({ cond_iva, total, umbral }) {
+  if (Number(cond_iva) !== REGLA_FISCAL.no_inscripto.cond) return false;  // sólo consumidor final
+  const u = Number(umbral);
+  if (!(u > 0)) return false;
+  return Number(total) >= u;
+}
+
 // ── LA DECISIÓN ─────────────────────────────────────────────────────────
 // Devuelve { ok, error } o el comprobante que corresponde. Nunca adivina: cuando el
 // dato falta y la respuesta depende de él, FRENA — un comprobante fiscal mal emitido
 // no se arregla después sin una nota de crédito.
-export function fiscalDeCliente(cliente, { esNC = false } = {}) {
+//
+// `identificacion` es el documento que se tipeó AL FACTURAR, no el de la ficha: por
+// encima del umbral hay que identificar al comprador de esa venta, y el cliente
+// "Consumidor Final" lo comparten muchas. Por eso el dato es del comprobante.
+export function fiscalDeCliente(cliente, { esNC = false, total = null, umbral = null, identificacion = null } = {}) {
   const nombre = (cliente && cliente.razon_social) || 'El cliente';
   const cat = String((cliente && cliente.categoria_fiscal) || '').trim();
   const cuit = cuitLimpio(cliente && cliente.cuit);
@@ -77,8 +100,7 @@ export function fiscalDeCliente(cliente, { esNC = false } = {}) {
   // mostrador por un dato que no cambia el resultado.
   if (!cat) {
     if (!cuitOk) {
-      const r = REGLA_FISCAL.no_inscripto;
-      return armar(r, esNC, null);
+      return armar(REGLA_FISCAL.no_inscripto, esNC, null, { total, umbral, identificacion, nombre });
     }
     // CON CUIT Y SIN CATEGORÍA SÍ SE FRENA: puede ser Responsable Inscripto o
     // monotributista, y de eso depende la letra. Es el caso del bug — hoy sale A.
@@ -95,22 +117,47 @@ export function fiscalDeCliente(cliente, { esNC = false } = {}) {
     return { ok: false, error: `"${nombre}" figura como ${r.label} y no tiene un CUIT válido cargado. `
       + `Un ${r.label} sin CUIT no existe: cargalo en Maestros → Clientes.` };
   }
-  return armar(r, esNC, cuitOk ? cuit : null);
+  return armar(r, esNC, cuitOk ? cuit : null, { total, umbral, identificacion, nombre });
 }
 
-function armar(r, esNC, cuit) {
-  return {
+// Tipos de documento de AFIP admitidos para identificar a un consumidor final.
+const DOC_TIPOS = { cuit: 80, cuil: 86, dni: 96 };
+
+function armar(r, esNC, cuit, ctx) {
+  const base = {
     ok: true,
     letra: r.letra,
     cbte_tipo: esNC ? CBTE[r.letra].nc : CBTE[r.letra].factura,
     cond_iva: r.cond,
     cond_iva_label: r.label,
     // El documento: CUIT si lo hay; si no, consumidor final sin identificar.
-    // (El umbral de RG 5700/2025 —identificar al consumidor final desde $10.000.000—
-    // es otra decisión y va con la venta de ventanilla, no acá.)
     doc_tipo: cuit ? DOC_CUIT : DOC_SIN_IDENTIFICAR,
     doc_nro: cuit || '0',
+    pide_identificacion: false,
   };
+  const c = ctx || {};
+  if (!pideIdentificacion({ cond_iva: r.cond, total: c.total, umbral: c.umbral })) return base;
+  base.pide_identificacion = true;
+  // Ya identificado por su CUIT: no hace falta pedir nada más.
+  if (cuit) return base;
+
+  const id = c.identificacion || {};
+  const tipo = String(id.tipo || '').toLowerCase();
+  const nro = String(id.numero == null ? '' : id.numero).replace(/[-\s.]/g, '');
+  if (!DOC_TIPOS[tipo] || !nro) {
+    return { ok: false, pide_identificacion: true, error:
+      `Esta venta supera ${Number(c.umbral).toLocaleString('es-AR')} y es a consumidor final: `
+      + `ARCA exige identificar al comprador (RG 5700/2025). Cargale el DNI o el CUIT.` };
+  }
+  if (tipo === 'dni' && !/^\d{7,8}$/.test(nro)) {
+    return { ok: false, pide_identificacion: true, error: `El DNI "${nro}" no parece un número de documento.` };
+  }
+  if ((tipo === 'cuit' || tipo === 'cuil') && !cuitValido(nro)) {
+    return { ok: false, pide_identificacion: true, error: `El ${tipo.toUpperCase()} "${nro}" no es válido.` };
+  }
+  base.doc_tipo = DOC_TIPOS[tipo];
+  base.doc_nro = nro;
+  return base;
 }
 
 // ¿Este comprobante discrimina el IVA en el papel? Sólo la A. Una Factura B lleva el

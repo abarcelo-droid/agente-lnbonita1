@@ -1174,59 +1174,96 @@ router.post('/cobranzas', requireAuth, (req, res) => {
   // Va contra la cuenta de "cheques en cartera" —valores a depositar—, y cuando
   // se deposita, esa cuenta se descarga contra el banco. El cheque además entra
   // a la CARTERA de Caja y Bancos, que es donde se lo sigue.
-  const conCheque = String(forma_pago || '') === 'cheque';
-  let ctaCartera = null, cheque = null;
-  if (conCheque) {
-    ctaCartera = (db.prepare("SELECT cuenta_id FROM sg_config_impositiva WHERE clave='cheques_cartera'")
-      .get() || {}).cuenta_id || null;
-    if (!ctaCartera) {
-      return res.status(400).json({ ok: false,
-        error: 'Falta decir contra qué cuenta contable van los cheques en cartera. Configurala en el '
-             + 'plan de cuentas (clave "cheques_cartera") antes de cobrar con cheque.' });
-    }
-    const ch = req.body?.cheque || {};
-    const nro = String(ch.nro_cheque || '').trim();
-    const librador = String(ch.librador || '').trim();
-    if (!nro || !librador) {
-      return res.status(400).json({ ok: false,
-        error: 'De un cheque hay que anotar por lo menos el número y quién lo firma.' });
-    }
-    // EL MISMO CHEQUE NO ENTRA DOS VECES. La identidad es banco + número +
-    // librador, que es lo que está impreso en el papel.
-    const ya = db.prepare(`SELECT id, estado, monto FROM sg_fin_cheques_terceros
-      WHERE COALESCE(banco,'')=COALESCE(?,'') AND nro_cheque=? AND librador=?`)
-      .get(String(ch.banco || '').trim() || null, nro, librador);
-    if (ya) {
-      return res.status(400).json({ ok: false,
-        error: `Ese cheque ya está en la cartera: N° ${nro} de ${librador} por ${ya.monto} (${ya.estado}).` });
-    }
-    cheque = { banco: String(ch.banco || '').trim() || null, nro, librador,
-               fecha_vto: ch.fecha_vto || null,
-               // El CUIT del que firma: es la clave con la que se le pregunta al
-               // BCRA si ese librador tiene deudas o cheques rechazados.
-               cuit: String(ch.cuit_librador || '').replace(/[^0-9]/g, '') || null };
-  }
+  // ══ VARIOS MEDIOS EN UNA MISMA COBRANZA ════════════════════════════
+  //
+  // Pablo, 25/8/2026: parte en efectivo y parte en transferencia, "como funciona hoy
+  // el pago a proveedores". Y así se hace: UNA cobranza, UN asiento, y un renglón
+  // por cada medio. Partirlo en dos cobranzas dejaría dos números para lo que el
+  // cliente vivió como un solo pago.
+  //
+  // El payload viejo —forma_pago + cuenta_fin_id + cheque sueltos— sigue andando: se
+  // normaliza a una lista de un elemento y de ahí para abajo hay un solo camino. Dos
+  // caminos serían dos lugares donde arreglar el próximo bug.
+  const mediosRaw = Array.isArray(req.body?.medios) && req.body.medios.length
+    ? req.body.medios
+    : [{ forma_pago: forma_pago || 'transferencia', cuenta_fin_id: req.body?.cuenta_fin_id,
+         referencia: referencia || null, cheque: req.body?.cheque || null, monto: total }];
+  // Cada medio, validado. El que no cierra corta acá: mejor un error antes de
+  // escribir nada que una cobranza a medias.
+  const medios = [];
+  let ctaCartera = null;
+  for (const m of mediosRaw) {
+    const forma = String(m.forma_pago || 'transferencia');
+    const monto = (mediosRaw.length === 1 && !(Math.round(parseFloat(m.monto || 0) * 100) / 100 > 0))
+      ? total : Math.round(parseFloat(m.monto || 0) * 100) / 100;
+    if (!(monto > 0)) return res.status(400).json({ ok: false, error: 'Cada medio de cobro necesita un monto' });
 
-  // LA PLATA ENTRA A ALGÚN LADO, y ese lado tiene que tener cuenta contable: sin
-  // ella el asiento no se puede armar. Con cheque no hace falta: no entra a
-  // ninguna cuenta todavía.
-  // El id se limpia ANTES de la consulta: better-sqlite3 tira una excepción si le
-  // pasan undefined, así que sin este paso "no elegí la cuenta" salía como un
-  // error 500 del servidor en vez de decir qué falta.
-  const ctaFinId = parseInt(req.body?.cuenta_fin_id, 10);
-  const cuenta = Number.isInteger(ctaFinId)
-    ? db.prepare(`SELECT c.*, cc.id AS cta FROM sg_fin_cuentas c
-        LEFT JOIN sg_cuentas cc ON cc.id = c.cuenta_contable_id
-        WHERE c.id=? AND c.activo=1`).get(ctaFinId)
-    : null;
-  if (!conCheque) {
+    if (forma === 'cheque') {
+      // EL CHEQUE ENTRA A LA CARTERA, no a una cuenta: el banco todavía no recibió
+      // nada. La cuenta contable de la cartera se pide una sola vez.
+      if (!ctaCartera) {
+        ctaCartera = (db.prepare("SELECT cuenta_id FROM sg_config_impositiva WHERE clave='cheques_cartera'")
+          .get() || {}).cuenta_id || null;
+        if (!ctaCartera) {
+          return res.status(400).json({ ok: false,
+            error: 'Falta decir contra qué cuenta contable van los cheques en cartera. Configurala en el '
+                 + 'plan de cuentas (clave "cheques_cartera") antes de cobrar con cheque.' });
+        }
+      }
+      const ch = m.cheque || {};
+      const nro = String(ch.nro_cheque || '').trim();
+      const librador = String(ch.librador || '').trim();
+      if (!nro || !librador) {
+        return res.status(400).json({ ok: false,
+          error: 'De un cheque hay que anotar por lo menos el número y quién lo firma.' });
+      }
+      // EL MISMO CHEQUE NO ENTRA DOS VECES. La identidad es banco + número +
+      // librador, que es lo que está impreso en el papel. Se mira también contra los
+      // otros medios de ESTA cobranza: dos veces el mismo papel en el mismo cobro.
+      const banco = String(ch.banco || '').trim() || null;
+      const ya = db.prepare(`SELECT id, estado, monto FROM sg_fin_cheques_terceros
+        WHERE COALESCE(banco,'')=COALESCE(?,'') AND nro_cheque=? AND librador=?`)
+        .get(banco, nro, librador);
+      const repe = medios.some((x) => x.cheque && x.cheque.nro === nro && x.cheque.librador === librador
+        && (x.cheque.banco || '') === (banco || ''));
+      if (ya || repe) {
+        return res.status(400).json({ ok: false,
+          error: `Ese cheque ya está${ya ? ' en la cartera' : ' en esta misma cobranza'}: `
+               + `N° ${nro} de ${librador}${ya ? ` por ${ya.monto} (${ya.estado})` : ''}.` });
+      }
+      medios.push({ forma, monto, cuenta: null, referencia: m.referencia || referencia || null,
+        cheque: { banco, nro, librador, fecha_vto: ch.fecha_vto || null,
+          cuit: String(ch.cuit_librador || '').replace(/[^0-9]/g, '') || null } });
+      continue;
+    }
+
+    // LA PLATA ENTRA A ALGÚN LADO, y ese lado tiene que tener cuenta contable: sin
+    // ella el asiento no se puede armar.
+    // El id se limpia ANTES de la consulta: better-sqlite3 tira una excepción si le
+    // pasan undefined, así que sin este paso "no elegí la cuenta" salía como un
+    // error 500 del servidor en vez de decir qué falta.
+    const ctaFinId = parseInt(m.cuenta_fin_id, 10);
+    const cuenta = Number.isInteger(ctaFinId)
+      ? db.prepare(`SELECT c.*, cc.id AS cta FROM sg_fin_cuentas c
+          LEFT JOIN sg_cuentas cc ON cc.id = c.cuenta_contable_id
+          WHERE c.id=? AND c.activo=1`).get(ctaFinId)
+      : null;
     if (!cuenta) return res.status(400).json({ ok: false, error: 'Elegí en qué cuenta entra la plata' });
     if (!cuenta.cta) {
       return res.status(400).json({ ok: false,
         error: `La cuenta "${cuenta.nombre}" no tiene cuenta contable asociada, así que la cobranza no `
              + `puede entrar al libro. Asignásela en Caja y Bancos.` });
     }
+    medios.push({ forma, monto, cuenta, referencia: m.referencia || referencia || null, cheque: null });
   }
+  // LOS MEDIOS TIENEN QUE DAR EL TOTAL. Si no, la diferencia se la come el asiento y
+  // el arqueo de la caja deja de dar. Es el mismo control que el pago a proveedores.
+  const sumaMedios = Math.round(medios.reduce((a, m) => a + m.monto, 0) * 100) / 100;
+  if (Math.abs(sumaMedios - total) > 0.009) {
+    return res.status(400).json({ ok: false,
+      error: `Los medios de cobro suman ${sumaMedios} y la cobranza es de ${total}.` });
+  }
+
   if (!cli.cuenta_contable_id) {
     return res.status(400).json({ ok: false,
       error: `El cliente ${cli.razon_social} no tiene cuenta contable asignada: sin ella no se sabe `
@@ -1237,23 +1274,35 @@ router.post('/cobranzas', requireAuth, (req, res) => {
     let cobId = null, asientoId = null;
     db.transaction(() => {
       const f = fecha || new Date().toISOString().split('T')[0];
+      // La cabecera guarda el medio PRINCIPAL —el de mayor monto— para que el
+      // listado diga algo útil de un vistazo. El detalle real son los medios.
+      const principal = medios.slice().sort((a, b) => b.monto - a.monto)[0];
       cobId = db.prepare(`INSERT INTO sg_ven_cobranzas
         (fecha, cliente_id, monto, forma_pago, referencia, notas, usuario_id, cuenta_fin_id)
         VALUES (?,?,?,?,?,?,?,?)`)
-        .run(f, cli.id, total, forma_pago || 'transferencia', referencia || null, notas || null,
-             u.id, conCheque ? null : cuenta.id).lastInsertRowid;
+        .run(f, cli.id, total,
+             medios.length > 1 ? 'varios' : principal.forma,
+             referencia || null, notas || null, u.id,
+             principal.cheque ? null : principal.cuenta.id).lastInsertRowid;
 
       // EL CHEQUE ENTRA A LA CARTERA, que vive en Caja y Bancos. Desde ahí se lo
       // sigue: qué hay, qué vence, y el día que se deposita entra la plata de
       // verdad al banco. Queda con el cliente del que vino, que no siempre es
       // quien firmó el papel: muchas veces al cliente le pagaron con ese cheque.
-      if (cheque) {
+      let primerCheque = null;
+      for (const m of medios) {
+        if (!m.cheque) continue;
         const chId = db.prepare(`INSERT INTO sg_fin_cheques_terceros
           (banco, nro_cheque, librador, monto, fecha_recepcion, fecha_vto, cliente_id, notas, cuit_librador)
-          VALUES (?,?,?,?,?,?,?,?,?)`).run(cheque.banco, cheque.nro, cheque.librador, total,
-          f, cheque.fecha_vto, cli.id,
-          'Cobranza ' + (referencia || '#' + cobId), cheque.cuit).lastInsertRowid;
-        db.prepare('UPDATE sg_ven_cobranzas SET cheque_terceros_id=? WHERE id=?').run(chId, cobId);
+          VALUES (?,?,?,?,?,?,?,?,?)`).run(m.cheque.banco, m.cheque.nro, m.cheque.librador, m.monto,
+          f, m.cheque.fecha_vto, cli.id,
+          'Cobranza ' + (referencia || '#' + cobId), m.cheque.cuit).lastInsertRowid;
+        if (primerCheque == null) primerCheque = chId;
+      }
+      // La columna es una sola y los cheques pueden ser varios: queda el primero,
+      // para no romper lo que ya la lee. Todos quedan atados por la nota de cartera.
+      if (primerCheque != null) {
+        db.prepare('UPDATE sg_ven_cobranzas SET cheque_terceros_id=? WHERE id=?').run(primerCheque, cobId);
       }
 
       const insDoc = db.prepare(`INSERT INTO sg_ven_cobranza_docs
@@ -1290,22 +1339,37 @@ router.post('/cobranzas', requireAuth, (req, res) => {
       if (ges < 0) ges = 0;
       const motivoGes = (lista.find((d) => (d.gestion || 0) > 0 && d.motivo) || {}).motivo
         || 'ajuste_gestion';
-      const partes = [
-        { ambito: 'fiscal', monto: Math.round((total - ges) * 100) / 100, motivo: null },
-        { ambito: 'gestion', monto: ges, motivo: motivoGes },
-      ].filter((x) => x.monto > 0.001);
+      // ── EL ASIENTO: UN RENGLÓN POR MEDIO Y POR ÁMBITO ────────────────
+      // La parte de gestión se reparte entre los medios EN PROPORCIÓN, y el resto de
+      // redondeo se acumula en el último: si no, la suma de las partes no da el
+      // total y falta o sobra un centavo que después nadie encuentra. Es el mismo
+      // criterio que usa el reparto del neto de una factura entre varias partidas.
+      const r2c2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
       const lineasCob = [];
-      for (const x of partes) {
-        lineasCob.push({ cuenta_id: conCheque ? ctaCartera : cuenta.cta, debe: x.monto, haber: 0,
-          ambito: x.ambito, motivo: x.motivo,
-          descripcion: conCheque ? ('Cheque N° ' + cheque.nro + ' en cartera') : cuenta.nombre });
-        lineasCob.push({ cuenta_id: cli.cuenta_contable_id, debe: 0, haber: x.monto,
-          ambito: x.ambito, motivo: x.motivo, descripcion: cli.razon_social });
-      }
+      let gesRepartido = 0;
+      medios.forEach((m, ix) => {
+        const gesM = (ix === medios.length - 1)
+          ? r2c2(ges - gesRepartido)
+          : r2c2(ges * (m.monto / total));
+        gesRepartido = r2c2(gesRepartido + gesM);
+        const partesM = [
+          { ambito: 'fiscal', monto: r2c2(m.monto - gesM), motivo: null },
+          { ambito: 'gestion', monto: gesM, motivo: motivoGes },
+        ].filter((x) => x.monto > 0.001);
+        m._partes = partesM;
+        for (const x of partesM) {
+          lineasCob.push({ cuenta_id: m.cheque ? ctaCartera : m.cuenta.cta, debe: x.monto, haber: 0,
+            ambito: x.ambito, motivo: x.motivo,
+            descripcion: m.cheque ? ('Cheque N° ' + m.cheque.nro + ' en cartera') : m.cuenta.nombre });
+          lineasCob.push({ cuenta_id: cli.cuenta_contable_id, debe: 0, haber: x.monto,
+            ambito: x.ambito, motivo: x.motivo, descripcion: cli.razon_social });
+        }
+      });
       asientoId = crearAsiento(db, {
         fecha: f, usuario_id: u.id, ref_codigo: referencia || null,
         descripcion: 'Cobranza de ' + cli.razon_social + (referencia ? ' — ' + referencia : '')
-          + (lista.length ? ' — ' + lista.length + ' comprobante(s)' : ' (a cuenta)'),
+          + (lista.length ? ' — ' + lista.length + ' comprobante(s)' : ' (a cuenta)')
+          + (medios.length > 1 ? ' — ' + medios.length + ' medios' : ''),
       }, lineasCob).id;
       db.prepare('UPDATE sg_ven_cobranzas SET asiento_id=? WHERE id=?').run(asientoId, cobId);
 
@@ -1317,12 +1381,13 @@ router.post('/cobranzas', requireAuth, (req, res) => {
       // El movimiento lo hace el depósito, desde la cartera.
       // Y EL MOVIMIENTO TAMBIÉN SE PARTE, para que el arqueo fiscal no se lleve
       // lo que entró por la parte sin comprobante.
-      if (!conCheque) {
-        const insMovC = db.prepare(`INSERT INTO sg_fin_movimientos
-          (cuenta_id, fecha, tipo, concepto, monto, referencia, usuario_id, ambito, motivo)
-          VALUES (?,?, 'ingreso', ?,?,?,?,?,?)`);
-        for (const x of partes) {
-          insMovC.run(cuenta.id, f, 'Cobranza de ' + cli.razon_social, x.monto,
+      const insMovC = db.prepare(`INSERT INTO sg_fin_movimientos
+        (cuenta_id, fecha, tipo, concepto, monto, referencia, usuario_id, ambito, motivo)
+        VALUES (?,?, 'ingreso', ?,?,?,?,?,?)`);
+      for (const m of medios) {
+        if (m.cheque) continue;
+        for (const x of m._partes) {
+          insMovC.run(m.cuenta.id, f, 'Cobranza de ' + cli.razon_social, x.monto,
             'COB-' + cobId, u.id, x.ambito, x.motivo);
         }
       }
