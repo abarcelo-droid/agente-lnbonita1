@@ -33,7 +33,25 @@ const fmtFecha = (s) => { const m = String(s || '').match(/^(\d{4})-(\d{2})-(\d{
 const fmtFechaCae = (s) => { const m = String(s || '').match(/^(\d{4})(\d{2})(\d{2})$/); return m ? `${m[3]}/${m[2]}/${m[1]}` : (s || '—'); };
 
 // DocTipo/DocNro del receptor (consistente con la emisión: A → CUIT 80; B → CUIT si hay, si no 99/0).
-export function docReceptor(cliente, cbteTipo) {
+// ══ EL PAPEL DICE A QUIÉN SE LE INFORMÓ ════════════════════════════════════
+//
+// `informado` es lo que quedó guardado del comprobante ({doc_tipo, doc_nro}): eso es
+// lo que se le mandó a ARCA y eso es lo que tiene que decir el papel.
+//
+// Antes esto se reconstruía SIEMPRE del cliente, y por eso una venta a consumidor
+// final identificado por DNI —las que superan el umbral de la RG 5700/2025— salía
+// impresa sin ese DNI. Se le pedía el documento al comprador, se le informaba a ARCA,
+// y en el papel que se llevaba no figuraba.
+//
+// Sin el dato guardado —comprobantes anteriores a que se empezara a guardar— se cae
+// a la reconstrucción de siempre, que es lo único que hay.
+const DOC_LABEL = { 80: 'CUIT', 86: 'CUIL', 96: 'DNI', 99: 'Consumidor Final' };
+export function docReceptor(cliente, cbteTipo, informado) {
+  const t = informado && informado.doc_tipo != null ? Number(informado.doc_tipo) : null;
+  if (t != null) {
+    const nro = soloDig(informado.doc_nro);
+    return { tipo: t, nro: t === 99 ? '0' : nro, label: DOC_LABEL[t] || 'Documento' };
+  }
   const cuit = soloDig(cliente && cliente.cuit);
   if (cbteTipo === 1 || cbteTipo === 3) return { tipo: 80, nro: cuit, label: 'CUIT' };
   return cuitValido(cuit) ? { tipo: 80, nro: cuit, label: 'CUIT' } : { tipo: 99, nro: '0', label: 'Consumidor Final' };
@@ -73,7 +91,7 @@ export async function generarFacturaPDF(factura) {
   const cliente = factura.cliente || {};
   const items = factura.items || [];
   const tipo = CBTE[factura.cbte_tipo] || { letra: 'X', cod: String(factura.cbte_tipo || ''), label: 'COMPROBANTE' };
-  const rcpt = docReceptor(cliente, factura.cbte_tipo);
+  const rcpt = docReceptor(cliente, factura.cbte_tipo, factura);
   const pvNum = String(factura.punto_venta || 0).padStart(4, '0') + '-' + String(factura.cbte_nro || 0).padStart(8, '0');
 
   // ── Encabezado: emisor (izq) · recuadro letra (centro) · datos del cbte (der) ──

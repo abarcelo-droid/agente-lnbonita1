@@ -115,8 +115,15 @@ test('la respuesta es UNA, no una consulta copiada en cada endpoint', () => {
   // y ninguno miraba la liquidación. Una cuarta copia garantizaba que el día que
   // cambiara el criterio, alguna quedara vieja.
   assert.match(SG, /import \{ frenoPrecioFirme \} from '\.\.\/servicios\/sg_perfeccionada\.js'/);
+  // Las cuatro puertas por las que se puede cambiar un precio: corregir un lote,
+  // completar una orden retroactiva, cerrarle el precio a una de pizarra, y el
+  // endpoint que edita los precios de la orden.
   const usos = (SG.match(/frenoPrecioFirme\(db,/g) || []).length;
-  assert.equal(usos, 3, 'las tres puertas usan la misma función');
+  assert.equal(usos, 5, 'todas las puertas usan la misma función');
+  // Y no volvieron las copias que había, cada una con su propio mensaje: son la
+  // huella de que alguien volvió a escribir la pregunta en vez de preguntarla.
+  assert.doesNotMatch(SG, /Anulá el asiento primero: si se corrigen los kilos/);
+  assert.doesNotMatch(SG, /Anulá el asiento antes de cambiarla de circuito/);
 });
 
 test('corregir un lote de una partida documentada se frena', () => {
@@ -124,8 +131,6 @@ test('corregir un lote de una partida documentada se frena', () => {
   assert.ok(i > 0);
   const cuerpo = SG.slice(i, i + 1600);
   assert.match(cuerpo, /frenoPrecioFirme\(db, l\.oc_id, 'corregir los kilos o el precio'\)/);
-  // Y ya no queda la consulta vieja, que miraba sólo la factura y pedía asiento vivo.
-  assert.doesNotMatch(cuerpo, /f\.activo=1 AND f\.asiento_id IS NOT NULL/);
 });
 
 test('repreciar una orden retroactiva ya documentada se frena', () => {

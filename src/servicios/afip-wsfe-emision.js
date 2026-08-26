@@ -56,6 +56,22 @@ _alter('sg_ven_facturas', 'afip_estado', 'afip_estado TEXT');           // borra
 // suelto: no se sabe qué anuló, y la factura no sabe que ya no se cobra.
 _alter('sg_ven_facturas', 'nc_de_factura_id', 'nc_de_factura_id INTEGER');
 _alter('sg_ven_facturas', 'nc_motivo', 'nc_motivo TEXT');
+// ══ A QUIÉN SE LE INFORMÓ EL COMPROBANTE ═══════════════════════════════════
+//
+// El documento del comprador se resolvía en cada emisión, se le informaba a ARCA
+// y se tiraba. Con eso pasaban tres cosas:
+//
+//   · El PDF lo reconstruía del CLIENTE, no de lo que se informó. Una venta a
+//     consumidor final identificado por DNI —las que superan el umbral de la RG
+//     5700/2025— salía impresa sin ese DNI, que es justamente el dato por el que
+//     hubo que pedírselo.
+//   · La nota de crédito de esa venta volvía a pedir el documento, porque no había
+//     de dónde sacarlo. El operador tenía que ir a buscar el papel.
+//   · Y no quedaba forma de saber, después, a quién se le informó cada comprobante.
+//
+// 80 = CUIT, 86 = CUIL, 96 = DNI, 99 = consumidor final sin identificar.
+_alter('sg_ven_facturas', 'doc_tipo', 'doc_tipo INTEGER');
+_alter('sg_ven_facturas', 'doc_nro', 'doc_nro TEXT');
 // DE QUÉ RENGLÓN DE REMITO SALIÓ ESTE RENGLÓN DEL COMPROBANTE.
 // La correspondencia existía pero era POSICIONAL: postEmitir empuja el ítem y su
 // vínculo en la misma vuelta del for, y nada los ataba. Con la nota de crédito
@@ -431,6 +447,11 @@ function persistirReservada(database, { comprobante, ptoVta, cbteTipo, cbteNro, 
       database.prepare('UPDATE sg_ven_facturas SET nc_de_factura_id=?, nc_motivo=? WHERE id=?')
         .run(Number(ncDeFacturaId), ncMotivo || null, facturaId);
     }
+    // Lo que se le informó a ARCA, tal cual. No se recalcula después: la ficha del
+    // cliente puede cambiar y este comprobante ya salió con estos datos.
+    database.prepare('UPDATE sg_ven_facturas SET doc_tipo=?, doc_nro=? WHERE id=?')
+      .run(comprobante.doc_tipo != null ? Number(comprobante.doc_tipo) : null,
+        comprobante.doc_nro != null ? String(comprobante.doc_nro) : null, facturaId);
     const insItem = database.prepare(`INSERT INTO sg_ven_factura_items
       (factura_id, descripcion, cantidad, precio_unitario, subtotal, producto_id, alicuota_id, bultos, kg_por_bulto, precio_por_bulto, unidad,
        despacho_item_id, nc_de_item_id, nc_modo)

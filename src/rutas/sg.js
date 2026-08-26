@@ -4679,18 +4679,12 @@ router.put('/oc/:id/documenta', requireAuth, (req, res) => {
     const oc = db.prepare('SELECT * FROM sg_oc WHERE id=? AND activo=1').get(req.params.id);
     if (!oc) return res.status(404).json({ ok: false, error: 'Orden no encontrada' });
 
-    // Si ya se contabilizó, esto define de dónde salió el asiento: no se mueve
-    // sin anularlo primero.
-    const fac = db.prepare(`SELECT f.asiento_id, a.anulado FROM sg_facturas_compra f
-      LEFT JOIN sg_asientos a ON a.id = f.asiento_id
-      WHERE f.activo=1 AND f.asiento_id IS NOT NULL
-        AND (f.oc_id = ? OR EXISTS (SELECT 1 FROM sg_factura_compra_ocs fo
-                                     WHERE fo.factura_id = f.id AND fo.oc_id = ?))`).get(oc.id, oc.id);
-    if (fac && !fac.anulado) {
-      return res.status(400).json({ ok: false,
-        error: 'Esta partida ya está contabilizada en el asiento ' + fac.asiento_id
-             + '. Anulá el asiento antes de cambiarla de circuito.' });
-    }
+    // ── LA MISMA REGLA, CON LA MISMA CUENTA ────────────────────────────────
+    // Acá había una CUARTA copia de «esta partida ya está documentada», que miraba
+    // sólo la factura y le exigía asiento vivo. Una partida ya LIQUIDADA se podía
+    // cambiar de circuito —de liquidación a factura— con su liquidación emitida.
+    const freno = frenoPrecioFirme(db, oc.id, 'cambiarla de circuito');
+    if (freno) return res.status(409).json({ ok: false, error: freno });
 
     const antes = oc.documenta
       || (oc.tipo_precio === 'pizarra' || oc.tipo_fiscal === 'liquidacion' ? 'liquidacion' : 'factura');
@@ -5252,6 +5246,227 @@ router.get('/oc/:id/items-sin-orden', requireAuth, (req, res) => {
 // COMPLETAR LA ORDEN. Lo que pone el comprador cuando se sienta a cerrar la
 // compra que ya entró. El precio baja hasta los lotes: el costo de la
 // mercadería es el del lote, no el del renglón de la orden.
+// ══ CAMBIARLE EL PRECIO A UNA ORDEN ════════════════════════════════════════
+//
+// Pablo, 26/8/2026: la orden se puede modificar mientras NO esté perfeccionada; una
+// vez que hay factura recibida o liquidación emitida, el precio queda firme y para
+// cambiarlo hay que anular primero.
+//
+// Hasta acá el precio pactado no se podía tocar por ningún lado: PUT /oc/:id sólo
+// edita la cabecera y sólo en borrador o abierta —una partida recibida ya no tiene
+// ese estado—, y el único UPDATE del precio vivía encerrado adentro de
+// /oc/:id/completar, que sólo acepta órdenes retroactivas. El propio código lo dice
+// dos veces: «no hay pantalla que edite los ítems de una orden ya cargada».
+//
+// ── NIVEL OPERAR, NO ADMIN ──────────────────────────────────────────────────
+// Es requireAuth y el nivel lo decide exigirNivel por la URL, bajo 'sg/oc'. Cambiar
+// lo que se le pactó al productor es del comprador: pedir un administrador obliga a
+// que lo cargue el dueño y el que hace el trabajo termina dictándoselo.
+// Y va por su PROPIA dirección para que el nivel se pueda reconocer.
+//
+// ── LA CASCADA, EN ORDEN ────────────────────────────────────────────────────
+// El precio de la orden baja al costo de cada lote y de ahí a todo lo demás:
+//   1. sg_oc_items.precio_estimado_por_kg
+//   2. por cada lote vivo del ítem: precio_unitario_kg y costo_base
+//   3. recalcCostoLote  — costo_final = costo_base + gastos + prorrateos
+//   4. generarVencimientos — el cronograma de deuda con el proveedor
+//
+// EL COSTO ES NETO. Si la cabecera dice precio_incluye_iva, el lote se valoriza con
+// precio/(1+alícuota): el IVA no es costo. /oc/:id/completar hacía esta misma cuenta
+// con el precio BRUTO —dos cuentas distintas del mismo número— y dejaba el inventario
+// y el margen 10,5% o 21% arriba. Ahora las dos llaman a la misma función.
+function precioNetoDeOC(db, ocId, ocItemId, precio) {
+  if (precio == null) return null;
+  const cab = db.prepare('SELECT precio_incluye_iva FROM sg_oc WHERE id=?').get(ocId);
+  const it = db.prepare('SELECT iva_alicuota FROM sg_oc_items WHERE id=?').get(ocItemId) || {};
+  const alic = (it.iva_alicuota != null && it.iva_alicuota !== '') ? Number(it.iva_alicuota) : null;
+  return (cab && Number(cab.precio_incluye_iva) === 1 && alic != null)
+    ? +(Number(precio) / (1 + alic / 100)).toFixed(6)
+    : Number(precio);
+}
+
+// Escribe el precio de un ítem y arrastra la cascada. La usan el endpoint nuevo y
+// /oc/:id/completar: una sola cuenta, o el día que cambie una, la otra queda vieja.
+// ── LOS TOTALES DE LA CABECERA, REHECHOS ───────────────────────────────────
+//
+// sg_oc.total_estimado_monto / total_neto / total_iva y el neto/iva por ítem se
+// calculaban SÓLO en el alta y nadie los rehacía. /completar ya los dejaba desfasados
+// hoy; el problema es que generarVencimientos reparte total_estimado_monto cuando la
+// partida todavía no tiene factura, así que cambiar el precio sin rehacerlos deja la
+// deuda con el proveedor en el número viejo.
+//
+// La cuenta es la MISMA del alta: si el precio trae IVA adentro, el neto sale por
+// división y el IVA por diferencia; si no, el IVA se adiciona.
+function recalcTotalesOC(db, ocId) {
+  const oc = db.prepare(`SELECT tipo_fiscal, tipo_precio, precio_incluye_iva, iva_alicuota_oc
+    FROM sg_oc WHERE id=?`).get(ocId);
+  if (!oc) return;
+  const discrimina = (oc.tipo_fiscal === 'factura_a' || oc.tipo_fiscal === 'liquidacion')
+    && oc.tipo_precio === 'firme';
+  const incluyeIva = Number(oc.precio_incluye_iva) === 1;
+  const items = db.prepare(`SELECT i.id, i.kg_estimados, i.precio_estimado_por_kg,
+      COALESCE(i.iva_alicuota, ?) AS alic
+    FROM sg_oc_items i WHERE i.oc_id=?`)
+    .all(oc.iva_alicuota_oc != null ? Number(oc.iva_alicuota_oc) : null, ocId);
+  let totKg = 0, totMonto = 0, totNeto = 0, totIva = 0;
+  const setItem = db.prepare('UPDATE sg_oc_items SET neto_estimado=?, iva_estimado=? WHERE id=?');
+  for (const it of items) {
+    const kg = Number(it.kg_estimados) || 0;
+    const precio = it.precio_estimado_por_kg != null ? Number(it.precio_estimado_por_kg) : null;
+    totKg += kg;
+    if (precio == null) { setItem.run(null, null, it.id); continue; }
+    const bruto = kg * precio;
+    let neto = bruto, iva = 0;
+    const alic = (discrimina && it.alic != null) ? Number(it.alic) : null;
+    if (alic != null) {
+      if (incluyeIva) { neto = bruto / (1 + alic / 100); iva = bruto - neto; }
+      else            { neto = bruto;                    iva = bruto * alic / 100; }
+    }
+    setItem.run(alic != null ? r2(neto) : null, alic != null ? r2(iva) : null, it.id);
+    totMonto += neto + iva; totNeto += neto; totIva += iva;
+  }
+  db.prepare(`UPDATE sg_oc SET total_estimado_kg=?, total_estimado_monto=?, total_neto=?, total_iva=?
+    WHERE id=?`).run(r2(totKg), r2(totMonto),
+    discrimina ? r2(totNeto) : null, discrimina ? r2(totIva) : null, ocId);
+}
+
+// ── EL LOTE CUYO COSTO YA VIAJÓ A OTRO NO SE REPRECIA ──────────────────────
+//
+// Cuando de un lote salió mercadería a una transformación o un reproceso, lo que se
+// le transfirió al hijo quedó CONGELADO (sg_transformaciones.costo_transferido) y no
+// se recalcula nunca. Si al padre se le cambia el costo_base, recalcCostoLote le
+// resta ese snapshot viejo: el padre queda con un costo por kilo inflado y el hijo
+// con uno de menos. El total cierra y la distribución queda mal en los dos lados.
+//
+// El repo ya lo prohíbe por la otra puerta —frenosDeEdicionLote, freno 3, que corta
+// PUT /lotes/:id/corregir con estas mismas palabras—. Este endpoint escribía el mismo
+// costo_base sin ese freno.
+//
+// NO se pide el freno de «ya se despachó»: corregir el precio de una venta ya hecha
+// es una cuestión de rentabilidad, y eso se mira después (Pablo, 26/8/2026). Acá el
+// problema es distinto: el inventario queda con un número que no existe.
+function loteConCostoViajado(db, ocItemId) {
+  return db.prepare(`SELECT l.id, l.codigo_lote FROM sg_lotes l
+     WHERE l.oc_item_id = ? AND l.activo = 1
+       AND ( l.transformado_de IS NOT NULL OR l.reproceso_id IS NOT NULL
+          OR EXISTS (SELECT 1 FROM sg_transformaciones t WHERE t.lote_origen_id = l.id)
+          OR EXISTS (SELECT 1 FROM sg_reprocesos rp WHERE rp.lote_madre_id = l.id AND rp.estado='activo') )
+     LIMIT 1`).get(ocItemId);
+}
+
+function aplicarPrecioItem(db, { ocId, ocItemId, precio, userId }) {
+  db.prepare('UPDATE sg_oc_items SET precio_estimado_por_kg=? WHERE id=? AND oc_id=?')
+    .run(precio, ocItemId, ocId);
+  const neto = precioNetoDeOC(db, ocId, ocItemId, precio);
+  const lotes = db.prepare('SELECT id, kg_reales FROM sg_lotes WHERE oc_item_id=? AND activo=1')
+    .all(ocItemId);
+  for (const l of lotes) {
+    db.prepare(`UPDATE sg_lotes SET precio_unitario_kg=?, costo_base=?,
+        modificado_en=datetime('now','localtime'), modificado_por=? WHERE id=?`)
+      .run(neto, r2((Number(l.kg_reales) || 0) * neto), userId || null, l.id);
+    recalcCostoLote(db, Number(l.id));
+  }
+  return lotes.length;
+}
+
+router.put('/oc/:id/precios', requireAuth, (req, res) => {
+  const db = getDb();
+  try {
+    const b = req.body || {};
+    const oc = db.prepare('SELECT * FROM sg_oc WHERE id=? AND activo=1').get(req.params.id);
+    if (!oc) return res.status(404).json({ ok: false, error: 'Orden no encontrada' });
+    if (oc.estado === 'anulada') {
+      return res.status(400).json({ ok: false, error: 'Esa orden está anulada' });
+    }
+    // EL CERROJO. Es la regla entera: documentada = firme.
+    const freno = frenoPrecioFirme(db, oc.id, 'cambiar el precio');
+    if (freno) return res.status(409).json({ ok: false, error: freno });
+
+    // POR QUÉ SE CAMBIA. Es lo que después explica una diferencia contra el papel del
+    // proveedor, y es la misma exigencia que ya tienen /documenta y la anulación de
+    // una factura de compra.
+    const motivo = String(b.motivo || '').trim();
+    if (motivo.length < 3) {
+      return res.status(400).json({ ok: false, error:
+        'Poné por qué cambia el precio: es lo que después explica la diferencia contra lo pactado.' });
+    }
+
+    const pedidos = (Array.isArray(b.items) ? b.items : [])
+      .map((x) => ({ id: Number(x.oc_item_id), precio: Number(x.precio_por_kg) }))
+      .filter((x) => x.id > 0 && x.precio >= 0);
+    if (!pedidos.length) {
+      return res.status(400).json({ ok: false, error: 'No mandaste ningún precio.' });
+    }
+    const items = db.prepare('SELECT id, precio_estimado_por_kg FROM sg_oc_items WHERE oc_id=?')
+      .all(oc.id);
+    const porId = new Map(items.map((i) => [Number(i.id), i]));
+    for (const p of pedidos) {
+      if (!porId.has(p.id)) {
+        return res.status(400).json({ ok: false, error: 'El renglón ' + p.id + ' no es de esta orden.' });
+      }
+    }
+    // ── LA PARTIDA DE PRECIO ABIERTO NO TIENE PRECIO EN LA ORDEN ───────────
+    // En pizarra el precio vive en cada LOTE y se fija con «cerrar precio»: escribirlo
+    // acá dejaría el ítem con un número que después nadie mira.
+    if (oc.tipo_precio === 'pizarra') {
+      return res.status(400).json({ ok: false, error:
+        'Esa partida se compró a PRECIO ABIERTO: su precio se fija en cada partida, con '
+        + '«cerrar precio», no en la orden.' });
+    }
+
+    // Ningún renglón cuyo costo ya se haya repartido a otro lote.
+    for (const p of pedidos) {
+      const antes = porId.get(p.id).precio_estimado_por_kg;
+      if (String(antes == null ? '' : antes) === String(p.precio)) continue;
+      const viajado = loteConCostoViajado(db, p.id);
+      if (viajado) {
+        return res.status(409).json({ ok: false, error:
+          'De la partida ' + (viajado.codigo_lote || viajado.id) + ' salió mercadería a una '
+          + 'transformación o un reproceso: parte de su costo ya viajó a otro lote. Cambiarle el '
+          + 'precio dejaría la plata contada mal en los dos lados.' });
+      }
+    }
+
+    const uidReq = uid(req);
+    let lotesTocados = 0;
+    db.transaction(() => {
+      for (const p of pedidos) {
+        const antes = porId.get(p.id).precio_estimado_por_kg;
+        if (String(antes == null ? '' : antes) === String(p.precio)) continue;
+        lotesTocados += aplicarPrecioItem(db,
+          { ocId: oc.id, ocItemId: p.id, precio: p.precio, userId: uidReq });
+        // El rastro va DENTRO de la transacción: no puede quedar el cambio sin
+        // registro ni el registro sin cambio.
+        anotarEdicion(db, { tabla: 'sg_oc_items', registroId: p.id,
+          campo: 'precio_estimado_por_kg', antes, despues: p.precio,
+          motivo, ocId: oc.id, userId: uidReq });
+      }
+      // ── Y LOS TOTALES DE LA CABECERA, ANTES DEL CRONOGRAMA ───────────────
+      // generarVencimientos reparte sg_oc.total_estimado_monto cuando la partida
+      // todavía no tiene factura. Sin rehacerlo primero, el cronograma se regeneraba
+      // con el importe VIEJO: se cambiaba el precio y la deuda con el proveedor
+      // quedaba igual. Y el PDF de la orden decía un precio y un total que no se
+      // correspondían.
+      recalcTotalesOC(db, oc.id);
+      // Y EL CRONOGRAMA DE DEUDA, una sola vez al final: lo que se le debe al
+      // proveedor cambió. Ojo —y queda dicho—: generarVencimientos no regenera si ya
+      // hay una cuota pagada, así que ahí el ajuste va a mano.
+      generarVencimientos(db, oc.id);
+    })();
+
+    const cuotasPagas = db.prepare(`SELECT COUNT(*) n FROM sg_oc_vencimientos
+       WHERE oc_id=? AND pagado=1`).get(oc.id);
+    res.json({ ok: true, data: {
+      oc_id: oc.id, lotes_recosteados: lotesTocados,
+      acordado: acordadoDeOC(db, oc.id).total,
+      aviso: (cuotasPagas && cuotasPagas.n > 0)
+        ? 'Esta orden ya tiene cuotas pagadas, así que el cronograma de vencimientos no se '
+          + 'regeneró: revisá la cuenta corriente del proveedor a mano.'
+        : null,
+    } });
+  } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
+});
+
 router.post('/oc/:id/completar', requireAdmin, (req, res) => {
   const db = getDb();
   try {
@@ -5289,16 +5504,12 @@ router.post('/oc/:id/completar', requireAdmin, (req, res) => {
         circ.tipoPrecio, circ.tipoFiscal, circ.documenta,
         val(b.observaciones) || null, uid(req), oc.id);
 
-      const setItem = db.prepare('UPDATE sg_oc_items SET precio_estimado_por_kg=? WHERE id=? AND oc_id=?');
-      const lotesDe = db.prepare('SELECT id, kg_reales FROM sg_lotes WHERE oc_item_id=? AND activo=1');
-      const setLote = db.prepare(`UPDATE sg_lotes SET precio_unitario_kg=?, costo_base=?,
-        modificado_en=datetime('now','localtime'), modificado_por=? WHERE id=?`);
+      // LA MISMA CUENTA QUE EL ENDPOINT DE PRECIOS. Acá se valorizaba el lote con el
+      // precio BRUTO, sin mirar precio_incluye_iva: una orden cargada con IVA adentro
+      // dejaba el inventario y el margen 10,5% o 21% arriba. Eran dos cuentas
+      // distintas del mismo número, y esta era la que estaba mal.
       for (const p of precios) {
-        setItem.run(p.precio, p.id, oc.id);
-        for (const l of lotesDe.all(p.id)) {
-          setLote.run(p.precio, r2((l.kg_reales || 0) * p.precio), uid(req), l.id);
-          recalcCostoLote(db, Number(l.id));
-        }
+        aplicarPrecioItem(db, { ocId: oc.id, ocItemId: p.id, precio: p.precio, userId: uid(req) });
       }
 
       // El total de la orden se rehace con lo que quedó, no con lo que se mandó:
@@ -5492,6 +5703,25 @@ router.get('/oc/:id', requireAuth, (req, res) => {
       LEFT JOIN sg_productos pr ON pr.id=i.producto_id
       LEFT JOIN sg_presentaciones ps ON ps.id=i.presentacion_id
       WHERE i.oc_id=?`).all(req.params.id);
+    // ── LO QUE SE LE PAGA POR CADA RENGLÓN, CALCULADO ACÁ ─────────────────
+    //
+    // La cuenta no es «kg × precio»: si el ítem se pactó POR BULTO se paga por
+    // bulto, y lo que entró pesado sin contar cajones se paga por kilo — puede ser
+    // mixto dentro del mismo ítem. Está en acordadoDeOC y es la única versión.
+    //
+    // Viaja al front para que la pantalla que edita el precio no tenga que rehacerla:
+    // como el importe es LINEAL en el precio, alcanza con escalarlo. Rehacerla en el
+    // navegador daba otro número —ignoraba modo_carga y los kilos sueltos— y le
+    // mostraba al comprador un total que no era el que iba a cobrar el productor.
+    (function () {
+      const det = acordadoDeOC(db, Number(req.params.id)).detalle || [];
+      const porItem = new Map(det.map((d) => [Number(d.oc_item_id), d]));
+      for (const it of oc.items) {
+        const d = porItem.get(Number(it.id));
+        it.acordado_importe = d && d.importe != null ? d.importe : null;
+        it.acordado_base = d ? d.base : null;
+      }
+    })();
     oc.vencimientos = db.prepare('SELECT * FROM sg_oc_vencimientos WHERE oc_id=? ORDER BY cuota_orden').all(req.params.id);
     // Lo pactado contra lo que entró. Si algo no da, la orden recibida lo avisa
     // arriba de todo para que el comprador pueda ajustar el precio.
