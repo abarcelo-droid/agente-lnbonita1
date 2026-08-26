@@ -58845,12 +58845,83 @@ function spListaRender(vista, r) {
   cont.innerHTML = filtros + spTablaHtml(arr, vista);
 }
 
+// ── ORDENAR LOS LISTADOS ───────────────────────────────────────────────────────────
+// Se ordena el ARREGLO que ya está en memoria y se repinta. Ordenar las filas del HTML
+// obligaría a leer "$ 1.234,56" del texto de la celda y volver a interpretarlo — la misma
+// adivinanza de separadores que ya costó caro acá. Y de paso no hace falta volver a
+// pedirle los datos al servidor sólo para cambiar el orden.
+//
+// El orden se guarda POR VISTA: ordenar "Todas" por monto no tiene por qué reordenar la
+// bandeja de "Me toca a mí", que se mira para trabajar y conviene que quede quieta.
+var SP_ORD = {};
+var SP_COLS = {
+  numero:      function(s){ return s.numero || ''; },
+  proveedor:   function(s){ return s.proveedor_texto || ''; },
+  monto:       function(s){ return Number(s.monto) || 0; },
+  concepto:    function(s){ return s.concepto || ''; },
+  paso:        function(s){ return s.paso_nombre || ''; },
+  espera:      function(s){ return s.paso_actual_desde || ''; },   // ISO: ordena como texto
+  solicitante: function(s){ return s.solicitante_nombre || ''; },
+  aviso:       function(s){ return s.aviso_prov ? 1 : 0; },
+};
+
+function spOrdenarArr(arr, vista) {
+  var o = SP_ORD[vista];
+  if (!o || !o.col || !SP_COLS[o.col]) return arr;
+  var get = SP_COLS[o.col];
+  return arr.slice().sort(function(a, b) {
+    // Los montos se agrupan PRIMERO POR MONEDA. Ordenar 100 dólares contra 100.000 pesos
+    // como si fueran el mismo número da una lista que no significa nada, y encima se lee
+    // como si el pago chico fuera el grande.
+    if (o.col === 'monto') {
+      var ma = String(a.moneda || 'ARS'), mb = String(b.moneda || 'ARS');
+      if (ma !== mb) return ma.localeCompare(mb) * o.dir;
+    }
+    var va = get(a), vb = get(b);
+    var c = (typeof va === 'number' && typeof vb === 'number')
+      ? va - vb
+      // numeric:true para que OP-9 vaya antes que OP-10.
+      : String(va).localeCompare(String(vb), 'es', { numeric: true, sensitivity: 'base' });
+    return c * o.dir;
+  });
+}
+
+// Un clic ordena ascendente; el mismo de nuevo lo da vuelta; el tercero vuelve al orden
+// que manda el servidor, para poder salir sin recargar la pantalla.
+function spOrdenarPor(vista, col) {
+  var o = SP_ORD[vista] || (SP_ORD[vista] = { col: null, dir: 1 });
+  if (o.col !== col)      { o.col = col; o.dir = 1; }
+  else if (o.dir === 1)   { o.dir = -1; }
+  else                    { o.col = null; o.dir = 1; }
+  // "frenadas" es la sub-tabla de la bandeja, no una vista propia: se repinta la bandeja.
+  spListaRender(vista === 'frenadas' ? 'pendiente' : vista);
+}
+
+// El encabezado dice con qué está ordenado y hacia dónde. Sin la flecha, dos clics dan dos
+// resultados distintos y no hay forma de saber cuál se está mirando.
+// El estilo llega como TEXTO y se concatena adentro del mismo atributo: dos style= en el
+// mismo <th> y el navegador se queda con el primero, así que el cursor o la alineación se
+// perderían en silencio.
+function spTh(vista, col, label, estilo, titulo) {
+  var o = SP_ORD[vista] || {}, act = o.col === col;
+  var t = titulo || ('Ordenar por ' + label.replace(/<[^>]*>/g, ' '));
+  return '<th style="cursor:pointer;user-select:none;' + (estilo || '') + '" title="' + t + '"'
+    + ' onclick="spOrdenarPor(\'' + vista + '\',\'' + col + '\')">' + label
+    + '<span style="opacity:' + (act ? '1' : '.25') + ';margin-left:4px">' + (act && o.dir < 0 ? '▼' : '▲') + '</span></th>';
+}
+
 function spTablaHtml(arr, vista) {
+  arr = spOrdenarArr(arr, vista);
   var html = '<div class="ab-table-wrap"><table class="pa-tbl" style="font-size:12px"><thead><tr>'
-    + '<th>Nº</th><th>Proveedor</th><th style="text-align:right">Monto</th><th>Concepto</th>'
-    + '<th>En qué paso está</th><th>Espera desde</th>'
-    + (vista === 'mias' ? '' : '<th>Pidió</th>')
-    + '<th style="width:74px;text-align:center" title="Marcá cuando ya le avisaste al proveedor y le mandaste los comprobantes">Avisé al<br>proveedor</th>'
+    + spTh(vista, 'numero', 'Nº')
+    + spTh(vista, 'proveedor', 'Proveedor')
+    + spTh(vista, 'monto', 'Monto', 'text-align:right')
+    + spTh(vista, 'concepto', 'Concepto')
+    + spTh(vista, 'paso', 'En qué paso está')
+    + spTh(vista, 'espera', 'Espera desde')
+    + (vista === 'mias' ? '' : spTh(vista, 'solicitante', 'Pidió'))
+    + spTh(vista, 'aviso', 'Avisé al<br>proveedor', 'width:74px;text-align:center',
+        'Marcá cuando ya le avisaste al proveedor y le mandaste los comprobantes — click para ordenar')
     + '<th style="width:190px"></th></tr></thead><tbody>';
 
   arr.forEach(function(s) {
