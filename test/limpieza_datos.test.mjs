@@ -303,8 +303,15 @@ test('el interruptor tiene DÓNDE tocarse', () => {
   // existe.
   assert.match(PANEL, /function sgLimSwitch\(on\)/);
   assert.match(PANEL, /api\('\/api\/sg\/config', 'PUT', \{ limpieza_habilitada:/);
-  assert.match(PANEL, /id="sg-lim-switch"/);
-  assert.match(PANEL, /function sgLimSwitchMontar\(\)/);
+  assert.match(PANEL, /caja\.id = 'sg-lim-switch';/);
+  // Y se ve en TODAS las pantallas que tienen algo que borrar, no en una sola. Estaba
+  // en el Dashboard —que en el menú se llama «Dash» y cuelga de Informes— y ahí no lo
+  // encontró nadie. Un control que no se encuentra es un control que no existe.
+  assert.match(PANEL, /function sgLimSwitchMontar\(secId\)/);
+  assert.match(PANEL, /if \(!SG_LIMPIEZA_PANTALLAS\[secId\]\) return;/);
+  assert.match(PANEL, /sgLimSwitchMontar\('sec-' \+ s\)/, 'se monta al cambiar de pantalla');
+  // Un solo nodo: se MUEVE a la pantalla abierta, no se clona.
+  assert.equal((PANEL.match(/id: 'sg-lim-switch'|id="sg-lim-switch"/g) || []).length, 0);
   // Y sólo lo ve un administrador.
   assert.match(PANEL, /var esAdmin = !!\(window\.LNB_USER && window\.LNB_USER\.rol === 'admin'\);/);
   // Al apagarlo, los botones que ya estaban dibujados se sacan.
