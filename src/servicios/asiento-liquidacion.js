@@ -123,7 +123,26 @@ export function lineasAsientoLiquidacion(db, datos) {
 
   // Los dos IVA salen de la configuración global, como en compras y en ventas.
   const ivaVentas = n(f.iva_ventas);
-  const ivaServ = n(f.iva_comision) + n(f.iva_descarga) + n(f.iva_gastos_admin);
+  // ══ EL IVA DE LOS SERVICIOS SALE DE LA LISTA, NO ESCRITO A MANO ══════════
+  //
+  // Acá decía `iva_comision + iva_descarga + iva_gastos_admin`. El FLETE se agregó
+  // después —Pablo: "flete lo estoy agregando ya que me lo había olvidado"— y esta
+  // suma quedó vieja: es un servicio más, lleva IVA débito como los otros tres
+  // (FILAS_LIQ lo dice), y su IVA no se le cobraba.
+  //
+  // Y NO SE VEÍA, porque el asiento balanceaba igual: Proveedores sale por
+  // DIFERENCIA, así que ese IVA que no se cobró engrosaba lo que se le queda
+  // debiendo al productor y las dos columnas cerraban lo mismo. Lo que no cerraba
+  // era el asiento contra la propia liquidación: la pantalla ya descontaba el IVA
+  // del flete de «neto a pagar al productor» (liqTotales, panel.html) y el `total`
+  // que se guarda sale de ahí, así que el mayor de Proveedores decía un número y la
+  // cuenta corriente del productor decía otro. Y el Diario de IVA Ventas —que sí
+  // cuenta el flete— declaraba un débito que el asiento no había registrado.
+  //
+  // Escrito contra FILAS_LIQ, el próximo servicio que se agregue entra solo.
+  const ivaServ = FILAS_LIQ
+    .filter((x) => x.iva === 'debito')
+    .reduce((a, x) => r2l(a + n(f['iva_' + x.clave])), 0);
   const ctaIvaCred = ivaVentas > 0 ? cuentaConfig(db, 'iva_credito_fiscal') : null;
   const ctaIvaDeb = ivaServ > 0 ? cuentaConfig(db, 'iva_debito_fiscal') : null;
   if (ivaVentas > 0 && !ctaIvaCred) {
