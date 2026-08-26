@@ -1,0 +1,224 @@
+{
+ "de": "respaldo clientes-2026-08-26.db, páginas liberadas",
+ "embarques": [
+  {
+   "id": 5,
+   "creado_en": "2026-08-21 14:59:08",
+   "cantidad_cajas": 1500
+  },
+  {
+   "id": 6,
+   "creado_en": "2026-08-20 02:24:19",
+   "cantidad_cajas": 2520
+  },
+  {
+   "id": 7,
+   "creado_en": "2026-08-19 20:30:23",
+   "cantidad_cajas": 1000
+  },
+  {
+   "id": 8,
+   "creado_en": "2026-08-19 20:34:58",
+   "cantidad_cajas": 1000
+  },
+  {
+   "id": 9,
+   "creado_en": "2026-08-19 20:39:40",
+   "cantidad_cajas": 2700
+  },
+  {
+   "id": 10,
+   "creado_en": "2026-08-20 13:15:57",
+   "cantidad_cajas": 1000
+  },
+  {
+   "id": 11,
+   "creado_en": "2026-08-21 14:45:56",
+   "cantidad_cajas": 1000
+  },
+  {
+   "id": 12,
+   "creado_en": "2026-08-22 14:26:31",
+   "cantidad_cajas": 2041
+  },
+  {
+   "id": 13,
+   "creado_en": "2026-08-26 16:55:52",
+   "cantidad_cajas": 1944
+  },
+  {
+   "id": 14,
+   "creado_en": "2026-08-26 12:36:23",
+   "cantidad_cajas": 1700
+  },
+  {
+   "id": 15,
+   "creado_en": "2026-08-26 12:36:41",
+   "cantidad_cajas": 1600
+  }
+ ],
+ "lineas": [
+  {
+   "embarque_id": 5,
+   "producto_id": 610,
+   "envase_id": 317,
+   "kg_por_bulto": 20,
+   "cajas": 1500,
+   "creado_en": "2026-08-21 14:59:08",
+   "precio_unitario_usd": 14.39
+  },
+  {
+   "embarque_id": 6,
+   "producto_id": 720,
+   "envase_id": 319,
+   "kg_por_bulto": 8,
+   "cajas": 1854,
+   "creado_en": "2026-08-20 02:24:19",
+   "precio_unitario_usd": 21
+  },
+  {
+   "embarque_id": 6,
+   "producto_id": 712,
+   "envase_id": 319,
+   "kg_por_bulto": 8,
+   "cajas": 287,
+   "creado_en": "2026-08-20 02:24:19",
+   "precio_unitario_usd": 23
+  },
+  {
+   "embarque_id": 6,
+   "producto_id": 728,
+   "envase_id": 319,
+   "kg_por_bulto": 8,
+   "cajas": 270,
+   "creado_en": "2026-08-20 02:24:19",
+   "precio_unitario_usd": 14.8
+  },
+  {
+   "embarque_id": 6,
+   "producto_id": 711,
+   "envase_id": 319,
+   "kg_por_bulto": 8,
+   "cajas": 109,
+   "creado_en": "2026-08-20 02:24:19",
+   "precio_unitario_usd": 18.9
+  },
+  {
+   "embarque_id": 7,
+   "producto_id": 680,
+   "envase_id": 317,
+   "kg_por_bulto": 25,
+   "cajas": 1000,
+   "creado_en": "2026-08-19 20:30:23",
+   "precio_unitario_usd": 19.5
+  },
+  {
+   "embarque_id": 8,
+   "producto_id": 680,
+   "envase_id": 317,
+   "kg_por_bulto": 25,
+   "cajas": 1000,
+   "creado_en": "2026-08-19 20:34:58",
+   "precio_unitario_usd": 19.5
+  },
+  {
+   "embarque_id": 9,
+   "producto_id": 712,
+   "envase_id": 319,
+   "kg_por_bulto": 8,
+   "cajas": 2700,
+   "creado_en": "2026-08-19 20:39:40",
+   "precio_unitario_usd": 23.5
+  },
+  {
+   "embarque_id": 10,
+   "producto_id": 680,
+   "envase_id": 317,
+   "kg_por_bulto": 25,
+   "cajas": 1000,
+   "creado_en": "2026-08-20 13:15:57",
+   "precio_unitario_usd": 19.5
+  },
+  {
+   "embarque_id": 11,
+   "producto_id": 680,
+   "envase_id": 317,
+   "kg_por_bulto": 25,
+   "cajas": 1000,
+   "creado_en": "2026-08-21 14:45:56",
+   "precio_unitario_usd": 18.5
+  },
+  {
+   "embarque_id": 12,
+   "producto_id": 665,
+   "envase_id": 319,
+   "kg_por_bulto": 10,
+   "cajas": 693,
+   "creado_en": "2026-08-22 14:26:31",
+   "precio_unitario_usd": 10
+  },
+  {
+   "embarque_id": 12,
+   "producto_id": 668,
+   "envase_id": 319,
+   "kg_por_bulto": 9,
+   "cajas": 616,
+   "creado_en": "2026-08-22 14:26:31",
+   "precio_unitario_usd": 12
+  },
+  {
+   "embarque_id": 12,
+   "producto_id": 667,
+   "envase_id": 319,
+   "kg_por_bulto": 9,
+   "cajas": 308,
+   "creado_en": "2026-08-22 14:26:31",
+   "precio_unitario_usd": 10
+  },
+  {
+   "embarque_id": 12,
+   "producto_id": 663,
+   "envase_id": 319,
+   "kg_por_bulto": 13,
+   "cajas": 270,
+   "creado_en": "2026-08-22 14:26:31",
+   "precio_unitario_usd": 10
+  },
+  {
+   "embarque_id": 12,
+   "producto_id": 664,
+   "envase_id": 319,
+   "kg_por_bulto": 9,
+   "cajas": 154,
+   "creado_en": "2026-08-22 14:26:31",
+   "precio_unitario_usd": 8
+  },
+  {
+   "embarque_id": 13,
+   "producto_id": 679,
+   "envase_id": 319,
+   "kg_por_bulto": 11.2,
+   "cajas": 1944,
+   "creado_en": "2026-08-26 16:55:52",
+   "precio_unitario_usd": 22.4
+  },
+  {
+   "embarque_id": 14,
+   "producto_id": 610,
+   "envase_id": 317,
+   "kg_por_bulto": 20,
+   "cajas": 1700,
+   "creado_en": "2026-08-26 12:36:23",
+   "precio_unitario_usd": 13
+  },
+  {
+   "embarque_id": 15,
+   "producto_id": 610,
+   "envase_id": 317,
+   "kg_por_bulto": 20,
+   "cajas": 1600,
+   "creado_en": "2026-08-26 12:36:41",
+   "precio_unitario_usd": 13.5
+  }
+ ]
+}

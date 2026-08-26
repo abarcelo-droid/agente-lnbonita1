@@ -5095,6 +5095,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
       #sec-sg-importacion .sg-emb-sw option{background:var(--sur,#fff);color:var(--txt,#111);font-weight:500}
     </style>
     <div class="ph"><div><div class="ph-t">🍅 San Gerónimo · Importación</div><div class="ph-s">Cotizador de embarque: costo por caja en pesos según a qué dólar se paga cada rubro. Estimado vs real.</div></div><div style="display:flex;gap:8px"><button class="btn bo" onclick="sgParamsAbrir()">⚙️ Parámetros</button><button class="btn bo" onclick="sgCurvaAbrir()">📈 Curva TC</button><button class="btn bo" onclick="sgTcAbrir()">💱 TC esperado</button><button class="btn bo" onclick="sgImpDesdeFactura()" title="Subí la factura del proveedor y se carga el embarque con sus productos. Se revisa antes de guardar.">📄 Desde la factura</button><a class="btn bo" href="/api/sg/embarques/export" title="Todos los camiones en un Excel plano: una fila por producto, con el cabezal y el costeo repetidos al lado">⬇️ Excel</a><button class="btn bb" onclick="sgImpOpen()">+ Nuevo embarque</button></div></div>
+    <div id="sg-imp-rescate" style="display:none;margin-bottom:14px;padding:12px 14px;border-radius:10px;border:1px solid #fde68a;background:#fffbeb"></div>
     <input type="file" id="sg-emb-factura-file" accept="application/pdf,image/jpeg,image/png" style="display:none" onchange="sgImpFacturaElegida(this)">
     <!-- Solapas propias de Importación (scopeadas a esta sección, no comparten el toggler
          genérico de catálogos para no apagar los subtabs de otras pantallas). -->
@@ -30142,11 +30143,58 @@ function sgEmbSwPintar(sel){
   sel.style.borderColor = c[2]; sel.style.fontWeight = '600';
 }
 
+// ══ RECUPERAR LOS EMBARQUES BORRADOS ═════════════════════════════════════
+//
+// El 26/8/2026 un borrado de datos de prueba se llevó once embarques REALES que no
+// estaban en su alcance. Del respaldo se rescataron los RENGLONES —producto, envase,
+// kilos por bulto, cajas y precio FOB—; las cabeceras ya estaban pisadas.
+//
+// El cartel se muestra solo si queda algo por recuperar, y desaparece cuando no.
+function sgImpRescateVer(){
+  var c = eid('sg-imp-rescate');
+  if (!c) return;
+  api('/api/sg/embarques/rescate').then(function(r){
+    if (!r || !r.ok || !r.data || !r.data.pendientes) { c.style.display='none'; return; }
+    var ps = r.data.embarques.filter(function(e){ return !e.ya_esta; });
+    c.style.display = '';
+    c.innerHTML = '<div style="font-weight:700;font-size:13.5px;color:#92400e">'
+      + '📦 Hay ' + ps.length + ' embarque(s) recuperados del respaldo, sin cargar</div>'
+      + '<div style="font-size:12px;color:#92400e;margin:6px 0 2px">'
+      + 'Se rescataron los <b>renglones</b>: producto, envase, kilos por bulto, cajas y precio FOB. '
+      + 'Las cabeceras (proveedor, país, incoterm, fechas, TC y costos) no se pudieron recuperar '
+      + 'y hay que completarlas a mano.</div>'
+      + '<div class="ab-table-wrap" style="overflow-x:hidden !important;margin:8px 0">'
+      + '<table class="pa-tbl" style="table-layout:fixed;width:100%;max-width:98vw"><tbody>'
+      + ps.map(function(e){
+          return '<tr><td style="width:80px">#' + e.id + '</td>'
+            + '<td style="overflow:hidden;text-overflow:ellipsis">' + esc(e.productos.join('  ·  ')) + '</td>'
+            + '<td style="width:100px;text-align:right">' + nr(e.cajas) + ' cajas</td></tr>'; }).join('')
+      + '</tbody></table></div>'
+      + '<button class="btn bb bs" id="sg-imp-resc-go" onclick="sgImpRescate()">📦 Cargarlos ahora</button>';
+  });
+}
+
+function sgImpRescate(){
+  var b = eid('sg-imp-resc-go');
+  if (b) { b.disabled = true; b.textContent = 'Cargando…'; }
+  api('/api/sg/embarques/rescate','POST',{}).then(function(r){
+    if (!r || !r.ok) {
+      alert('No se pudieron cargar.' + String.fromCharCode(10,10) + ((r && r.error) || 'Error'));
+      if (b) { b.disabled = false; b.textContent = '📦 Cargarlos ahora'; }
+      return;
+    }
+    toast('Se cargaron ' + r.data.total + ' embarque(s)','ok');
+    sgImpRescateVer();
+    sgImpInit();
+  });
+}
+
 function sgImpInit(){
   var t=document.getElementById('sec-sg-importacion');
   if(t && !t.querySelector('.sg-imp-tab.on')) sgImpTab('ingresos');
   // La curva alimenta el preview en vivo de los TC por rubro; se cachea al entrar al módulo.
   api('/api/sg/tc-esperado/curva').then(function(r){ SG._curva=(r&&r.ok&&r.data.curva)||[]; });
+  sgImpRescateVer();
   api('/api/sg/embarques').then(function(r){
     var rows=(r&&r.ok)?r.data:[];
     eid('sg-tb-embarques').innerHTML = rows.length ? rows.map(function(e){
