@@ -11061,6 +11061,36 @@ function sgOcVer(id){
         : '<b>' + nr(it.kg_estimados) + '</b> kg'
           + (precioKg != null ? '<div class="sg-oc-sub">' + sgMoney(precioKg) + ' /kg</div>' : '');
 
+      // ══ EL PRECIO DE VENTA DE REFERENCIA, QUE SE CARGABA Y SE PERDÍA ══
+      //
+      // Pablo, 25/8/2026: "el precio de venta de referencia debe VIVIR en la orden
+      // de compra cuando la vemos".
+      //
+      // Se cargaba al armar la orden, se guardaba en sg_oc_items... y no lo leía
+      // NADIE. Ni una consulta, ni una pantalla, ni el PDF. El que se tomaba el
+      // trabajo de estimarlo no lo volvía a ver nunca, ni acá ni al liquidar.
+      //
+      // Va al lado de lo pactado, que es donde sirve: ahí se ve de un vistazo si lo
+      // que se compró deja el margen que se pensaba. El margen se calcula sobre el
+      // precio de venta —(venta − costo) / venta—, que es como se mira en el rubro.
+      var refKg = (it.precio_referencia_venta != null && it.precio_referencia_venta !== '')
+        ? Number(it.precio_referencia_venta) : null;
+      var refTxt = '';
+      if (refKg != null && refKg > 0) {
+        var refUni = porBulto && kgBulto ? refKg * kgBulto : refKg;
+        var margen = (precioKg != null && refKg > 0)
+          ? Math.round((refKg - precioKg) / refKg * 1000) / 10 : null;
+        refTxt = '<div class="sg-oc-sub" style="margin-top:3px">'
+          + '<span title="Precio de venta estimado al cargar la orden">venta ref. '
+          + sgMoney(refUni) + (porBulto && kgBulto ? ' /bulto' : ' /kg') + '</span>'
+          + (margen != null
+              ? ' · <b style="color:' + (margen >= 0 ? '#166534' : '#b91c1c') + '">'
+                + String(margen).replace('.', ',') + '% margen</b>'
+              : '')
+          + '</div>';
+      }
+      pactado += refTxt;
+
       var mios = porItem[String(it.id)] || [];
       if (!mios.length) {
         h += '<tr><td>' + esc(it.producto_nombre || '') + '</td>'
