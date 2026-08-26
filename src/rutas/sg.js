@@ -13,6 +13,8 @@ import { fileURLToPath } from 'url';
 import * as XLSX from 'xlsx';
 import { subirArchivo, obtenerArchivo, storageConfigurado } from '../servicios/storage.js';
 import { facturaCuenta } from '../servicios/factura-cuenta.js';
+// La foto de lo que quedó guardado con la venta de gestión vieja. Sólo lee.
+import { diagnosticoGestion } from '../servicios/sg_gestion_vieja.js';
 import { previewAsientoLiquidacion, lineasAsientoLiquidacion } from '../servicios/asiento-liquidacion.js';
 import { crearAsiento, MOTIVOS, origenDeAsiento } from '../servicios/asientos.js';
 
@@ -7910,6 +7912,22 @@ router.post('/gastos-servicio/valorizar', requireAdmin, (req, res) => {
 // consulta: era que la cobranza no existía para la contabilidad —no generaba
 // asiento ni movía ninguna cuenta— así que no había nada real que restar. Con la
 // cobranza cerrada, acá se lee lo que de verdad entró.
+// ══ QUÉ QUEDÓ CON LA VENTA DE GESTIÓN VIEJA ════════════════════════════
+//
+// SÓLO LEE. Es la foto que hay que poder mirar antes de decidir qué se corrige:
+// cuántos comprobantes quedaron con el descuento registrado de menos, por cuánta
+// plata, cuáles no se pueden reconstruir solos, qué liquidaciones al productor se
+// armaron con ese número corto y qué saldos van a reabrir.
+//
+// Va con requireAdmin porque es una foto de TODA la cuenta corriente y porque de
+// acá sale una decisión de corregir historia contable, no una operación del día.
+router.get('/gestion-vieja/diagnostico', requireAdmin, (req, res) => {
+  const db = getDb();
+  try {
+    res.json({ ok: true, data: diagnosticoGestion(db) });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
 router.get('/cc-clientes', requireAuth, (req, res) => {
   const db = getDb();
   try {
