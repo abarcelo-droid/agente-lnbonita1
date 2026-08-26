@@ -4611,7 +4611,18 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
         <option value="50">50</option><option value="100" selected>100</option>
         <option value="250">250</option><option value="500">500</option>
       </select></div>
-      <div><button class="btn bo bs" onclick="opoExportar()">⬇️ Excel</button></div>
+      <!-- El PDF es para llevar a una visita, así que se elige cuántas entran: un informe de
+           doscientas hojas no lo lee nadie. -->
+      <div><label>PDF con las</label><select id="op2-tope" style="min-width:110px">
+        <option value="10">10 primeras</option>
+        <option value="25" selected>25 primeras</option>
+        <option value="50">50 primeras</option>
+        <option value="100">100 primeras</option>
+      </select></div>
+      <div style="display:flex;gap:6px">
+        <button class="btn bb bs" onclick="opoPDF()" title="Informe explicativo, agrupado por cliente, para salir a trabajarlo">📄 PDF para comerciales</button>
+        <button class="btn bo bs" onclick="opoExportar()">⬇️ Excel</button>
+      </div>
     </div>
     <div id="opo-aviso" style="margin-bottom:10px"></div>
     <div id="opo-tipos" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px"></div>
@@ -32787,6 +32798,20 @@ function opoPintar(d){
     + '“Caída fuerte” arranca en −'+nr((d.umbrales||{}).caida_pct||0)+'%. '
     + '“No le vendemos” pide al menos '+nr((d.umbrales||{}).cross_min_clientes||0)+' clientes del mismo rubro comprándolo.'
     + (m?'':' <span style="color:var(--mut)">El orden pesa el margen; tu nivel no lo muestra, pero la lista es la misma para todos.</span>');
+}
+
+// El PDF lo arma el servidor: es el MISMO radar que se está viendo —los mismos filtros, la
+// misma ventana— así que se le mandan los mismos parámetros y nada más. Armarlo en el
+// navegador obligaría a duplicar las reglas y a mantener dos versiones del mismo informe.
+function opoPDF(){
+  var d=IA.opo;
+  if(!d||!(d.items||[]).length){ toast('No hay oportunidades para poner en el informe','er'); return; }
+  var sel=Object.keys(IA.tipos).filter(function(k){ return IA.tipos[k]; });
+  var qs=iaParamsVentana('op2')
+    + '&limite='+encodeURIComponent((eid('op2-limite')||{}).value||'100')
+    + '&tope='+encodeURIComponent((eid('op2-tope')||{}).value||'25')
+    + (sel.length?'&tipos='+encodeURIComponent(sel.join(',')):'');
+  window.location='/api/informes/oportunidades.pdf?'+qs;
 }
 
 function opoExportar(){
