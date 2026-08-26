@@ -13,7 +13,7 @@ import { ultimoComprobante } from './afip-wsfe.js';
 import { fiscalDeCliente } from './sg_fiscal.js';
 import { lineasAsientoVenta } from './asiento-venta.js';
 import { crearAsiento } from './asientos.js';
-import { esNotaDeCredito } from './factura-cuenta.js';
+import { esNotaDeCredito, esNotaDeDebito } from './factura-cuenta.js';
 
 // ── Migraciones aditivas (no se tocan los archivos de Pablo) ──────────────────────
 function _alter(tabla, col, ddl) {
@@ -124,7 +124,10 @@ function alicuotaId(pct) {
 // La regla completa vive en servicios/sg_fiscal.js, que es PURO: se puede leer
 // entera de un saque y probar sin levantar nada. Acá sólo se la aplica.
 function fiscalDe(cliente, esNC, ctx) {
-  const f = fiscalDeCliente(cliente, { esNC: !!esNC, ...(ctx || {}) });
+  // OJO: se pasa la CLASE, no un booleano. Con `!!esNC`, la cadena 'nd' se convertia
+  // en true y la nota de debito salia con el tipo de una nota de credito — o sea, le
+  // devolvia plata al cliente en vez de cobrarsela.
+  const f = fiscalDeCliente(cliente, { esNC, ...(ctx || {}) });
   if (!f.ok) throw new Error(f.error);
   return f;
 }
@@ -137,6 +140,15 @@ function umbralIdentificacion(database) {
     return n > 0 ? n : null;
   } catch (_) { return null; }
 }
+// Qué papel es, mirando el tipo que quedó guardado. Es lo único que hay después de
+// emitido, y de eso dependen el asiento, el PDF y cómo se llama en pantalla.
+function claseDeCbte(t) {
+  if (esNotaDeCredito(t)) return 'nc';
+  if (esNotaDeDebito(t)) return 'nd';
+  return 'factura';
+}
+const PAPEL_DESC = { nc: 'Nota de crédito — ', nd: 'Nota de débito — ' };
+
 function r2(n) { return Math.round((Number(n) || 0) * 100) / 100; }
 function fechaHoyAR() { return new Date(Date.now() - 3 * 3600 * 1000).toISOString().slice(0, 10); }
 
@@ -166,7 +178,8 @@ function fechaHoyAR() { return new Date(Date.now() - 3 * 3600 * 1000).toISOStrin
 //    adentro-- los manda y acá no se recalculan. Reconstruir el total desde un
 //    precio unitario redondeado es lo que dejaba el comprobante en $2.789.999,98
 //    cuando el papel decía $2.790.000. Sin esos campos, se calcula como siempre.
-export function construirComprobante(database, { clienteId, items, esNC, identificacion, asociado }) {
+export function construirComprobante(database, { clienteId, items, esNC, identificacion,
+                                                asociado, concepto }) {
   const cliente = database.prepare('SELECT id, razon_social, cuit, categoria_fiscal FROM sg_clientes WHERE id=?').get(clienteId);
   if (!cliente) throw new Error('Cliente inexistente: ' + clienteId);
   // La LETRA se necesita antes de recorrer los renglones (define la serie), pero si
@@ -179,20 +192,41 @@ export function construirComprobante(database, { clienteId, items, esNC, identif
   let impNeto = 0, impIva = 0, impOpEx = 0;
   const detalle = [];
   for (const it of (items || [])) {
-    const prod = database.prepare(`SELECT p.id, p.nombre, p.familia_id,
-        COALESCE(p.iva_alicuota, f.iva_alicuota) AS iva_alicuota
-      FROM sg_productos p LEFT JOIN sg_familias f ON f.id=p.familia_id WHERE p.id=?`).get(it.producto_id);
-    if (!prod) throw new Error('Producto inexistente: ' + it.producto_id);
+    // ── NO TODO RENGLÓN ES MERCADERÍA ──────────────────────────────────────
+    //
+    // Una nota de débito por intereses por mora, o por un flete que no se había
+    // facturado, no tiene producto: es un CONCEPTO. Acá se exigía un producto_id
+    // existente y se frenaba, así que no había forma de emitirla.
+    //
+    // El renglón sin producto se acepta si el llamador dice QUÉ es (descripcion) y
+    // con qué alícuota (alicuota). Es el mismo criterio que la factura de compra de
+    // SERVICIOS, donde el concepto lleva descripción, monto e IVA y ninguna cuenta
+    // por concepto. La columna ya lo admite: producto_id es nullable.
+    //
+    // NO se resuelve sembrando pseudo-productos en el maestro: aparecerían en los
+    // autocompletar de orden de compra, remito y facturación directa, y en los
+    // informes de stock. Un interés por mora no es algo que se despache.
+    const prod = (it.producto_id != null)
+      ? database.prepare(`SELECT p.id, p.nombre, p.familia_id,
+          COALESCE(p.iva_alicuota, f.iva_alicuota) AS iva_alicuota
+        FROM sg_productos p LEFT JOIN sg_familias f ON f.id=p.familia_id WHERE p.id=?`).get(it.producto_id)
+      : null;
+    if (it.producto_id != null && !prod) throw new Error('Producto inexistente: ' + it.producto_id);
+    const rotulo = (prod && prod.nombre) || String(it.descripcion || '').trim();
+    if (!rotulo) throw new Error('Un renglón sin producto tiene que decir qué es: falta la descripción.');
     const cant = Number(it.cantidad) || 0, precio = Number(it.precio) || 0;
-    if (!(cant > 0)) throw new Error('Cantidad inválida en ' + (prod.nombre || it.producto_id));
+    if (!(cant > 0)) throw new Error('Cantidad inválida en ' + rotulo);
     // La alícuota que decidió el llamador gana sobre el catálogo: la línea de un
     // remito lleva la que se resolvió cuando se armó, no la que tenga el producto hoy.
     const alic = (it.alicuota != null && it.alicuota !== '') ? Number(it.alicuota)
-               : (prod.iva_alicuota != null ? Number(prod.iva_alicuota) : null);
+               : (prod && prod.iva_alicuota != null ? Number(prod.iva_alicuota) : null);
     if (alic == null || isNaN(alic)) {
-      throw new Error(`"${prod.nombre}" no tiene alícuota de IVA cargada. Cargala en el maestro `
-        + `de productos antes de facturarlo: sin ella el comprobante saldría exento y la pantalla `
-        + `estaría mostrando otro número.`);
+      throw new Error(prod
+        ? `"${rotulo}" no tiene alícuota de IVA cargada. Cargala en el maestro de productos `
+          + `antes de facturarlo: sin ella el comprobante saldría exento y la pantalla estaría `
+          + `mostrando otro número.`
+        : `El renglón "${rotulo}" no dice con qué alícuota de IVA va, y sin producto no hay `
+          + `de dónde sacarla.`);
     }
     const neto = (it.importe_neto != null) ? r2(it.importe_neto) : r2(cant * precio);
     // F5 — metadata de presentación por bulto (cajón). NO interviene en el cálculo de importes:
@@ -209,7 +243,7 @@ export function construirComprobante(database, { clienteId, items, esNC, identif
       nc_modo:          it.nc_modo || null,
     };
     const id = alicuotaId(alic);
-    if (id === undefined) throw new Error('Alícuota de IVA no soportada para ' + prod.nombre + ': ' + alic + '%');
+    if (id === undefined) throw new Error('Alícuota de IVA no soportada para ' + rotulo + ': ' + alic + '%');
     // El IVA de la línea, si el llamador lo trae, sale POR DIFERENCIA contra el
     // bruto que se tipeó y no de multiplicar el neto: así neto + iva da exacto
     // el importe que se vio en pantalla, sin residuo.
@@ -218,7 +252,7 @@ export function construirComprobante(database, { clienteId, items, esNC, identif
     if (!ivaMap[id]) ivaMap[id] = { base: 0, importe: 0 };
     ivaMap[id].base = r2(ivaMap[id].base + neto);
     ivaMap[id].importe = r2(ivaMap[id].importe + iva);
-    detalle.push({ producto_id: prod.id, descripcion: it.descripcion || prod.nombre,
+    detalle.push({ producto_id: prod ? prod.id : null, descripcion: it.descripcion || rotulo,
       cantidad: cant, precio_unitario: precio, subtotal: neto, alicuota_id: id, ...bultoMeta });
   }
   if (!detalle.length) throw new Error('El comprobante necesita al menos un ítem');
@@ -231,10 +265,16 @@ export function construirComprobante(database, { clienteId, items, esNC, identif
   const iva = Object.keys(ivaMap).map(id => ({ Id: Number(id), BaseImp: ivaMap[id].base, Importe: ivaMap[id].importe }));
   return { cliente, cbte_tipo: cbteTipo, doc_tipo, doc_nro, cond_iva_receptor: fisc.cond_iva, letra_fiscal: fisc.letra,
     pide_identificacion: !!fisc.pide_identificacion,
+    // ── QUÉ SE ESTÁ VENDIENDO, PARA ARCA ──────────────────────────────────
+    // 1 = Productos, 2 = Servicios, 3 = Productos y Servicios. Una nota de débito por
+    // intereses por mora o por un flete no es Productos, y con Concepto 2 o 3 ARCA
+    // exige además el período del servicio y el vencimiento del pago.
+    concepto_afip: (Number(concepto) === 2 || Number(concepto) === 3) ? Number(concepto) : 1,
     // EL COMPROBANTE ASOCIADO. Una nota de crédito sin la factura que corrige es un
     // papel suelto: ARCA la rechaza y el cliente no sabe qué se le está acreditando.
     asociado: asociado || null,
-    imp_neto: impNeto, imp_iva: impIva, imp_opex: impOpEx, imp_total: impTotal, iva, detalle, concepto: 1 };
+    imp_neto: impNeto, imp_iva: impIva, imp_opex: impOpEx, imp_total: impTotal, iva, detalle,
+    concepto: (Number(concepto) === 2 || Number(concepto) === 3) ? Number(concepto) : 1 };
 }
 
 // XML interno de FECAESolicitar (un comprobante). 'auth' = bloque <ar:Auth>.
@@ -261,7 +301,7 @@ export function xmlFECAESolicitar(auth, { ptoVta, cbteTipo, cbteNro, comprobante
     + '<ar:FeCAEReq>'
     + '<ar:FeCabReq><ar:CantReg>1</ar:CantReg><ar:PtoVta>' + ptoVta + '</ar:PtoVta><ar:CbteTipo>' + cbteTipo + '</ar:CbteTipo></ar:FeCabReq>'
     + '<ar:FeDetReq><ar:FECAEDetRequest>'
-    + '<ar:Concepto>1</ar:Concepto>'
+    + '<ar:Concepto>' + (c.concepto_afip || 1) + '</ar:Concepto>'
     + '<ar:DocTipo>' + c.doc_tipo + '</ar:DocTipo><ar:DocNro>' + c.doc_nro + '</ar:DocNro>'
     + '<ar:CbteDesde>' + cbteNro + '</ar:CbteDesde><ar:CbteHasta>' + cbteNro + '</ar:CbteHasta>'
     + '<ar:CbteFch>' + fch + '</ar:CbteFch>'
@@ -271,6 +311,13 @@ export function xmlFECAESolicitar(auth, { ptoVta, cbteTipo, cbteNro, comprobante
     + '<ar:ImpOpEx>' + c.imp_opex.toFixed(2) + '</ar:ImpOpEx>'
     + '<ar:ImpIVA>' + c.imp_iva.toFixed(2) + '</ar:ImpIVA>'
     + '<ar:ImpTrib>0.00</ar:ImpTrib>'
+    // SERVICIOS: ARCA pide el período y el vencimiento. Van DESPUÉS de ImpTrib y ANTES
+    // de MonId (orden del XSD). Sin ellos rechaza el comprobante con Concepto 2 o 3.
+    + (((c.concepto_afip || 1) !== 1)
+        ? '<ar:FchServDesde>' + fch + '</ar:FchServDesde>'
+          + '<ar:FchServHasta>' + fch + '</ar:FchServHasta>'
+          + '<ar:FchVtoPago>' + fch + '</ar:FchVtoPago>'
+        : '')
     + '<ar:MonId>PES</ar:MonId><ar:MonCotiz>1</ar:MonCotiz>'
     // RG 5616 — Condición frente al IVA del receptor. Va DESPUÉS de MonCotiz y ANTES de Iva (orden XSD).
     + '<ar:CondicionIVAReceptorId>' + (c.cond_iva_receptor || 5) + '</ar:CondicionIVAReceptorId>'
@@ -346,7 +393,10 @@ export function proximoNumeroManual(database, ptoVta, cbteTipo) {
 function persistirReservada(database, { comprobante, ptoVta, cbteTipo, cbteNro, ambiente, fecha,
                                         userId, manual, esPrueba, descuentoGestion,
                                         ncDeFacturaId, ncMotivo }) {
-  const tipoLetra = (cbteTipo === 1 || cbteTipo === 3) ? 'A' : 'B';
+  // 1 factura A, 3 nota de crédito A, 2 nota de DÉBITO A. Acá faltaba el 2: una nota
+  // de débito A quedaba guardada como 'B' y el listado, los filtros y el libro la
+  // mostraban con la letra equivocada.
+  const tipoLetra = (cbteTipo === 1 || cbteTipo === 3 || cbteTipo === 2) ? 'A' : 'B';
   // Identificador interno único (NO es el número fiscal: ese es PV + cbte_nro + CAE). Prefijo
   // ambiente-aware: AFIPH- en homologación (test), AFIP- en producción.
   // MANUAL- para que se distinga de un vistazo en cualquier listado: no salió de
@@ -437,6 +487,7 @@ export function recontabilizarVenta(database, facturaId, userId) {
     // La nota de crédito se reconoce por el tipo de comprobante, que es lo único
     // que quedó guardado: 3 = NC A, 8 = NC B.
     esNC: esNotaDeCredito(f.cbte_tipo),
+    clase: claseDeCbte(f.cbte_tipo),
   });
   if (arm.falta.length) {
     throw new Error('No se puede contabilizar la venta: falta ' + arm.falta.join(' y ')
@@ -446,7 +497,7 @@ export function recontabilizarVenta(database, facturaId, userId) {
   const id = database.transaction(() => {
     const asientoId = crearAsiento(database, {
       fecha: f.fecha || null, usuario_id: userId || null, ref_codigo: nro,
-      descripcion: (esNotaDeCredito(f.cbte_tipo) ? 'Nota de crédito — ' : 'Venta — ')
+      descripcion: (PAPEL_DESC[claseDeCbte(f.cbte_tipo)] || 'Venta — ')
                  + (cli.r || '') + ' — Comprobante ' + nro
                  + (f.asiento_id ? ' (rehecho: el anterior se anuló)' : ''),
     }, arm.lineas).id;
@@ -491,6 +542,7 @@ function asentarVenta(database, facturaId, comprobante, ptoVta, cbteNro, userId)
     neto: comprobante.imp_neto, iva: comprobante.imp_iva, total: comprobante.imp_total,
     descuento: (ya && ya.dif_gestion) || 0, numero: nro, motivo: ya && ya.dif_motivo,
     esNC: esNotaDeCredito(comprobante.cbte_tipo),
+    clase: claseDeCbte(comprobante.cbte_tipo),
   });
   if (arm.falta.length) {
     throw new Error('No se puede contabilizar la venta: falta ' + arm.falta.join(' y ')
@@ -503,7 +555,7 @@ function asentarVenta(database, facturaId, comprobante, ptoVta, cbteNro, userId)
     // ventas salían con un guión en "Cargado por" mientras todo lo demás decía el
     // nombre. Un asiento sin dueño es un asiento que nadie tiene que explicar.
     fecha: (ya && ya.fecha) || null, usuario_id: userId || null, ref_codigo: nro,
-    descripcion: (esNotaDeCredito(comprobante.cbte_tipo) ? 'Nota de crédito — ' : 'Venta — ')
+    descripcion: (PAPEL_DESC[claseDeCbte(comprobante.cbte_tipo)] || 'Venta — ')
       + (cli.r || '') + ' — Comprobante ' + nro,
   }, arm.lineas).id;
   database.prepare('UPDATE sg_ven_facturas SET asiento_id=? WHERE id=?').run(asientoId, facturaId);
@@ -546,8 +598,9 @@ function confirmarAutorizada(database, facturaId, campos, vinculos, esNC) {
 // (sin puente) · timeout: FECompConsultar. vinculos (opcional): [{despacho_id, despacho_item_id, kg}].
 export async function emitir(database, { ptoVta, clienteId, items, esNC, userId, vinculos,
                                          descuentoGestion, identificacion, asociado,
-                                         ncDeFacturaId, ncMotivo }) {
-  const comprobante = construirComprobante(database, { clienteId, items, esNC, identificacion, asociado });
+                                         ncDeFacturaId, ncMotivo, concepto }) {
+  const comprobante = construirComprobante(database, { clienteId, items, esNC, identificacion,
+    asociado, concepto });
   const cbteTipo = comprobante.cbte_tipo;
 
   // ── EL CORTE: UN PUNTO DE VENTA MANUAL NO LLAMA A AFIP ─────────────────
@@ -576,7 +629,7 @@ export async function emitir(database, { ptoVta, clienteId, items, esNC, userId,
         // hace el camino de AFIP, que sólo escribe afip_estado. Poner 'emitida'
         // rompía el CHECK de la tabla, que sólo admite pendiente/cobrada/anulada.
         afip_estado: 'MANUAL — sin AFIP',
-      }, vinculos, !!esNC);
+      }, vinculos, esNotaDeCredito(cbteTipo));
       return { ok: true, factura_id: facturaId, pto_vta: Number(ptoVta),
         cbte_tipo: cbteTipo, cbte_nro: cbteNro, cae: null, cae_vto: null,
         manual: true, es_prueba: !!(pv && pv.es_prueba),
@@ -615,7 +668,7 @@ export async function emitir(database, { ptoVta, clienteId, items, esNC, userId,
       asentarVenta(database, facturaId, comprobante, ptoVta, cbteNro, userId);
       confirmarAutorizada(database, facturaId,
         { cae: resp.cae, cae_vto: resp.cae_vto, afip_resultado: 'A', afip_estado: 'autorizado', afip_obs: resp.obs },
-        vinculos, !!esNC);
+        vinculos, esNotaDeCredito(cbteTipo));
       return { ok: true, factura_id: facturaId, ambiente, pto_vta: ptoVta, cbte_tipo: cbteTipo, cbte_nro: cbteNro, cae: resp.cae, cae_vto: resp.cae_vto, imp_total: comprobante.imp_total, vinculos: Array.isArray(vinculos) ? vinculos.length : 0 };
     }
     actualizarFactura(database, facturaId, { afip_resultado: resp.resultado || 'R', afip_estado: 'rechazado', afip_obs: resp.obs });

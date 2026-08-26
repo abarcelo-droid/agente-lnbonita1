@@ -20,7 +20,8 @@ import { recontabilizarVenta, emitir as afipEmitir, pctDeAlicuotaId }
 // Escribir la lista a mano acá es lo que dejó una factura RECHAZADA figurando como
 // deuda viva en la ficha del cliente y cobrable desde la pantalla de cobranzas.
 import { facturaCuenta, noEsNotaDeCredito, ncAplicadas, ncAplicadasFiscal,
-  ncAplicadasGestion, esNotaDeCredito } from '../servicios/factura-cuenta.js';
+  ncAplicadasGestion, esNotaDeCredito, esNotaDeDebito, ES_NOTA_CREDITO }
+  from '../servicios/factura-cuenta.js';
 import { generarFacturaPDF } from '../servicios/facturaPDF.js';
 import { enviarMail } from '../servicios/mail.js';
 import * as XLSX from 'xlsx';
@@ -74,7 +75,13 @@ function buildFacturasQuery(req) {
                -- devolución no se podía hacer nunca.
                ${ncAplicadas('f')} AS nc_acreditado,
                (SELECT n.id FROM sg_ven_facturas n
-                 WHERE n.nc_de_factura_id = f.id AND ${facturaCuenta('n')} LIMIT 1) AS nc_id,
+                 WHERE n.nc_de_factura_id = f.id AND ${facturaCuenta('n')}
+                   AND ${ES_NOTA_CREDITO('n')} LIMIT 1) AS nc_id,
+               -- Y lo que se le cobró DE MÁS con notas de débito, que va para el otro
+               -- lado: suma a la deuda del cliente y no se descuenta de nada.
+               COALESCE((SELECT SUM(COALESCE(n.total,0)) FROM sg_ven_facturas n
+                 WHERE n.nc_de_factura_id = f.id AND ${facturaCuenta('n')}
+                   AND COALESCE(n.cbte_tipo,0) IN (2,7)),0) AS nd_cargado,
                (SELECT o.punto_venta || '-' || o.cbte_nro FROM sg_ven_facturas o
                  WHERE o.id = f.nc_de_factura_id) AS nc_de_numero
              FROM sg_ven_facturas f JOIN sg_clientes c ON c.id=f.cliente_id WHERE 1 = 1`;
@@ -839,7 +846,8 @@ function baseDeNotaCredito(facturaId) {
         SUM(ni.subtotal) AS neto
       FROM sg_ven_factura_items ni
       JOIN sg_ven_facturas nf ON nf.id = ni.factura_id
-     WHERE nf.nc_de_factura_id = ? AND ${facturaCuenta('nf')} AND ni.nc_de_item_id IS NOT NULL
+     WHERE nf.nc_de_factura_id = ? AND ${facturaCuenta('nf')} AND ${ES_NOTA_CREDITO('nf')}
+       AND ni.nc_de_item_id IS NOT NULL
      GROUP BY ni.nc_de_item_id`).all(facturaId)) {
     yaPorItem.set(Number(n.ref), { cant: Number(n.cant) || 0, neto: r2n(n.neto) });
   }
@@ -849,7 +857,7 @@ function baseDeNotaCredito(facturaId) {
   const sinRef = db.prepare(`SELECT COALESCE(SUM(nf.total),0) AS total,
         COALESCE(SUM(nf.dif_gestion),0) AS gestion
       FROM sg_ven_facturas nf
-     WHERE nf.nc_de_factura_id = ? AND ${facturaCuenta('nf')}
+     WHERE nf.nc_de_factura_id = ? AND ${facturaCuenta('nf')} AND ${ES_NOTA_CREDITO('nf')}
        AND NOT EXISTS (SELECT 1 FROM sg_ven_factura_items ni
                         WHERE ni.factura_id = nf.id AND ni.nc_de_item_id IS NOT NULL)`)
     .get(facturaId);
@@ -890,12 +898,14 @@ function baseDeNotaCredito(facturaId) {
   const acordado = r2n((Number(f.total) || 0) + Math.abs(Number(f.dif_gestion) || 0));
   const devuelto = r2n(db.prepare(`SELECT COALESCE(SUM(nf.total + COALESCE(nf.dif_gestion,0)),0) AS t
       FROM sg_ven_facturas nf
-     WHERE nf.nc_de_factura_id = ? AND ${facturaCuenta('nf')}`).get(facturaId).t);
+     WHERE nf.nc_de_factura_id = ? AND ${facturaCuenta('nf')}
+       AND ${ES_NOTA_CREDITO('nf')}`).get(facturaId).t);
   return { factura: f, renglones, alineado,
     neto_total: netoTotal, neto_acreditado: netoAcreditado,
     gestion_acreditada: r2n(db.prepare(`SELECT COALESCE(SUM(nf.dif_gestion),0) AS g
         FROM sg_ven_facturas nf
-       WHERE nf.nc_de_factura_id = ? AND ${facturaCuenta('nf')}`).get(facturaId).g),
+       WHERE nf.nc_de_factura_id = ? AND ${facturaCuenta('nf')}
+         AND ${ES_NOTA_CREDITO('nf')}`).get(facturaId).g),
     acordado, acreditado: devuelto, pendiente: r2n(acordado - devuelto),
     notas_sin_renglon: r2n(sinRef.total) };
 }
@@ -920,6 +930,92 @@ router.get('/facturas/:id(\\d+)/nota-credito/base', requireAuth, (req, res) => {
   } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
 });
 
+
+// ══ LA NOTA DE DÉBITO ══════════════════════════════════════════════════════
+//
+// Es el espejo de la nota de crédito, y por eso reusa casi todo: mismo motor, misma
+// asociación al comprobante que corrige, mismo listado. Lo que cambia es el sentido.
+//
+//   · La de CRÉDITO le devuelve plata al cliente: baja su deuda, resta débito fiscal
+//     y el asiento va invertido.
+//   · La de DÉBITO le COBRA más —intereses por mora, un flete que no se había
+//     facturado, gastos—: SUMA a su deuda, SUMA débito fiscal, y el asiento es el de
+//     una venta común.
+//
+// LA MERCADERÍA NO SE MUEVE. No vuelven ni salen kilos: no se escribe una sola fila
+// del puente con el remito. Es plata sobre una operación que ya pasó.
+//
+// Y NO SALE DE LOS RENGLONES DE LA FACTURA, que es la otra diferencia grande con la
+// nota de crédito: una nota de débito es un CONCEPTO nuevo ("Intereses por mora,
+// 30 días"), no una parte de lo que se vendió. Por eso el renglón va sin producto —
+// el motor lo admite si dice qué es y con qué alícuota— y el comprobante va con
+// Concepto 2 (Servicios) ante ARCA, que es lo que corresponde y lo que obliga a
+// informar el período.
+router.post('/facturas/:id(\\d+)/nota-debito', requireAuth, async (req, res) => {
+  try {
+    const u = req._user || req.user || {};
+    const f = db.prepare('SELECT * FROM sg_ven_facturas WHERE id=?').get(parseInt(req.params.id, 10));
+    if (!f) return res.status(404).json({ ok: false, error: 'Comprobante no encontrado' });
+    if (esNotaDeCredito(f.cbte_tipo) || esNotaDeDebito(f.cbte_tipo)) {
+      return res.status(400).json({ ok: false, error:
+        'Esto ya es una nota. La nota de débito cuelga de una factura, no de otra nota.' });
+    }
+    if (String(f.estado || '') === 'anulada' || String(f.afip_estado || '') === 'rechazado') {
+      return res.status(400).json({ ok: false, error:
+        'Ese comprobante no está vivo: no hay nada que ajustar.' });
+    }
+    if (!f.punto_venta || !f.cbte_nro) {
+      return res.status(400).json({ ok: false, error:
+        'El comprobante no tiene número fiscal, así que no se lo puede asociar a una nota.' });
+    }
+    const motivo = String(req.body?.motivo || '').trim();
+    if (motivo.length < 3) {
+      return res.status(400).json({ ok: false, error:
+        'Poné el motivo de la nota de débito: es lo que después explica el asiento.' });
+    }
+    // Los conceptos que se le cobran. Cada uno dice QUÉ es, cuánto y con qué alícuota:
+    // sin producto no hay de dónde sacar la alícuota, así que se elige.
+    const pedidos = Array.isArray(req.body?.items) ? req.body.items : [];
+    const lineas = [];
+    for (const p of pedidos) {
+      const desc = String((p && p.descripcion) || '').trim();
+      const neto = r2n(p && p.importe);
+      const alic = (p && p.alicuota != null && p.alicuota !== '') ? Number(p.alicuota) : null;
+      if (!desc || !(neto > 0.009)) continue;
+      if (alic == null || isNaN(alic)) {
+        return res.status(400).json({ ok: false, error:
+          'El concepto "' + desc + '" no dice con qué alícuota de IVA va.' });
+      }
+      lineas.push({ producto_id: null, descripcion: desc, cantidad: 1, precio: neto,
+        alicuota: alic, importe_neto: neto, importe_iva: r2n(neto * alic / 100) });
+    }
+    if (!lineas.length) {
+      return res.status(400).json({ ok: false, error:
+        'Poné al menos un concepto con su importe: una nota de débito por cero no existe.' });
+    }
+
+    const r = await afipEmitir(db, {
+      ptoVta: Number(f.punto_venta), clienteId: f.cliente_id, items: lineas,
+      // esNC es la CLASE, no un booleano: 'nd' pide los tipos 2 y 7.
+      esNC: 'nd', userId: u.id || null,
+      // SIN VÍNCULOS: la mercadería no se mueve. Escribir el puente haría figurar
+      // kilos documentados que esta nota nunca documentó.
+      vinculos: [],
+      // Ni parte de gestión: lo que se le cobra de más está EN el comprobante.
+      descuentoGestion: 0,
+      identificacion: req.body?.identificacion || null,
+      // Servicios: intereses, fletes y gastos no son productos, y con este concepto
+      // ARCA pide además el período, que el motor completa con la fecha del día.
+      concepto: 2,
+      asociado: { cbte_tipo: f.cbte_tipo, punto_venta: f.punto_venta, cbte_nro: f.cbte_nro,
+        fecha: f.fecha },
+      ncDeFacturaId: f.id, ncMotivo: motivo,
+    });
+    if (r.ok) r.pdf_url = '/api/sg/ventas/facturas/' + r.factura_id + '/pdf';
+    res.json(r);
+  } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
+});
+
 // ══ UN COMPROBANTE CON CAE NO SE ANULA: SE ACREDITA ═══════════════════════
 //
 // Hasta acá la única salida era «anular», que marcaba estado='anulada' y anulaba el
@@ -940,9 +1036,10 @@ router.post('/facturas/:id(\\d+)/nota-credito', requireAuth, async (req, res) =>
     const u = req._user || req.user || {};
     const f = db.prepare('SELECT * FROM sg_ven_facturas WHERE id=?').get(parseInt(req.params.id, 10));
     if (!f) return res.status(404).json({ ok: false, error: 'Comprobante no encontrado' });
-    if (esNotaDeCredito(f.cbte_tipo)) {
+    if (esNotaDeCredito(f.cbte_tipo) || esNotaDeDebito(f.cbte_tipo)) {
       return res.status(400).json({ ok: false, error:
-        'Esto ya es una nota de crédito. No se le hace una nota de crédito a una nota de crédito.' });
+        'Esto ya es una nota. No se le hace una nota de crédito a otra nota: la nota se '
+        + 'anula, o se corrige la factura de la que cuelga.' });
     }
     if (String(f.estado || '') === 'anulada' || String(f.afip_estado || '') === 'rechazado') {
       return res.status(400).json({ ok: false, error:
@@ -1431,7 +1528,8 @@ function pendienteDeDoc(tipo, docId) {
     ? db.prepare(`SELECT COALESCE(SUM(n.total),0) AS fiscal,
            COALESCE(SUM(n.dif_gestion),0) AS gestion
         FROM sg_ven_facturas n
-       WHERE n.nc_de_factura_id = ? AND ${facturaCuenta('n')}`).get(docId)
+       WHERE n.nc_de_factura_id = ? AND ${facturaCuenta('n')}
+         AND ${ES_NOTA_CREDITO('n')}`).get(docId)
     : { fiscal: 0, gestion: 0 };
   // LO QUE EL CLIENTE DEBE ES LO ACORDADO, no lo facturado: el total del
   // comprobante más lo que quedó sin facturar. Es el espejo exacto de lo que se

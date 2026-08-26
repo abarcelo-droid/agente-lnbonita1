@@ -49,8 +49,22 @@ export const REGLA_FISCAL = {
   exento:         { letra: 'B', cond: 4, label: 'IVA Sujeto Exento', exigeCuit: true },
   no_inscripto:   { letra: 'B', cond: 5, label: 'Consumidor Final', exigeCuit: false },
 };
-// Tipos de comprobante de AFIP. NC = nota de crédito.
-const CBTE = { A: { factura: 1, nc: 3 }, B: { factura: 6, nc: 8 } };
+// ══ TRES CLASES DE COMPROBANTE, NO DOS ═════════════════════════════════════
+//
+// NC = nota de crédito (le devolvemos plata al cliente). ND = nota de DÉBITO (le
+// cobramos más: intereses por mora, un flete que no se había facturado, gastos).
+//
+// Acá había un booleano `esNC`, y un booleano sólo tiene dos valores: no había forma
+// de pedir un 2 ni un 7. Se pasa a una CLASE, que es lo que esto siempre fue.
+const CBTE = { A: { factura: 1, nc: 3, nd: 2 }, B: { factura: 6, nc: 8, nd: 7 } };
+export const CLASES = ['factura', 'nc', 'nd'];
+// Se sigue aceptando el booleano viejo: lo mandan los llamadores de siempre y
+// traducirlo acá es una línea, contra tocar cinco archivos por un rename.
+export function claseDe(x) {
+  if (x === true) return 'nc';
+  if (!x) return 'factura';
+  return CLASES.includes(String(x)) ? String(x) : 'factura';
+}
 // Tipos de documento de AFIP: 80 = CUIT, 99 = consumidor final sin identificar.
 const DOC_CUIT = 80, DOC_SIN_IDENTIFICAR = 99;
 
@@ -124,10 +138,12 @@ export function fiscalDeCliente(cliente, { esNC = false, total = null, umbral = 
 const DOC_TIPOS = { cuit: 80, cuil: 86, dni: 96 };
 
 function armar(r, esNC, cuit, ctx) {
+  const clase = claseDe(esNC);
   const base = {
     ok: true,
     letra: r.letra,
-    cbte_tipo: esNC ? CBTE[r.letra].nc : CBTE[r.letra].factura,
+    clase,
+    cbte_tipo: CBTE[r.letra][clase],
     cond_iva: r.cond,
     cond_iva_label: r.label,
     // El documento: CUIT si lo hay; si no, consumidor final sin identificar.
@@ -162,6 +178,15 @@ function armar(r, esNC, cuit, ctx) {
 
 // ¿Este comprobante discrimina el IVA en el papel? Sólo la A. Una Factura B lleva el
 // impuesto ADENTRO del precio y no lo muestra: es la RG 1415. Lo usa el PDF.
+// LA LETRA A DISCRIMINA, SEA CUAL SEA EL PAPEL. Acá decía «factura o nota de
+// crédito» y dejaba afuera la nota de DÉBITO A: se imprimía con el IVA metido adentro
+// del precio, como una B, y el cliente responsable inscripto no podía tomarse el
+// crédito fiscal de ese papel.
 export function discriminaIva(cbteTipo) {
-  return Number(cbteTipo) === CBTE.A.factura || Number(cbteTipo) === CBTE.A.nc;
+  const t = Number(cbteTipo);
+  return t === CBTE.A.factura || t === CBTE.A.nc || t === CBTE.A.nd;
+}
+// 2 = Nota de Débito A, 7 = Nota de Débito B.
+export function esNotaDeDebito(cbteTipo) {
+  return Number(cbteTipo) === CBTE.A.nd || Number(cbteTipo) === CBTE.B.nd;
 }

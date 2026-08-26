@@ -104,7 +104,13 @@ export function modeloVentaFaltan(lineas) {
 // cliente y aumentaba el débito fiscal, o sea hacía exactamente lo contrario de lo
 // que existe para hacer. Y no se arreglaba pasando importes negativos: el escritor de
 // asientos los rechaza. Lo que se invierte son los LADOS.
-export function lineasAsientoVenta(db, { clienteId, neto, iva, total, descuento, numero, motivo, esNC }) {
+// Y LA NOTA DE DÉBITO VA PARA EL MISMO LADO QUE LA FACTURA: le cobra más al cliente,
+// así que Deudores al debe y Ventas e IVA Débito al haber, igual que una venta. Lo
+// único que cambia son los TEXTOS — y no es cosmético: un asiento que dice «Factura
+// 0001-00000012» sobre una nota de débito es lo que va a leer el que tenga que
+// explicarlo seis meses después.
+export function lineasAsientoVenta(db, { clienteId, neto, iva, total, descuento, numero,
+                                         motivo, esNC, clase }) {
   const motivoGes = MOTIVOS[String(motivo || '').trim()] ? String(motivo).trim() : 'ajuste_gestion';
   const mod = modeloVentaLineas(db);
   const faltan = modeloVentaFaltan(mod.lineas);
@@ -146,7 +152,9 @@ export function lineasAsientoVenta(db, { clienteId, neto, iva, total, descuento,
   // El signo de la operación: una factura carga la deuda del cliente, una nota de
   // crédito la descarga. Es un solo lugar y de acá salen todos los lados.
   const nc = !!esNC;
-  const doc = (nc ? 'Nota de crédito ' : 'Factura ') + numero;
+  const cl = clase || (nc ? 'nc' : 'factura');
+  const PAPEL = { factura: 'Factura ', nc: 'Nota de crédito ', nd: 'Nota de débito ' };
+  const doc = (PAPEL[cl] || PAPEL.factura) + numero;
   const lado = (monto) => nc ? { debe: 0, haber: r2v(monto) } : { debe: r2v(monto), haber: 0 };
   const contra = (monto) => nc ? { debe: r2v(monto), haber: 0 } : { debe: 0, haber: r2v(monto) };
 
@@ -154,11 +162,13 @@ export function lineasAsientoVenta(db, { clienteId, neto, iva, total, descuento,
     { cuenta_id: lCli.cuenta_id, ...lado(total),
       descripcion: lCli.descripcion || doc },
     { cuenta_id: lVta.cuenta_id, ...contra(neto),
-      descripcion: lVta.descripcion || ((nc ? 'Devolución ' : 'Venta ') + numero) },
+      descripcion: lVta.descripcion
+        || ((nc ? 'Devolución ' : (cl === 'nd' ? 'Ajuste a favor ' : 'Venta ')) + numero) },
   ];
   if (r2v(iva) > 0) {
     lineas.push({ cuenta_id: ctaIva, ...contra(iva),
-      descripcion: 'IVA Débito Fiscal' + (nc ? ' (nota de crédito)' : '') });
+      descripcion: 'IVA Débito Fiscal'
+        + (nc ? ' (nota de crédito)' : (cl === 'nd' ? ' (nota de débito)' : '')) });
   }
   // EL DESCUENTO COMERCIAL, EN GESTIÓN. El cliente "debería" lo de lista y la
   // venta de gestión es la de lista: la diferencia queda medida.

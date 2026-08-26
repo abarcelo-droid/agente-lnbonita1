@@ -276,7 +276,9 @@ test('se puede acreditar de a poco, pero nunca más de lo que se compró', () =>
   // peso más. Ver test/nota_credito_parcial.test.mjs.
   assert.match(VENTAS, /ya está acreditado entero/i,
     'lo que frena es que no quede saldo, no que exista una nota');
-  assert.match(VENTAS, /No se le hace una nota de crédito a una nota de crédito/i);
+  // Y no se le hace una nota a otra nota — ni de crédito ni de débito: la nota se
+  // anula, o se corrige la factura de la que cuelga.
+  assert.match(VENTAS, /No se le hace una nota de crédito a otra nota/i);
 });
 
 test('la nota va ASOCIADA a su factura, que es lo que ARCA pide', () => {
