@@ -3123,6 +3123,52 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
 
      SIN BARRA LATERAL (CLAUDE.md): table-layout fijo, anchos por columna, y lo
      único que parte es la descripción. -->
+<!-- ══ NOTA DE DÉBITO ════════════════════════════════════════════════════
+     El espejo de la de crédito: en vez de devolverle plata al cliente, se le COBRA
+     más. Intereses por mora, un flete que no se había facturado, gastos.
+
+     No sale de los renglones de la factura —eso es la nota de crédito—: son
+     CONCEPTOS nuevos, cada uno con su importe y su alícuota. Y la mercadería no se
+     mueve: no vuelven ni salen kilos. -->
+<div class="ab-modal-overlay" id="sg-nd-modal">
+  <div class="ab-modal" style="max-width:min(780px,96vw)">
+    <div class="mhd"><div class="mht" id="sg-nd-tit">Nota de débito</div>
+      <button class="mcl" onclick="closeMB('sg-nd-modal')">×</button></div>
+    <div class="mbd">
+      <input type="hidden" id="sg-nd-id">
+      <div id="sg-nd-cab" style="font-size:12px;color:var(--mut);margin-bottom:10px"></div>
+      <div class="ab-table-wrap" style="overflow-x:hidden !important">
+        <table class="pa-tbl" style="table-layout:fixed;width:100%;max-width:98vw">
+          <thead><tr>
+            <th>Concepto</th>
+            <th style="width:130px;text-align:right">Importe neto</th>
+            <th style="width:100px">IVA</th>
+            <th style="width:120px;text-align:right">Total</th>
+            <th style="width:34px"></th>
+          </tr></thead>
+          <tbody id="sg-nd-body"></tbody>
+          <tfoot><tr>
+            <th colspan="3" style="text-align:right">Total de la nota</th>
+            <th style="text-align:right" id="sg-nd-total">$ 0,00</th><th></th>
+          </tr></tfoot>
+        </table>
+      </div>
+      <button class="btn bs" style="margin-top:6px" onclick="sgNdAdd()">+ Agregar concepto</button>
+      <div class="fl" style="margin-top:12px"><label>Motivo</label>
+        <input id="sg-nd-motivo" placeholder="Intereses por mora"
+          style="width:100%;box-sizing:border-box"></div>
+      <div style="font-size:11.5px;color:var(--mut);margin-top:6px">
+        Sale un comprobante nuevo, con su propio número y su propio CAE, asociado a éste.
+        <b>Sube</b> la deuda del cliente y suma débito fiscal. La mercadería no se mueve.
+      </div>
+      <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:16px">
+        <button class="btn bo" onclick="closeMB('sg-nd-modal')">Cancelar</button>
+        <button class="btn bb" id="sg-nd-btn" onclick="sgNdEmitir()">Emitir nota de débito</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <div class="ab-modal-overlay" id="sg-nc-modal">
   <div class="ab-modal" style="max-width:min(880px,96vw)">
     <div class="mhd"><div class="mht" id="sg-nc-tit">Nota de crédito</div>
@@ -15997,8 +16043,11 @@ function sgFacListLoad(){
       // en el listado igual que cualquier otra: el que miraba veía dos comprobantes
       // por la misma venta y ninguno decía que uno anulaba al otro.
       var esNC = (f.cbte_tipo==3 || f.cbte_tipo==8);
+      var esND = (f.cbte_tipo==2 || f.cbte_tipo==7);
       var tipoB= esNC
         ? '<span class="bdg" style="background:#fef3c7;color:#92400e">NC '+esc(f.tipo||'')+'</span>'
+        : esND
+        ? '<span class="bdg" style="background:#dbeafe;color:#1e40af">ND '+esc(f.tipo||'')+'</span>'
         : '<span class="bdg bcc">'+esc(f.tipo||'—')+'</span>';
       // EL MANUAL NO ES UN RECHAZO. Salía con la cruz roja de error, cuando en
       // realidad se emitió bien: lo que pasa es que no se le informó a AFIP
@@ -16028,9 +16077,10 @@ function sgFacListLoad(){
       // que baja la deuda del cliente, devuelve los kilos del remito a pendiente
       // de comprobante y deja el asiento invertido.
       var nc = '';
-      if (esNC) {
+      if (esNC || esND) {
         nc = f.nc_de_numero
-          ? '<span class="bdg" style="background:#fef3c7;color:#92400e" title="Comprobante que corrige">↩ de '
+          ? '<span class="bdg" style="background:'+(esND?'#dbeafe':'#fef3c7')+';color:'
+            +(esND?'#1e40af':'#92400e')+'" title="Comprobante que corrige">↩ de '
             + esc(String(f.nc_de_numero).split('-')[0].padStart(4,'0')+'-'
                   +String(f.nc_de_numero).split('-')[1].padStart(8,'0'))+'</span>'
           : '';
@@ -16052,6 +16102,14 @@ function sgFacListLoad(){
         } else if (puede) {
           nc = '<button class="btn bs" title="Hacerle una nota de crédito" '
              + 'onclick="sgNcOpen('+f.id+')">🧾 NC</button>';
+        }
+        // Y la de DÉBITO, que va para el otro lado: se le cobra más. Se ofrece
+        // siempre que el comprobante esté vivo — no depende de que quede saldo,
+        // porque no descuenta nada.
+        if (puede) {
+          nc += (nc ? ' ' : '')
+             + '<button class="btn bs" title="Cobrarle más con una nota de débito" '
+             + 'onclick="sgNdOpen('+f.id+')">➕ ND</button>';
         }
       }
       return '<tr><td>'+esc(num)+'</td><td>'+esc(f.fecha||'—')+'</td><td>'+tipoB+'</td>'
@@ -16076,6 +16134,77 @@ function sgFacListExport(){ window.open('/api/sg/ventas/facturas/export.xlsx?'+s
 // de la factura— porque eso es lo que resuelve el caso real: la venta se cayó, la
 // mercadería volvió, y hay que dejar la factura sin efecto. Una nota parcial es
 // otra cosa y todavía no está.
+// ── NOTA DE DÉBITO ───────────────────────────────────────────────────────
+// Se le cobra MÁS al cliente sobre una operación que ya pasó. No sale de los
+// renglones de la factura: son conceptos nuevos, cada uno con su alícuota — sin
+// producto no hay de dónde sacarla, así que se elige.
+var SG_ND_ALIC = [21, 10.5, 27, 0];
+function sgNdOpen(id){
+  var f=(SG._facList||{})[id]||{};
+  SG.nd={ id:id, items:[{ descripcion:'', importe:'', alicuota:21 }] };
+  eid('sg-nd-id').value=id;
+  eid('sg-nd-tit').textContent='Nota de débito — sobre el comprobante '+(f.tipo||'')+' N° '
+    +String(f.punto_venta||0).padStart(4,'0')+'-'+String(f.cbte_nro||0).padStart(8,'0');
+  eid('sg-nd-cab').innerHTML='<b>'+esc(f.cliente_nombre||'')+'</b> · el comprobante fue por '
+    +sgMoney(f.total)
+    +(Number(f.nd_cargado)>0.009
+        ? ' · <span style="color:#92400e">ya se le cargaron '+sgMoney(f.nd_cargado)+' de más</span>' : '');
+  eid('sg-nd-motivo').value='';
+  sgNdRender();
+  sgModalArriba('sg-nd-modal');
+}
+function sgNdAdd(){ SG.nd.items.push({ descripcion:'', importe:'', alicuota:21 }); sgNdRender(); }
+function sgNdDel(i){ SG.nd.items.splice(i,1); if(!SG.nd.items.length) sgNdAdd(); else sgNdRender(); }
+function sgNdUpd(i,c,v){ SG.nd.items[i][c]=v; sgNdTotal(); }
+function sgNdRender(){
+  eid('sg-nd-body').innerHTML=(SG.nd.items||[]).map(function(it,i){
+    return '<tr>'
+      +'<td><input id="sg-nd-d-'+i+'" value="'+escH(it.descripcion||'')+'"'
+        +' placeholder="Intereses por mora — 30 días" oninput="sgNdUpd('+i+',\'descripcion\',this.value)"'
+        +' style="width:100%;box-sizing:border-box"></td>'
+      +'<td><input type="number" step="0.01" min="0" id="sg-nd-i-'+i+'" value="'+(it.importe||'')+'"'
+        +' oninput="sgNdUpd('+i+',\'importe\',this.value)" style="width:100%;box-sizing:border-box;text-align:right"></td>'
+      +'<td><select id="sg-nd-a-'+i+'" onchange="sgNdUpd('+i+',\'alicuota\',this.value)" style="width:100%">'
+        +SG_ND_ALIC.map(function(a){ return '<option value="'+a+'"'+(Number(it.alicuota)===a?' selected':'')+'>'
+          +String(a).replace('.',',')+'%</option>'; }).join('')
+        +'</select></td>'
+      +'<td style="text-align:right" id="sg-nd-t-'+i+'">—</td>'
+      +'<td style="text-align:center"><button class="btn bs" onclick="sgNdDel('+i+')">×</button></td>'
+      +'</tr>';
+  }).join('');
+  sgNdTotal();
+}
+function sgNdTotal(){
+  var tot=0;
+  (SG.nd.items||[]).forEach(function(it,i){
+    var n=Number(it.importe)||0, a=Number(it.alicuota)||0;
+    var t=Math.round(n*(1+a/100)*100)/100;
+    var c=eid('sg-nd-t-'+i); if(c) c.textContent=n>0?sgMoney(t):'—';
+    tot+=n>0?t:0;
+  });
+  eid('sg-nd-total').textContent=sgMoney(Math.round(tot*100)/100);
+}
+function sgNdEmitir(){
+  var motivo=String(eid('sg-nd-motivo').value||'').trim();
+  if(motivo.length<3){ toast('Poné el motivo: es lo que después explica el asiento.','er'); return; }
+  var items=(SG.nd.items||[]).filter(function(it){
+    return String(it.descripcion||'').trim() && Number(it.importe)>0;
+  }).map(function(it){ return { descripcion:String(it.descripcion).trim(),
+    importe:Number(it.importe), alicuota:Number(it.alicuota) }; });
+  if(!items.length){ toast('Poné al menos un concepto con su importe','er'); return; }
+  var btn=eid('sg-nd-btn'); btn.disabled=true;
+  api('/api/sg/ventas/facturas/'+SG.nd.id+'/nota-debito','POST',{ motivo:motivo, items:items })
+    .then(function(r){
+      btn.disabled=false;
+      if(!r||!r.ok){ alert('No se pudo emitir la nota de débito.\n\n'+((r&&(r.error||r.obs))||'Error')); return; }
+      closeMB('sg-nd-modal');
+      toast('Nota de débito '+String(r.pto_vta||0).padStart(4,'0')+'-'
+        +String(r.cbte_nro||0).padStart(8,'0')+(r.cae?'':' (manual, sin CAE)'),'ok');
+      sgFacListLoad();
+      if(r.pdf_url) window.open(r.pdf_url,'_blank');
+    });
+}
+
 function sgNcOpen(id){
   var f=(SG._facList||{})[id]||{};
   SG.nc={ id:id, base:null };
