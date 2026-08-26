@@ -4494,6 +4494,19 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
     #sec-informes-comercial .pa-tbl th,#sec-informes-comercial .pa-tbl td{
       white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding:6px 9px;font-size:12.5px}
     #sec-informes-comercial .pa-tbl td.inf-nom{white-space:normal;word-break:break-word}
+    #sec-informes-comercial .inf-tab{padding:10px 16px;cursor:pointer;border-bottom:2px solid transparent;
+      color:var(--mut);font-weight:600}
+    #sec-informes-comercial .inf-tab.on{color:var(--burg);border-bottom-color:var(--burg)}
+    #sec-informes-comercial .inf-pane{display:none} #sec-informes-comercial .inf-pane.on{display:block}
+    /* El estado de cada fila del interanual. Colores y no sólo texto: la pregunta es "dónde
+       estoy perdiendo", y eso se contesta de un vistazo o no se contesta. */
+    #sec-informes-comercial .ia-chip{display:inline-block;padding:2px 8px;border-radius:10px;
+      font-size:11px;font-weight:600;white-space:nowrap}
+    #sec-informes-comercial .ia-perdido{background:#fee2e2;color:#991b1b}
+    #sec-informes-comercial .ia-cae{background:#fef3c7;color:#92400e}
+    #sec-informes-comercial .ia-crece{background:#dcfce7;color:#166534}
+    #sec-informes-comercial .ia-nuevo{background:#dbeafe;color:#1e40af}
+    #sec-informes-comercial .ia-estable{background:#f1f5f9;color:#64748b}
     #sec-informes-comercial .ab-table-wrap{overflow-x:hidden !important}
     @media(max-width:900px){ #sec-informes-comercial .ab-table-wrap{overflow-x:auto !important}
                              #sec-informes-comercial .pa-tbl{table-layout:auto} }
@@ -4511,6 +4524,16 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
        anteayer se lee igual que uno de recién. -->
   <div id="inf-sync" style="font-size:11.5px;margin-bottom:10px"></div>
 
+  <!-- Tres preguntas distintas, tres solapas. La primera es la de siempre —cuánto vendimos—
+       y las otras dos miran contra el año pasado: una muestra QUÉ cambió, la otra QUÉ HACER
+       con eso. Mezclarlas en una sola pantalla las hace ilegibles a las tres. -->
+  <div style="display:flex;border-bottom:1px solid var(--bor);margin-bottom:14px;flex-wrap:wrap">
+    <div class="inf-tab on" data-inf="tabla"  onclick="infTab('tabla')">📊 Ventas</div>
+    <div class="inf-tab"    data-inf="anual"  onclick="infTab('anual')">📈 Interanual</div>
+    <div class="inf-tab"    data-inf="oport"  onclick="infTab('oport')">🎯 Oportunidades</div>
+  </div>
+
+  <div class="inf-pane on" id="inf-pane-tabla">
   <div class="inf-f">
     <div><label>Agrupar por</label><select id="inf-agrupar" onchange="infCargar()"></select></div>
     <!-- El año comercial va de julio a junio: se elige el PERÍODO, no un rango de meses
@@ -4541,6 +4564,63 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
     <thead id="inf-thead"></thead><tbody id="inf-tbody"><tr><td class="emp">Elegí un período.</td></tr></tbody>
   </table></div>
   <div id="inf-nota" style="font-size:11px;color:var(--mut);margin-top:6px"></div>
+  </div><!-- /pane tabla -->
+
+  <!-- ── INTERANUAL ──────────────────────────────────────────────────────────────
+       Este mes comercial contra EL MISMO MES del año pasado. Mes contra mes y no
+       campaña contra campaña: una campaña en curso contra una terminada da siempre
+       una caída, y esa caída es del almanaque. -->
+  <div class="inf-pane" id="inf-pane-anual">
+    <div class="inf-f">
+      <div><label>Mes comercial</label><select id="ia-mes" onchange="iaCargar()"></select></div>
+      <div><label>Campaña</label><select id="ia-act" onchange="iaCargar()"></select></div>
+      <div><label>Contra</label><select id="ia-ant" onchange="iaCargar()"></select></div>
+      <div><label>Abrir por</label><select id="ia-dim" onchange="iaCargar()"></select></div>
+      <div><label>Umbral <span style="color:var(--mut)">crece/cae</span></label>
+        <select id="ia-umbral" onchange="iaCargar()">
+          <option value="5">±5%</option><option value="10" selected>±10%</option>
+          <option value="20">±20%</option><option value="30">±30%</option>
+        </select></div>
+      <div><label>Ver</label><select id="ia-estado" onchange="iaPintar()">
+        <option value="">todos</option>
+        <option value="perdido">sólo los perdidos</option>
+        <option value="cae">sólo los que caen</option>
+        <option value="crece">sólo los que crecen</option>
+        <option value="nuevo">sólo los nuevos</option>
+      </select></div>
+      <div><button class="btn bo bs" onclick="iaExportar()">⬇️ Excel</button></div>
+    </div>
+    <div id="ia-aviso" style="margin-bottom:10px"></div>
+    <div id="ia-resumen" style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px"></div>
+    <div id="ia-chips" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px"></div>
+    <div class="ab-table-wrap"><table class="pa-tbl" style="width:100%;table-layout:fixed">
+      <thead id="ia-thead"></thead><tbody id="ia-tbody"><tr><td class="emp">Calculando…</td></tr></tbody>
+    </table></div>
+    <div id="ia-nota" style="font-size:11px;color:var(--mut);margin-top:6px"></div>
+  </div><!-- /pane anual -->
+
+  <!-- ── OPORTUNIDADES ───────────────────────────────────────────────────────────
+       La misma ventana, contestando qué hacer. Cada fila trae la REGLA que la puso
+       ahí: una lista que no se puede explicar no se usa dos veces. -->
+  <div class="inf-pane" id="inf-pane-oport">
+    <div class="inf-f">
+      <div><label>Mes comercial</label><select id="op2-mes" onchange="opoCargar()"></select></div>
+      <div><label>Campaña</label><select id="op2-act" onchange="opoCargar()"></select></div>
+      <div><label>Contra</label><select id="op2-ant" onchange="opoCargar()"></select></div>
+      <div><label>Cuántas</label><select id="op2-limite" onchange="opoCargar()">
+        <option value="50">50</option><option value="100" selected>100</option>
+        <option value="250">250</option><option value="500">500</option>
+      </select></div>
+      <div><button class="btn bo bs" onclick="opoExportar()">⬇️ Excel</button></div>
+    </div>
+    <div id="opo-aviso" style="margin-bottom:10px"></div>
+    <div id="opo-tipos" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px"></div>
+    <div id="opo-resumen" style="margin-bottom:12px"></div>
+    <div class="ab-table-wrap"><table class="pa-tbl" style="width:100%;table-layout:fixed">
+      <thead id="opo-thead"></thead><tbody id="opo-tbody"><tr><td class="emp">Calculando…</td></tr></tbody>
+    </table></div>
+    <div id="opo-nota" style="font-size:11px;color:var(--mut);margin-top:6px"></div>
+  </div><!-- /pane oport -->
 </div>
 
 <!-- Abrir una fila: de qué está hecho ese cliente (o ese producto, o ese mes). Se pide con
@@ -32430,6 +32510,268 @@ function infExportar(){
   a.download='informe-'+(eid('inf-agrupar').value||'ventas')+'.csv';
   a.click();
   setTimeout(function(){ URL.revokeObjectURL(a.href); }, 2000);
+}
+
+// ══════════════════════════════════════════════════════════════════════════════════════
+// INTERANUAL Y OPORTUNIDADES
+// ══════════════════════════════════════════════════════════════════════════════════════
+// Las dos miran la MISMA ventana —este mes comercial, campaña actual contra la anterior— y
+// contestan preguntas distintas: una QUÉ cambió, la otra QUÉ HACER con eso. Comparten los
+// selectores de ventana, que se llenan una sola vez con lo que el servidor dice que hay
+// cargado: ofrecer un año vacío es hacer perder un clic.
+var IA = { data:null, opo:null, tipos:{} };
+
+function infTab(t){
+  INF.tab=t;
+  document.querySelectorAll('#sec-informes-comercial .inf-tab').forEach(function(el){
+    el.classList.toggle('on', el.getAttribute('data-inf')===t); });
+  document.querySelectorAll('#sec-informes-comercial .inf-pane').forEach(function(el){
+    el.classList.toggle('on', el.id==='inf-pane-'+t); });
+  if(t==='anual') iaCargar(); else if(t==='oport') opoCargar();
+}
+
+// Llena los tres selectores de ventana de las dos solapas con lo que vino del servidor.
+// Se hace UNA vez: son los períodos y meses cargados, no cambian mientras se mira.
+function iaLlenarVentana(v){
+  if(!v) return;
+  var op=function(arr,sel){ return (arr||[]).map(function(x){
+    return '<option value="'+esc(x)+'"'+(x===sel?' selected':'')+'>'+esc(iaMes(x))+'</option>'; }).join(''); };
+  // Sólo si está vacío: así no pisa lo que el usuario acaba de elegir, y cada solapa llena
+  // los suyos la primera vez que se abre.
+  var llenar=function(id,html){ var e=eid(id); if(e && !e.innerHTML) e.innerHTML=html; };
+  ['ia-mes','op2-mes'].forEach(function(id){ llenar(id, op(v.meses, v.mes)); });
+  ['ia-act','op2-act'].forEach(function(id){ llenar(id, op(v.periodos, v.actual)); });
+  ['ia-ant','op2-ant'].forEach(function(id){ llenar(id, op(v.periodos, v.anterior)); });
+  var d=eid('ia-dim');
+  if(d && !d.innerHTML) d.innerHTML=((INF.opts||{}).dimensiones||[])
+    .filter(function(x){ return ['cliente','producto','articulo','categoria','subcategoria','vendedor','proveedor','cate_clie'].indexOf(x.k)>=0; })
+    .map(function(x){ return '<option value="'+esc(x.k)+'"'+(x.k==='cliente'?' selected':'')+'>'+esc(x.label)+'</option>'; }).join('');
+}
+// '02-AGOSTO' se lee 'AGOSTO'. El número está para ordenar.
+function iaMes(v){ var m=/^\d\d-(.+)$/.exec(String(v||'')); return m?m[1]:String(v||''); }
+
+// Los filtros de la solapa principal se respetan acá también: si alguien filtró por vendedor
+// arriba, el interanual y el radar hablan de ESE vendedor. Una pantalla que ignora en
+// silencio el filtro que se ve puesto arriba miente.
+function iaParamsVentana(pre){
+  var p=[];
+  var m=(eid(pre+'-mes')||{}).value; if(m) p.push('mes_ok='+encodeURIComponent(m));
+  var a=(eid(pre+'-act')||{}).value; if(a) p.push('periodo_actual='+encodeURIComponent(a));
+  var b=(eid(pre+'-ant')||{}).value; if(b) p.push('periodo_anterior='+encodeURIComponent(b));
+  ['cliente','vendedor','producto','categoria'].forEach(function(k){
+    var v=(eid('inf-filtro-'+k)||{}).value; if(v) p.push('filtro_'+k+'='+encodeURIComponent(v));
+  });
+  var q=(eid('inf-q')||{}).value; if(q) p.push('q='+encodeURIComponent(q));
+  return p.join('&');
+}
+
+// El cartel del mes en curso. Es el único aviso que de verdad cambia una lectura: agosto a
+// medio facturar contra agosto entero del año pasado pinta TODA la tabla de rojo, y esa
+// caída es del calendario. No se corrige solo porque no hay con qué — la fecha de la
+// planilla es texto y el informe no la usa — así que se dice.
+function iaAvisoVentana(v){
+  if(!v || !v.en_curso) return '';
+  return '<div style="padding:9px 12px;border-radius:8px;background:#fef3c7;border:1px solid #fcd34d;color:#92400e;font-size:12px">'
+    + '⚠ <b>'+esc(iaMes(v.mes))+' de '+esc(v.actual)+' puede estar a medio facturar</b> y se compara contra '
+    + esc(iaMes(v.mes))+' entero de '+esc(v.anterior)+'. Si todo baja parejo, mirá primero el mes anterior.'
+    + '</div>';
+}
+
+// ── INTERANUAL ────────────────────────────────────────────────────────────────────────
+function iaCargar(){
+  eid('ia-tbody').innerHTML='<tr><td class="emp">Calculando…</td></tr>';
+  var qs='agrupar='+encodeURIComponent((eid('ia-dim')||{}).value||'cliente')
+       + '&umbral='+encodeURIComponent((eid('ia-umbral')||{}).value||'10')
+       + '&' + iaParamsVentana('ia');
+  api('/api/informes/interanual?'+qs).then(function(r){
+    if(!r||!r.ok){ eid('ia-tbody').innerHTML='<tr><td class="emp" style="color:var(--err,#dc2626)">'+esc((r&&r.error)||'Error')+'</td></tr>';
+      eid('ia-resumen').innerHTML=''; eid('ia-chips').innerHTML=''; eid('ia-aviso').innerHTML=''; return; }
+    IA.data=r.data;
+    iaLlenarVentana(r.data.ventana);
+    eid('ia-aviso').innerHTML=iaAvisoVentana(r.data.ventana);
+    iaResumen(r.data);
+    iaPintar();
+  });
+}
+
+function iaResumen(d){
+  var v=d.ventana, R=d.resumen||{}, A=R.actual||{}, B=R.anterior||{};
+  var k=function(l,v2,sub,color){
+    return '<div class="inf-kpi"><div style="font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:var(--mut)">'+l+'</div>'
+      +'<b'+(color?' style="color:'+color+'"':'')+'>'+v2+'</b><div style="font-size:11px;color:var(--mut)">'+(sub||'')+'</div></div>'; };
+  var pc=function(x){ if(x==null) return '—'; var c=x>=0?'#16a34a':'var(--err,#dc2626)';
+    return '<span style="color:'+c+';font-weight:700">'+(x>=0?'+':'')+nrDec(x,1)+'%</span>'; };
+  eid('ia-resumen').innerHTML =
+      k(esc(iaMes(v.mes))+' '+esc(v.actual), 'US$ '+nr(A.usd||0), nr(A.kilos||0)+' kg · '+nr(A.clientes||0)+' cliente(s)')
+    + k(esc(iaMes(v.mes))+' '+esc(v.anterior), 'US$ '+nr(B.usd||0), nr(B.kilos||0)+' kg · '+nr(B.clientes||0)+' cliente(s)')
+    + k('Variación US$', pc(R.var_usd_pct), (R.var_usd>=0?'+':'')+'US$ '+nr(R.var_usd||0))
+    + k('Variación kilos', pc(R.var_kilos_pct), (R.var_kilos>=0?'+':'')+nr(R.var_kilos||0)+' kg');
+
+  // Los contadores son también el filtro: el que ve "12 perdidos" quiere ver cuáles.
+  var e=d.estados||{};
+  var chip=function(cl,lbl,cant){
+    if(!cant) return '';
+    var sel=(eid('ia-estado')||{}).value===cl;
+    return '<span class="ia-chip ia-'+cl+'" style="cursor:pointer;'+(sel?'outline:2px solid var(--burg)':'')+'"'
+      + ' onclick="iaFiltrarEstado(\''+cl+'\')">'+lbl+': '+nr(cant)+'</span>'; };
+  eid('ia-chips').innerHTML = chip('perdido','Perdidos',e.perdido)+chip('cae','Caen',e.cae)
+    + chip('crece','Crecen',e.crece)+chip('nuevo','Nuevos',e.nuevo)+chip('estable','Estables',e.estable);
+}
+function iaFiltrarEstado(cl){
+  var s=eid('ia-estado'); s.value = (s.value===cl) ? '' : cl;
+  iaPintar();
+}
+
+function iaFilas(){
+  var d=IA.data; if(!d) return [];
+  var f=(eid('ia-estado')||{}).value;
+  return f ? (d.filas||[]).filter(function(x){ return x.estado===f; }) : (d.filas||[]);
+}
+
+function iaPintar(){
+  var d=IA.data; if(!d) return;
+  var m=d.ve_margen, v=d.ventana;
+  var actLbl=iaMes(v.mes)+' '+v.actual, antLbl=iaMes(v.mes)+' '+v.anterior;
+  eid('ia-thead').innerHTML='<tr>'
+    + '<th style="text-align:left;width:26%">'+esc(d.label||'')+'</th>'
+    + '<th style="text-align:right">kg '+esc(antLbl)+'</th>'
+    + '<th style="text-align:right">kg '+esc(actLbl)+'</th>'
+    + '<th style="text-align:right">US$ '+esc(antLbl)+'</th>'
+    + '<th style="text-align:right">US$ '+esc(actLbl)+'</th>'
+    + '<th style="text-align:right;width:10%">Var. US$</th>'
+    + (m?'<th style="text-align:right;width:9%">Rent. %</th>':'')
+    + '<th style="text-align:center;width:10%">Estado</th></tr>';
+  var num=function(x){ return x==null?'<span style="color:var(--mut)">—</span>':nr(x); };
+  var filas=iaFilas();
+  eid('ia-tbody').innerHTML = filas.length ? filas.map(function(f){
+    var col=(f.var_usd||0)>=0?'#16a34a':'var(--err,#dc2626)';
+    var pct=f.var_usd_pct!=null?((f.var_usd_pct>=0?'+':'')+nrDec(f.var_usd_pct,1)+'%'):'';
+    return '<tr>'
+      + '<td class="inf-nom">'+esc(f.clave||'')+'</td>'
+      + '<td style="text-align:right">'+num(f.kilos_ant)+'</td>'
+      + '<td style="text-align:right">'+num(f.kilos_act)+'</td>'
+      + '<td style="text-align:right">'+num(f.usd_ant)+'</td>'
+      + '<td style="text-align:right">'+num(f.usd_act)+'</td>'
+      + '<td style="text-align:right;color:'+col+';font-weight:600">'
+        + (f.var_usd!=null?((f.var_usd>=0?'+':'')+nr(f.var_usd)+(pct?'<div style="font-size:10px;font-weight:400">'+pct+'</div>':'')):'<span style="color:var(--mut)">—</span>')
+      + '</td>'
+      + (m?('<td style="text-align:right">'+(f.rent_pct_act!=null?nrDec(f.rent_pct_act,1)+'%':'—')
+          +'<div style="font-size:10px;color:var(--mut)">'+(f.rent_pct_ant!=null?nrDec(f.rent_pct_ant,1)+'%':'—')+' antes</div></td>'):'')
+      + '<td style="text-align:center"><span class="ia-chip ia-'+f.estado+'">'+f.estado+'</span></td>'
+      + '</tr>';
+  }).join('') : '<tr><td class="emp" colspan="8">Nada con ese filtro.</td></tr>';
+  eid('ia-nota').innerHTML=(d.truncado?'⚠ Se muestran las 300 de mayor impacto; el resumen de arriba incluye todo. ':'')
+    + 'Ordenado por cuánto movió el total, para arriba o para abajo. '
+    + '<b>Perdido</b> = vendía en ese mes y este año no. <b>Nuevo</b> = no vendía y ahora sí. '
+    + 'Crece/cae a partir de ±'+esc(String(d.umbral))+'%.';
+}
+
+function iaExportar(){
+  var d=IA.data, filas=iaFilas();
+  if(!filas.length){ toast('No hay nada para exportar','er'); return; }
+  var v=d.ventana, m=d.ve_margen;
+  var head=[d.label,'kg '+iaMes(v.mes)+' '+v.anterior,'kg '+iaMes(v.mes)+' '+v.actual,
+            'US$ '+iaMes(v.mes)+' '+v.anterior,'US$ '+iaMes(v.mes)+' '+v.actual,
+            'Var US$','Var %','Estado'].concat(m?['Rent % actual','Rent % anterior']:[]);
+  var e2=function(x){ return '"'+String(x==null?'':x).replace(/"/g,'""')+'"'; };
+  var csv=[head.map(e2).join(';')].concat(filas.map(function(f){
+    var r=[f.clave,f.kilos_ant,f.kilos_act,f.usd_ant,f.usd_act,f.var_usd,f.var_usd_pct,f.estado];
+    if(m) r=r.concat([f.rent_pct_act,f.rent_pct_ant]);
+    return r.map(e2).join(';');
+  })).join('\r\n');
+  iaBajar(csv,'interanual-'+v.mes+'-'+v.actual+'.csv');
+}
+function iaBajar(csv,nombre){
+  var b=new Blob(['\ufeff'+csv],{type:'text/csv;charset=utf-8'});
+  var a=document.createElement('a'); a.href=URL.createObjectURL(b); a.download=nombre; a.click();
+  URL.revokeObjectURL(a.href);
+}
+
+// ── OPORTUNIDADES ─────────────────────────────────────────────────────────────────────
+function opoCargar(){
+  eid('opo-tbody').innerHTML='<tr><td class="emp">Buscando oportunidades…</td></tr>';
+  var sel=Object.keys(IA.tipos).filter(function(k){ return IA.tipos[k]; });
+  var qs=iaParamsVentana('op2')
+    + '&limite='+encodeURIComponent((eid('op2-limite')||{}).value||'100')
+    + (sel.length?'&tipos='+encodeURIComponent(sel.join(',')):'');
+  api('/api/informes/oportunidades?'+qs).then(function(r){
+    if(!r||!r.ok){ eid('opo-tbody').innerHTML='<tr><td class="emp" style="color:var(--err,#dc2626)">'+esc((r&&r.error)||'Error')+'</td></tr>';
+      eid('opo-tipos').innerHTML=''; eid('opo-resumen').innerHTML=''; eid('opo-aviso').innerHTML=''; return; }
+    IA.opo=r.data;
+    iaLlenarVentana(r.data.ventana);
+    eid('opo-aviso').innerHTML=iaAvisoVentana(r.data.ventana);
+    opoPintar(r.data);
+  });
+}
+
+var OPO_COLOR={ rojo:'#fee2e2|#991b1b', ambar:'#fef3c7|#92400e', azul:'#dbeafe|#1e40af' };
+function opoChipTipo(k,def,cant,on){
+  var c=(OPO_COLOR[def.color]||'#f1f5f9|#64748b').split('|');
+  return '<span class="ia-chip" style="cursor:pointer;background:'+c[0]+';color:'+c[1]
+    + (on?';outline:2px solid var(--burg)':';opacity:'+(cant?'.55':'.3'))+'"'
+    + ' onclick="opoToggleTipo(\''+k+'\')">'+esc(def.label)+': '+nr(cant||0)+'</span>';
+}
+function opoToggleTipo(k){ IA.tipos[k]=!IA.tipos[k]; opoCargar(); }
+
+function opoPintar(d){
+  var m=d.ve_margen, v=d.ventana;
+  var pt=d.por_tipo||{};
+  eid('opo-tipos').innerHTML=Object.keys(d.tipos||{}).map(function(k){
+    return opoChipTipo(k, d.tipos[k], (pt[k]||{}).n, !!IA.tipos[k]); }).join('')
+    + (Object.keys(IA.tipos).some(function(k){ return IA.tipos[k]; })
+        ? ' <a href="#" onclick="IA.tipos={};opoCargar();return false" style="font-size:11px">ver todos</a>' : '');
+
+  // El número de arriba es el que se cita. Si el nivel no ve margen se muestra en dólares de
+  // venta, no se inventa nada — pero el ORDEN de la lista es el mismo para todos.
+  eid('opo-resumen').innerHTML='<div style="padding:10px 12px;border-radius:8px;background:var(--bg);font-size:13px">'
+    + '<b>'+nr(d.total||0)+'</b> oportunidades en '+esc(iaMes(v.mes))+', '+esc(v.actual)+' contra '+esc(v.anterior)+'. '
+    + (m ? 'Hay <b>US$ '+nr(d.margen_en_juego_total||0)+'</b> de margen sobre la mesa '
+         + '<span style="color:var(--mut)">(al '+nrDec((d.tasa_margen_global||0)*100,1)+'% de margen promedio de la ventana)</span>.'
+       : '<span style="color:var(--mut)">Ordenadas por la plata en juego.</span>')
+    + '</div>';
+
+  eid('opo-thead').innerHTML='<tr>'
+    + '<th style="text-align:left;width:13%">Qué pasa</th>'
+    + '<th style="text-align:left;width:20%">Cliente</th>'
+    + '<th style="text-align:left;width:14%">Producto</th>'
+    + '<th style="text-align:left">Por qué está acá</th>'
+    + '<th style="text-align:right;width:11%">US$ en juego</th>'
+    + (m?'<th style="text-align:right;width:11%">Margen en juego</th>':'')
+    + '</tr>';
+  eid('opo-tbody').innerHTML=(d.items||[]).length ? d.items.map(function(x){
+    var def=(d.tipos||{})[x.tipo]||{label:x.tipo,color:''};
+    var c=(OPO_COLOR[def.color]||'#f1f5f9|#64748b').split('|');
+    return '<tr>'
+      + '<td><span class="ia-chip" style="background:'+c[0]+';color:'+c[1]+'">'+esc(def.label)+'</span></td>'
+      + '<td class="inf-nom">'+esc(x.titulo||'')+'</td>'
+      + '<td class="inf-nom">'+esc(x.detalle||'')+'</td>'
+      + '<td class="inf-nom" style="font-size:11.5px;color:var(--mut)">'+esc(x.regla||'')+'</td>'
+      + '<td style="text-align:right;font-weight:600">'+nr(x.usd_en_juego||0)+'</td>'
+      + (m?('<td style="text-align:right;font-weight:700">'+nr(x.margen_en_juego||0)
+          + (x.tasa_propia===false?'<div style="font-size:10px;font-weight:400;color:var(--mut)" title="No se conoce el margen de esta fila: se usó el promedio de la ventana">al promedio</div>':'')
+          + '</td>'):'')
+      + '</tr>';
+  }).join('') : '<tr><td class="emp" colspan="6">No hay oportunidades con esos filtros. '
+      + 'Puede ser buena noticia — o que la ventana esté vacía.</td></tr>';
+  eid('opo-nota').innerHTML=(d.truncado?'⚠ Se muestran las '+nr((d.items||[]).length)+' de mayor impacto, de '+nr(d.total||0)+'. ':'')
+    + 'Por debajo de US$ '+nr((d.umbrales||{}).piso_usd||0)+' no entra nada (es ruido). '
+    + '“Caída fuerte” arranca en −'+nr((d.umbrales||{}).caida_pct||0)+'%. '
+    + '“No le vendemos” pide al menos '+nr((d.umbrales||{}).cross_min_clientes||0)+' clientes del mismo rubro comprándolo.'
+    + (m?'':' <span style="color:var(--mut)">El orden pesa el margen; tu nivel no lo muestra, pero la lista es la misma para todos.</span>');
+}
+
+function opoExportar(){
+  var d=IA.opo;
+  if(!d||!(d.items||[]).length){ toast('No hay nada para exportar','er'); return; }
+  var m=d.ve_margen;
+  var head=['Qué pasa','Cliente','Producto','Por qué','US$ en juego'].concat(m?['Margen en juego']:[]);
+  var e2=function(x){ return '"'+String(x==null?'':x).replace(/"/g,'""')+'"'; };
+  var csv=[head.map(e2).join(';')].concat(d.items.map(function(x){
+    var r=[((d.tipos||{})[x.tipo]||{}).label||x.tipo, x.titulo, x.detalle, x.regla, x.usd_en_juego];
+    if(m) r.push(x.margen_en_juego);
+    return r.map(e2).join(';');
+  })).join('\r\n');
+  iaBajar(csv,'oportunidades-'+d.ventana.mes+'-'+d.ventana.actual+'.csv');
 }
 
 // ── VISOR DEL CAMIÓN ──────────────────────────────────────────────────────────
