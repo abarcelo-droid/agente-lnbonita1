@@ -62,7 +62,22 @@ Y la anulación necesita su PROPIA dirección (`POST .../:id/anular`), porque
 `exigirNivel` la reconoce por la URL. Un `PATCH .../:id/estado` que aceptara
 `estado='anulado'` es una puerta lateral: quien sólo puede operar, anula.
 
-### TODA OPERACIÓN QUE ASIENTA MUESTRA EL ASIENTO
+### TODA OPERACIÓN QUE ASIENTA MUESTRA EL ASIENTO — AL QUE PUEDE LEERLO
+
+**Acotado el 25/8/2026.** Pablo: *"los asientos deben ser visibles sólo para
+administradores; dejalo como una flechita para abajo para que los administradores lo
+podamos desplegar"*. El cuadro se sigue armando SIEMPRE y sigue siendo el momento en
+que se puede frenar — pero se le muestra a quien puede hacer algo con él. El que
+factura no tiene por qué ver un debe y haber que le ocupa media pantalla.
+
+Se envuelve DENTRO de los tres armadores (`sgAsientoTabla`, `sgFmAsientoTabla`,
+`sgAsientoCuadro`) con `sgAsientoPlegado()`, no en cada pantalla: una sola puerta, y
+una pantalla nueva no puede olvidarse de cerrarla. Los bloques de "contra qué se
+contabiliza" (el selector de asiento modelo) se esconden enteros — elegir el modelo
+es PARAMETRIZAR, y eso ya era de admin.
+
+Lo que sigue valiendo entero, abajo:
+
 Si toca rubros contables y genera asiento —un pago, una cobranza, el depósito de
 un cheque, un ajuste—, la pantalla muestra el CUADRO del asiento (cuenta,
 descripción, debe, haber) y abajo la fila de totales con el cartel **balancea**,
@@ -101,7 +116,7 @@ no ofrezca lo que va a rebotar.
 ## Limitaciones del entorno
 - Si npm install falla en Windows, ya está resuelto: tenemos Node y npm OK
 - **SÍ HAY TESTS Y HAY QUE CORRERLOS**: `npm test` (runner nativo de Node, sin
-  framework). Esta línea decía "no hay tests automáticos" y era falsa: hay cinco
+  framework). Esta línea decía "no hay tests automáticos" y era falsa: hay ocho
   archivos en `test/`, incluido `plata_sg.test.mjs`, que clava los cinco bugs de
   plata del 25/8/2026 (alícuota del producto, gestión sin IVA sacado, cajones vs
   kilos, redondeo, carteles al centavo).
@@ -169,8 +184,16 @@ Estas notas son del área contable/administrativa (módulos MD). Respetarlas al 
 - Asientos manuales: `admCuentasOpts()`. Asiento modelo: autocompletar `admModCuBuscar/Pick` sobre `ADM_MOD_CUENTAS`. Ambos deshabilitan las cuentas no imputables.
 - Selector de insumos en factura: autocompletar `paInsBuscar` (agrupa por categoría). Al abrir la factura se recargan TODOS los insumos (no filtrar por categoría).
 
-### Validación manual (no hay tests)
-- panel.html es enorme (~33k líneas). Antes de dar por terminado, validar el JS de los <script> con `new Function(...)` y los .js con `node --check`.
+### Validación antes de entregar
+- **`npm test` SIEMPRE.** Esta sección decía "no hay tests" y contradecía a la de
+  Limitaciones del entorno, setenta líneas más arriba, que dice lo contrario y es la
+  que tiene razón. Mientras las dos frases convivieron, cada sesión eligió la que le
+  quedaba más cómoda.
+- panel.html es enorme (**62.000 líneas**, 3,6 MB — no las 33k que decía acá).
+  Validar el JS de los 7 bloques `<script>` con `new Function(...)` y los .js con
+  `node --check`.
+- Y lo que ninguna de las dos ve: una función USADA y nunca DEFINIDA. El chequeo de
+  sintaxis pasa igual y el error aparece recién cuando alguien abre esa pantalla.
 
 ## PARA ANDRÉS (y para quien mire el deploy) — HAY TRES RAILWAY, NO UNO
 
