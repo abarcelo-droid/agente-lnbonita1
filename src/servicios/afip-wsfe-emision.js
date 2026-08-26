@@ -10,6 +10,7 @@ import { ultimoComprobante } from './afip-wsfe.js';
 // LA VENTA TIENE QUE QUEDAR EN EL LIBRO. Este camino —el de facturación
 // directa— no generaba ningún asiento: la mercadería salía, el cliente quedaba
 // debiendo, y en la contabilidad no pasaba nada. Misma regla que en compras.
+import { fiscalDeCliente } from './sg_fiscal.js';
 import { lineasAsientoVenta } from './asiento-venta.js';
 import { crearAsiento } from './asientos.js';
 
@@ -82,31 +83,22 @@ function alicuotaId(pct) {
   const p = Number(pct);
   return Object.prototype.hasOwnProperty.call(IVA_PCT_A_ID, p) ? IVA_PCT_A_ID[p] : undefined; // undefined = no soportada
 }
-// Tipo de comprobante: con CUIT → Factura A (1) / NC A (3); sin CUIT → Factura B (6) / NC B (8).
-function tipoComprobante(cliente, esNC) {
-  const cuit = cliente && cliente.cuit ? String(cliente.cuit).replace(/\D/g, '') : '';
-  const tieneCuit = /^\d{11}$/.test(cuit) && !/^0+$/.test(cuit);
-  if (tieneCuit) return esNC ? 3 : 1;
-  return esNC ? 8 : 6;
-}
-// DocTipo/DocNro: A/NC A → CUIT (80). B/NC B → CUIT si lo hay (80), si no consumidor final (99, 0).
-function docDe(cliente, cbteTipo) {
-  const cuit = cliente && cliente.cuit ? String(cliente.cuit).replace(/\D/g, '') : '';
-  const cuitOk = /^\d{11}$/.test(cuit) && !/^0+$/.test(cuit);
-  if (cbteTipo === 1 || cbteTipo === 3) return { doc_tipo: 80, doc_nro: cuit };
-  return cuitOk ? { doc_tipo: 80, doc_nro: cuit } : { doc_tipo: 99, doc_nro: '0' };
-}
-// Condición frente al IVA del receptor (RG 5616, obligatorio desde 2025). Códigos AFIP —
-// verificables en vivo con FEParamGetCondicionIvaReceptor (GET /api/sg/afip/condiciones-iva):
-//   1=IVA Responsable Inscripto · 4=IVA Sujeto Exento · 5=Consumidor Final · 6=Responsable Monotributo.
-const CONDICION_IVA = { responsable_inscripto: 1, sujeto_exento: 4, consumidor_final: 5, monotributo: 6 };
-// Por ahora (brief): sin CUIT → Consumidor Final (5); con CUIT → Responsable Inscripto (1) por
-// defecto. La afinación por categoría fiscal real del cliente queda para más adelante (y debe ir
-// alineada con el tipo de comprobante: A exige receptor RI/Monotributo).
-function condicionIvaReceptorId(cliente) {
-  const cuit = cliente && cliente.cuit ? String(cliente.cuit).replace(/\D/g, '') : '';
-  const cuitOk = /^\d{11}$/.test(cuit) && !/^0+$/.test(cuit);
-  return cuitOk ? CONDICION_IVA.responsable_inscripto : CONDICION_IVA.consumidor_final;
+// ══ LA LETRA Y LA CONDICIÓN DEL RECEPTOR SALEN DE LA FICHA ═════════════
+//
+// Acá había tres funciones que decidían todo mirando UNA sola cosa: si el cliente
+// tenía un CUIT cargado. Con CUIT → Factura A y "Responsable Inscripto" a AFIP; sin
+// CUIT → Factura B y "Consumidor Final". La CATEGORÍA FISCAL del cliente, que está
+// en su ficha desde siempre, no se miraba.
+//
+// Un monotributista con CUIT recibía una Factura A y se lo informaba como
+// Responsable Inscripto. Las dos cosas mal, en cada venta.
+//
+// La regla completa vive en servicios/sg_fiscal.js, que es PURO: se puede leer
+// entera de un saque y probar sin levantar nada. Acá sólo se la aplica.
+function fiscalDe(cliente, esNC) {
+  const f = fiscalDeCliente(cliente, { esNC: !!esNC });
+  if (!f.ok) throw new Error(f.error);
+  return f;
 }
 function r2(n) { return Math.round((Number(n) || 0) * 100) / 100; }
 function fechaHoyAR() { return new Date(Date.now() - 3 * 3600 * 1000).toISOString().slice(0, 10); }
@@ -140,8 +132,9 @@ function fechaHoyAR() { return new Date(Date.now() - 3 * 3600 * 1000).toISOStrin
 export function construirComprobante(database, { clienteId, items, esNC }) {
   const cliente = database.prepare('SELECT id, razon_social, cuit, categoria_fiscal FROM sg_clientes WHERE id=?').get(clienteId);
   if (!cliente) throw new Error('Cliente inexistente: ' + clienteId);
-  const cbteTipo = tipoComprobante(cliente, esNC);
-  const { doc_tipo, doc_nro } = docDe(cliente, cbteTipo);
+  const fisc = fiscalDe(cliente, esNC);
+  const cbteTipo = fisc.cbte_tipo;
+  const doc_tipo = fisc.doc_tipo, doc_nro = fisc.doc_nro;
   const ivaMap = {};
   let impNeto = 0, impIva = 0, impOpEx = 0;
   const detalle = [];
@@ -185,7 +178,7 @@ export function construirComprobante(database, { clienteId, items, esNC }) {
   if (!detalle.length) throw new Error('El comprobante necesita al menos un ítem');
   const impTotal = r2(impNeto + impIva + impOpEx);
   const iva = Object.keys(ivaMap).map(id => ({ Id: Number(id), BaseImp: ivaMap[id].base, Importe: ivaMap[id].importe }));
-  return { cliente, cbte_tipo: cbteTipo, doc_tipo, doc_nro, cond_iva_receptor: condicionIvaReceptorId(cliente),
+  return { cliente, cbte_tipo: cbteTipo, doc_tipo, doc_nro, cond_iva_receptor: fisc.cond_iva, letra_fiscal: fisc.letra,
     imp_neto: impNeto, imp_iva: impIva, imp_opex: impOpEx, imp_total: impTotal, iva, detalle, concepto: 1 };
 }
 
