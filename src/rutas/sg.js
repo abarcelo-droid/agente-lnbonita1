@@ -17,6 +17,8 @@ import { facturaCuenta, deudaFactura, deudaGestionFactura, noEsNotaDeCredito, si
 import { acordadoDeOC, precioUnicoDeOC } from '../servicios/sg_acordado.js';
 // Una partida documentada con factura o liquidación tiene el precio FIRME.
 import { frenoPrecioFirme } from '../servicios/sg_perfeccionada.js';
+import { estadoRescate, restaurar as restaurarRescate }
+  from '../servicios/sg_rescate_embarques.js';
 // La foto de lo que quedó guardado con la venta de gestión vieja. Sólo lee.
 import { diagnosticoGestion } from '../servicios/sg_gestion_vieja.js';
 // Los dos libros de IVA. El de ventas no existía; el de compras estaba corto.
@@ -11184,6 +11186,25 @@ router.get('/embarques/export', requireAuth, (req, res) => {
     });
     res.send(buf);
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// ══ RESCATE DE LOS EMBARQUES BORRADOS ════════════════════════════════════════════════
+// La lógica vive en servicios/sg_rescate_embarques.js, donde el test la corre de verdad.
+// Acá quedan las dos puertas: mirar qué hay para recuperar, y recuperarlo.
+//
+// Van ANTES de '/embarques/:id': si no, Express lee «rescate» como un número de embarque
+// y contesta 404 sin llegar nunca acá.
+router.get('/embarques/rescate', requireAdmin, (req, res) => {
+  try {
+    const emb = estadoRescate(getDb());
+    res.json({ ok: true, data: { embarques: emb, pendientes: emb.filter((e) => !e.ya_esta).length } });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+router.post('/embarques/rescate', requireAdmin, express.json(), (req, res) => {
+  try {
+    res.json({ ok: true, data: restaurarRescate(getDb(), uid(req)) });
+  } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
 });
 
 router.get('/embarques/:id', requireAuth, (req, res) => {
