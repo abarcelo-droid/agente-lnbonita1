@@ -31,3 +31,49 @@
 // Fragmento SQL. `a` es el alias de sg_ven_facturas en la consulta que lo use.
 export const facturaCuenta = (a = 'f') =>
   `(COALESCE(${a}.afip_estado,'') <> 'rechazado' AND COALESCE(${a}.estado,'') <> 'anulada')`;
+
+// ══ UNA NOTA DE CRÉDITO RESTA ═══════════════════════════════════════════════
+//
+// Un comprobante con CAE no se anula: se le hace una NOTA DE CRÉDITO. La nota va a
+// la misma tabla que la factura y con los importes en POSITIVO, porque eso es lo
+// que dice el papel y es lo que se le informó a ARCA.
+//
+// Pero para la deuda del cliente vale al revés: la factura le suma y la nota le
+// resta. Escrito en un solo lugar por la misma razón que facturaCuenta: la regla
+// repetida a mano en diez consultas queda vieja en nueve.
+//
+// 3 = Nota de Crédito A, 8 = Nota de Crédito B (ARCA).
+export function esNotaDeCredito(cbteTipo) {
+  return Number(cbteTipo) === 3 || Number(cbteTipo) === 8;
+}
+
+// El signo con que un comprobante entra a la cuenta corriente. `a` es el alias.
+export const signoFactura = (a = 'f') =>
+  `(CASE WHEN COALESCE(${a}.cbte_tipo,0) IN (3,8) THEN -1 ELSE 1 END)`;
+
+// Lo que ese comprobante mueve en la deuda: total + lo de gestión, con su signo.
+// (`saldo_pagado` no lleva signo: es plata que efectivamente se imputó.)
+export const deudaFactura = (a = 'f') =>
+  `(${signoFactura(a)} * (COALESCE(${a}.total,0) + COALESCE(${a}.dif_gestion,0)))`;
+export const deudaGestionFactura = (a = 'f') =>
+  `(${signoFactura(a)} * COALESCE(${a}.dif_gestion,0))`;
+
+// Lo que las notas de crédito de ESA factura ya le sacaron. Sirve para lo pendiente
+// de cada comprobante: si no se restara acá, una factura acreditada entera seguiría
+// ofreciéndose para cobrar y el cobrador le reclamaría al cliente algo que ya se le
+// devolvió. (En el saldo total no hace falta: ahí la nota resta por su propia fila.)
+export const ncAplicadas = (a = 'f') =>
+  `COALESCE((SELECT SUM(COALESCE(n.total,0) + COALESCE(n.dif_gestion,0))
+      FROM sg_ven_facturas n
+     WHERE n.nc_de_factura_id = ${a}.id AND ${facturaCuenta('n')}),0)`;
+export const ncAplicadasFiscal = (a = 'f') =>
+  `COALESCE((SELECT SUM(COALESCE(n.total,0))
+      FROM sg_ven_facturas n
+     WHERE n.nc_de_factura_id = ${a}.id AND ${facturaCuenta('n')}),0)`;
+export const ncAplicadasGestion = (a = 'f') =>
+  `COALESCE((SELECT SUM(COALESCE(n.dif_gestion,0))
+      FROM sg_ven_facturas n
+     WHERE n.nc_de_factura_id = ${a}.id AND ${facturaCuenta('n')}),0)`;
+// Y una nota de crédito NO es algo para cobrar: no se ofrece en la lista de
+// comprobantes a imputar. Lo que hace es bajar lo pendiente de la factura que corrige.
+export const noEsNotaDeCredito = (a = 'f') => `COALESCE(${a}.cbte_tipo,0) NOT IN (3,8)`;

@@ -23,6 +23,8 @@
 // lo que asiento-liquidacion.js usó para armar el asiento. Reconstruirlos por otro
 // camino sería tener dos versiones del mismo número.
 
+import { esNotaDeCredito } from './factura-cuenta.js';
+
 const r2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
 
 // La grilla guardada, con los nombres que usa asiento-liquidacion.js.
@@ -96,15 +98,22 @@ export function libroIvaVentas(db, { desde, hasta, facturaCuentaSql }) {
      WHERE ${where.join(' AND ')}
      ORDER BY f.fecha DESC, f.id DESC`).all(...params);
 
-  const filas = facturas.map((f) => ({
-    origen: 'factura', id: f.id, fecha: f.fecha,
+  const filas = facturas.map((f) => {
+    // ── LA NOTA DE CRÉDITO RESTA DÉBITO ──────────────────────────────────
+    // Se guarda con los importes en positivo, porque eso es lo que dice el papel y
+    // lo que se le informó a ARCA. En el LIBRO va al revés: lo que la nota
+    // devuelve es débito fiscal que ya no se declara. Sumarla como una factura
+    // más haría pagar dos veces el IVA de una venta que se anuló.
+    const sg = esNotaDeCredito(f.cbte_tipo) ? -1 : 1;
+    return {
+    origen: 'factura', nc: sg < 0, id: f.id, fecha: f.fecha,
     comprobante: (f.punto_venta && f.cbte_nro)
       ? String(f.punto_venta).padStart(4, '0') + '-' + String(f.cbte_nro).padStart(8, '0')
       : f.numero,
     letra: f.letra || null, contraparte: f.cliente, cuit: f.cuit,
-    neto: r2(f.neto), iva: r2(f.iva), total: r2(f.total),
+    neto: sg * r2(f.neto), iva: sg * r2(f.iva), total: sg * r2(f.total),
     asiento_id: f.asiento_id, es_prueba: Number(f.es_prueba) === 1 || f.ambiente === 'homologacion',
-  }));
+    }; });
 
   // Y la mitad de DÉBITO de cada liquidación: lo que le cobramos al productor.
   for (const lq of liquidacionesDelPeriodo(db, { desde, hasta })) {

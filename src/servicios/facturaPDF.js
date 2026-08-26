@@ -111,8 +111,20 @@ export async function generarFacturaPDF(factura) {
   const domCli = [cliente.direccion_entrega, cliente.localidad, cliente.provincia].filter(Boolean).join(', ') || '—';
   doc.text('Domicilio: ' + domCli, 70, y + 12, { maxWidth: 128 });
 
-  // ── Detalle de ítems ──
+  // ── EL COMPROBANTE QUE ESTA NOTA CORRIGE ──────────────────────────────
+  // Una nota de crédito sin decir de qué factura es, es un papel suelto: el
+  // cliente no sabe qué se le acredita y la contabilidad de él tampoco.
   y += 24;
+  if (factura.asociado_numero || factura.nc_motivo) {
+    doc.setDrawColor(...GRIS).setLineWidth(0.3).rect(8, y, 194, 9);
+    doc.setTextColor(...GRIS).setFont('helvetica', 'normal').setFontSize(8.5);
+    const txt = (factura.asociado_numero ? 'Comprobante asociado: ' + factura.asociado_numero + '   ·   ' : '')
+      + (factura.nc_motivo ? 'Motivo: ' + factura.nc_motivo : '');
+    doc.text(txt, 12, y + 6, { maxWidth: 186 });
+    y += 13;
+  }
+
+  // ── Detalle de ítems ──
   // ══ UNA FACTURA B NO DISCRIMINA EL IVA ═════════════════════
   //
   // El papel discriminaba el impuesto SIEMPRE, sin mirar la letra: columna "% IVA"

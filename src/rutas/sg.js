@@ -12,7 +12,8 @@ import { randomUUID } from 'crypto';
 import { fileURLToPath } from 'url';
 import * as XLSX from 'xlsx';
 import { subirArchivo, obtenerArchivo, storageConfigurado } from '../servicios/storage.js';
-import { facturaCuenta } from '../servicios/factura-cuenta.js';
+import { facturaCuenta, deudaFactura, deudaGestionFactura, noEsNotaDeCredito }
+  from '../servicios/factura-cuenta.js';
 // La foto de lo que quedó guardado con la venta de gestión vieja. Sólo lee.
 import { diagnosticoGestion } from '../servicios/sg_gestion_vieja.js';
 // Los dos libros de IVA. El de ventas no existía; el de compras estaba corto.
@@ -1194,6 +1195,16 @@ const postEmitir = async (req, res) => {
     const clienteId = Number(b.cliente_id), pv = Number(b.punto_venta);
     if (!(clienteId > 0)) return res.status(400).json({ ok: false, error: 'Falta cliente_id' });
     if (!(pv > 0)) return res.status(400).json({ ok: false, error: 'Falta punto_venta' });
+    // ── LA NOTA DE CRÉDITO NO SE EMITE POR ACÁ ─────────────────────────────
+    // Este camino aceptaba es_nc y cambiaba el tipo de comprobante, nada más: salía
+    // una nota SUELTA, sin la factura que corrige. Una nota sin comprobante asociado
+    // no la acepta ARCA y acá no se sabría qué acreditó. Se emite desde el
+    // comprobante, con POST /ventas/facturas/:id/nota-credito.
+    if (b.es_nc === true) {
+      return res.status(400).json({ ok: false, error:
+        'Una nota de crédito se emite DESDE el comprobante que corrige, no desde acá: '
+        + 'en Comprobantes, el botón NC del renglón.' });
+    }
     const seleccion = Array.isArray(b.seleccion) ? b.seleccion : [];
     if (!seleccion.length) return res.status(400).json({ ok: false, error: 'Sin selección de despachos' });
     const facturaIncluyeIva = b.precio_incluye_iva === true;
@@ -6449,11 +6460,20 @@ router.get('/lotes/:id/movimientos', requireAuth, (req, res) => {
     for (const d of db.prepare(`
       SELECT di.id, di.kg_despachados AS kg, di.bultos, d.numero AS remito, d.fecha_despacho AS fecha,
         c.razon_social AS cliente,
-        (SELECT f.punto_venta || '-' || f.cbte_nro FROM sg_factura_despachos fd
+        -- El comprobante que cubre estos kilos, si todavía los cubre: una vez que
+        -- se le hizo la nota de crédito el neto queda en cero y la mercadería vuelve
+        -- a estar entregada sin documentar. Seguir mostrando el número de la factura
+        -- acreditada haría creer que esa venta sigue en pie.
+        (SELECT CASE WHEN COALESCE((SELECT SUM(fd2.kg) FROM sg_factura_despachos fd2
+                       JOIN sg_ven_facturas f2 ON f2.id = fd2.factura_id
+                      WHERE fd2.despacho_item_id = di.id AND ${facturaCuenta('f2')}),0) > 0.01
+                     THEN f.punto_venta || '-' || f.cbte_nro END
+           FROM sg_factura_despachos fd
            JOIN sg_ven_facturas f ON f.id = fd.factura_id
           WHERE fd.despacho_item_id = di.id AND ${facturaCuenta('f')}
+            AND ${noEsNotaDeCredito('f')}
             AND f.punto_venta IS NOT NULL AND f.cbte_nro IS NOT NULL
-          ORDER BY f.id LIMIT 1) AS comprobante
+          ORDER BY f.id DESC LIMIT 1) AS comprobante
         FROM sg_despacho_items di
         JOIN sg_despachos d ON d.id = di.despacho_id AND d.activo = 1
         LEFT JOIN sg_clientes c ON c.id = d.cliente_id
@@ -7783,9 +7803,18 @@ router.post('/despachos/:id/anular', requireAuth, (req, res) => {
     // La anulación de la factura de compra ya tenía el freno equivalente. Éste no.
     // Primero se anula el comprobante —que es lo que decide si hay que emitir una
     // nota de crédito— y recién después el remito.
-    const fact = db.prepare(`SELECT f.numero, f.id
+    // ── SALVO QUE YA SE LE HAYA HECHO LA NOTA DE CRÉDITO ─────────────
+    // El puente suma en negativo cuando hay nota, así que si los kilos netos
+    // documentados quedaron en cero, ese remito ya no tiene comprobante vivo y se
+    // puede anular. Preguntar sólo «¿existe una fila?» dejaba trabado para siempre
+    // un remito devuelto: la factura y su nota, las dos ahí, y nada que anular.
+    const neto = db.prepare(`SELECT COALESCE(SUM(fd.kg),0) kg
         FROM sg_factura_despachos fd JOIN sg_ven_facturas f ON f.id = fd.factura_id
-       WHERE fd.despacho_id = ? AND ${facturaCuenta('f')} LIMIT 1`).get(d.id);
+       WHERE fd.despacho_id = ? AND ${facturaCuenta('f')}`).get(d.id).kg;
+    const fact = neto > 0.01 ? db.prepare(`SELECT f.numero, f.id
+        FROM sg_factura_despachos fd JOIN sg_ven_facturas f ON f.id = fd.factura_id
+       WHERE fd.despacho_id = ? AND ${facturaCuenta('f')} AND ${noEsNotaDeCredito('f')}
+       ORDER BY f.id DESC LIMIT 1`).get(d.id) : null;
     if (fact) {
       return res.status(409).json({ ok: false, error:
         `El remito ${d.numero || d.id} ya está facturado con el comprobante ${fact.numero}. `
@@ -8367,7 +8396,9 @@ router.get('/cc-clientes', requireAuth, (req, res) => {
                        WHERE cd.tipo='liquidacion' AND cd.doc_id=l.id AND co2.anulada=0),0))
                     FROM sg_ven_liquidaciones l
                    WHERE l.cliente_id=c.id AND l.estado <> 'anulada'),0)
-        + COALESCE((SELECT SUM(f.total + COALESCE(f.dif_gestion,0)
+        -- Con SIGNO: la factura suma y la NOTA DE CRÉDITO resta. Sin esto una nota
+        -- de crédito AUMENTABA la deuda del cliente en vez de bajarla.
+        + COALESCE((SELECT SUM(${deudaFactura('f')}
                     - COALESCE((SELECT SUM(cd.monto) FROM sg_ven_cobranza_docs cd
                         JOIN sg_ven_cobranzas co2 ON co2.id=cd.cobranza_id
                        WHERE cd.tipo='factura' AND cd.doc_id=f.id AND co2.anulada=0),0))
@@ -8440,7 +8471,7 @@ router.get('/cc-clientes', requireAuth, (req, res) => {
         -- Misma regla que arriba: la parte de gestión de una factura rechazada
         -- tampoco es deuda. Si acá quedara la lista escrita a mano, la columna
         -- diría un número y el saldo del que sale, otro.
-        + COALESCE((SELECT SUM(COALESCE(f.dif_gestion,0)) FROM sg_ven_facturas f
+        + COALESCE((SELECT SUM(${deudaGestionFactura('f')}) FROM sg_ven_facturas f
                    WHERE f.cliente_id=c.id AND ${facturaCuenta('f')}),0)
         - COALESCE((SELECT SUM(COALESCE(cd.monto_gestion,0)) FROM sg_ven_cobranza_docs cd
                      JOIN sg_ven_cobranzas co ON co.id=cd.cobranza_id
