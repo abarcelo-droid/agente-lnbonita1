@@ -11,7 +11,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { DatabaseSync } from 'node:sqlite';
-import { diagnosticoGestion, gestionCorrecta, modoDeLinea } from '../src/servicios/sg_gestion_vieja.js';
+import { diagnosticoGestion, gestionCorrecta, modoDeLinea, esFiscalReal } from '../src/servicios/sg_gestion_vieja.js';
 
 const r2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
 
@@ -37,7 +37,8 @@ function base() {
     CREATE TABLE sg_despacho_items (id INTEGER PRIMARY KEY, lote_id INTEGER, producto_id INTEGER,
       precio_por_kg REAL, precio_lista_por_kg REAL);
     CREATE TABLE sg_ven_facturas (id INTEGER PRIMARY KEY, numero TEXT, fecha TEXT, cliente_id INTEGER,
-      total REAL, estado TEXT, afip_estado TEXT, dif_gestion REAL, dif_motivo TEXT, asiento_id INTEGER);
+      total REAL, estado TEXT, afip_estado TEXT, dif_gestion REAL, dif_motivo TEXT, asiento_id INTEGER,
+      ambiente TEXT DEFAULT 'produccion', es_prueba INTEGER DEFAULT 0, cae TEXT DEFAULT '75000000000001');
     CREATE TABLE sg_factura_despachos (id INTEGER PRIMARY KEY, factura_id INTEGER, despacho_id INTEGER,
       despacho_item_id INTEGER, kg REAL, neto REAL, iva REAL, gestion REAL);
     INSERT INTO sg_clientes VALUES (1,'ASUNCION 4054 S.A.');
@@ -55,7 +56,9 @@ function emitirViejo(db, { kg, precioBruto, precioLista, alicuota = 10.5, incluy
   const v = comoEraAntes({ kg, precioBruto, precioLista, alicuota, incluyeIva });
   db.prepare('INSERT INTO sg_lotes VALUES (?,?,?,1)').run(n, 'LT-' + n, n);
   db.prepare('INSERT INTO sg_despacho_items VALUES (?,?,1,?,?)').run(n, n, precioBruto, precioLista);
-  db.prepare('INSERT INTO sg_ven_facturas VALUES (?,?,?,1,?,?,?,?,?,NULL)')
+  db.prepare(`INSERT INTO sg_ven_facturas
+      (id,numero,fecha,cliente_id,total,estado,afip_estado,dif_gestion,dif_motivo,asiento_id)
+      VALUES (?,?,?,1,?,?,?,?,?,NULL)`)
     .run(n, '0001-' + String(n).padStart(8, '0'), '2026-08-2' + (n % 10),
       r2(v.neto + v.iva), estado, afip, v.gestion, v.gestion > 0 ? 'ajuste_gestion' : null);
   db.prepare('INSERT INTO sg_factura_despachos VALUES (?,?,1,?,?,?,?,?)')
@@ -139,8 +142,9 @@ test('una factura con un solo renglón dudoso no propone total', () => {
 
 test('las que AFIP rechazó y no tienen renglones se listan aparte', () => {
   const db = base();
-  db.prepare(`INSERT INTO sg_ven_facturas VALUES (500,'0001-00000500','2026-08-20',1,
-    1000,'pendiente','rechazado',733031.64,'ajuste_gestion',NULL)`).run();
+  db.prepare(`INSERT INTO sg_ven_facturas
+    (id,numero,fecha,cliente_id,total,estado,afip_estado,dif_gestion,dif_motivo,asiento_id)
+    VALUES (500,'0001-00000500','2026-08-20',1,1000,'pendiente','rechazado',733031.64,'ajuste_gestion',NULL)`).run();
   const d = diagnosticoGestion(db);
   assert.equal(d.huerfanas.length, 1);
   assert.equal(d.huerfanas[0].dif_gestion, 733031.64);
@@ -172,6 +176,36 @@ test('la cuenta nueva es la del repo: pesos pelados, sin IVA', () => {
   assert.equal(gestionCorrecta({ kg: 45, precio_por_kg: 60000, precio_lista_por_kg: 60000 }), 0);
   // Y por debajo del centavo por kilo no hay acuerdo: hay redondeo.
   assert.equal(gestionCorrecta({ kg: 1000, precio_por_kg: 486.486486, precio_lista_por_kg: 486.486999 }), 0);
+});
+
+// ══ LA PLATA DE PRUEBA NO SE CUENTA CON LA DE VERDAD ═══════════════════
+//
+// Le pasó a Pablo en la primera corrida: "$308.438,86 registrados de menos" en
+// letras grandes, y eran los 14 comprobantes de su circuito de prueba. Un número
+// que asusta y no es de nadie hace ignorar el cartel la vez que sí importa.
+test('separa lo fiscal de lo que salió del circuito de prueba', () => {
+  const db = base();
+  const real = emitirViejo(db, { kg: 45, precioBruto: 42000, precioLista: 60000 });
+  const prueba = emitirViejo(db, { kg: 45, precioBruto: 42000, precioLista: 60000 });
+  db.prepare("UPDATE sg_ven_facturas SET numero='MANUAL-9999-1-2-abc', afip_estado='MANUAL — sin AFIP', cae=NULL WHERE id=?").run(prueba.id);
+
+  const d = diagnosticoGestion(db);
+  assert.equal(d.resumen.corregibles, 1, 'sólo la fiscal cuenta como corregible');
+  assert.equal(d.resumen.corregibles_prueba, 1);
+  assert.equal(d.resumen.diferencia_total, d.comprobantes.find((c) => c.factura_id === real.id).diferencia,
+    'la plata que se informa es SÓLO la de los comprobantes fiscales');
+  assert.ok(d.resumen.diferencia_prueba > 0, 'y la de prueba se cuenta aparte, no se esconde');
+});
+
+test('qué es un comprobante fiscal de verdad', () => {
+  const ok = { afip_estado: 'autorizado', cae: '75000000000001', ambiente: 'produccion', numero: 'AFIP-1-1-1-x', es_prueba: 0 };
+  assert.equal(esFiscalReal(ok), true);
+  assert.equal(esFiscalReal({ ...ok, afip_estado: 'MANUAL — sin AFIP' }), false, 'manual no le informa nada a AFIP');
+  assert.equal(esFiscalReal({ ...ok, ambiente: 'homologacion' }), false, 'homologación es el AFIP de prueba');
+  assert.equal(esFiscalReal({ ...ok, numero: 'AFIPH-7-1-4-x' }), false);
+  assert.equal(esFiscalReal({ ...ok, es_prueba: 1 }), false);
+  assert.equal(esFiscalReal({ ...ok, cae: null }), false, 'sin CAE no es fiscal');
+  assert.equal(esFiscalReal({ ...ok, afip_estado: 'rechazado' }), false);
 });
 
 test('reconoce cómo se facturó cada renglón', () => {
