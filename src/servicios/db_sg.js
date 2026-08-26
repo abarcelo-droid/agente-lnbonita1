@@ -1612,6 +1612,29 @@ try {
   db.exec("UPDATE sg_familias SET iva_alicuota=10.5 WHERE codigo IN (1,2,3,4) AND iva_alicuota IS NULL");
 } catch (e) { console.error('[DB] SG migración sg_familias (iva_alicuota):', e.message); }
 
+// ══ LA FAMILIA DE TRÁNSITO ══════════════════════════════════════════════
+//
+// Una familia con productos colgando no se podía dar de baja: el maestro quedaba
+// con "Hortalizas Livianas" dos veces --03 y 09-- y no había forma de juntarlas,
+// porque para vaciar la de más había que mover especie por especie ANTES, y el
+// botón de baja mientras tanto estaba apagado.
+//
+// Ahora se da de baja igual y lo que colgaba se estaciona en una familia marcada
+// `transitoria`: no es una categoría comercial, es la sala de espera. Los productos
+// siguen vivos y operables --se compran, se venden, se facturan-- y desde el maestro
+// se les va poniendo la familia definitiva.
+//
+// La marca es una COLUMNA y no el nombre: el nombre se puede renombrar y entonces
+// el sistema perdería de vista cuál era la de tránsito, la volvería a crear, y
+// habría dos salas de espera.
+try {
+  const cols = db.prepare('PRAGMA table_info(sg_familias)').all().map((c) => c.name);
+  if (!cols.includes('transitoria')) {
+    db.exec('ALTER TABLE sg_familias ADD COLUMN transitoria INTEGER NOT NULL DEFAULT 0');
+    console.log('[DB] SG sg_familias.transitoria agregado');
+  }
+} catch (e) { console.error('[DB] SG migración sg_familias (transitoria):', e.message); }
+
 // ══ LA ALÍCUOTA DE IVA VIVE EN EL PRODUCTO Y ES OBLIGATORIA ═════════════
 //
 // Pablo, 25/8/2026: "la alícuota debe cargarse en el producto como dato

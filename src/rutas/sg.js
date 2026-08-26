@@ -519,14 +519,152 @@ router.delete('/especies/:id', requireAuth, (req, res) => {
   } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
 });
 
+// ══ DAR DE BAJA UNA FAMILIA QUE TIENE COSAS ADENTRO ═════════════════════
+//
+// Pablo, 25/8/2026: el maestro tiene familias repetidas --"Hortalizas Livianas"
+// está en el 03 y en el 09-- y la de más no se podía sacar: el botón se apagaba
+// porque tenía especies y productos colgando, y para vaciarla había que mover
+// especie por especie primero. La limpieza no arrancaba nunca.
+//
+// Ahora se da de baja igual y lo que colgaba se ESTACIONA en la familia de
+// tránsito: los productos siguen vivos y operables --se compran, se venden, se
+// facturan-- pero quedan juntos y a la vista, esperando familia definitiva.
+//
+// No se hace solo ni por las dudas: sin `?mover=1` sigue contestando el 409 de
+// siempre diciendo qué cuelga. El movimiento se pide.
+const FAMILIA_TRANSITORIA = 'Sin clasificar';
+
+// La sala de espera, creándola la primera vez que hace falta. Una empresa que
+// nunca borra una familia no la ve nunca en sus selectores.
+function familiaTransitoria(db, req) {
+  const marcada = db.prepare('SELECT * FROM sg_familias WHERE transitoria=1 AND activo=1 ORDER BY id LIMIT 1').get();
+  if (marcada) return marcada;
+  // ¿Ya hay una que se llama así, de antes de que existiera la marca? Se adopta:
+  // crear otra dejaría dos "Sin clasificar" y el alta rebotaría por nombre repetido.
+  const homonima = familiaConNombre(db, FAMILIA_TRANSITORIA, null);
+  if (homonima) {
+    db.prepare('UPDATE sg_familias SET transitoria=1 WHERE id=?').run(homonima.id);
+    return db.prepare('SELECT * FROM sg_familias WHERE id=?').get(homonima.id);
+  }
+  let n = nextCodigoNivel(db, 'sg_familias', '', []);
+  for (let intento = 0; intento < 200; intento++) {
+    try {
+      const info = db.prepare(`INSERT INTO sg_familias (codigo, nombre, transitoria, creado_por) VALUES (?,?,1,?)`)
+        .run(n, FAMILIA_TRANSITORIA, uid(req));
+      return db.prepare('SELECT * FROM sg_familias WHERE id=?').get(info.lastInsertRowid);
+    } catch (e) {
+      if (String(e.message).includes('UNIQUE') && intento < 199) { n++; continue; }
+      throw e;
+    }
+  }
+  throw new Error('No se pudo crear la familia de tránsito');
+}
+
 router.delete('/familias/:id', requireAuth, (req, res) => {
   const db = getDb();
   try {
-    borrarNivelTax(db, req, res, 'sg_familias', req.params.id, [
-      { count: 'SELECT COUNT(*) AS n FROM sg_especies  WHERE familia_id=? AND activo=1', params: [req.params.id], etiqueta: 'especie(s) hija(s) activa(s)' },
-      { count: 'SELECT COUNT(*) AS n FROM sg_productos WHERE familia_id=? AND activo=1', params: [req.params.id], etiqueta: 'producto(s) la usan' }
-    ]);
-  } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
+    const id = Number(req.params.id);
+    const fam = db.prepare('SELECT * FROM sg_familias WHERE id=? AND activo=1').get(id);
+    if (!fam) return res.status(404).json({ ok: false, error: 'No encontrado o ya eliminado' });
+
+    const nEsp  = db.prepare('SELECT COUNT(*) AS n FROM sg_especies  WHERE familia_id=? AND activo=1').get(id).n;
+    const nProd = db.prepare('SELECT COUNT(*) AS n FROM sg_productos WHERE familia_id=? AND activo=1').get(id).n;
+    const detalle = [];
+    if (nEsp)  detalle.push(`${nEsp} especie(s)`);
+    if (nProd) detalle.push(`${nProd} producto(s)`);
+
+    // Vacía: baja directa, como siempre. (Vale también para la de tránsito: si no
+    // quedó nadie esperando, que se pueda sacar del medio.)
+    if (!detalle.length) {
+      db.prepare(`UPDATE sg_familias SET activo=0, eliminado_en=datetime('now','localtime'), eliminado_por_id=? WHERE id=? AND activo=1`)
+        .run(uid(req), id);
+      return res.json({ ok: true, data: { id, movidos: { especies: 0, productos: 0 } } });
+    }
+
+    // LA SALA DE ESPERA NO SE MUDA A SÍ MISMA. Dar de baja la de tránsito con gente
+    // adentro sería crear otra y pasarle todo: el problema entero, de nuevo.
+    if (fam.transitoria) {
+      return res.status(400).json({ ok: false, bloqueado: true, detalle,
+        error: `«${fam.nombre}» es la familia de tránsito: es donde esperan los productos sin categoría. `
+          + `Asignales su familia definitiva y después dala de baja.` });
+    }
+
+    // Sin pedirlo, no se mueve nada.
+    if (String(req.query.mover) !== '1') {
+      return res.status(409).json({ ok: false, bloqueado: true, detalle, movible: true,
+        error: 'No se puede borrar: la usan ' + detalle.join(' y ')
+          + `. Se pueden mover a «${FAMILIA_TRANSITORIA}» y reasignarlos después.` });
+    }
+
+    const r = db.transaction(() => {
+      const dest = familiaTransitoria(db, req);
+      if (Number(dest.id) === id) throw new Error('La familia de tránsito no se puede mover a sí misma');
+
+      // 1) LA ALÍCUOTA QUE SE ESTABA USANDO SE CLAVA EN EL PRODUCTO. El IVA es del
+      //    producto y la familia es sólo el respaldo (COALESCE(pr, fam)); un producto
+      //    viejo que todavía se apoyaba en el 10,5 de su familia, al mudarse a una
+      //    familia sin alícuota, pasaría a facturar EXENTO sin que nadie lo decida.
+      if (fam.iva_alicuota != null) {
+        db.prepare('UPDATE sg_productos SET iva_alicuota=? WHERE familia_id=? AND iva_alicuota IS NULL')
+          .run(fam.iva_alicuota, id);
+      }
+
+      // 2) LAS ESPECIES, UNA POR UNA, con correlativo nuevo en el destino. Se mueven
+      //    TODAS --también las dadas de baja--: si quedara una apuntando a la familia
+      //    muerta, su producto tendría una especie de otra familia y editarlo rebotaría
+      //    con "la especie no pertenece a la familia elegida".
+      //    Nombres repetidos SE PERMITEN acá: si dos familias tenían "Lechuga", en la
+      //    sala de espera hay dos, que es exactamente lo que pasó. Al sacarlas de ahí,
+      //    el destino real vuelve a exigir que no se repita.
+      const especies = db.prepare('SELECT * FROM sg_especies WHERE familia_id=? ORDER BY codigo').all(id);
+      for (const esp of especies) {
+        db.prepare(`UPDATE sg_especies SET familia_id=?, codigo=?,
+            modificado_en=datetime('now','localtime'), modificado_por=? WHERE id=?`)
+          .run(dest.id, nextCodigoNivel(db, 'sg_especies', 'familia_id=?', [dest.id]), uid(req), esp.id);
+        // ── SÓLO LOS PRODUCTOS DE ESTA FAMILIA ──────────────────────────
+        // Acá faltaba el AND familia_id, y no es un detalle. Un producto puede tener
+        // su especie en la familia que muere y su familia_id apuntando a OTRA —pasa
+        // cuando una especie se movió de familia y ese producto quedó atrás—. Sin el
+        // filtro, este UPDATE lo arrancaba de su familia legítima, que sigue viva, y
+        // lo estacionaba en la sala de espera.
+        // Peor: al paso 1 tampoco lo alcanzaba (filtra por familia_id), así que se
+        // quedaba sin alícuota propia y sin la de su familia. Desde el #879 eso ya no
+        // sale exento en silencio: FRENA la emisión. Un producto que se facturaba
+        // bien dejaba de poder facturarse por dar de baja una familia ajena.
+        db.prepare('UPDATE sg_productos SET familia_id=?, familia=? WHERE especie_id=? AND familia_id=?')
+          .run(dest.id, dest.nombre, esp.id, id);
+        // Y el código del producto, que es FF.EE.VV y arranca con el de la familia.
+        // Sólo el de los que efectivamente se mudaron: al que se quedó en su familia
+        // hay que dejarle el suyo.
+        for (const pr of db.prepare('SELECT id, variedad_id FROM sg_productos WHERE especie_id=? AND familia_id=?').all(esp.id, dest.id)) {
+          const nuevo = resolverProducto(db, { familia_id: dest.id, especie_id: esp.id, variedad_id: pr.variedad_id });
+          if (!nuevo.error) db.prepare('UPDATE sg_productos SET codigo=? WHERE id=?').run(nuevo.codigo, pr.id);
+        }
+      }
+
+      // 3) Y LOS SUELTOS: productos viejos que traen familia pero no especie (la
+      //    migración de la taxonomía los dejó así). No tienen código que rehacer
+      //    --el código sale de la especie-- pero la familia sí se les cambia.
+      db.prepare('UPDATE sg_productos SET familia_id=?, familia=? WHERE familia_id=?').run(dest.id, dest.nombre, id);
+
+      db.prepare(`UPDATE sg_familias SET activo=0, eliminado_en=datetime('now','localtime'), eliminado_por_id=? WHERE id=?`)
+        .run(uid(req), id);
+      return { destino: { id: dest.id, codigo: dest.codigo, nombre: dest.nombre },
+        movidos: { especies: nEsp, productos: nProd } };
+    })();
+
+    res.json({ ok: true, data: { id, ...r } });
+  } catch (e) {
+    // El código del producto es FF.EE.VV y es UNIQUE. Si un producto viejo sin
+    // especie ya ocupaba el código que le tocaría a uno de los que se mudan, la
+    // transacción se cae entera y no se movió nada — pero el mensaje crudo de
+    // SQLite no le dice eso a nadie.
+    if (String(e.message).includes('UNIQUE') && String(e.message).includes('codigo')) {
+      return res.status(409).json({ ok: false, error: 'No se pudo mover: el código que le tocaría a uno de '
+        + 'los productos ya está ocupado. No se movió nada. Revisá los códigos repetidos en el maestro de productos.' });
+    }
+    res.status(400).json({ ok: false, error: e.message });
+  }
 });
 
 // ── PRODUCTOS (código autogenerado FF.EE.VV desde la taxonomía) ───────────────
@@ -674,53 +812,6 @@ router.delete('/productos/:id', requireAuth, (req, res) => {
   } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
 });
 
-// ── TEMPORAL (A REMOVER) — counts del maestro de artículos ─────────────────────────
-// Relevamiento del patrón real (productos/presentaciones/envases) para evaluar
-// simplificación del maestro. No hay consola SQL web → se lee por navegador y se
-// saca en el mismo PR. Admin-only. BORRAR junto con su registro tras leer.
-router.get('/_tmp_counts_articulos', requireAdmin, (req, res) => {
-  const db = getDb();
-  try {
-    const scalar = (sql) => db.prepare(sql).get().n;
-    // Presentaciones por producto (solo productos vivos, presentaciones activas).
-    const porProducto = db.prepare(`
-      SELECT p.id, COUNT(pr.id) AS n
-      FROM sg_productos p
-      LEFT JOIN sg_presentaciones pr ON pr.producto_id = p.id AND pr.activo = 1
-      WHERE p.eliminado_en IS NULL
-      GROUP BY p.id`).all();
-    const conPres = porProducto.filter(r => r.n >= 1);
-    const promedio = conPres.length
-      ? +(conPres.reduce((a, r) => a + r.n, 0) / conPres.length).toFixed(2)
-      : 0;
-
-    res.json({
-      ok: true,
-      data: {
-        total_productos:              scalar('SELECT COUNT(*) n FROM sg_productos WHERE eliminado_en IS NULL'),
-        total_presentaciones:         scalar('SELECT COUNT(*) n FROM sg_presentaciones WHERE activo=1'),
-        total_envases:                scalar('SELECT COUNT(*) n FROM sg_envases WHERE activo=1'),
-        productos_sin_presentacion:   porProducto.filter(r => r.n === 0).length,
-        productos_1_presentacion:     porProducto.filter(r => r.n === 1).length,
-        productos_2mas_presentaciones: porProducto.filter(r => r.n >= 2).length,
-        promedio_pres_por_producto:   promedio,
-        distribucion_factor: db.prepare(`
-          SELECT factor_conversion AS factor, COUNT(*) AS cantidad
-          FROM sg_presentaciones WHERE activo=1
-          GROUP BY factor_conversion ORDER BY cantidad DESC`).all(),
-        distribucion_unidad_base: db.prepare(`
-          SELECT unidad_base, COUNT(*) AS cantidad
-          FROM sg_productos WHERE eliminado_en IS NULL
-          GROUP BY unidad_base ORDER BY cantidad DESC`).all(),
-        uso_envase: {
-          con_envase: scalar('SELECT COUNT(*) n FROM sg_presentaciones WHERE activo=1 AND envase_id IS NOT NULL'),
-          sin_envase: scalar('SELECT COUNT(*) n FROM sg_presentaciones WHERE activo=1 AND envase_id IS NULL')
-        },
-        uso_paletizado: scalar('SELECT COUNT(*) n FROM sg_presentaciones WHERE activo=1 AND paletizado=1')
-      }
-    });
-  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
-});
 
 // ── ENVASES (catálogo editable: cajón, bolsa, bin, IFCO…) ─────────────────────────
 // CRUD completo vía helper (GET/POST/PUT/DELETE). El dropdown de presentaciones lo
