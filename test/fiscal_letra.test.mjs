@@ -130,3 +130,84 @@ function fsLeer(rel) {
 }
 import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
+
+// ══ EL UMBRAL PARA IDENTIFICAR AL CONSUMIDOR FINAL ═════════════════════
+//
+// RG 5700/2025 de ARCA, art. 1° inc. d): desde $10.000.000 hay que identificar al
+// comprador que reviste el carácter de consumidor final. Por debajo, la factura sale
+// "A CONSUMIDOR FINAL" sin ningún dato — y eso es lo que ahorra cargar una ficha por
+// cada venta de mostrador.
+//
+// Pablo, 26/8/2026: "el campo debería estar cuando la factura supera el umbral y es a
+// consumidor final, sólo ahí".
+const U = 10000000;
+const CF = { razon_social: 'Mostrador', cuit: null, categoria_fiscal: 'no_inscripto' };
+
+test('por debajo del umbral no se pide nada', () => {
+  const f = fiscalDeCliente(CF, { total: 9999999, umbral: U });
+  assert.equal(f.ok, true);
+  assert.equal(f.pide_identificacion, false);
+  assert.equal(f.doc_tipo, 99, 'sale A CONSUMIDOR FINAL, sin identificar');
+  assert.equal(f.doc_nro, '0');
+});
+
+test('desde el umbral se pide, y sin documento no se emite', () => {
+  const f = fiscalDeCliente(CF, { total: U, umbral: U });
+  assert.equal(f.ok, false);
+  assert.equal(f.pide_identificacion, true);
+  assert.match(f.error, /RG 5700\/2025/);
+});
+
+test('con el documento cargado, sale identificado', () => {
+  const dni = fiscalDeCliente(CF, { total: 12000000, umbral: U, identificacion: { tipo: 'dni', numero: '30.123.456' } });
+  assert.equal(dni.ok, true);
+  assert.equal(dni.doc_tipo, 96, 'DocTipo 96 = DNI');
+  assert.equal(dni.doc_nro, '30123456', 'sin puntos ni guiones');
+
+  const c = fiscalDeCliente(CF, { total: 12000000, umbral: U, identificacion: { tipo: 'cuit', numero: CUIT_OK } });
+  assert.equal(c.doc_tipo, 80);
+  assert.equal(c.doc_nro, CUIT_OK);
+});
+
+test('el documento que se carga tiene que ser un documento', () => {
+  const mal = fiscalDeCliente(CF, { total: 12000000, umbral: U, identificacion: { tipo: 'dni', numero: '123' } });
+  assert.equal(mal.ok, false);
+  assert.match(mal.error, /no parece un n[uú]mero de documento/i);
+  const cuitMal = fiscalDeCliente(CF, { total: 12000000, umbral: U, identificacion: { tipo: 'cuit', numero: CUIT_ROTO } });
+  assert.equal(cuitMal.ok, false);
+});
+
+test('el umbral SÓLO aplica a consumidor final', () => {
+  // Un Responsable Inscripto ya está identificado por su CUIT: pedirle un DNI por
+  // superar un monto no tiene sentido, y frenarlo sería trabar la venta grande.
+  for (const cat of ['resp_inscripto', 'monotributista', 'exento']) {
+    const f = fiscalDeCliente({ razon_social: 'X', cuit: CUIT_OK, categoria_fiscal: cat },
+      { total: 50000000, umbral: U });
+    assert.equal(f.ok, true, cat);
+    assert.equal(f.pide_identificacion, false, cat);
+  }
+});
+
+test('un consumidor final QUE YA TIENE CUIT no vuelve a identificarse', () => {
+  const f = fiscalDeCliente({ razon_social: 'X', cuit: CUIT_OK, categoria_fiscal: 'no_inscripto' },
+    { total: 50000000, umbral: U });
+  assert.equal(f.ok, true);
+  assert.equal(f.pide_identificacion, true, 'la venta sí lo pide…');
+  assert.equal(f.doc_tipo, 80, '…pero ya está identificado por su CUIT');
+  assert.equal(f.doc_nro, CUIT_OK);
+});
+
+test('sin umbral configurado no se pide nada y nada se rompe', () => {
+  const f = fiscalDeCliente(CF, { total: 99999999, umbral: null });
+  assert.equal(f.ok, true);
+  assert.equal(f.pide_identificacion, false);
+});
+
+test('el umbral está en configuración, no escrito en el código', () => {
+  const src = fsLeer('src/servicios/sg_fiscal.js');
+  assert.doesNotMatch(src, /10000000|10_000_000/,
+    'el número se movió de $208.644 a $10.000.000 en una sola resolución: escrito '
+    + 'adentro, el día que lo cambien seguimos con el viejo y nadie se entera');
+  assert.match(fsLeer('src/servicios/db_sg.js'), /umbral_identificar_cf/,
+    'tiene que vivir en sg_config, con su valor inicial');
+});

@@ -1269,7 +1269,11 @@ const postEmitir = async (req, res) => {
     const gestionLineas = r2(vinculos.reduce((a, v) => a + (Number(v.gestion) || 0), 0));
     const r = await afipEmitir(db, { ptoVta: pv, clienteId, items, esNC: b.es_nc === true,
       userId: uid(req), vinculos,
-      descuentoGestion: gestionLineas || (Number(b.descuento_gestion) || 0) });
+      descuentoGestion: gestionLineas || (Number(b.descuento_gestion) || 0),
+      // El documento del comprador, cuando la venta supera el umbral y va a
+      // consumidor final. Es del COMPROBANTE, no del cliente: el "Consumidor Final"
+      // lo comparten muchas ventas.
+      identificacion: b.identificacion || null });
     if (r.ok) r.pdf_url = '/api/sg/ventas/facturas/' + r.factura_id + '/pdf';
     res.json(r);
   } catch (e) { res.status(502).json({ ok: false, error: e.message }); }
@@ -1347,6 +1351,7 @@ router.post('/facturas/directa', requireAuth, async (req, res) => {
   fakeReq.body = {
     cliente_id: clienteId, punto_venta: Number(b.punto_venta), es_nc: false,
     precio_incluye_iva: b.precio_incluye_iva === true,
+    identificacion: b.identificacion || null,
     // LO RESIGNADO POR LOS ACUERDOS. El precio de cada línea ya viene con el
     // descuento aplicado —eso es lo que se factura y lo que va al libro
     // fiscal— y esto es la diferencia contra el precio de lista, que entra al

@@ -2790,6 +2790,12 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
              momento en que se puede frenar. -->
         <div id="sgfd-asiento" style="margin-top:14px"></div>
 
+        <!-- El documento del comprador. Aparece SOLO si la venta supera el umbral
+             de ARCA y va a consumidor final: por debajo, la factura sale "A
+             CONSUMIDOR FINAL" sin ningún dato, y eso es lo que ahorra cargar una
+             ficha por cada venta de mostrador. Es un dato del COMPROBANTE, no del
+             cobro: hace falta igual aunque se pague después. -->
+        <div id="sgfd-identif" style="display:none;margin-top:12px"></div>
         <!-- ══ SE COBRA EN LA VENTANILLA ═══════════════════════════════
              Pablo, 25/8/2026: "puede ser que al hacer una factura se cobre en el
              mismo momento; entonces debemos dar la opción de esa venta por
@@ -2808,22 +2814,14 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
             <span>💵 Se cobra ahora</span>
             <span style="font-weight:400;font-size:11.5px;color:var(--mut)">— venta de ventanilla</span>
           </label>
+          <!-- VARIOS MEDIOS EN LA MISMA VENTA. Parte en efectivo y parte en
+               transferencia, como el pago a proveedores. Los renglones se dibujan
+               solos y el pie dice cuánto falta o cuánto sobra. -->
           <div id="sgfd-cobro-box" style="display:none;margin-top:10px">
-            <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end">
-              <label style="font-size:11.5px;color:var(--mut)">Cómo<br>
-                <select id="sgfd-cobro-forma" onchange="sgFdCobroForma()" style="padding:6px 8px;font-size:12.5px">
-                  <option value="efectivo">Efectivo</option>
-                  <option value="transferencia">Transferencia</option>
-                  <option value="cheque">Cheque de tercero</option>
-                </select></label>
-              <label style="font-size:11.5px;color:var(--mut)" id="sgfd-cobro-cta-lbl">A qué cuenta<br>
-                <select id="sgfd-cobro-cta" style="padding:6px 8px;font-size:12.5px;min-width:200px"></select></label>
-              <label style="font-size:11.5px;color:var(--mut)">Cuánto entra<br>
-                <input id="sgfd-cobro-monto" type="text" inputmode="decimal"
-                       style="padding:6px 8px;font-size:12.5px;width:150px;text-align:right"></label>
-              <label style="font-size:11.5px;color:var(--mut)">Referencia<br>
-                <input id="sgfd-cobro-ref" type="text" placeholder="nº de cheque, comprobante…"
-                       style="padding:6px 8px;font-size:12.5px;width:180px"></label>
+            <div id="sgfd-cobro-medios"></div>
+            <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;margin-top:8px">
+              <button class="btn bo bs" type="button" onclick="sgFdMedioAdd()">+ otro medio</button>
+              <div id="sgfd-cobro-pie" style="font-size:12.5px"></div>
             </div>
             <div id="sgfd-cobro-nota" style="font-size:11.5px;color:var(--mut);margin-top:7px"></div>
           </div>
@@ -6470,6 +6468,10 @@ function sgCatSub(s){
 
 // Carga caches para dropdowns (productos, condiciones, presentaciones, proveedores)
 function sgLoadCaches(cb){
+  // La configuración del módulo: de ahí sale el umbral desde el que ARCA exige
+  // identificar al consumidor final. Es un número que se mueve, así que vive en
+  // sg_config y no en el código.
+  api('/api/sg/config').then(function(rc){ SG.cfg = (rc && rc.ok) ? (rc.data || rc.cfg || {}) : {}; });
   Promise.all([api('/api/sg/productos'), api('/api/sg/condiciones-pago'), api('/api/sg/presentaciones'), api('/api/sg/proveedores'), api('/api/sg/clientes'), api('/api/sg/familias'), api('/api/sg/envases')]).then(function(r){
     SG.cacheProd = (r[0] && r[0].ok) ? r[0].data : [];
     SG.cacheCond = (r[1] && r[1].ok) ? r[1].data : [];
@@ -15246,6 +15248,10 @@ function sgFdRender(){
   SG._fdResignado=paRound2Fm(resignado);
   // El cuadro se rehace con cada cambio: es el asiento de LO QUE SE VE ahora.
   if (typeof sgFdAsientoPreview === 'function') sgFdAsientoPreview();
+  // Y el documento del comprador: depende del TOTAL, así que se vuelve a mirar cada
+  // vez que cambia un renglón. Si se evaluara sólo al abrir el cobro, agregar una
+  // partida que cruza el umbral no lo pediría.
+  if (typeof sgFdIdentifRender === 'function') sgFdIdentifRender(sgFdTotal());
   eid('sgfd-resumen').innerHTML='Neto '+sgMoney(neto)+' · IVA '+sgMoney(iva)
     +' · <b>Total '+sgMoney(neto+iva)+'</b>'
     + (sinAlic.length
@@ -15446,52 +15452,26 @@ function sgAsientoCuadro(d, titulo, donde){
 // cobra desde Cuenta corriente. Al revés —cobrar y después emitir— dejaría plata
 // entrada contra una factura que no salió.
 var SG_FD_CTAS = [];
+var SG_FD_MEDIOS = [];
 function sgFdCobroToggle(){
   var on = eid('sgfd-cobrar') && eid('sgfd-cobrar').checked;
   var box = eid('sgfd-cobro-box'); if (box) box.style.display = on ? '' : 'none';
   if (!on) return;
+  if (!SG_FD_MEDIOS.length) SG_FD_MEDIOS = [{ forma: 'efectivo', cuenta: '', monto: '', ref: '' }];
   if (!SG_FD_CTAS.length) {
     api('/api/sg/tesoreria/cuentas').then(function(r){
       SG_FD_CTAS = (r && r.ok) ? (r.data || []) : [];
-      sgFdCobroForma();
+      sgFdMediosRender();
     });
-  } else { sgFdCobroForma(); }
-  sgFdCobroMonto();
+  } else { sgFdMediosRender(); }
 }
-// La cuenta que corresponde a la forma de cobro: efectivo entra a una CAJA,
-// transferencia a un BANCO. El cheque no entra a ninguna cuenta: queda en cartera
-// hasta que se deposite, y eso ya lo resuelve el circuito de cobranzas.
-function sgFdCobroForma(){
-  var forma = (eid('sgfd-cobro-forma') || {}).value || 'efectivo';
-  var lbl = eid('sgfd-cobro-cta-lbl'), sel = eid('sgfd-cobro-cta');
-  if (!sel) return;
-  if (forma === 'cheque') {
-    if (lbl) lbl.style.display = 'none';
-    eid('sgfd-cobro-nota').innerHTML = 'El cheque queda <b>en cartera</b> hasta que se deposite o se endose. '
-      + 'Eso se hace desde Tesorería.';
-    return;
-  }
-  if (lbl) lbl.style.display = '';
-  var quiere = forma === 'efectivo' ? 'caja' : 'banco';
-  // `puedo` lo devuelve el backend: una cuenta con dueño la tocan sólo sus dueños.
-  // No ofrecer lo que va a rebotar es la misma regla del botón anular.
-  var aptas = SG_FD_CTAS.filter(function(c){
-    return String(c.tipo) === quiere && c.activo !== 0 && c.puedo !== 0;
-  });
-  sel.innerHTML = aptas.length
-    ? aptas.map(function(c){
-        return '<option value="' + c.id + '">' + escH(c.nombre)
-          + (c.ambito ? ' · ' + escH(c.ambito) : '') + '</option>'; }).join('')
-    : '<option value="">— no hay ' + (quiere === 'caja' ? 'cajas' : 'cuentas') + ' que puedas tocar —</option>';
-  eid('sgfd-cobro-nota').innerHTML = aptas.length ? ''
-    : '<span style="color:#b91c1c">Sin una ' + (quiere === 'caja' ? 'caja' : 'cuenta bancaria')
-      + ' asignada no se puede registrar el cobro. Se puede emitir igual y cobrarlo después.</span>';
-}
-// Lo que se propone cobrar es el total del comprobante. Se puede bajar: lo que no
-// entra queda en la cuenta corriente del cliente, que es exactamente lo que Pablo
-// pidió cuando dijo que el cobro puede ser parcial.
-function sgFdCobroMonto(){
-  var e = eid('sgfd-cobro-monto'); if (!e || String(e.value || '').trim()) return;
+function sgFdMedioAdd(){ SG_FD_MEDIOS.push({ forma: 'efectivo', cuenta: '', monto: '', ref: '' }); sgFdMediosRender(); }
+function sgFdMedioDel(i){ SG_FD_MEDIOS.splice(i, 1); if (!SG_FD_MEDIOS.length) sgFdMedioAdd(); else sgFdMediosRender(); }
+function sgFdMedioUpd(i, campo, v){ SG_FD_MEDIOS[i][campo] = v; sgFdMediosRender(); }
+
+// El total del comprobante que se está por emitir. Es contra esto que se compara lo
+// que se cobra, y también lo que decide si hay que identificar al comprador.
+function sgFdTotal(){
   var incl = eid('sgfd-incluye-iva') && eid('sgfd-incluye-iva').checked;
   var t = 0;
   SG.fdItems.forEach(function(it){
@@ -15499,40 +15479,151 @@ function sgFdCobroMonto(){
     var alic = (it.alicuota != null) ? Number(it.alicuota) : 0;
     t += incl ? mm.facturado : paRound2Fm(mm.facturado * (1 + alic / 100));
   });
-  if (t > 0) e.value = liqPlata(paRound2Fm(t)).replace('$', '').trim();
+  return paRound2Fm(t);
 }
 
-// Toma el cobro contra el comprobante recién emitido, por el circuito de cobranzas
-// de siempre: él resuelve la caja, el banco, el cheque en cartera y el asiento.
+function sgFdMediosRender(){
+  var cont = eid('sgfd-cobro-medios'); if (!cont) return;
+  // Las cajas y cuentas QUE ESE USUARIO PUEDE TOCAR: una cuenta con dueño la tocan
+  // sólo sus dueños. No ofrecer lo que va a rebotar es la regla del botón anular.
+  var opts = function(tipo, sel){
+    var aptas = SG_FD_CTAS.filter(function(c){
+      return String(c.tipo) === tipo && c.activo !== 0 && c.puedo !== 0; });
+    if (!aptas.length) return '<option value="">— no hay ' + (tipo === 'caja' ? 'cajas' : 'cuentas') + ' que puedas tocar —</option>';
+    return '<option value="">— elegir —</option>' + aptas.map(function(c){
+      return '<option value="' + c.id + '"' + (String(sel) === String(c.id) ? ' selected' : '') + '>'
+        + escH(c.nombre) + (c.ambito ? ' · ' + escH(c.ambito) : '') + '</option>'; }).join('');
+  };
+  var up = function(i, campo){ return 'sgFdMedioUpd(' + i + ',\'' + campo + '\',this.value)'; };
+  cont.innerHTML = SG_FD_MEDIOS.map(function(m, i){
+    var esCheque = m.forma === 'cheque';
+    return '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;margin-bottom:6px">'
+      + '<label style="font-size:11px;color:var(--mut)">Cómo<br>'
+        + '<select onchange="' + up(i, 'forma') + '" style="padding:5px 7px;font-size:12.5px">'
+        + ['efectivo', 'transferencia', 'cheque'].map(function(f){
+            return '<option value="' + f + '"' + (m.forma === f ? ' selected' : '') + '>'
+              + (f === 'cheque' ? 'Cheque de tercero' : (f === 'efectivo' ? 'Efectivo' : 'Transferencia')) + '</option>'; }).join('')
+        + '</select></label>'
+      + (esCheque ? '' : '<label style="font-size:11px;color:var(--mut)">' + (m.forma === 'efectivo' ? 'A qué caja' : 'A qué cuenta') + '<br>'
+          + '<select onchange="' + up(i, 'cuenta') + '" style="padding:5px 7px;font-size:12.5px;min-width:190px">'
+          + opts(m.forma === 'efectivo' ? 'caja' : 'banco', m.cuenta) + '</select></label>')
+      + '<label style="font-size:11px;color:var(--mut)">Cuánto<br>'
+        + '<input type="text" inputmode="decimal" value="' + escH(m.monto) + '"'
+        + ' oninput="' + up(i, 'monto') + '"'
+        + ' style="padding:5px 7px;font-size:12.5px;width:130px;text-align:right"></label>'
+      + '<label style="font-size:11px;color:var(--mut)">' + (esCheque ? 'N° de cheque' : 'Referencia') + '<br>'
+        + '<input type="text" value="' + escH(m.ref) + '"'
+        + ' oninput="' + up(i, 'ref') + '"'
+        + ' style="padding:5px 7px;font-size:12.5px;width:150px"></label>'
+      + (esCheque ? '<label style="font-size:11px;color:var(--mut)">Quién lo firma<br>'
+          + '<input type="text" value="' + escH(m.librador || '') + '"'
+          + ' oninput="' + up(i, 'librador') + '"'
+          + ' style="padding:5px 7px;font-size:12.5px;width:170px"></label>' : '')
+      + (SG_FD_MEDIOS.length > 1
+          ? '<button class="btn bd bs" type="button" onclick="sgFdMedioDel(' + i + ')" title="Sacar este medio">×</button>' : '')
+      + '</div>';
+  }).join('');
+
+  // El pie: cuánto se está cobrando contra el total. Un cobro parcial es válido —lo
+  // que no entra queda en la cuenta corriente— pero pasarse no.
+  var total = sgFdTotal();
+  var suma = SG_FD_MEDIOS.reduce(function(a, m){ return a + (liqNum({ value: m.monto }) || 0); }, 0);
+  suma = paRound2Fm(suma);
+  var pie = eid('sgfd-cobro-pie');
+  if (pie) {
+    var falta = paRound2Fm(total - suma);
+    pie.innerHTML = 'Comprobante <b>' + sgMoney2(total) + '</b> · se cobra <b>' + sgMoney2(suma) + '</b>'
+      + (Math.abs(falta) < 0.01
+          ? ' · <span style="color:#166534">queda saldado</span>'
+          : (falta > 0
+              ? ' · <span style="color:#8a5a1f">quedan ' + sgMoney2(falta) + ' en la cuenta corriente</span>'
+              : ' · <span style="color:#b91c1c">te pasaste por ' + sgMoney2(-falta) + '</span>'));
+  }
+  sgFdIdentifRender(total);
+}
+
+// ══ EL DOCUMENTO DEL COMPRADOR, SÓLO CUANDO HACE FALTA ═════════════════
+//
+// Pablo, 26/8/2026: "el campo debería estar cuando la factura supera el umbral y es a
+// consumidor final, sólo ahí".
+//
+// RG 5700/2025 de ARCA: desde $10.000.000 hay que identificar al consumidor final.
+// Por debajo, la factura sale "A CONSUMIDOR FINAL" sin ningún dato — y eso es lo que
+// ahorra cargar una ficha por cada venta de mostrador.
+//
+// El umbral sale de la configuración, no del código: se movió de $208.644 a
+// $10.000.000 de un plumazo, y esa misma resolución eliminó la distinción entre pago
+// electrónico y otros medios que había antes.
+function sgFdIdentifRender(total){
+  var cont = eid('sgfd-identif'); if (!cont) return;
+  var cli = (SG.cacheCli || []).filter(function(c){
+    return String(c.id) === String((eid('sgfd-cli') || {}).value); })[0] || {};
+  // Consumidor final es: categoría no_inscripto, o sin categoría y sin CUIT.
+  var cuit = String(cli.cuit || '').replace(/[^0-9]/g, '');
+  var esCF = String(cli.categoria_fiscal || '') === 'no_inscripto'
+    || (!String(cli.categoria_fiscal || '') && cuit.length !== 11);
+  var umbral = Number((SG.cfg && SG.cfg.umbral_identificar_cf) || 0);
+  // Si ya tiene CUIT cargado, ya está identificado: no se le pide nada.
+  var hace = esCF && umbral > 0 && Number(total) >= umbral && cuit.length !== 11;
+  cont.style.display = hace ? '' : 'none';
+  if (!hace) { cont.innerHTML = ''; return; }
+  cont.innerHTML = '<div style="border:1.5px solid #d6a15e;background:#f6eddf;border-radius:8px;padding:9px 11px;color:#854d0e">'
+    + '<div style="font-size:12.5px;margin-bottom:6px">Esta venta supera <b>' + sgMoney2(umbral) + '</b> y va a '
+    + '<b>consumidor final</b>: ARCA exige identificar al comprador <span style="font-size:11px">(RG 5700/2025)</span>.</div>'
+    + '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end">'
+    + '<label style="font-size:11px">Tipo<br><select id="sgfd-idtipo" style="padding:5px 7px;font-size:12.5px">'
+    + '<option value="dni">DNI</option><option value="cuit">CUIT</option><option value="cuil">CUIL</option>'
+    + '</select></label>'
+    + '<label style="font-size:11px">Número<br><input id="sgfd-idnro" type="text" inputmode="numeric"'
+    + ' style="padding:5px 7px;font-size:12.5px;width:170px"></label></div></div>';
+}
+
 function sgFdCobrarAhora(r, cont){
   if (!(eid('sgfd-cobrar') && eid('sgfd-cobrar').checked)) return;
-  var forma = (eid('sgfd-cobro-forma') || {}).value || 'efectivo';
-  var monto = liqNum(eid('sgfd-cobro-monto'));
-  var cta = (eid('sgfd-cobro-cta') || {}).value || null;
   var aviso = function(txt, mal){
     cont.innerHTML += '<div style="margin-top:8px;font-size:12.5px;color:' + (mal ? '#b91c1c' : '#166534') + '">' + txt + '</div>';
   };
   var limpiar = function(){
     var chk = eid('sgfd-cobrar'); if (chk) chk.checked = false;
     var box = eid('sgfd-cobro-box'); if (box) box.style.display = 'none';
-    ['sgfd-cobro-monto', 'sgfd-cobro-ref'].forEach(function(id){ var e = eid(id); if (e) e.value = ''; });
+    SG_FD_MEDIOS = [];
   };
-  if (!(monto > 0)) { aviso('⚠ No se tomó el cobro: faltaba el monto. Cobralo desde Cuenta corriente.', true); limpiar(); return; }
-  if (forma !== 'cheque' && !cta) {
-    aviso('⚠ No se tomó el cobro: faltaba la cuenta. Cobralo desde Cuenta corriente.', true); limpiar(); return;
+  // Cada medio, con lo que el backend necesita. El cheque no lleva cuenta: entra a
+  // la cartera y el banco recibe recién cuando se deposita.
+  var medios = [], suma = 0, falla = null;
+  SG_FD_MEDIOS.forEach(function(m){
+    var monto = paRound2Fm(liqNum({ value: m.monto }) || 0);
+    if (!(monto > 0)) return;
+    suma = paRound2Fm(suma + monto);
+    if (m.forma === 'cheque') {
+      if (!String(m.ref || '').trim() || !String(m.librador || '').trim()) {
+        falla = 'de un cheque hay que anotar el número y quién lo firma';
+        return;
+      }
+      medios.push({ forma_pago: 'cheque', monto: monto, referencia: m.ref || null,
+        cheque: { nro_cheque: m.ref, librador: m.librador } });
+    } else {
+      if (!m.cuenta) { falla = 'falta elegir la ' + (m.forma === 'efectivo' ? 'caja' : 'cuenta'); return; }
+      medios.push({ forma_pago: m.forma, monto: monto, cuenta_fin_id: Number(m.cuenta),
+        referencia: m.ref || null });
+    }
+  });
+  if (falla || !medios.length) {
+    aviso('⚠ El comprobante salió bien, pero no se tomó el cobro: '
+      + escH(falla || 'faltaba el monto') + '. Tomalo desde Cuenta corriente de clientes.', true);
+    limpiar(); return;
   }
   api('/api/sg/ventas/cobranzas', 'POST', {
-    cliente_id: Number(eid('sgfd-cli').value), monto: monto, forma_pago: forma,
-    cuenta_fin_id: cta ? Number(cta) : null,
-    referencia: (eid('sgfd-cobro-ref') || {}).value || null,
+    cliente_id: Number(eid('sgfd-cli').value), monto: suma, medios: medios,
     notas: 'Venta de ventanilla',
     // Se imputa AL COMPROBANTE que se acaba de emitir: si no, la plata queda "a
     // cuenta" y el comprobante figura impago al lado de una cobranza suelta.
-    docs: [{ tipo: 'factura', doc_id: r.factura_id, monto: monto }],
+    docs: [{ tipo: 'factura', doc_id: r.factura_id, monto: suma }],
   }).then(function(rc){
     if (rc && rc.ok) {
-      aviso('✓ Cobrado ' + sgMoney2(monto) + ' por ' + escH(forma)
-        + (forma === 'cheque' ? ' — el cheque queda en cartera' : ''));
+      aviso('✓ Cobrado ' + sgMoney2(suma) + ' en ' + medios.length + ' medio' + (medios.length === 1 ? '' : 's')
+        + (medios.some(function(m){ return m.forma_pago === 'cheque'; }) ? ' — el cheque queda en cartera' : '')
+        + (rc.a_cuenta > 0.01 ? ' · ' + sgMoney2(rc.a_cuenta) + ' quedaron a cuenta' : ''));
     } else {
       aviso('⚠ El comprobante salió bien, pero el cobro no se registró: '
         + escH((rc && rc.error) || 'error') + '. Tomalo desde Cuenta corriente de clientes.', true);
@@ -15579,7 +15670,13 @@ function sgFdEmitir(){
   }
   if(!items.length){ toast('Cargá al menos una partida con cajones','er'); return; }
   var btn=eid('sgfd-emitir-btn'); btn.disabled=true; var prev=btn.textContent; btn.textContent='Emitiendo…';
+  // El documento del comprador, si la venta lo pide (supera el umbral y va a
+  // consumidor final). El backend vuelve a decidir si hace falta: acá sólo se manda.
+  var idt = eid('sgfd-idtipo'), idn = eid('sgfd-idnro');
+  var identif = (idt && idn && String(idn.value || '').trim())
+    ? { tipo: idt.value, numero: String(idn.value).trim() } : null;
   api('/api/sg/facturas/directa','POST',{ cliente_id:Number(cid), punto_venta:Number(pv),
+    identificacion: identif,
     precio_incluye_iva:!!(eid('sgfd-incluye-iva')&&eid('sgfd-incluye-iva').checked),
     // Por defecto NO: viaja la factura. Ver el comentario del checkbox.
     emitir_remito:!!(eid('sgfd-emitir-remito')&&eid('sgfd-emitir-remito').checked),

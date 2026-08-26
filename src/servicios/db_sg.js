@@ -2123,6 +2123,18 @@ db.exec(`
     modificado_por INTEGER
   );
   INSERT OR IGNORE INTO sg_config (clave, valor) VALUES ('fecha_corte', '2026-06-30');
+  -- ══ EL UMBRAL PARA IDENTIFICAR AL CONSUMIDOR FINAL ═══════════════════
+  -- RG 5700/2025 de ARCA, art. 1° inc. d): desde $10.000.000 hay que identificar al
+  -- comprador que reviste el carácter de consumidor final, con CUIT, CUIL, CDI o
+  -- DNI. Rige desde el 29/5/2025. Por debajo, la factura sale "A CONSUMIDOR FINAL"
+  -- sin ningún dato del comprador.
+  --
+  -- VA EN CONFIGURACIÓN Y NO EN EL CÓDIGO porque este número se mueve: pasó de
+  -- $208.644 a $10.000.000 en una sola resolución, y esa misma resolución eliminó la
+  -- distinción entre pago electrónico y otros medios que había antes. Escrito
+  -- adentro, el día que ARCA lo cambie el sistema sigue con el viejo y nadie se
+  -- entera — que es exactamente la forma de los bugs que se arreglaron el 25/8.
+  INSERT OR IGNORE INTO sg_config (clave, valor) VALUES ('umbral_identificar_cf', '10000000');
 `);
 
 // ── PARÁMETROS DE IMPORTACIÓN ───────────────────────────────────────────────────────
