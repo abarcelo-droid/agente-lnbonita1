@@ -9,6 +9,7 @@
 import express from 'express';
 import db from '../servicios/db_sg_finanzas.js';
 import { crearAsiento, MOTIVOS } from '../servicios/asientos.js';
+import { repartirAmbito, partesDeMedio } from '../servicios/sg_cobro_ambito.js';
 // EL ASIENTO DE VENTA VIVE EN UN SOLO LUGAR. Estaba acá adentro y el otro
 // camino que emite facturas —la facturación directa, por afip-wsfe-emision—
 // no lo usaba: esas ventas salían sin asiento.
@@ -1689,6 +1690,10 @@ router.post('/cobranzas', requireAuth, (req, res) => {
   let ctaCartera = null;
   for (const m of mediosRaw) {
     const forma = String(m.forma_pago || 'transferencia');
+    // CONTRA QUÉ MITAD VA ESTE MEDIO. Vacío = «lo que toque», que es el reparto
+    // proporcional de siempre: así el que no lo declara —la venta de ventanilla, el
+    // payload viejo— sigue funcionando igual.
+    const ambM = ['fiscal', 'gestion'].includes(String(m.ambito || '')) ? String(m.ambito) : null;
     const monto = (mediosRaw.length === 1 && !(Math.round(parseFloat(m.monto || 0) * 100) / 100 > 0))
       ? total : Math.round(parseFloat(m.monto || 0) * 100) / 100;
     if (!(monto > 0)) return res.status(400).json({ ok: false, error: 'Cada medio de cobro necesita un monto' });
@@ -1726,7 +1731,7 @@ router.post('/cobranzas', requireAuth, (req, res) => {
           error: `Ese cheque ya está${ya ? ' en la cartera' : ' en esta misma cobranza'}: `
                + `N° ${nro} de ${librador}${ya ? ` por ${ya.monto} (${ya.estado})` : ''}.` });
       }
-      medios.push({ forma, monto, cuenta: null, referencia: m.referencia || referencia || null,
+      medios.push({ forma, monto, ambito: ambM, cuenta: null, referencia: m.referencia || referencia || null,
         cheque: { banco, nro, librador, fecha_vto: ch.fecha_vto || null,
           cuit: String(ch.cuit_librador || '').replace(/[^0-9]/g, '') || null } });
       continue;
@@ -1749,7 +1754,7 @@ router.post('/cobranzas', requireAuth, (req, res) => {
         error: `La cuenta "${cuenta.nombre}" no tiene cuenta contable asociada, así que la cobranza no `
              + `puede entrar al libro. Asignásela en Caja y Bancos.` });
     }
-    medios.push({ forma, monto, cuenta, referencia: m.referencia || referencia || null, cheque: null });
+    medios.push({ forma, monto, ambito: ambM, cuenta, referencia: m.referencia || referencia || null, cheque: null });
   }
   // LOS MEDIOS TIENEN QUE DAR EL TOTAL. Si no, la diferencia se la come el asiento y
   // el arqueo de la caja deja de dar. Es el mismo control que el pago a proveedores.
@@ -1841,16 +1846,21 @@ router.post('/cobranzas', requireAuth, (req, res) => {
       // criterio que usa el reparto del neto de una factura entre varias partidas.
       const r2c2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
       const lineasCob = [];
-      let gesRepartido = 0;
+
+      // ── LO QUE CADA MEDIO DECLARÓ MANDA; EL RESTO SE PRORRATEA ──────
+      //
+      // Un medio que dice «gestión» cancela SÓLO la parte sin comprobante, y uno que
+      // dice «fiscal» sólo lo facturado. Los que no dicen nada se reparten lo que
+      // quedó, en proporción, como se hacía antes con todos — así la venta de
+      // ventanilla y el payload viejo, que no lo declaran, siguen funcionando igual.
+      //
+      // La cuenta vive en servicios/sg_cobro_ambito.js: es aritmética de plata, y un
+      // centavo perdido en el reparto es un asiento que no balancea. Ahí se prueba
+      // corriéndola. Si lo declarado no entra, tira ACÁ, antes de escribir nada.
+      const gesPorMedio = repartirAmbito(medios, ges, total);
       medios.forEach((m, ix) => {
-        const gesM = (ix === medios.length - 1)
-          ? r2c2(ges - gesRepartido)
-          : r2c2(ges * (m.monto / total));
-        gesRepartido = r2c2(gesRepartido + gesM);
-        const partesM = [
-          { ambito: 'fiscal', monto: r2c2(m.monto - gesM), motivo: null },
-          { ambito: 'gestion', monto: gesM, motivo: motivoGes },
-        ].filter((x) => x.monto > 0.001);
+        const gesM = gesPorMedio[ix];
+        const partesM = partesDeMedio(m.monto, gesM, motivoGes);
         m._partes = partesM;
         for (const x of partesM) {
           lineasCob.push({ cuenta_id: m.cheque ? ctaCartera : m.cuenta.cta, debe: x.monto, haber: 0,
