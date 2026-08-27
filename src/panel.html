@@ -4363,6 +4363,11 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
       <div style="font-size:11.5px;color:var(--mut);margin-top:6px">
         Queda registrado tu usuario, la fecha y qué decía cada campo antes.
       </div>
+      <!-- EL CERROJO NO ES UNA PARED. Si la partida ya está documentada, acá se
+           dice CUÁL comprobante la traba y se ofrece anularlo sin salir del modal.
+           La regla no cambia —hay que anular primero— pero el camino se ve. -->
+      <div id="sg-loteed-firme" style="display:none;margin-top:12px;padding:12px 14px;
+           border-radius:10px;border:1px solid #fecaca;background:#fef2f2"></div>
       <div style="display:flex;justify-content:space-between;gap:10px;margin-top:14px">
         <button class="btn bo" onclick="closeMB('sg-loteed-modal')">Cancelar</button>
         <button class="btn bb" onclick="sgLoteEditarGuardar()">Guardar corrección</button>
@@ -15046,6 +15051,7 @@ function sgLoteEditarOpen(loteId){
   });
   var nota = eid('sg-loteed-precio-nota'); if (nota) nota.style.display = admin ? 'none' : '';
   eid('sg-loteed-motivo').value = '';
+  sgLoteFirmeCartel(null, null);   // el cartel de la partida anterior no puede quedar
   sgLoteEdEq();
   sgModalArriba('sg-loteed-modal');
 }
@@ -15099,6 +15105,71 @@ function sgLoteEdPrecioKg(){
     : String(v);
 }
 
+// ── CUANDO EL PRECIO ESTÁ FIRME ──────────────────────────────────────────
+//
+// Pablo, 27/8/2026: «el mensaje está OK, pero debe permitirme corregir el precio».
+// La regla que él mismo puso el 26/8 sigue en pie —para cambiarlo hay que anular
+// el comprobante primero, porque si no el papel del productor dice una cosa y el
+// sistema otra— pero el cartel deja de ser el final del camino: dice qué
+// comprobante traba y ofrece anularlo acá mismo.
+function sgLoteFirmeCartel(error, firme){
+  var c = eid('sg-loteed-firme'); if (!c) return;
+  if (!firme) { c.style.display = 'none'; c.innerHTML = ''; SG.loteFirme = null; return; }
+  var quien = firme.como === 'factura'
+      ? 'la factura de compra ' + (firme.numero || ('#' + firme.id))
+    : firme.como === 'liquidacion'
+      ? 'la liquidación ' + (firme.numero || ('#' + firme.id))
+      : 'una marca de «ya liquidada»' + (firme.fecha ? ' del ' + String(firme.fecha).slice(0,10) : '');
+  var h = '<div style="font-weight:700;font-size:13px;color:#991b1b">'
+        + '⚠ El precio de esta partida está FIRME</div>'
+        + '<div style="font-size:12px;color:#991b1b;margin:6px 0 4px">Lo traba <b>' + escH(quien) + '</b>.</div>';
+  if (firme.como === 'marca') {
+    // La marca no es un comprobante: la puso un admin a mano y se saca desde la
+    // bandeja de partidas. No hay nada que anular acá.
+    h += '<div style="font-size:11.5px;color:#991b1b">Si esa marca está mal, sacala desde '
+       + 'Liquidaciones → Partidas pendientes, y volvé.</div>';
+  } else if (!lnbPuedeAnular(['sg-compras', 'sg-ordenes', 'ab-liquidaciones'])) {
+    h += '<div style="font-size:11.5px;color:#991b1b">Para cambiar el precio hay que anularlo '
+       + 'primero, y tu usuario no puede anular. Pedíselo a un administrador.</div>';
+  } else {
+    h += '<div style="font-size:11.5px;color:#991b1b;margin-bottom:8px">'
+       + 'Para cambiar el precio hay que anularlo primero. Se revierte su asiento y la deuda '
+       + 'con el productor vuelve atrás. Queda registrado quién, cuándo y por qué.</div>'
+       + '<button class="btn" style="background:#b91c1c;color:#fff" '
+       + 'onclick="sgLoteFirmeAnular()">Anular y corregir el precio</button>';
+  }
+  c.innerHTML = h;
+  c.style.display = '';
+  SG.loteFirme = firme;
+}
+
+// Anula el comprobante que traba y vuelve a intentar la corrección. Son puertas
+// distintas según qué lo documente, y el motivo es obligatorio en las dos que
+// existen: anular sin rastro es exactamente lo que el repo viene evitando.
+function sgLoteFirmeAnular(){
+  var f = SG.loteFirme; if (!f) return;
+  var quien = (f.como === 'factura' ? 'la factura ' : 'la liquidación ') + (f.numero || ('#' + f.id));
+  var motivo = prompt('Vas a ANULAR ' + quien + ' para poder corregir el precio.'
+    + String.fromCharCode(10,10)
+    + 'Se revierte su asiento y la deuda con el productor vuelve atrás.'
+    + String.fromCharCode(10,10) + 'Por qué se anula:', '');
+  if (motivo === null) return;
+  if (String(motivo).trim().length < 3) { toast('Poné por qué se anula','er'); return; }
+  var url = (f.como === 'factura')
+    ? '/api/sg/facturas-compra/' + f.id + '/anular'
+    : '/api/liquidaciones/' + f.id + '/anular';
+  api(url, 'POST', { motivo: String(motivo).trim() }).then(function(r){
+    if (!r || (r.ok === false) || r.error) {
+      toast((r && r.error) || 'No se pudo anular', 'er'); return;
+    }
+    toast('Anulado — ahora sí se puede corregir el precio', 'ok');
+    sgLoteFirmeCartel(null, null);
+    // Y se guarda la corrección que ya estaba escrita: el que llegó hasta acá
+    // tiene el trabajo hecho y no tiene por qué volver a tipearlo.
+    sgLoteEditarGuardar();
+  });
+}
+
 function sgLoteEditarGuardar(){
   var l = SG.loteEdit; if (!l) return;
   var motivo = String((eid('sg-loteed-motivo') || {}).value || '').trim();
@@ -15109,7 +15180,12 @@ function sgLoteEditarGuardar(){
     kg_reales: v('sg-loteed-kg'), bultos: v('sg-loteed-bultos'),
     calidad: v('sg-loteed-calidad'), precio_unitario_kg: sgLoteEdPrecioKg(),
   }).then(function(r){
-    if (!r || !r.ok) { toast((r && r.error) || 'No se pudo corregir', 'er'); return; }
+    if (!r || !r.ok) {
+      // Si lo que traba es el precio firme, el cartel ofrece el camino en vez de
+      // un toast que se va solo y deja al operador sin saber qué hacer.
+      if (r && r.firme) { sgLoteFirmeCartel(r.error, r.firme); return; }
+      toast((r && r.error) || 'No se pudo corregir', 'er'); return;
+    }
     toast('Corregido — queda registrado quién y qué cambió', 'ok');
     closeMB('sg-loteed-modal');
     // La ficha se vuelve a abrir para que se vean los números nuevos.

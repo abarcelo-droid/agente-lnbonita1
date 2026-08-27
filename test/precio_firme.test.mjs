@@ -114,11 +114,17 @@ test('la respuesta es UNA, no una consulta copiada en cada endpoint', () => {
   // Estaba escrita a mano en tres lugares de sg.js, con criterios distintos entre sí
   // y ninguno miraba la liquidación. Una cuarta copia garantizaba que el día que
   // cambiara el criterio, alguna quedara vieja.
-  assert.match(SG, /import \{ frenoPrecioFirme \} from '\.\.\/servicios\/sg_perfeccionada\.js'/);
-  // Las cuatro puertas por las que se puede cambiar un precio: corregir un lote,
+  assert.match(SG, /import \{ frenoPrecioFirme, precioFirmeDetalle \} from '\.\.\/servicios\/sg_perfeccionada\.js'/);
+  // Las cinco puertas por las que se puede cambiar un precio: corregir un lote,
   // completar una orden retroactiva, cerrarle el precio a una de pizarra, y el
   // endpoint que edita los precios de la orden.
-  const usos = (SG.match(/frenoPrecioFirme\(db,/g) || []).length;
+  //
+  // Corregir el lote usa precioFirmeDetalle, que es la MISMA respuesta con los
+  // datos del comprobante puestos: la pantalla los necesita para ofrecer el botón
+  // de anular. Sigue siendo una sola fuente — las dos salen de
+  // perfeccionamientoDeOC(), no de una consulta escrita de nuevo.
+  const usos = (SG.match(/frenoPrecioFirme\(db,/g) || []).length
+             + (SG.match(/precioFirmeDetalle\(db,/g) || []).length;
   assert.equal(usos, 5, 'todas las puertas usan la misma función');
   // Y no volvieron las copias que había, cada una con su propio mensaje: son la
   // huella de que alguien volvió a escribir la pregunta en vez de preguntarla.
@@ -130,7 +136,29 @@ test('corregir un lote de una partida documentada se frena', () => {
   const i = SG.indexOf('function frenosDeEdicionLote(');
   assert.ok(i > 0);
   const cuerpo = SG.slice(i, i + 1600);
-  assert.match(cuerpo, /frenoPrecioFirme\(db, l\.oc_id, 'corregir los kilos o el precio'\)/);
+  assert.match(cuerpo, /precioFirmeDetalle\(db, l\.oc_id, 'corregir los kilos o el precio'\)/);
+  // Y devuelve QUIÉN traba, no sólo el texto: sin eso la pantalla no puede ofrecer
+  // el camino y el cerrojo vuelve a ser una pared.
+  assert.match(cuerpo, /return \{ error: det\.error, firme: det\.firme \}/);
+});
+
+test('el cerrojo dice a dónde ir, y la regla no se afloja', () => {
+  // Pablo, 27/8/2026: «el mensaje está OK, pero debe permitirme corregir el precio».
+  // La regla del 26/8 sigue entera —hay que anular el comprobante primero— pero el
+  // cartel deja de ser el final del camino: dice cuál lo traba y ofrece anularlo.
+  assert.match(SG, /firme: chk\.firme \|\| null/);
+  assert.match(PANEL, /function sgLoteFirmeCartel\(error, firme\)\{/);
+  assert.match(PANEL, /function sgLoteFirmeAnular\(\)\{/);
+  assert.match(PANEL, /Anular y corregir el precio/);
+  // Las dos puertas de anulación, cada una a la suya.
+  assert.match(PANEL, /'\/api\/sg\/facturas-compra\/' \+ f\.id \+ '\/anular'/);
+  assert.match(PANEL, /'\/api\/liquidaciones\/' \+ f\.id \+ '\/anular'/);
+  // El motivo sigue siendo obligatorio: anular sin rastro es lo que esto evita.
+  assert.match(PANEL, /Poné por qué se anula/);
+  // La marca a mano no es un comprobante: no hay nada que anular ahí.
+  assert.match(PANEL, /firme\.como === 'marca'/);
+  // Y el cartel de la partida anterior no puede quedar pegado.
+  assert.match(PANEL, /sgLoteFirmeCartel\(null, null\);\s*\/\/ el cartel de la partida anterior/);
 });
 
 test('repreciar una orden retroactiva ya documentada se frena', () => {

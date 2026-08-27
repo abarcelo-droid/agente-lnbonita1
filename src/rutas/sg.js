@@ -16,7 +16,7 @@ import { facturaCuenta, deudaFactura, deudaGestionFactura, noEsNotaDeCredito, si
   from '../servicios/factura-cuenta.js';
 import { acordadoDeOC, precioUnicoDeOC } from '../servicios/sg_acordado.js';
 // Una partida documentada con factura o liquidación tiene el precio FIRME.
-import { frenoPrecioFirme } from '../servicios/sg_perfeccionada.js';
+import { frenoPrecioFirme, precioFirmeDetalle } from '../servicios/sg_perfeccionada.js';
 import { estadoRescate, restaurar as restaurarRescate }
   from '../servicios/sg_rescate_embarques.js';
 // La foto de lo que quedó guardado con la venta de gestión vieja. Sólo lee.
@@ -4459,7 +4459,11 @@ function frenosDeEdicionLote(db, loteId) {
     // LIQUIDACIÓN también perfecciona, y una factura CARGADA ya alcanza —si está
     // cargada, el asiento se tiene que haber disparado—. Con lo de antes, una
     // partida ya liquidada se podía corregir sin que nadie chistara.
-    const freno = frenoPrecioFirme(db, l.oc_id, 'corregir los kilos o el precio');
+    // El detalle, no sólo el texto: la pantalla necesita saber QUÉ comprobante
+    // traba para poder ofrecer anularlo sin salir del modal.
+    const det = precioFirmeDetalle(db, l.oc_id, 'corregir los kilos o el precio');
+    if (det) return { error: det.error, firme: det.firme };
+    const freno = null;
     if (freno) return { error: freno };
   }
   const desp = db.prepare(`SELECT COALESCE(SUM(di.kg_despachados),0) s FROM sg_despacho_items di
@@ -4527,7 +4531,10 @@ router.delete('/lotes/:id', requireAuth, (req, res) => {
     const motivo = val(req.body && req.body.motivo);
     if (!motivo) return res.status(400).json({ ok: false, error: 'Escribí por qué se elimina: queda registrado' });
     const chk = frenosDeEdicionLote(db, req.params.id);
-    if (chk.error) return res.status(400).json({ ok: false, error: chk.error });
+    // `firme` viaja para que el cartel pueda ofrecer el camino: cuál comprobante
+    // lo traba y el botón para anularlo. Un cerrojo que no dice a dónde ir deja al
+    // operador con el trabajo hecho y sin poder guardarlo.
+    if (chk.error) return res.status(400).json({ ok: false, error: chk.error, firme: chk.firme || null });
 
     const l = db.prepare('SELECT * FROM sg_lotes WHERE id=?').get(req.params.id);
     // Una reserva contra este lote es mercadería comprometida con un cliente: si
@@ -4628,7 +4635,10 @@ router.put('/lotes/:id/corregir', requireAuth, (req, res) => {
     if (!motivo) return res.status(400).json({ ok: false, error: 'Escribí por qué se corrige: queda registrado' });
 
     const chk = frenosDeEdicionLote(db, req.params.id);
-    if (chk.error) return res.status(400).json({ ok: false, error: chk.error });
+    // `firme` viaja para que el cartel pueda ofrecer el camino: cuál comprobante
+    // lo traba y el botón para anularlo. Un cerrojo que no dice a dónde ir deja al
+    // operador con el trabajo hecho y sin poder guardarlo.
+    if (chk.error) return res.status(400).json({ ok: false, error: chk.error, firme: chk.firme || null });
 
     const prev = db.prepare('SELECT * FROM sg_lotes WHERE id=?').get(req.params.id);
     // El factor de la partida: con él, corregir el conteo alcanza para que los
