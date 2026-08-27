@@ -6160,12 +6160,26 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
           <div id="sgfe-fletero-ayuda" style="font-size:11px;color:var(--mut);margin-top:3px"></div></div>
         <div class="fl"><label>Lo que dice la factura</label>
           <input type="text" inputmode="decimal" id="sgfe-monto" placeholder="$ 0"
-                 style="text-align:right" oninput="this.value=sgMilFmtLive(this.value);sgFeDif()"></div>
+                 style="text-align:right" oninput="this.value=sgMilFmtLive(this.value);sgFeDif();sgFeAsiento()"></div>
         <div class="fl"><label>Fecha</label><input type="date" id="sgfe-fecha"></div>
         <div class="fl"><label>N° de comprobante</label><input id="sgfe-ref"></div>
+        <!-- EL FLETE ES UN SERVICIO: lleva IVA a la alícuota general. Se carga el
+             TOTAL —que es lo que dice el papel y lo que entra al costo— y el neto
+             se despeja solo. Si la factura trae otra alícuota, se cambia acá. -->
+        <div class="fl"><label>Alícuota de IVA</label>
+          <select id="sgfe-alic" onchange="sgFeAsiento()">
+            <option value="21">21%</option>
+            <option value="10.5">10,5%</option>
+            <option value="27">27%</option>
+            <option value="0">Sin IVA / exento</option>
+          </select></div>
       </div>
       <div id="sgfe-dif" style="font-size:12.5px;margin-top:8px"></div>
+      <div id="sgfe-desglose" style="font-size:12px;color:var(--mut);margin-top:4px"></div>
       <div class="fl ff" style="margin-top:8px"><label>Observaciones</label><input id="sgfe-obs"></div>
+      <!-- TODA OPERACIÓN QUE ASIENTA MUESTRA EL ASIENTO. Es el único momento en
+           que se puede frenar: después ya está hecho. -->
+      <div id="sgfe-asiento" style="margin-top:10px"></div>
     </div>
     <div class="ab-modal-footer">
       <button class="btn bo" onclick="closeMB('sgfe-modal')">Cancelar</button>
@@ -18598,8 +18612,51 @@ function sgFeOpen(recId){
   if (f) f.value = x.fecha_valorizacion || new Date().toISOString().slice(0, 10);
   var ref = eid('sgfe-ref'); if (ref) ref.value = x.cuenta_ref || '';
   var obs = eid('sgfe-obs'); if (obs) obs.value = '';
+  var al = eid('sgfe-alic');
+  if (al) al.value = (x.iva_alicuota != null && x.iva_alicuota !== '') ? String(x.iva_alicuota) : '21';
   sgFeDif();
+  sgFeAsiento();
   sgModalArriba('sgfe-modal');
+}
+
+// ── EL ASIENTO DE LA FACTURA DEL FLETERO ─────────────────────────────────
+//
+// Pablo, 27/8/2026: «deberíamos poder cargar y contabilizar la factura de los
+// fleteros ahí mismo». El flete entraba al COSTO del lote y nada más: no había
+// asiento ni deuda con el fletero.
+//
+// El cuadro lo arma el BACKEND y esta pantalla sólo lo dibuja. Es a propósito: si
+// el front rehiciera la cuenta, tarde o temprano mostraría un asiento distinto del
+// que se graba, y el cuadro dejaría de servir para frenar nada.
+function sgFeAsiento(){
+  var c = eid('sgfe-asiento'); if (!c) return;
+  var total = sgMilParse((eid('sgfe-monto') || {}).value) || 0;
+  var des = eid('sgfe-desglose');
+  if (!(total > 0)) { c.innerHTML = ''; if (des) des.innerHTML = ''; return; }
+  api('/api/sg/fletes-entrada/asiento-preview', 'POST', {
+    monto: total, iva_alicuota: (eid('sgfe-alic') || {}).value,
+  }).then(function(r){
+    if (!r || !r.ok) { c.innerHTML = ''; return; }
+    var d = r.data, m = d.montos || {};
+    if (des) {
+      des.innerHTML = (m.iva_monto > 0)
+        ? 'Neto <b>' + sgMoney2(m.neto) + '</b> + IVA <b>' + sgMoney2(m.iva_monto) + '</b>'
+          + ' = ' + sgMoney2(m.total)
+        : 'Sin IVA discriminado.';
+    }
+    if (d.sin_modelo) {
+      // El flete entra al costo igual: no se traba la operación del día por una
+      // parametrización que hace el contador. Pero hay que decirlo, o queda un
+      // gasto fuera del libro y nadie se entera.
+      c.innerHTML = '<div style="padding:10px 12px;border-radius:8px;border:1px solid #fde68a;'
+        + 'background:#fffbeb;font-size:12px;color:#92400e">'
+        + '<b>No se va a contabilizar.</b> Falta elegir con qué asiento modelo se '
+        + 'contabilizan los fletes (Contabilidad SG → Asientos Modelo). El flete entra '
+        + 'igual al costo de la partida.</div>';
+      return;
+    }
+    c.innerHTML = sgAsientoPlegado(sgAsientoTabla(d.lineas), 'Asiento de este flete');
+  });
 }
 
 // La diferencia contra lo que estimó el comprador. No frena nada —la factura es
@@ -18632,10 +18689,17 @@ function sgFeGuardar(){
     monto: monto, proveedor_servicio_id: Number(fl),
     fecha: (eid('sgfe-fecha') || {}).value,
     cuenta_ref: (eid('sgfe-ref') || {}).value,
+    // La alícuota viaja para que el backend despeje el neto y el IVA. El TOTAL no
+    // se toca nunca: es lo que dice el papel, lo que se le paga al fletero y lo
+    // que entra al costo del lote.
+    iva_alicuota: (eid('sgfe-alic') || {}).value,
     observaciones: (eid('sgfe-obs') || {}).value
   }).then(function(r){
     if (!r || !r.ok) { toast((r && r.error) || 'No se pudo guardar', 'er'); return; }
-    toast('Flete valorizado — ya está en el costo de los lotes', 'ok');
+    // Si no se contabilizó hay que DECIRLO, y no con un toast que se va solo: un
+    // gasto fuera del libro no se descubre hasta que el mayor no cierra.
+    if (r.data && r.data.aviso) { alert(r.data.aviso); }
+    else { toast('Flete valorizado y contabilizado — ya está en el costo de los lotes', 'ok'); }
     closeMB('sgfe-modal');
     sgFeLoad();
   });

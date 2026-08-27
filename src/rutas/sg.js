@@ -3842,8 +3842,15 @@ function armarAsientoFactura(lineas, fac) {
 //
 // Ahora se completan solas: lo que el modelo no cubre lo pone la config global.
 // Si el modelo SÍ tiene la línea, gana el modelo — es más específico.
-function lineasModeloFactura(db) {
-  const cfg = db.prepare('SELECT valor FROM sg_config WHERE clave=?').get(CLAVE_MODELO_FACT);
+// ── EL MISMO ARMADOR, PARA CUALQUIER MODELO PARAMETRIZADO ────────────────
+// La factura de mercadería y la del fletero se asientan igual: un gasto contra
+// proveedores, con el IVA y las percepciones saliendo de la config global. Lo
+// único que cambia es CUÁL modelo. Copiar la función para el flete habría dejado
+// dos versiones de la misma regla, y la del flete se iba a quedar vieja.
+function lineasModeloFactura(db) { return lineasModeloDe(db, CLAVE_MODELO_FACT); }
+
+function lineasModeloDe(db, CLAVE) {
+  const cfg = db.prepare('SELECT valor FROM sg_config WHERE clave=?').get(CLAVE);
   const id = cfg && cfg.valor ? Number(cfg.valor) : null;
   if (!id) return null;
   const m = db.prepare('SELECT id FROM sg_asientos_modelo WHERE id=? AND activo=1').get(id);
@@ -8524,6 +8531,106 @@ router.get('/fletes-entrada', requireAuth, (req, res) => {
 // PISAR el estimado del comprador con lo que dice la factura del fletero.
 // El monto que se guarda acá es el que entra al costo del lote — el de la orden
 // nunca entró, y ése es justamente el agujero que esto tapa.
+// ══ CONTABILIZAR LA FACTURA DEL FLETERO ════════════════════════════════════
+//
+// Pablo, 27/8/2026: «deberíamos poder cargar y contabilizar la factura de los
+// fleteros ahí mismo. Armemos para que haga el asiento contable».
+//
+// Hasta acá el flete entraba al COSTO del lote y nada más: no generaba asiento ni
+// deuda con el fletero. Son dos libros distintos y los dos tienen que estar — el
+// costeo dice cuánto salió la mercadería; el asiento dice que se compró un
+// servicio, que hay IVA crédito fiscal y que a alguien se le debe plata.
+//
+// Se contabiliza con un ASIENTO MODELO parametrizado, igual que la factura de
+// mercadería: se elige UNA vez para el módulo y no factura por factura, para que
+// dos fletes iguales no entren con asientos distintos según quién los cargó.
+const CLAVE_MODELO_FLETE = 'asiento_modelo_flete';
+
+router.get('/flete/modelo', requireAuth, (req, res) => {
+  const db = getDb();
+  try {
+    const cfg = db.prepare('SELECT valor FROM sg_config WHERE clave=?').get(CLAVE_MODELO_FLETE);
+    const modeloId = cfg && cfg.valor ? Number(cfg.valor) : null;
+    if (!modeloId) return res.json({ ok: true, data: { modelo: null } });
+    const m = db.prepare('SELECT * FROM sg_asientos_modelo WHERE id=? AND activo=1').get(modeloId);
+    if (!m) return res.json({ ok: true, data: { modelo: null, id_perdido: modeloId } });
+    m.lineas = lineasModeloDe(db, CLAVE_MODELO_FLETE) || [];
+    // Qué le falta para poder contabilizar. Se avisa acá y no cuando ya está la
+    // factura cargada y el operador esperando.
+    const faltan = [];
+    if (!m.lineas.length) faltan.push('no tiene ninguna línea');
+    if (!m.lineas.some((l) => l.tipo_linea === 'proveedores')) {
+      faltan.push('no tiene la línea de Proveedores, que es lo que se le debe al fletero');
+    }
+    if (!m.lineas.some((l) => l.lado === 'debe')) faltan.push('no tiene ninguna línea en el debe');
+    const sinCuenta = m.lineas.filter((l) => !l.cuenta_codigo).length;
+    if (sinCuenta) faltan.push(sinCuenta + ' línea(s) apuntan a una cuenta que ya no existe');
+    res.json({ ok: true, data: { modelo: m, faltan } });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+router.put('/flete/modelo', requireAdmin, (req, res) => {
+  const db = getDb();
+  try {
+    const modeloId = req.body && req.body.modelo_id ? Number(req.body.modelo_id) : null;
+    if (modeloId) {
+      const m = db.prepare('SELECT id FROM sg_asientos_modelo WHERE id=? AND activo=1').get(modeloId);
+      if (!m) return res.status(400).json({ ok: false, error: 'Ese asiento modelo no existe o está dado de baja' });
+    }
+    db.prepare(`INSERT INTO sg_config (clave, valor, modificado_en, modificado_por)
+      VALUES (?,?,datetime('now','localtime'),?)
+      ON CONFLICT(clave) DO UPDATE SET valor=excluded.valor,
+        modificado_en=excluded.modificado_en, modificado_por=excluded.modificado_por`)
+      .run(CLAVE_MODELO_FLETE, modeloId == null ? null : String(modeloId), uid(req));
+    res.json({ ok: true, data: { modelo_id: modeloId } });
+  } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
+});
+
+// ── EL NETO Y EL IVA DE LA FACTURA DEL FLETERO ────────────────────────────
+// El flete es un servicio: alícuota general (21%). El operador carga el TOTAL —que
+// es lo que dice el papel y lo que entra al costo— y de ahí se despeja el neto,
+// salvo que declare otra cosa. Si carga neto e IVA por separado, mandan esos.
+//
+// El TOTAL no se toca nunca: es lo que dice la factura, es lo que se le paga al
+// fletero y es lo que ya venía entrando al costo del lote.
+function montosDeFlete(b) {
+  const total = r2(b.monto);
+  const alicDeclarada = (b.iva_alicuota == null || b.iva_alicuota === '') ? null : Number(b.iva_alicuota);
+  const netoDeclarado = (b.neto == null || b.neto === '') ? null : r2(b.neto);
+  const ivaDeclarado  = (b.iva_monto == null || b.iva_monto === '') ? null : r2(b.iva_monto);
+  if (netoDeclarado != null && ivaDeclarado != null) {
+    return { total, neto: netoDeclarado, iva_monto: ivaDeclarado,
+             iva_alicuota: netoDeclarado > 0 ? r2(ivaDeclarado / netoDeclarado * 100) : null };
+  }
+  const alic = (alicDeclarada != null && alicDeclarada >= 0) ? alicDeclarada : 21;
+  const neto = r2(total / (1 + alic / 100));
+  return { total, neto, iva_monto: r2(total - neto), iva_alicuota: alic };
+}
+
+// El cuadro del asiento, para que la pantalla lo muestre ANTES de guardar. Es la
+// regla del repo: toda operación que asienta muestra el asiento, y es el único
+// momento en que se puede frenar.
+function asientoDeFlete(db, b) {
+  const lineas = lineasModeloDe(db, CLAVE_MODELO_FLETE);
+  if (!lineas || !lineas.length) {
+    return { sin_modelo: true, lineas: [], debe: 0, haber: 0, diferencia: 0, balancea: false };
+  }
+  const m = montosDeFlete(b);
+  // armarAsientoFactura reparte por TIPO de línea y es el mismo que usa la factura
+  // de mercadería: si las dos no dieran igual, habría dos maneras de asentar una
+  // compra de servicio.
+  return Object.assign(armarAsientoFactura(lineas, {
+    neto: m.neto, iva_monto: m.iva_monto, total: m.total,
+    percepcion_iva: 0, percepcion_ganancias: 0, percepciones_iibb: [],
+  }), { montos: m });
+}
+
+router.post('/fletes-entrada/asiento-preview', requireAuth, express.json(), (req, res) => {
+  const db = getDb();
+  try { res.json({ ok: true, data: asientoDeFlete(db, req.body || {}) }); }
+  catch (e) { res.status(400).json({ ok: false, error: e.message }); }
+});
+
 router.post('/fletes-entrada/:recepcionId/valorizar', requireAdmin, (req, res) => {
   const db = getDb();
   try {
@@ -8545,11 +8652,11 @@ router.post('/fletes-entrada/:recepcionId/valorizar', requireAdmin, (req, res) =
       return res.status(400).json({ ok: false, error: 'Ese fletero no existe' });
     }
 
-    let gastoId = null;
+    let gastoId = null, asientoId = null;
+    let fecha = val(b.fecha) || db.prepare("SELECT date('now','localtime') d").get().d;
     db.transaction(() => {
       const ya = db.prepare(`SELECT * FROM sg_gastos_directos WHERE recepcion_id=?
         AND tipo_gasto='flete_entrada' AND activo=1 AND estado<>'anulado'`).get(rec.id);
-      const fecha = val(b.fecha) || db.prepare("SELECT date('now','localtime') d").get().d;
       if (ya) {
         db.prepare(`UPDATE sg_gastos_directos SET estado='valorizado', monto=?,
           proveedor_servicio_id=?, fecha_valorizacion=?, valorizado_por=?, cuenta_ref=?,
@@ -8564,13 +8671,59 @@ router.post('/fletes-entrada/:recepcionId/valorizar', requireAdmin, (req, res) =
           rec.id, fletero, monto, rec.fecha_recepcion, fecha,
           val(b.cuenta_ref), val(b.observaciones), uid(req), uid(req)).lastInsertRowid;
       }
+      // ── Y SU ASIENTO, EN LA MISMA TRANSACCIÓN ─────────────────────────
+      // La misma regla de oro que la factura de mercadería: no hay factura sin su
+      // asiento. Si se guardaran por separado, el segundo paso podía no correr
+      // nunca y quedaba una deuda con el fletero que existe para él y no existe
+      // para la contabilidad. Eso no se descubre solo.
+      //
+      // `contabilizar` viene en falso mientras no haya modelo parametrizado: es
+      // preferible que el flete entre al costo y se avise que falta el modelo, a
+      // trabar la operación del día por una parametrización que hace el contador.
+      const montos = montosDeFlete(b);
+      db.prepare(`UPDATE sg_gastos_directos SET neto=?, iva_alicuota=?, iva_monto=? WHERE id=?`)
+        .run(montos.neto, montos.iva_alicuota, montos.iva_monto, gastoId);
+      const as = asientoDeFlete(db, b);
+      if (!as.sin_modelo) {
+        const conCuenta = as.lineas.filter((l) => l.monto > 0);
+        if (conCuenta.some((l) => !l.cuenta_id)) {
+          throw new Error('Hay líneas del asiento con importe y sin cuenta. '
+            + 'Revisá el asiento modelo del flete antes de cargar la factura: no se guarda nada.');
+        }
+        if (!as.balancea) {
+          throw new Error('El asiento del flete no balancea (diferencia $' + as.diferencia + '). '
+            + 'Revisá el asiento modelo: no se guarda nada.');
+        }
+        const flNom = (db.prepare('SELECT razon_social r FROM sg_proveedores WHERE id=?').get(fletero) || {}).r;
+        const asId = crearAsiento(db, {
+          fecha, usuario_id: uid(req),
+          descripcion: 'Flete de entrada' + (flNom ? ' — ' + flNom : '')
+            + (val(b.cuenta_ref) ? ' — Comprobante ' + val(b.cuenta_ref) : '')
+            + (rec.trazabilidad ? ' — Partida ' + rec.trazabilidad : ''),
+          ref_codigo: val(b.cuenta_ref) || null,
+        }, conCuenta.map((l) => ({
+          cuenta_id: l.cuenta_id,
+          debe: l.lado === 'debe' ? l.monto : 0,
+          haber: l.lado === 'haber' ? l.monto : 0,
+          descripcion: l.descripcion || null,
+        }))).id;
+        db.prepare('UPDATE sg_gastos_directos SET asiento_id=? WHERE id=?').run(asId, gastoId);
+        asientoId = asId;
+      }
+
       // Y AHORA SÍ ENTRA AL COSTO. Se reparte por kilo entre los lotes de esa
       // recepción, igual que la descarga.
       for (const l of db.prepare('SELECT id FROM sg_lotes WHERE recepcion_id=? AND activo=1').all(rec.id)) {
         recalcCostoLote(db, Number(l.id));
       }
     })();
-    res.json({ ok: true, data: { id: Number(gastoId), recepcion_id: Number(rec.id), monto } });
+    res.json({ ok: true, data: { id: Number(gastoId), recepcion_id: Number(rec.id), monto,
+      asiento_id: asientoId,
+      // Si no hay modelo parametrizado el flete entra al costo igual, pero hay que
+      // decirlo: si no, queda un gasto fuera del libro y nadie se entera.
+      aviso: asientoId ? null
+        : 'El flete entró al costo, pero NO se contabilizó: falta elegir el asiento modelo '
+          + 'del flete (Contabilidad SG → Asientos Modelo).' } });
   } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
 });
 
