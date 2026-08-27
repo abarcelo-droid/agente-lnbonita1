@@ -6782,7 +6782,8 @@ function sgGridApply(entity){
   cols.forEach(function(c){
     var fv = st.filtros[c.k];
     if (fv==null || fv==='') return;
-    if (c.filtro==='texto'){ var q = String(fv).toLowerCase(); rows = rows.filter(function(r){ return String(sgGridVal(c,r)).toLowerCase().indexOf(q) >= 0; }); }
+    // Sin tildes de los dos lados: «melon» tiene que encontrar «Melón».
+    if (c.filtro==='texto'){ var q = sgNorm(fv); rows = rows.filter(function(r){ return sgNorm(sgGridVal(c,r)).indexOf(q) >= 0; }); }
     else if (c.filtro==='enum'){ rows = rows.filter(function(r){ return String(sgGridVal(c,r)) === String(fv); }); }
   });
   if (st.sortK){
@@ -6851,9 +6852,9 @@ function sgCliLabel(c){
   return a||r;
 }
 function sgCliOpts(query, sel, blank){
-  var q=String(query||'').trim().toLowerCase();
+  var q=sgNorm(String(query||'').trim());
   var lista=(SG.cacheCli||[]).map(function(c){
-    var a=String(c.nombre_comercial||'').toLowerCase(), r=String(c.razon_social||'').toLowerCase();
+    var a=sgNorm(c.nombre_comercial), r=sgNorm(c.razon_social);
     var mA=!!q && a.indexOf(q)>=0, mR=!!q && r.indexOf(q)>=0;
     return { c:c, match: !q || mA || mR, rank:(mA?0:(mR?1:2)) };
   }).filter(function(x){ return x.match; });
@@ -6963,11 +6964,10 @@ function sgBuscador(selectId, cfg){
     }
     // CONTIENE, no empieza por: es como lo pidió Pablo. Y por TODOS los campos —
     // alias, razón social, CUIT— porque uno busca por lo que tiene a mano.
-    var q = String(inp.value || '').trim().toLowerCase();
+    var q = sgNorm(String(inp.value || '').trim());
     var cli = todos.filter(function(c){
       if (!q) return true;
-      return cfg.campos(c).some(function(x){
-        return String(x || '').toLowerCase().indexOf(q) >= 0; });
+      return cfg.campos(c).some(function(x){ return sgNorm(x).indexOf(q) >= 0; });
     }).slice(0, 60);
     if (!cli.length) {
       lista.innerHTML = '<div style="padding:10px 12px;color:var(--mut);font-size:12.5px">'
@@ -7009,12 +7009,12 @@ function sgProvLabel(p){
 }
 
 function sgProvOpts(query, sel, blank){
-  var q = String(query || '').trim().toLowerCase();
+  var q = sgNorm(String(query || '').trim());
   var lista = (typeof sgOcProvOpts === 'function' ? sgOcProvOpts() : (SG.cacheProv || []))
     .filter(function(p){
       if (!q) return true;
       return [p.razon_social, p.nombre_comercial, p.cuit].some(function(x){
-        return String(x || '').toLowerCase().indexOf(q) >= 0; });
+        return sgNorm(x).indexOf(q) >= 0; });
     });
   lista.sort(function(x, y){ return sgProvLabel(x).localeCompare(sgProvLabel(y), 'es'); });
   return '<option value="">' + (blank || '— Elegir —') + '</option>'
@@ -8048,8 +8048,8 @@ function sgRecListPintar(){
   var q = String((eid('sg-rec-q')||{}).value || '').toLowerCase().trim();
   var filas = SG_RECLIST.filter(function(x){
     if (!q) return true;
-    return ((x.partida||'') + ' ' + (x.proveedor_nombre||'') + ' ' + (x.productos||'')
-      + ' ' + (x.numero_remito_proveedor||'')).toLowerCase().indexOf(q) >= 0;
+    return sgNorm((x.partida||'') + ' ' + (x.proveedor_nombre||'') + ' ' + (x.productos||'')
+      + ' ' + (x.numero_remito_proveedor||'')).indexOf(q) >= 0;
   });
   var tb = eid('sg-tb-reclist'); if (!tb) return;
   tb.innerHTML = filas.length ? filas.map(function(x){
@@ -9751,11 +9751,11 @@ var SG_CT_EST = {
 };
 
 function sgCbTercerosPintar(){
-  var q = ((eid('cb-ct-q') || {}).value || '').toLowerCase().trim();
+  var q = sgNorm(((eid('cb-ct-q') || {}).value || '').trim());
   var lista = SG_CB.terceros.filter(function(c){
     if (!q) return true;
-    return ((c.cliente_nombre || '') + ' ' + (c.librador || '') + ' ' + (c.banco || '')
-      + ' ' + (c.nro_cheque || '')).toLowerCase().indexOf(q) >= 0;
+    return sgNorm((c.cliente_nombre || '') + ' ' + (c.librador || '') + ' ' + (c.banco || '')
+      + ' ' + (c.nro_cheque || '')).indexOf(q) >= 0;
   });
 
   var cartera = SG_CB.terceros.filter(function(c){ return c.estado === 'en_cartera'; });
@@ -9980,11 +9980,11 @@ function sgCbCtGuardar(){
 // Un cheque rechazado está en el aire: ya no lo tiene el banco ni el proveedor,
 // y todavía no volvió a ser deuda del cliente. Esta pantalla es para cerrar eso.
 function sgCbRechazadosPintar(){
-  var q = ((eid('cb-ct-q') || {}).value || '').toLowerCase().trim();
+  var q = sgNorm(((eid('cb-ct-q') || {}).value || '').trim());
   var lista = SG_CB.terceros.filter(function(c){
     if (!q) return true;
-    return ((c.cliente_nombre || '') + ' ' + (c.librador || '') + ' ' + (c.banco || '')
-      + ' ' + (c.nro_cheque || '')).toLowerCase().indexOf(q) >= 0;
+    return sgNorm((c.cliente_nombre || '') + ' ' + (c.librador || '') + ' ' + (c.banco || '')
+      + ' ' + (c.nro_cheque || '')).indexOf(q) >= 0;
   });
   var tot = lista.reduce(function(a, c){ return a + (c.monto || 0); }, 0);
   var cards = eid('cb-cards');
@@ -11214,12 +11214,12 @@ function sgOcEnvasesStr(p){
 function sgOcBuscar(i, q){
   SG.ocItems[i].q = q; SG.ocItems[i].producto_id = '';   // tipear invalida la selección previa
   var res = eid('sg-oc-res-'+i); if(!res) return;
-  var ql = String(q||'').trim().toLowerCase();
+  var ql = sgNorm(String(q||'').trim());
   if(ql===''){ res.style.display='none'; res.innerHTML=''; sgOcTotales(); return; }
   var terms = ql.split(/\s+/);
   var matches = sgOcProductos().filter(function(p){
     // Post-F1 el envase se elige aparte → el typeahead filtra solo por especie/variedad/código.
-    var hay = sgOcProdLabel(p).toLowerCase();
+    var hay = sgNorm(sgOcProdLabel(p));
     return terms.every(function(t){ return hay.indexOf(t) >= 0; });
   }).slice(0, 40);
   res.innerHTML = matches.length ? matches.map(function(p){
@@ -18050,11 +18050,11 @@ function sgIPBuscar(key,v){ SG.itemPicker[key].q=v; sgIPRenderList(key); }
 // escapa < ni &. El nombre y la variedad los tipea el operador en Maestros.
 function sgIPRenderList(key){
   var st=SG.itemPicker[key]; if(!eid(key+'-list')) return;
-  var inc=sgIPConCamino(st), q=(st.q||'').toLowerCase();
+  var inc=sgIPConCamino(st), q=sgNorm(st.q);
   var lista=st.productos.filter(function(p){
     if(!q) return true;
-    return (String(p.nombre||'')+' '+String(p.variedad||'')+' '+String(p.codigo||''))
-      .toLowerCase().indexOf(q)>=0;
+    return sgNorm(String(p.nombre||'')+' '+String(p.variedad||'')+' '+String(p.codigo||''))
+      .indexOf(q)>=0;
   });
   eid(key+'-list').innerHTML = lista.length ? lista.map(function(p){
     var on=st.sel&&String(st.sel)===String(p.producto_id);
@@ -18888,11 +18888,11 @@ function sgFeLoad(){
 }
 
 function sgFePintar(){
-  var q = String((eid('sgfe-q') || {}).value || '').toLowerCase().trim();
+  var q = sgNorm(String((eid('sgfe-q') || {}).value || '').trim());
   var filas = SGFE.filas.filter(function(x){
     if (!q) return true;
-    return ((x.partida || '') + ' ' + (x.oc_numero || '') + ' ' + (x.proveedor_nombre || ''))
-      .toLowerCase().indexOf(q) >= 0;
+    return sgNorm((x.partida || '') + ' ' + (x.oc_numero || '') + ' ' + (x.proveedor_nombre || ''))
+      .indexOf(q) >= 0;
   });
   var tb = eid('sgfe-tb'); if (!tb) return;
   tb.innerHTML = filas.length ? filas.map(function(x){
@@ -19679,7 +19679,7 @@ function sgCcClNombre(c){
 function sgCcClPintar(){
   var q = String((eid('sg-cc-q') || {}).value || '').toLowerCase().trim();
   var todas = SG_CCLI.filas.filter(function(c){
-    return !q || sgCcClNombre(c).toLowerCase().indexOf(q) >= 0;
+    return !q || sgNorm(sgCcClNombre(c)).indexOf(q) >= 0;
   });
 
   // LA MISMA FORMA QUE PROVEEDORES. Las columnas SUMAN:
@@ -29466,6 +29466,38 @@ function api(url,method,body){
 }
 function eid(id){ return document.getElementById(id); }
 function elv(id,val){ var el=eid(id); if(val!==undefined){if(el) el.value=val; return;} return el?el.value.trim():''; }
+// ══ BUSCAR SIN TILDES ══════════════════════════════════════════════════════
+//
+// Pablo, 27/8/2026: «en el maestro de productos, si escribo melon no me figura
+// nada; si escribo melón sí. Evitemos los tildes para no complicar».
+//
+// Nadie escribe los acentos cuando busca, y el que carga el producto sí los pone.
+// Así que la lista se vaciaba y parecía que el producto no existía.
+//
+// Se compara SIN acentos de los dos lados: lo que se escribe y lo que está
+// cargado. NFD parte cada letra acentuada en letra + acento, y el reemplazo se
+// lleva los acentos. La ñ NO se toca: es una letra propia, no una n con algo
+// encima, y en NFD queda como n+tilde — por eso se saca sólo el rango de
+// diacríticos combinados, que no la incluye una vez recompuesta.
+//
+// Estaba escrita cuatro veces en este archivo, cada una en su módulo. Ésta es la
+// que usan las búsquedas de San Gerónimo: una sola, para que no haya pantallas
+// que encuentren el melón y otras que no.
+function sgNorm(s){
+  // La \u00d1 SE PROTEGE ANTES DE DESCOMPONER. En NFD la \u00f1 queda como n + tilde
+  // combinada, o sea que el barrido de acentos se la lleva y \u00abpi\u00f1a\u00bb se vuelve
+  // \u00abpina\u00bb: ah\u00ed empiezan a matchear cosas que no son, y \u00aba\u00f1o\u00bb pasa a ser otra
+  // palabra. Es una letra del idioma, no una n con algo encima.
+  //
+  // El acento de las vocales S\u00cd se saca, que es lo que se pidi\u00f3: en un teclado
+  // espa\u00f1ol la \u00f1 tiene tecla propia y el acento pide una tecla muerta \u2014 la
+  // fricci\u00f3n est\u00e1 en el acento, no en la e\u00f1e.
+  return String(s == null ? '' : s).toLowerCase()
+    .replace(/\u00f1/g, '\u0001')
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .replace(/\u0001/g, '\u00f1');
+}
+
 function esc(s){ return (s||'').replace(/\\/g,'\\\\').replace(/'/g,"\\'").replace(/"/g,'&quot;'); }
 // esc() escapa para meter texto DENTRO de un atributo o de un onclick, pero no
 // toca < ni &. Para texto libre que se dibuja como contenido —lo que escribió el
