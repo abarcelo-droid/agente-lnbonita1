@@ -16327,7 +16327,33 @@ function sgFdCobroToggle(){
 }
 function sgFdMedioAdd(){ SG_FD_MEDIOS.push({ forma: 'efectivo', cuenta: '', monto: '', ref: '' }); sgFdMediosRender(); }
 function sgFdMedioDel(i){ SG_FD_MEDIOS.splice(i, 1); if (!SG_FD_MEDIOS.length) sgFdMedioAdd(); else sgFdMediosRender(); }
-function sgFdMedioUpd(i, campo, v){ SG_FD_MEDIOS[i][campo] = v; sgFdMediosRender(); }
+function sgFdMedioUpd(i, campo, v){
+  SG_FD_MEDIOS[i][campo] = v;
+  // La FORMA cambia qué campos tiene el renglón: ahí sí hay que redibujar.
+  if (campo === 'forma') { sgFdMediosRender(); return; }
+  // Lo demás no cambia la forma de nada. Redibujar acá destruía el input que se
+  // estaba tipeando y se llevaba el foco puesto: entraba un dígito por vez.
+  sgFdCobroPie();
+}
+
+// El pie, aparte del dibujo de los renglones. Antes vivía adentro del render, así
+// que actualizarlo obligaba a rehacer los inputs — que es de donde salía el bug.
+function sgFdCobroPie(){
+  var total = sgFdTotal();
+  var suma = SG_FD_MEDIOS.reduce(function(a, m){ return a + (liqNum({ value: m.monto }) || 0); }, 0);
+  suma = paRound2Fm(suma);
+  var pie = eid('sgfd-cobro-pie');
+  if (pie) {
+    var falta = paRound2Fm(total - suma);
+    pie.innerHTML = 'Comprobante <b>' + sgMoney2(total) + '</b> · se cobra <b>' + sgMoney2(suma) + '</b>'
+      + (Math.abs(falta) < 0.01
+          ? ' · <span style="color:#166534">queda saldado</span>'
+          : (falta > 0
+              ? ' · <span style="color:#8a5a1f">quedan ' + sgMoney2(falta) + ' en la cuenta corriente</span>'
+              : ' · <span style="color:#b91c1c">te pasaste por ' + sgMoney2(-falta) + '</span>'));
+  }
+  sgFdIdentifRender(total);
+}
 
 // El total del comprobante que se está por emitir. Es contra esto que se compara lo
 // que se cobra, y también lo que decide si hay que identificar al comprador.
@@ -16385,21 +16411,9 @@ function sgFdMediosRender(){
   }).join('');
 
   // El pie: cuánto se está cobrando contra el total. Un cobro parcial es válido —lo
-  // que no entra queda en la cuenta corriente— pero pasarse no.
-  var total = sgFdTotal();
-  var suma = SG_FD_MEDIOS.reduce(function(a, m){ return a + (liqNum({ value: m.monto }) || 0); }, 0);
-  suma = paRound2Fm(suma);
-  var pie = eid('sgfd-cobro-pie');
-  if (pie) {
-    var falta = paRound2Fm(total - suma);
-    pie.innerHTML = 'Comprobante <b>' + sgMoney2(total) + '</b> · se cobra <b>' + sgMoney2(suma) + '</b>'
-      + (Math.abs(falta) < 0.01
-          ? ' · <span style="color:#166534">queda saldado</span>'
-          : (falta > 0
-              ? ' · <span style="color:#8a5a1f">quedan ' + sgMoney2(falta) + ' en la cuenta corriente</span>'
-              : ' · <span style="color:#b91c1c">te pasaste por ' + sgMoney2(-falta) + '</span>'));
-  }
-  sgFdIdentifRender(total);
+  // que no entra queda en la cuenta corriente— pero pasarse no. Vive en su propia
+  // función porque se actualiza en cada tecla, y el renglón no.
+  sgFdCobroPie();
 }
 
 // ══ EL DOCUMENTO DEL COMPRADOR, SÓLO CUANDO HACE FALTA ═════════════════
