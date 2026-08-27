@@ -6860,6 +6860,27 @@ function sgCliUnico(selectId){
   };
 
   var pintar = function(){
+    // AL ABRIRLO SE VE TODO. Si el texto es exactamente la etiqueta del cliente
+    // ya elegido, no es una búsqueda: es lo que quedó de la vez anterior. Filtrar
+    // por ahí contesta "ningún cliente dice" sobre la lista completa, porque la
+    // etiqueta junta alias Y razón social y el filtro compara contra cada uno por
+    // separado.
+    var elegido = (SG.cacheCli || []).filter(function(c){
+      return String(c.id) === String(sel.value); })[0];
+    if (elegido && String(inp.value || '') === sgCliLabel(elegido)) {
+      inp.select();                       // y si escribe, reemplaza en vez de agregar
+      lista.innerHTML = (SG.cacheCli || []).slice(0, 60).map(function(c){
+        return '<div class="sg-cli-op" data-id="' + c.id + '" style="padding:8px 12px;cursor:pointer;'
+          + 'font-size:13px;border-bottom:1px solid var(--bor)">' + escH(sgCliLabel(c)) + '</div>';
+      }).join('');
+      lista.style.display = 'block';
+      [].slice.call(lista.querySelectorAll('.sg-cli-op')).forEach(function(el){
+        el.onmousedown = function(ev){ ev.preventDefault(); elegir(el.dataset.id, el.textContent); };
+        el.onmouseenter = function(){ el.style.background = 'var(--sur)'; };
+        el.onmouseleave = function(){ el.style.background = ''; };
+      });
+      return;
+    }
     var q = String(inp.value || '').trim().toLowerCase();
     var cli = (SG.cacheCli || []).filter(function(c){
       if (!q) return true;
@@ -6898,6 +6919,18 @@ function sgCliUnico(selectId){
 //
 // Esto lo setea en los dos lados. Si el control único no está montado, hace lo
 // de siempre y no molesta.
+// DEJARLO EN BLANCO ES UNA OPERACIÓN, no un caso raro de elegir. Después de
+// emitir hay que borrar los DOS lados: el <select> escondido y el texto que se ve.
+// Limpiar sólo uno deja la pantalla diciendo un cliente que por dentro ya no está.
+function sgCliLimpiar(selectId){
+  var sel = eid(selectId); if (!sel) return;
+  sel.innerHTML = sgCliOpts('', '');
+  sel.value = '';
+  var inp = sel.parentNode && sel.parentNode.querySelector
+    ? sel.parentNode.querySelector('input') : null;
+  if (inp) inp.value = '';
+}
+
 function sgCliElegir(selectId, clienteId){
   var sel = eid(selectId); if (!sel) return;
   sel.innerHTML = sgCliOpts('', clienteId);
@@ -9432,8 +9465,23 @@ function sgBcPoner(pref, id){
 //
 // Se envuelve DENTRO de los tres armadores de cuadro y no en las diez pantallas que
 // los llaman: una sola puerta, y ninguna pantalla nueva puede olvidarse de cerrarla.
+// EL ASIENTO ES PARA TODA LA ADMINISTRACIÓN, no sólo para el dueño (Pablo,
+// 27/8/2026). El que lleva la contabilidad tiene que poder mirar el debe y el
+// haber en el momento en que se genera —que es el único momento en que se puede
+// frenar— sin depender de que alguien con rol de administrador esté al lado.
+//
+// Sigue afuera el que sólo vende: no es su trabajo, le ocupa media pantalla y no
+// puede hacer nada con él. Por eso se mira si tiene alguna pantalla de
+// Contabilidad SG tildada, y no un rol.
+var SG_MODULOS_CONTABLES = ['sgct-plan-cuentas', 'sgct-asientos', 'sgct-modelos',
+  'sgct-iva-compras', 'sgct-iva-ventas', 'sgct-puntos-venta'];
+
 function sgAsientoEsAdmin(){
-  return !!(window.LNB_USER && window.LNB_USER.rol === 'admin');
+  if (window.LNB_USER && window.LNB_USER.rol === 'admin') return true;
+  for (var i = 0; i < SG_MODULOS_CONTABLES.length; i++) {
+    if (lnbNivel(SG_MODULOS_CONTABLES[i])) return true;
+  }
+  return false;
 }
 function sgAsientoPlegado(html, titulo){
   if (!html) return '';
@@ -9441,7 +9489,7 @@ function sgAsientoPlegado(html, titulo){
   return '<details class="sg-asiento-det" style="margin-top:6px">'
     + '<summary style="cursor:pointer;font-size:11.5px;color:var(--mut);'
     + 'user-select:none;padding:4px 0">▸ ' + escH(titulo || 'Asiento contable')
-    + ' <span style="font-size:10.5px">(sólo lo ves vos)</span></summary>'
+    + ' <span style="font-size:10.5px">(lo ve la administración)</span></summary>'
     + '<div style="margin-top:6px">' + html + '</div></details>';
 }
 // ── Y LOS BLOQUES DE "CONTRA QUÉ SE CONTABILIZA" ─────────────────────────
@@ -15571,6 +15619,9 @@ function sgFdInit(){
   if (eid('sgfd-resumen')) eid('sgfd-resumen').innerHTML='';
   var sel=eid('sgfd-cli'); if(sel) sel.innerHTML=sgCliOpts('','','— Elegí cliente —');
   sgCliUnico('sgfd-cli');
+  // El comprobante que se acaba de emitir es de OTRO cliente: el próximo arranca
+  // en blanco y con la lista entera a la vista.
+  sgCliLimpiar('sgfd-cli');
   eid('sgfd-tipo-badge').innerHTML='';
   eid('sgfd-confirm').classList.remove('on');
   sgPvLlenarSelector('sgfd-pv');
