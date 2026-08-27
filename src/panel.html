@@ -2837,11 +2837,27 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
 
              El cobro puede ser PARCIAL: lo que no entra queda en la cuenta corriente. -->
         <div style="margin-top:14px;border:1px solid var(--bor);border-radius:10px;padding:12px 14px;background:var(--bg)">
-          <label style="display:flex;align-items:center;gap:7px;cursor:pointer;font-weight:600;font-size:13px">
-            <input type="checkbox" id="sgfd-cobrar" onchange="sgFdCobroToggle()">
-            <span>💵 Se cobra ahora</span>
-            <span style="font-weight:400;font-size:11.5px;color:var(--mut)">— venta de ventanilla</span>
-          </label>
+          <!-- ¿CÓMO SE PAGA? ES OBLIGATORIO (Pablo, 27/8/2026).
+               Hasta acá el cobro era un TILDE opcional que venía apagado: «cuenta
+               corriente» no era una opción elegida, era lo que pasaba cuando no se
+               elegía nada. El saldo quedaba en la cuenta del cliente sin que nadie
+               lo hubiera decidido y sin fecha de vencimiento. -->
+          <div style="font-weight:700;font-size:12px;text-transform:uppercase;letter-spacing:.04em;
+               color:var(--mut);margin-bottom:7px">¿Cómo se paga? <span style="color:var(--err)">*</span></div>
+          <div style="display:flex;gap:6px;margin-bottom:8px;flex-wrap:wrap">
+            <button type="button" class="btn bo bs" id="sgfd-pago-cc" onclick="sgFdPago('cc')">🧾 Cuenta corriente</button>
+            <button type="button" class="btn bo bs" id="sgfd-pago-ya" onclick="sgFdPago('ya')">💵 Se cobra ahora</button>
+          </div>
+          <!-- CUENTA CORRIENTE CON FECHA. Sin vencimiento no hay forma de saber qué
+               está vencido. Se propone la condición del cliente y se puede cambiar. -->
+          <div id="sgfd-cc-box" style="display:none;margin-bottom:8px;font-size:12.5px">
+            <label style="font-size:11px;color:var(--mut)">Vence a los<br>
+              <input type="number" id="sgfd-cc-dias" min="0" step="1" style="width:80px;padding:5px 7px"
+                     oninput="sgFdCcVenc()"></label>
+            <span style="margin-left:6px">días · <b id="sgfd-cc-fecha">—</b></span>
+            <div id="sgfd-cc-nota" style="font-size:11px;color:var(--mut);margin-top:3px"></div>
+          </div>
+          <label style="display:none"><input type="checkbox" id="sgfd-cobrar" onchange="sgFdCobroToggle()"></label>
           <!-- VARIOS MEDIOS EN LA MISMA VENTA. Parte en efectivo y parte en
                transferencia, como el pago a proveedores. Los renglones se dibujan
                solos y el pie dice cuánto falta o cuánto sobra. -->
@@ -3105,6 +3121,24 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
         </div>
         <div id="sgf-lineas"></div>
         <div id="sgf-resumen" style="margin-top:12px;font-size:12.5px"></div>
+        <!-- ¿CÓMO SE PAGA? También acá (Pablo, 27/8/2026: «en los dos lugares donde
+             se emite»). Acá lo natural es cuenta corriente —se factura mercadería
+             que salió hace días— pero elegirlo tiene que ser una DECISIÓN, y el
+             vencimiento tiene que quedar puesto. -->
+        <div style="margin-top:14px;border:1px solid var(--bor);border-radius:10px;padding:12px 14px;background:var(--bg)">
+          <div style="font-weight:700;font-size:12px;text-transform:uppercase;letter-spacing:.04em;
+               color:var(--mut);margin-bottom:7px">¿Cómo se paga? <span style="color:var(--err)">*</span></div>
+          <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">
+            <button type="button" class="btn bo bs" id="sgf-pago-cc" onclick="sgFacPago('cc')">🧾 Cuenta corriente</button>
+            <span id="sgf-cc-box" style="display:none;font-size:12.5px">
+              <label style="font-size:11px;color:var(--mut)">Vence a los
+                <input type="number" id="sgf-cc-dias" min="0" step="1" style="width:76px;padding:4px 6px;margin-left:4px"
+                       oninput="sgFacCcVenc()"></label>
+              <span style="margin-left:6px">días · <b id="sgf-cc-fecha">—</b></span>
+            </span>
+          </div>
+          <div id="sgf-cc-nota" style="font-size:11px;color:var(--mut);margin-top:4px"></div>
+        </div>
         <div style="text-align:right;margin-top:12px"><button class="btn bb" id="sgf-emitir-btn" onclick="sgFacEmitir()">Emitir comprobante</button></div>
       </div>
       <div class="sgr-confirm" id="sgf-confirm"></div>
@@ -15881,6 +15915,16 @@ function sgFdInit(){
   // El comprobante que se acaba de emitir es de OTRO cliente: el próximo arranca
   // en blanco y con la lista entera a la vista.
   sgCliLimpiar('sgfd-cli');
+  // LA PREGUNTA VUELVE A ESTAR SIN CONTESTAR. Si quedara elegida de la venta
+  // anterior, la próxima saldría por cuenta corriente sin que nadie lo decidiera —
+  // que es exactamente lo que esto viene a cerrar.
+  SG._fdPago = null; SG._fdVenc = null; SG._fdCondId = null;
+  ['sgfd-pago-cc', 'sgfd-pago-ya'].forEach(function(id){
+    var b = eid(id); if (b) b.className = 'btn bo bs';
+  });
+  var ccb = eid('sgfd-cc-box'); if (ccb) ccb.style.display = 'none';
+  var ccd = eid('sgfd-cc-dias'); if (ccd) ccd.value = '';
+  var ccf = eid('sgfd-cc-fecha'); if (ccf) ccf.textContent = '—';
   eid('sgfd-tipo-badge').innerHTML='';
   // EL CARTEL DEL COMPROBANTE NO SE LIMPIA ACÁ. sgFdInit() corre INMEDIATAMENTE
   // después de emitir para dejar la pantalla lista para la próxima venta, y
@@ -16303,6 +16347,95 @@ function sgAsientoCuadro(d, titulo, donde){
 // entrada contra una factura que no salió.
 var SG_FD_CTAS = [];
 var SG_FD_MEDIOS = [];
+// ══ ¿CÓMO SE PAGA? ═════════════════════════════════════════════════════════
+//
+// Pablo, 27/8/2026: «todas las facturas deberían tener un ¿cómo se paga? obligatorio,
+// donde una de las opciones sea Cuenta corriente».
+//
+// Era un tilde apagado: cuenta corriente no era una opción ELEGIDA, era lo que pasaba
+// cuando no se elegía nada. El saldo quedaba en la cuenta del cliente sin que nadie lo
+// decidiera y sin fecha de vencimiento.
+//
+// Ahora hay que elegir, y hasta que se elija no se puede emitir.
+function sgFdPago(cual){
+  SG._fdPago = cual;
+  var cc = eid('sgfd-pago-cc'), ya = eid('sgfd-pago-ya');
+  if (cc) cc.className = 'btn bs ' + (cual === 'cc' ? 'bb' : 'bo');
+  if (ya) ya.className = 'btn bs ' + (cual === 'ya' ? 'bb' : 'bo');
+  var box = eid('sgfd-cc-box'); if (box) box.style.display = (cual === 'cc') ? '' : 'none';
+  // El tilde viejo sigue existiendo escondido porque de él cuelga toda la mecánica
+  // del bloque de medios; lo que cambió es QUIÉN lo prende.
+  var chk = eid('sgfd-cobrar');
+  if (chk) { chk.checked = (cual === 'ya'); }
+  sgFdCobroToggle();
+  if (cual === 'cc') sgFdCcDefecto();
+}
+
+// LOS DÍAS QUE TIENE EL CLIENTE, Y SE PUEDEN CAMBIAR (definición de Pablo). Se
+// proponen los de su condición habitual; si esta venta va a otro plazo, se corrige acá
+// sin tocar el maestro.
+function sgFdCcDefecto(){
+  var d = eid('sgfd-cc-dias'); if (!d) return;
+  var cli = (SG.cacheCli || []).filter(function(c){
+    return String(c.id) === String((eid('sgfd-cli') || {}).value); })[0] || {};
+  var cond = (SG.cacheCond || []).filter(function(x){
+    return String(x.id) === String(cli.condicion_pago_habitual_id); })[0];
+  // UNA CONDICIÓN PUEDE TENER VARIAS CUOTAS. El vencimiento que importa acá es el
+  // ÚLTIMO: es cuando la factura termina de estar paga. Proponer el de la primera
+  // dejaría media deuda marcada como vencida el día que vence la cuota uno.
+  if (!String(d.value || '').trim()) {
+    var dias = 0;
+    ((cond && cond.cuotas) || []).forEach(function(c){
+      var x = Number(c.dias_offset) || 0; if (x > dias) dias = x;
+    });
+    d.value = dias;
+  }
+  var nota = eid('sgfd-cc-nota');
+  if (nota) {
+    nota.textContent = cond
+      ? 'Condición del cliente: ' + cond.nombre
+      : 'Este cliente no tiene condición de pago cargada — poné a cuántos días vence.';
+  }
+  SG._fdCondId = cond ? cond.id : null;
+  sgFdCcVenc();
+}
+
+function sgFdCcVenc(){
+  var d = Number((eid('sgfd-cc-dias') || {}).value);
+  var out = eid('sgfd-cc-fecha'); if (!out) return;
+  if (!(d >= 0)) { out.textContent = '—'; return; }
+  var f = new Date();
+  f.setDate(f.getDate() + d);
+  SG._fdVenc = f.toISOString().slice(0, 10);
+  out.textContent = SG._fdVenc.split('-').reverse().join('/');
+}
+
+// LO QUE FALTA PARA PODER EMITIR. Se contesta ANTES del punto de no retorno: hasta
+// acá el comprobante salía, la mercadería se descontaba, ARCA autorizaba, y recién
+// entonces el cobro se cortaba por una caja sin elegir. La plata se perdía.
+function sgFdPagoFalta(){
+  if (!SG._fdPago) return 'Elegí cómo se paga.';
+  if (SG._fdPago === 'cc') {
+    var d = Number((eid('sgfd-cc-dias') || {}).value);
+    if (!(d >= 0)) return 'Poné a cuántos días vence.';
+    return null;
+  }
+  var vivos = (SG_FD_MEDIOS || []).filter(function(m){ return (liqNum({ value: m.monto }) || 0) > 0; });
+  if (!vivos.length) return 'Cargá con qué se paga, o mandalo a cuenta corriente.';
+  for (var i = 0; i < vivos.length; i++) {
+    var m = vivos[i];
+    if (m.forma === 'cheque') {
+      if (!String(m.ref || '').trim()) return 'Falta el número del cheque.';
+      if (!String(m.librador || '').trim()) return 'Falta quién firma el cheque.';
+    } else if (!m.cuenta) {
+      return 'Falta elegir ' + (m.forma === 'efectivo' ? 'la caja' : 'la cuenta') + ' de un medio de pago.';
+    }
+  }
+  var suma = vivos.reduce(function(a, m){ return a + (liqNum({ value: m.monto }) || 0); }, 0);
+  if (paRound2Fm(suma - sgFdTotal()) > 0.01) return 'Estás cobrando más que el total del comprobante.';
+  return null;
+}
+
 function sgFdCobroToggle(){
   var on = eid('sgfd-cobrar') && eid('sgfd-cobrar').checked;
   var box = eid('sgfd-cobro-box'); if (box) box.style.display = on ? '' : 'none';
@@ -16521,6 +16654,13 @@ function sgFdCobrarAhora(r, cont){
 function sgFdEmitir(){
   var cid=eid('sgfd-cli').value; if(!cid){ toast('Elegí cliente','er'); return; }
   var pv=eid('sgfd-pv').value; if(!pv){ toast('Elegí el punto de venta','er'); return; }
+  // ── ¿CÓMO SE PAGA? SE CONTESTA ANTES DE EMITIR ─────────────────────────
+  // Acá no se validaba NADA del cobro. Si faltaba la caja, el número del cheque o
+  // el librador, el comprobante salía igual: la mercadería se descontaba, ARCA
+  // autorizaba, y recién entonces el cobro se cortaba. La plata se perdía del lado
+  // equivocado del punto de no retorno, y el aviso ni siquiera se veía.
+  var faltaPago = sgFdPagoFalta();
+  if (faltaPago) { toast(faltaPago, 'er'); return; }
   var items=[];
   for(var i=0;i<SG.fdItems.length;i++){
     var it=SG.fdItems[i]; var b=Number(it.bultos)||0;
@@ -16571,6 +16711,12 @@ function sgFdEmitir(){
     // por período para sentarse a renegociar.
     descuento_gestion: SG._fdResignado || 0,
     aplica_descuentos: sgFdDescuentosOn() ? 1 : 0,
+    // CUÁNDO VENCE LO QUE QUEDE EN CUENTA CORRIENTE. Sin esto la deuda no tiene
+    // fecha y no hay forma de saber qué está vencido. Va también cuando se cobra
+    // en el acto: si el cobro no alcanza, el resto queda en la cuenta y también
+    // vence.
+    vencimiento: SG._fdVenc || null,
+    condicion_pago_id: SG._fdCondId || null,
     items:items }).then(function(r){
     btn.disabled=false; btn.textContent=prev;
     var c=eid('sgfd-confirm');
@@ -16606,6 +16752,14 @@ function sgFdEmitir(){
 
 function sgFacInit(){
   SG.facData = null; SG.facSel = {}; SG.facLineas = [];
+  // La pregunta vuelve a estar sin contestar: si quedara elegida del comprobante
+  // anterior, el próximo saldría con el vencimiento del otro cliente.
+  SG._facPago = null; SG._facVenc = null; SG._facCondId = null;
+  var pb = eid('sgf-pago-cc'); if (pb) pb.className = 'btn bo bs';
+  var pbx = eid('sgf-cc-box'); if (pbx) pbx.style.display = 'none';
+  var pd = eid('sgf-cc-dias'); if (pd) pd.value = '';
+  var pf = eid('sgf-cc-fecha'); if (pf) pf.textContent = '—';
+  var pn = eid('sgf-cc-nota'); if (pn) pn.textContent = '';
   // Los puntos de venta salen de su pantalla, no del HTML.
   sgPvLlenarSelector();
   var sel = eid('sgf-cli');
@@ -17613,8 +17767,54 @@ function sgFacResumen(){
   var valid = SG.facLineas.some(function(l){return Number(l.kg)>0;}) && !sinAlic.length;
   if(btn){ btn.disabled=!valid; btn.style.opacity=valid?'1':'.5'; btn.style.cursor=valid?'pointer':'not-allowed'; }
 }
+// ── ¿CÓMO SE PAGA? EN EL EDITOR DE COMPROBANTE ───────────────────────────
+// Acá lo natural es cuenta corriente —se factura mercadería que salió hace días,
+// muchas veces en lote— pero elegirlo tiene que ser una DECISIÓN, y el vencimiento
+// tiene que quedar puesto: sin fecha, esa deuda no aparece en ningún informe de
+// vencidos y no se puede reclamar.
+function sgFacPago(cual){
+  SG._facPago = cual;
+  var b = eid('sgf-pago-cc'); if (b) b.className = 'btn bs ' + (cual === 'cc' ? 'bb' : 'bo');
+  var box = eid('sgf-cc-box'); if (box) box.style.display = (cual === 'cc') ? '' : 'none';
+  if (cual !== 'cc') return;
+  var d = eid('sgf-cc-dias');
+  var cli = (SG.cacheCli || []).filter(function(c){
+    return String(c.id) === String((eid('sgf-cli') || {}).value); })[0] || {};
+  var cond = (SG.cacheCond || []).filter(function(x){
+    return String(x.id) === String(cli.condicion_pago_habitual_id); })[0];
+  if (d && !String(d.value || '').trim()) {
+    // El ÚLTIMO vencimiento de la condición: es cuando la factura termina de estar
+    // paga. El de la primera cuota dejaría media deuda marcada como vencida.
+    var dias = 0;
+    ((cond && cond.cuotas) || []).forEach(function(c){
+      var x = Number(c.dias_offset) || 0; if (x > dias) dias = x; });
+    d.value = dias;
+  }
+  var nota = eid('sgf-cc-nota');
+  if (nota) {
+    nota.textContent = cond ? 'Condición del cliente: ' + cond.nombre
+      : 'Este cliente no tiene condición de pago cargada — poné a cuántos días vence.';
+  }
+  SG._facCondId = cond ? cond.id : null;
+  sgFacCcVenc();
+}
+
+function sgFacCcVenc(){
+  var d = Number((eid('sgf-cc-dias') || {}).value);
+  var out = eid('sgf-cc-fecha'); if (!out) return;
+  if (!(d >= 0)) { out.textContent = '—'; return; }
+  var f = new Date(); f.setDate(f.getDate() + d);
+  SG._facVenc = f.toISOString().slice(0, 10);
+  out.textContent = SG._facVenc.split('-').reverse().join('/');
+}
+
 function sgFacEmitir(){
   var cid = eid('sgf-cli').value; if(!cid){ toast('Elegí cliente','er'); return; }
+  // Antes de emitir, no después: una vez que ARCA autoriza ya no se puede volver.
+  if (SG._facPago !== 'cc') { toast('Elegí cómo se paga.', 'er'); return; }
+  if (!(Number((eid('sgf-cc-dias') || {}).value) >= 0)) {
+    toast('Poné a cuántos días vence.', 'er'); return;
+  }
   var lineas = SG.facLineas.filter(function(l){return Number(l.kg)>0;});
   if(!lineas.length){ toast('No hay líneas con kg','er'); return; }
   // agrupar por despacho
@@ -17632,6 +17832,8 @@ function sgFacEmitir(){
   });
   var body = { cliente_id:Number(cid), punto_venta:Number(eid('sgf-pv').value), es_nc:false,
     precio_incluye_iva: !!(eid('sgf-incluye-iva') && eid('sgf-incluye-iva').checked),
+    vencimiento: SG._facVenc || null,
+    condicion_pago_id: SG._facCondId || null,
     seleccion: Object.keys(porDesp).map(function(k){return porDesp[k];}) };
   var btn=eid('sgf-emitir-btn'); btn.disabled=true; var prev=btn.textContent; btn.textContent='Emitiendo…';
   api('/api/sg/facturas/emitir','POST',body).then(function(r){

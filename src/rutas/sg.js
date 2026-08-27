@@ -1414,6 +1414,12 @@ const postEmitir = async (req, res) => {
     const r = await afipEmitir(db, { ptoVta: pv, clienteId, items, esNC: b.es_nc === true,
       userId: uid(req), vinculos,
       descuentoGestion: gestionLineas || (Number(b.descuento_gestion) || 0),
+      // CUÁNDO VENCE LO QUE QUEDE EN CUENTA CORRIENTE. Pablo, 27/8/2026: al emitir
+      // hay que decir cómo se paga, y si va a cuenta corriente se propone la
+      // condición del cliente. Viaja aunque se cobre en el acto: si el cobro no
+      // alcanza, el resto queda en la cuenta y también vence.
+      vencimiento: val(b.vencimiento) || null,
+      condicionPagoId: b.condicion_pago_id ? Number(b.condicion_pago_id) : null,
       // El documento del comprador, cuando la venta supera el umbral y va a
       // consumidor final. Es del COMPROBANTE, no del cliente: el "Consumidor Final"
       // lo comparten muchas ventas.
