@@ -6237,48 +6237,22 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
         </select></div>
       <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px">
         <div class="fl"><label>Fecha</label><input type="date" id="sg-cob-fecha"></div>
-        <div class="fl"><label>En qué cuenta entra</label>
-          <select id="sg-cob-cuenta" onchange="sgCobAsientoPintar()"></select></div>
-        <div class="fl"><label>Forma de cobro</label>
-          <select id="sg-cob-forma" onchange="sgCobForma()">
-            <option value="transferencia">Transferencia</option>
-            <option value="efectivo">Efectivo</option>
-            <option value="cheque">Cheque</option>
-          </select></div>
-        <div class="fl"><label>Importe cobrado</label>
-          <input type="text" inputmode="decimal" id="sg-cob-monto" placeholder="$ 0"
-                 style="text-align:right" oninput="this.value=sgMilFmtLive(this.value);sgCobTotal()"></div>
-        <div class="fl"><label>Referencia</label>
-          <input id="sg-cob-ref" placeholder="N° de transferencia, recibo…"></div>
       </div>
-      <!-- EL CHEQUE NO ES PLATA EN EL BANCO. Cuando el cliente paga con cheque,
-           el banco no recibió nada: hay un papel que vale el día que se
-           deposita. Por eso acá no se elige cuenta —se elige más tarde, al
-           depositarlo— y se anotan los datos del papel, que es lo que después
-           permite reconocerlo en la cartera. -->
-      <div id="sg-cob-chq" style="display:none;border:1.5px solid var(--bd);border-radius:8px;
-           padding:10px 12px;margin-top:10px;background:var(--bg2)">
+      <!-- ── CON QUÉ SE PAGA, RENGLÓN POR RENGLÓN ────────────────────────────
+           Pablo, 27/8/2026: «debe seleccionar cómo cancela la parte que se facturó
+           y cómo la parte que es de gestión». Cada renglón dice su forma, su
+           importe y contra qué mitad va: son dos platas distintas dentro del mismo
+           pago, y antes había que cargar dos cobranzas. -->
+      <div style="display:flex;justify-content:space-between;align-items:center;margin:12px 0 6px">
         <div style="font-weight:700;font-size:12px;text-transform:uppercase;letter-spacing:.04em;
-             color:var(--mut);margin-bottom:8px">Datos del cheque</div>
-        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px">
-          <div class="fl"><label>Banco</label><input id="sg-cob-chq-banco" placeholder="Galicia, Nación…"></div>
-          <div class="fl"><label>N° de cheque</label><input id="sg-cob-chq-nro" placeholder="00012345"></div>
-          <div class="fl"><label>Librador (quién lo firma)</label>
-            <input id="sg-cob-chq-lib" placeholder="Razón social del que emitió el cheque"></div>
-          <div class="fl"><label>CUIT del librador</label>
-            <div style="display:flex;gap:6px">
-              <input id="sg-cob-chq-cuit" placeholder="30-12345678-9" maxlength="13" inputmode="numeric"
-                     oninput="cuitMask(this)" style="flex:1;min-width:0">
-              <button class="btn bo bs" type="button" title="Central de Deudores del BCRA"
-                      onclick="sgBcraVer('sg-cob-chq-cuit','sg-cob-chq-bcra')">🔍 BCRA</button>
-            </div></div>
-          <div class="fl"><label>Vencimiento</label><input type="date" id="sg-cob-chq-vto"></div>
-        </div>
-        <div id="sg-cob-chq-bcra" style="margin-top:8px"></div>
-        <div style="font-size:12px;color:var(--mut);margin-top:8px">
-          El cheque entra a la cartera, en Caja y Bancos. La plata recién sube al banco el día
-          que se deposita.</div>
+             color:var(--mut)">Con qué se paga</div>
+        <button class="btn bo bs" type="button" onclick="sgCobMedioAdd()">+ otro medio</button>
       </div>
+      <div id="sg-cob-medios"></div>
+      <div id="sg-cob-medios-pie" style="font-size:12px;color:var(--mut);margin-top:4px"></div>
+      <!-- El importe total ya no se tipea: es la suma de los renglones. Tenerlo en
+           dos lados era la forma más fácil de que dijeran cosas distintas. -->
+      <input type="hidden" id="sg-cob-monto">
       <div style="font-weight:700;font-size:12px;text-transform:uppercase;letter-spacing:.04em;
            color:var(--mut);margin:14px 0 6px">Qué comprobantes cancela</div>
       <div class="ab-table-wrap"><table class="pa-tbl">
@@ -19757,22 +19731,143 @@ function sgCcClVerDoc(id){
   });
 }
 
-var SG_COB = { clienteId: null, docs: [], cuentas: [], ctaCliente: null };
+var SG_COB = { clienteId: null, docs: [], cuentas: [], ctaCliente: null, medios: [] };
+
+// ══ CON QUÉ SE PAGA, RENGLÓN POR RENGLÓN ═══════════════════════════════════
+//
+// Pablo, 27/8/2026: «debe seleccionar cómo cancela la parte que se facturó y cómo
+// la parte que es de gestión».
+//
+// El modal aceptaba UN solo medio, aunque el servidor los acepta desde el 25/8 y la
+// venta de ventanilla ya los usa. Un cliente que pagaba mitad en efectivo y mitad
+// por transferencia obligaba a cargar DOS cobranzas para un solo pago.
+//
+// Y cada renglón dice contra qué MITAD va: son dos platas distintas —lo facturado y
+// lo que se acordó por fuera— y el ámbito decide en qué libro cae cada asiento.
+function sgCobMedioAdd(){
+  SG_COB.medios.push({ forma: 'transferencia', cuenta: '', monto: '', ref: '', ambito: '',
+                       banco: '', nro: '', librador: '', cuit: '', vto: '' });
+  sgCobMediosRender();
+}
+function sgCobMedioDel(i){
+  SG_COB.medios.splice(i, 1);
+  if (!SG_COB.medios.length) sgCobMedioAdd(); else sgCobMediosRender();
+}
+// Sólo la FORMA cambia la forma del renglón. Redibujar en cada tecla destruye el
+// input que se está tipeando y se lleva el foco: es el bug del «un dígito por vez»
+// que ya se arregló en la ventanilla, y no hay que repetirlo acá.
+function sgCobMedioUpd(i, campo, v){
+  SG_COB.medios[i][campo] = v;
+  if (campo === 'forma') { sgCobMediosRender(); return; }
+  sgCobMediosPie();
+}
+
+// ¿Esta cobranza tiene una mitad sin facturar? Si no la tiene, el selector de
+// ámbito es una pregunta sin respuesta posible y no se muestra.
+function sgCobHayGestion(){
+  return (SG_COB.docs || []).some(function(d){ return Number(d.pendiente_gestion) > 0.009; });
+}
+
+function sgCobMediosRender(){
+  var cont = eid('sg-cob-medios'); if (!cont) return;
+  if (!SG_COB.medios.length) SG_COB.medios.push({ forma: 'transferencia', cuenta: '', monto: '',
+    ref: '', ambito: '', banco: '', nro: '', librador: '', cuit: '', vto: '' });
+  var hayGes = sgCobHayGestion();
+  // Las cuentas que ESE usuario puede tocar. Igual que en la ventanilla: no ofrecer
+  // lo que va a rebotar. Y por la NEGATIVA — lo que no es caja es bancario.
+  var opts = function(esCaja, sel){
+    var aptas = (SG_COB.cuentas || []).filter(function(c){
+      var caja = String(c.tipo) === 'caja';
+      return (esCaja ? caja : !caja) && c.activo !== 0 && c.puedo !== 0; });
+    if (!aptas.length) return '<option value="">— no hay ' + (esCaja ? 'cajas' : 'cuentas bancarias') + ' que puedas tocar —</option>';
+    return '<option value="">— elegir —</option>' + aptas.map(function(c){
+      return '<option value="' + c.id + '"' + (String(sel) === String(c.id) ? ' selected' : '') + '>'
+        + escH(c.nombre) + (c.ambito ? ' · ' + escH(c.ambito) : '') + '</option>'; }).join('');
+  };
+  var up = function(i, campo){ return 'sgCobMedioUpd(' + i + ',\'' + campo + '\',this.value)'; };
+  cont.innerHTML = SG_COB.medios.map(function(m, i){
+    var esChq = m.forma === 'cheque';
+    return '<div style="border:1px solid var(--bor);border-radius:8px;padding:8px 10px;margin-bottom:6px">'
+      + '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end">'
+      + '<label style="font-size:11px;color:var(--mut)">Cómo<br>'
+        + '<select onchange="' + up(i, 'forma') + '" style="padding:5px 7px;font-size:12.5px">'
+        + [['transferencia', 'Transferencia'], ['efectivo', 'Efectivo'], ['cheque', 'Cheque de tercero']]
+            .map(function(f){ return '<option value="' + f[0] + '"' + (m.forma === f[0] ? ' selected' : '') + '>'
+              + f[1] + '</option>'; }).join('')
+        + '</select></label>'
+      + (esChq ? '' : '<label style="font-size:11px;color:var(--mut)">' + (m.forma === 'efectivo' ? 'A qué caja' : 'A qué cuenta') + '<br>'
+          + '<select onchange="' + up(i, 'cuenta') + '" style="padding:5px 7px;font-size:12.5px;min-width:190px">'
+          + opts(m.forma === 'efectivo', m.cuenta) + '</select></label>')
+      + '<label style="font-size:11px;color:var(--mut)">Cuánto<br>'
+        + '<input type="text" inputmode="decimal" value="' + escH(m.monto) + '"'
+        + ' oninput="' + up(i, 'monto') + '"'
+        + ' style="padding:5px 7px;font-size:12.5px;width:140px;text-align:right"></label>'
+      // CONTRA QUÉ MITAD VA ESTE RENGLÓN. Sólo aparece si hay una mitad sin
+      // facturar: si no, es una pregunta sin respuesta posible.
+      + (hayGes ? '<label style="font-size:11px;color:var(--mut)">Cancela<br>'
+          + '<select onchange="' + up(i, 'ambito') + '" style="padding:5px 7px;font-size:12.5px;min-width:170px">'
+          + [['', 'Lo que toque'], ['fiscal', 'Lo facturado'], ['gestion', 'Lo que falta facturar']]
+              .map(function(a){ return '<option value="' + a[0] + '"' + (m.ambito === a[0] ? ' selected' : '') + '>'
+                + a[1] + '</option>'; }).join('')
+          + '</select></label>' : '')
+      + '<label style="font-size:11px;color:var(--mut)">' + (esChq ? 'N° de cheque' : 'Referencia') + '<br>'
+        + '<input type="text" value="' + escH(esChq ? m.nro : m.ref) + '"'
+        + ' oninput="' + up(i, esChq ? 'nro' : 'ref') + '"'
+        + ' style="padding:5px 7px;font-size:12.5px;width:160px"></label>'
+      + (SG_COB.medios.length > 1
+          ? '<button class="btn bd bs" type="button" onclick="sgCobMedioDel(' + i + ')" title="Sacar este medio">×</button>' : '')
+      + '</div>'
+      // El cheque no es plata en el banco: es un papel que vale el día que se
+      // deposita. Sus datos son lo que después permite reconocerlo en la cartera.
+      + (esChq ? '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;margin-top:6px">'
+          + '<label style="font-size:11px;color:var(--mut)">Banco<br><input type="text" value="' + escH(m.banco) + '"'
+            + ' oninput="' + up(i, 'banco') + '" placeholder="Galicia, Nación…" style="padding:5px 7px;font-size:12.5px;width:150px"></label>'
+          + '<label style="font-size:11px;color:var(--mut)">Quién lo firma<br><input type="text" value="' + escH(m.librador) + '"'
+            + ' oninput="' + up(i, 'librador') + '" style="padding:5px 7px;font-size:12.5px;width:200px"></label>'
+          + '<label style="font-size:11px;color:var(--mut)">CUIT del librador<br><input type="text" value="' + escH(m.cuit) + '"'
+            + ' oninput="cuitMask(this);' + up(i, 'cuit') + '" maxlength="13" inputmode="numeric"'
+            + ' style="padding:5px 7px;font-size:12.5px;width:150px"></label>'
+          + '<label style="font-size:11px;color:var(--mut)">Vencimiento<br><input type="date" value="' + escH(m.vto) + '"'
+            + ' oninput="' + up(i, 'vto') + '" style="padding:5px 7px;font-size:12.5px"></label>'
+          + '<span style="font-size:11px;color:var(--mut);padding-bottom:6px">Entra a la cartera; la plata sube al banco al depositarlo.</span>'
+          + '</div>' : '')
+      + '</div>';
+  }).join('');
+  sgCobMediosPie();
+}
+
+// La suma de los renglones ES el importe de la cobranza: tenerlo también en un
+// campo aparte era la forma más fácil de que los dos dijeran cosas distintas.
+function sgCobMediosPie(){
+  var t = 0;
+  (SG_COB.medios || []).forEach(function(m){ t += sgMilParse(m.monto) || 0; });
+  t = Math.round(t * 100) / 100;
+  var h = eid('sg-cob-monto'); if (h) h.value = String(t);
+  var pie = eid('sg-cob-medios-pie');
+  if (pie) pie.innerHTML = t > 0 ? 'Se cobra <b>' + sgMoney2(t) + '</b>' : '';
+  sgCobTotal();
+}
 
 function sgCobOpen(clienteId){
   clienteId = clienteId ? Number(clienteId) : null;
   var c = (SG_CCLI.filas || []).filter(function(x){ return x.id === clienteId; })[0];
-  SG_COB = { clienteId: clienteId, docs: [], cuentas: [], ctaCliente: null, cartera: null };
+  SG_COB = { clienteId: clienteId, docs: [], cuentas: [], ctaCliente: null, cartera: null,
+             medios: [] };
   var t = eid('sg-cob-tit');
   if (t) t.textContent = 'Registrar cobranza' + (c ? ' — ' + sgCcClNombre(c) : '');
   var f = eid('sg-cob-fecha'); if (f) f.value = new Date().toISOString().slice(0, 10);
-  ['sg-cob-monto', 'sg-cob-ref', 'sg-cob-notas', 'sg-cob-chq-banco', 'sg-cob-chq-nro',
-   'sg-cob-chq-lib', 'sg-cob-chq-vto', 'sg-cob-chq-cuit'].forEach(function(id){
+  // Los datos del cheque ya no viven acá: cada renglón trae los suyos y se limpian
+  // solos al armar los medios de nuevo.
+  ['sg-cob-monto', 'sg-cob-notas'].forEach(function(id){
     var e = eid(id); if (e) e.value = '';
   });
-  var pb = eid('sg-cob-chq-bcra'); if (pb) pb.innerHTML = '';
-  var fp = eid('sg-cob-forma'); if (fp) fp.value = 'transferencia';
-  sgCobForma();
+  // Un renglón limpio. Los de la cobranza anterior no pueden quedar: sería cobrarle
+  // a este cliente con la caja y el importe del otro.
+  sgCobMedioAdd();
+  // Y el ÁMBITO tampoco. Antes se reseteaba todo menos esto, así que si la cobranza
+  // anterior fue «sólo lo que falta facturar», la próxima arrancaba ahí sin que nadie
+  // lo hubiera elegido, y los pendientes no daban con los de la cuenta corriente.
+  var amb = eid('sg-cob-ambito'); if (amb) amb.value = 'todo';
 
   // TODOS los clientes activos, no sólo los que ya tienen movimientos: al que
   // todavía no se le despachó nada también se le puede cobrar una seña, y ése
@@ -19795,19 +19890,17 @@ function sgCobOpen(clienteId){
   api('/api/sg/ventas/cobranzas/cuentas').then(function(r){
     SG_COB.cuentas = (r && r.ok) ? r.data : [];
     SG_COB.cartera = (r && r.ok) ? (r.cartera || null) : null;
-    var sel = eid('sg-cob-cuenta'); if (!sel) return;
-    // Sin cuenta contable la cobranza no puede entrar al libro: se muestra, pero
-    // avisando, en vez de dejar elegirla y fallar recién al guardar.
+    // Sin cuenta contable la cobranza no puede entrar al libro: se avisa acá, en vez
+    // de dejar elegirla y fallar recién al guardar.
+    //
+    // ACÁ HABÍA UN `if (!sel) return`. El desplegable único de cuenta se fue cuando
+    // los medios pasaron a ser renglones: ese return cortaba el repintado de los
+    // renglones y el cuadro del asiento, y el modal quedaba con los desplegables
+    // vacíos sin decir por qué.
     var usables = SG_COB.cuentas.filter(function(x){ return x.cuenta_contable_id; });
-    sel.innerHTML = SG_COB.cuentas.length
-      ? SG_COB.cuentas.map(function(x){
-          return '<option value="' + x.id + '"' + (x.cuenta_contable_id ? '' : ' disabled') + '>'
-            + esc(x.nombre) + (x.cuenta_contable_id ? '' : ' — sin cuenta contable') + '</option>';
-        }).join('')
-      : '<option value="">— no hay cuentas cargadas —</option>';
     var av = eid('sg-cob-aviso');
     if (av) {
-      av.innerHTML = (usables.length || (eid('sg-cob-forma') || {}).value === 'cheque') ? '' :
+      av.innerHTML = usables.length ? '' :
         '<div style="border:1.5px solid #e0a72e;background:rgba(224,167,46,.10);border-radius:8px;'
         + 'padding:9px 11px;margin-bottom:10px;font-size:12.5px;color:#9a3412">'
         + (SG_COB.cuentas.length
@@ -19817,6 +19910,9 @@ function sgCobOpen(clienteId){
               + 'donde entra la plata, con su cuenta contable, y volvé acá.')
         + '</div>';
     }
+    // Los renglones se dibujaron ANTES de que llegaran las cuentas, así que sus
+    // desplegables salieron vacíos: se repintan ahora que hay con qué llenarlos.
+    sgCobMediosRender();
     sgCobAsientoPintar();
   });
 
@@ -19827,19 +19923,8 @@ function sgCobOpen(clienteId){
 // COBRAR CON CHEQUE NO ELIGE CUENTA. La cuenta se elige al depositarlo, que es
 // cuando la plata entra de verdad. Dejar el selector activo invitaría a pensar
 // que el banco sube hoy, y no sube.
-function sgCobForma(){
-  var esChq = (eid('sg-cob-forma') || {}).value === 'cheque';
-  var box = eid('sg-cob-chq'); if (box) box.style.display = esChq ? '' : 'none';
-  var sel = eid('sg-cob-cuenta');
-  if (sel) { sel.disabled = esChq; sel.style.opacity = esChq ? '.5' : ''; }
-  var lbl = sel && sel.parentNode ? sel.parentNode.querySelector('label') : null;
-  if (lbl) lbl.textContent = esChq ? 'En qué cuenta entra (al depositar)' : 'En qué cuenta entra';
-  if (esChq) { var av = eid('sg-cob-aviso'); if (av) av.innerHTML = ''; }
-  sgCobAsientoPintar();
-}
-
-// Los comprobantes del cliente elegido, y contra qué cuenta corriente se cancela.
-// Sin cliente todavía, la tabla lo dice en vez de quedarse en "Cargando…".
+// La funcion sgCobForma se fue con el bloque de cheque único: cada renglón trae sus propios
+// datos de cheque, y el toggle no tenía a quién mostrar ni esconder.
 function sgCobCargarCliente(clienteId){
   SG_COB.clienteId = clienteId ? Number(clienteId) : null;
   SG_COB.docs = []; SG_COB.ctaCliente = null;
@@ -19945,29 +20030,7 @@ function sgCobAsientoPintar(){
   var total = sgMilParse((eid('sg-cob-monto') || {}).value) || 0;
   if (!(total > 0)) {
     cont.innerHTML = '<div style="font-size:12.5px;color:var(--mut)">'
-      + 'Poné cuánto se cobró y acá se muestra el asiento que va a entrar al libro.</div>';
-    return;
-  }
-  // Con cheque el DEBE no es el banco: es la cuenta de cheques en cartera. El
-  // banco sube el día del depósito, y ese asiento lo hace el depósito.
-  var esChq = (eid('sg-cob-forma') || {}).value === 'cheque';
-  var cta;
-  if (esChq) {
-    if (!SG_COB.cartera) {
-      cont.innerHTML = '<div style="font-size:12.5px;color:#9a3412">'
-        + '⚠️ Falta decir contra qué cuenta contable van los cheques en cartera. Configurala en el '
-        + 'plan de cuentas antes de cobrar con cheque.</div>';
-      return;
-    }
-    cta = { cuenta_contable_id: SG_COB.cartera.id, cuenta_codigo: SG_COB.cartera.codigo,
-            cuenta_nombre: SG_COB.cartera.nombre, nombre: 'Cheque de terceros — todavía no depositado' };
-  } else {
-    var id = (eid('sg-cob-cuenta') || {}).value;
-    cta = SG_COB.cuentas.filter(function(x){ return String(x.id) === String(id); })[0];
-  }
-  if (!cta || !cta.cuenta_contable_id) {
-    cont.innerHTML = '<div style="font-size:12.5px;color:#9a3412">'
-      + '⚠️ Elegí una cuenta con cuenta contable asignada: sin eso la cobranza no entra al libro.</div>';
+      + 'Cargá con qué se paga y acá se muestra el asiento que va a entrar al libro.</div>';
     return;
   }
   var cli = SG_COB.ctaCliente;
@@ -19977,33 +20040,88 @@ function sgCobAsientoPintar(){
       + 'corriente se cancela el cobro: asignásela en su ficha de Maestros.</div>';
     return;
   }
-  cont.innerHTML = sgAsientoTabla([
-    { codigo: cta.cuenta_codigo, nombre: cta.cuenta_nombre, descripcion: cta.nombre,
-      debe: total, haber: 0 },
-    { codigo: cli.codigo, nombre: cli.nombre, descripcion: 'Cuenta corriente del cliente',
-      debe: 0, haber: total }
-  ]);
+  // ── UN PAR DE RENGLONES POR CADA MEDIO Y POR CADA MITAD ─────────────────
+  //
+  // Antes esto dibujaba SIEMPRE dos renglones por el total, con una sola cuenta.
+  // El servidor arma un par por cada medio y por cada ámbito: cobrando las dos
+  // mitades con dos medios el asiento real tiene cuatro renglones y el cuadro
+  // mostraba dos. CLAUDE.md pide que el preview ESPEJE al backend, y el cuadro
+  // existe justamente para poder frenar antes de confirmar.
+  var lineas = [], falta = null;
+  (SG_COB.medios || []).forEach(function(m){
+    var monto = sgMilParse(m.monto) || 0;
+    if (!(monto > 0)) return;
+    var cta;
+    if (m.forma === 'cheque') {
+      // Con cheque el DEBE no es el banco: es la cuenta de cheques en cartera. El
+      // banco sube el día del depósito, y ese asiento lo hace el depósito.
+      if (!SG_COB.cartera) {
+        falta = 'Falta decir contra qué cuenta contable van los cheques en cartera. '
+              + 'Configurala en el plan de cuentas antes de cobrar con cheque.';
+        return;
+      }
+      cta = { cuenta_codigo: SG_COB.cartera.codigo, cuenta_nombre: SG_COB.cartera.nombre,
+              nombre: 'Cheque de terceros — todavía no depositado', cuenta_contable_id: SG_COB.cartera.id };
+    } else {
+      cta = (SG_COB.cuentas || []).filter(function(x){ return String(x.id) === String(m.cuenta); })[0];
+    }
+    if (!cta || !cta.cuenta_contable_id) {
+      falta = 'Elegí en cada renglón una cuenta con cuenta contable asignada: sin eso la '
+            + 'cobranza no entra al libro.';
+      return;
+    }
+    // La mitad que cancela este renglón. Vacío es «lo que toque»: el reparto lo hace
+    // el servidor contra los comprobantes, así que acá se dice eso y no un número
+    // inventado —mentir en el cuadro es peor que no mostrarlo—.
+    var etq = m.ambito === 'gestion' ? ' · gestión'
+            : (m.ambito === 'fiscal' ? ' · facturado' : '');
+    lineas.push({ codigo: cta.cuenta_codigo, nombre: cta.cuenta_nombre,
+      descripcion: cta.nombre + etq, debe: monto, haber: 0 });
+    lineas.push({ codigo: cli.codigo, nombre: cli.nombre,
+      descripcion: 'Cuenta corriente del cliente' + etq, debe: 0, haber: monto });
+  });
+  if (falta) {
+    cont.innerHTML = '<div style="font-size:12.5px;color:#9a3412">⚠️ ' + escH(falta) + '</div>';
+    return;
+  }
+  cont.innerHTML = sgAsientoTabla(lineas);
 }
-
 function sgCobGuardar(){
   if (!SG_COB.clienteId) { toast('Elegí a qué cliente se le cobra', 'er'); return; }
-  var total = sgMilParse((eid('sg-cob-monto') || {}).value) || 0;
-  if (!(total > 0)) { toast('Poné cuánto se cobró', 'er'); return; }
-  var forma = (eid('sg-cob-forma') || {}).value;
-  var esChq = forma === 'cheque';
-  var cuenta = (eid('sg-cob-cuenta') || {}).value;
-  if (!esChq && !cuenta) { toast('Elegí en qué cuenta entra la plata', 'er'); return; }
-  var chq = null;
-  if (esChq) {
-    chq = { banco: (eid('sg-cob-chq-banco') || {}).value,
-            nro_cheque: (eid('sg-cob-chq-nro') || {}).value,
-            librador: (eid('sg-cob-chq-lib') || {}).value,
-            cuit_librador: (eid('sg-cob-chq-cuit') || {}).value,
-            fecha_vto: (eid('sg-cob-chq-vto') || {}).value };
-    if (!String(chq.nro_cheque || '').trim() || !String(chq.librador || '').trim()) {
-      toast('De un cheque hay que anotar por lo menos el número y quién lo firma', 'er'); return;
+  // ── CADA RENGLÓN, VALIDADO ANTES DE MANDAR NADA ──────────────────────
+  // Mejor cortar acá que dejar entrar una cobranza a medias.
+  var medios = [], total = 0, cheques = 0;
+  for (var i = 0; i < SG_COB.medios.length; i++) {
+    var m = SG_COB.medios[i], monto = sgMilParse(m.monto) || 0;
+    if (!(monto > 0)) continue;                       // renglón vacío: se saltea
+    var esC = m.forma === 'cheque';
+    if (esC) {
+      cheques++;
+      if (!String(m.nro || '').trim() || !String(m.librador || '').trim()) {
+        toast('Del cheque hay que anotar por lo menos el número y quién lo firma', 'er'); return;
+      }
+    } else if (!m.cuenta) {
+      toast('Renglón ' + (i + 1) + ': elegí en qué cuenta entra la plata', 'er'); return;
     }
+    medios.push({ forma_pago: m.forma, monto: monto,
+      cuenta_fin_id: esC ? null : Number(m.cuenta),
+      referencia: esC ? null : (m.ref || null),
+      // CONTRA QUÉ MITAD VA ESTE RENGLÓN. Vacío = «lo que toque», el reparto
+      // proporcional de siempre.
+      ambito: m.ambito || null,
+      cheque: esC ? { banco: m.banco, nro_cheque: m.nro, librador: m.librador,
+                      cuit_librador: m.cuit, fecha_vto: m.vto } : null });
+    total = Math.round((total + monto) * 100) / 100;
   }
+  if (!medios.length) { toast('Poné cuánto se cobró', 'er'); return; }
+  // UN SOLO CHEQUE POR COBRANZA, POR AHORA. Anular una cobranza sólo devuelve el
+  // primero a la cartera: los demás quedarían vivos contra una cobranza que ya no
+  // existe. Se avisa en vez de ofrecerlo y romper.
+  if (cheques > 1) {
+    toast('Por ahora va un cheque por cobranza: al anular sólo vuelve el primero a la cartera. Cargá el otro aparte.', 'er');
+    return;
+  }
+  var esChq = medios.length === 1 && !!medios[0].cheque;
   var docs = [], imp = 0;
   SG_COB.docs.forEach(function(d, i){
     var v = sgMilParse((eid('sg-cob-i-' + i) || {}).value) || 0;
@@ -20014,11 +20132,10 @@ function sgCobGuardar(){
   }
   api('/api/sg/ventas/cobranzas', 'POST', {
     cliente_id: SG_COB.clienteId,
-    cuenta_fin_id: esChq ? null : Number(cuenta),
-    cheque: chq,
     fecha: (eid('sg-cob-fecha') || {}).value,
-    forma_pago: forma,
-    referencia: (eid('sg-cob-ref') || {}).value,
+    // UN renglón por medio, cada uno con su ámbito. El servidor acepta esta lista
+    // desde el 25/8; el modal era el único que seguía mandando un medio suelto.
+    medios: medios,
     notas: (eid('sg-cob-notas') || {}).value,
     monto: total, docs: docs,
     // Contra qué mitad se cobra: de esto depende en qué libro cae el asiento.

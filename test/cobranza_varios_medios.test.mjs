@@ -1,81 +1,121 @@
-// ══ UNA COBRANZA, VARIOS MEDIOS ════════════════════════════════════════
+// ══ LA COBRANZA ACEPTA VARIOS MEDIOS, Y CADA UNO SU MITAD ══════════════════
 //
-// Pablo, 25/8/2026: parte en efectivo y parte en transferencia, "como funciona hoy el
-// pago a proveedores". Una cobranza, un asiento, un renglón por medio. Partirlo en
-// dos cobranzas dejaría dos números para lo que el cliente vivió como un solo pago.
+// Pablo, 27/8/2026: «debe seleccionar cómo cancela la parte que se facturó y cómo
+// la parte que es de gestión».
 //
-// Lo que este test cuida es el REPARTO: la parte de gestión se distribuye entre los
-// medios en proporción y el resto de redondeo va en el último. Si no, la suma de las
-// partes no da el total y falta o sobra un centavo que después nadie encuentra — y
-// crearAsiento rechaza el asiento entero a partir de un centavo.
+// El modal aceptaba UN solo medio, aunque el servidor los acepta desde el 25/8 y
+// la venta de ventanilla ya los usaba. Un cliente que pagaba mitad en efectivo y
+// mitad por transferencia obligaba a cargar DOS cobranzas para un solo pago — y no
+// había forma de decir qué medio cancelaba qué mitad.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const RAIZ = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const VEN = fs.readFileSync(path.join(RAIZ, 'src/rutas/sg_ventas.js'), 'utf8');
-const r2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
+const RAIZ = process.env.LNB_RAIZ
+  || path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const PANEL = fs.readFileSync(path.join(RAIZ, 'src/panel.html'), 'utf8');
 
-// El reparto, tal como quedó escrito en el handler.
-function repartir(medios, ges, total) {
-  let gesRepartido = 0;
-  return medios.map((m, ix) => {
-    const gesM = (ix === medios.length - 1) ? r2(ges - gesRepartido) : r2(ges * (m.monto / total));
-    gesRepartido = r2(gesRepartido + gesM);
-    return { monto: m.monto, fiscal: r2(m.monto - gesM), gestion: gesM };
-  });
-}
-
-test('la suma de las partes da el total, siempre', () => {
-  const casos = [
-    { medios: [{ monto: 60000 }, { monto: 40000 }], ges: 0, total: 100000 },
-    { medios: [{ monto: 60000 }, { monto: 40000 }], ges: 10000, total: 100000 },
-    // El caso feo: una gestión que no se parte redondo entre tres medios.
-    { medios: [{ monto: 33333.33 }, { monto: 33333.33 }, { monto: 33333.34 }], ges: 10000, total: 100000 },
-    { medios: [{ monto: 0.01 }, { monto: 99999.99 }], ges: 7777.77, total: 100000 },
-    { medios: [{ monto: 1184 }, { monto: 259 }, { monto: 9250 }], ges: 810, total: 10693 },
-  ];
-  for (const c of casos) {
-    const p = repartir(c.medios, c.ges, c.total);
-    const sumaF = r2(p.reduce((a, x) => a + x.fiscal, 0));
-    const sumaG = r2(p.reduce((a, x) => a + x.gestion, 0));
-    assert.equal(sumaG, c.ges, 'la gestión repartida tiene que dar la gestión total: ' + JSON.stringify(c));
-    assert.equal(r2(sumaF + sumaG), c.total, 'y fiscal + gestión, el total');
-    for (const x of p) assert.equal(r2(x.fiscal + x.gestion), x.monto, 'y cada medio cierra solo');
+const cuerpo = (nombre) => {
+  const i = PANEL.indexOf('function ' + nombre + '(');
+  assert.ok(i > 0, 'no encontré ' + nombre);
+  let d = 0, j = PANEL.indexOf('{', i);
+  for (; j < PANEL.length; j++) {
+    if (PANEL[j] === '{') d++;
+    else if (PANEL[j] === '}') { d--; if (d === 0) { j++; break; } }
   }
+  return PANEL.slice(i, j);
+};
+
+test('el modal tiene renglones de pago, no un medio suelto', () => {
+  assert.match(PANEL, /id="sg-cob-medios"/);
+  assert.match(PANEL, /onclick="sgCobMedioAdd\(\)"/);
+  assert.match(PANEL, /function sgCobMediosRender\(\)\{/);
+  // Y los campos sueltos de antes ya no están.
+  assert.ok(!PANEL.includes('id="sg-cob-forma"'), 'quedó el selector único de forma');
+  assert.ok(!PANEL.includes('id="sg-cob-cuenta"'), 'quedó el selector único de cuenta');
 });
 
-test('el asiento no puede descuadrar por el reparto', () => {
-  // crearAsiento rechaza a partir de UN centavo, y cada ámbito balancea por su
-  // cuenta: por cada parte se escriben dos renglones espejados, así que lo único que
-  // puede romperlo es que las partes no sumen. Eso es lo que prueba el test de arriba.
-  const p = repartir([{ monto: 33333.33 }, { monto: 33333.33 }, { monto: 33333.34 }], 10000, 100000);
-  let debe = 0, haber = 0;
-  for (const x of p) { for (const m of [x.fiscal, x.gestion]) { if (m > 0.001) { debe += m; haber += m; } } }
-  assert.equal(r2(debe - haber), 0);
-  assert.equal(r2(debe), 100000);
+test('cada renglón dice contra qué mitad va', () => {
+  const b = cuerpo('sgCobMediosRender');
+  assert.match(b, /\['', 'Lo que toque'\], \['fiscal', 'Lo facturado'\], \['gestion', 'Lo que falta facturar'\]/);
+  // Y sólo se pregunta si hay una mitad sin facturar: si no, es una pregunta sin
+  // respuesta posible.
+  assert.match(b, /var hayGes = sgCobHayGestion\(\)/);
+  assert.match(b, /hayGes \? '<label/);
+  assert.match(cuerpo('sgCobHayGestion'), /Number\(d\.pendiente_gestion\) > 0\.009/);
 });
 
-test('el payload viejo de un solo medio sigue andando', () => {
-  assert.match(VEN, /Array\.isArray\(req\.body\?\.medios\) && req\.body\.medios\.length/,
-    'con `medios` se usa la lista; sin `medios` se normaliza el payload viejo');
-  assert.match(VEN, /forma_pago: forma_pago \|\| 'transferencia', cuenta_fin_id: req\.body\?\.cuenta_fin_id/,
-    'el payload viejo se convierte en una lista de un elemento: un solo camino abajo');
+test('el ámbito viaja al servidor en cada medio', () => {
+  const b = cuerpo('sgCobGuardar');
+  assert.match(b, /ambito: m\.ambito \|\| null/);
+  assert.match(b, /medios: medios,/);
+  // Y ya no manda el medio suelto de antes.
+  assert.ok(!/cuenta_fin_id: esChq \? null : Number\(cuenta\)/.test(b));
 });
 
-test('los medios tienen que dar el total', () => {
-  assert.match(VEN, /Los medios de cobro suman \$\{sumaMedios\} y la cobranza es de \$\{total\}/,
-    'si no cierran, la diferencia se la come el asiento y el arqueo deja de dar');
+test('tipear el importe NO redibuja el renglón', () => {
+  // Es el bug del «un dígito por vez» que ya se arregló en la ventanilla: no hay
+  // que repetirlo acá.
+  const b = cuerpo('sgCobMedioUpd');
+  assert.match(b, /if \(campo === 'forma'\) \{ sgCobMediosRender\(\); return; \}/);
+  const tras = b.slice(b.indexOf("if (campo === 'forma')") + 40);
+  assert.ok(!tras.includes('sgCobMediosRender()'));
+  assert.match(b, /sgCobMediosPie\(\);/);
 });
 
-test('el mismo cheque no entra dos veces, ni siquiera en la misma cobranza', () => {
-  assert.match(VEN, /en esta misma cobranza/,
-    'dos medios con el mismo papel es el error que aparece cuando se cobra apurado');
+test('las cuentas bancarias se filtran por la negativa', () => {
+  // El tipo «banco» no existe: son caja, cuenta_corriente y caja_ahorro. Es el
+  // mismo error que dejaba la ventanilla sin poder cobrar por transferencia.
+  const b = cuerpo('sgCobMediosRender');
+  assert.match(b, /var caja = String\(c\.tipo\) === 'caja';/);
+  assert.match(b, /esCaja \? caja : !caja/);
 });
 
-test('cada cheque de la cobranza entra a la cartera, no sólo el primero', () => {
-  assert.match(VEN, /for \(const m of medios\) \{\s*\r?\n\s*if \(!m\.cheque\) continue;/,
-    'con varios cheques, todos tienen que quedar en cartera');
+test('el total es la SUMA de los renglones, no un campo aparte', () => {
+  // Tenerlo en dos lados era la forma más fácil de que dijeran cosas distintas.
+  assert.match(PANEL, /<input type="hidden" id="sg-cob-monto">/);
+  const b = cuerpo('sgCobMediosPie');
+  assert.match(b, /var h = eid\('sg-cob-monto'\); if \(h\) h\.value = String\(t\);/);
+});
+
+test('un renglón sin cuenta o un cheque sin número no salen', () => {
+  const b = cuerpo('sgCobGuardar');
+  assert.match(b, /elegí en qué cuenta entra la plata/);
+  assert.match(b, /por lo menos el número y quién lo firma/);
+  assert.match(b, /if \(!medios\.length\) \{ toast\('Poné cuánto se cobró'/);
+});
+
+test('DOS CHEQUES NO: al anular sólo vuelve el primero a la cartera', () => {
+  // Es un bug conocido del backend. Ofrecerlo sería dejar el segundo vivo contra
+  // una cobranza que ya no existe. Se avisa en vez de romper.
+  const b = cuerpo('sgCobGuardar');
+  assert.match(b, /if \(cheques > 1\)/);
+  assert.match(b, /sólo vuelve el primero a la cartera/);
+});
+
+test('el cuadro del asiento ESPEJA los renglones', () => {
+  // Dibujaba siempre dos renglones por el total. El servidor arma un par por cada
+  // medio y por cada ámbito: con dos medios y dos mitades el asiento real tiene
+  // cuatro y el cuadro mostraba dos. El cuadro existe para poder frenar antes de
+  // confirmar; si miente, no sirve.
+  const b = cuerpo('sgCobAsientoPintar');
+  assert.match(b, /\(SG_COB\.medios \|\| \[\]\)\.forEach/);
+  assert.match(b, /m\.ambito === 'gestion' \? ' · gestión'/);
+  assert.match(b, /SG_COB\.cartera/, 'el cheque va contra cheques en cartera, no contra el banco');
+  assert.ok(!/debe: total, haber: 0/.test(b), 'quedó el cuadro viejo de dos renglones');
+});
+
+test('el modal arranca limpio: ni renglones ni ámbito de la vez anterior', () => {
+  const b = cuerpo('sgCobOpen');
+  assert.match(b, /sgCobMedioAdd\(\);/);
+  assert.match(b, /var amb = eid\('sg-cob-ambito'\); if \(amb\) amb\.value = 'todo';/);
+});
+
+test('los renglones se repintan cuando llegan las cuentas', () => {
+  // Se dibujan antes de que la respuesta vuelva, así que sus desplegables salen
+  // vacíos. Y acá había un `return` temprano que cortaba el repintado.
+  assert.match(PANEL, /sgCobMediosRender\(\);\r?\n\s*sgCobAsientoPintar\(\);/);
+  assert.ok(!/var sel = eid\('sg-cob-cuenta'\); if \(!sel\) return;/.test(PANEL));
 });
