@@ -6176,6 +6176,12 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
       </div>
       <div id="sgfe-dif" style="font-size:12.5px;margin-top:8px"></div>
       <div id="sgfe-desglose" style="font-size:12px;color:var(--mut);margin-top:4px"></div>
+      <!-- EL PAPEL DEL FLETERO. Se sube DESPUÉS de valorizar: la plata no espera
+           al escaneo, y el archivo se adjunta cuando llega. -->
+      <div class="fl ff" style="margin-top:8px"><label>Factura del fletero (PDF o foto)</label>
+        <div id="sgfe-arch" style="font-size:12px"></div></div>
+      <input type="file" id="sgfe-arch-file" accept="application/pdf,image/jpeg,image/png"
+             style="display:none" onchange="sgFeArchSubir(this)">
       <div class="fl ff" style="margin-top:8px"><label>Observaciones</label><input id="sgfe-obs"></div>
       <!-- TODA OPERACIÓN QUE ASIENTA MUESTRA EL ASIENTO. Es el único momento en
            que se puede frenar: después ya está hecho. -->
@@ -18616,7 +18622,67 @@ function sgFeOpen(recId){
   if (al) al.value = (x.iva_alicuota != null && x.iva_alicuota !== '') ? String(x.iva_alicuota) : '21';
   sgFeDif();
   sgFeAsiento();
+  sgFeArchPintar();
   sgModalArriba('sgfe-modal');
+}
+
+// ── EL PAPEL DEL FLETERO ─────────────────────────────────────────────────
+//
+// Se adjunta DESPUÉS de valorizar, contra el gasto ya creado: la plata no espera
+// al escaneo. Mientras el flete no está valorizado no hay gasto al que colgarlo, y
+// eso se dice en vez de ofrecer un botón que no puede funcionar.
+function sgFeArchPintar(){
+  var c = eid('sgfe-arch'); if (!c) return;
+  var x = SGFE.sel || {};
+  if (!x.gasto_id) {
+    c.innerHTML = '<span style="color:var(--mut)">Guardá primero la valorización y '
+      + 'después subí la factura.</span>';
+    return;
+  }
+  if (x.tiene_archivo) {
+    c.innerHTML = '<a href="/api/sg/gastos-directos/' + x.gasto_id + '/archivo?inline=1" '
+      + 'target="_blank" class="btn bo bs">📄 Ver la factura</a> '
+      + '<button class="btn bo bs" onclick="sgFeArchElegir()">Reemplazar</button>'
+      + (lnbPuedeAnular(['sg-gastos-directos', 'sg-compras'])
+          ? ' <button class="btn bd bs" onclick="sgFeArchSacar()" title="Suelta el archivo; no lo borra del depósito">×</button>'
+          : '');
+    return;
+  }
+  c.innerHTML = '<button class="btn bo bs" onclick="sgFeArchElegir()">'
+    + '📎 Subir la factura</button> '
+    + '<span style="color:var(--mut);font-size:11px">PDF, JPG o PNG · hasta 10MB</span>';
+}
+
+// El input de archivo está escondido y lo dispara el botón. Va como función y no
+// como eid(...) adentro del onclick: las comillas anidadas en un atributo que se
+// arma por concatenación son la forma más fácil de romper el archivo entero.
+function sgFeArchElegir(){ var i = eid('sgfe-arch-file'); if (i) i.click(); }
+
+function sgFeArchSubir(input){
+  var f = input.files && input.files[0]; if (!f) return;
+  var x = SGFE.sel || {};
+  if (!x.gasto_id) { toast('Guardá primero la valorización', 'er'); input.value = ''; return; }
+  var fd = new FormData(); fd.append('archivo', f);
+  eid('sgfe-arch').innerHTML = '<span style="color:var(--mut)">Subiendo…</span>';
+  fetch('/api/sg/gastos-directos/' + x.gasto_id + '/archivo', { method: 'POST', body: fd, credentials: 'include' })
+    .then(function(r){ return r.json().catch(function(){ return {}; }); })
+    .then(function(r){
+      input.value = '';
+      if (!r || !r.ok) { toast((r && r.error) || 'No se pudo subir', 'er'); sgFeArchPintar(); return; }
+      SGFE.sel.tiene_archivo = 1;
+      toast('Factura adjuntada', 'ok');
+      sgFeArchPintar(); sgFeLoad();
+    });
+}
+
+function sgFeArchSacar(){
+  var x = SGFE.sel || {}; if (!x.gasto_id) return;
+  if (!confirm('¿Sacar la factura adjunta? El archivo queda en el depósito; se suelta la referencia.')) return;
+  api('/api/sg/gastos-directos/' + x.gasto_id + '/archivo', 'DELETE').then(function(r){
+    if (!r || !r.ok) { toast((r && r.error) || 'No se pudo', 'er'); return; }
+    SGFE.sel.tiene_archivo = 0;
+    sgFeArchPintar(); sgFeLoad();
+  });
 }
 
 // ── EL ASIENTO DE LA FACTURA DEL FLETERO ─────────────────────────────────
@@ -18700,6 +18766,15 @@ function sgFeGuardar(){
     // gasto fuera del libro no se descubre hasta que el mayor no cierra.
     if (r.data && r.data.aviso) { alert(r.data.aviso); }
     else { toast('Flete valorizado y contabilizado — ya está en el costo de los lotes', 'ok'); }
+    // NO se cierra si todavía falta el papel: recién ahí existe el gasto al que
+    // colgarlo, y cerrar obliga a volver a entrar para adjuntar la factura que se
+    // tiene en la mano.
+    if (r.data && r.data.id && !(SGFE.sel && SGFE.sel.tiene_archivo)) {
+      SGFE.sel.gasto_id = r.data.id;
+      sgFeArchPintar();
+      sgFeLoad();
+      return;
+    }
     closeMB('sgfe-modal');
     sgFeLoad();
   });

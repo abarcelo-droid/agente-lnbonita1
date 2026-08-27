@@ -8485,6 +8485,12 @@ router.get('/fletes-entrada', requireAuth, (req, res) => {
                WHERE l.recepcion_id = r.id AND l.activo = 1 AND l.bultos IS NULL) AS lotes_sin_bultos,
              g.id AS gasto_id, g.estado AS gasto_estado, g.monto AS gasto_monto,
              g.proveedor_servicio_id, g.cuenta_ref, g.fecha_valorizacion,
+             -- La alícuota con la que se cargó, para que al reabrir el modal no se
+             -- vuelva a proponer el 21% sobre una factura que era al 10,5%.
+             g.iva_alicuota, g.asiento_id,
+             -- Si el papel está. Sin esto no hay forma de saber a qué fletes les
+             -- falta la factura sin abrirlos uno por uno.
+             (g.storage_key IS NOT NULL) AS tiene_archivo,
              pv.razon_social AS fletero_nombre
         FROM sg_recepciones r
         JOIN sg_oc o ON o.id = r.oc_id
@@ -8727,6 +8733,80 @@ router.post('/fletes-entrada/:recepcionId/valorizar', requireAdmin, (req, res) =
   } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
 });
 
+// ══ EL PAPEL DEL FLETERO ═══════════════════════════════════════════════════
+//
+// Pablo, 27/8/2026: «armemos para subir la factura». El asiento ya se hace; esto
+// es el comprobante que lo respalda.
+//
+// Mismo camino que los documentos del embarque: el archivo va a R2 y en la base
+// queda sólo la referencia. La storage_key NO sale al navegador — se baja por el
+// backend, que verifica que el archivo sea el de ESE gasto.
+//
+// Va DESPUÉS de valorizar y no adentro: el flete se valoriza igual sin el papel
+// —la plata no espera al escaneo— y el archivo se adjunta cuando llega.
+// uploadDoc y no uploadDocMem: la constante de multer se declara MÁS ABAJO en el
+// archivo, y pasarla acá como middleware la evalúa al registrar la ruta —o sea antes
+// de que exista— y el server no arranca. uploadDoc es una función declarada, se
+// hoistea, y sólo la toca cuando entra un pedido. Además devuelve JSON limpio si el
+// archivo se pasa de tamaño, en vez del HTML de error de express.
+router.post('/gastos-directos/:id/archivo', requireAuth, uploadDoc, async (req, res) => {
+  const db = getDb();
+  try {
+    if (!storageConfigurado()) {
+      return res.status(503).json({ ok: false, error: 'Almacenamiento no configurado: no se puede guardar el archivo' });
+    }
+    const g = db.prepare('SELECT * FROM sg_gastos_directos WHERE id=? AND activo=1').get(req.params.id);
+    if (!g) return res.status(404).json({ ok: false, error: 'Ese gasto no existe' });
+    const f = req.file;
+    if (!f) return res.status(400).json({ ok: false, error: 'Falta el archivo' });
+    if (!DOC_MIMES.has(f.mimetype)) {
+      return res.status(400).json({ ok: false, error: 'Formato no permitido (sólo PDF, JPG o PNG)' });
+    }
+    if (f.size > DOC_MAX_BYTES) return res.status(400).json({ ok: false, error: 'El archivo supera 10MB' });
+
+    const key = 'sg/gastos/' + g.id + '/' + Date.now() + '_' + sanitizarNombreDoc(f.originalname || 'factura');
+    await subirArchivo(f.buffer, key, f.mimetype);
+    // El UPDATE va DESPUÉS de subir: si la subida falla, la fila no queda apuntando
+    // a un archivo que no existe. Al revés dejaría un botón de descarga que rompe.
+    db.prepare(`UPDATE sg_gastos_directos SET storage_key=?, archivo_nombre=?, archivo_mime=?,
+      archivo_bytes=? WHERE id=?`).run(key, val(f.originalname), f.mimetype, f.size, g.id);
+    res.json({ ok: true, data: { id: g.id, nombre: f.originalname, bytes: f.size } });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+router.get('/gastos-directos/:id/archivo', requireAuth, async (req, res) => {
+  const db = getDb();
+  try {
+    if (!storageConfigurado()) return res.status(503).json({ ok: false, error: 'Almacenamiento no configurado' });
+    const g = db.prepare('SELECT * FROM sg_gastos_directos WHERE id=? AND activo=1').get(req.params.id);
+    if (!g || !g.storage_key) return res.status(404).json({ ok: false, error: 'Ese gasto no tiene factura cargada' });
+    const stream = await obtenerArchivo(g.storage_key);
+    res.setHeader('Content-Type', g.archivo_mime || 'application/octet-stream');
+    // ?inline=1 lo MUESTRA en vez de bajarlo, y sólo para PDF e imágenes: un archivo
+    // raro no se renderiza adentro de la aplicación.
+    const inline = req.query.inline === '1'
+      && /^(application\/pdf|image\/(jpeg|png))$/.test(g.archivo_mime || '');
+    res.setHeader('Content-Disposition', (inline ? 'inline' : 'attachment')
+      + "; filename*=UTF-8''" + encodeURIComponent(g.archivo_nombre || 'factura'));
+    if (g.archivo_bytes) res.setHeader('Content-Length', g.archivo_bytes);
+    stream.on('error', () => { if (!res.headersSent) res.status(500).end(); });
+    stream.pipe(res);
+  } catch (e) { if (!res.headersSent) res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// Sacar el archivo NO lo borra de R2: se suelta la referencia. El expediente de lo
+// que se subió alguna vez se conserva, igual que con los documentos del embarque.
+router.delete('/gastos-directos/:id/archivo', requireAuth, (req, res) => {
+  const db = getDb();
+  try {
+    const g = db.prepare('SELECT id, storage_key FROM sg_gastos_directos WHERE id=? AND activo=1').get(req.params.id);
+    if (!g || !g.storage_key) return res.status(404).json({ ok: false, error: 'Ese gasto no tiene factura cargada' });
+    db.prepare(`UPDATE sg_gastos_directos SET storage_key=NULL, archivo_nombre=NULL,
+      archivo_mime=NULL, archivo_bytes=NULL WHERE id=?`).run(g.id);
+    res.json({ ok: true });
+  } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
+});
+
 router.get('/gastos-servicio', requireAuth, (req, res) => {
   const db = getDb();
   try {
@@ -8738,7 +8818,8 @@ router.get('/gastos-servicio', requireAuth, (req, res) => {
     if (req.query.estado) { where.push('g.estado=?'); params.push(req.query.estado); }
     if (req.query.proveedor_id) { where.push('g.proveedor_servicio_id=?'); params.push(req.query.proveedor_id); }
     const rows = db.prepare(`
-      SELECT g.*, pv.razon_social AS fletero_nombre,
+      SELECT g.*, (g.storage_key IS NOT NULL) AS tiene_archivo,
+        pv.razon_social AS fletero_nombre,
         d.numero AS despacho_numero, d.fecha_despacho, c.razon_social AS cliente_nombre,
         r.numero_recepcion, oc.trazabilidad AS partida, oc.numero AS oc_numero,
         prov.razon_social AS proveedor_nombre,
