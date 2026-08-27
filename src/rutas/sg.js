@@ -6086,7 +6086,7 @@ router.put('/oc/:id', requireAuth, (req, res) => {
 // reserva que quede colgada se arregla en un solo lugar.
 //
 // `rechazo` = { motivo, userId } cuando el camión llegó y se devolvió.
-function cerrarOcSinEntrada(db, ocId, userId, rechazo) {
+function cerrarOcSinEntrada(db, ocId, userId, rechazo, anulMotivo) {
   const tieneRec = db.prepare('SELECT COUNT(*) c FROM sg_recepciones WHERE oc_id=? AND activo=1').get(ocId).c;
   if (tieneRec > 0) {
     return { error: rechazo
@@ -6105,6 +6105,13 @@ function cerrarOcSinEntrada(db, ocId, userId, rechazo) {
       // que una orden que nunca se mandó, y no hay forma de contarlos.
       db.prepare(`UPDATE sg_oc SET rechazado_en=datetime('now','localtime'),
         rechazado_motivo=?, rechazado_por=? WHERE id=?`).run(rechazo.motivo, userId, ocId);
+    }
+    // POR QUÉ SE ANULÓ, y adentro de la MISMA transacción que la cierra: escribirlo
+    // después dejaría, si algo falla en el medio, una orden anulada sin motivo — que
+    // es exactamente lo que este cambio vino a sacar.
+    if (anulMotivo) {
+      db.prepare(`UPDATE sg_oc SET anulado_en=datetime('now','localtime'),
+        anulado_motivo=?, anulado_por=? WHERE id=?`).run(anulMotivo, userId, ocId);
     }
     db.prepare('DELETE FROM sg_oc_vencimientos WHERE oc_id=? AND pagado=0').run(ocId);
     if (itemIds.length) {
@@ -6146,13 +6153,54 @@ router.post('/oc/:id/rechazar', requireAuth, express.json(), (req, res) => {
   } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
 });
 
-router.post('/oc/:id/anular', requireAuth, (req, res) => {
+// ── LA ORDEN LA ANULA EL QUE LA HIZO ─────────────────────────────────────────
+//
+// Pablo, 27/8/2026: «una orden de compra debe poder eliminarse íntegramente, y debe
+// figurar como anulada; se puede anular solamente por el usuario que la generó».
+//
+// Es una compra que alguien cerró con un productor. El que la dio de baja sin haberla
+// hecho deja al comprador explicándole al proveedor una decisión que no tomó.
+//
+// El administrador entra igual, como en todo el resto del sistema: si no, una orden
+// del que se fue de la empresa no la puede cerrar nadie.
+function puedeAnularOc(req, oc) {
+  const u = req.user;
+  if (!u) return false;
+  if (u.rol === 'admin') return true;
+  // Las órdenes viejas no tienen creado_por: ahí no hay a quién reservárselo, y
+  // trabarlas para todos dejaría un pendiente que nadie puede sacar.
+  if (oc.creado_por == null) return true;
+  return Number(oc.creado_por) === Number(u.id);
+}
+
+router.post('/oc/:id/anular', requireAuth, express.json(), (req, res) => {
   const db = getDb();
   try {
+    const oc = db.prepare('SELECT id, estado, activo, creado_por FROM sg_oc WHERE id=?').get(req.params.id);
+    if (!oc || !oc.activo) return res.status(404).json({ ok: false, error: 'Orden no encontrada' });
+    if (oc.estado === 'anulada') return res.status(400).json({ ok: false, error: 'Esa orden ya está anulada' });
+    if (!puedeAnularOc(req, oc)) {
+      const quien = db.prepare('SELECT nombre FROM usuarios WHERE id=?').get(oc.creado_por);
+      return res.status(403).json({ ok: false, error:
+        'Esta orden la anula quien la generó'
+        + (quien && quien.nombre ? ': ' + quien.nombre : '')
+        + '. Es una compra que se cerró con un productor, y darla de baja sin haberla hecho '
+        + 'deja al comprador explicando una decisión que no tomó.'
+        // Y EL CAMINO. Un «no podés» a secas deja al que lo lee sin saber qué hacer
+        // con la orden que igual hay que cerrar.
+        + ' Pedísela a quien la hizo, o a un administrador.' });
+    }
+    // POR QUÉ SE ANULA. Todo lo que deja trabajo afuera en este repo pide el motivo;
+    // anular una orden era lo único que salía con un confirm y nada más, así que a
+    // los dos meses no había forma de saber qué había pasado con esa compra.
+    const motivo = val(req.body && req.body.motivo);
+    if (!motivo || motivo.length < 3) {
+      return res.status(400).json({ ok: false, error: 'Escribí por qué se anula: queda registrado' });
+    }
     // La MISMA función que el rechazo: cierra la orden, cancela las reservas en
     // tránsito y suelta los vencimientos impagos. Lo único que cambia es que acá no
     // se anota ningún hecho del proveedor — anular es «esta orden no va a pasar».
-    const r = cerrarOcSinEntrada(db, Number(req.params.id), uid(req), null);
+    const r = cerrarOcSinEntrada(db, Number(req.params.id), uid(req), null, motivo);
     if (r.error) return res.status(400).json({ ok: false, error: r.error });
     if (r.pedidos_afectados.length) {
       console.warn(`[SG] OC ${req.params.id} anulada — reservas en tránsito canceladas. `

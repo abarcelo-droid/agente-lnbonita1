@@ -10874,7 +10874,12 @@ function sgOcPintar(){
       // están los dos caminos —el botón "+ Recibir mercadería", cuyo desplegable
       // lista todas las órdenes abiertas, y el "Recibir" de cada fila de la bandeja—
       // y son los mismos que usaba este botón.
-      if(o.estado==='abierta' && lnbPuedeAnular('sg-compras'))
+      // LA ANULA EL QUE LA HIZO (Pablo, 27/8/2026). El botón se ofrece a quien
+      // puede usarlo: mostrárselo al resto es ofrecer un 403.
+      //
+      // También en BORRADOR: una orden a medio cargar que se abandona se quedaba
+      // en la lista para siempre, sin ninguna forma de sacarla.
+      if((o.estado==='abierta' || o.estado==='borrador') && sgOcLaAnulo(o))
         acc+='<button class="btn bd bs" title="Anular la orden" onclick="sgOcAnular('+o.id+')">✖</button>';
 
 
@@ -10901,6 +10906,13 @@ function sgOcPintar(){
           // Que un admin la haya dado por terminada no es lo mismo que haber
           // entrado completa, y en la lista se perdía.
           + (o.cerrada_en ? '<div class="sg-oc-sub">confirmada</div>' : '')
+          // POR QUÉ SE CERRÓ. Una orden que aparece «Anulada» y nada más obliga a
+          // preguntarle al comprador qué pasó con esa compra; a los dos meses ya no
+          // se acuerda nadie. El motivo se pide al anular, así que mostrarlo es gratis.
+          + ((o.anulado_motivo || o.rechazado_motivo)
+              ? '<div class="sg-oc-sub" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap"'
+                + ' title="' + esc(o.anulado_motivo || o.rechazado_motivo) + '">'
+                + esc(o.anulado_motivo || o.rechazado_motivo) + '</div>' : '')
           + '</td>'
         + '<td style="text-align:right;white-space:nowrap">' + acc + '</td></tr>';
     }).join('')
@@ -11425,9 +11437,51 @@ function sgOcGuardar(){
     else toast((r&&r.error)||'Error','er');
   });
 }
+// ── QUIÉN PUEDE ANULAR UNA ORDEN ─────────────────────────────────────────
+//
+// Pablo, 27/8/2026: «se puede anular solamente por el usuario que la generó».
+//
+// Es una compra que alguien cerró con un productor. El que la da de baja sin
+// haberla hecho deja al comprador explicándole al proveedor una decisión que no
+// tomó.
+//
+// ESPEJA lo que decide el servidor (puedeAnularOc): el nivel sigue haciendo falta
+// —esto no lo reemplaza— pero además tiene que ser suya. El admin entra igual, o
+// una orden del que se fue de la empresa no la cierra nadie; y las órdenes viejas
+// sin creado_por no se le trababan a nadie.
+function sgOcLaAnulo(o){
+  if (!lnbPuedeAnular('sg-compras')) return false;
+  var u = window.LNB_USER || {};
+  if (u.rol === 'admin') return true;
+  if (o.creado_por == null) return true;
+  return String(o.creado_por) === String(u.id);
+}
+
 function sgOcAnular(id){
-  if(!confirm('¿Anular esta OC?')) return;
-  api('/api/sg/oc/'+id+'/anular','POST').then(function(r){ if(r&&r.ok){toast('OC anulada','ok');sgLoadOC();} else toast((r&&r.error)||'Error','er'); });
+  var o = (SG_OC_ROWS || []).filter(function(x){ return String(x.id) === String(id); })[0] || {};
+  var motivo = prompt('ANULAR la orden ' + (sgOcId(o) || ('#' + id))
+    + String.fromCharCode(10,10)
+    + 'La orden queda como ANULADA —no se borra— y se cancelan las reservas que su '
+    + 'mercadería tenía comprometidas.' + String.fromCharCode(10,10)
+    + 'Por qué se anula:', '');
+  if (motivo === null) return;
+  if (String(motivo).trim().length < 3) { toast('Escribí por qué se anula', 'er'); return; }
+  api('/api/sg/oc/' + id + '/anular', 'POST', { motivo: String(motivo).trim() }).then(function(r){
+    // El rebote va en cartel, no en un toast que se apaga solo: acá el mensaje dice
+    // de quién es la orden y a quién pedírsela, y eso hay que poder leerlo.
+    if (!r || !r.ok) { alert((r && r.error) || 'No se pudo anular'); return; }
+    // Los pedidos que contaban con esta mercadería: su reserva se canceló y hay que
+    // decirlo, no dejarlo en el log del servidor.
+    var af = (r.data && r.data.pedidos_afectados) || [];
+    if (af.length) {
+      alert('La orden quedó anulada.' + String.fromCharCode(10,10)
+        + 'OJO: había pedidos que contaban con esta mercadería y su reserva se canceló:'
+        + String.fromCharCode(10) + af.join(', '));
+    } else {
+      toast('Orden anulada', 'ok');
+    }
+    sgLoadOC();
+  });
 }
 function sgOcVer(id){
   SG.ocVerId = id;
