@@ -11159,7 +11159,14 @@ function sgOcRenderItems(){
       +'<button type="button" class="sg-seg-btn'+(bulto?' on':'')+'" onclick="sgOcUpd('+i+',\'modo\',\'bulto\')">por bulto</button>'
       +'</div>';
     var cantPh = bulto ? 'bultos' : 'kg';
-    var precioPh = bulto ? '$/bulto' : '$/kg';
+    // EL PRECIO SE LLAMA PRECIO, y dice si lleva IVA. Antes decía "$/bulto" a
+    // secas: si el número era neto o bruto había que ir a mirar dos radios que
+    // están arriba de todo, fuera de la vista mientras se cargan los renglones.
+    // El comprador cierra en bruto y ese es el número que tiene que poder tipear
+    // sin hacer ninguna cuenta.
+    var unidadPh = bulto ? '$/bulto' : '$/kg';
+    var conIva = sgOcDiscrimina() && sgOcIncluyeIva();
+    var precioPh = 'Precio ' + unidadPh + (sgOcDiscrimina() ? (conIva ? ' c/IVA' : ' neto') : '');
     // CAMBIO 1 — inputs type="text" inputmode="numeric" con separador de miles VISUAL (sgMilShow/sgOcMilInput).
     // El subtotal por item (#sg-oc-sub-i) lo completa sgOcTotales en vivo (cálculo intacto).
     return '<div class="sg-oc-card">'
@@ -11176,7 +11183,12 @@ function sgOcRenderItems(){
         // informativo —no suma al total ni arma deuda— pero es el dato con el
         // que después se compara si la operación dio lo que se pensaba. Hoy eso
         // vive en un chat de WhatsApp.
-        +(firme?'<input type="text" inputmode="numeric" placeholder="'+precioPh+'" value="'+sgMilShow(it.precio)+'" oninput="sgOcMilInput(this,'+i+',\'precio\')">'
+        +(firme?'<input type="text" inputmode="numeric" placeholder="'+precioPh+'"'
+                 +' title="'+(sgOcDiscrimina()
+                     ? (conIva ? 'El precio que se pactó con el proveedor, con IVA adentro. El neto se despeja solo.'
+                               : 'El precio SIN IVA. El IVA se adiciona — cambialo arriba si pactaste en bruto.')
+                     : 'El precio que se pactó con el proveedor.')+'"'
+                 +' value="'+sgMilShow(it.precio)+'" oninput="sgOcMilInput(this,'+i+',\'precio\')">'
                :'<input type="text" inputmode="numeric" placeholder="ref. venta '+(bulto?'$/bulto':'$/kg')+'" title="Precio de referencia de venta — informativo, no suma al total" value="'+sgMilShow(it.precio_ref)+'" oninput="sgOcMilInput(this,'+i+',\'precio_ref\')">')
         +'<span class="sg-oc-monto" id="sg-oc-sub-'+i+'"></span>'
       +'</div>'
@@ -11200,12 +11212,22 @@ function sgOcTotales(){
     if(!firme){ if(subEl) subEl.textContent='—'; return; }
     var bruto = bulto ? (cant*precio) : (kg*precio);  // $ línea con criterio actual
     tBruto += bruto;
-    if(subEl) subEl.textContent=sgMoney(Math.round(bruto));
+    // EL RENGLÓN MUESTRA LO QUE SE VA A PAGAR, con IVA. Mostraba lo tipeado × la
+    // cantidad: con el precio cargado en NETO ese número no es lo que se le paga al
+    // proveedor, y el comprador lo comparaba contra el remito y no le daba.
+    var lineaNeto = bruto, lineaIva = 0;
     if(disc){
       var alic=sgFamAlic(it.producto_id);
       if(alic==null){ tNeto += bruto; }                                  // familia sin alícuota → no discrimina esa línea
-      else if(incl){ var neto=bruto/(1+alic/100); tNeto+=neto; tIva+=bruto-neto; }
-      else { tNeto+=bruto; tIva+=bruto*alic/100; }
+      else if(incl){ var neto=bruto/(1+alic/100); tNeto+=neto; tIva+=bruto-neto; lineaNeto=neto; lineaIva=bruto-neto; }
+      else { tNeto+=bruto; tIva+=bruto*alic/100; lineaIva=bruto*alic/100; }
+    }
+    if(subEl){
+      var lineaTotal = lineaNeto + lineaIva;
+      subEl.textContent = sgMoney(Math.round(lineaTotal));
+      subEl.title = lineaIva > 0
+        ? 'Neto ' + sgMoney(Math.round(lineaNeto)) + ' + IVA ' + sgMoney(Math.round(lineaIva))
+        : '';
     }
   });
   var el=eid('sg-oc-totales');
