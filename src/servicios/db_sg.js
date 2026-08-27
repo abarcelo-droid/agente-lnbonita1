@@ -1928,6 +1928,11 @@ try {
   // El estado sigue siendo 'anulada' —el CHECK de sg_oc no admite otro y
   // rehacer esa tabla arrastra media docena de claves foráneas— y el hecho vive
   // en estas columnas.
+  // Y la anulación, con su motivo. Todo lo que deja trabajo afuera en este repo
+  // pide por qué; anular una orden era lo único que salía con un confirm y nada más.
+  if (addCol('sg_oc', 'anulado_en',      'TEXT'))    added.push('sg_oc.anulado_en');
+  if (addCol('sg_oc', 'anulado_motivo',  'TEXT'))    added.push('sg_oc.anulado_motivo');
+  if (addCol('sg_oc', 'anulado_por',     'INTEGER')) added.push('sg_oc.anulado_por');
   if (addCol('sg_oc', 'rechazado_en',     'TEXT'))    added.push('sg_oc.rechazado_en');
   if (addCol('sg_oc', 'rechazado_motivo', 'TEXT'))    added.push('sg_oc.rechazado_motivo');
   if (addCol('sg_oc', 'rechazado_por',    'INTEGER')) added.push('sg_oc.rechazado_por');

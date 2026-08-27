@@ -102,7 +102,7 @@ test('rechazar y anular hacen la MISMA limpieza, escrita una sola vez', () => {
   // Copiarla sería dos lugares donde arreglar la próxima reserva que quede colgada.
   assert.equal((SG.match(/function cerrarOcSinEntrada\(/g) || []).length, 1);
   assert.match(SG, /cerrarOcSinEntrada\(db, Number\(req\.params\.id\), uid\(req\), \{ motivo \}\)/);
-  assert.match(SG, /cerrarOcSinEntrada\(db, Number\(req\.params\.id\), uid\(req\), null\)/);
+  assert.match(SG, /cerrarOcSinEntrada\(db, Number\(req\.params\.id\), uid\(req\), null, motivo\)/);
   // Y el anular viejo ya no tiene su propia copia.
   const i = SG.indexOf("router.post('/oc/:id/anular'");
   const b = SG.slice(i, i + 1200);
