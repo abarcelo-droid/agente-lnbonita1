@@ -4583,6 +4583,21 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
     #sec-informes-comercial .ia-crece{background:#dcfce7;color:#166534}
     #sec-informes-comercial .ia-nuevo{background:#dbeafe;color:#1e40af}
     #sec-informes-comercial .ia-estable{background:#f1f5f9;color:#64748b}
+    /* La celda de un mes: la barra crece desde abajo, como en un calendario de producción.
+       Alto fijo para que todas las filas se puedan comparar de un vistazo — si cada fila se
+       escalara sola, un proveedor chico se vería igual de grande que el más grande. */
+    #sec-informes-comercial .vt-celda{position:relative;height:30px;padding:0 1px;vertical-align:bottom}
+    #sec-informes-comercial .vt-barra{position:absolute;left:2px;right:2px;bottom:0;
+      background:#2f7a4d;border-radius:2px 2px 0 0}
+    /* La campaña anterior va de contorno, atrás: se ve el corrimiento sin tapar lo de ahora. */
+    #sec-informes-comercial .vt-prev{position:absolute;left:2px;right:2px;bottom:0;
+      border:1px dashed #94a3b8;border-bottom:0;border-radius:2px 2px 0 0;background:transparent}
+    #sec-informes-comercial .vt-mes{font-size:9.5px;color:var(--mut);text-align:center;
+      font-weight:600;letter-spacing:.03em}
+    #sec-informes-comercial .vt-prov{font-size:12px;font-weight:600}
+    #sec-informes-comercial .vt-sub{font-size:10px;color:var(--mut);font-weight:400}
+    /* La línea del mes pico, para leer todas las filas contra el mismo momento. */
+    #sec-informes-comercial .vt-pico{background:rgba(47,122,77,.07)}
     #sec-informes-comercial .ab-table-wrap{overflow-x:hidden !important}
     @media(max-width:900px){ #sec-informes-comercial .ab-table-wrap{overflow-x:auto !important}
                              #sec-informes-comercial .pa-tbl{table-layout:auto} }
@@ -4607,6 +4622,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
     <div class="inf-tab on" data-inf="tabla"  onclick="infTab('tabla')">📊 Ventas</div>
     <div class="inf-tab"    data-inf="anual"  onclick="infTab('anual')">📈 Interanual</div>
     <div class="inf-tab"    data-inf="oport"  onclick="infTab('oport')">🎯 Oportunidades</div>
+    <div class="inf-tab"    data-inf="vent"   onclick="infTab('vent')">🪟 Ventanas</div>
   </div>
 
   <div class="inf-pane on" id="inf-pane-tabla">
@@ -4708,6 +4724,32 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
     </table></div>
     <div id="opo-nota" style="font-size:11px;color:var(--mut);margin-top:6px"></div>
   </div><!-- /pane oport -->
+
+  <!-- ── VENTANAS ────────────────────────────────────────────────────────────────
+       Un producto, y de quién vino la mercadería en cada momento del año. Cada
+       proveedor tiene su ventana: arranca, pega el pico, se apaga — y el año que
+       viene esa ventana se corre. Saber cuánto se corrió es lo que permite comprar
+       antes de que falte, en vez de reaccionar cuando ya faltó. -->
+  <div class="inf-pane" id="inf-pane-vent">
+    <div class="inf-f">
+      <div style="min-width:260px"><label>Producto</label>
+        <input id="vt-prod" type="text" list="vt-prod-lista" placeholder="Escribí un producto — cebolla, papa…"
+               onchange="vtCargar()" onkeydown="if(event.key==='Enter'){vtCargar();return false}">
+        <datalist id="vt-prod-lista"></datalist></div>
+      <div><label>Campaña</label><select id="vt-act" onchange="vtCargar()"></select></div>
+      <div><label>Contra</label><select id="vt-comparar" onchange="vtCargar()">
+        <option value="1" selected>la campaña anterior</option>
+        <option value="0">nada — sólo este año</option>
+      </select></div>
+      <div><button class="btn bo bs" onclick="vtExportar()">⬇️ Excel</button></div>
+    </div>
+    <div id="vt-sugerencias" style="margin-bottom:12px"></div>
+    <div id="vt-kpis" style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px"></div>
+    <div class="ab-table-wrap"><table class="pa-tbl" id="vt-tabla" style="width:100%;table-layout:fixed">
+      <thead id="vt-thead"></thead><tbody id="vt-tbody"></tbody>
+    </table></div>
+    <div id="vt-nota" style="font-size:11px;color:var(--mut);margin-top:6px"></div>
+  </div><!-- /pane vent -->
 </div>
 
 <!-- Abrir una fila: de qué está hecho ese cliente (o ese producto, o ese mes). Se pide con
@@ -34261,7 +34303,187 @@ function infTab(t){
     el.classList.toggle('on', el.getAttribute('data-inf')===t); });
   document.querySelectorAll('#sec-informes-comercial .inf-pane').forEach(function(el){
     el.classList.toggle('on', el.id==='inf-pane-'+t); });
-  if(t==='anual') iaCargar(); else if(t==='oport') opoCargar();
+  if(t==='anual') iaCargar(); else if(t==='oport') opoCargar(); else if(t==='vent') vtCargar();
+}
+
+// ══════════════════════════════════════════════════════════════════════════════════════
+// VENTANAS — de quién vendimos cada producto, y cuándo
+// ══════════════════════════════════════════════════════════════════════════════════════
+// Un producto, y la ventana de cada proveedor a lo largo de la campaña. Se lee como un
+// calendario de producción: cada fila es un proveedor y cada barra el mes en que trajo.
+//
+// Las barras de TODAS las filas se escalan contra el mismo techo. Si cada fila se escalara
+// sola, el proveedor que trae cien kilos se vería igual de alto que el que trae diez mil, y
+// el gráfico contaría lo contrario de lo que pasa.
+var VT = { data:null };
+
+function vtCargar(){
+  var prod=(eid('vt-prod')||{}).value||'';
+  var p=['comparar='+encodeURIComponent((eid('vt-comparar')||{}).value||'1')];
+  var a=(eid('vt-act')||{}).value; if(a) p.push('periodo_actual='+encodeURIComponent(a));
+  if(prod) p.push('producto='+encodeURIComponent(prod.trim()));
+  // Los filtros de arriba también valen acá: si alguien filtró por cliente, la ventana es la
+  // de ESE cliente. Una pantalla que ignora en silencio un filtro que se ve puesto miente.
+  ['cliente','vendedor','categoria'].forEach(function(k){
+    var v=(eid('inf-filtro-'+k)||{}).value; if(v) p.push('filtro_'+k+'='+encodeURIComponent(v));
+  });
+  eid('vt-tbody').innerHTML='<tr><td class="emp">Buscando…</td></tr>';
+  api('/api/informes/ventanas?'+p.join('&')).then(function(r){
+    if(!r||!r.ok){ eid('vt-tbody').innerHTML='<tr><td class="emp" style="color:var(--err,#dc2626)">'+esc((r&&r.error)||'Error')+'</td></tr>'; return; }
+    VT.data=r.data;
+    vtLlenarSelectores(r.data);
+    if(r.data.sin_producto||r.data.vacio){ vtPedirProducto(r.data); return; }
+    vtPintar(r.data);
+  });
+}
+
+function vtLlenarSelectores(d){
+  var s=eid('vt-act');
+  if(s && !s.innerHTML && d.ventana){
+    s.innerHTML=(d.ventana.periodos||[]).map(function(x){
+      return '<option value="'+esc(x)+'"'+(x===d.ventana.actual?' selected':'')+'>'+esc(x)+'</option>'; }).join('');
+  }
+  // El datalist con los productos que ya trae la pantalla: se escribe y autocompleta.
+  var dl=eid('vt-prod-lista');
+  if(dl && !dl.innerHTML){
+    dl.innerHTML=(((INF.opts||{}).producto)||[]).map(function(x){
+      return '<option value="'+esc(x)+'">'; }).join('');
+  }
+}
+
+// Todavía no eligió producto. En vez de un gráfico vacío, los que más se venden como botones:
+// nadie se sabe el padrón de memoria, y escribir a ciegas es el paso donde se abandona.
+function vtPedirProducto(d){
+  eid('vt-kpis').innerHTML='';
+  eid('vt-thead').innerHTML=''; eid('vt-tbody').innerHTML='';
+  eid('vt-nota').innerHTML='';
+  // El ÍNDICE en el onclick, no el nombre. Un producto que lleve una comilla —o una barra—
+  // rompería el atributo, y meter el nombre entre comillas dentro de HTML dentro de JS son
+  // tres capas de escapes que fallan en silencio. Es el mismo patrón que infDrillAbrir.
+  VT.sugeridos = d.productos || [];
+  eid('vt-sugerencias').innerHTML = VT.sugeridos.length
+    ? '<div style="padding:12px 14px;border-radius:8px;background:var(--bg)">'
+      + '<div style="font-size:13px;margin-bottom:8px">Elegí un producto y vas a ver <b>de qué proveedor vino</b> en cada mes de la campaña.</div>'
+      + '<div style="display:flex;gap:6px;flex-wrap:wrap">'
+      + VT.sugeridos.map(function(x, i){
+          return '<button class="btn bo bs" style="font-size:12px" onclick="vtElegir('+i+')">'
+            + esc(x.producto)+' <span style="color:var(--mut)">'+nr(x.kilos)+' K · '+x.proveedores+' prov.</span></button>'; }).join('')
+      + '</div></div>'
+    : '<div class="emp" style="padding:20px">No hay ventas cargadas en esta campaña.</div>';
+}
+function vtElegir(i){
+  var x=(VT.sugeridos||[])[i]; if(!x) return;
+  eid('vt-prod').value=x.producto; vtCargar();
+}
+
+// '05-NOVIEMBRE' → 'NOV'. En una columna de 30px no entra más, y el número es para ordenar.
+function vtMes(m){ var x=/^\d\d-(.+)$/.exec(String(m||'')); return (x?x[1]:String(m||'')).slice(0,3); }
+
+function vtPintar(d){
+  eid('vt-sugerencias').innerHTML='';
+  var meses=d.meses||[], comp=!!d.periodo_anterior;
+
+  var k=function(l,v,sub){ return '<div class="inf-kpi"><div style="font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:var(--mut)">'+l+'</div>'
+    +'<b>'+v+'</b><div style="font-size:11px;color:var(--mut)">'+(sub||'')+'</div></div>'; };
+  eid('vt-kpis').innerHTML =
+      k('Kilos de '+esc(d.producto), infKg(d.total_kilos), infUsd(d.total_usd))
+    + k('Proveedores', nr(d.proveedores), d.proveedores_perdidos ? (nr(d.proveedores_perdidos)+' que no trajeron este año') : 'todos siguen')
+    + k('Mes pico', esc(vtMes(d.pico_mes)), infKg(d.pico_kilos)+' entre todos');
+
+  if(!meses.length){
+    eid('vt-thead').innerHTML='';
+    eid('vt-tbody').innerHTML='<tr><td class="emp">No vendimos '+esc(d.producto)+' en esta campaña.</td></tr>';
+    eid('vt-nota').innerHTML=''; return;
+  }
+
+  // Anchos: el nombre a la izquierda, los meses repartidos, y a la derecha kilos y share.
+  var anchoMes=Math.max(4, Math.floor(52/meses.length));
+  eid('vt-thead').innerHTML='<tr>'
+    + '<th style="text-align:left;width:22%">Proveedor</th>'
+    + meses.map(function(m){
+        return '<th class="vt-mes'+(m===d.pico_mes?' vt-pico':'')+'" style="width:'+anchoMes+'%" title="'+esc(m)+'">'+esc(vtMes(m))+'</th>'; }).join('')
+    + '<th style="text-align:right;width:12%">Kilos</th>'
+    + '<th style="text-align:right;width:8%">Share</th>'
+    + '<th style="text-align:left;width:14%">Ventana</th></tr>';
+
+  var max=d.max_celda||1;
+  eid('vt-tbody').innerHTML=(d.filas||[]).map(function(f){
+    var apagado=f.solo_anterior;
+    var celdas=meses.map(function(m){
+      var c=f.por_mes[m], pv=f.prev_por_mes[m];
+      var h=c?Math.max(3, Math.round((c.kilos/max)*28)):0;
+      var hp=pv?Math.max(3, Math.round((pv.kilos/max)*28)):0;
+      var tip=[];
+      if(c) tip.push(vtMes(m)+' '+d.periodo_actual+': '+nr(c.kilos)+' K · USD '+nr(c.usd)+' · '+c.clientes+' cliente(s)');
+      if(pv) tip.push(vtMes(m)+' '+d.periodo_anterior+': '+nr(pv.kilos)+' K');
+      return '<td class="vt-celda'+(m===d.pico_mes?' vt-pico':'')+'"'
+        + (tip.length?' title="'+esc(tip.join(' | '))+'"':'')+'>'
+        + (hp?'<div class="vt-prev" style="height:'+hp+'px"></div>':'')
+        + (h?'<div class="vt-barra" style="height:'+h+'px'+(apagado?';opacity:.35':'')+'"></div>':'')
+        + '</td>';
+    }).join('');
+    // La ventana en palabras, que es lo que se dicta por teléfono.
+    var ventana = f.desde
+      ? esc(vtMes(f.desde))+' → '+esc(vtMes(f.hasta))+' <span style="color:var(--mut)">('+f.meses_activo+' m)</span>'
+      : '<span style="color:var(--mut)">no trajo</span>';
+    // El corrimiento: el dato por el que existe esta pantalla.
+    var corr='';
+    if(f.corrimiento!=null && f.corrimiento!==0){
+      var tarde=f.corrimiento>0;
+      corr='<div class="vt-sub" style="color:'+(tarde?'#92400e':'#166534')+'">'
+        + (tarde?'▶ ':'◀ ')+Math.abs(f.corrimiento)+' mes(es) '+(tarde?'más tarde':'más temprano')+' que en '+esc(d.periodo_anterior)+'</div>';
+    } else if(f.es_nuevo && comp){
+      corr='<div class="vt-sub" style="color:#1e40af">nuevo en '+esc(d.periodo_actual)+'</div>';
+    } else if(f.solo_anterior){
+      corr='<div class="vt-sub" style="color:var(--err,#dc2626)">no trajo este año — traía '+infKg(f.kilos_prev)+'</div>';
+    }
+    return '<tr>'
+      + '<td><div class="vt-prov"'+(apagado?' style="opacity:.6"':'')+'>'+esc(f.proveedor)+'</div>'+corr+'</td>'
+      + celdas
+      + '<td style="text-align:right">'+(f.kilos?infKg(f.kilos):'<span style="color:var(--mut)">—</span>')
+        + (f.var_kilos_pct!=null&&f.kilos?('<div class="vt-sub" style="color:'+(f.var_kilos_pct>=0?'#166534':'var(--err,#dc2626)')+'">'
+            +(f.var_kilos_pct>=0?'+':'')+nrDec(f.var_kilos_pct,1)+'%</div>'):'')+'</td>'
+      + '<td style="text-align:right">'+(f.share_pct!=null&&f.kilos?nrDec(f.share_pct,1)+'%':'—')+'</td>'
+      + '<td style="font-size:11.5px">'+ventana+'</td>'
+      + '</tr>';
+  }).join('');
+
+  // La fila del total: el perfil del producto entero, que es contra el que se lee cada
+  // proveedor. Sin ella no se sabe si un mes flojo es del proveedor o de la temporada.
+  var maxTot=Math.max.apply(null, meses.map(function(m){ return d.totales[m]||0; }))||1;
+  eid('vt-tbody').innerHTML+='<tr style="border-top:2px solid var(--bor)">'
+    + '<td><div class="vt-prov">TOTAL '+esc(d.producto)+'</div><div class="vt-sub">todos los proveedores</div></td>'
+    + meses.map(function(m){
+        var t=d.totales[m]||0, h=t?Math.max(3, Math.round((t/maxTot)*28)):0;
+        return '<td class="vt-celda'+(m===d.pico_mes?' vt-pico':'')+'"'
+          + (t?' title="'+esc(vtMes(m)+': '+nr(t)+' K')+'"':'')+'>'
+          + (h?'<div class="vt-barra" style="height:'+h+'px;background:#1a3a5c"></div>':'')+'</td>'; }).join('')
+    + '<td style="text-align:right"><b>'+infKg(d.total_kilos)+'</b></td>'
+    + '<td style="text-align:right">100%</td>'
+    + '<td style="font-size:11.5px">'+esc(vtMes(meses[0]))+' → '+esc(vtMes(meses[meses.length-1]))+'</td>'
+    + '</tr>';
+
+  eid('vt-nota').innerHTML =
+      '<b>Cómo se lee:</b> cada barra es lo que ese proveedor trajo ese mes, y todas están a la misma escala. '
+    + (comp ? 'El contorno punteado es <b>'+esc(d.periodo_anterior)+'</b>: donde el punteado está corrido del lleno, la ventana se movió. ' : '')
+    + 'El fondo verde marca el mes pico del producto.<br>'
+    + '<b>Proveedor</b> = de dónde vino la mercadería que vendimos, según la base de ventas — no es un libro de compras. '
+    + 'El eje es el <b>mes comercial</b> (julio a junio) y no la semana: la columna de semana de la planilla todavía no está verificada, '
+    + 'y un eje de tiempo mal interpretado corre todas las ventanas sin que se note.';
+}
+
+function vtExportar(){
+  var d=VT.data;
+  if(!d||!(d.filas||[]).length){ toast('Elegí un producto primero','er'); return; }
+  var meses=d.meses||[];
+  var head=['Proveedor'].concat(meses.map(vtMes)).concat(['Kilos','Share %','Desde','Hasta','Meses','Corrimiento']);
+  var e2=function(x){ return '"'+String(x==null?'':x).replace(/"/g,'""')+'"'; };
+  var csv=[head.map(e2).join(';')].concat((d.filas||[]).map(function(f){
+    return [f.proveedor].concat(meses.map(function(m){ return (f.por_mes[m]||{}).kilos||0; }))
+      .concat([f.kilos, f.share_pct, vtMes(f.desde), vtMes(f.hasta), f.meses_activo, f.corrimiento])
+      .map(e2).join(';');
+  })).join('\r\n');
+  iaBajar(csv, 'ventanas-'+String(d.producto).replace(/[^0-9A-Za-z]/g,'_')+'-'+d.periodo_actual+'.csv');
 }
 
 // Llena los tres selectores de ventana de las dos solapas con lo que vino del servidor.
