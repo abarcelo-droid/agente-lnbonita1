@@ -4342,7 +4342,19 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
         <!-- EL PRECIO ES DE ADMINISTRACIÓN: cambia lo que costó la mercadería y
              lo que se le debe al proveedor. El servidor lo rechaza igual; acá se
              muestra apagado para que no se ofrezca algo que va a rebotar. -->
-        <div class="fl"><label>Precio por kg</label><input type="number" step="0.01" id="sg-loteed-precio">
+        <!-- POR BULTO O POR KILO. La compra se pacta por bulto la mayoría de las
+             veces; obligar a cargar $/kg es pedir una división a mano, que es
+             justamente donde se cuelan los errores que esto viene a corregir.
+             Lo que se GUARDA es siempre $/kg: es la unidad con la que corren el
+             costo, el margen y lo que se le debe al proveedor. -->
+        <div class="fl"><label>Precio
+            <select id="sg-loteed-uni" onchange="sgLoteEdUni()"
+              style="font-size:11px;padding:1px 4px;margin-left:4px">
+              <option value="kg">por kg</option>
+              <option value="bulto">por bulto</option>
+            </select></label>
+          <input type="number" step="0.01" id="sg-loteed-precio">
+          <div id="sg-loteed-precio-eq" style="font-size:11px;color:var(--mut);margin-top:3px"></div>
           <div id="sg-loteed-precio-nota" style="font-size:11px;color:var(--mut);margin-top:3px;display:none">
             Lo corrige un administrador.</div></div>
       </div>
@@ -11473,9 +11485,15 @@ function sgOcVer(id){
       return '<b>' + sgMoney(l.costo_final) + '</b>'
         + '<div class="sg-oc-sub">' + sgMoney(l.precio_unitario_kg) + ' /kg</div>';
     };
+    // La referencia del ítem que se está dibujando. accionesDe() se define acá
+    // arriba —fuera del forEach— así que no ve la variable `it`; se la deja en
+    // ésta, que se reescribe en cada vuelta justo antes de usarla.
+    var refKgAcc = null;
     var accionesDe = function(l){
       return (l.precio_unitario_kg == null
-        ? '<button class="btn bb bs" onclick="sgPrecioOpen('+l.id+',\'' + esc(l.codigo_lote) + '\','+l.kg_reales+')">💲 cerrar precio</button>'
+        // La referencia viaja al modal: es el único momento en que sirve.
+        ? '<button class="btn bb bs" onclick="sgPrecioOpen('+l.id+',\'' + esc(l.codigo_lote) + '\','+l.kg_reales
+          + ',' + (refKgAcc == null ? 'null' : refKgAcc) + ')">💲 cerrar precio</button>'
         : '')
         // CORREGIR y ELIMINAR son dos permisos distintos: uno arregla un número
         // mal cargado, el otro deja afuera trabajo ya hecho.
@@ -11546,6 +11564,7 @@ function sgOcVer(id){
           + '</div>';
       }
       pactado += refTxt;
+      refKgAcc = refKg;      // para el botón de cerrar precio, abajo
 
       var mios = porItem[String(it.id)] || [];
       if (!mios.length) {
@@ -15008,7 +15027,16 @@ function sgLoteEditarOpen(loteId){
   eid('sg-loteed-kg').value = l.kg_reales != null ? l.kg_reales : '';
   eid('sg-loteed-bultos').value = l.bultos != null ? l.bultos : '';
   eid('sg-loteed-calidad').value = l.calidad || '';
-  eid('sg-loteed-precio').value = l.precio_unitario_kg != null ? l.precio_unitario_kg : '';
+  // Arranca en la unidad EN QUE SE PACTÓ la compra: si el cajón vale $25.000, ver
+  // "$2.777,78 /kg" obliga a una cuenta mental para saber si está bien.
+  var kpb = sgLoteEdKpb(l);
+  var uni = eid('sg-loteed-uni');
+  if (uni) { uni.value = kpb ? 'bulto' : 'kg'; uni.disabled = !kpb; }
+  eid('sg-loteed-precio').value = (l.precio_unitario_kg == null) ? ''
+    : ((uni && uni.value === 'bulto' && kpb)
+        ? Math.round(Number(l.precio_unitario_kg) * kpb * 100) / 100
+        : l.precio_unitario_kg);
+  eid('sg-loteed-precio').oninput = sgLoteEdEq;
   // EL CONTEO LO CORRIGE EL OPERADOR; el peso y el precio, administración. Los
   // kilos se recalculan solos con el kg por bulto, así que el que corrige el
   // conteo no tiene que hacer ninguna cuenta.
@@ -15018,7 +15046,57 @@ function sgLoteEditarOpen(loteId){
   });
   var nota = eid('sg-loteed-precio-nota'); if (nota) nota.style.display = admin ? 'none' : '';
   eid('sg-loteed-motivo').value = '';
+  sgLoteEdEq();
   sgModalArriba('sg-loteed-modal');
+}
+
+// Los kilos por bulto de la partida. Sin ellos no hay conversión posible y el
+// selector se apaga: es mejor un control en gris que uno que miente.
+function sgLoteEdKpb(l){
+  if (l.kg_por_bulto != null && Number(l.kg_por_bulto) > 0) return Number(l.kg_por_bulto);
+  var b = Number(l.bultos) || 0, kg = Number(l.kg_reales) || 0;
+  return (b > 0 && kg > 0) ? (kg / b) : null;
+}
+
+// Cambiar de unidad CONVIERTE lo que está escrito, no lo borra ni lo deja igual.
+// Dejarlo igual cambiaría el precio por un factor de diez sin que se note.
+function sgLoteEdUni(){
+  var l = SG.loteEdit; if (!l) return;
+  var kpb = sgLoteEdKpb(l); if (!kpb) return;
+  var e = eid('sg-loteed-precio');
+  var v = Number(e.value);
+  if (v > 0) {
+    e.value = (eid('sg-loteed-uni').value === 'bulto')
+      ? Math.round(v * kpb * 100) / 100      // venía en kg
+      : Math.round((v / kpb) * 1000000) / 1000000;
+  }
+  sgLoteEdEq();
+}
+
+// La otra unidad, siempre a la vista: es el control que evita guardar $/bulto
+// creyendo que son $/kg.
+function sgLoteEdEq(){
+  var c = eid('sg-loteed-precio-eq'); if (!c) return;
+  var l = SG.loteEdit, kpb = l ? sgLoteEdKpb(l) : null;
+  var v = Number((eid('sg-loteed-precio') || {}).value) || 0;
+  if (!kpb || !(v > 0)) { c.textContent = ''; return; }
+  c.innerHTML = (eid('sg-loteed-uni').value === 'bulto')
+    ? '= ' + sgMoney2(v / kpb) + ' /kg · bultos de ' + nr(kpb) + ' kg'
+    : '= ' + sgMoney2(v * kpb) + ' /bulto · bultos de ' + nr(kpb) + ' kg';
+}
+
+// LO QUE VIAJA ES SIEMPRE $/kg. Es la unidad con la que corren el costo, el margen
+// y lo que se le debe al proveedor; mandar la otra dejaría dos ítems del mismo
+// listado como números incomparables.
+function sgLoteEdPrecioKg(){
+  var x = (eid('sg-loteed-precio') || {}).value;
+  if (x === '' || x == null) return null;
+  var v = Number(x);
+  if (!(v > 0)) return String(x);
+  var l = SG.loteEdit, kpb = l ? sgLoteEdKpb(l) : null;
+  return (eid('sg-loteed-uni').value === 'bulto' && kpb)
+    ? String(Math.round((v / kpb) * 1000000) / 1000000)
+    : String(v);
 }
 
 function sgLoteEditarGuardar(){
@@ -15029,7 +15107,7 @@ function sgLoteEditarGuardar(){
   api('/api/sg/lotes/' + l.id + '/corregir', 'PUT', {
     motivo: motivo,
     kg_reales: v('sg-loteed-kg'), bultos: v('sg-loteed-bultos'),
-    calidad: v('sg-loteed-calidad'), precio_unitario_kg: v('sg-loteed-precio'),
+    calidad: v('sg-loteed-calidad'), precio_unitario_kg: sgLoteEdPrecioKg(),
   }).then(function(r){
     if (!r || !r.ok) { toast((r && r.error) || 'No se pudo corregir', 'er'); return; }
     toast('Corregido — queda registrado quién y qué cambió', 'ok');
@@ -15039,11 +15117,35 @@ function sgLoteEditarGuardar(){
   });
 }
 
-function sgPrecioOpen(loteId, codigo, kg){
-  SG.precioLote={id:loteId, kg:kg};
-  eid('sg-precio-info').innerHTML='Lote <b>'+esc(codigo)+'</b> · '+nr(kg)+' kg';
+// ── CERRAR EL PRECIO, CON LA REFERENCIA A LA VISTA ───────────────────────
+//
+// El precio de venta de referencia se cargaba al armar la orden y sólo se veía en
+// la ficha. Acá es donde sirve: el comprador está decidiendo cuánto se le paga al
+// productor, y sin la referencia no tiene contra qué compararlo.
+//
+// El margen se calcula sobre el precio de VENTA —(venta − costo) / venta—, que es
+// como se mira en el rubro y como ya lo muestra la ficha de la orden.
+function sgPrecioOpen(loteId, codigo, kg, refKg){
+  SG.precioLote={id:loteId, kg:kg, ref:(refKg!=null&&refKg>0)?Number(refKg):null};
+  var ref=SG.precioLote.ref;
+  eid('sg-precio-info').innerHTML='Lote <b>'+esc(codigo)+'</b> · '+nr(kg)+' kg'
+    + (ref!=null
+        ? '<div style="font-size:11.5px;color:var(--mut);margin-top:3px">'
+          + 'venta de referencia <b>'+sgMoney(ref)+'</b> /kg'
+          + '<span style="font-size:10.5px"> · lo que se estimó al cargar la orden</span></div>'
+        : '');
   eid('sg-precio-valor').value=''; eid('sg-precio-calc').textContent='';
-  eid('sg-precio-valor').oninput=function(){ var p=Number(this.value)||0; eid('sg-precio-calc').textContent='Costo base = '+sgMoney(p*kg); };
+  eid('sg-precio-valor').oninput=function(){
+    var p=Number(this.value)||0;
+    var t='Costo base = '+sgMoney(p*kg);
+    if(ref!=null && p>0){
+      var m=Math.round((ref-p)/ref*1000)/10;
+      t+=' · margen contra la referencia '
+        + '<b style="color:'+(m>=0?'#166534':'#b91c1c')+'">'+String(m).replace('.',',')+'%</b>';
+      if(m<0) t+=' <span style="color:#b91c1c">— se estaría pagando MÁS de lo que se espera vender</span>';
+    }
+    eid('sg-precio-calc').innerHTML=t;
+  };
   sgModalArriba('sg-precio-modal');
 }
 function sgPrecioGuardar(){
