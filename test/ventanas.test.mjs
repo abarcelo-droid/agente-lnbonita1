@@ -1,203 +1,237 @@
-// VENTANAS: de quién vendimos cada producto y cuándo.
+// VENTANAS: a qué productor hay que salir a contactar.
 //
-// Lo que hay que clavar es la VENTANA —dónde arranca, dónde termina, dónde pega el pico— y el
-// CORRIMIENTO contra el año pasado, que es lo que se usa para decidir cuándo comprar. Un
-// corrimiento mal calculado no se nota mirando el gráfico: las barras se ven bien igual, y el
-// número de abajo dice que un proveedor arranca un mes antes de lo que arranca.
+// La pantalla no contesta "cómo venimos" sino "a quién llamo". Eso cambia qué puede estar mal
+// sin que se note: si la historia se mira de a dos campañas, el que dejó de traernos hace dos
+// años es INVISIBLE — y es justamente el que hay que ir a buscar. El test clava que la
+// historia entra entera y que "contactar" no marque ni al que ya está trabajando ni al que
+// nunca trajo.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { DatabaseSync } from 'node:sqlite';
 import { readFileSync } from 'node:fs';
-import { ventanasDeProducto, productosMasVendidos, ejeMeses } from '../src/servicios/ventanas.js';
+import { ventanasDeProducto, productosMasVendidos, ejeMeses,
+         esProveedorNoIdentificado, SIN_IDENTIFICAR } from '../src/servicios/ventanas.js';
 
 const DDL = `CREATE TABLE sheet_ventas (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   cliente TEXT, vendedor TEXT, producto TEXT, proveedor TEXT,
   periodo TEXT, mes_ok TEXT, kilos_tot REAL, total REAL, tot_dol REAL, rent_dol REAL, rent REAL
 )`;
-const ACT = '2026-2027', ANT = '2025-2026';
-const WHERE = "WHERE producto = 'CEBOLLA' AND periodo IN ('" + ACT + "','" + ANT + "')";
-const WHERE_P = "WHERE producto = ? AND periodo IN (?,?)";
-const PARAMS = ['CEBOLLA', ACT, ANT];
-const OPTS = { periodo_actual: ACT, periodo_anterior: ANT };
+const P22 = '2022-2023', P23 = '2023-2024', P24 = '2024-2025', P25 = '2025-2026', P26 = '2026-2027';
+const WHERE = "WHERE producto = 'PALTA'";
+const WHERE_P = "WHERE producto = ?";
+const OPTS = { periodo_actual: P26 };
 
 function base(filas) {
   const db = new DatabaseSync(':memory:');
   db.exec(DDL);
   const ins = db.prepare(`INSERT INTO sheet_ventas
-    (cliente, producto, proveedor, periodo, mes_ok, kilos_tot, tot_dol)
-    VALUES (?,?,?,?,?,?,?)`);
+    (cliente, producto, proveedor, periodo, mes_ok, kilos_tot, tot_dol) VALUES (?,?,?,?,?,?,?)`);
   for (const f of filas) ins.run(...f);
   return db;
 }
 // cliente, producto, proveedor, periodo, mes, kilos, usd
 const F = [
-  // GIGLIO: noviembre a enero, pico en diciembre
-  ['C1', 'CEBOLLA', 'GIGLIO', ACT, '05-NOVIEMBRE', 1000, 5000],
-  ['C1', 'CEBOLLA', 'GIGLIO', ACT, '06-DICIEMBRE', 4000, 20000],
-  ['C2', 'CEBOLLA', 'GIGLIO', ACT, '07-ENERO',     1500, 7500],
-  // El año pasado GIGLIO arrancaba en OCTUBRE: se corrió un mes más tarde
-  ['C1', 'CEBOLLA', 'GIGLIO', ANT, '04-OCTUBRE',   1200, 6000],
-  ['C1', 'CEBOLLA', 'GIGLIO', ANT, '05-NOVIEMBRE', 3000, 15000],
-  // MEDINA: marzo a mayo, sin historia — es nuevo
-  ['C1', 'CEBOLLA', 'MEDINA', ACT, '09-MARZO',      800, 4000],
-  ['C3', 'CEBOLLA', 'MEDINA', ACT, '10-ABRIL',     2000, 9000],
-  // ROMERO: sólo el año pasado — lo perdimos
-  ['C1', 'CEBOLLA', 'ROMERO', ANT, '06-DICIEMBRE', 2500, 12000],
-  // Otro producto, para que el filtro tenga algo que dejar afuera
-  ['C1', 'PAPA',    'GIGLIO', ACT, '06-DICIEMBRE', 9000, 40000],
+  // BONELLA: trae todos los años en julio-agosto. Está trabajando ahora.
+  ['C1', 'PALTA', 'BONELLA', P24, '01-JULIO',   5000, 12000],
+  ['C1', 'PALTA', 'BONELLA', P25, '01-JULIO',   6000, 15000],
+  ['C1', 'PALTA', 'BONELLA', P25, '02-AGOSTO',  4000, 10000],
+  ['C1', 'PALTA', 'BONELLA', P26, '02-AGOSTO',  3000,  8000],
+  // JAGUACY: traía en marzo-abril, tres campañas seguidas, y hace DOS que no aparece.
+  // Contra la campaña anterior sola sería invisible: el año pasado tampoco vino.
+  ['C2', 'PALTA', 'JAGUACY', P22, '09-MARZO',   9000, 20000],
+  ['C2', 'PALTA', 'JAGUACY', P23, '09-MARZO',   8000, 18000],
+  ['C2', 'PALTA', 'JAGUACY', P24, '10-ABRIL',   7000, 16000],
+  // AGRO NUEVO: sólo este año. No hay a quién llamar: ya está.
+  ['C1', 'PALTA', 'AGRO NUEVO', P26, '01-JULIO', 500, 1200],
+  // Los errores de fórmula de la planilla, cada uno con su clave: sin agrupar son tres filas
+  ["C1", 'PALTA', "#N/A (Did not find value '12640234' in VLOOKUP)", P26, '02-AGOSTO', 1000, 2500],
+  ["C1", 'PALTA', "#N/A (Did not find value '12638734' in VLOOKUP)", P26, '02-AGOSTO',  800, 2000],
+  ["C1", 'PALTA', "#N/A (Did not find value '12607029' in VLOOKUP)", P25, '01-JULIO',   600, 1500],
+  // Otro producto, para que el filtro tenga qué dejar afuera
+  ['C1', 'BANANA', 'BONELLA', P26, '02-AGOSTO', 9000, 30000],
 ];
 
-// ── LA VENTANA ────────────────────────────────────────────────────────────────────────
-test('cada proveedor con su ventana: desde, hasta y el pico', () => {
+// ── LA HISTORIA ENTERA ────────────────────────────────────────────────────────────────
+test('el eje de campañas son TODAS las que hay, en orden', () => {
   const r = ventanasDeProducto(base(F), WHERE, [], OPTS);
-  const g = r.filas.find(x => x.proveedor === 'GIGLIO');
-  assert.equal(g.desde, '05-NOVIEMBRE');
-  assert.equal(g.hasta, '07-ENERO');
-  assert.equal(g.pico, '06-DICIEMBRE');
-  assert.equal(g.pico_kilos, 4000);
-  assert.equal(g.meses_activo, 3);
+  assert.deepEqual(r.periodos, [P22, P23, P24, P25, P26]);
+  assert.equal(r.periodo_actual, P26);
 });
 
-test('el eje son los meses que hay, en orden comercial (julio primero)', () => {
+test('cada productor dice en qué campañas trajo y desde cuándo no está', () => {
   const r = ventanasDeProducto(base(F), WHERE, [], OPTS);
-  assert.deepEqual(r.meses, ['04-OCTUBRE', '05-NOVIEMBRE', '06-DICIEMBRE', '07-ENERO', '09-MARZO', '10-ABRIL']);
-  // Y sale ordenado por el número, no alfabéticamente: ENERO va después de DICIEMBRE.
-  assert.ok(r.meses.indexOf('07-ENERO') > r.meses.indexOf('06-DICIEMBRE'));
+  const j = r.filas.find(x => x.proveedor === 'JAGUACY');
+  assert.deepEqual(j.anios, [P22, P23, P24]);
+  assert.equal(j.anios_activo, 3);
+  assert.equal(j.primer_periodo, P22);
+  assert.equal(j.ultimo_periodo, P24);
+  assert.equal(j.campanias_sin_traer, 2);      // P24 → P26
+  assert.equal(j.kilos_act, 0);
 });
 
-test('el filtro del producto manda: la papa de GIGLIO no entra', () => {
+test('la ventana típica sale de toda la historia, no de un año', () => {
+  const j = ventanasDeProducto(base(F), WHERE, [], OPTS).filas.find(x => x.proveedor === 'JAGUACY');
+  assert.equal(j.desde, '09-MARZO');
+  assert.equal(j.hasta, '10-ABRIL');
+  assert.equal(j.pico, '09-MARZO');            // 17.000 acumulados contra 7.000 de abril
+  assert.equal(j.kilos_hist, 24000);
+  assert.equal(j.kilos_prom_anio, 8000);       // 24.000 en 3 campañas
+});
+
+test('en cuántas campañas trajo CADA mes: una vez no es una costumbre', () => {
+  const b = ventanasDeProducto(base(F), WHERE, [], OPTS).filas.find(x => x.proveedor === 'BONELLA');
+  assert.equal(b.por_mes['01-JULIO'].anios, 2);   // P24 y P25
+  assert.equal(b.por_mes['02-AGOSTO'].anios, 2);  // P25 y P26
+  assert.equal(b.por_mes['01-JULIO'].kilos, 11000);
+});
+
+// ── A QUIÉN LLAMAR ────────────────────────────────────────────────────────────────────
+test('marca al que trajo antes y este año no está — aunque hace DOS años que falta', () => {
+  // Es el caso que la lógica de dos campañas no puede ver.
   const r = ventanasDeProducto(base(F), WHERE, [], OPTS);
-  const g = r.filas.find(x => x.proveedor === 'GIGLIO');
-  assert.equal(g.kilos, 6500);              // 1000 + 4000 + 1500, sin los 9000 de papa
-  assert.equal(r.total_kilos, 6500 + 2800); // GIGLIO + MEDINA
+  const j = r.filas.find(x => x.proveedor === 'JAGUACY');
+  assert.equal(j.contactar, true);
+  assert.equal(j.ausente_este_anio, true);
+  assert.equal(j.contactar_mes, '09-MARZO');   // cuándo llamarlo: cuando suele arrancar
+  assert.equal(r.a_contactar, 1);
 });
 
-// ── EL CORRIMIENTO ────────────────────────────────────────────────────────────────────
-test('dice cuántos meses se corrió el arranque contra el año pasado', () => {
-  const g = ventanasDeProducto(base(F), WHERE, [], OPTS).filas.find(x => x.proveedor === 'GIGLIO');
-  assert.equal(g.desde_prev, '04-OCTUBRE');
-  assert.equal(g.corrimiento, 1);           // arrancó UN mes más tarde
+test('no marca al que ya está trabajando', () => {
+  const r = ventanasDeProducto(base(F), WHERE, [], OPTS);
+  assert.equal(r.filas.find(x => x.proveedor === 'BONELLA').contactar, false);
+  assert.equal(r.filas.find(x => x.proveedor === 'AGRO NUEVO').contactar, false);
 });
 
-test('sin ventana del año pasado NO se inventa un corrimiento', () => {
-  // MEDINA es nuevo: "se corrió" no significa nada. Un cero acá se leería como "arrancó igual
-  // que siempre", que es lo contrario de lo que pasa.
-  const m = ventanasDeProducto(base(F), WHERE, [], OPTS).filas.find(x => x.proveedor === 'MEDINA');
-  assert.equal(m.corrimiento, null);
-  assert.equal(m.desde_prev, null);
-  assert.equal(m.es_nuevo, true);
+test('el que aparece por primera vez este año se marca como nuevo, no como recuperable', () => {
+  const a = ventanasDeProducto(base(F), WHERE, [], OPTS).filas.find(x => x.proveedor === 'AGRO NUEVO');
+  assert.equal(a.es_nuevo, true);
+  assert.equal(a.contactar, false);
 });
 
-test('un proveedor que arrancó ANTES da corrimiento negativo', () => {
+test('los kilos a recuperar son el promedio por campaña, no el acumulado', () => {
+  // Sumar los 24.000 de tres años diría que se recuperan 24.000 este año, y no es cierto.
+  const r = ventanasDeProducto(base(F), WHERE, [], OPTS);
+  assert.equal(r.kilos_a_contactar, 8000);
+});
+
+test('los que hay que llamar van después de los activos y ordenados por volumen', () => {
   const filas = [
-    ['C1', 'CEBOLLA', 'X', ANT, '06-DICIEMBRE', 100, 500],
-    ['C1', 'CEBOLLA', 'X', ACT, '04-OCTUBRE',   100, 500],
-  ];
-  const x = ventanasDeProducto(base(filas), WHERE, [], OPTS).filas[0];
-  assert.equal(x.corrimiento, -2);
-});
-
-// ── EL QUE SE FUE ─────────────────────────────────────────────────────────────────────
-test('el proveedor que sólo tiene historia se marca y va al final', () => {
-  const r = ventanasDeProducto(base(F), WHERE, [], OPTS);
-  const ro = r.filas.find(x => x.proveedor === 'ROMERO');
-  assert.equal(ro.solo_anterior, true);
-  assert.equal(ro.kilos, 0);
-  assert.equal(ro.kilos_prev, 2500);
-  assert.equal(r.filas[r.filas.length - 1].proveedor, 'ROMERO');
-  // Y no ensucia el conteo de con cuántos estamos trabajando.
-  assert.equal(r.proveedores, 2);
-  assert.equal(r.proveedores_perdidos, 1);
-});
-
-test('los que trajeron van ordenados por volumen', () => {
-  const r = ventanasDeProducto(base(F), WHERE, [], OPTS);
-  assert.deepEqual(r.filas.map(x => x.proveedor), ['GIGLIO', 'MEDINA', 'ROMERO']);
-});
-
-// ── LOS NÚMEROS DE ARRIBA ─────────────────────────────────────────────────────────────
-test('el share de cada proveedor suma 100', () => {
-  const r = ventanasDeProducto(base(F), WHERE, [], OPTS);
-  const suma = r.filas.filter(x => !x.solo_anterior).reduce((a, x) => a + x.share_pct, 0);
-  assert.ok(Math.abs(suma - 100) < 0.2, 'suma ' + suma);
-});
-
-test('el mes pico del producto es el de más kilos entre todos los proveedores', () => {
-  const r = ventanasDeProducto(base(F), WHERE, [], OPTS);
-  assert.equal(r.pico_mes, '06-DICIEMBRE');
-  assert.equal(r.pico_kilos, 4000);
-  assert.equal(r.totales['06-DICIEMBRE'], 4000);
-});
-
-test('los totales por mes son la suma de las celdas de ese mes', () => {
-  const filas = [
-    ['C1', 'CEBOLLA', 'A', ACT, '06-DICIEMBRE', 1000, 100],
-    ['C1', 'CEBOLLA', 'B', ACT, '06-DICIEMBRE',  500,  50],
+    ['C1', 'PALTA', 'CHICO', P22, '09-MARZO',  100,  10],
+    ['C1', 'PALTA', 'GRANDE', P22, '09-MARZO', 9000, 900],
+    ['C1', 'PALTA', 'ACTIVO', P26, '01-JULIO',   50,   5],
   ];
   const r = ventanasDeProducto(base(filas), WHERE, [], OPTS);
-  assert.equal(r.totales['06-DICIEMBRE'], 1500);
-  assert.equal(r.pico_kilos, 1500);
+  assert.deepEqual(r.filas.map(x => x.proveedor), ['ACTIVO', 'GRANDE', 'CHICO']);
 });
 
-test('la escala del gráfico sale de la celda más grande, no del total del mes', () => {
-  // Con diez proveedores en el mismo mes, escalar contra el total dejaría todas las barras
-  // aplastadas contra el piso y el gráfico no diría nada.
+// ── LOS #N/A DE LA PLANILLA ───────────────────────────────────────────────────────────
+test('reconoce los errores de fórmula como lo que son', () => {
+  assert.equal(esProveedorNoIdentificado("#N/A (Did not find value '12640234' in VLOOKUP)"), true);
+  assert.equal(esProveedorNoIdentificado('#REF!'), true);
+  assert.equal(esProveedorNoIdentificado('#VALUE!'), true);
+  assert.equal(esProveedorNoIdentificado(''), true);
+  assert.equal(esProveedorNoIdentificado(null), true);
+  // Y no se come a un proveedor de verdad que tenga un numeral en el nombre.
+  assert.equal(esProveedorNoIdentificado('AGRO #1 SA'), false);
+  assert.equal(esProveedorNoIdentificado('BONELLA'), false);
+});
+
+test('los tres #N/A distintos son UNA fila, no tres proveedores', () => {
+  // Sin agrupar, cada clave fallada aparece como un proveedor y tapan a los de verdad: en la
+  // pantalla real eran 8 de 11.
+  const r = ventanasDeProducto(base(F), WHERE, [], OPTS);
+  const ni = r.filas.filter(x => x.no_identificado);
+  assert.equal(ni.length, 1);
+  assert.equal(ni[0].proveedor, SIN_IDENTIFICAR);
+  assert.equal(ni[0].kilos_hist, 2400);        // 1000 + 800 + 600
+});
+
+test('no se ofrece llamar a un #N/A: no hay a quién', () => {
+  const r = ventanasDeProducto(base(F), WHERE, [], OPTS);
+  assert.equal(r.filas.find(x => x.no_identificado).contactar, false);
+  assert.ok(!r.filas.filter(x => x.contactar).some(x => x.no_identificado));
+});
+
+test('van al final y no se cuentan como proveedores activos', () => {
+  const r = ventanasDeProducto(base(F), WHERE, [], OPTS);
+  assert.equal(r.filas[r.filas.length - 1].no_identificado, true);
+  assert.equal(r.proveedores_activos, 2);      // BONELLA y AGRO NUEVO
+});
+
+test('se dice cuánto volumen quedó sin nombre, para saber cuánto vale la pantalla', () => {
+  const r = ventanasDeProducto(base(F), WHERE, [], OPTS);
+  assert.equal(r.sin_identificar.kilos_hist, 2400);
+  assert.equal(r.sin_identificar.kilos_act, 1800);
+  assert.ok(r.sin_identificar.pct_hist > 0 && r.sin_identificar.pct_hist < 100, r.sin_identificar.pct_hist);
+});
+
+test('si no hay ninguno, no se inventa la fila ni la advertencia', () => {
+  const filas = [['C1', 'PALTA', 'BONELLA', P26, '01-JULIO', 100, 10]];
+  const r = ventanasDeProducto(base(filas), WHERE, [], OPTS);
+  assert.equal(r.sin_identificar, null);
+  assert.ok(!r.filas.some(x => x.no_identificado));
+});
+
+// ── EL PERFIL DEL PRODUCTO ────────────────────────────────────────────────────────────
+test('el total por mes es de toda la historia, y aparte el de este año', () => {
+  const r = ventanasDeProducto(base(F), WHERE, [], OPTS);
+  // JULIO: 5000 + 6000 (BONELLA) + 500 (AGRO) + 600 (#N/A) = 12.100
+  assert.equal(r.totales['01-JULIO'], 12100);
+  assert.equal(r.totales_act['01-JULIO'], 500);
+  assert.equal(r.pico_mes, '09-MARZO');        // 17.000 de JAGUACY
+});
+
+test('el filtro del producto manda: la banana de BONELLA no entra', () => {
+  const b = ventanasDeProducto(base(F), WHERE, [], OPTS).filas.find(x => x.proveedor === 'BONELLA');
+  assert.equal(b.kilos_hist, 18000);           // sin los 9000 de banana
+});
+
+test('la escala sale de la celda más grande, no del total del mes', () => {
   const filas = [
-    ['C1', 'CEBOLLA', 'A', ACT, '06-DICIEMBRE', 1000, 100],
-    ['C1', 'CEBOLLA', 'B', ACT, '06-DICIEMBRE',  500,  50],
+    ['C1', 'PALTA', 'A', P26, '01-JULIO', 1000, 100],
+    ['C1', 'PALTA', 'B', P26, '01-JULIO',  500,  50],
   ];
   const r = ventanasDeProducto(base(filas), WHERE, [], OPTS);
   assert.equal(r.max_celda, 1000);
-  assert.notEqual(r.max_celda, r.totales['06-DICIEMBRE']);
-});
-
-test('la escala también mira la campaña anterior, para que el contorno entre', () => {
-  const filas = [
-    ['C1', 'CEBOLLA', 'A', ACT, '06-DICIEMBRE',  100, 10],
-    ['C1', 'CEBOLLA', 'A', ANT, '06-DICIEMBRE', 9000, 900],
-  ];
-  assert.equal(ventanasDeProducto(base(filas), WHERE, [], OPTS).max_celda, 9000);
-});
-
-test('sin proveedor cargado se dice, no se inventa', () => {
-  const filas = [['C1', 'CEBOLLA', '', ACT, '06-DICIEMBRE', 100, 10]];
-  assert.equal(ventanasDeProducto(base(filas), WHERE, [], OPTS).filas[0].proveedor, '(sin proveedor)');
+  assert.notEqual(r.max_celda, r.totales['01-JULIO']);
 });
 
 test('sin datos no explota', () => {
   const r = ventanasDeProducto(base([]), WHERE, [], OPTS);
   assert.deepEqual(r.filas, []);
-  assert.deepEqual(r.meses, []);
-  assert.equal(r.total_kilos, 0);
-  assert.equal(r.max_celda, 0);
-  assert.equal(r.pico_mes, null);
+  assert.deepEqual(r.periodos, []);
+  assert.equal(r.a_contactar, 0);
+  assert.equal(r.sin_identificar, null);
 });
 
-test('sin campaña anterior elegida, sigue andando y no marca corrimientos', () => {
-  const r = ventanasDeProducto(base(F), "WHERE producto = 'CEBOLLA' AND periodo = '" + ACT + "'", [],
-    { periodo_actual: ACT });
-  const g = r.filas.find(x => x.proveedor === 'GIGLIO');
-  assert.equal(g.corrimiento, null);
-  assert.equal(g.kilos, 6500);
-  assert.ok(!r.filas.some(x => x.proveedor === 'ROMERO'), 'trajo un proveedor de otra campaña');
+test('sin decir cuál es la campaña actual, toma la más nueva que haya', () => {
+  const r = ventanasDeProducto(base(F), WHERE, [], {});
+  assert.equal(r.periodo_actual, P26);
+  assert.equal(r.filas.find(x => x.proveedor === 'JAGUACY').contactar, true);
 });
 
-// ── EL SELECTOR DE PRODUCTOS ──────────────────────────────────────────────────────────
-test('ofrece los productos más vendidos, con cuántos proveedores tiene cada uno', () => {
-  const r = productosMasVendidos(base(F), "WHERE periodo IN ('" + ACT + "','" + ANT + "')", [], 10);
-  assert.equal(r[0].producto, 'CEBOLLA');   // 12.000 kg contra 9.000 de papa
-  assert.equal(r[0].proveedores, 3);
-  assert.equal(r[1].producto, 'PAPA');
+test('mirando una campaña vieja como actual, cambia a quién hay que llamar', () => {
+  // En P24, JAGUACY estaba trabajando: no hay que llamarlo. BONELLA tampoco.
+  const r = ventanasDeProducto(base(F), WHERE, [], { periodo_actual: P24 });
+  assert.equal(r.filas.find(x => x.proveedor === 'JAGUACY').contactar, false);
+  assert.equal(r.filas.find(x => x.proveedor === 'AGRO NUEVO').contactar, false);  // todavía no existía
+});
+
+// ── EL SELECTOR ───────────────────────────────────────────────────────────────────────
+test('ofrece los productos con cuántos proveedores y cuántas campañas tienen', () => {
+  const r = productosMasVendidos(base(F), '', [], 10);
+  assert.equal(r[0].producto, 'PALTA');
+  assert.equal(r[0].campanias, 5);
 });
 
 // ── LAS DOS TRAMPAS DE SQLITE ─────────────────────────────────────────────────────────
 test('con el WHERE parametrizado da EXACTAMENTE lo mismo que con los valores escritos', () => {
   const a = ventanasDeProducto(base(F), WHERE, [], OPTS);
-  const b = ventanasDeProducto(base(F), WHERE_P, PARAMS, OPTS);
+  const b = ventanasDeProducto(base(F), WHERE_P, ['PALTA'], OPTS);
   assert.equal(JSON.stringify(b), JSON.stringify(a));
   assert.ok(a.filas.length > 0);
-  assert.deepEqual(ejeMeses(base(F), WHERE_P, PARAMS), ejeMeses(base(F), WHERE, []));
+  assert.deepEqual(ejeMeses(base(F), WHERE_P, ['PALTA']), ejeMeses(base(F), WHERE, []));
 });
 
 test('ningún alias del SQL se llama como una columna de sheet_ventas', () => {
