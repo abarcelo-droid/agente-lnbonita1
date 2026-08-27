@@ -20445,13 +20445,10 @@ function sgCobGuardar(){
     total = Math.round((total + monto) * 100) / 100;
   }
   if (!medios.length) { toast('Poné cuánto se cobró', 'er'); return; }
-  // UN SOLO CHEQUE POR COBRANZA, POR AHORA. Anular una cobranza sólo devuelve el
-  // primero a la cartera: los demás quedarían vivos contra una cobranza que ya no
-  // existe. Se avisa en vez de ofrecerlo y romper.
-  if (cheques > 1) {
-    toast('Por ahora va un cheque por cobranza: al anular sólo vuelve el primero a la cartera. Cargá el otro aparte.', 'er');
-    return;
-  }
+  // VARIOS CHEQUES SÍ. El bloqueo que había acá era porque anular una cobranza
+  // devolvía sólo el primero a la cartera y los demás quedaban vivos contra una
+  // cobranza que ya no existía. Ya se arregló: ahora los cheques recuerdan de qué
+  // cobranza vinieron y la anulación los devuelve a todos.
   var esChq = medios.length === 1 && !!medios[0].cheque;
   var docs = [], imp = 0;
   SG_COB.docs.forEach(function(d, i){

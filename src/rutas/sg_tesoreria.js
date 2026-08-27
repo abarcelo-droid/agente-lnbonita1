@@ -680,22 +680,30 @@ router.post('/cheques-terceros/:id/rechazar', requireAuth, (req, res) => {
 
     let asientoId = null;
     const vuelven = [];
+    // El rechazo tiene que volver por el MISMO libro por el que entró. Si el cheque
+    // cobró la parte sin comprobante, deshacerlo en el libro fiscal deja las dos
+    // mitades descuadradas —una de más y otra de menos— y el asiento del rechazo
+    // parece correcto porque el total cierra.
+    const ambR = (c.ambito === 'gestion') ? 'gestion' : 'fiscal';
+    const motR = ambR === 'gestion' ? (c.motivo || 'ajuste_gestion') : null;
     db.transaction(() => {
       asientoId = crearAsiento(db, {
         fecha, usuario_id: u ? u.id : null, ref_codigo: 'CHT-R-' + c.id,
         descripcion: 'Cheque N° ' + c.nro_cheque + ' RECHAZADO' + (c.librador ? ' — ' + c.librador : '')
           + ' — ' + motivo,
       }, [
-        { cuenta_id: ctaRech, debe: c.monto, haber: 0, descripcion: 'Cheque rechazado N° ' + c.nro_cheque },
-        { cuenta_id: contra, debe: 0, haber: c.monto, descripcion: contraNombre },
+        { cuenta_id: ctaRech, debe: c.monto, haber: 0, ambito: ambR, motivo: motR,
+          descripcion: 'Cheque rechazado N° ' + c.nro_cheque },
+        { cuenta_id: contra, debe: 0, haber: c.monto, ambito: ambR, motivo: motR,
+          descripcion: contraNombre },
       ]).id;
 
       if (deDonde === 'banco') {
         db.prepare(`INSERT INTO sg_fin_movimientos
-          (cuenta_id, fecha, tipo, concepto, monto, referencia, usuario_id)
-          VALUES (?,?, 'egreso', ?,?,?,?)`).run(c.cuenta_destino, fecha,
+          (cuenta_id, fecha, tipo, concepto, monto, referencia, usuario_id, ambito, motivo)
+          VALUES (?,?, 'egreso', ?,?,?,?,?,?)`).run(c.cuenta_destino, fecha,
           'Cheque rechazado N° ' + c.nro_cheque + (c.librador ? ' — ' + c.librador : ''),
-          c.monto, 'CHT-R-' + c.id, u ? u.id : null);
+          c.monto, 'CHT-R-' + c.id, u ? u.id : null, ambR, motR);
       } else {
         // LA DEUDA CON EL PROVEEDOR VUELVE. Las facturas que ese cheque había
         // cancelado quedan otra vez pendientes: se descuenta de la ÚLTIMA
@@ -863,19 +871,30 @@ router.post('/cheques-terceros/:id/depositar', requireAuth, (req, res) => {
     db.transaction(() => {
       db.prepare("UPDATE sg_fin_cheques_terceros SET estado='depositado', cuenta_destino=? WHERE id=?")
         .run(cuenta.id, c.id);
+      // ── EL DEPÓSITO NO CAMBIA DE LIBRO ────────────────────────────────
+      // Un cheque que cobró la parte SIN comprobante entró a la cartera marcado
+      // como gestión. Acá el movimiento y el asiento salían sin decir ámbito —o
+      // sea FISCAL por defecto—, así que quedaba un débito de gestión en cartera
+      // que no se cancelaba nunca y un crédito fiscal que nadie debía: la cuenta
+      // de cheques en cartera no cerraba por ámbito, y el arqueo fiscal del banco
+      // se llevaba plata que nunca entró al libro fiscal.
+      const ambCh = (c.ambito === 'gestion') ? 'gestion' : 'fiscal';
+      const motCh = ambCh === 'gestion' ? (c.motivo || 'ajuste_gestion') : null;
       db.prepare(`INSERT INTO sg_fin_movimientos
-        (cuenta_id, fecha, tipo, concepto, monto, referencia, usuario_id)
-        VALUES (?,?, 'ingreso', ?,?,?,?)`).run(cuenta.id, fecha,
+        (cuenta_id, fecha, tipo, concepto, monto, referencia, usuario_id, ambito, motivo)
+        VALUES (?,?, 'ingreso', ?,?,?,?,?,?)`).run(cuenta.id, fecha,
         'Depósito cheque de terceros' + (c.nro_cheque ? ' N° ' + c.nro_cheque : '')
           + (c.librador ? ' — ' + c.librador : ''),
-        c.monto, 'CHT-' + c.id, u ? u.id : null);
+        c.monto, 'CHT-' + c.id, u ? u.id : null, ambCh, motCh);
       if (asienta) {
         asientoId = crearAsiento(db, {
           fecha, usuario_id: u ? u.id : null, ref_codigo: 'CHT-' + c.id,
           descripcion: 'Depósito cheque N° ' + c.nro_cheque + (c.librador ? ' de ' + c.librador : ''),
         }, [
-          { cuenta_id: cuenta.cuenta_contable_id, debe: c.monto, haber: 0, descripcion: cuenta.nombre },
-          { cuenta_id: ctaCartera, debe: 0, haber: c.monto, descripcion: 'Cheques en cartera' },
+          { cuenta_id: cuenta.cuenta_contable_id, debe: c.monto, haber: 0,
+            ambito: ambCh, motivo: motCh, descripcion: cuenta.nombre },
+          { cuenta_id: ctaCartera, debe: 0, haber: c.monto,
+            ambito: ambCh, motivo: motCh, descripcion: 'Cheques en cartera' },
         ]).id;
       }
     })();

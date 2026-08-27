@@ -105,19 +105,20 @@ test('parametrizar sigue siendo del dueño', () => {
   assert.match(SG, /router\.post\('\/limpieza\/todo\/borrar', requireAdmin/);
 });
 
-test('el cliente y el proveedor siguen siendo del dueño; el envase no', () => {
-  // Los cuatro los monta la misma función. Un envase o una presentación se dan de
-  // alta MIENTRAS se descarga un camión; un cliente o un proveedor llevan CUIT,
-  // categoría fiscal y límite de crédito.
+test('los cuatro maestros que monta la misma función se abrieron', () => {
+  // Los cuatro los monta montarCRUD. La primera pasada dejó cliente y proveedor en
+  // admin —llevan CUIT, categoría fiscal y límite de crédito— y Pablo lo revisó el
+  // 27/8/2026: «sí, abrilo a nivel operar». El comercial que toma un pedido de un
+  // cliente nuevo, o el que recibe un camión de un proveedor que nunca vino, no
+  // puede quedarse esperando.
+  //
+  // No quedan abiertos: el nivel los sigue mirando contra sg-catalogo. Lo que se
+  // sacó es la exigencia de ser el DUEÑO, no el control.
   assert.match(SG, /const escribir = opts\.operativo \? requireAuth : requireAdmin;/);
-  assert.match(SG, /montarCRUD\('envases'.*operativo: true/);
-  const i = SG.indexOf("montarCRUD('presentaciones'");
-  assert.match(SG.slice(i, i + 500), /operativo: true/);
-  // Y los otros dos NO la llevan.
-  for (const m of ['proveedores', 'clientes']) {
+  for (const m of ['envases', 'presentaciones', 'proveedores', 'clientes']) {
     const j = SG.indexOf("montarCRUD('" + m + "'");
     assert.ok(j > 0, m);
-    assert.ok(!/operativo: true/.test(SG.slice(j, j + 900)), m + ' se abrió sin decidirlo');
+    assert.match(SG.slice(j, j + 1200), /operativo: true/, m + ' quedó pidiendo admin');
   }
 });
 

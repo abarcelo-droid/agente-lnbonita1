@@ -136,9 +136,14 @@ function val(v) {
 //
 // Esta función monta CUATRO maestros y no son todos lo mismo. Un envase o una
 // presentación se dan de alta MIENTRAS se descarga un camión —llegó en un cajón
-// que no estaba cargado— y eso es trabajo del día. Un cliente o un proveedor
-// llevan CUIT, categoría fiscal y límite de crédito: eso define con quién y cómo
-// se opera, y sigue siendo del dueño.
+// que no estaba cargado— y eso es trabajo del día.
+//
+// El cliente y el proveedor llevan CUIT, categoría fiscal y límite de crédito, así
+// que la primera pasada los dejó en admin. Pablo lo revisó el 27/8/2026: «sí,
+// abrilo a nivel operar». Y tiene razón: el comercial que toma un pedido de un
+// cliente nuevo, o el que recibe un camión de un proveedor que nunca vino, no puede
+// quedarse esperando. Lo que se saca es la exigencia de ser el DUEÑO, no el control
+// —el nivel los sigue mirando contra sg-catalogo—.
 //
 // `opts.operativo` marca los primeros. No queda abierto: el nivel lo sigue
 // mirando exigirNivel contra el prefijo declarado (los cuatro son de sg-catalogo).
@@ -904,6 +909,9 @@ montarCRUD('proveedores', 'sg_proveedores',
    // diferencia se mide aparte como venta de gestión.
    'descuento_pct'],   // es_servicio: 1 = fletero/cooperativa · saldo_inicial: apertura al corte (BRIEF 10)
   { orderBy: 'razon_social COLLATE NOCASE',
+    // A nivel operar: el que recibe un camión de un proveedor nuevo lo da de alta y
+    // sigue trabajando, sin esperar al dueño (Pablo, 27/8/2026).
+    operativo: true,
     // nombre de la categoría comercial (categoria_id → sg_proveedor_categorias). La usa el front
     // para filtrar el selector de la OC de mercadería (solo Mercaderia Nacional/Importada).
     selectExtra: '(SELECT nombre FROM sg_proveedor_categorias WHERE id = sg_proveedores.categoria_id) AS categoria_nombre' });
@@ -1608,6 +1616,9 @@ montarCRUD('clientes', 'sg_clientes',
    'limite_credito', 'localidad', 'provincia', 'direccion_entrega', 'telefono',
    'email', 'observaciones', 'saldo_inicial'],   // saldo_inicial: apertura al corte (BRIEF 10)
   { orderBy: 'razon_social COLLATE NOCASE',
+    // A nivel operar: el comercial que toma un pedido de un cliente nuevo no puede
+    // quedarse esperando al dueño (Pablo, 27/8/2026).
+    operativo: true,
     // nombre de la categoría comercial (categoria_id → sg_cliente_categorias) para la grilla
     selectExtra: '(SELECT nombre FROM sg_cliente_categorias WHERE id = sg_clientes.categoria_id) AS categoria_nombre' });
 
