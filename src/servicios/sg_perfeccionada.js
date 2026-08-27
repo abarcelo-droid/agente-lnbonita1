@@ -102,3 +102,26 @@ export function motivoPrecioFirme(p, queSeIntenta = 'cambiar el precio') {
 export function frenoPrecioFirme(db, ocId, queSeIntenta) {
   return motivoPrecioFirme(perfeccionamientoDeOC(db, ocId), queSeIntenta);
 }
+
+// ── Y EL CERROJO DEJA DE SER UNA PARED ─────────────────────────────────────
+//
+// Pablo, 27/8/2026: «el mensaje está OK, pero debe permitirme corregir el precio».
+// La regla no cambia —para cambiarlo hay que anular primero— pero el cartel deja
+// de ser el final del camino: dice QUÉ comprobante lo traba y la pantalla puede
+// ofrecer anularlo ahí mismo. Antes había que salir a buscarlo a mano, con la
+// corrección a medio escribir.
+//
+// Devuelve el texto Y los datos del comprobante, para que la pantalla no tenga que
+// adivinarlos parseando el mensaje.
+export function precioFirmeDetalle(db, ocId, queSeIntenta) {
+  const p = perfeccionamientoDeOC(db, ocId);
+  if (!p) return null;
+  return {
+    error: motivoPrecioFirme(p, queSeIntenta),
+    // 'como' dice a qué puerta hay que ir a anular, y son tres distintas:
+    //   factura     → POST /api/sg/facturas-compra/:id/anular
+    //   liquidacion → POST /api/liquidaciones/:id/anular
+    //   marca       → la puso un admin a mano; se saca desde la bandeja
+    firme: { como: p.como, id: p.id, numero: p.numero, fecha: p.fecha || null },
+  };
+}
