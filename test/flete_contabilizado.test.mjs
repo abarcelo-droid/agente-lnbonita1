@@ -185,3 +185,64 @@ test('el desglose de neto e IVA se ve mientras se carga', () => {
   // sgMoney2 y no sgMoney: esto se compara al centavo contra el papel.
   assert.ok(!/sgMoney\(m\.neto\)/.test(b), 'al peso redondo no se puede comparar contra la factura');
 });
+
+// ── EL PAPEL DEL FLETERO ───────────────────────────────────────────────────
+test('el archivo va a R2 y la clave NO sale al navegador', () => {
+  // Mismo camino que los documentos del embarque: en la base queda la referencia
+  // y el archivo se baja por el backend, que verifica que sea el de ESE gasto.
+  assert.match(SG, /router\.post\('\/gastos-directos\/:id\/archivo'/);
+  assert.match(SG, /router\.get\('\/gastos-directos\/:id\/archivo'/);
+  assert.match(SG, /await subirArchivo\(f\.buffer, key, f\.mimetype\)/);
+  for (const c of ['storage_key', 'archivo_nombre', 'archivo_mime', 'archivo_bytes']) {
+    assert.ok(DB.includes("addCol('sg_gastos_directos', '" + c + "'"), 'falta la columna ' + c);
+  }
+  // El listado dice SI hay archivo, no CUÁL es.
+  assert.match(SG, /\(g\.storage_key IS NOT NULL\) AS tiene_archivo/);
+});
+
+test('la fila se actualiza DESPUÉS de subir, no antes', () => {
+  // Al revés dejaría la fila apuntando a un archivo que no existe, y un botón de
+  // descarga que rompe.
+  const i = SG.indexOf("router.post('/gastos-directos/:id/archivo'");
+  const b = SG.slice(i, i + 2200);
+  const sube = b.indexOf('await subirArchivo(');
+  const guarda = b.indexOf('UPDATE sg_gastos_directos SET storage_key=?');
+  assert.ok(sube > 0 && guarda > sube, 'el UPDATE va después de la subida');
+});
+
+test('sólo PDF, JPG o PNG, y hasta 10MB', () => {
+  const i = SG.indexOf("router.post('/gastos-directos/:id/archivo'");
+  const b = SG.slice(i, i + 2200);
+  assert.match(b, /DOC_MIMES\.has\(f\.mimetype\)/);
+  assert.match(b, /f\.size > DOC_MAX_BYTES/);
+  // Y usa uploadDoc, que es una FUNCIÓN declarada: uploadDocMem es una const que se
+  // declara miles de líneas más abajo, y pasarla como middleware acá se evalúa al
+  // registrar la ruta —antes de que exista— y el server no arranca.
+  assert.match(b, /requireAuth, uploadDoc, async/);
+});
+
+test('sacar el archivo suelta la referencia, no borra el papel', () => {
+  const i = SG.indexOf("router.delete('/gastos-directos/:id/archivo'");
+  assert.ok(i > 0);
+  const b = SG.slice(i, i + 900);
+  assert.match(b, /SET storage_key=NULL, archivo_nombre=NULL/);
+  assert.ok(!/borrarArchivo|deleteObject/.test(b), 'el archivo no se borra del depósito');
+});
+
+test('el modal no se cierra si todavía falta la factura', () => {
+  // Recién después de valorizar existe el gasto al que colgar el papel. Cerrar
+  // obligaría a volver a entrar para adjuntar la factura que se tiene en la mano.
+  const i = PANEL.indexOf('function sgFeGuardar(){');
+  const b = PANEL.slice(i, i + 2000);
+  assert.match(b, /if \(r\.data && r\.data\.id && !\(SGFE\.sel && SGFE\.sel\.tiene_archivo\)\)/);
+  assert.match(b, /SGFE\.sel\.gasto_id = r\.data\.id/);
+});
+
+test('sin gasto todavía, se dice — no se ofrece un botón que no puede andar', () => {
+  const i = PANEL.indexOf('function sgFeArchPintar(){');
+  assert.ok(i > 0);
+  const b = PANEL.slice(i, i + 1400);
+  assert.match(b, /Guardá primero la valorización/);
+  assert.match(b, /x\.tiene_archivo/);
+  assert.match(b, /inline=1/, 'se puede ver sin bajarlo');
+});

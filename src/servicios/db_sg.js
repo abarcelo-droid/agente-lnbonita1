@@ -1919,6 +1919,13 @@ try {
   if (addCol('sg_gastos_directos', 'iva_alicuota',        'REAL'))    added.push('sg_gastos_directos.iva_alicuota');
   if (addCol('sg_gastos_directos', 'iva_monto',           'REAL'))    added.push('sg_gastos_directos.iva_monto');
   if (addCol('sg_gastos_directos', 'asiento_id',          'INTEGER')) added.push('sg_gastos_directos.asiento_id');
+  // EL PAPEL DEL FLETERO. Se guarda en R2 —igual que los documentos del embarque—
+  // y acá queda sólo la referencia. La storage_key NO sale nunca al navegador: el
+  // archivo se baja por el backend, que verifica que sea el de ese gasto.
+  if (addCol('sg_gastos_directos', 'storage_key',     'TEXT'))    added.push('sg_gastos_directos.storage_key');
+  if (addCol('sg_gastos_directos', 'archivo_nombre',  'TEXT'))    added.push('sg_gastos_directos.archivo_nombre');
+  if (addCol('sg_gastos_directos', 'archivo_mime',    'TEXT'))    added.push('sg_gastos_directos.archivo_mime');
+  if (addCol('sg_gastos_directos', 'archivo_bytes',   'INTEGER')) added.push('sg_gastos_directos.archivo_bytes');
   if (addCol('sg_lote_decomisos',   'bultos',               'INTEGER')) added.push('sg_lote_decomisos.bultos');
   if (addCol('sg_transformaciones', 'bultos_transformados', 'INTEGER')) added.push('sg_transformaciones.bultos_transformados');
   if (addCol('sg_reprocesos',       'bultos_procesados',    'INTEGER')) added.push('sg_reprocesos.bultos_procesados');
