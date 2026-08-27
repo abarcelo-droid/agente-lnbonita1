@@ -28,6 +28,7 @@ import { nivelEnModulo } from '../servicios/permisos.js';
 import { detectar, sinMargen, TIPOS, UMBRALES } from '../servicios/oportunidades.js';
 import { generarOportunidadesPDF } from '../servicios/oportunidadesPDF.js';
 import { detallePorProducto, detalleClientesPerdidos } from '../servicios/interanualDetalle.js';
+import { ventanasDeProducto, productosMasVendidos } from '../servicios/ventanas.js';
 
 const router = express.Router();
 
@@ -606,6 +607,54 @@ router.get('/oportunidades.pdf', requireAuth, (req, res) => {
     console.error('[Informes][oportunidades.pdf]', e);
     res.status(500).json({ ok: false, error: e.message });
   }
+});
+
+// GET /api/informes/ventanas — de quién vendimos un producto, mes a mes de la campaña.
+//
+// La campaña ANTERIOR entra al WHERE aunque no se pida dibujarla: sin sus filas no se puede
+// saber que un proveedor arrancó un mes más tarde, ni que a otro lo perdimos. El servicio
+// decide qué va lleno y qué va de contorno.
+router.get('/ventanas', requireAuth, (req, res) => {
+  try {
+    const v = ventanaInteranual(req.query);
+    if (!v.actual) return res.json({ ok: true, data: { vacio: true, productos: [], meses: [], filas: [] } });
+    const comparar = req.query.comparar !== '0' && !!v.anterior;
+
+    // Toda la campaña, no un mes: acá el eje ES el año.
+    const q = Object.assign({}, req.query, {
+      periodos: comparar ? [v.actual, v.anterior].join(',') : v.actual,
+      mes_ok: '',
+    });
+    const producto = String(req.query.producto || '').trim();
+
+    // Sin producto elegido no se devuelve un gráfico vacío: se ofrecen los que más se venden,
+    // que es lo que hace falta para poder elegir sin saberse el padrón de memoria.
+    if (!producto) {
+      const { where, params } = armarWhere(q);
+      return res.json({ ok: true, data: {
+        sin_producto: true,
+        productos: productosMasVendidos(db, where, params, req.query.sugerencias),
+        ventana: v, comparar,
+        sync: { ultimo_ok: estadoSync().ultimo_ok },
+      } });
+    }
+
+    // El producto entra por filtro_producto, que armarWhere ya sabe atar como parámetro.
+    const { where, params } = armarWhere(Object.assign(q, { filtro_producto: producto }));
+    const data = ventanasDeProducto(db, where, params, {
+      periodo_actual: v.actual,
+      periodo_anterior: comparar ? v.anterior : null,
+    });
+    const est = estadoSync();
+    res.json({ ok: true, data: Object.assign(data, {
+      producto, ventana: v, comparar,
+      // El eje es el MES y no la semana a propósito: la columna `sem` de la planilla todavía
+      // no está verificada (¿semana ISO o semana de campaña?) y un eje de tiempo mal
+      // interpretado corre todas las ventanas sin fallar. La pantalla lo dice.
+      eje: 'mes_ok',
+      sync: { ultimo_ok: est.ultimo_ok, desactualizado: est.datos_desactualizados },
+    }) });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
 export default router;
