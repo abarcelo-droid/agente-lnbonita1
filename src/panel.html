@@ -28415,10 +28415,24 @@ function envLista(tipo){
 function envRepet(){api('/api/enviar-repeticion','POST',{}).then(function(d){toast('Enviado a '+(d.destinatarios||0)+' clientes','ok');});}
 
 // UTILS
+// UN 403 NO ES "NO HAY DATOS". Esto devolvia {} ante cualquier problema, y como
+// todos los lectores hacen (r&&r.ok)?r.data:[], una pantalla sin permiso se
+// dibujaba VACIA y sin una palabra: "Sin despachos", el selector con un solo
+// renglon, el cartel de "todo contabilizado" cuando en realidad no se pudo mirar.
+// El que la abria creia que no habia nada y seguia de largo.
+//
+// Vale mas que cualquier lista de permisos, porque tambien protege al lector que
+// se escape la proxima vez.
 function api(url,method,body){
   var opts={method:method||'GET',headers:{'Content-Type':'application/json'}};
   if(body) opts.body=JSON.stringify(body);
-  return fetch(url,opts).then(function(r){return r.json();}).catch(function(){return {};});
+  return fetch(url,opts).then(function(r){
+    return r.json().catch(function(){ return {}; }).then(function(j){
+      if(r.status===403 && !j.error){ j.error='No tenes acceso a este modulo.'; }
+      if(r.status===403){ j.sin_permiso=1; }
+      return j;
+    });
+  }).catch(function(){return {};});
 }
 function eid(id){ return document.getElementById(id); }
 function elv(id,val){ var el=eid(id); if(val!==undefined){if(el) el.value=val; return;} return el?el.value.trim():''; }
