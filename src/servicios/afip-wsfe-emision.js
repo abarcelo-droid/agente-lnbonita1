@@ -42,6 +42,12 @@ _alter('sg_factura_despachos', 'iva', 'iva REAL');
 _alter('sg_factura_despachos', 'gestion', 'gestion REAL');
 
 // sg_ven_facturas += columnas fiscales (AFIP)
+// ── CUÁNDO VENCE LO QUE QUEDÓ EN CUENTA CORRIENTE ─────────────────────────
+// Pablo, 27/8/2026: al emitir hay que decir cómo se paga, y si es cuenta corriente
+// se propone la condición del cliente y se puede cambiar. Sin esta columna la
+// deuda no tiene fecha y no hay forma de saber qué está vencido.
+_alter('sg_ven_facturas', 'vencimiento', 'vencimiento TEXT');
+_alter('sg_ven_facturas', 'condicion_pago_id', 'condicion_pago_id INTEGER');
 _alter('sg_ven_facturas', 'punto_venta', 'punto_venta INTEGER');
 _alter('sg_ven_facturas', 'cbte_tipo', 'cbte_tipo INTEGER');
 _alter('sg_ven_facturas', 'cbte_nro', 'cbte_nro INTEGER');
@@ -408,7 +414,7 @@ export function proximoNumeroManual(database, ptoVta, cbteTipo) {
 
 function persistirReservada(database, { comprobante, ptoVta, cbteTipo, cbteNro, ambiente, fecha,
                                         userId, manual, esPrueba, descuentoGestion,
-                                        ncDeFacturaId, ncMotivo }) {
+                                        ncDeFacturaId, ncMotivo, vencimiento, condicionPagoId }) {
   // 1 factura A, 3 nota de crédito A, 2 nota de DÉBITO A. Acá faltaba el 2: una nota
   // de débito A quedaba guardada como 'B' y el listado, los filtros y el libro la
   // mostraban con la letra equivocada.
@@ -424,8 +430,8 @@ function persistirReservada(database, { comprobante, ptoVta, cbteTipo, cbteNro, 
     const info = database.prepare(`INSERT INTO sg_ven_facturas
       (numero, fecha, cliente_id, tipo, concepto, neto, iva, total, estado,
        punto_venta, cbte_tipo, cbte_nro, ambiente, afip_estado, notas, usuario_id, es_prueba,
-       dif_gestion, dif_motivo)
-      VALUES (?,?,?,?,?,?,?,?, 'pendiente', ?,?,?,?, 'reservado', ?, ?, ?, ?, ?)`).run(
+       dif_gestion, dif_motivo, vencimiento, condicion_pago_id)
+      VALUES (?,?,?,?,?,?,?,?, 'pendiente', ?,?,?,?, 'reservado', ?, ?, ?, ?, ?, ?, ?)`).run(
       numero, fecha, comprobante.cliente.id, tipoLetra, 'Productos',
       comprobante.imp_neto, comprobante.imp_iva, comprobante.imp_total,
       ptoVta, cbteTipo, cbteNro, ambiente,
@@ -441,7 +447,16 @@ function persistirReservada(database, { comprobante, ptoVta, cbteTipo, cbteNro, 
       // segunda columna para lo mismo es una parte de gestión que existe en el
       // asiento y que la pantalla del saldo no ve.
       Math.round((Number(descuentoGestion) || 0) * 100) / 100,
-      (Number(descuentoGestion) || 0) > 0 ? 'ajuste_gestion' : null);
+      (Number(descuentoGestion) || 0) > 0 ? 'ajuste_gestion' : null,
+      // ── CUÁNDO VENCE LO QUE QUEDE EN CUENTA CORRIENTE ─────────────────
+      // Pablo, 27/8/2026: al emitir hay que decir cómo se paga, y si va a cuenta
+      // corriente se propone la condición del cliente y se puede cambiar.
+      //
+      // Se guarda AUNQUE se cobre en el acto: si el cobro no alcanza a cubrir el
+      // total, el resto queda en la cuenta corriente y también vence. Sin fecha,
+      // esa deuda no se puede reclamar ni aparece en ningún informe de vencidos.
+      vencimiento || null,
+      condicionPagoId ? Number(condicionPagoId) : null);
     facturaId = info.lastInsertRowid;
     if (ncDeFacturaId) {
       database.prepare('UPDATE sg_ven_facturas SET nc_de_factura_id=?, nc_motivo=? WHERE id=?')
@@ -619,7 +634,8 @@ function confirmarAutorizada(database, facturaId, campos, vinculos, esNC) {
 // (sin puente) · timeout: FECompConsultar. vinculos (opcional): [{despacho_id, despacho_item_id, kg}].
 export async function emitir(database, { ptoVta, clienteId, items, esNC, userId, vinculos,
                                          descuentoGestion, identificacion, asociado,
-                                         ncDeFacturaId, ncMotivo, concepto }) {
+                                         ncDeFacturaId, ncMotivo, concepto,
+                                         vencimiento, condicionPagoId }) {
   const comprobante = construirComprobante(database, { clienteId, items, esNC, identificacion,
     asociado, concepto });
   const cbteTipo = comprobante.cbte_tipo;
@@ -639,7 +655,8 @@ export async function emitir(database, { ptoVta, clienteId, items, esNC, userId,
       const cbteNro = proximoNumeroManual(database, ptoVta, cbteTipo);
       const facturaId = persistirReservada(database, { comprobante, ptoVta, cbteTipo,
         cbteNro, ambiente: 'manual', fecha, userId, manual: true,
-        descuentoGestion, esPrueba: !!(pv && pv.es_prueba), ncDeFacturaId, ncMotivo });
+        descuentoGestion, esPrueba: !!(pv && pv.es_prueba), ncDeFacturaId, ncMotivo,
+        vencimiento, condicionPagoId });
       // La MISMA función que el camino de AFIP: cierra la factura y ata los
       // despachos en una sola transacción. Escribir eso de nuevo acá sería dos
       // maneras de hacer lo mismo, y una de las dos se olvidaría de algo.
@@ -664,7 +681,8 @@ export async function emitir(database, { ptoVta, clienteId, items, esNC, userId,
     const ult = await ultimoComprobante(ptoVta, cbteTipo);     // FECompUltimoAutorizado
     const cbteNro = (Number(ult.ultimo_nro) || 0) + 1;
     const facturaId = persistirReservada(database, { comprobante, ptoVta, cbteTipo, cbteNro,
-      ambiente, fecha, userId, descuentoGestion, ncDeFacturaId, ncMotivo });
+      ambiente, fecha, userId, descuentoGestion, ncDeFacturaId, ncMotivo,
+      vencimiento, condicionPagoId });
 
     let resp;
     try {
