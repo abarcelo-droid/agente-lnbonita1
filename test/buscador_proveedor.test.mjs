@@ -52,7 +52,7 @@ test('escribiendo se acorta la lista, por CONTIENE', () => {
   const opts = fn('sgProvOpts', {
     sgOcProvOpts: () => PROVS, SG: { cacheProv: PROVS },
     esc: (x) => String(x),
-    sgProvLabel: fn('sgProvLabel'),
+    sgProvLabel: fn('sgProvLabel'), sgNorm: fn('sgNorm'),
   });
   const h = opts('cordon', '', '— Elegir —');
   assert.ok(h.includes('PUENTE CORDON SA'));
@@ -64,7 +64,7 @@ test('busca también por alias y por CUIT', () => {
   // Uno busca por lo que tiene a mano: a veces el papel sólo trae el CUIT.
   const opts = fn('sgProvOpts', {
     sgOcProvOpts: () => PROVS, SG: { cacheProv: PROVS },
-    esc: (x) => String(x), sgProvLabel: fn('sgProvLabel'),
+    esc: (x) => String(x), sgProvLabel: fn('sgProvLabel'), sgNorm: fn('sgNorm'),
   });
   assert.ok(opts('valle', '', '').includes('FRUTAS DEL VALLE'));      // alias
   assert.ok(opts('99887766', '', '').includes('PUENTE CORDON'));      // CUIT
@@ -74,7 +74,7 @@ test('busca también por alias y por CUIT', () => {
 test('sin texto están todos, y ordenados', () => {
   const opts = fn('sgProvOpts', {
     sgOcProvOpts: () => PROVS, SG: { cacheProv: PROVS },
-    esc: (x) => String(x), sgProvLabel: fn('sgProvLabel'),
+    esc: (x) => String(x), sgProvLabel: fn('sgProvLabel'), sgNorm: fn('sgNorm'),
   });
   const h = opts('', '', '— Elegir —');
   for (const p of PROVS) assert.ok(h.includes(p.razon_social), p.razon_social);
@@ -85,7 +85,7 @@ test('sin texto están todos, y ordenados', () => {
 test('respeta el que ya estaba elegido', () => {
   const opts = fn('sgProvOpts', {
     sgOcProvOpts: () => PROVS, SG: { cacheProv: PROVS },
-    esc: (x) => String(x), sgProvLabel: fn('sgProvLabel'),
+    esc: (x) => String(x), sgProvLabel: fn('sgProvLabel'), sgNorm: fn('sgNorm'),
   });
   assert.match(opts('', 2, ''), /<option value="2" selected>/);
 });
@@ -95,7 +95,7 @@ test('la orden de compra filtra por categoría, no por el padrón entero', () =>
   // buscador tiene que trabajar sobre ESA lista, no sobre todo el padrón.
   const opts = fn('sgProvOpts', {
     sgOcProvOpts: () => [PROVS[0]], SG: { cacheProv: PROVS },
-    esc: (x) => String(x), sgProvLabel: fn('sgProvLabel'),
+    esc: (x) => String(x), sgProvLabel: fn('sgProvLabel'), sgNorm: fn('sgNorm'),
   });
   const h = opts('', '', '');
   assert.ok(h.includes('ABRAHAM'));
