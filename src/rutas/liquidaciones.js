@@ -12,6 +12,7 @@ import dbSg from '../servicios/db_sg_finanzas.js';
 import { crearAsiento } from '../servicios/asientos.js';
 import { lineasAsientoLiquidacion } from '../servicios/asiento-liquidacion.js';
 import { objetivoCerrado, cierraContraLoAcordado } from '../servicios/sg_acordado.js';
+import { frenoPartidaSinTerminar } from '../servicios/sg_partida_terminada.js';
 import path    from 'path';
 import fs      from 'fs';
 import { fileURLToPath } from 'url';
@@ -362,6 +363,27 @@ router.post('/', function(req, res) {
   // muestra al pie («el neto a pagar da el precio acordado»), ahora del lado que
   // decide.
   const ocIdBody = (d.oc_id != null && d.oc_id !== '') ? Number(d.oc_id) : null;
+
+  // ══ SE LIQUIDA CUANDO LA PARTIDA ESTÁ TERMINADA ════════════════════════
+  //
+  // Pablo, 27/8/2026: «solamente se puede liquidar una partida si está 100%
+  // terminada, o sea todos los bultos vendidos o mermados».
+  //
+  // TERMINADA = lo que ya no está en el depósito: vendido MÁS merma. Las dos cosas
+  // cuentan igual —el bulto que se tiró también terminó, sólo que rindió cero—; sin
+  // contar la merma, una partida que salió entera nunca daría por terminada.
+  //
+  // La liquidación es el papel donde el productor cobra: una vez emitida, corregirla
+  // es anularla. Liquidar con la mitad en el depósito es fijarle precio a mercadería
+  // que todavía no se sabe cuánto va a rendir.
+  //
+  // Va ANTES de los controles de precio a propósito: si la partida no está terminada
+  // no importa a qué precio se liquida, y el mensaje que sirve es éste.
+  if (ocIdBody) {
+    const frena = frenoPartidaSinTerminar(db, ocIdBody);
+    if (frena) return res.status(400).json({ error: frena });
+  }
+
   // ── LA CONDICIÓN LA DICE LA ORDEN, NO EL RADIO DE LA PANTALLA ───────────
   // El cerrojo corría sólo si el cliente decía 'cerrado'. Un clic en «Precio abierto»
   // sobre una partida firme lo saltaba entero: la pantalla marca el modo al abrir

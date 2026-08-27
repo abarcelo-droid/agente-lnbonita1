@@ -11873,6 +11873,31 @@ function liqCnt(id, n){
   el.classList.toggle('hay', n > 0 && id === 'liq-cnt-part');
 }
 
+// ── UNA PARTIDA SE LIQUIDA CUANDO ESTÁ TERMINADA ─────────────────────────
+// Pablo, 27/8/2026. Terminada = lo que ya no está en el depósito: vendido MÁS
+// merma. El bulto que se tiró también terminó, sólo que rindió cero.
+//
+// Esto ESPEJA lo que decide el servidor (servicios/sg_partida_terminada.js); el
+// servidor sigue siendo el que manda. Está acá para no ofrecer un botón que va a
+// rebotar.
+function sgPartTerminada(p){
+  var rec = Number(p.bultos_recibidos) || 0;
+  if (rec <= 0) return false;                       // sin recibir no es terminada: es sin empezar
+  var fuera = (Number(p.bultos_vendidos) || 0) + (Number(p.bultos_merma) || 0);
+  return fuera >= rec - 0.01;                       // el centavo es contra la coma flotante
+}
+
+function sgPartFaltaTxt(p){
+  var rec = Number(p.bultos_recibidos) || 0;
+  if (rec <= 0) return 'Todavía no entró mercadería de esta partida.';
+  var vend = Number(p.bultos_vendidos) || 0, mer = Number(p.bultos_merma) || 0;
+  var faltan = Math.max(0, Math.round((rec - vend - mer) * 100) / 100);
+  return 'Se liquida cuando salió todo. De ' + nr(rec) + ' bulto(s) salieron '
+    + nr(vend + mer) + ' (' + nr(vend) + ' vendidos'
+    + (mer > 0 ? ' y ' + nr(mer) + ' de merma' : '')
+    + ') y quedan ' + nr(faltan) + ' en el depósito.';
+}
+
 function sgLiqPartidasLoad(){
   api('/api/sg/partidas-a-liquidar').then(function(r){
     var rows = (r && r.ok) ? r.data : [];
@@ -11904,8 +11929,14 @@ function sgLiqPartidasLoad(){
           + '<button class="btn bo bs" onclick="sgOcVer(' + p.id + ')">Ver</button> '
           // ACÁ EMPIEZA UNA LIQUIDACIÓN, y sólo acá: sobre una partida que entró
           // y todavía no tiene precio.
-          + '<button class="btn bb bs" onclick="liqDePartida(' + p.id + ',\'' + esc(p.trazabilidad || '') + '\',\''
-            + esc(p.proveedor_nombre || '') + '\')">💲 Liquidar</button>'
+          // SE LIQUIDA CUANDO SALIÓ TODO. El botón no se ofrece antes: el servidor
+          // lo rechaza igual, y el que aprieta un botón que contesta error cree que
+          // rompió algo. El motivo va en el title, para que no haya que adivinarlo.
+          + (sgPartTerminada(p)
+              ? '<button class="btn bb bs" onclick="liqDePartida(' + p.id + ',\'' + esc(p.trazabilidad || '') + '\',\''
+                + esc(p.proveedor_nombre || '') + '\')">💲 Liquidar</button>'
+              : '<button class="btn bo bs" disabled style="opacity:.5;cursor:not-allowed" title="'
+                + esc(sgPartFaltaTxt(p)) + '">💲 Liquidar</button>')
           // LA SALIDA DE EMERGENCIA. Si la liquidación se emitió fuera del
           // sistema, o se cargó por el botón suelto sin decir de qué partida
           // era, esta partida no tiene forma de salir de la bandeja: se queda
