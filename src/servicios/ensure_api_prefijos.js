@@ -216,7 +216,13 @@ const PREFIJOS = [
   // sg-control-coop las conserva —abajo— para no dejar sin acceso a quien tenga
   // ese permiso tildado y no éste: con dos dueños, exigirNivel se queda con el
   // nivel MÁS ALTO de los dos.
-  ['sg-gastos-directos', 'sg/gastos-directos,sg/gastos-servicio,sg/proveedores-servicio,sg/control-coop,sg/cooperativas'],
+  // 'sg/fletes-entrada' NO estaba declarado, y no lo cubre ningún otro prefijo: la
+  // comparación es por segmento completo. Sin él, exigirNivel hacía `return next()`
+  // sobre esas direcciones —o sea, NINGÚN control— y por eso valorizar un flete
+  // seguía con requireAdmin: aflojarlo lo habría dejado abierto a cualquier sesión.
+  // Declarado acá, el nivel lo cuida y la valorización vuelve a ser trabajo del día.
+  // Cierra también el asiento-preview del flete, que ya salía con requireAuth.
+  ['sg-gastos-directos', 'sg/gastos-directos,sg/gastos-servicio,sg/proveedores-servicio,sg/control-coop,sg/cooperativas,sg/fletes-entrada'],
   ['sg-reprocesos',      'sg/reprocesos,sg/transformaciones'],
   ['sg-importacion',     'sg/embarques'],
   // Control Cooperativa es casi todo lectura, pero tiene UNA escritura: asignar

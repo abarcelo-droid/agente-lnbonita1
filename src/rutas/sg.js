@@ -129,7 +129,21 @@ function val(v) {
 
 // CRUD genérico soft-delete sobre una tabla con columnas de auditoría estándar.
 // fields: lista de columnas asignables desde el body.
+// ── OPERAR NO ES SER ADMIN, TAMBIÉN ACÁ ──────────────────────────────────
+// Pablo, 27/8/2026: «si tiene permiso para operar en el menú, tiene permiso para
+// cargar. Lo mismo pasa con el resto: no hace falta ser ADM, si no nadie va a
+// poder operar».
+//
+// Esta función monta CUATRO maestros y no son todos lo mismo. Un envase o una
+// presentación se dan de alta MIENTRAS se descarga un camión —llegó en un cajón
+// que no estaba cargado— y eso es trabajo del día. Un cliente o un proveedor
+// llevan CUIT, categoría fiscal y límite de crédito: eso define con quién y cómo
+// se opera, y sigue siendo del dueño.
+//
+// `opts.operativo` marca los primeros. No queda abierto: el nivel lo sigue
+// mirando exigirNivel contra el prefijo declarado (los cuatro son de sg-catalogo).
 function montarCRUD(path, tabla, fields, opts = {}) {
+  const escribir = opts.operativo ? requireAuth : requireAdmin;
   // dedup: nombre de columna a chequear contra duplicados al crear (null = sin chequeo).
   // selectExtra: expresiones SELECT extra (display) para el listado, ej. nombre de una FK.
   const { orderBy = 'id DESC', listExtra = null, dedup = null, selectExtra = null } = opts;
@@ -162,7 +176,7 @@ function montarCRUD(path, tabla, fields, opts = {}) {
   });
 
   // CREAR
-  router.post(`/${path}`, requireAdmin, async (req, res) => {
+  router.post(`/${path}`, escribir, async (req, res) => {
     const db = getDb();
     try {
       // Detección de duplicados con bloqueo. Válvula de escape: un admin puede forzar
@@ -189,7 +203,7 @@ function montarCRUD(path, tabla, fields, opts = {}) {
   });
 
   // EDITAR
-  router.put(`/${path}/:id`, requireAdmin, (req, res) => {
+  router.put(`/${path}/:id`, escribir, (req, res) => {
     const db = getDb();
     try {
       const sets = [], vals = [];
@@ -289,7 +303,7 @@ function familiaConNombre(db, nombre, exceptoId) {
               && normalizar(f.nombre || '') === buscado) || null;
 }
 
-router.post('/familias', requireAdmin, (req, res) => {
+router.post('/familias', requireAuth, (req, res) => {
   const db = getDb();
   try {
     const nombre = val(req.body.nombre);
@@ -439,7 +453,7 @@ router.patch('/especies/:id', requireAdmin, (req, res) => {
   } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
 });
 
-router.patch('/variedades/:id', requireAdmin, (req, res) => {
+router.patch('/variedades/:id', requireAuth, (req, res) => {
   const db = getDb();
   try {
     const v = db.prepare('SELECT * FROM sg_variedades WHERE id=? AND activo=1').get(req.params.id);
@@ -459,7 +473,7 @@ router.patch('/variedades/:id', requireAdmin, (req, res) => {
   } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
 });
 
-router.post('/especies', requireAdmin, (req, res) => {
+router.post('/especies', requireAuth, (req, res) => {
   const db = getDb();
   try {
     const familia_id = req.body.familia_id, nombre = val(req.body.nombre);
@@ -483,7 +497,7 @@ router.get('/variedades', requireAuth, (req, res) => {
     res.json({ ok: true, data: db.prepare(`SELECT * FROM sg_variedades WHERE ${where} ORDER BY codigo`).all(...params) });
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
-router.post('/variedades', requireAdmin, (req, res) => {
+router.post('/variedades', requireAuth, (req, res) => {
   const db = getDb();
   try {
     const especie_id = req.body.especie_id, nombre = val(req.body.nombre);
@@ -787,7 +801,7 @@ function alicuotaDeProducto(body) {
   return { alic: n };
 }
 
-router.post('/productos', requireAdmin, (req, res) => {
+router.post('/productos', requireAuth, (req, res) => {
   const db = getDb();
   try {
     const r = resolverProducto(db, req.body || {});
@@ -861,7 +875,9 @@ router.get('/envases/uso', requireAuth, (req, res) => {
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
-montarCRUD('envases', 'sg_envases', ['nombre'], { orderBy: 'nombre COLLATE NOCASE', dedup: 'nombre' });
+// Un envase se da de alta mientras se descarga el camión: llegó en un cajón que
+// no estaba cargado y hay que seguir trabajando.
+montarCRUD('envases', 'sg_envases', ['nombre'], { orderBy: 'nombre COLLATE NOCASE', dedup: 'nombre', operativo: true });
 
 // ── PRESENTACIONES (filtra por producto_id) ──────────────────────────────────────
 // envase_id/paletizado son aditivos; factor_conversion (cálculo de kg) no se toca.
@@ -869,6 +885,9 @@ montarCRUD('presentaciones', 'sg_presentaciones',
   ['producto_id', 'nombre', 'factor_conversion', 'envase_id', 'paletizado'],
   {
     orderBy: 'nombre COLLATE NOCASE',
+    // Mismo caso que el envase: la presentación de un producto se arma en el
+    // momento en que entra la mercadería.
+    operativo: true,
     listExtra: (req, params) => {
       if (req.query.producto_id) { params.push(req.query.producto_id); return 'producto_id=?'; }
       return null;
@@ -2628,7 +2647,20 @@ router.get('/oc/trazabilidad-preview', requireAuth, (req, res) => {
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
-router.post('/oc', requireAdmin, (req, res) => {
+// ── CARGAR UNA ORDEN ES TRABAJO DEL DÍA ──────────────────────────────────────
+// Pablo, 27/8/2026: «Camila quiso cargar una Orden de Compra pero sólo la habilitó
+// siendo ADM. Eso no está bien: si tiene permiso para operar en el menú, tiene
+// permiso para cargar una orden de compra».
+//
+// Es la regla que el repo ya tenía escrita y que acá se estaba violando:
+// requireAdmin es para PARAMETRIZAR; el trabajo del día va con requireAuth y el
+// nivel lo decide exigirNivel mirando la URL.
+//
+// No queda abierto: 'sg/oc' está declarado en ensure_api_prefijos.js bajo
+// sg-compras y sg-ordenes, así que hace falta nivel 'operar' en alguno de los dos.
+// Sin prefijo declarado esto SÍ quedaría sin control — modulosDeRuta devolvería
+// vacío y exigirNivel haría return next()— y por eso se verificó antes de tocarlo.
+router.post('/oc', requireAuth, (req, res) => {
   const db = getDb();
   try {
     const b = req.body;
@@ -4373,7 +4405,7 @@ router.post('/oc/:id/factura-completa', facturaUpload.single('archivo'), require
 // pantalla llena los campos y el operador confirma.
 //
 // Va con requireAdmin — el de buscar.js quedó sin auth y gasta la API key.
-router.post('/factura-mercaderia/leer', requireAdmin, async (req, res) => {
+router.post('/factura-mercaderia/leer', requireAuth, async (req, res) => {
   try {
     const { base64, mediaType, oc_id } = req.body || {};
     if (!base64 || !mediaType) return res.status(400).json({ ok: false, error: 'Falta el archivo' });
@@ -5614,7 +5646,7 @@ router.put('/oc/:id/precios', requireAuth, (req, res) => {
   } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
 });
 
-router.post('/oc/:id/completar', requireAdmin, (req, res) => {
+router.post('/oc/:id/completar', requireAuth, (req, res) => {
   const db = getDb();
   try {
     const b = req.body || {};
@@ -5919,7 +5951,7 @@ router.get('/oc/:id/pdf', requireAuth, (req, res) => {
 });
 
 // Editar cabecera de OC (solo borrador/abierta) + regenerar vencimientos
-router.put('/oc/:id', requireAdmin, (req, res) => {
+router.put('/oc/:id', requireAuth, (req, res) => {
   const db = getDb();
   try {
     const oc = db.prepare('SELECT estado FROM sg_oc WHERE id=?').get(req.params.id);
@@ -6103,7 +6135,7 @@ router.post('/oc/:id/cerrar', requireAdmin, (req, res) => {
 // LAS RESERVAS CANCELADAS NO VUELVEN. Cancelar es definitivo —el comercial ya
 // rearmó el pedido con otra mercadería— y resucitarlas comprometería kilos que
 // hoy pueden estar prometidos a otro cliente. Hay que volver a reservar a mano.
-router.post('/oc/:id/reabrir', requireAdmin, (req, res) => {
+router.post('/oc/:id/reabrir', requireAuth, (req, res) => {
   const db = getDb();
   try {
     const oc = db.prepare('SELECT id, cerrada_en FROM sg_oc WHERE id=? AND activo=1').get(req.params.id);
@@ -6127,7 +6159,10 @@ router.post('/oc/:id/reabrir', requireAdmin, (req, res) => {
 // Recibir mercadería: crea recepción + lotes (con división por calidad), recalcula costos y vencimientos.
 // BLOQUE A+B — multipart: campos de texto en req.body.payload (JSON) + fotos en req.files.
 // upload.array corre primero para poblar req.body/req.files; requireAdmin no lee el body.
-router.post('/recepciones', sgUpload.array('fotos', 40), requireAdmin, (req, res) => {
+// RECIBIR EL CAMIÓN ES EL TRABAJO DEL DÍA, no del dueño. Es el caso más claro de
+// todos: con requireAdmin, cada descarga a las cinco de la mañana esperaba a que
+// se levantara Pablo.
+router.post('/recepciones', sgUpload.array('fotos', 40), requireAuth, (req, res) => {
   const db = getDb();
   try {
     const b = req.body && req.body.payload ? JSON.parse(req.body.payload) : (req.body || {});
@@ -6659,7 +6694,7 @@ router.get('/gastos-directos', requireAuth, (req, res) => {
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
-router.post('/gastos-directos', requireAdmin, (req, res) => {
+router.post('/gastos-directos', requireAuth, (req, res) => {
   const db = getDb();
   try {
     const b = req.body;
@@ -6673,7 +6708,7 @@ router.post('/gastos-directos', requireAdmin, (req, res) => {
   } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
 });
 
-router.put('/gastos-directos/:id', requireAdmin, (req, res) => {
+router.put('/gastos-directos/:id', requireAuth, (req, res) => {
   const db = getDb();
   try {
     const g = db.prepare('SELECT lote_id FROM sg_gastos_directos_lote WHERE id=?').get(req.params.id);
@@ -6711,7 +6746,7 @@ router.get('/gastos-globales', requireAuth, (req, res) => {
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
-router.post('/gastos-globales', requireAdmin, (req, res) => {
+router.post('/gastos-globales', requireAuth, (req, res) => {
   const db = getDb();
   try {
     const b = req.body;
@@ -6724,7 +6759,7 @@ router.post('/gastos-globales', requireAdmin, (req, res) => {
   } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
 });
 
-router.put('/gastos-globales/:id', requireAdmin, (req, res) => {
+router.put('/gastos-globales/:id', requireAuth, (req, res) => {
   const db = getDb();
   try {
     const g = db.prepare('SELECT periodo FROM sg_gastos_globales_periodo WHERE id=?').get(req.params.id);
@@ -7442,7 +7477,7 @@ function derivarBultosLote(row) {
 }
 
 // ── PEDIDOS ──────────────────────────────────────────────────────────────────
-router.post('/pedidos', requireAdmin, (req, res) => {
+router.post('/pedidos', requireAuth, (req, res) => {
   const db = getDb();
   try {
     const b = req.body;
@@ -8259,7 +8294,7 @@ router.get('/cooperativas', requireAuth, (req, res) => {
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
-router.post('/cooperativas', requireAdmin, (req, res) => {
+router.post('/cooperativas', requireAuth, (req, res) => {
   const db = getDb();
   try {
     const b = req.body || {};
@@ -8279,7 +8314,7 @@ router.post('/cooperativas', requireAdmin, (req, res) => {
   } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
 });
 
-router.put('/cooperativas/:id', requireAdmin, (req, res) => {
+router.put('/cooperativas/:id', requireAuth, (req, res) => {
   const db = getDb();
   try {
     const b = req.body || {};
@@ -8399,7 +8434,7 @@ router.get('/control-coop', requireAuth, (req, res) => {
 // no hay PUT de recepciones.
 //
 // Reusa syncGastoCoop, que ya es idempotente y no pisa un gasto ya valorizado.
-router.post('/control-coop/:id/cooperativa', requireAdmin, (req, res) => {
+router.post('/control-coop/:id/cooperativa', requireAuth, (req, res) => {
   const db = getDb();
   try {
     const rec = db.prepare('SELECT * FROM sg_recepciones WHERE id=? AND activo=1').get(req.params.id);
@@ -8700,7 +8735,11 @@ router.post('/fletes-entrada/asiento-preview', requireAuth, express.json(), (req
   catch (e) { res.status(400).json({ ok: false, error: e.message }); }
 });
 
-router.post('/fletes-entrada/:recepcionId/valorizar', requireAdmin, (req, res) => {
+// VALORIZAR EL FLETE ES TRABAJO DEL DÍA. Llegó la factura del fletero y se carga:
+// no hace falta el dueño. Estaba con requireAdmin y no se podía aflojar porque
+// 'sg/fletes-entrada' no estaba declarado en ensure_api_prefijos.js — sin prefijo,
+// exigirNivel deja pasar sin mirar nada. Declarado el prefijo, el nivel lo cuida.
+router.post('/fletes-entrada/:recepcionId/valorizar', requireAuth, (req, res) => {
   const db = getDb();
   try {
     const b = req.body || {};
@@ -8914,7 +8953,7 @@ router.get('/gastos-servicio', requireAuth, (req, res) => {
 
 // Valorizar la cuenta de un fletero: asigna monto + fecha + cuenta_ref común a sus gastos
 // pendientes. items=[{id, monto}] (el front ya calculó montos, sea a mano o por prorrateo).
-router.post('/gastos-servicio/valorizar', requireAdmin, (req, res) => {
+router.post('/gastos-servicio/valorizar', requireAuth, (req, res) => {
   const db = getDb();
   try {
     const b = req.body;
@@ -11660,7 +11699,7 @@ router.get('/importacion/deuda', requireAuth, (req, res) => {
 // 'transito' exige ETD: sin fecha de embarque no hay de dónde colgar las fechas de pago, y
 // el TC de cada rubro quedaría calculado sobre la nada.
 const EMB_ESTADOS_MANUALES = new Set(['cotizacion', 'abierto', 'transito']);
-router.patch('/embarques/:id/estado', requireAdmin, express.json(), (req, res) => {
+router.patch('/embarques/:id/estado', requireAuth, express.json(), (req, res) => {
   const db = getDb();
   try {
     const nuevo = val(req.body && req.body.estado);
@@ -12007,7 +12046,7 @@ router.post('/embarques/leer-factura', requireAdmin, uploadDoc, async (req, res)
   } catch (e) { res.status(e.status || 500).json({ ok: false, error: e.message }); }
 });
 
-router.post('/embarques', requireAdmin, (req, res) => {
+router.post('/embarques', requireAuth, (req, res) => {
   const db = getDb();
   try {
     const b = req.body || {};
@@ -12041,7 +12080,7 @@ router.post('/embarques', requireAdmin, (req, res) => {
 // Se copia la ESTRUCTURA, no la historia: van los montos estimados y las condiciones de
 // pago; NO van los montos reales, las fechas del viaje, el TC real ni el manual, el estado,
 // los documentos ni los lotes. El nuevo nace en cotización, limpio.
-router.post('/embarques/:id/duplicar', requireAdmin, (req, res) => {
+router.post('/embarques/:id/duplicar', requireAuth, (req, res) => {
   const db = getDb();
   try {
     const orig = db.prepare('SELECT * FROM sg_embarques WHERE id=? AND activo=1').get(req.params.id);
@@ -12092,7 +12131,7 @@ router.post('/embarques/:id/duplicar', requireAdmin, (req, res) => {
 });
 
 // EDITAR — cabecera y/o rubros. Upsert de costos por concepto (los 9 llegan del form).
-router.put('/embarques/:id', requireAdmin, (req, res) => {
+router.put('/embarques/:id', requireAuth, (req, res) => {
   const db = getDb();
   try {
     const emb = db.prepare('SELECT id, estado FROM sg_embarques WHERE id=? AND activo=1').get(req.params.id);
@@ -12179,7 +12218,7 @@ router.get('/embarques/:id/lineas', requireAuth, (req, res) => {
 
 // REEMPLAZAR líneas (replace-all). Solo si el embarque no fue recibido/cerrado (después ya generó
 // lotes y no se toca). Soft-delete de las activas + insert del set nuevo, en una transacción.
-router.put('/embarques/:id/lineas', requireAdmin, (req, res) => {
+router.put('/embarques/:id/lineas', requireAuth, (req, res) => {
   const db = getDb();
   try {
     const emb = db.prepare('SELECT id, estado FROM sg_embarques WHERE id=? AND activo=1').get(req.params.id);
@@ -12434,7 +12473,7 @@ router.post('/embarques/:id/cerrar', requireAdmin, (req, res) => {
 // POST /embarques/:id/recostear — re-costear sin cerrar. Sirve cuando van llegando los
 // números reales de a poco (liquidación del despachante, tc de pago) y querés que el stock
 // valga lo correcto antes del cierre definitivo.
-router.post('/embarques/:id/recostear', requireAdmin, (req, res) => {
+router.post('/embarques/:id/recostear', requireAuth, (req, res) => {
   const db = getDb();
   try {
     const emb = db.prepare('SELECT * FROM sg_embarques WHERE id=? AND activo=1').get(req.params.id);
@@ -12508,7 +12547,7 @@ function uploadDoc(req, res, next) {
 }
 
 // SUBIR — multer en memoria → R2 → INSERT. requireAdmin.
-router.post('/embarques/:id/documentos', requireAdmin, uploadDoc, async (req, res) => {
+router.post('/embarques/:id/documentos', requireAuth, uploadDoc, async (req, res) => {
   const db = getDb();
   try {
     if (!storageConfigurado()) return res.status(503).json({ ok: false, error: 'Almacenamiento R2 no configurado (faltan credenciales)' });
