@@ -15908,7 +15908,15 @@ function sgFdInit(){
   // en blanco y con la lista entera a la vista.
   sgCliLimpiar('sgfd-cli');
   eid('sgfd-tipo-badge').innerHTML='';
-  eid('sgfd-confirm').classList.remove('on');
+  // EL CARTEL DEL COMPROBANTE NO SE LIMPIA ACÁ. sgFdInit() corre INMEDIATAMENTE
+  // después de emitir para dejar la pantalla lista para la próxima venta, y
+  // borraba el CAE, el número y el botón del PDF en el mismo tick en que se
+  // habían pintado. El operador veía sólo el toast y el número se perdía.
+  //
+  // Se limpia al EMPEZAR una venta nueva (sgFdRender, cuando se agrega el primer
+  // renglón), que es cuando el cartel anterior ya no sirve.
+  if (!SG._fdRecienEmitido) eid('sgfd-confirm').classList.remove('on');
+  SG._fdRecienEmitido = false;
   sgPvLlenarSelector('sgfd-pv');
   // Sólo el stock: lo que viene en viaje se anota con un remito y se factura
   // cuando llega. Un comprobante de mercadería que no bajó del camión se arregla
@@ -15927,6 +15935,14 @@ function sgFdCliente(){
 }
 function sgFdOnAdd(tipo, fuenteId, kg, meta){
   if(tipo!=='lote'){ toast('La facturación directa es de mercadería en stock','er'); return; }
+  // EMPIEZA UNA VENTA NUEVA: el cartel del comprobante anterior ya no sirve, y
+  // dejarlo arriba mientras se carga otra venta hace creer que ésta ya se emitió.
+  // Se limpia acá y no al terminar de emitir, que es cuando el operador todavía
+  // necesita ver el CAE, el número y el botón del PDF.
+  if (!SG.fdItems.length) {
+    var cf = eid('sgfd-confirm');
+    if (cf) { cf.classList.remove('on'); cf.innerHTML = ''; cf.style.borderColor = ''; }
+  }
   var l=meta.lote||{};
   SG.fdItems.push({ lote_id:fuenteId, producto_id:meta.producto_id,
     producto_nombre:meta.producto_nombre, etiqueta:(l.codigo_lote||meta.codigo_lote||meta.label||''),
@@ -16372,10 +16388,16 @@ function sgFdMediosRender(){
   var cont = eid('sgfd-cobro-medios'); if (!cont) return;
   // Las cajas y cuentas QUE ESE USUARIO PUEDE TOCAR: una cuenta con dueño la tocan
   // sólo sus dueños. No ofrecer lo que va a rebotar es la regla del botón anular.
+  // POR LA NEGATIVA, como el resto del panel. Acá decía `=== 'banco'` y ese tipo no
+  // existe: las cuentas son 'caja', 'cuenta_corriente' o 'caja_ahorro'. El
+  // desplegable de Transferencia salía SIEMPRE vacío, el operador creía que le
+  // faltaban permisos, y el cobro se cortaba después de emitir el comprobante.
   var opts = function(tipo, sel){
+    var esCaja = (tipo === 'caja');
     var aptas = SG_FD_CTAS.filter(function(c){
-      return String(c.tipo) === tipo && c.activo !== 0 && c.puedo !== 0; });
-    if (!aptas.length) return '<option value="">— no hay ' + (tipo === 'caja' ? 'cajas' : 'cuentas') + ' que puedas tocar —</option>';
+      var caja = String(c.tipo) === 'caja';
+      return (esCaja ? caja : !caja) && c.activo !== 0 && c.puedo !== 0; });
+    if (!aptas.length) return '<option value="">— no hay ' + (esCaja ? 'cajas' : 'cuentas bancarias') + ' que puedas tocar —</option>';
     return '<option value="">— elegir —</option>' + aptas.map(function(c){
       return '<option value="' + c.id + '"' + (String(sel) === String(c.id) ? ' selected' : '') + '>'
         + escH(c.nombre) + (c.ambito ? ' · ' + escH(c.ambito) : '') + '</option>'; }).join('');
@@ -16393,6 +16415,8 @@ function sgFdMediosRender(){
       + (esCheque ? '' : '<label style="font-size:11px;color:var(--mut)">' + (m.forma === 'efectivo' ? 'A qué caja' : 'A qué cuenta') + '<br>'
           + '<select onchange="' + up(i, 'cuenta') + '" style="padding:5px 7px;font-size:12.5px;min-width:190px">'
           + opts(m.forma === 'efectivo' ? 'caja' : 'banco', m.cuenta) + '</select></label>')
+      // 'banco' acá es sólo la etiqueta del caso «no es caja»: opts() lo resuelve
+      // por la negativa, así que no importa que ese tipo no exista en la base.
       + '<label style="font-size:11px;color:var(--mut)">Cuánto<br>'
         + '<input type="text" inputmode="decimal" value="' + escH(m.monto) + '"'
         + ' oninput="' + up(i, 'monto') + '"'
@@ -16441,14 +16465,28 @@ function sgFdIdentifRender(total){
   var hace = esCF && umbral > 0 && Number(total) >= umbral && cuit.length !== 11;
   cont.style.display = hace ? '' : 'none';
   if (!hace) { cont.innerHTML = ''; return; }
+  // LO QUE YA SE TIPEÓ NO SE PIERDE. Esto se rearma con innerHTML y se llama en
+  // cada tecla del importe del cobro: el operador cargaba el documento, ponía el
+  // importe y el campo se vaciaba sin avisar. Al emitir viajaba vacío y el backend
+  // rebotaba —con la mercadería ya descontada del stock—.
+  //
+  // Y si ya está dibujado con los mismos datos, no se rearma: rehacer el nodo en
+  // cada tecla también se lleva el foco si el operador está tipeando ahí.
+  var tPrev = (eid('sgfd-idtipo') || {}).value || 'dni';
+  var nPrev = (eid('sgfd-idnro') || {}).value || '';
+  if (cont.dataset.umbral === String(umbral) && eid('sgfd-idnro')) return;
+  cont.dataset.umbral = String(umbral);
   cont.innerHTML = '<div style="border:1.5px solid #d6a15e;background:#f6eddf;border-radius:8px;padding:9px 11px;color:#854d0e">'
     + '<div style="font-size:12.5px;margin-bottom:6px">Esta venta supera <b>' + sgMoney2(umbral) + '</b> y va a '
     + '<b>consumidor final</b>: ARCA exige identificar al comprador <span style="font-size:11px">(RG 5700/2025)</span>.</div>'
     + '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end">'
     + '<label style="font-size:11px">Tipo<br><select id="sgfd-idtipo" style="padding:5px 7px;font-size:12.5px">'
-    + '<option value="dni">DNI</option><option value="cuit">CUIT</option><option value="cuil">CUIL</option>'
+    + ['dni', 'cuit', 'cuil'].map(function(t){
+        return '<option value="' + t + '"' + (tPrev === t ? ' selected' : '') + '>'
+          + t.toUpperCase() + '</option>'; }).join('')
     + '</select></label>'
     + '<label style="font-size:11px">Número<br><input id="sgfd-idnro" type="text" inputmode="numeric"'
+    + ' value="' + escH(nPrev) + '"'
     + ' style="padding:5px 7px;font-size:12.5px;width:170px"></label></div></div>';
 }
 
@@ -16576,6 +16614,9 @@ function sgFdEmitir(){
       // EL COBRO VA DESPUÉS DE EMITIR. Si falla, el comprobante ya existe y se cobra
       // desde Cuenta corriente: se avisa y no se pierde nada. Al revés —cobrar y
       // después emitir— dejaría plata entrada contra una factura que no salió.
+      // Que sgFdInit() —que corre a continuacion para dejar la pantalla lista— no
+      // se lleve puesto el cartel del comprobante que se acaba de pintar.
+      SG._fdRecienEmitido = true;
       sgFdCobrarAhora(r, c);
       SG.fdItems=[]; sgFdInit();
     } else {
