@@ -5559,6 +5559,104 @@ function aplicarPrecioItem(db, { ocId, ocItemId, precio, userId }) {
   return lotes.length;
 }
 
+// ══ CAMBIAR LOS BULTOS DE LA ORDEN, ANTES DE QUE ENTRE NADA ══════════════════════════
+//
+// Pablo, 27/8/2026: «desde la orden de compra los compradores pueden cambiar la cantidad
+// de bultos de la orden ANTES de que se recepcione».
+//
+// Hasta acá no había forma. Corregir la partida rebota con «los bultos recibidos no se
+// corrigen: son los que se contaron al bajar el camión — lo que se arregla es la ORDEN DE
+// COMPRA», y esa puerta no existía: el comprador que cerraba 90 cajones y al otro día
+// acordaba 100 tenía que anular la orden y hacerla de nuevo.
+//
+// ANTES DE QUE ENTRE NADA. Con mercadería recibida esto ya no es la orden: son los bultos
+// que se contaron, y ésos no se tocan. El cerrojo es que no haya recepciones, no el estado
+// —una orden puede quedar 'abierta' con una recepción anulada—.
+router.put('/oc/:id/cantidades', requireAuth, express.json(), (req, res) => {
+  const db = getDb();
+  try {
+    const b = req.body || {};
+    const oc = db.prepare('SELECT * FROM sg_oc WHERE id=? AND activo=1').get(req.params.id);
+    if (!oc) return res.status(404).json({ ok: false, error: 'Orden no encontrada' });
+    if (oc.estado === 'anulada') return res.status(400).json({ ok: false, error: 'Esa orden está anulada' });
+
+    // EL CERROJO: que no haya entrado nada. Después de la primera recepción, la
+    // cantidad de la orden es historia — lo que vale es lo que se contó.
+    const rec = db.prepare('SELECT COUNT(*) c FROM sg_recepciones WHERE oc_id=? AND activo=1').get(oc.id).c;
+    if (rec > 0) {
+      return res.status(409).json({ ok: false, error:
+        'Esta orden ya tiene mercadería recibida: los bultos de la orden no se cambian después '
+        + 'de que entró el camión. Lo que se corrige ahí son los KILOS de la partida.' });
+    }
+    // Y el de siempre: documentada = firme.
+    const freno = frenoPrecioFirme(db, oc.id, 'cambiar las cantidades');
+    if (freno) return res.status(409).json({ ok: false, error: freno });
+
+    const motivo = String(b.motivo || '').trim();
+    if (motivo.length < 3) {
+      return res.status(400).json({ ok: false, error:
+        'Poné por qué cambian las cantidades: es lo que después explica la diferencia contra lo pactado.' });
+    }
+
+    const items = db.prepare('SELECT * FROM sg_oc_items WHERE oc_id=?').all(oc.id);
+    const porId = new Map(items.map((i) => [Number(i.id), i]));
+    const pedidos = (Array.isArray(b.items) ? b.items : [])
+      .map((x) => ({ id: Number(x.oc_item_id), cantidad: Number(x.cantidad) }))
+      .filter((x) => x.id > 0 && Number.isFinite(x.cantidad) && x.cantidad > 0);
+    if (!pedidos.length) return res.status(400).json({ ok: false, error: 'No mandaste ninguna cantidad.' });
+    for (const p of pedidos) {
+      if (!porId.has(p.id)) {
+        return res.status(400).json({ ok: false, error: 'El renglón ' + p.id + ' no es de esta orden.' });
+      }
+    }
+
+    const uidReq = uid(req);
+    db.transaction(() => {
+      for (const p of pedidos) {
+        const it = porId.get(p.id);
+        // LA CANTIDAD VIAJA EN LA UNIDAD EN QUE SE PACTÓ. Si la compra se cerró por
+        // bulto, lo que se corrige son los bultos y los kilos se derivan; si se cerró
+        // por kilo, al revés. Guardar el otro número sin recalcular su par dejaría la
+        // orden diciendo 100 bultos de 900 kilos.
+        const porBulto = it.modo_carga === 'bulto';
+        const kpb = (it.kg_por_bulto != null && Number(it.kg_por_bulto) > 0)
+          ? Number(it.kg_por_bulto) : null;
+        const antesCant = porBulto ? it.cantidad_estimada_presentaciones : it.kg_estimados;
+        if (String(antesCant == null ? '' : antesCant) === String(p.cantidad)) continue;
+
+        if (porBulto) {
+          const kg = kpb ? Math.round(p.cantidad * kpb * 100) / 100 : it.kg_estimados;
+          db.prepare(`UPDATE sg_oc_items SET cantidad_estimada_presentaciones=?, kg_estimados=?
+            WHERE id=?`).run(p.cantidad, kg, p.id);
+        } else {
+          // Por kilo: los bultos quedan como referencia, derivados si hay factor.
+          const blt = kpb ? Math.round(p.cantidad / kpb * 100) / 100 : it.cantidad_estimada_presentaciones;
+          db.prepare(`UPDATE sg_oc_items SET kg_estimados=?, cantidad_estimada_presentaciones=?
+            WHERE id=?`).run(p.cantidad, blt, p.id);
+        }
+        anotarEdicion(db, { tabla: 'sg_oc_items', registroId: p.id,
+          campo: porBulto ? 'cantidad_estimada_presentaciones' : 'kg_estimados',
+          antes: antesCant, despues: p.cantidad, motivo, ocId: oc.id, userId: uidReq });
+      }
+      // Los totales de la cabecera ANTES del cronograma, por lo mismo que en el
+      // endpoint de precios: generarVencimientos reparte el total de la orden, y sin
+      // rehacerlo primero la deuda con el proveedor queda con el importe viejo.
+      recalcTotalesOC(db, oc.id);
+      generarVencimientos(db, oc.id);
+    })();
+
+    const cuotasPagas = db.prepare(`SELECT COUNT(*) n FROM sg_oc_vencimientos
+       WHERE oc_id=? AND pagado=1`).get(oc.id);
+    res.json({ ok: true, data: {
+      oc_id: oc.id, acordado: acordadoDeOC(db, oc.id).total,
+      aviso: (cuotasPagas && cuotasPagas.n > 0)
+        ? 'Esta orden ya tiene cuotas pagadas, así que el cronograma de vencimientos no se '
+          + 'regeneró: revisá la cuenta corriente del proveedor a mano.'
+        : null,
+    } });
+  } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
+});
+
 router.put('/oc/:id/precios', requireAuth, (req, res) => {
   const db = getDb();
   try {

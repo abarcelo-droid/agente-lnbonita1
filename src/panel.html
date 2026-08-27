@@ -4368,6 +4368,9 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
       </div>
       <div id="sg-loteed-info" style="background:var(--bg);border-radius:8px;padding:9px 12px;
            margin-bottom:12px;font-size:13px"></div>
+      <!-- LO QUE ENTRÓ, y arriba de todo porque es contra lo que se compara. -->
+      <div style="font-weight:700;font-size:11px;text-transform:uppercase;letter-spacing:.05em;
+           color:var(--mut);margin:14px 0 6px">Lo que entró</div>
       <div class="sg-rec-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
         <div class="fl"><label>Kilos</label><input type="number" step="0.01" id="sg-loteed-kg"></div>
         <div class="fl"><label>Bultos</label><input type="number" id="sg-loteed-bultos"></div>
@@ -4386,21 +4389,34 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
              justamente donde se cuelan los errores que esto viene a corregir.
              Lo que se GUARDA es siempre $/kg: es la unidad con la que corren el
              costo, el margen y lo que se le debe al proveedor. -->
-        <div class="fl"><label>Precio
-            <select id="sg-loteed-uni" onchange="sgLoteEdUni()"
-              style="font-size:11px;padding:1px 4px;margin-left:4px">
-              <option value="kg">por kg</option>
-              <option value="bulto">por bulto</option>
-            </select></label>
-          <input type="number" step="0.01" id="sg-loteed-precio">
-          <div id="sg-loteed-precio-eq" style="font-size:11px;color:var(--mut);margin-top:3px"></div>
-          <div id="sg-loteed-precio-nota" style="font-size:11px;color:var(--mut);margin-top:3px;display:none">
-            Lo corrige un administrador.</div></div>
       </div>
-      <div class="fl ff" style="margin-top:10px"><label>Por qué se corrige <span style="color:var(--err)">*</span></label>
-        <textarea id="sg-loteed-motivo" rows="2" placeholder="ej. se habían contado 100 bultos y eran 90"></textarea></div>
+      <!-- EL PRECIO, EN SU PROPIO BLOQUE. Es lo que cambia la plata, y mezclado
+           entre los otros campos pesaba lo mismo que la calidad. -->
+      <div style="font-weight:700;font-size:11px;text-transform:uppercase;letter-spacing:.05em;
+           color:var(--mut);margin:16px 0 6px">Lo que se paga</div>
+      <div style="border:1px solid var(--bor);border-radius:8px;padding:10px 12px;background:var(--bg)">
+        <div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap">
+          <div class="fl" style="margin:0"><label>Precio</label>
+            <input type="number" step="0.01" id="sg-loteed-precio" style="width:170px"></div>
+          <div class="fl" style="margin:0"><label>Por</label>
+            <select id="sg-loteed-uni" onchange="sgLoteEdUni()" style="width:120px">
+              <option value="kg">kilo</option>
+              <option value="bulto">bulto</option>
+            </select></div>
+          <div id="sg-loteed-precio-eq" style="font-size:12px;color:var(--mut);padding-bottom:8px"></div>
+        </div>
+        <!-- DE DÓNDE SALE ESA UNIDAD. Pablo: «siempre respetando el precio que se
+             ingresó en la orden de compra: si es por kilo por kilo, si es por bulto
+             por bulto». Arranca en la de la orden y se dice cuál es, para que
+             cambiarla sea una decisión y no un descuido. -->
+        <div id="sg-loteed-uni-nota" style="font-size:11px;color:var(--mut);margin-top:6px"></div>
+        <div id="sg-loteed-precio-nota" style="font-size:11px;color:var(--mut);margin-top:6px;display:none">
+          🔒 El precio lo corrige un administrador.</div>
+      </div>
+      <div class="fl ff" style="margin-top:16px"><label>Por qué se corrige <span style="color:var(--err)">*</span></label>
+        <textarea id="sg-loteed-motivo" rows="2" placeholder="ej. la balanza marcó 405 y se habían cargado 400"></textarea></div>
       <div style="font-size:11.5px;color:var(--mut);margin-top:6px">
-        Queda registrado tu usuario, la fecha y qué decía cada campo antes.
+        📝 Queda registrado tu usuario, la fecha y qué decía cada campo antes.
       </div>
       <!-- EL CERROJO NO ES UNA PARED. Si la partida ya está documentada, acá se
            dice CUÁL comprobante la traba y se ofrece anularlo sin salir del modal.
@@ -11429,6 +11445,9 @@ function sgOcVer(id){
     var o=r.data; var lotes=(res[1]&&res[1].ok)?res[1].data:[];
     // Los lotes quedan a mano: el botón de corregir pasa sólo el id y los busca acá.
     SG.ocVerLotes = lotes;
+    // Y la orden entera, por sus ÍTEMS: de ahí sale en qué unidad se pactó cada
+    // producto, que es la que tiene que usar la corrección del precio.
+    SG.ocVerData = o;
     eid('sg-ocver-tit').textContent='Orden de compra  '+sgOcId(o);
     // ── LA FICHA DE LA ORDEN ──────────────────────────────────────────────
     // Antes era un renglón corrido: "Proveedor: X · Abierta · Liquidación de
@@ -11705,10 +11724,19 @@ function sgOcVer(id){
 
       var mios = porItem[String(it.id)] || [];
       if (!mios.length) {
+        // TODAVÍA NO ENTRÓ NADA: acá la cantidad se puede corregir. Después de la
+        // primera recepción ya no —lo que vale es lo que se contó al bajar el
+        // camión— y por eso el botón vive sólo en este renglón.
         h += '<tr><td>' + esc(it.producto_nombre || '') + '</td>'
           + '<td style="text-align:right">' + pactado + '</td>'
           + '<td style="text-align:right;color:var(--mut)">todavía no entró</td>'
-          + '<td>—</td><td style="text-align:right">—</td><td></td></tr>';
+          + '<td>—</td><td style="text-align:right">—</td>'
+          + '<td style="text-align:right">'
+            + (lnbPuedeOperar(['sg-compras', 'sg-ordenes'])
+                ? '<button class="btn bo bs" title="Cambiar lo pactado: todavía no entró nada"'
+                  + ' onclick="sgOcCantOpen(' + it.id + ')">✏️ cantidad</button>'
+                : '')
+          + '</td></tr>';
         return;
       }
       mios.forEach(function(l, k) {
@@ -13686,6 +13714,56 @@ function sgFmGuardar(){
 //
 // EL MOTIVO ES OBLIGATORIO. Un rechazo sin motivo, a los dos meses, es una orden
 // anulada cualquiera: no se puede reclamar ni discutir con nadie.
+// ══ CAMBIAR LO PACTADO, ANTES DE QUE ENTRE NADA ══════════════════════════
+//
+// Pablo, 27/8/2026: «desde la orden de compra los compradores pueden cambiar la
+// cantidad de bultos de la orden ANTES de que se recepcione».
+//
+// Hasta acá no había forma: corregir la partida rebota con «los bultos recibidos no
+// se corrigen — lo que se arregla es la ORDEN DE COMPRA», y esa puerta no existía.
+// El comprador que cerraba 90 cajones y al otro día acordaba 100 tenía que anular la
+// orden y hacerla de nuevo.
+//
+// La cantidad se pide EN LA UNIDAD EN QUE SE PACTÓ: si la compra se cerró por bulto
+// se corrigen bultos y los kilos se derivan; si se cerró por kilo, al revés.
+function sgOcCantOpen(itemId){
+  var o = SG.ocVerData || {};
+  var it = (o.items || []).filter(function(x){ return String(x.id) === String(itemId); })[0];
+  if (!it) { toast('No se encontró ese renglón — actualizá la pantalla', 'er'); return; }
+  var porBulto = it.modo_carga === 'bulto';
+  var actual = porBulto ? it.cantidad_estimada_presentaciones : it.kg_estimados;
+  var uni = porBulto ? 'bultos' : 'kilos';
+  var kpb = (it.kg_por_bulto != null && Number(it.kg_por_bulto) > 0) ? Number(it.kg_por_bulto) : null;
+
+  var cant = prompt('Cambiar lo pactado de ' + (it.producto_nombre || 'este producto')
+    + String.fromCharCode(10,10)
+    + 'La orden se cerró POR ' + (porBulto ? 'BULTO' : 'KILO') + '.'
+    + (kpb ? ' Bultos de ' + nr(kpb) + ' kg.' : '')
+    + String.fromCharCode(10) + 'Ahora dice ' + nr(actual) + ' ' + uni + '.'
+    + String.fromCharCode(10,10) + 'Cuántos ' + uni + ':', String(actual || ''));
+  if (cant === null) return;
+  var n = Number(String(cant).replace(',', '.'));
+  if (!(n > 0)) { toast('Poné una cantidad mayor a cero', 'er'); return; }
+
+  var motivo = prompt('Por qué cambia la cantidad'
+    + String.fromCharCode(10) + '(se reacordó con el productor, se había cargado mal…):', '');
+  if (motivo === null) return;
+  if (String(motivo).trim().length < 3) { toast('Escribí por qué cambia', 'er'); return; }
+
+  api('/api/sg/oc/' + o.id + '/cantidades', 'PUT', {
+    motivo: String(motivo).trim(),
+    items: [{ oc_item_id: it.id, cantidad: n }],
+  }).then(function(r){
+    if (!r || !r.ok) { toast((r && r.error) || 'No se pudo cambiar', 'er'); return; }
+    // El cronograma de deuda con el proveedor se rehace solo, salvo que ya haya una
+    // cuota pagada — ahí el backend avisa y hay que mirarlo a mano.
+    if (r.data && r.data.aviso) alert(r.data.aviso);
+    else toast('Cantidad actualizada — se recalculó lo que se le debe al productor', 'ok');
+    sgOcVer(o.id);
+    if (typeof sgLoadOC === 'function') sgLoadOC();
+  });
+}
+
 function sgOcRechazar(id){
   // La partida y el proveedor salen de lo que la pantalla ya dibujó: no hacen
   // falta en el atributo del botón.
@@ -15218,11 +15296,31 @@ function sgLoteEditarOpen(loteId){
   eid('sg-loteed-kg').value = l.kg_reales != null ? l.kg_reales : '';
   eid('sg-loteed-bultos').value = l.bultos != null ? l.bultos : '';
   eid('sg-loteed-calidad').value = l.calidad || '';
-  // Arranca en la unidad EN QUE SE PACTÓ la compra: si el cajón vale $25.000, ver
-  // "$2.777,78 /kg" obliga a una cuenta mental para saber si está bien.
+  // ── LA UNIDAD SALE DE LA ORDEN, NO DE SI HAY KILOS POR BULTO ─────────
+  //
+  // Pablo, 27/8/2026: «siempre respetando el precio que se ingresó en la orden de
+  // compra: si es por kilo por kilo, si es por bulto por bulto».
+  //
+  // Antes se elegía por si la partida tenía kg/bulto, así que una compra cerrada
+  // POR KILO se abría mostrando el precio por bulto — un número que el comprador
+  // nunca tipeó y contra el que no puede comparar nada.
+  //
+  // El modo lo trae el ítem de la orden (modo_carga). Sin ítem —una descarga sin
+  // orden— se cae en el kilo, que es la unidad con la que corre el costo.
   var kpb = sgLoteEdKpb(l);
+  var it = ((SG.ocVerData && SG.ocVerData.items) || []).filter(function(x){
+    return String(x.id) === String(l.oc_item_id); })[0];
+  var uniOrden = (it && it.modo_carga === 'bulto' && kpb) ? 'bulto' : 'kg';
   var uni = eid('sg-loteed-uni');
-  if (uni) { uni.value = kpb ? 'bulto' : 'kg'; uni.disabled = !kpb; }
+  if (uni) { uni.value = uniOrden; uni.disabled = !kpb; }
+  var nota = eid('sg-loteed-uni-nota');
+  if (nota) {
+    nota.innerHTML = it
+      ? ('La orden se cerró <b>por ' + (it.modo_carga === 'bulto' ? 'bulto' : 'kilo') + '</b>'
+         + (kpb ? ' · bultos de ' + nr(kpb) + ' kg' : ''))
+      : (kpb ? 'Esta partida entró sin orden · bultos de ' + nr(kpb) + ' kg'
+             : 'Esta partida entró sin orden y sin kilos por bulto: el precio va por kilo.');
+  }
   eid('sg-loteed-precio').value = (l.precio_unitario_kg == null) ? ''
     : ((uni && uni.value === 'bulto' && kpb)
         ? Math.round(Number(l.precio_unitario_kg) * kpb * 100) / 100

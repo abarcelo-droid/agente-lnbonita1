@@ -115,9 +115,11 @@ test('la respuesta es UNA, no una consulta copiada en cada endpoint', () => {
   // y ninguno miraba la liquidación. Una cuarta copia garantizaba que el día que
   // cambiara el criterio, alguna quedara vieja.
   assert.match(SG, /import \{ frenoPrecioFirme, precioFirmeDetalle \} from '\.\.\/servicios\/sg_perfeccionada\.js'/);
-  // Las cinco puertas por las que se puede cambiar un precio: corregir un lote,
-  // completar una orden retroactiva, cerrarle el precio a una de pizarra, y el
-  // endpoint que edita los precios de la orden.
+  // Las SEIS puertas por las que se puede cambiar lo que se le va a pagar al
+  // productor: corregir un lote, completar una orden retroactiva, cerrarle el
+  // precio a una de pizarra, editar los precios de la orden, cambiarla de circuito
+  // y —desde el 27/8/2026— cambiar las CANTIDADES de la orden, que mueven el total
+  // igual que el precio.
   //
   // Corregir el lote usa precioFirmeDetalle, que es la MISMA respuesta con los
   // datos del comprobante puestos: la pantalla los necesita para ofrecer el botón
@@ -125,7 +127,7 @@ test('la respuesta es UNA, no una consulta copiada en cada endpoint', () => {
   // perfeccionamientoDeOC(), no de una consulta escrita de nuevo.
   const usos = (SG.match(/frenoPrecioFirme\(db,/g) || []).length
              + (SG.match(/precioFirmeDetalle\(db,/g) || []).length;
-  assert.equal(usos, 5, 'todas las puertas usan la misma función');
+  assert.equal(usos, 6, 'todas las puertas usan la misma función');
   // Y no volvieron las copias que había, cada una con su propio mensaje: son la
   // huella de que alguien volvió a escribir la pregunta en vez de preguntarla.
   assert.doesNotMatch(SG, /Anulá el asiento primero: si se corrigen los kilos/);
@@ -207,4 +209,26 @@ test('la pantalla pide el motivo y avisa que la partida queda libre', () => {
   assert.match(PANEL, /su precio se va a poder/);
   assert.doesNotMatch(PANEL, /fetch\('\/api\/liquidaciones\/'\+id, \{ method:'DELETE'/,
     'ya no se anula por el camino sin motivo');
+});
+
+test('cambiar las CANTIDADES de la orden también respeta el precio firme', () => {
+  // Mueven el total que se le va a pagar al productor igual que el precio: si la
+  // partida ya está documentada, el papel diría una cosa y la orden otra.
+  const i = SG.indexOf("router.put('/oc/:id/cantidades'");
+  assert.ok(i > 0, 'no existe el endpoint de cantidades');
+  const b = SG.slice(i, i + 2200);
+  assert.match(b, /frenoPrecioFirme\(db, oc\.id, 'cambiar las cantidades'\)/);
+  assert.match(b, /res\.status\(409\)/, 'conflicto, no un error de datos');
+});
+
+test('y sólo se pueden cambiar ANTES de que entre mercadería', () => {
+  // Después de la primera recepción la cantidad de la orden es historia: lo que
+  // vale es lo que se contó al bajar el camión.
+  const i = SG.indexOf("router.put('/oc/:id/cantidades'");
+  const b = SG.slice(i, i + 2200);
+  assert.match(b, /SELECT COUNT\(\*\) c FROM sg_recepciones WHERE oc_id=\? AND activo=1/);
+  assert.match(b, /los bultos de la orden no se cambian después/);
+  // El cerrojo es que no haya recepciones, NO el estado: una orden puede quedar
+  // 'abierta' con una recepción anulada.
+  assert.match(b, /if \(rec > 0\)/);
 });

@@ -81,7 +81,7 @@ test('el modal muestra la referencia y el margen EN VIVO', () => {
 // ── 7 · POR BULTO O POR KILO ───────────────────────────────────────────────
 test('el selector de unidad existe y convierte al cambiar', () => {
   assert.match(PANEL, /id="sg-loteed-uni" onchange="sgLoteEdUni\(\)"/);
-  assert.match(PANEL, /<option value="bulto">por bulto<\/option>/);
+  assert.match(PANEL, /<option value="bulto">bulto<\/option>/);
   const b = bloque('sgLoteEdUni', 700);
   // Convertir, no dejar el número igual: dejarlo igual cambia el precio por el
   // factor del cajón sin que se note.
@@ -89,12 +89,27 @@ test('el selector de unidad existe y convierte al cambiar', () => {
   assert.match(b, /v \/ kpb/);
 });
 
-test('arranca en la unidad en que se pactó la compra', () => {
-  // Si el cajón vale $25.000, ver "$2.777,78 /kg" obliga a una cuenta mental
-  // para saber si está bien.
-  const b = bloque('sgLoteEditarOpen', 2600);
-  assert.match(b, /uni\.value = kpb \? 'bulto' : 'kg'/);
+test('arranca en la unidad EN QUE SE PACTÓ LA ORDEN, no en la que haya', () => {
+  // Pablo, 27/8/2026: «siempre respetando el precio que se ingresó en la orden de
+  // compra: si es por kilo por kilo, si es por bulto por bulto».
+  //
+  // La primera versión elegía por si la partida tenía kg/bulto, así que una compra
+  // cerrada POR KILO se abría mostrando el precio por bulto — un número que el
+  // comprador nunca tipeó y contra el que no puede comparar nada.
+  const b = bloque('sgLoteEditarOpen', 3400);
+  assert.match(b, /var uniOrden = \(it && it\.modo_carga === 'bulto' && kpb\) \? 'bulto' : 'kg'/);
+  assert.match(b, /uni\.value = uniOrden/);
   assert.match(b, /uni\.disabled = !kpb/, 'sin kg por bulto no hay conversión posible');
+  // Y se DICE de dónde sale, para que cambiarla sea una decisión y no un descuido.
+  assert.match(b, /La orden se cerró <b>por/);
+  assert.match(b, /entró sin orden/, 'la descarga sin orden también tiene que decir algo');
+});
+
+test('la orden entera queda a mano para saber la unidad de cada ítem', () => {
+  // El modal recibe sólo el id del lote: el ítem de la orden —y con él modo_carga—
+  // sale de lo que la ficha ya cargó.
+  assert.match(PANEL, /SG\.ocVerData = o;/);
+  assert.match(PANEL, /\(\(SG\.ocVerData && SG\.ocVerData\.items\) \|\| \[\]\)\.filter/);
 });
 
 test('la otra unidad queda siempre a la vista', () => {
