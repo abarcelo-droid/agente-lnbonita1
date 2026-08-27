@@ -11887,9 +11887,18 @@ function sgLiqPartidasLoad(){
       return sgPartFila(p,
         '<td>' + sgAvanceBarra(p.bultos_vendidos, p.bultos_recibidos, p.bultos_merma) + '</td>'
         + '<td style="text-align:center">'
+        // DOS COSAS DISTINTAS, y antes las dos decían «cerrado»: CÓMO SE PACTÓ la
+        // compra (abierto / cerrado, lo que decide a qué precio se liquida) y si
+        // los lotes ya tienen su precio puesto. Una partida comprada a precio
+        // ABIERTO con los lotes ya valorizados decía «cerrado» y se leía como que
+        // la compra había sido a precio cerrado.
+        + (p.tipo_precio === 'pizarra'
+            ? '<span class="bdg bpe">abierto</span>'
+            : '<span class="bdg bcc">cerrado</span>')
         + (p.lotes_sin_precio > 0
-            ? '<b>' + nr(p.lotes_sin_precio) + '</b> de ' + nr(p.lotes) + ' sin cerrar'
-            : '<span class="bdg bok">cerrado</span>')
+            ? '<div style="font-size:10px;color:var(--mut)">' + nr(p.lotes_sin_precio)
+              + ' de ' + nr(p.lotes) + ' lote(s) sin valorizar</div>'
+            : '')
         + '</td>'
         + '<td style="text-align:right;white-space:nowrap">'
           + '<button class="btn bo bs" onclick="sgOcVer(' + p.id + ')">Ver</button> '
@@ -12313,17 +12322,34 @@ function liqDesdePartida(r){
   // Es lo que la orden ya decidió: obligar a elegirlo de nuevo es pedir que
   // repita un dato que el sistema tiene, y dejar que se liquide a precio abierto
   // una partida cerrada es liquidarla mal.
+  var radC = document.querySelector('input[name="liq-modo"][value="cerrado"]');
+  var radA = document.querySelector('input[name="liq-modo"][value="abierto"]');
   if (r.es_precio_cerrado) {
-    var rad = document.querySelector('input[name="liq-modo"][value="cerrado"]');
-    if (rad && !rad.checked) rad.checked = true;
+    if (radC && !radC.checked) radC.checked = true;
     // Y NO SE PUEDE MOVER. La condición se pactó en la orden: un clic en «Precio
     // abierto» sobre una partida firme salteaba entero el control del servidor —que
     // sólo corría con el modo en 'cerrado'— y dejaba la puerta con la llave puesta al
     // lado. El servidor ahora lo contrasta igual; esto es para que nadie lo intente.
-    var abi = document.querySelector('input[name="liq-modo"][value="abierto"]');
-    if (abi) { abi.disabled = true; abi.title = 'La partida se compró a precio cerrado'; }
+    if (radA) { radA.disabled = true; radA.title = 'La partida se compró a precio cerrado'; }
     LIQ.origen.comision = 'se despeja para llegar al precio acordado';
+  } else {
+    // ── Y EL CAMINO DE VUELTA, QUE NO EXISTÍA ───────────────────────────
+    //
+    // Trabar el radio no tenía contrapartida: `disabled = true` era la ÚNICA línea
+    // del archivo que tocaba esa propiedad. Después de liquidar UNA partida a
+    // precio cerrado quedaba trabado para toda la sesión, y la siguiente —aunque
+    // se hubiera comprado a precio abierto— se abría con «Precio abierto» en gris
+    // y «Precio cerrado» marcado. Liquidar a precio abierto se volvía imposible
+    // sin recargar la página, y nada lo decía.
+    //
+    // Va acá y no en liqAbrirNueva() por la misma razón por la que se rompió: lo
+    // que trabó el radio fue esta función, así que es esta función la que tiene
+    // que destrabarlo. Un reset en otro lado se vuelve a desincronizar el día que
+    // alguien agregue un tercer camino.
+    if (radA) { radA.disabled = false; radA.title = ''; }
+    if (radC && radC.checked) { radC.checked = false; if (radA) radA.checked = true; }
   }
+  liqModoCambio();   // que el fondo, la ayuda y el bloque de precio cerrado sigan al radio
   var ac = r.acordado || {};
   // El precio pactado y los bultos, puestos. El precio por bulto sólo si TODOS
   // los ítems comparten uno: con precios distintos no hay UN precio por bulto y
