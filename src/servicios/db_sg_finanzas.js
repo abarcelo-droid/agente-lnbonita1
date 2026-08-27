@@ -1042,4 +1042,35 @@ console.log("[SG] Esquema Contable/Ventas/Tesorería SG verificado (tablas sg_* 
   }
 })();
 
+// ══ TRES AGUJEROS DEL CHEQUE DE TERCEROS ═══════════════════════════════════════════════
+//
+// Aparecieron mapeando el circuito de cobro, y los tres necesitan que el cheque
+// recuerde cosas que hoy no recuerda.
+//
+// 1. DE QUÉ COBRANZA VINO. Se ataban por un TEXTO en las notas ('Cobranza #123'), que
+//    no se puede consultar: la cabecera guarda UN cheque (cheque_terceros_id) y al
+//    anular la cobranza sólo volvía ése a la cartera. Con dos cheques, el segundo
+//    quedaba vivo y bueno contra una cobranza que ya no existe.
+//
+// 2. QUÉ MITAD CANCELÓ. Un cheque que cobró la parte SIN comprobante entra a la cartera
+//    marcado como gestión, pero el depósito escribía el movimiento y el asiento sin
+//    decir ámbito —o sea fiscal por defecto—. Quedaba un débito de gestión en cartera
+//    que no se cancelaba nunca, y un crédito fiscal que nadie debía: la cuenta de
+//    cheques en cartera no cerraba por ámbito y el arqueo fiscal del banco se llevaba
+//    plata que nunca entró al libro fiscal. Lo mismo al rechazarlo.
+//
+// 3. Y CON QUÉ MOTIVO, porque una línea de gestión sin motivo no entra al asiento.
+try {
+  const addCol = (tabla, col, tipo) => {
+    const cols = db.prepare(`PRAGMA table_info(${tabla})`).all().map((c) => c.name);
+    if (!cols.includes(col)) { db.exec(`ALTER TABLE ${tabla} ADD COLUMN ${col} ${tipo}`); return true; }
+    return false;
+  };
+  const puestas = [];
+  if (addCol('sg_fin_cheques_terceros', 'cobranza_id', 'INTEGER')) puestas.push('cobranza_id');
+  if (addCol('sg_fin_cheques_terceros', 'ambito', 'TEXT')) puestas.push('ambito');
+  if (addCol('sg_fin_cheques_terceros', 'motivo', 'TEXT')) puestas.push('motivo');
+  if (puestas.length) console.log('[SG] sg_fin_cheques_terceros migrado (+' + puestas.join(', +') + ')');
+} catch (e) { console.error('[SG] sg_fin_cheques_terceros migracion:', e.message); }
+
 export default db;

@@ -87,14 +87,15 @@ test('un renglón sin cuenta o un cheque sin número no salen', () => {
   assert.match(b, /if \(!medios\.length\) \{ toast\('Poné cuánto se cobró'/);
 });
 
-test('DOS CHEQUES NO: al anular sólo vuelve el primero a la cartera', () => {
-  // Es un bug conocido del backend. Ofrecerlo sería dejar el segundo vivo contra
-  // una cobranza que ya no existe. Se avisa en vez de romper.
+test('DOS CHEQUES SÍ: la anulación ya los devuelve a todos', () => {
+  // Acá había un bloqueo: anular una cobranza devolvía sólo el primero a la
+  // cartera y los demás quedaban vivos contra una cobranza que ya no existía. Se
+  // arregló —los cheques recuerdan de qué cobranza vinieron— así que el bloqueo
+  // se fue.
   const b = cuerpo('sgCobGuardar');
-  assert.match(b, /if \(cheques > 1\)/);
-  assert.match(b, /sólo vuelve el primero a la cartera/);
+  assert.ok(!/if \(cheques > 1\)/.test(b), 'volvió el bloqueo de los dos cheques');
+  assert.match(b, /ahora los cheques recuerdan de qué\s*\/\/ cobranza vinieron/);
 });
-
 test('el cuadro del asiento ESPEJA los renglones', () => {
   // Dibujaba siempre dos renglones por el total. El servidor arma un par por cada
   // medio y por cada ámbito: con dos medios y dos mitades el asiento real tiene

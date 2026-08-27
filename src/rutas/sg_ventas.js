@@ -10,6 +10,7 @@ import express from 'express';
 import db from '../servicios/db_sg_finanzas.js';
 import { crearAsiento, MOTIVOS } from '../servicios/asientos.js';
 import { repartirAmbito, partesDeMedio } from '../servicios/sg_cobro_ambito.js';
+import { puedeMoverCuenta } from './sg_tesoreria.js';
 // EL ASIENTO DE VENTA VIVE EN UN SOLO LUGAR. Estaba acá adentro y el otro
 // camino que emite facturas —la facturación directa, por afip-wsfe-emision—
 // no lo usaba: esas ventas salían sin asiento.
@@ -1754,6 +1755,18 @@ router.post('/cobranzas', requireAuth, (req, res) => {
         error: `La cuenta "${cuenta.nombre}" no tiene cuenta contable asociada, así que la cobranza no `
              + `puede entrar al libro. Asignásela en Caja y Bancos.` });
     }
+    // ── LA CAJA TIENE DUEÑO ───────────────────────────────────────────────
+    // UNA sola regla en todo el sistema: si la cuenta tiene gente asignada la
+    // tocan sólo ellos; si no tiene a nadie, la toca cualquiera con permiso en el
+    // módulo. El pago a proveedores la aplica desde siempre (sg.js:9555) y el
+    // cobro no: el front escondía las cuentas ajenas, pero eso es cortesía del
+    // front — el servidor aceptaba cualquier cuenta_fin_id que le mandaran, así
+    // que se podía meter plata en la caja de otro escribiendo el número.
+    if (!puedeMoverCuenta(u, cuenta.id)) {
+      return res.status(403).json({ ok: false,
+        error: `La cuenta "${cuenta.nombre}" la maneja otra persona. Elegí una tuya, o pedile a un `
+             + `administrador que te asigne ésa en Caja y Bancos.` });
+    }
     medios.push({ forma, monto, ambito: ambM, cuenta, referencia: m.referencia || referencia || null, cheque: null });
   }
   // LOS MEDIOS TIENEN QUE DAR EL TOTAL. Si no, la diferencia se la come el asiento y
@@ -1792,15 +1805,24 @@ router.post('/cobranzas', requireAuth, (req, res) => {
       let primerCheque = null;
       for (const m of medios) {
         if (!m.cheque) continue;
+        // DE QUÉ COBRANZA VINO, en una columna y no en una nota. Atarlos por el
+        // texto 'Cobranza #123' no se puede consultar, y por eso al anular sólo
+        // volvía el primero a la cartera.
+        //
+        // El ÁMBITO no se sabe todavía: el reparto entre las dos mitades corre más
+        // abajo. Se escribe después, con un UPDATE, cuando ya está resuelto.
         const chId = db.prepare(`INSERT INTO sg_fin_cheques_terceros
-          (banco, nro_cheque, librador, monto, fecha_recepcion, fecha_vto, cliente_id, notas, cuit_librador)
-          VALUES (?,?,?,?,?,?,?,?,?)`).run(m.cheque.banco, m.cheque.nro, m.cheque.librador, m.monto,
+          (banco, nro_cheque, librador, monto, fecha_recepcion, fecha_vto, cliente_id, notas, cuit_librador,
+           cobranza_id)
+          VALUES (?,?,?,?,?,?,?,?,?,?)`).run(m.cheque.banco, m.cheque.nro, m.cheque.librador, m.monto,
           f, m.cheque.fecha_vto, cli.id,
-          'Cobranza ' + (referencia || '#' + cobId), m.cheque.cuit).lastInsertRowid;
+          'Cobranza ' + (referencia || '#' + cobId), m.cheque.cuit, cobId).lastInsertRowid;
+        m._chId = chId;
         if (primerCheque == null) primerCheque = chId;
       }
-      // La columna es una sola y los cheques pueden ser varios: queda el primero,
-      // para no romper lo que ya la lee. Todos quedan atados por la nota de cartera.
+      // La columna de la cabecera es una sola y los cheques pueden ser varios: queda
+      // el primero, para no romper lo que ya la lee. La vuelta atrás NO usa ésta:
+      // usa cobranza_id, que los tiene a todos.
       if (primerCheque != null) {
         db.prepare('UPDATE sg_ven_cobranzas SET cheque_terceros_id=? WHERE id=?').run(primerCheque, cobId);
       }
@@ -1862,6 +1884,20 @@ router.post('/cobranzas', requireAuth, (req, res) => {
         const gesM = gesPorMedio[ix];
         const partesM = partesDeMedio(m.monto, gesM, motivoGes);
         m._partes = partesM;
+        // ── EL CHEQUE SE LLEVA SU MITAD PUESTA ──────────────────────────
+        // Hace falta al depositarlo: sin esto el depósito escribía el movimiento y
+        // el asiento sin ámbito —o sea fiscal— y un cheque que cobró la parte SIN
+        // comprobante volvía al libro fiscal. Quedaba un débito de gestión en
+        // cartera que no se cancelaba nunca.
+        //
+        // Sólo se marca cuando el cheque es ENTERO de una mitad. Si cubre las dos
+        // —pasa cuando nadie declaró el ámbito y hay parte de gestión— se deja en
+        // blanco: partir un cheque al depositarlo es otro problema, y poner una de
+        // las dos sería elegir por el que cobra.
+        if (m._chId && partesM.length === 1) {
+          db.prepare('UPDATE sg_fin_cheques_terceros SET ambito=?, motivo=? WHERE id=?')
+            .run(partesM[0].ambito, partesM[0].motivo || null, m._chId);
+        }
         for (const x of partesM) {
           lineasCob.push({ cuenta_id: m.cheque ? ctaCartera : m.cuenta.cta, debe: x.monto, haber: 0,
             ambito: x.ambito, motivo: x.motivo,
@@ -1935,13 +1971,22 @@ function anularCobranza(id, motivo, usuarioId) {
       // Y si el cobro fue con cheque, ese cheque sale de la cartera. Si ya se
       // depositó no se toca: la plata entró al banco y anular la cobranza no la
       // saca de ahí — eso se resuelve marcando el cheque rechazado.
-      if (co.cheque_terceros_id) {
-        const ch = db.prepare('SELECT estado FROM sg_fin_cheques_terceros WHERE id=?')
-          .get(co.cheque_terceros_id);
+      // TODOS los cheques de esta cobranza, no sólo el de la cabecera. Esa columna
+      // guarda UNO y los cheques pueden ser varios: el segundo quedaba vivo y bueno
+      // en la cartera contra una cobranza que ya no existe. Se buscan por
+      // cobranza_id, y se deja el id de la cabecera como respaldo para las cobranzas
+      // viejas, cargadas antes de que existiera la columna.
+      const chIds = db.prepare(`SELECT id FROM sg_fin_cheques_terceros
+        WHERE cobranza_id=? AND estado='en_cartera'`).all(co.id).map((x) => x.id);
+      if (!chIds.length && co.cheque_terceros_id) chIds.push(co.cheque_terceros_id);
+      for (const chId of chIds) {
+        const ch = db.prepare('SELECT estado FROM sg_fin_cheques_terceros WHERE id=?').get(chId);
+        // Si ya se depositó no se toca: la plata entró al banco y anular la cobranza
+        // no la saca de ahí — eso se resuelve marcando el cheque rechazado.
         if (ch && ch.estado === 'en_cartera') {
           db.prepare(`UPDATE sg_fin_cheques_terceros SET estado='anulado',
             notas = TRIM(COALESCE(notas,'') || ' [ANULADO con la cobranza: ' || ? || ']')
-            WHERE id=?`).run(motivo, co.cheque_terceros_id);
+            WHERE id=?`).run(motivo, chId);
         }
       }
       if (co.asiento_id) {
