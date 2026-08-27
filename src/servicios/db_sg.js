@@ -1907,6 +1907,18 @@ try {
     return false;
   };
   const added = [];
+  // ── LA FACTURA DEL FLETERO ────────────────────────────────────────────
+  // Pablo, 27/8/2026: «deberíamos poder cargar y contabilizar la factura de los
+  // fleteros ahí mismo». Hasta acá `monto` era un número suelto: entraba al costo
+  // del lote y no generaba ni asiento ni deuda. Un servicio que se compra es un
+  // gasto con su IVA crédito fiscal y su cuenta a pagar.
+  //
+  // `monto` se conserva como el TOTAL de la factura —es lo que ya está cargado y
+  // lo que entra al costo— y se le agregan el neto y el IVA para poder asentar.
+  if (addCol('sg_gastos_directos', 'neto',                'REAL'))    added.push('sg_gastos_directos.neto');
+  if (addCol('sg_gastos_directos', 'iva_alicuota',        'REAL'))    added.push('sg_gastos_directos.iva_alicuota');
+  if (addCol('sg_gastos_directos', 'iva_monto',           'REAL'))    added.push('sg_gastos_directos.iva_monto');
+  if (addCol('sg_gastos_directos', 'asiento_id',          'INTEGER')) added.push('sg_gastos_directos.asiento_id');
   if (addCol('sg_lote_decomisos',   'bultos',               'INTEGER')) added.push('sg_lote_decomisos.bultos');
   if (addCol('sg_transformaciones', 'bultos_transformados', 'INTEGER')) added.push('sg_transformaciones.bultos_transformados');
   if (addCol('sg_reprocesos',       'bultos_procesados',    'INTEGER')) added.push('sg_reprocesos.bultos_procesados');
