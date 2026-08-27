@@ -6876,23 +6876,47 @@ function sgCliOpts(query, sel, blank){
 // mucho— no se entera de nada, que es lo que hace seguro el cambio.
 //
 // Idempotente: llamarlo dos veces sobre el mismo select no hace nada.
-function sgCliUnico(selectId){
+// ══ UN SOLO BUSCADOR, PARA CUALQUIER LISTA ═════════════════════════════════
+//
+// Pablo, 27/8/2026: «cuando escribimos los proveedores en la OC está raro. Me
+// gusta que a medida que vas escribiendo te acorte la lista con los que contienen
+// lo que estás escribiendo. También podemos usarlo para clientes cuando
+// facturamos o emitimos remitos».
+//
+// El de clientes ya existía; el de proveedores era un desplegable plano con todo
+// el padrón adentro, que se recorre a rueda de mouse. Esto es el mismo control
+// para los dos: se escribe, la lista se acorta debajo, se elige.
+//
+// Trabaja sobre un <select> que se esconde: el resto de la pantalla —el que lee
+// .value, el que hace .onchange— no se entera de nada. Y si no hay un <input>
+// delante, lo crea: así se puede montar sobre un desplegable pelado, que es como
+// estaba el de proveedores.
+//
+// cfg = { fuente(), etiqueta(item), campos(item), placeholder, opciones(query, sel) }
+function sgBuscador(selectId, cfg){
   var sel = eid(selectId);
   if (!sel || sel._unico) return;
-  // El input de búsqueda es el hermano anterior: así están escritos los cinco.
+  // El input de búsqueda es el hermano anterior, cuando existe. Si no, se crea:
+  // el desplegable de proveedores no tenía ninguno.
   var inp = sel.previousElementSibling;
   while (inp && inp.tagName !== 'INPUT') inp = inp.previousElementSibling;
-  if (!inp) return;
+  if (!inp) {
+    inp = document.createElement('input');
+    inp.type = 'text';
+    inp.autocomplete = 'off';
+    inp.style.cssText = 'width:100%;box-sizing:border-box';
+    sel.parentNode.insertBefore(inp, sel);
+  }
   sel._unico = true;
 
   var caja = document.createElement('div');
-  caja.style.cssText = 'position:relative;display:inline-block';
+  caja.style.cssText = 'position:relative;display:block';
   sel.parentNode.insertBefore(caja, inp);
   caja.appendChild(inp);
   caja.appendChild(sel);
   sel.style.display = 'none';
   inp.style.marginBottom = '0';
-  inp.placeholder = '\uD83D\uDD0E Escribí el cliente…';
+  inp.placeholder = cfg.placeholder || '\uD83D\uDD0E Escribí para buscar…';
 
   var lista = document.createElement('div');
   lista.style.cssText = 'position:absolute;z-index:60;left:0;right:0;top:100%;margin-top:2px;'
@@ -6902,60 +6926,56 @@ function sgCliUnico(selectId){
 
   var cerrar = function(){ lista.style.display = 'none'; };
   var elegir = function(id, texto){
-    sel.innerHTML = sgCliOpts('', id);
+    sel.innerHTML = cfg.opciones('', id);
     sel.value = String(id || '');
     inp.value = texto || '';
     cerrar();
     // El onchange no se dispara solo cuando el valor se asigna por código, y de
-    // él cuelga todo lo que la pantalla hace al elegir un cliente.
+    // él cuelga todo lo que la pantalla hace al elegir.
     if (typeof sel.onchange === 'function') sel.onchange();
     else sel.dispatchEvent(new Event('change'));
   };
 
-  var pintar = function(){
-    // AL ABRIRLO SE VE TODO. Si el texto es exactamente la etiqueta del cliente
-    // ya elegido, no es una búsqueda: es lo que quedó de la vez anterior. Filtrar
-    // por ahí contesta "ningún cliente dice" sobre la lista completa, porque la
-    // etiqueta junta alias Y razón social y el filtro compara contra cada uno por
-    // separado.
-    var elegido = (SG.cacheCli || []).filter(function(c){
-      return String(c.id) === String(sel.value); })[0];
-    if (elegido && String(inp.value || '') === sgCliLabel(elegido)) {
-      inp.select();                       // y si escribe, reemplaza en vez de agregar
-      lista.innerHTML = (SG.cacheCli || []).slice(0, 60).map(function(c){
-        return '<div class="sg-cli-op" data-id="' + c.id + '" style="padding:8px 12px;cursor:pointer;'
-          + 'font-size:13px;border-bottom:1px solid var(--bor)">' + escH(sgCliLabel(c)) + '</div>';
-      }).join('');
-      lista.style.display = 'block';
-      [].slice.call(lista.querySelectorAll('.sg-cli-op')).forEach(function(el){
-        el.onmousedown = function(ev){ ev.preventDefault(); elegir(el.dataset.id, el.textContent); };
-        el.onmouseenter = function(){ el.style.background = 'var(--sur)'; };
-        el.onmouseleave = function(){ el.style.background = ''; };
-      });
-      return;
-    }
-    var q = String(inp.value || '').trim().toLowerCase();
-    var cli = (SG.cacheCli || []).filter(function(c){
-      if (!q) return true;
-      return String(c.nombre_comercial || '').toLowerCase().indexOf(q) >= 0
-          || String(c.razon_social || '').toLowerCase().indexOf(q) >= 0;
-    }).slice(0, 60);
-    if (!cli.length) {
-      lista.innerHTML = '<div style="padding:10px 12px;color:var(--mut);font-size:12.5px">'
-        + 'Ningún cliente dice “' + escH(inp.value) + '”</div>';
-      lista.style.display = 'block';
-      return;
-    }
-    lista.innerHTML = cli.map(function(c){
-      return '<div class="sg-cli-op" data-id="' + c.id + '" style="padding:8px 12px;cursor:pointer;'
-        + 'font-size:13px;border-bottom:1px solid var(--bor)">' + escH(sgCliLabel(c)) + '</div>';
+  var dibujar = function(items){
+    lista.innerHTML = items.map(function(c){
+      return '<div class="sg-bus-op" data-id="' + c.id + '" style="padding:8px 12px;cursor:pointer;'
+        + 'font-size:13px;border-bottom:1px solid var(--bor)">' + escH(cfg.etiqueta(c)) + '</div>';
     }).join('');
     lista.style.display = 'block';
-    [].slice.call(lista.querySelectorAll('.sg-cli-op')).forEach(function(el){
+    [].slice.call(lista.querySelectorAll('.sg-bus-op')).forEach(function(el){
       el.onmousedown = function(ev){ ev.preventDefault(); elegir(el.dataset.id, el.textContent); };
       el.onmouseenter = function(){ el.style.background = 'var(--sur)'; };
       el.onmouseleave = function(){ el.style.background = ''; };
     });
+  };
+
+  var pintar = function(){
+    var todos = cfg.fuente() || [];
+    // AL ABRIRLO SE VE TODO. Si el texto es exactamente la etiqueta de lo que ya
+    // está elegido, no es una búsqueda: es lo que quedó de la vez anterior.
+    // Filtrar por ahí contesta «no hay ninguno» sobre la lista completa, porque la
+    // etiqueta junta dos campos y el filtro compara contra cada uno por separado.
+    var elegido = todos.filter(function(c){ return String(c.id) === String(sel.value); })[0];
+    if (elegido && String(inp.value || '') === cfg.etiqueta(elegido)) {
+      inp.select();                       // y si escribe, reemplaza en vez de agregar
+      dibujar(todos.slice(0, 60));
+      return;
+    }
+    // CONTIENE, no empieza por: es como lo pidió Pablo. Y por TODOS los campos —
+    // alias, razón social, CUIT— porque uno busca por lo que tiene a mano.
+    var q = String(inp.value || '').trim().toLowerCase();
+    var cli = todos.filter(function(c){
+      if (!q) return true;
+      return cfg.campos(c).some(function(x){
+        return String(x || '').toLowerCase().indexOf(q) >= 0; });
+    }).slice(0, 60);
+    if (!cli.length) {
+      lista.innerHTML = '<div style="padding:10px 12px;color:var(--mut);font-size:12.5px">'
+        + 'Nada dice “' + escH(inp.value) + '”</div>';
+      lista.style.display = 'block';
+      return;
+    }
+    dibujar(cli);
   };
 
   inp.oninput = pintar;
@@ -6964,6 +6984,53 @@ function sgCliUnico(selectId){
   // el click nunca llegaría a su destino.
   inp.onblur = function(){ setTimeout(cerrar, 120); };
   inp.onkeydown = function(ev){ if (ev.key === 'Escape') cerrar(); };
+}
+
+// El de clientes, con su etiqueta y sus campos de búsqueda.
+function sgCliUnico(selectId){
+  return sgBuscador(selectId, {
+    fuente: function(){ return SG.cacheCli || []; },
+    etiqueta: sgCliLabel,
+    // Se busca por alias, razón social y CUIT: uno busca por lo que tiene a mano.
+    campos: function(c){ return [c.nombre_comercial, c.razon_social, c.cuit]; },
+    opciones: sgCliOpts,
+    placeholder: '\uD83D\uDD0E Escribí el cliente…',
+  });
+}
+
+// ── Y EL DE PROVEEDORES, QUE NO EXISTÍA ──────────────────────────────────
+// Era un desplegable plano con el padrón entero adentro: se recorría a rueda de
+// mouse. Es el mismo control, con la lista de proveedores que corresponda.
+function sgProvLabel(p){
+  if (!p) return '';
+  var r = String(p.razon_social || '').trim();
+  var a = String(p.nombre_comercial || '').trim();
+  return (a && a.toLowerCase() !== r.toLowerCase()) ? (r + '  ·  ' + a) : r;
+}
+
+function sgProvOpts(query, sel, blank){
+  var q = String(query || '').trim().toLowerCase();
+  var lista = (typeof sgOcProvOpts === 'function' ? sgOcProvOpts() : (SG.cacheProv || []))
+    .filter(function(p){
+      if (!q) return true;
+      return [p.razon_social, p.nombre_comercial, p.cuit].some(function(x){
+        return String(x || '').toLowerCase().indexOf(q) >= 0; });
+    });
+  lista.sort(function(x, y){ return sgProvLabel(x).localeCompare(sgProvLabel(y), 'es'); });
+  return '<option value="">' + (blank || '— Elegir —') + '</option>'
+    + lista.map(function(p){
+        return '<option value="' + p.id + '"' + (String(p.id) === String(sel) ? ' selected' : '') + '>'
+          + esc(sgProvLabel(p)) + '</option>'; }).join('');
+}
+
+function sgProvUnico(selectId, fuente){
+  return sgBuscador(selectId, {
+    fuente: fuente || function(){ return (typeof sgOcProvOpts === 'function') ? sgOcProvOpts() : (SG.cacheProv || []); },
+    etiqueta: sgProvLabel,
+    campos: function(p){ return [p.razon_social, p.nombre_comercial, p.cuit]; },
+    opciones: sgProvOpts,
+    placeholder: '\uD83D\uDD0E Escribí el proveedor…',
+  });
 }
 
 // PONER EL CLIENTE POR CÓDIGO TIENE QUE VERSE. Con el control único, el <select>
@@ -10834,7 +10901,10 @@ var SG_OC_PROV_CATS = { 'Mercaderia Nacional':1, 'Mercaderia Importada':1 };
 function sgOcProvOpts(){ return (SG.cacheProv||[]).filter(function(p){ return SG_OC_PROV_CATS[p.categoria_nombre]; }); }
 function sgOcOpen(){
   SG.ocItems=[];
-  eid('sg-oc-prov').innerHTML=sgOpts(sgOcProvOpts(),'razon_social','','— Elegir —');
+  // Escribiendo se acorta la lista. Era un desplegable plano con el padrón entero
+  // adentro, que se recorría a rueda de mouse.
+  eid('sg-oc-prov').innerHTML=sgProvOpts('','','— Elegir —');
+  sgProvUnico('sg-oc-prov');
   eid('sg-oc-cond').innerHTML=sgOpts(SG.cacheCond,'nombre','','— Sin condición —');
   // El desplegable de comprobante lo arma sgOcFiscalOpts() según la condición
   // comercial, más abajo, una vez que los radios están en su valor inicial.
@@ -14848,7 +14918,8 @@ function sgSoGuardar(){
 // ── Compra retroactiva ──
 function sgRetroOpen(){
   SG.retroItems=[];
-  eid('sg-retro-prov').innerHTML=sgOpts(SG.cacheProv,'razon_social','','— Elegir —');
+  eid('sg-retro-prov').innerHTML=sgProvOpts('','','— Elegir —');
+  sgProvUnico('sg-retro-prov', function(){ return SG.cacheProv || []; });
   eid('sg-retro-obs').value='';
   sgRetroAddItem();
   eid('sg-retro-modal').classList.add('on');
@@ -15368,7 +15439,8 @@ function sgLoadGDirectos(){
 }
 function sgGdOpen(){
   api('/api/sg/lotes').then(function(r){ var lotes=(r&&r.ok)?r.data:[]; eid('sg-gd-lote').innerHTML='<option value="">— Elegir lote —</option>'+lotes.map(function(l){return '<option value="'+l.id+'">'+esc(l.codigo_lote)+' — '+esc(l.producto_nombre||'')+'</option>';}).join(''); });
-  eid('sg-gd-prov').innerHTML=sgOpts(SG.cacheProv,'razon_social','','— Ninguno —');
+  eid('sg-gd-prov').innerHTML=sgProvOpts('','','— Ninguno —');
+  sgProvUnico('sg-gd-prov', function(){ return SG.cacheProv || []; });
   eid('sg-gd-tipo').value='flete'; eid('sg-gd-monto').value=''; eid('sg-gd-fecha').value=new Date().toISOString().slice(0,10); eid('sg-gd-obs').value='';
   eid('sg-gd-modal').classList.add('on');
 }
@@ -31239,6 +31311,11 @@ function sgImpFill(e){
   eid('sg-emb-modal-tit').textContent = e.id ? ('✏️ Embarque — '+(e.nombre||'')) : '📥 Nuevo embarque';
   eid('sg-emb-nombre').value = sgImpVal(e.nombre);
   eid('sg-emb-prov').innerHTML = sgImpProvOpts(e.proveedor_id);
+  // Sólo proveedores del exterior: sgImpProvOpts ya los filtra, y el buscador
+  // trabaja sobre ESA misma lista para no ofrecer uno nacional en un embarque.
+  sgProvUnico('sg-emb-prov', function(){
+    return (SG.cacheProv || []).filter(function(p){ return p.es_exterior === 1 || p.id === e.proveedor_id; });
+  });
   eid('sg-emb-pais').value = sgImpVal(e.pais_origen);
   eid('sg-emb-incoterm').value = sgImpVal(e.incoterm||'FOB');
   eid('sg-emb-ncm').value = sgImpVal(e.ncm);
