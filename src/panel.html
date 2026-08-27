@@ -10692,7 +10692,11 @@ function sgOcImporte(o){
 // Naranja = falta hacer algo. Verde = está resuelto. Amarillo = todavía no
 // llegó la mercadería, que no es un pendiente de nadie acá.
 function sgOcSituacion(o){
-  if (o.estado === 'anulada')          return ['ber', 'Anulada'];
+  // Anular es «esta orden no va a pasar»; rechazar es «el proveedor entregó y se
+  // lo devolvimos». Las dos cierran la orden y las dos quedan en 'anulada' —el
+  // CHECK de la tabla no admite otro estado— pero son hechos distintos y el que
+  // mira la lista tiene que poder distinguirlos.
+  if (o.estado === 'anulada')          return o.rechazado_en ? ['ber', 'Rechazada'] : ['ber', 'Anulada'];
   // ── LO QUE ENTRÓ SIN ORDEN, ANTES QUE NADA ─────────────────────────────
   // La mercadería ya está adentro: lo que falta no es el camión, es la parte
   // COMERCIAL. El que recibió a las cinco de la mañana sabe qué bajó y cuánto,
@@ -11803,12 +11807,21 @@ function sgLoadPendientesRecibir(){
         // lo pedido y no va a recibir más se quedaba en esta bandeja para
         // siempre. Sólo aparece si YA entró algo — una orden que no recibió nada
         // se anula, no se da por terminada.
+        // «Terminada» y «Rechazar todo» son los dos finales posibles, y son
+        // excluyentes: si YA entró algo, la orden se da por terminada con lo que
+        // entró; si no entró nada y el camión se volvió, es un rechazo total.
+        // Ofrecer los dos a la vez haría elegir entre dos cosas que no compiten.
         var accion = f.primero
           ? '<button class="btn bb bs" onclick="sgRecOpen(' + f.o.id + ')">Recibir</button>'
             + (Number(f.o.entradas) > 0
                 ? ' <button class="btn bo bs" title="Dar la orden por terminada: pasa a OC recibidas"'
                   + ' onclick="sgOcCerrar(' + f.o.id + ')">✅ Terminada</button>'
-                : '')
+                // SÓLO EL ID, como el resto del panel. Meter la partida y el
+                // proveedor serializados adentro de un atributo HTML es frágil por
+                // diseño: cualquier comilla en una razón social rompe el atributo y
+                // el botón deja de responder, sin ningún error visible.
+                : ' <button class="btn bd bs" title="El camión llegó y se volvió entero: no entra nada al stock"'
+                  + ' onclick="sgOcRechazar(' + f.o.id + ')">🚫 Rechazar todo</button>')
           : '';
         return '<tr>'
           + '<td>' + (f.primero ? '<code>' + esc(sgOcId(f.o)) + '</code>' : '') + '</td>'
@@ -13590,6 +13603,50 @@ function sgFmGuardar(){
 // DAR LA ORDEN POR TERMINADA. El motivo se pide sólo si quedó saldo: si entró
 // todo, no hay nada que explicar. El backend igual lo vuelve a exigir — acá se
 // pide para no hacer ir y volver.
+// ══ RECHAZO TOTAL ══════════════════════════════════════════════════════════
+//
+// Pablo, 27/8/2026: «desde la recepción de una orden de compra debemos tener la
+// posibilidad de hacer un RECHAZO TOTAL directamente desde la pantalla general».
+//
+// El camión llegó y se volvió entero: mala calidad, producto equivocado, llegó
+// podrido. No entra nada al stock y la orden se cierra — pero queda anotado que el
+// proveedor VINO, con el motivo. Un proveedor al que se le rechazan tres camiones
+// es un problema, y si se guarda como una anulación más no queda registro de que
+// llegó a venir.
+//
+// EL MOTIVO ES OBLIGATORIO. Un rechazo sin motivo, a los dos meses, es una orden
+// anulada cualquiera: no se puede reclamar ni discutir con nadie.
+function sgOcRechazar(id){
+  // La partida y el proveedor salen de lo que la pantalla ya dibujó: no hacen
+  // falta en el atributo del botón.
+  var f = (SG._pendFilas || []).filter(function(x){ return String(x.o.id) === String(id); })[0];
+  var partida = f ? sgOcId(f.o) : ('orden ' + id);
+  var proveedor = f ? (f.o.proveedor_nombre || '') : '';
+  var motivo = prompt('RECHAZO TOTAL de la partida ' + partida
+    + (proveedor ? String.fromCharCode(10) + 'Proveedor: ' + proveedor : '')
+    + String.fromCharCode(10,10)
+    + 'No entra nada al stock y la orden se cierra. Se cancelan las reservas que '
+    + 'esta mercadería tenía comprometidas.' + String.fromCharCode(10,10)
+    + 'Por qué se rechaza (calidad, producto equivocado, llegó en mal estado…):', '');
+  if (motivo === null) return;
+  if (String(motivo).trim().length < 3) { toast('Escribí por qué se rechaza', 'er'); return; }
+  api('/api/sg/oc/' + id + '/rechazar', 'POST', { motivo: String(motivo).trim() }).then(function(r){
+    if (!r || !r.ok) { toast((r && r.error) || 'No se pudo rechazar', 'er'); return; }
+    // LOS PEDIDOS QUE CONTABAN CON ESTA MERCADERÍA. Sus reservas en tránsito se
+    // cancelaron: hay que decirlo, no dejarlo en el log del servidor.
+    var af = (r.data && r.data.pedidos_afectados) || [];
+    if (af.length) {
+      alert('La partida quedó rechazada.' + String.fromCharCode(10,10)
+        + 'OJO: había pedidos que contaban con esta mercadería y su reserva se canceló:'
+        + String.fromCharCode(10) + af.join(', '));
+    } else {
+      toast('Partida rechazada — no entró nada al stock', 'ok');
+    }
+    sgLoadPendientesRecibir();
+    if (typeof sgLoadOC === 'function') sgLoadOC();
+  });
+}
+
 function sgOcCerrar(id){
   api('/api/sg/oc/'+id).then(function(r){
     if(!r||!r.ok){ toast('No se pudo leer la orden','er'); return; }

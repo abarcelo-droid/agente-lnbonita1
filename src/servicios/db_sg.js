@@ -1915,6 +1915,22 @@ try {
   //
   // `monto` se conserva como el TOTAL de la factura —es lo que ya está cargado y
   // lo que entra al costo— y se le agregan el neto y el IVA para poder asentar.
+  // ── EL CAMIÓN LLEGÓ Y SE RECHAZÓ ENTERO ───────────────────────────────
+  // Pablo, 27/8/2026: desde la recepción de una orden de compra tiene que poder
+  // hacerse un RECHAZO TOTAL desde la pantalla general.
+  //
+  // No es lo mismo que anular. Anular es «esta orden no va a pasar»; rechazar es
+  // «el proveedor entregó y se lo devolvimos». Los dos cierran la orden, pero el
+  // segundo es un hecho del PROVEEDOR y hay que poder contarlo: un proveedor al
+  // que se le rechazan tres camiones es un problema, y si se guarda como anulada
+  // no queda registro de que llegó a venir.
+  //
+  // El estado sigue siendo 'anulada' —el CHECK de sg_oc no admite otro y
+  // rehacer esa tabla arrastra media docena de claves foráneas— y el hecho vive
+  // en estas columnas.
+  if (addCol('sg_oc', 'rechazado_en',     'TEXT'))    added.push('sg_oc.rechazado_en');
+  if (addCol('sg_oc', 'rechazado_motivo', 'TEXT'))    added.push('sg_oc.rechazado_motivo');
+  if (addCol('sg_oc', 'rechazado_por',    'INTEGER')) added.push('sg_oc.rechazado_por');
   if (addCol('sg_gastos_directos', 'neto',                'REAL'))    added.push('sg_gastos_directos.neto');
   if (addCol('sg_gastos_directos', 'iva_alicuota',        'REAL'))    added.push('sg_gastos_directos.iva_alicuota');
   if (addCol('sg_gastos_directos', 'iva_monto',           'REAL'))    added.push('sg_gastos_directos.iva_monto');

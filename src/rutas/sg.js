@@ -5938,29 +5938,86 @@ router.put('/oc/:id', requireAdmin, (req, res) => {
 });
 
 // Anular OC (solo si no tiene recepciones)
+// ── CERRAR UNA ORDEN QUE NO VA A ENTRAR ──────────────────────────────────────
+// Anular y rechazar hacen LO MISMO con la orden: la cierran, cancelan las reservas
+// en tránsito y sueltan los vencimientos impagos. Lo que cambia es el HECHO que se
+// anota. Estaba escrito una sola vez y se copió cero veces a propósito: la próxima
+// reserva que quede colgada se arregla en un solo lugar.
+//
+// `rechazo` = { motivo, userId } cuando el camión llegó y se devolvió.
+function cerrarOcSinEntrada(db, ocId, userId, rechazo) {
+  const tieneRec = db.prepare('SELECT COUNT(*) c FROM sg_recepciones WHERE oc_id=? AND activo=1').get(ocId).c;
+  if (tieneRec > 0) {
+    return { error: rechazo
+      ? 'Esta orden ya tiene mercadería recibida: un rechazo TOTAL es cuando no entró nada. '
+        + 'Si querés cerrarla con lo que entró, usá «Terminada».'
+      : 'La OC ya tiene recepciones; no se puede anular' };
+  }
+  const itemIds = db.prepare('SELECT id FROM sg_oc_items WHERE oc_id=?').all(ocId).map((x) => x.id);
+  let pedidosAfectados = [];
+  db.transaction(() => {
+    db.prepare(`UPDATE sg_oc SET estado='anulada', modificado_en=datetime('now','localtime'),
+      modificado_por=? WHERE id=?`).run(userId, ocId);
+    if (rechazo) {
+      // EL HECHO DEL PROVEEDOR. Anular es «esta orden no va a pasar»; rechazar es
+      // «entregó y se lo devolvimos». Sin esto, un camión rechazado queda igual
+      // que una orden que nunca se mandó, y no hay forma de contarlos.
+      db.prepare(`UPDATE sg_oc SET rechazado_en=datetime('now','localtime'),
+        rechazado_motivo=?, rechazado_por=? WHERE id=?`).run(rechazo.motivo, userId, ocId);
+    }
+    db.prepare('DELETE FROM sg_oc_vencimientos WHERE oc_id=? AND pagado=0').run(ocId);
+    if (itemIds.length) {
+      const ph = itemIds.map(() => '?').join(',');
+      pedidosAfectados = db.prepare(`SELECT DISTINCT pe.numero FROM sg_reservas rs
+        JOIN sg_pedido_items pi ON pi.id=rs.pedido_item_id JOIN sg_pedidos pe ON pe.id=pi.pedido_id
+        WHERE rs.oc_item_id IN (${ph}) AND rs.tipo='oc_item' AND rs.estado='activa'`).all(...itemIds).map((x) => x.numero);
+      db.prepare(`UPDATE sg_reservas SET estado='cancelada'
+        WHERE oc_item_id IN (${ph}) AND tipo='oc_item' AND estado='activa'`).run(...itemIds);
+    }
+  })();
+  return { pedidos_afectados: pedidosAfectados };
+}
+
+// ══ RECHAZO TOTAL ══════════════════════════════════════════════════════════════
+//
+// Pablo, 27/8/2026: «desde la recepción de una orden de compra debemos tener la
+// posibilidad de hacer un RECHAZO TOTAL directamente desde la pantalla general».
+//
+// El camión llegó y se volvió entero: mala calidad, producto equivocado, llegó
+// podrido. No entra nada al stock y la orden se cierra — pero queda anotado que el
+// proveedor VINO, con el motivo, que es lo que después permite mirarlo por proveedor.
+//
+// EL MOTIVO ES OBLIGATORIO. Un rechazo sin motivo, a los dos meses, es una orden
+// anulada más: no se puede reclamar ni discutir con nadie.
+router.post('/oc/:id/rechazar', requireAuth, express.json(), (req, res) => {
+  const db = getDb();
+  try {
+    const motivo = val(req.body && req.body.motivo);
+    if (!motivo || motivo.length < 3) {
+      return res.status(400).json({ ok: false, error: 'Escribí por qué se rechaza: queda registrado' });
+    }
+    const oc = db.prepare('SELECT id, estado, activo FROM sg_oc WHERE id=?').get(req.params.id);
+    if (!oc || !oc.activo) return res.status(404).json({ ok: false, error: 'Orden no encontrada' });
+    if (oc.estado === 'anulada') return res.status(400).json({ ok: false, error: 'Esa orden ya está cerrada' });
+    const r = cerrarOcSinEntrada(db, Number(req.params.id), uid(req), { motivo });
+    if (r.error) return res.status(400).json({ ok: false, error: r.error });
+    res.json({ ok: true, data: { id: Number(req.params.id), pedidos_afectados: r.pedidos_afectados } });
+  } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
+});
+
 router.post('/oc/:id/anular', requireAuth, (req, res) => {
   const db = getDb();
   try {
-    const tieneRec = db.prepare('SELECT COUNT(*) c FROM sg_recepciones WHERE oc_id=? AND activo=1').get(req.params.id).c;
-    if (tieneRec > 0) return res.status(400).json({ ok: false, error: 'La OC ya tiene recepciones; no se puede anular' });
-    // BRIEF 8 (D3) — al anular la OC, cancelar las reservas tipo='oc_item' activas de sus items y
-    // avisar qué pedidos quedan afectados (su reserva en tránsito ya no existe).
-    const itemIds = db.prepare('SELECT id FROM sg_oc_items WHERE oc_id=?').all(req.params.id).map(x => x.id);
-    let pedidosAfectados = [];
-    const tx = db.transaction(() => {
-      db.prepare("UPDATE sg_oc SET estado='anulada', modificado_en=datetime('now','localtime'), modificado_por=? WHERE id=?").run(uid(req), req.params.id);
-      db.prepare('DELETE FROM sg_oc_vencimientos WHERE oc_id=? AND pagado=0').run(req.params.id);
-      if (itemIds.length) {
-        const ph = itemIds.map(() => '?').join(',');
-        pedidosAfectados = db.prepare(`SELECT DISTINCT pe.numero FROM sg_reservas rs
-          JOIN sg_pedido_items pi ON pi.id=rs.pedido_item_id JOIN sg_pedidos pe ON pe.id=pi.pedido_id
-          WHERE rs.oc_item_id IN (${ph}) AND rs.tipo='oc_item' AND rs.estado='activa'`).all(...itemIds).map(x => x.numero);
-        db.prepare(`UPDATE sg_reservas SET estado='cancelada' WHERE oc_item_id IN (${ph}) AND tipo='oc_item' AND estado='activa'`).run(...itemIds);
-      }
-    });
-    tx();
-    if (pedidosAfectados.length) console.warn(`[SG] OC ${req.params.id} anulada — reservas en tránsito canceladas. Pedidos afectados: ${pedidosAfectados.join(', ')}`);
-    res.json({ ok: true, data: { id: Number(req.params.id), pedidos_afectados: pedidosAfectados } });
+    // La MISMA función que el rechazo: cierra la orden, cancela las reservas en
+    // tránsito y suelta los vencimientos impagos. Lo único que cambia es que acá no
+    // se anota ningún hecho del proveedor — anular es «esta orden no va a pasar».
+    const r = cerrarOcSinEntrada(db, Number(req.params.id), uid(req), null);
+    if (r.error) return res.status(400).json({ ok: false, error: r.error });
+    if (r.pedidos_afectados.length) {
+      console.warn(`[SG] OC ${req.params.id} anulada — reservas en tránsito canceladas. `
+        + `Pedidos afectados: ${r.pedidos_afectados.join(', ')}`);
+    }
+    res.json({ ok: true, data: { id: Number(req.params.id), pedidos_afectados: r.pedidos_afectados } });
   } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
 });
 
