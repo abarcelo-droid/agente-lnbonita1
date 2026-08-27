@@ -891,10 +891,28 @@ montarCRUD('proveedores', 'sg_proveedores',
 
 // Fleteros / proveedores de servicio (es_servicio=1). Alimenta el selector del despacho y
 // el filtro del módulo Gastos Directos.
+// ── A QUIÉN SE LE PAGA EL FLETE ────────────────────────────────────────────
+//
+// Pablo, 27/8/2026: «a qué fletero se le paga debería traer la lista de proveedores.
+// Dentro de proveedores podemos marcar algunos como fleteros».
+//
+// Devolvía SÓLO los marcados con es_servicio=1, y en una base recién cargada eso es
+// NINGUNO: el selector se abría vacío, con un «— Elegir —» y nada más. La marca
+// existía en el maestro y no había forma de enterarse de que hacía falta ponerla.
+//
+// Es la misma trampa que ya resolvió puedeMoverCuenta(): si nadie está asignado, lo
+// toca cualquiera. La marca ORDENA la lista —los fleteros primero— pero no puede ser
+// el requisito para poder trabajar.
 router.get('/proveedores-servicio', requireAuth, (req, res) => {
   const db = getDb();
   try {
-    res.json({ ok: true, data: db.prepare("SELECT * FROM sg_proveedores WHERE activo=1 AND es_servicio=1 ORDER BY razon_social COLLATE NOCASE").all() });
+    // ?solo_marcados=1 para los filtros de listado, donde mostrar el padrón entero
+    // no ayuda: ahí interesa filtrar por los que efectivamente hacen fletes.
+    const solo = String(req.query.solo_marcados || '') === '1';
+    const rows = db.prepare(`SELECT * FROM sg_proveedores
+       WHERE activo=1 ${solo ? 'AND es_servicio=1' : ''}
+       ORDER BY es_servicio DESC, razon_social COLLATE NOCASE`).all();
+    res.json({ ok: true, data: rows, marcados: rows.filter((r) => r.es_servicio === 1).length });
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 

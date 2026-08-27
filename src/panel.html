@@ -6156,7 +6156,8 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
     <div class="fg">
       <div id="sgfe-cab" style="font-size:12.5px;color:var(--mut);margin-bottom:10px"></div>
       <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px">
-        <div class="fl"><label>A qué fletero se le paga</label><select id="sgfe-fletero"></select></div>
+        <div class="fl"><label>A qué fletero se le paga</label><select id="sgfe-fletero"></select>
+          <div id="sgfe-fletero-ayuda" style="font-size:11px;color:var(--mut);margin-top:3px"></div></div>
         <div class="fl"><label>Lo que dice la factura</label>
           <input type="text" inputmode="decimal" id="sgfe-monto" placeholder="$ 0"
                  style="text-align:right" oninput="this.value=sgMilFmtLive(this.value);sgFeDif()"></div>
@@ -6605,7 +6606,9 @@ var SG_SCHEMA = {
       {k:'razon_social', l:'Razón social', t:'text', req:1},
       {k:'cuit', l:'CUIT', t:'text'},
       {k:'tipo', l:'Tipo', t:'select', o:SG_TIPOPRV},
-      {k:'es_servicio', l:'¿Proveedor de servicio? (flete / carga)', t:'select', o:[['','No'],['1','Sí — fletero/cooperativa']]},
+      // La marca no habilita nada: ORDENA. Un proveedor sin marcar se puede elegir
+      // igual para pagarle un flete; marcarlo lo pone primero en la lista.
+      {k:'es_servicio', l:'¿Hace fletes o cargas? (aparece primero al pagar un flete)', t:'select', o:[['','No'],['1','Sí — fletero / cooperativa']]},
       {k:'categoria_fiscal', l:'Categoría fiscal', t:'select', o:SG_CATFISC},
       {k:'tipo_fiscal_habitual', l:'Tipo fiscal habitual', t:'select', o:SG_FISCAL, def:'factura_a'},
       {k:'condicion_pago_habitual_id', l:'Condición de pago habitual', t:'select', src:'cond'},
@@ -17881,9 +17884,8 @@ function sgDespOpen(){
   // Proveedores de servicio: fletero (flete de salida) y cooperativa (carga). Ambos del mismo catálogo.
   api('/api/sg/proveedores-servicio').then(function(r){
     var fls=(r&&r.ok)?r.data:[];
-    var opts='<option value="">{X}</option>'+fls.map(function(f){return '<option value="'+f.id+'">'+esc(f.razon_social)+'</option>';}).join('');
-    eid('sg-desp-fletero').innerHTML=opts.replace('{X}','— Sin fletero —');
-    eid('sg-desp-coop').innerHTML=opts.replace('{X}','— Sin carga —');
+    eid('sg-desp-fletero').innerHTML=sgFleteroOpts(fls, '', '— Sin fletero —');
+    eid('sg-desp-coop').innerHTML=sgFleteroOpts(fls, '', '— Sin carga —');
   });
   sgItemPicker({ modo:'remito', contenedor:'sg-desp-items', onAdd:sgDespOnAdd });
   sgDespRender();
@@ -18322,7 +18324,9 @@ function sgrReprHist(){
 // ════ Módulo GASTOS DIRECTOS (servicio, valorización diferida) — Fase 1: Fletes de salida ════
 var SGGD={ tipo:'flete_salida', estado:'pendiente_valorizar', rows:[], valProv:null, valNombre:'', valItems:[] };
 function sgGdsInit(){
-  api('/api/sg/proveedores-servicio').then(function(r){
+  // El FILTRO sí va sólo con los marcados: acá el padrón entero no ayuda, porque se
+  // filtra por quien efectivamente hace fletes.
+  api('/api/sg/proveedores-servicio?solo_marcados=1').then(function(r){
     var fls=(r&&r.ok)?r.data:[];
     eid('sggd-filtro-fletero').innerHTML='<option value="">— Todos —</option>'+fls.map(function(f){return '<option value="'+f.id+'">'+esc(f.razon_social)+'</option>';}).join('');
   });
@@ -18440,6 +18444,37 @@ function sgGdsValGuardar(){
 // pisado es el que entra al costo del lote.
 var SGFE = { estado: 'pendiente_valorizar', filas: [], sel: null, fleteros: [] };
 
+// ── EL SELECTOR DE FLETERO, QUE NUNCA QUEDA VACÍO ────────────────────────
+//
+// Pablo, 27/8/2026: «debería traer la lista de proveedores; dentro de proveedores
+// podemos marcar algunos como fleteros».
+//
+// Traía sólo los marcados, y en una base recién cargada eso es ninguno: el
+// selector se abría con «— Elegir —» y nada más. La marca existía en el maestro y
+// no había forma de enterarse de que hacía falta ponerla.
+//
+// Los marcados van arriba, en su grupo; el resto del padrón queda abajo, a mano. La
+// marca ordena la lista, no habilita el trabajo.
+function sgFleteroOpts(lista, sel, vacio){
+  lista = lista || [];
+  var marcados = lista.filter(function(f){ return f.es_servicio === 1; });
+  var otros    = lista.filter(function(f){ return f.es_servicio !== 1; });
+  var op = function(f){
+    return '<option value="' + f.id + '"'
+      + (String(f.id) === String(sel) ? ' selected' : '') + '>'
+      + esc(f.razon_social) + '</option>';
+  };
+  var h = '<option value="">' + (vacio || '— Elegir —') + '</option>';
+  if (marcados.length) {
+    h += '<optgroup label="Fleteros">' + marcados.map(op).join('') + '</optgroup>';
+  }
+  if (otros.length) {
+    h += '<optgroup label="' + (marcados.length ? 'Otros proveedores' : 'Proveedores (ninguno marcado como fletero)')
+       + '">' + otros.map(op).join('') + '</optgroup>';
+  }
+  return h;
+}
+
 function sgFeInit(){
   if (!SGFE.fleteros.length) {
     api('/api/sg/proveedores-servicio').then(function(r){
@@ -18546,11 +18581,17 @@ function sgFeOpen(recId){
               : '')
         : '<br><span style="color:#9a3412">El comprador no dejó pactado el flete en la orden.</span>');
   var sel = eid('sgfe-fletero');
-  if (sel) sel.innerHTML = '<option value="">— Elegir —</option>' + SGFE.fleteros.map(function(f){
-    return '<option value="' + f.id + '"'
-      + (String(f.id) === String(x.proveedor_servicio_id) ? ' selected' : '') + '>'
-      + esc(f.razon_social) + '</option>';
-  }).join('');
+  if (sel) sel.innerHTML = sgFleteroOpts(SGFE.fleteros, x.proveedor_servicio_id);
+  // Y se dice dónde se marcan, una sola vez y en chico: la marca ordena la lista,
+  // no es un requisito para poder pagarle a alguien.
+  var ay = eid('sgfe-fletero-ayuda');
+  if (ay) {
+    var marc = (SGFE.fleteros || []).filter(function(f){ return f.es_servicio === 1; }).length;
+    ay.innerHTML = marc
+      ? ''
+      : 'Ningún proveedor está marcado como fletero. Se puede elegir igual; para que '
+        + 'aparezcan primero, marcalos en <b>Maestros → Proveedores</b>.';
+  }
   var m = eid('sgfe-monto');
   if (m) m.value = x.gasto_monto ? sgMilShow(x.gasto_monto) : (x.estimado ? sgMilShow(x.estimado) : '');
   var f = eid('sgfe-fecha');
@@ -18604,7 +18645,7 @@ function sgFeGuardar(){
 var SGCD={ estado:'pendiente_valorizar', rows:[] };
 function sgCdsTipoLbl(t){ return t==='descarga_ingreso'?'Descarga (ingreso)':(t==='carga_salida'?'Carga (salida)':t); }
 function sgCdsInit(){
-  api('/api/sg/proveedores-servicio').then(function(r){
+  api('/api/sg/proveedores-servicio?solo_marcados=1').then(function(r){
     var fls=(r&&r.ok)?r.data:[];
     eid('sgcd-filtro-coop').innerHTML='<option value="">— Todas —</option>'+fls.map(function(f){return '<option value="'+f.id+'">'+esc(f.razon_social)+'</option>';}).join('');
   });
