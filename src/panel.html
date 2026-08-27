@@ -994,8 +994,8 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
                    onfocus="liqNumFoco(this)" onblur="liqNumSalida(this)" oninput="liqCerradoResolver()"
                    style="width:150px;text-align:right;padding:6px 8px;border-radius:6px;border:1px solid var(--bor)"></label>
           <label style="font-size:11.5px;color:var(--mut)">× <span id="liq-cerr-cant-lbl">bultos</span> a liquidar<br>
-            <input id="liq-cerr-cant" type="number" step="0.01"
-                   oninput="liqCerradoResolver()"
+            <input id="liq-cerr-cant" type="number" step="1" min="0"
+                   oninput="liqCerradoResolver();liqArtSync()"
                    style="width:120px;text-align:right;padding:6px 8px;border-radius:6px;border:1px solid var(--bor)">
             <span id="liq-cerr-cant-hint" style="display:block;font-size:10.5px"></span></label>
           <div style="align-self:flex-end;padding-bottom:6px">
@@ -1087,8 +1087,13 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
         <div class="ab-card" style="margin-bottom:12px">
           <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
             <div style="font-weight:600">Artículos</div>
-            <button class="btn bo bs" onclick="liqAddArt()">+ Agregar</button>
+            <button class="btn bo bs" id="liq-art-add" onclick="liqAddArt()">+ Agregar</button>
           </div>
+          <!-- LO QUE SE DECIDE ARRIBA NO SE VUELVE A TIPEAR ACÁ. Con la partida a
+               precio cerrado, la cantidad y el precio son los del cuadro de arriba:
+               dos lugares para el mismo número terminan diciendo cosas distintas, y
+               el que se imprime es éste. -->
+          <div id="liq-art-nota" style="font-size:11.5px;color:var(--mut);margin-bottom:8px"></div>
           <div id="liq-articulos"></div>
         </div>
         <div class="ab-card" style="margin-bottom:12px">
@@ -35332,6 +35337,25 @@ var LIQ_COM_PASO = 0.5;    // y se le dice en medios puntos, no en decimales sue
 //        gastos_ajuste = falta / (1 + IVA de gastos)
 //
 // Y cierra exacto: el neto a pagar da T al peso, sea cual sea el redondeo.
+// Lo que se tipea arriba baja al renglón. Sin esto el cuadro decía 45 bultos y el
+// artículo seguía diciendo los 60 de la vez anterior, y la diferencia recién
+// aparecía en el control de cierre, sin explicar de dónde salía.
+function liqArtSync(){
+  if (!liqArtDerivado()) return;
+  var arts = _liqLeerArt();
+  if (!arts.length) return;
+  var cant = Number((eid('liq-cerr-cant') || {}).value);
+  // liqNum() y no parseFloat: el campo lleva separador de miles y "25.000" leído
+  // crudo da 25.
+  var pre  = liqNum(eid('liq-cerr-precio'));
+  if (cant > 0) arts[0].cantidad = cant;
+  if (pre > 0)  arts[0].precio = pre;
+  if (arts[0].cantidad > 0 && arts[0].precio > 0) {
+    arts[0].importe = Math.round(arts[0].cantidad * arts[0].precio * 100) / 100;
+  }
+  liqRenderArt(arts);
+}
+
 function liqCerradoResolver(){
   var pre = eid('liq-cerr-precio'), cant = eid('liq-cerr-cant');
   var out = eid('liq-cerr-resultado'), tot = eid('liq-cerr-total');
@@ -35843,9 +35867,35 @@ function liqAsientoPreview(d){
   }, 250);
 }
 
+// ── CUÁNDO EL RENGLÓN ES DERIVADO ────────────────────────────────────────
+// Si la liquidación sale de una PARTIDA y el precio está cerrado, la cantidad y el
+// precio ya los decidió el cuadro de arriba: acá se muestran, no se tipean. La
+// liquidación suelta —sin partida— se sigue cargando a mano, que es para lo que
+// existe.
+function liqArtDerivado(){
+  return !!(LIQ && LIQ.partida && LIQ.partida.oc_id && liqModo() === 'cerrado');
+}
+
+// El bulto es una unidad entera: no existe medio cajón. El campo dejaba tipear
+// 45,01 y ese decimal se multiplicaba por el precio, así que la liquidación salía
+// por unos pesos de más contra lo acordado y el control de cierre se quejaba sin
+// que se viera por qué.
+function liqPasoCantidad(){ return liqUnidad() === 'bulto' ? '1' : '0.01'; }
+
 function liqRenderArt(arts) {
   const c = document.getElementById('liq-articulos');
   const u = liqUnidad();
+  const fijo = liqArtDerivado();
+  const ro = fijo ? ' readonly tabindex="-1" style="background:var(--bg);color:var(--mut)"' : '';
+  const add = document.getElementById('liq-art-add');
+  if (add) add.style.display = fijo ? 'none' : '';
+  const nota = document.getElementById('liq-art-nota');
+  if (nota) {
+    nota.innerHTML = fijo
+      ? 'La cantidad y el precio salen del cuadro de arriba. Para cambiarlos, cambiá '
+        + '<b>los bultos a liquidar</b> ahí.'
+      : '';
+  }
   c.innerHTML =
     '<div style="display:grid;grid-template-columns:3fr 1.2fr 1.2fr 1.5fr 30px;gap:6px;'
     + 'font-size:11px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;'
@@ -35862,10 +35912,13 @@ function liqRenderArt(arts) {
       // productor cobra decía "56" a secas.
       '<input data-k="unidad" type="hidden" value="'+_liqEsc(a.unidad||u||'')+'">' +
       '<input data-k="articulo"  value="'+_liqEsc(a.articulo||'')+'" placeholder="Artículo">' +
-      '<input data-k="cantidad"  type="number" step="0.01" value="'+(a.cantidad||'')+'" placeholder="Cant." oninput="liqArtImporte(this)">' +
-      '<input data-k="precio"    type="number" step="0.01" value="'+(a.precio||'')+'" placeholder="Precio" oninput="liqArtImporte(this)">' +
+      '<input data-k="cantidad"  type="number" step="'+liqPasoCantidad()+'" value="'+(a.cantidad||'')+'" placeholder="Cant." oninput="liqArtImporte(this)"'+ro+'>' +
+      '<input data-k="precio"    type="number" step="0.01" value="'+(a.precio||'')+'" placeholder="Precio" oninput="liqArtImporte(this)"'+ro+'>' +
+      // El IMPORTE se sigue pudiendo corregir aunque el renglón sea derivado: el
+      // papel puede traer un redondeo y es el número que se imprime.
       '<input data-k="importe"   type="number" step="0.01" value="'+(a.importe||'')+'" placeholder="Importe" style="text-align:right" oninput="liqTotales()">' +
-      '<button class="btn bo bs" onclick="this.parentNode.remove();liqTotales()" style="color:#991b1b">×</button>' +
+      (fijo ? '<span></span>'
+            : '<button class="btn bo bs" onclick="this.parentNode.remove();liqTotales()" style="color:#991b1b">×</button>') +
     '</div>').join('');
   liqTotales();
 }
