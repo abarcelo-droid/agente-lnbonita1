@@ -123,7 +123,9 @@ try {
   // aplicados). El emoji va en el label (sidebar-v2 no mapea iconos para sg-*). Grupo no cambia.
   db.prepare("UPDATE modulos_config SET label='📊 Dash'     WHERE modulo='sg-dashboard'").run();
   db.prepare("UPDATE modulos_config SET label='📥 Ingresos' WHERE modulo='sg-compras'").run();
-  db.prepare("UPDATE modulos_config SET label='📤 Salidas'  WHERE modulo='sg-ventas'").run();
+  // «Salidas» no decía qué se hace ahí. La pantalla emite REMITOS y FACTURA:
+  // que el renglón lo diga (Pablo, 27/8/2026).
+  db.prepare("UPDATE modulos_config SET label='📤 Remitos y Facturación' WHERE modulo='sg-ventas'").run();
   db.prepare("UPDATE modulos_config SET label='🗂️ Maestros' WHERE modulo='sg-catalogo'").run();
   db.prepare("UPDATE modulos_config SET label='📈 Informes' WHERE modulo='sg-reportes'").run();
   db.prepare("UPDATE modulos_config SET label='📦 Stock'            WHERE modulo='sg-stock'").run();
@@ -165,9 +167,21 @@ try {
   //
   // Idempotente: son UPDATE por módulo, no-op una vez aplicados. Y no borra el
   // grupo viejo: "Abasto SG" desaparece solo cuando se queda sin pantallas.
+  //
+  // EL ORDEN LO PIDIÓ PABLO EL 27/8/2026, y sigue el camino de la mercadería:
+  // primero entra (Ingresos), después sale (Ventas), después se paga el papel
+  // (Compras) y al final se contabiliza. Antes Ventas encabezaba el menú y el
+  // que recibía un camión tenía que bajar hasta la mitad para encontrar su
+  // pantalla.
   const MENU_SG = [
     // grupo                          orden  módulo
-    ['Administración de Ventas',      649,  'sg-pisos'],
+    // ── INGRESOS: LA MERCADERÍA QUE ENTRA ────────────────────────────
+    // (el detalle del grupo está más abajo, donde estaba antes)
+
+    // ── ADMINISTRACIÓN DE VENTAS ─────────────────────────────────────
+    // Stock encabeza: es la pregunta que más se hace. Pisos ya no es un
+    // renglón —se unificó adentro de Stock, ver abajo— porque "qué hay" y
+    // "dónde está" son la misma pregunta partida en dos pantallas.
     ['Administración de Ventas',      650,  'sg-stock'],
     ['Administración de Ventas',      651,  'sg-ventas'],
     ['Administración de Ventas',      652,  'sg-cc-clientes'],
@@ -181,8 +195,8 @@ try {
     // liquidaciones, pagos, cuenta corriente— en un solo grupo de once
     // pantallas donde el que recibe camiones y el que paga facturas buscaban
     // en la misma lista.
-    ['Ingresos',                      660,  'sg-catalogo'],
-    ['Ingresos',                      661,  'sg-compras'],
+    ['Ingresos',                      640,  'sg-catalogo'],
+    ['Ingresos',                      641,  'sg-compras'],
     // Control Cooperativa va pegado a Ingresos porque se alimenta de ahí: cada
     // recepción que contesta "con descarga" cae en esta pantalla.
     // CONTROL COOPERATIVA YA NO ES UN RENGLÓN DEL MENÚ. Lo que la cooperativa
@@ -195,20 +209,20 @@ try {
     // usuario_modulos), y sus direcciones se declaran también bajo
     // sg-gastos-directos para que quien tenga esa pantalla pueda operar la
     // solapa. Borrarlo le sacaría el acceso a quien lo tenía tildado.
-    ['Ingresos',                      663,  'sg-importacion'],
-    ['Ingresos',                      664,  'sg-gastos-directos'],
-    ['Ingresos',                      665,  'sg-reprocesos'],
+    ['Ingresos',                      643,  'sg-importacion'],
+    ['Ingresos',                      644,  'sg-gastos-directos'],
+    ['Ingresos',                      645,  'sg-reprocesos'],
 
     // ── ADMINISTRACIÓN DE COMPRAS: EL PAPEL Y LA PLATA ───────────────
     // Emitir la orden y mirar las recibidas encabezan el grupo: es donde
     // empieza la compra, y de ahí salen la liquidación y la factura.
-    ['Administración de Compras',     669,  'sg-ordenes'],
-    ['Administración de Compras',     670,  'ab-liquidaciones'],
-    ['Administración de Compras',     671,  'sg-facturas-merc'],
-    ['Administración de Compras',     672,  'sg-cc-proveedores'],
-    ['Administración de Compras',     673,  'sp-pagos'],
-    ['Administración de Compras',     674,  'sg-gvariables'],
-    ['Administración de Compras',     675,  'sg-caja-bancos'],
+    ['Administración de Compras',     660,  'sg-ordenes'],
+    ['Administración de Compras',     661,  'ab-liquidaciones'],
+    ['Administración de Compras',     662,  'sg-facturas-merc'],
+    ['Administración de Compras',     663,  'sg-cc-proveedores'],
+    ['Administración de Compras',     664,  'sp-pagos'],
+    ['Administración de Compras',     665,  'sg-gvariables'],
+    ['Administración de Compras',     666,  'sg-caja-bancos'],
 
     ['Informes',                      680,  'sg-dashboard'],
     ['Informes',                      681,  'sg-reportes'],
@@ -246,6 +260,16 @@ try {
   // que lo tenga tildado no se le saca nada — ahora esas direcciones también
   // están declaradas bajo sg-remitos-pend, que es de donde se usan.
   db.prepare("UPDATE modulos_config SET oculto=1 WHERE modulo='sg-facturar'").run();
+
+  // ── PISOS SE UNIFICA CON STOCK ──────────────────────────────────────────
+  // Pablo, 27/8/2026: "Stock y Pisos los vamos a unificar". Son la misma
+  // pregunta partida en dos pantallas: QUÉ hay y DÓNDE está. El stock ya tenía
+  // el filtro por piso; ahora Pisos es una solapa suya.
+  //
+  // Igual que Control Cooperativa: el módulo NO se borra, se esconde. Sigue
+  // existiendo como PERMISO —quien lo tenía tildado no lo pierde— y sus
+  // direcciones se declaran también bajo sg-stock para que la solapa funcione.
+  db.prepare("UPDATE modulos_config SET oculto=1 WHERE modulo='sg-pisos'").run();
 
   console.log("[ORG] Labels Abasto SG (con emoji) verificados en modulos_config");
 } catch (e) { console.error("[ORG] Error ensureModuloSG:", e.message); }

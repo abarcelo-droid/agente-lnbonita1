@@ -2673,7 +2673,12 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
     </table></div>
   </div>
   <div class="sec sg-mod" id="sec-sg-stock">
-    <div class="ph"><div><div class="ph-t">🍅 San Gerónimo · Stock</div><div class="ph-s">Lotes, vencimientos y trazabilidad</div></div></div>
+    <div class="ph"><div><div class="ph-t">🍅 San Gerónimo · Stock</div><div class="ph-s">Qué hay, dónde está, cuándo vence</div></div></div>
+    <div style="display:flex;gap:6px;margin-bottom:14px">
+      <button class="btn bb" id="sg-st-tb-partidas" onclick="sgStockTab('partidas')">📦 Partidas</button>
+      <button class="btn bo" id="sg-st-tb-pisos" onclick="sgStockTab('pisos')">🏢 Por piso</button>
+    </div>
+    <div id="sg-st-tab-partidas">
     <div style="display:flex;gap:10px;margin-bottom:12px;align-items:flex-end;flex-wrap:wrap">
       <label style="font-size:12px;color:var(--mut)">Producto<br>
         <select id="sg-st-prod" onchange="sgLoadStock()" style="padding:5px 8px;border-radius:6px;border:1px solid var(--bor);background:var(--bg);min-width:150px"><option value="">— Todos —</option></select>
@@ -2714,9 +2719,24 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
       <button class="btn bb bs" onclick="sgApertOpen()" title="Cargar stock físico al corte (apertura)">📥 Carga inicial</button>
     </div>
     <div class="ab-table-wrap"><table class="pa-tbl">
-      <thead><tr><th style="text-align:center" title="Semáforo">🚦</th><th>Producto</th><th>Categoría</th><th style="text-align:right">Kg disp</th><th>Piso</th><th>Calidad</th><th>Vence (días)</th><th style="text-align:right">Costo/kg</th><th style="text-align:center">Estado</th><th></th></tr></thead>
+      <thead><tr><th style="text-align:center" title="Semáforo">🚦</th><th>Producto</th><th>Categoría</th><th style="text-align:right">Bultos disp</th><th>Piso</th><th>Calidad</th><th>Vence (días)</th><th style="text-align:right">Costo/kg</th><th style="text-align:center">Estado</th><th></th></tr></thead>
       <tbody id="sg-tb-stock"><tr><td colspan="10" class="emp">Cargando…</td></tr></tbody>
     </table></div>
+    </div>
+    <!-- ── DÓNDE ESTÁ CADA PARTIDA ────────────────────────────────────────
+         Era una pantalla aparte. "Qué hay" y "dónde está" son la misma pregunta
+         partida en dos, y el stock ya tenía el filtro por piso. -->
+    <div id="sg-st-tab-pisos" style="display:none">
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;align-items:center">
+        <select id="sg-pi-filtro" onchange="sgPiLoad()" style="padding:6px 8px;border-radius:6px;border:1px solid var(--bor);background:var(--card,#fff)">
+          <option value="">Todos los pisos</option>
+        </select>
+        <button class="btn bo" onclick="sgPiImprimir()" title="La hoja para contar contra ella">🖨️ Imprimir</button>
+        <button class="btn bo" onclick="sgPiAdmin()">⚙️ Administrar</button>
+      </div>
+      <div id="sg-pi-tot" style="margin-bottom:12px"></div>
+      <div id="sg-pi-cuerpo"><div class="emp">Cargando…</div></div>
+    </div>
   </div>
   <div class="sec sg-mod" id="sec-sg-ventas">
     <div class="ph"><div><div class="ph-t">🍅 San Gerónimo · Salidas</div><div class="ph-s">Lo que sale del depósito: con remito, o facturado en el acto</div></div></div>
@@ -2849,22 +2869,6 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
 <!-- ══ San Gerónimo · PISOS ══
      El stock deja de ser un total y se abre por dónde está la mercadería. El
      total sigue siendo uno: el piso lo desglosa. -->
-<div class="sec sg-mod" id="sec-sg-pisos">
-  <div class="ph">
-    <div><div class="ph-t">🏢 San Gerónimo · Pisos</div>
-      <div class="ph-s">Dónde está cada partida, y cuánto hay en cada lugar</div></div>
-    <div style="display:flex;gap:8px;flex-wrap:wrap">
-      <select id="sg-pi-filtro" onchange="sgPiLoad()" style="padding:6px 8px;border-radius:6px;border:1px solid var(--bor);background:var(--card,#fff)">
-        <option value="">Todos los pisos</option>
-      </select>
-      <button class="btn bo" onclick="sgPiImprimir()" title="La hoja para contar contra ella">🖨️ Imprimir</button>
-      <button class="btn bo" onclick="sgPiAdmin()">⚙️ Administrar</button>
-    </div>
-  </div>
-  <div id="sg-pi-tot" style="margin-bottom:12px"></div>
-  <div id="sg-pi-cuerpo"><div class="emp">Cargando…</div></div>
-</div>
-
 <!-- ── ADMINISTRAR LOS PISOS ────────────────────────────────────────────── -->
 <div class="ab-modal-overlay" id="sg-piadm-modal">
   <div class="ab-modal" style="max-width:min(680px,96vw)">
@@ -15135,7 +15139,11 @@ function sgLoadStock(){
         +'<td style="text-align:center">'+sgSemDot(l.semaforo)+'</td>'
         +'<td>'+esc(l.producto_nombre||'')+(esGranel?' <span class="bdg bpe" style="font-size:10px" title="Granel: no se vende directo, va a reproceso">granel</span>':'')+'</td>'
         +'<td>'+esc(l.producto_familia||'—')+'</td>'
-        +'<td style="text-align:right">'+nr(l.kg_disponibles!=null?l.kg_disponibles:l.kg_reales)+'</td>'
+        // EL CONTEO SE HACE POR BULTO. El kilo queda abajo en chico: sigue
+        // haciendo falta para lo que se vende por peso, pero el número que se
+        // cuenta contra la estiba es el cajón. El granel no tiene bulto —no
+        // está encajonado— así que ahí manda el kilo.
+        +'<td style="text-align:right">'+sgStockBultosCell(l)+'</td>'
         // DÓNDE ESTÁ. Si está repartida se ven los dos lugares; si nadie la
         // ubicó, se dice — es lo que hay que ir a acomodar, no un dato que falta.
         +'<td style="font-size:11.5px">'+(l.pisos
@@ -15150,6 +15158,32 @@ function sgLoadStock(){
           +'<button class="btn bo bs" onclick="event.stopPropagation();sgLoteVer('+l.id+')">🔍</button></td></tr>';
     }).join('') : '<tr><td colspan="10" class="emp">Sin lotes con esos filtros.</td></tr>';
   });
+}
+
+// Bultos arriba, kilos abajo en chico. Si la partida es granel (sin kg/bulto)
+// no hay cajón que contar y manda el kilo.
+function sgStockBultosCell(l){
+  var kg = (l.kg_disponibles!=null?l.kg_disponibles:l.kg_reales);
+  var b  = l.bultos_disponibles;
+  if (b == null) {
+    return '<b>'+nr(kg)+'</b><div style="font-size:10px;color:var(--mut)">kg · granel</div>';
+  }
+  return '<b>'+nr(Math.floor(b))+'</b>'
+    + '<div style="font-size:10px;color:var(--mut)">'+nr(kg)+' kg</div>';
+}
+
+// ── LAS DOS SOLAPAS DEL STOCK ────────────────────────────────────────────
+// Pisos era una pantalla aparte. Se plegó acá: preguntarle al stock QUÉ hay y
+// tener que ir a otro lado a preguntar DÓNDE ESTÁ era partir en dos la misma
+// respuesta.
+function sgStockTab(cual){
+  var esPisos = (cual === 'pisos');
+  eid('sg-st-tab-partidas').style.display = esPisos ? 'none' : '';
+  eid('sg-st-tab-pisos').style.display    = esPisos ? '' : 'none';
+  var a = eid('sg-st-tb-partidas'), b = eid('sg-st-tb-pisos');
+  if (a) a.className = esPisos ? 'btn bo' : 'btn bb';
+  if (b) b.className = esPisos ? 'btn bb' : 'btn bo';
+  if (esPisos) sgPiLoad();
 }
 
 function sgLoteVer(id){
@@ -26820,7 +26854,10 @@ function loadSec(s) {
     // Las dos que salieron de Salidas. sgLoadCaches primero: los selectores de
     // cliente se llenan con sgCliOpts(), que lee de esa caché.
     'sg-vta-comprobantes': function(){ sgLoadCaches(function(){ sgFacListInit(); }); },
-    'sg-pisos':            function(){ sgPiLoad(); },
+    // Pisos se plegó adentro de Stock. El módulo sigue vivo como PERMISO, así
+    // que si alguien llega por esa vía —un favorito viejo, una sesión guardada—
+    // se lo deposita en la solapa correcta y no en una pantalla que ya no está.
+    'sg-pisos':            function(){ sgStockInit(); sgStockTab('pisos'); },
     'sg-pedidos':          function(){ sgLoadCaches(function(){ sgLoadPedidos(); }); },
     // sgFacInit va JUNTO: el editor de comprobante ahora vive acá adentro y
     // necesita el selector de clientes y el de puntos de venta cargados.

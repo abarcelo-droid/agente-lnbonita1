@@ -155,7 +155,10 @@ const PREFIJOS = [
   // recepción a su propio prefijo, y eso se mide y se hace aparte. Lo que esto
   // separa hoy es la PANTALLA y quién ve la plata.
   ['sg-ordenes',         'sg/oc,sg/facturas-compra'],
-  ['sg-stock',           'sg/lotes,sg/disponibilidad,sg/decomisos'],
+  // 'sg/pisos' y 'sg/stock-pisos' entran acá porque Pisos se plegó adentro de
+  // Stock como solapa. Quedan declaradas TAMBIÉN bajo sg-pisos —el módulo se
+  // escondió pero no se borró— para no sacarle el acceso a quien ya lo tenía.
+  ['sg-stock',           'sg/lotes,sg/disponibilidad,sg/decomisos,sg/pisos,sg/stock-pisos'],
   // Los pisos son la apertura del stock: quien administra el stock los maneja,
   // y la pantalla propia tambien.
   ['sg-pisos',           'sg/pisos,sg/stock-pisos'],
