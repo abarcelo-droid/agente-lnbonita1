@@ -184,7 +184,13 @@ const PREFIJOS = [
   // 'sg/facturas' no pisa a 'sg/facturas-compra': el prefijo matchea por
   // segmento completo, y /api/sg/facturas-compra/9 no empieza con
   // /api/sg/facturas/.
-  ['sg-ventas',          'sg/despachos,sg/pedidos,sg/ventas,sg/ventas/facturas,sg/despachos-pendientes,sg/facturas,sg/facturable'],
+  //
+  // 'sg/ventas/cobranzas' y 'sg/ventas/liquidaciones' faltaban y son dos rebotes
+  // vivos, no hipótesis: el que factura en ventanilla desde Salidas emitía el
+  // comprobante fiscal y la plata NO entraba (el prefijo era sólo de CC clientes),
+  // y el botón "Recibir liquidación" se ofrece a quien tenga Salidas pero el 403
+  // llegaba después de cargarla entera.
+  ['sg-ventas',          'sg/despachos,sg/pedidos,sg/ventas,sg/ventas/facturas,sg/ventas/cobranzas,sg/ventas/liquidaciones,sg/despachos-pendientes,sg/facturas,sg/facturable'],
   ['sg-vta-comprobantes', 'sg/ventas/facturas'],
   // EL EDITOR DE COMPROBANTE SE MUDÓ ACÁ ADENTRO, así que sus direcciones tienen
   // que colgar de esta pantalla: quien tenga sólo Remitos pendientes tildado
@@ -403,12 +409,32 @@ const LECTURA = [
   // esto el selector se abre VACÍO para el que no tenga además Stock — que es el
   // dueño de /sg/disponibilidad—. Va en api_lectura y no en api_prefijos porque
   // el selector sólo LEE: la mercadería la mueve el remito, no el selector.
+  // ── Y DESDE QUE LAS VENTAS SON LECTURA CONTROLADA ──────────────────────
+  // Cada pantalla que LEE algo de otra tiene que decirlo acá, o se abre vacía y
+  // sin mensaje: el panel trata el 403 como "no hay datos".
+  //
+  // LA TRAMPA QUE NO ESTÁ ESCRITA EN NINGÚN LADO: declarar un prefijo MÁS LARGO
+  // no agrega un lector, REEMPLAZA el juego de dueños de esa dirección.
+  // modulosDeRuta() se queda con el largo máximo y descarta el resto. En cuanto
+  // 'sg/ventas/facturas-sin-asiento' se le declara a sg-vta-comprobantes,
+  // sg-ventas —que hasta ese segundo ganaba esa dirección con 'sg/ventas'— deja
+  // de ser dueño y come 403. Por eso figura en las DOS filas aunque la pantalla
+  // de Salidas no la llame.
   ['sg-pedidos',            'sg/oferta,sg/disponibilidad'],
-  ['sg-ventas',             'sg/oferta,sg/disponibilidad'],
-  ['sg-facturar',           'sg/oferta,sg/disponibilidad'],
-  ['sg-vta-comprobantes',   'sg/oferta,sg/disponibilidad'],
-  ['sg-remitos-pend',       'sg/oferta,sg/disponibilidad'],
+  ['sg-ventas',             'sg/oferta,sg/disponibilidad,sg/ventas/facturas-sin-asiento,sg/contable/puntos-venta'],
+  ['sg-facturar',           'sg/oferta,sg/disponibilidad,sg/ventas/facturas'],
+  ['sg-vta-comprobantes',   'sg/oferta,sg/disponibilidad,sg/ventas/facturas-sin-asiento'],
+  ['sg-remitos-pend',       'sg/oferta,sg/disponibilidad,sg/ventas/facturas,sg/contable/puntos-venta'],
   ['sg-stock',              'sg/oferta'],
+  // ESTO YA ESTABA ROTO, sin relación con el cierre de ventas: '/api/sg/contable'
+  // es lectura controlada desde antes, y el selector de punto de venta lo llenan
+  // Salidas y Remitos pendientes, que no lo tenían declarado. Para el que no es
+  // admin el selector decía "no hay puntos de venta cargados": no podía facturar
+  // y se lo mandaba a parametrizar algo que estaba bien.
+  //
+  // La ficha de cuenta corriente abre el detalle de cada comprobante para mostrar
+  // qué se vendió. Sólo LEE: los comprobantes los emite Salidas.
+  ['sg-cc-clientes',        'sg/ventas/facturas'],
 ];
 
 try {

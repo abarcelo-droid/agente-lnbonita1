@@ -302,6 +302,35 @@ const LECTURA_CONTROLADA = new Set([
   // declarada en api_lectura (ensure_api_prefijos.js), que da leer y no escribir.
   '/api/sg/oferta',
   '/api/sg/disponibilidad',
+  // ── LAS VENTAS DE SAN GERÓNIMO ─────────────────────────────────────────
+  // La cuenta corriente de cada cliente con su CUIT, el libro de ventas entero
+  // en Excel, las facturas, las liquidaciones, las cobranzas y el PDF de
+  // cualquier comprobante. Todo eso pedía sesión y nada más: el menú escondía
+  // la pantalla y la dirección se escribía igual.
+  //
+  // Se cierra '/api/sg/ventas' entero y no dirección por dirección: cubre
+  // facturas, facturas-sin-asiento, cc, cobranzas, liquidaciones y modelo-venta
+  // de una sola vez, y así ninguna sub-dirección queda afuera por la trampa de
+  // abajo. Se relevaron los 24 llamados del panel y los 24 tienen dueño
+  // declarado.
+  '/api/sg/ventas',
+  // Los remitos: qué salió, para quién y a cuánto.
+  '/api/sg/despachos',
+  // OJO — NO la cubre la de arriba. El prefijo matchea por SEGMENTO COMPLETO
+  // (`limpia === p || limpia.startsWith(p + '/')`), y '/api/sg/despachos-pendientes'
+  // no empieza con '/api/sg/despachos/'. Sin este renglón la lista de remitos
+  // sin facturar queda abierta y se cree cerrada, que es peor que saberla abierta.
+  '/api/sg/despachos-pendientes',
+  // El mismo dato que despachos-pendientes pero por cliente: es la puerta
+  // gemela. Cerrar una sin la otra no cierra nada.
+  '/api/sg/facturable',
+  '/api/sg/pedidos',
+  // La cuenta corriente de clientes con saldos. '/api/sg/ventas/cc' ya queda
+  // cubierta por '/api/sg/ventas'; ésta cuelga de otra raíz y va aparte.
+  '/api/sg/cc-clientes',
+  // Y NO va '/api/sg' pelado: apagaría doscientas rutas del router compartido,
+  // incluidas las siete que sgLoadCaches() pide al abrir CUALQUIER pantalla de
+  // San Gerónimo. El panel entero se quedaría sin desplegables.
 ]);
 
 // Cuando una pantalla necesita LEER algo de otro módulo. Va aparte de
