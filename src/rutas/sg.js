@@ -52,8 +52,19 @@ import { emitir as afipEmitir } from '../servicios/afip-wsfe-emision.js';
 import { exigirEmpresa, SAN_GERONIMO } from '../servicios/sociedad_modulo.js';
 
 import { chequeUsado, puedeMoverCuenta } from './sg_tesoreria.js';
+import { filtrarCosto, puedeVerCosto } from '../servicios/sg_costo_visible.js';
 
 const router = express.Router();
+
+// ── EL COSTO DE COMPRA NO SALE PARA CUALQUIERA ────────────────────────────
+// Pablo, 26/8/2026: «el vendedor ve a cuánto compramos». Se saca de TODAS las
+// lecturas de este router de una vez y no endpoint por endpoint: el arreglo que
+// se le había hecho a /oferta —sacarle el costo del SELECT— se salteaba pidiendo
+// /lotes-disponibles, que devolvía las mismas partidas con el costo puesto.
+//
+// La regla vive en servicios/sg_costo_visible.js. Al que tiene un módulo donde el
+// costo ES el trabajo no le cambia nada.
+router.use(filtrarCosto);
 
 // ── EL CERROJO DE EMPRESA, CONECTADO ──────────────────────────────────────
 // Corre ANTES que cualquier endpoint de este router. Si el pedido viene con OTRA
@@ -11020,7 +11031,13 @@ function semanaIso(iso) {
   return 1 + Math.round((d - ene4) / 604800000);
 }
 
+// El Excel lleva el costeo de cada camión y sale por res.send, así que el filtro
+// de arriba —que envuelve res.json— no lo ve. Se pide el permiso a mano: un
+// archivo que se baja y circula por mail es peor que una pantalla.
 router.get('/embarques/export', requireAuth, (req, res) => {
+  if (!puedeVerCosto(req.user)) {
+    return res.status(403).json({ ok: false, error: 'Este informe lleva el costo de cada camión.' });
+  }
   const db = getDb();
   try {
     const soloId = req.query.embarque_id ? Number(req.query.embarque_id) : null;
