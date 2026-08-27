@@ -390,7 +390,7 @@ router.get('/chequeras/:id/proximo', (req, res) => {
 // control de niveles reconoce la anulación por la URL: con /estado, alguien con
 // nivel "operar" anulaba un cheque igual que si lo estuviera editando.
 // El número NO se libera: un cheque roto no vuelve al talonario.
-router.post('/cheques-propios/:id/anular', requireAdmin, (req, res) => {
+router.post('/cheques-propios/:id/anular', requireAuth, (req, res) => {
   try {
     const c = db.prepare('SELECT * FROM sg_fin_cheques_propios WHERE id=?').get(req.params.id);
     if (!c) return res.status(404).json({ ok: false, error: 'Cheque no encontrado' });
