@@ -40,13 +40,17 @@ test('al abrir el campo se ve la lista ENTERA, no un «ningún cliente dice»', 
   // matchea ninguno de los dos. Resultado: "Ningún cliente dice …" sobre una
   // lista llena. Si el texto es exactamente la etiqueta del elegido, no es una
   // búsqueda — es lo que quedó de la vez anterior.
+  // El buscador se generalizo (sgBuscador) para servir tambien a proveedores: la
+  // etiqueta y la fuente ahora vienen por configuracion, pero la regla es la misma.
   const i = PANEL.indexOf('var pintar = function(){');
   assert.ok(i > 0);
-  const b = PANEL.slice(i, i + 1600);
-  assert.match(b, /String\(inp\.value \|\| ''\) === sgCliLabel\(elegido\)/);
+  const b = PANEL.slice(i, i + 1800);
+  assert.match(b, /String\(inp\.value \|\| ''\) === cfg\.etiqueta\(elegido\)/);
   assert.match(b, /inp\.select\(\)/, 'y si escribe, que reemplace en vez de agregar');
   // La lista completa, no la filtrada.
-  assert.match(b, /\(SG\.cacheCli \|\| \[\]\)\.slice\(0, 60\)/);
+  assert.match(b, /dibujar\(todos\.slice\(0, 60\)\)/);
+  // Y el de clientes sigue siendo el mismo control, con su etiqueta.
+  assert.match(PANEL, /etiqueta: sgCliLabel,/);
 });
 
 // ── EL ASIENTO, PARA TODA LA ADMINISTRACIÓN ────────────────────────────────
