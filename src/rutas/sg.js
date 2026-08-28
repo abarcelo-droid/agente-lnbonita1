@@ -5730,8 +5730,17 @@ router.get('/oc/:id/items-sin-orden', requireAuth, (req, res) => {
   try {
     const items = db.prepare(`SELECT i.id, i.producto_id, i.kg_estimados, i.precio_estimado_por_kg,
         pr.nombre AS producto_nombre,
-        (SELECT COUNT(*) FROM sg_lotes l WHERE l.oc_item_id = i.id AND l.activo = 1) AS bultos
-      FROM sg_oc_items i LEFT JOIN sg_productos pr ON pr.id = i.producto_id
+        -- CÓMO SE PACTÓ, para poder pedir el precio en esa unidad. Sin esto la
+        -- pantalla no tiene con qué y cae siempre en el kilo.
+        i.modo_carga,
+        COALESCE(i.kg_por_bulto, ps.factor_conversion) AS kg_por_bulto,
+        -- LOS CAJONES QUE ENTRARON, no cuántos lotes se cargaron. Acá había un
+        -- COUNT(*) de sg_lotes: una descarga de 90 cajones partida en dos
+        -- calidades decía «2 bulto(s)».
+        (SELECT COALESCE(SUM(l.bultos),0) FROM sg_lotes l WHERE l.oc_item_id = i.id AND l.activo = 1) AS bultos
+      FROM sg_oc_items i
+      LEFT JOIN sg_productos pr ON pr.id = i.producto_id
+      LEFT JOIN sg_presentaciones ps ON ps.id = i.presentacion_id
       WHERE i.oc_id = ? ORDER BY i.id`).all(req.params.id);
     res.json({ ok: true, data: items });
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
@@ -6396,7 +6405,10 @@ router.get('/oc/:id/pdf', requireAuth, (req, res) => {
       WHERE o.id=?`).get(req.params.id);
     if (!oc) return res.status(404).json({ ok: false, error: 'No encontrado' });
     oc.items = db.prepare(`SELECT i.*, pr.codigo AS producto_codigo, pr.nombre AS producto_nombre,
-        pr.variedad AS producto_variedad, ps.nombre AS presentacion_nombre
+        pr.variedad AS producto_variedad, ps.nombre AS presentacion_nombre,
+        -- El factor, para que el papel muestre el precio en la unidad en que se
+        -- pactó: con cajones, «$/kg» es un número que el productor nunca dio.
+        COALESCE(i.kg_por_bulto, ps.factor_conversion) AS kg_por_bulto_efectivo
       FROM sg_oc_items i
       LEFT JOIN sg_productos pr ON pr.id=i.producto_id
       LEFT JOIN sg_presentaciones ps ON ps.id=i.presentacion_id
@@ -7053,15 +7065,35 @@ router.post('/compra-retroactiva', requireAuth, (req, res) => {
         ocId, numeroRec, fechaIngreso, b.recibido_por || null, val(b.numero_remito_proveedor), val(b.observaciones), uid(req));
       const recId = recInfo.lastInsertRowid;
 
+      // ── LA UNIDAD EN QUE ENTRÓ, GUARDADA ────────────────────────────
+      //
+      // Pablo, 28/8/2026: «esta partida ingresó con bulto; por qué cuando voy a
+      // cerrar precio se lo tengo que cerrar por kilo».
+      //
+      // ACÁ ESTABA LA RAÍZ de que le saliera todo por kilo. La descarga sin
+      // orden guardaba los cajones y los kilos por bulto EN EL LOTE, pero no
+      // escribía modo_carga ni kg_por_bulto en el ítem de la orden — que es de
+      // donde todo el módulo lee en qué unidad se pactó. Quedaban en NULL, y con
+      // NULL cada pantalla adivina: la deuda con el productor la calcula por
+      // cajón y la liquidación la pide por kilo, sobre la misma partida.
+      //
+      // Si vino con cajones, se pactó por cajón. No hay nada que adivinar.
       const insItem = db.prepare(`INSERT INTO sg_oc_items
-        (oc_id, producto_id, presentacion_id, cantidad_estimada_presentaciones, kg_estimados, precio_estimado_por_kg, observaciones_item)
-        VALUES (?,?,?,?,?,?,?)`);
+        (oc_id, producto_id, presentacion_id, cantidad_estimada_presentaciones, kg_estimados,
+         precio_estimado_por_kg, observaciones_item, modo_carga, kg_por_bulto)
+        VALUES (?,?,?,?,?,?,?,?,?)`);
       let totKg = 0, totMonto = 0;
       for (const it of items) {
         const lotes = Array.isArray(it.lotes) ? it.lotes : [];
         const kgItem = lotes.reduce((a, l) => a + Number(l.kg_reales || 0), 0);
         const precio = tipoPrecio === 'pizarra' ? null : (it.precio_por_kg != null ? Number(it.precio_por_kg) : null);
-        const itInfo = insItem.run(ocId, it.producto_id, it.presentacion_id || null, lotes.length, kgItem, precio, val(it.observaciones_item));
+        // Los cajones y el factor salen de los lotes, que es donde el que
+        // descargó los contó.
+        const bltItem = lotes.reduce((a, l) => a + (Number(l.bultos) || 0), 0);
+        const kpbLote = lotes.map((l) => Number(l.kg_por_bulto) || 0).filter((x) => x > 0)[0] || null;
+        const kpbItem = kpbLote || (bltItem > 0 && kgItem > 0 ? Math.round((kgItem / bltItem) * 1e6) / 1e6 : null);
+        const modo = bltItem > 0 ? 'bulto' : 'kilo';
+        const itInfo = insItem.run(ocId, it.producto_id, it.presentacion_id || null, lotes.length, kgItem, precio, val(it.observaciones_item), modo, kpbItem);
         const ocItem = { id: itInfo.lastInsertRowid, producto_id: it.producto_id, precio_estimado_por_kg: precio, presentacion_id: it.presentacion_id || null };
         crearLotesDeItem(db, { recepcionId: recId, ocItem, tipoPrecio, fechaIngreso, lotes, userId: uid(req), req });
         totKg += kgItem;

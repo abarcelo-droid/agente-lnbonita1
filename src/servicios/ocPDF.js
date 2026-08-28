@@ -106,7 +106,9 @@ export function generarOcPDF(oc) {
   doc.text('Presentación', 96, y + 5.3);
   doc.text('Cant.', 132, y + 5.3, { align: 'right' });
   doc.text('Kg est.', 150, y + 5.3, { align: 'right' });
-  doc.text('$/kg', 168, y + 5.3, { align: 'right' });
+  // EL PRECIO, EN LA UNIDAD EN QUE SE PACTÓ. Decía «$/kg» siempre, y una orden
+  // cerrada por cajón le mostraba al productor un número que él nunca dio.
+  doc.text('Precio', 168, y + 5.3, { align: 'right' });
   doc.text('Subtotal', 193, y + 5.3, { align: 'right' });
   doc.setTextColor(0, 0, 0);
   y += 11;
@@ -115,14 +117,22 @@ export function generarOcPDF(oc) {
   items.forEach(function (it, i) {
     if (i % 2 === 0) { doc.setFillColor(...AZUL_CL); doc.rect(14, y - 4, 182, 7, 'F'); }
     const nombre = String(it.producto_nombre || '') + (it.producto_variedad ? (' ' + it.producto_variedad) : '');
-    const precio = it.precio_estimado_por_kg;
-    const sub = (precio != null) ? Number(it.kg_estimados || 0) * Number(precio) : null;
+    // La unidad del renglón. El precio se guarda por kilo; el papel lo muestra
+    // como se habló, y el subtotal se arma con esa misma unidad — con cajones,
+    // kg × $/kg no da lo que se le va a pagar.
+    const kpb = Number(it.kg_por_bulto_efectivo || it.kg_por_bulto) || 0;
+    const porBulto = it.modo_carga === 'bulto' && kpb > 0;
+    const pk = it.precio_estimado_por_kg;
+    const precio = (pk != null && porBulto) ? Number(pk) * kpb : pk;
+    const bultos = Number(it.cantidad_estimada_presentaciones) || 0;
+    const sub = (pk == null) ? null
+      : (porBulto ? bultos * Number(pk) * kpb : Number(it.kg_estimados || 0) * Number(pk));
     doc.text(String(it.producto_codigo || '—'), 17, y);
     doc.text(nombre.slice(0, 34), 38, y);
     doc.text(String(it.presentacion_nombre || '—').slice(0, 20), 96, y);
     doc.text(nr(it.cantidad_estimada_presentaciones), 132, y, { align: 'right' });
     doc.text(nr(it.kg_estimados), 150, y, { align: 'right' });
-    doc.text(precio != null ? money(precio) : '—', 168, y, { align: 'right' });
+    doc.text(precio != null ? (money(precio) + (porBulto ? '/blt' : '/kg')) : '—', 168, y, { align: 'right' });
     doc.text(sub != null ? money(sub) : '—', 193, y, { align: 'right' });
     y += 7;
   });
