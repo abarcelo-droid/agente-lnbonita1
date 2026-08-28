@@ -232,8 +232,23 @@ function ruta(filtros){
 }
 
 var DIM_LABEL = { cliente:'Cliente', producto:'Producto', articulo:'Artículo',
-  categoria:'Categoría', subcategoria:'Subcategoría', vendedor:'Vendedor',
-  proveedor:'Proveedor', cate_clie:'Rubro' };
+  categoria:'Categoría de producto', subcategoria:'Subcategoría', vendedor:'Vendedor',
+  proveedor:'Proveedor', cate_clie:'Categoría de cliente' };
+// El nombre corto, para los chips: "Categoría de producto" no entra en una pastilla.
+var DIM_CORTO = { cliente:'Cliente', producto:'Producto', articulo:'Artículo',
+  categoria:'Cat. producto', subcategoria:'Subcategoría', vendedor:'Vendedor',
+  proveedor:'Proveedor', cate_clie:'Cat. cliente' };
+
+// LAS PUERTAS DE ENTRADA. Cada una lista una dimensión, y al tocar un ítem se abre por la
+// que sigue: una categoría de cliente se abre en sus clientes, un vendedor en los clientes
+// a los que le vende, un proveedor en los productos que nos trae. Es lo que uno pregunta al
+// entrar por cada lado, y por eso no hay un único camino: hay cuatro.
+var PUERTAS = [
+  { d:'cate_clie', ic:'🏷️', t:'Categoría de cliente', s:'y adentro, cada cliente' },
+  { d:'categoria', ic:'🥬', t:'Categoría de producto', s:'y adentro, cada producto' },
+  { d:'vendedor',  ic:'👤', t:'Vendedores',            s:'a qué cliente le vende cada uno' },
+  { d:'proveedor', ic:'🚚', t:'Proveedores',           s:'qué producto nos trae cada uno' },
+];
 // Al entrar a algo, por qué abrirlo. Un cliente se abre por producto y un producto por
 // cliente: es lo que se pregunta el 90% de las veces, y las otras están en los chips.
 var DIM_SIGUIENTE = { cliente:'producto', producto:'cliente', articulo:'cliente',
@@ -283,7 +298,11 @@ PANTALLAS.inicio = async function(){
       + kpi('Facturación de '+esc(mesTxt(v.mes)), usd(A.usd||0),
           pctTxt(R.var_usd_pct, contra) + ' · antes ' + usd(B.usd||0))
       + kpi('Kilos de '+esc(mesTxt(v.mes)), kg(A.kilos||0),
-          pctTxt(R.var_kilos_pct, contra) + ' · antes ' + kg(B.kilos||0));
+          pctTxt(R.var_kilos_pct, contra) + ' · antes ' + kg(B.kilos||0))
+      // El precio promedio y cuántos clientes: son los otros dos números del mes, y no
+      // merecen tarjeta propia — pero sin ellos "los totales del mes" quedan a medias.
+      + kpi('Precio promedio', (A.kilos ? usd(Math.round((A.usd||0)/A.kilos*100)/100) : '—'),
+          'por kilo · ' + nr(A.clientes||0) + ' cliente(s) en el mes');
 
     // La rentabilidad, si el nivel alcanza. El servidor decide: si no puede verla, no viene
     // en la respuesta y acá no se dibuja. Una sola regla, la del panel.
@@ -301,7 +320,25 @@ PANTALLAS.inicio = async function(){
     }
     h += '</div>';
 
-    // La botonera.
+    // ── LAS PUERTAS DE ENTRADA ────────────────────────────────────────────────────
+    // Cuatro formas de entrar al mismo mes, y cada una responde una pregunta distinta. No
+    // hay un camino único porque no hay una única pregunta: el comercial entra por cliente,
+    // el que compra por proveedor, y el que mira el negocio por categoría.
+    h += '<div class="sec"><h2>Entrar por <small>tocá para abrir</small></h2>'
+      + PUERTAS.map(function(p){
+          return '<button class="fila" onclick="ir(\'lista\',{agrupar:\''+p.d+'\',filtros:{}},'
+            + JSON.stringify(p.t).replace(/"/g,'&quot;')+',\'ordenados por cuánto movieron\')">'
+            + '<span style="font-size:19px;flex-shrink:0">'+p.ic+'</span>'
+            + '<div class="nom">'+esc(p.t)+'<small>'+esc(p.s)+'</small></div>'
+            + '<span class="fl">›</span></button>'; }).join('')
+      // El cliente suelto también, que es por donde se entra más seguido.
+      + '<button class="fila" onclick="ir(\'lista\',{agrupar:\'cliente\',filtros:{}},\'Clientes\',\'ordenados por cuánto movieron\')">'
+        + '<span style="font-size:19px;flex-shrink:0">🛒</span>'
+        + '<div class="nom">Clientes<small>todos, sin agrupar por categoría</small></div>'
+        + '<span class="fl">›</span></button>'
+      + '</div>';
+
+    // Las tres secciones, abajo y como botones grandes.
     h += '<div class="menu">'
       + '<button onclick="ir(\'lista\',{agrupar:\'cliente\',filtros:{}},\'Interanual\',\'por cliente\')">'
         + '<span class="ic">📈</span>Interanual<small>quién sube y baja</small></button>'
@@ -311,14 +348,6 @@ PANTALLAS.inicio = async function(){
         + '<span class="ic">🪟</span>Ventanas<small>quién nos trae</small></button>'
       + '</div>';
 
-    // Un adelanto de lo que más se movió, ya tocable: para el que abre la app y no quiere
-    // elegir nada.
-    var imp = function(f){ return f.impacto!=null ? f.impacto : ((f.usd_act||0)-(f.usd_ant||0)); };
-    var top = (d.filas||[]).slice().sort(function(a,b){ return Math.abs(imp(b))-Math.abs(imp(a)); }).slice(0,5);
-    if (top.length) {
-      h += '<div class="sec"><h2>Lo que más se movió <small>tocá para ver el detalle</small></h2>'
-        + top.map(function(f){ return filaClave(f, 'cliente', {}); }).join('') + '</div>';
-    }
     $('cuerpo').innerHTML = h;
     $('pie-sync').textContent = (d.sync && d.sync.ultimo_ok) || '—';
   } catch(e){ error(e); }
@@ -370,10 +399,10 @@ PANTALLAS.lista = async function(a){
       + '</div></div></div>';
 
     // Por qué dimensión abrir. Sin esto, el camino sería siempre el mismo.
-    h += '<div class="dims">' + ['cliente','producto','articulo','categoria','vendedor','proveedor']
+    h += '<div class="dims">' + ['cliente','producto','cate_clie','categoria','articulo','vendedor','proveedor']
       .filter(function(k){ return !(a.filtros||{})[k]; })
       .map(function(k){
-        return '<button class="'+(k===a.agrupar?'on':'')+'" onclick="reAgrupar(\''+k+'\')">'+esc(DIM_LABEL[k])+'</button>'; })
+        return '<button class="'+(k===a.agrupar?'on':'')+'" onclick="reAgrupar(\''+k+'\')">'+esc(DIM_CORTO[k]||DIM_LABEL[k])+'</button>'; })
       .join('') + '</div>';
 
     var filas = d.filas||[];
