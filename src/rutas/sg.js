@@ -8694,9 +8694,27 @@ const postRemito = (req, res) => {
       // FASE 2 — si se asignó cooperativa, queda una CARGA DE SALIDA pendiente (cobra por bulto).
       // El despacho es kg-based y no captura bultos por línea → se usa el total de bultos que
       // carga el operador (cooperativa_bultos); como fallback, la suma de presentaciones (si la hubiera).
-      const coopId = b.cooperativa_id ? Number(b.cooperativa_id) : null;
+      // ── LA CUADRILLA QUE CARGA SALE DEL CATÁLOGO DE COOPERATIVAS ────
+      //
+      // Pablo, 28/8/2026: «acá debería tomar sólo los que están dados de alta en
+      // cooperativas».
+      //
+      // Acá se ofrecían TODOS los proveedores. La recepción ya se había
+      // arreglado —elige del catálogo y de ahí saca a quién se le paga— y el
+      // remito quedó con la lista vieja: se podía elegir de cuadrilla de carga a
+      // un proveedor de tomates.
+      //
+      // Se sigue aceptando el proveedor suelto para no romper lo que ya esté
+      // cargado, pero lo que manda la pantalla es la cooperativa.
+      const coopCatId = b.cooperativa_catalogo_id ? Number(b.cooperativa_catalogo_id) : null;
+      let coopId = b.cooperativa_id ? Number(b.cooperativa_id) : null;
+      if (coopCatId) {
+        const c = db.prepare('SELECT id, proveedor_id FROM sg_cooperativas WHERE id=? AND activo=1').get(coopCatId);
+        if (!c) throw new Error('La cooperativa elegida no existe o está dada de baja');
+        coopId = c.proveedor_id;
+      }
       const coopBultos = (b.cooperativa_bultos != null && b.cooperativa_bultos !== '') ? Number(b.cooperativa_bultos) : (totalBultos || null);
-      syncGastoCoop(db, { tipo: 'carga_salida', despachoId, proveedorId: coopId, unidad: 'bulto', cantidad: coopBultos, fechaServicio: val(b.fecha_despacho), userId: uid(req) });
+      syncGastoCoop(db, { tipo: 'carga_salida', despachoId, proveedorId: coopId, cooperativaId: coopCatId, unidad: 'bulto', cantidad: coopBultos, fechaServicio: val(b.fecha_despacho), userId: uid(req) });
       if (b.pedido_id) {
         db.prepare("UPDATE sg_pedidos SET estado='despachado_parcial', modificado_en=datetime('now','localtime') WHERE id=? AND estado IN ('borrador','confirmado')").run(b.pedido_id);
       }
@@ -8706,6 +8724,91 @@ const postRemito = (req, res) => {
   } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
 };
 router.post('/despachos', requireAuth, postRemito);
+
+// ══ CORREGIR EL PRECIO DE UN REMITO YA HECHO ═══════════════════════════════
+//
+// Pablo, 28/8/2026: «en el remito debo poder modificar el precio».
+//
+// Hasta acá el precio quedaba clavado al despachar: para corregirlo había que
+// anular el remito y volver a armarlo entero —eligiendo las mismas partidas, los
+// mismos cajones— por un número mal tipeado. Y el remito anulado devuelve el
+// stock y lo vuelve a sacar, así que un error de tipeo dejaba dos movimientos
+// falsos en la historia de la partida.
+//
+// PERO NO DESPUÉS DE FACTURAR. Ahí el precio ya salió en un comprobante que el
+// cliente tiene: cambiarlo acá dejaría el remito diciendo una cosa y la factura
+// otra, y la cuenta corriente con el número viejo. Para eso está la nota de
+// crédito.
+//
+// El margen se recalcula: es precio menos costo, y si cambia el precio y el
+// margen queda con el número viejo, el informe de rentabilidad miente.
+router.put('/despachos/:id/precios', requireAuth, express.json(), (req, res) => {
+  const db = getDb();
+  try {
+    const d = db.prepare('SELECT * FROM sg_despachos WHERE id=? AND activo=1').get(req.params.id);
+    if (!d) return res.status(404).json({ ok: false, error: 'Remito no encontrado' });
+
+    // ¿Ya se facturó? El puente es sg_factura_despachos, y sólo cuentan las
+    // facturas vivas: una acreditada dejó la mercadería entregada sin documentar
+    // y ahí el precio se puede volver a poner.
+    const fac = db.prepare(`SELECT f.punto_venta, f.cbte_nro FROM sg_factura_despachos fd
+      JOIN sg_despacho_items di ON di.id = fd.despacho_item_id
+      JOIN sg_ven_facturas f ON f.id = fd.factura_id
+      WHERE di.despacho_id = ? AND ${facturaCuenta('f')} AND ${noEsNotaDeCredito('f')}
+      ORDER BY f.id DESC LIMIT 1`).get(d.id);
+    if (fac) {
+      return res.status(409).json({ ok: false, error:
+        'Este remito ya se facturó' + (fac.punto_venta != null && fac.cbte_nro != null
+          ? ' con el comprobante ' + fac.punto_venta + '-' + fac.cbte_nro : '')
+        + '. El precio salió en un papel que el cliente tiene: cambiarlo acá dejaría el remito '
+        + 'diciendo una cosa y la factura otra. Se corrige con una nota de crédito.' });
+    }
+
+    const motivo = val(req.body && req.body.motivo);
+    if (!motivo || motivo.length < 3) {
+      return res.status(400).json({ ok: false, error: 'Escribí por qué cambia el precio: queda registrado' });
+    }
+    const items = db.prepare('SELECT * FROM sg_despacho_items WHERE despacho_id=?').all(d.id);
+    const porId = new Map(items.map((i) => [Number(i.id), i]));
+    const pedidos = (Array.isArray(req.body.items) ? req.body.items : [])
+      .map((x) => ({ id: Number(x.item_id), precio: Number(x.precio_por_kg) }))
+      .filter((x) => x.id > 0 && Number.isFinite(x.precio) && x.precio >= 0);
+    if (!pedidos.length) return res.status(400).json({ ok: false, error: 'No mandaste ningún precio.' });
+    for (const p of pedidos) {
+      if (!porId.has(p.id)) {
+        return res.status(400).json({ ok: false, error: 'El renglón ' + p.id + ' no es de este remito.' });
+      }
+    }
+
+    let cambiados = 0;
+    db.transaction(() => {
+      for (const p of pedidos) {
+        const it = porId.get(p.id);
+        const antes = Number(it.precio_por_kg) || 0;
+        if (Math.abs(antes - p.precio) < 0.000001) continue;
+        const kg = Number(it.kg_despachados) || 0;
+        const subtotal = kg * p.precio;
+        // EL MARGEN SE REHACE. El costo por kilo sale del que quedó guardado en
+        // el renglón: es el de la partida al momento de despachar, y ése no
+        // cambia porque cambie el precio de venta.
+        const costoKg = (Number(it.margen_estimado) != null && kg > 0 && antes > 0)
+          ? ((antes * kg) - Number(it.margen_estimado)) / kg : null;
+        const margen = (it.margen_estimado == null || costoKg == null)
+          ? it.margen_estimado : (subtotal - kg * costoKg);
+        db.prepare('UPDATE sg_despacho_items SET precio_por_kg=?, subtotal=?, margen_estimado=? WHERE id=?')
+          .run(p.precio, subtotal, margen, p.id);
+        anotarEdicion(db, { tabla: 'sg_despacho_items', registroId: p.id, campo: 'precio_por_kg',
+          antes: antes, despues: p.precio, motivo, userId: uid(req) });
+        cambiados++;
+      }
+      db.prepare("UPDATE sg_despachos SET modificado_en=datetime('now','localtime'), modificado_por=? WHERE id=?")
+        .run(uid(req), d.id);
+    })();
+
+    const tot = db.prepare('SELECT COALESCE(SUM(subtotal),0) s FROM sg_despacho_items WHERE despacho_id=?').get(d.id).s;
+    res.json({ ok: true, data: { id: d.id, cambiados, total: tot } });
+  } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
+});
 
 // Llamar al remito desde adentro, sin dar una vuelta por HTTP. El handler es
 // SÍNCRONO —arma todo y cierra con res.json— así que alcanza con darle un `res`
@@ -8781,6 +8884,15 @@ router.get('/despachos/:id', requireAuth, (req, res) => {
       LEFT JOIN sg_lotes l ON l.id=di.lote_id
       LEFT JOIN sg_productos pr ON pr.id=di.producto_id
       LEFT JOIN sg_presentaciones ps ON ps.id=di.presentacion_id WHERE di.despacho_id=?`).all(req.params.id);
+    // ¿YA SE FACTURÓ? De eso depende que se le pueda corregir el precio: una vez
+    // en un comprobante, el número lo tiene el cliente. Sólo cuentan las
+    // facturas vivas — una acreditada dejó la mercadería entregada sin
+    // documentar, y ahí el precio se vuelve a poder poner.
+    d.facturado = db.prepare(`SELECT COUNT(*) c FROM sg_factura_despachos fd
+      JOIN sg_despacho_items di ON di.id = fd.despacho_item_id
+      JOIN sg_ven_facturas f ON f.id = fd.factura_id
+      WHERE di.despacho_id = ? AND ${facturaCuenta('f')} AND ${noEsNotaDeCredito('f')}`)
+      .get(req.params.id).c > 0 ? 1 : 0;
     // PARTE D — flete de salida (gasto de servicio) ligado al despacho + margen neto.
     d.flete_salida_estado = db.prepare("SELECT estado, monto FROM sg_gastos_directos WHERE despacho_id=? AND tipo_gasto='flete_salida' AND activo=1 AND estado!='anulado' ORDER BY id DESC LIMIT 1").get(req.params.id) || null;
     d.flete_salida = db.prepare("SELECT COALESCE(SUM(monto),0) s FROM sg_gastos_directos WHERE despacho_id=? AND tipo_gasto='flete_salida' AND estado='valorizado' AND activo=1").get(req.params.id).s;
