@@ -19058,7 +19058,22 @@ function sgDespOpen(){
   api('/api/sg/proveedores-servicio').then(function(r){
     var fls=(r&&r.ok)?r.data:[];
     eid('sg-desp-fletero').innerHTML=sgFleteroOpts(fls, '', '— Sin fletero —');
-    eid('sg-desp-coop').innerHTML=sgFleteroOpts(fls, '', '— Sin carga —');
+    // LA CUADRILLA QUE CARGA, DEL CATÁLOGO DE COOPERATIVAS. Acá salían TODOS
+    // los proveedores —se podía elegir de cuadrilla a un proveedor de tomates—,
+    // mientras la recepción ya elegía del catálogo. Es la misma pregunta y tiene
+    // que tener la misma lista.
+    api('/api/sg/cooperativas').then(function(rc){
+      var cps=(rc&&rc.ok)?rc.data:[];
+      var sel=eid('sg-desp-coop'); if(!sel) return;
+      sel.innerHTML='<option value="">— Sin carga —</option>'
+        + cps.map(function(c){
+            return '<option value="'+c.id+'">'+escH(c.nombre)
+              + (c.proveedor_nombre?(' — '+escH(c.proveedor_nombre)):'')+'</option>';
+          }).join('')
+        // Sin cooperativas cargadas no se puede elegir nada, y hay que decir a
+        // dónde ir a darlas de alta en vez de mostrar una lista vacía.
+        + (cps.length?'':'<option value="" disabled>— no hay cooperativas dadas de alta —</option>');
+    });
   });
   sgItemPicker({ modo:'remito', contenedor:'sg-desp-items', onAdd:sgDespOnAdd });
   sgDespRender();
@@ -19175,7 +19190,9 @@ function sgDespGuardar(){
   var body={ cliente_id:Number(cli), pedido_id:eid('sg-desp-ped').value?Number(eid('sg-desp-ped').value):null,
     fecha_despacho:eid('sg-desp-fecha').value, transporte:eid('sg-desp-transp').value,
     fletero_id:eid('sg-desp-fletero').value?Number(eid('sg-desp-fletero').value):null,
-    cooperativa_id:eid('sg-desp-coop').value?Number(eid('sg-desp-coop').value):null,                 // FASE 2 · carga
+    // Es el id del CATÁLOGO, no el del proveedor: el servidor saca de ahí a
+    // quién se le paga, igual que en la recepción.
+    cooperativa_catalogo_id:eid('sg-desp-coop').value?Number(eid('sg-desp-coop').value):null,
     cooperativa_bultos:eid('sg-desp-bultos').value!==''?Number(eid('sg-desp-bultos').value):null,
     chofer:eid('sg-desp-chofer').value, dominio:eid('sg-desp-dominio').value, observaciones:eid('sg-desp-obs').value, items:items };
   api('/api/sg/despachos','POST',body).then(function(r){
@@ -20252,10 +20269,44 @@ function sgCdsValOpen(provId){
   sgGdsValAbrir({ prov:provId, nombre:pend[0].fletero_nombre||'', reload:sgCdsLoad,
     items:pend.map(function(g){ return {id:g.id, ref:sgCdsTipoLbl(g.tipo_gasto)+' · '+(g.operacion_ref||''), sub:g.cliente_nombre||'—', fecha:g.operacion_fecha, base:g.cantidad, unidadLbl:g.unidad||''}; }) });
 }
+// El subtotal se rehace mientras se escribe: es la única forma de ver si el
+// número nuevo es el que se quería antes de guardarlo.
+function sgDespEdUpd(i, valor){
+  if (!SG.despEd || !SG.despEd.items[i]) return;
+  SG.despEd.items[i].precio = Number(valor) || 0;
+  var fila = (SG.despVerItems || [])[i] || {};
+  var kg = Number(fila.kg_despachados) || 0;
+  var c = eid('sg-dpsub-' + i);
+  if (c) c.textContent = sgMoney(kg * SG.despEd.items[i].precio);
+  var t = eid('sg-dped-total');
+  if (t) {
+    var tot = (SG.despEd.items || []).reduce(function(a, x, j){
+      return a + (Number(((SG.despVerItems||[])[j]||{}).kg_despachados)||0) * (Number(x.precio)||0); }, 0);
+    t.textContent = 'Total con los precios nuevos: ' + sgMoney(tot);
+  }
+}
+
+function sgDespEdGuardar(){
+  if (!SG.despEd) return;
+  var motivo = String((eid('sg-dped-motivo')||{}).value || '').trim();
+  if (motivo.length < 3) { toast('Escribí por qué cambia el precio', 'er'); return; }
+  api('/api/sg/despachos/' + SG.despEd.id + '/precios', 'PUT', {
+    motivo: motivo,
+    items: SG.despEd.items.map(function(x){ return { item_id: x.id, precio_por_kg: x.precio }; })
+  }).then(function(r){
+    if (!r || !r.ok) { alert((r && r.error) || 'No se pudo cambiar el precio'); return; }
+    var n = (r.data && r.data.cambiados) || 0;
+    toast(n ? ('Precio actualizado en ' + n + ' renglón(es)') : 'No hubo cambios', 'ok');
+    sgDespVer(SG.despEd.id);
+    sgLoadDespachos();
+  });
+}
+
 function sgDespVer(id){
   Promise.all([api('/api/sg/despachos/'+id), api('/api/sg/despachos/'+id+'/trazabilidad')]).then(function(res){
     var r=res[0]; if(!r||!r.ok) return; var d=r.data;
     var tz=(res[1]&&res[1].ok)?res[1].data:null;
+    SG.despVerItems = d.items || [];   // los kilos, para rehacer el subtotal al escribir
     eid('sg-venver-tit').textContent='Despacho '+(d.numero||'');
     var h='<div style="font-size:13px;margin-bottom:10px">Cliente: <b>'+esc(d.cliente_nombre||'—')+'</b> · '+(SG_ESTDESP[d.estado]||d.estado)+(d.pedido_numero?(' · pedido '+esc(d.pedido_numero)):'')+(d.transporte?(' · '+d.transporte):'')+'</div>';
     // PARTE D + FASE 2 — fletero + flete de salida + carga de cooperativa + margen neto.
@@ -20269,9 +20320,44 @@ function sgDespVer(id){
         +' · Margen neto: <b style="color:'+((d.margen_neto||0)>=0?'#16a34a':'#dc2626')+'">'+sgMoney(d.margen_neto)+'</b>'
         +'</div>';
     }
+    // ── EL PRECIO SE PUEDE CORREGIR ──────────────────────────────────
+    // Pablo, 28/8/2026: «en el remito debo poder modificar el precio».
+    // Antes había que anular el remito y armarlo de nuevo entero por un número
+    // mal tipeado — y anularlo devuelve el stock y lo vuelve a sacar, así que
+    // dejaba dos movimientos falsos en la historia de la partida.
+    SG.despEd = { id: d.id, items: (d.items||[]).map(function(it){
+      return { id: it.id, precio: Number(it.precio_por_kg)||0 }; }) };
+    // sg-ventas es el módulo dueño de sg/despachos, que es el que va a mirar
+    // exigirNivel en el servidor: pedir otro acá ofrecería un botón que rebota.
+    var puedeEd = lnbPuedeOperar('sg-ventas') && !d.facturado;
     h+='<table class="pa-tbl" style="margin-bottom:12px"><thead><tr><th>Lote</th><th>Producto</th><th style="text-align:right">Kg</th><th style="text-align:right">$/kg</th><th style="text-align:right">Subtotal</th><th style="text-align:right">Margen</th></tr></thead><tbody>';
-    (d.items||[]).forEach(function(it){ h+='<tr><td><code>'+esc(it.codigo_lote||'')+'</code></td><td>'+esc(it.producto_nombre||'')+'</td><td style="text-align:right">'+nr(it.kg_despachados)+'</td><td style="text-align:right">'+sgMoney(it.precio_por_kg)+'</td><td style="text-align:right">'+sgMoney(it.subtotal)+'</td><td style="text-align:right;color:'+((it.margen_estimado||0)>=0?'#16a34a':'#dc2626')+'">'+sgMoney(it.margen_estimado)+'</td></tr>'; });
+    (d.items||[]).forEach(function(it, i){
+      var pcell = puedeEd
+        ? '<input type="number" step="0.01" min="0" id="sg-dped-'+i+'" value="'+(Number(it.precio_por_kg)||0)+'"'
+          + ' oninput="sgDespEdUpd('+i+',this.value)"'
+          + ' style="width:110px;text-align:right;padding:2px 6px">'
+        : sgMoney(it.precio_por_kg);
+      h+='<tr><td><code>'+esc(it.codigo_lote||'')+'</code></td><td>'+esc(it.producto_nombre||'')+'</td>'
+        +'<td style="text-align:right">'+nr(it.kg_despachados)+'</td>'
+        +'<td style="text-align:right">'+pcell+'</td>'
+        +'<td style="text-align:right" id="sg-dpsub-'+i+'">'+sgMoney(it.subtotal)+'</td>'
+        +'<td style="text-align:right;color:'+((it.margen_estimado||0)>=0?'#16a34a':'#dc2626')+'">'+sgMoney(it.margen_estimado)+'</td></tr>';
+    });
     h+='</tbody></table>';
+    if (puedeEd && (d.items||[]).length) {
+      h+='<div style="border:1px solid var(--bor);border-radius:8px;padding:10px 12px;margin-bottom:12px">'
+        +'<div class="fl ff"><label>Por qué cambia el precio <span style="color:var(--err)">*</span></label>'
+        +'<input id="sg-dped-motivo" placeholder="ej. se acordó otro precio con el cliente"></div>'
+        +'<div style="display:flex;justify-content:space-between;align-items:center;margin-top:8px">'
+        +'<span id="sg-dped-total" style="font-size:12.5px;color:var(--mut)"></span>'
+        +'<button class="btn bb bs" onclick="sgDespEdGuardar()">Guardar el precio</button></div></div>';
+    } else if (d.facturado) {
+      // Y SI YA SE FACTURÓ SE DICE POR QUÉ NO SE PUEDE, en vez de mostrar el
+      // número apagado y que el que mira crea que le falta un permiso.
+      h+='<div style="font-size:12.5px;color:var(--mut);margin-bottom:12px">'
+        +'🔒 Este remito ya se facturó: el precio salió en un comprobante que el cliente tiene. '
+        +'Se corrige con una nota de crédito.</div>';
+    }
     // Trazabilidad forward
     if(tz && (tz.items||[]).length){
       h+='<details open><summary style="cursor:pointer;font-weight:700;font-size:13px">🔍 Trazabilidad (forward: hacia el origen)</summary>';

@@ -117,11 +117,23 @@ test('respeta el que ya estaba elegido', () => {
   assert.match(h, /<option value="3" selected>PUENTE CORDON SA<\/option>/);
 });
 
-test('el remito usa el MISMO armador, no una copia', () => {
+test('el remito usa el MISMO armador de fleteros, no una copia', () => {
   // Dos reglas distintas sobre lo mismo terminan diciendo cosas distintas.
   assert.match(PANEL, /eid\('sg-desp-fletero'\)\.innerHTML=sgFleteroOpts\(fls, '', '— Sin fletero —'\)/);
-  assert.match(PANEL, /eid\('sg-desp-coop'\)\.innerHTML=sgFleteroOpts\(fls, '', '— Sin carga —'\)/);
   assert.equal((PANEL.match(/function sgFleteroOpts\(/g) || []).length, 1);
+});
+
+test('pero la COOPERATIVA de carga sale de su catálogo, no de los proveedores', () => {
+  // Pablo, 28/8/2026: «acá debería tomar sólo los que están dados de alta en
+  // cooperativas». El fletero es un proveedor marcado como tal; la cooperativa
+  // es una cuadrilla que se da de alta aparte, y ofrecerlas juntas dejaba elegir
+  // de cuadrilla de carga a un proveedor de tomates.
+  assert.ok(!/eid\('sg-desp-coop'\)\.innerHTML=sgFleteroOpts/.test(PANEL));
+  const i = PANEL.indexOf("api('/api/sg/cooperativas').then(function(rc){");
+  assert.ok(i > 0, 'el remito no pide el catálogo de cooperativas');
+  const b = PANEL.slice(i, i + 900);
+  assert.match(b, /sel=eid\('sg-desp-coop'\)/);
+  assert.match(b, /no hay cooperativas dadas de alta/);
 });
 
 test('la pantalla avisa cuando no hay ninguno marcado, y dice dónde se marcan', () => {
