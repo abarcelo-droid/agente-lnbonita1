@@ -121,7 +121,9 @@ test('los que hay que llamar van después de los activos y ordenados por volumen
     ['C1', 'PALTA', 'GRANDE', P22, '09-MARZO', 9000, 900],
     ['C1', 'PALTA', 'ACTIVO', P26, '01-JULIO',   50,   5],
   ];
-  const r = ventanasDeProducto(base(filas), WHERE, [], OPTS);
+  // umbral 0: acá se prueba el ORDEN, y con el agrupado puesto ACTIVO (50 kilos sobre 9.150)
+  // se iría a la bolsa de los chicos y no habría orden que mirar.
+  const r = ventanasDeProducto(base(filas), WHERE, [], Object.assign({}, OPTS, { umbral_share: 0 }));
   assert.deepEqual(r.filas.map(x => x.proveedor), ['ACTIVO', 'GRANDE', 'CHICO']);
 });
 
@@ -340,4 +342,150 @@ test('el tope de mes no perdona a quien nunca más apareció', () => {
   // correcto: marzo de esta campaña no llegó. Lo que NO se pierde es cuánto hace que falta.
   assert.equal(v.campanias_sin_traer, 3);
   assert.ok(v.esperando || v.contactar, 'quedó sin clasificar');
+});
+
+// ── TODO EN PROMEDIO POR CAMPAÑA ──────────────────────────────────────────────────────
+// "458k en julio" sumando seis campañas no es lo que se movió ni lo que se espera mover. El
+// promedio sí es una expectativa, y es contra eso que se decide cuánto comprar.
+const PROM = [
+  ['C1', 'PALTA', 'A', P24, '01-JULIO', 1000, 100],
+  ['C1', 'PALTA', 'A', P25, '01-JULIO', 3000, 300],
+  ['C1', 'PALTA', 'A', P26, '01-JULIO', 2000, 200],
+  // NOVIEMBRE existe en dos campañas nada más: la tercera no llegó todavía.
+  ['C1', 'PALTA', 'A', P24, '05-NOVIEMBRE', 900, 90],
+  ['C1', 'PALTA', 'A', P25, '05-NOVIEMBRE', 300, 30],
+];
+
+test('el promedio de cada mes divide por las campañas que LLEGARON a ese mes', () => {
+  const r = ventanasDeProducto(base(PROM), WHERE, [], {
+    periodo_actual: P26,
+    campanias_por_mes: { '01-JULIO': 3, '05-NOVIEMBRE': 2 },
+  });
+  assert.equal(r.totales['01-JULIO'], 6000);
+  assert.equal(r.promedios['01-JULIO'], 2000);        // 6000 / 3
+  assert.equal(r.totales['05-NOVIEMBRE'], 1200);
+  // Y NO 1200/3 = 400: la campaña en curso no llegó a noviembre, meterla en el divisor
+  // bajaría el promedio de ese mes por una razón de almanaque.
+  assert.equal(r.promedios['05-NOVIEMBRE'], 600);
+  assert.equal(r.campanias_mes['05-NOVIEMBRE'], 2);
+});
+
+test('el pico se decide por el promedio, no por el acumulado', () => {
+  const filas = [
+    ['C1', 'PALTA', 'A', P24, '01-JULIO',      100, 10],
+    ['C1', 'PALTA', 'A', P25, '01-JULIO',      100, 10],
+    ['C1', 'PALTA', 'A', P26, '01-JULIO',      100, 10],
+    ['C1', 'PALTA', 'A', P26, '05-NOVIEMBRE',  250, 25],
+  ];
+  const r = ventanasDeProducto(base(filas), WHERE, [], {
+    periodo_actual: P26, campanias_por_mes: { '01-JULIO': 3, '05-NOVIEMBRE': 1 } });
+  assert.equal(r.totales['01-JULIO'], 300);            // acumulado: julio gana
+  assert.equal(r.totales['05-NOVIEMBRE'], 250);
+  assert.equal(r.promedios['01-JULIO'], 100);          // promedio: noviembre gana
+  assert.equal(r.promedios['05-NOVIEMBRE'], 250);
+  assert.equal(r.pico_mes, '05-NOVIEMBRE');
+  assert.equal(r.pico_kilos, 250);
+});
+
+test('cada celda de cada productor trae su promedio, con el mismo divisor', () => {
+  const r = ventanasDeProducto(base(PROM), WHERE, [], {
+    periodo_actual: P26, campanias_por_mes: { '01-JULIO': 3, '05-NOVIEMBRE': 2 } });
+  const a = r.filas.find(x => x.proveedor === 'A');
+  assert.equal(a.por_mes['01-JULIO'].kilos, 6000);
+  assert.equal(a.por_mes['01-JULIO'].kilos_prom, 2000);
+  assert.equal(a.por_mes['05-NOVIEMBRE'].kilos_prom, 600);
+  // Y la escala del gráfico sale de los promedios, que es lo que se dibuja.
+  assert.equal(r.max_celda_prom, 2000);
+});
+
+test('sin el divisor, cae a la cantidad de campañas del producto', () => {
+  const r = ventanasDeProducto(base(PROM), WHERE, [], { periodo_actual: P26 });
+  assert.equal(r.promedios['01-JULIO'], 2000);   // 6000 / 3 campañas del producto
+});
+
+// ── LOS CHICOS SE AGRUPAN ─────────────────────────────────────────────────────────────
+const CHICOS = [
+  ['C1', 'PALTA', 'GRANDE', P25, '01-JULIO', 90000, 9000],
+  ['C1', 'PALTA', 'GRANDE', P26, '01-JULIO', 80000, 8000],
+  ['C1', 'PALTA', 'MEDIO',  P25, '01-JULIO',  8000,  800],
+  ['C1', 'PALTA', 'MEDIO',  P26, '01-JULIO',  7000,  700],
+  ['C1', 'PALTA', 'CHICO1', P25, '05-NOVIEMBRE', 300, 30],
+  ['C1', 'PALTA', 'CHICO2', P25, '05-NOVIEMBRE', 200, 20],
+  ['C1', 'PALTA', 'CHICO3', P24, '05-NOVIEMBRE', 100, 10],
+];
+const OPTS_CH = { periodo_actual: P26, umbral_share: 1 };
+
+test('los productores chicos van a una sola fila, no a una cada uno', () => {
+  const r = ventanasDeProducto(base(CHICOS), WHERE, [], OPTS_CH);
+  const nombres = r.filas.map(x => x.proveedor);
+  assert.ok(nombres.includes('GRANDE') && nombres.includes('MEDIO'), nombres.join(','));
+  assert.ok(!nombres.some(x => /^CHICO/.test(x)), 'quedaron sueltos: ' + nombres.join(','));
+  const otros = r.filas.find(x => x.agrupado);
+  assert.ok(otros, 'no armó la fila de otros');
+  assert.equal(otros.cuantos, 3);
+  assert.match(otros.proveedor, /3 productores chicos/);
+  assert.equal(r.agrupados, 3);
+});
+
+test('la fila junta conserva el volumen y la temporada de los chicos', () => {
+  // A veces los chicos cubren un mes que los grandes no: perder eso sería peor que la fila.
+  const r = ventanasDeProducto(base(CHICOS), WHERE, [], OPTS_CH);
+  const otros = r.filas.find(x => x.agrupado);
+  assert.equal(otros.kilos_hist, 600);
+  assert.equal(otros.por_mes['05-NOVIEMBRE'].kilos, 600);
+  assert.equal(otros.desde, '05-NOVIEMBRE');
+  assert.equal(otros.hasta, '05-NOVIEMBRE');
+  // Y el total del producto no cambia por agrupar: los kilos siguen todos.
+  assert.equal(r.kilos_hist, 90000 + 80000 + 8000 + 7000 + 600);
+});
+
+test('la fila junta no se ofrece para llamar, pero dice cuántos no trajeron', () => {
+  const r = ventanasDeProducto(base(CHICOS), WHERE, [], OPTS_CH);
+  const otros = r.filas.find(x => x.agrupado);
+  assert.equal(otros.contactar, false);
+  assert.equal(otros.esperando, false);
+  assert.equal(otros.cuantos_ausentes, 3);   // los tres son de campañas viejas
+  // Y no ensucian el KPI: llamar de a uno a tres productores de 200 kilos no es una gestión.
+  assert.equal(r.a_contactar, 0);
+});
+
+test('con el umbral en cero se ven todos, uno por uno', () => {
+  const r = ventanasDeProducto(base(CHICOS), WHERE, [], { periodo_actual: P26, umbral_share: 0 });
+  assert.equal(r.agrupados, 0);
+  assert.ok(!r.filas.some(x => x.agrupado));
+  assert.ok(r.filas.map(x => x.proveedor).includes('CHICO1'));
+});
+
+test('subir el umbral se lleva a los medianos también', () => {
+  const r = ventanasDeProducto(base(CHICOS), WHERE, [], { periodo_actual: P26, umbral_share: 10 });
+  assert.ok(!r.filas.map(x => x.proveedor).includes('MEDIO'), 'MEDIO sobrevivió al 10%');
+  assert.equal(r.filas.find(x => x.agrupado).cuantos, 4);
+});
+
+test('el umbral se mide contra el PROMEDIO del producto, no contra el acumulado', () => {
+  // Con varias campañas, el 1% del acumulado es mucho más exigente y dejaría afuera a
+  // productores que sí importan. El corte que informa es en kilos por campaña.
+  const r = ventanasDeProducto(base(CHICOS), WHERE, [], OPTS_CH);
+  const prom = r.kilos_hist / r.periodos.length;
+  assert.ok(Math.abs(r.corte_kilos - prom / 100) < 1, r.corte_kilos + ' vs ' + (prom / 100));
+});
+
+test('la fila junta va antes de los #N/A y después de todo lo demás', () => {
+  const filas = CHICOS.concat([['C1', 'PALTA', '#N/A (Did not find value)', P26, '01-JULIO', 500, 50]]);
+  const r = ventanasDeProducto(base(filas), WHERE, [], OPTS_CH);
+  const i = (f) => r.filas.findIndex(f);
+  assert.ok(i(x => x.agrupado) > i(x => x.proveedor === 'GRANDE'));
+  assert.ok(i(x => x.agrupado) < i(x => x.no_identificado));
+});
+
+test('los #N/A no se agrupan con los chicos: son otra cosa', () => {
+  // Uno es un dato de mala calidad, el otro un productor de verdad. Mezclarlos escondería el
+  // problema de la planilla adentro de una fila que dice "chicos".
+  const filas = [['C1', 'PALTA', '#N/A (Did not find value)', P26, '01-JULIO', 1, 1],
+                 ['C1', 'PALTA', 'GRANDE', P26, '01-JULIO', 90000, 9000]];
+  const r = ventanasDeProducto(base(filas), WHERE, [], OPTS_CH);
+  const ni = r.filas.find(x => x.no_identificado);
+  assert.ok(ni, 'se comió la fila de sin identificar');
+  assert.equal(ni.agrupado, undefined);
+  assert.ok(r.sin_identificar);
 });
