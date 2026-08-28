@@ -251,3 +251,93 @@ test('el WHERE va siempre en un WITH base al principio', () => {
       'hay un ? antes del ${where} en:\n' + q.trim().slice(0, 200));
   }
 });
+
+// ── LA CAMPAÑA QUE RECIÉN ARRANCÓ ─────────────────────────────────────────────────────
+// El caso de la pantalla real: MELON, campaña 2026-2027 arrancada en julio, y dieciséis
+// productores marcados "a contactar" cuando faltaban tres. Los otros trece traen de noviembre
+// a mayo: en agosto no están ausentes, están esperando.
+//
+// Una lista de gestión con trece falsos no se usa dos veces, así que esto importa tanto como
+// que el número esté bien.
+const MELON = [
+  // El de verano: trae de noviembre a mayo, todos los años. En agosto no le toca.
+  ['C1', 'MELON', 'PUENTE CORDON', P24, '05-NOVIEMBRE', 5000, 10000],
+  ['C1', 'MELON', 'PUENTE CORDON', P24, '11-MAYO',      4000,  8000],
+  ['C1', 'MELON', 'PUENTE CORDON', P25, '05-NOVIEMBRE', 6000, 12000],
+  ['C1', 'MELON', 'PUENTE CORDON', P25, '11-MAYO',      5000, 10000],
+  // El de invierno: trae en julio-agosto. Ese SÍ ya debería estar.
+  ['C1', 'MELON', 'AGRICOLA',      P24, '01-JULIO',     3000,  6000],
+  ['C1', 'MELON', 'AGRICOLA',      P25, '01-JULIO',     3500,  7000],
+  ['C1', 'MELON', 'AGRICOLA',      P25, '02-AGOSTO',    2000,  4000],
+  // La campaña nueva, recién arrancada: sólo julio y agosto cargados.
+  ['C1', 'MELON', 'TROPICAL',      P26, '01-JULIO',     1000,  2000],
+  ['C1', 'MELON', 'TROPICAL',      P26, '02-AGOSTO',     800,  1600],
+];
+const W_MELON = "WHERE producto = 'MELON'";
+
+test('con la campaña en curso, el de temporada tardía NO se marca: está esperando', () => {
+  // Estamos en agosto (hasta_mes = 02-AGOSTO). PUENTE CORDON trae nov→may.
+  const r = ventanasDeProducto(base(MELON), W_MELON, [],
+    { periodo_actual: P26, hasta_mes: '02-AGOSTO' });
+  const pc = r.filas.find(x => x.proveedor === 'PUENTE CORDON');
+  assert.equal(pc.contactar, false, 'lo marca cuando todavía no le toca');
+  assert.equal(pc.esperando, true);
+  assert.equal(r.esperando, 1);
+});
+
+test('pero el que ya debería haber traído sí se marca', () => {
+  const r = ventanasDeProducto(base(MELON), W_MELON, [],
+    { periodo_actual: P26, hasta_mes: '02-AGOSTO' });
+  const ag = r.filas.find(x => x.proveedor === 'AGRICOLA');
+  assert.equal(ag.contactar, true, 'trae en julio-agosto y no vino');
+  assert.equal(ag.esperando, false);
+  assert.equal(r.a_contactar, 1);
+});
+
+test('sin el tope de mes, los dos se marcarían — que es el bug de la captura', () => {
+  const r = ventanasDeProducto(base(MELON), W_MELON, [], { periodo_actual: P26 });
+  assert.equal(r.a_contactar, 2);
+  assert.equal(r.esperando, 0);
+});
+
+test('contra una campaña COMPLETA no hay nadie esperando: el año ya pasó entero', () => {
+  const r = ventanasDeProducto(base(MELON), W_MELON, [], { periodo_actual: P25 });
+  assert.equal(r.esperando, 0);
+  // En P25 los dos trajeron, así que tampoco hay a quién llamar.
+  assert.equal(r.a_contactar, 0);
+});
+
+test('los kilos que se esperan van aparte de los que hay que salir a buscar', () => {
+  const r = ventanasDeProducto(base(MELON), W_MELON, [],
+    { periodo_actual: P26, hasta_mes: '02-AGOSTO' });
+  assert.equal(r.kilos_esperando, 10000);   // (5000+4000+6000+5000) / 2 campañas
+  assert.equal(r.kilos_a_contactar, 4250);  // (3000+3500+2000) / 2 campañas
+});
+
+test('el orden pone primero a los que hay que llamar, después a los que se esperan', () => {
+  const r = ventanasDeProducto(base(MELON), W_MELON, [],
+    { periodo_actual: P26, hasta_mes: '02-AGOSTO' });
+  const i = (p) => r.filas.findIndex(x => x.proveedor === p);
+  assert.ok(i('TROPICAL') < i('AGRICOLA'), 'el que está trayendo va primero');
+  assert.ok(i('AGRICOLA') < i('PUENTE CORDON'), 'a contactar antes que esperando');
+});
+
+test('el tope de mes no perdona a quien nunca más apareció', () => {
+  // JAGUACY dejó de traer hace dos campañas y su ventana cierra en abril. Mirando P26 hasta
+  // agosto, abril de ESTA campaña todavía no pasó — pero el que hace dos años que no viene no
+  // está esperando: ya faltó dos veces enteras. Se marca igual.
+  const filas = [
+    ['C1', 'PALTA', 'VIEJO', P22, '09-MARZO', 9000, 20000],
+    ['C1', 'PALTA', 'VIEJO', P23, '09-MARZO', 8000, 18000],
+    ['C1', 'PALTA', 'HOY',   P26, '01-JULIO', 100, 200],
+  ];
+  // Las campañas del negocio, no las de este producto: en P24 y P25 no vendimos palta, y sin
+  // esta escala el hueco de esos dos años desaparece del conteo.
+  const r = ventanasDeProducto(base(filas), WHERE, [], {
+    periodo_actual: P26, hasta_mes: '02-AGOSTO', periodos_todos: [P22, P23, P24, P25, P26] });
+  const v = r.filas.find(x => x.proveedor === 'VIEJO');
+  // Su ventana (marzo) es posterior a agosto, así que por ahora figura como esperando —
+  // correcto: marzo de esta campaña no llegó. Lo que NO se pierde es cuánto hace que falta.
+  assert.equal(v.campanias_sin_traer, 3);
+  assert.ok(v.esperando || v.contactar, 'quedó sin clasificar');
+});
