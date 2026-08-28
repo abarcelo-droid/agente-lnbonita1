@@ -178,10 +178,22 @@ test('si no hay ninguno, no se inventa la fila ni la advertencia', () => {
 // ── EL PERFIL DEL PRODUCTO ────────────────────────────────────────────────────────────
 test('el total por mes es de toda la historia, y aparte el de este año', () => {
   const r = ventanasDeProducto(base(F), WHERE, [], OPTS);
-  // JULIO: 5000 + 6000 (BONELLA) + 500 (AGRO) + 600 (#N/A) = 12.100
+  // JULIO: 5000 + 6000 (BONELLA) + 500 (AGRO) + 600 (#N/A) = 12.100. El ACUMULADO sigue
+  // siendo toda la historia, aunque el promedio mire una ventana más corta.
   assert.equal(r.totales['01-JULIO'], 12100);
   assert.equal(r.totales_act['01-JULIO'], 500);
-  assert.equal(r.pico_mes, '09-MARZO');        // 17.000 de JAGUACY
+});
+
+test('el pico sale de la ventana del promedio, no de toda la historia', () => {
+  // Con la ventana en 3 campañas (P24-P25-P26), el marzo de JAGUACY —que es de P22 y P23—
+  // queda afuera: pesaba 17.000 acumulados pero hace tres años que no pasa. El pico se mueve
+  // a julio, que es donde el negocio está HOY. Es el punto de acortar la ventana.
+  const r = ventanasDeProducto(base(F), WHERE, [], OPTS);
+  assert.equal(r.pico_mes, '01-JULIO', JSON.stringify(r.promedios));
+  assert.equal(r.promedios['09-MARZO'], 0);
+  // Mirando toda la historia, en cambio, marzo vuelve a ganar.
+  const todo = ventanasDeProducto(base(F), WHERE, [], { ...OPTS, promedio_campanias: 0 });
+  assert.equal(todo.pico_mes, '09-MARZO');
 });
 
 test('el filtro del producto manda: la banana de BONELLA no entra', () => {
@@ -359,7 +371,9 @@ const PROM = [
 test('el promedio de cada mes divide por las campañas que LLEGARON a ese mes', () => {
   const r = ventanasDeProducto(base(PROM), WHERE, [], {
     periodo_actual: P26,
-    campanias_por_mes: { '01-JULIO': 3, '05-NOVIEMBRE': 2 },
+    // Por mes, QUÉ campañas lo tienen cargado: el promedio se calcula sobre una ventana, así
+    // que hace falta poder intersecar y no sólo contar.
+    campanias_por_mes_detalle: { '01-JULIO': [P24, P25, P26], '05-NOVIEMBRE': [P24, P25] },
   });
   assert.equal(r.totales['01-JULIO'], 6000);
   assert.equal(r.promedios['01-JULIO'], 2000);        // 6000 / 3
@@ -378,7 +392,7 @@ test('el pico se decide por el promedio, no por el acumulado', () => {
     ['C1', 'PALTA', 'A', P26, '05-NOVIEMBRE',  250, 25],
   ];
   const r = ventanasDeProducto(base(filas), WHERE, [], {
-    periodo_actual: P26, campanias_por_mes: { '01-JULIO': 3, '05-NOVIEMBRE': 1 } });
+    periodo_actual: P26, campanias_por_mes_detalle: { '01-JULIO': [P24, P25, P26], '05-NOVIEMBRE': [P26] } });
   assert.equal(r.totales['01-JULIO'], 300);            // acumulado: julio gana
   assert.equal(r.totales['05-NOVIEMBRE'], 250);
   assert.equal(r.promedios['01-JULIO'], 100);          // promedio: noviembre gana
@@ -389,7 +403,8 @@ test('el pico se decide por el promedio, no por el acumulado', () => {
 
 test('cada celda de cada productor trae su promedio, con el mismo divisor', () => {
   const r = ventanasDeProducto(base(PROM), WHERE, [], {
-    periodo_actual: P26, campanias_por_mes: { '01-JULIO': 3, '05-NOVIEMBRE': 2 } });
+    periodo_actual: P26,
+    campanias_por_mes_detalle: { '01-JULIO': [P24, P25, P26], '05-NOVIEMBRE': [P24, P25] } });
   const a = r.filas.find(x => x.proveedor === 'A');
   assert.equal(a.por_mes['01-JULIO'].kilos, 6000);
   assert.equal(a.por_mes['01-JULIO'].kilos_prom, 2000);

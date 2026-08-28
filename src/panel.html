@@ -4587,7 +4587,12 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
        Alto fijo para que todas las filas se puedan comparar de un vistazo — si cada fila se
        escalara sola, un proveedor chico se vería igual de grande que el más grande. */
     #sec-informes-comercial .vt-celda{position:relative;height:30px;padding:0 1px;vertical-align:bottom}
-    #sec-informes-comercial .vt-barra{position:absolute;left:2px;right:2px;bottom:0;
+    /* El año en curso va ADENTRO de la barra del promedio, más angosto y centrado. Del mismo
+       ancho se tapaban: cuando el año superaba al promedio, la clara desaparecía y quedaba
+       una barra oscura suelta que no se entendía contra qué se comparaba. Así se ven las dos
+       siempre, y que la oscura asome por arriba de la clara ES el dato — este año viene
+       mejor que un año típico. */
+    #sec-informes-comercial .vt-barra{position:absolute;left:26%;right:26%;bottom:0;
       background:#2f7a4d;border-radius:2px 2px 0 0}
     /* La barra CLARA es toda la historia de ese mes; la oscura, lo de este año, encima. Una
        clara sin oscura adentro es el hueco: trae siempre y ahora no está. Ese hueco es lo que
@@ -4757,6 +4762,14 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
       </select></div>
       <!-- Debajo de este porcentaje del promedio del producto, un productor va a la bolsa de
            "OTROS". Con treinta filas donde veinte son compras de una vez, no se ve ninguna. -->
+      <!-- Cuántas campañas entran al promedio. Seis años incluyen años que ya no son este
+           negocio, y como expectativa para comprar lo viejo no ayuda. -->
+      <div><label>Promedio de</label><select id="vt-prom" onchange="vtCargar()">
+        <option value="2">las últimas 2 campañas</option>
+        <option value="3" selected>las últimas 3 campañas</option>
+        <option value="5">las últimas 5 campañas</option>
+        <option value="0">toda la historia</option>
+      </select></div>
       <div><label>Agrupar los chicos</label><select id="vt-umbral" onchange="vtCargar()">
         <option value="0.5">menos del 0,5%</option>
         <option value="1" selected>menos del 1%</option>
@@ -34352,6 +34365,7 @@ function vtCargar(){
   var p=[];
   var a=(eid('vt-act')||{}).value; if(a) p.push('periodo_actual='+encodeURIComponent(a));
   var u=(eid('vt-umbral')||{}).value; if(u!=null&&u!=='') p.push('umbral_share='+encodeURIComponent(u));
+  var pc=(eid('vt-prom')||{}).value; if(pc!=null&&pc!=='') p.push('promedio_campanias='+encodeURIComponent(pc));
   if(prod) p.push('producto='+encodeURIComponent(prod.trim()));
   // Los filtros de arriba también valen acá: si alguien filtró por cliente, la ventana es la
   // de ESE cliente. Una pantalla que ignora en silencio un filtro que se ve puesto miente.
@@ -34486,7 +34500,7 @@ function vtPintar(d){
       var hA=promAct?Math.max(2, Math.round((promAct/max)*28)):0;
       var tip=[];
       if(c){
-        tip.push(vtMes(m)+': '+nr(prom)+' K de promedio ('+nr(c.kilos)+' K en total, sobre '+nc+' campaña(s))');
+        tip.push(vtMes(m)+': '+nr(prom)+' K de promedio sobre '+nc+' campaña(s) · '+nr(c.kilos)+' K en toda la historia');
         tip.push(c.kilos_act ? ('este año '+nr(c.kilos_act)+' K') : 'este año NO trajo en '+vtMes(m));
       }
       return '<td class="vt-celda'+(m===d.pico_mes?' vt-pico':'')+'"'
@@ -34551,11 +34565,13 @@ function vtPintar(d){
     : '';
 
   eid('vt-nota').innerHTML = aviso
-    + '<b>Cómo se lee:</b> la barra <span style="color:#9dc3ae">clara</span> es lo que ese productor trae ese mes <b>en una campaña típica</b> (el promedio); '
-    + 'la <span style="color:#2f7a4d">oscura</span>, lo que trajo <b>este año</b>. Una clara sin oscura adentro es un hueco: trae siempre y ahora no está. '
+    + '<b>Cómo se lee:</b> la barra <span style="color:#9dc3ae">clara</span> y ancha es lo que ese productor trae ese mes <b>en una campaña típica</b>; '
+    + 'la <span style="color:#2f7a4d">oscura</span> y angosta, lo que trajo <b>este año</b>. Si la oscura asoma por arriba de la clara, este año viene mejor que lo habitual; '
+    + 'una clara sin oscura adentro es un hueco: trae siempre y ahora no está. '
     + 'Los cuadraditos de <b>Campañas</b> son los años, llenos donde trajo. Todas las barras están a la misma escala.<br>'
-    + '<b>Todo en promedio por campaña</b>, no sumado: sumar seis años no dice lo que se movió ni lo que se espera mover. '
-    + 'El total acumulado está en el globo de cada barra. '
+    + '<b>El promedio es de '+vtRango(d.periodos_promedio)+'</b>, no de toda la historia: un promedio de seis años '
+    + 'incluye años que ya no son este negocio, y como expectativa para comprar lo viejo no ayuda. '
+    + 'El acumulado de toda la historia está en el globo de cada barra. '
     + (d.agrupados ? ('Los <b>'+nr(d.agrupados)+'</b> productores que pesan menos del '+nrDec(d.umbral_share,1)+'% ('+infKg(d.corte_kilos)+' por campaña) están juntos en una fila. ') : '')
     + '<b>Productor</b> = de dónde vino la mercadería que vendimos, según la base de ventas — no es un libro de compras. '
     + 'El eje es el <b>mes comercial</b> (julio a junio) y no la semana: la columna de semana de la planilla todavía no está verificada, '
@@ -34583,7 +34599,7 @@ function vtPerfil(d, meses){
     + '<div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin-bottom:9px">'
       + '<div style="font-size:14px;font-weight:700">La campaña de '+esc(d.producto)+'</div>'
       + '<div style="font-size:11.5px;color:var(--mut)">'
-        + '<b>promedio por campaña</b> · '+infKg(Math.round(d.kilos_hist/(nCamp||1)))+' al año sobre '+nr(nCamp)+' campañas'
+        + '<b>promedio de '+vtRango(d.periodos_promedio)+'</b>'
         + ' · pico en <b>'+esc(vtMes(d.pico_mes))+'</b>'
         + ' · <span style="color:#94a3b8">▇</span> promedio · <span style="color:#1a3a5c">▇</span> '+esc(d.periodo_actual)
       + '</div></div>'
@@ -34596,7 +34612,7 @@ function vtPerfil(d, meses){
         // exactamente la comparación que se viene a hacer.
         var hA=ta?Math.max(2, Math.round((ta/maxProm)*ALTO)):0;
         return '<div style="flex:1;text-align:center" title="'
-            + esc(vtMes(m)+': '+nr(pr)+' K de promedio · '+nr(t)+' K sumando '+nc+' campaña(s) · '+nr(ta)+' K en '+d.periodo_actual)+'">'
+            + esc(vtMes(m)+': '+nr(pr)+' K de promedio sobre '+nc+' campaña(s) · '+nr(t)+' K en toda la historia · '+nr(ta)+' K en '+d.periodo_actual)+'">'
           + '<div style="font-size:9.5px;color:var(--mut);margin-bottom:2px">'+(pr?vtMil(pr):'')+'</div>'
           + '<div style="position:relative;height:'+ALTO+'px">'
             + (hH?'<div style="position:absolute;left:0;right:0;bottom:0;height:'+hH+'px;background:#c7d6e6;border-radius:3px 3px 0 0"></div>':'')
@@ -34605,6 +34621,14 @@ function vtPerfil(d, meses){
           + '<div style="font-size:10px;font-weight:600;margin-top:3px'+(m===d.pico_mes?';color:var(--burg)':';color:var(--mut)')+'">'+esc(vtMes(m))+'</div>'
           + '</div>'; }).join('')
     + '</div></div>';
+}
+
+// ['2024-2025','2025-2026','2026-2027'] → '24/25 a 26/27'. Una sola campaña se dice sola.
+function vtRango(ps){
+  ps=ps||[];
+  if(!ps.length) return 'la historia';
+  if(ps.length===1) return esc(vtCamp(ps[0]));
+  return esc(vtCamp(ps[0]))+' a '+esc(vtCamp(ps[ps.length-1]));
 }
 
 // 76.234 → '76k'; 940 → '940'. Redondear a miles un número de tres cifras lo convierte en
