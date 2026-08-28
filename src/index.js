@@ -275,6 +275,22 @@ app.get("/m/ifco", (req, res) => {
   if (!cookie) return res.redirect('/login?next=/m/ifco');
   res.sendFile(path.join(__dirname, "mifco.html"));
 });
+// Informes comerciales — app mobile para mirar cómo viene el mes
+//
+// App aparte y no el panel achicado, igual que /m/ifco y /scout: panel.html pesa 3,6 MB y
+// por datos móviles es inusable, y su tabla de doce columnas no se lee en un teléfono ni con
+// la mejor CSS. Pega contra los MISMOS endpoints de /api/informes, así que las reglas de
+// permiso —el nivel que decide quién ve margen— siguen viviendo en el servidor y no hay una
+// segunda versión de la verdad que mantener.
+app.get("/m/informes", (req, res) => {
+  const cookie = req.cookies?.lnb_user;
+  if (!cookie) return res.redirect('/login?next=/m/informes');
+  res.sendFile(path.join(__dirname, "minf.html"));
+});
+app.get("/manifest-minf.json", (req, res) => {
+  res.sendFile(path.join(__dirname, "manifest-minf.json"));
+});
+
 app.get("/m", (req, res) => res.redirect('/m/ifco'));
 
 // PWA assets para IFCO mobile

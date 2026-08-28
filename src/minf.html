@@ -1,0 +1,318 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0f2540">
+<title>La Niña Bonita - Informes</title>
+
+<!-- PWA. Mismo patrón que /m/ifco y /scout: una app propia, instalable, no el panel
+     achicado. panel.html pesa 3,6 MB y por datos móviles es inusable. -->
+<link rel="manifest" href="/manifest-minf.json">
+<link rel="icon" type="image/png" sizes="32x32" href="/mifco-icon-32.png">
+<link rel="apple-touch-icon" sizes="180x180" href="/mifco-icon-apple.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="LNB Informes">
+<meta name="mobile-web-app-capable" content="yes">
+<style>
+:root{
+  --bg:#f0f4f8;--sur:#fff;--bor:#dde3ea;--bor2:#c8d2db;
+  --txt:#1a2332;--mut:#5a6a7e;--sub:#8a9bb0;
+  --burg:#1a3a5c;--burd:#0f2540;--burl:#e8f0f8;
+  --ok:#16a34a;--warn:#d97706;--err:#dc2626;
+  --verde:#2f7a4d;--verdel:#c3ddcd;
+  --sans:'DM Sans',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+}
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+html,body{background:var(--bg);color:var(--txt);font-family:var(--sans);font-size:15px;line-height:1.5;min-height:100vh}
+body{padding-bottom:calc(24px + env(safe-area-inset-bottom))}
+
+.hd{position:sticky;top:0;background:var(--burd);color:#fff;padding:13px 16px;
+  display:flex;align-items:center;gap:10px;z-index:10;
+  padding-top:calc(13px + env(safe-area-inset-top))}
+.hd .tit{flex:1;font-size:16px;font-weight:600;line-height:1.2}
+.hd .tit small{display:block;font-size:11px;opacity:.7;font-weight:400}
+.hd .out{background:transparent;border:1px solid rgba(255,255,255,.25);color:#fff;
+  font-size:11px;padding:5px 9px;border-radius:6px}
+
+.wrap{max-width:560px;margin:0 auto;padding:14px 14px 30px}
+
+/* Las tarjetas: un dato por tarjeta y grande. En un teléfono se mira de un vistazo o no se
+   mira. */
+.kpis{display:grid;grid-template-columns:1fr 1fr;gap:9px;margin-bottom:14px}
+.kpi{background:var(--sur);border-radius:12px;padding:12px 13px;border:1px solid var(--bor)}
+.kpi .l{font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:var(--mut);
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.kpi .v{font-size:22px;font-weight:700;line-height:1.15;margin-top:2px}
+.kpi .s{font-size:11.5px;color:var(--mut);margin-top:1px}
+.kpi.ancha{grid-column:1/-1}
+
+.sec{background:var(--sur);border-radius:12px;border:1px solid var(--bor);margin-bottom:14px;overflow:hidden}
+.sec > h2{font-size:13px;font-weight:700;padding:12px 14px 8px;display:flex;
+  align-items:baseline;gap:8px}
+.sec > h2 small{font-size:11px;font-weight:400;color:var(--mut)}
+.fila{display:flex;align-items:center;gap:10px;padding:10px 14px;border-top:1px solid var(--bor)}
+.fila .nom{flex:1;min-width:0;font-size:13.5px;font-weight:600;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.fila .nom small{display:block;font-size:11px;font-weight:400;color:var(--mut);
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.fila .num{font-size:13.5px;font-weight:700;text-align:right;white-space:nowrap}
+.fila .num small{display:block;font-size:11px;font-weight:600}
+.vacio{padding:16px 14px;color:var(--mut);font-size:13px;border-top:1px solid var(--bor)}
+
+.sube{color:var(--ok)} .baja{color:var(--err)}
+.chip{display:inline-block;padding:2px 7px;border-radius:9px;font-size:10.5px;font-weight:700}
+.c-rojo{background:#fee2e2;color:#991b1b} .c-ambar{background:#fef3c7;color:#92400e}
+.c-azul{background:#dbeafe;color:#1e40af}
+
+/* El mes a mes: barras en SVG, sin librerías. */
+.graf{padding:4px 14px 12px}
+.aviso{padding:10px 12px;border-radius:10px;background:#fef3c7;border:1px solid #fcd34d;
+  color:#92400e;font-size:12px;margin-bottom:12px}
+.sel{display:flex;gap:8px;margin-bottom:12px}
+.sel select{flex:1;min-width:0;padding:10px 11px;border-radius:10px;border:1px solid var(--bor2);
+  background:var(--sur);font-family:var(--sans);font-size:14px;color:var(--txt)}
+.pie{font-size:11px;color:var(--sub);text-align:center;margin-top:6px}
+.pie a{color:var(--burg)}
+.cargando{padding:30px 14px;text-align:center;color:var(--mut);font-size:14px}
+</style>
+</head>
+<body>
+
+<div class="hd">
+  <div class="tit">Informes comerciales<small id="hd-sub">cargando…</small></div>
+  <button class="out" onclick="salir()">Salir</button>
+</div>
+
+<div class="wrap">
+  <div id="aviso"></div>
+
+  <div class="sel">
+    <select id="mes" onchange="cargar()"></select>
+    <select id="camp" onchange="cargar()"></select>
+  </div>
+
+  <div id="cuerpo"><div class="cargando">Buscando los números…</div></div>
+
+  <div class="pie">
+    Datos al <span id="pie-sync">—</span>.<br>
+    <a href="/panel">Ver el informe completo en la computadora</a>
+  </div>
+</div>
+
+<script>
+// ── INFORMES COMERCIALES, VERSIÓN TELÉFONO ────────────────────────────────────────────
+// Para mirar cómo viene el mes en dos segundos, no para analizar. Todo lo que hace falta
+// entra en una pantalla y se lee sin tocar nada: el mes contra el mismo mes del año pasado,
+// quién sube, quién baja, y qué oportunidades hay.
+//
+// NO ES EL PANEL ACHICADO. panel.html pesa 3,6 MB — por datos móviles es inusable — y su
+// tabla de doce columnas no se puede leer en un teléfono ni con la mejor CSS. Es el mismo
+// patrón que /m/ifco y /scout: una app propia, instalable, contra los MISMOS endpoints.
+//
+// Y contra los mismos endpoints quiere decir con las mismas reglas: el nivel que gobierna el
+// margen en el panel lo gobierna acá, porque es el servidor el que decide. No hay una
+// segunda versión de la verdad que mantener.
+var S = { user:null, ventana:null, mes:null, camp:null };
+
+var $ = function(id){ return document.getElementById(id); };
+var esc = function(s){ return String(s==null?'':s).replace(/[&<>"']/g, function(c){
+  return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; }); };
+var nr = function(n){ return Number(n||0).toLocaleString('es-AR'); };
+var nrDec = function(n,d){ return Number(n||0).toLocaleString('es-AR',{minimumFractionDigits:d,maximumFractionDigits:d}); };
+// La unidad va pegada al número, igual que en el panel: una tarjeta suelta tiene que decir
+// sola de qué habla.
+var usd = function(n){ return n==null ? '—' : ('USD '+nr(n)); };
+var kg  = function(n){ return n==null ? '—' : (nr(n)+' K'); };
+// '02-AGOSTO' → 'AGOSTO'. El número está para ordenar.
+var mesTxt = function(m){ var x=/^\d\d-(.+)$/.exec(String(m||'')); return x?x[1]:String(m||''); };
+
+async function api(url){
+  var r = await fetch(url, { credentials:'include' });
+  if (r.status === 401) { window.location.href = '/login?next=/m/informes'; return null; }
+  var d = await r.json();
+  if (!d || !d.ok) throw new Error((d && d.error) || ('HTTP ' + r.status));
+  return d.data;
+}
+
+function salir(){
+  fetch('/api/auth/logout', { method:'POST', credentials:'include' })
+    .finally(function(){ window.location.href = '/login'; });
+}
+
+// ── ARRANQUE ──────────────────────────────────────────────────────────────────────────
+(async function(){
+  try {
+    var r = await fetch('/api/auth/me', { credentials:'include' });
+    if (!r.ok) { window.location.href = '/login?next=/m/informes'; return; }
+    var d = await r.json();
+    if (!d || !d.ok) { window.location.href = '/login?next=/m/informes'; return; }
+    S.user = d.user;
+    $('hd-sub').textContent = d.user.nombre || '';
+    cargar();
+  } catch(e) {
+    $('cuerpo').innerHTML = '<div class="cargando" style="color:var(--err)">'+esc(e.message)+'</div>';
+  }
+})();
+
+function params(){
+  var p = [];
+  if (S.mes)  p.push('mes_ok='+encodeURIComponent(S.mes));
+  if (S.camp) p.push('periodo_actual='+encodeURIComponent(S.camp));
+  return p.join('&');
+}
+
+async function cargar(){
+  S.mes  = ($('mes')||{}).value || null;
+  S.camp = ($('camp')||{}).value || null;
+  $('cuerpo').innerHTML = '<div class="cargando">Buscando los números…</div>';
+  try {
+    // Las dos preguntas de una vez: cómo viene el mes, y qué hay para hacer. Son dos
+    // llamadas en paralelo y no una: por teléfono, esperar la suma de las dos se nota.
+    var res = await Promise.all([
+      api('/api/informes/interanual?agrupar=cliente&'+params()),
+      api('/api/informes/oportunidades?limite=5&'+params()).catch(function(){ return null; })
+    ]);
+    if (!res[0]) return;
+    pintar(res[0], res[1]);
+  } catch(e) {
+    $('cuerpo').innerHTML = '<div class="cargando" style="color:var(--err)">'+esc(e.message)+'</div>';
+  }
+}
+
+function llenarSelectores(v){
+  var m = $('mes'), c = $('camp');
+  if (m && !m.innerHTML) {
+    m.innerHTML = (v.meses||[]).map(function(x){
+      return '<option value="'+esc(x)+'"'+(x===v.mes?' selected':'')+'>'+esc(mesTxt(x))+'</option>'; }).join('');
+  }
+  if (c && !c.innerHTML) {
+    c.innerHTML = (v.periodos||[]).map(function(x){
+      return '<option value="'+esc(x)+'"'+(x===v.actual?' selected':'')+'>'+esc(x)+'</option>'; }).join('');
+  }
+}
+
+function pintar(d, opo){
+  var v = d.ventana || {}, R = d.resumen || {}, A = R.actual || {}, B = R.anterior || {};
+  llenarSelectores(v);
+  $('pie-sync').textContent = (d.sync && d.sync.ultimo_ok) || '—';
+
+  // El aviso del mes en curso. Es el único que cambia una lectura: agosto a medio facturar
+  // contra agosto entero del año pasado pinta todo de rojo, y esa caída es del almanaque.
+  $('aviso').innerHTML = v.en_curso
+    ? '<div class="aviso">⚠ <b>'+esc(mesTxt(v.mes))+' de '+esc(v.actual)+' está a medio facturar</b> '
+      + 'y se compara contra el mes entero de '+esc(v.anterior)+'. Si todo baja parejo, mirá primero el mes anterior.</div>'
+    : '';
+
+  var pct = function(x){
+    if (x == null) return '<span style="color:var(--mut)">—</span>';
+    return '<span class="'+(x>=0?'sube':'baja')+'">'+(x>=0?'▲ ':'▼ ')+nrDec(Math.abs(x),1)+'%</span>';
+  };
+  var kpi = function(l, val, sub, ancha){
+    return '<div class="kpi'+(ancha?' ancha':'')+'"><div class="l">'+l+'</div>'
+      + '<div class="v">'+val+'</div><div class="s">'+(sub||'')+'</div></div>';
+  };
+
+  var h = '<div class="kpis">'
+    + kpi(esc(mesTxt(v.mes))+' '+esc(v.actual), usd(A.usd||0),
+        kg(A.kilos||0)+' · '+nr(A.clientes||0)+' cliente(s)', true)
+    + kpi('Contra '+esc(v.anterior), pct(R.var_usd_pct),
+        (R.var_usd>=0?'+':'')+usd(R.var_usd||0))
+    + kpi('Kilos', pct(R.var_kilos_pct), (R.var_kilos>=0?'+':'')+kg(R.var_kilos||0))
+    + '</div>';
+
+  // ── Quién sube y quién baja ─────────────────────────────────────────────────────
+  // Cinco de cada lado. Es lo que se puede leer parado, y lo que se pregunta un director:
+  // no la tabla entera sino de dónde viene el número de arriba.
+  // Se ordena por IMPACTO y no por var_usd. Un cliente nuevo no tiene variación —no hay
+  // contra qué compararlo— así que con var_usd quedaba afuera de las dos listas, y es
+  // justamente la buena noticia que uno quiere ver. Lo mismo del otro lado con el perdido.
+  // impacto = lo de este año menos lo del pasado, con el que falta contando como cero.
+  var filas = d.filas || [];
+  var imp = function(f){ return f.impacto != null ? f.impacto : ((f.usd_act||0) - (f.usd_ant||0)); };
+  var suben = filas.filter(function(f){ return imp(f) > 0; })
+    .sort(function(a,b){ return imp(b) - imp(a); }).slice(0,5);
+  var bajan = filas.filter(function(f){ return imp(f) < 0; })
+    .sort(function(a,b){ return imp(a) - imp(b); }).slice(0,5);
+
+  var lista = function(titulo, sub, arr, signo){
+    var s = '<div class="sec"><h2>'+titulo+' <small>'+sub+'</small></h2>';
+    if (!arr.length) { return s + '<div class="vacio">Ninguno.</div></div>'; }
+    s += arr.map(function(f){
+      var estado = f.estado==='perdido' ? '<span class="chip c-rojo">perdido</span> '
+                 : f.estado==='nuevo'   ? '<span class="chip c-azul">nuevo</span> ' : '';
+      var v = imp(f);
+      return '<div class="fila">'
+        + '<div class="nom">'+esc(f.clave||'')+'<small>'+estado
+          + (f.usd_ant!=null?('antes '+usd(f.usd_ant)):'no vendía')+'</small></div>'
+        + '<div class="num '+signo+'">'+(v>=0?'+':'−')+usd(Math.abs(v))
+          // El % sólo cuando existe: para un cliente nuevo sería una división por cero, y
+          // "+∞%" no le dice nada a nadie.
+          + (f.var_usd_pct!=null?('<small class="'+signo+'">'+(f.var_usd_pct>=0?'+':'')+nrDec(f.var_usd_pct,1)+'%</small>'):'')
+        + '</div></div>';
+    }).join('');
+    return s + '</div>';
+  };
+  h += lista('📈 Los que más subieron', 'contra ' + esc(mesTxt(v.mes)) + ' de ' + esc(v.anterior), suben, 'sube');
+  h += lista('📉 Los que más bajaron', (d.estados && d.estados.perdido ? (nr(d.estados.perdido) + ' perdidos en total') : ''), bajan, 'baja');
+
+  // ── Oportunidades ───────────────────────────────────────────────────────────────
+  if (opo && (opo.items||[]).length) {
+    h += '<div class="sec"><h2>🎯 Oportunidades <small>'
+      + nr(opo.total||0) + ' en total'
+      + (opo.ve_margen ? (' · ' + usd(opo.margen_en_juego_total||0) + ' de margen') : '')
+      + '</small></h2>';
+    h += opo.items.map(function(x){
+      var def = (opo.tipos||{})[x.tipo] || { label:x.tipo, color:'' };
+      var cls = def.color==='rojo' ? 'c-rojo' : (def.color==='azul' ? 'c-azul' : 'c-ambar');
+      return '<div class="fila">'
+        + '<div class="nom"><span class="chip '+cls+'">'+esc(def.label)+'</span> '+esc(x.titulo||'')
+          + '<small>'+esc(x.detalle ? (x.detalle+' — ') : '')+esc(x.regla||'')+'</small></div>'
+        + '<div class="num">'+usd(opo.ve_margen ? x.margen_en_juego : x.usd_en_juego)+'</div>'
+        + '</div>';
+    }).join('');
+    h += '</div>';
+  }
+
+  $('cuerpo').innerHTML = h;
+
+  // El mes a mes va al final y se pide aparte: es lo que menos se mira de parado, y hacer
+  // esperar las tarjetas por un gráfico sería al revés de lo que hace falta.
+  api('/api/informes/ventas/evolucion?periodos='+encodeURIComponent(v.actual))
+    .then(function(e){ if (e) grafico(e.filas||[], v); })
+    .catch(function(){});
+}
+
+// La campaña en curso, mes a mes. SVG inline, sin librerías — es lo que ya usa el panel.
+function grafico(filas, v){
+  if (!filas.length) return;
+  var max = Math.max.apply(null, filas.map(function(f){ return f.facturacion_usd||0; })) || 1;
+  var W = 100 / filas.length;
+  var s = '<div class="sec"><h2>La campaña '+esc(v.actual)+' <small>facturación por mes</small></h2>'
+    + '<div class="graf">'
+    + '<svg viewBox="0 0 100 30" preserveAspectRatio="none" style="width:100%;height:76px;display:block">'
+    + filas.map(function(f,i){
+        var alto = Math.max(0.5, ((f.facturacion_usd||0)/max)*26);
+        var esteMes = f.mes_ok === v.mes;
+        return '<rect x="'+(i*W+W*0.15)+'" y="'+(26-alto)+'" width="'+(W*0.7)+'" height="'+alto+'"'
+          + ' fill="'+(esteMes?'#1a3a5c':'#c3ddcd')+'"><title>'+esc(mesTxt(f.mes_ok))+': '
+          + usd(f.facturacion_usd||0)+' · '+kg(f.kilos||0)+'</title></rect>';
+      }).join('')
+    + '</svg>'
+    + '<div style="display:flex;font-size:9.5px;color:var(--mut);margin-top:2px">'
+    + filas.map(function(f){
+        return '<div style="flex:1;text-align:center;overflow:hidden">'+esc(mesTxt(f.mes_ok).slice(0,3))+'</div>'; }).join('')
+    + '</div></div></div>';
+  $('cuerpo').insertAdjacentHTML('beforeend', s);
+}
+
+// PWA: mismo service worker que IFCO mobile, que ya tiene scope '/m/'.
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', function(){
+    navigator.serviceWorker.register('/mifco-sw.js', { scope: '/m/' }).catch(function(){});
+  });
+}
+</script>
+</body>
+</html>
