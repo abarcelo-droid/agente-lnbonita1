@@ -127,7 +127,7 @@ test('quien entra por el módulo viejo cae en la solapa, no en una pantalla que 
 // ── EL CONTEO SE HACE POR BULTO ────────────────────────────────────────────
 test('Stock cuenta bultos, con el kilo abajo', () => {
   // Pablo, 27/8/2026: «en general los conteos los hacemos por bulto».
-  assert.match(PANEL, /<th style="text-align:right">Bultos disp<\/th>/);
+  assert.match(PANEL, /<th style="width:\d+%;text-align:right">Bultos disp<\/th>/);
   assert.match(PANEL, /function sgStockBultosCell\(l\)\{/);
   assert.match(PANEL, /sgStockBultosCell\(l\)/);
   const i = PANEL.indexOf('function sgStockBultosCell(l){');

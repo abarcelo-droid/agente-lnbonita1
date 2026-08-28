@@ -2470,6 +2470,122 @@ function crearLoteHijo(db, { madre, reprocesoId, productoId, kg, costoAsignado, 
   return { loteId: info.lastInsertRowid, codigoLote: codigo, costo, presentacion_id: presId, bultos: blt };
 }
 
+// ══ MERCADERÍA DE SEGUNDA: EL PEDAZO SE VA A UN LOTE HERMANO ═══════════════
+//
+// Pablo, 28/8/2026: «el comprador puede marcar 15 de esos 30 bultos como
+// mercadería de segunda, asumiendo que el precio va a ser más bajo y que la
+// rentabilidad cae. Pero siempre sabiendo que queda registrado en la partida».
+//
+// HERMANO, NO HIJO. crearLoteHijo y crearLoteTransformado —las dos que ya
+// existen— dejan recepcion_id y oc_item_id en NULL, porque un lote de reproceso
+// dejó de ser lo que se compró. Acá NO: son los mismos cajones de la misma
+// compra, con otra etiqueta. Si se fueran a NULL, la liquidación al productor no
+// los vería, el avance de la partida nunca llegaría al 100% y la partida no se
+// podría liquidar nunca.
+//
+// Y la madre PIERDE lo que se llevó el hermano. Sin eso, sumar los dos lotes por
+// oc_item daría 115 sobre 100 recibidos y todo lo que se le paga al productor
+// saldría de más.
+//
+// EL COSTO NO CAMBIA, y es la parte que hay que poder probar. Un cajón de
+// segunda costó lo mismo que uno de primera: lo que baja es el PRECIO al que se
+// va a vender, y por eso cae la rentabilidad. Inventarle un costo más barato
+// taparía justamente lo que Pablo quiere ver.
+//
+//   madre con costo C sobre K kilos → costo/kg = C/K
+//   salen x kilos con x·C/K de costo
+//   a la madre le queda (C − x·C/K)/(K − x) = C/K   ← el mismo
+//
+// El costo se mueve en tres partes, y las tres tienen que estar:
+//   · costo_base, proporcional por kilo. Así sigue valiendo kg × precio en los
+//     dos, que es lo que va a reproducir aplicarPrecioItem si el comprador
+//     cambia el precio acordado después.
+//   · la descarga y el flete de entrada se reparten SOLOS: recalcCostoLote los
+//     prorratea por kg del lote sobre el total de la recepción, y ese total no
+//     cambió porque los dos lotes son de la misma recepción.
+//   · los gastos directos del lote (acondicionamiento, comisión) NO se reparten
+//     solos: hay que partir cada fila. Si esto se omite, el lote de segunda
+//     queda más barato por kilo y se rompe la promesa.
+function reclasificarLote(db, { madre, bultos, calidadNueva, semaforo, motivo, pisoId, userId }) {
+  const kpb = kpbEfectivo(madre);
+  if (!(kpb > 0)) return { error: 'Esta partida no tiene kilos por bulto: no se puede separar por cajón.' };
+  const kgMov = Math.round(bultos * kpb * 1e4) / 1e4;
+  const kgOrig = Number(madre.kg_reales) || 0;
+  if (!(kgOrig > 0)) return { error: 'Esta partida no tiene kilos cargados.' };
+  const propor = kgMov / kgOrig;
+
+  const baseOrig = Number(madre.costo_base) || 0;
+  const baseMov = Math.round(baseOrig * propor * 100) / 100;
+  // La madre absorbe el redondeo: si se lo quedara el hermano, dos
+  // reclasificaciones seguidas irían corriendo el costo de a un centavo.
+  const baseQueda = Math.round((baseOrig - baseMov) * 100) / 100;
+  const kgQueda = Math.round((kgOrig - kgMov) * 1e4) / 1e4;
+  const bltQueda = Math.round((Number(madre.bultos) || 0) - bultos);
+
+  const codigo = nextNumero(db, 'SG-LT', 'sg_lotes', 'codigo_lote');
+  const info = db.prepare(`INSERT INTO sg_lotes
+    (codigo_lote, recepcion_id, oc_item_id, producto_id, kg_reales, precio_unitario_kg, costo_base,
+     calidad, calibre, origen, fecha_ingreso, fecha_vencimiento_estimada, estado, costo_final,
+     semaforo, presentacion_id, kg_por_bulto, bultos, reclasificado_de, creado_por)
+    VALUES (?,?,?,?,?,?,?, ?,?,?,?,?, 'disponible', ?, ?,?,?,?,?,?)`).run(
+    codigo, madre.recepcion_id, madre.oc_item_id, madre.producto_id, kgMov,
+    madre.precio_unitario_kg, baseMov,
+    calidadNueva, madre.calibre, madre.origen, madre.fecha_ingreso, madre.fecha_vencimiento_estimada,
+    baseMov, semaforo || madre.semaforo || 'verde', madre.presentacion_id, kpb, bultos,
+    madre.id, userId || null);
+  const nuevoId = info.lastInsertRowid;
+
+  db.prepare(`UPDATE sg_lotes SET kg_reales=?, bultos=?, costo_base=?,
+    modificado_en=datetime('now','localtime'), modificado_por=? WHERE id=?`)
+    .run(kgQueda, bltQueda, baseQueda, userId || null, madre.id);
+
+  // LOS GASTOS DIRECTOS DEL LOTE, partidos a mano. Es lo único del costo que no
+  // se reparte solo.
+  const gastos = db.prepare('SELECT * FROM sg_gastos_directos_lote WHERE lote_id=? AND activo=1').all(madre.id);
+  const insG = db.prepare(`INSERT INTO sg_gastos_directos_lote
+    (lote_id, tipo_gasto, proveedor_id_gasto, monto, fecha, observaciones, creado_por)
+    VALUES (?,?,?,?,?,?,?)`);
+  for (const g of gastos) {
+    const montoMov = Math.round((Number(g.monto) || 0) * propor * 100) / 100;
+    if (!(montoMov > 0)) continue;
+    const montoQueda = Math.round(((Number(g.monto) || 0) - montoMov) * 100) / 100;
+    db.prepare('UPDATE sg_gastos_directos_lote SET monto=? WHERE id=?').run(montoQueda, g.id);
+    insG.run(nuevoId, g.tipo_gasto, g.proveedor_id_gasto, montoMov, g.fecha,
+      'Parte de ' + madre.codigo_lote + ' — bultos pasados a ' + calidadNueva, userId || null);
+  }
+
+  // LA MERCADERÍA NO SE MOVIÓ DE LUGAR: sigue en el mismo piso, con otra
+  // etiqueta. Si la madre estaba repartida en varios pisos, el que marca elige
+  // de cuál sale — inventarlo haría que alguien vaya a buscarla donde no está.
+  const dondeEstaba = ubicacionesDeLote(db, madre.id);
+  let pisoUsado = pisoId || null;
+  if (dondeEstaba.length) {
+    if (!pisoUsado) {
+      pisoUsado = dondeEstaba.slice().sort((a, b) => (b.bultos || 0) - (a.bultos || 0))[0].piso_id;
+    }
+    descontarDeUbicacion(db, madre.id, bultos, kgMov, pisoUsado);
+    ubicarLote(db, nuevoId, [{ piso_id: pisoUsado, bultos: bultos, kg: kgMov }]);
+  }
+
+  const costoMov = recalcCostoLote(db, nuevoId);
+  recalcCostoLote(db, madre.id);
+  recalcEstadoLote(db, madre.id);
+  recalcEstadoLote(db, nuevoId);
+
+  db.prepare(`INSERT INTO sg_lote_reclasificaciones
+    (lote_origen_id, lote_destino_id, bultos, kg, costo_movido, calidad_anterior, calidad_nueva,
+     motivo, piso_id, usuario_id)
+    VALUES (?,?,?,?,?,?,?,?,?,?)`).run(
+    madre.id, nuevoId, bultos, kgMov, costoMov, madre.calidad || null, calidadNueva,
+    motivo, pisoUsado, userId || null);
+
+  anotarEdicion(db, { tabla: 'sg_lotes', registroId: madre.id, campo: 'bultos',
+    antes: madre.bultos, despues: bltQueda, motivo: 'Bultos pasados a ' + calidadNueva + ': ' + motivo,
+    userId });
+
+  return { loteId: nuevoId, codigoLote: codigo, kg: kgMov, bultos, costo: costoMov, piso_id: pisoUsado };
+}
+
 // Actualiza estado de la OC según kg recibidos vs estimados.
 //
 // SALVO QUE YA ESTÉ CONFIRMADA. Cuando alguien da la orden por terminada, esa
@@ -4566,6 +4682,17 @@ function frenosDeEdicionLote(db, loteId) {
     return { error: 'Este lote vino de una transformación o un reproceso: su costo se calculó a partir '
       + 'de otro lote y no se corrige acá.' };
   }
+  // ── LA PARTIDA QUE SE PARTIÓ POR CALIDAD ─────────────────────────────
+  // Corregirle los kilos a la madre después de haberle sacado los cajones de
+  // segunda descuadra la partida contra el proveedor: la suma de los dos lotes
+  // dejaría de dar lo que entró. Y al hermano lo mismo, al revés.
+  const reclas = db.prepare(`SELECT COUNT(*) c FROM sg_lote_reclasificaciones
+    WHERE (lote_origen_id=? OR lote_destino_id=?) AND anulada_en IS NULL`).get(loteId, loteId).c;
+  if (reclas > 0) {
+    return { error: 'Esta partida se separó por calidad: parte de sus bultos se pasaron a otra '
+      + '(o vinieron de ahí). Deshacé esa separación antes de corregir las cantidades: si no, '
+      + 'los dos lotes juntos dejarían de dar lo que entró.' };
+  }
   return { ok: true, lote: l };
 }
 
@@ -4653,6 +4780,183 @@ router.delete('/lotes/:id', requireAuth, (req, res) => {
 // venta y al margen: cambiarle la calidad ahí atrás es reescribir el pasado de
 // algo cerrado. Y queda registrado quién y cuándo, igual que cualquier otra
 // corrección.
+// ══ MARCAR BULTOS COMO MERCADERÍA DE SEGUNDA ═══════════════════════════════
+//
+// Pablo, 28/8/2026: «los compradores, dentro del stock, pueden asignar bultos de
+// una partida y marcarlos como mercadería de segunda. Entraron 100, se vendieron
+// 70, quedan 30; de esos 30 el comprador marca 15 —o el número que sea, siempre
+// sin pasarse del stock— asumiendo que el precio va a ser más bajo y que la
+// rentabilidad cae. Pero siempre sabiendo que queda registrado en la partida».
+//
+// Los 15 cajones se van a un lote HERMANO de la misma partida: misma recepción,
+// mismo ítem de la orden, misma fecha, mismo piso. Lo único que cambia es la
+// etiqueta y, cuando se venda, el precio.
+//
+// NO ES ADMIN. Es el trabajo del día del comprador: la URL cae bajo sg/lotes y
+// exigirNivel le pide nivel «operar» en Stock o en Compras, que es el que ya
+// tiene para mover mercadería.
+router.post('/lotes/:id/reclasificar', requireAuth, express.json(), (req, res) => {
+  const db = getDb();
+  try {
+    const b = req.body || {};
+    const madre = db.prepare('SELECT * FROM sg_lotes WHERE id=? AND activo=1').get(req.params.id);
+    if (!madre) return res.status(404).json({ ok: false, error: 'Partida no encontrada' });
+    if (madre.estado === 'bajado') {
+      return res.status(400).json({ ok: false, error: 'Esta partida está dada de baja.' });
+    }
+    // Sin cajones no hay nada que separar: el granel se parte por kilos y para
+    // eso está el reproceso, que además reparte el gasto del acondicionamiento.
+    if (madre.bultos == null) {
+      return res.status(400).json({ ok: false, error:
+        'Esta partida no se cuenta en bultos. Para separar mercadería a granel usá un reproceso.' });
+    }
+    // SIN PRECIO NO HAY COSTO QUE REPARTIR. Una partida de pizarra sin cerrar
+    // tiene costo cero: partirla dejaría dos lotes a cero y el margen del que se
+    // venda saldría inventado.
+    if (madre.precio_unitario_kg == null) {
+      return res.status(400).json({ ok: false, error:
+        'Esta partida todavía no tiene precio cerrado. Cerrale el precio primero: sin eso los dos '
+        + 'lotes quedarían a costo cero y el margen de lo que se venda no significaría nada.' });
+    }
+    const calidad = val(b.calidad);
+    if (!['primera', 'segunda', 'tercera'].includes(calidad)) {
+      return res.status(400).json({ ok: false, error: 'Elegí a qué calidad pasan esos bultos.' });
+    }
+    if (String(madre.calidad || 'primera') === calidad) {
+      return res.status(400).json({ ok: false, error:
+        'Esos bultos ya son de ' + calidad + ': separarlos no cambiaría nada.' });
+    }
+    const bultos = Number(b.bultos);
+    if (!Number.isFinite(bultos) || bultos <= 0 || Math.round(bultos) !== bultos) {
+      return res.status(400).json({ ok: false, error: 'Poné cuántos cajones enteros pasan a ' + calidad + '.' });
+    }
+    // EL LÍMITE: lo que hay de verdad. El mismo número que valida el reproceso.
+    const disp = bultosDisponibles(db, madre.id);
+    if (disp == null) return res.status(400).json({ ok: false, error: 'Esta partida no tiene bultos cargados.' });
+    if (bultos > disp) {
+      return res.status(400).json({ ok: false, error:
+        'No podés pasar ' + bultos + ' cajón(es) a ' + calidad + ': quedan ' + disp + ' en stock. '
+        + 'Lo que ya se despachó salió como estaba y eso no se reescribe.' });
+    }
+    // POR QUÉ. Es lo que después explica el precio más bajo: sin el motivo, a los
+    // dos meses hay una partida de segunda y nadie sabe qué le pasó.
+    const motivo = val(b.motivo);
+    if (!motivo || motivo.length < 3) {
+      return res.status(400).json({ ok: false, error: 'Escribí por qué pasan a ' + calidad + ': queda registrado en la partida.' });
+    }
+    const semaforo = val(b.semaforo);
+    if (semaforo && !['verde', 'amarillo', 'rojo'].includes(semaforo)) {
+      return res.status(400).json({ ok: false, error: 'Semáforo inválido' });
+    }
+    const pisoId = (b.piso_id != null && b.piso_id !== '') ? Number(b.piso_id) : null;
+
+    // ── SE VA TODO: NO SE PARTE, SE RE-ETIQUETA ────────────────────────────
+    // Marcar los 15 de 15 y crear un lote nuevo dejaría la madre en cero,
+    // fantasma en la lista y sin nada adentro. Si además ya se despachó algo, sí
+    // se parte: esos 70 salieron como primera y eso no se reescribe.
+    const salio = kgDespachados(db, madre.id) > 0.01 || kgDecomisado(db, madre.id) > 0.01
+      || kgTransformado(db, madre.id) > 0.01;
+    if (bultos === disp && !salio) {
+      const antes = madre.calidad;
+      db.prepare(`UPDATE sg_lotes SET calidad=?, semaforo=COALESCE(?, semaforo),
+        modificado_en=datetime('now','localtime'), modificado_por=? WHERE id=?`)
+        .run(calidad, semaforo || null, uid(req), madre.id);
+      anotarEdicion(db, { tabla: 'sg_lotes', registroId: madre.id, campo: 'calidad',
+        antes: antes, despues: calidad, motivo, userId: uid(req) });
+      return res.json({ ok: true, data: { entera: true, lote_id: madre.id, calidad } });
+    }
+
+    let out;
+    db.transaction(() => {
+      out = reclasificarLote(db, { madre, bultos, calidadNueva: calidad, semaforo, motivo,
+        pisoId, userId: uid(req) });
+    })();
+    if (out && out.error) return res.status(400).json({ ok: false, error: out.error });
+    res.json({ ok: true, data: out });
+  } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
+});
+
+// DESHACER. Se marcó de más, o se marcó la partida equivocada. Es lo primero que
+// van a necesitar, y la palabra «anular» en la URL hace que exigirNivel pida el
+// nivel de anular sin declarar nada nuevo.
+//
+// SÓLO SI EL LOTE DE SEGUNDA ESTÁ INTACTO. Si ya salió un cajón, su costo viajó
+// a esa venta: devolverlo dejaría la plata contada mal de los dos lados. El
+// camino en ese caso es el mismo endpoint al revés — reclasificar a primera lo
+// que queda—, que fragmenta la partida y es honesto.
+router.post('/lotes/:id/reclasificaciones/:rid/anular', requireAuth, express.json(), (req, res) => {
+  const db = getDb();
+  try {
+    const r = db.prepare('SELECT * FROM sg_lote_reclasificaciones WHERE id=? AND lote_origen_id=?')
+      .get(req.params.rid, req.params.id);
+    if (!r) return res.status(404).json({ ok: false, error: 'Esa separación no es de esta partida' });
+    if (r.anulada_en) return res.status(400).json({ ok: false, error: 'Esa separación ya se deshizo' });
+    const hijo = db.prepare('SELECT * FROM sg_lotes WHERE id=?').get(r.lote_destino_id);
+    const madre = db.prepare('SELECT * FROM sg_lotes WHERE id=? AND activo=1').get(r.lote_origen_id);
+    if (!hijo || !madre) return res.status(404).json({ ok: false, error: 'Partida no encontrada' });
+    if (!hijo.activo) return res.status(400).json({ ok: false, error: 'Ese lote ya no existe' });
+    const salio = kgDespachados(db, hijo.id) > 0.01 || kgDecomisado(db, hijo.id) > 0.01
+      || kgTransformado(db, hijo.id) > 0.01;
+    if (salio) {
+      return res.status(400).json({ ok: false, error:
+        'De los bultos de ' + hijo.calidad + ' ya salió mercadería: su costo viajó a esa venta y '
+        + 'devolverlos dejaría la plata contada mal. Lo que queda se puede volver a ' + (madre.calidad || 'primera')
+        + ' marcándolo de nuevo desde ese lote.' });
+    }
+    const otras = db.prepare(`SELECT COUNT(*) c FROM sg_lote_reclasificaciones
+      WHERE lote_origen_id=? AND anulada_en IS NULL`).get(hijo.id).c;
+    if (otras > 0) {
+      return res.status(400).json({ ok: false, error:
+        'De ese lote ya se separaron bultos a otra calidad. Deshacé esa separación primero.' });
+    }
+    const motivo = val(req.body && req.body.motivo);
+    if (!motivo || motivo.length < 3) {
+      return res.status(400).json({ ok: false, error: 'Escribí por qué se deshace: queda registrado' });
+    }
+    db.transaction(() => {
+      // Los kilos, los bultos y el costo vuelven enteros a la madre.
+      db.prepare(`UPDATE sg_lotes SET kg_reales=?, bultos=?, costo_base=?,
+        modificado_en=datetime('now','localtime'), modificado_por=? WHERE id=?`).run(
+        Math.round(((Number(madre.kg_reales) || 0) + (Number(hijo.kg_reales) || 0)) * 1e4) / 1e4,
+        Math.round((Number(madre.bultos) || 0) + (Number(hijo.bultos) || 0)),
+        Math.round(((Number(madre.costo_base) || 0) + (Number(hijo.costo_base) || 0)) * 100) / 100,
+        uid(req), madre.id);
+      // Y los gastos directos que se le habían partido.
+      const gh = db.prepare('SELECT * FROM sg_gastos_directos_lote WHERE lote_id=? AND activo=1').all(hijo.id);
+      for (const g of gh) {
+        const espejo = db.prepare(`SELECT id, monto FROM sg_gastos_directos_lote
+          WHERE lote_id=? AND tipo_gasto=? AND activo=1 ORDER BY id LIMIT 1`).get(madre.id, g.tipo_gasto);
+        if (espejo) {
+          db.prepare('UPDATE sg_gastos_directos_lote SET monto=? WHERE id=?')
+            .run(Math.round(((Number(espejo.monto) || 0) + (Number(g.monto) || 0)) * 100) / 100, espejo.id);
+        } else {
+          db.prepare('UPDATE sg_gastos_directos_lote SET lote_id=? WHERE id=?').run(madre.id, g.id);
+          continue;
+        }
+        db.prepare('UPDATE sg_gastos_directos_lote SET activo=0 WHERE id=?').run(g.id);
+      }
+      // La mercadería vuelve al piso del que salió.
+      const ubic = ubicacionesDeLote(db, hijo.id);
+      for (const u of ubic) {
+        descontarDeUbicacion(db, hijo.id, u.bultos, u.kg, u.piso_id);
+        ubicarLote(db, madre.id, [{ piso_id: u.piso_id, bultos: u.bultos, kg: u.kg }]);
+      }
+      db.prepare(`UPDATE sg_lotes SET activo=0, eliminado_en=datetime('now','localtime'),
+        eliminado_por_id=? WHERE id=?`).run(uid(req), hijo.id);
+      // La fila NO se borra: se sella. Una reclasificación que desaparece deja la
+      // partida con un agujero que nadie puede explicar.
+      db.prepare(`UPDATE sg_lote_reclasificaciones SET anulada_en=datetime('now','localtime'),
+        anulada_por=?, motivo_anulacion=? WHERE id=?`).run(uid(req), motivo, r.id);
+      recalcCostoLote(db, madre.id);
+      recalcEstadoLote(db, madre.id);
+      anotarEdicion(db, { tabla: 'sg_lotes', registroId: madre.id, campo: 'bultos',
+        antes: madre.bultos, despues: (Number(madre.bultos) || 0) + (Number(hijo.bultos) || 0),
+        motivo: 'Se deshizo el pase a ' + hijo.calidad + ': ' + motivo, userId: uid(req) });
+    })();
+    res.json({ ok: true, data: { lote_id: madre.id, bultos_devueltos: hijo.bultos } });
+  } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
+});
+
 router.put('/lotes/:id/calidad', requireAuth, (req, res) => {
   const db = getDb();
   try {
@@ -6839,13 +7143,20 @@ router.get('/lotes', requireAuth, (req, res) => {
            FROM sg_lote_ubicaciones u JOIN sg_pisos p ON p.id = u.piso_id
           WHERE u.lote_id = l.id AND (u.bultos > 0.001 OR u.kg > 0.01)) AS pisos,
         (SELECT COUNT(*) FROM sg_lote_ubicaciones u
-          WHERE u.lote_id = l.id AND (u.bultos > 0.001 OR u.kg > 0.01)) AS n_pisos
+          WHERE u.lote_id = l.id AND (u.bultos > 0.001 OR u.kg > 0.01)) AS n_pisos,
+        -- MERCADERÍA DE SEGUNDA: de qué partida salió esta, y cuántos cajones se
+        -- fueron de ésta a otra calidad. Las dos filas quedan juntas en la lista
+        -- porque heredan el vencimiento, que es el orden.
+        mad.codigo_lote AS reclasificado_de_codigo,
+        (SELECT COALESCE(SUM(rc.bultos),0) FROM sg_lote_reclasificaciones rc
+          WHERE rc.lote_origen_id = l.id AND rc.anulada_en IS NULL) AS bultos_reclasificados
       FROM sg_lotes l
       LEFT JOIN sg_productos pr ON pr.id=l.producto_id
       LEFT JOIN sg_presentaciones ps ON ps.id=l.presentacion_id
       LEFT JOIN sg_recepciones r ON r.id=l.recepcion_id
       LEFT JOIN sg_oc o ON o.id=r.oc_id
       LEFT JOIN sg_proveedores pv ON pv.id=o.proveedor_id
+      LEFT JOIN sg_lotes mad ON mad.id = l.reclasificado_de
       WHERE ${where.join(' AND ')} ORDER BY l.fecha_vencimiento_estimada ASC, l.id DESC`).all(...params);
     res.json({ ok: true, data: rows.map(derivarBultosLote) });
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
@@ -7067,11 +7378,41 @@ router.get('/lotes/:id/movimientos', requireAuth, (req, res) => {
       WHERE l.id = ?`).get(id);
     if (!lote) return res.status(404).json({ ok: false, error: 'Partida inexistente' });
 
+    // LO QUE SE PASÓ A OTRA CALIDAD. Se lee antes del alta porque el alta tiene
+    // que decir los kilos que entraron DE VERDAD: a la madre se le bajaron los
+    // kg_reales al separarle los cajones de segunda, y si el alta dijera el saldo
+    // de hoy, el movimiento no cerraría y parecería que entró menos.
+    const reclas = db.prepare(`SELECT rc.*, ld.codigo_lote AS destino_codigo,
+        lo.codigo_lote AS origen_codigo
+      FROM sg_lote_reclasificaciones rc
+      LEFT JOIN sg_lotes ld ON ld.id = rc.lote_destino_id
+      LEFT JOIN sg_lotes lo ON lo.id = rc.lote_origen_id
+      WHERE (rc.lote_origen_id=? OR rc.lote_destino_id=?) AND rc.anulada_en IS NULL
+      ORDER BY rc.id`).all(id, id);
+    const salioPorCalidad = reclas
+      .filter((rc) => rc.lote_origen_id === id)
+      .reduce((a, rc) => a + (Number(rc.kg) || 0), 0);
+    const vino = reclas.find((rc) => rc.lote_destino_id === id) || null;
+
     const movs = [];
     // EL ALTA. Una sola: la partida entra con lo que se recibió.
-    movs.push({ tipo: 'alta', fecha: lote.fecha_ingreso, kg: Number(lote.kg_reales) || 0,
-      detalle: 'Ingreso' + (lote.proveedor_nombre ? ' — ' + lote.proveedor_nombre : ''),
-      ref: lote.numero_recepcion || lote.oc_numero || null });
+    movs.push({ tipo: 'alta', fecha: lote.fecha_ingreso,
+      kg: Math.round(((Number(lote.kg_reales) || 0) + salioPorCalidad) * 1e4) / 1e4,
+      detalle: vino
+        ? 'Reclasificada desde ' + (vino.origen_codigo || 'otra partida')
+          + (vino.calidad_anterior ? ' (era ' + vino.calidad_anterior + ')' : '')
+        : 'Ingreso' + (lote.proveedor_nombre ? ' — ' + lote.proveedor_nombre : ''),
+      ref: vino ? (vino.origen_codigo || null) : (lote.numero_recepcion || lote.oc_numero || null) });
+
+    // Y LA SALIDA POR CALIDAD, con el código del lote a donde fue: sin eso queda
+    // un movimiento que dice que la mercadería se fue y no a dónde.
+    for (const rc of reclas) {
+      if (rc.lote_origen_id !== id) continue;
+      movs.push({ tipo: 'reclasificacion', fecha: String(rc.creado_en || '').slice(0, 10),
+        kg: -(Number(rc.kg) || 0), bultos: rc.bultos,
+        detalle: 'Pasados a ' + rc.calidad_nueva + (rc.motivo ? ' — ' + rc.motivo : ''),
+        ref: rc.destino_codigo || null });
+    }
 
     // LAS SALIDAS AL CLIENTE. Se nombra el COMPROBANTE si ya se facturó, porque
     // es por lo que el cliente reclama; si todavía no, el remito, que es lo único
@@ -7152,9 +7493,21 @@ router.get('/lotes/:id/trazabilidad', requireAuth, (req, res) => {
   try {
     const lote = db.prepare(`SELECT l.*, pr.nombre AS producto_nombre, pr.familia AS producto_familia,
         pr.vida_util_dias_default,
-        CAST(julianday(l.fecha_vencimiento_estimada) - julianday(date('now','localtime')) AS INTEGER) AS dias_restantes
-      FROM sg_lotes l LEFT JOIN sg_productos pr ON pr.id=l.producto_id WHERE l.id=?`).get(req.params.id);
+        COALESCE(l.kg_por_bulto, ps.factor_conversion) AS kg_por_bulto,
+        CAST(julianday(l.fecha_vencimiento_estimada) - julianday(date('now','localtime')) AS INTEGER) AS dias_restantes,
+        -- CUÁNTO QUEDA DE VERDAD. La ficha necesita el disponible para poder
+        -- ofrecer separar cajones sin pasarse: con kg_reales a secas ofrecería
+        -- los que ya se despacharon.
+        ${KG_VIGENTE_STOCK} AS kg_vigente,
+        ${KG_DISPONIBLE} AS kg_disponibles,
+        (SELECT COUNT(*) FROM sg_lote_ubicaciones u
+          WHERE u.lote_id = l.id AND (u.bultos > 0.001 OR u.kg > 0.01)) AS n_pisos
+      FROM sg_lotes l
+      LEFT JOIN sg_productos pr ON pr.id=l.producto_id
+      LEFT JOIN sg_presentaciones ps ON ps.id=l.presentacion_id
+      WHERE l.id=?`).get(req.params.id);
     if (!lote) return res.status(404).json({ ok: false, error: 'Lote no encontrado' });
+    derivarBultosLote(lote);
 
     const recepcion = lote.recepcion_id ? db.prepare('SELECT * FROM sg_recepciones WHERE id=?').get(lote.recepcion_id) : null;
     const oc = recepcion ? db.prepare('SELECT * FROM sg_oc WHERE id=?').get(recepcion.oc_id) : null;
@@ -7175,7 +7528,27 @@ router.get('/lotes/:id/trazabilidad', requireAuth, (req, res) => {
       LEFT JOIN sg_clientes c ON c.id=d.cliente_id
       WHERE di.lote_id=? ORDER BY d.fecha_despacho`).all(lote.id);
 
-    res.json({ ok: true, data: { lote, producto: { id: lote.producto_id, nombre: lote.producto_nombre, familia: lote.producto_familia }, oc_item: ocItem, recepcion, oc, proveedor, gastos_directos: gastosDirectos, prorrateo, despachos } });
+    // ── LO QUE SE PASÓ A OTRA CALIDAD ──────────────────────────────────
+    // Es la parte de «que quede registrado en la partida»: de dónde salieron
+    // estos cajones, y a dónde se fueron los que ya no están.
+    const reclasificaciones = db.prepare(`SELECT rc.*, ld.codigo_lote AS destino_codigo,
+        ld.calidad AS destino_calidad
+      FROM sg_lote_reclasificaciones rc
+      LEFT JOIN sg_lotes ld ON ld.id = rc.lote_destino_id
+      WHERE rc.lote_origen_id=? ORDER BY rc.id`).all(lote.id);
+    const vino = lote.reclasificado_de
+      ? db.prepare(`SELECT rc.*, lo.codigo_lote AS origen_codigo
+           FROM sg_lote_reclasificaciones rc
+           JOIN sg_lotes lo ON lo.id = rc.lote_origen_id
+          WHERE rc.lote_destino_id=? AND rc.anulada_en IS NULL ORDER BY rc.id DESC LIMIT 1`).get(lote.id)
+      : null;
+
+    // DÓNDE ESTÁ, piso por piso. La ficha lo necesita para preguntar de cuál
+    // salen los cajones que se separan: si la partida está repartida y se
+    // inventa el piso, alguien va a buscarla donde no está.
+    const ubicaciones = ubicacionesDeLote(db, lote.id).filter((u) => (u.bultos > 0.001 || u.kg > 0.01));
+
+    res.json({ ok: true, data: { lote, producto: { id: lote.producto_id, nombre: lote.producto_nombre, familia: lote.producto_familia }, oc_item: ocItem, recepcion, oc, proveedor, gastos_directos: gastosDirectos, prorrateo, despachos, reclasificaciones, reclasificado_de: vino, ubicaciones } });
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
