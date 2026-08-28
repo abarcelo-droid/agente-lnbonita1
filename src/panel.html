@@ -40140,6 +40140,40 @@ if(_inpGondola) _inpGondola.addEventListener('keydown', function(e){
   </div>
 </div></div>
 
+<!-- ── DE QUÉ ESTÁ HECHO EL NÚMERO DEL TARJETÓN ──────────────────────────
+     Pablo, 28/8/2026: «haciendo click en cada uno de los tarjetones de productos
+     deberíamos poder tener un detalle de cómo se compone ese costo; que se abra
+     una pantalla con el detalle de todas las órdenes».
+
+     El tarjetón decía «Brócoli · $24.696.169 · 52 órdenes» y ahí se terminaba:
+     para saber de dónde salía ese número había que filtrar por cultivo y sumar a
+     mano. -->
+<div class="ab-modal-overlay" id="pa-mb-cul-detalle">
+<div class="ab-modal" style="width:min(1040px,96vw)">
+  <div class="mhd">
+    <div><div class="mht" id="pa-cul-tit">Cultivo</div>
+      <div style="font-size:12px;color:var(--mut)" id="pa-cul-sub"></div></div>
+    <button class="mcl" onclick="document.getElementById('pa-mb-cul-detalle').classList.remove('on')">×</button>
+  </div>
+  <style>
+    /* Ninguna de las dos tablas saca barra de costado. */
+    #pa-mb-cul-detalle .ab-table-wrap{overflow-x:hidden !important}
+    #pa-mb-cul-detalle table.pa-tbl{width:100%;table-layout:fixed}
+    #pa-mb-cul-detalle table.pa-tbl td{
+      padding:6px 9px;font-size:12px;white-space:nowrap;
+      overflow:hidden;text-overflow:ellipsis}
+    #pa-mb-cul-detalle table.pa-tbl th{
+      padding:6px 9px;letter-spacing:.03em;line-height:1.2;
+      white-space:normal;vertical-align:bottom}
+    @media(max-width:900px){ #pa-mb-cul-detalle .ab-table-wrap{overflow-x:auto !important}
+                             #pa-mb-cul-detalle table.pa-tbl{table-layout:auto} }
+  </style>
+  <div id="pa-cul-body"></div>
+  <div class="ab-modal-footer">
+    <button class="btn bo" onclick="document.getElementById('pa-mb-cul-detalle').classList.remove('on')">Cerrar</button>
+  </div>
+</div></div>
+
 <!-- Modal detalle orden -->
 <div class="ab-modal-overlay" id="pa-mb-orden-det">
 <div class="ab-modal" style="width:740px">
@@ -43863,7 +43897,42 @@ function paOrdAplicarFiltros(){
   PA._ordenesFiltradas=rows;
   paOrdRenderCards(rows);
   paOrdRenderTablaOrdenes(rows);
+  // SI EL DETALLE DE UN CULTIVO ESTÁ ABIERTO, se repinta con lo nuevo. Desde ahí
+  // se puede abrir una orden y ejecutarla, y al volver el detalle mostraría los
+  // números viejos —sin la aplicación que se acaba de cargar— sin ninguna señal
+  // de estar desactualizado. Va acá y no en el camino de la ejecución para que
+  // cubra también emitir, editar y eliminar.
+  var mb=document.getElementById('pa-mb-cul-detalle');
+  if(mb && mb.classList.contains('on') && PA._culAbierto) paCultivoDetalle(PA._culAbierto);
 }
+// ── LO QUE LE TOCA A UN CULTIVO DE UNA ORDEN ─────────────────────────────
+//
+// Una orden puede tocar lotes de DOS cultivos: las viejas no tienen cultivo
+// propio y se les deduce de los lotes, y un lote es de un cultivo. Sumarle a
+// cada cultivo el costo ENTERO de esa orden contaba la misma plata dos veces —
+// la suma de los tarjetones daba más que lo que se gastó de verdad.
+//
+// El reparto es EXACTO, no a ojo: cada aplicación dice a qué LOTE salió
+// (pa_aplicaciones.lote_id es obligatorio) y cada lote tiene su cultivo. Así que
+// lo que le toca a un cultivo es, literalmente, lo que se aplicó en sus lotes.
+//
+// Devuelve las aplicaciones de ese cultivo y su costo. Si la orden es de un solo
+// cultivo no hay nada que repartir y se devuelve todo, incluido el costo de la
+// orden — que puede tener plata que no viene de una aplicación.
+function paCultivoParte(o, cultivo){
+  var cs=o.cultivo?[o.cultivo]:(o.cultivos||[]);
+  if(cs.indexOf(cultivo)<0) return null;
+  var apl=o.aplicado||[];
+  if(cs.length<=1) return { apl:apl, costo:Number(o.costo_total)||0, compartida:false };
+  // Los lotes de ESTE cultivo. Los que no tienen cultivo cargado en la campaña
+  // no se le adjudican a ninguno: inventarlo sería peor que dejarlo afuera.
+  var ok={};
+  (o.lotes||[]).forEach(function(l){ if(l.cultivo===cultivo) ok[String(l.lote_id)]=1; });
+  var mias=apl.filter(function(a){ return a.lote_id!=null && ok[String(a.lote_id)]; });
+  var costo=mias.reduce(function(x,a){return x+(Number(a.costo)||0);},0);
+  return { apl:mias, costo:costo, compartida:true, con:cs.filter(function(c){return c!==cultivo;}) };
+}
+
 // Cards de resumen por cultivo. Se ocultan si hay 0 o 1 cultivo.
 function paOrdRenderCards(rows){
   var cont=document.getElementById('pa-ord-cards');
@@ -43875,17 +43944,172 @@ function paOrdRenderCards(rows){
     cs.forEach(function(c){
       if(!mapa[c])mapa[c]={n:0,costo:0};
       mapa[c].n++;
-      mapa[c].costo+=(o.costo_total||0);
+      // A cada cultivo lo suyo: con una orden repartida entre dos, sumar el
+      // total a los dos hacía que los tarjetones dieran más que lo gastado.
+      var p=paCultivoParte(o,c);
+      mapa[c].costo+=(p?p.costo:0);
     });
   });
   var cultivos=Object.keys(mapa).sort();
   if(cultivos.length<=1){cont.style.display='none';cont.innerHTML='';return;}
   cont.style.display='grid';
   cont.innerHTML=cultivos.map(function(c){
-    return'<div class="pa-card"><div class="pa-card-title">🌱 '+c+'</div>'
+    // Se abre el detalle. El número solo no dice de dónde sale, y averiguarlo
+    // era filtrar por cultivo y sumar a mano.
+    return'<div class="pa-card" style="cursor:pointer" title="Ver de qué está hecho este costo"'
+      +' onclick="paCultivoDetalle('+paQ(c)+')">'
+      +'<div class="pa-card-title">🌱 '+c+'</div>'
       +'<div class="pa-stat">'+paMoney(mapa[c].costo)+'</div>'
-      +'<div style="font-size:12px;color:var(--mut);margin-top:4px">'+mapa[c].n+' '+(mapa[c].n===1?'orden':'órdenes')+'</div></div>';
+      +'<div style="font-size:12px;color:var(--mut);margin-top:4px">'+mapa[c].n+' '+(mapa[c].n===1?'orden':'órdenes')
+      +' <span style="color:var(--pri,#2563eb)">· ver detalle</span></div></div>';
   }).join('');
+}
+
+// Comilla simple para meter un texto adentro de un onclick. El cultivo viene de
+// una lista cerrada, pero un apóstrofo en un nombre nuevo rompería el atributo y
+// el botón dejaría de andar sin que nadie lo note.
+function paQ(t){ return "'" + String(t == null ? '' : t).replace(/\\/g, '\\\\').replace(/'/g, "\\'") + "'"; }
+
+// ── DE QUÉ ESTÁ HECHO EL COSTO DE UN CULTIVO ──────────────────────────────
+//
+// Pablo, 28/8/2026: «un detalle de cómo se compone ese costo… una pantalla con
+// el detalle de todas las órdenes».
+//
+// Dos lecturas del mismo número: POR PRODUCTO —que es lo que lo mueve, porque el
+// costo de una orden es la suma de lo que se aplicó— y POR ORDEN, que es lo que
+// pidió. Y abajo el total, que tiene que dar exactamente lo que dice el
+// tarjetón: si no diera, un detalle que no cuadra y se calla es peor que no
+// tenerlo.
+//
+// Trabaja sobre las órdenes que YA están en pantalla, así que respeta los
+// filtros de arriba: si el tarjetón dice 52 órdenes, el detalle muestra esas 52.
+function paCultivoDetalle(cultivo){
+  PA._culAbierto=cultivo;   // para poder repintarlo si se ejecuta una orden desde acá
+  var rows=[], partes={}, total=0, compartidas=0;
+  (PA._ordenesFiltradas||[]).forEach(function(o){
+    var p=paCultivoParte(o,cultivo);
+    if(!p) return;
+    rows.push(o); partes[String(o.id)]=p; total+=p.costo;
+    if(p.compartida) compartidas++;
+  });
+
+  // Por producto: se juntan las aplicaciones QUE SALIERON A LOS LOTES DE ESTE
+  // CULTIVO. Juntar todas las de la orden haría aparecer, entre dos pantallas,
+  // más kilos de un producto de los que salieron del depósito — y eso alguien lo
+  // contrasta contra el remito.
+  var porIns={}, ordenIns=[];
+  rows.forEach(function(o){
+    (partes[String(o.id)].apl||[]).forEach(function(a){
+      var k=String(a.insumo_id);
+      if(!porIns[k]){ porIns[k]={nombre:a.insumo_nombre||'', unidad:a.unidad||'', usado:0, costo:0, ord:{}}; ordenIns.push(k); }
+      porIns[k].usado += Number(a.usado)||0;
+      porIns[k].costo += Number(a.costo)||0;
+      // Órdenes distintas, no renglones: una orden aplicada en tres lotes trae
+      // tres filas del mismo producto y diría «3 órdenes».
+      porIns[k].ord[String(o.id)]=1;
+    });
+  });
+  ordenIns.sort(function(a,b){ return porIns[b].costo-porIns[a].costo; });
+  var sumaIns=ordenIns.reduce(function(a,k){return a+porIns[k].costo;},0);
+
+  document.getElementById('pa-cul-tit').textContent='🌱 '+cultivo;
+  document.getElementById('pa-cul-sub').textContent=
+    paMoney(total)+' en '+rows.length+' '+(rows.length===1?'orden':'órdenes')
+    +' — con los filtros que tenés puestos';
+
+  var h='';
+  if(!rows.length){
+    h='<div class="emp">Ninguna orden de este cultivo con esos filtros.</div>';
+  } else {
+    // ── POR PRODUCTO ──────────────────────────────────────────────────
+    h+='<div style="font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;'
+      +'color:var(--mut);margin:4px 0 6px">De qué está hecho</div>';
+    if(!ordenIns.length){
+      h+='<div style="font-size:12.5px;color:var(--mut);margin-bottom:14px">'
+        +'Ninguna de estas órdenes se ejecutó todavía, así que no salió producto del depósito: '
+        +'el costo es cero porque no se aplicó nada, no porque falte cargarlo.</div>';
+    } else {
+      h+='<div class="ab-table-wrap" style="margin-bottom:16px"><table class="pa-tbl">'
+        +'<thead><tr><th style="width:38%">Producto</th>'
+        +'<th style="width:18%;text-align:right">Usado</th>'
+        +'<th style="width:14%;text-align:center">Órdenes</th>'
+        +'<th style="width:18%;text-align:right">Costo</th>'
+        +'<th style="width:12%;text-align:right">%</th></tr></thead><tbody>'
+        +ordenIns.map(function(k){
+          var e=porIns[k];
+          var pct = sumaIns>0 ? Math.round((e.costo/sumaIns)*1000)/10 : 0;
+          var nOrd = Object.keys(e.ord).length;
+          // SALIÓ PRODUCTO Y NO COSTÓ NADA es un dato que falta, no un regalo:
+          // el costo se toma del precio de la última compra, y si el insumo
+          // nunca se compró queda en cero. Decir «$0 · 0%» lo esconde.
+          var sinPrecio = e.usado>0 && !(e.costo>0);
+          return '<tr><td title="'+esc(e.nombre)+'">'+esc(e.nombre)+'</td>'
+            +'<td style="text-align:right">'+paOrdCant(e.usado,e.unidad)+'</td>'
+            +'<td style="text-align:center;color:var(--mut)">'+nr(nOrd)+'</td>'
+            +(sinPrecio
+               ? '<td colspan="2" style="text-align:right;color:#9a3412;font-size:11.5px"'
+                 +' title="El costo sale del precio de la última compra del insumo">sin precio de compra</td>'
+               : '<td style="text-align:right"><b>'+paMoney(e.costo)+'</b></td>'
+                 +'<td style="text-align:right;color:var(--mut)">'+pct+'%</td>')
+            +'</tr>';
+        }).join('')
+        +'</tbody></table></div>';
+    }
+
+    // ── LAS ÓRDENES, que es lo que se pidió ───────────────────────────
+    h+='<div style="font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;'
+      +'color:var(--mut);margin:4px 0 6px">Las '+rows.length+' '+(rows.length===1?'orden':'órdenes')+'</div>'
+      +'<div class="ab-table-wrap"><table class="pa-tbl">'
+      +'<thead><tr><th style="width:13%">N° Orden</th><th style="width:11%">Fecha</th>'
+      +'<th style="width:14%">Tipo</th><th style="width:12%">Lotes</th>'
+      +'<th style="width:24%">Productos</th>'
+      +'<th style="width:14%;text-align:right">Costo</th>'
+      +'<th style="width:12%;text-align:center">Estado</th></tr></thead><tbody>'
+      +rows.slice().sort(function(a,b){
+          return String(b.fecha_orden||'').localeCompare(String(a.fecha_orden||''));
+        }).map(function(o){
+        var lts=(o.lotes||[]).map(function(l){return l.lote_nombre;}).join(', ');
+        var prs=(o.items||[]).map(function(i){return i.insumo_nombre;}).join(', ');
+        var p=partes[String(o.id)];
+        var cst=(p.costo>0)?paMoney(p.costo):'—';
+        // La orden repartida entre dos cultivos se marca: acá figura sólo su
+        // parte, y el número no cierra contra la orden abierta si no se dice.
+        var comp=p.compartida
+          ? ' <span class="pa-badge" style="background:#fff7ed;color:#9a3412;font-size:10px" title="'
+            +'Esta orden también tocó lotes de: '+esc((p.con||[]).join(', '))
+            +'. Acá figura sólo la parte que salió a los lotes de '+esc(cultivo)+'.">parte</span>'
+          : '';
+        return '<tr style="cursor:pointer" onclick="paVerOrden('+o.id+')" title="Abrir la orden">'
+          +'<td><strong>'+esc(o.nro_orden||'')+'</strong>'+comp+'</td>'
+          +'<td>'+paFecha(o.fecha_orden)+'</td>'
+          +'<td title="'+esc(o.tipo_aplicacion||'')+'">'+esc(o.tipo_aplicacion||'—')+'</td>'
+          +'<td title="'+esc(lts)+'" style="color:var(--mut)">'+esc(lts||'—')+'</td>'
+          +'<td title="'+esc(prs)+'" style="color:var(--mut)">'+esc(prs||'—')+'</td>'
+          +'<td style="text-align:right">'+cst+'</td>'
+          +'<td style="text-align:center">'+paBadgeEstado(o.estado)+'</td></tr>';
+      }).join('')
+      +'</tbody><tfoot><tr style="border-top:2px solid var(--bor);font-weight:700">'
+      +'<td colspan="5">TOTAL</td>'
+      +'<td style="text-align:right">'+paMoney(total)+'</td><td></td></tr></tfoot></table></div>';
+
+    // LO QUE DE VERDAD PUEDE NO CERRAR. Acá había un cartel que comparaba la
+    // suma por producto contra el total de las órdenes: son las MISMAS filas de
+    // la misma tabla sumadas dos veces, así que daba cero siempre y se leía como
+    // «está todo bien» sin haber mirado nada.
+    //
+    // Lo que sí hay que decir es la orden repartida: figura en dos cultivos y en
+    // cada uno con la parte que le tocó, así que su número no va a coincidir con
+    // el de la orden abierta.
+    if(compartidas>0){
+      h+='<div style="margin-top:10px;font-size:12.5px;color:#9a3412;background:#fff7ed;'
+        +'border-radius:8px;padding:8px 11px">⚠ '+nr(compartidas)+' '
+        +(compartidas===1?'orden tocó lotes':'órdenes tocaron lotes')+' de más de un cultivo. '
+        +'Acá figura sólo lo que salió a los lotes de '+esc(cultivo)
+        +', así que el costo de esas órdenes es menor al que muestran abiertas.</div>';
+    }
+  }
+  document.getElementById('pa-cul-body').innerHTML=h;
+  document.getElementById('pa-mb-cul-detalle').classList.add('on');
 }
 function paOrdRenderTablaOrdenes(data){
   var tb=document.getElementById('pa-ord-tbody');
