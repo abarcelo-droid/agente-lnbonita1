@@ -43924,6 +43924,7 @@ function paOrdExportarExcel(){
   if(!rows.length){alert('No hay órdenes para exportar con esos filtros');return;}
   var estadoLbl={borrador:'Borrador',emitida:'Emitida',en_ejecucion:'En ejecución',ejecutada:'Ejecutada',parcial:'Parcial',anulada:'Anulada'};
   var data=rows.map(function(o){
+    var items=o.items||[];
     return{
       'N° Orden':   o.nro_orden||'',
       'Fecha':      paFecha(o.fecha_orden),
@@ -43931,7 +43932,23 @@ function paOrdExportarExcel(){
       'Finca':      (o.finca_nombres||[]).join(', '),
       'Lote(s)':    (o.lotes||[]).map(function(l){return l.lote_nombre;}).join(', '),
       'Cultivo(s)': o.cultivo || (o.cultivos||[]).join(', '),
-      'Productos':  (o.items||[]).map(function(i){return i.insumo_nombre;}).join(', '),
+      'Productos':  items.map(function(i){return i.insumo_nombre;}).join(', '),
+      // CUÁNTO SE USÓ. Pablo, 28/8/2026: «al descargar el excel debe incorporar
+      // una columna que indique cantidad de producto que se usó en la
+      // aplicación».
+      //
+      // Es lo que SALIÓ DEL DEPÓSITO, no la dosis que se planificó.
+      //
+      // Y CADA CANTIDAD VA PEGADA A SU PRODUCTO —«Hydrocomplex: 25 kg»— en vez
+      // de en una lista paralela a la columna Productos. Dos listas alineadas
+      // por posición se leen mal apenas la orden tiene tres renglones, y peor si
+      // uno se aplicó y otro no.
+      'Cantidad usada': (o.aplicado||[]).map(function(a){
+          return a.insumo_nombre + ': ' + paOrdCant(a.usado, a.unidad); }).join(' · ') || '—',
+      // Y al lado la dosis planificada: una orden emitida no usó nada todavía, y
+      // sin esto ese vacío se lee como que la aplicación salió en cero.
+      'Dosis planificada': items.map(function(i){
+          return i.insumo_nombre + ': ' + paOrdCant(i.dosis, i.unidad_dosis); }).join(' · ') || '—',
       'Costo':      o.costo_total||0,
       'Asignado a': o.asignado_nombre||'',
       'Estado':     estadoLbl[o.estado]||o.estado||''
@@ -43946,8 +43963,84 @@ function paOrdExportarExcel(){
   });
   var wb=XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb,ws,'Órdenes');
+
+  // ── Y LA MISMA COSA, UN RENGLÓN POR PRODUCTO ──────────────────────────
+  // La hoja de arriba tiene una fila por ORDEN, así que cuando la orden lleva
+  // tres productos las cantidades quedan apiladas en una celda: se leen, pero no
+  // se suman. Acá cada producto tiene su renglón y su número propio, que es la
+  // única forma de contestar «cuánto Hydrocomplex usamos este mes».
+  var porProd=[];
+  rows.forEach(function(o){
+    // UN RENGLÓN POR PRODUCTO DE VERDAD. Se juntan los productos que la orden
+    // planificó con los que efectivamente se aplicaron —no siempre son los
+    // mismos: en la chacra pueden haber usado otra cosa— y se agrupan por
+    // insumo, porque una orden puede listar el mismo producto en dos renglones
+    // y ahí el total aplicado se contaría dos veces.
+    var porIns={}, orden=[];
+    var meter=function(id,nombre){
+      var k=String(id);
+      if(!porIns[k]){ porIns[k]={ nombre:nombre||'', dosis:0, unidad_dosis:'', usado:0, unidad:'' }; orden.push(k); }
+      return porIns[k];
+    };
+    (o.items||[]).forEach(function(i){
+      var e=meter(i.insumo_id, i.insumo_nombre);
+      // Dos renglones del mismo insumo son dos dosis del mismo producto: se suman.
+      e.dosis += Number(i.dosis)||0;
+      if(!e.unidad_dosis) e.unidad_dosis = i.unidad_dosis||'';
+      if(!e.unidad) e.unidad = i.unidad||'';
+    });
+    (o.aplicado||[]).forEach(function(a){
+      var e=meter(a.insumo_id, a.insumo_nombre);
+      e.usado = Number(a.usado)||0;   // ya viene sumado por el servidor
+      e.unidad = a.unidad||e.unidad;
+    });
+    orden.forEach(function(k){
+      var e=porIns[k];
+      porProd.push({
+        'N° Orden':   o.nro_orden||'',
+        'Fecha':      paFecha(o.fecha_orden),
+        'Tipo':       o.tipo_aplicacion||'',
+        'Finca':      (o.finca_nombres||[]).join(', '),
+        'Lote(s)':    (o.lotes||[]).map(function(l){return l.lote_nombre;}).join(', '),
+        'Cultivo(s)': o.cultivo || (o.cultivos||[]).join(', '),
+        'Producto':   e.nombre,
+        // Número pelado y la unidad al lado: así la columna se suma.
+        'Usado':      e.usado,
+        'Unidad':     e.unidad,
+        // LA DOSIS NO ES COMPARABLE CON LO USADO y por eso se llama dosis: una
+        // va en kg/ha y la otra en kilos. Puestas como «planificado» y «usado»,
+        // dos columnas de números pegadas se restan sin pensar.
+        'Dosis':      e.dosis,
+        'Unidad dosis': e.unidad_dosis,
+        'Estado':     estadoLbl[o.estado]||o.estado||''
+      });
+    });
+  });
+  if(porProd.length){
+    var ws2=XLSX.utils.json_to_sheet(porProd);
+    var cols2=Object.keys(porProd[0]);
+    ws2['!cols']=cols2.map(function(k){
+      var max=k.length;
+      porProd.forEach(function(row){var v=String(row[k]==null?'':row[k]);if(v.length>max)max=v.length;});
+      return{wch:Math.min(max+2,50)};
+    });
+    XLSX.utils.book_append_sheet(wb,ws2,'Por producto');
+  }
+
   var hoy=new Date().toISOString().slice(0,10);
   XLSX.writeFile(wb,'ordenes-aplicacion-'+hoy+'.xlsx');
+}
+
+// La cantidad con su unidad.
+//
+// NO USA nr(): esa redondea a ENTERO, y acá los decimales son el caso normal —
+// un agroquímico se dosifica a 0,05 o 0,75 lt/ha, y los dos campos de carga son
+// de a centavos. Con nr(), «0,4 lt usados» se imprimía «0 lt», que es
+// exactamente el número que se pidió, mintiendo.
+function paOrdCant(n, unidad){
+  var v = Number(n);
+  if (!(v > 0)) return '—';
+  return v.toLocaleString('es-AR', { maximumFractionDigits: 2 }) + (unidad ? ' ' + unidad : '');
 }
 
 function paEliminarOrden(id,nro){
