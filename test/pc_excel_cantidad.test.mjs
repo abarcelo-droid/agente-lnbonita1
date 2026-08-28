@@ -41,7 +41,7 @@ test('la cantidad usada sale de las aplicaciones, no de la dosis', () => {
   const b = PROD.slice(i, i + 1100);
   assert.match(b, /SUM\(a\.cantidad_real\),0\) AS usado/);
   assert.match(b, /FROM pa_aplicaciones a JOIN pa_insumos i ON i\.id = a\.insumo_id/);
-  assert.match(b, /GROUP BY a\.orden_id, a\.insumo_id/);
+  assert.match(b, /GROUP BY a\.orden_id, a\.lote_id, a\.insumo_id/);
   assert.match(PROD, /return \{ \.\.\.o, lotes, items, aplicado, cultivos/);
 });
 

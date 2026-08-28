@@ -1589,15 +1589,24 @@ router.get('/ordenes', requireAuth, (req, res) => {
     const usadoPorOrden = new Map();
     if (idsOrden.length) {
       const ph = idsOrden.map(() => '?').join(',');
-      for (const a of db.prepare(`SELECT a.orden_id, a.insumo_id, i.nombre AS insumo_nombre,
-          i.unidad, COALESCE(SUM(a.cantidad_real),0) AS usado
+      for (const a of db.prepare(`SELECT a.orden_id, a.lote_id, a.insumo_id,
+          i.nombre AS insumo_nombre, i.unidad,
+          COALESCE(SUM(a.cantidad_real),0) AS usado,
+          -- Y con cuánta plata: el costo de la orden es la suma de esto, así que
+          -- es lo que contesta «de qué está hecho este número».
+          COALESCE(SUM(a.costo_total),0) AS costo
         FROM pa_aplicaciones a JOIN pa_insumos i ON i.id = a.insumo_id
         WHERE a.orden_id IN (${ph})
-        GROUP BY a.orden_id, a.insumo_id`).all(...idsOrden)) {
+        -- POR LOTE, y no sólo por orden. Una orden puede tocar lotes de dos
+        -- cultivos distintos, y sin el lote no hay forma de saber qué parte de
+        -- lo aplicado fue a cada uno: habría que repartir a ojo o contar todo
+        -- dos veces. lote_id es NOT NULL en pa_aplicaciones, así que el reparto
+        -- es EXACTO — cada litro salió a un lote y el lote tiene su cultivo.
+        GROUP BY a.orden_id, a.lote_id, a.insumo_id`).all(...idsOrden)) {
         if (!usadoPorOrden.has(a.orden_id)) usadoPorOrden.set(a.orden_id, []);
         usadoPorOrden.get(a.orden_id).push({
-          insumo_id: a.insumo_id, insumo_nombre: a.insumo_nombre,
-          unidad: a.unidad, usado: a.usado,
+          insumo_id: a.insumo_id, insumo_nombre: a.insumo_nombre, lote_id: a.lote_id,
+          unidad: a.unidad, usado: a.usado, costo: a.costo,
         });
       }
     }
