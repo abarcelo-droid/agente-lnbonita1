@@ -29,6 +29,13 @@
 // campaña que arrancó en julio no tiene noviembre, y contarla en el divisor de noviembre
 // bajaría el promedio de ese mes por una razón de almanaque.
 //
+// Y EL PROMEDIO ES DE LAS ÚLTIMAS CAMPAÑAS, NO DE TODA LA HISTORIA (Pablo, 27/8/2026: "el
+// promedio tendría que ser últimas 3 campañas"). Un promedio de seis años incluye años que ya
+// no son este negocio: otros clientes, otras hectáreas, otro productor de referencia. Como
+// expectativa para comprar, lo viejo no ayuda — y encima aplana el número contra el que se
+// compara el año en curso. La historia entera sigue entrando para saber QUIÉNES existen y
+// cuándo trabajaban; lo que se acota es el promedio.
+//
 // ── LOS CHICOS SE AGRUPAN ─────────────────────────────────────────────────────────────
 // Un productor que trajo doscientos kilos una vez ocupa la misma fila que el que trae ochenta
 // mil todos los años, y en una lista de treinta filas eso hace que no se vea ninguno. Los que
@@ -119,12 +126,12 @@ export function ventanasDeProducto(db, where, params, opciones) {
   // vende todo el año. Los huecos son la mitad del dato. Si no viene, se cae a los del
   // producto.
   const mesesTodos = (o.meses_todos && o.meses_todos.length) ? o.meses_todos.slice().sort() : null;
-  // Cuántas campañas llegaron a cada mes. Lo calcula el router sobre TODA la base: es una
-  // pregunta de calendario, no de este producto.
-  const campPorMes = o.campanias_por_mes || {};
   // Cuánto tiene que pesar un productor para tener fila propia, en % del promedio del
   // producto. Por debajo va a "OTROS".
   const umbralPct = o.umbral_share != null ? Number(o.umbral_share) : 1;
+  // Cuántas campañas entran al promedio, contando desde la de referencia hacia atrás. 0 =
+  // todas. Lo elige la pantalla.
+  const ventanaProm = o.promedio_campanias != null ? Number(o.promedio_campanias) : 3;
 
   const filas = db.prepare(`
     WITH base AS (SELECT * FROM sheet_ventas ${where})
@@ -144,9 +151,34 @@ export function ventanasDeProducto(db, where, params, opciones) {
   const act = (o.periodo_actual && periodos.includes(o.periodo_actual))
     ? o.periodo_actual : periodos[periodos.length - 1];
 
+  // Qué campañas entran al promedio: las últimas N hasta la de referencia. Se calcula acá y
+  // no en el router porque depende de cuál terminó siendo la campaña de referencia.
+  const escalaCamp = (o.periodos_todos && o.periodos_todos.length)
+    ? o.periodos_todos.slice().sort()
+    : periodos.slice();
+  const hastaIdx = escalaCamp.indexOf(act);
+  const periodosProm = (ventanaProm > 0 && hastaIdx >= 0)
+    ? escalaCamp.slice(Math.max(0, hastaIdx - ventanaProm + 1), hastaIdx + 1)
+    : (hastaIdx >= 0 ? escalaCamp.slice(0, hastaIdx + 1) : escalaCamp.slice());
+  const enVentana = new Set(periodosProm);
+
+  // Cuántas campañas DE LA VENTANA llegaron a un mes. El router manda, por mes, la lista de
+  // campañas que lo tienen cargado (mirando toda la base, no este producto: que no vendamos
+  // palta en marzo no quiere decir que marzo no haya pasado). Sin ese detalle se cae a contar
+  // las de la ventana, que es lo mismo cuando están todas completas.
+  const detalleMes = o.campanias_por_mes_detalle || null;
+  const divisorMes = (m) => {
+    if (detalleMes && detalleMes[m]) {
+      const k = detalleMes[m].filter(p => enVentana.has(p)).length;
+      if (k > 0) return k;
+    }
+    return periodosProm.length || 1;
+  };
+
   const prov = new Map();
   const totMes = {};        // el perfil del producto entero, mes a mes (toda la historia)
   const totMesAct = {};     // y el de la campaña en curso
+  const totMesVent = {};    // y el de la ventana del promedio
   for (const f of filas) {
     const nombre = nombreProveedor(f.proveedor);
     if (!prov.has(nombre)) {
@@ -164,6 +196,9 @@ export function ventanasDeProducto(db, where, params, opciones) {
     const clave = f.mes_ok + '|' + f.periodo;
     if (!p.mes_periodo.has(clave)) { p.mes_periodo.add(clave); m.anios++; }
     if (f.periodo === act) m.kilos_act += f.kilos || 0;
+    // Lo que entra al promedio. Va aparte del acumulado: el acumulado sigue siendo toda la
+    // historia y es lo que se muestra en el globo.
+    if (enVentana.has(f.periodo)) m.kilos_vent = (m.kilos_vent || 0) + (f.kilos || 0);
 
     p.por_periodo[f.periodo] = (p.por_periodo[f.periodo] || 0) + (f.kilos || 0);
     p.kilos_hist += f.kilos || 0;
@@ -172,6 +207,7 @@ export function ventanasDeProducto(db, where, params, opciones) {
 
     totMes[f.mes_ok] = (totMes[f.mes_ok] || 0) + (f.kilos || 0);
     if (f.periodo === act) totMesAct[f.mes_ok] = (totMesAct[f.mes_ok] || 0) + (f.kilos || 0);
+    if (enVentana.has(f.periodo)) totMesVent[f.mes_ok] = (totMesVent[f.mes_ok] || 0) + (f.kilos || 0);
   }
 
   const bordes = (m, campo) => {
@@ -316,9 +352,10 @@ export function ventanasDeProducto(db, where, params, opciones) {
   for (const m of meses) {
     totales[m] = r0(totMes[m] || 0);
     totales_act[m] = r0(totMesAct[m] || 0);
-    const nc = campPorMes[m] || periodos.length || 1;
+    // Cuántas campañas DE LA VENTANA llegaron a ese mes.
+    const nc = divisorMes(m);
     campanias_mes[m] = nc;
-    promedios[m] = r0((totMes[m] || 0) / nc);
+    promedios[m] = r0((totMesVent[m] || 0) / nc);
   }
   // El pico se decide por el PROMEDIO, no por el acumulado: con una campaña vieja enorme, el
   // acumulado pone el pico donde ya no está.
@@ -335,16 +372,21 @@ export function ventanasDeProducto(db, where, params, opciones) {
   // dividan distinto la barra y el número, que es como se pierde la confianza en un gráfico.
   for (const p of salida) {
     for (const m of Object.keys(p.por_mes)) {
-      p.por_mes[m].kilos_prom = r0((p.por_mes[m].kilos || 0) / (campanias_mes[m] || 1));
+      p.por_mes[m].kilos_prom = r0((p.por_mes[m].kilos_vent || 0) / (campanias_mes[m] || 1));
     }
   }
-  // La escala del gráfico también en promedio: es lo que se dibuja.
+  // LA ESCALA MIRA LAS DOS BARRAS. Si sólo mirara el promedio, el año en curso que lo supera
+  // se dibujaría más alto que la celda y se saldría del renglón — que es exactamente lo que
+  // se veía raro. Se toma el máximo entre el promedio y lo que va del año.
   const maxProm = salida.reduce((mx, p) => Math.max(mx,
-    ...meses.map(m => (p.por_mes[m] || {}).kilos_prom || 0)), 0);
+    ...meses.map(m => Math.max((p.por_mes[m] || {}).kilos_prom || 0, (p.por_mes[m] || {}).kilos_act || 0))), 0);
 
   return {
     meses, periodos, periodo_actual: act,
     filas: salida, totales, totales_act, promedios, campanias_mes,
+    // Qué campañas entraron al promedio. La pantalla lo dice: "promedio de 24/25 a 26/27" no
+    // se puede deducir de un número, y sin eso nadie sabe contra qué está comparando.
+    periodos_promedio: periodosProm, promedio_campanias: periodosProm.length,
     max_celda_prom: r0(maxProm),
     agrupados: chicos.length, umbral_share: umbralPct, corte_kilos: r0(corte),
     kilos_hist: r0(salida.reduce((a, x) => a + x.kilos_hist, 0)),

@@ -646,13 +646,14 @@ function mesesDelAnio() {
 // de noviembre bajaría ese promedio por una razón de almanaque, no del negocio.
 function campaniasPorMes() {
   const filas = db.prepare(`
-    SELECT mes_ok, COUNT(DISTINCT periodo) AS campanias
-    FROM sheet_ventas
+    SELECT DISTINCT mes_ok, periodo FROM sheet_ventas
     WHERE mes_ok IS NOT NULL AND mes_ok <> '' AND periodo IS NOT NULL AND periodo <> ''
-    GROUP BY mes_ok
   `).all();
+  // Por mes, QUÉ campañas lo tienen cargado — no cuántas. El promedio se calcula sobre una
+  // ventana de campañas, así que hace falta poder intersecar, no sólo contar.
   const m = {};
-  for (const f of filas) m[f.mes_ok] = f.campanias;
+  for (const f of filas) (m[f.mes_ok] || (m[f.mes_ok] = [])).push(f.periodo);
+  for (const k of Object.keys(m)) m[k].sort();
   return m;
 }
 
@@ -713,8 +714,11 @@ router.get('/ventanas', requireAuth, (req, res) => {
       // Y el año comercial entero como eje: los meses en que este producto NO está son la
       // mitad de lo que se viene a ver.
       meses_todos: mesesDelAnio(),
-      // El divisor de los promedios.
-      campanias_por_mes: campaniasPorMes(),
+      // El divisor de los promedios: por mes, qué campañas llegaron a él.
+      campanias_por_mes_detalle: campaniasPorMes(),
+      // Cuántas campañas entran al promedio, contando hacia atrás desde la de referencia.
+      // Un promedio de seis años incluye años que ya no son este negocio.
+      promedio_campanias: req.query.promedio_campanias,
       // Debajo de qué porcentaje del promedio del producto un productor va a la bolsa de
       // "OTROS". Se puede subir o bajar desde la pantalla; 0 muestra a todos.
       umbral_share: req.query.umbral_share,
