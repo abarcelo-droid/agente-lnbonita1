@@ -4744,19 +4744,25 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
         <input id="vt-prod" type="text" list="vt-prod-lista" placeholder="Escribí un producto — cebolla, papa…"
                onchange="vtCargar()" onkeydown="if(event.key==='Enter'){vtCargar();return false}">
         <datalist id="vt-prod-lista"></datalist></div>
-      <!-- Cuál es "este año" a los efectos de decidir quién falta. La historia entra SIEMPRE
-           entera: no hay un selector de "contra qué", porque la pregunta no es cómo venimos
-           sino a quién llamar, y para eso todos los años cuentan. -->
-      <div><label>Campaña en curso</label><select id="vt-act" onchange="vtCargar()"></select></div>
+      <!-- Contra qué campaña se decide quién falta. Arranca en la última COMPLETA, no en la
+           que está corriendo: en agosto, el que trae de noviembre a mayo todavía no le toca,
+           y preguntarle a una campaña recién arrancada da una lista de falsos.
+           La historia entra siempre entera — eso no se elige. -->
+      <div><label>Comparar contra</label><select id="vt-act" onchange="vtCargar()"></select></div>
       <div><label>Ver</label><select id="vt-filtro" onchange="vtPintar(VT.data)">
         <option value="">todos los productores</option>
         <option value="contactar">sólo a los que hay que llamar</option>
-        <option value="activos">sólo los que están trayendo</option>
+        <option value="esperando">sólo los que todavía no les toca</option>
+        <option value="activos">sólo los que trajeron</option>
       </select></div>
       <div><button class="btn bo bs" onclick="vtExportar()">⬇️ Excel</button></div>
     </div>
     <div id="vt-sugerencias" style="margin-bottom:12px"></div>
+    <div id="vt-aviso" style="margin-bottom:10px"></div>
     <div id="vt-kpis" style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px"></div>
+    <!-- La campaña entera del producto, arriba de todo: es el perfil contra el que se lee
+         cada productor. Sin esto, un mes flojo no se distingue de la temporada. -->
+    <div id="vt-perfil" style="margin-bottom:12px"></div>
     <div class="ab-table-wrap"><table class="pa-tbl" id="vt-tabla" style="width:100%;table-layout:fixed">
       <thead id="vt-thead"></thead><tbody id="vt-tbody"></tbody>
     </table></div>
@@ -34356,8 +34362,14 @@ function vtCargar(){
 function vtLlenarSelectores(d){
   var s=eid('vt-act');
   if(s && !s.innerHTML && d.ventana){
+    var camp=d.campanias||{};
+    var ref=(d.referencia||{}).periodo;
     s.innerHTML=(d.ventana.periodos||[]).map(function(x){
-      return '<option value="'+esc(x)+'"'+(x===d.ventana.actual?' selected':'')+'>'+esc(x)+'</option>'; }).join('');
+      // Las que están a medio correr se marcan: elegirlas es válido, pero hay que saber que
+      // lo son antes de leer "a contactar".
+      var c=camp[x]||{};
+      return '<option value="'+esc(x)+'"'+(x===ref?' selected':'')+'>'
+        + esc(x)+(c.completa===false?' (en curso)':'')+'</option>'; }).join('');
   }
   var dl=eid('vt-prod-lista');
   if(dl && !dl.innerHTML){
@@ -34400,6 +34412,7 @@ function vtFilas(){
   var d=VT.data; if(!d) return [];
   var f=(eid('vt-filtro')||{}).value;
   if(f==='contactar') return (d.filas||[]).filter(function(x){ return x.contactar; });
+  if(f==='esperando') return (d.filas||[]).filter(function(x){ return x.esperando; });
   if(f==='activos')   return (d.filas||[]).filter(function(x){ return !x.ausente_este_anio && !x.no_identificado; });
   return d.filas||[];
 }
@@ -34408,13 +34421,27 @@ function vtPintar(d){
   if(!d) return;
   eid('vt-sugerencias').innerHTML='';
   var meses=d.meses||[], periodos=d.periodos||[];
+  var ref=d.referencia||{};
+
+  // De qué campaña se está hablando. Es lo primero que hay que saber para leer el resto: los
+  // mismos productores dan una lista distinta según contra qué año se los mire.
+  eid('vt-aviso').innerHTML = ref.completa
+    ? (ref.elegida_sola
+        ? '<div style="font-size:11.5px;color:var(--mut)">Se compara contra <b>'+esc(ref.periodo)+'</b>, la última campaña completa. '
+          + esc((d.ventana||{}).actual||'')+' recién arrancó: preguntarle a un año que empieza quién falta da una lista de falsos.</div>'
+        : '<div style="font-size:11.5px;color:var(--mut)">Se compara contra <b>'+esc(ref.periodo)+'</b>, una campaña completa.</div>')
+    : '<div style="padding:9px 12px;border-radius:8px;background:#fef3c7;border:1px solid #fcd34d;color:#92400e;font-size:12px">'
+      + '⚠ <b>'+esc(ref.periodo)+' todavía está corriendo</b> — van '+nr(ref.meses_cargados||0)+' meses, hasta '+esc(vtMes(ref.hasta_mes))+'. '
+      + 'Sólo se marca a quien <b>ya debería haber traído</b>; los que arrancan más adelante figuran como <b>esperando</b>, no como perdidos.'
+      + '</div>';
 
   var k=function(l,v,sub,color){ return '<div class="inf-kpi"><div style="font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:var(--mut)">'+l+'</div>'
     +'<b'+(color?' style="color:'+color+'"':'')+'>'+v+'</b><div style="font-size:11px;color:var(--mut)">'+(sub||'')+'</div></div>'; };
   eid('vt-kpis').innerHTML =
       k('A contactar', nr(d.a_contactar||0), (d.a_contactar? infKg(d.kilos_a_contactar)+' por campaña, en promedio' : 'ninguno: están todos'),
         d.a_contactar ? '#92400e' : '#166534')
-    + k('Trayendo hoy', nr(d.proveedores_activos||0), infKg(d.kilos_act)+' en '+esc(d.periodo_actual))
+    + (d.esperando ? k('Todavía no les toca', nr(d.esperando), infKg(d.kilos_esperando)+' que se esperan más adelante') : '')
+    + k('Trajeron en '+esc(d.periodo_actual), nr(d.proveedores_activos||0), infKg(d.kilos_act))
     + k('Historia de '+esc(d.producto), infKg(d.kilos_hist), nr(periodos.length)+' campañas · '+infUsd(d.usd_hist))
     + k('Mes pico', esc(vtMes(d.pico_mes)), infKg(d.pico_kilos)+' históricos');
 
@@ -34465,6 +34492,9 @@ function vtPintar(d){
       estado='<div class="vt-sub" style="color:#92400e">☎ '
         + (f.campanias_sin_traer===1?'hace 1 campaña que no trae':'hace '+f.campanias_sin_traer+' campañas que no trae')
         + (f.contactar_mes?(' · suele arrancar en <b>'+esc(vtMes(f.contactar_mes))+'</b>'):'')+'</div>';
+    } else if(f.esperando){
+      estado='<div class="vt-sub" style="color:var(--mut)">todavía no le toca · suele arrancar en <b>'
+        + esc(vtMes(f.desde))+'</b></div>';
     } else if(f.es_nuevo){
       estado='<div class="vt-sub" style="color:#1e40af">nuevo en '+esc(d.periodo_actual)+'</div>';
     } else if(f.no_identificado){
@@ -34486,23 +34516,8 @@ function vtPintar(d){
       + '</tr>';
   }).join('') : '<tr><td class="emp" colspan="'+(meses.length+4)+'">Nada con ese filtro.</td></tr>';
 
-  // La fila del total: el perfil del producto entero, que es contra el que se lee cada
-  // productor. Sin ella no se sabe si un mes flojo es del productor o de la temporada.
-  var maxTot=Math.max.apply(null, meses.map(function(m){ return d.totales[m]||0; }))||1;
-  eid('vt-tbody').innerHTML+='<tr style="border-top:2px solid var(--bor)">'
-    + '<td><div class="vt-prov">TOTAL '+esc(d.producto)+'</div><div class="vt-sub">todas las campañas · claro histórico, oscuro '+esc(d.periodo_actual)+'</div></td>'
-    + meses.map(function(m){
-        var t=d.totales[m]||0, ta=d.totales_act[m]||0;
-        var hH=t?Math.max(3, Math.round((t/maxTot)*28)):0;
-        var hA=ta?Math.max(2, Math.round((ta/maxTot)*28)):0;
-        return '<td class="vt-celda'+(m===d.pico_mes?' vt-pico':'')+'"'
-          + (t?' title="'+esc(vtMes(m)+': '+nr(t)+' K históricos · '+nr(ta)+' K este año')+'"':'')+'>'
-          + (hH?'<div class="vt-hist" style="height:'+hH+'px;background:#c7d6e6"></div>':'')
-          + (hA?'<div class="vt-barra" style="height:'+hA+'px;background:#1a3a5c"></div>':'')+'</td>'; }).join('')
-    + '<td style="text-align:center" class="vt-sub">'+nr(periodos.length)+' campañas</td>'
-    + '<td style="text-align:right"><b>'+infKg(d.kilos_hist)+'</b><div class="vt-sub">'+infKg(d.kilos_act)+' este año</div></td>'
-    + '<td style="font-size:11.5px">'+esc(vtMes(meses[0]))+' → '+esc(vtMes(meses[meses.length-1]))+'</td>'
-    + '</tr>';
+
+  vtPerfil(d, meses);
 
   // El aviso de los #N/A. Va arriba de la nota y sólo si hay: si una parte grande de la
   // mercadería no tiene nombre, la pantalla entera vale menos y hay que decirlo antes de que
@@ -34521,6 +34536,41 @@ function vtPintar(d){
     + '<b>Productor</b> = de dónde vino la mercadería que vendimos, según la base de ventas — no es un libro de compras. '
     + 'El eje es el <b>mes comercial</b> (julio a junio) y no la semana: la columna de semana de la planilla todavía no está verificada, '
     + 'y un eje de tiempo mal interpretado corre todas las ventanas sin que se note.';
+}
+
+// LA CAMPAÑA ENTERA DEL PRODUCTO, ARRIBA DE TODO.
+//
+// Es la pregunta anterior a la tabla: cómo es la temporada de esta fruta. Sin eso, un mes
+// flojo de un productor no se distingue de un mes en que el producto directamente no está.
+// Va con barras grandes y con el número de cada mes escrito: es el gráfico que se mira una
+// vez y se recuerda, no uno para pasarle el mouse por encima.
+function vtPerfil(d, meses){
+  var box=eid('vt-perfil'); if(!box) return;
+  if(!meses.length){ box.innerHTML=''; return; }
+  var maxTot=Math.max.apply(null, meses.map(function(m){ return d.totales[m]||0; }))||1;
+  var ALTO=54;
+  box.innerHTML=
+      '<div style="padding:12px 14px;border-radius:10px;background:var(--bg)">'
+    + '<div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin-bottom:9px">'
+      + '<div style="font-size:14px;font-weight:700">La campaña de '+esc(d.producto)+'</div>'
+      + '<div style="font-size:11.5px;color:var(--mut)">'
+        + infKg(d.kilos_hist)+' en '+nr((d.periodos||[]).length)+' campañas · pico en <b>'+esc(vtMes(d.pico_mes))+'</b>'
+        + ' · <span style="color:#94a3b8">▇</span> historia · <span style="color:#1a3a5c">▇</span> '+esc(d.periodo_actual)
+      + '</div></div>'
+    + '<div style="display:flex;gap:3px;align-items:flex-end">'
+    + meses.map(function(m){
+        var t=d.totales[m]||0, ta=d.totales_act[m]||0;
+        var hH=t?Math.max(2, Math.round((t/maxTot)*ALTO)):0;
+        var hA=ta?Math.max(2, Math.round((ta/maxTot)*ALTO)):0;
+        return '<div style="flex:1;text-align:center" title="'+esc(vtMes(m)+': '+nr(t)+' K en toda la historia · '+nr(ta)+' K en '+d.periodo_actual)+'">'
+          + '<div style="font-size:9.5px;color:var(--mut);margin-bottom:2px">'+(t?nr(Math.round(t/1000))+'k':'')+'</div>'
+          + '<div style="position:relative;height:'+ALTO+'px">'
+            + (hH?'<div style="position:absolute;left:0;right:0;bottom:0;height:'+hH+'px;background:#c7d6e6;border-radius:3px 3px 0 0"></div>':'')
+            + (hA?'<div style="position:absolute;left:22%;right:22%;bottom:0;height:'+hA+'px;background:#1a3a5c;border-radius:3px 3px 0 0"></div>':'')
+          + '</div>'
+          + '<div style="font-size:10px;font-weight:600;margin-top:3px'+(m===d.pico_mes?';color:var(--burg)':';color:var(--mut)')+'">'+esc(vtMes(m))+'</div>'
+          + '</div>'; }).join('')
+    + '</div></div>';
 }
 
 function vtExportar(){

@@ -614,6 +614,33 @@ router.get('/oportunidades.pdf', requireAuth, (req, res) => {
 // La campaña ANTERIOR entra al WHERE aunque no se pida dibujarla: sin sus filas no se puede
 // saber que un proveedor arrancó un mes más tarde, ni que a otro lo perdimos. El servicio
 // decide qué va lleno y qué va de contorno.
+// Dónde está parada cada campaña: cuántos meses tiene cargados y hasta cuál llegó. Se mira
+// TODA la base y no un producto — la pregunta es en qué punto del año estamos, y que un
+// producto no se venda en marzo no quiere decir que marzo no haya pasado.
+function estadoCampanias() {
+  const filas = db.prepare(`
+    SELECT periodo, COUNT(DISTINCT mes_ok) AS meses_cargados, MAX(mes_ok) AS hasta_mes
+    FROM sheet_ventas
+    WHERE periodo IS NOT NULL AND periodo <> '' AND mes_ok IS NOT NULL AND mes_ok <> ''
+    GROUP BY periodo ORDER BY periodo
+  `).all();
+  const m = {};
+  for (const f of filas) {
+    // Doce meses cargados = la campaña dio la vuelta. Con menos, todavía está corriendo.
+    m[f.periodo] = { meses_cargados: f.meses_cargados, hasta_mes: f.hasta_mes, completa: f.meses_cargados >= 12 };
+  }
+  return m;
+}
+
+// Los meses del año comercial tal como los escribe la planilla ('01-JULIO' … '12-JUN'). Se
+// leen de la base y no se hardcodean: si mañana la planilla los escribe distinto, el eje
+// sigue siendo el de ella y no uno inventado acá.
+function mesesDelAnio() {
+  return db.prepare(
+    "SELECT DISTINCT mes_ok FROM sheet_ventas WHERE mes_ok IS NOT NULL AND mes_ok <> '' ORDER BY mes_ok"
+  ).all().map(r => r.mes_ok);
+}
+
 router.get('/ventanas', requireAuth, (req, res) => {
   try {
     const v = ventanaInteranual(req.query);
@@ -638,12 +665,52 @@ router.get('/ventanas', requireAuth, (req, res) => {
       } });
     }
 
+    // ── CUÁL ES LA CAMPAÑA DE REFERENCIA ───────────────────────────────────────────
+    // La última COMPLETA, no la que está corriendo. Preguntarle a una campaña recién
+    // arrancada quién falta da una lista de falsos: en agosto, el que trae de noviembre a
+    // mayo todavía no le toca. Con MELON eran 16 "a contactar" donde faltaban tres.
+    //
+    // Si se elige a mano una campaña a medio correr, se respeta — pero entonces el servicio
+    // sólo marca al que ya debería haber traído, y la pantalla dice cuántos se esperan.
+    const estado = estadoCampanias();
+    const pedido = String(req.query.periodo_actual || '').trim();
+    let ref = (pedido && estado[pedido]) ? pedido : null;
+    let auto = false;
+    if (!ref) {
+      const ordenadas = Object.keys(estado).sort();
+      // De atrás para adelante, la primera completa. Si ninguna lo está (una base con una
+      // sola campaña a medio cargar), se usa la más nueva y el guardarraíl hace el resto.
+      ref = [...ordenadas].reverse().find(p => estado[p].completa) || ordenadas[ordenadas.length - 1];
+      auto = true;
+    }
+    const refEstado = estado[ref] || {};
+
     // El producto entra por filtro_producto, que armarWhere ya sabe atar como parámetro.
     const { where, params } = armarWhere(Object.assign(q, { filtro_producto: producto }));
-    const data = ventanasDeProducto(db, where, params, { periodo_actual: v.actual });
+    const data = ventanasDeProducto(db, where, params, {
+      periodo_actual: ref,
+      // Sólo se acota si la campaña está a medio correr. Una terminada no tiene meses por
+      // venir, y pasarle un tope la haría perdonar a quien de verdad no vino.
+      hasta_mes: refEstado.completa ? null : refEstado.hasta_mes,
+      // Las campañas del NEGOCIO, para contar "hace N campañas que no trae" en años y no en
+      // campañas de este producto.
+      periodos_todos: Object.keys(estado).sort(),
+      // Y el año comercial entero como eje: los meses en que este producto NO está son la
+      // mitad de lo que se viene a ver.
+      meses_todos: mesesDelAnio(),
+    });
     const est = estadoSync();
     res.json({ ok: true, data: Object.assign(data, {
       producto, ventana: v,
+      // De qué campaña se está hablando y por qué esa. Sin esto, la pantalla muestra números
+      // de 2025-2026 arriba de un selector que dice 2026-2027 y nadie sabe cuál es cuál.
+      referencia: {
+        periodo: ref, elegida_sola: auto,
+        completa: !!refEstado.completa,
+        meses_cargados: refEstado.meses_cargados || 0,
+        hasta_mes: refEstado.hasta_mes || null,
+      },
+      campanias: estado,
       // El eje es el MES y no la semana a propósito: la columna `sem` de la planilla todavía
       // no está verificada (¿semana ISO o semana de campaña?) y un eje de tiempo mal
       // interpretado corre todas las ventanas sin fallar. La pantalla lo dice.

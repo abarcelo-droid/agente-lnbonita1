@@ -10,6 +10,16 @@
 // dice en qué mes suele arrancar cada uno, cuántos años seguidos trabajó, y desde cuándo no
 // está.
 //
+// ── LA CAMPAÑA DE REFERENCIA NO ES LA QUE ESTÁ CORRIENDO ──────────────────────────────
+// Preguntarle a una campaña recién arrancada quién falta da una lista de falsos: en agosto,
+// el que trae de noviembre a mayo TODAVÍA NO LE TOCA. En la pantalla real eran 16 "a
+// contactar" sobre un producto donde faltaban tres.
+//
+// Por eso la referencia es la última campaña COMPLETA, y si alguien igual elige mirar la que
+// está corriendo, sólo se marca al que YA debería haber traído: los que su ventana típica
+// cierra antes del último mes cargado. Al resto no se lo llama, se lo espera — y la pantalla
+// dice cuántos son.
+//
 // ── QUÉ ES `proveedor` ACÁ ────────────────────────────────────────────────────────────
 // El ORIGEN DE LA MERCADERÍA de la línea de venta, no una operación de compra propia: esta
 // base no tiene libro de compras. Es la misma aclaración que hace el informe de
@@ -79,6 +89,21 @@ export function productosMasVendidos(db, where, params, limite) {
 // resto es historia, y toda la historia cuenta por igual para dibujar la ventana típica.
 export function ventanasDeProducto(db, where, params, opciones) {
   const o = opciones || {};
+  // Hasta qué mes llegó la campaña de referencia. Lo calcula el router mirando TODA la base
+  // —no este producto— porque la pregunta es dónde está parado el año, y un producto que no
+  // se vende en marzo no quiere decir que marzo no haya pasado. Vacío = la campaña terminó.
+  const hastaMes = o.hasta_mes || null;
+  // Y las campañas DEL NEGOCIO, también de toda la base. "Hace 3 campañas que no trae" se
+  // cuenta en años, como los cuenta una persona. Contra las campañas de este producto, si un
+  // año no vendimos palta el hueco desaparece del conteo y el número queda más chico de lo
+  // que el que lo lee entiende. Si no viene, se cae a las del producto.
+  const todas = (o.periodos_todos && o.periodos_todos.length) ? o.periodos_todos.slice().sort() : null;
+  // Y los meses del AÑO COMERCIAL entero, también de toda la base. Una ventana se entiende
+  // por dónde NO hay nada tanto como por dónde hay: con el eje recortado a los meses en que
+  // este producto se vende, el melón muestra JUL, AGO, NOV y MAY pegados y parece que se
+  // vende todo el año. Los huecos son la mitad del dato. Si no viene, se cae a los del
+  // producto.
+  const mesesTodos = (o.meses_todos && o.meses_todos.length) ? o.meses_todos.slice().sort() : null;
 
   const filas = db.prepare(`
     WITH base AS (SELECT * FROM sheet_ventas ${where})
@@ -92,7 +117,7 @@ export function ventanasDeProducto(db, where, params, opciones) {
     GROUP BY proveedor, periodo, mes_ok
   `).all(...params);
 
-  const meses = [...new Set(filas.map(f => f.mes_ok))].sort();
+  const meses = mesesTodos || [...new Set(filas.map(f => f.mes_ok))].sort();
   const periodos = [...new Set(filas.map(f => f.periodo))].sort();
   // Si no se dijo cuál es "este año", se toma la campaña más nueva que haya.
   const act = (o.periodo_actual && periodos.includes(o.periodo_actual))
@@ -148,10 +173,16 @@ export function ventanasDeProducto(db, where, params, opciones) {
     // todo lo posterior es futuro: un productor que recién aparece dos años después no es
     // alguien a quien había que llamar entonces, y marcarlo sería leer el diario de mañana.
     const previos = anios.filter(x => x <= act);
+    // ¿Ya le tocaba traer? Si la campaña de referencia está a medio correr, sólo cuenta el
+    // que debería haber cerrado su ventana y no apareció. El que arranca en noviembre, en
+    // agosto no está ausente: está esperando.
+    const leTocaba = !hastaMes || !hist.hasta || hist.hasta <= hastaMes;
     const ultimo = previos[previos.length - 1] || null;
     const ausente = (p.kilos_act || 0) <= 0;
     // Cuántas campañas atrás quedó. 0 = está trabajando este año.
-    const hace = ultimo ? (periodos.indexOf(act) - periodos.indexOf(ultimo)) : null;
+    const escala = todas || periodos;
+    const hace = (ultimo && escala.indexOf(act) >= 0 && escala.indexOf(ultimo) >= 0)
+      ? (escala.indexOf(act) - escala.indexOf(ultimo)) : null;
     const promAnio = anios.length ? p.kilos_hist / anios.length : 0;
     const noIdent = p.proveedor === SIN_IDENTIFICAR;
 
@@ -179,15 +210,20 @@ export function ventanasDeProducto(db, where, params, opciones) {
       // llamar), ni al que ya está trabajando, ni al que aparece recién en una campaña
       // posterior a la que se mira. Los #N/A tampoco: no hay un nombre al que llamar, y
       // ofrecerlo como gestión sería mandar a alguien a buscar un fantasma.
-      contactar: ausente && previos.length > 0 && !noIdent,
+      contactar: ausente && previos.length > 0 && !noIdent && leTocaba,
       // Cuándo llamarlo: el mes en que suele arrancar. Llamarlo cuando ya empezó es tarde.
       contactar_mes: ausente && hist.desde ? hist.desde : null,
+      // Trajo siempre, todavía no apareció, y su temporada no llegó. No es una pérdida: es
+      // una espera. Se muestra aparte para no mandar a nadie a llamar de más — y para que
+      // el que quiera adelantarse igual los tenga.
+      esperando: ausente && previos.length > 0 && !noIdent && !leTocaba,
     };
   });
 
-  // Los que están trabajando primero, después los que hay que ir a buscar, y al final los no
-  // identificados. Dentro de cada grupo, por volumen histórico: a quién más conviene llamar.
-  const grupo = (x) => x.no_identificado ? 2 : (x.ausente_este_anio ? 1 : 0);
+  // Los que están trabajando primero, después los que hay que ir a buscar, después los que
+  // todavía no les toca, y al final los no identificados. Dentro de cada grupo, por volumen
+  // histórico: a quién más conviene llamar.
+  const grupo = (x) => x.no_identificado ? 3 : (x.contactar ? 1 : (x.esperando ? 2 : 0));
   salida.sort((a, b) => (grupo(a) - grupo(b)) || (b.kilos_hist - a.kilos_hist));
 
   const totales = {}, totales_act = {};
@@ -197,6 +233,7 @@ export function ventanasDeProducto(db, where, params, opciones) {
 
   const activos = salida.filter(x => !x.ausente_este_anio && !x.no_identificado);
   const aContactar = salida.filter(x => x.contactar);
+  const esperando = salida.filter(x => x.esperando);
   const sinIdent = salida.find(x => x.no_identificado) || null;
 
   return {
@@ -208,6 +245,9 @@ export function ventanasDeProducto(db, where, params, opciones) {
     proveedores_activos: activos.length,
     a_contactar: aContactar.length,
     kilos_a_contactar: r0(aContactar.reduce((a, x) => a + x.kilos_prom_anio, 0)),
+    esperando: esperando.length,
+    kilos_esperando: r0(esperando.reduce((a, x) => a + x.kilos_prom_anio, 0)),
+    hasta_mes: hastaMes,
     pico_mes: picoMes, pico_kilos: r0(picoTot),
     // Cuánta mercadería quedó sin nombre por los errores de la planilla. Va como número
     // propio: si es grande, la pantalla entera vale menos y hay que decirlo.
