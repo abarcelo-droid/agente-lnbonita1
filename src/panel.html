@@ -2779,8 +2779,33 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
       <button class="btn bo bs" onclick="sgStockReset()">Limpiar</button>
       <button class="btn bb bs" onclick="sgApertOpen()" title="Cargar stock físico al corte (apertura)">📥 Carga inicial</button>
     </div>
-    <div class="ab-table-wrap"><table class="pa-tbl">
-      <thead><tr><th style="text-align:center" title="Semáforo">🚦</th><th>Producto</th><th>Categoría</th><th style="text-align:right">Bultos disp</th><th>Piso</th><th>Calidad</th><th>Vence (días)</th><th style="text-align:right">Costo/kg</th><th style="text-align:center">Estado</th><th></th></tr></thead>
+    <!-- ── NADA SE DESPLAZA DE COSTADO ──
+         Esta tabla nunca tuvo el patron: heredaba overflow-x:auto de la clase y
+         ninguna celda truncaba. Con diez columnas ya sacaba barra. -->
+    <style>
+      #sg-stock-wrap { overflow-x:hidden !important }
+      #sg-stock-wrap .pa-tbl { width:100%; table-layout:fixed }
+      #sg-stock-wrap .pa-tbl td {
+        padding:7px 9px; font-size:12.5px; white-space:nowrap;
+        overflow:hidden; text-overflow:ellipsis }
+      /* El encabezado aparte: compartiendo la regla de las celdas se cortaba en
+         «VENCE (DÍA…» y la columna quedaba sin nombre. Su texto es fijo y
+         conocido: envuelve. */
+      #sg-stock-wrap .pa-tbl th {
+        padding:7px 6px; letter-spacing:.03em; line-height:1.2;
+        white-space:normal; vertical-align:bottom }
+      /* La celda de acciones no se recorta: un boton cortado no se aprieta. */
+      #sg-stock-wrap .pa-tbl td.sgst-acc { overflow:visible }
+      @media(max-width:900px){ #sg-stock-wrap { overflow-x:auto !important }
+                               #sg-stock-wrap .pa-tbl { table-layout:auto } }
+    </style>
+    <div class="ab-table-wrap" id="sg-stock-wrap"><table class="pa-tbl">
+      <thead><tr><th style="width:4%;text-align:center" title="Semáforo">🚦</th>
+        <th style="width:16%">Producto</th><th style="width:12%">Categoría</th>
+        <th style="width:9%;text-align:right">Bultos disp</th><th style="width:12%">Piso</th>
+        <th style="width:9%">Calidad</th><th style="width:11%">Vence (días)</th>
+        <th style="width:10%;text-align:right">Costo/kg</th>
+        <th style="width:9%;text-align:center">Estado</th><th style="width:8%"></th></tr></thead>
       <tbody id="sg-tb-stock"><tr><td colspan="10" class="emp">Cargando…</td></tr></tbody>
     </table></div>
     </div>
@@ -16071,7 +16096,13 @@ function sgLoadStock(){
       var esGranel = String(l.origen||'')==='granel';
       return '<tr style="cursor:pointer" onclick="sgLoteVer('+l.id+')" title="Lote '+esc(l.codigo_lote)+'">'
         +'<td style="text-align:center">'+sgSemDot(l.semaforo)+'</td>'
-        +'<td>'+esc(l.producto_nombre||'')+(esGranel?' <span class="bdg bpe" style="font-size:10px" title="Granel: no se vende directo, va a reproceso">granel</span>':'')+'</td>'
+        +'<td title="'+esc(l.producto_nombre||'')+'">'+esc(l.producto_nombre||'')
+          +(esGranel?' <span class="bdg bpe" style="font-size:10px" title="Granel: no se vende directo, va a reproceso">granel</span>':'')
+          // DE QUÉ PARTIDA SALIÓ. Un lote de segunda sin esto es mercadería
+          // aparecida de la nada: hay que poder volver a la compra.
+          +(l.reclasificado_de_codigo
+              ? '<div style="font-size:10px;color:var(--mut)">de '+esc(l.reclasificado_de_codigo)+'</div>' : '')
+          +'</td>'
         +'<td>'+esc(l.producto_familia||'—')+'</td>'
         // EL CONTEO SE HACE POR BULTO. El kilo queda abajo en chico: sigue
         // haciendo falta para lo que se vende por peso, pero el número que se
@@ -16083,15 +16114,35 @@ function sgLoadStock(){
         +'<td style="font-size:11.5px">'+(l.pisos
             ? escH(l.pisos)
             : '<span style="color:#9a3412">sin ubicar</span>')+'</td>'
-        +'<td>'+(l.calidad||'—')+'</td>'
+        // LA CALIDAD, EN COLOR. Escrita en texto plano se perdía entre las
+        // otras nueve columnas, y es justamente lo que hay que ver de un
+        // vistazo cuando media partida pasó a segunda.
+        +'<td>'+sgCalidadBadge(l.calidad)
+          +(Number(l.bultos_reclasificados)>0
+              ? '<div style="font-size:10px;color:#9a3412" title="Esos cajones están en otra partida, de otra calidad">→ '
+                + nr(l.bultos_reclasificados)+' cj a otra calidad</div>' : '')
+          +'</td>'
         +'<td>'+venceCell+'</td>'
         +'<td style="text-align:right">'+costoKgCell+'</td>'
         +'<td style="text-align:center"><span class="bdg '+(l.estado==='bajado'?'ber':'bok')+'">'+(SG_ESTLOTE[l.estado]||l.estado)+'</span></td>'
-        +'<td style="text-align:right;white-space:nowrap">'
+        +'<td class="sgst-acc" style="text-align:right;white-space:nowrap">'
           +(esGranel?'<button class="btn bb bs" onclick="event.stopPropagation();sgrReprPrecargar('+l.id+','+l.producto_id+')" title="Convertir el granel en cajones">♻️ Reprocesar</button> ':'')
           +'<button class="btn bo bs" onclick="event.stopPropagation();sgLoteVer('+l.id+')">🔍</button></td></tr>';
     }).join('') : '<tr><td colspan="10" class="emp">Sin lotes con esos filtros.</td></tr>';
   });
+}
+
+// LA CALIDAD DE UN CAJÓN, EN UN GOLPE DE VISTA.
+//
+// Ámbar y rojo no son decoración: la segunda y la tercera se venden más baratas
+// y el que arma el pedido tiene que verlo antes de tipear el precio, no después.
+// Primera va en gris —es lo normal— y sin calidad cargada va en gris también,
+// porque «no lo dijeron» no es una alarma.
+function sgCalidadBadge(c){
+  if (c === 'segunda') return '<span class="bdg bfs" title="Mercadería de segunda: se vende más barata">2ª</span>';
+  if (c === 'tercera') return '<span class="bdg ber" title="Mercadería de tercera">3ª</span>';
+  if (c === 'primera') return '<span class="bdg bok" style="opacity:.75">1ª</span>';
+  return '<span style="color:var(--mut)">—</span>';
 }
 
 // Bultos arriba, kilos abajo en chico. Si la partida es granel (sin kg/bulto)
@@ -16143,7 +16194,14 @@ function sgLoteVer(id){
     if(d.proveedor){ h+='🚜 <b>Proveedor:</b> '+esc(d.proveedor.razon_social)+(d.proveedor.localidad?(' ('+esc(d.proveedor.localidad)+')'):'')+'<br>'; }
     else { h+='🚜 <b>Proveedor:</b> — (lote sin OC / finca propia)<br>'; }
     if(d.oc){ h+='📋 <b>Partida:</b> '+esc(d.oc.trazabilidad||d.oc.numero||'')+' · '+(d.oc.tipo_precio==='pizarra'?'pizarra':'firme')+' · '+(d.oc.fecha_oc||'')+'<br>'; }
+    // DE DÓNDE SALIERON ESTOS CAJONES. Un lote de segunda sin esto es
+    // mercadería aparecida de la nada.
+    if(d.reclasificado_de){ h+='🏷️ <b>Viene de:</b> <code>'+esc(d.reclasificado_de.origen_codigo||'')+'</code>'
+      +' — '+nr(d.reclasificado_de.bultos)+' cj pasados de '+esc(d.reclasificado_de.calidad_anterior||'primera')
+      +' a '+esc(d.reclasificado_de.calidad_nueva)+' el '+String(d.reclasificado_de.creado_en||'').slice(0,10)
+      +'<div style="font-size:11.5px;color:var(--mut);margin-left:22px">'+esc(d.reclasificado_de.motivo||'')+'</div>'; }
     if(d.recepcion){ h+='📥 <b>Recibido:</b> '+(d.recepcion.fecha_recepcion||'')+(d.recepcion.numero_remito_proveedor?(' · remito del proveedor '+esc(d.recepcion.numero_remito_proveedor)):'')+'<br>'; }
+    var kgVigLote = (l.kg_vigente != null ? Number(l.kg_vigente) : Number(l.kg_reales)) || 0;
     h+='📦 <b>Costo base:</b> '+sgMoney(l.costo_base)+(l.precio_unitario_kg!=null?(' ('+sgMoney(l.precio_unitario_kg)+'/kg)'):' <span class="bdg bpe">pizarra sin precio</span>')+'<br>';
     if((d.gastos_directos||[]).length){
       h+='🧾 <b>Gastos directos:</b><br>';
@@ -16170,6 +16228,70 @@ function sgLoteVer(id){
         +'<div class="fl"><label>Origen</label><input id="sg-le-origen" value="'+esc(l.origen||'')+'"></div>'
         +'</div><button class="btn bb bs" style="margin-top:8px" onclick="sgLoteGuardar('+l.id+')">Guardar cambios</button></details>';
 
+      // ── MERCADERÍA DE SEGUNDA ──────────────────────────────────
+      // Pablo, 28/8/2026: «el comprador puede marcar 15 de esos 30 bultos como
+      // mercadería de segunda, asumiendo que el precio va a ser más bajo y que
+      // la rentabilidad cae».
+      //
+      // Va en la ficha y no en la fila de la lista: son cinco datos y hace
+      // falta ver contra qué se está separando. Y sólo si hay cajones — el
+      // granel se separa por kilos y para eso está el reproceso.
+      if (l.bultos != null && Number(l.bultos_disponibles) > 0) {
+        SG.reclas = { id: l.id, disp: Math.floor(Number(l.bultos_disponibles) || 0),
+                      calidad: l.calidad || 'primera', kpb: Number(l.kg_por_bulto) || 0,
+                      costoKg: (kgVigLote > 0 ? (Number(l.costo_final) || 0) / kgVigLote : 0),
+                      pisos: (d.ubicaciones || []) };
+        h+='<details style="margin-bottom:10px"><summary style="cursor:pointer;font-weight:700;font-size:13px">'
+          +'🏷️ Marcar mercadería de segunda</summary>'
+          +'<div style="margin-top:8px;font-size:12px;color:var(--mut);margin-bottom:8px">'
+            +'Quedan <b>'+nr(SG.reclas.disp)+'</b> cajón(es) en stock de esta partida. '
+            +'Los que marques se separan en una partida nueva, de la misma compra, '
+            +'para poder venderlos a otro precio.</div>'
+          +'<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px">'
+          +'<div class="fl"><label>Cajones</label><input type="number" min="1" step="1" max="'+SG.reclas.disp+'"'
+            +' id="sg-rc-bultos" oninput="sgReclasPreview()"></div>'
+          +'<div class="fl"><label>Pasan a</label><select id="sg-rc-cal" onchange="sgReclasPreview()">'
+            +SG_CALIDAD.filter(function(o){ return o[0] !== SG.reclas.calidad; })
+              .map(function(o){ return '<option value="'+o[0]+'">'+o[1]+'</option>'; }).join('')
+            +'</select></div>'
+          +'<div class="fl"><label>Semáforo</label><select id="sg-rc-sem">'
+            +SG_SEMAFORO.map(function(o){ return '<option value="'+o[0]+'"'+(o[0]===l.semaforo?' selected':'')+'>'+o[1]+'</option>'; }).join('')
+            +'</select></div>'
+          +'</div>'
+          // El piso sólo si la partida está repartida: elegirlo cuando hay uno
+          // solo es una pregunta con una sola respuesta posible.
+          +(Number(l.n_pisos) > 1
+              ? '<div class="fl" style="margin-top:8px"><label>Salen del piso</label>'
+                +'<select id="sg-rc-piso">'+(SG.reclas.pisos||[]).map(function(u){
+                    return '<option value="'+u.piso_id+'">'+esc(u.piso_nombre||'')+' ('+nr(u.bultos)+' cj)</option>'; }).join('')
+                +'</select></div>' : '')
+          +'<div class="fl ff" style="margin-top:8px"><label>Por qué <span style="color:var(--err)">*</span></label>'
+            +'<textarea id="sg-rc-motivo" rows="2" placeholder="ej. quedaron blandos, no se vendieron a tiempo"></textarea></div>'
+          +'<div id="sg-rc-preview" style="font-size:12px;margin-top:8px"></div>'
+          +'<button class="btn bb bs" style="margin-top:8px" onclick="sgReclasGuardar()">Marcar</button>'
+          +'</details>';
+      }
+      // Y lo que ya se separó de esta partida, con la puerta para deshacerlo.
+      if ((d.reclasificaciones || []).length) {
+        h+='<details style="margin-bottom:10px"><summary style="cursor:pointer;font-weight:700;font-size:13px">'
+          +'🏷️ Bultos pasados a otra calidad ('+d.reclasificaciones.filter(function(r){return !r.anulada_en;}).length+')</summary>'
+          +'<div style="margin-top:8px;font-size:12.5px">'
+          +d.reclasificaciones.map(function(rc){
+              return '<div style="padding:6px 0;border-bottom:1px solid var(--bor)'
+                +(rc.anulada_en?';opacity:.5':'')+'">'
+                +'<b>'+nr(rc.bultos)+' cj</b> a '+esc(rc.calidad_nueva)
+                +' → <code>'+esc(rc.destino_codigo||'')+'</code>'
+                +' <span style="color:var(--mut)">· '+String(rc.creado_en||'').slice(0,10)+'</span>'
+                +(rc.anulada_en?' <span class="bdg ber" style="font-size:10px">deshecho</span>':'')
+                +'<div style="font-size:11px;color:var(--mut)">'+esc(rc.motivo||'')+'</div>'
+                +(!rc.anulada_en && lnbPuedeAnular(['sg-stock','sg-compras'])
+                    ? '<button class="btn bd bs" style="margin-top:4px;font-size:11px" onclick="sgReclasAnular('
+                      +l.id+','+rc.id+')">Deshacer</button>' : '')
+                +'</div>';
+            }).join('')
+          +'</div></details>';
+      }
+
       // Bajar lote
       h+='<details style="margin-bottom:4px"><summary style="cursor:pointer;font-weight:700;font-size:13px;color:var(--err)">⬇️ Dar de baja</summary>'
         +'<div style="margin-top:8px;display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap">'
@@ -16184,6 +16306,65 @@ function sgLoteVer(id){
     eid('sg-lote-modal').classList.add('on');
   });
 }
+// EL PREVIEW, que es la parte que evita la discusión: se dice ANTES de
+// confirmar que el costo por kilo NO cambia. Sin esta frase alguien va a pedir
+// que el costo de la segunda baje, y ahí se pierde justamente lo que Pablo
+// quiere ver — que la rentabilidad cae porque cae el PRECIO.
+function sgReclasPreview(){
+  var c = eid('sg-rc-preview'); if (!c || !SG.reclas) return;
+  var n = Number((eid('sg-rc-bultos')||{}).value || 0);
+  var cal = (eid('sg-rc-cal')||{}).value || 'segunda';
+  if (!(n > 0)) { c.innerHTML = ''; return; }
+  if (n > SG.reclas.disp) {
+    c.innerHTML = '<span style="color:var(--err)">Sólo quedan '+nr(SG.reclas.disp)+' cajón(es) en stock.</span>';
+    return;
+  }
+  var queda = SG.reclas.disp - n;
+  c.innerHTML = '<div style="background:var(--bg);border-radius:8px;padding:8px 11px">'
+    + 'Quedan <b>'+nr(queda)+'</b> cj de '+esc(SG.reclas.calidad)
+    + ' · se crea una partida nueva con <b>'+nr(n)+'</b> cj de '+esc(cal)
+    + (SG.reclas.kpb > 0 ? ' ('+nr(Math.round(n*SG.reclas.kpb))+' kg)' : '')
+    + '<div style="font-size:11.5px;color:var(--mut);margin-top:4px">'
+    + 'Costo/kg: <b>'+sgMoney(SG.reclas.costoKg)+'</b> en las dos — <b>el mismo</b>. '
+    + 'Lo que baja es el precio de venta, y por eso cae la rentabilidad.</div></div>';
+}
+
+function sgReclasGuardar(){
+  if (!SG.reclas) return;
+  var n = Number((eid('sg-rc-bultos')||{}).value || 0);
+  if (!(n > 0)) return toast('Poné cuántos cajones', 'er');
+  if (n > SG.reclas.disp) return toast('Sólo quedan '+SG.reclas.disp+' cajón(es) en stock', 'er');
+  var motivo = String((eid('sg-rc-motivo')||{}).value || '').trim();
+  if (motivo.length < 3) return toast('Escribí por qué pasan a otra calidad', 'er');
+  var piso = eid('sg-rc-piso');
+  api('/api/sg/lotes/'+SG.reclas.id+'/reclasificar', 'POST', {
+    bultos: n, calidad: (eid('sg-rc-cal')||{}).value, semaforo: (eid('sg-rc-sem')||{}).value,
+    motivo: motivo, piso_id: piso ? piso.value : null
+  }).then(function(r){
+    if (!r || !r.ok) { alert((r && r.error) || 'No se pudo marcar'); return; }
+    toast(r.data && r.data.entera ? 'La partida entera quedó marcada' : 'Bultos separados', 'ok');
+    closeMB('sg-lote-modal');
+    sgLoadStock();
+  });
+}
+
+function sgReclasAnular(loteId, rid){
+  var motivo = prompt('DESHACER la separación por calidad'
+    + String.fromCharCode(10,10)
+    + 'Los cajones vuelven a la partida de origen con su costo. Sólo se puede si de '
+    + 'esos bultos todavía no salió nada.' + String.fromCharCode(10,10)
+    + 'Por qué se deshace:', '');
+  if (motivo === null) return;
+  if (String(motivo).trim().length < 3) { toast('Escribí por qué se deshace', 'er'); return; }
+  api('/api/sg/lotes/'+loteId+'/reclasificaciones/'+rid+'/anular', 'POST',
+      { motivo: String(motivo).trim() }).then(function(r){
+    if (!r || !r.ok) { alert((r && r.error) || 'No se pudo deshacer'); return; }
+    toast('Vuelven '+nr((r.data && r.data.bultos_devueltos) || 0)+' cajón(es)', 'ok');
+    closeMB('sg-lote-modal');
+    sgLoadStock();
+  });
+}
+
 function sgLoteBajaToggle(){
   var dest=eid('sg-lb-destino').value;
   eid('sg-lb-receptor-wrap').style.display = (dest==='donacion') ? 'block' : 'none';
@@ -16198,7 +16379,7 @@ function sgLoteBajaToggle(){
 // pantalla de stock. Lo calcula el servidor y lo dice; si NO cierra, se avisa en
 // rojo: un listado que no cuadra y se calla es peor que no tenerlo.
 var SG_MOV_ICONO = { alta:'📥', salida:'🚚', merma:'🗑️',
-                     transformacion:'♻️', reproceso:'♻️' };
+                     transformacion:'♻️', reproceso:'♻️', reclasificacion:'🏷️' };
 function sgLoteMovs(id){
   var c = eid('sg-lote-movs'); if (!c) return;
   api('/api/sg/lotes/' + id + '/movimientos').then(function(r){
@@ -18568,6 +18749,11 @@ function sgIPRenderDetalle(key){
       // Y SIN EL COSTO: es información de la compra en la pantalla del que
       // vende, y lo que importa acá es qué hay y de quién es.
       +'<span style="font-size:12px"><code>'+esc(l.codigo_lote)+'</code>'
+        // LA CALIDAD, ACÁ. Es el momento en que se tipea el precio: el que
+        // vende tiene que ver que está por vender segunda ANTES de ponerle
+        // número, no enterarse después. Sin esto, separar los bultos no sirve
+        // para lo que se pidió — que se vendan más baratos.
+        +((l.calidad && l.calidad !== 'primera') ? ' ' + sgCalidadBadge(l.calidad) : '')
         +(l.proveedor_nombre?(' · <b>'+escH(l.proveedor_nombre)+'</b>'):'')
         +' · '+cant+' · '+venc
         +(l.kg_reservado>0?(' · <span style="color:var(--mut)">'+nr(l.kg_reservado)+'kg res.</span>'):'')+'</span>'

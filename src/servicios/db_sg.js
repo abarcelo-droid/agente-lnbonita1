@@ -2501,6 +2501,68 @@ try {
   }
 } catch (e) { console.error('[DB] SG despacho_items.piso_id:', e.message); }
 
+// ══ MERCADERÍA DE SEGUNDA ══════════════════════════════════════════════════
+//
+// Pablo, 28/8/2026: «los compradores, dentro del stock, pueden asignar bultos de
+// una partida y marcarlos como mercadería de segunda. Entraron 100 bultos, se
+// vendieron 70, quedan 30; de esos 30 puede que algunos ya no estén en
+// condiciones de venderse igual que los primeros 70 —se puso viejo, lo que sea—.
+// El comprador marca 15, asumiendo que el precio va a ser más bajo y que la
+// rentabilidad cae. Pero siempre sabiendo que queda registrado en la partida».
+//
+// LOS 15 CAJONES SE VAN A UN LOTE HERMANO, no a una marca al costado. Una marca
+// obligaría a partir el disponible por calidad en los diez lugares que hoy suman
+// kilos —el despacho, el decomiso, la oferta, los pisos, la reserva— y con que
+// uno se olvidara quedaría stock fantasma. El hermano es el lote que se habría
+// creado al recibir, si se hubiera sabido: una recepción YA puede traer varios
+// lotes del mismo ítem con calidades distintas, así que todo el módulo está
+// escrito para esto.
+//
+// HERMANO Y NO HIJO. Los lotes de reproceso nacen con recepcion_id y oc_item_id
+// en NULL, y eso los saca de la partida: la liquidación al productor no los ve,
+// el avance nunca llega al 100% y la partida no se puede liquidar nunca. Acá los
+// dos campos se HEREDAN y a la madre se le bajan los kilos y los bultos que se
+// llevó el hermano, así que la suma por partida sigue dando lo que entró.
+try {
+  const colsL = db.prepare('PRAGMA table_info(sg_lotes)').all().map((c) => c.name);
+  if (!colsL.includes('reclasificado_de')) {
+    db.exec('ALTER TABLE sg_lotes ADD COLUMN reclasificado_de INTEGER REFERENCES sg_lotes(id)');
+    console.log('[DB] SG sg_lotes.reclasificado_de agregado (de qué lote salió por calidad)');
+  }
+} catch (e) { console.error('[DB] SG lotes.reclasificado_de:', e.message); }
+
+// EL REGISTRO, QUE NO ES UN CONTADOR. Ningún cálculo de stock ni de costo lee
+// esta tabla: lo que se movió ya está descontado en kg_reales y bultos. Es la
+// hoja de vida de la partida —cuántos, cuándo, quién y por qué—, y es lo que
+// Pablo pidió cuando dijo «que quede registrado». Si además fuera contador,
+// alcanzaría con que un sumador se olvidara de restarla para tener stock que no
+// existe.
+try {
+  db.exec(`
+  CREATE TABLE IF NOT EXISTS sg_lote_reclasificaciones (
+    id                INTEGER PRIMARY KEY AUTOINCREMENT,
+    lote_origen_id    INTEGER NOT NULL REFERENCES sg_lotes(id),
+    lote_destino_id   INTEGER NOT NULL REFERENCES sg_lotes(id),
+    bultos            INTEGER NOT NULL,
+    kg                REAL    NOT NULL,
+    costo_movido      REAL    NOT NULL DEFAULT 0,
+    calidad_anterior  TEXT,
+    calidad_nueva     TEXT    NOT NULL,
+    motivo            TEXT    NOT NULL,
+    piso_id           INTEGER,
+    usuario_id        INTEGER,
+    creado_en         TEXT DEFAULT (datetime('now','localtime')),
+    -- Deshacer no borra: la fila queda sellada. Una reclasificación que
+    -- desaparece deja la partida con un agujero que nadie puede explicar.
+    anulada_en        TEXT,
+    anulada_por       INTEGER,
+    motivo_anulacion  TEXT
+  );
+  CREATE INDEX IF NOT EXISTS idx_sg_reclas_origen  ON sg_lote_reclasificaciones(lote_origen_id);
+  CREATE INDEX IF NOT EXISTS idx_sg_reclas_destino ON sg_lote_reclasificaciones(lote_destino_id);
+  `);
+} catch (e) { console.error('[DB] SG sg_lote_reclasificaciones:', e.message); }
+
 console.log('[DB] Módulo San Gerónimo (sg_*) inicializado');
 
 export default db;
