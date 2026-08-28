@@ -1568,14 +1568,48 @@ router.get('/ordenes', requireAuth, (req, res) => {
     const getCosto = db.prepare(
       "SELECT COALESCE(SUM(costo_total), 0) AS costo FROM pa_aplicaciones WHERE orden_id = ?"
     );
+    // ── CUÁNTO PRODUCTO SE USÓ DE VERDAD ────────────────────────────────
+    //
+    // La orden lleva la DOSIS —lo que la ingeniera planificó, en kg/ha o
+    // lt/lote—, que no es lo que salió del depósito: eso vive en
+    // pa_aplicaciones.cantidad_real, en la unidad del insumo, y es lo que
+    // descuenta el stock. Son dos números distintos y hacen falta los dos.
+    //
+    // Y VIAJA APARTE, no colgado de cada renglón planificado. Dos razones, las
+    // dos reales: una orden puede listar el mismo insumo en dos renglones —nada
+    // lo impide, y el selector viene con el primer producto preseleccionado, así
+    // que pasa sin mala fe— y ahí el total aplicado se repetiría en los dos; y
+    // en la chacra pueden haber usado un producto que la orden no listaba, que
+    // colgado de los items no aparecería en ningún lado.
+    //
+    // UNA SOLA PASADA POR LA TABLA, no una por orden: pa_aplicaciones no tiene
+    // índice por orden_id, así que una consulta adentro del map es un recorrido
+    // completo por cada orden.
+    const idsOrden = ordenes.map(o => o.id);
+    const usadoPorOrden = new Map();
+    if (idsOrden.length) {
+      const ph = idsOrden.map(() => '?').join(',');
+      for (const a of db.prepare(`SELECT a.orden_id, a.insumo_id, i.nombre AS insumo_nombre,
+          i.unidad, COALESCE(SUM(a.cantidad_real),0) AS usado
+        FROM pa_aplicaciones a JOIN pa_insumos i ON i.id = a.insumo_id
+        WHERE a.orden_id IN (${ph})
+        GROUP BY a.orden_id, a.insumo_id`).all(...idsOrden)) {
+        if (!usadoPorOrden.has(a.orden_id)) usadoPorOrden.set(a.orden_id, []);
+        usadoPorOrden.get(a.orden_id).push({
+          insumo_id: a.insumo_id, insumo_nombre: a.insumo_nombre,
+          unidad: a.unidad, usado: a.usado,
+        });
+      }
+    }
 
     const data = ordenes.map(o => {
       const lotes = getLotes.all(o.id);
       const items = getItems.all(o.id);
+      const aplicado = usadoPorOrden.get(o.id) || [];
       const cultivos = [...new Set(lotes.map(l => l.cultivo).filter(Boolean))];
       const finca_nombres = [...new Set(lotes.map(l => l.finca).filter(Boolean))];
       const costo_total = getCosto.get(o.id).costo;
-      return { ...o, lotes, items, cultivos, finca_nombres, costo_total };
+      return { ...o, lotes, items, aplicado, cultivos, finca_nombres, costo_total };
     });
     res.json({ ok: true, data });
   } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
