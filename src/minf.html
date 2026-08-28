@@ -104,10 +104,25 @@ body{padding-bottom:calc(24px + env(safe-area-inset-bottom))}
 .pie{font-size:11px;color:var(--sub);text-align:center;margin-top:8px}
 .pie a{color:var(--burg)}
 .cargando{padding:30px 14px;text-align:center;color:var(--mut);font-size:14px}
-/* La franja de meses de un productor, en el ancho de un teléfono. */
-.mini{display:flex;gap:1px;align-items:flex-end;height:22px;flex-shrink:0;width:88px}
-.mini i{flex:1;background:var(--verdel);border-radius:1px;min-height:1px}
-.mini i.on{background:var(--verde)}
+/* VENTANAS. Cada productor es una FICHA y no un renglón: doce meses apretados en 88px entre
+   el nombre y el número no se leen en un teléfono — que es lo que había antes. Acá la franja
+   ocupa todo el ancho, así cada mes tiene unos 27px y se distingue.
+   La grilla de los meses y la de las barras son la MISMA, así que el rótulo de arriba cae
+   exactamente sobre su columna: sin eso, una barra alta no dice en qué mes está. */
+.vmeses{display:grid;gap:2px;padding:2px 13px 7px;font-size:9.5px;color:var(--sub);
+  text-align:center;font-weight:700;letter-spacing:.02em}
+.vcard{display:block;width:100%;padding:11px 13px 12px;border:0;border-top:1px solid var(--bor);
+  background:transparent;font-family:var(--sans);text-align:left;color:var(--txt)}
+.vcard:active{background:var(--burl)}
+.vtop{display:flex;align-items:baseline;gap:8px}
+.vtop .n{flex:1;min-width:0;font-size:14px;font-weight:700;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.vtop .k{font-size:12.5px;font-weight:700;white-space:nowrap}
+.vsub{font-size:11.5px;color:var(--mut);margin:1px 0 7px}
+.vbar{display:grid;gap:2px;align-items:end;height:28px}
+.vbar i{background:var(--verdel);border-radius:2px 2px 0 0;min-height:2px;display:block}
+.vbar i.on{background:var(--verde)}
+.vnota{font-size:11.5px;margin-top:7px;font-weight:600}
 </style>
 </head>
 <body>
@@ -237,9 +252,13 @@ PANTALLAS.inicio = async function(){
     $('pie-sync').textContent = (d.sync && d.sync.ultimo_ok) || '—';
     var v = d.ventana||{}, R = d.resumen||{}, A = R.actual||{}, B = R.anterior||{};
 
-    var pctTxt = function(x){
-      if (x == null) return '<span style="color:var(--mut)">—</span>';
-      return '<span class="'+(x>=0?'sube':'baja')+'">'+(x>=0?'▲ ':'▼ ')+nrDec(Math.abs(x),1)+'%</span>';
+    // EL NÚMERO GRANDE ES EL TOTAL; la variación va abajo y chica. Al revés —el % arriba— se
+    // lee primero el cambio y después el tamaño, y lo que se viene a ver es cuánto se
+    // facturó. La comparación es contexto, no el titular.
+    var pctTxt = function(x, sufijo){
+      if (x == null) return '<span style="color:var(--mut)">sin comparación</span>';
+      return '<span class="'+(x>=0?'sube':'baja')+'">'+(x>=0?'▲ ':'▼ ')+nrDec(Math.abs(x),1)+'%</span>'
+        + (sufijo ? ('<span style="color:var(--mut)"> '+sufijo+'</span>') : '');
     };
     var kpi = function(l,val,sub,ancha){
       return '<div class="kpi'+(ancha?' ancha':'')+'"><div class="l">'+l+'</div>'
@@ -258,16 +277,29 @@ PANTALLAS.inicio = async function(){
       + (v.periodos||[]).map(function(x){ return '<option value="'+esc(x)+'"'+(x===v.actual?' selected':'')+'>'+esc(x)+'</option>'; }).join('')
       + '</select></div>';
 
-    // Los dos números del mes, grandes, y abajo el comparativo. Es lo que se viene a ver.
+    // Los totales del mes, grandes, con la comparación abajo en chico.
+    var contra = 'vs ' + camp(v.anterior);
     h += '<div class="kpis">'
-      + kpi('Facturación de '+esc(mesTxt(v.mes)), usd(A.usd||0), nr(A.clientes||0)+' cliente(s)')
+      + kpi('Facturación de '+esc(mesTxt(v.mes)), usd(A.usd||0),
+          pctTxt(R.var_usd_pct, contra) + ' · antes ' + usd(B.usd||0))
       + kpi('Kilos de '+esc(mesTxt(v.mes)), kg(A.kilos||0),
-          (A.kilos ? usd(Math.round((A.usd||0)/A.kilos*100)/100)+' por kilo' : ''))
-      + kpi('Contra '+esc(mesTxt(v.mes))+' de '+esc(v.anterior), pctTxt(R.var_usd_pct),
-          'antes '+usd(B.usd||0)+' · '+((R.var_usd||0)>=0?'+':'−')+usd(Math.abs(R.var_usd||0)))
-      + kpi('Kilos contra '+esc(v.anterior), pctTxt(R.var_kilos_pct),
-          'antes '+kg(B.kilos||0))
-      + '</div>';
+          pctTxt(R.var_kilos_pct, contra) + ' · antes ' + kg(B.kilos||0));
+
+    // La rentabilidad, si el nivel alcanza. El servidor decide: si no puede verla, no viene
+    // en la respuesta y acá no se dibuja. Una sola regla, la del panel.
+    if (d.ve_margen && A.rent_pct != null) {
+      // Dos porcentajes se comparan en PUNTOS, no en porcentaje del porcentaje: pasar de 6% a
+      // 7% es "un punto más", y decir "+16,7%" sería cierto y no lo entendería nadie.
+      var pts = (B.rent_pct != null) ? (Math.round((A.rent_pct - B.rent_pct)*10)/10) : null;
+      h += kpi('Rentabilidad', nrDec(A.rent_pct,1)+'%',
+        usd(A.rent_dol||0)
+        + (pts != null
+            ? (' · <span class="'+(pts>=0?'sube':'baja')+'">'+(pts>=0?'▲ ':'▼ ')+nrDec(Math.abs(pts),1)
+               +' pts</span><span style="color:var(--mut)"> '+contra+' ('+nrDec(B.rent_pct,1)+'%)</span>')
+            : ''),
+        true);
+    }
+    h += '</div>';
 
     // La botonera.
     h += '<div class="menu">'
@@ -470,33 +502,56 @@ PANTALLAS.ventana = async function(a){
       h += '<div class="aviso">⚠ <b>'+kg(d.sin_identificar.kilos_hist)+' ('+nrDec(d.sin_identificar.pct_hist,1)
         + '%) sin productor identificado.</b> La columna de proveedor de la planilla trae errores de fórmula.</div>';
     }
-    h += '<div class="sec"><h2>Productores <small>la franja es el año: '
-      + esc(mesTxt(meses[0]||''))+' a '+esc(mesTxt(meses[meses.length-1]||''))+'</small></h2>';
+    var cols = 'grid-template-columns:repeat('+meses.length+',1fr)';
+    h += '<div class="sec"><h2>'+nr((d.filas||[]).length)+' productores '
+      + '<small>tocá uno para ver qué nos vende</small></h2>';
+    // Los meses, UNA vez y arriba de todas las fichas: la grilla es la misma, así que cada
+    // letra cae sobre su columna. Repetirlos en cada ficha sería ruido.
+    h += '<div class="vmeses" style="'+cols+'">'
+      + meses.map(function(m){ return '<div>'+esc(mesTxt(m).slice(0,1))+'</div>'; }).join('')
+      + '</div>';
     h += (d.filas||[]).map(function(f){
+      var tocable = !(f.agrupado || f.no_identificado);
       var franja = meses.map(function(m){
         var c = f.por_mes[m]||{};
-        var alt = Math.max(1, Math.round(((c.kilos_prom||0)/max)*20));
+        var alt = Math.max(2, Math.round(((c.kilos_prom||0)/max)*26));
         var act = (c.kilos_act||0) > 0;
-        return '<i class="'+(act?'on':'')+'" style="height:'+alt+'px" title="'+esc(mesTxt(m))+'"></i>';
+        return '<i class="'+(act?'on':'')+'" style="height:'+alt+'px"'
+          + ' title="'+esc(mesTxt(m)+': '+nr(c.kilos_prom||0)+' K de promedio'
+              + ((c.kilos_act||0) ? (' · este año '+nr(c.kilos_act)+' K') : ' · este año no trajo'))+'"></i>';
       }).join('');
-      var chip = f.contactar ? '<span class="chip c-ambar">☎ llamar</span> '
-               : f.esperando ? '<span class="chip c-gris">no le toca aún</span> '
-               : f.es_nuevo  ? '<span class="chip c-azul">nuevo</span> '
-               : f.no_identificado ? '<span class="chip c-rojo">sin identificar</span> '
-               : f.agrupado  ? '<span class="chip c-gris">agrupados</span> ' : '';
-      return '<button class="fila" onclick="'+(f.agrupado||f.no_identificado ? '' :
-          ('abrir('+JSON.stringify(JSON.stringify({d:'proveedor',c:f.proveedor,f:{producto:a.producto}})).replace(/"/g,'&quot;')+')'))+'">'
-        + '<div class="nom">'+esc(f.proveedor)+'<small>'+chip
-          + (f.desde ? (esc(mesTxt(f.desde)).slice(0,3)+' → '+esc(mesTxt(f.hasta)).slice(0,3)) : 'no trajo')
-          + (f.contactar && f.campanias_sin_traer ? (' · hace '+nr(f.campanias_sin_traer)+' campaña(s)') : '')
-          + '</small></div>'
-        + '<div class="mini">'+franja+'</div>'
-        + '<div class="num">'+kg(f.kilos_prom_anio)+'<small style="color:var(--mut);font-weight:400">/campaña</small></div>'
-        + (f.agrupado||f.no_identificado?'':'<span class="fl">›</span>')
+      var chip = f.contactar ? '<span class="chip c-ambar">☎ llamar</span>'
+               : f.esperando ? '<span class="chip c-gris">no le toca aún</span>'
+               : f.es_nuevo  ? '<span class="chip c-azul">nuevo</span>'
+               : f.no_identificado ? '<span class="chip c-rojo">sin identificar</span>'
+               : f.agrupado  ? '<span class="chip c-gris">chicos</span>' : '';
+      var nota = f.contactar
+          ? '<div class="vnota" style="color:#92400e">☎ hace '+nr(f.campanias_sin_traer||1)+' campaña(s) que no trae'
+            + (f.desde ? (' · suele arrancar en <b>'+esc(mesTxt(f.desde).slice(0,3))+'</b>') : '')+'</div>'
+        : f.esperando
+          ? '<div class="vnota" style="color:var(--mut)">Todavía no le toca · suele arrancar en <b>'
+            + esc(mesTxt(f.desde).slice(0,3))+'</b></div>'
+        : f.no_identificado
+          ? '<div class="vnota" style="color:var(--err)">No son productores: son errores de fórmula de la planilla</div>'
+        : '';
+      return '<button class="vcard"'+(tocable
+          ? (' onclick="abrir('+JSON.stringify(JSON.stringify({d:'proveedor',c:f.proveedor,f:{producto:a.producto}})).replace(/"/g,'&quot;')+')"')
+          : ' disabled style="opacity:.75"')+'>'
+        + '<div class="vtop"><div class="n">'+esc(f.proveedor)+'</div>'
+          + (chip||'') + (tocable?'<span class="fl">›</span>':'') + '</div>'
+        + '<div class="vsub">'
+          + (f.desde ? ('<b>'+esc(mesTxt(f.desde).slice(0,3))+' → '+esc(mesTxt(f.hasta).slice(0,3))+'</b>') : 'no trajo')
+          + ' · ' + kg(f.kilos_prom_anio) + ' por campaña'
+          + (f.ultimo_periodo ? (' · último '+esc(camp(f.ultimo_periodo))) : '')
+        + '</div>'
+        + '<div class="vbar" style="'+cols+'">'+franja+'</div>'
+        + nota
         + '</button>';
     }).join('');
     h += '</div>';
-    h += '<div class="pie">La barra clara es el promedio de ese mes; en verde fuerte, los meses en que trajo este año.</div>';
+    h += '<div class="pie">La barra clara es lo que ese productor trae ese mes en una campaña típica; '
+      + 'en <b style="color:var(--verde)">verde fuerte</b>, los meses en que trajo este año. '
+      + 'Una clara sin verde es un hueco.</div>';
     $('cuerpo').innerHTML = h;
   } catch(e){ error(e); }
 };
