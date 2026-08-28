@@ -5881,6 +5881,24 @@ router.get('/oc', requireAuth, (req, res) => {
              -- número no se muestra: no existe.
              (SELECT COUNT(*) FROM sg_oc_items i
                WHERE i.oc_id = o.id AND i.modo_carga = 'bulto') AS items_por_bulto,
+             -- ── ¿TODOS los renglones se pactaron en cajones, o sólo alguno? ──
+             --
+             -- items_por_bulto de arriba dice «al menos uno», y para preguntar «¿en
+             -- qué unidad se pactó ESTA orden?» eso no alcanza: con un renglón de
+             -- cajones y otro de kilos, los bultos pedidos suman cajones pactados
+             -- con kilos÷factor, que es sumar dos cosas distintas.
+             --
+             -- Y modo_carga llegó por migración: en todo lo anterior está en NULL.
+             -- La regla tolerante es la MISMA que ya usa diferenciasDeOC más arriba
+             -- (modo_carga null con bultos cargados = se pactó por cajón); si acá
+             -- fuera otra, la orden se compararía en bultos en una pantalla y en
+             -- kilos en la otra.
+             (SELECT COUNT(*) FROM sg_oc_items i WHERE i.oc_id = o.id) AS items_total,
+             (SELECT COUNT(*) FROM sg_oc_items i
+               WHERE i.oc_id = o.id
+                 AND (i.modo_carga = 'bulto'
+                      OR (i.modo_carga IS NULL
+                          AND COALESCE(i.cantidad_estimada_presentaciones, 0) > 0))) AS items_pactados_bulto,
              -- Y si ENTRÓ mitad contada y mitad pesada, el total de bultos no
              -- cuenta toda la mercadería: hay que decirlo, no mostrar 60 al
              -- lado de 2.000 kg como si fueran lo mismo.
@@ -5888,6 +5906,23 @@ router.get('/oc', requireAuth, (req, res) => {
                 JOIN sg_oc_items i ON i.id = l.oc_item_id
                WHERE i.oc_id = o.id AND l.activo = 1
                  AND COALESCE(l.bultos, 0) = 0 AND l.kg_reales > 0) AS lotes_sin_contar,
+             -- Y de ésos, cuáles NO se pueden pasar a bultos de ninguna manera:
+             -- entraron pesados, nadie contó los cajones, y la orden tampoco dice
+             -- cuántos kilos entran en uno. Esos bultos no existen en ningún lado.
+             --
+             -- Se pregunta acá y no se deduce restando totales en la pantalla:
+             -- bultos_equivalentes es fraccionario (sale de una división), así que
+             -- «equivalentes == contados» daba verdadero por redondeo cada vez que
+             -- el resto pesado no llegaba a medio cajón, y apagaba la señal en
+             -- órdenes que estaban perfectas. El mismo COALESCE que usa
+             -- bultos_equivalentes, para que las dos preguntas no puedan contestar
+             -- distinto.
+             (SELECT COUNT(*) FROM sg_lotes l
+                JOIN sg_oc_items i ON i.id = l.oc_item_id
+                LEFT JOIN sg_presentaciones ps ON ps.id = i.presentacion_id
+               WHERE i.oc_id = o.id AND l.activo = 1
+                 AND COALESCE(l.bultos, 0) = 0 AND l.kg_reales > 0
+                 AND COALESCE(i.kg_por_bulto, ps.factor_conversion, 0) <= 0) AS lotes_sin_factor,
              -- ── LOS BULTOS QUE ENTRARON, AUNQUE NO SE HAYAN CONTADO ───────
              -- Una compra pactada en cajones se mira en cajones. Si el camión
              -- se pesó sin contarlos, los cajones salen del peso: la orden ya
@@ -5933,6 +5968,18 @@ router.get('/oc', requireAuth, (req, res) => {
 
     for (const o of rows) {
       o.liquidada = (o.liquidada_en || conLiq.has(Number(o.id))) ? 1 : 0;
+      // ── ¿ESTA ORDEN SE PACTÓ EN CAJONES? UNA SOLA RESPUESTA ─────────────
+      //
+      // La misma partida no puede contarse de dos maneras, y estaba pasando: el
+      // listado de órdenes preguntaba items_por_bulto > 0 («alguno») y la solapa
+      // de recibidas preguntaba «todos». Una orden vieja, de cuando modo_carga
+      // todavía no existía, salía en kilos en una pantalla y en cajones en la
+      // otra — la misma orden, dos números distintos.
+      //
+      // TODOS los renglones, no alguno: con uno por cajón y otro por kilo, los
+      // bultos pedidos suman cajones pactados con kilos÷factor.
+      const itTot = Number(o.items_total) || 0;
+      o.pactada_por_bulto = (itTot > 0 && Number(o.items_pactados_bulto) === itTot) ? 1 : 0;
       // EL IMPORTE DE LA ORDEN. Si ya entró mercadería, lo que vale es lo que
       // se acordó por lo que ENTRÓ —la misma cuenta que hace la pantalla de
       // facturas, en bultos por el precio del bulto—, no el estimado con el que

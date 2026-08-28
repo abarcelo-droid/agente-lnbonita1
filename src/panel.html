@@ -2635,15 +2635,71 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
       <div style="font-weight:700;font-size:12px;text-transform:uppercase;letter-spacing:.04em;color:var(--mut);margin-bottom:8px">
         ✅ Órdenes recibidas
       </div>
-      <div class="ab-table-wrap"><table class="pa-tbl">
-        <!-- Las mismas columnas que el listado de órdenes: es la misma partida
-             y no puede contarse de dos maneras. Lo que esta pantalla agrega es
-             el remito y en cuántas veces entró. -->
-        <thead><tr><th>Partida</th><th>Fecha</th><th>Proveedor</th>
-          <th style="text-align:right">Bultos</th><th style="text-align:right">Importe</th>
-          <th>Remito prov.</th><th style="text-align:center">Entradas</th>
-          <th style="text-align:center">Situación</th><th></th></tr></thead>
-        <tbody id="sg-tb-ocrecibidas"><tr><td colspan="9" class="emp">Cargando…</td></tr></tbody>
+      <style>
+        /* ONCE COLUMNAS Y NINGUNA BARRA DE COSTADO.
+           El wrapper lleva id propio porque este mismo bloque contiene la tabla
+           "Entró sin orden de compra", que es de cinco columnas: scopear por
+           #sgc-sub-ocrecibidas le impondría estos anchos también a ella.
+           El !important es porque .ab-table-wrap trae su overflow-x:auto desde
+           la clase. Bajar el padding de 9px 12px a 6px 9px recupera 66px, que
+           es lo que hace entrar las dos columnas nuevas. */
+        #sg-ocrec-wrap{overflow-x:hidden !important}
+        #sg-ocrec-wrap .pa-tbl{width:100%;table-layout:fixed}
+        #sg-ocrec-wrap .pa-tbl td{
+          padding:6px 9px;font-size:12.5px;white-space:nowrap;
+          overflow:hidden;text-overflow:ellipsis}
+        /* EL ENCABEZADO VA APARTE. Metido en la misma regla que las celdas, el
+           th subía de 10px a 12,5px y se quedaba con el nowrap: "BULTOS
+           PEDIDOS" y "BULTOS RECIBIDOS" se cortaban en el MISMO prefijo
+           ("BULT…") y quedaban dos columnas de números con el mismo título.
+           A 10px y en dos renglones entran enteros. */
+        #sg-ocrec-wrap .pa-tbl th{padding:6px 9px;font-size:10px;letter-spacing:.04em;
+          white-space:normal;line-height:1.25;vertical-align:bottom;word-break:normal}
+        #sg-ocrec-wrap .pa-tbl code{font-size:11.5px}
+        /* LA PARTIDA NO ESCONDE DÍGITOS. Son 18 caracteres fijos y el último par
+           es el número de partida del día: recortarlo deja dos partidas iguales
+           en pantalla. Parte en dos renglones, como en los dos modales que ya
+           resolvieron esto. */
+        #sg-ocrec-wrap .pa-tbl td.ocr-part{white-space:normal;word-break:break-word}
+        /* La celda de acciones no se recorta: un botón cortado por la mitad no
+           se aprieta. */
+        #sg-ocrec-wrap .pa-tbl td.ocr-acc{overflow:visible}
+        /* La píldora de situación y el importe son inline-block: el
+           text-overflow del td no les llega, se cortaban al ras y sin puntos
+           suspensivos. Con overflow propio truncan adentro suyo. */
+        #sg-ocrec-wrap .pa-tbl td .bdg,#sg-ocrec-wrap .pa-tbl td>b{
+          display:inline-block;max-width:100%;overflow:hidden;
+          text-overflow:ellipsis;vertical-align:bottom}
+        /* Y el detalle de la barra es un hijo del td: el ellipsis del td no se
+           hereda, hay que ponérselo. */
+        #sg-ocrec-wrap .ocr-det{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+        @media(max-width:900px){ #sg-ocrec-wrap{overflow-x:auto !important}
+                                 #sg-ocrec-wrap .pa-tbl{table-layout:auto} }
+      </style>
+      <div class="ab-table-wrap" id="sg-ocrec-wrap"><table class="pa-tbl">
+        <!-- ── CUÁNTO DE LA ORDEN ENTRÓ, SIN ABRIRLA ────────────────────
+             Pablo, 27/8/2026: "en órdenes recibidas sería bueno que las
+             columnas sean Bultos Pedidos, Bultos Recibidos y % de Recepción,
+             para ver rápido qué porcentaje de la orden de compra se
+             recepcionó".
+
+             No es un lujo: el estado de esta solapa MIENTE. actualizarEstadoOC
+             pone 'recibida_total' apenas hay UNA recepción, sin comparar nada
+             contra lo pedido (rutas/sg.js). Una orden de 1.188 kg de la que
+             bajaron 38 está acá adentro diciendo "Rec. total". Estas tres
+             columnas son el número que faltaba.
+
+             La columna "Bultos" que estaba acá mostraba SÓLO lo recibido: para
+             saber si eso era todo o la mitad había que abrir la orden. -->
+        <thead><tr><th style="width:11%">Partida</th><th style="width:9%">Fecha</th>
+          <th style="width:12%">Proveedor</th>
+          <th style="width:9%;text-align:right">Bultos pedidos</th>
+          <th style="width:9%;text-align:right">Bultos recibidos</th>
+          <th style="width:13%">% de recepción</th>
+          <th style="width:10%;text-align:right">Importe</th>
+          <th style="width:6%">Remito prov.</th>
+          <th style="width:12%;text-align:center">Situación</th><th style="width:9%"></th></tr></thead>
+        <tbody id="sg-tb-ocrecibidas"><tr><td colspan="10" class="emp">Cargando…</td></tr></tbody>
       </table></div>
 
       <!-- Y sólo lo que NO está representado arriba: la mercadería que entró sin
@@ -10812,7 +10868,10 @@ function sgOcCantidad(o){
   var kg  = Number(o.kg_recibidos_total) || 0;
   var bltEst = Number(o.bultos_estimados) || 0;
   var kgEst  = Number(o.total_estimado_kg) || 0;
-  var porBultos = Number(o.items_por_bulto) > 0;
+  // La MISMA pregunta que hace la solapa de recibidas, contestada una sola vez
+  // en el servidor: preguntar acá "¿algún renglón es por cajón?" y allá "¿todos?"
+  // hacía que la misma orden se contara de dos maneras.
+  var porBultos = Number(o.pactada_por_bulto) === 1;
   var bltEq = Math.round(Number(o.bultos_equivalentes) || 0);
   if (porBultos && bltEq > 0) {
     return '<b>' + nr(bltEq) + '</b>'
@@ -12070,6 +12129,163 @@ function sgLoadPendientesRecibir(){
   });
 }
 
+// ══ CUÁNTO DE LA ORDEN ENTRÓ ═══════════════════════════════════════════════
+//
+// Pablo, 27/8/2026: «en órdenes recibidas sería bueno que las columnas sean
+// Bultos Pedidos, Bultos Recibidos y % de Recepción, para ver rápido qué
+// porcentaje de la orden de compra se recepcionó».
+//
+// UNA FUNCIÓN DECIDE Y TRES CELDAS PINTAN. Si cada columna resolviera por su
+// cuenta de dónde saca el número, habría filas con "—" en pedidos y un 92% al
+// lado — tres lecturas distintas de la misma orden, en la misma fila.
+//
+// Y decide sobre todo LA UNIDAD, que es la parte donde esto se puede romper: la
+// compra se pacta en cajones o en kilos, y el otro número siempre se puede
+// derivar dividiendo. Derivarlo es inventar un compromiso que nadie firmó. Ya
+// está escrito en el propio SELECT del listado: "cuando se carga por kilo, los
+// bultos estimados salen de dividir kilos por el factor y dan números que nadie
+// pactó. Ese número no se muestra: no existe."
+function sgOcRecepcion(o){
+  var r = { modo:'', unidad:'', pedido:null, recibido:null, pct:null,
+            nota:'', confiable:true, ayuda:'', kgPedido:0, kgRecibido:0 };
+
+  // ── 1 · LA QUE ENTRÓ SIN ORDEN NO TIENE CONTRA QUÉ COMPARARSE ──────────
+  //
+  // La orden retroactiva se escribe DESPUÉS, a partir de lo que bajó del camión:
+  // no hubo pedido. Y su "cantidad pedida" guarda lotes.length —cuántos renglones
+  // se tipearon en el formulario, no cuántos cajones—, así que una descarga de un
+  // renglón con 60 cajones daría 60 sobre 1: seis mil por ciento.
+  //
+  // Va PRIMERO, antes que cualquier otra regla, porque la de más abajo la
+  // clasificaría como pactada por cajón y dispararía justamente ese número.
+  if (o.modalidad === 'retroactiva') {
+    r.modo = 'retro'; r.unidad = 'kg';
+    r.recibido = Number(o.kg_recibidos_total) || 0;
+    r.nota = 'entró sin orden';
+    r.ayuda = 'Esta orden se escribió a partir de lo que bajó del camión: no hubo un pedido contra el cual comparar.';
+    return r;
+  }
+
+  // ── 2 · EN QUÉ UNIDAD SE PACTÓ ESTA ORDEN ──────────────────────────────
+  // Lo contesta el servidor (pactada_por_bulto) y lo lee también el listado de
+  // órdenes: si cada pantalla lo calculara por su cuenta, la misma orden se
+  // contaría de dos maneras. TODOS los renglones, no alguno.
+  var itBlt = Number(o.items_pactados_bulto) || 0;
+  var porBultos = Number(o.pactada_por_bulto) === 1;
+
+  if (porBultos) {
+    r.modo = 'bulto'; r.unidad = 'bultos';
+    // EL PORCENTAJE SALE DE LOS NÚMEROS CRUDOS, no de los redondeados: 59,45
+    // sobre 60 es 99,1% y no 98,3%. Se redondea para MOSTRAR, al final.
+    r.pedido   = Number(o.bultos_estimados) || 0;
+    // bultos_equivalentes, no bultos_recibidos_total: el camión que se pesó sin
+    // contar cajones tiene el segundo en 0 y mostraría "0 de 60" en una orden
+    // que entró completa.
+    r.recibido = Number(o.bultos_equivalentes) || 0;
+    // Y los kilos abajo, que es como llegó el remito. Estaban en la columna
+    // vieja y perderlos era sacar un dato para agregar otro.
+    r.kgPedido = Number(o.total_estimado_kg) || 0;
+    r.kgRecibido = Number(o.kg_recibidos_total) || 0;
+    var sinContar = Number(o.lotes_sin_contar) || 0;
+    var contados  = Number(o.bultos_recibidos_total) || 0;
+    if (sinContar > 0) {
+      r.nota = contados > 0 ? 'parte por peso' : 'por peso';
+      r.ayuda = 'Parte de la mercadería entró pesada y sin contar cajones: esos bultos salen del peso, no de un conteo.';
+    }
+    // Y el caso mudo, que el servidor cuenta directamente: mercadería que entró
+    // pesada, sin conteo, y sin kilos por bulto en la orden. Esos bultos no
+    // existen en ningún lado, el número recibido queda corto y el porcentaje
+    // pintaría rojo intenso una orden que entró entera.
+    //
+    // La pregunta la contesta el servidor y no una resta de totales: los bultos
+    // equivalentes son fraccionarios, y "equivalentes == contados" daba
+    // verdadero por redondeo cada vez que el resto pesado no llegaba a medio
+    // cajón — apagaba la señal justo en las órdenes que estaban bien.
+    if ((Number(o.lotes_sin_factor) || 0) > 0) {
+      r.confiable = false; r.nota = 'faltan contar';
+      r.ayuda = 'Hay mercadería que entró pesada, sin contar cajones y sin kilos por bulto cargados en la orden: '
+              + 'esos bultos no se pueden contar de ninguna de las dos formas.';
+    }
+  } else {
+    // Por kilo, o mixta. En los dos casos las tres celdas hablan en KILOS: es la
+    // fila la que elige unidad, no la columna. Poner bultos derivados acá sería
+    // el número que el propio backend dice que no existe.
+    r.modo = itBlt > 0 ? 'mixta' : 'kilo';
+    r.unidad = 'kg';
+    r.pedido   = Number(o.total_estimado_kg) || 0;
+    r.recibido = Number(o.kg_recibidos_total) || 0;
+    if (r.modo === 'mixta') {
+      // Y en la mixta el porcentaje se informa SIN COLOR. Los kilos de un renglón
+      // pactado por cajón los calculó la pantalla —cajones × kilos por cajón—, y
+      // el repo ya decidió que contra esos no se dispara ningún aviso. El color
+      // ES el aviso.
+      r.confiable = false; r.nota = 'aprox · renglones mixtos';
+      r.ayuda = 'Esta orden mezcla renglones pactados por cajón con otros por kilo: el total en kilos es aproximado.';
+    } else {
+      r.ayuda = 'Esta orden se compró por kilo: no hay bultos pactados.';
+    }
+  }
+
+  // El pedido en cero no es 0%: es que no hay contra qué comparar. Decir 0%
+  // sobre una orden que entró entera es peor que no decir nada.
+  if (r.pedido > 0) r.pct = Math.round((r.recibido / r.pedido) * 1000) / 10;
+  else if (!r.nota) { r.nota = 'sin pedido cargado'; }
+  return r;
+}
+
+// El número y la barra. Copia la forma de sgAvanceBarra —misma pantalla, misma
+// pregunta— pero NO la reusa por una diferencia de fondo: allá pasarse del 100%
+// es verde porque más vendido es mejor; acá recibir de más es una anomalía que
+// hay que ir a mirar. Y sgAvanceBarra la usan las liquidaciones: tocarla es
+// cambiarle la pantalla a otro.
+function sgOcRecepBarra(r){
+  if (r.pct == null) {
+    return '<span style="color:var(--mut)">—</span>'
+      + (r.nota ? '<div class="sg-oc-sub ocr-det" title="' + esc(r.ayuda || r.nota) + '">'
+                  + esc(r.nota) + '</div>' : '');
+  }
+  var pct = r.pct;
+  // Gris y sin barra cuando el número no es de fiar: pintar rojo un dato
+  // incompleto manda a buscar un problema que no existe.
+  var col, fondo;
+  if (!r.confiable)      { col = 'var(--mut)'; fondo = '#e5e7eb'; }
+  // Más del 100% no es verde. Entró de más: el conteo ya no se corrige, lo que
+  // se arregla es el precio, y eso alguien lo tiene que hacer.
+  else if (pct > 100.5)  { col = '#9a3412'; fondo = '#fff7ed'; }
+  else if (pct >= 99.5)  { col = '#16a34a'; fondo = '#dcfce7'; }
+  else if (pct >= 80)    { col = '#d19a1a'; fondo = '#fefce8'; }
+  else                   { col = '#dc2626'; fondo = '#fef2f2'; }
+  // La barra se topea para dibujar; el número se dice como es.
+  var ancho = Math.max(0, Math.min(100, pct));
+  var det = nr(r.recibido) + ' de ' + nr(r.pedido);
+  var tit = det + ' ' + r.unidad + (r.ayuda ? ' · ' + r.ayuda : '');
+  return '<div title="' + esc(tit) + '">'
+    + (r.confiable
+        ? '<div style="height:8px;border-radius:6px;background:' + fondo + ';overflow:hidden">'
+          + '<div style="height:100%;width:' + ancho + '%;background:' + col + '"></div></div>'
+        : '')
+    + '<div class="ocr-det" style="font-size:11px;color:' + col + ';font-weight:600;margin-top:2px">'
+      + pct + '% <span style="color:var(--mut);font-weight:400">· ' + esc(det) + '</span></div>'
+    + (r.nota ? '<div class="sg-oc-sub ocr-det">' + esc(r.nota) + '</div>' : '')
+    + '</div>';
+}
+
+// Y las dos celdas de números. Van juntas para que la unidad se escriba una sola
+// vez: si una dijera cajones y la otra kilos, la resta no significaría nada.
+function sgOcRecepNum(valor, r){
+  if (valor == null) return '<span style="color:var(--mut)">—</span>';
+  return '<b>' + nr(Math.round(valor * 100) / 100) + '</b>'
+    + (r.unidad === 'kg' ? ' <span style="color:var(--mut);font-weight:400">kg</span>' : '');
+}
+
+// Y los kilos abajo, cuando la orden se cuenta en cajones. Estaban en la columna
+// vieja como sub-línea y perderlos era sacar un dato para agregar otro: el
+// remito del proveedor viene en kilos y es contra eso que se controla.
+function sgOcRecepKg(kg, r){
+  if (r.modo !== 'bulto' || !(Number(kg) > 0)) return '';
+  return '<div class="sg-oc-sub ocr-det">' + nr(kg) + ' kg</div>';
+}
+
 // Las órdenes ya recibidas. Van aparte para que la bandeja de lo que falta
 // hacer no se llene de lo que ya está resuelto.
 function sgLoadOcRecibidas(){
@@ -12082,35 +12298,50 @@ function sgLoadOcRecibidas(){
     tb.innerHTML = ocs.length ? ocs.map(function(o){
       // En cuántas veces entró. Una sola es lo normal y no se destaca; más de
       // una es una entrega partida y sí importa verlo.
+      // EN CUÁNTAS VECES ENTRÓ, ahora colgado de lo recibido en vez de en una
+      // columna propia. Decía "1" en el 99% de las filas y se llevaba el ancho
+      // que necesitaban los dos números que Pablo pidió ver. Y es información
+      // SOBRE lo recibido: entró en dos veces, no la orden en dos veces.
       var n = Number(o.entradas) || 0;
-      var entradas = n > 1
-        ? '<b title="Entró en ' + n + ' veces">' + n + '</b>'
-        : (n === 1 ? '1' : '—');
+      var entradas = n > 1 ? 'en ' + n + ' entregas' : '';
       // LA MISMA PARTIDA NO SE CUENTA DE DOS MANERAS. Esta pantalla mostraba
       // kilos pedidos contra kilos recibidos y el estado de la mercadería,
       // mientras el listado de órdenes ya hablaba en bultos, con el importe y
       // con lo que falta hacer. Eran dos lecturas distintas de lo mismo.
       var sit = sgOcSituacion(o);
+      // Lo pedido, lo que entró y qué porcentaje es: una sola lectura, tres
+      // celdas. Reemplaza a la columna "Bultos", que mostraba sólo lo recibido
+      // y obligaba a abrir la orden para saber si eso era todo o la mitad.
+      var rec = sgOcRecepcion(o);
       return '<tr>'
-        + '<td><code>' + esc(sgOcId(o)) + '</code></td>'
-        + '<td>' + esc(o.fecha_oc || '—') + '</td>'
-        + '<td>' + esc(o.proveedor_nombre || '—') + '</td>'
-        + '<td style="text-align:right">' + sgOcCantidad(o) + '</td>'
-        + '<td style="text-align:right">' + sgOcImporte(o) + '</td>'
-        + '<td>' + esc(o.remitos_proveedor || '—') + '</td>'
-        + '<td style="text-align:center">' + entradas + '</td>'
-        + '<td style="text-align:center"><span class="bdg ' + sit[0] + '">' + sit[1] + '</span>'
+        + '<td class="ocr-part" title="' + esc(sgOcId(o)) + '"><code>' + esc(sgOcId(o)) + '</code></td>'
+        + '<td title="' + esc(o.fecha_oc || '') + '">' + esc(o.fecha_oc || '—') + '</td>'
+        + '<td title="' + esc(o.proveedor_nombre || '') + '">' + esc(o.proveedor_nombre || '—') + '</td>'
+        + '<td style="text-align:right">' + sgOcRecepNum(rec.pedido, rec)
+          + sgOcRecepKg(rec.kgPedido, rec) + '</td>'
+        + '<td style="text-align:right">' + sgOcRecepNum(rec.recibido, rec)
+          + sgOcRecepKg(rec.kgRecibido, rec)
+          // Entró partido: es lo que explica que la orden diga 2 entradas.
+          + (entradas ? '<div class="sg-oc-sub ocr-det">' + entradas + '</div>' : '') + '</td>'
+        + '<td>' + sgOcRecepBarra(rec) + '</td>'
+        + '<td style="text-align:right" title="' + (Number(o.importe) > 0 ? esc(sgMoney(o.importe)) : '') + '">'
+          + sgOcImporte(o) + '</td>'
+        + '<td title="' + esc(o.remitos_proveedor || '') + '">' + esc(o.remitos_proveedor || '—') + '</td>'
+        + '<td style="text-align:center" title="' + esc(sit[1]) + (o.cerrada_en ? ' · confirmada' : '') + '">'
+          + '<span class="bdg ' + sit[0] + '">' + sit[1] + '</span>'
           + (o.cerrada_en ? '<div class="sg-oc-sub">confirmada</div>' : '') + '</td>'
-        + '<td style="text-align:right;white-space:nowrap">'
+        + '<td class="ocr-acc" style="text-align:right;white-space:nowrap">'
           + '<button class="btn bo bs" onclick="sgOcVer(' + o.id + ')">Ver</button>'
           // La mercadería que se daba por perdida apareció: se reabre y vuelve a
           // la bandeja de pendientes para poder recibirla.
           + (o.cerrada_en
+              // A ícono: con once columnas, "Ver" y "↩ Reabrir" con texto no
+              // entran en el ancho de la celda sin quitárselo al proveedor.
               ? ' <button class="btn bo bs" title="Volver a abrirla para recibir"'
-                + ' onclick="sgOcReabrir(' + o.id + ')">↩ Reabrir</button>'
+                + ' onclick="sgOcReabrir(' + o.id + ')">↩</button>'
               : '')
         + '</td></tr>';
-    }).join('') : '<tr><td colspan="9" class="emp">Todavía no se recibió ninguna orden.</td></tr>';
+    }).join('') : '<tr><td colspan="10" class="emp">Todavía no se recibió ninguna orden.</td></tr>';
   });
 }
 
