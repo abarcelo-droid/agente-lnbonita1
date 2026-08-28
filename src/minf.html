@@ -28,73 +28,98 @@
 html,body{background:var(--bg);color:var(--txt);font-family:var(--sans);font-size:15px;line-height:1.5;min-height:100vh}
 body{padding-bottom:calc(24px + env(safe-area-inset-bottom))}
 
-.hd{position:sticky;top:0;background:var(--burd);color:#fff;padding:13px 16px;
-  display:flex;align-items:center;gap:10px;z-index:10;
-  padding-top:calc(13px + env(safe-area-inset-top))}
-.hd .tit{flex:1;font-size:16px;font-weight:600;line-height:1.2}
-.hd .tit small{display:block;font-size:11px;opacity:.7;font-weight:400}
-.hd .out{background:transparent;border:1px solid rgba(255,255,255,.25);color:#fff;
-  font-size:11px;padding:5px 9px;border-radius:6px}
+.hd{position:sticky;top:0;background:var(--burd);color:#fff;padding:12px 14px;
+  display:flex;align-items:center;gap:10px;z-index:20;
+  padding-top:calc(12px + env(safe-area-inset-top))}
+.hd .tit{flex:1;min-width:0;font-size:16px;font-weight:600;line-height:1.2;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.hd .tit small{display:block;font-size:11px;opacity:.72;font-weight:400;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.hd button{background:transparent;border:1px solid rgba(255,255,255,.25);color:#fff;
+  font-size:12px;padding:6px 10px;border-radius:8px;font-family:var(--sans);flex-shrink:0}
+.hd .atras{border:0;font-size:22px;padding:2px 8px 6px;line-height:1}
 
-.wrap{max-width:560px;margin:0 auto;padding:14px 14px 30px}
+.wrap{max-width:560px;margin:0 auto;padding:13px 13px 30px}
 
-/* Las tarjetas: un dato por tarjeta y grande. En un teléfono se mira de un vistazo o no se
-   mira. */
-.kpis{display:grid;grid-template-columns:1fr 1fr;gap:9px;margin-bottom:14px}
+.kpis{display:grid;grid-template-columns:1fr 1fr;gap:9px;margin-bottom:13px}
 .kpi{background:var(--sur);border-radius:12px;padding:12px 13px;border:1px solid var(--bor)}
 .kpi .l{font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:var(--mut);
   white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.kpi .v{font-size:22px;font-weight:700;line-height:1.15;margin-top:2px}
+.kpi .v{font-size:23px;font-weight:700;line-height:1.15;margin-top:2px}
 .kpi .s{font-size:11.5px;color:var(--mut);margin-top:1px}
 .kpi.ancha{grid-column:1/-1}
 
-.sec{background:var(--sur);border-radius:12px;border:1px solid var(--bor);margin-bottom:14px;overflow:hidden}
+/* La botonera. Botones grandes: se tocan con el pulgar, sin apuntar. */
+.menu{display:grid;grid-template-columns:1fr 1fr 1fr;gap:9px;margin-bottom:14px}
+.menu button{background:var(--sur);border:1px solid var(--bor);border-radius:12px;
+  padding:14px 6px;font-family:var(--sans);font-size:12px;font-weight:700;color:var(--txt);
+  display:flex;flex-direction:column;align-items:center;gap:5px;line-height:1.15}
+.menu button:active{background:var(--burl)}
+.menu button .ic{font-size:21px}
+.menu button small{font-size:10px;font-weight:400;color:var(--mut)}
+
+.sec{background:var(--sur);border-radius:12px;border:1px solid var(--bor);margin-bottom:13px;overflow:hidden}
 .sec > h2{font-size:13px;font-weight:700;padding:12px 14px 8px;display:flex;
   align-items:baseline;gap:8px}
 .sec > h2 small{font-size:11px;font-weight:400;color:var(--mut)}
-.fila{display:flex;align-items:center;gap:10px;padding:10px 14px;border-top:1px solid var(--bor)}
+
+/* Cada fila es un botón: la app entera se navega tocando. La flecha lo dice — sin ella,
+   nadie descubre que se puede entrar. */
+.fila{display:flex;align-items:center;gap:9px;padding:11px 13px;border-top:1px solid var(--bor);
+  width:100%;background:transparent;border-left:0;border-right:0;border-bottom:0;
+  font-family:var(--sans);text-align:left;color:var(--txt)}
+.fila:active{background:var(--burl)}
 .fila .nom{flex:1;min-width:0;font-size:13.5px;font-weight:600;
   white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .fila .nom small{display:block;font-size:11px;font-weight:400;color:var(--mut);
-  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  white-space:normal}
 .fila .num{font-size:13.5px;font-weight:700;text-align:right;white-space:nowrap}
 .fila .num small{display:block;font-size:11px;font-weight:600}
+.fila .fl{color:var(--sub);font-size:17px;flex-shrink:0;line-height:1}
 .vacio{padding:16px 14px;color:var(--mut);font-size:13px;border-top:1px solid var(--bor)}
 
 .sube{color:var(--ok)} .baja{color:var(--err)}
 .chip{display:inline-block;padding:2px 7px;border-radius:9px;font-size:10.5px;font-weight:700}
 .c-rojo{background:#fee2e2;color:#991b1b} .c-ambar{background:#fef3c7;color:#92400e}
-.c-azul{background:#dbeafe;color:#1e40af}
+.c-azul{background:#dbeafe;color:#1e40af} .c-verde{background:#dcfce7;color:#166534}
+.c-gris{background:#f1f5f9;color:#64748b}
 
-/* El mes a mes: barras en SVG, sin librerías. */
-.graf{padding:4px 14px 12px}
+/* Por qué dimensión abrir la lista. Chips y no un <select>: se ve qué opciones hay sin
+   desplegar nada. */
+.dims{display:flex;gap:6px;overflow-x:auto;padding:0 13px 11px;margin:0 -13px}
+.dims button{flex-shrink:0;background:var(--sur);border:1px solid var(--bor2);border-radius:20px;
+  padding:7px 13px;font-family:var(--sans);font-size:12.5px;color:var(--mut)}
+.dims button.on{background:var(--burg);border-color:var(--burg);color:#fff;font-weight:600}
+
+.ruta{font-size:11.5px;color:var(--mut);margin-bottom:11px;line-height:1.45}
+.ruta b{color:var(--txt)}
+.graf{padding:4px 13px 12px}
 .aviso{padding:10px 12px;border-radius:10px;background:#fef3c7;border:1px solid #fcd34d;
   color:#92400e;font-size:12px;margin-bottom:12px}
 .sel{display:flex;gap:8px;margin-bottom:12px}
-.sel select{flex:1;min-width:0;padding:10px 11px;border-radius:10px;border:1px solid var(--bor2);
+.sel select,.busca input{width:100%;padding:10px 11px;border-radius:10px;border:1px solid var(--bor2);
   background:var(--sur);font-family:var(--sans);font-size:14px;color:var(--txt)}
-.pie{font-size:11px;color:var(--sub);text-align:center;margin-top:6px}
+.sel select{flex:1;min-width:0}
+.busca{margin-bottom:11px}
+.pie{font-size:11px;color:var(--sub);text-align:center;margin-top:8px}
 .pie a{color:var(--burg)}
 .cargando{padding:30px 14px;text-align:center;color:var(--mut);font-size:14px}
+/* La franja de meses de un productor, en el ancho de un teléfono. */
+.mini{display:flex;gap:1px;align-items:flex-end;height:22px;flex-shrink:0;width:88px}
+.mini i{flex:1;background:var(--verdel);border-radius:1px;min-height:1px}
+.mini i.on{background:var(--verde)}
 </style>
 </head>
 <body>
 
 <div class="hd">
-  <div class="tit">Informes comerciales<small id="hd-sub">cargando…</small></div>
-  <button class="out" onclick="salir()">Salir</button>
+  <button class="atras" id="btn-atras" onclick="volver()" style="display:none">‹</button>
+  <div class="tit" id="hd-tit">Informes comerciales<small id="hd-sub">cargando…</small></div>
+  <button id="btn-salir" onclick="salir()">Salir</button>
 </div>
 
 <div class="wrap">
-  <div id="aviso"></div>
-
-  <div class="sel">
-    <select id="mes" onchange="cargar()"></select>
-    <select id="camp" onchange="cargar()"></select>
-  </div>
-
   <div id="cuerpo"><div class="cargando">Buscando los números…</div></div>
-
   <div class="pie">
     Datos al <span id="pie-sync">—</span>.<br>
     <a href="/panel">Ver el informe completo en la computadora</a>
@@ -103,30 +128,37 @@ body{padding-bottom:calc(24px + env(safe-area-inset-bottom))}
 
 <script>
 // ── INFORMES COMERCIALES, VERSIÓN TELÉFONO ────────────────────────────────────────────
-// Para mirar cómo viene el mes en dos segundos, no para analizar. Todo lo que hace falta
-// entra en una pantalla y se lee sin tocar nada: el mes contra el mismo mes del año pasado,
-// quién sube, quién baja, y qué oportunidades hay.
+// Una app NAVEGABLE, no una pantalla que se lee. Arranca en la facturación y los kilos del
+// mes contra el año pasado, y de ahí se entra: tocás CENCOSUD y ves qué le vendimos, tocás
+// un producto y ves de quién vino. Todo es un botón.
 //
-// NO ES EL PANEL ACHICADO. panel.html pesa 3,6 MB — por datos móviles es inusable — y su
-// tabla de doce columnas no se puede leer en un teléfono ni con la mejor CSS. Es el mismo
-// patrón que /m/ifco y /scout: una app propia, instalable, contra los MISMOS endpoints.
+// NO ES EL PANEL ACHICADO. panel.html pesa 3,6 MB —por datos móviles es inusable— y su tabla
+// de doce columnas no se lee en un teléfono. Es el mismo patrón que /m/ifco y /scout: una app
+// propia, instalable, contra los MISMOS endpoints. Eso último importa más de lo que parece:
+// el nivel que decide quién ve margen lo decide el servidor, así que no hay una segunda
+// versión de la verdad que mantener.
 //
-// Y contra los mismos endpoints quiere decir con las mismas reglas: el nivel que gobierna el
-// margen en el panel lo gobierna acá, porque es el servidor el que decide. No hay una
-// segunda versión de la verdad que mantener.
-var S = { user:null, ventana:null, mes:null, camp:null };
+// ── LA NAVEGACIÓN ─────────────────────────────────────────────────────────────────────
+// Una PILA de pantallas, y cada empujón hace un history.pushState. Sin eso, el botón "atrás"
+// del teléfono —que es el que la gente usa, no el de la app— cerraría la aplicación en vez de
+// volver un paso, y eso se siente roto aunque todo lo demás ande.
+var S = {
+  user:null, ventana:null, sync:null,
+  pila:[],            // el camino recorrido
+  opts:null,          // dimensiones y productos, se piden una vez
+};
 
 var $ = function(id){ return document.getElementById(id); };
 var esc = function(s){ return String(s==null?'':s).replace(/[&<>"']/g, function(c){
   return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; }); };
 var nr = function(n){ return Number(n||0).toLocaleString('es-AR'); };
 var nrDec = function(n,d){ return Number(n||0).toLocaleString('es-AR',{minimumFractionDigits:d,maximumFractionDigits:d}); };
-// La unidad va pegada al número, igual que en el panel: una tarjeta suelta tiene que decir
-// sola de qué habla.
+// La unidad va pegada al número, igual que en el panel: una fila suelta tiene que decir sola
+// de qué habla.
 var usd = function(n){ return n==null ? '—' : ('USD '+nr(n)); };
 var kg  = function(n){ return n==null ? '—' : (nr(n)+' K'); };
-// '02-AGOSTO' → 'AGOSTO'. El número está para ordenar.
 var mesTxt = function(m){ var x=/^\d\d-(.+)$/.exec(String(m||'')); return x?x[1]:String(m||''); };
+var camp = function(p){ var m=/^(\d{2})(\d{2})-(\d{2})(\d{2})$/.exec(String(p||'')); return m?(m[2]+'/'+m[4]):String(p||''); };
 
 async function api(url){
   var r = await fetch(url, { credentials:'include' });
@@ -135,11 +167,339 @@ async function api(url){
   if (!d || !d.ok) throw new Error((d && d.error) || ('HTTP ' + r.status));
   return d.data;
 }
-
 function salir(){
   fetch('/api/auth/logout', { method:'POST', credentials:'include' })
     .finally(function(){ window.location.href = '/login'; });
 }
+function cargando(txt){ $('cuerpo').innerHTML = '<div class="cargando">'+(txt||'Buscando…')+'</div>'; }
+function error(e){ $('cuerpo').innerHTML = '<div class="cargando" style="color:var(--err)">'+esc(e.message||e)+'</div>'; }
+
+// ── LA PILA ───────────────────────────────────────────────────────────────────────────
+function ir(pantalla, args, titulo, sub){
+  S.pila.push({ p:pantalla, a:args||{}, t:titulo, s:sub });
+  history.pushState({ n:S.pila.length }, '', '#'+pantalla);
+  render();
+}
+function volver(){ history.back(); }
+window.addEventListener('popstate', function(){
+  if (S.pila.length > 1) { S.pila.pop(); render(); }
+});
+
+function render(){
+  var e = S.pila[S.pila.length-1];
+  if (!e) return;
+  $('hd-tit').childNodes[0].nodeValue = e.t || 'Informes comerciales';
+  $('hd-sub').textContent = e.s || '';
+  $('btn-atras').style.display = S.pila.length > 1 ? 'block' : 'none';
+  $('btn-salir').style.display = S.pila.length > 1 ? 'none' : 'block';
+  window.scrollTo(0,0);
+  PANTALLAS[e.p](e.a);
+}
+
+// Los filtros puestos, para armar la URL y para mostrar el camino.
+function qs(a, extra){
+  var p = [];
+  if (S.ventana) {
+    if (a.mes || S.ventana.mes)   p.push('mes_ok='+encodeURIComponent(a.mes||S.ventana.mes));
+    if (a.camp || S.ventana.actual) p.push('periodo_actual='+encodeURIComponent(a.camp||S.ventana.actual));
+  }
+  var f = a.filtros || {};
+  for (var k in f) if (f[k]) p.push('filtro_'+k+'='+encodeURIComponent(f[k]));
+  return p.concat(extra||[]).join('&');
+}
+// El camino recorrido, escrito. En una pantalla chica, sin esto no se sabe si el número que
+// se está mirando es de todo o de un cliente.
+function ruta(filtros){
+  var ks = Object.keys(filtros||{}).filter(function(k){ return filtros[k]; });
+  if (!ks.length) return '';
+  return '<div class="ruta">Mirando sólo: '
+    + ks.map(function(k){ return '<b>'+esc(filtros[k])+'</b>'; }).join(' · ') + '</div>';
+}
+
+var DIM_LABEL = { cliente:'Cliente', producto:'Producto', articulo:'Artículo',
+  categoria:'Categoría', subcategoria:'Subcategoría', vendedor:'Vendedor',
+  proveedor:'Proveedor', cate_clie:'Rubro' };
+// Al entrar a algo, por qué abrirlo. Un cliente se abre por producto y un producto por
+// cliente: es lo que se pregunta el 90% de las veces, y las otras están en los chips.
+var DIM_SIGUIENTE = { cliente:'producto', producto:'cliente', articulo:'cliente',
+  categoria:'producto', subcategoria:'producto', vendedor:'cliente', proveedor:'producto',
+  cate_clie:'cliente' };
+
+var PANTALLAS = {};
+
+// ══ INICIO ════════════════════════════════════════════════════════════════════════════
+PANTALLAS.inicio = async function(){
+  cargando();
+  try {
+    var d = await api('/api/informes/interanual?agrupar=cliente&'+qs({}));
+    if (!d) return;
+    S.ventana = d.ventana; S.sync = d.sync;
+    $('pie-sync').textContent = (d.sync && d.sync.ultimo_ok) || '—';
+    var v = d.ventana||{}, R = d.resumen||{}, A = R.actual||{}, B = R.anterior||{};
+
+    var pctTxt = function(x){
+      if (x == null) return '<span style="color:var(--mut)">—</span>';
+      return '<span class="'+(x>=0?'sube':'baja')+'">'+(x>=0?'▲ ':'▼ ')+nrDec(Math.abs(x),1)+'%</span>';
+    };
+    var kpi = function(l,val,sub,ancha){
+      return '<div class="kpi'+(ancha?' ancha':'')+'"><div class="l">'+l+'</div>'
+        + '<div class="v">'+val+'</div><div class="s">'+(sub||'')+'</div></div>'; };
+
+    var h = '';
+    if (v.en_curso) {
+      h += '<div class="aviso">⚠ <b>'+esc(mesTxt(v.mes))+' de '+esc(v.actual)+' está a medio facturar</b> '
+        + 'y se compara contra el mes entero de '+esc(v.anterior)+'. Si todo baja parejo, mirá primero el mes anterior.</div>';
+    }
+    h += '<div class="sel">'
+      + '<select onchange="S.ventana.mes=this.value;render()">'
+      + (v.meses||[]).map(function(x){ return '<option value="'+esc(x)+'"'+(x===v.mes?' selected':'')+'>'+esc(mesTxt(x))+'</option>'; }).join('')
+      + '</select>'
+      + '<select onchange="S.ventana.actual=this.value;render()">'
+      + (v.periodos||[]).map(function(x){ return '<option value="'+esc(x)+'"'+(x===v.actual?' selected':'')+'>'+esc(x)+'</option>'; }).join('')
+      + '</select></div>';
+
+    // Los dos números del mes, grandes, y abajo el comparativo. Es lo que se viene a ver.
+    h += '<div class="kpis">'
+      + kpi('Facturación de '+esc(mesTxt(v.mes)), usd(A.usd||0), nr(A.clientes||0)+' cliente(s)')
+      + kpi('Kilos de '+esc(mesTxt(v.mes)), kg(A.kilos||0),
+          (A.kilos ? usd(Math.round((A.usd||0)/A.kilos*100)/100)+' por kilo' : ''))
+      + kpi('Contra '+esc(mesTxt(v.mes))+' de '+esc(v.anterior), pctTxt(R.var_usd_pct),
+          'antes '+usd(B.usd||0)+' · '+((R.var_usd||0)>=0?'+':'−')+usd(Math.abs(R.var_usd||0)))
+      + kpi('Kilos contra '+esc(v.anterior), pctTxt(R.var_kilos_pct),
+          'antes '+kg(B.kilos||0))
+      + '</div>';
+
+    // La botonera.
+    h += '<div class="menu">'
+      + '<button onclick="ir(\'lista\',{agrupar:\'cliente\',filtros:{}},\'Interanual\',\'por cliente\')">'
+        + '<span class="ic">📈</span>Interanual<small>quién sube y baja</small></button>'
+      + '<button onclick="ir(\'oport\',{},\'Oportunidades\',\'qué hay para hacer\')">'
+        + '<span class="ic">🎯</span>Oportunidades<small>a quién llamar</small></button>'
+      + '<button onclick="ir(\'productos\',{},\'Ventanas\',\'elegí un producto\')">'
+        + '<span class="ic">🪟</span>Ventanas<small>quién nos trae</small></button>'
+      + '</div>';
+
+    // Un adelanto de lo que más se movió, ya tocable: para el que abre la app y no quiere
+    // elegir nada.
+    var imp = function(f){ return f.impacto!=null ? f.impacto : ((f.usd_act||0)-(f.usd_ant||0)); };
+    var top = (d.filas||[]).slice().sort(function(a,b){ return Math.abs(imp(b))-Math.abs(imp(a)); }).slice(0,5);
+    if (top.length) {
+      h += '<div class="sec"><h2>Lo que más se movió <small>tocá para ver el detalle</small></h2>'
+        + top.map(function(f){ return filaClave(f, 'cliente', {}); }).join('') + '</div>';
+    }
+    $('cuerpo').innerHTML = h;
+    $('pie-sync').textContent = (d.sync && d.sync.ultimo_ok) || '—';
+  } catch(e){ error(e); }
+};
+
+// Una fila de la lista interanual, tocable.
+function filaClave(f, dim, filtros){
+  var imp = f.impacto!=null ? f.impacto : ((f.usd_act||0)-(f.usd_ant||0));
+  var sg = imp>=0 ? 'sube' : 'baja';
+  var chip = f.estado==='perdido' ? '<span class="chip c-rojo">perdido</span> '
+           : f.estado==='nuevo'   ? '<span class="chip c-azul">nuevo</span> '
+           : f.estado==='crece'   ? '<span class="chip c-verde">crece</span> '
+           : f.estado==='cae'     ? '<span class="chip c-ambar">cae</span> ' : '';
+  var nuevos = Object.assign({}, filtros); nuevos[dim] = f.clave;
+  return '<button class="fila" onclick="abrir('+JSON.stringify(JSON.stringify({d:dim,c:f.clave,f:filtros})).replace(/"/g,'&quot;')+')">'
+    + '<div class="nom">'+esc(f.clave||'')+'<small>'+chip
+      + (f.usd_act!=null?usd(f.usd_act):'no vendió')
+      + (f.kilos_act!=null?(' · '+kg(f.kilos_act)):'')+'</small></div>'
+    + '<div class="num '+sg+'">'+(imp>=0?'+':'−')+usd(Math.abs(imp))
+      + (f.var_usd_pct!=null?('<small class="'+sg+'">'+(f.var_usd_pct>=0?'+':'')+nrDec(f.var_usd_pct,1)+'%</small>'):'')
+    + '</div><span class="fl">›</span></button>';
+}
+// Entrar a una clave: se le agrega su filtro y se abre por la dimensión que sigue.
+function abrir(json){
+  var x = typeof json === 'string' ? JSON.parse(json) : json;
+  if (x.c === '(sin dato)') return;      // no hay filtro que lo separe
+  var filtros = Object.assign({}, x.f); filtros[x.d] = x.c;
+  ir('lista', { agrupar: DIM_SIGUIENTE[x.d] || 'producto', filtros: filtros },
+     x.c, 'por ' + (DIM_LABEL[DIM_SIGUIENTE[x.d]||'producto']||'').toLowerCase());
+}
+
+// ══ LISTA (interanual, y todo el drill) ═══════════════════════════════════════════════
+PANTALLAS.lista = async function(a){
+  cargando();
+  try {
+    var d = await api('/api/informes/interanual?agrupar='+encodeURIComponent(a.agrupar)+'&'+qs(a));
+    if (!d) return;
+    var v = d.ventana||{}, R = d.resumen||{}, A = R.actual||{}, B = R.anterior||{};
+    var h = ruta(a.filtros);
+
+    // El total de lo que se está mirando, arriba: sin esto no se sabe si las filas son todo
+    // o una parte.
+    h += '<div class="kpis">'
+      + '<div class="kpi ancha"><div class="l">'+esc(mesTxt(v.mes))+' '+esc(v.actual)+'</div>'
+      + '<div class="v">'+usd(A.usd||0)+'</div>'
+      + '<div class="s">'+kg(A.kilos||0)+' · antes '+usd(B.usd||0)
+      + (R.var_usd_pct!=null?(' <span class="'+(R.var_usd_pct>=0?'sube':'baja')+'">'
+          +(R.var_usd_pct>=0?'▲ ':'▼ ')+nrDec(Math.abs(R.var_usd_pct),1)+'%</span>'):'')
+      + '</div></div></div>';
+
+    // Por qué dimensión abrir. Sin esto, el camino sería siempre el mismo.
+    h += '<div class="dims">' + ['cliente','producto','articulo','categoria','vendedor','proveedor']
+      .filter(function(k){ return !(a.filtros||{})[k]; })
+      .map(function(k){
+        return '<button class="'+(k===a.agrupar?'on':'')+'" onclick="reAgrupar(\''+k+'\')">'+esc(DIM_LABEL[k])+'</button>'; })
+      .join('') + '</div>';
+
+    var filas = d.filas||[];
+    h += '<div class="sec"><h2>'+nr(filas.length)+' '+esc((DIM_LABEL[a.agrupar]||'').toLowerCase())+'(s) '
+      + '<small>ordenados por cuánto movieron</small></h2>'
+      + (filas.length
+          ? filas.slice(0,60).map(function(f){ return filaClave(f, a.agrupar, a.filtros||{}); }).join('')
+          : '<div class="vacio">No hay ventas con esos filtros.</div>')
+      + '</div>';
+    if (filas.length > 60) h += '<div class="pie">Se muestran los 60 de mayor impacto.</div>';
+    $('cuerpo').innerHTML = h;
+  } catch(e){ error(e); }
+};
+function reAgrupar(dim){
+  var e = S.pila[S.pila.length-1];
+  e.a.agrupar = dim;
+  e.s = 'por ' + (DIM_LABEL[dim]||'').toLowerCase();
+  render();
+}
+
+// ══ OPORTUNIDADES ═════════════════════════════════════════════════════════════════════
+PANTALLAS.oport = async function(a){
+  cargando('Buscando oportunidades…');
+  try {
+    var d = await api('/api/informes/oportunidades?limite=40&'+qs(a));
+    if (!d) return;
+    var h = ruta(a.filtros);
+    h += '<div class="kpis"><div class="kpi ancha"><div class="l">Oportunidades</div>'
+      + '<div class="v">'+nr(d.total||0)+'</div><div class="s">'
+      + (d.ve_margen ? (usd(d.margen_en_juego_total||0)+' de margen sobre la mesa')
+                     : 'ordenadas por la plata en juego')
+      + '</div></div></div>';
+    var items = d.items||[];
+    h += '<div class="sec"><h2>Las más grandes <small>tocá para ver el detalle</small></h2>'
+      + (items.length ? items.map(function(x){
+          var def = (d.tipos||{})[x.tipo] || { label:x.tipo, color:'' };
+          var cls = def.color==='rojo' ? 'c-rojo' : (def.color==='azul' ? 'c-azul' : 'c-ambar');
+          return '<button class="fila" onclick="abrirOport('
+            + JSON.stringify(JSON.stringify(x)).replace(/"/g,'&quot;')+','
+            + JSON.stringify(JSON.stringify(def)).replace(/"/g,'&quot;')+')">'
+            + '<div class="nom"><span class="chip '+cls+'">'+esc(def.label)+'</span> '+esc(x.titulo||'')
+              + '<small>'+esc(x.detalle?(x.detalle+' — '):'')+esc(x.regla||'')+'</small></div>'
+            + '<div class="num">'+usd(d.ve_margen ? x.margen_en_juego : x.usd_en_juego)+'</div>'
+            + '<span class="fl">›</span></button>';
+        }).join('') : '<div class="vacio">No hay oportunidades con esos filtros. Puede ser buena noticia.</div>')
+      + '</div>';
+    $('cuerpo').innerHTML = h;
+  } catch(e){ error(e); }
+};
+// Tocar una oportunidad entra al cliente con su filtro puesto: la lista es para decidir a
+// quién ir, y lo que sigue es ver qué pasa con ese cliente.
+function abrirOport(sx, sdef){
+  var x = JSON.parse(sx), def = JSON.parse(sdef);
+  ir('oportDet', { item:x, def:def }, x.titulo || 'Oportunidad', def.label || '');
+}
+PANTALLAS.oportDet = function(a){
+  var x = a.item, def = a.def;
+  var cls = def.color==='rojo' ? 'c-rojo' : (def.color==='azul' ? 'c-azul' : 'c-ambar');
+  var h = '<div class="sec"><h2><span class="chip '+cls+'">'+esc(def.label)+'</span></h2>'
+    + '<div class="fila" style="border-top:1px solid var(--bor)"><div class="nom">'+esc(x.titulo||'')
+      + (x.detalle?('<small>'+esc(x.detalle)+'</small>'):'')+'</div>'
+      + '<div class="num">'+usd(x.margen_en_juego!=null ? x.margen_en_juego : x.usd_en_juego)
+      + (x.margen_en_juego!=null?'<small style="color:var(--mut);font-weight:400">de margen</small>':'<small style="color:var(--mut);font-weight:400">en juego</small>')
+      + '</div></div>'
+    + '<div class="vacio" style="color:var(--txt)">'+esc(x.regla||'')+'</div>'
+    + '</div>';
+  // El botón que sigue: ir a ver a ese cliente.
+  var f = x.filtro || {};
+  if (f.cliente) {
+    h += '<div class="menu" style="grid-template-columns:1fr">'
+      + '<button onclick="abrir('+JSON.stringify(JSON.stringify({d:'cliente',c:f.cliente,f:{}})).replace(/"/g,'&quot;')+')">'
+      + '<span class="ic">🔎</span>Ver qué le vendemos a '+esc(f.cliente)+'</button></div>';
+  }
+  if (f.producto) {
+    h += '<div class="menu" style="grid-template-columns:1fr">'
+      + '<button onclick="ir(\'ventana\',{producto:'+JSON.stringify(JSON.stringify(f.producto)).replace(/"/g,'&quot;')+'},'
+      + JSON.stringify(JSON.stringify(f.producto)).replace(/"/g,'&quot;')+',\'quién nos lo trae\')">'
+      + '<span class="ic">🪟</span>Quién nos trae '+esc(f.producto)+'</button></div>';
+  }
+  $('cuerpo').innerHTML = h;
+};
+
+// ══ VENTANAS ══════════════════════════════════════════════════════════════════════════
+PANTALLAS.productos = async function(){
+  cargando('Buscando los productos…');
+  try {
+    var d = await api('/api/informes/ventanas?sugerencias=40');
+    if (!d) return;
+    var ps = d.productos||[];
+    var h = '<div class="busca"><input id="q" type="search" placeholder="Buscar un producto…" oninput="filtrarProd()"></div>'
+      + '<div class="sec"><h2>Los que más se venden <small>tocá uno</small></h2>'
+      + '<div id="lista-prod">'
+      + ps.map(function(x,i){
+          return '<button class="fila prod" data-n="'+esc(String(x.producto).toUpperCase())+'" onclick="verVentana('
+            + JSON.stringify(JSON.stringify(x.producto)).replace(/"/g,'&quot;')+')">'
+            + '<div class="nom">'+esc(x.producto)+'<small>'+nr(x.campanias)+' campañas · '+nr(x.proveedores)+' productores</small></div>'
+            + '<div class="num">'+kg(x.kilos)+'</div><span class="fl">›</span></button>'; }).join('')
+      + '</div></div>';
+    $('cuerpo').innerHTML = h;
+  } catch(e){ error(e); }
+};
+function filtrarProd(){
+  var q = ($('q').value||'').toUpperCase();
+  var els = document.querySelectorAll('#lista-prod .prod');
+  for (var i=0;i<els.length;i++){
+    els[i].style.display = els[i].getAttribute('data-n').indexOf(q) >= 0 ? '' : 'none';
+  }
+}
+function verVentana(sp){ var p = JSON.parse(sp); ir('ventana', { producto:p }, p, 'quién nos lo trae'); }
+
+PANTALLAS.ventana = async function(a){
+  cargando('Buscando quién nos lo trae…');
+  try {
+    var d = await api('/api/informes/ventanas?producto='+encodeURIComponent(a.producto));
+    if (!d) return;
+    if (d.sin_producto) { $('cuerpo').innerHTML = '<div class="vacio">Elegí un producto.</div>'; return; }
+    var meses = d.meses||[], max = d.max_celda_prom||1;
+    var h = '<div class="kpis">'
+      + '<div class="kpi"><div class="l">A contactar</div><div class="v" style="color:'
+        + (d.a_contactar?'#92400e':'#166534')+'">'+nr(d.a_contactar||0)+'</div>'
+        + '<div class="s">'+(d.a_contactar?kg(d.kilos_a_contactar)+' por campaña':'están todos')+'</div></div>'
+      + '<div class="kpi"><div class="l">Trayendo</div><div class="v">'+nr(d.proveedores_activos||0)+'</div>'
+        + '<div class="s">'+kg(d.kilos_act)+' en '+esc(d.periodo_actual)+'</div></div>'
+      + '</div>';
+    if (d.sin_identificar) {
+      h += '<div class="aviso">⚠ <b>'+kg(d.sin_identificar.kilos_hist)+' ('+nrDec(d.sin_identificar.pct_hist,1)
+        + '%) sin productor identificado.</b> La columna de proveedor de la planilla trae errores de fórmula.</div>';
+    }
+    h += '<div class="sec"><h2>Productores <small>la franja es el año: '
+      + esc(mesTxt(meses[0]||''))+' a '+esc(mesTxt(meses[meses.length-1]||''))+'</small></h2>';
+    h += (d.filas||[]).map(function(f){
+      var franja = meses.map(function(m){
+        var c = f.por_mes[m]||{};
+        var alt = Math.max(1, Math.round(((c.kilos_prom||0)/max)*20));
+        var act = (c.kilos_act||0) > 0;
+        return '<i class="'+(act?'on':'')+'" style="height:'+alt+'px" title="'+esc(mesTxt(m))+'"></i>';
+      }).join('');
+      var chip = f.contactar ? '<span class="chip c-ambar">☎ llamar</span> '
+               : f.esperando ? '<span class="chip c-gris">no le toca aún</span> '
+               : f.es_nuevo  ? '<span class="chip c-azul">nuevo</span> '
+               : f.no_identificado ? '<span class="chip c-rojo">sin identificar</span> '
+               : f.agrupado  ? '<span class="chip c-gris">agrupados</span> ' : '';
+      return '<button class="fila" onclick="'+(f.agrupado||f.no_identificado ? '' :
+          ('abrir('+JSON.stringify(JSON.stringify({d:'proveedor',c:f.proveedor,f:{producto:a.producto}})).replace(/"/g,'&quot;')+')'))+'">'
+        + '<div class="nom">'+esc(f.proveedor)+'<small>'+chip
+          + (f.desde ? (esc(mesTxt(f.desde)).slice(0,3)+' → '+esc(mesTxt(f.hasta)).slice(0,3)) : 'no trajo')
+          + (f.contactar && f.campanias_sin_traer ? (' · hace '+nr(f.campanias_sin_traer)+' campaña(s)') : '')
+          + '</small></div>'
+        + '<div class="mini">'+franja+'</div>'
+        + '<div class="num">'+kg(f.kilos_prom_anio)+'<small style="color:var(--mut);font-weight:400">/campaña</small></div>'
+        + (f.agrupado||f.no_identificado?'':'<span class="fl">›</span>')
+        + '</button>';
+    }).join('');
+    h += '</div>';
+    h += '<div class="pie">La barra clara es el promedio de ese mes; en verde fuerte, los meses en que trajo este año.</div>';
+    $('cuerpo').innerHTML = h;
+  } catch(e){ error(e); }
+};
 
 // ── ARRANQUE ──────────────────────────────────────────────────────────────────────────
 (async function(){
@@ -149,165 +509,12 @@ function salir(){
     var d = await r.json();
     if (!d || !d.ok) { window.location.href = '/login?next=/m/informes'; return; }
     S.user = d.user;
-    $('hd-sub').textContent = d.user.nombre || '';
-    cargar();
-  } catch(e) {
-    $('cuerpo').innerHTML = '<div class="cargando" style="color:var(--err)">'+esc(e.message)+'</div>';
-  }
+    S.pila = [{ p:'inicio', a:{}, t:'Informes comerciales', s:d.user.nombre||'' }];
+    history.replaceState({ n:1 }, '', '#inicio');
+    render();
+  } catch(e) { error(e); }
 })();
 
-function params(){
-  var p = [];
-  if (S.mes)  p.push('mes_ok='+encodeURIComponent(S.mes));
-  if (S.camp) p.push('periodo_actual='+encodeURIComponent(S.camp));
-  return p.join('&');
-}
-
-async function cargar(){
-  S.mes  = ($('mes')||{}).value || null;
-  S.camp = ($('camp')||{}).value || null;
-  $('cuerpo').innerHTML = '<div class="cargando">Buscando los números…</div>';
-  try {
-    // Las dos preguntas de una vez: cómo viene el mes, y qué hay para hacer. Son dos
-    // llamadas en paralelo y no una: por teléfono, esperar la suma de las dos se nota.
-    var res = await Promise.all([
-      api('/api/informes/interanual?agrupar=cliente&'+params()),
-      api('/api/informes/oportunidades?limite=5&'+params()).catch(function(){ return null; })
-    ]);
-    if (!res[0]) return;
-    pintar(res[0], res[1]);
-  } catch(e) {
-    $('cuerpo').innerHTML = '<div class="cargando" style="color:var(--err)">'+esc(e.message)+'</div>';
-  }
-}
-
-function llenarSelectores(v){
-  var m = $('mes'), c = $('camp');
-  if (m && !m.innerHTML) {
-    m.innerHTML = (v.meses||[]).map(function(x){
-      return '<option value="'+esc(x)+'"'+(x===v.mes?' selected':'')+'>'+esc(mesTxt(x))+'</option>'; }).join('');
-  }
-  if (c && !c.innerHTML) {
-    c.innerHTML = (v.periodos||[]).map(function(x){
-      return '<option value="'+esc(x)+'"'+(x===v.actual?' selected':'')+'>'+esc(x)+'</option>'; }).join('');
-  }
-}
-
-function pintar(d, opo){
-  var v = d.ventana || {}, R = d.resumen || {}, A = R.actual || {}, B = R.anterior || {};
-  llenarSelectores(v);
-  $('pie-sync').textContent = (d.sync && d.sync.ultimo_ok) || '—';
-
-  // El aviso del mes en curso. Es el único que cambia una lectura: agosto a medio facturar
-  // contra agosto entero del año pasado pinta todo de rojo, y esa caída es del almanaque.
-  $('aviso').innerHTML = v.en_curso
-    ? '<div class="aviso">⚠ <b>'+esc(mesTxt(v.mes))+' de '+esc(v.actual)+' está a medio facturar</b> '
-      + 'y se compara contra el mes entero de '+esc(v.anterior)+'. Si todo baja parejo, mirá primero el mes anterior.</div>'
-    : '';
-
-  var pct = function(x){
-    if (x == null) return '<span style="color:var(--mut)">—</span>';
-    return '<span class="'+(x>=0?'sube':'baja')+'">'+(x>=0?'▲ ':'▼ ')+nrDec(Math.abs(x),1)+'%</span>';
-  };
-  var kpi = function(l, val, sub, ancha){
-    return '<div class="kpi'+(ancha?' ancha':'')+'"><div class="l">'+l+'</div>'
-      + '<div class="v">'+val+'</div><div class="s">'+(sub||'')+'</div></div>';
-  };
-
-  var h = '<div class="kpis">'
-    + kpi(esc(mesTxt(v.mes))+' '+esc(v.actual), usd(A.usd||0),
-        kg(A.kilos||0)+' · '+nr(A.clientes||0)+' cliente(s)', true)
-    + kpi('Contra '+esc(v.anterior), pct(R.var_usd_pct),
-        (R.var_usd>=0?'+':'')+usd(R.var_usd||0))
-    + kpi('Kilos', pct(R.var_kilos_pct), (R.var_kilos>=0?'+':'')+kg(R.var_kilos||0))
-    + '</div>';
-
-  // ── Quién sube y quién baja ─────────────────────────────────────────────────────
-  // Cinco de cada lado. Es lo que se puede leer parado, y lo que se pregunta un director:
-  // no la tabla entera sino de dónde viene el número de arriba.
-  // Se ordena por IMPACTO y no por var_usd. Un cliente nuevo no tiene variación —no hay
-  // contra qué compararlo— así que con var_usd quedaba afuera de las dos listas, y es
-  // justamente la buena noticia que uno quiere ver. Lo mismo del otro lado con el perdido.
-  // impacto = lo de este año menos lo del pasado, con el que falta contando como cero.
-  var filas = d.filas || [];
-  var imp = function(f){ return f.impacto != null ? f.impacto : ((f.usd_act||0) - (f.usd_ant||0)); };
-  var suben = filas.filter(function(f){ return imp(f) > 0; })
-    .sort(function(a,b){ return imp(b) - imp(a); }).slice(0,5);
-  var bajan = filas.filter(function(f){ return imp(f) < 0; })
-    .sort(function(a,b){ return imp(a) - imp(b); }).slice(0,5);
-
-  var lista = function(titulo, sub, arr, signo){
-    var s = '<div class="sec"><h2>'+titulo+' <small>'+sub+'</small></h2>';
-    if (!arr.length) { return s + '<div class="vacio">Ninguno.</div></div>'; }
-    s += arr.map(function(f){
-      var estado = f.estado==='perdido' ? '<span class="chip c-rojo">perdido</span> '
-                 : f.estado==='nuevo'   ? '<span class="chip c-azul">nuevo</span> ' : '';
-      var v = imp(f);
-      return '<div class="fila">'
-        + '<div class="nom">'+esc(f.clave||'')+'<small>'+estado
-          + (f.usd_ant!=null?('antes '+usd(f.usd_ant)):'no vendía')+'</small></div>'
-        + '<div class="num '+signo+'">'+(v>=0?'+':'−')+usd(Math.abs(v))
-          // El % sólo cuando existe: para un cliente nuevo sería una división por cero, y
-          // "+∞%" no le dice nada a nadie.
-          + (f.var_usd_pct!=null?('<small class="'+signo+'">'+(f.var_usd_pct>=0?'+':'')+nrDec(f.var_usd_pct,1)+'%</small>'):'')
-        + '</div></div>';
-    }).join('');
-    return s + '</div>';
-  };
-  h += lista('📈 Los que más subieron', 'contra ' + esc(mesTxt(v.mes)) + ' de ' + esc(v.anterior), suben, 'sube');
-  h += lista('📉 Los que más bajaron', (d.estados && d.estados.perdido ? (nr(d.estados.perdido) + ' perdidos en total') : ''), bajan, 'baja');
-
-  // ── Oportunidades ───────────────────────────────────────────────────────────────
-  if (opo && (opo.items||[]).length) {
-    h += '<div class="sec"><h2>🎯 Oportunidades <small>'
-      + nr(opo.total||0) + ' en total'
-      + (opo.ve_margen ? (' · ' + usd(opo.margen_en_juego_total||0) + ' de margen') : '')
-      + '</small></h2>';
-    h += opo.items.map(function(x){
-      var def = (opo.tipos||{})[x.tipo] || { label:x.tipo, color:'' };
-      var cls = def.color==='rojo' ? 'c-rojo' : (def.color==='azul' ? 'c-azul' : 'c-ambar');
-      return '<div class="fila">'
-        + '<div class="nom"><span class="chip '+cls+'">'+esc(def.label)+'</span> '+esc(x.titulo||'')
-          + '<small>'+esc(x.detalle ? (x.detalle+' — ') : '')+esc(x.regla||'')+'</small></div>'
-        + '<div class="num">'+usd(opo.ve_margen ? x.margen_en_juego : x.usd_en_juego)+'</div>'
-        + '</div>';
-    }).join('');
-    h += '</div>';
-  }
-
-  $('cuerpo').innerHTML = h;
-
-  // El mes a mes va al final y se pide aparte: es lo que menos se mira de parado, y hacer
-  // esperar las tarjetas por un gráfico sería al revés de lo que hace falta.
-  api('/api/informes/ventas/evolucion?periodos='+encodeURIComponent(v.actual))
-    .then(function(e){ if (e) grafico(e.filas||[], v); })
-    .catch(function(){});
-}
-
-// La campaña en curso, mes a mes. SVG inline, sin librerías — es lo que ya usa el panel.
-function grafico(filas, v){
-  if (!filas.length) return;
-  var max = Math.max.apply(null, filas.map(function(f){ return f.facturacion_usd||0; })) || 1;
-  var W = 100 / filas.length;
-  var s = '<div class="sec"><h2>La campaña '+esc(v.actual)+' <small>facturación por mes</small></h2>'
-    + '<div class="graf">'
-    + '<svg viewBox="0 0 100 30" preserveAspectRatio="none" style="width:100%;height:76px;display:block">'
-    + filas.map(function(f,i){
-        var alto = Math.max(0.5, ((f.facturacion_usd||0)/max)*26);
-        var esteMes = f.mes_ok === v.mes;
-        return '<rect x="'+(i*W+W*0.15)+'" y="'+(26-alto)+'" width="'+(W*0.7)+'" height="'+alto+'"'
-          + ' fill="'+(esteMes?'#1a3a5c':'#c3ddcd')+'"><title>'+esc(mesTxt(f.mes_ok))+': '
-          + usd(f.facturacion_usd||0)+' · '+kg(f.kilos||0)+'</title></rect>';
-      }).join('')
-    + '</svg>'
-    + '<div style="display:flex;font-size:9.5px;color:var(--mut);margin-top:2px">'
-    + filas.map(function(f){
-        return '<div style="flex:1;text-align:center;overflow:hidden">'+esc(mesTxt(f.mes_ok).slice(0,3))+'</div>'; }).join('')
-    + '</div></div></div>';
-  $('cuerpo').insertAdjacentHTML('beforeend', s);
-}
-
-// PWA: mismo service worker que IFCO mobile, que ya tiene scope '/m/'.
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', function(){
     navigator.serviceWorker.register('/mifco-sw.js', { scope: '/m/' }).catch(function(){});
