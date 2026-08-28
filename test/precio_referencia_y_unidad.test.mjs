@@ -69,13 +69,15 @@ test('accionesDe no puede ver `it`, así que la referencia entra por cierre', ()
 });
 
 test('el modal muestra la referencia y el margen EN VIVO', () => {
-  const b = bloque('sgPrecioOpen', 1600);
+  // El cálculo se mudó a sgPrecioCalc cuando el precio pasó a poder tipearse por
+  // bulto: la referencia y lo tipeado tienen que estar en la MISMA unidad, así
+  // que el margen se saca sobre el precio ya convertido a kilo.
+  const b = bloque('sgPrecioOpen', 1900);
   assert.match(b, /venta de referencia/);
-  // El margen se calcula sobre el precio de VENTA, como en la ficha de la orden.
-  assert.match(b, /\(ref-p\)\/ref\*1000/);
-  assert.match(b, /se estaría pagando MÁS de lo que se espera vender/);
-  // Sin referencia el modal sigue funcionando: es un dato opcional.
-  assert.match(b, /ref!=null/);
+  assert.match(b, /ref!=null/);   // sin referencia el modal sigue andando
+  const c = bloque('sgPrecioCalc', 1200);
+  assert.match(c, /\(ref - pk\) \/ ref \* 1000/);
+  assert.match(c, /se estaría pagando MÁS de lo que se espera vender/);
 });
 
 // ── 7 · POR BULTO O POR KILO ───────────────────────────────────────────────

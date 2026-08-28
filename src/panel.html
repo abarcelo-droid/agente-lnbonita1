@@ -6538,7 +6538,19 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
     <div class="mhd"><div class="mht">Cerrar precio (pizarra)</div><button class="mcl" onclick="closeMB('sg-precio-modal')">×</button></div>
     <div class="fg">
       <div id="sg-precio-info" style="font-size:13px;margin-bottom:6px"></div>
-      <div class="fl ff"><label>Precio del día por kg <span style="color:var(--err)">*</span></label><input type="number" id="sg-precio-valor" placeholder="$/kg"></div>
+      <!-- COMO SE PACTÓ, ASÍ SE CIERRA. Si la orden se cerró por cajón, el
+           precio del día se pone por cajón: pedirlo por kilo obliga a dividir a
+           mano un número que el productor dio en cajones. -->
+      <div class="fl ff"><label>Precio del día <span style="color:var(--err)">*</span></label>
+        <div style="display:flex;gap:8px;align-items:flex-end">
+          <input type="number" step="0.01" id="sg-precio-valor" style="flex:1" placeholder="$">
+          <select id="sg-precio-uni" onchange="sgPrecioUni()" style="width:110px">
+            <option value="kg">por kilo</option>
+            <option value="bulto">por bulto</option>
+          </select>
+        </div>
+        <div id="sg-precio-uni-nota" style="font-size:11.5px;color:var(--mut);margin-top:4px"></div>
+      </div>
       <div id="sg-precio-calc" style="font-size:12px;color:var(--mut)"></div>
     </div>
     <div class="ab-modal-footer">
@@ -15321,11 +15333,15 @@ function sgSoRender(){
     return '<div style="display:grid;grid-template-columns:1fr 110px 130px 130px;gap:8px;'
       + 'align-items:center;padding:6px 0;border-bottom:1px solid var(--bor)">'
       + '<div style="font-size:13px"><b>' + escH(it.producto_nombre || '—') + '</b>'
-        + '<div style="font-size:11px;color:var(--mut)">' + (it.bultos || 0) + ' bulto(s)</div></div>'
+        + '<div style="font-size:11px;color:var(--mut)">' + nr(it.bultos || 0) + ' bulto(s)'
+        + (sgSoPorBulto(it) ? ' de ' + nr(it.kg_por_bulto) + ' kg' : '') + '</div></div>'
       + '<div style="text-align:right;font-size:12.5px">' + nr(it.kg_estimados || 0) + ' kg</div>'
-      + '<input type="text" inputmode="decimal" id="sg-so-p-' + i + '" placeholder="$/kg"'
+      // EN LA UNIDAD EN QUE ENTRÓ. Si bajaron cajones, el precio se pone por
+      // cajón: es el número que se habló con el productor.
+      + '<input type="text" inputmode="decimal" id="sg-so-p-' + i + '"'
+        + ' placeholder="' + (sgSoPorBulto(it) ? '$ por bulto' : '$ por kg') + '"'
         + ' style="text-align:right" value="'
-        + (it.precio_estimado_por_kg ? sgMilShow(it.precio_estimado_por_kg) : '') + '"'
+        + (it.precio_estimado_por_kg ? sgMilShow(sgSoVista(it)) : '') + '"'
         + ' oninput="this.value=sgMilFmtLive(this.value);sgSoTotal()">'
       + '<div style="text-align:right;font-weight:600" id="sg-so-t-' + i + '"></div>'
       + '</div>';
@@ -15335,11 +15351,27 @@ function sgSoRender(){
   sgSoTotal();
 }
 
+// La unidad de este renglón: si entró con cajones y sabemos cuánto pesa uno, se
+// pactó por cajón. Es el mismo criterio que usa el resto del módulo.
+function sgSoPorBulto(it){
+  return !!(it && String(it.modo_carga || '') === 'bulto' && Number(it.kg_por_bulto) > 0);
+}
+// Lo guardado es por kilo; se muestra en la unidad del renglón.
+function sgSoVista(it){
+  var p = Number(it.precio_estimado_por_kg) || 0;
+  return sgSoPorBulto(it) ? Math.round(p * it.kg_por_bulto * 100) / 100 : p;
+}
+// Y al revés al guardar.
+function sgSoPrecioKg(it, i){
+  var p = sgMilParse((eid('sg-so-p-' + i) || {}).value) || 0;
+  return (sgSoPorBulto(it) && p > 0) ? p / it.kg_por_bulto : p;
+}
+
 function sgSoTotal(){
   var tot = 0;
   SG_SO.items.forEach(function(it, i){
-    var p = sgMilParse((eid('sg-so-p-' + i) || {}).value) || 0;
-    var sub = p * (Number(it.kg_estimados) || 0);
+    var pk = sgSoPrecioKg(it, i);
+    var sub = pk * (Number(it.kg_estimados) || 0);
     tot += sub;
     var c = eid('sg-so-t-' + i);
     if (c) c.textContent = sub ? sgMoney(sub) : '';
@@ -15347,8 +15379,8 @@ function sgSoTotal(){
   var t = eid('sg-so-total');
   if (t) t.innerHTML = tot ? 'Total de la compra: ' + sgMoney(tot) : '';
   var av = eid('sg-so-aviso');
-  var faltan = SG_SO.items.filter(function(_, i){
-    return !(sgMilParse((eid('sg-so-p-' + i) || {}).value) > 0);
+  var faltan = SG_SO.items.filter(function(it, i){
+    return !(sgSoPrecioKg(it, i) > 0);
   }).length;
   var pizarra = (eid('sg-so-precio') || {}).value === 'pizarra';
   if (av) av.innerHTML = (!pizarra && faltan)
@@ -15363,8 +15395,10 @@ function sgSoGuardar(){
   var items = [];
   if (!pizarra) {
     SG_SO.items.forEach(function(it, i){
-      var p = sgMilParse((eid('sg-so-p-' + i) || {}).value) || 0;
-      if (p > 0) items.push({ oc_item_id: it.id, precio_por_kg: p });
+      // Se tipea en la unidad en que entró y se manda por kilo, que es como se
+      // guarda en todo el módulo.
+      var pk = sgSoPrecioKg(it, i);
+      if (pk > 0) items.push({ oc_item_id: it.id, precio_por_kg: pk });
     });
   }
   api('/api/sg/oc/' + o.id + '/completar', 'POST', {
@@ -15566,6 +15600,11 @@ function sgOcpOpen(ocId){
         // lineal en el precio. Rehacer la cuenta en el navegador daba otro número.
         precio_base: (it.precio_estimado_por_kg != null) ? Number(it.precio_estimado_por_kg) : null,
         importe_base: (it.acordado_importe != null) ? Number(it.acordado_importe) : null,
+        // CÓMO SE PACTÓ ESTE RENGLÓN. El precio se guarda por kilo, pero se
+        // tipea en la unidad en que se cerró la compra: pedirle al comprador que
+        // divida $370.000 el cajón por 18,5 es pedirle que se equivoque.
+        modo: it.modo_carga || null,
+        kpb: Number(it.kg_por_bulto_efectivo || it.kg_por_bulto) || null,
         precio: (it.precio_estimado_por_kg != null) ? Number(it.precio_estimado_por_kg) : '' };
     });
     eid('sg-ocp-tit').textContent = 'Cambiar el precio — ' + (o.numero || o.trazabilidad || ('orden ' + ocId));
@@ -15576,22 +15615,57 @@ function sgOcpOpen(ocId){
   });
 }
 function sgOcpUpd(i, v){ SG.ocp.items[i].precio = v; sgOcpTotal(); }
+// ── CADA RENGLÓN, EN LA UNIDAD EN QUE SE PACTÓ ───────────────────────────
+// Una orden puede tener un producto por cajón y otro por kilo, así que la unidad
+// no puede ser del encabezado: va por renglón.
+function sgOcpPorBulto(it){ return !!(it && it.modo === 'bulto' && it.kpb > 0); }
+
+// Lo que se MUESTRA en el input: el precio guardado (por kilo) llevado a la
+// unidad del renglón.
+function sgOcpVista(it){
+  if (it.precio === '' || it.precio == null) return '';
+  return sgOcpPorBulto(it) ? Math.round(Number(it.precio) * it.kpb * 100) / 100 : it.precio;
+}
+
+// Y al revés al escribir: lo tipeado vuelve a kilo, que es como se guarda.
+function sgOcpSet(i, valor){
+  var it = (SG.ocp.items || [])[i];
+  if (!it) return;
+  var v = String(valor).trim();
+  if (v === '') { sgOcpUpd(i, ''); return; }
+  var n = Number(v);
+  sgOcpUpd(i, sgOcpPorBulto(it) && n > 0 ? (n / it.kpb) : n);
+  // El equivalente al lado: se tipea en una unidad y se guarda en la otra.
+  var eq = eid('sg-ocp-eq-' + i);
+  if (eq) eq.textContent = sgOcpPorBulto(it) && n > 0 ? (sgMoney(n / it.kpb) + ' /kg') : '';
+}
+
 function sgOcpRender(){
   eid('sg-ocp-body').innerHTML = (SG.ocp.items || []).map(function(it, i){
     var recib = (it.bultos > 0
         ? (nr(it.bultos) + ' bultos · ' + nr(it.kg) + ' kg')
         : (nr(it.kg) + ' kg'))
       + (it.recibido ? '' : ' <span style="color:var(--mut)">(estimado)</span>');
+    var pb = sgOcpPorBulto(it);
+    var vista = sgOcpVista(it);
     return '<tr>'
-      + '<td style="overflow:hidden;text-overflow:ellipsis">' + esc(it.nombre) + '</td>'
+      + '<td style="overflow:hidden;text-overflow:ellipsis">' + esc(it.nombre)
+        + '<div style="font-size:10.5px;color:var(--mut)">se pactó por '
+        + (pb ? ('bulto · de ' + nr(it.kpb) + ' kg') : 'kilo') + '</div></td>'
       + '<td style="text-align:right;font-size:11.5px;color:var(--mut)">' + recib + '</td>'
-      + '<td><input type="number" step="0.000001" min="0" id="sg-ocp-p-' + i + '"'
-        + ' value="' + (it.precio === '' ? '' : it.precio) + '"'
-        + ' oninput="sgOcpUpd(' + i + ',this.value)"'
-        + ' style="width:100%;box-sizing:border-box;text-align:right"></td>'
+      + '<td><input type="number" step="0.01" min="0" id="sg-ocp-p-' + i + '"'
+        + ' value="' + (vista === '' ? '' : vista) + '"'
+        + ' placeholder="' + (pb ? '$ por bulto' : '$ por kg') + '"'
+        + ' oninput="sgOcpSet(' + i + ',this.value)"'
+        + ' style="width:100%;box-sizing:border-box;text-align:right">'
+        + '<div id="sg-ocp-eq-' + i + '" style="font-size:10.5px;color:var(--mut);text-align:right">'
+        + (pb && it.precio !== '' && it.precio != null ? (sgMoney(it.precio) + ' /kg') : '') + '</div></td>'
       + '<td style="text-align:right" id="sg-ocp-t-' + i + '">—</td>'
       + '</tr>';
   }).join('');
+  // El encabezado deja de mentir: la unidad es de cada renglón, no de la tabla.
+  var th = eid('sg-ocp-th');
+  if (th) th.textContent = 'Precio';
   sgOcpTotal();
 }
 // ── LO QUE SE LE VA A PAGAR AL PRODUCTOR ─────────────────────────────────
@@ -15876,32 +15950,96 @@ function sgLoteEditarGuardar(){
 //
 // El margen se calcula sobre el precio de VENTA —(venta − costo) / venta—, que es
 // como se mira en el rubro y como ya lo muestra la ficha de la orden.
+// ── COMO SE PACTÓ, ASÍ SE CIERRA ─────────────────────────────────────────
+//
+// Pablo, 28/8/2026: «esta partida ingresó con bulto; por qué cuando voy a cerrar
+// precio se lo tengo que cerrar por kilo. La lógica es muy fácil: bulto, bulto;
+// kilo, kilo».
+//
+// El productor da el precio del día en la unidad en que se cerró la compra. Si la
+// pantalla lo pide por kilo, el comprador tiene que dividir a mano —y el número
+// que queda registrado no es el que se habló.
+//
+// La unidad sale del ítem de la orden (modo_carga), igual que en el modal de
+// corregir la partida: es la MISMA regla y sale del mismo lado, para que las dos
+// pantallas no puedan contestar distinto.
 function sgPrecioOpen(loteId, codigo, kg, refKg){
-  SG.precioLote={id:loteId, kg:kg, ref:(refKg!=null&&refKg>0)?Number(refKg):null};
+  // El lote y su ítem, para saber cómo se pactó y cuántos kilos entran en un
+  // cajón. Salen de los mismos dos lados que usa el modal de corregir: si cada
+  // pantalla los buscara por su cuenta, podrían contestar distinto.
+  var lote = (SG.ocVerLotes || []).filter(function(l){
+    return String(l.id) === String(loteId); })[0] || null;
+  var kpb = lote ? sgLoteEdKpb(lote) : null;
+  var it = lote ? ((SG.ocVerData && SG.ocVerData.items) || []).filter(function(x){
+    return String(x.id) === String(lote.oc_item_id); })[0] : null;
+  // Sin kilos por bulto no hay conversión posible y manda el kilo, que es la
+  // unidad con la que corre el costo.
+  var porBulto = !!(it && it.modo_carga === 'bulto' && kpb);
+
+  SG.precioLote={id:loteId, kg:kg, ref:(refKg!=null&&refKg>0)?Number(refKg):null, kpb:kpb||null};
   var ref=SG.precioLote.ref;
   eid('sg-precio-info').innerHTML='Lote <b>'+esc(codigo)+'</b> · '+nr(kg)+' kg'
+    + (kpb ? ' · '+nr(Math.round(kg/kpb))+' bultos de '+nr(kpb)+' kg' : '')
     + (ref!=null
         ? '<div style="font-size:11.5px;color:var(--mut);margin-top:3px">'
           + 'venta de referencia <b>'+sgMoney(ref)+'</b> /kg'
+          + (kpb ? ' · <b>'+sgMoney(ref*kpb)+'</b> por bulto' : '')
           + '<span style="font-size:10.5px"> · lo que se estimó al cargar la orden</span></div>'
         : '');
   eid('sg-precio-valor').value=''; eid('sg-precio-calc').textContent='';
-  eid('sg-precio-valor').oninput=function(){
-    var p=Number(this.value)||0;
-    var t='Costo base = '+sgMoney(p*kg);
-    if(ref!=null && p>0){
-      var m=Math.round((ref-p)/ref*1000)/10;
-      t+=' · margen contra la referencia '
-        + '<b style="color:'+(m>=0?'#166534':'#b91c1c')+'">'+String(m).replace('.',',')+'%</b>';
-      if(m<0) t+=' <span style="color:#b91c1c">— se estaría pagando MÁS de lo que se espera vender</span>';
-    }
-    eid('sg-precio-calc').innerHTML=t;
-  };
+  var uni = eid('sg-precio-uni');
+  uni.value = porBulto ? 'bulto' : 'kg';
+  uni.disabled = !kpb;
+  eid('sg-precio-uni-nota').innerHTML = it
+    ? ('La orden se cerró <b>por ' + (it.modo_carga === 'bulto' ? 'bulto' : 'kilo') + '</b>'
+       + (kpb ? ' · bultos de ' + nr(kpb) + ' kg' : ' · sin kilos por bulto, se cierra por kilo'))
+    : (kpb ? 'Esta partida entró sin orden · bultos de ' + nr(kpb) + ' kg'
+           : 'Esta partida se cuenta en kilos');
+  eid('sg-precio-valor').oninput=sgPrecioCalc;
+  sgPrecioUni();
   sgModalArriba('sg-precio-modal');
 }
+
+// El precio SIEMPRE se guarda por kilo —es la unidad con la que corre el costo en
+// todo el módulo—, así que lo tipeado por bulto se divide por el factor. La
+// pantalla muestra el equivalente para que nadie tenga que confiar a ciegas.
+function sgPrecioKg(){
+  var p = Number(eid('sg-precio-valor').value) || 0;
+  var kpb = Number(SG.precioLote && SG.precioLote.kpb) || 0;
+  if (eid('sg-precio-uni').value === 'bulto' && kpb > 0) return p / kpb;
+  return p;
+}
+function sgPrecioUni(){
+  var porBulto = eid('sg-precio-uni').value === 'bulto';
+  eid('sg-precio-valor').placeholder = porBulto ? '$ por bulto' : '$ por kg';
+  sgPrecioCalc();
+}
+function sgPrecioCalc(){
+  var pk = sgPrecioKg();
+  var kg = Number(SG.precioLote && SG.precioLote.kg) || 0;
+  var kpb = Number(SG.precioLote && SG.precioLote.kpb) || 0;
+  var ref = SG.precioLote && SG.precioLote.ref;
+  if (!(pk > 0)) { eid('sg-precio-calc').textContent = ''; return; }
+  var t = 'Costo base = ' + sgMoney(pk * kg);
+  // El otro número, siempre a la vista: se tipea en una unidad y se guarda en la
+  // otra, y sin verlo hay que creerle a la cuenta.
+  if (kpb > 0) {
+    t += ' · ' + (eid('sg-precio-uni').value === 'bulto'
+      ? sgMoney(pk) + ' /kg'
+      : sgMoney(pk * kpb) + ' por bulto');
+  }
+  if (ref != null && pk > 0) {
+    var m = Math.round((ref - pk) / ref * 1000) / 10;
+    t += '<div style="margin-top:3px">margen contra la referencia '
+      + '<b style="color:' + (m >= 0 ? '#166534' : '#b91c1c') + '">' + String(m).replace('.', ',') + '%</b>';
+    if (m < 0) t += ' <span style="color:#b91c1c">— se estaría pagando MÁS de lo que se espera vender</span>';
+    t += '</div>';
+  }
+  eid('sg-precio-calc').innerHTML = t;
+}
 function sgPrecioGuardar(){
-  var p=Number(eid('sg-precio-valor').value);
-  if(!(p>0)){ toast('Precio inválido','er'); return; }
+  var p = sgPrecioKg();
+  if(!(p>0)){ toast('Poné el precio del día','er'); return; }
   api('/api/sg/lotes/'+SG.precioLote.id+'/cerrar-precio','POST',{precio_unitario_kg:p}).then(function(r){
     if(r&&r.ok){ toast('Precio cerrado · costo y vencimientos actualizados','ok'); closeMB('sg-precio-modal'); closeMB('sg-ocver-modal'); sgLoadOC(); }
     else toast((r&&r.error)||'Error','er');
