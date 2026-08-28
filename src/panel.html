@@ -2945,7 +2945,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
           <div id="sgfd-cobro-box" style="display:none;margin-top:10px">
             <div id="sgfd-cobro-medios"></div>
             <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;margin-top:8px">
-              <button class="btn bo bs" type="button" onclick="sgFdMedioAdd()">+ otro medio</button>
+              <div id="sgfd-cobro-botones"></div>
               <div id="sgfd-cobro-pie" style="font-size:12.5px"></div>
             </div>
             <div id="sgfd-cobro-nota" style="font-size:11.5px;color:var(--mut);margin-top:7px"></div>
@@ -4190,6 +4190,12 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
       .sg-fp-b.on{border-color:var(--pri);background:rgba(37,99,235,.12);
         box-shadow:0 0 0 2px rgba(37,99,235,.16) inset}
       .sg-fp-b:disabled{opacity:.42;cursor:not-allowed}
+      /* El renglón ya cargado: mismo ícono, en chico y sin borde de botón — es
+         un hecho, no algo para apretar. */
+      .sg-fp-chip{display:inline-flex;align-items:center;gap:5px;padding:4px 10px;
+        border-radius:8px;background:rgba(37,99,235,.10);color:var(--txt);
+        font-size:12px;font-weight:600;white-space:nowrap}
+      .sg-fp-chip .sg-fp-i{font-size:15px}
       #sg-pago-modal td.pg-ac input{width:112px;text-align:right}
       /* ── EL BUSCADOR DE RUBROS ────────────────────────────────────────
          Un <select> con el plan de cuentas entero son 300 renglones para
@@ -6458,9 +6464,9 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
       <div style="display:flex;justify-content:space-between;align-items:center;margin:12px 0 6px">
         <div style="font-weight:700;font-size:12px;text-transform:uppercase;letter-spacing:.04em;
              color:var(--mut)">Con qué se paga</div>
-        <button class="btn bo bs" type="button" onclick="sgCobMedioAdd()">+ otro medio</button>
       </div>
       <div id="sg-cob-medios"></div>
+      <div id="sg-cob-botones" style="margin-top:8px"></div>
       <div id="sg-cob-medios-pie" style="font-size:12px;color:var(--mut);margin-top:4px"></div>
       <!-- El importe total ya no se tipea: es la suma de los renglones. Tenerlo en
            dos lados era la forma más fácil de que dijeran cosas distintas. -->
@@ -17259,6 +17265,47 @@ function sgAsientoCuadro(d, titulo, donde){
 // entrada contra una factura que no salió.
 var SG_FD_CTAS = [];
 var SG_FD_MEDIOS = [];
+// ══ CON QUÉ SE COBRA: EL MISMO LENGUAJE QUE EL PAGO ════════════════════════
+//
+// Pablo, 28/8/2026: «en los circuitos de cobranzas usemos íconos como tenemos en
+// los de pagos: es más lindo y más intuitivo para los cajeros».
+//
+// El pago a proveedores elige el medio con botones grandes y un ícono; el cobro
+// lo elegía con un desplegable dentro de un renglón ya cargado. Son el mismo
+// gesto —«con qué entra o sale esta plata»— y el cajero, que hace veinte por día,
+// tenía que abrir una lista y leer para hacer lo que del otro lado se hace de un
+// vistazo.
+//
+// UNA SOLA DEFINICIÓN para las dos pantallas de cobro. Si cada una eligiera su
+// ícono, en tres meses el efectivo sería un billete en una y una caja en la otra.
+var SG_MEDIO = {
+  efectivo:      { i: '💵', t: 'Efectivo' },
+  transferencia: { i: '🏦', t: 'Transferencia' },
+  cheque:        { i: '🧾', t: 'Cheque de tercero' },
+};
+
+// La botonera. `onAdd` recibe la forma; el orden es el del pago —caja, cheque,
+// transferencia— para que las dos pantallas se lean igual.
+function sgMedioBotones(onAdd, formas){
+  return '<div class="sg-fp">'
+    + (formas || ['efectivo', 'cheque', 'transferencia']).map(function(f){
+        var m = SG_MEDIO[f] || { i: '•', t: f };
+        return '<button type="button" class="sg-fp-b" onclick="' + onAdd + '(\'' + f + '\')"'
+          + ' title="Agregar un cobro en ' + m.t.toLowerCase() + '">'
+          + '<span class="sg-fp-i">' + m.i + '</span><span>' + m.t + '</span></button>';
+      }).join('')
+    + '</div>';
+}
+
+// Y el renglón ya cargado dice qué es con el mismo ícono, en vez de repetir el
+// desplegable: una vez elegido, la forma es un hecho, no una pregunta abierta.
+// Para cambiarla se saca el renglón y se agrega el otro — que es un clic, igual
+// que en el pago.
+function sgMedioChip(forma){
+  var m = SG_MEDIO[forma] || { i: '•', t: forma };
+  return '<span class="sg-fp-chip"><span class="sg-fp-i">' + m.i + '</span>' + m.t + '</span>';
+}
+
 // ══ ¿CÓMO SE PAGA? ═════════════════════════════════════════════════════════
 //
 // Pablo, 27/8/2026: «todas las facturas deberían tener un ¿cómo se paga? obligatorio,
@@ -17360,7 +17407,12 @@ function sgFdCobroToggle(){
     });
   } else { sgFdMediosRender(); }
 }
-function sgFdMedioAdd(){ SG_FD_MEDIOS.push({ forma: 'efectivo', cuenta: '', monto: '', ref: '' }); sgFdMediosRender(); }
+// La forma viene del botón que se apretó. Sin argumento cae en efectivo, que es
+// lo que hacía antes el «+ otro medio».
+function sgFdMedioAdd(forma){
+  SG_FD_MEDIOS.push({ forma: SG_MEDIO[forma] ? forma : 'efectivo', cuenta: '', monto: '', ref: '' });
+  sgFdMediosRender();
+}
 function sgFdMedioDel(i){ SG_FD_MEDIOS.splice(i, 1); if (!SG_FD_MEDIOS.length) sgFdMedioAdd(); else sgFdMediosRender(); }
 function sgFdMedioUpd(i, campo, v){
   SG_FD_MEDIOS[i][campo] = v;
@@ -17425,12 +17477,8 @@ function sgFdMediosRender(){
   cont.innerHTML = SG_FD_MEDIOS.map(function(m, i){
     var esCheque = m.forma === 'cheque';
     return '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;margin-bottom:6px">'
-      + '<label style="font-size:11px;color:var(--mut)">Cómo<br>'
-        + '<select onchange="' + up(i, 'forma') + '" style="padding:5px 7px;font-size:12.5px">'
-        + ['efectivo', 'transferencia', 'cheque'].map(function(f){
-            return '<option value="' + f + '"' + (m.forma === f ? ' selected' : '') + '>'
-              + (f === 'cheque' ? 'Cheque de tercero' : (f === 'efectivo' ? 'Efectivo' : 'Transferencia')) + '</option>'; }).join('')
-        + '</select></label>'
+      // Qué es este renglón, con el mismo ícono que el botón que lo creó.
+      + '<div style="padding-bottom:6px">' + sgMedioChip(m.forma) + '</div>'
       + (esCheque ? '' : '<label style="font-size:11px;color:var(--mut)">' + (m.forma === 'efectivo' ? 'A qué caja' : 'A qué cuenta') + '<br>'
           + '<select onchange="' + up(i, 'cuenta') + '" style="padding:5px 7px;font-size:12.5px;min-width:190px">'
           + opts(m.forma === 'efectivo' ? 'caja' : 'banco', m.cuenta) + '</select></label>')
@@ -17452,6 +17500,11 @@ function sgFdMediosRender(){
           ? '<button class="btn bd bs" type="button" onclick="sgFdMedioDel(' + i + ')" title="Sacar este medio">×</button>' : '')
       + '</div>';
   }).join('');
+
+  // La botonera, debajo de los renglones: agregar un medio es elegir CUÁL, no
+  // agregar uno vacío y después decir qué era.
+  var bot = eid('sgfd-cobro-botones');
+  if (bot) bot.innerHTML = sgMedioBotones('sgFdMedioAdd');
 
   // El pie: cuánto se está cobrando contra el total. Un cobro parcial es válido —lo
   // que no entra queda en la cuenta corriente— pero pasarse no. Vive en su propia
@@ -20949,8 +21002,11 @@ var SG_COB = { clienteId: null, docs: [], cuentas: [], ctaCliente: null, medios:
 //
 // Y cada renglón dice contra qué MITAD va: son dos platas distintas —lo facturado y
 // lo que se acordó por fuera— y el ámbito decide en qué libro cae cada asiento.
-function sgCobMedioAdd(){
-  SG_COB.medios.push({ forma: 'transferencia', cuenta: '', monto: '', ref: '', ambito: '',
+// La forma viene del botón que se apretó. Sin argumento cae en transferencia,
+// que es lo que hacía antes el «+ otro medio».
+function sgCobMedioAdd(forma){
+  SG_COB.medios.push({ forma: SG_MEDIO[forma] ? forma : 'transferencia',
+                       cuenta: '', monto: '', ref: '', ambito: '',
                        banco: '', nro: '', librador: '', cuit: '', vto: '' });
   sgCobMediosRender();
 }
@@ -20994,12 +21050,8 @@ function sgCobMediosRender(){
     var esChq = m.forma === 'cheque';
     return '<div style="border:1px solid var(--bor);border-radius:8px;padding:8px 10px;margin-bottom:6px">'
       + '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end">'
-      + '<label style="font-size:11px;color:var(--mut)">Cómo<br>'
-        + '<select onchange="' + up(i, 'forma') + '" style="padding:5px 7px;font-size:12.5px">'
-        + [['transferencia', 'Transferencia'], ['efectivo', 'Efectivo'], ['cheque', 'Cheque de tercero']]
-            .map(function(f){ return '<option value="' + f[0] + '"' + (m.forma === f[0] ? ' selected' : '') + '>'
-              + f[1] + '</option>'; }).join('')
-        + '</select></label>'
+      // Qué es este renglón, con el mismo ícono que el botón que lo creó.
+      + '<div style="padding-bottom:6px">' + sgMedioChip(m.forma) + '</div>'
       + (esChq ? '' : '<label style="font-size:11px;color:var(--mut)">' + (m.forma === 'efectivo' ? 'A qué caja' : 'A qué cuenta') + '<br>'
           + '<select onchange="' + up(i, 'cuenta') + '" style="padding:5px 7px;font-size:12.5px;min-width:190px">'
           + opts(m.forma === 'efectivo', m.cuenta) + '</select></label>')
@@ -21038,6 +21090,8 @@ function sgCobMediosRender(){
           + '</div>' : '')
       + '</div>';
   }).join('');
+  var bot = eid('sg-cob-botones');
+  if (bot) bot.innerHTML = sgMedioBotones('sgCobMedioAdd');
   sgCobMediosPie();
 }
 

@@ -30,7 +30,11 @@ const cuerpo = (nombre) => {
 
 test('el modal tiene renglones de pago, no un medio suelto', () => {
   assert.match(PANEL, /id="sg-cob-medios"/);
-  assert.match(PANEL, /onclick="sgCobMedioAdd\(\)"/);
+  // El medio se agrega desde la botonera con íconos, que le pasa la forma: antes
+  // era un «+ otro medio» que agregaba un renglón vacío y después había que
+  // decirle qué era.
+  assert.match(PANEL, /sgMedioBotones\('sgCobMedioAdd'\)/);
+  assert.match(PANEL, /id="sg-cob-botones"/);
   assert.match(PANEL, /function sgCobMediosRender\(\)\{/);
   // Y los campos sueltos de antes ya no están.
   assert.ok(!PANEL.includes('id="sg-cob-forma"'), 'quedó el selector único de forma');
