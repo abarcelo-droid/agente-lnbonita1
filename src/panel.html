@@ -27023,6 +27023,41 @@ function sgRepExport(){
     .sp-tl li.sp-av::before { background:var(--ok,#16a34a) }
     .sp-tl li.sp-dv::before { background:#f59e0b }
     .sp-tl li.sp-rc::before { background:var(--err) }
+
+    /* EL CANAL DEL CHEQUE. Azul neutro: acá el ámbar significa "esperando" y el
+       verde "listo", y un e-cheq no es ninguna de las dos cosas. El único
+       mensaje es "esto es electrónico". */
+    .sp-echeq { background:#dbeafe; color:#1e40af }
+
+    /* ── NADA SE DESPLAZA DE COSTADO ────────────────────────────────────────
+       La tabla de seguimiento pasó a diez columnas, y esta pantalla no tenía el
+       patrón: heredaba overflow-x:auto de .ab-table-wrap y ninguna celda
+       truncaba. Los anchos van en el <th> (con table-layout:fixed alcanza).
+
+       La clase sp-tbl-seg está sólo en la tabla de seguimiento a propósito: en
+       esta misma sección viven las tablas de Tiempos y de Circuito, que no
+       declaran anchos y con fixed quedarían en columnas todas iguales. El
+       overflow-x:hidden sí va a toda la sección — la regla es para todas. */
+    #sec-sp-pagos .sp-wrap-seg { overflow-x:hidden !important }
+    #sec-sp-pagos table.sp-tbl-seg { width:100%; table-layout:fixed }
+    #sec-sp-pagos table.sp-tbl-seg td {
+      padding:7px 9px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap }
+    /* EL ENCABEZADO VA APARTE Y NO SE TRUNCA. Compartiendo la regla de las
+       celdas, «EN QUÉ PASO ESTÁ» y «AVISÉ AL PROVEEDOR» se cortaban y la columna
+       se quedaba sin nombre — y se llevaban puesta la flecha de orden, que va al
+       final: dos clics daban dos resultados y no había cómo saber cuál se estaba
+       mirando. El texto de un encabezado es fijo y conocido: envuelve. */
+    #sec-sp-pagos table.sp-tbl-seg th {
+      padding:7px 6px; letter-spacing:.03em; line-height:1.2;
+      white-space:normal; word-break:normal; vertical-align:bottom }
+    /* Dos celdas llevan prosa, no un dato: "Espera desde" cuelga de abajo
+       «OK pedido a…» y «le toca a…», y la de botones puede traer tres. Con
+       nowrap se cortarían en la primera palabra, y un botón partido al medio no
+       se aprieta. Envuelven. */
+    #sec-sp-pagos table.sp-tbl-seg td.sp-libre {
+      white-space:normal; word-break:break-word; overflow:visible }
+    @media(max-width:900px){ #sec-sp-pagos .sp-wrap-seg { overflow-x:auto !important }
+                             #sec-sp-pagos table.sp-tbl-seg { table-layout:auto } }
   </style>
 
   <div style="display:flex;border-bottom:1px solid var(--bor);margin-bottom:14px;flex-wrap:wrap">
@@ -62028,6 +62063,10 @@ var SP_COLS = {
   concepto:    function(s){ return s.concepto || ''; },
   paso:        function(s){ return s.paso_nombre || ''; },
   espera:      function(s){ return s.paso_actual_desde || ''; },   // ISO: ordena como texto
+  // CUÁNDO SE PIDIÓ EL PAGO, que es otra cosa que "espera desde": ésta no
+  // cambia nunca; la otra se reinicia cada vez que la solicitud avanza de paso.
+  // Ordena como texto porque el formato es YYYY-MM-DD HH:MM:SS.
+  creada:      function(s){ return s.creado_en || ''; },
   solicitante: function(s){ return s.solicitante_nombre || ''; },
   aviso:       function(s){ return s.aviso_prov ? 1 : 0; },
 };
@@ -62079,17 +62118,41 @@ function spTh(vista, col, label, estilo, titulo) {
 
 function spTablaHtml(arr, vista) {
   arr = spOrdenarArr(arr, vista);
-  var html = '<div class="ab-table-wrap"><table class="pa-tbl" style="font-size:12px"><thead><tr>'
-    + spTh(vista, 'numero', 'Nº')
-    + spTh(vista, 'proveedor', 'Proveedor')
-    + spTh(vista, 'monto', 'Monto', 'text-align:right')
-    + spTh(vista, 'concepto', 'Concepto')
-    + spTh(vista, 'paso', 'En qué paso está')
-    + spTh(vista, 'espera', 'Espera desde')
-    + (vista === 'mias' ? '' : spTh(vista, 'solicitante', 'Pidió'))
-    + spTh(vista, 'aviso', 'Avisé al<br>proveedor', 'width:74px;text-align:center',
+  // ── DIEZ COLUMNAS, ANCHOS FIJOS ────────────────────────────────────────
+  // "Pidió" no se dibuja en «Mis solicitudes» —son todas propias—, así que ese
+  // 7% se reparte entre las dos que se truncan.
+  var propias = (vista === 'mias');
+  var wProv = propias ? '16%' : '13%', wConc = propias ? '13%' : '10%';
+  var html = '<div class="ab-table-wrap sp-wrap-seg"><table class="pa-tbl sp-tbl-seg" style="font-size:12px"><thead><tr>'
+    // El número mide doce caracteres fijos (SP-2026-0141) y es el identificador:
+    // partido o recortado deja dos solicitudes que se leen igual.
+    + spTh(vista, 'numero', 'Nº', 'width:10%')
+    // CUÁNDO SE PIDIÓ. Pablo, 28/8/2026: «una columna con la fecha de creación
+    // de la solicitud para poder ordenarla por fecha de creación».
+    //
+    // Va pegada al número porque las dos identifican al pedido —"SP-0141, del
+    // 27/08"— y porque así queda lejos de «Espera desde»: dos columnas de fecha
+    // una al lado de la otra es exactamente la confusión que hay que evitar. Y
+    // el tooltip de las dos dice cuál es cuál, que es la única forma de que no
+    // se lean como lo mismo.
+    + spTh(vista, 'creada', 'Pedida<br>el', 'width:8%',
+        'Cuándo se pidió el pago. No cambia nunca — click para ordenar las que están cargadas')
+    + spTh(vista, 'proveedor', 'Proveedor', 'width:' + wProv)
+    // EL MONTO ES POR LO QUE SE MIRA ESTA FILA. Va en monoespaciada y con la
+    // moneda adelante: «ARS 20.553.000,00» son diecisiete caracteres. Con menos
+    // ancho el navegador recorta por la izquierda —porque está alineado a la
+    // derecha— y «…553.000,00» se lee como quinientos mil.
+    + spTh(vista, 'monto', 'Monto', 'width:13%;text-align:right')
+    + spTh(vista, 'concepto', 'Concepto', 'width:' + wConc)
+    + spTh(vista, 'paso', 'En qué paso está', 'width:10%')
+    + spTh(vista, 'espera', 'Espera desde', 'width:11%',
+        'Desde cuándo está parada en el paso actual. Se reinicia cada vez que avanza — click para ordenar')
+    + (propias ? '' : spTh(vista, 'solicitante', 'Pidió', 'width:6%'))
+    // Una palabra: el significado entero ya vive en el tooltip, y el rótulo
+    // largo no entraba en el ancho que necesita un tilde.
+    + spTh(vista, 'aviso', 'Avisé', 'width:5%;text-align:center',
         'Marcá cuando ya le avisaste al proveedor y le mandaste los comprobantes — click para ordenar')
-    + '<th style="width:190px"></th></tr></thead><tbody>';
+    + '<th style="width:14%"></th></tr></thead><tbody>';
 
   arr.forEach(function(s) {
     var badge;
@@ -62110,20 +62173,33 @@ function spTablaHtml(arr, vista) {
         + ' onclick="spAccionAbrir(' + s.id + ',\'' + spEsc(a.accion) + '\',\'' + spEsc(a.destino || '') + '\')">' + spEsc(a.etiqueta) + '</button>';
     }).join('');
 
+    // La fecha sola: la hora de creación no decide nada —los plazos del circuito
+    // se miden sobre «espera desde»— y diez caracteres contra dieciséis hacen
+    // que las dos columnas de fecha se distingan por la forma, no sólo por el
+    // encabezado. La hora completa queda en el tooltip.
+    var creada = String(s.creado_en || '');
+    var mon = spMoney(s.monto, s.moneda);
     html += '<tr>'
+      // El badge «urgente» baja a su propio renglón: al lado del número le comía
+      // el ancho y el identificador terminaba partido.
       + '<td><strong>' + spEsc(s.numero) + '</strong>'
-        + (s.prioridad === 'urgente' ? ' <span class="sp-bad sp-err">urgente</span>' : '') + '</td>'
+        + (s.prioridad === 'urgente'
+            ? '<div><span class="sp-bad sp-err">urgente</span></div>' : '') + '</td>'
+      + '<td class="sp-chica" title="' + spEsc(creada.slice(0, 16)) + '">'
+        + (creada ? spEsc(creada.slice(0, 10)) : '—') + '</td>'
       // La cuenta va en monoespaciada y rotulada: se lee como código, que es lo que
       // es, y se distingue de un nombre o una referencia cualquiera.
-      + '<td>' + spEsc(s.proveedor_texto)
+      + '<td title="' + spEsc(s.proveedor_texto || '') + '">' + spEsc(s.proveedor_texto)
         + (s.cuenta_texto
             ? '<div class="sp-chica">cta. <span style="font-family:ui-monospace,Consolas,monospace;font-weight:600">'
               + spEsc(s.cuenta_texto) + '</span></div>' : '') + '</td>'
-      + '<td class="sp-num"><strong>' + spEsc(spMoney(s.monto, s.moneda)) + '</strong></td>'
-      + '<td class="sp-chica">' + spEsc(String(s.concepto || '').slice(0, 60)) + '</td>'
-      + '<td>' + badge
+      + '<td class="sp-num" title="' + spEsc(mon) + '"><strong>' + spEsc(mon) + '</strong></td>'
+      + '<td class="sp-chica" title="' + spEsc(String(s.concepto || '')) + '">'
+        + spEsc(String(s.concepto || '').slice(0, 60)) + '</td>'
+      + '<td title="' + spEsc(s.paso_nombre || '')
+          + (s.fecha_pago_confirmada ? ' — pago: ' + spEsc(s.fecha_pago_confirmada) : '') + '">' + badge
         + (s.fecha_pago_confirmada ? '<div class="sp-chica">pago: ' + spEsc(s.fecha_pago_confirmada) + '</div>' : '') + '</td>'
-      + '<td class="sp-chica">' + spEsc(String(s.paso_actual_desde || '').slice(0, 16))
+      + '<td class="sp-chica sp-libre">' + spEsc(String(s.paso_actual_desde || '').slice(0, 16))
         // SIN "VENCIDO" EN EL SEGUIMIENTO DE ÓRDENES DE PAGO. Acá la columna
         // dice desde cuándo la orden está esperando en su paso, y el cartel rojo
         // se leía como si la DEUDA estuviera vencida — que es otra cosa— o como
@@ -62145,7 +62221,8 @@ function spTablaHtml(arr, vista) {
         + (vista === 'frenadas' && (s.esperando_a || []).length
             ? '<div>lo puede resolver: <strong>' + spEsc(s.esperando_a.join(', ')) + '</strong></div>'
             : '') + '</td>'
-      + (vista === 'mias' ? '' : '<td class="sp-chica">' + spEsc(s.solicitante_nombre || '') + '</td>')
+      + (propias ? '' : '<td class="sp-chica" title="' + spEsc(s.solicitante_nombre || '') + '">'
+          + spEsc(s.solicitante_nombre || '') + '</td>')
       // El tilde de "ya le avisé al proveedor". Sólo lo puede tocar quien pidió
       // el pago: para el resto se ve, pero apagado y sin poder cambiarlo.
       + '<td style="text-align:center">'
@@ -62159,7 +62236,9 @@ function spTablaHtml(arr, vista) {
         + (s.aviso_prov && s.aviso_prov_en
             ? '<div class="sp-chica" style="font-size:10px">' + spEsc(String(s.aviso_prov_en).slice(5, 10)) + '</div>' : '')
       + '</td>'
-      + '<td style="text-align:right;white-space:nowrap">'
+      // Sin nowrap: con anchos fijos, tres botones en una fila se cortarían por
+      // la mitad. Que la fila crezca a dos renglones es mejor que medio botón.
+      + '<td class="sp-libre" style="text-align:right">'
         + '<button class="btn bo bs" onclick="spDetalleAbrir(' + s.id + ')" style="padding:2px 7px;font-size:11px">Ver</button>'
         + acciones + '</td></tr>';
   });
@@ -62626,7 +62705,18 @@ function spDetalleRender() {
           return '<tr class="sp-grp"><td colspan="4" style="background:var(--bg2,#f1f5f9);font-weight:700;font-size:11px">'
             + spEsc(SP_PAGO_ETQ[t]) + ' — ' + arr.length + ' — ' + spEsc(spMoney(sub, s.moneda)) + '</td></tr>'
             + arr.map(function(p) {
-                return '<tr><td class="sp-chica">' + spEsc(SP_PAGO_ETQ[t]) + '</td>'
+                return '<tr><td class="sp-chica">' + spEsc(SP_PAGO_ETQ[t])
+                  // PAPEL O HOMEBANKING. El que confecciona y el que firma lo
+                  // ven acá sin abrir nada: son dos trabajos distintos.
+                  // La tercera rama es la que importa: un cheque viejo, sin
+                  // canal, se veía igual que uno marcado y nadie podía saber que
+                  // faltaba el dato. Va condicionada por el TIPO — en una
+                  // transferencia el canal vacío es correcto, no es un olvido.
+                  + (p.canal === 'echeq' ? ' <span class="sp-bad sp-echeq">e-cheq</span>'
+                     : (p.canal === 'fisico' ? ' <span class="sp-bad sp-gris">físico</span>'
+                        : (t === 'transferencia' ? ''
+                           : ' <span class="sp-bad sp-warn">canal sin informar</span>')))
+                  + '</td>'
                   + '<td class="sp-num">' + spEsc(spMoney(p.importe, s.moneda)) + '</td>'
                   + '<td class="sp-chica">' + spEsc(p.fecha || '—') + '</td>'
                   + '<td class="sp-chica">' + spEsc(p.codigo || '—') + '</td></tr>';
@@ -62767,7 +62857,10 @@ function spAccionAbrir(id, accion, destino) {
           + 'La suma tiene que dar ' + spEsc(spMoney(s.monto, s.moneda)) + '. '
           + 'Cada cheque propio que agregás <strong>se lleva su parte del saldo</strong> — '
           + 'si ponés 4, sale partido en 4. Escribí un importe a mano para fijarlo y el resto '
-          + 'se reparte entre los demás; borralo para devolverlo al reparto.</div>'
+          + 'se reparte entre los demás; borralo para devolverlo al reparto.<br>'
+          + 'En cada cheque marcá si es <strong>físico</strong> o <strong>e-cheq</strong>: '
+          + 'no es lo mismo imprimirlo y firmarlo a mano que emitirlo en el homebanking, y el que '
+          + 'lo confecciona y el que lo firma se enteran por ahí.</div>'
         + '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px">'
           + '<button type="button" class="btn bo bs" style="font-size:11px" onclick="spPagoAgregar(\'transferencia\')">+ Transferencia</button>'
           + '<button type="button" class="btn bo bs" style="font-size:11px" onclick="spPagoAgregar(\'cheque_propio\')">+ Cheque propio</button>'
@@ -62814,7 +62907,7 @@ function spAccionAbrir(id, accion, destino) {
     // Arranca con una transferencia por el total: es el caso más común y evita
     // empezar de cero cuando no hay cheques. Queda en 'auto', así que apenas se
     // agrega el primer cheque propio cede el saldo y se saca sola.
-    SP.pagos = [{ tipo: 'transferencia', importe: s.monto, fecha: '', codigo: '', auto: true }];
+    SP.pagos = [{ tipo: 'transferencia', importe: s.monto, fecha: '', codigo: '', canal: '', auto: true }];
     spPagoRender();
   }
 }
@@ -62908,6 +63001,34 @@ function spPagoRepartir() {
   });
 }
 
+// ── PAPEL O HOMEBANKING ─────────────────────────────────────────────────
+//
+// Pablo, 28/8/2026: «dentro de cheques, cuando decidimos, poner dos box para
+// tildar si son cheques físicos o e-cheqs, tanto para propios como para de
+// terceros, para que todos sepan si el canal de pago es electrónico o no».
+//
+// Son DOS RADIO, no dos checkbox. Dos tildes independientes admiten "los dos"
+// —que es una mentira física: un cheque o se imprime o se emite— y ese estado
+// imposible termina guardado en la base. El radio lo hace imposible por
+// construcción del navegador, no por una validación que alguien puede olvidarse
+// de escribir. Se tildan igual que un box, que es lo que se pidió.
+//
+// Y NO VIENE NINGUNO MARCADO. Un valor por defecto es la forma más rápida de
+// que el campo se vuelva ruido: se acepta sin mirar y a las tres semanas el dato
+// no significa nada. "Ninguno" también es el estado de las líneas viejas, que
+// nadie puede completar de memoria.
+var SP_CANAL_ETQ = { fisico: 'físico', echeq: 'e-cheq' };
+
+function spCanalRadios(i, p) {
+  return ['fisico', 'echeq'].map(function(c) {
+    return '<label style="font-size:11px;margin-right:8px;cursor:pointer;white-space:nowrap">'
+      + '<input type="radio" name="sp-canal-' + i + '" value="' + c + '"'
+      + (p.canal === c ? ' checked' : '')
+      + ' onchange="spPagoSet(' + i + ',\'canal\',\'' + c + '\')"'
+      + ' style="vertical-align:-1px;margin-right:3px"> ' + SP_CANAL_ETQ[c] + '</label>';
+  }).join('');
+}
+
 function spPagoAgregar(tipo) {
   SP.pagos = SP.pagos || [];
   if (SP.pagos.filter(function(p) { return p.tipo === tipo; }).length >= 20) {
@@ -62919,9 +63040,9 @@ function spPagoAgregar(tipo) {
   var fijo = SP.pagos.reduce(function(a, p) { return a + (p.auto ? 0 : (Number(p.importe) || 0)); }, 0);
   var falta = Math.round((Number(SP.pagoMonto || 0) - fijo) * 100) / 100;
   SP.pagos.push(tipo === 'cheque_propio'
-    ? { tipo: tipo, importe: '', fecha: '', codigo: '', auto: true }
+    ? { tipo: tipo, importe: '', fecha: '', codigo: '', canal: '', auto: true }
     // Transferencia y cheque de terceros: se propone lo que falta y queda fijo.
-    : { tipo: tipo, importe: falta > 0 ? falta : '', fecha: '', codigo: '', auto: false });
+    : { tipo: tipo, importe: falta > 0 ? falta : '', fecha: '', codigo: '', canal: '', auto: false });
   spPagoRepartir();
   spPagoRender();
 }
@@ -62979,7 +63100,12 @@ function spPagoRender() {
         var nro = p.tipo === 'transferencia' ? '' :
           ' <span class="sp-chica">#' + (SP.pagos.filter(function(q, j) {
             return q.tipo === p.tipo && j <= i; }).length) + '</span>';
-        return '<tr><td><strong>' + spEsc(SP_PAGO_ETQ[p.tipo]) + '</strong>' + nro + '</td>'
+        return '<tr><td><strong>' + spEsc(SP_PAGO_ETQ[p.tipo]) + '</strong>' + nro
+          // Debajo del medio, no en una columna propia: la tabla del modal ya
+          // tiene 439px clavados en las otras cuatro y una quinta la desborda.
+          // Es el mismo lugar donde ya cuelga "repartido".
+          + (esCheque ? '<div style="margin-top:3px">' + spCanalRadios(i, p) + '</div>' : '')
+          + '</td>'
           + '<td><span class="sp-money"><span class="sp-money-sig">$</span>'
           + '<input type="text" inputmode="decimal" autocomplete="off" class="sp-inp sp-num" style="width:120px"'
             + ' value="' + spEsc(spMontoTexto(p.importe)) + '"'
@@ -63053,9 +63179,19 @@ function spAccionConfirmar() {
       if (p.tipo === 'cheque_terceros' && !String(p.codigo || '').trim()) {
         return toast('Falta el código del cheque de terceros de la línea ' + (i + 1), 'er');
       }
+      // Papel o homebanking. Se pregunta acá además de en el servidor para no
+      // hacerle rehacer la pantalla entera al que se olvidó de un tilde.
+      if (p.tipo !== 'transferencia' && !SP_CANAL_ETQ[p.canal]) {
+        return toast('La línea ' + (i + 1) + ' (' + SP_PAGO_ETQ[p.tipo] + ') no dice si es '
+          + 'un cheque físico o un e-cheq.', 'er');
+      }
     }
     body.pagos = SP.pagos.map(function(p) {
-      return { tipo: p.tipo, importe: p.importe, fecha: p.fecha || null, codigo: p.codigo || null };
+      // El canal viaja o no sirve de nada: sin este campo se tilda en pantalla,
+      // se manda sin él, y el error es mudo. La transferencia manda null: ya es
+      // electrónica por definición y decirlo sería inventar un dato.
+      return { tipo: p.tipo, importe: p.importe, fecha: p.fecha || null, codigo: p.codigo || null,
+               canal: (p.tipo === 'transferencia' ? null : (p.canal || null)) };
     });
   }
   var om = document.getElementById('sp-acc-otromedio');
@@ -63180,6 +63316,9 @@ function spAyudaHtml(d) {
       + '(importe, vencimiento y <strong>código del cheque</strong>, que es obligatorio).</li>'
     + '<li>Se agregan con los botones <em>+ Transferencia</em>, <em>+ Cheque propio</em>, <em>+ Cheque de terceros</em>. '
       + 'Hasta 20 de cada uno.</li>'
+    + '<li><strong>En cada cheque hay que marcar si es físico o e-cheq.</strong> Es obligatorio: uno se '
+      + 'imprime, se firma a mano y alguien lo lleva; el otro se emite y se firma en el homebanking. '
+      + 'Son dos trabajos distintos y el que lo hace tiene que saber cuál le toca.</li>'
     + '<li><strong>La suma tiene que dar el monto autorizado.</strong> Abajo se ve en vivo: en verde si cierra, '
       + 'en rojo con la diferencia exacta si no. No se puede confirmar hasta que cierre.</li>'
     + '<li>Si todavía no hay fondos, usá <strong>Todavía sin fecha</strong> y dejá el motivo. La solicitud queda '
@@ -63188,8 +63327,9 @@ function spAyudaHtml(d) {
 
   // ── Confecciona ──
   html += '<h3>Si confeccionás las órdenes <span class="sp-chica">(' + spEsc(spQuien(d, 'confeccion')) + ')</span></h3><ol style="padding-left:20px">'
-    + '<li>Te llega un mail con <strong>el detalle completo de cómo se paga</strong>: cuántos cheques, por cuánto '
-      + 'y con qué vencimiento, más el total. No hace falta entrar al panel a averiguarlo.</li>'
+    + '<li>Te llega un mail con <strong>el detalle completo de cómo se paga</strong>: cuántos cheques, por cuánto, '
+      + 'con qué vencimiento y <strong>cuáles son e-cheq y cuáles van en papel</strong>, más el total. '
+      + 'No hace falta entrar al panel a averiguarlo.</li>'
     + '<li>El mismo detalle está en la solicitud, en <strong>Cómo se paga</strong>.</li>'
     + '<li><strong>Adjuntá el PDF de la cuenta corriente del proveedor.</strong> Es obligatorio: sin ese '
       + 'archivo el sistema no te deja mandarla a la firma. Se sube desde la solicitud, en <em>Adjuntos</em>, '

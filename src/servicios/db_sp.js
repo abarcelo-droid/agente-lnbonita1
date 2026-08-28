@@ -338,6 +338,31 @@ try {
   // entran en una lista fija.
   addCol('sp_solicitudes', 'condicion_pago', 'TEXT');
 
+  // ── EL CHEQUE, ¿EN PAPEL O ELECTRÓNICO? ──────────────────────────────────
+  //
+  // Pablo, 28/8/2026: «dentro de cheques, cuando decidimos, poner dos box para
+  // tildar si son cheques físicos o e-cheqs, tanto para propios como para de
+  // terceros, para que todos sepan si el canal de pago es electrónico o no».
+  //
+  // Son dos trabajos distintos: uno se imprime, se firma a mano y alguien lo
+  // lleva; el otro se emite en el homebanking y se firma ahí. El que confecciona
+  // y el que firma se enteraban recién cuando les llegaba —o no les llegaba— el
+  // papel.
+  //
+  // COLUMNA APARTE, no un cuarto valor de `tipo`: `tipo` tiene CHECK, y en SQLite
+  // ampliar un CHECK obliga a recrear la tabla entera. Ya pasó con sp_adjuntos.
+  // Acá el vocabulario ('fisico' | 'echeq') se valida en JS, que es donde se
+  // puede cambiar sin migrar.
+  //
+  // NULL es un valor con significado: «todavía no lo dijeron». Las líneas
+  // cargadas antes de esto quedan así y se muestran como «canal sin informar»,
+  // tanto en la pantalla como en el mail — inventarles el canal sería meter una
+  // afirmación falsa en un registro que alguien va a citar, y dejarlas en blanco
+  // las haría ver igual que una transferencia, donde el vacío es correcto.
+  // Se corrige solo a medida que las solicitudes vuelvan a pasar por el paso de
+  // fechas, que rehace la composición entera.
+  addCol('sp_pago_detalle', 'canal', 'TEXT');
+
   // El paso de confección exige el PDF de cuenta corriente del proveedor, y el de
   // solicitud exige que el comprador adjunte el respaldo ('*' = cualquier tipo: el
   // comprobante puede ser factura, proforma o remito según el caso).
