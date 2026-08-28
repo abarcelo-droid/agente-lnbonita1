@@ -4755,6 +4755,14 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
         <option value="esperando">sólo los que todavía no les toca</option>
         <option value="activos">sólo los que trajeron</option>
       </select></div>
+      <!-- Debajo de este porcentaje del promedio del producto, un productor va a la bolsa de
+           "OTROS". Con treinta filas donde veinte son compras de una vez, no se ve ninguna. -->
+      <div><label>Agrupar los chicos</label><select id="vt-umbral" onchange="vtCargar()">
+        <option value="0.5">menos del 0,5%</option>
+        <option value="1" selected>menos del 1%</option>
+        <option value="3">menos del 3%</option>
+        <option value="0">no agrupar — verlos a todos</option>
+      </select></div>
       <div><button class="btn bo bs" onclick="vtExportar()">⬇️ Excel</button></div>
     </div>
     <div id="vt-sugerencias" style="margin-bottom:12px"></div>
@@ -34343,6 +34351,7 @@ function vtCargar(){
   var prod=(eid('vt-prod')||{}).value||'';
   var p=[];
   var a=(eid('vt-act')||{}).value; if(a) p.push('periodo_actual='+encodeURIComponent(a));
+  var u=(eid('vt-umbral')||{}).value; if(u!=null&&u!=='') p.push('umbral_share='+encodeURIComponent(u));
   if(prod) p.push('producto='+encodeURIComponent(prod.trim()));
   // Los filtros de arriba también valen acá: si alguien filtró por cliente, la ventana es la
   // de ESE cliente. Una pantalla que ignora en silencio un filtro que se ve puesto miente.
@@ -34443,7 +34452,7 @@ function vtPintar(d){
     + (d.esperando ? k('Todavía no les toca', nr(d.esperando), infKg(d.kilos_esperando)+' que se esperan más adelante') : '')
     + k('Trajeron en '+esc(d.periodo_actual), nr(d.proveedores_activos||0), infKg(d.kilos_act))
     + k('Historia de '+esc(d.producto), infKg(d.kilos_hist), nr(periodos.length)+' campañas · '+infUsd(d.usd_hist))
-    + k('Mes pico', esc(vtMes(d.pico_mes)), infKg(d.pico_kilos)+' históricos');
+    + k('Mes pico', esc(vtMes(d.pico_mes)), infKg(d.pico_kilos)+' por campaña');
 
   if(!meses.length){
     eid('vt-thead').innerHTML='';
@@ -34460,16 +34469,24 @@ function vtPintar(d){
     + '<th style="text-align:right;width:11%">Kilos</th>'
     + '<th style="text-align:left;width:13%">Ventana típica</th></tr>';
 
-  var max=d.max_celda||1;
+  // TODO EN PROMEDIO POR CAMPAÑA. Sumar seis años en una barra no dice ni lo que se movió ni
+  // lo que se espera mover; el promedio sí es una expectativa, y es contra eso que se compra.
+  // El acumulado queda en el tooltip para quien quiera el número entero.
+  var max=d.max_celda_prom||1;
   var filas=vtFilas();
   eid('vt-tbody').innerHTML = filas.length ? filas.map(function(f){
     var celdas=meses.map(function(m){
       var c=f.por_mes[m];
-      var hH=c?Math.max(3, Math.round((c.kilos/max)*28)):0;
-      var hA=(c&&c.kilos_act)?Math.max(2, Math.round((c.kilos_act/max)*28)):0;
+      var nc=(d.campanias_mes||{})[m]||1;
+      var prom=c?(c.kilos_prom||0):0;
+      var promAct=(c&&c.kilos_act)?Math.round(c.kilos_act):0;
+      var hH=prom?Math.max(3, Math.round((prom/max)*28)):0;
+      // La de este año NO se promedia: es un año solo. Se escala con el mismo techo para que
+      // se lea contra el promedio — que es justo la comparación que se viene a hacer.
+      var hA=promAct?Math.max(2, Math.round((promAct/max)*28)):0;
       var tip=[];
       if(c){
-        tip.push(vtMes(m)+': '+nr(c.kilos)+' K en '+c.anios+' campaña(s)');
+        tip.push(vtMes(m)+': '+nr(prom)+' K de promedio ('+nr(c.kilos)+' K en total, sobre '+nc+' campaña(s))');
         tip.push(c.kilos_act ? ('este año '+nr(c.kilos_act)+' K') : 'este año NO trajo en '+vtMes(m));
       }
       return '<td class="vt-celda'+(m===d.pico_mes?' vt-pico':'')+'"'
@@ -34497,6 +34514,10 @@ function vtPintar(d){
         + esc(vtMes(f.desde))+'</b></div>';
     } else if(f.es_nuevo){
       estado='<div class="vt-sub" style="color:#1e40af">nuevo en '+esc(d.periodo_actual)+'</div>';
+    } else if(f.agrupado){
+      estado='<div class="vt-sub">cada uno pesa menos del '+nrDec(d.umbral_share,1)+'% del promedio del producto'
+        + (f.cuantos_ausentes?(' · '+nr(f.cuantos_ausentes)+' no trajeron este año'):'')
+        + ' · <a href="#" onclick="eid(\'vt-umbral\').value=\'0\';vtCargar();return false">verlos uno por uno</a></div>';
     } else if(f.no_identificado){
       estado='<div class="vt-sub" style="color:var(--err,#dc2626)">no son proveedores: son errores de fórmula de la planilla</div>';
     } else if(f.desde_act && f.desde && f.desde_act!==f.desde){
@@ -34504,12 +34525,12 @@ function vtPintar(d){
     }
 
     return '<tr'+(f.contactar?' style="background:rgba(245,158,11,.07)"':'')+'>'
-      + '<td><div class="vt-prov"'+(f.no_identificado?' style="opacity:.65"':'')+'>'+esc(f.proveedor)+'</div>'+estado+'</td>'
+      + '<td><div class="vt-prov"'+((f.no_identificado||f.agrupado)?' style="opacity:.65"':'')+'>'+esc(f.proveedor)+'</div>'+estado+'</td>'
       + celdas
       + '<td style="text-align:center;white-space:nowrap">'+tira
         + '<div class="vt-sub">'+(f.ultimo_periodo?('último '+esc(vtCamp(f.ultimo_periodo))):'—')+'</div></td>'
-      + '<td style="text-align:right">'+infKg(f.kilos_hist)
-        + '<div class="vt-sub">'+infKg(f.kilos_prom_anio)+'/campaña</div></td>'
+      + '<td style="text-align:right">'+infKg(f.kilos_prom_anio)
+        + '<div class="vt-sub">por campaña · '+infKg(f.kilos_hist)+' en total</div></td>'
       + '<td style="font-size:11.5px">'+(f.desde
           ? (esc(vtMes(f.desde))+' → '+esc(vtMes(f.hasta))+' <span style="color:var(--mut)">('+f.meses_activo+' m)</span>')
           : '<span style="color:var(--mut)">—</span>')+'</td>'
@@ -34530,9 +34551,12 @@ function vtPintar(d){
     : '';
 
   eid('vt-nota').innerHTML = aviso
-    + '<b>Cómo se lee:</b> la barra <span style="color:#9dc3ae">clara</span> es lo que ese productor trajo ese mes <b>en toda la historia</b>; '
+    + '<b>Cómo se lee:</b> la barra <span style="color:#9dc3ae">clara</span> es lo que ese productor trae ese mes <b>en una campaña típica</b> (el promedio); '
     + 'la <span style="color:#2f7a4d">oscura</span>, lo que trajo <b>este año</b>. Una clara sin oscura adentro es un hueco: trae siempre y ahora no está. '
     + 'Los cuadraditos de <b>Campañas</b> son los años, llenos donde trajo. Todas las barras están a la misma escala.<br>'
+    + '<b>Todo en promedio por campaña</b>, no sumado: sumar seis años no dice lo que se movió ni lo que se espera mover. '
+    + 'El total acumulado está en el globo de cada barra. '
+    + (d.agrupados ? ('Los <b>'+nr(d.agrupados)+'</b> productores que pesan menos del '+nrDec(d.umbral_share,1)+'% ('+infKg(d.corte_kilos)+' por campaña) están juntos en una fila. ') : '')
     + '<b>Productor</b> = de dónde vino la mercadería que vendimos, según la base de ventas — no es un libro de compras. '
     + 'El eje es el <b>mes comercial</b> (julio a junio) y no la semana: la columna de semana de la planilla todavía no está verificada, '
     + 'y un eje de tiempo mal interpretado corre todas las ventanas sin que se note.';
@@ -34547,23 +34571,33 @@ function vtPintar(d){
 function vtPerfil(d, meses){
   var box=eid('vt-perfil'); if(!box) return;
   if(!meses.length){ box.innerHTML=''; return; }
-  var maxTot=Math.max.apply(null, meses.map(function(m){ return d.totales[m]||0; }))||1;
+  // EL NÚMERO DE CADA MES ES EL PROMEDIO POR CAMPAÑA, no la suma. "458k en julio" sumando
+  // seis años no es lo que se movió ni lo que se espera mover; el promedio sí es una
+  // expectativa —"un julio típico son 76k"— y es contra eso que se decide cuánto comprar.
+  // El acumulado queda en el tooltip.
+  var maxProm=Math.max.apply(null, meses.map(function(m){ return (d.promedios||{})[m]||0; }))||1;
   var ALTO=54;
+  var nCamp=(d.periodos||[]).length;
   box.innerHTML=
       '<div style="padding:12px 14px;border-radius:10px;background:var(--bg)">'
     + '<div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin-bottom:9px">'
       + '<div style="font-size:14px;font-weight:700">La campaña de '+esc(d.producto)+'</div>'
       + '<div style="font-size:11.5px;color:var(--mut)">'
-        + infKg(d.kilos_hist)+' en '+nr((d.periodos||[]).length)+' campañas · pico en <b>'+esc(vtMes(d.pico_mes))+'</b>'
-        + ' · <span style="color:#94a3b8">▇</span> historia · <span style="color:#1a3a5c">▇</span> '+esc(d.periodo_actual)
+        + '<b>promedio por campaña</b> · '+infKg(Math.round(d.kilos_hist/(nCamp||1)))+' al año sobre '+nr(nCamp)+' campañas'
+        + ' · pico en <b>'+esc(vtMes(d.pico_mes))+'</b>'
+        + ' · <span style="color:#94a3b8">▇</span> promedio · <span style="color:#1a3a5c">▇</span> '+esc(d.periodo_actual)
       + '</div></div>'
     + '<div style="display:flex;gap:3px;align-items:flex-end">'
     + meses.map(function(m){
-        var t=d.totales[m]||0, ta=d.totales_act[m]||0;
-        var hH=t?Math.max(2, Math.round((t/maxTot)*ALTO)):0;
-        var hA=ta?Math.max(2, Math.round((ta/maxTot)*ALTO)):0;
-        return '<div style="flex:1;text-align:center" title="'+esc(vtMes(m)+': '+nr(t)+' K en toda la historia · '+nr(ta)+' K en '+d.periodo_actual)+'">'
-          + '<div style="font-size:9.5px;color:var(--mut);margin-bottom:2px">'+(t?nr(Math.round(t/1000))+'k':'')+'</div>'
+        var pr=(d.promedios||{})[m]||0, ta=d.totales_act[m]||0, t=d.totales[m]||0;
+        var nc=(d.campanias_mes||{})[m]||1;
+        var hH=pr?Math.max(2, Math.round((pr/maxProm)*ALTO)):0;
+        // La de este año va con el mismo techo: es un año contra el promedio, que es
+        // exactamente la comparación que se viene a hacer.
+        var hA=ta?Math.max(2, Math.round((ta/maxProm)*ALTO)):0;
+        return '<div style="flex:1;text-align:center" title="'
+            + esc(vtMes(m)+': '+nr(pr)+' K de promedio · '+nr(t)+' K sumando '+nc+' campaña(s) · '+nr(ta)+' K en '+d.periodo_actual)+'">'
+          + '<div style="font-size:9.5px;color:var(--mut);margin-bottom:2px">'+(pr?vtMil(pr):'')+'</div>'
           + '<div style="position:relative;height:'+ALTO+'px">'
             + (hH?'<div style="position:absolute;left:0;right:0;bottom:0;height:'+hH+'px;background:#c7d6e6;border-radius:3px 3px 0 0"></div>':'')
             + (hA?'<div style="position:absolute;left:22%;right:22%;bottom:0;height:'+hA+'px;background:#1a3a5c;border-radius:3px 3px 0 0"></div>':'')
@@ -34571,6 +34605,13 @@ function vtPerfil(d, meses){
           + '<div style="font-size:10px;font-weight:600;margin-top:3px'+(m===d.pico_mes?';color:var(--burg)':';color:var(--mut)')+'">'+esc(vtMes(m))+'</div>'
           + '</div>'; }).join('')
     + '</div></div>';
+}
+
+// 76.234 → '76k'; 940 → '940'. Redondear a miles un número de tres cifras lo convierte en
+// '1k' o directamente en '0k', que se lee como "no hay nada".
+function vtMil(v){
+  v=Math.round(v||0);
+  return v>=1000 ? (nr(Math.round(v/1000))+'k') : nr(v);
 }
 
 function vtExportar(){

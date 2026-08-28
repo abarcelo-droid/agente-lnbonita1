@@ -641,6 +641,21 @@ function mesesDelAnio() {
   ).all().map(r => r.mes_ok);
 }
 
+// Cuántas campañas LLEGARON a cada mes. Es el divisor de los promedios, y se cuenta sobre
+// toda la base: una campaña que arrancó en julio no tiene noviembre, y meterla en el divisor
+// de noviembre bajaría ese promedio por una razón de almanaque, no del negocio.
+function campaniasPorMes() {
+  const filas = db.prepare(`
+    SELECT mes_ok, COUNT(DISTINCT periodo) AS campanias
+    FROM sheet_ventas
+    WHERE mes_ok IS NOT NULL AND mes_ok <> '' AND periodo IS NOT NULL AND periodo <> ''
+    GROUP BY mes_ok
+  `).all();
+  const m = {};
+  for (const f of filas) m[f.mes_ok] = f.campanias;
+  return m;
+}
+
 router.get('/ventanas', requireAuth, (req, res) => {
   try {
     const v = ventanaInteranual(req.query);
@@ -698,6 +713,11 @@ router.get('/ventanas', requireAuth, (req, res) => {
       // Y el año comercial entero como eje: los meses en que este producto NO está son la
       // mitad de lo que se viene a ver.
       meses_todos: mesesDelAnio(),
+      // El divisor de los promedios.
+      campanias_por_mes: campaniasPorMes(),
+      // Debajo de qué porcentaje del promedio del producto un productor va a la bolsa de
+      // "OTROS". Se puede subir o bajar desde la pantalla; 0 muestra a todos.
+      umbral_share: req.query.umbral_share,
     });
     const est = estadoSync();
     res.json({ ok: true, data: Object.assign(data, {
