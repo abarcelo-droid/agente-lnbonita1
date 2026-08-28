@@ -15,6 +15,7 @@ import {
   accionesDisponibles, aplicarCambioDePaso, registrarEvento
 , destinoDevolucion, pasoInicio, destinosDevolucion} from '../servicios/sp_motor.js';
 import { encolar, render, procesarEnBackground } from '../servicios/sp_outbox.js';
+import { CANALES, ETIQUETA_CANAL, pideCanal, canalDeLinea, resumenCanales } from '../servicios/sp_canal.js';
 // El cerrojo de empresa. Antes cada router tenia su propia copia de esta
 // logica y todas ADIVINABAN cuando no les llegaba el dato: siete caian a
 // Puente Cordon y dos a San Geronimo. El por que esta en el servicio.
@@ -214,7 +215,10 @@ function avisarPaso(def, sol, pasoClave, eventoId) {
   if (sol.condicion_pago && texto.indexOf(sol.condicion_pago) === -1) {
     texto = insertar(texto, 'Condición de pago: ' + sol.condicion_pago);
   }
-  if (comp && paso.hito === 'confeccion' && texto.indexOf(comp) === -1) {
+  // Y TAMBIÉN AL QUE FIRMA. Antes esto iba sólo al que confecciona, y quien firma
+  // recibía un mail que no decía nada del pago: firmar un papel o autorizar en el
+  // homebanking es literalmente su acto, y se enteraba al abrir el panel.
+  if (comp && ['confeccion', 'firma'].includes(paso.hito) && texto.indexOf(comp) === -1) {
     texto = insertar(texto, 'Cómo se paga:\n' + comp);
   }
 
@@ -485,7 +489,18 @@ function validarComposicion(lista, sol, fechaPago) {
     // Los cheques llevan su propia fecha de vencimiento, que es justamente el punto
     // de un cheque diferido. Si no viene, se asume la fecha de pago.
     const fecha = vFecha(p.fecha, `La fecha de la línea ${i + 1}`) || fechaPago;
-    return { tipo, importe: round2(importe), fecha, codigo, notas: vTexto(p.notas, 'Las notas', { max: 200 }) };
+    // ── PAPEL O HOMEBANKING ───────────────────────────────────────────────
+    // Obligatorio en los cheques, prohibido en la transferencia. Se pide acá y
+    // no sólo en la pantalla porque el front es una cortesía: el que decide es
+    // el servidor, y un cheque sin canal deja al que lo confecciona sin saber
+    // qué tiene que hacer.
+    const canal = canalDeLinea(tipo, p.canal);
+    if (pideCanal(tipo) && !canal) {
+      throw bad(`La línea ${i + 1} (${ETIQUETA_PAGO[tipo]}) no dice si es un cheque físico o un e-cheq. `
+        + `Marcá ${CANALES.map((c) => ETIQUETA_CANAL[c]).join(' o ')} en esa línea.`);
+    }
+    return { tipo, importe: round2(importe), fecha, codigo, canal,
+             notas: vTexto(p.notas, 'Las notas', { max: 200 }) };
   });
 
   // La suma tiene que dar el monto: si no, la orden se confecciona por un importe
@@ -517,9 +532,19 @@ function textoComposicion(pagos, moneda) {
     for (const p of arr) {
       lineas.push('   · ' + money(p.importe, moneda)
         + (p.fecha ? ' · ' + p.fecha : '')
+        // El canal, en la línea de cada cheque: es lo que decide si hay que
+        // imprimir y firmar a mano o entrar al homebanking.
+        + (ETIQUETA_CANAL[p.canal] ? ' · ' + ETIQUETA_CANAL[p.canal]
+           // Y si es un cheque viejo, sin canal, se dice: en blanco se lee como
+           // «no hace falta», que es lo que significa en una transferencia.
+           : (pideCanal(p.tipo) ? ' · canal sin informar' : ''))
         + (p.codigo ? ' · cheque ' + p.codigo : ''));
     }
   }
+  // Y el resumen antes del total: el que confecciona necesita saber CUÁNTOS va a
+  // cargar en el homebanking antes de leer renglón por renglón.
+  const resumen = resumenCanales(pagos);
+  if (resumen) lineas.push(resumen);
   const total = round2(pagos.reduce((a, p) => a + p.importe, 0));
   lineas.push(`TOTAL: ${money(total, moneda)}`);
   return lineas.join('\n');
@@ -1039,10 +1064,10 @@ router.post('/solicitudes/:id/accion', wrap((req, res) => {
       // se rehace entera y no quedan líneas viejas mezcladas con las nuevas.
       db.prepare('DELETE FROM sp_pago_detalle WHERE solicitud_id=?').run(s.id);
       const insP = db.prepare(`
-        INSERT INTO sp_pago_detalle (solicitud_id, tipo, importe, fecha, codigo, notas, orden, creado_por_id)
-        VALUES (?,?,?,?,?,?,?,?)
+        INSERT INTO sp_pago_detalle (solicitud_id, tipo, importe, fecha, codigo, canal, notas, orden, creado_por_id)
+        VALUES (?,?,?,?,?,?,?,?,?)
       `);
-      pagos.forEach((p, i) => insP.run(s.id, p.tipo, p.importe, p.fecha, p.codigo, p.notas, i, req.user.id));
+      pagos.forEach((p, i) => insP.run(s.id, p.tipo, p.importe, p.fecha, p.codigo, p.canal, p.notas, i, req.user.id));
     }
     const detalle = { ...datos };
     if (omitida) detalle.sod_omitida = omitida;
