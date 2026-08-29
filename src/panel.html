@@ -12748,10 +12748,43 @@ function liqVentaCab(ocId){
     // LO QUE SALIÓ Y NO SE FACTURÓ no está en las tres filas —esas son el
     // comprobante— pero liquidar sin contarlo es liquidar de menos, y el
     // productor se entera después.
+    // ── LO QUE FRENA LA LIQUIDACIÓN ────────────────────────────────
+    //
+    // Pablo, 29/8/2026: «no se debe poder liquidar si la mercadería no está
+    // facturada; hay que esperar a cerrar la facturación. Debemos tener la
+    // descarga por lo menos valorizada. Lo mismo con el flete».
+    //
+    // Antes esto era un aviso al pasar y la liquidación se emitía igual: el
+    // productor cobraba de menos y se enteraba después. Ahora frena, y dice a
+    // qué pantalla ir — un «no se puede» a secas deja al operador sin saber
+    // qué hacer con una partida que igual hay que liquidar.
+    var frenos = [];
     if (Number(r.sin_facturar) > 0.01) {
-      h += '<div style="margin-top:8px;font-size:12px;color:#9a3412">⚠ Además salió '
-        + sgMoney(r.sin_facturar) + ' de mercadería que todavía no se facturó. '
-        + 'No está en los números de arriba.</div>';
+      frenos.push('Salió <b>' + sgMoney(r.sin_facturar) + '</b> de mercadería que todavía '
+        + 'no se facturó. La liquidación se arma con lo que dicen los comprobantes: emitida '
+        + 'así, al productor se le pagaría de menos. Cerrá la facturación en '
+        + '<b>Remitos pendientes de comprobante</b>.');
+    }
+    var sv = r.sin_valorizar || {};
+    if (Number(sv.descarga) > 0) {
+      frenos.push('La <b>descarga</b> está cargada pero sin valorizar: no se sabe cuánto '
+        + 'cobró la cuadrilla, así que no se le puede descontar al productor. Valorizala en '
+        + '<b>Gastos Directos → Cargas y Descargas</b>. Alcanza con el importe; la factura '
+        + 'de la cooperativa puede llegar después.');
+    }
+    if (Number(sv.flete) > 0) {
+      frenos.push('El <b>flete</b> está cargado pero sin valorizar: no se sabe cuánto cobró '
+        + 'el fletero. Valorizalo en <b>Gastos Directos → Fletes de entrada</b>. Alcanza con '
+        + 'el importe; la factura puede llegar después.');
+    }
+    LIQ.frenos = frenos;
+    if (frenos.length) {
+      h += '<div style="margin-top:10px;border:1px solid #fca5a5;background:#fef2f2;'
+        + 'border-radius:8px;padding:10px 12px;font-size:12.5px;color:#991b1b">'
+        + '<b>Esta partida todavía no se puede liquidar</b>'
+        + '<ul style="margin:6px 0 0 18px;padding:0">'
+        + frenos.map(function(f){ return '<li style="margin-bottom:4px">' + f + '</li>'; }).join('')
+        + '</ul></div>';
     }
     // DE QUÉ RENGLONES SALE. Uno por línea facturada de esta partida, con sus
     // pesos: es la única manera de verificar el total sin rehacer la cuenta.
@@ -38018,6 +38051,15 @@ function _liqLeerConc() {
   return out;
 }
 async function liqGuardar() {
+  // LO QUE FRENA, ANTES DE ARMAR NADA. El servidor lo vuelve a mirar —un campo
+  // gris no es un control— pero rebotar acá evita que el operador descubra
+  // después de llenar la pantalla que la partida no se podía liquidar.
+  if ((LIQ.frenos || []).length) {
+    alert('Esta partida todavía no se puede liquidar:' + String.fromCharCode(10,10)
+      + LIQ.frenos.map(function(f){ return '· ' + f.replace(/<[^>]*>/g, ''); })
+          .join(String.fromCharCode(10,10)));
+    return;
+  }
   const body = {
     n_liquidacion:        document.getElementById('liq-numero').value.trim(),
     fecha:                document.getElementById('liq-fecha').value,

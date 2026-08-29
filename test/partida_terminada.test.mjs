@@ -194,8 +194,11 @@ test('sin partida no frena nada: la liquidación suelta sigue existiendo', () =>
 test('el servidor lo frena, y ANTES de mirar el precio', () => {
   // Si la partida no está terminada no importa a qué precio se liquida, y el
   // mensaje que sirve es el de la partida, no el del precio.
-  assert.match(LIQ, /import \{ frenoPartidaSinTerminar \}/);
-  const freno = LIQ.indexOf('frenoPartidaSinTerminar(db, ocIdBody)');
+  // El freno pasó a ser frenoParaLiquidar, que mira ESTO y además la plata sin
+  // cerrar: facturación, descarga y flete. La partida terminada sigue siendo lo
+  // primero que revisa.
+  assert.match(LIQ, /import \{ frenoParaLiquidar \}/);
+  const freno = LIQ.indexOf('frenoParaLiquidar(db, ocIdBody, facturaCuenta)');
   const precio = LIQ.indexOf("String(d.modo_precio || '') !== 'cerrado'");
   assert.ok(freno > 0 && precio > 0);
   assert.ok(freno < precio, 'el freno de partida va antes que el de precio');
