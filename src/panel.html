@@ -16916,6 +16916,12 @@ function sgReclasAnular(loteId, rid){
     + String.fromCharCode(10,10)
     + 'Los cajones vuelven a la partida de origen con su costo. Sólo se puede si de '
     + 'esos bultos todavía no salió nada.' + String.fromCharCode(10,10)
+    // Y LO QUE MÁS IMPORTA, QUE NO SE DECÍA: si a esa mercadería se le había puesto
+    // otro precio —el descuento que el productor reconoció por la segunda—, al
+    // volver al renglón de la primera vuelve al precio de la primera. Es plata, y el
+    // que aprieta tiene que saberlo antes.
+    + 'Y si esos cajones tenían su propio precio en la orden, vuelven al precio del '
+    + 'renglón de origen: lo que se le debe al productor cambia.' + String.fromCharCode(10,10)
     + 'Por qué se deshace:', '');
   if (motivo === null) return;
   if (String(motivo).trim().length < 3) { toast('Escribí por qué se deshace', 'er'); return; }

@@ -380,5 +380,10 @@ export function objetivoCerradoGrupo(db, partes) {
 // Un centavo de tolerancia, el mismo que usa la pantalla.
 export function cierraContraLoAcordado(pagar, obj) {
   if (!obj || !obj.ok) return false;
-  return (obj.admitidos || []).some((x) => Math.abs(r2(pagar) - r2(x)) < 0.01);
+  // UN CENTAVO ES UN CENTAVO: el comentario de arriba dice «un centavo de tolerancia»
+  // y la cuenta pedía MENOS de un centavo. La diferencia importa desde que un renglón
+  // se puede partir en dos: el importe se redondea POR RENGLÓN, así que la misma
+  // mercadería en dos renglones puede dar un centavo distinto que en uno. Rechazar por
+  // eso deja una liquidación correcta sin poder emitirse.
+  return (obj.admitidos || []).some((x) => r2(Math.abs(r2(pagar) - r2(x))) <= 0.01);
 }

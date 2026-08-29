@@ -115,12 +115,13 @@ test('la respuesta es UNA, no una consulta copiada en cada endpoint', () => {
   // y ninguno miraba la liquidación. Una cuarta copia garantizaba que el día que
   // cambiara el criterio, alguna quedara vieja.
   assert.match(SG, /import \{ frenoPrecioFirme, precioFirmeDetalle \} from '\.\.\/servicios\/sg_perfeccionada\.js'/);
-  // Las SIETE puertas por las que se puede cambiar lo que se le va a pagar al
+  // Las NUEVE puertas por las que se puede cambiar lo que se le va a pagar al
   // productor: corregir un lote, completar una orden retroactiva, cerrarle el
   // precio a una de pizarra, editar los precios de la orden, cambiarla de circuito,
   // cambiar las CANTIDADES de la orden —que mueven el total igual que el precio— y
-  // —desde el 29/8/2026— PARTIRLE EL RENGLÓN a una partida, que es el paso previo a
-  // ponerle un precio distinto del de sus hermanas.
+  // las tres del 29/8/2026: partirle el renglón a una partida, separarla por calidad
+  // (que parte el renglón sola) y DESHACER esa separación, que le devuelve la
+  // mercadería al renglón de la primera y con eso el precio viejo.
   //
   // Corregir el lote usa precioFirmeDetalle, que es la MISMA respuesta con los
   // datos del comprobante puestos: la pantalla los necesita para ofrecer el botón
@@ -128,7 +129,7 @@ test('la respuesta es UNA, no una consulta copiada en cada endpoint', () => {
   // perfeccionamientoDeOC(), no de una consulta escrita de nuevo.
   const usos = (SG.match(/frenoPrecioFirme\(db,/g) || []).length
              + (SG.match(/precioFirmeDetalle\(db,/g) || []).length;
-  assert.equal(usos, 7, 'todas las puertas usan la misma función');
+  assert.equal(usos, 9, 'todas las puertas usan la misma función');
   // Y no volvieron las copias que había, cada una con su propio mensaje: son la
   // huella de que alguien volvió a escribir la pregunta en vez de preguntarla.
   assert.doesNotMatch(SG, /Anulá el asiento primero: si se corrigen los kilos/);
