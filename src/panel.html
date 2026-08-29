@@ -881,12 +881,21 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
     <div style="font-weight:700;font-size:12px;text-transform:uppercase;letter-spacing:.04em;color:var(--mut);margin-bottom:8px">
       ⏳ Pendientes de liquidar <span id="liq-part-n" style="font-weight:400;text-transform:none;letter-spacing:0"></span>
     </div>
+    <!-- ── VARIAS PARTIDAS, UNA SOLA LIQUIDACIÓN ────────────────────────
+         Pablo, 29/8/2026: "si un productor o proveedor tiene 2 o más partidas para
+         liquidar debemos poder agruparlas y liquidarlas en una sola liquidación,
+         manteniendo los precios y cantidades de cada partida".
+         La barra aparece recién con dos tildadas, y dice por qué NO se pueden juntar
+         cuando no se pueden: un botón que rebota se lee como que algo se rompió. -->
+    <div id="liq-part-grupo" style="display:none;margin-bottom:10px;border:1px solid #0369a1;
+         background:rgba(3,105,161,.07);border-radius:8px;padding:9px 12px;font-size:12.5px"></div>
     <div class="ab-table-wrap"><table class="pa-tbl">
-      <thead><tr><th>Partida</th><th>Recibida</th><th>Proveedor</th>
+      <thead><tr><th style="width:30px" title="Tildá dos o más partidas del mismo productor para liquidarlas juntas"></th>
+        <th>Partida</th><th>Recibida</th><th>Proveedor</th>
         <th style="text-align:right">Bultos</th><th style="text-align:right">Kg</th>
         <th style="width:190px" title="Bultos vendidos sobre bultos ingresados. A precio abierto se liquida lo que se vendió: con la mitad en el depósito todavía no se sabe cuánto va a rendir.">Vendido</th>
         <th style="text-align:center">Precio</th><th></th></tr></thead>
-      <tbody id="liq-tb-partidas"><tr><td colspan="8" class="emp">Cargando…</td></tr></tbody>
+      <tbody id="liq-tb-partidas"><tr><td colspan="9" class="emp">Cargando…</td></tr></tbody>
     </table></div>
   </div>
 
@@ -1023,17 +1032,13 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
         <div id="liq-merma-box" style="display:none;margin-top:10px;border:1px solid #f59e0b;
              background:rgba(245,158,11,.09);border-radius:8px;padding:10px 12px">
           <div style="font-weight:700;font-size:12.5px;color:#92400e;margin-bottom:2px">
-            Esta partida tiene <span id="liq-merma-cant"></span> de merma. ¿Se le pagan al productor?</div>
-          <div style="font-size:11.5px;color:var(--mut);margin-bottom:7px">
+            ¿Se le pagan al productor las mermas?</div>
+          <div style="font-size:11.5px;color:var(--mut)">
             El precio se cerró por lo que se recibió. Lo que se tiró lo pierde alguien: elegí quién.</div>
-          <label style="display:block;font-size:12.5px;margin-bottom:4px;cursor:pointer">
-            <input type="radio" name="liq-merma-paga" value="1" onchange="liqMermaCambio()">
-            <b>Sí, se los pago igual.</b> La pérdida la absorbe San Gerónimo
-            <span id="liq-merma-si" style="color:var(--mut)"></span></label>
-          <label style="display:block;font-size:12.5px;cursor:pointer">
-            <input type="radio" name="liq-merma-paga" value="0" onchange="liqMermaCambio()">
-            <b>No, sólo lo que quedó sano.</b> La pérdida la absorbe el productor
-            <span id="liq-merma-no" style="color:var(--mut)"></span></label>
+          <!-- UNA PREGUNTA POR PARTIDA. Un grupo no tiene «una» merma: tiene la de cada
+               partida, y se pueden querer resolver distinto. Se arma al abrir y no se
+               vuelve a armar mientras se tipea, o el tilde se perdería en cada tecla. -->
+          <div id="liq-merma-lista"></div>
         </div>
         <!-- PRECIO CERRADO ES PRECIO CERRADO (Pablo, 26/8/2026). El número sale de la
              orden y no se corrige acá — tampoco siendo administrador. Que se vea por
@@ -12527,8 +12532,12 @@ function sgAvanceBarra(vendidos, ingresados, merma){
       + pct + '% · <span style="color:var(--mut);font-weight:400">' + det + '</span></div></div>';
 }
 
-function sgPartFila(p, extra){
+// `antes` es una celda opcional que va PRIMERA. La usa la bandeja de liquidar para
+// el tilde con el que se agrupan partidas; la de facturar no la manda y su tabla
+// queda igual que siempre.
+function sgPartFila(p, extra, antes){
   return '<tr>'
+    + (antes || '')
     + '<td><code>' + esc(p.trazabilidad || p.numero || '—') + '</code></td>'
     + '<td>' + esc(p.fecha_recepcion || p.fecha_oc || '—') + '</td>'
     + '<td>' + esc(p.proveedor_nombre || '—') + '</td>'
@@ -12598,6 +12607,16 @@ function sgLiqPartidasLoad(){
       // El precio es un DATO de la partida, no el motivo por el que está acá:
       // una compra a Precio Cerrado que se documenta con liquidación llega con
       // el precio puesto y también espera su liquidación.
+      // SÓLO LAS QUE YA SE PUEDEN LIQUIDAR. Tildar una que todavía tiene mercadería en
+      // el depósito armaría un grupo que el servidor va a rechazar entero, y el que lo
+      // arma no sabría cuál de las tres fue.
+      var ck = sgPartTerminada(p)
+        ? '<td style="text-align:center"><input type="checkbox" class="liq-part-ck" value="' + p.id + '"'
+          + ' data-prov="' + esc(p.proveedor_nombre || '') + '"'
+          + ' data-modo="' + (p.tipo_precio === 'pizarra' ? 'abierto' : 'cerrado') + '"'
+          + ' data-cod="' + esc(p.trazabilidad || '') + '"'
+          + ' onchange="sgLiqSelCambio()" title="Liquidar junto con otras del mismo productor"></td>'
+        : '<td></td>';
       return sgPartFila(p,
         '<td>' + sgAvanceBarra(p.bultos_vendidos, p.bultos_recibidos, p.bultos_merma) + '</td>'
         + '<td style="text-align:center">'
@@ -12634,11 +12653,59 @@ function sgLiqPartidasLoad(){
               ? ' <button class="btn bo bs" title="Ya se liquidó y no hace falta cargarla acá"'
                 + ' onclick="sgLiqYaEsta(' + p.id + ',\'' + esc(p.trazabilidad || '') + '\')">✔</button>'
               : '')
-        + '</td>');
-    }).join('') : '<tr><td colspan="8" class="emp">No hay partidas esperando liquidación. '
+        + '</td>', ck);
+    }).join('') : '<tr><td colspan="9" class="emp">No hay partidas esperando liquidación. '
         + 'Las que se documentan con liquidación aparecen acá apenas se reciben, '
         + 'y salen cuando se les carga la liquidación.</td></tr>';
+    sgLiqSelCambio();
   });
+}
+
+// ══ AGRUPAR PARTIDAS ══════════════════════════════════════════════════════
+//
+// Pablo, 29/8/2026: «si un productor o proveedor tiene 2 o más partidas para liquidar
+// debemos poder agruparlas y liquidarlas en una sola liquidación, manteniendo los
+// precios y cantidades de cada partida. Lo fiscal y lo de gestión se debe mantener…
+// simplemente que sumen los montos».
+function sgLiqSel(){
+  return Array.prototype.slice.call(document.querySelectorAll('.liq-part-ck'))
+    .filter(function(x){ return x.checked; })
+    .map(function(x){ return { id: Number(x.value), prov: x.getAttribute('data-prov'),
+      modo: x.getAttribute('data-modo'), cod: x.getAttribute('data-cod') }; });
+}
+function sgLiqSelCambio(){
+  var bar = eid('liq-part-grupo'); if (!bar) return;
+  var s = sgLiqSel();
+  if (s.length < 2) { bar.style.display = 'none'; bar.innerHTML = ''; return; }
+  bar.style.display = '';
+  var provs = {}, modos = {};
+  s.forEach(function(x){ provs[x.prov] = 1; modos[x.modo] = 1; });
+  var nProv = Object.keys(provs).length, nModo = Object.keys(modos).length;
+  // LO QUE NO SE PUEDE JUNTAR SE DICE ACÁ, no con un error después de armar todo. El
+  // servidor lo rechaza igual; esto es para que no se llegue hasta allá.
+  if (nProv > 1) {
+    bar.innerHTML = '<span style="color:var(--err)"><b>No se pueden juntar.</b> Son de '
+      + nProv + ' productores distintos, y la liquidación se emite a nombre de uno solo.</span>';
+    return;
+  }
+  if (nModo > 1) {
+    bar.innerHTML = '<span style="color:var(--err)"><b>No se pueden juntar.</b> Hay partidas a '
+      + 'precio abierto y a precio cerrado: una se liquida por lo que rindió y la otra por lo '
+      + 'pactado. Van en liquidaciones separadas.</span>';
+    return;
+  }
+  bar.innerHTML = '<b>' + s.length + ' partidas</b> de ' + escH(s[0].prov || '—')
+    + ' <button class="btn bb bs" style="margin-left:8px" onclick="sgLiqGrupo()">💲 Liquidar las '
+    + s.length + ' juntas</button>'
+    + '<div style="color:var(--mut);font-size:11.5px;margin-top:4px">Cada partida entra con SUS '
+    + 'precios y SUS cantidades —el comprobante las lista una por una— y los montos se suman. '
+    + 'Lo fiscal y lo de gestión de cada una se mantienen.</div>';
+}
+function sgLiqGrupo(){
+  var s = sgLiqSel();
+  if (s.length < 2) return;
+  liqDeGrupo(s.map(function(x){ return x.id; }),
+    s.map(function(x){ return x.cod; }).join(' + '), s[0].prov);
 }
 
 // Dar una partida por liquidada sin cargarle la liquidación acá. Es para la que
@@ -12669,14 +12736,20 @@ function sgLiqYaEsta(ocId, partida){
 // Y arriba, los dos datos que se ingresan: bultos ingresados (viene puesto,
 // sale de lo que se recibió) y bultos a liquidar, que es lo que el que liquida
 // decide — no siempre se liquida todo de una.
-function liqVentaCab(ocId){
+// `mas` son las OTRAS partidas del grupo. Van por la MISMA dirección que la de una
+// sola —el permiso se resuelve mirando la URL— y el servidor devuelve la suma con el
+// detalle de cada una.
+function liqVentaCab(ocId, mas){
   var c = eid('liq-venta-cab'); if (!c) return;
   c.style.display = '';
-  c.innerHTML = '<div style="font-size:12px;color:var(--mut)">Buscando lo que vendió esta partida…</div>';
-  api('/api/sg/partidas/' + ocId + '/venta').then(function(r){
+  var varias = (mas && mas.length);
+  c.innerHTML = '<div style="font-size:12px;color:var(--mut)">Buscando lo que vendieron '
+    + (varias ? 'estas partidas' : 'esta partida') + '…</div>';
+  api('/api/sg/partidas/' + ocId + '/venta' + (varias ? '?mas=' + mas.join(',') : '')).then(function(r){
     c = eid('liq-venta-cab'); if (!c) return;
     if (!r || !r.ok) {
-      c.innerHTML = '<div style="font-size:12px;color:var(--err)">No se pudo leer la venta de la partida.</div>';
+      c.innerHTML = '<div style="font-size:12px;color:var(--err)">'
+        + escH((r && r.error) || 'No se pudo leer la venta de la partida.') + '</div>';
       return;
     }
     LIQ.venta = r;
@@ -12998,7 +13071,8 @@ function liqDesdePartida(r){
         // LO QUE SE TIRÓ VIENE COMO UN RENGLÓN MÁS, A $0 (Pablo, 29/8/2026: «no
         // podemos dejar cantidades abiertas… deben figurar como X cantidad de bultos
         // mermados multiplicados por $0 de venta»). Los renglones suman lo que entró.
-        es_merma: a.es_merma ? 1 : 0 };
+        es_merma: a.es_merma ? 1 : 0,
+        oc_id: (a.oc_id != null) ? a.oc_id : ((LIQ.partida && LIQ.partida.oc_id) || '') };
     }));
   }
   // Y las mermas, con su motivo: el productor cobra por lo que se vendió y tiene
@@ -13009,8 +13083,12 @@ function liqDesdePartida(r){
     // comprobante mostraba 56 arriba y 90 abajo sin que ninguna columna dijera de
     // qué estaba hablando. La orden manda para las dos cosas.
     var enBultos = (r.unidad === 'bulto');
+    // Y DE QUÉ PARTIDA, cuando son varias: en un comprobante con dos camiones, dos
+    // mermas del mismo producto son dos renglones idénticos que nadie puede ubicar.
+    var variasP = ((r.partidas || []).length > 1);
     liqRenderMermas(r.mermas.map(function(m){
-      return { descripcion: (m.producto ? m.producto + ' — ' : '') + (m.motivo || 'merma'),
+      return { descripcion: (m.producto ? m.producto + ' — ' : '') + (m.motivo || 'merma')
+          + (variasP && m.partida ? ' · ' + m.partida : ''),
         cantidad: enBultos ? m.bultos : m.kg, fecha: m.fecha, tipo: 'merma' };
     }));
   }
@@ -13229,7 +13307,7 @@ function liqDePartida(ocId, partida, proveedor){
   // DESPUÉS de abrir: liqAbrirNueva limpia la partida para el caso del botón
   // suelto, así que si se asignara antes se perdería y la liquidación no
   // quedaría vinculada a la partida (y la bandeja no se vaciaría nunca).
-  LIQ.partida = { oc_id: ocId, codigo: partida, proveedor: proveedor };
+  LIQ.partida = { oc_id: ocId, oc_ids: [ocId], codigo: partida, proveedor: proveedor };
   var cab = eid('liq-partida-cab');
   if (cab) {
     cab.style.display = '';
@@ -13237,6 +13315,30 @@ function liqDePartida(ocId, partida, proveedor){
       + (proveedor ? ' · ' + escH(proveedor) : '');
   }
   liqVentaCab(ocId);
+}
+
+// ══ VARIAS PARTIDAS EN UNA SOLA LIQUIDACIÓN ══════════════════════════════
+//
+// Pablo, 29/8/2026: «si un productor o proveedor tiene 2 o más partidas para liquidar
+// debemos poder agruparlas y liquidarlas en una sola liquidación, manteniendo los
+// precios y cantidades de cada partida».
+//
+// Es el MISMO modal: lo único que cambia es que la venta viene de varias partidas
+// sumadas, con los renglones de cada una. Un modal aparte para el grupo serían dos
+// pantallas que hacen lo mismo y que hay que arreglar de a dos.
+function liqDeGrupo(ocIds, codigos, proveedor){
+  if (!ocIds || ocIds.length < 2) return;
+  liqAbrirNueva();
+  LIQ.partida = { oc_id: ocIds[0], oc_ids: ocIds.slice(), codigo: codigos, proveedor: proveedor };
+  var cab = eid('liq-partida-cab');
+  if (cab) {
+    cab.style.display = '';
+    cab.innerHTML = '🍅 Liquidando <b>' + ocIds.length + ' partidas</b>'
+      + (proveedor ? ' de ' + escH(proveedor) : '')
+      + '<div style="font-size:11.5px;color:var(--mut)"><code>' + escH(codigos) + '</code>'
+      + ' — cada una entra con sus precios y sus cantidades; los montos se suman.</div>';
+  }
+  liqVentaCab(ocIds[0], ocIds.slice(1));
 }
 
 function sgFmSub(){ /* una sola solapa por ahora; existe para que el patrón no cambie después */ }
@@ -37055,9 +37157,7 @@ function liqRellenarForm() {
   if ((_e = eid('liq-cerr-cant-hint'))) _e.innerHTML = '';
   // La respuesta de la merma NO se hereda de la liquidación anterior: es una
   // decisión de esta partida, y arrastrarla sería contestarla por omisión.
-  Array.prototype.forEach.call(
-    document.querySelectorAll('input[name="liq-merma-paga"]'),
-    function(x){ x.checked = false; });
+  if ((_e = eid('liq-merma-lista'))) _e.innerHTML = '';
   if ((_e = eid('liq-merma-box'))) _e.style.display = 'none';
   if ((_e = eid('liq-grilla-body')))    _e.innerHTML = '';
   liqGrillaPintar();
@@ -37323,38 +37423,57 @@ function liqArtSync(){
   // liqNum() y no parseFloat: el campo lleva separador de miles y "25.000" leído
   // crudo da 25.
   var pre  = liqNum(eid('liq-cerr-precio'));
-  // CON UN SOLO PRODUCTO. Si la partida trae dos, los bultos de arriba son el
-  // TOTAL y meterlos en el primer renglón le adjudica a un producto lo que
-  // entró de los dos: el papel donde el productor cobra sale mal. Con varios,
-  // cada renglón ya viene con lo suyo desde la partida y no hay nada que
-  // sincronizar.
+  // SE HACE PARTIDA POR PARTIDA. Pablo, 29/8/2026: agrupar «manteniendo los precios y
+  // cantidades DE CADA PARTIDA». Los bultos y el precio de arriba son los del grupo:
+  // meterle a un camión lo que se pactó con el otro es exactamente lo que el pedido
+  // dice que no hay que hacer.
   //
   // Y LA MERMA TIENE SU PROPIO RENGLÓN, así que sale del renglón del producto: los
-  // bultos de arriba son los que ENTRARON, y si cinco se tiraron el producto vendió
-  // los otros cincuenta y cinco. Metérselos todos Y dejar además la línea de merma
-  // haría que el comprobante sume más de lo que entró.
+  // bultos son los que ENTRARON, y si cinco se tiraron el producto vendió los otros
+  // cincuenta y cinco. Metérselos todos Y dejar además la línea de merma haría que el
+  // comprobante sume más de lo que entró.
   var esM = function(a){ return String(a.es_merma || '') === '1'; };
-  var reales = arts.filter(function(a){ return !esM(a); });
-  var mers = arts.filter(esM);
-  var cantM = mers.reduce(function(t, a){ return t + (Number(a.cantidad) || 0); }, 0);
-  if (reales.length === 1) {
-    if (cant > 0) reales[0].cantidad = Math.round((cant - cantM) * 100) / 100;
-    if (pre > 0)  reales[0].precio = pre;
-    if (reales[0].cantidad > 0 && reales[0].precio > 0) {
-      reales[0].importe = Math.round(reales[0].cantidad * reales[0].precio * 100) / 100;
+  var ps = liqPartidasVenta();
+  var una = (ps.length === 1);
+  var m2a = function(x){ return Math.round((Number(x) || 0) * 100) / 100; };
+  ps.forEach(function(p){
+    var mios = arts.filter(function(a){ return Number(a.oc_id) === Number(p.oc_id); });
+    if (!mios.length) return;
+    var reales = mios.filter(function(a){ return !esM(a); });
+    var mers = mios.filter(esM);
+    var cantM = mers.reduce(function(t, a){ return t + (Number(a.cantidad) || 0); }, 0);
+    // Con UNA partida manda lo que se tipeó arriba —es el campo que el operador tiene
+    // delante—; con varias, cada una trae lo suyo de su orden.
+    var pu = una ? (pre > 0 ? pre : (Number(p.precio_por_bulto) || 0))
+                 : (Number(p.precio_por_bulto) || 0);
+    var ing = una ? (cant > 0 ? cant : (Number(p.bultos_ingresados) || 0))
+                  : (Number(p.bultos_ingresados) || 0);
+    // CON UN SOLO PRODUCTO. Si la partida trae dos, sus bultos son el TOTAL y
+    // metérselos al primer renglón le adjudica a un producto lo que entró de los dos:
+    // el papel donde el productor cobra sale mal. Con varios, cada renglón ya viene
+    // con lo suyo desde la partida y no hay nada que sincronizar.
+    if (reales.length === 1) {
+      if (ing > 0) reales[0].cantidad = m2a(ing - cantM);
+      if (pu > 0)  reales[0].precio = pu;
+      if (reales[0].cantidad > 0 && reales[0].precio > 0) {
+        reales[0].importe = m2a(reales[0].cantidad * reales[0].precio);
+      }
     }
-  }
-  // ── Y SU PRECIO ES LA RESPUESTA A LA PREGUNTA ─────────────────────────
-  //
-  // Pablo, 29/8/2026: las mermas «deben figurar como X cantidad de bultos mermados
-  // multiplicados por $0 de venta». Ése es el caso normal. A precio cerrado, si se
-  // decide pagárselas igual, el renglón toma el precio acordado — que es
-  // exactamente lo que significa «la pérdida la absorbe San Gerónimo»: se le paga
-  // mercadería que se tiró, y el papel lo dice.
-  var pagaM = (liqMermaPaga() === true);
-  mers.forEach(function(a){
-    a.precio  = (pagaM && pre > 0) ? pre : 0;
-    a.importe = Math.round((Number(a.cantidad) || 0) * a.precio * 100) / 100;
+    // ── Y EL PRECIO DE LA MERMA ES LA RESPUESTA A LA PREGUNTA ───────────
+    //
+    // Pablo, 29/8/2026: las mermas «deben figurar como X cantidad de bultos mermados
+    // multiplicados por $0 de venta». Ése es el caso normal. A precio cerrado, si se
+    // decide pagárselas igual, el renglón toma el precio acordado — que es
+    // exactamente lo que significa «la pérdida la absorbe San Gerónimo»: se le paga
+    // mercadería que se tiró, y el papel lo dice.
+    //
+    // Y AL PRECIO DE SU PARTIDA: en un grupo, la merma de un camión no se paga al
+    // precio del otro.
+    var paga = (liqMermaPagaDe(p.oc_id) === true);
+    mers.forEach(function(a){
+      a.precio  = (paga && pu > 0) ? pu : 0;
+      a.importe = m2a((Number(a.cantidad) || 0) * a.precio);
+    });
   });
   liqRenderArt(arts);
 }
@@ -37367,37 +37486,84 @@ function liqArtSync(){
 // TRES ESTADOS, NO DOS. `null` no es «no»: es que todavía no se contestó. Sin esa
 // distinción, abrir la pantalla y guardar sin mirar equivale a decidir que la
 // pérdida la absorbe el productor, en silencio y por omisión.
-function liqMermaPaga(){
-  var e = document.querySelector('input[name="liq-merma-paga"]:checked');
-  return e ? (e.value === '1') : null;
+// LAS PARTIDAS DE ESTA LIQUIDACIÓN, siempre como lista. Cuando es una sola el
+// endpoint no manda `partidas` —es la respuesta de siempre— y se arma acá: el caso
+// de una es el grupo de una, no un camino aparte que haya que mantener en paralelo.
+function liqPartidasVenta(){
+  var v = (LIQ && LIQ.venta) || {};
+  if (v.partidas && v.partidas.length) return v.partidas;
+  if (!v.partida) return [];
+  var ac = v.acordado || {};
+  return [{ oc_id: (LIQ.partida && LIQ.partida.oc_id) || 0, partida: v.partida,
+    unidad: v.unidad, bultos_ingresados: v.bultos_ingresados,
+    bultos_merma: v.bultos_merma, kg_merma: v.kg_merma,
+    acordado_total: ac.total, acordado_sin_mermas: ac.total_sin_mermas,
+    precio_por_bulto: ac.precio_por_bulto }];
 }
+function liqUniDe(p){ return (p && p.unidad === 'bulto') ? 'bultos' : 'kg'; }
 // Cuánto se mermó, en la unidad en que se liquida. Si la orden se pactó por cajón
 // se cuentan cajones; si la mercadería entró pesada, kilos.
+function liqMermaCantDe(p){
+  if (!p) return 0;
+  return (p.unidad === 'bulto') ? (Number(p.bultos_merma) || 0) : (Number(p.kg_merma) || 0);
+}
+// TRES ESTADOS, NO DOS. `null` no es «no»: es que todavía no se contestó. Sin esa
+// distinción, abrir la pantalla y guardar sin mirar equivale a decidir que la
+// pérdida la absorbe el productor, en silencio y por omisión.
+function liqMermaPagaDe(ocId){
+  var e = document.querySelector('input[name="liq-merma-paga-' + ocId + '"]:checked');
+  return e ? (e.value === '1') : null;
+}
+// Las partidas que tienen merma y todavía nadie contestó.
+function liqMermaPendientes(){
+  return liqPartidasVenta().filter(function(p){
+    return liqMermaCantDe(p) > 0 && liqMermaPagaDe(p.oc_id) === null;
+  });
+}
+// El total mermado del grupo, para los carteles.
 function liqMermaCant(){
-  var v = (LIQ && LIQ.venta) || {};
-  return (v.unidad === 'bulto') ? (Number(v.bultos_merma) || 0) : (Number(v.kg_merma) || 0);
+  return liqPartidasVenta().reduce(function(a, p){ return a + liqMermaCantDe(p); }, 0);
 }
 function liqMermaUni(){
-  return ((LIQ && LIQ.venta) || {}).unidad === 'bulto' ? 'bultos' : 'kg';
+  var ps = liqPartidasVenta();
+  return (ps.length && ps[0].unidad === 'bulto') ? 'bultos' : 'kg';
 }
 // Sin redondear a entero: en kilos, «0,4» no es «0».
 function liqCant(x){
   return Number(x || 0).toLocaleString('es-AR', { maximumFractionDigits: 2 });
 }
+// SE ARMA UNA VEZ, al abrir la partida y al cambiar el modo. NO en cada tecla:
+// reconstruir el HTML mientras se tipea el precio borraría el tilde recién puesto.
 function liqMermaPintar(){
-  var box = eid('liq-merma-box'); if (!box) return;
-  var v = (LIQ && LIQ.venta) || {}, ac = v.acordado || {};
-  var hay = liqMermaCant() > 0 && liqModo() === 'cerrado';
+  var box = eid('liq-merma-box'), cont = eid('liq-merma-lista');
+  if (!box || !cont) return;
+  var con = liqPartidasVenta().filter(function(p){ return liqMermaCantDe(p) > 0; });
+  var hay = con.length > 0 && liqModo() === 'cerrado';
   box.style.display = hay ? '' : 'none';
-  if (!hay) return;
-  var e = eid('liq-merma-cant');
-  if (e) e.textContent = liqCant(liqMermaCant()) + ' ' + liqMermaUni();
+  if (!hay) { cont.innerHTML = ''; return; }
+  var varias = liqPartidasVenta().length > 1;
   // LOS DOS NÚMEROS, AL LADO DE SU OPCIÓN. La pregunta sin los importes obliga a
   // elegir a ciegas y después mirar el total para ver qué se eligió.
-  var si = eid('liq-merma-si'), no = eid('liq-merma-no');
-  if (si) si.innerHTML = Number(ac.total) ? ' · cobra <b>' + sgMoney(ac.total) + '</b>' : '';
-  if (no) no.innerHTML = (ac.total_sin_mermas != null)
-    ? ' · cobra <b>' + sgMoney(ac.total_sin_mermas) + '</b>' : '';
+  cont.innerHTML = con.map(function(p){
+    var n = 'liq-merma-paga-' + p.oc_id;
+    return '<div style="border-top:1px solid rgba(146,64,14,.22);margin-top:7px;padding-top:6px">'
+      + (varias ? '<div style="font-size:12px;font-weight:700;color:#92400e">Partida '
+                  + escH(p.partida || '') + '</div>' : '')
+      + '<div style="font-size:11.5px;color:#92400e;margin-bottom:3px">'
+      + liqCant(liqMermaCantDe(p)) + ' ' + liqUniDe(p) + ' de merma</div>'
+      + '<label style="display:block;font-size:12.5px;margin-bottom:3px;cursor:pointer">'
+      + '<input type="radio" name="' + n + '" value="1" onchange="liqMermaCambio()"> '
+      + '<b>Sí, se los pago igual.</b> La pérdida la absorbe San Gerónimo'
+      + (Number(p.acordado_total)
+          ? ' <span style="color:var(--mut)">· cobra <b>' + sgMoney(p.acordado_total) + '</b></span>' : '')
+      + '</label>'
+      + '<label style="display:block;font-size:12.5px;cursor:pointer">'
+      + '<input type="radio" name="' + n + '" value="0" onchange="liqMermaCambio()"> '
+      + '<b>No, sólo lo que quedó sano.</b> La pérdida la absorbe el productor'
+      + (p.acordado_sin_mermas != null
+          ? ' <span style="color:var(--mut)">· cobra <b>' + sgMoney(p.acordado_sin_mermas) + '</b></span>' : '')
+      + '</label></div>';
+  }).join('');
 }
 // La respuesta mueve el objetivo Y el renglón de la merma: los dos tienen que
 // contar la misma historia o el papel dice una cosa y el total otra.
@@ -37441,27 +37607,44 @@ function liqCerradoResolver(){
   // Se pactó un precio por lo que se recibió. Si cinco cajones se tiraron, ese
   // precio se paga igual —lo pierde San Gerónimo— o no se paga —lo pierde el
   // productor—. Son dos liquidaciones distintas y la pantalla no elige.
-  var mCant = liqMermaCant(), mPaga = liqMermaPaga();
-  liqMermaPintar();
-  if (mCant > 0 && mPaga === null) {
+  var mCant = liqMermaCant();
+  var pend = liqMermaPendientes();
+  if (pend.length) {
     if (tot) tot.textContent = '—';
     LIQ.cerrado = LIQ.cerrado || {};
     LIQ.cerrado.objetivo = 0;
     out.innerHTML = '<span style="color:#9a3412"><b>Falta decidir la merma.</b> '
-      + 'Decí ahí arriba si esos ' + liqCant(mCant) + ' ' + liqMermaUni()
-      + ' se le pagan al productor o no: son dos importes distintos.</span>';
+      + (pend.length > 1
+          ? 'Hay ' + pend.length + ' partidas con merma sin contestar. '
+          : 'Decí ahí arriba si esos ' + liqCant(liqMermaCantDe(pend[0])) + ' '
+            + liqUniDe(pend[0]) + ' ')
+      + 'se le pagan al productor o no: son dos importes distintos.</span>';
     liqTotales();
     return;
   }
-  if (mCant > 0 && mPaga === false) {
-    // LO QUE QUEDÓ SANO, AL PRECIO DE LA ORDEN. El total sin mermas lo calcula el
-    // servidor ítem por ítem y a su propio precio —cinco cajones de ciruela no
-    // valen el promedio del camión—, así que se usa ése cuando se liquida entera.
-    base = (_entera && ac.total_sin_mermas != null)
-      ? m2(ac.total_sin_mermas)
-      : m2(liqNum(pre) * Math.max(0, _cant - mCant));
-  } else if (Number(ac.total) && _entera) {
-    base = m2(ac.total);
+  // ── EL OBJETIVO ES LA SUMA DE LO PACTADO EN CADA PARTIDA ──────────────
+  //
+  // Pablo, 29/8/2026: agrupar «manteniendo los precios y cantidades de cada
+  // partida… simplemente que sumen los montos». Cada una entra con SU total
+  // acordado, y con SU respuesta sobre la merma: el grupo no tiene una merma.
+  //
+  // El total sin mermas lo calcula el servidor ítem por ítem y a su propio precio
+  // —cinco cajones de ciruela no valen el promedio del camión—, así que se usa ése.
+  var ps = liqPartidasVenta();
+  var sumaAc = 0, hayAc = false, mNoPaga = 0;
+  ps.forEach(function(p){
+    var mc = liqMermaCantDe(p);
+    var paga = mc > 0 ? liqMermaPagaDe(p.oc_id) : true;
+    if (mc > 0 && paga === false) mNoPaga += mc;
+    if (p.acordado_total == null) return;
+    hayAc = true;
+    sumaAc += Number((paga === false && p.acordado_sin_mermas != null)
+      ? p.acordado_sin_mermas : p.acordado_total) || 0;
+  });
+  if (hayAc && _entera) {
+    base = m2(sumaAc);
+  } else if (mNoPaga > 0) {
+    base = m2(liqNum(pre) * Math.max(0, _cant - mNoPaga));
   }
   var T = conIva ? base : m2(base * (1 + alicAc / 100));
   if (tot) tot.textContent = T ? liqPlata(T) : '—';
@@ -37534,7 +37717,7 @@ function liqCerradoResolver(){
     // no se vendió, que es exactamente lo que significa absorberla.
     out.innerHTML = '<span style="color:var(--err)"><b>No cierra.</b> Para pagarle ' + liqPlata(T)
       + ' habría que poner ' + liqPlata(-(p * den)) + ', no cobrar comisión. '
-      + ((mCant > 0 && mPaga === true)
+      + ((mCant > 0 && mNoPaga < mCant)
           ? 'Es lo que cuesta absorber la merma: se le está pagando ' + liqCant(mCant) + ' '
             + liqMermaUni() + ' que no se vendieron. Si no se los absorbe, elegí la otra '
             + 'opción ahí arriba.'
@@ -38091,6 +38274,9 @@ function liqRenderArt(arts) {
       // la merma en un producto más y el despeje del precio cerrado le mete encima la
       // cantidad y el precio del producto.
       '<input data-k="es_merma" type="hidden" value="'+(a.es_merma ? '1' : '')+'">' +
+      // Y DE QUÉ PARTIDA ES. En una liquidación agrupada hay renglones de varias, con
+      // precios distintos: sin esto, la merma de un camión se pagaría al precio del otro.
+      '<input data-k="oc_id" type="hidden" value="'+_liqEsc(a.oc_id == null ? '' : a.oc_id)+'">' +
       // EL PRODUCTO ES EL QUE SE COMPRÓ. Pablo, 29/8/2026: «no está bien que me
       // deje editar artículos, ya que ellos vienen con la partida». Cambiar el
       // nombre acá dejaba el papel donde el productor cobra diciendo un producto
@@ -38250,9 +38436,22 @@ async function liqGuardar() {
     // ¿Se le pagó la merma? 1 sí, 0 no, null si la partida no tuvo. Va guardado:
     // dos liquidaciones de partidas iguales por plata distinta no se explican solas
     // seis meses después.
-    merma_liquidada:      (function(){ var p = liqMermaPaga();
-                            return (liqModo() === 'cerrado' && liqMermaCant() > 0 && p !== null)
-                              ? (p ? 1 : 0) : null; })(),
+    merma_liquidada:      (function(){ var ps = liqPartidasVenta();
+                            if (ps.length !== 1 || liqModo() !== 'cerrado') return null;
+                            var x = liqMermaPagaDe(ps[0].oc_id);
+                            return (liqMermaCantDe(ps[0]) > 0 && x !== null) ? (x ? 1 : 0) : null; })(),
+    // ── DE QUÉ PARTIDAS ES ────────────────────────────────────
+    // Una fila por partida, con lo suyo: cuántos bultos y si se le paga la merma.
+    // Con una sola partida es una lista de una — el caso simple no es un camino
+    // aparte, o el día que cambie una cosa habría que acordarse de tocar las dos.
+    partidas:             liqPartidasVenta().map(function(p){
+                            var x = liqMermaPagaDe(p.oc_id);
+                            return { oc_id: p.oc_id,
+                              bultos_liquidados: (p.bultos_ingresados != null)
+                                ? p.bultos_ingresados : null,
+                              merma_liquidada: (liqModo() === 'cerrado'
+                                && liqMermaCantDe(p) > 0 && x !== null) ? (x ? 1 : 0) : null };
+                          }),
     texto_original:       (LIQ.datos && LIQ.datos._textoOriginal) || '',
     // De qué partida es. Sólo viaja si la liquidación se abrió desde la bandeja;
     // es lo que después saca a la partida de "pendientes de liquidar".
@@ -38266,8 +38465,13 @@ async function liqGuardar() {
   // operador armaba la liquidación entera y se enteraba recién al guardar.
   // Y TAMPOCO SI FALTA DECIDIR LA MERMA. El servidor lo frena igual, pero el que
   // arma la liquidación tiene que enterarse acá, con el número a la vista.
-  if (liqModo() === 'cerrado' && liqMermaCant() > 0 && liqMermaPaga() === null) {
-    alert('Esta partida tiene ' + liqCant(liqMermaCant()) + ' ' + liqMermaUni() + ' de merma.'
+  if (liqModo() === 'cerrado' && liqMermaPendientes().length) {
+    var _p = liqMermaPendientes();
+    alert((_p.length > 1
+        ? 'Hay ' + _p.length + ' partidas con merma sin contestar: '
+          + _p.map(function(x){ return x.partida; }).join(', ') + '.'
+        : 'Esta partida tiene ' + liqCant(liqMermaCantDe(_p[0])) + ' ' + liqUniDe(_p[0])
+          + ' de merma.')
       + String.fromCharCode(10, 10)
       + 'Antes de emitir hay que decir si esa merma se le paga al productor —la pérdida '
       + 'la absorbe San Gerónimo— o no se le paga —la absorbe él—: son dos importes '
@@ -38294,6 +38498,10 @@ async function liqGuardar() {
     if (!r.ok) throw new Error(data.error || 'Error '+r.status);
     document.getElementById('liq-modal').classList.remove('on');
     liqCargar();
+    // Y LA BANDEJA DE PARTIDAS. Las que se acaban de liquidar tienen que salir de
+    // ahí; liquidando varias juntas quedaban las tres a la vista y alguien las
+    // volvía a liquidar.
+    if (typeof sgLiqPartidasLoad === 'function') sgLiqPartidasLoad();
     // Abrir el PDF generado
     window.open('/api/liquidaciones/'+data.id+'/pdf', '_blank');
   } catch(e) { alert('Error: ' + e.message); }

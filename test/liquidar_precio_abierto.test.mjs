@@ -69,7 +69,9 @@ test('el servidor sigue frenando la partida CERRADA liquidada a precio abierto',
   // Destrabar la pantalla no puede abrir la puerta que el servidor cuida: la
   // condición se pactó en la orden, y liquidar a precio abierto una partida firme
   // es pagarle al productor otra cosa de la que se acordó.
-  assert.match(LIQ, /if \(ocIdBody && String\(d\.modo_precio \|\| ''\) !== 'cerrado'\) \{/);
+  // Y por CADA partida del grupo: una firme entre varias abiertas no puede pasar.
+  assert.match(LIQ, /if \(String\(d\.modo_precio \|\| ''\) !== 'cerrado'\) \{/);
+  assert.match(LIQ, /for \(const p of partidas\) \{[\s\S]{0,220}SELECT tipo_precio FROM sg_oc WHERE id = \?'\)\.get\(p\.oc_id\)/);
   assert.match(LIQ, /oc\.tipo_precio !== 'pizarra'/);
   assert.match(LIQ, /no se puede liquidar a precio abierto/);
 });

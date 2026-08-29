@@ -123,8 +123,9 @@ test('una partida sin gastos cargados no frena por eso', () => {
 
 test('el POST usa el freno nuevo, antes de mirar el precio', () => {
   assert.match(LIQ, /import \{ frenoParaLiquidar \}/);
-  assert.match(LIQ, /const frena = frenoParaLiquidar\(db, ocIdBody, facturaCuenta\);/);
-  const freno = LIQ.indexOf('frenoParaLiquidar(db, ocIdBody, facturaCuenta)');
+  // POR CADA PARTIDA: agrupar no puede ser la forma de colar la que no estaba lista.
+  assert.match(LIQ, /for \(const p of partidas\) \{\r?\n\s*const frena = frenoParaLiquidar\(db, p\.oc_id, facturaCuenta\);/);
+  const freno = LIQ.indexOf('frenoParaLiquidar(db, p.oc_id, facturaCuenta)');
   const precio = LIQ.indexOf("String(d.modo_precio || '') !== 'cerrado'");
   assert.ok(freno > 0 && precio > freno, 'el freno va antes que el control de precio');
 });

@@ -61,10 +61,12 @@ test('pero NO le mete a un producto los bultos de toda la partida', () => {
   // renglón le adjudica a uno lo que entró de los dos, y el papel donde el
   // productor cobra sale mal.
   //
-  // Se cuentan los renglones REALES —los de merma no son productos vendidos—, si no
-  // una partida de un solo producto con merma dejaba de sincronizarse.
-  const b = cuerpo('function liqArtSync(){', 2600);
-  assert.match(b, /var reales = arts\.filter\(function\(a\)\{ return !esM\(a\); \}\);/);
+  // Se cuentan los renglones REALES DE ESA PARTIDA —los de merma no son productos
+  // vendidos, y en un grupo los de otro camión tampoco—, si no una partida de un solo
+  // producto con merma dejaba de sincronizarse.
+  const b = cuerpo('function liqArtSync(){', 3600);
+  assert.match(b, /var mios = arts\.filter\(function\(a\)\{ return Number\(a\.oc_id\) === Number\(p\.oc_id\); \}\);/);
+  assert.match(b, /var reales = mios\.filter\(function\(a\)\{ return !esM\(a\); \}\);/);
   assert.match(b, /if \(reales\.length === 1\) \{/);
 });
 

@@ -2957,11 +2957,27 @@ router.post('/oc', requireAuth, (req, res) => {
 // módulo de Abasto, así que si por orden de carga todavía no existe se sigue sin
 // ella en vez de romper la pantalla entera.
 function partidasConLiquidacion(db) {
+  const con = new Set();
   try {
-    return new Set(db.prepare(
+    for (const r of db.prepare(
       'SELECT DISTINCT oc_id FROM liquidaciones WHERE oc_id IS NOT NULL AND eliminado_en IS NULL')
-      .all().map((r) => Number(r.oc_id)));
+      .all()) con.add(Number(r.oc_id));
   } catch (_) { return new Set(); }
+  // ── Y LAS QUE SE LIQUIDARON AGRUPADAS ─────────────────────────
+  //
+  // La columna oc_id guarda sólo la PRIMERA del grupo. Sin esto, liquidar tres
+  // partidas juntas sacaba de la bandeja a una y dejaba las otras dos esperando una
+  // liquidación que ya se emitió — y alguien se la volvería a hacer.
+  //
+  // Aparte y con su propio try: la tabla la crea el módulo de Abasto al arrancar, y si
+  // por orden de carga todavía no existe es mejor mostrar una partida de más que
+  // romper la pantalla entera.
+  try {
+    for (const r of db.prepare(`SELECT DISTINCT lp.oc_id FROM liquidacion_partidas lp
+        JOIN liquidaciones l ON l.id = lp.liquidacion_id
+       WHERE l.eliminado_en IS NULL`).all()) con.add(Number(r.oc_id));
+  } catch (_) { /* todavía no existe: se sigue con las de oc_id */ }
+  return con;
 }
 
 function partidasRecibidas(db, comoSeDocumenta) {
@@ -3533,10 +3549,13 @@ router.put('/liquidacion/modelo', requireAdmin, (req, res) => {
 // kg × precio del renglón, que sigue siendo SU precio y no el de otro — y se
 // dice cuántos son, para que nadie firme una liquidación creyendo que todo el
 // número salió del comprobante.
-router.get('/partidas/:id/venta', requireAuth, (req, res) => {
-  const db = getDb();
-  try {
-    const ocId = Number(req.params.id);
+// EL CUERPO, COMO FUNCIÓN. La liquidación AGRUPADA necesita esta misma cuenta para
+// cada partida del grupo (Pablo, 29/8/2026: «si un productor tiene 2 o más partidas
+// para liquidar debemos poder agruparlas y liquidarlas en una sola liquidación,
+// manteniendo los precios y cantidades de cada partida»). Copiarla serían dos cuentas
+// de lo mismo, y el día que una cambie la liquidación agrupada empieza a decir otro
+// número sin que nadie se entere.
+function ventaDePartida(db, ocId) {
     // ── EL PROVEEDOR SALE DE LA PARTIDA ───────────────────────────
     //
     // Pablo: "en la liquidación los datos del proveedor los debe traer automáticos
@@ -3553,7 +3572,7 @@ router.get('/partidas/:id/venta', requireAuth, (req, res) => {
         p.codigo_postal, p.categoria_fiscal, p.comision_pct
         FROM sg_oc o LEFT JOIN sg_proveedores p ON p.id = o.proveedor_id
        WHERE o.id = ?`).get(ocId);
-    if (!oc) return res.status(404).json({ ok: false, error: 'Partida inexistente' });
+    if (!oc) throw Object.assign(new Error('Partida inexistente'), { status: 404 });
 
     // ── LA UNIDAD LA MANDA LA ORDEN DE COMPRA ───────────────────────
     //
@@ -3804,7 +3823,8 @@ router.get('/partidas/:id/venta', requireAuth, (req, res) => {
     // decide si la partida se puede liquidar, porque lo que queda adentro
     // todavía no se sabe cuánto va a rendir.
     const terminado = r2(bultosOut + mermaBultos);
-    res.json({ ok: true,
+    return { ok: true,
+      oc_id: ocId,
       partida: oc.trazabilidad || oc.numero,
       fecha_oc: oc.fecha_oc || null,
       fecha_ingreso: (ing && ing.f) || null,
@@ -3875,8 +3895,170 @@ router.get('/partidas/:id/venta', requireAuth, (req, res) => {
       // para no hacerle perder el trabajo, no para reemplazar el control.
       sin_valorizar: gastosSinValorizar(db, ocId),
       lineas_estimadas: estimadas, lineas_sin_atribuir: sinAtribuir,
-      lineas: detalle });
-  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+      lineas: detalle };
+}
+
+// ══ VARIAS PARTIDAS, UNA SOLA LIQUIDACIÓN ═════════════════════════════════════
+//
+// Pablo, 29/8/2026: «si un productor o proveedor tiene 2 o más partidas para
+// liquidar debemos poder agruparlas y liquidarlas en una sola liquidación,
+// MANTENIENDO LOS PRECIOS Y CANTIDADES DE CADA PARTIDA. Lo fiscal y lo de gestión
+// se debe mantener… simplemente que sumen los montos a la hora de hacer la
+// liquidación».
+//
+// Por eso esto SUMA y no promedia: cada partida trae sus renglones con su precio y
+// su cantidad, y lo único que se junta son los totales. Un precio promedio del grupo
+// sería un número que no se pactó con nadie.
+//
+// LO QUE NO SE PUEDE JUNTAR, NO SE JUNTA. Dos partidas de proveedores distintos son
+// dos comprobantes —la liquidación se emite a nombre de UNO—, y una a precio abierto
+// con otra a precio cerrado son dos cuentas distintas para el mismo papel. Se rechaza
+// con el motivo en vez de armar un comprobante que después nadie sabe explicar.
+function fusionarVentas(partes) {
+  const p0 = partes[0];
+  const provs = new Set(partes.map((p) => String((p.proveedor && p.proveedor.id) || '')));
+  if (provs.size > 1) {
+    throw Object.assign(new Error(
+      'Esas partidas no son del mismo productor. La liquidación se emite a nombre de uno '
+      + 'solo: hay que liquidarlas por separado.'), { status: 400 });
+  }
+  const modos = new Set(partes.map((p) => (p.es_precio_cerrado ? 'cerrado' : 'abierto')));
+  if (modos.size > 1) {
+    throw Object.assign(new Error(
+      'Hay partidas a precio abierto y a precio cerrado en el mismo grupo. Son dos cuentas '
+      + 'distintas —una se liquida por lo que rindió y la otra por lo pactado—, así que van '
+      + 'en liquidaciones separadas.'), { status: 400 });
+  }
+  const sum = (f) => r2(partes.reduce((a, p) => a + (Number(f(p)) || 0), 0));
+  // LA UNIDAD: si alguna se pactó por bulto, manda el bulto — es la unidad más gruesa
+  // y la que el productor cuenta. Misma regla que dentro de una partida.
+  const unidad = partes.some((p) => p.unidad === 'bulto') ? 'bulto' : 'kilo';
+  // El precio por unidad sólo si TODAS coinciden. Con precios distintos no hay UN
+  // precio del grupo, y poner el de una sería inventar el de las otras.
+  const precios = partes.map((p) => (p.acordado || {}).precio_por_bulto);
+  const precioUnico = (precios.every((x) => x != null) && new Set(precios).size === 1)
+    ? precios[0] : null;
+  return {
+    ok: true,
+    // De qué partidas se está hablando. La primera manda para lo que es de la orden
+    // —el proveedor, la comisión, si el precio trae IVA— porque ya se validó que
+    // todas comparten eso.
+    oc_id: p0.oc_id,
+    oc_ids: partes.map((p) => p.oc_id),
+    partida: partes.map((p) => p.partida).join(' + '),
+    // EL DETALLE POR PARTIDA. Es lo que la pantalla necesita para preguntar la merma
+    // de cada una y para sumar los objetivos uno por uno: el grupo no tiene una
+    // merma, tiene la merma de cada partida.
+    partidas: partes.map((p) => ({
+      oc_id: p.oc_id, partida: p.partida, unidad: p.unidad,
+      bultos_ingresados: p.bultos_ingresados, bultos_merma: p.bultos_merma,
+      kg_merma: p.kg_merma,
+      acordado_total: (p.acordado || {}).total,
+      acordado_sin_mermas: (p.acordado || {}).total_sin_mermas,
+      // El precio por unidad DE ESA PARTIDA: el renglón de merma se paga al precio de
+      // su camión, no al del otro.
+      precio_por_bulto: (p.acordado || {}).precio_por_bulto,
+      neto: p.neto, gestion: p.gestion, iva: p.iva,
+    })),
+    fecha_oc: p0.fecha_oc, fecha_ingreso: p0.fecha_ingreso,
+    unidad,
+    tipo_precio: p0.tipo_precio, es_precio_cerrado: p0.es_precio_cerrado,
+    acordado: {
+      total: sum((p) => (p.acordado || {}).total),
+      total_sin_mermas: sum((p) => (p.acordado || {}).total_sin_mermas),
+      precio_por_bulto: precioUnico,
+      base: p0.acordado && p0.acordado.base,
+      items: partes.reduce((a, p) => a + (((p.acordado || {}).items) || 0), 0),
+      precio_incluye_iva: (p0.acordado || {}).precio_incluye_iva,
+      iva_alicuota: (p0.acordado || {}).iva_alicuota,
+    },
+    comision_pct: p0.comision_pct,
+    comision_pct_de_proveedor: p0.comision_pct_de_proveedor,
+    iva_servicios_pct: p0.iva_servicios_pct,
+    descarga: {
+      monto: sum((p) => p.descarga.monto), n: partes.reduce((a, p) => a + p.descarga.n, 0),
+      sin_valorizar: partes.reduce((a, p) => a + (p.descarga.sin_valorizar || 0), 0),
+      iva: sum((p) => p.descarga.iva),
+    },
+    // ── EL FLETE: SÓLO SE SUMA LO QUE SE LE COBRA AL PRODUCTOR ───────────────
+    //
+    // Pablo, 27/8/2026: «si el vendedor paga el flete no hace falta cargar los datos de
+    // importes ni nada porque no nos interesa el costo».
+    //
+    // Sumar los montos a secas era cobrarle al productor un viaje que pagó el vendedor:
+    // el monto del flete a cargo del vendedor viaja igual —que exista y no se cobre es
+    // una decisión, no un olvido— y la pantalla prellena el campo con el NETO cuando
+    // se_cobra. Con dos partidas, una a cargo de cada uno, se sumaban las dos y la
+    // liquidación le descontaba de más.
+    flete: (function(){
+      const cobrables = partes.filter((p) => (p.flete || {}).se_cobra);
+      const f0 = ((cobrables[0] || p0).flete) || {};
+      const suma = (f) => r2(cobrables.reduce((a, p) => a + (Number(f(p.flete || {})) || 0), 0));
+      return Object.assign({}, f0, {
+        monto: suma((f) => f.monto),
+        neto: suma((f) => f.neto),
+        iva: suma((f) => f.iva),
+        se_cobra: cobrables.length ? 1 : 0,
+        a_cargo: cobrables.length ? 'comprador' : ((p0.flete || {}).a_cargo || null),
+      });
+    })(),
+    proveedor: p0.proveedor,
+    // LOS RENGLONES SE CONCATENAN, cada uno con su precio y su cantidad. Y llevan de
+    // qué partida son: en un comprobante con dos camiones del mismo producto, dos
+    // renglones iguales con precios distintos se leen como un error de carga.
+    articulos: partes.flatMap((p) => (p.articulos || []).map((a) => Object.assign({}, a, {
+      articulo: partes.length > 1 ? (a.articulo + ' · ' + p.partida) : a.articulo,
+      oc_id: p.oc_id,
+    }))),
+    mermas: partes.flatMap((p) => (p.mermas || []).map(
+      (m) => Object.assign({}, m, { oc_id: p.oc_id, partida: p.partida }))),
+    bultos_ingresados: sum((p) => p.bultos_ingresados),
+    bultos_vendidos: sum((p) => p.bultos_vendidos),
+    bultos_merma: sum((p) => p.bultos_merma),
+    kg_merma: sum((p) => p.kg_merma),
+    bultos_terminados: sum((p) => p.bultos_terminados),
+    bultos_en_deposito: sum((p) => p.bultos_en_deposito),
+    kg_ingresados: sum((p) => p.kg_ingresados),
+    kg_vendidos: sum((p) => p.kg_vendidos),
+    avance: (function(){
+      const i = sum((p) => p.bultos_ingresados), t = sum((p) => p.bultos_terminados);
+      return i > 0 ? Math.round((t / i) * 1000) / 10 : 0;
+    })(),
+    neto: sum((p) => p.neto), gestion: sum((p) => p.gestion), iva: sum((p) => p.iva),
+    sin_facturar: sum((p) => p.sin_facturar),
+    sin_valorizar: {
+      descarga: partes.reduce((a, p) => a + ((p.sin_valorizar || {}).descarga || 0), 0),
+      flete: partes.reduce((a, p) => a + ((p.sin_valorizar || {}).flete || 0), 0),
+    },
+    lineas_estimadas: partes.reduce((a, p) => a + (p.lineas_estimadas || 0), 0),
+    lineas_sin_atribuir: partes.reduce((a, p) => a + (p.lineas_sin_atribuir || 0), 0),
+    lineas: partes.flatMap((p) => (p.lineas || []).map(
+      (l) => Object.assign({}, l, { oc_id: p.oc_id, partida: p.partida }))),
+  };
+}
+
+// Los ids del grupo: el de la URL primero, y los demás en ?mas=. Van por la MISMA
+// dirección para que el permiso se resuelva igual — exigirNivel mira la URL.
+function idsDelGrupo(req) {
+  const ids = [Number(req.params.id)];
+  for (const x of String(req.query.mas || '').split(',')) {
+    const n = Number(String(x).trim());
+    if (n > 0 && !ids.includes(n)) ids.push(n);
+  }
+  return ids;
+}
+
+router.get('/partidas/:id/venta', requireAuth, (req, res) => {
+  const db = getDb();
+  try {
+    const ids = idsDelGrupo(req);
+    if (ids.length > 20) {
+      return res.status(400).json({ ok: false, error:
+        'Son demasiadas partidas para una sola liquidación. Agrupá hasta 20.' });
+    }
+    const partes = ids.map((id) => ventaDePartida(db, id));
+    res.json(partes.length === 1 ? partes[0] : fusionarVentas(partes));
+  } catch (e) { res.status(e.status || 500).json({ ok: false, error: e.message }); }
 });
 
 router.get('/partidas-a-liquidar', requireAuth, (req, res) => {

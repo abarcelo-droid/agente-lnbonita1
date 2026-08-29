@@ -211,13 +211,16 @@ test('la condición la dice la ORDEN, no el radio de la pantalla', () => {
 test('entre todas las liquidaciones de una partida tampoco se paga de más', () => {
   // Dos parciales de 60 cajones sobre una partida de 100 pasaban las dos, y al
   // productor se le pagaba por 120.
-  assert.match(LIQ, /FROM liquidaciones WHERE oc_id = \? AND eliminado_en IS NULL/);
-  assert.match(LIQ, /ya tiene liquidaciones por/i);
+  // Y CUENTA TAMBIÉN LAS AGRUPADAS: la columna oc_id guarda sólo la primera del
+  // grupo, así que mirar sólo esa dejaba pasar la que se liquidó junto con otras.
+  assert.match(LIQ, /FROM liquidaciones l\r?\n\s*WHERE l\.eliminado_en IS NULL/);
+  assert.match(LIQ, /EXISTS \(SELECT 1 FROM liquidacion_partidas lp/);
+  assert.match(LIQ, /liquidaciones por/i);
 });
 
 // ── EL CERROJO ESTÁ PUESTO DONDE DECIDE ─────────────────────────────────────
 test('el cerrojo corre en el POST que guarda, no sólo en la pantalla', () => {
-  assert.match(LIQ, /objetivoCerrado\(/, 'el que guarda la liquidación lo consulta');
+  assert.match(LIQ, /objetivoCerradoGrupo\(/, 'el que guarda la liquidación lo consulta');
   assert.match(LIQ, /cierraContraLoAcordado\(/);
   assert.match(LIQ, /se modifica LA ORDEN DE COMPRA/,
     'y dice a dónde ir, que es lo único que el usuario puede hacer');
