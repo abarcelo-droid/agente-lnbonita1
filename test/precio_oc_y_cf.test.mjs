@@ -88,7 +88,7 @@ test('EL COSTO ES NETO, y ahora las dos puertas hacen la misma cuenta', () => {
   // cuánto vender.
   assert.match(SG, /function precioNetoDeOC\(db, ocId, ocItemId, precio\)/);
   assert.match(SG, /\+\(Number\(precio\) \/ \(1 \+ alic \/ 100\)\)\.toFixed\(6\)/);
-  assert.match(SG, /function aplicarPrecioItem\(db, \{ ocId, ocItemId, precio, userId \}\)/);
+  assert.match(SG, /function aplicarPrecioItem\(db, \{ ocId, ocItemId, precio, userId, motivo \}\)/);
   // Y /completar dejó de hacer la suya.
   assert.doesNotMatch(SG, /setLote\.run\(p\.precio, r2\(\(l\.kg_reales \|\| 0\) \* p\.precio\)/);
   // Dos llamadas —el endpoint nuevo y /completar— más la definición.
@@ -115,7 +115,8 @@ test('y se avisa lo que la cascada NO alcanza', () => {
   // generarVencimientos sale por la puerta si ya hay una cuota pagada: el precio
   // nuevo no llega a la cuenta corriente y el ajuste va a mano. Callarlo dejaría el
   // saldo del proveedor mal sin que nadie se entere.
-  assert.match(endpoint(SG, "router.put('/oc/:id/precios'"), /ya tiene cuotas pagadas/);
+  assert.match(endpoint(SG, "router.put('/oc/:id/precios'"), /AVISO_CRONOGRAMA_CONGELADO/);
+  assert.match(SG, /const AVISO_CRONOGRAMA_CONGELADO =[\s\S]{0,120}ya tiene cuotas pagadas/);
   assert.match(PANEL, /if \(r\.data && r\.data\.aviso\) alert\(r\.data\.aviso\);/);
 });
 

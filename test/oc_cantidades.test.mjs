@@ -115,7 +115,10 @@ test('y avisa cuando el cronograma NO se pudo regenerar', () => {
   // la deuda quedaría vieja en silencio.
   const b = endpoint();
   assert.match(b, /WHERE oc_id=\? AND pagado=1/);
-  assert.match(b, /revisá la cuenta corriente del proveedor a mano/);
+  // El texto vive UNA vez y lo usan las tres puertas que mueven ese número: el mismo
+  // problema contado distinto en tres pantallas son tres problemas.
+  assert.match(b, /AVISO_CRONOGRAMA_CONGELADO/);
+  assert.match(SG, /const AVISO_CRONOGRAMA_CONGELADO =[\s\S]{0,240}revisá la cuenta corriente del proveedor a mano/);
 });
 
 // ── LA PANTALLA ────────────────────────────────────────────────────────────

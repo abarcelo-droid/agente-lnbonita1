@@ -367,13 +367,17 @@ test('el stock muestra la calidad en color y de qué partida salió', () => {
 
 // ══ LO QUE SE PROTEGE ══════════════════════════════════════════════════════
 
-test('una partida partida por calidad no se puede corregir', () => {
+test('a una partida partida por calidad no se le corrigen las CANTIDADES', () => {
   // Bajarle los kilos a la madre después descuadraría la partida contra el
   // proveedor: la suma de los dos lotes dejaría de dar lo que entró.
+  //
+  // El PRECIO sí, y es justamente el caso que trajo Pablo el 29/8/2026: la
+  // mercadería de segunda es la que se renegocia con el productor.
   const i = SG.indexOf('function frenosDeEdicionLote(');
-  const b = SG.slice(i, i + 3600);
+  const b = SG.slice(i, i + 6200);
   assert.match(b, /FROM sg_lote_reclasificaciones\s*\n?\s*WHERE \(lote_origen_id=\? OR lote_destino_id=\?\) AND anulada_en IS NULL/);
   assert.match(b, /Deshacé esa separación antes de corregir las cantidades/);
+  assert.match(b, /if \(reclas > 0 && !soloPrecio\) \{/);
 });
 
 test('NO es admin: es el trabajo del día del comprador', () => {
