@@ -5997,7 +5997,16 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
                ciegas entre tres opciones con consecuencias contables distintas. -->
           <div id="sg-oc-flete-ayuda" style="grid-column:1/-1;font-size:11.5px;line-height:1.45;
                border-left:3px solid var(--bor);padding:2px 0 2px 10px;color:var(--mut);margin:-2px 0 2px"></div>
-          <div class="fl"><label>Cómo se pactó</label>
+          <!-- LOS IMPORTES SÓLO CUANDO SON PLATA NUESTRA.
+               Pablo, 28/8/2026: «si el vendedor paga el flete no hace falta
+               cargar los datos de importes ni nada porque no nos interesa el
+               costo».
+               Con el flete del productor, San Gerónimo no le paga a ningún
+               fletero y el monto no entra a ningún lado: el campo decía
+               «informativo» y pedía un número que nadie iba a usar. Cuando lo
+               ADELANTA San Gerónimo sí se pide, porque esa plata se le recupera
+               al productor de su liquidación. -->
+          <div class="fl" id="sg-oc-flete-modo-wrap"><label>Cómo se pactó</label>
             <select id="sg-oc-flete-modo" onchange="sgOcFleteModo()">
               <option value="total">Monto total</option>
               <option value="bulto">Por bulto</option>
@@ -6007,7 +6016,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
           <div class="fl" id="sg-oc-flete-total-wrap"><label>Monto de flete ($)</label><input type="number" id="sg-oc-flete-monto" min="0" step="0.01" placeholder="informativo" oninput="sgOcFleteCalc()"></div>
           <div class="fl" id="sg-oc-flete-cant-wrap" style="display:none"><label id="sg-oc-flete-cant-lbl">Bultos</label><input type="number" id="sg-oc-flete-cant" min="0" step="1" oninput="sgOcFleteCalc()"><div id="sg-oc-flete-cant-sub" style="font-size:11px;color:var(--mut);margin-top:3px"></div></div>
           <div class="fl" id="sg-oc-flete-pu-wrap" style="display:none"><label id="sg-oc-flete-pu-lbl">$ por bulto</label><input type="number" id="sg-oc-flete-pu" min="0" step="0.01" oninput="sgOcFleteCalc()"></div>
-          <div class="fl ff" style="display:flex;flex-direction:row;gap:16px;align-items:center;flex-wrap:wrap">
+          <div class="fl ff" id="sg-oc-flete-iva-wrap" style="display:flex;flex-direction:row;gap:16px;align-items:center;flex-wrap:wrap">
             <label style="text-transform:none;letter-spacing:0;font-size:12.5px;display:inline-flex;align-items:center;gap:5px;min-height:0"><input type="radio" name="sg-oc-flete-iva" value="si" style="width:auto"> Con IVA</label>
             <label style="text-transform:none;letter-spacing:0;font-size:12.5px;display:inline-flex;align-items:center;gap:5px;min-height:0"><input type="radio" name="sg-oc-flete-iva" value="no" style="width:auto"> Sin IVA</label>
             <span id="sg-oc-flete-calc" style="margin-left:auto;font-size:12.5px;font-weight:700;color:var(--burg)"></span>
@@ -11261,6 +11270,24 @@ var SG_FLETE_AYUDA = {
     + 'Aparece en <b>Fletes de entrada</b> para cargar la factura del fletero, pero '
     + '<b>NO entra al costo de la partida</b>: es plata a recuperar, se le descuenta de su liquidación.'
 };
+// ¿HAY QUE CARGAR EL IMPORTE DEL FLETE?
+//
+// Pablo, 28/8/2026: «si el vendedor paga el flete no hace falta cargar los datos
+// de importes ni nada porque no nos interesa el costo».
+//
+// Sólo cuando la plata la pone San Gerónimo, y son dos casos:
+//   · flete del comprador → es gasto nuestro y entra al costo de la partida.
+//   · del vendedor pero ADELANTADO por San Gerónimo → no entra al costo, pero se
+//     le paga al fletero y se le recupera al productor de su liquidación. Sin el
+//     monto no hay nada que recuperar.
+// Con el flete del productor no se toca plata en ningún lado: el monto era un
+// campo que decía «informativo» y pedía un número que nadie iba a usar.
+function sgOcFletePideImporte(cargo, quien){
+  if (cargo === 'comprador') return true;
+  if (cargo === 'vendedor') return quien === 'san_geronimo';
+  return false;   // sin flete
+}
+
 function sgOcFleteCargo(){
   var cargo=(eid('sg-oc-flete-cargo')||{}).value||'';
   var wrap=eid('sg-oc-flete-quien-wrap');
@@ -11269,6 +11296,27 @@ function sgOcFleteCargo(){
   var clave = (cargo==='vendedor') ? ('vendedor|'+quien) : cargo;
   var ay=eid('sg-oc-flete-ayuda');
   if(ay) ay.innerHTML = SG_FLETE_AYUDA[clave] || '';
+
+  // Los importes se muestran o se esconden ENTEROS: dejar el «cómo se pactó»
+  // solo, sin monto, es peor que no mostrar nada.
+  var pide = sgOcFletePideImporte(cargo, quien);
+  ['sg-oc-flete-modo-wrap','sg-oc-flete-total-wrap','sg-oc-flete-cant-wrap',
+   'sg-oc-flete-pu-wrap','sg-oc-flete-iva-wrap'].forEach(function(id){
+    var e = eid(id); if (e) e.style.display = pide ? '' : 'none';
+  });
+  if (pide) {
+    // Volver a mostrarlos deja al «cómo se pactó» decidiendo cuáles van.
+    sgOcFleteModo();
+  } else {
+    // Y SE LIMPIA. Si quedara un monto escrito de antes, se guardaría un flete
+    // que nadie va a pagar y aparecería en el costo o en la liquidación.
+    ['sg-oc-flete-monto','sg-oc-flete-cant','sg-oc-flete-pu'].forEach(function(id){
+      var e = eid(id); if (e) e.value = '';
+    });
+    var iva = document.querySelector('input[name="sg-oc-flete-iva"]:checked');
+    if (iva) iva.checked = false;
+    var c = eid('sg-oc-flete-calc'); if (c) c.textContent = '';
+  }
 }
 function sgOcFleteModo(){
   var modo = eid('sg-oc-flete-modo').value;
@@ -11579,18 +11627,31 @@ function sgOcGuardar(){
     // resto de los casos, para que no quede un dato que contradice al de al lado.
     flete_pagado_por:(eid('sg-oc-flete-cargo').value==='vendedor'
       ? (eid('sg-oc-flete-quien').value||'productor') : null),
-    flete_monto:(eid('sg-oc-flete-monto').value!==''?Number(eid('sg-oc-flete-monto').value):null),
+    // LOS IMPORTES SÓLO CUANDO SON PLATA NUESTRA. La pantalla ya los esconde y
+    // los limpia con el flete del productor; acá va el mismo cerrojo, para que
+    // un valor viejo que quedara escrito no termine guardado como un flete que
+    // nadie va a pagar.
+    flete_monto:(sgOcFletePideImporte(eid('sg-oc-flete-cargo').value,
+                                      eid('sg-oc-flete-quien').value)
+      && eid('sg-oc-flete-monto').value!=='' ? Number(eid('sg-oc-flete-monto').value) : null),
     // El total del flete lo calcula el backend con estos tres datos: acá se
     // manda cómo se pactó, no una cuenta ya hecha.
-    flete_modalidad:eid('sg-oc-flete-modo').value||null,
+    flete_modalidad:(sgOcFletePideImporte(eid('sg-oc-flete-cargo').value,
+                                          eid('sg-oc-flete-quien').value)
+      ? (eid('sg-oc-flete-modo').value||null) : null),
     // Por bulto se manda lo que el comprador PIDIÓ, no lo que se va a cobrar:
     // queda como referencia de lo que estimó al cerrar. El flete se valoriza con
     // los bultos que baje cada camión, y esos los pone la recepción.
-    flete_cantidad:(eid('sg-oc-flete-modo').value==='bulto'
+    flete_cantidad:(!sgOcFletePideImporte(eid('sg-oc-flete-cargo').value, eid('sg-oc-flete-quien').value) ? null
+      : eid('sg-oc-flete-modo').value==='bulto'
       ? (sgOcBultosTotales()||null)
       : (eid('sg-oc-flete-cant').value!==''?Number(eid('sg-oc-flete-cant').value):null)),
-    flete_precio_unit:(eid('sg-oc-flete-pu').value!==''?Number(eid('sg-oc-flete-pu').value):null),
-    flete_con_iva:(function(){var r=document.querySelector('input[name="sg-oc-flete-iva"]:checked');return r?(r.value==='si'?1:0):null;})(),
+    flete_precio_unit:(sgOcFletePideImporte(eid('sg-oc-flete-cargo').value,
+                                            eid('sg-oc-flete-quien').value)
+      && eid('sg-oc-flete-pu').value!=='' ? Number(eid('sg-oc-flete-pu').value) : null),
+    flete_con_iva:(function(){
+      if(!sgOcFletePideImporte(eid('sg-oc-flete-cargo').value, eid('sg-oc-flete-quien').value)) return null;
+      var r=document.querySelector('input[name="sg-oc-flete-iva"]:checked');return r?(r.value==='si'?1:0):null;})(),
     precio_incluye_iva: sgOcIncluyeIva()?1:0,   // IVA Fase 2 (el backend solo lo usa si discrimina: Factura A + firme)
     // CAMBIO 2 — se envían SIEMPRE valores canónicos: kg_estimados (kg reales) y precio_estimado_por_kg ($/kg
     // efectivo), sin importar el modo. Así el backend (kg×$/kg) calcula el total correcto y el stock/costeo
