@@ -30,7 +30,7 @@ const DB_SG = fs.readFileSync(path.join(RAIZ, 'src/servicios/db_sg.js'), 'utf8')
 // La función real, sacada del router. recalcTotalesOC se inyecta: rehace los totales
 // de la cabecera y tiene sus propios tests; acá se prueba el reparto.
 function traerPartir() {
-  const i = SG.indexOf('function partirRenglonDeOrden(db, { itemId, loteId, bultosMov, kgMov, nota }) {');
+  const i = SG.indexOf('function partirRenglonDeOrden(db, { itemId, loteId, kgMov, nota }) {');
   assert.ok(i > 0, 'no existe partirRenglonDeOrden');
   const src = SG.slice(i, SG.indexOf('\n}', i) + 2);
   const r2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
@@ -207,18 +207,63 @@ test('un renglón que no existe no rompe nada', () => {
 test('reclasificar abre el renglón y lo deja apuntado', () => {
   // Apuntado: deshacer la separación tiene que saber qué renglón cerrar, sin adivinar.
   const i = SG.indexOf('function reclasificarLote(');
-  const b = SG.slice(i, i + 6000);
-  assert.match(b, /const itemNuevo = madre\.oc_item_id\r?\n?\s*\? partirRenglonDeOrden\(db, \{ itemId: madre\.oc_item_id, loteId: nuevoId/);
+  const b = SG.slice(i, i + 8000);
+  assert.match(b, /partirRenglonDeOrden\(db, \{ itemId: madre\.oc_item_id, loteId: nuevoId, kgMov/);
   assert.match(b, /motivo, piso_id, usuario_id, oc_item_creado\)/);
   assert.match(DB_SG, /ALTER TABLE sg_lote_reclasificaciones ADD COLUMN oc_item_creado INTEGER/);
 });
 
-test('y una partida sin orden no intenta partir nada', () => {
-  // Una descarga suelta no tiene renglón: llamar igual reventaría la recepción.
+test('una partida sin orden no intenta partir nada, y una DOCUMENTADA tampoco', () => {
+  // Sin orden no hay renglón: llamar igual reventaría la recepción.
+  //
+  // Y con la orden ya facturada o liquidada el precio quedó firme: partir el renglón
+  // ahí es tocar lo pactado por una puerta que no pide permiso. Es la misma regla que
+  // ya tenía /renglon-propio — si no, separar un cajón por calidad hacía lo que darle
+  // su renglón tiene prohibido. La separación por calidad se hace igual: es stock.
   const i = SG.indexOf('function reclasificarLote(');
-  const b = SG.slice(i, i + 6000);
-  assert.match(b, /madre\.oc_item_id\r?\n?\s*\? partirRenglonDeOrden/);
+  const b = SG.slice(i, i + 8000);
+  assert.match(b, /const firme = ocDeMadre \? frenoPrecioFirme\(db, ocDeMadre, 'partirle el renglón'\) : null;/);
+  assert.match(b, /const itemNuevo = \(madre\.oc_item_id && !firme\)/);
   assert.match(b, /: null;/);
+});
+
+test('y deshacer la separación también pide permiso', () => {
+  // Si al renglón de la segunda le pusieron otro precio, deshacer devuelve esa
+  // mercadería al renglón de la primera: la deuda vuelve al precio viejo. Era la
+  // ÚNICA puerta que movía lo pactado sin pedirlo.
+  const i = SG.indexOf("router.post('/lotes/:id/reclasificaciones/:rid/anular'");
+  const b = SG.slice(i, i + 3000);
+  assert.match(b, /frenoPrecioFirme\(db, ocDeMadre, 'deshacer la separación'\)/);
+  assert.match(b, /if \(frenoF\) return res\.status\(409\)/);
+});
+
+test('y no se pasa a otra calidad lo que ya se tiró', () => {
+  // La merma se anota contra el LOTE: al separar, los kilos se van al hermano y el
+  // decomiso se queda. Si a la madre le quedan menos kilos de los que se le
+  // decomisaron, la cuenta de lo que se le debe al productor trunca en cero y esos
+  // kilos —que NO se le pagan— vuelven a la deuda.
+  const i = SG.indexOf('function reclasificarLote(');
+  const b = SG.slice(i, i + 3000);
+  assert.match(b, /const kgTirados = r2\(kgDecomisado\(db, madre\.id\)\);/);
+  assert.match(b, /if \(kgTirados > 0 && r2\(kgOrig - kgMov\) < kgTirados - 0\.01\)/);
+  assert.match(b, /menos de lo que se tiró/);
+});
+
+test('y el decomiso guarda sus BULTOS, que era la raíz', () => {
+  // La columna existía y nadie la escribía: bultosDecomisado() daba siempre cero y el
+  // tope por bultos dejaba mover a otra calidad cajones ya tirados.
+  const i = SG.indexOf("router.post('/lotes/:id/decomiso'");
+  const b = SG.slice(i, i + 2600);
+  assert.match(b, /INSERT INTO sg_lote_decomisos \(lote_id, kg, bultos, motivo, usuario_id\)/);
+  assert.match(b, /bultosDecomisados\(db, lote\.id, kg\), motivo/);
+});
+
+test('y un centavo de tolerancia es UN centavo', () => {
+  // El importe se redondea POR RENGLÓN: la misma mercadería en dos renglones puede
+  // dar un centavo distinto que en uno. Con «menos de un centavo», una liquidación
+  // correcta dejaba de poder emitirse por haber partido el renglón.
+  const AC = fs.readFileSync(path.join(RAIZ, 'src/servicios/sg_acordado.js'), 'utf8');
+  assert.match(AC, /r2\(Math\.abs\(r2\(pagar\) - r2\(x\)\)\) <= 0\.01/);
 });
 
 // ── 5 · DESHACER CIERRA EL RENGLÓN ─────────────────────────────────────────
@@ -427,4 +472,15 @@ test('y con la merma ya descontada, el invariante también', () => {
   const antes = acordadoDeOC(db, 1, { sinMermas: true }).total;
   partir(db, { itemId: 1, loteId: 2, bultosMov: 10, kgMov: 180, nota: 'x' });
   assert.equal(acordadoDeOC(db, 1, { sinMermas: true }).total, antes);
+});
+
+test('y el cartel de deshacer avisa que la deuda puede cambiar', () => {
+  // Decía «los cajones vuelven con su costo». No decía que si tenían su propio
+  // precio —el descuento que el productor reconoció por la segunda— vuelven al del
+  // renglón de origen. Es plata, y el que aprieta tiene que saberlo antes.
+  const i = PANEL.indexOf('function sgReclasAnular(loteId, rid){');
+  assert.ok(i > 0);
+  const b = PANEL.slice(i, i + 1200);
+  assert.match(b, /vuelven al precio del /);
+  assert.match(b, /lo que se le debe al productor cambia/);
 });

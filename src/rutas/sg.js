@@ -2552,7 +2552,9 @@ function colgadosDeItem(db, itemId) {
     + uno('SELECT COUNT(*) c FROM sg_reservas WHERE oc_item_id=? OR origen_oc_item_id=?', true);
 }
 
-function partirRenglonDeOrden(db, { itemId, loteId, bultosMov, kgMov, nota }) {
+// Se reparte por KILOS, así que los bultos no entran: la firma no los pide para no
+// prometer que importan.
+function partirRenglonDeOrden(db, { itemId, loteId, kgMov, nota }) {
   const it = db.prepare('SELECT * FROM sg_oc_items WHERE id=?').get(itemId);
   if (!it) return null;
   // Lo recibido del renglón ENTERO es contra lo que se prorratea.
@@ -2606,6 +2608,24 @@ function reclasificarLote(db, { madre, bultos, calidadNueva, semaforo, motivo, p
   const kgOrig = Number(madre.kg_reales) || 0;
   if (!(kgOrig > 0)) return { error: 'Esta partida no tiene kilos cargados.' };
   const propor = kgMov / kgOrig;
+
+  // ── NO SE PASA A OTRA CALIDAD LO QUE YA SE TIRÓ ───────────────────────
+  //
+  // La merma se anota contra el LOTE, y al separar los kilos se van al hermano
+  // mientras el decomiso se queda. Si a la madre le quedan menos kilos de los que
+  // ya se le decomisaron, la merma queda contada sobre mercadería que no está: la
+  // cuenta de lo que se le debe al productor la trunca en cero y esos kilos —que
+  // NO se le pagan— vuelven a la deuda.
+  //
+  // El tope por bultos no alcanzaba: bultosDecomisado() leía una columna que el
+  // decomiso nunca escribía, así que daba cero. Acá se mira en kilos, que es la
+  // unidad en la que el decomiso se carga.
+  const kgTirados = r2(kgDecomisado(db, madre.id));
+  if (kgTirados > 0 && r2(kgOrig - kgMov) < kgTirados - 0.01) {
+    return { error: 'De esta partida se decomisaron ' + kgTirados + ' kg. Pasando '
+      + bultos + ' bulto(s) a otra calidad le quedarían ' + r2(kgOrig - kgMov)
+      + ' kg, menos de lo que se tiró. Deshacé el decomiso o separá menos.' };
+  }
 
   const baseOrig = Number(madre.costo_base) || 0;
   const baseMov = Math.round(baseOrig * propor * 100) / 100;
@@ -2687,9 +2707,18 @@ function reclasificarLote(db, { madre, bultos, calidadNueva, semaforo, motivo, p
   // el precio vive en el renglón, no en la partida (ver partirRenglonDeOrden).
   // Arranca con el MISMO precio, así que lo que se le debe al productor no se
   // mueve al separar.
-  const itemNuevo = madre.oc_item_id
-    ? partirRenglonDeOrden(db, { itemId: madre.oc_item_id, loteId: nuevoId,
-        bultosMov: bultos, kgMov,
+  //
+  // SALVO QUE LA ORDEN YA ESTÉ DOCUMENTADA. Ahí el precio quedó firme y los
+  // renglones son lo que dice el comprobante: partirlos es tocar lo pactado por una
+  // puerta que no pide permiso. La misma regla que ya tiene /renglon-propio — si no,
+  // separar un cajón por calidad hace lo que darle su renglón tiene prohibido.
+  // La separación por calidad se hace igual: es stock, no precio.
+  const ocDeMadre = madre.oc_item_id
+    ? (db.prepare('SELECT oc_id FROM sg_oc_items WHERE id=?').get(madre.oc_item_id) || {}).oc_id
+    : null;
+  const firme = ocDeMadre ? frenoPrecioFirme(db, ocDeMadre, 'partirle el renglón') : null;
+  const itemNuevo = (madre.oc_item_id && !firme)
+    ? partirRenglonDeOrden(db, { itemId: madre.oc_item_id, loteId: nuevoId, kgMov,
         nota: calidadNueva + ' separada de ' + (madre.codigo_lote || 'la partida') })
     : null;
 
@@ -5349,6 +5378,17 @@ router.post('/lotes/:id/reclasificaciones/:rid/anular', requireAuth, express.jso
         + 'devolverlos dejaría la plata contada mal. Lo que queda se puede volver a ' + (madre.calidad || 'primera')
         + ' marcándolo de nuevo desde ese lote.' });
     }
+    // ── DESHACER PUEDE MOVER LO QUE SE LE DEBE AL PRODUCTOR ─────────────
+    //
+    // Si al renglón de la segunda le pusieron otro precio, deshacer la separación
+    // devuelve esa mercadería al renglón de la primera: la deuda vuelve al precio
+    // viejo. Era la ÚNICA puerta que movía lo pactado sin pedir permiso.
+    const ocDeMadre = madre.oc_item_id
+      ? (db.prepare('SELECT oc_id FROM sg_oc_items WHERE id=?').get(madre.oc_item_id) || {}).oc_id
+      : null;
+    const frenoF = ocDeMadre ? frenoPrecioFirme(db, ocDeMadre, 'deshacer la separación') : null;
+    if (frenoF) return res.status(409).json({ ok: false, error: frenoF });
+
     const otras = db.prepare(`SELECT COUNT(*) c FROM sg_lote_reclasificaciones
       WHERE lote_origen_id=? AND anulada_en IS NULL`).get(hijo.id).c;
     if (otras > 0) {
@@ -5543,7 +5583,7 @@ router.post('/lotes/:id/renglon-propio', requireAuth, express.json(), (req, res)
     let creado = null;
     db.transaction(() => {
       creado = partirRenglonDeOrden(db, { itemId: lote.oc_item_id, loteId: lote.id,
-        bultosMov: lote.bultos, kgMov: lote.kg_reales,
+        kgMov: lote.kg_reales,
         nota: (lote.calidad || 'Partida') + ' — ' + (lote.codigo_lote || '') });
       if (creado) {
         anotarEdicion(db, { tabla: 'sg_lotes', registroId: lote.id, campo: 'oc_item_id',
@@ -8317,7 +8357,19 @@ router.post('/lotes/:id/decomiso', requireAuth, (req, res) => {
     const disp = (lote.kg_reales || 0) - kgDespachados(db, lote.id) - kgDecomisado(db, lote.id) - kgTransformado(db, lote.id);
     if (kg > disp + 0.01) return res.status(400).json({ ok: false, error: `No podés decomisar ${kg}kg: hay ${disp.toFixed(1)}kg disponibles` });
     db.transaction(() => {
-      db.prepare('INSERT INTO sg_lote_decomisos (lote_id, kg, motivo, usuario_id) VALUES (?,?,?,?)').run(lote.id, kg, motivo, uid(req));
+      // ── Y SUS BULTOS ────────────────────────────────────────────────
+      //
+      // La columna existe y NADIE la escribía, así que bultosDecomisado() daba
+      // siempre CERO y bultosDisponibles() dejaba mover a otra calidad cajones que
+      // ya se habían tirado. Desde que separar por calidad parte el renglón de la
+      // orden, eso se volvió plata: la merma queda colgada del renglón de la madre
+      // mientras los kilos se fueron al renglón nuevo, y lo que no entra se trunca
+      // — o sea, se le termina pagando al productor la mercadería que se tiró.
+      //
+      // Se derivan de los kilos con el MISMO factor que ya usa la ubicación tres
+      // líneas más abajo: el decomiso se carga en kilos y el stock lleva las dos.
+      db.prepare(`INSERT INTO sg_lote_decomisos (lote_id, kg, bultos, motivo, usuario_id)
+        VALUES (?,?,?,?,?)`).run(lote.id, kg, bultosDecomisados(db, lote.id, kg), motivo, uid(req));
       // Lo decomisado deja de estar en el piso. Si no se descontara, el que va a
       // buscarlo encontraría vacío un lugar que la pantalla dice lleno.
       // Los bultos se derivan de los kilos con el factor del lote: el decomiso
