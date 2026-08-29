@@ -445,3 +445,71 @@ test('los diez anchos del stock suman 100', () => {
   const suma = (th.match(/width:(\d+)%/g) || []).reduce((a, w) => a + Number(w.match(/\d+/)[0]), 0);
   assert.equal(suma, 100);
 });
+
+// ══ EL NÚMERO DEL LOTE DE SEGUNDA ══════════════════════════════════════════
+
+test('el lote de segunda se numera como la partida, no con un SG-LT suelto', () => {
+  // Pablo, 29/8/2026: «al número de partida que vamos a asignar como segunda lo
+  // vamos a renombrar con el mismo número que tiene la partida madre, pero en el
+  // último dígito ponemos el siguiente».
+  //
+  // Salía SG-LT-20260829-0001, que no dice de dónde vino: en la lista de stock
+  // quedaba al lado de su madre sin ninguna relación visible.
+  const i = SG.indexOf('function reclasificarLote(');
+  const b = SG.slice(i, i + 4200);
+  assert.match(b, /const codigo = codigoLoteDePartida\(db, madre\.oc_item_id\);/);
+  assert.ok(!/const codigo = nextNumero\(db, 'SG-LT', 'sg_lotes', 'codigo_lote'\);/.test(b),
+    'volvió el número suelto');
+});
+
+test('y es la MISMA función que numera los lotes de una recepción', () => {
+  // Dos formas de numerar lo mismo terminan chocando: el hermano se numera como
+  // cualquier otro lote de la partida.
+  assert.match(SG, /function codigoLoteDePartida\(db, ocItemId\) \{/);
+  assert.match(SG, /const codigo = codigoLoteDePartida\(db, ocItem\.id\);/);
+});
+
+test('la numeración, corriéndola', () => {
+  // Es la cuenta real: el dígito que sigue al último lote de esa partida, y
+  // buscando hasta encontrar uno libre porque codigo_lote es UNIQUE.
+  const db = new DatabaseSync(':memory:');
+  db.exec(`CREATE TABLE sg_lotes (id INTEGER PRIMARY KEY, codigo_lote TEXT UNIQUE, oc_item_id INTEGER);
+           CREATE TABLE sg_oc_items (id INTEGER PRIMARY KEY, oc_id INTEGER);
+           CREATE TABLE sg_oc (id INTEGER PRIMARY KEY, trazabilidad TEXT)`);
+  db.prepare("INSERT INTO sg_oc VALUES (7,'0015.29.08.2026.01')").run();
+  db.prepare('INSERT INTO sg_oc_items VALUES (3,7)').run();
+  db.prepare("INSERT INTO sg_lotes VALUES (1,'0015.29.08.2026.01.1',3)").run();
+
+  const siguiente = () => {
+    const oc = db.prepare(`SELECT o.id, o.trazabilidad FROM sg_oc_items i
+      JOIN sg_oc o ON o.id = i.oc_id WHERE i.id = ?`).get(3);
+    const usados = db.prepare(`SELECT COUNT(*) c FROM sg_lotes l
+      JOIN sg_oc_items i ON i.id = l.oc_item_id WHERE i.oc_id = ?`).get(oc.id).c;
+    for (let n = usados + 1; n <= usados + 50; n++) {
+      const c = `${oc.trazabilidad}.${n}`;
+      if (!db.prepare('SELECT 1 FROM sg_lotes WHERE codigo_lote = ?').get(c)) return c;
+    }
+    return null;
+  };
+  // El de la foto: la madre es .1, la segunda es .2.
+  assert.equal(siguiente(), '0015.29.08.2026.01.2');
+  db.prepare("INSERT INTO sg_lotes VALUES (2,'0015.29.08.2026.01.2',3)").run();
+  // Y si se parte otra vez, .3 — no vuelve al .2 aunque el .2 se haya dado de baja.
+  assert.equal(siguiente(), '0015.29.08.2026.01.3');
+});
+
+test('el número de la partida NO se toca: la segunda cuelga de la misma compra', () => {
+  // Subir el .01 a .02 habría chocado con la segunda compra a ese proveedor ese
+  // mismo día — que es lo que numera ese tramo.
+  assert.match(SG, /El código es PPPP\.DD\.MM\.AAAA\.XX — la secuencia es el último tramo/);
+  const i = SG.indexOf('function reclasificarLote(');
+  const b = SG.slice(i, i + 4200);
+  assert.ok(!/codigoTrazabilidad\(/.test(b), 'se está pidiendo un número de partida nuevo');
+});
+
+test('sin orden de compra cae en el número de siempre', () => {
+  // Una partida que no viene de ninguna compra no tiene de qué colgar.
+  const i = SG.indexOf('function codigoLoteDePartida(');
+  const b = SG.slice(i, i + 900);
+  assert.match(b, /if \(!ocItemId\) return nextNumero\(db, 'SG-LT', 'sg_lotes', 'codigo_lote'\);/);
+});

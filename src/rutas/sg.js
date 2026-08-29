@@ -2522,7 +2522,23 @@ function reclasificarLote(db, { madre, bultos, calidadNueva, semaforo, motivo, p
   const kgQueda = Math.round((kgOrig - kgMov) * 1e4) / 1e4;
   const bltQueda = Math.round((Number(madre.bultos) || 0) - bultos);
 
-  const codigo = nextNumero(db, 'SG-LT', 'sg_lotes', 'codigo_lote');
+  // ── EL NÚMERO SIGUE AL DE LA MADRE ────────────────────────────────────
+  //
+  // Pablo, 29/8/2026: «al número de partida que vamos a asignar como segunda lo
+  // vamos a renombrar con el mismo número que tiene la partida madre, pero en el
+  // último dígito ponemos el siguiente».
+  //
+  // Salía un SG-LT-20260829-0001, que no dice de dónde vino: en la lista de
+  // stock quedaba al lado de su madre sin ninguna relación visible. Con el
+  // código de la partida —0015.29.08.2026.01.2 al lado de 0015.29.08.2026.01.1—
+  // se lee de un vistazo que son la misma compra.
+  //
+  // Es la MISMA función que numera los lotes de una recepción, así que el
+  // hermano se numera como cualquier otro lote de la partida y no puede pisar a
+  // ninguno: codigoLoteDePartida busca hasta encontrar uno libre, y cuenta
+  // también los dados de baja —un código que existió no vuelve a existir con
+  // otra mercadería adentro—. Sin ítem de orden cae sola en el SG-LT de siempre.
+  const codigo = codigoLoteDePartida(db, madre.oc_item_id);
   const info = db.prepare(`INSERT INTO sg_lotes
     (codigo_lote, recepcion_id, oc_item_id, producto_id, kg_reales, precio_unitario_kg, costo_base,
      calidad, calibre, origen, fecha_ingreso, fecha_vencimiento_estimada, estado, costo_final,
