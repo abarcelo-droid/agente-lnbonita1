@@ -12,7 +12,8 @@ import dbSg from '../servicios/db_sg_finanzas.js';
 import { crearAsiento } from '../servicios/asientos.js';
 import { lineasAsientoLiquidacion } from '../servicios/asiento-liquidacion.js';
 import { objetivoCerrado, cierraContraLoAcordado } from '../servicios/sg_acordado.js';
-import { frenoPartidaSinTerminar } from '../servicios/sg_partida_terminada.js';
+import { frenoParaLiquidar } from '../servicios/sg_partida_terminada.js';
+import { facturaCuenta } from '../servicios/factura-cuenta.js';
 import path    from 'path';
 import fs      from 'fs';
 import { fileURLToPath } from 'url';
@@ -379,8 +380,12 @@ router.post('/', function(req, res) {
   //
   // Va ANTES de los controles de precio a propósito: si la partida no está terminada
   // no importa a qué precio se liquida, y el mensaje que sirve es éste.
+  //
+  // Y con la plata cerrada, que Pablo agregó el 29/8/2026: sin la venta facturada la
+  // liquidación sale de menos, y sin la descarga o el flete valorizados esos gastos no
+  // se le pueden descontar. frenoParaLiquidar mira las tres cosas.
   if (ocIdBody) {
-    const frena = frenoPartidaSinTerminar(db, ocIdBody);
+    const frena = frenoParaLiquidar(db, ocIdBody, facturaCuenta);
     if (frena) return res.status(400).json({ error: frena });
   }
 

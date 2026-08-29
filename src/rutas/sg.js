@@ -53,6 +53,9 @@ import { exigirEmpresa, SAN_GERONIMO } from '../servicios/sociedad_modulo.js';
 
 import { chequeUsado, puedeMoverCuenta } from './sg_tesoreria.js';
 import { filtrarCosto, puedeVerCosto } from '../servicios/sg_costo_visible.js';
+// Lo que falta valorizar para poder liquidar. Vive con el freno de la partida
+// terminada porque es la misma pregunta: si esta partida esta lista.
+import { gastosSinValorizar } from '../servicios/sg_partida_terminada.js';
 
 const router = express.Router();
 
@@ -3831,6 +3834,10 @@ router.get('/partidas/:id/venta', requireAuth, (req, res) => {
       avance: bultosIn > 0 ? Math.round((terminado / bultosIn) * 1000) / 10 : 0,
       neto: r2(neto), gestion: r2(gestion), iva: r2(iva),
       sin_facturar: r2(sinFac && sinFac.monto),
+      // LO QUE FALTA VALORIZAR, para que la pantalla pueda frenar antes de que el
+      // operador cargue todo. El servidor lo vuelve a mirar al guardar: esto es
+      // para no hacerle perder el trabajo, no para reemplazar el control.
+      sin_valorizar: gastosSinValorizar(db, ocId),
       lineas_estimadas: estimadas, lineas_sin_atribuir: sinAtribuir,
       lineas: detalle });
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
