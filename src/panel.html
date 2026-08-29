@@ -1011,6 +1011,30 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
              y no se mostraba en ningún lado, así que nada avisaba cuando el precio
              por el que se está liquidando no da contra el de la orden. -->
         <div id="liq-cerr-acordado" style="font-size:11.5px;margin-top:6px"></div>
+        <!-- ══ ¿SE LE PAGA LA MERMA? ════════════════════════════════
+             Pablo, 29/8/2026: "en el caso de precio cerrado, efectivamente la
+             liquidación debe preguntar si «liquida las mermas» —o sea las incluye en
+             la liquidación, pérdida para San Gerónimo— o si no paga esas mermas.
+             Mostralo en las partidas que tengan merma y da las dos opciones para el
+             cálculo".
+             SIN OPCIÓN MARCADA POR DEFECTO. Las dos son legítimas y la diferencia es
+             de quién es la pérdida: marcar una sería decidir de qué bolsillo sale
+             sin preguntarle a nadie. Con merma y sin respuesta, no se emite. -->
+        <div id="liq-merma-box" style="display:none;margin-top:10px;border:1px solid #f59e0b;
+             background:rgba(245,158,11,.09);border-radius:8px;padding:10px 12px">
+          <div style="font-weight:700;font-size:12.5px;color:#92400e;margin-bottom:2px">
+            Esta partida tiene <span id="liq-merma-cant"></span> de merma. ¿Se le pagan al productor?</div>
+          <div style="font-size:11.5px;color:var(--mut);margin-bottom:7px">
+            El precio se cerró por lo que se recibió. Lo que se tiró lo pierde alguien: elegí quién.</div>
+          <label style="display:block;font-size:12.5px;margin-bottom:4px;cursor:pointer">
+            <input type="radio" name="liq-merma-paga" value="1" onchange="liqMermaCambio()">
+            <b>Sí, se los pago igual.</b> La pérdida la absorbe San Gerónimo
+            <span id="liq-merma-si" style="color:var(--mut)"></span></label>
+          <label style="display:block;font-size:12.5px;cursor:pointer">
+            <input type="radio" name="liq-merma-paga" value="0" onchange="liqMermaCambio()">
+            <b>No, sólo lo que quedó sano.</b> La pérdida la absorbe el productor
+            <span id="liq-merma-no" style="color:var(--mut)"></span></label>
+        </div>
         <!-- PRECIO CERRADO ES PRECIO CERRADO (Pablo, 26/8/2026). El número sale de la
              orden y no se corrige acá — tampoco siendo administrador. Que se vea por
              qué el campo está gris, y a dónde hay que ir si cambió la condición. -->
@@ -12970,7 +12994,11 @@ function liqDesdePartida(r){
       // La unidad viaja con el renglón: la manda la orden de compra y el PDF la
       // imprime. El productor cobra en la unidad en la que se le compró.
       return { articulo: a.articulo, unidad: a.unidad || '',
-        cantidad: a.cantidad, precio: a.precio, importe: a.importe };
+        cantidad: a.cantidad, precio: a.precio, importe: a.importe,
+        // LO QUE SE TIRÓ VIENE COMO UN RENGLÓN MÁS, A $0 (Pablo, 29/8/2026: «no
+        // podemos dejar cantidades abiertas… deben figurar como X cantidad de bultos
+        // mermados multiplicados por $0 de venta»). Los renglones suman lo que entró.
+        es_merma: a.es_merma ? 1 : 0 };
     }));
   }
   // Y las mermas, con su motivo: el productor cobra por lo que se vendió y tiene
@@ -37025,6 +37053,12 @@ function liqRellenarForm() {
   if ((_e = eid('liq-cerr-resultado'))) _e.innerHTML = '';
   if ((_e = eid('liq-cerr-acordado')))  _e.innerHTML = '';
   if ((_e = eid('liq-cerr-cant-hint'))) _e.innerHTML = '';
+  // La respuesta de la merma NO se hereda de la liquidación anterior: es una
+  // decisión de esta partida, y arrastrarla sería contestarla por omisión.
+  Array.prototype.forEach.call(
+    document.querySelectorAll('input[name="liq-merma-paga"]'),
+    function(x){ x.checked = false; });
+  if ((_e = eid('liq-merma-box'))) _e.style.display = 'none';
   if ((_e = eid('liq-grilla-body')))    _e.innerHTML = '';
   liqGrillaPintar();
   liqRemResumen();
@@ -37208,6 +37242,9 @@ function liqModoCambio(){
     pct.style.background = cerrado ? 'var(--bg)' : '';
     pct.title = cerrado ? 'A precio cerrado sale de la cuenta, no se tipea' : 'Sobre las ventas';
   }
+  // La pregunta de la merma es de precio cerrado: a precio abierto lo mermado va a
+  // $0 y no hay nada que decidir.
+  liqMermaPintar();
   if (cerrado) liqCerradoResolver(); else liqTotales();
 }
 
@@ -37291,15 +37328,80 @@ function liqArtSync(){
   // entró de los dos: el papel donde el productor cobra sale mal. Con varios,
   // cada renglón ya viene con lo suyo desde la partida y no hay nada que
   // sincronizar.
-  if (arts.length === 1) {
-    if (cant > 0) arts[0].cantidad = cant;
-    if (pre > 0)  arts[0].precio = pre;
-    if (arts[0].cantidad > 0 && arts[0].precio > 0) {
-      arts[0].importe = Math.round(arts[0].cantidad * arts[0].precio * 100) / 100;
+  //
+  // Y LA MERMA TIENE SU PROPIO RENGLÓN, así que sale del renglón del producto: los
+  // bultos de arriba son los que ENTRARON, y si cinco se tiraron el producto vendió
+  // los otros cincuenta y cinco. Metérselos todos Y dejar además la línea de merma
+  // haría que el comprobante sume más de lo que entró.
+  var esM = function(a){ return String(a.es_merma || '') === '1'; };
+  var reales = arts.filter(function(a){ return !esM(a); });
+  var mers = arts.filter(esM);
+  var cantM = mers.reduce(function(t, a){ return t + (Number(a.cantidad) || 0); }, 0);
+  if (reales.length === 1) {
+    if (cant > 0) reales[0].cantidad = Math.round((cant - cantM) * 100) / 100;
+    if (pre > 0)  reales[0].precio = pre;
+    if (reales[0].cantidad > 0 && reales[0].precio > 0) {
+      reales[0].importe = Math.round(reales[0].cantidad * reales[0].precio * 100) / 100;
     }
   }
+  // ── Y SU PRECIO ES LA RESPUESTA A LA PREGUNTA ─────────────────────────
+  //
+  // Pablo, 29/8/2026: las mermas «deben figurar como X cantidad de bultos mermados
+  // multiplicados por $0 de venta». Ése es el caso normal. A precio cerrado, si se
+  // decide pagárselas igual, el renglón toma el precio acordado — que es
+  // exactamente lo que significa «la pérdida la absorbe San Gerónimo»: se le paga
+  // mercadería que se tiró, y el papel lo dice.
+  var pagaM = (liqMermaPaga() === true);
+  mers.forEach(function(a){
+    a.precio  = (pagaM && pre > 0) ? pre : 0;
+    a.importe = Math.round((Number(a.cantidad) || 0) * a.precio * 100) / 100;
+  });
   liqRenderArt(arts);
 }
+
+// ══ LA MERMA, EN LA PANTALLA ══════════════════════════════════════════════
+//
+// Pablo, 29/8/2026: «a precio cerrado la liquidación debe preguntar si liquida las
+// mermas —las incluye, pérdida para San Gerónimo— o si no paga esas mermas».
+//
+// TRES ESTADOS, NO DOS. `null` no es «no»: es que todavía no se contestó. Sin esa
+// distinción, abrir la pantalla y guardar sin mirar equivale a decidir que la
+// pérdida la absorbe el productor, en silencio y por omisión.
+function liqMermaPaga(){
+  var e = document.querySelector('input[name="liq-merma-paga"]:checked');
+  return e ? (e.value === '1') : null;
+}
+// Cuánto se mermó, en la unidad en que se liquida. Si la orden se pactó por cajón
+// se cuentan cajones; si la mercadería entró pesada, kilos.
+function liqMermaCant(){
+  var v = (LIQ && LIQ.venta) || {};
+  return (v.unidad === 'bulto') ? (Number(v.bultos_merma) || 0) : (Number(v.kg_merma) || 0);
+}
+function liqMermaUni(){
+  return ((LIQ && LIQ.venta) || {}).unidad === 'bulto' ? 'bultos' : 'kg';
+}
+// Sin redondear a entero: en kilos, «0,4» no es «0».
+function liqCant(x){
+  return Number(x || 0).toLocaleString('es-AR', { maximumFractionDigits: 2 });
+}
+function liqMermaPintar(){
+  var box = eid('liq-merma-box'); if (!box) return;
+  var v = (LIQ && LIQ.venta) || {}, ac = v.acordado || {};
+  var hay = liqMermaCant() > 0 && liqModo() === 'cerrado';
+  box.style.display = hay ? '' : 'none';
+  if (!hay) return;
+  var e = eid('liq-merma-cant');
+  if (e) e.textContent = liqCant(liqMermaCant()) + ' ' + liqMermaUni();
+  // LOS DOS NÚMEROS, AL LADO DE SU OPCIÓN. La pregunta sin los importes obliga a
+  // elegir a ciegas y después mirar el total para ver qué se eligió.
+  var si = eid('liq-merma-si'), no = eid('liq-merma-no');
+  if (si) si.innerHTML = Number(ac.total) ? ' · cobra <b>' + sgMoney(ac.total) + '</b>' : '';
+  if (no) no.innerHTML = (ac.total_sin_mermas != null)
+    ? ' · cobra <b>' + sgMoney(ac.total_sin_mermas) + '</b>' : '';
+}
+// La respuesta mueve el objetivo Y el renglón de la merma: los dos tienen que
+// contar la misma historia o el papel dice una cosa y el total otra.
+function liqMermaCambio(){ liqCerradoResolver(); liqArtSync(); }
 
 function liqCerradoResolver(){
   var pre = eid('liq-cerr-precio'), cant = eid('liq-cerr-cant');
@@ -37333,7 +37435,32 @@ function liqCerradoResolver(){
   // partida entera hay uno solo que es el de verdad: el que calculó la orden, y es
   // el que el servidor va a exigir.
   var _recib = Number((eid('liq-bultos-in') || {}).value) || 0;
-  if (Number(ac.total) && _cant > 0 && _recib > 0 && Math.abs(_cant - _recib) < 1e-6) {
+  var _entera = (_cant > 0 && _recib > 0 && Math.abs(_cant - _recib) < 1e-6);
+  // ── LA MERMA CAMBIA EL NÚMERO, Y HAY QUE HABERLA CONTESTADO ────────────
+  //
+  // Se pactó un precio por lo que se recibió. Si cinco cajones se tiraron, ese
+  // precio se paga igual —lo pierde San Gerónimo— o no se paga —lo pierde el
+  // productor—. Son dos liquidaciones distintas y la pantalla no elige.
+  var mCant = liqMermaCant(), mPaga = liqMermaPaga();
+  liqMermaPintar();
+  if (mCant > 0 && mPaga === null) {
+    if (tot) tot.textContent = '—';
+    LIQ.cerrado = LIQ.cerrado || {};
+    LIQ.cerrado.objetivo = 0;
+    out.innerHTML = '<span style="color:#9a3412"><b>Falta decidir la merma.</b> '
+      + 'Decí ahí arriba si esos ' + liqCant(mCant) + ' ' + liqMermaUni()
+      + ' se le pagan al productor o no: son dos importes distintos.</span>';
+    liqTotales();
+    return;
+  }
+  if (mCant > 0 && mPaga === false) {
+    // LO QUE QUEDÓ SANO, AL PRECIO DE LA ORDEN. El total sin mermas lo calcula el
+    // servidor ítem por ítem y a su propio precio —cinco cajones de ciruela no
+    // valen el promedio del camión—, así que se usa ése cuando se liquida entera.
+    base = (_entera && ac.total_sin_mermas != null)
+      ? m2(ac.total_sin_mermas)
+      : m2(liqNum(pre) * Math.max(0, _cant - mCant));
+  } else if (Number(ac.total) && _entera) {
     base = m2(ac.total);
   }
   var T = conIva ? base : m2(base * (1 + alicAc / 100));
@@ -37401,9 +37528,17 @@ function liqCerradoResolver(){
 
   var p = (Vf + IVAv + Vg - S - T) / den;
   if (p < 0) {
+    // Y SI LA CAUSA ES LA MERMA QUE SE ACABA DE ELEGIR ABSORBER, se dice: «revisá el
+    // precio o los gastos» manda a mirar donde no está el problema. El precio está
+    // bien y los gastos también; lo que pasa es que se está pagando mercadería que
+    // no se vendió, que es exactamente lo que significa absorberla.
     out.innerHTML = '<span style="color:var(--err)"><b>No cierra.</b> Para pagarle ' + liqPlata(T)
       + ' habría que poner ' + liqPlata(-(p * den)) + ', no cobrar comisión. '
-      + 'Revisá el precio o los gastos.</span>';
+      + ((mCant > 0 && mPaga === true)
+          ? 'Es lo que cuesta absorber la merma: se le está pagando ' + liqCant(mCant) + ' '
+            + liqMermaUni() + ' que no se vendieron. Si no se los absorbe, elegí la otra '
+            + 'opción ahí arriba.'
+          : 'Revisá el precio o los gastos.') + '</span>';
     liqTotales();
     return;
   }
@@ -37951,6 +38086,11 @@ function liqRenderArt(arts) {
       // el PDF --que la imprime si está-- nunca la tenía. El papel donde el
       // productor cobra decía "56" a secas.
       '<input data-k="unidad" type="hidden" value="'+_liqEsc(a.unidad||u||'')+'">' +
+      // Y SI ES UN RENGLÓN DE MERMA, TAMBIÉN ESCONDIDO. _liqLeerArt reconstruye el
+      // objeto recorriendo los input[data-k]: sin esto, el primer repintado convierte
+      // la merma en un producto más y el despeje del precio cerrado le mete encima la
+      // cantidad y el precio del producto.
+      '<input data-k="es_merma" type="hidden" value="'+(a.es_merma ? '1' : '')+'">' +
       // EL PRODUCTO ES EL QUE SE COMPRÓ. Pablo, 29/8/2026: «no está bien que me
       // deje editar artículos, ya que ellos vienen con la partida». Cambiar el
       // nombre acá dejaba el papel donde el productor cobra diciendo un producto
@@ -38107,6 +38247,12 @@ async function liqGuardar() {
     // ningún lado: si la liquidación era parcial, no quedaba registro.
     bultos_ingresados:    (document.getElementById('liq-bultos-in')||{}).value || null,
     bultos_liquidados:    (document.getElementById('liq-bultos-liq')||{}).value || null,
+    // ¿Se le pagó la merma? 1 sí, 0 no, null si la partida no tuvo. Va guardado:
+    // dos liquidaciones de partidas iguales por plata distinta no se explican solas
+    // seis meses después.
+    merma_liquidada:      (function(){ var p = liqMermaPaga();
+                            return (liqModo() === 'cerrado' && liqMermaCant() > 0 && p !== null)
+                              ? (p ? 1 : 0) : null; })(),
     texto_original:       (LIQ.datos && LIQ.datos._textoOriginal) || '',
     // De qué partida es. Sólo viaja si la liquidación se abrió desde la bandeja;
     // es lo que después saca a la partida de "pendientes de liquidar".
@@ -38118,6 +38264,16 @@ async function liqGuardar() {
   // A precio cerrado el servidor exige que el neto a pagar dé el precio de la
   // orden. La pantalla ya lo compara y lo dice en rojo al pie; sin esto, el
   // operador armaba la liquidación entera y se enteraba recién al guardar.
+  // Y TAMPOCO SI FALTA DECIDIR LA MERMA. El servidor lo frena igual, pero el que
+  // arma la liquidación tiene que enterarse acá, con el número a la vista.
+  if (liqModo() === 'cerrado' && liqMermaCant() > 0 && liqMermaPaga() === null) {
+    alert('Esta partida tiene ' + liqCant(liqMermaCant()) + ' ' + liqMermaUni() + ' de merma.'
+      + String.fromCharCode(10, 10)
+      + 'Antes de emitir hay que decir si esa merma se le paga al productor —la pérdida '
+      + 'la absorbe San Gerónimo— o no se le paga —la absorbe él—: son dos importes '
+      + 'distintos.');
+    return;
+  }
   if (liqModo() === 'cerrado' && LIQ.cerrado && Number(LIQ.cerrado.objetivo)) {
     var _pagar = Math.round(((Number(body.total) || 0) + (Number(body.dif_gestion) || 0)) * 100) / 100;
     var _dif = Math.round((_pagar - Number(LIQ.cerrado.objetivo)) * 100) / 100;

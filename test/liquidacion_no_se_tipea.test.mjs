@@ -60,8 +60,12 @@ test('pero NO le mete a un producto los bultos de toda la partida', () => {
   // Con dos productos, los bultos de arriba son el total: metérselos al primer
   // renglón le adjudica a uno lo que entró de los dos, y el papel donde el
   // productor cobra sale mal.
-  const b = cuerpo('function liqArtSync(){', 1500);
-  assert.match(b, /if \(arts\.length === 1\) \{/);
+  //
+  // Se cuentan los renglones REALES —los de merma no son productos vendidos—, si no
+  // una partida de un solo producto con merma dejaba de sincronizarse.
+  const b = cuerpo('function liqArtSync(){', 2600);
+  assert.match(b, /var reales = arts\.filter\(function\(a\)\{ return !esM\(a\); \}\);/);
+  assert.match(b, /if \(reales\.length === 1\) \{/);
 });
 
 // ── 2 · LOS ARTÍCULOS ──────────────────────────────────────────────────────

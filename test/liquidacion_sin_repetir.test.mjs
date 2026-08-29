@@ -75,14 +75,19 @@ test('cambiar los bultos de arriba baja al renglón', () => {
   // oninput dejó de existir y el renglón se sincroniza donde se fija el número.
   assert.match(PANEL, /if \(String\(cc\.value\) !== antes\) liqArtSync\(\);/);
   const i = PANEL.indexOf('function liqArtSync(){');
-  const b = PANEL.slice(i, i + 1500);
+  const b = PANEL.slice(i, i + 2600);
   assert.match(b, /if \(!liqArtDerivado\(\)\) return;/, 'no toca la liquidación suelta');
   // SÓLO con un producto: si la partida trae dos, los bultos de arriba son el
   // TOTAL y metérselos al primer renglón le adjudica a un producto lo que entró
   // de los dos — el papel donde el productor cobra sale mal.
-  assert.match(b, /if \(arts\.length === 1\) \{/);
-  assert.match(b, /arts\[0\]\.cantidad = cant/);
-  assert.match(b, /arts\[0\]\.importe = Math\.round\(arts\[0\]\.cantidad \* arts\[0\]\.precio \* 100\) \/ 100/);
+  //
+  // Se cuentan los renglones REALES: la merma tiene el suyo y no es un producto
+  // vendido, así que una partida de un solo producto con merma se sigue sincronizando.
+  assert.match(b, /if \(reales\.length === 1\) \{/);
+  // Y LA CANTIDAD DEL PRODUCTO ES LA QUE ENTRÓ MENOS LA QUE SE TIRÓ: los dos
+  // renglones tienen que sumar lo recibido, no más.
+  assert.match(b, /reales\[0\]\.cantidad = Math\.round\(\(cant - cantM\) \* 100\) \/ 100/);
+  assert.match(b, /reales\[0\]\.importe = Math\.round\(reales\[0\]\.cantidad \* reales\[0\]\.precio \* 100\) \/ 100/);
 });
 
 test('el precio se lee con separador de miles, no crudo', () => {
