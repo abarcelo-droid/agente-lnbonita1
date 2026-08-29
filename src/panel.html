@@ -4551,6 +4551,17 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
              padding:7px 9px;margin-top:8px"></div>
         <div id="sg-loteed-precio-nota" style="font-size:11px;color:var(--mut);margin-top:6px;display:none">
           🔒 El precio lo corrige un administrador.</div>
+        <!-- ── DOS CALIDADES SON DOS RENGLONES ──────────────────────────────
+             Pablo, 29/8/2026: «que separar por calidad parta también el renglón de
+             la orden; los 10 de segunda pasan a ser su propio renglón y ahí sí les
+             ponés $20.000 sin tocar los 45».
+             Las separaciones hechas ANTES de eso quedaron compartiendo renglón: el
+             precio que se le corrige acá les baja el COSTO, pero lo que la
+             liquidación exige sale del renglón, y ése es el de todas. Acá se dice y
+             se ofrece abrirle el suyo. -->
+        <div id="sg-loteed-renglon" style="display:none;margin-top:10px;border:1px solid #f59e0b;
+             background:rgba(245,158,11,.09);border-radius:8px;padding:9px 11px;font-size:12px;
+             color:#92400e"></div>
       </div>
       <div class="fl ff" style="margin-top:16px"><label>Por qué se corrige <span style="color:var(--err)">*</span></label>
         <textarea id="sg-loteed-motivo" rows="2" placeholder="ej. la balanza marcó 405 y se habían cargado 400"></textarea></div>
@@ -15870,6 +15881,11 @@ function sgOcpOpen(ocId){
     SG.ocp.items = (o.items || []).map(function(it){
       var recibKg = Number(it.kg_recibidos) || 0;
       return { oc_item_id: it.id, nombre: it.producto_nombre || ('#' + it.producto_id),
+        // DE QUÉ CALIDAD ES ESTE RENGLÓN, y qué partidas cuelgan de él. Una orden
+        // puede tener dos renglones del mismo producto desde que separar por calidad
+        // parte también el renglón: sin esto son dos filas que dicen «Manzana» y el
+        // comprador no sabe a cuál bajarle el precio.
+        calidades: it.calidades || '', lotes_codigos: it.lotes_codigos || '',
         // Lo que entró. Si el camión todavía no llegó, lo estimado — que es contra
         // lo que se pactó y lo único que hay para mostrar.
         kg: recibKg > 0 ? recibKg : (Number(it.kg_estimados) || 0),
@@ -15929,10 +15945,19 @@ function sgOcpRender(){
       + (it.recibido ? '' : ' <span style="color:var(--mut)">(estimado)</span>');
     var pb = sgOcpPorBulto(it);
     var vista = sgOcpVista(it);
+    // Las calidades vienen separadas por coma y con las vacías adentro; se limpian
+    // acá para no mostrar «,segunda» ni «primera,» cuando alguna partida no la tiene.
+    var cal = String(it.calidades || '').split(',').filter(function(x){ return x.trim(); })
+      .join(' + ');
     return '<tr>'
       + '<td style="overflow:hidden;text-overflow:ellipsis">' + esc(it.nombre)
+        // La calidad al lado del nombre, en negrita: es lo que distingue un renglón
+        // del otro cuando el producto es el mismo.
+        + (cal ? ' <b style="color:#92400e">· ' + esc(cal) + '</b>' : '')
         + '<div style="font-size:10.5px;color:var(--mut)">se pactó por '
-        + (pb ? ('bulto · de ' + nr(it.kpb) + ' kg') : 'kilo') + '</div></td>'
+        + (pb ? ('bulto · de ' + nr(it.kpb) + ' kg') : 'kilo')
+        + (it.lotes_codigos ? ' · <code style="font-size:10px">' + esc(it.lotes_codigos) + '</code>' : '')
+        + '</div></td>'
       + '<td style="text-align:right;font-size:11.5px;color:var(--mut)">' + recib + '</td>'
       + '<td><input type="number" step="0.01" min="0" id="sg-ocp-p-' + i + '"'
         + ' value="' + (vista === '' ? '' : vista) + '"'
@@ -16143,6 +16168,32 @@ function sgLoteEditarOpen(loteId){
     if (bte) { bte.disabled = false; bte.title = ''; }
     if (cnota) { cnota.style.display = 'none'; cnota.innerHTML = ''; }
   }
+  // ── ¿COMPARTE EL RENGLÓN DE LA ORDEN CON OTRAS? ──────────────────────
+  //
+  // Si lo comparte, el precio que se corrige acá le cambia el COSTO y el cronograma
+  // de pago, pero NO lo que la liquidación va a exigir: eso sale del renglón, y el
+  // renglón es de todas. Bajarlo desde la orden se lo baja a las hermanas.
+  //
+  // Desde el 29/8/2026 separar por calidad abre un renglón nuevo. Las que se
+  // separaron antes quedaron compartiendo, y acá se les ofrece el suyo.
+  var comparten = (SG.ocVerLotes || []).filter(function(x){
+    return x.oc_item_id != null && String(x.oc_item_id) === String(l.oc_item_id);
+  }).length;
+  var rg = eid('sg-loteed-renglon');
+  if (rg) {
+    if (comparten > 1) {
+      rg.style.display = '';
+      rg.innerHTML = '<b>Esta partida comparte el renglón de la orden con otras '
+        + (comparten - 1) + '.</b><div style="margin:4px 0 7px">Lo que se le paga al productor '
+        + 'sale del <b>renglón</b>, así que el precio de acá le cambia el costo pero no lo que '
+        + 'la liquidación va a exigir. Para poder ponerle un precio propio, primero necesita su '
+        + 'propio renglón.</div>'
+        + '<button class="btn bo bs" onclick="sgLoteRenglonPropio()">Darle su propio renglón en la orden</button>';
+    } else {
+      rg.style.display = 'none';
+      rg.innerHTML = '';
+    }
+  }
   eid('sg-loteed-motivo').value = '';
   sgLoteFirmeCartel(null, null);   // el cartel de la partida anterior no puede quedar
   sgLoteEdEq();
@@ -16265,6 +16316,26 @@ function sgLoteFirmeAnular(){
     // Y se guarda la corrección que ya estaba escrita: el que llegó hasta acá
     // tiene el trabajo hecho y no tiene por qué volver a tipearlo.
     sgLoteEditarGuardar();
+  });
+}
+
+// ── DARLE SU PROPIO RENGLÓN ──────────────────────────────────────────────
+//
+// Lo pactado se parte en proporción y el precio se COPIA: partir el renglón no
+// cambia un peso de lo que se le debe al productor. Lo que habilita es lo de
+// después: ponerle otro precio sin tocar el de sus hermanas.
+function sgLoteRenglonPropio(){
+  var l = SG.loteEdit; if (!l) return;
+  if (!confirm('Se le va a abrir a esta partida su PROPIO renglón en la orden de compra.'
+    + String.fromCharCode(10,10)
+    + 'Arranca con el mismo precio, así que lo que se le debe al productor no cambia. '
+    + 'Después le podés poner otro precio desde la orden, sin tocar el de las otras.')) return;
+  api('/api/sg/lotes/' + l.id + '/renglon-propio', 'POST',
+    { motivo: String((eid('sg-loteed-motivo') || {}).value || '').trim() || null }).then(function(r){
+    if (!r || !r.ok) { toast((r && r.error) || 'No se pudo', 'er'); return; }
+    toast('Listo: ahora tiene su propio renglón. El precio se cambia desde la orden.', 'ok');
+    closeMB('sg-loteed-modal');
+    if (SG.ocVerId) sgOcVer(SG.ocVerId);
   });
 }
 

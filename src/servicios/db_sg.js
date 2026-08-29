@@ -2581,6 +2581,17 @@ try {
   `);
 } catch (e) { console.error('[DB] SG sg_lote_reclasificaciones:', e.message); }
 
+// ── QUÉ RENGLÓN DE LA ORDEN SE ABRIÓ PARA LA MERCADERÍA DE SEGUNDA ──────────
+//
+// Pablo, 29/8/2026: «que separar por calidad parta también el renglón de la orden;
+// los 10 de segunda pasan a ser su propio renglón y ahí sí les ponés $20.000 sin
+// tocar los 45».
+//
+// El precio vive en el RENGLÓN de la orden —es de ahí de donde sale lo que se le
+// paga al productor—, así que dos calidades con dos precios son dos renglones. Acá
+// queda cuál se creó, para poder deshacerlo sin adivinar.
+try { db.exec('ALTER TABLE sg_lote_reclasificaciones ADD COLUMN oc_item_creado INTEGER'); } catch (_) {}
+
 console.log('[DB] Módulo San Gerónimo (sg_*) inicializado');
 
 export default db;

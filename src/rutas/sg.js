@@ -2509,6 +2509,96 @@ function crearLoteHijo(db, { madre, reprocesoId, productoId, kg, costoAsignado, 
 //   · los gastos directos del lote (acondicionamiento, comisión) NO se reparten
 //     solos: hay que partir cada fila. Si esto se omite, el lote de segunda
 //     queda más barato por kilo y se rompe la promesa.
+// ══ DOS CALIDADES SON DOS RENGLONES DE LA ORDEN ═══════════════════════════════
+//
+// Pablo, 29/8/2026: «que separar por calidad parta también el renglón de la orden.
+// Los 10 de segunda pasan a ser su propio renglón y ahí sí les ponés $20.000 sin
+// tocar los 45. Es lo más parecido a la realidad: se pactaron dos precios».
+//
+// POR QUÉ EL RENGLÓN Y NO LA PARTIDA. Lo que se le paga al productor sale de
+// sg_oc_items.precio_estimado_por_kg —lo mira acordadoDeOC, y contra eso controla la
+// liquidación a precio cerrado—. El precio de la partida es una copia derivada, y
+// encima NETA de IVA. Bajarle el precio a la partida cambiaba el costo y el
+// cronograma pero no lo que la liquidación exigía: dos números para la misma
+// mercadería. Con dos renglones hay uno solo, y es el que ya mira todo el sistema.
+//
+// LO PACTADO SE PARTE EN LA MISMA PROPORCIÓN, así que la suma de los dos renglones
+// da lo de antes: ni la orden pactó de más ni «entró de más» contra lo pedido. Y el
+// precio se COPIA: partir el renglón no cambia lo que se debe. Recién después se le
+// pone otro precio, que es una decisión aparte y tiene su propia pantalla.
+//
+// La madre absorbe el redondeo, igual que con el costo.
+// ── QUIÉN APUNTA A UN RENGLÓN DE LA ORDEN ────────────────────────────────
+//
+// CINCO columnas, no dos. Con foreign_keys en ON, borrar un renglón que todavía
+// tiene algo colgando tira FOREIGN KEY constraint failed, y como el borrado corre
+// dentro de la transacción que deshace la separación, se lleva puesta la anulación
+// entera: los kilos, los bultos, el costo, los gastos directos y la ubicación
+// vuelven atrás y el usuario recibe el texto crudo de SQLite.
+//
+// Se cuentan también las filas INACTIVAS: una FK no distingue, y un lote dado de
+// baja apuntando al renglón lo traba igual.
+function colgadosDeItem(db, itemId) {
+  // El try/catch es por si alguna tabla todavía no existe en una base vieja: mejor
+  // contar de menos en ESA tabla que romper la anulación entera.
+  const uno = (sql, n2) => {
+    try { return db.prepare(sql).get(...(n2 ? [itemId, itemId] : [itemId])).c; }
+    catch (_) { return 0; }
+  };
+  return uno('SELECT COUNT(*) c FROM sg_lotes WHERE oc_item_id=?')
+    + uno('SELECT COUNT(*) c FROM sg_despacho_items WHERE oc_item_id=?')
+    + uno('SELECT COUNT(*) c FROM sg_recepcion_fotos WHERE oc_item_id=?')
+    + uno('SELECT COUNT(*) c FROM sg_recepcion_calidad WHERE oc_item_id=?')
+    + uno('SELECT COUNT(*) c FROM sg_reservas WHERE oc_item_id=? OR origen_oc_item_id=?', true);
+}
+
+function partirRenglonDeOrden(db, { itemId, loteId, bultosMov, kgMov, nota }) {
+  const it = db.prepare('SELECT * FROM sg_oc_items WHERE id=?').get(itemId);
+  if (!it) return null;
+  // Lo recibido del renglón ENTERO es contra lo que se prorratea.
+  const rec = db.prepare(`SELECT COALESCE(SUM(kg_reales),0) k
+     FROM sg_lotes WHERE oc_item_id=? AND activo=1`).get(itemId);
+  const totK = r2(rec.k);
+  // ── SE PARTE POR KILOS, SIEMPRE ───────────────────────────────────────
+  //
+  // Los kilos los tiene TODO lote; los bultos no. Un renglón mixto —el camión que
+  // descarga 60 cajones y después 800 kg sueltos del mismo producto, que el propio
+  // sg_acordado.js documenta— tiene lotes sin bultos, y prorratear por cajones los
+  // dejaba afuera del denominador: partir el lote contado se llevaba TODO lo pactado
+  // (55 sobre 55 cajones = 1) y el renglón que se quedaba con los 800 kg quedaba
+  // pactado en cero. Después la orden avisa «entró de más» de un lado y «faltó» del
+  // otro, las dos cosas falsas.
+  //
+  // Con una sola unidad para los dos lados, el reparto cierra siempre. Y en el caso
+  // normal —todos los lotes contados— da lo mismo que por cajones.
+  const km = r2(kgMov);
+  const prop = (km > 0 && totK > 0) ? km / totK : 0;
+  if (!(prop > 0)) return null;
+
+  const cantOrig = Number(it.cantidad_estimada_presentaciones) || 0;
+  const kgOrig = Number(it.kg_estimados) || 0;
+  const cantMov = Math.min(cantOrig, Math.round(cantOrig * prop));
+  const kgMovEst = Math.min(kgOrig, r2(kgOrig * prop));
+
+  const info = db.prepare(`INSERT INTO sg_oc_items
+    (oc_id, producto_id, presentacion_id, cantidad_estimada_presentaciones, kg_estimados,
+     precio_estimado_por_kg, observaciones_item, modo_carga, precio_referencia_venta,
+     iva_alicuota, kg_por_bulto, envase_id, piso_id)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
+    it.oc_id, it.producto_id, it.presentacion_id, cantMov, kgMovEst,
+    it.precio_estimado_por_kg, nota || null, it.modo_carga, it.precio_referencia_venta,
+    it.iva_alicuota, it.kg_por_bulto, it.envase_id, it.piso_id);
+  const nuevoItem = Number(info.lastInsertRowid);
+
+  db.prepare(`UPDATE sg_oc_items SET cantidad_estimada_presentaciones=?, kg_estimados=?
+     WHERE id=?`).run(cantOrig - cantMov, r2(kgOrig - kgMovEst), itemId);
+  db.prepare('UPDATE sg_lotes SET oc_item_id=? WHERE id=?').run(nuevoItem, loteId);
+  // El neto, el IVA y los totales de la cabecera se rehacen con la MISMA cuenta del
+  // alta: si no, el PDF de la orden diría un total que no es la suma de sus renglones.
+  recalcTotalesOC(db, it.oc_id);
+  return nuevoItem;
+}
+
 function reclasificarLote(db, { madre, bultos, calidadNueva, semaforo, motivo, pisoId, userId }) {
   const kpb = kpbEfectivo(madre);
   if (!(kpb > 0)) return { error: 'Esta partida no tiene kilos por bulto: no se puede separar por cajón.' };
@@ -2591,18 +2681,31 @@ function reclasificarLote(db, { madre, bultos, calidadNueva, semaforo, motivo, p
   recalcEstadoLote(db, madre.id);
   recalcEstadoLote(db, nuevoId);
 
+  // ── Y SU PROPIO RENGLÓN EN LA ORDEN ────────────────────────────────
+  //
+  // Para que el precio de la segunda se pueda cambiar sin tocar el de la primera:
+  // el precio vive en el renglón, no en la partida (ver partirRenglonDeOrden).
+  // Arranca con el MISMO precio, así que lo que se le debe al productor no se
+  // mueve al separar.
+  const itemNuevo = madre.oc_item_id
+    ? partirRenglonDeOrden(db, { itemId: madre.oc_item_id, loteId: nuevoId,
+        bultosMov: bultos, kgMov,
+        nota: calidadNueva + ' separada de ' + (madre.codigo_lote || 'la partida') })
+    : null;
+
   db.prepare(`INSERT INTO sg_lote_reclasificaciones
     (lote_origen_id, lote_destino_id, bultos, kg, costo_movido, calidad_anterior, calidad_nueva,
-     motivo, piso_id, usuario_id)
-    VALUES (?,?,?,?,?,?,?,?,?,?)`).run(
+     motivo, piso_id, usuario_id, oc_item_creado)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?)`).run(
     madre.id, nuevoId, bultos, kgMov, costoMov, madre.calidad || null, calidadNueva,
-    motivo, pisoUsado, userId || null);
+    motivo, pisoUsado, userId || null, itemNuevo);
 
   anotarEdicion(db, { tabla: 'sg_lotes', registroId: madre.id, campo: 'bultos',
     antes: madre.bultos, despues: bltQueda, motivo: 'Bultos pasados a ' + calidadNueva + ': ' + motivo,
     userId });
 
-  return { loteId: nuevoId, codigoLote: codigo, kg: kgMov, bultos, costo: costoMov, piso_id: pisoUsado };
+  return { loteId: nuevoId, codigoLote: codigo, kg: kgMov, bultos, costo: costoMov,
+    piso_id: pisoUsado, oc_item_creado: itemNuevo };
 }
 
 // Actualiza estado de la OC según kg recibidos vs estimados.
@@ -2662,7 +2765,13 @@ function diferenciasDeOC(db, ocId) {
     WHERE oc_id = ? AND activo = 1`).get(ocId).c;
   if (!recibida) return [];
   const items = db.prepare(`SELECT i.id, i.kg_estimados, i.cantidad_estimada_presentaciones,
-      i.kg_por_bulto, i.presentacion_id, i.modo_carga, pr.nombre AS producto_nombre,
+      i.kg_por_bulto, i.presentacion_id, i.modo_carga,
+      -- CON LA CALIDAD PEGADA. Desde que separar por calidad parte el renglón, una
+      -- orden puede tener dos del mismo producto: sin esto el aviso de «entró
+      -- distinto de lo que se había pedido» sale dos veces con el mismo rótulo y no
+      -- se sabe cuál de los dos mirar.
+      pr.nombre || COALESCE(' · ' || NULLIF((SELECT GROUP_CONCAT(DISTINCT COALESCE(l.calidad,''))
+        FROM sg_lotes l WHERE l.oc_item_id=i.id AND l.activo=1), ''), '') AS producto_nombre,
       (SELECT COALESCE(SUM(kg_reales),0) FROM sg_lotes WHERE oc_item_id=i.id AND activo=1) AS kg_recibidos,
       (SELECT COALESCE(SUM(bultos),0)    FROM sg_lotes WHERE oc_item_id=i.id AND activo=1) AS bultos_recibidos
     FROM sg_oc_items i LEFT JOIN sg_productos pr ON pr.id=i.producto_id
@@ -5278,8 +5387,55 @@ router.post('/lotes/:id/reclasificaciones/:rid/anular', requireAuth, express.jso
         descontarDeUbicacion(db, hijo.id, u.bultos, u.kg, u.piso_id);
         ubicarLote(db, madre.id, [{ piso_id: u.piso_id, bultos: u.bultos, kg: u.kg }]);
       }
+      // El lote se da de baja Y VUELVE AL RENGLÓN DE LA MADRE: si quedara colgado
+      // del renglón que se abrió para él, ese renglón no se podría cerrar y la orden
+      // quedaría con un renglón fantasma para siempre.
       db.prepare(`UPDATE sg_lotes SET activo=0, eliminado_en=datetime('now','localtime'),
-        eliminado_por_id=? WHERE id=?`).run(uid(req), hijo.id);
+        eliminado_por_id=?, oc_item_id=? WHERE id=?`).run(uid(req), madre.oc_item_id, hijo.id);
+      // ── Y EL RENGLÓN QUE SE LE HABÍA ABIERTO SE CIERRA ─────────────────
+      //
+      // Lo pactado vuelve entero al renglón de la madre y el otro se borra: dos
+      // renglones del mismo producto cuando ya no hay dos calidades es un renglón que
+      // nadie sabe qué es. Si mientras tanto le habían puesto otro precio, ese precio
+      // se va con él — y está bien: ya no hay mercadería a la cual aplicárselo.
+      if (r.oc_item_creado && Number(r.oc_item_creado) !== Number(madre.oc_item_id)) {
+        const cre = db.prepare('SELECT * FROM sg_oc_items WHERE id=?').get(r.oc_item_creado);
+        // ── O SE DEVUELVE Y SE BORRA, O NO SE TOCA NADA ─────────────────
+        //
+        // Devolver lo pactado y después no poder borrar el renglón lo cuenta DOS
+        // veces: la madre se lo quedó y el otro lo conservó. Pasa de verdad —una
+        // separación anidada deja un lote inactivo colgando del renglón—, y ahí la
+        // orden pasaba de 55 cajones pactados a 65.
+        //
+        // Se pregunta por TODAS las tablas que apuntan al renglón, no por dos: con
+        // foreign_keys en ON, un DELETE que revienta se lleva puesta la anulación
+        // entera —los kilos, los bultos, el costo, los gastos, la ubicación— y el
+        // usuario recibe el texto crudo de SQLite.
+        if (cre) {
+          // Lo pactado vuelve ENTERO a la madre, siempre.
+          db.prepare(`UPDATE sg_oc_items
+               SET cantidad_estimada_presentaciones = COALESCE(cantidad_estimada_presentaciones,0) + ?,
+                   kg_estimados = ROUND(COALESCE(kg_estimados,0) + ?, 2)
+             WHERE id = ?`).run(Number(cre.cantidad_estimada_presentaciones) || 0,
+            Number(cre.kg_estimados) || 0, madre.oc_item_id);
+          // Y el renglón se borra. Si algo todavía le cuelga —una foto de recepción,
+          // un informe de calidad, una reserva, un lote de una separación anidada—
+          // el DELETE reventaría con foreign_keys en ON y se llevaría puesta la
+          // anulación entera, así que en ese caso se lo deja VACÍO: sin pactado no
+          // dispara el «entró distinto de lo que se había pedido» ni devuelve la
+          // orden a la bandeja de pendientes de recibir. Y se dice por qué está ahí.
+          if (!colgadosDeItem(db, cre.id)) {
+            db.prepare('DELETE FROM sg_oc_items WHERE id=?').run(cre.id);
+          } else {
+            db.prepare(`UPDATE sg_oc_items
+                 SET cantidad_estimada_presentaciones = 0, kg_estimados = 0,
+                     observaciones_item = 'Renglón vacío: se deshizo la separación por calidad'
+               WHERE id = ?`).run(cre.id);
+          }
+          const ocDe = db.prepare('SELECT oc_id FROM sg_oc_items WHERE id=?').get(madre.oc_item_id);
+          if (ocDe && ocDe.oc_id) recalcTotalesOC(db, ocDe.oc_id);
+        }
+      }
       // La fila NO se borra: se sella. Una reclasificación que desaparece deja la
       // partida con un agujero que nadie puede explicar.
       db.prepare(`UPDATE sg_lote_reclasificaciones SET anulada_en=datetime('now','localtime'),
@@ -5346,6 +5502,66 @@ router.put('/lotes/:id/calidad', requireAuth, (req, res) => {
         modificado_por=? WHERE id=?`).run(nueva, uid(req), l.id);
     })();
     res.json({ ok: true, data: { id: Number(l.id), calidad: nueva } });
+  } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
+});
+
+// ══ DARLE A UNA PARTIDA SU PROPIO RENGLÓN EN LA ORDEN ════════════════════════
+//
+// Las separaciones por calidad hechas ANTES de que separar partiera también el
+// renglón quedaron con las dos calidades colgando del mismo: su precio es uno solo, y
+// bajarlo se lo baja a las dos.
+//
+// Esto le abre el suyo, con la misma cuenta y el mismo resultado: lo pactado se parte
+// en proporción, el precio se COPIA, y lo que se le debe al productor no se mueve.
+// Recién después se le pone otro precio, desde la orden, que es donde vive.
+//
+// Es trabajo del día del que compra, no de un administrador: exigirNivel lo resuelve
+// por la dirección como todo el resto del módulo.
+router.post('/lotes/:id/renglon-propio', requireAuth, express.json(), (req, res) => {
+  const db = getDb();
+  try {
+    const lote = db.prepare('SELECT * FROM sg_lotes WHERE id=? AND activo=1').get(req.params.id);
+    if (!lote) return res.status(404).json({ ok: false, error: 'Partida no encontrada' });
+    if (!lote.oc_item_id) {
+      return res.status(400).json({ ok: false, error:
+        'Esta partida no cuelga de ninguna orden, así que no hay renglón que partir.' });
+    }
+    const hermanos = db.prepare(`SELECT COUNT(*) c FROM sg_lotes
+       WHERE oc_item_id=? AND activo=1 AND id<>?`).get(lote.oc_item_id, lote.id).c;
+    if (!hermanos) {
+      return res.status(400).json({ ok: false, error:
+        'Esta partida ya es la única de su renglón: el precio de ese renglón es sólo suyo. '
+        + 'Se cambia desde la orden de compra.' });
+    }
+    const ocRow = db.prepare('SELECT oc_id FROM sg_oc_items WHERE id=?').get(lote.oc_item_id);
+    // MISMA REGLA DE SIEMPRE: con la orden ya documentada el precio quedó firme, y
+    // partir el renglón es preparar el terreno para cambiarlo.
+    const freno = (ocRow && ocRow.oc_id)
+      ? frenoPrecioFirme(db, ocRow.oc_id, 'darle su propio renglón') : null;
+    if (freno) return res.status(409).json({ ok: false, error: freno });
+
+    let creado = null;
+    db.transaction(() => {
+      creado = partirRenglonDeOrden(db, { itemId: lote.oc_item_id, loteId: lote.id,
+        bultosMov: lote.bultos, kgMov: lote.kg_reales,
+        nota: (lote.calidad || 'Partida') + ' — ' + (lote.codigo_lote || '') });
+      if (creado) {
+        anotarEdicion(db, { tabla: 'sg_lotes', registroId: lote.id, campo: 'oc_item_id',
+          antes: lote.oc_item_id, despues: creado,
+          motivo: val(req.body && req.body.motivo) || 'Se le abrió su propio renglón en la orden',
+          ocId: ocRow && ocRow.oc_id, userId: uid(req) });
+        // Y si vino de una separación por calidad, queda apuntado: deshacerla tiene
+        // que saber qué renglón cerrar.
+        db.prepare(`UPDATE sg_lote_reclasificaciones SET oc_item_creado=?
+           WHERE lote_destino_id=? AND anulada_en IS NULL AND oc_item_creado IS NULL`)
+          .run(creado, lote.id);
+      }
+    })();
+    if (!creado) {
+      return res.status(400).json({ ok: false, error:
+        'No se pudo partir el renglón: la partida no tiene bultos ni kilos con los que hacerlo.' });
+    }
+    res.json({ ok: true, data: { oc_item_id: creado, oc_id: ocRow && ocRow.oc_id } });
   } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
 });
 
@@ -6817,7 +7033,16 @@ router.get('/oc/:id', requireAuth, (req, res) => {
       (SELECT COALESCE(SUM(kg_reales),0) FROM sg_lotes WHERE oc_item_id=i.id AND activo=1) AS kg_recibidos,
       -- Los BULTOS que entraron de verdad. La orden se pacta en bultos y se
       -- controla en bultos: es la columna que mira el comprador contra el remito.
-      (SELECT COALESCE(SUM(bultos),0) FROM sg_lotes WHERE oc_item_id=i.id AND activo=1) AS bultos_recibidos
+      (SELECT COALESCE(SUM(bultos),0) FROM sg_lotes WHERE oc_item_id=i.id AND activo=1) AS bultos_recibidos,
+      -- ── DE QUÉ CALIDAD ES ESTE RENGLÓN ──────────────────────────────────
+      -- Desde que separar por calidad parte también el renglón (29/8/2026), una
+      -- orden puede tener DOS renglones del mismo producto. Sin esto, la pantalla
+      -- de precios muestra dos filas que dicen «Manzana» y el comprador no sabe
+      -- cuál es la de segunda — que es justamente a la que le va a bajar el precio.
+      (SELECT GROUP_CONCAT(DISTINCT COALESCE(l.calidad,''))
+         FROM sg_lotes l WHERE l.oc_item_id=i.id AND l.activo=1) AS calidades,
+      (SELECT GROUP_CONCAT(l.codigo_lote, ' · ')
+         FROM sg_lotes l WHERE l.oc_item_id=i.id AND l.activo=1) AS lotes_codigos
       FROM sg_oc_items i
       LEFT JOIN sg_productos pr ON pr.id=i.producto_id
       LEFT JOIN sg_presentaciones ps ON ps.id=i.presentacion_id
