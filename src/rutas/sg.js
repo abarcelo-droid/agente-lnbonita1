@@ -3718,6 +3718,35 @@ router.get('/partidas/:id/venta', requireAuth, (req, res) => {
       };
     });
 
+    // ── Y LA MERMA ES UN RENGLÓN MÁS, A $0 ──────────────────────────
+    //
+    // Pablo, 29/8/2026: «lo que se liquidan son pesos, no podemos dejar cantidades
+    // abiertas… las mermas deben descontarse pero deben figurar como X cantidad de
+    // bultos mermados multiplicados por $0 de venta».
+    //
+    // Antes la merma vivía sólo en su cuadro aparte, sin precio: el cuerpo del
+    // comprobante decía 55 cajones sobre una partida de 60 y los otros 5 no estaban
+    // en ninguna línea. El productor tenía que restar de memoria para entender por
+    // qué le faltaban cinco. Ahora los renglones SUMAN lo que entró, y el que se
+    // tiró dice con todas las letras que se pagó cero.
+    //
+    // A precio CERRADO este precio puede dejar de ser cero: si se decide pagarle la
+    // merma, el renglón toma el precio acordado. Eso lo resuelve la pantalla, que es
+    // donde se hace la pregunta.
+    const mermaPorProd = new Map();
+    for (const m of mermas) {
+      const k = m.producto || 'Sin producto';
+      const a = mermaPorProd.get(k) || { bultos: 0, kg: 0 };
+      a.bultos += Number(m.bultos) || 0;
+      a.kg = r2(a.kg + (Number(m.kg) || 0));
+      mermaPorProd.set(k, a);
+    }
+    const mermaArticulos = [...mermaPorProd.entries()].map(([prod, a]) => {
+      const cant = unidad === 'bulto' ? r2(a.bultos) : r2(a.kg);
+      return { articulo: prod + ' — merma', unidad, cantidad: cant,
+        bultos: r2(a.bultos), kg: r2(a.kg), precio: 0, importe: 0, es_merma: 1 };
+    }).filter((a) => a.cantidad > 0);
+
     // ── LO QUE SE LE DESCUENTA, TRAÍDO DE DONDE YA VIVE ────────────────
     //
     // Pablo: "la descarga debe venir de la recepción de mercadería que se hizo, si
@@ -3798,6 +3827,13 @@ router.get('/partidas/:id/venta', requireAuth, (req, res) => {
         return { total: u.total, precio_por_bulto: u.precio,
                  base: u.base,
                  items: u.items,
+                 // LO MISMO, DESCONTANDO LO QUE SE TIRÓ. Es la segunda de las dos
+                 // opciones que la pantalla tiene que ofrecer cuando hubo merma:
+                 // se calcula ítem por ítem y a su propio precio, no prorrateando
+                 // —cinco cajones de ciruela no valen el precio promedio del
+                 // camión—.
+                 total_sin_mermas: (mermaBultos > 0 || mermaKg > 0)
+                   ? r2(acordadoDeOC(db, ocId, { sinMermas: true }).total) : u.total,
                  // 1 = el precio ya trae el IVA; 0 = es neto; null = la orden es
                  // vieja y no lo dice. La pantalla asume CON IVA, que es lo
                  // habitual (Pablo, 25/8/2026), y lo deja cambiar.
@@ -3825,7 +3861,7 @@ router.get('/partidas/:id/venta', requireAuth, (req, res) => {
         localidad: oc.localidad, provincia: oc.provincia,
         cp: oc.codigo_postal, iva: oc.categoria_fiscal,
       },
-      articulos,
+      articulos: articulos.concat(mermaArticulos),
       bultos_ingresados: bultosIn, bultos_vendidos: bultosOut,
       bultos_merma: mermaBultos, kg_merma: mermaKg, mermas,
       bultos_terminados: terminado,

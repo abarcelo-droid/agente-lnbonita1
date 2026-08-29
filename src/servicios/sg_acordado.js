@@ -19,11 +19,47 @@
 
 const r2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
 
+// ══ LO QUE SE TIRÓ, POR ÍTEM ══════════════════════════════════════════════
+//
+// La merma NO baja los kilos ni los bultos del lote —el decomiso deja kg_reales
+// intacto a propósito—, así que lo recibido de la orden los sigue incluyendo. Para
+// poder pagar SIN las mermas hay que descontarlas acá.
+//
+// POR ÍTEM Y NO PRORRATEADO. Un camión con durazno a $8.000 y ciruela a $2.000 en
+// el que se tiran cinco cajones de ciruela no descuenta «cinco cajones al precio
+// promedio»: descuenta cinco cajones de ciruela. El prorrateo da un número creíble
+// y equivocado, y la diferencia se la come el productor.
+//
+// Los kilos se separan según el lote haya entrado contado en cajones o pesado a
+// granel, porque la cuenta de abajo paga cada parte con su base.
+export function mermaPorItemDeOC(db, ocId) {
+  const rows = db.prepare(`SELECT l.oc_item_id AS item,
+      COALESCE(SUM(dc.bultos),0) AS bultos,
+      COALESCE(SUM(dc.kg),0) AS kg,
+      COALESCE(SUM(CASE WHEN COALESCE(l.bultos,0) > 0 THEN dc.kg ELSE 0 END),0) AS kg_con_bultos
+    FROM sg_lote_decomisos dc
+    JOIN sg_lotes l ON l.id = dc.lote_id AND l.activo = 1
+    JOIN sg_oc_items i ON i.id = l.oc_item_id
+   WHERE i.oc_id = ? GROUP BY l.oc_item_id`).all(ocId);
+  const porItem = new Map();
+  let bultos = 0, kg = 0;
+  for (const x of rows) {
+    porItem.set(x.item, { bultos: Number(x.bultos) || 0, kg: r2(x.kg),
+      kg_con_bultos: r2(x.kg_con_bultos) });
+    bultos += Number(x.bultos) || 0;
+    kg = r2(kg + Number(x.kg));
+  }
+  return { bultos, kg, hay: bultos > 0 || kg > 0, porItem };
+}
+
 // La consulta se compila UNA vez por base y se reusa: el listado de órdenes la
 // llama una vez por fila, y compilar la misma sentencia doscientas veces para
 // pintar una pantalla es trabajo que no hace falta.
 const _stmtAcordado = new WeakMap();
-export function acordadoDeOC(db, ocId) {
+// Con { sinMermas: true } devuelve lo que se le debe al productor DESCONTANDO lo
+// que se tiró. Es la segunda de las dos opciones que la liquidación tiene que
+// ofrecer cuando la partida tuvo merma (Pablo, 29/8/2026).
+export function acordadoDeOC(db, ocId, opts) {
   if (!_stmtAcordado.has(db)) _stmtAcordado.set(db, db.prepare(`SELECT i.id, i.precio_estimado_por_kg,
       -- LA UNIDAD EN QUE SE PACTÓ. Es lo que el comprador eligió al cargar la
       -- orden, y es lo que manda cuando hay diferencias: si compró bultos, la
@@ -40,12 +76,20 @@ export function acordadoDeOC(db, ocId) {
     LEFT JOIN sg_presentaciones ps ON ps.id=i.presentacion_id
     WHERE i.oc_id=?`));
   const its = _stmtAcordado.get(db).all(ocId);
+  const mer = (opts && opts.sinMermas) ? mermaPorItemDeOC(db, ocId) : null;
   let total = 0;
   const detalle = [];
   for (const it of its) {
     const pk = it.precio_estimado_por_kg != null ? Number(it.precio_estimado_por_kg) : null;
     const kpb = Number(it.kg_por_bulto) || 0;
-    const bultos = Number(it.bultos_recibidos) || 0;
+    const m = (mer && mer.porItem.get(it.id)) || { bultos: 0, kg: 0, kg_con_bultos: 0 };
+    // LO BRUTO DECIDE LA BASE, LO NETO DECIDE EL IMPORTE. Si una partida entró en
+    // cajones y se mermó entera, descontar primero la haría caer a la cuenta por
+    // kilo y cambiaría de qué se está hablando: se pactó por cajón igual.
+    const bultosBrutos = Number(it.bultos_recibidos) || 0;
+    const bultos = Math.max(0, bultosBrutos - m.bultos);
+    const kgRecibidos = Math.max(0, r2(Number(it.kg_recibidos) - m.kg));
+    const kgConBultos = Math.max(0, r2(Number(it.kg_con_bultos) - m.kg_con_bultos));
     const precioBulto = (pk != null && kpb > 0) ? r2(pk * kpb) : null;
     let importe = null, base = null;
     if (pk != null) {
@@ -58,7 +102,7 @@ export function acordadoDeOC(db, ocId) {
       //
       // Ahora los cajones se pagan por cajón y el resto por kilo, que es
       // exactamente como se pactó cada parte.
-      const kgSueltos = Math.max(0, r2(Number(it.kg_recibidos) - Number(it.kg_con_bultos)));
+      const kgSueltos = Math.max(0, r2(kgRecibidos - kgConBultos));
       // Y LA BASE SALE DE LO QUE PACTÓ EL COMPRADOR, no de si alguien contó
       // bultos. Antes: "si hay aunque sea un bulto contado, se cobra por bulto".
       // Eso decidía por él. Un ítem comprado POR KILO se paga por kilo aunque haya
@@ -68,12 +112,18 @@ export function acordadoDeOC(db, ocId) {
       // antes: no hay dato de qué eligió, y suponer "kilo" cambiaría la cuenta de
       // órdenes ya cerradas.
       const porBulto = (it.modo_carga === 'bulto')
-        || (it.modo_carga == null && bultos > 0);
+        || (it.modo_carga == null && bultosBrutos > 0);
       if (porBulto && bultos > 0 && precioBulto != null) {
         importe = r2(bultos * precioBulto + kgSueltos * pk);
         base = kgSueltos > 0 ? 'mixto' : 'bulto';
+      } else if (porBulto && bultosBrutos > 0) {
+        // Se pactó por cajón y no queda ninguno sin mermar: se debe cero, pero la
+        // base sigue siendo el cajón. Caer al `else` diría 'kilo' y el mensaje del
+        // cerrojo hablaría de una cuenta que nadie hizo.
+        importe = r2(kgSueltos * pk);
+        base = 'bulto';
       } else {
-        importe = r2(it.kg_recibidos * pk);
+        importe = r2(kgRecibidos * pk);
         base = 'kilo';
       }
       total = r2(total + importe);
@@ -137,8 +187,23 @@ const ALICUOTAS = [0, 2.5, 5, 10.5, 21, 27];
 // se rechaza sólo lo que no es ninguno. Eso frena lo que hay que frenar (alguien
 // tipeando un precio distinto del pactado) sin frenar trabajo legítimo.
 //
+// ══ Y LA MERMA, QUE ES UNA PREGUNTA, NO UNA CUENTA ════════════════════════════
+//
+// Pablo, 29/8/2026: «en el caso de precio cerrado, efectivamente la liquidación debe
+// preguntar si "liquida las mermas" —o sea las incluye en la liquidación, pérdida
+// para San Gerónimo— o si no paga esas mermas. Mostralo en las partidas que tengan
+// merma y da las dos opciones para el cálculo».
+//
+// A precio cerrado se pactó un precio por los cajones que se recibieron. Si cinco se
+// tiraron, ese precio se le paga igual (lo pierde San Gerónimo) o no se le paga (lo
+// pierde el productor). Las dos son legítimas y NINGUNA es la respuesta por defecto:
+// son la misma partida cobrada con dos números distintos, y elegir uno acá sería
+// decidir de qué bolsillo sale la pérdida sin preguntarle a nadie.
+//
+// Por eso `mermaLiquidada` no tiene default: con merma y sin respuesta, se frena.
 // Devuelve { ok, objetivo, admitidos, ... } o { ok:false, motivo }.
-export function objetivoCerrado(db, { ocId, cantidad, incluyeIvaElegido = null }) {
+export function objetivoCerrado(db, { ocId, cantidad, incluyeIvaElegido = null,
+    mermaLiquidada = null }) {
   const oc = db.prepare(`SELECT id, tipo_precio, precio_incluye_iva, iva_alicuota_oc
     FROM sg_oc WHERE id = ?`).get(ocId);
   if (!oc) return { ok: false, motivo: 'La partida no existe.' };
@@ -169,6 +234,30 @@ export function objetivoCerrado(db, { ocId, cantidad, incluyeIvaElegido = null }
       + ' bultos (' + recib.kg + ' kg). No se le puede pagar al productor por mercadería '
       + 'que no recibimos.' };
   }
+  // ── LA MERMA: DOS CUENTAS, Y HAY QUE ELEGIR UNA ──────────────────────────
+  const merma = mermaPorItemDeOC(db, ocId);
+  // En la misma unidad que el campo «a liquidar»: bultos cuando se contaron cajones,
+  // kilos cuando la mercadería entró pesada.
+  const mermaCant = recib.bultos > 0 ? merma.bultos : merma.kg;
+  if (merma.hay && mermaLiquidada == null) {
+    return { ok: false, motivo:
+      'Esta partida tiene ' + mermaCant + (recib.bultos > 0 ? ' bultos' : ' kg')
+      + ' de merma y se compró a precio cerrado. Hay que decir si esa merma se le paga '
+      + 'al productor —la pérdida la absorbe San Gerónimo— o no se le paga —la absorbe '
+      + 'él—: son dos liquidaciones por importes distintos y el sistema no puede elegir '
+      + 'por vos.' };
+  }
+  const sinMermas = merma.hay && mermaLiquidada === false;
+  // Lo acordado descontando lo tirado, ítem por ítem y a su propio precio.
+  const totalObj = sinMermas ? r2(acordadoDeOC(db, ocId, { sinMermas: true }).total) : total;
+  // Lo que se paga y contra qué se prorratea: las dos cosas sin la merma, o las dos
+  // con ella. Mezclarlas —pagar sin merma sobre un total con merma— da un tercer
+  // número que no es ninguna de las dos opciones.
+  const cantPag = sinMermas ? r2(Math.max(0, cant - mermaCant)) : cant;
+  const recibPag = sinMermas
+    ? { bultos: Math.max(0, recib.bultos - merma.bultos), kg: Math.max(0, r2(recib.kg - merma.kg)) }
+    : recib;
+
   // ── LOS NETOS QUE LA ORDEN ADMITE ────────────────────────────────────────
   const netos = new Set();
   // 1. La partida ENTERA: es el total que calculó acordadoDeOC, con la base que le
@@ -177,7 +266,7 @@ export function objetivoCerrado(db, { ocId, cantidad, incluyeIvaElegido = null }
   //    se dijo cuánto, que es el caso de la mercadería que entró pesada y sin cajones.
   const entera = !(cant > 0) || Math.abs(cant - recib.bultos) < 1e-6
     || Math.abs(cant - recib.kg) < 1e-6;
-  if (entera) netos.add(total);
+  if (entera) netos.add(totalObj);
   // 2. Una PARTE, por el precio por unidad de la orden.
   //
   //    Y ACÁ SE ADMITEN LAS DOS LECTURAS DE LA UNIDAD. La orden guarda el precio POR
@@ -189,14 +278,14 @@ export function objetivoCerrado(db, { ocId, cantidad, incluyeIvaElegido = null }
   //
   //    Los dos salen de la orden, así que los dos se admiten. Lo que se frena sigue
   //    siendo lo que se frena: un precio que no es el pactado.
-  if (cant > 0 && precio != null) netos.add(r2(precio * cant));
-  if (cant > 0 && base !== 'bulto' && recib.bultos > 0) {
+  if (cant > 0 && precio != null) netos.add(r2(precio * cantPag));
+  if (cant > 0 && base !== 'bulto' && recibPag.bultos > 0) {
     // La cuenta por kilo con la proporción liquidada, que es lo que corresponde
     // cuando se pactó por kilo y se liquida una parte contada en cajones.
-    netos.add(r2(total * (cant / recib.bultos)));
+    netos.add(r2(totalObj * (cantPag / recibPag.bultos)));
   }
-  if (cant > 0 && base !== 'bulto' && recib.kg > 0 && Math.abs(cant - recib.kg) > 1e-6) {
-    netos.add(r2(total * (cant / recib.kg)));
+  if (cant > 0 && base !== 'bulto' && recibPag.kg > 0 && Math.abs(cant - recib.kg) > 1e-6) {
+    netos.add(r2(totalObj * (cantPag / recibPag.kg)));
   }
   if (!netos.size) {
     return { ok: false, motivo:
@@ -221,7 +310,12 @@ export function objetivoCerrado(db, { ocId, cantidad, incluyeIvaElegido = null }
   // El que se muestra en el mensaje es el primero: la lectura que la orden fija, o
   // —si no fija ninguna— la más habitual, que es que el precio ya trae el IVA.
   return { ok: true, objetivo: admitidos[0], admitidos: [...new Set(admitidos)],
-    precio, cantidad: cant, entera, base, total_orden: total,
+    precio, cantidad: cantPag, entera, base, total_orden: totalObj,
+    // Para que el mensaje del cerrojo pueda decir por qué el número es ése: sin
+    // esto, «cobra $X por la partida entera» sobre una partida con merma descontada
+    // manda a revisar la orden de compra, que está bien.
+    merma: { hay: merma.hay, cantidad: mermaCant, liquidada: sinMermas ? 0 : (merma.hay ? 1 : null),
+      unidad: recib.bultos > 0 ? 'bultos' : 'kg' },
     alicuota: alicOC, dice_iva: dice, recibido: recib };
 }
 

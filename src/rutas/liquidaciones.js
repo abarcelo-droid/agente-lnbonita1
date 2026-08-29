@@ -111,6 +111,12 @@ try { db.exec("ALTER TABLE liquidaciones ADD COLUMN modo_precio TEXT"); } catch(
 // lado: si la liquidación era parcial, no quedaba registro de por cuántos fue.
 try { db.exec("ALTER TABLE liquidaciones ADD COLUMN bultos_ingresados REAL"); } catch(_){}
 try { db.exec("ALTER TABLE liquidaciones ADD COLUMN bultos_liquidados REAL"); } catch(_){}
+// ¿SE LE PAGÓ LA MERMA? 1 = sí, la pérdida la absorbió San Gerónimo. 0 = no, la
+// absorbió el productor. NULL = la partida no tuvo merma, o es vieja.
+// Es la respuesta a una pregunta que cambia el importe, así que tiene que quedar
+// escrita: dentro de seis meses, dos liquidaciones de partidas iguales por plata
+// distinta no se explican solas.
+try { db.exec("ALTER TABLE liquidaciones ADD COLUMN merma_liquidada INTEGER"); } catch(_){}
 // La grilla completa —las cuatro filas con su IVA y su parte de gestión— tal
 // como se cargó. El asiento sale de acá, así que tiene que quedar guardado o no
 // hay forma de explicar el asiento después.
@@ -307,7 +313,7 @@ router.get('/', function(req, res) {
   const rows = db.prepare(`
     SELECT id, n_liquidacion, fecha, remitente_nombre, neto, total, creado_en,
       COALESCE(dif_gestion,0) AS dif_gestion, dif_motivo, asiento_id, modo_precio,
-      oc_id, bultos_liquidados
+      oc_id, bultos_liquidados, merma_liquidada
     FROM liquidaciones
     WHERE eliminado_en IS NULL
     ORDER BY fecha DESC, id DESC
@@ -418,6 +424,12 @@ router.post('/', function(req, res) {
       // corregir una orden vieja cargada al revés; si el servidor lo ignorara,
       // corregirla no serviría de nada.
       incluyeIvaElegido: (d.precio_incluye_iva == null) ? null : !!d.precio_incluye_iva,
+      // ── ¿SE LE PAGA LA MERMA? ──────────────────────────────────────────
+      // No tiene default a propósito: si la partida tuvo merma y esto no viene,
+      // objetivoCerrado frena. Elegir por el operador sería decidir de qué
+      // bolsillo sale la pérdida sin preguntarle a nadie.
+      mermaLiquidada: (d.merma_liquidada == null || d.merma_liquidada === '')
+        ? null : !!Number(d.merma_liquidada),
     });
     if (!obj.ok) return res.status(400).json({ error: obj.motivo });
     // Lo que el productor cobra: el comprobante MÁS lo que se le reconoce por
@@ -449,6 +461,11 @@ router.post('/', function(req, res) {
         + plata(obj.objetivo)
         + (obj.entera ? ' por la partida entera'
                       : ' (' + plata(obj.precio) + ' × ' + obj.cantidad + ')')
+        + ((obj.merma && obj.merma.hay && obj.merma.liquidada === 0)
+            ? ' descontando ' + obj.merma.cantidad + ' ' + obj.merma.unidad + ' de merma'
+            : (obj.merma && obj.merma.hay)
+              ? ' incluyendo ' + obj.merma.cantidad + ' ' + obj.merma.unidad + ' de merma'
+              : '')
         + (obj.dice_iva ? ', precio ' + obj.dice_iva : '')
         + '. Esta liquidación le paga ' + plata(pagar) + '. '
         + 'Si cambió la condición, se modifica LA ORDEN DE COMPRA — no el papel donde cobra.' });
@@ -466,8 +483,9 @@ router.post('/', function(req, res) {
         remitente_nombre, remitente_cuit, remitente_localidad, remitente_provincia, remitente_cp, remitente_iva,
         iva_letra, articulos, mermas, conceptos, neto, total,
         cai_numero, cai_vencimiento, codigo_barras, texto_original, creado_por_id, oc_id,
-        dif_gestion, dif_motivo, modo_precio, bultos_ingresados, bultos_liquidados, grilla_json
-      ) VALUES (?, ?, ?, ?,  ?, ?, ?, ?, ?, ?,  ?, ?, ?, ?, ?, ?,  ?, ?, ?, ?, ?, ?,  ?, ?, ?, ?, ?, ?)
+        dif_gestion, dif_motivo, modo_precio, bultos_ingresados, bultos_liquidados, grilla_json,
+        merma_liquidada
+      ) VALUES (?, ?, ?, ?,  ?, ?, ?, ?, ?, ?,  ?, ?, ?, ?, ?, ?,  ?, ?, ?, ?, ?, ?,  ?, ?, ?, ?, ?, ?,  ?)
     `).run(
       d.n_liquidacion, d.fecha, d.fecha_ingreso || null, d.prov_codigo || null,
       d.remitente_nombre || null, d.remitente_cuit || null, d.remitente_localidad || null,
@@ -489,7 +507,9 @@ router.post('/', function(req, res) {
       d.modo_precio === 'cerrado' ? 'cerrado' : 'abierto',
       d.bultos_ingresados != null && d.bultos_ingresados !== '' ? Number(d.bultos_ingresados) : null,
       d.bultos_liquidados != null && d.bultos_liquidados !== '' ? Number(d.bultos_liquidados) : null,
-      d.grilla ? JSON.stringify(d.grilla) : null
+      d.grilla ? JSON.stringify(d.grilla) : null,
+      (d.merma_liquidada == null || d.merma_liquidada === '')
+        ? null : (Number(d.merma_liquidada) ? 1 : 0)
     );
     // ── Y ENTRA AL LIBRO ────────────────────────────────────
     //

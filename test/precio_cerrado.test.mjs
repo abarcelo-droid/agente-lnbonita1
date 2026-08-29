@@ -44,6 +44,8 @@ function base(opts = {}) {
     CREATE TABLE sg_presentaciones (id INTEGER PRIMARY KEY, factor_conversion REAL);
     CREATE TABLE sg_lotes (id INTEGER PRIMARY KEY, oc_item_id INTEGER, kg_reales REAL,
       bultos REAL, activo INTEGER DEFAULT 1);
+    CREATE TABLE sg_lote_decomisos (id INTEGER PRIMARY KEY, lote_id INTEGER, kg REAL,
+      bultos INTEGER, motivo TEXT, fecha TEXT);
   `);
   db.prepare('INSERT INTO sg_oc VALUES (1,?,?,?)').run(
     opts.tipo_precio || 'firme',
