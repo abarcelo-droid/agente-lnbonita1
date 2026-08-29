@@ -4159,6 +4159,19 @@ const facturaStorage = multer.diskStorage({
 const facturaUpload = multer({ storage: facturaStorage, limits: { fileSize: 15 * 1024 * 1024 } });
 
 const numF = (v) => (v != null && v !== '' && !isNaN(Number(v))) ? Number(v) : null;
+
+// ── EL AVISO DE QUE LA DEUDA QUEDÓ EN EL NÚMERO VIEJO ────────────────────
+//
+// generarVencimientos se corta cuando la orden ya tiene una cuota PAGADA: no puede
+// borrar y rehacer un cronograma contra el que ya salió plata. Entonces cambia el
+// precio y la deuda con el productor queda como estaba, sin que nadie se entere.
+//
+// Lo dicen las TRES puertas que mueven ese número —cambiar el precio de la orden,
+// completarla y corregir una partida— y lo dicen con las mismas palabras: el mismo
+// problema contado distinto en tres pantallas son tres problemas.
+const AVISO_CRONOGRAMA_CONGELADO =
+  'Esta orden ya tiene cuotas pagadas, así que el cronograma de vencimientos no se '
+  + 'regeneró: revisá la cuenta corriente del proveedor a mano.';
 const r2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
 
 // ── CUÁNTO SE ACORDÓ PAGAR POR UNA PARTIDA ───────────────────────────────
@@ -4868,15 +4881,43 @@ REGLAS:
 // error existe y hay que poder arreglarlo — pero queda registrado QUÉ decía
 // antes, no sólo quién lo tocó.
 //
-// Los tres frenos, en orden de gravedad:
-//   1. La partida YA ESTÁ CONTABILIZADA. El asiento en el libro dice 1.500.000
-//      porque los kilos decían 2.000: cambiarlos deja el asiento mintiendo.
-//      Primero se anula el asiento, después se corrige.
+// Los frenos, en orden de gravedad:
+//   1. La partida YA ESTÁ DOCUMENTADA. El comprobante dice 1.500.000 porque los
+//      kilos decían 2.000: cambiarlos deja el papel mintiendo. Primero se anula.
 //   2. La mercadería YA SE DESPACHÓ. Bajarle los kilos a un lote del que ya
 //      salieron 1.800 dejaría stock negativo, y el costo del cliente calculado
 //      sobre un número que ya no existe.
 //   3. El lote se TRANSFORMÓ o se REPROCESÓ: su costo ya viajó a otro lote.
-function frenosDeEdicionLote(db, loteId) {
+//   4. La partida se PARTIÓ POR CALIDAD: la suma de los dos lotes dejaría de dar
+//      lo que entró.
+//
+// ══ Y NO TODOS FRENAN LO MISMO ═══════════════════════════════════════════════
+//
+// Pablo, 29/8/2026: «si le quiero cambiar el precio a una mercadería que tiene una
+// subcategoría de segunda, no me deja. Entiendo que el motivo es porque ya se vendió
+// y se despachó toda, PERO ESO NO TIENE NADA QUE VER CON QUE PUEDA CAMBIARLE EL
+// PRECIO: el proveedor me reconoció la mercadería en mal estado».
+//
+// Tiene razón, y el propio repo ya lo decía en otro lado: el endpoint que cambia el
+// precio de la orden lleva escrito «NO se pide el freno de "ya se despachó":
+// corregir el precio de una venta ya hecha es una cuestión de rentabilidad, y eso se
+// mira después (Pablo, 26/8/2026)». Acá el mismo caso estaba frenado, y el mensaje
+// hasta lo delataba: decía «no se pueden corregir sus CANTIDADES» y bloqueaba todo.
+//
+// Lo que cada freno protege de verdad:
+//   · DESPACHADO y PARTIDO POR CALIDAD cuidan las CANTIDADES —el stock, y que los
+//     dos lotes sumen lo que entró—. El precio no mueve ni una ni otra.
+//   · DOCUMENTADA, TRANSFORMADA y VENIDA DE UNA TRANSFORMACIÓN cuidan también el
+//     PRECIO: el comprobante ya salió con ese número, o el costo se repartió a otro
+//     lote con un snapshot congelado.
+//
+// Por eso `soloPrecio`: cuando la corrección no toca ni un kilo ni un bulto ni la
+// calidad, los dos primeros no corren.
+function frenosDeEdicionLote(db, loteId, opts) {
+  // Sin la opción se comporta como antes: frena todo. Es lo que quiere DELETE
+  // —eliminar un lote es la mayor de las correcciones de cantidad— y es el default
+  // seguro para cualquier llamador nuevo.
+  const soloPrecio = !!(opts && opts.soloPrecio);
   const l = db.prepare(`SELECT l.id, l.kg_reales, l.bultos, l.kg_por_bulto, l.presentacion_id,
       l.transformado_de, l.reproceso_id, i.oc_id
     FROM sg_lotes l LEFT JOIN sg_oc_items i ON i.id = l.oc_item_id
@@ -4897,11 +4938,16 @@ function frenosDeEdicionLote(db, loteId) {
     const freno = null;
     if (freno) return { error: freno };
   }
+  // CANTIDADES, NO PRECIO. Lo que este freno cuida es que no se le baje el peso a un
+  // lote del que ya salió mercadería: el stock se iría a negativo. El precio no toca
+  // el stock, y el margen de lo ya vendido se recalcula solo en cada consulta
+  // (MARGEN_LINEA sale del costo vigente, no de un número guardado).
   const desp = db.prepare(`SELECT COALESCE(SUM(di.kg_despachados),0) s FROM sg_despacho_items di
     JOIN sg_despachos d ON d.id=di.despacho_id AND d.activo=1 WHERE di.lote_id=?`).get(loteId).s;
-  if (desp > 0) {
+  if (desp > 0 && !soloPrecio) {
     return { error: 'De este lote ya se despacharon ' + r2(desp) + ' kg. No se pueden corregir sus '
-      + 'cantidades: el stock y el costo del cliente ya salieron con el número viejo.' };
+      + 'cantidades: el stock y el costo del cliente ya salieron con el número viejo. '
+      + 'El precio sí se puede corregir.' };
   }
 
   // ── EL LOTE CUYO COSTO YA VIAJÓ A OTRO ───────────────────────────────
@@ -4919,6 +4965,11 @@ function frenosDeEdicionLote(db, loteId) {
     return { error: 'De este lote salió mercadería a una transformación o un reproceso: parte de su '
       + 'costo ya viajó a otro lote. Corregirlo dejaría la plata contada mal en los dos lados.' };
   }
+  // ESTE FRENA TAMBIÉN EL PRECIO, y es el que más importa que frene. El costo de un
+  // lote hijo NO sale de su precio: recalcCostoLote toma la rama de transformado_de y
+  // usa el snapshot que se le cargó en costo_base. Pero la corrección escribe
+  // costo_base = kilos × precio, y un hijo normalmente no tiene precio: dejaría el
+  // costo heredado en CERO.
   if (l.transformado_de != null || l.reproceso_id != null) {
     return { error: 'Este lote vino de una transformación o un reproceso: su costo se calculó a partir '
       + 'de otro lote y no se corrige acá.' };
@@ -4927,14 +4978,46 @@ function frenosDeEdicionLote(db, loteId) {
   // Corregirle los kilos a la madre después de haberle sacado los cajones de
   // segunda descuadra la partida contra el proveedor: la suma de los dos lotes
   // dejaría de dar lo que entró. Y al hermano lo mismo, al revés.
+  // CANTIDADES, NO PRECIO. Y acá está el caso que trajo Pablo: la mercadería de
+  // segunda es justamente la que se renegocia. Al separarla se le copia el costo de
+  // la madre a propósito —un cajón de segunda costó lo mismo que uno de primera— pero
+  // cuando el proveedor reconoce que vino en mal estado, ese costo cambió de verdad y
+  // hay que poder escribirlo.
   const reclas = db.prepare(`SELECT COUNT(*) c FROM sg_lote_reclasificaciones
     WHERE (lote_origen_id=? OR lote_destino_id=?) AND anulada_en IS NULL`).get(loteId, loteId).c;
-  if (reclas > 0) {
+  if (reclas > 0 && !soloPrecio) {
     return { error: 'Esta partida se separó por calidad: parte de sus bultos se pasaron a otra '
       + '(o vinieron de ahí). Deshacé esa separación antes de corregir las cantidades: si no, '
-      + 'los dos lotes juntos dejarían de dar lo que entró.' };
+      + 'los dos lotes juntos dejarían de dar lo que entró. El precio sí se puede corregir.' };
   }
-  return { ok: true, lote: l };
+  return { ok: true, lote: l, despachado: r2(desp) };
+}
+
+// ── EL MARGEN GUARDADO DE LO QUE YA SALIÓ ────────────────────────────────
+//
+// sg_despacho_items.margen_estimado es una FOTO del margen sacada al emitir el
+// remito. Los informes no la usan —recalculan con MARGEN_LINEA, desde el costo
+// vigente— pero la lista de remitos, la ficha del remito y la trazabilidad de la
+// partida sí, y ahí quedaba diciendo un margen que ya no era.
+//
+// Ahora que se puede corregir el precio de una partida ya despachada, hay que
+// rehacerla: si no, el mismo remito muestra un margen en su ficha y otro en el
+// informe de rentabilidad, los dos "del sistema".
+//
+// Con la MISMA cuenta que hace el alta del remito —costo_final sobre los kilos
+// VIGENTES, no sobre kg_reales—. El auto-arreglo del arranque (db_sg.js) usa
+// kg_reales y por eso corrige distinto: acá manda la del alta, que es la buena.
+function recalcMargenDespachos(db, loteId) {
+  db.prepare(`UPDATE sg_despacho_items
+     SET margen_estimado = COALESCE(subtotal,0) - COALESCE(kg_despachados,0) * COALESCE((
+       SELECT COALESCE(
+         COALESCE(l.costo_final,0) / NULLIF(
+           l.kg_reales
+           - COALESCE((SELECT SUM(kg) FROM sg_lote_decomisos WHERE lote_id = l.id),0)
+           - COALESCE((SELECT SUM(kg_transformados) FROM sg_transformaciones
+                        WHERE lote_origen_id = l.id),0), 0), 0)
+         FROM sg_lotes l WHERE l.id = sg_despacho_items.lote_id), 0)
+   WHERE lote_id = ?`).run(Number(loteId));
 }
 
 // Deja constancia del cambio. Se llama DENTRO de la transacción que edita, para
@@ -5253,13 +5336,34 @@ router.put('/lotes/:id/corregir', requireAuth, (req, res) => {
     const motivo = val(b.motivo);
     if (!motivo) return res.status(400).json({ ok: false, error: 'Escribí por qué se corrige: queda registrado' });
 
-    const chk = frenosDeEdicionLote(db, req.params.id);
+    // ── ¿ESTO CAMBIA ALGUNA CANTIDAD, O SÓLO EL PRECIO? ───────────────────
+    //
+    // Hay que saberlo ANTES de mirar los frenos, porque no todos frenan lo mismo:
+    // «ya se despachó» y «se partió por calidad» cuidan las cantidades, no el precio
+    // (Pablo, 29/8/2026 — ver frenosDeEdicionLote).
+    //
+    // Y se mide contra lo que el lote dice HOY, no por si el campo vino en el
+    // pedido: la pantalla manda SIEMPRE los cuatro campos —un input deshabilitado
+    // igual tiene valor y el payload se arma a mano—, así que «vino el kilo» no
+    // significa «cambió el kilo».
+    const prev = db.prepare('SELECT * FROM sg_lotes WHERE id=? AND activo=1').get(req.params.id);
+    if (!prev) return res.status(404).json({ ok: false, error: 'Lote no encontrado' });
+    const pedKg = numF(b.kg_reales);
+    const pedBultos = (b.bultos === '' || b.bultos == null) ? null : Math.round(Number(b.bultos));
+    const prevBultos = (prev.bultos == null || prev.bultos === '') ? null : Math.round(Number(prev.bultos));
+    const txt = (x) => String(x == null ? '' : x);
+    const cambiaCantidades =
+         (pedKg != null && Math.abs(r2(pedKg) - r2(prev.kg_reales)) > 0.001)
+      || (pedBultos != null && pedBultos !== prevBultos)
+      // La CALIDAD va del lado de las cantidades: mueve la mercadería de una
+      // categoría a otra y tiene su propia puerta con su propio freno.
+      || (b.calidad !== undefined && txt(val(b.calidad)) !== txt(prev.calidad));
+
+    const chk = frenosDeEdicionLote(db, req.params.id, { soloPrecio: !cambiaCantidades });
     // `firme` viaja para que el cartel pueda ofrecer el camino: cuál comprobante
     // lo traba y el botón para anularlo. Un cerrojo que no dice a dónde ir deja al
     // operador con el trabajo hecho y sin poder guardarlo.
     if (chk.error) return res.status(400).json({ ok: false, error: chk.error, firme: chk.firme || null });
-
-    const prev = db.prepare('SELECT * FROM sg_lotes WHERE id=?').get(req.params.id);
     // El factor de la partida: con él, corregir el conteo alcanza para que los
     // kilos queden bien solos.
     const kpbPrev = (prev.kg_por_bulto != null && prev.kg_por_bulto > 0)
@@ -5271,20 +5375,47 @@ router.put('/lotes/:id/corregir', requireAuth, (req, res) => {
     // ── LOS BULTOS NO SE TOCAN ────────────────────────────────────────────
     // Se rechaza en vez de ignorarlo en silencio: quien mandó el número cree que
     // lo cambió, y descubrirlo un mes después es peor que un error ahora.
-    const bultosPedidos = (b.bultos === '' || b.bultos == null) ? null : Math.round(Number(b.bultos));
-    if (bultosPedidos != null && bultosPedidos !== prev.bultos) {
+    // pedBultos ya se leyó arriba, para saber si esto cambia cantidades. Uno solo:
+    // dos lecturas del mismo campo son dos reglas que un día contestan distinto.
+    const bultosPedidos = pedBultos;
+    if (bultosPedidos != null && bultosPedidos !== prevBultos) {
       return res.status(400).json({ ok: false,
         error: 'Los bultos recibidos no se corrigen: son los que se contaron al bajar el camión. '
              + 'Si entraron ' + Math.abs(bultosPedidos - (prev.bultos || 0)) + ' de '
              + (bultosPedidos > (prev.bultos || 0) ? 'más' : 'menos') + ', lo que se arregla es la '
              + 'ORDEN DE COMPRA, por el precio del bulto. Acá se corrigen los kilos.' });
     }
+    // ── EL PRECIO, VALIDADO ───────────────────────────────────────────────
+    //
+    // Los dos endpoints hermanos lo validan —«cerrar precio» pide > 0 y el de la orden
+    // pide >= 0— y éste no pedía NADA. Mientras el freno de «ya se despachó» tapaba
+    // todo era inalcanzable en una partida vendida; ahora es el camino principal, así
+    // que un menos delante del número entraba y dejaba la deuda con el productor EN
+    // NEGATIVO: pasaba a deberle plata a la empresa.
+    //
+    // Y VACÍO NO ES CERO: es «no lo mandé». La pantalla manda el campo siempre —el
+    // payload se arma a mano, un input deshabilitado igual tiene valor— y a quien no
+    // puede ver costos el filtro de costo visible se lo borra de la respuesta, así que
+    // abriría el modal con el precio en blanco y al guardar se lo borraría a la
+    // partida sin querer. Vacío = queda el que estaba.
+    const pedPrecio = (b.precio_unitario_kg === undefined || b.precio_unitario_kg === null
+      || b.precio_unitario_kg === '') ? null : numF(b.precio_unitario_kg);
+    if (b.precio_unitario_kg !== undefined && b.precio_unitario_kg !== null
+        && b.precio_unitario_kg !== '' && !(pedPrecio > 0)) {
+      return res.status(400).json({ ok: false, error:
+        'El precio tiene que ser mayor a cero: con cero o en negativo, lo que se le debe '
+        + 'al productor sale al revés.' });
+    }
     const nuevo = {
-      kg_reales: numF(b.kg_reales) != null ? numF(b.kg_reales) : prev.kg_reales,
+      // SI NO CAMBIAN LAS CANTIDADES, NO SE ESCRIBEN. El detector compara redondeado a
+      // dos decimales y el escritor no redondeaba: 810,004 contra 810 daba «no cambió
+      // nada» —así que el freno de despacho no corría— y el UPDATE escribía 810,004
+      // igual. El detector y el escritor tienen que mirar lo mismo.
+      kg_reales: (cambiaCantidades && numF(b.kg_reales) != null)
+        ? numF(b.kg_reales) : prev.kg_reales,
       bultos: prev.bultos,   // no se corrigen: ver arriba
-      calidad: b.calidad !== undefined ? val(b.calidad) : prev.calidad,
-      precio_unitario_kg: b.precio_unitario_kg !== undefined
-        ? numF(b.precio_unitario_kg) : prev.precio_unitario_kg,
+      calidad: (cambiaCantidades && b.calidad !== undefined) ? val(b.calidad) : prev.calidad,
+      precio_unitario_kg: pedPrecio != null ? pedPrecio : prev.precio_unitario_kg,
     };
     if (!(nuevo.kg_reales > 0)) {
       return res.status(400).json({ ok: false, error: 'Los kilos tienen que ser mayores a cero' });
@@ -5321,8 +5452,14 @@ router.put('/lotes/:id/corregir', requireAuth, (req, res) => {
     //
     // Rechazar dejaba los kilos CLAVADOS: sin poder tocar los bultos, no había
     // forma de escribir un peso distinto al que daba la cuenta vieja.
+    //
+    // Y SÓLO SI LOS KILOS CAMBIARON. El factor existe para que corregir el peso no
+    // rompa la correspondencia con los bultos; en una corrección de SÓLO PRECIO no
+    // hay peso nuevo, y reescribirlo movería un número de cantidad —el que usa el
+    // despacho para pasar de cajones a kilos— en una partida que quizá ya despachó.
+    // Si venía descuadrado, sigue descuadrado: eso se arregla corrigiendo el peso.
     let kpbNuevo = null;
-    if (nuevo.bultos > 0 && kpb > 0
+    if (cambiaCantidades && nuevo.bultos > 0 && kpb > 0
         && Math.abs(r2(nuevo.kg_reales - r2(nuevo.bultos * kpb))) > 1) {
       kpbNuevo = +(nuevo.kg_reales / nuevo.bultos).toFixed(4);
     }
@@ -5348,6 +5485,11 @@ router.put('/lotes/:id/corregir', requireAuth, (req, res) => {
       }
       // Y lo que cuelga de esos kilos: el costo con sus gastos, y el período.
       recalcCostoLote(db, prev.id);
+      // Y EL MARGEN DE LO QUE YA SALIÓ. Es la única foto que quedaba congelada, y
+      // ahora que el precio de una partida despachada se puede corregir, dejarla
+      // vieja haría que el mismo remito diga un margen en su ficha y otro en el
+      // informe de rentabilidad. Va DESPUÉS de recalcCostoLote: lee el costo nuevo.
+      recalcMargenDespachos(db, prev.id);
       if (prev.fecha_ingreso) recalcPeriodo(db, String(prev.fecha_ingreso).slice(0, 7));
       // Y lo que se le debe al proveedor. El cronograma de pago se arma con la
       // suma de los costos de los lotes de la orden: si se corrigen los kilos y
@@ -5357,7 +5499,24 @@ router.put('/lotes/:id/corregir', requireAuth, (req, res) => {
       if (chk.lote.oc_id) generarVencimientos(db, chk.lote.oc_id);
     })();
     const l = db.prepare('SELECT * FROM sg_lotes WHERE id=?').get(prev.id);
-    res.json({ ok: true, data: l });
+    // ── SI EL CRONOGRAMA NO SE PUDO REHACER, SE DICE ─────────────────────
+    //
+    // generarVencimientos se corta cuando la orden ya tiene una cuota PAGADA: no
+    // puede borrar y rehacer algo contra lo que ya salió plata. Entonces la deuda
+    // con el productor queda con el importe viejo y nadie se entera.
+    //
+    // El endpoint que cambia el precio de la orden ya avisaba de esto con estas
+    // mismas palabras; acá faltaba, y ahora que el precio de una partida ya
+    // despachada se puede corregir el caso es mucho más probable —una partida
+    // despachada es una partida vieja, y las viejas tienen cuotas pagadas—.
+    const cuotasPagas = chk.lote.oc_id
+      ? db.prepare('SELECT COUNT(*) n FROM sg_oc_vencimientos WHERE oc_id=? AND pagado=1')
+          .get(chk.lote.oc_id).n
+      : 0;
+    res.json({ ok: true, data: l,
+      aviso: cuotasPagas > 0
+        ? AVISO_CRONOGRAMA_CONGELADO
+        : null });
   } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
 });
 
@@ -6098,17 +6257,33 @@ function loteConCostoViajado(db, ocItemId) {
      LIMIT 1`).get(ocItemId);
 }
 
-function aplicarPrecioItem(db, { ocId, ocItemId, precio, userId }) {
+// ── EL PRECIO DEL RENGLÓN LE GANA AL DE LA PARTIDA, Y SE ANOTA ─────────────
+//
+// Esto pisa el precio de TODOS los lotes del ítem con uno solo. Era inocuo mientras
+// dos lotes hermanos no podían tener precios distintos; desde que se puede corregir
+// el precio de una partida separada por calidad (29/8/2026), sí pueden — y este
+// UPDATE le devuelve al lote de segunda el precio del de primera.
+//
+// No se frena: el precio del renglón es lo pactado y pisar es lo que corresponde.
+// Pero QUEDA ESCRITO EN LA HISTORIA DEL LOTE. Antes sólo se anotaba el cambio sobre
+// sg_oc_items, así que el descuento que alguien había acordado por esa partida
+// desaparecía sin dejar rastro donde se lo iba a buscar.
+function aplicarPrecioItem(db, { ocId, ocItemId, precio, userId, motivo }) {
   db.prepare('UPDATE sg_oc_items SET precio_estimado_por_kg=? WHERE id=? AND oc_id=?')
     .run(precio, ocItemId, ocId);
   const neto = precioNetoDeOC(db, ocId, ocItemId, precio);
-  const lotes = db.prepare('SELECT id, kg_reales FROM sg_lotes WHERE oc_item_id=? AND activo=1')
-    .all(ocItemId);
+  const lotes = db.prepare(`SELECT id, kg_reales, precio_unitario_kg
+     FROM sg_lotes WHERE oc_item_id=? AND activo=1`).all(ocItemId);
   for (const l of lotes) {
+    anotarEdicion(db, { tabla: 'sg_lotes', registroId: l.id, campo: 'precio_unitario_kg',
+      antes: l.precio_unitario_kg, despues: neto,
+      motivo: motivo || 'Se cambió el precio del renglón de la orden', ocId, userId });
     db.prepare(`UPDATE sg_lotes SET precio_unitario_kg=?, costo_base=?,
         modificado_en=datetime('now','localtime'), modificado_por=? WHERE id=?`)
       .run(neto, r2((Number(l.kg_reales) || 0) * neto), userId || null, l.id);
     recalcCostoLote(db, Number(l.id));
+    // Y el margen de lo que ya salió de ese lote, que también cuelga del costo.
+    recalcMargenDespachos(db, Number(l.id));
   }
   return lotes.length;
 }
@@ -6204,8 +6379,7 @@ router.put('/oc/:id/cantidades', requireAuth, express.json(), (req, res) => {
     res.json({ ok: true, data: {
       oc_id: oc.id, acordado: acordadoDeOC(db, oc.id).total,
       aviso: (cuotasPagas && cuotasPagas.n > 0)
-        ? 'Esta orden ya tiene cuotas pagadas, así que el cronograma de vencimientos no se '
-          + 'regeneró: revisá la cuenta corriente del proveedor a mano.'
+        ? AVISO_CRONOGRAMA_CONGELADO
         : null,
     } });
   } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
@@ -6276,7 +6450,7 @@ router.put('/oc/:id/precios', requireAuth, (req, res) => {
         const antes = porId.get(p.id).precio_estimado_por_kg;
         if (String(antes == null ? '' : antes) === String(p.precio)) continue;
         lotesTocados += aplicarPrecioItem(db,
-          { ocId: oc.id, ocItemId: p.id, precio: p.precio, userId: uidReq });
+          { ocId: oc.id, ocItemId: p.id, precio: p.precio, userId: uidReq, motivo });
         // El rastro va DENTRO de la transacción: no puede quedar el cambio sin
         // registro ni el registro sin cambio.
         anotarEdicion(db, { tabla: 'sg_oc_items', registroId: p.id,
@@ -6302,8 +6476,7 @@ router.put('/oc/:id/precios', requireAuth, (req, res) => {
       oc_id: oc.id, lotes_recosteados: lotesTocados,
       acordado: acordadoDeOC(db, oc.id).total,
       aviso: (cuotasPagas && cuotasPagas.n > 0)
-        ? 'Esta orden ya tiene cuotas pagadas, así que el cronograma de vencimientos no se '
-          + 'regeneró: revisá la cuenta corriente del proveedor a mano.'
+        ? AVISO_CRONOGRAMA_CONGELADO
         : null,
     } });
   } catch (e) { res.status(400).json({ ok: false, error: e.message }); }

@@ -4489,6 +4489,14 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
       <!-- LO QUE ENTRÓ, y arriba de todo porque es contra lo que se compara. -->
       <div style="font-weight:700;font-size:11px;text-transform:uppercase;letter-spacing:.05em;
            color:var(--mut);margin:14px 0 6px">Lo que entró</div>
+      <!-- LO QUE NO SE PUEDE CORREGIR, DICHO ANTES Y NO DESPUÉS.
+           Pablo, 29/8/2026: «entiendo que el motivo es porque ya se vendió y se
+           despachó toda, pero eso no tiene nada que ver con que pueda cambiarle el
+           precio». El servidor ya separa las dos cosas; acá se avisa antes de que
+           alguien tipee un kilo que va a rebotar, y se dice que el precio sí va. -->
+      <div id="sg-loteed-cant-nota" style="display:none;font-size:11.5px;color:#92400e;
+           background:rgba(245,158,11,.10);border:1px solid #f59e0b;border-radius:8px;
+           padding:8px 10px;margin-bottom:8px"></div>
       <div class="sg-rec-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
         <div class="fl"><label>Kilos</label><input type="number" step="0.01" id="sg-loteed-kg"></div>
         <div class="fl"><label>Bultos</label><input type="number" id="sg-loteed-bultos"></div>
@@ -4515,7 +4523,10 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
       <div style="border:1px solid var(--bor);border-radius:8px;padding:10px 12px;background:var(--bg)">
         <div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap">
           <div class="fl" style="margin:0"><label>Precio</label>
-            <input type="number" step="0.01" id="sg-loteed-precio" style="width:170px"></div>
+            <!-- min: el precio no puede ser cero ni negativo. El servidor lo rechaza
+                 igual —un campo del navegador no es un control— pero ofrecerlo es
+                 ofrecer algo que va a rebotar. -->
+            <input type="number" step="0.01" min="0.01" id="sg-loteed-precio" style="width:170px"></div>
           <div class="fl" style="margin:0"><label>Por</label>
             <select id="sg-loteed-uni" onchange="sgLoteEdUni()" style="width:120px">
               <option value="kg">kilo</option>
@@ -16059,6 +16070,47 @@ function sgLoteEditarOpen(loteId){
     var e = eid(id); if (e) { e.disabled = !admin; e.title = admin ? '' : 'Lo corrige un administrador'; }
   });
   var nota = eid('sg-loteed-precio-nota'); if (nota) nota.style.display = admin ? 'none' : '';
+
+  // ── LO QUE TRABA LAS CANTIDADES NO TRABA EL PRECIO ───────────────────
+  //
+  // Pablo, 29/8/2026: «si le quiero cambiar el precio a una mercadería que tiene una
+  // subcategoría de segunda, no me deja… eso no tiene nada que ver con que pueda
+  // cambiarle el precio: el proveedor me reconoció la mercadería en mal estado».
+  //
+  // Los kilos de una partida ya despachada no se corrigen —el stock salió con ese
+  // número— y los de una partida separada por calidad tampoco —los dos lotes
+  // dejarían de dar lo que entró—. El precio sí, en las dos. Se dice acá, antes de
+  // tipear, en vez de dejar que el servidor lo rebote después.
+  //
+  // Los kilos despachados salen de lo que la lista ya trae: vigentes − disponibles.
+  // Pedirlos aparte sería otra consulta para un número que ya está en la pantalla.
+  var despK = Math.round(Math.max(0,
+    (Number(l.kg_vigente) || 0) - (Number(l.kg_disponibles) || 0)) * 100) / 100;
+  var separada = !!(Number(l.bultos_reclasificados) > 0 || l.reclasificado_de_codigo);
+  var motivos = [];
+  // Con decimales: nr() redondea a entero y una partida con 0,4 kg despachados diría
+  // «ya salieron 0 kg», que se lee como que no salió nada.
+  if (despK > 0.01) {
+    motivos.push('ya salieron <b>'
+      + Number(despK).toLocaleString('es-AR', { maximumFractionDigits: 2 })
+      + ' kg</b> de esta partida');
+  }
+  if (separada) motivos.push('se <b>separó por calidad</b>');
+  var cnota = eid('sg-loteed-cant-nota');
+  var kge = eid('sg-loteed-kg'), bte = eid('sg-loteed-bultos');
+  if (motivos.length) {
+    if (kge) { kge.disabled = true; kge.title = 'Los kilos no se corrigen: ' + motivos.join(' y '); }
+    if (bte) { bte.disabled = true; bte.title = kge ? kge.title : ''; }
+    if (cnota) {
+      cnota.style.display = '';
+      cnota.innerHTML = '🔒 Los <b>kilos</b> y los <b>bultos</b> no se corrigen porque '
+        + motivos.join(' y ') + '. <b>El precio sí</b>'
+        + (admin ? '' : ' — lo corrige un administrador') + '.';
+    }
+  } else {
+    if (bte) { bte.disabled = false; bte.title = ''; }
+    if (cnota) { cnota.style.display = 'none'; cnota.innerHTML = ''; }
+  }
   eid('sg-loteed-motivo').value = '';
   sgLoteFirmeCartel(null, null);   // el cartel de la partida anterior no puede quedar
   sgLoteEdEq();
@@ -16196,6 +16248,11 @@ function sgLoteEditarGuardar(){
       toast((r && r.error) || 'No se pudo corregir', 'er'); return;
     }
     toast('Corregido — queda registrado quién y qué cambió', 'ok');
+    // Y SI EL CRONOGRAMA NO SE PUDO REHACER, SE DICE. Pasa cuando la orden ya tiene
+    // una cuota pagada: la deuda con el productor queda con el importe viejo, y eso
+    // hay que arreglarlo a mano. Un toast que se va solo no alcanza para algo que
+    // exige ir a otra pantalla.
+    if (r.aviso) alert(r.aviso);
     closeMB('sg-loteed-modal');
     // La ficha se vuelve a abrir para que se vean los números nuevos.
     if (SG.ocVerId) sgOcVer(SG.ocVerId);

@@ -1842,15 +1842,33 @@ try {
 // costo_final es el costo TOTAL del lote, no por kg. El front del modal ya calculaba
 // bien (costo_final / kg_reales); solo el valor PERSISTIDO quedaba absurdo.
 // Este UPDATE recalcula con el costo por kg y es self-healing (no-op una vez correcto).
+//
+// ── Y DIVIDE POR LOS KILOS VIGENTES, COMO EL REMITO ──────────────────────────
+//
+// Dividía por kg_reales. El alta del remito divide por los kilos VIGENTES —lo que
+// entró menos la merma y lo que se transformó—, así que en toda partida con merma
+// este arreglo escribía un margen DISTINTO del que había escrito el remito, y lo
+// reescribía en cada arranque del servidor: el mismo remito mostraba un margen antes
+// del reinicio y otro después.
+//
+// Se notó al abrir la corrección del precio de una partida ya despachada (29/8/2026):
+// esa corrección rehace el margen con la cuenta del remito, y el próximo arranque se
+// lo volvía a pisar con la otra.
+const MARGEN_COSTO_KG = `COALESCE(
+  COALESCE(l.costo_final,0) / NULLIF(
+    l.kg_reales
+    - COALESCE((SELECT SUM(kg) FROM sg_lote_decomisos WHERE lote_id = l.id),0)
+    - COALESCE((SELECT SUM(kg_transformados) FROM sg_transformaciones
+                 WHERE lote_origen_id = l.id),0), 0), 0)`;
 try {
   db.exec(`
     UPDATE sg_despacho_items
     SET margen_estimado = subtotal - kg_despachados * (
-          SELECT COALESCE(l.costo_final,0) / NULLIF(l.kg_reales,0)
+          SELECT ${MARGEN_COSTO_KG}
           FROM sg_lotes l WHERE l.id = sg_despacho_items.lote_id)
     WHERE EXISTS (SELECT 1 FROM sg_lotes l WHERE l.id = sg_despacho_items.lote_id AND l.kg_reales > 0)
       AND ABS(margen_estimado - (subtotal - kg_despachados * (
-          SELECT COALESCE(l.costo_final,0) / NULLIF(l.kg_reales,0)
+          SELECT ${MARGEN_COSTO_KG}
           FROM sg_lotes l WHERE l.id = sg_despacho_items.lote_id))) > 0.01;
   `);
 } catch (e) {
