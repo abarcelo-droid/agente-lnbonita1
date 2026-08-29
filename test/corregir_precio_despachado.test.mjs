@@ -53,7 +53,8 @@ function base(opts = {}) {
       lote_id INTEGER, kg_despachados REAL, subtotal REAL, margen_estimado REAL);
     CREATE TABLE sg_transformaciones (id INTEGER PRIMARY KEY, lote_origen_id INTEGER,
       kg_transformados REAL);
-    CREATE TABLE sg_reprocesos (id INTEGER PRIMARY KEY, lote_madre_id INTEGER, estado TEXT);
+    CREATE TABLE sg_reprocesos (id INTEGER PRIMARY KEY, lote_madre_id INTEGER, estado TEXT,
+      kg_procesados REAL);
     CREATE TABLE sg_lote_reclasificaciones (id INTEGER PRIMARY KEY, lote_origen_id INTEGER,
       lote_destino_id INTEGER, anulada_en TEXT);
     CREATE TABLE sg_lote_decomisos (id INTEGER PRIMARY KEY, lote_id INTEGER, kg REAL);
@@ -411,7 +412,7 @@ test('pisar el precio del renglón queda escrito EN EL LOTE', () => {
   // No se frena (el renglón es lo pactado), pero se anota donde se lo va a buscar:
   // antes sólo quedaba registrado sobre sg_oc_items.
   const i = SG.indexOf('function aplicarPrecioItem(');
-  const b = SG.slice(i, i + 1400);
+  const b = SG.slice(i, i + 2400);
   assert.match(b, /anotarEdicion\(db, \{ tabla: 'sg_lotes', registroId: l\.id, campo: 'precio_unitario_kg'/);
   assert.match(b, /antes: l\.precio_unitario_kg, despues: neto/);
   assert.match(b, /recalcMargenDespachos\(db, Number\(l\.id\)\)/);

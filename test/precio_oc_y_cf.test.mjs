@@ -88,7 +88,7 @@ test('EL COSTO ES NETO, y ahora las dos puertas hacen la misma cuenta', () => {
   // cuánto vender.
   assert.match(SG, /function precioNetoDeOC\(db, ocId, ocItemId, precio\)/);
   assert.match(SG, /\+\(Number\(precio\) \/ \(1 \+ alic \/ 100\)\)\.toFixed\(6\)/);
-  assert.match(SG, /function aplicarPrecioItem\(db, \{ ocId, ocItemId, precio, userId, motivo \}\)/);
+  assert.match(SG, /function aplicarPrecioItem\(db, \{ ocId, ocItemId, precio, userId, motivo, pisados \}\)/);
   // Y /completar dejó de hacer la suya.
   assert.doesNotMatch(SG, /setLote\.run\(p\.precio, r2\(\(l\.kg_reales \|\| 0\) \* p\.precio\)/);
   // Dos llamadas —el endpoint nuevo y /completar— más la definición.
@@ -98,7 +98,7 @@ test('EL COSTO ES NETO, y ahora las dos puertas hacen la misma cuenta', () => {
 
 test('la cascada corre entera y en orden', () => {
   const i = SG.indexOf('function aplicarPrecioItem(');
-  const cuerpo = SG.slice(i, i + 1200);
+  const cuerpo = SG.slice(i, i + 2400);
   assert.match(cuerpo, /UPDATE sg_oc_items SET precio_estimado_por_kg=\?/, '1. el precio del ítem');
   assert.match(cuerpo, /UPDATE sg_lotes SET precio_unitario_kg=\?, costo_base=\?/, '2. cada lote vivo');
   assert.match(cuerpo, /recalcCostoLote\(db, Number\(l\.id\)\)/, '3. el costo final del lote');

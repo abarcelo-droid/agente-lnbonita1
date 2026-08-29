@@ -5008,16 +5008,29 @@ function frenosDeEdicionLote(db, loteId, opts) {
 // VIGENTES, no sobre kg_reales—. El auto-arreglo del arranque (db_sg.js) usa
 // kg_reales y por eso corrige distinto: acá manda la del alta, que es la buena.
 function recalcMargenDespachos(db, loteId) {
+  // LOS MISMOS KILOS QUE CUENTA kgTransformado: transformaciones Y REPROCESOS. Le
+  // faltaban los reprocesos. Mientras esto lo llamaba sólo la corrección de una
+  // partida no mordía —el freno corta cualquier lote con un reproceso activo—, pero
+  // aplicarPrecioItem lo llama sobre TODOS los lotes del renglón, y ahí sí entran.
+  //
+  // Y NO TOCA LOS RENGLONES DE UN REMITO ANULADO: ese remito ya no existe, y su
+  // margen es historia de algo que se dio de baja.
+  const KG_VIG = `l.kg_reales
+    - COALESCE((SELECT SUM(kg) FROM sg_lote_decomisos WHERE lote_id = l.id),0)
+    - COALESCE((SELECT SUM(kg_transformados) FROM sg_transformaciones
+                 WHERE lote_origen_id = l.id),0)
+    - COALESCE((SELECT SUM(kg_procesados) FROM sg_reprocesos
+                 WHERE lote_madre_id = l.id AND estado='activo'),0)`;
+  // Con los kilos vigentes en cero el costo por kilo va a CERO, no a nulo: es lo que
+  // hace el alta del remito, y lo que este recálculo tiene que espejar.
   db.prepare(`UPDATE sg_despacho_items
      SET margen_estimado = COALESCE(subtotal,0) - COALESCE(kg_despachados,0) * COALESCE((
-       SELECT COALESCE(
-         COALESCE(l.costo_final,0) / NULLIF(
-           l.kg_reales
-           - COALESCE((SELECT SUM(kg) FROM sg_lote_decomisos WHERE lote_id = l.id),0)
-           - COALESCE((SELECT SUM(kg_transformados) FROM sg_transformaciones
-                        WHERE lote_origen_id = l.id),0), 0), 0)
+       SELECT COALESCE(COALESCE(l.costo_final,0) / NULLIF(${KG_VIG}, 0), 0)
          FROM sg_lotes l WHERE l.id = sg_despacho_items.lote_id), 0)
-   WHERE lote_id = ?`).run(Number(loteId));
+   WHERE lote_id = ?
+     AND EXISTS (SELECT 1 FROM sg_despachos d
+                  WHERE d.id = sg_despacho_items.despacho_id AND d.activo = 1)`)
+    .run(Number(loteId));
 }
 
 // Deja constancia del cambio. Se llama DENTRO de la transacción que edita, para
@@ -5271,6 +5284,31 @@ router.post('/lotes/:id/reclasificaciones/:rid/anular', requireAuth, express.jso
       // partida con un agujero que nadie puede explicar.
       db.prepare(`UPDATE sg_lote_reclasificaciones SET anulada_en=datetime('now','localtime'),
         anulada_por=?, motivo_anulacion=? WHERE id=?`).run(uid(req), motivo, r.id);
+      // ── Y EL PRECIO DE LA MADRE, SI LOS DOS NO ERAN IGUALES ────────────
+      //
+      // El costo vuelve SUMADO, pero el precio por kilo se quedaba en el de la madre.
+      // Desde que la partida de segunda puede tener su propio precio —el productor
+      // reconoce la mercadería en mal estado (Pablo, 29/8/2026)—, esos dos números
+      // dejan de cerrar entre sí: 2.000 kg con un costo de 1.760.000 y un precio que
+      // dice 1.000. Y la próxima corrección reescribe costo_base = kilos × precio y
+      // el descuento desaparece sin que nadie lo vea.
+      //
+      // El precio que queda es el que sale del costo que volvió: es el promedio de lo
+      // que efectivamente se acordó por cada parte, no un número inventado.
+      const pm = Number(madre.precio_unitario_kg), ph = Number(hijo.precio_unitario_kg);
+      if (madre.precio_unitario_kg != null && hijo.precio_unitario_kg != null
+          && Math.abs(pm - ph) > 0.000001) {
+        const mAhora = db.prepare('SELECT kg_reales, costo_base FROM sg_lotes WHERE id=?').get(madre.id);
+        const kg = Number(mAhora.kg_reales) || 0;
+        const nuevoPrecio = kg > 0 ? +((Number(mAhora.costo_base) || 0) / kg).toFixed(6) : pm;
+        anotarEdicion(db, { tabla: 'sg_lotes', registroId: madre.id, campo: 'precio_unitario_kg',
+          antes: madre.precio_unitario_kg, despues: nuevoPrecio,
+          motivo: 'Se deshizo la separación por calidad: las dos partes tenían precios distintos',
+          // La orden sale del ítem: sg_lotes guarda oc_item_id, no oc_id.
+          ocId: (db.prepare('SELECT oc_id FROM sg_oc_items WHERE id=?').get(madre.oc_item_id) || {}).oc_id,
+          userId: uid(req) });
+        db.prepare('UPDATE sg_lotes SET precio_unitario_kg=? WHERE id=?').run(nuevoPrecio, madre.id);
+      }
       recalcCostoLote(db, madre.id);
       recalcEstadoLote(db, madre.id);
       anotarEdicion(db, { tabla: 'sg_lotes', registroId: madre.id, campo: 'bultos',
@@ -6268,13 +6306,21 @@ function loteConCostoViajado(db, ocItemId) {
 // Pero QUEDA ESCRITO EN LA HISTORIA DEL LOTE. Antes sólo se anotaba el cambio sobre
 // sg_oc_items, así que el descuento que alguien había acordado por esa partida
 // desaparecía sin dejar rastro donde se lo iba a buscar.
-function aplicarPrecioItem(db, { ocId, ocItemId, precio, userId, motivo }) {
+function aplicarPrecioItem(db, { ocId, ocItemId, precio, userId, motivo, pisados }) {
   db.prepare('UPDATE sg_oc_items SET precio_estimado_por_kg=? WHERE id=? AND oc_id=?')
     .run(precio, ocItemId, ocId);
   const neto = precioNetoDeOC(db, ocId, ocItemId, precio);
-  const lotes = db.prepare(`SELECT id, kg_reales, precio_unitario_kg
+  const lotes = db.prepare(`SELECT id, codigo_lote, kg_reales, precio_unitario_kg
      FROM sg_lotes WHERE oc_item_id=? AND activo=1`).all(ocItemId);
   for (const l of lotes) {
+    // LAS QUE TENÍAN UN PRECIO PROPIO SE ANOTAN APARTE, para poder decirlo. Una
+    // partida de segunda renegociada con el productor pierde su descuento acá, y
+    // enterarse por la cuenta corriente tres semanas después no sirve.
+    if (Array.isArray(pisados) && l.precio_unitario_kg != null
+        && Math.abs(Number(l.precio_unitario_kg) - Number(neto)) > 0.000001) {
+      pisados.push({ id: l.id, codigo: l.codigo_lote,
+        antes: Number(l.precio_unitario_kg), ahora: Number(neto) });
+    }
     anotarEdicion(db, { tabla: 'sg_lotes', registroId: l.id, campo: 'precio_unitario_kg',
       antes: l.precio_unitario_kg, despues: neto,
       motivo: motivo || 'Se cambió el precio del renglón de la orden', ocId, userId });
@@ -6445,12 +6491,13 @@ router.put('/oc/:id/precios', requireAuth, (req, res) => {
 
     const uidReq = uid(req);
     let lotesTocados = 0;
+    const pisados = [];
     db.transaction(() => {
       for (const p of pedidos) {
         const antes = porId.get(p.id).precio_estimado_por_kg;
         if (String(antes == null ? '' : antes) === String(p.precio)) continue;
         lotesTocados += aplicarPrecioItem(db,
-          { ocId: oc.id, ocItemId: p.id, precio: p.precio, userId: uidReq, motivo });
+          { ocId: oc.id, ocItemId: p.id, precio: p.precio, userId: uidReq, motivo, pisados });
         // El rastro va DENTRO de la transacción: no puede quedar el cambio sin
         // registro ni el registro sin cambio.
         anotarEdicion(db, { tabla: 'sg_oc_items', registroId: p.id,
@@ -6475,9 +6522,19 @@ router.put('/oc/:id/precios', requireAuth, (req, res) => {
     res.json({ ok: true, data: {
       oc_id: oc.id, lotes_recosteados: lotesTocados,
       acordado: acordadoDeOC(db, oc.id).total,
-      aviso: (cuotasPagas && cuotasPagas.n > 0)
-        ? AVISO_CRONOGRAMA_CONGELADO
-        : null,
+      aviso: [
+        // EL PRECIO DEL RENGLÓN LE GANA AL DE LA PARTIDA, y eso hay que decirlo: si
+        // alguna partida tenía su propio precio —una segunda renegociada con el
+        // productor—, acaba de perderlo. Queda escrito en su historia, pero el que
+        // apretó el botón tiene que enterarse ahora.
+        pisados.length
+          ? 'Ojo: ' + pisados.length + (pisados.length === 1 ? ' partida tenía' : ' partidas tenían')
+            + ' un precio propio y ahora tienen el del renglón — '
+            + pisados.map((x) => (x.codigo || ('#' + x.id))).join(', ')
+            + '. Si eso era un descuento acordado, hay que volver a ponerlo.'
+          : null,
+        (cuotasPagas && cuotasPagas.n > 0) ? AVISO_CRONOGRAMA_CONGELADO : null,
+      ].filter(Boolean).join(String.fromCharCode(10, 10)) || null,
     } });
   } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
 });
