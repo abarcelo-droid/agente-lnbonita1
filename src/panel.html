@@ -993,10 +993,12 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
             <input id="liq-cerr-precio" type="text" inputmode="decimal"
                    onfocus="liqNumFoco(this)" onblur="liqNumSalida(this)" oninput="liqCerradoResolver()"
                    style="width:150px;text-align:right;padding:6px 8px;border-radius:6px;border:1px solid var(--bor)"></label>
+          <!-- LO MISMO ACÁ ARRIBA. Es el mismo número dicho dos veces en la
+               misma pantalla: si uno se puede tocar y el otro no, se contradicen. -->
           <label style="font-size:11.5px;color:var(--mut)">× <span id="liq-cerr-cant-lbl">bultos</span> a liquidar<br>
-            <input id="liq-cerr-cant" type="number" step="1" min="0"
-                   oninput="liqCerradoResolver();liqArtSync()"
-                   style="width:120px;text-align:right;padding:6px 8px;border-radius:6px;border:1px solid var(--bor)">
+            <input id="liq-cerr-cant" type="number" step="1" min="0" readonly tabindex="-1"
+                   title="Se liquida la partida entera: el sistema no deja liquidar hasta que salió todo"
+                   style="width:120px;text-align:right;padding:6px 8px;border-radius:6px;border:1px solid var(--bor);background:var(--bor2,#f1f5f9);color:var(--mut);cursor:not-allowed">
             <span id="liq-cerr-cant-hint" style="display:block;font-size:10.5px"></span></label>
           <div style="align-self:flex-end;padding-bottom:6px">
             <div style="font-size:11px;color:var(--mut)">Total a pagar al productor</div>
@@ -12685,9 +12687,24 @@ function liqVentaCab(ocId){
         + ' readonly tabindex="-1" title="Es el conteo de la recepción: no se corrige desde acá"'
         + ' style="width:130px;padding:6px 8px;border-radius:6px;border:1px solid var(--bor);'
         + 'background:var(--bor2,#f1f5f9);color:var(--mut);cursor:not-allowed"></label>'
+      // ── Y CUÁNTOS SE LIQUIDAN TAMPOCO SE ELIGE ────────────────────
+      //
+      // Pablo, 29/8/2026: «pusimos un cerrojo para que sólo se pueda liquidar
+      // cuando toda la partida tiene venta o está mermada, entonces la
+      // liquidación no debería permitirnos liquidar un número diferente de
+      // bultos a los ingresados. Siempre vamos a tener que liquidar los 55».
+      //
+      // Tiene razón y ya estaba escrito en el propio sistema:
+      // frenoPartidaSinTerminar no deja liquidar hasta que la partida salió
+      // ENTERA —vendida más merma—, así que este número sólo puede ser el que
+      // entró. Dejarlo editable era ofrecer la única forma de liquidar mal: de
+      // menos, y el productor cobra menos de lo que le corresponde.
       + '<label style="font-size:11.5px;color:var(--mut)">Bultos a liquidar<br>'
-        + '<input id="liq-bultos-liq" type="number" step="1" min="0" value="' + (r.bultos_vendidos || 0) + '"'
-        + ' oninput="liqBultosCambio()" style="width:130px;padding:6px 8px;border-radius:6px;border:1px solid var(--bor)"></label>'
+        + '<input id="liq-bultos-liq" type="number" step="1" min="0" value="' + (r.bultos_ingresados || 0) + '"'
+        + ' readonly tabindex="-1"'
+        + ' title="Se liquida la partida entera: el sistema no deja liquidar hasta que salió todo"'
+        + ' style="width:130px;padding:6px 8px;border-radius:6px;border:1px solid var(--bor);'
+        + 'background:var(--bor2,#f1f5f9);color:var(--mut);cursor:not-allowed"></label>'
       + '<div style="flex:1;min-width:200px;align-self:flex-end" id="liq-avance"></div></div>';
 
     h += '<table style="width:100%;border-collapse:collapse">'
@@ -13052,8 +13069,18 @@ function liqDesdePartida(r){
   if (pc && !String(pc.value || '').trim() && Number(ac.precio_por_bulto)) {
     liqNumPoner(pc, ac.precio_por_bulto);
   }
-  if (cc && !String(cc.value || '').trim()) {
-    cc.value = Number(r.bultos_vendidos) || Number(r.bultos_ingresados) || '';
+  // LOS BULTOS SON LOS QUE ENTRARON, siempre. Antes se proponía lo vendido y se
+  // podía cambiar; ahora el número es uno solo y se escribe cada vez, para que
+  // no quede el de una partida anterior si el modal se reusa.
+  //
+  // Y el renglón del artículo se sincroniza acá: antes lo hacía el oninput del
+  // campo, que al quedar de sólo lectura ya no dispara. Sin esto el cuadro decía
+  // 55 y el artículo seguía en los bultos de la vez anterior — y la diferencia
+  // aparecía recién en el control de cierre.
+  if (cc) {
+    var antes = String(cc.value || '');
+    cc.value = Number(r.bultos_ingresados) || Number(r.bultos_vendidos) || '';
+    if (String(cc.value) !== antes) liqArtSync();
   }
   var ul = eid('liq-cerr-uni'), cl = eid('liq-cerr-cant-lbl');
   if (ul) ul.textContent = (r.unidad === 'bulto') ? 'bulto' : 'kilo';
@@ -13119,6 +13146,9 @@ function liqDesdePartida(r){
 // Ahora manda el de la partida y el de la caja gris lo espeja, de sólo lectura.
 // Cuando no hay partida --liquidación suelta-- el de la caja gris no existe del
 // otro lado, así que queda editable y es el único.
+// Los dos campos de bultos quedaron de sólo lectura —se liquida la partida
+// entera— así que nadie los tipea. Esto sigue existiendo para que el avance y el
+// despeje se rehagan cuando el número se fija al abrir.
 function liqBultosCambio(){
   var b = eid('liq-bultos-liq'), c = eid('liq-cerr-cant');
   if (b && c) c.value = b.value;
@@ -37223,10 +37253,17 @@ function liqArtSync(){
   // liqNum() y no parseFloat: el campo lleva separador de miles y "25.000" leído
   // crudo da 25.
   var pre  = liqNum(eid('liq-cerr-precio'));
-  if (cant > 0) arts[0].cantidad = cant;
-  if (pre > 0)  arts[0].precio = pre;
-  if (arts[0].cantidad > 0 && arts[0].precio > 0) {
-    arts[0].importe = Math.round(arts[0].cantidad * arts[0].precio * 100) / 100;
+  // CON UN SOLO PRODUCTO. Si la partida trae dos, los bultos de arriba son el
+  // TOTAL y meterlos en el primer renglón le adjudica a un producto lo que
+  // entró de los dos: el papel donde el productor cobra sale mal. Con varios,
+  // cada renglón ya viene con lo suyo desde la partida y no hay nada que
+  // sincronizar.
+  if (arts.length === 1) {
+    if (cant > 0) arts[0].cantidad = cant;
+    if (pre > 0)  arts[0].precio = pre;
+    if (arts[0].cantidad > 0 && arts[0].precio > 0) {
+      arts[0].importe = Math.round(arts[0].cantidad * arts[0].precio * 100) / 100;
+    }
   }
   liqRenderArt(arts);
 }
@@ -37388,6 +37425,7 @@ function liqCerradoResolver(){
       ? ((gastoManual ? liqPlata(gastoManual) + ' a mano + ' : '')
          + liqPlata(gAjuste) + ' de ajuste para llegar al precio')
       : 'a mano';
+    liqOrigenPintar();
   }
   liqTotales();
 }
@@ -37487,6 +37525,22 @@ function liqGrillaPintar(){
   var v = (LIQ && LIQ.grilla) ? LIQ.grilla : {};
   var bloqueado = liqCerradoBloquea();
   var inp = function(k, amb){
+    // ══ LO QUE EL SISTEMA CALCULA NO SE TIPEA ═════════════════════════
+    //
+    // Pablo, 29/8/2026: «tampoco tiene sentido editar estos cuadros, deberían
+    // venir todos por sistema, ¿no?».
+    //
+    // En la mayoría tiene razón y acá se cierran. En tres NO se cierran todavía,
+    // y no por descuido: hoy el sistema no puede calcularlas y trabarlas dejaría
+    // liquidaciones que no se pueden emitir. Están enumeradas abajo.
+    if (liqCeldaCalculada(k, amb)) {
+      var vc = (v[amb + '_' + k] != null && v[amb + '_' + k] !== '')
+        ? liqPlata(v[amb + '_' + k]) : '';
+      return '<input type="text" id="liq-g-' + amb + '-' + k + '" value="' + vc + '"'
+        + ' readonly tabindex="-1" title="' + liqCeldaPorQue(k, amb) + '"'
+        + ' style="width:100%;text-align:right;box-sizing:border-box;'
+        + 'background:var(--bor2,#f1f5f9);color:var(--mut);cursor:not-allowed;border:1px solid var(--bor)">';
+    }
     // ══ A PRECIO CERRADO EL OPERADOR CONFIRMA, NO CALCULA ═════════════
     //
     // Pablo, 25/8/2026: "a la hora de hacer las liquidaciones precio cerrado vamos
@@ -37527,18 +37581,34 @@ function liqGrillaPintar(){
     // EL ORIGEN, ABAJO DEL NOMBRE. Un número que apareció solo y no dice de dónde
     // salió es un número que el operador no puede defender cuando el productor
     // pregunta. Acá cada fila dice si vino de la recepción, de la orden o a mano.
-    var sub = org[f.k]
-      ? '<div style="font-size:10.5px;color:var(--mut)">' + org[f.k] + '</div>' : '';
+    // CON ID PROPIO. El texto que dice de dónde salió el número se pintaba una
+    // sola vez, al abrir; después el despeje lo corregía en LIQ.origen y nadie
+    // lo volvía a mirar. Por eso Gastos administrativos decía «a mano» sobre un
+    // número que la propia pantalla acababa de calcular tres líneas antes.
+    // Se refresca desde liqOrigenPintar, sin repintar la grilla entera —eso se
+    // llevaría el foco del campo que se está tipeando—.
+    var sub = '<div id="liq-org-' + f.k + '" style="font-size:10.5px;color:var(--mut)">'
+      + (org[f.k] || '') + '</div>';
     // LA COMISIÓN SE CALCULA CON UN %. Pablo: "la comisión por default es 12% en
     // precio abierto, aunque tiene que haber un box donde podamos editarla — hay
     // proveedores que tienen distintas comisiones".
+    //
+    // A precio CERRADO ese % es el resultado del despeje, no algo para llenar:
+    // ya era readOnly, pero se veía igual que un campo editable y por eso se lee
+    // como una invitación. Ahora se ve trabado como el resto de la pantalla.
     var pct = '';
     if (f.k === 'comision') {
+      var pctFijo = (liqModo() === 'cerrado');
       pct = '<div style="display:flex;gap:5px;align-items:center;margin-top:3px">'
         + '<input type="number" step="0.01" id="liq-comision-pct" value="'
         + ((LIQ && LIQ.comisionPct != null) ? LIQ.comisionPct : 12) + '"'
-        + ' oninput="liqComisionCalcular()" title="Sobre las ventas"'
-        + ' style="width:70px;text-align:right;padding:2px 5px">'
+        + (pctFijo
+            ? ' readonly tabindex="-1" title="A precio cerrado sale de la cuenta, no se tipea"'
+              + ' style="width:70px;text-align:right;padding:2px 5px;'
+              + 'background:var(--bor2,#f1f5f9);color:var(--mut);cursor:not-allowed"'
+            : ' oninput="liqComisionCalcular()" title="Sobre las ventas"'
+              + ' style="width:70px;text-align:right;padding:2px 5px"')
+        + '>'
         + '<span style="font-size:11px;color:var(--mut)">% sobre las ventas</span></div>';
     }
     // EL SIGNO, ADELANTE DEL NOMBRE. Pablo: "le agregaría los signos nada más que
@@ -37617,6 +37687,67 @@ function liqComisionCalcular(){
 // la descarga, del flete y de los gastos administrativos es el 21%". Se recalcula
 // al tocar el importe; si después se corrige el IVA a mano, queda lo corregido
 // hasta que el importe vuelva a cambiar.
+// ── QUÉ CELDA SALE SOLA, SIEMPRE ────────────────────────────────────────
+//
+// UNA SOLA PUERTA, para que una fila nueva no se olvide de cerrarse.
+//
+// Se cierran:
+//   · TODOS los IVA. Son importe × alícuota y la alícuota vive en LIQ_FILAS. Si
+//     un día hay que cambiarla, se cambia la alícuota, no el IVA.
+//   · La COMISIÓN y su IVA, en los dos modos y en las dos columnas: a precio
+//     abierto es ventas × %, y a cerrado la despeja el sistema para llegar al
+//     precio acordado. Tocar el importe a mano deja el % de al lado mintiendo.
+//   · La columna de GESTIÓN de descarga, flete y gastos administrativos. Regla
+//     de Pablo, citada tres líneas más abajo en este mismo archivo: «la comisión
+//     debe afectar tanto a la parte fiscal como a la parte de gestión, NO ASÍ la
+//     descarga y el flete». Nadie las calcula y entran igual en el despeje: eran
+//     la única puerta para meter plata de gestión sin origen.
+//
+// NO se cierran, y hay que decir por qué:
+//   · VENTAS y su IVA: salen de los comprobantes, pero hay dos casos donde
+//     llegan incompletas —mercadería despachada sin facturar todavía, y una
+//     factura vieja compartida entre dos partidas, donde el IVA y la gestión no
+//     se pueden atribuir—. Trabarlas sin resolver eso deja liquidaciones que no
+//     se pueden emitir.
+//   · DESCARGA: sale de la recepción sólo si el gasto está VALORIZADO, y se
+//     valoriza cuando se le paga a la cooperativa — otro reloj. Hasta que el
+//     aviso lleve a la pantalla donde se valoriza, el campo a mano es la única
+//     salida.
+//   · FLETE: hoy sólo trae el de la orden cuando es a cargo del comprador. El
+//     caso que el propio sistema dice que se recupera por acá —el que adelantó
+//     San Gerónimo por el productor— no lo trae, así que a mano es la única
+//     forma de cobrarlo.
+//   · GASTOS ADMINISTRATIVOS a precio abierto: nada lo calcula. A precio cerrado
+//     lo escribe el despeje, y ahí ya queda trabado por el bloqueo del modo.
+function liqCeldaCalculada(k, amb){
+  if (String(k).indexOf('iva_') === 0) return true;      // todos los IVA
+  if (k === 'comision') return true;                      // las dos columnas
+  if (amb === 'g' && (k === 'descarga' || k === 'flete' || k === 'gastos_admin')) return true;
+  return false;
+}
+
+function liqCeldaPorQue(k, amb){
+  if (String(k).indexOf('iva_') === 0) return 'Sale del importe por la alícuota de la fila';
+  if (k === 'comision') {
+    return liqModo() === 'cerrado'
+      ? 'A precio cerrado se despeja para llegar al precio acordado'
+      : 'Sale del porcentaje de acá abajo, sobre las ventas';
+  }
+  if (amb === 'g') return 'La descarga y el flete no se reparten a gestión: van enteros al fiscal';
+  return 'Lo calcula el sistema';
+}
+
+// Refresca sólo los sub-rótulos de la grilla. Repintarla entera destruiría los
+// inputs y se llevaría el foco del que se está tipeando — que es de donde salió
+// el bug de «entra un dígito por vez» en la pantalla de cobro.
+function liqOrigenPintar(){
+  var org = (LIQ && LIQ.origen) ? LIQ.origen : {};
+  LIQ_FILAS.forEach(function(f){
+    var e = eid('liq-org-' + f.k);
+    if (e) e.innerHTML = org[f.k] || '';
+  });
+}
+
 function liqIvaServicio(k){
   var m = eid('liq-g-f-' + k), iv = eid('liq-g-f-iva_' + k);
   var a = liqAlic(k);
@@ -37767,8 +37898,9 @@ function liqRenderArt(arts) {
   const nota = document.getElementById('liq-art-nota');
   if (nota) {
     nota.innerHTML = fijo
-      ? 'La cantidad y el precio salen del cuadro de arriba. Para cambiarlos, cambiá '
-        + '<b>los bultos a liquidar</b> ahí.'
+      ? 'El producto, la cantidad y el precio salen de la partida: es lo que se compró y '
+        + 'lo que se acordó pagar. Si algo de eso está mal, se corrige en la orden de compra '
+        + '—que es donde el productor lo acordó—, no en el papel donde cobra.'
       : '';
   }
   c.innerHTML =
@@ -37786,12 +37918,18 @@ function liqRenderArt(arts) {
       // el PDF --que la imprime si está-- nunca la tenía. El papel donde el
       // productor cobra decía "56" a secas.
       '<input data-k="unidad" type="hidden" value="'+_liqEsc(a.unidad||u||'')+'">' +
-      '<input data-k="articulo"  value="'+_liqEsc(a.articulo||'')+'" placeholder="Artículo">' +
+      // EL PRODUCTO ES EL QUE SE COMPRÓ. Pablo, 29/8/2026: «no está bien que me
+      // deje editar artículos, ya que ellos vienen con la partida». Cambiar el
+      // nombre acá dejaba el papel donde el productor cobra diciendo un producto
+      // y la partida diciendo otro.
+      '<input data-k="articulo"  value="'+_liqEsc(a.articulo||'')+'" placeholder="Artículo"'+ro+'>' +
       '<input data-k="cantidad"  type="number" step="'+liqPasoCantidad()+'" value="'+(a.cantidad||'')+'" placeholder="Cant." oninput="liqArtImporte(this)"'+ro+'>' +
       '<input data-k="precio"    type="number" step="0.01" value="'+(a.precio||'')+'" placeholder="Precio" oninput="liqArtImporte(this)"'+ro+'>' +
-      // El IMPORTE se sigue pudiendo corregir aunque el renglón sea derivado: el
-      // papel puede traer un redondeo y es el número que se imprime.
-      '<input data-k="importe"   type="number" step="0.01" value="'+(a.importe||'')+'" placeholder="Importe" style="text-align:right" oninput="liqTotales()">' +
+      // Y EL IMPORTE TAMPOCO. Estaba editable «por si el papel trae un redondeo»,
+      // pero es cantidad × precio y los dos ya salen de la partida: tocarlo acá
+      // era la forma de que la liquidación no diera el precio acordado sin que
+      // se viera dónde se había torcido.
+      '<input data-k="importe"   type="number" step="0.01" value="'+(a.importe||'')+'" placeholder="Importe" style="text-align:right" oninput="liqTotales()"'+ro+'>' +
       (fijo ? '<span></span>'
             : '<button class="btn bo bs" onclick="this.parentNode.remove();liqTotales()" style="color:#991b1b">×</button>') +
     '</div>').join('');

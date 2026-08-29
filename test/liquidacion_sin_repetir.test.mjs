@@ -71,10 +71,16 @@ test('cambiar los bultos de arriba baja al renglón', () => {
   // Sin esto el cuadro decía 45 y el artículo seguía en los 60 de la vez anterior,
   // y la diferencia aparecía recién en el control de cierre.
   assert.match(PANEL, /function liqArtSync\(\)\{/);
-  assert.match(PANEL, /oninput="liqCerradoResolver\(\);liqArtSync\(\)"/);
+  // Los bultos ya no se tipean —se liquida la partida entera—, así que el
+  // oninput dejó de existir y el renglón se sincroniza donde se fija el número.
+  assert.match(PANEL, /if \(String\(cc\.value\) !== antes\) liqArtSync\(\);/);
   const i = PANEL.indexOf('function liqArtSync(){');
-  const b = PANEL.slice(i, i + 900);
+  const b = PANEL.slice(i, i + 1500);
   assert.match(b, /if \(!liqArtDerivado\(\)\) return;/, 'no toca la liquidación suelta');
+  // SÓLO con un producto: si la partida trae dos, los bultos de arriba son el
+  // TOTAL y metérselos al primer renglón le adjudica a un producto lo que entró
+  // de los dos — el papel donde el productor cobra sale mal.
+  assert.match(b, /if \(arts\.length === 1\) \{/);
   assert.match(b, /arts\[0\]\.cantidad = cant/);
   assert.match(b, /arts\[0\]\.importe = Math\.round\(arts\[0\]\.cantidad \* arts\[0\]\.precio \* 100\) \/ 100/);
 });
@@ -83,7 +89,7 @@ test('el precio se lee con separador de miles, no crudo', () => {
   // El campo muestra $25.000. parseFloat sobre eso da 25, y la liquidación saldría
   // por mil veces menos.
   const i = PANEL.indexOf('function liqArtSync(){');
-  const b = PANEL.slice(i, i + 900);
+  const b = PANEL.slice(i, i + 1500);
   assert.match(b, /liqNum\(eid\('liq-cerr-precio'\)\)/);
   assert.ok(!/parseFloat\(\(eid\('liq-cerr-precio'\)/.test(b));
 });
@@ -91,21 +97,24 @@ test('el precio se lee con separador de miles, no crudo', () => {
 // ── LA PANTALLA ────────────────────────────────────────────────────────────
 test('los campos derivados se ven, no se tipean', () => {
   const i = PANEL.indexOf('function liqRenderArt(arts) {');
-  const b = PANEL.slice(i, i + 3000);
+  const b = PANEL.slice(i, i + 4200);
   assert.match(b, /const fijo = liqArtDerivado\(\)/);
   assert.match(b, /const ro = fijo \? ' readonly tabindex="-1"/);
-  // Cantidad y precio quedan de sólo lectura...
+  // TODO el renglón queda de sólo lectura. Pablo, 29/8/2026: «no está bien que
+  // me deje editar artículos, ya que ellos vienen con la partida».
   assert.match(b, /data-k="cantidad".*\+ro\+/);
   assert.match(b, /data-k="precio".*\+ro\+/);
-  // ...pero el IMPORTE se sigue pudiendo corregir: el papel puede traer un
-  // redondeo y es el número que se imprime.
-  const imp = b.slice(b.indexOf('data-k="importe"'), b.indexOf('data-k="importe"') + 220);
-  assert.ok(!imp.includes('+ro+'), 'el importe tiene que quedar editable');
+  assert.match(b, /data-k="articulo".*\+ro\+/);
+  // El importe también: es cantidad × precio y los dos salen de la partida.
+  // Tocarlo era la forma de que la liquidación no diera el precio acordado sin
+  // que se viera dónde se había torcido.
+  const imp = b.slice(b.indexOf('data-k="importe"'), b.indexOf('data-k="importe"') + 260);
+  assert.ok(imp.includes('+ro+'), 'el importe tiene que quedar de sólo lectura');
 });
 
 test('sin agregar ni borrar renglones cuando viene de una partida', () => {
   const i = PANEL.indexOf('function liqRenderArt(arts) {');
-  const b = PANEL.slice(i, i + 3000);
+  const b = PANEL.slice(i, i + 4200);
   assert.match(b, /if \(add\) add\.style\.display = fijo \? 'none' : ''/);
   assert.match(b, /fijo \? '<span><\/span>'/, 'la × no se ofrece');
   assert.match(PANEL, /id="liq-art-add"/);
@@ -114,9 +123,10 @@ test('sin agregar ni borrar renglones cuando viene de una partida', () => {
 test('y se dice por qué no se pueden tocar, con el camino', () => {
   // Un campo gris sin explicación se lee como que la pantalla está rota.
   const i = PANEL.indexOf('function liqRenderArt(arts) {');
-  const b = PANEL.slice(i, i + 3000);
-  assert.match(b, /La cantidad y el precio salen del cuadro de arriba/);
-  assert.match(b, /cambiá.*los bultos a liquidar.*ahí/s);
+  const b = PANEL.slice(i, i + 4200);
+  // Y el camino es la orden de compra: los bultos ya no se tocan tampoco.
+  assert.match(b, /El producto, la cantidad y el precio salen de la partida/);
+  assert.match(b, /se corrige en la orden de compra/);
   assert.match(PANEL, /id="liq-art-nota"/);
 });
 
