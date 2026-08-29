@@ -198,11 +198,14 @@ test('el servidor lo frena, y ANTES de mirar el precio', () => {
   // cerrar: facturación, descarga y flete. La partida terminada sigue siendo lo
   // primero que revisa.
   assert.match(LIQ, /import \{ frenoParaLiquidar \}/);
-  const freno = LIQ.indexOf('frenoParaLiquidar(db, ocIdBody, facturaCuenta)');
+  const freno = LIQ.indexOf('frenoParaLiquidar(db, p.oc_id, facturaCuenta)');
   const precio = LIQ.indexOf("String(d.modo_precio || '') !== 'cerrado'");
   assert.ok(freno > 0 && precio > 0);
   assert.ok(freno < precio, 'el freno de partida va antes que el de precio');
-  assert.match(LIQ, /if \(frena\) return res\.status\(400\)\.json\(\{ error: frena \}\)/);
+  // El motivo se devuelve tal cual, con el agregado de cuál del grupo fue cuando
+  // son varias: «una de las partidas» y después el mismo texto de siempre.
+  assert.match(LIQ, /if \(frena\) \{[\s\S]{0,300}\+ frena \}\);/);
+  assert.match(LIQ, /Una de las partidas del grupo no se puede liquidar todavía/);
 });
 
 test('la pantalla no ofrece el botón que va a rebotar, y dice por qué', () => {

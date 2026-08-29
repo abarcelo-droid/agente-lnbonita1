@@ -319,6 +319,43 @@ export function objetivoCerrado(db, { ocId, cantidad, incluyeIvaElegido = null,
     alicuota: alicOC, dice_iva: dice, recibido: recib };
 }
 
+// ══ VARIAS PARTIDAS, UN SOLO PRECIO CERRADO ═══════════════════════════════════
+//
+// Pablo, 29/8/2026: «si un productor o proveedor tiene 2 o más partidas para liquidar
+// debemos poder agruparlas y liquidarlas en una sola liquidación, MANTENIENDO LOS
+// PRECIOS Y CANTIDADES DE CADA PARTIDA».
+//
+// Por eso el objetivo del grupo es la SUMA de los objetivos y no una cuenta nueva:
+// cada partida se controla contra SU orden, con su precio, su alícuota y su propia
+// respuesta sobre la merma. Un precio promedio del grupo sería un número que no se
+// pactó con nadie, y el día que una partida no cierre no se sabría cuál.
+//
+// Y LOS ADMITIDOS DEL GRUPO SON TODAS LAS SUMAS DE UN ADMITIDO DE CADA PARTIDA. Suena
+// raro y es lo correcto: una orden vieja que no dice si el precio traía IVA admite
+// varias lecturas, y el grupo tiene que admitir cualquier combinación de lecturas que
+// cada orden admite por su cuenta. Si el producto se dispara se corta y queda la
+// lectura principal de cada una —la que muestra la pantalla—, que es lo único que se
+// puede seguir explicando.
+export function objetivoCerradoGrupo(db, partes) {
+  const uno = partes.map((p) => objetivoCerrado(db, p));
+  const malo = uno.find((o) => !o.ok);
+  if (malo) return malo;
+  const objetivo = r2(uno.reduce((a, o) => a + o.objetivo, 0));
+  let admitidos = [0];
+  let corto = false;
+  for (const o of uno) {
+    if (admitidos.length * o.admitidos.length > 4000) { corto = true; break; }
+    const sig = [];
+    for (const a of admitidos) for (const b of o.admitidos) sig.push(r2(a + b));
+    admitidos = [...new Set(sig)];
+  }
+  if (corto) admitidos = [objetivo];
+  return { ok: true, objetivo, admitidos, partes: uno, grupo: uno.length,
+    entera: uno.every((o) => o.entera),
+    // Cuál de las partidas no da, para poder nombrarla. Lo llena el que compara.
+    total_orden: r2(uno.reduce((a, o) => a + (Number(o.total_orden) || 0), 0)) };
+}
+
 // ¿El neto a pagar da lo acordado? `pagar` es fiscal + gestión: es lo que el
 // productor efectivamente cobra, y es contra eso que se pactó el precio.
 // Un centavo de tolerancia, el mismo que usa la pantalla.

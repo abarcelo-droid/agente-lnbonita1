@@ -192,12 +192,16 @@ test('la respuesta queda escrita en la liquidación', () => {
   // Dos liquidaciones de partidas iguales por plata distinta no se explican solas
   // seis meses después.
   assert.match(LIQ, /ALTER TABLE liquidaciones ADD COLUMN merma_liquidada INTEGER/);
-  assert.match(LIQ, /mermaLiquidada: \(d\.merma_liquidada == null \|\| d\.merma_liquidada === ''\)/);
+  // La respuesta viaja POR PARTIDA: en un grupo cada una tiene la suya.
+  assert.match(LIQ, /mermaLiquidada: p\.merma_liquidada == null \? null : !!p\.merma_liquidada/);
   assert.match(LIQ, /oc_id, bultos_liquidados, merma_liquidada/);
   const i = LIQ.indexOf('INSERT INTO liquidaciones (');
   const b = LIQ.slice(i, i + 2600);
   assert.match(b, /grilla_json,\r?\n\s*merma_liquidada/);
-  assert.match(b, /\? null : \(Number\(d\.merma_liquidada\) \? 1 : 0\)/);
+  // En la columna sólo cuando es UNA partida: la de la primera diría que el grupo
+  // entero se resolvió así. Las de verdad están en liquidacion_partidas.
+  assert.match(b, /partidas\.length === 1 \? partidas\[0\]\.merma_liquidada : null/);
+  assert.match(LIQ, /INSERT INTO liquidacion_partidas \(liquidacion_id, oc_id, bultos, merma_liquidada\)/);
 });
 
 test('y el mensaje del cerrojo dice si el número lleva la merma o no', () => {
@@ -249,77 +253,96 @@ function traer(nombre, extra = '') {
 test('tres estados, no dos: sin contestar NO es «no»', () => {
   // Si null se leyera como «no», abrir la pantalla y guardar sin mirar equivaldría a
   // decidir que la pérdida la absorbe el productor, en silencio y por omisión.
-  const f = traer('function liqMermaPaga(){');
-  const doc = (v) => ({ querySelector: () => (v == null ? null : { value: v }) });
-  assert.equal(f(null, doc(null))(), null, 'sin contestar tiene que ser null');
-  assert.equal(f(null, doc('1'))(), true);
-  assert.equal(f(null, doc('0'))(), false);
+  const f = traer('function liqMermaPagaDe(ocId){');
+  const doc = (v) => ({ querySelector: (q) => {
+    // Y la pregunta es DE UNA PARTIDA: el nombre del grupo de radios lleva su id.
+    assert.match(q, /liq-merma-paga-7/);
+    return v == null ? null : { value: v };
+  } });
+  assert.equal(f(null, doc(null))(7), null, 'sin contestar tiene que ser null');
+  assert.equal(f(null, doc('1'))(7), true);
+  assert.equal(f(null, doc('0'))(7), false);
 });
 
 test('la cantidad mermada se cuenta en la unidad en que se liquida', () => {
-  const f = traer('function liqMermaCant(){');
-  const enBultos = { venta: { unidad: 'bulto', bultos_merma: 5, kg_merma: 100 } };
-  const enKilos  = { venta: { unidad: 'kilo',  bultos_merma: 5, kg_merma: 100 } };
-  assert.equal(f(enBultos, null)(), 5);
-  assert.equal(f(enKilos, null)(), 100);
-  assert.equal(f({}, null)(), 0, 'sin partida no hay merma que contar');
+  const f = traer('function liqMermaCantDe(p){');
+  assert.equal(f(null, null)({ unidad: 'bulto', bultos_merma: 5, kg_merma: 100 }), 5);
+  assert.equal(f(null, null)({ unidad: 'kilo',  bultos_merma: 5, kg_merma: 100 }), 100);
+  assert.equal(f(null, null)(null), 0, 'sin partida no hay merma que contar');
 });
 
 test('la pregunta se muestra con las dos opciones y su importe', () => {
   const i = PANEL.indexOf('id="liq-merma-box"');
   assert.ok(i > 0, 'no está el cuadro de la merma');
-  const b = PANEL.slice(i - 900, i + 1800);
-  assert.match(b, /¿Se le pagan al productor\?/);
-  assert.match(b, /La pérdida la absorbe San Gerónimo/);
-  assert.match(b, /La pérdida la absorbe el productor/);
+  const b = PANEL.slice(i - 900, i + 1400);
+  assert.match(b, /¿Se le pagan al productor las mermas\?/);
   const f = PANEL.indexOf('function liqMermaPintar(){');
-  const p = PANEL.slice(f, f + 1200);
-  assert.match(p, /sgMoney\(ac\.total\)/);
-  assert.match(p, /sgMoney\(ac\.total_sin_mermas\)/);
+  const p = PANEL.slice(f, f + 2600);
+  assert.match(p, /La pérdida la absorbe San Gerónimo/);
+  assert.match(p, /La pérdida la absorbe el productor/);
+  assert.match(p, /sgMoney\(p\.acordado_total\)/);
+  assert.match(p, /sgMoney\(p\.acordado_sin_mermas\)/);
+});
+
+test('una pregunta por PARTIDA, no una para el grupo', () => {
+  // Un grupo no tiene «una» merma: tiene la de cada partida, y se pueden querer
+  // resolver distinto. El nombre del grupo de radios lleva el id de la partida.
+  const f = PANEL.indexOf('function liqMermaPintar(){');
+  const p = PANEL.slice(f, f + 2600);
+  assert.match(p, /var n = 'liq-merma-paga-' \+ p\.oc_id;/);
+  assert.match(p, /liqPartidasVenta\(\)\.filter\(function\(p\)\{ return liqMermaCantDe\(p\) > 0; \}\)/);
+  assert.match(p, /Partida '\r?\n?\s*\+ escH\(p\.partida/, 'no dice de qué partida es cada pregunta');
 });
 
 test('NINGUNA opción viene marcada', () => {
   // Marcar una sería decidir de qué bolsillo sale la pérdida sin preguntarle a nadie.
-  const i = PANEL.indexOf('id="liq-merma-box"');
-  const b = PANEL.slice(i, i + 1800);
-  const radios = b.match(/name="liq-merma-paga"[^>]*/g) || [];
+  const f = PANEL.indexOf('function liqMermaPintar(){');
+  const b = PANEL.slice(f, f + 2600);
+  const radios = b.match(/<input type="radio" name="' \+ n \+ '" value="[01]"[^>]*/g) || [];
   assert.equal(radios.length, 2, 'tienen que ser las dos opciones');
   for (const r of radios) assert.ok(!/checked/.test(r), 'vino una marcada por defecto');
 });
 
 test('ni se hereda de la liquidación anterior', () => {
-  const i = PANEL.indexOf("querySelectorAll('input[name=\"liq-merma-paga\"]')");
-  assert.ok(i > 0, 'no se limpian los radios al abrir una nueva');
-  assert.match(PANEL.slice(i - 400, i + 300), /x\.checked = false/);
+  // El cuadro se vacía al abrir: los radios se rearman con la partida nueva.
+  const i = PANEL.indexOf("if ((_e = eid('liq-merma-lista'))) _e.innerHTML = '';");
+  assert.ok(i > 0, 'no se limpia el cuadro de la merma al abrir una nueva');
+  // Y NO se rearma en cada tecla: reconstruirlo mientras se tipea el precio
+  // borraría el tilde recién puesto.
+  const r = PANEL.indexOf('function liqCerradoResolver(){');
+  assert.ok(!/liqMermaPintar\(\)/.test(PANEL.slice(r, r + 2200)),
+    'el despeje reconstruye el cuadro y se lleva puesta la respuesta');
 });
 
 test('sin contestar no se calcula el objetivo, y se dice por qué', () => {
-  const i = PANEL.indexOf('var mCant = liqMermaCant(), mPaga = liqMermaPaga();');
+  const i = PANEL.indexOf('var pend = liqMermaPendientes();');
   assert.ok(i > 0, 'liqCerradoResolver no mira la merma');
-  const b = PANEL.slice(i, i + 1400);
-  assert.match(b, /if \(mCant > 0 && mPaga === null\) \{/);
+  const b = PANEL.slice(i, i + 2200);
+  assert.match(b, /if \(pend\.length\) \{/);
   assert.match(b, /LIQ\.cerrado\.objetivo = 0;/);
   assert.match(b, /Falta decidir la merma/);
-  // Y la otra rama: no pagarlas usa el total sin mermas del servidor.
-  assert.match(b, /if \(mCant > 0 && mPaga === false\) \{/);
-  assert.match(b, /m2\(ac\.total_sin_mermas\)/);
+  // Y la otra rama: no pagarlas usa el total sin mermas del servidor, POR PARTIDA.
+  assert.match(b, /paga === false && p\.acordado_sin_mermas != null/);
+  assert.match(b, /if \(hayAc && _entera\) \{/);
 });
 
 test('y no se emite sin contestar', () => {
   const g = PANEL.indexOf('async function liqGuardar() {');
-  const i = PANEL.indexOf("liqMermaCant() > 0 && liqMermaPaga() === null", g);
+  const i = PANEL.indexOf("liqModo() === 'cerrado' && liqMermaPendientes().length", g);
   assert.ok(i > g, 'liqGuardar no frena cuando falta decidir la merma');
   // ANTES del envío: el servidor lo rebota igual, pero el que arma la liquidación
   // tiene que enterarse acá, con el número a la vista.
   assert.ok(i < PANEL.indexOf("fetch('/api/liquidaciones'", g));
-  assert.match(PANEL.slice(i, i + 700), /Antes de emitir hay que decir si esa merma se le paga/);
+  assert.match(PANEL.slice(i, i + 900), /Antes de emitir hay que decir si esa merma se le paga/);
 });
 
-test('la respuesta viaja al servidor', () => {
-  assert.match(PANEL, /merma_liquidada:\s+\(function\(\)\{ var p = liqMermaPaga\(\);/);
-  const i = PANEL.indexOf('merma_liquidada:      (function(){');
-  const b = PANEL.slice(i, i + 400);
-  assert.match(b, /liqModo\(\) === 'cerrado' && liqMermaCant\(\) > 0 && p !== null/);
+test('la respuesta viaja al servidor, una por partida', () => {
+  const i = PANEL.indexOf('partidas:             liqPartidasVenta().map(function(p){');
+  assert.ok(i > 0, 'no viaja la lista de partidas');
+  const b = PANEL.slice(i, i + 700);
+  assert.match(b, /merma_liquidada: \(liqModo\(\) === 'cerrado'/);
+  assert.match(b, /liqMermaCantDe\(p\) > 0 && x !== null\) \? \(x \? 1 : 0\) : null/);
+  assert.match(b, /bultos_liquidados: \(p\.bultos_ingresados != null\)/);
 });
 
 // ── 6 · EL RENGLÓN, EN LA PANTALLA ─────────────────────────────────────────
@@ -329,21 +352,30 @@ test('el renglón se acuerda de que es merma después de repintarse', () => {
   // escondido, el primer repintado convierte la merma en un producto más y el
   // despeje del precio cerrado le mete encima la cantidad y el precio del producto.
   assert.match(PANEL, /'<input data-k="es_merma" type="hidden" value="'\+\(a\.es_merma \? '1' : ''\)\+'">'/);
-  assert.match(PANEL, /es_merma: a\.es_merma \? 1 : 0 \}/);
+  assert.match(PANEL, /es_merma: a\.es_merma \? 1 : 0,/);
 });
 
 test('el producto y la merma suman lo que entró, no más', () => {
   const i = PANEL.indexOf('function liqArtSync(){');
-  const b = PANEL.slice(i, i + 2600);
+  const b = PANEL.slice(i, i + 3600);
   assert.match(b, /var cantM = mers\.reduce\(/);
-  assert.match(b, /reales\[0\]\.cantidad = Math\.round\(\(cant - cantM\) \* 100\) \/ 100/);
+  assert.match(b, /reales\[0\]\.cantidad = m2a\(ing - cantM\)/);
 });
 
 test('y la merma cobra $0, salvo que se haya decidido pagarla', () => {
   const i = PANEL.indexOf('function liqArtSync(){');
-  const b = PANEL.slice(i, i + 2600);
-  assert.match(b, /var pagaM = \(liqMermaPaga\(\) === true\);/);
-  assert.match(b, /a\.precio\s+= \(pagaM && pre > 0\) \? pre : 0;/);
+  const b = PANEL.slice(i, i + 3600);
+  assert.match(b, /var paga = \(liqMermaPagaDe\(p\.oc_id\) === true\);/);
+  assert.match(b, /a\.precio\s+= \(paga && pu > 0\) \? pu : 0;/);
+  // AL PRECIO DE SU PARTIDA: en un grupo, la merma de un camión no se paga al
+  // precio del otro.
+  assert.match(b, /Number\(p\.precio_por_bulto\) \|\| 0/);
+});
+
+test('el renglón se acuerda de qué partida es', () => {
+  // En una liquidación agrupada hay renglones de varias partidas con precios
+  // distintos: sin esto, la merma de un camión se pagaría al precio del otro.
+  assert.match(PANEL, /'<input data-k="oc_id" type="hidden" value="'\+_liqEsc\(a\.oc_id == null \? '' : a\.oc_id\)\+'">'/);
 });
 
 test('cambiar la respuesta mueve el objetivo Y el renglón', () => {

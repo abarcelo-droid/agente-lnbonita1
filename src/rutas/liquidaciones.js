@@ -11,7 +11,7 @@ import express from 'express';
 import dbSg from '../servicios/db_sg_finanzas.js';
 import { crearAsiento } from '../servicios/asientos.js';
 import { lineasAsientoLiquidacion } from '../servicios/asiento-liquidacion.js';
-import { objetivoCerrado, cierraContraLoAcordado } from '../servicios/sg_acordado.js';
+import { objetivoCerradoGrupo, cierraContraLoAcordado } from '../servicios/sg_acordado.js';
 import { frenoParaLiquidar } from '../servicios/sg_partida_terminada.js';
 import { facturaCuenta } from '../servicios/factura-cuenta.js';
 import path    from 'path';
@@ -140,6 +140,32 @@ try { db.exec("ALTER TABLE liquidaciones ADD COLUMN anulado_motivo TEXT"); } cat
 try { db.exec("ALTER TABLE liquidaciones ADD COLUMN anulado_por INTEGER"); } catch(_){}
 try { db.exec("ALTER TABLE liquidaciones ADD COLUMN saldo_pagado_gestion REAL NOT NULL DEFAULT 0"); } catch(_){}
 try { db.exec("CREATE INDEX IF NOT EXISTS idx_liq_oc ON liquidaciones(oc_id)"); } catch(_){}
+// ══ UNA LIQUIDACIÓN, VARIAS PARTIDAS ═════════════════════════════════════════
+//
+// Pablo, 29/8/2026: «si un productor o proveedor tiene 2 o más partidas para liquidar
+// debemos poder agruparlas y liquidarlas en una sola liquidación».
+//
+// La columna oc_id no alcanza: guarda una sola. Y no se puede reemplazar —la usan la
+// bandeja, el cerrojo del precio cerrado, la anulación y cuatro informes—, así que
+// sigue apuntando a la PRIMERA del grupo y acá se guarda el grupo entero. Una
+// liquidación de una sola partida también deja su fila: si el caso simple fuera la
+// excepción, la consulta de "qué partidas ya se liquidaron" tendría que preguntar en
+// dos lados y un día se olvidaría de uno.
+//
+// SIN FOREIGN KEY HACIA sg_oc (regla del repo): con foreign_keys=ON, una FK hacia otro
+// módulo hace fallar los DELETE de ese módulo. Hacia liquidaciones sí, que es de acá.
+try {
+  db.exec(`CREATE TABLE IF NOT EXISTS liquidacion_partidas (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    liquidacion_id  INTEGER NOT NULL REFERENCES liquidaciones(id),
+    oc_id           INTEGER NOT NULL,
+    bultos          REAL,
+    merma_liquidada INTEGER,
+    creado_en       TEXT DEFAULT (datetime('now','localtime'))
+  )`);
+  db.exec("CREATE INDEX IF NOT EXISTS idx_liqpart_liq ON liquidacion_partidas(liquidacion_id)");
+  db.exec("CREATE INDEX IF NOT EXISTS idx_liqpart_oc  ON liquidacion_partidas(oc_id)");
+} catch(_){}
 try { db.exec("CREATE INDEX IF NOT EXISTS idx_liq_fecha ON liquidaciones(fecha)"); } catch(_){}
 try { db.exec("CREATE INDEX IF NOT EXISTS idx_liq_n     ON liquidaciones(n_liquidacion)"); } catch(_){}
 
@@ -369,7 +395,40 @@ router.post('/', function(req, res) {
   // orden por la cantidad liquidada: es exactamente el cartel que la pantalla ya
   // muestra al pie («el neto a pagar da el precio acordado»), ahora del lado que
   // decide.
-  const ocIdBody = (d.oc_id != null && d.oc_id !== '') ? Number(d.oc_id) : null;
+  // ── DE QUÉ PARTIDAS ES ESTA LIQUIDACIÓN ─────────────────────────────────
+  //
+  // `partidas` es la lista con la respuesta de cada una (cuántos bultos, y si se le
+  // paga la merma). Cuando no viene se arma con los campos sueltos de siempre, que es
+  // como manda la pantalla cuando se liquida una sola: el caso de una es el grupo de
+  // una, no un camino aparte.
+  const partidasBody = Array.isArray(d.partidas) && d.partidas.length
+    ? d.partidas
+        .map((p) => ({
+          oc_id: Number(p && p.oc_id) || 0,
+          bultos: (p && p.bultos_liquidados != null && p.bultos_liquidados !== '')
+            ? Number(p.bultos_liquidados) : null,
+          merma_liquidada: (p && p.merma_liquidada != null && p.merma_liquidada !== '')
+            ? (Number(p.merma_liquidada) ? 1 : 0) : null,
+        }))
+        .filter((p) => p.oc_id > 0)
+    : ((d.oc_id != null && d.oc_id !== '') ? [{
+        oc_id: Number(d.oc_id),
+        bultos: (d.bultos_liquidados != null && d.bultos_liquidados !== '')
+          ? Number(d.bultos_liquidados) : null,
+        merma_liquidada: (d.merma_liquidada == null || d.merma_liquidada === '')
+          ? null : (Number(d.merma_liquidada) ? 1 : 0),
+      }] : []);
+  // Sin repetidas: la misma partida dos veces en el mismo comprobante le pagaría dos
+  // veces al productor y el cerrojo del precio cerrado lo daría por bueno.
+  const vistas = new Set();
+  const partidas = partidasBody.filter((p) => {
+    if (vistas.has(p.oc_id)) return false;
+    vistas.add(p.oc_id);
+    return true;
+  });
+  // La PRIMERA manda para oc_id, que es la columna que ya existía y que usan la
+  // bandeja, la anulación y los informes.
+  const ocIdBody = partidas.length ? partidas[0].oc_id : null;
 
   // ══ SE LIQUIDA CUANDO LA PARTIDA ESTÁ TERMINADA ════════════════════════
   //
@@ -390,9 +449,15 @@ router.post('/', function(req, res) {
   // Y con la plata cerrada, que Pablo agregó el 29/8/2026: sin la venta facturada la
   // liquidación sale de menos, y sin la descarga o el flete valorizados esos gastos no
   // se le pueden descontar. frenoParaLiquidar mira las tres cosas.
-  if (ocIdBody) {
-    const frena = frenoParaLiquidar(db, ocIdBody, facturaCuenta);
-    if (frena) return res.status(400).json({ error: frena });
+  // POR CADA PARTIDA DEL GRUPO. Con una sola sin facturar, la liquidación entera sale
+  // de menos: agrupar no puede ser la forma de colar la que no estaba lista.
+  for (const p of partidas) {
+    const frena = frenoParaLiquidar(db, p.oc_id, facturaCuenta);
+    if (frena) {
+      return res.status(400).json({ error:
+        (partidas.length > 1 ? 'Una de las partidas del grupo no se puede liquidar todavía. ' : '')
+        + frena });
+    }
   }
 
   // ── LA CONDICIÓN LA DICE LA ORDEN, NO EL RADIO DE LA PANTALLA ───────────
@@ -401,12 +466,14 @@ router.post('/', function(req, res) {
   // pero no lo traba, así que la puerta que esto viene a cerrar quedaba con la llave
   // puesta al lado. Ahora se contrasta contra sg_oc.tipo_precio, que es donde la
   // condición se pactó.
-  if (ocIdBody && String(d.modo_precio || '') !== 'cerrado') {
-    const oc = db.prepare('SELECT tipo_precio FROM sg_oc WHERE id = ?').get(ocIdBody);
-    if (oc && oc.tipo_precio && oc.tipo_precio !== 'pizarra') {
-      return res.status(400).json({ error:
-        'Esa partida se compró a PRECIO CERRADO, así que no se puede liquidar a precio abierto. '
-        + 'Si cambió la condición, se modifica la orden de compra.' });
+  if (String(d.modo_precio || '') !== 'cerrado') {
+    for (const p of partidas) {
+      const oc = db.prepare('SELECT tipo_precio FROM sg_oc WHERE id = ?').get(p.oc_id);
+      if (oc && oc.tipo_precio && oc.tipo_precio !== 'pizarra') {
+        return res.status(400).json({ error:
+          'Esa partida se compró a PRECIO CERRADO, así que no se puede liquidar a precio abierto. '
+          + 'Si cambió la condición, se modifica la orden de compra.' });
+      }
     }
   }
   if (String(d.modo_precio || '') === 'cerrado') {
@@ -416,10 +483,11 @@ router.post('/', function(req, res) {
         'Una liquidación a precio cerrado tiene que salir de una partida: el precio lo pone '
         + 'la orden de compra. Abrila desde la bandeja de partidas a liquidar.' });
     }
-    const obj = objetivoCerrado(db, {
-      ocId,
-      cantidad: (d.bultos_liquidados != null && d.bultos_liquidados !== '')
-        ? Number(d.bultos_liquidados) : null,
+    // CADA PARTIDA CONTRA SU ORDEN, y el objetivo del grupo es la suma. Con una sola
+    // es exactamente la cuenta de antes: el grupo de una no es un camino aparte.
+    const obj = objetivoCerradoGrupo(db, partidas.map((p) => ({
+      ocId: p.oc_id,
+      cantidad: p.bultos,
       // Qué leyó la PANTALLA cuando la orden no lo dice. El selector existe para
       // corregir una orden vieja cargada al revés; si el servidor lo ignorara,
       // corregirla no serviría de nada.
@@ -427,10 +495,10 @@ router.post('/', function(req, res) {
       // ── ¿SE LE PAGA LA MERMA? ──────────────────────────────────────────
       // No tiene default a propósito: si la partida tuvo merma y esto no viene,
       // objetivoCerrado frena. Elegir por el operador sería decidir de qué
-      // bolsillo sale la pérdida sin preguntarle a nadie.
-      mermaLiquidada: (d.merma_liquidada == null || d.merma_liquidada === '')
-        ? null : !!Number(d.merma_liquidada),
-    });
+      // bolsillo sale la pérdida sin preguntarle a nadie. Y va POR PARTIDA: el
+      // grupo no tiene una merma, tiene la merma de cada una.
+      mermaLiquidada: p.merma_liquidada == null ? null : !!p.merma_liquidada,
+    })));
     if (!obj.ok) return res.status(400).json({ error: obj.motivo });
     // Lo que el productor cobra: el comprobante MÁS lo que se le reconoce por
     // fuera. Es la misma suma que la cuenta corriente del proveedor (total +
@@ -439,9 +507,18 @@ router.post('/', function(req, res) {
     // ── Y ENTRE TODAS LAS LIQUIDACIONES DE ESA PARTIDA, TAMPOCO ──────────
     // El cerrojo miraba cada liquidación aislada: dos parciales de 60 cajones sobre
     // una partida de 100 pasaban las dos, y al productor se le pagaba por 120.
-    const yaLiq = db.prepare(`SELECT COALESCE(SUM(COALESCE(total,0) + COALESCE(dif_gestion,0)),0) AS t,
-          COALESCE(SUM(COALESCE(bultos_liquidados,0)),0) AS b
-        FROM liquidaciones WHERE oc_id = ? AND eliminado_en IS NULL`).get(ocId);
+    // TODAS LAS QUE YA TOCARON ALGUNA DE ESTAS PARTIDAS, por la columna vieja o por
+    // la tabla del grupo. Mirar sólo oc_id dejaba pasar la que se liquidó agrupada.
+    const marcas = partidas.map((p) => p.oc_id);
+    const enIn = marcas.map(() => '?').join(',');
+    const yaLiq = db.prepare(`SELECT COALESCE(SUM(COALESCE(l.total,0) + COALESCE(l.dif_gestion,0)),0) AS t,
+          COALESCE(SUM(COALESCE(l.bultos_liquidados,0)),0) AS b
+        FROM liquidaciones l
+       WHERE l.eliminado_en IS NULL
+         AND (l.oc_id IN (${enIn})
+              OR EXISTS (SELECT 1 FROM liquidacion_partidas lp
+                          WHERE lp.liquidacion_id = l.id AND lp.oc_id IN (${enIn})))`)
+      .get(...marcas, ...marcas);
     const yaPagado = Math.round((Number(yaLiq.t) || 0) * 100) / 100;
     const topeTotal = Math.max(...(obj.admitidos || [obj.objetivo]));
     if (yaPagado > 0.009) {
@@ -449,24 +526,34 @@ router.post('/', function(req, res) {
         { minimumFractionDigits: 2, maximumFractionDigits: 2 });
       if (Math.round((yaPagado + pagar - topeTotal) * 100) / 100 > 0.01) {
         return res.status(400).json({ error:
-          'Esa partida ya tiene liquidaciones por ' + plata0(yaPagado) + ' y se pactó en '
+          (partidas.length > 1 ? 'Esas partidas ya tienen' : 'Esa partida ya tiene')
+          + ' liquidaciones por ' + plata0(yaPagado) + ' y se pactaron en '
           + plata0(topeTotal) + '. Con ésta le estarías pagando ' + plata0(yaPagado + pagar) + '.' });
       }
     }
     if (!cierraContraLoAcordado(pagar, obj)) {
       const plata = (x) => '$' + Number(x).toLocaleString('es-AR',
         { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      if (obj.grupo > 1) {
+        return res.status(400).json({ error:
+          'Esas ' + obj.grupo + ' partidas se compraron a PRECIO CERRADO: sumadas, el productor '
+          + 'cobra ' + plata(obj.objetivo) + ' — '
+          + (obj.partes || []).map((o) => plata(o.objetivo)).join(' + ')
+          + '. Esta liquidación le paga ' + plata(pagar) + '. '
+          + 'Si cambió la condición, se modifica LA ORDEN DE COMPRA — no el papel donde cobra.' });
+      }
+      const uno = (obj.partes && obj.partes[0]) || obj;
       return res.status(400).json({ error:
         'Esta partida se compró a PRECIO CERRADO: el productor cobra '
         + plata(obj.objetivo)
-        + (obj.entera ? ' por la partida entera'
-                      : ' (' + plata(obj.precio) + ' × ' + obj.cantidad + ')')
-        + ((obj.merma && obj.merma.hay && obj.merma.liquidada === 0)
-            ? ' descontando ' + obj.merma.cantidad + ' ' + obj.merma.unidad + ' de merma'
-            : (obj.merma && obj.merma.hay)
-              ? ' incluyendo ' + obj.merma.cantidad + ' ' + obj.merma.unidad + ' de merma'
+        + (uno.entera ? ' por la partida entera'
+                      : ' (' + plata(uno.precio) + ' × ' + uno.cantidad + ')')
+        + ((uno.merma && uno.merma.hay && uno.merma.liquidada === 0)
+            ? ' descontando ' + uno.merma.cantidad + ' ' + uno.merma.unidad + ' de merma'
+            : (uno.merma && uno.merma.hay)
+              ? ' incluyendo ' + uno.merma.cantidad + ' ' + uno.merma.unidad + ' de merma'
               : '')
-        + (obj.dice_iva ? ', precio ' + obj.dice_iva : '')
+        + (uno.dice_iva ? ', precio ' + uno.dice_iva : '')
         + '. Esta liquidación le paga ' + plata(pagar) + '. '
         + 'Si cambió la condición, se modifica LA ORDEN DE COMPRA — no el papel donde cobra.' });
     }
@@ -499,7 +586,7 @@ router.post('/', function(req, res) {
       d.cai_numero || null, d.cai_vencimiento || null, d.codigo_barras || null,
       d.texto_original || null,
       (req.user && req.user.id) || null,
-      (d.oc_id != null && d.oc_id !== '') ? Number(d.oc_id) : null,
+      ocIdBody,
       // Lo que se le reconoce al productor por fuera del comprobante. El TOTAL no
       // se toca: es lo que dice el papel y es lo que va al libro fiscal.
       Math.round((parseFloat(d.dif_gestion) || 0) * 100) / 100,
@@ -508,9 +595,20 @@ router.post('/', function(req, res) {
       d.bultos_ingresados != null && d.bultos_ingresados !== '' ? Number(d.bultos_ingresados) : null,
       d.bultos_liquidados != null && d.bultos_liquidados !== '' ? Number(d.bultos_liquidados) : null,
       d.grilla ? JSON.stringify(d.grilla) : null,
-      (d.merma_liquidada == null || d.merma_liquidada === '')
-        ? null : (Number(d.merma_liquidada) ? 1 : 0)
+      // SÓLO CON UNA PARTIDA. En un grupo cada una tiene su respuesta y meter la de la
+      // primera acá diría que el grupo entero se resolvió así. Las respuestas de
+      // verdad viven en liquidacion_partidas, una fila por partida.
+      partidas.length === 1 ? partidas[0].merma_liquidada : null
     );
+    // ── Y DE QUÉ PARTIDAS ES ──────────────────────────────────
+    //
+    // Una fila por partida, también cuando es una sola: si el caso simple no dejara
+    // rastro acá, «qué partidas ya se liquidaron» habría que preguntarlo en dos
+    // lados y un día se olvidaría de uno.
+    for (const p of partidas) {
+      db.prepare(`INSERT INTO liquidacion_partidas (liquidacion_id, oc_id, bultos, merma_liquidada)
+        VALUES (?, ?, ?, ?)`).run(r.lastInsertRowid, p.oc_id, p.bultos, p.merma_liquidada);
+    }
     // ── Y ENTRA AL LIBRO ────────────────────────────────────
     //
     // Pablo: "una vez que se emite la liquidación se contabiliza". La liquidación

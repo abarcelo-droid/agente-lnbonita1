@@ -75,7 +75,7 @@ test('cambiar los bultos de arriba baja al renglón', () => {
   // oninput dejó de existir y el renglón se sincroniza donde se fija el número.
   assert.match(PANEL, /if \(String\(cc\.value\) !== antes\) liqArtSync\(\);/);
   const i = PANEL.indexOf('function liqArtSync(){');
-  const b = PANEL.slice(i, i + 2600);
+  const b = PANEL.slice(i, i + 3600);
   assert.match(b, /if \(!liqArtDerivado\(\)\) return;/, 'no toca la liquidación suelta');
   // SÓLO con un producto: si la partida trae dos, los bultos de arriba son el
   // TOTAL y metérselos al primer renglón le adjudica a un producto lo que entró
@@ -86,8 +86,12 @@ test('cambiar los bultos de arriba baja al renglón', () => {
   assert.match(b, /if \(reales\.length === 1\) \{/);
   // Y LA CANTIDAD DEL PRODUCTO ES LA QUE ENTRÓ MENOS LA QUE SE TIRÓ: los dos
   // renglones tienen que sumar lo recibido, no más.
-  assert.match(b, /reales\[0\]\.cantidad = Math\.round\(\(cant - cantM\) \* 100\) \/ 100/);
-  assert.match(b, /reales\[0\]\.importe = Math\.round\(reales\[0\]\.cantidad \* reales\[0\]\.precio \* 100\) \/ 100/);
+  assert.match(b, /reales\[0\]\.cantidad = m2a\(ing - cantM\)/);
+  assert.match(b, /reales\[0\]\.importe = m2a\(reales\[0\]\.cantidad \* reales\[0\]\.precio\)/);
+  // Y CON UNA SOLA PARTIDA manda lo que se tipeó arriba: es el campo que el operador
+  // tiene delante. Con varias, cada una trae lo suyo de su orden.
+  assert.match(b, /var una = \(ps\.length === 1\);/);
+  assert.match(b, /var ing = una \? \(cant > 0 \? cant : \(Number\(p\.bultos_ingresados\) \|\| 0\)\)/);
 });
 
 test('el precio se lee con separador de miles, no crudo', () => {
@@ -143,7 +147,7 @@ test('la lectura del renglón NO cambió: readonly sigue siendo un input', () =>
   assert.match(b, /querySelectorAll\('#liq-articulos \.liq-art-row'\)/);
   assert.match(b, /row\.querySelectorAll\('input\[data-k\]'\)/);
   const r = PANEL.indexOf('function liqRenderArt(arts) {');
-  const br = PANEL.slice(r, r + 3000);
+  const br = PANEL.slice(r, r + 3800);
   assert.match(br, /'<input data-k="cantidad"/, 'sigue siendo input, no un span');
   assert.match(br, /'<input data-k="precio"/);
 });
