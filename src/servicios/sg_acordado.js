@@ -142,6 +142,19 @@ export function precioUnicoDeOC(db, ocId) {
   const unico = (precios.length && precios.every((x) => x === precios[0])) ? precios[0] : null;
   const bases = new Set((a.detalle || []).map((d) => d.base).filter(Boolean));
   return { total: r2(a.total), precio: unico, items: (a.detalle || []).length,
+    // ── Y TODOS LOS PRECIOS, NO SÓLO EL ÚNICO ────────────────────────────
+    //
+    // Desde que separar por calidad parte el renglón de la orden (29/8/2026), una
+    // partida puede tener DOS precios: los 45 de primera a $50.000 y los 10 de
+    // segunda a $20.000. Ahí `precio` es null —no hay UN precio por cajón— y una
+    // liquidación PARCIAL se quedaba sin ningún importe contra el cual controlarse:
+    // el guardado contestaba «dejá un solo precio en la orden de compra», que es
+    // deshacer justo lo que se acaba de hacer.
+    //
+    // Con la lista, liquidar los 45 de primera se controla contra el precio de la
+    // primera y los 10 de segunda contra el de la segunda. Sigue saliendo de la
+    // orden: lo que se frena es un precio que no se pactó, no una calidad.
+    precios: [...new Set(precios)],
     // 'bulto' sólo si TODOS los ítems se pagan por bulto. Con uno solo en kilos, la
     // cuenta de la orden ya no es «precio por bulto × cajones».
     base: bases.size === 1 ? [...bases][0] : (bases.size ? 'mixto' : null) };
@@ -279,6 +292,11 @@ export function objetivoCerrado(db, { ocId, cantidad, incluyeIvaElegido = null,
   //    Los dos salen de la orden, así que los dos se admiten. Lo que se frena sigue
   //    siendo lo que se frena: un precio que no es el pactado.
   if (cant > 0 && precio != null) netos.add(r2(precio * cantPag));
+  // Y con VARIOS precios —una partida separada por calidad—, el de cada renglón.
+  // Liquidar los 10 de segunda da 10 × el precio de la segunda, no 10 × el promedio.
+  if (cant > 0 && precio == null) {
+    for (const p of (precioUnicoDeOC(db, ocId).precios || [])) netos.add(r2(p * cantPag));
+  }
   if (cant > 0 && base !== 'bulto' && recibPag.bultos > 0) {
     // La cuenta por kilo con la proporción liquidada, que es lo que corresponde
     // cuando se pactó por kilo y se liquida una parte contada en cajones.
@@ -290,7 +308,8 @@ export function objetivoCerrado(db, { ocId, cantidad, incluyeIvaElegido = null,
   if (!netos.size) {
     return { ok: false, motivo:
       'La orden no tiene un precio por unidad contra el cual controlar esta liquidación '
-      + 'parcial. Liquidá la partida entera, o dejá un solo precio en la orden de compra.' };
+      + 'parcial. Liquidá la partida entera, o cargale el precio a los renglones de la orden '
+      + 'de compra.' };
   }
   // ── ¿EL PRECIO PACTADO TRAE IVA, Y CON QUÉ ALÍCUOTA? ─────────────────────
   // La orden lo dice desde que se agregaron las columnas. Las viejas no, y ahí se

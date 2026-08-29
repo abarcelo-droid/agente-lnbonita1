@@ -191,7 +191,7 @@ test('no se puede pasar más de lo que hay en stock', () => {
   // que valida el reproceso.
   const i = SG.indexOf("router.post('/lotes/:id/reclasificar'");
   assert.ok(i > 0, 'no existe el endpoint');
-  const b = SG.slice(i, i + 5200);
+  const b = SG.slice(i, i + 7200);
   assert.match(b, /const disp = bultosDisponibles\(db, madre\.id\);/);
   assert.match(b, /if \(bultos > disp\)/);
   assert.match(b, /Lo que ya se despachó salió como estaba y eso no se reescribe/);
@@ -199,21 +199,21 @@ test('no se puede pasar más de lo que hay en stock', () => {
 
 test('cajones enteros, y al menos uno', () => {
   const i = SG.indexOf("router.post('/lotes/:id/reclasificar'");
-  const b = SG.slice(i, i + 5200);
+  const b = SG.slice(i, i + 7200);
   assert.match(b, /Math\.round\(bultos\) !== bultos/);
   assert.match(b, /bultos <= 0/);
 });
 
 test('el granel no se separa por cajón: va a reproceso', () => {
   const i = SG.indexOf("router.post('/lotes/:id/reclasificar'");
-  const b = SG.slice(i, i + 5200);
+  const b = SG.slice(i, i + 7200);
   assert.match(b, /if \(madre\.bultos == null\)/);
   assert.match(b, /Para separar mercadería a granel usá un reproceso/);
 });
 
 test('sin precio cerrado no se parte: los dos lotes quedarían a costo cero', () => {
   const i = SG.indexOf("router.post('/lotes/:id/reclasificar'");
-  const b = SG.slice(i, i + 5200);
+  const b = SG.slice(i, i + 7200);
   assert.match(b, /if \(madre\.precio_unitario_kg == null\)/);
   assert.match(b, /Cerrale el precio primero/);
 });
@@ -222,14 +222,14 @@ test('el motivo es obligatorio', () => {
   // Es lo que después explica el precio más bajo: sin él, a los dos meses hay
   // una partida de segunda y nadie sabe qué le pasó.
   const i = SG.indexOf("router.post('/lotes/:id/reclasificar'");
-  const b = SG.slice(i, i + 5200);
+  const b = SG.slice(i, i + 7200);
   assert.match(b, /motivo\.length < 3/);
   assert.match(b, /queda registrado en la partida/);
 });
 
 test('pasarlo a la calidad que ya tiene rebota', () => {
   const i = SG.indexOf("router.post('/lotes/:id/reclasificar'");
-  const b = SG.slice(i, i + 5200);
+  const b = SG.slice(i, i + 7200);
   assert.match(b, /ya son de ' \+ calidad \+ ': separarlos no cambiaría nada/);
 });
 
@@ -237,7 +237,7 @@ test('si se marcan TODOS y no salió nada, no se parte: se re-etiqueta', () => {
   // Crear un lote nuevo dejaría la madre en cero, fantasma en la lista y sin
   // nada adentro.
   const i = SG.indexOf("router.post('/lotes/:id/reclasificar'");
-  const b = SG.slice(i, i + 5200);
+  const b = SG.slice(i, i + 7200);
   assert.match(b, /if \(bultos === disp && !salio\)/);
   assert.match(b, /UPDATE sg_lotes SET calidad=\?/);
   // Pero si YA salió algo, se parte igual: esos 70 salieron como primera.
@@ -250,7 +250,7 @@ test('se puede deshacer, y la palabra «anular» en la URL pide el nivel', () =>
   // Es lo primero que van a necesitar: se marcó de más o la partida equivocada.
   const i = SG.indexOf("router.post('/lotes/:id/reclasificaciones/:rid/anular'");
   assert.ok(i > 0, 'no existe el endpoint de deshacer');
-  const b = SG.slice(i, i + 5200);
+  const b = SG.slice(i, i + 7200);
   assert.match(b, /motivo\.length < 3/);
   assert.match(b, /UPDATE sg_lote_reclasificaciones SET anulada_en=/);
   // La fila NO se borra: se sella.
@@ -260,7 +260,7 @@ test('se puede deshacer, y la palabra «anular» en la URL pide el nivel', () =>
 
 test('pero no si de esos bultos ya salió mercadería', () => {
   const i = SG.indexOf("router.post('/lotes/:id/reclasificaciones/:rid/anular'");
-  const b = SG.slice(i, i + 5200);
+  const b = SG.slice(i, i + 7200);
   assert.match(b, /const salio = kgDespachados\(db, hijo\.id\) > 0\.01/);
   assert.match(b, /su costo viajó a esa venta/);
   // Y ofrece el camino: volver a marcar lo que queda.
@@ -269,7 +269,7 @@ test('pero no si de esos bultos ya salió mercadería', () => {
 
 test('deshacer devuelve kilos, bultos y costo enteros', () => {
   const i = SG.indexOf("router.post('/lotes/:id/reclasificaciones/:rid/anular'");
-  const b = SG.slice(i, i + 5200);
+  const b = SG.slice(i, i + 7200);
   assert.match(b, /UPDATE sg_lotes SET kg_reales=\?, bultos=\?, costo_base=\?/);
   assert.match(b, /UPDATE sg_lotes SET activo=0, eliminado_en=/);
 });

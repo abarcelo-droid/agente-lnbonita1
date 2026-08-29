@@ -192,11 +192,27 @@ test('con ítems a precios distintos se puede liquidar la partida ENTERA', () =>
   const entera = objetivoCerrado(db, { ocId: 1, cantidad: 150 });
   assert.equal(entera.ok, true, 'liquidando todo lo que entró sí hay un número: el de la orden');
   assert.equal(entera.objetivo, 1700000, '$1.000.000 + 50 cajones × $14.000');
-  // Pero una PARTE no tiene contra qué controlarse, y se dice en vez de inventar.
+});
+
+test('y una PARTE se controla contra el precio de CADA renglón', () => {
+  // Desde que separar por calidad parte el renglón de la orden (Pablo, 29/8/2026),
+  // una partida puede tener dos precios: los de primera a $10.000 el cajón y los de
+  // segunda a $14.000. Antes, con dos precios, una liquidación parcial se quedaba sin
+  // ningún importe contra el cual controlarse y el guardado contestaba «dejá un solo
+  // precio en la orden de compra» — o sea, deshacé lo que acabás de hacer.
+  //
+  // Ahora se admite el precio de cada renglón: liquidar 40 cajones de una calidad da
+  // 40 × el precio de ESA calidad, no 40 × un promedio que nadie pactó.
+  const db = base({ precio_incluye_iva: 1 });
+  db.prepare("INSERT INTO sg_oc_items VALUES (2,1,700,'bulto',20,NULL)").run();
+  db.prepare('INSERT INTO sg_lotes VALUES (2,2,1000,50,1)').run();
+  assert.deepEqual(precioUnicoDeOC(db, 1).precios.slice().sort((a, b) => a - b), [10000, 14000]);
   const parte = objetivoCerrado(db, { ocId: 1, cantidad: 40 });
-  assert.equal(parte.ok, false);
-  assert.match(parte.motivo, /precio por unidad/i);
-  assert.match(parte.motivo, /partida entera/i, 'y se dice cuál es la salida');
+  assert.equal(parte.ok, true, 'una parte volvió a quedar sin salida');
+  assert.equal(cierraContraLoAcordado(40 * 10000, parte), true, '40 cajones de la primera');
+  assert.equal(cierraContraLoAcordado(40 * 14000, parte), true, '40 de la segunda');
+  // Y lo que no sale de ningún renglón sigue rebotando.
+  assert.equal(cierraContraLoAcordado(40 * 12000, parte), false, 'un promedio que nadie pactó');
 });
 
 test('la condición la dice la ORDEN, no el radio de la pantalla', () => {
