@@ -116,7 +116,7 @@ test('la orden entera queda a mano para saber la unidad de cada ítem', () => {
 
 test('la otra unidad queda siempre a la vista', () => {
   // Es el control que evita guardar $/bulto creyendo que son $/kg.
-  const b = bloque('sgLoteEdEq', 700);
+  const b = bloque('sgLoteEdEq', 1400);
   assert.match(b, /\/kg · bultos de/);
   assert.match(b, /\/bulto · bultos de/);
 });

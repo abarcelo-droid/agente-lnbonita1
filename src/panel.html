@@ -4539,6 +4539,16 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
              por bulto». Arranca en la de la orden y se dice cuál es, para que
              cambiarla sea una decisión y no un descuido. -->
         <div id="sg-loteed-uni-nota" style="font-size:11px;color:var(--mut);margin-top:6px"></div>
+        <!-- ── SI LA ORDEN SE PACTÓ CON IVA, LA PARTIDA GUARDA EL NETO ──────
+             Y no lo decía en ningún lado. El comprador acuerda «$20.000 el cajón»
+             con el productor —con IVA, que es como se habla— y acá tipea 20.000: se
+             guarda como NETO, así que lo que termina debiéndose es un 10,5% más de
+             lo acordado, y para el lado que nadie reclama.
+             La otra puerta que toca el precio (la de la orden) sí convierte. Ésta
+             guarda lo que se escribe, así que tiene que decir qué está escribiendo. -->
+        <div id="sg-loteed-precio-iva" style="display:none;font-size:11.5px;color:#075985;
+             background:rgba(3,105,161,.08);border:1px solid #0369a1;border-radius:6px;
+             padding:7px 9px;margin-top:8px"></div>
         <div id="sg-loteed-precio-nota" style="font-size:11px;color:var(--mut);margin-top:6px;display:none">
           🔒 El precio lo corrige un administrador.</div>
       </div>
@@ -16062,6 +16072,28 @@ function sgLoteEditarOpen(loteId){
         ? Math.round(Number(l.precio_unitario_kg) * kpb * 100) / 100
         : l.precio_unitario_kg);
   eid('sg-loteed-precio').oninput = sgLoteEdEq;
+  // ── ¿ESTE PRECIO ES NETO? ────────────────────────────────────────────
+  //
+  // La partida guarda el NETO cuando la orden se cargó con «el precio incluye IVA»:
+  // lo hace la recepción y lo hace la pantalla de precios de la orden. Pero acá se
+  // guarda lo que se escribe, sin convertir, y no se decía. El comprador acuerda
+  // «$20.000 el cajón» con el productor —con IVA, que es como se habla—, tipea
+  // 20.000, y lo que se termina debiendo queda 10,5% arriba de lo acordado.
+  var ocD = SG.ocVerData || {};
+  var alicIt = (it && it.iva_alicuota != null && it.iva_alicuota !== '') ? Number(it.iva_alicuota) : null;
+  SG.loteEdNeto = (Number(ocD.precio_incluye_iva) === 1 && alicIt > 0) ? alicIt : null;
+  var ivaN = eid('sg-loteed-precio-iva');
+  if (ivaN) {
+    if (SG.loteEdNeto) {
+      ivaN.style.display = '';
+      ivaN.innerHTML = '<b>Ojo: este precio es NETO.</b> La orden se pactó con el IVA incluido '
+        + '(' + String(SG.loteEdNeto).replace('.', ',') + '%), y la partida guarda el precio '
+        + 'sin IVA. Si con el productor acordaste un número CON IVA, dividilo primero.';
+    } else {
+      ivaN.style.display = 'none';
+      ivaN.innerHTML = '';
+    }
+  }
   // EL CONTEO LO CORRIGE EL OPERADOR; el peso y el precio, administración. Los
   // kilos se recalculan solos con el kg por bulto, así que el que corrige el
   // conteo no tiene que hacer ninguna cuenta.
@@ -16146,10 +16178,15 @@ function sgLoteEdEq(){
   var c = eid('sg-loteed-precio-eq'); if (!c) return;
   var l = SG.loteEdit, kpb = l ? sgLoteEdKpb(l) : null;
   var v = Number((eid('sg-loteed-precio') || {}).value) || 0;
-  if (!kpb || !(v > 0)) { c.textContent = ''; return; }
-  c.innerHTML = (eid('sg-loteed-uni').value === 'bulto')
+  if (!(v > 0)) { c.textContent = ''; return; }
+  // CUÁNTO ES ESO CON IVA. Es el número que se habló con el productor, y tenerlo al
+  // lado mientras se tipea es la única forma de darse cuenta de que se puso el otro.
+  var conIva = SG.loteEdNeto
+    ? ' · <b>' + sgMoney2(v * (1 + SG.loteEdNeto / 100)) + ' con IVA</b>' : '';
+  if (!kpb) { c.innerHTML = conIva ? conIva.replace(' · ', '= ') : ''; return; }
+  c.innerHTML = ((eid('sg-loteed-uni').value === 'bulto')
     ? '= ' + sgMoney2(v / kpb) + ' /kg · bultos de ' + nr(kpb) + ' kg'
-    : '= ' + sgMoney2(v * kpb) + ' /bulto · bultos de ' + nr(kpb) + ' kg';
+    : '= ' + sgMoney2(v * kpb) + ' /bulto · bultos de ' + nr(kpb) + ' kg') + conIva;
 }
 
 // LO QUE VIAJA ES SIEMPRE $/kg. Es la unidad con la que corren el costo, el margen
