@@ -238,3 +238,37 @@ test('y el rótulo dice de qué precio se trata, y en qué unidad', () => {
   // Y los otros campos crudos también tienen nombre.
   assert.match(PANEL, /oc_item_id: 'Renglón de la orden'/);
 });
+
+// ── 7 · EL DESPEJE CORRE, Y SE VE LA COMISIÓN ──────────────────────────────
+
+test('los bultos recibidos salen de la partida, no de un campo que puede no existir', () => {
+  // Pablo, 30/8/2026: pidió ver la comisión y el total, y la pantalla decía «—».
+  // El cuadro que dibuja #liq-bultos-in se pinta DESPUÉS del despeje —liqVentaCab
+  // arma el HTML al final— así que la primera vez el campo no existe y leerlo daba 0:
+  // la partida no era «entera», la base quedaba en cero y no se calculaba nada.
+  //
+  // No se veía mientras el precio por cajón se prellenaba —ahí la base salía de
+  // multiplicar— y apareció en cuanto una partida tuvo DOS precios.
+  const i = PANEL.indexOf('var _recib = Number((eid(\'liq-bultos-in\') || {}).value)');
+  assert.ok(i > 0, 'el despeje sigue leyendo sólo el campo');
+  assert.match(PANEL.slice(i, i + 220), /\|\| Number\(\(\(LIQ\.venta\) \|\| \{\}\)\.bultos_ingresados\) \|\| 0;/);
+});
+
+test('y el despeje se rehace cuando el cuadro ya está dibujado', () => {
+  // Cinturón y tiradores: aunque la base salga de la partida, el cuadro trae los
+  // gastos y el avance, y el despeje tiene que verlos.
+  const i = PANEL.indexOf('liqBultosAvance();');
+  const b = PANEL.slice(i, i + 700);
+  assert.match(b, /if \(liqModo\(\) === 'cerrado'\) liqCerradoResolver\(\); else liqComisionCalcular\(\);/);
+});
+
+test('y con dos precios se muestra el promedio efectivo por bulto', () => {
+  // El campo no puede mostrar UN precio, pero el promedio sí se puede decir y sirve
+  // para comparar contra lo que se habló con el productor.
+  assert.match(PANEL, /id="liq-cerr-precio-eq"/);
+  const i = PANEL.indexOf("var eqP = eid('liq-cerr-precio-eq');");
+  assert.ok(i > 0);
+  const b = PANEL.slice(i, i + 500);
+  assert.match(b, /T && _cant > 0 && !Number\(\(ac \|\| \{\}\)\.precio_por_bulto\)/);
+  assert.match(b, /sgMoney\(T \/ _cant\)/);
+});
