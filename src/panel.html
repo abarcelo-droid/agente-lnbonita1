@@ -13245,6 +13245,19 @@ function liqDesdePartida(r){
   if (pc && !String(pc.value || '').trim() && Number(ac.precio_por_bulto)) {
     liqNumPoner(pc, ac.precio_por_bulto);
   }
+  // ── CON DOS PRECIOS NO HAY UN PRECIO POR CAJÓN ──────────────────────
+  //
+  // Pasa desde que separar por calidad parte el renglón de la orden: los 45 de
+  // primera a un precio y los 10 de segunda a otro. El campo no puede mostrar UN
+  // número —poner el de uno sería inventar el del otro— pero eso NO lo vuelve
+  // editable: el total sale de la orden igual, y abajo se dice cuál es cada uno.
+  var variosPrecios = !!(Number(ac.total) && !Number(ac.precio_por_bulto));
+  if (pc && variosPrecios) {
+    pc.value = '';
+    pc.placeholder = 'dos precios';
+  } else if (pc) {
+    pc.placeholder = '';
+  }
   // LOS BULTOS SON LOS QUE ENTRARON, siempre. Antes se proponía lo vendido y se
   // podía cambiar; ahora el número es uno solo y se escribe cada vez, para que
   // no quede el de una partida anterior si el modal se reusa.
@@ -13297,6 +13310,16 @@ function liqDesdePartida(r){
             ? ' · ' + sgMoney(ac.precio_por_bulto) + ' por ' + ((r.unidad === 'bulto') ? 'bulto' : 'kilo')
             : '')
         + '</span>'
+        // ── Y CUÁL ES CADA PRECIO, cuando son dos ──────────────────────
+        // Sin esto, el que liquida ve un total y un campo vacío y no tiene forma de
+        // saber que la segunda se renegoció — que es justo lo que hay que poder ver.
+        + ((!Number(ac.precio_por_bulto) && (r.renglones || []).length > 1)
+            ? '<div style="margin-top:3px">' + r.renglones.map(function(x){
+                return '<span style="color:var(--mut)">' + escH(x.calidad || 'sin calificar')
+                  + ': </span><b>' + sgMoney(x.precio_por_bulto || x.precio_por_kg) + '</b>'
+                  + '<span style="color:var(--mut)"> × ' + nr(x.bultos) + '</span>';
+              }).join('<span style="color:var(--mut)"> · </span>') + '</div>'
+            : '')
       : '';
   }
 
@@ -15832,14 +15855,51 @@ function sgLoteEliminar(loteId, codigo){
 // aparece: una orden sin correcciones no tiene por qué mostrar una tabla vacía.
 var SG_ED_CAMPO = {
   kg_reales: 'Kilos', bultos: 'Bultos', calidad: 'Calidad',
-  precio_unitario_kg: 'Precio por kg', documenta: 'Se documenta con',
-  tipo_precio: 'Condición comercial', tipo_fiscal: 'Comprobante'
+  kg_por_bulto: 'Kilos por bulto', documenta: 'Se documenta con',
+  tipo_precio: 'Condición comercial', tipo_fiscal: 'Comprobante',
+  oc_item_id: 'Renglón de la orden', eliminada: 'Eliminada', anulada: 'Anulada',
+  liquidada_en: 'Dada por liquidada', factura_compra: 'Factura de compra',
+  precio_por_kg: 'Precio de venta'
 };
-function sgEdValor(campo, v){
+
+// ── LOS PRECIOS SE INFORMAN EN LA UNIDAD EN QUE SE PACTARON ───────────────
+//
+// Pablo, 30/8/2026: «si modifico el precio del bulto no tenés por qué seguirme
+// informando el precio por kilo. Si en la OC arreglamos por bulto y corregimos por
+// bulto, debemos informar por bulto en las correcciones también».
+//
+// El número se GUARDA por kilo —es la unidad con la que corren el costo y la deuda—
+// pero se pacta y se tipea por cajón. Mostrar «2777.777777777778» donde se habló de
+// $50.000 el cajón obliga a hacer una cuenta para leer el propio registro.
+//
+// Los dos campos son el mismo precio en dos lugares: el de la partida (el costo) y el
+// del renglón de la orden (lo que se le paga al productor).
+var SG_ED_PRECIO_KG = { precio_unitario_kg: 1, precio_estimado_por_kg: 1 };
+// Y por bulto sólo cuando la orden se pactó así Y hay factor: sin una de las dos, el
+// número por cajón sería inventado.
+function sgEdPorBulto(e){
+  return !!(e && e.modo_carga === 'bulto' && Number(e.kg_por_bulto) > 0);
+}
+function sgEdCampo(e){
+  if (SG_ED_PRECIO_KG[e.campo]) {
+    return (e.campo === 'precio_estimado_por_kg' ? 'Precio de la orden' : 'Precio de la partida')
+      + (sgEdPorBulto(e) ? ' por bulto' : ' por kg');
+  }
+  return SG_ED_CAMPO[e.campo] || e.campo;
+}
+function sgEdValor(campo, v, e){
   if (v === null || v === undefined || v === '') return '—';
   if (campo === 'documenta') return v === 'liquidacion' ? 'Liquidación' : 'Factura de compra';
   if (campo === 'tipo_precio') return v === 'pizarra' ? 'Precio abierto' : 'Precio Cerrado';
   if (campo === 'tipo_fiscal') return sgLbl(SG_FISCAL, v) || String(v);
+  if (SG_ED_PRECIO_KG[campo] && Number(v) > 0) {
+    // Y CON EL DE LA OTRA UNIDAD AL LADO, en chico: el costo y el margen corren por
+    // kilo, así que el que audita tiene que poder ver los dos sin ir a otra pantalla.
+    return sgEdPorBulto(e)
+      ? sgMoney2(Number(v) * Number(e.kg_por_bulto)) + ' /bulto'
+        + '  ·  ' + sgMoney2(Number(v)) + ' /kg'
+      : sgMoney2(Number(v)) + ' /kg';
+  }
   return String(v);
 }
 function sgOcEdiciones(ocId){
@@ -15854,9 +15914,9 @@ function sgOcEdiciones(ocId){
       + '<th>Quedó</th><th>Por qué</th><th>Quién</th></tr></thead><tbody>'
       + rows.map(function(e){
           return '<tr><td style="white-space:nowrap">' + escH(String(e.fecha || '').slice(0, 16)) + '</td>'
-            + '<td>' + escH(SG_ED_CAMPO[e.campo] || e.campo) + '</td>'
-            + '<td>' + escH(sgEdValor(e.campo, e.valor_anterior)) + '</td>'
-            + '<td><b>' + escH(sgEdValor(e.campo, e.valor_nuevo)) + '</b></td>'
+            + '<td>' + escH(sgEdCampo(e)) + '</td>'
+            + '<td style="white-space:nowrap">' + escH(sgEdValor(e.campo, e.valor_anterior, e)) + '</td>'
+            + '<td style="white-space:nowrap"><b>' + escH(sgEdValor(e.campo, e.valor_nuevo, e)) + '</b></td>'
             + '<td>' + escH(e.motivo || '—') + '</td>'
             + '<td>' + escH(e.usuario_nombre || '—') + '</td></tr>';
         }).join('')
@@ -37444,10 +37504,24 @@ function liqCerradoBloquea(){
 //
 // El servidor exige lo mismo al guardar (rutas/liquidaciones.js): esto es para que
 // nadie tipee diez minutos algo que va a rebotar, no para reemplazarlo.
+// ── EL PRECIO SALE DE LA ORDEN, HAYA UNO O HAYA DOS ──────────────────────
+//
+// Pablo, 30/8/2026: «el precio en la liquidación a precio cerrado debe venir de la
+// orden de compra… ¿por qué lo dejaste editable? Ahora lo puede editar y sacar mal
+// los números de margen, después tengo problemas de quién se equivocó. Esto ya lo
+// teníamos bien».
+//
+// Y lo teníamos bien: se trababa. Lo que lo destrabó fue partir el renglón por
+// calidad — con dos precios ya no hay UN precio por cajón, precio_por_bulto viene
+// null, y esta condición lo leía como «la orden no dice nada, que lo tipee».
+//
+// La orden SÍ dice: dice DOS. Lo que no hay es un solo número para el campo, y eso
+// se resuelve mostrando el total y el detalle, no abriendo el campo. El precio de una
+// partida a precio cerrado no lo tipea nadie, nunca.
 function liqPrecioDeLaOrden(){
   if (liqModo() !== 'cerrado') return false;
   var ac = (LIQ.venta && LIQ.venta.acordado) || {};
-  return !!(LIQ.partida && LIQ.partida.oc_id && Number(ac.precio_por_bulto));
+  return !!(LIQ.partida && LIQ.partida.oc_id && (Number(ac.precio_por_bulto) || Number(ac.total)));
 }
 function liqModo(){
   var el = document.querySelector('input[name="liq-modo"]:checked');
