@@ -136,7 +136,7 @@ test('y el precio que no cambió no se toca ni deja rastro', () => {
 // ── LA PANTALLA ────────────────────────────────────────────────────────────
 
 test('el precio es un campo, no un número muerto', () => {
-  const b = cuerpo('function sgDespVer(id){', 4200);
+  const b = cuerpo('function sgDespVer(id){', 6200);
   assert.match(b, /var puedeEd = lnbPuedeOperar\('sg-ventas'\) && !d\.facturado;/);
   assert.match(b, /id="sg-dped-'\+i\+'"/);
   assert.match(b, /Por qué cambia el precio/);
@@ -145,14 +145,14 @@ test('el precio es un campo, no un número muerto', () => {
 test('el subtotal se rehace mientras se escribe', () => {
   // Es la única forma de ver si el número nuevo es el que se quería ANTES de
   // guardarlo.
-  const b = cuerpo('function sgDespEdUpd(i, valor){', 1100);
+  const b = cuerpo('function sgDespEdUpd(i, valor){', 2200);
   assert.match(b, /c\.textContent = sgMoney\(kg \* SG\.despEd\.items\[i\]\.precio\)/);
   assert.match(b, /Total con los precios nuevos/);
 });
 
 test('si ya se facturó se dice POR QUÉ, no se muestra apagado', () => {
   // Un campo deshabilitado sin explicación se lee como que falta un permiso.
-  const b = cuerpo('function sgDespVer(id){', 6000);
+  const b = cuerpo('function sgDespVer(id){', 8200);
   assert.match(b, /🔒 Este remito ya se facturó/);
   assert.match(b, /Se corrige con una nota de crédito/);
 });
