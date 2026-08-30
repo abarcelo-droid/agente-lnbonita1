@@ -19815,6 +19815,47 @@ function sgDespOnAdd(tipo, fuenteId, kg, meta){
 }
 function sgDespDelItem(i){ SG.despItems.splice(i,1); sgDespRender(); }
 function sgDespUpdNR(i,c,v){ SG.despItems[i][c]=v; sgDespTotal(); }
+
+// ══ EL PRECIO DEL REMITO, EN LA UNIDAD EN QUE SE VENDE ════════════════════
+//
+// Pablo, 30/8/2026: «en el remito necesito poder poner el precio por bulto también,
+// no sólo por kilo. En la modificación del remito también».
+//
+// Es la misma regla que del lado de la compra: el precio se pacta en cajones —«el
+// morrón a $60.000 el cajón»— y obligarlo a dividir por los kilos del cajón es
+// pedirle una cuenta a mano, que es justo donde se cuela el cero de más.
+//
+// LO QUE VIAJA AL SERVIDOR ES SIEMPRE $/kg. Es la unidad con la que corren el
+// subtotal, el margen y lo que se le factura al cliente; mandar la otra dejaría dos
+// renglones del mismo remito como números incomparables.
+var SG_DESP_UNI = 'kg';
+function sgDespUniCambio(v){
+  SG_DESP_UNI = (v === 'bulto') ? 'bulto' : 'kg';
+  sgDespRender();
+}
+// El factor de la línea. Sin él no hay conversión posible y ese renglón se queda en
+// $/kg: es mejor un renglón que dice su unidad que uno que miente.
+function sgDespKpb(it){
+  var k = Number(it && it.kg_por_bulto) || 0;
+  if (k > 0) return k;
+  var b = Number(it && it.bultos) || 0, kg = Number(it && it.kg) || 0;
+  return (b > 0 && kg > 0) ? +(kg / b).toFixed(4) : 0;
+}
+function sgDespPorBulto(it){ return SG_DESP_UNI === 'bulto' && sgDespKpb(it) > 0; }
+// Lo que se MUESTRA: el precio guardado (por kilo) llevado a la unidad elegida.
+function sgDespPrecioVista(it){
+  var p = Number(it.precio);
+  if (!(p > 0)) return it.precio || '';
+  return sgDespPorBulto(it) ? Math.round(p * sgDespKpb(it) * 100) / 100 : p;
+}
+// Y al revés al escribir: lo tipeado vuelve a kilo, que es como se guarda.
+function sgDespPrecioSet(i, valor){
+  var it = SG.despItems[i]; if (!it) return;
+  var v = Number(valor);
+  it.precio = (sgDespPorBulto(it) && v > 0)
+    ? Math.round((v / sgDespKpb(it)) * 1000000) / 1000000 : valor;
+  sgDespRender();
+}
 function sgDespLoteDe(it){ return (it.lotes||[]).find(function(l){return String(l.id)===String(it.lote_id);}); }
 // Los cajones son la cantidad; los kg se derivan. Cambiar los cajones recalcula
 // los kg, porque es la cuenta que hace el servidor.
@@ -19827,7 +19868,17 @@ function sgDespUpdBultos(i,v){
 }
 function sgDespRender(){
   if(!SG.despItems.length){ eid('sg-desp-lines').innerHTML='<div style="font-size:12px;color:var(--mut)">Elegí arriba con + lo que sale: del stock 🟢 o de lo que viene en viaje 🚚.</div>'; sgDespTotal(); return; }
-  eid('sg-desp-lines').innerHTML=SG.despItems.map(function(it,i){
+  // El precio se pacta en cajones tanto como en kilos: la unidad se elige acá y vale
+  // para todos los renglones. Lo que se guarda es siempre $/kg.
+  var cab = '<div style="display:flex;justify-content:flex-end;align-items:center;gap:8px;'
+    + 'margin-bottom:6px;font-size:12px">'
+    + '<span style="color:var(--mut)">El precio se pone por</span>'
+    + '<select onchange="sgDespUniCambio(this.value)" style="padding:3px 6px;border-radius:6px;'
+    + 'border:1px solid var(--bor);font-weight:600">'
+    + '<option value="kg"' + (SG_DESP_UNI === 'kg' ? ' selected' : '') + '>kilo</option>'
+    + '<option value="bulto"' + (SG_DESP_UNI === 'bulto' ? ' selected' : '') + '>bulto</option>'
+    + '</select></div>';
+  eid('sg-desp-lines').innerHTML = cab + SG.despItems.map(function(it,i){
     var enViaje=it.origen==='oc_item';
     var lote=enViaje?null:sgDespLoteDe(it);
     var kg=Number(it.kg)||0;
@@ -19851,8 +19902,21 @@ function sgDespRender(){
         +'<div style="font-size:11px;color:var(--mut);font-family:ui-monospace,monospace;margin-top:1px">'+sub+'</div>'
       +'</div>'
       +'<input type="number" placeholder="cj" value="'+(it.bultos||'')+'" onchange="sgDespUpdBultos('+i+',this.value)">'
-      +'<input type="number" placeholder="$/kg sugerido" value="'+(it.precio||'')+'" onchange="sgDespUpdNR('+i+',\'precio\',this.value)">'
+      +'<input type="number" placeholder="'+(sgDespPorBulto(it)?'$/bulto':'$/kg')+' sugerido" value="'+sgDespPrecioVista(it)+'"'
+        +' onchange="sgDespPrecioSet('+i+',this.value)"'
+        +' title="'+(sgDespPorBulto(it)
+            ? ('cajones de '+nr(sgDespKpb(it))+' kg — se guarda por kilo')
+            : 'por kilo')+'">'
       +'<button class="btn bd bs" onclick="sgDespDelItem('+i+')">×</button>'
+      // LA OTRA UNIDAD, SIEMPRE A LA VISTA. Es el control que evita guardar $/bulto
+      // creyendo que son $/kg — el mismo que ya tiene la corrección de la partida.
+      +((Number(it.precio) > 0 && sgDespKpb(it) > 0)
+          ? '<div style="grid-column:1/-1;font-size:11px;color:var(--mut);margin:-2px 0 2px">= '
+            + (sgDespPorBulto(it)
+                ? (sgMoney2(it.precio) + ' /kg')
+                : (sgMoney2(Number(it.precio) * sgDespKpb(it)) + ' /bulto'))
+            + ' · cajones de ' + nr(sgDespKpb(it)) + ' kg</div>'
+          : '')
       // POR QUÉ ESE PRECIO. Hoy eso vive en un chat de WhatsApp: el que factura
       // no lo tiene y termina llamando para preguntar.
       +'<input placeholder="por qué ese precio (lo ve el que factura)" value="'+esc(it.nota||'')+'" onchange="sgDespUpdNR('+i+',\'nota\',this.value)" style="grid-column:1/-1;font-size:11.5px;padding:3px 6px">'
@@ -20977,15 +21041,47 @@ function sgCdsValOpen(provId){
   sgGdsValAbrir({ prov:provId, nombre:pend[0].fletero_nombre||'', reload:sgCdsLoad,
     items:pend.map(function(g){ return {id:g.id, ref:sgCdsTipoLbl(g.tipo_gasto)+' · '+(g.operacion_ref||''), sub:g.cliente_nombre||'—', fecha:g.operacion_fecha, base:g.cantidad, unidadLbl:g.unidad||''}; }) });
 }
+// ══ Y AL MODIFICARLO, LA MISMA UNIDAD ════════════════════════════════════
+//
+// Pablo, 30/8/2026: «en la modificación del remito también». El precio se acordó por
+// cajón y se corrige por cajón; lo que se guarda —y lo que viaja al servidor— sigue
+// siendo $/kg, que es con lo que corren el subtotal, el margen y la factura.
+var SG_DPED_UNI = 'kg';
+function sgDespEdKpb(i){
+  var f = (SG.despVerItems || [])[i] || {};
+  var k = Number(f.kg_por_bulto) || 0;
+  if (k > 0) return k;
+  var b = Number(f.bultos) || 0, kg = Number(f.kg_despachados) || 0;
+  return (b > 0 && kg > 0) ? +(kg / b).toFixed(4) : 0;
+}
+function sgDespEdPorBulto(i){ return SG_DPED_UNI === 'bulto' && sgDespEdKpb(i) > 0; }
+function sgDespEdUniCambio(v){
+  SG_DPED_UNI = (v === 'bulto') ? 'bulto' : 'kg';
+  // Se repinta la ficha entera: es la que dibuja la tabla con los precios.
+  if (SG.despEd) sgDespVer(SG.despEd.id);
+}
+
 // El subtotal se rehace mientras se escribe: es la única forma de ver si el
 // número nuevo es el que se quería antes de guardarlo.
 function sgDespEdUpd(i, valor){
   if (!SG.despEd || !SG.despEd.items[i]) return;
-  SG.despEd.items[i].precio = Number(valor) || 0;
+  var v = Number(valor) || 0;
+  // Lo tipeado vuelve a kilo si se está trabajando por cajón.
+  SG.despEd.items[i].precio = (sgDespEdPorBulto(i) && v > 0)
+    ? Math.round((v / sgDespEdKpb(i)) * 1000000) / 1000000 : v;
   var fila = (SG.despVerItems || [])[i] || {};
   var kg = Number(fila.kg_despachados) || 0;
   var c = eid('sg-dpsub-' + i);
   if (c) c.textContent = sgMoney(kg * SG.despEd.items[i].precio);
+  // Y LA OTRA UNIDAD, A LA VISTA: el control que evita guardar $/bulto creyendo
+  // que son $/kg.
+  var e = eid('sg-dpeq-' + i);
+  if (e) {
+    var kpb = sgDespEdKpb(i), p = SG.despEd.items[i].precio;
+    e.innerHTML = (p > 0 && kpb > 0)
+      ? (sgDespEdPorBulto(i) ? (sgMoney2(p) + ' /kg') : (sgMoney2(p * kpb) + ' /bulto'))
+      : '';
+  }
   var t = eid('sg-dped-total');
   if (t) {
     var tot = (SG.despEd.items || []).reduce(function(a, x, j){
@@ -21038,13 +21134,33 @@ function sgDespVer(id){
     // sg-ventas es el módulo dueño de sg/despachos, que es el que va a mirar
     // exigirNivel en el servidor: pedir otro acá ofrecería un botón que rebota.
     var puedeEd = lnbPuedeOperar('sg-ventas') && !d.facturado;
-    h+='<table class="pa-tbl" style="margin-bottom:12px"><thead><tr><th>Lote</th><th>Producto</th><th style="text-align:right">Kg</th><th style="text-align:right">$/kg</th><th style="text-align:right">Subtotal</th><th style="text-align:right">Margen</th></tr></thead><tbody>';
+    // El precio se acordó por cajón tanto como por kilo: la unidad se elige acá.
+    if (puedeEd && (d.items||[]).length) {
+      h+='<div style="display:flex;justify-content:flex-end;align-items:center;gap:8px;'
+        +'margin-bottom:6px;font-size:12px"><span style="color:var(--mut)">El precio se pone por</span>'
+        +'<select onchange="sgDespEdUniCambio(this.value)" style="padding:3px 6px;border-radius:6px;'
+        +'border:1px solid var(--bor);font-weight:600">'
+        +'<option value="kg"'+(SG_DPED_UNI==='kg'?' selected':'')+'>kilo</option>'
+        +'<option value="bulto"'+(SG_DPED_UNI==='bulto'?' selected':'')+'>bulto</option>'
+        +'</select></div>';
+    }
+    h+='<table class="pa-tbl" style="margin-bottom:12px"><thead><tr><th>Lote</th><th>Producto</th><th style="text-align:right">Kg</th><th style="text-align:right">'
+      +(SG_DPED_UNI==='bulto'?'$/bulto':'$/kg')+'</th><th style="text-align:right">Subtotal</th><th style="text-align:right">Margen</th></tr></thead><tbody>';
     (d.items||[]).forEach(function(it, i){
+      var kpbF = Number(it.kg_por_bulto) || ((Number(it.bultos)>0 && Number(it.kg_despachados)>0)
+        ? +(Number(it.kg_despachados)/Number(it.bultos)).toFixed(4) : 0);
+      var porB = (SG_DPED_UNI === 'bulto' && kpbF > 0);
+      var pk = Number(it.precio_por_kg) || 0;
+      var vista = porB ? Math.round(pk * kpbF * 100) / 100 : pk;
+      var eq = (pk > 0 && kpbF > 0)
+        ? (porB ? (sgMoney2(pk) + ' /kg') : (sgMoney2(pk * kpbF) + ' /bulto')) : '';
       var pcell = puedeEd
-        ? '<input type="number" step="0.01" min="0" id="sg-dped-'+i+'" value="'+(Number(it.precio_por_kg)||0)+'"'
+        ? '<input type="number" step="0.01" min="0" id="sg-dped-'+i+'" value="'+vista+'"'
           + ' oninput="sgDespEdUpd('+i+',this.value)"'
+          + ' title="'+(porB?('cajones de '+nr(kpbF)+' kg — se guarda por kilo'):'por kilo')+'"'
           + ' style="width:110px;text-align:right;padding:2px 6px">'
-        : sgMoney(it.precio_por_kg);
+          + '<div id="sg-dpeq-'+i+'" style="font-size:10.5px;color:var(--mut)">'+eq+'</div>'
+        : (sgMoney(vista) + (eq ? '<div style="font-size:10.5px;color:var(--mut)">'+eq+'</div>' : ''));
       h+='<tr><td><code>'+esc(it.codigo_lote||'')+'</code></td><td>'+esc(it.producto_nombre||'')+'</td>'
         +'<td style="text-align:right">'+nr(it.kg_despachados)+'</td>'
         +'<td style="text-align:right">'+pcell+'</td>'
@@ -24744,6 +24860,18 @@ function sgRepExport(){
       <label style="font-size:11px;font-weight:700;color:#991b1b;text-transform:uppercase;display:block;margin-bottom:4px">Cheques de terceros rechazados</label>
       <div style="font-size:10px;color:#b91c1c;margin-bottom:6px">Los que rebotaron. Etapa intermedia: salieron del banco o del proveedor y todavía no volvieron a ser deuda del cliente.</div>
       <select id="sgct-cfg-imp-cheques_rechazados" onchange="sgctGuardarConfigImp('cheques_rechazados',this.value)" style="width:100%;font-size:12px"></select>
+    </div>
+    <!-- ── LOS GASTOS DE UNA LIQUIDACIÓN QUE NOS EMITEN ─────────────────
+         Pablo, 30/8/2026: «acá no me agregaste para poder generar los asientos de
+         liquidaciones recibidas».
+         La clave existía en la base y la usaba el asiento desde el primer día, pero
+         no tenía dónde cargarse: el armador pedía la cuenta, no la encontraba nunca
+         y la liquidación no se podía registrar. Una cuenta que el sistema exige y
+         que ninguna pantalla ofrece es un cerrojo sin llave. -->
+    <div style="background:#eff6ff;border:1px solid #93c5fd;border-radius:8px;padding:12px">
+      <label style="font-size:11px;font-weight:700;color:#1e40af;text-transform:uppercase;display:block;margin-bottom:4px">Gastos de liquidaciones recibidas</label>
+      <div style="font-size:10px;color:#2563eb;margin-bottom:6px">Cuando el mercado o la cooperativa nos liquida, se descuenta comisión, flete y carga: para nosotros eso es GASTO. Sin esta cuenta la liquidación recibida no se puede registrar.</div>
+      <select id="sgct-cfg-imp-liq_recibida_gastos" onchange="sgctGuardarConfigImp('liq_recibida_gastos',this.value)" style="width:100%;font-size:12px"></select>
     </div>
   </div>
   <!-- ── LO QUE LE COBRAMOS AL PRODUCTOR EN LA LIQUIDACIÓN ──────────────
@@ -68678,6 +68806,9 @@ function sgctCargarConfigImp() {
     ['iva_credito_fiscal','iva_debito_fiscal','percepcion_iva','percepcion_iibb',
      'percepcion_ganancias','retencion','ventas','cheques_cartera',
      'cheques_rechazados',
+     // Y la de los gastos de una liquidación RECIBIDA, que el asiento exige desde el
+     // primer día y no tenía dónde cargarse.
+     'liq_recibida_gastos',
      // Las tres de la liquidación. Si la clave no está en esta lista el select
      // queda vacío y no se puede elegir nada, aunque exista en la pantalla.
      'liq_comision','liq_descarga','liq_flete','liq_gastos_admin'].forEach(function(clave) {
