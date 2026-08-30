@@ -3171,6 +3171,13 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
           </div>
           <div style="font-weight:600;font-size:13px;margin:4px 0 6px">Lo que se liquidó</div>
           <div id="sg-liqrec-items"></div>
+          <!-- ── LO ACORDADO CONTRA LO QUE NOS LIQUIDARON ────────────────────
+               Pablo, 30/8/2026: «puede ser que acordamos un precio —el que ponemos en
+               el remito SIEMPRE— y nos liquiden menos por algún error administrativo».
+               El precio del remito es lo que se pactó; el del papel del cliente es lo
+               que declara. Los dos son ciertos, y la diferencia es de GESTIÓN: misma
+               regla que del lado de la compra. -->
+          <div id="sg-liqrec-acordado" style="margin-top:8px;font-size:12.5px"></div>
         </div>
 
         <div class="sgr-card">
@@ -3195,6 +3202,58 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
             </div>
           </div>
           <div id="sg-liqrec-totales" style="margin-top:12px;font-size:13px"></div>
+        </div>
+
+        <!-- ══ LA GRILLA: FISCAL Y GESTIÓN ═══════════════════════════════════
+             Pablo, 30/8/2026: «la pantalla debería ser similar a la que tenemos en
+             liquidaciones emitidas. Recordá que acá también tenemos que tener
+             alternativa fiscal y de gestión… permitime acá poner la venta y los IVAs».
+             Es el espejo exacto de la liquidación que EMITIMOS: un solo comprobante,
+             dos libros. La venta fiscal es lo que dice el papel del cliente; la de
+             gestión, lo que se acordó y él no declaró.
+             LA FILA DE IVA NO TIENE GESTIÓN: el débito fiscal sale del comprobante y
+             de nada más (regla del repo). -->
+        <div class="sgr-card">
+          <div style="font-weight:700;font-size:12px;text-transform:uppercase;letter-spacing:.04em;
+               color:var(--mut);margin-bottom:8px">💰 La venta que documenta esta liquidación</div>
+          <div class="ab-table-wrap" style="overflow-x:hidden !important">
+            <table class="pa-tbl" style="table-layout:fixed;width:100%;max-width:98vw">
+              <thead><tr>
+                <th style="width:42%">Concepto</th>
+                <th style="text-align:right;width:19%">Fiscal</th>
+                <th style="text-align:right;width:19%">Gestión</th>
+                <th style="text-align:right;width:20%">Total</th>
+              </tr></thead>
+              <tbody>
+                <tr>
+                  <td><b>Ventas</b><div style="font-size:11px;color:var(--mut)"
+                      id="sg-liqrec-vnota">de los renglones de arriba</div></td>
+                  <td style="text-align:right" id="sg-liqrec-vf">—</td>
+                  <td style="text-align:right" id="sg-liqrec-vg">—</td>
+                  <td style="text-align:right" id="sg-liqrec-vt">—</td>
+                </tr>
+                <tr>
+                  <td>IVA de la venta <span style="font-size:11px;color:var(--mut)">(débito)</span>
+                    <div style="font-size:11px;color:var(--mut)">el que dice el papel del cliente</div></td>
+                  <td style="text-align:right"><input id="sg-liqrec-iva" type="number" step="0.01" min="0"
+                      style="width:100%;box-sizing:border-box;text-align:right"
+                      oninput="sgLiqRecTotales()"></td>
+                  <td style="text-align:right;font-size:11.5px;color:var(--mut)">sin IVA en gestión</td>
+                  <td style="text-align:right" id="sg-liqrec-ivat">—</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <!-- UNA DIFERENCIA DE GESTIÓN SIN MOTIVO NO ENTRA. Cuatro motivos, no texto
+               libre: texto libre son cuarenta maneras de escribir lo mismo y ningún
+               informe posible. El servidor lo exige igual. -->
+          <div id="sg-liqrec-motivo-fila" style="display:none;margin-top:10px">
+            <div class="fl" style="margin:0"><label>Por qué la liquidación no da lo acordado
+              <span style="color:var(--err)">*</span></label>
+              <select id="sg-liqrec-motivo" onchange="sgLiqRecTotales()"
+                      style="width:100%;box-sizing:border-box"></select></div>
+            <div id="sg-liqrec-motivo-ayuda" style="font-size:11.5px;color:var(--mut);margin-top:4px"></div>
+          </div>
         </div>
 
         <!-- EL CUADRO DEL ASIENTO, ANTES DE GRABAR (convención del repo). El
@@ -18879,9 +18938,19 @@ function sgLiqRecAbrir(clienteId, despachoId, numero){
   var t = eid('sg-liqrec-tit');
   if (t) t.textContent = '\uD83D\uDCE5 Recibir la liquidaci\u00f3n del remito' + (numero ? ' ' + numero : '');
   ['sg-liqrec-nro','sg-liqrec-com','sg-liqrec-flete','sg-liqrec-carga','sg-liqrec-otros',
-   'sg-liqrec-riva','sg-liqrec-rgan','sg-liqrec-riibb','sg-liqrec-rotras'].forEach(function(id){
+   'sg-liqrec-riva','sg-liqrec-rgan','sg-liqrec-riibb','sg-liqrec-rotras',
+   'sg-liqrec-iva'].forEach(function(id){
     var e = eid(id); if (e) e.value = '';
   });
+  // Los cuatro motivos, no texto libre: texto libre son cuarenta maneras de escribir
+  // lo mismo y ningún informe posible. Son los MISMOS del otro lado del mostrador.
+  var mo = eid('sg-liqrec-motivo');
+  if (mo) {
+    mo.innerHTML = '<option value="">— elegí el motivo —</option>'
+      + Object.keys(SG_MOTIVOS).map(function(k){
+          return '<option value="' + k + '">' + escH(SG_MOTIVOS[k]) + '</option>'; }).join('');
+    mo.value = '';
+  }
   var f = eid('sg-liqrec-fecha'); if (f) f.value = new Date().toISOString().slice(0,10);
   var cn = eid('sg-liqrec-cli-nom');
   // El nombre sale del cache de clientes con la MISMA etiqueta que usan los
@@ -18905,7 +18974,11 @@ function sgLiqRecAbrir(clienteId, despachoId, numero){
     SGLR.items = d.items.map(function(it){
       return { despacho_item_id: it.despacho_item_id, producto: it.producto, lote: it.lote,
         kg_pendiente: it.kg_pendiente, kg: it.kg_pendiente,
-        precio: it.precio_por_kg != null ? it.precio_por_kg : 0 };
+        precio: it.precio_por_kg != null ? it.precio_por_kg : 0,
+        // EL PRECIO DEL REMITO ES LO QUE SE ACORDÓ. El del papel del cliente es lo
+        // que declara, y se tipea encima. Guardar el original es lo único que
+        // permite después decir cuánto se resignó y por qué.
+        precio_acordado: it.precio_por_kg != null ? it.precio_por_kg : 0 };
     });
     sgLiqRecPintar();
   });
@@ -18938,17 +19011,35 @@ function sgLiqRecUpd(i, campo, v){ SGLR.items[i][campo] = Number(v) || 0; sgLiqR
 
 function sgLiqRecDatos(){
   var v = function(id){ return Number((eid(id)||{}).value) || 0; };
+  var m2 = function(x){ return Math.round((Number(x) || 0) * 100) / 100; };
   var bruto = SGLR.items.reduce(function(a,it){ return a + (Number(it.kg)||0) * (Number(it.precio)||0); }, 0);
-  bruto = Math.round(bruto * 100) / 100;
+  bruto = m2(bruto);
+  // ── LO QUE SE ACORDÓ, POR SI LIQUIDARON MENOS ──────────────────────────
+  //
+  // Pablo, 30/8/2026: «puede ser que acordamos un precio —el que ponemos en el remito
+  // SIEMPRE— y nos liquiden menos por algún error administrativo».
+  //
+  // Los dos números son ciertos: al cliente se le factura lo que dice su papel y se
+  // le debe lo acordado. La diferencia es GESTIÓN, exactamente igual que del lado de
+  // la compra. Si liquidaron de MÁS no hay gestión: lo que vale es el comprobante.
+  var acordado = m2(SGLR.items.reduce(function(a,it){
+    return a + (Number(it.kg)||0) * (Number(it.precio_acordado)||0); }, 0));
+  var dif = m2(Math.max(0, acordado - bruto));
+  var iva = v('sg-liqrec-iva');
   var desc = v('sg-liqrec-com') + v('sg-liqrec-flete') + v('sg-liqrec-carga') + v('sg-liqrec-otros');
   var ret  = v('sg-liqrec-riva') + v('sg-liqrec-rgan') + v('sg-liqrec-riibb') + v('sg-liqrec-rotras');
   return { cliente_id: SGLR.clienteId, numero: (eid('sg-liqrec-nro')||{}).value || '(sin n\u00famero)',
-    precio_bruto: bruto, desc_comision: v('sg-liqrec-com'), desc_flete: v('sg-liqrec-flete'),
+    precio_bruto: bruto, iva: iva,
+    desc_comision: v('sg-liqrec-com'), desc_flete: v('sg-liqrec-flete'),
     desc_carga_descarga: v('sg-liqrec-carga'), desc_otros: v('sg-liqrec-otros'),
     ret_iva: v('sg-liqrec-riva'), ret_ganancias: v('sg-liqrec-rgan'),
     ret_iibb: v('sg-liqrec-riibb'), ret_otras: v('sg-liqrec-rotras'),
-    _descuentos: Math.round(desc*100)/100, _retenciones: Math.round(ret*100)/100,
-    neto_acreditar: Math.round((bruto - desc - ret) * 100) / 100 };
+    dif_gestion: dif, dif_motivo: (eid('sg-liqrec-motivo')||{}).value || null,
+    _acordado: acordado, _dif: dif,
+    _descuentos: m2(desc), _retenciones: m2(ret),
+    // EL IVA SUMA: es plata que el cliente nos debe y que nosotros le debemos a la
+    // AFIP, no un descuento.
+    neto_acreditar: m2(bruto + iva - desc - ret) };
 }
 
 // Lo último que dijo el preview. Si falta una cuenta, el botón no deja apretar:
@@ -18958,12 +19049,55 @@ var SGLR_FALTA = [];
 var _sglrT = null;
 function sgLiqRecTotales(){
   var d = sgLiqRecDatos();
+  // ── LA GRILLA: UN COMPROBANTE, DOS LIBROS ──────────────────────────────
+  var pon = function(id, val, rojo){
+    var e = eid(id); if (!e) return;
+    e.innerHTML = Number(val) ? sgMoney(val) : '<span style="color:var(--mut)">—</span>';
+    if (rojo) e.style.color = 'var(--err)';
+  };
+  pon('sg-liqrec-vf', d.precio_bruto);
+  pon('sg-liqrec-vg', d._dif);
+  pon('sg-liqrec-vt', d.precio_bruto + d._dif);
+  pon('sg-liqrec-ivat', d.iva);
+  var vn = eid('sg-liqrec-vnota');
+  if (vn) {
+    vn.innerHTML = d._dif > 0
+      ? 'fiscal: lo que dice el papel · gestión: lo acordado que no declaró'
+      : 'de los renglones de arriba';
+  }
+  // ── LO ACORDADO CONTRA LO LIQUIDADO ────────────────────────────────────
+  var ac = eid('sg-liqrec-acordado');
+  if (ac) {
+    ac.innerHTML = !(d._acordado > 0) ? ''
+      : (d._dif > 0
+          ? '<span style="color:#9a3412">⚠ Se acordó <b>' + sgMoney(d._acordado) + '</b> y la '
+            + 'liquidación dice <b>' + sgMoney(d.precio_bruto) + '</b>: faltan <b>'
+            + sgMoney(d._dif) + '</b>. Se le sigue debiendo lo acordado —eso va de '
+            + '<b>gestión</b>— y al libro fiscal entra lo que dice el papel.</span>'
+          : '<span style="color:#166534">✓ La liquidación da lo acordado en el remito ('
+            + sgMoney(d._acordado) + ').</span>');
+  }
+  // Y EL MOTIVO SÓLO SI HAY DIFERENCIA: pedirlo en cero es pedir un dato que no
+  // existe. El servidor lo exige igual — esto es para no llegar hasta allá.
+  var fm = eid('sg-liqrec-motivo-fila');
+  if (fm) fm.style.display = d._dif > 0 ? '' : 'none';
+  var ay = eid('sg-liqrec-motivo-ayuda');
+  if (ay) {
+    var AYUDA = {
+      error_proveedor: 'Liquidó por menos de lo acordado. Falta que emita la nota de crédito o débito.',
+      comprobante_pendiente: 'La operación está cerrada y el comprobante todavía no llegó entero.',
+      diferencia_peso_calidad: 'La liquidación refleja lo que realmente se vendió; lo acordado era un estimado.',
+      ajuste_gestion: 'Se resignó de común acuerdo. No hay nada que reclamar.'
+    };
+    ay.textContent = AYUDA[(eid('sg-liqrec-motivo') || {}).value] || '';
+  }
   var t = eid('sg-liqrec-totales');
   if (t) {
     // EL NETO PUEDE DAR NEGATIVO: si nos descontaron más de lo que se vendió,
     // le debemos nosotros. Se muestra en rojo en vez de taparse con un cero.
     t.innerHTML = '<div style="display:flex;gap:18px;flex-wrap:wrap">'
       + '<span>Bruto liquidado <b>' + sgMoney(d.precio_bruto) + '</b></span>'
+      + (d.iva ? '<span style="color:#166534">+ IVA <b>' + sgMoney(d.iva) + '</b></span>' : '')
       + '<span style="color:#dc2626">\u2212 descuentos <b>' + sgMoney(d._descuentos) + '</b></span>'
       + '<span style="color:#dc2626">\u2212 retenciones <b>' + sgMoney(d._retenciones) + '</b></span>'
       + '<span style="margin-left:auto">Neto a acreditar <b style="font-size:15px'
@@ -19007,6 +19141,12 @@ function sgLiqRecGuardar(){
   }
   var pasado = SGLR.items.filter(function(it){ return (Number(it.kg)||0) > (Number(it.kg_pendiente)||0) + 0.01; });
   if (pasado.length) { toast('Hay renglones con m\u00e1s kilos de los que quedan pendientes', 'er'); return; }
+  // UNA DIFERENCIA DE GESTIÓN SIN MOTIVO NO ENTRA. El servidor la rechaza igual; acá
+  // se avisa antes de perder lo cargado.
+  if (d._dif > 0 && !d.dif_motivo) {
+    toast('Poné por qué la liquidación no da lo acordado: son ' + sgMoney(d._dif)
+      + ' que se le siguen debiendo al cliente.', 'er'); return;
+  }
   var body = {
     fecha: (eid('sg-liqrec-fecha')||{}).value || null,
     cliente_id: SGLR.clienteId,
@@ -19019,6 +19159,8 @@ function sgLiqRecGuardar(){
     desc_carga_descarga: d.desc_carga_descarga, desc_otros: d.desc_otros,
     ret_iva: d.ret_iva, ret_ganancias: d.ret_ganancias,
     ret_iibb: d.ret_iibb, ret_otras: d.ret_otras,
+    // El IVA del comprobante y la diferencia con lo acordado, que es de gestión.
+    iva: d.iva, dif_gestion: d.dif_gestion, dif_motivo: d.dif_motivo,
     items: SGLR.items.filter(function(it){ return (Number(it.kg)||0) > 0; }).map(function(it){
       return { descripcion: it.producto || '', kilos: Number(it.kg)||0,
         precio_unitario: Number(it.precio)||0,

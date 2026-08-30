@@ -455,6 +455,16 @@ try { db.exec("ALTER TABLE sg_ven_facturas ADD COLUMN dif_gestion REAL NOT NULL 
 // sumarlo por período sin volver a recorrer los asientos.
 try { db.exec("ALTER TABLE sg_ven_facturas ADD COLUMN descuento_gestion REAL"); } catch (_) {}
 try { db.exec("ALTER TABLE sg_ven_facturas ADD COLUMN dif_motivo TEXT"); } catch (_) {}
+// ── EL IVA DE LA LIQUIDACIÓN QUE NOS EMITEN ────────────────────────────────
+//
+// Pablo, 30/8/2026: «permitime acá poner la venta y los IVAs de las liquidaciones
+// recibidas también».
+//
+// La liquidación que emite el mercado o la cooperativa ES nuestro comprobante de
+// venta, y su IVA es DÉBITO fiscal. Estaba sin campo: el asiento acreditaba Ventas
+// por el bruto y no había ninguna línea de IVA, así que el libro de IVA ventas se
+// quedaba sin esa operación. Arranca en cero, que es lo que valen las que ya están.
+try { db.exec("ALTER TABLE sg_ven_liquidaciones ADD COLUMN iva REAL NOT NULL DEFAULT 0"); } catch (_) {}
 try { db.exec("ALTER TABLE sg_ven_liquidaciones ADD COLUMN dif_gestion REAL NOT NULL DEFAULT 0"); } catch (_) {}
 try { db.exec("ALTER TABLE sg_ven_liquidaciones ADD COLUMN dif_motivo TEXT"); } catch (_) {}
 

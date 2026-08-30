@@ -285,6 +285,14 @@ export function armarLineasLiq(db, d) {
   const cuentaVentas  = configImp['ventas'] || null;
   if (!cuentaCliente) falta.push('la cuenta contable del cliente ' + ((cliente && cliente.razon_social) || ''));
   if (!cuentaVentas)  falta.push('la cuenta de Ventas en la configuración impositiva');
+  // ── EL IVA DE LA LIQUIDACIÓN ES DÉBITO FISCAL ──────────────────────────
+  // La liquidación que nos emite el mercado o la cooperativa es NUESTRO comprobante
+  // de venta. Sin esta línea, el asiento acreditaba Ventas por el bruto y la
+  // operación no entraba al libro de IVA ventas.
+  const ivaLiq = Math.round(((parseFloat(d.iva) || 0)) * 100) / 100;
+  if (ivaLiq > 0 && !configImp['iva_debito_fiscal']) {
+    falta.push('la cuenta de IVA Débito Fiscal en la configuración impositiva');
+  }
 
   const n = (x) => Math.round(((parseFloat(x) || 0)) * 100) / 100;
   const ret = { percepcion_iva: n(d.ret_iva), percepcion_ganancias: n(d.ret_ganancias),
@@ -324,7 +332,11 @@ export function armarLineasLiq(db, d) {
     descripcion: 'Descuentos de la liquidación' });
 
   lineas.push({ cuenta_id: cuentaVentas, debe: 0, haber: n(d.precio_bruto),
-    descripcion: `Venta bruta ${d.numero}` });
+    descripcion: `Venta neta ${d.numero}` });
+  if (ivaLiq > 0) {
+    lineas.push({ cuenta_id: configImp['iva_debito_fiscal'], debe: 0, haber: ivaLiq,
+      descripcion: `IVA débito ${d.numero}` });
+  }
 
   // EL ESPEJO DE LA COMPRA. Si se acordó más de lo que dice el comprobante, la
   // diferencia entra como dos líneas de gestión en el MISMO asiento: el cliente al
@@ -408,19 +420,22 @@ router.post('/liquidaciones', requireAuth, (req, res) => {
         + (parseFloat(desc_carga_descarga)||0) + (parseFloat(desc_otros)||0);
       const retenciones = (parseFloat(ret_iva)||0) + (parseFloat(ret_ganancias)||0)
         + (parseFloat(ret_iibb)||0) + (parseFloat(ret_otras)||0);
-      const neto_acreditar = precio_bruto - descuentos - retenciones;
+      // EL IVA SUMA a lo que el cliente nos tiene que acreditar: es plata que él nos
+      // debe y que nosotros le debemos a la AFIP, no un descuento.
+      const ivaLiq = Math.round(((parseFloat(req.body.iva) || 0)) * 100) / 100;
+      const neto_acreditar = precio_bruto + ivaLiq - descuentos - retenciones;
 
       const r = db.prepare(`INSERT INTO sg_ven_liquidaciones
         (numero, fecha, cliente_id, nro_remito, observaciones, precio_bruto,
          desc_comision, desc_flete, desc_carga_descarga, desc_otros,
-         ret_iva, ret_ganancias, ret_iibb, ret_otras, neto_acreditar, usuario_id)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+         ret_iva, ret_ganancias, ret_iibb, ret_otras, neto_acreditar, usuario_id, iva)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
         .run(numero, fechaLiq, parseInt(cliente_id), nro_remito||null, observaciones||null,
              precio_bruto, parseFloat(desc_comision)||0, parseFloat(desc_flete)||0,
              parseFloat(desc_carga_descarga)||0, parseFloat(desc_otros)||0,
              parseFloat(ret_iva)||0, parseFloat(ret_ganancias)||0,
              parseFloat(ret_iibb)||0, parseFloat(ret_otras)||0,
-             neto_acreditar, u.id);
+             neto_acreditar, u.id, ivaLiq);
       const liqId = r.lastInsertRowid;
 
       for (const it of items) {
@@ -472,7 +487,7 @@ router.post('/liquidaciones', requireAuth, (req, res) => {
       try {
         const cliente = db.prepare('SELECT * FROM sg_clientes WHERE id=?').get(parseInt(cliente_id));
         const arm = armarLineasLiq(db, {
-          cliente_id, numero, precio_bruto, neto_acreditar,
+          cliente_id, numero, precio_bruto, neto_acreditar, iva: ivaLiq,
           desc_comision, desc_flete, desc_carga_descarga, desc_otros,
           ret_iva, ret_ganancias, ret_iibb, ret_otras,
           dif_gestion: req.body.dif_gestion, dif_motivo: req.body.dif_motivo,
