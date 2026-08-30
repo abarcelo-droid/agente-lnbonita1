@@ -5715,6 +5715,22 @@ router.put('/lotes/:id/corregir', requireAuth, (req, res) => {
       return res.status(400).json({ ok: false, error: 'Los kilos tienen que ser mayores a cero' });
     }
 
+    // ── ¿ESTE PRECIO TIENE QUE SUBIR AL RENGLÓN DE LA ORDEN? ──────────────
+    // Sólo si CAMBIÓ y si esta partida es la única que cuelga de ese renglón. Se
+    // resuelve acá, antes de escribir nada, para poder decírselo al que corrige.
+    const cambiaPrecio = String(prev.precio_unitario_kg == null ? '' : prev.precio_unitario_kg)
+      !== String(nuevo.precio_unitario_kg == null ? '' : nuevo.precio_unitario_kg);
+    const hermanasEnElRenglon = prev.oc_item_id
+      ? db.prepare(`SELECT COUNT(*) c FROM sg_lotes
+           WHERE oc_item_id=? AND activo=1 AND id<>?`).get(prev.oc_item_id, prev.id).c
+      : 0;
+    const subeALaOrden = !!(cambiaPrecio && prev.oc_item_id && chk.lote.oc_id
+      && hermanasEnElRenglon === 0 && nuevo.precio_unitario_kg != null);
+    const precioItemAntes = prev.oc_item_id
+      ? (db.prepare('SELECT precio_estimado_por_kg p FROM sg_oc_items WHERE id=?')
+          .get(prev.oc_item_id) || {}).p
+      : null;
+
     // ── LOS KILOS Y LOS BULTOS TIENEN QUE SEGUIR SIENDO EL MISMO LOTE ────
     // El módulo corre sobre DOS unidades: el despacho y las reservas validan en
     // BULTOS y derivan los kilos (bultos × kg por bulto); el costo, el margen y
@@ -5785,6 +5801,33 @@ router.put('/lotes/:id/corregir', requireAuth, (req, res) => {
       // informe de rentabilidad. Va DESPUÉS de recalcCostoLote: lee el costo nuevo.
       recalcMargenDespachos(db, prev.id);
       if (prev.fecha_ingreso) recalcPeriodo(db, String(prev.fecha_ingreso).slice(0, 7));
+      // ── Y SI ESTA PARTIDA ES LA ÚNICA DE SU RENGLÓN, EL PRECIO SUBE A LA ORDEN ──
+      //
+      // Pablo, 30/8/2026: «entro a la orden de compra, arreglo el precio de costo,
+      // pero cuando voy a liquidar a precio cerrado no me trae el costo nuevo, me
+      // sigue tomando el viejo… entonces el cambio que hice no tiene ningún sentido».
+      //
+      // Tenía razón. Lo que se le paga al productor sale del RENGLÓN de la orden
+      // —lo lee acordadoDeOC y contra eso controla la liquidación— y esto escribía
+      // sólo el precio de la PARTIDA, que es el costo. Dos números para la misma
+      // mercadería, y el que mandaba al liquidar era justo el que no se había tocado.
+      //
+      // SÓLO CUANDO LA PARTIDA ES LA ÚNICA DE SU RENGLÓN: ahí su precio ES el del
+      // renglón. Compartiéndolo, subirlo se lo cambiaría también a las hermanas —y
+      // para eso está el botón que le abre el suyo—.
+      //
+      // Va por aplicarPrecioItem, que es la puerta de siempre: escribe el renglón y
+      // baja la cascada a los lotes. Y BRUTO, porque la partida guarda el neto.
+      if (subeALaOrden) {
+        anotarEdicion(db, { tabla: 'sg_oc_items', registroId: prev.oc_item_id,
+          campo: 'precio_estimado_por_kg', antes: precioItemAntes,
+          despues: precioBrutoDeOC(db, chk.lote.oc_id, prev.oc_item_id, nuevo.precio_unitario_kg),
+          motivo, ocId: chk.lote.oc_id, userId: uid(req) });
+        aplicarPrecioItem(db, { ocId: chk.lote.oc_id, ocItemId: prev.oc_item_id,
+          precio: precioBrutoDeOC(db, chk.lote.oc_id, prev.oc_item_id, nuevo.precio_unitario_kg),
+          userId: uid(req), motivo });
+        recalcTotalesOC(db, chk.lote.oc_id);
+      }
       // Y lo que se le debe al proveedor. El cronograma de pago se arma con la
       // suma de los costos de los lotes de la orden: si se corrigen los kilos y
       // no se regenera, se le termina pagando por mercadería que no entró.
@@ -5808,9 +5851,20 @@ router.put('/lotes/:id/corregir', requireAuth, (req, res) => {
           .get(chk.lote.oc_id).n
       : 0;
     res.json({ ok: true, data: l,
-      aviso: cuotasPagas > 0
-        ? AVISO_CRONOGRAMA_CONGELADO
-        : null });
+      // Que el precio subió al renglón —o que NO subió porque la partida lo comparte—
+      // es lo que decide si la liquidación va a pedir el número nuevo o el viejo. El
+      // que corrige tiene que enterarse ahora, no al emitir el comprobante.
+      precio_a_la_orden: subeALaOrden ? 1 : 0,
+      comparte_renglon: (cambiaPrecio && hermanasEnElRenglon > 0) ? hermanasEnElRenglon : 0,
+      aviso: [
+        (cambiaPrecio && hermanasEnElRenglon > 0)
+          ? 'OJO: el precio de la PARTIDA cambió, pero el de la ORDEN no. Esta partida '
+            + 'comparte renglón con ' + hermanasEnElRenglon + ' más, y lo que se le paga al '
+            + 'productor sale del renglón: la liquidación va a seguir pidiendo el precio '
+            + 'viejo. Dale su propio renglón desde este mismo modal y volvé a corregirlo.'
+          : null,
+        cuotasPagas > 0 ? AVISO_CRONOGRAMA_CONGELADO : null,
+      ].filter(Boolean).join(String.fromCharCode(10, 10)) || null });
   } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
 });
 
@@ -6480,6 +6534,20 @@ function precioNetoDeOC(db, ocId, ocItemId, precio) {
   return (cab && Number(cab.precio_incluye_iva) === 1 && alic != null)
     ? +(Number(precio) / (1 + alic / 100)).toFixed(6)
     : Number(precio);
+}
+
+// LA VUELTA EXACTA. La partida guarda el precio NETO de IVA; el renglón de la orden
+// lo guarda como se pactó. Para subir a la orden un precio corregido en la partida hay
+// que devolverle el impuesto, con la misma condición y la misma alícuota que se lo
+// sacaron: si no, cada corrección le baja un 10,5% a lo que se le paga al productor.
+function precioBrutoDeOC(db, ocId, ocItemId, neto) {
+  if (neto == null) return null;
+  const cab = db.prepare('SELECT precio_incluye_iva FROM sg_oc WHERE id=?').get(ocId);
+  const it = db.prepare('SELECT iva_alicuota FROM sg_oc_items WHERE id=?').get(ocItemId) || {};
+  const alic = (it.iva_alicuota != null && it.iva_alicuota !== '') ? Number(it.iva_alicuota) : null;
+  return (cab && Number(cab.precio_incluye_iva) === 1 && alic != null)
+    ? +(Number(neto) * (1 + alic / 100)).toFixed(6)
+    : Number(neto);
 }
 
 // Escribe el precio de un ítem y arrastra la cascada. La usan el endpoint nuevo y

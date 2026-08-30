@@ -13193,7 +13193,12 @@ function liqDesdePartida(r){
     LIQ.origen.flete = 'la orden no registró flete — a mano si corresponde';
   }
 
-  LIQ.origen.ventas = 'de lo que la partida vendió, arriba';
+  // Y SI QUEDARON ABIERTAS, SE DICE POR QUÉ. Un campo editable en el renglón que
+  // arma el libro de IVA tiene que estar justificado a la vista.
+  LIQ.origen.ventas = liqVentasSeCalculan()
+    ? 'de los comprobantes de la partida, arriba'
+    : '<span style="color:#9a3412">a mano: hay renglones de una factura compartida que no '
+      + 'se pueden atribuir a esta partida</span>';
   LIQ.origen.gastos_admin = 'a mano';
 
   // ── SI LA PARTIDA ES A PRECIO CERRADO, LA PANTALLA ARRANCA AHÍ ─────────
@@ -38225,12 +38230,13 @@ function liqComisionCalcular(){
 //     descarga y el flete». Nadie las calcula y entran igual en el despeje: eran
 //     la única puerta para meter plata de gestión sin origen.
 //
+//   · Las VENTAS y su parte de GESTIÓN, salvo el único caso en que el servidor
+//     declara que no pudo calcularlas: una factura vieja compartida entre dos
+//     partidas, donde el IVA y la gestión no se pueden atribuir sin repartir. El
+//     otro motivo por el que estaban abiertas —mercadería despachada sin facturar—
+//     dejó de existir el 29/8/2026: eso ahora FRENA la liquidación.
+//
 // NO se cierran, y hay que decir por qué:
-//   · VENTAS y su IVA: salen de los comprobantes, pero hay dos casos donde
-//     llegan incompletas —mercadería despachada sin facturar todavía, y una
-//     factura vieja compartida entre dos partidas, donde el IVA y la gestión no
-//     se pueden atribuir—. Trabarlas sin resolver eso deja liquidaciones que no
-//     se pueden emitir.
 //   · DESCARGA: sale de la recepción sólo si el gasto está VALORIZADO, y se
 //     valoriza cuando se le paga a la cooperativa — otro reloj. Hasta que el
 //     aviso lleve a la pantalla donde se valoriza, el campo a mano es la única
@@ -38241,14 +38247,48 @@ function liqComisionCalcular(){
 //     forma de cobrarlo.
 //   · GASTOS ADMINISTRATIVOS a precio abierto: nada lo calcula. A precio cerrado
 //     lo escribe el despeje, y ahí ya queda trabado por el bloqueo del modo.
+// ── ¿SE PUEDE CONFIAR EN LAS VENTAS QUE TRAJO EL SERVIDOR? ──────────────
+//
+// Pablo, 30/8/2026: «en la liquidación me deja modificar las ventas a mano… es un
+// error tremendo, de ahí se despliega una mala liquidación de impuestos».
+//
+// Tiene razón: las ventas son lo que dicen los comprobantes, y su IVA es débito
+// fiscal. Tipearlas a mano es escribir el libro de IVA a dedo.
+//
+// Quedaron abiertas por dos motivos que YA NO EXISTEN o que se pueden reconocer:
+//   · Mercadería despachada sin facturar. Desde el 29/8/2026 eso FRENA la
+//     liquidación (frenoParaLiquidar), así que no puede llegar hasta acá.
+//   · Una factura vieja compartida entre dos partidas, donde el IVA y la parte de
+//     gestión no se pueden atribuir sin repartir. Ése sí existe, el servidor lo
+//     cuenta (lineas_sin_atribuir) y la pantalla ya lo avisa en rojo arriba.
+//
+// Entonces: se traban SIEMPRE, y se abren SÓLO en el caso que el servidor declara
+// que no pudo calcular. Trabarlas también ahí dejaría liquidaciones imposibles de
+// emitir; dejarlas abiertas siempre es lo que Pablo acaba de encontrar.
+function liqVentasSeCalculan(){
+  var v = (LIQ && LIQ.venta) || {};
+  // Sin partida —la liquidación suelta, que se carga a mano— no hay comprobantes de
+  // dónde sacarlas: ahí es el único dato que hay.
+  if (!(LIQ && LIQ.partida && LIQ.partida.oc_id)) return false;
+  return !(Number(v.lineas_sin_atribuir) > 0);
+}
+
 function liqCeldaCalculada(k, amb){
   if (String(k).indexOf('iva_') === 0) return true;      // todos los IVA
   if (k === 'comision') return true;                      // las dos columnas
   if (amb === 'g' && (k === 'descarga' || k === 'flete' || k === 'gastos_admin')) return true;
+  // LAS VENTAS Y SU PARTE DE GESTIÓN, las dos: la de gestión es la de la compra
+  // —la misma operación vista del otro lado— y sale del mismo lugar.
+  if (k === 'ventas') return liqVentasSeCalculan();
   return false;
 }
 
 function liqCeldaPorQue(k, amb){
+  if (k === 'ventas') {
+    return amb === 'g'
+      ? 'Es la parte de gestión de la compra: la misma operación vista del otro lado'
+      : 'Sale de los comprobantes de la partida, sumados arriba';
+  }
   if (String(k).indexOf('iva_') === 0) return 'Sale del importe por la alícuota de la fila';
   if (k === 'comision') {
     return liqModo() === 'cerrado'

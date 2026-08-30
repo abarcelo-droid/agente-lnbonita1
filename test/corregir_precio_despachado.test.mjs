@@ -330,9 +330,9 @@ test('si el cronograma no se pudo rehacer, la corrección lo dice', () => {
   const i = SG.indexOf("router.put('/lotes/:id/corregir'");
   const j = SG.indexOf('const cuotasPagas', i);
   assert.ok(j > i, 'la corrección no mira si quedaron cuotas pagadas');
-  const b = SG.slice(j, j + 700);
+  const b = SG.slice(j, j + 1800);
   assert.match(b, /FROM sg_oc_vencimientos WHERE oc_id=\? AND pagado=1/);
-  assert.match(b, /aviso: cuotasPagas > 0[\s\S]{0,20}\? AVISO_CRONOGRAMA_CONGELADO/);
+  assert.match(b, /cuotasPagas > 0 \? AVISO_CRONOGRAMA_CONGELADO : null/);
   // LAS MISMAS PALABRAS EN LAS TRES PUERTAS que mueven ese número: cambiar el precio
   // de la orden, completarla, y corregir una partida. El mismo problema contado
   // distinto en tres pantallas son tres problemas — así que el texto vive una vez.

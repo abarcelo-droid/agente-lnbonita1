@@ -21,15 +21,22 @@ const cuerpo = (nombre, largo = 2600) => {
   return PANEL.slice(i, i + largo);
 };
 
-// La regla real, importada sin inyectarle nada.
-function cargarRegla() {
-  const i = PANEL.indexOf('function liqCeldaCalculada(k, amb){');
-  assert.ok(i > 0, 'no existe liqCeldaCalculada');
-  const src = PANEL.slice(i, PANEL.indexOf('\n}', i) + 2);
+// La regla real, sacada del panel. Se lleva las DOS funciones —la regla y la que
+// decide si las ventas se pueden calcular— y recibe el LIQ que el test le arma: es
+// lo único que mira para las ventas.
+function cargarRegla(liq) {
+  const trozo = (nombre) => {
+    const i = PANEL.indexOf(nombre);
+    assert.ok(i > 0, 'no existe ' + nombre);
+    return PANEL.slice(i, PANEL.indexOf('\n}', i) + 2);
+  };
+  const src = trozo('function liqVentasSeCalculan(){')
+    + trozo('function liqCeldaCalculada(k, amb){');
   // eslint-disable-next-line no-new-func
-  return new Function(src + '; return liqCeldaCalculada;')();
+  return new Function('LIQ', src + '; return liqCeldaCalculada;')(liq);
 }
-const calculada = cargarRegla();
+// El caso normal: una partida cuyos comprobantes se pudieron atribuir enteros.
+const calculada = cargarRegla({ partida: { oc_id: 7 }, venta: { lineas_sin_atribuir: 0 } });
 
 // ── 1 · LOS BULTOS ─────────────────────────────────────────────────────────
 
@@ -115,11 +122,32 @@ test('la descarga y el flete NO se reparten a gestión', () => {
   assert.match(PANEL, /no así la descarga y el flete/);
 });
 
+test('LAS VENTAS NO SE TIPEAN: salen de los comprobantes', () => {
+  // Pablo, 30/8/2026: «en la liquidación me deja modificar las ventas a mano… es un
+  // error tremendo, de ahí se despliega una mala liquidación de impuestos». Su IVA es
+  // débito fiscal: tipearlas es escribir el libro de IVA a dedo.
+  assert.equal(calculada('ventas', 'f'), true);
+  assert.equal(calculada('ventas', 'g'), true, 'la parte de gestión sale del mismo lado');
+});
+
+test('salvo cuando el servidor dice que no las pudo atribuir', () => {
+  // Una factura vieja compartida entre dos partidas: su IVA y su gestión no se pueden
+  // separar sin repartir, y repartir no se hace. Trabarlas ahí dejaría liquidaciones
+  // imposibles de emitir. La pantalla ya lo avisa en rojo arriba.
+  const conDudas = cargarRegla({ partida: { oc_id: 7 }, venta: { lineas_sin_atribuir: 2 } });
+  assert.equal(conDudas('ventas', 'f'), false);
+  assert.equal(conDudas('ventas', 'g'), false);
+});
+
+test('y en una liquidación SUELTA, que no sale de ninguna partida', () => {
+  // Ahí no hay comprobantes de dónde sacarlas: lo que se tipea es el único dato.
+  const suelta = cargarRegla({ partida: null, venta: {} });
+  assert.equal(suelta('ventas', 'f'), false);
+});
+
 test('lo que el sistema HOY no puede calcular sigue abierto', () => {
   // Trabarlo dejaría liquidaciones que no se pueden emitir. Cada uno con su
   // motivo escrito al lado.
-  assert.equal(calculada('ventas', 'f'), false, 'ventas: falta el freno de lo no facturado');
-  assert.equal(calculada('ventas', 'g'), false);
   assert.equal(calculada('descarga', 'f'), false, 'descarga: puede estar sin valorizar');
   assert.equal(calculada('flete', 'f'), false, 'flete: el adelantado por SG no llega solo');
   assert.equal(calculada('gastos_admin', 'f'), false, 'a precio abierto nada lo calcula');
@@ -128,11 +156,12 @@ test('lo que el sistema HOY no puede calcular sigue abierto', () => {
 test('y está escrito POR QUÉ cada uno sigue abierto', () => {
   // Para que el próximo que lo mire no lo trabe sin resolver lo de arriba.
   const j = PANEL.indexOf('function liqCeldaCalculada(k, amb){');
-  const antes = PANEL.slice(j - 3400, j);
+  const antes = PANEL.slice(j - 4600, j);
   assert.match(antes, /NO se cierran, y hay que decir por qué/);
-  assert.match(antes, /despachada sin facturar todavía/);
   assert.match(antes, /valoriza cuando se le paga a la cooperativa/);
   assert.match(antes, /adelantó/);
+  // Y por qué las ventas SÍ se cerraron: el motivo que las tenía abiertas se fue.
+  assert.match(antes, /dejó de existir el 29\/8\/2026: eso ahora FRENA la liquidación/);
 });
 
 test('la celda trabada dice por qué lo está', () => {
