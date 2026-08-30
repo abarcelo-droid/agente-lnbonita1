@@ -148,3 +148,93 @@ test('y el rótulo dice de dónde salen, o por qué están abiertas', () => {
   assert.match(b, /de los comprobantes de la partida, arriba/);
   assert.match(b, /factura compartida que no /);
 });
+
+// ── 5 · EL PRECIO NO SE TIPEA, HAYA UNO O HAYA DOS ─────────────────────────
+
+test('el precio de una partida a precio cerrado sale de la orden, siempre', () => {
+  // Pablo, 30/8/2026: «el precio en la liquidación a precio cerrado debe venir de la
+  // orden de compra… ahora lo puede editar y sacar mal los números de margen, después
+  // tengo problemas de quién se equivocó. Esto ya lo teníamos bien».
+  //
+  // Y lo estaba: se trababa. Lo destrabó partir el renglón por calidad — con dos
+  // precios ya no hay UN precio por cajón, precio_por_bulto viene null, y la
+  // condición lo leía como «la orden no dice nada, que lo tipee». La orden SÍ dice:
+  // dice DOS.
+  const i = PANEL.indexOf('function liqPrecioDeLaOrden(){');
+  assert.ok(i > 0);
+  const b = PANEL.slice(i, i + 400);
+  assert.match(b, /\(Number\(ac\.precio_por_bulto\) \|\| Number\(ac\.total\)\)/);
+});
+
+test('y con dos precios el campo lo dice, en vez de quedar vacío', () => {
+  // Vacío no puede querer decir «tipealo»: el total sale de la orden igual.
+  const i = PANEL.indexOf('var variosPrecios =');
+  assert.ok(i > 0, 'la pantalla no reconoce el caso de dos precios');
+  const b = PANEL.slice(i, i + 500);
+  assert.match(b, /Number\(ac\.total\) && !Number\(ac\.precio_por_bulto\)/);
+  assert.match(b, /pc\.placeholder = 'dos precios'/);
+});
+
+test('y abajo se dice CUÁL es cada uno', () => {
+  // Un total con el campo del precio vacío no se puede auditar: hay que poder ver
+  // que la segunda se renegoció y a cuánto.
+  assert.match(SG, /renglones: db\.prepare\(`SELECT i\.id, i\.precio_estimado_por_kg,/);
+  assert.match(SG, /precio_por_bulto: \(x\.precio_estimado_por_kg != null && Number\(x\.kpb\) > 0\)/);
+  const i = PANEL.indexOf("var acEl = eid('liq-cerr-acordado');");
+  const b = PANEL.slice(i, i + 1600);
+  assert.match(b, /\(r\.renglones \|\| \[\]\)\.length > 1/);
+  assert.match(b, /escH\(x\.calidad \|\| 'sin calificar'\)/);
+  assert.match(b, /sgMoney\(x\.precio_por_bulto \|\| x\.precio_por_kg\)/);
+});
+
+test('y en un grupo, los renglones no se repiten', () => {
+  // Dos partidas del mismo camión comparten orden: sus renglones vendrían dos veces.
+  const i = SG.indexOf('renglones: (function(){');
+  assert.ok(i > 0);
+  const b = SG.slice(i, i + 500);
+  assert.match(b, /const vistos = new Set\(\)/);
+  assert.match(b, /if \(vistos\.has\(x\.oc_item_id\)\) continue;/);
+});
+
+// ── 6 · LAS CORRECCIONES HABLAN EN LA UNIDAD QUE SE PACTÓ ──────────────────
+
+test('el registro informa el precio por BULTO si así se pactó', () => {
+  // Pablo, 30/8/2026: «si modifico el precio del bulto no tenés por qué seguirme
+  // informando el precio por kilo. Si en la OC arreglamos por bulto y corregimos por
+  // bulto, debemos informar por bulto en las correcciones también».
+  //
+  // Se guarda por kilo —es la unidad del costo y de la deuda— pero se pacta por
+  // cajón: mostrar «2777.777777777778» donde se habló de $50.000 obliga a hacer una
+  // cuenta para leer el propio registro.
+  assert.match(SG, /COALESCE\(il\.modo_carga, ii\.modo_carga\) AS modo_carga/);
+  assert.match(SG, /COALESCE\(l\.kg_por_bulto, psl\.factor_conversion,/);
+  const i = PANEL.indexOf('function sgEdValor(campo, v, e){');
+  assert.ok(i > 0, 'el formateador no recibe la edición');
+  const b = PANEL.slice(i, i + 900);
+  assert.match(b, /sgEdPorBulto\(e\)\r?\n?\s*\? sgMoney2\(Number\(v\) \* Number\(e\.kg_por_bulto\)\) \+ ' \/bulto'/);
+  // Y con el de la otra unidad al lado: el costo y el margen corren por kilo.
+  assert.match(b, /\+ '  ·  ' \+ sgMoney2\(Number\(v\)\) \+ ' \/kg'/);
+});
+
+test('por bulto SÓLO si la orden se pactó así y hay factor', () => {
+  // Sin una de las dos, el número por cajón sería inventado.
+  const i = PANEL.indexOf('function sgEdPorBulto(e){');
+  assert.ok(i > 0);
+  assert.match(PANEL.slice(i, i + 220),
+    /e\.modo_carga === 'bulto' && Number\(e\.kg_por_bulto\) > 0/);
+});
+
+test('y el rótulo dice de qué precio se trata, y en qué unidad', () => {
+  // «precio_estimado_por_kg» era el nombre de la columna: nadie sabe qué es.
+  const i = PANEL.indexOf('function sgEdCampo(e){');
+  assert.ok(i > 0);
+  const b = PANEL.slice(i, i + 500);
+  // La condición arranca en el mapa de precios: colgarla de otra cosa la apaga y el
+  // rótulo vuelve a ser el nombre crudo de la columna.
+  assert.match(b, /if \(SG_ED_PRECIO_KG\[e\.campo\]\) \{/);
+  assert.match(b, /Precio de la orden/);
+  assert.match(b, /Precio de la partida/);
+  assert.match(b, /sgEdPorBulto\(e\) \? ' por bulto' : ' por kg'/);
+  // Y los otros campos crudos también tienen nombre.
+  assert.match(PANEL, /oc_item_id: 'Renglón de la orden'/);
+});

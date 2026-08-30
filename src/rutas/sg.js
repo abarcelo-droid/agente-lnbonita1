@@ -3980,6 +3980,30 @@ function ventaDePartida(db, ocId) {
       // por bulto — se manda null y la pantalla trabaja con el total.
       tipo_precio: oc.tipo_precio || null,
       es_precio_cerrado: oc.tipo_precio !== 'pizarra' ? 1 : 0,
+      // ── LOS RENGLONES DE LA ORDEN, CON SU PRECIO ────────────────────
+      //
+      // Desde que separar por calidad parte el renglón (29/8/2026), una partida puede
+      // tener DOS precios: los de primera a uno y los de segunda a otro. Ahí no hay UN
+      // precio por cajón que mostrar, y el campo de la pantalla queda vacío — pero
+      // vacío no puede querer decir «tipealo»: el total sale de la orden igual.
+      //
+      // Con esto la pantalla puede decir CUÁL es cada uno, que es lo único que hace
+      // auditable un total sin precio unitario.
+      renglones: db.prepare(`SELECT i.id, i.precio_estimado_por_kg,
+          COALESCE(i.kg_por_bulto, ps.factor_conversion) AS kpb,
+          (SELECT COALESCE(SUM(l.bultos),0) FROM sg_lotes l
+            WHERE l.oc_item_id = i.id AND l.activo = 1) AS bultos,
+          (SELECT GROUP_CONCAT(DISTINCT COALESCE(l.calidad,'')) FROM sg_lotes l
+            WHERE l.oc_item_id = i.id AND l.activo = 1) AS calidad
+          FROM sg_oc_items i LEFT JOIN sg_presentaciones ps ON ps.id = i.presentacion_id
+         WHERE i.oc_id = ? ORDER BY i.id`).all(ocId).map((x) => ({
+        oc_item_id: x.id,
+        calidad: String(x.calidad || '').split(',').filter((c) => c.trim()).join(' + ') || null,
+        bultos: r2(x.bultos),
+        precio_por_kg: x.precio_estimado_por_kg,
+        precio_por_bulto: (x.precio_estimado_por_kg != null && Number(x.kpb) > 0)
+          ? r2(Number(x.precio_estimado_por_kg) * Number(x.kpb)) : null,
+      })),
       acordado: (function(){
         const u = precioUnicoDeOC(db, ocId);
         return { total: u.total, precio_por_bulto: u.precio,
@@ -4101,6 +4125,19 @@ function fusionarVentas(partes) {
     fecha_oc: p0.fecha_oc, fecha_ingreso: p0.fecha_ingreso,
     unidad,
     tipo_precio: p0.tipo_precio, es_precio_cerrado: p0.es_precio_cerrado,
+    // Los renglones de todas las órdenes del grupo, sin repetir: dos partidas del
+    // mismo camión comparten orden y sus renglones vendrían dos veces.
+    renglones: (function(){
+      const vistos = new Set(), out = [];
+      for (const p of partes) {
+        for (const x of (p.renglones || [])) {
+          if (vistos.has(x.oc_item_id)) continue;
+          vistos.add(x.oc_item_id);
+          out.push(x);
+        }
+      }
+      return out;
+    })(),
     acordado: {
       total: sum((p) => (p.acordado || {}).total),
       total_sin_mermas: sum((p) => (p.acordado || {}).total_sin_mermas),
@@ -5980,11 +6017,35 @@ router.put('/oc/:id/documenta', requireAuth, (req, res) => {
 });
 
 // Lo que se corrigió de una partida: quién, cuándo, qué decía antes.
+//
+// ── Y EN QUÉ UNIDAD SE PACTÓ ────────────────────────────────────────────────
+//
+// Pablo, 30/8/2026: «si modifico el precio del bulto no tenés por qué seguirme
+// informando el precio por kilo. Si en la OC arreglamos por bulto y corregimos por
+// bulto, debemos informar por bulto en las correcciones también».
+//
+// El precio se GUARDA por kilo —es la unidad con la que corren el costo, el margen y
+// lo que se le debe al productor— pero se pacta, se tipea y se discute por cajón.
+// Mostrar «2777.777777777778» donde se habló de $50.000 el cajón obliga a hacer una
+// cuenta para leer el propio registro, que es lo contrario de un registro.
+//
+// El modo y el factor salen de la misma cadena que usa el resto del módulo: del ítem
+// de la orden, y si el ítem no lo tiene, de su presentación. Para una corrección
+// sobre un LOTE se busca por su ítem; para una sobre el renglón, por el renglón.
 router.get('/oc/:id/ediciones', requireAuth, (req, res) => {
   const db = getDb();
   try {
-    const rows = db.prepare(`SELECT e.*, u.nombre AS usuario_nombre
-      FROM sg_ediciones e LEFT JOIN usuarios u ON u.id = e.usuario_id
+    const rows = db.prepare(`SELECT e.*, u.nombre AS usuario_nombre,
+        COALESCE(il.modo_carga, ii.modo_carga) AS modo_carga,
+        COALESCE(l.kg_por_bulto, psl.factor_conversion,
+                 il.kg_por_bulto, ii.kg_por_bulto, psi.factor_conversion) AS kg_por_bulto
+      FROM sg_ediciones e
+      LEFT JOIN usuarios u ON u.id = e.usuario_id
+      LEFT JOIN sg_lotes l          ON e.tabla = 'sg_lotes'     AND l.id  = e.registro_id
+      LEFT JOIN sg_presentaciones psl ON psl.id = l.presentacion_id
+      LEFT JOIN sg_oc_items il      ON il.id = l.oc_item_id
+      LEFT JOIN sg_oc_items ii      ON e.tabla = 'sg_oc_items' AND ii.id = e.registro_id
+      LEFT JOIN sg_presentaciones psi ON psi.id = ii.presentacion_id
       WHERE e.oc_id = ? ORDER BY e.id DESC`).all(req.params.id);
     res.json({ ok: true, data: rows });
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
