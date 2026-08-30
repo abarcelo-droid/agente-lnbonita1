@@ -92,8 +92,11 @@ test('EL COSTO ES NETO, y ahora las dos puertas hacen la misma cuenta', () => {
   // Y /completar dejó de hacer la suya.
   assert.doesNotMatch(SG, /setLote\.run\(p\.precio, r2\(\(l\.kg_reales \|\| 0\) \* p\.precio\)/);
   // Dos llamadas —el endpoint nuevo y /completar— más la definición.
+  // CUATRO: el endpoint de precios, /completar, la corrección de una partida que es
+  // la única de su renglón —desde el 30/8/2026, para que el precio corregido llegue a
+  // lo que se le paga al productor— y la definición.
   const usos = (SG.match(/aplicarPrecioItem\(db,/g) || []).length;
-  assert.equal(usos, 3, 'el endpoint nuevo, /completar, y la función');
+  assert.equal(usos, 4, 'todas las puertas usan la misma cascada');
 });
 
 test('la cascada corre entera y en orden', () => {
