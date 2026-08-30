@@ -1009,6 +1009,10 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
                    title="Se liquida la partida entera: el sistema no deja liquidar hasta que salió todo"
                    style="width:120px;text-align:right;padding:6px 8px;border-radius:6px;border:1px solid var(--bor);background:var(--bor2,#f1f5f9);color:var(--mut);cursor:not-allowed">
             <span id="liq-cerr-cant-hint" style="display:block;font-size:10.5px"></span></label>
+          <!-- Con dos precios el campo de arriba no puede mostrar uno solo, pero el
+               promedio efectivo sí se puede decir y sirve para comparar contra lo que
+               se habló con el productor. -->
+          <div id="liq-cerr-precio-eq" style="align-self:flex-end;padding-bottom:8px;font-size:12px"></div>
           <div style="align-self:flex-end;padding-bottom:6px">
             <div style="font-size:11px;color:var(--mut)">Total a pagar al productor</div>
             <div id="liq-cerr-total" style="font-weight:700;font-size:18px">—</div>
@@ -12955,6 +12959,12 @@ function liqVentaCab(ocId, mas){
     h += '</div>';
     c.innerHTML = h;
     liqBultosAvance();
+    // ── Y AHORA SÍ, EL DESPEJE ────────────────────────────────────────
+    // Corrió una vez desde liqDesdePartida, cuando este cuadro todavía no existía.
+    // Ahora que están los bultos en pantalla se rehace: es lo que llena la comisión,
+    // los gastos y el total a pagar. Sin esto quedaba en «—» hasta que alguien
+    // tocara un campo.
+    if (liqModo() === 'cerrado') liqCerradoResolver(); else liqComisionCalcular();
   });
 }
 
@@ -16157,28 +16167,36 @@ function sgLoteEditarOpen(loteId){
       : (kpb ? 'Esta partida entró sin orden · bultos de ' + nr(kpb) + ' kg'
              : 'Esta partida entró sin orden y sin kilos por bulto: el precio va por kilo.');
   }
-  eid('sg-loteed-precio').value = (l.precio_unitario_kg == null) ? ''
-    : ((uni && uni.value === 'bulto' && kpb)
-        ? Math.round(Number(l.precio_unitario_kg) * kpb * 100) / 100
-        : l.precio_unitario_kg);
-  eid('sg-loteed-precio').oninput = sgLoteEdEq;
-  // ── ¿ESTE PRECIO ES NETO? ────────────────────────────────────────────
+  // ── SE TIPEA COMO SE PACTÓ, NO COMO SE GUARDA ────────────────────────
   //
-  // La partida guarda el NETO cuando la orden se cargó con «el precio incluye IVA»:
-  // lo hace la recepción y lo hace la pantalla de precios de la orden. Pero acá se
-  // guarda lo que se escribe, sin convertir, y no se decía. El comprador acuerda
-  // «$20.000 el cajón» con el productor —con IVA, que es como se habla—, tipea
-  // 20.000, y lo que se termina debiendo queda 10,5% arriba de lo acordado.
+  // Pablo, 30/8/2026: «fijate acá cómo quedaron los IVAs porque me suenan raros».
+  // Sonaban raros porque no eran los suyos: acordaba «$15.000 el cajón» con el
+  // productor —con IVA, que es como se habla— tipeaba 15.000, y el sistema lo tomaba
+  // como NETO y le terminaba debiendo $16.575. Un 10,5% de más, para el lado que
+  // nadie reclama.
+  //
+  // La partida guarda el neto —es la unidad con la que corren el costo y el margen—
+  // pero eso es asunto del sistema. Acá se pide el precio COMO SE PACTÓ, igual que la
+  // pantalla de precios de la orden, y la conversión la hace la máquina.
+  //
+  // Se resuelve ANTES de escribir el campo: es lo que decide qué número se muestra.
   var ocD = SG.ocVerData || {};
   var alicIt = (it && it.iva_alicuota != null && it.iva_alicuota !== '') ? Number(it.iva_alicuota) : null;
   SG.loteEdNeto = (Number(ocD.precio_incluye_iva) === 1 && alicIt > 0) ? alicIt : null;
+  var factorIva = SG.loteEdNeto ? (1 + SG.loteEdNeto / 100) : 1;
+
+  eid('sg-loteed-precio').value = (l.precio_unitario_kg == null) ? ''
+    : (Math.round(Number(l.precio_unitario_kg) * factorIva
+        * ((uni && uni.value === 'bulto' && kpb) ? kpb : 1) * 100) / 100);
+  eid('sg-loteed-precio').oninput = sgLoteEdEq;
   var ivaN = eid('sg-loteed-precio-iva');
   if (ivaN) {
     if (SG.loteEdNeto) {
       ivaN.style.display = '';
-      ivaN.innerHTML = '<b>Ojo: este precio es NETO.</b> La orden se pactó con el IVA incluido '
-        + '(' + String(SG.loteEdNeto).replace('.', ',') + '%), y la partida guarda el precio '
-        + 'sin IVA. Si con el productor acordaste un número CON IVA, dividilo primero.';
+      ivaN.innerHTML = 'Este precio va <b>CON IVA incluido</b> ('
+        + String(SG.loteEdNeto).replace('.', ',') + '%), igual que en la orden de compra: '
+        + 'poné el número que acordaste con el productor. El sistema le saca el IVA para '
+        + 'guardar el costo.';
     } else {
       ivaN.style.display = 'none';
       ivaN.innerHTML = '';
@@ -16295,10 +16313,11 @@ function sgLoteEdEq(){
   var l = SG.loteEdit, kpb = l ? sgLoteEdKpb(l) : null;
   var v = Number((eid('sg-loteed-precio') || {}).value) || 0;
   if (!(v > 0)) { c.textContent = ''; return; }
-  // CUÁNTO ES ESO CON IVA. Es el número que se habló con el productor, y tenerlo al
-  // lado mientras se tipea es la única forma de darse cuenta de que se puso el otro.
+  // CUÁNTO ES ESO SIN IVA. Lo que se tipea es el precio acordado —con IVA, como en la
+  // orden— y lo que se guarda es el costo, que va neto. Tenerlos los dos a la vista es
+  // lo que evita descubrir la diferencia recién en la liquidación.
   var conIva = SG.loteEdNeto
-    ? ' · <b>' + sgMoney2(v * (1 + SG.loteEdNeto / 100)) + ' con IVA</b>' : '';
+    ? ' · <b>' + sgMoney2(v / (1 + SG.loteEdNeto / 100)) + ' sin IVA</b>' : '';
   if (!kpb) { c.innerHTML = conIva ? conIva.replace(' · ', '= ') : ''; return; }
   c.innerHTML = ((eid('sg-loteed-uni').value === 'bulto')
     ? '= ' + sgMoney2(v / kpb) + ' /kg · bultos de ' + nr(kpb) + ' kg'
@@ -16314,9 +16333,13 @@ function sgLoteEdPrecioKg(){
   var v = Number(x);
   if (!(v > 0)) return String(x);
   var l = SG.loteEdit, kpb = l ? sgLoteEdKpb(l) : null;
+  // Y SIN EL IVA, si la orden se pactó con el impuesto adentro: lo que se tipea es el
+  // precio acordado y lo que se guarda es el costo. La vuelta la hace el servidor
+  // cuando ese precio sube al renglón de la orden.
+  var neto = SG.loteEdNeto ? (v / (1 + SG.loteEdNeto / 100)) : v;
   return (eid('sg-loteed-uni').value === 'bulto' && kpb)
-    ? String(Math.round((v / kpb) * 1000000) / 1000000)
-    : String(v);
+    ? String(Math.round((neto / kpb) * 1000000) / 1000000)
+    : String(Math.round(neto * 1000000) / 1000000);
 }
 
 // ── CUANDO EL PRECIO ESTÁ FIRME ──────────────────────────────────────────
@@ -37850,7 +37873,16 @@ function liqCerradoResolver(){
   // cajón—. Los dos números salen de la orden y no coinciden. Cuando se liquida la
   // partida entera hay uno solo que es el de verdad: el que calculó la orden, y es
   // el que el servidor va a exigir.
-  var _recib = Number((eid('liq-bultos-in') || {}).value) || 0;
+  //
+  // Y SALEN DE LA PARTIDA, NO DEL CAMPO. El cuadro que dibuja #liq-bultos-in se pinta
+  // DESPUÉS de este despeje —liqVentaCab arma el HTML recién al final—, así que la
+  // primera vez el campo no existe y leerlo daba 0: la partida no era «entera», la
+  // base quedaba en cero y la pantalla decía «poné el precio acordado y los bultos»
+  // sobre una partida cuyo precio no se tipea. No se veía mientras el precio por
+  // cajón se prellenaba —ahí la base salía de multiplicar—, y apareció en cuanto una
+  // partida tuvo DOS precios y ese campo quedó vacío a propósito.
+  var _recib = Number((eid('liq-bultos-in') || {}).value)
+    || Number(((LIQ.venta) || {}).bultos_ingresados) || 0;
   var _entera = (_cant > 0 && _recib > 0 && Math.abs(_cant - _recib) < 1e-6);
   // ── LA MERMA CAMBIA EL NÚMERO, Y HAY QUE HABERLA CONTESTADO ────────────
   //
@@ -37898,6 +37930,16 @@ function liqCerradoResolver(){
   }
   var T = conIva ? base : m2(base * (1 + alicAc / 100));
   if (tot) tot.textContent = T ? liqPlata(T) : '—';
+  // Con UN solo precio el campo lo muestra; con dos no hay uno que mostrar, pero el
+  // promedio efectivo sí se puede decir —es el total dividido los cajones— y sirve
+  // para comparar contra lo que se habló.
+  var eqP = eid('liq-cerr-precio-eq');
+  if (eqP) {
+    eqP.innerHTML = (T && _cant > 0 && !Number((ac || {}).precio_por_bulto))
+      ? '<span style="color:var(--mut)">promedio </span>' + sgMoney(T / _cant)
+        + '<span style="color:var(--mut)"> por bulto</span>'
+      : '';
+  }
   // EL OBJETIVO QUEDA GUARDADO acá arriba, antes de cualquier corte: los caminos
   // en que el despeje se rinde —comisión negativa, partida sin ventas— también
   // tienen que quedar marcados abajo, y no salir en silencio con la grilla vieja.

@@ -20,29 +20,40 @@ const PANEL = fs.readFileSync(path.join(RAIZ, 'src/panel.html'), 'utf8');
 
 // ── 1 · EL PRECIO DE LA PARTIDA ES NETO, Y NO LO DECÍA ─────────────────────
 
-test('la pantalla avisa que el precio es NETO cuando la orden se pactó con IVA', () => {
-  // La partida guarda el NETO cuando la orden dice «el precio incluye IVA»: lo hace
-  // la recepción y lo hace la pantalla de precios de la orden. Pero la corrección
-  // guarda lo que se escribe, sin convertir.
+test('el precio se TIPEA como se pactó: con IVA si la orden lo incluye', () => {
+  // Pablo, 30/8/2026: «fijate acá cómo quedaron los IVAs porque me suenan raros».
+  // Sonaban raros porque no eran los suyos: acordaba «$15.000 el cajón» con el
+  // productor —con IVA, que es como se habla—, tipeaba 15.000, el sistema lo tomaba
+  // como NETO y le terminaba debiendo $16.575. Un 10,5% de más, para el lado que
+  // nadie reclama.
   //
-  // El comprador acuerda «$20.000 el cajón» con el productor —con IVA, que es como se
-  // habla—, tipea 20.000, y lo que se termina debiendo queda 10,5% ARRIBA de lo
-  // acordado. Para el lado que nadie reclama.
+  // Ahora se pide el precio COMO SE PACTÓ, igual que la pantalla de precios de la
+  // orden, y la conversión la hace la máquina.
   assert.match(PANEL, /id="sg-loteed-precio-iva"/);
   const i = PANEL.indexOf('SG.loteEdNeto = (Number(ocD.precio_incluye_iva) === 1');
   assert.ok(i > 0, 'la pantalla no mira si el precio de la orden trae IVA');
-  const b = PANEL.slice(i - 300, i + 900);
+  const b = PANEL.slice(i - 300, i + 1200);
   assert.match(b, /alicIt > 0\) \? alicIt : null/);
-  assert.match(b, /este precio es NETO/);
+  assert.match(b, /var factorIva = SG\.loteEdNeto \? \(1 \+ SG\.loteEdNeto \/ 100\) : 1;/);
+  // Y el campo se muestra en esa unidad: el neto guardado, con el IVA devuelto.
+  assert.match(b, /Number\(l\.precio_unitario_kg\) \* factorIva/);
+  assert.match(b, /CON IVA incluido<\/b>/);
 });
 
-test('y muestra cuánto es eso CON IVA mientras se tipea', () => {
-  // Es el número que se habló con el productor. Tenerlo al lado es la única forma de
-  // darse cuenta de que se puso el otro.
+test('y se le saca el IVA al guardar: lo que se guarda es el costo', () => {
+  const i = PANEL.indexOf('function sgLoteEdPrecioKg(){');
+  const b = PANEL.slice(i, i + 900);
+  assert.match(b, /var neto = SG\.loteEdNeto \? \(v \/ \(1 \+ SG\.loteEdNeto \/ 100\)\) : v;/);
+  assert.match(b, /Math\.round\(\(neto \/ kpb\) \* 1000000\) \/ 1000000/);
+});
+
+test('y muestra cuánto es eso SIN IVA mientras se tipea', () => {
+  // Los dos a la vista: lo que se acordó y lo que se guarda. Es lo que evita
+  // descubrir la diferencia recién en la liquidación.
   const i = PANEL.indexOf('function sgLoteEdEq(){');
   const b = PANEL.slice(i, i + 1400);
-  assert.match(b, /sgMoney2\(v \* \(1 \+ SG\.loteEdNeto \/ 100\)\)/);
-  assert.match(b, /con IVA/);
+  assert.match(b, /sgMoney2\(v \/ \(1 \+ SG\.loteEdNeto \/ 100\)\)/);
+  assert.match(b, /sin IVA/);
   // Y sin kilos por bulto también: antes se cortaba antes de llegar acá.
   assert.match(b, /if \(!kpb\) \{ c\.innerHTML = conIva/);
 });
