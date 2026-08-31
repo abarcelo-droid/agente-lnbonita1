@@ -91,7 +91,10 @@ test('el buscador de clientes y proveedores', () => {
   assert.match(b, /var q = sgNorm\(String\(inp\.value \|\| ''\)\.trim\(\)\)/);
   assert.match(b, /return sgNorm\(x\)\.indexOf\(q\) >= 0;/);
   // Y las dos listas que arman el desplegable escondido.
-  assert.match(PANEL, /function sgCliOpts\(query, sel, blank\)\{\s*var q=sgNorm/);
+  // El 4º parámetro es el recorte opcional del padrón (lo usa la solapa de cadenas).
+  // La búsqueda sigue siendo la misma: sgNorm sobre lo tipeado, y sgNorm sobre cada
+  // nombre — se busca "gerónimo" escribiendo "geronimo".
+  assert.match(PANEL, /function sgCliOpts\(query, sel, blank, filtro\)\{\s*var q=sgNorm/);
   assert.match(PANEL, /var a=sgNorm\(c\.nombre_comercial\), r=sgNorm\(c\.razon_social\)/);
   assert.match(PANEL, /return sgNorm\(x\)\.indexOf\(q\) >= 0; \}\);/);
 });

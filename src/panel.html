@@ -2860,15 +2860,16 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
     </div>
   </div>
   <div class="sec sg-mod" id="sec-sg-ventas">
-    <div class="ph"><div><div class="ph-t">🍅 San Gerónimo · Salidas</div><div class="ph-s">Lo que sale del depósito: con remito, o facturado en el acto</div></div></div>
+    <div class="ph"><div><div class="ph-t">🧾 San Gerónimo · Remitos y Facturación</div><div class="ph-s">El remito que acompaña la mercadería, la venta que se factura en el puesto y lo que hay que facturarle a las cadenas</div></div></div>
     <style>
       .sg-mod .sgv-subtab{padding:7px 14px;cursor:pointer;font-size:12.5px;font-weight:600;border-radius:6px;color:var(--mut)}
       .sg-mod .sgv-subtab.on{background:var(--burg);color:#fff}
       .sg-mod .sgv-sub{display:none} .sg-mod .sgv-sub.on{display:block}
     </style>
     <div style="display:inline-flex;gap:2px;background:var(--bg);border:1px solid var(--bor);border-radius:8px;padding:3px;margin-bottom:16px;flex-wrap:wrap">
-      <div class="sgv-subtab on" data-sub="despachos" onclick="sgVenSub('despachos')">📄 Remitos</div>
-      <div class="sgv-subtab" data-sub="directa"       onclick="sgVenSub('directa')">💵 Facturación directa</div>
+      <div class="sgv-subtab on" data-sub="despachos" onclick="sgVenSub('despachos')">📄 Emisión de Remitos</div>
+      <div class="sgv-subtab" data-sub="directa"       onclick="sgVenSub('directa')">💵 Facturación Puesto</div>
+      <div class="sgv-subtab" data-sub="supermercados" onclick="sgVenSub('supermercados')">🏪 Facturación Supermercados</div>
     </div>
 
     <!-- Remitos -->
@@ -2880,7 +2881,81 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
       </table></div>
     </div>
 
-    <!-- 💵 FACTURACIÓN DIRECTA — stock → comprobante, en un paso ───────────
+    <!-- ══ 🏪 FACTURACIÓN A SUPERMERCADOS ═══════════════════════════════
+         Pablo, 31/8/2026: el tercer ítem del menú «facturar remitos ya
+         entregados».
+
+         A UNA CADENA NO SE LE FACTURA EN EL MOSTRADOR. La mercadería sale con
+         remito, la recibe la sucursal, y la factura se emite después —muchas
+         veces por varios remitos juntos, que es como la cadena lo espera. Eso
+         ya se podía hacer, pero desde «Remitos pendientes de comprobante», que
+         es la lista de TODOS los clientes: para facturarle a un súper había que
+         entrar a otra pantalla y encontrarlo entre los demás.
+
+         Acá es la misma lista acotada a las cadenas, y el botón abre el MISMO
+         editor de factura —el que ya sabe tildar varios remitos del mismo
+         cliente y emitir un solo comprobante—. No hay un segundo circuito de
+         facturación: una segunda copia de las reglas de stock y de asiento es
+         una segunda copia que se olvida de actualizar. -->
+    <div class="sgv-sub" id="sgv-sub-supermercados">
+      <style>
+        /* Nada se desplaza de costado. La clase .ab-table-wrap trae su propio
+           overflow-x:auto, así que hace falta ganarle con !important. */
+        #sgv-sub-supermercados .ab-table-wrap{overflow-x:hidden !important}
+        #sgv-sub-supermercados table{table-layout:fixed;width:100%}
+        /* El ancho de cada columna, declarado contra el LARGO REAL del dato: suman
+           100 y no se pasan. El número de remito es SG-DESP-20260831-0001 —21
+           caracteres— y con un ancho de compromiso se cortaba en «SG-DESP-2026…»:
+           todos los remitos del mismo día se veían iguales, que es peor que no
+           mostrar la columna. */
+        #sgv-sub-supermercados th:nth-child(1),#sgv-sub-supermercados td:nth-child(1){width:14%}
+        #sgv-sub-supermercados th:nth-child(2),#sgv-sub-supermercados td:nth-child(2){width:8%}
+        #sgv-sub-supermercados th:nth-child(3),#sgv-sub-supermercados td:nth-child(3){width:11%}
+        #sgv-sub-supermercados th:nth-child(4),#sgv-sub-supermercados td:nth-child(4){width:15%}
+        #sgv-sub-supermercados th:nth-child(5),#sgv-sub-supermercados td:nth-child(5){width:20%}
+        #sgv-sub-supermercados th:nth-child(6),#sgv-sub-supermercados td:nth-child(6){width:10%}
+        #sgv-sub-supermercados th:nth-child(7),#sgv-sub-supermercados td:nth-child(7){width:10%}
+        #sgv-sub-supermercados th:nth-child(8),#sgv-sub-supermercados td:nth-child(8){width:12%}
+        /* Se truncan con puntos suspensivos SÓLO las de texto plano: número, fecha,
+           alias, cliente y total. Un alias largo no puede empujar la tabla. */
+        #sgv-sub-supermercados td:nth-child(-n+4),#sgv-sub-supermercados th:nth-child(-n+4),
+        #sgv-sub-supermercados td:nth-child(6){
+          overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+        /* El estado NO va con overflow:hidden. Su contenido no es texto sino una
+           pastilla (.bdg, inline-block con padding): recortarla la corta al ras, sin
+           puntos suspensivos, y queda media pastilla sin decir nada. Tiene su ancho
+           y no parte. */
+        #sgv-sub-supermercados td:nth-child(7){white-space:nowrap}
+        /* Lo de largo variable —qué se vendió— parte en varias líneas. */
+        #sgv-sub-supermercados td.sgsu-que{white-space:normal;word-break:break-word}
+        /* Y los BOTONES tampoco se recortan: se apilan. Cortar un botón lo deja a
+           medio dibujar y el pedazo cortado no se puede apretar. */
+        #sgv-sub-supermercados td:nth-child(8){white-space:normal}
+        #sgv-sub-supermercados td:nth-child(8) .btn{margin:1px 0;max-width:100%}
+        #sgv-sub-supermercados input,#sgv-sub-supermercados select{max-width:100%;box-sizing:border-box}
+        @media(max-width:900px){ #sgv-sub-supermercados .ab-table-wrap{overflow-x:auto !important} }
+      </style>
+      <div class="sgr-card" style="max-width:98vw;overflow-x:hidden">
+        <div style="display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap;margin-bottom:10px">
+          <label style="font-size:11.5px;color:var(--mut)">Cadena<br>
+            <input type="text" placeholder="🔎 alias o razón social" autocomplete="off" style="min-width:220px;padding:5px 8px;border-radius:6px;border:1px solid var(--bor);background:var(--card,#fff);margin-bottom:4px;display:block">
+            <select id="sgsu-cli" onchange="sgSuperLoad()" style="min-width:220px;padding:6px 8px;border-radius:6px;border:1px solid var(--bor);background:var(--card,#fff)"></select>
+          </label>
+          <label style="font-size:11.5px;color:var(--mut)">Desde<br><input type="date" id="sgsu-desde" style="padding:6px 8px;border-radius:6px;border:1px solid var(--bor);background:var(--card,#fff)"></label>
+          <label style="font-size:11.5px;color:var(--mut)">Hasta<br><input type="date" id="sgsu-hasta" style="padding:6px 8px;border-radius:6px;border:1px solid var(--bor);background:var(--card,#fff)"></label>
+          <button class="btn bb bs" onclick="sgSuperLoad()">Filtrar</button>
+        </div>
+        <!-- QUÉ CLIENTES ENTRAN ACÁ, dicho. Una pantalla que filtra sin decir con
+             qué criterio hace que el remito que falta parezca perdido. -->
+        <div style="font-size:11.5px;color:var(--mut);margin-bottom:12px">
+          Entran los clientes marcados como <b>Supermercado</b> en su ficha o con categoría comercial <b>Retail</b>.
+          Si una cadena no aparece, le falta una de las dos en Maestros → Clientes.
+        </div>
+        <div class="ab-table-wrap" id="sgsu-tabla"><div style="font-size:12px;color:var(--mut)">Cargando…</div></div>
+      </div>
+    </div>
+
+    <!-- 💵 FACTURACIÓN PUESTO — stock → comprobante, en un paso ───────────
          Por dentro hay remito igual: la mercadería sale del depósito y sin él
          el lote quedaría figurando disponible después de vendido. Lo que se
          saca es el paso a mano, no el documento. -->
@@ -3151,7 +3226,24 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
        Hasta ahora el backend existía entero y no tenía pantalla, y aunque la
        hubiera tenido no habría servido: la liquidación guardaba el remito como
        TEXTO LIBRE, así que sus kilos no se descontaban de ningún lado. -->
-  <div class="ab-modal-overlay" id="sg-liqrec-modal">
+  
+  
+    </div>
+
+  <!-- ══ LOS DOS MODALES QUE DOCUMENTAN UN REMITO ═══════════════════════
+       Facturarlo (lo emitimos nosotros) o recibir la liquidación del cliente.
+       Son los mismos de siempre, con los mismos ids: lo único que cambió es
+       DÓNDE están.
+
+       Estaban ADENTRO de «Remitos pendientes de comprobante». Con `.sec{display:none}`
+       eso alcanzaba mientras se abrieran sólo desde ahí, pero desde el 31/8/2026 los
+       abre también la solapa «Facturación Supermercados», que es otra pantalla: el
+       botón corría, el modal se marcaba como abierto y no se veía nada, porque su
+       pantalla contenedora estaba escondida. El que lo aprieta cree que se colgó.
+
+       Acá arriba, al nivel de todos los demás modales del proyecto, se abren desde
+       donde sea. -->
+<div class="ab-modal-overlay" id="sg-liqrec-modal">
     <!-- width:96vw JUNTO al max-width, como todos los modales anchos del proyecto.
          .ab-modal declara width:560px: el max-width TOPEA pero no ensancha, así que
          sin esto el modal sale de 560px, la grilla de renglones se aplasta a unos
@@ -3268,7 +3360,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
       </div>
     </div>
   </div>
-  <div class="ab-modal-overlay" id="sg-fac-modal">
+<div class="ab-modal-overlay" id="sg-fac-modal">
     <div class="ab-modal" style="width:96vw;max-width:min(1100px,96vw)">
       <div class="mhd"><div class="mht" id="sg-fac-tit">🧾 Facturar el remito</div>
         <button class="mcl" onclick="closeMB('sg-fac-modal')">×</button></div>
@@ -3320,7 +3412,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
       </div>
     </div>
   </div>
-    </div>
+
 
 
 <!-- ── MANDARLE EL COMPROBANTE AL CLIENTE ─────────────────────────────────
@@ -7182,9 +7274,13 @@ function sgCliLabel(c){
   if(a && r && a.toLowerCase()!==r.toLowerCase()) return a+'  ·  '+r;
   return a||r;
 }
-function sgCliOpts(query, sel, blank){
+// `filtro` (opcional) recorta el padrón antes de buscar: lo usa la solapa de
+// cadenas para no ofrecer un cliente que después no va a traer ningún remito.
+function sgCliOpts(query, sel, blank, filtro){
   var q=sgNorm(String(query||'').trim());
-  var lista=(SG.cacheCli||[]).map(function(c){
+  var base=(SG.cacheCli||[]);
+  if (typeof filtro === 'function') base = base.filter(filtro);
+  var lista=base.map(function(c){
     var a=sgNorm(c.nombre_comercial), r=sgNorm(c.razon_social);
     var mA=!!q && a.indexOf(q)>=0, mR=!!q && r.indexOf(q)>=0;
     return { c:c, match: !q || mA || mR, rank:(mA?0:(mR?1:2)) };
@@ -7401,6 +7497,18 @@ function sgCliUnicoTodos(){
 
 // Filtra un <select> de cliente desde su input de búsqueda (preserva la selección si sigue visible).
 function sgCliFiltrar(selectId, q){ var el=eid(selectId); if(el) el.innerHTML=sgCliOpts(q, el.value); }
+// ── QUIÉN ES UNA CADENA ─────────────────────────────────────────────────
+//
+// ESPEJA la regla del backend (SQL_ES_CADENA en rutas/sg.js): el que decide sigue
+// siendo el servidor, esto es para que el selector no ofrezca un cliente que la
+// lista después no va a traer.
+//
+// Son DOS lugares y los dos son ciertos: el campo `tipo` de la ficha, que se tilda
+// a mano, y la categoría comercial 'Retail', que viene del padrón de ABASTO. Mirar
+// uno solo dejaría media cartera afuera sin que nadie se entere.
+function sgEsCadena(c){
+  return !!c && (c.tipo === 'supermercado' || c.categoria_nombre === 'Retail');
+}
 // Presentaciones de un producto (desde cache)
 function sgPresDe(prodId){ return SG.cachePres.filter(function(p){ return String(p.producto_id)===String(prodId); }); }
 function sgFactor(presId){ var p = SG.cachePres.find(function(x){ return String(x.id)===String(presId); }); return p ? Number(p.factor_conversion) : 1; }
@@ -17167,6 +17275,9 @@ function sgVenSub(s){
   document.querySelectorAll('.sg-mod .sgv-sub').forEach(function(el){ el.classList.toggle('on', el.id==='sgv-sub-'+s); });
   if (s==='despachos') sgLoadDespachos();
   else if (s==='directa') sgFdInit();
+  // Facturarle a una cadena es facturar remitos ya entregados, no vender en el
+  // mostrador: es su propia puerta (Pablo, 31/8/2026).
+  else if (s==='supermercados') sgSuperInit();
   // Pedidos y Facturar se fueron a Administración de Ventas. Salidas quedó con
   // lo que efectivamente SALE: el remito, y la venta que se factura en el acto.
   else if (s==='pedidos'){ SG.venSub='despachos'; cmAbrirModulo('sg-pedidos'); }
@@ -19246,28 +19357,100 @@ function sgPendLoad(){
     // FACTURAR Y RECIBIR UNA LIQUIDACIÓN SON OPERAR. No se le ofrece el botón al
     // que va a comer un 403: el que lo aprieta cree que rompió algo. Misma regla
     // que usa Comprobantes emitidos para el botón de mandar por mail.
-    var puedeDoc = lnbPuedeOperar('sg-remitos-pend') || lnbPuedeOperar('sg-ventas');
-    var body=ds.map(function(d){
-      var vendido=(d.items||[]).map(function(it){ return (it.en_viaje?'🚚 ':'')+esc(it.producto||'—')+' '+nr(it.kg_pendiente)+'kg'; }).join(', ');
-      var estB= d.estado_facturacion==='parcial' ? '<span class="bdg bpe">🟡 parcial</span>' : '<span class="bdg ber">🔴 pendiente</span>';
-      return '<tr><td><b>'+esc(d.numero||('Desp '+d.despacho_id))+'</b></td><td>'+esc(d.fecha||'—')+'</td>'
-        +'<td>'+esc(d.alias||'—')+'</td><td>'+esc(d.razon_social||'—')+'</td>'
-        +'<td>'+vendido+'</td><td style="text-align:right">'+sgMoney(d.total_pendiente)+'</td>'
-        +'<td>'+estB+'</td>'
-        +'<td style="text-align:center;white-space:nowrap">'
-        +(!puedeDoc ? '<span style="color:var(--mut);font-size:11.5px">sin permiso para documentar</span>' : ''
-        +'<button class="btn bb bs" onclick="sgFacPrecargar('+d.cliente_id+','+d.despacho_id+',\''+esc(d.numero||'')+'\')" title="Emitir nuestro comprobante por este remito">Facturar</button>'
-        // LAS DOS FORMAS DE DOCUMENTAR EL MISMO REMITO. Pablo: "necesitamos poder
-        // facturar un remito o recibir una liquidación". No son alternativas del
-        // mismo botón: son dos comprobantes distintos --uno lo emitimos nosotros,
-        // el otro nos lo manda el cliente-- y los dos consumen los kilos del remito.
-        +' <button class="btn bo bs" onclick="sgLiqRecAbrir('+d.cliente_id+','+d.despacho_id+',\''+esc(d.numero||'')+'\')" title="Cargar la liquidaci\u00f3n que nos mand\u00f3 el cliente por este remito">\uD83D\uDCE5 Recibir liquidaci\u00f3n</button>')
-        +'</td></tr>';
-    }).join('');
-    eid('sgpe-tabla').innerHTML='<table class="pa-tbl"><thead><tr>'
-      +'<th>N° despacho</th><th>Fecha</th><th>Alias</th><th>Cliente</th><th>Qué se vendió</th>'
-      +'<th style="text-align:right">Total</th><th>Estado</th><th style="text-align:center"></th>'
-      +'</tr></thead><tbody>'+body+'</tbody></table>';
+    eid('sgpe-tabla').innerHTML = sgPendTablaHTML(ds);
+  });
+}
+// ── LA TABLA DE LO QUE FALTA FACTURAR, UNA SOLA VEZ ─────────────────────
+//
+// La usan las dos pantallas que hacen la misma pregunta: «Remitos pendientes de
+// comprobante», que mira a todos los clientes, y la solapa «Facturación
+// Supermercados», que mira sólo a las cadenas. Muestran lo mismo —el remito, qué
+// salió, cuánto falta facturar y las dos formas de documentarlo—, así que es una
+// sola función: dos copias son dos lugares donde arreglar el permiso, y uno de los
+// dos se olvida.
+function sgPendTablaHTML(ds){
+  // FACTURAR Y RECIBIR UNA LIQUIDACIÓN SON OPERAR. No se le ofrece el botón al
+  // que va a comer un 403: el que lo aprieta cree que rompió algo. Misma regla
+  // que usa Comprobantes emitidos para el botón de mandar por mail.
+  var puedeDoc = lnbPuedeOperar('sg-remitos-pend') || lnbPuedeOperar('sg-ventas');
+  var body=(ds||[]).map(function(d){
+    var vendido=(d.items||[]).map(function(it){ return (it.en_viaje?'🚚 ':'')+esc(it.producto||'—')+' '+nr(it.kg_pendiente)+'kg'; }).join(', ');
+    var estB= d.estado_facturacion==='parcial' ? '<span class="bdg bpe">🟡 parcial</span>' : '<span class="bdg ber">🔴 pendiente</span>';
+    return '<tr><td><b>'+esc(d.numero||('Desp '+d.despacho_id))+'</b></td><td>'+esc(d.fecha||'—')+'</td>'
+      +'<td>'+esc(d.alias||'—')+'</td><td>'+esc(d.razon_social||'—')+'</td>'
+      // La clase deja que ESTA celda —la única de largo variable— parta en varias
+      // líneas donde la tabla es de ancho fijo; el resto se trunca con puntos
+      // suspensivos y nada se desplaza de costado.
+      +'<td class="sgsu-que">'+vendido+'</td><td style="text-align:right">'+sgMoney(d.total_pendiente)+'</td>'
+      +'<td>'+estB+'</td>'
+      +'<td style="text-align:center;white-space:nowrap">'
+      +(!puedeDoc ? '<span style="color:var(--mut);font-size:11.5px">sin permiso para documentar</span>' : ''
+      +'<button class="btn bb bs" onclick="sgFacPrecargar('+d.cliente_id+','+d.despacho_id+',\''+esc(d.numero||'')+'\')" title="Emitir nuestro comprobante por este remito">Facturar</button>'
+      // LAS DOS FORMAS DE DOCUMENTAR EL MISMO REMITO. Pablo: "necesitamos poder
+      // facturar un remito o recibir una liquidación". No son alternativas del
+      // mismo botón: son dos comprobantes distintos --uno lo emitimos nosotros,
+      // el otro nos lo manda el cliente-- y los dos consumen los kilos del remito.
+      +' <button class="btn bo bs" onclick="sgLiqRecAbrir('+d.cliente_id+','+d.despacho_id+',\''+esc(d.numero||'')+'\')" title="Cargar la liquidaci\u00f3n que nos mand\u00f3 el cliente por este remito">\uD83D\uDCE5 Recibir liquidaci\u00f3n</button>')
+      +'</td></tr>';
+  }).join('');
+  return '<table class="pa-tbl"><thead><tr>'
+    +'<th>N° despacho</th><th>Fecha</th><th>Alias</th><th>Cliente</th><th>Qué se vendió</th>'
+    +'<th style="text-align:right">Total</th><th>Estado</th><th style="text-align:center"></th>'
+    +'</tr></thead><tbody>'+body+'</tbody></table>';
+}
+
+// ══ 🏪 FACTURACIÓN A SUPERMERCADOS ══════════════════════════════════════
+//
+// A una cadena no se le factura en el mostrador: la mercadería sale con remito, la
+// recibe la sucursal y la factura se emite después, muchas veces por varios remitos
+// juntos. Eso ya se podía hacer desde «Remitos pendientes de comprobante», pero ahí
+// están TODOS los clientes y había que encontrar al súper entre los demás.
+//
+// El botón abre el MISMO editor de factura, que ya sabe tildar varios remitos del
+// mismo cliente y emitir un solo comprobante. No hay un segundo circuito.
+// El buscador único, con el padrón recortado a las cadenas. Es el MISMO control que
+// usan las otras pantallas (sgCliUnico): un solo campo donde se escribe y se elige,
+// en vez del par «campo de texto arriba, desplegable abajo» que obligaba a hacer dos
+// pasos para un dato.
+function sgCadenaUnico(selectId){
+  return sgBuscador(selectId, {
+    fuente: function(){ return (SG.cacheCli || []).filter(sgEsCadena); },
+    etiqueta: sgCliLabel,
+    // Se busca por alias, razón social y CUIT: uno busca por lo que tiene a mano.
+    campos: function(c){ return [c.nombre_comercial, c.razon_social, c.cuit]; },
+    opciones: function(q, sel, blank){ return sgCliOpts(q, sel, blank || '— Todas las cadenas —', sgEsCadena); },
+    placeholder: '\uD83D\uDD0E Escribí la cadena…',
+  });
+}
+function sgSuperInit(){
+  var sel=eid('sgsu-cli'); if(!sel) return;
+  // SE CONSERVA LO ELEGIDO. Volver a la solapa no es empezar de nuevo, y rearmar el
+  // desplegable en blanco lo dejaba diciendo «todas» mientras el campo de texto
+  // seguía mostrando la cadena que se había elegido: la pantalla se contradecía a sí
+  // misma y la lista de abajo no coincidía con ninguno de los dos.
+  sel.innerHTML=sgCliOpts('', sel.value, '— Todas las cadenas —', sgEsCadena);
+  sgCadenaUnico('sgsu-cli');
+  sgSuperLoad();
+}
+function sgSuperLoad(){
+  var cont=eid('sgsu-tabla'); if(!cont) return;
+  cont.innerHTML='<div style="font-size:12px;color:var(--mut)">Cargando…</div>';
+  // solo_cadenas=1: el recorte lo hace el servidor. Traer la lista entera para
+  // esconder la mayoría es mandar plata de otros clientes a una pantalla que no la
+  // pidió.
+  var qs=['solo_cadenas=1'];
+  var c=eid('sgsu-cli').value;   if(c) qs.push('cliente_id='+encodeURIComponent(c));
+  var d=eid('sgsu-desde').value; if(d) qs.push('desde='+encodeURIComponent(d));
+  var h=eid('sgsu-hasta').value; if(h) qs.push('hasta='+encodeURIComponent(h));
+  api('/api/sg/despachos-pendientes?'+qs.join('&')).then(function(r){
+    if(!r||!r.ok){ cont.innerHTML='<div style="color:var(--err)">'+esc((r&&r.error)||'Error')+'</div>'; return; }
+    var ds=r.despachos||[];
+    if(!ds.length){
+      cont.innerHTML='<div style="font-size:12px;color:var(--mut)">'
+        +'No hay remitos a cadenas pendientes de facturar.</div>';
+      return;
+    }
+    cont.innerHTML = sgPendTablaHTML(ds);
   });
 }
 // "Facturar" → ir a la sub-tab 🧾 Facturar con cliente + despacho precargados.

@@ -97,16 +97,18 @@ registrar({
 // ── 5 · SALIDAS ────────────────────────────────────────────────────────────
 registrar({
   clave: 'sg-salidas', orden: 50,
-  pantalla: 'Salidas (remitos y facturación directa)',
+  pantalla: 'Remitos y Facturación (emisión de remitos, puesto y supermercados)',
   requiere: ['sg-comprobantes-emitidos', 'sg-remitos-pendientes', 'sg-gastos-directos'],
-  // Facturación directa no es otra tabla: por dentro llama al mismo circuito del remito,
-  // así que deja fila acá igual que un remito a mano.
+  // Ni Facturación Puesto ni Facturación Supermercados son otra tabla: la primera
+  // llama por dentro al mismo circuito del remito, y la segunda es la lista de
+  // remitos ya emitidos que todavía no se facturaron. Las tres puertas dejan fila
+  // en las mismas dos tablas.
   aviso: 'BORRAR UN REMITO NO DEVUELVE LA MERCADERÍA AL STOCK: el remito descontó del piso '
     + 'cuando salió, y borrarlo no lo repone. Si se borra esto sin borrar Stock, esas '
     + 'partidas quedan descontadas para siempre. Los dos módulos van juntos.',
   tablas: [
     { tabla: 'sg_despacho_items', que_es: 'los renglones del remito' },
-    { tabla: 'sg_despachos', que_es: 'los remitos y las salidas de facturación directa' },
+    { tabla: 'sg_despachos', que_es: 'los remitos y las salidas de Facturación Puesto' },
   ],
   no_se_tocan: ['sg_clientes', 'sg_productos'],
 });
