@@ -1236,6 +1236,26 @@ router.get('/facturable', requireAuth, (req, res) => {
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
+// ── QUIÉN ES UNA CADENA ───────────────────────────────────────────────────
+//
+// Pablo, 31/8/2026: la pantalla de Salidas queda con tres puertas —emitir el
+// remito, facturar en el puesto y facturar a las cadenas— y la tercera tiene que
+// mostrar SOLO los remitos de supermercado.
+//
+// Hay DOS lugares donde un cliente puede decir que es una cadena, y los dos son
+// ciertos: el campo `tipo` ('supermercado'), que se tilda a mano en la ficha, y la
+// categoría comercial 'Retail', que viene cargada desde el padrón de ABASTO. Si se
+// mirara uno solo, media cartera quedaría afuera de la pantalla sin que nadie se
+// entere: los importados no tienen `tipo`, y los cargados a mano no tienen
+// categoría.
+//
+// UNA SOLA REGLA, y vive acá: el front la usa para llenar su selector de clientes
+// y el backend para filtrar la lista. Dos definiciones de "cadena" serían una
+// pantalla que ofrece un cliente que después no trae ningún remito.
+const SQL_ES_CADENA = `(c.tipo='supermercado'
+  OR EXISTS (SELECT 1 FROM sg_cliente_categorias cc
+             WHERE cc.id = c.categoria_id AND cc.nombre = 'Retail'))`;
+
 // GET /despachos-pendientes → MISMA lógica de kg_pendiente que /facturable pero para TODOS los
 // clientes (listado "Pendientes de comprobante"). Filtros opcionales: cliente_id, desde, hasta
 // (fecha_despacho). Devuelve por despacho: alias/cliente, qué se vendió (producto + kg pend),
@@ -1245,6 +1265,10 @@ router.get('/despachos-pendientes', requireAuth, (req, res) => {
   try {
     const where = ['d.activo=1', "d.estado<>'rechazado_total'"], params = [];
     if (req.query.cliente_id) { where.push('d.cliente_id=?'); params.push(Number(req.query.cliente_id)); }
+    // La solapa de cadenas pide su recorte acá y no en el navegador: mandarle la
+    // lista entera para que esconda la mayoría es mandar plata de otros clientes
+    // a una pantalla que no la pidió.
+    if (req.query.solo_cadenas === '1') { where.push(SQL_ES_CADENA); }
     if (req.query.desde)      { where.push('d.fecha_despacho>=?'); params.push(String(req.query.desde)); }
     if (req.query.hasta)      { where.push('d.fecha_despacho<=?'); params.push(String(req.query.hasta)); }
     const rows = db.prepare(`
@@ -1517,7 +1541,7 @@ router.post('/facturas/directa', requireAuth, async (req, res) => {
     transporte: b.transporte || null, chofer: b.chofer || null, dominio: b.dominio || null,
     fletero_id: b.fletero_id || null,
     cooperativa_id: b.cooperativa_id || null, cooperativa_bultos: b.cooperativa_bultos,
-    observaciones: b.observaciones || 'Facturación directa',
+    observaciones: b.observaciones || 'Facturación Puesto',
     items: items.map((it) => ({ origen: 'lote', lote_id: it.lote_id, bultos: it.bultos,
       kg_despachados: it.kg_despachados, precio_por_kg: it.precio_por_kg,
       // EL PRECIO DE LISTA VIAJA HASTA LA LÍNEA. Acá se caía: lo resignado llegaba
