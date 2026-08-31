@@ -1178,11 +1178,17 @@ router.get('/facturable', requireAuth, (req, res) => {
         -- viejas que la migración no pudo llenar (familia sin alícuota cargada).
         COALESCE(pr.iva_alicuota, fam.iva_alicuota) AS iva_alicuota,
         di.lote_id, l.codigo_lote, di.kg_despachados, di.precio_por_kg,
+        -- ── CÓMO SE PACTÓ ESTE RENGLÓN ────────────────────────────────────
+        -- Pablo, 31/8/2026: «si el remito se pactó en bultos, la liquidación debe
+        -- pactarse en bultos también». Sin esto, la liquidación que llega después
+        -- vuelve a pedir kilos sobre un trato que se habló en cajones.
+        di.modo_precio, di.bultos, COALESCE(di.kg_por_bulto, ps.factor_conversion) AS kg_por_bulto,
         di.origen, di.oc_item_id, di.nota_precio, di.lote_recibido_id, oc.numero AS oc_numero
       FROM sg_despachos d
       JOIN sg_despacho_items di ON di.despacho_id=d.id
       LEFT JOIN sg_productos pr ON pr.id=di.producto_id
       LEFT JOIN sg_familias fam ON fam.id=pr.familia_id
+      LEFT JOIN sg_presentaciones ps ON ps.id=di.presentacion_id
       LEFT JOIN sg_lotes l ON l.id=di.lote_id
       LEFT JOIN sg_oc_items oi ON oi.id=di.oc_item_id
       LEFT JOIN sg_oc oc ON oc.id=oi.oc_id
@@ -1201,6 +1207,13 @@ router.get('/facturable', requireAuth, (req, res) => {
           despacho_item_id: r.despacho_item_id, producto_id: r.producto_id, producto: r.producto_nombre || '',
           lote_id: r.lote_id, lote: r.codigo_lote || '', kg_despachado: kgDesp, kg_facturado: +kgFact.toFixed(2),
           kg_pendiente: kgPend, precio_por_kg: Number(r.precio_por_kg) || 0,
+          // La unidad en que se pactó y con qué convertir. El factor sale del
+          // renglón y, si no lo tiene, se despeja de sus propios kilos y cajones:
+          // un remito viejo no deja de poder liquidarse en cajones por eso.
+          modo_precio: r.modo_precio === 'bulto' ? 'bulto' : 'kilo',
+          bultos: Number(r.bultos) || 0,
+          kg_por_bulto: Number(r.kg_por_bulto)
+            || ((Number(r.bultos) > 0 && kgDesp > 0) ? +(kgDesp / Number(r.bultos)).toFixed(4) : 0),
           // LO QUE DIJO EL QUE HIZO EL REMITO. El precio es una SUGERENCIA suya,
           // y la razón de ese precio vivía en un chat de WhatsApp: el que
           // factura no la tenía y llamaba a preguntar.
@@ -9499,8 +9512,8 @@ const postRemito = (req, res) => {
       const ins = db.prepare(`INSERT INTO sg_despacho_items
         (despacho_id, origen, lote_id, oc_item_id, producto_id, presentacion_id, envase_id, kg_por_bulto,
          cantidad_presentaciones, bultos, kg_despachados, precio_por_kg, precio_lista_por_kg,
-         nota_precio, subtotal, margen_estimado, piso_id)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`);
+         nota_precio, subtotal, margen_estimado, piso_id, modo_precio)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`);
       const lotesAfectados = new Set();
       let totalBultos = 0;   // FASE 2 — bultos del despacho (para la carga de la cooperativa)
       for (const ln of lineas) {
@@ -9551,7 +9564,10 @@ const postRemito = (req, res) => {
           (ln.envaseId != null ? ln.envaseId : null), (ln.kgPorBulto != null ? ln.kgPorBulto : null),
           bultos, bultos, kg, precio, pLista,
           (String(it.nota_precio || '').trim() || null), subtotal, margen,
-          ln.origen === 'lote' ? pisoLinea : null);
+          ln.origen === 'lote' ? pisoLinea : null,
+          // CÓMO SE PACTÓ. El precio se guarda por kilo igual; esto es para que la
+          // liquidación que llegue después hable en la misma unidad que el trato.
+          (it.modo_precio === 'bulto') ? 'bulto' : 'kilo');
         if (ln.origen === 'lote') {
           // SACAR DEL PISO DE OTRO TAMPOCO. Si sólo se controlara recibir, se
           // podría vaciar el piso ajeno armando un remito. Cuando la línea no
@@ -9648,7 +9664,10 @@ router.put('/despachos/:id/precios', requireAuth, express.json(), (req, res) => 
     const items = db.prepare('SELECT * FROM sg_despacho_items WHERE despacho_id=?').all(d.id);
     const porId = new Map(items.map((i) => [Number(i.id), i]));
     const pedidos = (Array.isArray(req.body.items) ? req.body.items : [])
-      .map((x) => ({ id: Number(x.item_id), precio: Number(x.precio_por_kg) }))
+      .map((x) => ({ id: Number(x.item_id), precio: Number(x.precio_por_kg),
+        // Y EN QUÉ UNIDAD SE ACORDÓ. Si se corrige por cajón, el remito queda
+        // diciendo que se pactó por cajón: es lo que después mira la liquidación.
+        modo: (x.modo_precio === 'bulto') ? 'bulto' : 'kilo' }))
       .filter((x) => x.id > 0 && Number.isFinite(x.precio) && x.precio >= 0);
     if (!pedidos.length) return res.status(400).json({ ok: false, error: 'No mandaste ningún precio.' });
     for (const p of pedidos) {
@@ -9661,6 +9680,14 @@ router.put('/despachos/:id/precios', requireAuth, express.json(), (req, res) => 
     db.transaction(() => {
       for (const p of pedidos) {
         const it = porId.get(p.id);
+        // ── LA UNIDAD SE GUARDA AUNQUE EL PRECIO NO CAMBIE ────────────────
+        //
+        // Corregir un renglón y pasar los otros a cajones es una sola cosa para el
+        // que lo hace. Si esto colgara del `continue` de abajo, los renglones que
+        // quedaron en el mismo número se guardarían en la unidad vieja y el mismo
+        // remito terminaría con dos unidades: la liquidación pediría cajones para
+        // unas líneas y kilos para otras.
+        db.prepare('UPDATE sg_despacho_items SET modo_precio=? WHERE id=?').run(p.modo, p.id);
         const antes = Number(it.precio_por_kg) || 0;
         if (Math.abs(antes - p.precio) < 0.000001) continue;
         const kg = Number(it.kg_despachados) || 0;

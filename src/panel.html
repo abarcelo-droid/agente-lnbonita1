@@ -18972,8 +18972,20 @@ function sgLiqRecAbrir(clienteId, despachoId, numero){
       return;
     }
     SGLR.items = d.items.map(function(it){
+      // ── LA UNIDAD LA MANDA EL REMITO ──────────────────────────────────
+      //
+      // Pablo, 31/8/2026: «si el remito se pactó en bultos, la liquidación debe
+      // pactarse en bultos también». El trato se habló en cajones; volver a pedir
+      // kilos acá obliga a rehacer la cuenta a mano contra el papel del cliente,
+      // que también viene en cajones.
+      //
+      // Sin factor no hay conversión posible y ese renglón se queda en kilos: es
+      // mejor un renglón que dice su unidad que uno que miente.
+      var kpb = Number(it.kg_por_bulto) || 0;
+      var porBulto = (it.modo_precio === 'bulto') && kpb > 0;
       return { despacho_item_id: it.despacho_item_id, producto: it.producto, lote: it.lote,
         kg_pendiente: it.kg_pendiente, kg: it.kg_pendiente,
+        por_bulto: porBulto, kpb: kpb,
         precio: it.precio_por_kg != null ? it.precio_por_kg : 0,
         // EL PRECIO DEL REMITO ES LO QUE SE ACORDÓ. El del papel del cliente es lo
         // que declara, y se tipea encima. Guardar el original es lo único que
@@ -18984,30 +18996,58 @@ function sgLiqRecAbrir(clienteId, despachoId, numero){
   });
 }
 
+// Lo que se MUESTRA de cada renglón, en la unidad en que se pactó el remito. Lo que
+// se GUARDA es siempre kilos y $/kg: es la unidad de la venta, del margen y del
+// vínculo con el remito.
+function sgLiqRecVista(it, campo){
+  var v = Number(it[campo]) || 0;
+  if (!it.por_bulto || !(it.kpb > 0) || !(v > 0)) return v;
+  return campo === 'kg'
+    ? Math.round((v / it.kpb) * 100) / 100          // kilos → cajones
+    : Math.round(v * it.kpb * 100) / 100;           // $/kg  → $/cajón
+}
 function sgLiqRecPintar(){
   var c = eid('sg-liqrec-items'); if (!c) return;
+  // El encabezado dice la unidad del remito: si alguno se pactó por cajón, la
+  // columna se rotula así y el que carga no tiene que adivinar contra qué comparar.
+  var hayB = SGLR.items.some(function(x){ return x.por_bulto; });
   c.innerHTML = '<div style="display:grid;grid-template-columns:1.6fr 1fr 0.9fr 0.9fr 1fr;gap:6px;'
     + 'font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:var(--mut);'
-    + 'padding:0 2px 4px"><div>Producto</div><div>Lote</div><div style="text-align:right">kg pend.</div>'
-    + '<div style="text-align:right">kg liquidados</div><div style="text-align:right">$/kg</div></div>'
+    + 'padding:0 2px 4px"><div>Producto</div><div>Lote</div>'
+    + '<div style="text-align:right">' + (hayB ? 'pend.' : 'kg pend.') + '</div>'
+    + '<div style="text-align:right">' + (hayB ? 'liquidado' : 'kg liquidados') + '</div>'
+    + '<div style="text-align:right">' + (hayB ? 'precio' : '$/kg') + '</div></div>'
     + SGLR.items.map(function(it, i){
+        var u = it.por_bulto ? 'bulto' : 'kg';
         return '<div style="display:grid;grid-template-columns:1.6fr 1fr 0.9fr 0.9fr 1fr;gap:6px;'
           + 'align-items:center;margin-bottom:5px;font-size:12.5px">'
-          + '<div>' + escH(it.producto || '\u2014') + '</div>'
+          + '<div>' + escH(it.producto || '\u2014')
+            + (it.por_bulto ? '<div style="font-size:10.5px;color:var(--mut)">se pactó por bulto · '
+                + 'cajones de ' + nr(it.kpb) + ' kg</div>' : '') + '</div>'
           + '<div style="color:var(--mut)">' + escH(it.lote || '\u2014') + '</div>'
-          + '<div style="text-align:right;color:var(--mut)">' + nr(it.kg_pendiente) + '</div>'
+          + '<div style="text-align:right;color:var(--mut)">'
+            + nr(sgLiqRecVista(it, 'kg_pendiente')) + ' ' + u + '</div>'
           // min-width:0 o el input congela su pista de la grilla en su ancho
           // intrínseco —unos 160px— y el renglón se desalinea contra su encabezado,
           // que es otra grilla con las mismas fracciones pero sin inputs.
-          + '<input type="number" step="0.01" min="0" value="' + it.kg + '" style="text-align:right;min-width:0"'
+          + '<input type="number" step="0.01" min="0" value="' + sgLiqRecVista(it, 'kg') + '" style="text-align:right;min-width:0"'
           + ' oninput="sgLiqRecUpd(' + i + ',\'kg\',this.value)">'
-          + '<input type="number" step="0.01" min="0" value="' + it.precio + '" style="text-align:right;min-width:0"'
+          + '<input type="number" step="0.01" min="0" value="' + sgLiqRecVista(it, 'precio') + '" style="text-align:right;min-width:0"'
           + ' oninput="sgLiqRecUpd(' + i + ',\'precio\',this.value)">'
           + '</div>';
       }).join('');
   sgLiqRecTotales();
 }
-function sgLiqRecUpd(i, campo, v){ SGLR.items[i][campo] = Number(v) || 0; sgLiqRecTotales(); }
+// Y al escribir se vuelve a kilos, que es como se guarda y como se ata al remito.
+function sgLiqRecUpd(i, campo, v){
+  var it = SGLR.items[i]; if (!it) return;
+  var n = Number(v) || 0;
+  it[campo] = (it.por_bulto && it.kpb > 0 && n > 0)
+    ? (campo === 'kg' ? Math.round(n * it.kpb * 10000) / 10000
+                      : Math.round((n / it.kpb) * 1000000) / 1000000)
+    : n;
+  sgLiqRecTotales();
+}
 
 function sgLiqRecDatos(){
   var v = function(id){ return Number((eid(id)||{}).value) || 0; };
@@ -19956,7 +19996,11 @@ function sgDespGuardar(){
       lote_id:it.lote_id?Number(it.lote_id):null,
       oc_item_id:it.oc_item_id?Number(it.oc_item_id):null,
       bultos:b, kg_despachados:Number(it.kg),
-      precio_por_kg:Number(it.precio||0), nota_precio:it.nota||'' });
+      precio_por_kg:Number(it.precio||0), nota_precio:it.nota||'',
+      // CÓMO SE PACTÓ ESTE RENGLÓN. El precio viaja por kilo igual; esto es para
+      // que la liquidación que llegue después hable en la misma unidad que el trato
+      // (Pablo, 31/8/2026).
+      modo_precio: sgDespPorBulto(it) ? 'bulto' : 'kilo' });
   }
   if(!items.length){ toast('Cargá al menos una línea con cajones','er'); return; }
   var body={ cliente_id:Number(cli), pedido_id:eid('sg-desp-ped').value?Number(eid('sg-desp-ped').value):null,
@@ -21055,8 +21099,13 @@ function sgDespEdKpb(i){
   return (b > 0 && kg > 0) ? +(kg / b).toFixed(4) : 0;
 }
 function sgDespEdPorBulto(i){ return SG_DPED_UNI === 'bulto' && sgDespEdKpb(i) > 0; }
+// El remito de quien eligió la unidad a mano. Mientras se esté mirando ESE, la
+// elección manda sobre lo guardado —si no, el repintado se la pisaría—; al abrir
+// otro remito vuelve a mandar el trato de ese otro.
+var SG_DPED_UNI_MANUAL = 0;
 function sgDespEdUniCambio(v){
   SG_DPED_UNI = (v === 'bulto') ? 'bulto' : 'kg';
+  SG_DPED_UNI_MANUAL = SG.despEd ? Number(SG.despEd.id) : 0;
   // Se repinta la ficha entera: es la que dibuja la tabla con los precios.
   if (SG.despEd) sgDespVer(SG.despEd.id);
 }
@@ -21096,7 +21145,9 @@ function sgDespEdGuardar(){
   if (motivo.length < 3) { toast('Escribí por qué cambia el precio', 'er'); return; }
   api('/api/sg/despachos/' + SG.despEd.id + '/precios', 'PUT', {
     motivo: motivo,
-    items: SG.despEd.items.map(function(x){ return { item_id: x.id, precio_por_kg: x.precio }; })
+    items: SG.despEd.items.map(function(x, i){
+      return { item_id: x.id, precio_por_kg: x.precio,
+        modo_precio: sgDespEdPorBulto(i) ? 'bulto' : 'kilo' }; })
   }).then(function(r){
     if (!r || !r.ok) { alert((r && r.error) || 'No se pudo cambiar el precio'); return; }
     var n = (r.data && r.data.cambiados) || 0;
@@ -21111,6 +21162,18 @@ function sgDespVer(id){
     var r=res[0]; if(!r||!r.ok) return; var d=r.data;
     var tz=(res[1]&&res[1].ok)?res[1].data:null;
     SG.despVerItems = d.items || [];   // los kilos, para rehacer el subtotal al escribir
+    // ── LA FICHA ABRE EN LA UNIDAD EN QUE SE PACTÓ ──────────────────────
+    //
+    // Pablo, 31/8/2026: «si el remito se pactó en bultos, la liquidación debe
+    // pactarse en bultos también» — y la corrección del remito, antes que ella.
+    //
+    // Sin esto la ficha abría siempre en kilos, y guardar un cambio de precio
+    // dejaba todo el remito marcado como pactado por kilo aunque se hubiera
+    // hablado en cajones: el trato se perdía sin que nadie lo tocara.
+    if (SG_DPED_UNI_MANUAL !== Number(id)) {
+      SG_DPED_UNI = (d.items || []).some(function(x){ return x.modo_precio === 'bulto'; })
+        ? 'bulto' : 'kg';
+    }
     eid('sg-venver-tit').textContent='Despacho '+(d.numero||'');
     var h='<div style="font-size:13px;margin-bottom:10px">Cliente: <b>'+esc(d.cliente_nombre||'—')+'</b> · '+(SG_ESTDESP[d.estado]||d.estado)+(d.pedido_numero?(' · pedido '+esc(d.pedido_numero)):'')+(d.transporte?(' · '+d.transporte):'')+'</div>';
     // PARTE D + FASE 2 — fletero + flete de salida + carga de cooperativa + margen neto.

@@ -1965,6 +1965,18 @@ try {
   if (addCol('sg_gastos_directos', 'archivo_nombre',  'TEXT'))    added.push('sg_gastos_directos.archivo_nombre');
   if (addCol('sg_gastos_directos', 'archivo_mime',    'TEXT'))    added.push('sg_gastos_directos.archivo_mime');
   if (addCol('sg_gastos_directos', 'archivo_bytes',   'INTEGER')) added.push('sg_gastos_directos.archivo_bytes');
+  // ── CÓMO SE PACTÓ EL PRECIO DEL REMITO ────────────────────────────────────
+  //
+  // Pablo, 31/8/2026: «si el remito se pactó en bultos, la liquidación debe pactarse
+  // en bultos también».
+  //
+  // El precio se GUARDA por kilo —es la unidad con la que corren el subtotal, el
+  // margen y la factura— pero se acuerda por cajón tanto como por kilo. Sin dejar
+  // asentado en cuál, la liquidación que llega después no tiene cómo saberlo y
+  // vuelve a pedir kilos sobre un trato que se habló en cajones.
+  //
+  // NULL = kilo, que es como se pactó todo lo que ya existe.
+  if (addCol('sg_despacho_items',   'modo_precio',          'TEXT')) added.push('sg_despacho_items.modo_precio');
   if (addCol('sg_lote_decomisos',   'bultos',               'INTEGER')) added.push('sg_lote_decomisos.bultos');
   if (addCol('sg_transformaciones', 'bultos_transformados', 'INTEGER')) added.push('sg_transformaciones.bultos_transformados');
   if (addCol('sg_reprocesos',       'bultos_procesados',    'INTEGER')) added.push('sg_reprocesos.bultos_procesados');
