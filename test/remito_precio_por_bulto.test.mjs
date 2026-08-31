@@ -103,7 +103,7 @@ test('lo tipeado al modificar también vuelve a kilo', () => {
 test('y al servidor sigue viajando $/kg en las dos pantallas', () => {
   // Es la unidad con la que corren el subtotal, el margen y la factura.
   assert.match(PANEL, /precio_por_kg:Number\(it\.precio\|\|0\), nota_precio:it\.nota\|\|''/);
-  assert.match(PANEL, /items: SG\.despEd\.items\.map\(function\(x\)\{ return \{ item_id: x\.id, precio_por_kg: x\.precio \}; \}\)/);
+  assert.match(PANEL, /return \{ item_id: x\.id, precio_por_kg: x\.precio,/);
 });
 
 test('la otra unidad queda SIEMPRE a la vista', () => {
@@ -132,4 +132,89 @@ test('y la clave está en la lista que llena los selectores', () => {
   const i = PANEL.indexOf("'cheques_rechazados',", PANEL.indexOf("'percepcion_ganancias','retencion','ventas','cheques_cartera'"));
   assert.ok(i > 0);
   assert.match(PANEL.slice(i, i + 500), /'liq_recibida_gastos',/);
+});
+
+// ── 4 · Y LA LIQUIDACIÓN HABLA EN LA UNIDAD DEL REMITO ─────────────────────
+
+test('el remito recuerda cómo se pactó', () => {
+  // Pablo, 31/8/2026: «si el remito se pactó en bultos, la liquidación debe pactarse
+  // en bultos también». El precio se guarda por kilo igual; esto es para que la
+  // liquidación que llegue después hable en la misma unidad que el trato.
+  const DB = fs.readFileSync(path.join(RAIZ, 'src/servicios/db_sg.js'), 'utf8');
+  assert.match(DB, /addCol\('sg_despacho_items',\s+'modo_precio',\s+'TEXT'\)/);
+  const SG = fs.readFileSync(path.join(RAIZ, 'src/rutas/sg.js'), 'utf8');
+  assert.match(SG, /nota_precio, subtotal, margen_estimado, piso_id, modo_precio\)/);
+  assert.match(SG, /\(it\.modo_precio === 'bulto'\) \? 'bulto' : 'kilo'\);/);
+  // Y corregir el precio por cajón deja el remito diciendo que se pactó por cajón.
+  assert.match(SG, /db\.prepare\('UPDATE sg_despacho_items SET modo_precio=\? WHERE id=\?'\)\.run\(p\.modo, p\.id\)/);
+  assert.match(PANEL, /modo_precio: sgDespPorBulto\(it\) \? 'bulto' : 'kilo' \}\)/);
+  assert.match(PANEL, /modo_precio: sgDespEdPorBulto\(i\) \? 'bulto' : 'kilo' \}; \}\)/);
+});
+
+test('y la bandeja de pendientes lo manda, con el factor', () => {
+  const SG = fs.readFileSync(path.join(RAIZ, 'src/rutas/sg.js'), 'utf8');
+  const i = SG.indexOf("router.get('/facturable'");
+  const b = SG.slice(i, i + 4800);
+  assert.match(b, /di\.modo_precio, di\.bultos, COALESCE\(di\.kg_por_bulto, ps\.factor_conversion\) AS kg_por_bulto/);
+  assert.match(b, /modo_precio: r\.modo_precio === 'bulto' \? 'bulto' : 'kilo',/);
+  // Y si el renglón no trae factor, se despeja de sus propios kilos y cajones: un
+  // remito viejo no deja de poder liquidarse en cajones por eso.
+  assert.match(b, /\+\(kgDesp \/ Number\(r\.bultos\)\)\.toFixed\(4\)/);
+});
+
+test('la liquidación recibida muestra cajones cuando el remito se pactó así', () => {
+  const i = PANEL.indexOf('function sgLiqRecVista(it, campo){');
+  assert.ok(i > 0, 'la liquidación no convierte a la unidad del remito');
+  const b = PANEL.slice(i, i + 700);
+  assert.match(b, /Math\.round\(\(v \/ it\.kpb\) \* 100\) \/ 100/, 'kilos → cajones');
+  assert.match(b, /Math\.round\(v \* it\.kpb \* 100\) \/ 100/, '\$\/kg → \$\/cajón');
+  // Sin factor no hay conversión posible y el renglón se queda en kilos.
+  assert.match(b, /if \(!it\.por_bulto \|\| !\(it\.kpb > 0\) \|\| !\(v > 0\)\) return v;/);
+});
+
+test('y lo que se GUARDA sigue siendo kilos y $/kg', () => {
+  // Es la unidad de la venta, del margen y del vínculo con el remito.
+  const i = PANEL.indexOf('function sgLiqRecUpd(i, campo, v){');
+  const b = PANEL.slice(i, i + 700);
+  // La conversion cuelga de que el renglon sea por bulto Y tenga factor: colgarla
+  // de otra cosa la apaga y se guardan cajones donde el sistema espera kilos.
+  assert.match(b, /it\[campo\] = \(it\.por_bulto && it\.kpb > 0 && n > 0\)/);
+  assert.match(b, /campo === 'kg' \? Math\.round\(n \* it\.kpb \* 10000\) \/ 10000/);
+  assert.match(b, /Math\.round\(\(n \/ it\.kpb\) \* 1000000\) \/ 1000000/);
+});
+
+test('el encabezado dice la unidad, y el renglón el factor', () => {
+  // El que carga no tiene que adivinar contra qué comparar el papel del cliente.
+  const i = PANEL.indexOf('function sgLiqRecPintar(){');
+  const b = PANEL.slice(i, i + 2400);
+  assert.match(b, /var hayB = SGLR\.items\.some\(function\(x\)\{ return x\.por_bulto; \}\);/);
+  assert.match(b, /hayB \? 'pend\.' : 'kg pend\.'/);
+  assert.match(b, /se pactó por bulto · '/);
+});
+
+test('la ficha del remito ABRE en la unidad en que se pacto', () => {
+  // Sin esto abria siempre en kilos, y guardar un cambio de precio dejaba todo el
+  // remito marcado como pactado por kilo aunque se hubiera hablado en cajones: el
+  // trato se perdia sin que nadie lo tocara.
+  const i = PANEL.indexOf('function sgDespVer(id){');
+  const b = PANEL.slice(i, i + 1800);
+  assert.match(b, /if \(SG_DPED_UNI_MANUAL !== Number\(id\)\) \{/);
+  assert.match(b, /some\(function\(x\)\{ return x\.modo_precio === 'bulto'; \}\)/);
+  // Y si el que corrige la eligio a mano, esa gana — pero solo en ESE remito.
+  const j = PANEL.indexOf('function sgDespEdUniCambio(v){');
+  assert.match(PANEL.slice(j, j + 400),
+    /SG_DPED_UNI_MANUAL = SG\.despEd \? Number\(SG\.despEd\.id\) : 0;/);
+});
+
+test('y la unidad se guarda aunque el precio no cambie', () => {
+  // Corregir un renglon y pasar los otros a cajones es una sola cosa para el que lo
+  // hace. Colgado del `continue`, los renglones sin cambio se guardaban en la unidad
+  // vieja y el mismo remito terminaba con dos unidades.
+  const SG = fs.readFileSync(path.join(RAIZ, 'src/rutas/sg.js'), 'utf8');
+  const i = SG.indexOf("router.put('/despachos/:id/precios'");
+  const b = SG.slice(i, i + 5200);
+  const iModo = b.indexOf("UPDATE sg_despacho_items SET modo_precio=?");
+  const iCont = b.indexOf("if (Math.abs(antes - p.precio) < 0.000001) continue;");
+  assert.ok(iModo > 0 && iCont > 0);
+  assert.ok(iModo < iCont, 'la unidad se guarda ANTES del corte por precio igual');
 });

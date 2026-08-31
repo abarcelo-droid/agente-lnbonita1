@@ -183,7 +183,7 @@ test('el precio del REMITO es lo acordado, y se guarda aparte del que se tipea',
   // permite después decir cuánto se resignó y por qué.
   const i = PANEL.indexOf('SGLR.items = d.items.map(function(it){');
   assert.ok(i > 0);
-  const b = PANEL.slice(i, i + 900);
+  const b = PANEL.slice(i, i + 1800);
   assert.match(b, /precio_acordado: it\.precio_por_kg != null \? it\.precio_por_kg : 0/);
 });
 
