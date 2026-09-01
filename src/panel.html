@@ -3243,7 +3243,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
 
        Acá arriba, al nivel de todos los demás modales del proyecto, se abren desde
        donde sea. -->
-<div class="ab-modal-overlay" id="sg-liqrec-modal">
+<div class="ab-modal-overlay sg-mod" id="sg-liqrec-modal">
     <!-- width:96vw JUNTO al max-width, como todos los modales anchos del proyecto.
          .ab-modal declara width:560px: el max-width TOPEA pero no ensancha, así que
          sin esto el modal sale de 560px, la grilla de renglones se aplasta a unos
@@ -3360,7 +3360,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
       </div>
     </div>
   </div>
-<div class="ab-modal-overlay" id="sg-fac-modal">
+<div class="ab-modal-overlay sg-mod" id="sg-fac-modal">
     <div class="ab-modal" style="width:96vw;max-width:min(1100px,96vw)">
       <div class="mhd"><div class="mht" id="sg-fac-tit">🧾 Facturar el remito</div>
         <button class="mcl" onclick="closeMB('sg-fac-modal')">×</button></div>
@@ -18398,8 +18398,22 @@ function sgFdEmitir(){
   });
 }
 
+// Deja el cartel de confirmación como si el modal se abriera por primera vez: sin
+// texto, sin clase y sin el borde rojo que le pone el camino de rechazo (que se
+// escribe inline y tampoco se sacaba nunca).
+function sgFacConfirmLimpiar(){
+  var c = eid('sgf-confirm'); if (!c) return;
+  c.classList.remove('on');
+  c.innerHTML = '';
+  c.style.borderColor = '';
+}
 function sgFacInit(){
   SG.facData = null; SG.facSel = {}; SG.facLineas = [];
+  // ESCONDER NO ES BORRAR. El cartel del comprobante anterior —con su CAE y su
+  // botón «Ver comprobante»— se dejaba escrito y sólo se le sacaba la clase que lo
+  // mostraba. Con eso, cualquier día en que una regla de CSS deje de alcanzarlo,
+  // el modal abre mostrando la factura de otro cliente.
+  sgFacConfirmLimpiar();
   // La pregunta vuelve a estar sin contestar: si quedara elegida del comprobante
   // anterior, el próximo saldría con el vencimiento del otro cliente.
   SG._facPago = null; SG._facVenc = null; SG._facCondId = null;
@@ -18415,7 +18429,6 @@ function sgFacInit(){
   sgCliUnico('sgf-cli');
   eid('sgf-tipo-badge').innerHTML = '';
   eid('sgf-despachos').innerHTML = '<div style="font-size:12px;color:var(--mut)">Elegí un cliente para ver sus despachos facturables.</div>';
-  eid('sgf-confirm').classList.remove('on');
   sgFacRenderLineas();
 }
 
@@ -19334,8 +19347,21 @@ function sgLiqRecGuardar(){
     // pendientes-- y no hay ninguna pantalla que después la liste para volver a ella.
     toast('Liquidación ' + (r.numero || '') + ' registrada', 'ok');
     closeMB('sg-liqrec-modal');
-    sgPendLoad();
+    sgPendRefrescar();
   });
+}
+
+// ── DESPUÉS DE DOCUMENTAR, LA LISTA DE ATRÁS DEJA DE MOSTRARLO ───────────
+//
+// Si el remito recién facturado sigue en la lista, alguien lo factura de nuevo. Y
+// desde el 31/8/2026 son DOS listas que hacen la misma pregunta: la de todos los
+// clientes y la de las cadenas. Refrescar siempre la primera dejaba la segunda
+// mostrando un remito ya facturado —y encima disparaba un pedido de clientes que esa
+// pantalla no había pedido—. Se refresca la que está a la vista.
+function sgPendRefrescar(){
+  var pe = eid('sgpe-tabla'), su = eid('sgsu-tabla');
+  if (pe && pe.offsetParent !== null && typeof sgPendLoad === 'function') sgPendLoad();
+  if (su && su.offsetParent !== null && typeof sgSuperLoad === 'function') sgSuperLoad();
 }
 
 // ── 📋 Pendientes de comprobante (despachos con kg sin facturar) ──
@@ -19474,7 +19500,7 @@ function sgFacPrecargar(clienteId, despachoId, numero){
 function sgFacCliente(){
   var cid = eid('sgf-cli').value;
   SG.facSel = {}; SG.facLineas = []; SG.facData = null;
-  eid('sgf-confirm').classList.remove('on');
+  sgFacConfirmLimpiar();
   if (!cid){ eid('sgf-tipo-badge').innerHTML=''; eid('sgf-despachos').innerHTML='<div style="font-size:12px;color:var(--mut)">Elegí un cliente.</div>'; sgFacRenderLineas(); return; }
   eid('sgf-despachos').innerHTML = '<div style="font-size:12px;color:var(--mut)">Cargando…</div>';
   api('/api/sg/facturable?cliente_id='+cid).then(function(r){
@@ -19687,7 +19713,7 @@ function sgFacEmitir(){
       sgFacCliente();   // refresca /facturable PRIMERO (sgFacCliente oculta el confirm) y recién pintamos el panel
       // Y LA LISTA DE ATRÁS TAMBIÉN. El remito recién facturado tiene que
       // desaparecer de «pendientes»: si sigue ahí, alguien lo factura de nuevo.
-      if (typeof sgPendLoad === 'function' && eid('sgpe-tabla')) sgPendLoad();
+      sgPendRefrescar();
       var c=eid('sgf-confirm');
       c.innerHTML = '✓ <b>Comprobante '+(r.cbte_tipo===1?'A':(r.cbte_tipo===6?'B':r.cbte_tipo))+'</b> · N° '
         +String(r.pto_vta).padStart(4,'0')+'-'+String(r.cbte_nro).padStart(8,'0')
