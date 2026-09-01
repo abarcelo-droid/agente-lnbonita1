@@ -10,6 +10,9 @@ import { informeContable } from '../servicios/diagnostico_contable.js';
 // La lista de migraciones que fallaron al arrancar. Va al informe para que se
 // vean: si no, el error queda en la consola de Railway y nadie lo mira.
 import { fallasMigracion } from '../servicios/db_pa.js';
+// El mail de una persona es UNO SOLO: se edite en la ficha o en Usuarios, el otro
+// lado queda igual. El porqué está en el servicio.
+import { sincronizarMailAUsuario, esMailReal } from '../servicios/mail_persona.js';
 
 const router = express.Router();
 const db = () => getDb();
@@ -341,7 +344,23 @@ router.patch('/personas/:id', requireAdmin, (req, res) => {
       nuevoNivel,
       id
     );
-    res.json({ ok: true });
+
+    // ── Y EL MAIL VIAJA AL USUARIO ─────────────────────────────────────
+    //
+    // Pablo, 1/9/2026: «actualicé un mail en usuarios pero no se me actualiza acá
+    // para enviarle las notificaciones». El mail se copiaba UNA vez, al crear el
+    // usuario desde la persona, y después nunca más: corregirlo en la ficha no
+    // llegaba a ningún lado y los avisos seguían saliendo al viejo —o al
+    // `campo_nombre@interno.lnb` que el sistema le había inventado.
+    //
+    // Se contesta QUÉ pasó (`mail_usuario`) para que la pantalla lo pueda decir.
+    // Un sincronismo silencioso que a veces no ocurre es peor que ninguno: nadie
+    // se entera de que un mail no llega.
+    let mailUsuario = null;
+    if (mail !== undefined && esMailReal(mail)) {
+      mailUsuario = sincronizarMailAUsuario(db(), id, mail);
+    }
+    res.json({ ok: true, mail_usuario: mailUsuario });
   } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 

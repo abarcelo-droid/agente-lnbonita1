@@ -5,6 +5,8 @@
 // Fase 1: solo modelado. No toca el flujo de login ni los permisos actuales.
 
 import { getDb } from './db.js';
+// El mail de la ficha tiene que llegar al usuario, que es a donde salen los avisos.
+import { arrastrarMailesDePersonas } from './mail_persona.js';
 
 const db = getDb();
 
@@ -71,6 +73,13 @@ db.exec(`
 // ─── ALTERs opcionales en tablas existentes ────────────────────────────
 // Vinculan registros viejos al nuevo modelo sin romper nada.
 try { db.exec("ALTER TABLE usuarios ADD COLUMN persona_id INTEGER REFERENCES personas(id)"); } catch(_) {}
+
+// ── EL MAIL DE LA FICHA LLEGA AL USUARIO ──────────────────────────────
+// Corre en cada arranque y es idempotente: cuando no hay nada desfasado, no
+// hace nada. Pisa SÓLO el `campo_nombre@interno.lnb` autogenerado, que no es una
+// dirección; los casos con dos mailes reales distintos quedan anotados sin
+// tocarse. El porqué está en servicios/mail_persona.js.
+arrastrarMailesDePersonas(db);
 try { db.exec("ALTER TABLE proveedores ADD COLUMN sociedad_id INTEGER REFERENCES sociedades(id)"); } catch(_) {}
 
 // Fase 1.b: jerarquía — cada persona puede reportar a otra

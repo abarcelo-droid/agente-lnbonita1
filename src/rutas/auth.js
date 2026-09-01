@@ -8,6 +8,11 @@ import { enviarMail } from '../servicios/mail.js';
 import { AUTH_COOKIE, authCookieOpts } from '../servicios/auth_sesion.js';
 import { seccionesDe, sociedadesConNombreDe, sociedadesDe, guardarPermisos, permisosDe } from '../servicios/permisos.js';
 
+// El mail de una persona es UNO SOLO. Si se corrige acá, vuelve a su ficha: sin
+// esto se arregla de un lado y al rato alguien lo "arregla" del otro, y las dos
+// pantallas vuelven a decir cosas distintas.
+import { sincronizarMailAPersona } from '../servicios/mail_persona.js';
+
 const router = express.Router();
 const BCRYPT_ROUNDS = 10;
 
@@ -816,7 +821,13 @@ router.patch('/usuarios/:id', soloAdmin, (req, res) => {
            activo!==undefined?(activo?1:0):current.activo,
            depTipo, depProvId, usernameFinal, soloLect,
            req.params.id);
-    res.json({ ok: true, username: usernameFinal });
+    // ── Y VUELVE A LA FICHA DE LA PERSONA ──────────────────────────────
+    // El mail es UNO SOLO. Si se corrige acá y no vuelve, mañana alguien lo
+    // "arregla" en la ficha y las dos pantallas empiezan otra vez a decir cosas
+    // distintas — que es justo el problema que esto viene a cerrar.
+    const mailPersona = (email !== undefined && email)
+      ? sincronizarMailAPersona(db, Number(req.params.id), emailFinal) : null;
+    res.json({ ok: true, username: usernameFinal, mail_persona: mailPersona });
   } catch(e) {
     if (e.message.includes('UNIQUE')) return res.status(400).json({ ok: false, error: 'Ya existe un usuario con ese username, email o nombre' });
     res.status(500).json({ ok: false, error: e.message });
