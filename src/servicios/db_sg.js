@@ -1976,6 +1976,21 @@ try {
   // vuelve a pedir kilos sobre un trato que se habló en cajones.
   //
   // NULL = kilo, que es como se pactó todo lo que ya existe.
+  // ── LO QUE PIDE UNA CADENA Y UN CLIENTE COMÚN NO ─────────────────────────
+  //
+  // Pablo, 1/9/2026: «separemos la confección en dos: emisión de remitos normales
+  // y emisión de remitos para supermercados, para que tengan dos tratamientos
+  // distintos. Agreguémosle un campo de TURNO y un campo de OC que salgan
+  // impresos».
+  //
+  // El súper da un TURNO de descarga en su centro de distribución y un número de
+  // ORDEN DE COMPRA propio. Sin los dos en el papel, el camión llega y no lo
+  // reciben — y esos dos datos vivían en un WhatsApp o en la cabeza del que
+  // coordinó. Van en el remito, que es el papel que viaja con la mercadería.
+  //
+  // Son del REMITO y no del cliente: cambian en cada entrega.
+  if (addCol('sg_despachos',        'turno',                'TEXT')) added.push('sg_despachos.turno');
+  if (addCol('sg_despachos',        'oc_cliente',           'TEXT')) added.push('sg_despachos.oc_cliente');
   if (addCol('sg_despacho_items',   'modo_precio',          'TEXT')) added.push('sg_despacho_items.modo_precio');
   if (addCol('sg_lote_decomisos',   'bultos',               'INTEGER')) added.push('sg_lote_decomisos.bultos');
   if (addCol('sg_transformaciones', 'bultos_transformados', 'INTEGER')) added.push('sg_transformaciones.bultos_transformados');

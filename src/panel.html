@@ -2868,8 +2868,36 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
     </style>
     <div style="display:inline-flex;gap:2px;background:var(--bg);border:1px solid var(--bor);border-radius:8px;padding:3px;margin-bottom:16px;flex-wrap:wrap">
       <div class="sgv-subtab on" data-sub="despachos" onclick="sgVenSub('despachos')">📄 Emisión de Remitos</div>
+      <div class="sgv-subtab" data-sub="remsuper"      onclick="sgVenSub('remsuper')">🏪 Remitos Supermercados</div>
       <div class="sgv-subtab" data-sub="directa"       onclick="sgVenSub('directa')">💵 Facturación Puesto</div>
       <div class="sgv-subtab" data-sub="supermercados" onclick="sgVenSub('supermercados')">🏪 Facturación Supermercados</div>
+    </div>
+
+    <!-- ══ 🏪 REMITOS A SUPERMERCADOS ══════════════════════════════════
+         Pablo, 1/9/2026: «separemos la confección en dos: emisión de remitos
+         normales y emisión de remitos para supermercados, para que tengan dos
+         tratamientos distintos. La pantalla básicamente es la misma, pero
+         agreguémosle un campo de TURNO y un campo de OC».
+
+         ES EL MISMO REMITO Y EL MISMO FORMULARIO. Lo que cambia es que la cadena
+         da un TURNO de descarga en su centro de distribución y un número de orden
+         de compra propio, y sin esos dos datos en el papel el camión llega y no
+         lo reciben. Vivían en un WhatsApp.
+
+         Un formulario aparte sería una segunda copia de las reglas de stock: el
+         mismo modal se abre en modo cadena. -->
+    <div class="sgv-sub" id="sgv-sub-remsuper">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px">
+        <div style="font-size:11.5px;color:var(--mut)">
+          Los remitos a clientes marcados como <b>Supermercado</b> o con categoría <b>Retail</b>.
+          Llevan turno de descarga y la orden de compra de la cadena.
+        </div>
+        <button class="btn bb" onclick="sgDespOpen('super')">+ Nuevo remito a cadena</button>
+      </div>
+      <div class="ab-table-wrap"><table class="pa-tbl">
+        <thead><tr><th>N°</th><th>Fecha</th><th>Turno</th><th>OC</th><th>Cliente</th><th>Qué se vendió</th><th style="text-align:right">Total</th><th style="text-align:center">Estado</th><th></th></tr></thead>
+        <tbody id="sg-tb-remsuper"><tr><td colspan="9" class="emp">Cargando…</td></tr></tbody>
+      </table></div>
     </div>
 
     <!-- Remitos -->
@@ -6923,6 +6951,15 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
            campos por fila y el formulario deja de ser una tira vertical. -->
       <div class="ff" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:12px 14px">
         <div class="fl"><label>Cliente <span style="color:var(--err)">*</span></label><input type="text" placeholder="🔎 alias o razón social" oninput="sgCliFiltrar('sg-desp-cli',this.value)" autocomplete="off" style="margin-bottom:4px"><select id="sg-desp-cli"></select></div>
+        <!-- LO QUE PIDE UNA CADENA Y UN CLIENTE COMÚN NO. Aparecen sólo en el
+             remito a supermercado: preguntarle el turno de descarga al que carga
+             una camioneta para el puesto es pedirle un dato que no existe. -->
+        <div class="fl sg-desp-super" style="display:none"><label>Turno de descarga</label>
+          <input id="sg-desp-turno" placeholder="ej. 14:30 · CD Moreno" maxlength="60">
+          <div style="font-size:11px;color:var(--mut);margin-top:3px">Sale impreso en el remito</div></div>
+        <div class="fl sg-desp-super" style="display:none"><label>OC del supermercado</label>
+          <input id="sg-desp-occli" placeholder="número de orden de compra" maxlength="60">
+          <div style="font-size:11px;color:var(--mut);margin-top:3px">La que dio la cadena, no la nuestra</div></div>
         <div class="fl"><label>Pedido <span style="font-weight:400;color:var(--mut);font-size:11px">opcional</span></label><select id="sg-desp-ped"><option value="">— Sin pedido —</option></select></div>
         <div class="fl"><label>Fecha de despacho</label><input type="date" id="sg-desp-fecha"></div>
         <div class="fl"><label>Transporte</label><select id="sg-desp-transp"><option value="">—</option><option value="propio">Propio</option><option value="cliente">Cliente</option><option value="tercero">Tercero</option></select></div>
@@ -17278,6 +17315,8 @@ function sgVenSub(s){
   // Facturarle a una cadena es facturar remitos ya entregados, no vender en el
   // mostrador: es su propia puerta (Pablo, 31/8/2026).
   else if (s==='supermercados') sgSuperInit();
+  // La otra puerta de emisión: los mismos remitos, los de las cadenas.
+  else if (s==='remsuper') sgRemSuperLoad();
   // Pedidos y Facturar se fueron a Administración de Ventas. Salidas quedó con
   // lo que efectivamente SALE: el remito, y la venta que se factura en el acto.
   else if (s==='pedidos'){ SG.venSub='despachos'; cmAbrirModulo('sg-pedidos'); }
@@ -19759,14 +19798,24 @@ function sgItemPicker(opts){
     +'</div>'
     +'<div id="'+key+'-det" style="border:1px solid var(--bor);border-radius:8px;padding:8px;background:var(--bg)"><div style="font-size:12px;color:var(--mut)">Elegí un producto.</div></div>'
     +'</div>';
-  // EL REMITO TAMBIÉN VE LO QUE VIENE EN VIAJE. El comprador cerró la carga, el
-  // camión está en la ruta, y el cliente la quiere anotada a su nombre: eso
-  // antes no se podía escribir en ningún lado y quedaba en la memoria del que
-  // lo prometió.
   api('/api/sg/disponibilidad?incluir_camino='+(sgIPConCamino(st)?1:0)).then(function(r){ st.productos=(r&&r.ok)?r.data:[]; sgIPRenderList(key); });
 }
-// Pedido y remito miran lo que viene en viaje; el resto no.
-function sgIPConCamino(st){ return st.modo==='pedido' || st.modo==='remito'; }
+// ── SÓLO EL PEDIDO MIRA LO QUE VIENE EN VIAJE ───────────────────────────
+//
+// Pablo, 1/9/2026: «no debes dejarnos seleccionar para remitir o facturar
+// mercadería en camino, porque eso hace que se rompan los stocks».
+//
+// El REMITO lo ofrecía y no puede: ese renglón sale del depósito sin haber
+// entrado nunca, el piso descuenta algo que no existe, y cuando el camión llega
+// —o llega con menos— el stock ya se movió y no hay contra qué compararlo.
+//
+// El PEDIDO sí lo sigue mirando, y está bien: un pedido es lo que el cliente
+// encargó, no mueve un solo cajón. Ahí prometer contra un camión en ruta es
+// justamente de lo que se trata.
+//
+// El servidor rechaza igual (ERROR_EN_VIAJE en rutas/sg.js): esto es para no
+// ofrecer un botón que va a rebotar.
+function sgIPConCamino(st){ return st.modo==='pedido'; }
 // El REMITO se carga en CAJONES, que es lo que se sube al camión y lo que el
 // backend valida. Pedirle kg al que carga era pedirle una cuenta: escribía 500
 // y el servidor le contestaba «el despacho es por cajón entero», después de
@@ -19991,19 +20040,124 @@ function sgPedVer(id){
 }
 
 // ── Despachos ──
-function sgLoadDespachos(){
+// ── LAS DOS PUERTAS DE EMISIÓN, UNA SOLA LISTA ─────────────────────────
+//
+// Pablo, 1/9/2026: «separemos la confección en dos». Los remitos son los MISMOS;
+// lo que cambia es a quién van. Una segunda copia de la tabla sería un segundo
+// lugar donde arreglar el botón de anular, y uno de los dos se olvida.
+//
+// El corte lo hace el servidor con la misma regla que ya usa la facturación a
+// cadenas: tipo 'supermercado' en la ficha, o categoría 'Retail' del padrón.
+function sgLoadDespachos(){ sgDespListar('normal'); }
+function sgRemSuperLoad(){ sgDespListar('super'); }
+
+function sgDespListar(modo){
+  var sup = (modo === 'super');
+  var tb = eid(sup ? 'sg-tb-remsuper' : 'sg-tb-despachos'); if (!tb) return;
+  var cols = sup ? 9 : 8;
+  tb.innerHTML = '<tr><td colspan="'+cols+'" class="emp">Cargando…</td></tr>';
   // solo_remitos: la lista de REMITOS no lista las salidas de una venta directa.
-  api('/api/sg/despachos?solo_remitos=1').then(function(r){
+  api('/api/sg/despachos?solo_remitos=1&'+(sup?'solo_cadenas=1':'sin_cadenas=1')).then(function(r){
     var rows=(r&&r.ok)?r.data:[];
-    eid('sg-tb-despachos').innerHTML = rows.length ? rows.map(function(d){
-      return '<tr><td><code>'+esc(d.numero||'')+'</code></td><td>'+(d.fecha_despacho||'—')+'</td><td>'+esc(d.cliente_alias||'—')+'</td><td>'+esc(d.cliente_nombre||'—')+'</td><td>'+esc(d.vendido||'—')+'</td><td style="text-align:right">'+sgMoney(d.total)+'</td><td style="text-align:center"><span class="bdg bok">'+(SG_ESTDESP[d.estado]||d.estado)+'</span></td><td style="text-align:right;white-space:nowrap"><button class="btn bo bs" onclick="sgDespVer('+d.id+')">🔍</button>'+(lnbPuedeAnular('sg-ventas')?' <button class="btn bd bs" title="Anular el despacho" onclick="sgDespAnular('+d.id+')">✖</button>':'')+'</td></tr>';
-    }).join('') : '<tr><td colspan="8" class="emp">Sin despachos.</td></tr>';
+    if (!rows.length) {
+      tb.innerHTML = '<tr><td colspan="'+cols+'" class="emp">'
+        + (sup ? 'Sin remitos a cadenas.' : 'Sin despachos.') + '</td></tr>';
+      return;
+    }
+    tb.innerHTML = rows.map(function(d){
+      // El TURNO y la OC de la cadena van a la vista: son los dos datos por los
+      // que llama el que está coordinando la descarga.
+      var extra = sup
+        ? ('<td>'+esc(d.turno||'—')+'</td><td>'+esc(d.oc_cliente||'—')+'</td>')
+        : ('<td>'+esc(d.cliente_alias||'—')+'</td>');
+      return '<tr><td><code>'+esc(d.numero||'')+'</code></td><td>'+(d.fecha_despacho||'—')+'</td>'
+        +extra
+        +'<td>'+esc(d.cliente_nombre||'—')+'</td><td>'+esc(d.vendido||'—')+'</td>'
+        +'<td style="text-align:right">'+sgMoney(d.total)+'</td>'
+        +'<td style="text-align:center"><span class="bdg bok">'+(SG_ESTDESP[d.estado]||d.estado)+'</span></td>'
+        +'<td style="text-align:right;white-space:nowrap">'
+        +'<button class="btn bo bs" title="Imprimir el remito" onclick="sgDespImprimir('+d.id+')">🖨</button> '
+        +'<button class="btn bo bs" onclick="sgDespVer('+d.id+')">🔍</button>'
+        +(lnbPuedeAnular('sg-ventas')?' <button class="btn bd bs" title="Anular el despacho" onclick="sgDespAnular('+d.id+')">✖</button>':'')
+        +'</td></tr>';
+    }).join('');
   });
 }
-function sgDespOpen(){
+
+// ── EL REMITO IMPRESO ──────────────────────────────────────────────────
+//
+// Pablo, 1/9/2026: el turno y la OC «que salgan impresos». No había impresión de
+// remito: el papel que acompaña la mercadería se hacía a mano.
+//
+// El turno y la orden de compra van ARRIBA y grandes, que es donde los busca el
+// de la recepción de la cadena. Si el remito no los trae, no aparecen: en un
+// remito común serían dos rótulos vacíos que no dicen nada.
+function sgDespImprimir(id){
+  api('/api/sg/despachos/'+id).then(function(r){
+    if(!r||!r.ok){ toast((r&&r.error)||'No se pudo abrir el remito','er'); return; }
+    var d=r.data, its=d.items||[];
+    var caja = function(rot, v){
+      return '<div style="border:1.5px solid #333;border-radius:6px;padding:6px 12px;min-width:150px">'
+        + '<div style="font-size:9px;text-transform:uppercase;letter-spacing:.06em;color:#555">'+rot+'</div>'
+        + '<div style="font-size:15px;font-weight:700">'+escH(v)+'</div></div>';
+    };
+    var cajas=[];
+    if (d.turno) cajas.push(caja('Turno de descarga', d.turno));
+    if (d.oc_cliente) cajas.push(caja('OC del cliente', d.oc_cliente));
+    var h='<h1>Remito '+escH(d.numero||'')+'</h1>'
+      +'<h2>PUENTE CORDON SA · San Ger\u00f3nimo · MCBA Nave 4</h2>'
+      +(cajas.length?('<div style="display:flex;gap:10px;margin:0 0 14px">'+cajas.join('')+'</div>'):'')
+      +'<table style="margin-bottom:14px"><tbody>'
+      +'<tr><td><b>Cliente</b></td><td>'+escH(d.cliente_nombre||'—')+'</td>'
+        +'<td><b>Fecha</b></td><td>'+escH(d.fecha_despacho||'—')+'</td></tr>'
+      +'<tr><td><b>Transporte</b></td><td>'+escH(d.transporte||'—')+(d.fletero_nombre?(' · '+escH(d.fletero_nombre)):'')+'</td>'
+        +'<td><b>Chofer / dominio</b></td><td>'+escH(d.chofer||'—')+' · '+escH(d.dominio||'—')+'</td></tr>'
+      +'</tbody></table>'
+      +'<table><thead><tr><th>Lote</th><th>Producto</th><th class="d">Cajones</th><th class="d">Kg</th></tr></thead><tbody>'
+      +its.map(function(it){
+        return '<tr><td><code>'+escH(it.codigo_lote||'')+'</code></td><td>'+escH(it.producto_nombre||'')+'</td>'
+          +'<td class="d">'+nr(it.bultos)+'</td><td class="d">'+nr(it.kg_despachados)+'</td></tr>';
+      }).join('')
+      +'<tr class="tot"><td colspan="2">Total</td>'
+      +'<td class="d">'+nr(its.reduce(function(a,x){return a+(Number(x.bultos)||0);},0))+'</td>'
+      +'<td class="d">'+nr(its.reduce(function(a,x){return a+(Number(x.kg_despachados)||0);},0))+'</td></tr>'
+      +'</tbody></table>'
+      +(d.observaciones?('<div style="margin-top:12px;font-size:11.5px"><b>Observaciones:</b> '+escH(d.observaciones)+'</div>'):'')
+      +'<div style="margin-top:34px;display:flex;gap:40px;font-size:11px">'
+      +'<div style="flex:1;border-top:1px solid #333;padding-top:4px">Entregué conforme</div>'
+      +'<div style="flex:1;border-top:1px solid #333;padding-top:4px">Recibí conforme</div></div>';
+    _ccImprimir('Remito '+(d.numero||''), h);
+  });
+}
+// ── EL MISMO REMITO, DOS TRATAMIENTOS ──────────────────────────────────
+//
+// Pablo, 1/9/2026: «separemos la confección en dos». Es el MISMO formulario y el
+// mismo circuito de stock; lo que cambia es que a una cadena hay que pedirle el
+// turno de descarga y su orden de compra, y que el cliente sale de la lista de
+// cadenas y no del padrón entero.
+//
+// Un segundo formulario sería una segunda copia de las reglas de stock, y sería
+// la copia que se olvida de actualizar.
+function sgDespOpen(modo){
+  SG.despModo = (modo === 'super') ? 'super' : 'normal';
+  var sup = SG.despModo === 'super';
   SG.despItems=[]; SG.despLotes={};
-  eid('sg-desp-cli').innerHTML=sgCliOpts('','','— Elegir —');
-  sgCliUnico('sg-desp-cli');
+  // Los dos campos de la cadena aparecen SÓLO en su modo: preguntarle el turno de
+  // descarga al que carga una camioneta para el puesto es pedirle un dato que no
+  // existe.
+  [].slice.call(document.querySelectorAll('#sg-desp-modal .sg-desp-super')).forEach(function(el){
+    el.style.display = sup ? '' : 'none';
+  });
+  eid('sg-desp-turno').value=''; eid('sg-desp-occli').value='';
+  var tit = document.querySelector('#sg-desp-modal .mht');
+  if (tit) tit.textContent = sup ? '🏪 Nuevo remito a supermercado' : 'Nuevo remito';
+  // EL CLIENTE, DE LA LISTA QUE CORRESPONDE. Ofrecer el padrón entero en la
+  // pantalla de cadenas es dejar que un remito con turno y OC salga a nombre de
+  // una verdulería, y después no aparece en ninguna de las dos listas.
+  eid('sg-desp-cli').innerHTML = sup
+    ? sgCliOpts('','','— Elegí la cadena —', sgEsCadena)
+    : sgCliOpts('','','— Elegir —');
+  if (sup) sgCadenaUnico('sg-desp-cli'); else sgCliUnico('sg-desp-cli');
   api('/api/sg/pedidos?estado=confirmado').then(function(r){
     var peds=(r&&r.ok)?r.data:[];
     eid('sg-desp-ped').innerHTML='<option value="">— Sin pedido —</option>'+peds.map(function(p){return '<option value="'+p.id+'" data-cli="'+p.cliente_id+'">'+esc(p.numero)+' — '+esc(p.cliente_nombre||'')+'</option>';}).join('');
@@ -20219,9 +20373,22 @@ function sgDespGuardar(){
     // quién se le paga, igual que en la recepción.
     cooperativa_catalogo_id:eid('sg-desp-coop').value?Number(eid('sg-desp-coop').value):null,
     cooperativa_bultos:eid('sg-desp-bultos').value!==''?Number(eid('sg-desp-bultos').value):null,
-    chofer:eid('sg-desp-chofer').value, dominio:eid('sg-desp-dominio').value, observaciones:eid('sg-desp-obs').value, items:items };
+    chofer:eid('sg-desp-chofer').value, dominio:eid('sg-desp-dominio').value, observaciones:eid('sg-desp-obs').value,
+    // EL TURNO Y LA OC DE LA CADENA. Salen impresos en el remito, que es el papel
+    // que viaja con la mercadería: sin ellos el camión llega y no lo reciben.
+    turno:(eid('sg-desp-turno').value||'').trim(),
+    oc_cliente:(eid('sg-desp-occli').value||'').trim(),
+    items:items };
+  var sup = SG.despModo === 'super';
   api('/api/sg/despachos','POST',body).then(function(r){
-    if(r&&r.ok){ toast('Remito registrado','ok'); closeMB('sg-desp-modal'); sgLoadDespachos(); }
+    if(r&&r.ok){
+      toast('Remito registrado','ok'); closeMB('sg-desp-modal');
+      // Se refresca la lista de la que se salió, no siempre la de los normales:
+      // el remito a la cadena no aparece en esa y parecería no haberse guardado.
+      if (sup) sgRemSuperLoad(); else sgLoadDespachos();
+      // Y se ofrece imprimirlo en el acto, que es lo que se hace con un remito.
+      if (r.data && r.data.id) sgDespImprimir(r.data.id);
+    }
     else toast((r&&r.error)||'Error','er');
   });
 }

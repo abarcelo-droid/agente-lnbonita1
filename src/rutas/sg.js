@@ -1236,26 +1236,7 @@ router.get('/facturable', requireAuth, (req, res) => {
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
-// ── QUIÉN ES UNA CADENA ───────────────────────────────────────────────────
-//
-// Pablo, 31/8/2026: la pantalla de Salidas queda con tres puertas —emitir el
-// remito, facturar en el puesto y facturar a las cadenas— y la tercera tiene que
-// mostrar SOLO los remitos de supermercado.
-//
-// Hay DOS lugares donde un cliente puede decir que es una cadena, y los dos son
-// ciertos: el campo `tipo` ('supermercado'), que se tilda a mano en la ficha, y la
-// categoría comercial 'Retail', que viene cargada desde el padrón de ABASTO. Si se
-// mirara uno solo, media cartera quedaría afuera de la pantalla sin que nadie se
-// entere: los importados no tienen `tipo`, y los cargados a mano no tienen
-// categoría.
-//
-// UNA SOLA REGLA, y vive acá: el front la usa para llenar su selector de clientes
-// y el backend para filtrar la lista. Dos definiciones de "cadena" serían una
-// pantalla que ofrece un cliente que después no trae ningún remito.
-const SQL_ES_CADENA = `(c.tipo='supermercado'
-  OR EXISTS (SELECT 1 FROM sg_cliente_categorias cc
-             WHERE cc.id = c.categoria_id AND cc.nombre = 'Retail'))`;
-
+// (la regla de «quién es una cadena» vive arriba, junto a los helpers)
 // GET /despachos-pendientes → MISMA lógica de kg_pendiente que /facturable pero para TODOS los
 // clientes (listado "Pendientes de comprobante"). Filtros opcionales: cliente_id, desde, hasta
 // (fecha_despacho). Devuelve por despacho: alias/cliente, qué se vendió (producto + kg pend),
@@ -1413,6 +1394,7 @@ const postEmitir = async (req, res) => {
         if (!(kg > 0)) continue;
         const di = db.prepare(`SELECT di.id, di.producto_id, di.kg_despachados, di.precio_por_kg,
             di.precio_lista_por_kg, di.presentacion_id, pr.nombre AS producto_nombre,
+            di.origen, di.lote_recibido_id,
             COALESCE(di.kg_por_bulto, ps.factor_conversion) AS kg_por_bulto,
             COALESCE(pr.iva_alicuota, fam.iva_alicuota) AS iva_alicuota
           FROM sg_despacho_items di
@@ -1421,6 +1403,17 @@ const postEmitir = async (req, res) => {
           LEFT JOIN sg_presentaciones ps ON ps.id=di.presentacion_id
           WHERE di.id=? AND di.despacho_id=?`).get(diId, despachoId);
         if (!di) return res.status(400).json({ ok: false, error: 'Ítem de despacho inválido: ' + diId });
+        // ── NO SE FACTURA LO QUE NO BAJÓ DEL CAMIÓN ────────────────────
+        // Pablo, 1/9/2026. El renglón en viaje ya no se puede crear, pero los
+        // armados antes siguen ahí. Facturarlos es cobrarle al cliente algo que
+        // no salió del depósito: si el camión trae menos, hay que emitir una
+        // nota de crédito para arreglar un comprobante que nunca debió salir.
+        // Se destraba solo cuando la partida se recibe.
+        if (di.origen === 'oc_item' && di.lote_recibido_id == null) {
+          return res.status(400).json({ ok: false, error:
+            `${di.producto_nombre || 'Un renglón'} del remito todavía viene en viaje: `
+            + 'no se factura hasta que la mercadería entre al stock.' });
+        }
         const kgPend = (Number(di.kg_despachados) || 0) - kgDocumentadoItem(db, diId);
         if (kg > kgPend + 0.01) return res.status(400).json({ ok: false, error: `Ítem ${diId}: pedís ${kg}kg pero quedan ${kgPend.toFixed(2)}kg pendientes` });
         const alic = di.iva_alicuota != null ? Number(di.iva_alicuota) : null;
@@ -1800,6 +1793,34 @@ router.delete('/condiciones-pago/:id', requireAuth, (req, res) => {
 //
 // Tomar el máximo no reusa nunca un número, y un número que existió no vuelve a
 // existir con otra mercadería adentro.
+// ── QUIÉN ES UNA CADENA ───────────────────────────────────────────────────
+//
+// Pablo, 31/8/2026: la pantalla de Salidas se abre en puertas, y las de
+// supermercado tienen que mostrar SOLO lo de supermercado.
+//
+// Hay DOS lugares donde un cliente puede decir que es una cadena, y los dos son
+// ciertos: el campo `tipo` ('supermercado'), que se tilda a mano en la ficha, y la
+// categoría comercial 'Retail', que viene cargada desde el padrón de ABASTO. Si se
+// mirara uno solo, media cartera quedaría afuera de la pantalla sin que nadie se
+// entere: los importados no tienen `tipo`, y los cargados a mano no tienen
+// categoría.
+//
+// UNA SOLA REGLA, y vive acá: la usan la lista de remitos, la de remitos
+// pendientes y el selector de clientes del front. Dos definiciones de "cadena"
+// serían una pantalla que ofrece un cliente que después no trae ningún remito.
+//
+// Pide que la tabla sg_clientes esté aliasada como `c`.
+// COALESCE, y no `c.tipo` a secas: con el tipo en NULL —que es el caso NORMAL,
+// el padrón de ABASTO no lo trae— la condición entera daba NULL, y NULL no es ni
+// verdadero ni falso. El remito a ese cliente no entraba en la lista de cadenas
+// (bien) PERO TAMPOCO en la de normales, porque `NOT NULL` también es NULL:
+// desaparecía de las dos pantallas sin que nadie lo hubiera borrado.
+//
+// EXISTS nunca devuelve NULL, así que con esto la regla siempre contesta sí o no.
+const SQL_ES_CADENA = `(COALESCE(c.tipo,'')='supermercado'
+  OR EXISTS (SELECT 1 FROM sg_cliente_categorias cc
+             WHERE cc.id = c.categoria_id AND cc.nombre = 'Retail'))`;
+
 function nextNumero(db, prefijo, tabla, col) {
   const fecha = db.prepare("SELECT strftime('%Y%m%d','now','localtime') d").get().d;
   const pre = `${prefijo}-${fecha}-`;
@@ -9390,6 +9411,10 @@ function syncGastoCoop(db, { tipo, despachoId, recepcionId, proveedorId, coopera
 // DÍA: lo hace el que carga el camión. Con requireAdmin lo tenía que cargar el
 // dueño, y el que hace el trabajo terminaba dictándoselo por teléfono. El nivel
 // lo decide exigirNivel mirando la dirección, como en todo el resto.
+const ERROR_EN_VIAJE = 'No se puede remitir mercadería que todavía viene en viaje: '
+  + 'sale del depósito sin haber entrado y el stock queda descontando algo que no existe. '
+  + 'Recibí la partida primero y después remitila.';
+
 const postRemito = (req, res) => {
   const db = getDb();
   try {
@@ -9403,68 +9428,30 @@ const postRemito = (req, res) => {
     // presentación del lote). Se rechaza fracción de cajón y se valida contra bultosDisponibles
     // (helper F3-A). NO se acepta kg libre: si el front manda kg, se deriva el bulto y debe ser entero.
     const pedidoLote = {};   // Σ bultos por lote
-    const pedidoCamino = {}; // Σ bultos por partida EN VIAJE
-    const lineas = [];       // {it, origen, loteId, ocItemId, bultos, kgPorBulto, kg}
+    const lineas = [];       // {it, origen, loteId, bultos, kgPorBulto, kg}
 
-    // ── LO QUE VIENE EN VIAJE ────────────────────────────────────────────
-    // El comprador cerró la carga, el camión está en la ruta, y el cliente
-    // quiere la mercadería anotada a su nombre. Hasta ahora eso no se podía
-    // escribir en ningún lado: la línea del remito exigía un lote, y el lote no
-    // existe hasta que se recibe. El único registro era la memoria del que lo
-    // prometió.
-    for (const it of items) {
-      if (String(it.origen || '') !== 'oc_item') continue;
-      const ocItemId = Number(it.oc_item_id);
-      if (!ocItemId) return res.status(400).json({ ok: false, error: 'Falta la partida en viaje de una línea' });
-      const oi = db.prepare(`SELECT i.*, o.numero AS oc_numero, o.estado AS oc_estado, o.activo AS oc_activo,
-          COALESCE(i.kg_por_bulto, ps.factor_conversion) AS kpb
-        FROM sg_oc_items i JOIN sg_oc o ON o.id=i.oc_id
-        LEFT JOIN sg_presentaciones ps ON ps.id=i.presentacion_id WHERE i.id=?`).get(ocItemId);
-      if (!oi) return res.status(400).json({ ok: false, error: 'Partida en viaje inexistente: ' + ocItemId });
-      if (!oi.oc_activo || !['abierta', 'recibida_parcial'].includes(String(oi.oc_estado))) {
-        return res.status(400).json({ ok: false,
-          error: `La orden ${oi.oc_numero} está ${oi.oc_estado}: ya no hay nada en viaje que asignar.` });
-      }
-      const kpb = (Number(oi.kpb) > 0) ? Number(oi.kpb) : null;
-      if (kpb == null) {
-        return res.status(400).json({ ok: false,
-          error: `La partida de ${oi.oc_numero} no tiene kg por bulto cargados: no se puede asignar por cajón.` });
-      }
-      let bultos;
-      if (it.bultos != null && it.bultos !== '') bultos = Number(it.bultos);
-      else if (it.kg_despachados != null && it.kg_despachados !== '') bultos = Number(it.kg_despachados) / kpb;
-      else return res.status(400).json({ ok: false, error: `${oi.oc_numero}: falta la cantidad de bultos` });
-      if (!(bultos > 0)) return res.status(400).json({ ok: false, error: `${oi.oc_numero}: la cantidad debe ser > 0` });
-      if (Math.abs(bultos - Math.round(bultos)) > 1e-6) {
-        return res.status(400).json({ ok: false,
-          error: `${oi.oc_numero}: se asigna por cajón entero, no se admiten fracciones (${+bultos.toFixed(3)})` });
-      }
-      bultos = Math.round(bultos);
-      pedidoCamino[ocItemId] = (pedidoCamino[ocItemId] || 0) + bultos;
-      lineas.push({ it, origen: 'oc_item', ocItemId, bultos, kgPorBulto: kpb,
-        kg: +(bultos * kpb).toFixed(4), presentacionId: oi.presentacion_id, envaseId: oi.envase_id,
-        productoId: oi.producto_id, costoKg: (Number(oi.precio_estimado_por_kg) > 0
-          ? Number(oi.precio_estimado_por_kg) : null) });
-    }
-
-    // NO SE PROMETE DOS VECES LA MISMA CARGA. Sin esta cuenta, el segundo remito
-    // ve el camión entero libre porque el primero no descontó nada, y el día que
-    // baja la mercadería falta para uno de los dos.
-    for (const ocItemId of Object.keys(pedidoCamino)) {
-      const d = db.prepare(`SELECT i.id, o.numero AS oc_numero,
-          COALESCE(i.cantidad_estimada_presentaciones,0) AS bultos_est,
-          COALESCE((SELECT SUM(bultos) FROM sg_lotes WHERE oc_item_id=i.id AND activo=1),0) AS recibidos,
-          COALESCE((SELECT SUM(bultos) FROM sg_reservas WHERE oc_item_id=i.id AND tipo='oc_item' AND estado='activa'),0) AS reservados,
-          COALESCE((SELECT SUM(di.bultos) FROM sg_despacho_items di
-             JOIN sg_despachos d2 ON d2.id=di.despacho_id AND d2.activo=1
-            WHERE di.oc_item_id=i.id AND di.origen='oc_item' AND di.lote_recibido_id IS NULL),0) AS comprometidos
-        FROM sg_oc_items i JOIN sg_oc o ON o.id=i.oc_id WHERE i.id=?`).get(ocItemId);
-      const libre = Number(d.bultos_est) - Number(d.recibidos) - Number(d.reservados) - Number(d.comprometidos);
-      if (pedidoCamino[ocItemId] > libre) {
-        return res.status(400).json({ ok: false,
-          error: `${d.oc_numero}: pedís ${pedidoCamino[ocItemId]} cajón(es) en viaje y quedan ${libre}. `
-               + `Lo que ya está prometido en otro remito no se puede prometer de nuevo.` });
-      }
+    // ── SÓLO SALE LO QUE ENTRÓ ───────────────────────────────────────────
+    //
+    // Pablo, 1/9/2026: «no debes dejarnos seleccionar para remitir o facturar
+    // mercadería en camino, porque eso hace que se rompan los stocks. Directamente
+    // nos tenés que dar posibilidad de remitir o facturar sólo mercadería ingresada
+    // al stock».
+    //
+    // El remito podía comprometer una partida que todavía venía en la ruta: la
+    // orden cerrada, el camión andando, y el cliente que la quería anotada a su
+    // nombre. El problema es que ese renglón SALE del depósito sin haber ENTRADO
+    // nunca. El piso descuenta algo que no existe, y cuando el camión llega —o
+    // llega con menos, o no llega— el stock ya se movió y no hay contra qué
+    // compararlo.
+    //
+    // El cerrojo está ACÁ y no sólo en la pantalla: un botón que no se ofrece se
+    // llama igual por la dirección. Lo que hace la pantalla es no ofrecerlo, para
+    // que nadie apriete algo que va a rebotar.
+    //
+    // Lo YA remitido en viaje no se toca: existe, y hay que poder cerrarlo cuando
+    // la mercadería baje. Lo que no se puede es abrir uno nuevo.
+    if (items.some((it) => String(it.origen || '') === 'oc_item')) {
+      return res.status(400).json({ ok: false, error: ERROR_EN_VIAJE });
     }
 
     for (const it of items) {
@@ -9521,11 +9508,15 @@ const postRemito = (req, res) => {
       // trazabilidad— pero no se emite el remito como documento, porque el papel
       // que viaja con la mercadería es la factura. Ver A2b en db_sg.js.
       const info = db.prepare(`INSERT INTO sg_despachos
-        (numero, pedido_id, cliente_id, comercial_id, fecha_despacho, transporte, transportista, chofer, dominio, fletero_id, estado, observaciones, sin_remito, creado_por)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
+        (numero, pedido_id, cliente_id, comercial_id, fecha_despacho, transporte, transportista, chofer, dominio, fletero_id, estado, observaciones, sin_remito, creado_por, turno, oc_cliente)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
         numero, b.pedido_id || null, b.cliente_id, b.comercial_id || null, val(b.fecha_despacho),
         val(b.transporte), val(b.transportista), val(b.chofer), val(b.dominio), fleteroId,
-        val(b.estado) || 'despachado', val(b.observaciones), b.sin_remito ? 1 : 0, uid(req));
+        val(b.estado) || 'despachado', val(b.observaciones), b.sin_remito ? 1 : 0, uid(req),
+        // EL TURNO Y LA ORDEN DE COMPRA DE LA CADENA. Van en el remito porque es el
+        // papel que viaja con la mercadería: sin los dos, el camión llega al centro
+        // de distribución y no lo reciben. Antes vivían en un WhatsApp.
+        val(b.turno), val(b.oc_cliente));
       const despachoId = info.lastInsertRowid;
       // PARTE B — si se asignó fletero, queda un gasto de flete de salida PENDIENTE de valorizar.
       syncGastoFleteDespacho(db, despachoId, fleteroId, val(b.fecha_despacho), uid(req));
@@ -9775,6 +9766,20 @@ router.get('/despachos', requireAuth, (req, res) => {
     // factura aparece en «Remitos pendientes de comprobante», que es de dónde
     // hay que sacarla.
     if (req.query.solo_remitos) where.push('COALESCE(d.sin_remito,0)=0');
+    // Las dos puertas de emisión: la de cadenas muestra sólo cadenas, y la
+    // normal sólo el resto. Dos pantallas con la misma lista no son dos
+    // tratamientos distintos, son la misma lista dos veces.
+    if (req.query.solo_cadenas === '1') where.push(SQL_ES_CADENA);
+    // El paréntesis de afuera NO es decorativo: los where se pegan con AND, y un
+    // OR suelto se comería los filtros anteriores (`activo=1 AND ... OR esto`
+    // devuelve también los anulados).
+    //
+    // Y el remito sin cliente cargado va con los NORMALES: sin él la condición da
+    // NULL, no entraría en ninguna de las dos listas y desaparecería de la
+    // pantalla sin que nadie lo haya borrado.
+    if (req.query.sin_cadenas === '1') {
+      where.push('(NOT ' + SQL_ES_CADENA + ' OR d.cliente_id IS NULL OR c.id IS NULL)');
+    }
     const rows = db.prepare(`
       SELECT d.*, c.razon_social AS cliente_nombre, c.nombre_comercial AS cliente_alias,
         p.numero AS pedido_numero,
