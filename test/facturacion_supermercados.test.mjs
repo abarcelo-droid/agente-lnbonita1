@@ -112,7 +112,9 @@ test('el front espeja la misma regla que el backend', () => {
   assert.match(b, /c\.categoria_nombre === 'Retail'/);
   // Y el backend mira exactamente esos dos.
   const sql = sqlDeCadena();
-  assert.match(sql, /c\.tipo='supermercado'/);
+  // COALESCE: con el tipo en NULL la condicion daba NULL, y un remito a ese
+  // cliente desaparecia de las dos listas de emision sin que nadie lo borre.
+  assert.match(sql, /COALESCE\(c\.tipo,''\)='supermercado'/);
   assert.match(sql, /cc\.nombre = 'Retail'/);
 });
 
