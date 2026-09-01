@@ -334,11 +334,46 @@ const AVISO_BASE = {
   movimiento: { asunto: 'Avanzó tu solicitud {{numero}} · {{proveedor}}',
     cuerpo: 'Hola {{destinatario}},\n\n{{actor}} movió tu solicitud de pago a {{proveedor}} '
       + 'por {{monto}}.\n\nDe: {{paso_origen}}\nA: {{paso}}\n{{comentario}}\n\n{{link}}\n' },
+  // ── EL PAPEL TAMBIÉN ES UNA NOVEDAD ────────────────────────────────────
+  //
+  // Pablo, 1/9/2026: «por cada paso que avanza o cada novedad que tengamos sobre
+  // la orden de pago, avisale al que solicitó la OP».
+  //
+  // Los pasos ya avisaban —hasta con un aviso genérico para cualquier movimiento
+  // que nadie hubiera previsto—. Lo que no avisaba era el ADJUNTO, y es
+  // justamente el que más le importa al que pidió el pago: el comprobante de la
+  // transferencia es el papel que él le manda al proveedor. Quedaba registrado en
+  // el historial y en ningún mail, así que para saber si ya estaba había que
+  // entrar al panel a mirar — que es exactamente lo que estos avisos existen para
+  // evitar.
+  //
+  // Y sacar un adjunto también: si desaparece el PDF de cuenta corriente que
+  // respaldaba la orden, el que le da la cara al proveedor tiene que saberlo.
+  adjunto: { asunto: 'Nuevo archivo en {{numero}} · {{proveedor}}',
+    cuerpo: 'Hola {{destinatario}},\n\n{{actor}} subió un archivo a tu solicitud de pago '
+      + 'a {{proveedor}} por {{monto}}.\n\nQué es: {{adjunto_tipo}}\nArchivo: {{adjunto_nombre}}'
+      + '\n\n{{link}}\n' },
+  adjunto_quitado: { asunto: 'Sacaron un archivo de {{numero}} · {{proveedor}}',
+    cuerpo: 'Hola {{destinatario}},\n\n{{actor}} sacó un archivo de tu solicitud de pago '
+      + 'a {{proveedor}} por {{monto}}.\n\nQué era: {{adjunto_tipo}}\nArchivo: {{adjunto_nombre}}'
+      + '\n\nSi hacía falta, pedile que lo vuelva a subir.\n\n{{link}}\n' },
   editada: { asunto: 'Editaron tu solicitud {{numero}} · {{proveedor}}',
     cuerpo: 'Hola {{destinatario}},\n\n{{actor}} modificó tu solicitud de pago.\n\n'
       + 'Qué cambió:\n{{cambios}}\n\nSi no corresponde, avisale antes de que salga a autorizar.'
       + '\n\n{{link}}\n' },
 };
+
+// EL QUE HACE LA NOVEDAD NO SE AVISA A SÍ MISMO. Es la misma regla que ya usan el
+// movimiento y la cancelación: un mail contándole a alguien lo que acaba de hacer
+// entrena a saltear los avisos, y el que se saltea uno se saltea el que importaba.
+function avisarSolicitanteSiNoEsEl(req, sol, evento, eventoId, extra) {
+  if (!sol || req.user.id === sol.solicitante_id) return;
+  try {
+    avisarSolicitante(defDe(sol), sol, evento, eventoId, extra);
+  } catch (e) {
+    console.error('[SP] No se pudo avisar al solicitante (' + evento + '):', e.message);
+  }
+}
 
 function avisarSolicitante(def, sol, evento, eventoId, extra) {
   // La del flujo primero —es la que el usuario puede escribir a su gusto— y si
@@ -894,12 +929,22 @@ router.post('/solicitudes/:id/adjuntos', subida.single('archivo'), async (req, r
 
     // Queda en el historial: un adjunto que respalda una orden de pago tiene que
     // poder rastrearse igual que una decisión.
-    registrarEvento(s.id, {
+    const evId = registrarEvento(s.id, {
       paso_desde: s.paso_actual_clave, paso_hasta: s.paso_actual_clave, accion: 'adjuntar',
       actor_id: req.user.id, actor_nombre: req.user.nombre, actor_rol: req.user.rol,
       datos_json: { adjunto_id: r.lastInsertRowid, nombre: req.file.originalname, tipo }
     });
+    // Y EL QUE PIDIÓ EL PAGO SE ENTERA. El comprobante de la transferencia es el
+    // papel que él le manda al proveedor: enterarse entrando a mirar es no
+    // enterarse.
+    avisarSolicitanteSiNoEsEl(req, s, 'adjunto', evId, {
+      actor: req.user.nombre,
+      adjunto_tipo: TIPOS_ADJUNTO[tipo] || tipo,
+      adjunto_nombre: req.file.originalname || limpio,
+    });
     res.json({ ok: true, id: r.lastInsertRowid });
+    // Fuera de la respuesta, como en todos los demás caminos.
+    procesarEnBackground();
   } catch (e) {
     console.error('[SP] Error subiendo adjunto:', e.message);
     res.status(500).json({ ok: false, error: e.message });
@@ -936,11 +981,20 @@ router.delete('/adjuntos/:adjId', wrap((req, res) => {
   `).get(parseInt(req.params.adjId, 10), soc);
   if (!a) throw noEncontrado('Adjunto no encontrado');
   db.prepare("UPDATE sp_adjuntos SET eliminado_en=datetime('now','localtime') WHERE id=?").run(a.id);
-  registrarEvento(a.solicitud_id, {
+  const evId = registrarEvento(a.solicitud_id, {
     accion: 'quitar_adjunto', actor_id: req.user.id, actor_nombre: req.user.nombre,
     actor_rol: req.user.rol, datos_json: { adjunto_id: a.id, nombre: a.nombre, tipo: a.tipo }
   });
+  // Si desaparece el papel que respaldaba la orden, el que le da la cara al
+  // proveedor tiene que saberlo.
+  const sol = db.prepare('SELECT * FROM sp_solicitudes WHERE id=?').get(a.solicitud_id);
+  avisarSolicitanteSiNoEsEl(req, sol, 'adjunto_quitado', evId, {
+    actor: req.user.nombre,
+    adjunto_tipo: TIPOS_ADJUNTO[a.tipo] || a.tipo,
+    adjunto_nombre: a.nombre,
+  });
   res.json({ ok: true });
+  procesarEnBackground();
 }));
 
 // ── La acción: avanzar, devolver o rechazar ───────────────────────────────
