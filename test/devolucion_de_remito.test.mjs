@@ -191,7 +191,7 @@ test('sin piso no se registra, vaya donde vaya después', () => {
   // por un piso». Y sin piso la partida figuraría disponible sin estar en ningún
   // lado.
   const i = SG.indexOf("router.post('/despachos/:id/devolver'");
-  const b = SG.slice(i, i + 7200);
+  const b = SG.slice(i, i + 8200);
   assert.match(b, /if \(!p\.pisoId\) return res\.status\(400\)/);
   assert.match(b, /Elegí por qué piso entra: aunque vuelva al productor/);
   // Y el piso con dueño lo toca sólo él.
@@ -202,7 +202,7 @@ test('entra por el piso, y si va al productor vuelve a salir', () => {
   // El neto sobre lo disponible es cero —esa mercadería no la tenemos— y queda el
   // rastro de por dónde pasó, que es de donde sale el papel.
   const i = SG.indexOf("router.post('/despachos/:id/devolver'");
-  const b = SG.slice(i, i + 7200);
+  const b = SG.slice(i, i + 8200);
   assert.match(b, /ubicMover\(db, ln\.it\.lote_id, ln\.p\.pisoId, ln\.bultos, r2\(ln\.p\.kg\)\);/);
   assert.match(b, /if \(ln\.p\.destino === 'proveedor'\) \{\r?\n\s*ubicMover\(db, ln\.it\.lote_id, ln\.p\.pisoId, -ln\.bultos, -r2\(ln\.p\.kg\)\);/);
 });
@@ -302,7 +302,8 @@ test('el remito de devolución se imprime, y marca lo que va al productor', () =
   const b = PANEL.slice(i, i + 3000);
   assert.match(b, /<h1>Remito de devolución /);
   assert.match(b, /Devuelve del remito/);
-  assert.match(b, /vuelve al productor<\/b>/);
+  // Y dice a QUE productor: el fletero que la lleva necesita saber donde la deja.
+  assert.match(b, /'<b>vuelve a ' \+ escH\(x\.productor_nombre \|\| 'el productor'\) \+ '<\/b>'/);
   assert.match(b, /renglón\(es\) vuelven al productor/);
   // Y si está anulada, el papel lo dice: uno impreso antes sigue dando vueltas.
   assert.match(b, /ANULADA/);
@@ -440,7 +441,7 @@ test('la marca se CONGELA al registrarla, no se recalcula', () => {
   // quedaría «de más» sin que nadie tocara nada.
   assert.match(DBSG, /addCol\('sg_devolucion_items', 'descuenta_al_productor', 'INTEGER'\)/);
   const i = SG.indexOf("router.post('/despachos/:id/devolver'");
-  const b = SG.slice(i, i + 7200);
+  const b = SG.slice(i, i + 8200);
   assert.match(b, /let descuenta = 0;/);
   assert.match(b, /if \(p\.destino === 'proveedor'\) \{/);
   assert.match(b, /descuenta = firme \? 0 : 1;/);
@@ -501,7 +502,7 @@ test('el mismo renglón dos veces en una llamada no se pasa del tope', () => {
   // mandarlo dos veces con la mitad del pendiente cada una pasaba las dos
   // validaciones y devolvía el doble.
   const i = SG.indexOf("router.post('/despachos/:id/devolver'");
-  const b = SG.slice(i, i + 7200);
+  const b = SG.slice(i, i + 8200);
   assert.match(b, /const yaEnEstePedido = \{\};/);
   assert.match(b, /yaEnEstePedido\[p\.id\] = \(yaEnEstePedido\[p\.id\] \|\| 0\) \+ p\.kg;/);
 });
@@ -517,4 +518,27 @@ test('lo devuelto NO se le puede facturar al súper', () => {
   assert.equal(ofrecen, 2, 'los dos listados tienen que restar lo devuelto');
   const i = SG.indexOf('const postEmitir');
   assert.match(SG.slice(i, i + 4200), /kgDocumentadoItem\(db, diId\)\r?\n\s*- kgDevueltoItem\(db, diId\);/);
+});
+
+// ── 12 · EL TABLERO CUENTA LO MISMO QUE LA VENTA ──────────────────
+//
+// «Stock por familia» y «próximos a vencer» tenían su propia cuenta a mano y quedó
+// vieja: no sumaba lo que el cliente devolvió al piso. Con una partida despachada
+// entera y 300 kg devueltos, la mercadería estaba en la cámara, la lista de venta la
+// ofrecía, y el tablero decía 0 kg y $0. Y quedaba fuera de la alarma de
+// vencimiento, o sea que se pasaba sin que nadie avisara.
+
+test('el tablero y la venta cuentan los mismos kilos', () => {
+  const cam = trozo('const KG_EN_CAMARA =', '\r\n');
+  // Los mismos sumandos que KG_DISPONIBLE, uno por uno.
+  for (const t of ['SUM_TRANSF', 'SUM_DECOMISO', 'SUM_DEV_STOCK']) {
+    assert.ok(cam.includes(t), 'al tablero le falta ' + t);
+  }
+  // Y no quedan copias a mano de la fórmula dando vueltas. Se busca la que CIERRA
+  // ahí —la vieja, sin decomisos ni devoluciones—: la definición de KG_EN_CAMARA
+  // empieza igual y sigue con los otros sumandos, así que no cuenta como copia.
+  assert.ok(!/COALESCE\(de\.kg,0\) - \$\{SUM_TRANSF\}\)/.test(SG),
+    'volvió una copia a mano de la cuenta de stock');
+  // Las cinco veces que el tablero la usa son la MISMA.
+  assert.equal((SG.match(/\$\{KG_EN_CAMARA\}/g) || []).length, 5);
 });

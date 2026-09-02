@@ -8913,9 +8913,16 @@ function recalcEstadoLote(db, loteId) {
   } else {
     // FALLBACK legacy: lote sin bultos (sin presentación / no migrado) → umbral por kg como antes,
     // sobre kg VIGENTES (kg_reales − Σ decomiso − Σ transformado), con tolerancia 0.01.
+    // NETO DE LO QUE VOLVIÓ AL PISO, igual que la rama de bultos. Sin esto la
+    // partida a granel quedaba en «despachado total» con la mercadería devuelta
+    // parada en el piso: desaparecía de la venta y encima se podía liquidar como
+    // terminada.
     const desp = db.prepare(`SELECT COALESCE(SUM(di.kg_despachados),0) s
       FROM sg_despacho_items di JOIN sg_despachos d ON d.id=di.despacho_id AND d.activo=1
-      WHERE di.lote_id=?`).get(loteId).s;
+      WHERE di.lote_id=?`).get(loteId).s
+      - db.prepare(`SELECT COALESCE(SUM(dvi.kg),0) s FROM sg_devolucion_items dvi
+          JOIN sg_devoluciones dv ON dv.id=dvi.devolucion_id AND dv.estado='registrada'
+         WHERE dvi.lote_id=? AND dvi.destino='stock'`).get(loteId).s;
     const kgVig = (l.kg_reales || 0) - kgDecomisado(db, loteId) - kgTransformado(db, loteId);
     if (desp >= kgVig - 0.01 && desp > 0) estado = 'despachado_total';
     else if (desp > 0) estado = 'despachado_parcial';
@@ -9055,6 +9062,22 @@ const KG_DISPONIBLE = `(l.kg_reales - ${SUM_DECOMISO} - ${SUM_TRANSF} - ${SUM_DE
 // reescribe: es un hecho. Lo que la devolución al productor cambia es cuánto de esa
 // partida terminó siendo NUESTRA, que es la cuenta de la que sale lo que le debemos.
 const KG_INGRESADO_NETO = `(l.kg_reales - ${SUM_DEV_PROV})`;
+
+// ── LO QUE HAY DE VERDAD EN LA CÁMARA ─────────────────────────────────────
+//
+// Es KG_DISPONIBLE escrito con la CTE `desp` en vez del subselect: los dos informes
+// del tablero —stock por familia y próximos a vencer— ya traen lo despachado
+// agrupado y no pueden usar la fórmula canónica tal cual.
+//
+// Existe porque esas dos consultas tenían su propia cuenta a mano y quedó vieja:
+// no sumaba lo que el cliente devolvió al piso, así que una partida devuelta
+// figuraba con 0 kg y $0 mientras la mercadería estaba en la cámara y la lista de
+// venta la ofrecía. Y quedaba fuera de la alarma de vencimiento, o sea que se
+// pasaba sin que nadie avisara.
+//
+// Los decomisos también faltaban: eso ya venía mal de antes y se arregla de paso —
+// sobrevaluaba los lotes con decomiso.
+const KG_EN_CAMARA = `(l.kg_reales - COALESCE(de.kg,0) - ${SUM_TRANSF} - ${SUM_DECOMISO} + ${SUM_DEV_STOCK})`;
 
 // ══ EL KILO POR BULTO EFECTIVO, EN SQL ══════════════════════════════════
 //
@@ -10114,7 +10137,10 @@ router.post('/despachos/:id/devolver', requireAuth, express.json(), (req, res) =
     if (!d) return res.status(404).json({ ok: false, error: 'Remito no encontrado o anulado' });
     const pedidos = (Array.isArray(req.body.items) ? req.body.items : [])
       .map((x) => ({ id: Number(x.despacho_item_id), kg: Number(x.kg),
-        destino: x.destino === 'proveedor' ? 'proveedor' : 'stock',
+        // El destino se toma tal cual y se valida abajo: convertir cualquier cosa a
+        // 'stock' hace que un error de tipeo mande al piso mercadería que iba a
+        // volver al productor, sin que nadie se entere.
+        destino: String(x.destino || ''),
         pisoId: x.piso_id ? Number(x.piso_id) : null }))
       .filter((x) => x.id > 0 && x.kg > 0.001);
     if (!pedidos.length) return res.status(400).json({ ok: false, error: 'No mandaste nada para devolver' });
@@ -10125,13 +10151,23 @@ router.post('/despachos/:id/devolver', requireAuth, express.json(), (req, res) =
     // validaciones por separado y devolvía el doble.
     const yaEnEstePedido = {};
     for (const p of pedidos) {
+      // EL FACTOR DEL RENGLÓN PRIMERO. Es el que se usó al despachar; el de la
+      // presentación puede haber cambiado desde entonces, y con dos factores
+      // distintos vuelven más o menos cajones de los que salieron.
       const it = db.prepare(`SELECT di.*, l.oc_item_id AS lote_oc_item,
-          COALESCE(di.kg_por_bulto, ps.factor_conversion) AS kpb
+          COALESCE(di.kg_por_bulto,
+                   CASE WHEN di.bultos > 0 AND di.kg_despachados > 0
+                        THEN di.kg_despachados / di.bultos END,
+                   ps.factor_conversion) AS kpb
         FROM sg_despacho_items di
         LEFT JOIN sg_lotes l ON l.id=di.lote_id
         LEFT JOIN sg_presentaciones ps ON ps.id=di.presentacion_id
         WHERE di.id=? AND di.despacho_id=?`).get(p.id, d.id);
       if (!it) return res.status(400).json({ ok: false, error: 'El renglón ' + p.id + ' no es de este remito' });
+      if (p.destino !== 'stock' && p.destino !== 'proveedor') {
+        return res.status(400).json({ ok: false, error:
+          'Decí a dónde va lo que vuelve: al stock o al productor.' });
+      }
       if (!it.lote_id) {
         return res.status(400).json({ ok: false, error:
           'Ese renglón no tiene partida asociada: no hay stock al que devolverle nada.' });
@@ -10287,13 +10323,19 @@ router.get('/devoluciones/:id', requireAuth, (req, res) => {
       LEFT JOIN sg_despachos d ON d.id=dv.despacho_id
       LEFT JOIN sg_clientes c ON c.id=dv.cliente_id WHERE dv.id=?`).get(req.params.id);
     if (!dv) return res.status(404).json({ ok: false, error: 'No encontrada' });
+    // EL REMITO DE DEVOLUCIÓN AL PRODUCTOR TIENE QUE DECIR A QUÉ PRODUCTOR VA.
+    // Nombraba al supermercado —el que devolvió— en las dos partes del papel, y el
+    // fletero que lo lleva necesita saber a dónde deja la mercadería.
     dv.items = db.prepare(`SELECT dvi.*, l.codigo_lote, pr.nombre AS producto_nombre,
-        p.nombre AS piso_nombre
+        p.nombre AS piso_nombre, prov.razon_social AS productor_nombre
       FROM sg_devolucion_items dvi
       LEFT JOIN sg_lotes l ON l.id=dvi.lote_id
       LEFT JOIN sg_despacho_items di ON di.id=dvi.despacho_item_id
       LEFT JOIN sg_productos pr ON pr.id=di.producto_id
       LEFT JOIN sg_pisos p ON p.id=dvi.piso_id
+      LEFT JOIN sg_oc_items oi ON oi.id = COALESCE(di.oc_item_id, l.oc_item_id)
+      LEFT JOIN sg_oc o ON o.id = oi.oc_id
+      LEFT JOIN sg_proveedores prov ON prov.id = o.proveedor_id
       WHERE dvi.devolucion_id=?`).all(dv.id);
     res.json({ ok: true, data: dv });
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
@@ -12502,13 +12544,13 @@ router.get('/dashboard', requireAuth, (req, res) => {
         FROM sg_despacho_items di JOIN sg_despachos d ON d.id=di.despacho_id AND d.activo=1
         GROUP BY di.lote_id)
       SELECT pr.familia AS familia,
-        COALESCE(SUM(l.kg_reales - COALESCE(de.kg,0) - ${SUM_TRANSF}),0) AS kg,
-        COALESCE(SUM((l.kg_reales - COALESCE(de.kg,0) - ${SUM_TRANSF})*${COSTO_KG}),0) AS valor
+        COALESCE(SUM${KG_EN_CAMARA},0) AS kg,
+        COALESCE(SUM(${KG_EN_CAMARA}*${COSTO_KG}),0) AS valor
       FROM sg_lotes l
       JOIN sg_productos pr ON pr.id=l.producto_id
       LEFT JOIN desp de ON de.lote_id=l.id
       WHERE l.activo=1 AND l.estado NOT IN ('bajado','despachado_total')
-        AND (l.kg_reales - COALESCE(de.kg,0) - ${SUM_TRANSF}) > 0.01
+        AND ${KG_EN_CAMARA} > 0.01
       GROUP BY pr.familia ORDER BY valor DESC`).all();
 
     // Lotes próximos a vencer (≤5 días, incluye vencidos) con stock disponible
@@ -12518,7 +12560,7 @@ router.get('/dashboard', requireAuth, (req, res) => {
         FROM sg_despacho_items di JOIN sg_despachos d ON d.id=di.despacho_id AND d.activo=1
         GROUP BY di.lote_id)
       SELECT l.id, l.codigo_lote, pr.nombre AS producto_nombre, l.calidad,
-        (l.kg_reales - COALESCE(de.kg,0) - ${SUM_TRANSF}) AS kg_disponibles,
+        ${KG_EN_CAMARA} AS kg_disponibles,
         l.fecha_vencimiento_estimada,
         CAST(julianday(l.fecha_vencimiento_estimada)-julianday(date('now','localtime')) AS INTEGER) AS dias_restantes
       FROM sg_lotes l
@@ -12527,7 +12569,7 @@ router.get('/dashboard', requireAuth, (req, res) => {
       WHERE l.activo=1 AND l.estado NOT IN ('bajado','despachado_total')
         AND l.fecha_vencimiento_estimada IS NOT NULL
         AND julianday(l.fecha_vencimiento_estimada)-julianday(date('now','localtime')) <= 5
-        AND (l.kg_reales - COALESCE(de.kg,0) - ${SUM_TRANSF}) > 0.01
+        AND ${KG_EN_CAMARA} > 0.01
       ORDER BY l.fecha_vencimiento_estimada ASC LIMIT 20`).all();
 
     // Top 5 productos por margen del período

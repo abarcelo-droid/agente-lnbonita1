@@ -20469,7 +20469,12 @@ function sgDevImprimir(id){
       +its.map(function(x){
           return '<tr><td><code>'+escH(x.codigo_lote||'')+'</code></td><td>'+escH(x.producto_nombre||'')+'</td>'
             +'<td class="d">'+nr(x.bultos)+'</td><td class="d">'+nr(x.kg)+'</td>'
-            +'<td>'+(x.destino==='proveedor' ? '<b>vuelve al productor</b>' : 'stock')
+            // A QUÉ PRODUCTOR. El fletero que lleva la devolución necesita saber
+            // dónde la deja; decir sólo «vuelve al productor» es mandarlo a
+            // preguntar.
+            +'<td>'+(x.destino==='proveedor'
+                ? ('<b>vuelve a ' + escH(x.productor_nombre || 'el productor') + '</b>')
+                : 'stock')
               +(x.piso_nombre?(' · '+escH(x.piso_nombre)):'')+'</td></tr>';
         }).join('')
       +'<tr class="tot"><td colspan="2">Total</td>'
@@ -20478,8 +20483,14 @@ function sgDevImprimir(id){
       +'</tbody></table>'
       +(alProd.length
           ? '<div style="margin-top:12px;font-size:11.5px;border-left:3px solid #333;padding-left:10px">'
-            + '<b>'+alProd.length+' renglón(es) vuelven al productor.</b> Esa mercadería baja en el '
-            + 'depósito y sale con este mismo remito.</div>' : '')
+            + '<b>'+alProd.length+' renglón(es) vuelven al productor'
+            // Los nombres, sin repetir: es a quién hay que entregarle.
+            + (function(){
+                var n=[]; alProd.forEach(function(x){
+                  var q=x.productor_nombre; if(q && n.indexOf(q)<0) n.push(q); });
+                return n.length ? (' — ' + escH(n.join(', '))) : '';
+              })()
+            + '.</b> Esa mercadería baja en el depósito y sale con este mismo remito.</div>' : '')
       +'<div style="margin-top:34px;display:flex;gap:40px;font-size:11px">'
       +'<div style="flex:1;border-top:1px solid #333;padding-top:4px">Entregó (cliente)</div>'
       +'<div style="flex:1;border-top:1px solid #333;padding-top:4px">Recibió conforme</div></div>';
