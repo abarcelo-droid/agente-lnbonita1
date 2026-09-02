@@ -199,9 +199,9 @@ test('las dos columnas existen, y son del remito', () => {
 test('el remito las guarda', () => {
   const i = SG.indexOf('const postRemito = (req, res)');
   const b = SG.slice(i, SG.indexOf('\r\n};', i));
-  assert.match(b, /creado_por, turno, oc_cliente\)/);
-  assert.match(b, /VALUES \(\?,\?,\?,\?,\?,\?,\?,\?,\?,\?,\?,\?,\?,\?,\?,\?\)/);
-  assert.match(b, /val\(b\.turno\), val\(b\.oc_cliente\)\);/);
+  assert.match(b, /creado_por, turno, oc_cliente, flete_paga\)/);
+  assert.match(b, /VALUES \(\?,\?,\?,\?,\?,\?,\?,\?,\?,\?,\?,\?,\?,\?,\?,\?,\?\)/);
+  assert.match(b, /val\(b\.turno\), val\(b\.oc_cliente\),/);
 });
 
 test('los pide sólo el remito a cadena', () => {
@@ -258,7 +258,9 @@ test('el remito se imprime, y el turno y la OC van arriba', () => {
 test('y el papel trae lo que un remito tiene que traer', () => {
   const i = PANEL.indexOf('function sgDespImprimir(id){');
   const b = PANEL.slice(i, i + 3000);
-  for (const dato of ['Cliente', 'Fecha', 'Transporte', 'Chofer / dominio',
+  // «Flete» y no «Transporte»: el selector de transporte se sacó (2/9/2026), y lo
+  // que hace falta en el papel es quién trae el camión y quién lo paga.
+  for (const dato of ['Cliente', 'Fecha', 'Flete', 'Chofer / dominio',
                       'Lote', 'Producto', 'Cajones', 'Recib\\u00ed conforme']) {
     assert.match(b, new RegExp(dato), 'al remito impreso le falta: ' + dato);
   }
