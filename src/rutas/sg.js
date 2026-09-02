@@ -10016,13 +10016,26 @@ router.get('/despachos/:id/devolver', requireAuth, (req, res) => {
       // NO SE DEVUELVE MÁS DE LO QUE SALIÓ. Sin esta cuenta, dos devoluciones
       // parciales del mismo renglón hacen aparecer mercadería que nunca existió.
       const pend = +(kg - ya).toFixed(2);
-      // Y si la partida ya está documentada, devolverle mercadería al productor
-      // cambiaría una cuenta que ya se cerró. Se dice acá para que la pantalla no
-      // ofrezca ese destino, y el POST lo vuelve a controlar.
+      // ── SI LA PARTIDA YA SE LIQUIDÓ, LA DEVOLUCIÓN ES PÉRDIDA NUESTRA ──
+      //
+      // Pablo, 2/9/2026: «una vez liquidado ya todo es firme». No frena —la
+      // mercadería vuelve igual, el súper ya la devolvió— pero deja de bajar lo que
+      // se le debe al productor, porque ese número quedó cerrado.
+      //
+      // Se avisa acá para que la pantalla lo diga ANTES de registrarla. Una pérdida
+      // silenciosa es peor que un freno: el que la carga cree que le descontó al
+      // productor y no le descontó nada.
       const firme = it.oc_id
-        ? precioFirmeDetalle(db, it.oc_id, 'devolverle mercadería al proveedor') : null;
+        ? precioFirmeDetalle(db, it.oc_id, 'descontarle esta devolución al productor') : null;
       return { ...it, kg_devuelto: ya, kg_pendiente: pend > 0 ? pend : 0,
-        puede_proveedor: !firme, freno_proveedor: firme ? firme.error : null };
+        // El destino 'proveedor' se ofrece SIEMPRE. Lo que cambia es si además
+        // baja lo que se le debe.
+        baja_lo_que_se_le_debe: !firme,
+        aviso_liquidada: firme
+          ? 'Esta partida ya está firme (' + (firme.firme.numero || firme.firme.como) + '): '
+            + 'la mercadería vuelve igual, pero NO se le descuenta al productor. '
+            + 'Queda como pérdida nuestra.'
+          : null };
     });
     res.json({ ok: true, data: { despacho: d, items: out,
       devoluciones: db.prepare(`SELECT id, numero, fecha, estado, motivo
@@ -10065,28 +10078,30 @@ router.post('/despachos/:id/devolver', requireAuth, express.json(), (req, res) =
           `Del renglón salieron ${kgSalio.toFixed(2)} kg y quedan ${Math.max(0, pend).toFixed(2)} kg `
           + `sin devolver: no se pueden devolver ${p.kg.toFixed(2)}.` });
       }
-      if (p.destino === 'stock') {
-        // SIN PISO NO VUELVE AL STOCK. La partida figuraría disponible sin estar en
-        // ningún lado, y la suma de los pisos dejaría de dar lo disponible.
-        if (!p.pisoId) return res.status(400).json({ ok: false, error:
-          'Elegí a qué piso vuelve la mercadería.' });
-        const piso = db.prepare('SELECT id FROM sg_pisos WHERE id=? AND activo=1').get(p.pisoId);
-        if (!piso) return res.status(400).json({ ok: false, error: 'Ese piso no existe o está dado de baja' });
-        // Y si ese piso tiene dueño, lo toca sólo él: meterle mercadería al piso de
-        // otro es hacerle aparecer stock que no puso. Misma regla que la recepción.
-        const noPuede = exigirPiso(db, req, p.pisoId, 'devolver mercadería');
-        if (noPuede) return res.status(403).json({ ok: false, error: noPuede });
-      } else {
-        // DEVOLVERLE MERCADERÍA AL PRODUCTOR CAMBIA LO QUE SE LE DEBE. Si la partida
-        // ya tiene factura o liquidación, esa cuenta está cerrada: para tocarla hay
-        // que anular primero, que es la misma regla que ya rige el precio.
-        const ocItem = it.oc_item_id || it.lote_oc_item;
-        const oc = ocItem ? db.prepare('SELECT oc_id FROM sg_oc_items WHERE id=?').get(ocItem) : null;
-        if (oc && oc.oc_id) {
-          const firme = precioFirmeDetalle(db, oc.oc_id, 'devolverle mercadería al proveedor');
-          if (firme) return res.status(409).json({ ok: false, error: firme.error, firme: firme.firme });
-        }
-      }
+      // ── TODA DEVOLUCIÓN ENTRA POR UN PISO, VAYA DONDE VAYA DESPUÉS ────
+      //
+      // Pablo, 2/9/2026: «tenemos las dos cosas, por eso te pedí que se genere un
+      // remito de devolución. Si querés, ficticiamente para hacer el remito lo
+      // tenés que hacer pasar por un piso».
+      //
+      // Es lo que pasa de verdad: el camión del súper descarga en el depósito, y si
+      // esa mercadería vuelve al productor sale después con su propio remito. Y de
+      // paso el papel tiene de dónde salir — un remito sin mercadería en ningún lado
+      // no se puede emitir.
+      //
+      // Sin piso, además, la partida figuraría disponible sin estar en ningún lado y
+      // la suma de los pisos dejaría de dar lo disponible.
+      if (!p.pisoId) return res.status(400).json({ ok: false, error:
+        p.destino === 'stock'
+          ? 'Elegí a qué piso vuelve la mercadería.'
+          : 'Elegí por qué piso entra: aunque vuelva al productor, la mercadería baja acá '
+            + 'y sale después con el remito de devolución.' });
+      const piso = db.prepare('SELECT id FROM sg_pisos WHERE id=? AND activo=1').get(p.pisoId);
+      if (!piso) return res.status(400).json({ ok: false, error: 'Ese piso no existe o está dado de baja' });
+      // Y si ese piso tiene dueño, lo toca sólo él: meterle mercadería al piso de
+      // otro es hacerle aparecer stock que no puso. Misma regla que la recepción.
+      const noPuede = exigirPiso(db, req, p.pisoId, 'devolver mercadería');
+      if (noPuede) return res.status(403).json({ ok: false, error: noPuede });
       const kpb = Number(it.kpb) > 0 ? Number(it.kpb) : null;
       lineas.push({ p, it, bultos: kpb ? +(p.kg / kpb).toFixed(4) : 0 });
     }
@@ -10105,11 +10120,16 @@ router.post('/despachos/:id/devolver', requireAuth, express.json(), (req, res) =
         VALUES (?,?,?,?,?,?,?)`);
       const lotes = new Set();
       for (const ln of lineas) {
-        ins.run(devId, ln.p.id, ln.it.lote_id, ln.bultos, r2(ln.p.kg), ln.p.destino,
-          ln.p.destino === 'stock' ? ln.p.pisoId : null);
-        // Lo que vuelve al piso, vuelve al piso: la suma de los pisos tiene que
-        // seguir dando lo disponible de la partida.
-        if (ln.p.destino === 'stock') ubicMover(db, ln.it.lote_id, ln.p.pisoId, ln.bultos, r2(ln.p.kg));
+        ins.run(devId, ln.p.id, ln.it.lote_id, ln.bultos, r2(ln.p.kg), ln.p.destino, ln.p.pisoId);
+        // ENTRA SIEMPRE. La suma de los pisos tiene que seguir dando lo disponible.
+        ubicMover(db, ln.it.lote_id, ln.p.pisoId, ln.bultos, r2(ln.p.kg));
+        // Y si vuelve al productor, SALE de nuevo con el remito de devolución: entró
+        // por el piso y se fue. El neto sobre lo disponible es cero, que es lo
+        // correcto —esa mercadería no la tenemos— y queda el rastro de por dónde
+        // pasó.
+        if (ln.p.destino === 'proveedor') {
+          ubicMover(db, ln.it.lote_id, ln.p.pisoId, -ln.bultos, -r2(ln.p.kg));
+        }
         lotes.add(ln.it.lote_id);
       }
       for (const lid of lotes) recalcEstadoLote(db, lid);
@@ -10132,6 +10152,9 @@ router.post('/devoluciones/:id/anular', requireAuth, express.json(), (req, res) 
       'Poné el motivo: una devolución anulada sin motivo, a los dos meses, es un número que nadie puede explicar.' });
     db.transaction(() => {
       for (const it of db.prepare('SELECT * FROM sg_devolucion_items WHERE devolucion_id=?').all(dv.id)) {
+        // Se deshace exactamente lo que se hizo: lo que quedó en el piso se saca; lo
+        // que entró y volvió a salir para el productor ya estaba en cero y no se
+        // toca. Sacarlo igual dejaría el piso en negativo.
         if (it.destino === 'stock' && it.piso_id) {
           ubicMover(db, it.lote_id, it.piso_id, -(Number(it.bultos) || 0), -(Number(it.kg) || 0));
         }
