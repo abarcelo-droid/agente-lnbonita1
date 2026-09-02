@@ -2051,6 +2051,21 @@ try {
   // costo × 1,10. Guardar el porcentaje y no el precio es a propósito — el costo
   // todavía puede cambiar (la balanza, el flete), y el pronóstico que vale es el
   // criterio del comprador, no un número que quedó viejo.
+  // ── LA FOTO DE LA MERMA ──────────────────────────────────────────────────
+  //
+  // Pablo, 2/9/2026: «dentro de stock vamos a avanzar con el módulo MERMA. Qué son
+  // las mermas: stock que se tira. Obviamente debe descontar cantidades de la
+  // partida y lo facturado es 0. Motivo obligatorio, subir foto opcional».
+  //
+  // El motivo dice QUÉ pasó; la foto lo PRUEBA. Una merma de treinta cajones que a
+  // los dos meses hay que discutir con el productor —o con el seguro— vale lo que
+  // vale la evidencia: sin foto es la palabra de uno contra la del otro.
+  //
+  // Opcional a propósito: exigirla haría que el que está en la cámara con las manos
+  // sucias no cargue la merma, y una merma sin registrar es peor que una sin foto.
+  // En la base va la RUTA, como las de la recepción; el archivo va al disco.
+  if (addCol('sg_lote_decomisos',   'foto_ruta',             'TEXT')) added.push('sg_lote_decomisos.foto_ruta');
+  if (addCol('sg_lote_decomisos',   'foto_nombre',           'TEXT')) added.push('sg_lote_decomisos.foto_nombre');
   if (addCol('sg_oc',               'rentabilidad_estimada', 'REAL')) added.push('sg_oc.rentabilidad_estimada');
   if (addCol('sg_devolucion_items', 'descuenta_al_productor', 'INTEGER')) added.push('sg_devolucion_items.descuenta_al_productor');
   if (addCol('sg_despachos',        'flete_a_cargo',        'TEXT')) added.push('sg_despachos.flete_a_cargo');
