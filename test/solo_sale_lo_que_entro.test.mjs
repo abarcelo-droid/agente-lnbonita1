@@ -199,9 +199,9 @@ test('las dos columnas existen, y son del remito', () => {
 test('el remito las guarda', () => {
   const i = SG.indexOf('const postRemito = (req, res)');
   const b = SG.slice(i, SG.indexOf('\r\n};', i));
-  assert.match(b, /creado_por, turno, oc_cliente, flete_paga\)/);
-  assert.match(b, /VALUES \(\?,\?,\?,\?,\?,\?,\?,\?,\?,\?,\?,\?,\?,\?,\?,\?,\?\)/);
-  assert.match(b, /val\(b\.turno\), val\(b\.oc_cliente\),/);
+  // El flete se abrio en tres columnas (2/9/2026) con el vocabulario de la orden.
+  assert.match(b, /turno, oc_cliente, flete_paga,\r?\n\s*flete_a_cargo, flete_pagado_por, flete_monto\)/);
+  assert.match(b, /VALUES \(\?,\?,\?,\?,\?,\?,\?,\?,\?,\?,\?,\?,\?,\?,\?,\?,\?,\?,\?,\?\)/);
 });
 
 test('los pide sólo el remito a cadena', () => {

@@ -2871,6 +2871,46 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
       <div class="sgv-subtab" data-sub="remsuper"      onclick="sgVenSub('remsuper')">🏪 Remitos Supermercados</div>
       <div class="sgv-subtab" data-sub="directa"       onclick="sgVenSub('directa')">💵 Facturación Puesto</div>
       <div class="sgv-subtab" data-sub="supermercados" onclick="sgVenSub('supermercados')">🏪 Facturación Supermercados</div>
+      <div class="sgv-subtab" data-sub="devoluciones"  onclick="sgVenSub('devoluciones')">↩️ Devoluciones</div>
+    </div>
+
+    <!-- ══ ↩️ DEVOLUCIÓN DE MERCADERÍA ═══════════════════════════════════
+         Pablo, 2/9/2026: «devolución de mercadería de los súper. De un remito
+         particular permite hacer una devolución parcial o total, y la mercadería
+         devuelta tiene dos opciones: o vuelve al stock eligiendo alguno de los
+         pisos, o se devuelve al proveedor».
+
+         La devolución SALE DE UN REMITO: se elige cuál y ahí se dice, renglón por
+         renglón, cuánto vuelve y a dónde va. -->
+    <div class="sgv-sub" id="sgv-sub-devoluciones">
+      <style>
+        /* Nada se desplaza de costado. */
+        #sgv-sub-devoluciones .ab-table-wrap{overflow-x:hidden !important}
+        #sgv-sub-devoluciones table{table-layout:fixed;width:100%}
+        #sgv-sub-devoluciones th:nth-child(1),#sgv-sub-devoluciones td:nth-child(1){width:15%}
+        #sgv-sub-devoluciones th:nth-child(2),#sgv-sub-devoluciones td:nth-child(2){width:15%}
+        #sgv-sub-devoluciones th:nth-child(3),#sgv-sub-devoluciones td:nth-child(3){width:9%}
+        #sgv-sub-devoluciones th:nth-child(4),#sgv-sub-devoluciones td:nth-child(4){width:19%}
+        #sgv-sub-devoluciones th:nth-child(5),#sgv-sub-devoluciones td:nth-child(5){width:11%}
+        #sgv-sub-devoluciones th:nth-child(6),#sgv-sub-devoluciones td:nth-child(6){width:15%}
+        #sgv-sub-devoluciones th:nth-child(7),#sgv-sub-devoluciones td:nth-child(7){width:16%}
+        #sgv-sub-devoluciones td:nth-child(-n+5){overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+        #sgv-sub-devoluciones td:nth-child(7){white-space:normal}
+        #sgv-sub-devoluciones td:nth-child(7) .btn{margin:1px 0;max-width:100%}
+        @media(max-width:900px){ #sgv-sub-devoluciones .ab-table-wrap{overflow-x:auto !important} }
+      </style>
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px">
+        <div style="font-size:11.5px;color:var(--mut)">
+          Lo que el cliente devolvió de un remito. Vuelve al stock —a un piso— o se le
+          devuelve al productor con su propio remito de devolución.
+        </div>
+        <button class="btn bb" onclick="sgDevAbrir()">+ Registrar una devolución</button>
+      </div>
+      <div class="ab-table-wrap"><table class="pa-tbl">
+        <thead><tr><th>N°</th><th>Remito</th><th>Fecha</th><th>Cliente</th>
+          <th style="text-align:right">Cajones</th><th>Motivo</th><th style="text-align:center"></th></tr></thead>
+        <tbody id="sg-tb-devoluciones"><tr><td colspan="7" class="emp">Cargando…</td></tr></tbody>
+      </table></div>
     </div>
 
     <!-- ══ 🏪 REMITOS A SUPERMERCADOS ══════════════════════════════════
@@ -6934,6 +6974,44 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
 </div>
 
 <!-- Modal Crear despacho -->
+<!-- ══ ↩️ DEVOLVER MERCADERÍA DE UN REMITO ═════════════════════════════════
+     Pablo, 2/9/2026. Se elige el remito y ahí se dice, renglón por renglón, cuánto
+     vuelve y a dónde va. Parcial o total es la misma pantalla: la diferencia son
+     los kilos que se ponen, no un modo aparte.
+
+     Va al nivel de arriba, con los demás modales: se abre desde la solapa de
+     Devoluciones y también desde la ficha de un remito, y una pantalla escondida no
+     puede mostrar un modal que tiene adentro. -->
+<div class="ab-modal-overlay sg-mod" id="sg-dev-modal">
+  <div class="ab-modal" style="width:min(1000px,96vw);max-width:96vw;max-height:90vh;overflow-y:auto;overflow-x:hidden">
+    <div class="mhd"><div class="mht" id="sg-dev-tit">↩️ Devolver mercadería</div>
+      <button class="mcl" onclick="closeMB('sg-dev-modal')">×</button></div>
+    <style>
+      #sg-dev-modal .ab-table-wrap{overflow-x:hidden !important}
+      #sg-dev-modal input,#sg-dev-modal select{max-width:100%;box-sizing:border-box}
+      @media(max-width:900px){ #sg-dev-modal .ab-table-wrap{overflow-x:auto !important} }
+    </style>
+    <div class="mbd">
+      <div class="sgr-card">
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px 12px;margin-bottom:12px">
+          <div class="fl"><label>Remito <span style="color:var(--err)">*</span></label>
+            <input type="text" placeholder="🔎 número o cliente" oninput="sgDevFiltrar(this.value)" autocomplete="off" style="margin-bottom:4px">
+            <select id="sg-dev-remito" onchange="sgDevCargar()"></select></div>
+          <div class="fl"><label>Fecha</label><input type="date" id="sg-dev-fecha"></div>
+          <div class="fl" style="grid-column:span 2"><label>Motivo</label>
+            <input id="sg-dev-motivo" maxlength="200" placeholder="por qué lo devolvieron"></div>
+        </div>
+        <div id="sg-dev-lineas"><div style="font-size:12px;color:var(--mut)">Elegí un remito.</div></div>
+        <div id="sg-dev-resumen" style="margin-top:12px;font-size:12.5px"></div>
+        <div style="text-align:right;margin-top:14px">
+          <button class="btn bo" onclick="closeMB('sg-dev-modal')">Cancelar</button>
+          <button class="btn bb" id="sg-dev-btn" onclick="sgDevGuardar()">Registrar la devolución</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
 <div class="ab-modal-overlay" id="sg-desp-modal">
   <!-- EL ANCHO ERA FIJO Y LA GRILLA RÍGIDA. 880px sin max-width: en una pantalla
        de portátil el modal era más ancho que la ventana. Y tres columnas iguales
@@ -6962,18 +7040,47 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
           <div style="font-size:11px;color:var(--mut);margin-top:3px">La que dio la cadena, no la nuestra</div></div>
         <div class="fl"><label>Pedido <span style="font-weight:400;color:var(--mut);font-size:11px">opcional</span></label><select id="sg-desp-ped"><option value="">— Sin pedido —</option></select></div>
         <div class="fl"><label>Fecha de despacho</label><input type="date" id="sg-desp-fecha"></div>
-        <div class="fl"><label>Fletero</label><select id="sg-desp-fletero" onchange="sgDespFletePagaPintar()"><option value="">— Sin fletero —</option></select></div>
-        <!-- ── QUIÉN PAGA EL FLETE ─────────────────────────────────────────
-             De esto depende que salga plata nuestra: si lo pagamos nosotros, queda
-             un gasto de flete de salida esperando la factura del fletero. Si lo
-             paga el otro, el camión queda anotado igual —es trazabilidad del
-             remito— pero no se abre ningún pendiente que nadie va a valorizar. -->
-        <div class="fl" id="sg-desp-flete-box" style="display:none"><label>¿Quién paga el flete? <span style="color:var(--err)">*</span></label>
-          <select id="sg-desp-flete-paga" onchange="sgDespFletePagaPintar()">
-            <option value="nosotros">Lo pagamos nosotros</option>
-            <option value="vendedor">Lo paga el vendedor</option>
-          </select>
-          <div id="sg-desp-flete-nota" style="font-size:11px;color:var(--mut);margin-top:3px"></div></div>
+        <!-- ══ 🚚 LOGÍSTICA, CON LAS MISMAS CONSIDERACIONES QUE LA ORDEN ══
+             Pablo, 2/9/2026: «la parte de logística en el remito quedó media rara.
+             Deberíamos tomar consideraciones similares a las que tenemos en la
+             orden de compra, sobre todo para que quede bien claro si lo tenemos
+             que descontar o no en la liquidación».
+
+             La versión anterior preguntaba una sola cosa —¿lo pagamos nosotros o
+             el vendedor?— y con eso no alcanza: en una salida son TRES los que
+             pueden tener el flete a cargo, y cuando es del productor todavía falta
+             saber quién pone la plata. Es exactamente la misma pregunta que hace
+             la orden de compra, del otro lado del mostrador. -->
+        <div class="fl ff sg-desp-log" style="grid-column:1/-1;border:1px solid var(--bor);
+             border-radius:10px;padding:10px 12px;background:var(--bg)">
+          <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;
+               color:var(--mut);margin-bottom:8px">🚚 Logística</div>
+          <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:10px 12px">
+            <div class="fl"><label>Fletero</label>
+              <select id="sg-desp-fletero" onchange="sgDespFleteCargo()"><option value="">— Sin fletero —</option></select></div>
+            <div class="fl" id="sg-desp-flete-cargo-wrap" style="display:none"><label>Flete a cargo de <span style="color:var(--err)">*</span></label>
+              <select id="sg-desp-flete-cargo" onchange="sgDespFleteCargo()">
+                <option value="nosotros">Nosotros (San Gerónimo)</option>
+                <option value="cliente">El cliente</option>
+                <option value="productor">El productor de la mercadería</option>
+              </select></div>
+            <!-- QUIÉN PUSO LA PLATA. Sólo con flete del productor, y sólo ahí,
+                 porque son dos circuitos distintos: si lo paga él no se toca nada;
+                 si lo adelanta San Gerónimo hay que pagarle al fletero y
+                 recuperarlo de su liquidación. Igual que en la orden. -->
+            <div class="fl" id="sg-desp-flete-quien-wrap" style="display:none"><label>¿Quién lo paga?</label>
+              <select id="sg-desp-flete-quien" onchange="sgDespFleteCargo()">
+                <option value="productor">El productor directamente</option>
+                <option value="san_geronimo">Lo adelanta San Gerónimo</option>
+              </select></div>
+            <div class="fl" id="sg-desp-flete-monto-wrap" style="display:none"><label>Monto de flete ($)</label>
+              <input type="number" id="sg-desp-flete-monto" min="0" step="0.01" placeholder="lo que se pactó"></div>
+          </div>
+          <!-- QUÉ IMPLICA LO QUE SE ELIGIÓ. El que arma el remito elegía a ciegas
+               entre opciones con consecuencias distintas. -->
+          <div id="sg-desp-flete-ayuda" style="font-size:11.5px;line-height:1.45;
+               border-left:3px solid var(--bor);padding:2px 0 2px 10px;color:var(--mut);margin-top:8px"></div>
+        </div>
         <div class="fl"><label>Chofer y dominio</label><input id="sg-desp-chofer" placeholder="chofer"><input id="sg-desp-dominio" placeholder="dominio" style="margin-top:4px"></div>
         <!-- LOS DOS DE LA COOPERATIVA VAN JUNTOS: el segundo sólo tiene sentido
              si se eligió el primero, y separados por la grilla parecían datos
@@ -17326,6 +17433,7 @@ function sgVenSub(s){
   else if (s==='supermercados') sgSuperInit();
   // La otra puerta de emisión: los mismos remitos, los de las cadenas.
   else if (s==='remsuper') sgRemSuperLoad();
+  else if (s==='devoluciones') sgDevLoad();
   // Pedidos y Facturar se fueron a Administración de Ventas. Salidas quedó con
   // lo que efectivamente SALE: el remito, y la venta que se factura en el acto.
   else if (s==='pedidos'){ SG.venSub='despachos'; cmAbrirModulo('sg-pedidos'); }
@@ -18959,10 +19067,22 @@ function sgNcModo(){
   var a=eid('sg-nc-modo-ayuda');
   if(a) a.innerHTML = (m==='precio')
     ? 'La mercadería <b>no vuelve</b>: sigue en la casa del cliente. Se le acredita plata sobre los mismos kilos.'
-    : 'La mercadería <b>vuelve</b>: esos kilos regresan al remito como «entregado sin comprobante» y se pueden volver a facturar.';
+    : 'La mercadería <b>vuelve</b>: esos kilos regresan al remito como «entregado sin comprobante» y se pueden '
+      + 'volver a facturar. <b>Después se registra la devolución</b> para decir a qué piso entra o si vuelve '
+      + 'al productor — la nota arregla el comprobante, no mueve la mercadería de lugar.';
   var th=eid('sg-nc-th-cant');
   if(th) th.textContent = (m==='precio') ? 'Kilos (no vuelven)' : 'Se devuelve';
   sgNcRender();
+}
+// De qué remito salieron los renglones de esta nota. Si son de varios, no se
+// adivina: se abre la lista y que elija — abrir el equivocado es peor que no abrir
+// ninguno.
+function sgNcRemitoDe(base){
+  var ids = [];
+  (base && base.renglones || []).forEach(function(l){
+    if (l.despacho_id && ids.indexOf(l.despacho_id) < 0) ids.push(l.despacho_id);
+  });
+  return ids.length === 1 ? ids[0] : null;
 }
 function sgNcModoVal(){
   var el=document.querySelector('input[name="sg-nc-modo"]:checked');
@@ -19044,6 +19164,24 @@ function sgNcEmitir(){
       +String(r.cbte_nro||0).padStart(8,'0')+(r.cae?'':' (manual, sin CAE)'),'ok');
     sgFacListLoad();
     if(r.pdf_url) window.open(r.pdf_url,'_blank');
+    // ── Y LA MERCADERÍA, ¿DÓNDE QUEDÓ? ────────────────────────────────
+    //
+    // La nota arregló el comprobante: esos kilos volvieron a estar «entregados sin
+    // comprobante» y se pueden refacturar. Pero la mercadería NO está en ningún
+    // piso, y si nadie registra la devolución queda figurando disponible sin estar
+    // en ningún lado.
+    //
+    // No se mueve el stock desde acá —sería un segundo escritor, y el stock tiene
+    // uno solo— pero tampoco se deja al que la emitió adivinando: se le abre la
+    // devolución con el remito ya elegido. Un paso, dos documentos.
+    var remito = sgNcRemitoDe(b);
+    if (!precio && remito) {
+      setTimeout(function(){
+        if (confirm('La nota está emitida.\n\n'
+          + 'Ahora falta decir DÓNDE quedó esa mercadería: a qué piso entra, o si vuelve '
+          + 'al productor.\n\n¿Registramos la devolución?')) sgDevAbrir(remito);
+      }, 400);
+    }
   });
 }
 
@@ -20086,10 +20224,277 @@ function sgDespListar(modo){
         +'<td style="text-align:center"><span class="bdg bok">'+(SG_ESTDESP[d.estado]||d.estado)+'</span></td>'
         +'<td style="text-align:right;white-space:nowrap">'
         +'<button class="btn bo bs" title="Imprimir el remito" onclick="sgDespImprimir('+d.id+')">🖨</button> '
+        // LA DEVOLUCIÓN SALE DE UN REMITO. El que la registra está mirando ese
+        // remito; mandarlo a otra pantalla a buscarlo de nuevo es pedirle el mismo
+        // dato dos veces. Se ofrece sólo a quien puede operar el módulo: el botón
+        // que contesta 403 hace creer que se rompió algo.
+        +(lnbPuedeOperar('sg-ventas')
+            ? '<button class="btn bo bs" title="Registrar una devolución de este remito" onclick="sgDevAbrir('+d.id+')">↩️</button> ' : '')
         +'<button class="btn bo bs" onclick="sgDespVer('+d.id+')">🔍</button>'
         +(lnbPuedeAnular('sg-ventas')?' <button class="btn bd bs" title="Anular el despacho" onclick="sgDespAnular('+d.id+')">✖</button>':'')
         +'</td></tr>';
     }).join('');
+  });
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+// ↩️ DEVOLUCIÓN DE MERCADERÍA DE UN REMITO
+// ══════════════════════════════════════════════════════════════════════════
+//
+// Pablo, 2/9/2026: «de un remito particular permite hacer una devolución parcial o
+// total, y la mercadería devuelta tiene dos opciones: o vuelve al stock eligiendo
+// alguno de los pisos, o se devuelve al proveedor».
+//
+// Parcial o total NO son dos modos: son los kilos que se ponen. Un modo aparte
+// obliga a elegir antes de mirar los renglones, que es cuando recién se sabe.
+var SGDEV = { remitos: [], items: [], pisos: [], despachoId: null };
+
+function sgDevLoad(){
+  var tb = eid('sg-tb-devoluciones'); if(!tb) return;
+  tb.innerHTML = '<tr><td colspan="7" class="emp">Cargando…</td></tr>';
+  api('/api/sg/devoluciones').then(function(r){
+    var rows = (r&&r.ok) ? r.data : [];
+    if(!rows.length){ tb.innerHTML='<tr><td colspan="7" class="emp">Todavía no hay devoluciones.</td></tr>'; return; }
+    var puede = lnbPuedeAnular('sg-ventas');
+    tb.innerHTML = rows.map(function(d){
+      var anulada = d.estado === 'anulada';
+      return '<tr'+(anulada?' style="opacity:.55"':'')+'>'
+        +'<td><code>'+esc(d.numero||'')+'</code>'+(anulada?' <span class="bdg ber">anulada</span>':'')+'</td>'
+        +'<td><code>'+esc(d.remito_numero||'—')+'</code></td>'
+        +'<td>'+esc(d.fecha||'—')+'</td>'
+        +'<td>'+esc(d.cliente_nombre||'—')+'</td>'
+        +'<td style="text-align:right">'+nr(d.bultos)
+          +(d.al_proveedor>0?' <span class="bdg bpe" title="parte vuelve al productor">↩ productor</span>':'')+'</td>'
+        +'<td>'+esc(d.motivo||'—')+'</td>'
+        +'<td style="text-align:center;white-space:nowrap">'
+        +'<button class="btn bo bs" title="Ver el papel" onclick="sgDevImprimir('+d.id+')">🖨</button>'
+        +((!anulada && puede)?(' <button class="btn bd bs" title="Anular la devolución" onclick="sgDevAnular('+d.id+')">✖</button>'):'')
+        +'</td></tr>';
+    }).join('');
+  });
+}
+
+// Se abre desde la solapa o desde la ficha de un remito. Con `despachoId` viene
+// elegido: el que está mirando un remito no tiene que buscarlo de nuevo en la lista.
+function sgDevAbrir(despachoId){
+  SGDEV = { remitos: [], items: [], pisos: [], despachoId: despachoId || null };
+  eid('sg-dev-fecha').value = new Date().toISOString().slice(0,10);
+  eid('sg-dev-motivo').value = '';
+  eid('sg-dev-lineas').innerHTML = '<div style="font-size:12px;color:var(--mut)">Elegí un remito.</div>';
+  eid('sg-dev-resumen').innerHTML = '';
+  eid('sg-dev-modal').classList.add('on');
+  // Los pisos primero: sin ellos el renglón no puede ofrecer a dónde vuelve.
+  api('/api/sg/pisos').then(function(r){ SGDEV.pisos = (r&&r.ok) ? (r.data||[]) : []; sgDevPintar(); });
+  api('/api/sg/despachos?solo_remitos=1').then(function(r){
+    SGDEV.remitos = (r&&r.ok) ? (r.data||[]) : [];
+    sgDevOpts('');
+    if (SGDEV.despachoId) { eid('sg-dev-remito').value = String(SGDEV.despachoId); sgDevCargar(); }
+  });
+}
+function sgDevOpts(q){
+  var t = sgNorm(String(q||'').trim());
+  var l = SGDEV.remitos.filter(function(d){
+    if(!t) return true;
+    return sgNorm(d.numero).indexOf(t)>=0 || sgNorm(d.cliente_nombre).indexOf(t)>=0
+        || sgNorm(d.cliente_alias).indexOf(t)>=0;
+  });
+  eid('sg-dev-remito').innerHTML = '<option value="">— Elegí el remito —</option>'
+    + l.map(function(d){
+        return '<option value="'+d.id+'">'+esc(d.numero||('Desp '+d.id))+' · '
+          + esc(d.cliente_nombre||'') + ' · ' + esc(d.fecha_despacho||'') + '</option>';
+      }).join('');
+}
+function sgDevFiltrar(q){ var v=eid('sg-dev-remito').value; sgDevOpts(q); eid('sg-dev-remito').value=v; }
+
+function sgDevCargar(){
+  var id = eid('sg-dev-remito').value;
+  SGDEV.items = [];
+  if(!id){ sgDevPintar(); return; }
+  eid('sg-dev-lineas').innerHTML = '<div style="font-size:12px;color:var(--mut)">Cargando…</div>';
+  api('/api/sg/despachos/'+id+'/devolver').then(function(r){
+    if(!r||!r.ok){ eid('sg-dev-lineas').innerHTML='<div style="color:var(--err)">'+esc((r&&r.error)||'Error')+'</div>'; return; }
+    SGDEV.items = (r.data.items||[]).map(function(it){
+      return { despacho_item_id: it.despacho_item_id, producto: it.producto_nombre||'',
+        lote: it.codigo_lote||'', kpb: Number(it.kg_por_bulto)||0,
+        kg_despachado: Number(it.kg_despachados)||0, kg_devuelto: Number(it.kg_devuelto)||0,
+        kg_pendiente: Number(it.kg_pendiente)||0,
+        // Lo que vuelve arranca en CERO: una devolución total es apretar «todo»,
+        // no lo que pasa si nadie mira los renglones.
+        kg: 0, destino: 'stock', piso_id: '',
+        aviso_liquidada: it.aviso_liquidada || null };
+    });
+    sgDevPintar();
+  });
+}
+
+function sgDevPisoOpts(sel){
+  return '<option value="">— piso —</option>' + (SGDEV.pisos||[]).map(function(p){
+    return '<option value="'+p.id+'"'+(String(p.id)===String(sel)?' selected':'')+'>'+escH(p.nombre||('Piso '+p.id))+'</option>';
+  }).join('');
+}
+
+function sgDevPintar(){
+  var c = eid('sg-dev-lineas'); if(!c) return;
+  if(!SGDEV.items.length){
+    c.innerHTML = '<div style="font-size:12px;color:var(--mut)">'
+      + (eid('sg-dev-remito').value ? 'Ese remito no tiene nada pendiente de devolver.' : 'Elegí un remito.')
+      + '</div>';
+    sgDevTotales(); return;
+  }
+  c.innerHTML = '<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:6px">'
+      + '<div style="font-weight:600;font-size:13px">Qué vuelve</div>'
+      + '<button class="btn bo bs" onclick="sgDevTodo()">Devolver todo lo pendiente</button></div>'
+    + '<div class="ab-table-wrap"><table class="pa-tbl"><thead><tr>'
+      + '<th>Producto</th><th>Partida</th><th style="text-align:right">Salió</th>'
+      + '<th style="text-align:right">Ya volvió</th><th style="text-align:right">Vuelve ahora</th>'
+      + '<th>A dónde va</th><th>Entra por</th></tr></thead><tbody>'
+    + SGDEV.items.map(function(it,i){
+        var u = it.kpb>0 ? 'cj' : 'kg';
+        var aCj = function(kg){ return (it.kpb>0) ? (Math.round(kg/it.kpb*100)/100) : kg; };
+        return '<tr>'
+          +'<td>'+escH(it.producto)+'</td><td><code>'+escH(it.lote)+'</code></td>'
+          +'<td style="text-align:right;color:var(--mut)">'+nr(aCj(it.kg_despachado))+' '+u+'</td>'
+          +'<td style="text-align:right;color:var(--mut)">'+nr(aCj(it.kg_devuelto))+' '+u+'</td>'
+          +'<td style="text-align:right"><input type="number" min="0" step="0.01" style="width:90px;text-align:right"'
+            +' value="'+(it.kg?aCj(it.kg):'')+'" placeholder="'+nr(aCj(it.kg_pendiente))+'"'
+            +' oninput="sgDevUpd('+i+',\'kg\',this.value)"></td>'
+          +'<td><select onchange="sgDevUpd('+i+',\'destino\',this.value)">'
+            +'<option value="stock"'+(it.destino==='stock'?' selected':'')+'>Vuelve al stock</option>'
+            +'<option value="proveedor"'+(it.destino==='proveedor'?' selected':'')+'>Se le devuelve al productor</option>'
+            +'</select>'
+            // EL AVISO DE LA PARTIDA FIRME. No frena —la mercadería vuelve igual—
+            // pero el que la carga tiene que saber que no le está descontando nada.
+            +((it.destino==='proveedor' && it.aviso_liquidada)
+                ? '<div style="font-size:10.5px;color:var(--err);margin-top:3px">'+escH(it.aviso_liquidada)+'</div>' : '')
+          +'</td>'
+          +'<td><select onchange="sgDevUpd('+i+',\'piso_id\',this.value)">'+sgDevPisoOpts(it.piso_id)+'</select>'
+            +(it.destino==='proveedor'
+                ? '<div style="font-size:10.5px;color:var(--mut);margin-top:3px">baja acá y sale con el remito de devolución</div>' : '')
+          +'</td></tr>';
+      }).join('')
+    + '</tbody></table></div>';
+  sgDevTotales();
+}
+
+// Lo tipeado está en la unidad del renglón (cajones si la partida los tiene) y se
+// guarda en KILOS, que es como se cuenta el stock.
+function sgDevUpd(i, campo, v){
+  var it = SGDEV.items[i]; if(!it) return;
+  if (campo === 'kg') {
+    var n = Number(v)||0;
+    it.kg = (it.kpb>0) ? Math.round(n*it.kpb*10000)/10000 : n;
+  } else {
+    it[campo] = v;
+    if (campo === 'destino') sgDevPintar();
+  }
+  sgDevTotales();
+}
+function sgDevTodo(){
+  SGDEV.items.forEach(function(it){ it.kg = it.kg_pendiente; });
+  sgDevPintar();
+}
+function sgDevTotales(){
+  var e = eid('sg-dev-resumen'); if(!e) return;
+  var kg = 0, cj = 0, prov = 0, sinPiso = 0, deMas = 0;
+  SGDEV.items.forEach(function(it){
+    if(!(it.kg>0)) return;
+    kg += it.kg; cj += (it.kpb>0 ? it.kg/it.kpb : 0);
+    if(it.destino==='proveedor') prov++;
+    if(!it.piso_id) sinPiso++;
+    if(it.kg > it.kg_pendiente + 0.01) deMas++;
+  });
+  var partes = [];
+  if(kg>0) partes.push('<b>'+nr(cj)+'</b> cajones · <b>'+nr(kg)+'</b> kg');
+  if(prov>0) partes.push(prov+' renglón(es) vuelven al productor');
+  var alerta = '';
+  if(deMas>0) alerta = '<div style="color:var(--err);margin-top:4px">Hay '+deMas
+    +' renglón(es) con más de lo que quedaba por devolver.</div>';
+  else if(kg>0 && sinPiso>0) alerta = '<div style="color:var(--err);margin-top:4px">Falta decir por qué piso entra en '
+    +sinPiso+' renglón(es).</div>';
+  e.innerHTML = partes.length ? (partes.join(' · ') + alerta)
+    : '<span style="color:var(--mut)">Poné cuánto vuelve de cada renglón.</span>';
+  var b = eid('sg-dev-btn');
+  if(b) b.disabled = !(kg>0) || deMas>0 || sinPiso>0;
+}
+
+function sgDevGuardar(){
+  var id = eid('sg-dev-remito').value;
+  if(!id){ toast('Elegí el remito','er'); return; }
+  var items = SGDEV.items.filter(function(it){ return it.kg>0; }).map(function(it){
+    return { despacho_item_id: it.despacho_item_id, kg: it.kg,
+      destino: it.destino, piso_id: it.piso_id ? Number(it.piso_id) : null };
+  });
+  if(!items.length){ toast('Poné cuánto vuelve','er'); return; }
+  api('/api/sg/despachos/'+id+'/devolver','POST',{
+    fecha: eid('sg-dev-fecha').value, motivo: eid('sg-dev-motivo').value, items: items
+  }).then(function(r){
+    if(!r||!r.ok){ toast((r&&r.error)||'Error','er'); return; }
+    toast('Devolución '+(r.data&&r.data.numero||'')+' registrada','ok');
+    closeMB('sg-dev-modal');
+    sgDevLoad();
+    // Y se ofrece el papel en el acto, que es lo que se hace con una devolución.
+    if(r.data&&r.data.id) sgDevImprimir(r.data.id);
+  });
+}
+
+function sgDevAnular(id){
+  var m = prompt('¿Por qué se anula esta devolución?\n\nLo que había vuelto al piso se saca de vuelta.');
+  if(m===null) return;
+  if(!String(m).trim()){ toast('Poné el motivo','er'); return; }
+  api('/api/sg/devoluciones/'+id+'/anular','POST',{ motivo:m }).then(function(r){
+    if(r&&r.ok){ toast('Devolución anulada','ok'); sgDevLoad(); }
+    else toast((r&&r.error)||'Error','er');
+  });
+}
+
+// ── EL REMITO DE DEVOLUCIÓN ────────────────────────────────────────────
+// El papel que acompaña la mercadería que vuelve. Los renglones que van al
+// productor se marcan: es lo que el fletero tiene que dejar en otro lado.
+function sgDevImprimir(id){
+  api('/api/sg/devoluciones/'+id).then(function(r){
+    if(!r||!r.ok){ toast((r&&r.error)||'No se pudo abrir','er'); return; }
+    var d = r.data, its = d.items||[];
+    var alProd = its.filter(function(x){ return x.destino==='proveedor'; });
+    var h = '<h1>Remito de devolución '+escH(d.numero||'')+'</h1>'
+      +'<h2>PUENTE CORDON SA · San Ger\u00f3nimo · MCBA Nave 4</h2>'
+      +(d.estado==='anulada'?'<div style="color:#b91c1c;font-weight:700;margin-bottom:10px">ANULADA — '+escH(d.anulado_motivo||'')+'</div>':'')
+      +'<table style="margin-bottom:14px"><tbody>'
+      +'<tr><td><b>Cliente</b></td><td>'+escH(d.cliente_nombre||'—')+'</td>'
+        +'<td><b>Fecha</b></td><td>'+escH(d.fecha||'—')+'</td></tr>'
+      +'<tr><td><b>Devuelve del remito</b></td><td>'+escH(d.remito_numero||'—')+'</td>'
+        +'<td><b>Motivo</b></td><td>'+escH(d.motivo||'—')+'</td></tr>'
+      +'</tbody></table>'
+      +'<table><thead><tr><th>Partida</th><th>Producto</th><th class="d">Cajones</th>'
+        +'<th class="d">Kg</th><th>Destino</th></tr></thead><tbody>'
+      +its.map(function(x){
+          return '<tr><td><code>'+escH(x.codigo_lote||'')+'</code></td><td>'+escH(x.producto_nombre||'')+'</td>'
+            +'<td class="d">'+nr(x.bultos)+'</td><td class="d">'+nr(x.kg)+'</td>'
+            // A QUÉ PRODUCTOR. El fletero que lleva la devolución necesita saber
+            // dónde la deja; decir sólo «vuelve al productor» es mandarlo a
+            // preguntar.
+            +'<td>'+(x.destino==='proveedor'
+                ? ('<b>vuelve a ' + escH(x.productor_nombre || 'el productor') + '</b>')
+                : 'stock')
+              +(x.piso_nombre?(' · '+escH(x.piso_nombre)):'')+'</td></tr>';
+        }).join('')
+      +'<tr class="tot"><td colspan="2">Total</td>'
+      +'<td class="d">'+nr(its.reduce(function(a,x){return a+(Number(x.bultos)||0);},0))+'</td>'
+      +'<td class="d">'+nr(its.reduce(function(a,x){return a+(Number(x.kg)||0);},0))+'</td><td></td></tr>'
+      +'</tbody></table>'
+      +(alProd.length
+          ? '<div style="margin-top:12px;font-size:11.5px;border-left:3px solid #333;padding-left:10px">'
+            + '<b>'+alProd.length+' renglón(es) vuelven al productor'
+            // Los nombres, sin repetir: es a quién hay que entregarle.
+            + (function(){
+                var n=[]; alProd.forEach(function(x){
+                  var q=x.productor_nombre; if(q && n.indexOf(q)<0) n.push(q); });
+                return n.length ? (' — ' + escH(n.join(', '))) : '';
+              })()
+            + '.</b> Esa mercadería baja en el depósito y sale con este mismo remito.</div>' : '')
+      +'<div style="margin-top:34px;display:flex;gap:40px;font-size:11px">'
+      +'<div style="flex:1;border-top:1px solid #333;padding-top:4px">Entregó (cliente)</div>'
+      +'<div style="flex:1;border-top:1px solid #333;padding-top:4px">Recibió conforme</div></div>';
+    _ccImprimir('Devolución '+(d.numero||''), h);
   });
 }
 
@@ -20120,7 +20525,7 @@ function sgDespImprimir(id){
       +'<tr><td><b>Cliente</b></td><td>'+escH(d.cliente_nombre||'—')+'</td>'
         +'<td><b>Fecha</b></td><td>'+escH(d.fecha_despacho||'—')+'</td></tr>'
       +'<tr><td><b>Flete</b></td><td>'+escH(d.fletero_nombre||'—')
-        +(d.fletero_nombre?(' · '+(sgFletePagaTxt(d.flete_paga))):'')+'</td>'
+        +(d.fletero_nombre?(' · '+(sgFletePagaTxt(d.flete_a_cargo || d.flete_paga, d.flete_pagado_por))):'')+'</td>'
         +'<td><b>Chofer / dominio</b></td><td>'+escH(d.chofer||'—')+' · '+escH(d.dominio||'—')+'</td></tr>'
       +'</tbody></table>'
       +'<table><thead><tr><th>Lote</th><th>Producto</th><th class="d">Cajones</th><th class="d">Kg</th></tr></thead><tbody>'
@@ -20176,8 +20581,10 @@ function sgDespOpen(modo){
   ['sg-desp-chofer','sg-desp-dominio','sg-desp-obs','sg-desp-bultos'].forEach(function(id){eid(id).value='';});
   // Viene en «lo pagamos nosotros», que es lo que el sistema hacía siempre: el que
   // no mira la pregunta obtiene el comportamiento de antes, no uno nuevo.
-  eid('sg-desp-flete-paga').value='nosotros';
-  sgDespFletePagaPintar();
+  eid('sg-desp-flete-cargo').value='nosotros';
+  eid('sg-desp-flete-quien').value='productor';
+  eid('sg-desp-flete-monto').value='';
+  sgDespFleteCargo();
   // Proveedores de servicio: fletero (flete de salida) y cooperativa (carga). Ambos del mismo catálogo.
   api('/api/sg/proveedores-servicio').then(function(r){
     var fls=(r&&r.ok)?r.data:[];
@@ -20353,22 +20760,70 @@ function sgDespTotal(){
   eid('sg-desp-total').innerHTML='Total: '+sgMoney(tot)
     +(enViaje?' <span style="font-size:11px;color:var(--mut)">('+enViaje+' renglón(es) todavía en viaje)</span>':'');
 }
-// La pregunta aparece sólo cuando hay fletero: sin camión no hay flete que pagar.
-// Y dice qué va a pasar, que es lo que antes estaba escrito fijo abajo del fletero
-// —«queda un gasto esperando su factura»— y era mentira la mitad de las veces.
-// Cómo se dice quién paga, en una línea. NULL es 'nosotros': es lo que el sistema
-// venía haciendo con todos los remitos que ya existen.
-function sgFletePagaTxt(v){
-  return String(v || 'nosotros') === 'nosotros' ? 'lo pagamos nosotros' : 'lo paga el vendedor';
+// Cómo se dice quién paga, en una línea. Sin dato es 'nosotros': es lo que el
+// sistema venía haciendo con todos los remitos que ya existen.
+function sgFletePagaTxt(cargo, quien){
+  var c = String(cargo || 'nosotros');
+  if (c === 'cliente') return 'lo paga el cliente';
+  if (c === 'productor') {
+    return String(quien) === 'san_geronimo'
+      ? 'lo adelantamos y se le descuenta al productor'
+      : 'lo paga el productor';
+  }
+  return 'lo pagamos nosotros';
 }
-function sgDespFletePagaPintar(){
-  var box=eid('sg-desp-flete-box'); if(!box) return;
-  var hay=!!(eid('sg-desp-fletero')||{}).value;
-  box.style.display = hay ? '' : 'none';
-  var n=eid('sg-desp-flete-nota'); if(!n) return;
-  n.innerHTML = (eid('sg-desp-flete-paga').value === 'nosotros')
-    ? 'Queda un gasto en Gastos Directos → Fletes de salida, esperando su factura'
-    : 'El camión queda anotado en el remito, pero no se abre ningún gasto nuestro';
+// ── QUÉ IMPLICA CADA OPCIÓN DE FLETE, EN LA SALIDA ─────────────────────
+//
+// Pablo, 2/9/2026: «sobre todo para que quede bien claro si lo tenemos que
+// descontar o no en la liquidación».
+//
+// Cada texto dice lo que el sistema HACE de verdad con esa elección, no lo que
+// debería hacer. Es el espejo de SG_FLETE_AYUDA de la orden de compra, del otro
+// lado del mostrador.
+var SG_DESP_FLETE_AYUDA = {
+  'nosotros': '<b>Es un gasto de San Gerónimo.</b> Queda pendiente de valorizar en '
+    + '<b>Gastos directos → Fletes de salida</b>; cuando llega la factura del fletero, '
+    + 'ese monto es <b>costo nuestro</b>. No se le descuenta a nadie.',
+  'cliente': '<b>Lo paga el cliente.</b> El camión queda anotado en el remito —es '
+    + 'trazabilidad de la entrega— pero <b>no se abre ningún gasto nuestro</b> ni '
+    + 'aparece en la bandeja de fletes de salida.',
+  'productor|productor': '<b>Lo paga el productor.</b> San Gerónimo no le paga a ningún '
+    + 'fletero y el flete <b>no entra a ningún lado</b>: ni a nuestro costo ni a su '
+    + 'liquidación. No hay nada que descontar.',
+  'productor|san_geronimo': '<b>Lo adelanta San Gerónimo y se le recupera al productor.</b> '
+    + 'Aparece en <b>Fletes de salida</b> para cargar la factura del fletero, pero '
+    + '<b>NO es costo nuestro</b>: es plata a recuperar, <b>se le descuenta de su '
+    + 'liquidación</b>.'
+};
+// ¿HAY QUE CARGAR EL MONTO? Sólo cuando la plata la pone San Gerónimo. Con el flete
+// del cliente o del productor no se toca plata en ningún lado, y un número guardado
+// que nadie va a usar aparece después en un informe como si fuera plata nuestra.
+function sgDespFletePideMonto(cargo, quien){
+  if (cargo === 'nosotros') return true;
+  if (cargo === 'productor') return quien === 'san_geronimo';
+  return false;
+}
+// Todo el bloque aparece sólo cuando hay fletero: sin camión no hay flete.
+function sgDespFleteCargo(){
+  var hay = !!(eid('sg-desp-fletero')||{}).value;
+  var cw = eid('sg-desp-flete-cargo-wrap');
+  if (cw) cw.style.display = hay ? '' : 'none';
+  var cargo = (eid('sg-desp-flete-cargo')||{}).value || 'nosotros';
+  var quien = (eid('sg-desp-flete-quien')||{}).value || 'productor';
+  var qw = eid('sg-desp-flete-quien-wrap');
+  if (qw) qw.style.display = (hay && cargo === 'productor') ? '' : 'none';
+  var pide = hay && sgDespFletePideMonto(cargo, quien);
+  var mw = eid('sg-desp-flete-monto-wrap');
+  if (mw) mw.style.display = pide ? '' : 'none';
+  // Y SE LIMPIA. Un monto escrito de antes se guardaría como un flete que nadie va
+  // a pagar, y aparecería en el costo o en la liquidación del productor.
+  if (!pide) { var m=eid('sg-desp-flete-monto'); if(m) m.value=''; }
+  var ay = eid('sg-desp-flete-ayuda');
+  if (ay) {
+    var clave = (cargo === 'productor') ? ('productor|'+quien) : cargo;
+    ay.innerHTML = hay ? (SG_DESP_FLETE_AYUDA[clave] || '')
+      : 'Sin fletero no hay flete que registrar en esta salida.';
+  }
 }
 
 function sgDespGuardar(){
@@ -20400,8 +20855,11 @@ function sgDespGuardar(){
   var body={ cliente_id:Number(cli), pedido_id:eid('sg-desp-ped').value?Number(eid('sg-desp-ped').value):null,
     fecha_despacho:eid('sg-desp-fecha').value,
     fletero_id:eid('sg-desp-fletero').value?Number(eid('sg-desp-fletero').value):null,
-    // De esto depende que salga plata nuestra.
-    flete_paga:eid('sg-desp-flete-paga').value,
+    // De esto depende que salga plata nuestra Y que se le descuente o no al
+    // productor de su liquidación.
+    flete_a_cargo:eid('sg-desp-flete-cargo').value,
+    flete_pagado_por:eid('sg-desp-flete-quien').value,
+    flete_monto:eid('sg-desp-flete-monto').value!==''?Number(eid('sg-desp-flete-monto').value):null,
     // Es el id del CATÁLOGO, no el del proveedor: el servidor saca de ahí a
     // quién se le paga, igual que en la recepción.
     cooperativa_catalogo_id:eid('sg-desp-coop').value?Number(eid('sg-desp-coop').value):null,
@@ -21584,7 +22042,7 @@ function sgDespVer(id){
         ? 'bulto' : 'kg';
     }
     eid('sg-venver-tit').textContent='Despacho '+(d.numero||'');
-    var h='<div style="font-size:13px;margin-bottom:10px">Cliente: <b>'+esc(d.cliente_nombre||'—')+'</b> · '+(SG_ESTDESP[d.estado]||d.estado)+(d.pedido_numero?(' · pedido '+esc(d.pedido_numero)):'')+(d.fletero_nombre?(' · flete '+esc(sgFletePagaTxt(d.flete_paga))):'')+'</div>';
+    var h='<div style="font-size:13px;margin-bottom:10px">Cliente: <b>'+esc(d.cliente_nombre||'—')+'</b> · '+(SG_ESTDESP[d.estado]||d.estado)+(d.pedido_numero?(' · pedido '+esc(d.pedido_numero)):'')+(d.fletero_nombre?(' · flete '+esc(sgFletePagaTxt(d.flete_a_cargo || d.flete_paga, d.flete_pagado_por))):'')+'</div>';
     // PARTE D + FASE 2 — fletero + flete de salida + carga de cooperativa + margen neto.
     if(d.fletero_nombre || d.flete_salida_estado || d.carga_salida_estado){
       var fEstado = d.flete_salida_estado ? d.flete_salida_estado.estado : null;

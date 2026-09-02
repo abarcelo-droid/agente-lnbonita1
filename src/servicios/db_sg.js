@@ -2003,7 +2003,53 @@ try {
   //
   // NULL = 'nosotros'. Es lo que el sistema venía haciendo con todos los remitos
   // que ya existen: si un fletero tenía gasto, era nuestro.
+  // ── LA LOGÍSTICA DEL REMITO, COMO LA DE LA ORDEN ─────────────────────────
+  //
+  // Pablo, 2/9/2026: «la parte de logística en el remito quedó media rara.
+  // Deberíamos tomar consideraciones similares a las que tenemos en la orden de
+  // compra, sobre todo para que quede bien claro si lo tenemos que descontar o no
+  // en la liquidación».
+  //
+  // La primera versión preguntaba una sola cosa —¿lo pagamos nosotros o el
+  // vendedor?— y con eso no alcanza, porque en una salida hay TRES que pueden tener
+  // el flete a cargo y las consecuencias son distintas:
+  //
+  //   'nosotros'   gasto nuestro. Va a Fletes de salida y es costo nuestro.
+  //   'cliente'    lo paga el súper. No tocamos plata en ningún lado.
+  //   'productor'  el dueño de la mercadería. Y ahí hay que preguntar QUIÉN pone la
+  //                plata, igual que en la orden: si la pone él, no tocamos nada; si
+  //                la ADELANTA San Gerónimo, se le paga al fletero y se le descuenta
+  //                de su liquidación.
+  //
+  // Mismos nombres que sg_oc.flete_a_cargo / flete_pagado_por a propósito: es la
+  // misma pregunta del otro lado del mostrador, y dos vocabularios para lo mismo
+  // obligan a traducir en cada informe.
+  // ── ¿ESTA DEVOLUCIÓN LE BAJA LO QUE SE LE DEBE AL PRODUCTOR? ─────────────
+  //
+  // Pablo, 2/9/2026: «una vez liquidado ya todo es firme… a lo sumo es como una
+  // pérdida en la partida».
+  //
+  // La respuesta se congela CUANDO SE REGISTRA la devolución y no se vuelve a
+  // preguntar. Si se recalculara cada vez, una partida que se liquida después
+  // haría que las devoluciones viejas dejaran de descontar de golpe, y la
+  // liquidación ya emitida pasaría a estar «de más» sin que nadie tocara nada.
+  //
+  // 1 = descuenta (la partida estaba libre) · 0 = pérdida nuestra (ya estaba firme)
+  if (addCol('sg_devolucion_items', 'descuenta_al_productor', 'INTEGER')) added.push('sg_devolucion_items.descuenta_al_productor');
+  if (addCol('sg_despachos',        'flete_a_cargo',        'TEXT')) added.push('sg_despachos.flete_a_cargo');
+  if (addCol('sg_despachos',        'flete_pagado_por',     'TEXT')) added.push('sg_despachos.flete_pagado_por');
+  if (addCol('sg_despachos',        'flete_monto',          'REAL')) added.push('sg_despachos.flete_monto');
   if (addCol('sg_despachos',        'flete_paga',           'TEXT')) added.push('sg_despachos.flete_paga');
+  // Lo cargado con la pregunta vieja se traduce al vocabulario nuevo, una sola vez.
+  // Sin esto esos remitos quedan sin decir a cargo de quién estaba el flete, y el
+  // que los mire mañana no tiene cómo saberlo.
+  try {
+    const m = db.prepare(`UPDATE sg_despachos
+      SET flete_a_cargo = CASE WHEN flete_paga='vendedor' THEN 'productor' ELSE 'nosotros' END,
+          flete_pagado_por = CASE WHEN flete_paga='vendedor' THEN 'productor' ELSE NULL END
+      WHERE flete_a_cargo IS NULL AND fletero_id IS NOT NULL`).run();
+    if (m.changes) console.log(`[DB] SG: ${m.changes} remito(s) tradujeron su flete al vocabulario de la orden.`);
+  } catch (e) { console.error('[DB] SG traducción flete_paga:', e.message); }
   if (addCol('sg_despachos',        'turno',                'TEXT')) added.push('sg_despachos.turno');
   if (addCol('sg_despachos',        'oc_cliente',           'TEXT')) added.push('sg_despachos.oc_cliente');
   if (addCol('sg_despacho_items',   'modo_precio',          'TEXT')) added.push('sg_despacho_items.modo_precio');
@@ -2633,6 +2679,69 @@ try {
 // paga al productor—, así que dos calidades con dos precios son dos renglones. Acá
 // queda cuál se creó, para poder deshacerlo sin adivinar.
 try { db.exec('ALTER TABLE sg_lote_reclasificaciones ADD COLUMN oc_item_creado INTEGER'); } catch (_) {}
+
+// ══ DEVOLUCIÓN DE MERCADERÍA DE UN REMITO ═════════════════════════════════
+//
+// Pablo, 2/9/2026: «devolución de mercadería de los súper. De un remito particular
+// permite hacer una devolución parcial o total, y la mercadería devuelta tiene dos
+// opciones: o vuelve al stock eligiendo alguno de los pisos, o se devuelve al
+// proveedor. En caso de que se devuelva al proveedor se genera un remito de
+// devolución, que lo que hace es descontar de la mercadería ingresada de esa
+// partida».
+//
+// NO SE TOCA EL REMITO ORIGINAL. Lo que salió, salió: el remito es el papel que
+// acompañó la mercadería y bajarle los kilos sería reescribir lo que ya pasó —y
+// además rompería la cuenta de lo que falta facturar de ese renglón. La devolución
+// es un hecho NUEVO que se anota aparte, igual que un decomiso o una
+// reclasificación.
+//
+// LOS DOS DESTINOS NO SON LO MISMO, y la diferencia es dónde queda la mercadería:
+//
+//   'stock'      vuelve a un piso nuestro y se puede volver a vender. Suma a lo
+//                disponible de la partida.
+//   'proveedor'  se la devolvemos al productor. NO vuelve a lo disponible —ya había
+//                salido con el remito— pero SÍ baja lo ingresado de la partida, que
+//                es la cuenta de lo que le debemos.
+//
+// Por eso son dos acumuladores distintos y no un signo: si fueran el mismo número,
+// devolverle diez cajones al productor los haría reaparecer en el piso.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS sg_devoluciones (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    numero         TEXT UNIQUE,
+    despacho_id    INTEGER NOT NULL REFERENCES sg_despachos(id),
+    cliente_id     INTEGER REFERENCES sg_clientes(id),
+    fecha          TEXT,
+    motivo         TEXT,
+    -- 'registrada' | 'anulada'. Una devolución mal cargada se anula, no se borra:
+    -- el papel salió y el cliente tiene su copia.
+    estado         TEXT NOT NULL DEFAULT 'registrada',
+    creado_en      TEXT DEFAULT (datetime('now','localtime')),
+    creado_por     INTEGER,
+    anulado_en     TEXT,
+    anulado_por    INTEGER,
+    anulado_motivo TEXT
+  );
+  CREATE INDEX IF NOT EXISTS idx_sg_dev_despacho ON sg_devoluciones(despacho_id);
+
+  CREATE TABLE IF NOT EXISTS sg_devolucion_items (
+    id               INTEGER PRIMARY KEY AUTOINCREMENT,
+    devolucion_id    INTEGER NOT NULL REFERENCES sg_devoluciones(id),
+    despacho_item_id INTEGER NOT NULL REFERENCES sg_despacho_items(id),
+    lote_id          INTEGER REFERENCES sg_lotes(id),
+    bultos           REAL NOT NULL DEFAULT 0,
+    kg               REAL NOT NULL DEFAULT 0,
+    -- A dónde va lo que vuelve. Es la pregunta que hace Pablo y la que decide todo
+    -- lo demás.
+    destino          TEXT NOT NULL CHECK(destino IN ('stock','proveedor')),
+    -- Sólo cuando vuelve al stock: a qué piso entra. Sin esto la partida figura
+    -- disponible sin estar en ningún lado y la suma de los pisos deja de cerrar.
+    piso_id          INTEGER REFERENCES sg_pisos(id)
+  );
+  CREATE INDEX IF NOT EXISTS idx_sg_devit_dev  ON sg_devolucion_items(devolucion_id);
+  CREATE INDEX IF NOT EXISTS idx_sg_devit_lote ON sg_devolucion_items(lote_id);
+  CREATE INDEX IF NOT EXISTS idx_sg_devit_di   ON sg_devolucion_items(despacho_item_id);
+`);
 
 console.log('[DB] Módulo San Gerónimo (sg_*) inicializado');
 

@@ -193,7 +193,11 @@ const PREFIJOS = [
   // comprobante fiscal y la plata NO entraba (el prefijo era sólo de CC clientes),
   // y el botón "Recibir liquidación" se ofrece a quien tenga Salidas pero el 403
   // llegaba después de cargarla entera.
-  ['sg-ventas',          'sg/despachos,sg/pedidos,sg/ventas,sg/ventas/facturas,sg/ventas/cobranzas,sg/ventas/liquidaciones,sg/despachos-pendientes,sg/facturas,sg/facturable'],
+  // 'sg/devoluciones' va declarado aparte: el prefijo matchea por segmento
+  // completo, y /api/sg/devoluciones/12/anular no cuelga de 'sg/despachos'.
+  // Sin declararlo, exigirNivel no le encuentra módulo y contesta 403 a todo el
+  // mundo — el mismo agujero que ya se comió 'sg/despachos-pendientes'.
+  ['sg-ventas',          'sg/despachos,sg/pedidos,sg/ventas,sg/ventas/facturas,sg/ventas/cobranzas,sg/ventas/liquidaciones,sg/despachos-pendientes,sg/facturas,sg/facturable,sg/devoluciones'],
   ['sg-vta-comprobantes', 'sg/ventas/facturas'],
   // EL EDITOR DE COMPROBANTE SE MUDÓ ACÁ ADENTRO, así que sus direcciones tienen
   // que colgar de esta pantalla: quien tenga sólo Remitos pendientes tildado
