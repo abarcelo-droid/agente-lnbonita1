@@ -184,6 +184,24 @@ Estas notas son del área contable/administrativa (módulos MD). Respetarlas al 
 - Asientos manuales: `admCuentasOpts()`. Asiento modelo: autocompletar `admModCuBuscar/Pick` sobre `ADM_MOD_CUENTAS`. Ambos deshabilitan las cuentas no imputables.
 - Selector de insumos en factura: autocompletar `paInsBuscar` (agrupa por categoría). Al abrir la factura se recargan TODOS los insumos (no filtrar por categoría).
 
+### SI TOCÁS UN MÓDULO, ACTUALIZÁS SU «¿CÓMO SE USA?»
+
+Pablo, 2/9/2026: *«de ahora en más, como REGLA: si modificás algo en el módulo lo
+agregás al "cómo se usa" con el número de versión, de esa manera si introducimos
+cambios pueden ver en el nuevo manual cómo usarlo».*
+
+Cada módulo tiene su botón **¿Cómo se usa?** con un manual para el operador: qué se
+espera de cada campo, con qué otros módulos se vincula ese dato, y qué significa
+para el negocio. Cuando se toca algo del módulo, la entrada del manual se agrega o
+se corrige **en el mismo commit**, con el V### del PR al lado.
+
+No es opcional ni "si da el tiempo". Un manual que va una versión atrás es peor que
+no tenerlo: el operador hace lo que dice y le sale mal.
+
+Y tiene un tercer uso además de documentar: **desde ahí se revisa si el proceso está
+bien**. Un campo que no se puede explicar en una línea es un campo que sobra o que
+está mal pensado.
+
 ### Validación antes de entregar
 - **`npm test` SIEMPRE.** Esta sección decía "no hay tests" y contradecía a la de
   Limitaciones del entorno, setenta líneas más arriba, que dice lo contrario y es la

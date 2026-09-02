@@ -191,7 +191,7 @@ test('sin piso no se registra, vaya donde vaya después', () => {
   // por un piso». Y sin piso la partida figuraría disponible sin estar en ningún
   // lado.
   const i = SG.indexOf("router.post('/despachos/:id/devolver'");
-  const b = SG.slice(i, i + 8200);
+  const b = SG.slice(i, i + 9400);
   assert.match(b, /if \(!p\.pisoId\) return res\.status\(400\)/);
   assert.match(b, /Elegí por qué piso entra: aunque vuelva al productor/);
   // Y el piso con dueño lo toca sólo él.
@@ -202,7 +202,7 @@ test('entra por el piso, y si va al productor vuelve a salir', () => {
   // El neto sobre lo disponible es cero —esa mercadería no la tenemos— y queda el
   // rastro de por dónde pasó, que es de donde sale el papel.
   const i = SG.indexOf("router.post('/despachos/:id/devolver'");
-  const b = SG.slice(i, i + 8200);
+  const b = SG.slice(i, i + 9400);
   assert.match(b, /ubicMover\(db, ln\.it\.lote_id, ln\.p\.pisoId, ln\.bultos, r2\(ln\.p\.kg\)\);/);
   assert.match(b, /if \(ln\.p\.destino === 'proveedor'\) \{\r?\n\s*ubicMover\(db, ln\.it\.lote_id, ln\.p\.pisoId, -ln\.bultos, -r2\(ln\.p\.kg\)\);/);
 });
@@ -441,7 +441,7 @@ test('la marca se CONGELA al registrarla, no se recalcula', () => {
   // quedaría «de más» sin que nadie tocara nada.
   assert.match(DBSG, /addCol\('sg_devolucion_items', 'descuenta_al_productor', 'INTEGER'\)/);
   const i = SG.indexOf("router.post('/despachos/:id/devolver'");
-  const b = SG.slice(i, i + 8200);
+  const b = SG.slice(i, i + 9400);
   assert.match(b, /let descuenta = 0;/);
   assert.match(b, /if \(p\.destino === 'proveedor'\) \{/);
   assert.match(b, /descuenta = firme \? 0 : 1;/);
@@ -469,10 +469,10 @@ test('el tope se vuelve a mirar ADENTRO de la transacción', () => {
   // pasaban las dos y entre las dos devolvían más de lo que salió: aparecía en el
   // piso mercadería que nunca existió.
   const i = SG.indexOf("router.post('/despachos/:id/devolver'");
-  const b = SG.slice(i, i + 7000);
+  const b = SG.slice(i, i + 12000);
   const tx = b.indexOf('const salida = db.transaction(() => {');
   assert.ok(tx > 0);
-  const dentro = b.slice(tx, tx + 1200);
+  const dentro = b.slice(tx, tx + 1600);
   assert.match(dentro, /kgDevueltoItem\(db, ln\.p\.id\)/, 'el tope no se revisa adentro');
   assert.match(dentro, /Alguien acaba de devolver parte de este remito/);
   // Y sigue estando afuera, que es de donde sale el mensaje bueno.
@@ -502,7 +502,7 @@ test('el mismo renglón dos veces en una llamada no se pasa del tope', () => {
   // mandarlo dos veces con la mitad del pendiente cada una pasaba las dos
   // validaciones y devolvía el doble.
   const i = SG.indexOf("router.post('/despachos/:id/devolver'");
-  const b = SG.slice(i, i + 8200);
+  const b = SG.slice(i, i + 9400);
   assert.match(b, /const yaEnEstePedido = \{\};/);
   assert.match(b, /yaEnEstePedido\[p\.id\] = \(yaEnEstePedido\[p\.id\] \|\| 0\) \+ p\.kg;/);
 });
@@ -541,4 +541,55 @@ test('el tablero y la venta cuentan los mismos kilos', () => {
     'volvió una copia a mano de la cuenta de stock');
   // Las cinco veces que el tablero la usa son la MISMA.
   assert.equal((SG.match(/\$\{KG_EN_CAMARA\}/g) || []).length, 5);
+});
+
+// ── 13 · LAS CUATRO DEL 2/9/2026 ──────────────────────────────────────────
+
+test('se devuelve en la MISMA unidad en que se remitió: cajones enteros', () => {
+  // Pablo: «si se remitieron 200 cajones, se pueden devolver X cantidad de CAJONES,
+  // no de kilos». Es la misma regla que el remito, que ya despacha por cajón entero:
+  // medio cajón no existe y deja la partida con una fracción que no se puede vender.
+  const i = SG.indexOf("router.post('/despachos/:id/devolver'");
+  const b = SG.slice(i, i + 12000);
+  assert.match(b, /const bultos = kpb \? p\.kg \/ kpb : 0;/);
+  assert.match(b, /Math\.abs\(bultos - Math\.round\(bultos\)\) > 1e-4/);
+  assert.match(b, /se devuelve en cajones enteros/);
+  // Y se guarda el entero, no la fracción.
+  assert.match(b, /bultos: kpb \? Math\.round\(bultos\) : 0 \}\);/);
+  // La pantalla pide el paso de a uno cuando el renglón salió por cajón.
+  assert.match(PANEL, /step="'\+\(it\.kpb>0\?'1':'0\.01'\)\+'"/);
+});
+
+test('el selector ofrece SOLO los pisos que esa persona puede tocar', () => {
+  // Pablo: «los usuarios pueden tocar sólo sus pisos asignados, no cualquiera». El
+  // servidor ya los frenaba, pero el 403 llegaba con la devolución entera cargada.
+  const i = PANEL.indexOf('function sgDevPisoOpts(sel){');
+  const b = PANEL.slice(i, i + 700);
+  assert.match(b, /\.filter\(function\(p\)\{ return p\.puedo; \}\)/);
+  assert.match(b, /no tenés pisos asignados/, 'sin pisos propios hay que decirlo, no dejar la lista vacía');
+  // Y el servidor sigue siendo el que decide.
+  assert.match(SG, /exigirPiso\(db, req, p\.pisoId, 'devolver mercadería'\)/);
+});
+
+test('leer las devoluciones lo controla el módulo donde vive la solapa', () => {
+  // Pablo: «devoluciones debería estar con el mismo código de autorización que
+  // configuramos los usuarios en el menú donde está». Escribir ya estaba
+  // controlado; faltaba LEER — el menú escondía la solapa y la dirección se
+  // escribía igual.
+  const PERM = fs.readFileSync(path.join(RAIZ, 'src/servicios/permisos.js'), 'utf8');
+  const i = PERM.indexOf('const LECTURA_CONTROLADA');
+  const b = PERM.slice(i, PERM.indexOf(']);', i));
+  assert.match(b, /'\/api\/sg\/devoluciones'/);
+});
+
+test('cambiar «a dónde va» no rehace la tabla: el cursor se queda', () => {
+  // Antes se redibujaba entera y había que volver a hacer clic para seguir cargando.
+  const i = PANEL.indexOf('function sgDevUpd(i, campo, v){');
+  const b = PANEL.slice(i, i + 900);
+  assert.match(b, /if \(campo === 'destino'\) sgDevAvisoFila\(i\);/);
+  assert.ok(!/if \(campo === 'destino'\) sgDevPintar\(\);/.test(b),
+    'volvió a rehacer la tabla entera');
+  // Y los dos carteles del renglón tienen su propio div para poder repintarlos.
+  assert.match(PANEL, /id="sg-dev-av-'\+i\+'"/);
+  assert.match(PANEL, /id="sg-dev-pn-'\+i\+'"/);
 });

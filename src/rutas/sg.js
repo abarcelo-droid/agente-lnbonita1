@@ -10219,8 +10219,23 @@ router.post('/despachos/:id/devolver', requireAuth, express.json(), (req, res) =
           ? precioFirmeDetalle(db, oc.oc_id, 'descontarle esta devolución al productor') : null;
         descuenta = firme ? 0 : 1;
       }
+      // ── SE DEVUELVE EN LA MISMA UNIDAD EN QUE SE REMITIÓ ──────────────
+      //
+      // Pablo, 2/9/2026: «la devolución tiene que ser en las mismas unidades en que
+      // se remitió. Si se remitieron 200 cajones, se pueden devolver X cantidad de
+      // CAJONES, no de kilos».
+      //
+      // Es la misma regla que el remito, que ya despacha por cajón entero: medio
+      // cajón no existe, y aceptarlo acá deja la partida con una fracción que
+      // después no se puede vender ni contar.
       const kpb = Number(it.kpb) > 0 ? Number(it.kpb) : null;
-      lineas.push({ p, it, descuenta, bultos: kpb ? +(p.kg / kpb).toFixed(4) : 0 });
+      const bultos = kpb ? p.kg / kpb : 0;
+      if (kpb && Math.abs(bultos - Math.round(bultos)) > 1e-4) {
+        return res.status(400).json({ ok: false, error:
+          `Ese renglón salió por cajón: se devuelve en cajones enteros, no ${+bultos.toFixed(3)}. `
+          + `Cada cajón es de ${kpb} kg.` });
+      }
+      lineas.push({ p, it, descuenta, bultos: kpb ? Math.round(bultos) : 0 });
     }
 
     const salida = db.transaction(() => {

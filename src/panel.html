@@ -20327,8 +20327,12 @@ function sgDevCargar(){
   });
 }
 
+// SÓLO LOS PISOS QUE ESA PERSONA PUEDE TOCAR. El servidor los frena igual, pero el
+// 403 llegaba con la devolución entera cargada. La lista trae `puedo` para esto.
 function sgDevPisoOpts(sel){
-  return '<option value="">— piso —</option>' + (SGDEV.pisos||[]).map(function(p){
+  var mios = (SGDEV.pisos||[]).filter(function(p){ return p.puedo; });
+  if (!mios.length) return '<option value="">— no tenés pisos asignados —</option>';
+  return '<option value="">— piso —</option>' + mios.map(function(p){
     return '<option value="'+p.id+'"'+(String(p.id)===String(sel)?' selected':'')+'>'+escH(p.nombre||('Piso '+p.id))+'</option>';
   }).join('');
 }
@@ -20355,21 +20359,30 @@ function sgDevPintar(){
           +'<td>'+escH(it.producto)+'</td><td><code>'+escH(it.lote)+'</code></td>'
           +'<td style="text-align:right;color:var(--mut)">'+nr(aCj(it.kg_despachado))+' '+u+'</td>'
           +'<td style="text-align:right;color:var(--mut)">'+nr(aCj(it.kg_devuelto))+' '+u+'</td>'
-          +'<td style="text-align:right"><input type="number" min="0" step="0.01" style="width:90px;text-align:right"'
+          // EN CAJONES ENTEROS cuando el renglón salió por cajón: medio cajón no
+          // existe, y el servidor lo rechaza igual. El paso del campo lo dice.
+          +'<td style="text-align:right"><input type="number" min="0" step="'+(it.kpb>0?'1':'0.01')+'"'
+            +' style="width:90px;text-align:right"'
             +' value="'+(it.kg?aCj(it.kg):'')+'" placeholder="'+nr(aCj(it.kg_pendiente))+'"'
-            +' oninput="sgDevUpd('+i+',\'kg\',this.value)"></td>'
+            +' oninput="sgDevUpd('+i+',\'kg\',this.value)">'
+            +'<div style="font-size:10px;color:var(--mut)">'+u+(it.kpb>0?(' de '+nr(it.kpb)+'kg'):'')+'</div></td>'
           +'<td><select onchange="sgDevUpd('+i+',\'destino\',this.value)">'
             +'<option value="stock"'+(it.destino==='stock'?' selected':'')+'>Vuelve al stock</option>'
             +'<option value="proveedor"'+(it.destino==='proveedor'?' selected':'')+'>Se le devuelve al productor</option>'
             +'</select>'
             // EL AVISO DE LA PARTIDA FIRME. No frena —la mercadería vuelve igual—
             // pero el que la carga tiene que saber que no le está descontando nada.
+            // Va en su propio div para poder repintarlo sin rehacer la tabla.
+            +'<div id="sg-dev-av-'+i+'">'
             +((it.destino==='proveedor' && it.aviso_liquidada)
                 ? '<div style="font-size:10.5px;color:var(--err);margin-top:3px">'+escH(it.aviso_liquidada)+'</div>' : '')
+            +'</div>'
           +'</td>'
           +'<td><select onchange="sgDevUpd('+i+',\'piso_id\',this.value)">'+sgDevPisoOpts(it.piso_id)+'</select>'
+            +'<div id="sg-dev-pn-'+i+'">'
             +(it.destino==='proveedor'
                 ? '<div style="font-size:10.5px;color:var(--mut);margin-top:3px">baja acá y sale con el remito de devolución</div>' : '')
+            +'</div>'
           +'</td></tr>';
       }).join('')
     + '</tbody></table></div>';
@@ -20385,9 +20398,27 @@ function sgDevUpd(i, campo, v){
     it.kg = (it.kpb>0) ? Math.round(n*it.kpb*10000)/10000 : n;
   } else {
     it[campo] = v;
-    if (campo === 'destino') sgDevPintar();
+    // NO SE REDIBUJA LA TABLA ENTERA. Antes cambiar «a dónde va» la rehacía y el
+    // cursor se iba del renglón: había que volver a hacer clic para seguir
+    // cargando. Se toca sólo lo que cambia de ESE renglón.
+    if (campo === 'destino') sgDevAvisoFila(i);
   }
   sgDevTotales();
+}
+// Los dos carteles del renglón que dependen del destino: el aviso de la partida
+// firme y el «baja acá y sale con el remito». Se pintan solos, sin rehacer la tabla.
+function sgDevAvisoFila(i){
+  var it = SGDEV.items[i]; if(!it) return;
+  var a = eid('sg-dev-av-'+i);
+  if (a) {
+    a.innerHTML = (it.destino==='proveedor' && it.aviso_liquidada)
+      ? '<div style="font-size:10.5px;color:var(--err);margin-top:3px">'+escH(it.aviso_liquidada)+'</div>' : '';
+  }
+  var p = eid('sg-dev-pn-'+i);
+  if (p) {
+    p.innerHTML = (it.destino==='proveedor')
+      ? '<div style="font-size:10.5px;color:var(--mut);margin-top:3px">baja acá y sale con el remito de devolución</div>' : '';
+  }
 }
 function sgDevTodo(){
   SGDEV.items.forEach(function(it){ it.kg = it.kg_pendiente; });
