@@ -202,7 +202,7 @@ test('entra por el piso, y si va al productor vuelve a salir', () => {
   // El neto sobre lo disponible es cero —esa mercadería no la tenemos— y queda el
   // rastro de por dónde pasó, que es de donde sale el papel.
   const i = SG.indexOf("router.post('/despachos/:id/devolver'");
-  const b = SG.slice(i, i + 6000);
+  const b = SG.slice(i, i + 7200);
   assert.match(b, /ubicMover\(db, ln\.it\.lote_id, ln\.p\.pisoId, ln\.bultos, r2\(ln\.p\.kg\)\);/);
   assert.match(b, /if \(ln\.p\.destino === 'proveedor'\) \{\r?\n\s*ubicMover\(db, ln\.it\.lote_id, ln\.p\.pisoId, -ln\.bultos, -r2\(ln\.p\.kg\)\);/);
 });
@@ -440,7 +440,7 @@ test('la marca se CONGELA al registrarla, no se recalcula', () => {
   // quedaría «de más» sin que nadie tocara nada.
   assert.match(DBSG, /addCol\('sg_devolucion_items', 'descuenta_al_productor', 'INTEGER'\)/);
   const i = SG.indexOf("router.post('/despachos/:id/devolver'");
-  const b = SG.slice(i, i + 6000);
+  const b = SG.slice(i, i + 7200);
   assert.match(b, /let descuenta = 0;/);
   assert.match(b, /if \(p\.destino === 'proveedor'\) \{/);
   assert.match(b, /descuenta = firme \? 0 : 1;/);
@@ -459,4 +459,21 @@ test('las devoluciones viejas, sin la marca, siguen descontando', () => {
     VALUES (1,70,1,100,5,'proveedor',3,NULL)`).run();
   assert.equal(ingr(db), 900);
   db.close();
+});
+
+test('el tope se vuelve a mirar ADENTRO de la transacción', () => {
+  // Las validaciones corren afuera —así el 400 sale en criollo y sin abrir una
+  // transacción por cada error de tipeo— pero entre que se validan y que se escribe
+  // hay una ventana. Dos personas devolviendo el mismo renglón al mismo tiempo
+  // pasaban las dos y entre las dos devolvían más de lo que salió: aparecía en el
+  // piso mercadería que nunca existió.
+  const i = SG.indexOf("router.post('/despachos/:id/devolver'");
+  const b = SG.slice(i, i + 7000);
+  const tx = b.indexOf('const salida = db.transaction(() => {');
+  assert.ok(tx > 0);
+  const dentro = b.slice(tx, tx + 1200);
+  assert.match(dentro, /kgDevueltoItem\(db, ln\.p\.id\)/, 'el tope no se revisa adentro');
+  assert.match(dentro, /Alguien acaba de devolver parte de este remito/);
+  // Y sigue estando afuera, que es de donde sale el mensaje bueno.
+  assert.match(b.slice(0, tx), /const pend = kgSalio - kgDevueltoItem\(db, p\.id\);/);
 });

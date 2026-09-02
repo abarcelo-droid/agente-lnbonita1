@@ -10164,6 +10164,16 @@ router.post('/despachos/:id/devolver', requireAuth, express.json(), (req, res) =
     }
 
     const salida = db.transaction(() => {
+      // ÚLTIMA PALABRA, YA ADENTRO. Entre la validación de arriba y esta línea otro
+      // pudo haber registrado una devolución del mismo renglón: los dos pasaban el
+      // tope por separado y entre los dos devolvían más de lo que salió.
+      for (const ln of lineas) {
+        const kgSalio = Number(ln.it.kg_despachados) || 0;
+        if (ln.p.kg > kgSalio - kgDevueltoItem(db, ln.p.id) + 0.01) {
+          throw new Error('Alguien acaba de devolver parte de este remito: '
+            + 'volvé a abrir la pantalla para ver qué quedó pendiente.');
+        }
+      }
       const numero = nextNumero(db, 'SG-DEV', 'sg_devoluciones', 'numero');
       const info = db.prepare(`INSERT INTO sg_devoluciones
         (numero, despacho_id, cliente_id, fecha, motivo, estado, creado_por)
