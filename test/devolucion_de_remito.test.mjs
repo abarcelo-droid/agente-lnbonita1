@@ -362,3 +362,45 @@ test('y si la nota toca varios remitos, no se adivina cuál', () => {
   assert.ok(i > 0);
   assert.match(PANEL.slice(i, i + 400), /return ids\.length === 1 \? ids\[0\] : null;/);
 });
+
+// ── 9 · EL HISTORIAL DE LA PARTIDA LA CONOCE ──────────────────────────────
+//
+// El historial se AUTOCONTROLA: al final compara la suma de los movimientos contra
+// lo disponible y avisa si no cierra. Sin esta vuelta, la primera devolución hacía
+// que dijera que no cierra — y una alarma que se dispara por algo que está bien
+// deja de servir a los dos días.
+
+test('la devolución aparece en el historial de la partida', () => {
+  const i = SG.indexOf("router.get('/lotes/:id/movimientos'");
+  const b = SG.slice(i, i + 9000);
+  assert.match(b, /tipo: 'devolucion', fecha: dv\.fecha,/);
+  assert.match(b, /FROM sg_devolucion_items dvi/);
+  assert.match(b, /JOIN sg_devoluciones dv ON dv\.id = dvi\.devolucion_id AND dv\.estado = 'registrada'/);
+});
+
+test('y suma en el saldo SÓLO lo que volvió al piso', () => {
+  // Lo que fue al productor entró y salió: en el saldo no mueve nada. Sumarlo haría
+  // que el historial dejara de cerrar, que es justo lo que esto viene a evitar.
+  const i = SG.indexOf("router.get('/lotes/:id/movimientos'");
+  const b = SG.slice(i, i + 9000);
+  assert.match(b, /kg: alProd \? 0 : kg,/);
+  assert.match(b, /bultos: alProd \? 0 : dv\.bultos,/);
+  // Pero se muestra igual: es lo que explica por qué a esa partida le entraron
+  // menos kilos de los que dice la balanza.
+  assert.match(b, /kg salieron del depósito/);
+  assert.match(b, /Devuelta al productor/);
+  assert.match(b, /Devuelta al stock/);
+});
+
+test('el helper que usa existe de verdad', () => {
+  // Una función usada y nunca definida pasa el chequeo de sintaxis y explota recién
+  // cuando alguien abre esa pantalla.
+  const i = SG.indexOf("router.get('/lotes/:id/movimientos'");
+  const b = SG.slice(i, i + 9000);
+  const usados = [...b.matchAll(/([a-zA-Z_$][\w$]*)\(/g)].map((m) => m[1]);
+  for (const f of ['r2']) {
+    assert.ok(usados.includes(f), 'el historial no usa ' + f);
+    assert.ok(new RegExp('(const|function)\\s+' + f + '\\s*[=(]').test(SG), f + ' no está definida');
+  }
+  assert.ok(!/\bnr2\(/.test(b), 'quedó nr2, que no existe en este archivo');
+});

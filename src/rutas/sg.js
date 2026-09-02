@@ -8402,6 +8402,43 @@ router.get('/lotes/:id/movimientos', requireAuth, (req, res) => {
         ref: nro || d.remito });
     }
 
+    // ── LO QUE VOLVIÓ ────────────────────────────────────────────────────
+    //
+    // El historial de la partida se AUTOCONTROLA: al final compara la suma de los
+    // movimientos contra lo disponible y avisa si no cierra. Sin esta vuelta, la
+    // primera devolución hacía que dijera que no cierra —y una alarma que se
+    // dispara por algo que está bien deja de servir a los dos días.
+    //
+    // Los dos destinos se muestran distinto porque son dos cosas distintas:
+    //
+    //   'stock'      volvió al piso y se puede volver a vender: suma.
+    //   'proveedor'  entró y salió para el productor. En saldo es cero —esa
+    //                mercadería no la tenemos— pero se muestra igual: es lo que
+    //                explica por qué a esa partida le entraron menos kilos de los
+    //                que dice la balanza, y por qué se le paga menos.
+    for (const dv of db.prepare(`
+      SELECT dvi.kg, dvi.bultos, dvi.destino, dv.numero, dv.fecha, dv.motivo,
+        d.numero AS remito, c.razon_social AS cliente, p.nombre AS piso
+        FROM sg_devolucion_items dvi
+        JOIN sg_devoluciones dv ON dv.id = dvi.devolucion_id AND dv.estado = 'registrada'
+        LEFT JOIN sg_despachos d ON d.id = dv.despacho_id
+        LEFT JOIN sg_clientes c ON c.id = dv.cliente_id
+        LEFT JOIN sg_pisos p ON p.id = dvi.piso_id
+       WHERE dvi.lote_id = ? ORDER BY dv.fecha, dv.id`).all(id)) {
+      const kg = Number(dv.kg) || 0;
+      const alProd = dv.destino === 'proveedor';
+      movs.push({ tipo: 'devolucion', fecha: dv.fecha,
+        // Al productor: entró y salió, así que en el saldo no mueve nada.
+        kg: alProd ? 0 : kg,
+        bultos: alProd ? 0 : dv.bultos,
+        detalle: alProd
+          ? 'Devuelta al productor' + (dv.cliente ? ' — la devolvió ' + dv.cliente : '')
+            + ' · ' + r2(kg) + ' kg salieron del depósito'
+          : 'Devuelta al stock' + (dv.piso ? ' — ' + dv.piso : '')
+            + (dv.cliente ? ' · la devolvió ' + dv.cliente : ''),
+        ref: dv.numero || dv.remito || null });
+    }
+
     // LA MERMA. Lo que se tiró, con su motivo: sin el motivo es un número que no
     // se le puede reclamar a nadie.
     for (const x of db.prepare(`SELECT kg, bultos, motivo, fecha FROM sg_lote_decomisos
