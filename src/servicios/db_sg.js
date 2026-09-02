@@ -2024,6 +2024,18 @@ try {
   // Mismos nombres que sg_oc.flete_a_cargo / flete_pagado_por a propósito: es la
   // misma pregunta del otro lado del mostrador, y dos vocabularios para lo mismo
   // obligan a traducir en cada informe.
+  // ── ¿ESTA DEVOLUCIÓN LE BAJA LO QUE SE LE DEBE AL PRODUCTOR? ─────────────
+  //
+  // Pablo, 2/9/2026: «una vez liquidado ya todo es firme… a lo sumo es como una
+  // pérdida en la partida».
+  //
+  // La respuesta se congela CUANDO SE REGISTRA la devolución y no se vuelve a
+  // preguntar. Si se recalculara cada vez, una partida que se liquida después
+  // haría que las devoluciones viejas dejaran de descontar de golpe, y la
+  // liquidación ya emitida pasaría a estar «de más» sin que nadie tocara nada.
+  //
+  // 1 = descuenta (la partida estaba libre) · 0 = pérdida nuestra (ya estaba firme)
+  if (addCol('sg_devolucion_items', 'descuenta_al_productor', 'INTEGER')) added.push('sg_devolucion_items.descuenta_al_productor');
   if (addCol('sg_despachos',        'flete_a_cargo',        'TEXT')) added.push('sg_despachos.flete_a_cargo');
   if (addCol('sg_despachos',        'flete_pagado_por',     'TEXT')) added.push('sg_despachos.flete_pagado_por');
   if (addCol('sg_despachos',        'flete_monto',          'REAL')) added.push('sg_despachos.flete_monto');

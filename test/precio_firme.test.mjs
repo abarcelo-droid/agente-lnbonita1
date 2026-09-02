@@ -136,9 +136,15 @@ test('la respuesta es UNA, no una consulta copiada en cada endpoint', () => {
   //
   // Usa la misma función a propósito: preguntar «esta partida ya está cerrada» con
   // una consulta propia sería la cuarta copia que este test existe para evitar.
+  //
+  // Son DOS llamadas y no una: la de la LECTURA, para que la pantalla lo avise
+  // antes, y la de la ESCRITURA, que es la que congela la marca de si esa
+  // devolución le descuenta al productor. La segunda no se puede sacar aunque la
+  // primera exista: entre que se abre la pantalla y se aprieta el botón, la
+  // partida se pudo haber liquidado.
   const usos = (SG.match(/frenoPrecioFirme\(db,/g) || []).length
              + (SG.match(/precioFirmeDetalle\(db,/g) || []).length;
-  assert.equal(usos, 10, 'todas las puertas usan la misma función');
+  assert.equal(usos, 11, 'todas las puertas usan la misma función');
   // Y no volvieron las copias que había, cada una con su propio mensaje: son la
   // huella de que alguien volvió a escribir la pregunta en vez de preguntarla.
   assert.doesNotMatch(SG, /Anulá el asiento primero: si se corrigen los kilos/);

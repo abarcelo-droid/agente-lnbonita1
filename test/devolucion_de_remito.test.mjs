@@ -52,7 +52,9 @@ const FORMULAS = (() => {
     trozo('const SUM_DESPACHADO ', ';\r\n') + ';',
     trozo('const SUM_DEV = (destino)', ';\r\n') + ';',
     trozo('const SUM_DEV_STOCK =', '\r\n'),
-    trozo('const SUM_DEV_PROV ', '\r\n'),
+    // SUM_DEV_PROV se escribe entero y no con el armador `SUM_DEV`, porque además
+    // del destino mira la marca congelada: va en varias líneas.
+    trozo('const SUM_DEV_PROV ', ';\r\n') + ';',
     trozo('const KG_VIGENTE_STOCK =', '\r\n'),
     trozo('const KG_DISPONIBLE =', '\r\n'),
     trozo('const KG_INGRESADO_NETO =', '\r\n'),
@@ -74,7 +76,8 @@ function base() {
       kg_despachados REAL, bultos REAL);
     CREATE TABLE sg_devoluciones (id INTEGER PRIMARY KEY, estado TEXT);
     CREATE TABLE sg_devolucion_items (id INTEGER PRIMARY KEY, devolucion_id INTEGER,
-      despacho_item_id INTEGER, lote_id INTEGER, kg REAL, bultos REAL, destino TEXT, piso_id INTEGER);
+      despacho_item_id INTEGER, lote_id INTEGER, kg REAL, bultos REAL, destino TEXT, piso_id INTEGER,
+      descuenta_al_productor INTEGER);
     -- Una partida de 1000 kg. Salieron 400 con un remito.
     INSERT INTO sg_lotes VALUES (1, 1000, 50);
     INSERT INTO sg_despachos VALUES (7, 1);
@@ -87,10 +90,15 @@ const num = (db, expr) => Number(db.prepare(
 const disp = (db) => num(db, FORMULAS.KG_DISPONIBLE);
 const ingr = (db) => num(db, FORMULAS.KG_INGRESADO_NETO);
 
-function devolver(db, kg, destino, id) {
+// `descuenta` es la marca que se CONGELA al registrar la devolución:
+//   1 → le baja al productor lo que se le debe (la partida estaba libre)
+//   0 → la partida ya estaba firme: la mercadería vuelve igual, pero es pérdida
+//       nuestra. «Una vez liquidado ya todo es firme» — Pablo, 2/9/2026.
+function devolver(db, kg, destino, id, descuenta) {
   db.prepare("INSERT OR IGNORE INTO sg_devoluciones VALUES (?, 'registrada')").run(id || 1);
-  db.prepare(`INSERT INTO sg_devolucion_items (devolucion_id, despacho_item_id, lote_id, kg, bultos, destino, piso_id)
-    VALUES (?,70,1,?,?,?,3)`).run(id || 1, kg, kg / 20, destino);
+  db.prepare(`INSERT INTO sg_devolucion_items
+      (devolucion_id, despacho_item_id, lote_id, kg, bultos, destino, piso_id, descuenta_al_productor)
+    VALUES (?,70,1,?,?,?,3,?)`).run(id || 1, kg, kg / 20, destino, descuenta == null ? 1 : descuenta);
 }
 
 // ── 1 · LA CUENTA DEL STOCK, CORRIDA ───────────────────────────────────────
@@ -403,4 +411,52 @@ test('el helper que usa existe de verdad', () => {
     assert.ok(new RegExp('(const|function)\\s+' + f + '\\s*[=(]').test(SG), f + ' no está definida');
   }
   assert.ok(!/\bnr2\(/.test(b), 'quedó nr2, que no existe en este archivo');
+});
+
+// ── 10 · LO LIQUIDADO ES FIRME: LA DEVOLUCIÓN NO LE DESCUENTA ──────────
+//
+// Pablo, 2/9/2026: «una vez liquidado ya todo es firme… a lo sumo es como una
+// pérdida en la partida». La mercadería vuelve igual —el súper ya la devolvió— pero
+// deja de bajarle lo que se le debe al productor.
+
+test('sobre partida firme, la mercadería vuelve pero NO le descuenta', () => {
+  const db = base();
+  devolver(db, 100, 'proveedor', 1, 0);   // 0 = la partida ya estaba firme
+  assert.equal(ingr(db), 1000, 'no se le descuenta nada al productor');
+  assert.equal(disp(db), 600, 'y lo disponible sigue igual: ya había salido');
+  db.close();
+});
+
+test('y si estaba libre, sí le descuenta', () => {
+  const db = base();
+  devolver(db, 100, 'proveedor', 1, 1);
+  assert.equal(ingr(db), 900);
+  db.close();
+});
+
+test('la marca se CONGELA al registrarla, no se recalcula', () => {
+  // Si se recalculara cada vez, liquidar la partida después haría que las
+  // devoluciones viejas dejaran de descontar de golpe, y la liquidación ya emitida
+  // quedaría «de más» sin que nadie tocara nada.
+  assert.match(DBSG, /addCol\('sg_devolucion_items', 'descuenta_al_productor', 'INTEGER'\)/);
+  const i = SG.indexOf("router.post('/despachos/:id/devolver'");
+  const b = SG.slice(i, i + 6000);
+  assert.match(b, /let descuenta = 0;/);
+  assert.match(b, /if \(p\.destino === 'proveedor'\) \{/);
+  assert.match(b, /descuenta = firme \? 0 : 1;/);
+  assert.match(b, /ln\.p\.pisoId, ln\.descuenta\);/);
+  // Y lo ingresado neto mira la MARCA, no el destino.
+  assert.match(SG, /AND COALESCE\(dvi\.descuenta_al_productor,1\)=1\),0\)/);
+});
+
+test('las devoluciones viejas, sin la marca, siguen descontando', () => {
+  // COALESCE(...,1): las que se registraron antes de que existiera la columna se
+  // hicieron sobre partidas libres, que era la única manera de registrarlas.
+  const db = base();
+  db.prepare("INSERT INTO sg_devoluciones VALUES (1,'registrada')").run();
+  db.prepare(`INSERT INTO sg_devolucion_items
+      (devolucion_id, despacho_item_id, lote_id, kg, bultos, destino, piso_id, descuenta_al_productor)
+    VALUES (1,70,1,100,5,'proveedor',3,NULL)`).run();
+  assert.equal(ingr(db), 900);
+  db.close();
 });

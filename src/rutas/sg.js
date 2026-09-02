@@ -9025,7 +9025,13 @@ const SUM_DEV = (destino) => "COALESCE((SELECT SUM(dvi.kg) FROM sg_devolucion_it
   + " JOIN sg_devoluciones dv ON dv.id=dvi.devolucion_id AND dv.estado='registrada'"
   + ` WHERE dvi.lote_id=l.id AND dvi.destino='${destino}'),0)`;
 const SUM_DEV_STOCK = SUM_DEV('stock');
-const SUM_DEV_PROV  = SUM_DEV('proveedor');
+// Y el que BAJA lo que se le debe al productor mira la marca congelada, no el
+// destino: una devolución sobre una partida ya firme vuelve igual, pero es pérdida
+// nuestra y no le descuenta nada. «Una vez liquidado ya todo es firme» — Pablo.
+const SUM_DEV_PROV = "COALESCE((SELECT SUM(dvi.kg) FROM sg_devolucion_items dvi"
+  + " JOIN sg_devoluciones dv ON dv.id=dvi.devolucion_id AND dv.estado='registrada'"
+  + " WHERE dvi.lote_id=l.id AND dvi.destino='proveedor'"
+  + " AND COALESCE(dvi.descuenta_al_productor,1)=1),0)";
 
 // kg vigentes (disponibilidad) = kg_reales − Σ decomisos − (transformaciones + reprocesos activos).
 const KG_VIGENTE_STOCK = `(l.kg_reales - ${SUM_DECOMISO} - ${SUM_TRANSF})`;
@@ -10139,8 +10145,22 @@ router.post('/despachos/:id/devolver', requireAuth, express.json(), (req, res) =
       // otro es hacerle aparecer stock que no puso. Misma regla que la recepción.
       const noPuede = exigirPiso(db, req, p.pisoId, 'devolver mercadería');
       if (noPuede) return res.status(403).json({ ok: false, error: noPuede });
+      // ── ¿ESTA LÍNEA LE BAJA LO QUE SE LE DEBE AL PRODUCTOR? ───────────
+      //
+      // Sólo las que vuelven al productor, y sólo si la partida NO estaba ya
+      // firme. Se decide ACÁ y se guarda: si se recalculara después, liquidar la
+      // partida haría que las devoluciones viejas dejaran de descontar de golpe y
+      // la liquidación ya emitida quedaría «de más» sin que nadie tocara nada.
+      let descuenta = 0;
+      if (p.destino === 'proveedor') {
+        const ocItem = it.oc_item_id || it.lote_oc_item;
+        const oc = ocItem ? db.prepare('SELECT oc_id FROM sg_oc_items WHERE id=?').get(ocItem) : null;
+        const firme = (oc && oc.oc_id)
+          ? precioFirmeDetalle(db, oc.oc_id, 'descontarle esta devolución al productor') : null;
+        descuenta = firme ? 0 : 1;
+      }
       const kpb = Number(it.kpb) > 0 ? Number(it.kpb) : null;
-      lineas.push({ p, it, bultos: kpb ? +(p.kg / kpb).toFixed(4) : 0 });
+      lineas.push({ p, it, descuenta, bultos: kpb ? +(p.kg / kpb).toFixed(4) : 0 });
     }
 
     const salida = db.transaction(() => {
@@ -10153,11 +10173,12 @@ router.post('/despachos/:id/devolver', requireAuth, express.json(), (req, res) =
         val(req.body.motivo), uid(req));
       const devId = info.lastInsertRowid;
       const ins = db.prepare(`INSERT INTO sg_devolucion_items
-        (devolucion_id, despacho_item_id, lote_id, bultos, kg, destino, piso_id)
-        VALUES (?,?,?,?,?,?,?)`);
+        (devolucion_id, despacho_item_id, lote_id, bultos, kg, destino, piso_id, descuenta_al_productor)
+        VALUES (?,?,?,?,?,?,?,?)`);
       const lotes = new Set();
       for (const ln of lineas) {
-        ins.run(devId, ln.p.id, ln.it.lote_id, ln.bultos, r2(ln.p.kg), ln.p.destino, ln.p.pisoId);
+        ins.run(devId, ln.p.id, ln.it.lote_id, ln.bultos, r2(ln.p.kg), ln.p.destino,
+          ln.p.pisoId, ln.descuenta);
         // ENTRA SIEMPRE. La suma de los pisos tiene que seguir dando lo disponible.
         ubicMover(db, ln.it.lote_id, ln.p.pisoId, ln.bultos, r2(ln.p.kg));
         // Y si vuelve al productor, SALE de nuevo con el remito de devolución: entró
