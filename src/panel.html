@@ -59836,6 +59836,29 @@ function eqQuitarAsignacion(areaId) {
   });
 }
 
+// Qué contar del sincronismo del mail, en el idioma del que guardó la ficha. El
+// backend contesta `mail_usuario` con lo que pasó; acá se traduce.
+function eqMailAviso(m) {
+  if (!m) return 'Persona guardada';
+  if (m.estado === 'actualizado') return 'Persona guardada · los avisos ya salen a ' + m.email;
+  if (m.estado === 'ya_estaba') return 'Persona guardada';
+  if (m.estado === 'sin_usuario') {
+    return 'Persona guardada, PERO no tiene usuario en el sistema: no le van a llegar avisos';
+  }
+  if (m.estado === 'homonimos') {
+    return 'Persona guardada, PERO hay dos usuarios con ese mismo nombre y no se sabe cuál es: '
+      + 'vinculalo desde Empresas y accesos';
+  }
+  if (m.estado === 'ocupado') {
+    return 'Persona guardada, PERO ese mail ya lo tiene otro usuario: los avisos siguen '
+      + 'yendo al anterior';
+  }
+  return 'Persona guardada';
+}
+function eqMailProblema(m) {
+  return !!m && ['sin_usuario', 'homonimos', 'ocupado'].indexOf(m.estado) >= 0;
+}
+
 function eqGuardarPersona() {
   var id = document.getElementById('eq-per-id').value;
   var esNueva = !id;
@@ -59867,7 +59890,11 @@ function eqGuardarPersona() {
     // "Empresas y accesos" y se guardan con su propio botón: si esto siguiera
     // sincronizando, un guardado de la ficha mandaría un PATCH del usuario con
     // valores que quien apretó el botón no vio en ninguna pantalla.
-    toast('Persona guardada', 'ok');
+    //
+    // EL MAIL SÍ VIAJA, Y SE DICE. Es el único campo de la ficha del que dependen
+    // los avisos del sistema, y un sincronismo mudo es exactamente el problema que
+    // los avisos vienen a evitar: nadie se entera de que un mail no llega.
+    toast(eqMailAviso(r.mail_usuario), r.mail_usuario && r.mail_usuario.estado === 'actualizado' ? 'ok' : (eqMailProblema(r.mail_usuario) ? 'er' : 'ok'));
     closeMB('mb-eq-persona');
     eqCargarPersonas();
   });
