@@ -43,11 +43,67 @@ export function normalizarMail(m) {
  * problema se informa. Voltear el guardado por el sincronismo sería peor que la
  * desincronización.
  */
+// ── ENCONTRAR AL USUARIO DE UNA PERSONA ───────────────────────────────────
+//
+// Pablo, 1/9/2026, después del primer arreglo: «no estás tomando bien el mail de
+// Camila, no funciona».
+//
+// El vínculo `usuarios.persona_id` SÓLO se escribe cuando el usuario se crea DESDE
+// la ficha, o cuando alguien lo vincula a mano. Los usuarios que ya existían antes
+// de que el organigrama existiera —que son casi todos— lo tienen en NULL. Así que
+// el sincronismo buscaba por ahí, no encontraba nada, y se callaba: la ficha se
+// guardaba, el mail no viajaba, y no había ni un cartel que lo dijera.
+//
+// Ahora hay tres formas de reconocerlo, de la más firme a la más floja:
+//
+//   1. El vínculo, cuando existe.
+//   2. El mail que la ficha tenía ANTES. Si la ficha decía X y hay un usuario
+//      con X, es la misma persona: no hay margen de duda.
+//   3. El nombre completo exacto, y SÓLO si hay uno solo. El usuario se crea con
+//      `nombre + ' ' + apellido`, así que suele coincidir. Con dos homónimos no se
+//      elige: mandar el mail de uno al otro es peor que no mandarlo.
+//
+// Y cuando lo encuentra por 2 o por 3, DEJA EL VÍNCULO ESCRITO. Así la próxima vez
+// entra por el camino firme y esto no se vuelve a apoyar en adivinar.
+export function buscarUsuarioDePersona(db, personaId) {
+  const porVinculo = db.prepare(
+    'SELECT id, email, persona_id FROM usuarios WHERE persona_id = ? AND activo = 1').get(personaId);
+  if (porVinculo) return { usuario: porVinculo, como: 'vinculo' };
+
+  const p = db.prepare('SELECT nombre, apellido, mail FROM personas WHERE id = ?').get(personaId);
+  if (!p) return { usuario: null, como: 'sin_persona' };
+
+  if (esMailReal(p.mail)) {
+    const porMail = db.prepare(
+      'SELECT id, email, persona_id FROM usuarios WHERE LOWER(email) = ? AND activo = 1'
+    ).get(normalizarMail(p.mail));
+    if (porMail && !porMail.persona_id) return { usuario: porMail, como: 'mail_anterior' };
+    if (porMail) return { usuario: porMail, como: 'vinculo' };
+  }
+
+  const completo = (String(p.nombre || '').trim() + ' ' + String(p.apellido || '').trim()).trim();
+  if (completo) {
+    const homonimos = db.prepare(
+      'SELECT id, email, persona_id FROM usuarios WHERE nombre = ? AND activo = 1 AND persona_id IS NULL'
+    ).all(completo);
+    if (homonimos.length === 1) return { usuario: homonimos[0], como: 'nombre' };
+    if (homonimos.length > 1) return { usuario: null, como: 'homonimos' };
+  }
+  return { usuario: null, como: 'sin_usuario' };
+}
+
 export function sincronizarMailAUsuario(db, personaId, mail) {
   if (!esMailReal(mail)) return { estado: 'sin_mail' };
   const nuevo = normalizarMail(mail);
-  const u = db.prepare('SELECT id, email FROM usuarios WHERE persona_id = ? AND activo = 1').get(personaId);
-  if (!u) return { estado: 'sin_usuario' };
+  const hallazgo = buscarUsuarioDePersona(db, personaId);
+  const u = hallazgo.usuario;
+  if (!u) return { estado: hallazgo.como === 'homonimos' ? 'homonimos' : 'sin_usuario' };
+  // Encontrado por el mail viejo o por el nombre: se deja el vínculo escrito para
+  // no volver a depender de eso.
+  if (!u.persona_id) {
+    try { db.prepare('UPDATE usuarios SET persona_id = ? WHERE id = ?').run(personaId, u.id); }
+    catch (_) { /* si no se puede vincular, el mail se actualiza igual */ }
+  }
   if (normalizarMail(u.email) === nuevo) return { estado: 'ya_estaba' };
   const otro = db.prepare('SELECT id FROM usuarios WHERE LOWER(email) = ? AND id <> ?').get(nuevo, u.id);
   if (otro) return { estado: 'ocupado', email: nuevo };
@@ -92,11 +148,21 @@ export const mailesQueNoCoinciden = [];
 export function arrastrarMailesDePersonas(db) {
   const out = { arrastrados: 0, encontrados: 0 };
   try {
-    const filas = db.prepare(`
-      SELECT u.id AS usuario_id, u.email, u.nombre, p.id AS persona_id, p.mail
-      FROM usuarios u JOIN personas p ON p.id = u.persona_id
-      WHERE u.activo = 1 AND p.mail IS NOT NULL AND TRIM(p.mail) <> ''
+    // Se sale de PERSONAS y se busca el usuario con las tres formas, no con un JOIN
+    // por `persona_id`: ese JOIN dejaba afuera justamente a los que no tienen el
+    // vínculo, que son los que arrastran el mail viejo.
+    const personas = db.prepare(`
+      SELECT id AS persona_id, nombre, apellido, mail FROM personas
+      WHERE activo = 1 AND mail IS NOT NULL AND TRIM(mail) <> ''
     `).all();
+    const filas = [];
+    for (const p of personas) {
+      const h = buscarUsuarioDePersona(db, p.persona_id);
+      if (!h.usuario) continue;
+      filas.push({ usuario_id: h.usuario.id, email: h.usuario.email,
+        nombre: (p.nombre + ' ' + (p.apellido || '')).trim(),
+        persona_id: p.persona_id, mail: p.mail });
+    }
     for (const f of filas) {
       if (!esMailReal(f.mail)) continue;
       if (normalizarMail(f.email) === normalizarMail(f.mail)) continue;

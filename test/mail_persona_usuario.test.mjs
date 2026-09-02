@@ -28,7 +28,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   esMailReal, normalizarMail, sincronizarMailAUsuario, sincronizarMailAPersona,
-  arrastrarMailesDePersonas, mailesQueNoCoinciden,
+  arrastrarMailesDePersonas, mailesQueNoCoinciden, buscarUsuarioDePersona,
 } from '../src/servicios/mail_persona.js';
 
 const RAIZ = process.env.LNB_RAIZ
@@ -38,22 +38,35 @@ const AUTH = fs.readFileSync(path.join(RAIZ, 'src/rutas/auth.js'), 'utf8');
 const DBORG = fs.readFileSync(path.join(RAIZ, 'src/servicios/db_org.js'), 'utf8');
 
 // La base de la captura de pantalla: los mismos nombres y los mismos mails.
+//
+// `personas.activo` va porque está en el esquema real (db_org.js) y el arrastre lo
+// filtra: una tabla de prueba a la que le falta una columna hace que la consulta
+// tire, el catch se lo coma y el test pase por una razón que no es la que dice.
 function base() {
   const db = new DatabaseSync(':memory:');
   db.exec(`
-    CREATE TABLE personas (id INTEGER PRIMARY KEY, nombre TEXT, apellido TEXT, mail TEXT);
+    CREATE TABLE personas (id INTEGER PRIMARY KEY, nombre TEXT, apellido TEXT, mail TEXT,
+      activo INTEGER DEFAULT 1);
     CREATE TABLE usuarios (id INTEGER PRIMARY KEY, nombre TEXT, email TEXT UNIQUE,
       activo INTEGER DEFAULT 1, persona_id INTEGER);
-    INSERT INTO personas VALUES
+    INSERT INTO personas (id,nombre,apellido,mail) VALUES
       (1,'Alejandro','Aracena','a.aracena@lnbonita.com.ar'),  -- se le cargó el mail después
       (2,'Camila','Persampieri','c.persampieri@lnbonita.com.ar'),
       (3,'Belen','Argañaras',NULL),                            -- todavía sin mail
-      (4,'Carlos','Barcelo','carlos.nuevo@barcelotransporte.com.ar');
+      (4,'Carlos','Barcelo','carlos.nuevo@barcelotransporte.com.ar'),
+      -- EL CASO DE CAMILA: el usuario existe desde antes que el organigrama, así
+      -- que NO tiene persona_id. Es el que el primer arreglo no encontraba.
+      (5,'Sergio','Viduherio','s.viduherio@lnbonita.com.ar'),
+      -- Y dos homónimos: no se elige, mandar el mail de uno al otro es peor.
+      (6,'Juan','Perez','juan.nuevo@lnbonita.com.ar');
     INSERT INTO usuarios VALUES
       (1,'Alejandro Aracena','campo_alejandro_aracena@interno.lnb',1,1),
       (2,'Camila Persampieri','c.persampieri@lnbonita.com.ar',1,2),
       (3,'Belen Argañaras','campo_belen_argaaras@interno.lnb',1,3),
       (4,'Carlos Barcelo','carlos@barcelotransporte.com.ar',1,4),
+      (5,'Sergio Viduherio','campo_sergio_viduherio@interno.lnb',1,NULL),
+      (6,'Juan Perez','juan1@lnbonita.com.ar',1,NULL),
+      (7,'Juan Perez','juan2@lnbonita.com.ar',1,NULL),
       (9,'Usuario suelto','suelto@lnbonita.com.ar',1,NULL);
   `);
   return db;
@@ -86,6 +99,65 @@ test('el mismo mail con otra capitalización cuenta como el mismo', () => {
   const p = db.prepare("SELECT mail FROM personas WHERE id=2").get();
   db.prepare("UPDATE personas SET mail='C.Persampieri@LNBonita.com.ar' WHERE id=2").run();
   assert.equal(sincronizarMailAPersona(db, 2, p.mail).estado, 'ya_estaba');
+  db.close();
+});
+
+// ── 1b · ENCONTRAR AL USUARIO DE UNA PERSONA ───────────────────────────────
+//
+// Pablo, después del primer arreglo: «no estás tomando bien el mail de Camila, no
+// funciona». El vínculo `usuarios.persona_id` SÓLO se escribe cuando el usuario se
+// crea desde la ficha; los que ya existían antes del organigrama lo tienen en NULL.
+// El primer arreglo buscaba sólo por ahí, no encontraba nada, y se callaba.
+
+test('lo encuentra por el vínculo cuando existe', () => {
+  const db = base();
+  const h = buscarUsuarioDePersona(db, 2);
+  assert.equal(h.como, 'vinculo');
+  assert.equal(h.usuario.id, 2);
+  db.close();
+});
+
+test('y SIN vínculo lo encuentra igual, por el nombre completo', () => {
+  // ES EL CASO QUE FALLABA. El usuario de Sergio existe desde antes que el
+  // organigrama: persona_id en NULL, mail interno autogenerado.
+  const db = base();
+  const h = buscarUsuarioDePersona(db, 5);
+  assert.equal(h.como, 'nombre');
+  assert.equal(h.usuario.id, 5);
+  db.close();
+});
+
+test('o por el mail que la ficha tenía antes, que no admite duda', () => {
+  // Si la ficha decía X y hay un usuario con X, es la misma persona.
+  const db = base();
+  db.prepare("UPDATE usuarios SET persona_id=NULL WHERE id=4").run();
+  db.prepare("UPDATE personas SET mail='carlos@barcelotransporte.com.ar' WHERE id=4").run();
+  const h = buscarUsuarioDePersona(db, 4);
+  assert.equal(h.como, 'mail_anterior');
+  assert.equal(h.usuario.id, 4);
+  db.close();
+});
+
+test('con dos homónimos NO elige', () => {
+  // Mandarle el mail de uno al otro es peor que no mandarlo.
+  const db = base();
+  const h = buscarUsuarioDePersona(db, 6);
+  assert.equal(h.como, 'homonimos');
+  assert.equal(h.usuario, null);
+  assert.equal(sincronizarMailAUsuario(db, 6, 'juan.nuevo@lnbonita.com.ar').estado, 'homonimos');
+  assert.equal(db.prepare('SELECT email FROM usuarios WHERE id=6').get().email, 'juan1@lnbonita.com.ar');
+  db.close();
+});
+
+test('y al encontrarlo sin vínculo, lo deja vinculado', () => {
+  // Para que la próxima vez entre por el camino firme y esto no se vuelva a apoyar
+  // en adivinar.
+  const db = base();
+  assert.equal(db.prepare('SELECT persona_id FROM usuarios WHERE id=5').get().persona_id, null);
+  sincronizarMailAUsuario(db, 5, 's.viduherio@lnbonita.com.ar');
+  assert.equal(db.prepare('SELECT persona_id FROM usuarios WHERE id=5').get().persona_id, 5);
+  assert.equal(db.prepare('SELECT email FROM usuarios WHERE id=5').get().email,
+    's.viduherio@lnbonita.com.ar');
   db.close();
 });
 
@@ -170,7 +242,12 @@ test('el arrastre pisa el interno y deja quieto lo que es una decisión', () => 
   // Carlos tiene DOS mails reales distintos: elegir uno es adivinar. Queda anotado.
   assert.equal(db.prepare('SELECT email FROM usuarios WHERE id=4').get().email,
     'carlos@barcelotransporte.com.ar', 'se pisó un mail real');
-  assert.equal(r.arrastrados, 1);
+  // Y SERGIO, que es el caso que el primer arreglo no encontraba: su usuario existe
+  // desde antes que el organigrama y no tiene el vínculo. Se lo encuentra por el
+  // nombre completo y se le arrastra el mail.
+  assert.equal(db.prepare('SELECT email FROM usuarios WHERE id=5').get().email,
+    's.viduherio@lnbonita.com.ar');
+  assert.equal(r.arrastrados, 2, 'Alejandro (por vínculo) y Sergio (por nombre)');
   assert.equal(mailesQueNoCoinciden.length, 1);
   assert.equal(mailesQueNoCoinciden[0].motivo, 'los_dos_son_reales');
   assert.equal(mailesQueNoCoinciden[0].usuario, 'Carlos Barcelo');
@@ -229,6 +306,33 @@ test('el arrastre corre al arrancar, después de crear el vínculo', () => {
   const j = DBORG.search(/\r?\narrastrarMailesDePersonas\(db\);/);
   assert.ok(i > 0, 'no está el ALTER de persona_id');
   assert.ok(j > i, 'el arrastre no corre, o corre antes de que exista persona_id');
+});
+
+// ── 5b · Y LA PANTALLA LO DICE ─────────────────────────────────────────────
+//
+// El primer arreglo sincronizaba y no se veía: el cartel decía «Persona guardada»
+// tanto cuando el mail viajaba como cuando no encontraba a quién actualizarlo.
+// Justamente el error que estos avisos existen para evitar —enterarse de que algo
+// no llegó— estaba en la pantalla que lo arregla.
+
+test('el cartel dice a dónde van a salir los avisos, o por qué no van a salir', () => {
+  const PANEL = fs.readFileSync(path.join(RAIZ, 'src/panel.html'), 'utf8');
+  const i = PANEL.indexOf('function eqMailAviso(m) {');
+  assert.ok(i > 0, 'el guardado no dice nada del mail');
+  const b = PANEL.slice(i, i + 1400);
+  // Los tres casos en que el mail NO llega tienen que decirlo, no pasar por «ok».
+  assert.match(b, /no tiene usuario en el sistema: no le van a llegar avisos/);
+  assert.match(b, /hay dos usuarios con ese mismo nombre y no se sabe cuál es/);
+  assert.match(b, /ese mail ya lo tiene otro usuario: los avisos siguen /);
+  // Y cuando sí llega, dice a dónde.
+  assert.match(b, /'Persona guardada · los avisos ya salen a ' \+ m\.email/);
+  // Los tres problemas salen en rojo.
+  const j = PANEL.indexOf('function eqMailProblema(m) {');
+  assert.match(PANEL.slice(j, j + 250),
+    /\['sin_usuario', 'homonimos', 'ocupado'\]\.indexOf\(m\.estado\) >= 0/);
+  // Y el guardado lo usa.
+  const k = PANEL.indexOf('function eqGuardarPersona() {');
+  assert.match(PANEL.slice(k, k + 2200), /toast\(eqMailAviso\(r\.mail_usuario\)/);
 });
 
 // ── 6 · Y LOS AVISOS SIGUEN MIRANDO usuarios ───────────────────────────────
