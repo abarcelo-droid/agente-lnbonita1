@@ -127,9 +127,15 @@ test('la respuesta es UNA, no una consulta copiada en cada endpoint', () => {
   // datos del comprobante puestos: la pantalla los necesita para ofrecer el botón
   // de anular. Sigue siendo una sola fuente — las dos salen de
   // perfeccionamientoDeOC(), no de una consulta escrita de nuevo.
+  //
+  // Y las DOS del 2/9/2026, que son la misma puerta mirada de los dos lados:
+  // devolverle mercadería al productor. Baja lo que entró de esa partida, o sea lo
+  // que se le debe — exactamente lo que el cerrojo protege. La pantalla pregunta
+  // antes (para no ofrecer un destino que va a rebotar) y el POST vuelve a
+  // controlar, porque el botón que no se ofrece se llama igual por la dirección.
   const usos = (SG.match(/frenoPrecioFirme\(db,/g) || []).length
              + (SG.match(/precioFirmeDetalle\(db,/g) || []).length;
-  assert.equal(usos, 9, 'todas las puertas usan la misma función');
+  assert.equal(usos, 11, 'todas las puertas usan la misma función');
   // Y no volvieron las copias que había, cada una con su propio mensaje: son la
   // huella de que alguien volvió a escribir la pregunta en vez de preguntarla.
   assert.doesNotMatch(SG, /Anulá el asiento primero: si se corrigen los kilos/);
