@@ -290,6 +290,15 @@ const LECTURA_CONTROLADA = new Set([
   // comercial: no corresponde que la vea cualquiera que tenga usuario, y menos que se la
   // pueda bajar en Excel. Entra en la lista por eso.
   '/api/share',
+  // LAS DEVOLUCIONES DE SAN GERÓNIMO: qué le devolvió cada cliente, de qué remito y
+  // por cuánta plata. Pablo, 2/9/2026: «devoluciones debería estar con el mismo
+  // código de autorización que configuramos los usuarios en el menú donde está».
+  //
+  // Vive adentro de Remitos y Facturación, así que la gobierna ese módulo: quien no
+  // lo tenga no la ve ni escribiendo la dirección. Escribir ya estaba controlado;
+  // lo que faltaba era LEER — el menú escondía la solapa y la dirección se escribía
+  // igual.
+  '/api/sg/devoluciones',
   // LA OFERTA DE SAN GERÓNIMO: qué partidas hay, de QUÉ PROVEEDOR es cada una y
   // qué descuento comercial tiene ese proveedor. Es la lista de compras de la
   // casa. Estaba abierta a cualquiera que tuviera usuario —el menú escondía la
