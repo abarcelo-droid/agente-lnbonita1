@@ -1198,7 +1198,10 @@ router.get('/facturable', requireAuth, (req, res) => {
     for (const r of rows) {
       const kgFact = kgDocumentadoItem(db, r.despacho_item_id);
       const kgDesp = Number(r.kg_despachados) || 0;
-      const kgPend = +(kgDesp - kgFact).toFixed(2);
+      // LO DEVUELTO NO SE OFRECE. El súper devuelve ANTES de facturar (Pablo,
+      // 2/9/2026), así que esto es el caso normal: sin restarlo, el remito se
+      // sigue ofreciendo entero y se le cobra mercadería que ya devolvió.
+      const kgPend = +(kgDesp - kgFact - kgDevueltoItem(db, r.despacho_item_id)).toFixed(2);
       if (!mapa.has(r.despacho_id)) mapa.set(r.despacho_id, { despacho_id: r.despacho_id, numero: r.despacho_numero, fecha: r.fecha_despacho, _desp: 0, _fact: 0, items: [] });
       const g = mapa.get(r.despacho_id);
       g._desp += kgDesp; g._fact += kgFact;
@@ -1268,7 +1271,10 @@ router.get('/despachos-pendientes', requireAuth, (req, res) => {
     for (const r of rows) {
       const kgFact = kgDocumentadoItem(db, r.despacho_item_id);
       const kgDesp = Number(r.kg_despachados) || 0;
-      const kgPend = +(kgDesp - kgFact).toFixed(2);
+      // LO DEVUELTO NO SE OFRECE. El súper devuelve ANTES de facturar (Pablo,
+      // 2/9/2026), así que esto es el caso normal: sin restarlo, el remito se
+      // sigue ofreciendo entero y se le cobra mercadería que ya devolvió.
+      const kgPend = +(kgDesp - kgFact - kgDevueltoItem(db, r.despacho_item_id)).toFixed(2);
       if (!mapa.has(r.despacho_id)) mapa.set(r.despacho_id, {
         despacho_id: r.despacho_id, numero: r.despacho_numero, fecha: r.fecha_despacho,
         cliente_id: r.cliente_id, razon_social: r.razon_social || '', alias: r.nombre_comercial || '',
@@ -1414,7 +1420,10 @@ const postEmitir = async (req, res) => {
             `${di.producto_nombre || 'Un renglón'} del remito todavía viene en viaje: `
             + 'no se factura hasta que la mercadería entre al stock.' });
         }
-        const kgPend = (Number(di.kg_despachados) || 0) - kgDocumentadoItem(db, diId);
+        // Y TAMPOCO SE ACEPTA. La pantalla ya no lo ofrece, pero el botón que no
+        // se ofrece se llama igual por la dirección.
+        const kgPend = (Number(di.kg_despachados) || 0) - kgDocumentadoItem(db, diId)
+                     - kgDevueltoItem(db, diId);
         if (kg > kgPend + 0.01) return res.status(400).json({ ok: false, error: `Ítem ${diId}: pedís ${kg}kg pero quedan ${kgPend.toFixed(2)}kg pendientes` });
         const alic = di.iva_alicuota != null ? Number(di.iva_alicuota) : null;
         const incluyeIva = (it.incluye_iva != null) ? (it.incluye_iva === true) : facturaIncluyeIva;
@@ -10026,6 +10035,16 @@ router.get('/despachos/:id/trazabilidad', requireAuth, (req, res) => {
 // reescribir lo que ya pasó, y además rompería la cuenta de lo que falta facturar
 // de ese renglón. La devolución es un hecho NUEVO, anotado aparte.
 
+// ── LO DEVUELTO NO SE FACTURA ─────────────────────────────────────────────
+//
+// Pablo, 2/9/2026: «en general los supermercados devuelven la mercadería ANTES de
+// facturarlo». O sea que devolver-y-después-facturar es el caso NORMAL, no el raro.
+//
+// Lo pendiente de facturar de un renglón era «lo despachado − lo documentado», sin
+// mirar lo devuelto: el remito se seguía ofreciendo entero y se le cobraba al súper
+// mercadería que ya había devuelto. Se arregla después con una nota de crédito por
+// algo que nunca debió salir.
+//
 // Cuánto de un renglón de remito ya volvió (sin contar devoluciones anuladas).
 function kgDevueltoItem(db, despachoItemId) {
   return Number(db.prepare(`SELECT COALESCE(SUM(dvi.kg),0) kg FROM sg_devolucion_items dvi
@@ -10101,6 +10120,10 @@ router.post('/despachos/:id/devolver', requireAuth, express.json(), (req, res) =
     if (!pedidos.length) return res.status(400).json({ ok: false, error: 'No mandaste nada para devolver' });
 
     const lineas = [];
+    // Lo que este mismo pedido ya se llevó de cada renglón. Sin esto, mandar el
+    // mismo renglón dos veces con la mitad del pendiente cada una pasaba las dos
+    // validaciones por separado y devolvía el doble.
+    const yaEnEstePedido = {};
     for (const p of pedidos) {
       const it = db.prepare(`SELECT di.*, l.oc_item_id AS lote_oc_item,
           COALESCE(di.kg_por_bulto, ps.factor_conversion) AS kpb
@@ -10115,7 +10138,8 @@ router.post('/despachos/:id/devolver', requireAuth, express.json(), (req, res) =
       }
       // NO SE DEVUELVE MÁS DE LO QUE SALIÓ, contando lo ya devuelto antes.
       const kgSalio = Number(it.kg_despachados) || 0;
-      const pend = kgSalio - kgDevueltoItem(db, p.id);
+      const pend = kgSalio - kgDevueltoItem(db, p.id) - (yaEnEstePedido[p.id] || 0);
+      yaEnEstePedido[p.id] = (yaEnEstePedido[p.id] || 0) + p.kg;
       if (p.kg > pend + 0.01) {
         return res.status(400).json({ ok: false, error:
           `Del renglón salieron ${kgSalio.toFixed(2)} kg y quedan ${Math.max(0, pend).toFixed(2)} kg `
@@ -10321,6 +10345,28 @@ router.post('/despachos/:id/anular', requireAuth, (req, res) => {
       // disponible sin estar en ningun lado, y la suma de los pisos deja de dar
       // lo disponible. Vuelve al piso del que salio; si no se habia anotado
       // cual, al primero que tenga esa partida.
+      // ── PRIMERO SE DESHACEN LAS DEVOLUCIONES DE ESTE REMITO ──────────
+      //
+      // Si no, la mercadería vuelve DOS veces: una por la devolución que ya la
+      // había traído al piso y otra por la anulación, que devuelve lo despachado
+      // entero. Quedaban 1.100 kg disponibles de una partida de 1.000.
+      //
+      // Se anulan, no se borran: el papel de la devolución salió y el cliente tiene
+      // su copia. Y dejan de tener sentido igual — el remito del que colgaban ya no
+      // existe.
+      for (const dv of db.prepare(
+        "SELECT id FROM sg_devoluciones WHERE despacho_id=? AND estado='registrada'").all(req.params.id)) {
+        for (const it of db.prepare('SELECT * FROM sg_devolucion_items WHERE devolucion_id=?').all(dv.id)) {
+          // Lo que había quedado en el piso se saca. Lo que fue al productor entró
+          // y salió: ya estaba en cero y tocarlo lo dejaría en negativo.
+          if (it.destino === 'stock' && it.piso_id) {
+            ubicMover(db, it.lote_id, it.piso_id, -(Number(it.bultos) || 0), -(Number(it.kg) || 0));
+          }
+        }
+        db.prepare(`UPDATE sg_devoluciones SET estado='anulada',
+          anulado_en=datetime('now','localtime'), anulado_por=?,
+          anulado_motivo='Se anuló el remito del que colgaba' WHERE id=?`).run(uid(req), dv.id);
+      }
       for (const li of db.prepare(`SELECT lote_id, bultos, kg_despachados, piso_id
           FROM sg_despacho_items WHERE despacho_id=? AND lote_id IS NOT NULL`).all(req.params.id)) {
         let piso = li.piso_id;

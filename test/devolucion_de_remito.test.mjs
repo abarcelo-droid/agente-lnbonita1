@@ -191,7 +191,7 @@ test('sin piso no se registra, vaya donde vaya después', () => {
   // por un piso». Y sin piso la partida figuraría disponible sin estar en ningún
   // lado.
   const i = SG.indexOf("router.post('/despachos/:id/devolver'");
-  const b = SG.slice(i, i + 5200);
+  const b = SG.slice(i, i + 7200);
   assert.match(b, /if \(!p\.pisoId\) return res\.status\(400\)/);
   assert.match(b, /Elegí por qué piso entra: aunque vuelva al productor/);
   // Y el piso con dueño lo toca sólo él.
@@ -227,7 +227,7 @@ test('el tope cuenta lo YA devuelto antes', () => {
   assert.match(SG.slice(i, i + 400), /dv\.estado='registrada'[\s\S]*?WHERE dvi\.despacho_item_id = \?/);
   const j = SG.indexOf("router.post('/despachos/:id/devolver'");
   const b = SG.slice(j, j + 5200);
-  assert.match(b, /const pend = kgSalio - kgDevueltoItem\(db, p\.id\);/);
+  assert.match(b, /const pend = kgSalio - kgDevueltoItem\(db, p\.id\) - \(yaEnEstePedido\[p\.id\] \|\| 0\);/);
   assert.match(b, /if \(p\.kg > pend \+ 0\.01\)/);
 });
 
@@ -475,5 +475,46 @@ test('el tope se vuelve a mirar ADENTRO de la transacción', () => {
   assert.match(dentro, /kgDevueltoItem\(db, ln\.p\.id\)/, 'el tope no se revisa adentro');
   assert.match(dentro, /Alguien acaba de devolver parte de este remito/);
   // Y sigue estando afuera, que es de donde sale el mensaje bueno.
-  assert.match(b.slice(0, tx), /const pend = kgSalio - kgDevueltoItem\(db, p\.id\);/);
+  assert.match(b.slice(0, tx), /const pend = kgSalio - kgDevueltoItem\(db, p\.id\) - \(yaEnEstePedido/);
+});
+
+// ── 11 · LO QUE ENCONTRÓ LA REVISIÓN ──────────────────────────
+
+test('anular el remito no devuelve dos veces la mercadería', () => {
+  // 400 despachados, 100 ya devueltos al piso. Anular devolvía los 400 enteros: en
+  // el piso quedaban 500 de una partida que sólo tenía 400 afuera, y lo disponible
+  // daba 1.100 de una partida de 1.000.
+  const i = SG.indexOf("router.post('/despachos/:id/anular'");
+  const b = SG.slice(i, i + 5200);
+  const dev = b.indexOf("SELECT id FROM sg_devoluciones WHERE despacho_id=? AND estado='registrada'");
+  const dsp = b.indexOf('FROM sg_despacho_items WHERE despacho_id=? AND lote_id IS NOT NULL');
+  assert.ok(dev > 0, 'anular no toca las devoluciones del remito');
+  assert.ok(dev < dsp, 'las devoluciones se deshacen ANTES de devolver lo despachado');
+  // Se anulan, no se borran: el papel salió y el cliente tiene su copia.
+  assert.match(b, /Se anuló el remito del que colgaba/);
+  // Y lo que fue al productor no se toca: ya estaba en cero.
+  assert.match(b.slice(dev, dsp), /if \(it\.destino === 'stock' && it\.piso_id\)/);
+});
+
+test('el mismo renglón dos veces en una llamada no se pasa del tope', () => {
+  // Cada línea se comparaba contra lo ya devuelto ANTES, pero no entre ellas:
+  // mandarlo dos veces con la mitad del pendiente cada una pasaba las dos
+  // validaciones y devolvía el doble.
+  const i = SG.indexOf("router.post('/despachos/:id/devolver'");
+  const b = SG.slice(i, i + 7200);
+  assert.match(b, /const yaEnEstePedido = \{\};/);
+  assert.match(b, /yaEnEstePedido\[p\.id\] = \(yaEnEstePedido\[p\.id\] \|\| 0\) \+ p\.kg;/);
+});
+
+test('lo devuelto NO se le puede facturar al súper', () => {
+  // Pablo: «en general los supermercados devuelven la mercadería ANTES de
+  // facturarlo». O sea que devolver-y-después-facturar es el caso NORMAL, y el
+  // remito se seguía ofreciendo entero.
+  //
+  // Los tres lugares: lo que se OFRECE (dos listados) y lo que se ACEPTA (el que
+  // emite). El botón que no se ofrece se llama igual por la dirección.
+  const ofrecen = (SG.match(/kgDesp - kgFact - kgDevueltoItem\(db, r\.despacho_item_id\)/g) || []).length;
+  assert.equal(ofrecen, 2, 'los dos listados tienen que restar lo devuelto');
+  const i = SG.indexOf('const postEmitir');
+  assert.match(SG.slice(i, i + 4200), /kgDocumentadoItem\(db, diId\)\r?\n\s*- kgDevueltoItem\(db, diId\);/);
 });
