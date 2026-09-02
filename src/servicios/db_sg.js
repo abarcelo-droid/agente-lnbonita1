@@ -2035,6 +2035,23 @@ try {
   // liquidación ya emitida pasaría a estar «de más» sin que nadie tocara nada.
   //
   // 1 = descuenta (la partida estaba libre) · 0 = pérdida nuestra (ya estaba firme)
+  // ── LO QUE EL COMPRADOR CREE QUE VA A DEJAR ──────────────────────────────
+  //
+  // Pablo, 2/9/2026: «en nueva OC debemos poner Rentabilidad Estimada para que
+  // complete el comprador. ¿Para qué? Primero porque más adelante vamos a poner
+  // algún tipo de traba para que órdenes de compra superiores a X pesos requieran
+  // autorización. Y además para poder hacer un seguimiento luego de si los
+  // compradores están o no forecasteando bien».
+  //
+  // Es un PRONÓSTICO, no un dato del acuerdo: no cambia lo que se le paga al
+  // productor ni entra a ningún asiento. Se guarda para poder compararlo después
+  // contra el margen que la partida dejó de verdad.
+  //
+  // Va en porcentaje SOBRE EL COSTO: «10%» quiere decir que espera vender a
+  // costo × 1,10. Guardar el porcentaje y no el precio es a propósito — el costo
+  // todavía puede cambiar (la balanza, el flete), y el pronóstico que vale es el
+  // criterio del comprador, no un número que quedó viejo.
+  if (addCol('sg_oc',               'rentabilidad_estimada', 'REAL')) added.push('sg_oc.rentabilidad_estimada');
   if (addCol('sg_devolucion_items', 'descuenta_al_productor', 'INTEGER')) added.push('sg_devolucion_items.descuenta_al_productor');
   if (addCol('sg_despachos',        'flete_a_cargo',        'TEXT')) added.push('sg_despachos.flete_a_cargo');
   if (addCol('sg_despachos',        'flete_pagado_por',     'TEXT')) added.push('sg_despachos.flete_pagado_por');

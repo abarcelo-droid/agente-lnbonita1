@@ -150,3 +150,139 @@ test('y ninguna versión del manual es mayor que la del panel', () => {
     }
   }
 });
+
+// ── 4 · LA LUPA ────────────────────────────────────────────────────────────
+//
+// Pablo, 2/9/2026: «podés agregarle una lupita para buscar; por ejemplo poner Flete
+// y que busque todo lo que sea relativo a flete y lo resalte, para encontrarlo más
+// fácil». El manual se lee entero la primera vez y después se CONSULTA: el que
+// vuelve ya sabe qué busca.
+
+test('el manual se puede buscar, y lo encontrado se resalta', () => {
+  assert.match(PANEL, /id="sg-manual-q"/);
+  assert.match(PANEL, /oninput="sgManualBuscar\(this\.value\)"/);
+  const i = PANEL.indexOf('function sgManualBuscar(q){');
+  assert.ok(i > 0, 'no existe el buscador');
+  const b = PANEL.slice(i, i + 2600);
+  // Se camina por los NODOS DE TEXTO. Reemplazar sobre el string de etiquetas
+  // parte un atributo al medio y rompe la página.
+  assert.match(b, /if \(h\.nodeType === 3\)/);
+  assert.match(b, /createElement\('mark'\)/);
+  assert.ok(!/innerHTML\s*=\s*[^;]*replace\(/.test(b), 'está reemplazando sobre el HTML');
+});
+
+test('lo que no viene al caso se apaga, no se esconde', () => {
+  // Esconderlo deja al que busca «flete» con tres renglones sueltos y sin saber en
+  // qué parte del circuito está parado.
+  const i = PANEL.indexOf('function sgManualBuscar(q){');
+  const b = PANEL.slice(i, i + 2600);
+  assert.match(b, /classList\.toggle\('apagado', !el\.querySelector\('mark'\)/);
+  assert.match(PANEL, /#sg-manual-modal \.man \.apagado\{opacity:/);
+  assert.match(PANEL, /#sg-manual-modal \.man mark\{background:/);
+});
+
+test('busca sin tildes, y con una sola letra no pinta media pantalla', () => {
+  const i = PANEL.indexOf('function sgManualBuscar(q){');
+  const b = PANEL.slice(i, i + 2600);
+  assert.match(b, /var t = sgNorm\(String\(q \|\| ''\)\.trim\(\)\);/);
+  assert.match(b, /if \(t\.length < 2\)/);
+  // Y dice cuántas encontró, o que no hay nada: una búsqueda sin respuesta que no
+  // dice nada parece un error de la pantalla.
+  assert.match(b, /No hay nada sobre/);
+});
+
+test('sgNorm no cambia el largo del texto, o el resaltado cae corrido', () => {
+  // El resaltado usa las posiciones del texto normalizado sobre el original: si
+  // sgNorm sacara o agregara letras, el <mark> caería en el lugar equivocado.
+  const i = PANEL.indexOf('function sgNorm(s){');
+  assert.ok(i > 0);
+  const src = PANEL.slice(i, PANEL.indexOf('\n}', i) + 2);
+  // eslint-disable-next-line no-new-func
+  const f = new Function(src + '; return sgNorm;')();
+  for (const t of ['flete', 'liquidación', 'piña', 'año', 'ÓRDENES', 'José Ñandú']) {
+    assert.equal(f(t).length, t.length, 'sgNorm cambia el largo de: ' + t);
+  }
+});
+
+test('la búsqueda arranca limpia cada vez que se abre', () => {
+  // La de la vez pasada no tiene por qué seguir puesta.
+  const i = PANEL.indexOf('function sgManualAbrir(clave){');
+  assert.match(PANEL.slice(i, i + 700), /eid\('sg-manual-q'\)\.value = '';/);
+});
+
+// ── 5 · LA RENTABILIDAD ESTIMADA ───────────────────────────────────────────
+//
+// Pablo, 2/9/2026: «en nueva OC debemos poner Rentabilidad Estimada para que
+// complete el comprador. Primero porque más adelante vamos a poner algún tipo de
+// traba para que órdenes superiores a X pesos requieran autorización. Y además para
+// hacer un seguimiento de si los compradores están o no forecasteando bien. Al
+// poner 10%, automáticamente necesito que nos calcule la venta estimada también».
+
+test('el campo existe, va en % y se manda al guardar', () => {
+  assert.match(PANEL, /<label>Rentabilidad estimada<\/label>/);
+  assert.match(PANEL, /id="sg-oc-rent"/);
+  assert.match(PANEL, /sobre el costo/);
+  const i = PANEL.indexOf('function sgOcGuardar(){');
+  assert.match(PANEL.slice(i, i + 3000),
+    /rentabilidad_estimada:\(eid\('sg-oc-rent'\)\.value!==''\?Number\(eid\('sg-oc-rent'\)\.value\):null\)/);
+});
+
+test('la venta estimada se calcula sola, sobre el costo', () => {
+  // «Al poner 10%, automáticamente necesito que nos calcule la venta estimada
+  // también (obviamente en función al costo)» — Pablo.
+  const i = PANEL.indexOf('function sgOcVentaEstimada(costo, kg, hayPrecio){');
+  assert.ok(i > 0, 'no se calcula la venta estimada');
+  const b = PANEL.slice(i, i + 1800);
+  assert.match(b, /var venta = costo \* \(1 \+ pct \/ 100\);/);
+  // Y el precio POR KILO, que es la unidad en la que se vende.
+  assert.match(b, /var porKg = \(kg > 0\) \? \(venta \/ kg\) : null;/);
+  assert.match(b, /por kilo/);
+  // Se dispara sola al escribir y al cambiar los ítems.
+  assert.match(PANEL, /id="sg-oc-rent"[\s\S]{0,200}oninput="sgOcTotales\(\)"/);
+});
+
+test('estima sobre el NETO cuando se discrimina IVA', () => {
+  // El IVA no es costo: se recupera. Estimar sobre el bruto sería pronosticar
+  // margen sobre plata que vuelve.
+  const i = PANEL.indexOf('function sgOcTotales(){');
+  const b = PANEL.slice(i, i + 4200);
+  assert.match(b, /sgOcVentaEstimada\(disc \? tNeto : tBruto, tk, true\);/);
+  // Y esta escrito por que: el IVA se recupera, no es costo.
+  assert.match(b, /estimar sobre plata que vuelve/);
+});
+
+test('con precio abierto lo dice, y no inventa un número', () => {
+  const i = PANEL.indexOf('function sgOcVentaEstimada(costo, kg, hayPrecio){');
+  const b = PANEL.slice(i, i + 1800);
+  assert.match(b, /todavía no hay costo/);
+  assert.match(b, /la rentabilidad queda anotada igual/);
+  // Y si se estima cero o menos, se avisa: es una respuesta válida pero rara.
+  assert.match(b, /Estás estimando que esta orden no deja nada/);
+});
+
+test('el servidor la guarda, y acota lo que no tiene sentido', () => {
+  const DB = fs.readFileSync(path.join(RAIZ, 'src/servicios/db_sg.js'), 'utf8');
+  assert.match(DB, /addCol\('sg_oc',\s+'rentabilidad_estimada', 'REAL'\)/);
+  const SG = fs.readFileSync(path.join(RAIZ, 'src/rutas/sg.js'), 'utf8');
+  // Un −200% o un 5.000% son un dedo que se resbaló: ensucian el seguimiento.
+  assert.match(SG, /Math\.max\(-100, Math\.min\(1000, rEst\)\)/);
+  // Y cero es una respuesta, no «sin contestar».
+  assert.match(SG, /const rentabilidadEstimada = \(rEst == null\) \? null :/);
+  assert.match(SG, /documenta,\r?\n\s*rentabilidad_estimada\)/);
+});
+
+test('y no se arrastra de la orden anterior', () => {
+  // El pronóstico de otra compra guardado como si fuera el de ésta arruina
+  // justamente el seguimiento para el que se pide.
+  assert.match(PANEL, /eid\('sg-oc-rent'\)\.value='';/);
+});
+
+test('LA REGLA: el campo nuevo ya está en el manual, con su versión', () => {
+  // Es el primer cambio después de escribir la regla. Si esto no estuviera, la
+  // regla habría nacido incumplida.
+  const m = manualDe('oc');
+  assert.ok(m.includes('Rentabilidad estimada'), 'el campo nuevo no está en el manual');
+  assert.match(m, /<span class="ver">V992<\/span>/);
+  assert.match(m.replace(/\s+/g, ' '), /Se pide la <b>rentabilidad estimada<\/b> al armar/);
+  assert.match(m.replace(/\s+/g, ' '), /El manual tiene <b>buscador<\/b>/);
+});
