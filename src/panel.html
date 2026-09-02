@@ -2784,6 +2784,49 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
     <div style="display:flex;gap:6px;margin-bottom:14px">
       <button class="btn bb" id="sg-st-tb-partidas" onclick="sgStockTab('partidas')">📦 Partidas</button>
       <button class="btn bo" id="sg-st-tb-pisos" onclick="sgStockTab('pisos')">🏢 Por piso</button>
+      <!-- ── 🗑️ MERMA: EL STOCK QUE SE TIRA ────────────────────────────
+           Pablo, 2/9/2026: «dentro de stock vamos a avanzar con el módulo MERMA.
+           Qué son las mermas: stock que se tira. Obviamente debe descontar
+           cantidades de la partida y lo facturado es 0».
+
+           Va acá y no en Reprocesos: tirar mercadería es una operación de STOCK
+           —lo que hay, dónde está— y el que la carga está parado en la cámara
+           mirando la partida, no reprocesando nada. -->
+      <button class="btn bo" id="sg-st-tb-merma" onclick="sgStockTab('merma')">🗑️ Merma</button>
+      <button class="btn bo bs" style="margin-left:auto" onclick="sgManualAbrir('stock')">❓ ¿Cómo se usa?</button>
+    </div>
+    <div id="sg-st-tab-merma" style="display:none">
+      <style>
+        #sg-st-tab-merma .ab-table-wrap{overflow-x:hidden !important}
+        #sg-st-tab-merma table{table-layout:fixed;width:100%}
+        #sg-st-tab-merma th:nth-child(1),#sg-st-tab-merma td:nth-child(1){width:11%}
+        #sg-st-tab-merma th:nth-child(2),#sg-st-tab-merma td:nth-child(2){width:15%}
+        #sg-st-tab-merma th:nth-child(3),#sg-st-tab-merma td:nth-child(3){width:15%}
+        #sg-st-tab-merma th:nth-child(4),#sg-st-tab-merma td:nth-child(4){width:11%}
+        #sg-st-tab-merma th:nth-child(5),#sg-st-tab-merma td:nth-child(5){width:11%}
+        #sg-st-tab-merma th:nth-child(6),#sg-st-tab-merma td:nth-child(6){width:25%}
+        #sg-st-tab-merma th:nth-child(7),#sg-st-tab-merma td:nth-child(7){width:12%}
+        #sg-st-tab-merma td:nth-child(-n+5){overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+        #sg-st-tab-merma td:nth-child(6){white-space:normal;word-break:break-word}
+        @media(max-width:900px){ #sg-st-tab-merma .ab-table-wrap{overflow-x:auto !important} }
+      </style>
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;flex-wrap:wrap;margin-bottom:10px">
+        <div style="font-size:11.5px;color:var(--mut);max-width:60ch">
+          El stock que se tira. Sale de la partida y del piso, y <b>no se factura</b>:
+          la partida ya la pagó y no va a entrar un peso por eso, así que el margen la
+          absorbe entera.
+        </div>
+        <div style="display:flex;gap:8px;align-items:center">
+          <span id="sg-merma-total" style="font-size:12.5px;font-weight:700"></span>
+          <button class="btn bb" onclick="sgMermaAbrir()">+ Registrar una merma</button>
+        </div>
+      </div>
+      <div class="ab-table-wrap"><table class="pa-tbl">
+        <thead><tr><th>Fecha</th><th>Partida</th><th>Producto</th>
+          <th style="text-align:right">Cajones</th><th style="text-align:right">Costo</th>
+          <th>Motivo</th><th style="text-align:center">Foto</th></tr></thead>
+        <tbody id="sg-tb-merma"><tr><td colspan="7" class="emp">Cargando…</td></tr></tbody>
+      </table></div>
     </div>
     <div id="sg-st-tab-partidas">
     <div style="display:flex;gap:10px;margin-bottom:12px;align-items:flex-end;flex-wrap:wrap">
@@ -7026,6 +7069,63 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
 
      Va al nivel de arriba, con los demás: se abre desde cualquier pantalla y una
      pantalla escondida no puede mostrar un modal que tiene adentro. -->
+<!-- ══ 🗑️ REGISTRAR UNA MERMA ═══════════════════════════════════════════════
+     Pablo, 2/9/2026: «stock que se tira. Debe descontar cantidades de la partida y
+     lo facturado es 0. Motivo obligatorio, subir foto opcional».
+
+     Se carga en CAJONES, que es la unidad en la que se tira y en la que la pantalla
+     de stock muestra la partida. Los kilos los deriva el sistema con el factor de
+     esa partida: pedirlos es pedir una cuenta a mano.
+
+     Va al nivel de arriba, con los demás modales. -->
+<div class="ab-modal-overlay sg-mod" id="sg-merma-modal">
+  <div class="ab-modal" style="width:min(620px,96vw);max-width:96vw;max-height:90vh;overflow-y:auto;overflow-x:hidden">
+    <div class="mhd"><div class="mht">🗑️ Registrar una merma</div>
+      <button class="mcl" onclick="closeMB('sg-merma-modal')">×</button></div>
+    <div class="mbd">
+      <div class="sgr-card">
+        <div class="fl"><label>Partida <span style="color:var(--err)">*</span></label>
+          <input type="text" placeholder="🔎 código o producto" oninput="sgMermaFiltrar(this.value)" autocomplete="off" style="margin-bottom:4px">
+          <select id="sg-merma-lote" onchange="sgMermaLotePick()"></select>
+          <div id="sg-merma-disp" style="font-size:11.5px;color:var(--mut);margin-top:4px"></div></div>
+
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:10px">
+          <div class="fl" style="margin:0"><label id="sg-merma-lbl">Cajones que se tiran <span style="color:var(--err)">*</span></label>
+            <input type="number" id="sg-merma-cant" min="0" step="1" oninput="sgMermaCalc()"></div>
+          <div class="fl" style="margin:0"><label>Equivale a</label>
+            <div id="sg-merma-kg" style="padding:7px 0;font-weight:700">—</div></div>
+        </div>
+
+        <!-- EL MOTIVO ES OBLIGATORIO. Un número de kilos tirados sin decir por qué,
+             a los dos meses, no se le puede reclamar a nadie. -->
+        <div class="fl" style="margin-top:10px"><label>¿Por qué se tira? <span style="color:var(--err)">*</span></label>
+          <select id="sg-merma-motivo-sel" onchange="sgMermaMotivo()">
+            <option value="">— Elegí el motivo —</option>
+            <option>Podrido / pasado de maduración</option>
+            <option>Golpeado en el transporte</option>
+            <option>Rotura de cadena de frío</option>
+            <option>Plaga o enfermedad</option>
+            <option>Descarte de calidad</option>
+            <option value="otro">Otro (lo escribo)</option>
+          </select>
+          <input id="sg-merma-motivo" maxlength="200" placeholder="detalle" style="margin-top:6px"></div>
+
+        <!-- LA FOTO ES OPCIONAL. El motivo dice QUÉ pasó; la foto lo PRUEBA. Pero
+             exigirla haría que el que está en la cámara con las manos sucias no
+             cargue la merma, y una merma sin registrar es peor que una sin foto. -->
+        <div class="fl" style="margin-top:10px"><label>Foto <span style="font-weight:400;color:var(--mut);font-size:11px">opcional — es lo que después prueba la merma</span></label>
+          <input type="file" id="sg-merma-foto" accept="image/*"></div>
+
+        <div id="sg-merma-aviso" style="font-size:12px;margin-top:10px"></div>
+        <div style="text-align:right;margin-top:14px">
+          <button class="btn bo" onclick="closeMB('sg-merma-modal')">Cancelar</button>
+          <button class="btn bd" id="sg-merma-btn" onclick="sgMermaGuardar()">Registrar la merma</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
 <div class="ab-modal-overlay sg-mod" id="sg-manual-modal">
   <div class="ab-modal" style="width:min(880px,96vw);max-width:96vw;max-height:90vh;overflow-y:auto;overflow-x:hidden">
     <div class="mhd"><div class="mht" id="sg-manual-tit">¿Cómo se usa?</div>
@@ -17276,14 +17376,18 @@ function sgStockBultosCell(l){
 // Pisos era una pantalla aparte. Se plegó acá: preguntarle al stock QUÉ hay y
 // tener que ir a otro lado a preguntar DÓNDE ESTÁ era partir en dos la misma
 // respuesta.
+// Tres solapas: lo que hay (partidas), dónde está (pisos) y lo que se tiró (merma).
+// Se manejan por una tabla y no con ifs encadenados: agregar una cuarta era tocar
+// cinco líneas y olvidarse de alguna.
+var SG_STOCK_TABS = ['partidas', 'pisos', 'merma'];
 function sgStockTab(cual){
-  var esPisos = (cual === 'pisos');
-  eid('sg-st-tab-partidas').style.display = esPisos ? 'none' : '';
-  eid('sg-st-tab-pisos').style.display    = esPisos ? '' : 'none';
-  var a = eid('sg-st-tb-partidas'), b = eid('sg-st-tb-pisos');
-  if (a) a.className = esPisos ? 'btn bo' : 'btn bb';
-  if (b) b.className = esPisos ? 'btn bb' : 'btn bo';
-  if (esPisos) sgPiLoad();
+  var elegida = (SG_STOCK_TABS.indexOf(cual) >= 0) ? cual : 'partidas';
+  SG_STOCK_TABS.forEach(function(t){
+    var pan = eid('sg-st-tab-' + t); if (pan) pan.style.display = (t === elegida) ? '' : 'none';
+    var btn = eid('sg-st-tb-' + t); if (btn) btn.className = (t === elegida) ? 'btn bb' : 'btn bo';
+  });
+  if (elegida === 'pisos') sgPiLoad();
+  if (elegida === 'merma') sgMermaLoad();
 }
 
 function sgLoteVer(id){
@@ -20382,6 +20486,152 @@ function sgDespListar(modo){
 }
 
 // ══════════════════════════════════════════════════════════════════════════
+// 🗑️ MERMA — EL STOCK QUE SE TIRA
+// ══════════════════════════════════════════════════════════════════════════
+//
+// Pablo, 2/9/2026: «qué son las mermas: stock que se tira. Obviamente debe descontar
+// cantidades de la partida y lo facturado es 0. Motivo obligatorio, subir foto
+// opcional».
+//
+// LO FACTURADO ES CERO, y eso es la definición: la merma no se vende. Sale de lo
+// disponible, sale del piso, no entra un peso — y sin embargo la partida ya la
+// pagó. Por eso el margen la absorbe entera, y por eso la pantalla muestra el COSTO
+// de lo tirado: es la plata que se perdió, que es lo que se mira.
+var SGMER = { lotes: [] };
+
+function sgMermaLoad(){
+  var tb = eid('sg-tb-merma'); if(!tb) return;
+  tb.innerHTML = '<tr><td colspan="7" class="emp">Cargando…</td></tr>';
+  api('/api/sg/decomisos').then(function(r){
+    var rows = (r&&r.ok) ? (r.data||[]) : [];
+    var tot = eid('sg-merma-total');
+    if(tot) tot.innerHTML = rows.length
+      ? ('Se tiraron ' + sgMoney(rows.reduce(function(a,x){return a+(Number(x.costo)||0);},0)))
+      : '';
+    if(!rows.length){ tb.innerHTML='<tr><td colspan="7" class="emp">Todavía no se registró ninguna merma.</td></tr>'; return; }
+    tb.innerHTML = rows.map(function(d){
+      return '<tr><td>'+esc(String(d.fecha||'').slice(0,10))+'</td>'
+        +'<td><code>'+esc(d.codigo_lote||'')+'</code></td>'
+        +'<td>'+esc(d.producto||'—')+'</td>'
+        +'<td style="text-align:right">'+nr(d.bultos)
+          +'<div style="font-size:10.5px;color:var(--mut)">'+nr(d.kg)+' kg</div></td>'
+        +'<td style="text-align:right">'+sgMoney(d.costo)+'</td>'
+        +'<td>'+esc(d.motivo||'—')
+          +(d.usuario?('<div style="font-size:10.5px;color:var(--mut)">'+esc(d.usuario)+'</div>'):'')+'</td>'
+        +'<td style="text-align:center">'
+          +(d.foto_ruta
+              ? ('<a href="'+esc(d.foto_ruta)+'" target="_blank" title="'+esc(d.foto_nombre||'foto')+'">📷 ver</a>')
+              : '<span style="color:var(--sub)">—</span>')
+        +'</td></tr>';
+    }).join('');
+  });
+}
+
+function sgMermaAbrir(){
+  eid('sg-merma-cant').value=''; eid('sg-merma-motivo').value='';
+  eid('sg-merma-motivo-sel').value=''; eid('sg-merma-foto').value='';
+  eid('sg-merma-kg').textContent='—'; eid('sg-merma-disp').textContent='';
+  eid('sg-merma-aviso').innerHTML='';
+  eid('sg-merma-modal').classList.add('on');
+  // Sólo las partidas que TIENEN algo. Ofrecer una vacía es ofrecer un renglón que
+  // el servidor va a rechazar.
+  api('/api/sg/lotes?estado=disponible').then(function(r){
+    SGMER.lotes = ((r&&r.ok)?(r.data||[]):[]).filter(function(l){ return Number(l.kg_disponibles)>0.01; });
+    sgMermaOpts('');
+  });
+}
+function sgMermaOpts(q){
+  var t = sgNorm(String(q||'').trim());
+  var l = SGMER.lotes.filter(function(x){
+    if(!t) return true;
+    return sgNorm(x.codigo_lote).indexOf(t)>=0 || sgNorm(x.producto_nombre).indexOf(t)>=0;
+  });
+  eid('sg-merma-lote').innerHTML = '<option value="">— Elegí la partida —</option>'
+    + l.map(function(x){
+        return '<option value="'+x.id+'">'+esc(x.codigo_lote)+' · '+esc(x.producto_nombre||'')
+          + ' · ' + nr(x.bultos_disponibles) + ' cj</option>';
+      }).join('');
+}
+function sgMermaFiltrar(q){ var v=eid('sg-merma-lote').value; sgMermaOpts(q); eid('sg-merma-lote').value=v; sgMermaLotePick(); }
+
+function sgMermaLote(){
+  var id = eid('sg-merma-lote').value;
+  return SGMER.lotes.filter(function(x){ return String(x.id)===String(id); })[0] || null;
+}
+function sgMermaLotePick(){
+  var l = sgMermaLote();
+  var d = eid('sg-merma-disp');
+  var lbl = eid('sg-merma-lbl');
+  if(!l){ d.textContent=''; if(lbl) lbl.innerHTML='Cajones que se tiran <span style="color:var(--err)">*</span>'; sgMermaCalc(); return; }
+  var kpb = Number(l.kg_por_bulto)||0;
+  // Sin factor no hay cajones: esa partida se carga en kilos, y el rótulo lo dice.
+  if(lbl) lbl.innerHTML = (kpb>0 ? 'Cajones que se tiran' : 'Kilos que se tiran')
+    + ' <span style="color:var(--err)">*</span>';
+  d.innerHTML = 'Quedan <b>'+nr(l.bultos_disponibles)+'</b> cajones · '+nr(l.kg_disponibles)+' kg'
+    + (kpb>0 ? (' · cajones de '+nr(kpb)+' kg') : ' · esta partida no tiene cajones, se carga en kilos');
+  sgMermaCalc();
+}
+// Se carga en CAJONES y se manda en KILOS, que es como el servidor cuenta la merma.
+// Pedirle los kilos al que está en la cámara es pedirle una cuenta a mano.
+function sgMermaKg(){
+  var l = sgMermaLote(); if(!l) return 0;
+  var n = Number(eid('sg-merma-cant').value)||0;
+  var kpb = Number(l.kg_por_bulto)||0;
+  return kpb>0 ? Math.round(n*kpb*100)/100 : n;
+}
+function sgMermaCalc(){
+  var l = sgMermaLote(), kg = sgMermaKg();
+  var e = eid('sg-merma-kg'), av = eid('sg-merma-aviso'), b = eid('sg-merma-btn');
+  e.textContent = kg>0 ? (nr(kg)+' kg') : '—';
+  var mal = '';
+  if(l && kg > Number(l.kg_disponibles)+0.01){
+    mal = 'No se puede tirar más de lo que hay: quedan '+nr(l.kg_disponibles)+' kg.';
+  }
+  if(av) av.innerHTML = mal
+    ? ('<span style="color:var(--err)">'+mal+'</span>')
+    : (kg>0 && l
+        ? ('<span style="color:var(--mut)">Sale de la partida y del piso. No se factura: '
+           + 'la partida ya lo pagó.</span>') : '');
+  if(b) b.disabled = !l || !(kg>0) || !!mal;
+}
+// El motivo: una lista de los de siempre, y «otro» para lo que no entra. Texto
+// libre solo son cuarenta maneras de escribir lo mismo y ningún informe posible.
+function sgMermaMotivo(){
+  var sel = eid('sg-merma-motivo-sel').value;
+  var txt = eid('sg-merma-motivo');
+  if(sel && sel!=='otro'){ txt.value = sel; txt.style.display='none'; }
+  else { if(txt.value===''||sel==='otro') txt.value = (sel==='otro'?'':txt.value); txt.style.display=''; txt.focus(); }
+}
+
+function sgMermaGuardar(){
+  var l = sgMermaLote(); if(!l){ toast('Elegí la partida','er'); return; }
+  var kg = sgMermaKg(); if(!(kg>0)){ toast('Poné cuánto se tira','er'); return; }
+  var motivo = String(eid('sg-merma-motivo').value||'').trim();
+  if(!motivo){ toast('El motivo es obligatorio: sin él, a los dos meses nadie puede explicar esos kilos','er'); return; }
+  // FormData porque puede llevar foto. El servidor la toma con el mismo multer que
+  // las de la recepción.
+  var fd = new FormData();
+  fd.append('kg', String(kg));
+  fd.append('motivo', motivo);
+  var f = eid('sg-merma-foto').files[0];
+  if(f) fd.append('foto', f);
+  var b = eid('sg-merma-btn'); b.disabled = true;
+  fetch('/api/sg/lotes/'+l.id+'/decomiso', { method:'POST', body: fd, credentials:'same-origin' })
+    .then(function(r){ return r.json(); })
+    .then(function(r){
+      b.disabled = false;
+      if(!r||!r.ok){ toast((r&&r.error)||'Error','er'); return; }
+      toast('Merma registrada','ok');
+      closeMB('sg-merma-modal');
+      sgMermaLoad();
+      // La partida cambió: si la lista de stock está a la vista, se pone al día.
+      if(typeof sgLoadStock==='function' && eid('sg-st-tab-partidas')
+         && eid('sg-st-tab-partidas').style.display!=='none') sgLoadStock();
+    })
+    .catch(function(){ b.disabled=false; toast('No se pudo registrar la merma','er'); });
+}
+
+// ══════════════════════════════════════════════════════════════════════════
 // ❓ EL MANUAL DE CADA MÓDULO
 // ══════════════════════════════════════════════════════════════════════════
 //
@@ -20494,6 +20744,69 @@ function sgManCampo(nombre, espera, liga, ver){
     + (ver ? '<span class="ver">' + ver + '</span>' : '') + '</b>'
     + espera + (liga ? ('<span class="liga">↔ ' + liga + '</span>') : '') + '</div>';
 }
+
+SG_MANUAL.stock = { titulo: 'Stock', html:
+  '<p>Stock contesta tres preguntas: <b>qué hay</b>, <b>dónde está</b> y <b>cuándo '
+  + 'vence</b>. Todo lo que se ve acá nació en una recepción y va a morir en un '
+  + 'remito o en una merma — no se carga stock a mano.</p>'
+
+  + '<h3>Las tres solapas</h3>'
+  + '<ul>'
+  + '<li><b>Partidas</b> — qué hay, con su costo por kilo, su calidad y a cuántos '
+  + 'días vence. El punto de color es el semáforo.</li>'
+  + '<li><b>Por piso</b> — dónde está. La suma de los pisos tiene que dar exactamente '
+  + 'lo disponible: si no da, hay mercadería anotada en un lugar donde no está.</li>'
+  + '<li><b>Merma</b> — lo que se tiró.</li>'
+  + '</ul>'
+
+  + '<h3>🗑️ Merma <span class="ver">V993</span></h3>'
+  + '<p>La merma es <b>stock que se tira</b>. Sale de la partida y sale del piso, y '
+  + '<b>no se factura</b>: no va a entrar un peso por esa mercadería, y sin embargo '
+  + 'la partida ya la pagó. Por eso el margen de la partida la absorbe entera — la '
+  + 'merma es la diferencia entre lo que entró y lo que se pudo vender.</p>'
+
+  + sgManCampo('Partida',
+      'De cuál se tira. Sólo aparecen las que tienen algo: una partida vacía no se '
+      + 'puede mermar.',
+      'Lo que se tira baja de lo <b>disponible</b> (Partidas) y del <b>piso</b> donde '
+      + 'estaba (Por piso), así que las dos pantallas se ponen al día solas.', 'V993')
+
+  + sgManCampo('Cuánto se tira',
+      'En <b>cajones</b>, que es la unidad en la que se tira. Los kilos los calcula el '
+      + 'sistema con el factor de esa partida. Si la partida no tiene cajones —granel— '
+      + 'se pide en kilos y el rótulo lo dice.',
+      'No se puede tirar más de lo que queda disponible. Y la partida se pone en '
+      + '<b>semáforo amarillo</b> si estaba en verde: algo le pasó y el que la mire '
+      + 'después tiene que saberlo.', 'V993')
+
+  + sgManCampo('¿Por qué se tira?',
+      '<b>Obligatorio.</b> Se elige de la lista —podrido, golpeado, cadena de frío, '
+      + 'plaga, descarte— y si no entra en ninguna, «Otro» y se escribe.',
+      'Un número de kilos tirados sin decir por qué, a los dos meses, no se le puede '
+      + 'reclamar a nadie. Y con motivos de lista se puede ver de qué se muere la '
+      + 'mercadería; con texto libre son cuarenta maneras de escribir lo mismo.', 'V993')
+
+  + sgManCampo('Foto',
+      '<b>Opcional.</b> El motivo dice qué pasó; la foto lo prueba.',
+      'Una merma de treinta cajones que a los dos meses hay que discutir con el '
+      + 'productor —o con el seguro— vale lo que vale la evidencia. Es opcional a '
+      + 'propósito: exigirla haría que el que está en la cámara no cargue la merma, y '
+      + 'una merma sin registrar es peor que una sin foto.', 'V993')
+
+  + '<div class="ojo"><b>La merma no se deshace.</b> Lo que se tiró se tiró: no hay '
+  + 'botón para volver atrás. Si se cargó mal, se registra la diferencia como una '
+  + 'entrada aparte y se explica en el motivo — dejar borrar mermas es dejar que '
+  + 'desaparezca la única prueba de por qué faltan kilos.</div>'
+
+  + '<h3>Qué cambió, y desde cuándo</h3>'
+  + '<ul>'
+  + '<li><span class="ver">V993</span> Merma tiene su propia solapa acá adentro (antes '
+  + 'estaba en Reprocesos) y admite <b>foto</b>. Tirar mercadería es una operación de '
+  + 'stock: el que la carga está en la cámara mirando la partida.</li>'
+  + '<li><span class="ver">V990</span> Lo que un cliente devuelve y vuelve al piso '
+  + 'se cuenta acá: la partida vuelve a estar disponible, en kilos y en cajones.</li>'
+  + '</ul>'
+};
 
 SG_MANUAL.oc = { titulo: 'Órdenes de Compra', html:
   '<p>La orden de compra es <b>el acuerdo con el productor</b>: qué le compramos, a '

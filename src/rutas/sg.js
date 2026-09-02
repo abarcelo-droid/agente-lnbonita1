@@ -8591,7 +8591,22 @@ router.post('/lotes/:id/baja', requireAuth, (req, res) => {
 // Decomiso PARCIAL de un lote: saca X kg (merma) SIN tocar kg_reales. Baja el disponible y revalúa
 // el costo/kg (costo_final fijo / kg vigentes). El lote SIGUE activo; pasa a 'amarillo' si estaba
 // verde. requireAuth (cualquiera con acceso, incl. operario). La baja TOTAL (disposal) es aparte.
-router.post('/lotes/:id/decomiso', requireAuth, (req, res) => {
+// ── LA MERMA: STOCK QUE SE TIRA ───────────────────────────────────────────
+//
+// Pablo, 2/9/2026: «qué son las mermas: stock que se tira. Obviamente debe
+// descontar cantidades de la partida y lo facturado es 0. Motivo obligatorio,
+// subir foto opcional».
+//
+// Y eso último es la definición: la merma NO SE VENDE. Sale de lo disponible, sale
+// del piso, no genera un peso de ingreso — y sin embargo la partida ya la pagó. Por
+// eso el margen de la partida la absorbe entera: es la diferencia entre lo que
+// entró y lo que se pudo vender.
+//
+// El motivo es obligatorio desde siempre: un número de kilos tirados sin decir por
+// qué, a los dos meses, no se le puede reclamar a nadie. La foto es opcional —
+// exigirla haría que el que está en la cámara no cargue la merma, y una merma sin
+// registrar es peor que una sin foto.
+router.post('/lotes/:id/decomiso', requireAuth, sgUpload.single('foto'), (req, res) => {
   const db = getDb();
   try {
     const kg = Number(req.body?.kg);
@@ -8615,8 +8630,15 @@ router.post('/lotes/:id/decomiso', requireAuth, (req, res) => {
       //
       // Se derivan de los kilos con el MISMO factor que ya usa la ubicación tres
       // líneas más abajo: el decomiso se carga en kilos y el stock lleva las dos.
-      db.prepare(`INSERT INTO sg_lote_decomisos (lote_id, kg, bultos, motivo, usuario_id)
-        VALUES (?,?,?,?,?)`).run(lote.id, kg, bultosDecomisados(db, lote.id, kg), motivo, uid(req));
+      db.prepare(`INSERT INTO sg_lote_decomisos (lote_id, kg, bultos, motivo, usuario_id,
+          foto_ruta, foto_nombre)
+        VALUES (?,?,?,?,?,?,?)`).run(lote.id, kg, bultosDecomisados(db, lote.id, kg), motivo, uid(req),
+        // El motivo dice qué pasó; la foto lo prueba. En la base va la ruta, como
+        // las de la recepción.
+        // '/data/sg/' es la carpeta que index.js sirve estatica: con otra ruta el
+        // archivo se guarda igual y la foto no se ve nunca.
+        req.file ? ('/data/sg/' + req.file.filename) : null,
+        req.file ? (req.file.originalname || null) : null);
       // Lo decomisado deja de estar en el piso. Si no se descontara, el que va a
       // buscarlo encontraría vacío un lugar que la pantalla dice lleno.
       // Los bultos se derivan de los kilos con el factor del lote: el decomiso
@@ -8854,7 +8876,15 @@ router.get('/decomisos', requireAuth, (req, res) => {
   const db = getDb();
   try {
     const rows = db.prepare(`
-      SELECT d.id, d.lote_id, l.codigo_lote, pr.nombre AS producto, d.kg, d.motivo, d.fecha, u.nombre AS usuario
+      SELECT d.id, d.lote_id, l.codigo_lote, pr.nombre AS producto, d.kg, d.motivo, d.fecha,
+        u.nombre AS usuario,
+        -- Los BULTOS y la FOTO. La pantalla de merma habla en cajones —es la unidad
+        -- en la que se tira— y la foto es lo que después prueba la merma cuando hay
+        -- que discutirla con el productor o con el seguro.
+        d.bultos, d.foto_ruta, d.foto_nombre,
+        -- Lo que costó lo que se tiró: la partida ya lo pagó y no va a entrar un
+        -- peso por eso. Es la plata de la merma, que es lo que se mira.
+        ROUND(d.kg * COALESCE(l.costo_final / NULLIF(l.kg_reales,0), 0), 2) AS costo
       FROM sg_lote_decomisos d
       JOIN sg_lotes l ON l.id=d.lote_id
       LEFT JOIN sg_productos pr ON pr.id=l.producto_id
