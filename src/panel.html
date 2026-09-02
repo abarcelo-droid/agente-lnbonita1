@@ -19067,10 +19067,22 @@ function sgNcModo(){
   var a=eid('sg-nc-modo-ayuda');
   if(a) a.innerHTML = (m==='precio')
     ? 'La mercadería <b>no vuelve</b>: sigue en la casa del cliente. Se le acredita plata sobre los mismos kilos.'
-    : 'La mercadería <b>vuelve</b>: esos kilos regresan al remito como «entregado sin comprobante» y se pueden volver a facturar.';
+    : 'La mercadería <b>vuelve</b>: esos kilos regresan al remito como «entregado sin comprobante» y se pueden '
+      + 'volver a facturar. <b>Después se registra la devolución</b> para decir a qué piso entra o si vuelve '
+      + 'al productor — la nota arregla el comprobante, no mueve la mercadería de lugar.';
   var th=eid('sg-nc-th-cant');
   if(th) th.textContent = (m==='precio') ? 'Kilos (no vuelven)' : 'Se devuelve';
   sgNcRender();
+}
+// De qué remito salieron los renglones de esta nota. Si son de varios, no se
+// adivina: se abre la lista y que elija — abrir el equivocado es peor que no abrir
+// ninguno.
+function sgNcRemitoDe(base){
+  var ids = [];
+  (base && base.renglones || []).forEach(function(l){
+    if (l.despacho_id && ids.indexOf(l.despacho_id) < 0) ids.push(l.despacho_id);
+  });
+  return ids.length === 1 ? ids[0] : null;
 }
 function sgNcModoVal(){
   var el=document.querySelector('input[name="sg-nc-modo"]:checked');
@@ -19152,6 +19164,24 @@ function sgNcEmitir(){
       +String(r.cbte_nro||0).padStart(8,'0')+(r.cae?'':' (manual, sin CAE)'),'ok');
     sgFacListLoad();
     if(r.pdf_url) window.open(r.pdf_url,'_blank');
+    // ── Y LA MERCADERÍA, ¿DÓNDE QUEDÓ? ────────────────────────────────
+    //
+    // La nota arregló el comprobante: esos kilos volvieron a estar «entregados sin
+    // comprobante» y se pueden refacturar. Pero la mercadería NO está en ningún
+    // piso, y si nadie registra la devolución queda figurando disponible sin estar
+    // en ningún lado.
+    //
+    // No se mueve el stock desde acá —sería un segundo escritor, y el stock tiene
+    // uno solo— pero tampoco se deja al que la emitió adivinando: se le abre la
+    // devolución con el remito ya elegido. Un paso, dos documentos.
+    var remito = sgNcRemitoDe(b);
+    if (!precio && remito) {
+      setTimeout(function(){
+        if (confirm('La nota está emitida.\n\n'
+          + 'Ahora falta decir DÓNDE quedó esa mercadería: a qué piso entra, o si vuelve '
+          + 'al productor.\n\n¿Registramos la devolución?')) sgDevAbrir(remito);
+      }, 400);
+    }
   });
 }
 

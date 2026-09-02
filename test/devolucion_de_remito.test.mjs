@@ -316,3 +316,49 @@ test('la dirección está declarada, o contesta 403 a todo el mundo', () => {
   const PRE = fs.readFileSync(path.join(RAIZ, 'src/servicios/ensure_api_prefijos.js'), 'utf8');
   assert.match(PRE, /\['sg-ventas',\s+'[^']*sg\/devoluciones[^']*'\]/);
 });
+
+// ── 8 · LA NOTA DE CRÉDITO Y LA DEVOLUCIÓN SON DOS COSAS ───────────────────
+//
+// Pablo, 2/9/2026: «las notas de crédito deberían permitirnos o no (selector)
+// devolver la mercadería. Hay veces que son por precio y otras por cantidad.
+// Obviamente deben afectar la partida».
+//
+// El selector ya existía y anda. Lo que faltaba era decir hasta dónde llega cada
+// una: la NOTA arregla el comprobante y la deuda; la DEVOLUCIÓN mueve la
+// mercadería. Hacer que la nota mueva stock sola sería un segundo escritor del
+// stock, que es justo lo que este código evita.
+
+test('el selector de la nota sigue en pie, con sus dos modos', () => {
+  const VEN = fs.readFileSync(path.join(RAIZ, 'src/rutas/sg_ventas.js'), 'utf8');
+  assert.match(VEN, /const modo = \(String\(req\.body\?\.modo \|\| ''\) === 'precio'\) \? 'precio' : 'devolucion';/);
+  // Por PRECIO no vuelven kilos; por CANTIDAD sí.
+  assert.match(VEN, /elegidos\.push\(\{ ren, cantidad: ren\.cantidad, neto, devuelveKg: false \}\);/);
+  assert.match(VEN, /kg: e\.devuelveKg \? Math\.min\(e\.cantidad, e\.ren\.kg_documentados\) : 0,/);
+  assert.match(PANEL, /name="sg-nc-modo" value="devolucion"/);
+  assert.match(PANEL, /name="sg-nc-modo" value="precio"/);
+});
+
+test('y el cartel dice que la nota NO mueve la mercadería de lugar', () => {
+  // Sin esto, el que emite la nota cree que ya devolvió el stock y la partida queda
+  // figurando disponible sin estar en ningún piso.
+  const i = PANEL.indexOf('function sgNcModo(){');
+  const b = PANEL.slice(i, i + 1200);
+  assert.match(b, /Después se registra la devolución/);
+  assert.match(b, /la nota arregla el comprobante, no mueve la mercadería de lugar/);
+});
+
+test('al emitirla en modo devolución, se ofrece registrar la devolución', () => {
+  // Un paso para el que la carga, dos documentos: que es lo que son.
+  const i = PANEL.indexOf('function sgNcEmitir(){');
+  const b = PANEL.slice(i, i + 2600);
+  assert.match(b, /var remito = sgNcRemitoDe\(b\);/);
+  assert.match(b, /if \(!precio && remito\) \{/);
+  assert.match(b, /¿Registramos la devolución\?'\)\) sgDevAbrir\(remito\);/);
+});
+
+test('y si la nota toca varios remitos, no se adivina cuál', () => {
+  // Abrir el equivocado es peor que no abrir ninguno.
+  const i = PANEL.indexOf('function sgNcRemitoDe(base){');
+  assert.ok(i > 0);
+  assert.match(PANEL.slice(i, i + 400), /return ids\.length === 1 \? ids\[0\] : null;/);
+});
