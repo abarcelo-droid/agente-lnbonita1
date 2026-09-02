@@ -3033,6 +3033,11 @@ router.post('/oc', requireAuth, (req, res) => {
     const fleteModalidad = ['total', 'bulto', 'pallet'].includes(b.flete_modalidad)
       ? b.flete_modalidad : (b.flete_monto != null && b.flete_monto !== '' ? 'total' : null);
     const nOno = (v) => (v != null && v !== '' && !isNaN(Number(v))) ? Number(v) : null;
+    // La rentabilidad que estima el comprador, en % sobre el costo. Se acota a un
+    // rango con sentido: un −200% o un 5.000% son un dedo que se resbaló, y
+    // guardarlos ensucia el seguimiento de qué tan bien pronostican.
+    const rEst = nOno(b.rentabilidad_estimada);
+    const rentabilidadEstimada = (rEst == null) ? null : Math.max(-100, Math.min(1000, rEst));
     const fleteCantidad = fleteModalidad && fleteModalidad !== 'total' ? nOno(b.flete_cantidad) : null;
     const fletePrecioUnit = fleteModalidad && fleteModalidad !== 'total' ? nOno(b.flete_precio_unit) : null;
     const fleteMonto = fleteModalidad === 'total'
@@ -3077,12 +3082,21 @@ router.post('/oc', requireAuth, (req, res) => {
         (numero, modalidad, proveedor_id, tipo_fiscal, tipo_precio, condicion_pago_id, fecha_oc,
          fecha_recepcion_estimada, comercial_id, estado, observaciones, flete_a_cargo, flete_pagado_por, flete_monto,
          precio_incluye_iva, iva_alicuota_oc, total_estimado_kg, total_estimado_monto, creado_por,
-         trazabilidad, flete_modalidad, flete_cantidad, flete_precio_unit, flete_con_iva, documenta)
-        VALUES (?,?,?,?,?,?,?,?,?, 'abierta', ?,?,?,?, ?,?, 0, 0, ?, ?, ?,?,?,?,?)`).run(
+         trazabilidad, flete_modalidad, flete_cantidad, flete_precio_unit, flete_con_iva, documenta,
+         rentabilidad_estimada)
+        VALUES (?,?,?,?,?,?,?,?,?, 'abierta', ?,?,?,?, ?,?, 0, 0, ?, ?, ?,?,?,?,?, ?)`).run(
         numero, val(b.modalidad) || 'normal', b.proveedor_id || null, tipoFiscal, tipoPrecio,
         dft.condicion_pago_id, val(b.fecha_oc), val(b.fecha_recepcion_estimada), b.comercial_id || null,
         val(b.observaciones), fleteCargo, fletePagadoPor, fleteMonto, (discrimina ? incluyeIva : null), alicOverride, uid(req),
-        traza, fleteModalidad, fleteCantidad, fletePrecioUnit, fleteConIva, documenta);
+        traza, fleteModalidad, fleteCantidad, fletePrecioUnit, fleteConIva, documenta,
+        // LO QUE EL COMPRADOR CREE QUE VA A DEJAR. Es un pronóstico: no cambia lo
+        // que se le paga al productor ni entra a ningún asiento. Se guarda para
+        // poder comparar después contra el margen que la partida dejó de verdad, y
+        // porque de acá va a colgar la traba de las órdenes grandes.
+        //
+        // Cero es una respuesta —«no espero ganar nada con esta»— y no es lo mismo
+        // que no haberla contestado: por eso null cuando viene vacío.
+        rentabilidadEstimada);
       const ocId = ocInfo.lastInsertRowid;
 
       const insItem = db.prepare(`INSERT INTO sg_oc_items

@@ -6345,6 +6345,32 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
     </div>
     <div class="ab-modal-footer" style="display:flex;justify-content:space-between;align-items:center;gap:12px;background:var(--bg)">
       <div id="sg-oc-totales" style="font-weight:700;font-size:13.5px;text-align:left"></div>
+      <!-- ── LO QUE EL COMPRADOR CREE QUE VA A DEJAR ────────────────────
+           Pablo, 2/9/2026: «en nueva OC debemos poner Rentabilidad Estimada para
+           que complete el comprador. Primero porque más adelante vamos a poner
+           algún tipo de traba para que órdenes superiores a X pesos requieran
+           autorización. Y además para poder hacer un seguimiento de si los
+           compradores están o no forecasteando bien».
+
+           Va PEGADO AL TOTAL a propósito: es el número contra el que se estima, y
+           el que lo escribe tiene que verlo. Y con la venta estimada al lado, que
+           es la traducción del porcentaje a plata — «10%» no dice nada hasta que
+           se ve a cuánto hay que vender el cajón. -->
+      <div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--bor);
+           display:grid;grid-template-columns:150px 1fr;gap:10px;align-items:start">
+        <div class="fl" style="margin:0"><label>Rentabilidad estimada</label>
+          <div style="position:relative">
+            <input type="number" id="sg-oc-rent" step="0.1" min="-100" max="1000"
+                   placeholder="ej. 10" oninput="sgOcTotales()"
+                   style="padding-right:24px">
+            <span style="position:absolute;right:8px;top:50%;transform:translateY(-50%);
+                  color:var(--mut);font-size:12px">%</span>
+          </div>
+          <div style="font-size:10.5px;color:var(--mut);margin-top:3px">sobre el costo</div>
+        </div>
+        <div id="sg-oc-venta-est" style="font-size:12.5px;line-height:1.5;color:var(--mut);
+             padding-top:18px"></div>
+      </div>
       <div style="display:flex;gap:8px;flex-shrink:0">
         <button class="btn bo" onclick="closeMB('sg-oc-modal')">Cancelar</button>
         <button class="btn bb" onclick="sgOcGuardar()">Crear OC</button>
@@ -7020,9 +7046,31 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
         background:var(--bg);border:1px solid var(--bor);border-radius:4px;padding:1px 5px;
         color:var(--mut);margin-left:6px;vertical-align:middle}
       #sg-manual-modal .man ul{margin:0 0 10px;padding-left:18px}
+      /* Lo encontrado se pinta; lo que no viene al caso se apaga, no se esconde:
+         el que busca «flete» quiere ver dónde está, no quedarse sin contexto. */
+      #sg-manual-modal .man mark{background:#fde68a;color:inherit;border-radius:3px;padding:0 2px}
+      #sg-manual-modal .man .apagado{opacity:.28}
       #sg-manual-modal .man li{margin-bottom:4px}
     </style>
-    <div class="mbd"><div class="man" id="sg-manual-cuerpo"></div></div>
+    <div class="mbd">
+      <!-- ── LA LUPA ────────────────────────────────────────────────────
+           Pablo, 2/9/2026: «podés agregarle una lupita para buscar; por ejemplo
+           poner Flete y que busque todo lo que sea relativo a flete y lo resalte,
+           para encontrarlo más fácil».
+
+           El manual se lee entero la primera vez y después se consulta: el que
+           vuelve ya sabe qué busca. Sin buscador tiene que barrer con la rueda del
+           mouse hasta encontrarlo, y en un manual largo eso es no consultarlo. -->
+      <div style="position:sticky;top:0;z-index:2;background:var(--card,#fff);
+           padding:0 0 10px;margin-bottom:4px;border-bottom:1px solid var(--bor)">
+        <input type="text" id="sg-manual-q" placeholder="🔎 Buscar en el manual — probá «flete», «precio», «IVA»…"
+               autocomplete="off" oninput="sgManualBuscar(this.value)"
+               style="width:100%;box-sizing:border-box;padding:7px 10px;border-radius:8px;
+                      border:1px solid var(--bor);background:var(--bg);font-size:13px">
+        <div id="sg-manual-cuenta" style="font-size:11.5px;color:var(--mut);margin-top:4px"></div>
+      </div>
+      <div class="man" id="sg-manual-cuerpo"></div>
+    </div>
   </div>
 </div>
 
@@ -11561,6 +11609,9 @@ function sgOcOpen(){
   // comercial, más abajo, una vez que los radios están en su valor inicial.
   eid('sg-oc-fecha').value=new Date().toISOString().slice(0,10);
   eid('sg-oc-fecharec').value=''; eid('sg-oc-obs').value='';
+  // La rentabilidad de la orden anterior no es la de esta: se limpia, o el que
+  // no la mira guarda el pronostico de otra compra.
+  eid('sg-oc-rent').value='';
   eid('sg-oc-flete-cargo').value=''; eid('sg-oc-flete-monto').value='';
   eid('sg-oc-flete-quien').value='productor'; sgOcFleteCargo();
   eid('sg-oc-flete-modo').value='total'; eid('sg-oc-flete-cant').value=''; eid('sg-oc-flete-pu').value='';
@@ -12031,7 +12082,11 @@ function sgOcTotales(){
     }
   });
   var el=eid('sg-oc-totales');
-  if(!firme){ el.innerHTML='Total estimado: '+nr(tk)+' kg · (Precio abierto — a definir cuando se venda)'; return; }
+  if(!firme){
+    el.innerHTML='Total estimado: '+nr(tk)+' kg · (Precio abierto — a definir cuando se venda)';
+    sgOcVentaEstimada(0, tk, false);
+    return;
+  }
   if(disc){
     var tTotal=tNeto+tIva;
     el.innerHTML='Total estimado: '+nr(tk)+' kg'
@@ -12041,6 +12096,47 @@ function sgOcTotales(){
     el.innerHTML='Total estimado: '+nr(tk)+' kg · '+sgMoney(tBruto)
       +(eid('sg-oc-fiscal').value==='liquidacion'?'<div style="font-weight:500;font-size:11px;color:var(--mut)">Liquidación — IVA no discriminado en la OC</div>':'');
   }
+  // El costo contra el que se estima es el NETO cuando se discrimina IVA: el IVA no
+  // es costo —se recupera— y meterlo adentro haría estimar sobre plata que vuelve.
+  sgOcVentaEstimada(disc ? tNeto : tBruto, tk, true);
+}
+
+// ── LA VENTA A LA QUE HAY QUE LLEGAR ──────────────────────────────────────
+//
+// Pablo, 2/9/2026: «al poner rentabilidad estimada, por ejemplo 10%, automáticamente
+// necesito que nos calcule la venta estimada también (obviamente en función al
+// costo)».
+//
+// El porcentaje solo no dice nada: «10%» se vuelve útil cuando se ve a cuánto hay
+// que vender el cajón. Por eso se muestra el total Y el precio por kilo — que es la
+// unidad en la que se vende y con la que el comprador compara contra la pizarra.
+//
+// Es un PRONÓSTICO: no se guarda el número, se guarda el porcentaje. El costo
+// todavía puede cambiar (la balanza, el flete) y lo que vale es el criterio del
+// comprador, no un precio que quedó viejo.
+function sgOcVentaEstimada(costo, kg, hayPrecio){
+  var e = eid('sg-oc-venta-est'); if (!e) return;
+  var r = eid('sg-oc-rent');
+  var pct = (r && r.value !== '') ? Number(r.value) : null;
+  if (pct == null || isNaN(pct)) {
+    e.innerHTML = '<span style="color:var(--mut)">Poné a cuánto esperás venderla y te digo '
+      + 'a qué precio hay que salir.</span>';
+    return;
+  }
+  if (!hayPrecio || !(costo > 0)) {
+    e.innerHTML = '<span style="color:var(--mut)">Con precio abierto todavía no hay costo '
+      + 'contra el cual estimar: la rentabilidad queda anotada igual.</span>';
+    return;
+  }
+  var venta = costo * (1 + pct / 100);
+  var porKg = (kg > 0) ? (venta / kg) : null;
+  e.innerHTML = '<b>Venta estimada: ' + sgMoney(Math.round(venta)) + '</b>'
+    + (porKg ? ('<span style="color:var(--mut)"> · ' + sgMoney2(porKg) + ' por kilo</span>') : '')
+    + '<div style="font-size:11px;color:var(--mut);margin-top:2px">'
+    + 'Sobre un costo de ' + sgMoney(Math.round(costo))
+    + '. Deja ' + sgMoney(Math.round(venta - costo)) + '.</div>'
+    + (pct <= 0 ? '<div style="font-size:11px;color:var(--err);margin-top:2px">'
+        + 'Estás estimando que esta orden no deja nada.</div>' : '');
 }
 function sgOcGuardar(){
   var prov=eid('sg-oc-prov').value;
@@ -12053,6 +12149,10 @@ function sgOcGuardar(){
   var body={ modalidad:'normal', proveedor_id:Number(prov),
     tipo_fiscal:eid('sg-oc-fiscal').value, tipo_precio:sgOcPrecio(), documenta:sgOcDoc(), condicion_pago_id:eid('sg-oc-cond').value?Number(eid('sg-oc-cond').value):null,
     fecha_oc:eid('sg-oc-fecha').value, fecha_recepcion_estimada:eid('sg-oc-fecharec').value, observaciones:eid('sg-oc-obs').value,
+    // LO QUE EL COMPRADOR CREE QUE VA A DEJAR. Es un pronostico: no cambia lo que
+    // se le paga al productor. Se guarda para poder comparar despues contra el
+    // margen que la partida dejo de verdad.
+    rentabilidad_estimada:(eid('sg-oc-rent').value!==''?Number(eid('sg-oc-rent').value):null),
     flete_a_cargo:eid('sg-oc-flete-cargo').value||null,
     // Sólo viaja si el flete es del vendedor; el backend igual lo ignora en el
     // resto de los casos, para que no quede un dato que contradice al de al lado.
@@ -20310,9 +20410,81 @@ var SG_MANUAL = {};
 function sgManualAbrir(clave){
   var m = SG_MANUAL[clave];
   if (!m) { toast('Todavía no hay manual de esta pantalla', 'er'); return; }
+  SG._manualClave = clave;
   eid('sg-manual-tit').textContent = '❓ ' + m.titulo;
   eid('sg-manual-cuerpo').innerHTML = m.html;
+  // Se abre limpio: la búsqueda de la vez pasada no tiene por qué seguir puesta.
+  eid('sg-manual-q').value = '';
+  eid('sg-manual-cuenta').textContent = '';
   eid('sg-manual-modal').classList.add('on');
+}
+
+// ── BUSCAR ADENTRO DEL MANUAL ─────────────────────────────────────────────
+//
+// Pablo, 2/9/2026: «podés agregarle una lupita para buscar; por ejemplo poner Flete
+// y que busque todo lo que sea relativo a flete y lo resalte, para encontrarlo más
+// fácil».
+//
+// LO QUE NO VIENE AL CASO SE APAGA, NO SE ESCONDE. Esconderlo deja al que busca
+// «flete» con tres renglones sueltos y sin saber en qué parte del circuito está
+// parado. Apagado sigue viéndose la estructura y el ojo va solo a lo resaltado.
+//
+// Y se busca SIN TILDES: el que escribe «liquidacion» tiene que encontrar
+// «liquidación», que es como está escrito.
+function sgManualBuscar(q){
+  var cuerpo = eid('sg-manual-cuerpo'); if (!cuerpo) return;
+  var clave = String(SG._manualClave || '');
+  var m = SG_MANUAL[clave]; if (!m) return;
+  var t = sgNorm(String(q || '').trim());
+  var cuenta = eid('sg-manual-cuenta');
+
+  if (t.length < 2) {                       // con una letra sola pinta media pantalla
+    cuerpo.innerHTML = m.html;
+    if (cuenta) cuenta.textContent = '';
+    return;
+  }
+  cuerpo.innerHTML = m.html;
+
+  // Se recorre el TEXTO, no el HTML: reemplazar sobre el string de etiquetas parte
+  // un atributo al medio y rompe la página. Se camina por los nodos de texto.
+  var n = 0;
+  var caminar = function(nodo){
+    for (var i = 0; i < nodo.childNodes.length; i++) {
+      var h = nodo.childNodes[i];
+      if (h.nodeType === 3) {
+        var txt = h.nodeValue, norm = sgNorm(txt), pos = norm.indexOf(t);
+        if (pos < 0) continue;
+        // Se parte el nodo y se envuelve la coincidencia. sgNorm no cambia el
+        // largo (saca tildes, no letras), así que las posiciones coinciden.
+        var frag = document.createDocumentFragment(), desde = 0;
+        while (pos >= 0) {
+          if (pos > desde) frag.appendChild(document.createTextNode(txt.slice(desde, pos)));
+          var mk = document.createElement('mark');
+          mk.textContent = txt.slice(pos, pos + t.length);
+          frag.appendChild(mk); n++;
+          desde = pos + t.length;
+          pos = norm.indexOf(t, desde);
+        }
+        if (desde < txt.length) frag.appendChild(document.createTextNode(txt.slice(desde)));
+        nodo.replaceChild(frag, h);
+        i += frag.childNodes ? 0 : 0;
+      } else if (h.nodeType === 1 && h.tagName !== 'MARK') {
+        caminar(h);
+      }
+    }
+  };
+  caminar(cuerpo);
+
+  // Y los bloques sin ninguna coincidencia se apagan.
+  [].slice.call(cuerpo.children).forEach(function(el){
+    el.classList.toggle('apagado', !el.querySelector('mark') && !(el.tagName === 'MARK'));
+  });
+
+  if (cuenta) {
+    cuenta.textContent = n
+      ? (n + (n === 1 ? ' coincidencia' : ' coincidencias'))
+      : 'No hay nada sobre «' + q + '» en este manual.';
+  }
 }
 
 // Azúcar para que cada entrada se lea como lo que es: el campo, qué se espera, y
@@ -20404,6 +20576,16 @@ SG_MANUAL.oc = { titulo: 'Órdenes de Compra', html:
   + 'decía 20 kg y entraron 18,5, la partida sigue con los 18,5: es lo que hay para '
   + 'vender y es sobre lo que se paga. El nominal sólo se usa cuando no hay pesada.</div>'
 
+  + sgManCampo('Rentabilidad estimada',
+      'A cuánto esperás que deje esta compra, en <b>% sobre el costo</b>. Poné 10 y '
+      + 'el sistema te dice a cuánto hay que vender —el total y el precio por kilo— '
+      + 'para llegar a eso. Es un <b>pronóstico tuyo</b>: no cambia lo que se le paga '
+      + 'al productor ni entra a ningún asiento.',
+      'Queda guardado para comparar después contra el margen que la partida dejó de '
+      + 'verdad, y de acá va a colgar la autorización de las órdenes grandes. Con '
+      + 'precio abierto se anota igual, aunque todavía no haya costo contra el cual '
+      + 'estimar.', 'V992')
+
   + '<h3>Flete</h3>'
 
   + sgManCampo('A cargo de / ¿Quién lo paga?',
@@ -20427,6 +20609,11 @@ SG_MANUAL.oc = { titulo: 'Órdenes de Compra', html:
 
   + '<h3>Qué cambió, y desde cuándo</h3>'
   + '<ul>'
+  + '<li><span class="ver">V992</span> Se pide la <b>rentabilidad estimada</b> al armar '
+  + 'la orden, y el sistema calcula solo a cuánto hay que vender para llegar a eso. '
+  + 'Más adelante, de acá va a colgar la autorización de las órdenes grandes.</li>'
+  + '<li><span class="ver">V992</span> El manual tiene <b>buscador</b>: escribí «flete» '
+  + 'y te resalta todo lo que hable de flete.</li>'
   + '<li><span class="ver">V990</span> El flete del remito de SALIDA ahora pregunta lo '
   + 'mismo que el de entrada: a cargo de quién y quién pone la plata, con el cartel '
   + 'que dice si se le descuenta al productor de su liquidación.</li>'
