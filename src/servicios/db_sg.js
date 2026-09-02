@@ -1989,6 +1989,21 @@ try {
   // coordinó. Van en el remito, que es el papel que viaja con la mercadería.
   //
   // Son del REMITO y no del cliente: cambian en cada entrega.
+  // ── QUIÉN PAGA EL FLETE ──────────────────────────────────────────────────
+  //
+  // Pablo, 2/9/2026: «en remitos, tanto para cadenas como para el resto, saquemos
+  // el selector de transporte, dejemos sólo fletero. Pero sí preguntemos si el
+  // flete lo pagamos nosotros o el vendedor. Si lo pagamos nosotros debe ir a
+  // gastos directos, fletes de salida».
+  //
+  // Hasta acá, elegir un fletero SIEMPRE dejaba un gasto nuestro esperando la
+  // factura. Y muchas veces el camión es del otro: el gasto quedaba en nuestros
+  // números esperando una cuenta que no iba a llegar nunca, y alguien tenía que
+  // acordarse de anularlo a mano.
+  //
+  // NULL = 'nosotros'. Es lo que el sistema venía haciendo con todos los remitos
+  // que ya existen: si un fletero tenía gasto, era nuestro.
+  if (addCol('sg_despachos',        'flete_paga',           'TEXT')) added.push('sg_despachos.flete_paga');
   if (addCol('sg_despachos',        'turno',                'TEXT')) added.push('sg_despachos.turno');
   if (addCol('sg_despachos',        'oc_cliente',           'TEXT')) added.push('sg_despachos.oc_cliente');
   if (addCol('sg_despacho_items',   'modo_precio',          'TEXT')) added.push('sg_despacho_items.modo_precio');

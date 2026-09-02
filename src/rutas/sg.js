@@ -9358,11 +9358,30 @@ router.get('/disponibilidad', requireAuth, (req, res) => {
 // fletero elegido. Idempotente: solo toca el gasto PENDIENTE (nunca uno ya valorizado).
 //  - sin fletero → anula el pendiente si existía.
 //  - con fletero → si ya hay pendiente, reasigna; si no, crea uno nuevo sin monto.
-function syncGastoFleteDespacho(db, despachoId, fleteroId, fechaServicio, userId) {
+// ── EL GASTO ES NUESTRO SÓLO SI LO PAGAMOS NOSOTROS ──────────────────────
+//
+// Pablo, 2/9/2026: «preguntemos si el flete lo pagamos nosotros o el vendedor. Si
+// lo pagamos nosotros debe ir a gastos directos, fletes de salida».
+//
+// Antes alcanzaba con ELEGIR un fletero: quedaba un gasto nuestro esperando la
+// factura, aunque el camión fuera del otro. Ese pendiente esperaba una cuenta que
+// no iba a llegar nunca y ensuciaba el listado hasta que alguien lo anulaba a mano.
+//
+// Anotar quién trajo el camión sigue sirviendo aunque no lo paguemos: es
+// trazabilidad del remito. Lo que cambia es si sale plata nuestra.
+//
+// El default es 'nosotros' —lo que el sistema venía haciendo con todos los remitos
+// que ya existen—, así que un remito viejo sigue teniendo su gasto.
+const FLETE_LO_PAGAMOS = (v) => String(v || 'nosotros') === 'nosotros';
+
+function syncGastoFleteDespacho(db, despachoId, fleteroId, fechaServicio, userId, fletePaga) {
   const existente = db.prepare(
     "SELECT id, estado FROM sg_gastos_directos WHERE despacho_id=? AND tipo_gasto='flete_salida' AND activo=1 AND estado!='anulado'"
   ).get(despachoId);
-  if (!fleteroId) {
+  // Sin fletero, o con el flete a cargo del otro: no hay gasto nuestro. Y si había
+  // uno pendiente se anula, que es lo mismo que ya hacía cuando se sacaba el
+  // fletero — un pendiente que nadie va a valorizar sólo ensucia el listado.
+  if (!fleteroId || !FLETE_LO_PAGAMOS(fletePaga)) {
     if (existente && existente.estado === 'pendiente_valorizar') {
       db.prepare("UPDATE sg_gastos_directos SET estado='anulado' WHERE id=?").run(existente.id);
     }
@@ -9508,18 +9527,21 @@ const postRemito = (req, res) => {
       // trazabilidad— pero no se emite el remito como documento, porque el papel
       // que viaja con la mercadería es la factura. Ver A2b en db_sg.js.
       const info = db.prepare(`INSERT INTO sg_despachos
-        (numero, pedido_id, cliente_id, comercial_id, fecha_despacho, transporte, transportista, chofer, dominio, fletero_id, estado, observaciones, sin_remito, creado_por, turno, oc_cliente)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
+        (numero, pedido_id, cliente_id, comercial_id, fecha_despacho, transporte, transportista, chofer, dominio, fletero_id, estado, observaciones, sin_remito, creado_por, turno, oc_cliente, flete_paga)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
         numero, b.pedido_id || null, b.cliente_id, b.comercial_id || null, val(b.fecha_despacho),
         val(b.transporte), val(b.transportista), val(b.chofer), val(b.dominio), fleteroId,
         val(b.estado) || 'despachado', val(b.observaciones), b.sin_remito ? 1 : 0, uid(req),
         // EL TURNO Y LA ORDEN DE COMPRA DE LA CADENA. Van en el remito porque es el
         // papel que viaja con la mercadería: sin los dos, el camión llega al centro
         // de distribución y no lo reciben. Antes vivían en un WhatsApp.
-        val(b.turno), val(b.oc_cliente));
+        val(b.turno), val(b.oc_cliente),
+        // Quién paga el flete: es lo que decide si sale plata nuestra. Se guarda
+        // siempre lo que se eligió, sin dejarlo en NULL.
+        FLETE_LO_PAGAMOS(b.flete_paga) ? 'nosotros' : 'vendedor');
       const despachoId = info.lastInsertRowid;
       // PARTE B — si se asignó fletero, queda un gasto de flete de salida PENDIENTE de valorizar.
-      syncGastoFleteDespacho(db, despachoId, fleteroId, val(b.fecha_despacho), uid(req));
+      syncGastoFleteDespacho(db, despachoId, fleteroId, val(b.fecha_despacho), uid(req), val(b.flete_paga));
       // precio_lista_por_kg: el precio ANTES del descuento acordado con el
       // proveedor de esa partida. Sin él, lo resignado sólo existe como un total
       // de la factura y no se puede decir cuánto resignó CADA partida — que es
