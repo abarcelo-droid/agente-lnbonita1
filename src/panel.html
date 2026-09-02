@@ -2614,6 +2614,17 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
       <div class="sgc-subtab on" data-sub="oc" onclick="sgOrdSub('oc')">📋 Emisión de órdenes</div>
       <div class="sgc-subtab" data-sub="ocrecibidas" onclick="sgOrdSub('ocrecibidas')">✅ Órdenes recibidas</div>
     </div>
+    <!-- ── EL MANUAL DEL MÓDULO, A UN CLIC ──────────────────────────────
+         Pablo, 2/9/2026: «quiero un pequeño ícono con un "¿cómo se usa?" para que
+         los operadores puedan consultar operaciones básicas por ahí. Es importante
+         que sea fácil de leer, y que especifiques lo que esperamos de cada campo,
+         con qué otros módulos se vincula esa info y algún significado».
+
+         Y la REGLA que sale de ahí: cuando se toca algo del módulo, la entrada del
+         manual se agrega en el MISMO commit, con el número de versión. Un manual
+         que va una versión atrás es peor que no tenerlo: el operador hace lo que
+         dice y le sale mal. -->
+    <button class="btn bo bs" style="margin:0 0 16px 8px" onclick="sgManualAbrir('oc')">❓ ¿Cómo se usa?</button>
     <div class="sgc-sub on" id="sgc-sub-oc">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;gap:10px;flex-wrap:wrap">
         <!-- ── RASTREAR UNA PARTIDA ────────────────────────────────────
@@ -6982,6 +6993,39 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
      Va al nivel de arriba, con los demás modales: se abre desde la solapa de
      Devoluciones y también desde la ficha de un remito, y una pantalla escondida no
      puede mostrar un modal que tiene adentro. -->
+<!-- ══ ❓ EL MANUAL DE CADA MÓDULO ══════════════════════════════════════════
+     Pablo, 2/9/2026. Un solo modal para todos los módulos: el contenido sale de
+     SG_MANUAL, que es donde se escribe. Uno por pantalla sería un modal nuevo cada
+     vez y ninguno se actualizaría.
+
+     Va al nivel de arriba, con los demás: se abre desde cualquier pantalla y una
+     pantalla escondida no puede mostrar un modal que tiene adentro. -->
+<div class="ab-modal-overlay sg-mod" id="sg-manual-modal">
+  <div class="ab-modal" style="width:min(880px,96vw);max-width:96vw;max-height:90vh;overflow-y:auto;overflow-x:hidden">
+    <div class="mhd"><div class="mht" id="sg-manual-tit">¿Cómo se usa?</div>
+      <button class="mcl" onclick="closeMB('sg-manual-modal')">×</button></div>
+    <style>
+      /* Se lee de corrido: una columna, renglones cortos y nada que se desplace. */
+      #sg-manual-modal .man{font-size:13.5px;line-height:1.6;color:var(--txt)}
+      #sg-manual-modal .man h3{font-size:14px;margin:20px 0 6px;padding-bottom:4px;
+        border-bottom:1px solid var(--bor);color:var(--burg)}
+      #sg-manual-modal .man h3:first-child{margin-top:0}
+      #sg-manual-modal .man p{margin:0 0 10px}
+      #sg-manual-modal .man .campo{border-left:3px solid var(--bor);padding:2px 0 2px 12px;margin:0 0 12px}
+      #sg-manual-modal .man .campo b{display:block;font-size:13px}
+      #sg-manual-modal .man .liga{display:block;font-size:11.5px;color:var(--mut);margin-top:3px}
+      #sg-manual-modal .man .ojo{background:rgba(180,60,40,.07);border-left:3px solid var(--err);
+        padding:8px 12px;margin:0 0 12px;font-size:12.5px}
+      #sg-manual-modal .man .ver{display:inline-block;font-size:10.5px;font-weight:700;
+        background:var(--bg);border:1px solid var(--bor);border-radius:4px;padding:1px 5px;
+        color:var(--mut);margin-left:6px;vertical-align:middle}
+      #sg-manual-modal .man ul{margin:0 0 10px;padding-left:18px}
+      #sg-manual-modal .man li{margin-bottom:4px}
+    </style>
+    <div class="mbd"><div class="man" id="sg-manual-cuerpo"></div></div>
+  </div>
+</div>
+
 <div class="ab-modal-overlay sg-mod" id="sg-dev-modal">
   <div class="ab-modal" style="width:min(1000px,96vw);max-width:96vw;max-height:90vh;overflow-y:auto;overflow-x:hidden">
     <div class="mhd"><div class="mht" id="sg-dev-tit">↩️ Devolver mercadería</div>
@@ -20236,6 +20280,164 @@ function sgDespListar(modo){
     }).join('');
   });
 }
+
+// ══════════════════════════════════════════════════════════════════════════
+// ❓ EL MANUAL DE CADA MÓDULO
+// ══════════════════════════════════════════════════════════════════════════
+//
+// Pablo, 2/9/2026: «quiero un pequeño ícono con un "¿cómo se usa?" para que los
+// operadores puedan consultar operaciones básicas por ahí. Es importante que sea
+// fácil de leer, y que especifiques lo que esperamos de cada campo, con qué otros
+// módulos se vincula esa info de cada campo específico y algún significado».
+//
+// Tiene TRES propósitos y sólo uno es documentar:
+//   1. Que el operador sepa qué se espera de cada campo sin preguntar.
+//   2. Que se vea con qué otros módulos se enlaza cada dato — la mitad de los
+//      errores de carga son de alguien que no sabía a dónde iba a parar lo que
+//      escribía.
+//   3. Que desde acá se REVISE si el proceso está bien: un campo que no se puede
+//      explicar en una línea es un campo que sobra o que está mal pensado.
+//
+// ── LA REGLA ──────────────────────────────────────────────────────────────
+// Si se toca algo del módulo, la entrada se agrega o se corrige ACÁ, en el mismo
+// commit, con el número de versión al lado (la etiqueta <span class="ver">V###
+// </span>). Así el que lo usa ve qué cambió y desde cuándo, sin leer un commit.
+//
+// Un manual que va una versión atrás es peor que no tenerlo: el operador hace lo
+// que dice y le sale mal.
+var SG_MANUAL = {};
+
+function sgManualAbrir(clave){
+  var m = SG_MANUAL[clave];
+  if (!m) { toast('Todavía no hay manual de esta pantalla', 'er'); return; }
+  eid('sg-manual-tit').textContent = '❓ ' + m.titulo;
+  eid('sg-manual-cuerpo').innerHTML = m.html;
+  eid('sg-manual-modal').classList.add('on');
+}
+
+// Azúcar para que cada entrada se lea como lo que es: el campo, qué se espera, y
+// con qué se enlaza. Se escribe una vez y todas las fichas salen iguales.
+function sgManCampo(nombre, espera, liga, ver){
+  return '<div class="campo"><b>' + nombre
+    + (ver ? '<span class="ver">' + ver + '</span>' : '') + '</b>'
+    + espera + (liga ? ('<span class="liga">↔ ' + liga + '</span>') : '') + '</div>';
+}
+
+SG_MANUAL.oc = { titulo: 'Órdenes de Compra', html:
+  '<p>La orden de compra es <b>el acuerdo con el productor</b>: qué le compramos, a '
+  + 'cuánto y cómo se lo vamos a pagar. Todo lo que se carga acá vuelve después en '
+  + 'la recepción, en el costo de la partida y en lo que se le liquida — por eso lo '
+  + 'que se escribe mal acá se paga mal tres pantallas más adelante.</p>'
+
+  + '<h3>Antes de empezar: las dos preguntas que definen todo lo demás</h3>'
+
+  + sgManCampo('¿Cómo se documenta esta compra?',
+      'Dos caminos que no se mezclan. <b>Recibimos factura de compra</b>: el productor '
+      + 'nos factura y esa factura entra por Facturas por mercadería. <b>Emitimos '
+      + 'liquidación</b>: le liquidamos nosotros, y esa liquidación sale de Liquidaciones.',
+      'Decide a qué bandeja va la partida después de recibirse, y cuál de los dos '
+      + 'comprobantes deja el precio FIRME.')
+
+  + sgManCampo('¿Cómo se pactó el precio?',
+      '<b>Precio cerrado</b>: se acordó el número y no se toca. <b>Precio abierto '
+      + '(pizarra)</b>: se cierra cuando se vende, según a cuánto salió.',
+      'El precio abierto habilita «Cerrar precio» en la partida. El cerrado NO: para '
+      + 'cambiarlo hay que anular el comprobante que lo dejó firme.')
+
+  + '<div class="ojo"><b>Ojo:</b> una vez que la partida tiene <b>factura de compra '
+  + 'cargada o liquidación emitida</b>, el precio queda FIRME y la orden no se toca '
+  + 'más. Para cambiarlo hay que anular ese comprobante primero. No es un capricho '
+  + 'del sistema: es lo que ya se le informó al productor.</div>'
+
+  + '<h3>El encabezado</h3>'
+
+  + sgManCampo('Proveedor',
+      'El productor al que le compramos. Sale del padrón de Maestros.',
+      'De acá salen su condición de pago habitual, su comprobante fiscal y su cuenta '
+      + 'corriente. Es a quien se le va a liquidar o de quien se va a recibir la factura.')
+
+  + sgManCampo('Comprobante Fiscal',
+      'Qué papel esperamos: factura A, B, o liquidación. Viene sugerido del proveedor '
+      + 'y se puede cambiar en esta orden.',
+      'Define si el precio lleva IVA discriminado y qué alícuota se usa. Va al Diario '
+      + 'de IVA Compras.')
+
+  + sgManCampo('Condición de pago',
+      'A cuántos días y en cuántas cuotas. Viene sugerida del proveedor.',
+      'De acá salen los VENCIMIENTOS de la cuenta corriente de proveedores y lo que '
+      + 'aparece en Órdenes de Pago cuando llega la fecha.')
+
+  + sgManCampo('Fecha OC / Fecha recepción estimada',
+      'Cuándo se cerró el trato y cuándo se espera el camión. La estimada es la que '
+      + 'ordena la bandeja de lo que falta recibir.',
+      'La fecha de OC puede ser la base de los vencimientos, según la condición de pago.')
+
+  + '<h3>Los ítems: qué se compró</h3>'
+
+  + sgManCampo('Producto y presentación',
+      'Qué y en qué envase. La presentación trae los <b>kilos por bulto</b>, que es lo '
+      + 'que convierte cajones en kilos.',
+      'El producto define la ALÍCUOTA DE IVA. Sin alícuota no se puede facturar la '
+      + 'venta de esa mercadería: se carga en Maestros → Productos.')
+
+  + sgManCampo('Cómo se carga: por bulto o por kilo',
+      'La unidad en que se PACTÓ. Si arreglaste «el cajón a $50.000», cargalo por '
+      + 'bulto; si arreglaste «$2.500 el kilo», por kilo.',
+      'El precio se guarda siempre por kilo, pero la unidad se recuerda: la '
+      + 'corrección, la liquidación y el remito hablan después en esa misma unidad. '
+      + 'Es lo que evita hacer la cuenta a mano y equivocarse en un cero.')
+
+  + sgManCampo('Cantidad estimada',
+      'Cuánto se espera que baje del camión. Es una ESTIMACIÓN: lo que vale es lo que '
+      + 'se pesa al recibir.',
+      'Es el tope de lo que se puede recibir contra esta orden, y lo que la bandeja '
+      + 'de pendientes muestra como «en viaje».')
+
+  + sgManCampo('Precio',
+      'Lo acordado, en la unidad que elegiste. Si el precio incluye IVA, tildalo: el '
+      + 'sistema guarda el neto y lo vuelve a mostrar bruto donde corresponde.',
+      'Es la base de lo que se le debe al productor. La liquidación a precio cerrado '
+      + 'lo trae de acá y no se puede editar a mano — si hay que corregirlo, se '
+      + 'corrige la orden.')
+
+  + '<div class="ojo"><b>El peso que manda es el que pesó la balanza.</b> Si el cajón '
+  + 'decía 20 kg y entraron 18,5, la partida sigue con los 18,5: es lo que hay para '
+  + 'vender y es sobre lo que se paga. El nominal sólo se usa cuando no hay pesada.</div>'
+
+  + '<h3>Flete</h3>'
+
+  + sgManCampo('A cargo de / ¿Quién lo paga?',
+      '<b>Comprador</b>: es gasto nuestro y entra al costo de la partida. '
+      + '<b>Vendedor y lo paga él</b>: ya viene en el precio, no tocamos plata. '
+      + '<b>Vendedor pero lo adelanta San Gerónimo</b>: le pagamos al fletero y se le '
+      + 'descuenta de su liquidación.',
+      'Los dos primeros casos aparecen en Gastos Directos → Fletes de entrada. El '
+      + 'monto sólo se pide cuando la plata la ponemos nosotros: si lo paga el otro, '
+      + 'no nos interesa el costo.')
+
+  + '<h3>Qué pasa después</h3>'
+  + '<ul>'
+  + '<li><b>Recibir</b> — el camión llega, se pesa y se cuenta. Ahí nace la PARTIDA, '
+  + 'con su código y su piso. Lo que se pesa manda sobre lo estimado.</li>'
+  + '<li><b>Documentar</b> — o entra la factura del productor, o le emitimos la '
+  + 'liquidación. Cualquiera de las dos deja el precio firme.</li>'
+  + '<li><b>Pagar</b> — los vencimientos ya están calculados por la condición de pago '
+  + 'y aparecen en la cuenta corriente de proveedores.</li>'
+  + '</ul>'
+
+  + '<h3>Qué cambió, y desde cuándo</h3>'
+  + '<ul>'
+  + '<li><span class="ver">V990</span> El flete del remito de SALIDA ahora pregunta lo '
+  + 'mismo que el de entrada: a cargo de quién y quién pone la plata, con el cartel '
+  + 'que dice si se le descuenta al productor de su liquidación.</li>'
+  + '<li><span class="ver">V986</span> No se puede remitir ni facturar mercadería «en '
+  + 'camino»: primero se recibe la partida.</li>'
+  + '<li><span class="ver">V980</span> La liquidación habla en la misma unidad en que '
+  + 'se pactó el remito: si fue por cajón, se liquida por cajón.</li>'
+  + '<li><span class="ver">V970</span> La alícuota de IVA vive en el producto y es '
+  + 'obligatoria para facturar.</li>'
+  + '</ul>'
+};
 
 // ══════════════════════════════════════════════════════════════════════════
 // ↩️ DEVOLUCIÓN DE MERCADERÍA DE UN REMITO
