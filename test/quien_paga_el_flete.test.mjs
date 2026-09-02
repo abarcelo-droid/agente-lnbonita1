@@ -35,8 +35,8 @@ const DBSG = fs.readFileSync(path.join(RAIZ, 'src/servicios/db_sg.js'), 'utf8');
 // La función real del router, sacada del fuente y corrida de verdad. Si alguien la
 // renombra, esto revienta en vez de pasar en falso.
 function traerSync() {
-  const i = SG.indexOf('const FLETE_LO_PAGAMOS =');
-  assert.ok(i > 0, 'no existe FLETE_LO_PAGAMOS');
+  const i = SG.indexOf('const FLETE_SG_PONE_LA_PLATA =');
+  assert.ok(i > 0, 'no existe FLETE_SG_PONE_LA_PLATA');
   const j = SG.indexOf('function syncGastoFleteDespacho(');
   assert.ok(j > i, 'no existe syncGastoFleteDespacho');
   let prof = 0, k = SG.indexOf('{', j);
@@ -46,6 +46,13 @@ function traerSync() {
   }
   // eslint-disable-next-line no-new-func
   return new Function(SG.slice(i, k + 1) + '; return syncGastoFleteDespacho;')();
+}
+// Y la regla sola, para poder correr las cuatro respuestas posibles.
+function traerRegla() {
+  const i = SG.indexOf('const FLETE_SG_PONE_LA_PLATA =');
+  const fin = SG.indexOf(';', SG.indexOf('quien === \'san_geronimo\')', i)) + 1;
+  // eslint-disable-next-line no-new-func
+  return new Function(SG.slice(i, fin) + '; return FLETE_SG_PONE_LA_PLATA;')();
 }
 
 function base() {
@@ -64,9 +71,22 @@ const pendientes = (db, despachoId) => db.prepare(
 
 // ── 1 · LA REGLA, CORRIDA ──────────────────────────────────────────────────
 
+test('las cuatro respuestas, y cuál de ellas hace salir plata nuestra', () => {
+  // Pablo, 2/9/2026: «tomemos consideraciones similares a la orden de compra, sobre
+  // todo para que quede bien claro si lo tenemos que descontar o no en la
+  // liquidación». En una salida son TRES los que pueden tener el flete a cargo, y
+  // cuando es del productor todavía falta saber quién pone la plata.
+  const pone = traerRegla();
+  assert.equal(pone('nosotros', null), true, 'gasto nuestro');
+  assert.equal(pone('cliente', null), false, 'lo paga el súper: no tocamos plata');
+  assert.equal(pone('productor', 'productor'), false, 'lo paga él directo');
+  assert.equal(pone('productor', 'san_geronimo'), true,
+    'lo adelantamos: hay que pagarle al fletero y recuperarlo de su liquidación');
+});
+
 test('si lo pagamos nosotros, queda el gasto esperando la factura', () => {
   const db = base();
-  traerSync()(db, 10, 77, '2026-09-02', 1, 'nosotros');
+  traerSync()(db, 10, 77, '2026-09-02', 1, { cargo: 'nosotros' });
   const g = pendientes(db, 10);
   assert.equal(g.length, 1);
   assert.equal(g[0].tipo_gasto, 'flete_salida');
@@ -79,14 +99,14 @@ test('si lo paga el vendedor, el camión se anota pero NO hay gasto nuestro', ()
   // ES EL BUG. Un pendiente que espera una cuenta que no va a llegar nunca sólo
   // ensucia el listado hasta que alguien lo anula a mano.
   const db = base();
-  traerSync()(db, 11, 77, '2026-09-02', 1, 'vendedor');
+  traerSync()(db, 11, 77, '2026-09-02', 1, { cargo: 'productor', quien: 'productor' });
   assert.equal(pendientes(db, 11).length, 0);
   db.close();
 });
 
 test('sin fletero no hay gasto, lo diga quien lo diga', () => {
   const db = base();
-  traerSync()(db, 12, null, '2026-09-02', 1, 'nosotros');
+  traerSync()(db, 12, null, '2026-09-02', 1, { cargo: 'nosotros' });
   assert.equal(pendientes(db, 12).length, 0);
   db.close();
 });
@@ -96,9 +116,9 @@ test('cambiar de opinión a «lo paga el vendedor» anula el pendiente', () => {
   // a valorizar no se queda dando vueltas.
   const db = base();
   const sync = traerSync();
-  sync(db, 13, 77, '2026-09-02', 1, 'nosotros');
+  sync(db, 13, 77, '2026-09-02', 1, { cargo: 'nosotros' });
   assert.equal(pendientes(db, 13).length, 1);
-  sync(db, 13, 77, '2026-09-02', 1, 'vendedor');
+  sync(db, 13, 77, '2026-09-02', 1, { cargo: 'cliente' });
   assert.equal(pendientes(db, 13).length, 0);
   assert.equal(db.prepare('SELECT estado FROM sg_gastos_directos WHERE despacho_id=13').get().estado,
     'anulado');
@@ -109,7 +129,7 @@ test('y lo YA VALORIZADO no se toca: eso es una factura que llegó', () => {
   const db = base();
   db.prepare(`INSERT INTO sg_gastos_directos (tipo_gasto, despacho_id, proveedor_servicio_id, estado, activo)
     VALUES ('flete_salida', 14, 77, 'valorizado', 1)`).run();
-  traerSync()(db, 14, 77, '2026-09-02', 1, 'vendedor');
+  traerSync()(db, 14, 77, '2026-09-02', 1, { cargo: 'cliente' });
   assert.equal(db.prepare('SELECT estado FROM sg_gastos_directos WHERE despacho_id=14').get().estado,
     'valorizado', 'se anuló un gasto que ya tenía su factura');
   db.close();
@@ -121,9 +141,9 @@ test('el remito viejo, sin el dato, sigue teniendo su gasto', () => {
   // borraría gastos reales de un plumazo.
   const db = base();
   const sync = traerSync();
-  sync(db, 15, 77, '2026-09-02', 1, null);
-  sync(db, 16, 77, '2026-09-02', 1, undefined);
-  sync(db, 17, 77, '2026-09-02', 1, '');
+  sync(db, 15, 77, '2026-09-02', 1, { cargo: 'nosotros' });
+  sync(db, 16, 77, '2026-09-02', 1, { cargo: 'nosotros', quien: null });
+  sync(db, 17, 77, '2026-09-02', 1, { cargo: 'nosotros', quien: undefined });
   for (const d of [15, 16, 17]) assert.equal(pendientes(db, d).length, 1, 'despacho ' + d);
   db.close();
 });
@@ -134,10 +154,10 @@ test('la columna existe y el remito la guarda', () => {
   assert.match(DBSG, /addCol\('sg_despachos',\s+'flete_paga',\s+'TEXT'\)/);
   const i = SG.indexOf('const postRemito = (req, res)');
   const b = SG.slice(i, SG.indexOf('\r\n};', i));
-  assert.match(b, /turno, oc_cliente, flete_paga\)/);
-  assert.match(b, /FLETE_LO_PAGAMOS\(b\.flete_paga\) \? 'nosotros' : 'vendedor'\);/);
-  // Y el que arma el gasto recibe la respuesta.
-  assert.match(b, /syncGastoFleteDespacho\(db, despachoId, fleteroId, val\(b\.fecha_despacho\), uid\(req\), val\(b\.flete_paga\)\)/);
+  assert.match(b, /flete_a_cargo, flete_pagado_por, flete_monto\)/);
+  assert.match(b, /fleteDeRemito\(b\)\.cargo, fleteDeRemito\(b\)\.quien,/);
+  // Y el que arma el gasto recibe la respuesta entera, no media.
+  assert.match(b, /syncGastoFleteDespacho\(db, despachoId, fleteroId, val\(b\.fecha_despacho\), uid\(req\), fleteDeRemito\(b\)\)/);
 });
 
 // ── 3 · FUERA EL SELECTOR DE TRANSPORTE ────────────────────────────────────
@@ -150,48 +170,95 @@ test('el selector de transporte ya no está en ninguna parte', () => {
 });
 
 test('y la pregunta que sí cambia algo ocupó su lugar', () => {
-  assert.match(PANEL, /<label>¿Quién paga el flete\?/);
-  assert.match(PANEL, /<option value="nosotros">Lo pagamos nosotros<\/option>/);
-  assert.match(PANEL, /<option value="vendedor">Lo paga el vendedor<\/option>/);
+  // Con las mismas consideraciones que la orden de compra: quién tiene el flete a
+  // cargo, y si es del productor, quién pone la plata.
+  assert.match(PANEL, /<label>Flete a cargo de <span style="color:var\(--err\)">\*<\/span><\/label>/);
+  assert.match(PANEL, /<option value="nosotros">Nosotros \(San Gerónimo\)<\/option>/);
+  assert.match(PANEL, /<option value="cliente">El cliente<\/option>/);
+  assert.match(PANEL, /<option value="productor">El productor de la mercadería<\/option>/);
+  assert.match(PANEL, /<option value="san_geronimo">Lo adelanta San Gerónimo<\/option>/);
   const i = PANEL.indexOf('function sgDespGuardar(){');
-  assert.match(PANEL.slice(i, i + 3400), /flete_paga:eid\('sg-desp-flete-paga'\)\.value,/);
+  const b = PANEL.slice(i, i + 3600);
+  assert.match(b, /flete_a_cargo:eid\('sg-desp-flete-cargo'\)\.value,/);
+  assert.match(b, /flete_pagado_por:eid\('sg-desp-flete-quien'\)\.value,/);
+  assert.match(b, /flete_monto:eid\('sg-desp-flete-monto'\)\.value!==''/);
 });
 
-test('la pregunta aparece sólo cuando hay fletero, y dice qué va a pasar', () => {
-  // Sin camión no hay flete que pagar. Y antes abajo del fletero decía fijo «queda
-  // un gasto esperando su factura», que era mentira la mitad de las veces.
-  const i = PANEL.indexOf('function sgDespFletePagaPintar(){');
-  assert.ok(i > 0, 'la pregunta no se muestra ni se esconde');
-  const b = PANEL.slice(i, i + 900);
-  assert.match(b, /var hay=!!\(eid\('sg-desp-fletero'\)\|\|\{\}\)\.value;/);
-  assert.match(b, /box\.style\.display = hay \? '' : 'none';/);
-  assert.match(b, /Queda un gasto en Gastos Directos → Fletes de salida, esperando su factura/);
-  assert.match(b, /no se abre ningún gasto nuestro/);
-  // El fletero la vuelve a pintar al cambiar, o queda escondida con fletero puesto.
-  assert.match(PANEL, /<select id="sg-desp-fletero" onchange="sgDespFletePagaPintar\(\)">/);
-  // Y no quedó el cartel FIJO de antes, que decía siempre lo mismo aunque el
-  // camión fuera del otro. (Se busca la frase completa: el comentario que explica
-  // por qué se sacó cita el texto viejo, y es un comentario, no un cartel.)
-  assert.ok(!/Si ponés uno, queda un gasto esperando su factura/.test(PANEL),
-    'quedó el cartel viejo, que mentía la mitad de las veces');
+test('el cartel dice si se descuenta o no en la liquidación', () => {
+  // Pablo, 2/9/2026: «sobre todo para que quede bien claro si lo tenemos que
+  // descontar o no en la liquidación». Cada texto dice lo que el sistema HACE, no
+  // lo que debería hacer.
+  const i = PANEL.indexOf('var SG_DESP_FLETE_AYUDA = {');
+  assert.ok(i > 0, 'no hay cartel que explique las consecuencias');
+  const b = PANEL.slice(i, i + 1600);
+  assert.match(b, /'nosotros':.*ese monto es <b>costo nuestro<\/b>\. No se le descuenta a nadie/s);
+  assert.match(b, /'cliente':.*no se abre ningún gasto nuestro/s);
+  assert.match(b, /'productor\|productor':[\s\S]*?No hay nada que descontar/);
+  assert.match(b, /'productor\|san_geronimo':[\s\S]*?se le descuenta de su/);
+  // Las cuatro respuestas tienen su texto: una sin cartel es una elección a ciegas.
+  assert.equal((b.match(/^  '/gm) || []).length, 4);
+});
+
+test('el bloque aparece sólo cuando hay fletero, y el monto sólo si ponemos la plata', () => {
+  // Sin camión no hay flete. Y un monto guardado que nadie va a pagar aparece
+  // después en un informe como si fuera plata nuestra.
+  const i = PANEL.indexOf('function sgDespFleteCargo(){');
+  assert.ok(i > 0);
+  const b = PANEL.slice(i, i + 1400);
+  assert.match(b, /var hay = !!\(eid\('sg-desp-fletero'\)\|\|\{\}\)\.value;/);
+  assert.match(b, /qw\.style\.display = \(hay && cargo === 'productor'\) \? '' : 'none';/);
+  assert.match(b, /var pide = hay && sgDespFletePideMonto\(cargo, quien\);/);
+  assert.match(b, /if \(!pide\) \{ var m=eid\('sg-desp-flete-monto'\); if\(m\) m\.value=''; \}/);
+  // Y la regla del front espeja la del servidor.
+  const j = PANEL.indexOf('function sgDespFletePideMonto(cargo, quien){');
+  const r = PANEL.slice(j, j + 260);
+  assert.match(r, /if \(cargo === 'nosotros'\) return true;/);
+  assert.match(r, /if \(cargo === 'productor'\) return quien === 'san_geronimo';/);
 });
 
 test('viene en «lo pagamos nosotros», que es lo que el sistema hacía antes', () => {
   // El que no mira la pregunta obtiene el comportamiento de siempre, no uno nuevo.
   const i = PANEL.indexOf('function sgDespOpen(modo){');
-  assert.match(PANEL.slice(i, i + 2200), /eid\('sg-desp-flete-paga'\)\.value='nosotros';/);
+  const b = PANEL.slice(i, i + 2400);
+  assert.match(b, /eid\('sg-desp-flete-cargo'\)\.value='nosotros';/);
+  assert.match(b, /eid\('sg-desp-flete-quien'\)\.value='productor';/);
+  assert.match(b, /sgDespFleteCargo\(\);/);
 });
 
 // ── 4 · Y SE VE DÓNDE IMPORTA ──────────────────────────────────────────────
 
 test('la ficha y el remito impreso dicen quién paga', () => {
   // Es lo que se discute en la puerta del cliente.
-  assert.match(PANEL, /function sgFletePagaTxt\(v\)\{/);
-  assert.match(PANEL, /'lo pagamos nosotros' : 'lo paga el vendedor'/);
-  const i = PANEL.indexOf('function sgDespImprimir(id){');
-  assert.match(PANEL.slice(i, i + 3000), /<b>Flete<\/b>/);
-  assert.match(PANEL.slice(i, i + 3000), /sgFletePagaTxt\(d\.flete_paga\)/);
-  // Y en la ficha, al lado del estado.
-  const j = PANEL.indexOf('function sgDespVer(id){');
-  assert.match(PANEL.slice(j, j + 1800), /' · flete '\+esc\(sgFletePagaTxt\(d\.flete_paga\)\)/);
+  const i = PANEL.indexOf('function sgFletePagaTxt(cargo, quien){');
+  assert.ok(i > 0, 'no se dice quién paga');
+  const b = PANEL.slice(i, i + 500);
+  assert.match(b, /'lo paga el cliente'/);
+  assert.match(b, /'lo adelantamos y se le descuenta al productor'/);
+  assert.match(b, /'lo paga el productor'/);
+  assert.match(b, /return 'lo pagamos nosotros';/);
+  // El remito viejo, con el vocabulario anterior, sigue contestando.
+  assert.match(PANEL, /sgFletePagaTxt\(d\.flete_a_cargo \|\| d\.flete_paga, d\.flete_pagado_por\)/);
+  const j = PANEL.indexOf('function sgDespImprimir(id){');
+  assert.match(PANEL.slice(j, j + 3000), /<b>Flete<\/b>/);
+});
+
+test('y el vocabulario es el MISMO que el de la orden de compra', () => {
+  // Dos nombres para la misma pregunta obligan a traducir en cada informe.
+  const DB = fs.readFileSync(path.join(RAIZ, 'src/servicios/db_sg.js'), 'utf8');
+  assert.match(DB, /addCol\('sg_despachos',\s+'flete_a_cargo',\s+'TEXT'\)/);
+  assert.match(DB, /addCol\('sg_despachos',\s+'flete_pagado_por',\s+'TEXT'\)/);
+  assert.match(DB, /addCol\('sg_despachos',\s+'flete_monto',\s+'REAL'\)/);
+  assert.match(DB, /flete_a_cargo\s+TEXT CHECK\(flete_a_cargo IN \('comprador','vendedor'\)\)/,
+    'la orden dejó de tener sus columnas: el espejo perdió sentido');
+});
+
+test('lo cargado con la pregunta vieja se traduce, no se pierde', () => {
+  // Sin esto, esos remitos quedan sin decir a cargo de quién estaba el flete.
+  const DB = fs.readFileSync(path.join(RAIZ, 'src/servicios/db_sg.js'), 'utf8');
+  assert.match(DB, /SET flete_a_cargo = CASE WHEN flete_paga='vendedor' THEN 'productor' ELSE 'nosotros' END/);
+  assert.match(DB, /WHERE flete_a_cargo IS NULL AND fletero_id IS NOT NULL/);
+  // Y el servidor entiende los dos vocabularios.
+  const i = SG.indexOf('function fleteDeRemito(b) {');
+  assert.ok(i > 0, 'no hay traductor');
+  assert.match(SG.slice(i, i + 600), /String\(b\.flete_paga\) === 'vendedor' \? 'productor' : 'nosotros'/);
 });

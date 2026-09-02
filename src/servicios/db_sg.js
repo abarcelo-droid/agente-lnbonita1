@@ -2003,7 +2003,41 @@ try {
   //
   // NULL = 'nosotros'. Es lo que el sistema venía haciendo con todos los remitos
   // que ya existen: si un fletero tenía gasto, era nuestro.
+  // ── LA LOGÍSTICA DEL REMITO, COMO LA DE LA ORDEN ─────────────────────────
+  //
+  // Pablo, 2/9/2026: «la parte de logística en el remito quedó media rara.
+  // Deberíamos tomar consideraciones similares a las que tenemos en la orden de
+  // compra, sobre todo para que quede bien claro si lo tenemos que descontar o no
+  // en la liquidación».
+  //
+  // La primera versión preguntaba una sola cosa —¿lo pagamos nosotros o el
+  // vendedor?— y con eso no alcanza, porque en una salida hay TRES que pueden tener
+  // el flete a cargo y las consecuencias son distintas:
+  //
+  //   'nosotros'   gasto nuestro. Va a Fletes de salida y es costo nuestro.
+  //   'cliente'    lo paga el súper. No tocamos plata en ningún lado.
+  //   'productor'  el dueño de la mercadería. Y ahí hay que preguntar QUIÉN pone la
+  //                plata, igual que en la orden: si la pone él, no tocamos nada; si
+  //                la ADELANTA San Gerónimo, se le paga al fletero y se le descuenta
+  //                de su liquidación.
+  //
+  // Mismos nombres que sg_oc.flete_a_cargo / flete_pagado_por a propósito: es la
+  // misma pregunta del otro lado del mostrador, y dos vocabularios para lo mismo
+  // obligan a traducir en cada informe.
+  if (addCol('sg_despachos',        'flete_a_cargo',        'TEXT')) added.push('sg_despachos.flete_a_cargo');
+  if (addCol('sg_despachos',        'flete_pagado_por',     'TEXT')) added.push('sg_despachos.flete_pagado_por');
+  if (addCol('sg_despachos',        'flete_monto',          'REAL')) added.push('sg_despachos.flete_monto');
   if (addCol('sg_despachos',        'flete_paga',           'TEXT')) added.push('sg_despachos.flete_paga');
+  // Lo cargado con la pregunta vieja se traduce al vocabulario nuevo, una sola vez.
+  // Sin esto esos remitos quedan sin decir a cargo de quién estaba el flete, y el
+  // que los mire mañana no tiene cómo saberlo.
+  try {
+    const m = db.prepare(`UPDATE sg_despachos
+      SET flete_a_cargo = CASE WHEN flete_paga='vendedor' THEN 'productor' ELSE 'nosotros' END,
+          flete_pagado_por = CASE WHEN flete_paga='vendedor' THEN 'productor' ELSE NULL END
+      WHERE flete_a_cargo IS NULL AND fletero_id IS NOT NULL`).run();
+    if (m.changes) console.log(`[DB] SG: ${m.changes} remito(s) tradujeron su flete al vocabulario de la orden.`);
+  } catch (e) { console.error('[DB] SG traducción flete_paga:', e.message); }
   if (addCol('sg_despachos',        'turno',                'TEXT')) added.push('sg_despachos.turno');
   if (addCol('sg_despachos',        'oc_cliente',           'TEXT')) added.push('sg_despachos.oc_cliente');
   if (addCol('sg_despacho_items',   'modo_precio',          'TEXT')) added.push('sg_despacho_items.modo_precio');

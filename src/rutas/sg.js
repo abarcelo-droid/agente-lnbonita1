@@ -9418,16 +9418,49 @@ router.get('/disponibilidad', requireAuth, (req, res) => {
 //
 // El default es 'nosotros' —lo que el sistema venía haciendo con todos los remitos
 // que ya existen—, así que un remito viejo sigue teniendo su gasto.
-const FLETE_LO_PAGAMOS = (v) => String(v || 'nosotros') === 'nosotros';
+// ── ¿PONE LA PLATA SAN GERÓNIMO? ─────────────────────────────────────────
+//
+// Es la única pregunta que decide si se abre un gasto, y tiene DOS respuestas que
+// dicen que sí por razones distintas:
+//
+//   'nosotros'                 el flete es nuestro y es costo nuestro.
+//   'productor' + adelantado   no es costo nuestro, pero le pagamos al fletero y
+//                              se lo descontamos al productor de su liquidación.
+//                              Sin el gasto cargado no hay nada que recuperar.
+//
+// Con el flete a cargo del cliente, o del productor pagándolo él, no se toca plata
+// en ningún lado y no hay gasto que abrir.
+//
+// Espejo exacto de `adelantado()` en la bandeja de fletes de entrada: es la misma
+// pregunta del otro lado del mostrador.
+const FLETE_SG_PONE_LA_PLATA = (cargo, quien) =>
+  cargo === 'nosotros' || (cargo === 'productor' && quien === 'san_geronimo');
 
-function syncGastoFleteDespacho(db, despachoId, fleteroId, fechaServicio, userId, fletePaga) {
+// Y lo que se le RECUPERA al productor: el gasto existe, pero no es costo nuestro.
+const FLETE_A_RECUPERAR = (cargo, quien) =>
+  cargo === 'productor' && quien === 'san_geronimo';
+
+// El vocabulario viejo (`flete_paga`: 'nosotros' | 'vendedor') se traduce al nuevo.
+// Un remito guardado antes del 2/9/2026 tiene que seguir contestando lo mismo.
+function fleteDeRemito(b) {
+  const cargo = ['nosotros', 'cliente', 'productor'].includes(String(b.flete_a_cargo))
+    ? String(b.flete_a_cargo)
+    : (String(b.flete_paga) === 'vendedor' ? 'productor' : 'nosotros');
+  const quien = cargo === 'productor'
+    ? (String(b.flete_pagado_por) === 'san_geronimo' ? 'san_geronimo' : 'productor')
+    : null;
+  return { cargo, quien };
+}
+
+function syncGastoFleteDespacho(db, despachoId, fleteroId, fechaServicio, userId, flete) {
+  const pone = FLETE_SG_PONE_LA_PLATA(flete && flete.cargo, flete && flete.quien);
   const existente = db.prepare(
     "SELECT id, estado FROM sg_gastos_directos WHERE despacho_id=? AND tipo_gasto='flete_salida' AND activo=1 AND estado!='anulado'"
   ).get(despachoId);
   // Sin fletero, o con el flete a cargo del otro: no hay gasto nuestro. Y si había
   // uno pendiente se anula, que es lo mismo que ya hacía cuando se sacaba el
   // fletero — un pendiente que nadie va a valorizar sólo ensucia el listado.
-  if (!fleteroId || !FLETE_LO_PAGAMOS(fletePaga)) {
+  if (!fleteroId || !pone) {
     if (existente && existente.estado === 'pendiente_valorizar') {
       db.prepare("UPDATE sg_gastos_directos SET estado='anulado' WHERE id=?").run(existente.id);
     }
@@ -9573,8 +9606,9 @@ const postRemito = (req, res) => {
       // trazabilidad— pero no se emite el remito como documento, porque el papel
       // que viaja con la mercadería es la factura. Ver A2b en db_sg.js.
       const info = db.prepare(`INSERT INTO sg_despachos
-        (numero, pedido_id, cliente_id, comercial_id, fecha_despacho, transporte, transportista, chofer, dominio, fletero_id, estado, observaciones, sin_remito, creado_por, turno, oc_cliente, flete_paga)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
+        (numero, pedido_id, cliente_id, comercial_id, fecha_despacho, transporte, transportista, chofer, dominio, fletero_id, estado, observaciones, sin_remito, creado_por, turno, oc_cliente, flete_paga,
+         flete_a_cargo, flete_pagado_por, flete_monto)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
         numero, b.pedido_id || null, b.cliente_id, b.comercial_id || null, val(b.fecha_despacho),
         val(b.transporte), val(b.transportista), val(b.chofer), val(b.dominio), fleteroId,
         val(b.estado) || 'despachado', val(b.observaciones), b.sin_remito ? 1 : 0, uid(req),
@@ -9584,10 +9618,18 @@ const postRemito = (req, res) => {
         val(b.turno), val(b.oc_cliente),
         // Quién paga el flete: es lo que decide si sale plata nuestra. Se guarda
         // siempre lo que se eligió, sin dejarlo en NULL.
-        FLETE_LO_PAGAMOS(b.flete_paga) ? 'nosotros' : 'vendedor');
+        // `flete_paga` se sigue escribiendo para no dejar mudas las pantallas que
+        // todavía lo leen; la verdad vive en las dos columnas de abajo.
+        fleteDeRemito(b).cargo === 'nosotros' ? 'nosotros' : 'vendedor',
+        fleteDeRemito(b).cargo, fleteDeRemito(b).quien,
+        // El monto sólo cuando la plata la pone San Gerónimo: si lo paga el otro no
+        // nos interesa el costo, y un número guardado que nadie va a usar aparece
+        // después en un informe como si fuera plata nuestra.
+        FLETE_SG_PONE_LA_PLATA(fleteDeRemito(b).cargo, fleteDeRemito(b).quien)
+          ? (Number(b.flete_monto) > 0 ? Number(b.flete_monto) : null) : null);
       const despachoId = info.lastInsertRowid;
       // PARTE B — si se asignó fletero, queda un gasto de flete de salida PENDIENTE de valorizar.
-      syncGastoFleteDespacho(db, despachoId, fleteroId, val(b.fecha_despacho), uid(req), val(b.flete_paga));
+      syncGastoFleteDespacho(db, despachoId, fleteroId, val(b.fecha_despacho), uid(req), fleteDeRemito(b));
       // precio_lista_por_kg: el precio ANTES del descuento acordado con el
       // proveedor de esa partida. Sin él, lo resignado sólo existe como un total
       // de la factura y no se puede decir cuánto resignó CADA partida — que es
