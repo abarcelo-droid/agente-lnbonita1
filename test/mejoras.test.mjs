@@ -397,9 +397,10 @@ test('la tabla no pide barra de desplazamiento lateral', () => {
   const b = PANEL.slice(i, i + 2600);
   assert.match(b, /overflow-x:hidden !important/);
   assert.match(b, /table-layout:fixed/);
-  const anchos = [...b.matchAll(/<th style="width:(\d+)%/g)].map((m) => Number(m[1]));
-  assert.equal(anchos.length, 6, 'la tabla no tiene seis columnas con ancho fijo');
-  assert.equal(anchos.reduce((a, x) => a + x, 0), 100, 'los anchos no suman 100%');
+  assert.match(b, /max-width:98vw/);
+  // Los anchos de las columnas los pone mejCabecera, porque los títulos se
+  // clickean para ordenar: se verifican en el test del orden.
+  assert.match(b, /<thead><tr id="mej-thead"><\/tr><\/thead>/);
 });
 
 test('al que no es administrador no se le ofrece el selector de prioridad', () => {
@@ -445,7 +446,7 @@ test('tiene su «¿Cómo se usa?», con su versión', () => {
   // Y cada campo lleva la suya, que la arma sgManCampo al dibujar.
   assert.ok((m.match(/, 'V\d+'\)/g) || []).length >= 5,
     'los campos del manual no están anotados con su versión');
-  for (const v of [997, 999]) {
+  for (const v of [997, 999, 1000]) {
     assert.ok(vs.includes(v), 'falta anotar el cambio de la V' + v + ' en el manual de Mejoras');
   }
   for (const n of vs) assert.ok(n <= actual, 'el manual cita la V' + n + ' y el panel va en la V' + actual);
@@ -651,4 +652,113 @@ test('el manual no promete una agrupación que la pantalla no hace', () => {
   assert.ok(!plano.includes('tres personas piden lo mismo'),
     'volvió a prometer que se agrupa lo repetido');
   assert.ok(plano.includes('Borrar la propia'), 'no cuenta que la propia se puede borrar');
+});
+
+
+// ── 13 · ORDENAR LA LISTA ──────────────────────────────────────────────────
+//
+// Pablo, 3/9/2026: «permitime ordenar de mayor a menor prioridades, básico».
+//
+// Se ordena el arreglo que ya está en memoria y se repinta: no hace falta
+// volver a pedirle los datos al servidor sólo para dar vuelta una columna.
+
+// Se ejecuta el ordenador DEL REPO, no una copia.
+function ordenador(col, dir) {
+  const i = PANEL.indexOf('var MEJ_COLS = {');
+  assert.ok(i > 0, 'no existe la tabla de columnas ordenables');
+  const j = PANEL.indexOf('\r\n}', PANEL.indexOf('function mejOrdenarArr(arr){', i));
+  // eslint-disable-next-line no-new-func
+  return new Function('MEJ', PANEL.slice(i, j + 3) + '\nreturn mejOrdenarArr;')(
+    { orden: { col, dir } });
+}
+
+const FILAS = [
+  { id: 1, prioridad: null, texto: 'sin prioridad vieja' },
+  { id: 2, prioridad: 1, texto: 'urgente' },
+  { id: 3, prioridad: 5, texto: 'algún día' },
+  { id: 4, prioridad: 3, texto: 'media' },
+  { id: 5, prioridad: null, texto: 'sin prioridad nueva' },
+];
+
+test('de la más urgente para abajo', () => {
+  const ord = ordenador('prioridad', 1);
+  assert.deepEqual(ord(FILAS).map((x) => x.id), [2, 4, 3, 5, 1]);
+});
+
+test('y al revés, de la que menos corre a la más urgente', () => {
+  // Es lo que pidió Pablo: «de mayor a menor».
+  const ord = ordenador('prioridad', -1);
+  assert.deepEqual(ord(FILAS).map((x) => x.id), [3, 4, 2, 5, 1]);
+});
+
+test('las que nadie miró van al final en los DOS sentidos', () => {
+  // No son «prioridad cero»: son las que todavía no miró nadie. Al invertir,
+  // ponerlas primeras haría que la lista deje de contestar para qué existe.
+  for (const dir of [1, -1]) {
+    const ids = ordenador('prioridad', dir)(FILAS).map((x) => x.id);
+    assert.deepEqual(ids.slice(-2), [5, 1],
+      'con dir=' + dir + ' las sin prioridad no quedaron al fondo');
+  }
+});
+
+test('a igualdad, la más nueva primero', () => {
+  const ord = ordenador('prioridad', 1);
+  const empate = [{ id: 10, prioridad: 2 }, { id: 20, prioridad: 2 }, { id: 15, prioridad: 2 }];
+  assert.deepEqual(ord(empate).map((x) => x.id), [20, 15, 10]);
+});
+
+test('y se puede ordenar por las otras columnas, no sólo por prioridad', () => {
+  const filas = [
+    { id: 1, modulo_actual: 'Stock', usuario_nombre: 'Ana', foto_ruta: null, estado: 'propuesta' },
+    { id: 2, modulo_actual: 'Caja y Bancos', usuario_nombre: 'Zoe', foto_ruta: '/x.jpg', estado: 'resuelta' },
+  ];
+  assert.deepEqual(ordenador('pantalla', 1)(filas).map((x) => x.id), [2, 1]);
+  assert.deepEqual(ordenador('quien', -1)(filas).map((x) => x.id), [2, 1]);
+  assert.deepEqual(ordenador('foto', -1)(filas).map((x) => x.id), [2, 1]);
+});
+
+test('la cabecera se clickea y dice hacia dónde ordena', () => {
+  // Sin la flecha, dos clics dan dos resultados distintos y no hay forma de
+  // saber cuál se está mirando.
+  const i = PANEL.indexOf('function mejTh(col, label, estilo){');
+  const b = PANEL.slice(i, PANEL.indexOf('\r\n}', i));
+  assert.match(b, /onclick="mejOrdenarPor\(/);
+  assert.match(b, /MEJ\.orden\.dir < 0 \? '▼' : '▲'/);
+  // Y las seis columnas son ordenables.
+  const j = PANEL.indexOf('function mejCabecera(){');
+  const c = PANEL.slice(j, PANEL.indexOf('\r\n}', j));
+  for (const col of ['pantalla', 'texto', 'quien', 'foto', 'prioridad', 'estado']) {
+    assert.ok(c.includes("mejTh('" + col + "'"), 'no se puede ordenar por: ' + col);
+  }
+  // Los anchos siguen sumando 100: la tabla no puede pedir barra lateral.
+  const anchos = [...c.matchAll(/width:(\d+)%/g)].map((m) => Number(m[1]));
+  assert.equal(anchos.length, 6);
+  assert.equal(anchos.reduce((a, x) => a + x, 0), 100);
+});
+
+test('el segundo clic da vuelta el orden, no lo apaga', () => {
+  const i = PANEL.indexOf('function mejOrdenarPor(col){');
+  const b = PANEL.slice(i, PANEL.indexOf('\r\n}', i));
+  assert.match(b, /else\s+\{ o\.dir = -o\.dir; \}/);
+  // Y arranca por prioridad, que es el orden que ya venía del servidor: entrar y
+  // ver otra cosa sería el peor primer paso.
+  assert.match(PANEL, /orden: \{ col: 'prioridad', dir: 1 \} \};/);
+});
+
+test('y mejPintar los usa: ordena y redibuja la cabecera', () => {
+  // Sin esto se puede tener el mejor ordenador del mundo y una lista que lo
+  // ignora: la flecha cambia y las filas se quedan quietas.
+  const i = PANEL.indexOf('function mejPintar(){');
+  const b = PANEL.slice(i, PANEL.indexOf("var nA = MEJ.filas.filter", i));
+  assert.match(b, /mejCabecera\(\);/);
+  assert.match(b, /var filas = mejOrdenarArr\(/);
+});
+
+test('el manual anota el orden con SU versión', () => {
+  // El registro de versiones es lo que le dice al operador desde cuándo puede
+  // hacer algo. Anotarlo con la versión de otro cambio es no anotarlo.
+  const i = PANEL.indexOf('SG_MANUAL.mejoras = {');
+  const m = PANEL.slice(i, PANEL.indexOf('\r\n};', i));
+  const cambios = m.slice(m.indexOf('Qué cambió, y desde cuándo'));
+  assert.match(cambios, /<span class="ver">V1000<\/span> La lista se <b>ordena por cualquier columna<\/b>/);
 });

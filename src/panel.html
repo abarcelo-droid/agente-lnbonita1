@@ -496,14 +496,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
   <!-- NADA DE BARRAS LATERALES: anchos por columna y lo largo parte o se trunca. -->
   <div class="ab-table-wrap" style="overflow-x:hidden !important;max-width:98vw">
     <table class="pa-tbl" style="table-layout:fixed;width:100%">
-      <thead><tr>
-        <th style="width:16%">Pantalla</th>
-        <th style="width:38%">Qué habría que mejorar</th>
-        <th style="width:13%">Quién</th>
-        <th style="width:9%;text-align:center">Foto</th>
-        <th style="width:11%;text-align:center">Prioridad</th>
-        <th style="width:13%;text-align:right">Estado</th>
-      </tr></thead>
+      <thead><tr id="mej-thead"></tr></thead>
       <tbody id="mej-tb"><tr><td colspan="6" class="emp">Cargando…</td></tr></tbody>
     </table>
   </div>
@@ -20838,7 +20831,8 @@ function sgMermaGuardar(){
 // por WhatsApp, por teléfono y de palabra en el pasillo — el que lo pedía no
 // sabía si alguien lo anotó, el que lo arregla no sabía cuál de los cuarenta era
 // urgente, y nadie podía decir «esto ya está».
-var MEJ = { filas: [], modulos: [], tab: 'abiertas', admin: false, resolviendo: null };
+var MEJ = { filas: [], modulos: [], tab: 'abiertas', admin: false, resolviendo: null,
+  orden: { col: 'prioridad', dir: 1 } };
 
 function mejLoad(){
   var tb = eid('mej-tb'); if(!tb) return;
@@ -20868,10 +20862,85 @@ function mejPrioColor(p){
        : p === 4 ? '#2563eb' : p === 5 ? '#64748b' : 'var(--mut)';
 }
 
+// ── ORDENAR LA LISTA ──────────────────────────────────────────────────────
+//
+// Pablo, 3/9/2026: «permitime ordenar de mayor a menor prioridades, básico».
+//
+// Se ordena el ARREGLO que ya está en memoria y se repinta, igual que en
+// Órdenes de Pago: no hace falta volver a pedirle los datos al servidor sólo
+// para dar vuelta una columna.
+//
+// LAS QUE NO TIENEN PRIORIDAD VAN SIEMPRE AL FINAL, ordene como ordene. No son
+// "prioridad cero": son las que nadie miró todavía. Mezclarlas con las urgentes
+// —o ponerlas primeras al invertir— haría que la lista deje de contestar la
+// pregunta para la que existe.
+var MEJ_COLS = {
+  pantalla:  function(x){ return x.modulo_actual || x.modulo_label || x.modulo || ''; },
+  texto:     function(x){ return x.texto || ''; },
+  quien:     function(x){ return (x.usuario_nombre || '') + ' ' + (x.creado_en || ''); },
+  foto:      function(x){ return x.foto_ruta ? 1 : 0; },
+  prioridad: function(x){ return Number(x.prioridad) || 0; },
+  estado:    function(x){ return (x.estado === 'resuelta' ? 1 : 0); },
+};
+
+function mejOrdenarArr(arr){
+  var o = MEJ.orden;
+  if (!o || !o.col || !MEJ_COLS[o.col]) return arr;
+  var get = MEJ_COLS[o.col];
+  return arr.slice().sort(function(a, b){
+    if (o.col === 'prioridad'){
+      // Sin prioridad, al fondo en los dos sentidos.
+      var sa = a.prioridad == null, sb = b.prioridad == null;
+      if (sa !== sb) return sa ? 1 : -1;
+    }
+    var va = get(a), vb = get(b);
+    var c = (typeof va === 'number' && typeof vb === 'number')
+      ? va - vb
+      : String(va).localeCompare(String(vb), 'es', { numeric: true, sensitivity: 'base' });
+    // A igualdad, la más nueva primero: es la que el que la propuso está
+    // esperando ver.
+    if (c === 0) return b.id - a.id;
+    return c * o.dir;
+  });
+}
+
+// Un clic ordena de menor a mayor; el mismo de nuevo lo da vuelta. En prioridad
+// arranca al revés —de la más urgente a la que menos— porque es para lo que se
+// mira esa columna.
+function mejOrdenarPor(col){
+  var o = MEJ.orden;
+  if (o.col !== col) { o.col = col; o.dir = (col === 'prioridad') ? 1 : 1; }
+  else               { o.dir = -o.dir; }
+  mejPintar();
+}
+
+// El encabezado dice con qué está ordenado y hacia dónde. Sin la flecha, dos
+// clics dan dos resultados distintos y no hay forma de saber cuál se mira.
+function mejTh(col, label, estilo){
+  var act = MEJ.orden.col === col;
+  return '<th style="cursor:pointer;user-select:none;' + (estilo || '') + '"'
+    + ' title="Ordenar por ' + esc(label) + '"'
+    + ' onclick="mejOrdenarPor(' + sgQ(col) + ')">' + escH(label)
+    + '<span style="opacity:' + (act ? '1' : '.25') + ';margin-left:4px">'
+    + (act && MEJ.orden.dir < 0 ? '▼' : '▲') + '</span></th>';
+}
+
+function mejCabecera(){
+  var t = eid('mej-thead'); if(!t) return;
+  t.innerHTML = mejTh('pantalla', 'Pantalla', 'width:16%')
+    + mejTh('texto', 'Qué habría que mejorar', 'width:38%')
+    + mejTh('quien', 'Quién', 'width:13%')
+    + mejTh('foto', 'Foto', 'width:9%;text-align:center')
+    + mejTh('prioridad', 'Prioridad', 'width:11%;text-align:center')
+    + mejTh('estado', 'Estado', 'width:13%;text-align:right');
+}
+
 function mejPintar(){
   var tb = eid('mej-tb'); if(!tb) return;
+  mejCabecera();
   var resueltas = MEJ.tab === 'resueltas';
-  var filas = MEJ.filas.filter(function(x){ return (x.estado === 'resuelta') === resueltas; });
+  var filas = mejOrdenarArr(
+    MEJ.filas.filter(function(x){ return (x.estado === 'resuelta') === resueltas; }));
 
   var nA = MEJ.filas.filter(function(x){ return x.estado !== 'resuelta'; }).length;
   var nR = MEJ.filas.length - nA;
@@ -21257,8 +21326,19 @@ SG_MANUAL.mejoras = { titulo: 'Mejoras', html:
   + 'que <b>se podría hacer mejor</b>, que es distinto y por eso se pierde: nadie '
   + 'llama por teléfono para pedir un buscador.</div>'
 
+  + '<h3>Ordenar la lista <span class="ver">V1000</span></h3>'
+  + '<p>Se clickea el <b>título de cualquier columna</b>. Un clic ordena de menor a '
+  + 'mayor, el mismo de nuevo lo da vuelta, y la flechita dice cuál está mandando. '
+  + 'Arranca por <b>prioridad</b>, de lo más urgente para abajo.</p>'
+  + '<div class="ojo">Las que <b>no tienen prioridad</b> van siempre al final, ordene '
+  + 'como ordene. No son «prioridad cero»: son las que <b>nadie miró todavía</b>, y '
+  + 'mezclarlas con las urgentes haría que la lista deje de contestar la pregunta para '
+  + 'la que existe.</div>'
+
   + '<h3>Qué cambió, y desde cuándo</h3>'
   + '<ul>'
+  + '<li><span class="ver">V1000</span> La lista se <b>ordena por cualquier columna</b>, '
+  + 'clickeando el título.</li>'
   + '<li><span class="ver">V999</span> <b>Mejoras</b> es el primer grupo del menú, '
   + 'arriba de Comercial, y se busca con <b>⌘K</b> como cualquier otra pantalla. '
   + 'Antes estaba escrito aparte y salía como una barrita de color sin texto.</li>'
