@@ -3818,7 +3818,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
   </div>
   <!-- ══ Módulo Gastos Directos (servicio, valorización diferida) — Fase 1: Fletes de salida ══ -->
   <div class="sec sg-mod" id="sec-sg-gastos-directos">
-    <div class="ph"><div><div class="ph-t">🍅 San Gerónimo · Gastos Directos</div><div class="ph-s">Costos de servicio por operación, con valorización diferida (cuando llega la cuenta del proveedor)</div></div></div>
+    <div class="ph"><div><div class="ph-t">🚜 San Gerónimo · Gastos Directos</div><div class="ph-s">Costos de servicio por operación, con valorización diferida (cuando llega la cuenta del proveedor)</div></div></div>
     <style>
       .sg-mod .sggd-tab{padding:7px 14px;cursor:pointer;font-size:12.5px;font-weight:600;border-radius:6px;color:var(--mut)}
       .sg-mod .sggd-tab.on{background:var(--burg);color:#fff}
@@ -3830,6 +3830,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
       <div class="sggd-tab" data-t="coop"             onclick="sgGdsTab('coop')">🤝 Control Cooperativa</div>
       <div class="sggd-tab" data-t="repaso"           onclick="sgGdsTab('repaso')">🔁 Repasos</div>
     </div>
+    <button class="btn bo bs" style="margin:0 0 16px 8px" onclick="sgManualAbrir('gastos')">❓ ¿Cómo se usa?</button>
 
     <div class="sggd-pane on" id="sggd-pane-flete_salida">
       <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:14px">
@@ -13584,8 +13585,8 @@ function liqVentaCab(ocId, mas){
     if (Number(sv.descarga) > 0) {
       frenos.push('La <b>descarga</b> está cargada pero sin valorizar: no se sabe cuánto '
         + 'cobró la cuadrilla, así que no se le puede descontar al productor. Valorizala en '
-        + '<b>Gastos Directos → Cargas y Descargas</b>. Alcanza con el importe; la factura '
-        + 'de la cooperativa puede llegar después.');
+        + '<b>Gastos Directos → Control Cooperativa</b>, con el botón <b>💵 Valorizar</b> de '
+        + 'la fila. Alcanza con el importe; la factura de la cooperativa puede llegar después.');
     }
     if (Number(sv.flete) > 0) {
       frenos.push('El <b>flete</b> está cargado pero sin valorizar: no se sabe cuánto cobró '
@@ -21339,6 +21340,75 @@ function sgManCampo(nombre, espera, liga, ver){
 // el costo de la partida, los kilos que se van a vender y lo que se le va a
 // pagar al productor salen de estos seis pasos.
 // ── MEJORAS ───────────────────────────────────────────────────────────────
+// ── GASTOS DIRECTOS ───────────────────────────────────────────────────────
+//
+// El costo de una partida no es sólo lo que se le paga al productor: el flete
+// que la trajo, la cuadrilla que la bajó y el repaso que hubo que hacerle son
+// plata de esa partida. Y ninguna de las tres se sabe el día que pasa.
+SG_MANUAL.gastos = { titulo: 'Gastos Directos', html:
+  '<p>Acá viven los <b>costos de servicio</b> de cada operación: el flete que trajo '
+  + 'la mercadería, la cuadrilla que la descargó, el repaso que hubo que hacerle y el '
+  + 'flete que la sacó. Todos tienen la misma forma: <b>primero se anotan y después se '
+  + 'valorizan</b>, porque el día que pasan todavía no se sabe cuánto van a costar.</p>'
+
+  + '<div class="ojo"><b>Un gasto sin valorizar frena la liquidación.</b> Si no se sabe '
+  + 'cuánto cobró la cuadrilla, no se le puede descontar al productor — y liquidar sin '
+  + 'contarlo es pagarle de más. Por eso el circuito no termina hasta que el importe '
+  + 'está puesto.</div>'
+
+  + '<h3>Las cuatro solapas</h3>'
+  + '<ul>'
+  + '<li><b>🚚 Fletes de salida</b> — lo que costó llevarle la mercadería al cliente.</li>'
+  + '<li><b>🚛 Fletes de entrada</b> — lo que costó traerla. Entra al costo de la partida.</li>'
+  + '<li><b>🤝 Control Cooperativa</b> — las descargas: qué cuadrilla bajó cada camión y '
+  + 'cuánto cobró.</li>'
+  + '<li><b>🔁 Repasos</b> — el trabajo de reacondicionar mercadería que llegó mal.</li>'
+  + '</ul>'
+
+  + '<h3>🤝 Control Cooperativa <span class="ver">V1003</span></h3>'
+  + '<p>Cada renglón es <b>una descarga</b>: nace sola cuando en la recepción se contesta '
+  + 'que la bajó una cuadrilla. Los estados son tres y se leen de un vistazo:</p>'
+  + '<ul>'
+  + '<li><b>⚠️ Sin cooperativa</b> — se descargó y no se anotó quién. El trabajo se hizo '
+  + 'y no está anotado: es lo primero que hay que resolver, con <b>Asignar</b>.</li>'
+  + '<li><b>⏳ A valorizar</b> — ya se sabe quién, falta cuánto.</li>'
+  + '<li><b>✅ Valorizada</b> — tiene importe y ya entró al costo de la partida.</li>'
+  + '</ul>'
+
+  + sgManCampo('💵 Valorizar',
+      'El botón de la fila. Se pone el <b>importe</b> de esa descarga, o un total a '
+      + 'repartir entre varias — se reparte por lo que se le cobra, bultos o pallets. '
+      + '<b>Alcanza con el importe:</b> la factura de la cooperativa puede llegar después.',
+      'Es el único momento en que la descarga <b>entra al costo del lote</b>. Hasta que no '
+      + 'se pone, la partida <b>no se puede liquidar</b> — el productor cobraría de más '
+      + 'porque no se le descontó la cuadrilla.', 'V1003')
+
+  + sgManCampo('Cobra por',
+      'Lo que se acordó con la cuadrilla: por <b>bulto</b> o por <b>pallet</b>. Sale de la '
+      + 'cooperativa y se elige al recibir.',
+      'Es la base con la que se reparte un total entre varias descargas. Con la unidad '
+      + 'equivocada, el mismo total da otro número por partida.', 'V1003')
+
+  + sgManCampo('Asignar',
+      'Para la descarga que entró sin decir qué cuadrilla la bajó.',
+      'Sin cooperativa no hay a quién ponerle el importe, así que el botón de valorizar '
+      + 'todavía no aparece: primero se dice de quién fue.', 'V1003')
+
+  + '<div class="ojo"><b>Una vez valorizada no se corrige desde acá.</b> El importe ya '
+  + 'entró al costo de la partida y puede haber una liquidación armada con él. Si salió '
+  + 'mal, avisá — se corrige a mano y se rehace el costo.</div>'
+
+  + '<h3>Qué cambió, y desde cuándo</h3>'
+  + '<ul>'
+  + '<li><span class="ver">V1003</span> El botón <b>💵 Valorizar</b> está en la fila. '
+  + 'Antes el aviso mandaba a una solapa vieja que ya no existía: la descarga quedaba '
+  + '«a valorizar» para siempre y la partida trabada, sin ningún lugar donde '
+  + 'destrabarla.</li>'
+  + '<li><span class="ver">V1003</span> Si el servidor no valoriza ninguna, la pantalla '
+  + 'lo dice en vez de cerrar el cuadro como si hubiera guardado.</li>'
+  + '</ul>'
+};
+
 SG_MANUAL.mejoras = { titulo: 'Mejoras', html:
   '<p>Acá se pide que algo se arregle. <b>Es el único canal</b>: lo que se manda '
   + 'por WhatsApp, se dice por teléfono o se comenta en el pasillo no queda '
@@ -22882,7 +22952,18 @@ function sgGdsValGuardar(){
   var items=SGGD.valItems.filter(function(it){return it.monto!==''&&Number(it.monto)>=0;}).map(function(it){return {id:it.id,monto:Number(it.monto)};});
   if(!items.length){ toast('Cargá al menos un monto','er'); return; }
   api('/api/sg/gastos-servicio/valorizar','POST',{proveedor_servicio_id:SGGD.valProv,items:items}).then(function(r){
-    if(r&&r.ok){ toast(r.data.valorizados+' operación(es) valorizada(s)','ok'); closeMB('sg-val-modal'); (SGGD.valReload||sgGdsLoad)(); }
+    // CERO NO ES UN ÉXITO. El servidor sólo pisa lo que está pendiente: si el
+    // gasto ya se valorizó, o lo anularon, o es de otro proveedor, contesta ok
+    // con cero cambios. Decir «0 operación(es) valorizada(s)» y cerrar el cuadro
+    // deja al operador convencido de que cargó la plata.
+    if(r&&r.ok&&Number(r.data&&r.data.valorizados)>0){
+      toast(r.data.valorizados+' operación(es) valorizada(s)','ok');
+      closeMB('sg-val-modal'); (SGGD.valReload||sgGdsLoad)();
+    }
+    else if(r&&r.ok){
+      toast('No se valorizó ninguna: puede que ya tuvieran importe o que las hayan anulado','er');
+      (SGGD.valReload||sgGdsLoad)();
+    }
     else toast((r&&r.error)||'Error','er');
   });
 }
@@ -23333,7 +23414,7 @@ function sgCcoopInit(){
 
 function sgCcoopEstado(e){
   SGCC.estado = e;
-  document.querySelectorAll('#sec-sg-control-coop .sgcc-est').forEach(function(x){
+  document.querySelectorAll('#sggd-pane-coop .sgcc-est').forEach(function(x){
     x.classList.toggle('on', (x.getAttribute('data-e') || '') === e);
   });
   // "Sin cooperativa" y "esta cooperativa" son incompatibles: juntas no devuelven
@@ -23429,17 +23510,59 @@ function sgCcoopRender(){
           + '<td>' + esc(f.unidad || '—') + '</td>'
           + '<td>' + estado + '</td>'
           + '<td style="text-align:right">' + (f.monto != null ? sgMoney(f.monto) : '—') + '</td>'
-          // La descarga sin cooperativa es el único caso accionable desde acá: el
-          // resto ya tiene dueño y se valoriza en Gastos Directos.
-          + '<td style="text-align:right">' + (!f.gasto_id
+          // ── LA PLATA SE PONE ACÁ ──────────────────────────────────
+          //
+          // Sin cooperativa hay que asignarla primero: sin proveedor no hay a
+          // quién ponerle el importe. Con cooperativa y sin valorizar, el botón
+          // abre el mismo cuadro que usan los fletes. Y si ya está valorizada
+          // se puede corregir: el importe lo pone el que lo carga a mano y una
+          // cifra mal tipeada se arrastra hasta la liquidación del productor.
+          + '<td style="text-align:right;white-space:nowrap">' + (!f.gasto_id
               ? '<button class="btn bb bs" onclick="sgCcoopAsignar(' + f.recepcion_id + ')">Asignar</button>'
-              : '') + '</td>'
+              : (f.estado === 'valorizado'
+                  // Ya tiene importe. Corregirlo no se ofrece porque el servidor
+                  // sólo pisa lo que está pendiente: el botón mandaría el pedido,
+                  // no cambiaría nada y contestaría que sí.
+                  ? ''
+                  : '<button class="btn bb bs" onclick="sgCcoopValorizar(' + f.gasto_id + ')">💵 Valorizar</button>'))
+            + '</td>'
           + '</tr>';
       }).join('')
     + '</tbody></table></div>'
-    + '<div style="font-size:11.5px;color:var(--mut);margin-top:10px">La plata se carga en '
-    + '<b>Gastos Directos → Cargas y Descargas</b>, que es donde se valoriza la cuenta de cada cooperativa. '
-    + 'Recién ahí la descarga entra al costo del lote.</div>';
+    + '<div style="font-size:11.5px;color:var(--mut);margin-top:10px">El importe se pone con '
+    + '<b>💵 Valorizar</b>, en la fila. Recién ahí la descarga entra al costo del lote — y hasta '
+    + 'que no entre, la partida no se puede liquidar.</div>';
+}
+
+// ── VALORIZAR UNA DESCARGA, DESDE SU FILA ────────────────────────────────
+//
+// Se reusa sgGdsValAbrir, el cuadro genérico que ya valoriza los fletes: sabe
+// prorratear y sabe guardar. Acá se le pasa UNA sola operación, que es lo que
+// se está mirando.
+//
+// El `prov` es la cooperativa: /gastos-servicio/valorizar agrupa por proveedor
+// del servicio, y en esta pantalla `cooperativa_id` ES ese proveedor (el backend
+// lo trae con ese alias). Mandar otra cosa haría que el gasto se guarde contra
+// un proveedor que no descargó nada.
+function sgCcoopValorizar(gastoId){
+  var f = (SGCC.filas || []).filter(function(x){ return String(x.gasto_id) === String(gastoId); })[0];
+  if (!f) { toast('Esa descarga ya no está en la lista', 'er'); sgCcoopLoad(); return; }
+  if (!f.cooperativa_id) { toast('Primero asignale la cooperativa', 'er'); return; }
+  sgGdsValAbrir({
+    prov: f.cooperativa_id,
+    nombre: f.cooperativa_nombre || '',
+    reload: sgCcoopLoad,
+    items: [{
+      id: f.gasto_id,
+      ref: f.partida || f.numero_recepcion || '',
+      sub: f.proveedor_nombre || '',
+      fecha: f.fecha,
+      // Lo que se le cobra: por bulto o por pallet, según lo que se acordó con
+      // la cuadrilla. Es la base con la que el cuadro prorratea un total.
+      base: f.cantidad,
+      unidadLbl: f.unidad || '',
+    }],
+  });
 }
 
 // Asignar la cooperativa de una descarga que entró sin saber de quién fue.

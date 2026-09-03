@@ -131,7 +131,7 @@ export function frenoParaLiquidar(db, ocId, facturaCuenta) {
   if (g.descarga > 0) {
     return 'La descarga de esta partida está cargada pero sin valorizar: no se sabe cuánto '
       + 'cobró la cuadrilla, así que no se le puede descontar al productor. Valorizala en '
-      + '«Gastos Directos → Cargas y Descargas» —alcanza con el importe, la factura puede '
+      + '«Gastos Directos → Control Cooperativa», con el botón «Valorizar» de la fila —alcanza con el importe, la factura puede '
       + 'llegar después— y volvé.';
   }
   if (g.flete > 0) {
