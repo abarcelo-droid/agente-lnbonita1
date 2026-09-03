@@ -158,32 +158,48 @@ test('y ninguna versión del manual es mayor que la del panel', () => {
 // fácil». El manual se lee entero la primera vez y después se CONSULTA: el que
 // vuelve ya sabe qué busca.
 
+// El cableado del buscador. Lo que HACE se prueba corriéndolo, con los manuales
+// de verdad y un DOM de mentira: test/buscador_manual.test.mjs.
+function buscadorSrc() {
+  const i = PANEL.indexOf('function sgManualBuscar(q){');
+  assert.ok(i > 0, 'no existe el buscador');
+  const j = PANEL.indexOf('\r\n}\r\n', i);
+  assert.ok(j > i);
+  return PANEL.slice(i, j);
+}
+
 test('el manual se puede buscar, y lo encontrado se resalta', () => {
   assert.match(PANEL, /id="sg-manual-q"/);
   assert.match(PANEL, /oninput="sgManualBuscar\(this\.value\)"/);
-  const i = PANEL.indexOf('function sgManualBuscar(q){');
-  assert.ok(i > 0, 'no existe el buscador');
-  const b = PANEL.slice(i, i + 2600);
-  // Se camina por los NODOS DE TEXTO. Reemplazar sobre el string de etiquetas
-  // parte un atributo al medio y rompe la página.
-  assert.match(b, /if \(h\.nodeType === 3\)/);
+  const b = buscadorSrc();
+  // Se toca el TEXTO, no el HTML: reemplazar sobre el string de etiquetas parte
+  // un atributo al medio y rompe la página.
   assert.match(b, /createElement\('mark'\)/);
+  assert.match(b, /nodeType === 3/);
   assert.ok(!/innerHTML\s*=\s*[^;]*replace\(/.test(b), 'está reemplazando sobre el HTML');
+});
+
+test('busca sobre el bloque entero, no nodo por nodo', () => {
+  // Los manuales están llenos de <b>: mirando cada nodo por separado, «acá entra»
+  // —que está en la primera línea de Ingresos— contestaba «no hay nada». Eran 179
+  // pares de palabras vecinas sólo en ese manual.
+  const b = buscadorSrc();
+  assert.match(b, /var corrido = '', rangos = \[\];/);
+  assert.match(b, /corrido\.indexOf\(t\)/);
+  assert.match(b, /rangos\.push\(\{ nodo: nodos\[k\], desde: corrido\.length/);
 });
 
 test('lo que no viene al caso se apaga, no se esconde', () => {
   // Esconderlo deja al que busca «flete» con tres renglones sueltos y sin saber en
   // qué parte del circuito está parado.
-  const i = PANEL.indexOf('function sgManualBuscar(q){');
-  const b = PANEL.slice(i, i + 2600);
-  assert.match(b, /classList\.toggle\('apagado', !el\.querySelector\('mark'\)/);
+  const b = buscadorSrc();
+  assert.match(b, /classList\.toggle\('apagado', !hubo/);
   assert.match(PANEL, /#sg-manual-modal \.man \.apagado\{opacity:/);
   assert.match(PANEL, /#sg-manual-modal \.man mark\{background:/);
 });
 
 test('busca sin tildes, y con una sola letra no pinta media pantalla', () => {
-  const i = PANEL.indexOf('function sgManualBuscar(q){');
-  const b = PANEL.slice(i, i + 2600);
+  const b = buscadorSrc();
   assert.match(b, /var t = sgNorm\(String\(q \|\| ''\)\.trim\(\)\);/);
   assert.match(b, /if \(t\.length < 2\)/);
   // Y dice cuántas encontró, o que no hay nada: una búsqueda sin respuesta que no
