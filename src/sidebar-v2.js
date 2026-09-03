@@ -36,7 +36,7 @@ const MAX_RECIENTES = 4;
 // SE ACTUALIZA A MANO, en el mismo cambio que se mergea. Sacarlo de git en el
 // arranque sonaba mejor, pero Railway despliega desde una copia sin historial:
 // diría siempre lo mismo y mentiría, que es peor que no estar.
-const VERSION = 'V997';
+const VERSION = 'V998';
 
 let SIDEBAR_DATA = { grupos: [], modulos: [] };
 let SOCIEDADES = [];                             // array de {id, nombre, funcion}
@@ -221,9 +221,12 @@ function buildSidebar(){
          y un módulo con permisos sería un buzón que hay que habilitar persona por
          persona — justo lo contrario de unificar el canal. -->
     <div class="sb2-fastlane mej">
+      <div class="sb2-group-sec">
+        <span class="sb2-label">💡 Mejoras</span>
+      </div>
       <a class="sb2-ni" data-sec="mejoras" href="#" title="Proponer una mejora sobre cualquier pantalla que uses">
-        <span class="sb2-ni-ico">💡</span>
-        <span class="sb2-ni-text">Mejoras</span>
+        <span class="sb2-ni-ico">✍️</span>
+        <span class="sb2-ni-text">Proponer una mejora</span>
       </a>
     </div>
 
