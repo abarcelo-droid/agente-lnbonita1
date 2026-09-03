@@ -500,3 +500,54 @@ test('el servidor ya los mandaba: no hacía falta tocarlo', () => {
   const b = SG.slice(i, SG.indexOf('\r\n});', i));
   assert.match(b, /SELECT r\.\*, o\.numero AS oc_numero/);
 });
+
+
+// ── 10 · Y AL INFORME SE PUEDE LLEGAR ──────────────────────────────────────
+//
+// El PDF ya salía completo, pero el único link vivía en la tabla «Entró sin
+// orden de compra», que filtra por oc_pendiente: aparecía sólo para la
+// EXCEPCIÓN —las recepciones sin orden— y nunca para las que sí la tienen, que
+// son casi todas.
+//
+// El informe se podía mirar antes de confirmar, con la vista previa. Después de
+// confirmar, que es cuando hace falta para mandarlo, no había forma de abrirlo.
+
+test('las recepciones observadas llevan el 📄 del informe', () => {
+  const i = PANEL.indexOf('function sgRecListPintar(){');
+  const b = PANEL.slice(i, PANEL.indexOf('\r\n}', i));
+  assert.match(b, /href="\/api\/sg\/recepciones\/' \+ x\.id \+ '\/calidad\.pdf"/);
+  assert.match(b, /target="_blank"/);
+  // Sólo las observadas: en las demás el informe no dice nada.
+  assert.match(b, /x\.observada\s*\n?\s*\?/);
+});
+
+test('el link va en la celda de la partida, no en una columna nueva', () => {
+  // Siete columnas ya son las que entran sin barra lateral. Una octava obliga a
+  // arrastrar la tabla para leer justamente el número que importa.
+  const i = PANEL.indexOf('function sgRecListPintar(){');
+  // Sólo la fila de datos: el renglón de «todavía no se recibió nada» trae su
+  // propio <td colspan> y contarlo daría ocho.
+  const fila = PANEL.slice(i, PANEL.indexOf(".join('')", i));
+  assert.equal((fila.match(/<td/g) || []).length, 7, 'la fila dejó de tener siete celdas');
+  assert.match(PANEL.slice(i, i + 2600), /colspan="7"/);
+  // Y la cabecera igual. <thead> también empieza con «th»: se pide el espacio.
+  const j = PANEL.indexOf('id="sg-tb-reclist"');
+  const cab = PANEL.slice(Math.max(0, j - 1200), j);
+  assert.equal((cab.match(/<th[\s>]/g) || []).length, 7, 'la cabecera no tiene siete columnas');
+});
+
+test('y el manual dice dónde está, que si no da igual que no exista', () => {
+  const i = PANEL.indexOf('SG_MANUAL.ingresos = {');
+  const m = PANEL.slice(i, PANEL.indexOf('\r\n};', i));
+  const plano = m.replace(/'\s*\+\s*'/g, '').replace(/\s+/g, ' ');
+  assert.ok(plano.includes('Después queda a mano'),
+    'el manual no cuenta que el informe se abre desde Recepciones');
+  assert.ok(plano.includes('al lado de la partida que abre el mismo informe'),
+    'no dice cuál es el botón');
+});
+
+test('la ruta que abre existe y no pide ser admin', () => {
+  // El que recibe la mercadería es el que tiene que poder mandar el reclamo.
+  const SG = fs.readFileSync(path.join(RAIZ, 'src/rutas/sg.js'), 'utf8');
+  assert.match(SG, /router\.get\('\/recepciones\/:id\/calidad\.pdf', requireAuth,/);
+});
