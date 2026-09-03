@@ -172,8 +172,15 @@ test('la diferencia va en el MISMO asiento, con ámbito gestión', () => {
   // asiento con lo fiscal y lo de gestión adentro.
   const g = trozo(SG, 'function lineasGestionFactura(lineasAsiento, fac) {', SALTO + '}');
   assert.match(g, /ambito: 'gestion', motivo/);
+  // Las fiscales y las de gestión salen en la MISMA lista de líneas. Esto antes
+  // clavaba el renglón `base.lineas.concat(gestion` —la forma, no la conducta— y
+  // por eso no dijo nada cuando esa misma línea dejaba las fiscales sin debe ni
+  // haber. Ahora se mira lo que devuelve: una sola lista, con los dos ámbitos.
   const b = trozo(SG, 'function asientoDeFacturaGasto(db, b, valorizado) {', SALTO + '}');
-  assert.match(b, /lineas: base\.lineas\.concat\(gestion/);
+  assert.match(b, /const todas = fiscales\.concat\(gestion/);
+  assert.match(b, /lineas: todas/);
+  assert.ok(!/ambito: 'gestion'/.test(b),
+    'el ámbito de gestión se pone acá y no en lineasGestionFactura, que es la única que sabe por qué');
 });
 
 test('sin motivo no se guarda una diferencia', () => {
@@ -200,7 +207,11 @@ test('no hay factura sin su asiento: todo en una transacción', () => {
   assert.match(tx, /INSERT INTO sg_facturas_gasto/);
   assert.match(tx, /INSERT INTO sg_factura_gasto_items/);
   assert.match(tx, /crearAsiento\(db, \{/);
-  assert.match(tx, /if \(!as\.balancea\) throw new Error/);
+  // Y no se graba si no balancea. Se mira POR ÁMBITO: el `balancea` general no
+  // ve las líneas de gestión, así que lo fiscal podía estar descuadrado y lo de
+  // gestión compensarlo al revés.
+  assert.match(tx, /Object\.entries\(as\.totales/);
+  assert.match(tx, /no balancea: revisá el asiento modelo/);
 });
 
 test('y si no hay asiento modelo, la factura entra igual y lo dice', () => {
@@ -254,7 +265,11 @@ test('las listas de motivos del panel coinciden con las del servidor', () => {
 
 test('el botón está en Control Cooperativa y el modal al nivel de arriba', () => {
   const i = PANEL.indexOf('id="sggd-pane-coop"');
-  assert.match(PANEL.slice(i, i + 800), /onclick="sgFgAbrir\(\)">🧾 Ingresar factura/);
+  // Hasta la barra de filtros: el botón va en la barra de acciones de la solapa,
+  // arriba de todo. La ventana era de 800 caracteres y la corrió el bloque del
+  // asiento modelo, que ahora entra primero.
+  const barra = PANEL.slice(i, PANEL.indexOf('id="sgcc-desde"', i));
+  assert.match(barra, /onclick="sgFgAbrir\(\)">🧾 Ingresar factura/);
   // El modal NO puede vivir adentro de una .sec: ahí sólo se abriría desde esa
   // pantalla.
   const m = PANEL.indexOf('id="sg-fg-modal"');

@@ -3700,6 +3700,29 @@ router.post('/liquidacion/preview-asiento', requireAuth, (req, res) => {
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
+// ── ¿ESTE MODELO SIRVE PARA CONTABILIZAR? ─────────────────────────────────
+//
+// Se pregunta ANTES, en la pantalla donde se elige el modelo, y no cuando ya
+// está la factura cargada y el operador esperando. Un modelo a medias no da
+// error: da un asiento contablemente falso que se descubre al cierre.
+//
+// `queEsElHaber` cambia según el circuito —en una compra el haber es el
+// proveedor, en una liquidación es lo que se le queda debiendo al productor—
+// pero la regla es la misma, así que vive en un solo lugar.
+function queLeFaltaAlModelo(lineas, queEsElHaber) {
+  const ls = lineas || [];
+  const faltan = [];
+  if (!ls.length) faltan.push('no tiene ninguna línea');
+  if (!ls.some((l) => l.tipo_linea === 'proveedores')) {
+    faltan.push('no tiene la línea de Proveedores, que es ' + queEsElHaber);
+  }
+  if (!ls.some((l) => l.lado === 'debe')) faltan.push('no tiene ninguna línea en el debe');
+  if (!ls.some((l) => l.lado === 'haber')) faltan.push('no tiene ninguna línea en el haber');
+  const sinCuenta = ls.filter((l) => !l.cuenta_codigo).length;
+  if (sinCuenta) faltan.push(sinCuenta + ' línea(s) apuntan a una cuenta que ya no existe');
+  return faltan;
+}
+
 router.get('/liquidacion/modelo', requireAuth, (req, res) => {
   const db = getDb();
   try {
@@ -3716,17 +3739,7 @@ router.get('/liquidacion/modelo', requireAuth, (req, res) => {
       LEFT JOIN sg_cuentas c ON c.id = l.cuenta_id
       WHERE l.modelo_id=? ORDER BY l.orden, l.id`).all(modeloId);
 
-    // Qué le falta para poder contabilizar. Se avisa acá y no cuando ya está la
-    // liquidación cargada y el proveedor esperando.
-    const faltan = [];
-    if (!m.lineas.length) faltan.push('no tiene ninguna línea');
-    if (!m.lineas.some((l) => l.tipo_linea === 'proveedores')) {
-      faltan.push('no tiene la línea de Proveedores, que es lo que se le queda debiendo al productor');
-    }
-    if (!m.lineas.some((l) => l.lado === 'debe')) faltan.push('no tiene ninguna línea en el debe');
-    if (!m.lineas.some((l) => l.lado === 'haber')) faltan.push('no tiene ninguna línea en el haber');
-    const sinCuenta = m.lineas.filter((l) => !l.cuenta_codigo).length;
-    if (sinCuenta) faltan.push(sinCuenta + ' línea(s) apuntan a una cuenta que ya no existe');
+    const faltan = queLeFaltaAlModelo(m.lineas, 'lo que se le queda debiendo al productor');
 
     res.json({ ok: true, data: { modelo: m, faltan } });
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
@@ -4372,17 +4385,7 @@ router.get('/factura-mercaderia/modelo', requireAuth, (req, res) => {
     // el asiento de la pantalla no sería el que se graba.
     m.lineas = lineasModeloFactura(db) || [];
 
-    // Qué le falta al modelo para poder contabilizar una compra. Se avisa acá y
-    // no cuando ya está la factura cargada y el operador esperando.
-    const faltan = [];
-    if (!m.lineas.length) faltan.push('no tiene ninguna línea');
-    if (!m.lineas.some((l) => l.tipo_linea === 'proveedores')) {
-      faltan.push('no tiene la línea de Proveedores, que es el haber de la compra');
-    }
-    if (!m.lineas.some((l) => l.lado === 'debe')) faltan.push('no tiene ninguna línea en el debe');
-    if (!m.lineas.some((l) => l.lado === 'haber')) faltan.push('no tiene ninguna línea en el haber');
-    const sinCuenta = m.lineas.filter((l) => !l.cuenta_codigo).length;
-    if (sinCuenta) faltan.push(sinCuenta + ' línea(s) apuntan a una cuenta que ya no existe');
+    const faltan = queLeFaltaAlModelo(m.lineas, 'el haber de la compra');
 
     res.json({ ok: true, data: { modelo: m, faltan } });
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
@@ -10955,16 +10958,11 @@ router.get('/flete/modelo', requireAuth, (req, res) => {
     const m = db.prepare('SELECT * FROM sg_asientos_modelo WHERE id=? AND activo=1').get(modeloId);
     if (!m) return res.json({ ok: true, data: { modelo: null, id_perdido: modeloId } });
     m.lineas = lineasModeloDe(db, CLAVE_MODELO_FLETE) || [];
-    // Qué le falta para poder contabilizar. Se avisa acá y no cuando ya está la
-    // factura cargada y el operador esperando.
-    const faltan = [];
-    if (!m.lineas.length) faltan.push('no tiene ninguna línea');
-    if (!m.lineas.some((l) => l.tipo_linea === 'proveedores')) {
-      faltan.push('no tiene la línea de Proveedores, que es lo que se le debe al fletero');
-    }
-    if (!m.lineas.some((l) => l.lado === 'debe')) faltan.push('no tiene ninguna línea en el debe');
-    const sinCuenta = m.lineas.filter((l) => !l.cuenta_codigo).length;
-    if (sinCuenta) faltan.push(sinCuenta + ' línea(s) apuntan a una cuenta que ya no existe');
+    // Esta copia había perdido un chequeo por el camino: no miraba si el modelo
+    // tenía alguna línea en el HABER. Un modelo todo al debe pasaba como bueno y
+    // el asiento del flete no podía balancear nunca. Es lo que hacen las copias:
+    // se corrige una y las otras quedan.
+    const faltan = queLeFaltaAlModelo(m.lineas, 'lo que se le debe al fletero');
     res.json({ ok: true, data: { modelo: m, faltan } });
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
@@ -11049,14 +11047,32 @@ const CLAVE_MODELO_GASTO = 'asiento_modelo_descarga';
 
 // El modelo con el que se contabiliza. Se parametriza una vez, como el del flete
 // y el de la factura de mercadería.
+//
+// Pablo, 3/9/2026: «necesito un selector de rubros... ponéme con qué asiento
+// modelo lo hacemos y lo seleccionamos ahí». Devuelve lo mismo que el de la
+// factura de mercadería —el modelo con sus líneas, qué le falta, y la lista para
+// elegir— para que la pantalla de Cooperativa muestre las CUENTAS y no un
+// nombre suelto: el nombre no dice contra qué se imputa.
 router.get('/gastos-factura/modelo', requireAuth, (req, res) => {
   const db = getDb();
   try {
-    const cfg = db.prepare('SELECT valor FROM sg_config WHERE clave=?').get(CLAVE_MODELO_GASTO);
-    const id = cfg && cfg.valor ? Number(cfg.valor) : null;
     const modelos = db.prepare('SELECT id, nombre FROM sg_asientos_modelo WHERE activo=1 ORDER BY nombre').all();
-    const lineas = id ? (lineasModeloDe(db, CLAVE_MODELO_GASTO) || []) : [];
-    res.json({ ok: true, data: { modelo_id: id, modelos, lineas } });
+    const cfg = db.prepare('SELECT valor FROM sg_config WHERE clave=?').get(CLAVE_MODELO_GASTO);
+    const modeloId = cfg && cfg.valor ? Number(cfg.valor) : null;
+    if (!modeloId) return res.json({ ok: true, data: { modelo: null, modelos } });
+
+    const m = db.prepare('SELECT * FROM sg_asientos_modelo WHERE id=? AND activo=1').get(modeloId);
+    // Elegido y después dado de baja: hay que decirlo. Devolver null a secas se
+    // lee como «nunca se configuró», y son dos problemas distintos.
+    if (!m) return res.json({ ok: true, data: { modelo: null, id_perdido: modeloId, modelos } });
+
+    // Las líneas EFECTIVAS: las del modelo MÁS el IVA crédito fiscal y las
+    // percepciones que agrega la configuración impositiva global. Es lo que se
+    // va a grabar, así que es lo que tiene que ver la pantalla.
+    m.lineas = lineasModeloDe(db, CLAVE_MODELO_GASTO) || [];
+    const faltan = queLeFaltaAlModelo(m.lineas, 'lo que se le queda debiendo a la cooperativa');
+
+    res.json({ ok: true, data: { modelo: m, faltan, modelos } });
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
@@ -11140,11 +11156,42 @@ function asientoDeFacturaGasto(db, b, valorizado) {
   // balanceando por su cuenta. Es la misma función que usa la factura de
   // mercadería — si fueran dos, un día darían distinto.
   const gestion = dif ? lineasGestionFactura(lineas, { dif_gestion: dif, dif_motivo: b.dif_motivo }) : [];
-  return Object.assign(base, { montos: m, dif_gestion: dif,
-    lineas: base.lineas.concat(gestion.map((g) => {
-      const c = lineas.find((l) => l.cuenta_id === g.cuenta_id) || {};
-      return Object.assign({}, g, { cuenta_codigo: c.cuenta_codigo, cuenta_nombre: c.cuenta_nombre });
-    })) });
+
+  // ── EN debe/haber, Y NO EN lado/monto ────────────────────────────────
+  //
+  // armarAsientoFactura devuelve {lado, monto}; crearAsiento lee {debe, haber},
+  // y el cuadro de la pantalla también. Los otros tres circuitos traducen en el
+  // llamador; éste pasaba las líneas crudas, así que las fiscales llegaban con
+  // debe y haber en undefined → 0.
+  //
+  // No se veía: `balancea` lo calcula armarAsientoFactura sobre SUS montos, así
+  // que decía que sí. Recién frenaba crearAsiento con «la parte fiscal del
+  // asiento está en cero», y del otro lado la pantalla mostraba el asiento
+  // entero con guiones. Se traduce ACÁ, una vez, y no en cada llamador.
+  const fiscales = base.lineas.map((l) => Object.assign({}, l, {
+    debe:  l.lado === 'debe'  ? l.monto : 0,
+    haber: l.lado === 'haber' ? l.monto : 0,
+    ambito: 'fiscal',
+  }));
+  const todas = fiscales.concat(gestion.map((g) => {
+    const c = lineas.find((l) => l.cuenta_id === g.cuenta_id) || {};
+    return Object.assign({}, g, { cuenta_codigo: c.cuenta_codigo, cuenta_nombre: c.cuenta_nombre });
+  }));
+
+  // ── Y CADA ÁMBITO CON SU PROPIO BALANCE ──────────────────────────────
+  // Que el total cierre no alcanza: lo fiscal puede estar descuadrado y lo de
+  // gestión compensarlo al revés. Es el mismo cuadro que muestran las ventas y
+  // la factura de mercadería, y lo que después vuelve a validar crearAsiento.
+  const totales = {};
+  for (const l of todas) {
+    const t = (totales[l.ambito] = totales[l.ambito] || { debe: 0, haber: 0 });
+    t.debe = r2(t.debe + (l.debe || 0));
+    t.haber = r2(t.haber + (l.haber || 0));
+  }
+  for (const t of Object.values(totales)) t.balancea = Math.abs(t.debe - t.haber) < 0.01;
+
+  return Object.assign(base, { montos: m, dif_gestion: dif, lineas: todas, totales,
+    balancea: Object.values(totales).every((t) => t.balancea) });
 }
 
 router.post('/gastos-factura/asiento-preview', requireAuth, express.json(), (req, res) => {
@@ -11233,7 +11280,14 @@ router.post('/gastos-factura', requireAuth, express.json(), (req, res) => {
       // queda una deuda que existe para el proveedor y no para la contabilidad.
       const as = asientoDeFacturaGasto(db, Object.assign({}, b, { total: m.total }), valorizado);
       if (!as.sin_modelo) {
-        if (!as.balancea) throw new Error('El asiento no balancea: revisá el asiento modelo.');
+        // Por ÁMBITO, que es como lo valida crearAsiento. El `balancea` de
+      // armarAsientoFactura no ve las líneas de gestión.
+      for (const [amb, t] of Object.entries(as.totales || {})) {
+        if (!t.balancea) {
+          throw new Error('La parte ' + (amb === 'gestion' ? 'de gestión' : 'fiscal')
+            + ' del asiento no balancea: revisá el asiento modelo.');
+        }
+      }
         const r = crearAsiento(db, {
           fecha: val(b.fecha_emision) || null,
           descripcion: 'Factura de servicio ' + numero,
