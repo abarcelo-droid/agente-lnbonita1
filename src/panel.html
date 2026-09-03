@@ -215,6 +215,10 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
     <div id="sb-clima-alert" style="display:none;font-size:14px" title="Hay alertas activas">⚠️</div>
   </div>
 
+  <!-- MEJORAS — no pertenece a ningún grupo: es el buzón de todo el panel.
+       Este renglón es el PUENTE de navegación (ver sidebar-v2.js → navigateTo). -->
+  <div class="ni" data-sec="mejoras"><span class="dot da"></span>💡 Mejoras</div>
+
   <div class="ng" style="color:rgba(74,222,128,.5)">Producción Agrícola</div>
   <div class="ni" data-sec="pa-dashboard"><span class="dot da"></span>Inicio</div>
 
@@ -463,6 +467,48 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
 </style>
 
 <!-- ==================== DASHBOARD ABASTO ==================== -->
+<!-- ══════════ 💡 MEJORAS ══════════════════════════════════════════════════
+     Pablo, 2/9/2026: «cada usuario puede proponer ahí algo para mejorar en cada
+     uno de los menús con los que le toca interactuar. Es para UNIFICAR CANALES
+     DE COMUNICACIÓN. Sólo podrá proponer cosas sobre los menús en los que tiene
+     acceso. Los administradores vamos a poder asignarles prioridad del 1 al 5
+     para que vean en qué estado están sus pedidos, y cuando estén resueltos
+     marcarlos como resueltos».
+
+     Lo que hay que arreglar llegaba por WhatsApp, por teléfono y de palabra en
+     el pasillo: el que lo pedía no sabía si alguien lo había anotado. Una sola
+     puerta, con el estado a la vista. -->
+<div class="sec sg-mod" id="sec-mejoras">
+  <div class="ph"><div><div class="ph-t">💡 Mejoras</div>
+    <div class="ph-s">Lo que habría que mejorar en cada pantalla. Se propone acá y se sigue acá — no por WhatsApp.</div></div>
+    <div style="display:flex;gap:8px;align-items:center">
+      <button class="btn bo bs" onclick="sgManualAbrir('mejoras')">❓ ¿Cómo se usa?</button>
+      <button class="btn bb" onclick="mejAbrir()">＋ Proponer una mejora</button>
+    </div></div>
+
+  <div style="display:inline-flex;gap:2px;background:var(--bg);border:1px solid var(--bor);border-radius:8px;padding:3px;margin-bottom:14px;flex-wrap:wrap">
+    <div class="sgc-subtab on" id="mej-tb-abiertas" onclick="mejTab('abiertas')">⏳ Pendientes <span id="mej-n-abiertas"></span></div>
+    <div class="sgc-subtab" id="mej-tb-resueltas" onclick="mejTab('resueltas')">✅ Resueltas <span id="mej-n-resueltas"></span></div>
+  </div>
+
+  <div id="mej-cartel" style="font-size:12px;color:var(--mut);margin-bottom:10px"></div>
+
+  <!-- NADA DE BARRAS LATERALES: anchos por columna y lo largo parte o se trunca. -->
+  <div class="ab-table-wrap" style="overflow-x:hidden !important;max-width:98vw">
+    <table class="pa-tbl" style="table-layout:fixed;width:100%">
+      <thead><tr>
+        <th style="width:16%">Pantalla</th>
+        <th style="width:38%">Qué habría que mejorar</th>
+        <th style="width:13%">Quién</th>
+        <th style="width:9%;text-align:center">Foto</th>
+        <th style="width:11%;text-align:center">Prioridad</th>
+        <th style="width:13%;text-align:right">Estado</th>
+      </tr></thead>
+      <tbody id="mej-tb"><tr><td colspan="6" class="emp">Cargando…</td></tr></tbody>
+    </table>
+  </div>
+</div>
+
 <div class="sec" id="sec-ab-dashboard">
   <div class="ab-section-header">
     <div><div class="ab-section-title">📊 Abasto — Dashboard</div><div style="font-size:13px;color:var(--mut);margin-top:3px">Resumen operativo de stock y movimientos</div></div>
@@ -7125,6 +7171,66 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
         <div style="text-align:right;margin-top:14px">
           <button class="btn bo" onclick="closeMB('sg-merma-modal')">Cancelar</button>
           <button class="btn bd" id="sg-merma-btn" onclick="sgMermaGuardar()">Registrar la merma</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ══ 💡 PROPONER UNA MEJORA ═══════════════════════════════════════════════
+     El selector sólo trae las pantallas que ESTA persona usa: proponer sobre una
+     que no conoce no es un aporte, es ruido. La lista sale del servidor, de la
+     misma regla que arma el menú lateral.
+
+     Va al nivel de arriba, con los demás modales. -->
+<div class="ab-modal-overlay sg-mod" id="mej-modal">
+  <div class="ab-modal" style="width:min(640px,96vw);max-width:96vw;max-height:90vh;overflow-y:auto;overflow-x:hidden">
+    <div class="mhd"><div class="mht">💡 Proponer una mejora</div>
+      <button class="mcl" onclick="closeMB('mej-modal')">×</button></div>
+    <div class="mbd">
+      <div class="sgr-card">
+        <div class="fl"><label>¿Sobre qué pantalla? <span style="color:var(--err)">*</span></label>
+          <input type="text" id="mej-q" placeholder="🔎 buscar la pantalla" oninput="mejOpts(this.value)" autocomplete="off" style="margin-bottom:4px">
+          <select id="mej-modulo"></select>
+          <div style="font-size:11.5px;color:var(--mut);margin-top:4px">Sólo aparecen las pantallas que usás.</div></div>
+
+        <div class="fl ff" style="margin-top:12px"><label>¿Qué habría que mejorar? <span style="color:var(--err)">*</span></label>
+          <textarea id="mej-texto" rows="5" maxlength="2000" oninput="mejContar()"
+            placeholder="Contá qué te pasa hoy y qué te gustaría que pasara. Cuanto más concreto, más rápido se resuelve: «al cargar el remito tengo que escribir el cliente entero, estaría bueno que lo busque como en pedidos»."></textarea>
+          <div id="mej-cuenta" style="font-size:11px;color:var(--mut);text-align:right;margin-top:3px"></div></div>
+
+        <!-- LA FOTO ES OPCIONAL. Una captura de la pantalla con el problema
+             señalado explica en un segundo lo que en texto son tres párrafos. -->
+        <div class="fl" style="margin-top:8px"><label>Foto <span style="font-weight:400;color:var(--mut);font-size:11px">opcional — una captura de la pantalla ayuda más que tres párrafos</span></label>
+          <input type="file" id="mej-foto" accept="image/*"></div>
+
+        <div style="text-align:right;margin-top:16px">
+          <button class="btn bo" onclick="closeMB('mej-modal')">Cancelar</button>
+          <button class="btn bb" id="mej-btn" onclick="mejGuardar()">Proponerla</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ══ ✅ MARCAR UNA MEJORA COMO RESUELTA (administrador) ════════════════════
+     La nota no es adorno: «resuelto» sin decir cómo deja al que lo pidió mirando
+     una pantalla igual a la de ayer, sin saber si se hizo otra cosa o si se
+     entendió mal el pedido. -->
+<div class="ab-modal-overlay sg-mod" id="mej-res-modal">
+  <div class="ab-modal" style="width:min(560px,96vw);max-width:96vw">
+    <div class="mhd"><div class="mht">✅ Marcar como resuelta</div>
+      <button class="mcl" onclick="closeMB('mej-res-modal')">×</button></div>
+    <div class="mbd">
+      <div class="sgr-card">
+        <div id="mej-res-que" style="font-size:12.5px;margin-bottom:10px"></div>
+        <div class="fl ff"><label>¿Cómo se resolvió?</label>
+          <textarea id="mej-res-nota" rows="3" maxlength="500"
+            placeholder="ej. se agregó el buscador de clientes en el remito — V998"></textarea>
+          <div style="font-size:11.5px;color:var(--mut);margin-top:4px">Lo lee quien la propuso. Sin esto ve la pantalla igual que ayer y no sabe qué cambió.</div></div>
+        <div style="text-align:right;margin-top:14px">
+          <button class="btn bo" onclick="closeMB('mej-res-modal')">Cancelar</button>
+          <button class="btn bb" id="mej-res-btn" onclick="mejResolverOk()">Marcar resuelta</button>
         </div>
       </div>
     </div>
@@ -20721,6 +20827,258 @@ function sgMermaGuardar(){
 }
 
 // ══════════════════════════════════════════════════════════════════════════
+// 💡 MEJORAS — UNA SOLA PUERTA PARA PEDIR QUE ALGO SE ARREGLE
+// ══════════════════════════════════════════════════════════════════════════
+//
+// Pablo, 2/9/2026: «cada usuario puede proponer ahí algo para mejorar en cada uno
+// de los menús con los que le toca interactuar. Es para UNIFICAR CANALES DE
+// COMUNICACIÓN».
+//
+// El valor no es la lista: es que haya UN lugar. Lo que hay que arreglar llegaba
+// por WhatsApp, por teléfono y de palabra en el pasillo — el que lo pedía no
+// sabía si alguien lo anotó, el que lo arregla no sabía cuál de los cuarenta era
+// urgente, y nadie podía decir «esto ya está».
+var MEJ = { filas: [], modulos: [], tab: 'abiertas', admin: false, resolviendo: null };
+
+function mejLoad(){
+  var tb = eid('mej-tb'); if(!tb) return;
+  tb.innerHTML = '<tr><td colspan="6" class="emp">Cargando…</td></tr>';
+  api('/api/mejoras').then(function(r){
+    MEJ.filas = (r && r.ok) ? (r.data || []) : [];
+    MEJ.admin = !!(r && r.soy_admin);
+    mejPintar();
+  });
+}
+
+function mejTab(cual){
+  MEJ.tab = cual;
+  eid('mej-tb-abiertas').classList.toggle('on', cual === 'abiertas');
+  eid('mej-tb-resueltas').classList.toggle('on', cual === 'resueltas');
+  mejPintar();
+}
+
+// Del 1 al 5, y el 1 es lo más urgente. Se dibuja con el número al lado del
+// color: sólo con color, el que no distingue rojo de naranja no lee nada.
+function mejPrioTxt(p){
+  var t = { 1:'1 · urgente', 2:'2 · alta', 3:'3 · media', 4:'4 · baja', 5:'5 · algún día' };
+  return t[p] || '';
+}
+function mejPrioColor(p){
+  return p === 1 ? '#dc2626' : p === 2 ? '#ea580c' : p === 3 ? '#ca8a04'
+       : p === 4 ? '#2563eb' : p === 5 ? '#64748b' : 'var(--mut)';
+}
+
+function mejPintar(){
+  var tb = eid('mej-tb'); if(!tb) return;
+  var resueltas = MEJ.tab === 'resueltas';
+  var filas = MEJ.filas.filter(function(x){ return (x.estado === 'resuelta') === resueltas; });
+
+  var nA = MEJ.filas.filter(function(x){ return x.estado !== 'resuelta'; }).length;
+  var nR = MEJ.filas.length - nA;
+  eid('mej-n-abiertas').textContent = nA ? ('· ' + nA) : '';
+  eid('mej-n-resueltas').textContent = nR ? ('· ' + nR) : '';
+
+  var cartel = eid('mej-cartel');
+  if (cartel) cartel.innerHTML = MEJ.admin
+    ? 'Ves las de todos. Poné prioridad del <b>1 al 5</b> —el 1 es lo más urgente— y marcá resuelto cuando esté.'
+    : 'Acá seguís lo que propusiste. La prioridad y el «resuelta» los pone un administrador.';
+
+  if (!filas.length){
+    tb.innerHTML = '<tr><td colspan="6" class="emp">'
+      + (resueltas ? 'Todavía no hay ninguna resuelta.'
+                   : 'No hay nada pendiente. Si algo te complica el día, proponelo.')
+      + '</td></tr>';
+    return;
+  }
+
+  tb.innerHTML = filas.map(function(x){
+    // El label del menú puede haber cambiado desde que se propuso: manda el de
+    // hoy, y si el módulo ya no existe queda el que se guardó al proponerla.
+    var pantalla = x.modulo_actual || x.modulo_label || x.modulo;
+    return '<tr>'
+      + '<td style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="' + esc(pantalla) + '">'
+        + escH(pantalla) + '</td>'
+      + '<td style="white-space:pre-wrap;word-break:break-word">' + escH(x.texto || '')
+        + (x.resuelta_nota
+            ? ('<div style="margin-top:5px;font-size:11.5px;color:#166534">✅ ' + escH(x.resuelta_nota) + '</div>')
+            : '')
+        + '</td>'
+      + '<td style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + escH(x.usuario_nombre || '—')
+        + '<div style="font-size:10.5px;color:var(--mut)">' + esc(String(x.creado_en || '').slice(0,10)) + '</div></td>'
+      + '<td style="text-align:center">'
+        + (x.foto_ruta
+            ? ('<a href="' + esc(x.foto_ruta) + '" target="_blank" title="' + esc(x.foto_nombre || 'foto') + '">📷</a>')
+            : '<span style="color:var(--sub)">—</span>')
+        + '</td>'
+      + '<td style="text-align:center">' + mejCeldaPrioridad(x) + '</td>'
+      + '<td style="text-align:right;white-space:nowrap">' + mejCeldaEstado(x) + '</td>'
+      + '</tr>';
+  }).join('');
+}
+
+// El administrador la ELIGE; el resto la LEE. Ofrecerle el selector a quien va a
+// recibir un 403 es hacerle creer que rompió algo.
+function mejCeldaPrioridad(x){
+  if (!MEJ.admin){
+    return x.prioridad
+      ? ('<span style="font-weight:700;color:' + mejPrioColor(x.prioridad) + '">' + mejPrioTxt(x.prioridad) + '</span>')
+      : '<span style="font-size:11px;color:var(--mut)">sin prioridad</span>';
+  }
+  var opts = ['<option value="">— sin prioridad —</option>'];
+  for (var p = 1; p <= 5; p++){
+    opts.push('<option value="' + p + '"' + (Number(x.prioridad) === p ? ' selected' : '') + '>'
+      + mejPrioTxt(p) + '</option>');
+  }
+  return '<select onchange="mejPrioridad(' + x.id + ',this.value)" style="width:100%;font-size:11.5px">'
+    + opts.join('') + '</select>';
+}
+
+function mejCeldaEstado(x){
+  if (x.estado === 'resuelta'){
+    var cuando = String(x.resuelta_en || '').slice(0,10);
+    return '<span style="color:#166534;font-weight:600">✅ Resuelta</span>'
+      + (cuando ? ('<div style="font-size:10.5px;color:var(--mut)">' + esc(cuando) + '</div>') : '')
+      + (MEJ.admin ? ('<div><button class="btn bo bs" style="margin-top:4px" onclick="mejReabrir(' + x.id + ')">Reabrir</button></div>') : '');
+  }
+  if (MEJ.admin){
+    return '<button class="btn bb bs" onclick="mejResolver(' + x.id + ')">Marcar resuelta</button>';
+  }
+  // Y el que la escribió la puede borrar MIENTRAS NADIE LA MIRÓ. Después ya es
+  // parte de una conversación: borrarla sería borrarle el trabajo a otro.
+  return '<span style="color:var(--mut)">⏳ Pendiente</span>'
+    + (x.prioridad == null
+        ? ('<div><button class="btn bo bs" style="margin-top:4px" onclick="mejBorrar(' + x.id + ')">Borrar</button></div>')
+        : '');
+}
+
+// ── PROPONER ──────────────────────────────────────────────────────────────
+
+function mejAbrir(){
+  eid('mej-texto').value = ''; eid('mej-foto').value = ''; eid('mej-q').value = '';
+  mejContar();
+  eid('mej-modal').classList.add('on');
+  // Las pantallas salen del SERVIDOR, de la misma regla que arma el menú: si se
+  // armara con lo que hay en pantalla, un menú desactualizado dejaría proponer
+  // sobre algo a lo que ya no accede — y el servidor lo rebotaría después.
+  api('/api/mejoras/modulos').then(function(r){
+    MEJ.modulos = (r && r.ok) ? (r.data || []) : [];
+    mejOpts('');
+  });
+}
+
+function mejOpts(q){
+  var t = sgNorm(String(q || '').trim());
+  var l = MEJ.modulos.filter(function(m){
+    if (!t) return true;
+    return sgNorm((m.label || '') + ' ' + (m.grupo || '')).indexOf(t) >= 0;
+  });
+  var sel = eid('mej-modulo'); if(!sel) return;
+  if (!l.length){
+    sel.innerHTML = '<option value="">— ninguna coincide —</option>';
+    return;
+  }
+  // Agrupadas como en el menú: con noventa pantallas en una lista plana no se
+  // encuentra ninguna.
+  var porGrupo = {};
+  l.forEach(function(m){ (porGrupo[m.grupo] = porGrupo[m.grupo] || []).push(m); });
+  var html = '<option value="">— Elegí la pantalla —</option>';
+  Object.keys(porGrupo).forEach(function(g){
+    html += '<optgroup label="' + escH(g) + '">'
+      + porGrupo[g].map(function(m){
+          return '<option value="' + esc(m.modulo) + '">' + escH(m.label || m.modulo) + '</option>';
+        }).join('')
+      + '</optgroup>';
+  });
+  sel.innerHTML = html;
+}
+
+function mejContar(){
+  var n = String((eid('mej-texto') || {}).value || '').length;
+  var e = eid('mej-cuenta');
+  if (e) e.textContent = n ? (n + ' / 2.000') : '';
+}
+
+function mejGuardar(){
+  var modulo = eid('mej-modulo').value;
+  if (!modulo){ toast('Elegí sobre qué pantalla es', 'er'); return; }
+  var texto = String(eid('mej-texto').value || '').trim();
+  if (!texto){ toast('Contá qué habría que mejorar', 'er'); return; }
+  // FormData porque puede llevar foto: el mismo camino que las fotos de la
+  // recepción.
+  var fd = new FormData();
+  fd.append('modulo', modulo);
+  fd.append('texto', texto);
+  var f = eid('mej-foto').files[0];
+  if (f) fd.append('foto', f);
+  var b = eid('mej-btn'); b.disabled = true;
+  fetch('/api/mejoras', { method:'POST', body: fd, credentials:'same-origin' })
+    .then(function(r){ return r.json(); })
+    .then(function(r){
+      b.disabled = false;
+      if (!r || !r.ok){ toast((r && r.error) || 'Error', 'er'); return; }
+      toast('Propuesta enviada', 'ok');
+      closeMB('mej-modal');
+      MEJ.tab = 'abiertas';
+      mejTab('abiertas');
+      mejLoad();
+    })
+    .catch(function(){ b.disabled = false; toast('No se pudo enviar la propuesta', 'er'); });
+}
+
+// ── PRIORIZAR Y RESOLVER (administrador) ──────────────────────────────────
+
+function mejPrioridad(id, v){
+  api('/api/mejoras/' + id + '/prioridad', 'PATCH', { prioridad: v === '' ? null : Number(v) })
+    .then(function(r){
+      if (!r || !r.ok){ toast((r && r.error) || 'Error', 'er'); mejLoad(); return; }
+      toast('Prioridad guardada', 'ok');
+      mejLoad();   // se reordena sola: lo urgente sube
+    });
+}
+
+function mejResolver(id){
+  var x = MEJ.filas.filter(function(f){ return f.id === id; })[0];
+  MEJ.resolviendo = id;
+  eid('mej-res-nota').value = '';
+  eid('mej-res-que').innerHTML = x
+    ? ('<b>' + escH(x.modulo_actual || x.modulo_label || x.modulo) + '</b><div style="color:var(--mut);margin-top:3px">'
+       + escH(x.texto || '') + '</div>')
+    : '';
+  eid('mej-res-modal').classList.add('on');
+}
+
+function mejResolverOk(){
+  var id = MEJ.resolviendo; if(!id) return;
+  var b = eid('mej-res-btn'); b.disabled = true;
+  api('/api/mejoras/' + id + '/resolver', 'POST', { nota: eid('mej-res-nota').value })
+    .then(function(r){
+      b.disabled = false;
+      if (!r || !r.ok){ toast((r && r.error) || 'Error', 'er'); return; }
+      toast('Marcada como resuelta', 'ok');
+      closeMB('mej-res-modal');
+      MEJ.resolviendo = null;
+      mejLoad();
+    });
+}
+
+function mejBorrar(id){
+  if (!confirm('¿Borrar esta propuesta? Todavía no la miró nadie.')) return;
+  api('/api/mejoras/' + id, 'DELETE').then(function(r){
+    if (!r || !r.ok){ toast((r && r.error) || 'Error', 'er'); return; }
+    toast('Borrada', 'ok');
+    mejLoad();
+  });
+}
+
+function mejReabrir(id){
+  api('/api/mejoras/' + id + '/reabrir', 'POST').then(function(r){
+    if (!r || !r.ok){ toast((r && r.error) || 'Error', 'er'); return; }
+    toast('Vuelve a pendientes', 'ok');
+    mejLoad();
+  });
+}
+
+// ══════════════════════════════════════════════════════════════════════════
 // ❓ EL MANUAL DE CADA MÓDULO
 // ══════════════════════════════════════════════════════════════════════════
 //
@@ -20840,6 +21198,73 @@ function sgManCampo(nombre, espera, liga, ver){
 // en el sistema. Lo que se anota mal acá no se arregla después en ningún lado —
 // el costo de la partida, los kilos que se van a vender y lo que se le va a
 // pagar al productor salen de estos seis pasos.
+// ── MEJORAS ───────────────────────────────────────────────────────────────
+SG_MANUAL.mejoras = { titulo: 'Mejoras', html:
+  '<p>Acá se pide que algo se arregle. <b>Es el único canal</b>: lo que se manda '
+  + 'por WhatsApp, se dice por teléfono o se comenta en el pasillo no queda '
+  + 'anotado en ningún lado — el que lo pidió no sabe si alguien lo escuchó, y a '
+  + 'la semana ya nadie se acuerda de quién había pedido qué.</p>'
+
+  + '<h3>Las dos solapas</h3>'
+  + '<ul>'
+  + '<li><b>Pendientes</b> — lo que todavía no se hizo, con lo más urgente arriba.</li>'
+  + '<li><b>Resueltas</b> — lo que ya está, con la nota de cómo se resolvió.</li>'
+  + '</ul>'
+  + '<p>Si sos <b>administrador</b> ves las de todos; si no, ves <b>las tuyas</b> — '
+  + 'que es para lo que están: para poder seguir en qué anda lo que pediste.</p>'
+
+  + '<h3>Proponer una mejora <span class="ver">V997</span></h3>'
+  + sgManCampo('¿Sobre qué pantalla?',
+      'La pantalla donde se te complica el trabajo. Aparecen <b>sólo las que usás</b>, '
+      + 'agrupadas igual que en el menú, y hay un buscador arriba.',
+      'La lista sale de tus permisos: proponer sobre una pantalla que no conocés no '
+      + 'es un aporte. Y es lo que le permite al administrador ver de qué pantallas '
+      + 'viene lo que más molesta.', 'V997')
+
+  + sgManCampo('¿Qué habría que mejorar?',
+      '<b>Obligatorio</b>, hasta 2.000 caracteres. Contá <b>qué te pasa hoy</b> y '
+      + '<b>qué te gustaría que pasara</b>.',
+      'Lo concreto se resuelve rápido y lo vago se archiva. «Está lento» no se puede '
+      + 'arreglar; «al cargar el remito tengo que escribir el cliente entero, estaría '
+      + 'bueno que lo busque como en pedidos» se arregla en una tarde.', 'V997')
+
+  + sgManCampo('Foto',
+      '<b>Opcional.</b> Una captura de la pantalla, marcando dónde está el problema.',
+      'Explica en un segundo lo que en texto son tres párrafos, y saca del medio la '
+      + 'ida y vuelta de «¿pero en cuál de los dos botones?».', 'V997')
+
+  + '<h3>Qué hace el administrador <span class="ver">V997</span></h3>'
+  + sgManCampo('Prioridad',
+      'Del <b>1 al 5</b>. El <b>1 es lo más urgente</b> y el 5 es «algún día». '
+      + 'Arranca <b>sin prioridad</b>, que quiere decir que todavía nadie la miró.',
+      'Es lo que contesta la pregunta que hoy no tiene respuesta: <b>en qué estado '
+      + 'está lo que pedí</b>. La lista se ordena sola con lo urgente arriba.', 'V997')
+  + sgManCampo('Marcar como resuelta',
+      'Cuando ya está. Se pide una <b>nota</b> de cómo se resolvió.',
+      'La nota la lee quien lo propuso. Sin ella ve la pantalla igual que ayer y no '
+      + 'sabe si se hizo otra cosa o si se entendió mal el pedido. Y si quedó mal '
+      + 'marcada, se puede <b>reabrir</b>.', 'V997')
+
+  + sgManCampo('Borrar la propia',
+      'Mientras <b>nadie le puso prioridad todavía</b>, el que la escribió la puede '
+      + 'borrar. Después no.',
+      'Es para la que salió con la pantalla equivocada. Una vez que un administrador '
+      + 'la miró ya es parte de una conversación, y borrarla sería borrarle el trabajo '
+      + 'a otro: ahí se escribe otra aclarando.', 'V997')
+
+  + '<div class="ojo"><b>Esto no reemplaza avisar que algo está roto.</b> Si algo no '
+  + 'funciona y frena el trabajo de hoy, se avisa como siempre. Este buzón es para lo '
+  + 'que <b>se podría hacer mejor</b>, que es distinto y por eso se pierde: nadie '
+  + 'llama por teléfono para pedir un buscador.</div>'
+
+  + '<h3>Qué cambió, y desde cuándo</h3>'
+  + '<ul>'
+  + '<li><span class="ver">V997</span> Nace la pantalla, arriba de todo el menú. '
+  + 'Antes esto vivía en cuatro canales distintos y en ninguno se podía decir «esto '
+  + 'ya está».</li>'
+  + '</ul>'
+};
+
 SG_MANUAL.ingresos = { titulo: 'Ingresos — recibir mercadería', html:
   '<p>Por acá <b>entra la mercadería al depósito</b>. Un camión llega, se cuenta, '
   + 'se pesa, se mira cómo vino y se deja en un piso. De ese momento salen tres '
@@ -31467,6 +31892,8 @@ function loadSec(s) {
   // un botón de borrar en producción.
   if (s === 'sgct-limpieza') { try { sgLimInit(); } catch (_) { /* todavía sin config */ } }
   var m = {
+    // El buzón de mejoras: no es de ningún módulo, lo ve todo el mundo.
+    mejoras: mejLoad,
     inicio: loadInicio, pedidos: loadPedidos, logistica: loadLog,
     preparacion: prepCargar,
     crm: loadCRM,

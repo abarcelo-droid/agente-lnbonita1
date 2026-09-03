@@ -29,6 +29,7 @@ import bancosRouter        from "./rutas/bancos.js";
 import ordenesRouter       from "./rutas/ordenes.js";
 import orgRouter           from "./rutas/org.js";
 import sidebarRouter       from "./rutas/sidebar.js";
+import mejorasRouter      from "./rutas/mejoras.js";
 import ventasRouter        from "./rutas/ventas.js";
 import sgRouter            from "./rutas/sg.js";
 import sgContableRouter    from "./rutas/sg_contable.js";
@@ -260,6 +261,10 @@ app.use("/api/admin",  adminRouter);
 app.use("/api/pli",    planificacionRouter);   // Planificación Insumos (módulo independiente)
 app.use("/api/sp",     spRouter);              // Seguimiento de Órdenes de Pago (circuito de autorización)
 app.use("/api/fp",     fpRouter);              // Planificación Financiera SG (flujo de fondos semanal)
+// Mejoras: el buzón de "esto habría que arreglarlo", por pantalla. Va SIN prefijo
+// declarado en ensure_api_prefijos: proponer lo puede hacer cualquiera, y sobre
+// qué pantalla puede proponer lo decide el router mirando sus permisos.
+app.use("/api/mejoras", mejorasRouter);
 app.use("/api/bt",     btRouter);              // Barceló Transporte — espejo de lectura de Transoft
 
 // Scout — app mobile para campo

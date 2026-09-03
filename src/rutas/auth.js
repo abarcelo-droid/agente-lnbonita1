@@ -421,6 +421,17 @@ function bloquearSiSoloLectura(req, res, next) {
   if (url.indexOf('/api/auth/logout') === 0) return next();
   if (url.indexOf('/api/auth/cambiar-pwd') === 0) return next();
   if (url.indexOf('/api/auth/me') === 0) return next();
+  // PROPONER UNA MEJORA NO ES ESCRIBIR EN EL NEGOCIO: es mandar un mensaje.
+  //
+  // Pablo, 2/9/2026: el buzón es «para unificar canales de comunicación». Un
+  // usuario de sólo lectura es JUSTAMENTE el que se pasa el día mirando
+  // pantallas: dejarlo afuera del único canal que hay lo manda de vuelta al
+  // WhatsApp, que es lo que se vino a sacar.
+  //
+  // Sólo el alta: priorizar y marcar resuelto siguen siendo de administradores,
+  // y un admin nunca llega hasta acá.
+  if (url.indexOf('/api/mejoras') === 0 && metodo === 'POST'
+      && !/\/(prioridad|resolver|reabrir)$/.test(url.split('?')[0])) return next();
   // Bloquear
   console.log('[AUTH][solo_lectura] Bloqueando', metodo, url, 'para usuario', user.id);
   return res.status(403).json({
