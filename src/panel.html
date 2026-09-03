@@ -3900,6 +3900,7 @@ input[type=number]{-moz-appearance:textfield;appearance:textfield}
          mismo peor: sin filtro por fecha, sin el catálogo, y llamando a la
          descarga por el número de recepción en vez de por la partida. -->
     <div style="display:flex;justify-content:flex-end;gap:8px;margin-bottom:12px">
+      <button class="btn bo" onclick="sgFgAbrir()">🧾 Ingresar factura</button>
       <button class="btn bb" onclick="sgCoopOpen()">+ Nueva cooperativa</button>
       <button class="btn bo" onclick="sgCcoopLoad()">↻ Actualizar</button>
     </div>
@@ -7239,6 +7240,78 @@ input[type=number]{-moz-appearance:textfield;appearance:textfield}
           <button class="btn bo" onclick="closeMB('mej-res-modal')">Cancelar</button>
           <button class="btn bb" id="mej-res-btn" onclick="mejResolverOk()">Marcar resuelta</button>
         </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ══ 🧾 INGRESAR LA FACTURA DE UN SERVICIO ═══════════════════════════════
+     Pablo, 3/9/2026: «permite seleccionar todas las descargas valorizadas y las
+     "pisa" con una factura real. Una vez que se ingresa la factura se hace el
+     asiento y se genera la deuda en el proveedor. Si tenemos valorizados 100
+     pero la factura es por 80, los 20 de diferencia van a asiento de gestión».
+
+     Va al nivel de arriba, con los demás modales. -->
+<div class="ab-modal-overlay sg-mod" id="sg-fg-modal">
+  <div class="ab-modal" style="width:min(1000px,96vw);max-width:96vw;max-height:92vh;overflow-y:auto;overflow-x:hidden">
+    <div class="mhd"><div class="mht">🧾 Ingresar factura de servicio</div>
+      <button class="mcl" onclick="closeMB('sg-fg-modal')">×</button></div>
+    <div class="fg">
+      <div class="fl"><label>¿De quién es la factura? <span style="color:var(--err)">*</span></label>
+        <select id="sg-fg-prov" onchange="sgFgProv()"></select></div>
+      <div class="fl"><label>Fecha de emisión</label>
+        <input type="date" id="sg-fg-fecha"></div>
+
+      <div class="fl"><label>Tipo</label>
+        <select id="sg-fg-tipo"><option value="factura_a">Factura A</option><option value="factura_b">Factura B</option></select></div>
+      <div class="fl"><label>Número <span style="color:var(--err)">*</span></label>
+        <input id="sg-fg-numero" placeholder="0001-00001234" oninput="sgFgCalc()"></div>
+
+      <!-- LO QUE SE ELIGE ES LO QUE LA FACTURA PISA. Sólo aparece lo valorizado
+           de ese proveedor que todavía no está en ninguna factura. -->
+      <div class="ff"><label style="font-size:11px;letter-spacing:.06em;color:var(--mut)">QUÉ CUBRE ESTA FACTURA</label>
+        <div class="ab-table-wrap" style="overflow-x:hidden !important;max-height:240px;overflow-y:auto">
+          <table class="pa-tbl" style="table-layout:fixed;width:100%">
+            <thead><tr>
+              <th style="width:8%;text-align:center"><input type="checkbox" id="sg-fg-todos" onchange="sgFgTodos(this.checked)" style="width:auto"></th>
+              <th style="width:26%">Partida</th>
+              <th style="width:26%">Proveedor</th>
+              <th style="width:16%">Fecha</th>
+              <th style="width:24%;text-align:right">Valorizado</th>
+            </tr></thead>
+            <tbody id="sg-fg-items"><tr><td colspan="5" class="emp">Elegí el proveedor.</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="fl"><label>Total de la factura ($) <span style="color:var(--err)">*</span></label>
+        <input type="number" id="sg-fg-total" min="0" step="0.01" oninput="sgFgCalc()"></div>
+      <div class="fl"><label>Alícuota de IVA (%)</label>
+        <input type="number" id="sg-fg-alic" min="0" step="0.5" value="21" oninput="sgFgCalc()"></div>
+
+      <div class="ff" id="sg-fg-cuadro" style="font-size:12.5px"></div>
+
+      <!-- LA DIFERENCIA CONTRA LO VALORIZADO. Aparece sola cuando la hay, y sin
+           motivo no se guarda: un número suelto que nadie puede explicar en seis
+           meses no sirve para reclamar nada. -->
+      <div class="ff" id="sg-fg-difbox" style="display:none">
+        <div class="fl" style="margin:0"><label>¿Por qué no coincide con lo valorizado? <span style="color:var(--err)">*</span></label>
+          <select id="sg-fg-motivo" onchange="sgFgAsiento()">
+            <option value="">— elegí el motivo —</option>
+            <option value="error_proveedor">Error del proveedor — falta nota de débito</option>
+            <option value="comprobante_pendiente">Comprobante pendiente — va a llegar</option>
+            <option value="diferencia_peso_calidad">Diferencia de peso o calidad</option>
+            <option value="ajuste_gestion">Ajuste de gestión — no va a tener comprobante</option>
+          </select></div>
+      </div>
+
+      <div class="ff" id="sg-fg-asiento"></div>
+
+      <div class="fl ff"><label>Observaciones</label><input id="sg-fg-obs" maxlength="200"></div>
+
+      <div class="ff" style="text-align:right;margin-top:6px">
+        <button class="btn bo" onclick="closeMB('sg-fg-modal')">Cancelar</button>
+        <button class="btn bb" id="sg-fg-btn" onclick="sgFgGuardar()">Ingresar la factura</button>
       </div>
     </div>
   </div>
@@ -21447,6 +21520,37 @@ SG_MANUAL.gastos = { titulo: 'Gastos Directos', html:
       + 'se <b>rehace el costo</b> de los lotes de esa recepción, y queda anotado quién '
       + 'lo cambió.', 'V1006')
 
+  + '<h3>🧾 Ingresar la factura <span class="ver">V1008</span></h3>'
+  + '<p><b>Valorizar y facturar son dos cosas.</b> Valorizar es «la cuadrilla dijo que '
+  + 'cobra 10.300»: con eso alcanza para que entre al costo del lote y la partida se '
+  + 'pueda liquidar. Facturar es «llegó el papel»: recién ahí hay comprobante, asiento '
+  + 'y deuda. Hasta que no llega, el sistema le debe plata a la cuadrilla y no lo sabe.</p>'
+
+  + sgManCampo('Qué cubre esta factura',
+      'Se tildan las descargas que la factura pisa. Aparecen <b>sólo las valorizadas</b> '
+      + 'de ese proveedor que todavía no están en ninguna otra factura.',
+      'Una factura puede cubrir varios camiones. Cada descarga queda anotada con lo que '
+      + 'le tocó: sin eso, a los seis meses el costo de una partida no se puede '
+      + 'explicar.', 'V1008')
+
+  + sgManCampo('Total de la factura',
+      'Lo que dice el papel, con IVA. El neto lo despeja el sistema con la alícuota.',
+      'El total <b>no se toca nunca</b>: es lo que se le va a pagar y lo que va al libro '
+      + 'fiscal. Se genera la <b>deuda con el proveedor</b> y el <b>asiento</b>, que se '
+      + 've en la pantalla antes de guardar.', 'V1008')
+
+  + sgManCampo('Si no coincide con lo valorizado',
+      'Se pide el <b>motivo</b>, de una lista de cuatro. Sin motivo no se guarda.',
+      'Valorizados 100 y facturada por 80: los 20 van al mismo asiento como línea de '
+      + '<b>gestión</b> — un solo número de asiento, con lo fiscal y lo de gestión '
+      + 'adentro, y cada parte balanceando por su cuenta. La comparación es contra el '
+      + '<b>neto</b>: lo valorizado se carga sin IVA, así que compararlo con el total '
+      + 'daría una diferencia que es puro impuesto.', 'V1008')
+
+  + '<div class="ojo"><b>El costo del lote no se mueve.</b> Ya entró con la '
+  + 'valorización. Si la factura vino por otra cosa, esa es la diferencia de gestión — '
+  + 'no se vuelve a tocar la partida.</div>'
+
   + '<div class="ojo"><b>Ojo con corregir una partida ya liquidada.</b> Si con ese costo '
   + 'ya se emitió una liquidación, el número de la liquidación no se mueve solo: cambia '
   + 'el costo y el margen, no lo que se le pagó al productor. Si la diferencia importa, '
@@ -21458,6 +21562,11 @@ SG_MANUAL.gastos = { titulo: 'Gastos Directos', html:
   + 'Antes el aviso mandaba a una solapa vieja que ya no existía: la descarga quedaba '
   + '«a valorizar» para siempre y la partida trabada, sin ningún lugar donde '
   + 'destrabarla.</li>'
+  + '<li><span class="ver">V1008</span> Se puede <b>ingresar la factura</b> de la '
+  + 'cooperativa: pisa las descargas valorizadas, hace el asiento y genera la deuda. '
+  + 'La diferencia contra lo valorizado va como <b>gestión</b>, con su motivo.</li>'
+  + '<li><span class="ver">V1007</span> Los campos numéricos ya no tienen las flechitas '
+  + 'de subir y bajar, en <b>todo el panel</b>.</li>'
   + '<li><span class="ver">V1006</span> Se puede cargar el <b>precio por unidad</b> —lo '
   + 'que cobra por bulto o por pallet— y el total sale solo, o al revés. Y una '
   + 'valorización ya cargada <b>se puede corregir</b>.</li>'
@@ -23715,6 +23824,171 @@ function sgCcoopValorizar(gastoId){
       // El importe de hoy, si ya lo tiene: es lo que se viene a corregir.
       monto: f.monto,
     }],
+  });
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+// 🧾 LA FACTURA DE UN SERVICIO — LA QUE PISA LO VALORIZADO
+// ══════════════════════════════════════════════════════════════════════════
+//
+// Pablo, 3/9/2026: «permite seleccionar todas las descargas valorizadas y las
+// "pisa" con una factura real. Una vez que se ingresa la factura se hace el
+// asiento y se genera la deuda en el proveedor. Si tenemos valorizados 100 pero
+// la factura es por 80, los 20 de diferencia van a asiento de gestión».
+//
+// VALORIZAR Y FACTURAR SON DOS COSAS. Valorizar es «la cuadrilla dijo que cobra
+// 10.300» — con eso alcanza para que entre al costo del lote y la partida se
+// pueda liquidar. Facturar es «llegó el papel»: recién ahí hay comprobante,
+// asiento y deuda. Hasta que no llega, el sistema le debe plata a la cuadrilla y
+// no lo sabe.
+var SGFG = { filas: [], sel: {}, asiento: null };
+
+function sgFgAbrir(){
+  SGFG.filas = []; SGFG.sel = {}; SGFG.asiento = null;
+  eid('sg-fg-numero').value = ''; eid('sg-fg-total').value = '';
+  eid('sg-fg-alic').value = '21'; eid('sg-fg-obs').value = '';
+  eid('sg-fg-fecha').value = new Date().toISOString().slice(0,10);
+  eid('sg-fg-todos').checked = false;
+  eid('sg-fg-items').innerHTML = '<tr><td colspan="5" class="emp">Elegí el proveedor.</td></tr>';
+  eid('sg-fg-cuadro').innerHTML = ''; eid('sg-fg-asiento').innerHTML = '';
+  eid('sg-fg-difbox').style.display = 'none';
+  // Los proveedores de servicio son las cooperativas dadas de alta: a ellas se
+  // les factura la descarga.
+  // A la cooperativa se le factura a través de su PROVEEDOR: es el que tiene
+  // CUIT y cuenta corriente. Las que todavía no lo tienen cargado no se pueden
+  // facturar, y decirlo es mejor que ofrecerlas y que rebote el servidor.
+  var conProv = (SG_COOPS || []).filter(function(c){ return c.proveedor_id; });
+  eid('sg-fg-prov').innerHTML = '<option value="">— Elegí —</option>'
+    + conProv.map(function(c){
+        return '<option value="' + c.proveedor_id + '">' + escH(c.proveedor_nombre || c.nombre) + '</option>';
+      }).join('')
+    + ((SG_COOPS || []).length > conProv.length
+        ? '<option value="" disabled>(hay cooperativas sin proveedor: cargáselo en el lápiz)</option>' : '');
+  sgModalArriba('sg-fg-modal');
+}
+
+function sgFgProv(){
+  var prov = eid('sg-fg-prov').value;
+  SGFG.sel = {}; SGFG.filas = [];
+  eid('sg-fg-todos').checked = false;
+  if (!prov){ eid('sg-fg-items').innerHTML = '<tr><td colspan="5" class="emp">Elegí el proveedor.</td></tr>'; sgFgCalc(); return; }
+  eid('sg-fg-items').innerHTML = '<tr><td colspan="5" class="emp">Cargando…</td></tr>';
+  api('/api/sg/gastos-facturables?proveedor_servicio_id=' + encodeURIComponent(prov)).then(function(r){
+    SGFG.filas = (r && r.ok) ? (r.data || []) : [];
+    sgFgPintar();
+  });
+}
+
+function sgFgPintar(){
+  var tb = eid('sg-fg-items'); if (!tb) return;
+  if (!SGFG.filas.length){
+    tb.innerHTML = '<tr><td colspan="5" class="emp">No hay nada valorizado sin facturar de este '
+      + 'proveedor. Se factura lo que ya tiene importe: primero valorizá la descarga.</td></tr>';
+    sgFgCalc(); return;
+  }
+  var cel = 'overflow:hidden;text-overflow:ellipsis;white-space:nowrap';
+  tb.innerHTML = SGFG.filas.map(function(f){
+    return '<tr>'
+      + '<td style="text-align:center"><input type="checkbox" ' + (SGFG.sel[f.id] ? 'checked' : '')
+        + ' onchange="sgFgMarcar(' + f.id + ',this.checked)" style="width:auto"></td>'
+      + '<td style="' + cel + '"><code>' + escH(f.partida || f.numero_recepcion || '—') + '</code></td>'
+      + '<td style="' + cel + '">' + escH(f.proveedor_mercaderia || '—') + '</td>'
+      + '<td style="' + cel + '">' + esc(f.fecha_servicio || f.fecha_valorizacion || '—') + '</td>'
+      + '<td style="text-align:right">' + sgMoney(f.monto) + '</td></tr>';
+  }).join('');
+  sgFgCalc();
+}
+
+function sgFgMarcar(id, on){ if (on) SGFG.sel[id] = 1; else delete SGFG.sel[id]; sgFgCalc(); }
+function sgFgTodos(on){
+  SGFG.sel = {};
+  if (on) SGFG.filas.forEach(function(f){ SGFG.sel[f.id] = 1; });
+  sgFgPintar();
+}
+
+function sgFgElegidos(){ return SGFG.filas.filter(function(f){ return SGFG.sel[f.id]; }); }
+function sgFgValorizado(){
+  return Math.round(sgFgElegidos().reduce(function(a,f){ return a + (Number(f.monto)||0); }, 0) * 100) / 100;
+}
+
+// El cuadro de arriba: lo valorizado contra lo facturado, y la diferencia. Se
+// compara contra el NETO porque lo valorizado se carga SIN IVA — compararlo con
+// un total con IVA daría una diferencia que es puro impuesto.
+function sgFgCalc(){
+  var total = Number(eid('sg-fg-total').value) || 0;
+  var alic = Number(eid('sg-fg-alic').value);
+  if (!(alic >= 0)) alic = 21;
+  var neto = total > 0 ? Math.round((total / (1 + alic/100)) * 100) / 100 : 0;
+  var val = sgFgValorizado();
+  var dif = Math.round((val - neto) * 100) / 100;
+
+  eid('sg-fg-cuadro').innerHTML = sgFgElegidos().length
+    ? ('<div style="display:flex;gap:18px;flex-wrap:wrap;padding:8px 10px;border:1px solid var(--bor);border-radius:8px;background:var(--bg)">'
+       + '<div><b>' + sgFgElegidos().length + '</b> operación(es)</div>'
+       + '<div>Valorizado: <b>' + sgMoney(val) + '</b></div>'
+       + '<div>Neto de la factura: <b>' + sgMoney(neto) + '</b></div>'
+       + (dif ? ('<div style="color:#a16207">Diferencia: <b>' + sgMoney(dif) + '</b> '
+                 + (dif > 0 ? '(facturó de menos)' : '(facturó de más)') + '</div>') : '<div style="color:#166534">Coincide ✓</div>')
+       + '</div>')
+    : '';
+
+  // El motivo se pide sólo cuando hay diferencia. Pedirlo siempre sería pedir que
+  // se explique algo que no pasó.
+  eid('sg-fg-difbox').style.display = dif ? 'block' : 'none';
+  sgFgAsiento();
+}
+
+// EL ASIENTO SE VE ANTES DE GUARDAR. Es la regla del repo, y es el único momento
+// en que se puede frenar: después ya está escrito.
+function sgFgAsiento(){
+  var caja = eid('sg-fg-asiento'); if (!caja) return;
+  var ids = sgFgElegidos().map(function(f){ return f.id; });
+  var total = Number(eid('sg-fg-total').value) || 0;
+  if (!ids.length || !(total > 0)){ caja.innerHTML = ''; SGFG.asiento = null; return; }
+  api('/api/sg/gastos-factura/asiento-preview', 'POST', {
+    proveedor_servicio_id: eid('sg-fg-prov').value,
+    gastos: ids, total: total, iva_alicuota: Number(eid('sg-fg-alic').value),
+    dif_motivo: eid('sg-fg-motivo').value,
+  }).then(function(r){
+    if (!r || !r.ok){ caja.innerHTML = ''; SGFG.asiento = null; return; }
+    SGFG.asiento = r.data;
+    caja.innerHTML = r.data.sin_modelo
+      ? ('<div style="border:1.5px solid #fbbf24;background:#fffbeb;border-radius:8px;padding:10px 12px;'
+         + 'font-size:12.5px;color:#92400e"><b>Todavía no hay asiento modelo para las descargas.</b> '
+         + 'La factura se va a guardar igual y va a quedar sin contabilizar: un administrador tiene '
+         + 'que elegir el modelo.</div>')
+      : sgAsientoCuadro(r.data, 'Así se va a contabilizar', 'el asiento modelo de descargas');
+  });
+}
+
+function sgFgGuardar(){
+  var prov = eid('sg-fg-prov').value;
+  if (!prov){ toast('Elegí a quién le entra la factura', 'er'); return; }
+  var ids = sgFgElegidos().map(function(f){ return f.id; });
+  if (!ids.length){ toast('Elegí al menos una operación', 'er'); return; }
+  if (!String(eid('sg-fg-numero').value || '').trim()){ toast('Falta el número de la factura', 'er'); return; }
+  var total = Number(eid('sg-fg-total').value) || 0;
+  if (!(total > 0)){ toast('Poné el total de la factura', 'er'); return; }
+  if (eid('sg-fg-difbox').style.display !== 'none' && !eid('sg-fg-motivo').value){
+    toast('La factura no coincide con lo valorizado: elegí el motivo', 'er'); return;
+  }
+  var b = eid('sg-fg-btn'); b.disabled = true;
+  api('/api/sg/gastos-factura', 'POST', {
+    proveedor_servicio_id: prov,
+    tipo_comprobante: eid('sg-fg-tipo').value,
+    numero: eid('sg-fg-numero').value,
+    fecha_emision: eid('sg-fg-fecha').value,
+    total: total, iva_alicuota: Number(eid('sg-fg-alic').value),
+    gastos: ids, dif_motivo: eid('sg-fg-motivo').value,
+    observaciones: eid('sg-fg-obs').value,
+  }).then(function(r){
+    b.disabled = false;
+    if (!r || !r.ok){ toast((r && r.error) || 'No se pudo guardar', 'er'); return; }
+    toast(r.data.sin_asiento
+      ? 'Factura ingresada — sin asiento: falta el modelo'
+      : 'Factura ingresada y contabilizada', 'ok');
+    closeMB('sg-fg-modal');
+    sgCcoopLoad();
   });
 }
 

@@ -11025,6 +11025,251 @@ function asientoDeFlete(db, b) {
   }), { montos: m });
 }
 
+// ══════════════════════════════════════════════════════════════════════════
+// LA FACTURA DE UN SERVICIO — LA QUE PISA LO VALORIZADO
+// ══════════════════════════════════════════════════════════════════════════
+//
+// Pablo, 3/9/2026: «un botón para INGRESAR FACTURA: permite seleccionar todas las
+// descargas valorizadas y las "pisa" con una factura real. Una vez que se ingresa
+// la factura se hace el asiento y se genera la deuda en el proveedor. Si tenemos
+// valorizados 100 pero la factura es por 80, los 20 de diferencia van a asiento
+// de gestión, como siempre».
+//
+// EL CIRCUITO, EN TRES TIEMPOS:
+//   1. La recepción anota la descarga: se sabe QUIÉN bajó el camión.
+//   2. Se valoriza: se sabe CUÁNTO dijo que cobraba. Ahí entra al costo del lote.
+//   3. Llega la factura y la pisa: recién ahí hay comprobante, asiento y deuda.
+//
+// Hasta el punto 3, el sistema le debía plata a la cuadrilla y no lo sabía: la
+// valorización no genera asiento ni deuda. Este endpoint cierra eso.
+//
+// LO QUE NO CAMBIA: el costo del lote. Ya entró con la valorización, y la factura
+// no lo mueve —si la factura dice otra cosa, esa es la diferencia de gestión—.
+const CLAVE_MODELO_GASTO = 'asiento_modelo_descarga';
+
+// El modelo con el que se contabiliza. Se parametriza una vez, como el del flete
+// y el de la factura de mercadería.
+router.get('/gastos-factura/modelo', requireAuth, (req, res) => {
+  const db = getDb();
+  try {
+    const cfg = db.prepare('SELECT valor FROM sg_config WHERE clave=?').get(CLAVE_MODELO_GASTO);
+    const id = cfg && cfg.valor ? Number(cfg.valor) : null;
+    const modelos = db.prepare('SELECT id, nombre FROM sg_asientos_modelo WHERE activo=1 ORDER BY nombre').all();
+    const lineas = id ? (lineasModeloDe(db, CLAVE_MODELO_GASTO) || []) : [];
+    res.json({ ok: true, data: { modelo_id: id, modelos, lineas } });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// PARAMETRIZAR ES DE ADMINISTRADOR. Elegir contra qué cuentas se contabiliza no
+// es trabajo del día: es una decisión del que lleva la contabilidad.
+router.put('/gastos-factura/modelo', requireAdmin, (req, res) => {
+  const db = getDb();
+  try {
+    const id = req.body?.modelo_id ? Number(req.body.modelo_id) : null;
+    if (id && !db.prepare('SELECT 1 FROM sg_asientos_modelo WHERE id=? AND activo=1').get(id)) {
+      return res.status(400).json({ ok: false, error: 'Ese asiento modelo no existe' });
+    }
+    db.prepare(`INSERT INTO sg_config (clave, valor) VALUES (?,?)
+      ON CONFLICT(clave) DO UPDATE SET valor=excluded.valor`).run(CLAVE_MODELO_GASTO, id ? String(id) : '');
+    res.json({ ok: true, data: { modelo_id: id } });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// ── QUÉ SE PUEDE FACTURAR ─────────────────────────────────────────────────
+//
+// Lo valorizado de ese proveedor que todavía no está en ninguna factura. El
+// NOT EXISTS es lo que impide facturar dos veces la misma descarga — y es el
+// mismo criterio que usa /oc/:id/agrupables para la mercadería.
+router.get('/gastos-facturables', requireAuth, (req, res) => {
+  const db = getDb();
+  try {
+    const prov = Number(req.query.proveedor_servicio_id);
+    if (!prov) return res.status(400).json({ ok: false, error: 'Falta el proveedor del servicio' });
+    const filas = db.prepare(`
+      SELECT g.id, g.tipo_gasto, g.monto, g.fecha_servicio, g.fecha_valorizacion,
+             g.unidad, g.cantidad, g.recepcion_id,
+             r.numero_recepcion, o.trazabilidad AS partida,
+             p.razon_social AS proveedor_mercaderia
+        FROM sg_gastos_directos g
+        LEFT JOIN sg_recepciones r ON r.id = g.recepcion_id
+        LEFT JOIN sg_oc o          ON o.id = r.oc_id
+        LEFT JOIN sg_proveedores p ON p.id = o.proveedor_id
+       WHERE g.proveedor_servicio_id = ?
+         AND g.estado = 'valorizado' AND g.activo = 1
+         AND NOT EXISTS (SELECT 1 FROM sg_factura_gasto_items fi
+                           JOIN sg_facturas_gasto f ON f.id = fi.factura_id AND f.activo = 1
+                          WHERE fi.gasto_id = g.id)
+       ORDER BY g.fecha_servicio, g.id`).all(prov);
+    res.json({ ok: true, data: filas, total: r2(filas.reduce((a, x) => a + (Number(x.monto) || 0), 0)) });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// ── LOS NÚMEROS DE LA FACTURA ─────────────────────────────────────────────
+//
+// El operador carga el TOTAL, que es lo que dice el papel, y de ahí se despeja el
+// neto. Es la misma cuenta que hace el flete: si las dos no dieran igual, habría
+// dos maneras de leer la misma factura de servicio.
+function montosDeFacturaGasto(b) {
+  return montosDeFlete({ monto: b.total, neto: b.neto, iva_monto: b.iva_monto,
+    iva_alicuota: b.iva_alicuota });
+}
+
+// La diferencia contra lo que se había valorizado. POSITIVA = la factura vino por
+// MENOS de lo acordado (sobra plata valorizada); negativa = vino por más.
+//
+// Se mira contra el NETO, no contra el total: lo valorizado se carga sin IVA —lo
+// dice el cuadro de valorizar—, así que compararlo con un total con IVA daría una
+// diferencia que es puro impuesto.
+function difDeFacturaGasto(valorizado, neto) {
+  return r2(r2(valorizado) - r2(neto));
+}
+
+function asientoDeFacturaGasto(db, b, valorizado) {
+  const lineas = lineasModeloDe(db, CLAVE_MODELO_GASTO);
+  if (!lineas || !lineas.length) {
+    return { sin_modelo: true, lineas: [], debe: 0, haber: 0, diferencia: 0, balancea: false };
+  }
+  const m = montosDeFacturaGasto(b);
+  const dif = difDeFacturaGasto(valorizado, m.neto);
+  const base = armarAsientoFactura(lineas, {
+    neto: m.neto, iva_monto: m.iva_monto, total: m.total,
+    percepcion_iva: 0, percepcion_ganancias: 0, percepciones_iibb: [],
+  });
+  // Y LA DIFERENCIA, EN EL MISMO ASIENTO. El ámbito viaja en la LÍNEA: un solo
+  // número de asiento, con lo fiscal y lo de gestión adentro, y cada ámbito
+  // balanceando por su cuenta. Es la misma función que usa la factura de
+  // mercadería — si fueran dos, un día darían distinto.
+  const gestion = dif ? lineasGestionFactura(lineas, { dif_gestion: dif, dif_motivo: b.dif_motivo }) : [];
+  return Object.assign(base, { montos: m, dif_gestion: dif,
+    lineas: base.lineas.concat(gestion.map((g) => {
+      const c = lineas.find((l) => l.cuenta_id === g.cuenta_id) || {};
+      return Object.assign({}, g, { cuenta_codigo: c.cuenta_codigo, cuenta_nombre: c.cuenta_nombre });
+    })) });
+}
+
+router.post('/gastos-factura/asiento-preview', requireAuth, express.json(), (req, res) => {
+  const db = getDb();
+  try {
+    const b = req.body || {};
+    const ids = Array.isArray(b.gastos) ? b.gastos.map(Number).filter(Boolean) : [];
+    const valorizado = sumaValorizada(db, ids, Number(b.proveedor_servicio_id));
+    res.json({ ok: true, data: Object.assign(asientoDeFacturaGasto(db, b, valorizado), { valorizado }) });
+  } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
+});
+
+// Lo que suman las operaciones elegidas — SIEMPRE leído de la base y nunca del
+// pedido: es contra este número que se calcula la diferencia de gestión, y un
+// número que manda el navegador es un número que se puede editar.
+function sumaValorizada(db, ids, prov) {
+  if (!ids.length || !prov) return 0;
+  const q = ids.map(() => '?').join(',');
+  const r = db.prepare(`SELECT COALESCE(SUM(monto),0) s FROM sg_gastos_directos
+    WHERE id IN (${q}) AND proveedor_servicio_id=? AND estado='valorizado' AND activo=1`)
+    .get(...ids, prov);
+  return r2(r.s);
+}
+
+// ── INGRESAR LA FACTURA ───────────────────────────────────────────────────
+router.post('/gastos-factura', requireAuth, express.json(), (req, res) => {
+  const db = getDb();
+  try {
+    const b = req.body || {};
+    const prov = Number(b.proveedor_servicio_id);
+    if (!prov) return res.status(400).json({ ok: false, error: 'Elegí a quién le entra la factura' });
+    if (!db.prepare('SELECT 1 FROM sg_proveedores WHERE id=? AND activo=1').get(prov)) {
+      return res.status(400).json({ ok: false, error: 'Ese proveedor no existe' });
+    }
+    const ids = Array.isArray(b.gastos) ? [...new Set(b.gastos.map(Number).filter(Boolean))] : [];
+    if (!ids.length) return res.status(400).json({ ok: false, error: 'Elegí al menos una operación' });
+    const numero = val(b.numero);
+    if (!numero) return res.status(400).json({ ok: false, error: 'Falta el número de la factura' });
+    const total = r2(b.total);
+    if (!(total > 0)) return res.status(400).json({ ok: false, error: 'Poné el total de la factura' });
+
+    // TODAS TIENEN QUE SER DE ESE PROVEEDOR, ESTAR VALORIZADAS Y NO ESTAR YA EN
+    // OTRA FACTURA. Se vuelve a mirar acá aunque la pantalla ya haya filtrado:
+    // entre que se abrió el cuadro y se apretó guardar pudo pasar cualquier cosa.
+    const q = ids.map(() => '?').join(',');
+    const elegidos = db.prepare(`SELECT g.id, g.monto FROM sg_gastos_directos g
+      WHERE g.id IN (${q}) AND g.proveedor_servicio_id=? AND g.estado='valorizado' AND g.activo=1
+        AND NOT EXISTS (SELECT 1 FROM sg_factura_gasto_items fi
+                          JOIN sg_facturas_gasto f ON f.id=fi.factura_id AND f.activo=1
+                         WHERE fi.gasto_id=g.id)`).all(...ids, prov);
+    if (elegidos.length !== ids.length) {
+      return res.status(400).json({ ok: false,
+        error: 'Alguna de las operaciones ya está facturada, no está valorizada o es de otro '
+             + 'proveedor. Actualizá la pantalla y volvé a elegir.' });
+    }
+
+    const m = montosDeFacturaGasto(b);
+    const valorizado = r2(elegidos.reduce((a, x) => a + (Number(x.monto) || 0), 0));
+    const dif = difDeFacturaGasto(valorizado, m.neto);
+    // UNA LÍNEA DE GESTIÓN SIN MOTIVO NO ENTRA. Texto libre serían cuarenta
+    // maneras de escribir lo mismo y ningún informe posible.
+    if (dif !== 0 && !MOTIVOS[b.dif_motivo]) {
+      return res.status(400).json({ ok: false,
+        error: 'La factura no coincide con lo valorizado: elegí el motivo. Los motivos son: '
+             + Object.values(MOTIVOS).map((x) => x.label).join(', ') + '.' });
+    }
+
+    let facturaId = null, asientoId = null;
+    db.transaction(() => {
+      facturaId = db.prepare(`INSERT INTO sg_facturas_gasto
+        (proveedor_servicio_id, tipo_comprobante, punto_venta, numero, fecha_emision, cuit_emisor,
+         neto, iva_alicuota, iva_monto, total, valorizado, dif_gestion, dif_motivo,
+         observaciones, creado_por)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
+        prov, val(b.tipo_comprobante) || 'factura_a', val(b.punto_venta), numero,
+        val(b.fecha_emision) || db.prepare("SELECT date('now','localtime') d").get().d,
+        val(b.cuit_emisor), m.neto, m.iva_alicuota, m.iva_monto, m.total,
+        valorizado, dif, dif ? b.dif_motivo : null, val(b.observaciones), uid(req)).lastInsertRowid;
+
+      const insItem = db.prepare('INSERT INTO sg_factura_gasto_items (factura_id, gasto_id, neto) VALUES (?,?,?)');
+      for (const g of elegidos) insItem.run(facturaId, g.id, g.monto);
+
+      // ── Y SU ASIENTO, EN LA MISMA TRANSACCIÓN ─────────────────────────
+      // La regla de oro de la factura de mercadería: no hay factura sin su
+      // asiento. Guardados por separado, el segundo paso puede no correr nunca y
+      // queda una deuda que existe para el proveedor y no para la contabilidad.
+      const as = asientoDeFacturaGasto(db, Object.assign({}, b, { total: m.total }), valorizado);
+      if (!as.sin_modelo) {
+        if (!as.balancea) throw new Error('El asiento no balancea: revisá el asiento modelo.');
+        const r = crearAsiento(db, {
+          fecha: val(b.fecha_emision) || null,
+          descripcion: 'Factura de servicio ' + numero,
+          // Así se ata el asiento a su comprobante en todo el módulo: con el
+          // código de referencia. Sin esto, entrando por Asientos Contables no
+          // hay forma de volver a la factura que lo generó.
+          ref_codigo: 'FG-' + facturaId,
+          usuario_id: uid(req),
+        }, as.lineas);
+        asientoId = r.id;
+        db.prepare('UPDATE sg_facturas_gasto SET asiento_id=? WHERE id=?').run(asientoId, facturaId);
+      }
+    })();
+    res.json({ ok: true, data: { id: facturaId, asiento_id: asientoId, dif_gestion: dif,
+      sin_asiento: !asientoId } });
+  } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
+});
+
+// Las facturas de servicio ya cargadas de un proveedor, para la pantalla.
+router.get('/gastos-factura', requireAuth, (req, res) => {
+  const db = getDb();
+  try {
+    const cond = ['f.activo=1'];
+    const par = [];
+    if (req.query.proveedor_servicio_id) {
+      cond.push('f.proveedor_servicio_id=?'); par.push(Number(req.query.proveedor_servicio_id));
+    }
+    const filas = db.prepare(`SELECT f.*, p.razon_social AS proveedor_nombre,
+        (SELECT COUNT(*) FROM sg_factura_gasto_items i WHERE i.factura_id=f.id) AS operaciones
+      FROM sg_facturas_gasto f
+      LEFT JOIN sg_proveedores p ON p.id=f.proveedor_servicio_id
+      WHERE ${cond.join(' AND ')} ORDER BY f.fecha_emision DESC, f.id DESC`).all(...par);
+    res.json({ ok: true, data: filas });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
 router.post('/fletes-entrada/asiento-preview', requireAuth, express.json(), (req, res) => {
   const db = getDb();
   try { res.json({ ok: true, data: asientoDeFlete(db, req.body || {}) }); }

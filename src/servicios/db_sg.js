@@ -1014,6 +1014,68 @@ try {
   //
   // Se guardan acá TODAS las percepciones y no sólo las de IIBB, para que
   // agregar un impuesto nuevo no vuelva a pedir una columna.
+// ══ LA FACTURA DE UN SERVICIO — LA QUE PISA LO VALORIZADO ═══════════════════
+//
+// Pablo, 3/9/2026: «un botón para INGRESAR FACTURA: permite seleccionar todas las
+// descargas valorizadas y las "pisa" con una factura real. Una vez que se ingresa
+// la factura se hace el asiento y se genera la deuda en el proveedor. Si tenemos
+// valorizados 100 pero la factura es por 80, los 20 de diferencia van a asiento
+// de gestión, como siempre».
+//
+// POR QUÉ UNA TABLA APARTE Y NO sg_facturas_compra. Esa tiene oc_id NOT NULL: es
+// la factura de la MERCADERÍA de una orden. Una factura de la cuadrilla no cuelga
+// de ninguna orden — cuelga de N descargas, que pueden ser de camiones distintos
+// y de proveedores de mercadería distintos.
+//
+// EL TOTAL ES LO QUE DICE EL PAPEL, siempre. Lo que se había valorizado queda en
+// `valorizado`, y la diferencia en dif_gestion + dif_motivo. Es la misma regla que
+// en la factura de mercadería: el libro fiscal dice lo facturado, la deuda dice lo
+// acordado.
+try {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS sg_facturas_gasto (
+      id                    INTEGER PRIMARY KEY AUTOINCREMENT,
+      proveedor_servicio_id INTEGER NOT NULL,   -- la cooperativa, el fletero
+      tipo_comprobante      TEXT,               -- factura_a | factura_b
+      punto_venta           TEXT,
+      numero                TEXT,
+      fecha_emision         TEXT,
+      cuit_emisor           TEXT,
+      neto                  REAL,
+      iva_alicuota          REAL,
+      iva_monto             REAL,
+      total                 REAL,
+      -- Lo que sumaban las operaciones al momento de facturar. Se guarda porque
+      -- después se pueden corregir, y entonces la diferencia de esta factura ya
+      -- no se podría reconstruir.
+      valorizado            REAL,
+      dif_gestion           REAL NOT NULL DEFAULT 0,
+      dif_motivo            TEXT,
+      asiento_id            INTEGER,
+      observaciones         TEXT,
+      activo                INTEGER NOT NULL DEFAULT 1,
+      anulada_en            TEXT,
+      anulada_por           INTEGER,
+      creado_en             TEXT DEFAULT (datetime('now','localtime')),
+      creado_por            INTEGER
+    );
+    CREATE INDEX IF NOT EXISTS idx_sg_fg_prov ON sg_facturas_gasto(proveedor_servicio_id);
+
+    -- Qué operaciones cubre, y por cuánto le tocó a cada una. Una factura que
+    -- cubre tres camiones tiene que poder decir cuánto le tocó a cada uno: sin
+    -- eso, el costo de una partida no se puede explicar.
+    CREATE TABLE IF NOT EXISTS sg_factura_gasto_items (
+      id         INTEGER PRIMARY KEY AUTOINCREMENT,
+      factura_id INTEGER NOT NULL REFERENCES sg_facturas_gasto(id) ON DELETE CASCADE,
+      gasto_id   INTEGER NOT NULL,
+      neto       REAL
+    );
+    -- Una operación no se factura dos veces. El índice lo garantiza, no el código.
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_sg_fg_items ON sg_factura_gasto_items(factura_id, gasto_id);
+    CREATE INDEX IF NOT EXISTS idx_sg_fg_items_gasto ON sg_factura_gasto_items(gasto_id);
+  `);
+} catch (e) { console.error('[DB] SG sg_facturas_gasto:', e.message); }
+
   db.exec(`
     CREATE TABLE IF NOT EXISTS sg_factura_percepciones (
       id           INTEGER PRIMARY KEY AUTOINCREMENT,
