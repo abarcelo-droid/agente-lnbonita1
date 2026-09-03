@@ -3899,6 +3899,26 @@ input[type=number]{-moz-appearance:textfield;appearance:textfield}
          Reemplaza a la vieja solapa "Cargas y Descargas", que mostraba lo
          mismo peor: sin filtro por fecha, sin el catálogo, y llamando a la
          descarga por el número de recepción en vez de por la partida. -->
+
+    <!-- ══ CONTRA QUÉ SE CONTABILIZA LA DESCARGA ═══════════════════════════
+         Pablo, 3/9/2026: «necesito un selector de rubros... ponéme con qué
+         asiento modelo lo hacemos y lo seleccionamos ahí».
+
+         Va acá y no sólo en Contabilidad SG porque acá es donde se trabaja: el
+         que ingresa la factura de la cooperativa tiene que ver, en la misma
+         pantalla, contra qué cuentas va a entrar. Es la MISMA parametrización
+         —la del circuito «Descarga y servicios»—, no una segunda: se guarda en
+         el mismo lugar y las dos pantallas muestran lo mismo.
+
+         Se esconde entero para el que no es admin, con los otros tres bloques
+         de asiento modelo, en sgAsientoModeloVisible(). -->
+    <div id="sggd-modelo-box" style="display:none;border:1px solid var(--bor);border-radius:10px;padding:12px 14px;margin-bottom:16px;background:var(--bg)">
+      <div style="font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--mut);margin-bottom:6px">
+        Asiento contable de las descargas
+      </div>
+      <div id="sggd-modelo-cuerpo" style="font-size:13px">Cargando…</div>
+    </div>
+
     <div style="display:flex;justify-content:flex-end;gap:8px;margin-bottom:12px">
       <button class="btn bo" onclick="sgFgAbrir()">🧾 Ingresar factura</button>
       <button class="btn bb" onclick="sgCoopOpen()">+ Nueva cooperativa</button>
@@ -10636,7 +10656,7 @@ function sgAsientoPlegado(html, titulo){
 // "Asiento contable de venta" colgado arriba de un hueco no le sirve a nadie.
 function sgAsientoModeloVisible(){
   var admin = sgAsientoEsAdmin();
-  ['sgfd-modelo-box', 'sgfm-modelo-box', 'liq-modelo-box'].forEach(function(id){
+  ['sgfd-modelo-box', 'sgfm-modelo-box', 'liq-modelo-box', 'sggd-modelo-box'].forEach(function(id){
     var e = document.getElementById(id);
     if (e) e.style.display = admin ? '' : 'none';
   });
@@ -21519,6 +21539,13 @@ SG_MANUAL.modelos = { titulo: 'Asiento Modelo', html:
       + 'hay que tocarlos todos y el que se olvide queda mal por meses.',
       'Se usa en toda factura de compra y de venta')
 
+  + '<h3>La segunda puerta <span class="ver">V1010</span></h3>'
+  + '<p>El circuito <b>Descarga y servicios</b> también se elige desde <b>Gastos '
+  + 'Directos → 🤝 Control Cooperativa</b>, arriba de todo, donde además se ven las '
+  + 'cuentas que toca. Es <b>el mismo valor</b>, no una segunda configuración: se '
+  + 'guarda en un solo lugar y las dos pantallas muestran lo mismo. Dos puertas al '
+  + 'mismo cuarto, para no hacer cambiar de pantalla al que está trabajando.</p>'
+
   + '<h3>Si se da de baja un modelo que estaba en uso</h3>'
   + '<p>El circuito que lo tenía queda <b>en rojo</b> en el cuadro de arriba, avisando '
   + 'que hay que elegir otro. Antes se veía igual que uno sin elegir, y la diferencia '
@@ -21544,6 +21571,26 @@ SG_MANUAL.gastos = { titulo: 'Gastos Directos', html:
   + 'cuánto cobró.</li>'
   + '<li><b>🔁 Repasos</b> — el trabajo de reacondicionar mercadería que llegó mal.</li>'
   + '</ul>'
+
+  + '<h3>Contra qué se contabiliza la descarga <span class="ver">V1010</span></h3>'
+  + '<p>Arriba de todo en <b>🤝 Control Cooperativa</b> está el <b>asiento modelo</b> '
+  + 'con el que se van a contabilizar las facturas de las cooperativas, y debajo las '
+  + '<b>cuentas</b> que toca. La flechita <b>▸ Asiento contable</b> abre el cuadro '
+  + 'completo con el debe y el haber.</p>'
+  + '<ul>'
+  + '<li>Es <b>el mismo</b> que el circuito «Descarga y servicios» de Contabilidad SG → '
+  + 'Asiento Modelo: se guarda en un solo lugar, y cambiarlo en cualquiera de las dos '
+  + 'pantallas lo cambia en las dos. Está acá porque es donde se trabaja — el que '
+  + 'ingresa la factura tiene que ver contra qué va a entrar sin cambiar de pantalla.</li>'
+  + '<li>El <b>selector lo ve sólo la administración</b>. Elegir el modelo es '
+  + 'parametrizar, y se hace una vez.</li>'
+  + '<li>Si el modelo <b>no sirve</b> —le falta la línea de Proveedores, o alguna cuenta '
+  + 'se dio de baja— lo dice en amarillo <b>antes</b>, no cuando ya está la factura '
+  + 'cargada y el proveedor esperando.</li>'
+  + '</ul>'
+  + '<div class="ojo"><b>Sin modelo, la factura se guarda igual pero no asienta.</b> '
+  + 'La deuda con la cooperativa queda, el costo de la partida queda, y el asiento no '
+  + 'está. No rompe nada — se descubre al cierre, que es tarde.</div>'
 
   + '<h3>🤝 Control Cooperativa <span class="ver">V1003</span></h3>'
   + '<p>Cada renglón es <b>una descarga</b>: nace sola cuando en la recepción se contesta '
@@ -23633,7 +23680,7 @@ function sgCdsEstado(e){
 // La fila que más importa no es la que está pendiente de valorizar sino la que
 // dice "hubo descarga" y no tiene cooperativa asignada: ese trabajo se hizo,
 // alguien lo va a cobrar, y hoy no está anotado en ningún lado.
-var SGCC = { estado: '', filas: [], por: [], tot: null };
+var SGCC = { estado: '', filas: [], por: [], tot: null, modelo: null };
 
 // ── EL CATÁLOGO DE COOPERATIVAS ───────────────────────────────────────────
 // Una cooperativa es la cuadrilla que descarga. Siempre cuelga de un proveedor,
@@ -23709,6 +23756,10 @@ function sgCoopBaja(id){
 }
 
 function sgCcoopInit(){
+  // Acá y no adentro de sgCcoopLoad: sgCcoopLoad se dispara con cada filtro, con
+  // el botón ↻ y después de cada asignación. El asiento modelo no cambia porque
+  // se mueva una fecha, y rehacer el bloque cerraba el cuadro abierto.
+  sgCcoopModeloCargar();
   // Arranca mostrando el mes en curso: es el corte con el que se paga.
   var hoy = new Date();
   var d1 = new Date(hoy.getFullYear(), hoy.getMonth(), 1);
@@ -23744,6 +23795,87 @@ function sgCcoopEstado(e){
     else { sel.disabled = false; sel.title = ''; }
   }
   sgCcoopLoad();
+}
+
+// ══ CONTRA QUÉ SE CONTABILIZA LA DESCARGA ═════════════════════════════════
+//
+// Pablo, 3/9/2026: «necesito un selector de rubros... ponéme con qué asiento
+// modelo lo hacemos y lo seleccionamos ahí».
+//
+// ES LA MISMA PARAMETRIZACIÓN que el circuito «Descarga y servicios» de
+// Contabilidad SG, no una segunda: los dos escriben la misma clave. Que haya dos
+// puertas está bien; que hubiera dos valores sería un problema, y por eso esta
+// pantalla no guarda nada por su cuenta.
+//
+// Y muestra las CUENTAS, no el nombre del modelo: «Descarga cooperativa» no dice
+// contra qué se imputa, y lo que se viene a confirmar acá es justamente eso.
+function sgCcoopModeloCargar(){
+  sgAsientoModeloVisible();
+  var box = eid('sggd-modelo-cuerpo'); if (!box) return;
+  api('/api/sg/gastos-factura/modelo').then(function(r){
+    if (!r || !r.ok){ box.innerHTML = '<div style="color:var(--err)">No se pudo leer el asiento modelo.</div>'; return; }
+    var m = r.data.modelo, lista = r.data.modelos || [], faltan = r.data.faltan || [];
+    SGCC.modelo = m;
+    // VER Y CAMBIAR NO SON LO MISMO. El BLOQUE lo ve quien tenga alguna pantalla
+    // contable de SG (sgAsientoModeloVisible, con sgAsientoEsAdmin); el SELECTOR
+    // lo ve sólo el administrador, porque el PUT es requireAdmin y a cualquier
+    // otro le va a contestar 403. Es la misma división que hacen la liquidación,
+    // la factura de mercadería y las ventas, y por la misma razón: ofrecer un
+    // control que rebota hace creer que se rompió algo.
+    var esAdmin = sgFmEsAdmin();
+
+    var sel = '';
+    if (esAdmin){
+      sel = '<select id="sggd-modelo-sel" onchange="sgCcoopModeloGuardar()" '
+        + 'style="padding:6px 8px;border-radius:6px;border:1px solid var(--bor);background:var(--pan);min-width:260px">'
+        + '<option value="">— Elegí el asiento modelo —</option>'
+        + lista.map(function(x){
+            return '<option value="' + x.id + '"' + (m && x.id === m.id ? ' selected' : '') + '>'
+              + escH(x.nombre) + '</option>';
+          }).join('')
+        + '</select>';
+    }
+
+    if (!m){
+      box.innerHTML = '<div style="color:#9a3412;font-weight:600;margin-bottom:8px">'
+        + '⚠️ Todavía no se eligió con qué asiento se contabilizan las descargas: '
+        + 'la factura de la cooperativa se va a guardar sin contabilizar.'
+        + (r.data.id_perdido ? ' (El que estaba elegido se dio de baja.)' : '')
+        + '</div>'
+        + (esAdmin ? sel
+                   : '<div style="font-size:12px;color:var(--mut)">Pedile a un administrador que lo configure.</div>');
+      return;
+    }
+
+    var cuentas = (m.lineas || []).map(function(l){
+      return escH(l.cuenta_codigo || '?') + ' ' + escH(l.cuenta_nombre || '');
+    });
+    box.innerHTML = '<div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap">'
+        + '<div style="font-weight:700;font-size:14px">' + escH(m.nombre) + '</div>'
+        + '<span style="font-size:12px;color:var(--mut)">' + cuentas.length + ' cuentas</span>'
+        + sel
+      + '</div>'
+      + (faltan.length
+          ? '<div style="border:1.5px solid #e0a72e;background:rgba(224,167,46,.10);border-radius:8px;padding:9px 12px;margin-top:9px;font-size:12.5px;color:#9a3412">'
+            + '⚠️ Este modelo todavía no sirve para contabilizar: ' + faltan.map(escH).join(' · ') + '</div>'
+          : '<div style="font-size:12px;color:var(--mut);margin-top:6px">' + cuentas.join(' · ') + '</div>')
+      // El cuadro debe/haber completo, plegado. Lo pliega sgAsientoPlegado desde
+      // adentro de sgFmAsientoTabla —un solo clic en «▸ Asiento contable»—, que
+      // es la regla del repo: el asiento se muestra siempre y lo abre quien
+      // puede leerlo. Un botón propio encima daba dos desplegables y dos clics.
+      + '<div style="margin-top:8px">' + sgFmAsientoTabla(m.lineas || []) + '</div>';
+  });
+}
+
+function sgCcoopModeloGuardar(){
+  var sel = eid('sggd-modelo-sel'); if (!sel) return;
+  sel.disabled = true;
+  api('/api/sg/gastos-factura/modelo', 'PUT', { modelo_id: sel.value || null }).then(function(r){
+    sel.disabled = false;
+    if (!r || !r.ok){ toast((r && r.error) || 'No se pudo guardar', 'er'); sgCcoopModeloCargar(); return; }
+    toast(sel.value ? 'Las descargas se contabilizan con ese modelo' : 'Sin modelo: la factura no va a asentar', 'ok');
+    sgCcoopModeloCargar();
+  });
 }
 
 function sgCcoopLoad(){
