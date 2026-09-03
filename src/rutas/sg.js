@@ -11258,9 +11258,24 @@ router.post('/gastos-servicio/valorizar', requireAuth, (req, res) => {
     if (!items.length) return res.status(400).json({ ok: false, error: 'Nada para valorizar' });
     const ref = val(b.cuenta_ref) || db.prepare("SELECT 'SG-VAL-'||strftime('%Y%m%d%H%M%S','now','localtime') r").get().r;
     const fecha = db.prepare("SELECT date('now','localtime') d").get().d;
+    // ── SE PUEDE CORREGIR UN IMPORTE YA CARGADO ─────────────────────────
+    //
+    // Pablo, 3/9/2026: «permitime editar la valorización».
+    //
+    // Acá había un `AND estado='pendiente_valorizar'`: el importe se cargaba una
+    // vez y quedaba clavado. Y se carga A MANO mirando lo que dijo la cuadrilla,
+    // así que un cero de más se arrastraba al costo de la partida sin ninguna
+    // forma de arreglarlo desde el sistema.
+    //
+    // Corregir NO es peligroso mientras se rehaga el costo —se rehace, abajo—.
+    // Y queda rastro: fecha_valorizacion y valorizado_por se pisan con los de
+    // ahora, así que la pantalla dice quién puso el número que se está mirando.
+    //
+    // Lo que NO se toca es el estado 'anulado': un gasto anulado no vuelve por
+    // la puerta de atrás.
     const upd = db.prepare(`UPDATE sg_gastos_directos
       SET estado='valorizado', monto=?, fecha_valorizacion=?, valorizado_por=?, cuenta_ref=?
-      WHERE id=? AND proveedor_servicio_id=? AND estado='pendiente_valorizar' AND activo=1`);
+      WHERE id=? AND proveedor_servicio_id=? AND estado <> 'anulado' AND activo=1`);
     const tx = db.transaction(() => {
       let n = 0;
       const recepciones = new Set();   // FASE 2 — recepciones con descarga valorizada → recalcular costo

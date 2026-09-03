@@ -127,19 +127,23 @@ test('el botón está en la fila, y sólo en la que falta valorizar', () => {
   assert.ok(b.length >= 0);
 });
 
-test('a la ya valorizada no se le ofrece nada, porque el servidor no la pisaría', () => {
-  // El UPDATE lleva AND estado='pendiente_valorizar': un botón de corregir
-  // mandaría el pedido, no cambiaría nada, y contestaría que sí. Es el botón que
-  // no hace nada, otra vez.
+test('a la ya valorizada se le ofrece Editar, y el servidor la pisa', () => {
+  // Pablo, 3/9/2026: «permitime editar la valorización». El importe se carga a
+  // mano mirando lo que dijo la cuadrilla: un cero de más se arrastraba al costo
+  // de la partida sin ninguna forma de arreglarlo desde el sistema.
   const i = PANEL.indexOf('function sgCcoopRender(){');
   const b = PANEL.slice(i, i + 6000);
   assert.match(b, /f\.estado === 'valorizado'/);
-  // Se mira el BOTÓN, no la palabra: el comentario del código explica por qué no
-  // está, y buscar «Corregir» a secas se matchea a sí mismo.
-  assert.ok(!b.includes('>Corregir<'), 'volvió el botón de corregir, que no corrige nada');
+  assert.match(b, /✏️ Editar/);
   const j = SG.indexOf("router.post('/gastos-servicio/valorizar'");
   const r = SG.slice(j, SG.indexOf(SALTO + '});', j));
-  assert.match(r, /AND estado='pendiente_valorizar' AND activo=1/);
+  // Se mira el WHERE del UPDATE, no el bloque entero: el comentario de arriba
+  // cuenta que ahí había un candado, y buscarlo suelto se matchea a sí mismo.
+  const where = r.slice(r.indexOf('WHERE id=? AND proveedor_servicio_id=?'));
+  const clausula = where.slice(0, where.indexOf('`'));
+  assert.ok(!clausula.includes("estado='pendiente_valorizar'"), 'volvió el candado');
+  // Pero un gasto ANULADO no vuelve por la puerta de atrás.
+  assert.match(clausula, /AND estado <> 'anulado'/);
 });
 
 test('la tabla sigue sin pedir barra de desplazamiento lateral', () => {
@@ -241,8 +245,10 @@ test('Gastos Directos tiene su «¿Cómo se usa?»', () => {
   // Lo que de verdad hay que saber: sin el importe no se liquida.
   assert.ok(plano.includes('frena la liquidación'), 'no dice que un gasto sin valorizar frena');
   assert.ok(plano.includes('entra al costo del lote'), 'no dice cuándo entra al costo');
-  // Y que una vez valorizada no se corrige desde ahí, que es lo que se decidió.
-  assert.ok(plano.includes('no se corrige desde acá'), 'no avisa que no se puede corregir');
+  // Y lo único que corregir NO arregla: una liquidación ya emitida con el costo
+  // viejo no se mueve sola.
+  assert.ok(plano.includes('ya liquidada'),
+    'no avisa el riesgo de corregir después de haber liquidado');
 });
 
 test('y queda anotado con su versión', () => {

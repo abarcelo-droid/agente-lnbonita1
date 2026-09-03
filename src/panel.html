@@ -7442,11 +7442,12 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
       <div class="ab-table-wrap ff" style="overflow-x:hidden !important">
         <table class="pa-tbl" style="table-layout:fixed;width:100%">
         <thead><tr>
-          <th style="width:26%">Partida</th>
-          <th style="width:24%">Detalle</th>
-          <th style="width:13%">Fecha</th>
-          <th style="width:15%;text-align:right">Cant.</th>
-          <th style="width:22%;text-align:right">Monto $</th>
+          <th style="width:22%">Partida</th>
+          <th style="width:20%">Detalle</th>
+          <th style="width:12%">Fecha</th>
+          <th style="width:12%;text-align:right">Cant.</th>
+          <th style="width:17%;text-align:right">$ por unidad</th>
+          <th style="width:17%;text-align:right">Monto $</th>
         </tr></thead>
         <tbody id="sg-val-items"></tbody>
       </table></div>
@@ -21425,9 +21426,18 @@ SG_MANUAL.gastos = { titulo: 'Gastos Directos', html:
       'Sin cooperativa no hay a quién ponerle el importe, así que el botón de valorizar '
       + 'todavía no aparece: primero se dice de quién fue.', 'V1003')
 
-  + '<div class="ojo"><b>Una vez valorizada no se corrige desde acá.</b> El importe ya '
-  + 'entró al costo de la partida y puede haber una liquidación armada con él. Si salió '
-  + 'mal, avisá — se corrige a mano y se rehace el costo.</div>'
+  + sgManCampo('✏️ Editar',
+      'El importe de una descarga ya valorizada se puede corregir: se abre el mismo '
+      + 'cuadro con lo que tiene puesto y se pisa.',
+      'El número se carga a mano mirando lo que dijo la cuadrilla, y un cero de más se '
+      + 'arrastraba al costo de la partida sin ninguna forma de arreglarlo. Al corregir '
+      + 'se <b>rehace el costo</b> de los lotes de esa recepción, y queda anotado quién '
+      + 'lo cambió.', 'V1006')
+
+  + '<div class="ojo"><b>Ojo con corregir una partida ya liquidada.</b> Si con ese costo '
+  + 'ya se emitió una liquidación, el número de la liquidación no se mueve solo: cambia '
+  + 'el costo y el margen, no lo que se le pagó al productor. Si la diferencia importa, '
+  + 'hay que rehacer la liquidación.</div>'
 
   + '<h3>Qué cambió, y desde cuándo</h3>'
   + '<ul>'
@@ -21435,6 +21445,9 @@ SG_MANUAL.gastos = { titulo: 'Gastos Directos', html:
   + 'Antes el aviso mandaba a una solapa vieja que ya no existía: la descarga quedaba '
   + '«a valorizar» para siempre y la partida trabada, sin ningún lugar donde '
   + 'destrabarla.</li>'
+  + '<li><span class="ver">V1006</span> Se puede cargar el <b>precio por unidad</b> —lo '
+  + 'que cobra por bulto o por pallet— y el total sale solo, o al revés. Y una '
+  + 'valorización ya cargada <b>se puede corregir</b>.</li>'
   + '<li><span class="ver">V1005</span> El cuadro se ve entero: el aviso del IVA pasó '
   + 'abajo y a lo ancho —al lado le comía la mitad de la tabla y la partida salía '
   + 'cortada— y ya no se recorta ningún dato.</li>'
@@ -22942,8 +22955,17 @@ function sgGdsRenderVal(){
 //    (kg para flete; bultos/pallets para cargas/descargas). Reusada por Fletes y Cargas/Descargas.
 function sgGdsValAbrir(opts){   // opts:{prov, nombre, items:[{id,ref,sub,fecha,base,unidadLbl}], reload}
   SGGD.valProv=opts.prov; SGGD.valNombre=opts.nombre||''; SGGD.valReload=opts.reload||sgGdsLoad;
-  SGGD.valItems=(opts.items||[]).map(function(x){ return {id:x.id, ref:x.ref, sub:x.sub, fecha:x.fecha, base:Number(x.base)||0, unidadLbl:x.unidadLbl||'', monto:''}; });
-  eid('sg-val-tit').textContent='Valorizar cuenta — '+SGGD.valNombre;
+  SGGD.valItems=(opts.items||[]).map(function(x){
+    return {id:x.id, ref:x.ref, sub:x.sub, fecha:x.fecha, base:Number(x.base)||0,
+      unidadLbl:x.unidadLbl||'',
+      // El importe que ya tenía, para poder corregirlo. Abrir en blanco obligaba
+      // a acordarse de cuánto se había puesto — y a volver a tipearlo entero.
+      monto:(x.monto!=null&&x.monto!=='')?Number(x.monto):''};
+  });
+  // Corrigiendo, el título lo dice: abrir el mismo cuadro con el importe ya
+  // puesto y el mismo rótulo hace dudar de si se está por duplicar el gasto.
+  var yaTiene=(opts.items||[]).some(function(x){ return x.monto!=='' && x.monto!=null; });
+  eid('sg-val-tit').textContent=(yaTiene?'Editar valorización — ':'Valorizar cuenta — ')+SGGD.valNombre;
   document.querySelector('input[name="sg-val-modo"][value="remito"]').checked=true;
   eid('sg-val-total').value='';
   sgGdsValModo();
@@ -22976,6 +22998,7 @@ function sgGdsValRender(){
       +'<td style="'+cel+'">'+escH(it.sub||'—')+'</td>'
       +'<td style="'+cel+';white-space:nowrap">'+escH(it.fecha||'—')+'</td>'
       +'<td style="text-align:right;'+cel+'">'+nr(it.base)+(it.unidadLbl?(' '+escH(it.unidadLbl)):'')+'</td>'
+      +'<td style="text-align:right"><input type="number" min="0" step="0.01" value="'+sgGdsValUnit(it)+'" '+(ro?('readonly style="background:rgba(128,128,128,.12);'+inSty+'"'):('style="'+inSty+'"'))+' oninput="sgGdsValPorUnidad('+i+',this.value)" title="lo que cobra por '+escH(it.unidadLbl||'unidad')+'"></td>'
       +'<td style="text-align:right"><input type="number" min="0" step="0.01" value="'+(it.monto!==''&&it.monto!=null?it.monto:'')+'" '+(ro?('readonly style="background:rgba(128,128,128,.12);'+inSty+'"'):('style="'+inSty+'"'))+' oninput="sgGdsValMonto('+i+',this.value)"></td></tr>';
   }).join('');
   sgGdsValResumen();
@@ -22992,7 +23015,32 @@ function sgGdsValModoActual(){
   var r=document.querySelector('input[name="sg-val-modo"]:checked');
   return r ? r.value : 'remito';
 }
-function sgGdsValMonto(i,v){ SGGD.valItems[i].monto=(v===''?'':Number(v)); sgGdsValResumen(); }
+// ── EL PRECIO POR UNIDAD Y EL TOTAL SE SIGUEN ────────────────────────────
+//
+// Pablo, 3/9/2026: «sería bueno agregar el precio unitario».
+//
+// La cuadrilla no cotiza un total: cotiza «dos mil el pallet». Pedir sólo el
+// total obliga a multiplicar a mano y a redondear, y ese redondeo se va derecho
+// al costo de la partida. Se escribe el que se tenga y el otro sale solo.
+function sgGdsValUnit(it){
+  var b=Number(it.base)||0, m=Number(it.monto);
+  if(!(b>0)||it.monto===''||it.monto==null||isNaN(m)) return '';
+  return Math.round((m/b)*100)/100;
+}
+function sgGdsValPorUnidad(i,v){
+  var it=SGGD.valItems[i], b=Number(it.base)||0;
+  // Sin cantidad no hay de qué multiplicar: se deja el total como está en vez de
+  // ponerlo en cero, que sería borrar lo que el operador ya había escrito.
+  if(v===''){ it.monto=''; }
+  else if(b>0){ it.monto=Math.round(Number(v)*b*100)/100; }
+  sgGdsValRender();
+}
+function sgGdsValMonto(i,v){
+  SGGD.valItems[i].monto=(v===''?'':Number(v));
+  // El de al lado se recalcula solo. Se pinta el renglón entero y no sólo el
+  // resumen: si no, el precio por unidad se queda mostrando el de antes.
+  sgGdsValRender();
+}
 function sgGdsProrratear(){
   var total=Number(eid('sg-val-total').value)||0;
   var totBase=SGGD.valItems.reduce(function(a,x){return a+(x.base||0);},0);
@@ -23569,7 +23617,12 @@ function sgCcoopRender(){
           + '<td style="text-align:right">' + nr(f.pallets_recibidos) + '</td>'
           + '<td>' + esc(f.unidad || '—') + '</td>'
           + '<td>' + estado + '</td>'
-          + '<td style="text-align:right">' + (f.monto != null ? sgMoney(f.monto) : '—') + '</td>'
+          + '<td style="text-align:right">' + (f.monto != null ? sgMoney(f.monto) : '—')
+            + ((f.monto != null && Number(f.cantidad) > 0)
+                ? ('<div style="font-size:10.5px;color:var(--mut)">'
+                   + sgMoney(Math.round((Number(f.monto) / Number(f.cantidad)) * 100) / 100)
+                   + ' / ' + escH(f.unidad || 'unidad') + '</div>')
+                : '') + '</td>'
           // ── LA PLATA SE PONE ACÁ ──────────────────────────────────
           //
           // Sin cooperativa hay que asignarla primero: sin proveedor no hay a
@@ -23580,10 +23633,10 @@ function sgCcoopRender(){
           + '<td style="text-align:right;white-space:nowrap">' + (!f.gasto_id
               ? '<button class="btn bb bs" onclick="sgCcoopAsignar(' + f.recepcion_id + ')">Asignar</button>'
               : (f.estado === 'valorizado'
-                  // Ya tiene importe. Corregirlo no se ofrece porque el servidor
-                  // sólo pisa lo que está pendiente: el botón mandaría el pedido,
-                  // no cambiaría nada y contestaría que sí.
-                  ? ''
+                  // Pablo, 3/9/2026: «permitime editar la valorización». El importe
+                  // se carga a mano mirando lo que dijo la cuadrilla: un cero de más
+                  // se arrastraba al costo de la partida sin forma de arreglarlo.
+                  ? '<button class="btn bo bs" onclick="sgCcoopValorizar(' + f.gasto_id + ')">✏️ Editar</button>'
                   : '<button class="btn bb bs" onclick="sgCcoopValorizar(' + f.gasto_id + ')">💵 Valorizar</button>'))
             + '</td>'
           + '</tr>';
@@ -23618,9 +23671,12 @@ function sgCcoopValorizar(gastoId){
       sub: f.proveedor_nombre || '',
       fecha: f.fecha,
       // Lo que se le cobra: por bulto o por pallet, según lo que se acordó con
-      // la cuadrilla. Es la base con la que el cuadro prorratea un total.
+      // la cuadrilla. Es la base con la que el cuadro prorratea un total, y con
+      // la que sale el precio por unidad.
       base: f.cantidad,
       unidadLbl: f.unidad || '',
+      // El importe de hoy, si ya lo tiene: es lo que se viene a corregir.
+      monto: f.monto,
     }],
   });
 }
