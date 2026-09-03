@@ -77,6 +77,19 @@ tbody tr:hover{background:var(--burl)}
 label{font-size:12px;color:var(--mut);letter-spacing:.05em;text-transform:uppercase}
 input,select,textarea{background:var(--sur);border:1px solid var(--bor2);border-radius:7px;color:var(--txt);font-family:var(--sans);font-size:13.5px;padding:9px 12px;outline:none;transition:border-color .15s;width:100%}
 input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 0 3px rgba(26,58,92,.12)}
+/* ── LAS FLECHITAS DE LOS CAMPOS NUMÉRICOS, AFUERA ──────────────────────────
+   Pablo, 3/9/2026: «no me gustan las flechas para subir y bajar, las vi en
+   varios lugares, sacalo de todos lados».
+
+   Acá se cargan importes y cantidades de a miles: subir de a uno con una flecha
+   no sirve para nada, y en cambio se comen el ancho del campo justo donde está
+   el número —y un clic al pasar cambia una cifra sin que nadie se entere—.
+
+   Va una sola regla para todo el panel. Había dos copias sueltas (.pli-inp-num
+   y .sp-num) que sólo cubrían dos pantallas: se van, porque esto ya las cubre. */
+input[type=number]::-webkit-outer-spin-button,
+input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
+input[type=number]{-moz-appearance:textfield;appearance:textfield}
 .mb{display:none;position:fixed;inset:0;background:rgba(10,20,40,.55);z-index:100;align-items:center;justify-content:center}
 /* La pantalla de accesos se abre DESDE otro modal (Editar persona). Con el
    mismo z-index gana el que está más abajo en el archivo, y quedaba atrás. */
@@ -23027,19 +23040,43 @@ function sgGdsValUnit(it){
   if(!(b>0)||it.monto===''||it.monto==null||isNaN(m)) return '';
   return Math.round((m/b)*100)/100;
 }
+// ── ESCRIBIR EN UNO CAMBIA EL OTRO, SIN REDIBUJAR EL RENGLÓN ─────────────
+//
+// Pablo, 3/9/2026: «no anda bien la casilla donde pongo el importe».
+//
+// Y no andaba por lo de siempre: acá se llamaba a sgGdsValRender() con cada
+// tecla, que hace innerHTML= sobre la tabla. El campo donde se estaba
+// escribiendo se destruye, se pierde el foco, y sólo entra un carácter. Es el
+// mismo defecto que el del paso de calidad de la recepción, y lo metí yo ayer
+// al hacer que los dos campos se siguieran.
+//
+// Ahora se escribe DIRECTO en el campo de al lado: es un valor, no una fila
+// nueva. La tabla no se toca.
+function sgGdsValCampo(i, cual){
+  var f=eid('sg-val-items');
+  if(!f||!f.children) return null;
+  var fila=f.children[i];
+  if(!fila) return null;
+  // 0 partida · 1 detalle · 2 fecha · 3 cantidad · 4 $/unidad · 5 monto
+  var td=fila.children[cual==='unidad'?4:5];
+  return td ? td.querySelector('input') : null;
+}
 function sgGdsValPorUnidad(i,v){
   var it=SGGD.valItems[i], b=Number(it.base)||0;
   // Sin cantidad no hay de qué multiplicar: se deja el total como está en vez de
   // ponerlo en cero, que sería borrar lo que el operador ya había escrito.
   if(v===''){ it.monto=''; }
   else if(b>0){ it.monto=Math.round(Number(v)*b*100)/100; }
-  sgGdsValRender();
+  var otro=sgGdsValCampo(i,'monto');
+  if(otro) otro.value=(it.monto===''||it.monto==null)?'':it.monto;
+  sgGdsValResumen();
 }
 function sgGdsValMonto(i,v){
-  SGGD.valItems[i].monto=(v===''?'':Number(v));
-  // El de al lado se recalcula solo. Se pinta el renglón entero y no sólo el
-  // resumen: si no, el precio por unidad se queda mostrando el de antes.
-  sgGdsValRender();
+  var it=SGGD.valItems[i];
+  it.monto=(v===''?'':Number(v));
+  var otro=sgGdsValCampo(i,'unidad');
+  if(otro) otro.value=sgGdsValUnit(it);
+  sgGdsValResumen();
 }
 function sgGdsProrratear(){
   var total=Number(eid('sg-val-total').value)||0;
@@ -30634,10 +30671,8 @@ function sgRepExport(){
     /* Campos de carga: chicos no se leen. Los números van en monoespaciada y
        alineados a la derecha, que es como se comparan cifras. */
     .pli-inp { font-size:13px; padding:5px 7px; min-height:30px; box-sizing:border-box }
+    /* Las flechitas ya se sacan para todo el panel arriba, en la hoja base. */
     .pli-inp-num { font-family:ui-monospace,Consolas,monospace; text-align:right; letter-spacing:.02em }
-    .pli-inp-num::-webkit-outer-spin-button,
-    .pli-inp-num::-webkit-inner-spin-button { -webkit-appearance:none; margin:0 }
-    .pli-inp-num[type=number] { -moz-appearance:textfield }
     #sec-pli-planificacion .pa-tbl th { white-space:nowrap }
     /* NADA DE BARRA LATERAL (regla del repo), pero SÓLO EN LA VISTA NUEVA.
        La primera versión de esto apuntaba a `#pli-pane-comprar .ab-table-wrap`,
@@ -31003,10 +31038,8 @@ function sgRepExport(){
     .sp-money > input { padding-left:19px }
     /* Sin flechitas de subir/bajar: en un importe estorban para escribir, ocupan
        justo donde uno apunta a hacer click, y con el foco puesto la rueda del mouse
-       cambia el número sin que nadie lo haya pedido. */
-    .sp-num[type=number]::-webkit-outer-spin-button,
-    .sp-num[type=number]::-webkit-inner-spin-button { -webkit-appearance:none; margin:0 }
-    .sp-num[type=number] { -moz-appearance:textfield }
+       cambia el número sin que nadie lo haya pedido.
+       La regla vive arriba, en la hoja base, y ahora vale para TODO el panel. */
     .sp-chica { font-size:11px; color:var(--mut) }
     .sp-inp { font-size:13px; padding:5px 7px; min-height:30px; box-sizing:border-box }
     /* Línea de tiempo del expediente */

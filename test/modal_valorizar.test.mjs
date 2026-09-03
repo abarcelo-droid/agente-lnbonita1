@@ -31,7 +31,7 @@ const SALTO = String.fromCharCode(13, 10);
 
 function cuadro(items) {
   const nombres = ['sgGdsValRender', 'sgGdsValModoActual', 'sgGdsValModo', 'sgGdsValResumen',
-    'sgGdsValUnit', 'sgGdsValPorUnidad', 'sgGdsValMonto'];
+    'sgGdsValUnit', 'sgGdsValCampo', 'sgGdsValPorUnidad', 'sgGdsValMonto'];
   let src = '';
   for (const n of nombres) {
     const i = PANEL.indexOf('function ' + n + '(');
@@ -39,7 +39,9 @@ function cuadro(items) {
     src += PANEL.slice(i, PANEL.indexOf(SALTO + '}', i) + 3) + SALTO;
   }
   const campos = {
-    'sg-val-items': { innerHTML: '' },
+    // children arranca vacío: el modal se arma antes de pintar, y los handlers
+    // tienen que aguantarlo.
+    'sg-val-items': { innerHTML: '', children: [] },
     'sg-val-modobox': { style: { display: 'none' } },
     'sg-val-totalbox': { style: { display: 'none' } },
     'sg-val-total': { value: '' },
@@ -63,7 +65,7 @@ function cuadro(items) {
   // eslint-disable-next-line no-new-func
   const F = new Function(...ns, src
     + 'return { sgGdsValRender, sgGdsValModo, sgGdsValModoActual, sgGdsValUnit,'
-    + ' sgGdsValPorUnidad, sgGdsValMonto };')(...ns.map((n) => entorno[n]));
+    + ' sgGdsValCampo, sgGdsValPorUnidad, sgGdsValMonto };')(...ns.map((n) => entorno[n]));
   return { ...F, campos, items: SGGD.valItems, elegir: (v) => { radio = v; } };
 }
 
@@ -228,14 +230,12 @@ test('escribiendo el precio por unidad sale el total', () => {
   assert.equal(c.items[0].monto, 10300, '5 pallets a 2.060 son 10.300');
 });
 
-test('y escribiendo el total sale el precio por unidad, EN PANTALLA', () => {
-  // Se mira el renglón dibujado, no la cuenta: si sólo se refrescara el total,
-  // el campo de al lado seguiría mostrando el precio de antes.
+test('y escribiendo el total sale el precio por unidad', () => {
+  // Que además se escriba en el campo de al lado se prueba más abajo, con el
+  // DOM: acá sólo la cuenta.
   const c = cuadro([{ ...UNA[0] }]);
   c.sgGdsValMonto(0, '10300');
   assert.equal(c.sgGdsValUnit(c.items[0]), 2060);
-  assert.match(c.campos['sg-val-items'].innerHTML, /value="2060"/,
-    'el precio por unidad se quedó con el número viejo');
 });
 
 test('los dos campos se ven en la fila', () => {
@@ -335,4 +335,95 @@ test('el manual cuenta el precio por unidad, el editar y su riesgo', () => {
   // Y avisa lo que corregir NO hace: mover una liquidación ya emitida.
   assert.ok(plano.includes('ya liquidada'), 'no avisa el riesgo de corregir después de liquidar');
   assert.match(m, /<span class="ver">V1006<\/span>/);
+});
+
+// ── 8 · ESCRIBIR EN LA CASILLA, SIN PERDER EL FOCO ─────────────────────────
+//
+// Pablo, 3/9/2026: «no anda bien la casilla donde pongo el importe».
+//
+// Y no andaba por lo de siempre: se llamaba a sgGdsValRender() con cada tecla,
+// que hace innerHTML= sobre la tabla. El campo donde se estaba escribiendo se
+// destruye, se pierde el foco, y sólo entra un carácter. Es el mismo defecto del
+// paso de calidad de la recepción — y lo metí yo al hacer que los dos campos se
+// siguieran.
+
+function cuadroConDom(items) {
+  const c = cuadro(items);
+  // Un DOM mínimo para la tabla: seis celdas por fila, con su input en las dos
+  // últimas. Alcanza para ver si el handler redibuja o escribe derecho.
+  const campos = [];
+  const fila = (i) => ({
+    children: [0, 1, 2, 3, 4, 5].map((k) => ({
+      querySelector: () => (k >= 4 ? (campos[i] = campos[i] || {})[k] : null),
+    })),
+  });
+  for (let i = 0; i < items.length; i++) { campos[i] = { 4: { value: '' }, 5: { value: '' } }; }
+  c.campos['sg-val-items'].children = items.map((_, i) => ({
+    children: [0, 1, 2, 3, 4, 5].map((k) => ({
+      querySelector: () => (k >= 4 ? campos[i][k] : null),
+    })),
+  }));
+  void fila;
+  return { ...c, dom: campos };
+}
+
+test('escribir el precio por unidad NO redibuja la tabla', () => {
+  // Si redibuja, el campo donde se está escribiendo desaparece y sólo entra una
+  // tecla. Se cuenta el innerHTML: tiene que quedar igual que antes.
+  const c = cuadroConDom([{ ...UNA[0] }]);
+  c.campos['sg-val-items'].innerHTML = 'MARCA';
+  c.sgGdsValPorUnidad(0, '2060');
+  assert.equal(c.campos['sg-val-items'].innerHTML, 'MARCA',
+    'redibujó la tabla: el campo pierde el foco y sólo entra un carácter');
+});
+
+test('y escribir el monto tampoco', () => {
+  const c = cuadroConDom([{ ...UNA[0] }]);
+  c.campos['sg-val-items'].innerHTML = 'MARCA';
+  c.sgGdsValMonto(0, '10300');
+  assert.equal(c.campos['sg-val-items'].innerHTML, 'MARCA', 'redibujó la tabla');
+});
+
+test('pero el campo de al lado sí se actualiza', () => {
+  const c = cuadroConDom([{ ...UNA[0] }]);
+  c.sgGdsValPorUnidad(0, '2060');
+  assert.equal(c.dom[0][5].value, 10300, 'el total no se actualizó');
+  c.sgGdsValMonto(0, '5150');
+  assert.equal(c.dom[0][4].value, 1030, 'el precio por unidad no se actualizó');
+});
+
+test('borrar el precio por unidad vacía el total en pantalla, no lo pone en cero', () => {
+  const c = cuadroConDom([{ ...UNA[0], monto: 10300 }]);
+  c.sgGdsValPorUnidad(0, '');
+  assert.equal(c.items[0].monto, '');
+  assert.equal(c.dom[0][5].value, '');
+});
+
+test('y si la tabla todavía no está dibujada, no revienta', () => {
+  // El modal se arma antes de pintar: un handler que dé por hecho el DOM tira
+  // una excepción y corta el guardado. Se prueban los dos huecos: la tabla sin
+  // hijos todavía, y el contenedor sin la lista de hijos.
+  for (const hijos of [[], undefined]) {
+    const c = cuadro([{ ...UNA[0] }]);
+    c.campos['sg-val-items'].children = hijos;
+    c.sgGdsValPorUnidad(0, '2060');
+    assert.equal(c.items[0].monto, 10300, 'no guardó el valor con children = ' + hijos);
+  }
+});
+
+// ── 9 · LAS FLECHITAS, AFUERA DE TODO EL PANEL ─────────────────────────────
+
+test('ningún campo numérico del panel muestra las flechitas', () => {
+  // Pablo, 3/9/2026: «no me gustan las flechas para subir y bajar, las vi en
+  // varios lugares, sacalo de todos lados». Acá se cargan importes de a miles:
+  // subir de a uno no sirve, se comen el ancho justo donde está el número, y con
+  // el foco puesto la rueda del mouse cambia una cifra sin que nadie lo pida.
+  assert.match(PANEL, /input\[type=number\]::-webkit-outer-spin-button,\r?\ninput\[type=number\]::-webkit-inner-spin-button\{-webkit-appearance:none;margin:0\}/);
+  assert.match(PANEL, /input\[type=number\]\{-moz-appearance:textfield;appearance:textfield\}/);
+});
+
+test('y las dos copias sueltas que sólo tapaban dos pantallas se fueron', () => {
+  // Una regla por pantalla es una regla que la próxima pantalla no tiene.
+  assert.ok(!PANEL.includes('.pli-inp-num::-webkit-outer-spin-button'), 'quedó la copia de .pli-inp-num');
+  assert.ok(!PANEL.includes('.sp-num[type=number]::-webkit-outer-spin-button'), 'quedó la copia de .sp-num');
 });
