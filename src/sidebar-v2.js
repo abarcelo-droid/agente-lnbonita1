@@ -36,7 +36,7 @@ const MAX_RECIENTES = 4;
 // SE ACTUALIZA A MANO, en el mismo cambio que se mergea. Sacarlo de git en el
 // arranque sonaba mejor, pero Railway despliega desde una copia sin historial:
 // diría siempre lo mismo y mentiría, que es peor que no estar.
-const VERSION = 'V996';
+const VERSION = 'V997';
 
 let SIDEBAR_DATA = { grupos: [], modulos: [] };
 let SOCIEDADES = [];                             // array de {id, nombre, funcion}
@@ -83,6 +83,10 @@ function getRecientes(){
   catch(_) { return []; }
 }
 function pushReciente(modulo){
+  // Mejoras no es un módulo del menú: no está en MODULO_INDEX, así que
+  // renderRecientes lo descarta igual — pero antes le come uno de los cuatro
+  // lugares a un módulo de verdad. Ya está fijo arriba de todo: no necesita atajo.
+  if (modulo === 'mejoras') return;
   let r = getRecientes().filter(m => m !== modulo);
   r.unshift(modulo);
   r = r.slice(0, MAX_RECIENTES);
@@ -210,6 +214,18 @@ function buildSidebar(){
 
     <!-- Recientes -->
     <div id="sb2-recientes-wrap"></div>
+
+    <!-- MEJORAS — fuera de todos los menús, arriba de COMERCIAL.
+         Pablo, 2/9/2026: «como un menú aparte arriba de donde dice comercial».
+         No sale de modulos_config: proponer una mejora lo puede hacer cualquiera,
+         y un módulo con permisos sería un buzón que hay que habilitar persona por
+         persona — justo lo contrario de unificar el canal. -->
+    <div class="sb2-fastlane mej">
+      <a class="sb2-ni" data-sec="mejoras" href="#" title="Proponer una mejora sobre cualquier pantalla que uses">
+        <span class="sb2-ni-ico">💡</span>
+        <span class="sb2-ni-text">Mejoras</span>
+      </a>
+    </div>
 
     <!-- Divider fuerte entre fast lanes y menú normal -->
     <div class="sb2-divider"></div>

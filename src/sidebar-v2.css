@@ -299,6 +299,9 @@
 .sb2-fastlane + .sb2-fastlane{ margin-top: 8px }
 .sb2-fastlane.fav{ background: rgba(240,165,0,.06); border-color: rgba(240,165,0,.18) }
 .sb2-fastlane.rec{ background: rgba(91,127,176,.06); border-color: rgba(91,127,176,.18) }
+/* MEJORAS — el buzon. Verde, distinto de favoritos y de recientes: es el unico
+   item del menu que no lleva a una pantalla de trabajo sino a pedir algo. */
+.sb2-fastlane.mej{ background: rgba(34,160,90,.07); border-color: rgba(34,160,90,.20) }
 
 .sb2-fastlane .sb2-group-sec{
   padding: 8px 12px 4px;

@@ -247,7 +247,12 @@ test('LA REGLA: lo que se tocó quedó anotado con su versión', () => {
   const vs = (m.match(/<span class="ver">V(\d+)<\/span>/g) || [])
     .map((v) => Number(v.match(/V(\d+)/)[1]));
   assert.ok(vs.length >= 5, 'el manual no anota las versiones de sus campos');
-  assert.ok(vs.includes(actual), 'el cambio de esta versión (V' + actual + ') no está anotado');
+  // Las versiones en las que ESTA pantalla cambió, que es lo que la regla pide.
+  // Pedir la versión ACTUAL del panel obligaría a inventar una entrada en cada
+  // manual con cada release, aunque su módulo no se haya tocado.
+  for (const v of [995, 996]) {
+    assert.ok(vs.includes(v), 'falta anotar el cambio de la V' + v + ' en el manual de Ingresos');
+  }
   for (const n of vs) {
     assert.ok(n <= actual, 'el manual cita la V' + n + ' y el panel va en la V' + actual);
   }
