@@ -59,7 +59,11 @@ test('la descarga sin valorizar frena, y manda a valorizarla', () => {
   const i = SERV.indexOf('export function frenoParaLiquidar(');
   const b = SERV.slice(i, i + 2200);
   assert.match(b, /if \(g\.descarga > 0\)/);
-  assert.match(b, /Gastos Directos → Cargas y Descargas/);
+  // Manda a Control Cooperativa, al botón de la fila. «Cargas y Descargas» era
+  // una solapa que dejó de existir: el aviso decía dónde destrabar y ahí no
+  // había nada, así que la partida se quedaba trabada para siempre.
+  assert.match(b, /Gastos Directos → Control Cooperativa/);
+  assert.match(b, /bot[óo]n «Valorizar» de la fila/);
   // Y dice que alcanza con el importe: es la distinción que hizo Pablo.
   assert.match(b, /alcanza con el importe, la factura puede/);
 });
@@ -147,7 +151,7 @@ test('la pantalla frena y dice las tres cosas con su camino', () => {
   assert.ok(i > 0, 'no está el bloque de frenos');
   const b = PANEL.slice(i, i + 2400);
   assert.match(b, /Remitos pendientes de comprobante/);
-  assert.match(b, /Gastos Directos → Cargas y Descargas/);
+  assert.match(b, /Gastos Directos → Control Cooperativa/);
   assert.match(b, /Gastos Directos → Fletes de entrada/);
   assert.match(b, /Esta partida todavía no se puede liquidar/);
 });
