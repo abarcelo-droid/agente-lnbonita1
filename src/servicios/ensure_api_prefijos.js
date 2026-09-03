@@ -226,7 +226,7 @@ const PREFIJOS = [
   // seguía con requireAdmin: aflojarlo lo habría dejado abierto a cualquier sesión.
   // Declarado acá, el nivel lo cuida y la valorización vuelve a ser trabajo del día.
   // Cierra también el asiento-preview del flete, que ya salía con requireAuth.
-  ['sg-gastos-directos', 'sg/gastos-directos,sg/gastos-servicio,sg/proveedores-servicio,sg/control-coop,sg/cooperativas,sg/fletes-entrada'],
+  ['sg-gastos-directos', 'sg/gastos-directos,sg/gastos-servicio,sg/gastos-factura,sg/gastos-facturables,sg/proveedores-servicio,sg/control-coop,sg/cooperativas,sg/fletes-entrada'],
   ['sg-reprocesos',      'sg/reprocesos,sg/transformaciones'],
   ['sg-importacion',     'sg/embarques'],
   // Control Cooperativa es casi todo lectura, pero tiene UNA escritura: asignar
