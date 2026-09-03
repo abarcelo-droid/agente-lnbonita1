@@ -269,45 +269,116 @@ test('guarda el nombre de la pantalla y de quien propuso, no sólo los ids', () 
 
 // ── 7 · LA PANTALLA ────────────────────────────────────────────────────────
 
-test('el ítem está FUERA de todos los menús y arriba de COMERCIAL', () => {
-  // Pablo: «como un menú aparte arriba de donde dice comercial». Va suelto,
-  // arriba del divisor de «Menú completo», con favoritos y recientes.
-  const i = SIDEBAR.indexOf('sb2-fastlane mej');
-  assert.ok(i > 0, 'no está el ítem de Mejoras en el sidebar');
-  const j = SIDEBAR.indexOf('<div class="sb2-divider">', i);
-  const k = SIDEBAR.indexOf('id="sb2-grupos"', i);
-  assert.ok(j > i && k > j, 'el ítem quedó abajo del menú completo');
-  assert.match(SIDEBAR.slice(i, j), /data-sec="mejoras"/);
-});
-test('y SE VE: lleva rótulo propio, como Favoritos y Recientes', () => {
-  // Sin el rótulo era una cajita con un renglón suelto adentro, y a simple vista
-  // parecía un hueco entre Recientes y «Menú completo». Pablo: «no me aparece».
-  //
-  // Los tres bloques sueltos del menú se arman igual: .sb2-fastlane con su
-  // .sb2-group-sec arriba. El que no lo lleva no se lee como una sección.
-  const i = SIDEBAR.indexOf('sb2-fastlane mej');
-  const b = SIDEBAR.slice(i, SIDEBAR.indexOf('<div class="sb2-divider">', i));
-  assert.match(b, /<div class="sb2-group-sec">/);
-  assert.ok(b.includes('<span class="sb2-label">\u{1F4A1} Mejoras</span>'),
-    'el bloque no lleva su rótulo');
-  // Y el renglón dice qué se hace, no repite el título.
-  assert.ok(b.includes('<span class="sb2-ni-text">Proponer una mejora</span>'),
-    'el renglón no dice qué se hace ahí');
+// ── 7 · LA PANTALLA Y EL MENÚ ──────────────────────────────────────────────
+//
+// LA LECCIÓN CARA DE ESTE MÓDULO. El ítem estaba escrito A MANO en el template
+// del menú, con sus clases copiadas de Favoritos. En pantalla salía una barrita
+// de color sin contenido: dependía de heredar bien tres clases y no lo hacía. Y
+// como no estaba en MODULO_INDEX, el buscador ⌘K contestaba «sin resultados».
+//
+// Todo el resto del menú se dibuja por UN camino —renderGrupos → niHTML— que
+// anda hace meses. Escribir un segundo camino para un solo ítem fue el error.
+// Ahora Mejoras es un GRUPO más, el primero, y se dibuja como los otros veinte.
+
+// Se ejecuta el armado REAL del archivo: si alguien lo cambia, el test lo dice.
+function gruposConMejoras(desdeElServidor) {
+  const i = SIDEBAR.indexOf('const MEJORAS = {');
+  assert.ok(i > 0, 'no está el grupo sintético de Mejoras');
+  const j = SIDEBAR.indexOf('.concat(SIDEBAR_DATA.grupos || []);', i);
+  assert.ok(j > i);
+  const src = SIDEBAR.slice(i, j + '.concat(SIDEBAR_DATA.grupos || []);'.length);
+  // eslint-disable-next-line no-new-func
+  return new Function('SIDEBAR_DATA', src + '\nreturn SIDEBAR_DATA.grupos;')(
+    { grupos: desdeElServidor });
+}
+
+test('Mejoras es el PRIMER grupo del menú, arriba de Comercial', () => {
+  // Pablo: «como un menú aparte arriba de donde dice comercial».
+  const g = gruposConMejoras([
+    { grupo: 'Comercial', items: [{ modulo: 'crm', sociedad_id: 1 }] },
+    { grupo: 'Pricing', items: [{ modulo: 'pricing', sociedad_id: 1 }] },
+  ]);
+  assert.equal(g[0].grupo, 'Mejoras');
+  assert.equal(g[1].grupo, 'Comercial');
+  assert.deepEqual(g[0].items.map((m) => m.modulo), ['mejoras']);
 });
 
-test('el CSS le da color propio al rótulo y al renglón, como a los otros dos', () => {
-  const CSS = fs.readFileSync(path.join(RAIZ, 'src/sidebar-v2.css'), 'utf8');
-  assert.ok(CSS.includes('.sb2-fastlane.mej .sb2-group-sec{ color: #9FE3B8 }'),
-    'el rótulo no tiene color propio');
-  assert.ok(CSS.includes('.sb2-fastlane.mej .sb2-ni{ color: rgba(255,255,255,.92) }'),
-    'el renglón no tiene color propio');
-  // El tinte tiene que verse sobre un fondo oscuro: con 7% no se distinguía del
-  // hueco que había al lado.
-  const m = CSS.match(/\.sb2-fastlane\.mej\{ background: rgba\(\d+,\d+,\d+,\.(\d+)\)/);
-  assert.ok(m, 'no está el fondo del bloque');
-  assert.ok(Number(m[1]) >= 10, 'el fondo del bloque quedó demasiado transparente');
+test('y lo ve todo el mundo, en cualquiera de las cuatro empresas', () => {
+  // No sale de modulos_config a propósito: ahí un módulo se ve sólo si el
+  // administrador se lo tildó a cada uno, y este buzón tiene que verlo todos.
+  const m = gruposConMejoras([])[0].items[0];
+  assert.equal(m.sociedad_id, null, 'quedó atado a una empresa: las otras tres no lo ven');
+  // shouldShow deja pasar todo lo que no tiene empresa. Se corre la función real.
+  const i = SIDEBAR.indexOf('function shouldShow(m){');
+  // eslint-disable-next-line no-new-func
+  const shouldShow = new Function('CURRENT_SOCIEDAD',
+    SIDEBAR.slice(i, SIDEBAR.indexOf('\r\n}', i) + 3) + '\nreturn shouldShow;')(3);
+  assert.equal(shouldShow(m), true, 'el menú lo escondería al elegir una empresa');
 });
 
+test('se dibuja por el MISMO camino que los otros veinte ítems', () => {
+  // Escrito a mano quedaba una barrita de color sin contenido. renderGrupos y
+  // niHTML son el único camino que dibuja bien un ítem del menú.
+  assert.ok(!SIDEBAR.includes('sb2-fastlane mej'),
+    'volvió el bloque escrito a mano en el template');
+  const i = SIDEBAR.indexOf('function gruposHTML(grupos, collapsed){');
+  assert.ok(i > 0, 'no está el armador de grupos');
+  assert.match(SIDEBAR.slice(i, i + 700), /g\.items\.map\(m => niHTML\(m, false\)\)/);
+});
+
+test('y el aviso de «no tenés accesos» no desaparece por culpa de Mejoras', () => {
+  // Mejoras está SIEMPRE, así que contándolo el menú nunca queda «vacío» y ese
+  // aviso —la única forma que tiene alguien recién dado de alta de entender qué
+  // le falta— no se mostraría nunca más.
+  const i = SIDEBAR.indexOf('function renderGrupos(){');
+  const b = SIDEBAR.slice(i, SIDEBAR.indexOf('function gruposHTML', i));
+  assert.ok(b.includes('const conAccesos = gruposFiltrados'),
+    'el menú vacío se sigue midiendo contando lo sintético');
+  assert.match(b, /if \(!conAccesos\)\{/);
+  assert.ok(!/if \(!gruposFiltrados\.length\)\{/.test(b), 'volvió a contar lo sintético');
+  // Y el grupo de Mejoras se dibuja igual junto al aviso: es justamente por donde
+  // esa persona puede pedir que le den los accesos.
+  assert.match(b, /wrap\.innerHTML = gruposHTML\(gruposFiltrados, collapsed\) \+ \(tieneEnOtra/);
+  // Son DOS los que tienen que ignorar lo sintético: el que decide si el menú
+  // está vacío, y el que decide cuál de los dos avisos mostrar. Si el segundo lo
+  // contara, a alguien sin ningún acceso le diría «probá cambiando de empresa».
+  assert.equal((b.match(/\.some\(m => !m\.sintetico\)/g) || []).length, 2,
+    'uno de los dos vuelve a contar el grupo de Mejoras como si fuera un acceso');
+});
+
+test('aparece en el buscador ⌘K: escribir «mejora» lo encuentra', () => {
+  // Era el segundo síntoma del mismo error: el buscador se arma con
+  // MODULO_INDEX, y MODULO_INDEX se arma recorriendo SIDEBAR_DATA.grupos.
+  // Estando fuera de los grupos, «mejoras» contestaba «sin resultados».
+  // El índice se arma DENTRO de fetchSidebarData: la primera aparición del
+  // nombre es la declaración de arriba de todo.
+  const i = SIDEBAR.indexOf('  // Index global por modulo');
+  assert.ok(i > 0, 'no se encontró el armado del índice');
+  assert.match(SIDEBAR.slice(i, i + 260), /for \(const g of SIDEBAR_DATA\.grupos\)\{/);
+  // Y el grupo se agrega ANTES de armar el índice, o no entra.
+  assert.ok(SIDEBAR.indexOf('const MEJORAS = {') < i,
+    'el grupo se agrega después de armar el índice: el buscador no lo va a ver');
+});
+
+test('el ítem no lleva estrella de favorito, que contestaría 404', () => {
+  // La ruta de favoritos valida contra modulos_config, y este módulo no está ahí.
+  // Ofrecer la estrella es ofrecer un botón que rebota.
+  const m = gruposConMejoras([])[0].items[0];
+  assert.equal(m.sintetico, true);
+  const i = SIDEBAR.indexOf('function niHTML(m, isFavSection){');
+  const b = SIDEBAR.slice(i, SIDEBAR.indexOf('const isFav =', i));
+  assert.match(b, /if \(m\.sintetico\)\{/);
+  assert.ok(!b.includes('sb2-star'), 'el ítem sintético sigue llevando estrella');
+});
+
+test('tiene ícono propio, y el grupo también', () => {
+  // groupIcon devuelve «·» para lo que no conoce, y el renglón quedaría con el
+  // ícono genérico.
+  const i = SIDEBAR.indexOf('function groupIcon(grupo){');
+  assert.match(SIDEBAR.slice(i, i + 600), /'Mejoras':\s+'💡',/);
+  const j = SIDEBAR.indexOf('function moduleIcon(m){');
+  assert.match(SIDEBAR.slice(j, j + 400), /'mejoras':\s+'✍️',/);
+});
 
 test('y navega: existe el .ni puente del nav viejo', () => {
   // El menú que se ve lo dibuja sidebar-v2, pero el que NAVEGA es el <nav>
@@ -316,7 +387,6 @@ test('y navega: existe el .ni puente del nav viejo', () => {
   assert.match(PANEL, /<div class="ni" data-sec="mejoras">/);
   assert.match(PANEL, /<div class="sec sg-mod" id="sec-mejoras">/);
   // Y entrar a la pantalla la carga.
-  // Hay cuatro «var m = {» en el panel: se ancla en el mapa de secciones.
   const i = PANEL.indexOf('inicio: loadInicio, pedidos: loadPedidos');
   assert.ok(i > 0, 'no se encontró el mapa de carga de secciones');
   assert.match(PANEL.slice(i - 300, i + 60), /mejoras: mejLoad,/);
@@ -375,7 +445,7 @@ test('tiene su «¿Cómo se usa?», con su versión', () => {
   // Y cada campo lleva la suya, que la arma sgManCampo al dibujar.
   assert.ok((m.match(/, 'V\d+'\)/g) || []).length >= 5,
     'los campos del manual no están anotados con su versión');
-  for (const v of [997, 998]) {
+  for (const v of [997, 999]) {
     assert.ok(vs.includes(v), 'falta anotar el cambio de la V' + v + ' en el manual de Mejoras');
   }
   for (const n of vs) assert.ok(n <= actual, 'el manual cita la V' + n + ' y el panel va en la V' + actual);
