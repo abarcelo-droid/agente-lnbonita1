@@ -7415,20 +7415,45 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
   </div>
 </div>
 
-<!-- Modal Valorizar cuenta de fletero (Gastos Directos · Fletes de salida) -->
+<!-- ══ VALORIZAR — el importe de un servicio ya prestado ════════════════════
+     Pablo, 3/9/2026: «no barras laterales, y por ahora saquemos las 2 opciones
+     que me das. Simplemente aclará que la valorización se hace en valores SIN
+     IVA, y permitinos poner el valor en la partida».
+
+     LAS DOS OPCIONES SÓLO APARECEN CUANDO SIRVEN. Con UNA operación —que es
+     siempre el caso de una descarga— «monto por operación» y «total a repartir»
+     dan exactamente lo mismo: es una pregunta cuya respuesta no cambia nada.
+     Con varias —la cuenta de un fletero con veinte remitos— sí importa, y ahí se
+     muestra: tipear veinte importes a mano en vez de repartir uno es peor.
+
+     NADA DE BARRAS LATERALES: la tabla usa el ancho que hay, con anchos por
+     columna, y lo de largo variable se trunca. -->
 <div class="ab-modal-overlay" id="sg-val-modal">
-  <div class="ab-modal" style="width:740px;max-width:96vw;max-height:90vh;overflow-y:auto">
+  <div class="ab-modal" style="width:min(760px,96vw);max-width:96vw;max-height:90vh;overflow-y:auto;overflow-x:hidden">
     <div class="mhd"><div class="mht" id="sg-val-tit">Valorizar cuenta</div><button class="mcl" onclick="closeMB('sg-val-modal')">×</button></div>
     <div class="fg">
-      <div style="display:flex;gap:18px;align-items:center;margin-bottom:12px;flex-wrap:wrap">
+      <!-- EL IMPORTE VA SIN IVA. Es el número que entra al costo de la partida, y
+           el costo no lleva IVA: el crédito fiscal se recupera aparte. Cargado
+           con IVA, la partida sale un 21% más cara y el margen miente. -->
+      <div style="font-size:12.5px;background:rgba(240,165,0,.10);border:1px solid rgba(240,165,0,.30);border-radius:8px;padding:8px 10px;margin-bottom:12px">
+        Los importes se cargan <b>SIN IVA</b> — es lo que entra al costo de la partida.
+      </div>
+      <div id="sg-val-modobox" style="display:none;gap:18px;align-items:center;margin-bottom:12px;flex-wrap:wrap">
         <label style="font-weight:600"><input type="radio" name="sg-val-modo" value="remito" checked onchange="sgGdsValModo()" style="width:auto"> Monto por operación</label>
         <label style="font-weight:600"><input type="radio" name="sg-val-modo" value="total" onchange="sgGdsValModo()" style="width:auto"> Total a repartir (prorrateo por cantidad)</label>
       </div>
       <div id="sg-val-totalbox" style="display:none;margin-bottom:12px">
-        <div class="fl"><label>Total de la cuenta ($)</label><input type="number" id="sg-val-total" min="0" step="0.01" oninput="sgGdsProrratear()" placeholder="se reparte entre las operaciones por su cantidad (kg / bultos / pallets)"></div>
+        <div class="fl"><label>Total de la cuenta ($, sin IVA)</label><input type="number" id="sg-val-total" min="0" step="0.01" oninput="sgGdsProrratear()" placeholder="se reparte entre las operaciones por su cantidad (kg / bultos / pallets)"></div>
       </div>
-      <div class="ab-table-wrap"><table class="pa-tbl">
-        <thead><tr><th>Operación</th><th>Detalle</th><th>Fecha</th><th style="text-align:right">Cant.</th><th style="text-align:right">Monto $</th></tr></thead>
+      <div class="ab-table-wrap" style="overflow-x:hidden !important">
+        <table class="pa-tbl" style="table-layout:fixed;width:100%">
+        <thead><tr>
+          <th style="width:30%">Partida</th>
+          <th style="width:26%">Detalle</th>
+          <th style="width:14%">Fecha</th>
+          <th style="width:12%;text-align:right">Cant.</th>
+          <th style="width:18%;text-align:right">Monto $</th>
+        </tr></thead>
         <tbody id="sg-val-items"></tbody>
       </table></div>
       <div id="sg-val-resumen" style="text-align:right;font-weight:700;margin-top:10px"></div>
@@ -21376,9 +21401,12 @@ SG_MANUAL.gastos = { titulo: 'Gastos Directos', html:
   + '</ul>'
 
   + sgManCampo('💵 Valorizar',
-      'El botón de la fila. Se pone el <b>importe</b> de esa descarga, o un total a '
-      + 'repartir entre varias — se reparte por lo que se le cobra, bultos o pallets. '
-      + '<b>Alcanza con el importe:</b> la factura de la cooperativa puede llegar después.',
+      'El botón de la fila. Se escribe el <b>importe</b> al lado de la partida. Va '
+      + '<b>SIN IVA</b>: es lo que entra al costo, y el costo no lleva IVA — el crédito '
+      + 'fiscal se recupera aparte. Cargado con IVA la partida sale un 21% más cara y el '
+      + 'margen miente. <b>Alcanza con el importe:</b> la factura de la cooperativa puede '
+      + 'llegar después. Cuando son varias operaciones de la misma cuenta se puede cargar '
+      + 'un total y repartirlo por lo que se cobra, bultos o pallets.',
       'Es el único momento en que la descarga <b>entra al costo del lote</b>. Hasta que no '
       + 'se pone, la partida <b>no se puede liquidar</b> — el productor cobraría de más '
       + 'porque no se le descontó la cuadrilla.', 'V1003')
@@ -21404,6 +21432,9 @@ SG_MANUAL.gastos = { titulo: 'Gastos Directos', html:
   + 'Antes el aviso mandaba a una solapa vieja que ya no existía: la descarga quedaba '
   + '«a valorizar» para siempre y la partida trabada, sin ningún lugar donde '
   + 'destrabarla.</li>'
+  + '<li><span class="ver">V1004</span> El cuadro de valorizar dice que los importes van '
+  + '<b>sin IVA</b>, el campo está al lado de la partida, y con <b>una sola</b> operación '
+  + 'ya no pregunta entre dos caminos que dan el mismo número.</li>'
   + '<li><span class="ver">V1003</span> Si el servidor no valoriza ninguna, la pantalla '
   + 'lo dice en vez de cerrar el cuadro como si hubiera guardado.</li>'
   + '</ul>'
@@ -22919,18 +22950,39 @@ function sgGdsValOpen(provId){   // FLETE (Fase 1) → base=kg
     items:pend.map(function(g){ return {id:g.id, ref:g.despacho_numero, sub:g.cliente_nombre, fecha:g.fecha_despacho, base:g.kg, unidadLbl:'kg'}; }) });
 }
 function sgGdsValModo(){
-  var modo=document.querySelector('input[name="sg-val-modo"]:checked').value;
-  eid('sg-val-totalbox').style.display=modo==='total'?'block':'none';
-  if(modo==='total') sgGdsProrratear(); else sgGdsValRender();
+  var varias=(SGGD.valItems||[]).length>=2;
+  var caja=eid('sg-val-modobox');
+  if(caja) caja.style.display=varias?'flex':'none';
+  var modo=sgGdsValModoActual();
+  eid('sg-val-totalbox').style.display=(varias&&modo==='total')?'block':'none';
+  if(varias&&modo==='total') sgGdsProrratear(); else sgGdsValRender();
 }
 function sgGdsValRender(){
-  var ro=document.querySelector('input[name="sg-val-modo"]:checked').value==='total';
-  var inSty='width:110px;text-align:right;padding:4px 6px;border-radius:6px;border:1px solid var(--bor)';
+  var ro=sgGdsValModoActual()==='total';
+  // El campo usa el ancho de SU columna, no 110 píxeles fijos: con un ancho fijo
+  // la última columna empujaba la tabla y aparecía la barra de abajo.
+  var inSty='width:100%;box-sizing:border-box;text-align:right;padding:4px 6px;border-radius:6px;border:1px solid var(--bor)';
+  var cel='overflow:hidden;text-overflow:ellipsis;white-space:nowrap';
   eid('sg-val-items').innerHTML=SGGD.valItems.map(function(it,i){
-    return '<tr><td><code>'+esc(it.ref||'—')+'</code></td><td>'+esc(it.sub||'—')+'</td><td>'+(it.fecha||'—')+'</td><td style="text-align:right">'+nr(it.base)+(it.unidadLbl?(' '+esc(it.unidadLbl)):'')+'</td>'
+    return '<tr><td style="'+cel+'" title="'+esc(it.ref||'')+'"><code>'+escH(it.ref||'—')+'</code></td>'
+      +'<td style="'+cel+'" title="'+esc(it.sub||'')+'">'+escH(it.sub||'—')+'</td>'
+      +'<td style="'+cel+'">'+esc(it.fecha||'—')+'</td>'
+      +'<td style="text-align:right;'+cel+'">'+nr(it.base)+(it.unidadLbl?(' '+escH(it.unidadLbl)):'')+'</td>'
       +'<td style="text-align:right"><input type="number" min="0" step="0.01" value="'+(it.monto!==''&&it.monto!=null?it.monto:'')+'" '+(ro?('readonly style="background:rgba(128,128,128,.12);'+inSty+'"'):('style="'+inSty+'"'))+' oninput="sgGdsValMonto('+i+',this.value)"></td></tr>';
   }).join('');
   sgGdsValResumen();
+}
+
+// ── CON UNA SOLA OPERACIÓN NO HAY NADA QUE ELEGIR ─────────────────────────
+//
+// «Monto por operación» y «total a repartir» dan el mismo número cuando hay una
+// sola: preguntarlo es hacer elegir entre dos caminos idénticos. Se pregunta
+// recién cuando hay varias, que es cuando repartir un total ahorra trabajo de
+// verdad —la cuenta de un fletero con veinte remitos—.
+function sgGdsValModoActual(){
+  if ((SGGD.valItems||[]).length < 2) return 'remito';
+  var r=document.querySelector('input[name="sg-val-modo"]:checked');
+  return r ? r.value : 'remito';
 }
 function sgGdsValMonto(i,v){ SGGD.valItems[i].monto=(v===''?'':Number(v)); sgGdsValResumen(); }
 function sgGdsProrratear(){
@@ -22942,7 +22994,7 @@ function sgGdsProrratear(){
 function sgGdsValResumen(){
   var suma=SGGD.valItems.reduce(function(a,x){return a+(Number(x.monto)||0);},0);
   var extra='';
-  if(document.querySelector('input[name="sg-val-modo"]:checked').value==='total'){
+  if(sgGdsValModoActual()==='total'){
     var total=Number(eid('sg-val-total').value)||0, dif=Math.round((total-suma)*100)/100;
     extra=' · objetivo '+sgMoney(total)+(Math.abs(dif)>=0.01?(' · dif '+sgMoney2(dif)):' ✓');
   }
