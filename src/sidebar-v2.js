@@ -36,7 +36,7 @@ const MAX_RECIENTES = 4;
 // SE ACTUALIZA A MANO, en el mismo cambio que se mergea. Sacarlo de git en el
 // arranque sonaba mejor, pero Railway despliega desde una copia sin historial:
 // diría siempre lo mismo y mentiría, que es peor que no estar.
-const VERSION = 'V998';
+const VERSION = 'V999';
 
 let SIDEBAR_DATA = { grupos: [], modulos: [] };
 let SOCIEDADES = [];                             // array de {id, nombre, funcion}
@@ -108,6 +108,30 @@ async function fetchSidebarData(){
     return false;
   }
   SIDEBAR_DATA = sidebarResp.value;
+
+  // ── MEJORAS, ARRIBA DE TODO ─────────────────────────────────────────────
+  //
+  // Pablo, 2/9/2026: «fuera de todos los menú, como un menú aparte ARRIBA de
+  // donde dice COMERCIAL».
+  //
+  // Va como un GRUPO más, el primero, y no como un bloque escrito a mano en el
+  // template: así lo dibuja renderGrupos con niHTML, que es el único camino que
+  // dibuja bien un ítem del menú. Escrito a mano quedaba una barrita de color
+  // sin contenido, y encima no aparecía en el buscador ⌘K —que se arma con
+  // MODULO_INDEX— así que escribir «mejoras» contestaba «sin resultados».
+  //
+  // Y NO sale de modulos_config a propósito: ahí un módulo se ve sólo si el
+  // administrador se lo tildó a cada uno, y este buzón tiene que verlo todo el
+  // mundo. `sociedad_id: null` lo hace transversal a las cuatro empresas.
+  const MEJORAS = {
+    modulo: 'mejoras', label: '💡 Proponer una mejora', grupo: 'Mejoras',
+    sociedad_id: null, area_id: null, tipo: 'panel', orden: 0,
+    // Sin estrella: favoritos valida contra modulos_config y este módulo no está
+    // ahí, así que el botón contestaría 404. Ya está fijo arriba de todo.
+    sintetico: true,
+  };
+  SIDEBAR_DATA.grupos = [{ grupo: 'Mejoras', items: [MEJORAS] }]
+    .concat(SIDEBAR_DATA.grupos || []);
 
   // Index global por modulo
   MODULO_INDEX = {};
@@ -214,21 +238,6 @@ function buildSidebar(){
 
     <!-- Recientes -->
     <div id="sb2-recientes-wrap"></div>
-
-    <!-- MEJORAS — fuera de todos los menús, arriba de COMERCIAL.
-         Pablo, 2/9/2026: «como un menú aparte arriba de donde dice comercial».
-         No sale de modulos_config: proponer una mejora lo puede hacer cualquiera,
-         y un módulo con permisos sería un buzón que hay que habilitar persona por
-         persona — justo lo contrario de unificar el canal. -->
-    <div class="sb2-fastlane mej">
-      <div class="sb2-group-sec">
-        <span class="sb2-label">💡 Mejoras</span>
-      </div>
-      <a class="sb2-ni" data-sec="mejoras" href="#" title="Proponer una mejora sobre cualquier pantalla que uses">
-        <span class="sb2-ni-ico">✍️</span>
-        <span class="sb2-ni-text">Proponer una mejora</span>
-      </a>
-    </div>
 
     <!-- Divider fuerte entre fast lanes y menú normal -->
     <div class="sb2-divider"></div>
@@ -455,7 +464,14 @@ function renderGrupos(){
     .map(g => ({ ...g, items: g.items.filter(shouldShow) }))
     .filter(g => g.items.length > 0);
 
-  if (!gruposFiltrados.length){
+  // EL MENÚ VACÍO SE MIDE SIN LO SINTÉTICO. Mejoras está siempre —lo ve todo el
+  // mundo—, así que contándolo el menú nunca queda "vacío" y el aviso de "todavía
+  // no tenés accesos asignados" no se mostraría nunca más. Ese aviso es la única
+  // forma que tiene alguien recién dado de alta de entender qué le falta.
+  const conAccesos = gruposFiltrados
+    .some(g => (g.items || []).some(m => !m.sintetico));
+
+  if (!conAccesos){
     // Sin un solo módulo hay dos motivos posibles, y decir el equivocado manda a
     // la persona a buscar donde no es:
     //
@@ -465,8 +481,10 @@ function renderGrupos(){
     //    que el sistema se rompió.
     //  · Tiene accesos, pero ninguno en la empresa que eligió arriba.
     const tieneEnOtra = (SIDEBAR_DATA.grupos || [])
-      .some(g => (g.items || []).length > 0);
-    wrap.innerHTML = tieneEnOtra
+      .some(g => (g.items || []).some(m => !m.sintetico));
+    // Mejoras se dibuja igual: es justamente por donde esa persona puede pedir
+    // que le den los accesos.
+    wrap.innerHTML = gruposHTML(gruposFiltrados, collapsed) + (tieneEnOtra
       ? `<div style="padding:14px 16px;font-size:11.5px;color:rgba(255,255,255,.55);text-align:center;line-height:1.5">
            No tenés accesos en esta empresa.<br>Probá cambiándola arriba.
          </div>`
@@ -474,11 +492,17 @@ function renderGrupos(){
            <div style="font-size:22px;margin-bottom:6px">🔑</div>
            <b>Todavía no tenés accesos asignados.</b><br>
            <span style="color:rgba(255,255,255,.55)">Pedile a un administrador que te dé permiso a los módulos que necesitás.</span>
-         </div>`;
+         </div>`);
     return;
   }
 
-  wrap.innerHTML = gruposFiltrados.map(g => {
+  wrap.innerHTML = gruposHTML(gruposFiltrados, collapsed);
+}
+
+// El HTML de los grupos, en un solo lugar: lo usan el menú normal y el aviso de
+// "todavía no tenés accesos", que ahora también dibuja el grupo de Mejoras.
+function gruposHTML(grupos, collapsed){
+  return grupos.map(g => {
     const isCollapsed = collapsed.includes(g.grupo);
     return `
       <div class="sb2-grp ${isCollapsed ? 'collapsed' : ''}" data-grp="${escapeHtml(g.grupo)}">
@@ -496,6 +520,16 @@ function renderGrupos(){
 }
 
 function niHTML(m, isFavSection){
+  // Los ítems sintéticos —los que no viven en modulos_config— no pueden ser
+  // favoritos: la ruta de favoritos valida contra esa tabla y contestaría 404.
+  if (m.sintetico){
+    return `
+      <a class="sb2-ni" data-sec="${escapeHtml(m.modulo)}" href="#">
+        <span class="sb2-ni-ico">${moduleIcon(m)}</span>
+        <span class="sb2-ni-text">${escapeHtml(stripIconFromLabel(m.label))}</span>
+      </a>
+    `;
+  }
   const isFav = FAVORITOS.includes(m.modulo);
   const starClass = isFav ? 'sb2-star on' : 'sb2-star';
   const starTitle = isFav ? 'Quitar de favoritos' : 'Agregar a favoritos';
@@ -536,6 +570,8 @@ const ICO_AUTOELEVADOR = '<svg viewBox="0 0 24 24" width="15" height="15" fill="
 function moduleIcon(m){
   // 1) Mapping manual prioritario — emojis por módulo según el panel original
   const map = {
+    // El buzón de mejoras: no es una pantalla de trabajo, es donde se pide algo.
+    'mejoras':           '✍️',
     // General / Sistema
     'inicio':            '⌂',
     'calendario':        '📅',
@@ -650,6 +686,7 @@ function groupIcon(grupo){
     'Financiero':    '🏦',
     'Ventas':        '🧾',
     'Retail':        '🛒',
+    'Mejoras':       '💡',
   };
   return ICONS[grupo] || '·';
 }

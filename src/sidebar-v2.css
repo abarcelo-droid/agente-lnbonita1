@@ -299,11 +299,9 @@
 .sb2-fastlane + .sb2-fastlane{ margin-top: 8px }
 .sb2-fastlane.fav{ background: rgba(240,165,0,.06); border-color: rgba(240,165,0,.18) }
 .sb2-fastlane.rec{ background: rgba(91,127,176,.06); border-color: rgba(91,127,176,.18) }
-/* MEJORAS — el buzon. Verde, distinto de favoritos y de recientes: es el unico
-   item del menu que no lleva a una pantalla de trabajo sino a pedir algo. */
-.sb2-fastlane.mej{ background: rgba(52,190,110,.10); border-color: rgba(52,190,110,.30) }
-.sb2-fastlane.mej .sb2-group-sec{ color: #9FE3B8 }
-.sb2-fastlane.mej .sb2-ni{ color: rgba(255,255,255,.92) }
+/* MEJORAS — es el unico grupo del menu que no lleva a una pantalla de trabajo
+   sino a pedir algo: el rotulo va en verde para que se distinga. */
+.sb2-grp[data-grp="Mejoras"]{ color: #9FE3B8 }
 
 .sb2-fastlane .sb2-group-sec{
   padding: 8px 12px 4px;
