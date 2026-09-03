@@ -1462,6 +1462,83 @@ router.get('/modelos', (req, res) => {
   res.json({ ok: true, data: modelos });
 });
 
+// ═══════════════════════════════════════════════════════════════════════════
+// CONTRA QUÉ SE CONTABILIZA CADA CIRCUITO
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// Pablo, 3/9/2026: «no encuentro dónde guardar el asiento modelo del proveedor».
+//
+// Y no lo encontraba porque en San Gerónimo NO HAY un modelo por proveedor. El
+// modelo por proveedor es del otro módulo —Contabilidad, de Familia, donde cada
+// factura de servicios sale del modelo del proveedor que la emitió—. Acá el
+// modelo se elige UNA VEZ POR CIRCUITO: todas las facturas de mercadería usan el
+// mismo, todos los fletes el mismo, y así.
+//
+// Es una decisión distinta y es la correcta para este negocio: lo que define las
+// cuentas de una compra de tomate no es quién la vendió, es que sea mercadería.
+// Cambiar de proveedor no cambia el asiento.
+//
+// LO QUE FALTABA ERA LA PANTALLA. Cada circuito guardaba su modelo por su lado,
+// dos tenían selector escondido dentro de su propio modal y los otros tres no
+// tenían dónde elegirse: la venta, el flete y la descarga no se podían
+// parametrizar desde ningún lado, así que sus asientos no salían nunca. Acá
+// están los cinco juntos, en la pantalla donde se los va a buscar.
+const CIRCUITOS = [
+  { clave: 'asiento_modelo_factura_mercaderia', label: 'Factura de mercadería',
+    donde: 'La factura del proveedor por lo que entró al galpón.' },
+  { clave: 'asiento_modelo_liquidacion', label: 'Liquidación al productor',
+    donde: 'Lo que se le liquida al productor cuando la partida iba a precio abierto.' },
+  { clave: 'asiento_modelo_venta', label: 'Venta',
+    donde: 'La factura que San Gerónimo le emite a un cliente.' },
+  { clave: 'asiento_modelo_flete', label: 'Flete de entrada',
+    donde: 'El flete de la mercadería que entra, cuando lo paga San Gerónimo.' },
+  { clave: 'asiento_modelo_descarga', label: 'Descarga y servicios',
+    donde: 'La factura de la cooperativa o la cuadrilla que descargó el camión.' },
+];
+
+router.get('/modelos/circuitos', (req, res) => {
+  try {
+    const modelos = db.prepare(
+      'SELECT id, nombre FROM sg_asientos_modelo WHERE activo=1 ORDER BY nombre').all();
+    const vivos = new Map(modelos.map((m) => [m.id, m.nombre]));
+    const filas = CIRCUITOS.map((c) => {
+      const cfg = db.prepare('SELECT valor FROM sg_config WHERE clave=?').get(c.clave);
+      const id = cfg && cfg.valor ? Number(cfg.valor) : null;
+      return {
+        ...c,
+        modelo_id: id && vivos.has(id) ? id : null,
+        modelo_nombre: id ? vivos.get(id) || null : null,
+        // Un modelo elegido y después dado de baja: la config queda apuntando a
+        // la nada y el circuito deja de asentar sin que nadie lo toque. Se avisa
+        // en vez de mostrarlo como si estuviera sin elegir.
+        perdido: id && !vivos.has(id) ? id : null,
+      };
+    });
+    res.json({ ok: true, data: { circuitos: filas, modelos } });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// PARAMETRIZAR ES DE ADMINISTRADOR. Elegir contra qué cuentas se contabiliza un
+// circuito entero no es trabajo del día.
+router.put('/modelos/circuitos', requireAdmin, (req, res) => {
+  try {
+    const clave = String(req.body?.clave || '');
+    // La lista blanca es la que impide que esto sea un escritor genérico de
+    // sg_config: con el nombre de la clave en el cuerpo, sin ella se podría
+    // pisar cualquier parámetro del módulo desde acá.
+    if (!CIRCUITOS.some((c) => c.clave === clave)) {
+      return res.status(400).json({ ok: false, error: 'Ese circuito no existe' });
+    }
+    const id = req.body?.modelo_id ? Number(req.body.modelo_id) : null;
+    if (id && !db.prepare('SELECT 1 FROM sg_asientos_modelo WHERE id=? AND activo=1').get(id)) {
+      return res.status(400).json({ ok: false, error: 'Ese asiento modelo no existe' });
+    }
+    db.prepare(`INSERT INTO sg_config (clave, valor) VALUES (?,?)
+      ON CONFLICT(clave) DO UPDATE SET valor=excluded.valor`).run(clave, id ? String(id) : '');
+    res.json({ ok: true, data: { clave, modelo_id: id } });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
 router.get('/modelos/:id', (req, res) => {
   const id = parseInt(req.params.id);
   const modelo = db.prepare('SELECT * FROM sg_asientos_modelo WHERE id = ?').get(id);

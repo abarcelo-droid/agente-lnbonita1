@@ -21460,6 +21460,71 @@ function sgManCampo(nombre, espera, liga, ver){
 // El costo de una partida no es sólo lo que se le paga al productor: el flete
 // que la trajo, la cuadrilla que la bajó y el repaso que hubo que hacerle son
 // plata de esa partida. Y ninguna de las tres se sabe el día que pasa.
+// ── ASIENTO MODELO ────────────────────────────────────────────────────────
+//
+// Pablo, 3/9/2026: «no encuentro dónde guardar el asiento modelo del proveedor».
+// La respuesta —que acá el modelo es por CIRCUITO y no por proveedor— tiene que
+// vivir en el manual de esta pantalla, que es donde se la vino a buscar. Que
+// esté sólo en un comentario del código no le sirve a nadie.
+SG_MANUAL.modelos = { titulo: 'Asiento Modelo', html:
+  '<p>Un <b>asiento modelo</b> es la FORMA de un asiento: qué cuentas se tocan y de '
+  + 'qué lado. No lleva importes — esos los pone cada operación. Un modelo de factura '
+  + 'de mercadería dice «el gasto al debe, el IVA al debe, el proveedor al haber», y '
+  + 'sirve para las mil facturas que vengan.</p>'
+
+  + '<div class="ojo"><b>Acá el modelo es por CIRCUITO, no por proveedor.</b> '
+  + 'Todas las facturas de mercadería se contabilizan con el mismo modelo, venga de '
+  + 'quien venga: lo que define las cuentas de una compra de tomate es que sea '
+  + 'mercadería, no quién la vendió. Si buscabas un campo «asiento modelo» adentro de '
+  + 'la ficha del proveedor, no existe y no falta: eso es del módulo contable de la '
+  + 'otra empresa, donde cada proveedor de servicios factura una cosa distinta.</div>'
+
+  + '<h3>🔗 Contra qué se contabiliza cada circuito <span class="ver">V1009</span></h3>'
+  + '<p>El cuadro de arriba de todo. Son los <b>cinco circuitos que asientan</b>, y al '
+  + 'lado de cada uno se elige con qué modelo. Se toca una vez y queda.</p>'
+  + '<ul>'
+  + '<li><b>Factura de mercadería</b> — la factura del proveedor por lo que entró.</li>'
+  + '<li><b>Liquidación al productor</b> — lo que se le liquida cuando la partida iba a '
+  + 'precio abierto.</li>'
+  + '<li><b>Venta</b> — la factura que se le emite al cliente.</li>'
+  + '<li><b>Flete de entrada</b> — el flete de la mercadería que entra, cuando lo paga '
+  + 'San Gerónimo.</li>'
+  + '<li><b>Descarga y servicios</b> — la factura de la cooperativa que bajó el camión.</li>'
+  + '</ul>'
+
+  + '<div class="ojo"><b>Un circuito sin modelo no genera asiento.</b> La operación se '
+  + 'guarda igual —la venta se factura, la descarga se paga— pero queda <b>sin '
+  + 'contabilizar</b>, y eso se descubre al cierre, cuando ya son ciento veinte. '
+  + 'Los tres de abajo del cuadro (venta, flete y descarga) hasta esta versión no se '
+  + 'podían elegir desde ningún lado: si están en «Sin elegir», elegilos.</div>'
+
+  + sgManCampo('Nombre del modelo',
+      'Cómo se llama la plantilla. Conviene que diga para qué es —«Compra de '
+      + 'mercadería», «Venta a supermercado»— porque es lo único que se ve en el '
+      + 'selector del cuadro de arriba.',
+      'El cuadro de circuitos lista los modelos por este nombre')
+
+  + sgManCampo('Las líneas',
+      'Cada renglón es una cuenta y un lado (debe o haber). El modelo tiene que tener '
+      + '<b>al menos una de cada lado</b>: un asiento que no balancea no se puede grabar. '
+      + 'La línea marcada como <b>Proveedores</b> es la que va a llevar el total de la '
+      + 'factura, y va siempre en el <b>haber</b> — sin ella el asiento balancea pero no '
+      + 'se sabe cuál era la deuda.',
+      'Las cuentas salen del Plan de Cuentas SG; sólo las imputables')
+
+  + sgManCampo('⚙️ Configuración Impositiva Global',
+      'El IVA no se pone en cada modelo: se pone <b>una vez acá</b> y se agrega solo al '
+      + 'asiento. Es una sola cuenta de crédito fiscal y una de débito fiscal para todo '
+      + 'el módulo, y es lo correcto: si cada modelo trajera la suya, el día que cambie '
+      + 'hay que tocarlos todos y el que se olvide queda mal por meses.',
+      'Se usa en toda factura de compra y de venta')
+
+  + '<h3>Si se da de baja un modelo que estaba en uso</h3>'
+  + '<p>El circuito que lo tenía queda <b>en rojo</b> en el cuadro de arriba, avisando '
+  + 'que hay que elegir otro. Antes se veía igual que uno sin elegir, y la diferencia '
+  + 'importa: uno nunca se configuró, el otro dejó de funcionar solo.</p>'
+};
+
 SG_MANUAL.gastos = { titulo: 'Gastos Directos', html:
   '<p>Acá viven los <b>costos de servicio</b> de cada operación: el flete que trajo '
   + 'la mercadería, la cuadrilla que la descargó, el repaso que hubo que hacerle y el '
@@ -27846,9 +27911,40 @@ function sgRepExport(){
 <div class="ph">
   <div>
     <div class="ph-t">📐 Asiento Modelo</div>
-    <div class="ph-s">Plantillas contables por proveedor</div>
+    <div class="ph-s">Las plantillas contables, y contra cuál se contabiliza cada circuito</div>
   </div>
-  <button class="btn bb" onclick="sgctModAbrirNuevo()">+ Nuevo modelo</button>
+  <div style="display:flex;gap:8px">
+    <button class="btn bo bs" onclick="sgManualAbrir('modelos')">❓ ¿Cómo se usa?</button>
+    <button class="btn bb" onclick="sgctModAbrirNuevo()">+ Nuevo modelo</button>
+  </div>
+</div>
+
+<!-- ══ CONTRA QUÉ SE CONTABILIZA CADA CIRCUITO ═════════════════════════════
+     Pablo, 3/9/2026: «no encuentro dónde guardar el asiento modelo del
+     proveedor». En San Gerónimo no hay uno por proveedor: hay uno por circuito.
+     Va PRIMERO, arriba de la lista de modelos, porque es lo que se viene a
+     buscar: un modelo suelto no sirve para nada hasta que algo lo usa. -->
+<div style="background:var(--bg);border:1px solid var(--bor);border-radius:10px;padding:16px;margin-bottom:20px">
+  <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
+    <span style="font-size:16px">🔗</span>
+    <div style="font-weight:700;font-size:13px">Contra qué se contabiliza cada circuito</div>
+  </div>
+  <div style="font-size:11px;color:var(--mut);margin-bottom:12px">
+    En San Gerónimo el asiento modelo NO es por proveedor: es por circuito. Todas
+    las facturas de mercadería se contabilizan igual, sin importar quién las
+    emitió. Un circuito sin modelo no genera asiento — la operación se guarda,
+    pero queda sin contabilizar.
+  </div>
+  <div class="ab-table-wrap" style="overflow-x:hidden !important">
+    <table class="pa-tbl" style="table-layout:fixed;width:100%;max-width:98vw">
+      <thead><tr>
+        <th style="width:26%">Circuito</th>
+        <th style="width:40%">Cuándo se usa</th>
+        <th style="width:34%">Asiento modelo</th>
+      </tr></thead>
+      <tbody id="sgct-circ-tbody"><tr><td colspan="3" class="emp">Cargando…</td></tr></tbody>
+    </table>
+  </div>
 </div>
 
 <!-- Configuración Impositiva Global -->
@@ -71869,6 +71965,68 @@ function sgctModCargarCuentas(cb) {
     .catch(function(){ cb(); });
 }
 
+// ══ CONTRA QUÉ SE CONTABILIZA CADA CIRCUITO ═══════════════════════════════
+//
+// Los cinco circuitos que asientan, con su modelo al lado. Los modelos se
+// definen abajo, en la tabla de siempre; acá se dice cuál usa cada uno.
+var SGCTCIRC = { modelos: [] };
+
+function sgctCircCargar() {
+  var tb = document.getElementById('sgct-circ-tbody');
+  if (!tb) return;
+  sgctModApi('/modelos/circuitos').then(function(r) {
+    if (!r || !r.ok) {
+      tb.innerHTML = '<tr><td colspan="3" class="emp">No se pudo cargar.</td></tr>';
+      return;
+    }
+    SGCTCIRC.modelos = r.data.modelos || [];
+    sgctCircPintar(r.data.circuitos || []);
+  });
+}
+
+function sgctCircPintar(filas) {
+  var tb = document.getElementById('sgct-circ-tbody');
+  if (!tb) return;
+  var cel = 'overflow:hidden;text-overflow:ellipsis';
+  tb.innerHTML = filas.map(function(c) {
+    return '<tr>'
+      + '<td style="' + cel + '"><strong>' + sgctEsc(c.label) + '</strong></td>'
+      + '<td style="' + cel + ';font-size:11.5px;color:var(--mut);white-space:normal">'
+        + sgctEsc(c.donde) + '</td>'
+      + '<td>' + sgctCircSelect(c) + '</td>'
+      + '</tr>';
+  }).join('');
+}
+
+function sgctCircSelect(c) {
+  var opts = '<option value="">— Sin elegir: no genera asiento —</option>'
+    + SGCTCIRC.modelos.map(function(m) {
+        return '<option value="' + m.id + '"' + (m.id === c.modelo_id ? ' selected' : '') + '>'
+          + sgctEsc(m.nombre) + '</option>';
+      }).join('');
+  // El modelo que se eligió y después se dio de baja: el circuito dejó de
+  // asentar sin que nadie tocara nada. Se dice, no se muestra como vacío.
+  var aviso = c.perdido
+    ? '<div style="font-size:11px;color:var(--err);margin-top:4px">El modelo que tenía '
+      + 'fue dado de baja: elegí otro.</div>'
+    : '';
+  return '<select onchange="sgctCircGuardar(\'' + c.clave + '\', this)" '
+    + 'style="width:100%">' + opts + '</select>' + aviso;
+}
+
+function sgctCircGuardar(clave, sel) {
+  sel.disabled = true;
+  sgctModApi('/modelos/circuitos', {
+    method: 'PUT',
+    body: JSON.stringify({ clave: clave, modelo_id: sel.value || null }),
+  }).then(function(r) {
+    sel.disabled = false;
+    if (!r || !r.ok) { toast((r && r.error) || 'No se pudo guardar', 'er'); sgctCircCargar(); return; }
+    toast(sel.value ? 'Circuito contabilizado con ese modelo' : 'Circuito sin modelo: no va a asentar', 'ok');
+    sgctCircCargar();
+  });
+}
+
 function sgctModCargar() {
   sgctModApi('/modelos').then(function(r) {
     var data = r.data || [];
@@ -72308,7 +72466,7 @@ function sgctExportarAsientos(){
     }
     if (s === 'sgct-puntos-venta') { sgPvLoad(); return; }
     if (s === 'sgct-asientos') { sgctCargarCuentas(); sgctLoadAsientos(); return; }
-    if (s === 'sgct-modelos')  { sgctModCargarCuentas(function(){ sgctModCargar(); }); sgctCargarConfigImp(); return; }
+    if (s === 'sgct-modelos')  { sgctModCargarCuentas(function(){ sgctModCargar(); sgctCircCargar(); }); sgctCargarConfigImp(); return; }
     if (s === 'sgct-iva-compras') { sgIvaInit(); return; }
     if (s === 'sgct-iva-ventas') { sgIvaVtaInit(); return; }
     return anterior(s);
