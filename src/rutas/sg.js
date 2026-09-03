@@ -7639,6 +7639,10 @@ router.post('/recepciones', sgUpload.array('fotos', 40), requireAuth, (req, res)
   try {
     const b = req.body && req.body.payload ? JSON.parse(req.body.payload) : (req.body || {});
     const numN = (v) => (v != null && v !== '' && !isNaN(Number(v))) ? Number(v) : null; // BLOQUE A
+    // Un porcentaje es de 0 a 100. El input del asistente lo dice y no lo
+    // impide: acá se corta, porque el número termina impreso en el informe que
+    // se le manda al proveedor y «afectado el 500%» no se puede reclamar.
+    const pct = (v) => { const n = numN(v); return n == null ? null : Math.max(0, Math.min(100, n)); };
     // RECEPCIÓN SIN OC: si no viene oc_id, se recibe igual y queda "OC pendiente" (lotes con
     // costo pendiente). Se vincula a una OC después (POST /recepciones/:id/vincular-oc).
     const sinOC = !b.oc_id;
@@ -7698,7 +7702,7 @@ router.post('/recepciones', sgUpload.array('fotos', 40), requireAuth, (req, res)
         VALUES (?,?,?,?,?,?,?, ?,?,?,?, ?,?,?,?,?, ?, ?,?,?,?)`).run(
         sinOC ? null : b.oc_id, numero, fechaIngreso, b.recibido_por || null, val(b.numero_remito_proveedor), val(b.observaciones), uid(req),
         val(b.factura_numero), val(b.dtv_codigo), numN(b.pallets_recibidos), numN(b.bultos_recibidos),
-        b.observada ? 1 : 0, val(b.calidad_estado_general), val(b.calidad_defectos), numN(b.calidad_pct_afectado), val(b.calidad_observaciones),
+        b.observada ? 1 : 0, val(b.calidad_estado_general), val(b.calidad_defectos), pct(b.calidad_pct_afectado), val(b.calidad_observaciones),
         sinOC ? 1 : 0,
         // "Hubo descarga" se pregunta y se guarda. Antes el único indicio era si
         // habían elegido cooperativa: "no hubo" y "me olvidé" se veían igual.
@@ -7747,7 +7751,7 @@ router.post('/recepciones', sgUpload.array('fotos', 40), requireAuth, (req, res)
           VALUES (?,?,?,1,?,?,?,?,?)`).run(
             recId, itemOk ? Number(c.oc_item_id) : null,
             c.producto_id ? Number(c.producto_id) : null,
-            val(c.estado_general), val(c.defectos), numN(c.pct_afectado), val(c.observaciones), uid(req));
+            val(c.estado_general), val(c.defectos), pct(c.pct_afectado), val(c.observaciones), uid(req));
       }
 
       // FASE 2 — si se asignó cooperativa, queda una DESCARGA DE INGRESO pendiente. La unidad
@@ -7907,6 +7911,14 @@ router.get('/recepciones/:id/calidad.pdf', requireAuth, async (req, res) => {
       LEFT JOIN sg_proveedores p ON p.id=o.proveedor_id
       WHERE r.id=?`).get(req.params.id);
     if (!rec) return res.status(404).json({ ok: false, error: 'No encontrado' });
+    // EL INFORME POR PRODUCTO. El generador lo imprime desde rec.calidad; sin
+    // esta consulta caía a las columnas viejas de la recepción, que desde que la
+    // calidad se carga por producto viajan siempre en null — y el informe salía
+    // con todo menos lo único que se le reclama al proveedor.
+    rec.calidad = db.prepare(`SELECT c.*, p.nombre AS producto_nombre
+      FROM sg_recepcion_calidad c
+      LEFT JOIN sg_productos p ON p.id = c.producto_id
+      WHERE c.recepcion_id = ? ORDER BY c.id`).all(rec.id);
     rec.lotes = db.prepare(`SELECT l.*, pr.nombre AS producto_nombre, pr.variedad AS producto_variedad
       FROM sg_lotes l LEFT JOIN sg_productos pr ON pr.id=l.producto_id
       WHERE l.recepcion_id=? AND l.activo=1`).all(rec.id);
@@ -7946,6 +7958,21 @@ router.post('/recepciones/preview-calidad.pdf', sgUploadMem.array('fotos', 40), 
       pallets_recibidos: b.pallets_recibidos, bultos_recibidos: b.bultos_recibidos,
       observada: b.observada ? 1 : 0, calidad_estado_general: b.calidad_estado_general, calidad_defectos: b.calidad_defectos,
       calidad_pct_afectado: b.calidad_pct_afectado, calidad_observaciones: b.calidad_observaciones, observaciones: b.observaciones,
+      // Lo mismo que el PDF definitivo, pero desde el formulario: la previa
+      // tiene que mostrar lo que se acaba de tipear, o no sirve para revisarlo.
+      // El % se recorta acá igual que al guardar, así la previa no promete un
+      // número que el informe final no va a tener.
+      calidad: (Array.isArray(b.calidad_items) ? b.calidad_items : [])
+        .filter((c) => c && c.observada)
+        .map((c) => ({
+          producto_nombre: c.producto_nombre || null,
+          observada: 1,
+          estado_general: c.estado_general || null,
+          defectos: c.defectos || null,
+          pct_afectado: (c.pct_afectado == null || c.pct_afectado === '' || isNaN(Number(c.pct_afectado)))
+            ? null : Math.max(0, Math.min(100, Number(c.pct_afectado))),
+          observaciones: c.observaciones || null,
+        })),
       lotes: []
     };
     // Lotes-display desde los items del formulario (sin códigos aún; es una previa).

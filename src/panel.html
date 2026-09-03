@@ -2422,7 +2422,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
     </div>
   </div>
   <div class="sec sg-mod" id="sec-sg-compras">
-    <div class="ph"><div><div class="ph-t">🍅 San Gerónimo · Ingresos</div><div class="ph-s">Órdenes de compra, recepciones, lotes y gastos</div></div></div>
+    <div class="ph"><div><div class="ph-t">📥 San Gerónimo · Ingresos</div><div class="ph-s">Lo que entra al depósito: se recibe, se cuenta, se pesa y se ubica en un piso</div></div></div>
     <style>
       .sg-mod .sgc-subtab{padding:7px 14px;cursor:pointer;font-size:12.5px;font-weight:600;border-radius:6px;color:var(--mut)}
       .sg-mod .sgc-subtab.on{background:var(--burg);color:#fff}
@@ -2546,6 +2546,8 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
            camión no le sirve, y no tiene por qué verlo. -->
       <div class="sgc-subtab" data-sub="recibidas" onclick="sgComSub('recibidas')">✅ Recepciones</div>
     </div>
+    <!-- El manual, en el mismo lugar que en Órdenes de Compra y en Stock. -->
+    <button class="btn bo bs" style="margin:0 0 16px 8px" onclick="sgManualAbrir('ingresos')">❓ ¿Cómo se usa?</button>
 
     <!-- Órdenes de compra -->
     <!-- Recepciones: lo que efectivamente entró, en cantidades -->
@@ -2610,6 +2612,8 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
         dos pantallas del depósito. Acá SI se muestra el importe: es la pantalla del
         comprador y de administración. -->
    <div class="sec sg-mod" id="sec-sg-ordenes">
+    <div class="ph"><div><div class="ph-t">📋 San Gerónimo · Órdenes de Compra</div><div class="ph-s">Lo que se le encargó a cada productor, y en qué anda: si falta la mercadería, la factura o la liquidación.</div></div>
+      <button class="btn bo" onclick="sgOrdSub(SG.ordSub||'oc')">↻ Actualizar</button></div>
     <div style="display:inline-flex;gap:2px;background:var(--bg);border:1px solid var(--bor);border-radius:8px;padding:3px;margin-bottom:16px;flex-wrap:wrap">
       <div class="sgc-subtab on" data-sub="oc" onclick="sgOrdSub('oc')">📋 Emisión de órdenes</div>
       <div class="sgc-subtab" data-sub="ocrecibidas" onclick="sgOrdSub('ocrecibidas')">✅ Órdenes recibidas</div>
@@ -8834,13 +8838,23 @@ function sgRecListPintar(){
   var filas = SG_RECLIST.filter(function(x){
     if (!q) return true;
     return sgNorm((x.partida||'') + ' ' + (x.proveedor_nombre||'') + ' ' + (x.productos||'')
-      + ' ' + (x.numero_remito_proveedor||'')).indexOf(q) >= 0;
+      + ' ' + (x.numero_remito_proveedor||'') + ' ' + (x.observaciones||'')
+      + ' ' + (x.variacion_motivo||'')).indexOf(q) >= 0;
   });
   var tb = eid('sg-tb-reclist'); if (!tb) return;
   tb.innerHTML = filas.length ? filas.map(function(x){
     return '<tr>'
       + '<td style="font-family:monospace;font-size:11.5px;overflow:hidden;text-overflow:ellipsis">'
-        + '<b>' + escH(x.partida || x.oc_numero || '—') + '</b></td>'
+        + '<b>' + escH(x.partida || x.oc_numero || '—') + '</b>'
+        + (x.observada ? ' <span title="entró con problemas">⚠️</span>' : '')
+        + (x.variacion_motivo
+            ? ('<div style="font-family:inherit;color:var(--adv,#a16207);font-size:11px;white-space:normal">'
+               + '≠ ' + escH(x.variacion_motivo) + '</div>')
+            : '')
+        + (x.observaciones
+            ? ('<div style="font-family:inherit;color:var(--mut);font-size:11px;white-space:normal">'
+               + escH(x.observaciones) + '</div>')
+            : '') + '</td>'
       + '<td style="white-space:nowrap">' + escH(x.fecha_recepcion || '—') + '</td>'
       + '<td class="cb-nom" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'
         + escH(x.proveedor_nombre || '—') + '</td>'
@@ -15351,7 +15365,8 @@ function sgRecRenderPesos(){
           + '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;padding-top:2px">'
             + '<button class="btn bb bs" type="button" onclick="eid(\'sg-rec-bal-' + i + '-cam\').click()">📷 Cámara</button>'
             + '<button class="btn bo bs" type="button" onclick="eid(\'sg-rec-bal-' + i + '\').click()">🖼️ Galería</button>'
-            + (fotos ? ('<span style="font-size:12px;color:#166534">✓ ' + fotos + '</span>') : '')
+            + '<span id="sg-rec-fc-peso-' + i + '" style="font-size:12px;color:#166534">'
+              + (fotos ? ('✓ ' + fotos) : '') + '</span>'
           + '</div>'
           + '<input type="file" accept="image/*" multiple capture="environment" id="sg-rec-bal-' + i + '-cam" style="display:none"'
             + ' onchange="sgRecAddFotos(this,\'peso\',' + i + ')">'
@@ -15452,12 +15467,13 @@ function sgRecRenderCalidad(){
             + ' oninput="sgRecCalUpd(' + i + ',\'defectos\',this.value)"></div>'
         + '</div>'
         + '<div class="fl ff" style="margin-top:10px"><label>Observaciones</label>'
-          + '<textarea rows="2" oninput="sgRecCalUpd(' + i + ',\'observaciones\',this.value)">' + esc(c.observaciones || '') + '</textarea></div>'
+          + '<textarea rows="2" oninput="sgRecCalUpd(' + i + ',\'observaciones\',this.value)">' + escH(c.observaciones || '') + '</textarea></div>'
         + '<div class="fl ff" style="margin-top:10px"><label>Fotos que lo respaldan</label>'
           + '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">'
             + '<button class="btn bb bs" type="button" onclick="eid(\'sg-rec-cal-' + i + '-cam\').click()">📷 Cámara</button>'
             + '<button class="btn bo bs" type="button" onclick="eid(\'sg-rec-cal-' + i + '\').click()">🖼️ Galería</button>'
-            + (fotos ? ('<span style="font-size:12px;color:#166534">✓ ' + fotos + '</span>') : '')
+            + '<span id="sg-rec-fc-cal-' + i + '" style="font-size:12px;color:#166534">'
+              + (fotos ? ('✓ ' + fotos) : '') + '</span>'
           + '</div>'
           + '<input type="file" accept="image/*" multiple capture="environment" id="sg-rec-cal-' + i + '-cam" style="display:none"'
             + ' onchange="sgRecAddFotos(this,\'calidad\',' + i + ')">'
@@ -15477,7 +15493,17 @@ function sgRecCalUpd(i, campo, v){
   var it = SG.recItems[i]; if (!it) return;
   it.calidad = it.calidad || {};
   it.calidad[campo] = v;
-  sgRecRenderCalidad();
+  // ── SÓLO SE REDIBUJA LO QUE CAMBIA DE FORMA ─────────────────────────
+  //
+  // El único campo que cambia la PINTA del cuadro es el tilde de «entró con
+  // problemas»: abre o cierra los campos de abajo y le pone el borde naranja.
+  // Los demás son texto, y volver a dibujar el cuadro con cada tecla destruía
+  // el input donde se estaba escribiendo: se perdía el foco y sólo entraba
+  // una letra.
+  //
+  // Lo que se tipea ya quedó guardado arriba, en it.calidad: el cuadro se
+  // vuelve a armar solo la próxima vez que se entra al paso.
+  if (campo === 'observada') sgRecRenderCalidad();
   sgRecValidar();
 }
 
@@ -15750,6 +15776,13 @@ function sgRecRenderFotos(){
   (SG.recItems || []).forEach(function(_, i){
     ['peso','cal'].forEach(function(pref){
       var cat = pref === 'peso' ? 'peso' : 'calidad';
+      // El contador «✓ N» vive al lado de los botones y se escribe SOLO: si para
+      // ponerlo al día hubiera que rearmar el cuadro, se le borraría el campo al
+      // que está escribiendo mientras la foto se comprime.
+      var n = (SG._recFotos || []).filter(function(f){
+        return f.categoria === cat && String(f.art) === String(i); }).length;
+      var cnt = eid('sg-rec-fc-' + pref + '-' + i);
+      if (cnt) cnt.textContent = n ? ('✓ ' + n) : '';
       var c = eid('sg-rec-prev-' + pref + '-' + i);
       if (!c) return;
       c.innerHTML = (SG._recFotos || []).map(function(f, k){
@@ -16015,6 +16048,10 @@ function sgRecBuildBody(requireItems){
     calidad_items: (SG.recItems || []).map(function(it){
       var c = it.calidad || {};
       return { oc_item_id: it.oc_item_id || null, producto_id: it.producto_id || null,
+               // El nombre viaja para la VISTA PREVIA, que arma el informe sin
+               // pasar por la base: sin él, la previa dice «Producto: —» y no se
+               // puede revisar cuál de los dos del camión vino observado.
+               producto_nombre: it.producto_nombre || null,
                observada: c.observada ? 1 : 0, estado_general: c.estado_general || null,
                defectos: c.defectos || null,
                pct_afectado: (c.pct_afectado === '' || c.pct_afectado == null) ? null : Number(c.pct_afectado),
@@ -20792,6 +20829,168 @@ function sgManCampo(nombre, espera, liga, ver){
     + (ver ? '<span class="ver">' + ver + '</span>' : '') + '</b>'
     + espera + (liga ? ('<span class="liga">↔ ' + liga + '</span>') : '') + '</div>';
 }
+
+// ── INGRESOS ──────────────────────────────────────────────────────────────
+//
+// Es la puerta de entrada de TODO: no hay otra forma de que la mercadería exista
+// en el sistema. Lo que se anota mal acá no se arregla después en ningún lado —
+// el costo de la partida, los kilos que se van a vender y lo que se le va a
+// pagar al productor salen de estos seis pasos.
+SG_MANUAL.ingresos = { titulo: 'Ingresos — recibir mercadería', html:
+  '<p>Por acá <b>entra la mercadería al depósito</b>. Un camión llega, se cuenta, '
+  + 'se pesa, se mira cómo vino y se deja en un piso. De ese momento salen tres '
+  + 'cosas que ya no se vuelven a preguntar: <b>los kilos que se van a vender</b>, '
+  + '<b>el costo de la partida</b> y <b>lo que se le va a pagar al productor</b>.</p>'
+
+  + '<div class="ojo"><b>Una orden se recibe una sola vez.</b> Guardada la recepción, '
+  + 'la orden queda firme por lo que entró: si llegó algo más hay que <b>reabrirla</b> '
+  + 'desde Órdenes recibidas, o hacer una orden nueva. Los kilos de la partida se '
+  + 'pueden corregir después desde Stock, pero eso deja rastro y hay que poder '
+  + 'explicarlo — el número bueno es el que se anota acá.</div>'
+
+  + '<h3>Las dos solapas</h3>'
+  + '<ul>'
+  + '<li><b>Recepciones pendientes</b> — las órdenes de compra que ya se emitieron y '
+  + 'están esperando el camión. Es la bandeja de trabajo: lo que hay que recibir hoy.</li>'
+  + '<li><b>Recepciones</b> — lo que ya entró, en cantidades. Sin importes: al que '
+  + 'descarga el camión no le sirven y no tiene por qué verlos.</li>'
+  + '</ul>'
+
+  + '<h3>Los tres botones de arriba</h3>'
+  + '<ul>'
+  + '<li><b>+ Recibir mercadería</b> — el camino normal: se elige la orden y se '
+  + 'recibe contra ella.</li>'
+  + '<li><b>Recibir sin orden</b> — llegó mercadería que nadie encargó. Entra igual '
+  + '—frenarla sería dejar el camión en la calle— pero la partida queda con el '
+  + '<b>costo pendiente</b>: hasta que no tenga precio, lo que se calcule con ella '
+  + 'sale con costo cero, así que el margen que muestre no es real. Vincularla a una '
+  + 'orden lo hace un <b>administrador</b> desde Órdenes recibidas.</li>'
+  + '<li><b>Imprimir</b> — la lista de lo que se espera, para bajar al depósito con '
+  + 'el papel.</li>'
+  + '</ul>'
+
+  + '<h3>El asistente, paso por paso</h3>'
+  + '<p>Son seis pasos y se pueden recorrer para adelante y para atrás. Abajo, el '
+  + 'cartel dice qué falta para poder confirmar.</p>'
+
+  + '<h3>1 · 📄 Documentación <span class="ver">V995</span></h3>'
+  + sgManCampo('Orden de compra',
+      'Contra qué orden se recibe. La lista trae sólo las que están esperando '
+      + 'mercadería. Si no hay ninguna, se recibe «sin OC».',
+      'De la orden salen el <b>proveedor</b>, los <b>productos</b> y el <b>precio '
+      + 'acordado</b>. Una orden se recibe <b>una sola vez</b>: si llegó más, hay que '
+      + 'reabrirla desde Órdenes recibidas o hacer una orden nueva.', 'V995')
+  + sgManCampo('Fecha de recepción',
+      'El día que entró la mercadería, no el día que se carga el sistema.',
+      'Es la <b>fecha de ingreso de la partida</b>: manda para el vencimiento, para el '
+      + 'FEFO y —según la condición de pago— para calcular cuándo se le paga al '
+      + 'productor.', 'V995')
+  + sgManCampo('Remito N° · Factura N° · DTV SENASA',
+      'Los números de los papeles que trajo el camión. Ninguno es obligatorio: si el '
+      + 'papel no llegó, se recibe igual y se completa después.',
+      'El remito es con lo que después se cruza la factura del proveedor. El <b>DTV</b> '
+      + 'es el código de tránsito de SENASA: es el que hay que mostrar si paran el '
+      + 'camión o si viene una inspección.', 'V995')
+  + sgManCampo('Fotos del remito / factura / DTV',
+      'Opcional, pero es lo que más sirve.',
+      'Cuando hay que reclamar, lo que se manda es <b>la foto del papel</b>, no el '
+      + 'número tipeado. Un número mal copiado se discute; una foto no.', 'V995')
+
+  + '<h3>2 · 📦 Artículos recibidos <span class="ver">V995</span></h3>'
+  + sgManCampo('Bultos y pallets de cada producto',
+      'Lo que se cuenta mirando el camión, <b>producto por producto</b>. No se '
+      + 'proponen desde la orden a propósito: el punto es que alguien los cuente.',
+      'Los bultos son la unidad con la que después se remite, se factura y se tira: '
+      + 'todo el circuito habla en <b>cajones</b>. Contar de más o de menos acá se '
+      + 'arrastra hasta la liquidación al productor.', 'V995')
+
+  + '<h3>3 · 🧑‍🌾 Descarga <span class="ver">V995</span></h3>'
+  + sgManCampo('¿Hubo descarga?',
+      'Sí o no. Si fue una cooperativa, se elige cuál y si cobra <b>por bulto o por '
+      + 'pallet</b>.',
+      'Se pregunta explícitamente porque antes el único indicio era si habían elegido '
+      + 'cooperativa, y «no hubo descarga» y «me olvidé de cargarla» se veían igual. '
+      + 'Lo que se responde acá se acumula en <b>Control Cooperativa</b> y termina '
+      + 'siendo un <b>gasto directo de la partida</b>: entra al costo.', 'V995')
+
+  + '<h3>4 · ⚖️ Peso por bulto <span class="ver">V995</span></h3>'
+  + sgManCampo('Peso de UN bulto',
+      'Se pone un cajón en la balanza y se anota <b>lo que marcó</b>. Los kilos de la '
+      + 'partida los multiplica el sistema por los bultos del paso 2.',
+      'Es la medición que más plata mueve. Si un producto no se pesa, se usa el peso '
+      + 'por bulto que dice la orden — que es una <b>estimación</b>, no una medición.', 'V995')
+  + sgManCampo('¿En qué piso quedó?',
+      'Dónde se dejó la mercadería. Si trabajás en un solo piso va derecho ahí y no se '
+      + 'pregunta; si trabajás en varios, se elige entre <b>los tuyos</b>.',
+      'Es el único momento en que alguien sabe de verdad dónde quedó. Si se deja sin '
+      + 'elegir, la partida cae en el piso que <b>había propuesto la orden</b>, y si la '
+      + 'orden tampoco decía nada, entra <b>sin ubicar</b> y se ve así en Stock → Por '
+      + 'piso. Lo que dice el que descarga le gana a lo que suponía el comprador.', 'V995')
+  + sgManCampo('Foto de la balanza',
+      'Opcional.',
+      'Es la prueba del peso cuando el remito del proveedor dice otro número.', 'V995')
+
+  + '<div class="ojo"><b>Acá no se muestra el total.</b> Ver los kilos de la partida '
+  + 'mientras se tipea convierte la medición en un ajuste: el que pesa ve que no le '
+  + 'cierra con lo esperado y corrige hasta que dé. Primero se anota lo medido; el '
+  + 'total se compara en el paso 5, que es donde corresponde.</div>'
+
+  + '<h3>5 · 🔍 Resumen <span class="ver">V995</span></h3>'
+  + sgManCampo('Confirmar cada producto',
+      'Lo que pidió la orden contra lo que entró, en bultos y en kilos. Hay que '
+      + 'apretar <b>Confirmar</b> en cada uno, mirando el número.',
+      'Antes era una sola pregunta de sí o no, y contestar «coincide» sin mirar era '
+      + 'demasiado fácil. Lo que se confirma acá es lo que le queda dicho al '
+      + 'productor: corregirlo después se puede, pero hay que explicarlo.', 'V995')
+  + sgManCampo('Justificación de las diferencias',
+      'Qué pasó, si entró distinto de lo pedido. Con fotos si las hay. <b>Nadie la '
+      + 'exige</b>: la recepción se guarda igual sin escribirla.',
+      'La diferencia entre lo pedido y lo recibido es lo que después se le reclama al '
+      + 'productor, y a los dos meses el único que se acuerda es el que la escribió. '
+      + 'Se lee en la solapa <b>Recepciones</b>, debajo de la partida, y el buscador '
+      + 'la mira: escribiendo «pesaron de menos» aparecen las que dicen eso.', 'V995')
+  + sgManCampo('Observaciones generales',
+      'Lo que no entra en ningún campo.',
+      'Se lee en la solapa <b>Recepciones</b>, debajo de la partida, junto con la '
+      + 'justificación. El buscador también las mira.', 'V995')
+
+  + '<h3>6 · ⚠️ Control de calidad <span class="ver">V995</span></h3>'
+  + '<p>Se marca <b>sólo lo que entró con problemas</b>. Lo que está bien se deja como '
+  + 'está y la recepción se confirma directo. Es <b>por producto</b>: con dos productos '
+  + 'en el mismo camión, un solo «estado general» no describe a ninguno, y el reclamo '
+  + 'al proveedor se hace por producto.</p>'
+  + sgManCampo('Estado general · % afectado · Defectos · Observaciones',
+      'Cómo vino y cuánto. El porcentaje va de <b>0 a 100</b>: si se escribe otra cosa, '
+      + 'se recorta — es el número que después se le muestra al proveedor.',
+      'Queda guardado <b>por producto</b> y la recepción entera queda marcada como '
+      + '<b>observada</b>. Se lee entrando a la recepción.', 'V995')
+  + sgManCampo('Fotos que lo respaldan',
+      'Opcional, y es lo único que hace fuerza en el reclamo.',
+      'Van adentro del <b>informe de calidad en PDF</b>, junto con los papeles y las '
+      + 'fotos de la mercadería.', 'V995')
+
+  + '<div class="ojo"><b>Miralo antes de mandarlo.</b> El botón <b>Vista previa PDF</b> '
+  + 'aparece apenas se marca un producto como observado y muestra el informe tal cual '
+  + 'va a salir: producto por producto, con las fotos. Es el papel con el que se le '
+  + 'reclama al proveedor — conviene leerlo antes de confirmar la recepción.</div>'
+
+  + '<h3>Qué cambió, y desde cuándo</h3>'
+  + '<ul>'
+  + '<li><span class="ver">V995</span> Los campos del paso 6 dejaban escribir <b>una '
+  + 'sola letra</b>: el cuadro se volvía a dibujar con cada tecla y el cursor se '
+  + 'perdía. Ya se puede escribir normal.</li>'
+  + '<li><span class="ver">V995</span> El <b>informe de calidad en PDF</b> salía sin '
+  + 'el detalle por producto: la carátula, los lotes y las fotos, y en blanco justo lo '
+  + 'que se le reclama al proveedor. Ya imprime lo que se carga en el paso 6, y la '
+  + 'vista previa también.</li>'
+  + '<li><span class="ver">V995</span> Esta pantalla tiene su <b>¿Cómo se usa?</b>. '
+  + 'Escribirlo campo por campo fue lo que destapó lo del PDF, que el <b>% afectado</b> '
+  + 'aceptaba 500 (ahora se recorta a 100) y que escribir «faltaron &lt;100 kg» en '
+  + 'Observaciones rompía la pantalla.</li>'
+  + '<li><span class="ver">V990</span> El piso que se ofrece es el <b>tuyo</b>: el que '
+  + 'recibe en Empaque no tenía por qué ver San Pedro en la lista.</li>'
+  + '</ul>'
+};
 
 SG_MANUAL.stock = { titulo: 'Stock', html:
   '<p>Stock contesta tres preguntas: <b>qué hay</b>, <b>dónde está</b> y <b>cuándo '
@@ -65728,6 +65927,23 @@ function spListaCargar(vista) {
   });
 }
 
+// Pinta la lista SIN robarle el cursor al que está escribiendo. La fila de
+// filtros se redibuja junto con la tabla, así que el input donde se tipea
+// desaparece y aparece uno nuevo, vacío de foco: se anota dónde estaba el
+// cursor y se lo pone de vuelta.
+function spPintar(cont, html) {
+  var ant = document.activeElement;
+  var id = (ant && ant.id && cont.contains(ant)) ? ant.id : '';
+  var ini = null, fin = null;
+  if (id) { try { ini = ant.selectionStart; fin = ant.selectionEnd; } catch (e) { /* no es de texto */ } }
+  cont.innerHTML = html;
+  if (!id) return;
+  var nuevo = document.getElementById(id);
+  if (!nuevo) return;
+  nuevo.focus();
+  if (ini != null) { try { nuevo.setSelectionRange(ini, fin); } catch (e) { /* idem */ } }
+}
+
 function spListaRender(vista, r) {
   var arr = SP.listas[vista] || [];
   var cont = document.getElementById('sp-lista-' + vista);
@@ -65756,24 +65972,24 @@ function spListaRender(vista, r) {
         + '<div style="margin-top:3px">' + spEsc(frenadas[0].bloqueo_sod) + '</div></div>'
         + spTablaHtml(frenadas, 'frenadas');
     }
-    cont.innerHTML = filtros + h;
+    spPintar(cont, filtros + h);
     return;
   }
 
   if (!arr.length) {
     var f = spFiltro(vista);
     var conFiltro = !!(f.q || f.estado || f.paso || f.solicitante_id);
-    cont.innerHTML = filtros + '<div class="emp" style="padding:26px;text-align:center">'
+    spPintar(cont, filtros + '<div class="emp" style="padding:26px;text-align:center">'
       // Vacío por un filtro NO es lo mismo que vacío porque no hay nada. Decir
       // "Sin solicitudes" con un filtro puesto hace pensar que se perdieron.
       + (conFiltro ? 'Ningún pago coincide con la búsqueda. '
           + '<button class="btn bo bs" onclick="spFiltroLimpiar(\'' + vista + '\')">Limpiar filtros</button>'
         : (vista === 'pendiente' ? '✔ No tenés nada esperando tu decisión.'
         : (vista === 'mias' ? 'Todavía no pediste ningún pago. <button class="btn bo bs" onclick="spNuevaAbrir()">+ Solicitar uno</button>'
-        : 'Sin solicitudes.'))) + '</div>';
+        : 'Sin solicitudes.'))) + '</div>');
     return;
   }
-  cont.innerHTML = filtros + spTablaHtml(arr, vista);
+  spPintar(cont, filtros + spTablaHtml(arr, vista));
 }
 
 // ── ORDENAR LOS LISTADOS ───────────────────────────────────────────────────────────
