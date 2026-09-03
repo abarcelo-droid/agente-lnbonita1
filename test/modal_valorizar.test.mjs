@@ -127,8 +127,6 @@ test('el campo del importe usa su columna, no 110 píxeles fijos', () => {
   const b = PANEL.slice(i, PANEL.indexOf(SALTO + '}', i));
   assert.match(b, /var inSty='width:100%;box-sizing:border-box;/);
   assert.ok(!b.includes('width:110px'), 'volvió el ancho fijo');
-  // Y lo de largo variable se trunca en vez de estirar la tabla.
-  assert.match(b, /overflow:hidden;text-overflow:ellipsis;white-space:nowrap/);
 });
 
 test('la tabla del modal tiene anchos por columna y no pide barra lateral', () => {
@@ -139,15 +137,51 @@ test('la tabla del modal tiene anchos por columna y no pide barra lateral', () =
   const anchos = [...b.matchAll(/<th style="width:(\d+)%/g)].map((m) => Number(m[1]));
   assert.equal(anchos.length, 5, 'la tabla no tiene cinco columnas con ancho fijo');
   assert.equal(anchos.reduce((a, x) => a + x, 0), 100, 'los anchos no suman 100%');
-  // Y el modal tampoco: min() en vez de un ancho fijo de 740.
-  assert.match(b, /width:min\(760px,96vw\);max-width:96vw/);
+  assert.match(b, /width:min\(960px,96vw\);max-width:96vw/);
   assert.match(b, /overflow-y:auto;overflow-x:hidden/);
 });
 
 test('la primera columna dice PARTIDA, que es lo que el operador busca', () => {
   const i = PANEL.indexOf('id="sg-val-modal"');
   const b = PANEL.slice(i, i + 3000);
-  assert.match(b, /<th style="width:30%">Partida<\/th>/);
+  assert.match(b, /<th style="width:\d+%">Partida<\/th>/);
+});
+
+test('TODO lo que se cuelga del cuerpo ocupa el ancho entero', () => {
+  // El cuerpo del modal es .fg, una grilla de DOS columnas: lo que no lleva .ff
+  // ocupa media fila. El aviso se colgó ahí sin la clase y le comió la mitad del
+  // ancho a la tabla — la partida salía «0549.03.09…» y la fecha «20…».
+  const i = PANEL.indexOf('id="sg-val-modal"');
+  const cuerpo = PANEL.slice(PANEL.indexOf('<div class="fg">', i), PANEL.indexOf('<div class="ab-modal-footer">', i));
+  // Los hijos directos del cuerpo: van indentados con seis espacios.
+  const bloques = cuerpo.split(SALTO)
+    .filter((l) => /^ {6}<div /.test(l))
+    .map((l) => l.trim());
+  assert.ok(bloques.length >= 4, 'no se encontraron los bloques del cuerpo');
+  for (const b of bloques) {
+    assert.ok(/class="[^"]*ff/.test(b), 'este bloque ocupa media fila: ' + b.slice(0, 70));
+  }
+  // Y la regla es la que ya existía en el panel, no una copia.
+  assert.match(PANEL, /\.ff\{grid-column:1\/-1\}/);
+});
+
+test('el aviso del IVA va ABAJO de la tabla, no al lado', () => {
+  const i = PANEL.indexOf('id="sg-val-modal"');
+  const b = PANEL.slice(i, i + 3000);
+  assert.ok(b.indexOf('<tbody id="sg-val-items">') < b.indexOf('Los importes se cargan'),
+    'el aviso volvió arriba, donde le come el ancho a la tabla');
+});
+
+test('y no se corta ningún dato: lo largo baja de renglón', () => {
+  // Media partida no sirve para nada. Bajar de renglón muestra todo y no produce
+  // barra lateral, que es lo que se estaba evitando con el recorte.
+  const i = PANEL.indexOf('function sgGdsValRender(){');
+  const b = PANEL.slice(i, PANEL.indexOf(SALTO + '}', i));
+  assert.match(b, /var cel='white-space:normal;word-break:break-word';/);
+  assert.ok(!b.includes('text-overflow:ellipsis'), 'volvió el recorte');
+  // La fecha sí queda en un renglón: es corta y partida se lee peor.
+  assert.ok(b.includes("+';white-space:nowrap\">'+escH(it.fecha"),
+    'la fecha se puede partir en dos renglones');
 });
 
 // ── 4 · SIN IVA, DICHO DONDE SE ESCRIBE ────────────────────────────────────
@@ -159,9 +193,6 @@ test('el cuadro avisa que los importes van SIN IVA', () => {
   const i = PANEL.indexOf('id="sg-val-modal"');
   const b = PANEL.slice(i, i + 3000);
   assert.match(b, /Los importes se cargan <b>SIN IVA<\/b>/);
-  // Arriba de la tabla, no al pie: el aviso que se lee después de tipear no sirve.
-  assert.ok(b.indexOf('SIN IVA') < b.indexOf('<tbody id="sg-val-items">'),
-    'el aviso quedó abajo del lugar donde se escribe');
   // Y el campo del total también lo dice, porque ahí se carga la cuenta entera.
   assert.match(b, /Total de la cuenta \(\$, sin IVA\)/);
 });
