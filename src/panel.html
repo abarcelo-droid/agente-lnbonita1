@@ -21211,39 +21211,79 @@ function sgManualBuscar(q){
   }
   cuerpo.innerHTML = m.html;
 
-  // Se recorre el TEXTO, no el HTML: reemplazar sobre el string de etiquetas parte
-  // un atributo al medio y rompe la página. Se camina por los nodos de texto.
+  // ── SE BUSCA SOBRE EL TEXTO DEL BLOQUE, NO NODO POR NODO ─────────────
+  //
+  // Acá había un caminante que miraba CADA nodo de texto por separado. El
+  // manual está lleno de <b>, así que la mitad de las frases quedan partidas en
+  // dos nodos: «Por acá <b>entra la mercadería…</b>». Buscando «acá entra» —que
+  // está ahí, en pantalla— contestaba «no hay nada sobre acá entra».
+  //
+  // Medido sobre los manuales de hoy: 179 pares de palabras vecinas en Ingresos,
+  // 90 en Órdenes de Compra, 84 en Mejoras. Uno de cada tres.
+  //
+  // Ahora se arma el texto CORRIDO de cada bloque —con un mapa de qué pedazo
+  // vino de qué nodo— y se busca ahí. Una frase que cruza un <b> se encuentra, y
+  // se resalta de los dos lados.
   var n = 0;
-  var caminar = function(nodo){
-    for (var i = 0; i < nodo.childNodes.length; i++) {
-      var h = nodo.childNodes[i];
-      if (h.nodeType === 3) {
-        var txt = h.nodeValue, norm = sgNorm(txt), pos = norm.indexOf(t);
-        if (pos < 0) continue;
-        // Se parte el nodo y se envuelve la coincidencia. sgNorm no cambia el
-        // largo (saca tildes, no letras), así que las posiciones coinciden.
-        var frag = document.createDocumentFragment(), desde = 0;
-        while (pos >= 0) {
-          if (pos > desde) frag.appendChild(document.createTextNode(txt.slice(desde, pos)));
-          var mk = document.createElement('mark');
-          mk.textContent = txt.slice(pos, pos + t.length);
-          frag.appendChild(mk); n++;
-          desde = pos + t.length;
-          pos = norm.indexOf(t, desde);
-        }
-        if (desde < txt.length) frag.appendChild(document.createTextNode(txt.slice(desde)));
-        nodo.replaceChild(frag, h);
-        i += frag.childNodes ? 0 : 0;
-      } else if (h.nodeType === 1 && h.tagName !== 'MARK') {
-        caminar(h);
+
+  var nodosDeTexto = function(el){
+    var out = [];
+    (function rec(nodo){
+      for (var i = 0; i < nodo.childNodes.length; i++) {
+        var h = nodo.childNodes[i];
+        if (h.nodeType === 3) { if (h.nodeValue) out.push(h); }
+        else if (h.nodeType === 1) rec(h);
       }
-    }
+    })(el);
+    return out;
   };
-  caminar(cuerpo);
+
+  var resaltarBloque = function(el){
+    var nodos = nodosDeTexto(el);
+    var corrido = '', rangos = [];
+    for (var k = 0; k < nodos.length; k++) {
+      var v = nodos[k].nodeValue, nv = sgNorm(v);
+      // sgNorm saca tildes sin cambiar el largo. Si algún día cambiara, las
+      // posiciones dejarían de coincidir y se resaltaría corrido: mejor no
+      // resaltar ese nodo que pintar la palabra de al lado.
+      if (nv.length !== v.length) nv = v.toLowerCase();
+      rangos.push({ nodo: nodos[k], desde: corrido.length, hasta: corrido.length + nv.length });
+      corrido += nv;
+    }
+
+    var hits = [], p = corrido.indexOf(t);
+    while (p >= 0) { hits.push(p); p = corrido.indexOf(t, p + t.length); }
+    if (!hits.length) return 0;
+    n += hits.length;
+
+    // Se recorren los nodos de atrás para adelante: partir uno no corre las
+    // posiciones de los anteriores.
+    for (var r = rangos.length - 1; r >= 0; r--) {
+      var g = rangos[r], cortes = [];
+      for (var j = 0; j < hits.length; j++) {
+        var a = Math.max(hits[j], g.desde), b = Math.min(hits[j] + t.length, g.hasta);
+        if (a < b) cortes.push([a - g.desde, b - g.desde]);
+      }
+      if (!cortes.length) continue;
+      var txt = g.nodo.nodeValue;
+      var frag = document.createDocumentFragment(), desde = 0;
+      for (var c = 0; c < cortes.length; c++) {
+        if (cortes[c][0] > desde) frag.appendChild(document.createTextNode(txt.slice(desde, cortes[c][0])));
+        var mk = document.createElement('mark');
+        mk.textContent = txt.slice(cortes[c][0], cortes[c][1]);
+        frag.appendChild(mk);
+        desde = cortes[c][1];
+      }
+      if (desde < txt.length) frag.appendChild(document.createTextNode(txt.slice(desde)));
+      g.nodo.parentNode.replaceChild(frag, g.nodo);
+    }
+    return hits.length;
+  };
 
   // Y los bloques sin ninguna coincidencia se apagan.
   [].slice.call(cuerpo.children).forEach(function(el){
-    el.classList.toggle('apagado', !el.querySelector('mark') && !(el.tagName === 'MARK'));
+    var hubo = resaltarBloque(el);
+    el.classList.toggle('apagado', !hubo && el.tagName !== 'MARK');
   });
 
   if (cuenta) {
