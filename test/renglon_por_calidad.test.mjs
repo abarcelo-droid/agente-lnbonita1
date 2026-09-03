@@ -253,7 +253,7 @@ test('y el decomiso guarda sus BULTOS, que era la raíz', () => {
   // La columna existía y nadie la escribía: bultosDecomisado() daba siempre cero y el
   // tope por bultos dejaba mover a otra calidad cajones ya tirados.
   const i = SG.indexOf("router.post('/lotes/:id/decomiso'");
-  const b = SG.slice(i, i + 2600);
+  const b = SG.slice(i, SG.indexOf('\r\n});', i));
   // Desde el 2/9/2026 la merma tambien puede llevar foto: la lista de columnas
   // creció, pero  sigue ahí, que es lo que este test protege.
   assert.match(b, /INSERT INTO sg_lote_decomisos \(lote_id, kg, bultos, motivo, usuario_id,/);

@@ -78,11 +78,28 @@ test('no se puede tirar más de lo que hay', () => {
   assert.match(b, /if \(kg > disp \+ 0\.01\)/);
 });
 
-test('y sale del PISO, o la pantalla dice lleno un lugar vacío', () => {
+test('y sale del PISO QUE SE ELIGIÓ, o le baja los cajones a otro', () => {
+  // Pablo, 2/9/2026: «los usuarios pueden tocar sólo sus pisos asignados, no
+  // cualquiera». Antes salía por orden de piso: la merma de Cámara 2 le
+  // descontaba los cajones a Playa 1 si Playa 1 venía primero.
   const b = trozo("router.post('/lotes/:id/decomiso'", '\r\n});');
-  assert.match(b, /descontarDeUbicacion\(db, lote\.id, bultosDecomisados\(db, lote\.id, kg\), kg, null\);/);
+  assert.match(b, /const pisoId = \(req\.body\?\.piso_id != null/);
+  assert.match(b, /exigirPiso\(db, req, pisoId, 'tirar mercadería'\)/);
+  assert.match(b, /descontarDeUbicacion\(db, lote\.id, bultosDecomisados\(db, lote\.id, kg\), kg, pisoId\);/);
+  // Y si ese piso no tiene tanto, se corta: la transacción vuelve atrás y no
+  // queda una merma anotada contra una ubicación que no existe.
+  assert.match(b, /if \(!sacada\.ok\) \{ const err = new Error\(sacada\.error\); err\.esDelUsuario = true; throw err; \}/);
+  assert.match(b, /e\.esDelUsuario \? 400 : 500/);
   // Y la partida queda en amarillo si estaba en verde: algo le pasó.
   assert.match(b, /semaforo='amarillo'/);
+});
+
+test('el piso es OPCIONAL: la mercadería vieja no está ubicada en ningún lado', () => {
+  // Entró antes de que existieran los pisos. No puede ser que por eso no se
+  // pueda tirar.
+  const b = trozo("router.post('/lotes/:id/decomiso'", '\r\n});');
+  assert.match(b, /req\.body\.piso_id !== ''\) \? Number\(req\.body\.piso_id\) : null/);
+  assert.match(b, /\n    if \(pisoId\) \{/, 'el chequeo de piso corre siempre, incluso sin piso');
 });
 
 // ── 2 · MOTIVO OBLIGATORIO, FOTO OPCIONAL ──────────────────────────────────
@@ -130,28 +147,54 @@ test('la solapa está en Stock, no en Reprocesos', () => {
   assert.match(c, /if \(elegida === 'merma'\) sgMermaLoad\(\);/);
 });
 
-test('se carga en CAJONES y se manda en kilos', () => {
-  // Es la unidad en la que se tira y en la que la pantalla muestra la partida.
-  // Pedirle los kilos al que está en la cámara es pedirle una cuenta a mano.
-  const i = PANEL.indexOf('function sgMermaKg(){');
-  assert.ok(i > 0);
-  assert.match(PANEL.slice(i, i + 400), /return kpb>0 \? Math\.round\(n\*kpb\*100\)\/100 : n;/);
-  // Y si la partida no tiene cajones, el rótulo lo dice en vez de mentir.
-  const j = PANEL.indexOf('function sgMermaLotePick(){');
-  assert.match(PANEL.slice(j, j + 900), /kpb>0 \? 'Cajones que se tiran' : 'Kilos que se tiran'/);
+// ── LA UNIDAD LA DECIDE LA PARTIDA, NO EL MODO ────────────────────────────
+//
+// El remito y la facturación se cargan en cajones y el servidor valida cajón
+// entero. La merma también — salvo cuando la partida es a granel, que no tiene
+// cajones: exigírselos sería no dejar tirarla nunca.
+function unidad() {
+  const i = PANEL.indexOf('function sgIPPorBulto(st){');
+  const j = PANEL.indexOf('function sgIPPisosTxt(l){', i);
+  assert.ok(i > 0 && j > i);
+  // eslint-disable-next-line no-new-func
+  return new Function(PANEL.slice(i, j) + '\nreturn { sgIPPorBulto, sgIPPorBultoLote };')();
+}
+
+test('la merma se carga en CAJONES, como el remito', () => {
+  const U = unidad();
+  assert.equal(U.sgIPPorBulto({ modo: 'merma' }), true);
+  assert.equal(U.sgIPPorBultoLote({ modo: 'merma' }, { kg_por_bulto: 11 }), true);
+  // Y el pedido sigue siendo en kilos: ahí se pide lo que se necesita.
+  assert.equal(U.sgIPPorBulto({ modo: 'pedido' }), false);
 });
 
-test('sólo ofrece partidas que tienen algo', () => {
-  // Ofrecer una vacía es ofrecer un renglón que el servidor va a rechazar.
-  const i = PANEL.indexOf('function sgMermaAbrir(){');
-  assert.match(PANEL.slice(i, i + 1200), /\.filter\(function\(l\)\{ return Number\(l\.kg_disponibles\)>0\.01; \}\)/);
+test('…salvo si la partida es a granel, que se pesa', () => {
+  const U = unidad();
+  assert.equal(U.sgIPPorBultoLote({ modo: 'merma' }, { kg_por_bulto: 0 }), false,
+    'una partida a granel no se puede tirar si se le exigen cajones');
+  assert.equal(U.sgIPPorBultoLote({ modo: 'merma' }, {}), false);
+  // Pero el remito NO cambia: ahí el servidor valida cajón entero y cambiar la
+  // unidad sería cambiar lo que se factura.
+  assert.equal(U.sgIPPorBultoLote({ modo: 'remito' }, { kg_por_bulto: 0 }), true);
+  assert.equal(U.sgIPPorBultoLote({ modo: 'directa' }, {}), true);
 });
 
-test('el botón se apaga si se pasa de lo que hay', () => {
-  const i = PANEL.indexOf('function sgMermaCalc(){');
+test('no ofrece tirar lo que viene EN CAMINO', () => {
+  // Todavía no llegó. Ofrecerlo es ofrecer un renglón que rompe el stock.
+  const i = PANEL.indexOf('function sgIPConCamino(st){');
+  assert.match(PANEL.slice(i, i + 120), /return st\.modo==='pedido';/);
+  const j = PANEL.indexOf('function sgMermaAbrir(){');
+  assert.match(PANEL.slice(j, j + 1200), /sgItemPicker\(\{ contenedor:'sg-merma-pick', modo:'merma'/);
+});
+
+test('no se puede tirar más de lo que hay, y el botón se apaga', () => {
+  const i = PANEL.indexOf('function sgMermaElegir(');
   const b = PANEL.slice(i, i + 1200);
   assert.match(b, /No se puede tirar más de lo que hay/);
-  assert.match(b, /b\.disabled = !l \|\| !\(kg>0\) \|\| !!mal;/);
+  assert.match(b, /if\(kg > disp \+ 0\.01\)\{/);
+  // Y sin partida elegida el botón no se puede apretar.
+  const j = PANEL.indexOf('function sgMermaPintar(){');
+  assert.match(PANEL.slice(j, j + 1600), /if\(b\) b\.disabled = true;/);
 });
 
 test('el listado muestra el COSTO de lo que se tiró', () => {
@@ -175,7 +218,7 @@ test('Stock tiene su «¿Cómo se usa?», con la merma adentro', () => {
   assert.ok(i > 0, 'Stock no tiene manual');
   const m = PANEL.slice(i, PANEL.indexOf('\r\n};', i));
   const plano = m.replace(/'\s*\+\s*'/g, '').replace(/\s+/g, ' ');
-  for (const campo of ['Partida', 'Cuánto se tira', '¿Por qué se tira?', 'Foto']) {
+  for (const campo of ['Qué se tira', 'Cuántos cajones', '¿Por qué se tira?', 'Foto']) {
     assert.ok(m.includes(campo), 'al manual de Stock le falta: ' + campo);
   }
   assert.ok(plano.includes('no se factura'), 'el manual no dice que la merma no se factura');

@@ -2049,6 +2049,12 @@ function descontarDeUbicacion(db, loteId, bultos, kg, pisoId) {
       return { ok: false,
         error: `En ${u.piso_nombre} hay ${u.bultos} bulto(s) de esa partida y se piden ${restB}.` };
     }
+    // Y los KILOS. Una partida a granel no tiene bultos: el control de arriba la
+    // dejaba pasar entera y el piso quedaba en kilos negativos.
+    if (restK - (u.kg || 0) > 0.01) {
+      return { ok: false,
+        error: `En ${u.piso_nombre} hay ${u.kg} kg de esa partida y se piden ${restK}.` };
+    }
     ubicMover(db, loteId, u.piso_id, -restB, -restK);
     return { ok: true };
   }
@@ -8618,6 +8624,20 @@ router.post('/lotes/:id/decomiso', requireAuth, sgUpload.single('foto'), (req, r
     if (lote.estado === 'bajado') return res.status(400).json({ ok: false, error: 'El lote está dado de baja' });
     const disp = (lote.kg_reales || 0) - kgDespachados(db, lote.id) - kgDecomisado(db, lote.id) - kgTransformado(db, lote.id);
     if (kg > disp + 0.01) return res.status(400).json({ ok: false, error: `No podés decomisar ${kg}kg: hay ${disp.toFixed(1)}kg disponibles` });
+    // ── DE QUÉ PISO SALE ──────────────────────────────────────────────
+    //
+    // Pablo, 2/9/2026: «los usuarios pueden tocar sólo sus pisos asignados, no
+    // cualquiera». Vale igual para tirar que para remitir: si la merma no dijera
+    // de dónde sale, saldría por orden de piso y le bajaría los cajones a otro.
+    //
+    // Opcional a propósito: la mercadería vieja —la que se recibió antes de que
+    // existieran los pisos— no está ubicada en ningún lado, y no puede ser que
+    // por eso no se pueda tirar.
+    const pisoId = (req.body?.piso_id != null && req.body.piso_id !== '') ? Number(req.body.piso_id) : null;
+    if (pisoId) {
+      const noPuede = exigirPiso(db, req, pisoId, 'tirar mercadería');
+      if (noPuede) return res.status(403).json({ ok: false, error: noPuede });
+    }
     db.transaction(() => {
       // ── Y SUS BULTOS ────────────────────────────────────────────────
       //
@@ -8643,7 +8663,10 @@ router.post('/lotes/:id/decomiso', requireAuth, sgUpload.single('foto'), (req, r
       // buscarlo encontraría vacío un lugar que la pantalla dice lleno.
       // Los bultos se derivan de los kilos con el factor del lote: el decomiso
       // se carga en kilos y la ubicación lleva las dos unidades.
-      descontarDeUbicacion(db, lote.id, bultosDecomisados(db, lote.id, kg), kg, null);
+      const sacada = descontarDeUbicacion(db, lote.id, bultosDecomisados(db, lote.id, kg), kg, pisoId);
+      // Si el piso elegido no tiene tanto, se corta acá: la transacción vuelve
+      // atrás y no queda una merma anotada contra una ubicación que no existe.
+      if (!sacada.ok) { const err = new Error(sacada.error); err.esDelUsuario = true; throw err; }
       // semáforo → amarillo SOLO si estaba verde (si ya amarillo/rojo, no lo cambia ni registra).
       if (lote.semaforo === 'verde') {
         db.prepare("UPDATE sg_lotes SET semaforo='amarillo', modificado_en=datetime('now','localtime') WHERE id=?").run(lote.id);
@@ -8653,7 +8676,11 @@ router.post('/lotes/:id/decomiso', requireAuth, sgUpload.single('foto'), (req, r
       recalcEstadoLote(db, lote.id);   // umbral sobre kg vigentes → si no queda stock, despachado_total
     })();
     res.json({ ok: true, data: { id: lote.id, kg_decomisado: kg, kg_disponible: +(disp - kg).toFixed(2) } });
-  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+  } catch (e) {
+    // «En Cámara 2 hay 8 cajones y se piden 12» es un dato que el que carga puede
+    // arreglar; un 500 le dice que se rompió el sistema.
+    res.status(e.esDelUsuario ? 400 : 500).json({ ok: false, error: e.message });
+  }
 });
 
 // #reproceso caso 2: TRANSFORMACIÓN de unidad. Convierte stock del lote (producto-caja) en un lote
@@ -9452,7 +9479,31 @@ router.get('/oferta', requireAuth, (req, res) => {
         : null;
       return r;
     });
-    res.json({ ok: true, data: { stock: stock.map(derivarBultosLote), en_camino: en_caminoB } });
+    // ── Y DÓNDE ESTÁ CADA PARTIDA ─────────────────────────────────────
+    //
+    // Pablo, 2/9/2026: «en merma debería traerme algo parecido a lo que me
+    // muestra en facturación, con el piso completo».
+    //
+    // El que va a tirar mercadería está parado en un piso mirando los cajones:
+    // necesita saber cuáles de esos cajones son de esta partida y cuáles de la
+    // de al lado. Y `puedo` viaja con cada piso porque la regla es la de
+    // siempre —se toca sólo el piso asignado—: sin esto la pantalla ofrece un
+    // renglón que el servidor va a rechazar.
+    // Los pisos de esta persona se preguntan UNA vez, no una por partida: son los
+    // mismos para todas y /oferta se abre cada vez que se clickea un producto.
+    const mios = new Set(pisosDeUsuario(db, req));
+    const conPisos = stock.map(derivarBultosLote).map((l) => {
+      l.pisos = ubicacionesDeLote(db, l.lote_id).map((u) => ({
+        piso_id: u.piso_id,
+        piso_nombre: u.piso_nombre,
+        piso_codigo: u.piso_codigo,
+        bultos: u.bultos,
+        kg: u.kg,
+        puedo: mios.has(u.piso_id) ? 1 : 0,
+      }));
+      return l;
+    });
+    res.json({ ok: true, data: { stock: conPisos, en_camino: en_caminoB } });
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
