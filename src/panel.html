@@ -7429,34 +7429,37 @@ input:focus,select:focus,textarea:focus{border-color:var(--burg);box-shadow:0 0 
      NADA DE BARRAS LATERALES: la tabla usa el ancho que hay, con anchos por
      columna, y lo de largo variable se trunca. -->
 <div class="ab-modal-overlay" id="sg-val-modal">
-  <div class="ab-modal" style="width:min(760px,96vw);max-width:96vw;max-height:90vh;overflow-y:auto;overflow-x:hidden">
+  <div class="ab-modal" style="width:min(960px,96vw);max-width:96vw;max-height:90vh;overflow-y:auto;overflow-x:hidden">
     <div class="mhd"><div class="mht" id="sg-val-tit">Valorizar cuenta</div><button class="mcl" onclick="closeMB('sg-val-modal')">×</button></div>
     <div class="fg">
-      <!-- EL IMPORTE VA SIN IVA. Es el número que entra al costo de la partida, y
-           el costo no lleva IVA: el crédito fiscal se recupera aparte. Cargado
-           con IVA, la partida sale un 21% más cara y el margen miente. -->
-      <div style="font-size:12.5px;background:rgba(240,165,0,.10);border:1px solid rgba(240,165,0,.30);border-radius:8px;padding:8px 10px;margin-bottom:12px">
-        Los importes se cargan <b>SIN IVA</b> — es lo que entra al costo de la partida.
-      </div>
-      <div id="sg-val-modobox" style="display:none;gap:18px;align-items:center;margin-bottom:12px;flex-wrap:wrap">
+      <div id="sg-val-modobox" class="ff" style="display:none;gap:18px;align-items:center;margin-bottom:12px;flex-wrap:wrap">
         <label style="font-weight:600"><input type="radio" name="sg-val-modo" value="remito" checked onchange="sgGdsValModo()" style="width:auto"> Monto por operación</label>
         <label style="font-weight:600"><input type="radio" name="sg-val-modo" value="total" onchange="sgGdsValModo()" style="width:auto"> Total a repartir (prorrateo por cantidad)</label>
       </div>
-      <div id="sg-val-totalbox" style="display:none;margin-bottom:12px">
+      <div id="sg-val-totalbox" class="ff" style="display:none;margin-bottom:12px">
         <div class="fl"><label>Total de la cuenta ($, sin IVA)</label><input type="number" id="sg-val-total" min="0" step="0.01" oninput="sgGdsProrratear()" placeholder="se reparte entre las operaciones por su cantidad (kg / bultos / pallets)"></div>
       </div>
-      <div class="ab-table-wrap" style="overflow-x:hidden !important">
+      <div class="ab-table-wrap ff" style="overflow-x:hidden !important">
         <table class="pa-tbl" style="table-layout:fixed;width:100%">
         <thead><tr>
-          <th style="width:30%">Partida</th>
-          <th style="width:26%">Detalle</th>
-          <th style="width:14%">Fecha</th>
-          <th style="width:12%;text-align:right">Cant.</th>
-          <th style="width:18%;text-align:right">Monto $</th>
+          <th style="width:26%">Partida</th>
+          <th style="width:24%">Detalle</th>
+          <th style="width:13%">Fecha</th>
+          <th style="width:15%;text-align:right">Cant.</th>
+          <th style="width:22%;text-align:right">Monto $</th>
         </tr></thead>
         <tbody id="sg-val-items"></tbody>
       </table></div>
-      <div id="sg-val-resumen" style="text-align:right;font-weight:700;margin-top:10px"></div>
+      <div id="sg-val-resumen" class="ff" style="text-align:right;font-weight:700;margin-top:10px"></div>
+      <!-- EL IMPORTE VA SIN IVA. Es el número que entra al costo de la partida, y
+           el costo no lleva IVA: el crédito fiscal se recupera aparte. Cargado
+           con IVA, la partida sale un 21% más cara y el margen miente.
+
+           Va ABAJO y a lo ancho: arriba y en media fila le comía la mitad de la
+           tabla, y la partida salía cortada. -->
+      <div class="ff" style="font-size:12.5px;background:rgba(240,165,0,.10);border:1px solid rgba(240,165,0,.30);border-radius:8px;padding:8px 10px">
+        Los importes se cargan <b>SIN IVA</b> — es lo que entra al costo de la partida.
+      </div>
     </div>
     <div class="ab-modal-footer">
       <button class="btn bo" onclick="closeMB('sg-val-modal')">Cancelar</button>
@@ -21432,6 +21435,9 @@ SG_MANUAL.gastos = { titulo: 'Gastos Directos', html:
   + 'Antes el aviso mandaba a una solapa vieja que ya no existía: la descarga quedaba '
   + '«a valorizar» para siempre y la partida trabada, sin ningún lugar donde '
   + 'destrabarla.</li>'
+  + '<li><span class="ver">V1005</span> El cuadro se ve entero: el aviso del IVA pasó '
+  + 'abajo y a lo ancho —al lado le comía la mitad de la tabla y la partida salía '
+  + 'cortada— y ya no se recorta ningún dato.</li>'
   + '<li><span class="ver">V1004</span> El cuadro de valorizar dice que los importes van '
   + '<b>sin IVA</b>, el campo está al lado de la partida, y con <b>una sola</b> operación '
   + 'ya no pregunta entre dos caminos que dan el mismo número.</li>'
@@ -22962,11 +22968,13 @@ function sgGdsValRender(){
   // El campo usa el ancho de SU columna, no 110 píxeles fijos: con un ancho fijo
   // la última columna empujaba la tabla y aparecía la barra de abajo.
   var inSty='width:100%;box-sizing:border-box;text-align:right;padding:4px 6px;border-radius:6px;border:1px solid var(--bor)';
-  var cel='overflow:hidden;text-overflow:ellipsis;white-space:nowrap';
+  // Se parte el renglón en vez de cortar el texto: media partida no sirve para
+  // nada, y bajar de renglón no produce barra lateral.
+  var cel='white-space:normal;word-break:break-word';
   eid('sg-val-items').innerHTML=SGGD.valItems.map(function(it,i){
-    return '<tr><td style="'+cel+'" title="'+esc(it.ref||'')+'"><code>'+escH(it.ref||'—')+'</code></td>'
-      +'<td style="'+cel+'" title="'+esc(it.sub||'')+'">'+escH(it.sub||'—')+'</td>'
-      +'<td style="'+cel+'">'+esc(it.fecha||'—')+'</td>'
+    return '<tr><td style="'+cel+'"><code>'+escH(it.ref||'—')+'</code></td>'
+      +'<td style="'+cel+'">'+escH(it.sub||'—')+'</td>'
+      +'<td style="'+cel+';white-space:nowrap">'+escH(it.fecha||'—')+'</td>'
       +'<td style="text-align:right;'+cel+'">'+nr(it.base)+(it.unidadLbl?(' '+escH(it.unidadLbl)):'')+'</td>'
       +'<td style="text-align:right"><input type="number" min="0" step="0.01" value="'+(it.monto!==''&&it.monto!=null?it.monto:'')+'" '+(ro?('readonly style="background:rgba(128,128,128,.12);'+inSty+'"'):('style="'+inSty+'"'))+' oninput="sgGdsValMonto('+i+',this.value)"></td></tr>';
   }).join('');
