@@ -279,6 +279,35 @@ test('el ítem está FUERA de todos los menús y arriba de COMERCIAL', () => {
   assert.ok(j > i && k > j, 'el ítem quedó abajo del menú completo');
   assert.match(SIDEBAR.slice(i, j), /data-sec="mejoras"/);
 });
+test('y SE VE: lleva rótulo propio, como Favoritos y Recientes', () => {
+  // Sin el rótulo era una cajita con un renglón suelto adentro, y a simple vista
+  // parecía un hueco entre Recientes y «Menú completo». Pablo: «no me aparece».
+  //
+  // Los tres bloques sueltos del menú se arman igual: .sb2-fastlane con su
+  // .sb2-group-sec arriba. El que no lo lleva no se lee como una sección.
+  const i = SIDEBAR.indexOf('sb2-fastlane mej');
+  const b = SIDEBAR.slice(i, SIDEBAR.indexOf('<div class="sb2-divider">', i));
+  assert.match(b, /<div class="sb2-group-sec">/);
+  assert.ok(b.includes('<span class="sb2-label">\u{1F4A1} Mejoras</span>'),
+    'el bloque no lleva su rótulo');
+  // Y el renglón dice qué se hace, no repite el título.
+  assert.ok(b.includes('<span class="sb2-ni-text">Proponer una mejora</span>'),
+    'el renglón no dice qué se hace ahí');
+});
+
+test('el CSS le da color propio al rótulo y al renglón, como a los otros dos', () => {
+  const CSS = fs.readFileSync(path.join(RAIZ, 'src/sidebar-v2.css'), 'utf8');
+  assert.ok(CSS.includes('.sb2-fastlane.mej .sb2-group-sec{ color: #9FE3B8 }'),
+    'el rótulo no tiene color propio');
+  assert.ok(CSS.includes('.sb2-fastlane.mej .sb2-ni{ color: rgba(255,255,255,.92) }'),
+    'el renglón no tiene color propio');
+  // El tinte tiene que verse sobre un fondo oscuro: con 7% no se distinguía del
+  // hueco que había al lado.
+  const m = CSS.match(/\.sb2-fastlane\.mej\{ background: rgba\(\d+,\d+,\d+,\.(\d+)\)/);
+  assert.ok(m, 'no está el fondo del bloque');
+  assert.ok(Number(m[1]) >= 10, 'el fondo del bloque quedó demasiado transparente');
+});
+
 
 test('y navega: existe el .ni puente del nav viejo', () => {
   // El menú que se ve lo dibuja sidebar-v2, pero el que NAVEGA es el <nav>
@@ -346,7 +375,9 @@ test('tiene su «¿Cómo se usa?», con su versión', () => {
   // Y cada campo lleva la suya, que la arma sgManCampo al dibujar.
   assert.ok((m.match(/, 'V\d+'\)/g) || []).length >= 5,
     'los campos del manual no están anotados con su versión');
-  assert.ok(vs.includes(actual), 'el módulo nuevo no está anotado con la V' + actual);
+  for (const v of [997, 998]) {
+    assert.ok(vs.includes(v), 'falta anotar el cambio de la V' + v + ' en el manual de Mejoras');
+  }
   for (const n of vs) assert.ok(n <= actual, 'el manual cita la V' + n + ' y el panel va en la V' + actual);
 });
 
