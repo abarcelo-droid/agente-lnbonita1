@@ -36,7 +36,7 @@ const MAX_RECIENTES = 4;
 // SE ACTUALIZA A MANO, en el mismo cambio que se mergea. Sacarlo de git en el
 // arranque sonaba mejor, pero Railway despliega desde una copia sin historial:
 // diría siempre lo mismo y mentiría, que es peor que no estar.
-const VERSION = 'V1008';
+const VERSION = 'V1009';
 
 let SIDEBAR_DATA = { grupos: [], modulos: [] };
 let SOCIEDADES = [];                             // array de {id, nombre, funcion}
@@ -943,11 +943,26 @@ function closeCmdK(){
 function renderCmdK(q){
   q = (q || '').toLowerCase().trim();
   const list = document.getElementById('sb2-cmdk-list');
-  const allItems = Object.values(MODULO_INDEX);
+
+  // EL BUSCADOR MUESTRA LO MISMO QUE EL MENÚ, NI UN ÍTEM MÁS.
+  //
+  // Pablo, 3/9/2026: «veo Proveedores en Contabilidad... pero Contabilidad no
+  // existe, se llama Contabilidad SG... ¿no será de otra empresa?». Era de otra
+  // empresa: el grupo «Contabilidad» es de Familia, y San Gerónimo tiene el suyo
+  // aparte. El menú lo escondía bien —renderGrupos, favoritos y recientes pasan
+  // todos por shouldShow— y sólo el ⌘K leía MODULO_INDEX crudo, que trae los
+  // módulos de las CUATRO empresas.
+  //
+  // Que el router después conteste 403 no arregla lo importante: el buscador ya
+  // le dijo qué áreas tiene la otra empresa, y lo mandó a una pantalla que no es
+  // la suya a buscar algo que ahí no está. Es la misma regla que ya estaba
+  // escrita en rutas/sidebar.js: cada empresa es autónoma, el menú no muestra lo
+  // ajeno.
+  const allItems = Object.values(MODULO_INDEX).filter(m => shouldShow(m));
 
   if (!q){
-    const favItems    = FAVORITOS.map(m => MODULO_INDEX[m]).filter(Boolean);
-    const recItems    = RECIENTES.filter(m => !FAVORITOS.includes(m)).map(m => MODULO_INDEX[m]).filter(Boolean);
+    const favItems    = FAVORITOS.map(m => MODULO_INDEX[m]).filter(m => m && shouldShow(m));
+    const recItems    = RECIENTES.filter(m => !FAVORITOS.includes(m)).map(m => MODULO_INDEX[m]).filter(m => m && shouldShow(m));
     const groups = [];
     if (favItems.length) groups.push({ label: '⭐ Favoritos',   items: favItems });
     if (recItems.length) groups.push({ label: '⏱ Recientes',   items: recItems });
