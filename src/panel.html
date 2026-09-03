@@ -16312,9 +16312,36 @@ function sgSoPintar(){
     : '';
 }
 
+// ── EL BOTÓN «COMPLETAR» SE APRIETA DESDE DOS PANTALLAS ──────────────────
+//
+// Pablo, 3/9/2026: «cuando se recibe mercadería sin orden de compra no funciona
+// el botón de completar».
+//
+// Y no funcionaba de la peor manera: NO PASABA NADA. Esto buscaba la orden en
+// SG_SO.filas, que la llena sgLoadSinOrden —el circuito de la bandeja vieja—.
+// Apretándolo desde Órdenes de Compra, que es de donde cuelga el botón desde que
+// la bandeja dejó de ser una solapa, ese arreglo está vacío: el `if (!o) return`
+// se cumplía y el modal no abría. Ni un cartel, ni un error en la consola.
+//
+// Ahora, si no la tiene a mano, la va a buscar. Es un pedido de más la primera
+// vez y ninguno después, contra un botón que no hace nada.
 function sgSoOpen(id){
   var o = SG_SO.filas.filter(function(x){ return x.id === id; })[0];
-  if (!o) return;
+  if (o) { sgSoAbrirCon(o); return; }
+  // No la tiene a mano: la va a buscar. Se llama a sgSoAbrirCon y NO a sgSoOpen
+  // otra vez — con una llamada de vuelta, un servidor que nunca la devuelve deja
+  // al navegador pidiéndola en círculos.
+  api('/api/sg/oc/sin-orden?todas=1').then(function(r){
+    SG_SO.filas = (r && r.ok) ? (r.data || []) : [];
+    var hay = SG_SO.filas.filter(function(x){ return x.id === id; })[0];
+    // Si no aparece es que ya no es una orden retroactiva pendiente: alguien la
+    // completó o la anuló desde otra pantalla mientras tanto.
+    if (!hay) { toast('Esa orden ya no está pendiente de completar', 'er'); sgLoadOC(); return; }
+    sgSoAbrirCon(hay);
+  });
+}
+
+function sgSoAbrirCon(o){
   SG_SO.sel = o;
   var t = eid('sg-so-tit');
   if (t) t.textContent = (o.completada_en ? 'La orden de ' : 'Completar la orden de ') + (o.proveedor_nombre || '');
@@ -16332,7 +16359,7 @@ function sgSoOpen(id){
   var obs = eid('sg-so-obs'); if (obs) obs.value = o.observaciones || '';
   eid('sg-so-items').innerHTML = '<div class="emp">Cargando…</div>';
   sgSoDocCambio();
-  api('/api/sg/oc/' + id + '/items-sin-orden').then(function(r){
+  api('/api/sg/oc/' + o.id + '/items-sin-orden').then(function(r){
     SG_SO.items = (r && r.ok) ? r.data : [];
     sgSoRender();
   });
@@ -16448,6 +16475,10 @@ function sgSoGuardar(){
       ? 'Orden completada'
       : 'Guardado — sigue en la bandeja: falta ' + (r.data.falta || []).join(', '), 'ok');
     closeMB('sg-so-modal');
+    // La cache se tira: sgLoadSinOrden se va sin hacer nada cuando la bandeja no
+    // esta en pantalla --que es siempre, desde que dejo de ser una solapa-- y
+    // SG_SO.filas se quedaria diciendo que esta orden sigue pendiente.
+    SG_SO.filas = [];
     sgLoadSinOrden();
     sgLoadOC();
   });
