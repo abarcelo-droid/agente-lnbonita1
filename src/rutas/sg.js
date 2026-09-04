@@ -7293,6 +7293,17 @@ router.get('/oc/:id', requireAuth, (req, res) => {
       -- Los BULTOS que entraron de verdad. La orden se pacta en bultos y se
       -- controla en bultos: es la columna que mira el comprador contra el remito.
       (SELECT COALESCE(SUM(bultos),0) FROM sg_lotes WHERE oc_item_id=i.id AND activo=1) AS bultos_recibidos,
+      -- Y LOS EQUIVALENTES, para el camión que se pesó sin contar cajones. El
+      -- de arriba queda en 0 en ese caso, y una bandeja que dice «faltan 60 de
+      -- 60» en una orden que entró completa manda a buscar mercadería que está.
+      -- Es el MISMO CASE que ya usa el listado de órdenes (bultos_equivalentes
+      -- de arriba): si estuviera escrito de dos formas, un día darían distinto.
+      (SELECT COALESCE(SUM(
+           CASE WHEN COALESCE(l.bultos,0) > 0 THEN l.bultos
+                WHEN COALESCE(i.kg_por_bulto, ps.factor_conversion) > 0
+                  THEN l.kg_reales / COALESCE(i.kg_por_bulto, ps.factor_conversion)
+                ELSE 0 END), 0)
+         FROM sg_lotes l WHERE l.oc_item_id=i.id AND l.activo=1) AS bultos_equivalentes,
       -- ── DE QUÉ CALIDAD ES ESTE RENGLÓN ──────────────────────────────────
       -- Desde que separar por calidad parte también el renglón (29/8/2026), una
       -- orden puede tener DOS renglones del mismo producto. Sin esto, la pantalla
@@ -7816,7 +7827,27 @@ router.get('/recepciones', requireAuth, (req, res) => {
         (SELECT GROUP_CONCAT(x.nombre, ' · ') FROM (
            SELECT DISTINCT pr.nombre AS nombre FROM sg_lotes l
              JOIN sg_productos pr ON pr.id=l.producto_id
-            WHERE l.recepcion_id=r.id AND l.activo=1 ORDER BY pr.nombre) x) AS productos
+            WHERE l.recepcion_id=r.id AND l.activo=1 ORDER BY pr.nombre) x) AS productos,
+        -- ── LA CALIDAD, CON NÚMEROS ────────────────────────────────────
+        --
+        -- Pablo, 4/9/2026: «los informes de calidad explicitalos un poco mejor
+        -- como una columna o algo porque no se notan muy bien».
+        --
+        -- Hasta acá la lista traía sólo el sí/no de la cabecera (r.observada) y
+        -- la pantalla lo dibujaba como un ⚠️ de once puntos y medio pegado al
+        -- código de la partida. Ahora viaja QUÉ pasó: cuántos productos entraron
+        -- observados y cuánto del peor. Con eso la columna dice algo.
+        --
+        -- Sale de sg_recepcion_calidad, que tiene una fila POR PRODUCTO
+        -- OBSERVADO, y NO de las columnas calidad_* de la cabecera: ésas quedan
+        -- siempre en null desde que el informe es por producto.
+        (SELECT COUNT(*) FROM sg_recepcion_calidad c
+          WHERE c.recepcion_id=r.id AND c.observada=1) AS calidad_observados,
+        (SELECT MAX(c.pct_afectado) FROM sg_recepcion_calidad c
+          WHERE c.recepcion_id=r.id AND c.observada=1) AS calidad_pct_peor,
+        (SELECT GROUP_CONCAT(pr.nombre, ' · ') FROM sg_recepcion_calidad c
+           LEFT JOIN sg_productos pr ON pr.id=c.producto_id
+          WHERE c.recepcion_id=r.id AND c.observada=1) AS calidad_productos
       FROM sg_recepciones r
       LEFT JOIN sg_oc o ON o.id=r.oc_id
       LEFT JOIN sg_proveedores p ON p.id=o.proveedor_id
