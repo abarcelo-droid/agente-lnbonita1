@@ -184,7 +184,7 @@ test('la diferencia va en el MISMO asiento, con ámbito gestión', () => {
 });
 
 test('sin motivo no se guarda una diferencia', () => {
-  const b = trozo(SG, "router.post('/gastos-factura', requireAuth", SALTO + '});');
+  const b = trozo(SG, "router.post('/gastos-factura', ", SALTO + '});');
   assert.match(b, /if \(dif !== 0 && !MOTIVOS\[b\.dif_motivo\]\)/);
   assert.match(b, /elegí el motivo/);
 });
@@ -192,7 +192,7 @@ test('sin motivo no se guarda una diferencia', () => {
 test('y el valorizado se lee de la BASE, no del pedido', () => {
   // Es contra ese número que se calcula la diferencia de gestión. Un número que
   // manda el navegador es un número que se puede editar.
-  const b = trozo(SG, "router.post('/gastos-factura', requireAuth", SALTO + '});');
+  const b = trozo(SG, "router.post('/gastos-factura', ", SALTO + '});');
   assert.match(b, /const valorizado = r2\(elegidos\.reduce/);
   assert.ok(!/b\.valorizado/.test(b), 'la diferencia se calcula con un número que manda el navegador');
 });
@@ -200,7 +200,7 @@ test('y el valorizado se lee de la BASE, no del pedido', () => {
 test('no hay factura sin su asiento: todo en una transacción', () => {
   // Guardados por separado, el segundo paso puede no correr nunca y queda una
   // deuda que existe para el proveedor y no para la contabilidad.
-  const b = trozo(SG, "router.post('/gastos-factura', requireAuth", SALTO + '});');
+  const b = trozo(SG, "router.post('/gastos-factura', ", SALTO + '});');
   const i = b.indexOf('db.transaction(');
   assert.ok(i > 0, 'no está la transacción');
   const tx = b.slice(i);
@@ -217,11 +217,13 @@ test('no hay factura sin su asiento: todo en una transacción', () => {
 test('y si no hay asiento modelo, la factura entra igual y lo dice', () => {
   // Trabar la operación del día por una parametrización que hace el contador
   // sería peor: el papel llegó y hay que anotarlo.
-  const b = trozo(SG, "router.post('/gastos-factura', requireAuth", SALTO + '});');
+  const b = trozo(SG, "router.post('/gastos-factura', facturaGastoUpload", SALTO + '});');
   assert.match(b, /if \(!as\.sin_modelo\) \{/);
   assert.match(b, /sin_asiento: !asientoId/);
-  const p = PANEL.slice(PANEL.indexOf('function sgFgGuardar(){'));
-  assert.match(p.slice(0, 1800), /sin asiento: falta el modelo/);
+  // La función entera, no una ventana de N caracteres: creció al mandar el PDF
+  // en el mismo pedido y el cartel quedó afuera de la ventana, no del código.
+  const p = trozo(PANEL, 'function sgFgGuardar(){', SALTO + '}' + SALTO);
+  assert.match(p, /sin asiento: falta el modelo/);
 });
 
 // ── 4 · EL ASIENTO SE VE ANTES DE GUARDAR ──────────────────────────────────
@@ -319,14 +321,16 @@ test('parametrizar el asiento modelo es de administrador', () => {
   // Elegir contra qué cuentas se contabiliza no es trabajo del día.
   assert.match(SG, /router\.put\('\/gastos-factura\/modelo', requireAdmin,/);
   assert.match(SG, /router\.get\('\/gastos-factura\/modelo', requireAuth,/);
-  // Pero cargar la factura sí lo es: llegó el papel y hay que anotarlo.
-  assert.match(SG, /router\.post\('\/gastos-factura', requireAuth,/);
+  // Pero cargar la factura sí lo es: llegó el papel y hay que anotarlo. El
+  // multer va delante para poblar req.body desde el multipart; requireAuth sigue
+  // estando y sigue siendo lo que decide.
+  assert.match(SG, /router\.post\('\/gastos-factura', facturaGastoUpload\.single\('archivo'\), requireAuth,/);
 });
 
 test('el que guarda también mide contra el neto, no sólo el que previsualiza', () => {
   // La cuenta puede estar bien en la función pura y mal en el llamador: la
   // diferencia que se GUARDA es la que sale de acá.
-  const b = trozo(SG, "router.post('/gastos-factura', requireAuth", SALTO + '});');
+  const b = trozo(SG, "router.post('/gastos-factura', ", SALTO + '});');
   assert.match(b, /const dif = difDeFacturaGasto\(valorizado, m\.neto\);/);
   assert.ok(!/difDeFacturaGasto\(valorizado, m\.total\)/.test(b),
     'la diferencia se mide contra el total: sería puro IVA');
@@ -335,7 +339,7 @@ test('el que guarda también mide contra el neto, no sólo el que previsualiza',
 test('y el que guarda vuelve a mirar que no esté ya facturado', () => {
   // La pantalla ya filtró, pero entre que se abrió el cuadro y se apretó guardar
   // pudo entrar otra factura. Lo que decide es el servidor.
-  const b = trozo(SG, "router.post('/gastos-factura', requireAuth", SALTO + '});');
+  const b = trozo(SG, "router.post('/gastos-factura', ", SALTO + '});');
   const i = b.indexOf('const elegidos =');
   assert.ok(i > 0, 'no está la revalidación de las operaciones elegidas');
   const q = b.slice(i, b.indexOf('.all(...ids, prov)', i));
