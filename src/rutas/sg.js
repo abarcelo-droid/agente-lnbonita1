@@ -11216,11 +11216,132 @@ function sumaValorizada(db, ids, prov) {
   return r2(r.s);
 }
 
+// El papel de una factura de servicio. Storage propio y no facturaStorage:
+// aquél nombra el archivo con req.params.id —el de la orden—, que acá no existe,
+// y en /data/sg quedaban todos como "factura_x_...".
+const facturaGastoUpload = multer({
+  storage: multer.diskStorage({
+    destination: (req, file, cb) => cb(null, SG_UPLOAD_DIR),
+    filename: (req, file, cb) => {
+      const ext = (path.extname(file.originalname || '') || '.pdf').toLowerCase();
+      cb(null, 'factserv_' + Date.now() + '_' + Math.floor(Math.random() * 1e6) + ext);
+    },
+  }),
+  limits: { fileSize: 15 * 1024 * 1024 },
+});
+
+// ── LEERLE LOS DATOS AL COMPROBANTE DE UN SERVICIO ───────────────────────
+//
+// Pablo, 4/9/2026: «en ingresar factura siempre poné la versión para adjuntar un
+// PDF y que los datos los lea sola».
+//
+// Mismo mecanismo que la factura de mercadería (/factura-mercaderia/leer), con
+// el prompt de un comprobante de SERVICIO: acá no hay mercadería ni percepciones
+// por jurisdicción, hay un trabajo hecho y su IVA.
+//
+// LO QUE DEVUELVE ES UNA PROPUESTA, NO UN DATO. De acá sale un asiento y una
+// deuda: nada se guarda sin que una persona lo mire. La pantalla llena los
+// campos y el operador confirma.
+router.post('/gastos-factura/leer', requireAuth, async (req, res) => {
+  try {
+    const { base64, mediaType, proveedor_servicio_id } = req.body || {};
+    if (!base64 || !mediaType) return res.status(400).json({ ok: false, error: 'Falta el archivo' });
+    if (!process.env.ANTHROPIC_API_KEY) {
+      return res.status(503).json({ ok: false,
+        error: 'La lectura automática no está configurada en este servidor. Cargá los datos a mano; '
+             + 'el PDF se adjunta igual.' });
+    }
+    const db = getDb();
+
+    // A quién se le paga, para contrastar el CUIT. Si el comprobante es de otro,
+    // eso hay que verlo ANTES de que genere una deuda con el que no la tiene.
+    let prov = null;
+    if (proveedor_servicio_id) {
+      prov = db.prepare('SELECT razon_social, cuit FROM sg_proveedores WHERE id=?')
+        .get(Number(proveedor_servicio_id));
+    }
+
+    const esPDF = mediaType === 'application/pdf';
+    const contenido = esPDF
+      ? { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: base64 } }
+      : { type: 'image', source: { type: 'base64', media_type: mediaType, data: base64 } };
+
+    const prompt = `Sos un asistente contable argentino. Leé esta factura de un SERVICIO —descarga de
+camiones, flete, cuadrilla, repaso de mercadería— y extraé sus datos fiscales. Respondé ÚNICAMENTE
+un JSON válido, sin markdown ni backticks, con estas claves:
+
+{"tipo_comprobante":"factura_a|factura_b","punto_venta":"","numero":"","fecha_emision":"AAAA-MM-DD",
+ "cuit_emisor":"","razon_social_emisor":"","neto":0,"iva_alicuota":0,"iva_monto":0,"total":0,
+ "confianza":"alta|media|baja","observaciones":""}
+
+REGLAS:
+- Los montos son NÚMEROS en pesos, sin separador de miles. iva_alicuota es el PORCENTAJE (21, 10.5)
+  y iva_monto es el MONTO en pesos. No los confundas.
+- El punto de venta y el número van por separado. En "0001-00012345", punto_venta es "0001" y
+  numero "00012345".
+- neto + iva_monto tiene que dar total. Si no da —porque el comprobante trae percepciones u otros
+  conceptos— poné el total tal cual figura y explicá la diferencia en observaciones. NO fuerces
+  los números para que cierren.
+- Lo que no puedas leer con seguridad va en null, NUNCA inventado. Si dudás de un monto, poné
+  confianza "baja" y decí qué no se lee en observaciones.${prov && prov.cuit ? `
+- El servicio lo prestó "${prov.razon_social}", CUIT ${prov.cuit}. Si el CUIT del comprobante NO
+  coincide, dejá igual el que leíste y avisalo en observaciones: puede ser una factura de otro.` : ''}`;
+
+    const headers = {
+      'Content-Type': 'application/json',
+      'x-api-key': process.env.ANTHROPIC_API_KEY,
+      'anthropic-version': '2023-06-01',
+    };
+    if (esPDF) headers['anthropic-beta'] = 'pdfs-2024-09-25';
+
+    const resp = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST', headers,
+      body: JSON.stringify({ model: MODELO_CHAT, max_tokens: 1200,
+        messages: [{ role: 'user', content: [contenido, { type: 'text', text: prompt }] }] }),
+    });
+    const data = await resp.json();
+    const txt = (data.content || []).filter((x) => x.type === 'text').map((x) => x.text).join('\n');
+    if (!txt) return res.status(502).json({ ok: false, error: 'La lectura no devolvió nada' });
+
+    let leido;
+    try {
+      leido = JSON.parse(txt.replace(/```json|```/g, '').trim());
+    } catch (_) {
+      // El texto crudo deja ver QUÉ contestó cuando no parsea. Un 500 pelado lo
+      // esconde y no hay forma de saber si fue el PDF o el prompt.
+      return res.status(422).json({ ok: false, error: 'No se pudo interpretar la lectura', raw: txt.slice(0, 800) });
+    }
+
+    // El control de suma viaja con la propuesta: que se vea de entrada si los
+    // números leídos cierran entre sí, antes de mirar si cierran contra lo
+    // valorizado, que es otra pregunta.
+    const n = (v) => (v != null && !isNaN(Number(v))) ? Number(v) : 0;
+    const suma = r2(n(leido.neto) + n(leido.iva_monto));
+    const cierra = leido.total == null || Math.abs(n(leido.total) - suma) < 0.01;
+
+    res.json({ ok: true, data: {
+      leido, suma_desglose: suma, cierra,
+      proveedor: prov || null,
+      cuit_coincide: !!(prov && prov.cuit && leido.cuit_emisor
+        && String(prov.cuit).replace(/\D/g, '') === String(leido.cuit_emisor).replace(/\D/g, '')),
+    } });
+  } catch (e) {
+    console.error('[SG] Lectura de factura de servicio:', e.message);
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
 // ── INGRESAR LA FACTURA ───────────────────────────────────────────────────
-router.post('/gastos-factura', requireAuth, express.json(), (req, res) => {
+router.post('/gastos-factura', facturaGastoUpload.single('archivo'), requireAuth, express.json(), (req, res) => {
   const db = getDb();
   try {
     const b = req.body || {};
+    // POR MULTIPART TODO LLEGA COMO TEXTO. `gastos` viaja como JSON en un campo:
+    // sin esto la lista de operaciones llega como la cadena "[3,7]" y ninguna
+    // factura cubriría nada.
+    if (typeof b.gastos === 'string') {
+      try { b.gastos = JSON.parse(b.gastos); } catch (_) { b.gastos = []; }
+    }
     const prov = Number(b.proveedor_servicio_id);
     if (!prov) return res.status(400).json({ ok: false, error: 'Elegí a quién le entra la factura' });
     if (!db.prepare('SELECT 1 FROM sg_proveedores WHERE id=? AND activo=1').get(prov)) {
@@ -11264,12 +11385,20 @@ router.post('/gastos-factura', requireAuth, express.json(), (req, res) => {
       facturaId = db.prepare(`INSERT INTO sg_facturas_gasto
         (proveedor_servicio_id, tipo_comprobante, punto_venta, numero, fecha_emision, cuit_emisor,
          neto, iva_alicuota, iva_monto, total, valorizado, dif_gestion, dif_motivo,
-         observaciones, creado_por)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
+         observaciones, archivo_ruta, archivo_nombre, leido_por_ia, creado_por)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
         prov, val(b.tipo_comprobante) || 'factura_a', val(b.punto_venta), numero,
         val(b.fecha_emision) || db.prepare("SELECT date('now','localtime') d").get().d,
         val(b.cuit_emisor), m.neto, m.iva_alicuota, m.iva_monto, m.total,
-        valorizado, dif, dif ? b.dif_motivo : null, val(b.observaciones), uid(req)).lastInsertRowid;
+        valorizado, dif, dif ? b.dif_motivo : null, val(b.observaciones),
+        // El papel queda archivado con la factura: es el respaldo de la deuda y
+        // del asiento. Se sirve por /data/sg, igual que el de mercadería.
+        req.file ? ('/data/sg/' + req.file.filename) : null,
+        req.file ? (req.file.originalname || null) : null,
+        // De dónde salieron los números. Cuando uno no cierra, es lo primero
+        // que se pregunta.
+        (b.leido_por_ia === '1' || b.leido_por_ia === 1 || b.leido_por_ia === true) ? 1 : 0,
+        uid(req)).lastInsertRowid;
 
       const insItem = db.prepare('INSERT INTO sg_factura_gasto_items (factura_id, gasto_id, neto) VALUES (?,?,?)');
       for (const g of elegidos) insItem.run(facturaId, g.id, g.monto);
@@ -11281,13 +11410,13 @@ router.post('/gastos-factura', requireAuth, express.json(), (req, res) => {
       const as = asientoDeFacturaGasto(db, Object.assign({}, b, { total: m.total }), valorizado);
       if (!as.sin_modelo) {
         // Por ÁMBITO, que es como lo valida crearAsiento. El `balancea` de
-      // armarAsientoFactura no ve las líneas de gestión.
-      for (const [amb, t] of Object.entries(as.totales || {})) {
-        if (!t.balancea) {
-          throw new Error('La parte ' + (amb === 'gestion' ? 'de gestión' : 'fiscal')
-            + ' del asiento no balancea: revisá el asiento modelo.');
+        // armarAsientoFactura no ve las líneas de gestión.
+        for (const [amb, t] of Object.entries(as.totales || {})) {
+          if (!t.balancea) {
+            throw new Error('La parte ' + (amb === 'gestion' ? 'de gestión' : 'fiscal')
+              + ' del asiento no balancea: revisá el asiento modelo.');
+          }
         }
-      }
         const r = crearAsiento(db, {
           fecha: val(b.fecha_emision) || null,
           descripcion: 'Factura de servicio ' + numero,

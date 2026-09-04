@@ -1074,6 +1074,27 @@ try {
     CREATE UNIQUE INDEX IF NOT EXISTS idx_sg_fg_items ON sg_factura_gasto_items(factura_id, gasto_id);
     CREATE INDEX IF NOT EXISTS idx_sg_fg_items_gasto ON sg_factura_gasto_items(gasto_id);
   `);
+
+  // ── EL PAPEL, ADJUNTO ───────────────────────────────────────────────────
+  //
+  // Pablo, 4/9/2026: «en ingresar factura siempre poné la versión para adjuntar
+  // un PDF y que los datos los lea sola».
+  //
+  // Van por ALTER y no en el CREATE de arriba: la tabla ya existe en producción
+  // desde la V1008, y un CREATE TABLE IF NOT EXISTS con columnas nuevas no las
+  // agrega — se queda con la tabla vieja y nadie se entera hasta el INSERT.
+  //
+  // leido_por_ia guarda si los datos los propuso la lectura o los tipeó alguien.
+  // No es un detalle: cuando un número no cierra, lo primero que se pregunta es
+  // de dónde salió.
+  for (const [col, tipo] of [
+    ['archivo_ruta',  'TEXT'],
+    ['archivo_nombre', 'TEXT'],
+    ['leido_por_ia',  'INTEGER NOT NULL DEFAULT 0'],
+  ]) {
+    const cols = db.prepare('PRAGMA table_info(sg_facturas_gasto)').all().map((c) => c.name);
+    if (!cols.includes(col)) db.exec(`ALTER TABLE sg_facturas_gasto ADD COLUMN ${col} ${tipo}`);
+  }
 } catch (e) { console.error('[DB] SG sg_facturas_gasto:', e.message); }
 
   db.exec(`

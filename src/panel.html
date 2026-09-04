@@ -7277,6 +7277,31 @@ input[type=number]{-moz-appearance:textfield;appearance:textfield}
     <div class="mhd"><div class="mht">🧾 Ingresar factura de servicio</div>
       <button class="mcl" onclick="closeMB('sg-fg-modal')">×</button></div>
     <div class="fg">
+      <!-- ══ EL PAPEL, PRIMERO ═══════════════════════════════════════════
+           Pablo, 4/9/2026: «en ingresar factura siempre poné la versión para
+           adjuntar un PDF y que los datos los lea sola».
+
+           Va ARRIBA de los campos porque es el orden en que se trabaja: llega
+           el papel, se adjunta, se leen los datos, se revisan. Abajo sería
+           tipear todo y recién después descubrir que había un botón. -->
+      <div class="ff" style="border:1px solid var(--bor);border-radius:10px;padding:12px 14px;background:var(--bg)">
+        <div style="font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--mut);margin-bottom:8px">
+          El comprobante
+        </div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+          <button class="btn bb bs" type="button" onclick="eid('sg-fg-pdf').click()">📎 Adjuntar PDF</button>
+          <input type="file" accept="application/pdf,image/*" id="sg-fg-pdf" style="display:none" onchange="sgFgPdfElegido(this)">
+          <span id="sg-fg-pdf-nom" style="font-size:12.5px;color:var(--mut)">Ningún archivo</span>
+          <button class="btn bo bs" type="button" id="sg-fg-leer" style="display:none" onclick="sgFgLeerPdf()">🔍 Leer datos</button>
+        </div>
+        <div style="font-size:11.5px;color:var(--mut);margin-top:6px">
+          El PDF queda archivado con la factura: es el respaldo de la deuda y del asiento.
+          La lectura PROPONE los datos; se confirman a mano.
+        </div>
+        <div id="sg-fg-aviso-lectura" style="display:none;border:1.5px solid #e0a72e;background:rgba(224,167,46,.10);
+             border-radius:8px;padding:9px 11px;margin-top:9px;font-size:12.5px;color:#9a3412;line-height:1.55"></div>
+      </div>
+
       <div class="fl"><label>¿De quién es la factura? <span style="color:var(--err)">*</span></label>
         <select id="sg-fg-prov" onchange="sgFgProv()"></select></div>
       <div class="fl"><label>Fecha de emisión</label>
@@ -21572,6 +21597,22 @@ SG_MANUAL.gastos = { titulo: 'Gastos Directos', html:
   + '<li><b>🔁 Repasos</b> — el trabajo de reacondicionar mercadería que llegó mal.</li>'
   + '</ul>'
 
+  + '<h3>📎 Adjuntar el comprobante y leerlo <span class="ver">V1011</span></h3>'
+  + '<p>Arriba de todo en <b>Ingresar factura</b> se adjunta el <b>PDF</b> (o una foto). '
+  + 'Con <b>🔍 Leer datos</b> se completan solos el tipo, el número, la fecha, el total y '
+  + 'la alícuota. El archivo queda <b>archivado con la factura</b>: es el respaldo de la '
+  + 'deuda y del asiento.</p>'
+  + '<div class="ojo"><b>Lo que lee es una PROPUESTA, no un dato.</b> Hay que mirarlo y '
+  + 'corregir lo que haga falta antes de guardar: de esta pantalla sale una deuda con la '
+  + 'cooperativa y un asiento contable. La pantalla avisa en amarillo cuando la lectura '
+  + 'dice que no está segura, cuando el neto y el IVA no dan el total, o cuando el <b>CUIT '
+  + 'del comprobante no es el del proveedor elegido</b> — eso último suele ser una factura '
+  + 'de otro.</div>'
+  + '<p>El PDF <b>se adjunta igual aunque la lectura no esté disponible</b>: si el servidor '
+  + 'no la tiene configurada lo dice y los datos se cargan a mano, como antes. Y queda '
+  + 'anotado si los números los propuso la lectura o los tipeó alguien — cuando un número '
+  + 'no cierra, es lo primero que se pregunta.</p>'
+
   + '<h3>Contra qué se contabiliza la descarga <span class="ver">V1010</span></h3>'
   + '<p>Arriba de todo en <b>🤝 Control Cooperativa</b> está el <b>asiento modelo</b> '
   + 'con el que se van a contabilizar las facturas de las cooperativas, y debajo las '
@@ -24038,10 +24079,18 @@ function sgCcoopValorizar(gastoId){
 // pueda liquidar. Facturar es «llegó el papel»: recién ahí hay comprobante,
 // asiento y deuda. Hasta que no llega, el sistema le debe plata a la cuadrilla y
 // no lo sabe.
-var SGFG = { filas: [], sel: {}, asiento: null };
+var SGFG = { filas: [], sel: {}, asiento: null,
+             archivo: null, leido: 0, cuit: null, pv: null };
 
 function sgFgAbrir(){
   SGFG.filas = []; SGFG.sel = {}; SGFG.asiento = null;
+  // El archivo y lo leído NO se arrastran de la factura anterior: quedaría el
+  // PDF de una cooperativa colgado de la factura de otra.
+  SGFG.archivo = null; SGFG.leido = 0; SGFG.cuit = null; SGFG.pv = null;
+  eid('sg-fg-pdf').value = '';
+  eid('sg-fg-pdf-nom').textContent = 'Ningún archivo';
+  eid('sg-fg-leer').style.display = 'none';
+  eid('sg-fg-aviso-lectura').style.display = 'none';
   eid('sg-fg-numero').value = ''; eid('sg-fg-total').value = '';
   eid('sg-fg-alic').value = '21'; eid('sg-fg-obs').value = '';
   eid('sg-fg-fecha').value = new Date().toISOString().slice(0,10);
@@ -24158,6 +24207,97 @@ function sgFgAsiento(){
   });
 }
 
+// ── ADJUNTAR EL COMPROBANTE Y LEERLE LOS DATOS ───────────────────────────
+//
+// Pablo, 4/9/2026: «en ingresar factura siempre poné la versión para adjuntar un
+// PDF y que los datos los lea sola».
+//
+// Lo que vuelve es una PROPUESTA: llena los campos y el operador los mira. De
+// acá sale una deuda con la cooperativa y un asiento, así que nada se guarda sin
+// que alguien lo confirme.
+// El tope de multer para subirlo (15 MB) y el que aguanta la lectura: el PDF
+// viaja a leerse en base64, que abulta un tercio, contra un límite de 20 MB de
+// cuerpo. Sin este control el operador se entera recién cuando falla, y falla con
+// un 413 en HTML que la pantalla no sabe leer: sale «Error de red».
+var SGFG_MB_SUBIR = 15, SGFG_MB_LEER = 12;
+
+function sgFgPdfElegido(input){
+  var f = input.files && input.files[0];
+  if (f && f.size > SGFG_MB_SUBIR * 1024 * 1024) {
+    toast('El archivo pesa más de ' + SGFG_MB_SUBIR + ' MB y no se va a poder subir', 'er');
+    input.value = ''; f = null;
+  }
+  SGFG.archivo = f || null;
+  SGFG.leido = 0;
+  var nom = eid('sg-fg-pdf-nom');
+  if (nom) nom.textContent = f ? f.name : 'Ningún archivo';
+  var leer = eid('sg-fg-leer');
+  if (leer) leer.style.display = f ? '' : 'none';
+}
+
+function sgFgLeerPdf(){
+  var f = SGFG.archivo;
+  if (!f) { toast('Adjuntá primero el comprobante', 'er'); return; }
+  if (f.size > SGFG_MB_LEER * 1024 * 1024) {
+    toast('El archivo es muy grande para leerlo (más de ' + SGFG_MB_LEER + ' MB). '
+      + 'Queda adjunto igual: cargá los datos a mano.', 'er');
+    return;
+  }
+  var btn = eid('sg-fg-leer');
+  var listo = function(){ if (btn) { btn.disabled = false; btn.textContent = '🔍 Leer datos'; } };
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ Leyendo…'; }
+
+  var fr = new FileReader();
+  fr.onload = function(){
+    // Sin comprimir: un PDF pasado por canvas se rompe, y una factura
+    // recomprimida pierde justo los números chicos.
+    var b64 = String(fr.result).split(',')[1];
+    api('/api/sg/gastos-factura/leer', 'POST', {
+      base64: b64, mediaType: f.type || 'application/pdf',
+      proveedor_servicio_id: eid('sg-fg-prov').value || null,
+    }).then(function(r){
+      listo();
+      if (!r || !r.ok){ toast((r && r.error) || 'No se pudo leer el comprobante', 'er'); return; }
+      var d = r.data, L = d.leido || {};
+      var poner = function(id, v){ var el = eid(id); if (el && v != null && v !== '') el.value = v; };
+      poner('sg-fg-tipo', L.tipo_comprobante);
+      poner('sg-fg-fecha', L.fecha_emision);
+      // El número se guarda entero, como está impreso: el punto de venta y el
+      // número por separado no le dicen nada a nadie cuando hay que buscarlo.
+      if (L.numero) {
+        eid('sg-fg-numero').value = L.punto_venta ? (L.punto_venta + '-' + L.numero) : String(L.numero);
+      }
+      poner('sg-fg-total', L.total);
+      if (L.iva_alicuota != null && L.iva_alicuota !== '') eid('sg-fg-alic').value = L.iva_alicuota;
+      SGFG.leido = 1;
+      SGFG.cuit = L.cuit_emisor || null;
+      SGFG.pv = L.punto_venta || null;
+      sgFgCalc();
+
+      // LO QUE HAY QUE MIRAR ANTES DE DARLA POR BUENA. Un cartel verde de «listo»
+      // sobre una lectura que no está segura es peor que no leer nada.
+      var avisos = [];
+      if (L.confianza === 'baja') avisos.push('la lectura dice que no está segura');
+      if (L.observaciones) avisos.push(escH(L.observaciones));
+      if (!d.cierra) avisos.push('el neto y el IVA leídos no dan el total ('
+        + sgMoney(d.suma_desglose) + ' contra ' + sgMoney(L.total) + ')');
+      if (d.proveedor && d.proveedor.cuit && L.cuit_emisor && !d.cuit_coincide) {
+        avisos.push('el CUIT del comprobante NO es el de ' + escH(d.proveedor.razon_social)
+          + ': puede ser una factura de otro');
+      }
+      var cont = eid('sg-fg-aviso-lectura');
+      if (cont){
+        cont.style.display = avisos.length ? '' : 'none';
+        cont.innerHTML = avisos.length ? '<b>⚠️ Revisá antes de guardar:</b><br>• ' + avisos.join('<br>• ') : '';
+      }
+      toast(avisos.length ? 'Datos leídos — hay cosas para revisar'
+                          : 'Datos leídos. Revisalos antes de guardar.', 'ok');
+    }).catch(function(){ listo(); toast('No se pudo leer el comprobante', 'er'); });
+  };
+  fr.onerror = function(){ listo(); toast('No se pudo abrir el archivo', 'er'); };
+  fr.readAsDataURL(f);
+}
+
 function sgFgGuardar(){
   var prov = eid('sg-fg-prov').value;
   if (!prov){ toast('Elegí a quién le entra la factura', 'er'); return; }
@@ -24170,15 +24310,26 @@ function sgFgGuardar(){
     toast('La factura no coincide con lo valorizado: elegí el motivo', 'er'); return;
   }
   var b = eid('sg-fg-btn'); b.disabled = true;
-  api('/api/sg/gastos-factura', 'POST', {
-    proveedor_servicio_id: prov,
-    tipo_comprobante: eid('sg-fg-tipo').value,
-    numero: eid('sg-fg-numero').value,
-    fecha_emision: eid('sg-fg-fecha').value,
-    total: total, iva_alicuota: Number(eid('sg-fg-alic').value),
-    gastos: ids, dif_motivo: eid('sg-fg-motivo').value,
-    observaciones: eid('sg-fg-obs').value,
-  }).then(function(r){
+  // FormData y no JSON: va el PDF junto con los datos, en el mismo pedido. Si
+  // fueran dos, el segundo puede no correr nunca y queda una factura sin papel.
+  var fd = new FormData();
+  fd.append('proveedor_servicio_id', prov);
+  fd.append('tipo_comprobante', eid('sg-fg-tipo').value);
+  fd.append('numero', eid('sg-fg-numero').value);
+  fd.append('fecha_emision', eid('sg-fg-fecha').value);
+  fd.append('total', total);
+  fd.append('iva_alicuota', Number(eid('sg-fg-alic').value));
+  fd.append('gastos', JSON.stringify(ids));
+  fd.append('dif_motivo', eid('sg-fg-motivo').value);
+  fd.append('observaciones', eid('sg-fg-obs').value);
+  fd.append('leido_por_ia', SGFG.leido ? '1' : '0');
+  if (SGFG.cuit) fd.append('cuit_emisor', SGFG.cuit);
+  if (SGFG.pv) fd.append('punto_venta', SGFG.pv);
+  if (SGFG.archivo) fd.append('archivo', SGFG.archivo);
+  fetch('/api/sg/gastos-factura', { method: 'POST', credentials: 'same-origin', body: fd })
+    .then(function(x){ return x.json(); })
+    .catch(function(){ return { ok: false, error: 'Error de red' }; })
+    .then(function(r){
     b.disabled = false;
     if (!r || !r.ok){ toast((r && r.error) || 'No se pudo guardar', 'er'); return; }
     toast(r.data.sin_asiento
