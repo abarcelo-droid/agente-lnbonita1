@@ -518,27 +518,73 @@ test('el servidor ya los mandaba: no hacía falta tocarlo', () => {
 // confirmar, que es cuando hace falta para mandarlo, no había forma de abrirlo.
 
 test('las recepciones observadas llevan el 📄 del informe', () => {
-  const i = PANEL.indexOf('function sgRecListPintar(){');
-  const b = PANEL.slice(i, PANEL.indexOf('\r\n}', i));
+  const b = PANEL.slice(PANEL.indexOf('function sgRecCalidadCelda(x){'),
+                        PANEL.indexOf('function sgRecCalidadCelda(x){') + 1400);
   assert.match(b, /href="\/api\/sg\/recepciones\/' \+ x\.id \+ '\/calidad\.pdf"/);
   assert.match(b, /target="_blank"/);
   // Sólo las observadas: en las demás el informe no dice nada.
-  assert.match(b, /x\.observada\s*\n?\s*\?/);
+  assert.match(b, /if \(!x\.observada\) return/);
 });
 
-test('el link va en la celda de la partida, no en una columna nueva', () => {
-  // Siete columnas ya son las que entran sin barra lateral. Una octava obliga a
-  // arrastrar la tabla para leer justamente el número que importa.
+// ── LA CALIDAD PASÓ A SER UNA COLUMNA ─────────────────────────────────────
+//
+// Pablo, 4/9/2026: «los informes de calidad explicitalos un poco mejor como una
+// columna o algo porque no se notan muy bien».
+//
+// Hasta acá el test de al lado exigía lo CONTRARIO —que el link fuera dentro de
+// la celda de la partida y que la tabla se quedara en siete columnas— con el
+// argumento de que una octava obligaba a arrastrar. El argumento era bueno y la
+// conclusión salió mal: el ⚠️ terminó siendo un emoji de once puntos y medio
+// dentro de una celda monoespaciada, que es exactamente no estar. La octava
+// columna entra sin barra lateral porque los anchos se recortaron para que entre.
+
+test('la calidad tiene columna propia, y la tabla sigue sin barra lateral', () => {
   const i = PANEL.indexOf('function sgRecListPintar(){');
-  // Sólo la fila de datos: el renglón de «todavía no se recibió nada» trae su
-  // propio <td colspan> y contarlo daría ocho.
   const fila = PANEL.slice(i, PANEL.indexOf(".join('')", i));
-  assert.equal((fila.match(/<td/g) || []).length, 7, 'la fila dejó de tener siete celdas');
-  assert.match(PANEL.slice(i, i + 2600), /colspan="7"/);
-  // Y la cabecera igual. <thead> también empieza con «th»: se pide el espacio.
+  assert.equal((fila.match(/<td/g) || []).length, 8, 'la fila no tiene las ocho celdas');
+  assert.match(fila, /sgRecCalidadCelda\(x\)/);
+  assert.match(PANEL.slice(i, i + 3200), /colspan="8"/);
+
   const j = PANEL.indexOf('id="sg-tb-reclist"');
-  const cab = PANEL.slice(Math.max(0, j - 1200), j);
-  assert.equal((cab.match(/<th[\s>]/g) || []).length, 7, 'la cabecera no tiene siete columnas');
+  const cab = PANEL.slice(Math.max(0, j - 1600), j);
+  assert.equal((cab.match(/<th[\s>]/g) || []).length, 8, 'la cabecera no tiene ocho columnas');
+  assert.match(cab, /<th style="width:13%">Calidad<\/th>/);
+  // Los anchos tienen que seguir sumando 100, o la octava columna empuja.
+  const anchos = [...cab.matchAll(/<th style="width:(\d+)%/g)].map((m) => Number(m[1]));
+  assert.equal(anchos.length, 8);
+  assert.equal(anchos.reduce((a, b) => a + b, 0), 100, 'los anchos suman ' + anchos.reduce((a, b) => a + b, 0));
+  // Y la regla del repo, que a esta tabla le faltaba: la clase .ab-table-wrap
+  // trae overflow-x:auto y hay que ganarle.
+  assert.match(cab, /overflow-x:hidden !important/);
+  assert.match(cab, /table-layout:fixed/);
+});
+
+test('la columna dice CUÁNTO, no sólo que pasó algo', () => {
+  // Un ⚠️ a secas obliga a abrir el PDF para saber si fue un cajón o media
+  // partida. El porcentaje es el del PEOR producto: es el que decide si se
+  // reclama.
+  const b = PANEL.slice(PANEL.indexOf('function sgRecCalidadCelda(x){'),
+                        PANEL.indexOf('function sgRecCalidadCelda(x){') + 1400);
+  assert.match(b, /x\.calidad_observados/);
+  assert.match(b, /x\.calidad_pct_peor/);
+  assert.match(b, /n === 1 \? ' producto' : ' productos'/);
+  // Las partidas viejas —de antes de que el informe fuera por producto— tienen
+  // la cabecera en observada y ninguna fila de detalle. Se dicen distinto.
+  assert.match(b, /'Observada'/);
+  // Y las que entraron bien quedan en blanco: una columna llena de tildes verdes
+  // tapa las tres que importan.
+  assert.match(b, /if \(!x\.observada\) return '<span style="color:var\(--mut\)">—<\/span>'/);
+});
+
+test('y el servidor manda esos números, sacados del detalle por producto', () => {
+  // NO de las columnas calidad_* de la cabecera: quedan siempre en null desde
+  // que el informe es por producto.
+  const SG = fs.readFileSync(path.join(RAIZ, 'src/rutas/sg.js'), 'utf8');
+  const i = SG.indexOf("router.get('/recepciones'");
+  const q = SG.slice(i, SG.indexOf('\r\n});', i));
+  assert.match(q, /FROM sg_recepcion_calidad c\s+WHERE c\.recepcion_id=r\.id AND c\.observada=1\) AS calidad_observados/);
+  assert.match(q, /MAX\(c\.pct_afectado\)[\s\S]{0,140}AS calidad_pct_peor/);
+  assert.match(q, /AS calidad_productos/);
 });
 
 test('y el manual dice dónde está, que si no da igual que no exista', () => {
@@ -555,4 +601,147 @@ test('la ruta que abre existe y no pide ser admin', () => {
   // El que recibe la mercadería es el que tiene que poder mandar el reclamo.
   const SG = fs.readFileSync(path.join(RAIZ, 'src/rutas/sg.js'), 'utf8');
   assert.match(SG, /router\.get\('\/recepciones\/:id\/calidad\.pdf', requireAuth,/);
+});
+
+// ══════════════════════════════════════════════════════════════════════════
+// LA UNIDAD LA MANDA LA ORDEN, Y EL PESO SE PESA
+// ══════════════════════════════════════════════════════════════════════════
+//
+// Pablo, 4/9/2026: «si la orden de compra pactó por bultos, deben figurar los
+// bultos a recibir; si pactó KG, los kilogramos» y «en peso por bultos es
+// OBLIGATORIO que el operador cargue a mano los kilos, no debe permitir avanzar
+// si el operador no carga».
+
+function unidad() {
+  const i = PANEL.indexOf('function sgPendUnidad(it){');
+  assert.ok(i > 0, 'no existe sgPendUnidad');
+  const src = PANEL.slice(i, PANEL.indexOf('\r\n}', i) + 3);
+  return new Function(src + '\r\nreturn sgPendUnidad;')();
+}
+
+test('una orden pactada por cajón se muestra en cajones', () => {
+  const u = unidad()({
+    modo_carga: 'bulto', cantidad_estimada_presentaciones: 60,
+    kg_estimados: 1200, kg_recibidos: 0, bultos_recibidos: 0, bultos_equivalentes: 0,
+  });
+  assert.equal(u.unidad, 'bultos');
+  assert.equal(u.pedido, 60);
+  assert.equal(u.falta, 60);
+});
+
+test('y una pactada por kilo, en kilos — sin convertir nada', () => {
+  const u = unidad()({
+    modo_carga: 'kilo', cantidad_estimada_presentaciones: 36,
+    kg_estimados: 450, kg_recibidos: 100, bultos_recibidos: 8, bultos_equivalentes: 8,
+  });
+  assert.equal(u.unidad, 'kg');
+  assert.equal(u.pedido, 450);
+  assert.equal(u.recibido, 100);
+  assert.equal(u.falta, 350);
+});
+
+test('las órdenes viejas siguen la MISMA regla que usa la plata', () => {
+  // modo_carga se agregó por migración: en las órdenes de antes quedó NULL. El
+  // backend ya decidió hace rato que NULL con bultos cargados = se pactó por
+  // cajón (diferenciasDeOC, el listado de órdenes, sg_acordado.js). Con la regla
+  // estricta la misma orden saldría en cajones en la cuenta corriente y en kilos
+  // en esta bandeja.
+  const f = unidad();
+  assert.equal(f({ modo_carga: null, cantidad_estimada_presentaciones: 60,
+                   kg_estimados: 1200 }).unidad, 'bultos');
+  // Y una vieja SIN bultos es de kilos: no hay cajones que mostrar.
+  assert.equal(f({ modo_carga: null, cantidad_estimada_presentaciones: 0,
+                   kg_estimados: 1200 }).unidad, 'kg');
+});
+
+test('el camión que se pesó sin contar cajones no dice «faltan 60 de 60»', () => {
+  // bultos_recibidos queda en 0 cuando entró pesado; los equivalentes salen de
+  // kilos ÷ kg por bulto. Es el mismo criterio que el listado de órdenes.
+  const u = unidad()({
+    modo_carga: 'bulto', cantidad_estimada_presentaciones: 60,
+    bultos_recibidos: 0, bultos_equivalentes: 60, kg_estimados: 1200, kg_recibidos: 1200,
+  });
+  assert.equal(u.recibido, 60);
+  assert.equal(u.falta, 0);
+  // Y si el servidor no manda los equivalentes (una versión vieja del backend),
+  // cae a los bultos crudos en vez de romper.
+  assert.equal(unidad()({ modo_carga: 'bulto', cantidad_estimada_presentaciones: 60,
+                          bultos_recibidos: 12 }).recibido, 12);
+});
+
+test('el servidor manda los bultos equivalentes por ítem', () => {
+  const SG = fs.readFileSync(path.join(RAIZ, 'src/rutas/sg.js'), 'utf8');
+  const i = SG.indexOf("router.get('/oc/:id'");
+  const q = SG.slice(i, SG.indexOf('\r\n});', i));
+  assert.match(q, /AS bultos_equivalentes/);
+  assert.match(q, /l\.kg_reales \/ COALESCE\(i\.kg_por_bulto, ps\.factor_conversion\)/);
+});
+
+test('la cabecera no clava una unidad, porque cambia por renglón', () => {
+  // Una misma orden puede tener un producto por cajón y otro por kilo:
+  // modo_carga es por ítem. Con "Kg pedidos" en el título, dos filas seguidas
+  // parecen comparables y no lo son.
+  const j = PANEL.indexOf('id="sg-tb-pendientes"');
+  const cab = PANEL.slice(Math.max(0, j - 900), j);
+  assert.match(cab, />Pedido</);
+  assert.match(cab, />Recibido</);
+  assert.ok(!/Kg pedidos/.test(cab), 'la cabecera sigue diciendo kilos');
+  // Y la unidad va en la celda.
+  const i = PANEL.indexOf('function sgPendNum(');
+  assert.match(PANEL.slice(i, i + 400), /\+ unidad \+/);
+});
+
+test('la hoja que se imprime dice lo mismo que la pantalla', () => {
+  // Se recibe con esa hoja en la mano: si dice kilos y la pantalla cajones, el
+  // que cuenta en el andén usa la hoja.
+  const i = PANEL.indexOf('function sgPendImprimir(');
+  const b = PANEL.slice(i, PANEL.indexOf('w.document.close();', i));
+  assert.match(b, /<th class="n">Pedido<\/th>/);
+  assert.ok(!/Kg pedidos/.test(b), 'la hoja sigue diciendo kilos');
+  assert.match(b, /nr\(f\.u\.pedido\) \+ ' ' \+ f\.u\.unidad/);
+});
+
+test('sin pesar no se avanza, aunque la orden traiga el kg por bulto', () => {
+  // Era la puerta de escape: si la orden tenía kg_por_bulto, el campo se podía
+  // dejar vacío y los kilos salían de esa multiplicación. Eso es una estimación
+  // disfrazada de medición, y sobre esos kilos se costea y se liquida.
+  const i = PANEL.indexOf('function sgRecFaltaEn(p){');
+  const b = PANEL.slice(i, PANEL.indexOf('\r\n}', i));
+  const p4 = b.slice(b.indexOf('} else if (p === 4)'), b.indexOf('} else if (p === 5)'));
+  assert.match(p4, /if \(Number\(it\.peso_bulto\) > 0\) return;/);
+  assert.ok(!/sgRecKgArt\(it\) > 0/.test(p4), 'volvió la puerta de escape del factor de la orden');
+  assert.match(p4, /f\.push\('pesar un bulto de '/);
+  // Un producto que no entró no se pesa.
+  assert.match(p4, /if \(bultos <= 0\) return;/);
+});
+
+test('y el campo lo dice: obligatorio, con lo de la orden como referencia', () => {
+  const i = PANEL.indexOf('function sgRecRenderPesos(){');
+  const b = PANEL.slice(i, i + 4000);
+  assert.match(b, /Peso de UN bulto \(kg\) <span style="color:var\(--err\)">\*<\/span>/);
+  // El placeholder decía "la orden dice 4" e invitaba a dejarlo vacío.
+  // Anclado en el ATRIBUTO y no en la frase suelta: el comentario que explica
+  // por qué se sacó también dice «la orden dice», y el test se matcheaba solo.
+  assert.ok(!/placeholder="[^"]*la orden dice/.test(b),
+    'el placeholder sigue ofreciendo el valor de la orden');
+  assert.match(b, /placeholder="lo que marca la balanza"/);
+  // Lo de la orden queda a la vista, abajo, como lo que es: una referencia.
+  assert.match(b, /La orden esperaba/);
+});
+
+test('el subtítulo del paso ya no promete lo contrario del botón', () => {
+  const i = PANEL.indexOf('data-paso="4"');
+  const b = PANEL.slice(i, i + 900);
+  assert.ok(!/Si un producto no se pesa, se usa el peso por bulto que dice la orden/.test(b),
+    'la pantalla sigue diciendo que se puede no pesar');
+  assert.match(b, /Hay que pesar todos los productos que entraron/);
+});
+
+test('y no hay otra puerta: el riel y el Confirmar pasan por la misma validación', () => {
+  // sgRecFaltaEn es la única puerta. Si el botón Siguiente frenara y el riel no,
+  // se saltea el paso clickeando el número.
+  const i = PANEL.indexOf('function sgRecVerPaso(n){');
+  assert.match(PANEL.slice(i, i + 500), /sgRecFaltaEn\(p\)/);
+  const j = PANEL.indexOf('function sgRecGuardar(');
+  assert.match(PANEL.slice(j, j + 900), /sgRecFaltaEn\(p\)/);
 });

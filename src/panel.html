@@ -2608,13 +2608,22 @@ input[type=number]{-moz-appearance:textfield;appearance:textfield}
         <div style="font-weight:700;font-size:12px;text-transform:uppercase;letter-spacing:.04em;color:var(--mut)">✅ Recepciones</div>
         <input id="sg-rec-q" placeholder="Buscar partida, proveedor o remito…" oninput="sgRecListPintar()" style="max-width:280px">
       </div>
-      <div class="ab-table-wrap"><table class="pa-tbl" style="table-layout:fixed">
-        <thead><tr><th style="width:15%">Partida</th><th style="width:10%">Fecha</th>
-          <th style="width:20%">Proveedor</th><th style="width:22%">Producto</th>
-          <th style="width:9%;text-align:right">Bultos</th>
-          <th style="width:10%;text-align:right">Kilos</th>
-          <th style="width:14%">Remito prov.</th></tr></thead>
-        <tbody id="sg-tb-reclist"><tr><td colspan="7" class="emp">Cargando…</td></tr></tbody>
+      <!-- LA CALIDAD, COMO COLUMNA ───────────────────────────────────────
+           Pablo, 4/9/2026: «los informes de calidad explicitalos un poco mejor
+           como una columna o algo porque no se notan muy bien».
+
+           Estaba como un ⚠️ de once puntos y medio pegado al código de la
+           partida, en una celda monoespaciada. Ahora tiene lugar propio y dice
+           qué pasó: cuántos productos y cuánto del peor. -->
+      <div class="ab-table-wrap" style="overflow-x:hidden !important">
+        <table class="pa-tbl" style="table-layout:fixed;width:100%;max-width:98vw">
+        <thead><tr><th style="width:14%">Partida</th><th style="width:9%">Fecha</th>
+          <th style="width:17%">Proveedor</th><th style="width:19%">Producto</th>
+          <th style="width:13%">Calidad</th>
+          <th style="width:8%;text-align:right">Bultos</th>
+          <th style="width:9%;text-align:right">Kilos</th>
+          <th style="width:11%">Remito prov.</th></tr></thead>
+        <tbody id="sg-tb-reclist"><tr><td colspan="8" class="emp">Cargando…</td></tr></tbody>
       </table></div>
     </div>
 
@@ -2638,8 +2647,13 @@ input[type=number]{-moz-appearance:textfield;appearance:textfield}
         </div>
       </div>
       <div class="ab-table-wrap" style="margin-bottom:22px"><table class="pa-tbl">
+        <!-- LA UNIDAD LA MANDA CADA RENGLÓN, ASÍ QUE NO PUEDE ESTAR EN EL
+             TÍTULO. Pablo, 4/9/2026: «si la orden de compra pactó por bultos,
+             deben figurar los bultos a recibir; si pactó KG, los kilogramos».
+             Una misma orden puede tener un producto por cajón y otro por kilo
+             —modo_carga es por ítem—, así que la unidad va en la celda. -->
         <thead><tr><th>Partida</th><th>Fecha</th><th>Proveedor</th><th>Producto</th>
-          <th style="text-align:right">Kg pedidos</th><th style="text-align:right">Kg recibidos</th>
+          <th style="text-align:right">Pedido</th><th style="text-align:right">Recibido</th>
           <th style="text-align:right">Falta</th><th></th></tr></thead>
         <tbody id="sg-tb-pendientes"><tr><td colspan="8" class="emp">Cargando…</td></tr></tbody>
       </table></div>
@@ -6601,8 +6615,10 @@ input[type=number]{-moz-appearance:textfield;appearance:textfield}
       <div class="sg-rec-paso" data-paso="4">
         <div class="sg-rec-tit">⚖️ Peso por bulto</div>
         <div class="sg-rec-sub">Se pesa UN bulto y se anota lo que marcó la balanza: los kilos de la
-          partida salen de multiplicarlo por los bultos contados en el paso 2. Si un producto no se
-          pesa, se usa el peso por bulto que dice la orden.</div>
+          partida salen de multiplicarlo por los bultos contados en el paso 2.
+          <b>Hay que pesar todos los productos que entraron</b> — el peso que dice la orden es lo que
+          se esperaba, no lo que pesó, y sobre estos kilos se costea la partida y se le liquida al
+          productor.</div>
         <div id="sg-rec-pesos"><div class="emp">Elegí una orden de compra en el paso 1.</div></div>
         <div class="sg-oc-box">
           <div class="sg-oc-box-tit">📷 Fotos generales de la mercadería <span style="text-transform:none;letter-spacing:0;font-weight:400">(opcional — lo que no es de un producto en particular)</span></div>
@@ -9099,18 +9115,15 @@ function sgRecListPintar(){
     if (!q) return true;
     return sgNorm((x.partida||'') + ' ' + (x.proveedor_nombre||'') + ' ' + (x.productos||'')
       + ' ' + (x.numero_remito_proveedor||'') + ' ' + (x.observaciones||'')
-      + ' ' + (x.variacion_motivo||'')).indexOf(q) >= 0;
+      // Y por lo observado: buscar «observada» tiene que traer las que lo están.
+      + ' ' + (x.variacion_motivo||'') + ' ' + (x.calidad_productos||'')
+      + (x.observada ? ' observada calidad' : '')).indexOf(q) >= 0;
   });
   var tb = eid('sg-tb-reclist'); if (!tb) return;
   tb.innerHTML = filas.length ? filas.map(function(x){
     return '<tr>'
       + '<td style="font-family:monospace;font-size:11.5px;overflow:hidden;text-overflow:ellipsis">'
         + '<b>' + escH(x.partida || x.oc_numero || '—') + '</b>'
-        + (x.observada
-            ? (' <span title="entró con problemas">⚠️</span>'
-               + ' <a href="/api/sg/recepciones/' + x.id + '/calidad.pdf" target="_blank"'
-               + ' title="Informe de calidad en PDF">📄</a>')
-            : '')
         + (x.variacion_motivo
             ? ('<div style="font-family:inherit;color:var(--adv,#a16207);font-size:11px;white-space:normal">'
                + '≠ ' + escH(x.variacion_motivo) + '</div>')
@@ -9124,12 +9137,40 @@ function sgRecListPintar(){
         + escH(x.proveedor_nombre || '—') + '</td>'
       + '<td style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'
         + escH(x.productos || '—') + '</td>'
+      + '<td style="overflow:hidden;text-overflow:ellipsis">' + sgRecCalidadCelda(x) + '</td>'
       + '<td style="text-align:right">' + (x.bultos ? nr(x.bultos)
           : '<span style="color:var(--mut)">—</span>') + '</td>'
       + '<td style="text-align:right">' + nr(Math.round(x.kg || 0)) + '</td>'
       + '<td style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'
         + escH(x.numero_remito_proveedor || '—') + '</td></tr>';
-  }).join('') : '<tr><td colspan="7" class="emp">Todavía no se recibió ninguna partida.</td></tr>';
+  }).join('') : '<tr><td colspan="8" class="emp">Todavía no se recibió ninguna partida.</td></tr>';
+}
+
+// ── QUÉ DICE LA COLUMNA DE CALIDAD ───────────────────────────────────────
+//
+// Tres estados, y los tres se leen sin abrir nada:
+//   · en blanco → entró sin observaciones. No se pone «OK» en verde: la mayoría
+//     entra bien y una columna llena de tildes verdes tapa las tres que importan.
+//   · «⚠️ N productos · 15%» → entró observada y se sabe cuánto. El porcentaje es
+//     el del PEOR producto, que es el que decide si se reclama.
+//   · «⚠️ Observada» → partidas viejas, de antes de que el informe fuera por
+//     producto: la cabecera dice que sí y no hay detalle. Decirlo es mejor que
+//     mostrarlas iguales que las que sí lo tienen.
+// El 📄 abre el informe en PDF, y sigue estando sólo cuando hay informe.
+function sgRecCalidadCelda(x){
+  if (!x.observada) return '<span style="color:var(--mut)">—</span>';
+  var n = Number(x.calidad_observados) || 0;
+  var pct = Number(x.calidad_pct_peor) || 0;
+  var txt = n
+    ? (n + (n === 1 ? ' producto' : ' productos') + (pct > 0 ? (' · ' + nr(pct) + '%') : ''))
+    : 'Observada';
+  return '<span title="' + escH(x.calidad_productos || 'Mercadería observada') + '" '
+    + 'style="display:inline-block;padding:1px 7px;border-radius:999px;font-size:11px;'
+    + 'font-weight:700;background:rgba(224,167,46,.16);color:#9a3412;white-space:nowrap;'
+    + 'max-width:100%;overflow:hidden;text-overflow:ellipsis;vertical-align:middle">⚠️ '
+    + escH(txt) + '</span>'
+    + ' <a href="/api/sg/recepciones/' + x.id + '/calidad.pdf" target="_blank"'
+    + ' title="Informe de calidad en PDF" style="text-decoration:none">📄</a>';
 }
 // BRIEF 10 — CC proveedores: saldo apertura + vencimientos pendientes.
 var SG_CCPROV = [];
@@ -13017,9 +13058,9 @@ function sgPendImprimir(){
       + '<td>' + escH(f.primero ? (f.o.fecha_oc || '') : '') + '</td>'
       + '<td>' + escH(f.primero ? (f.o.proveedor_nombre || '') : '') + '</td>'
       + '<td>' + escH(f.it.producto_nombre || '') + '</td>'
-      + '<td class="n">' + nr(f.it.kg_estimados) + '</td>'
-      + '<td class="n">' + nr(f.it.kg_recibidos) + '</td>'
-      + '<td class="n b">' + nr(f.falta) + '</td>'
+      + '<td class="n">' + nr(f.u.pedido) + ' ' + f.u.unidad + '</td>'
+      + '<td class="n">' + nr(f.u.recibido) + ' ' + f.u.unidad + '</td>'
+      + '<td class="n b">' + nr(f.falta) + ' ' + f.u.unidad + '</td>'
       + '<td class="chk"></td></tr>';
   }).join('');
   var w = window.open('', '_blank');
@@ -13048,11 +13089,55 @@ function sgPendImprimir(){
     + '<h1>Pendientes de recibir</h1>'
     + '<div class="sub">San Ger\u00f3nimo &middot; ' + escH(cuando) + '</div>'
     + '<table><thead><tr><th>Partida</th><th>Fecha</th><th>Proveedor</th><th>Producto</th>'
-    + '<th class="n">Kg pedidos</th><th class="n">Kg recibidos</th><th class="n">Falta</th>'
+    + '<th class="n">Pedido</th><th class="n">Recibido</th><th class="n">Falta</th>'
     + '<th class="chk"></th></tr></thead><tbody>' + cuerpo + '</tbody></table>'
     + '<div class="pie">Es una foto del momento: lo que se reciba despu\u00e9s de imprimir '
     + 'no est\u00e1 en esta hoja.</div></body></html>');
   w.document.close();
+}
+
+// ── EN QUÉ UNIDAD SE PACTÓ ESTE RENGLÓN ──────────────────────────────────
+//
+// Pablo, 4/9/2026: «donde dice KG pedidos y KG recibidos lo tenemos que
+// convertir a la unidad que tenga la orden de compra. En realidad no hay que
+// convertir nada: si la orden pactó por bultos, deben figurar los bultos a
+// recibir; si pactó KG, los kilogramos».
+//
+// Y tiene razón en lo de no convertir: la bandeja mostraba kilos SIEMPRE, así
+// que el que iba a recibir una orden de 60 cajones leía «1.200» y tenía que
+// dividir de cabeza por el peso del cajón para saber cuántos contar. Peor: ese
+// 1.200 es una estimación —kilos esperados—, mientras que los 60 cajones son lo
+// que de verdad se pactó y lo que dice el remito.
+//
+// LA REGLA ES LA MISMA QUE USA LA PLATA. modo_carga puede venir en NULL en las
+// órdenes viejas (la columna se agregó por migración), y el backend ya resolvió
+// eso hace rato: NULL con bultos cargados = se pactó por cajón. Está escrito
+// igual en diferenciasDeOC, en el listado de órdenes y en sg_acordado.js. Usar
+// acá la regla estricta —sólo modo_carga==='bulto'— haría que la misma orden
+// saliera en cajones en la cuenta corriente y en kilos en esta bandeja.
+function sgPendUnidad(it){
+  var bultosPact = Number(it.cantidad_estimada_presentaciones) || 0;
+  var porBulto = (it.modo_carga === 'bulto')
+    || (it.modo_carga == null && bultosPact > 0);
+  if (porBulto) {
+    // Los EQUIVALENTES y no los bultos crudos: el camión que se pesó sin contar
+    // cajones tiene bultos_recibidos en 0 y diría «faltan 60 de 60» en una orden
+    // que entró completa. Es el mismo criterio del listado de órdenes.
+    var rec = Number(it.bultos_equivalentes);
+    if (!(rec >= 0)) rec = Number(it.bultos_recibidos) || 0;
+    return { porBulto: true, unidad: 'bultos', pedido: bultosPact, recibido: rec,
+             falta: Math.max(0, bultosPact - rec) };
+  }
+  var kgP = Number(it.kg_estimados) || 0, kgR = Number(it.kg_recibidos) || 0;
+  return { porBulto: false, unidad: 'kg', pedido: kgP, recibido: kgR,
+           falta: Math.max(0, kgP - kgR) };
+}
+
+// El número con su unidad al lado, en gris y chico: la unidad cambia de renglón
+// a renglón y sin decirla dos filas seguidas parecen comparables y no lo son.
+function sgPendNum(v, unidad, fuerte){
+  return (fuerte ? '<b>' : '') + nr(v) + (fuerte ? '</b>' : '')
+    + ' <span style="font-size:10.5px;color:var(--mut)">' + unidad + '</span>';
 }
 
 function sgLoadPendientesRecibir(){
@@ -13084,11 +13169,11 @@ function sgLoadPendientesRecibir(){
         if (!d || !d.ok) return;
         var o = d.data;
         (o.items || []).forEach(function(it, k){
-          var falta = Math.max(0, (Number(it.kg_estimados) || 0) - (Number(it.kg_recibidos) || 0));
-          if (falta <= 0) return;      // ese producto ya entró entero
+          var u = sgPendUnidad(it);
+          if (u.falta <= 0) return;      // ese producto ya entró entero
           var esPrimera = !vistas[o.id];
           vistas[o.id] = 1;
-          filas.push({ o: o, it: it, falta: falta, primero: esPrimera });
+          filas.push({ o: o, it: it, u: u, falta: u.falta, primero: esPrimera });
         });
       });
       if (!filas.length) {
@@ -13134,9 +13219,9 @@ function sgLoadPendientesRecibir(){
           + '<td>' + (f.primero ? esc(f.o.fecha_oc || '—') : '') + '</td>'
           + '<td>' + (f.primero ? esc(f.o.proveedor_nombre || '—') : '') + '</td>'
           + '<td>' + esc(f.it.producto_nombre || '—') + '</td>'
-          + '<td style="text-align:right">' + nr(f.it.kg_estimados) + '</td>'
-          + '<td style="text-align:right">' + nr(f.it.kg_recibidos) + '</td>'
-          + '<td style="text-align:right;font-weight:700">' + nr(f.falta) + '</td>'
+          + '<td style="text-align:right">' + sgPendNum(f.u.pedido, f.u.unidad) + '</td>'
+          + '<td style="text-align:right">' + sgPendNum(f.u.recibido, f.u.unidad) + '</td>'
+          + '<td style="text-align:right">' + sgPendNum(f.falta, f.u.unidad, true) + '</td>'
           + '<td style="text-align:right">' + accion + '</td></tr>';
       }).join('');
     });
@@ -15509,17 +15594,25 @@ function sgRecFaltaEn(p){
       }
     }
   } else if (p === 4) {
-    // EL PESO, CUANDO NO HAY DE DÓNDE SACARLO. Los kilos salen de bultos × kg
-    // por cajón; si la orden no trae ese factor, el único camino es la balanza.
-    // Este paso no validaba nada: el operador seguía hasta el final, subía las
-    // fotos y recién ahí el servidor cortaba con "no se puede sacar el peso" —
-    // con el camión esperando y todo el trabajo hecho. Ahora frena acá, que es
-    // donde está el campo.
+    // EL PESO SE PESA. SIEMPRE.
+    //
+    // Pablo, 4/9/2026: «en peso por bultos es OBLIGATORIO que el OPERADOR cargue
+    // a mano los kilos, no debe permitir avanzar si el operador no carga».
+    //
+    // Antes alcanzaba con que el peso se pudiera DEDUCIR: si la orden traía el
+    // kg por bulto, el campo se podía dejar vacío y los kilos salían de esa
+    // multiplicación. Y eso es una estimación disfrazada de medición — el kg por
+    // bulto de la orden es lo que se ESPERABA que pesara, no lo que pesó. Con él
+    // entraban al stock kilos que nadie puso nunca en una balanza, y sobre esos
+    // kilos se costea la partida, se liquida al productor y se mide el margen.
+    //
+    // Ahora se exige el número de la balanza. El de la orden queda a la vista
+    // como referencia, para que se note si la diferencia es grande.
     (SG.recItems || []).forEach(function(it){
       var bultos = Number(it.bultos) || 0;
       if (bultos <= 0) return;                       // ese producto no entró
-      if (sgRecKgArt(it) > 0) return;                // se pesó, o sale del factor
-      f.push('el peso de ' + (it.producto_nombre || 'un artículo'));
+      if (Number(it.peso_bulto) > 0) return;         // se pesó
+      f.push('pesar un bulto de ' + (it.producto_nombre || 'un artículo'));
     });
   } else if (p === 5) {
     // Sin OC no hay contra qué comparar: no hay resumen que confirmar.
@@ -15584,9 +15677,13 @@ function sgRecRenderPesos(){
         // "peso de balanza" a secas y se guardaba como el peso de TODA la
         // partida: quien anotaba los 10 kg de un cajón dejaba 90 cajones
         // pesando 10 kg en total.
-        + '<div class="fl"><label>Peso de UN bulto (kg)</label>'
+        // EL PLACEHOLDER DECÍA "la orden dice 4" Y ESO INVITABA A DEJARLO VACÍO:
+        // parecía un valor por omisión. Ahora el campo pide la balanza y lo de la
+        // orden va abajo, como referencia — que es lo que es.
+        + '<div class="fl"><label>Peso de UN bulto (kg) <span style="color:var(--err)">*</span></label>'
           + '<input type="number" min="0" step="0.01" value="' + _sgN(it.peso_bulto) + '"'
-          + ' placeholder="' + (kpb ? ('la orden dice ' + nr(kpb)) : 'lo que marca la balanza') + '"'
+          + ' placeholder="lo que marca la balanza"'
+          + (Number(it.peso_bulto) > 0 ? '' : ' style="border-color:var(--err)"')
           + ' oninput="sgRecArtUpd(' + i + ',\'peso_bulto\',this.value)">'
           // ACÁ NO VA EL TOTAL. Mostrar los kilos de la partida mientras se
           // tipea convierte la medición en un AJUSTE: el que pesa ve que no le
@@ -15600,6 +15697,12 @@ function sgRecRenderPesos(){
           + '<div style="font-size:11px;color:var(--mut);margin-top:3px">'
             + (bultos ? 'Lo que marcó la balanza con UN bulto arriba.'
                       : 'contá los bultos en el paso 2')
+            // Lo que la orden esperaba, al lado, para que una diferencia grande
+            // se note en el momento y no al cerrar el mes.
+            + (kpb ? (' La orden esperaba <b>' + nr(kpb) + ' kg</b>'
+                      + (Number(it.peso_bulto) > 0 && Math.abs(Number(it.peso_bulto) - kpb) > kpb * 0.15
+                          ? ' <span style="color:#9a3412">— pesó bastante distinto</span>' : '')
+                      + '.') : '')
           + '</div></div>'
         // DONDE QUEDO LA MERCADERIA. Se pregunta acá, en el mismo paso donde el
         // que recibe ya está mirando el producto: es el único momento en que
@@ -21844,8 +21947,23 @@ SG_MANUAL.ingresos = { titulo: 'Ingresos — recibir mercadería', html:
   + 'sale con costo cero, así que el margen que muestre no es real. Vincularla a una '
   + 'orden lo hace un <b>administrador</b> desde Órdenes recibidas.</li>'
   + '<li><b>Imprimir</b> — la lista de lo que se espera, para bajar al depósito con '
-  + 'el papel.</li>'
+  + 'el papel. Dice lo mismo que la pantalla, en la misma unidad.</li>'
   + '</ul>'
+
+  + '<h3>Pedido, Recibido y Falta <span class="ver">V1012</span></h3>'
+  + '<p>Van en <b>la unidad en que se pactó cada renglón</b>, y al lado de cada número '
+  + 'dice cuál es. Si la orden se cerró por cajón, cajones; si se cerró por kilo, '
+  + 'kilos. <b>No se convierte nada</b>: los cajones son lo que se pactó y lo que dice '
+  + 'el remito, mientras que los kilos de una orden por cajón son una estimación.</p>'
+  + '<div class="ojo">Una misma orden puede tener <b>un producto por cajón y otro por '
+  + 'kilo</b>, así que la unidad está en cada fila y no en el título de la columna. Dos '
+  + 'filas seguidas pueden no ser comparables.</div>'
+
+  + '<h3>⚠️ La columna Calidad <span class="ver">V1012</span></h3>'
+  + '<p>En <b>Recepciones</b>, al lado del producto. Dice <b>cuántos productos entraron '
+  + 'observados</b> y el porcentaje del peor, y el <b>📄</b> abre el informe en PDF. '
+  + 'Las que entraron bien quedan en blanco a propósito: la mayoría entra bien, y una '
+  + 'columna llena de tildes verdes tapa las tres que importan.</p>'
 
   + '<h3>El asistente, paso por paso</h3>'
   + '<p>Son seis pasos y se pueden recorrer para adelante y para atrás. Abajo, el '
@@ -21891,12 +22009,16 @@ SG_MANUAL.ingresos = { titulo: 'Ingresos — recibir mercadería', html:
       + 'Lo que se responde acá se acumula en <b>Control Cooperativa</b> y termina '
       + 'siendo un <b>gasto directo de la partida</b>: entra al costo.', 'V995')
 
-  + '<h3>4 · ⚖️ Peso por bulto <span class="ver">V995</span></h3>'
+  + '<h3>4 · ⚖️ Peso por bulto <span class="ver">V1012</span></h3>'
   + sgManCampo('Peso de UN bulto',
       'Se pone un cajón en la balanza y se anota <b>lo que marcó</b>. Los kilos de la '
-      + 'partida los multiplica el sistema por los bultos del paso 2.',
-      'Es la medición que más plata mueve. Si un producto no se pesa, se usa el peso '
-      + 'por bulto que dice la orden — que es una <b>estimación</b>, no una medición.', 'V995')
+      + 'partida los multiplica el sistema por los bultos del paso 2. '
+      + '<b>Es obligatorio y no se puede avanzar sin cargarlo</b>, producto por producto.',
+      'Es la medición que más plata mueve: sobre estos kilos se costea la partida, se '
+      + 'le liquida al productor y se mide el margen. Antes se podía dejar vacío y los '
+      + 'kilos salían del peso por bulto de la orden — que es lo que se <b>esperaba</b> '
+      + 'que pesara, no lo que pesó. Entraban al stock kilos que nadie puso nunca en '
+      + 'una balanza.', 'V1012')
   + sgManCampo('¿En qué piso quedó?',
       'Dónde se dejó la mercadería. Si trabajás en un solo piso va derecho ahí y no se '
       + 'pregunta; si trabajás en varios, se elige entre <b>los tuyos</b>.',
@@ -21960,6 +22082,15 @@ SG_MANUAL.ingresos = { titulo: 'Ingresos — recibir mercadería', html:
   + '<li><span class="ver">V995</span> Los campos del paso 6 dejaban escribir <b>una '
   + 'sola letra</b>: el cuadro se volvía a dibujar con cada tecla y el cursor se '
   + 'perdía. Ya se puede escribir normal.</li>'
+  + '<li><span class="ver">V1012</span> La calidad tiene <b>columna propia</b> en '
+  + 'Recepciones, con cuántos productos entraron observados y cuánto del peor. Antes '
+  + 'era un ⚠️ chiquito pegado al código de la partida y no se veía.</li>'
+  + '<li><span class="ver">V1012</span> <b>Pedido / Recibido / Falta</b> van en la '
+  + 'unidad en que se pactó cada renglón: si la orden se cerró por cajón, cajones. '
+  + 'Antes decía kilos siempre, y para una orden de 60 cajones había que dividir de '
+  + 'cabeza por el peso del cajón para saber cuántos contar.</li>'
+  + '<li><span class="ver">V1012</span> El <b>peso por bulto es obligatorio</b>: no se '
+  + 'avanza sin pesar cada producto que entró.</li>'
   + '<li><span class="ver">V996</span> Al <b>informe de calidad</b> ya se llega: hay '
   + 'un <b>📄</b> en Recepciones, al lado de las partidas que entraron observadas. '
   + 'Antes el único link estaba en la tabla de las que entran <i>sin</i> orden, así que '
