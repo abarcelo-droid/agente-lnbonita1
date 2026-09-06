@@ -3926,14 +3926,22 @@ input[type=number]{-moz-appearance:textfield;appearance:textfield}
 
          Se esconde entero para el que no es admin, con los otros tres bloques
          de asiento modelo, en sgAsientoModeloVisible(). -->
-    <div id="sggd-modelo-box" style="display:none;border:1px solid var(--bor);border-radius:10px;padding:12px 14px;margin-bottom:16px;background:var(--bg)">
-      <div style="font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--mut);margin-bottom:6px">
-        Asiento contable de las descargas
-      </div>
-      <div id="sggd-modelo-cuerpo" style="font-size:13px">Cargando…</div>
-    </div>
+    <!-- LO QUE YA ESTÁ PARAMETRIZADO NO OCUPA EL ENCABEZADO ─────────────
+         Pablo, 6/9/2026: «una vez que el asiento modelo ya está configurado no
+         tiene mucho sentido que ocupe tanto lugar visual, porque los operadores
+         no deberían operar con él... podemos ponerlo en un botón que se llame
+         Asiento modelo y abra la configuración».
+
+         Acá queda SÓLO el aviso de cuando falta, que es lo único accionable:
+         sin modelo la factura se guarda pero no se contabiliza, y eso se
+         descubre al cierre. Lo demás se fue al botón ⚙️ Asiento modelo. -->
+    <div id="sggd-modelo-falta" style="display:none;border:1.5px solid #e0a72e;
+         background:rgba(224,167,46,.10);border-radius:8px;padding:9px 12px;
+         margin-bottom:12px;font-size:12.5px;color:#9a3412"></div>
 
     <div style="display:flex;justify-content:flex-end;gap:8px;margin-bottom:12px">
+      <button class="btn bo" id="sggd-modelo-btn" style="display:none"
+              onclick="sgCcoopModeloAbrir()">⚙️ Asiento modelo</button>
       <button class="btn bo" onclick="sgFgAbrir()">🧾 Ingresar factura</button>
       <button class="btn bb" onclick="sgCoopOpen()">+ Nueva cooperativa</button>
       <button class="btn bo" onclick="sgCcoopLoad()">↻ Actualizar</button>
@@ -7378,6 +7386,25 @@ input[type=number]{-moz-appearance:textfield;appearance:textfield}
   </div>
 </div>
 
+<!-- ══ ⚙️ EL ASIENTO MODELO DE LAS DESCARGAS ═══════════════════════════
+     Lo que antes ocupaba el encabezado. Se abre desde el botón, se toca una vez
+     y se cierra. Va al nivel de arriba, con los demás modales. -->
+<div class="ab-modal-overlay sg-mod" id="sggd-modelo-modal">
+  <div class="ab-modal" style="width:min(760px,96vw);max-width:96vw;max-height:90vh;overflow-y:auto;overflow-x:hidden">
+    <div class="mhd"><div class="mht">⚙️ Asiento contable de las descargas</div>
+      <button class="mcl" onclick="closeMB('sggd-modelo-modal')">×</button></div>
+    <div style="font-size:12px;color:var(--mut);margin-bottom:12px">
+      Con qué asiento modelo se contabilizan las facturas de las cooperativas. Es
+      el mismo que el circuito «Descarga y servicios» de Contabilidad SG: se
+      guarda en un solo lugar y cambiarlo acá lo cambia en las dos pantallas.
+    </div>
+    <div id="sggd-modelo-cuerpo" style="font-size:13px">Cargando…</div>
+    <div style="text-align:right;margin-top:16px">
+      <button class="btn bo" onclick="closeMB('sggd-modelo-modal')">Cerrar</button>
+    </div>
+  </div>
+</div>
+
 <div class="ab-modal-overlay sg-mod" id="sg-manual-modal">
   <div class="ab-modal" style="width:min(880px,96vw);max-width:96vw;max-height:90vh;overflow-y:auto;overflow-x:hidden">
     <div class="mhd"><div class="mht" id="sg-manual-tit">¿Cómo se usa?</div>
@@ -10722,7 +10749,7 @@ function sgAsientoPlegado(html, titulo){
 // "Asiento contable de venta" colgado arriba de un hueco no le sirve a nadie.
 function sgAsientoModeloVisible(){
   var admin = sgAsientoEsAdmin();
-  ['sgfd-modelo-box', 'sgfm-modelo-box', 'liq-modelo-box', 'sggd-modelo-box'].forEach(function(id){
+  ['sgfd-modelo-box', 'sgfm-modelo-box', 'liq-modelo-box', 'sggd-modelo-btn'].forEach(function(id){
     var e = document.getElementById(id);
     if (e) e.style.display = admin ? '' : 'none';
   });
@@ -21700,6 +21727,23 @@ SG_MANUAL.gastos = { titulo: 'Gastos Directos', html:
   + '<li><b>🔁 Repasos</b> — el trabajo de reacondicionar mercadería que llegó mal.</li>'
   + '</ul>'
 
+  + '<h3>⚙️ El asiento modelo, en un botón <span class="ver">V1013</span></h3>'
+  + '<p>Está en <b>🤝 Control Cooperativa</b>, en la barra de arriba. Se toca una vez '
+  + '—se elige con qué asiento se contabilizan las facturas de las cooperativas— y se '
+  + 'cierra. Antes ocupaba media pantalla del encabezado con algo que el operador no '
+  + 'usa nunca.</p>'
+  + '<div class="ojo"><b>Cuando FALTA, sí se ve.</b> Si no hay asiento modelo elegido, o '
+  + 'el que hay no sirve, aparece un cartel arriba de la lista y el botón cambia a '
+  + '⚠️. No es un detalle: sin modelo la factura se guarda igual y <b>queda sin '
+  + 'contabilizar</b>, y eso se descubre al cierre.</div>'
+  + '<p>El botón lo ve sólo la administración: elegir el modelo es parametrizar.</p>'
+
+  + '<h3>Las ventanas no se cierran solas <span class="ver">V1013</span></h3>'
+  + '<p>Ninguna ventana de carga se cierra al hacer clic afuera. Se sale con '
+  + '<b>Cancelar</b>, con el botón de guardar, o con la <b>×</b>. Antes un clic al '
+  + 'costado descartaba todo lo cargado sin preguntar, y no había forma de '
+  + 'recuperarlo.</p>'
+
   + '<h3>📎 Adjuntar el comprobante y leerlo <span class="ver">V1011</span></h3>'
   + '<p>Arriba de todo en <b>Ingresar factura</b> se adjunta el <b>PDF</b> (o una foto). '
   + 'Con <b>🔍 Leer datos</b> se completan solos el tipo, el número, la fecha, el total y '
@@ -23852,7 +23896,7 @@ function sgCdsEstado(e){
 // La fila que más importa no es la que está pendiente de valorizar sino la que
 // dice "hubo descarga" y no tiene cooperativa asignada: ese trabajo se hizo,
 // alguien lo va a cobrar, y hoy no está anotado en ningún lado.
-var SGCC = { estado: '', filas: [], por: [], tot: null, modelo: null };
+var SGCC = { estado: '', filas: [], por: [], tot: null, modelo: null, modeloResp: null };
 
 // ── EL CATÁLOGO DE COOPERATIVAS ───────────────────────────────────────────
 // Una cooperativa es la cuadrilla que descarga. Siempre cuelga de un proveedor,
@@ -23981,10 +24025,53 @@ function sgCcoopEstado(e){
 //
 // Y muestra las CUENTAS, no el nombre del modelo: «Descarga cooperativa» no dice
 // contra qué se imputa, y lo que se viene a confirmar acá es justamente eso.
+// Se pide al entrar a la solapa aunque el cuadro esté escondido: de la respuesta
+// sale el estado del BOTÓN (⚙️ normal o ⚠️ cuando falta) y el aviso del
+// encabezado. Sin esto habría que abrir el modal para enterarse de que no hay
+// modelo, que es justo lo que no puede pasar.
 function sgCcoopModeloCargar(){
   sgAsientoModeloVisible();
-  var box = eid('sggd-modelo-cuerpo'); if (!box) return;
   api('/api/sg/gastos-factura/modelo').then(function(r){
+    SGCC.modeloResp = (r && r.ok) ? r.data : null;
+    sgCcoopModeloEstado();
+    if (eid('sggd-modelo-modal').classList.contains('on')) sgCcoopModeloPintar();
+  });
+}
+
+// EL ESTADO, EN UN RENGLÓN. El botón dice si hay que tocarlo, y el aviso del
+// encabezado aparece SÓLO cuando falta: sin modelo la factura se guarda igual y
+// queda sin contabilizar, y eso se descubre al cierre.
+function sgCcoopModeloEstado(){
+  var btn = eid('sggd-modelo-btn'), av = eid('sggd-modelo-falta');
+  var d = SGCC.modeloResp;
+  if (!btn || !av) return;
+  if (!sgAsientoEsAdmin()) { av.style.display = 'none'; return; }
+  var m = d && d.modelo, faltan = (d && d.faltan) || [];
+  var mal = !m || faltan.length;
+  btn.textContent = mal ? '⚠️ Asiento modelo' : '⚙️ Asiento modelo';
+  btn.title = m ? ('Se contabiliza con: ' + m.nombre) : 'Todavía no se eligió';
+  av.style.display = mal ? '' : 'none';
+  if (mal) {
+    av.innerHTML = !m
+      ? ('<b>Las descargas no se están contabilizando.</b> Todavía no se eligió el '
+         + 'asiento modelo' + (d && d.id_perdido ? ' (el que estaba se dio de baja)' : '')
+         + ': la factura de la cooperativa se guarda igual y queda sin asiento. '
+         + '<a href="#" onclick="sgCcoopModeloAbrir();return false">Elegirlo</a>.')
+      : ('<b>El asiento modelo no sirve para contabilizar:</b> ' + faltan.map(escH).join(' · ')
+         + '. <a href="#" onclick="sgCcoopModeloAbrir();return false">Revisarlo</a>.');
+  }
+}
+
+function sgCcoopModeloAbrir(){
+  sgModalArriba('sggd-modelo-modal');
+  sgCcoopModeloPintar();
+  if (!SGCC.modeloResp) sgCcoopModeloCargar();
+}
+
+function sgCcoopModeloPintar(){
+  var box = eid('sggd-modelo-cuerpo'); if (!box) return;
+  var r = { ok: !!SGCC.modeloResp, data: SGCC.modeloResp || {} };
+  (function(){
     if (!r || !r.ok){ box.innerHTML = '<div style="color:var(--err)">No se pudo leer el asiento modelo.</div>'; return; }
     var m = r.data.modelo, lista = r.data.modelos || [], faltan = r.data.faltan || [];
     SGCC.modelo = m;
@@ -24036,7 +24123,7 @@ function sgCcoopModeloCargar(){
       // es la regla del repo: el asiento se muestra siempre y lo abre quien
       // puede leerlo. Un botón propio encima daba dos desplegables y dos clics.
       + '<div style="margin-top:8px">' + sgFmAsientoTabla(m.lineas || []) + '</div>';
-  });
+  })();
 }
 
 function sgCcoopModeloGuardar(){
@@ -24046,6 +24133,7 @@ function sgCcoopModeloGuardar(){
     sel.disabled = false;
     if (!r || !r.ok){ toast((r && r.error) || 'No se pudo guardar', 'er'); sgCcoopModeloCargar(); return; }
     toast(sel.value ? 'Las descargas se contabilizan con ese modelo' : 'Sin modelo: la factura no va a asentar', 'ok');
+    // Recarga el estado (botón y aviso) y, como el modal está abierto, lo repinta.
     sgCcoopModeloCargar();
   });
 }
@@ -40545,15 +40633,25 @@ function abBadgeEstado(e) {
 }
 function abCerrarModal(id) { var el = document.getElementById(id); if(el) el.classList.remove('on'); }
 
-// Cerrar modales abasto al click fuera
-document.querySelectorAll('.ab-modal-overlay').forEach(function(el){
-  el.addEventListener('click', function(e){
-    // La recepción NO: es un asistente de siete pasos con fotos ya sacadas.
-    // Un click al costado cerraba todo y no había forma de recuperarlo.
-    if (el.id === 'sg-rec-modal') return;
-    if(e.target===el) el.classList.remove('on');
-  });
-});
+// ══ UN MODAL NO SE CIERRA AL CLIC AFUERA ═════════════════════════════════
+//
+// Pablo, 6/9/2026: «si hago click fuera de esa ventana se cierra... y pierdo toda
+// la info que cargué. Sería bueno que sólo me deje salir de esa ventana con los
+// dos botones de abajo, de cancelar o cargar factura».
+//
+// Acá vivía el handler que lo hacía, sobre TODOS los overlays del panel. Ya
+// tenía escrita a mano una excepción —el asistente de recepción, «un click al
+// costado cerraba todo y no había forma de recuperarlo»— y esa excepción era en
+// realidad la regla: lo mismo vale para la factura de la cooperativa, para el
+// alta de una orden, para cualquier pantalla donde se cargue algo.
+//
+// Un clic al costado es un accidente, no una decisión. Se sale con Cancelar, con
+// el botón de guardar, o con la ×, que son las tres cosas que alguien aprieta a
+// propósito.
+//
+// Los diálogos de confirmación y los visores de sólo lectura que se arman al
+// vuelo (ifcoConfirmarSalteo, ifcoVerSalteoContexto) SÍ se siguen cerrando al
+// costado: ahí no hay nada cargado que perder.
 
 // ─── DASHBOARD ──────────────────────────────────────────────
 function abDashboard() {

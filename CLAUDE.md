@@ -49,6 +49,44 @@ hace falta `overflow-x:hidden !important` para ganarle. Se deja `auto` sólo baj
 Por qué: para leer un saldo o un total había que arrastrar la tabla, y el número
 que importa suele ser el de la última columna.
 
+### UN MODAL NO SE CIERRA AL CLIC AFUERA
+
+Pablo, 6/9/2026: *«si hago click fuera de esa ventana se cierra... y pierdo toda
+la info que cargué. Sería bueno que sólo me deje salir de esa ventana con los dos
+botones de abajo, de cancelar o cargar factura»*.
+
+Ningún overlay con campos de carga se cierra por clic en el fondo. Se sale con
+**Cancelar**, con el botón de guardar, o con la ×. Los diálogos de confirmación y
+los visores de sólo lectura sí pueden cerrarse al costado: ahí no hay nada que
+perder.
+
+Por qué: un clic al costado es un accidente, no una decisión, y descarta trabajo
+de varios minutos sin ningún deshacer. El modal está bien justamente porque deja
+claro que se está trabajando ahí; cerrarse solo lo contradice.
+
+El que lo hacía era un handler global sobre `.ab-modal-overlay` en `panel.html`,
+que ya tenía escrita a mano la excepción de `sg-rec-modal` por esta misma razón:
+la excepción era la regla.
+
+### LO QUE YA ESTÁ PARAMETRIZADO NO OCUPA EL ENCABEZADO
+
+Pablo, 6/9/2026: *«una vez que el asiento modelo ya está configurado no tiene
+mucho sentido que ocupe tanto lugar visual, porque los operadores no deberían
+operar con él... podemos ponerlo en un botón que se llame Asiento modelo y abra
+la configuración»*.
+
+Cuando algo YA está configurado se colapsa a un botón. Cuando **falta**
+configurarlo, o quedó roto, ahí sí ocupa lugar: eso es accionable y tiene
+consecuencia. El estado normal es el silencioso; el excepcional es el que se ve.
+
+Por qué: el encabezado es el lugar más caro de la pantalla, y lo que se pone ahí
+es lo que se mira todo el día. Una parametrización se toca una vez y después le
+come el espacio a la bandeja de trabajo — y le enseña al operador a saltear la
+parte de arriba de la pantalla.
+
+No contradice la regla de abajo: el asiento de la OPERACIÓN se sigue mostrando
+antes de grabar. Lo que se esconde es la parametrización.
+
 ### EL BOTÓN ANULAR SE MUESTRA POR NIVEL, NO A CUALQUIERA
 `/api/auth/me` devuelve `user.niveles` (módulo → nivel). En el panel se mira con
 `lnbPuedeAnular('<modulo>')`, que usa la MISMA regla que el servidor: `anular` y
