@@ -10983,18 +10983,22 @@ const CLAVE_MODELO_FLETE = 'asiento_modelo_flete';
 router.get('/flete/modelo', requireAuth, (req, res) => {
   const db = getDb();
   try {
+    // La lista de modelos viaja SIEMPRE, también cuando no hay ninguno elegido:
+    // si no, la pantalla avisa que falta y no deja resolverlo — el selector
+    // quedaría vacío. Es el mismo agujero que tenía el de la descarga.
+    const modelos = db.prepare('SELECT id, nombre FROM sg_asientos_modelo WHERE activo=1 ORDER BY nombre').all();
     const cfg = db.prepare('SELECT valor FROM sg_config WHERE clave=?').get(CLAVE_MODELO_FLETE);
     const modeloId = cfg && cfg.valor ? Number(cfg.valor) : null;
-    if (!modeloId) return res.json({ ok: true, data: { modelo: null } });
+    if (!modeloId) return res.json({ ok: true, data: { modelo: null, modelos } });
     const m = db.prepare('SELECT * FROM sg_asientos_modelo WHERE id=? AND activo=1').get(modeloId);
-    if (!m) return res.json({ ok: true, data: { modelo: null, id_perdido: modeloId } });
+    if (!m) return res.json({ ok: true, data: { modelo: null, id_perdido: modeloId, modelos } });
     m.lineas = lineasModeloDe(db, CLAVE_MODELO_FLETE) || [];
     // Esta copia había perdido un chequeo por el camino: no miraba si el modelo
     // tenía alguna línea en el HABER. Un modelo todo al debe pasaba como bueno y
     // el asiento del flete no podía balancear nunca. Es lo que hacen las copias:
     // se corrige una y las otras quedan.
     const faltan = queLeFaltaAlModelo(m.lineas, 'lo que se le debe al fletero');
-    res.json({ ok: true, data: { modelo: m, faltan } });
+    res.json({ ok: true, data: { modelo: m, faltan, modelos } });
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
@@ -11039,6 +11043,52 @@ function montosDeFlete(b) {
 // El cuadro del asiento, para que la pantalla lo muestre ANTES de guardar. Es la
 // regla del repo: toda operación que asienta muestra el asiento, y es el único
 // momento en que se puede frenar.
+// ══ EL FLETE DE SALIDA — EL CIRCUITO QUE FALTABA ═══════════════════════════
+//
+// Pablo, 6/9/2026: «copiemos estos modelos de Control Cooperativa a fletes de
+// ingresos y flete de egresos... así empezamos a cargar datos ahí».
+//
+// El flete de entrada tenía su asiento modelo desde hace rato; el de SALIDA no
+// tenía ninguno. No era un olvido de la pantalla: no existía la clave, así que
+// tampoco figuraba en el cuadro de circuitos de Contabilidad SG. Valorizar un
+// flete de salida no generaba, y no genera todavía, ningún asiento.
+//
+// SON DOS CUENTAS DISTINTAS Y POR ESO SON DOS MODELOS. El flete de ENTRADA es
+// costo de la mercadería: entra al costo del lote (recalcCostoLote lo suma) y se
+// recupera al vender. El de SALIDA es costo de la VENTA: no toca el costo de la
+// partida, pega en el margen del remito. Meterlos en el mismo modelo los mandaría
+// a la misma cuenta de gasto y el estado de resultados no podría separarlos.
+const CLAVE_MODELO_FLETE_SALIDA = 'asiento_modelo_flete_salida';
+
+router.get('/flete-salida/modelo', requireAuth, (req, res) => {
+  const db = getDb();
+  try {
+    const modelos = db.prepare('SELECT id, nombre FROM sg_asientos_modelo WHERE activo=1 ORDER BY nombre').all();
+    const cfg = db.prepare('SELECT valor FROM sg_config WHERE clave=?').get(CLAVE_MODELO_FLETE_SALIDA);
+    const modeloId = cfg && cfg.valor ? Number(cfg.valor) : null;
+    if (!modeloId) return res.json({ ok: true, data: { modelo: null, modelos } });
+    const m = db.prepare('SELECT * FROM sg_asientos_modelo WHERE id=? AND activo=1').get(modeloId);
+    if (!m) return res.json({ ok: true, data: { modelo: null, id_perdido: modeloId, modelos } });
+    m.lineas = lineasModeloDe(db, CLAVE_MODELO_FLETE_SALIDA) || [];
+    const faltan = queLeFaltaAlModelo(m.lineas, 'lo que se le debe al fletero');
+    res.json({ ok: true, data: { modelo: m, faltan, modelos } });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// PARAMETRIZAR ES DE ADMINISTRADOR, como los otros cuatro circuitos.
+router.put('/flete-salida/modelo', requireAdmin, (req, res) => {
+  const db = getDb();
+  try {
+    const id = req.body?.modelo_id ? Number(req.body.modelo_id) : null;
+    if (id && !db.prepare('SELECT 1 FROM sg_asientos_modelo WHERE id=? AND activo=1').get(id)) {
+      return res.status(400).json({ ok: false, error: 'Ese asiento modelo no existe' });
+    }
+    db.prepare(`INSERT INTO sg_config (clave, valor) VALUES (?,?)
+      ON CONFLICT(clave) DO UPDATE SET valor=excluded.valor`).run(CLAVE_MODELO_FLETE_SALIDA, id ? String(id) : '');
+    res.json({ ok: true, data: { modelo_id: id } });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
 function asientoDeFlete(db, b) {
   const lineas = lineasModeloDe(db, CLAVE_MODELO_FLETE);
   if (!lineas || !lineas.length) {

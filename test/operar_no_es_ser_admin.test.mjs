@@ -152,10 +152,15 @@ test('la comparación es por SEGMENTO COMPLETO, no startsWith pelado', () => {
 });
 
 // ── QUE NO VUELVA ──────────────────────────────────────────────────────────
-test('quedan menos de 60 escrituras pidiendo admin', () => {
-  // Eran 86. Este número no tiene que volver a subir sin que alguien lo decida:
-  // cada requireAdmin nuevo sobre una acción operativa vuelve a dejar a la gente
-  // sin poder trabajar, que es lo que Pablo reportó.
+test('quedan menos de 61 escrituras pidiendo admin', () => {
+  // Eran 86. Este número no tiene que subir sin que alguien lo DECIDA: cada
+  // requireAdmin nuevo sobre una acción operativa vuelve a dejar a la gente sin
+  // poder trabajar, que es lo que Pablo reportó.
+  //
+  // Subió a 61 el 6/9/2026, a propósito: PUT /flete-salida/modelo elige contra
+  // qué cuentas se contabiliza TODO el circuito del flete de salida. Eso es
+  // parametrizar —lo mismo que los otros cuatro asientos modelo, que ya piden
+  // admin— y no es trabajo del día. Valorizar un flete sigue siendo requireAuth.
   const n = escrituras().filter((e) => e.guarda === 'requireAdmin').length;
-  assert.ok(n <= 60, 'subió a ' + n + ': revisá si alguno es trabajo del día');
+  assert.ok(n <= 61, 'subió a ' + n + ': revisá si alguno es trabajo del día');
 });
