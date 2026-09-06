@@ -206,68 +206,97 @@ test('elegir el modelo desde esta pantalla es de administrador', () => {
 
 // ── LA PANTALLA ───────────────────────────────────────────────────────────
 
+// Un pedazo de un archivo, del ancla hasta su cierre.
+function pedazo(txt, desde, cierre) {
+  const i = txt.indexOf(desde);
+  assert.ok(i > 0, 'no está: ' + desde);
+  return txt.slice(i, txt.indexOf(cierre, i) + cierre.length);
+}
+
 function panelCoop() {
   const i = PANEL.indexOf('id="sggd-pane-coop"');
   assert.ok(i > 0);
   return PANEL.slice(i, PANEL.indexOf('id="sgcc-desde"', i));
 }
 
-test('el bloque está arriba de Control Cooperativa', () => {
+// ══════════════════════════════════════════════════════════════════════════
+// LO QUE YA ESTÁ PARAMETRIZADO NO OCUPA EL ENCABEZADO
+// ══════════════════════════════════════════════════════════════════════════
+//
+// Pablo, 6/9/2026: «una vez que el asiento modelo ya está configurado no tiene
+// mucho sentido que ocupe tanto lugar visual, porque los operadores no deberían
+// operar con él... podemos ponerlo en un botón que se llame Asiento modelo y
+// abra la configuración».
+//
+// Los tests de acá abajo pedían lo CONTRARIO —que el bloque estuviera arriba de
+// todo y antes que los botones— y era la forma correcta mientras el circuito no
+// se podía configurar desde ningún lado. Una vez configurado, es ruido.
+
+test('el asiento modelo se abre desde un botón, no ocupa el encabezado', () => {
   const b = panelCoop();
-  assert.match(b, /id="sggd-modelo-box"/);
-  assert.match(b, /id="sggd-modelo-cuerpo"/);
-  // Arriba de la barra de acciones: es lo primero que se ve al entrar.
-  assert.ok(b.indexOf('id="sggd-modelo-box"') < b.indexOf('sgFgAbrir()'),
-    'el bloque quedó debajo de los botones');
+  assert.match(b, /id="sggd-modelo-btn"[^>]*onclick="sgCcoopModeloAbrir\(\)"/);
+  assert.ok(!/id="sggd-modelo-box"/.test(PANEL), 'quedó el bloque viejo del encabezado');
+  // El cuerpo se mudó al modal, que vive al nivel de arriba: adentro de la
+  // pantalla sólo se abriría desde ahí.
+  assert.ok(!b.includes('id="sggd-modelo-cuerpo"'),
+    'el cuadro sigue dibujado en el encabezado de la solapa');
+  const m = PANEL.indexOf('id="sggd-modelo-modal"');
+  assert.ok(m > 0, 'no existe el modal');
+  assert.match(PANEL.slice(m, m + 1400), /id="sggd-modelo-cuerpo"/);
 });
 
-test('y se esconde para el que no es administrador, por la MISMA puerta que los otros tres', () => {
-  // Elegir el asiento modelo es parametrizar. Si esta pantalla se escondiera
-  // sola, el día que cambie la regla habría que acordarse de las cuatro.
+test('pero lo que FALTA sí ocupa lugar: sin modelo no se contabiliza', () => {
+  // Es la única parte accionable. Sin modelo la factura se guarda igual y queda
+  // sin asiento, y eso se descubre al cierre — esconderlo también sería peor.
+  const b = panelCoop();
+  assert.match(b, /id="sggd-modelo-falta"/);
+  assert.match(b, /style="display:none;/, 'el aviso nace visible');
+  const f = pedazo(PANEL, 'function sgCcoopModeloEstado(){', '\r\n}');
+  assert.match(f, /var mal = !m \|\| faltan\.length;/);
+  assert.match(f, /av\.style\.display = mal \? '' : 'none';/);
+  assert.match(f, /queda sin asiento/);
+  // Y el botón cambia de cara, para que se note sin leer el cartel.
+  assert.match(f, /btn\.textContent = mal \? '⚠️ Asiento modelo' : '⚙️ Asiento modelo';/);
+  // El modelo elegido se dice en el title del botón: saberlo no debería costar
+  // un clic.
+  assert.match(f, /btn\.title = m \? \('Se contabiliza con: ' \+ m\.nombre\)/);
+});
+
+test('el estado se sabe al entrar a la solapa, sin abrir el modal', () => {
+  // Si el estado saliera de abrir el modal, habría que abrirlo para enterarse de
+  // que no hay modelo — que es justo lo que no puede pasar.
+  const c = pedazo(PANEL, 'function sgCcoopModeloCargar(){', '\r\n}');
+  assert.match(c, /api\('\/api\/sg\/gastos-factura\/modelo'\)/);
+  assert.match(c, /sgCcoopModeloEstado\(\);/);
+  // Y si el modal está abierto cuando llega la respuesta, se repinta.
+  assert.match(c, /if \(eid\('sggd-modelo-modal'\)\.classList\.contains\('on'\)\) sgCcoopModeloPintar\(\);/);
+  const i = PANEL.indexOf('function sgCcoopInit(){');
+  assert.match(PANEL.slice(i, i + 400), /sgCcoopModeloCargar\(\);/);
+});
+
+test('el botón se esconde para el que no es administrador, por la MISMA puerta', () => {
+  // Elegir el asiento modelo es parametrizar. Una sola puerta para las cuatro
+  // pantallas: si mañana cambia la regla, cambia en un renglón.
   const i = PANEL.indexOf('function sgAsientoModeloVisible(){');
   const f = PANEL.slice(i, PANEL.indexOf('\r\n}', i));
-  assert.match(f, /'sggd-modelo-box'/);
-  // Y el selector se dibuja con la MISMA regla que las tres pantallas hermanas.
-  const j = PANEL.indexOf('function sgCcoopModeloCargar(){');
-  const g = PANEL.slice(j, PANEL.indexOf('\r\n}\r\n', j));
-  assert.match(g, /if \(esAdmin\)\{[\s\S]*sggd-modelo-sel/);
+  assert.match(f, /'sggd-modelo-btn'/);
+  assert.ok(!/'sggd-modelo-box'/.test(f), 'sigue escondiendo un id que ya no existe');
+  // Y el aviso del encabezado tampoco es para el operador.
+  const e = pedazo(PANEL, 'function sgCcoopModeloEstado(){', '\r\n}');
+  assert.match(e, /if \(!sgAsientoEsAdmin\(\)\) \{ av\.style\.display = 'none'; return; \}/);
 });
 
 test('el SELECTOR se le ofrece sólo a quien el servidor va a dejar guardar', () => {
   // sgAsientoEsAdmin() es «tiene alguna pantalla contable de SG», no «es
   // administrador»: un operador con nivel «ver» en Modelos daba true, veía el
-  // selector, elegía, y el PUT —que es requireAdmin— le contestaba 403. VER el
-  // bloque y CAMBIARLO son dos permisos distintos; así lo resuelven la
-  // liquidación, la factura de mercadería y las ventas.
-  const j = PANEL.indexOf('function sgCcoopModeloCargar(){');
-  const g = PANEL.slice(j, PANEL.indexOf('\r\n}\r\n', j));
+  // selector, elegía, y el PUT —que es requireAdmin— le contestaba 403.
+  const g = pedazo(PANEL, 'function sgCcoopModeloPintar(){', '\r\n}\r\n');
   assert.match(g, /var esAdmin = sgFmEsAdmin\(\);/);
   assert.ok(!/var esAdmin = sgAsientoEsAdmin\(\)/.test(g),
     'el selector se decide con «tiene pantalla contable» en vez de «es admin»');
-  // Y sgFmEsAdmin sigue siendo estrictamente el rol.
+  assert.match(g, /if \(esAdmin\)\{[\s\S]*sggd-modelo-sel/);
   const k = PANEL.indexOf('function sgFmEsAdmin(){');
   assert.match(PANEL.slice(k, PANEL.indexOf('\r\n}', k)), /LNB_USER\.rol === 'admin'/);
-});
-
-test('el bloque nace escondido: no se ve mientras vuelve la primera llamada', () => {
-  // sgCcoopInit pide los proveedores y recién dentro del .then llama a la carga.
-  // Sin el display:none inicial, el que no puede verlo lo veía ese rato.
-  const b = panelCoop();
-  const i = b.indexOf('id="sggd-modelo-box"');
-  assert.match(b.slice(i, i + 120), /style="display:none;/);
-});
-
-test('se carga al ENTRAR a la solapa, y no con cada filtro', () => {
-  // Entrar a 🤝 Control Cooperativa corre sgCcoopInit, así que volver desde
-  // Contabilidad SG después de cambiar el modelo lo muestra actualizado.
-  const i = PANEL.indexOf('function sgCcoopInit(){');
-  assert.match(PANEL.slice(i, i + 400), /sgCcoopModeloCargar\(\);/);
-  // Y NO adentro de sgCcoopLoad, que se dispara con cada fecha, cada ↻ y cada
-  // asignación: rehacer el bloque pedía una llamada de red por cada movimiento
-  // del filtro y cerraba el cuadro que estaba abierto.
-  const j = PANEL.indexOf('function sgCcoopLoad(){');
-  assert.ok(!/sgCcoopModeloCargar\(\)/.test(PANEL.slice(j, PANEL.indexOf('\r\n}\r\n', j))),
-    'el bloque se rehace con cada filtro');
 });
 
 test('el cuadro debe/haber se abre de UN clic', () => {
@@ -275,7 +304,7 @@ test('el cuadro debe/haber se abre de UN clic', () => {
   // hacen, es la regla del repo—, así que un botón «Ver detalle» propio encima
   // dejaba DOS desplegables: el primero abría un <details> cerrado y hacía falta
   // un segundo clic para ver el cuadro. El desplegable del armador ES el botón.
-  const i = PANEL.indexOf('function sgCcoopModeloCargar(){');
+  const i = PANEL.indexOf('function sgCcoopModeloPintar(){');
   const f = PANEL.slice(i, PANEL.indexOf('\r\n}\r\n', i));
   assert.match(f, /sgFmAsientoTabla\(m\.lineas \|\| \[\]\)/);
   assert.ok(!/Ver detalle/.test(f), 'quedó el botón que sumaba un segundo clic');
@@ -289,9 +318,8 @@ test('el cuadro debe/haber se abre de UN clic', () => {
 test('sin modelo, la pantalla dice qué pasa si se deja así', () => {
   // «Sin elegir» a secas no explica nada. Lo que importa es la consecuencia:
   // la factura se guarda igual y queda sin contabilizar.
-  const i = PANEL.indexOf('function sgCcoopModeloCargar(){');
-  const f = PANEL.slice(i, PANEL.indexOf('\r\n}\r\n', i));
-  assert.match(f, /sin contabilizar/);
+  const f = pedazo(PANEL, 'function sgCcoopModeloEstado(){', '\r\n}');
+  assert.match(f, /queda sin asiento/);
 });
 
 test('y está en el manual, con su versión', () => {
