@@ -79,7 +79,11 @@ function armar() {
   };
 }
 
-test('los cinco circuitos que asientan están, y arrancan sin modelo', () => {
+test('los seis circuitos que asientan están, y arrancan sin modelo', () => {
+  // El de FLETE DE SALIDA se agregó el 6/9/2026: no existía la clave, así que el
+  // circuito no figuraba en el cuadro y no se podía elegir con qué se
+  // contabiliza. Es aparte del de entrada porque son cuentas distintas: entrada
+  // es costo de la mercadería, salida es costo de la venta.
   const a = armar();
   const r = a.GET();
   assert.ok(r.ok);
@@ -88,6 +92,7 @@ test('los cinco circuitos que asientan están, y arrancan sin modelo', () => {
     'asiento_modelo_descarga',
     'asiento_modelo_factura_mercaderia',
     'asiento_modelo_flete',
+    'asiento_modelo_flete_salida',
     'asiento_modelo_liquidacion',
     'asiento_modelo_venta',
   ]);

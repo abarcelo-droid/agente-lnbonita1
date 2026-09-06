@@ -1492,6 +1492,13 @@ const CIRCUITOS = [
     donde: 'La factura que San Gerónimo le emite a un cliente.' },
   { clave: 'asiento_modelo_flete', label: 'Flete de entrada',
     donde: 'El flete de la mercadería que entra, cuando lo paga San Gerónimo.' },
+  // Es un circuito APARTE del de entrada, no el mismo con otro nombre: el flete
+  // de entrada es costo de la MERCADERÍA —entra al costo del lote y se recupera
+  // al vender— y el de salida es costo de la VENTA, que pega en el margen del
+  // remito. Con un solo modelo los dos irían a la misma cuenta de gasto y el
+  // estado de resultados no podría separarlos.
+  { clave: 'asiento_modelo_flete_salida', label: 'Flete de salida',
+    donde: 'El flete que lleva la mercadería al cliente. No entra al costo de la partida.' },
   { clave: 'asiento_modelo_descarga', label: 'Descarga y servicios',
     donde: 'La factura de la cooperativa o la cuadrilla que descargó el camión.' },
 ];

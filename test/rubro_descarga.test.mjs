@@ -34,12 +34,12 @@ test('las dos pantallas guardan el modelo de la descarga en la MISMA clave', () 
 
 // ── UN SOLO CHEQUEO DE «¿SIRVE ESTE MODELO?» ──────────────────────────────
 
-test('el chequeo del modelo está escrito UNA vez, y lo usan los cuatro circuitos', () => {
+test('el chequeo del modelo está escrito UNA vez, y lo usan los cinco circuitos', () => {
   // Estaba copiado TRES veces —liquidación, factura de mercadería y flete— y la
   // descarga iba a ser la cuarta. Copias de la misma regla son reglas distintas:
   // se corrige una y las otras quedan como estaban.
   assert.equal((SG.match(/function queLeFaltaAlModelo\(/g) || []).length, 1);
-  assert.equal((SG.match(/queLeFaltaAlModelo\(m\.lineas,/g) || []).length, 4,
+  assert.equal((SG.match(/queLeFaltaAlModelo\(m\.lineas,/g) || []).length, 5,
     'algún circuito dejó de usar el chequeo común');
   // Y no quedó ninguna copia suelta.
   assert.equal((SG.match(/faltan\.push\('no tiene ninguna línea'\)/g) || []).length, 1,
@@ -220,107 +220,160 @@ function panelCoop() {
 }
 
 // ══════════════════════════════════════════════════════════════════════════
-// LO QUE YA ESTÁ PARAMETRIZADO NO OCUPA EL ENCABEZADO
+// LOS TRES CIRCUITOS, CON UNA SOLA IMPLEMENTACIÓN
 // ══════════════════════════════════════════════════════════════════════════
 //
-// Pablo, 6/9/2026: «una vez que el asiento modelo ya está configurado no tiene
-// mucho sentido que ocupe tanto lugar visual, porque los operadores no deberían
-// operar con él... podemos ponerlo en un botón que se llame Asiento modelo y
-// abra la configuración».
+// Pablo, 6/9/2026: «copiemos estos modelos de Control Cooperativa a fletes de
+// ingresos y flete de egresos... así empezamos a cargar datos ahí».
 //
-// Los tests de acá abajo pedían lo CONTRARIO —que el bloque estuviera arriba de
-// todo y antes que los botones— y era la forma correcta mientras el circuito no
-// se podía configurar desde ningún lado. Una vez configurado, es ruido.
+// Copiar habría sido el error: tres copias del mismo cuadro son tres reglas. En
+// este mismo módulo el chequeo del modelo estaba escrito tres veces y una copia
+// había perdido un control.
 
-test('el asiento modelo se abre desde un botón, no ocupa el encabezado', () => {
-  const b = panelCoop();
-  assert.match(b, /id="sggd-modelo-btn"[^>]*onclick="sgCcoopModeloAbrir\(\)"/);
-  assert.ok(!/id="sggd-modelo-box"/.test(PANEL), 'quedó el bloque viejo del encabezado');
-  // El cuerpo se mudó al modal, que vive al nivel de arriba: adentro de la
-  // pantalla sólo se abriría desde ahí.
-  assert.ok(!b.includes('id="sggd-modelo-cuerpo"'),
-    'el cuadro sigue dibujado en el encabezado de la solapa');
-  const m = PANEL.indexOf('id="sggd-modelo-modal"');
-  assert.ok(m > 0, 'no existe el modal');
-  assert.match(PANEL.slice(m, m + 1400), /id="sggd-modelo-cuerpo"/);
+const CIRCUITOS_UI = [
+  { k: 'descarga',      ruta: '/api/sg/gastos-factura/modelo', btn: 'sggd-modelo-btn', av: 'sggd-modelo-falta', pane: 'sggd-pane-coop' },
+  { k: 'flete_entrada', ruta: '/api/sg/flete/modelo',          btn: 'sgfe-modelo-btn', av: 'sgfe-modelo-falta', pane: 'sggd-pane-flete_entrada' },
+  { k: 'flete_salida',  ruta: '/api/sg/flete-salida/modelo',   btn: 'sgfs-modelo-btn', av: 'sgfs-modelo-falta', pane: 'sggd-pane-flete_salida' },
+];
+
+function tablaCircuitos() {
+  const src = pedazo(PANEL, 'var SG_MODELOS = {', '\r\n};');
+  return new Function(src + '\r\nreturn SG_MODELOS;')();
+}
+
+test('los tres circuitos salen de UNA tabla, no de tres copias', () => {
+  const t = tablaCircuitos();
+  assert.deepEqual(Object.keys(t).sort(), ['descarga', 'flete_entrada', 'flete_salida']);
+  for (const c of CIRCUITOS_UI) {
+    assert.equal(t[c.k].ruta, c.ruta, c.k + ' apunta a otra dirección');
+    assert.equal(t[c.k].btn, c.btn);
+    assert.equal(t[c.k].av, c.av);
+    assert.ok(t[c.k].que && t[c.k].sub && t[c.k].titulo, c.k + ' sin textos');
+  }
+  // Y la implementación es una sola: las funciones toman la clave por parámetro.
+  for (const f of ['sgModeloCargar', 'sgModeloEstado', 'sgModeloAbrir', 'sgModeloPintar', 'sgModeloGuardar']) {
+    assert.equal((PANEL.match(new RegExp('function ' + f + '\\(k\\)', 'g')) || []).length, 1,
+      f + ' no está escrita una sola vez y parametrizada');
+  }
+  // No quedó nada de la versión copiada.
+  assert.ok(!/sgCcoopModelo/.test(PANEL), 'quedó la implementación vieja de cooperativa');
 });
 
-test('pero lo que FALTA sí ocupa lugar: sin modelo no se contabiliza', () => {
-  // Es la única parte accionable. Sin modelo la factura se guarda igual y queda
-  // sin asiento, y eso se descubre al cierre — esconderlo también sería peor.
-  const b = panelCoop();
-  assert.match(b, /id="sggd-modelo-falta"/);
-  assert.match(b, /style="display:none;/, 'el aviso nace visible');
-  const f = pedazo(PANEL, 'function sgCcoopModeloEstado(){', '\r\n}');
+test('el flete de SALIDA dice por qué es un circuito aparte del de entrada', () => {
+  // Entrada es costo de la mercadería —entra al costo del lote— y salida es
+  // costo de la venta: pega en el margen del remito. Con un solo modelo los dos
+  // irían a la misma cuenta y el resultado no podría separarlos.
+  const t = tablaCircuitos();
+  assert.match(t.flete_salida.sub, /APARTE del de entrada/);
+  assert.match(t.flete_salida.sub, /NO entra al costo de la partida/);
+  assert.match(t.flete_entrada.sub, /ENTRA al costo de la partida/);
+});
+
+test('cada solapa tiene su botón y su aviso, y los tres se esconden por la MISMA puerta', () => {
+  for (const c of CIRCUITOS_UI) {
+    const i = PANEL.indexOf('id="' + c.pane + '"');
+    assert.ok(i > 0, 'no existe ' + c.pane);
+    const b = PANEL.slice(i, i + 6000);
+    assert.match(b, new RegExp('id="' + c.btn + '"[^>]*style="display:none"'),
+      c.k + ': el botón no nace escondido');
+    assert.match(b, new RegExp("onclick=\"sgModeloAbrir\\('" + c.k + "'\\)\""),
+      c.k + ': el botón no abre su circuito');
+    assert.match(b, new RegExp('id="' + c.av + '"[^>]*display:none'),
+      c.k + ': el aviso no nace escondido');
+  }
+  // Elegir el asiento modelo es parametrizar: una sola puerta para las seis
+  // pantallas, o el día que cambie la regla hay que acordarse de todas.
+  const f = pedazo(PANEL, 'function sgAsientoModeloVisible(){', '\r\n}');
+  for (const c of CIRCUITOS_UI) assert.match(f, new RegExp("'" + c.btn + "'"));
+});
+
+test('el estado se sabe al ENTRAR a cada solapa, sin abrir el modal', () => {
+  // Si saliera de abrir el modal, habría que abrirlo para enterarse de que falta.
+  const t = pedazo(PANEL, 'function sgGdsTab(t){', '\r\n}');
+  assert.match(t, /sgModeloCargar\('flete_salida'\)/);
+  assert.match(t, /sgModeloCargar\('flete_entrada'\)/);
+  const i = PANEL.indexOf('function sgCcoopInit(){');
+  assert.match(PANEL.slice(i, i + 400), /sgModeloCargar\('descarga'\)/);
+  // Y la solapa que arranca abierta también: sgGdsInit entra por sgGdsTab.
+  const g = pedazo(PANEL, 'function sgGdsInit(){', '\r\n}');
+  assert.match(g, /sgGdsTab\('flete_salida'\)/);
+});
+
+test('lo que FALTA sí ocupa lugar, y el botón cambia de cara', () => {
+  // Sin modelo la operación se guarda igual y queda sin contabilizar, y eso se
+  // descubre al cierre. Esconderlo del todo sería cambiar un problema visual por
+  // uno contable.
+  const f = pedazo(PANEL, 'function sgModeloEstado(k){', '\r\n}');
   assert.match(f, /var mal = !m \|\| faltan\.length;/);
   assert.match(f, /av\.style\.display = mal \? '' : 'none';/);
   assert.match(f, /queda sin asiento/);
-  // Y el botón cambia de cara, para que se note sin leer el cartel.
   assert.match(f, /btn\.textContent = mal \? '⚠️ Asiento modelo' : '⚙️ Asiento modelo';/);
-  // El modelo elegido se dice en el title del botón: saberlo no debería costar
-  // un clic.
+  // Saber con qué se contabiliza no debería costar un clic.
   assert.match(f, /btn\.title = m \? \('Se contabiliza con: ' \+ m\.nombre\)/);
+  // Y el aviso tampoco es para el operador.
+  assert.match(f, /if \(!sgAsientoEsAdmin\(\)\) \{ av\.style\.display = 'none'; return; \}/);
 });
 
-test('el estado se sabe al entrar a la solapa, sin abrir el modal', () => {
-  // Si el estado saliera de abrir el modal, habría que abrirlo para enterarse de
-  // que no hay modelo — que es justo lo que no puede pasar.
-  const c = pedazo(PANEL, 'function sgCcoopModeloCargar(){', '\r\n}');
-  assert.match(c, /api\('\/api\/sg\/gastos-factura\/modelo'\)/);
-  assert.match(c, /sgCcoopModeloEstado\(\);/);
-  // Y si el modal está abierto cuando llega la respuesta, se repinta.
-  assert.match(c, /if \(eid\('sggd-modelo-modal'\)\.classList\.contains\('on'\)\) sgCcoopModeloPintar\(\);/);
-  const i = PANEL.indexOf('function sgCcoopInit(){');
-  assert.match(PANEL.slice(i, i + 400), /sgCcoopModeloCargar\(\);/);
-});
-
-test('el botón se esconde para el que no es administrador, por la MISMA puerta', () => {
-  // Elegir el asiento modelo es parametrizar. Una sola puerta para las cuatro
-  // pantallas: si mañana cambia la regla, cambia en un renglón.
-  const i = PANEL.indexOf('function sgAsientoModeloVisible(){');
-  const f = PANEL.slice(i, PANEL.indexOf('\r\n}', i));
-  assert.match(f, /'sggd-modelo-btn'/);
-  assert.ok(!/'sggd-modelo-box'/.test(f), 'sigue escondiendo un id que ya no existe');
-  // Y el aviso del encabezado tampoco es para el operador.
-  const e = pedazo(PANEL, 'function sgCcoopModeloEstado(){', '\r\n}');
-  assert.match(e, /if \(!sgAsientoEsAdmin\(\)\) \{ av\.style\.display = 'none'; return; \}/);
+test('UN modal para los tres, con el texto del circuito que se abrió', () => {
+  // Tres modales iguales serían tres lugares donde arreglar lo mismo.
+  assert.equal((PANEL.match(/id="sg-modelo-modal"/g) || []).length, 1);
+  assert.ok(!/id="sggd-modelo-modal"/.test(PANEL), 'quedó el modal viejo de cooperativa');
+  const a = pedazo(PANEL, 'function sgModeloAbrir(k){', '\r\n}');
+  assert.match(a, /eid\('sg-modelo-tit'\)\.textContent = '⚙️ ' \+ c\.titulo;/);
+  assert.match(a, /eid\('sg-modelo-sub'\)\.textContent = c\.sub;/);
+  // Y se acuerda de cuál está abierto, o al llegar la respuesta repintaría otro.
+  assert.match(a, /SG\._modeloAbierto = k;/);
+  const c = pedazo(PANEL, 'function sgModeloCargar(k){', '\r\n}');
+  assert.match(c, /SG\._modeloAbierto === k/);
 });
 
 test('el SELECTOR se le ofrece sólo a quien el servidor va a dejar guardar', () => {
   // sgAsientoEsAdmin() es «tiene alguna pantalla contable de SG», no «es
   // administrador»: un operador con nivel «ver» en Modelos daba true, veía el
-  // selector, elegía, y el PUT —que es requireAdmin— le contestaba 403.
-  const g = pedazo(PANEL, 'function sgCcoopModeloPintar(){', '\r\n}\r\n');
+  // selector, elegía, y el PUT —requireAdmin— le contestaba 403.
+  const g = pedazo(PANEL, 'function sgModeloPintar(k){', '\r\n}');
   assert.match(g, /var esAdmin = sgFmEsAdmin\(\);/);
-  assert.ok(!/var esAdmin = sgAsientoEsAdmin\(\)/.test(g),
-    'el selector se decide con «tiene pantalla contable» en vez de «es admin»');
-  assert.match(g, /if \(esAdmin\)\{[\s\S]*sggd-modelo-sel/);
+  assert.ok(!/var esAdmin = sgAsientoEsAdmin\(\)/.test(g));
+  assert.match(g, /if \(esAdmin\)\{[\s\S]*sg-modelo-sel/);
   const k = PANEL.indexOf('function sgFmEsAdmin(){');
   assert.match(PANEL.slice(k, PANEL.indexOf('\r\n}', k)), /LNB_USER\.rol === 'admin'/);
 });
 
 test('el cuadro debe/haber se abre de UN clic', () => {
-  // sgFmAsientoTabla se envuelve sola en sgAsientoPlegado —los tres armadores lo
-  // hacen, es la regla del repo—, así que un botón «Ver detalle» propio encima
-  // dejaba DOS desplegables: el primero abría un <details> cerrado y hacía falta
-  // un segundo clic para ver el cuadro. El desplegable del armador ES el botón.
-  const i = PANEL.indexOf('function sgCcoopModeloPintar(){');
-  const f = PANEL.slice(i, PANEL.indexOf('\r\n}\r\n', i));
+  // sgFmAsientoTabla se envuelve sola en sgAsientoPlegado: un botón propio encima
+  // dejaba dos desplegables y hacían falta dos clics.
+  const f = pedazo(PANEL, 'function sgModeloPintar(k){', '\r\n}');
   assert.match(f, /sgFmAsientoTabla\(m\.lineas \|\| \[\]\)/);
-  assert.ok(!/Ver detalle/.test(f), 'quedó el botón que sumaba un segundo clic');
-  assert.ok(!PANEL.includes('sggd-modelo-det'), 'quedó el div del desplegable de más');
-  // Y sgFmAsientoTabla se banca que la llamen con un solo argumento: sin
-  // importes muestra la estructura, que es lo que hay hasta que llega la factura.
-  const j = PANEL.indexOf('function sgFmAsientoTabla(');
-  assert.match(PANEL.slice(j, j + 500), /var monto = importes \? /);
+  assert.ok(!/Ver detalle/.test(f));
+  assert.ok(!PANEL.includes('sggd-modelo-det'));
 });
 
-test('sin modelo, la pantalla dice qué pasa si se deja así', () => {
-  // «Sin elegir» a secas no explica nada. Lo que importa es la consecuencia:
-  // la factura se guarda igual y queda sin contabilizar.
-  const f = pedazo(PANEL, 'function sgCcoopModeloEstado(){', '\r\n}');
-  assert.match(f, /queda sin asiento/);
+test('los tres endpoints devuelven la lista para poder elegir, también cuando falta', () => {
+  // Sin `modelos` la pantalla avisa que falta y no deja resolverlo: el selector
+  // quedaría vacío. El del flete de entrada lo tenía así.
+  for (const [ancla, clave] of [
+    ["router.get('/gastos-factura/modelo'", 'CLAVE_MODELO_GASTO'],
+    ["router.get('/flete/modelo'", 'CLAVE_MODELO_FLETE'],
+    ["router.get('/flete-salida/modelo'", 'CLAVE_MODELO_FLETE_SALIDA'],
+  ]) {
+    const h = pedazo(SG, ancla, '\r\n});');
+    assert.match(h, /SELECT id, nombre FROM sg_asientos_modelo WHERE activo=1/, ancla);
+    assert.match(h, /data: \{ modelo: null, modelos \}/, ancla + ': sin lista cuando no hay modelo');
+    assert.match(h, /id_perdido: modeloId, modelos/, ancla + ': sin lista cuando se dio de baja');
+    assert.ok(SG.includes(clave), 'falta la clave ' + clave);
+  }
 });
+
+test('elegir el modelo del flete de salida es de administrador, y está declarado', () => {
+  const p = pedazo(SG, "router.put('/flete-salida/modelo'", '\r\n});');
+  assert.match(SG, /router\.put\('\/flete-salida\/modelo', requireAdmin,/);
+  assert.match(p, /SELECT 1 FROM sg_asientos_modelo WHERE id=\? AND activo=1/);
+  // Y el prefijo, o moduloDeRuta devuelve null y exigirNivel deja pasar.
+  const PREF = fs.readFileSync(path.join(RAIZ, 'src/servicios/ensure_api_prefijos.js'), 'utf8');
+  assert.match(PREF, /sg\/flete-salida/);
+  assert.match(PREF, /sg\/flete,/);
+});
+
 
 test('y está en el manual, con su versión', () => {
   const i = PANEL.indexOf("SG_MANUAL.gastos = {");

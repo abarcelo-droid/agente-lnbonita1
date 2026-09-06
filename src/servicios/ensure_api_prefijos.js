@@ -226,7 +226,11 @@ const PREFIJOS = [
   // seguía con requireAdmin: aflojarlo lo habría dejado abierto a cualquier sesión.
   // Declarado acá, el nivel lo cuida y la valorización vuelve a ser trabajo del día.
   // Cierra también el asiento-preview del flete, que ya salía con requireAuth.
-  ['sg-gastos-directos', 'sg/gastos-directos,sg/gastos-servicio,sg/gastos-factura,sg/gastos-facturables,sg/proveedores-servicio,sg/control-coop,sg/cooperativas,sg/fletes-entrada'],
+  // 'sg/flete' y 'sg/flete-salida' son los asientos modelo de los dos fletes, y
+  // faltaban: sin prefijo declarado moduloDeRuta devuelve null y exigirNivel deja
+  // pasar. El PUT es requireAdmin igual, pero eso es el segundo cerrojo, no el
+  // primero. Ojo que 'sg/fletes-entrada' (plural) es otra cosa: la bandeja.
+  ['sg-gastos-directos', 'sg/gastos-directos,sg/gastos-servicio,sg/gastos-factura,sg/gastos-facturables,sg/proveedores-servicio,sg/control-coop,sg/cooperativas,sg/fletes-entrada,sg/flete,sg/flete-salida'],
   ['sg-reprocesos',      'sg/reprocesos,sg/transformaciones'],
   ['sg-importacion',     'sg/embarques'],
   // Control Cooperativa es casi todo lectura, pero tiene UNA escritura: asignar
