@@ -3473,6 +3473,29 @@ input[type=number]{-moz-appearance:textfield;appearance:textfield}
      #sgfd-confirm: el CAE con el botón del PDF, y —cuando contesta el
      servidor— el resultado del cobro, que es el único lugar donde se avisa que
      el cobro NO se tomó. Cerrando la ventana se pierden los dos. -->
+<!-- ══ 🔒 LA CONTRASEÑA PARA VER LA COMPENSACIÓN ═══════════════════════
+     Estaba ADENTRO de .sec#sec-personal-valorizar. Con `.sec{display:none}`
+     eso alcanza mientras se abra desde esa pantalla y desde ninguna otra —
+     hoy es así— pero es la misma bomba que ya explotó con los modales de
+     facturar el remito y recibir la liquidación: el día que se pida la
+     contraseña desde otro lado, el overlay corre y no se ve nada, y lo que
+     queda es una pantalla que no responde.
+
+     Era la ÚNICA de las 201 ventanas del panel que violaba la regla, y el
+     test que la audita no la veía porque está escrita a mano, sin las clases
+     estándar. Ahora el test mira las 201. -->
+<div id="pp-val-pwd-overlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:9999;align-items:center;justify-content:center">
+      <div style="background:var(--card,#fff);border-radius:12px;padding:22px 24px;max-width:370px;width:90%;box-shadow:0 12px 44px rgba(0,0,0,.32)">
+        <div style="font-weight:700;font-size:15px;margin-bottom:4px">🔒 Acceso a compensación</div>
+        <div style="font-size:12px;color:var(--mut);margin-bottom:14px">Esta vista muestra montos individuales. Reingresá tu contraseña para abrir una sesión de 15 minutos.</div>
+        <input type="password" id="pp-val-pwd-input" placeholder="Tu contraseña" autocomplete="current-password" style="width:100%;padding:8px 10px;font-size:13px;margin-bottom:10px;box-sizing:border-box" onkeydown="if(event.key==='Enter')ppValPwdSubmit()">
+        <div id="pp-val-pwd-err" style="display:none;font-size:11px;color:#b91c1c;margin-bottom:8px"></div>
+        <div style="display:flex;gap:8px;justify-content:flex-end">
+          <button class="btn bo bs" onclick="ppValPwdCancel()">Cancelar</button>
+          <button class="btn bb bs" onclick="ppValPwdSubmit()">Validar</button>
+        </div>
+      </div>
+    </div>
 <div class="ab-modal-overlay sg-mod" id="sg-fd-modal">
   <div class="ab-modal" style="width:min(1100px,96vw);max-width:96vw;max-height:92vh;overflow-y:auto;overflow-x:hidden">
     <div class="mhd"><div class="mht">💵 Facturar en el puesto</div>
@@ -26819,18 +26842,6 @@ function sgRepExport(){
   </div>
   <div class="pp-sub on" id="pp-sub-valorizar">
     <!-- Barrera re-password (sesión sensible 15 min) -->
-    <div id="pp-val-pwd-overlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:9999;align-items:center;justify-content:center">
-      <div style="background:var(--card,#fff);border-radius:12px;padding:22px 24px;max-width:370px;width:90%;box-shadow:0 12px 44px rgba(0,0,0,.32)">
-        <div style="font-weight:700;font-size:15px;margin-bottom:4px">🔒 Acceso a compensación</div>
-        <div style="font-size:12px;color:var(--mut);margin-bottom:14px">Esta vista muestra montos individuales. Reingresá tu contraseña para abrir una sesión de 15 minutos.</div>
-        <input type="password" id="pp-val-pwd-input" placeholder="Tu contraseña" autocomplete="current-password" style="width:100%;padding:8px 10px;font-size:13px;margin-bottom:10px;box-sizing:border-box" onkeydown="if(event.key==='Enter')ppValPwdSubmit()">
-        <div id="pp-val-pwd-err" style="display:none;font-size:11px;color:#b91c1c;margin-bottom:8px"></div>
-        <div style="display:flex;gap:8px;justify-content:flex-end">
-          <button class="btn bo bs" onclick="ppValPwdCancel()">Cancelar</button>
-          <button class="btn bb bs" onclick="ppValPwdSubmit()">Validar</button>
-        </div>
-      </div>
-    </div>
     <div style="display:flex;gap:10px;margin-bottom:14px;align-items:center;flex-wrap:wrap">
       <button class="btn bo bs" onclick="ppValSemana(-1)">‹ Semana ant.</button>
       <span id="pp-val-rango" style="font-size:13px;font-weight:700"></span>
