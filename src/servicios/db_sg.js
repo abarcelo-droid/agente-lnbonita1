@@ -1091,6 +1091,12 @@ try {
     ['archivo_ruta',  'TEXT'],
     ['archivo_nombre', 'TEXT'],
     ['leido_por_ia',  'INTEGER NOT NULL DEFAULT 0'],
+    // De qué circuito es la factura: descarga_ingreso, flete_entrada o
+    // flete_salida. Se puede derivar de los items —cada gasto tiene su
+    // tipo_gasto— pero derivarlo en cada consulta es una cuenta más que se puede
+    // hacer distinta en cada lugar. Las de antes de la V1015 quedan en NULL y
+    // son todas de descarga: era el único circuito que se facturaba.
+    ['circuito',      'TEXT'],
   ]) {
     const cols = db.prepare('PRAGMA table_info(sg_facturas_gasto)').all().map((c) => c.name);
     if (!cols.includes(col)) db.exec(`ALTER TABLE sg_facturas_gasto ADD COLUMN ${col} ${tipo}`);

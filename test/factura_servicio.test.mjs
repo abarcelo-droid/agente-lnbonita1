@@ -89,9 +89,17 @@ function base() {
     DBSG.indexOf('`);', DBSG.indexOf('idx_sg_fg_items_gasto')));
   db.exec(`
     CREATE TABLE sg_gastos_directos (id INTEGER PRIMARY KEY, tipo_gasto TEXT,
-      recepcion_id INTEGER, proveedor_servicio_id INTEGER, estado TEXT, monto REAL,
+      recepcion_id INTEGER, despacho_id INTEGER, proveedor_servicio_id INTEGER,
+      estado TEXT, monto REAL, cuenta_ref TEXT, asiento_id INTEGER,
       fecha_servicio TEXT, fecha_valorizacion TEXT, unidad TEXT, cantidad REAL,
       activo INTEGER DEFAULT 1);
+    -- El flete de SALIDA cuelga de un remito, no de una recepción: sin estas dos
+    -- el SELECT del router no corre, y es el mismo SELECT que corre en producción.
+    CREATE TABLE sg_despachos (id INTEGER PRIMARY KEY, numero TEXT, cliente_id INTEGER);
+    CREATE TABLE sg_clientes (id INTEGER PRIMARY KEY, razon_social TEXT);
+    -- El asiento se mira para saber si SIGUE VIVO: uno anulado a mano no cuenta
+    -- como «ya contabilizado», o el gasto se cae del libro.
+    CREATE TABLE sg_asientos (id INTEGER PRIMARY KEY, anulado INTEGER DEFAULT 0);
   `);
   db.exec(ddl);
   const g = db.prepare(`INSERT INTO sg_gastos_directos
@@ -106,15 +114,22 @@ function base() {
   return db;
 }
 
-// El SELECT sale del router, no de una copia.
-function facturables(db, prov) {
+// El SELECT sale del router, no de una copia. Ahora corre ENTERO: las tablas de
+// remito y cliente están en la base del test, así que ya no hace falta recortarle
+// los JOIN — y recortarlos era lo que dejaba sin probar la mitad de la consulta.
+function facturables(db, prov, tipos) {
+  const ts = Array.isArray(tipos) ? tipos : [tipos || 'descarga_ingreso'];
   const b = trozo(SG, "router.get('/gastos-facturables'", SALTO + '});');
   const i = b.indexOf('SELECT g.id');
   const sql = b.slice(i, b.indexOf('`', i))
-    // Las tablas que este test no necesita: se sacan los JOIN opcionales.
+    // Las de la mercadería sí se sacan: traerían el árbol entero de compras.
     .replace(/LEFT JOIN sg_recepciones[\s\S]*?LEFT JOIN sg_proveedores p ON p\.id = o\.proveedor_id/, '')
-    .replace(/,\s*\n?\s*r\.numero_recepcion[\s\S]*?p\.razon_social AS proveedor_mercaderia/, '');
-  return db.prepare(sql).all(prov);
+    .replace(/,\s*\n?\s*r\.numero_recepcion, o\.trazabilidad AS partida,/, ',')
+    .replace(/,\s*\n?\s*p\.razon_social AS proveedor_mercaderia/, '')
+    // El ${...} de la lista de tipos lo resuelve el router; acá se pone la
+    // cantidad de signos que corresponde a los tipos de esta corrida.
+    .replace(/IN \(\$\{[^}]*\}\)/, 'IN (' + ts.map(() => '?').join(',') + ')');
+  return db.prepare(sql).all(prov, ...ts);
 }
 
 test('sólo lo valorizado, activo y de ese proveedor', () => {
@@ -161,10 +176,12 @@ test('la misma operación no puede entrar dos veces en la misma factura', () => 
 test('el asiento se arma con las MISMAS funciones que la factura de mercadería', () => {
   // Si fueran dos, un día darían distinto y habría dos maneras de asentar una
   // compra de servicio.
-  const b = trozo(SG, 'function asientoDeFacturaGasto(db, b, valorizado) {', SALTO + '}');
+  const b = trozo(SG, 'function asientoDeFacturaGasto(db, b, valorizado, clave) {', SALTO + '}');
   assert.match(b, /armarAsientoFactura\(lineas, \{/);
   assert.match(b, /lineasGestionFactura\(lineas, \{ dif_gestion: dif, dif_motivo: b\.dif_motivo \}\)/);
-  assert.match(b, /lineasModeloDe\(db, CLAVE_MODELO_GASTO\)/);
+  // La clave la pone el circuito; la de la descarga queda de respaldo porque era
+  // el único que se facturaba antes.
+  assert.match(b, /lineasModeloDe\(db, clave \|\| CLAVE_MODELO_GASTO\)/);
 });
 
 test('la diferencia va en el MISMO asiento, con ámbito gestión', () => {
@@ -176,7 +193,7 @@ test('la diferencia va en el MISMO asiento, con ámbito gestión', () => {
   // clavaba el renglón `base.lineas.concat(gestion` —la forma, no la conducta— y
   // por eso no dijo nada cuando esa misma línea dejaba las fiscales sin debe ni
   // haber. Ahora se mira lo que devuelve: una sola lista, con los dos ámbitos.
-  const b = trozo(SG, 'function asientoDeFacturaGasto(db, b, valorizado) {', SALTO + '}');
+  const b = trozo(SG, 'function asientoDeFacturaGasto(db, b, valorizado, clave) {', SALTO + '}');
   assert.match(b, /const todas = fiscales\.concat\(gestion/);
   assert.match(b, /lineas: todas/);
   assert.ok(!/ambito: 'gestion'/.test(b),
@@ -218,12 +235,27 @@ test('y si no hay asiento modelo, la factura entra igual y lo dice', () => {
   // Trabar la operación del día por una parametrización que hace el contador
   // sería peor: el papel llegó y hay que anotarlo.
   const b = trozo(SG, "router.post('/gastos-factura', facturaGastoUpload", SALTO + '});');
-  assert.match(b, /if \(!as\.sin_modelo\) \{/);
+  // Y tampoco si el asiento salió sin líneas: es el circuito que ya asentó al
+  // valorizar y encima no tuvo diferencia contra lo estimado. El comprobante
+  // existe igual y hay que anotarlo.
+  assert.match(b, /if \(!as\.sin_modelo && as\.lineas\.length\) \{/);
+  // Y el cartel nombra al circuito que falta, no siempre a las descargas: con el
+  // texto clavado, facturando un flete la pantalla mandaba a tocar el modelo de
+  // la descarga —que está y funciona— y rompía el circuito que andaba.
+  const pv = trozo(PANEL, 'function sgFgAsiento(){', SALTO + '}');
+  assert.match(pv, /escH\(cc\.que \|\| 'este circuito'\)/);
+  assert.match(pv, /'el asiento modelo de ' \+ \(cc\.que \|\| 'este circuito'\)/);
+  assert.ok(!/asiento modelo de descargas'/.test(pv), 'sigue nombrando siempre a la descarga');
   assert.match(b, /sin_asiento: !asientoId/);
   // La función entera, no una ventana de N caracteres: creció al mandar el PDF
   // en el mismo pedido y el cartel quedó afuera de la ventana, no del código.
+  // «Sin asiento» tiene DOS causas: que falte el modelo, o que las operaciones ya
+  // estuvieran contabilizadas. Decir siempre «falta el modelo» manda a cambiar
+  // una parametrización que está bien puesta.
   const p = trozo(PANEL, 'function sgFgGuardar(){', SALTO + '}' + SALTO);
-  assert.match(p, /sin asiento: falta el modelo/);
+  assert.match(p, /sin asiento: falta elegir el asiento modelo/);
+  assert.match(p, /ya estaba contabilizada al valorizarla/);
+  assert.match(p, /r\.data\.solo_comprobante/);
 });
 
 // ── 4 · EL ASIENTO SE VE ANTES DE GUARDAR ──────────────────────────────────
@@ -271,7 +303,9 @@ test('el botón está en Control Cooperativa y el modal al nivel de arriba', () 
   // arriba de todo. La ventana era de 800 caracteres y la corrió el bloque del
   // asiento modelo, que ahora entra primero.
   const barra = PANEL.slice(i, PANEL.indexOf('id="sgcc-desde"', i));
-  assert.match(barra, /onclick="sgFgAbrir\(\)">🧾 Ingresar factura/);
+  // Con el circuito explícito: el mismo modal sirve para los tres, y sin decirle
+  // cuál es se contabilizaría con el modelo de la descarga.
+  assert.match(barra, /onclick="sgFgAbrir\('descarga'\)">🧾 Ingresar factura/);
   // El modal NO puede vivir adentro de una .sec: ahí sólo se abriría desde esa
   // pantalla.
   const m = PANEL.indexOf('id="sg-fg-modal"');
@@ -294,7 +328,10 @@ test('la tabla del modal no pide barra de desplazamiento lateral', () => {
 test('sólo se ofrecen las cooperativas que tienen proveedor cargado', () => {
   // A la cooperativa se le factura a través de su proveedor: es el que tiene
   // CUIT y cuenta corriente. Ofrecer una sin proveedor es ofrecer un rebote.
-  const p = PANEL.slice(PANEL.indexOf('function sgFgAbrir(){'), PANEL.indexOf('function sgFgProv(){'));
+  // El armado del selector se mudó a sgFgProvs, que es el que sabe de qué
+  // circuito es la factura: a la descarga se le factura a la cooperativa y al
+  // flete, al fletero.
+  const p = PANEL.slice(PANEL.indexOf('function sgFgProvs(){'), PANEL.indexOf('function sgFgProv(){'));
   assert.match(p, /filter\(function\(c\)\{ return c\.proveedor_id; \}\)/);
   assert.match(p, /hay cooperativas sin proveedor/);
 });
@@ -362,4 +399,230 @@ test('el manual cuenta el circuito, con su versión', () => {
     'no aclara que la factura no vuelve a tocar la partida');
   assert.ok(plano.includes('es puro impuesto'), 'no explica por qué se compara contra el neto');
   assert.match(m, /<span class="ver">V1008<\/span>/);
+});
+
+// ══════════════════════════════════════════════════════════════════════════
+// LOS TRES CIRCUITOS SE FACTURAN CON EL MISMO MECANISMO
+// ══════════════════════════════════════════════════════════════════════════
+//
+// Pablo, 7/9/2026: «necesito el lugar donde contabilizar la factura, con la misma
+// lógica que en Control Cooperativa... seleccionando los valorizados».
+
+function circuitos() {
+  const src = trozo(SG, 'const CIRCUITOS_FACTURA = {', SALTO + '};');
+  return new Function("const CLAVE_MODELO_GASTO='asiento_modelo_descarga',"
+    + "CLAVE_MODELO_FLETE='asiento_modelo_flete',"
+    + "CLAVE_MODELO_FLETE_SALIDA='asiento_modelo_flete_salida';\n"
+    + src + '\nreturn CIRCUITOS_FACTURA;')();
+}
+
+test('los tres circuitos, cada uno con SU tipo de gasto y SU asiento modelo', () => {
+  const c = circuitos();
+  assert.deepEqual(Object.keys(c).sort(), ['descarga', 'flete_entrada', 'flete_salida']);
+  // La cooperativa hace DOS cosas —baja el camión que entra y carga el que
+  // sale— y las dos se le facturan juntas. Con un solo tipo, la carga de salida
+  // se quedaba sin circuito y dejaba de poder facturarse.
+  assert.deepEqual(c.descarga.tipos, ['descarga_ingreso', 'carga_salida']);
+  assert.equal(c.descarga.clave, 'asiento_modelo_descarga');
+  assert.deepEqual(c.flete_entrada.tipos, ['flete_entrada']);
+  assert.equal(c.flete_entrada.clave, 'asiento_modelo_flete');
+  assert.deepEqual(c.flete_salida.tipos, ['flete_salida']);
+  assert.equal(c.flete_salida.clave, 'asiento_modelo_flete_salida');
+  // Tres claves distintas: con una sola, los tres irían a la misma cuenta.
+  assert.equal(new Set(Object.values(c).map((x) => x.clave)).size, 3);
+});
+
+test('un circuito inventado no se contesta', () => {
+  // Viene del navegador y decide con qué modelo se contabiliza una factura: sin
+  // lista blanca, el que manda el pedido elige la cuenta contable.
+  const f = new Function('CIRCUITOS_FACTURA',
+    trozo(SG, 'function circuitoFactura(v) {', SALTO + '}') + '\nreturn circuitoFactura;')(circuitos());
+  assert.deepEqual(f('flete_salida').tipos, ['flete_salida']);
+  assert.equal(f('inventado'), null);
+  assert.equal(f('').circuito, 'descarga', 'sin circuito no cae en el de la descarga');
+  // La CLAVE del circuito viaja adentro: la columna `circuito` de la factura
+  // guarda eso y no el tipo de gasto, que desde ahora ya no lo identifica.
+  assert.equal(f('flete_salida').circuito, 'flete_salida');
+});
+
+test('la lista de facturables NO mezcla circuitos', () => {
+  // Era el agujero: filtraba sólo por proveedor. Un fletero dado de alta también
+  // como proveedor de una cooperativa metía sus fletes en la factura de la
+  // descarga, y se contabilizaban con el modelo de la descarga.
+  const db = base();
+  db.prepare("INSERT INTO sg_gastos_directos (id, tipo_gasto, despacho_id, proveedor_servicio_id, estado, monto, fecha_servicio, activo) VALUES (10,'flete_salida',1,4,'valorizado',7000,'2026-09-03',1)").run();
+  db.prepare("INSERT INTO sg_gastos_directos (id, tipo_gasto, recepcion_id, proveedor_servicio_id, estado, monto, fecha_servicio, activo) VALUES (11,'flete_entrada',1,4,'valorizado',3000,'2026-09-03',1)").run();
+
+  assert.deepEqual(facturables(db, 4, ['descarga_ingreso', 'carga_salida']).map((x) => x.id), [1, 2]);
+  assert.deepEqual(facturables(db, 4, ['flete_salida']).map((x) => x.id), [10]);
+  assert.deepEqual(facturables(db, 4, ['flete_entrada']).map((x) => x.id), [11]);
+  db.close();
+});
+
+test('el flete de salida trae su REMITO y su cliente, que es de lo que cuelga', () => {
+  // No cuelga de una partida: sin esto la fila salía sin ninguna referencia y no
+  // se podía saber qué se está facturando.
+  const db = base();
+  db.prepare("INSERT INTO sg_clientes (id, razon_social) VALUES (3,'Supermercado X')").run();
+  db.prepare("INSERT INTO sg_despachos (id, numero, cliente_id) VALUES (1,'R-0001',3)").run();
+  db.prepare("INSERT INTO sg_gastos_directos (id, tipo_gasto, despacho_id, proveedor_servicio_id, estado, monto, fecha_servicio, activo) VALUES (10,'flete_salida',1,4,'valorizado',7000,'2026-09-03',1)").run();
+  const f = facturables(db, 4, ['flete_salida'])[0];
+  assert.equal(f.numero_remito, 'R-0001');
+  assert.equal(f.cliente, 'Supermercado X');
+  db.close();
+});
+
+test('lo que ya está contabilizado no se vuelve a asentar NI se corrige a mano', () => {
+  // Quedan fletes de entrada valorizados con la versión anterior, que armaban su
+  // asiento al valorizar. Para ésos la base fiscal que YA ESTÁ en el libro es lo
+  // VALORIZADO. Las líneas de gestión, en cambio, están pensadas para llevar el
+  // asiento DESDE lo facturado HACIA lo acordado: aplicarlas sobre una base que
+  // ya es lo acordado corrige al revés.
+  //
+  // Así que la factura de esas operaciones no asienta nada — sólo guarda el
+  // comprobante — y si no coincide con lo valorizado se frena y se pide arreglar
+  // la valorización. Inventar el ajuste habría sido peor que no hacerlo.
+  const b = trozo(SG, "router.post('/gastos-factura', facturaGastoUpload", SALTO + '});');
+  assert.match(b, /const soloComprobante = conAsiento === elegidos\.length;/);
+  assert.match(b, /if \(soloComprobante && dif !== 0\)/);
+  assert.match(b, /Corregí la /);
+  assert.match(b, /valorización con el importe de la factura/);
+  assert.match(b, /soloComprobante\s*\n?\s*\? \{ sin_modelo: false, lineas: \[\], totales: \{\} \}/);
+  // Y ya no existe el asiento «sólo de gestión»: era el que corregía al revés.
+  assert.ok(!/soloGestion/.test(SG), 'quedó el camino que inventaba el ajuste');
+});
+
+test('un asiento ANULADO no cuenta como contabilizado', () => {
+  // Con `asiento_id IS NOT NULL` a secas, un asiento anulado a mano desde
+  // Asientos Contables seguía contando: la factura no lo volvía a poner y el
+  // gasto se caía del libro sin que nadie se enterara.
+  const b = trozo(SG, "router.get('/gastos-facturables'", SALTO + '});');
+  assert.match(b, /LEFT JOIN sg_asientos a\s+ON a\.id = g\.asiento_id/);
+  assert.match(b, /CASE WHEN a\.id IS NOT NULL AND COALESCE\(a\.anulado,0\)=0/);
+  const y = trozo(SG, 'function soloYaAsentados(db, ids) {', SALTO + '}');
+  assert.match(y, /COALESCE\(a\.anulado,0\)=0/);
+
+  // Y se corre: un gasto con asiento anulado vuelve a ofrecerse para facturar.
+  const db = base();
+  db.prepare('INSERT INTO sg_asientos (id, anulado) VALUES (7,1)').run();
+  db.prepare('UPDATE sg_gastos_directos SET asiento_id=7 WHERE id=1').run();
+  const f = facturables(db, 4, ['descarga_ingreso', 'carga_salida']).find((x) => x.id === 1);
+  assert.equal(f.asiento_id, null, 'un asiento anulado sigue contando como contabilizado');
+  db.close();
+});
+
+test('y una factura se puede ANULAR: si no, la operación queda trabada para siempre', () => {
+  // El filtro que impide facturar dos veces sólo se suelta con activo=0, y no
+  // había ninguna ruta que lo escribiera: una factura mal cargada dejaba sus
+  // operaciones bloqueadas y su asiento en el libro, sin vuelta atrás.
+  const a = trozo(SG, "router.post('/gastos-factura/:id/anular'", SALTO + '});');
+  assert.match(a, /Escribí por qué se anula/);
+  assert.match(a, /UPDATE sg_asientos SET anulado=1/);
+  assert.match(a, /UPDATE sg_facturas_gasto SET activo=0/);
+  assert.match(a, /anulada_en=datetime\('now','localtime'\), anulada_por=\?/);
+  // Anular la factura y dejar el asiento vivo la deja fuera del libro por el
+  // otro lado, así que van juntas.
+  assert.match(a, /db\.transaction\(\(\) => \{/);
+  // Y es su PROPIA dirección: exigirNivel reconoce la anulación por la URL.
+  assert.match(SG, /router\.post\('\/gastos-factura\/:id\/anular', requireAuth,/);
+});
+
+test('mezclar contabilizadas con no contabilizadas se rechaza, no se adivina', () => {
+  // En una sola factura no hay asiento que sea correcto para las dos: si pone lo
+  // fiscal, duplica lo que ya estaba; si no lo pone, deja sin asentar lo que
+  // faltaba.
+  const b = trozo(SG, "router.post('/gastos-factura', facturaGastoUpload", SALTO + '});');
+  assert.match(b, /if \(conAsiento && conAsiento !== elegidos\.length\)/);
+  assert.match(b, /Hacé una factura para cada grupo/);
+  // Y la pantalla lo dice antes de apretar guardar.
+  // El freno vive en sgFgFreno, que es lo que mira el botón: un cartel que no
+  // deshabilita nada se lee como un dato más y el operador aprieta igual.
+  const fr = trozo(PANEL, 'function sgFgFreno(){', SALTO + '}');
+  assert.match(fr, /Estás mezclando operaciones ya contabilizadas/);
+  assert.match(fr, /Corregí la valorización/);
+  const bt = trozo(PANEL, 'function sgFgBoton(){', SALTO + '}');
+  assert.match(bt, /b\.disabled = !!freno;/);
+  // Y el cartel cambia de color: azul cuando informa, rojo cuando frena.
+  const y = trozo(PANEL, 'function sgFgYaAsentado(){', SALTO + '}');
+  assert.match(y, /var malo = !!freno;/);
+  assert.match(y, /ya están contabilizadas/);
+});
+
+test('la suma de lo valorizado también mira el circuito', () => {
+  // Sumar una descarga adentro de una factura de flete daría una diferencia de
+  // gestión inventada — y esa diferencia se graba.
+  const b = trozo(SG, 'function sumaValorizada(db, ids, prov, tipos) {', SALTO + '}');
+  assert.match(b, /AND tipo_gasto IN \(\$\{t\}\)/);
+  assert.match(b, /\.get\(\.\.\.ids, prov, \.\.\.tipos\)/);
+});
+
+test('la factura guarda de qué circuito es', () => {
+  // Se puede derivar de los items, pero derivarlo en cada consulta es una cuenta
+  // más que se puede hacer distinta en cada lugar.
+  const b = trozo(SG, "router.post('/gastos-factura', facturaGastoUpload", SALTO + '});');
+  assert.match(b, /leido_por_ia, circuito, creado_por\)/);
+  // La CLAVE del circuito, no el tipo de gasto: la descarga tiene dos tipos.
+  assert.match(b, /c\.circuito, uid\(req\)\)\.lastInsertRowid/);
+  assert.match(DBSG, /\['circuito',\s+'TEXT'\]/);
+  // Y el asiento dice de qué circuito es: «Factura de servicio 0001-12» no
+  // distingue una descarga de un flete cuando se lo mira desde el mayor.
+  assert.match(b, /descripcion: 'Factura de ' \+ c\.label \+ ' ' \+ numero/);
+});
+
+test('el mismo modal para los tres, con el circuito explícito', () => {
+  // Sin decirle cuál es, se contabilizaría todo con el modelo de la descarga.
+  for (const [pane, k] of [
+    ['sggd-pane-coop', 'descarga'],
+    ['sggd-pane-flete_entrada', 'flete_entrada'],
+    ['sggd-pane-flete_salida', 'flete_salida'],
+  ]) {
+    const i = PANEL.indexOf('id="' + pane + '"');
+    assert.ok(i > 0, 'no existe ' + pane);
+    assert.match(PANEL.slice(i, i + 6000),
+      new RegExp("onclick=\"sgFgAbrir\\('" + k + "'\\)\">🧾 Ingresar factura"),
+      pane + ': no tiene el botón, o no le pasa el circuito');
+  }
+  assert.equal((PANEL.match(/id="sg-fg-modal"/g) || []).length, 1, 'hay más de un modal de factura');
+  // Y las tres llamadas al servidor lo llevan.
+  const a = trozo(PANEL, 'function sgFgProv(){', SALTO + '}');
+  assert.match(a, /&circuito=' \+ encodeURIComponent\(SGFG\.circuito\)/);
+  const s2 = trozo(PANEL, 'function sgFgAsiento(){', SALTO + '}');
+  assert.match(s2, /circuito: SGFG\.circuito,/);
+  const g = trozo(PANEL, 'function sgFgGuardar(){', SALTO + '}' + SALTO);
+  assert.match(g, /fd\.append\('circuito', SGFG\.circuito\)/);
+});
+
+test('a cada circuito se le factura a quien corresponde', () => {
+  // A la descarga, a la cooperativa —el catálogo ya trae atado su proveedor—; al
+  // flete, al fletero del padrón. Mezclarlos ofrecería cooperativas para
+  // facturar un flete.
+  const p = trozo(PANEL, 'function sgFgProvs(){', SALTO + '}');
+  assert.match(p, /c\.provs === 'fleteros'/);
+  assert.match(p, /api\('\/api\/sg\/proveedores-servicio'\)/);
+  assert.match(p, /SG_COOPS/);
+});
+
+test('y la anulación es alcanzable: la lista de lo ya facturado está en el modal', () => {
+  // Un endpoint sin pantalla es un endpoint que no existe. Va en el mismo modal
+  // porque es donde alguien se da cuenta de que cargó una mal: la operación que
+  // busca no aparece arriba justamente porque ya está en una de éstas.
+  const i = PANEL.indexOf('id="sg-fg-yacargadas"');
+  assert.ok(i > 0, 'no está la lista de facturas ya cargadas');
+  const b = PANEL.slice(i - 700, i + 1200);
+  assert.match(b, /YA FACTURADO A ESTE PROVEEDOR/);
+  assert.match(b, /overflow-x:hidden !important/);
+  assert.match(b, /table-layout:fixed/);
+
+  const f = trozo(PANEL, 'function sgFgYaCargadas(){', SALTO + '}');
+  assert.match(f, /api\('\/api\/sg\/gastos-factura\?proveedor_servicio_id='/);
+  // Sólo las de ESTE circuito: las de otro no se anulan desde acá.
+  assert.match(f, /f\.circuito === SGFG\.circuito/);
+  // El botón se ofrece por NIVEL, con la misma regla que usa el servidor.
+  assert.match(f, /lnbPuedeAnular\(\['sg-gastos-directos', 'sg-control-coop'\]\)/);
+
+  const a = trozo(PANEL, 'function sgFgAnular(id, numero){', SALTO + '}');
+  assert.match(a, /¿Por qué se anula la factura/);
+  assert.match(a, /'\/anular', 'POST', \{ motivo: motivo \}/);
+  // Y se recarga lo de arriba: las operaciones que cubría vuelven a la lista.
+  assert.match(a, /sgFgProv\(\);/);
 });
