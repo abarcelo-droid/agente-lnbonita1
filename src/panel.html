@@ -7408,6 +7408,26 @@ input[type=number]{-moz-appearance:textfield;appearance:textfield}
 
       <div class="fl ff"><label>Observaciones</label><input id="sg-fg-obs" maxlength="200"></div>
 
+      <!-- LO QUE YA SE LE FACTURÓ A ESTE PROVEEDOR ────────────────────────
+           Está acá porque es donde alguien se da cuenta de que cargó una mal: la
+           operación que busca no aparece en la lista de arriba justamente porque
+           ya está en una de éstas. Sin la anulación, esa factura quedaba viva
+           para siempre y sus operaciones bloqueadas. -->
+      <div class="ff" id="sg-fg-yacargadas" style="display:none;margin-top:4px">
+        <label style="font-size:11px;letter-spacing:.06em;color:var(--mut)">YA FACTURADO A ESTE PROVEEDOR</label>
+        <div class="ab-table-wrap" style="overflow-x:hidden !important;max-height:150px;overflow-y:auto">
+          <table class="pa-tbl" style="table-layout:fixed;width:100%">
+            <thead><tr>
+              <th style="width:22%">Comprobante</th><th style="width:16%">Fecha</th>
+              <th style="width:14%;text-align:right">Operaciones</th>
+              <th style="width:24%;text-align:right">Total</th>
+              <th style="width:24%"></th>
+            </tr></thead>
+            <tbody id="sg-fg-yacargadas-tb"></tbody>
+          </table>
+        </div>
+      </div>
+
       <div class="ff" style="text-align:right;margin-top:6px">
         <button class="btn bo" onclick="closeMB('sg-fg-modal')">Cancelar</button>
         <button class="btn bb" id="sg-fg-btn" onclick="sgFgGuardar()">Ingresar la factura</button>
@@ -21764,6 +21784,16 @@ SG_MANUAL.gastos = { titulo: 'Gastos Directos', html:
   + '<li><b>🔁 Repasos</b> — el trabajo de reacondicionar mercadería que llegó mal.</li>'
   + '</ul>'
 
+  + '<h3>Anular una factura de servicio <span class="ver">V1015</span></h3>'
+  + '<p>Adentro de <b>Ingresar factura</b>, después de elegir el proveedor, está la lista '
+  + 'de <b>lo ya facturado</b> a esa gente, con su botón <b>Anular</b>. Se pide el motivo, '
+  + 'queda registrado, se <b>anula también el asiento</b> y las operaciones que cubría '
+  + '<b>vuelven a estar disponibles</b> para facturar.</p>'
+  + '<div class="ojo">Está ahí porque es donde uno se da cuenta: la operación que buscás '
+  + 'no aparece en la lista de arriba justamente porque <b>ya está en una de esas '
+  + 'facturas</b>. Sin la anulación, una factura mal cargada dejaba sus operaciones '
+  + 'trabadas para siempre.</div>'
+
   + '<h3>⚖️ Valorizar un flete de entrada es poner el precio <span class="ver">V1015</span></h3>'
   + '<p>El modal pedía además el <b>número de comprobante</b>, la <b>alícuota de IVA</b> y el '
   + '<b>PDF de la factura</b>, y armaba el asiento: cargaba la factura con el nombre de '
@@ -24362,6 +24392,12 @@ function sgFgAbrir(circuito){
   eid('sg-fg-pdf-nom').textContent = 'Ningún archivo';
   eid('sg-fg-leer').style.display = 'none';
   eid('sg-fg-aviso-lectura').style.display = 'none';
+  // Y el cartel de «ya están contabilizadas»: no se limpiaba, así que sobrevivía
+  // al cambio de circuito y hablaba de operaciones de la factura anterior.
+  eid('sg-fg-yaasentado').style.display = 'none';
+  eid('sg-fg-yacargadas').style.display = 'none';
+  eid('sg-fg-yacargadas-tb').innerHTML = '';
+  eid('sg-fg-btn').disabled = false;
   eid('sg-fg-numero').value = ''; eid('sg-fg-total').value = '';
   eid('sg-fg-alic').value = '21'; eid('sg-fg-obs').value = '';
   eid('sg-fg-fecha').value = new Date().toISOString().slice(0,10);
@@ -24407,6 +24443,7 @@ function sgFgProv(){
   var prov = eid('sg-fg-prov').value;
   SGFG.sel = {}; SGFG.filas = [];
   eid('sg-fg-todos').checked = false;
+  sgFgYaCargadas();
   if (!prov){ eid('sg-fg-items').innerHTML = '<tr><td colspan="5" class="emp">Elegí el proveedor.</td></tr>'; sgFgCalc(); return; }
   eid('sg-fg-items').innerHTML = '<tr><td colspan="5" class="emp">Cargando…</td></tr>';
   api('/api/sg/gastos-facturables?proveedor_servicio_id=' + encodeURIComponent(prov)
@@ -24416,6 +24453,59 @@ function sgFgProv(){
     // valorizar, así que su factura no vuelve a poner la parte fiscal.
     SGFG.yaAsentados = (r && r.ok) ? (r.ya_asentados || 0) : 0;
     sgFgPintar();
+  });
+}
+
+// ── LO QUE YA SE LE FACTURÓ, Y CÓMO DESHACERLO ───────────────────────────
+//
+// Una factura mal cargada —número equivocado, importe equivocado, cargada contra
+// el proveedor que no era— dejaba sus operaciones tomadas para siempre: el filtro
+// que impide facturar dos veces sólo se suelta dando de baja la factura, y no
+// había forma de darla de baja. Se lista acá, que es donde alguien se da cuenta:
+// la operación que busca no aparece arriba justamente porque ya está en una de
+// éstas.
+function sgFgYaCargadas(){
+  var caja = eid('sg-fg-yacargadas'), tb = eid('sg-fg-yacargadas-tb');
+  if (!caja || !tb) return;
+  var prov = eid('sg-fg-prov').value;
+  if (!prov){ caja.style.display = 'none'; tb.innerHTML = ''; return; }
+  api('/api/sg/gastos-factura?proveedor_servicio_id=' + encodeURIComponent(prov)).then(function(r){
+    var fs = (r && r.ok) ? (r.data || []) : [];
+    // Sólo las de ESTE circuito: las de otro no se anulan desde acá y mostrarlas
+    // invita a tocar lo que no se está mirando.
+    fs = fs.filter(function(f){ return !f.circuito || f.circuito === SGFG.circuito; });
+    if (!fs.length){ caja.style.display = 'none'; tb.innerHTML = ''; return; }
+    caja.style.display = '';
+    var cel = 'overflow:hidden;text-overflow:ellipsis;white-space:nowrap';
+    tb.innerHTML = fs.map(function(f){
+      return '<tr>'
+        + '<td style="' + cel + '"><code>' + escH(f.numero || '—') + '</code></td>'
+        + '<td style="' + cel + '">' + esc(f.fecha_emision || '—') + '</td>'
+        + '<td style="text-align:right">' + nr(f.operaciones || 0) + '</td>'
+        + '<td style="text-align:right">' + sgMoney(f.total) + '</td>'
+        + '<td style="text-align:right">'
+          // El botón se ofrece por NIVEL, con la misma regla que usa el servidor:
+          // ofrecerlo a quien va a recibir un 403 hace creer que rompió algo.
+          + (lnbPuedeAnular(['sg-gastos-directos', 'sg-control-coop'])
+              ? '<button class="btn bd bs" onclick="sgFgAnular(' + f.id + ',\''
+                + esc(f.numero || '') + '\')">Anular</button>' : '')
+        + '</td></tr>';
+    }).join('');
+  });
+}
+
+function sgFgAnular(id, numero){
+  var motivo = prompt('¿Por qué se anula la factura ' + (numero || '') + '?\n\n'
+    + 'Queda registrado. Se anula también su asiento y las operaciones que cubría '
+    + 'vuelven a estar disponibles para facturar.');
+  if (motivo == null) return;
+  if (!String(motivo).trim()){ toast('Escribí por qué se anula', 'er'); return; }
+  api('/api/sg/gastos-factura/' + id + '/anular', 'POST', { motivo: motivo }).then(function(r){
+    if (!r || !r.ok){ toast((r && r.error) || 'No se pudo anular', 'er'); return; }
+    toast(r.data.asiento_anulado ? 'Factura y asiento anulados' : 'Factura anulada', 'ok');
+    // Y se recarga lo de arriba: las operaciones que cubría vuelven a la lista.
+    sgFgProv();
+    sgFgYaCargadas();
   });
 }
 
@@ -24489,18 +24579,59 @@ function sgFgCalc(){
 // Volver a poner la parte fiscal de algo que ya está en el libro sería contar el
 // gasto dos veces, así que la factura sólo agrega la diferencia contra lo
 // estimado. Se dice ANTES de guardar, o el asiento que se ve no se entiende.
+// ¿Se puede guardar? Devuelve el motivo por el que no, o ''. El servidor vuelve a
+// mirarlo —es el que decide— pero mandar para recibir un 400 hace creer que se
+// rompió algo.
+function sgFgFreno(){
+  var elegidos = sgFgElegidos();
+  var conAsiento = elegidos.filter(function(f){ return f.asiento_id; }).length;
+  if (!elegidos.length || !conAsiento) return '';
+  if (conAsiento !== elegidos.length) {
+    return 'Estás mezclando operaciones ya contabilizadas con otras que no. Hacé una '
+         + 'factura para cada grupo: en una sola no hay asiento que sea correcto para las dos.';
+  }
+  // Ya contabilizadas al valorizarlas: la factura sólo guarda el comprobante. Si
+  // no coincide con lo valorizado no hay ajuste posible —el asiento que está en
+  // el libro es POR lo valorizado— y hay que corregir la valorización.
+  var total = Number(eid('sg-fg-total').value) || 0;
+  var alic = Number(eid('sg-fg-alic').value); if (!(alic >= 0)) alic = 21;
+  var neto = total > 0 ? Math.round((total / (1 + alic/100)) * 100) / 100 : 0;
+  if (total > 0 && Math.abs(sgFgValorizado() - neto) > 0.009) {
+    return 'Estas operaciones ya se contabilizaron al valorizarlas y la factura no coincide '
+         + 'con lo valorizado. Corregí la valorización con el importe de la factura: el '
+         + 'asiento que está en el libro es por lo valorizado.';
+  }
+  return '';
+}
+
 function sgFgYaAsentado(){
   var caja = eid('sg-fg-yaasentado'); if (!caja) return;
   var elegidos = sgFgElegidos();
   var conAsiento = elegidos.filter(function(f){ return f.asiento_id; }).length;
-  if (!elegidos.length || !conAsiento){ caja.style.display = 'none'; return; }
+  if (!elegidos.length || !conAsiento){ caja.style.display = 'none'; sgFgBoton(); return; }
+  var freno = sgFgFreno();
   caja.style.display = '';
-  caja.innerHTML = (conAsiento === elegidos.length)
-    ? '<b>Estas operaciones ya están contabilizadas</b> (se asentaron al valorizarlas). '
-      + 'La factura no las vuelve a asentar: queda el comprobante, y si hay diferencia '
-      + 'contra lo valorizado, esa diferencia va a gestión.'
-    : '<b>Estás mezclando operaciones ya contabilizadas con otras que no.</b> Hacé una '
-      + 'factura para cada grupo: en una sola no hay asiento que sea correcto para las dos.';
+  // AZUL cuando es información y ROJO cuando frena. Con el mismo color, el
+  // cartel que impide guardar se leía como un dato más y el operador apretaba
+  // igual para comerse un error del servidor.
+  var malo = !!freno;
+  caja.style.borderColor = malo ? '#fca5a5' : '#93c5fd';
+  caja.style.background = malo ? 'rgba(252,165,165,.16)' : 'rgba(147,197,253,.14)';
+  caja.style.color = malo ? '#991b1b' : '#1e40af';
+  caja.innerHTML = malo
+    ? ('<b>No se puede guardar así.</b> ' + escH(freno))
+    : ('<b>Estas operaciones ya están contabilizadas</b> (se asentaron al valorizarlas con la '
+       + 'versión anterior). Esta factura <b>no genera asiento</b>: queda el comprobante.');
+  sgFgBoton();
+}
+
+// El botón dice si se puede. Deshabilitarlo es la forma de que el freno se note
+// antes de apretar, no después.
+function sgFgBoton(){
+  var b = eid('sg-fg-btn'); if (!b) return;
+  var freno = sgFgFreno();
+  b.disabled = !!freno;
+  b.title = freno || '';
 }
 
 function sgFgAsiento(){
@@ -24516,12 +24647,23 @@ function sgFgAsiento(){
   }).then(function(r){
     if (!r || !r.ok){ caja.innerHTML = ''; SGFG.asiento = null; return; }
     SGFG.asiento = r.data;
-    caja.innerHTML = r.data.sin_modelo
+    var cc = SG_MODELOS[SGFG.circuito] || {};
+    // EL TEXTO NOMBRA AL CIRCUITO QUE FALTA, NO SIEMPRE A LAS DESCARGAS. Con el
+    // texto clavado, facturando un flete sin su modelo la pantalla mandaba al
+    // administrador a tocar el de la descarga —que está y funciona—: rompía el
+    // circuito que andaba y no arreglaba el que fallaba.
+    caja.innerHTML = r.data.solo_comprobante
+      ? ('<div style="border:1.5px solid #93c5fd;background:rgba(147,197,253,.14);border-radius:8px;'
+         + 'padding:10px 12px;font-size:12.5px;color:#1e40af"><b>Esta factura no genera asiento.</b> '
+         + 'Las operaciones elegidas ya estaban contabilizadas: queda el comprobante.</div>')
+      : r.data.sin_modelo
       ? ('<div style="border:1.5px solid #fbbf24;background:#fffbeb;border-radius:8px;padding:10px 12px;'
-         + 'font-size:12.5px;color:#92400e"><b>Todavía no hay asiento modelo para las descargas.</b> '
+         + 'font-size:12.5px;color:#92400e"><b>Todavía no hay asiento modelo para '
+         + escH(cc.que || 'este circuito') + '.</b> '
          + 'La factura se va a guardar igual y va a quedar sin contabilizar: un administrador tiene '
-         + 'que elegir el modelo.</div>')
-      : sgAsientoCuadro(r.data, 'Así se va a contabilizar', 'el asiento modelo de descargas');
+         + 'que elegir el modelo con <b>⚙️ Asiento modelo</b>.</div>')
+      : sgAsientoCuadro(r.data, 'Así se va a contabilizar',
+          'el asiento modelo de ' + (cc.que || 'este circuito'));
   });
 }
 
@@ -24651,9 +24793,12 @@ function sgFgGuardar(){
     .then(function(r){
     b.disabled = false;
     if (!r || !r.ok){ toast((r && r.error) || 'No se pudo guardar', 'er'); return; }
-    toast(r.data.sin_asiento
-      ? 'Factura ingresada — sin asiento: falta el modelo'
-      : 'Factura ingresada y contabilizada', 'ok');
+    // «Sin asiento» tiene DOS causas y decir siempre «falta el modelo» manda a
+    // cambiar una parametrización que está bien puesta.
+    toast(!r.data.sin_asiento ? 'Factura ingresada y contabilizada'
+      : (r.data.solo_comprobante
+          ? 'Factura ingresada — ya estaba contabilizada al valorizarla'
+          : 'Factura ingresada — sin asiento: falta elegir el asiento modelo'), 'ok');
     closeMB('sg-fg-modal');
     sgCcoopLoad();
   });

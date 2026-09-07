@@ -11172,19 +11172,31 @@ router.put('/gastos-factura/modelo', requireAdmin, (req, res) => {
 // cooperativa, sus fletes aparecían en la factura de la descarga y se
 // contabilizaban con el modelo de la descarga. Con un solo circuito en pantalla
 // no se notaba; con tres es una factura mezclada.
+//
+// LOS TIPOS SON UNA LISTA porque la cooperativa hace DOS cosas: baja el camión
+// que entra (descarga_ingreso) y carga el que sale (carga_salida). Las dos se le
+// facturan juntas y la solapa de Control Cooperativa ya las lista juntas
+// (?tipo=carga_salida,descarga_ingreso). Con un solo tipo, la carga de salida
+// quedaba sin ningún circuito y dejaba de poder facturarse — antes entraba porque
+// la lista no filtraba por tipo, que era el otro problema.
 const CIRCUITOS_FACTURA = {
-  descarga:      { tipo: 'descarga_ingreso', clave: CLAVE_MODELO_GASTO,
+  descarga:      { tipos: ['descarga_ingreso', 'carga_salida'], clave: CLAVE_MODELO_GASTO,
                    label: 'descarga', debiendo: 'lo que se le queda debiendo a la cooperativa' },
-  flete_entrada: { tipo: 'flete_entrada',    clave: CLAVE_MODELO_FLETE,
+  flete_entrada: { tipos: ['flete_entrada'],  clave: CLAVE_MODELO_FLETE,
                    label: 'flete de entrada', debiendo: 'lo que se le debe al fletero' },
-  flete_salida:  { tipo: 'flete_salida',     clave: CLAVE_MODELO_FLETE_SALIDA,
+  flete_salida:  { tipos: ['flete_salida'],   clave: CLAVE_MODELO_FLETE_SALIDA,
                    label: 'flete de salida', debiendo: 'lo que se le debe al fletero' },
 };
 
 // Sin circuito válido no se contesta: la lista blanca es lo que impide que el
 // navegador elija con qué modelo se contabiliza una factura.
 function circuitoFactura(v) {
-  return CIRCUITOS_FACTURA[String(v || 'descarga')] || null;
+  const k = String(v || 'descarga');
+  const c = CIRCUITOS_FACTURA[k];
+  // La clave viaja adentro: la columna `circuito` de la factura guarda ESTO y no
+  // el tipo de gasto. Desde que la descarga tiene dos tipos, el tipo ya no
+  // identifica al circuito.
+  return c ? Object.assign({ circuito: k }, c) : null;
 }
 
 // ── QUÉ SE PUEDE FACTURAR ─────────────────────────────────────────────────
@@ -11201,8 +11213,13 @@ router.get('/gastos-facturables', requireAuth, (req, res) => {
     if (!c) return res.status(400).json({ ok: false, error: 'Ese circuito no existe' });
     const filas = db.prepare(`
       SELECT g.id, g.tipo_gasto, g.monto, g.fecha_servicio, g.fecha_valorizacion,
-             g.unidad, g.cantidad, g.recepcion_id, g.despacho_id, g.asiento_id,
-             g.cuenta_ref,
+             g.unidad, g.cantidad, g.recepcion_id, g.despacho_id, g.cuenta_ref,
+             -- EL ASIENTO, SÓLO SI SIGUE VIVO. Con g.asiento_id a secas, un
+             -- asiento anulado a mano desde Asientos Contables seguía contando
+             -- como «ya contabilizado» y la factura no lo volvía a poner: el
+             -- gasto se caía del libro y nadie se enteraba.
+             CASE WHEN a.id IS NOT NULL AND COALESCE(a.anulado,0)=0
+                  THEN g.asiento_id ELSE NULL END AS asiento_id,
              r.numero_recepcion, o.trazabilidad AS partida,
              -- El flete de SALIDA no cuelga de una recepción sino de un remito:
              -- sin esto la fila salía sin ninguna referencia y no se podía saber
@@ -11215,17 +11232,18 @@ router.get('/gastos-facturables', requireAuth, (req, res) => {
         LEFT JOIN sg_proveedores p ON p.id = o.proveedor_id
         LEFT JOIN sg_despachos d   ON d.id = g.despacho_id
         LEFT JOIN sg_clientes cli  ON cli.id = d.cliente_id
+        LEFT JOIN sg_asientos a    ON a.id = g.asiento_id
        WHERE g.proveedor_servicio_id = ?
          -- POR CIRCUITO. Sin esto, un fletero que además es el proveedor de una
          -- cooperativa metía sus fletes en la factura de la descarga, y se
          -- contabilizaban con el modelo equivocado.
-         AND g.tipo_gasto = ?
+         AND g.tipo_gasto IN (${c.tipos.map(() => '?').join(',')})
          AND g.estado = 'valorizado' AND g.activo = 1
          AND NOT EXISTS (SELECT 1 FROM sg_factura_gasto_items fi
                            JOIN sg_facturas_gasto f ON f.id = fi.factura_id AND f.activo = 1
                           WHERE fi.gasto_id = g.id)
-       ORDER BY g.fecha_servicio, g.id`).all(prov, c.tipo);
-    res.json({ ok: true, data: filas, circuito: c.tipo,
+       ORDER BY g.fecha_servicio, g.id`).all(prov, ...c.tipos);
+    res.json({ ok: true, data: filas, circuito: c.tipos,
       // Cuántas de estas ya tienen asiento. El flete de ENTRADA asienta al
       // valorizar, así que su factura NO tiene que volver a asentar lo fiscal:
       // sería contar el gasto dos veces. La pantalla lo dice antes de guardar.
@@ -11257,11 +11275,7 @@ function difDeFacturaGasto(valorizado, neto) {
 // `clave` es la del circuito: descarga, flete de entrada o flete de salida. Antes
 // estaba clavada en la de la descarga, que era la única que se facturaba.
 //
-// `soloGestion` es para el circuito que YA asentó al valorizar (el flete de
-// entrada): la parte fiscal ya está en el libro y volver a ponerla sería contar
-// el gasto dos veces. Lo que la factura sí agrega es la diferencia contra lo
-// estimado, que hasta ahora se mostraba en pantalla y se perdía.
-function asientoDeFacturaGasto(db, b, valorizado, clave, soloGestion) {
+function asientoDeFacturaGasto(db, b, valorizado, clave) {
   const lineas = lineasModeloDe(db, clave || CLAVE_MODELO_GASTO);
   if (!lineas || !lineas.length) {
     return { sin_modelo: true, lineas: [], debe: 0, haber: 0, diferencia: 0, balancea: false };
@@ -11289,7 +11303,7 @@ function asientoDeFacturaGasto(db, b, valorizado, clave, soloGestion) {
   // que decía que sí. Recién frenaba crearAsiento con «la parte fiscal del
   // asiento está en cero», y del otro lado la pantalla mostraba el asiento
   // entero con guiones. Se traduce ACÁ, una vez, y no en cada llamador.
-  const fiscales = soloGestion ? [] : base.lineas.map((l) => Object.assign({}, l, {
+  const fiscales = base.lineas.map((l) => Object.assign({}, l, {
     debe:  l.lado === 'debe'  ? l.monto : 0,
     haber: l.lado === 'haber' ? l.monto : 0,
     ambito: 'fiscal',
@@ -11312,7 +11326,6 @@ function asientoDeFacturaGasto(db, b, valorizado, clave, soloGestion) {
   for (const t of Object.values(totales)) t.balancea = Math.abs(t.debe - t.haber) < 0.01;
 
   return Object.assign(base, { montos: m, dif_gestion: dif, lineas: todas, totales,
-    solo_gestion: !!soloGestion,
     balancea: Object.values(totales).every((t) => t.balancea) });
 }
 
@@ -11323,26 +11336,37 @@ router.post('/gastos-factura/asiento-preview', requireAuth, express.json(), (req
     const c = circuitoFactura(b.circuito);
     if (!c) return res.status(400).json({ ok: false, error: 'Ese circuito no existe' });
     const ids = Array.isArray(b.gastos) ? b.gastos.map(Number).filter(Boolean) : [];
-    const valorizado = sumaValorizada(db, ids, Number(b.proveedor_servicio_id), c.tipo);
-    // Si TODAS las operaciones elegidas ya tienen asiento —el flete de entrada
-    // asienta al valorizar— la factura no vuelve a poner la parte fiscal.
-    const yaAsentados = ids.length ? soloYaAsentados(db, ids) : false;
+    const valorizado = sumaValorizada(db, ids, Number(b.proveedor_servicio_id), c.tipos);
+    // Si TODAS las operaciones elegidas ya están en el libro —fletes de entrada
+    // valorizados con la versión anterior— esta factura NO asienta: sólo guarda el
+    // comprobante. El preview tiene que decir exactamente eso, o muestra un
+    // asiento que después no se graba.
+    if (ids.length && soloYaAsentados(db, ids)) {
+      const m = montosDeFacturaGasto(b);
+      return res.json({ ok: true, data: { solo_comprobante: true, lineas: [], totales: {},
+        valorizado, montos: m, dif_gestion: difDeFacturaGasto(valorizado, m.neto) } });
+    }
     res.json({ ok: true, data: Object.assign(
-      asientoDeFacturaGasto(db, b, valorizado, c.clave, yaAsentados), { valorizado }) });
+      asientoDeFacturaGasto(db, b, valorizado, c.clave), { valorizado }) });
   } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
 });
 
-// ¿Ya están todas en el libro? El flete de entrada arma su asiento al valorizar;
-// la descarga y el flete de salida, recién con la factura. Volver a poner la
-// parte fiscal de algo que ya está sería contar el gasto dos veces.
+// ¿Ya están todas en el libro? Hasta la V1015 el flete de entrada armaba su
+// asiento al VALORIZAR; desde ahí, ninguno de los tres circuitos asienta al
+// valorizar y el asiento sale siempre de la factura. Pero quedan fletes cargados
+// con la versión anterior, y ésos ya están contabilizados.
 //
-// Se pregunta por TODAS: si algunas ya asentaron y otras no, la factura mezcla
-// dos situaciones y no hay un asiento correcto posible — se rechaza y se pide
-// separarlas.
+// Se cuenta sólo el asiento VIVO: uno anulado a mano desde Asientos Contables
+// dejaría el gasto fuera del libro y la factura no lo volvería a poner.
+//
+// Si algunas ya asentaron y otras no, la factura mezcla dos situaciones y no hay
+// un asiento correcto posible: se rechaza y se pide separarlas.
 function soloYaAsentados(db, ids) {
   const q = ids.map(() => '?').join(',');
-  const r = db.prepare(`SELECT COUNT(*) n, SUM(CASE WHEN asiento_id IS NOT NULL THEN 1 ELSE 0 END) con
-                          FROM sg_gastos_directos WHERE id IN (${q})`).get(...ids);
+  const r = db.prepare(`SELECT COUNT(*) n,
+      SUM(CASE WHEN a.id IS NOT NULL AND COALESCE(a.anulado,0)=0 THEN 1 ELSE 0 END) con
+      FROM sg_gastos_directos g LEFT JOIN sg_asientos a ON a.id = g.asiento_id
+     WHERE g.id IN (${q})`).get(...ids);
   if (!r || !r.n) return false;
   if (r.con && r.con !== r.n) {
     throw new Error('Elegiste operaciones que ya están contabilizadas junto con otras que no. '
@@ -11354,15 +11378,16 @@ function soloYaAsentados(db, ids) {
 // Lo que suman las operaciones elegidas — SIEMPRE leído de la base y nunca del
 // pedido: es contra este número que se calcula la diferencia de gestión, y un
 // número que manda el navegador es un número que se puede editar.
-function sumaValorizada(db, ids, prov, tipo) {
-  if (!ids.length || !prov) return 0;
+function sumaValorizada(db, ids, prov, tipos) {
+  if (!ids.length || !prov || !tipos || !tipos.length) return 0;
   const q = ids.map(() => '?').join(',');
   // El tipo_gasto también: sumar una descarga adentro de una factura de flete
-  // daría una diferencia de gestión inventada.
+  // daría una diferencia de gestión inventada — y esa diferencia se graba.
+  const t = tipos.map(() => '?').join(',');
   const r = db.prepare(`SELECT COALESCE(SUM(monto),0) s FROM sg_gastos_directos
-    WHERE id IN (${q}) AND proveedor_servicio_id=? AND tipo_gasto=?
+    WHERE id IN (${q}) AND proveedor_servicio_id=? AND tipo_gasto IN (${t})
       AND estado='valorizado' AND activo=1`)
-    .get(...ids, prov, tipo);
+    .get(...ids, prov, ...tipos);
   return r2(r.s);
 }
 
@@ -11512,12 +11537,17 @@ router.post('/gastos-factura', facturaGastoUpload.single('archivo'), requireAuth
     // OTRA FACTURA. Se vuelve a mirar acá aunque la pantalla ya haya filtrado:
     // entre que se abrió el cuadro y se apretó guardar pudo pasar cualquier cosa.
     const q = ids.map(() => '?').join(',');
-    const elegidos = db.prepare(`SELECT g.id, g.monto, g.asiento_id FROM sg_gastos_directos g
-      WHERE g.id IN (${q}) AND g.proveedor_servicio_id=? AND g.tipo_gasto=?
+    const t = c.tipos.map(() => '?').join(',');
+    // asiento_id sólo si el asiento SIGUE VIVO: uno anulado a mano desde Asientos
+    // Contables dejaría el gasto fuera del libro y la factura no lo repondría.
+    const elegidos = db.prepare(`SELECT g.id, g.monto,
+        CASE WHEN a.id IS NOT NULL AND COALESCE(a.anulado,0)=0 THEN g.asiento_id END AS asiento_id
+      FROM sg_gastos_directos g LEFT JOIN sg_asientos a ON a.id = g.asiento_id
+      WHERE g.id IN (${q}) AND g.proveedor_servicio_id=? AND g.tipo_gasto IN (${t})
         AND g.estado='valorizado' AND g.activo=1
         AND NOT EXISTS (SELECT 1 FROM sg_factura_gasto_items fi
                           JOIN sg_facturas_gasto f ON f.id=fi.factura_id AND f.activo=1
-                         WHERE fi.gasto_id=g.id)`).all(...ids, prov, c.tipo);
+                         WHERE fi.gasto_id=g.id)`).all(...ids, prov, ...c.tipos);
     if (elegidos.length !== ids.length) {
       return res.status(400).json({ ok: false,
         error: 'Alguna de las operaciones ya está facturada, no está valorizada, es de otro '
@@ -11534,11 +11564,30 @@ router.post('/gastos-factura', facturaGastoUpload.single('archivo'), requireAuth
              + 'Hacé una factura para cada grupo: en una sola no hay asiento que sea correcto '
              + 'para las dos.' });
     }
-    const soloGestion = conAsiento === elegidos.length;
+    // LO QUE YA ESTÁ EN EL LIBRO NO SE VUELVE A ASENTAR, Y TAMPOCO SE CORRIGE
+    // CON UNA LÍNEA DE GESTIÓN INVENTADA.
+    //
+    // Quedan fletes de entrada valorizados con la versión anterior, que armaban su
+    // asiento al valorizar. Para ésos la base fiscal que está en el libro YA ES lo
+    // valorizado; las líneas de gestión, en cambio, están pensadas para llevar el
+    // asiento DESDE lo facturado HACIA lo acordado. Aplicarlas sobre una base que
+    // ya es lo acordado corrige al revés.
+    //
+    // Así que: si ya están contabilizadas y la factura coincide, se guarda el
+    // comprobante y listo. Si NO coincide, se frena y se pide arreglar la
+    // valorización primero — inventar el ajuste sería peor que no hacerlo.
+    const soloComprobante = conAsiento === elegidos.length;
 
     const m = montosDeFacturaGasto(b);
     const valorizado = r2(elegidos.reduce((a, x) => a + (Number(x.monto) || 0), 0));
     const dif = difDeFacturaGasto(valorizado, m.neto);
+    if (soloComprobante && dif !== 0) {
+      return res.status(400).json({ ok: false,
+        error: 'Estas operaciones ya se contabilizaron al valorizarlas, y la factura no '
+             + 'coincide con lo valorizado (diferencia $' + Math.abs(dif) + '). Corregí la '
+             + 'valorización con el importe de la factura y volvé a intentar: el asiento que '
+             + 'ya está en el libro es por lo valorizado.' });
+    }
     // UNA LÍNEA DE GESTIÓN SIN MOTIVO NO ENTRA. Texto libre serían cuarenta
     // maneras de escribir lo mismo y ningún informe posible.
     if (dif !== 0 && !MOTIVOS[b.dif_motivo]) {
@@ -11565,7 +11614,7 @@ router.post('/gastos-factura', facturaGastoUpload.single('archivo'), requireAuth
         // De dónde salieron los números. Cuando uno no cierra, es lo primero
         // que se pregunta.
         (b.leido_por_ia === '1' || b.leido_por_ia === 1 || b.leido_por_ia === true) ? 1 : 0,
-        c.tipo, uid(req)).lastInsertRowid;
+        c.circuito, uid(req)).lastInsertRowid;
 
       const insItem = db.prepare('INSERT INTO sg_factura_gasto_items (factura_id, gasto_id, neto) VALUES (?,?,?)');
       for (const g of elegidos) insItem.run(facturaId, g.id, g.monto);
@@ -11574,11 +11623,9 @@ router.post('/gastos-factura', facturaGastoUpload.single('archivo'), requireAuth
       // La regla de oro de la factura de mercadería: no hay factura sin su
       // asiento. Guardados por separado, el segundo paso puede no correr nunca y
       // queda una deuda que existe para el proveedor y no para la contabilidad.
-      const as = asientoDeFacturaGasto(db, Object.assign({}, b, { total: m.total }),
-                                       valorizado, c.clave, soloGestion);
-      // Sin líneas no hay asiento que grabar: es el caso del circuito que ya
-      // asentó al valorizar y encima no tuvo diferencia contra lo estimado.
-      // La factura igual se guarda: el comprobante existe y hay que anotarlo.
+      const as = soloComprobante
+        ? { sin_modelo: false, lineas: [], totales: {} }
+        : asientoDeFacturaGasto(db, Object.assign({}, b, { total: m.total }), valorizado, c.clave);
       if (!as.sin_modelo && as.lineas.length) {
         // Por ÁMBITO, que es como lo valida crearAsiento. El `balancea` de
         // armarAsientoFactura no ve las líneas de gestión.
@@ -11604,7 +11651,52 @@ router.post('/gastos-factura', facturaGastoUpload.single('archivo'), requireAuth
       }
     })();
     res.json({ ok: true, data: { id: facturaId, asiento_id: asientoId, dif_gestion: dif,
-      sin_asiento: !asientoId } });
+      sin_asiento: !asientoId, solo_comprobante: soloComprobante } });
+  } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
+});
+
+// ══ ANULAR UNA FACTURA DE SERVICIO ═════════════════════════════════════════
+//
+// Sin esto, una factura mal cargada —número equivocado, importe equivocado,
+// cargada contra el fletero que no era— quedaba viva para siempre: su asiento en
+// el libro y sus operaciones bloqueadas, porque el filtro que impide facturar dos
+// veces sólo se suelta con activo=0 y nadie lo escribía. El circuito no tenía
+// vuelta atrás, y desde que son tres circuitos el problema se multiplicaba.
+//
+// Es la misma forma que /facturas-compra/:id/anular: motivo obligatorio, se anula
+// el asiento primero, y las operaciones vuelven a estar disponibles para
+// facturar. NO se borra la fila: se da de baja y queda quién y cuándo.
+router.post('/gastos-factura/:id/anular', requireAuth, express.json(), (req, res) => {
+  const db = getDb();
+  try {
+    const motivo = val(req.body && req.body.motivo);
+    if (!motivo) return res.status(400).json({ ok: false, error: 'Escribí por qué se anula: queda registrado' });
+    const f = db.prepare('SELECT * FROM sg_facturas_gasto WHERE id=?').get(req.params.id);
+    if (!f) return res.status(404).json({ ok: false, error: 'Factura no encontrada' });
+    if (!f.activo) return res.status(400).json({ ok: false, error: 'Esa factura ya está dada de baja' });
+
+    // Si está contabilizada, primero se anula el asiento. Anular la factura y
+    // dejar el asiento vivo la deja fuera del libro por el otro lado: un gasto
+    // que la contabilidad tiene y la operación no.
+    const asi = f.asiento_id
+      ? db.prepare('SELECT id, anulado FROM sg_asientos WHERE id=?').get(f.asiento_id) : null;
+    let asientoAnulado = false;
+    db.transaction(() => {
+      if (asi && !asi.anulado) {
+        db.prepare(`UPDATE sg_asientos SET anulado=1, anulado_por=?, anulado_en=datetime('now','localtime'),
+          motivo_anulacion=? WHERE id=?`).run(uid(req), motivo, asi.id);
+        asientoAnulado = true;
+      }
+      db.prepare(`UPDATE sg_facturas_gasto SET activo=0,
+        anulada_en=datetime('now','localtime'), anulada_por=?,
+        observaciones=COALESCE(observaciones || ' · ', '') || ?
+        WHERE id=?`).run(uid(req), 'ANULADA: ' + motivo, f.id);
+    })();
+    // Las operaciones vuelven solas: el filtro de facturables exige activo=1 en
+    // la factura, así que con la baja dejan de estar tomadas. No hay nada que
+    // deshacer en sg_factura_gasto_items — el detalle de lo que cubría queda,
+    // que es lo que después explica por qué se anuló.
+    res.json({ ok: true, data: { id: Number(f.id), asiento_anulado: asientoAnulado } });
   } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
 });
 
