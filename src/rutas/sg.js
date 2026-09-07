@@ -7847,7 +7847,39 @@ router.get('/recepciones', requireAuth, (req, res) => {
           WHERE c.recepcion_id=r.id AND c.observada=1) AS calidad_pct_peor,
         (SELECT GROUP_CONCAT(pr.nombre, ' · ') FROM sg_recepcion_calidad c
            LEFT JOIN sg_productos pr ON pr.id=c.producto_id
-          WHERE c.recepcion_id=r.id AND c.observada=1) AS calidad_productos
+          WHERE c.recepcion_id=r.id AND c.observada=1) AS calidad_productos,
+        -- ── SE VE QUE SE CORRIGIÓ, Y POR QUÉ ───────────────────────────
+        --
+        -- Pablo, 7/9/2026: «sería bueno que sólo los administradores puedan
+        -- modificarlos... ahora, ¿qué pasa si todo el tiempo se confunden?».
+        --
+        -- Se confunden o no se confunden: el problema es que hasta acá no había
+        -- forma de saberlo. Las correcciones se guardaban en sg_ediciones y sólo
+        -- se veían entrando a la ficha de la orden, de a una. Un registro que hay
+        -- que ir a buscar de a uno no contesta «¿pasa seguido?».
+        --
+        -- Se cuentan las de la recepción Y las de sus lotes: corregir el conteo
+        -- de un bulto toca el lote, no la cabecera, y para el que mira es la
+        -- misma partida corregida.
+        (SELECT COUNT(*) FROM sg_ediciones e
+          WHERE (e.tabla='sg_recepciones' AND e.registro_id=r.id)
+             OR (e.tabla='sg_lotes' AND e.registro_id IN
+                  (SELECT id FROM sg_lotes WHERE recepcion_id=r.id))) AS correcciones,
+        (SELECT e.motivo FROM sg_ediciones e
+          WHERE (e.tabla='sg_recepciones' AND e.registro_id=r.id)
+             OR (e.tabla='sg_lotes' AND e.registro_id IN
+                  (SELECT id FROM sg_lotes WHERE recepcion_id=r.id))
+          ORDER BY e.id DESC LIMIT 1) AS correccion_motivo,
+        (SELECT u.nombre FROM sg_ediciones e LEFT JOIN usuarios u ON u.id=e.usuario_id
+          WHERE (e.tabla='sg_recepciones' AND e.registro_id=r.id)
+             OR (e.tabla='sg_lotes' AND e.registro_id IN
+                  (SELECT id FROM sg_lotes WHERE recepcion_id=r.id))
+          ORDER BY e.id DESC LIMIT 1) AS correccion_quien,
+        (SELECT e.fecha FROM sg_ediciones e
+          WHERE (e.tabla='sg_recepciones' AND e.registro_id=r.id)
+             OR (e.tabla='sg_lotes' AND e.registro_id IN
+                  (SELECT id FROM sg_lotes WHERE recepcion_id=r.id))
+          ORDER BY e.id DESC LIMIT 1) AS correccion_fecha
       FROM sg_recepciones r
       LEFT JOIN sg_oc o ON o.id=r.oc_id
       LEFT JOIN sg_proveedores p ON p.id=o.proveedor_id
@@ -7878,12 +7910,42 @@ router.get('/recepciones/:id', requireAuth, (req, res) => {
 // Vincular una recepción "OC pendiente" a una OC: setea oc_id, quita la marca y BAJA el precio
 // de la OC a los lotes (match por producto_id con un item de la OC), recalculando el costo.
 // Lotes cuyo producto no esté en la OC (o OC pizarra sin precio) quedan pendientes.
+// ══ DE QUIÉN ERA ESTA MERCADERÍA ══════════════════════════════════════════
+//
+// Pablo, 7/9/2026: «¿qué pasa si se equivocan en un ingreso? Ingresan mercadería
+// en otro proveedor... La otra opción es que permita cambiar de proveedor y quede
+// registro de quién lo hizo, porque eso es algo que puede pasar: pensar que la
+// mercadería es de un proveedor pero luego el ingreso es de otro».
+//
+// EL PROVEEDOR NO ES UN CAMPO DE LA RECEPCIÓN: sale de la orden a la que cuelga.
+// Así que «cambiar el proveedor» es re-apuntar la recepción a OTRA orden, y eso
+// arrastra el precio, el costo del lote y lo que se le debe a cada uno. Por eso
+// pasa por los mismos frenos que corregir un lote.
+//
+// DOS CAMINOS EN LA MISMA PUERTA:
+//   · la recepción entró SIN orden y se le pone la que era (lo que ya hacía);
+//   · la recepción está en la orden EQUIVOCADA y se la pasa a la correcta.
+//
+// Y LAS DOS QUEDAN REGISTRADAS. Antes se escribía modificado_por y nada más: un
+// dato en una tabla que no mira nadie. Ahora va con MOTIVO obligatorio y entra en
+// sg_ediciones, que es lo que la ficha de la orden muestra — el mismo lugar donde
+// ya se ven las correcciones de cantidades.
 router.post('/recepciones/:id/vincular-oc', requireAdmin, (req, res) => {
   const db = getDb();
   try {
     const rec = db.prepare('SELECT * FROM sg_recepciones WHERE id=? AND activo=1').get(req.params.id);
     if (!rec) return res.status(404).json({ ok: false, error: 'Recepción no encontrada' });
-    if (rec.oc_id) return res.status(400).json({ ok: false, error: 'La recepción ya está vinculada a una OC' });
+    const motivo = val(req.body && req.body.motivo);
+    // El motivo es lo que sirve dentro de dos meses para saber si el problema es
+    // un proveedor difícil de identificar o alguien que no mira el remito. Sin
+    // eso, el registro dice que hubo veinte correcciones y ninguna razón.
+    if (!motivo) {
+      return res.status(400).json({ ok: false,
+        error: 'Escribí por qué se vincula a esta orden: queda registrado' });
+    }
+    const ocPrevia = rec.oc_id
+      ? db.prepare('SELECT o.id, o.numero, o.trazabilidad, p.razon_social prov FROM sg_oc o '
+        + 'LEFT JOIN sg_proveedores p ON p.id=o.proveedor_id WHERE o.id=?').get(rec.oc_id) : null;
     const ocId = Number(req.body.oc_id);
     const oc = ocId ? db.prepare('SELECT * FROM sg_oc WHERE id=? AND activo=1').get(ocId) : null;
     if (!oc) return res.status(400).json({ ok: false, error: 'OC inexistente' });
@@ -7894,16 +7956,65 @@ router.post('/recepciones/:id/vincular-oc', requireAdmin, (req, res) => {
       return res.status(400).json({ ok: false,
         error: 'La orden está confirmada. Reabrila desde OC recibidas para poder vincularle esta recepción.' });
     }
+    if (ocPrevia && ocPrevia.id === ocId) {
+      return res.status(400).json({ ok: false, error: 'Ya está vinculada a esa orden' });
+    }
+
+    // ── SI YA ESTABA EN OTRA ORDEN, LOS MISMOS FRENOS QUE CORREGIR UN LOTE ──
+    //
+    // Cambiar de orden le cambia el precio, el costo y de paso el número de
+    // partida a cada lote. Si la mercadería ya se documentó, ya se despachó, ya
+    // se transformó o ya se partió por calidad, eso deja el papel mintiendo o el
+    // stock en negativo — exactamente los cuatro casos que frenosDeEdicionLote ya
+    // sabe reconocer. No se inventa un freno nuevo: se usa el que ya decide en
+    // todo el módulo, o serían dos reglas para el mismo riesgo.
+    if (ocPrevia) {
+      for (const l of db.prepare('SELECT id FROM sg_lotes WHERE recepcion_id=? AND activo=1').all(rec.id)) {
+        const chk = frenosDeEdicionLote(db, l.id, { soloPrecio: false });
+        if (chk.error) {
+          return res.status(400).json({ ok: false, firme: chk.firme || null,
+            error: 'No se puede cambiar de orden: ' + chk.error });
+        }
+      }
+    }
 
     const out = db.transaction(() => {
       db.prepare("UPDATE sg_recepciones SET oc_id=?, oc_pendiente=0, modificado_en=datetime('now','localtime'), modificado_por=? WHERE id=?")
         .run(ocId, uid(req), req.params.id);
-      const lotes = db.prepare('SELECT id, producto_id, kg_reales, codigo_lote FROM sg_lotes WHERE recepcion_id=? AND activo=1').all(req.params.id);
+      // EL REGISTRO, ADENTRO DE LA MISMA TRANSACCIÓN: no puede quedar el cambio
+      // sin constancia ni la constancia sin cambio.
+      anotarEdicion(db, { tabla: 'sg_recepciones', registroId: Number(rec.id), campo: 'oc_id',
+        antes: ocPrevia ? (ocPrevia.trazabilidad || ocPrevia.numero) : 'sin orden',
+        despues: oc.trazabilidad || oc.numero, motivo, ocId, userId: uid(req) });
+      // Y en la orden de la que SALIÓ, para que ahí también se vea que se fue.
+      if (ocPrevia) {
+        anotarEdicion(db, { tabla: 'sg_recepciones', registroId: Number(rec.id), campo: 'oc_id',
+          antes: ocPrevia.trazabilidad || ocPrevia.numero, despues: oc.trazabilidad || oc.numero,
+          motivo, ocId: ocPrevia.id, userId: uid(req) });
+      }
+      // precio_unitario_kg viaja para no pisar un precio que ya se había cerrado.
+      const lotes = db.prepare(`SELECT id, producto_id, kg_reales, codigo_lote,
+        precio_unitario_kg FROM sg_lotes WHERE recepcion_id=? AND activo=1`).all(req.params.id);
       let conPrecio = 0;
       for (const l of lotes) {
+        // OJO, PENDIENTE CONOCIDO: si la orden tiene el MISMO producto en dos
+        // renglones —dos calidades, dos precios pactados— toda la mercadería se
+        // cuelga del primero y toma su precio. sg_oc_items no tiene columna de
+        // calidad: la calidad de un renglón se deduce de los lotes que ya le
+        // cuelgan, y al vincular el renglón destino puede no tener ninguno. Un
+        // match adivinado sería peor que éste, que al menos es predecible.
         const ocItem = db.prepare('SELECT id, precio_estimado_por_kg FROM sg_oc_items WHERE oc_id=? AND producto_id=? ORDER BY id LIMIT 1').get(ocId, l.producto_id);
         if (!ocItem) continue; // producto no está en la OC → el lote queda pendiente
-        const precio = (oc.tipo_precio === 'firme' && ocItem.precio_estimado_por_kg != null) ? Number(ocItem.precio_estimado_por_kg) : null;
+        let precio = (oc.tipo_precio === 'firme' && ocItem.precio_estimado_por_kg != null) ? Number(ocItem.precio_estimado_por_kg) : null;
+        // ── Y NO SE PISA UN PRECIO QUE YA SE HABÍA CERRADO ────────────────
+        //
+        // Un lote huérfano se le puede cerrar el precio antes de vincularlo
+        // (POST /lotes/:id/cerrar-precio no tiene freno mientras no cuelgue de
+        // una orden). Si después se lo vincula a una orden de PIZARRA, este
+        // cálculo da null y el UPDATE de abajo escribía null y costo_base=0
+        // encima: la mercadería volvía a «costo pendiente» y nadie se enteraba.
+        // El precio cerrado a mano es un dato, no un vacío que se rellena.
+        if (precio == null && l.precio_unitario_kg != null) precio = Number(l.precio_unitario_kg);
         const costoBase = precio != null ? l.kg_reales * precio : 0;
         // Y AHORA EL LOTE SE LLAMA COMO LA PARTIDA. Este es el camino del camión
         // que llega sin la orden cargada: la recepción entra sin OC y sus lotes
@@ -7925,8 +8036,12 @@ router.post('/recepciones/:id/vincular-oc', requireAdmin, (req, res) => {
       }
       actualizarEstadoOC(db, ocId);
       generarVencimientos(db, ocId);
+      // La orden VIEJA también cambia de estado: le sacaron mercadería y puede
+      // volver a estar esperando. Sin esto queda como recibida por algo que ya no
+      // tiene, y no vuelve a aparecer en la bandeja de pendientes.
+      if (ocPrevia) { actualizarEstadoOC(db, ocPrevia.id); generarVencimientos(db, ocPrevia.id); }
       recalcPeriodo(db, (rec.fecha_recepcion || '').slice(0, 7));
-      return { lotes: lotes.length, conPrecio };
+      return { lotes: lotes.length, conPrecio, desde: ocPrevia ? (ocPrevia.prov || null) : null };
     })();
     res.json({ ok: true, data: out });
   } catch (e) { res.status(400).json({ ok: false, error: e.message }); }

@@ -2617,13 +2617,22 @@ input[type=number]{-moz-appearance:textfield;appearance:textfield}
            qué pasó: cuántos productos y cuánto del peor. -->
       <div class="ab-table-wrap" style="overflow-x:hidden !important">
         <table class="pa-tbl" style="table-layout:fixed;width:100%;max-width:98vw">
-        <thead><tr><th style="width:14%">Partida</th><th style="width:9%">Fecha</th>
-          <th style="width:17%">Proveedor</th><th style="width:19%">Producto</th>
-          <th style="width:13%">Calidad</th>
+        <!-- LA CORRECCIÓN SE VE ────────────────────────────────────────────
+             Pablo, 7/9/2026: «sería bueno que sólo los administradores puedan
+             modificarlos... ahora, ¿qué pasa si todo el tiempo se confunden?».
+
+             Se confunden o no: el problema era que no había forma de saberlo. Lo
+             que se corregía quedaba en la tabla de ediciones y sólo se veía
+             entrando a la ficha de la orden, de a una. Acá se ve de un vistazo
+             cuántas veces se tocó una partida, quién y por qué. -->
+        <thead><tr><th style="width:13%">Partida</th><th style="width:8%">Fecha</th>
+          <th style="width:15%">Proveedor</th><th style="width:17%">Producto</th>
+          <th style="width:12%">Calidad</th>
+          <th style="width:12%">Corregida</th>
           <th style="width:8%;text-align:right">Bultos</th>
-          <th style="width:9%;text-align:right">Kilos</th>
-          <th style="width:11%">Remito prov.</th></tr></thead>
-        <tbody id="sg-tb-reclist"><tr><td colspan="8" class="emp">Cargando…</td></tr></tbody>
+          <th style="width:8%;text-align:right">Kilos</th>
+          <th style="width:7%">Remito prov.</th></tr></thead>
+        <tbody id="sg-tb-reclist"><tr><td colspan="9" class="emp">Cargando…</td></tr></tbody>
       </table></div>
     </div>
 
@@ -6850,6 +6859,15 @@ input[type=number]{-moz-appearance:textfield;appearance:textfield}
     <div class="fg">
       <div style="font-size:12px;color:var(--mut);margin-bottom:10px">Al vincular, se baja el precio de la OC a los lotes de esta recepción (match por producto) y se completa el costo. Los productos que no estén en la OC quedan pendientes.</div>
       <div class="fl ff"><label>Orden de compra <span style="color:var(--err)">*</span></label><select id="sg-recvinc-oc"></select></div>
+      <!-- EL MOTIVO ES EL DATO QUE SIRVE DESPUÉS. «Se corrigió 14 veces» no dice
+           nada; «el remito venía a nombre de la cooperativa y la mercadería era
+           del productor» dice qué hay que arreglar en el circuito. Se pide igual
+           que para anular una factura. -->
+      <div class="fl ff"><label>¿Por qué? <span style="color:var(--err)">*</span></label>
+        <input id="sg-recvinc-motivo" maxlength="200" placeholder="Ej: el remito venía a nombre de la cooperativa">
+        <div style="font-size:11px;color:var(--mut);margin-top:3px">Queda registrado con tu nombre y se ve en la lista de recepciones.</div></div>
+      <div id="sg-recvinc-aviso" style="display:none;border:1.5px solid #e0a72e;background:rgba(224,167,46,.10);
+           border-radius:8px;padding:9px 12px;margin-top:8px;font-size:12.5px;color:#9a3412"></div>
       <div style="font-size:12px;color:var(--mut);margin-top:8px">¿No existe la OC? <button class="btn bo bs" onclick="sgRecVincularCrearOC()">➕ Crear OC nueva</button> y después volvé a vincular.</div>
     </div>
     <div class="ab-modal-footer">
@@ -9259,7 +9277,9 @@ function sgRecListPintar(){
       + ' ' + (x.numero_remito_proveedor||'') + ' ' + (x.observaciones||'')
       // Y por lo observado: buscar «observada» tiene que traer las que lo están.
       + ' ' + (x.variacion_motivo||'') + ' ' + (x.calidad_productos||'')
-      + (x.observada ? ' observada calidad' : '')).indexOf(q) >= 0;
+      + ' ' + (x.correccion_motivo||'')
+      + (x.observada ? ' observada calidad' : '')
+      + (x.correcciones ? ' corregida' : '')).indexOf(q) >= 0;
   });
   var tb = eid('sg-tb-reclist'); if (!tb) return;
   tb.innerHTML = filas.length ? filas.map(function(x){
@@ -9280,12 +9300,34 @@ function sgRecListPintar(){
       + '<td style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'
         + escH(x.productos || '—') + '</td>'
       + '<td style="overflow:hidden;text-overflow:ellipsis">' + sgRecCalidadCelda(x) + '</td>'
+      + '<td style="overflow:hidden;text-overflow:ellipsis">' + sgRecCorregidaCelda(x) + '</td>'
       + '<td style="text-align:right">' + (x.bultos ? nr(x.bultos)
           : '<span style="color:var(--mut)">—</span>') + '</td>'
       + '<td style="text-align:right">' + nr(Math.round(x.kg || 0)) + '</td>'
       + '<td style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'
         + escH(x.numero_remito_proveedor || '—') + '</td></tr>';
-  }).join('') : '<tr><td colspan="8" class="emp">Todavía no se recibió ninguna partida.</td></tr>';
+  }).join('') : '<tr><td colspan="9" class="emp">Todavía no se recibió ninguna partida.</td></tr>';
+}
+
+// ── QUÉ DICE LA COLUMNA «CORREGIDA» ──────────────────────────────────────
+//
+// En blanco: entró y quedó como se cargó, que es la mayoría. Con número: cuántas
+// veces se tocó, y al pasar el mouse quién fue, cuándo y por qué.
+//
+// El motivo es lo que sirve dentro de dos meses. «Se corrigió 14 veces» no dice
+// nada; «se corrigió porque el remito venía a nombre de la cooperativa y la
+// mercadería era del productor» dice qué hay que arreglar en el circuito.
+function sgRecCorregidaCelda(x){
+  var n = Number(x.correcciones) || 0;
+  if (!n) return '<span style="color:var(--mut)">—</span>';
+  var det = (x.correccion_quien ? escH(x.correccion_quien) : 'alguien')
+    + (x.correccion_fecha ? (' · ' + esc(String(x.correccion_fecha).slice(0, 16))) : '')
+    + (x.correccion_motivo ? ('\n' + escH(x.correccion_motivo)) : '');
+  return '<span title="' + escH(det) + '" '
+    + 'style="display:inline-block;padding:1px 7px;border-radius:999px;font-size:11px;'
+    + 'font-weight:700;background:rgba(147,197,253,.20);color:#1e40af;white-space:nowrap;'
+    + 'max-width:100%;overflow:hidden;text-overflow:ellipsis;vertical-align:middle">✎ '
+    + n + (n === 1 ? ' vez' : ' veces') + '</span>';
 }
 
 // ── QUÉ DICE LA COLUMNA DE CALIDAD ───────────────────────────────────────
@@ -15666,6 +15708,9 @@ function sgRecVer(id){
 // VINCULAR una recepción "OC pendiente" a una OC (baja el precio de la OC a los lotes).
 function sgRecVincularOpen(id, numero){
   SG._vincRec=id;
+  // No se arrastran ni el motivo ni el freno de la vez anterior.
+  var mo=eid('sg-recvinc-motivo'); if(mo) mo.value='';
+  var av=eid('sg-recvinc-aviso'); if(av){ av.style.display='none'; av.innerHTML=''; }
   eid('sg-recvinc-tit').textContent='Vincular '+(numero||'recepción')+' a una OC';
   Promise.all([api('/api/sg/oc?estado=abierta'), api('/api/sg/oc?estado=recibida_parcial')]).then(function(res){
     var ocs=((res[0]&&res[0].ok)?res[0].data:[]).concat((res[1]&&res[1].ok)?res[1].data:[]);
@@ -15677,10 +15722,24 @@ function sgRecVincularCrearOC(){ closeMB('sg-recvinc-modal'); toast('Creá la OC
 function sgRecVincularGuardar(){
   var ocId=eid('sg-recvinc-oc').value;
   if(!ocId){ toast('Elegí una OC','er'); return; }
-  api('/api/sg/recepciones/'+SG._vincRec+'/vincular-oc','POST',{oc_id:Number(ocId)}).then(function(r){
+  var motivo=(eid('sg-recvinc-motivo')||{}).value||'';
+  if(!String(motivo).trim()){ toast('Escribí por qué se vincula: queda registrado','er'); return; }
+  api('/api/sg/recepciones/'+SG._vincRec+'/vincular-oc','POST',
+      {oc_id:Number(ocId), motivo:motivo}).then(function(r){
     // Al vincularla deja de estar sin orden y pasa a la tabla de arriba: hay
     // que recargar las dos, o la fila queda en los dos lados.
-    if(r&&r.ok){ toast('Vinculada — '+r.data.conPrecio+'/'+r.data.lotes+' lote(s) con precio','ok'); closeMB('sg-recvinc-modal'); sgLoadRecepciones(); sgLoadOcRecibidas(); }
+    if(r&&r.ok){
+      toast((r.data.desde ? 'Pasada de '+r.data.desde+' — ' : 'Vinculada — ')
+        +r.data.conPrecio+'/'+r.data.lotes+' lote(s) con precio','ok');
+      closeMB('sg-recvinc-modal'); sgLoadRecepciones(); sgLoadOcRecibidas(); sgRecListPintar();
+      if (typeof sgLoadRecList==='function') sgLoadRecList();
+      return;
+    }
+    // EL FRENO SE EXPLICA EN LA VENTANA, no en un toast que se va solo: los
+    // motivos por los que no se puede cambiar de orden son largos —ya se
+    // facturó, ya se despachó— y hay que poder leerlos dos veces.
+    var av=eid('sg-recvinc-aviso');
+    if(av){ av.style.display=''; av.innerHTML='<b>No se puede.</b> '+escH((r&&r.error)||'Error'); }
     else toast((r&&r.error)||'Error','er');
   });
 }
@@ -22245,6 +22304,35 @@ SG_MANUAL.ingresos = { titulo: 'Ingresos — recibir mercadería', html:
   + '<div class="ojo">Una misma orden puede tener <b>un producto por cajón y otro por '
   + 'kilo</b>, así que la unidad está en cada fila y no en el título de la columna. Dos '
   + 'filas seguidas pueden no ser comparables.</div>'
+
+  + '<h3>✎ Si se equivocaron: la columna Corregida <span class="ver">V1021</span></h3>'
+  + '<p>Al lado de Calidad. En blanco si la partida entró y quedó como se cargó —que '
+  + 'es la mayoría—; con un número si se tocó después. Pasando el mouse dice <b>quién, '
+  + 'cuándo y por qué</b>.</p>'
+  + '<div class="ojo"><b>Para qué sirve:</b> contesta «¿pasa seguido?». Hasta ahora las '
+  + 'correcciones se guardaban pero sólo se veían entrando a la ficha de cada orden, de '
+  + 'a una — así no hay forma de saber si son dos por mes o veinte por día, ni si el '
+  + 'problema es una persona o un proveedor difícil de identificar. Por eso el motivo es '
+  + 'obligatorio: «se corrigió 14 veces» no dice nada.</div>'
+
+  + '<h3>Cambiar de proveedor un ingreso <span class="ver">V1021</span></h3>'
+  + '<p>El proveedor de una partida <b>sale de la orden de compra</b>: no es un campo '
+  + 'que se edite. Cambiarlo es <b>pasar la recepción a otra orden</b>, y eso se hace con '
+  + '<b>🔗 Vincular</b>. Lo hace un <b>administrador</b>, pide <b>motivo</b>, y queda '
+  + 'registrado con su nombre.</p>'
+  + '<ul>'
+  + '<li>Sirve para los dos casos: la mercadería que <b>entró sin orden</b> y hay que '
+  + 'decir de quién era, y la que quedó <b>en la orden equivocada</b> — antes esto último '
+  + 'no se podía arreglar, era de un solo intento.</li>'
+  + '<li>Al pasarla, los lotes toman el precio de la orden nueva, se renumeran con esa '
+  + 'partida, y las <b>dos órdenes</b> —la que la recibe y la que la pierde— vuelven a '
+  + 'calcular su estado.</li>'
+  + '</ul>'
+  + '<div class="ojo"><b>No siempre se puede</b>, y cuando no se puede la ventana dice '
+  + 'por qué: si la partida ya se <b>documentó</b> con un comprobante, ya se '
+  + '<b>despachó</b>, se <b>transformó</b> o se <b>partió por calidad</b>. Son los mismos '
+  + 'frenos que para corregir los kilos: cambiarle la orden dejaría el papel mintiendo o '
+  + 'el stock en negativo. Primero se anula lo que la traba.</div>'
 
   + '<h3>⚠️ La columna Calidad <span class="ver">V1012</span></h3>'
   + '<p>En <b>Recepciones</b>, al lado del producto. Dice <b>cuántos productos entraron '
