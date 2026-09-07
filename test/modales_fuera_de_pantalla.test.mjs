@@ -35,7 +35,11 @@ const RAIZ = process.env.LNB_RAIZ
   || path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const PANEL = fs.readFileSync(path.join(RAIZ, 'src/panel.html'), 'utf8');
 
-const MODALES = ['sg-fac-modal', 'sg-liqrec-modal'];
+// sg-fd-modal entra el 7/9/2026: Facturación Puesto pasó de ser un formulario
+// metido en la pantalla a abrirse en ventana, y arrastra las mismas dos reglas
+// —.sgr-card para el formato de los campos y .sgr-confirm para esconder el
+// cartel del CAE—, que cuelgan de un ancestro .sg-mod.
+const MODALES = ['sg-fac-modal', 'sg-liqrec-modal', 'sg-fd-modal'];
 
 // Recorre las etiquetas div y devuelve la pila de ancestros abiertos en `pos`.
 function ancestros(pos) {

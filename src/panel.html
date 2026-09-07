@@ -3152,117 +3152,24 @@ input[type=number]{-moz-appearance:textfield;appearance:textfield}
          el lote quedaría figurando disponible después de vendido. Lo que se
          saca es el paso a mano, no el documento. -->
     <div class="sgv-sub" id="sgv-sub-directa">
-      <!-- CONTRA QUÉ SE CONTABILIZA, arriba y a la vista. Es la misma tarjeta que
-           tiene Facturas por mercadería para las compras: el que factura ve con
-           qué asiento se va a registrar, y si falta elegirlo lo sabe ANTES de
-           cargar nada. -->
-      <div id="sgfd-modelo-box" style="border:1px solid var(--bor);border-radius:10px;padding:12px 14px;margin-bottom:16px;background:var(--bg)">
-        <div style="font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--mut);margin-bottom:6px">
-          Asiento contable de venta
+      <!-- ══ SE FACTURA EN UNA VENTANA ═══════════════════════════════
+           Pablo, 7/9/2026: «a la hora de facturar o hacer un remito me gusta
+           que se abra como una ventana, como en emisión de órdenes de compra,
+           porque nos hace saber que estamos trabajando en otra pantalla».
+
+           El formulario entero se fue a #sg-fd-modal, al nivel de arriba. Acá
+           queda la puerta, igual que «+ Nuevo remito» en Emisión de Remitos.
+           El id de este div NO puede cambiar: sgVenSub arma el id del panel
+           concatenando la clave de la solapa. -->
+      <div class="sgr-card" style="max-width:640px">
+        <div style="font-weight:700;font-size:14px;margin-bottom:4px">💵 Facturar en el puesto</div>
+        <div style="font-size:12.5px;color:var(--mut);margin-bottom:12px">
+          La venta que se cobra en el mostrador: se elige el cliente, se toman las
+          partidas del stock y se emite el comprobante en el acto. Se abre en una
+          ventana aparte para no perder de vista que se está facturando.
         </div>
-        <div id="sgfd-modelo-cuerpo" style="font-size:13px">Cargando…</div>
+        <button class="btn bb" onclick="sgFdAbrir()">💵 Facturar en el puesto</button>
       </div>
-      <style>
-        /* Nada se desplaza de costado, y los campos no se desbordan de su caja. */
-        #sgv-sub-directa .ab-table-wrap{overflow-x:hidden !important}
-        #sgv-sub-directa input,#sgv-sub-directa select{max-width:100%;box-sizing:border-box}
-        @media(max-width:900px){ #sgv-sub-directa .ab-table-wrap{overflow-x:auto !important} }
-      </style>
-      <div class="sgr-card" style="max-width:98vw;overflow-x:hidden">
-        <div style="display:flex;gap:14px;align-items:flex-end;flex-wrap:wrap;margin-bottom:10px">
-          <label style="font-size:11.5px;color:var(--mut)">Cliente<br>
-            <input type="text" placeholder="🔎 alias o razón social" oninput="sgCliFiltrar('sgfd-cli',this.value)" autocomplete="off" style="min-width:240px;padding:5px 8px;border-radius:6px;border:1px solid var(--bor);background:var(--card,#fff);margin-bottom:4px;display:block">
-            <select id="sgfd-cli" onchange="sgFdCliente()" style="min-width:240px;padding:6px 8px;border-radius:6px;border:1px solid var(--bor);background:var(--card,#fff)"></select>
-          </label>
-          <span id="sgfd-tipo-badge" style="padding-bottom:6px"></span>
-          <label style="font-size:11.5px;color:var(--mut)">Punto de venta<br>
-            <select id="sgfd-pv" style="padding:6px 8px;border-radius:6px;border:1px solid var(--bor);background:var(--card,#fff)"><option value="">…</option></select>
-          </label>
-          <label style="font-size:12px;color:var(--mut);padding-bottom:7px"><input type="checkbox" id="sgfd-incluye-iva" onchange="sgFdRender()"> precio incluye IVA</label>
-          <!-- APLICAR O NO LOS ACUERDOS. Viene tildado: el acuerdo con el
-               proveedor es la regla, y no aplicarlo es la excepción. -->
-          <label style="font-size:12px;color:var(--mut);padding-bottom:7px" title="Cada partida sale por el precio menos el descuento acordado con SU proveedor">
-            <input type="checkbox" id="sgfd-aplicar-desc" checked onchange="sgFdRender()"> aplicar descuentos por proveedor</label>
-          <!-- NO TODA VENTA EMITE UN REMITO NUEVO. Acá el papel que acompaña la
-               mercadería es la factura: emitir además un remito propio son dos
-               documentos del mismo viaje. Viene DESTILDADO. La salida se registra
-               igual —descuenta stock y guarda de qué partida salió—; lo que se
-               tilda acá es el documento, para el cliente que lo exige aparte. -->
-          <label style="font-size:12px;color:var(--mut);padding-bottom:7px" title="La salida se registra siempre. Tildá esto sólo si además de la factura hace falta un remito propio.">
-            <input type="checkbox" id="sgfd-emitir-remito"> emitir remito aparte</label>
-        </div>
-        <div id="sgfd-items"></div>
-        <div style="font-weight:600;font-size:13px;margin:12px 0 4px">Lo que se factura</div>
-        <div id="sgfd-lines"></div>
-        <div id="sgfd-resumen" style="margin-top:12px;font-size:12.5px"></div>
-        <!-- TODA OPERACIÓN QUE ASIENTA MUESTRA EL ASIENTO. El asiento se arma en
-             el backend y el usuario lo veía recién después, entrando a Asientos
-             Contables — y si estaba mal, ya estaba hecho. El cuadro es el único
-             momento en que se puede frenar. -->
-        <div id="sgfd-asiento" style="margin-top:14px"></div>
-
-        <!-- El documento del comprador. Aparece SOLO si la venta supera el umbral
-             de ARCA y va a consumidor final: por debajo, la factura sale "A
-             CONSUMIDOR FINAL" sin ningún dato, y eso es lo que ahorra cargar una
-             ficha por cada venta de mostrador. Es un dato del COMPROBANTE, no del
-             cobro: hace falta igual aunque se pague después. -->
-        <div id="sgfd-identif" style="display:none;margin-top:12px"></div>
-        <!-- ══ SE COBRA EN LA VENTANILLA ═══════════════════════════════
-             Pablo, 25/8/2026: "puede ser que al hacer una factura se cobre en el
-             mismo momento; entonces debemos dar la opción de esa venta por
-             ventanilla cobrarla ahí con efectivo (caja), transferencia o cheque".
-
-             SON DOS PREGUNTAS DISTINTAS SOBRE LA MISMA VENTA. Una es fiscal —a quién
-             se le informa el comprobante—; la otra es comercial —si la plata entra
-             ahora o queda en la cuenta corriente—. Se combinan libres: un cliente que
-             no es responsable inscripto recibe una Factura B Y tiene cuenta corriente
-             igual. Hasta ahora estaban atadas.
-
-             El cobro puede ser PARCIAL: lo que no entra queda en la cuenta corriente. -->
-        <div style="margin-top:14px;border:1px solid var(--bor);border-radius:10px;padding:12px 14px;background:var(--bg)">
-          <!-- ¿CÓMO SE PAGA? ES OBLIGATORIO (Pablo, 27/8/2026).
-               Hasta acá el cobro era un TILDE opcional que venía apagado: «cuenta
-               corriente» no era una opción elegida, era lo que pasaba cuando no se
-               elegía nada. El saldo quedaba en la cuenta del cliente sin que nadie
-               lo hubiera decidido y sin fecha de vencimiento. -->
-          <div style="font-weight:700;font-size:12px;text-transform:uppercase;letter-spacing:.04em;
-               color:var(--mut);margin-bottom:7px">¿Cómo se paga? <span style="color:var(--err)">*</span></div>
-          <div style="display:flex;gap:6px;margin-bottom:8px;flex-wrap:wrap">
-            <button type="button" class="btn bo bs" id="sgfd-pago-cc" onclick="sgFdPago('cc')">🧾 Cuenta corriente</button>
-            <button type="button" class="btn bo bs" id="sgfd-pago-ya" onclick="sgFdPago('ya')">💵 Se cobra ahora</button>
-          </div>
-          <!-- CUENTA CORRIENTE CON FECHA. Sin vencimiento no hay forma de saber qué
-               está vencido. Se propone la condición del cliente y se puede cambiar. -->
-          <div id="sgfd-cc-box" style="display:none;margin-bottom:8px;font-size:12.5px">
-            <label style="font-size:11px;color:var(--mut)">Vence a los<br>
-              <input type="number" id="sgfd-cc-dias" min="0" step="1" style="width:80px;padding:5px 7px"
-                     oninput="sgFdCcVenc()"></label>
-            <span style="margin-left:6px">días · <b id="sgfd-cc-fecha">—</b></span>
-            <div id="sgfd-cc-nota" style="font-size:11px;color:var(--mut);margin-top:3px"></div>
-          </div>
-          <label style="display:none"><input type="checkbox" id="sgfd-cobrar" onchange="sgFdCobroToggle()"></label>
-          <!-- VARIOS MEDIOS EN LA MISMA VENTA. Parte en efectivo y parte en
-               transferencia, como el pago a proveedores. Los renglones se dibujan
-               solos y el pie dice cuánto falta o cuánto sobra. -->
-          <div id="sgfd-cobro-box" style="display:none;margin-top:10px">
-            <div id="sgfd-cobro-medios"></div>
-            <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;margin-top:8px">
-              <div id="sgfd-cobro-botones"></div>
-              <div id="sgfd-cobro-pie" style="font-size:12.5px"></div>
-            </div>
-            <div id="sgfd-cobro-nota" style="font-size:11.5px;color:var(--mut);margin-top:7px"></div>
-          </div>
-        </div>
-
-        <div style="text-align:right;margin-top:12px">
-          <button class="btn bb" id="sgfd-emitir-btn" onclick="sgFdEmitir()">Emitir comprobante</button>
-        </div>
-        <div style="font-size:11.5px;color:var(--mut);margin-top:8px">
-          Se genera el remito y el comprobante juntos. Si AFIP rechaza, el remito queda hecho
-          —la mercadería ya salió— y el comprobante se reintenta desde Remitos pendientes de comprobante.
-        </div>
-      </div>
-      <div class="sgr-confirm" id="sgfd-confirm"></div>
     </div>
 
     <!-- Cuenta corriente clientes -->
@@ -3552,6 +3459,141 @@ input[type=number]{-moz-appearance:textfield;appearance:textfield}
       </div>
     </div>
   </div>
+<!-- ══ 💵 FACTURAR EN EL PUESTO, EN SU VENTANA ═══════════════════════════
+     Pablo, 7/9/2026: «me gusta que se abra como una ventana... porque nos hace
+     saber que estamos trabajando en otra pantalla».
+
+     Va al NIVEL DE ARRIBA, fuera de toda .sec, y CONSERVA sg-mod. Las dos cosas
+     las exige test/modales_fuera_de_pantalla: sin sg-mod se pierden .sgr-card
+     —el formato de todos los campos— y .sgr-confirm, que es la única regla que
+     esconde el cartel del CAE. Sin ella, el modal se abre mostrando el
+     comprobante de la factura anterior.
+
+     Y NO SE CIERRA AL EMITIR. Después de emitir, dos cosas escriben en
+     #sgfd-confirm: el CAE con el botón del PDF, y —cuando contesta el
+     servidor— el resultado del cobro, que es el único lugar donde se avisa que
+     el cobro NO se tomó. Cerrando la ventana se pierden los dos. -->
+<div class="ab-modal-overlay sg-mod" id="sg-fd-modal">
+  <div class="ab-modal" style="width:min(1100px,96vw);max-width:96vw;max-height:92vh;overflow-y:auto;overflow-x:hidden">
+    <div class="mhd"><div class="mht">💵 Facturar en el puesto</div>
+      <button class="mcl" onclick="closeMB('sg-fd-modal')">×</button></div>
+
+      <!-- CONTRA QUÉ SE CONTABILIZA, arriba y a la vista. Es la misma tarjeta que
+           tiene Facturas por mercadería para las compras: el que factura ve con
+           qué asiento se va a registrar, y si falta elegirlo lo sabe ANTES de
+           cargar nada. -->
+      <div id="sgfd-modelo-box" style="border:1px solid var(--bor);border-radius:10px;padding:12px 14px;margin-bottom:16px;background:var(--bg)">
+        <div style="font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--mut);margin-bottom:6px">
+          Asiento contable de venta
+        </div>
+        <div id="sgfd-modelo-cuerpo" style="font-size:13px">Cargando…</div>
+      </div>
+      <style>
+        /* Nada se desplaza de costado, y los campos no se desbordan de su caja. */
+        #sg-fd-modal .ab-table-wrap{overflow-x:hidden !important}
+        #sg-fd-modal input,#sg-fd-modal select{max-width:100%;box-sizing:border-box}
+        @media(max-width:900px){ #sg-fd-modal .ab-table-wrap{overflow-x:auto !important} }
+      </style>
+      <div class="sgr-card" style="max-width:98vw;overflow-x:hidden">
+        <div style="display:flex;gap:14px;align-items:flex-end;flex-wrap:wrap;margin-bottom:10px">
+          <label style="font-size:11.5px;color:var(--mut)">Cliente<br>
+            <input type="text" placeholder="🔎 alias o razón social" oninput="sgCliFiltrar('sgfd-cli',this.value)" autocomplete="off" style="min-width:240px;padding:5px 8px;border-radius:6px;border:1px solid var(--bor);background:var(--card,#fff);margin-bottom:4px;display:block">
+            <select id="sgfd-cli" onchange="sgFdCliente()" style="min-width:240px;padding:6px 8px;border-radius:6px;border:1px solid var(--bor);background:var(--card,#fff)"></select>
+          </label>
+          <span id="sgfd-tipo-badge" style="padding-bottom:6px"></span>
+          <label style="font-size:11.5px;color:var(--mut)">Punto de venta<br>
+            <select id="sgfd-pv" style="padding:6px 8px;border-radius:6px;border:1px solid var(--bor);background:var(--card,#fff)"><option value="">…</option></select>
+          </label>
+          <label style="font-size:12px;color:var(--mut);padding-bottom:7px"><input type="checkbox" id="sgfd-incluye-iva" onchange="sgFdRender()"> precio incluye IVA</label>
+          <!-- APLICAR O NO LOS ACUERDOS. Viene tildado: el acuerdo con el
+               proveedor es la regla, y no aplicarlo es la excepción. -->
+          <label style="font-size:12px;color:var(--mut);padding-bottom:7px" title="Cada partida sale por el precio menos el descuento acordado con SU proveedor">
+            <input type="checkbox" id="sgfd-aplicar-desc" checked onchange="sgFdRender()"> aplicar descuentos por proveedor</label>
+          <!-- NO TODA VENTA EMITE UN REMITO NUEVO. Acá el papel que acompaña la
+               mercadería es la factura: emitir además un remito propio son dos
+               documentos del mismo viaje. Viene DESTILDADO. La salida se registra
+               igual —descuenta stock y guarda de qué partida salió—; lo que se
+               tilda acá es el documento, para el cliente que lo exige aparte. -->
+          <label style="font-size:12px;color:var(--mut);padding-bottom:7px" title="La salida se registra siempre. Tildá esto sólo si además de la factura hace falta un remito propio.">
+            <input type="checkbox" id="sgfd-emitir-remito"> emitir remito aparte</label>
+        </div>
+        <div id="sgfd-items"></div>
+        <div style="font-weight:600;font-size:13px;margin:12px 0 4px">Lo que se factura</div>
+        <div id="sgfd-lines"></div>
+        <div id="sgfd-resumen" style="margin-top:12px;font-size:12.5px"></div>
+        <!-- TODA OPERACIÓN QUE ASIENTA MUESTRA EL ASIENTO. El asiento se arma en
+             el backend y el usuario lo veía recién después, entrando a Asientos
+             Contables — y si estaba mal, ya estaba hecho. El cuadro es el único
+             momento en que se puede frenar. -->
+        <div id="sgfd-asiento" style="margin-top:14px"></div>
+
+        <!-- El documento del comprador. Aparece SOLO si la venta supera el umbral
+             de ARCA y va a consumidor final: por debajo, la factura sale "A
+             CONSUMIDOR FINAL" sin ningún dato, y eso es lo que ahorra cargar una
+             ficha por cada venta de mostrador. Es un dato del COMPROBANTE, no del
+             cobro: hace falta igual aunque se pague después. -->
+        <div id="sgfd-identif" style="display:none;margin-top:12px"></div>
+        <!-- ══ SE COBRA EN LA VENTANILLA ═══════════════════════════════
+             Pablo, 25/8/2026: "puede ser que al hacer una factura se cobre en el
+             mismo momento; entonces debemos dar la opción de esa venta por
+             ventanilla cobrarla ahí con efectivo (caja), transferencia o cheque".
+
+             SON DOS PREGUNTAS DISTINTAS SOBRE LA MISMA VENTA. Una es fiscal —a quién
+             se le informa el comprobante—; la otra es comercial —si la plata entra
+             ahora o queda en la cuenta corriente—. Se combinan libres: un cliente que
+             no es responsable inscripto recibe una Factura B Y tiene cuenta corriente
+             igual. Hasta ahora estaban atadas.
+
+             El cobro puede ser PARCIAL: lo que no entra queda en la cuenta corriente. -->
+        <div style="margin-top:14px;border:1px solid var(--bor);border-radius:10px;padding:12px 14px;background:var(--bg)">
+          <!-- ¿CÓMO SE PAGA? ES OBLIGATORIO (Pablo, 27/8/2026).
+               Hasta acá el cobro era un TILDE opcional que venía apagado: «cuenta
+               corriente» no era una opción elegida, era lo que pasaba cuando no se
+               elegía nada. El saldo quedaba en la cuenta del cliente sin que nadie
+               lo hubiera decidido y sin fecha de vencimiento. -->
+          <div style="font-weight:700;font-size:12px;text-transform:uppercase;letter-spacing:.04em;
+               color:var(--mut);margin-bottom:7px">¿Cómo se paga? <span style="color:var(--err)">*</span></div>
+          <div style="display:flex;gap:6px;margin-bottom:8px;flex-wrap:wrap">
+            <button type="button" class="btn bo bs" id="sgfd-pago-cc" onclick="sgFdPago('cc')">🧾 Cuenta corriente</button>
+            <button type="button" class="btn bo bs" id="sgfd-pago-ya" onclick="sgFdPago('ya')">💵 Se cobra ahora</button>
+          </div>
+          <!-- CUENTA CORRIENTE CON FECHA. Sin vencimiento no hay forma de saber qué
+               está vencido. Se propone la condición del cliente y se puede cambiar. -->
+          <div id="sgfd-cc-box" style="display:none;margin-bottom:8px;font-size:12.5px">
+            <label style="font-size:11px;color:var(--mut)">Vence a los<br>
+              <input type="number" id="sgfd-cc-dias" min="0" step="1" style="width:80px;padding:5px 7px"
+                     oninput="sgFdCcVenc()"></label>
+            <span style="margin-left:6px">días · <b id="sgfd-cc-fecha">—</b></span>
+            <div id="sgfd-cc-nota" style="font-size:11px;color:var(--mut);margin-top:3px"></div>
+          </div>
+          <label style="display:none"><input type="checkbox" id="sgfd-cobrar" onchange="sgFdCobroToggle()"></label>
+          <!-- VARIOS MEDIOS EN LA MISMA VENTA. Parte en efectivo y parte en
+               transferencia, como el pago a proveedores. Los renglones se dibujan
+               solos y el pie dice cuánto falta o cuánto sobra. -->
+          <div id="sgfd-cobro-box" style="display:none;margin-top:10px">
+            <div id="sgfd-cobro-medios"></div>
+            <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;margin-top:8px">
+              <div id="sgfd-cobro-botones"></div>
+              <div id="sgfd-cobro-pie" style="font-size:12.5px"></div>
+            </div>
+            <div id="sgfd-cobro-nota" style="font-size:11.5px;color:var(--mut);margin-top:7px"></div>
+          </div>
+        </div>
+
+        <div style="text-align:right;margin-top:12px">
+          <button class="btn bb" id="sgfd-emitir-btn" onclick="sgFdEmitir()">Emitir comprobante</button>
+        </div>
+        <div style="font-size:11.5px;color:var(--mut);margin-top:8px">
+          Se genera el remito y el comprobante juntos. Si AFIP rechaza, el remito queda hecho
+          —la mercadería ya salió— y el comprobante se reintenta desde Remitos pendientes de comprobante.
+        </div>
+      </div>
+      <div class="sgr-confirm" id="sgfd-confirm"></div>
+    <div style="text-align:right;margin-top:14px">
+      <button class="btn bo" onclick="closeMB('sg-fd-modal')">Cerrar</button>
+    </div>
+  </div>
+</div>
 <div class="ab-modal-overlay sg-mod" id="sg-fac-modal">
     <div class="ab-modal" style="width:96vw;max-width:min(1100px,96vw)">
       <div class="mhd"><div class="mht" id="sg-fac-tit">🧾 Facturar el remito</div>
@@ -18189,7 +18231,9 @@ function sgVenSub(s){
   document.querySelectorAll('.sg-mod .sgv-subtab').forEach(function(el){ el.classList.toggle('on', el.dataset.sub===s); });
   document.querySelectorAll('.sg-mod .sgv-sub').forEach(function(el){ el.classList.toggle('on', el.id==='sgv-sub-'+s); });
   if (s==='despachos') sgLoadDespachos();
-  else if (s==='directa') sgFdInit();
+  // 'directa' ya no inicializa nada: el formulario vive en una ventana y se
+  // inicializa al abrirla. Entrar a la solapa sólo muestra el botón.
+  else if (s==='directa') { /* la puerta está en el HTML */ }
   // Facturarle a una cadena es facturar remitos ya entregados, no vender en el
   // mostrador: es su propia puerta (Pablo, 31/8/2026).
   else if (s==='supermercados') sgSuperInit();
@@ -18418,6 +18462,20 @@ function sgPiPasar(){
     toast('Mercadería pasada','ok');
     closeMB('sg-pipase-modal'); sgPiLoad();
   });
+}
+
+// ── SE FACTURA EN UNA VENTANA ────────────────────────────────────────────
+//
+// Pablo, 7/9/2026: «me gusta que se abra como una ventana, como en emisión de
+// órdenes de compra, porque nos hace saber que estamos trabajando en otra
+// pantalla».
+//
+// sgFdInit da por cargados los maestros (SG.cacheCli, SG.cacheCond, SG.cfg): los
+// llena sgLoadCaches en sgVenInit, antes de mostrar cualquier solapa. Se abre
+// desde la solapa, así que ya pasaron.
+function sgFdAbrir(){
+  sgModalArriba('sg-fd-modal');
+  sgFdInit();
 }
 
 function sgFdInit(){
