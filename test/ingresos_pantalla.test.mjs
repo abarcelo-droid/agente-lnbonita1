@@ -541,17 +541,21 @@ test('las recepciones observadas llevan el 📄 del informe', () => {
 test('la calidad tiene columna propia, y la tabla sigue sin barra lateral', () => {
   const i = PANEL.indexOf('function sgRecListPintar(){');
   const fila = PANEL.slice(i, PANEL.indexOf(".join('')", i));
-  assert.equal((fila.match(/<td/g) || []).length, 8, 'la fila no tiene las ocho celdas');
+  // Nueve desde el 7/9/2026: se sumó «Corregida», para que se vea de un vistazo
+  // qué partidas se tocaron después de cargarlas y por qué.
+  assert.equal((fila.match(/<td/g) || []).length, 9, 'la fila no tiene las nueve celdas');
   assert.match(fila, /sgRecCalidadCelda\(x\)/);
-  assert.match(PANEL.slice(i, i + 3200), /colspan="8"/);
+  assert.match(fila, /sgRecCorregidaCelda\(x\)/);
+  assert.match(PANEL.slice(i, i + 3400), /colspan="9"/);
 
   const j = PANEL.indexOf('id="sg-tb-reclist"');
-  const cab = PANEL.slice(Math.max(0, j - 1600), j);
-  assert.equal((cab.match(/<th[\s>]/g) || []).length, 8, 'la cabecera no tiene ocho columnas');
-  assert.match(cab, /<th style="width:13%">Calidad<\/th>/);
-  // Los anchos tienen que seguir sumando 100, o la octava columna empuja.
+  const cab = PANEL.slice(Math.max(0, j - 2200), j);
+  assert.equal((cab.match(/<th[\s>]/g) || []).length, 9, 'la cabecera no tiene nueve columnas');
+  assert.match(cab, /<th style="width:12%">Calidad<\/th>/);
+  assert.match(cab, /<th style="width:12%">Corregida<\/th>/);
+  // Los anchos tienen que seguir sumando 100, o la novena columna empuja.
   const anchos = [...cab.matchAll(/<th style="width:(\d+)%/g)].map((m) => Number(m[1]));
-  assert.equal(anchos.length, 8);
+  assert.equal(anchos.length, 9);
   assert.equal(anchos.reduce((a, b) => a + b, 0), 100, 'los anchos suman ' + anchos.reduce((a, b) => a + b, 0));
   // Y la regla del repo, que a esta tabla le faltaba: la clase .ab-table-wrap
   // trae overflow-x:auto y hay que ganarle.
@@ -744,4 +748,134 @@ test('y no hay otra puerta: el riel y el Confirmar pasan por la misma validació
   assert.match(PANEL.slice(i, i + 500), /sgRecFaltaEn\(p\)/);
   const j = PANEL.indexOf('function sgRecGuardar(');
   assert.match(PANEL.slice(j, j + 900), /sgRecFaltaEn\(p\)/);
+});
+
+// ══════════════════════════════════════════════════════════════════════════
+// SI SE EQUIVOCAN EN UN INGRESO, SE ARREGLA Y QUEDA REGISTRADO
+// ══════════════════════════════════════════════════════════════════════════
+//
+// Pablo, 7/9/2026: «¿qué pasa si se equivocan en un ingreso? Ingresan mercadería
+// en otro proveedor... La otra opción es que permita cambiar de proveedor y quede
+// registro de quién lo hizo... ahora, ¿qué pasa si todo el tiempo se confunden?».
+//
+// El proveedor NO es un campo de la recepción: sale de la orden. Cambiarlo es
+// re-apuntar la recepción a otra orden.
+
+const SGR = fs.readFileSync(path.join(RAIZ, 'src/rutas/sg.js'), 'utf8');
+// El mismo helper: los tests de abajo lo llaman con (texto, desde, cierre).
+const troz = (txt, desde, cierre) => {
+  const i = txt.indexOf(desde);
+  assert.ok(i > 0, 'no está: ' + desde);
+  return txt.slice(i, txt.indexOf(cierre, i) + cierre.length);
+};
+const pedazo = troz;
+
+test('cambiar de orden es de administrador, y pide motivo', () => {
+  const v = troz(SGR, "router.post('/recepciones/:id/vincular-oc'", '\r\n});');
+  assert.match(SGR, /router\.post\('\/recepciones\/:id\/vincular-oc', requireAdmin,/);
+  // Se mira el FRENO, no el texto del mensaje: con el if desactivado la cadena
+  // sigue en el archivo y el test pasaba igual.
+  assert.match(v, /if \(!motivo\) \{[\s\S]{0,200}Escribí por qué se vincula a esta orden: queda registrado/);
+  // El motivo es lo que sirve después: «se corrigió 14 veces» no dice nada.
+  assert.match(v, /const motivo = val\(req\.body && req\.body\.motivo\)/);
+});
+
+test('y ahora se puede re-apuntar una que YA estaba en otra orden', () => {
+  // Era de un solo intento: «la recepción ya está vinculada a una OC». Si el
+  // administrador elegía la orden equivocada, esa mercadería quedaba colgada del
+  // proveedor equivocado para siempre.
+  const v = troz(SGR, "router.post('/recepciones/:id/vincular-oc'", '\r\n});');
+  assert.ok(!/La recepción ya está vinculada a una OC/.test(v), 'sigue siendo de un solo intento');
+  assert.match(v, /const ocPrevia = rec\.oc_id/);
+  assert.match(v, /Ya está vinculada a esa orden/, 'deja re-vincularla a la misma');
+});
+
+test('pero con los MISMOS frenos que corregir un lote, no con unos nuevos', () => {
+  // Cambiar de orden le cambia el precio, el costo y el número de partida a cada
+  // lote. Si ya se documentó, ya se despachó, ya se transformó o ya se partió por
+  // calidad, eso deja el papel mintiendo o el stock en negativo. Inventar un
+  // freno aparte serían dos reglas para el mismo riesgo.
+  const v = troz(SGR, "router.post('/recepciones/:id/vincular-oc'", '\r\n});');
+  assert.match(v, /if \(ocPrevia\) \{[\s\S]{0,400}frenosDeEdicionLote\(db, l\.id/);
+  assert.match(v, /No se puede cambiar de orden: /);
+  // Y el freno viaja con el camino para resolverlo, como en corregir.
+  assert.match(v, /firme: chk\.firme \|\| null/);
+});
+
+test('queda en sg_ediciones, que es lo que la pantalla ya sabe mostrar', () => {
+  // Antes sólo escribía modificado_por, que además la carga de la factura de
+  // compra PISA después: la recepción terminaba diciendo que la tocó el que
+  // facturó.
+  const v = troz(SGR, "router.post('/recepciones/:id/vincular-oc'", '\r\n});');
+  assert.match(v, /anotarEdicion\(db, \{ tabla: 'sg_recepciones', registroId: Number\(rec\.id\), campo: 'oc_id'/);
+  // En las DOS órdenes: la ficha filtra por oc_id, así que si sólo se anota en la
+  // nueva, en la vieja no se ve que le sacaron mercadería.
+  assert.equal((v.match(/anotarEdicion\(db, \{ tabla: 'sg_recepciones'/g) || []).length, 2);
+  assert.match(v, /ocId: ocPrevia\.id, userId: uid\(req\)/);
+});
+
+test('y la orden de la que SALIÓ vuelve a su estado', () => {
+  // Le sacaron mercadería: puede volver a estar esperando. Sin esto queda como
+  // recibida por algo que ya no tiene y no vuelve a la bandeja de pendientes.
+  const v = troz(SGR, "router.post('/recepciones/:id/vincular-oc'", '\r\n});');
+  assert.match(v, /if \(ocPrevia\) \{ actualizarEstadoOC\(db, ocPrevia\.id\); generarVencimientos\(db, ocPrevia\.id\); \}/);
+});
+
+test('vincular NO pisa un precio que ya se había cerrado a mano', () => {
+  // A un lote huérfano se le puede cerrar el precio antes de vincularlo. Si
+  // después se lo vinculaba a una orden de PIZARRA, el cálculo daba null y el
+  // UPDATE escribía null y costo_base=0 encima: la mercadería volvía a «costo
+  // pendiente» y nadie se enteraba.
+  const v = troz(SGR, "router.post('/recepciones/:id/vincular-oc'", '\r\n});');
+  assert.match(v, /if \(precio == null && l\.precio_unitario_kg != null\) precio = Number\(l\.precio_unitario_kg\);/);
+  // Y el SELECT lo trae, o el arreglo lee undefined y no hace nada.
+  assert.match(v, /SELECT id, producto_id, kg_reales, codigo_lote,\s*\n?\s*precio_unitario_kg FROM sg_lotes/);
+});
+
+test('la lista de recepciones cuenta las correcciones, de la cabecera Y de los lotes', () => {
+  // Corregir el conteo toca el lote, no la cabecera, y para el que mira es la
+  // misma partida corregida.
+  const q = troz(SGR, "router.get('/recepciones'", '\r\n});');
+  assert.match(q, /AS correcciones/);
+  assert.match(q, /AS correccion_motivo/);
+  assert.match(q, /AS correccion_quien/);
+  // LAS CUATRO subconsultas tienen que mirar los lotes, no una sola: si el
+  // conteo mira los dos lados pero el motivo sólo la cabecera, la columna dice
+  // «2 veces» y no puede decir por qué.
+  assert.equal((q.match(/e\.tabla='sg_lotes' AND e\.registro_id IN/g) || []).length, 4);
+});
+
+test('y se ve en la lista: cuántas veces, quién y por qué', () => {
+  // El registro estaba y sólo se veía entrando a la ficha de la orden, de a una.
+  // Un registro que hay que ir a buscar no contesta «¿pasa seguido?».
+  const f = pedazo(PANEL, 'function sgRecCorregidaCelda(x){', '\r\n}');
+  assert.match(f, /x\.correcciones/);
+  assert.match(f, /x\.correccion_quien/);
+  assert.match(f, /x\.correccion_motivo/);
+  assert.match(f, /n === 1 \? ' vez' : ' veces'/);
+  // Las que no se tocaron quedan en blanco: la mayoría entra bien y una columna
+  // llena tapa las que importan.
+  assert.match(f, /if \(!n\) return '<span style="color:var\(--mut\)">—<\/span>'/);
+});
+
+test('el motivo se pide en la pantalla, y no se arrastra de la vez anterior', () => {
+  const i = PANEL.indexOf('id="sg-recvinc-modal"');
+  assert.ok(i > 0);
+  const m = PANEL.slice(i, i + 2200);
+  assert.match(m, /id="sg-recvinc-motivo"/);
+  assert.match(m, /Queda registrado con tu nombre/);
+  const g = pedazo(PANEL, 'function sgRecVincularGuardar(){', '\r\n}');
+  assert.match(g, /Escribí por qué se vincula: queda registrado/);
+  assert.match(g, /motivo:motivo/);
+  const o = pedazo(PANEL, 'function sgRecVincularOpen(id, numero){', '\r\n}');
+  assert.match(o, /mo\.value=''/);
+});
+
+test('y el freno se lee en la ventana, no en un cartel que se va solo', () => {
+  // Los motivos por los que no se puede cambiar de orden son largos —ya se
+  // facturó, ya se despachó— y hay que poder leerlos dos veces.
+  const g = pedazo(PANEL, 'function sgRecVincularGuardar(){', '\r\n}');
+  assert.match(g, /id="sg-recvinc-aviso"|eid\('sg-recvinc-aviso'\)/);
+  assert.match(g, /No se puede\.<\/b> '/);
+  assert.match(PANEL, /id="sg-recvinc-aviso"/);
 });
