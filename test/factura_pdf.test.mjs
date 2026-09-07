@@ -265,7 +265,7 @@ test('y avisa de las cuatro cosas que hay que mirar antes de dar por buena la le
 
 test('el archivo no se arrastra de la factura anterior', () => {
   // Quedaría el PDF de una cooperativa colgado de la factura de otra.
-  const f = pedazo(PANEL, 'function sgFgAbrir(){', '\r\n}\r\n');
+  const f = pedazo(PANEL, 'function sgFgAbrir(circuito){', '\r\n}\r\n');
   assert.match(f, /SGFG\.archivo = null; SGFG\.leido = 0;/);
   assert.match(f, /eid\('sg-fg-pdf'\)\.value = '';/);
   assert.match(f, /eid\('sg-fg-aviso-lectura'\)\.style\.display = 'none';/);
