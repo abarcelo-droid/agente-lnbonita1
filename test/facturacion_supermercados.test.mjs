@@ -301,3 +301,90 @@ test('la pantalla dice qué clientes muestra', () => {
   // parezca perdido.
   assert.match(PANEL, /Entran los clientes marcados como <b>Supermercado<\/b> en su ficha o con categoría comercial <b>Retail<\/b>/);
 });
+
+// ══════════════════════════════════════════════════════════════════════════
+// FACTURAR EN EL PUESTO SE ABRE EN UNA VENTANA
+// ══════════════════════════════════════════════════════════════════════════
+//
+// Pablo, 7/9/2026: «a la hora de facturar o hacer un remito me gusta que se abra
+// como una ventana, como en emisión de órdenes de compra, porque nos hace saber
+// que estamos trabajando en otra pantalla».
+//
+// Emisión de Remitos ya lo hacía (+ Nuevo remito → #sg-desp-modal). Facturación
+// Puesto era un formulario metido en la pantalla.
+
+const trozoP = (desde, cierre) => {
+  const i = PANEL.indexOf(desde);
+  assert.ok(i > 0, 'no está: ' + desde);
+  return PANEL.slice(i, PANEL.indexOf(cierre, i) + cierre.length);
+};
+
+test('la solapa quedó como PUERTA, y su id no cambió', () => {
+  // sgVenSub arma el id del panel concatenando la clave de la solapa: sin ese
+  // div, la solapa se marca y no se muestra nada.
+  const i = PANEL.indexOf('id="sgv-sub-directa"');
+  assert.ok(i > 0, 'desapareció el panel de la solapa');
+  const b = PANEL.slice(i, i + 1800);
+  assert.match(b, /onclick="sgFdAbrir\(\)"/);
+  // Y el formulario ya no está acá: se fue entero a la ventana.
+  assert.ok(!b.includes('id="sgfd-cli"'), 'el formulario sigue metido en la pantalla');
+  assert.ok(!b.includes('id="sgfd-emitir-btn"'));
+});
+
+test('el formulario entero está en la ventana, con TODOS sus campos', () => {
+  const m = trozoP('id="sg-fd-modal"', '</div>\r\n</div>\r\n');
+  // Los campos que no pueden faltar: si uno se perdió en la mudanza, la pantalla
+  // explota recién cuando alguien la abre.
+  for (const id of ['sgfd-cli', 'sgfd-pv', 'sgfd-incluye-iva', 'sgfd-aplicar-desc',
+                    'sgfd-emitir-remito', 'sgfd-items', 'sgfd-lines', 'sgfd-resumen',
+                    'sgfd-asiento', 'sgfd-identif', 'sgfd-pago-cc', 'sgfd-pago-ya',
+                    'sgfd-cc-box', 'sgfd-cobro-box', 'sgfd-emitir-btn', 'sgfd-confirm']) {
+    assert.ok(m.includes('id="' + id + '"'), 'falta ' + id + ' en la ventana');
+  }
+  // El buscador de cliente reestructura el DOM alrededor del select: el input y
+  // el select tienen que seguir siendo hermanos.
+  const j = m.indexOf('id="sgfd-cli"');
+  assert.match(m.slice(Math.max(0, j - 400), j), /sgCliFiltrar\('sgfd-cli'/);
+});
+
+test('la ventana conserva sg-mod, que es de donde cuelga el formato y el cartel', () => {
+  // Sin sg-mod se pierden .sgr-card (el formato de todos los campos) y
+  // .sgr-confirm, que es la ÚNICA regla que esconde el cartel del CAE: el modal
+  // se abriría mostrando el comprobante de la factura anterior.
+  const i = PANEL.indexOf('id="sg-fd-modal"');
+  assert.match(PANEL.slice(i - 60, i + 40), /class="ab-modal-overlay sg-mod"/);
+  assert.match(PANEL, /\.sg-mod \.sgr-confirm\{[^}]*display:none\}/);
+});
+
+test('y el <style> del bloque se mudó con él', () => {
+  // Estaba anclado a #sgv-sub-directa. Con el contenido en otro lado, esas tres
+  // reglas dejaban de aplicarse y volvía la barra de desplazamiento lateral.
+  assert.match(PANEL, /#sg-fd-modal \.ab-table-wrap\{overflow-x:hidden !important\}/);
+  assert.match(PANEL, /#sg-fd-modal input,#sg-fd-modal select\{max-width:100%/);
+  assert.ok(!/#sgv-sub-directa \.ab-table-wrap/.test(PANEL),
+    'quedó una regla apuntando al id viejo');
+});
+
+test('la ventana NO se cierra al emitir: ahí queda el CAE y el aviso del cobro', () => {
+  // Después de emitir, dos cosas escriben en #sgfd-confirm: el CAE con el botón
+  // del PDF, y —cuando contesta el servidor— el resultado del cobro, que es el
+  // único lugar donde se avisa que el cobro NO se tomó. Cerrando se pierden los
+  // dos, y el segundo no vuelve a aparecer en ningún lado.
+  const e = trozoP('function sgFdEmitir(){', '\r\n}\r\n');
+  assert.ok(!/closeMB\('sg-fd-modal'\)/.test(e), 'la ventana se cierra al emitir');
+  assert.match(e, /sgFdCobrarAhora\(/);
+  // Se sale a mano, con la × o con Cerrar.
+  const m = trozoP('id="sg-fd-modal"', '</div>\r\n</div>\r\n');
+  assert.match(m, /class="mcl" onclick="closeMB\('sg-fd-modal'\)"/);
+  assert.match(m, /onclick="closeMB\('sg-fd-modal'\)">Cerrar</);
+});
+
+test('la puerta inicializa el formulario al abrir, no antes', () => {
+  const a = trozoP('function sgFdAbrir(){', '\r\n}');
+  assert.match(a, /sgModalArriba\('sg-fd-modal'\)/);
+  assert.match(a, /sgFdInit\(\)/);
+  // Y la solapa ya no lo inicializa: entrar a la solapa sólo muestra el botón.
+  const v = trozoP('function sgVenSub(s){', '\r\n}');
+  assert.ok(!/s==='directa'\) sgFdInit\(\)/.test(v),
+    'la solapa sigue inicializando el formulario que ya no está ahí');
+});
