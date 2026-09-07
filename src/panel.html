@@ -68957,7 +68957,8 @@ var SP_CANAL_ETQ = { fisico: 'físico', echeq: 'e-cheq' };
 
 function spCanalRadios(i, p) {
   return ['fisico', 'echeq'].map(function(c) {
-    return '<label style="font-size:11px;margin-right:8px;cursor:pointer;white-space:nowrap">'
+    return '<label style="font-size:11px;cursor:pointer;white-space:nowrap;'
+      + 'display:inline-flex;align-items:center;margin:1px 8px 1px 0">'
       + '<input type="radio" name="sp-canal-' + i + '" value="' + c + '"'
       + (p.canal === c ? ' checked' : '')
       + ' onchange="spPagoSet(' + i + ',\'canal\',\'' + c + '\')"'
@@ -69025,9 +69026,23 @@ function spPagoRender() {
     spPagoTotalRender();
     return;
   }
-  cont.innerHTML = '<div class="ab-table-wrap"><table class="pa-tbl" style="font-size:12px"><thead><tr>'
-    + '<th>Medio</th><th style="width:130px">Importe</th><th style="width:145px">Fecha</th>'
-    + '<th style="width:130px">Código</th><th style="width:34px"></th></tr></thead><tbody>'
+  // ── SIN BARRA DE DESPLAZAMIENTO LATERAL ─────────────────────────────
+  //
+  // Pablo, 7/9/2026: «sacame esta barra desplazadora que me molesta».
+  //
+  // Los anchos estaban en PÍXELES —130 + 145 + 130 + 34, más la columna del
+  // medio— y los inputs también (120px, 135px). En un modal angosto eso suma más
+  // que el ancho disponible y aparece la barra: para leer el importe de un cheque
+  // había que arrastrar la tabla, que es exactamente lo que la regla del repo
+  // prohíbe. Ahora van en PORCENTAJE y suman 100, y los inputs ocupan su celda.
+  //
+  // La clase .ab-table-wrap trae su propio overflow-x:auto, así que hace falta el
+  // !important para ganarle.
+  cont.innerHTML = '<div class="ab-table-wrap" style="overflow-x:hidden !important">'
+    + '<table class="pa-tbl" style="font-size:12px;table-layout:fixed;width:100%;max-width:98vw"><thead><tr>'
+    + '<th style="width:30%">Medio</th><th style="width:24%">Importe</th>'
+    + '<th style="width:22%">Fecha</th>'
+    + '<th style="width:18%">Código</th><th style="width:6%"></th></tr></thead><tbody>'
     + SP.pagos.map(function(p, i) {
         var esTerceros = p.tipo === 'cheque_terceros';
         var esCheque = p.tipo !== 'transferencia';
@@ -69036,14 +69051,18 @@ function spPagoRender() {
         var nro = p.tipo === 'transferencia' ? '' :
           ' <span class="sp-chica">#' + (SP.pagos.filter(function(q, j) {
             return q.tipo === p.tipo && j <= i; }).length) + '</span>';
-        return '<tr><td><strong>' + spEsc(SP_PAGO_ETQ[p.tipo]) + '</strong>' + nro
+        return '<tr><td style="white-space:normal;word-break:break-word">'
+          + '<strong>' + spEsc(SP_PAGO_ETQ[p.tipo]) + '</strong>' + nro
           // Debajo del medio, no en una columna propia: la tabla del modal ya
           // tiene 439px clavados en las otras cuatro y una quinta la desborda.
           // Es el mismo lugar donde ya cuelga "repartido".
-          + (esCheque ? '<div style="margin-top:3px">' + spCanalRadios(i, p) + '</div>' : '')
+          + (esCheque ? '<div style="margin-top:3px;display:flex;flex-wrap:wrap;gap:0 4px">'
+              + spCanalRadios(i, p) + '</div>' : '')
           + '</td>'
-          + '<td><span class="sp-money"><span class="sp-money-sig">$</span>'
-          + '<input type="text" inputmode="decimal" autocomplete="off" class="sp-inp sp-num" style="width:120px"'
+          + '<td><span class="sp-money" style="display:flex;align-items:center;gap:2px">'
+          + '<span class="sp-money-sig">$</span>'
+          + '<input type="text" inputmode="decimal" autocomplete="off" class="sp-inp sp-num"'
+            + ' style="width:100%;min-width:0"'
             + ' value="' + spEsc(spMontoTexto(p.importe)) + '"'
             + (p.auto && p.tipo === 'cheque_propio'
                 ? ' title="Se reparte solo entre los cheques propios. Escribí un importe para fijarlo."'
@@ -69057,11 +69076,11 @@ function spPagoRender() {
           // Los cheques llevan su propio vencimiento; la transferencia va con la
           // fecha de pago general.
           + '<td>' + (esCheque
-              ? '<input type="date" class="sp-inp" style="width:135px" value="' + spEsc(p.fecha || '') + '"'
+              ? '<input type="date" class="sp-inp" style="width:100%;min-width:0" value="' + spEsc(p.fecha || '') + '"'
                 + ' onchange="spPagoSet(' + i + ',\'fecha\',this.value)">'
               : '<span class="sp-chica">' + spEsc(fechaGral || 'la de pago') + '</span>') + '</td>'
           + '<td>' + (esTerceros
-              ? '<input class="sp-inp" style="width:120px" placeholder="nº cheque" value="' + spEsc(p.codigo || '') + '"'
+              ? '<input class="sp-inp" style="width:100%;min-width:0" placeholder="nº" value="' + spEsc(p.codigo || '') + '"'
                 + ' onchange="spPagoSet(' + i + ',\'codigo\',this.value)">'
               : '<span class="sp-chica">—</span>') + '</td>'
           + '<td><button type="button" class="btn bd bs" style="padding:2px 6px;font-size:11px"'

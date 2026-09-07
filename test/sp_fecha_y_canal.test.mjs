@@ -232,9 +232,12 @@ test('los dos son RADIO, no dos checkbox sueltos', () => {
 test('los tildes salen en los DOS tipos de cheque, y en la transferencia no', () => {
   const i = PANEL.indexOf('spCanalRadios(i, p)', PANEL.indexOf('function spPagoRender()'));
   assert.ok(i > 0, 'no se dibujan en el editor');
-  const b = PANEL.slice(i - 300, i + 120);
-  // esCheque es tipo !== 'transferencia': cubre propio Y terceros de una.
-  assert.match(b, /esCheque \? '<div style="margin-top:3px">' \+ spCanalRadios\(i, p\)/);
+  const b = PANEL.slice(i - 700, i + 160);
+  // esCheque es tipo !== 'transferencia': cubre propio Y terceros de una. Se
+  // ancla en la CONDICIÓN y no en el estilo del div: el estilo cambió al sacar la
+  // barra de desplazamiento (los radios pasaron a flex para no pisarse) y esto
+  // se ponía en rojo por un cambio que no tiene nada que ver con los tildes.
+  assert.match(b, /esCheque \? '<div style="margin-top:3px[^']*'[\s\S]{0,40}spCanalRadios\(i, p\)/);
 });
 
 test('el canal VIAJA en el payload: si no, se tilda y el error es mudo', () => {
@@ -376,4 +379,67 @@ test('y la base aguanta una composición mixta de verdad', () => {
   // LÍNEA y no en la solicitud.
   const ech = db.prepare("SELECT COUNT(*) n FROM sp_pago_detalle WHERE canal='echeq'").get().n;
   assert.equal(ech, 1);
+});
+
+// ══ LA TABLA DE MEDIOS DE PAGO NO PIDE BARRA LATERAL ═══════════════════════
+//
+// Pablo, 7/9/2026: «sacame esta barra desplazadora que me molesta».
+//
+// Los anchos estaban en PÍXELES —130 + 145 + 130 + 34, más la columna del medio—
+// y los inputs también (120px, 135px). En el modal de fechas de pago, con varios
+// cheques propios, eso suma más que el ancho disponible: para leer el importe de
+// un cheque había que arrastrar la tabla.
+
+function pagoRender() {
+  const i = PANEL.indexOf('function spPagoRender() {');
+  assert.ok(i > 0, 'no existe spPagoRender');
+  return PANEL.slice(i, PANEL.indexOf('\r\n}', i));
+}
+
+test('la tabla de medios de pago no pide barra de desplazamiento lateral', () => {
+  const b = pagoRender();
+  // La clase .ab-table-wrap trae su propio overflow-x:auto: hace falta ganarle.
+  assert.match(b, /class="ab-table-wrap" style="overflow-x:hidden !important"/);
+  assert.match(b, /table-layout:fixed/);
+  assert.match(b, /max-width:98vw/);
+});
+
+test('y los anchos van en porcentaje, sumando 100', () => {
+  // En píxeles no hay ancho que sirva para todas las pantallas: el que entra en
+  // una computadora de escritorio desborda en una notebook.
+  const b = pagoRender();
+  const cab = b.slice(b.indexOf('<thead>'), b.indexOf('</thead>'));
+  const pct = [...cab.matchAll(/width:(\d+)%/g)].map((m) => Number(m[1]));
+  assert.equal(pct.length, 5, 'las cinco columnas tienen que tener ancho declarado');
+  assert.equal(pct.reduce((a, c) => a + c, 0), 100, 'los anchos suman ' + pct.reduce((a, c) => a + c, 0));
+  assert.ok(!/width:\d+px/.test(cab), 'quedó un ancho de columna en píxeles');
+});
+
+test('los campos ocupan su celda, no un ancho fijo que la desborda', () => {
+  const b = pagoRender();
+  // Los tres inputs de la fila: importe, fecha y código.
+  assert.ok(!/class="sp-inp[^"]*" style="width:\d+px"/.test(b),
+    'quedó un input con ancho fijo en píxeles');
+  assert.equal((b.match(/width:100%;min-width:0/g) || []).length, 3,
+    'los tres campos tienen que ocupar su celda');
+  // min-width:0 es el que permite que la celda se achique: sin eso el input
+  // tiene un ancho mínimo propio y vuelve a empujar la tabla.
+});
+
+test('la celda del medio se parte en vez de estirar la columna', () => {
+  // «Cheque propio #5» con los radios abajo: con nowrap, la etiqueta estira la
+  // columna y vuelve la barra.
+  const b = pagoRender();
+  assert.match(b, /white-space:normal;word-break:break-word/);
+});
+
+test('y los radios de canal no se pisan con el renglón de «repartido»', () => {
+  // Estaban con margin-right y nowrap, uno al lado del otro, y encima del
+  // renglón que dice que el importe se reparte solo.
+  const i = PANEL.indexOf('function spCanalRadios(i, p) {');
+  const r = PANEL.slice(i, PANEL.indexOf('\r\n}', i));
+  assert.match(r, /display:inline-flex;align-items:center/);
+  assert.ok(!/margin-right:8px;cursor/.test(r), 'siguen empujados con margin-right');
+  const b = pagoRender();
+  assert.match(b, /display:flex;flex-wrap:wrap/);
 });
