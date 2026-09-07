@@ -49,6 +49,42 @@ hace falta `overflow-x:hidden !important` para ganarle. Se deja `auto` sólo baj
 Por qué: para leer un saldo o un total había que arrastrar la tabla, y el número
 que importa suele ser el de la última columna.
 
+### CUANDO HAY QUE ABRIR ALGO, ABRE UNA VENTANA
+
+Pablo, 7/9/2026: *«a la hora de facturar o hacer un remito me gusta que se abra
+como una ventana, como en emisión de órdenes de compra, porque nos hace saber que
+estamos trabajando en otra pantalla»* y *«veamos la manera de unificar este tipo
+de conceptos para que todo el panel funcione de la misma manera»*.
+
+**Un formulario de carga no vive metido en una pantalla: se abre en una ventana.**
+La pantalla queda como la LISTA de lo que hay, con su botón para abrir. Que se
+abra una ventana es lo que le dice al operador que dejó de mirar y empezó a
+cargar.
+
+Una LISTA no se mete en una ventana. Lo que va en la ventana es la ACCIÓN que se
+dispara desde ella: Facturación Supermercados es una lista con filtros y su
+botón de facturar abre `#sg-fac-modal` — eso ya está bien y no hay que tocarlo.
+
+Las cuatro reglas de una ventana, todas con su test en
+`test/ventanas_del_panel.test.mjs`, que las audita TODAS y no una lista escrita a
+mano:
+
+1. **Fuera de toda `.sec`.** Con `.sec{display:none}`, una ventana que cuelga de
+   una pantalla sólo se abre desde ésa; desde otra el botón corre y no se ve nada.
+2. **Con `sg-mod` puesta** si usa las clases `.sgr-*`: de ese ancestro cuelgan el
+   formato de los campos y la única regla que esconde el cartel del comprobante.
+3. **No se cierra al clic afuera** (abajo).
+4. **No se cierra al guardar** si adentro queda algo que hay que leer: el CAE, el
+   número autorizado, el aviso de que el cobro no se tomó.
+
+**La altura la pone el panel, no cada pantalla.** Había dos maneras de abrir —26
+ventanas con `sgModalArriba` y 113 con `classList.add('on')` a mano— y el z-index
+lo ponía sólo el helper: una ventana abierta desde adentro de otra quedaba DETRÁS.
+Se arregló el mecanismo y no las 113 llamadas: un `MutationObserver` mira la clase
+y le da su altura a cualquier overlay que reciba `on`, lo abra quien lo abra.
+Tocar 113 lugares son 113 oportunidades de romper algo, y la 114ª que alguien
+escriba mañana volvería a quedar afuera.
+
 ### UN MODAL NO SE CIERRA AL CLIC AFUERA
 
 Pablo, 6/9/2026: *«si hago click fuera de esa ventana se cierra... y pierdo toda
