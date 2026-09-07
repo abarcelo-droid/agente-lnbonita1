@@ -23,10 +23,34 @@ const RAIZ = process.env.LNB_RAIZ
 const PANEL = fs.readFileSync(path.join(RAIZ, 'src/panel.html'), 'utf8');
 const CLAUDE = fs.readFileSync(path.join(RAIZ, 'CLAUDE.md'), 'utf8');
 
-// Las ventanas, sacadas del HTML y no de una lista escrita a mano.
+// Los tokens del atributo class. Se compara por TOKEN y no con \bsec\b: ese
+// límite de palabra da positivo dentro de class="sec-chk", que existe en el
+// archivo, y marcaría como «adentro de una pantalla» algo que no lo está.
+function clases(tag) {
+  return ((tag.match(/class="([^"]*)"/) || [, ''])[1]).split(/\s+/).filter(Boolean);
+}
+
+// LAS VENTANAS, TODAS. La primera versión de este audit sólo miraba
+// `ab-modal-overlay` y auditaba 141 de 201: se le escapaban las 58 con
+// class="mb" —que tienen el CSS byte por byte idéntico— y las 2 escritas a mano
+// con position:fixed. Y justamente en esas 60 estaba la ÚNICA violación del
+// panel: #pp-val-pwd-overlay vivía adentro de .sec#sec-personal-valorizar.
+//
+// Un audit que no ve la mitad de lo que audita da una tranquilidad falsa, que es
+// peor que no tenerlo.
 function ventanas() {
-  return [...PANEL.matchAll(/<div class="([^"]*\bab-modal-overlay\b[^"]*)"\s+id="([^"]+)"/g)]
-    .map((m) => ({ clases: m[1], id: m[2], pos: m.index }));
+  const out = [];
+  for (const m of PANEL.matchAll(/<div\b[^>]*>/g)) {
+    const c = clases(m[0]);
+    const aMano = /position:fixed;inset:0/.test(m[0]) && /z-index/.test(m[0]);
+    if (!c.includes('ab-modal-overlay') && !c.includes('mb') && !aMano) continue;
+    out.push({
+      clases: c.join(' '),
+      id: (m[0].match(/id="([^"]+)"/) || [, null])[1],
+      pos: m.index,
+    });
+  }
+  return out;
 }
 
 // El cuerpo de una ventana, balanceando <div>: desde su apertura hasta su cierre.
@@ -54,9 +78,14 @@ function ancestros(pos) {
 test('hay ventanas que auditar, y son las que se esperan', () => {
   // Si el regex deja de encontrarlas, todos los tests de abajo pasarían vacíos.
   const v = ventanas();
-  assert.ok(v.length > 100, 'sólo se encontraron ' + v.length + ' ventanas: el regex se rompió');
-  assert.ok(v.some((x) => x.id === 'sg-fd-modal'));
-  assert.ok(v.some((x) => x.id === 'sg-fac-modal'));
+  assert.ok(v.length > 190, 'sólo se encontraron ' + v.length + ' ventanas: el regex se rompió');
+  // Una de cada familia: las tres tienen que entrar al audit.
+  assert.ok(v.some((x) => x.id === 'sg-fd-modal'), 'falta una .ab-modal-overlay');
+  assert.ok(v.some((x) => x.id === 'mb-ped'), 'faltan las 58 con class="mb"');
+  assert.ok(v.some((x) => x.id === 'pp-val-pwd-overlay'), 'faltan las escritas a mano');
+  // Y todas tienen id: sin id no hay forma de abrirlas ni de nombrarlas en un
+  // informe de este test.
+  assert.deepEqual(v.filter((x) => !x.id).map((x) => x.pos), []);
 });
 
 test('NINGUNA ventana vive adentro de una pantalla', () => {
@@ -65,7 +94,7 @@ test('NINGUNA ventana vive adentro de una pantalla', () => {
   // nada. Ya pasó con los modales de facturar el remito y recibir la
   // liquidación, y es lo que documenta modales_fuera_de_pantalla.
   const malas = ventanas()
-    .filter((v) => ancestros(v.pos).some((t) => /class="[^"]*\bsec\b/.test(t)))
+    .filter((v) => ancestros(v.pos).some((t) => clases(t).includes('sec')))
     .map((v) => v.id);
   assert.deepEqual(malas, [], 'estas ventanas están adentro de una pantalla');
 });
