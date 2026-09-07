@@ -32344,8 +32344,18 @@ function sgRepExport(){
 </div>
 
 <!-- Modal: resolver un paso -->
+<!-- ══ EL MODAL DE RESOLVER, MÁS ANCHO ═══════════════════════════════════
+     Pablo, 7/9/2026: «hacelo un poco más ancha, no cuesta nada este espacio, y
+     que me figuren bien las cruces para eliminar».
+
+     Estaba clavado en 560px, que es el ancho por defecto de .ab-modal. Ahí
+     adentro entra la tabla de medios de pago con cinco columnas: la fecha se veía
+     como «dd/mm» cortada y la ✕ de borrar quedaba pegada al borde.
+
+     min(880px, 96vw): en una pantalla chica sigue entrando, y en una normal la
+     tabla respira. -->
 <div class="ab-modal-overlay" id="sp-mb-accion">
-<div class="ab-modal" style="width:560px">
+<div class="ab-modal" style="width:min(880px,96vw)">
   <div class="mhd">
     <div><div class="mht" id="sp-acc-tit">Resolver</div></div>
     <button class="mcl" onclick="document.getElementById('sp-mb-accion').classList.remove('on')">×</button>
@@ -69040,9 +69050,13 @@ function spPagoRender() {
   // !important para ganarle.
   cont.innerHTML = '<div class="ab-table-wrap" style="overflow-x:hidden !important">'
     + '<table class="pa-tbl" style="font-size:12px;table-layout:fixed;width:100%;max-width:98vw"><thead><tr>'
-    + '<th style="width:30%">Medio</th><th style="width:24%">Importe</th>'
-    + '<th style="width:22%">Fecha</th>'
-    + '<th style="width:18%">Código</th><th style="width:6%"></th></tr></thead><tbody>'
+    // La ✕ pasa de 6% a 10%: con 6% de un modal de 560px eran 33 píxeles y el
+    // botón quedaba cortado. Y la fecha sube a 24%, que es lo que necesita el
+    // selector para mostrar la fecha entera en vez de «dd/mm».
+    + '<th style="width:26%">Medio</th><th style="width:22%">Importe</th>'
+    + '<th style="width:24%">Fecha</th>'
+    + '<th style="width:18%">Código</th>'
+    + '<th style="width:10%;text-align:center"></th></tr></thead><tbody>'
     + SP.pagos.map(function(p, i) {
         var esTerceros = p.tipo === 'cheque_terceros';
         var esCheque = p.tipo !== 'transferencia';
@@ -69083,7 +69097,11 @@ function spPagoRender() {
               ? '<input class="sp-inp" style="width:100%;min-width:0" placeholder="nº" value="' + spEsc(p.codigo || '') + '"'
                 + ' onchange="spPagoSet(' + i + ',\'codigo\',this.value)">'
               : '<span class="sp-chica">—</span>') + '</td>'
-          + '<td><button type="button" class="btn bd bs" style="padding:2px 6px;font-size:11px"'
+          // Centrada y con aire: pegada al borde de la celda se veía cortada, y
+          // es el botón que borra un cheque — el que menos conviene errarle.
+          + '<td style="text-align:center;padding-left:2px;padding-right:2px">'
+            + '<button type="button" class="btn bd bs" title="Quitar este medio de pago"'
+            + ' style="padding:3px 9px;font-size:12px;line-height:1"'
             + ' onclick="spPagoQuitar(' + i + ')">✕</button></td></tr>';
       }).join('')
     + '</tbody></table></div>';

@@ -443,3 +443,42 @@ test('y los radios de canal no se pisan con el renglón de «repartido»', () =>
   const b = pagoRender();
   assert.match(b, /display:flex;flex-wrap:wrap/);
 });
+
+// ══ EL MODAL DE RESOLVER TIENE LUGAR PARA LO QUE MUESTRA ═══════════════════
+//
+// Pablo, 7/9/2026: «hacelo un poco más ancha, no cuesta nada este espacio... y
+// que me figuren bien las cruces para eliminar».
+//
+// Estaba clavado en el ancho por defecto de .ab-modal (560px) y ahí adentro va la
+// tabla de medios de pago con cinco columnas: la fecha se veía como «dd/mm»
+// cortada y la ✕ de borrar quedaba pegada al borde.
+
+test('el modal de resolver no usa el ancho por defecto: la tabla no entra', () => {
+  const i = PANEL.indexOf('id="sp-mb-accion"');
+  assert.ok(i > 0);
+  const b = PANEL.slice(i, i + 900);
+  assert.match(b, /class="ab-modal" style="width:min\(880px,96vw\)"/);
+  assert.ok(!/class="ab-modal" style="width:560px"/.test(b), 'volvió al ancho por defecto');
+  // Y sigue entrando en una pantalla chica: el vw es lo que lo garantiza.
+  assert.match(b, /96vw/);
+});
+
+test('la columna de la ✕ tiene lugar para el botón, y sigue sumando 100', () => {
+  // Con 6% de un modal de 560px eran 33 píxeles: el botón quedaba cortado. Y es
+  // el que borra un cheque, que es al que menos conviene errarle.
+  const b = pagoRender();
+  const cab = b.slice(b.indexOf('<thead>'), b.indexOf('</thead>'));
+  const pct = [...cab.matchAll(/width:(\d+)%/g)].map((m) => Number(m[1]));
+  assert.equal(pct.reduce((a, c) => a + c, 0), 100);
+  assert.equal(pct[4], 10, 'la columna de la ✕ quedó en ' + pct[4] + '%');
+  // La fecha necesita lugar para mostrarse entera y no «dd/mm».
+  assert.ok(pct[2] >= 24, 'la columna de la fecha quedó en ' + pct[2] + '%');
+});
+
+test('y la ✕ va centrada, no pegada al borde de la celda', () => {
+  const b = pagoRender();
+  const i = b.indexOf('spPagoQuitar(');
+  const celda = b.slice(Math.max(0, i - 420), i + 60);
+  assert.match(celda, /text-align:center/);
+  assert.match(celda, /title="Quitar este medio de pago"/);
+});
