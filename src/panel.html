@@ -16954,12 +16954,58 @@ function sgRetroGuardar(){
 //
 // En vez de acordarse de un z-index por cada uno, se cuenta cuántos hay
 // abiertos y el nuevo se pone por encima. Sirve igual para el que venga.
+// ══════════════════════════════════════════════════════════════════════════
+// UNA SOLA MANERA DE ABRIR UNA VENTANA
+// ══════════════════════════════════════════════════════════════════════════
+//
+// Pablo, 7/9/2026: «veamos la manera de unificar este tipo de conceptos para que
+// todo el panel funcione de la misma manera: que cuando tengamos que abrir, abra
+// una ventana y eso».
+//
+// Había DOS maneras de abrir. De las 141 ventanas del panel, 26 usaban este
+// helper y 113 hacían classList.add('on') a mano. Y no es cosmético: el z-index
+// lo ponía SÓLO el helper, así que una ventana abierta desde adentro de otra
+// —elegir el asiento modelo mientras se carga una factura, ver una partida desde
+// un remito— quedaba DETRÁS de la que la abrió. Se ve el fondo gris, no se puede
+// tocar nada, y parece que el panel se colgó.
+//
+// SE ARREGLA EL MECANISMO, NO LAS 113 LLAMADAS. Tocar 113 lugares es 113
+// oportunidades de romper algo, y la 114ª que alguien escriba mañana vuelve a
+// quedar afuera. Acá se observa la CLASE: cuando un overlay recibe 'on' —lo abra
+// quien lo abra y como lo abra— se le asigna el z-index que le toca. La regla
+// pasa a ser del panel y no de cada pantalla que se acuerde de usarla.
+function sgModalZ(el){
+  if (!el || !el.classList.contains('on')) return;
+  // Los que ya estaban abiertos, sin contarse a sí mismo.
+  var abiertos = 0;
+  document.querySelectorAll('.ab-modal-overlay.on, .mb.on').forEach(function(x){
+    if (x !== el) abiertos++;
+  });
+  el.style.zIndex = String(100 + (abiertos + 1) * 10);
+}
+
+// El helper sigue existiendo y sigue siendo la forma explícita de abrir. Ahora es
+// azúcar: el z-index lo pone el observador igual.
 function sgModalArriba(id){
   var el = eid(id); if (!el) return;
-  var abiertos = document.querySelectorAll('.ab-modal-overlay.on').length;
-  el.style.zIndex = String(100 + (abiertos + 1) * 10);
   el.classList.add('on');
+  sgModalZ(el);
 }
+
+// EL OBSERVADOR. Mira el atributo class de todo el árbol: cuando a un overlay le
+// aparece 'on', le da su altura. Es una sola suscripción para las 141 ventanas.
+(function(){
+  if (typeof MutationObserver !== 'function') return;
+  new MutationObserver(function(muts){
+    for (var i = 0; i < muts.length; i++) {
+      var t = muts[i].target;
+      if (!t.classList) continue;
+      if (t.classList.contains('ab-modal-overlay') || t.classList.contains('mb')) sgModalZ(t);
+    }
+  }).observe(document.documentElement, {
+    attributes: true, attributeFilter: ['class'], subtree: true,
+  });
+})();
 
 // Eliminar una partida que se cargó de más. No se borra el renglón: se da de
 // baja, y con eso sale del stock, del costo del período y de lo que se le debe
