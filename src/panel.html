@@ -19148,6 +19148,13 @@ function sgFdPrecioVista(it){
   if (!pk) return '';
   return (sgFdUnidad(it) === 'bulto') ? +(pk * sgFdKpb(it)).toFixed(2) : pk;
 }
+// EL MISMO NÚMERO, CON EL SIGNO. El campo mostraba «25000» al lado de uno que
+// dice «44»: los dos parecían cantidades. liqPlata es el que usa el resto del
+// panel, así que la plata se escribe igual en todas las pantallas.
+function sgFdPrecioTexto(it){
+  var v = sgFdPrecioVista(it);
+  return v === '' ? '' : liqPlata(v);
+}
 function sgFdSetUnidad(i, u){
   var it = SG.fdItems[i];
   it.unidad = (u === 'kilo') ? 'kilo' : 'bulto';
@@ -19155,8 +19162,11 @@ function sgFdSetUnidad(i, u){
 }
 function sgFdSetPrecio(i, v){
   var it = SG.fdItems[i];
-  var n = Number(v);
-  if (!v || isNaN(n)) { it.precio = ''; sgFdRender(); return; }
+  // liqNum, no Number(): el campo ahora dice «$25.000» y Number() da NaN, así que
+  // el precio se borraría solo al salir. Y liqNum ya sabe cuál punto es de mil y
+  // cuál es el decimal, que es donde se pierde un cero.
+  var n = liqNum({ value: v });
+  if (!v || !n) { it.precio = ''; sgFdRender(); return; }
   var kpb = sgFdKpb(it);
   it.precio = (sgFdUnidad(it) === 'bulto' && kpb > 0) ? +(n / kpb).toFixed(6) : n;
   sgFdRender();
@@ -19201,7 +19211,9 @@ function sgFdRender(){
       // EL PRECIO Y SU UNIDAD, JUNTOS. El selector al lado del campo y no arriba:
       // es lo que le da sentido al número que se está escribiendo.
       +'<div style="display:grid;grid-template-columns:1fr 74px;gap:4px">'
-        +'<input type="number" placeholder="'+(u==='bulto'?'$/bulto':'$/kg')+'" value="'+sgFdPrecioVista(it)+'"'
+        +'<input type="text" inputmode="decimal" placeholder="'+(u==='bulto'?'$/bulto':'$/kg')+'"'
+          +' value="'+escH(sgFdPrecioTexto(it))+'" style="text-align:right"'
+          +' onfocus="liqNumFoco(this)" onblur="liqNumSalida(this)"'
           +' onchange="sgFdSetPrecio('+i+',this.value)">'
         +'<select onchange="sgFdSetUnidad('+i+',this.value)"'+(kpb?'':' disabled title="Esta partida no tiene kg por bulto cargados"')+'>'
           +'<option value="bulto"'+(u==='bulto'?' selected':'')+'>bulto</option>'
@@ -19573,6 +19585,13 @@ function sgFdTotal(){
   return paRound2Fm(t);
 }
 
+// Lo cargado, con el signo. Se guarda lo que se tipeó —liqNum lee las dos
+// formas— así que acá se muestra siempre formateado y no lo que quedó escrito.
+function sgFdMedioMonto(m){
+  var n = liqNum({ value: m.monto });
+  return n ? liqPlata(n) : '';
+}
+
 function sgFdMediosRender(){
   var cont = eid('sgfd-cobro-medios'); if (!cont) return;
   // Las cajas y cuentas QUE ESE USUARIO PUEDE TOCAR: una cuenta con dueño la tocan
@@ -19603,9 +19622,13 @@ function sgFdMediosRender(){
       // 'banco' acá es sólo la etiqueta del caso «no es caja»: opts() lo resuelve
       // por la negativa, así que no importa que ese tipo no exista en la base.
       + '<label style="font-size:11px;color:var(--mut)">Cuánto<br>'
-        + '<input type="text" inputmode="decimal" value="' + escH(m.monto) + '"'
+        + '<input type="text" inputmode="decimal" value="' + escH(sgFdMedioMonto(m)) + '"'
         + ' oninput="' + up(i, 'monto') + '"'
-        + ' style="padding:5px 7px;font-size:12.5px;width:130px;text-align:right"></label>'
+        // Al entrar se pela para poder tipear, al salir queda $500.000,00. Y el
+        // valor formateado vuelve al modelo: si no, el próximo redibujado lo
+        // muestra pelado otra vez.
+        + ' onfocus="liqNumFoco(this)" onblur="liqNumSalida(this);' + up(i, 'monto') + '"'
+        + ' style="padding:5px 7px;font-size:12.5px;width:140px;text-align:right"></label>'
       + '<label style="font-size:11px;color:var(--mut)">' + (esCheque ? 'N° de cheque' : 'Referencia') + '<br>'
         + '<input type="text" value="' + escH(m.ref) + '"'
         + ' oninput="' + up(i, 'ref') + '"'
@@ -26790,6 +26813,13 @@ function sgCobHayGestion(){
   return (SG_COB.docs || []).some(function(d){ return Number(d.pendiente_gestion) > 0.009; });
 }
 
+// Lo cargado, con el signo. Se guarda lo que se tipeó —sgMilParse y liqNum leen
+// las dos formas— así que acá se muestra siempre formateado.
+function sgCobMedioMonto(m){
+  var n = liqNum({ value: m.monto });
+  return n ? liqPlata(n) : '';
+}
+
 function sgCobMediosRender(){
   var cont = eid('sg-cob-medios'); if (!cont) return;
   if (!SG_COB.medios.length) SG_COB.medios.push({ forma: 'transferencia', cuenta: '', monto: '',
@@ -26817,9 +26847,12 @@ function sgCobMediosRender(){
           + '<select onchange="' + up(i, 'cuenta') + '" style="padding:5px 7px;font-size:12.5px;min-width:190px">'
           + opts(m.forma === 'efectivo', m.cuenta) + '</select></label>')
       + '<label style="font-size:11px;color:var(--mut)">Cuánto<br>'
-        + '<input type="text" inputmode="decimal" value="' + escH(m.monto) + '"'
+        + '<input type="text" inputmode="decimal" value="' + escH(sgCobMedioMonto(m)) + '"'
         + ' oninput="' + up(i, 'monto') + '"'
-        + ' style="padding:5px 7px;font-size:12.5px;width:140px;text-align:right"></label>'
+        // Al entrar se pela para tipear, al salir queda $1.000.000,00 — y el valor
+        // formateado vuelve al modelo, o el próximo redibujado lo muestra pelado.
+        + ' onfocus="liqNumFoco(this)" onblur="liqNumSalida(this);' + up(i, 'monto') + '"'
+        + ' style="padding:5px 7px;font-size:12.5px;width:150px;text-align:right"></label>'
       // CONTRA QUÉ MITAD VA ESTE RENGLÓN. Sólo aparece si hay una mitad sin
       // facturar: si no, es una pregunta sin respuesta posible.
       + (hayGes ? '<label style="font-size:11px;color:var(--mut)">Cancela<br>'
