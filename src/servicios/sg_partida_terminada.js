@@ -23,6 +23,8 @@
 
 // El redondeo del repo: los bultos se cuentan enteros pero llegan como REAL de SQLite y
 // arrastran coma flotante. Sin esto, 44.99999 contra 45 da "falta 1 bulto".
+import { gastosSinFactura } from './sg_gastos_facturados.js';
+
 const r2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
 
 export function avanceDePartida(db, ocId) {
@@ -74,9 +76,22 @@ export function avanceDePartida(db, ocId) {
 // de menos. Sin la descarga o el flete valorizados, esos gastos NO se le descuentan —o
 // alguien los tipea a ojo— y el que pierde es siempre el mismo lado.
 //
-// LO QUE SE EXIGE ES LA VALORIZACIÓN, NO LA FACTURA DEL FLETERO. Es la distinción que
-// hizo Pablo: hace falta saber CUÁNTO, no tener el papel. La factura del fletero puede
-// llegar después.
+// SON DOS FRENOS, EN ESE ORDEN: PRIMERO EL IMPORTE, DESPUÉS EL PAPEL.
+//
+// Hasta el 8/9/2026 se exigía sólo la VALORIZACIÓN —«hace falta saber CUÁNTO, no tener el
+// papel; la factura puede llegar después»—. Pablo lo cambió ese día, y por una razón que
+// no es de stock sino impositiva: *«en principio hay que FRENARLA. Sin la factura no
+// podemos liquidar. Es el filtro para contabilizar la factura»*.
+//
+// Descontarle al productor el flete que se le pagó al fletero es trasladarle un
+// comprobante de un tercero: la liquidación tiene que identificarlo —CUIT, razón social,
+// número y total— o la declaración jurada queda mal. Sin el comprobante cargado no hay
+// con qué.
+//
+// El orden importa y sigue siendo el mismo: la VALORIZACIÓN va primero, porque es lo que
+// entra al costo del lote el día que pasa el camión. La FACTURA va después, y es lo que
+// habilita a liquidar. Que trabe el circuito del día es el objetivo — es lo que hace que
+// el papel se cargue en vez de quedar en un cajón.
 //
 // Vive acá, al lado del freno de la partida terminada, porque son la misma pregunta
 // —«¿esta partida está lista para liquidarse?»— y porque la pantalla tiene que poder
@@ -131,13 +146,40 @@ export function frenoParaLiquidar(db, ocId, facturaCuenta) {
   if (g.descarga > 0) {
     return 'La descarga de esta partida está cargada pero sin valorizar: no se sabe cuánto '
       + 'cobró la cuadrilla, así que no se le puede descontar al productor. Valorizala en '
-      + '«Gastos Directos → Control Cooperativa», con el botón «Valorizar» de la fila —alcanza con el importe, la factura puede '
-      + 'llegar después— y volvé.';
+      + '«Gastos Directos → Control Cooperativa», con el botón «Valorizar» de la fila, y '
+      + 'después cargá su factura.';
   }
   if (g.flete > 0) {
     return 'El flete de esta partida está cargado pero sin valorizar: no se sabe cuánto '
-      + 'cobró el fletero. Valorizalo en «Gastos Directos → Fletes de entrada» —alcanza con '
-      + 'el importe, la factura puede llegar después— y volvé.';
+      + 'cobró el fletero. Valorizalo en «Gastos Directos → Fletes de entrada» y después '
+      + 'cargá su factura.';
+  }
+
+  // ── SIN LA FACTURA DEL TERCERO NO SE LIQUIDA ────────────────────────────
+  //
+  // Pablo, 8/9/2026: «en principio hay que FRENARLA. Sin la factura no podemos
+  // liquidar. Es el filtro para contabilizar la factura».
+  //
+  // Descontarle al productor el flete que le pagamos al fletero es, ante AFIP,
+  // trasladarle un comprobante de un tercero: la liquidación tiene que
+  // identificarlo —CUIT, razón social, número, total— y sin el comprobante
+  // cargado no hay con qué. Que trabe el circuito del día es el objetivo: es lo
+  // que hace que la factura se cargue en vez de quedar en un cajón.
+  //
+  // Va DESPUÉS del freno por valorizar, y en ese orden: primero se pone el
+  // importe —que es lo que entra al costo— y después llega el papel.
+  const sf = gastosSinFactura(db, ocId);
+  if (sf.descarga > 0) {
+    return 'La descarga de esta partida todavía no tiene la factura de la cooperativa cargada. '
+      + 'Ese gasto se le descuenta al productor, así que la liquidación tiene que citar el '
+      + 'comprobante —CUIT, razón social, número y total— o la declaración jurada queda mal. '
+      + 'Cargala en «Gastos Directos → Control Cooperativa → 🧾 Ingresar factura» y volvé.';
+  }
+  if (sf.flete > 0) {
+    return 'El flete de esta partida todavía no tiene la factura del fletero cargada. Ese gasto '
+      + 'se le descuenta al productor, así que la liquidación tiene que citar el comprobante '
+      + '—CUIT, razón social, número y total— o la declaración jurada queda mal. Cargala en '
+      + '«Gastos Directos → Fletes de entrada → 🧾 Ingresar factura» y volvé.';
   }
   return null;
 }

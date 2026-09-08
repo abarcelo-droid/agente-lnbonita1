@@ -13,6 +13,7 @@ import { crearAsiento } from '../servicios/asientos.js';
 import { lineasAsientoLiquidacion } from '../servicios/asiento-liquidacion.js';
 import { objetivoCerradoGrupo, cierraContraLoAcordado } from '../servicios/sg_acordado.js';
 import { frenoParaLiquidar } from '../servicios/sg_partida_terminada.js';
+import { comprobantesDeLaPartida } from '../servicios/sg_gastos_facturados.js';
 import { facturaCuenta } from '../servicios/factura-cuenta.js';
 import path    from 'path';
 import fs      from 'fs';
@@ -773,6 +774,38 @@ function _drawBarcode(doc, code, x, y, moduleW, height) {
   }
 }
 
+// ── LOS COMPROBANTES DE TERCEROS QUE ESTA LIQUIDACIÓN DESCUENTA ──────────
+//
+// Pablo, 8/9/2026: «es MANDATORIO que figuren los datos de las facturas de B y C».
+//
+// Una liquidación puede cubrir VARIAS partidas —se agrupan desde el 29/8— así que
+// se juntan las de todas y se saca el repetido: una misma factura del fletero
+// puede cubrir dos partidas del mismo productor, y citarla dos veces en el papel
+// haría creer que son dos comprobantes.
+//
+// Vive acá y no en el armador del PDF porque la pantalla lo va a pedir también:
+// el que liquida tiene que ver qué comprobantes va a citar ANTES de imprimir.
+function comprobantesDeLaLiquidacion(liq) {
+  const ocs = new Set();
+  // El oc_id de la cabecera es el de las liquidaciones de UNA partida; las
+  // agrupadas lo tienen en liquidacion_partidas, una fila por partida. Se leen las
+  // dos: una liquidación vieja tiene la cabecera y ninguna fila.
+  if (liq && liq.oc_id) ocs.add(Number(liq.oc_id));
+  if (liq && liq.id) {
+    for (const p of db.prepare('SELECT oc_id FROM liquidacion_partidas WHERE liquidacion_id=?')
+      .all(Number(liq.id))) {
+      if (p && p.oc_id) ocs.add(Number(p.oc_id));
+    }
+  }
+  const vistos = new Map();
+  for (const ocId of ocs) {
+    for (const c of comprobantesDeLaPartida(dbSg, ocId)) {
+      if (!vistos.has(String(c.factura_id))) vistos.set(String(c.factura_id), c);
+    }
+  }
+  return [...vistos.values()];
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // GET /:id/pdf — genera el PDF lo más fiel al original posible
 // ─────────────────────────────────────────────────────────────────────────────
@@ -982,6 +1015,59 @@ router.get('/:id/pdf', async function(req, res) {
       }
       doc.text(moneyFmt(c.importe), cConImp, y, { align: 'right' });
       y += 5;
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // LOS COMPROBANTES DE TERCEROS QUE SE ESTÁN DESCONTANDO
+    // ═══════════════════════════════════════════════════════════════════════
+    //
+    // Pablo, 8/9/2026: «Si al proveedor A le vamos a liquidar una partida y por esa
+    // partida pagamos descargas y fletes de los proveedores B y C, es MANDATORIO
+    // que figuren los datos de las facturas de B y C. Hay que mostrar CUIT, Razón
+    // Social, número de factura y el TOTAL de esa factura, no importa que
+    // solamente estemos descontando una parte».
+    //
+    // Descontarle a A el costo que se le pagó a B es, ante AFIP, trasladarle un
+    // comprobante de un tercero: sin identificarlo acá, la liquidación no respalda
+    // la deducción y la declaración jurada sale mal.
+    //
+    // Va el TOTAL del comprobante, entero. No se prorratea: lo que la declaración
+    // necesita es IDENTIFICAR el papel, y el papel vale lo que dice. Al lado se
+    // aclara qué parte se imputó a esta liquidación, para que el número que se
+    // descuenta arriba se pueda seguir.
+    const comps = comprobantesDeLaLiquidacion(r);
+    if (comps.length) {
+      y += 4;
+      setF(9, true);
+      doc.text('COMPROBANTES DE TERCEROS QUE SE DESCUENTAN', L, y);
+      y += 5;
+      setF(7.5, false);
+      doc.text('Emisor', L, y);
+      doc.text('CUIT', L + 62, y);
+      doc.text('Comprobante', L + 92, y);
+      doc.text('Fecha', L + 126, y);
+      doc.text('Total factura', R - 3, y, { align: 'right' });
+      y += 1.5;
+      doc.setLineWidth(0.2);
+      doc.line(L, y, R, y);
+      y += 4;
+      setF(8, false);
+      for (const c of comps) {
+        // El nombre se recorta y el resto NO: un CUIT o un número de comprobante a
+        // medias no sirve para identificar nada, que es para lo que están.
+        doc.text(String(c.emisor || '').slice(0, 34), L, y);
+        doc.text(String(c.cuit || '—'), L + 62, y);
+        doc.text(String(c.comprobante || '—'), L + 92, y);
+        doc.text(String(c.fecha || '—'), L + 126, y);
+        doc.text(moneyFmt(c.total), R - 3, y, { align: 'right' });
+        y += 4;
+        setF(7, false);
+        doc.text((c.conceptos || []).join(' · ')
+          + (c.imputado ? ('  ·  imputado a esta liquidación: ' + moneyFmt(c.imputado)) : ''),
+          L + 3, y);
+        setF(8, false);
+        y += 5;
+      }
     }
 
     // EL SELLO DE LA COPIA INTERNA. Si el papel lleva los números de gestión, tiene

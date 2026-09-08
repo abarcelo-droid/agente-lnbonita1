@@ -56,6 +56,7 @@ import { filtrarCosto, puedeVerCosto } from '../servicios/sg_costo_visible.js';
 // Lo que falta valorizar para poder liquidar. Vive con el freno de la partida
 // terminada porque es la misma pregunta: si esta partida esta lista.
 import { gastosSinValorizar } from '../servicios/sg_partida_terminada.js';
+import { gastosSinFactura, comprobantesDeLaPartida } from '../servicios/sg_gastos_facturados.js';
 
 const router = express.Router();
 
@@ -4130,25 +4131,64 @@ function ventaDePartida(db, ocId) {
         JOIN sg_recepciones r ON r.id = g.recepcion_id AND r.activo = 1
        WHERE r.oc_id = ? AND g.tipo_gasto = 'descarga_ingreso' AND g.activo = 1`).get(ocId);
 
-    // EL FLETE sale de la orden. Se trae sólo si está a cargo del COMPRADOR, que
-    // es lo que pidió Pablo; si está a cargo del vendedor igual se informa con su
-    // rótulo, para que el que liquida vea que existe y decida.
+    // ── EL FLETE: LA FACTURA DEL FLETERO PERFECCIONA LA ORDEN ────────────
     //
-    // flete_con_iva dice si el monto YA lo trae adentro: sin esa distinción se le
-    // cobraría el IVA dos veces o ninguna.
+    // Pablo, 8/9/2026: «el flete debe salir de la factura del fletero... es como
+    // que con la factura del fletero PERFECCIONAMOS lo de la orden de compra.
+    // Recordá acá Gestión y Fiscal, debemos mantener el criterio: se descuenta lo
+    // que dice la factura en la parte fiscal, y si hay diferencia se descuenta en
+    // Gestión».
+    //
+    // Antes salía SÓLO de sg_oc.flete_monto —lo que el comprador pactó— así que
+    // al productor se le descontaba un número que no tenía ningún comprobante
+    // detrás. La descarga ya salía del gasto real; eran dos criterios para dos
+    // conceptos que van al mismo lugar.
+    //
+    // Ahora son dos números, los dos ciertos, que es la regla del repo:
+    //   · FISCAL   = lo que dicen las facturas del fletero imputadas a esta
+    //                partida. Es lo que va al libro y lo que la liquidación cita.
+    //   · GESTIÓN  = lo acordado en la orden menos lo facturado. Es lo que de
+    //                verdad se le descuenta al productor cuando el papel vino por
+    //                menos de lo pactado.
+    //
     // La alícuota de los servicios que le cobramos. La comisión va al 10,5 y la
     // maneja la pantalla; acá sólo se prellenan la descarga y el flete, que van
     // al 21.
     const IVA_SERVICIOS = 21;
     const fMonto = r2(oc.flete_monto);
     const fConIva = oc.flete_con_iva ? 1 : 0;
-    const fNeto = fConIva ? r2(fMonto / (1 + IVA_SERVICIOS / 100)) : fMonto;
+    // Lo ACORDADO, neto. Sigue siendo el número de la orden y no se toca.
+    const fAcordado = fConIva ? r2(fMonto / (1 + IVA_SERVICIOS / 100)) : fMonto;
+    // Lo FACTURADO. Sale del neto que cada factura le imputó a cada viaje de esta
+    // partida —no del total del comprobante—: una factura del fletero puede cubrir
+    // varias partidas, y a ésta le toca su parte.
+    const fFact = db.prepare(`
+      SELECT COALESCE(SUM(fi.neto),0) AS neto, COUNT(*) AS n
+        FROM sg_gastos_directos g
+        JOIN sg_recepciones r ON r.id = g.recepcion_id AND r.activo = 1
+        JOIN sg_factura_gasto_items fi ON fi.gasto_id = g.id
+        JOIN sg_facturas_gasto f ON f.id = fi.factura_id AND f.activo = 1
+       WHERE r.oc_id = ? AND g.tipo_gasto = 'flete_entrada'
+         AND g.activo = 1 AND g.estado <> 'anulado'`).get(ocId);
+    const fFiscal = r2(fFact && fFact.neto);
+    const fHayFactura = Number(fFact && fFact.n) > 0;
+    // Sin factura todavía, lo acordado es lo único que hay. La liquidación no va a
+    // poder emitirse igual —frenoParaLiquidar lo corta— pero la pantalla tiene que
+    // poder mostrar de qué se está hablando.
+    const fNeto = fHayFactura ? fFiscal : fAcordado;
     const flete = {
       a_cargo: oc.flete_a_cargo || null,
       monto: fMonto,
       con_iva: fConIva,
       neto: fNeto,
-      iva: r2(fConIva ? (fMonto - fNeto) : (fMonto * IVA_SERVICIOS / 100)),
+      iva: r2(fNeto * IVA_SERVICIOS / 100),
+      // LOS DOS NÚMEROS, dichos por separado para que la pantalla los muestre y el
+      // asiento los separe. La diferencia puede ser de cualquier signo: el papel
+      // puede venir por más de lo pactado.
+      acordado: fAcordado,
+      facturado: fFiscal,
+      hay_factura: fHayFactura ? 1 : 0,
+      dif_gestion: fHayFactura ? r2(fAcordado - fFiscal) : 0,
       // Se prellena sólo cuando corresponde; el resto es información.
       se_cobra: oc.flete_a_cargo === 'comprador' && fMonto > 0 ? 1 : 0,
     };
@@ -4261,6 +4301,13 @@ function ventaDePartida(db, ocId) {
       // operador cargue todo. El servidor lo vuelve a mirar al guardar: esto es
       // para no hacerle perder el trabajo, no para reemplazar el control.
       sin_valorizar: gastosSinValorizar(db, ocId),
+      // Y LO QUE FALTA FACTURAR de los terceros. Sin la factura del fletero o de
+      // la cooperativa la liquidación no se puede emitir —el comprobante hay que
+      // citarlo— y la pantalla tiene que decirlo ANTES de que se cargue todo.
+      sin_factura: gastosSinFactura(db, ocId),
+      // Los comprobantes que la liquidación va a citar, para mostrarlos al lado de
+      // cada concepto y para imprimirlos.
+      comprobantes: comprobantesDeLaPartida(db, ocId),
       lineas_estimadas: estimadas, lineas_sin_atribuir: sinAtribuir,
       lineas: detalle };
 }
@@ -4410,6 +4457,22 @@ function fusionarVentas(partes) {
       descarga: partes.reduce((a, p) => a + ((p.sin_valorizar || {}).descarga || 0), 0),
       flete: partes.reduce((a, p) => a + ((p.sin_valorizar || {}).flete || 0), 0),
     },
+    sin_factura: {
+      descarga: partes.reduce((a, p) => a + ((p.sin_factura || {}).descarga || 0), 0),
+      flete: partes.reduce((a, p) => a + ((p.sin_factura || {}).flete || 0), 0),
+    },
+    // LOS COMPROBANTES DEL GRUPO, sin repetir: una misma factura del fletero puede
+    // cubrir dos partidas del mismo productor, y citarla dos veces en el papel
+    // haría creer que son dos comprobantes.
+    comprobantes: (function(){
+      const vistos = new Map();
+      for (const p of partes) {
+        for (const c of (p.comprobantes || [])) {
+          if (!vistos.has(String(c.factura_id))) vistos.set(String(c.factura_id), c);
+        }
+      }
+      return [...vistos.values()];
+    })(),
     lineas_estimadas: partes.reduce((a, p) => a + (p.lineas_estimadas || 0), 0),
     lineas_sin_atribuir: partes.reduce((a, p) => a + (p.lineas_sin_atribuir || 0), 0),
     lineas: partes.flatMap((p) => (p.lineas || []).map(
