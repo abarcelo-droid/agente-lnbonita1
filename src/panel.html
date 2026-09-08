@@ -4056,17 +4056,36 @@ input[type=number]{-moz-appearance:textfield;appearance:textfield}
         </div>
         <input id="sgfe-q" placeholder="🔎 Partida, proveedor o fletero…" oninput="sgFePintar()"
                style="max-width:280px;padding:5px 9px;border-radius:6px;border:1px solid var(--bor);background:var(--bg)">
+        <!-- ══ LA CUENTA DEL FLETERO, COMO EN FLETES DE SALIDA ═════════════
+             Pablo, 8/9/2026: «usá el mismo modelo de trabajo para Fletes de
+             entrada que el que ya tenemos para fletes de salida, si no las dos
+             pantallas confunden».
+
+             El fletero trae ocho camiones en la semana y manda UNA cuenta. En
+             salida eso se valoriza junto; acá había que entrar viaje por viaje.
+
+             La diferencia con salida es de dónde sale el fletero: allá viene del
+             remito, así que los pendientes ya vienen agrupados. Acá se sabe
+             recién al valorizar —la orden de compra no lo guarda— así que primero
+             se elige y después se tildan sus viajes. Es el mismo trabajo con el
+             orden invertido, no otra pantalla. -->
+        <label id="sgfe-cuenta-box" style="display:none;font-size:11px;color:var(--mut)">A qué fletero se le paga<br>
+          <select id="sgfe-cuenta-fletero" onchange="sgFePintar()"
+                  style="padding:5px 7px;font-size:12.5px;min-width:210px"></select></label>
+        <button class="btn bb bs" id="sgfe-cuenta-btn" style="display:none"
+                onclick="sgFeCuentaAbrir()">💵 Valorizar cuenta</button>
         <span style="font-size:11px;color:var(--mut)">El flete a cargo del vendedor no figura: viene adentro del precio.</span>
       </div>
       <div class="ab-table-wrap"><table class="pa-tbl">
-        <thead><tr><th style="width:165px">Partida</th><th style="width:96px">Fecha</th>
+        <thead><tr><th style="width:34px" id="sgfe-th-chk"></th>
+          <th style="width:165px">Partida</th><th style="width:96px">Fecha</th>
           <th>Proveedor</th>
           <th style="width:76px;text-align:right">Bultos</th>
           <th style="width:96px;text-align:right">Kg</th>
           <th style="width:135px;text-align:right">Estimó el comprador</th>
           <th style="width:135px;text-align:right">Factura del fletero</th>
           <th style="width:120px"></th></tr></thead>
-        <tbody id="sgfe-tb"><tr><td colspan="8" class="emp">Cargando…</td></tr></tbody>
+        <tbody id="sgfe-tb"><tr><td colspan="9" class="emp">Cargando…</td></tr></tbody>
       </table></div>
       <div id="sgfe-n" style="font-size:11.5px;color:var(--mut);margin-top:6px"></div>
     </div>
@@ -22422,6 +22441,24 @@ SG_MANUAL.gastos = { titulo: 'Gastos Directos', html:
   + '<p>Los fletes valorizados <b>antes</b> de esta versión tienen el total con IVA adentro. '
   + 'Se corrigen entrando de nuevo a <b>Valorizar</b> y poniendo el neto.</p>'
 
+  + '<h3>La cuenta del fletero, de una vez <span class="ver">V1031</span></h3>'
+  + '<p>El fletero trae ocho camiones en la semana y manda <b>una</b> cuenta. En <b>Fletes de '
+  + 'entrada</b> ahora se valoriza igual que en <b>Fletes de salida</b>: se elige el fletero, se '
+  + '<b>tildan los viajes</b> que entran en esa cuenta y se abre el mismo cuadro que reparte un '
+  + 'total entre ellos —por kilos— o deja poner uno por uno.</p>'
+  + '<div class="ojo">Antes había que entrar viaje por viaje y tipear ocho veces el mismo '
+  + 'importe repartido a mano.</div>'
+  + '<p><b>El orden es al revés que en salida, y por una razón:</b> allá el fletero viene del '
+  + 'remito, así que los pendientes ya salen agrupados por él. Acá la orden de compra <b>no '
+  + 'guarda quién hace el flete</b> —guarda cuánto se pactó— así que el fletero se sabe recién '
+  + 'al valorizar: primero se elige y después se tildan sus viajes.</p>'
+  + '<p>Cada viaje arranca con <b>lo que dijo la orden</b>, igual que al valorizar de a uno. Y '
+  + 'sigue valiendo todo lo demás: el importe va <b>sin IVA</b>, entra al <b>costo de la '
+  + 'partida</b>, y el asiento y la deuda con el fletero salen de la <b>factura</b>.</p>'
+  + '<div class="ojo">Si uno de los viajes tildados es de un flete que <b>paga el productor</b>, '
+  + 'la cuenta entera se rechaza y dice de qué partida se trata: ese flete ya viene adentro del '
+  + 'precio y no se paga aparte.</div>'
+
   + '<h3>Sin la factura del tercero NO se puede liquidar <span class="ver">V1030</span></h3>'
   + '<p>El flete y la descarga de una partida <b>se le descuentan al productor</b> en su '
   + 'liquidación. Ante ARCA eso es <b>trasladarle un comprobante de un tercero</b>, así que la '
@@ -24604,8 +24641,15 @@ function sgGdsRenderVal(){
 }
 // ── Valorización de una cuenta (fletero o cooperativa). GENÉRICA: prorratea por `base`
 //    (kg para flete; bultos/pallets para cargas/descargas). Reusada por Fletes y Cargas/Descargas.
-function sgGdsValAbrir(opts){   // opts:{prov, nombre, items:[{id,ref,sub,fecha,base,unidadLbl}], reload}
+function sgGdsValAbrir(opts){   // opts:{prov, nombre, items:[{id,ref,sub,fecha,base,unidadLbl}], reload, ruta, cuerpo}
   SGGD.valProv=opts.prov; SGGD.valNombre=opts.nombre||''; SGGD.valReload=opts.reload||sgGdsLoad;
+  // A DÓNDE VA. Estaba clavado en /gastos-servicio/valorizar, así que este cuadro
+  // —que ya prorratea, corrige y valida— servía para una sola pantalla. Los
+  // fletes de ENTRADA no se pueden guardar por ahí: su operación puede no tener
+  // todavía fila de gasto, y el que la escribe tiene que recalcular el costo de
+  // los lotes. Con la dirección por parámetro, el cuadro es uno solo.
+  SGGD.valRuta=opts.ruta||'/api/sg/gastos-servicio/valorizar';
+  SGGD.valCuerpo=opts.cuerpo||null;
   SGGD.valItems=(opts.items||[]).map(function(x){
     return {id:x.id, ref:x.ref, sub:x.sub, fecha:x.fecha, base:Number(x.base)||0,
       unidadLbl:x.unidadLbl||'',
@@ -24734,7 +24778,10 @@ function sgGdsValResumen(){
 function sgGdsValGuardar(){
   var items=SGGD.valItems.filter(function(it){return it.monto!==''&&Number(it.monto)>=0;}).map(function(it){return {id:it.id,monto:Number(it.monto)};});
   if(!items.length){ toast('Cargá al menos un monto','er'); return; }
-  api('/api/sg/gastos-servicio/valorizar','POST',{proveedor_servicio_id:SGGD.valProv,items:items}).then(function(r){
+  var cuerpo = SGGD.valCuerpo
+    ? SGGD.valCuerpo(items)
+    : {proveedor_servicio_id:SGGD.valProv, items:items};
+  api(SGGD.valRuta||'/api/sg/gastos-servicio/valorizar','POST',cuerpo).then(function(r){
     // CERO NO ES UN ÉXITO. El servidor sólo pisa lo que está pendiente: si el
     // gasto ya se valorizó, o lo anularon, o es de otro proveedor, contesta ok
     // con cero cambios. Decir «0 operación(es) valorizada(s)» y cerrar el cuadro
@@ -24817,7 +24864,34 @@ function sgFeLoad(){
   });
 }
 
+// LO QUE SE ESTÁ ARMANDO. sel = los viajes tildados, por recepción.
+SGFE.sel = SGFE.sel || {};
+
+function sgFeSel(recId, on){
+  if (on) SGFE.sel[String(recId)] = 1; else delete SGFE.sel[String(recId)];
+  sgFeCuentaBoton();
+}
+
+// El botón dice cuántos viajes entran, o no se ofrece. Un «Valorizar cuenta» que
+// abre un cuadro vacío hace pensar que se perdió la selección.
+function sgFeCuentaBoton(){
+  var b = eid('sgfe-cuenta-btn'); if (!b) return;
+  var n = Object.keys(SGFE.sel || {}).length;
+  var puede = SGFE.estado === 'pendiente_valorizar' && n > 0
+    && (eid('sgfe-cuenta-fletero') || {}).value;
+  b.style.display = (SGFE.estado === 'pendiente_valorizar') ? '' : 'none';
+  b.disabled = !puede;
+  b.style.opacity = puede ? '1' : '.5';
+  b.textContent = n ? ('💵 Valorizar cuenta — ' + n + ' viaje(s)') : '💵 Valorizar cuenta';
+}
+
 function sgFePintar(){
+  // EN «A VALORIZAR» SE ARMA UNA CUENTA; EN «VALORIZADOS» SE CORRIGE DE A UNO.
+  // El selector de fletero y los tildes son de la primera: en la segunda cada
+  // viaje ya tiene el suyo y tildarlos no significaría nada.
+  var porCuenta = SGFE.estado === 'pendiente_valorizar';
+  var cb = eid('sgfe-cuenta-box'); if (cb) cb.style.display = porCuenta ? '' : 'none';
+  var th = eid('sgfe-th-chk'); if (th) th.textContent = '';
   var q = sgNorm(String((eid('sgfe-q') || {}).value || '').trim());
   var filas = SGFE.filas.filter(function(x){
     if (!q) return true;
@@ -24833,6 +24907,13 @@ function sgFePintar(){
     var val = x.gasto_estado === 'valorizado';
     var dif = val ? Math.round(((x.gasto_monto || 0) - (x.estimado || 0)) * 100) / 100 : 0;
     return '<tr>'
+      // El tilde sólo cuando hay algo que tildar: en «Valorizados» no se arma una
+      // cuenta, se corrige de a uno.
+      + (porCuenta
+          ? '<td style="text-align:center"><input type="checkbox" data-rec="' + x.recepcion_id + '"'
+            + (SGFE.sel[String(x.recepcion_id)] ? ' checked' : '')
+            + ' onchange="sgFeSel(' + x.recepcion_id + ',this.checked)"></td>'
+          : '<td></td>')
       + '<td style="font-family:monospace;font-size:11.5px"><b>'
         + escH(x.partida || x.oc_numero || '—') + '</b>'
         // EL ADELANTADO NO ES UN GASTO NUESTRO. Sin decirlo acá, administración
@@ -24887,11 +24968,12 @@ function sgFePintar(){
         + '<button class="btn ' + (val ? 'bo' : 'bb') + ' bs" onclick="sgFeOpen(' + x.recepcion_id + ')">'
         + (val ? 'Corregir' : 'Valorizar') + '</button></td></tr>';
   }).join('')
-    : '<tr><td colspan="8" class="emp">'
+    : '<tr><td colspan="9" class="emp">'
       + (SGFE.estado === 'valorizado'
           ? 'Todavía no se valorizó ningún flete de entrada.'
           : '✓ No hay fletes de entrada esperando la factura del fletero.')
       + '</td></tr>';
+  sgFeCuentaBoton();
   var n = eid('sgfe-n');
   var conIva = SGFE.filas.filter(sgFeConIvaAdentro).length;
   if (n) n.innerHTML = (SGFE.estado === 'pendiente_valorizar' && filas.length)
@@ -24925,6 +25007,8 @@ function sgFeOpen(recId){
   sgFePropuesta(x);
   var sel = eid('sgfe-fletero');
   if (sel) sel.innerHTML = sgFleteroOpts(SGFE.fleteros, x.proveedor_servicio_id);
+  var selC = eid('sgfe-cuenta-fletero');
+  if (selC && !selC.options.length) selC.innerHTML = sgFleteroOpts(SGFE.fleteros, '', '— Elegí el fletero —');
   // Y se dice dónde se marcan, una sola vez y en chico: la marca ordena la lista,
   // no es un requisito para poder pagarle a alguien.
   var ay = eid('sgfe-fletero-ayuda');
@@ -24946,6 +25030,39 @@ function sgFeOpen(recId){
   var arch = eid('sgfe-arch'); if (arch) arch.innerHTML = sgFeArchLink(x);
   sgFeDif();
   sgModalArriba('sgfe-modal');
+}
+
+// ── LA CUENTA DEL FLETERO ────────────────────────────────────────────────
+//
+// Se reusa el MISMO cuadro que fletes de salida —el que reparte un total entre las
+// operaciones, o deja poner uno por uno— cambiándole a dónde postea. Escribir otro
+// serían dos maneras de repartir la misma plata.
+function sgFeCuentaAbrir(){
+  var fl = (eid('sgfe-cuenta-fletero') || {}).value;
+  if (!fl) { toast('Elegí a qué fletero se le paga', 'er'); return; }
+  var elegidos = SGFE.filas.filter(function(x){ return SGFE.sel[String(x.recepcion_id)]; });
+  if (!elegidos.length) { toast('Tildá los viajes que entran en esta cuenta', 'er'); return; }
+  var nom = ((SGFE.fleteros || []).filter(function(f){ return String(f.id) === String(fl); })[0] || {}).razon_social || '';
+  sgGdsValAbrir({
+    prov: Number(fl), nombre: nom,
+    // El reparto se hace por KILOS, que es como se cobra un flete de entrada.
+    items: elegidos.map(function(x){
+      return { id: x.recepcion_id, ref: x.partida || x.oc_numero || '',
+        sub: x.proveedor_nombre || '', fecha: x.fecha_recepcion,
+        base: Number(x.kg) || 0, unidadLbl: 'kg',
+        // Lo que dijo la orden, como piso: es de donde tiene que salir la
+        // propuesta, igual que al valorizar de a uno.
+        monto: x.estimado || '' };
+    }),
+    ruta: '/api/sg/fletes-entrada/valorizar-cuenta',
+    // Los ids de acá son RECEPCIONES, no gastos: el gasto puede no existir
+    // todavía y lo crea el servidor.
+    cuerpo: function(items){
+      return { proveedor_servicio_id: Number(fl),
+        items: items.map(function(i){ return { recepcion_id: i.id, monto: i.monto }; }) };
+    },
+    reload: function(){ SGFE.sel = {}; sgFeLoad(); },
+  });
 }
 
 // ── LO QUE PROPONE LA ORDEN, Y EL IVA QUE QUEDÓ ADENTRO ──────────────────

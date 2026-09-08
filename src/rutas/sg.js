@@ -12045,6 +12045,95 @@ router.get('/gastos-factura', requireAuth, (req, res) => {
 // no hace falta el dueño. Estaba con requireAdmin y no se podía aflojar porque
 // 'sg/fletes-entrada' no estaba declarado en ensure_api_prefijos.js — sin prefijo,
 // exigirNivel deja pasar sin mirar nada. Declarado el prefijo, el nivel lo cuida.
+// ══ LA CUENTA DEL FLETERO, DE UNA VEZ ═══════════════════════════════════
+//
+// Pablo, 8/9/2026: «usá el mismo modelo de trabajo para Fletes de entrada que el
+// que ya tenemos para Fletes de salida, si no las dos pantallas confunden».
+//
+// Y tenía razón: es el mismo trabajo. El fletero trae ocho camiones en la semana
+// y manda UNA cuenta; en salida eso se valoriza junto —se elige el fletero, se ven
+// sus remitos y se pone un total que se reparte— y en entrada había que entrar
+// viaje por viaje y tipear ocho veces.
+//
+// POR QUÉ NO ALCANZABA CON REUSAR /gastos-servicio/valorizar, que es el de salida:
+//
+//   · Aquél actualiza POR ID DE GASTO, y un flete de entrada pendiente puede no
+//     tener todavía fila en sg_gastos_directos: la lista se arma desde las
+//     recepciones y el gasto nace al valorizar. Acá se crea o se actualiza.
+//   · Aquél exige que el gasto YA tenga fletero (WHERE proveedor_servicio_id=?),
+//     y en entrada el fletero se sabe recién ahora: en salida viene del remito.
+//   · Y aquél recalcula el costo del lote sólo para la descarga. El flete de
+//     entrada también entra al costo de la partida, así que sin eso la plata se
+//     cargaba y la mercadería seguía costando lo mismo.
+//
+// Lo que NO cambia es la regla del importe: va SIN IVA, y el asiento y la deuda
+// salen de la factura. El cuadro que reparte el total es el mismo de salida.
+router.post('/fletes-entrada/valorizar-cuenta', requireAuth, (req, res) => {
+  const db = getDb();
+  try {
+    const b = req.body || {};
+    const fletero = Number(b.proveedor_servicio_id);
+    if (!fletero) return res.status(400).json({ ok: false, error: 'Elegí a qué fletero se le paga' });
+    if (!db.prepare('SELECT 1 FROM sg_proveedores WHERE id=? AND activo=1').get(fletero)) {
+      return res.status(400).json({ ok: false, error: 'Ese fletero no existe' });
+    }
+    const items = Array.isArray(b.items) ? b.items : [];
+    if (!items.length) return res.status(400).json({ ok: false, error: 'Elegí al menos un viaje' });
+
+    const fecha = val(b.fecha) || db.prepare("SELECT date('now','localtime') d").get().d;
+    // El agrupador de la cuenta: es lo que después permite ver qué viajes entraron
+    // en la misma valorización, igual que en fletes de salida.
+    const ref = val(b.cuenta_ref)
+      || db.prepare("SELECT 'SG-FE-'||strftime('%Y%m%d%H%M%S','now','localtime') r").get().r;
+
+    let n = 0;
+    const tocados = [];
+    db.transaction(() => {
+      for (const it of items) {
+        const monto = r2(it.monto);
+        if (!(monto > 0)) throw new Error('Cada viaje necesita su importe');
+        const rec = db.prepare(`SELECT r.*, o.flete_a_cargo, o.flete_pagado_por
+          FROM sg_recepciones r JOIN sg_oc o ON o.id = r.oc_id
+         WHERE r.id=? AND r.activo=1`).get(Number(it.recepcion_id));
+        if (!rec) throw new Error('Una de las recepciones no existe');
+        // EL MISMO FRENO QUE DE A UNO. El flete del vendedor sólo se valoriza si
+        // lo adelantó San Gerónimo; si lo pagó el productor no hay factura de
+        // fletero que cargar. Sin repetirlo acá, la puerta nueva se lo saltearía.
+        if (rec.flete_a_cargo === 'vendedor' && rec.flete_pagado_por !== 'san_geronimo') {
+          throw new Error('El flete de la partida ' + (rec.numero_recepcion || rec.id)
+            + ' lo paga el productor: ya viene adentro del precio y no se paga aparte.');
+        }
+        const ya = db.prepare(`SELECT * FROM sg_gastos_directos WHERE recepcion_id=?
+          AND tipo_gasto='flete_entrada' AND activo=1 AND estado<>'anulado'`).get(rec.id);
+        if (ya) {
+          db.prepare(`UPDATE sg_gastos_directos SET estado='valorizado', monto=?,
+            proveedor_servicio_id=?, fecha_valorizacion=?, valorizado_por=?, cuenta_ref=?
+           WHERE id=?`).run(monto, fletero, fecha, uid(req), ref, ya.id);
+        } else {
+          db.prepare(`INSERT INTO sg_gastos_directos
+            (tipo_gasto, recepcion_id, proveedor_servicio_id, estado, monto, fecha_servicio,
+             fecha_valorizacion, cuenta_ref, creado_por, valorizado_por)
+            VALUES ('flete_entrada', ?,?, 'valorizado', ?,?,?,?,?,?)`).run(
+            rec.id, fletero, monto, rec.fecha_recepcion, fecha, ref, uid(req), uid(req));
+        }
+        n++;
+        tocados.push(rec.id);
+      }
+      // Y AHORA ENTRA AL COSTO. Es lo que el endpoint de salida no hace para este
+      // tipo de gasto: sin esto la plata se carga y la partida sigue costando lo
+      // mismo, que es el error más caro de todos porque no se ve.
+      for (const recId of tocados) {
+        for (const l of db.prepare('SELECT id FROM sg_lotes WHERE recepcion_id=? AND activo=1').all(recId)) {
+          recalcCostoLote(db, Number(l.id));
+        }
+      }
+    })();
+    res.json({ ok: true, data: { valorizados: n, cuenta_ref: ref,
+      aviso: 'Entraron al costo de sus partidas. Para contabilizarlo y generar la deuda con el '
+           + 'fletero, cargá su factura con «🧾 Ingresar factura».' } });
+  } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
+});
+
 router.post('/fletes-entrada/:recepcionId/valorizar', requireAuth, (req, res) => {
   const db = getDb();
   try {
