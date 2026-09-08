@@ -292,6 +292,53 @@ router.get('/familias', requireAuth, (req, res) => {
 // de ochenta productos. Sin ese número, borrar es adivinar: se aprieta, vuelve
 // un 409, y el que lo apretó cree que rompió algo.
 // Va declarada ANTES que cualquier /familias/:id para que ':id' no se coma 'uso'.
+// ── EL MAPA DE PRODUCTOS ─────────────────────────────────────────────────
+//
+// Pablo, 8/9/2026: «mejorame el mapa de productos... poniéndolo como si fuese un
+// gráfico que se entienda un poco más: Frutas, todas las especies, y luego los
+// que tengan variedades».
+//
+// El maestro era una GRILLA PLANA de productos: la jerarquía existía en la base
+// pero no se veía en ningún lado, y para saber qué especies tenía una familia
+// había que filtrar y contar a ojo.
+//
+// Va en UNA llamada y no en cuatro. Con cuatro, el árbol se arma en el navegador
+// pegando listas, y basta que una llegue tarde para dibujar una familia sin sus
+// especies — que es exactamente el error que hace creer que se perdió algo.
+router.get('/taxonomia', requireAuth, (req, res) => {
+  const db = getDb();
+  try {
+    // Los conteos salen de sg_productos, que es lo que importa: una especie sin
+    // ningún producto se puede mover sin pensarlo, y una con cuarenta no.
+    const familias = db.prepare(`
+      SELECT f.id, f.codigo, f.nombre, f.iva_alicuota, f.transitoria,
+             (SELECT COUNT(*) FROM sg_especies  e WHERE e.familia_id=f.id AND e.activo=1) AS especies,
+             (SELECT COUNT(*) FROM sg_productos p WHERE p.familia_id=f.id AND p.activo=1) AS productos
+        FROM sg_familias f WHERE f.activo=1 ORDER BY f.codigo`).all();
+    const especies = db.prepare(`
+      SELECT e.id, e.codigo, e.nombre, e.familia_id,
+             (SELECT COUNT(*) FROM sg_variedades v WHERE v.especie_id=e.id AND v.activo=1) AS variedades,
+             (SELECT COUNT(*) FROM sg_productos p WHERE p.especie_id=e.id AND p.activo=1) AS productos
+        FROM sg_especies e WHERE e.activo=1 ORDER BY e.codigo`).all();
+    const variedades = db.prepare(`
+      SELECT v.id, v.codigo, v.nombre, v.especie_id,
+             (SELECT COUNT(*) FROM sg_productos p WHERE p.variedad_id=v.id AND p.activo=1) AS productos
+        FROM sg_variedades v WHERE v.activo=1 ORDER BY v.codigo`).all();
+    // EL PRODUCTO SIN VARIEDAD EXISTE Y HAY QUE MOSTRARLO. Es el «Limón» a secas,
+    // con código FF.EE.00: si el árbol sólo dibujara variedades, esos productos
+    // no aparecerían en ningún lado y parecerían borrados.
+    const sinVariedad = db.prepare(`
+      SELECT especie_id, COUNT(*) AS productos FROM sg_productos
+       WHERE activo=1 AND variedad_id IS NULL AND especie_id IS NOT NULL
+       GROUP BY especie_id`).all();
+    // Y los que no cuelgan de ninguna especie: quedaron de una importación vieja.
+    // Se cuentan aparte para poder decirlo en vez de que desaparezcan.
+    const huerfanos = db.prepare(`
+      SELECT COUNT(*) AS n FROM sg_productos WHERE activo=1 AND especie_id IS NULL`).get().n;
+    res.json({ ok: true, data: { familias, especies, variedades, sinVariedad, huerfanos } });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
 router.get('/familias/uso', requireAuth, (req, res) => {
   const db = getDb();
   try {
@@ -466,16 +513,65 @@ router.patch('/variedades/:id', requireAuth, (req, res) => {
   try {
     const v = db.prepare('SELECT * FROM sg_variedades WHERE id=? AND activo=1').get(req.params.id);
     if (!v) return res.status(404).json({ ok: false, error: 'Variedad no encontrada' });
-    const nombre = val(req.body.nombre);
-    if (!nombre) return res.status(400).json({ ok: false, error: 'Nombre vacío' });
-    const rep4 = taxConNombre(db, 'sg_variedades', 'especie_id', v.especie_id, nombre, v.id);
-    if (rep4) return res.status(400).json({ ok: false, error: `Ya existe la variedad "${rep4.nombre}" en esa especie` });
+
+    // Se puede venir a renombrar, a MOVER de especie, o las dos cosas. Antes se
+    // exigía el nombre siempre y un PATCH con sólo {especie_id} contestaba
+    // «Nombre vacío»: mover una variedad no tenía forma de hacerse.
+    const nombre = req.body.nombre !== undefined ? val(req.body.nombre) : null;
+    if (req.body.nombre !== undefined && !nombre) {
+      return res.status(400).json({ ok: false, error: 'Nombre vacío' });
+    }
+    const pideMover = req.body.especie_id !== undefined
+      && Number(req.body.especie_id) !== Number(v.especie_id);
+    if (nombre === null && !pideMover) {
+      return res.status(400).json({ ok: false, error: 'Nada para actualizar' });
+    }
+
+    const sets = [], vals = [];
+    let especieNueva = null;
+    // EL NOMBRE SE CHEQUEA CONTRA EL DESTINO, no contra donde está hoy: mover una
+    // «Criolla» a una especie que ya tiene otra «Criolla» rompería el UNIQUE de
+    // más adelante y dejaría dos variedades iguales colgando de lo mismo.
+    const destino = pideMover ? Number(req.body.especie_id) : v.especie_id;
+    if (nombre !== null) {
+      const rep4 = taxConNombre(db, 'sg_variedades', 'especie_id', destino, nombre, v.id);
+      if (rep4) return res.status(400).json({ ok: false, error: `Ya existe la variedad "${rep4.nombre}" en esa especie` });
+      sets.push('nombre=?'); vals.push(nombre);
+    }
+    if (pideMover) {
+      especieNueva = db.prepare(`SELECT e.*, f.id AS fam_id, f.nombre AS fam_nombre
+          FROM sg_especies e JOIN sg_familias f ON f.id = e.familia_id
+         WHERE e.id=? AND e.activo=1`).get(destino);
+      if (!especieNueva) return res.status(400).json({ ok: false, error: 'La especie destino no existe' });
+      const rep5 = taxConNombre(db, 'sg_variedades', 'especie_id', especieNueva.id, nombre || v.nombre, v.id);
+      if (rep5) return res.status(400).json({ ok: false, error: `La especie destino ya tiene una variedad "${rep5.nombre}"` });
+      // Se renumera dentro del destino: el código de una variedad es correlativo
+      // adentro de SU especie, y el que traía puede estar ocupado allá.
+      sets.push('especie_id=?', 'codigo=?');
+      vals.push(especieNueva.id, nextCodigoNivel(db, 'sg_variedades', 'especie_id=?', [especieNueva.id]));
+    }
+    sets.push(`modificado_en=datetime('now','localtime')`, 'modificado_por=?');
+    vals.push(uid(req), v.id);
+
     db.transaction(() => {
-      db.prepare(`UPDATE sg_variedades SET nombre=?,
-        modificado_en=datetime('now','localtime'), modificado_por=? WHERE id=?`)
-        .run(nombre, uid(req), v.id);
+      db.prepare(`UPDATE sg_variedades SET ${sets.join(',')} WHERE id=?`).run(...vals);
       // La variedad también está denormalizada en el producto.
-      db.prepare('UPDATE sg_productos SET variedad=? WHERE variedad_id=?').run(nombre, v.id);
+      if (nombre !== null) db.prepare('UPDATE sg_productos SET variedad=? WHERE variedad_id=?').run(nombre, v.id);
+      if (especieNueva) {
+        // MOVER LA VARIEDAD MUEVE AL PRODUCTO ENTERO. El producto es
+        // familia+especie+variedad: si la variedad se cuelga de otra especie, sus
+        // productos cambian de especie y —si la especie destino es de otra
+        // familia— también de familia. Sin esto quedan diciendo la especie vieja
+        // y con un código FF.EE.VV que ya no corresponde a nada.
+        db.prepare(`UPDATE sg_productos SET especie_id=?, nombre=?, familia_id=?, familia=?
+           WHERE variedad_id=?`)
+          .run(especieNueva.id, especieNueva.nombre, especieNueva.fam_id, especieNueva.fam_nombre, v.id);
+        for (const pr of db.prepare('SELECT id FROM sg_productos WHERE variedad_id=?').all(v.id)) {
+          const r = resolverProducto(db, { familia_id: especieNueva.fam_id,
+            especie_id: especieNueva.id, variedad_id: v.id });
+          if (!r.error) db.prepare('UPDATE sg_productos SET codigo=? WHERE id=?').run(r.codigo, pr.id);
+        }
+      }
     })();
     res.json({ ok: true, data: db.prepare('SELECT * FROM sg_variedades WHERE id=?').get(v.id) });
   } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
