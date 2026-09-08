@@ -9,6 +9,8 @@
 import express from 'express';
 import db from '../servicios/db_sg_finanzas.js';
 import { crearAsiento, MOTIVOS } from '../servicios/asientos.js';
+import { cuentaCorrienteDe, cuentasDeCobranza, modeloCobranzaLineas,
+         modeloCobranzaFaltan, CLAVE_MODELO_COBRANZA } from '../servicios/asiento-cobranza.js';
 import { repartirAmbito, partesDeMedio } from '../servicios/sg_cobro_ambito.js';
 import { puedeMoverCuenta } from './sg_tesoreria.js';
 // EL ASIENTO DE VENTA VIVE EN UN SOLO LUGAR. Estaba acá adentro y el otro
@@ -1613,6 +1615,46 @@ router.get('/cobranzas/cuentas', requireAuth, (req, res) => {
 //
 // Y no controlaba nada: se podía imputar a un documento de OTRO cliente, por más
 // de lo que ese documento debía, o contra uno anulado.
+// ── CON QUÉ SE CONTABILIZAN LOS COBROS ───────────────────────
+//
+// Lo pide la pantalla de Cobranzas para dibujar el asiento antes de guardarlo
+// —convención del repo: toda operación que asienta muestra el asiento— y también
+// Facturar en el puesto, que es un ATAJO del mismo circuito (Pablo, 8/9/2026: «la
+// cobranza en las facturas es como un atajo de la cobranza por cuenta corriente,
+// debería leer ahí los parámetros»). Una sola fuente para las dos, o el cuadro
+// que se aprueba en una pantalla no es el que graba la otra.
+router.get('/modelo-cobranza', requireAuth, (req, res) => {
+  try {
+    const modelos = db.prepare(
+      'SELECT id, nombre FROM sg_asientos_modelo WHERE activo=1 ORDER BY nombre').all();
+    const m = modeloCobranzaLineas(db);
+    const est = modeloCobranzaFaltan(db);
+    if (!m.id) {
+      return res.json({ ok: true, data: { modelo: null, id_perdido: m.perdido || null,
+        modelos, faltan: est.faltan, cuentas: est.cuentas } });
+    }
+    const cab = db.prepare('SELECT * FROM sg_asientos_modelo WHERE id=?').get(m.id);
+    cab.lineas = m.lineas;
+    res.json({ ok: true, data: { modelo: cab, modelos, faltan: est.faltan, cuentas: est.cuentas } });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// Elegirlo es PARAMETRIZAR: define cómo entra al libro TODO lo que se cobra.
+router.put('/modelo-cobranza', requireAdmin, (req, res) => {
+  try {
+    const modeloId = req.body && req.body.modelo_id ? Number(req.body.modelo_id) : null;
+    if (modeloId && !db.prepare('SELECT id FROM sg_asientos_modelo WHERE id=? AND activo=1').get(modeloId)) {
+      return res.status(400).json({ ok: false, error: 'Ese asiento modelo no existe o está dado de baja' });
+    }
+    db.prepare(`INSERT INTO sg_config (clave, valor, modificado_en, modificado_por)
+      VALUES (?,?,datetime('now','localtime'),?)
+      ON CONFLICT(clave) DO UPDATE SET valor=excluded.valor,
+        modificado_en=excluded.modificado_en, modificado_por=excluded.modificado_por`)
+      .run(CLAVE_MODELO_COBRANZA, modeloId == null ? null : String(modeloId), req._user?.id || null);
+    res.json({ ok: true, data: { modelo_id: modeloId } });
+  } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
+});
+
 router.post('/cobranzas', requireAuth, (req, res) => {
   const u = req._user;
   const { fecha, cliente_id, monto, forma_pago, referencia, notas, docs } = req.body || {};
@@ -1723,12 +1765,17 @@ router.post('/cobranzas', requireAuth, (req, res) => {
       // EL CHEQUE ENTRA A LA CARTERA, no a una cuenta: el banco todavía no recibió
       // nada. La cuenta contable de la cartera se pide una sola vez.
       if (!ctaCartera) {
+        // Primero la configuración impositiva —de ahí la toma el depósito de
+        // cheques desde antes de que este modelo existiera— y después el modelo.
+        // Dos lugares para la misma cuenta serían dos verdades, y la que ya está
+        // en uso es aquélla.
         ctaCartera = (db.prepare("SELECT cuenta_id FROM sg_config_impositiva WHERE clave='cheques_cartera'")
-          .get() || {}).cuenta_id || null;
+          .get() || {}).cuenta_id || cuentasDeCobranza(db).cheques || null;
         if (!ctaCartera) {
           return res.status(400).json({ ok: false,
-            error: 'Falta decir contra qué cuenta contable van los cheques en cartera. Configurala en el '
-                 + 'plan de cuentas (clave "cheques_cartera") antes de cobrar con cheque.' });
+            error: 'Falta decir contra qué cuenta contable van los cheques en cartera. Ponela en la '
+                 + 'linea «Cheques en cartera» del asiento modelo de cobranza, o en el plan de cuentas '
+                 + '(clave "cheques_cartera").' });
         }
       }
       const ch = m.cheque || {};
@@ -1770,10 +1817,19 @@ router.post('/cobranzas', requireAuth, (req, res) => {
           WHERE c.id=? AND c.activo=1`).get(ctaFinId)
       : null;
     if (!cuenta) return res.status(400).json({ ok: false, error: 'Elegí en qué cuenta entra la plata' });
+    // LA CUENTA ELEGIDA MANDA; EL MODELO ES EL PISO. Cada banco es una cuenta
+    // distinta del plan y por eso la suya gana. Pero una caja sin cuenta asignada
+    // no tiene por qué frenar el cobro: para eso está la línea de Efectivo o la
+    // de Banco del modelo.
+    if (!cuenta.cta) {
+      const piso = cuentasDeCobranza(db);
+      cuenta.cta = (forma === 'efectivo' ? piso.efectivo : piso.banco) || null;
+    }
     if (!cuenta.cta) {
       return res.status(400).json({ ok: false,
-        error: `La cuenta "${cuenta.nombre}" no tiene cuenta contable asociada, así que la cobranza no `
-             + `puede entrar al libro. Asignásela en Caja y Bancos.` });
+        error: `La cuenta "${cuenta.nombre}" no tiene cuenta contable asociada y el asiento modelo de `
+             + `cobranza tampoco dice dónde entra ${forma === 'efectivo' ? 'el efectivo' : 'una transferencia'}. `
+             + `Asignásela en Caja y Bancos, o completá el modelo.` });
     }
     // ── LA CAJA TIENE DUEÑO ───────────────────────────────────────────────
     // UNA sola regla en todo el sistema: si la cuenta tiene gente asignada la
@@ -1797,10 +1853,26 @@ router.post('/cobranzas', requireAuth, (req, res) => {
       error: `Los medios de cobro suman ${sumaMedios} y la cobranza es de ${total}.` });
   }
 
-  if (!cli.cuenta_contable_id) {
+  // ── CONTRA QUÉ CUENTA CORRIENTE SE CANCELA ────────────────────────────
+  //
+  // Pablo, 8/9/2026: «la contabilización de la cobranza NO depende del cliente:
+  // toda la deuda va al rubro contable correspondiente».
+  //
+  // Acá se exigía que CADA CLIENTE tuviera su cuenta contable cargada en la ficha
+  // y, si no, se rechazaba el cobro con un 400. Nadie carga una cuenta por
+  // cliente —ni tiene por qué—: la deuda de todos vive en el mismo rubro,
+  // Deudores por Ventas, que es el que ya usa el modelo de venta al emitir el
+  // comprobante. El cobro se cargaba entero, se apretaba guardar, y no entraba.
+  //
+  // El cliente que SÍ tenga cuenta propia la sigue usando: hay clientes que se
+  // llevan su propia cuenta corriente en el plan, y quitárselo sería romper algo
+  // que alguien configuró a propósito.
+  const ctaCte = cuentaCorrienteDe(db, cli);
+  if (!ctaCte.cuenta_id) {
     return res.status(400).json({ ok: false,
-      error: `El cliente ${cli.razon_social} no tiene cuenta contable asignada: sin ella no se sabe `
-           + `contra qué cuenta corriente se cancela el cobro. Asignásela en su ficha.` });
+      error: 'Todavía no se eligió contra qué cuenta corriente se cancelan los cobros. '
+           + 'Elegí el asiento modelo del circuito «Cobranza de clientes» en Contabilidad SG '
+           + 'y marcá en él la línea de Clientes / Deudores.' });
   }
 
   try {
@@ -1922,7 +1994,7 @@ router.post('/cobranzas', requireAuth, (req, res) => {
           lineasCob.push({ cuenta_id: m.cheque ? ctaCartera : m.cuenta.cta, debe: x.monto, haber: 0,
             ambito: x.ambito, motivo: x.motivo,
             descripcion: m.cheque ? ('Cheque N° ' + m.cheque.nro + ' en cartera') : m.cuenta.nombre });
-          lineasCob.push({ cuenta_id: cli.cuenta_contable_id, debe: 0, haber: x.monto,
+          lineasCob.push({ cuenta_id: ctaCte.cuenta_id, debe: 0, haber: x.monto,
             ambito: x.ambito, motivo: x.motivo, descripcion: cli.razon_social });
         }
       });

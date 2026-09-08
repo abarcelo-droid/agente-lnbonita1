@@ -79,7 +79,11 @@ function armar() {
   };
 }
 
-test('los seis circuitos que asientan están, y arrancan sin modelo', () => {
+test('los siete circuitos que asientan están, y arrancan sin modelo', () => {
+  // El de COBRANZA se agregó el 8/9/2026. No existía, y por eso la cuenta
+  // corriente contra la que se cancela un cobro había que cargarla CLIENTE POR
+  // CLIENTE en su ficha: sin eso el cobro se rechazaba con un 400 y no entraba.
+  // Toda la deuda de clientes vive en el mismo rubro.
   // El de FLETE DE SALIDA se agregó el 6/9/2026: no existía la clave, así que el
   // circuito no figuraba en el cuadro y no se podía elegir con qué se
   // contabiliza. Es aparte del de entrada porque son cuentas distintas: entrada
@@ -89,6 +93,7 @@ test('los seis circuitos que asientan están, y arrancan sin modelo', () => {
   assert.ok(r.ok);
   const claves = r.data.circuitos.map(c => c.clave);
   assert.deepEqual(claves.slice().sort(), [
+    'asiento_modelo_cobranza',
     'asiento_modelo_descarga',
     'asiento_modelo_factura_mercaderia',
     'asiento_modelo_flete',

@@ -9,6 +9,7 @@ import express from 'express';
 import db from '../servicios/db_sg_finanzas.js';
 import { crearAsiento, filtroAmbito, totalesDeAsiento, origenDeAsiento } from '../servicios/asientos.js';
 import { exigirEmpresa, SAN_GERONIMO } from '../servicios/sociedad_modulo.js';
+import { esModeloDeCobranza } from '../servicios/asiento-cobranza.js';
 
 const router = express.Router();
 
@@ -1483,6 +1484,45 @@ router.get('/modelos', (req, res) => {
 // tenían dónde elegirse: la venta, el flete y la descarga no se podían
 // parametrizar desde ningún lado, así que sus asientos no salían nunca. Acá
 // están los cinco juntos, en la pantalla donde se los va a buscar.
+// ── LO QUE UN MODELO DE COBRANZA TIENE QUE TENER ─────────────────────────
+//
+// Devuelve el texto del error, o null si está bien. Escrita UNA vez y llamada por
+// el POST y el PUT: la validación de los otros modelos vive duplicada en los dos
+// handlers, y ésta no repite ese camino.
+function erroresCobranza(lineas, prov) {
+  if (!esModeloDeCobranza(lineas)) return null;
+  if (prov.length) {
+    return 'Un modelo de cobranza no lleva línea de Proveedores: no se le está pagando a nadie, '
+         + 'se está cobrando.';
+  }
+  if (lineas.some((l) => ['clientes', 'ventas'].includes(l.tipo_linea))) {
+    return 'Un modelo de cobranza no lleva las líneas de Ventas ni de Clientes del modelo de VENTA. '
+         + 'La cuenta corriente va marcada como «Clientes / Deudores (cobranza)», en el HABER.';
+  }
+  const cli = lineas.filter((l) => l.tipo_linea === 'cobro_clientes');
+  if (cli.length !== 1) {
+    return 'El modelo de cobranza necesita UNA línea de Clientes / Deudores, y tiene ' + cli.length + '.';
+  }
+  if (cli[0].lado !== 'haber') {
+    return 'La línea de Clientes / Deudores va en el HABER: cobrar es que el cliente DEJE de deber.';
+  }
+  const medios = lineas.filter((l) =>
+    ['cobro_efectivo', 'cobro_banco', 'cobro_cheques'].includes(l.tipo_linea));
+  if (!medios.length) {
+    return 'El modelo de cobranza necesita al menos una línea de dónde entra la plata: '
+         + 'Efectivo, Banco o Cheques en cartera.';
+  }
+  const mal = medios.find((l) => l.lado !== 'debe');
+  if (mal) {
+    return 'La línea de ' + (mal.tipo_linea === 'cobro_efectivo' ? 'Efectivo'
+      : (mal.tipo_linea === 'cobro_banco' ? 'Banco' : 'Cheques en cartera'))
+      + ' va en el DEBE: es dónde entra la plata.';
+  }
+  const rep = medios.map((l) => l.tipo_linea).filter((t, i, a) => a.indexOf(t) !== i)[0];
+  if (rep) return 'El modelo tiene dos líneas del mismo medio. Cada uno va una sola vez.';
+  return null;
+}
+
 const CIRCUITOS = [
   { clave: 'asiento_modelo_factura_mercaderia', label: 'Factura de mercadería',
     donde: 'La factura del proveedor por lo que entró al galpón.' },
@@ -1501,6 +1541,13 @@ const CIRCUITOS = [
     donde: 'El flete que lleva la mercadería al cliente. No entra al costo de la partida.' },
   { clave: 'asiento_modelo_descarga', label: 'Descarga y servicios',
     donde: 'La factura de la cooperativa o la cuadrilla que descargó el camión.' },
+  // LA COBRANZA ES LA CONTRACARA DE LA VENTA, no una variante suya: la venta
+  // carga la cuenta corriente del cliente y la cobranza la descarga contra donde
+  // entró la plata. Sin modelo propio, la cuenta del cliente había que cargarla
+  // CLIENTE POR CLIENTE en su ficha, y sin eso el cobro se rechazaba.
+  { clave: 'asiento_modelo_cobranza', label: 'Cobranza de clientes',
+    donde: 'Lo que se le cobra a un cliente: contra qué cuenta corriente se cancela y '
+         + 'dónde entra la plata según sea efectivo, transferencia o cheque.' },
 ];
 
 router.get('/modelos/circuitos', (req, res) => {
@@ -1582,9 +1629,16 @@ router.post('/modelos', requireAdmin, (req, res) => {
   // guardar ninguno: la validación daba por hecho que todo modelo era de compra.
   // Se reconoce por sus propias líneas —Clientes y Ventas— y se valida con la
   // regla que le corresponde.
+  // ── UN MODELO DE COBRANZA NO LLEVA NI PROVEEDORES NI VENTAS ──────────
+  // Es la contracara: el cliente va al HABER —deja de deber— contra donde entró
+  // la plata. Sin esta rama, las dos de abajo lo rechazaban y no había forma de
+  // guardar uno.
+  const _cob = erroresCobranza(lineas, _prov);
+  if (_cob) return res.status(400).json({ error: _cob });
   const _cli = lineas.filter(l => l.tipo_linea === 'clientes');
   const _vta = lineas.filter(l => l.tipo_linea === 'ventas');
-  if (_cli.length > 0 || _vta.length > 0) {
+  if (esModeloDeCobranza(lineas)) { /* ya quedó validado arriba */ }
+  else if (_cli.length > 0 || _vta.length > 0) {
     if (_prov.length) return res.status(400).json({
       error: 'Un modelo de venta no lleva línea de Proveedores. Es una venta: el que debe es el cliente.' });
     if (_cli.length !== 1) return res.status(400).json({
@@ -1649,9 +1703,16 @@ router.put('/modelos/:id', requireAdmin, (req, res) => {
   // guardar ninguno: la validación daba por hecho que todo modelo era de compra.
   // Se reconoce por sus propias líneas —Clientes y Ventas— y se valida con la
   // regla que le corresponde.
+  // ── UN MODELO DE COBRANZA NO LLEVA NI PROVEEDORES NI VENTAS ──────────
+  // Es la contracara: el cliente va al HABER —deja de deber— contra donde entró
+  // la plata. Sin esta rama, las dos de abajo lo rechazaban y no había forma de
+  // guardar uno.
+  const _cob = erroresCobranza(lineas, _prov);
+  if (_cob) return res.status(400).json({ error: _cob });
   const _cli = lineas.filter(l => l.tipo_linea === 'clientes');
   const _vta = lineas.filter(l => l.tipo_linea === 'ventas');
-  if (_cli.length > 0 || _vta.length > 0) {
+  if (esModeloDeCobranza(lineas)) { /* ya quedó validado arriba */ }
+  else if (_cli.length > 0 || _vta.length > 0) {
     if (_prov.length) return res.status(400).json({
       error: 'Un modelo de venta no lleva línea de Proveedores. Es una venta: el que debe es el cliente.' });
     if (_cli.length !== 1) return res.status(400).json({

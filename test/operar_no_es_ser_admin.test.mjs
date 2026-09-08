@@ -152,7 +152,7 @@ test('la comparación es por SEGMENTO COMPLETO, no startsWith pelado', () => {
 });
 
 // ── QUE NO VUELVA ──────────────────────────────────────────────────────────
-test('quedan menos de 61 escrituras pidiendo admin', () => {
+test('quedan menos de 62 escrituras pidiendo admin', () => {
   // Eran 86. Este número no tiene que subir sin que alguien lo DECIDA: cada
   // requireAdmin nuevo sobre una acción operativa vuelve a dejar a la gente sin
   // poder trabajar, que es lo que Pablo reportó.
@@ -161,6 +161,10 @@ test('quedan menos de 61 escrituras pidiendo admin', () => {
   // qué cuentas se contabiliza TODO el circuito del flete de salida. Eso es
   // parametrizar —lo mismo que los otros cuatro asientos modelo, que ya piden
   // admin— y no es trabajo del día. Valorizar un flete sigue siendo requireAuth.
+  //
+  // Y a 62 el 8/9/2026, por la misma razón: PUT /ventas/modelo-cobranza elige
+  // contra qué cuenta corriente se cancelan TODOS los cobros. Registrar un cobro
+  // sigue siendo requireAuth — de hecho este cambio es el que lo destraba.
   const n = escrituras().filter((e) => e.guarda === 'requireAdmin').length;
-  assert.ok(n <= 61, 'subió a ' + n + ': revisá si alguno es trabajo del día');
+  assert.ok(n <= 62, 'subió a ' + n + ': revisá si alguno es trabajo del día');
 });
