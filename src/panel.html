@@ -6047,9 +6047,11 @@ input[type=number]{-moz-appearance:textfield;appearance:textfield}
 
   <!-- Catálogo (operativo desde Fase 1) -->
   <div class="sec sg-mod" id="sec-sg-catalogo">
-    <div class="ph"><div><div class="ph-t">🍅 San Gerónimo · Maestros</div><div class="ph-s">Productos, presentaciones, proveedores, clientes y condiciones de pago</div></div></div>
+    <div class="ph"><div><div class="ph-t">🍅 San Gerónimo · Maestros</div><div class="ph-s">Productos, presentaciones, proveedores, clientes y condiciones de pago</div></div>
+      <button class="btn bo bs" style="margin-left:auto" onclick="sgManualAbrir('catalogo')">❓ ¿Cómo se usa?</button></div>
     <div style="display:inline-flex;gap:2px;background:var(--bg);border:1px solid var(--bor);border-radius:8px;padding:3px;margin-bottom:16px;flex-wrap:wrap">
       <div class="sg-subtab on" data-sub="productos"     onclick="sgCatSub('productos')">🥦 Productos</div>
+      <div class="sg-subtab" data-sub="mapa"          onclick="sgCatSub('mapa')">🗺️ Mapa</div>
       <div class="sg-subtab" data-sub="envases"       onclick="sgCatSub('envases')">🧺 Envases</div>
       <div class="sg-subtab" data-sub="presentaciones" onclick="sgCatSub('presentaciones')">📦 Presentaciones</div>
       <div class="sg-subtab" data-sub="proveedores"    onclick="sgCatSub('proveedores')">🚜 Proveedores</div>
@@ -6073,6 +6075,43 @@ input[type=number]{-moz-appearance:textfield;appearance:textfield}
          orden —"Nombre del nuevo envase"— y no había dónde darlos de baja: así
          es como el maestro termina con "Cajón", "cajon" y "CAJON 20" siendo tres
          envases distintos para cualquier informe. -->
+    <!-- ══ 🗺️ EL MAPA DE PRODUCTOS ═══════════════════════════════════════
+         Pablo, 8/9/2026: «mejorame el mapa de productos o maestro de productos,
+         poniéndolo como si fuese un gráfico que se entienda un poco más: Frutas,
+         todas las especies y luego los que tengan variedades. Permitime arrastrar
+         de una a otra para poder modificar. Algo similar a lo que tenemos con los
+         rubros contables».
+
+         La grilla de Productos es una lista PLANA: la jerarquía existe en la base
+         —familia → especie → variedad— pero no se ve, y para saber qué especies
+         tiene una familia había que filtrar y contar a ojo. Acá se ve entera, y
+         reorganizarla es arrastrar. -->
+    <div class="sg-sub" id="sg-sub-mapa">
+      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:12px">
+        <div style="font-size:12.5px;color:var(--mut);max-width:640px">
+          El catálogo entero: <b>familia → especie → variedad</b>. El código del producto
+          (<code>FF.EE.VV</code>) se arma con estos tres números, así que mover algo de lugar
+          <b>le cambia el código a todos sus productos</b> — y por eso hay que prenderlo.
+        </div>
+        <button class="btn bo" id="sg-tax-modo-btn" style="margin-left:auto"
+                onclick="sgTaxModo()">✏️ Reorganizar</button>
+        <button class="btn bo" onclick="sgTaxLoad()">↻ Actualizar</button>
+      </div>
+      <!-- MIENTRAS NO SE PRENDE, NADA SE ARRASTRA. Un arrastre accidental sobre un
+           catálogo le cambia el código a decenas de productos sin que nadie lo
+           haya pedido. -->
+      <div id="sg-tax-banner" style="display:none;border:1.5px solid #f59e0b;background:#fef3c7;
+           border-radius:8px;padding:9px 12px;margin-bottom:12px;font-size:12.5px;color:#92400e">
+        <b>✏️ Estás reorganizando.</b> Arrastrá una <b>especie</b> a otra familia, o una
+        <b>variedad</b> a otra especie. Cada movimiento <b>se guarda al soltar</b> y renumera
+        el código de los productos que cuelgan.
+      </div>
+      <div id="sg-tax-huerfanos" style="display:none;border:1.5px solid #e0a72e;
+           background:rgba(224,167,46,.10);border-radius:8px;padding:9px 12px;margin-bottom:12px;
+           font-size:12.5px;color:#9a3412"></div>
+      <div id="sg-tax-arbol"><div class="emp">Cargando…</div></div>
+    </div>
+
     <div class="sg-sub" id="sg-sub-envases">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;gap:10px;flex-wrap:wrap">
         <div style="font-size:12px;color:var(--mut)">
@@ -8127,6 +8166,251 @@ function sgGridFilter(entity, k, val){ sgGridSt(entity).filtros[k] = val; sgGrid
 // Navegación SG: cada módulo es ahora una sección propia del sidebar (loadSec).
 // sgInit/sgTab (tabs horizontales) quedaron obsoletos al separar en 6 módulos.
 
+// ══════════════════════════════════════════════════════════════════════════
+// 🗺️ EL MAPA DE PRODUCTOS — familia → especie → variedad, y se arrastra
+// ══════════════════════════════════════════════════════════════════════════
+//
+// Está calcado del plan de cuentas de Contabilidad SG (sgctPc*): mismo modo
+// edición con su banner, mismo arrastre con zona de drop resaltada, mismo criterio
+// de que el nivel de arriba se lee por color y el de abajo por indentación.
+//
+// Lo que NO se comparte es el código. El plan de cuentas ya tiene tres clones
+// deliberados en el panel (sgct*, paCu*, admPc*) y la nota de arriba de sgctPc dice
+// por qué: son jerarquías distintas —cuatro niveles contra tres, con reglas de
+// código distintas— y compartirlas obliga a que un arreglo de una sirva para las
+// otras dos, que es donde se rompen.
+var SGTAX = { fam: [], esp: [], var: [], sinVar: {}, huerfanos: 0,
+              edicion: 0, plegadas: {}, arrastrando: null };
+
+// Los colores de las familias: el mismo criterio que los grupos del plan de
+// cuentas. No hay una paleta por familia guardada en la base —las familias las da
+// de alta el usuario—, así que se reparte por posición y se repite si hay muchas.
+var SGTAX_COLORES = [
+  { color: '#166534', dark: '#14532d' }, { color: '#7c2d12', dark: '#601f0c' },
+  { color: '#1e40af', dark: '#1e3a8a' }, { color: '#6b21a8', dark: '#581c87' },
+  { color: '#9f1239', dark: '#881337' }, { color: '#115e59', dark: '#134e4a' },
+];
+function sgTaxColor(i){ return SGTAX_COLORES[i % SGTAX_COLORES.length]; }
+
+function sgTaxLoad(){
+  var box = eid('sg-tax-arbol'); if (!box) return;
+  api('/api/sg/taxonomia').then(function(r){
+    if (!r || !r.ok){ box.innerHTML = '<div class="emp">No se pudo leer el catálogo.</div>'; return; }
+    SGTAX.fam = r.data.familias || [];
+    SGTAX.esp = r.data.especies || [];
+    SGTAX.var = r.data.variedades || [];
+    SGTAX.sinVar = {};
+    (r.data.sinVariedad || []).forEach(function(x){ SGTAX.sinVar[String(x.especie_id)] = x.productos; });
+    SGTAX.huerfanos = r.data.huerfanos || 0;
+    sgTaxRender();
+  });
+}
+
+function sgTaxModo(){
+  // Se avisa ANTES, no después: el que entra a mirar no tiene por qué descubrir
+  // que arrastró algo.
+  if (!SGTAX.edicion && !confirm(
+      'Vas a reorganizar el catálogo.\n\n'
+    + 'Arrastrar una especie a otra familia, o una variedad a otra especie, '
+    + 'LE CAMBIA EL CÓDIGO a todos los productos que cuelgan de ella '
+    + '(el código es familia.especie.variedad).\n\n'
+    + 'Los productos siguen siendo los mismos y no se pierde nada: cambia dónde '
+    + 'están clasificados y cómo se numeran.\n\n¿Seguimos?')) return;
+  SGTAX.edicion = SGTAX.edicion ? 0 : 1;
+  var b = eid('sg-tax-modo-btn');
+  if (b){
+    b.textContent = SGTAX.edicion ? '🔒 Salir de reorganizar' : '✏️ Reorganizar';
+    b.style.background = SGTAX.edicion ? '#f59e0b' : '';
+    b.style.color = SGTAX.edicion ? '#fff' : '';
+  }
+  var ban = eid('sg-tax-banner'); if (ban) ban.style.display = SGTAX.edicion ? '' : 'none';
+  sgTaxRender();
+}
+
+function sgTaxPlegar(famId){
+  SGTAX.plegadas[String(famId)] = !SGTAX.plegadas[String(famId)];
+  sgTaxRender();
+}
+
+// CUÁNTOS PRODUCTOS HAY DEBAJO. Es el número que decide si mover algo es gratis o
+// caro: una especie sin productos se mueve sin pensarlo, una con cuarenta no.
+function sgTaxCuenta(n, sing, plur){
+  return '<span style="font-size:11px;opacity:.75">' + n + ' ' + (n === 1 ? sing : plur) + '</span>';
+}
+
+function sgTaxRender(){
+  var box = eid('sg-tax-arbol'); if (!box) return;
+  var hu = eid('sg-tax-huerfanos');
+  if (hu){
+    // NO SE ESCONDEN LOS QUE NO ENTRAN EN EL ÁRBOL. Un producto sin especie no
+    // cuelga de ningún lado; si el mapa no lo dijera, parecería borrado.
+    hu.style.display = SGTAX.huerfanos ? '' : 'none';
+    hu.innerHTML = SGTAX.huerfanos
+      ? '<b>' + SGTAX.huerfanos + ' producto(s) no cuelgan de ninguna especie</b> y por eso no '
+        + 'aparecen acá. Se arreglan de a uno desde <b>🥦 Productos</b>, eligiéndoles familia, '
+        + 'especie y variedad con el lápiz.'
+      : '';
+  }
+  if (!SGTAX.fam.length){ box.innerHTML = '<div class="emp">Todavía no hay familias.</div>'; return; }
+
+  var ed = SGTAX.edicion;
+  box.innerHTML = SGTAX.fam.map(function(f, i){
+    var c = sgTaxColor(i);
+    var esps = SGTAX.esp.filter(function(e){ return String(e.familia_id) === String(f.id); });
+    var plegada = !!SGTAX.plegadas[String(f.id)];
+    // La familia es zona de drop de ESPECIES: se puede soltar en la cabecera o en
+    // el cuerpo, porque apuntarle a una franja de 40px es incómodo.
+    var drop = ed
+      ? ' ondragover="sgTaxDragOver(event,\'especie\')" ondragleave="sgTaxDragLeave(event)"'
+        + ' ondrop="sgTaxDrop(event,\'especie\',' + f.id + ')"'
+      : '';
+    var cab = '<div style="background:linear-gradient(135deg,' + c.color + ',' + c.dark + ');'
+        + 'color:#fff;padding:11px 16px;display:flex;justify-content:space-between;'
+        + 'align-items:center;gap:12px;cursor:pointer" onclick="sgTaxPlegar(' + f.id + ')"' + drop + '>'
+      + '<div style="display:flex;align-items:center;gap:10px;min-width:0">'
+        + '<span style="opacity:.8">' + (plegada ? '▸' : '▾') + '</span>'
+        + '<code style="font-size:11.5px;opacity:.85">' + sgPad2(f.codigo) + '</code>'
+        + '<b style="font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'
+        + escH(f.nombre) + '</b>'
+        + (f.transitoria
+            ? '<span style="font-size:10px;background:rgba(255,255,255,.18);border:1px solid rgba(255,255,255,.3);'
+              + 'border-radius:20px;padding:2px 8px">DE TRÁNSITO</span>' : '')
+      + '</div>'
+      + '<div style="display:flex;align-items:center;gap:12px;white-space:nowrap">'
+        + sgTaxCuenta(esps.length, 'especie', 'especies')
+        + sgTaxCuenta(f.productos, 'producto', 'productos')
+        // LA ALÍCUOTA QUE FALTA ES ACCIONABLE, y por eso ocupa lugar: un producto
+        // de una familia sin alícuota no se puede facturar.
+        + (f.iva_alicuota == null
+            ? '<span style="font-size:10px;background:#fee2e2;color:#991b1b;border-radius:20px;'
+              + 'padding:2px 8px;font-weight:700">SIN IVA</span>'
+            : '<span style="font-size:11px;opacity:.75">IVA '
+              + String(f.iva_alicuota).replace('.', ',') + '%</span>')
+      + '</div></div>';
+
+    var cuerpo = plegada ? '' : ('<div style="padding:4px 0"' + drop + '>'
+      + (esps.length
+          ? esps.map(function(e){ return sgTaxEspecie(e, ed); }).join('')
+          : '<div style="padding:10px 16px;font-size:12.5px;color:var(--mut)">'
+            + 'Sin especies.' + (ed ? ' Arrastrá una acá para moverla a esta familia.' : '') + '</div>')
+      + '</div>');
+
+    return '<div class="pa-wrap" style="margin-bottom:12px;overflow:hidden">' + cab + cuerpo + '</div>';
+  }).join('');
+}
+
+function sgTaxEspecie(e, ed){
+  var vars = SGTAX.var.filter(function(v){ return String(v.especie_id) === String(e.id); });
+  var sueltos = SGTAX.sinVar[String(e.id)] || 0;
+  // La especie se ARRASTRA (a una familia) y es zona de drop DE VARIEDADES.
+  var arr = ed
+    ? ' draggable="true" ondragstart="sgTaxDragStart(event,\'especie\',' + e.id + ')"'
+      + ' ondragover="sgTaxDragOver(event,\'variedad\')" ondragleave="sgTaxDragLeave(event)"'
+      + ' ondrop="sgTaxDrop(event,\'variedad\',' + e.id + ')"'
+    : '';
+  var fila = '<div style="background:#dbeafe;border-left:4px solid #3b82f6;padding:7px 16px;'
+      + 'display:flex;justify-content:space-between;align-items:center;gap:12px;margin:3px 0"' + arr + '>'
+    + '<div style="display:flex;align-items:center;gap:9px;min-width:0">'
+      + (ed ? '<span style="color:#94a3b8;cursor:grab" title="arrastrala a otra familia">⠿</span>' : '')
+      + '<code style="font-size:11.5px;color:#1d4ed8">' + sgPad2(e.codigo) + '</code>'
+      + '<b style="font-size:13px;color:#1e3a5f;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'
+      + escH(e.nombre) + '</b>'
+    + '</div>'
+    + '<div style="display:flex;align-items:center;gap:12px;color:#1e3a5f;white-space:nowrap">'
+      + sgTaxCuenta(vars.length, 'variedad', 'variedades')
+      + sgTaxCuenta(e.productos, 'producto', 'productos')
+    + '</div></div>';
+
+  var hijos = vars.map(function(v){ return sgTaxVariedad(v, ed); }).join('');
+  // EL PRODUCTO SIN VARIEDAD TAMBIÉN ESTÁ. Es el «Limón» a secas, con código
+  // FF.EE.00: si sólo se dibujaran variedades, esos productos no aparecerían en
+  // ningún lado y parecería que se borraron.
+  if (sueltos) {
+    hijos += '<div style="padding:4px 16px 4px 52px;font-size:12px;color:var(--mut)">'
+      + '<code style="font-size:11px">00</code> &nbsp;sin variedad · '
+      + sgTaxCuenta(sueltos, 'producto', 'productos') + '</div>';
+  }
+  return fila + hijos;
+}
+
+function sgTaxVariedad(v, ed){
+  var arr = ed
+    ? ' draggable="true" ondragstart="sgTaxDragStart(event,\'variedad\',' + v.id + ')"'
+    : '';
+  return '<div style="padding:5px 16px 5px 52px;display:flex;justify-content:space-between;'
+      + 'align-items:center;gap:12px;font-size:12.5px"' + arr + '>'
+    + '<div style="display:flex;align-items:center;gap:9px;min-width:0">'
+      + (ed ? '<span style="color:#94a3b8;cursor:grab" title="arrastrala a otra especie">⠿</span>' : '')
+      + '<code style="font-size:11px;color:var(--mut)">' + sgPad2(v.codigo) + '</code>'
+      + '<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + escH(v.nombre) + '</span>'
+    + '</div>'
+    + '<div style="color:var(--mut);white-space:nowrap">'
+      + sgTaxCuenta(v.productos, 'producto', 'productos') + '</div></div>';
+}
+
+// ── EL ARRASTRE ──────────────────────────────────────────────────────────
+//
+// Se guarda QUÉ se arrastra además del id: una variedad soltada sobre una familia
+// no significa nada, y sin el tipo el drop la aceptaría y llamaría al endpoint
+// equivocado.
+function sgTaxDragStart(ev, tipo, id){
+  if (!SGTAX.edicion) return;
+  SGTAX.arrastrando = { tipo: tipo, id: id };
+  ev.dataTransfer.effectAllowed = 'move';
+  ev.dataTransfer.setData('text/plain', tipo + ':' + id);
+  ev.stopPropagation();
+}
+
+function sgTaxDragOver(ev, acepta){
+  var a = SGTAX.arrastrando;
+  if (!SGTAX.edicion || !a || a.tipo !== acepta) return;
+  ev.preventDefault();
+  ev.stopPropagation();
+  ev.currentTarget.style.outline = '2px dashed #16a34a';
+  ev.currentTarget.style.outlineOffset = '-2px';
+}
+
+function sgTaxDragLeave(ev){ ev.currentTarget.style.outline = ''; }
+
+function sgTaxDrop(ev, acepta, destinoId){
+  ev.preventDefault();
+  ev.stopPropagation();
+  ev.currentTarget.style.outline = '';
+  var a = SGTAX.arrastrando;
+  SGTAX.arrastrando = null;
+  if (!SGTAX.edicion || !a || a.tipo !== acepta) return;
+
+  if (acepta === 'especie'){
+    var e = SGTAX.esp.filter(function(x){ return String(x.id) === String(a.id); })[0];
+    // SOLTAR DONDE YA ESTABA NO ES UN MOVIMIENTO. Sin esto se llama al endpoint,
+    // se renumera el código y se le cambia el código a todos los productos para
+    // dejarlos donde estaban.
+    if (!e || String(e.familia_id) === String(destinoId)) return;
+    var fam = SGTAX.fam.filter(function(x){ return String(x.id) === String(destinoId); })[0] || {};
+    sgTaxMover('/api/sg/especies/' + a.id, { familia_id: Number(destinoId) },
+      escH(e.nombre) + ' pasó a ' + escH(fam.nombre || ''), e.productos);
+    return;
+  }
+  var v = SGTAX.var.filter(function(x){ return String(x.id) === String(a.id); })[0];
+  if (!v || String(v.especie_id) === String(destinoId)) return;
+  var esp = SGTAX.esp.filter(function(x){ return String(x.id) === String(destinoId); })[0] || {};
+  sgTaxMover('/api/sg/variedades/' + a.id, { especie_id: Number(destinoId) },
+    escH(v.nombre) + ' pasó a ' + escH(esp.nombre || ''), v.productos);
+}
+
+function sgTaxMover(ruta, body, texto, productos){
+  api(ruta, 'PATCH', body).then(function(r){
+    if (!r || !r.ok){ toast((r && r.error) || 'No se pudo mover', 'er'); sgTaxLoad(); return; }
+    // Se dice CUÁNTOS productos se renumeraron: es la consecuencia del movimiento
+    // y el que arrastra tiene que verla, no descubrirla después.
+    toast(texto + (productos ? ' · ' + productos + ' producto(s) renumerados' : ''), 'ok');
+    sgTaxLoad();
+    // El catálogo que tienen en memoria las otras pantallas quedó viejo: los
+    // códigos cambiaron.
+    if (typeof sgLoadCaches === 'function') sgLoadCaches(function(){});
+  });
+}
+
 function sgCatSub(s){
   document.querySelectorAll('.sg-mod .sg-subtab').forEach(function(el){ el.classList.toggle('on', el.dataset.sub===s); });
   document.querySelectorAll('.sg-mod .sg-sub').forEach(function(el){ el.classList.toggle('on', el.id==='sg-sub-'+s); });
@@ -8557,6 +8841,7 @@ function sgLbl(opts, v){ var f = (opts||[]).find(function(o){ return o[0]===v; }
 
 // ── Carga + render de tablas ────────────────────────────────────────────────
 function sgLoad(entity){
+  if (entity==='mapa'){ return sgTaxLoad(); }
   if (entity==='condiciones'){ return sgLoadCondiciones(); }
   if (entity==='familias'){ return sgLoadFamilias(); }   // IVA Fase 2
   if (entity==='envases'){ return sgLoadEnvases(); }
@@ -22594,6 +22879,91 @@ SG_MANUAL.ingresos = { titulo: 'Ingresos — recibir mercadería', html:
   + '<li><span class="ver">V990</span> El piso que se ofrece es el <b>tuyo</b>: el que '
   + 'recibe en Empaque no tenía por qué ver San Pedro en la lista.</li>'
   + '</ul>'
+};
+
+SG_MANUAL.catalogo = { titulo: 'Maestros', html:
+  '<p>Los <b>maestros</b> son las listas de las que después elige todo el módulo: qué se '
+  + 'compra y se vende, en qué envase, a quién y en qué condiciones. Un maestro desprolijo '
+  + 'no se nota el día que se carga — se nota <b>meses después</b>, cuando un informe agrupa '
+  + '«Cajón», «cajon» y «CAJON 20» como tres cosas distintas.</p>'
+
+  + '<h3>Un producto son TRES niveles, y de ahí sale su código</h3>'
+  + '<p>La <b>familia</b> es la categoría comercial (Frutas, Hortalizas Pesadas…). Adentro van '
+  + 'las <b>especies</b> (Mandarina, Lima) y adentro las <b>variedades</b> (Murcot, Afurer). '
+  + 'El código del producto es exactamente eso: <code>FF.EE.VV</code> — dos dígitos por nivel.</p>'
+  + '<ul>'
+  + '<li>Cada número es <b>correlativo adentro de su padre</b>: la especie 03 de una familia no '
+  + 'tiene nada que ver con la especie 03 de otra.</li>'
+  + '<li>Un producto <b>puede no tener variedad</b>: ahí el código termina en <code>00</code>. Es '
+  + 'el «Limón» a secas.</li>'
+  + '<li>Un código dado de baja <b>no se reusa</b>. Si se borra la especie 04 y se crea otra, la '
+  + 'nueva es la 05: reusarlo haría que dos cosas distintas tengan el mismo número en papeles '
+  + 'de fechas distintas.</li>'
+  + '</ul>'
+
+  + '<h3>🗺️ El mapa <span class="ver">V1027</span></h3>'
+  + '<p>La solapa <b>Productos</b> es la lista plana: sirve para buscar uno y editarlo. El '
+  + '<b>Mapa</b> muestra <b>el catálogo entero como es</b>: cada familia con sus especies, y '
+  + 'cada especie con sus variedades. Al lado de cada nivel dice <b>cuántos productos cuelgan</b> '
+  + 'de él, que es el número que importa para decidir si mover algo es gratis o caro.</p>'
+  + '<p>Las familias se <b>pliegan</b> haciendo clic en su barra de color. La que no tiene '
+  + '<b>alícuota de IVA</b> cargada sale marcada en rojo: sus productos <b>no se pueden '
+  + 'facturar</b>.</p>'
+
+  + '<h3>Reorganizar arrastrando <span class="ver">V1027</span></h3>'
+  + '<p>Con <b>✏️ Reorganizar</b> se prende el modo edición y aparecen los agarres. Ahí se puede:</p>'
+  + '<ul>'
+  + '<li>Arrastrar una <b>especie</b> a otra familia.</li>'
+  + '<li>Arrastrar una <b>variedad</b> a otra especie.</li>'
+  + '</ul>'
+  + '<div class="ojo"><b>Mover algo le cambia el código a todos sus productos</b>, porque el '
+  + 'código ES la ubicación. Los productos siguen siendo los mismos y no se pierde nada: cambia '
+  + 'dónde están clasificados y cómo se numeran. Al soltar, la pantalla avisa <b>cuántos '
+  + 'productos se renumeraron</b>.</div>'
+  + '<p>Por eso el arrastre está <b>apagado</b> hasta que se prende, y prenderlo pregunta antes: '
+  + 'un arrastre accidental sobre el catálogo movería decenas de productos sin que nadie lo '
+  + 'haya pedido. Cada movimiento <b>se guarda al soltar</b> — no hay un botón de guardar.</p>'
+  + '<p>Si un nombre <b>choca</b> en el destino —mover una «Criolla» a una especie que ya tiene '
+  + 'otra «Criolla»— el movimiento se rechaza y se explica: no se puede tener dos veces lo mismo '
+  + 'colgando del mismo lugar.</p>'
+  + '<p>Los productos que <b>no cuelgan de ninguna especie</b> —quedaron de importaciones '
+  + 'viejas— no aparecen en el árbol y por eso se cuentan arriba, con un aviso: se arreglan de '
+  + 'a uno desde <b>🥦 Productos</b>, eligiéndoles familia, especie y variedad con el lápiz.</p>'
+
+  + '<h3>🏷️ Familias</h3>'
+  + '<p>Se dan de alta, se renombran y se les pone la <b>alícuota de IVA</b>, que es la que se '
+  + '<b>propone</b> al crear un producto nuevo. La que factura después es la <b>del producto</b>: '
+  + 'un producto sin alícuota propia no se puede facturar aunque su familia tenga una.</p>'
+  + '<p>Renombrar una familia <b>cambia también lo que muestran los productos</b>. Una familia '
+  + 'con cosas colgando <b>sí</b> se puede dar de baja: lo que colgaba pasa a <b>«Sin '
+  + 'clasificar»</b>, la familia de tránsito, y los productos siguen operando normalmente '
+  + 'mientras se les asigna la definitiva.</p>'
+
+  + '<h3>Las otras solapas</h3>'
+  + '<ul>'
+  + '<li><b>🧺 Envases</b> — el cajón, la caja, el bin. Antes se creaban con un cartelito en '
+  + 'medio de cargar una orden y no había dónde darlos de baja; así es como el maestro termina '
+  + 'con tres envases que son el mismo.</li>'
+  + '<li><b>📦 Presentaciones</b> — cómo se vende un producto: cuántos kilos entran en un cajón. '
+  + 'De ahí sale la conversión entre <b>bultos y kilos</b> que usan el remito, la factura y el '
+  + 'stock.</li>'
+  + '<li><b>🚜 Proveedores</b> — con su CUIT y su condición fiscal. La marca <b>¿hace fletes o '
+  + 'cargas?</b> no habilita nada: <b>ordena</b> — pone al proveedor primero cuando hay que '
+  + 'pagarle un flete.</li>'
+  + '<li><b>🏪 Clientes</b> — con su categoría, su límite de crédito y su condición de pago '
+  + 'habitual, que es la que propone el vencimiento al facturar en cuenta corriente.</li>'
+  + '<li><b>💳 Condiciones de pago</b> — las cuotas: qué porcentaje a cuántos días. Los '
+  + 'porcentajes tienen que sumar 100.</li>'
+  + '</ul>'
+
+  + '<h3>Con qué otras pantallas se conecta</h3>'
+  + '<p>Con <b>todas</b>. El producto se elige en la orden de compra, en el ingreso, en el '
+  + 'remito y en la factura; la presentación decide si se opera en cajones o en kilos; la '
+  + 'alícuota de la familia y del producto es la que va al comprobante; el proveedor y el '
+  + 'cliente arrastran su cuenta corriente.</p>'
+  + '<div class="ojo">Por eso mover cosas en el mapa <b>se hace de a poco y mirando</b>: un '
+  + 'catálogo prolijo hace que todos los informes cierren, y uno desprolijo no se arregla desde '
+  + 'los informes.</div>'
 };
 
 SG_MANUAL.ventas = { titulo: 'Remitos y Facturación', html:
