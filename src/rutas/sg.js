@@ -739,8 +739,17 @@ function resolverProducto(db, body) {
 router.get('/productos', requireAuth, (req, res) => {
   const db = getDb();
   try {
-    const where = req.query.todos === '1' ? '1=1' : 'activo=1';
-    res.json({ ok: true, data: db.prepare(`SELECT * FROM sg_productos WHERE ${where} ORDER BY codigo`).all() });
+    const where = req.query.todos === '1' ? '1=1' : 'p.activo=1';
+    // LA FAMILIA SALE DE familia_id, NO DE LA COPIA. `p.familia` es un
+    // denormalizado para los informes; si alguna vez vuelve a quedar viejo, la
+    // pantalla igual muestra la familia de verdad y no un nombre que no existe.
+    // Va en un campo aparte para no depender de qué columna gana cuando el nombre
+    // se repite —eso cambia entre drivers de SQLite—.
+    res.json({ ok: true, data: db.prepare(`
+      SELECT p.*, f.nombre AS familia_real
+        FROM sg_productos p
+        LEFT JOIN sg_familias f ON f.id = p.familia_id
+       WHERE ${where} ORDER BY p.codigo`).all() });
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 // EXPORT XLSX — una fila por producto para limpiar el catálogo fuera del sistema (read-only).

@@ -6092,6 +6092,10 @@ input[type=number]{-moz-appearance:textfield;appearance:textfield}
           <b>alícuota de IVA</b> es la que se <b>propone</b> al dar de alta un producto nuevo. Lo que factura
           después es la alícuota <b>del producto</b>: un producto sin alícuota propia no se puede facturar,
           aunque su familia tenga una. Renombrar una familia cambia también lo que muestran los productos.
+          <b>V1023:</b> los productos guardan además una <b>copia</b> del nombre de su familia para los
+          informes. Los renombres viejos no la actualizaban, y en Productos se leían familias que ya no
+          existían con ese nombre —«Cítricos»—. La copia se pone al día sola al arrancar, y la grilla
+          muestra la familia de verdad aunque la copia quede vieja.
         </div>
         <button class="btn bb" id="sg-fam-nueva" onclick="sgFamNueva()">+ Nueva familia</button>
       </div>
@@ -7913,7 +7917,9 @@ var SG_GRID = {
   // de las dos es del producto —salen de sus presentaciones, que tienen su propia
   // solapa— y ocupaban dos columnas para mostrar un guión en casi todas las filas.
   productos: [
-    {k:'familia',  l:'Familia',  sort:true,  filtro:'enum',  disp:function(r){ return r.familia||''; }},
+    // De familia_real, no de la copia: es lo que hacía aparecer «Cítricos» en el
+    // filtro, una familia que ya no se llama así.
+    {k:'familia',  l:'Familia',  sort:true,  filtro:'enum',  disp:function(r){ return sgProdFamiliaNom(r); }},
     {k:'codigo',   l:'Código',   sort:true,  filtro:'texto'},
     {k:'nombre',   l:'Especie',  sort:true,  filtro:'texto'},
     {k:'variedad', l:'Variedad', sort:true,  filtro:'texto', disp:function(r){ return r.variedad||''; }},
@@ -8671,6 +8677,14 @@ function sgActions(entity, id){
     + '</td>';
 }
 
+// DE QUÉ FAMILIA ES UN PRODUCTO. La de verdad es familia_id, que el backend
+// resuelve en familia_real; `r.familia` es una copia del nombre guardada al lado
+// del producto para los informes, y puede haber quedado vieja. Se pregunta en un
+// solo lugar para que la grilla, el filtro y el orden no puedan contestar distinto.
+function sgProdFamiliaNom(r){
+  return (r && (r.familia_real || r.familia)) || '';
+}
+
 function sgRow(entity, r){
   if (entity==='productos'){
     // Mismo orden que SG_GRID.productos: Familia · Código · Especie · Variedad.
@@ -8679,7 +8693,7 @@ function sgRow(entity, r){
       ? '<td style="text-align:right">'+escH(String(r.iva_alicuota).replace('.',','))+'%</td>'
       : '<td style="text-align:right;color:var(--err);font-weight:700" '
         + 'title="Sin alícuota no se puede facturar: la pantalla calcularía un IVA y el comprobante saldría con otro">falta</td>';
-    return '<tr><td>'+escH(r.familia||'—')+'</td><td><code>'+escH(r.codigo)+'</code></td><td>'+escH(r.nombre)+'</td><td>'+escH(r.variedad||'—')+'</td>'
+    return '<tr><td>'+escH(sgProdFamiliaNom(r)||'—')+'</td><td><code>'+escH(r.codigo)+'</code></td><td>'+escH(r.nombre)+'</td><td>'+escH(r.variedad||'—')+'</td>'
       +al+sgActions(entity,r.id)+'</tr>';
   }
   if (entity==='presentaciones'){
