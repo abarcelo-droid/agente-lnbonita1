@@ -3815,29 +3815,31 @@ input[type=number]{-moz-appearance:textfield;appearance:textfield}
   </div>
 </div>
 
-  <!-- ══ Módulo Reprocesos (#reproceso): decomiso / transformación / reproceso con clasificación ══ -->
-  <div class="sec sg-mod" id="sec-sg-reprocesos">
-    <div class="ph"><div><div class="ph-t">🍅 San Gerónimo · Reprocesos</div><div class="ph-s">Decomiso parcial, transformación de unidad y reproceso con clasificación de lotes</div></div></div>
-    <style>
-      .sg-mod .sgr-subtab{padding:7px 14px;cursor:pointer;font-size:12.5px;font-weight:600;border-radius:6px;color:var(--mut)}
-      .sg-mod .sgr-subtab.on{background:var(--burg);color:#fff}
-      .sg-mod .sgr-sub{display:none} .sg-mod .sgr-sub.on{display:block}
-      .sg-mod .sgr-card{border:1px solid var(--bor);border-radius:10px;padding:14px;margin-bottom:14px;background:var(--bg)}
-      .sg-mod .sgr-card label{display:block;font-size:11.5px;color:var(--mut);margin-bottom:3px}
-      .sg-mod .sgr-card input,.sg-mod .sgr-card select,.sg-mod .sgr-card textarea{padding:6px 8px;border-radius:6px;border:1px solid var(--bor);background:var(--card,#fff)}
-      .sg-mod .sgr-confirm{border:1px solid var(--ok,#16a34a);border-radius:10px;padding:12px;margin-bottom:14px;background:rgba(22,163,74,.06);display:none}
-      .sg-mod .sgr-confirm.on{display:block}
-    </style>
-    <div style="display:inline-flex;gap:2px;background:var(--bg);border:1px solid var(--bor);border-radius:8px;padding:3px;margin-bottom:16px;flex-wrap:wrap">
-      <div class="sgr-subtab on" data-sub="reproceso"      onclick="sgrSub('reproceso')">♻️ Reproceso</div>
-      <div class="sgr-subtab" data-sub="transformacion"    onclick="sgrSub('transformacion')">🔄 Transformación</div>
-      <div class="sgr-subtab" data-sub="decomiso"          onclick="sgrSub('decomiso')">🗑️ Decomiso</div>
-    </div>
 
-    <!-- ── REPROCESO (clasificación: 1 madre → N hijos + merma) ── -->
-    <div class="sgr-sub on" id="sgr-sub-reproceso">
+<!-- ══ REPROCESOS: LOS TRES FORMULARIOS, EN VENTANA ═════════════════════
+     Pablo, 8/9/2026: «Reprocesos OK para avanzar».
+
+     Era la última pantalla de San Gerónimo con el formulario metido adentro:
+     arriba se cargaba y abajo estaba el historial, todo en la misma vista. Que
+     se abra una ventana es lo que le dice al operador que dejó de mirar y
+     empezó a cargar — y acá importa más que en ningún lado, porque las tres
+     operaciones TOCAN EL STOCK y dos de ellas no se pueden deshacer.
+
+     Van FUERA de toda .sec: si colgaran de #sec-sg-reprocesos, el botón
+     «Reprocesar» de Stock correría y no se vería nada. El <style> del módulo
+     se queda donde está: es la única definición de .sg-mod .sgr-card y
+     .sg-mod .sgr-confirm de todo el panel, y la usan otras 16 cajas. -->
+<div class="ab-modal-overlay sg-mod" id="sgr-rep-modal">
+  <div class="ab-modal" style="width:min(1080px,96vw);max-width:96vw;max-height:92vh;overflow-y:auto;overflow-x:hidden">
+    <div class="mhd"><div class="mht">♻️ Nuevo reproceso</div>
+      <button class="mcl" onclick="closeMB('sgr-rep-modal')">×</button></div>
+    <style>
+      /* Nada se desplaza de costado, y los campos no se desbordan de su caja. */
+      #sgr-rep-modal .ab-table-wrap{overflow-x:hidden !important}
+      #sgr-rep-modal input,#sgr-rep-modal select,#sgr-rep-modal textarea{max-width:100%;box-sizing:border-box}
+      @media(max-width:900px){ #sgr-rep-modal .ab-table-wrap{overflow-x:auto !important} }
+    </style>
       <div class="sgr-card">
-        <div style="font-weight:700;margin-bottom:8px">Nuevo reproceso</div>
         <label>Lote madre</label>
         <div id="sgr-pick-rep" style="margin-bottom:10px"></div>
         <div style="display:grid;grid-template-columns:1fr 1fr 2fr;gap:10px;margin-bottom:10px">
@@ -3862,9 +3864,94 @@ input[type=number]{-moz-appearance:textfield;appearance:textfield}
         </div>
         <div id="sgr-rep-hijos"></div>
         <div id="sgr-rep-meta" style="margin-top:10px;font-size:12.5px"></div>
-        <div style="margin-top:12px;text-align:right"><button class="btn bb" id="sgr-rep-btn" onclick="sgrReprGuardar()">Registrar reproceso</button></div>
       </div>
       <div class="sgr-confirm" id="sgr-rep-confirm"></div>
+    <div class="ab-modal-footer">
+      <button class="btn bo" onclick="closeMB('sgr-rep-modal')">Cerrar</button>
+      <button class="btn bb" id="sgr-rep-btn" onclick="sgrReprGuardar()">Registrar reproceso</button>
+    </div>
+  </div>
+</div>
+<div class="ab-modal-overlay sg-mod" id="sgr-tr-modal">
+  <div class="ab-modal" style="width:min(760px,96vw);max-width:96vw;max-height:92vh;overflow-y:auto;overflow-x:hidden">
+    <div class="mhd"><div class="mht">🔄 Nueva transformación</div>
+      <button class="mcl" onclick="closeMB('sgr-tr-modal')">×</button></div>
+    <style>
+      /* Nada se desplaza de costado, y los campos no se desbordan de su caja. */
+      #sgr-tr-modal .ab-table-wrap{overflow-x:hidden !important}
+      #sgr-tr-modal input,#sgr-tr-modal select,#sgr-tr-modal textarea{max-width:100%;box-sizing:border-box}
+      @media(max-width:900px){ #sgr-tr-modal .ab-table-wrap{overflow-x:auto !important} }
+    </style>
+      <div class="sgr-card">
+        <label>Lote origen</label>
+        <div id="sgr-pick-tr" style="margin-bottom:10px"></div>
+        <div style="display:grid;grid-template-columns:2fr 1fr 1fr;gap:10px;align-items:end">
+          <div><label>Producto destino</label><select id="sgr-tr-dest" style="width:100%;box-sizing:border-box"></select></div>
+          <div><label>kg a transformar</label><input type="number" id="sgr-tr-kg" placeholder="(vacío = caja entera)" style="width:100%;box-sizing:border-box"></div>
+          <div><label>Factor (1 origen = N destino)</label><input type="number" id="sgr-tr-factor" placeholder="ej. 12" style="width:100%;box-sizing:border-box"></div>
+        </div>
+        <div style="margin-top:6px;font-size:11px;color:var(--mut)">Dejá kg vacío para transformar todo el disponible del lote ("1 caja entera"). El semáforo del destino se hereda del origen.</div>
+      </div>
+      <div class="sgr-confirm" id="sgr-tr-confirm"></div>
+    <div class="ab-modal-footer">
+      <button class="btn bo" onclick="closeMB('sgr-tr-modal')">Cerrar</button>
+      <button class="btn bb" onclick="sgrTrGuardar()">Transformar</button>
+    </div>
+  </div>
+</div>
+<div class="ab-modal-overlay sg-mod" id="sgr-dec-modal">
+  <div class="ab-modal" style="width:min(680px,96vw);max-width:96vw;max-height:92vh;overflow-y:auto;overflow-x:hidden">
+    <div class="mhd"><div class="mht">🗑️ Nuevo decomiso</div>
+      <button class="mcl" onclick="closeMB('sgr-dec-modal')">×</button></div>
+    <style>
+      /* Nada se desplaza de costado, y los campos no se desbordan de su caja. */
+      #sgr-dec-modal .ab-table-wrap{overflow-x:hidden !important}
+      #sgr-dec-modal input,#sgr-dec-modal select,#sgr-dec-modal textarea{max-width:100%;box-sizing:border-box}
+      @media(max-width:900px){ #sgr-dec-modal .ab-table-wrap{overflow-x:auto !important} }
+    </style>
+      <div class="sgr-card">
+        <label>Lote</label>
+        <div id="sgr-pick-dec" style="margin-bottom:10px"></div>
+        <div style="display:grid;grid-template-columns:1fr 2fr;gap:10px;align-items:end">
+          <div><label>kg a decomisar</label><input type="number" id="sgr-dec-kg" placeholder="0" style="width:100%;box-sizing:border-box"></div>
+          <div><label>Motivo</label><input type="text" id="sgr-dec-motivo" placeholder="podrido, golpeado…" style="width:100%;box-sizing:border-box"></div>
+        </div>
+        <div style="margin-top:6px;font-size:11px;color:var(--mut)">No toca kg_reales: baja el disponible y revalúa el costo/kg de lo que queda. Si el lote estaba verde pasa a 🟡.</div>
+      </div>
+      <div class="sgr-confirm" id="sgr-dec-confirm"></div>
+    <div class="ab-modal-footer">
+      <button class="btn bo" onclick="closeMB('sgr-dec-modal')">Cerrar</button>
+      <button class="btn bb" onclick="sgrDecGuardar()">Registrar decomiso</button>
+    </div>
+  </div>
+</div>
+  <!-- ══ Módulo Reprocesos (#reproceso): decomiso / transformación / reproceso con clasificación ══ -->
+  <div class="sec sg-mod" id="sec-sg-reprocesos">
+    <div class="ph"><div><div class="ph-t">🍅 San Gerónimo · Reprocesos</div><div class="ph-s">Decomiso parcial, transformación de unidad y reproceso con clasificación de lotes</div></div>
+      <button class="btn bo bs" style="margin-left:auto" onclick="sgManualAbrir('reprocesos')">❓ ¿Cómo se usa?</button></div>
+    <style>
+      .sg-mod .sgr-subtab{padding:7px 14px;cursor:pointer;font-size:12.5px;font-weight:600;border-radius:6px;color:var(--mut)}
+      .sg-mod .sgr-subtab.on{background:var(--burg);color:#fff}
+      .sg-mod .sgr-sub{display:none} .sg-mod .sgr-sub.on{display:block}
+      .sg-mod .sgr-card{border:1px solid var(--bor);border-radius:10px;padding:14px;margin-bottom:14px;background:var(--bg)}
+      .sg-mod .sgr-card label{display:block;font-size:11.5px;color:var(--mut);margin-bottom:3px}
+      .sg-mod .sgr-card input,.sg-mod .sgr-card select,.sg-mod .sgr-card textarea{padding:6px 8px;border-radius:6px;border:1px solid var(--bor);background:var(--card,#fff)}
+      .sg-mod .sgr-confirm{border:1px solid var(--ok,#16a34a);border-radius:10px;padding:12px;margin-bottom:14px;background:rgba(22,163,74,.06);display:none}
+      .sg-mod .sgr-confirm.on{display:block}
+    </style>
+    <div style="display:inline-flex;gap:2px;background:var(--bg);border:1px solid var(--bor);border-radius:8px;padding:3px;margin-bottom:16px;flex-wrap:wrap">
+      <div class="sgr-subtab on" data-sub="reproceso"      onclick="sgrSub('reproceso')">♻️ Reproceso</div>
+      <div class="sgr-subtab" data-sub="transformacion"    onclick="sgrSub('transformacion')">🔄 Transformación</div>
+      <div class="sgr-subtab" data-sub="decomiso"          onclick="sgrSub('decomiso')">🗑️ Decomiso</div>
+    </div>
+
+    <!-- ── REPROCESO (clasificación: 1 madre → N hijos + merma) ── -->
+    <div class="sgr-sub on" id="sgr-sub-reproceso">
+      <div class="sgr-card" style="max-width:680px">
+        <div style="font-weight:700;font-size:14px;margin-bottom:4px">♻️ Reproceso</div>
+        <div style="font-size:12.5px;color:var(--mut);margin-bottom:12px">Un lote madre se clasifica en varios hijos —primera, segunda, tercera— y lo que no sirve queda como merma. El costo de la madre m&aacute;s el gasto del proceso se reparte entre los hijos: lo que no se le carga a uno se lo lleva otro.</div>
+        <button class="btn bb" onclick="sgrReprAbrir()">♻️ Nuevo reproceso</button>
+      </div>
       <div style="font-weight:600;margin-bottom:6px">Historial de reprocesos</div>
       <div class="ab-table-wrap"><table class="pa-tbl">
         <thead><tr><th>Fecha</th><th>Madre</th><th style="text-align:right">Procesado</th><th style="text-align:right">Merma</th><th style="text-align:right">Costo madre</th><th style="text-align:right">Gasto</th><th>Hijos</th><th style="text-align:center">Estado</th></tr></thead>
@@ -3874,19 +3961,11 @@ input[type=number]{-moz-appearance:textfield;appearance:textfield}
 
     <!-- ── TRANSFORMACIÓN (caja → cubetas) ── -->
     <div class="sgr-sub" id="sgr-sub-transformacion">
-      <div class="sgr-card">
-        <div style="font-weight:700;margin-bottom:8px">Nueva transformación</div>
-        <label>Lote origen</label>
-        <div id="sgr-pick-tr" style="margin-bottom:10px"></div>
-        <div style="display:grid;grid-template-columns:2fr 1fr 1fr;gap:10px;align-items:end">
-          <div><label>Producto destino</label><select id="sgr-tr-dest" style="width:100%;box-sizing:border-box"></select></div>
-          <div><label>kg a transformar</label><input type="number" id="sgr-tr-kg" placeholder="(vacío = caja entera)" style="width:100%;box-sizing:border-box"></div>
-          <div><label>Factor (1 origen = N destino)</label><input type="number" id="sgr-tr-factor" placeholder="ej. 12" style="width:100%;box-sizing:border-box"></div>
-        </div>
-        <div style="margin-top:6px;font-size:11px;color:var(--mut)">Dejá kg vacío para transformar todo el disponible del lote ("1 caja entera"). El semáforo del destino se hereda del origen.</div>
-        <div style="margin-top:12px;text-align:right"><button class="btn bb" onclick="sgrTrGuardar()">Transformar</button></div>
+      <div class="sgr-card" style="max-width:680px">
+        <div style="font-weight:700;font-size:14px;margin-bottom:4px">🔄 Transformación</div>
+        <div style="font-size:12.5px;color:var(--mut);margin-bottom:12px">La misma mercader&iacute;a cambia de producto: una caja pasa a cubetas, un bin se fracciona. Se lleva su costo al lote nuevo y hereda el sem&aacute;foro del origen. Es la &uacute;nica de las tres que se puede revertir.</div>
+        <button class="btn bb" onclick="sgrTrAbrir()">🔄 Nueva transformación</button>
       </div>
-      <div class="sgr-confirm" id="sgr-tr-confirm"></div>
       <div style="font-weight:600;margin-bottom:6px">Historial de transformaciones</div>
       <div class="ab-table-wrap"><table class="pa-tbl">
         <thead><tr><th>Fecha</th><th>Origen</th><th>Destino</th><th style="text-align:right">kg</th><th style="text-align:right">Costo transf.</th><th style="text-align:center">Estado</th><th></th></tr></thead>
@@ -3896,18 +3975,11 @@ input[type=number]{-moz-appearance:textfield;appearance:textfield}
 
     <!-- ── DECOMISO (merma parcial) ── -->
     <div class="sgr-sub" id="sgr-sub-decomiso">
-      <div class="sgr-card">
-        <div style="font-weight:700;margin-bottom:8px">Nuevo decomiso</div>
-        <label>Lote</label>
-        <div id="sgr-pick-dec" style="margin-bottom:10px"></div>
-        <div style="display:grid;grid-template-columns:1fr 2fr;gap:10px;align-items:end">
-          <div><label>kg a decomisar</label><input type="number" id="sgr-dec-kg" placeholder="0" style="width:100%;box-sizing:border-box"></div>
-          <div><label>Motivo</label><input type="text" id="sgr-dec-motivo" placeholder="podrido, golpeado…" style="width:100%;box-sizing:border-box"></div>
-        </div>
-        <div style="margin-top:6px;font-size:11px;color:var(--mut)">No toca kg_reales: baja el disponible y revalúa el costo/kg de lo que queda. Si el lote estaba verde pasa a 🟡.</div>
-        <div style="margin-top:12px;text-align:right"><button class="btn bb" onclick="sgrDecGuardar()">Registrar decomiso</button></div>
+      <div class="sgr-card" style="max-width:680px">
+        <div style="font-weight:700;font-size:14px;margin-bottom:4px">🗑️ Decomiso</div>
+        <div style="font-size:12.5px;color:var(--mut);margin-bottom:12px">Mercader&iacute;a que se tira. No toca los kilos que entraron —eso es lo que dice el remito— sino el disponible, y revalúa el costo por kilo de lo que queda: la p&eacute;rdida la absorbe el resto del lote. Un lote verde pasa a 🟡.</div>
+        <button class="btn bb" onclick="sgrDecAbrir()">🗑️ Nuevo decomiso</button>
       </div>
-      <div class="sgr-confirm" id="sgr-dec-confirm"></div>
       <div style="font-weight:600;margin-bottom:6px">Historial de decomisos</div>
       <div class="ab-table-wrap"><table class="pa-tbl">
         <thead><tr><th>Fecha</th><th>Lote</th><th>Producto</th><th style="text-align:right">kg</th><th>Motivo</th><th>Usuario</th></tr></thead>
@@ -22523,6 +22595,61 @@ SG_MANUAL.ingresos = { titulo: 'Ingresos — recibir mercadería', html:
   + '</ul>'
 };
 
+SG_MANUAL.reprocesos = { titulo: 'Reprocesos', html:
+  '<p>Acá se registra <b>todo lo que le pasa a la mercadería después de entrar y antes de '
+  + 'salir</b>: clasificarla, cambiarla de formato o tirarla. Las tres cosas <b>mueven el '
+  + 'stock y mueven el costo</b>, y <b>dos de las tres no se pueden deshacer</b>.</p>'
+
+  + '<div class="ojo"><b>El costo no se pierde ni aparece de la nada.</b> Lo que entró vale lo '
+  + 'que costó: si una parte se tira o se clasifica peor, ese costo <b>se lo lleva lo que '
+  + 'queda</b>. Por eso el costo por kilo sube después de un decomiso — no es un error.</div>'
+
+  + '<h3>♻️ Reproceso — un lote madre se abre en varios hijos</h3>'
+  + '<p>Es la clasificación: entra un lote y salen primera, segunda y tercera, más lo que se '
+  + 'descarta. Se elige el <b>lote madre</b>, se pone cuántos <b>kg se procesaron</b> (incluida '
+  + 'la merma) y qué <b>gastó el proceso</b> —mano de obra, clasificación—, y se cargan los hijos.</p>'
+  + '<ul>'
+  + '<li><b>kg procesados</b> incluye la merma. Lo que no se reparta entre los hijos <b>es</b> '
+  + 'la merma: no se carga aparte, sale de la resta.</li>'
+  + '<li><b>Repartir auto</b> divide el costo de la madre más el gasto entre los hijos, por kilo. '
+  + 'Se puede pisar a mano: lo que no se le carga a uno se lo lleva otro, y la suma tiene que '
+  + 'dar el total o el botón no deja guardar.</li>'
+  + '<li>Si la madre opera en <b>cajones</b>, aparece la caja de cajones procesados y el sistema '
+  + 'controla que los cajones cierren igual que los kilos.</li>'
+  + '<li>El hijo al que no se le elige producto <b>hereda el de la madre</b>.</li>'
+  + '</ul>'
+
+  + '<h3>🔄 Transformación — la misma mercadería, otro producto</h3>'
+  + '<p>Una caja pasa a cubetas, un bin se fracciona. Se lleva su costo al lote nuevo y el '
+  + '<b>semáforo se hereda</b> del origen: la mercadería no se pone más fresca por cambiar de '
+  + 'envase. Dejando los <b>kg vacíos</b> se transforma todo lo disponible.</p>'
+  + '<div class="ojo">Es la <b>única de las tres que se puede revertir</b>, desde el historial. '
+  + 'Las otras dos no.</div>'
+
+  + '<h3>🗑️ Decomiso — mercadería que se tira</h3>'
+  + '<p><b>No toca los kilos que entraron</b> —eso es lo que dice el remito y no se cambia—: baja '
+  + 'el <b>disponible</b> y revalúa el costo por kilo de lo que queda. Un lote <b>verde pasa a '
+  + '🟡</b>, porque algo le pasó.</p>'
+  + '<p>El <b>motivo es obligatorio</b>. «Podrido» y «golpeado» no son lo mismo: uno es del '
+  + 'productor y el otro del flete o de la descarga, y sin el motivo escrito no hay forma de '
+  + 'reclamarle a nadie.</p>'
+
+  + '<h3>Se carga en una ventana <span class="ver">V1025</span></h3>'
+  + '<p>Los tres formularios <b>se abren en una ventana</b>, con su botón. Antes estaban metidos '
+  + 'arriba del historial, en la misma pantalla.</p>'
+  + '<div class="ojo">Que se abra una ventana es lo que le avisa al operador que <b>dejó de mirar '
+  + 'y empezó a cargar</b> — y acá importa más que en ningún lado, porque las tres operaciones '
+  + 'tocan el stock. La ventana <b>no se cierra al guardar</b>: adentro queda el comprobante con '
+  + 'los códigos de los lotes nuevos, la merma y el disponible que quedó, que es justo lo que hay '
+  + 'que anotar.</div>'
+  + '<p>Y la pantalla queda como el <b>historial</b> de lo que se hizo, que es lo que se mira '
+  + 'cuando no se está cargando.</p>'
+
+  + '<h3>Desde dónde se llega</h3>'
+  + '<p>Además del menú, en <b>Stock</b> cada lote a granel tiene su botón <b>♻️ Reprocesar</b>, '
+  + 'que trae la pantalla <b>con la madre ya cargada</b>.</p>'
+};
+
 SG_MANUAL.stock = { titulo: 'Stock', html:
   '<p>Stock contesta tres preguntas: <b>qué hay</b>, <b>dónde está</b> y <b>cuándo '
   + 'vence</b>. Todo lo que se ve acá nació en una recepción y va a morir en un '
@@ -23455,24 +23582,50 @@ function sgrSub(s){
   SG.reprSub=s;
   document.querySelectorAll('.sg-mod .sgr-subtab').forEach(function(el){ el.classList.toggle('on', el.dataset.sub===s); });
   document.querySelectorAll('.sg-mod .sgr-sub').forEach(function(el){ el.classList.toggle('on', el.id==='sgr-sub-'+s); });
+  // ENTRAR A LA SOLAPA ES MIRAR EL HISTORIAL. Armar el formulario es de abrir la
+  // ventana: si se armara acá, cambiar de solapa borraría lo que estaba cargado
+  // en la ventana de al lado, y el picker se pediría de nuevo sin que nadie lo
+  // haya pedido.
   if(s==='reproceso'){
-    sgPickerInit('rep', function(){ sgrReprRender(); });
-    SG.reprHijos=[]; SG.reprAuto=true;
-    eid('sgr-rep-kgproc').value=''; eid('sgr-rep-gasto').value='0'; eid('sgr-rep-gastodesc').value=''; eid('sgr-rep-bproc').value='';
-    eid('sgr-rep-confirm').classList.remove('on');
-    sgrReprAddHijo(); sgrReprHist();
-    // F4-UI — precarga de madre desde Stock (ej. botón Reprocesar en un lote granel).
-    if(SG._reprPre){ var pre=SG._reprPre; SG._reprPre=null; sgrReprInject(pre.loteId, pre.productoId); }
-  } else if(s==='transformacion'){
-    sgPickerInit('tr', null);
-    eid('sgr-tr-dest').innerHTML=sgOpts(SG.cacheProd,'nombre','','— Producto destino —');
-    eid('sgr-tr-kg').value=''; eid('sgr-tr-factor').value=''; eid('sgr-tr-confirm').classList.remove('on');
-    sgrTrHist();
-  } else if(s==='decomiso'){
-    sgPickerInit('dec', null);
-    eid('sgr-dec-kg').value=''; eid('sgr-dec-motivo').value=''; eid('sgr-dec-confirm').classList.remove('on');
-    sgrDecHist();
+    sgrReprHist();
+    // F4-UI — precarga de madre desde Stock (ej. botón Reprocesar en un lote
+    // granel). Ahora ABRE la ventana: sin esto el operador aprieta «Reprocesar»
+    // en Stock y llega a una pantalla que no muestra nada de lo que pidió.
+    if(SG._reprPre){ var pre=SG._reprPre; SG._reprPre=null; sgrReprAbrir(); sgrReprInject(pre.loteId, pre.productoId); }
   }
+  else if(s==='transformacion') sgrTrHist();
+  else if(s==='decomiso') sgrDecHist();
+}
+
+// ── LAS TRES PUERTAS ─────────────────────────────────────────────────────
+//
+// Cada una deja la ventana como si fuera la primera vez: las tres operaciones
+// tocan el stock, y arrastrar los kilos de la anterior es la manera de decomisar
+// dos veces el mismo lote sin darse cuenta. El cartel del comprobante también se
+// apaga: es el de la operación pasada.
+function sgrReprAbrir(){
+  sgPickerInit('rep', function(){ sgrReprRender(); });
+  SG.reprHijos=[]; SG.reprAuto=true;
+  eid('sgr-rep-kgproc').value=''; eid('sgr-rep-gasto').value='0';
+  eid('sgr-rep-gastodesc').value=''; eid('sgr-rep-bproc').value='';
+  eid('sgr-rep-confirm').classList.remove('on');
+  sgrReprAddHijo();
+  sgModalArriba('sgr-rep-modal');
+}
+
+function sgrTrAbrir(){
+  sgPickerInit('tr', null);
+  eid('sgr-tr-dest').innerHTML=sgOpts(SG.cacheProd,'nombre','','— Producto destino —');
+  eid('sgr-tr-kg').value=''; eid('sgr-tr-factor').value='';
+  eid('sgr-tr-confirm').classList.remove('on');
+  sgModalArriba('sgr-tr-modal');
+}
+
+function sgrDecAbrir(){
+  sgPickerInit('dec', null);
+  eid('sgr-dec-kg').value=''; eid('sgr-dec-motivo').value='';
+  eid('sgr-dec-confirm').classList.remove('on');
+  sgModalArriba('sgr-dec-modal');
 }
 
 // ── DECOMISO ──
