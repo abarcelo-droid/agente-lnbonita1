@@ -6974,18 +6974,38 @@ input[type=number]{-moz-appearance:textfield;appearance:textfield}
       <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px">
         <div class="fl"><label>A qué fletero se le paga</label><select id="sgfe-fletero"></select>
           <div id="sgfe-fletero-ayuda" style="font-size:11px;color:var(--mut);margin-top:3px"></div></div>
-        <div class="fl"><label>Cuánto vale el flete (sin IVA)</label>
+        <div class="fl"><label>Cuánto vale el flete <b style="color:#b45309">SIN IVA</b></label>
           <input type="text" inputmode="decimal" id="sgfe-monto" placeholder="$ 0"
-                 style="text-align:right" oninput="this.value=sgMilFmtLive(this.value);sgFeDif()"></div>
+                 style="text-align:right" oninput="this.value=sgMilFmtLive(this.value);sgFeDif()">
+          <!-- LO QUE DICE LA ORDEN, AL LADO DEL CAMPO Y USABLE DE UN CLIC. Estaba
+               en el encabezado como texto: para copiarlo había que leerlo y
+               tipearlo, y si el flete ya estaba valorizado quedaba de adorno. -->
+          <div id="sgfe-prop" style="font-size:11.5px;margin-top:4px"></div></div>
         <div class="fl"><label>Fecha</label><input type="date" id="sgfe-fecha"></div>
       </div>
       <div id="sgfe-dif" style="font-size:12.5px;margin-top:8px"></div>
+      <!-- EL AVISO DE LOS VIEJOS. Los fletes valorizados antes de la V1015 se
+           cargaron con el TOTAL del papel: tienen el IVA metido adentro del costo
+           de la partida. Se reconocen porque tienen alícuota guardada —desde la
+           V1015 valorizar no guarda ninguna— y el neto de entonces también quedó,
+           así que la corrección es exacta. -->
+      <div id="sgfe-iva-viejo" style="display:none;border:1.5px solid #e0a72e;
+           background:rgba(224,167,46,.10);border-radius:8px;padding:9px 12px;
+           margin-top:8px;font-size:12.5px;color:#9a3412"></div>
       <!-- SIN IVA, como la descarga. El IVA es crédito fiscal recuperable, no es
            costo: cargado con IVA la partida sale un 21% más cara y el margen
            miente. El impuesto entra con la factura, que es donde está el papel. -->
-      <div style="font-size:11.5px;color:var(--mut);margin-top:6px">
-        Es lo que entra al <b>costo de la partida</b>, así que va <b>sin IVA</b>.
-        El comprobante, el IVA y el asiento van después, con <b>🧾 Ingresar factura</b>.
+      <!-- EL CIRCUITO ENTERO, EN TRES RENGLONES Y EN LA PANTALLA DONDE SE OPERA.
+           Estaba escrito sólo en el manual, y el que valoriza no abre el manual. -->
+      <div style="font-size:11.5px;color:var(--mut);margin-top:8px;line-height:1.6;
+                  border-left:3px solid var(--bor);padding-left:10px">
+        <b>1.</b> La <b>orden de compra</b> propone cuánto tendría que salir.<br>
+        <b>2.</b> Acá se <b>rechequea</b> contra lo que pasó de verdad y se confirma
+        <b style="color:#b45309">SIN IVA</b>: es lo que entra al <b>costo de la partida</b>,
+        y el IVA es crédito fiscal recuperable, no es costo.<br>
+        <b>3.</b> El <b>IVA se suma después</b>, al cargar el papel con
+        <b>🧾 Ingresar factura</b>, que es donde además nace la deuda con el fletero
+        y el asiento.
       </div>
       <div class="fl ff" style="margin-top:8px"><label>Observaciones</label><input id="sgfe-obs"></div>
       <!-- Sólo para los fletes valorizados ANTES, que tienen el PDF colgado del
@@ -21959,6 +21979,38 @@ SG_MANUAL.gastos = { titulo: 'Gastos Directos', html:
   + '<p>Los fletes valorizados <b>antes</b> de esta versión tienen el total con IVA adentro. '
   + 'Se corrigen entrando de nuevo a <b>Valorizar</b> y poniendo el neto.</p>'
 
+  + '<h3>El precio del flete: la orden propone, vos confirmás sin IVA '
+  + '<span class="ver">V1024</span></h3>'
+  + '<p>Son <b>tres momentos</b> y cada uno pone una cosa distinta:</p>'
+  + '<ol>'
+  + '<li>La <b>orden de compra</b> propone cuánto tendría que salir el viaje. Sale de lo que '
+  + 'el comprador dejó pactado —tanto por bulto, tanto por kilo o un monto por la orden— y si la '
+  + 'orden se repartió en varios camiones, se prorratea entre ellos.</li>'
+  + '<li>El <b>administrativo valoriza</b>: rechequea contra lo que pasó de verdad y confirma. '
+  + 'Acá el importe va <b>SIN IVA</b>. Al lado del campo está lo que dice la orden, con un '
+  + '<b>usar este</b> para tomarlo tal cual.</li>'
+  + '<li>Cuando llega el papel, <b>🧾 Ingresar factura</b> le <b>suma el IVA</b>, genera la '
+  + 'deuda con el fletero y hace el asiento.</li>'
+  + '</ol>'
+  + '<div class="ojo"><b>Por qué sin IVA:</b> lo que se valoriza entra al <b>costo de la '
+  + 'partida</b>, y el IVA es <b>crédito fiscal recuperable</b>, no es costo. Cargado con IVA, la '
+  + 'mercadería figura costando un 21% más de lo que costó y el margen de todo lo que se venda de '
+  + 'ella sale bajo.</div>'
+  + '<p>Si la orden <b>no dejó pactado</b> el flete, la pantalla lo dice y no propone nada: ese '
+  + 'importe sale del papel del fletero y nada más.</p>'
+
+  + '<h3>Los fletes viejos que tienen el IVA adentro <span class="ver">V1024</span></h3>'
+  + '<p>Los que se valorizaron <b>antes de la V1015</b> se cargaron con el <b>total del papel</b>: '
+  + 'tienen el IVA metido adentro del costo de su partida. Ahora <b>se ven</b>: dicen '
+  + '<b>«con IVA adentro»</b> abajo del importe, el pie de la tabla cuenta cuántos son, y '
+  + 'escribiendo <b>iva</b> en el buscador salen todos juntos.</p>'
+  + '<p>Al abrir uno, el aviso dice cuánto está de más y deja el <b>neto exacto</b> de un clic — '
+  + 'no es una cuenta estimada: el neto de ese comprobante quedó guardado cuando se cargó. '
+  + 'Después hay que <b>Guardar</b>: valorizar lo confirma una persona, no el sistema.</p>'
+  + '<div class="ojo">Se reconocen solos porque desde la V1015 valorizar <b>no guarda alícuota '
+  + 'nunca más</b>. Un flete valorizado que tenga alícuota es, por construcción, uno de los de '
+  + 'antes.</div>'
+
   + '<h3>La factura es del FLETERO, no del proveedor de la mercadería '
   + '<span class="ver">V1022</span></h3>'
   + '<p>En <b>Fletes de entrada</b>, la columna <b>Proveedor</b> es de quién era la '
@@ -23941,8 +23993,11 @@ function sgFePintar(){
   var q = sgNorm(String((eid('sgfe-q') || {}).value || '').trim());
   var filas = SGFE.filas.filter(function(x){
     if (!q) return true;
+    // «iva» los encuentra a todos: es la única manera de juntar los viejos sin
+    // una pantalla aparte.
     return sgNorm((x.partida || '') + ' ' + (x.oc_numero || '') + ' '
-                + (x.proveedor_nombre || '') + ' ' + (x.fletero_nombre || ''))
+                + (x.proveedor_nombre || '') + ' ' + (x.fletero_nombre || '')
+                + (sgFeConIvaAdentro(x) ? ' iva adentro' : ''))
       .indexOf(q) >= 0;
   });
   var tb = eid('sgfe-tb'); if (!tb) return;
@@ -23990,6 +24045,14 @@ function sgFePintar(){
             ? '<b>' + sgMoney(x.gasto_monto) + '</b>'
               + (dif ? '<div style="font-size:10.5px;color:' + (dif > 0 ? '#b91c1c' : '#0f766e') + '">'
                   + (dif > 0 ? '+' : '−') + sgMoney2(Math.abs(dif)) + '</div>' : '')
+              // CUÁLES SON LOS QUE TIENEN EL IVA ADENTRO. Sin esto había que
+              // abrirlos de a uno para saberlo, y nadie iba a hacer eso con
+              // meses de fletes cargados.
+              + (sgFeConIvaAdentro(x)
+                  ? '<div style="font-size:10px;color:#9a3412;font-weight:600" '
+                    + 'title="Se valorizó con el total del papel: el IVA está adentro del costo de la partida">'
+                    + 'con IVA adentro</div>'
+                  : '')
             : '<span style="color:#9a3412">falta</span>')
         + '</td>'
       + '<td style="text-align:right">'
@@ -24002,9 +24065,16 @@ function sgFePintar(){
           : '✓ No hay fletes de entrada esperando la factura del fletero.')
       + '</td></tr>';
   var n = eid('sgfe-n');
-  if (n) n.textContent = (SGFE.estado === 'pendiente_valorizar' && filas.length)
+  var conIva = SGFE.filas.filter(sgFeConIvaAdentro).length;
+  if (n) n.innerHTML = (SGFE.estado === 'pendiente_valorizar' && filas.length)
     ? filas.length + ' viaje(s) esperando la factura: hasta que llegue, ese costo no está en el lote.'
-    : '';
+    // CUÁNTOS SON. Sin el número no se sabe si es uno o son doscientos, y por lo
+    // tanto no se puede decidir si vale la pena corregirlos.
+    : (conIva
+        ? '<span style="color:#9a3412">' + conIva + ' flete(s) valorizados con el <b>IVA adentro</b> '
+          + '(de antes de que el precio fuera sin IVA): están inflando el costo de su partida. '
+          + 'Buscá <b>iva</b> acá arriba para verlos, y en cada uno el aviso deja el neto de un clic.</span>'
+        : '');
 }
 
 function sgFeOpen(recId){
@@ -24024,6 +24094,7 @@ function sgFeOpen(recId){
               ? ' (' + sgMoney(x.flete_precio_unit) + ' por ' + escH(x.flete_modalidad || 'bulto') + ')'
               : '')
         : '<br><span style="color:#9a3412">El comprador no dejó pactado el flete en la orden.</span>');
+  sgFePropuesta(x);
   var sel = eid('sgfe-fletero');
   if (sel) sel.innerHTML = sgFleteroOpts(SGFE.fleteros, x.proveedor_servicio_id);
   // Y se dice dónde se marcan, una sola vez y en chico: la marca ordena la lista,
@@ -24037,6 +24108,9 @@ function sgFeOpen(recId){
         + 'aparezcan primero, marcalos en <b>Maestros → Proveedores</b>.';
   }
   var m = eid('sgfe-monto');
+  // Lo ya valorizado NO se pisa con la propuesta: alguien lo confirmó mirando el
+  // viaje. La propuesta de la orden queda al lado, a un clic. Si todavía no se
+  // valorizó, arranca con la de la orden, que es de donde tiene que salir.
   if (m) m.value = x.gasto_monto ? sgMilShow(x.gasto_monto) : (x.estimado ? sgMilShow(x.estimado) : '');
   var f = eid('sgfe-fecha');
   if (f) f.value = x.fecha_valorizacion || new Date().toISOString().slice(0, 10);
@@ -24044,6 +24118,64 @@ function sgFeOpen(recId){
   var arch = eid('sgfe-arch'); if (arch) arch.innerHTML = sgFeArchLink(x);
   sgFeDif();
   sgModalArriba('sgfe-modal');
+}
+
+// ── LO QUE PROPONE LA ORDEN, Y EL IVA QUE QUEDÓ ADENTRO ──────────────────
+//
+// Dos avisos que salen del mismo lugar: qué dice la orden de compra que tendría
+// que salir este viaje, y —si el flete se valorizó antes de la V1015— que el
+// importe cargado tiene el IVA adentro del costo de la partida.
+
+function sgFeConIvaAdentro(x){
+  // Desde la V1015 valorizar no guarda alícuota NUNCA. Que la tenga es la marca
+  // de que se cargó con el total del papel. Se pide además que el neto guardado
+  // sea distinto del monto: si son iguales, ya está sin IVA y no hay nada que
+  // corregir aunque haya quedado la alícuota dando vueltas.
+  if (!x || x.gasto_estado !== 'valorizado') return null;
+  var alic = Number(x.iva_alicuota), neto = Number(x.neto), monto = Number(x.gasto_monto);
+  if (!(alic > 0) || !(neto > 0) || !(monto > 0)) return null;
+  if (Math.abs(monto - neto) < 0.01) return null;
+  return { neto: neto, alic: alic, iva: Math.round((monto - neto) * 100) / 100 };
+}
+
+function sgFePropuesta(x){
+  var p = eid('sgfe-prop');
+  if (p) {
+    p.innerHTML = x.estimado
+      ? 'La orden dice <b>' + sgMoney(x.estimado) + '</b>'
+        + (x.estimado_base ? ' <span style="color:var(--mut)">(' + escH(x.estimado_base) + ')</span>' : '')
+        + ' · <a href="#" onclick="sgFeUsarOrden();return false">usar este</a>'
+      // SIN PROPUESTA SE DICE POR QUÉ, y qué hacer: sin esto el campo aparece
+      // vacío y parece que el sistema no sabe calcularlo.
+      : '<span style="color:#9a3412">La orden no dejó pactado el flete: no hay '
+        + 'nada que proponer y el importe sale del papel del fletero.</span>';
+  }
+  var av = eid('sgfe-iva-viejo'); if (!av) return;
+  var v = sgFeConIvaAdentro(x);
+  if (!v){ av.style.display = 'none'; av.innerHTML = ''; return; }
+  av.style.display = '';
+  av.innerHTML = '<b>⚠️ Este flete tiene el IVA adentro.</b> Se valorizó cuando se '
+    + 'cargaba el total del papel, así que la partida está costando '
+    + sgMoney(v.iva) + ' de más (IVA ' + String(v.alic).replace('.', ',') + '%). '
+    + 'El neto de ese comprobante era <b>' + sgMoney(v.neto) + '</b>. '
+    + '<a href="#" onclick="sgFeSacarIva();return false">Dejarlo en el neto</a>.';
+}
+
+function sgFeUsarOrden(){
+  var x = SGFE.sel; if (!x || !x.estimado) return;
+  var m = eid('sgfe-monto'); if (!m) return;
+  m.value = sgMilShow(x.estimado);
+  sgFeDif();
+}
+
+function sgFeSacarIva(){
+  var v = sgFeConIvaAdentro(SGFE.sel); if (!v) return;
+  var m = eid('sgfe-monto'); if (!m) return;
+  m.value = sgMilShow(v.neto);
+  sgFeDif();
+  // No guarda solo: valorizar es una confirmación de una persona. Se deja el
+  // número puesto y el botón de abajo es el que decide.
+  toast('Queda el neto. Confirmá con «Guardar» para que baje el costo de la partida', 'ok');
 }
 
 // ── EL PAPEL DEL FLETERO, SÓLO PARA MIRARLO ──────────────────────────────
