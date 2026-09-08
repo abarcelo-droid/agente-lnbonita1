@@ -14435,14 +14435,44 @@ function liqVentaCab(ocId, mas){
       frenos.push('La <b>descarga</b> está cargada pero sin valorizar: no se sabe cuánto '
         + 'cobró la cuadrilla, así que no se le puede descontar al productor. Valorizala en '
         + '<b>Gastos Directos → Control Cooperativa</b>, con el botón <b>💵 Valorizar</b> de '
-        + 'la fila. Alcanza con el importe; la factura de la cooperativa puede llegar después.');
+        + 'la fila, y después cargá su factura.');
     }
     if (Number(sv.flete) > 0) {
       frenos.push('El <b>flete</b> está cargado pero sin valorizar: no se sabe cuánto cobró '
-        + 'el fletero. Valorizalo en <b>Gastos Directos → Fletes de entrada</b>. Alcanza con '
-        + 'el importe; la factura puede llegar después.');
+        + 'el fletero. Valorizalo en <b>Gastos Directos → Fletes de entrada</b> y después '
+        + 'cargá su factura.');
+    }
+    // ── Y SIN LA FACTURA DEL TERCERO TAMPOCO ───────────────────────
+    //
+    // Pablo, 8/9/2026: «en principio hay que FRENARLA. Sin la factura no podemos
+    // liquidar. Es el filtro para contabilizar la factura».
+    //
+    // Descontarle al productor lo que se le pagó al fletero es trasladarle un
+    // comprobante de un tercero: la liquidación tiene que identificarlo —CUIT,
+    // razón social, número y total— o la declaración jurada queda mal.
+    //
+    // Va después del de valorizar y sólo aparece cuando aquél ya se resolvió: los
+    // dos juntos son un cartel que dice «hacé dos cosas» sin decir en qué orden.
+    var sf = r.sin_factura || {};
+    if (!Number(sv.descarga) && Number(sf.descarga) > 0) {
+      frenos.push('La <b>descarga</b> está valorizada pero todavía no tiene la <b>factura de '
+        + 'la cooperativa</b>. Ese gasto se le descuenta al productor, así que la liquidación '
+        + 'tiene que citar el comprobante —CUIT, razón social, número y total— o la '
+        + 'declaración jurada queda mal. Cargala en <b>Gastos Directos → Control Cooperativa '
+        + '→ 🧾 Ingresar factura</b>.');
+    }
+    if (!Number(sv.flete) && Number(sf.flete) > 0) {
+      frenos.push('El <b>flete</b> está valorizado pero todavía no tiene la <b>factura del '
+        + 'fletero</b>. Ese gasto se le descuenta al productor, así que la liquidación tiene '
+        + 'que citar el comprobante —CUIT, razón social, número y total— o la declaración '
+        + 'jurada queda mal. Cargala en <b>Gastos Directos → Fletes de entrada → 🧾 Ingresar '
+        + 'factura</b>.');
     }
     LIQ.frenos = frenos;
+    // Y los comprobantes que la liquidación va a citar, para poder mostrarlos
+    // ANTES de imprimir: el que liquida tiene que ver con qué papeles se está
+    // respaldando lo que descuenta.
+    LIQ.comprobantes = r.comprobantes || [];
     if (frenos.length) {
       h += '<div style="margin-top:10px;border:1px solid #fca5a5;background:#fef2f2;'
         + 'border-radius:8px;padding:10px 12px;font-size:12.5px;color:#991b1b">'
@@ -22391,6 +22421,32 @@ SG_MANUAL.gastos = { titulo: 'Gastos Directos', html:
   + 'es costo.</div>'
   + '<p>Los fletes valorizados <b>antes</b> de esta versión tienen el total con IVA adentro. '
   + 'Se corrigen entrando de nuevo a <b>Valorizar</b> y poniendo el neto.</p>'
+
+  + '<h3>Sin la factura del tercero NO se puede liquidar <span class="ver">V1030</span></h3>'
+  + '<p>El flete y la descarga de una partida <b>se le descuentan al productor</b> en su '
+  + 'liquidación. Ante ARCA eso es <b>trasladarle un comprobante de un tercero</b>, así que la '
+  + 'liquidación tiene que <b>identificarlo</b>: CUIT, razón social, número y total. Y para eso '
+  + 'el comprobante tiene que estar cargado.</p>'
+  + '<div class="ojo"><b>Son dos frenos y van en orden.</b> Primero <b>valorizar</b> —el importe '
+  + 'es lo que entra al costo del lote el día que pasa el camión—; después <b>la factura</b>, que '
+  + 'es lo que habilita a liquidar. La pantalla de liquidación muestra uno por vez, no los dos '
+  + 'juntos.</div>'
+  + '<p>Que trabe el circuito del día <b>es el objetivo</b>: es lo que hace que el papel del '
+  + 'fletero y el de la cuadrilla se carguen, en vez de quedar en un cajón hasta el cierre.</p>'
+
+  + '<h3>La factura del fletero PERFECCIONA la orden <span class="ver">V1030</span></h3>'
+  + '<p>El flete que se le descuenta al productor <b>salía de la orden de compra</b> —lo que el '
+  + 'comprador pactó— sin ningún comprobante detrás. Ahora sale de la <b>factura del fletero</b>, '
+  + 'y se mantiene el criterio de siempre:</p>'
+  + '<ul>'
+  + '<li><b>Fiscal</b> = lo que dice la factura. Es lo que va al libro y lo que la liquidación '
+  + 'cita.</li>'
+  + '<li><b>Gestión</b> = la diferencia con lo acordado en la orden, si la hay.</li>'
+  + '</ul>'
+  + '<div class="ojo">Si la factura del fletero cubre <b>varias partidas</b>, a cada una le toca '
+  + '<b>su parte</b> —la que se le imputó al cargar la factura—, pero el papel impreso muestra el '
+  + '<b>total del comprobante</b>: lo que la declaración necesita es identificarlo, y el '
+  + 'comprobante vale lo que dice.</div>'
 
   + '<h3>El precio del flete: la orden propone, vos confirmás sin IVA '
   + '<span class="ver">V1024</span></h3>'

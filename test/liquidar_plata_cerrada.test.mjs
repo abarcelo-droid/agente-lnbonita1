@@ -64,8 +64,8 @@ test('la descarga sin valorizar frena, y manda a valorizarla', () => {
   // había nada, así que la partida se quedaba trabada para siempre.
   assert.match(b, /Gastos Directos → Control Cooperativa/);
   assert.match(b, /bot[óo]n «Valorizar» de la fila/);
-  // Y dice que alcanza con el importe: es la distinción que hizo Pablo.
-  assert.match(b, /alcanza con el importe, la factura puede/);
+  // Y manda a cargar la factura después: desde el 8/9/2026 hace falta.
+  assert.match(b, /después cargá su factura/);
 });
 
 test('el flete sin valorizar también', () => {
@@ -75,13 +75,22 @@ test('el flete sin valorizar también', () => {
   assert.match(b, /Gastos Directos → Fletes de entrada/);
 });
 
-test('lo que se exige es la VALORIZACIÓN, no la factura del fletero', () => {
-  // «Después se puede ingresar la factura, pero deben estar valorizados sí o sí».
-  assert.match(SERV, /LO QUE SE EXIGE ES LA VALORIZACIÓN, NO LA FACTURA DEL FLETERO/);
+test('son DOS frenos, y en ese orden: primero el importe, después el papel', () => {
+  // Hasta el 8/9/2026 se exigía sólo la valorización. Pablo lo cambió ese día:
+  // «en principio hay que FRENARLA. Sin la factura no podemos liquidar. Es el
+  // filtro para contabilizar la factura».
+  assert.match(SERV, /SON DOS FRENOS, EN ESE ORDEN: PRIMERO EL IMPORTE, DESPUÉS EL PAPEL/);
+  // El de valorizar sigue mirando SÓLO el estado: son dos preguntas distintas y
+  // mezclarlas daría un aviso que no dice qué falta.
   const i = SERV.indexOf('export function gastosSinValorizar(');
   const b = SERV.slice(i, i + 900);
   assert.match(b, /g\.estado='pendiente_valorizar'/);
   assert.ok(!/factura/i.test(b.slice(b.indexOf('SELECT'), b.indexOf('.get('))));
+  // Y el nuevo va DESPUÉS: primero se pone el importe —que es lo que entra al
+  // costo el día que pasa el camión— y después llega el papel.
+  const f = SERV.slice(SERV.indexOf('export function frenoParaLiquidar('));
+  assert.ok(f.indexOf('gastosSinValorizar(db, ocId)') < f.indexOf('gastosSinFactura(db, ocId)'),
+    'el freno de la factura quedó antes que el de valorizar');
 });
 
 // ── LA CUENTA, CORRIDA ─────────────────────────────────────────────────────
@@ -149,7 +158,10 @@ test('la pantalla frena y dice las tres cosas con su camino', () => {
   // Antes era un aviso al pasar y la liquidación se emitía igual.
   const i = PANEL.indexOf('var frenos = [];');
   assert.ok(i > 0, 'no está el bloque de frenos');
-  const b = PANEL.slice(i, i + 2400);
+  // Hasta donde el bloque termina de escribirse, no «los próximos 2400
+  // caracteres»: agregarle un freno más lo empujaba afuera de la ventana y esto
+  // daba rojo sin que nada se hubiera roto.
+  const b = PANEL.slice(i, PANEL.indexOf('Esta partida todavía no se puede liquidar', i) + 200);
   assert.match(b, /Remitos pendientes de comprobante/);
   assert.match(b, /Gastos Directos → Control Cooperativa/);
   assert.match(b, /Gastos Directos → Fletes de entrada/);
