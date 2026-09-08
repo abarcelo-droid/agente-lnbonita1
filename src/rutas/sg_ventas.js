@@ -652,13 +652,18 @@ router.get('/facturas/export.xlsx', requireAuth, (req, res) => {
 // El modelo elegido, con sus líneas y con la verificación de que sirve.
 router.get('/modelo-venta', requireAuth, (req, res) => {
   try {
+    // LA LISTA VIAJA SIEMPRE, también cuando no hay ninguno elegido: es de lo que
+    // el selector se arma. Sin esto la pantalla tenía que pedir /contable/modelos
+    // por su cuenta —dos llamadas para una sola pregunta— y el bloque genérico que
+    // usan los otros cuatro circuitos no podía servir para éste.
+    const modelos = db.prepare('SELECT id, nombre FROM sg_asientos_modelo WHERE activo=1 ORDER BY nombre').all();
     const m = modeloVentaLineas(db);
     if (!m.id) {
-      return res.json({ ok: true, data: { modelo: null, id_perdido: m.perdido || null } });
+      return res.json({ ok: true, data: { modelo: null, id_perdido: m.perdido || null, modelos } });
     }
     const cab = db.prepare('SELECT * FROM sg_asientos_modelo WHERE id=?').get(m.id);
     cab.lineas = m.lineas;
-    res.json({ ok: true, data: { modelo: cab, faltan: modeloVentaFaltan(m.lineas) } });
+    res.json({ ok: true, data: { modelo: cab, faltan: modeloVentaFaltan(m.lineas), modelos } });
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 

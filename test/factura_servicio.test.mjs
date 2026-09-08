@@ -317,12 +317,24 @@ test('el botón está en Control Cooperativa y el modal al nivel de arriba', () 
 
 test('la tabla del modal no pide barra de desplazamiento lateral', () => {
   const i = PANEL.indexOf('id="sg-fg-modal"');
-  const b = PANEL.slice(i, i + 4000);
+  // Hasta donde empieza el modal siguiente, no «los próximos 4000 caracteres»:
+  // medido así, agregar un campo arriba de la tabla ponía el test en rojo sin
+  // que nada se hubiera roto.
+  const fin = PANEL.indexOf('class="ab-modal-overlay', i + 10);
+  const b = PANEL.slice(i, fin > i ? fin : i + 12000);
   assert.match(b, /overflow-x:hidden !important/);
   assert.match(b, /table-layout:fixed/);
-  const anchos = [...b.matchAll(/<th style="width:(\d+)%/g)].map((m) => Number(m[1]));
-  assert.equal(anchos.length, 5);
-  assert.equal(anchos.reduce((a, x) => a + x, 0), 100);
+  // LAS DOS TABLAS DEL MODAL, no la primera: la de «qué cubre esta factura» y la
+  // de «lo que ya se le facturó». Con la ventana vieja —4000 caracteres— la
+  // segunda quedaba afuera y podía desbordarse sin que nadie se enterara.
+  const tablas = b.split('<table').slice(1)
+    .map((t) => [...t.matchAll(/<th style="width:(\d+)%/g)].map((m) => Number(m[1])))
+    .filter((w) => w.length);
+  assert.ok(tablas.length >= 2, 'el modal tiene menos tablas con anchos de las que tenía');
+  for (const anchos of tablas) {
+    assert.equal(anchos.reduce((a, x) => a + x, 0), 100,
+      'los anchos de una de las tablas no suman 100: ' + anchos.join('+'));
+  }
 });
 
 test('sólo se ofrecen las cooperativas que tienen proveedor cargado', () => {
@@ -331,9 +343,14 @@ test('sólo se ofrecen las cooperativas que tienen proveedor cargado', () => {
   // El armado del selector se mudó a sgFgProvs, que es el que sabe de qué
   // circuito es la factura: a la descarga se le factura a la cooperativa y al
   // flete, al fletero.
-  const p = PANEL.slice(PANEL.indexOf('function sgFgProvs(){'), PANEL.indexOf('function sgFgProv(){'));
-  assert.match(p, /filter\(function\(c\)\{ return c\.proveedor_id; \}\)/);
-  assert.match(p, /hay cooperativas sin proveedor/);
+  const p = PANEL.slice(PANEL.indexOf('function sgFgProvs(){'),
+                        PANEL.indexOf('function sgFgProvBuscar(){'));
+  // Se filtra por proveedor_id, se llame como se llame el parámetro: antes esto
+  // se ataba al nombre de la variable y renombrarla lo rompía sin cambiar nada.
+  assert.match(p, /\.filter\(function\((\w+)\)\{ return \1\.proveedor_id; \}\)/);
+  // Y se dice cuántas quedaron afuera, para que no parezca que faltan del padrón.
+  assert.match(p, /SGFG\.sinProv = \(SG_COOPS \|\| \[\]\)\.length - conProv\.length/);
+  assert.match(PANEL, /cooperativa\(s\) sin proveedor cargado/);
 });
 
 // ── 7 · LA TABLA, SIN ATARSE A OTROS MÓDULOS ───────────────────────────────
