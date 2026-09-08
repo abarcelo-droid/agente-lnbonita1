@@ -245,9 +245,13 @@ test('los circuitos salen de UNA tabla, no de una copia cada uno', () => {
   const t = tablaCircuitos();
   // La VENTA se sumó a la misma tabla en la V1022: su parametrización vivía
   // adentro de la ventana de facturar, con una copia propia de las funciones.
-  assert.deepEqual(Object.keys(t).sort(), ['descarga', 'flete_entrada', 'flete_salida', 'venta']);
+  // La COBRANZA se sumó el 8/9/2026: es la contracara de la venta y hasta
+  // entonces no tenía modelo, así que la cuenta corriente se pedía por cliente.
+  assert.deepEqual(Object.keys(t).sort(),
+    ['cobranza', 'descarga', 'flete_entrada', 'flete_salida', 'venta']);
   // Y no lleva facturaTit: a la venta no se le ingresa una factura, se EMITE.
   assert.ok(!t.venta.facturaTit, 'la venta no tiene ventana de ingresar factura');
+  assert.ok(!t.cobranza.facturaTit, 'a una cobranza no se le ingresa una factura');
   for (const c of CIRCUITOS_UI) {
     assert.equal(t[c.k].ruta, c.ruta, c.k + ' apunta a otra dirección');
     assert.equal(t[c.k].btn, c.btn);
