@@ -276,6 +276,24 @@ Y tiene un tercer uso además de documentar: **desde ahí se revisa si el proces
 bien**. Un campo que no se puede explicar en una línea es un campo que sobra o que
 está mal pensado.
 
+**Reafirmado el 8/9/2026**, con dos precisiones que faltaban. Pablo: *«IMPORTANTE:
+cada vez que modifiques algo en alguna pantalla, tenés que actualizar el Cómo se usa
+correspondiente. Si no nos perdemos»*.
+
+1. **Si la pantalla NO tiene manual, actualizarlo es ESCRIBIRLO.** No es excusa para
+   saltearse la regla; es la señal de que le tocaba. Así salieron el de Reprocesos
+   (V1025) y el de Remitos y Facturación (V1026).
+2. **El manual se prueba contra el código, no contra sí mismo.** Un test que sólo
+   verifica que el texto existe no sirve para nada: lo que hay que clavar es que lo
+   que el manual AFIRMA sigue siendo cierto. `test/manual_remitos.test.mjs` es el
+   molde — cada afirmación («el precio de un remito facturado queda con candado»,
+   «lo devuelto no se factura») tiene al lado su assert contra `rutas/sg.js`. Se
+   verificó mutando el CÓDIGO: siete cambios en el backend, siete rojos en el manual.
+
+Al 8/9/2026 quedan **18 de 23 pantallas de SG sin manual**. Las que tienen: Ingresos,
+Órdenes de Compra, Stock, Gastos Directos, Asiento Modelo, Reprocesos y Remitos y
+Facturación.
+
 ### Validación antes de entregar
 - **`npm test` SIEMPRE.** Esta sección decía "no hay tests" y contradecía a la de
   Limitaciones del entorno, setenta líneas más arriba, que dice lo contrario y es la
