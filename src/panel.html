@@ -3177,7 +3177,15 @@ input[type=number]{-moz-appearance:textfield;appearance:textfield}
           partidas del stock y se emite el comprobante en el acto. Se abre en una
           ventana aparte para no perder de vista que se está facturando.
         </div>
+        <!-- LO ÚNICO ACCIONABLE, acá: sin asiento modelo la venta se emite igual
+             —el comprobante sale— pero no entra al libro, y eso se descubre al
+             cierre. Lo demás se fue al botón. -->
+        <div id="sgfd-modelo-falta" style="display:none;border:1.5px solid #e0a72e;
+             background:rgba(224,167,46,.10);border-radius:8px;padding:9px 12px;
+             margin-bottom:12px;font-size:12.5px;color:#9a3412"></div>
         <button class="btn bb" onclick="sgFdAbrir()">💵 Facturar en el puesto</button>
+        <button class="btn bo" id="sgfd-modelo-btn" style="display:none"
+                onclick="sgModeloAbrir('venta')">⚙️ Asiento modelo</button>
       </div>
     </div>
 
@@ -3510,16 +3518,6 @@ input[type=number]{-moz-appearance:textfield;appearance:textfield}
     <div class="mhd"><div class="mht">💵 Facturar en el puesto</div>
       <button class="mcl" onclick="closeMB('sg-fd-modal')">×</button></div>
 
-      <!-- CONTRA QUÉ SE CONTABILIZA, arriba y a la vista. Es la misma tarjeta que
-           tiene Facturas por mercadería para las compras: el que factura ve con
-           qué asiento se va a registrar, y si falta elegirlo lo sabe ANTES de
-           cargar nada. -->
-      <div id="sgfd-modelo-box" style="border:1px solid var(--bor);border-radius:10px;padding:12px 14px;margin-bottom:16px;background:var(--bg)">
-        <div style="font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--mut);margin-bottom:6px">
-          Asiento contable de venta
-        </div>
-        <div id="sgfd-modelo-cuerpo" style="font-size:13px">Cargando…</div>
-      </div>
       <style>
         /* Nada se desplaza de costado, y los campos no se desbordan de su caja. */
         #sg-fd-modal .ab-table-wrap{overflow-x:hidden !important}
@@ -3983,7 +3981,7 @@ input[type=number]{-moz-appearance:textfield;appearance:textfield}
           <div class="sgfe-est" data-e="valorizado" onclick="sgFeEstado('valorizado')"
                style="padding:5px 12px;cursor:pointer;font-size:12px;font-weight:600;border-radius:6px;color:var(--mut)">✅ Valorizados</div>
         </div>
-        <input id="sgfe-q" placeholder="🔎 Partida o proveedor…" oninput="sgFePintar()"
+        <input id="sgfe-q" placeholder="🔎 Partida, proveedor o fletero…" oninput="sgFePintar()"
                style="max-width:280px;padding:5px 9px;border-radius:6px;border:1px solid var(--bor);background:var(--bg)">
         <span style="font-size:11px;color:var(--mut)">El flete a cargo del vendedor no figura: viene adentro del precio.</span>
       </div>
@@ -7429,8 +7427,22 @@ input[type=number]{-moz-appearance:textfield;appearance:textfield}
              border-radius:8px;padding:9px 11px;margin-top:9px;font-size:12.5px;color:#9a3412;line-height:1.55"></div>
       </div>
 
+      <!-- SE ESCRIBE Y APARECE, como en los rubros contables (Pablo, 8/9/2026).
+           El padrón de proveedores es largo y en un desplegable hay que bajarlo a
+           ojo; acá se escribe un pedazo del nombre y busca POR CONTIENE.
+
+           Y CADA UNO DICE CUÁNTO TIENE SIN FACTURAR. Es lo que faltaba: la lista
+           de fletes muestra al proveedor de la MERCADERÍA y la factura la emite el
+           FLETERO, que es otro. Elegir el que no era contestaba «no hay nada»,
+           exactamente lo mismo que si de verdad no hubiera nada. -->
       <div class="fl"><label>¿De quién es la factura? <span style="color:var(--err)">*</span></label>
-        <select id="sg-fg-prov" onchange="sgFgProv()"></select></div>
+        <div style="position:relative">
+          <input id="sg-fg-provq" autocomplete="off" placeholder="Escribí el nombre…"
+                 oninput="sgFgProvBuscar()" onfocus="sgFgProvBuscar()" onblur="sgFgProvBlur()"
+                 style="width:100%;box-sizing:border-box">
+          <input type="hidden" id="sg-fg-prov">
+          <div class="pa-ac-list" id="sg-fg-provlist" style="display:none"></div>
+        </div></div>
       <div class="fl"><label>Fecha de emisión</label>
         <input type="date" id="sg-fg-fecha"></div>
 
@@ -10906,8 +10918,9 @@ function sgAsientoPlegado(html, titulo){
 // "Asiento contable de venta" colgado arriba de un hueco no le sirve a nadie.
 function sgAsientoModeloVisible(){
   var admin = sgAsientoEsAdmin();
-  ['sgfd-modelo-box', 'sgfm-modelo-box', 'liq-modelo-box',
-   'sggd-modelo-btn', 'sgfe-modelo-btn', 'sgfs-modelo-btn'].forEach(function(id){
+  ['sgfm-modelo-box', 'liq-modelo-box',
+   'sggd-modelo-btn', 'sgfe-modelo-btn', 'sgfs-modelo-btn',
+   'sgfd-modelo-btn'].forEach(function(id){
     var e = document.getElementById(id);
     if (e) e.style.display = admin ? '' : 'none';
   });
@@ -18359,9 +18372,11 @@ function sgVenSub(s){
   document.querySelectorAll('.sg-mod .sgv-subtab').forEach(function(el){ el.classList.toggle('on', el.dataset.sub===s); });
   document.querySelectorAll('.sg-mod .sgv-sub').forEach(function(el){ el.classList.toggle('on', el.id==='sgv-sub-'+s); });
   if (s==='despachos') sgLoadDespachos();
-  // 'directa' ya no inicializa nada: el formulario vive en una ventana y se
-  // inicializa al abrirla. Entrar a la solapa sólo muestra el botón.
-  else if (s==='directa') { /* la puerta está en el HTML */ }
+  // 'directa' no inicializa el formulario —vive en una ventana y se arma al
+  // abrirla—, pero sí pregunta con qué asiento se contabiliza: de ahí sale el
+  // estado del botón y el aviso de cuando falta. Si saliera de abrir la ventana,
+  // habría que abrirla para enterarse de que las ventas no están asentando.
+  else if (s==='directa') sgModeloCargar('venta');
   // Facturarle a una cadena es facturar remitos ya entregados, no vender en el
   // mostrador: es su propia puerta (Pablo, 31/8/2026).
   else if (s==='supermercados') sgSuperInit();
@@ -18607,7 +18622,7 @@ function sgFdAbrir(){
 }
 
 function sgFdInit(){
-  sgFdModeloCargar();
+  sgModeloCargar('venta');
   SG.fdItems=[];
   // NADA DE LA VENTA ANTERIOR SOBREVIVE. El cuadro del asiento vive en un div
   // aparte: si no se vacía acá, al volver a entrar se ve el asiento de una venta
@@ -18879,86 +18894,10 @@ function sgFdRender(){
 // puede estar descuadrado y lo de gestión compensarlo al revés, y el cuadro
 // diría "balancea" con el libro fiscal mal.
 // ── CONTRA QUÉ SE CONTABILIZA ──────────────────────────────
-// Calcado de sgFmModeloCargar(), que hace lo mismo para las compras: la misma
-// decisión se toma en el mismo lugar y se ve igual en las dos pantallas.
-function sgFdModeloCargar(){
-  sgAsientoModeloVisible();
-  var box = eid('sgfd-modelo-cuerpo'); if (!box) return;
-  Promise.all([
-    api('/api/sg/ventas/modelo-venta'),
-    api('/api/sg/contable/modelos'),
-  ]).then(function(res){
-    var r = res[0], lista = (res[1] && res[1].ok) ? res[1].data : [];
-    var m = (r && r.ok) ? r.data.modelo : null;
-    var faltan = (r && r.ok) ? (r.data.faltan || []) : [];
-    var esAdmin = (typeof sgFmEsAdmin === 'function') ? sgFmEsAdmin() : true;
-
-    var sel = '';
-    if (esAdmin) {
-      sel = '<select id="sgfd-modelo-sel" onchange="sgFdModeloGuardar()" style="padding:6px 8px;'
-        + 'border-radius:6px;border:1px solid var(--bor);background:var(--pan);min-width:260px">'
-        + '<option value="">— Elegí el asiento modelo —</option>'
-        + lista.map(function(x){
-            return '<option value="' + x.id + '"' + (m && x.id === m.id ? ' selected' : '') + '>'
-              + escH(x.nombre) + '</option>';
-          }).join('')
-        + '</select>';
-    }
-
-    if (!m) {
-      box.innerHTML = '<div style="color:#9a3412;font-weight:600;margin-bottom:8px">'
-        + '⚠️ Todavía no se eligió con qué asiento se contabilizan las ventas.'
-        + (r && r.ok && r.data.id_perdido ? ' (El que estaba elegido se dio de baja.)' : '')
-        + '</div>'
-        + (esAdmin ? sel
-                   : '<div style="font-size:12px;color:var(--mut)">Pedile a un administrador que lo configure.</div>');
-      return;
-    }
-    var cuentas = (m.lineas || []).map(function(l){
-      return escH(l.cuenta_codigo || '?') + ' ' + escH(l.cuenta_nombre || '');
-    });
-    SGFD_MODELO = m;
-    box.innerHTML = '<div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap">'
-      + '<div style="font-weight:700;font-size:14px">' + escH(m.nombre) + '</div>'
-      + '<span style="font-size:12px;color:var(--mut)">' + cuentas.length + ' cuentas</span>'
-      // EL MISMO BOTÓN QUE COMPRAS, y la misma tabla: es la misma pregunta
-      // —qué cuentas toca este asiento— y se responde igual en las dos pantallas.
-      + '<button class="btn bo bs" type="button" onclick="sgFdModeloDetalle()">Ver detalle</button>'
-      + (esAdmin ? sel : '')
-      + '</div>'
-      + '<div style="font-size:11.5px;color:var(--mut);margin-top:5px">' + cuentas.join(' · ') + '</div>'
-      // LO QUE LE FALTA AL MODELO, dicho acá y no cuando ya hay una factura
-      // cargada y alguien esperando.
-      + (faltan.length
-          ? '<div style="margin-top:8px;color:#9a3412;font-size:12.5px">⚠️ Le falta '
-            + escH(faltan.join(' y ')) + '</div>'
-          : '')
-      + '<div id="sgfd-modelo-det" style="display:none;margin-top:10px"></div>';
-  });
-}
-
-// El detalle completo, con la MISMA tabla que compras: cada línea con su cuenta,
-// su tipo y de qué lado va. Incluye las que pone la Configuración impositiva —
-// el IVA Débito no está en el modelo y tiene que verse igual, porque va a estar
-// en el asiento.
-var SGFD_MODELO = null;
-function sgFdModeloDetalle(){
-  var d = eid('sgfd-modelo-det'); if (!d || !SGFD_MODELO) return;
-  var abierto = d.style.display !== 'none';
-  d.style.display = abierto ? 'none' : '';
-  d.innerHTML = abierto ? '' : sgFmAsientoTabla(SGFD_MODELO.lineas || []);
-}
-
-function sgFdModeloGuardar(){
-  var sel = eid('sgfd-modelo-sel'); if (!sel) return;
-  api('/api/sg/ventas/modelo-venta', 'PUT', { modelo_id: sel.value ? Number(sel.value) : null })
-    .then(function(r){
-      if (!r || !r.ok) { toast((r && r.error) || 'No se pudo guardar', 'er'); return; }
-      toast(sel.value ? 'Las ventas se contabilizan con ese asiento' : 'Sin asiento modelo', 'ok');
-      sgFdModeloCargar();
-      sgFdRender();          // el cuadro de abajo se rehace con el modelo nuevo
-    });
-}
+// Se fue al botón «⚙️ Asiento modelo» de la solapa, con el bloque genérico que
+// usan los otros cuatro circuitos (SG_MODELOS.venta). Acá había una copia de
+// sgFmModeloCargar/Detalle/Guardar que hacía exactamente lo mismo: dos lugares
+// donde arreglar la misma cosa, y el que se olvide queda distinto.
 
 function sgFdAsientoPreview(){
   var cont = eid('sgfd-asiento'); if (!cont) return;
@@ -21944,6 +21883,19 @@ SG_MANUAL.modelos = { titulo: 'Asiento Modelo', html:
   + 'guarda en un solo lugar y las dos pantallas muestran lo mismo. Dos puertas al '
   + 'mismo cuarto, para no hacer cambiar de pantalla al que está trabajando.</p>'
 
+  + '<h3>El de VENTAS también tiene su puerta <span class="ver">V1022</span></h3>'
+  + '<p>Está en <b>Administración de Ventas → Salidas → Facturar en el puesto</b>, en el '
+  + 'botón <b>⚙️ Asiento modelo</b>. Antes vivía <b>adentro</b> de la ventana de facturar: '
+  + 'lo primero que veía el que iba a emitir un comprobante era una parametrización que no '
+  + 'le toca, y ocupaba el encabezado entero.</p>'
+  + '<div class="ojo">Es <b>el mismo valor</b> que el circuito <b>Venta</b> de acá, no una '
+  + 'segunda configuración. Y sirve para <b>toda</b> venta: la del puesto, la de las cadenas '
+  + 'y la de los remitos ya entregados. El <b>IVA Débito no sale del modelo</b> sino de la '
+  + 'Configuración impositiva, y se agrega solo.</div>'
+  + '<p>Si falta, el aviso aparece <b>en la solapa</b>, sin abrir la ventana: la venta se '
+  + 'emite igual —el comprobante sale— pero <b>no entra al libro</b>, y eso se descubría al '
+  + 'cierre.</p>'
+
   + '<h3>Si se da de baja un modelo que estaba en uso</h3>'
   + '<p>El circuito que lo tenía queda <b>en rojo</b> en el cuadro de arriba, avisando '
   + 'que hay que elegir otro. Antes se veía igual que uno sin elegir, y la diferencia '
@@ -21992,6 +21944,28 @@ SG_MANUAL.gastos = { titulo: 'Gastos Directos', html:
   + 'es costo.</div>'
   + '<p>Los fletes valorizados <b>antes</b> de esta versión tienen el total con IVA adentro. '
   + 'Se corrigen entrando de nuevo a <b>Valorizar</b> y poniendo el neto.</p>'
+
+  + '<h3>La factura es del FLETERO, no del proveedor de la mercadería '
+  + '<span class="ver">V1022</span></h3>'
+  + '<p>En <b>Fletes de entrada</b>, la columna <b>Proveedor</b> es de quién era la '
+  + '<b>mercadería</b>. A quién se le paga el viaje —y quién emite la factura— es el '
+  + '<b>fletero</b>, que ahora se lee <b>abajo del proveedor</b> en la misma columna, y por '
+  + 'el que además se puede buscar.</p>'
+  + '<div class="ojo">Sin eso, el que iba a cargar la factura elegía el nombre que veía en '
+  + 'la lista —el equivocado— y la pantalla contestaba <b>«no hay fletes valorizados sin '
+  + 'facturar de este fletero»</b>: exactamente lo mismo que si de verdad no hubiera nada. '
+  + 'Se perdía la tarde buscando una partida que estaba.</div>'
+
+  + '<h3>El proveedor se escribe, y dice cuánto tiene sin facturar '
+  + '<span class="ver">V1022</span></h3>'
+  + '<p>En <b>🧾 Ingresar factura</b>, <b>¿De quién es la factura?</b> dejó de ser un '
+  + 'desplegable: se <b>escribe un pedazo del nombre</b> y busca <b>por contiene</b> y sin '
+  + 'acentos, igual que los rubros contables. «ardisone» encuentra «AGROINSUMOS ARDISONE '
+  + 'S.R.L.».</p>'
+  + '<p>Y al lado de cada uno dice <b>cuántas operaciones tiene sin facturar y por cuánto</b>. '
+  + 'Los que tienen algo van <b>primero</b>; los que no tienen nada quedan abajo y se pueden '
+  + 'elegir igual, porque hay que poder entrar a uno para <b>anular</b> una factura ya '
+  + 'cargada.</p>'
 
   + '<h3>🧾 Ingresar factura, en las TRES solapas <span class="ver">V1015</span></h3>'
   + '<p>El mismo circuito para las descargas y para los dos fletes: la operación nace, '
@@ -23953,7 +23927,8 @@ function sgFePintar(){
   var q = sgNorm(String((eid('sgfe-q') || {}).value || '').trim());
   var filas = SGFE.filas.filter(function(x){
     if (!q) return true;
-    return sgNorm((x.partida || '') + ' ' + (x.oc_numero || '') + ' ' + (x.proveedor_nombre || ''))
+    return sgNorm((x.partida || '') + ' ' + (x.oc_numero || '') + ' '
+                + (x.proveedor_nombre || '') + ' ' + (x.fletero_nombre || ''))
       .indexOf(q) >= 0;
   });
   var tb = eid('sgfe-tb'); if (!tb) return;
@@ -23972,7 +23947,15 @@ function sgFePintar(){
             : '')
         + '</td>'
       + '<td>' + escH(x.fecha_recepcion || '—') + '</td>'
-      + '<td class="cb-nom">' + escH(x.proveedor_nombre || '—') + '</td>'
+      + '<td class="cb-nom">' + escH(x.proveedor_nombre || '—')
+        // Y ABAJO, EL FLETERO. Es a quien se le paga y a nombre de quién viene la
+        // factura, y es OTRO que el proveedor de la mercadería. Sin esto, el que
+        // va a cargar la factura elige el nombre que ve acá —el equivocado— y la
+        // pantalla le contesta que no hay nada para facturar.
+        + (x.fletero_nombre
+            ? '<div style="font-size:10.5px;color:var(--mut)">flete: ' + escH(x.fletero_nombre) + '</div>'
+            : '')
+        + '</td>'
       // SIN DATO NO ES CERO. Las recepciones viejas no tienen los bultos
       // cargados, y ahí el flete no se puede calcular con ellos: se dice.
       + '<td style="text-align:right">' + (x.bultos
@@ -24286,6 +24269,18 @@ var SG_MODELOS = {
        + 'mercadería. Es el circuito «Flete de entrada» de Contabilidad SG. Este flete '
        + 'ENTRA al costo de la partida.',
   },
+  // LA VENTA NO TIENE «INGRESAR FACTURA»: no se recibe un comprobante, se EMITE.
+  // Por eso no lleva facturaTit ni provs — sólo la parte de parametrización, que
+  // es la que se comparte.
+  venta: {
+    ruta: '/api/sg/ventas/modelo-venta',
+    btn: 'sgfd-modelo-btn', av: 'sgfd-modelo-falta',
+    titulo: 'Asiento contable de las ventas',
+    que: 'las ventas',
+    sub: 'Con qué asiento modelo se contabiliza TODA venta: la del puesto, la de las '
+       + 'cadenas y la de los remitos ya entregados. El IVA Débito no sale de acá sino '
+       + 'de la Configuración impositiva, y se agrega solo.',
+  },
   flete_salida: {
     ruta: '/api/sg/flete-salida/modelo',
     btn: 'sgfs-modelo-btn', av: 'sgfs-modelo-falta',
@@ -24420,6 +24415,11 @@ function sgModeloGuardar(k){
                     : 'Sin modelo: la operación no va a asentar', 'ok');
     // Recarga el estado (botón y aviso) y, como el modal está abierto, lo repinta.
     sgModeloCargar(k);
+    // Y si la venta se está cargando en este momento, el cuadro del asiento que
+    // muestra abajo se armó con el modelo VIEJO: se rehace, o se aprueba uno que
+    // no es el que se va a grabar.
+    if (k === 'venta' && eid('sg-fd-modal') && eid('sg-fd-modal').classList.contains('on')
+        && typeof sgFdRender === 'function') sgFdRender();
   });
 }
 
@@ -24585,7 +24585,9 @@ function sgCcoopValorizar(gastoId){
 // asiento y deuda. Hasta que no llega, el sistema le debe plata a la cuadrilla y
 // no lo sabe.
 var SGFG = { filas: [], sel: {}, asiento: null, circuito: 'descarga', yaAsentados: 0,
-             archivo: null, leido: 0, cuit: null, pv: null };
+             archivo: null, leido: 0, cuit: null, pv: null,
+             // El padrón del circuito y, por proveedor, lo que tiene sin facturar.
+             provs: [], pend: {}, sinProv: 0 };
 
 // Pablo, 7/9/2026: «necesito el lugar donde contabilizar la factura, con la
 // misma lógica que en Control Cooperativa... seleccionando los valorizados».
@@ -24594,7 +24596,11 @@ var SGFG = { filas: [], sel: {}, asiento: null, circuito: 'descarga', yaAsentado
 // factura, qué operaciones se ofrecen y contra qué modelo se contabiliza. Tres
 // modales iguales serían tres lugares donde arreglar lo mismo.
 function sgFgAbrir(circuito){
-  SGFG.circuito = SG_MODELOS[circuito] ? circuito : 'descarga';
+  // Se pide facturaTit y no sólo que la clave exista: 'venta' está en SG_MODELOS
+  // para configurarse, pero no se le ingresa una factura a nadie —se emite—, y
+  // abrir esta ventana con ese circuito dejaría el título y las columnas vacías.
+  var ok = SG_MODELOS[circuito] && SG_MODELOS[circuito].facturaTit;
+  SGFG.circuito = ok ? circuito : 'descarga';
   var c = SG_MODELOS[SGFG.circuito];
   eid('sg-fg-tit').textContent = c.facturaTit;
   eid('sg-fg-ref-th').textContent = c.ref;
@@ -24630,28 +24636,120 @@ function sgFgAbrir(circuito){
 // cooperativas para facturar un flete.
 function sgFgProvs(){
   var c = SG_MODELOS[SGFG.circuito] || {};
-  var sel = eid('sg-fg-prov');
-  var poner = function(ops){
-    sel.innerHTML = '<option value="">— Elegí —</option>' + ops.join('');
-  };
+  SGFG.provs = []; SGFG.pend = {}; SGFG.sinProv = 0; SGFG.provsListo = 0;
+  var inp = eid('sg-fg-provq'), hid = eid('sg-fg-prov');
+  if (inp) inp.value = '';
+  if (hid) hid.value = '';
+  sgFgProvCerrar();
+
+  // CUÁNTAS OPERACIONES TIENE CADA UNO SIN FACTURAR. Se pide con el mismo criterio
+  // que la consulta que arma la tabla de abajo: si fuera otro, el selector diría
+  // «3 sin facturar» y al elegirlo no aparecería ninguna.
+  api('/api/sg/gastos-facturables/resumen?circuito=' + encodeURIComponent(SGFG.circuito))
+    .then(function(r){
+      var m = {};
+      ((r && r.ok) ? (r.data || []) : []).forEach(function(x){ m[String(x.id)] = x; });
+      SGFG.pend = m;
+      if (eid('sg-fg-provlist').style.display !== 'none') sgFgProvBuscar();
+    });
+
   if (c.provs === 'fleteros') {
-    poner([]);
     api('/api/sg/proveedores-servicio').then(function(r){
-      var fs = (r && r.ok) ? (r.data || []) : [];
-      poner(fs.map(function(f){
-        return '<option value="' + f.id + '">' + escH(f.razon_social) + '</option>';
-      }));
+      SGFG.provs = ((r && r.ok) ? (r.data || []) : []).map(function(f){
+        return { id: f.id, nombre: f.razon_social };
+      });
+      SGFG.provsListo = 1;
+      if (eid('sg-fg-provlist').style.display !== 'none') sgFgProvBuscar();
     });
     return;
   }
   // A la cooperativa se le factura a través de su PROVEEDOR: es el que tiene CUIT
   // y cuenta corriente. Las que todavía no lo tienen cargado no se pueden
   // facturar, y decirlo es mejor que ofrecerlas y que rebote el servidor.
-  var conProv = (SG_COOPS || []).filter(function(c){ return c.proveedor_id; });
-  poner(conProv.map(function(x){
-    return '<option value="' + x.proveedor_id + '">' + escH(x.proveedor_nombre || x.nombre) + '</option>';
-  }).concat((SG_COOPS || []).length > conProv.length
-    ? ['<option value="" disabled>(hay cooperativas sin proveedor: cargáselo en el lápiz)</option>'] : []));
+  var conProv = (SG_COOPS || []).filter(function(x){ return x.proveedor_id; });
+  SGFG.sinProv = (SG_COOPS || []).length - conProv.length;
+  // Dos cooperativas pueden facturar por el mismo proveedor: en la lista es UNO.
+  var vistos = {};
+  SGFG.provs = conProv.filter(function(x){
+    if (vistos[String(x.proveedor_id)]) return false;
+    vistos[String(x.proveedor_id)] = 1; return true;
+  }).map(function(x){
+    return { id: x.proveedor_id, nombre: x.proveedor_nombre || x.nombre };
+  });
+  // SG_COOPS ya está en memoria: no hay nada que esperar.
+  SGFG.provsListo = 1;
+}
+
+// BUSCA POR CONTIENE Y SIN ACENTOS, igual que el resto del panel: «ardisone»
+// tiene que encontrar «AGROINSUMOS ARDISONE S.R.L.».
+function sgFgProvBuscar(){
+  var box = eid('sg-fg-provlist'); if (!box) return;
+  var q = sgNorm(String((eid('sg-fg-provq') || {}).value || '').trim());
+  var pend = function(p){ return (SGFG.pend || {})[String(p.id)]; };
+  var arr = (SGFG.provs || []).filter(function(p){
+    return !q || sgNorm(p.nombre || '').indexOf(q) >= 0;
+  });
+  // PRIMERO LOS QUE TIENEN ALGO PENDIENTE, que es la pregunta que se está
+  // haciendo. Los demás quedan abajo, no escondidos: hay que poder entrar a uno
+  // sin nada pendiente para dar de baja una factura ya cargada.
+  arr.sort(function(a, b){
+    var pa = pend(a) ? 1 : 0, pb = pend(b) ? 1 : 0;
+    if (pa !== pb) return pb - pa;
+    return String(a.nombre || '').localeCompare(String(b.nombre || ''));
+  });
+  var top = arr.slice(0, 50);
+  // «Sin resultados» sobre una lista que todavía no llegó hace buscar de nuevo
+  // algo que sí estaba.
+  if (!SGFG.provsListo && !(SGFG.provs || []).length){
+    box.innerHTML = '<div class="pa-ac-empty">Cargando el padrón…</div>';
+    box.style.display = '';
+    return;
+  }
+  box.innerHTML = (top.length
+      ? top.map(function(p){
+          var x = pend(p);
+          return '<div class="pa-ac-item" onmousedown="sgFgProvPick(' + p.id + ')">'
+            + escH(p.nombre || '')
+            + (x
+                ? '<span style="font-size:11px;color:#0f766e;margin-left:8px">'
+                  + x.pendientes + ' sin facturar · ' + sgMoney(x.total) + '</span>'
+                : '<span style="font-size:11px;color:var(--mut);margin-left:8px">nada pendiente</span>')
+            + '</div>';
+        }).join('')
+        + (arr.length > top.length
+            ? '<div class="pa-ac-more">… ' + (arr.length - top.length) + ' más — seguí escribiendo</div>' : '')
+      : '<div class="pa-ac-empty">Sin resultados</div>')
+    + (SGFG.sinProv
+        ? '<div class="pa-ac-more">(' + SGFG.sinProv + ' cooperativa(s) sin proveedor cargado: '
+          + 'cargáselo en el lápiz)</div>'
+        : '');
+  box.style.display = '';
+}
+
+function sgFgProvCerrar(){
+  var b = eid('sg-fg-provlist'); if (b) b.style.display = 'none';
+}
+
+// ESCRIBIR EL NOMBRE NO ES HABERLO ELEGIDO. Si se tipea «ARDISONE» y no se toca
+// la sugerencia, el campo muestra el nombre y por dentro no hay nadie: al
+// guardar contesta «elegí a quién le entra la factura» con el nombre escrito
+// ahí adelante, y no se entiende. Se vacía, que es lo que de verdad pasó.
+function sgFgProvBlur(){
+  sgFgProvCerrar();
+  var hid = eid('sg-fg-prov'), inp = eid('sg-fg-provq');
+  if (!hid || !inp) return;
+  var p = (SGFG.provs || []).find(function(x){ return String(x.id) === String(hid.value); });
+  if (!p || inp.value !== p.nombre){ hid.value = ''; inp.value = ''; sgFgProv(); }
+}
+
+function sgFgProvPick(id){
+  var p = (SGFG.provs || []).find(function(x){ return String(x.id) === String(id); });
+  if (!p) return;
+  var hid = eid('sg-fg-prov'), inp = eid('sg-fg-provq');
+  if (hid) hid.value = p.id;
+  if (inp) inp.value = p.nombre;
+  sgFgProvCerrar();
+  sgFgProv();
 }
 
 function sgFgProv(){

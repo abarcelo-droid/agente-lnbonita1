@@ -183,7 +183,10 @@ test('y la pantalla pide el suyo', () => {
   assert.match(PANEL, /function sgRemSuperLoad\(\)\{ sgDespListar\('super'\); \}/);
   // Y la solapa está enganchada.
   const j = PANEL.indexOf('function sgVenSub(s){');
-  assert.match(PANEL.slice(j, j + 1000), /else if \(s==='remsuper'\) sgRemSuperLoad\(\);/);
+  // La función entera, no sus primeros 1000 caracteres: un comentario de más
+  // arriba empujaba el enganche afuera de la ventana y el test daba rojo.
+  const fin = PANEL.indexOf('\r\n}', j);
+  assert.match(PANEL.slice(j, fin), /else if \(s==='remsuper'\) sgRemSuperLoad\(\);/);
   assert.match(PANEL, /data-sub="remsuper"/);
   assert.match(PANEL, /id="sgv-sub-remsuper"/);
 });

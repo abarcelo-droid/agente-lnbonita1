@@ -11319,6 +11319,40 @@ function circuitoFactura(v) {
 // Lo valorizado de ese proveedor que todavía no está en ninguna factura. El
 // NOT EXISTS es lo que impide facturar dos veces la misma descarga — y es el
 // mismo criterio que usa /oc/:id/agrupables para la mercadería.
+// ── QUIÉN TIENE ALGO PARA FACTURAR ───────────────────────────────────────
+//
+// Pablo, 8/9/2026: «no me trae las partidas valorizadas para poder ingresarlas
+// como facturas».
+//
+// No estaban: había elegido al PROVEEDOR DE LA MERCADERÍA, que es el nombre que
+// muestra la lista de fletes, y la factura la emite el FLETERO, que es otro. El
+// selector ofrecía el padrón entero sin distinguir a los que tienen algo
+// pendiente de los que no, así que elegir mal no se notaba: contestaba lo mismo
+// que si de verdad no hubiera nada.
+//
+// Devuelve cuántas operaciones y por cuánto tiene cada uno, con el MISMO criterio
+// que la consulta de abajo. Si fuera otro, la pantalla diría «3 pendientes» y al
+// elegirlo no aparecería ninguna, que es peor que no decir nada.
+router.get('/gastos-facturables/resumen', requireAuth, (req, res) => {
+  const db = getDb();
+  try {
+    const c = circuitoFactura(req.query.circuito);
+    if (!c) return res.status(400).json({ ok: false, error: 'Ese circuito no existe' });
+    const filas = db.prepare(`
+      SELECT g.proveedor_servicio_id AS id, COUNT(*) AS pendientes,
+             SUM(COALESCE(g.monto,0)) AS total
+        FROM sg_gastos_directos g
+       WHERE g.proveedor_servicio_id IS NOT NULL
+         AND g.tipo_gasto IN (${c.tipos.map(() => '?').join(',')})
+         AND g.estado = 'valorizado' AND g.activo = 1
+         AND NOT EXISTS (SELECT 1 FROM sg_factura_gasto_items fi
+                           JOIN sg_facturas_gasto f ON f.id = fi.factura_id AND f.activo = 1
+                          WHERE fi.gasto_id = g.id)
+       GROUP BY g.proveedor_servicio_id`).all(...c.tipos);
+    res.json({ ok: true, data: filas.map((x) => ({ ...x, total: r2(x.total) })) });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
 router.get('/gastos-facturables', requireAuth, (req, res) => {
   const db = getDb();
   try {

@@ -241,9 +241,13 @@ function tablaCircuitos() {
   return new Function(src + '\r\nreturn SG_MODELOS;')();
 }
 
-test('los tres circuitos salen de UNA tabla, no de tres copias', () => {
+test('los circuitos salen de UNA tabla, no de una copia cada uno', () => {
   const t = tablaCircuitos();
-  assert.deepEqual(Object.keys(t).sort(), ['descarga', 'flete_entrada', 'flete_salida']);
+  // La VENTA se sumó a la misma tabla en la V1022: su parametrización vivía
+  // adentro de la ventana de facturar, con una copia propia de las funciones.
+  assert.deepEqual(Object.keys(t).sort(), ['descarga', 'flete_entrada', 'flete_salida', 'venta']);
+  // Y no lleva facturaTit: a la venta no se le ingresa una factura, se EMITE.
+  assert.ok(!t.venta.facturaTit, 'la venta no tiene ventana de ingresar factura');
   for (const c of CIRCUITOS_UI) {
     assert.equal(t[c.k].ruta, c.ruta, c.k + ' apunta a otra dirección');
     assert.equal(t[c.k].btn, c.btn);
