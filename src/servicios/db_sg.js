@@ -1701,6 +1701,38 @@ try {
   db.exec("UPDATE sg_familias SET iva_alicuota=10.5 WHERE codigo IN (1,2,3,4) AND iva_alicuota IS NULL");
 } catch (e) { console.error('[DB] SG migración sg_familias (iva_alicuota):', e.message); }
 
+// ══ EL NOMBRE DE FAMILIA QUE QUEDÓ VIEJO EN EL PRODUCTO ═════════════════
+//
+// Pablo, 8/9/2026: «la familia Cítricos no existe... no entiendo de dónde sale».
+//
+// Salía de `sg_productos.familia`, que NO es la familia: es una COPIA del nombre
+// guardada al lado del producto para que los informes no tengan que hacer el join
+// (db_sg.js, arriba: «denormalizados (display)»). La familia de verdad es
+// `familia_id`.
+//
+// Renombrar una familia recién propaga a esa copia desde que se agregó el UPDATE
+// de rutas/sg.js. Los productos que ya existían cuando alguien renombró antes de
+// eso se quedaron con el nombre viejo pegado: la grilla de Productos mostraba
+// «Cítricos» —una familia que ya no existe con ese nombre— y la solapa Familias,
+// que cuenta por familia_id, mostraba la actual. Dos pantallas del mismo maestro
+// diciendo cosas distintas.
+//
+// Se pone al día. Es una copia, no un dato: si discrepa de su origen, está mal.
+// Idempotente y barata (cinco o seis familias): corre en cada arranque y no toca
+// nada cuando ya coinciden.
+try {
+  const desfasados = db.prepare(`
+    SELECT COUNT(*) AS n FROM sg_productos p JOIN sg_familias f ON f.id = p.familia_id
+     WHERE p.familia IS NOT f.nombre`).get().n;
+  if (desfasados) {
+    db.prepare(`
+      UPDATE sg_productos SET familia = (SELECT f.nombre FROM sg_familias f WHERE f.id = sg_productos.familia_id)
+       WHERE familia_id IS NOT NULL
+         AND familia IS NOT (SELECT f.nombre FROM sg_familias f WHERE f.id = sg_productos.familia_id)`).run();
+    console.log('[DB] SG sg_productos.familia puesto al día en ' + desfasados + ' producto(s)');
+  }
+} catch (e) { console.error('[DB] SG migración sg_productos.familia:', e.message); }
+
 // ══ LA FAMILIA DE TRÁNSITO ══════════════════════════════════════════════
 //
 // Una familia con productos colgando no se podía dar de baja: el maestro quedaba
