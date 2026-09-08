@@ -11037,9 +11037,14 @@ router.get('/fletes-entrada', requireAuth, (req, res) => {
                WHERE l.recepcion_id = r.id AND l.activo = 1 AND l.bultos IS NULL) AS lotes_sin_bultos,
              g.id AS gasto_id, g.estado AS gasto_estado, g.monto AS gasto_monto,
              g.proveedor_servicio_id, g.cuenta_ref, g.fecha_valorizacion,
-             -- La alícuota con la que se cargó, para que al reabrir el modal no se
-             -- vuelva a proponer el 21% sobre una factura que era al 10,5%.
-             g.iva_alicuota, g.asiento_id,
+             -- LA MARCA DE LOS VIEJOS. Desde la V1015 valorizar NO guarda alícuota
+             -- nunca más: el precio va sin IVA y el impuesto entra con la factura.
+             -- Entonces un flete valorizado que TIENE alícuota es, por
+             -- construcción, uno de los de antes — de los que se cargaron con el
+             -- total del papel y metieron el IVA adentro del costo de la partida.
+             -- El neto de aquel momento también quedó guardado, así que la
+             -- corrección es exacta y no hay que estimar nada.
+             g.iva_alicuota, g.neto, g.asiento_id,
              -- Si el papel está. Sin esto no hay forma de saber a qué fletes les
              -- falta la factura sin abrirlos uno por uno.
              (g.storage_key IS NOT NULL) AS tiene_archivo,

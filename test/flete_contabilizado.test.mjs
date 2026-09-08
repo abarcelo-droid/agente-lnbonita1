@@ -134,10 +134,13 @@ test('y el precio es SIN IVA, porque es lo que entra al costo', () => {
   assert.match(r, /SUM\(g\.monto\)/);
   assert.match(r, /g\.tipo_gasto IN \('descarga_ingreso','flete_entrada'\)/);
   // Y la pantalla lo dice, o el que carga pone el total del papel igual.
+  // Hasta donde termina el modal, no «los próximos 3000 caracteres»: agregarle
+  // un aviso arriba empujaba el texto afuera de la ventana y esto daba rojo.
   const i = PANEL.indexOf('id="sgfe-modal"');
-  const m = PANEL.slice(i, i + 3000);
-  assert.match(m, /Cuánto vale el flete \(sin IVA\)/);
-  assert.match(m, /va <b>sin IVA<\/b>/);
+  const m = PANEL.slice(i, PANEL.indexOf('id="sgfe-arch"', i));
+  assert.match(m, /Cuánto vale el flete <b style="color:#b45309">SIN IVA<\/b>/);
+  // Y por qué, que es lo que hace que no se lo saltee el que carga.
+  assert.match(m, /SIN IVA<\/b>: es lo que entra al <b>costo de la partida<\/b>/);
 });
 
 test('el modal de valorizar ya no es una carga de factura', () => {

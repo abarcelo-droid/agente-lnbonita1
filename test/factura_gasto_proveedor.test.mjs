@@ -186,7 +186,12 @@ test('la fila de Fletes de entrada muestra al fletero, no sólo al de la mercade
 
 test('y se puede buscar por él', () => {
   const f = trozo(PANEL, 'function sgFePintar(){', '\r\nfunction ');
-  assert.match(f, /\(x\.fletero_nombre \|\| ''\)\)\r?\n?\s*\.indexOf\(q\)/);
+  // Lo que se busca es el TEXTO del filtro, sin atarse a que el fletero sea lo
+  // último: después se le sumó la marca de «iva adentro» y esto daba rojo sin
+  // que se hubiera roto nada.
+  const filtro = trozo(f, 'var filas = SGFE.filas.filter(', '});');
+  assert.match(filtro, /\(x\.fletero_nombre \|\| ''\)/);
+  assert.match(filtro, /\.indexOf\(q\) >= 0/);
   assert.match(PANEL, /placeholder="🔎 Partida, proveedor o fletero…"/);
 });
 
