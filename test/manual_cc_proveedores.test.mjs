@@ -43,32 +43,62 @@ const PAGO = trozo(SG, "router.post('/pagos', requireAuth", '\r\n});');
 // 1 · EL HUECO, DICHO Y VERIFICADO
 // ══════════════════════════════════════════════════════════════════════════
 
-test('el manual avisa que las facturas de servicio no están acá', () => {
-  assert.match(MANUAL, /<b>Las facturas de servicio NO están acá todavía\.<\/b>/);
-  assert.match(MANUAL, /no se pueden pagar '\r?\n?\s*\+ 'desde acá/);
-  // Y dice por qué importa: el mayor y la pantalla dan distinto.
-  assert.match(MANUAL, /el mayor de Proveedores y esta pantalla dan distinto/);
+test('las facturas de servicio SÍ están en la cuenta corriente', () => {
+  // Hasta la V1035 no estaban: su asiento acreditaba al proveedor pero la
+  // pantalla no las leía, así que el mayor y la cuenta corriente daban distinto
+  // para un fletero y esa deuda no se podía pagar desde ninguna pantalla.
+  //
+  // El test que estaba acá clavaba el hueco y se puso en rojo al arreglarlo, que
+  // es exactamente para lo que estaba: un hueco documentado no se queda
+  // documentado para siempre.
+  assert.match(CC, /FROM sg_facturas_gasto fg/);
+  assert.match(CC, /fg\.proveedor_servicio_id = p\.id AND fg\.activo = 1/);
+  // Y sólo si están en el libro, como las otras dos.
+  assert.match(CC, /JOIN sg_asientos a5 ON a5\.id = fg\.asiento_id AND COALESCE\(a5\.anulado,0\) = 0/);
+  assert.ok(!/NO están acá todavía/.test(MANUAL), 'el manual sigue avisando de un hueco cerrado');
+  assert.match(MANUAL, /<b>V1035<\/b> — las <b>facturas de servicio<\/b> entran a la cuenta corriente/);
 });
 
-test('y es cierto: la cuenta corriente no lee sg_facturas_gasto', () => {
-  // El día que se arregle, este test se pone en rojo y avisa que el párrafo del
-  // manual hay que sacarlo. Es la única forma de que un hueco documentado no se
-  // quede documentado para siempre.
-  assert.ok(!/sg_facturas_gasto/.test(CC),
-    'la CC ya lee las facturas de servicio: sacá el párrafo del hueco del manual');
-  assert.match(CC, /FROM sg_facturas_compra f/);
-  assert.match(CC, /FROM liquidaciones lq/);
+test('y se pueden elegir para pagar, con las mismas columnas que las otras dos', () => {
+  const P = trozo(SG, "router.get('/pagos/pendientes/:proveedorId'", '\r\n});');
+  assert.match(P, /FROM sg_facturas_gasto fg/);
+  assert.match(P, /'factura_gasto' AS tipo/);
+  // Las mismas dos mitades: sin ellas, el que arma el pago no sabe cuánto puede
+  // imputar a cada lado.
+  assert.match(P, /AS pendiente_fiscal/);
+  assert.match(P, /AS pendiente_gestion/);
 });
 
-test('ni un pago las puede cancelar: sólo factura o liquidación', () => {
-  assert.match(PAGO, /String\(x\.tipo \|\| ''\) === 'liquidacion' \? 'liquidacion' : 'factura'/);
-  assert.ok(!/sg_facturas_gasto/.test(PAGO),
-    'el pago ya puede cancelar una factura de servicio: actualizá el manual');
+test('el pago las reconoce y les baja el saldo a SU tabla', () => {
+  const P = trozo(SG, "router.post('/pagos', requireAuth", '\r\n});');
+  assert.match(P, /\['liquidacion', 'factura_gasto'\]\.includes\(String\(x\.tipo \|\| ''\)\)/);
+  assert.match(P, /im\.tipo === 'factura_gasto'/);
+  assert.match(P, /UPDATE sg_facturas_gasto/);
+  assert.match(P, /x\.f\._tipo === 'factura_gasto' \? subeSaldoGasto/);
+  // Y el proveedor sale de proveedor_servicio_id, no de proveedor_id: sin ese
+  // alias el control de «es de otro proveedor» rechazaría todas.
+  assert.match(P, /fg\.proveedor_servicio_id AS proveedor_id/);
 });
 
-test('pero su asiento SÍ le acredita al proveedor, que es de dónde sale la diferencia', () => {
-  // Si no acreditara, no habría hueco: sería un gasto sin deuda. El hueco existe
-  // justamente porque la deuda está en el libro y no en la pantalla.
+test('y anular el pago le devuelve el saldo a la tabla correcta', () => {
+  // Sin esta tercera rama, anular le devolvía el saldo a sg_facturas_compra POR
+  // EL ID de una factura de servicio: le borraba la deuda a una factura de
+  // mercadería que no tenía nada que ver, y la de servicio quedaba pagada para
+  // siempre.
+  const A = trozo(SG, "router.post('/pagos/:id/anular'", '\r\n});');
+  assert.match(A, /const bajaGasto = db\.prepare\(`UPDATE sg_facturas_gasto/);
+  assert.match(A, /else if \(t === 'factura_gasto'\) bajaGasto\.run/);
+});
+
+test('las dos columnas de saldo existen en la tabla', () => {
+  // Sin ellas la factura aparecería en la cuenta corriente y no habría forma de
+  // bajarla: la deuda quedaría para siempre.
+  const DB = fs.readFileSync(path.join(RAIZ, 'src/servicios/db_sg.js'), 'utf8');
+  assert.match(DB, /\['saldo_pagado',\s+'REAL NOT NULL DEFAULT 0'\]/);
+  assert.match(DB, /\['saldo_pagado_gestion',\s+'REAL NOT NULL DEFAULT 0'\]/);
+});
+
+test('pero su asiento SÍ le acredita al proveedor, que es de dónde salía la diferencia', () => {
   const fg = trozo(SG, "router.post('/gastos-factura', ", '\r\n});');
   assert.match(fg, /crearAsiento/);
 });

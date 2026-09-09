@@ -12597,7 +12597,21 @@ router.get('/cc-proveedores', requireAuth, (req, res) => {
                     FROM liquidaciones lq
                     JOIN sg_oc oc2 ON oc2.id = lq.oc_id
                     JOIN sg_asientos a2 ON a2.id = lq.asiento_id AND COALESCE(a2.anulado,0) = 0
-                   WHERE oc2.proveedor_id = p.id AND lq.eliminado_en IS NULL),0) AS facturado,
+                   WHERE oc2.proveedor_id = p.id AND lq.eliminado_en IS NULL),0)
+        -- ── Y LAS FACTURAS DE SERVICIO, POR LA MISMA RAZÓN ───────────────
+        -- El flete de entrada, la descarga y la cooperativa se cargan en Gastos
+        -- Directos y su asiento acredita a Proveedores igual que cualquier otra
+        -- compra. No aparecían acá, así que el mayor y esta pantalla daban
+        -- distinto para un fletero, y esa deuda no se podía pagar desde ninguna
+        -- pantalla.
+        --
+        -- Se volvió imposible de ignorar con la V1030: para liquidarle una
+        -- partida a un productor hay que cargar sí o sí la factura del fletero,
+        -- así que ahora se carga el papel, nace la deuda, y no había dónde verla.
+        + COALESCE((SELECT SUM(COALESCE(fg.total,0) + COALESCE(fg.dif_gestion,0) - COALESCE(fg.saldo_pagado,0))
+                    FROM sg_facturas_gasto fg
+                    JOIN sg_asientos a5 ON a5.id = fg.asiento_id AND COALESCE(a5.anulado,0) = 0
+                   WHERE fg.proveedor_servicio_id = p.id AND fg.activo = 1),0) AS facturado,
         -- ── QUÉ PARTE DE LO QUE SE LE DEBE NO TIENE COMPROBANTE ──────────
         -- Sale de lo que CADA PAGO dijo estar cancelando, no de un prorrateo:
         -- saldo_pagado_gestion es cuánto de lo pagado fue contra la parte sin
@@ -12616,7 +12630,13 @@ router.get('/cc-proveedores', requireAuth, (req, res) => {
                     JOIN sg_oc oc3 ON oc3.id = lq.oc_id
                     JOIN sg_asientos a3 ON a3.id = lq.asiento_id AND COALESCE(a3.anulado,0) = 0
                    WHERE oc3.proveedor_id = p.id AND lq.eliminado_en IS NULL
-                     AND COALESCE(lq.dif_gestion,0) <> 0),0) AS pendiente_gestion,
+                     AND COALESCE(lq.dif_gestion,0) <> 0),0)
+        + COALESCE((SELECT SUM(ROUND(
+                    COALESCE(fg2.dif_gestion,0) - COALESCE(fg2.saldo_pagado_gestion,0), 2))
+                    FROM sg_facturas_gasto fg2
+                    JOIN sg_asientos a6 ON a6.id = fg2.asiento_id AND COALESCE(a6.anulado,0) = 0
+                   WHERE fg2.proveedor_servicio_id = p.id AND fg2.activo = 1
+                     AND COALESCE(fg2.dif_gestion,0) <> 0),0) AS pendiente_gestion,
         -- LO QUE TODAVÍA NO ESTÁ EN EL LIBRO. Se informa aparte y NO suma al
         -- saldo: la cuenta corriente refleja la contabilidad, y hasta que no
         -- hay asiento no hay deuda registrada. Se muestra igual para que el que
@@ -12732,7 +12752,33 @@ router.get('/pagos/pendientes/:proveedorId', requireAuth, (req, res) => {
        WHERE o.proveedor_id = ? AND lq.eliminado_en IS NULL
          AND ROUND(COALESCE(lq.total,0) + COALESCE(lq.dif_gestion,0) - COALESCE(lq.saldo_pagado,0), 2) > 0
        ORDER BY lq.fecha, lq.id`).all(req.params.proveedorId);
-    rows.push(...liqs);
+    // ── Y LAS FACTURAS DE SERVICIO, QUE TAMBIÉN SON DEUDA ────────────
+    // El flete de entrada, la descarga y la cooperativa. Mismas columnas y mismo
+    // criterio, para que la pantalla no tenga que saber de cuál de las tres
+    // tablas vino cada renglón.
+    //
+    // La «partida» acá no sale de la orden —una factura de servicio puede cubrir
+    // viajes de varias— así que se dice qué circuito es, que es lo que el que
+    // paga necesita para reconocerla.
+    const gastos = db.prepare(`
+      SELECT fg.id, fg.fecha_emision, fg.tipo_comprobante, fg.punto_venta, fg.numero,
+             fg.total, COALESCE(fg.saldo_pagado,0) AS pagado,
+             COALESCE(fg.dif_gestion,0) AS dif_gestion, fg.dif_motivo,
+             ROUND(COALESCE(fg.total,0) - (COALESCE(fg.saldo_pagado,0) - COALESCE(fg.saldo_pagado_gestion,0)), 2) AS pendiente_fiscal,
+             ROUND(COALESCE(fg.dif_gestion,0) - COALESCE(fg.saldo_pagado_gestion,0), 2) AS pendiente_gestion,
+             ROUND(COALESCE(fg.total,0) + COALESCE(fg.dif_gestion,0) - COALESCE(fg.saldo_pagado,0), 2) AS pendiente,
+             CASE fg.circuito
+               WHEN 'flete_entrada' THEN 'Flete de entrada'
+               WHEN 'flete_salida'  THEN 'Flete de salida'
+               WHEN 'descarga'      THEN 'Descarga'
+               ELSE 'Servicio' END AS partida,
+             'factura_gasto' AS tipo
+        FROM sg_facturas_gasto fg
+        JOIN sg_asientos a ON a.id = fg.asiento_id AND COALESCE(a.anulado,0) = 0
+       WHERE fg.proveedor_servicio_id = ? AND fg.activo = 1
+         AND ROUND(COALESCE(fg.total,0) + COALESCE(fg.dif_gestion,0) - COALESCE(fg.saldo_pagado,0), 2) > 0
+       ORDER BY fg.fecha_emision, fg.id`).all(req.params.proveedorId);
+    rows.push(...liqs, ...gastos);
     rows.sort((a, b) => String(a.fecha_emision || '').localeCompare(String(b.fecha_emision || '')));
     res.json({ ok: true, data: rows });
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
@@ -12832,7 +12878,11 @@ router.post('/pagos', requireAuth, (req, res) => {
         // liquidación, y las dos son deuda con el productor. Sin esto sólo se
         // podía pagar la factura: la liquidación quedaba en el mayor de
         // Proveedores sin forma de imputarle un peso.
-        tipo: String(x.tipo || '') === 'liquidacion' ? 'liquidacion' : 'factura',
+        // Y las de SERVICIO —flete, descarga, cooperativa—, que también son
+        // deuda: su asiento acredita a Proveedores igual que las otras dos, y
+        // hasta acá no había forma de imputarles un peso.
+        tipo: ['liquidacion', 'factura_gasto'].includes(String(x.tipo || ''))
+          ? String(x.tipo) : 'factura',
         monto: r2(x.monto),
         desdeACuenta: r2(x.desde_a_cuenta),
       }))
@@ -13034,7 +13084,21 @@ router.post('/pagos', requireAuth, (req, res) => {
       // LA MISMA FORMA PARA LAS DOS. La liquidación no tiene proveedor propio
       // --cuelga de la orden-- ni la columna `activo`: se normaliza ací para que
       // todo lo que viene después no tenga que saber de cuál de las dos vino.
-      const f = im.tipo === 'liquidacion'
+      // LA MISMA FORMA PARA LAS TRES. La de servicio tiene el proveedor en
+      // proveedor_servicio_id y no en proveedor_id: se normaliza acá, como ya se
+      // hacía con la liquidación, para que lo de abajo no tenga que saber de cuál
+      // vino.
+      const f = im.tipo === 'factura_gasto'
+        ? db.prepare(`SELECT fg.id, fg.numero, fg.punto_venta, fg.total,
+              COALESCE(fg.dif_gestion,0) AS dif_gestion, fg.dif_motivo,
+              COALESCE(fg.saldo_pagado,0) AS saldo_pagado,
+              COALESCE(fg.saldo_pagado_gestion,0) AS saldo_pagado_gestion,
+              fg.asiento_id, fg.proveedor_servicio_id AS proveedor_id,
+              a.anulado AS asiento_anulado
+            FROM sg_facturas_gasto fg
+            LEFT JOIN sg_asientos a ON a.id = fg.asiento_id
+            WHERE fg.id=? AND fg.activo=1`).get(im.factura_id)
+        : im.tipo === 'liquidacion'
         ? db.prepare(`SELECT lq.id, lq.n_liquidacion AS numero, lq.total,
               COALESCE(lq.dif_gestion,0) AS dif_gestion, lq.dif_motivo,
               COALESCE(lq.saldo_pagado,0) AS saldo_pagado,
@@ -13139,6 +13203,11 @@ router.post('/pagos', requireAuth, (req, res) => {
         SET saldo_pagado = ROUND(COALESCE(saldo_pagado,0) + ?, 2),
             saldo_pagado_gestion = ROUND(COALESCE(saldo_pagado_gestion,0) + ?, 2)
         WHERE ? IS NOT NULL AND id=?`);
+      // Y el de la factura de servicio, con la misma forma que los otros dos.
+      const subeSaldoGasto = db.prepare(`UPDATE sg_facturas_gasto
+        SET saldo_pagado = ROUND(COALESCE(saldo_pagado,0) + ?, 2),
+            saldo_pagado_gestion = ROUND(COALESCE(saldo_pagado_gestion,0) + ?, 2)
+        WHERE ? IS NOT NULL AND id=?`);
 
       if (total > 0) {
         pagoId = db.prepare(`INSERT INTO sg_pagos_proveedores
@@ -13183,7 +13252,8 @@ router.post('/pagos', requireAuth, (req, res) => {
         // A SU TABLA. Las dos columnas de saldo son las mismas de los dos lados,
         // así que cambia el nombre de la tabla y nada más.
         if (cancela > 0) {
-          (x.f._tipo === 'liquidacion' ? subeSaldoLiq : subeSaldo)
+          (x.f._tipo === 'liquidacion' ? subeSaldoLiq
+            : x.f._tipo === 'factura_gasto' ? subeSaldoGasto : subeSaldo)
             .run(cancela, x.gestion, uid(req), x.f.id);
         }
       }
@@ -13551,9 +13621,19 @@ router.post('/pagos/:id/anular', requireAuth, (req, res) => {
         SET saldo_pagado = MAX(0, ROUND(COALESCE(saldo_pagado,0) - ?, 2)),
             saldo_pagado_gestion = MAX(0, ROUND(COALESCE(saldo_pagado_gestion,0) - ?, 2))
         WHERE id=?`);
+      // Y el de la factura de servicio. Sin esta tercera, anular un pago le
+      // devolvía el saldo a sg_facturas_compra POR EL ID de una factura de
+      // servicio: le borraba la deuda a una factura de mercadería que no tenía
+      // nada que ver, y la de servicio quedaba pagada para siempre.
+      const bajaGasto = db.prepare(`UPDATE sg_facturas_gasto
+        SET saldo_pagado = MAX(0, ROUND(COALESCE(saldo_pagado,0) - ?, 2)),
+            saldo_pagado_gestion = MAX(0, ROUND(COALESCE(saldo_pagado_gestion,0) - ?, 2))
+        WHERE id=?`);
       for (const im of imps) {
         const g = Number(im.monto_gestion) || 0;
-        if (String(im.tipo || '') === 'liquidacion') bajaLiq.run(im.monto, g, im.compra_id);
+        const t = String(im.tipo || '');
+        if (t === 'liquidacion') bajaLiq.run(im.monto, g, im.compra_id);
+        else if (t === 'factura_gasto') bajaGasto.run(im.monto, g, im.compra_id);
         else baja.run(im.monto, g, uid(req), im.compra_id);
       }
       db.prepare(`UPDATE sg_pagos_proveedores SET anulado=1, anulado_en=datetime('now','localtime'),
@@ -13622,6 +13702,28 @@ router.get('/cc-proveedores/:id', requireAuth, (req, res) => {
       JOIN sg_asientos a ON a.id = f.asiento_id AND COALESCE(a.anulado,0) = 0
       WHERE f.proveedor_id = ? AND f.activo = 1
       ORDER BY f.fecha_emision, f.id`).all(p.id);
+    // ── Y LAS FACTURAS DE SERVICIO, CON LAS MISMAS COLUMNAS ─────────────
+    // Se suman a la MISMA lista para que los saldos, los renglones y el estado
+    // salgan de un solo recorrido: separarlas sería tres cuentas que se pueden
+    // hacer distinto. Lo único propio es el rótulo del circuito, que es lo que le
+    // dice al que mira de qué es esa deuda —una factura de un fletero no cuelga
+    // de una partida, cuelga de varios viajes—.
+    facturas.push(...db.prepare(`SELECT fg.id, fg.fecha_emision, fg.tipo_comprobante, fg.punto_venta,
+        fg.numero, fg.neto, fg.iva_monto, fg.total, COALESCE(fg.saldo_pagado,0) AS pagado,
+        COALESCE(fg.saldo_pagado_gestion,0) AS pagado_gestion,
+        COALESCE(fg.dif_gestion,0) AS dif_gestion, fg.dif_motivo,
+        fg.asiento_id, a.fecha AS asiento_fecha,
+        CASE fg.circuito
+          WHEN 'flete_entrada' THEN 'Flete de entrada'
+          WHEN 'flete_salida'  THEN 'Flete de salida'
+          WHEN 'descarga'      THEN 'Descarga'
+          ELSE 'Servicio' END AS partidas,
+        1 AS es_servicio
+      FROM sg_facturas_gasto fg
+      JOIN sg_asientos a ON a.id = fg.asiento_id AND COALESCE(a.anulado,0) = 0
+      WHERE fg.proveedor_servicio_id = ? AND fg.activo = 1
+      ORDER BY fg.fecha_emision, fg.id`).all(p.id));
+    facturas.sort((x, y) => String(x.fecha_emision || '').localeCompare(String(y.fecha_emision || '')));
     // Lo mismo que en el listado, con la misma regla: el pago cancela
     // proporcionalmente lo facturado y lo que no. Se calcula acá para que la
     // ficha y el listado no puedan dar números distintos — que es justo lo que
@@ -13637,8 +13739,10 @@ router.get('/cc-proveedores/:id', requireAuth, (req, res) => {
     }
     const TIPO = { factura_a: 'Factura A', factura_b: 'Factura B', liquidacion: 'Liquidación' };
     for (const f of facturas) {
-      movs.push({ tipo: 'factura', fecha: f.fecha_emision, factura_id: f.id,
-        detalle: TIPO[f.tipo_comprobante] || f.tipo_comprobante || 'Comprobante',
+      movs.push({ tipo: f.es_servicio ? 'factura_gasto' : 'factura',
+        fecha: f.fecha_emision, factura_id: f.id,
+        detalle: (TIPO[f.tipo_comprobante] || f.tipo_comprobante || 'Comprobante')
+               + (f.es_servicio ? ' de servicio' : ''),
         comprobante: (f.punto_venta ? f.punto_venta + '-' : '') + (f.numero || ''),
         partidas: f.partidas, neto: f.neto, iva: f.iva_monto,
         debe: 0, haber: r2(f.total),

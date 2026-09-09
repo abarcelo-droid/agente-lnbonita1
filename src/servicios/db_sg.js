@@ -1097,6 +1097,15 @@ try {
     // hacer distinta en cada lugar. Las de antes de la V1015 quedan en NULL y
     // son todas de descarga: era el único circuito que se facturaba.
     ['circuito',      'TEXT'],
+    // ── LO QUE SE LE PAGÓ DE ESTA FACTURA ──────────────────────────────
+    // Las de mercadería y las liquidaciones lo tienen desde siempre; ésta no,
+    // porque no se podía pagar. Sin las dos columnas, la factura del fletero
+    // aparecería en la cuenta corriente y no habría forma de bajarla.
+    // saldo_pagado_gestion es cuánto de lo pagado fue contra la parte SIN
+    // comprobante: sale de lo que cada pago dijo cancelar, no de un prorrateo.
+
+    ['saldo_pagado',          'REAL NOT NULL DEFAULT 0'],
+    ['saldo_pagado_gestion',  'REAL NOT NULL DEFAULT 0'],
   ]) {
     const cols = db.prepare('PRAGMA table_info(sg_facturas_gasto)').all().map((c) => c.name);
     if (!cols.includes(col)) db.exec(`ALTER TABLE sg_facturas_gasto ADD COLUMN ${col} ${tipo}`);
