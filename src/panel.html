@@ -3926,6 +3926,105 @@ input[type=number]{-moz-appearance:textfield;appearance:textfield}
     </div>
   </div>
 </div>
+
+<!-- ══ CUATRO FORMULARIOS QUE CARGABAN SIN ABRIR NADA ═══════════════════
+     Pablo, 7/9/2026: «veamos la manera de unificar este tipo de conceptos para
+     que todo el panel funcione de la misma manera, que cuando tengamos que abrir
+     abra una ventana».
+
+     Eran los últimos cuatro del panel. Los tres primeros aparecían y desaparecían
+     con display, uno de ellos además haciendo scroll solo hasta él —el operador
+     veía la pantalla moverse y tenía que darse cuenta de que ahora estaba
+     cargando—. El cuarto vivía siempre abierto arriba de su lista.
+
+     Van FUERA de toda .sec: una ventana que cuelga de una pantalla sólo se abre
+     desde ésa, y desde otra el botón corre y no se ve nada. -->
+<div class="ab-modal-overlay" id="scout-asig-modal">
+  <div class="ab-modal" style="width:min(560px,96vw);max-width:96vw">
+    <div class="mhd"><div class="mht">🌿 Asignar reporte <span id="scout-asig-id-txt"></span></div>
+      <button class="mcl" onclick="closeMB('scout-asig-modal')">×</button></div>
+    <div class="mbd">
+      <input type="hidden" id="scout-asig-rep-id">
+      <div class="pa-grid2">
+        <div class="fl"><label>Asignar a</label>
+          <select id="scout-asig-usr" class="ab-form-select"></select></div>
+        <div class="fl"><label>Frecuencia seguimiento</label>
+          <select id="scout-asig-frec" class="ab-form-select">
+            <option value="semanal">Semanal</option>
+            <option value="diario">Diario</option>
+          </select></div>
+      </div>
+    </div>
+    <div class="ab-modal-footer">
+      <button class="btn bo" onclick="closeMB('scout-asig-modal')">Cancelar</button>
+      <button class="btn bb" onclick="scoutGuardarAsig()">Asignar</button>
+    </div>
+  </div>
+</div>
+
+<div class="ab-modal-overlay" id="pp-sem-modal">
+  <div class="ab-modal" style="width:min(560px,96vw);max-width:96vw">
+    <div class="mhd"><div class="mht">🗓️ Nueva semana de pago</div>
+      <button class="mcl" onclick="closeMB('pp-sem-modal')">×</button></div>
+    <div class="mbd">
+      <div style="font-size:12px;color:var(--mut);margin-bottom:10px">
+        Rango libre de apertura a cierre. La valorización y el pago masivo operan sobre él.
+        El sistema <b>avisa pero no bloquea</b> si queda un hueco o un solape con otra semana.
+      </div>
+      <div class="fl"><label>Apertura *</label><input type="date" id="pp-sem-apertura"></div>
+      <div class="fl"><label>Cierre *</label><input type="date" id="pp-sem-cierre"></div>
+      <div class="fl ff"><label>Notas</label><input id="pp-sem-notas" placeholder="(opcional)"></div>
+    </div>
+    <div class="ab-modal-footer">
+      <button class="btn bo" onclick="closeMB('pp-sem-modal')">Cancelar</button>
+      <button class="btn bb" onclick="ppSemCrear()">Crear semana</button>
+    </div>
+  </div>
+</div>
+
+<div class="ab-modal-overlay" id="pp-tarper-modal">
+  <div class="ab-modal" style="width:min(560px,96vw);max-width:96vw">
+    <div class="mhd"><div class="mht">💲 Nueva vigencia de tarifa</div>
+      <button class="mcl" onclick="closeMB('pp-tarper-modal')">×</button></div>
+    <div class="mbd">
+      <div style="font-size:12px;color:var(--mut);margin-bottom:10px">
+        La tarifa propia de una persona <b>gana sobre la del rol</b>. Se aplica la vigente a la
+        fecha del jornal, así que esto <b>no pisa</b> la anterior: crea una fila nueva y queda el
+        histórico. <b>Lo ya valorizado no se recalcula.</b>
+      </div>
+      <div class="fl"><label>Persona</label><select id="pp-tarper-persona"></select></div>
+      <div class="fl"><label>Tarifa $/jornal</label>
+        <input type="number" step="0.01" min="0" id="pp-tarper-tarifa" placeholder="0" style="text-align:right"></div>
+      <div class="fl"><label>Vigente desde</label><input type="date" id="pp-tarper-desde"></div>
+    </div>
+    <div class="ab-modal-footer">
+      <button class="btn bo" onclick="closeMB('pp-tarper-modal')">Cancelar</button>
+      <button class="btn bb" onclick="ppGuardarTarifaPersona()">Agregar vigencia</button>
+    </div>
+  </div>
+</div>
+
+<div class="ab-modal-overlay" id="fp-sal-modal">
+  <div class="ab-modal" style="width:min(560px,96vw);max-width:96vw">
+    <div class="mhd"><div class="mht">🏦 Cargar saldo de banco</div>
+      <button class="mcl" onclick="closeMB('fp-sal-modal')">×</button></div>
+    <div class="mbd">
+      <div style="font-size:12px;color:var(--mut);margin-bottom:10px">
+        Es una <b>foto a una fecha</b>, no algo que entre todas las semanas. La proyección toma el
+        último saldo anterior al inicio del horizonte y lo usa como punto de partida, una sola vez.
+        Los negativos —descubierto— son válidos.
+      </div>
+      <div class="fl"><label>Banco</label><input id="fp-sal-banco" placeholder="Ej: Galicia"></div>
+      <div class="fl"><label>Fecha</label><input type="date" id="fp-sal-fecha"></div>
+      <div class="fl"><label>Saldo</label><input id="fp-sal-monto" class="fp-num" placeholder="0,00" style="text-align:right"></div>
+    </div>
+    <div class="ab-modal-footer">
+      <button class="btn bo" onclick="closeMB('fp-sal-modal')">Cancelar</button>
+      <button class="btn bb" onclick="fpSaldoGuardar()">Guardar</button>
+    </div>
+  </div>
+</div>
+
   <!-- ══ Módulo Reprocesos (#reproceso): decomiso / transformación / reproceso con clasificación ══ -->
   <div class="sec sg-mod" id="sec-sg-reprocesos">
     <div class="ph"><div><div class="ph-t">🍅 San Gerónimo · Reprocesos</div><div class="ph-s">Decomiso parcial, transformación de unidad y reproceso con clasificación de lotes</div></div>
@@ -27977,25 +28076,6 @@ function sgRepExport(){
   </table></div>
 </div>
 <!-- Formulario asignación inline -->
-<div id="scout-asig-form" style="display:none;margin-top:16px" class="pa-card">
-  <div style="font-size:13px;font-weight:700;margin-bottom:12px">Asignar reporte <span id="scout-asig-id-txt"></span></div>
-  <input type="hidden" id="scout-asig-rep-id">
-  <div class="pa-grid2">
-    <div class="fl"><label>Asignar a</label>
-      <select id="scout-asig-usr" class="ab-form-select"></select>
-    </div>
-    <div class="fl"><label>Frecuencia seguimiento</label>
-      <select id="scout-asig-frec" class="ab-form-select">
-        <option value="semanal">Semanal</option>
-        <option value="diario">Diario</option>
-      </select>
-    </div>
-  </div>
-  <div style="display:flex;gap:10px;margin-top:12px">
-    <button class="btn bb" onclick="scoutGuardarAsig()">Asignar</button>
-    <button class="btn bo" onclick="document.getElementById('scout-asig-form').style.display='none'">Cancelar</button>
-  </div>
-</div>
 </div>
 
 <!-- ─── PA COMBUSTIBLE ────────────────────────────────────────── -->
@@ -28369,11 +28449,8 @@ function sgRepExport(){
   <div class="pp-sub" id="pp-sub-semanas">
     <div style="font-size:13px;font-weight:700;margin:4px 0 8px">🗓️ Semanas de pago</div>
     <div style="font-size:12px;color:var(--mut);margin-bottom:10px">Rangos libres de apertura → cierre. La valorización y el pago masivo operan sobre estos rangos. El sistema avisa (no bloquea) si hay huecos o solapes entre semanas.</div>
-    <div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap;margin-bottom:12px;padding:10px;background:var(--bg2);border-radius:8px">
-      <div class="fl" style="margin:0"><label>Apertura *</label><input type="date" id="pp-sem-apertura"></div>
-      <div class="fl" style="margin:0"><label>Cierre *</label><input type="date" id="pp-sem-cierre"></div>
-      <div class="fl" style="margin:0;flex:1 1 200px"><label>Notas</label><input id="pp-sem-notas" placeholder="(opcional)"></div>
-      <button class="btn bb" onclick="ppSemCrear()">+ Crear semana</button>
+    <div style="margin-bottom:12px">
+      <button class="btn bb" onclick="ppSemAbrir()">+ Crear semana</button>
     </div>
     <div class="tw"><table>
       <thead><tr><th>Apertura</th><th>Cierre</th><th>Estado</th><th>Continuidad</th><th>Notas</th><th></th></tr></thead>
@@ -28403,14 +28480,9 @@ function sgRepExport(){
         vigente a la fecha del jornal. Cargar una tarifa nueva crea una <strong>fila nueva</strong> (no pisa la anterior),
         así queda el histórico. Lo ya valorizado no se recalcula.
       </div>
-      <div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap;margin-bottom:14px">
-        <div><label style="display:block;font-size:11px;color:var(--mut);margin-bottom:3px">Persona</label>
-          <select id="pp-tarper-persona" style="min-width:220px;padding:5px 8px;font-size:12px"></select></div>
-        <div><label style="display:block;font-size:11px;color:var(--mut);margin-bottom:3px">Tarifa $/jornal</label>
-          <input type="number" step="0.01" min="0" id="pp-tarper-tarifa" placeholder="0" style="width:130px;text-align:right;padding:5px 8px;font-size:12px"></div>
-        <div><label style="display:block;font-size:11px;color:var(--mut);margin-bottom:3px">Vigente desde</label>
-          <input type="date" id="pp-tarper-desde" style="padding:5px 8px;font-size:12px"></div>
-        <button class="btn bb bs" style="padding:6px 14px;font-size:12px" onclick="ppGuardarTarifaPersona()">Agregar vigencia</button>
+      <div style="margin-bottom:14px">
+        <button class="btn bb bs" style="padding:6px 14px;font-size:12px"
+                onclick="ppTarperAbrir()">+ Agregar vigencia</button>
       </div>
       <div class="tw"><table>
         <thead><tr><th>Persona</th><th>Rol</th><th style="text-align:right">Tarifa $/jornal</th><th>Vigente desde</th><th>Cargada</th></tr></thead>
@@ -34335,11 +34407,8 @@ function sgRepExport(){
       el último saldo cargado de cada banco anterior al inicio del horizonte y lo usa como punto de
       partida, una sola vez. Los negativos (descubierto) son válidos.
     </div>
-    <div style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap;margin-bottom:12px">
-      <div class="fl"><label>Banco</label><input id="fp-sal-banco" placeholder="Ej: Galicia" style="min-width:150px"></div>
-      <div class="fl"><label>Fecha</label><input type="date" id="fp-sal-fecha"></div>
-      <div class="fl"><label>Saldo</label><input id="fp-sal-monto" class="fp-num" placeholder="0,00" style="min-width:150px"></div>
-      <button class="btn bb" onclick="fpSaldoGuardar()">Guardar</button>
+    <div style="margin-bottom:12px">
+      <button class="btn bb" onclick="fpSaldoAbrir()">+ Cargar saldo</button>
     </div>
     <div id="fp-sal-lista"></div>
   </div>
@@ -52583,8 +52652,12 @@ function paLoadScout() {
 function scoutAbrirAsig(id, nombre) {
   document.getElementById('scout-asig-rep-id').value = id;
   document.getElementById('scout-asig-id-txt').textContent = '— ' + nombre;
-  document.getElementById('scout-asig-form').style.display = 'block';
-  document.getElementById('scout-asig-form').scrollIntoView({ behavior: 'smooth' });
+  // ARRANCA SIN NADIE ELEGIDO. Antes el formulario sólo se mostraba, así que
+  // conservaba a la persona del reporte anterior y bastaba con apretar Asignar
+  // para mandarle un reporte que no era suyo.
+  var u = document.getElementById('scout-asig-usr'); if (u) u.value = '';
+  var f = document.getElementById('scout-asig-frec'); if (f) f.value = 'semanal';
+  sgModalArriba('scout-asig-modal');
 }
 function scoutGuardarAsig() {
   var repId = document.getElementById('scout-asig-rep-id').value;
@@ -52593,7 +52666,7 @@ function scoutGuardarAsig() {
   if (!usrId) return toast('Elegí una persona', 'er');
   paF('/api/pa/scout/asignar', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ reporte_id: repId, usuario_id: usrId, frecuencia: frec }) })
     .then(function(r) {
-      if (r.ok) { toast('Asignado correctamente'); document.getElementById('scout-asig-form').style.display='none'; paLoadScout(); }
+      if (r.ok) { toast('Asignado correctamente'); closeMB('scout-asig-modal'); paLoadScout(); }
       else toast(r.error||'Error','er');
     });
 }
@@ -53260,6 +53333,14 @@ function ppLoadTarifasPersona() {
     }).join('');
   });
 }
+function ppTarperAbrir() {
+  var p = document.getElementById('pp-tarper-persona'); if (p) p.value = '';
+  ['pp-tarper-tarifa', 'pp-tarper-desde'].forEach(function(id){
+    var e = document.getElementById(id); if (e) e.value = '';
+  });
+  sgModalArriba('pp-tarper-modal');
+}
+
 function ppGuardarTarifaPersona() {
   var personalId = Number(document.getElementById('pp-tarper-persona').value);
   var tarifa = Number(document.getElementById('pp-tarper-tarifa').value);
@@ -53268,7 +53349,7 @@ function ppGuardarTarifaPersona() {
   if (!(tarifa > 0)) return toast('Tarifa inválida', 'er');
   if (!desde) return toast('Indicá desde cuándo rige', 'er');
   paF('/api/pa/personal/tarifas-persona', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ personal_id: personalId, tarifa: tarifa, vigente_desde: desde }) })
-    .then(function(r){ if (r && r.ok) { toast('Vigencia agregada'); document.getElementById('pp-tarper-tarifa').value=''; ppLoadTarifasPersona(); } else toast((r&&r.error)||'Error', 'er'); });
+    .then(function(r){ if (r && r.ok) { toast('Vigencia agregada'); closeMB('pp-tarper-modal'); ppLoadTarifasPersona(); } else toast((r&&r.error)||'Error', 'er'); });
 }
 
 // ═══ Bloque B — Configuración (ingeniería) de rubros MO ══════════════════════
@@ -53535,6 +53616,13 @@ function ppSemRender() {
       '<td style="white-space:nowrap">'+toggle+' <button class="btn bo bs" onclick="ppSemBorrar('+s.id+')" style="padding:3px 8px;font-size:11px">🗑️</button></td></tr>';
   }).join('');
 }
+function ppSemAbrir() {
+  ['pp-sem-apertura', 'pp-sem-cierre', 'pp-sem-notas'].forEach(function(id){
+    var e = document.getElementById(id); if (e) e.value = '';
+  });
+  sgModalArriba('pp-sem-modal');
+}
+
 function ppSemCrear() {
   var body = {
     fecha_apertura: document.getElementById('pp-sem-apertura').value,
@@ -53547,7 +53635,7 @@ function ppSemCrear() {
       if (r.aviso === 'hueco') toast('Semana creada — ⚠ queda un hueco con la anterior', 'er');
       else if (r.aviso === 'solape') toast('Semana creada — ⚠ solapa con otra semana', 'er');
       else toast('Semana creada');
-      document.getElementById('pp-sem-notas').value = '';
+      closeMB('pp-sem-modal');
       ppLoadSemanas();
     } else toast(r.error||'Error', 'er');
   });
@@ -73097,6 +73185,13 @@ function fpSaldosCargar() {
   });
 }
 
+function fpSaldoAbrir() {
+  ['fp-sal-banco', 'fp-sal-fecha', 'fp-sal-monto'].forEach(function(id){
+    var e = document.getElementById(id); if (e) e.value = '';
+  });
+  sgModalArriba('fp-sal-modal');
+}
+
 function fpSaldoGuardar() {
   fpApi('/saldos', { method: 'POST', body: JSON.stringify({
     banco: document.getElementById('fp-sal-banco').value,
@@ -73105,8 +73200,7 @@ function fpSaldoGuardar() {
   }) }).then(function(r) {
     if (!r.ok) return fpErr(r);
     toast(r.actualizado ? 'Saldo actualizado' : 'Saldo cargado');
-    document.getElementById('fp-sal-banco').value = '';
-    document.getElementById('fp-sal-monto').value = '';
+    closeMB('fp-sal-modal');
     fpSaldosCargar();
   });
 }
