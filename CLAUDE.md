@@ -194,9 +194,18 @@ no ofrezca lo que va a rebotar.
   archivos en `test/`, incluido `plata_sg.test.mjs`, que clava los cinco bugs de
   plata del 25/8/2026 (alícuota del producto, gestión sin IVA sacado, cajones vs
   kilos, redondeo, carteles al centavo).
-- `test/share_import.test.mjs` queda SIEMPRE en rojo porque importa `xlsx` y no hay
-  `node_modules`. Es ruido conocido: mirar que los demás pasen. Un suite en rojo
-  permanente deja de ser señal a los dos días.
+- **`npm test` termina en verde: 0 en rojo.** Esta línea decía que
+  `test/share_import.test.mjs` «queda SIEMPRE en rojo» y que era ruido conocido —
+  y esa instrucción era el problema: un suite que siempre termina con dos rojos
+  deja de ser señal a los dos días, y el rojo número tres pasa de largo.
+  Arreglado el 9/9/2026: los dos archivos que necesitan un paquete que acá no
+  está (`xlsx`, `jspdf`) lo cargan **a demanda** y se **saltean** si falta,
+  diciendo cuál falta y que se arregla con `npm install`. Donde hay
+  `node_modules` corren igual que siempre.
+  **Si ves un rojo, es un rojo de verdad.** Y si ves que los salteados suben de
+  27, alguien rompió otra cosa: `test/suite_sin_rojos_permanentes.test.mjs`
+  vigila que el salteo siga siendo condicional y que ningún test nuevo se
+  escape del envoltorio.
 - No hay `node_modules`: no se puede levantar el server ni usar better-sqlite3. Los
   tests usan `node:sqlite` (viene con Node 24) y copian `src/servicios` a un temporal
   reemplazando sólo los módulos que abren la base. Ver `test/plata_sg.test.mjs`.

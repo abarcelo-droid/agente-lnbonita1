@@ -11,9 +11,27 @@
 // El resto —que el PDF se genere, que tenga el membrete, que la explicación esté— se prueba
 // generándolo de verdad y leyendo el texto del archivo: jsPDF no comprime los streams, así
 // que lo escrito aparece tal cual adentro.
+// -- SIN node_modules ESTE ARCHIVO SE SALTEA, NO SE CAE --------------------
+//
+// El repo no tiene node_modules, asi que jspdf no esta y este archivo moria en el
+// import: la suite quedaba con dos rojos PERMANENTES. CLAUDE.md ya lo decia
+// -- «es ruido conocido: mirar que los demas pasen» -- y esa frase es el problema:
+// un suite que siempre tiene dos rojos deja de ser senal a los dos dias, y el rojo
+// numero tres pasa desapercibido.
+//
+// Se saltea SOLO si el paquete de verdad falta. Donde hay node_modules -Railway, y
+// la maquina de cualquiera que haya corrido npm install- corre igual que antes.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { generarOportunidadesPDF, agruparPorCliente, GUIA } from '../src/servicios/oportunidadesPDF.js';
+
+let generarOportunidadesPDF = null, agruparPorCliente = null, GUIA = null;
+let falta = null;
+try {
+  const m = await import('../src/servicios/oportunidadesPDF.js');
+  ({ generarOportunidadesPDF, agruparPorCliente, GUIA } = m);
+} catch { falta = 'falta el paquete jspdf: corre npm install para que estos tests corran'; }
+
+const t = (nombre, fn) => test(nombre, { skip: falta }, fn);
 
 const op = (tipo, cliente, detalle, usd, margen) => ({
   tipo, titulo: cliente, detalle,
@@ -40,7 +58,7 @@ const DATA = {
 };
 
 // ── QUÉ ENTRA ─────────────────────────────────────────────────────────────────────────
-test('entran las N más importantes de la lista, no los N primeros clientes', () => {
+t('entran las N más importantes de la lista, no los N primeros clientes', () => {
   // Con tope 2 entran COTO (50.000) e INC (20.000) — las dos primeras de la lista.
   const { elegidas, grupos } = agruparPorCliente(ITEMS, 2, true);
   assert.equal(elegidas.length, 2);
@@ -50,7 +68,7 @@ test('entran las N más importantes de la lista, no los N primeros clientes', ()
   assert.deepEqual(grupos[0].lista.map(x => x.detalle), ['']);
 });
 
-test('agrupa por cliente y suma lo de cada uno', () => {
+t('agrupa por cliente y suma lo de cada uno', () => {
   const { grupos } = agruparPorCliente(ITEMS, 25, true);
   assert.deepEqual(grupos.map(g => g.cliente), ['COTO', 'INC S.A.', 'CENCOSUD']);
   const coto = grupos[0];
@@ -59,7 +77,7 @@ test('agrupa por cliente y suma lo de cada uno', () => {
   assert.equal(coto.margen, 6900);
 });
 
-test('sin margen, los clientes se ordenan por dólares', () => {
+t('sin margen, los clientes se ordenan por dólares', () => {
   // Un caso donde los dos criterios NO dan lo mismo: A factura más, B deja más margen.
   const items = [
     op('CLIENTE_PERDIDO', 'B FINO',  '', 10000, 4000),
@@ -69,20 +87,20 @@ test('sin margen, los clientes se ordenan por dólares', () => {
   assert.deepEqual(agruparPorCliente(items, 25, false).grupos.map(g => g.cliente), ['A GORDO', 'B FINO']);
 });
 
-test('el tope tiene techo y piso: ni cero hojas ni doscientas', () => {
+t('el tope tiene techo y piso: ni cero hojas ni doscientas', () => {
   const muchas = Array.from({ length: 400 }, (_, i) => op('CLIENTE_PERDIDO', 'C' + i, '', 1000 - i, 100));
   assert.equal(agruparPorCliente(muchas, 500, true).elegidas.length, 200);
   assert.equal(agruparPorCliente(muchas, 0, true).elegidas.length, 25);
   assert.equal(agruparPorCliente(muchas, -3, true).elegidas.length, 25);
 });
 
-test('una lista vacía no explota', () => {
+t('una lista vacía no explota', () => {
   const r = agruparPorCliente([], 25, true);
   assert.deepEqual(r.elegidas, []);
   assert.deepEqual(r.grupos, []);
 });
 
-test('cada tipo del radar tiene su explicación y su qué hacer', () => {
+t('cada tipo del radar tiene su explicación y su qué hacer', () => {
   // Si aparece un tipo nuevo en oportunidades.js y nadie escribe su guía, el PDF lo listaría
   // sin decir qué es — que es justamente lo que este informe viene a evitar.
   for (const t of ['CLIENTE_PERDIDO', 'PRODUCTO_PERDIDO', 'CAIDA_FUERTE', 'CROSS_SELL', 'MARGEN_NEGATIVO']) {
@@ -97,14 +115,14 @@ test('cada tipo del radar tiene su explicación y su qué hacer', () => {
 // jsPDF no comprime los streams, así que lo escrito se lee tal cual dentro del binario.
 const texto = (buf) => buf.toString('latin1');
 
-test('genera un PDF de verdad', () => {
+t('genera un PDF de verdad', () => {
   const buf = generarOportunidadesPDF(DATA, { tope: 25, hoy: '26/08/2026' });
   assert.ok(Buffer.isBuffer(buf));
   assert.equal(texto(buf).slice(0, 5), '%PDF-');
   assert.ok(buf.length > 3000, 'salió sospechosamente chico: ' + buf.length);
 });
 
-test('lleva el membrete de la casa y de qué ventana habla', () => {
+t('lleva el membrete de la casa y de qué ventana habla', () => {
   const t = texto(generarOportunidadesPDF(DATA, { tope: 25, hoy: '26/08/2026' }));
   assert.ok(t.includes('OPORTUNIDADES COMERCIALES'));
   assert.ok(t.includes('San') && t.includes('nimo'));      // "San Gerónimo", con la ó escapada
@@ -112,7 +130,7 @@ test('lleva el membrete de la casa y de qué ventana habla', () => {
   assert.ok(t.includes('2026-2027') && t.includes('2025-2026'));
 });
 
-test('la leyenda explica los CINCO tipos, aparezcan o no en este informe', () => {
+t('la leyenda explica los CINCO tipos, aparezcan o no en este informe', () => {
   // Cambió a propósito: la leyenda pasó a la última página y es una hoja de REFERENCIA. El
   // que la guarda se va a encontrar el mes que viene con los tipos que hoy no salieron, así
   // que están todos — y los que no aparecen se marcan, para no hacerlos buscar en el informe.
@@ -123,7 +141,7 @@ test('la leyenda explica los CINCO tipos, aparezcan o no en este informe', () =>
   assert.ok(uno.includes('hacer'), 'no aparece el "qué hacer"');
 });
 
-test('la leyenda va DESPUÉS de todo lo demás', () => {
+t('la leyenda va DESPUÉS de todo lo demás', () => {
   // Es de consulta: adelante empujaba hacia abajo lo único que se mira todos los días, y la
   // primera hoja de un informe es la que se mira.
   const t = texto(generarOportunidadesPDF(Object.assign({}, DATA, {
@@ -138,7 +156,7 @@ test('la leyenda va DESPUÉS de todo lo demás', () => {
   assert.ok(iLeyenda > iSecciones, 'la leyenda quedó antes de las secciones');
 });
 
-test('avisa del mes en curso, y no lo hace cuando el mes está cerrado', () => {
+t('avisa del mes en curso, y no lo hace cuando el mes está cerrado', () => {
   const conAviso = texto(generarOportunidadesPDF(DATA, { tope: 25, hoy: '26/08/2026' }));
   assert.ok(conAviso.includes('medio facturar'));
   const cerrado = Object.assign({}, DATA, {
@@ -146,7 +164,7 @@ test('avisa del mes en curso, y no lo hace cuando el mes está cerrado', () => {
   assert.ok(!texto(generarOportunidadesPDF(cerrado, { tope: 25, hoy: '26/08/2026' })).includes('medio facturar'));
 });
 
-test('el que no ve margen no lo ve tampoco en el papel', () => {
+t('el que no ve margen no lo ve tampoco en el papel', () => {
   // Es el punto delicado: un PDF se manda por mail y se reenvía.
   const sinM = {
     ...DATA, ve_margen: false, margen_en_juego_total: undefined,
@@ -161,7 +179,7 @@ test('el que no ve margen no lo ve tampoco en el papel', () => {
   assert.ok(t.includes('la misma') || t.includes('mismos'), 'no explica por qué el orden es ese');
 });
 
-test('con muchas oportunidades pagina en vez de escribir encima', () => {
+t('con muchas oportunidades pagina en vez de escribir encima', () => {
   const muchas = Array.from({ length: 60 }, (_, i) =>
     op('CLIENTE_PERDIDO', 'CLIENTE NUMERO ' + i, '', 5000 - i, 500 - i));
   const buf = generarOportunidadesPDF(Object.assign({}, DATA, { items: muchas }), { tope: 60, hoy: '26/08/2026' });
@@ -172,7 +190,7 @@ test('con muchas oportunidades pagina en vez de escribir encima', () => {
   assert.equal(membretes, paginas);
 });
 
-test('el pie dice de cuándo son los datos, que es lo que envejece', () => {
+t('el pie dice de cuándo son los datos, que es lo que envejece', () => {
   const t = texto(generarOportunidadesPDF(DATA, { tope: 25, hoy: '26/08/2026' }));
   assert.ok(t.includes('26/08/2026'));
   assert.ok(t.includes('2026-08-26'), 'no dice la fecha del último sync');

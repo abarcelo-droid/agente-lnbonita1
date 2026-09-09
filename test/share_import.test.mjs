@@ -3,12 +3,32 @@
 // Corre contra una base node:sqlite EN MEMORIA con el esquema REAL (share_ddl.js), no con una
 // copia escrita a mano — así el test se entera si el DDL cambia. better-sqlite3 no compila en
 // Windows, de ahí el adaptador de abajo.
+// ── SIN node_modules ESTE ARCHIVO SE SALTEA, NO SE CAE ────────────────────
+//
+// El repo no tiene node_modules, así que xlsx no está y este archivo moría en el
+// import: la suite quedaba con dos rojos PERMANENTES. CLAUDE.md ya lo decía —
+// «es ruido conocido: mirar que los demás pasen»— y esa frase es el problema: un
+// suite que siempre tiene dos rojos deja de ser señal a los dos días, y el rojo
+// número tres pasa desapercibido.
+//
+// Se saltean SÓLO si el paquete de verdad falta. Donde hay node_modules —Railway,
+// y la máquina de cualquiera que haya corrido npm install— corren igual que antes.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { DatabaseSync } from 'node:sqlite';
-import * as XLSX from 'xlsx';
 import { crearEsquema } from '../src/servicios/share_ddl.js';
-import { importar, analizar, recalcularKg, reclasificarFamilias } from '../src/servicios/share_import.js';
+
+// share_import.js importa xlsx, así que también se carga a demanda: con el import
+// arriba, el archivo moría antes de llegar a ningún test.
+let XLSX = null, importar = null, analizar = null, recalcularKg = null, reclasificarFamilias = null;
+let falta = null;
+try {
+  XLSX = await import('xlsx');
+  ({ importar, analizar, recalcularKg, reclasificarFamilias } =
+    await import('../src/servicios/share_import.js'));
+} catch { falta = 'falta el paquete xlsx: corré npm install para que estos tests corran'; }
+
+const t = (nombre, fn) => test(nombre, { skip: falta }, fn);
 
 // node:sqlite no tiene db.transaction() como better-sqlite3. El adaptador le da la misma
 // forma para que el importador que se prueba sea EL MISMO que corre en producción, sin
@@ -45,7 +65,7 @@ const DIA24 = [
   ['PROV.IMPORT.PROPIA PFT FRUT Y VERD', '2026-08-24', 'BANANA X KG', 5000],
 ];
 
-test('carga base: filas, proveedores, artículos y kg_equiv', () => {
+t('carga base: filas, proveedores, artículos y kg_equiv', () => {
   const db = abrir();
   const r = importar(db, { buffer: planilla(DIA24), nombre: 'PLANNING_FF_VV_24_08.xlsx', usuario: 'andy' });
   assert.equal(r.ok, true);
@@ -66,7 +86,7 @@ test('carga base: filas, proveedores, artículos y kg_equiv', () => {
   assert.equal(db.prepare('SELECT COUNT(*) c FROM share_articulos WHERE pendiente_revision=1').get().c, 3);
 });
 
-test('idempotencia por hash: el mismo archivo no entra dos veces', () => {
+t('idempotencia por hash: el mismo archivo no entra dos veces', () => {
   const db = abrir();
   const buf = planilla(DIA24);
   const a = importar(db, { buffer: buf, nombre: 'PLANNING_FF_VV_24_08.xlsx' });
@@ -82,7 +102,7 @@ test('idempotencia por hash: el mismo archivo no entra dos veces', () => {
   assert.equal(db.prepare('SELECT COUNT(*) c FROM share_cargas').get().c, 1);
 });
 
-test('recarga de una fecha ya cargada: la vieja se marca reemplazada, no se borra', () => {
+t('recarga de una fecha ya cargada: la vieja se marca reemplazada, no se borra', () => {
   const db = abrir();
   importar(db, { buffer: planilla(DIA24), nombre: 'PLANNING_24_08.xlsx' });
 
@@ -103,7 +123,7 @@ test('recarga de una fecha ya cargada: la vieja se marca reemplazada, no se borr
   assert.equal(db.prepare('SELECT COUNT(*) c FROM share_lineas').get().c, 8);
 });
 
-test('solapamiento parcial: se frena y lo explica, no adivina', () => {
+t('solapamiento parcial: se frena y lo explica, no adivina', () => {
   const db = abrir();
   // Un planning de dos días.
   const dosDias = [...DIA24, [SG, '2026-08-25', 'MANZANA X KG', 900]];
@@ -121,7 +141,7 @@ test('solapamiento parcial: se frena y lo explica, no adivina', () => {
   assert.equal(db.prepare('SELECT SUM(bultos) s FROM share_v').get().s, 13900);
 });
 
-test('un archivo de otro día no toca al anterior', () => {
+t('un archivo de otro día no toca al anterior', () => {
   const db = abrir();
   importar(db, { buffer: planilla(DIA24), nombre: 'PLANNING_24_08.xlsx' });
   const dia25 = DIA24.map(f => [f[0], '2026-08-25', f[2], f[3]]);
@@ -133,7 +153,7 @@ test('un archivo de otro día no toca al anterior', () => {
   assert.equal(db.prepare('SELECT SUM(bultos) s FROM share_v').get().s, 26000);
 });
 
-test('la hoja o las columnas equivocadas fallan con un mensaje claro', () => {
+t('la hoja o las columnas equivocadas fallan con un mensaje claro', () => {
   const db = abrir();
   assert.throws(
     () => importar(db, { buffer: planilla(DIA24, { hoja: 'Hoja1' }), nombre: 'x.xlsx' }),
@@ -147,7 +167,7 @@ test('la hoja o las columnas equivocadas fallan con un mensaje claro', () => {
   assert.throws(() => importar(db, { buffer: buf, nombre: 'x.xlsx' }), /Falta la columna "PROVEEDOR ORIGEN DESC"/);
 });
 
-test('una fila ilegible no voltea la carga, pero queda registrada', () => {
+t('una fila ilegible no voltea la carga, pero queda registrada', () => {
   const db = abrir();
   const conBasura = [...DIA24, [SG, 'no es una fecha', 'PERA X KG', 100], ['', '2026-08-24', 'PERA X KG', 50]];
   const r = importar(db, { buffer: planilla(conBasura), nombre: 'PLANNING_24_08.xlsx' });
@@ -161,7 +181,7 @@ test('una fila ilegible no voltea la carga, pero queda registrada', () => {
   assert.match(w.warnings.join(' '), /no se pueden cargar/);
 });
 
-test('el nombre del archivo que contradice a las filas avisa, pero carga', () => {
+t('el nombre del archivo que contradice a las filas avisa, pero carga', () => {
   const db = abrir();
   const r = importar(db, { buffer: planilla(DIA24), nombre: 'PLANNING_FF_VV_30_08.xlsx' });
   assert.equal(r.ok, true);
@@ -169,7 +189,7 @@ test('el nombre del archivo que contradice a las filas avisa, pero carga', () =>
   assert.equal(db.prepare('SELECT fecha_entrega f FROM share_cargas').get().f, '2026-08-24');
 });
 
-test('corregir la unidad a mano arregla también lo ya cargado', () => {
+t('corregir la unidad a mano arregla también lo ya cargado', () => {
   const db = abrir();
   importar(db, { buffer: planilla([[SG, '2026-08-24', 'ACELGA X ATADO', 200]]), nombre: 'a.xlsx' });
 
@@ -187,7 +207,7 @@ test('corregir la unidad a mano arregla también lo ya cargado', () => {
   assert.equal(db.prepare("SELECT kg_equiv k FROM share_lineas WHERE fecha_entrega='2026-08-25'").get().k, 40);
 });
 
-test('analizar no escribe nada: es el preview', () => {
+t('analizar no escribe nada: es el preview', () => {
   const db = abrir();
   const a = analizar(db, { buffer: planilla(DIA24), nombre: 'PLANNING_24_08.xlsx' });
   assert.equal(a.filas, 4);
@@ -200,7 +220,7 @@ test('analizar no escribe nada: es el preview', () => {
   assert.equal(db.prepare('SELECT COUNT(*) c FROM share_articulos').get().c, 0);
 });
 
-test('migrar familias: lo que quedó con la etiqueta vieja se reclasifica solo', () => {
+t('migrar familias: lo que quedó con la etiqueta vieja se reclasifica solo', () => {
   const db = abrir();
   importar(db, { buffer: planilla([
     [SG, '2026-08-24', 'PAPA BLANCA LAVADA X KG', 100],
@@ -232,7 +252,7 @@ test('migrar familias: lo que quedó con la etiqueta vieja se reclasifica solo',
   assert.equal(r.migrados, 3, 'sólo las tres que estaban fuera del vocabulario nuevo');
 });
 
-test('migrar familias: correr diez veces es lo mismo que correr una', () => {
+t('migrar familias: correr diez veces es lo mismo que correr una', () => {
   const db = abrir();
   importar(db, { buffer: planilla([[SG, '2026-08-24', 'PAPA BLANCA X KG', 100]]), nombre: 'a.xlsx' });
   db.prepare("UPDATE share_articulos SET familia='VERDURA'").run();
@@ -242,7 +262,7 @@ test('migrar familias: correr diez veces es lo mismo que correr una', () => {
   assert.equal(db.prepare('SELECT familia f FROM share_articulos').get().f, 'HORTALIZA PESADA');
 });
 
-test('migrar familias: una corrección a mano NO se pisa', () => {
+t('migrar familias: una corrección a mano NO se pisa', () => {
   const db = abrir();
   importar(db, { buffer: planilla([[SG, '2026-08-24', 'PAPA BLANCA X KG', 100]]), nombre: 'a.xlsx' });
   // Alguien decidió que esta papa va en OTRO. El clasificador diría HORTALIZA PESADA, pero
