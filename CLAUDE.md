@@ -77,6 +77,17 @@ mano:
 4. **No se cierra al guardar** si adentro queda algo que hay que leer: el CAE, el
    número autorizado, el aviso de que el cobro no se tomó.
 
+**Al 9/9/2026 no queda ningún formulario cargando adentro de una pantalla.** Los
+últimos cuatro —asignar un reporte en Scout, crear una semana de pago y agregar
+una vigencia de tarifa en Personal, y cargar el saldo de un banco en Flujo de
+fondos— pasaron a ventana en la V1036. Tres aparecían y desaparecían con
+`display` y el cuarto vivía siempre abierto arriba de su lista.
+
+Y el riesgo no era visual: **un formulario que sólo se esconde CONSERVA lo que
+tenía**. En Scout eso era mandarle el reporte a la persona del reporte anterior
+con sólo apretar Asignar. Por eso cada abridor deja la ventana en blanco, y hay
+un test que lo clava.
+
 **La altura la pone el panel, no cada pantalla.** Había dos maneras de abrir —26
 ventanas con `sgModalArriba` y 113 con `classList.add('on')` a mano— y el z-index
 lo ponía sólo el helper: una ventana abierta desde adentro de otra quedaba DETRÁS.
