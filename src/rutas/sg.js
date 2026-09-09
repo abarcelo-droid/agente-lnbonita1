@@ -5002,7 +5002,7 @@ router.post('/oc/:id/factura-completa', facturaUpload.single('archivo'), require
       avisoAcordado = 'El ' + comoFac + ' de la factura (' + ladoFac + ', ' + conSin + ') no da contra '
         + 'lo acordado en la orden por lo que entró (' + acordado + ', ' + conSin + ')'
         + (ocIds.length > 1 ? ', sumando las ' + ocIds.length + ' partidas' : '')
-        + '. Falta por facturar: ' + r2(ladoFac - acordado) + '.'
+        + '. Diferencia: ' + r2(ladoFac - acordado) + '.'
         + (mezcla ? ' Ojo: hay partidas con el precio con IVA y otras sin IVA, así que se compara '
                   + 'contra el neto y la diferencia puede ser sólo el IVA de las primeras.' : '');
     }
