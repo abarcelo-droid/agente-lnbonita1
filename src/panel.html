@@ -4198,6 +4198,7 @@ input[type=number]{-moz-appearance:textfield;appearance:textfield}
         <!-- El acceso directo. Para pagarle a alguien había que buscarlo en la
              lista, abrir su ficha y recién ahí encontrar el botón — y un
              proveedor sin movimientos ni figura. Desde acá se elige adentro. -->
+        <button class="btn bo bs" onclick="sgManualAbrir('ccproveedores')">❓ ¿Cómo se usa?</button>
         <button class="btn bb" id="sg-ccprov-btn-pagar" onclick="sgPagoOpen(null)">💵 Emitir un pago</button>
         <button class="btn bo" onclick="sgCcExportar('excel')">📗 Excel</button>
         <button class="btn bo" onclick="sgCcExportar('pdf')">🖨 PDF</button>
@@ -23032,6 +23033,84 @@ SG_MANUAL.ingresos = { titulo: 'Ingresos — recibir mercadería', html:
   + 'Observaciones rompía la pantalla.</li>'
   + '<li><span class="ver">V990</span> El piso que se ofrece es el <b>tuyo</b>: el que '
   + 'recibe en Empaque no tenía por qué ver San Pedro en la lista.</li>'
+  + '</ul>'
+};
+
+SG_MANUAL.ccproveedores = { titulo: 'Cuenta corriente de proveedores', html:
+  '<p>Cuánto se le debe a cada proveedor, de dónde sale esa deuda y qué se le pagó. Desde acá '
+  + 'se <b>registra un pago</b> y se abre la <b>ficha</b> de cada uno, movimiento por movimiento.</p>'
+
+  + '<h3>El saldo son dos mitades, y suman</h3>'
+  + '<p><b>Contabilizado</b> —lo que dicen los comprobantes y ya está en el libro— más <b>sin '
+  + 'facturar</b> —la parte acordada que ningún comprobante respalda— dan el <b>saldo</b>.</p>'
+  + '<div class="ojo">Los dos números son ciertos. El comprador cierra el tomate en 20.000 y la '
+  + 'factura llega por 10.000: a ARCA se le informa la factura, y al proveedor se le deben '
+  + '20.000. <b>La deuda es lo acordado; el libro fiscal es lo facturado.</b></div>'
+  + '<p>El selector <b>Fiscal + Gestión / Sólo fiscal / Sólo gestión</b> de arriba cambia qué '
+  + 'mitad se está mirando, con las mismas palabras que en Asientos.</p>'
+
+  + '<h3>«Esperando el libro»</h3>'
+  + '<p>Son las facturas <b>cargadas y todavía sin asiento</b> —o con el asiento anulado—. '
+  + '<b>No suman al saldo</b>: hasta que no entran al libro no son deuda registrada, y pagarlas '
+  + 'dejaría la cuenta del proveedor deudora por algo que nunca subió.</p>'
+  + '<p>Se contabilizan desde la orden de compra. Mientras estén ahí, esa plata está cargada '
+  + 'pero no cuenta.</p>'
+
+  + '<h3>De dónde sale la deuda</h3>'
+  + '<ul>'
+  + '<li><b>La factura de mercadería</b> de una orden de compra.</li>'
+  + '<li><b>La liquidación al productor</b>, cuando la partida iba a precio abierto. El '
+  + 'proveedor sale de la <b>orden</b>: la liquidación no tiene uno propio.</li>'
+  + '</ul>'
+  + '<p>Y la baja: los <b>pagos</b>, y los <b>anticipos</b> entregados que todavía no se '
+  + 'imputaron a ningún comprobante, que se restan del saldo.</p>'
+  + '<div class="ojo"><b>Las facturas de servicio NO están acá todavía.</b> El flete de entrada, '
+  + 'la descarga y la cooperativa se cargan en <b>Gastos Directos → 🧾 Ingresar factura</b>, y su '
+  + 'asiento sí le acredita al proveedor — pero esta pantalla no las lee y <b>no se pueden pagar '
+  + 'desde acá</b>. Por eso el mayor de Proveedores y esta pantalla dan distinto para un fletero '
+  + 'o una cooperativa. Es un hueco conocido, no un error de carga.</div>'
+
+  + '<h3>La ficha de un proveedor</h3>'
+  + '<p>Se abre con 👁 o haciendo clic en la fila. Arriba, los saldos fiscal y de gestión —los '
+  + 'calcula el <b>servidor</b>, para que la ficha y el listado no puedan discrepar—; abajo, los '
+  + 'movimientos con su saldo corriendo y un filtro por columna.</p>'
+  + '<ul>'
+  + '<li><b>HABER es lo que se le debe; DEBE es lo que se le pagó.</b></li>'
+  + '<li>La <b>apertura</b> —lo que se le debía al arrancar el sistema— va primera y sin fecha.</li>'
+  + '<li>Una factura con diferencia de gestión deja <b>dos renglones</b>: el del comprobante y '
+  + 'otro aparte, «Falta por facturar» o «Facturado de más», con su motivo. No se mezclan.</li>'
+  + '<li>Un pago que no canceló ningún comprobante sale como <b>anticipo</b>, «a cuenta».</li>'
+  + '</ul>'
+
+  + '<h3>Pagar</h3>'
+  + '<p>Con <b>Registrar pago</b>, desde la pantalla o desde la ficha. Se elige de qué caja o '
+  + 'cuenta sale, con qué se paga —efectivo, transferencia, cheque propio o un <b>cheque de '
+  + 'tercero endosado</b>— y contra qué comprobantes se imputa.</p>'
+  + '<ul>'
+  + '<li><b>Cada mitad se paga con lo suyo.</b> Con «sólo lo facturado» no se puede imputar '
+  + 'contra la parte sin comprobante, y al revés.</li>'
+  + '<li><b>No se puede pagar más de lo que queda</b> de cada comprobante.</li>'
+  + '<li>Las <b>cajas y cuentas que no podés mover no se te ofrecen</b>: si tienen dueño, las '
+  + 'toca sólo su gente.</li>'
+  + '<li>Lo que sobre queda <b>a cuenta</b> y se imputa después.</li>'
+  + '</ul>'
+  + '<div class="ojo">Un comprobante que <b>todavía no está en el libro</b> no se puede pagar: '
+  + 'no es deuda registrada. Es el mismo freno que del lado de las cobranzas.</div>'
+
+  + '<h3>Con qué otras pantallas se conecta</h3>'
+  + '<ul>'
+  + '<li><b>Órdenes de Compra</b> — ahí nace la factura de mercadería y ahí se contabiliza.</li>'
+  + '<li><b>Liquidaciones</b> — la del productor entra como deuda al emitirse.</li>'
+  + '<li><b>Caja y Bancos</b> — de ahí sale la plata, y ahí se endosa un cheque de tercero.</li>'
+  + '<li><b>Gastos Directos</b> — las facturas de servicio viven ahí, y por ahora <b>sólo</b> '
+  + 'ahí.</li>'
+  + '</ul>'
+
+  + '<h3>Qué cambió, y desde cuándo</h3>'
+  + '<ul>'
+  + '<li><b>V1034</b> — esta pantalla estrena su <b>¿Cómo se usa?</b>, y queda escrito el hueco '
+  + 'de las facturas de servicio: no aparecen en la cuenta corriente ni se pueden pagar desde '
+  + 'acá.</li>'
   + '</ul>'
 };
 
