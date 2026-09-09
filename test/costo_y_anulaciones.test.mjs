@@ -53,8 +53,14 @@ test('anular un pago devuelve la deuda al comprobante que se pagó, no a otro', 
 });
 
 test('el código de la anulación mira el tipo y las dos columnas', () => {
-  assert.match(SG, /if \(String\(im\.tipo \|\| ''\) === 'liquidacion'\) bajaLiq\.run/,
+  // Son TRES tablas desde la V1035: factura de mercadería, liquidación y factura
+  // de servicio. Sin mirar `tipo`, la deuda vuelve al comprobante equivocado —y
+  // con tres, el que se olvide le borra la deuda a una factura que no tiene nada
+  // que ver mientras la de servicio queda pagada para siempre.
+  assert.match(SG, /const t = String\(im\.tipo \|\| ''\);/,
     'sin mirar `tipo`, la deuda vuelve al comprobante equivocado');
+  assert.match(SG, /if \(t === 'liquidacion'\) bajaLiq\.run/);
+  assert.match(SG, /else if \(t === 'factura_gasto'\) bajaGasto\.run/);
   assert.match(SG, /saldo_pagado_gestion = MAX\(0, ROUND\(COALESCE\(saldo_pagado_gestion,0\) - \?, 2\)\)/,
     'el pago escribe las dos columnas: al anular tienen que volver las dos');
   assert.match(TESO, /String\(im\.tipo \|\| ''\) === 'liquidacion'/,
