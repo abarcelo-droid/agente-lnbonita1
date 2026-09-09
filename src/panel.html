@@ -4273,6 +4273,7 @@ input[type=number]{-moz-appearance:textfield;appearance:textfield}
       <div><div class="ph-t">🏦 San Gerónimo · Caja y Bancos</div>
         <div class="ph-s" id="cb-sub">De dónde sale y a dónde entra la plata</div></div>
       <div style="display:flex;gap:8px">
+        <button class="btn bo bs" onclick="sgManualAbrir('cajabancos')">❓ ¿Cómo se usa?</button>
         <button class="btn bb" id="cb-btn-nueva" onclick="sgCbNueva()">+ Nueva</button>
         <button class="btn bo" onclick="sgCbInit()">↻ Actualizar</button>
       </div>
@@ -4464,8 +4465,10 @@ input[type=number]{-moz-appearance:textfield;appearance:textfield}
         <button class="mcl" onclick="closeMB('cb-usr-modal')">×</button></div>
       <div class="mbd">
         <div style="font-size:12px;color:var(--mut);margin-bottom:10px">
-          Los que tildes van a poder cargar y anular movimientos de esta caja, y
-          ninguna otra. Si no tildás a nadie, la caja la mueve solamente un admin.
+          <b>Asignar gente CIERRA la caja.</b> Sin nadie tildado la mueve cualquiera
+          que tenga permiso en el módulo; en cuanto tildás a uno, pasan a poder
+          moverla sólo los tildados —y un administrador, siempre—. Los que elijas
+          acá pueden cargar y anular movimientos de esta caja, y de ninguna otra.
         </div>
         <div id="cb-usr-lista" style="max-height:46vh;overflow-y:auto"></div>
         <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:14px">
@@ -10741,7 +10744,10 @@ function sgCbPintar(){
         + '<td style="font-size:11.5px">'
           + (c.usuarios_n
               ? escH(c.usuarios_nombres || '')
-              : '<span style="color:var(--mut)">— sólo admin —</span>')
+              // SIN DUEÑO NO ES «SÓLO ADMIN»: es abierta a cualquiera con permiso
+              // en el módulo. Decía lo contrario y la regla real está en
+              // puedeMoverCuenta (sg_tesoreria.js).
+              : '<span style="color:var(--mut)">— abierta —</span>')
           + ' <button class="btn bo bs" title="Elegir quiénes la tocan"'
           + ' onclick="sgCbUsrOpen(' + c.id + ')">👤</button></td>'
         + '<td style="text-align:right"><b>' + sgMoney(c.saldo_actual) + '</b></td>'
@@ -11034,7 +11040,7 @@ function sgCbUsrGuardar(){
   sgCbApi('/cuentas/' + SG_CB.usrCta + '/usuarios', 'PUT', { usuarios: ids }).then(function(r){
     if (!r || !r.ok) { toast((r && r.error) || 'No se pudo guardar', 'er'); return; }
     toast(ids.length ? ('Esta caja la tocan ' + ids.length + ' usuario(s)')
-                     : 'Sin nadie asignado: la caja la mueve sólo un admin', 'ok');
+                     : 'Sin nadie asignado: la caja queda abierta a cualquiera con permiso', 'ok');
     closeMB('cb-usr-modal');
     sgCbCargar();
   });
@@ -23027,6 +23033,98 @@ SG_MANUAL.ingresos = { titulo: 'Ingresos — recibir mercadería', html:
   + '<li><span class="ver">V990</span> El piso que se ofrece es el <b>tuyo</b>: el que '
   + 'recibe en Empaque no tenía por qué ver San Pedro en la lista.</li>'
   + '</ul>'
+};
+
+SG_MANUAL.cajabancos = { titulo: 'Caja y Bancos', html:
+  '<p>Dónde está la plata y cómo se mueve: las <b>cajas</b> de efectivo, las <b>cuentas '
+  + 'bancarias</b>, los <b>cheques de terceros</b> que están en cartera y la <b>conciliación</b> '
+  + 'contra el extracto.</p>'
+  + '<div class="ojo"><b>El saldo sale de los movimientos, no del libro.</b> Un asiento puede '
+  + 'existir sin que la plata se haya movido —y al revés—, así que el arqueo se calcula con lo '
+  + 'que entró y salió de cada cuenta. Por eso una cobranza con cheque <b>no sube el banco</b>: '
+  + 'el banco recibe el día que se deposita.</div>'
+
+  + '<h3>Las cinco solapas</h3>'
+  + '<ul>'
+  + '<li><b>💵 Cajas</b> — el efectivo. Con su arqueo abierto en fiscal y gestión.</li>'
+  + '<li><b>🏦 Bancos</b> — cuentas corrientes y cajas de ahorro, con sus chequeras y los '
+  + 'cheques propios librados.</li>'
+  + '<li><b>📥 Cheques de terceros</b> — la cartera: lo que se recibió y todavía no se depositó '
+  + 'ni se endosó.</li>'
+  + '<li><b>⛔ Rechazados</b> — los que rebotaron, para devolvérselos al cliente.</li>'
+  + '<li><b>⚖️ Conciliación</b> — el extracto del banco contra el libro.</li>'
+  + '</ul>'
+
+  + '<h3>Caja o banco: lo que de verdad cambia</h3>'
+  + '<p>Hay tres tipos —<b>caja</b>, <b>cuenta corriente</b> y <b>caja de ahorro</b>— pero lo '
+  + 'único que el sistema distingue es <b>caja</b> contra <b>no caja</b>:</p>'
+  + '<ul>'
+  + '<li>Una <b>caja</b> puede ser <b>interna</b>; nunca tiene chequera; no se puede depositar '
+  + 'un cheque en ella ni conciliarla.</li>'
+  + '<li>Una <b>cuenta bancaria</b> es siempre fiscal, puede tener chequera, y es la única donde '
+  + 'se deposita un cheque y la única que se concilia.</li>'
+  + '</ul>'
+  + '<p>Entre cuenta corriente y caja de ahorro <b>no hay ninguna diferencia de '
+  + 'comportamiento</b>: es una etiqueta para saber qué es cada una.</p>'
+
+  + '<h3>Fiscal e interno, y por qué el movimiento manda</h3>'
+  + '<p>El ámbito de la <b>caja</b> es lo que se <b>propone</b>; el que vale es el del '
+  + '<b>movimiento</b>. Una misma caja puede tener movimientos de las dos clases sin partirse en '
+  + 'dos cajas.</p>'
+  + '<div class="ojo"><b>Son dos vocabularios para lo mismo.</b> La cuenta dice <b>fiscal</b> o '
+  + '<b>interno</b>; el movimiento y el libro dicen <b>fiscal</b> o <b>gestión</b>. «Interno» de '
+  + 'la caja se traduce a «gestión» en el movimiento — si buscás «interno» en el listado de '
+  + 'movimientos no lo vas a encontrar.</div>'
+  + '<p>Un movimiento de <b>gestión necesita motivo</b>, y son cuatro, no texto libre: texto '
+  + 'libre son cuarenta maneras de escribir lo mismo y ningún informe posible.</p>'
+  + '<p>El <b>arqueo</b> se abre por el ámbito del movimiento: total, fiscal y gestión. El saldo '
+  + 'de apertura va entero del lado fiscal.</p>'
+  + '<p>Un movimiento de gestión <b>desde un banco</b> avisa: la conciliación lo va a marcar '
+  + 'todos los meses, porque el extracto no lo tiene.</p>'
+
+  + '<h3>Quién puede mover una caja <span class="ver">V1033</span></h3>'
+  + '<p><b>Asignar gente CIERRA la caja.</b> La regla es una sola y vale en todo el sistema:</p>'
+  + '<ul>'
+  + '<li>Un <b>administrador</b> siempre puede.</li>'
+  + '<li>Si la caja <b>tiene gente asignada</b>, la mueven sólo ellos.</li>'
+  + '<li>Si <b>no tiene a nadie</b>, la mueve <b>cualquiera con permiso en el módulo</b>.</li>'
+  + '</ul>'
+  + '<div class="ojo">Hasta la V1033 la pantalla decía lo contrario en tres lugares —«sin nadie '
+  + 'asignado la mueve sólo un admin»— y no es como funciona. Al que lo leía le quedaba que no '
+  + 'podía trabajar, y terminaba pidiendo que lo agreguen a una lista que justamente le '
+  + '<b>cierra</b> la caja al resto.</div>'
+  + '<p>Las cuentas que no podés mover <b>no se te ofrecen</b>: ni para cobrar, ni para pagar, '
+  + 'ni para depositar. No es que el botón rebota — no aparece.</p>'
+
+  + '<h3>Los cheques de terceros, paso por paso</h3>'
+  + '<p>Un cheque <b>no es plata en el banco</b>: es un papel que vale el día que se deposita. '
+  + 'Por eso vive en la <b>cartera</b> y tiene su propio recorrido.</p>'
+  + '<ul>'
+  + '<li><b>Recibir</b> — entra a la cartera. Se pide número, banco, quién lo firma y '
+  + 'vencimiento: son los datos que después permiten reconocerlo.</li>'
+  + '<li><b>Depositar</b> — recién ahí <b>sube el banco</b> y sale de la cartera.</li>'
+  + '<li><b>Endosar</b> — se lo usa para pagarle a un proveedor. Sale de la cartera y <b>no mueve '
+  + 'ninguna cuenta</b>: no pasó por el banco.</li>'
+  + '<li><b>Rechazar</b> — rebotó. Si había entrado por el banco, sale de ahí.</li>'
+  + '<li><b>Devolver</b> — el papel vuelve al cliente y la deuda vuelve a su cuenta corriente.</li>'
+  + '</ul>'
+  + '<div class="ojo">El cheque <b>se lleva su ámbito puesto</b> desde que se cobra. Sin eso, uno '
+  + 'que cobró la parte sin comprobante volvía al libro fiscal al depositarlo, y quedaba un '
+  + 'débito de gestión en cartera que no se cancelaba nunca.</div>'
+
+  + '<h3>Con qué otras pantallas se conecta</h3>'
+  + '<ul>'
+  + '<li><b>CC clientes</b> — lo que se cobra entra por acá, y los cheques van a la cartera.</li>'
+  + '<li><b>CC proveedores</b> — lo que se paga sale de acá, y un cheque de tercero se puede '
+  + 'endosar.</li>'
+  + '<li><b>Asientos Contables</b> — cada paso deja su asiento; el saldo, en cambio, sale de los '
+  + 'movimientos.</li>'
+  + '</ul>'
+
+  + '<h3>Qué es de administrador</h3>'
+  + '<p><b>Parametrizar</b>: dar de alta una cuenta, decidir quiénes la tocan, cargar una '
+  + 'chequera. <b>Operar</b> —cargar un movimiento, recibir o depositar un cheque— es trabajo del '
+  + 'día y lo hace quien tenga permiso en el módulo.</p>'
 };
 
 SG_MANUAL.ccclientes = { titulo: 'Cuenta corriente de clientes', html:
