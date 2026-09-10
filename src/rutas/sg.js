@@ -1586,6 +1586,15 @@ const postEmitir = async (req, res) => {
     // calcularan por su cuenta, un día no van a coincidir y va a ganar el que
     // nadie mira.
     const gestionLineas = r2(vinculos.reduce((a, v) => a + (Number(v.gestion) || 0), 0));
+    // EL PORCENTAJE SE VALIDA ACÁ, con el nombre del campo a la vista. El motor
+    // también frena, pero contestaría 502 —que suena a que se cayó AFIP— cuando lo
+    // que pasó es que alguien tipeó 500 en vez de 5.
+    const descuentoPct = Number(b.descuento_pct) || 0;
+    if (descuentoPct < 0 || descuentoPct >= 100) {
+      return res.status(400).json({ ok: false, error:
+        'El descuento tiene que estar entre 0 y 100%: con ' + descuentoPct
+        + '% el comprobante quedaría en cero o en negativo.' });
+    }
     const r = await afipEmitir(db, { ptoVta: pv, clienteId, items, esNC: b.es_nc === true,
       userId: uid(req), vinculos,
       descuentoGestion: gestionLineas || (Number(b.descuento_gestion) || 0),
@@ -1595,6 +1604,19 @@ const postEmitir = async (req, res) => {
       // alcanza, el resto queda en la cuenta y también vence.
       vencimiento: val(b.vencimiento) || null,
       condicionPagoId: b.condicion_pago_id ? Number(b.condicion_pago_id) : null,
+      // ── EL DESCUENTO QUE SE LLEVA LA CADENA ─────────────────────────────
+      //
+      // Pablo, 9/9/2026: «un porcentaje de la venta, en la factura debe aparecer
+      // como un ítem más. El operador debería seleccionar si lo aplica o no».
+      //
+      // Es FISCAL: baja el neto, baja el IVA y baja lo que el cliente debe. Nada
+      // que ver con descuento_gestion, que es lo resignado SIN papel.
+      //
+      // Y viaja como PORCENTAJE, no como pesos: los pesos los hace el motor sobre
+      // las bases que él mismo calculó. Si la pantalla mandara el importe, con dos
+      // alícuotas en el mismo comprobante habría que decidir acá cómo repartirlo —y
+      // dos cuentas de lo mismo terminan dando distinto.
+      descuentoPct: descuentoPct,
       // El documento del comprador, cuando la venta supera el umbral y va a
       // consumidor final. Es del COMPROBANTE, no del cliente: el "Consumidor Final"
       // lo comparten muchas ventas.
@@ -1683,6 +1705,10 @@ router.post('/facturas/directa', requireAuth, async (req, res) => {
     // asiento como venta de GESTIÓN: es lo que la empresa pone sobre la mesa
     // en cada acuerdo con un proveedor.
     descuento_gestion: Number(b.descuento_gestion) || 0,
+    // El descuento de la cadena también viaja por acá: facturación directa entra
+    // por la MISMA puerta que Facturar remitos —postEmitir— y si no se pasara, el
+    // mismo botón haría dos cosas distintas según desde qué pantalla se apretara.
+    descuento_pct: Number(b.descuento_pct) || 0,
     aplica_descuentos: b.aplica_descuentos ? 1 : 0,
     seleccion: [{ despacho_id: despachoId,
       items: lineas.map((l, ix) => {
@@ -1762,7 +1788,11 @@ montarCRUD('clientes', 'sg_clientes',
   ['razon_social', 'cuit', 'tipo', 'categoria_fiscal', 'tipo_fiscal_habitual',
    'condicion_pago_habitual_id', 'comercial_responsable_id', 'modalidad_pedido',
    'limite_credito', 'localidad', 'provincia', 'direccion_entrega', 'telefono',
-   'email', 'observaciones', 'saldo_inicial'],   // saldo_inicial: apertura al corte (BRIEF 10)
+   'email', 'observaciones', 'saldo_inicial',   // saldo_inicial: apertura al corte (BRIEF 10)
+   // El descuento acordado con la cadena. Lo PROPONE la pantalla de facturar; el
+   // operador decide si lo aplica. Sin esta columna en la lista, el campo se
+   // pintaba en la ficha y al guardar se perdía sin decir nada.
+   'descuento_pct'],
   { orderBy: 'razon_social COLLATE NOCASE',
     // A nivel operar: el comercial que toma un pedido de un cliente nuevo no puede
     // quedarse esperando al dueño (Pablo, 27/8/2026).

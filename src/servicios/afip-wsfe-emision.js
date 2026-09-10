@@ -200,8 +200,42 @@ function fechaHoyAR() { return new Date(Date.now() - 3 * 3600 * 1000).toISOStrin
 //    adentro-- los manda y acá no se recalculan. Reconstruir el total desde un
 //    precio unitario redondeado es lo que dejaba el comprobante en $2.789.999,98
 //    cuando el papel decía $2.790.000. Sin esos campos, se calcula como siempre.
+// ══ EL DESCUENTO DE LA CADENA, RENGLÓN POR ALÍCUOTA ════════════════════════
+//
+// Pablo, 9/9/2026: «un porcentaje de la venta, en la factura debe aparecer como un
+// ítem más».
+//
+// VA UNA LÍNEA POR CADA ALÍCUOTA que tenga el comprobante, no una sola por el
+// total. Un comprobante con fruta al 10,5% y algo al 21% descontado en una sola
+// línea al 10,5% le devolvería al cliente crédito fiscal que no corresponde, y las
+// bases que se le informan a ARCA dejarían de coincidir con los renglones.
+//
+// El descuento se reparte sobre las bases YA CALCULADAS y el IVA de cada línea
+// sale POR DIFERENCIA de su propia base, igual que en el resto del circuito: así
+// neto + iva sigue dando exacto el total que se ve en pantalla.
+export function lineasDeDescuento(pct, porAlicuota) {
+  const p = Number(pct) || 0;
+  if (!(p > 0)) return [];
+  const claves = Object.keys(porAlicuota).filter((a) => r2(porAlicuota[a].neto) > 0);
+  const varias = claves.length > 1;
+  return claves.map((a) => {
+    const base = r2(porAlicuota[a].neto);
+    const neto = r2(base * p / 100);
+    return {
+      alicuota: Number(a),
+      // El rótulo dice el porcentaje: es lo que el cliente reclama si no coincide
+      // con lo acordado. Y con más de una alícuota dice cuál, porque si no salen
+      // dos renglones idénticos con importes distintos.
+      descripcion: 'Descuento acordado ' + String(p).replace('.', ',') + '%'
+        + (varias ? ' (IVA ' + String(a).replace('.', ',') + '%)' : ''),
+      importe_neto: -neto,
+      importe_iva: -r2(neto * Number(a) / 100),
+    };
+  });
+}
+
 export function construirComprobante(database, { clienteId, items, esNC, identificacion,
-                                                asociado, concepto }) {
+                                                asociado, concepto, descuentoPct }) {
   const cliente = database.prepare('SELECT id, razon_social, cuit, categoria_fiscal FROM sg_clientes WHERE id=?').get(clienteId);
   if (!cliente) throw new Error('Cliente inexistente: ' + clienteId);
   // La LETRA se necesita antes de recorrer los renglones (define la serie), pero si
@@ -212,6 +246,10 @@ export function construirComprobante(database, { clienteId, items, esNC, identif
   const cbteTipo = fisc0.cbte_tipo;
   const ivaMap = {};
   let impNeto = 0, impIva = 0, impOpEx = 0;
+  // El neto de la mercadería, abierto por alícuota: es la BASE del descuento de la
+  // cadena. Se junta acá, mientras se recorren los renglones, y no volviendo a
+  // sumar el detalle después: dos cuentas de lo mismo terminan dando distinto.
+  const netoPorPct = {};
   const detalle = [];
   for (const it of (items || [])) {
     // ── NO TODO RENGLÓN ES MERCADERÍA ──────────────────────────────────────
@@ -274,10 +312,47 @@ export function construirComprobante(database, { clienteId, items, esNC, identif
     if (!ivaMap[id]) ivaMap[id] = { base: 0, importe: 0 };
     ivaMap[id].base = r2(ivaMap[id].base + neto);
     ivaMap[id].importe = r2(ivaMap[id].importe + iva);
+    if (!netoPorPct[alic]) netoPorPct[alic] = { neto: 0 };
+    netoPorPct[alic].neto = r2(netoPorPct[alic].neto + neto);
     detalle.push({ producto_id: prod ? prod.id : null, descripcion: it.descripcion || rotulo,
       cantidad: cant, precio_unitario: precio, subtotal: neto, alicuota_id: id, ...bultoMeta });
   }
   if (!detalle.length) throw new Error('El comprobante necesita al menos un ítem');
+
+  // ── Y AHORA EL DESCUENTO DE LA CADENA, SI LO HAY ────────────────────────
+  //
+  // Entra por la MISMA puerta que la mercadería: baja el neto, baja el IVA y baja
+  // el total. Por eso va acá y no al final restando: si sólo se tocara el total,
+  // el comprobante le informaría a ARCA una base que no es la suma de sus renglones.
+  //
+  // Se recorta a menos de 100: un descuento del 100% deja un comprobante en cero
+  // —que no es un comprobante— y por arriba de 100 lo deja en negativo, que ARCA
+  // rechaza. El que quiere regalar la mercadería no emite una factura.
+  const pctDesc = Number(descuentoPct) || 0;
+  if (pctDesc > 0) {
+    if (!(pctDesc < 100)) {
+      throw new Error('El descuento tiene que ser menor a 100%: con 100 el comprobante '
+        + 'quedaría en cero y no habría nada que facturar.');
+    }
+    for (const d of lineasDeDescuento(pctDesc, netoPorPct)) {
+      const id = alicuotaId(d.alicuota);
+      if (id === undefined) throw new Error('Alícuota de IVA no soportada para el descuento: ' + d.alicuota + '%');
+      impNeto = r2(impNeto + d.importe_neto); impIva = r2(impIva + d.importe_iva);
+      ivaMap[id].base = r2(ivaMap[id].base + d.importe_neto);
+      ivaMap[id].importe = r2(ivaMap[id].importe + d.importe_iva);
+      detalle.push({ producto_id: null, descripcion: d.descripcion,
+        // Cantidad 1: es un importe, no una medida. El PDF lo reconoce por
+        // es_descuento y no le imprime «1 kg» al lado.
+        cantidad: 1, precio_unitario: d.importe_neto, subtotal: d.importe_neto,
+        alicuota_id: id, es_descuento: 1,
+        bultos: null, kg_por_bulto: null, precio_por_bulto: null, unidad: null,
+        despacho_item_id: null, nc_de_item_id: null, nc_modo: null });
+    }
+  }
+  // Los pesos del descuento, ya hechos: es lo que el asiento necesita para
+  // acreditar Ventas por el neto ENTERO y medir el descuento en su propia cuenta.
+  const descuentoNeto = r2(detalle.filter((d) => d.es_descuento)
+    .reduce((a, d) => a - d.subtotal, 0));
   const impTotal = r2(impNeto + impIva + impOpEx);
   // AHORA SÍ, con el total en la mano: ¿hay que identificar al comprador? Si el
   // comprobante supera el umbral y va a consumidor final, ARCA exige DNI o CUIT.
@@ -296,6 +371,8 @@ export function construirComprobante(database, { clienteId, items, esNC, identif
     // papel suelto: ARCA la rechaza y el cliente no sabe qué se le está acreditando.
     asociado: asociado || null,
     imp_neto: impNeto, imp_iva: impIva, imp_opex: impOpEx, imp_total: impTotal, iva, detalle,
+    // Lo que se llevó la cadena: el porcentaje tal cual se aplicó y los pesos.
+    descuento_pct: pctDesc > 0 ? pctDesc : null, descuento_neto: descuentoNeto,
     concepto: (Number(concepto) === 2 || Number(concepto) === 3) ? Number(concepto) : 1 };
 }
 
@@ -467,15 +544,22 @@ function persistirReservada(database, { comprobante, ptoVta, cbteTipo, cbteNro, 
     database.prepare('UPDATE sg_ven_facturas SET doc_tipo=?, doc_nro=? WHERE id=?')
       .run(comprobante.doc_tipo != null ? Number(comprobante.doc_tipo) : null,
         comprobante.doc_nro != null ? String(comprobante.doc_nro) : null, facturaId);
+    // EL DESCUENTO DE LA CADENA, EN EL COMPROBANTE. El porcentaje se guarda para
+    // que la nota de crédito lo pueda devolver en la misma proporción; los pesos,
+    // porque son los que el asiento lleva a su propia cuenta.
+    database.prepare('UPDATE sg_ven_facturas SET descuento_pct=?, descuento_neto=? WHERE id=?')
+      .run(comprobante.descuento_pct != null ? Number(comprobante.descuento_pct) : null,
+        Number(comprobante.descuento_neto) || 0, facturaId);
     const insItem = database.prepare(`INSERT INTO sg_ven_factura_items
       (factura_id, descripcion, cantidad, precio_unitario, subtotal, producto_id, alicuota_id, bultos, kg_por_bulto, precio_por_bulto, unidad,
-       despacho_item_id, nc_de_item_id, nc_modo)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`);
+       despacho_item_id, nc_de_item_id, nc_modo, es_descuento)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`);
     for (const d of comprobante.detalle) insItem.run(facturaId, d.descripcion, d.cantidad, d.precio_unitario, d.subtotal, d.producto_id, d.alicuota_id,
       d.bultos != null ? d.bultos : null, d.kg_por_bulto != null ? d.kg_por_bulto : null, d.precio_por_bulto != null ? d.precio_por_bulto : null, d.unidad || null,
       d.despacho_item_id != null ? d.despacho_item_id : null,
       d.nc_de_item_id != null ? d.nc_de_item_id : null,
-      d.nc_modo || null);
+      d.nc_modo || null,
+      d.es_descuento ? 1 : 0);
   })();
   return facturaId;
 }
@@ -505,7 +589,8 @@ export function recontabilizarVenta(database, facturaId, userId) {
   // factura: la deuda que la nota había bajado volvía a subir.
   const f = database.prepare(`SELECT id, cliente_id, neto, iva, total, fecha, numero,
       punto_venta, cbte_nro, cbte_tipo, estado, asiento_id,
-      COALESCE(dif_gestion,0) AS dif_gestion, dif_motivo
+      COALESCE(dif_gestion,0) AS dif_gestion, dif_motivo,
+      COALESCE(descuento_neto,0) AS descuento_neto
     FROM sg_ven_facturas WHERE id=?`).get(facturaId);
   if (!f) throw new Error('El comprobante no existe');
   if (String(f.estado || '') === 'anulada') {
@@ -520,6 +605,11 @@ export function recontabilizarVenta(database, facturaId, userId) {
   const arm = lineasAsientoVenta(database, {
     clienteId: f.cliente_id, neto: f.neto, iva: f.iva, total: f.total,
     descuento: f.dif_gestion, numero: nro, motivo: f.dif_motivo,
+    // Rehacer el asiento tiene que dar el MISMO asiento. Sin esto, un comprobante
+    // con descuento de cadena que se recontabiliza salía con Ventas por el neto
+    // corto y sin la línea del descuento: el mismo comprobante, dos asientos
+    // distintos según por dónde se hubiera pasado.
+    descuentoFiscal: f.descuento_neto,
     // La nota de crédito se reconoce por el tipo de comprobante, que es lo único
     // que quedó guardado: 3 = NC A, 8 = NC B.
     esNC: esNotaDeCredito(f.cbte_tipo),
@@ -565,7 +655,8 @@ function actualizarFactura(database, facturaId, campos) {
 // Si al modelo le falta algo, se corta y lo dice: no se guarda una venta a
 // medias. Y si ya tiene asiento —un reintento— no se escribe dos veces.
 function asentarVenta(database, facturaId, comprobante, ptoVta, cbteNro, userId) {
-  const ya = database.prepare(`SELECT asiento_id, numero, fecha, dif_gestion, dif_motivo
+  const ya = database.prepare(`SELECT asiento_id, numero, fecha, dif_gestion, dif_motivo,
+      descuento_neto
     FROM sg_ven_facturas WHERE id=?`).get(facturaId);
   // TENER UN PUNTERO NO ES ESTAR EN EL LIBRO. Acá alcanzaba con que asiento_id
   // tuviera algo: si ese asiento estaba ANULADO, esta función devolvía su id y no
@@ -577,6 +668,11 @@ function asentarVenta(database, facturaId, comprobante, ptoVta, cbteNro, userId)
     clienteId: comprobante.cliente.id,
     neto: comprobante.imp_neto, iva: comprobante.imp_iva, total: comprobante.imp_total,
     descuento: (ya && ya.dif_gestion) || 0, numero: nro, motivo: ya && ya.dif_motivo,
+    // EL DESCUENTO DE LA CADENA SALE DE LA FACTURA YA ESCRITA, no del comprobante
+    // en memoria: es el mismo criterio que dif_gestion dos líneas arriba. Si un
+    // reintento llegara acá con el comprobante rearmado y la factura ya guardada,
+    // el asiento tiene que salir por lo que dice la factura.
+    descuentoFiscal: (ya && ya.descuento_neto) || 0,
     esNC: esNotaDeCredito(comprobante.cbte_tipo),
     clase: claseDeCbte(comprobante.cbte_tipo),
   });
@@ -635,9 +731,9 @@ function confirmarAutorizada(database, facturaId, campos, vinculos, esNC) {
 export async function emitir(database, { ptoVta, clienteId, items, esNC, userId, vinculos,
                                          descuentoGestion, identificacion, asociado,
                                          ncDeFacturaId, ncMotivo, concepto,
-                                         vencimiento, condicionPagoId }) {
+                                         vencimiento, condicionPagoId, descuentoPct }) {
   const comprobante = construirComprobante(database, { clienteId, items, esNC, identificacion,
-    asociado, concepto });
+    asociado, concepto, descuentoPct });
   const cbteTipo = comprobante.cbte_tipo;
 
   // ── EL CORTE: UN PUNTO DE VENTA MANUAL NO LLAMA A AFIP ─────────────────

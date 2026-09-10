@@ -109,8 +109,25 @@ export function modeloVentaFaltan(lineas) {
 // único que cambia son los TEXTOS — y no es cosmético: un asiento que dice «Factura
 // 0001-00000012» sobre una nota de débito es lo que va a leer el que tenga que
 // explicarlo seis meses después.
+// ══ Y EL DESCUENTO DE LA CADENA NO SE ESCONDE ADENTRO DE VENTAS ════════════
+//
+// Pablo, 9/9/2026: «en contabilidad vamos a necesitar configurar a dónde hacer el
+// asiento modelo de estos descuentos».
+//
+// El descuento ya bajó el neto del comprobante, así que un asiento que acreditara
+// Ventas por ese neto BALANCEARÍA IGUAL — y el descuento no existiría en ningún
+// lado. Al fin del mes nadie podría contestar cuánto se llevaron las cadenas sin
+// abrir factura por factura.
+//
+// Por eso se abre: Ventas se acredita por el neto ENTERO, y el descuento se debita
+// contra su cuenta. La deuda del cliente no cambia —es el total del papel—.
+//
+//   Deudores        DEBE   total
+//   Descuentos      DEBE   descuento
+//   Ventas          HABER  neto + descuento
+//   IVA Débito      HABER  iva
 export function lineasAsientoVenta(db, { clienteId, neto, iva, total, descuento, numero,
-                                         motivo, esNC, clase }) {
+                                         motivo, esNC, clase, descuentoFiscal }) {
   const motivoGes = MOTIVOS[String(motivo || '').trim()] ? String(motivo).trim() : 'ajuste_gestion';
   const mod = modeloVentaLineas(db);
   const faltan = modeloVentaFaltan(mod.lineas);
@@ -158,13 +175,33 @@ export function lineasAsientoVenta(db, { clienteId, neto, iva, total, descuento,
   const lado = (monto) => nc ? { debe: 0, haber: r2v(monto) } : { debe: r2v(monto), haber: 0 };
   const contra = (monto) => nc ? { debe: r2v(monto), haber: 0 } : { debe: 0, haber: r2v(monto) };
 
+  // El descuento de la cadena vuelve a sumarse a Ventas: lo que se vendió es lo de
+  // lista, y lo resignado se mide aparte. Si no se le pide cuenta al modelo, no se
+  // puede medir — y ahí se frena, porque la alternativa es esconderlo.
+  const dFis = r2v(descuentoFiscal);
+  const lDescFis = de('descuento_super');
+  if (dFis > 0 && !lDescFis) {
+    return { lineas: [],
+      falta: ['la línea de Descuentos sobre ventas en el asiento modelo de venta, '
+            + 'y este comprobante lleva un descuento de cadena. Marcala en Contabilidad SG '
+            + '→ Asiento Modelo, en el modelo de venta'],
+      modelo_id: mod.id };
+  }
   const lineas = [
     { cuenta_id: lCli.cuenta_id, ...lado(total),
       descripcion: lCli.descripcion || doc },
-    { cuenta_id: lVta.cuenta_id, ...contra(neto),
+    { cuenta_id: lVta.cuenta_id, ...contra(r2v(neto + dFis)),
       descripcion: lVta.descripcion
         || ((nc ? 'Devolución ' : (cl === 'nd' ? 'Ajuste a favor ' : 'Venta ')) + numero) },
   ];
+  if (dFis > 0) {
+    // Va del MISMO lado que el cliente: en una factura al debe (es un menor
+    // ingreso), y en una nota de crédito al haber, porque la devolución también
+    // devuelve el descuento que se había concedido sobre esa mercadería.
+    lineas.push({ cuenta_id: lDescFis.cuenta_id, ...lado(dFis),
+      descripcion: lDescFis.descripcion
+        || ('Descuento acordado ' + numero + (nc ? ' (nota de crédito)' : '')) });
+  }
   if (r2v(iva) > 0) {
     lineas.push({ cuenta_id: ctaIva, ...contra(iva),
       descripcion: 'IVA Débito Fiscal'

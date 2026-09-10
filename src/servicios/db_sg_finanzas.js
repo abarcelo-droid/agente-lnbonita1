@@ -827,6 +827,22 @@ try {
   }
 } catch (e) { console.error('[DB] SG migración sg_clientes (nombre_comercial):', e.message); }
 
+// ── CADA CADENA SE LLEVA SU PORCENTAJE ─────────────────────────────────────
+// El descuento que negocia cada supermercado no cambia de una factura a la otra:
+// vive en la ficha del cliente y la pantalla de facturar lo PROPONE, igual que la
+// condición de pago. El operador decide si lo aplica y puede cambiarlo — que es lo
+// que Pablo pidió: «el operador debería seleccionar si lo aplica o no».
+//
+// Sin esto habría que acordarse de que una cadena es 3 y la otra 5, y tipearlo en
+// cada comprobante. Un dígito de más en un porcentaje es plata.
+try {
+  const cols = db.prepare("PRAGMA table_info(sg_clientes)").all().map(c => c.name);
+  if (!cols.includes('descuento_pct')) {
+    db.exec("ALTER TABLE sg_clientes ADD COLUMN descuento_pct REAL");
+    console.log('[DB] SG sg_clientes migrado (+descuento_pct)');
+  }
+} catch (e) { console.error('[DB] SG migración sg_clientes (descuento_pct):', e.message); }
+
 // 2) Re-apuntar FK cliente_id de liquidaciones/facturas/cobranzas → sg_clientes en DBs ya
 //    deployadas (las nuevas ya se crean con la FK correcta arriba). Idempotente: solo
 //    rebuildea si el DDL aún referencia sg_ven_clientes. DATA-SAFE: ABORTA si hay filas.
@@ -1082,5 +1098,38 @@ try {
   if (addCol('sg_fin_cheques_terceros', 'motivo', 'TEXT')) puestas.push('motivo');
   if (puestas.length) console.log('[SG] sg_fin_cheques_terceros migrado (+' + puestas.join(', +') + ')');
 } catch (e) { console.error('[SG] sg_fin_cheques_terceros migracion:', e.message); }
+
+// ── EL DESCUENTO QUE SE LLEVA LA CADENA ────────────────────────────────────
+//
+// Pablo, 9/9/2026: «voy a necesitar un botón que se llame Descuento super: que sea
+// un porcentaje de la venta, en la factura debe aparecer como un ítem más. El
+// operador debería seleccionar si lo aplica o no».
+//
+// Es un descuento FISCAL, no de gestión: sale impreso en el comprobante, baja el
+// neto, baja el IVA y baja lo que el cliente debe. Nada que ver con dif_gestion,
+// que mide lo que se resignó SIN papel.
+//
+// Se guardan las dos cosas:
+//   · descuento_pct   — el porcentaje que se aplicó. Lo necesita la nota de crédito:
+//                       si se devuelve mercadería, el descuento vuelve en la misma
+//                       proporción o se estaría acreditando de más.
+//   · descuento_neto  — los pesos, ya hechos. El asiento los necesita para poder
+//                       acreditar Ventas por el neto ENTERO y medir el descuento
+//                       en su propia cuenta, que es lo que Pablo pidió configurar.
+//
+// Y en el renglón, es_descuento: para no imprimirlo como si fueran «1 kg» de algo,
+// y para que la nota de crédito no lo ofrezca como mercadería a devolver.
+try {
+  const addCol = (tabla, col, tipo) => {
+    const cols = db.prepare(`PRAGMA table_info(${tabla})`).all().map((c) => c.name);
+    if (!cols.includes(col)) { db.exec(`ALTER TABLE ${tabla} ADD COLUMN ${col} ${tipo}`); return true; }
+    return false;
+  };
+  const puestas = [];
+  if (addCol('sg_ven_facturas', 'descuento_pct', 'REAL')) puestas.push('descuento_pct');
+  if (addCol('sg_ven_facturas', 'descuento_neto', 'REAL NOT NULL DEFAULT 0')) puestas.push('descuento_neto');
+  if (addCol('sg_ven_factura_items', 'es_descuento', 'INTEGER NOT NULL DEFAULT 0')) puestas.push('items.es_descuento');
+  if (puestas.length) console.log('[SG] descuento de cadena migrado (+' + puestas.join(', +') + ')');
+} catch (e) { console.error('[SG] descuento de cadena migracion:', e.message); }
 
 export default db;

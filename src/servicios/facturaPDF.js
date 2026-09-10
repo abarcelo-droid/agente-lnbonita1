@@ -191,9 +191,13 @@ export async function generarFacturaPDF(factura) {
     // SIEMPRE es el subtotal almacenado (kg×precio_kg) → totales idénticos a la versión kg.
     const kpb = (it.kg_por_bulto != null && Number(it.kg_por_bulto) > 0) ? Number(it.kg_por_bulto) : null;
     const enBulto = kpb != null && it.bultos != null;
-    const cantTxt = enBulto ? String(Number(it.bultos)) : String(Number(it.cantidad) || 0);
-    const uMed = enBulto ? (it.unidad || 'cajón') : 'kg';
-    const pUnit = enBulto ? money(it.precio_por_bulto) : money(it.precio_unitario);
+    // EL DESCUENTO DE LA CADENA ES UN IMPORTE, NO UNA MEDIDA. Sin esto salía
+    // impreso «Descuento acordado 5% · 1 · kg · -$12.345», y «1 kg de descuento»
+    // es exactamente el renglón que el cliente llama para discutir.
+    const esDesc = !!it.es_descuento;
+    const cantTxt = esDesc ? '' : (enBulto ? String(Number(it.bultos)) : String(Number(it.cantidad) || 0));
+    const uMed = esDesc ? '' : (enBulto ? (it.unidad || 'cajón') : 'kg');
+    const pUnit = esDesc ? '' : (enBulto ? money(it.precio_por_bulto) : money(it.precio_unitario));
     // EL KILAJE DEL CAJÓN, LEGIBLE. Desde que el kg por bulto es el EFECTIVO
     // (kg pesados ÷ cajones contados), casi nunca da redondo: un lote de 64
     // cajones que pesó 1.187 kg da 18,546875, y el renglón de un comprobante
@@ -217,7 +221,7 @@ export async function generarFacturaPDF(factura) {
       desc,
       cantTxt,
       uMed,
-      money(conIva(enBulto ? it.precio_por_bulto : it.precio_unitario)),
+      esDesc ? '' : money(conIva(enBulto ? it.precio_por_bulto : it.precio_unitario)),
       money(conIva(sub))
     ];
     if (y > 250) { doc.addPage(); y = 16; }

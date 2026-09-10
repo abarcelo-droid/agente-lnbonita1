@@ -191,7 +191,14 @@ test('el renglón del comprobante guarda de qué remito salió', () => {
   // qué remito devolvérselos; por posición andaba de casualidad.
   assert.match(EMISION, /_alter\('sg_ven_factura_items', 'despacho_item_id'/);
   assert.match(EMISION, /_alter\('sg_ven_factura_items', 'nc_de_item_id'/);
-  assert.match(EMISION, /despacho_item_id, nc_de_item_id, nc_modo\)/, 'y se escriben al emitir');
+  // Y SE ESCRIBEN AL EMITIR. Se mira la lista de columnas del INSERT, no el
+  // paréntesis que la cierra: agregar una columna más al final —es_descuento, en
+  // V1038— rompía este assert sin que la atadura tuviera nada de malo.
+  const ins = EMISION.slice(EMISION.indexOf('INSERT INTO sg_ven_factura_items'));
+  const cols = ins.slice(0, ins.indexOf('VALUES'));
+  for (const c of ['despacho_item_id', 'nc_de_item_id', 'nc_modo']) {
+    assert.ok(cols.includes(c), 'el INSERT del renglón no escribe ' + c);
+  }
 });
 
 test('el IVA de la nota sale del que ESE renglón le puso a la factura', () => {
