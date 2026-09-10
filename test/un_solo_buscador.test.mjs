@@ -208,6 +208,65 @@ test('al montarlo el foco pasa al input, o no se puede escribir', () => {
   assert.match(b, /inp\.focus\(\)/);
 });
 
+// ══════════════════════════════════════════════════════════════════════════
+// 4 · Y EL MANUAL LO DICE — EN LOS DOCE, ESCRITO UNA VEZ
+// ══════════════════════════════════════════════════════════════════════════
+
+test('el bloque común se le pega a CUALQUIER manual, no a doce a mano', () => {
+  // La regla dice que si se toca una pantalla se actualiza su «¿Cómo se usa?».
+  // Acá se tocaron TODAS: no hay una pantalla dueña de este cambio. Copiarlo doce
+  // veces es la misma trampa que arreglar 47 llamadas — el manual trece que
+  // alguien escriba mañana no lo tendría.
+  assert.match(PANEL, /var SG_MANUAL_COMUN =/);
+  const f = trozo(PANEL, 'function sgManualHtml(m){', '\r\n}');
+  assert.match(f, /\+ SG_MANUAL_COMUN/);
+
+  // Y no quedó ningún manual pintándose sin él: si alguno siguiera usando m.html
+  // directo, esa pantalla sería la única sin la explicación.
+  assert.ok(!/innerHTML = m\.html/.test(PANEL), 'quedó un manual sin el bloque común');
+  assert.ok(!/cuerpo\.innerHTML = m\.html/.test(PANEL));
+  assert.equal((PANEL.match(/= sgManualHtml\(m\);/g) || []).length, 3,
+    'son tres lugares que pintan el cuerpo: abrir, buscar con poco, buscar');
+});
+
+test('lo busca la lupa igual que el resto del manual', () => {
+  // sgManualBuscar repinta el cuerpo antes de resaltar. Si ahí usara m.html, el
+  // bloque común desaparecería al escribir en la lupa: buscar «tilde» contestaría
+  // que no hay nada sobre tildes, con la explicación de las tildes ahí abajo.
+  const f = trozo(PANEL, 'function sgManualBuscar(q){', '\r\n  cuerpo.innerHTML = sgManualHtml(m);');
+  assert.match(f, /if \(t\.length < 2\)[\s\S]*sgManualHtml\(m\)/);
+});
+
+test('y dice lo que el buscador hace de verdad, con su versión', () => {
+  // No alcanza con que el texto exista: tiene que afirmar lo mismo que el código.
+  const b = trozo(PANEL, 'var SG_MANUAL_COMUN =', "todo lo cargado.</p>';");
+  assert.match(b, /<span class="ver">V1037<\/span>/);
+
+  // «No hace falta poner tildes» — y el buscador lo cumple.
+  assert.match(b, /No hace falta poner tildes/);
+  const m1 = montar(PADRON);
+  assert.deepEqual(m1.escribir('comision'), ['— Elegir —', 'Comisión de venta']);
+
+  // «Pero la ñ sí distingue».
+  assert.match(b, /la ñ sí distingue/);
+  assert.deepEqual(m1.escribir('munoz'), ['— Elegir —', 'Munoz SA']);
+
+  // «Varias palabras en cualquier orden».
+  assert.match(b, /en cualquier orden/);
+  assert.deepEqual(m1.escribir('galicia banco'), ['— Elegir —', 'Banco Galicia']);
+
+  // «Las listas cortas no lo traen» — y el umbral está puesto.
+  assert.match(b, /Las listas <b>cortas<\/b> no lo traen/);
+  assert.match(PANEL, /var SG_BUSCADOR_DESDE = 12;/);
+});
+
+test('el corte se ve: de ahí para abajo no habla de esta pantalla', () => {
+  // Leído corrido, el operador creería que «salir de una ventana» es de la
+  // pantalla que tenía abierta.
+  assert.match(PANEL, /<h3 class="mc">Vale en todo el panel<\/h3>/);
+  assert.match(PANEL, /#sg-manual-modal \.man h3\.mc\{/);
+});
+
 test('y si el select se repobló, la lista guardada se vuelve a leer', () => {
   // sgSelBuscable guarda las opciones UNA vez. Cambiar un filtro que repuebla el
   // select dejaba el buscador ofreciendo lo de antes.

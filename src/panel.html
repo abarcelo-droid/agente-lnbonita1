@@ -7847,6 +7847,11 @@ input[type=number]{-moz-appearance:textfield;appearance:textfield}
       #sg-manual-modal .man mark{background:#fde68a;color:inherit;border-radius:3px;padding:0 2px}
       #sg-manual-modal .man .apagado{opacity:.28}
       #sg-manual-modal .man li{margin-bottom:4px}
+      /* El bloque que vale en TODAS las pantallas se separa a ojo del manual del
+         módulo: si se lee corrido parece que habla de la pantalla que está abierta. */
+      #sg-manual-modal .man h3.mc{margin-top:30px;border-top:2px solid var(--bor);
+        border-bottom:0;padding-top:14px;padding-bottom:0;font-size:11.5px;
+        letter-spacing:.08em;text-transform:uppercase;color:var(--mut)}
     </style>
     <div class="mbd">
       <!-- ── LA LUPA ────────────────────────────────────────────────────
@@ -22319,12 +22324,50 @@ function mejReabrir(id){
 // que dice y le sale mal.
 var SG_MANUAL = {};
 
+// ── LO QUE VALE EN TODAS LAS PANTALLAS ────────────────────────────────────
+//
+// Se agrega al final de CUALQUIER manual, sin que cada uno tenga que acordarse.
+// Es para lo que no es de un módulo: cómo se busca en una lista, cómo se sale de
+// una ventana. Si mañana hay un manual nuevo, ya lo trae puesto.
+var SG_MANUAL_COMUN =
+  '<h3 class="mc">Vale en todo el panel</h3>'
+  + '<h3>🔎 Buscar en una lista desplegable <span class="ver">V1037</span></h3>'
+  + '<p>Cualquier lista larga —clientes, proveedores, productos, cuentas— <b>se '
+  + 'busca escribiendo</b>. Se hace clic en ella y aparece un casillero: lo que se '
+  + 'escriba deja sólo lo que <b>contiene</b> eso, en cualquier parte del nombre. '
+  + 'Buscar <i>galicia</i> encuentra «Banco Galicia» sin escribir «banco».</p>'
+  + '<ul>'
+  + '<li><b>No hace falta poner tildes.</b> <i>comision</i> encuentra «Comisión» y '
+  + '<i>nacion</i> encuentra «Banco Nación».</li>'
+  + '<li>Pero <b>la ñ sí distingue</b>: <i>muñoz</i> no trae «Munoz», que puede ser '
+  + 'otro proveedor.</li>'
+  + '<li>Se pueden poner <b>varias palabras en cualquier orden</b>: <i>galicia '
+  + 'banco</i> encuentra lo mismo que <i>banco galicia</i>.</li>'
+  + '<li>Si no queda nada, lo dice — no se queda en blanco haciendo creer que la '
+  + 'lista está vacía.</li>'
+  + '</ul>'
+  + '<p>Las listas <b>cortas</b> no lo traen: un «Sí / No» con un buscador arriba '
+  + 'es más trabajo, no menos.</p>'
+  + '<div class="ojo">Antes lo tenían <b>24 listas de 71</b>, y cada una buscaba '
+  + 'distinto: en unas las tildes importaban y en otras no. Ahora es <b>una sola '
+  + 'manera</b> en todo el panel, así que lo que se aprende en una pantalla sirve '
+  + 'en las demás.</div>'
+  + '<h3>🪟 Salir de una ventana</h3>'
+  + '<p>Una ventana de carga <b>no se cierra haciendo clic afuera</b>: se sale con '
+  + '<b>Cancelar</b>, con el botón de guardar, o con la <b>×</b>. Un clic al costado '
+  + 'es un accidente, y perdería todo lo cargado.</p>';
+
+// Lo que se muestra: el manual del módulo más lo que vale en todos.
+function sgManualHtml(m){
+  return String((m && m.html) || '') + SG_MANUAL_COMUN;
+}
+
 function sgManualAbrir(clave){
   var m = SG_MANUAL[clave];
   if (!m) { toast('Todavía no hay manual de esta pantalla', 'er'); return; }
   SG._manualClave = clave;
   eid('sg-manual-tit').textContent = '❓ ' + m.titulo;
-  eid('sg-manual-cuerpo').innerHTML = m.html;
+  eid('sg-manual-cuerpo').innerHTML = sgManualHtml(m);
   // Se abre limpio: la búsqueda de la vez pasada no tiene por qué seguir puesta.
   eid('sg-manual-q').value = '';
   eid('sg-manual-cuenta').textContent = '';
@@ -22351,11 +22394,11 @@ function sgManualBuscar(q){
   var cuenta = eid('sg-manual-cuenta');
 
   if (t.length < 2) {                       // con una letra sola pinta media pantalla
-    cuerpo.innerHTML = m.html;
+    cuerpo.innerHTML = sgManualHtml(m);
     if (cuenta) cuenta.textContent = '';
     return;
   }
-  cuerpo.innerHTML = m.html;
+  cuerpo.innerHTML = sgManualHtml(m);
 
   // ── SE BUSCA SOBRE EL TEXTO DEL BLOQUE, NO NODO POR NODO ─────────────
   //

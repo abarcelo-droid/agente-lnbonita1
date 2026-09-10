@@ -113,9 +113,21 @@ function buscador(clave) {
   const fnN = PANEL.slice(iN, PANEL.indexOf('\r\n}', iN) + 3);
   const iB = PANEL.indexOf('function sgManualBuscar(q){');
   const fnB = PANEL.slice(iB, PANEL.indexOf('\r\n}\r\n', iB) + 3);
+  // El bloque que vale en TODAS las pantallas y la función que se lo pega al
+  // manual del módulo. Van los DE VERDAD: la lupa tiene que buscar también ahí,
+  // o escribir en ella haría desaparecer media explicación.
+  const iC = PANEL.indexOf('var SG_MANUAL_COMUN =');
+  const fnC = PANEL.slice(iC,
+    PANEL.indexOf('\r\n}', PANEL.indexOf('function sgManualHtml(m){')) + 3);
 
   const cuenta = { textContent: '' };
-  let cuerpo = parsear(man.html);
+  // El cuerpo arranca como lo deja sgManualAbrir: el manual del módulo MÁS el
+  // bloque común. Si acá se pintara sólo man.html, buscar algo agrandaría el
+  // manual —el buscador repinta con los dos— y este harness diría que el
+  // resaltado se comió texto cuando en realidad lo agregó.
+  // eslint-disable-next-line no-new-func
+  const sgManualHtml = new Function(fnC + '\nreturn sgManualHtml;')();
+  let cuerpo = parsear(sgManualHtml(man));
   const doc = {
     createTextNode: (v) => new Texto(v),
     createElement: (t) => new Nodo(t.toUpperCase()),
@@ -129,7 +141,7 @@ function buscador(clave) {
   });
   // eslint-disable-next-line no-new-func
   const F = new Function('document', 'eid', 'SG', 'SG_MANUAL',
-    fnN + '\n' + fnB + '\nreturn sgManualBuscar;')(
+    fnN + '\n' + fnC + '\n' + fnB + '\nreturn sgManualBuscar;')(
     doc, eid, { _manualClave: clave }, { [clave]: man });
 
   return {

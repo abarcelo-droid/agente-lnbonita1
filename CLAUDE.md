@@ -96,6 +96,38 @@ y le da su altura a cualquier overlay que reciba `on`, lo abra quien lo abra.
 Tocar 113 lugares son 113 oportunidades de romper algo, y la 114ª que alguien
 escriba mañana volvería a quedar afuera.
 
+### UNA LISTA LARGA SE BUSCA ESCRIBIENDO
+
+Pablo, 9/9/2026: *«en clientes y proveedores, listas desplegables: veamos también
+el tema de CONTIENE para que sea más fácil buscar. Por favor revisá TODOS los
+menúes desplegables y mejoralo»*.
+
+**Ningún desplegable de padrón —clientes, proveedores, productos, cuentas,
+personas— se elige bajando la lista a ojo.** Eran 71 y 47 no tenían con qué
+buscar.
+
+Y de nuevo: **se arregla el mecanismo, no las 47 llamadas.** Un `focusin`
+delegado le monta `sgSelBuscable` a cualquier `<select>` de 12 opciones o más,
+lo escriba quien lo escriba. No hace falta configurarlo porque filtra las
+opciones que el select YA tiene. Se saltean los que ya traen uno propio
+(`_unico` de `sgBuscador`, `_buscable` de éste), los `multiple`, las listas
+cortas —un «Sí / No» con un buscador arriba es peor— y el que pida
+`data-sin-buscador`.
+
+**Y un solo normalizador: `sgNorm`.** Había cuatro y ninguno igual a otro: uno
+protegía la ñ, dos la convertían en n —«año» se volvía «ano»— y el de las
+opciones no sacaba acentos, así que «comision» no encontraba «Comisión». Sin
+acentos, **con la ñ intacta**: es una letra del idioma y tiene tecla propia; el
+acento pide una tecla muerta y por eso nadie lo escribe al buscar.
+
+Los `NFD` que quedan en `panel.html` **no son buscadores** —arman un nombre de
+usuario y una clave para cruzar bancos— y ahí la ñ sí tiene que caerse. Se
+reconocen porque además tiran todo lo que no sea `[a-z0-9]`.
+
+Lo audita `test/un_solo_buscador.test.mjs`, que monta el buscador sobre un select
+de mentira y **le escribe**: verifica qué opciones quedan, no que el código diga
+`sgNorm`.
+
 ### UN MODAL NO SE CIERRA AL CLIC AFUERA
 
 Pablo, 6/9/2026: *«si hago click fuera de esa ventana se cierra... y pierdo toda
@@ -309,6 +341,14 @@ correspondiente. Si no nos perdemos»*.
    molde — cada afirmación («el precio de un remito facturado queda con candado»,
    «lo devuelto no se factura») tiene al lado su assert contra `rutas/sg.js`. Se
    verificó mutando el CÓDIGO: siete cambios en el backend, siete rojos en el manual.
+
+3. **Y si el cambio no es de ninguna pantalla, va en `SG_MANUAL_COMUN` (V1037).**
+   Un bloque que `sgManualHtml()` le pega al final a CUALQUIER manual: ahí vive lo
+   que vale en todo el panel —cómo se busca en una lista, cómo se sale de una
+   ventana—. Copiar el mismo párrafo en los doce es la misma trampa que arreglar
+   47 llamadas: el manual trece que alguien escriba mañana no lo tendría, y
+   corregir una redacción serían doce ediciones. Se separa a ojo con `h3.mc`,
+   porque leído corrido parece que habla de la pantalla que está abierta.
 
 Al 8/9/2026 quedan **18 de 23 pantallas de SG sin manual**. Las que tienen: Ingresos,
 Órdenes de Compra, Stock, Gastos Directos, Asiento Modelo, Reprocesos y Remitos y
