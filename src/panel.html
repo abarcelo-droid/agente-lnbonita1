@@ -7847,6 +7847,11 @@ input[type=number]{-moz-appearance:textfield;appearance:textfield}
       #sg-manual-modal .man mark{background:#fde68a;color:inherit;border-radius:3px;padding:0 2px}
       #sg-manual-modal .man .apagado{opacity:.28}
       #sg-manual-modal .man li{margin-bottom:4px}
+      /* El bloque que vale en TODAS las pantallas se separa a ojo del manual del
+         módulo: si se lee corrido parece que habla de la pantalla que está abierta. */
+      #sg-manual-modal .man h3.mc{margin-top:30px;border-top:2px solid var(--bor);
+        border-bottom:0;padding-top:14px;padding-bottom:0;font-size:11.5px;
+        letter-spacing:.08em;text-transform:uppercase;color:var(--mut)}
     </style>
     <div class="mbd">
       <!-- ── LA LUPA ────────────────────────────────────────────────────
@@ -8880,12 +8885,16 @@ function sgSelBuscable(sel, placeholder){
   sgSelGuardarOpciones(sel);
 
   var filtrar = function(){
-    var q = inp.value.trim().toLowerCase();
+    // SIN ACENTOS, como el resto del panel. Acá se comparaba con toLowerCase() a
+    // secas: «comision» no encontraba «Comisión» y «Nacion» no encontraba
+    // «Banco Nación». En un teclado español el acento pide una tecla muerta, así
+    // que nadie lo escribe al buscar.
+    var q = sgNorm(inp.value.trim());
     var elegido = sel.value;
     var partes = q.split(/\s+/).filter(Boolean);
     var visibles = (sel._todas || []).filter(function(o){
       if (!o.value) return true;                       // el "— Sin asignar —" no se filtra
-      var t = (o.text || '').toLowerCase();
+      var t = sgNorm(o.text || '');
       // Todas las palabras tienen que estar, en cualquier orden: "galicia banco"
       // encuentra "BANCO GALICIA" igual que "banco galicia".
       return partes.every(function(p){ return t.indexOf(p) >= 0; });
@@ -8896,13 +8905,75 @@ function sgSelBuscable(sel, placeholder){
     // Si lo que estaba elegido sobrevive al filtro, se mantiene.
     if (elegido && visibles.some(function(o){ return o.value === elegido; })) sel.value = elegido;
     if (!visibles.some(function(o){ return o.value; }) && q) {
-      sel.innerHTML = '<option value="">(no hay ningún rubro que diga "' + escH(q) + '")</option>';
+      sel.innerHTML = '<option value="">(no hay nada que diga "' + escH(inp.value.trim()) + '")</option>';
     }
   };
   inp.oninput = filtrar;
   // Enter no manda el formulario: abre la lista con lo filtrado.
   inp.onkeydown = function(e){ if (e.key === 'Enter') { e.preventDefault(); sel.focus(); } };
 }
+
+// ══ NINGUNA LISTA LARGA SE QUEDA SIN BUSCADOR ═══════════════════════════
+//
+// Pablo, 9/9/2026: «revisá TODOS los menúes desplegables y mejoralo para que las
+// herramientas de búsqueda sean más fáciles».
+//
+// Se contaron: 71 desplegables eligen de un padrón —clientes, proveedores,
+// productos, cuentas, personas— y 47 no tenían con qué buscar. Había que bajar
+// la lista a ojo, que con 300 proveedores es inservible.
+//
+// SE ARREGLA EL MECANISMO, NO LAS 47 LLAMADAS. Es la misma decisión que se tomó
+// con la altura de las ventanas: tocar 47 lugares son 47 oportunidades de romper
+// algo, y el 48º que alguien escriba mañana volvería a quedar afuera.
+//
+// Al pararse en un desplegable largo se le monta el buscador, una sola vez. No
+// necesita configuración porque filtra las OPCIONES QUE EL SELECT YA TIENE: sirva
+// para lo que sirva ese select, y sin saber de dónde salieron.
+//
+// Se saltea:
+//   · los que ya tienen uno propio —sgBuscador deja _unico, éste deja _buscable—,
+//     que son los 24 con dato extra: «3 sin facturar · $1.234.567».
+//   · los de pocas opciones: un «Sí / No» con un buscador arriba es peor.
+//   · los múltiples, y los que pidan quedarse afuera con data-sin-buscador.
+var SG_BUSCADOR_DESDE = 12;   // a partir de cuántas opciones vale la pena
+
+function sgBuscadorAuto(sel){
+  if (!sel || sel.tagName !== 'SELECT') return;
+  if (sel._unico || sel._buscable || sel.multiple) return;
+  if (sel.hasAttribute('data-sin-buscador')) return;
+  if (sel.options.length < SG_BUSCADOR_DESDE) return;
+  sgSelBuscable(sel);
+}
+
+(function(){
+  if (typeof document === 'undefined' || !document.addEventListener) return;
+  document.addEventListener('focusin', function(ev){
+    var t = ev.target;
+    if (!t || t.tagName !== 'SELECT') return;
+    // AL MONTARLO SE LE PASA EL FOCO AL INPUT, o el operador se queda escribiendo
+    // adentro del select y no pasa nada.
+    if (sel_montar(t)) {
+      var inp = t.parentNode && t.parentNode.querySelector('input');
+      if (inp) try { inp.focus(); } catch (_) {}
+    }
+  }, true);
+
+  // Y si el select se repobló después de montado, la lista guardada quedó vieja:
+  // se vuelve a leer mientras no haya nada escrito. Sin esto, cambiar un filtro
+  // dejaba el buscador ofreciendo lo de antes.
+  function sel_montar(t){
+    var antes = t._buscable;
+    sgBuscadorAuto(t);
+    if (!antes && t._buscable) return true;
+    if (t._buscable) {
+      var inp = t.parentNode && t.parentNode.querySelector('input');
+      if (inp && !inp.value.trim() && t.options.length !== (t._todas || []).length) {
+        sgSelGuardarOpciones(t);
+      }
+    }
+    return false;
+  }
+})();
 
 function sgSelGuardarOpciones(sel){
   if (typeof sel === 'string') sel = eid(sel);
@@ -11286,11 +11357,9 @@ function sgCbChequeAnular(id, nro){
 // nadie escribe "Comisión" con tilde cuando está buscando.
 var SG_BC = {};
 
-function sgBcNorm(s){
-  return String(s == null ? '' : s).toLowerCase()
-    .replace(/[áàä]/g, 'a').replace(/[éèë]/g, 'e').replace(/[íìï]/g, 'i')
-    .replace(/[óòö]/g, 'o').replace(/[úùü]/g, 'u').replace(/ñ/g, 'n');
-}
+// El tercero. Reemplazaba vocal por vocal —así que se perdía cualquier acento
+// que no estuviera en la lista— y convertía la ñ en n. Mismo destino que ppNorm.
+function sgBcNorm(s){ return sgNorm(s); }
 
 // De dónde saca las cuentas cada buscador. Un solo lugar: si mañana hay otro
 // campo de rubro, se agrega acá y no se copia la función.
@@ -22255,12 +22324,50 @@ function mejReabrir(id){
 // que dice y le sale mal.
 var SG_MANUAL = {};
 
+// ── LO QUE VALE EN TODAS LAS PANTALLAS ────────────────────────────────────
+//
+// Se agrega al final de CUALQUIER manual, sin que cada uno tenga que acordarse.
+// Es para lo que no es de un módulo: cómo se busca en una lista, cómo se sale de
+// una ventana. Si mañana hay un manual nuevo, ya lo trae puesto.
+var SG_MANUAL_COMUN =
+  '<h3 class="mc">Vale en todo el panel</h3>'
+  + '<h3>🔎 Buscar en una lista desplegable <span class="ver">V1037</span></h3>'
+  + '<p>Cualquier lista larga —clientes, proveedores, productos, cuentas— <b>se '
+  + 'busca escribiendo</b>. Se hace clic en ella y aparece un casillero: lo que se '
+  + 'escriba deja sólo lo que <b>contiene</b> eso, en cualquier parte del nombre. '
+  + 'Buscar <i>galicia</i> encuentra «Banco Galicia» sin escribir «banco».</p>'
+  + '<ul>'
+  + '<li><b>No hace falta poner tildes.</b> <i>comision</i> encuentra «Comisión» y '
+  + '<i>nacion</i> encuentra «Banco Nación».</li>'
+  + '<li>Pero <b>la ñ sí distingue</b>: <i>muñoz</i> no trae «Munoz», que puede ser '
+  + 'otro proveedor.</li>'
+  + '<li>Se pueden poner <b>varias palabras en cualquier orden</b>: <i>galicia '
+  + 'banco</i> encuentra lo mismo que <i>banco galicia</i>.</li>'
+  + '<li>Si no queda nada, lo dice — no se queda en blanco haciendo creer que la '
+  + 'lista está vacía.</li>'
+  + '</ul>'
+  + '<p>Las listas <b>cortas</b> no lo traen: un «Sí / No» con un buscador arriba '
+  + 'es más trabajo, no menos.</p>'
+  + '<div class="ojo">Antes lo tenían <b>24 listas de 71</b>, y cada una buscaba '
+  + 'distinto: en unas las tildes importaban y en otras no. Ahora es <b>una sola '
+  + 'manera</b> en todo el panel, así que lo que se aprende en una pantalla sirve '
+  + 'en las demás.</div>'
+  + '<h3>🪟 Salir de una ventana</h3>'
+  + '<p>Una ventana de carga <b>no se cierra haciendo clic afuera</b>: se sale con '
+  + '<b>Cancelar</b>, con el botón de guardar, o con la <b>×</b>. Un clic al costado '
+  + 'es un accidente, y perdería todo lo cargado.</p>';
+
+// Lo que se muestra: el manual del módulo más lo que vale en todos.
+function sgManualHtml(m){
+  return String((m && m.html) || '') + SG_MANUAL_COMUN;
+}
+
 function sgManualAbrir(clave){
   var m = SG_MANUAL[clave];
   if (!m) { toast('Todavía no hay manual de esta pantalla', 'er'); return; }
   SG._manualClave = clave;
   eid('sg-manual-tit').textContent = '❓ ' + m.titulo;
-  eid('sg-manual-cuerpo').innerHTML = m.html;
+  eid('sg-manual-cuerpo').innerHTML = sgManualHtml(m);
   // Se abre limpio: la búsqueda de la vez pasada no tiene por qué seguir puesta.
   eid('sg-manual-q').value = '';
   eid('sg-manual-cuenta').textContent = '';
@@ -22287,11 +22394,11 @@ function sgManualBuscar(q){
   var cuenta = eid('sg-manual-cuenta');
 
   if (t.length < 2) {                       // con una letra sola pinta media pantalla
-    cuerpo.innerHTML = m.html;
+    cuerpo.innerHTML = sgManualHtml(m);
     if (cuenta) cuenta.textContent = '';
     return;
   }
-  cuerpo.innerHTML = m.html;
+  cuerpo.innerHTML = sgManualHtml(m);
 
   // ── SE BUSCA SOBRE EL TEXTO DEL BLOQUE, NO NODO POR NODO ─────────────
   //
@@ -54060,7 +54167,13 @@ function ppAsistDefaults() {
 }
 
 // Normaliza para búsqueda/filtro: minúsculas + sin acentos.
-function ppAsistNorm(s){ return (s==null?'':String(s)).toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,''); }
+// El cuarto normalizador de BÚSQUEDA. Mismo destino que ppNorm y sgBcNorm: uno
+// solo, o la misma palabra encuentra distinto según la pantalla.
+//
+// Los otros dos NFD que quedan en el archivo no son buscadores: uno arma un
+// nombre de usuario y el otro una clave para cruzar bancos, y ahí la ñ SÍ tiene
+// que caerse — un usuario «muñoz» no puede escribirse con ñ.
+function ppAsistNorm(s){ return sgNorm(s); }
 // Texto de la columna Persona/Cuadrilla (para buscar/ordenar).
 function ppAsistPersonaTxt(a){ return a.personal_id ? (a.personal_nombre||'') : (a.contratista_nombre||'Cuadrilla'); }
 function ppAsistRubroTxt(a){ return (a.rubro_codigo?a.rubro_codigo+' ':'')+(a.rubro_nombre||''); }
@@ -54331,7 +54444,12 @@ function ppAsistGrupoChange() {
 }
 
 // Normaliza texto para búsqueda: minúsculas + sin acentos.
-function ppNorm(s) { return String(s||'').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, ''); }
+// UN SOLO NORMALIZADOR. Éste sacaba los acentos y se llevaba la ñ puesta —«año»
+// se volvía «ano»— así que buscar una persona con ñ en el nombre encontraba
+// cosas que no eran. sgNorm hace lo mismo pero protege la ñ, que es una letra
+// del idioma y no una n con algo encima. Se deja el nombre viejo porque lo usan
+// tres pantallas: lo que cambia es qué hace, no cómo se llama.
+function ppNorm(s) { return sgNorm(s); }
 
 // Buscador de la lista grupal: filtra SOLO la visualización (oculta filas que no matchean
 // por nombre), NO destilda. "Seleccionar todos" y el contador siguen operando sobre la
