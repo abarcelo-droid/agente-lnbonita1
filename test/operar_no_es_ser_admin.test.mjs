@@ -165,6 +165,12 @@ test('quedan menos de 62 escrituras pidiendo admin', () => {
   // Y a 62 el 8/9/2026, por la misma razón: PUT /ventas/modelo-cobranza elige
   // contra qué cuenta corriente se cancelan TODOS los cobros. Registrar un cobro
   // sigue siendo requireAuth — de hecho este cambio es el que lo destraba.
+  //
+  // Y a 63 el 10/9/2026: PUT /contable/modelos/cobranza escribe las CUATRO cuentas
+  // con las que entra al libro todo lo que se cobra. Es la misma parametrización que
+  // el de arriba, con más detalle. Y no podía ser requireAuth: sin prefijo declarado
+  // exigirNivel deja pasar, y con prefijo el nivel no alcanza — quien escribe las
+  // cuentas del libro decide contra qué rubro entra la plata de la empresa.
   const n = escrituras().filter((e) => e.guarda === 'requireAdmin').length;
-  assert.ok(n <= 62, 'subió a ' + n + ': revisá si alguno es trabajo del día');
+  assert.ok(n <= 63, 'subió a ' + n + ': revisá si alguno es trabajo del día');
 });

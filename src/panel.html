@@ -7823,7 +7823,7 @@ input[type=number]{-moz-appearance:textfield;appearance:textfield}
 <!-- ══ ⚙️ EL ASIENTO MODELO DE LAS DESCARGAS ═══════════════════════════
      Lo que antes ocupaba el encabezado. Se abre desde el botón, se toca una vez
      y se cierra. Va al nivel de arriba, con los demás modales. -->
-<!-- ══ ⚙️ EL ASIENTO MODELO — UN MODAL PARA LOS TRES CIRCUITOS ═══════════
+<!-- ══ ⚙️ EL ASIENTO MODELO — UN MODAL PARA LOS CINCO CIRCUITOS ═══════════
      Tres modales iguales serían tres lugares donde arreglar lo mismo, y el que
      se olvide queda distinto. El título, el texto y el cuerpo los pone
      sgModeloAbrir(clave) según de qué circuito se trate. -->
@@ -22644,6 +22644,11 @@ function sgManCampo(nombre, espera, liga, ver){
 // vivir en el manual de esta pantalla, que es donde se la vino a buscar. Que
 // esté sólo en un comentario del código no le sirve a nadie.
 SG_MANUAL.modelos = { titulo: 'Asiento Modelo', html:
+  '<div class="ojo"><b>El de cobranza tiene una segunda puerta</b> '
+  + '<span class="ver">V1039</span>: sus cuatro cuentas también se ponen desde <b>Cuenta '
+  + 'corriente de clientes → ⚙️ Asiento modelo</b>, que es donde se cobra. Es el <b>mismo</b> '
+  + 'modelo y las mismas líneas — se toque donde se toque, cambia en los dos lados.</div>'
+  + 
   '<p>Un <b>asiento modelo</b> es la FORMA de un asiento: qué cuentas se tocan y de '
   + 'qué lado. No lleva importes — esos los pone cada operación. Un modelo de factura '
   + 'de mercadería dice «el gasto al debe, el IVA al debe, el proveedor al haber», y '
@@ -23578,6 +23583,9 @@ SG_MANUAL.ccclientes = { titulo: 'Cuenta corriente de clientes', html:
   + '</ul>'
   + '<p>Antes de guardar se muestra el <b>asiento</b> que va a entrar al libro, con un renglón por '
   + 'cada medio y por cada mitad. Es el momento de frenar si algo no cierra.</p>'
+  + '<p><span class="ver">V1039</span> Si la caja elegida no tiene cuenta contable propia, el '
+  + 'cuadro muestra la del <b>asiento modelo</b> y lo aclara al lado del renglón. Antes decía que '
+  + 'faltaba algo y no dibujaba nada — para un cobro que el servidor tomaba igual.</p>'
 
   + '<h3>Contra qué cuenta se cancela <span class="ver">V1029</span></h3>'
   + '<p>Sale del <b>asiento modelo de cobranza</b>, con el botón <b>⚙️ Asiento modelo</b> de arriba. '
@@ -23588,6 +23596,33 @@ SG_MANUAL.ccclientes = { titulo: 'Cuenta corriente de clientes', html:
   + 'asiento no se puede armar. Por eso el aviso está arriba de todo.</div>'
   + '<p>Hasta la V1029 esto se pedía en la ficha de cada cliente, y el cobro de un cliente sin esa '
   + 'cuenta se rechazaba: se cargaba entero, se apretaba guardar y no entraba.</p>'
+  + '<p>Y hasta la <b>V1039</b> el botón sólo dejaba ELEGIR el modelo: las cuentas había que '
+  + 'cargarlas en otra pantalla. Ahora se ponen desde acá — ver abajo.</p>'
+
+  + '<h3>Un rubro distinto por cada medio de pago <span class="ver">V1039</span></h3>'
+  + '<p>Las cuentas se ponen <b>acá mismo</b>, con <b>⚙️ Asiento modelo</b>. Antes ese botón '
+  + 'sólo dejaba <b>elegir</b> un modelo de una lista, y para decir contra qué rubro va cada '
+  + 'medio había que irse a Contabilidad SG → Asiento Modelo a armarlo línea por línea.</p>'
+  + '<p>Son cuatro, y <b>no todas funcionan igual</b>:</p>'
+  + '<ul>'
+  + '<li><b>Clientes / Deudores</b> — contra qué se cancela la deuda. <b>Se usa siempre.</b> Es '
+  + 'la única obligatoria: sin ella el cobro no entra. Sólo la pisa el cliente que tenga una '
+  + 'cuenta corriente propia cargada en su ficha.</li>'
+  + '<li><b>Efectivo</b> y <b>Banco</b> — <b>son el piso</b>. Si la caja o la cuenta bancaria '
+  + 'que se elige al cobrar ya tiene su propia cuenta contable, <b>manda ésa</b>: cada banco es '
+  + 'una cuenta distinta del plan y no tendría sentido que todos cayeran en el mismo rubro. '
+  + 'Esto se usa para las que no la tienen — y la pantalla dice <b>cuántas son hoy</b>.</li>'
+  + '<li><b>Cheques en cartera</b> — dónde queda el cheque hasta que se deposita. Si se deja '
+  + 'vacía se usa la de Configuración impositiva.</li>'
+  + '</ul>'
+  + '<p>Se guardan <b>las cuatro juntas</b>, con el botón. La ventana <b>no se cierra</b>: '
+  + 'queda mostrando contra qué quedó configurado cada medio, que es lo que hay que leer.</p>'
+  + '<div class="ojo">Si todavía no había ningún asiento modelo de cobranza, <b>guardar las '
+  + 'cuentas lo crea y lo deja elegido</b> — no hay que ir a armarlo a otra pantalla. Y si ya '
+  + 'había uno, se le cambian esas cuatro líneas y <b>el resto del modelo queda intacto</b>.</div>'
+  + '<p>Lo que <b>no</b> se puede es usar el mismo modelo para dos circuitos: si el que está '
+  + 'elegido también se usa para la venta, la pantalla lo frena. Editarlo desde acá le metería '
+  + 'líneas de cobranza al modelo de venta y las ventas dejarían de contabilizarse.</p>'
 
   + '<h3>Lo que NO se puede cobrar</h3>'
   + '<ul>'
@@ -26031,6 +26066,118 @@ function sgModeloAbrir(k){
   if (!SG_MODELO_EST[k]) sgModeloCargar(k);
 }
 
+// ══ LAS CUATRO CUENTAS DE LA COBRANZA, EN LA PANTALLA DONDE SE COBRA ══════
+//
+// Pablo, 10/9/2026: «el asiento modelo de cobranzas... lo ideal sería configurarlo
+// desde el módulo de CC clientes, porque el asiento depende con qué nos pagan:
+// entonces en cada medio de pago necesito configurar un rubro distinto».
+//
+// El botón ⚙️ ya estaba en Cuenta corriente de clientes; lo que hacía era ELEGIR un
+// modelo de una lista. Para decir qué rubro va por cada medio había que irse a
+// Contabilidad SG → Asiento Modelo y marcar línea por línea. Ahora se elige acá.
+//
+// VA ADENTRO DE #sg-modelo-cuerpo, que es lo único que se reescribe entero en cada
+// pintada. Colgado del modal como hermano sobreviviría al cierre y aparecería al
+// abrir el circuito de descarga o el de flete — que es el bug de «un formulario que
+// sólo se esconde CONSERVA lo que tenía».
+//
+// LOS CUATRO RENGLONES SALEN DEL SERVIDOR (d.tipos), no de una lista escrita acá:
+// TIPOS_COBRANZA existe justamente para que el asiento, el editor y la pantalla
+// digan lo mismo, y una cuarta copia es la que un día queda distinta.
+function sgModeloCobranzaBloque(d){
+  if (!d) return '';
+  var tipos = d.tipos || [], plan = d.plan || [], det = d.cuentas_det || {};
+  if (!tipos.length) return '';
+  var opts = function(sel){
+    var h = '<option value="">— Sin elegir —</option>';
+    for (var i = 0; i < plan.length; i++) {
+      var c = plan[i];
+      h += '<option value="' + c.id + '"' + (String(c.id) === String(sel || '') ? ' selected' : '')
+         + '>' + escH(c.codigo + ' — ' + c.nombre) + '</option>';
+    }
+    return h;
+  };
+  var clave = function(t){ return t.tipo.replace('cobro_', ''); };
+  var sc = d.sin_contable || {};
+  var cuantas = (Number(sc.caja) || 0) + (Number(sc.banco) || 0);
+
+  var filas = tipos.map(function(t){
+    var k2 = clave(t), actual = det[k2] ? det[k2].id : '';
+    // LA DE CLIENTES FUNCIONA AL REVÉS QUE LAS OTRAS TRES y hay que decirlo acá:
+    // aquélla se usa SIEMPRE, éstas son el piso.
+    var pie = (t.tipo === 'cobro_clientes')
+      ? 'Se usa siempre. Sólo la pisa el cliente que tenga cuenta propia en su ficha.'
+      : (t.tipo === 'cobro_cheques'
+          ? 'Si la dejás vacía se usa la de Configuración impositiva.'
+          : 'Piso: manda la cuenta contable de la caja o el banco que se elija al cobrar.');
+    return '<div style="display:grid;grid-template-columns:170px minmax(0,1fr);gap:8px;'
+         + 'align-items:start;margin-bottom:9px">'
+      + '<div style="min-width:0">'
+        + '<div style="font-size:12.5px;font-weight:600">' + escH(t.label) + '</div>'
+        + '<div style="font-size:10.5px;color:var(--mut);text-transform:uppercase;'
+          + 'letter-spacing:.04em">' + escH(t.lado) + '</div>'
+      + '</div>'
+      + '<div style="min-width:0">'
+        + '<select id="sg-cobcta-' + escH(k2) + '" style="width:100%;padding:5px 7px;'
+          + 'border-radius:6px;border:1px solid var(--bor);background:var(--pan)">'
+          + opts(actual) + '</select>'
+        + '<div style="font-size:11px;color:var(--mut);margin-top:2px">' + escH(pie) + '</div>'
+      + '</div></div>';
+  }).join('');
+
+  return '<div style="margin-top:12px;border-top:1px solid var(--bor);padding-top:11px">'
+    + '<div style="font-weight:700;font-size:12.5px;margin-bottom:3px">'
+      + 'Contra qué rubro va cada medio de pago</div>'
+    + '<div style="font-size:11.5px;color:var(--mut);margin-bottom:10px">'
+      + 'Se guarda en el asiento modelo de arriba. No se configura cliente por cliente: '
+      + 'toda la deuda de clientes vive en el mismo rubro, el mismo que carga la venta.'
+      + (cuantas
+          ? ' <b>Hoy ' + cuantas + ' cuenta(s) de Caja y Bancos no tienen la suya</b>: en ésas '
+            + 'se usa lo que pongas acá.'
+          : '')
+    + '</div>'
+    + filas
+    + '<div style="display:flex;gap:9px;align-items:center;margin-top:10px">'
+      + '<button class="btn bb bs" id="sg-cobcta-btn" onclick="sgModeloCobranzaGuardar()">'
+        + 'Guardar las cuentas</button>'
+      + '<span id="sg-cobcta-msg" style="font-size:12px"></span>'
+    + '</div></div>';
+}
+
+// SE GUARDAN LAS CUATRO JUNTAS, con un botón. Con onchange se escribirían estados
+// intermedios inválidos —el primero rebotaría por faltar la de Clientes— y el
+// operador vería un error por algo que estaba a medio cargar.
+//
+// Y NO SE CIERRA EL MODAL al guardar: adentro queda lo que hay que leer, que es
+// contra qué quedó configurado cada medio.
+function sgModeloCobranzaGuardar(){
+  var d = SG_MODELO_EST.cobranza; if (!d) return;
+  var msg = eid('sg-cobcta-msg'), btn = eid('sg-cobcta-btn');
+  var cuentas = {};
+  (d.tipos || []).forEach(function(t){
+    var k2 = t.tipo.replace('cobro_', '');
+    var e = eid('sg-cobcta-' + k2);
+    cuentas[k2] = e && e.value ? Number(e.value) : null;
+  });
+  if (btn) { btn.disabled = true; btn.textContent = 'Guardando…'; }
+  if (msg) { msg.textContent = ''; msg.style.color = ''; }
+  api('/api/sg/contable/modelos/cobranza', 'PUT', { cuentas: cuentas }).then(function(r){
+    if (btn) { btn.disabled = false; btn.textContent = 'Guardar las cuentas'; }
+    if (!r || !r.ok) {
+      if (msg) { msg.style.color = 'var(--err)'; msg.textContent = (r && r.error) || 'No se pudo guardar'; }
+      return;
+    }
+    if (msg) { msg.style.color = 'var(--ok,#166534)'; msg.textContent = '✓ Guardado'; }
+    toast(r.data && r.data.creado ? 'Se creó el asiento modelo de cobranza y quedó elegido'
+                                  : 'Cuentas de la cobranza guardadas', 'ok');
+    sgModeloCargar('cobranza');
+    // Y SI HAY UN COBRO ABIERTO EN ESTE MOMENTO, su cuadro se armó con las cuentas
+    // viejas: se rehace, o se aprueba un asiento que no es el que se va a grabar.
+    if (eid('sg-cob-modal') && eid('sg-cob-modal').classList.contains('on')
+        && typeof sgCobAsientoPintar === 'function') sgCobAsientoPintar();
+  });
+}
+
 function sgModeloPintar(k){
   var box = eid('sg-modelo-cuerpo'); if (!box) return;
   var d = SG_MODELO_EST[k];
@@ -26061,7 +26208,11 @@ function sgModeloPintar(k){
       + (d.id_perdido ? ' (El que estaba elegido se dio de baja.)' : '')
       + '</div>'
       + (esAdmin ? sel
-                 : '<div style="font-size:12px;color:var(--mut)">Pedile a un administrador que lo configure.</div>');
+                 : '<div style="font-size:12px;color:var(--mut)">Pedile a un administrador que lo configure.</div>')
+      // TAMBIÉN ACÁ. Éste es el estado en que se entra a configurar por primera vez:
+      // si el bloque fuera sólo al final, no aparecería nunca justo cuando hace falta.
+      // Guardar desde acá crea el modelo y lo deja elegido de una.
+      + (esAdmin && k === 'cobranza' ? sgModeloCobranzaBloque(d) : '');
     return;
   }
 
@@ -26080,7 +26231,8 @@ function sgModeloPintar(k){
     // El cuadro debe/haber, plegado. Lo pliega sgAsientoPlegado desde adentro de
     // sgFmAsientoTabla —un solo clic—, que es la regla del repo: el asiento se
     // muestra siempre y lo abre quien puede leerlo.
-    + '<div style="margin-top:8px">' + sgFmAsientoTabla(m.lineas || []) + '</div>';
+    + '<div style="margin-top:8px">' + sgFmAsientoTabla(m.lineas || []) + '</div>'
+    + (esAdmin && k === 'cobranza' ? sgModeloCobranzaBloque(d) : '');
 }
 
 function sgModeloGuardar(k){
@@ -27946,8 +28098,15 @@ function sgCobAsientoPintar(){
   //
   // La del cliente sigue ganando si la tiene: hay clientes que se llevan su
   // propia cuenta corriente en el plan.
-  var cli = SG_COB.ctaCliente || (SG_MODELO_EST.cobranza
-    && SG_MODELO_EST.cobranza.cuentas && SG_MODELO_EST.cobranza.cuentas.clientes) || null;
+  // EL PISO VIENE CON CÓDIGO Y NOMBRE, no como un id pelado. Acá se leía
+  // `cuentas.clientes` —que es un número— y doce renglones más abajo se lo usaba
+  // como objeto: en el caso NORMAL, el cliente sin cuenta propia, el renglón del
+  // haber salía sin código ni nombre. Un cuadro con un renglón vacío no sirve para
+  // frenar nada, que es para lo único que está.
+  var cobEst = SG_MODELO_EST.cobranza || {};
+  var cli = SG_COB.ctaCliente
+    || (cobEst.cuentas_det && cobEst.cuentas_det.clientes)
+    || null;
   if (!cli) {
     cont.innerHTML = '<div style="font-size:12.5px;color:#9a3412">'
       + '⚠️ Todavía no se eligió contra qué cuenta corriente se cancelan los cobros. '
@@ -27980,10 +28139,31 @@ function sgCobAsientoPintar(){
     } else {
       cta = (SG_COB.cuentas || []).filter(function(x){ return String(x.id) === String(m.cuenta); })[0];
     }
-    if (!cta || !cta.cuenta_contable_id) {
-      falta = 'Elegí en cada renglón una cuenta con cuenta contable asignada: sin eso la '
-            + 'cobranza no entra al libro.';
+    if (!cta) {
+      falta = 'Elegí en cada renglón en qué cuenta entra la plata.';
       return;
+    }
+    // ── Y SI ESA CUENTA NO TRAE LA SUYA, SE CAE AL PISO ─────────────────
+    //
+    // Es lo que hace el servidor: la cuenta contable de la caja o el banco elegido
+    // MANDA, y cuando no la tiene usa la línea de Efectivo o la de Banco del asiento
+    // modelo. Acá se exigía la propia y se cortaba — así que configurar el piso no
+    // se notaba: la pantalla seguía negándose a dibujar un asiento que el servidor
+    // graba perfecto.
+    if (!cta.cuenta_contable_id) {
+      var piso = (m.forma === 'efectivo')
+        ? (cobEst.cuentas_det && cobEst.cuentas_det.efectivo)
+        : (cobEst.cuentas_det && cobEst.cuentas_det.banco);
+      if (!piso) {
+        falta = 'La cuenta "' + (cta.nombre || '') + '" no tiene cuenta contable propia, y el '
+              + 'asiento modelo de cobranza tampoco dice dónde entra '
+              + (m.forma === 'efectivo' ? 'el efectivo' : 'una transferencia') + '. '
+              + 'Se arregla en ⚙️ Asiento modelo, arriba.';
+        return;
+      }
+      cta = { cuenta_codigo: piso.codigo, cuenta_nombre: piso.nombre,
+              nombre: (cta.nombre || '') + ' (por el asiento modelo)',
+              cuenta_contable_id: piso.id };
     }
     // La mitad que cancela este renglón. Vacío es «lo que toque»: el reparto lo hace
     // el servidor contra los comprobantes, así que acá se dice eso y no un número

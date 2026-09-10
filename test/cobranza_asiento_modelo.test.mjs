@@ -309,10 +309,22 @@ test('el preview del asiento tampoco exige la cuenta del cliente', () => {
   // cuenta del rubro y la pantalla dice que no se puede, se frena una operación
   // que sí se podía hacer.
   const f = trozo(PANEL, 'function sgCobAsientoPintar(){', '\r\n}');
-  assert.match(f, /SG_COB\.ctaCliente \|\| \(SG_MODELO_EST\.cobranza/);
-  assert.match(f, /cuentas && SG_MODELO_EST\.cobranza\.cuentas\.clientes\)/);
+  assert.match(f, /SG_COB\.ctaCliente/);
+  // Y SE LEE CON CÓDIGO Y NOMBRE. Esto pinneaba `cuentas.clientes`, que es un id
+  // PELADO, y doce renglones más abajo se lo usaba como objeto (cli.codigo): en el
+  // caso normal —el cliente sin cuenta propia, que desde la V1029 son todos— el
+  // renglón del haber salía en blanco. El assert se endurece: tiene que salir de
+  // cuentas_det, que es la que trae el código y el nombre.
+  assert.match(f, /cobEst\.cuentas_det && cobEst\.cuentas_det\.clientes/);
   assert.ok(!/asignásela en su ficha de Maestros/.test(f),
     'sigue mandando a cargar una cuenta por cliente');
+  // Y TAMPOCO EXIGE QUE LA CAJA TRAIGA LA SUYA. El backend cae al piso del modelo
+  // (la línea de Efectivo o la de Banco) cuando la cuenta elegida no tiene cuenta
+  // contable; el front cortaba antes, así que configurar el piso no se notaba.
+  assert.match(f, /cuentas_det\.efectivo/);
+  assert.match(f, /cuentas_det\.banco/);
+  assert.ok(!/Elegí en cada renglón una cuenta con cuenta contable asignada/.test(f),
+    'el preview sigue frenando un cobro que el servidor toma');
 });
 
 test('y Facturar en el puesto hereda: cobra por la misma puerta', () => {
