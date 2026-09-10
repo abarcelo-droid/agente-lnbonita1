@@ -3652,6 +3652,23 @@ input[type=number]{-moz-appearance:textfield;appearance:textfield}
           <div>Producto</div><div>Lote</div><div style="text-align:right">kg pend.</div><div style="text-align:right">kg facturar</div><div style="text-align:right">$/kg</div><div style="text-align:right">%IVA</div><div></div>
         </div>
         <div id="sgf-lineas"></div>
+        <!-- ── EL DESCUENTO QUE SE LLEVA LA CADENA ────────────────────────
+             Pablo, 9/9/2026: «un botón que se llame Descuento super: que sea un
+             porcentaje de la venta, en la factura debe aparecer como un ítem más.
+             El operador debería seleccionar si lo aplica o no».
+             Apagado por defecto SIEMPRE, aunque el cliente tenga porcentaje: lo
+             que se propone es el número, no la decisión. -->
+        <div id="sgf-desc-box" style="margin-top:12px;border:1px solid var(--bor);border-radius:10px;
+             padding:10px 13px;background:var(--bg);display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+          <label style="font-size:12.5px;font-weight:600;cursor:pointer;display:flex;gap:6px;align-items:center">
+            <input type="checkbox" id="sgf-desc-on" onchange="sgFacDescToggle()"> 🏷️ Descuento super</label>
+          <span id="sgf-desc-campo" style="display:none;font-size:12px">
+            <input type="number" id="sgf-desc-pct" min="0" max="99.99" step="0.01"
+                   oninput="sgFacResumen()" style="width:80px;padding:4px 6px;text-align:right"> %
+            <span style="color:var(--mut)">de la venta · sale impreso como un renglón más</span>
+          </span>
+          <span id="sgf-desc-nota" style="font-size:11px;color:var(--mut)"></span>
+        </div>
         <div id="sgf-resumen" style="margin-top:12px;font-size:12.5px"></div>
         <!-- ¿CÓMO SE PAGA? También acá (Pablo, 27/8/2026: «en los dos lugares donde
              se emite»). Acá lo natural es cuenta corriente —se factura mercadería
@@ -8166,6 +8183,10 @@ var SG_SCHEMA = {
       {k:'condicion_pago_habitual_id', l:'Condición de pago habitual', t:'select', src:'cond'},
       {k:'modalidad_pedido', l:'Modalidad de pedido', t:'select', o:SG_MODPED, def:'mixto'},
       {k:'limite_credito', l:'Límite de crédito ($)', t:'number'},
+      // EL DESCUENTO QUE SE LE ACORDÓ A ESTA CADENA. No cambia de una factura a la
+      // otra, así que vive acá y la pantalla de facturar lo PROPONE — igual que la
+      // condición de pago. Tipearlo en cada comprobante es una cifra de más al mes.
+      {k:'descuento_pct', l:'Descuento acordado (%)', t:'number'},
       {k:'localidad', l:'Localidad', t:'text'},
       {k:'provincia', l:'Provincia', t:'text'},
       {k:'direccion_entrega', l:'Dirección de entrega', t:'text'},
@@ -20125,6 +20146,15 @@ function sgFacInit(){
   sgCliUnico('sgf-cli');
   eid('sgf-tipo-badge').innerHTML = '';
   eid('sgf-despachos').innerHTML = '<div style="font-size:12px;color:var(--mut)">Elegí un cliente para ver sus despachos facturables.</div>';
+  // El descuento arranca apagado y sin porcentaje: aplicarlo es una decisión de
+  // ESTE comprobante, no una que se hereda del anterior.
+  var dc = eid('sgf-desc-on'); if (dc) dc.checked = false;
+  var dp = eid('sgf-desc-pct'); if (dp) dp.value = '';
+  var dcp = eid('sgf-desc-campo'); if (dcp) dcp.style.display = 'none';
+  // Y si todavía no se sabe si hay cuenta donde medirlo, se pregunta. Esta ventana
+  // se abre desde «Remitos pendientes de comprobante», que no pasa por la solapa
+  // donde el circuito se carga: sin esto, el botón salía siempre apagado.
+  if (SG_MODELO_EST.venta === undefined) sgModeloCargar('venta'); else sgFacDescNota();
   sgFacRenderLineas();
 }
 
@@ -21223,15 +21253,90 @@ function sgFacPrecargar(clienteId, despachoId, numero){
   SG._facPreDesp=despachoId;                   // despacho a tildar cuando cargue /facturable
   sgFacCliente();                              // carga despachos del cliente y aplica la precarga
 }
+// ── EL DESCUENTO DE LA CADENA, EN LA PANTALLA ────────────────────────────
+//
+// Tres reglas, y las tres tienen su razón:
+//
+// 1. ARRANCA APAGADO, siempre. El porcentaje del cliente es una PROPUESTA; que se
+//    aplique es una decisión del que factura, que es lo que Pablo pidió. Un
+//    descuento que se aplica solo es un descuento que un día sale de más.
+// 2. Si el cliente no tiene porcentaje cargado, el casillero se puede prender
+//    igual y se tipea a mano: hay acuerdos de una sola vez.
+// 3. Y si el asiento modelo de venta NO tiene cuenta de descuentos, no se ofrece:
+//    sin ella el descuento no se puede medir y la emisión iba a rebotar al final,
+//    con todo cargado. Se dice acá, donde se puede ir a arreglarlo.
+function sgFacDescPropuesto(){
+  var cli = (SG.cacheCli || []).filter(function(c){
+    return String(c.id) === String((eid('sgf-cli') || {}).value); })[0] || {};
+  var p = Number(cli.descuento_pct);
+  return (p > 0 && p < 100) ? p : 0;
+}
+
+function sgFacDescHay(){
+  // La respuesta de /modelo-venta, que el circuito ya pide al entrar a la solapa.
+  var e = SG_MODELO_EST && SG_MODELO_EST.venta;
+  return !!(e && e.tiene_descuento);
+}
+
+// El estado del bloque: qué se propone, y por qué no se puede.
+function sgFacDescNota(){
+  var chk = eid('sgf-desc-on'), nota = eid('sgf-desc-nota');
+  if (!chk || !nota) return;
+  var hay = sgFacDescHay(), p = sgFacDescPropuesto();
+  chk.disabled = !hay;
+  if (!hay) {
+    // NO SE OFRECE UN BOTÓN QUE VA A REBOTAR. Es la misma regla que la del botón
+    // Anular: el que lo aprieta y recibe un error cree que rompió algo.
+    chk.checked = false;
+    var campo = eid('sgf-desc-campo'); if (campo) campo.style.display = 'none';
+    nota.innerHTML = '<span style="color:#9a3412">⚠️ Falta decir contra qué cuenta se '
+      + 'registran los descuentos: se marca en <b>Contabilidad SG → Asiento Modelo</b>, '
+      + 'en el modelo de venta, con la línea «Descuentos sobre ventas».</span>';
+    return;
+  }
+  nota.textContent = p > 0
+    ? 'Acordado con este cliente: ' + String(p).replace('.', ',') + '%'
+    : 'Este cliente no tiene descuento cargado en su ficha — poné el porcentaje a mano.';
+}
+
+function sgFacDescToggle(){
+  var chk = eid('sgf-desc-on'), campo = eid('sgf-desc-campo');
+  if (!chk || !campo) return;
+  campo.style.display = chk.checked ? '' : 'none';
+  var inp = eid('sgf-desc-pct');
+  if (chk.checked && inp && !String(inp.value || '').trim()) {
+    var p = sgFacDescPropuesto();
+    if (p > 0) inp.value = p;
+  }
+  sgFacResumen();
+}
+
+// Cuánto se descuenta, en pesos y por alícuota. ESPEJA lineasDeDescuento() del
+// backend: una línea por alícuota, sobre la base de esa alícuota. Con una sola
+// línea al 10,5% sobre un comprobante que tiene también 21%, el IVA que se le
+// devuelve al cliente no es el que le corresponde.
+function sgFacDescPct(){
+  var chk = eid('sgf-desc-on');
+  if (!chk || !chk.checked) return 0;
+  var p = Number((eid('sgf-desc-pct') || {}).value) || 0;
+  return (p > 0 && p < 100) ? p : 0;
+}
+
 function sgFacCliente(){
   var cid = eid('sgf-cli').value;
   SG.facSel = {}; SG.facLineas = []; SG.facData = null;
   sgFacConfirmLimpiar();
+  // El descuento se rearma con cada cliente: el porcentaje de la cadena anterior
+  // no tiene nada que ver con ésta, y quedaba puesto.
+  var chk = eid('sgf-desc-on'); if (chk) chk.checked = false;
+  var pct = eid('sgf-desc-pct'); if (pct) pct.value = '';
+  sgFacDescToggle();
   if (!cid){ eid('sgf-tipo-badge').innerHTML=''; eid('sgf-despachos').innerHTML='<div style="font-size:12px;color:var(--mut)">Elegí un cliente.</div>'; sgFacRenderLineas(); return; }
   eid('sgf-despachos').innerHTML = '<div style="font-size:12px;color:var(--mut)">Cargando…</div>';
   api('/api/sg/facturable?cliente_id='+cid).then(function(r){
     if(!r||!r.ok){ eid('sgf-despachos').innerHTML='<div style="color:var(--err)">'+esc((r&&r.error)||'Error')+'</div>'; return; }
     SG.facData = r;
+    sgFacDescNota();
     var letra = r.tipo_cbte_sugerido===1 ? 'A' : 'B';
     eid('sgf-tipo-badge').innerHTML = '<span class="bdg bcc">Comprobante '+letra+'</span>';
     sgFacRenderDespachos();
@@ -21326,6 +21431,30 @@ function sgFacResumen(){
     if(alic==null){ exento += ln_neto; }
     else { neto += ln_neto; ivaPorAlic[alic]=(ivaPorAlic[alic]||0)+ln_neto*alic/100; }
   });
+  // EL DESCUENTO, SOBRE LAS MISMAS BASES. Baja el neto de cada alícuota y baja su
+  // IVA en la misma proporción: es lo que hace el backend, y por eso el total que
+  // se ve acá es el que va a salir impreso.
+  //
+  // No toca `exento`: una línea sin alícuota no tiene base gravada que descontar,
+  // y de todas formas la emisión frena antes si hay alguna.
+  var dPct = sgFacDescPct(), dNeto = 0, dIva = 0;
+  if (dPct > 0) {
+    var netoPorAlic = {};
+    SG.facLineas.forEach(function(ln){
+      var kg=Number(ln.kg)||0, precio=Number(ln.precio)||0;
+      var incl = ln.incluye_iva_override===null ? gen : ln.incluye_iva_override;
+      var alic = ln.exento ? null : ln.alicuota;
+      if (alic==null) return;
+      var pn = incl ? precio/(1+alic/100) : precio;
+      netoPorAlic[alic] = (netoPorAlic[alic]||0) + pn*kg;
+    });
+    Object.keys(netoPorAlic).forEach(function(al){
+      var d = paRound2(netoPorAlic[al] * dPct / 100);
+      if (!(d > 0)) return;
+      dNeto += d; dIva += paRound2(d * Number(al) / 100);
+      neto -= d; ivaPorAlic[al] -= paRound2(d * Number(al) / 100);
+    });
+  }
   var iva = Object.keys(ivaPorAlic).reduce(function(a,k){return a+ivaPorAlic[k];},0);
   var total = neto + iva + exento;
   // ══ LO QUE FIGURA COMO "EXENTO" ACÁ ES, EN REALIDAD, SIN CARGAR ══════
@@ -21347,6 +21476,8 @@ function sgFacResumen(){
     +'<div><span class="bdg bcc">Comprobante '+letra+'</span> <span class="bdg bok">PV '+(eid('sgf-pv')?eid('sgf-pv').value:'7')+'</span></div>'
     +'<div style="text-align:right">'
       +'Neto gravado: <b>'+sgMoney(neto)+'</b>';
+  if(dNeto>0.001) h+=' · <span style="color:#9a3412">Descuento '+String(dPct).replace('.',',')
+    +'%: −'+sgMoney(dNeto)+'</span>';
   Object.keys(ivaPorAlic).map(Number).sort(function(a,b){return a-b;}).forEach(function(al){ h+=' · IVA '+String(al).replace('.',',')+'%: '+sgMoney(ivaPorAlic[al]); });
   if(exento>0.001) h+=' · Sin alícuota: '+sgMoney(exento);
   h+='<div style="font-size:15px;font-weight:700;margin-top:3px">Total: '+sgMoney(total)+'</div></div></div>';
@@ -21427,6 +21558,10 @@ function sgFacEmitir(){
   });
   var body = { cliente_id:Number(cid), punto_venta:Number(eid('sgf-pv').value), es_nc:false,
     precio_incluye_iva: !!(eid('sgf-incluye-iva') && eid('sgf-incluye-iva').checked),
+    // Viaja el PORCENTAJE, no los pesos: los pesos los hace el backend sobre las
+    // bases que él mismo calculó. Mandar el importe obligaría a decidir acá cómo
+    // se reparte entre dos alícuotas, y serían dos cuentas de lo mismo.
+    descuento_pct: sgFacDescPct(),
     vencimiento: SG._facVenc || null,
     condicion_pago_id: SG._facCondId || null,
     seleccion: Object.keys(porDesp).map(function(k){return porDesp[k];}) };
@@ -23541,7 +23676,11 @@ SG_MANUAL.catalogo = { titulo: 'Maestros', html:
   + 'cargas?</b> no habilita nada: <b>ordena</b> — pone al proveedor primero cuando hay que '
   + 'pagarle un flete.</li>'
   + '<li><b>🏪 Clientes</b> — con su categoría, su límite de crédito y su condición de pago '
-  + 'habitual, que es la que propone el vencimiento al facturar en cuenta corriente.</li>'
+  + 'habitual, que es la que propone el vencimiento al facturar en cuenta corriente. Y el '
+  + '<b>descuento acordado</b> <span class="ver">V1038</span>: el porcentaje que se lleva esa '
+  + 'cadena. Acá <b>no se aplica nada</b> — se guarda para que la pantalla de facturar lo '
+  + 'proponga, y el que factura decide si va. Sin esto habría que acordarse de que una cadena es '
+  + '3 y la otra 5, y tipearlo en cada comprobante.</li>'
   + '<li><b>💳 Condiciones de pago</b> — las cuotas: qué porcentaje a cuántos días. Los '
   + 'porcentajes tienen que sumar 100.</li>'
   + '</ul>'
@@ -23642,6 +23781,32 @@ SG_MANUAL.ventas = { titulo: 'Remitos y Facturación', html:
   + 'liquidación: se carga lo que ella dice y se cruza contra lo que se le entregó.</li>'
   + '</ul>'
 
+  + '<h3>🏷️ Descuento super <span class="ver">V1038</span></h3>'
+  + '<p>El porcentaje que se lleva la cadena. <b>Sale impreso en el comprobante como un '
+  + 'renglón más</b>, con su porcentaje escrito: baja el neto, baja el IVA y baja lo que el '
+  + 'cliente queda debiendo. No es una nota mental — es parte de la factura.</p>'
+  + '<ul>'
+  + '<li><b>Lo decide el que factura, comprobante por comprobante.</b> El casillero arranca '
+  + 'apagado siempre. Lo que se propone es el <b>número</b>, no la decisión.</li>'
+  + '<li><b>El número sale de la ficha del cliente</b> (Maestros → Clientes → «Descuento '
+  + 'acordado»). Si el cliente no tiene ninguno cargado, se tipea a mano: hay acuerdos de una '
+  + 'sola vez.</li>'
+  + '<li><b>Con dos alícuotas salen dos renglones</b>, uno por cada una. Es lo correcto: un '
+  + 'solo renglón le devolvería al cliente crédito fiscal que no le corresponde.</li>'
+  + '<li>El total de abajo <b>ya lo tiene descontado</b>: lo que se ve es lo que se emite.</li>'
+  + '</ul>'
+  + '<div class="ojo"><b>No es lo mismo que el descuento de gestión.</b> Aquél es lo que se '
+  + 'resigna <b>sin papel</b> —se factura menos de lo acordado y la diferencia se mide aparte—. '
+  + 'Éste está <b>en el comprobante</b>: ARCA lo ve, el cliente lo ve, y el crédito fiscal que '
+  + 'se toma es el de la factura descontada.</div>'
+  + '<p>Si el <b>asiento modelo de venta</b> no dice contra qué cuenta se registran los '
+  + 'descuentos, <b>el casillero no se puede prender</b> y la pantalla dice dónde arreglarlo. No '
+  + 'es un capricho: sin esa cuenta el descuento se escondería adentro de Ventas y a fin de mes '
+  + 'nadie podría contestar cuánto se llevaron las cadenas.</p>'
+  + '<p>Y si después se emite una <b>nota de crédito</b>, el descuento vuelve en la misma '
+  + 'proporción — automático. Acreditar el 100% de lo que vuelve sería devolverle al cliente '
+  + 'más de lo que pagó.</p>'
+
   + '<h3>↩️ Devoluciones</h3>'
   + '<p>Se elige el <b>remito</b> y, renglón por renglón, cuánto <b>vuelve ahora</b>. La pantalla '
   + 'muestra lo que salió y lo que ya había vuelto, así que no se puede devolver dos veces lo '
@@ -23672,6 +23837,15 @@ SG_MANUAL.ventas = { titulo: 'Remitos y Facturación', html:
   + '<div class="ojo">Si falta, <b>el comprobante sale igual</b> —la venta no se traba— pero '
   + '<b>no entra al libro</b>, y eso se descubre al cierre. Por eso el aviso aparece en la solapa '
   + 'sin necesidad de abrir nada.</div>'
+  + '<p>El modelo lleva tres líneas obligatorias —<b>Clientes / Deudores</b> al debe, '
+  + '<b>Ventas</b> al haber, y el <b>IVA Débito</b> que se agrega solo desde la Configuración '
+  + 'impositiva— y una cuarta <b>opcional</b>: <b>Descuentos sobre ventas</b> '
+  + '<span class="ver">V1038</span>. Ésa hace falta sólo para poder usar el Descuento super, y '
+  + 'una venta sin descuento se contabiliza perfecto sin ella.</p>'
+  + '<p>Con descuento, el asiento se abre: <b>Ventas se acredita por el neto entero</b> —lo de '
+  + 'lista— y el descuento se debita contra su cuenta. La deuda del cliente sigue siendo el '
+  + 'total del papel. Sin abrirlo, el asiento balancearía igual y el descuento no existiría en '
+  + 'ningún lado.</p>'
 
   + '<h3>Con qué otras pantallas se conecta</h3>'
   + '<ul>'
@@ -23690,6 +23864,9 @@ SG_MANUAL.ventas = { titulo: 'Remitos y Facturación', html:
   + 'pasó al botón <b>⚙️ Asiento modelo</b>.</li>'
   + '<li><b>V1026</b> — esta pantalla estrena su <b>¿Cómo se usa?</b>. Era la que más plata mueve '
   + 'del módulo y la única de las grandes sin manual.</li>'
+  + '<li><b>V1038</b> — <b>Descuento super</b>: el porcentaje que se lleva la cadena sale como un '
+  + 'renglón del comprobante, se propone desde la ficha del cliente, y se registra en su propia '
+  + 'cuenta contable.</li>'
   + '</ul>'
 };
 
@@ -25801,6 +25978,10 @@ function sgModeloCargar(k){
   api(c.ruta).then(function(r){
     SG_MODELO_EST[k] = (r && r.ok) ? r.data : null;
     sgModeloEstado(k);
+    // El bloque de Descuento super mira esta respuesta para saber si hay cuenta
+    // donde medirlo. Llega después de que la ventana se abrió, así que se repinta
+    // acá: si no, la primera vez siempre diría que falta.
+    if (k === 'venta') sgFacDescNota();
     if (SG._modeloAbierto === k && eid('sg-modelo-modal').classList.contains('on')) sgModeloPintar(k);
   });
 }
@@ -46185,6 +46366,11 @@ function admModAgregarLinea(lado, cuentaId, desc, tipoLinea) {
     ['clientes',             'Clientes / Deudores (Debe) — ventas'],
     ['ventas',               'Ventas (Haber) — ventas'],
     ['descuento',            'Descuentos comerciales — ventas, gestión'],
+    // Y EL DESCUENTO QUE SE LLEVA LA CADENA, que NO es el de arriba. Aquél mide lo
+    // resignado SIN papel; éste sale impreso en el comprobante, baja el IVA y baja
+    // lo que el cliente debe. Una sola cuenta para los dos mezclaría un descuento
+    // documentado con una medición interna, y no habría forma de separarlos.
+    ['descuento_super',      'Descuentos sobre ventas (Debe) — descuento de cadena'],
     // LOS TIPOS DE COBRANZA. Pablo, 8/9/2026: «definir un asiento modelo para la
     // cobranza y seleccionar qué rubros registra cuando seleccionamos efectivo,
     // banco o cheques». Son los de la CONTRACARA de la venta: el cliente deja de
@@ -74882,6 +75068,11 @@ function sgctModAgregarLinea(lado, cuentaId, desc, tipoLinea) {
     ['clientes',             'Clientes / Deudores (Debe) — ventas'],
     ['ventas',               'Ventas (Haber) — ventas'],
     ['descuento',            'Descuentos comerciales — ventas, gestión'],
+    // Y EL DESCUENTO QUE SE LLEVA LA CADENA, que NO es el de arriba. Aquél mide lo
+    // resignado SIN papel; éste sale impreso en el comprobante, baja el IVA y baja
+    // lo que el cliente debe. Una sola cuenta para los dos mezclaría un descuento
+    // documentado con una medición interna, y no habría forma de separarlos.
+    ['descuento_super',      'Descuentos sobre ventas (Debe) — descuento de cadena'],
     // LOS TIPOS DE COBRANZA. Pablo, 8/9/2026: «definir un asiento modelo para la
     // cobranza y seleccionar qué rubros registra cuando seleccionamos efectivo,
     // banco o cheques». Son los de la CONTRACARA de la venta: el cliente deja de

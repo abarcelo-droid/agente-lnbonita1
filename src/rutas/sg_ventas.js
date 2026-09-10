@@ -665,7 +665,16 @@ router.get('/modelo-venta', requireAuth, (req, res) => {
     }
     const cab = db.prepare('SELECT * FROM sg_asientos_modelo WHERE id=?').get(m.id);
     cab.lineas = m.lineas;
-    res.json({ ok: true, data: { modelo: cab, faltan: modeloVentaFaltan(m.lineas), modelos } });
+    res.json({ ok: true, data: { modelo: cab, faltan: modeloVentaFaltan(m.lineas), modelos,
+      // ¿HAY CUENTA PARA EL DESCUENTO DE CADENA? No es un `falta`: una venta sin
+      // descuento se contabiliza perfecto sin ella, y ponerla en la lista de
+      // faltantes marcaría en rojo un modelo que está bien.
+      //
+      // Pero la pantalla que factura necesita saberlo ANTES: sin esta cuenta el
+      // descuento no se puede medir, así que el botón se ofrece apagado y con el
+      // motivo. Ofrecerlo y contestar 400 al emitir es hacerle cargar todo para
+      // rebotar al final.
+      tiene_descuento: m.lineas.some((l) => l.tipo_linea === 'descuento_super') ? 1 : 0 } });
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
@@ -731,6 +740,9 @@ router.post('/facturas/preview-asiento', requireAuth, (req, res) => {
       // El preview tiene que espejar lo que se graba, motivo incluido: si acá
       // dijera otro, el cuadro y el libro se leerían distinto.
       motivo: b.dif_motivo || b.motivo_gestion,
+      // Y el descuento de la cadena también, o el cuadro mostraría tres líneas y
+      // el libro guardaría cuatro — que es justo lo que el preview promete no hacer.
+      descuentoFiscal: r2v(b.descuento_fiscal),
     });
     // Los nombres de las cuentas, para que el cuadro se lea sin buscarlas.
     const nom = db.prepare('SELECT id, codigo, nombre FROM sg_cuentas');
@@ -867,7 +879,16 @@ function identificacionDe(f) {
 // al remito equivocado.
 function baseDeNotaCredito(facturaId) {
   const f = db.prepare('SELECT * FROM sg_ven_facturas WHERE id=?').get(facturaId);
-  const items = db.prepare('SELECT * FROM sg_ven_factura_items WHERE factura_id=? ORDER BY id')
+  // EL DESCUENTO DE LA CADENA NO ES UN RENGLÓN QUE SE DEVUELVA. Es un importe, no
+  // mercadería: ofrecerlo acá sería preguntarle al operador cuántos kilos de
+  // descuento quiere acreditar. Vuelve solo, en proporción a lo que se acredite,
+  // porque la nota se emite con el mismo porcentaje que tenía la factura.
+  //
+  // Y además desalinearía el puente: `alineado` compara los largos de las dos
+  // listas para los comprobantes viejos que no guardan despacho_item_id, y un
+  // renglón de más ahí le devolvería los kilos al remito equivocado.
+  const items = db.prepare(`SELECT * FROM sg_ven_factura_items
+     WHERE factura_id=? AND COALESCE(es_descuento,0)=0 ORDER BY id`)
     .all(facturaId);
   const puente = db.prepare(`SELECT despacho_id, despacho_item_id, kg, neto, iva, gestion
      FROM sg_factura_despachos WHERE factura_id=? ORDER BY rowid`).all(facturaId);
@@ -1242,6 +1263,16 @@ router.post('/facturas/:id(\\d+)/nota-credito', requireAuth, async (req, res) =>
       // acuerdo, la devolución los devuelve. Dejarla afuera haría que la deuda de
       // gestión sobreviviera a una venta que ya no existe.
       descuentoGestion: Math.max(0, gestionNota),
+      // ── Y EL DESCUENTO DE LA CADENA VUELVE EN LA MISMA PROPORCIÓN ────────
+      //
+      // La factura se emitió con 5% menos: el cliente pagó 95. Si la nota
+      // acreditara el 100% de lo que vuelve, se le devolvería más de lo que pagó
+      // por esa mercadería, y la diferencia quedaría como saldo a favor de nadie.
+      //
+      // Sale del PORCENTAJE guardado en la factura y no de los pesos: la nota
+      // acredita una parte, y lo que hay que aplicarle es la misma tasa sobre lo
+      // que efectivamente vuelve.
+      descuentoPct: Number(f.descuento_pct) || 0,
       identificacion: req.body?.identificacion || identificacionDe(f),
       asociado: { cbte_tipo: f.cbte_tipo, punto_venta: f.punto_venta, cbte_nro: f.cbte_nro,
         fecha: f.fecha },
