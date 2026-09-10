@@ -23,6 +23,7 @@ const RAIZ = process.env.LNB_RAIZ
   || path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const PANEL = fs.readFileSync(path.join(RAIZ, 'src/panel.html'), 'utf8');
 const VEN = fs.readFileSync(path.join(RAIZ, 'src/rutas/sg_ventas.js'), 'utf8');
+const ACOB = fs.readFileSync(path.join(RAIZ, 'src/servicios/asiento-cobranza.js'), 'utf8');
 const CONT = fs.readFileSync(path.join(RAIZ, 'src/rutas/sg_contable.js'), 'utf8');
 
 const trozo = (txt, desde, cierre) => {
@@ -252,8 +253,18 @@ test('una caja sin cuenta contable ya no frena el cobro: el modelo es el piso', 
 });
 
 test('el cheque toma la cartera del modelo si la config no la tiene', () => {
+  // Sigue valiendo lo mismo, pero ahora lo resuelve UNA función con nombre propio.
+  // El motivo es que había CINCO lectores de esta cuenta —el cobro, el depósito, el
+  // endoso, el alta manual y el cuadro que se aprueba— y hacer que sólo el cobro
+  // prefiriera el modelo dejaba al cheque entrando por una cuenta y saliendo por
+  // otra, con cada asiento balanceando por su lado.
   const p = trozo(VEN, "router.post('/cobranzas', requireAuth", '\r\n});');
-  assert.match(p, /cuentasDeCobranza\(db\)\.cheques \|\| null/);
+  assert.match(p, /ctaCartera = cuentaCarteraCheques\(db\);/);
+  // Y el orden que la función garantiza: modelo primero, Configuración impositiva
+  // después — así el que nunca armó un modelo sigue igual que siempre.
+  const f = trozo(ACOB, 'export function cuentaCarteraCheques(db) {', '\r\n}');
+  assert.ok(f.indexOf("x.tipo_linea === 'cobro_cheques'") < f.indexOf('sg_config_impositiva'),
+    'la configuración impositiva le gana al modelo');
 });
 
 test('elegir el modelo es de administrador; cobrar no', () => {
@@ -309,7 +320,12 @@ test('el preview del asiento tampoco exige la cuenta del cliente', () => {
   // cuenta del rubro y la pantalla dice que no se puede, se frena una operación
   // que sí se podía hacer.
   const f = trozo(PANEL, 'function sgCobAsientoPintar(){', '\r\n}');
-  assert.match(f, /SG_COB\.ctaCliente/);
+  // Y EL ORDEN SIGUE CLAVADO: la cuenta propia del cliente gana sobre el rubro
+  // común. Al pasar a leer cuentas_det esto quedó por un momento en un match suelto
+  // de `SG_COB.ctaCliente`, que pasaba igual con el orden invertido — y con el orden
+  // invertido, el cliente que se lleva su propia cuenta corriente en el plan
+  // cancelaría contra la de todos y su mayor dejaría de cerrar.
+  assert.match(f, /var cli = SG_COB\.ctaCliente\s*\r?\n?\s*\|\|\s*\(cobEst\.cuentas_det/);
   // Y SE LEE CON CÓDIGO Y NOMBRE. Esto pinneaba `cuentas.clientes`, que es un id
   // PELADO, y doce renglones más abajo se lo usaba como objeto (cli.codigo): en el
   // caso normal —el cliente sin cuenta propia, que desde la V1029 son todos— el

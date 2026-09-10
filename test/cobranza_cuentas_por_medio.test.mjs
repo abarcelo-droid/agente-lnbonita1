@@ -286,6 +286,9 @@ test('lo guardado es EXACTAMENTE lo que después lee el cobro', async () => {
   const src = fs.readFileSync(path.join(RAIZ, 'src/servicios/asiento-cobranza.js'), 'utf8');
   const fuente = [
     trozoDe(src, 'export function modeloCobranzaLineas(db) {', '\r\n}'),
+    // La de cheques ya no sale de las líneas: la resuelve cuentaCarteraCheques,
+    // que es la MISMA que usan el depósito, el endoso y el alta manual.
+    trozoDe(src, 'export function cuentaCarteraCheques(db) {', '\r\n}'),
     trozoDe(src, 'export function cuentasDeCobranza(db) {', '\r\n}'),
     trozoDe(src, 'export function cuentaCorrienteDe(db, cliente) {', '\r\n}'),
   ].join('\n\n').replace(/export function/g, 'function');
@@ -352,9 +355,106 @@ test('la cuenta de cheques que se configura es la que se usa', () => {
   const i = VENTAS.indexOf('let ctaCartera = null;');
   assert.ok(i > 0);
   const b = VENTAS.slice(i, VENTAS.indexOf('const ch = m.cheque || {};', i));
-  assert.match(b, /ctaCartera = cuentasDeCobranza\(db\)\.cheques \|\| null;/);
+  assert.match(b, /ctaCartera = cuentaCarteraCheques\(db\);/);
   assert.ok(!/SELECT cuenta_id FROM sg_config_impositiva/.test(b),
     'el cobro sigue leyendo la config impositiva antes que el modelo');
+});
+
+test('EL CHEQUE ENTRA Y SALE POR LA MISMA CUENTA: un solo resolutor', () => {
+  // Éste es el que casi se va a producción. Al hacer que el cobro prefiera la
+  // cuenta del MODELO, quedaron cuatro lectores leyendo la de Configuración
+  // impositiva: el depósito, el endoso, el alta manual en cartera y el cuadro que
+  // se aprueba antes de cobrar.
+  //
+  // Con las dos cargadas distintas, el cheque ENTRA por una cuenta y SALE por
+  // otra. Cada asiento balancea por su lado, así que no salta ningún cartel: una
+  // cuenta se llena de cheques que ya se cobraron y la otra se va a negativo. Se
+  // descubre conciliando el mayor, meses después.
+  const TES = fs.readFileSync(path.join(RAIZ, 'src/rutas/sg_tesoreria.js'), 'utf8');
+  const SGJS = fs.readFileSync(path.join(RAIZ, 'src/rutas/sg.js'), 'utf8');
+
+  // NINGÚN lector suelto: el único lugar donde se nombra la clave, fuera del
+  // resolutor y de la pantalla que la configura, no puede resolver una cuenta.
+  const sueltos = [];
+  for (const [nom, txt] of [['sg_tesoreria.js', TES], ['sg.js', SGJS], ['sg_ventas.js', VENTAS]]) {
+    for (const m of txt.matchAll(/.{0,120}cheques_cartera.{0,80}/gs)) {
+      const t = m[0];
+      if (!/cuenta_id|ctaConfig|SELECT/i.test(t)) continue;   // sólo texto de un mensaje
+      sueltos.push(nom + ': ' + t.replace(/\s+/g, ' ').slice(0, 110));
+    }
+  }
+  assert.deepEqual(sueltos, [],
+    'quedó un lector suelto de la cartera de cheques: el cheque puede entrar por una cuenta y salir por otra');
+
+  // Y los cuatro pasan por el resolutor.
+  assert.match(TES, /const ctaCartera = cuentaCarteraCheques\(db\);/, 'el depósito');
+  assert.match(TES, /const ctaCart = cuentaCarteraCheques\(db\);/, 'el alta manual en cartera');
+  assert.match(SGJS, /function cuentaChequesCartera\(db\) \{\s*\r?\n\s*return cuentaCarteraCheques\(db\);/, 'el endoso');
+  assert.match(VENTAS, /ctaCartera = cuentaCarteraCheques\(db\);/, 'el cobro');
+  // El cuadro que se aprueba antes de cobrar sale de la MISMA cuenta.
+  assert.match(VENTAS, /const ctaCart = cuentaCarteraCheques\(db\);\s*\r?\n\s*const cartera = ctaCart/,
+    'el preview del cobro con cheque');
+});
+
+test('y sin asiento modelo elegido, el cheque sigue teniendo cuenta', async () => {
+  // REGRESIÓN QUE SE METIÓ Y SE SACÓ. modeloCobranzaLineas() corta antes de
+  // completar nada cuando no hay modelo elegido, así que resolver por ahí dejaba
+  // sin cuenta a quien la tenía en Configuración impositiva desde siempre: el
+  // cobro con cheque pasaba a rebotar de un día para el otro, sin que nadie
+  // hubiera tocado nada.
+  const src = fs.readFileSync(path.join(RAIZ, 'src/servicios/asiento-cobranza.js'), 'utf8');
+  const fuente = [
+    trozoDe(src, 'export function modeloCobranzaLineas(db) {', '\r\n}'),
+    trozoDe(src, 'export function cuentaCarteraCheques(db) {', '\r\n}'),
+  ].join('\n\n').replace(/export function/g, 'function');
+  // eslint-disable-next-line no-new-func
+  const api = new Function('CLAVE_MODELO_COBRANZA',
+    fuente + '\nreturn cuentaCarteraCheques;')('asiento_modelo_cobranza');
+
+  const a = armar();                                  // sin modelo elegido
+  a.db.exec(`CREATE TABLE sg_config_impositiva (clave TEXT, cuenta_id INTEGER);
+    INSERT INTO sg_config_impositiva VALUES ('cheques_cartera', 40);`);
+  assert.equal(api(a.db), 40, 'sin modelo, la cuenta tiene que salir de Configuración impositiva');
+
+  // Y con modelo, gana la del modelo — que es la que se ve en la pantalla.
+  a.PUT({ cuentas: { clientes: 10, efectivo: 20, cheques: 30 } });
+  assert.equal(api(a.db), 30, 'con la línea puesta tiene que ganar la del modelo');
+});
+
+test('el cartel del cobro ya no manda a arreglar algo que el piso resuelve', () => {
+  // Decía «ninguna cuenta tiene cuenta contable: la cobranza no entra al libro»
+  // —justo el caso que el piso resuelve—. Con el piso puesto el cobro entra
+  // perfecto y el cartel seguía en rojo.
+  const i = PANEL.indexOf('var usables = SG_COB.cuentas.filter');
+  assert.ok(i > 0);
+  const b = PANEL.slice(i - 400, i + 900);
+  assert.match(b, /x\.cuenta_contable_id \|\| _pisoDe\(x\)/);
+  assert.match(b, /String\(x\.tipo \|\| ''\) === 'caja' \? _cobDet\.efectivo : _cobDet\.banco/);
+  // Y si de verdad no hay ni una cosa ni la otra, lo dice y manda a los DOS lados.
+  assert.match(b, /el asiento '\s*\+\s*'modelo de cobranza tampoco dice/);
+});
+
+test('la cuenta configurada viaja aunque se haya dado de baja', () => {
+  // Si no aparece entre las opciones, el desplegable queda en «— Sin elegir —» y
+  // guardar le BORRA esa línea al modelo: el circuito se rompe por abrir la
+  // ventana. Se muestra marcada, no se esconde.
+  const i = VENTAS.indexOf('const puestas = new Set(plan.map');
+  assert.ok(i > 0, 'el plan no rescata la cuenta configurada');
+  const b = VENTAS.slice(i, i + 700);
+  assert.match(b, /for \(const k of \['clientes', 'efectivo', 'banco', 'cheques'\]\)/);
+  assert.match(b, /dada de baja — cambiala/);
+});
+
+test('y el buscador no puede borrar la línea: lo elegido nunca se filtra', () => {
+  // Basta con pararse en el desplegable, tipear tres letras y hacer clic afuera:
+  // el filtro se llevaba la opción elegida, el select quedaba en la primera que
+  // quedó, y guardar escribía otra cuenta —o borraba la línea—. Le pasa a los 71
+  // desplegables del panel, así que se arregla en el mecanismo.
+  const f = trozoP('function sgSelBuscable(sel, placeholder){', '\r\n}');
+  assert.match(f, /if \(o\.value === elegido\) return true;/);
+  // Y «no hay nada» se sigue midiendo SIN esa excepción, o el cartel no saldría
+  // nunca mientras haya algo elegido.
+  assert.match(f, /var hubo = \(sel\._todas \|\| \[\]\)\.some\(function\(o\)\{ return o\.value && coincide\(o\); \}\);/);
 });
 
 test('pero no se pierde la de Configuración impositiva', () => {
@@ -508,6 +608,14 @@ test('«Efectivo y Banco son el piso» — y el cobro usa la de la caja si la ti
   const b = VENTAS.slice(i, i + 320);
   assert.match(b, /const piso = cuentasDeCobranza\(db\);/);
   assert.match(b, /forma === 'efectivo' \? piso\.efectivo : piso\.banco/);
+});
+
+test('«es la misma cuenta por la que el cheque sale» — y lo es', () => {
+  assert.match(MAN_CC, /<b>Es la misma cuenta por la que el cheque sale<\/b>/);
+  // Las dos puntas resuelven con la misma función.
+  const TES = fs.readFileSync(path.join(RAIZ, 'src/rutas/sg_tesoreria.js'), 'utf8');
+  assert.match(VENTAS, /ctaCartera = cuentaCarteraCheques\(db\);/, 'la que entra');
+  assert.match(TES, /const ctaCartera = cuentaCarteraCheques\(db\);/, 'la que sale');
 });
 
 test('«si se deja vacía la de cheques se usa la de Configuración impositiva»', () => {
