@@ -10,7 +10,9 @@ import express from 'express';
 import db from '../servicios/db_sg_finanzas.js';
 import { crearAsiento, MOTIVOS } from '../servicios/asientos.js';
 import { cuentaCorrienteDe, cuentasDeCobranza, modeloCobranzaLineas,
-         modeloCobranzaFaltan, CLAVE_MODELO_COBRANZA } from '../servicios/asiento-cobranza.js';
+         modeloCobranzaFaltan, CLAVE_MODELO_COBRANZA, TIPOS_COBRANZA,
+         cuentaCarteraCheques }
+  from '../servicios/asiento-cobranza.js';
 import { repartirAmbito, partesDeMedio } from '../servicios/sg_cobro_ambito.js';
 import { puedeMoverCuenta } from './sg_tesoreria.js';
 // EL ASIENTO DE VENTA VIVE EN UN SOLO LUGAR. Estaba acá adentro y el otro
@@ -1630,9 +1632,14 @@ router.get('/cobranzas/cuentas', requireAuth, (req, res) => {
     // La cuenta de cheques en cartera va acá porque el cobro con cheque asienta
     // contra ELLA, no contra un banco: la pantalla necesita el nombre para poder
     // mostrar el asiento antes de confirmar, como todo lo que toca el libro.
-    const cartera = db.prepare(`SELECT cu.id, cu.codigo, cu.nombre
-      FROM sg_config_impositiva ci JOIN sg_cuentas cu ON cu.id = ci.cuenta_id
-      WHERE ci.clave='cheques_cartera'`).get() || null;
+    // EL CUADRO TIENE QUE MOSTRAR LA QUE SE VA A GRABAR. Acá se leía derecho de
+    // Configuración impositiva mientras el cobro resuelve por el modelo: con las dos
+    // cargadas distintas, la pantalla mostraba una y el asiento salía con la otra —
+    // exactamente lo que el preview existe para que no pase.
+    const ctaCart = cuentaCarteraCheques(db);
+    const cartera = ctaCart
+      ? db.prepare('SELECT id, codigo, nombre FROM sg_cuentas WHERE id=?').get(ctaCart) || null
+      : null;
     res.json({ ok: true, data: rows, cartera });
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
@@ -1660,13 +1667,73 @@ router.get('/modelo-cobranza', requireAuth, (req, res) => {
       'SELECT id, nombre FROM sg_asientos_modelo WHERE activo=1 ORDER BY nombre').all();
     const m = modeloCobranzaLineas(db);
     const est = modeloCobranzaFaltan(db);
+    // ── CON QUÉ SE CONFIGURA, DESDE CUENTA CORRIENTE DE CLIENTES ────────
+    //
+    // Pablo, 10/9/2026: «en cada medio de pago necesito configurar un rubro
+    // distinto». Para eso la pantalla necesita tres cosas que antes tenía que
+    // adivinar o pedirle a otro módulo.
+    //
+    // 1 · LOS CUATRO MEDIOS SALEN DE ACÁ, no de una lista escrita en el panel.
+    // TIPOS_COBRANZA ya existe para que el asiento, el editor y la pantalla digan
+    // lo mismo; una quinta copia en el front es la que un día queda distinta.
+    const tipos = TIPOS_COBRANZA;
+    // 2 · LAS CUATRO CUENTAS CON SU CÓDIGO Y SU NOMBRE. `cuentas` son ids pelados
+    // y con eso no se puede ni dibujar el selector ni mostrar el asiento: el
+    // preview del cobro pintaba el renglón de la cuenta corriente sin código ni
+    // nombre justo en el caso normal, el del cliente sin cuenta propia.
+    const det = (id) => (id
+      ? db.prepare('SELECT id, codigo, nombre FROM sg_cuentas WHERE id=?').get(Number(id)) || null
+      : null);
+    const cuentas_det = {
+      clientes: det(est.cuentas.clientes), efectivo: det(est.cuentas.efectivo),
+      banco: det(est.cuentas.banco), cheques: det(est.cuentas.cheques),
+    };
+    // 3 · EL PLAN DE CUENTAS, YA FILTRADO — sólo para el administrador, que es el
+    // único que ve el control y el único que puede guardar. Viene filtrado a las
+    // IMPUTABLES a propósito: el buscador que se le monta solo a los desplegables
+    // largos rearma las opciones y perdería un `disabled`, así que lo que no se
+    // puede elegir directamente no viaja.
+    const esAdmin = req._user?.rol === 'admin';
+    const plan = esAdmin
+      ? db.prepare(`SELECT c.id, c.codigo, c.nombre FROM sg_cuentas c
+           WHERE COALESCE(c.activo,1)=1
+             AND NOT EXISTS (SELECT 1 FROM sg_cuentas h
+                              WHERE h.codigo LIKE c.codigo || '.%' AND h.codigo != c.codigo)
+           ORDER BY c.codigo`).all()
+      : [];
+    // ── LA QUE YA ESTÁ CONFIGURADA VIAJA SIEMPRE, aunque se haya dado de baja
+    // o haya dejado de ser imputable. Si no, no aparecía entre las opciones, el
+    // desplegable quedaba en «— Sin elegir —» y guardar le BORRABA esa línea al
+    // modelo sin que nadie lo pidiera: el circuito se rompía por abrir la ventana.
+    //
+    // Se marca, para que se vea que hay que cambiarla — no se esconde el problema.
+    if (esAdmin) {
+      const puestas = new Set(plan.map((c) => c.id));
+      for (const k of ['clientes', 'efectivo', 'banco', 'cheques']) {
+        const id = est.cuentas[k];
+        if (!id || puestas.has(Number(id))) continue;
+        const c = db.prepare('SELECT id, codigo, nombre FROM sg_cuentas WHERE id=?').get(Number(id));
+        if (!c) continue;
+        plan.push({ ...c, nombre: c.nombre + ' (dada de baja — cambiala)', de_baja: 1 });
+        puestas.add(c.id);
+      }
+      plan.sort((a, b) => String(a.codigo).localeCompare(String(b.codigo)));
+    }
+    // 4 · Y CUÁNTAS CAJAS Y BANCOS NO TRAEN LA SUYA. Convierte «esto es el piso»
+    // en un número: es la diferencia entre una regla abstracta y saber si te toca.
+    const sinCta = db.prepare(`SELECT
+        SUM(CASE WHEN tipo='caja' THEN 1 ELSE 0 END) AS caja,
+        SUM(CASE WHEN tipo<>'caja' THEN 1 ELSE 0 END) AS banco
+      FROM sg_fin_cuentas WHERE activo=1 AND cuenta_contable_id IS NULL`).get() || {};
+    const sin_contable = { caja: Number(sinCta.caja) || 0, banco: Number(sinCta.banco) || 0 };
     if (!m.id) {
       return res.json({ ok: true, data: { modelo: null, id_perdido: m.perdido || null,
-        modelos, faltan: est.faltan, cuentas: est.cuentas } });
+        modelos, faltan: est.faltan, cuentas: est.cuentas, tipos, cuentas_det, plan, sin_contable } });
     }
     const cab = db.prepare('SELECT * FROM sg_asientos_modelo WHERE id=?').get(m.id);
     cab.lineas = m.lineas;
-    res.json({ ok: true, data: { modelo: cab, modelos, faltan: est.faltan, cuentas: est.cuentas } });
+    res.json({ ok: true, data: { modelo: cab, modelos, faltan: est.faltan, cuentas: est.cuentas,
+      tipos, cuentas_det, plan, sin_contable } });
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
@@ -1796,12 +1863,20 @@ router.post('/cobranzas', requireAuth, (req, res) => {
       // EL CHEQUE ENTRA A LA CARTERA, no a una cuenta: el banco todavía no recibió
       // nada. La cuenta contable de la cartera se pide una sola vez.
       if (!ctaCartera) {
-        // Primero la configuración impositiva —de ahí la toma el depósito de
-        // cheques desde antes de que este modelo existiera— y después el modelo.
-        // Dos lugares para la misma cuenta serían dos verdades, y la que ya está
-        // en uso es aquélla.
-        ctaCartera = (db.prepare("SELECT cuenta_id FROM sg_config_impositiva WHERE clave='cheques_cartera'")
-          .get() || {}).cuenta_id || cuentasDeCobranza(db).cheques || null;
+        // ── GANA LA DEL MODELO, Y NO SE PIERDE LA OTRA ────────────────────
+        //
+        // Acá se leía PRIMERO la configuración impositiva y después el modelo. Con
+        // eso, la cuenta de cheques que se elige en Cuenta corriente de clientes se
+        // mostraba en la pantalla y NO se usaba al asentar: el cobro iba contra la
+        // otra. La pantalla mentía, y el que la configuró se iba a enterar mirando
+        // el mayor.
+        //
+        // No se pierde la de la configuración impositiva: cuentasDeCobranza() cae
+        // sola a ella cuando el modelo no trae la línea —está escrito en
+        // asiento-cobranza.js—, así que las instalaciones que sólo tienen aquélla
+        // siguen igual. Lo único que cambia es cuál gana cuando están las dos, y la
+        // que gana pasa a ser la que se ve.
+        ctaCartera = cuentaCarteraCheques(db);
         if (!ctaCartera) {
           return res.status(400).json({ ok: false,
             error: 'Falta decir contra qué cuenta contable van los cheques en cartera. Ponela en la '

@@ -9,7 +9,8 @@ import express from 'express';
 import db from '../servicios/db_sg_finanzas.js';
 import { crearAsiento, filtroAmbito, totalesDeAsiento, origenDeAsiento } from '../servicios/asientos.js';
 import { exigirEmpresa, SAN_GERONIMO } from '../servicios/sociedad_modulo.js';
-import { esModeloDeCobranza } from '../servicios/asiento-cobranza.js';
+import { esModeloDeCobranza, TIPOS_COBRANZA, CLAVE_MODELO_COBRANZA }
+  from '../servicios/asiento-cobranza.js';
 
 const router = express.Router();
 
@@ -1591,6 +1592,144 @@ router.put('/modelos/circuitos', requireAdmin, (req, res) => {
       ON CONFLICT(clave) DO UPDATE SET valor=excluded.valor`).run(clave, id ? String(id) : '');
     res.json({ ok: true, data: { clave, modelo_id: id } });
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// ══ LAS CUATRO CUENTAS DE LA COBRANZA, DESDE DONDE SE COBRA ═══════════════
+//
+// Pablo, 10/9/2026: «el asiento modelo de cobranzas... lo ideal sería configurarlo
+// desde el módulo de CC clientes, porque el asiento depende con qué nos pagan:
+// entonces en cada medio de pago necesito configurar un rubro distinto. Lo mejor
+// es que me lo pongas ahí».
+//
+// LO QUE HABÍA. El botón ⚙️ de Cuenta corriente de clientes sólo dejaba ELEGIR un
+// modelo de una lista. Para decir contra qué rubro va el efectivo, contra cuál la
+// transferencia y contra cuál el cheque había que irse a Contabilidad SG → Asiento
+// Modelo, crear un modelo y marcar línea por línea qué era cada una. La puerta
+// estaba en el lugar correcto; adentro no estaba la decisión.
+//
+// NO HAY TABLA NUEVA NI CLAVE NUEVA. Las cuatro cuentas siguen siendo líneas de
+// sg_asientos_modelo_lineas con su tipo_linea, que es lo que lee cuentasDeCobranza()
+// y de ahí el POST del cobro. El camino de LECTURA no se toca: si esto guardara en
+// otro lado habría dos verdades y el cobro seguiría usando la del modelo.
+//
+// Y VA EN ESTE ARCHIVO, no en sg_ventas.js: sg_asientos_modelo(_lineas) tiene UN
+// solo escritor y agregarle un segundo router es el problema que servicios/asientos.js
+// ya resolvió del lado del libro. Además acá ya viven erroresCobranza,
+// cuentaEsImputable, puedeUsarCuenta y mensajeRestringida, y ninguna está exportada.
+//
+// VA ANTES DE /modelos/:id. Si fuera después, 'cobranza' entraría como :id, parseInt
+// daría NaN y contestaría «modelo no encontrado». Es el mismo cuidado de
+// /modelos/circuitos, veinte líneas más arriba.
+router.put('/modelos/cobranza', requireAdmin, (req, res) => {
+  try {
+    const body = req.body || {};
+    const pedidas = body.cuentas || {};
+    // EL LADO NO VIAJA EN EL CUERPO: lo pone el servidor desde TIPOS_COBRANZA. Que
+    // el cliente pueda mandar «Clientes al debe» es la puerta que el editor cierra
+    // a mano; acá directamente no existe. Un cobro con la cuenta corriente al debe
+    // SUBE la deuda del cliente en vez de bajarla.
+    const clave = (t) => t.tipo.replace('cobro_', '');
+    const lineas = [];
+    for (let i = 0; i < TIPOS_COBRANZA.length; i++) {
+      const t = TIPOS_COBRANZA[i];
+      const cru = pedidas[clave(t)];
+      const id = (cru === '' || cru == null) ? null : Number(cru);
+      if (id == null) continue;
+      if (!Number.isInteger(id) || id <= 0) {
+        return res.status(400).json({ ok: false, error: 'La cuenta de ' + t.label + ' no es válida.' });
+      }
+      lineas.push({ cuenta_id: id, lado: t.lado, tipo_linea: t.tipo, descripcion: t.label, orden: i });
+    }
+
+    // 1 · SIN LA DE CLIENTES NO SE GUARDA NADA. Es la única que corta: sin ella no
+    // hay contra qué cancelar y no se puede cobrar con NINGÚN medio. Las otras tres
+    // son un piso que puede no hacer falta si todas las cajas traen la suya.
+    if (!lineas.some((l) => l.tipo_linea === 'cobro_clientes')) {
+      return res.status(400).json({ ok: false, error:
+        'Elegí contra qué cuenta corriente se cancela el cobro: sin ella el cobro no entra al libro.' });
+    }
+
+    // 2 · Cada cuenta existe, está activa, es IMPUTABLE y el que guarda la puede usar.
+    // Son los mismos dos frenos que corren al armar un modelo desde el editor.
+    for (const l of lineas) {
+      const cu = db.prepare('SELECT id, codigo, nombre, activo FROM sg_cuentas WHERE id=?').get(l.cuenta_id);
+      if (!cu || cu.activo === 0) {
+        return res.status(400).json({ ok: false, error: 'Una de las cuentas elegidas no existe o está dada de baja.' });
+      }
+      if (!cuentaEsImputable(db, l.cuenta_id)) {
+        return res.status(400).json({ ok: false, error:
+          'La cuenta ' + cu.codigo + ' — ' + cu.nombre + ' agrupa a otras: no se puede imputar contra ella. '
+          + 'Elegí una de las que cuelgan.' });
+      }
+      if (!puedeUsarCuenta(req._user, l.cuenta_id)) {
+        return res.status(403).json({ ok: false, error: mensajeRestringida(cu) });
+      }
+    }
+
+    const cfg = db.prepare('SELECT valor FROM sg_config WHERE clave=?').get(CLAVE_MODELO_COBRANZA);
+    const actualId = cfg && cfg.valor ? Number(cfg.valor) : null;
+    const vivo = actualId
+      ? db.prepare('SELECT id, nombre FROM sg_asientos_modelo WHERE id=? AND activo=1').get(actualId)
+      : null;
+
+    // 3 · NO SE PISA UN MODELO QUE OTRO CIRCUITO ESTÁ USANDO. Nada impide hoy que
+    // dos circuitos apunten al mismo modelo; editarlo desde acá le metería líneas de
+    // cobranza al modelo de venta y las ventas dejarían de asentarse, sin que nadie
+    // se entere hasta que alguien factura.
+    if (vivo) {
+      for (const c of CIRCUITOS) {
+        if (c.clave === CLAVE_MODELO_COBRANZA) continue;
+        const otro = db.prepare('SELECT valor FROM sg_config WHERE clave=?').get(c.clave);
+        if (otro && otro.valor && Number(otro.valor) === vivo.id) {
+          return res.status(400).json({ ok: false, error:
+            'Ese asiento modelo también se usa para «' + c.label + '». Hacele uno propio a la '
+            + 'cobranza desde Contabilidad SG → Asiento Modelo, elegilo acá, y después configurá '
+            + 'las cuentas.' });
+        }
+      }
+    }
+
+    // 4 · Y EL PISO FINAL: lo que se guarda desde la pantalla tiene que ser algo que
+    // el editor de modelos aceptaría. Si no, las dos pantallas dirían cosas distintas
+    // del mismo modelo.
+    const malo = erroresCobranza(lineas, []);
+    if (malo) return res.status(400).json({ ok: false, error: malo });
+
+    // 5 · El modelo y la config, JUNTOS. Si se escribieran por separado, un error en
+    // la segunda dejaría un modelo huérfano y el circuito sin elegir.
+    const salida = db.transaction(() => {
+      let modeloId = vivo ? vivo.id : null;
+      let creado = false;
+      if (!modeloId) {
+        const nombre = String(body.nombre || '').trim() || 'Cobranza de clientes';
+        modeloId = db.prepare(`INSERT INTO sg_asientos_modelo (nombre, descripcion, activo)
+          VALUES (?,?,1)`).run(nombre,
+          'Armado desde Cuenta corriente de clientes. Dice contra qué cuenta corriente se '
+          + 'cancela el cobro y dónde entra la plata según el medio.').lastInsertRowid;
+        creado = true;
+      } else {
+        // REEMPLAZO QUIRÚRGICO: se borran SÓLO las cuatro de cobranza. El PUT del
+        // editor borra todas las líneas del modelo y las reescribe; hacer eso acá se
+        // llevaría puesto cualquier otro renglón que alguien haya agregado a mano.
+        db.prepare(`DELETE FROM sg_asientos_modelo_lineas
+          WHERE modelo_id=? AND tipo_linea IN ('cobro_clientes','cobro_efectivo','cobro_banco','cobro_cheques')`)
+          .run(modeloId);
+      }
+      const ins = db.prepare(`INSERT INTO sg_asientos_modelo_lineas
+        (modelo_id, cuenta_id, lado, descripcion, orden, tipo_linea) VALUES (?,?,?,?,?,?)`);
+      for (const l of lineas) ins.run(modeloId, l.cuenta_id, l.lado, l.descripcion, l.orden, l.tipo_linea);
+      // Y queda elegido. Estampando quién y cuándo: son las cuentas del libro y hay
+      // que poder contestar quién las cambió.
+      db.prepare(`INSERT INTO sg_config (clave, valor, modificado_en, modificado_por)
+        VALUES (?,?,datetime('now','localtime'),?)
+        ON CONFLICT(clave) DO UPDATE SET valor=excluded.valor,
+          modificado_en=excluded.modificado_en, modificado_por=excluded.modificado_por`)
+        .run(CLAVE_MODELO_COBRANZA, String(modeloId), req._user?.id || null);
+      return { modelo_id: modeloId, creado };
+    })();
+
+    res.json({ ok: true, data: salida });
+  } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
 });
 
 router.get('/modelos/:id', (req, res) => {

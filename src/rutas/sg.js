@@ -11,6 +11,7 @@ import fs from 'fs';
 import { randomUUID } from 'crypto';
 import { fileURLToPath } from 'url';
 import * as XLSX from 'xlsx';
+import { cuentaCarteraCheques } from '../servicios/asiento-cobranza.js';
 import { subirArchivo, obtenerArchivo, storageConfigurado } from '../servicios/storage.js';
 import { facturaCuenta, deudaFactura, deudaGestionFactura, noEsNotaDeCredito, signoFactura }
   from '../servicios/factura-cuenta.js';
@@ -12729,11 +12730,16 @@ function cuentaProveedoresDeModelo(db) {
 
 // La cuenta donde están parados los cheques de terceros que todavía no se
 // depositaron. Endosar uno la descarga: sale de la cartera y cancela deuda.
-// Ésta SÍ se parametriza —no hay un asiento modelo del que sacarla— y se
-// configura en Contabilidad SG.
+//
+// AHORA SÍ HAY UN MODELO DEL QUE SACARLA: la línea «Cheques en cartera» del asiento
+// modelo de cobranza, que se configura desde Cuenta corriente de clientes. Se
+// resuelve con la misma función que el cobro, el depósito y el alta manual — si el
+// endoso leyera otra, el cheque entraría por una cuenta y saldría por otra.
+//
+// El resolutor cae solo a Configuración impositiva cuando el modelo no trae la
+// línea, así que para el que nunca armó un modelo no cambia nada.
 function cuentaChequesCartera(db) {
-  const r = db.prepare("SELECT cuenta_id FROM sg_config_impositiva WHERE clave='cheques_cartera'").get();
-  return (r && r.cuenta_id) || null;
+  return cuentaCarteraCheques(db);
 }
 
 // Lo que le queda por pagar a cada factura contabilizada de un proveedor. Es lo

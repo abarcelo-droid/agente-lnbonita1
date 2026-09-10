@@ -79,6 +79,39 @@ export function modeloCobranzaLineas(db) {
   return { id, lineas };
 }
 
+// ══ LA CARTERA DE CHEQUES LA DECIDE UN SOLO LUGAR ═════════════════════════
+//
+// HABÍA CINCO LECTORES de la misma cuenta y no todos leían lo mismo:
+//
+//   · el cobro con cheque        (rutas/sg_ventas.js)
+//   · el depósito del cheque     (rutas/sg_tesoreria.js)
+//   · el alta manual en cartera  (rutas/sg_tesoreria.js)
+//   · el endoso a un proveedor   (rutas/sg.js)
+//   · y el cuadro que se aprueba antes de cobrar
+//
+// Mientras los cinco leían sg_config_impositiva no podían discrepar. Al dejar que
+// el modelo de cobranza gane —para que la cuenta que se elige en la pantalla sea la
+// que se usa— hacía falta que ganara PARA LOS CINCO. Si no, el cheque ENTRA por una
+// cuenta y SALE por otra: cada asiento balancea por su lado, así que no salta
+// ningún cartel, una cuenta se llena de cheques que ya se cobraron y la otra se va
+// a negativo. Se descubre conciliando el mayor, meses después.
+//
+// EL ORDEN: la línea del modelo, y si no está, la de Configuración impositiva —que
+// es de donde salía antes y sigue sirviendo para el que no armó modelo.
+//
+// Y NO DEPENDE DE QUE HAYA MODELO ELEGIDO. modeloCobranzaLineas() corta antes de
+// completar nada cuando no hay ninguno, así que resolver por ahí dejaba sin cuenta
+// a quien la tenía cargada en Configuración impositiva de toda la vida: el cobro
+// con cheque pasaba a rebotar de un día para el otro.
+export function cuentaCarteraCheques(db) {
+  const m = modeloCobranzaLineas(db);
+  const l = m.lineas.find((x) => x.tipo_linea === 'cobro_cheques');
+  if (l && l.cuenta_id) return Number(l.cuenta_id);
+  const c = db.prepare(`SELECT cuenta_id FROM sg_config_impositiva
+    WHERE clave = 'cheques_cartera' AND cuenta_id IS NOT NULL`).get();
+  return c && c.cuenta_id ? Number(c.cuenta_id) : null;
+}
+
 // Las cuatro cuentas, resueltas. Devuelve null en la que falte: quien llama
 // decide si eso lo frena —depende de con qué se esté cobrando— en vez de exigir
 // las cuatro para cobrar en efectivo.
@@ -93,7 +126,10 @@ export function cuentasDeCobranza(db) {
     clientes: de('cobro_clientes'),
     efectivo: de('cobro_efectivo'),
     banco: de('cobro_banco'),
-    cheques: de('cobro_cheques'),
+    // La de cheques sale del resolutor: es la MISMA que van a usar el depósito, el
+    // endoso y el alta manual. Con de('cobro_cheques') a secas, sin modelo elegido
+    // daba null aunque estuviera cargada en Configuración impositiva.
+    cheques: cuentaCarteraCheques(db),
   };
 }
 

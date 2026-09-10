@@ -17,6 +17,7 @@ import db from '../servicios/db_sg_finanzas.js';
 import { exigirEmpresa, SAN_GERONIMO } from '../servicios/sociedad_modulo.js';
 import { consultarBcra } from '../servicios/bcra.js';
 import { crearAsiento, AMBITOS, MOTIVOS } from '../servicios/asientos.js';
+import { cuentaCarteraCheques } from '../servicios/asiento-cobranza.js';
 
 const router = express.Router();
 
@@ -504,7 +505,8 @@ router.post('/cheques-terceros', requireAuth, (req, res) => {
     // debe contra la cuenta corriente del cliente. Si el cheque no viene de un
     // cliente —una devolución, un cheque viejo que se está regularizando— hay
     // que decir contra qué cuenta entra. Una de las dos, pero alguna.
-    const ctaCart = ctaConfig('cheques_cartera');
+    // Misma resolución que el cobro y el depósito: una sola cuenta de cartera.
+    const ctaCart = cuentaCarteraCheques(db);
     if (!ctaCart) {
       return res.status(400).json({ ok: false,
         error: 'Falta decir contra qué cuenta contable van los cheques en cartera. Configurala en '
@@ -852,8 +854,10 @@ router.post('/cheques-terceros/:id/depositar', requireAuth, (req, res) => {
     // Sólo asienta si el cheque tiene con qué: los que se cargaron a mano en la
     // cartera, sin pasar por una cobranza, nunca entraron al libro — para esos
     // el depósito es sólo el movimiento, como era antes.
-    const ctaCartera = (db.prepare("SELECT cuenta_id FROM sg_config_impositiva WHERE clave='cheques_cartera'")
-      .get() || {}).cuenta_id || null;
+    // LA MISMA CUENTA POR LA QUE ENTRÓ. El cobro con cheque la debita resolviéndola
+    // con cuentaCarteraCheques(); si el depósito la acreditara leyendo otra fuente,
+    // el cheque entraría por una cuenta y saldría por otra sin que nada avise.
+    const ctaCartera = cuentaCarteraCheques(db);
     const vinoDeCobranza = !!db.prepare(
       'SELECT 1 FROM sg_ven_cobranzas WHERE cheque_terceros_id=? AND anulada=0').get(c.id);
     if (vinoDeCobranza && (!ctaCartera || !cuenta.cuenta_contable_id)) {
