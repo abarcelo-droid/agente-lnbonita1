@@ -12,6 +12,8 @@ import { randomUUID } from 'crypto';
 import { fileURLToPath } from 'url';
 import * as XLSX from 'xlsx';
 import { cuentaCarteraCheques } from '../servicios/asiento-cobranza.js';
+import { kgDelPapel, kgPendienteDelPapel, validarKgDeclarados, kgPapelSql }
+  from '../servicios/sg_kilos_del_papel.js';
 import { subirArchivo, obtenerArchivo, storageConfigurado } from '../servicios/storage.js';
 import { facturaCuenta, deudaFactura, deudaGestionFactura, noEsNotaDeCredito, signoFactura }
   from '../servicios/factura-cuenta.js';
@@ -1249,6 +1251,22 @@ router.post('/afip/emitir-test', requireAdmin, async (req, res) => {
 // consumen del mismo remito, así que se cuentan juntos y en UN SOLO LUGAR.
 //
 // El nombre cambió a propósito: "facturado" ya no era cierto.
+// ── LO QUE QUEDA POR FACTURAR DE UN RENGLÓN, EN KILOS DEL PAPEL ──────────
+//
+// Lo usan las TRES puertas que ofrecen o aceptan facturar un remito: la lista de
+// facturables de un cliente, la bandeja de remitos pendientes y el POST de la
+// factura. Antes cada una hacía la cuenta a mano con kg_despachados, y con el remito
+// al súper declarando 15 kg de una partida de 14, las tres trababan la factura en 14:
+// el papel decía una cosa y el sistema no dejaba cobrar lo que decía el papel.
+//
+// Lo devuelto viene en kilos del galpón y se lleva a kilos del papel adentro de
+// kgPendienteDelPapel: si la cadena devuelve el renglón entero, cancela el renglón
+// entero, no deja la diferencia de balanza pendiente de facturar para siempre.
+function kgPendienteItem(db, despachoItemId, di) {
+  return kgPendienteDelPapel(di, kgDocumentadoItem(db, despachoItemId),
+    kgDevueltoItem(db, despachoItemId));
+}
+
 let _hayLiqDesp = null;
 function kgDocumentadoItem(db, despachoItemId) {
   const fac = db.prepare(`SELECT COALESCE(SUM(fd.kg),0) s FROM sg_factura_despachos fd
@@ -1284,7 +1302,7 @@ router.get('/facturable', requireAuth, (req, res) => {
         -- LA DEL PRODUCTO MANDA; la de la familia queda de respaldo para las filas
         -- viejas que la migración no pudo llenar (familia sin alícuota cargada).
         COALESCE(pr.iva_alicuota, fam.iva_alicuota) AS iva_alicuota,
-        di.lote_id, l.codigo_lote, di.kg_despachados, di.precio_por_kg,
+        di.lote_id, l.codigo_lote, di.kg_despachados, di.kg_declarados, di.precio_por_kg,
         -- ── CÓMO SE PACTÓ ESTE RENGLÓN ────────────────────────────────────
         -- Pablo, 31/8/2026: «si el remito se pactó en bultos, la liquidación debe
         -- pactarse en bultos también». Sin esto, la liquidación que llega después
@@ -1304,11 +1322,13 @@ router.get('/facturable', requireAuth, (req, res) => {
     const mapa = new Map();
     for (const r of rows) {
       const kgFact = kgDocumentadoItem(db, r.despacho_item_id);
-      const kgDesp = Number(r.kg_despachados) || 0;
+      // LOS KILOS DEL PAPEL: al súper se le pueden haber remitido más que los de la
+      // partida, y ésos son los que se le facturan. Sin declaración, son los mismos.
+      const kgDesp = kgDelPapel(r);
       // LO DEVUELTO NO SE OFRECE. El súper devuelve ANTES de facturar (Pablo,
       // 2/9/2026), así que esto es el caso normal: sin restarlo, el remito se
       // sigue ofreciendo entero y se le cobra mercadería que ya devolvió.
-      const kgPend = +(kgDesp - kgFact - kgDevueltoItem(db, r.despacho_item_id)).toFixed(2);
+      const kgPend = kgPendienteItem(db, r.despacho_item_id, r);
       if (!mapa.has(r.despacho_id)) mapa.set(r.despacho_id, { despacho_id: r.despacho_id, numero: r.despacho_numero, fecha: r.fecha_despacho, _desp: 0, _fact: 0, items: [] });
       const g = mapa.get(r.despacho_id);
       g._desp += kgDesp; g._fact += kgFact;
@@ -1367,7 +1387,7 @@ router.get('/despachos-pendientes', requireAuth, (req, res) => {
         c.razon_social, c.nombre_comercial,
         di.id AS despacho_item_id, pr.nombre AS producto_nombre,
         di.origen, di.lote_recibido_id,
-        di.kg_despachados, di.precio_por_kg
+        di.kg_despachados, di.kg_declarados, di.precio_por_kg
       FROM sg_despachos d
       JOIN sg_despacho_items di ON di.despacho_id=d.id
       LEFT JOIN sg_clientes c ON c.id=d.cliente_id
@@ -1377,11 +1397,9 @@ router.get('/despachos-pendientes', requireAuth, (req, res) => {
     const mapa = new Map();
     for (const r of rows) {
       const kgFact = kgDocumentadoItem(db, r.despacho_item_id);
-      const kgDesp = Number(r.kg_despachados) || 0;
-      // LO DEVUELTO NO SE OFRECE. El súper devuelve ANTES de facturar (Pablo,
-      // 2/9/2026), así que esto es el caso normal: sin restarlo, el remito se
-      // sigue ofreciendo entero y se le cobra mercadería que ya devolvió.
-      const kgPend = +(kgDesp - kgFact - kgDevueltoItem(db, r.despacho_item_id)).toFixed(2);
+      // Misma cuenta que /facturable, en kilos del papel: las dos pantallas tienen
+      // que ofrecer lo mismo del mismo remito.
+      const kgPend = kgPendienteItem(db, r.despacho_item_id, r);
       if (!mapa.has(r.despacho_id)) mapa.set(r.despacho_id, {
         despacho_id: r.despacho_id, numero: r.despacho_numero, fecha: r.fecha_despacho,
         cliente_id: r.cliente_id, razon_social: r.razon_social || '', alias: r.nombre_comercial || '',
@@ -1505,7 +1523,7 @@ const postEmitir = async (req, res) => {
       for (const it of (Array.isArray(sel.items) ? sel.items : [])) {
         const diId = Number(it.despacho_item_id), kg = Number(it.kg);
         if (!(kg > 0)) continue;
-        const di = db.prepare(`SELECT di.id, di.producto_id, di.kg_despachados, di.precio_por_kg,
+        const di = db.prepare(`SELECT di.id, di.producto_id, di.kg_despachados, di.kg_declarados, di.precio_por_kg,
             di.precio_lista_por_kg, di.presentacion_id, pr.nombre AS producto_nombre,
             di.origen, di.lote_recibido_id,
             COALESCE(di.kg_por_bulto, ps.factor_conversion) AS kg_por_bulto,
@@ -1529,8 +1547,10 @@ const postEmitir = async (req, res) => {
         }
         // Y TAMPOCO SE ACEPTA. La pantalla ya no lo ofrece, pero el botón que no
         // se ofrece se llama igual por la dirección.
-        const kgPend = (Number(di.kg_despachados) || 0) - kgDocumentadoItem(db, diId)
-                     - kgDevueltoItem(db, diId);
+        // EN KILOS DEL PAPEL. Es la misma cuenta que ofrece la pantalla: si ésta
+        // mirara los del galpón, el remito al súper que dice 15 kg rebotaría acá
+        // con «quedan 14 pendientes» después de haberlo ofrecido entero.
+        const kgPend = kgPendienteItem(db, diId, di);
         if (kg > kgPend + 0.01) return res.status(400).json({ ok: false, error: `Ítem ${diId}: pedís ${kg}kg pero quedan ${kgPend.toFixed(2)}kg pendientes` });
         const alic = di.iva_alicuota != null ? Number(di.iva_alicuota) : null;
         const incluyeIva = (it.incluye_iva != null) ? (it.incluye_iva === true) : facturaIncluyeIva;
@@ -4063,8 +4083,10 @@ function ventaDePartida(db, ocId) {
     // LO QUE SALIÓ Y TODAVÍA NO SE FACTURÓ. No entra en las tres filas —esas son
     // el comprobante— pero hay que decirlo: liquidar sin contarlo es liquidar de
     // menos, y el productor se entera después.
+    // En kilos del papel, igual que sinFacturarDePartida: son la misma cuenta y
+    // tienen que dar lo mismo.
     const sinFac = db.prepare(`
-      SELECT COALESCE(SUM((di.kg_despachados
+      SELECT COALESCE(SUM((${kgPapelSql('di')}
           - COALESCE((SELECT SUM(fd.kg) FROM sg_factura_despachos fd
               JOIN sg_ven_facturas fv ON fv.id = fd.factura_id
              WHERE fd.despacho_item_id = di.id AND ${facturaCuenta('fv')}),0))
@@ -10097,6 +10119,13 @@ const postRemito = (req, res) => {
       return res.status(400).json({ ok: false, error: ERROR_EN_VIAJE });
     }
 
+    // ¿ES UNA CADENA? Se pregunta con la MISMA regla que usan las listas de
+    // cadenas —SQL_ES_CADENA—, no con el modo de la pantalla: la pantalla es un
+    // pedido, y el que decide si a este cliente se le pueden declarar kilos de más
+    // es el servidor.
+    const esCadena = !!db.prepare(`SELECT 1 FROM sg_clientes c WHERE c.id=? AND ${SQL_ES_CADENA}`)
+      .get(Number(b.cliente_id));
+
     for (const it of items) {
       if (String(it.origen || '') === 'oc_item') continue;
       const loteId = Number(it.lote_id);
@@ -10129,8 +10158,13 @@ const postRemito = (req, res) => {
       }
       bultos = Math.round(bultos);
       const kg = +(bultos * kgPorBulto).toFixed(4);   // kg DERIVADO (nominal), nunca input libre
+      // LOS KILOS DEL PAPEL, si los hay. Los de arriba siguen siendo los que salen
+      // del galpón y los que baja el stock: esto es lo que va a decir el remito.
+      const dec = validarKgDeclarados({ esCadena, kgNominal: kg, kgDeclarados: it.kg_declarados,
+        etiqueta: 'Lote ' + loteId });
+      if (!dec.ok) return res.status(400).json({ ok: false, error: dec.error });
       pedidoLote[loteId] = (pedidoLote[loteId] || 0) + bultos;
-      lineas.push({ it, origen: 'lote', loteId, bultos, kgPorBulto, kg,
+      lineas.push({ it, origen: 'lote', loteId, bultos, kgPorBulto, kg, kgDeclarados: dec.kg,
         presentacionId: lp.presentacion_id, envaseId: lp.envase_id });
     }
     for (const loteId of Object.keys(pedidoLote)) {
@@ -10182,8 +10216,8 @@ const postRemito = (req, res) => {
       const ins = db.prepare(`INSERT INTO sg_despacho_items
         (despacho_id, origen, lote_id, oc_item_id, producto_id, presentacion_id, envase_id, kg_por_bulto,
          cantidad_presentaciones, bultos, kg_despachados, precio_por_kg, precio_lista_por_kg,
-         nota_precio, subtotal, margen_estimado, piso_id, modo_precio)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`);
+         nota_precio, subtotal, margen_estimado, piso_id, modo_precio, kg_declarados)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`);
       const lotesAfectados = new Set();
       let totalBultos = 0;   // FASE 2 — bultos del despacho (para la carga de la cooperativa)
       for (const ln of lineas) {
@@ -10237,7 +10271,10 @@ const postRemito = (req, res) => {
           ln.origen === 'lote' ? pisoLinea : null,
           // CÓMO SE PACTÓ. El precio se guarda por kilo igual; esto es para que la
           // liquidación que llegue después hable en la misma unidad que el trato.
-          (it.modo_precio === 'bulto') ? 'bulto' : 'kilo');
+          (it.modo_precio === 'bulto') ? 'bulto' : 'kilo',
+          // Los del papel. NO entran al subtotal ni al margen de arriba ni a
+          // descontarDeUbicacion de abajo: ésos son del galpón.
+          ln.kgDeclarados != null ? ln.kgDeclarados : null);
         if (ln.origen === 'lote') {
           // SACAR DEL PISO DE OTRO TAMPOCO. Si sólo se controlara recibir, se
           // podría vaciar el piso ajeno armando un remito. Cuando la línea no
@@ -10467,11 +10504,17 @@ router.get('/despachos/:id', requireAuth, (req, res) => {
       LEFT JOIN sg_pedidos p ON p.id=d.pedido_id
       LEFT JOIN sg_proveedores f ON f.id=d.fletero_id WHERE d.id=?`).get(req.params.id);
     if (!d) return res.status(404).json({ ok: false, error: 'No encontrado' });
-    d.items = db.prepare(`SELECT di.*, l.codigo_lote, pr.nombre AS producto_nombre, ps.nombre AS presentacion_nombre
+    // EL ENVASE, para el papel: la cadena recibe cajones y tiene que poder
+    // controlar qué cajón le llegó (Pablo, 9/9/2026: «agregar detalle del envase»).
+    // Sale del snapshot del renglón y, en los viejos que no lo guardaron, del lote.
+    d.items = db.prepare(`SELECT di.*, l.codigo_lote, pr.nombre AS producto_nombre, ps.nombre AS presentacion_nombre,
+        COALESCE(ev.nombre, evl.nombre) AS envase_nombre
       FROM sg_despacho_items di
       LEFT JOIN sg_lotes l ON l.id=di.lote_id
       LEFT JOIN sg_productos pr ON pr.id=di.producto_id
-      LEFT JOIN sg_presentaciones ps ON ps.id=di.presentacion_id WHERE di.despacho_id=?`).all(req.params.id);
+      LEFT JOIN sg_presentaciones ps ON ps.id=di.presentacion_id
+      LEFT JOIN sg_envases ev ON ev.id=di.envase_id
+      LEFT JOIN sg_envases evl ON evl.id=l.envase_id WHERE di.despacho_id=?`).all(req.params.id);
     // ¿YA SE FACTURÓ? De eso depende que se le pueda corregir el precio: una vez
     // en un comprobante, el número lo tiene el cliente. Sólo cuentan las
     // facturas vivas — una acreditada dejó la mercadería entregada sin
@@ -12508,7 +12551,9 @@ router.get('/cc-clientes', requireAuth, (req, res) => {
         -- sólo las facturas: un remito documentado con la liquidación del cliente
         -- seguía contando entero como "sin facturar", y esa plata quedaba sumada
         -- dos veces en la pantalla —una en el saldo y otra acá—.
-        COALESCE((SELECT SUM((di.kg_despachados
+        -- EN KILOS DEL PAPEL (V1040): lo que se le puede facturar a una cadena es
+        -- lo que dijo el remito, así que lo que falta facturar también.
+        COALESCE((SELECT SUM((${kgPapelSql('di')}
                      - COALESCE((SELECT SUM(fd.kg) FROM sg_factura_despachos fd
                          JOIN sg_ven_facturas fv ON fv.id=fd.factura_id
                         WHERE fd.despacho_item_id=di.id
@@ -12521,7 +12566,7 @@ router.get('/cc-clientes', requireAuth, (req, res) => {
                     FROM sg_despacho_items di
                     JOIN sg_despachos d ON d.id=di.despacho_id AND d.activo=1
                    WHERE d.cliente_id=c.id AND d.estado <> 'rechazado_total'
-                     AND (di.kg_despachados
+                     AND (${kgPapelSql('di')}
                           - COALESCE((SELECT SUM(fd.kg) FROM sg_factura_despachos fd
                               JOIN sg_ven_facturas fv ON fv.id=fd.factura_id
                              WHERE fd.despacho_item_id=di.id

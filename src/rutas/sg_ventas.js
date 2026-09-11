@@ -14,6 +14,7 @@ import { cuentaCorrienteDe, cuentasDeCobranza, modeloCobranzaLineas,
          cuentaCarteraCheques }
   from '../servicios/asiento-cobranza.js';
 import { repartirAmbito, partesDeMedio } from '../servicios/sg_cobro_ambito.js';
+import { kgDelPapel } from '../servicios/sg_kilos_del_papel.js';
 import { puedeMoverCuenta } from './sg_tesoreria.js';
 // EL ASIENTO DE VENTA VIVE EN UN SOLO LUGAR. Estaba acá adentro y el otro
 // camino que emite facturas —la facturación directa, por afip-wsfe-emision—
@@ -467,7 +468,10 @@ router.post('/liquidaciones', requireAuth, (req, res) => {
           // hace un minuto-- para documentar dos veces los mismos kilos. La
           // transacción se cae entera, así que no queda media liquidación.
           if (diId != null && kg > 0) {
-            const di = db.prepare('SELECT kg_despachados FROM sg_despacho_items WHERE id=?').get(diId);
+            // EN KILOS DEL PAPEL. La liquidación la manda la cadena con los kilos que
+            // recibió, que son los que dijo el remito: si acá se mirara el galpón, el
+            // remito que declaró 15 kg de una partida de 14 no se podría liquidar entero.
+            const di = db.prepare('SELECT kg_despachados, kg_declarados FROM sg_despacho_items WHERE id=?').get(diId);
             if (!di) throw new Error('El renglón ' + diId + ' del remito no existe');
             const yaFac = db.prepare(`SELECT COALESCE(SUM(fd.kg),0) s FROM sg_factura_despachos fd
               JOIN sg_ven_facturas f ON f.id=fd.factura_id
@@ -476,7 +480,7 @@ router.post('/liquidaciones', requireAuth, (req, res) => {
             const yaLiq = db.prepare(`SELECT COALESCE(SUM(ld.kg),0) s FROM sg_liquidacion_despachos ld
               JOIN sg_ven_liquidaciones l ON l.id=ld.liquidacion_id
               WHERE ld.despacho_item_id=? AND COALESCE(l.estado,'') <> 'anulada'`).get(diId).s;
-            const pend = Math.round(((Number(di.kg_despachados) || 0) - yaFac - yaLiq) * 100) / 100;
+            const pend = Math.round((kgDelPapel(di) - yaFac - yaLiq) * 100) / 100;
             if (kg > pend + 0.01) {
               throw new Error('Ese renglón del remito tiene ' + pend + ' kg pendientes y se '
                 + 'quieren liquidar ' + kg + '. Puede que lo hayan facturado desde otra pantalla.');

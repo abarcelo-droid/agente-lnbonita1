@@ -233,7 +233,10 @@ test('y el cliente sale de la lista que corresponde', () => {
 
 test('viajan al servidor', () => {
   const i = PANEL.indexOf('function sgDespGuardar(){');
-  const b = PANEL.slice(i, i + 3200);
+  // Hasta donde TERMINA la función, no «los próximos N caracteres»: con cada
+  // renglón que se le agrega, lo buscado queda fuera de la ventana y el test se
+  // pone en rojo sin que nada se haya roto.
+  const b = PANEL.slice(i, PANEL.indexOf('\r\n}', i));
   assert.match(b, /turno:\(eid\('sg-desp-turno'\)\.value\|\|''\)\.trim\(\),/);
   assert.match(b, /oc_cliente:\(eid\('sg-desp-occli'\)\.value\|\|''\)\.trim\(\),/);
   // Y al guardar se refresca la lista de la que se salió: el remito a la cadena no
@@ -248,7 +251,7 @@ test('el remito se imprime, y el turno y la OC van arriba', () => {
   // acompaña la mercadería se hacía a mano.
   const i = PANEL.indexOf('function sgDespImprimir(id){');
   assert.ok(i > 0, 'no existe la impresión del remito');
-  const b = PANEL.slice(i, i + 3000);
+  const b = PANEL.slice(i, PANEL.indexOf('\r\n}', i));
   assert.match(b, /caja\('Turno de descarga', d\.turno\)/);
   assert.match(b, /caja\('OC del cliente', d\.oc_cliente\)/);
   // Si el remito no los trae, no se dibujan: en uno común serían dos rótulos
@@ -260,21 +263,26 @@ test('el remito se imprime, y el turno y la OC van arriba', () => {
 
 test('y el papel trae lo que un remito tiene que traer', () => {
   const i = PANEL.indexOf('function sgDespImprimir(id){');
-  const b = PANEL.slice(i, i + 3000);
+  const b = PANEL.slice(i, PANEL.indexOf('\r\n}', i));
   // «Flete» y no «Transporte»: el selector de transporte se sacó (2/9/2026), y lo
   // que hace falta en el papel es quién trae el camión y quién lo paga.
+  // Y ENVASE y KG/BULTO desde la V1040 (Pablo, 9/9/2026): la cadena recibe cajones
+  // y tiene que poder controlar qué cajón le llegó y cuánto pesa cada uno.
   for (const dato of ['Cliente', 'Fecha', 'Flete', 'Chofer / dominio',
-                      'Lote', 'Producto', 'Cajones', 'Recib\\u00ed conforme']) {
+                      'Lote', 'Producto', 'Envase', 'Cajones', 'Kg/bulto', 'Recib\\u00ed conforme']) {
     assert.match(b, new RegExp(dato), 'al remito impreso le falta: ' + dato);
   }
   // Total de cajones y de kilos: es contra lo que firma el que recibe.
   assert.match(b, /its\.reduce\(function\(a,x\)\{return a\+\(Number\(x\.bultos\)\|\|0\);\},0\)/);
-  assert.match(b, /its\.reduce\(function\(a,x\)\{return a\+\(Number\(x\.kg_despachados\)\|\|0\);\},0\)/);
+  // Los kilos son LOS DEL PAPEL: si al súper se le declararon más, el total que
+  // firma el que recibe es ése. Sumar los del galpón daría un total que no coincide
+  // con los renglones de arriba.
+  assert.match(b, /return a\+sgDespKgPapel\(\{ kg_declarados: x\.kg_declarados, kg: x\.kg_despachados \}\);/);
 });
 
 test('y se ofrece imprimirlo apenas se guarda', () => {
   const i = PANEL.indexOf('function sgDespGuardar(){');
-  assert.match(PANEL.slice(i, i + 3200), /if \(r\.data && r\.data\.id\) sgDespImprimir\(r\.data\.id\);/);
+  assert.match(PANEL.slice(i, PANEL.indexOf('\r\n}', i)), /if \(r\.data && r\.data\.id\) sgDespImprimir\(r\.data\.id\);/);
   // También desde el renglón de la lista, para reimprimirlo.
   const j = PANEL.indexOf('function sgDespListar(modo){');
   assert.match(PANEL.slice(j, j + 2600), /onclick="sgDespImprimir\('\+d\.id\+'\)">🖨<\/button>/);

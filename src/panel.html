@@ -23581,6 +23581,9 @@ SG_MANUAL.ccclientes = { titulo: 'Cuenta corriente de clientes', html:
   + '<p>Las columnas <b>suman</b>: lo <b>contabilizado</b> —lo que salió con comprobante— más lo '
   + '<b>sin facturar</b> —la parte acordada que todavía no tiene papel— dan el <b>saldo</b>. Y '
   + 'aparte va la <b>mercadería entregada con remito</b> que ni siquiera se facturó.</p>'
+  + '<p><span class="ver">V1040</span> A una cadena, esa columna cuenta <b>los kilos que dijo el '
+  + 'remito</b>, que pueden ser más que los que salieron del galpón: son los que se le pueden '
+  + 'facturar.</p>'
   + '<div class="ojo">Son dos números ciertos y distintos, no un error: a AFIP se le informa lo '
   + 'facturado, y al cliente se le cobra lo acordado. Por eso al cobrar se puede decir contra qué '
   + 'mitad va cada medio de pago.</div>'
@@ -23797,6 +23800,35 @@ SG_MANUAL.ventas = { titulo: 'Remitos y Facturación', html:
   + 'en un piso del galpón: prometer lo que todavía viene es la forma de quedar mal dos veces, '
   + 'con el cliente y con el stock.</div>'
   + '<p>Al guardar, <b>el remito se imprime solo</b>: es el papel que se sube al camión.</p>'
+  + '<p><span class="ver">V1040</span> El papel trae, renglón por renglón, el <b>envase</b> y los '
+  + '<b>kg por bulto</b>. La cadena recibe cajones: con eso controla qué cajón le llegó y cuánto '
+  + 'pesa cada uno sin tener que dividir.</p>'
+
+  + '<h3>⚖️ Al súper, más kilos que los de la partida <span class="ver">V1040</span></h3>'
+  + '<p>El cajón entra pesado por un factor —14 kg por cajón— y la cadena lo pesa en su '
+  + 'balanza al recibirlo. Si su balanza dice 15, el remito tiene que decir 15 o la recepción '
+  + 'no cierra. Por eso, <b>sólo en el remito a un supermercado</b>, cada renglón tiene un '
+  + 'casillero más: <b>los kilos que va a decir el remito</b>. Vacío es «los mismos que '
+  + 'salen», que es el caso normal.</p>'
+  + '<ul>'
+  + '<li><b>El stock baja lo que sale, no lo declarado.</b> De la partida salió un cajón: '
+  + 'descontarle 15 kg a una partida de 14 la dejaría en negativo por una diferencia de '
+  + 'balanza. Los kilos de más son una declaración en el papel.</li>'
+  + '<li><b>Lo que se imprime y lo que se puede facturar son los declarados.</b> Si no, el remito '
+  + 'diría 15 y la factura quedaría trabada en 14. Lo mismo al recibir la liquidación de la '
+  + 'cadena.</li>'
+  + '<li><b>Los kilos firmes los da la recepción de la cadena.</b> Si recibió menos, se factura '
+  + 'menos: no hace falta tocar el remito.</li>'
+  + '<li>Si la cadena <b>devuelve el renglón entero</b>, se cancela entero —los 15 del papel—, '
+  + 'aunque del galpón hayan salido 14.</li>'
+  + '<li>Todo lo que mide <b>«remitido y sin facturar»</b> cuenta en kilos del papel: la columna '
+  + 'de mercadería entregada de la cuenta corriente del cliente, y el <b>freno que no deja '
+  + 'liquidarle una partida al productor</b> mientras tenga ventas sin comprobante.</li>'
+  + '</ul>'
+  + '<div class="ojo">Tiene tres frenos: <b>sólo a un cliente que sea cadena</b> —a otro, el '
+  + 'remito dice lo que salió—; <b>sólo más, nunca menos</b> —declarar menos no destraba '
+  + 'nada—; y <b>no más de la mitad por encima</b> de lo que sale. Ninguna balanza se equivoca '
+  + 'medio cajón; un cero de más, sí, y lo declarado es lo que después se puede facturar.</div>'
 
   + '<h3>Corregir el precio de un remito</h3>'
   + '<p>Se entra con el <b>🔍</b> de la fila. Pide <b>motivo</b> y rehace el margen. Pero si ese '
@@ -23922,6 +23954,8 @@ SG_MANUAL.ventas = { titulo: 'Remitos y Facturación', html:
   + '<li><b>V1038</b> — <b>Descuento super</b>: el porcentaje que se lleva la cadena sale como un '
   + 'renglón del comprobante, se propone desde la ficha del cliente, y se registra en su propia '
   + 'cuenta contable.</li>'
+  + '<li><b>V1040</b> — al <b>súper se le pueden remitir más kilos</b> que los de la partida, sin '
+  + 'tocar el stock; y el remito impreso trae <b>envase y kg por bulto</b>.</li>'
   + '</ul>'
 };
 
@@ -24504,14 +24538,30 @@ function sgDespImprimir(id){
         +(d.fletero_nombre?(' · '+(sgFletePagaTxt(d.flete_a_cargo || d.flete_paga, d.flete_pagado_por))):'')+'</td>'
         +'<td><b>Chofer / dominio</b></td><td>'+escH(d.chofer||'—')+' · '+escH(d.dominio||'—')+'</td></tr>'
       +'</tbody></table>'
-      +'<table><thead><tr><th>Lote</th><th>Producto</th><th class="d">Cajones</th><th class="d">Kg</th></tr></thead><tbody>'
+      // ── ENVASE Y KG/BULTO (Pablo, 9/9/2026) ──────────────────────────────
+      // La cadena recibe CAJONES: para controlar la entrega necesita saber qué cajón
+      // y cuánto pesa cada uno. Y los kilos son LOS DEL PAPEL —los declarados, si al
+      // súper se le remitieron más—, así que el kg/bulto sale de esos mismos: un
+      // remito que dijera «1 cajón × 14 kg = 15 kg» no cerraría a la vista de nadie.
+      +'<table><thead><tr><th>Lote</th><th>Producto</th><th>Envase</th>'
+      +'<th class="d">Cajones</th><th class="d">Kg/bulto</th><th class="d">Kg</th></tr></thead><tbody>'
       +its.map(function(it){
+        var kgP = sgDespKgPapel({ kg_declarados: it.kg_declarados, kg: it.kg_despachados });
+        var b = Number(it.bultos) || 0;
+        // CON DECIMALES. nr() redondea a entero, y en el papel con el que la cadena
+        // controla el peso un cajón de 18,5 kg no puede decir «19».
         return '<tr><td><code>'+escH(it.codigo_lote||'')+'</code></td><td>'+escH(it.producto_nombre||'')+'</td>'
-          +'<td class="d">'+nr(it.bultos)+'</td><td class="d">'+nr(it.kg_despachados)+'</td></tr>';
+          +'<td>'+escH(it.envase_nombre||'—')+'</td>'
+          +'<td class="d">'+nr(b)+'</td>'
+          +'<td class="d">'+(b>0?sgMilShow(Math.round(kgP/b*100)/100):'—')+'</td>'
+          +'<td class="d">'+sgMilShow(kgP)+'</td></tr>';
       }).join('')
-      +'<tr class="tot"><td colspan="2">Total</td>'
+      +'<tr class="tot"><td colspan="3">Total</td>'
       +'<td class="d">'+nr(its.reduce(function(a,x){return a+(Number(x.bultos)||0);},0))+'</td>'
-      +'<td class="d">'+nr(its.reduce(function(a,x){return a+(Number(x.kg_despachados)||0);},0))+'</td></tr>'
+      +'<td class="d"></td>'
+      +'<td class="d">'+sgMilShow(Math.round(its.reduce(function(a,x){
+          return a+sgDespKgPapel({ kg_declarados: x.kg_declarados, kg: x.kg_despachados });
+        },0)*100)/100)+'</td></tr>'
       +'</tbody></table>'
       +(d.observaciones?('<div style="margin-top:12px;font-size:11.5px"><b>Observaciones:</b> '+escH(d.observaciones)+'</div>'):'')
       +'<div style="margin-top:34px;display:flex;gap:40px;font-size:11px">'
@@ -24532,7 +24582,7 @@ function sgDespImprimir(id){
 function sgDespOpen(modo){
   SG.despModo = (modo === 'super') ? 'super' : 'normal';
   var sup = SG.despModo === 'super';
-  SG.despItems=[]; SG.despLotes={};
+  SG.despItems=[]; SG.despLotes={};   // cada renglón nuevo arranca sin kilos declarados
   // Los dos campos de la cadena aparecen SÓLO en su modo: preguntarle el turno de
   // descarga al que carga una camioneta para el puesto es pedirle un dato que no
   // existe.
@@ -24613,6 +24663,30 @@ function sgDespOnAdd(tipo, fuenteId, kg, meta){
   sgDespRender();
 }
 function sgDespDelItem(i){ SG.despItems.splice(i,1); sgDespRender(); }
+
+// ══ LOS KILOS DEL PAPEL, EN EL REMITO A UNA CADENA ═══════════════════════
+//
+// Pablo, 9/9/2026: «si la partida tiene 14 kilos por ingresos, debemos poder poner
+// a mano 15 kg para que figure en el remito. Los kilos quedan firmes con las
+// recepciones del supermercado y ahí sacamos los kilos para facturar».
+//
+// Los cajones siguen siendo la cantidad y los kilos que salen del galpón se siguen
+// derivando de ellos: eso es lo que baja el stock. Esto es lo que va a decir el
+// PAPEL. Vacío es «lo mismo que sale», que es el caso de casi todos los renglones.
+//
+// Se lleva por separado de it.kg a propósito: si pisara it.kg, el servidor volvería
+// a derivar los cajones de ahí y un 15 sobre cajones de 14 sería «1,07 cajones».
+function sgDespKgPapel(it){
+  var d = Number(it && it.kg_declarados);
+  return d > 0 ? d : (Number(it && it.kg) || 0);
+}
+function sgDespUpdDecl(i, v){
+  var it = SG.despItems[i]; if (!it) return;
+  var n = sgMilParse(v);
+  // Igual a lo que sale no es una declaración: se guarda como nada.
+  it.kg_declarados = (n > 0 && Math.abs(n - (Number(it.kg) || 0)) >= 0.005) ? n : '';
+  sgDespRender();
+}
 function sgDespUpdNR(i,c,v){ SG.despItems[i][c]=v; sgDespTotal(); }
 
 // ══ EL PRECIO DEL REMITO, EN LA UNIDAD EN QUE SE VENDE ════════════════════
@@ -24694,13 +24768,27 @@ function sgDespRender(){
     var info = enViaje
       ? '<div style="font-size:11px;color:var(--mut);grid-column:1/-1;margin:-2px 0 4px">🚚 Todavía no llegó: sale del depósito cuando se reciba</div>'
       : '';
-    return '<div style="display:grid;grid-template-columns:1.7fr 0.7fr 0.8fr auto;gap:6px;align-items:center;margin-bottom:2px">'
+    // En el remito a una cadena, una columna más: los kilos del papel. Sólo para lo
+    // que sale del stock —lo que viene en viaje ni siquiera se puede remitir—.
+    var sup = SG.despModo === 'super' && !enViaje;
+    var decl = Number(it.kg_declarados) > 0;
+    return '<div style="display:grid;grid-template-columns:'
+      + (sup ? '1.5fr 0.55fr 0.75fr 0.8fr auto' : '1.7fr 0.7fr 0.8fr auto')
+      + ';gap:6px;align-items:center;margin-bottom:2px">'
       +'<div>'
         +'<div style="font-size:13.5px;font-weight:600;line-height:1.2">'
           +(enViaje?'🚚 ':(lote&&lote.semaforo?sgSemEmoji(lote.semaforo)+' ':''))+esc(pnombre)+'</div>'
         +'<div style="font-size:11px;color:var(--mut);font-family:ui-monospace,monospace;margin-top:1px">'+sub+'</div>'
       +'</div>'
       +'<input type="number" placeholder="cj" value="'+(it.bultos||'')+'" onchange="sgDespUpdBultos('+i+',this.value)">'
+      +(sup
+          ? ('<input type="text" inputmode="decimal" placeholder="'+sgMilShow(kg)+' kg"'
+            +' value="'+(decl?sgMilShow(it.kg_declarados):'')+'"'
+            +' onchange="sgDespUpdDecl('+i+',this.value)"'
+            +' title="Los kilos que va a decir el remito. Vacío = los '+sgMilShow(kg)+' kg que salen. '
+            +'El stock baja lo que sale, no esto."'
+            +(decl?' style="border-color:#b45309;font-weight:600"':'')+'>')
+          : '')
       +'<input type="number" placeholder="'+(sgDespPorBulto(it)?'$/bulto':'$/kg')+' sugerido" value="'+sgDespPrecioVista(it)+'"'
         +' onchange="sgDespPrecioSet('+i+',this.value)"'
         +' title="'+(sgDespPorBulto(it)
@@ -24718,6 +24806,11 @@ function sgDespRender(){
           : '')
       // POR QUÉ ESE PRECIO. Hoy eso vive en un chat de WhatsApp: el que factura
       // no lo tiene y termina llamando para preguntar.
+      +((sup && decl)
+          ? '<div style="grid-column:1/-1;font-size:11px;color:#92400e;margin:-2px 0 2px">'
+            + 'El remito dice <b>'+sgMilShow(it.kg_declarados)+' kg</b> · del stock salen '+sgMilShow(kg)+' kg'
+            + ' · se le puede facturar hasta lo que dice el remito</div>'
+          : '')
       +'<input placeholder="por qué ese precio (lo ve el que factura)" value="'+esc(it.nota||'')+'" onchange="sgDespUpdNR('+i+',\'nota\',this.value)" style="grid-column:1/-1;font-size:11.5px;padding:3px 6px">'
       +info+'</div>';
   }).join('');
@@ -24730,7 +24823,7 @@ function sgDespRender(){
 function sgDespTotal(){
   var tot=0, enViaje=0;
   SG.despItems.forEach(function(it){
-    tot += (Number(it.kg)||0) * (Number(it.precio)||0);
+    tot += sgDespKgPapel(it) * (Number(it.precio)||0);
     if(it.origen==='oc_item') enViaje++;
   });
   eid('sg-desp-total').innerHTML='Total: '+sgMoney(tot)
@@ -24821,6 +24914,8 @@ function sgDespGuardar(){
       lote_id:it.lote_id?Number(it.lote_id):null,
       oc_item_id:it.oc_item_id?Number(it.oc_item_id):null,
       bultos:b, kg_despachados:Number(it.kg),
+      // Los del papel, sólo en el remito a una cadena. Vacío = lo que sale.
+      kg_declarados:(SG.despModo==='super' && Number(it.kg_declarados)>0) ? Number(it.kg_declarados) : null,
       precio_por_kg:Number(it.precio||0), nota_precio:it.nota||'',
       // CÓMO SE PACTÓ ESTE RENGLÓN. El precio viaja por kilo igual; esto es para
       // que la liquidación que llegue después hable en la misma unidad que el trato
