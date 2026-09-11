@@ -12853,6 +12853,86 @@ router.post('/gastos-factura', facturaGastoUpload.single('archivo'), requireAuth
   } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
 });
 
+// ── LAS PARTIDAS CUYA LIQUIDACIÓN CITA UNA FACTURA DE SERVICIO (V1049) ─────────
+//
+// Pablo, 11/9/2026: «una vez que está liquidado, los documentos asociados no pueden
+// eliminarse: no deberíamos poder eliminar una factura de fletero».
+//
+// «Asociado» es lo que el papel de una liquidación viva CITA como comprobante de lo que
+// se le descontó al productor. Se mira la copia que la liquidación guardó al emitirse
+// (comprobantes_json, V1046) y no lo que la base diría hoy: un renglón de flete en cero,
+// uno que el cliente devolvió entero o una factura que llegó después no están en ese
+// papel, y trabarlas obligaba a anular una liquidación ajena para corregirlas.
+//
+// Una liquidación de antes de la V1046 no guardó la copia: se lee como su reimpresión
+// (comprobantesDeLaLiquidacion, rutas/liquidaciones.js) — la descarga y el flete de
+// entrada de sus partidas, sin el flete de salida.
+//
+// La partida dada por liquidada A MANO (liquidada_en) no traba nada: no hay un papel en
+// el sistema que cite la factura.
+//
+// `memo` es para la lista: las liquidaciones de una partida se leen una vez por pedido,
+// no una vez por factura.
+function partidasLiquidadasDeFacturaGasto(db, facturaId, memo = new Map()) {
+  const una = (clave, fn) => { if (!memo.has(clave)) memo.set(clave, fn()); return memo.get(clave); };
+  const hay = (t) => una('tabla:' + t,
+    () => !!db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(t));
+  if (!hay('liquidaciones')) return [];
+  const id = Number(facturaId);
+  // Las partidas que la factura toca: las de sus recepciones y las de los renglones de
+  // sus remitos.
+  const ocs = db.prepare(`
+    SELECT r.oc_id AS oc_id FROM sg_factura_gasto_items fi
+      JOIN sg_gastos_directos g ON g.id = fi.gasto_id
+      JOIN sg_recepciones r ON r.id = g.recepcion_id
+     WHERE fi.factura_id = ?
+    UNION
+    SELECT oi.oc_id FROM sg_factura_gasto_items fi
+      JOIN sg_gastos_directos g ON g.id = fi.gasto_id
+      JOIN sg_despacho_items di ON di.despacho_id = g.despacho_id
+      JOIN sg_lotes l ON l.id = di.lote_id
+      JOIN sg_oc_items oi ON oi.id = l.oc_item_id
+     WHERE fi.factura_id = ?`).all(id, id).map((x) => Number(x.oc_id)).filter((x) => x > 0);
+  // Qué facturas cita una liquidación.
+  const citadas = (lq) => una('liq:' + lq.id, () => {
+    if (lq.comprobantes_json) {
+      try {
+        const g = JSON.parse(lq.comprobantes_json);
+        if (Array.isArray(g)) return new Set(g.map((c) => Number(c && c.factura_id)));
+      } catch (_) { /* se lee como la reimpresión, abajo */ }
+    }
+    const suyas = new Set(lq.oc_id ? [Number(lq.oc_id)] : []);
+    if (hay('liquidacion_partidas')) {
+      for (const p of db.prepare('SELECT oc_id FROM liquidacion_partidas WHERE liquidacion_id = ?').all(lq.id)) {
+        if (p.oc_id) suyas.add(Number(p.oc_id));
+      }
+    }
+    const s = new Set();
+    for (const oc of suyas) {
+      for (const c of comprobantesDeLaPartida(db, oc, { salida: false })) s.add(Number(c.factura_id));
+    }
+    return s;
+  });
+  const out = [];
+  for (const oc of [...new Set(ocs)].sort((a, b) => a - b)) {
+    // Las liquidaciones vivas de la partida: la de ella sola y la del grupo.
+    const vivas = una('oc:' + oc, () => {
+      const filas = db.prepare(
+        'SELECT id, oc_id, comprobantes_json FROM liquidaciones WHERE oc_id = ? AND eliminado_en IS NULL').all(oc);
+      if (hay('liquidacion_partidas')) {
+        filas.push(...db.prepare(`SELECT lq.id, lq.oc_id, lq.comprobantes_json FROM liquidacion_partidas lp
+            JOIN liquidaciones lq ON lq.id = lp.liquidacion_id AND lq.eliminado_en IS NULL
+           WHERE lp.oc_id = ?`).all(oc));
+      }
+      return filas;
+    });
+    if (!vivas.some((lq) => citadas(lq).has(id))) continue;
+    const o = una('partida:' + oc, () => db.prepare('SELECT trazabilidad, numero FROM sg_oc WHERE id = ?').get(oc) || {});
+    out.push({ oc_id: oc, partida: o.trazabilidad || o.numero || null });
+  }
+  return out;
+}
+
 // ══ ANULAR UNA FACTURA DE SERVICIO ═════════════════════════════════════════
 //
 // Sin esto, una factura mal cargada —número equivocado, importe equivocado,
@@ -12872,6 +12952,18 @@ router.post('/gastos-factura/:id/anular', requireAuth, express.json(), (req, res
     const f = db.prepare('SELECT * FROM sg_facturas_gasto WHERE id=?').get(req.params.id);
     if (!f) return res.status(404).json({ ok: false, error: 'Factura no encontrada' });
     if (!f.activo) return res.status(400).json({ ok: false, error: 'Esa factura ya está dada de baja' });
+    // ── LO QUE UNA LIQUIDACIÓN CITA NO SE ANULA (V1049) ──────────────────────
+    // El papel de la liquidación la cita como comprobante de lo que se le descontó al
+    // productor: anularla lo dejaría citando una factura que ya no existe.
+    const liquidadas = partidasLiquidadasDeFacturaGasto(db, f.id);
+    if (liquidadas.length) {
+      return res.status(400).json({ ok: false, error:
+        'Esta factura la cita como comprobante la liquidación de '
+        + (liquidadas.length === 1 ? 'la partida ' : 'las partidas ')
+        + liquidadas.map((x) => x.partida || x.oc_id).join(', ')
+        + ': es lo que se le descontó al productor, y no se puede anular. Si hay que corregirla, '
+        + 'primero se anula la liquidación (y si ya tiene pagos, antes el pago).' });
+    }
 
     // Si está contabilizada, primero se anula el asiento. Anular la factura y
     // dejar el asiento vivo la deja fuera del libro por el otro lado: un gasto
@@ -12912,6 +13004,14 @@ router.get('/gastos-factura', requireAuth, (req, res) => {
       FROM sg_facturas_gasto f
       LEFT JOIN sg_proveedores p ON p.id=f.proveedor_servicio_id
       WHERE ${cond.join(' AND ')} ORDER BY f.fecha_emision DESC, f.id DESC`).all(...par);
+    // Si la cita una liquidación viva, la pantalla no ofrece anularla (V1049). Un solo
+    // memo para toda la lista: las liquidaciones de cada partida se leen una vez.
+    const memo = new Map();
+    for (const f of filas) {
+      const lq = partidasLiquidadasDeFacturaGasto(db, f.id, memo);
+      f.liquidada = lq.length ? 1 : 0;
+      f.partidas_liquidadas = lq.map((x) => x.partida || x.oc_id).join(', ');
+    }
     res.json({ ok: true, data: filas });
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });

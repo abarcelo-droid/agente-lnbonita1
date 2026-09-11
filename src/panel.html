@@ -23263,6 +23263,15 @@ SG_MANUAL.gastos = { titulo: 'Gastos Directos', html:
   + 'no aparece en la lista de arriba justamente porque <b>ya está en una de esas '
   + 'facturas</b>. Sin la anulación, una factura mal cargada dejaba sus operaciones '
   + 'trabadas para siempre.</div>'
+  + '<p><span class="ver">V1049</span> <b>Lo que una liquidación cita no se anula.</b> El papel de una '
+  + 'liquidación cita las facturas de la descarga y del flete de entrada de sus partidas, y la del flete '
+  + 'de salida que se le adelantó al productor. Mientras esa liquidación esté viva, la fila muestra <b>🔒 '
+  + 'liquidada</b> y el sistema no deja anularla. Para corregirla, primero se anula la liquidación (y si '
+  + 'ya tiene pagos, antes el pago). Si la factura de la cooperativa lleva esa descarga junto con cargas, '
+  + 'queda trabada entera. La que ninguna liquidación cita —la carga sola, el flete de salida que pagamos '
+  + 'nosotros, el flete de salida de una partida a precio cerrado— se sigue pudiendo anular.</p>'
+  + '<p><span class="ver">V1049</span> Y <b>el asiento de una factura de servicio no se anula desde '
+  + 'Asientos</b>: se anula la factura, que se lleva su asiento.</p>'
 
   + '<h3>⚖️ Valorizar un flete de entrada es poner el precio <span class="ver">V1015</span></h3>'
   + '<p>El modal pedía además el <b>número de comprobante</b>, la <b>alícuota de IVA</b> y el '
@@ -23599,6 +23608,8 @@ SG_MANUAL.gastos = { titulo: 'Gastos Directos', html:
 
   + '<h3>Qué cambió, y desde cuándo</h3>'
   + '<ul>'
+  + '<li><span class="ver">V1049</span> Una factura que cita una liquidación viva no se puede anular: la '
+  + 'fila muestra 🔒. Su asiento tampoco se anula suelto desde Asientos.</li>'
   + '<li><span class="ver">V1048</span> El flete de <b>entrada</b> adelantado se descuenta solo en la '
   + 'liquidación, y el de salida de lo devuelto es pérdida de la partida.</li>'
   + '<li><span class="ver">V1047</span> Las <b>cargas de salida</b> de la cooperativa se valorizan en '
@@ -24611,7 +24622,9 @@ SG_MANUAL.liquidaciones = { titulo: 'Liquidaciones', html:
   + '<p>El PDF cita cada factura de terceros que se le descuenta al productor —del fletero, de la '
   + 'cooperativa— con <b>emisor, CUIT, número, fecha y el total</b> de la factura, entero, y abajo '
   + 'qué parte se imputó a esta liquidación. <span class="ver">V1046</span> Entra también la del '
-  + 'fletero del flete de salida adelantado, con lo que es de esta partida.</p>'
+  + 'fletero del flete de salida adelantado, con lo que es de esta partida. '
+  + '<span class="ver">V1049</span> Y mientras la liquidación esté viva, <b>esas facturas no se '
+  + 'pueden anular</b>: el papel las cita.</p>'
 
   + '<h3>Con qué asiento se contabiliza</h3>'
   + '<p>El asiento modelo de las liquidaciones se configura en esta pantalla y es del <b>módulo '
@@ -24624,6 +24637,8 @@ SG_MANUAL.liquidaciones = { titulo: 'Liquidaciones', html:
   + 'de cada partida a pizarra, y frena si falta valorizarlo por producto o cargar su factura.</li>'
   + '<li><span class="ver">V1048</span> También el flete de <b>entrada</b> adelantado llega solo, y el '
   + 'flete de salida de lo que el cliente devolvió no se le descuenta al productor.</li>'
+  + '<li><span class="ver">V1049</span> Las facturas de terceros que una liquidación cita ya no se '
+  + 'pueden anular mientras ella esté viva.</li>'
   + '</ul>'
 };
 
@@ -27622,9 +27637,14 @@ function sgFgYaCargadas(){
         + '<td style="text-align:right">'
           // El botón se ofrece por NIVEL, con la misma regla que usa el servidor:
           // ofrecerlo a quien va a recibir un 403 hace creer que rompió algo.
-          + (lnbPuedeAnular(['sg-gastos-directos', 'sg-control-coop'])
-              ? '<button class="btn bd bs" onclick="sgFgAnular(' + f.id + ',\''
-                + esc(f.numero || '') + '\')">Anular</button>' : '')
+          // LO QUE UNA LIQUIDACIÓN CITA NO SE ANULA (V1049): la fila lo dice en vez de
+          // ofrecer un botón que va a rebotar.
+          + (f.liquidada
+              ? '<span style="font-size:11px;color:var(--mut)" title="La cita la liquidación de '
+                + escH(f.partidas_liquidadas || '') + ': primero se anula la liquidación">🔒 liquidada</span>'
+              : (lnbPuedeAnular(['sg-gastos-directos', 'sg-control-coop'])
+                  ? '<button class="btn bd bs" onclick="sgFgAnular(' + f.id + ',\''
+                    + esc(f.numero || '') + '\')">Anular</button>' : ''))
         + '</td></tr>';
     }).join('');
   });
