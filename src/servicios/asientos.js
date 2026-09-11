@@ -241,6 +241,17 @@ export const ORIGENES_SG = [
     pantalla: 'Facturas por mercadería',
     como: 'ahí se da de baja el comprobante y su asiento juntos, y la partida vuelve a esperar factura' },
 
+  // LA FACTURA DE SERVICIO —fletero, cuadrilla, cooperativa— (V1049). Sin este renglón su
+  // asiento se anulaba desde Asientos con la factura viva: la deuda y el IVA quedaban
+  // afuera del libro, y se salteaba el freno de lo que una liquidación cita.
+  { modulo: 'gastos', tabla: 'sg_facturas_gasto', via: 'asiento_id',
+    vivo: [{ col: 'activo', sql: 'COALESCE(activo,1) = 1' }],
+    // El número se lee del papel y a veces ya trae el punto de venta («0003-00001234»):
+    // ponérselo de nuevo decía «0003-0003-00001234».
+    que: (r) => 'la factura de servicio ' + (/-/.test(String(r.numero || '')) ? r.numero : _nro(r)),
+    pantalla: 'Ingresar factura de servicio (Gastos Directos o Control Cooperativa), en la lista de las ya cargadas',
+    como: 'ahí se anula la factura, que se lleva su asiento, y sus operaciones vuelven a quedar para facturar' },
+
   { modulo: 'ventas', tabla: 'sg_ven_facturas', via: 'asiento_id',
     vivo: [{ col: 'estado', sql: "COALESCE(estado,'') <> 'anulada'" }],
     que: (r) => 'la factura de venta ' + _nro(r),
