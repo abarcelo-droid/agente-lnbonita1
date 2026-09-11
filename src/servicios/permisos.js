@@ -299,6 +299,10 @@ const LECTURA_CONTROLADA = new Set([
   // lo que faltaba era LEER — el menú escondía la solapa y la dirección se escribía
   // igual.
   '/api/sg/devoluciones',
+  // Y las que se le devuelven al proveedor desde la cámara (V1044): qué proveedor, su
+  // CUIT, cuánto y por qué. Las gobierna Stock. El prefijo de arriba no la cubre
+  // —matchea por segmento completo—, así que va aparte.
+  '/api/sg/devoluciones-stock',
   // LA OFERTA DE SAN GERÓNIMO: qué partidas hay, de QUÉ PROVEEDOR es cada una y
   // qué descuento comercial tiene ese proveedor. Es la lista de compras de la
   // casa. Estaba abierta a cualquiera que tuviera usuario —el menú escondía la

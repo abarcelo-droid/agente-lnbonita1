@@ -401,6 +401,40 @@ test('el piso de otro no se toca', () => {
   assert.equal(r.code, 403);
 });
 
+test('una partida con factor pero sin cajones contados se devuelve igual, en kilos', () => {
+  // La pesada en la balanza: tiene factor —el selector cuenta en cajones— pero ningún
+  // cajón contado. La pantalla manda las dos cosas y el servidor elige kilos. Si
+  // pidiera cajones, esa partida no se podría devolver nunca desde la pantalla.
+  const db = base();
+  db.prepare('UPDATE sg_lotes SET bultos=NULL WHERE id=1').run();
+  const r = montarAlta(db).correr(1, { bultos: 5, kg: 100, motivo: 'x' });
+  assert.equal(r.code, 200, r.error);
+  assert.equal(db.prepare('SELECT kg FROM sg_devolucion_stock_items').get().kg, 100);
+  // Y la pantalla manda las dos.
+  const g = hasta(PANEL, 'function sgDvpGuardar(){', '\r\n}');
+  assert.match(g, /if \(x\.bultos != null && Number\(x\.bultos\) > 0\) body\.bultos = Number\(x\.bultos\);\r?\n\s*body\.kg = Number\(x\.kg\);/);
+});
+
+test('una fecha que no es fecha no se guarda', () => {
+  // Se guardaba lo que viniera, y la lista lo dibujaba: una puerta para meter código en
+  // la pantalla de quien la abra.
+  const db = base();
+  const r = montarAlta(db).correr(1, { bultos: 2, motivo: 'x', fecha: '<img src=x onerror=alert(1)>' });
+  assert.equal(r.code, 400);
+  assert.match(r.error, /fecha no es válida/);
+  // Sin fecha, la de hoy.
+  assert.equal(montarAlta(db).correr(1, { bultos: 2, motivo: 'x' }).code, 200);
+  assert.match(db.prepare('SELECT fecha FROM sg_devoluciones_stock').get().fecha, /^\d{4}-\d{2}-\d{2}$/);
+  // Y las dos listas la escapan igual, por si llega por otro lado.
+  assert.match(hasta(PANEL, 'function sgDvpLoad(){', '\r\n}'), /escH\(sgDespFechaCorta\(d\.fecha\)\)/);
+  assert.match(hasta(PANEL, 'function sgDespListar(modo){', '\r\n}'), /\+escH\(sup\?sgDespFechaCorta\(d\.fecha_despacho\)/);
+});
+
+test('el aviso dice QUÉ hizo firme la partida', () => {
+  const b = handler('/lotes/:id/devolver-proveedor');
+  assert.match(b, /factura: 'llegó la factura', liquidacion: 'se liquidó', marca: 'se marcó a mano como firme'/);
+});
+
 test('la partida a granel se devuelve en kilos', () => {
   const db = base();
   db.prepare('UPDATE sg_lotes SET bultos=NULL, kg_por_bulto=NULL WHERE id=1').run();
@@ -415,10 +449,7 @@ test('la partida a granel se devuelve en kilos', () => {
 // 5 · ANULARLA
 // ══════════════════════════════════════════════════════════════════════════
 
-test('anular devuelve la mercadería al piso del que salió, y avisa a la partida', () => {
-  const db = base();
-  const id = devolver(db, { bultos: 10, kg: 200 });
-  db.prepare('UPDATE sg_devolucion_stock_items SET piso_id=4').run();
+function montarAnular(db, id, opts = {}) {
   const movidos = [], recalc = [];
   db.transaction = (fnx) => (...a) => fnx(...a);
   const mundo = {
@@ -426,6 +457,8 @@ test('anular devuelve la mercadería al piso del que salió, y avisa a la partid
     ubicMover: (d, lote, piso, b, k) => movidos.push({ lote, piso, b, k }),
     recalcCostoLote: (d, l) => recalc.push(['costo', l]),
     recalcEstadoLote: (d, l) => recalc.push(['estado', l]),
+    precioFirmeDetalle: () => opts.firme
+      ? { error: 'La partida ya tiene factura: anulala primero.', firme: { como: 'factura', id: 1 } } : null,
   };
   // eslint-disable-next-line no-new-func
   const h = new Function(...Object.keys(mundo), 'return ' + handler('/devoluciones-stock/:id/anular') + ';')(
@@ -435,6 +468,14 @@ test('anular devuelve la mercadería al piso del que salió, y avisa a la partid
     h({ params: { id }, body }, { status(c) { code = c; return this; }, json(j) { out = j; return this; } });
     return { code, ...out };
   };
+  return { correr, movidos, recalc };
+}
+
+test('anular devuelve la mercadería al piso del que salió, y avisa a la partida', () => {
+  const db = base();
+  const id = devolver(db, { bultos: 10, kg: 200 });
+  db.prepare('UPDATE sg_devolucion_stock_items SET piso_id=4').run();
+  const { correr, movidos, recalc } = montarAnular(db, id);
   assert.equal(correr({ motivo: '' }).code, 400, 'se anuló sin motivo');
   assert.equal(correr({ motivo: 'se cargó a la partida equivocada' }).code, 200);
   assert.equal(db.prepare('SELECT estado FROM sg_devoluciones_stock WHERE id=?').get(id).estado, 'anulada');
@@ -442,6 +483,38 @@ test('anular devuelve la mercadería al piso del que salió, y avisa a la partid
   assert.deepEqual(recalc, [['costo', 1], ['estado', 1]]);
   // Y ya no cuenta como salida.
   assert.equal(kg(db, F.KG_DISPONIBLE), 1000);
+});
+
+test('si bajó la deuda y la partida ya quedó firme, no se anula: se reabriría lo cerrado', () => {
+  // Llegó la factura del proveedor después de la devolución. Anularla subiría otra vez
+  // la deuda y el costo con el precio ya cerrado: se anula primero la factura.
+  const db = base();
+  const id = devolver(db, { bultos: 10, kg: 200, descuenta: 1 });
+  const { correr, movidos } = montarAnular(db, id, { firme: true });
+  const r = correr({ motivo: 'se cargó mal' });
+  assert.equal(r.code, 400);
+  assert.match(r.error, /anulala primero/);
+  assert.equal(db.prepare('SELECT estado FROM sg_devoluciones_stock WHERE id=?').get(id).estado, 'registrada');
+  assert.deepEqual(movidos, []);
+});
+
+test('pero la que no bajó la deuda se anula igual: sólo devuelve la mercadería al piso', () => {
+  const db = base();
+  const id = devolver(db, { bultos: 10, kg: 200, descuenta: 0 });
+  db.prepare('UPDATE sg_devolucion_stock_items SET piso_id=4').run();
+  const r = montarAnular(db, id, { firme: true }).correr({ motivo: 'se cargó mal' });
+  assert.equal(r.code, 200, r.error);
+});
+
+test('y la devolución de un REMITO tiene el mismo freno', () => {
+  // Desde la V1043 lo que vuelve al productor baja la deuda de verdad: anularla con la
+  // partida firme la subiría otra vez.
+  const i = SG.indexOf("router.post('/devoluciones/:id/anular'");
+  const b = SG.slice(i, SG.indexOf('\r\n});', i));
+  assert.match(b, /dvi\.destino = 'proveedor'/);
+  assert.match(b, /COALESCE\(dvi\.descuenta_al_productor, 1\) = 1/);
+  assert.match(b, /const firme = precioFirmeDetalle\(db, x\.oc_id, 'anular esta devolución'\);/);
+  assert.ok(b.indexOf('precioFirmeDetalle(') < b.indexOf('db.transaction('), 'frena después de anular');
 });
 
 test('se marca anulada ANTES de recalcular, o la partida la seguiría contando', () => {
@@ -594,6 +667,35 @@ test('es de Stock, y la dirección nueva está declarada', () => {
   assert.match(hasta(PANEL, 'function sgDvpLoad(){', '\r\n}'), /lnbPuedeAnular\('sg-stock'\)/);
 });
 
+test('leerlas también es de Stock: la lista tiene el CUIT y el motivo de cada proveedor', () => {
+  // El prefijo de escritura sólo protege escribir. La lista de devoluciones de remito ya
+  // estaba cerrada a quien no tiene el módulo; ésta no puede quedar abierta.
+  const PER = leer('src/servicios/permisos.js');
+  assert.match(PER, /'\/api\/sg\/devoluciones-stock',/);
+});
+
+test('el selector no ofrece lo que va a rebotar, y después del aviso no deja cargar otra', () => {
+  const e = hasta(PANEL, 'function sgDvpElegir(tipo, fuenteId, kg, meta){', '\r\n}');
+  assert.match(e, /if \(meta\.lote && !meta\.lote\.proveedor_id\)/);
+  assert.match(e, /if \(SGDVP\.hecho\) return;/);
+  const g = hasta(PANEL, 'function sgDvpGuardar(){', '\r\n}');
+  const i = g.indexOf('if (r.data.aviso) {');
+  const aviso = g.slice(i, g.indexOf('return;', i));
+  // Queda como resultado: sin buscador, sin botón de registrar, con Cerrar.
+  assert.match(aviso, /SGDVP\.hecho = true;/);
+  assert.match(aviso, /eid\('sg-dvp-pick'\)\.innerHTML = '';/);
+  assert.match(aviso, /eid\('sg-dvp-btn'\)\.style\.display = 'none';/);
+  assert.match(aviso, /eid\('sg-dvp-cancelar'\)\.textContent = 'Cerrar';/);
+  // Y abrir otra vez lo deja listo.
+  const a = hasta(PANEL, 'function sgDvpAbrir(){', '\r\n}');
+  assert.match(a, /SGDVP\.hecho = false;/);
+  assert.match(a, /eid\('sg-dvp-btn'\)\.style\.display = '';/);
+});
+
+test('el libro de movimientos la dibuja con su ícono', () => {
+  assert.match(PANEL, /devolucion:'↩️', devolucion_proveedor:'↩️' \};/);
+});
+
 test('la limpieza de Stock se las lleva, los renglones antes que la cabecera', () => {
   const M = leer('src/servicios/sg_limpieza_mapa.js');
   const i = M.indexOf("tabla: 'sg_devolucion_stock_items'");
@@ -623,6 +725,9 @@ test('«baja lo disponible, los cajones y el piso» — y así es', () => {
 
 test('«si no tiene el precio firme baja la deuda y el costo; si lo tiene, es pérdida»', () => {
   assert.match(MAN, /<b>baja lo que se le debe al proveedor<\/b>, por producto y a su precio, y <b>baja el costo de la partida<\/b>/);
+  // Y dice lo que pasa con los gastos, que es lo que el test de arriba mide: el flete y
+  // la descarga quedan en lo que queda.
+  assert.match(MAN, /El flete y la descarga se pagaron por el camión entero y quedan repartidos en lo que queda/);
   assert.match(MAN, /<b>no le baja la deuda<\/b>: es pérdida nuestra/);
   assert.match(fn('kgDevueltoCamaraConCosto'), /it\.descuenta_al_productor = 1/);
 });

@@ -7740,7 +7740,7 @@ input[type=number]{-moz-appearance:textfield;appearance:textfield}
         <!-- LO QUE PASA CON LA PLATA, dicho ANTES de guardar y también después. -->
         <div id="sg-dvp-aviso" style="font-size:12px;margin-top:10px"></div>
         <div style="text-align:right;margin-top:14px">
-          <button class="btn bo" onclick="closeMB('sg-dvp-modal')">Cancelar</button>
+          <button class="btn bo" id="sg-dvp-cancelar" onclick="closeMB('sg-dvp-modal')">Cancelar</button>
           <button class="btn bb" id="sg-dvp-btn" onclick="sgDvpGuardar()">Registrar la devolución</button>
         </div>
       </div>
@@ -19110,7 +19110,8 @@ function sgLoteBajaToggle(){
 // pantalla de stock. Lo calcula el servidor y lo dice; si NO cierra, se avisa en
 // rojo: un listado que no cuadra y se calla es peor que no tenerlo.
 var SG_MOV_ICONO = { alta:'📥', salida:'🚚', merma:'🗑️',
-                     transformacion:'♻️', reproceso:'♻️', reclasificacion:'🏷️' };
+                     transformacion:'♻️', reproceso:'♻️', reclasificacion:'🏷️',
+                     devolucion:'↩️', devolucion_proveedor:'↩️' };
 function sgLoteMovs(id){
   var c = eid('sg-lote-movs'); if (!c) return;
   api('/api/sg/lotes/' + id + '/movimientos').then(function(r){
@@ -22136,7 +22137,7 @@ function sgDespListar(modo){
       var cliVista = sup ? (d.cliente_alias || d.cliente_nombre) : d.cliente_nombre;
       return '<tr><td'+(sup?sgDespTit(d.numero):'')+'><code>'+escH(d.numero||'')+'</code></td>'
         +'<td'+(sup?sgDespTit(d.fecha_despacho):'')+'>'
-          +(sup?sgDespFechaCorta(d.fecha_despacho):(d.fecha_despacho||'—'))+'</td>'
+          +escH(sup?sgDespFechaCorta(d.fecha_despacho):(d.fecha_despacho||'—'))+'</td>'
         +extra
         +'<td'+(sup?sgDespTit(d.cliente_nombre):'')+'>'+escH(cliVista||'—')+'</td>'
         +'<td'+(sup?sgDespTit(d.vendido):'')+'>'+escH(d.vendido||'—')+'</td>'
@@ -22298,6 +22299,9 @@ var SGDVP = { sel: null };
 
 function sgDvpAbrir(){
   SGDVP.sel = null;
+  SGDVP.hecho = false;
+  eid('sg-dvp-btn').style.display = '';
+  eid('sg-dvp-cancelar').textContent = 'Cancelar';
   // ABRE EN BLANCO: un formulario que sólo se esconde conserva lo de la vez pasada, y
   // acá eso sería devolverle al proveedor la partida de otro.
   eid('sg-dvp-motivo').value = ''; eid('sg-dvp-motivo-sel').value = '';
@@ -22315,6 +22319,14 @@ function sgDvpAbrir(){
 
 function sgDvpElegir(tipo, fuenteId, kg, meta){
   if (tipo !== 'lote') return;
+  if (SGDVP.hecho) return;   // ya se registró una: la ventana es para leer el aviso
+  // SIN ORDEN DE COMPRA NO HAY A QUIÉN DEVOLVÉRSELA. Un reproceso, una apertura: se
+  // dice acá y no después de llenar el motivo y apretar el botón.
+  if (meta.lote && !meta.lote.proveedor_id) {
+    toast('Esa partida no viene de una orden de compra: no hay proveedor a quien devolvérsela. '
+      + 'Si hay que sacarla, se carga como merma.', 'er');
+    return;
+  }
   var disp = Number(meta.kg_disponibles) || 0;
   if (kg > disp + 0.01) { toast('No se puede devolver más de lo que hay: quedan ' + nr(disp) + ' kg', 'er'); return; }
   SGDVP.sel = { lote_id: fuenteId, kg: kg, bultos: meta.bultos, kg_por_bulto: meta.kg_por_bulto,
@@ -22363,8 +22375,12 @@ function sgDvpGuardar(){
   var body = { motivo: motivo, piso_id: x.piso_id || null,
     fecha: eid('sg-dvp-fecha').value || null,
     chofer: (eid('sg-dvp-chofer').value || '').trim(), dominio: (eid('sg-dvp-dominio').value || '').trim() };
-  // En cajones si la partida los tiene; en kilos si entró pesada a granel.
-  if (x.bultos != null && Number(x.bultos) > 0) body.bultos = Number(x.bultos); else body.kg = Number(x.kg);
+  // LAS DOS: los cajones elegidos y los kilos que son. El servidor decide cuál vale con
+  // la regla de la partida —cajones si tiene cajones contados, kilos si entró pesada—.
+  // Mandar una sola hacía que una partida con factor pero sin cajones contados rebotara
+  // siempre: la pantalla mandaba cajones y el servidor pedía kilos.
+  if (x.bultos != null && Number(x.bultos) > 0) body.bultos = Number(x.bultos);
+  body.kg = Number(x.kg);
   var b = eid('sg-dvp-btn'); b.disabled = true;
   api('/api/sg/lotes/' + x.lote_id + '/devolver-proveedor', 'POST', body).then(function(r){
     b.disabled = false;
@@ -22379,10 +22395,17 @@ function sgDvpGuardar(){
     // SI NO BAJÓ LO QUE SE LE DEBE, LA VENTANA NO SE CIERRA: adentro queda lo que hay
     // que leer. Un cartelito que se va solo no alcanza para decir «esto es pérdida».
     if (r.data.aviso) {
+      // Queda como RESULTADO: el aviso y un solo botón, Cerrar. Si se pudiera volver a
+      // elegir, una segunda devolución saldría con el motivo de la primera y con el
+      // buscador mostrando los cajones de antes.
+      SGDVP.hecho = true;
       eid('sg-dvp-aviso').innerHTML = '<div style="border:1.5px solid #e0a72e;background:rgba(224,167,46,.10);'
-        + 'border-radius:8px;padding:9px 11px;color:#9a3412">⚠️ ' + escH(r.data.aviso) + '</div>';
-      sgDvpPintar();
-      eid('sg-dvp-btn').disabled = true;
+        + 'border-radius:8px;padding:9px 11px;color:#9a3412">⚠️ Devolución ' + escH(r.data.numero || '')
+        + ' registrada. ' + escH(r.data.aviso) + '</div>';
+      eid('sg-dvp-pick').innerHTML = '';
+      eid('sg-dvp-sel').innerHTML = '';
+      eid('sg-dvp-btn').style.display = 'none';
+      eid('sg-dvp-cancelar').textContent = 'Cerrar';
       return;
     }
     closeMB('sg-dvp-modal');
@@ -22406,7 +22429,7 @@ function sgDvpLoad(){
             : '<span class="bdg bpe" title="La partida ya tenía el precio firme: es pérdida nuestra">Firme</span>');
       return '<tr' + (anulada ? ' style="opacity:.55"' : '') + '>'
         + '<td title="' + escH(d.numero || '') + '"><code>' + escH(d.numero || '') + '</code></td>'
-        + '<td title="' + escH(d.fecha || '') + '">' + sgDespFechaCorta(d.fecha) + '</td>'
+        + '<td title="' + escH(d.fecha || '') + '">' + escH(sgDespFechaCorta(d.fecha)) + '</td>'
         + '<td title="' + escH(d.proveedor_nombre || '') + '">' + escH(d.proveedor_nombre || '—') + '</td>'
         + '<td title="' + escH(que + ' — ' + (d.motivo || '')) + '">' + escH(que || '—') + '</td>'
         + '<td style="text-align:right">' + nr(d.bultos) + '</td>'
@@ -24456,7 +24479,9 @@ SG_MANUAL.stock = { titulo: 'Stock', html:
   + 'el <b>piso</b>. Esos cajones no se pueden remitir más.</li>'
   + '<li><b>Para la plata, no.</b> Si la partida <b>no tiene el precio firme</b> —no llegó la '
   + 'factura ni se liquidó—, <b>baja lo que se le debe al proveedor</b>, por producto y a su '
-  + 'precio, y <b>baja el costo de la partida</b>: el costo por kilo de lo que queda no cambia.</li>'
+  + 'precio, y <b>baja el costo de la partida</b> a ese mismo precio. El flete y la descarga se '
+  + 'pagaron por el camión entero y quedan repartidos en lo que queda, así que su parte por '
+  + 'kilo sube un poco.</li>'
   + '<li>Si la partida <b>ya tenía el precio firme</b>, la devolución se registra igual pero '
   + '<b>no le baja la deuda</b>: es pérdida nuestra. La ventana <b>no se cierra</b> y lo dice. Si '
   + 'el proveedor manda una nota de crédito, se carga en su cuenta corriente.</li>'

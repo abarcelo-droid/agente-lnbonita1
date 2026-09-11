@@ -10965,6 +10965,11 @@ router.post('/lotes/:id/devolver-proveedor', requireAuth, express.json(), (req, 
     const kpb = kpbEfectivo(lote);
     const conCajones = (Number(lote.bultos) || 0) > 0 && kpb > 0;
     let bultos = 0, kg = 0;
+    // LA PANTALLA MANDA LAS DOS COSAS —los cajones que se eligieron y los kilos que
+    // son— y ACÁ se decide cuál vale. El selector cuenta en cajones cuando la partida
+    // tiene un factor, pero una partida pesada en la balanza puede tener el factor y
+    // ningún cajón contado: si el servidor pidiera cajones igual, esa partida no se
+    // podría devolver nunca desde la pantalla.
     if (conCajones) {
       bultos = Number(b.bultos);
       if (!(bultos > 0) || Math.abs(bultos - Math.round(bultos)) > 1e-6) {
@@ -10990,6 +10995,11 @@ router.post('/lotes/:id/devolver-proveedor', requireAuth, express.json(), (req, 
     // ── DE QUÉ PISO SALE ───────────────────────────────────────────────────
     // Misma regla que la merma: si tiene dueño, lo toca sólo él. Opcional sólo para
     // la mercadería de antes de los pisos, que no está ubicada en ningún lado.
+    // UNA FECHA ES UNA FECHA. Sin esto se guardaba lo que viniera, y la lista lo dibuja.
+    const fecha = (b.fecha == null || b.fecha === '') ? new Date().toISOString().slice(0, 10) : String(b.fecha);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(fecha)) {
+      return res.status(400).json({ ok: false, error: 'La fecha no es válida.' });
+    }
     const pisoId = (b.piso_id != null && b.piso_id !== '') ? Number(b.piso_id) : null;
     if (pisoId) {
       const noPuede = exigirPiso(db, req, pisoId, 'devolver mercadería');
@@ -11015,7 +11025,7 @@ router.post('/lotes/:id/devolver-proveedor', requireAuth, express.json(), (req, 
       const devId = db.prepare(`INSERT INTO sg_devoluciones_stock
           (numero, proveedor_id, fecha, motivo, chofer, dominio, estado, creado_por)
         VALUES (?,?,?,?,?,?, 'registrada', ?)`).run(
-        numero, lote.proveedor_id, val(b.fecha) || new Date().toISOString().slice(0, 10),
+        numero, lote.proveedor_id, fecha,
         motivo, val(b.chofer), val(b.dominio), uid(req)).lastInsertRowid;
       db.prepare(`INSERT INTO sg_devolucion_stock_items
           (devolucion_id, lote_id, piso_id, bultos, kg, descuenta_al_productor)
@@ -11035,7 +11045,9 @@ router.post('/lotes/:id/devolver-proveedor', requireAuth, express.json(), (req, 
       ...salida,
       // Lo que la pantalla tiene que decir después de guardar, sin adivinar.
       aviso: descuenta ? null
-        : 'La partida ya tenía el precio firme (' + (firme.firme.como === 'factura' ? 'factura' : 'liquidación')
+        : 'La partida ya tenía el precio firme ('
+          + ({ factura: 'llegó la factura', liquidacion: 'se liquidó', marca: 'se marcó a mano como firme' }[firme.firme.como]
+             || 'precio cerrado')
           + '): la devolución se registró, pero no le baja lo que se le debe al proveedor. '
           + 'Si él manda una nota de crédito, se carga en su cuenta corriente.',
     } });
@@ -11052,6 +11064,22 @@ router.post('/devoluciones-stock/:id/anular', requireAuth, express.json(), (req,
     const motivo = String((req.body && req.body.motivo) || '').trim();
     if (!motivo) return res.status(400).json({ ok: false, error:
       'Poné el motivo: una devolución anulada sin motivo, a los dos meses, es un número que nadie puede explicar.' });
+    // ── LO FIRME NO SE REABRE ──────────────────────────────────────────────
+    //
+    // Si la devolución BAJÓ la deuda y después la partida quedó firme —llegó la
+    // factura del proveedor, o se liquidó—, anularla subiría otra vez lo que se le
+    // debe y el costo, con el precio ya cerrado. Es la misma regla que deshacer una
+    // separación por calidad: se anula primero el comprobante.
+    //
+    // La que no bajó la deuda (la partida ya estaba firme al registrarla) se puede
+    // anular igual: sólo devuelve la mercadería al piso.
+    const itsFirme = db.prepare(`SELECT DISTINCT i.oc_id FROM sg_devolucion_stock_items it
+      JOIN sg_lotes l ON l.id = it.lote_id JOIN sg_oc_items i ON i.id = l.oc_item_id
+      WHERE it.devolucion_id = ? AND it.descuenta_al_productor = 1`).all(dv.id);
+    for (const x of itsFirme) {
+      const firme = precioFirmeDetalle(db, x.oc_id, 'anular esta devolución');
+      if (firme) return res.status(400).json({ ok: false, error: firme.error, firme: firme.firme });
+    }
     db.transaction(() => {
       const its = db.prepare('SELECT * FROM sg_devolucion_stock_items WHERE devolucion_id=?').all(dv.id);
       // Primero se marca anulada: así, cuando se recalcula la partida, ya no la cuenta.
@@ -11122,6 +11150,16 @@ router.post('/devoluciones/:id/anular', requireAuth, express.json(), (req, res) 
     const motivo = String(req.body.motivo || '').trim();
     if (!motivo) return res.status(400).json({ ok: false, error:
       'Poné el motivo: una devolución anulada sin motivo, a los dos meses, es un número que nadie puede explicar.' });
+    // LO FIRME NO SE REABRE. Desde la V1043 lo que vuelve al productor BAJA de verdad lo
+    // que se le debe: anular esa devolución con la partida ya firme subiría la deuda
+    // otra vez después de cerrado el precio.
+    for (const x of db.prepare(`SELECT DISTINCT i.oc_id FROM sg_devolucion_items dvi
+        JOIN sg_lotes l ON l.id = dvi.lote_id JOIN sg_oc_items i ON i.id = l.oc_item_id
+        WHERE dvi.devolucion_id = ? AND dvi.destino = 'proveedor'
+          AND COALESCE(dvi.descuenta_al_productor, 1) = 1`).all(dv.id)) {
+      const firme = precioFirmeDetalle(db, x.oc_id, 'anular esta devolución');
+      if (firme) return res.status(400).json({ ok: false, error: firme.error, firme: firme.firme });
+    }
     db.transaction(() => {
       for (const it of db.prepare('SELECT * FROM sg_devolucion_items WHERE devolucion_id=?').all(dv.id)) {
         // Se deshace exactamente lo que se hizo: lo que quedó en el piso se saca; lo
