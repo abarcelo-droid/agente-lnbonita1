@@ -23,7 +23,7 @@
 
 // El redondeo del repo: los bultos se cuentan enteros pero llegan como REAL de SQLite y
 // arrastran coma flotante. Sin esto, 44.99999 contra 45 da "falta 1 bulto".
-import { gastosSinFactura } from './sg_gastos_facturados.js';
+import { gastosSinFactura, resumenSalidaAdelantada } from './sg_gastos_facturados.js';
 import { kgPapelSql } from './sg_kilos_del_papel.js';
 
 const r2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
@@ -230,6 +230,26 @@ export function frenoParaLiquidar(db, ocId, facturaCuenta) {
       + 'se le descuenta al productor, así que la liquidación tiene que citar el comprobante '
       + '—CUIT, razón social, número y total— o la declaración jurada queda mal. Cargala en '
       + '«Gastos Directos → Fletes de entrada → 🧾 Ingresar factura» y volvé.';
+  }
+
+  // ── Y EL FLETE DE SALIDA QUE SE LE ADELANTÓ (V1046) ──────────────────────────
+  //
+  // Mismo criterio y mismo orden que el de entrada: primero se sabe cuánto es —por
+  // producto, porque un remito lleva mercadería de varias partidas— y después llega
+  // el papel que la liquidación tiene que citar.
+  const sal = resumenSalidaAdelantada(db, ocId);
+  if (sal.sin_valorizar > 0) {
+    return 'El flete de salida del remito ' + sal.remitos_sin_valorizar.join(', ') + ' se le adelantó '
+      + 'al productor y no está valorizado por producto: no se sabe cuánto de ese flete es de esta '
+      + 'partida, así que no se le puede descontar. Valorizalo en «Gastos Directos → Fletes de '
+      + 'salida» —si ya estaba valorizado, con «✏️ Editar»; si ya tiene la factura del fletero, '
+      + 'primero hay que anularla— y después cargá la factura.';
+  }
+  if (sal.sin_factura > 0) {
+    return 'El flete de salida del remito ' + sal.remitos_sin_factura.join(', ') + ' se le descuenta '
+      + 'al productor, pero todavía no tiene la factura del fletero cargada: la liquidación tiene que '
+      + 'citar el comprobante —CUIT, razón social, número y total— o la declaración jurada queda mal. '
+      + 'Cargala en «Gastos Directos → Fletes de salida → 🧾 Ingresar factura» y volvé.';
   }
   return null;
 }

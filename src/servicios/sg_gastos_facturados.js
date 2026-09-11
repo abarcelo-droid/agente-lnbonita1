@@ -29,7 +29,7 @@
 // tercero detrás y por eso no entran acá.
 export const TIPOS_DESCONTABLES = ['flete_entrada', 'descarga_ingreso'];
 
-const ROTULO = { flete_entrada: 'Flete', descarga_ingreso: 'Descarga' };
+const ROTULO = { flete_entrada: 'Flete', descarga_ingreso: 'Descarga', flete_salida: 'Flete de salida' };
 
 // El criterio de «ya tiene factura» es EL MISMO que usa /gastos-facturables para
 // decidir qué ofrecer: si fueran dos, la pantalla de facturas diría que una
@@ -80,11 +80,123 @@ export function gastosSinFactura(db, ocId) {
   return { descarga: Number(f && f.descarga) || 0, flete: Number(f && f.flete) || 0 };
 }
 
+// ══ EL FLETE DE SALIDA QUE SAN GERÓNIMO LE ADELANTÓ AL PRODUCTOR (V1046) ════
+//
+// Pablo, 11/9/2026, sobre el flete del remito «a cargo del productor, lo adelanta
+// San Gerónimo»: «OK avanzar». La pantalla del remito decía «se le descuenta de su
+// liquidación» y ninguna liquidación lo descontaba: se le pagaba al fletero y la
+// plata no volvía.
+//
+// No cuelga de una recepción sino de un REMITO, y un remito puede llevar mercadería
+// de varias partidas —y de varios productores—. Por eso lo que le toca a esta
+// partida sale de los RENGLONES valorizados (sg_gasto_flete_lineas, V1045) de los
+// productos que son suyos: exacto, sin prorratear.
+//
+// Una fila por gasto (remito) que toca la partida:
+//   · imputado  — lo de esta partida, sumando sus renglones.
+//   · renglones — cuántos renglones valorizados tiene el gasto. Uno valorizado antes
+//                 de la V1045 tiene cero: se valorizó por remito y no se sabe cuánto
+//                 es de cada partida, así que cuenta como sin valorizar.
+//   · la factura viva del fletero, si hay, con los datos que la DDJJ necesita.
+const _tablas = new WeakMap();
+function hayTabla(db, nombre) {
+  if (!_tablas.has(db)) _tablas.set(db, new Map());
+  const m = _tablas.get(db);
+  if (!m.has(nombre)) {
+    m.set(nombre, !!db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(nombre));
+  }
+  return m.get(nombre);
+}
+
+export function fletesSalidaAdelantados(db, ocId) {
+  // Una base sin los renglones del flete (la de un test viejo, o una que todavía no
+  // migró) no tiene fletes de salida por renglón: no hay nada que descontar.
+  if (!hayTabla(db, 'sg_gasto_flete_lineas') || !hayTabla(db, 'sg_despachos')) return [];
+  const id = Number(ocId);
+  // SÓLO EN LAS PARTIDAS A PIZARRA. Pablo, 11/9/2026, sobre las de precio cerrado: «lo
+  // absorbemos nosotros». A precio cerrado el productor cobra lo pactado entero —el
+  // despeje de la liquidación lo garantiza—, así que ese flete no se le puede
+  // descontar: no frena, no se cita, y queda como costo nuestro en el margen del remito.
+  if (!hayTabla(db, 'sg_oc')) return [];
+  const oc = db.prepare('SELECT tipo_precio FROM sg_oc WHERE id = ?').get(id);
+  if (!oc || oc.tipo_precio !== 'pizarra') return [];
+  return db.prepare(`
+    SELECT g.id, g.estado, g.fecha_servicio, d.numero AS remito,
+           pv.razon_social AS prestador,
+           (SELECT COALESCE(SUM(fl.monto),0) FROM sg_gasto_flete_lineas fl
+              JOIN sg_despacho_items di ON di.id = fl.despacho_item_id
+              JOIN sg_lotes l ON l.id = di.lote_id
+              JOIN sg_oc_items oi ON oi.id = l.oc_item_id
+             WHERE fl.gasto_id = g.id AND oi.oc_id = ?) AS imputado,
+           (SELECT COUNT(*) FROM sg_gasto_flete_lineas fl WHERE fl.gasto_id = g.id) AS renglones,
+           -- ¿El remito ENTERO es de esta partida? Entonces un gasto valorizado por
+           -- remito, sin renglones, es todo de ella: se toma entero, sin repartir.
+           (SELECT COUNT(*) FROM sg_despacho_items di2 WHERE di2.despacho_id = d.id) AS items_remito,
+           (SELECT COUNT(*) FROM sg_despacho_items di3
+              JOIN sg_lotes l3 ON l3.id = di3.lote_id
+              JOIN sg_oc_items oi3 ON oi3.id = l3.oc_item_id
+             WHERE di3.despacho_id = d.id AND oi3.oc_id = ?) AS items_partida,
+           g.monto AS monto_gasto,
+           f.id            AS factura_id,
+           f.tipo_comprobante, f.punto_venta, f.numero, f.fecha_emision,
+           f.cuit_emisor, f.neto AS factura_neto, f.iva_monto AS factura_iva,
+           f.total AS factura_total,
+           fp.razon_social AS emisor, fp.cuit AS emisor_cuit
+      FROM sg_gastos_directos g
+      JOIN sg_despachos d ON d.id = g.despacho_id AND d.activo = 1
+      LEFT JOIN sg_proveedores pv ON pv.id = g.proveedor_servicio_id
+      -- La factura VIVA, una sola: con una anulada y otra nueva, la fila no se duplica.
+      LEFT JOIN sg_facturas_gasto f ON f.id = (SELECT fi.factura_id FROM sg_factura_gasto_items fi
+             JOIN sg_facturas_gasto f2 ON f2.id = fi.factura_id AND f2.activo = 1
+            WHERE fi.gasto_id = g.id LIMIT 1)
+      LEFT JOIN sg_proveedores fp ON fp.id = f.proveedor_servicio_id
+     WHERE g.tipo_gasto = 'flete_salida' AND g.activo = 1 AND g.estado <> 'anulado'
+       AND d.flete_a_cargo = 'productor' AND d.flete_pagado_por = 'san_geronimo'
+       AND EXISTS (SELECT 1 FROM sg_despacho_items di
+                     JOIN sg_lotes l ON l.id = di.lote_id
+                     JOIN sg_oc_items oi ON oi.id = l.oc_item_id
+                    WHERE di.despacho_id = d.id AND oi.oc_id = ?)
+     ORDER BY g.id`).all(id, id, id).map((x) => {
+    // Valorizado antes de la V1045 —un número por remito— y con TODO el remito de esta
+    // partida: ese número es suyo entero. Exacto, no un reparto. Si el remito lleva
+    // mercadería de otra partida (o de un reproceso sin partida), no se sabe cuánto
+    // es de cada una y hay que valorizarlo por producto.
+    const entero = x.estado === 'valorizado' && !(Number(x.renglones) > 0)
+      && Number(x.items_remito) > 0 && Number(x.items_partida) === Number(x.items_remito);
+    return Object.assign({}, x, entero
+      ? { imputado: Math.round((Number(x.monto_gasto) || 0) * 100) / 100, por_remito_entero: 1 }
+      : { por_remito_entero: 0 });
+  });
+}
+
+// Lo que la liquidación de la partida necesita saber, en números: cuánto se le
+// descuenta y qué la frena.
+//   · sin_valorizar — remitos pendientes, o valorizados por remito sin decir cuánto es
+//     de cada producto. No se sabe cuánto descontarle.
+//   · sin_factura   — valorizados, con algo para esta partida, sin la factura del
+//     fletero: sin el comprobante la liquidación no lo puede citar.
+export function resumenSalidaAdelantada(db, ocId) {
+  const filas = fletesSalidaAdelantados(db, ocId);
+  const porValorizar = (x) => x.estado !== 'valorizado'
+    || (!(Number(x.renglones) > 0) && !x.por_remito_entero);
+  const valorizados = filas.filter((x) => !porValorizar(x));
+  const r2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
+  return {
+    neto: r2(valorizados.reduce((a, x) => a + (Number(x.imputado) || 0), 0)),
+    sin_valorizar: filas.filter(porValorizar).length,
+    sin_factura: valorizados.filter((x) => Number(x.imputado) > 0 && !x.factura_id).length,
+    remitos: filas.map((x) => x.remito).filter(Boolean),
+    remitos_sin_valorizar: filas.filter(porValorizar).map((x) => x.remito).filter(Boolean),
+    remitos_sin_factura: valorizados.filter((x) => Number(x.imputado) > 0 && !x.factura_id)
+      .map((x) => x.remito).filter(Boolean),
+  };
+}
+
 // LO QUE VA IMPRESO. Una línea por comprobante citado, con lo que la declaración
 // jurada necesita para identificarlo. Se agrupa por factura: si una cubre tres
 // viajes de la misma partida, el papel la cita UNA vez y dice a qué conceptos
 // corresponde — citarla tres veces haría creer que son tres comprobantes.
-export function comprobantesDeLaPartida(db, ocId) {
+export function comprobantesDeLaPartida(db, ocId, opts = {}) {
   const porFactura = new Map();
   for (const g of gastosDescontables(db, ocId)) {
     if (!g.factura_id) continue;
@@ -107,6 +219,30 @@ export function comprobantesDeLaPartida(db, ocId) {
     const x = porFactura.get(k);
     if (!x.conceptos.includes(ROTULO[g.tipo_gasto])) x.conceptos.push(ROTULO[g.tipo_gasto]);
     x.imputado = Math.round((x.imputado + (Number(g.monto) || 0)) * 100) / 100;
+  }
+  // Y la factura del fletero que llevó lo que se le adelantó al productor (V1046). Lo
+  // imputado es SÓLO lo de esta partida —sus renglones—, no el remito entero: la
+  // misma factura puede cubrir productos de otros productores.
+  // Salvo que se pida sin él: una liquidación emitida antes de la V1046 no lo descontó.
+  for (const s of (opts.salida === false ? [] : fletesSalidaAdelantados(db, ocId))) {
+    if (!s.factura_id || !(Number(s.imputado) > 0)) continue;
+    const k = String(s.factura_id);
+    if (!porFactura.has(k)) {
+      porFactura.set(k, {
+        factura_id: s.factura_id,
+        emisor: s.emisor || s.prestador || '',
+        cuit: s.cuit_emisor || s.emisor_cuit || '',
+        comprobante: numeroDe(s),
+        fecha: s.fecha_emision || '',
+        total: Number(s.factura_total) || 0,
+        neto: Number(s.factura_neto) || 0,
+        conceptos: [],
+        imputado: 0,
+      });
+    }
+    const x = porFactura.get(k);
+    if (!x.conceptos.includes(ROTULO.flete_salida)) x.conceptos.push(ROTULO.flete_salida);
+    x.imputado = Math.round((x.imputado + (Number(s.imputado) || 0)) * 100) / 100;
   }
   return [...porFactura.values()];
 }

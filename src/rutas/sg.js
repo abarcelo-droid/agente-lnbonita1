@@ -59,7 +59,7 @@ import { filtrarCosto, puedeVerCosto } from '../servicios/sg_costo_visible.js';
 // Lo que falta valorizar para poder liquidar. Vive con el freno de la partida
 // terminada porque es la misma pregunta: si esta partida esta lista.
 import { gastosSinValorizar } from '../servicios/sg_partida_terminada.js';
-import { gastosSinFactura, comprobantesDeLaPartida } from '../servicios/sg_gastos_facturados.js';
+import { gastosSinFactura, comprobantesDeLaPartida, resumenSalidaAdelantada } from '../servicios/sg_gastos_facturados.js';
 
 const router = express.Router();
 
@@ -4289,6 +4289,14 @@ function ventaDePartida(db, ocId) {
       dif_gestion: fHayFactura ? r2(fAcordado - fFiscal) : 0,
       // Se prellena sólo cuando corresponde; el resto es información.
       se_cobra: oc.flete_a_cargo === 'comprador' && fMonto > 0 ? 1 : 0,
+      // EL DE SALIDA QUE SE LE ADELANTÓ (V1046). Aparte, porque no sale de la orden
+      // sino de los remitos: lo valorizado para los productos de esta partida. Se
+      // SUMA al de arriba en la pantalla. Va al 21 como cualquier servicio que se le
+      // cobra, y sin gestión: el número es lo que dicen sus renglones.
+      salida: (function(){
+        const s = resumenSalidaAdelantada(db, ocId);
+        return Object.assign({}, s, { iva: r2(s.neto * IVA_SERVICIOS / 100) });
+      })(),
     };
 
     // LA FECHA EN QUE ENTRÓ LA MERCADERÍA. El comprobante la imprime ("Fecha de
@@ -4550,6 +4558,20 @@ function fusionarVentas(partes) {
         iva: suma((f) => f.iva),
         se_cobra: cobrables.length ? 1 : 0,
         a_cargo: cobrables.length ? 'comprador' : ((p0.flete || {}).a_cargo || null),
+        // El de salida adelantado se suma de TODAS: cada partida trae sólo lo suyo,
+        // así que no hay nada que repetir (V1046).
+        salida: (function(){
+          const ss = partes.map((p) => (p.flete || {}).salida || {});
+          const n = (f) => r2(ss.reduce((a, s) => a + (Number(f(s)) || 0), 0));
+          const lista = (f) => [...new Set(ss.flatMap((s) => f(s) || []))];
+          return {
+            neto: n((s) => s.neto), iva: n((s) => s.iva),
+            sin_valorizar: n((s) => s.sin_valorizar), sin_factura: n((s) => s.sin_factura),
+            remitos: lista((s) => s.remitos),
+            remitos_sin_valorizar: lista((s) => s.remitos_sin_valorizar),
+            remitos_sin_factura: lista((s) => s.remitos_sin_factura),
+          };
+        })(),
       });
     })(),
     proveedor: p0.proveedor,
@@ -4592,10 +4614,18 @@ function fusionarVentas(partes) {
     // cubrir dos partidas del mismo productor, y citarla dos veces en el papel
     // haría creer que son dos comprobantes.
     comprobantes: (function(){
+      // Citada una vez, con lo imputado a TODAS las partidas del grupo (V1046): un
+      // remito lleva mercadería de varias, y la misma factura del fletero las cubre.
       const vistos = new Map();
       for (const p of partes) {
         for (const c of (p.comprobantes || [])) {
-          if (!vistos.has(String(c.factura_id))) vistos.set(String(c.factura_id), c);
+          if (!vistos.has(String(c.factura_id))) {
+            vistos.set(String(c.factura_id), Object.assign({}, c, { conceptos: [...(c.conceptos || [])] }));
+          } else {
+            const x = vistos.get(String(c.factura_id));
+            x.imputado = Math.round(((Number(x.imputado) || 0) + (Number(c.imputado) || 0)) * 100) / 100;
+            for (const k of (c.conceptos || [])) if (!x.conceptos.includes(k)) x.conceptos.push(k);
+          }
         }
       }
       return [...vistos.values()];
@@ -10159,6 +10189,41 @@ const FLETE_SG_PONE_LA_PLATA = (cargo, quien) =>
 const FLETE_A_RECUPERAR = (cargo, quien) =>
   cargo === 'productor' && quien === 'san_geronimo';
 
+// ── CUÁNTO DEL FLETE DE UN REMITO SE LE RECUPERA DE VERDAD (V1046) ──────────────
+//
+// Del flete adelantado, sólo lo que alguna liquidación le va a descontar a alguien:
+// los renglones de partidas A PIZARRA. Lo de una partida a precio cerrado lo
+// absorbemos nosotros (Pablo, 11/9/2026), y lo de un renglón sin partida —un lote de
+// reproceso— no tiene a quién descontárselo: las dos cosas siguen siendo costo y el
+// margen del remito las resta.
+//
+// Un gasto valorizado por remito, antes de la V1045, se recupera entero sólo si TODO
+// el remito es de una sola partida a pizarra: es la misma regla que usa la liquidación.
+function fleteARecuperarDeRemito(db, despachoId) {
+  const g = db.prepare(`SELECT id, monto FROM sg_gastos_directos
+    WHERE despacho_id = ? AND tipo_gasto = 'flete_salida' AND activo = 1 AND estado = 'valorizado'
+    ORDER BY id DESC LIMIT 1`).get(despachoId);
+  if (!g) return 0;
+  const renglones = Number(db.prepare('SELECT COUNT(*) AS n FROM sg_gasto_flete_lineas WHERE gasto_id = ?')
+    .get(g.id).n) || 0;
+  if (renglones > 0) {
+    return r2(db.prepare(`SELECT COALESCE(SUM(fl.monto),0) AS s FROM sg_gasto_flete_lineas fl
+      JOIN sg_despacho_items di ON di.id = fl.despacho_item_id
+      JOIN sg_lotes l ON l.id = di.lote_id
+      JOIN sg_oc_items oi ON oi.id = l.oc_item_id
+      JOIN sg_oc o ON o.id = oi.oc_id AND o.tipo_precio = 'pizarra'
+     WHERE fl.gasto_id = ?`).get(g.id).s);
+  }
+  const r = db.prepare(`SELECT COUNT(*) AS n, COUNT(DISTINCT oi.oc_id) AS ocs,
+      SUM(CASE WHEN o.tipo_precio = 'pizarra' THEN 1 ELSE 0 END) AS piz
+    FROM sg_despacho_items di
+    LEFT JOIN sg_lotes l ON l.id = di.lote_id
+    LEFT JOIN sg_oc_items oi ON oi.id = l.oc_item_id
+    LEFT JOIN sg_oc o ON o.id = oi.oc_id
+   WHERE di.despacho_id = ?`).get(despachoId);
+  return (Number(r.n) > 0 && Number(r.ocs) === 1 && Number(r.piz) === Number(r.n)) ? r2(g.monto) : 0;
+}
+
 // El vocabulario viejo (`flete_paga`: 'nosotros' | 'vendedor') se traduce al nuevo.
 // Un remito guardado antes del 2/9/2026 tiene que seguir contestando lo mismo.
 function fleteDeRemito(b) {
@@ -10774,7 +10839,15 @@ router.get('/despachos', requireAuth, (req, res) => {
       WHERE ${where.join(' AND ')} ORDER BY d.id DESC`).all(...params);
     // PARTE D + FASE 2 — margen NETO = margen de items − costos de venta valorizados (flete de
     // salida + carga de salida de la cooperativa). Son costo de la VENTA, no del lote.
-    for (const r of rows) r.margen_neto = (r.margen || 0) - (r.flete_salida || 0) - (r.carga_salida || 0);
+    // El flete que se le ADELANTÓ al productor no es costo nuestro: se le descuenta en
+    // su liquidación (V1046). Restarlo del margen era contarlo en contra dos veces. Pero
+    // sólo lo que de verdad se le descuenta a alguien: ver fleteARecuperarDeRemito.
+    for (const r of rows) {
+      const fr = fleteDeRemito(r);
+      r.flete_a_recuperar = FLETE_A_RECUPERAR(fr.cargo, fr.quien)
+        ? Math.min(r.flete_salida || 0, fleteARecuperarDeRemito(db, r.id)) : 0;
+      r.margen_neto = (r.margen || 0) - ((r.flete_salida || 0) - r.flete_a_recuperar) - (r.carga_salida || 0);
+    }
     res.json({ ok: true, data: rows });
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
@@ -10821,7 +10894,12 @@ router.get('/despachos/:id', requireAuth, (req, res) => {
       .all(req.params.id).map((x) => [Number(x.despacho_item_id), Number(x.monto)]));
     for (const it of d.items) it.flete_linea = fleteLinea.has(Number(it.id)) ? fleteLinea.get(Number(it.id)) : null;
     const margen = db.prepare("SELECT COALESCE(SUM(margen_estimado),0) s FROM sg_despacho_items WHERE despacho_id=?").get(req.params.id).s;
-    d.margen = margen; d.margen_neto = margen - (d.flete_salida || 0) - (d.carga_salida || 0);
+    // Lo adelantado al productor se le recupera en su liquidación: no resta (V1046).
+    const frd = fleteDeRemito(d);
+    d.flete_a_recuperar = FLETE_A_RECUPERAR(frd.cargo, frd.quien)
+      ? Math.min(d.flete_salida || 0, fleteARecuperarDeRemito(db, d.id)) : 0;
+    d.margen = margen;
+    d.margen_neto = margen - ((d.flete_salida || 0) - d.flete_a_recuperar) - (d.carga_salida || 0);
     res.json({ ok: true, data: d });
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
