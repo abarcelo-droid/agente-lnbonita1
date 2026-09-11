@@ -55,6 +55,17 @@ const SQL_LIQUIDACION = `SELECT id, n_liquidacion, asiento_id
   FROM liquidaciones
  WHERE oc_id = ? AND eliminado_en IS NULL
  LIMIT 1`;
+// Y LA LIQUIDADA EN GRUPO. Una liquidación que junta varias partidas guarda sólo la
+// primera en oc_id y el resto en liquidacion_partidas: mirando únicamente oc_id, la
+// segunda partida del grupo figuraba libre aunque el productor ya estaba liquidado —y
+// una devolución sobre ella le bajaba la deuda después de pagarle—. Es el mismo criterio
+// que ya usa el control de «no liquidar dos veces» en liquidaciones.js.
+const SQL_LIQUIDACION_GRUPO = `SELECT l.id, l.n_liquidacion, l.asiento_id
+  FROM liquidaciones l
+ WHERE l.eliminado_en IS NULL
+   AND (l.oc_id = ? OR EXISTS (SELECT 1 FROM liquidacion_partidas lp
+                                WHERE lp.liquidacion_id = l.id AND lp.oc_id = ?))
+ LIMIT 1`;
 
 // Y la marca a mano: una liquidación emitida fuera del sistema, o cargada sin decir
 // de qué partida es. La pone un admin con motivo (POST /oc/:id/liquidada).
@@ -70,7 +81,12 @@ export function perfeccionamientoDeOC(db, ocId) {
     if (f) return { como: 'factura', id: f.id, numero: f.numero, asiento_id: f.asiento_id };
   } catch (_) { /* la tabla de compras siempre está; si no, no hay factura */ }
   try {
-    const l = db.prepare(SQL_LIQUIDACION).get(oc);
+    let l;
+    // Con la tabla del grupo, se mira el grupo; si esa tabla todavía no existe (una base
+    // vieja), la de siempre. Que falte la tabla nueva no puede dejar a TODAS las
+    // partidas sin su liquidación.
+    try { l = db.prepare(SQL_LIQUIDACION_GRUPO).get(oc, oc); }
+    catch (_) { l = db.prepare(SQL_LIQUIDACION).get(oc); }
     if (l) return { como: 'liquidacion', id: l.id, numero: l.n_liquidacion, asiento_id: l.asiento_id };
   } catch (_) { /* liquidaciones es del módulo de abasto y puede no existir todavía */ }
   try {

@@ -590,7 +590,8 @@ test('no se anula si después salió mercadería a una transformación: el costo
   const { correr, movidos } = montarAnular(db, id);
   const r = correr({ motivo: 'se cargó mal' });
   assert.equal(r.code, 400);
-  assert.match(r.error, /deshacer primero la transformación o el reproceso/);
+  assert.match(r.error, /ya no se puede anular desde acá/);
+  assert.ok(!/hay que deshacer primero/.test(r.error), 'promete que deshacer la transformación destraba, y no destraba');
   assert.deepEqual(movidos, []);
   // Una transformación de ANTES de la devolución no frena: su costo se llevó el
   // número de antes, y anular vuelve justo a ese estado.
@@ -599,6 +600,13 @@ test('no se anula si después salió mercadería a una transformación: el costo
   db2.prepare("UPDATE sg_devoluciones_stock SET creado_en='2026-09-10 09:00:00' WHERE id=?").run(id2);
   db2.exec("INSERT INTO sg_transformaciones VALUES (1, 100, 5, 10000, '2026-09-01 10:00:00')");
   assert.equal(montarAnular(db2, id2).correr({ motivo: 'se cargó mal' }).code, 200);
+  // Y una de ESA MISMA MAÑANA pero anterior tampoco: se compara con la hora.
+  const db3 = base();
+  const id3 = devolver(db3, { bultos: 10, kg: 200 });
+  db3.prepare("UPDATE sg_devoluciones_stock SET creado_en='2026-09-10 13:04:00' WHERE id=?").run(id3);
+  db3.exec("INSERT INTO sg_transformaciones VALUES (1, 100, 5, 10000, '2026-09-10 00:00:01')");
+  assert.equal(montarAnular(db3, id3).correr({ motivo: 'se cargó mal' }).code, 200,
+    'una transformación anterior, del mismo día, traba la anulación');
 });
 
 test('y la devolución de un REMITO tiene el mismo freno', () => {

@@ -24311,6 +24311,13 @@ SG_MANUAL.ventas = { titulo: 'Remitos y Facturación', html:
   + '<p>Un <b>remito ya facturado no se anula</b>. Primero va la <b>nota de crédito</b>; recién '
   + 'cuando el comprobante queda en cero, el remito se puede dar de baja. Y el botón de anular '
   + '<b>sólo lo ve quien tiene el nivel</b>: si no aparece, no es que se rompió.</p>'
+  + '<p><span class="ver">V1044</span> Un <b>remito con una devolución que se le mandó al '
+  + 'productor tampoco se anula</b>: esa mercadería ya la tiene él, y anular el remito se '
+  + 'llevaba de arrastre la devolución —la mercadería volvía a figurar disponible y se le '
+  + 'volvía a deber—. Primero se anula la devolución, y después el remito.</p>'
+  + '<p><span class="ver">V1044</span> Y una <b>devolución que le bajó la deuda al productor no se '
+  + 'anula si la partida ya quedó firme</b> —factura o liquidación, también la que junta varias '
+  + 'órdenes—: lo liquidado no se reabre.</p>'
 
   + '<h3>Con qué asiento se contabiliza</h3>'
   + '<p>Toda venta —la del puesto, la de las cadenas y la de los remitos entregados— se '
@@ -24358,6 +24365,11 @@ SG_MANUAL.ventas = { titulo: 'Remitos y Facturación', html:
   + 'sola línea</b>.</li>'
   + '<li><b>V1043</b> — lo que se le <b>devuelve al productor</b> se le descuenta de verdad de lo '
   + 'que se le debe.</li>'
+  + '<li><b>V1044</b> — un remito con una devolución al productor ya no se anula sin anular antes '
+  + 'la devolución; la devolución no se anula con la partida firme; y la partida que tuvo una '
+  + 'devolución al productor <b>se puede liquidar</b> (antes la pantalla mandaba los cajones que '
+  + 'entraron y el servidor la rechazaba). Lo que falta facturar ya no cuenta lo que el cliente '
+  + 'devolvió.</li>'
   + '</ul>'
 };
 
@@ -24499,7 +24511,18 @@ SG_MANUAL.stock = { titulo: 'Stock', html:
   + 'compra</b>: de ahí sale a quién se le devuelve y qué deuda baja. Una partida que salió '
   + 'de un reproceso no tiene proveedor — si hay que sacarla, es una merma.</div>'
   + '<p>Anular una devolución pide <b>motivo</b> y la mercadería <b>vuelve al piso del que '
-  + 'salió</b>, con su costo.</p>'
+  + 'salió</b>, con su costo. <b>Dos cosas la frenan</b>:</p>'
+  + '<ul>'
+  + '<li>Si le había bajado la deuda al proveedor y <b>después la partida quedó firme</b> '
+  + '—llegó la factura o se liquidó—: lo firmado ya no se reabre.</li>'
+  + '<li>Si <b>después</b> de devolverla la partida se <b>transformó o se reprocesó</b>: lo que '
+  + 'salió se llevó el costo por kilo de ese momento, que ya tenía descontada la devolución, y '
+  + 'anularla dejaría el costo mal repartido. Deshacer la transformación no lo arregla: esa '
+  + 'devolución <b>ya no se anula desde acá</b>.</li>'
+  + '</ul>'
+  + '<p>La <b>liquidación</b> del proveedor propone los cajones que <b>quedaron</b>: los que '
+  + 'entraron menos los que se le devolvieron. Y la barra de avance de la partida los cuenta '
+  + 'como terminados, igual que lo vendido y lo tirado.</p>'
   + '<p>No es lo mismo que la devolución de <b>Remitos y Facturación</b>: aquélla parte del '
   + 'remito de un cliente —la mercadería ya estaba afuera—; ésta, de la cámara.</p>'
 
@@ -44640,8 +44663,8 @@ function liqArtSync(){
     // delante—; con varias, cada una trae lo suyo de su orden.
     var pu = una ? (pre > 0 ? pre : (Number(p.precio_por_bulto) || 0))
                  : (Number(p.precio_por_bulto) || 0);
-    var ing = una ? (cant > 0 ? cant : (Number(p.bultos_ingresados) || 0))
-                  : (Number(p.bultos_ingresados) || 0);
+    var ing = una ? (cant > 0 ? cant : (liqALiquidarDe(p) || 0))
+                  : (liqALiquidarDe(p) || 0);
     // CON UN SOLO PRODUCTO. Si la partida trae dos, sus bultos son el TOTAL y
     // metérselos al primer renglón le adjudica a un producto lo que entró de los dos:
     // el papel donde el productor cobra sale mal. Con varios, cada renglón ya viene
@@ -44690,11 +44713,23 @@ function liqPartidasVenta(){
   var ac = v.acordado || {};
   return [{ oc_id: (LIQ.partida && LIQ.partida.oc_id) || 0, partida: v.partida,
     unidad: v.unidad, bultos_ingresados: v.bultos_ingresados,
+    bultos_a_liquidar: v.bultos_a_liquidar,
     bultos_merma: v.bultos_merma, kg_merma: v.kg_merma,
     acordado_total: ac.total, acordado_sin_mermas: ac.total_sin_mermas,
     precio_por_bulto: ac.precio_por_bulto }];
 }
 function liqUniDe(p){ return (p && p.unidad === 'bulto') ? 'bultos' : 'kg'; }
+// ── LO QUE SE LE LIQUIDA A UNA PARTIDA ──────────────────────────────────
+// Lo que entró MENOS lo que se le devolvió al productor sin firmar (V1044): esos cajones
+// son suyos otra vez y el servidor no deja liquidarlos. UNA sola función para las tres
+// cosas que lo usan —la cantidad del artículo, el control de «partida entera» y lo que
+// viaja al guardar—: si una leyera los que entraron, la pantalla mostraría 40 y mandaría
+// 50, que es exactamente lo que pasaba.
+function liqALiquidarDe(p){
+  if (!p) return null;
+  if (p.bultos_a_liquidar != null && p.bultos_a_liquidar !== '') return Number(p.bultos_a_liquidar);
+  return (p.bultos_ingresados != null && p.bultos_ingresados !== '') ? Number(p.bultos_ingresados) : null;
+}
 // Cuánto se mermó, en la unidad en que se liquida. Si la orden se pactó por cajón
 // se cuentan cajones; si la mercadería entró pesada, kilos.
 function liqMermaCantDe(p){
@@ -44802,8 +44837,13 @@ function liqCerradoResolver(){
   // sobre una partida cuyo precio no se tipea. No se veía mientras el precio por
   // cajón se prellenaba —ahí la base salía de multiplicar—, y apareció en cuanto una
   // partida tuvo DOS precios y ese campo quedó vacío a propósito.
-  var _recib = Number((eid('liq-bultos-in') || {}).value)
-    || Number(((LIQ.venta) || {}).bultos_ingresados) || 0;
+  // Lo que se LIQUIDA, no lo que entró (V1044): el campo #liq-bultos-in muestra los que
+  // entraron, y comparar contra él daba «no es la partida entera» a toda partida con una
+  // devolución al productor.
+  var _v = LIQ.venta || {};
+  var _recib = (_v.bultos_a_liquidar != null ? Number(_v.bultos_a_liquidar) : null)
+    || Number((eid('liq-bultos-in') || {}).value)
+    || Number(_v.bultos_ingresados) || 0;
   var _entera = (_cant > 0 && _recib > 0 && Math.abs(_cant - _recib) < 1e-6);
   // ── LA MERMA CAMBIA EL NÚMERO, Y HAY QUE HABERLA CONTESTADO ────────────
   //
@@ -45695,8 +45735,9 @@ async function liqGuardar() {
     partidas:             liqPartidasVenta().map(function(p){
                             var x = liqMermaPagaDe(p.oc_id);
                             return { oc_id: p.oc_id,
-                              bultos_liquidados: (p.bultos_ingresados != null)
-                                ? p.bultos_ingresados : null,
+                              // LO QUE QUEDÓ para liquidar, no lo que entró: es
+                              // lo que controla el servidor.
+                              bultos_liquidados: liqALiquidarDe(p),
                               merma_liquidada: (liqModo() === 'cerrado'
                                 && liqMermaCantDe(p) > 0 && x !== null) ? (x ? 1 : 0) : null };
                           }),

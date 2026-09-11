@@ -342,7 +342,9 @@ test('la respuesta viaja al servidor, una por partida', () => {
   const b = PANEL.slice(i, i + 700);
   assert.match(b, /merma_liquidada: \(liqModo\(\) === 'cerrado'/);
   assert.match(b, /liqMermaCantDe\(p\) > 0 && x !== null\) \? \(x \? 1 : 0\) : null/);
-  assert.match(b, /bultos_liquidados: \(p\.bultos_ingresados != null\)/);
+  // LO QUE QUEDÓ para liquidar (V1044), no lo que entró: la pantalla mostraba 40 y
+  // mandaba 50, y el servidor la rechazaba.
+  assert.match(b, /bultos_liquidados: liqALiquidarDe\(p\),/);
 });
 
 // ── 6 · EL RENGLÓN, EN LA PANTALLA ─────────────────────────────────────────

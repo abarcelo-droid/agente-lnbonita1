@@ -139,11 +139,22 @@ export function avanceDePartida(db, ocId) {
 // entero daría −1 kg, y esa resta se come lo que otro renglón tiene sin facturar: el
 // freno dejaría liquidar una partida con mercadería vendida y sin comprobante.
 export function sinFacturarDePartida(db, ocId, facturaCuenta) {
+  // SIN LO QUE EL CLIENTE DEVOLVIÓ (V1044), igual que al facturar: eso no se le va a
+  // facturar nunca. Sin restarlo, la mercadería devuelta y revendida dejaba al remito
+  // original con «sin facturar» para siempre, y el freno no dejaba liquidar la partida.
+  // Lo devuelto viene en kilos del galpón y se lleva a kilos del papel.
+  const devuelto = _hayTabla(db, 'sg_devolucion_items')
+    ? `- COALESCE((SELECT SUM(dvi.kg) FROM sg_devolucion_items dvi
+          JOIN sg_devoluciones dv ON dv.id = dvi.devolucion_id AND dv.estado = 'registrada'
+         WHERE dvi.despacho_item_id = di.id),0)
+        * (${kgPapelSql('di')} / NULLIF(di.kg_despachados, 0))`
+    : '';
   const f = db.prepare(`
     SELECT COALESCE(SUM((${kgPapelSql('di')}
         - COALESCE((SELECT SUM(fd.kg) FROM sg_factura_despachos fd
             JOIN sg_ven_facturas fv ON fv.id = fd.factura_id
-           WHERE fd.despacho_item_id = di.id AND ${facturaCuenta('fv')}),0))
+           WHERE fd.despacho_item_id = di.id AND ${facturaCuenta('fv')}),0)
+        ${devuelto})
       * COALESCE(di.precio_por_kg,0)),0) AS monto
       FROM sg_despacho_items di
       JOIN sg_despachos d ON d.id = di.despacho_id AND d.activo = 1

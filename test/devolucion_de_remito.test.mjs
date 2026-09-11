@@ -492,7 +492,9 @@ test('anular el remito no devuelve dos veces la mercadería', () => {
   // el piso quedaban 500 de una partida que sólo tenía 400 afuera, y lo disponible
   // daba 1.100 de una partida de 1.000.
   const i = SG.indexOf("router.post('/despachos/:id/anular'");
-  const b = SG.slice(i, i + 5200);
+  // Hasta donde termina el handler, no «los próximos 5.200 caracteres»: el freno de la
+  // devolución al productor (V1044) empujó lo buscado fuera de la ventana.
+  const b = SG.slice(i, SG.indexOf('\r\n});', i));
   const dev = b.indexOf("SELECT id FROM sg_devoluciones WHERE despacho_id=? AND estado='registrada'");
   const dsp = b.indexOf('FROM sg_despacho_items WHERE despacho_id=? AND lote_id IS NOT NULL');
   assert.ok(dev > 0, 'anular no toca las devoluciones del remito');

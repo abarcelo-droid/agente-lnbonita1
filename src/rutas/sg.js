@@ -4129,7 +4129,12 @@ function ventaDePartida(db, ocId) {
       SELECT COALESCE(SUM((${kgPapelSql('di')}
           - COALESCE((SELECT SUM(fd.kg) FROM sg_factura_despachos fd
               JOIN sg_ven_facturas fv ON fv.id = fd.factura_id
-             WHERE fd.despacho_item_id = di.id AND ${facturaCuenta('fv')}),0))
+             WHERE fd.despacho_item_id = di.id AND ${facturaCuenta('fv')}),0)
+          -- Sin lo que el cliente devolvió, igual que el freno (V1044).
+          - COALESCE((SELECT SUM(dvi.kg) FROM sg_devolucion_items dvi
+              JOIN sg_devoluciones dv ON dv.id = dvi.devolucion_id AND dv.estado = 'registrada'
+             WHERE dvi.despacho_item_id = di.id),0)
+            * (${kgPapelSql('di')} / NULLIF(di.kg_despachados, 0)))
         * COALESCE(di.precio_por_kg,0)),0) AS monto
         FROM sg_despacho_items di
         JOIN sg_despachos d ON d.id = di.despacho_id AND d.activo = 1
@@ -4481,6 +4486,9 @@ function fusionarVentas(partes) {
     partidas: partes.map((p) => ({
       oc_id: p.oc_id, partida: p.partida, unidad: p.unidad,
       bultos_ingresados: p.bultos_ingresados, bultos_merma: p.bultos_merma,
+      // Lo que se le liquida a CADA partida del grupo: lo que entró menos lo que se le
+      // devolvió sin firmar. Es lo que viaja al servidor como bultos liquidados.
+      bultos_a_liquidar: p.bultos_a_liquidar,
       kg_merma: p.kg_merma,
       acordado_total: (p.acordado || {}).total,
       acordado_sin_mermas: (p.acordado || {}).total_sin_mermas,
@@ -11158,17 +11166,26 @@ router.post('/devoluciones-stock/:id/anular', requireAuth, express.json(), (req,
     // momento —que ya tenía descontada la devolución—. Anularla recalcula la partida
     // sin la devolución y deja el costo mal repartido entre los dos lotes. Es el mismo
     // freno que ya tiene corregir un lote. Se compara por día, del lado seguro.
+    // CON LA HORA, no con el día: una transformación de esa misma mañana, ANTERIOR a la
+    // devolución, se llevó el costo de antes y no molesta. Las dos fechas salen de
+    // datetime('now','localtime'), así que se comparan tal cual.
+    //
+    // Y la revertida también cuenta: revertirla no le devuelve el costo a esta partida
+    // —vuelve a un lote nuevo—, así que el reparto sigue armado con el número de ese
+    // momento.
     const viajo = db.prepare(`SELECT 1 FROM sg_devolucion_stock_items it
       WHERE it.devolucion_id = ? AND (
         EXISTS (SELECT 1 FROM sg_transformaciones t WHERE t.lote_origen_id = it.lote_id
-                 AND substr(t.fecha,1,10) >= substr(?,1,10))
+                 AND t.fecha >= ?)
         OR EXISTS (SELECT 1 FROM sg_reprocesos r WHERE r.lote_madre_id = it.lote_id AND r.estado = 'activo'
-                 AND substr(r.fecha,1,10) >= substr(?,1,10)))`).get(dv.id, dv.creado_en || '', dv.creado_en || '');
+                 AND r.fecha >= ?))`).get(dv.id, dv.creado_en || '', dv.creado_en || '');
     if (viajo) {
+      // NO SE PROMETE UNA SALIDA QUE NO HAY. Deshacer la transformación no destraba:
+      // el costo no vuelve a esta partida. Se dice eso.
       return res.status(400).json({ ok: false, error:
         'Después de esta devolución salió mercadería de esa partida a una transformación o un reproceso, '
-        + 'y se llevó el costo de ese momento. Anularla dejaría el costo mal repartido entre los lotes: '
-        + 'hay que deshacer primero la transformación o el reproceso.' });
+        + 'y se llevó el costo de ese momento. Anularla dejaría el costo mal repartido entre los lotes, '
+        + 'y eso no se arregla deshaciendo la transformación: esta devolución ya no se puede anular desde acá.' });
     }
     db.transaction(() => {
       const its = db.prepare('SELECT * FROM sg_devolucion_stock_items WHERE devolucion_id=?').all(dv.id);
@@ -11345,6 +11362,23 @@ router.post('/despachos/:id/anular', requireAuth, (req, res) => {
         FROM sg_factura_despachos fd JOIN sg_ven_facturas f ON f.id = fd.factura_id
        WHERE fd.despacho_id = ? AND ${facturaCuenta('f')} AND ${noEsNotaDeCredito('f')}
        ORDER BY f.id DESC LIMIT 1`).get(d.id) : null;
+    // ── NI UNO CON UNA DEVOLUCIÓN AL PRODUCTOR ───────────────────────────
+    //
+    // Anular el remito anulaba de arrastre sus devoluciones. Las que volvieron al PISO
+    // pueden irse con él. Las que se le devolvieron al PRODUCTOR no: esa mercadería la
+    // tiene él, bajó lo que se le debe, y anularla de arrastre la hacía reaparecer en
+    // lo disponible y le subía la deuda otra vez — con la partida ya firme incluso,
+    // salteando el freno que tiene la devolución en su propia puerta.
+    const alProd = db.prepare(`SELECT dv.numero FROM sg_devoluciones dv
+      WHERE dv.despacho_id = ? AND dv.estado = 'registrada'
+        AND EXISTS (SELECT 1 FROM sg_devolucion_items dvi
+                     WHERE dvi.devolucion_id = dv.id AND dvi.destino = 'proveedor')
+      LIMIT 1`).get(d.id);
+    if (alProd) {
+      return res.status(409).json({ ok: false, error:
+        `El remito ${d.numero || d.id} tiene una devolución al productor (${alProd.numero}). Esa `
+        + 'mercadería ya la tiene él: anulá primero la devolución desde Devoluciones, y después el remito.' });
+    }
     if (fact) {
       return res.status(409).json({ ok: false, error:
         `El remito ${d.numero || d.id} ya está facturado con el comprobante ${fact.numero}. `

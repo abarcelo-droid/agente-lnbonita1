@@ -540,3 +540,183 @@ test('el test viejo de la solapa de merma encuentra su marca, o no mira nada', (
   const T = leer('test/merma.test.mjs');
   assert.match(T, /const fin = PANEL\.indexOf\('<div id="sg-st-tab-partidas">', i\);\s+assert\.ok\(fin > i/);
 });
+
+// ══════════════════════════════════════════════════════════════════════════
+// 7 · LO QUE ENCONTRÓ LA ÚLTIMA REVISIÓN, CORRIDO
+// ══════════════════════════════════════════════════════════════════════════
+
+test('la liquidación MANDA lo que quedó, no sólo lo muestra', () => {
+  // La pantalla mostraba 40 y mandaba 50: la cantidad que viaja sale de la lista de
+  // partidas, y ésa seguía cargando los que entraron. El servidor la rechazaba.
+  // eslint-disable-next-line no-new-func
+  const aLiq = new Function(hasta(PANEL, 'function liqALiquidarDe(p){', '\r\n}') + '\nreturn liqALiquidarDe;')();
+  assert.equal(aLiq({ bultos_ingresados: 50, bultos_a_liquidar: 40 }), 40);
+  assert.equal(aLiq({ bultos_ingresados: 50, bultos_a_liquidar: 0 }), 0, 'devolver todo no es «no sé»');
+  assert.equal(aLiq({ bultos_ingresados: 50 }), 50, 'sin el dato nuevo, lo que entró');
+  assert.equal(aLiq({}), null);
+  // Las tres puertas usan la misma: el artículo, la partida entera y lo que viaja.
+  const sync = hasta(PANEL, 'function liqArtSync(){', '\r\n}');
+  assert.match(sync, /: \(liqALiquidarDe\(p\) \|\| 0\);/);
+  assert.match(PANEL, /bultos_liquidados: liqALiquidarDe\(p\),/);
+  assert.match(PANEL, /var _recib = \(_v\.bultos_a_liquidar != null \? Number\(_v\.bultos_a_liquidar\) : null\)/);
+  // Y cada partida del grupo trae lo suyo.
+  const fus = hasta(SG, '    partidas: partes.map((p) => ({', '\r\n    })),');
+  assert.match(fus, /bultos_a_liquidar: p\.bultos_a_liquidar,/);
+  // Del lado del servidor: con lo que quedó cierra, con lo que entró no.
+  const db = base();
+  alta(db).correr({ bultos: 10, kg: 200, piso_id: 5, motivo: 'x' });
+  // El control de la liquidación mira cómo se pactó la orden.
+  db.exec("ALTER TABLE sg_oc ADD COLUMN tipo_precio TEXT; ALTER TABLE sg_oc ADD COLUMN precio_incluye_iva INTEGER; ALTER TABLE sg_oc ADD COLUMN iva_alicuota_oc REAL; UPDATE sg_oc SET tipo_precio='firme', precio_incluye_iva=1, iva_alicuota_oc=10.5;");
+  assert.equal(A.objetivoCerradoGrupo(db, [{ ocId: 7, cantidad: 40 }]).ok !== false, true);
+  assert.match(A.objetivoCerradoGrupo(db, [{ ocId: 7, cantidad: 50 }]).motivo, /entraron 40 bultos/);
+});
+
+test('anular un remito con una devolución al productor se frena', () => {
+  // Anulaba de arrastre la devolución: la mercadería que ya tiene el productor volvía a
+  // lo disponible y se le subía la deuda, con la partida firme incluso.
+  const b = handler("router.post('/despachos/:id/anular'");
+  const i = b.indexOf('const alProd = db.prepare(');
+  assert.ok(i > 0 && i < b.indexOf('db.transaction('), 'el freno está después de anular');
+  // Y CORTA: consultar y no hacer nada con el resultado es no tener freno.
+  assert.match(b.slice(i, b.indexOf('db.transaction(')), /if \(alProd\) \{\s*return res\.status\(409\)/,
+    'se consulta si hay una devolución al productor y se anula igual');
+  const q = b.slice(b.indexOf('`', i) + 1, b.indexOf('`).get(d.id)', i));
+  const db = new DatabaseSync(':memory:');
+  db.exec(`CREATE TABLE sg_devoluciones (id INTEGER PRIMARY KEY, numero TEXT, despacho_id INTEGER, estado TEXT);
+    CREATE TABLE sg_devolucion_items (id INTEGER PRIMARY KEY, devolucion_id INTEGER, destino TEXT);
+    INSERT INTO sg_devoluciones VALUES (1, 'SG-DEV-1', 9, 'registrada'), (2, 'SG-DEV-2', 8, 'registrada'),
+      (3, 'SG-DEV-3', 7, 'anulada');
+    INSERT INTO sg_devolucion_items VALUES (1, 1, 'proveedor'), (2, 2, 'stock'), (3, 3, 'proveedor');`);
+  assert.equal(db.prepare(q).get(9).numero, 'SG-DEV-1', 'no frena con una devolución al productor');
+  assert.equal(db.prepare(q).get(8), undefined, 'frena con una devolución al PISO, que puede irse con el remito');
+  assert.equal(db.prepare(q).get(7), undefined, 'frena con una devolución ya anulada');
+});
+
+test('una partida liquidada en GRUPO también está firme, no sólo la primera', async () => {
+  const PF = await import(pathToFileURL(path.join(RAIZ, 'src/servicios/sg_perfeccionada.js')).href);
+  const db = new DatabaseSync(':memory:');
+  db.exec(`CREATE TABLE sg_facturas_compra (id INTEGER, numero TEXT, asiento_id INTEGER, activo INTEGER, oc_id INTEGER);
+    CREATE TABLE sg_factura_compra_ocs (factura_id INTEGER, oc_id INTEGER);
+    CREATE TABLE sg_oc (id INTEGER PRIMARY KEY, liquidada_en TEXT);
+    CREATE TABLE liquidaciones (id INTEGER PRIMARY KEY, n_liquidacion TEXT, asiento_id INTEGER,
+      oc_id INTEGER, eliminado_en TEXT);
+    CREATE TABLE liquidacion_partidas (id INTEGER PRIMARY KEY, liquidacion_id INTEGER, oc_id INTEGER);
+    INSERT INTO sg_oc VALUES (8, NULL), (7, NULL), (6, NULL);
+    -- Liquidación agrupada de las órdenes 8 y 7: oc_id guarda sólo la primera.
+    INSERT INTO liquidaciones VALUES (1, 'LIQ-1', NULL, 8, NULL);
+    INSERT INTO liquidacion_partidas VALUES (1, 1, 8), (2, 1, 7);`);
+  assert.equal(PF.perfeccionamientoDeOC(db, 8).como, 'liquidacion');
+  assert.equal(PF.perfeccionamientoDeOC(db, 7)?.como, 'liquidacion', 'la segunda del grupo figura libre');
+  assert.equal(PF.perfeccionamientoDeOC(db, 6), null);
+  // Y en una base sin la tabla del grupo, la primera sigue encontrándose.
+  db.exec('DROP TABLE liquidacion_partidas');
+  assert.equal(PF.perfeccionamientoDeOC(db, 8)?.como, 'liquidacion', 'sin la tabla nueva se perdió la liquidación');
+});
+
+test('«sin facturar» de la partida no cuenta lo que el cliente devolvió', () => {
+  // Remito de 1.000 kg, el cliente devuelve 200 al piso, se facturan 800. Sin restar lo
+  // devuelto quedaban 200 kg «sin facturar» para siempre y el freno no dejaba liquidar.
+  const db = new DatabaseSync(':memory:');
+  db.exec(`
+    CREATE TABLE sg_oc_items (id INTEGER PRIMARY KEY, oc_id INTEGER);
+    CREATE TABLE sg_lotes (id INTEGER PRIMARY KEY, oc_item_id INTEGER, activo INTEGER);
+    CREATE TABLE sg_despachos (id INTEGER PRIMARY KEY, activo INTEGER);
+    CREATE TABLE sg_despacho_items (id INTEGER PRIMARY KEY, despacho_id INTEGER, lote_id INTEGER,
+      kg_despachados REAL, kg_declarados REAL, precio_por_kg REAL);
+    CREATE TABLE sg_ven_facturas (id INTEGER PRIMARY KEY);
+    CREATE TABLE sg_factura_despachos (factura_id INTEGER, despacho_item_id INTEGER, kg REAL);
+    CREATE TABLE sg_devoluciones (id INTEGER PRIMARY KEY, estado TEXT);
+    CREATE TABLE sg_devolucion_items (id INTEGER PRIMARY KEY, devolucion_id INTEGER, despacho_item_id INTEGER, kg REAL);
+    INSERT INTO sg_oc_items VALUES (70, 7);
+    INSERT INTO sg_lotes VALUES (1, 70, 1);
+    INSERT INTO sg_despachos VALUES (1, 1), (2, 1);
+    INSERT INTO sg_despacho_items VALUES (11, 1, 1, 1000, NULL, 10);
+    INSERT INTO sg_ven_facturas VALUES (1);
+    INSERT INTO sg_factura_despachos VALUES (1, 11, 800);
+    INSERT INTO sg_devoluciones VALUES (1, 'registrada'), (2, 'anulada');
+    INSERT INTO sg_devolucion_items VALUES (1, 1, 11, 200);`);
+  assert.equal(P.sinFacturarDePartida(db, 7, () => '1=1'), 0);
+  // Una devolución ANULADA no resta: esa mercadería sí salió.
+  db.exec("UPDATE sg_devolucion_items SET devolucion_id = 2");
+  assert.equal(P.sinFacturarDePartida(db, 7, () => '1=1'), 2000);
+  // Al súper con kilos declarados: devolver los 14 del galpón cancela los 15 del papel.
+  db.exec(`UPDATE sg_devolucion_items SET devolucion_id = 1;
+    INSERT INTO sg_despacho_items VALUES (12, 2, 1, 14, 15, 10);
+    INSERT INTO sg_devolucion_items VALUES (2, 1, 12, 14);`);
+  assert.equal(P.sinFacturarDePartida(db, 7, () => '1=1'), 0);
+  // Y la venta de la partida hace la misma cuenta.
+  const i = SG.indexOf('const sinFac = db.prepare(`');
+  const venta = SG.slice(i, SG.indexOf('`).get(ocId);', i));
+  assert.match(venta, /- COALESCE\(\(SELECT SUM\(dvi\.kg\) FROM sg_devolucion_items dvi/);
+  assert.match(venta, /\* \(\$\{kgPapelSql\('di'\)\} \/ NULLIF\(di\.kg_despachados, 0\)\)\)/);
+});
+
+// ── 8 · EL «¿CÓMO SE USA?» DICE LO QUE EL CÓDIGO HACE ─────────────────────
+//
+// Regla de Pablo: si se toca una pantalla, se actualiza su manual. Y el manual se
+// prueba contra el código, no contra sí mismo: cada afirmación, con su assert al lado.
+
+const manual = (clave) => {
+  const i = PANEL.indexOf('SG_MANUAL.' + clave + ' = {');
+  assert.ok(i > 0, 'no está el manual de ' + clave);
+  // Pegado: el texto viene partido en renglones «' + '» y una frase puede cruzar el corte.
+  return PANEL.slice(i, PANEL.indexOf('\r\n};', i)).replace(/'\r?\n\s*\+ '/g, '');
+};
+const handlerTexto = (firma) => {
+  const i = SG.indexOf(firma);
+  assert.ok(i > 0, 'no está: ' + firma);
+  return SG.slice(i, SG.indexOf('\r\n});', i));
+};
+
+test('manual de Stock: «anular la frenan la partida firme y lo que salió después»', () => {
+  const M = manual('stock');
+  assert.match(M, /<b>Dos cosas la frenan<\/b>/);
+  const h = handlerTexto("router.post('/devoluciones-stock/:id/anular'");
+  // «si le había bajado la deuda y después la partida quedó firme»: sólo las que
+  // descontaron, y contra la firmeza de la orden.
+  assert.match(M, /Si le había bajado la deuda al proveedor y <b>después la partida quedó firme<\/b>/);
+  assert.match(h, /WHERE it\.devolucion_id = \? AND it\.descuenta_al_productor = 1`\)/);
+  assert.match(h, /precioFirmeDetalle\(db, x\.oc_id, 'anular esta devolución'\);\r?\n\s+if \(firme\) return res\.status\(400\)/);
+  // «si después se transformó o se reprocesó, ya no se anula desde acá».
+  assert.match(M, /se <b>transformó o se reprocesó<\/b>/);
+  assert.match(M, /devolución <b>ya no se anula desde acá<\/b>/);
+  assert.match(h, /FROM sg_transformaciones t WHERE t\.lote_origen_id = it\.lote_id\s+AND t\.fecha >= \?\)/);
+  assert.match(h, /FROM sg_reprocesos r WHERE r\.lote_madre_id = it\.lote_id AND r\.estado = 'activo'\s+AND r\.fecha >= \?\)/);
+  assert.match(h, /esta devolución ya no se puede anular desde acá/);
+  // Y el manual no promete la salida que el mensaje niega.
+  assert.match(M, /Deshacer la transformación no lo arregla/);
+});
+
+test('manual de Stock: «la liquidación propone los cajones que quedaron»', () => {
+  const M = manual('stock');
+  assert.match(M, /propone los cajones que <b>quedaron<\/b>: los que entraron menos los que se le devolvieron/);
+  const f = PANEL.slice(PANEL.indexOf('function liqALiquidarDe('), PANEL.indexOf('\r\n}', PANEL.indexOf('function liqALiquidarDe(')));
+  assert.match(f, /return Number\(p\.bultos_a_liquidar\);/);
+  // «la barra de avance los cuenta como terminados»
+  assert.match(M, /la barra de avance de la partida los cuenta como terminados/);
+  assert.match(PANEL, /sgAvanceBarra\(p\.bultos_vendidos, p\.bultos_recibidos, p\.bultos_merma, p\.bultos_devueltos_prov\)/);
+});
+
+test('manual de Remitos: «un remito con una devolución al productor no se anula»', () => {
+  const M = manual('ventas');
+  assert.match(M, /<b>V1044<\/b> — un remito con una devolución al productor ya no se anula/);
+  assert.match(M, /Primero se anula la devolución, y después el remito\./);
+  const h = handlerTexto("router.post('/despachos/:id/anular'");
+  assert.match(h, /WHERE dvi\.devolucion_id = dv\.id AND dvi\.destino = 'proveedor'\)/);
+  assert.match(h, /anulá primero la devolución desde Devoluciones, y después el remito\./);
+  // Y el freno va ANTES de anular nada.
+  assert.ok(h.indexOf('if (alProd) {') > 0, 'no está el freno');
+  assert.ok(h.indexOf('if (alProd) {') < h.indexOf('db.transaction('),
+    'el freno está después de la transacción: el remito se anula igual');
+});
+
+test('manual de Remitos: «la devolución que bajó la deuda no se anula con la partida firme, tampoco en grupo»', () => {
+  const M = manual('ventas');
+  assert.match(M, /<b>devolución que le bajó la deuda al productor no se anula si la partida ya quedó firme<\/b>/);
+  assert.match(M, /también la que junta varias órdenes/);
+  const h = handlerTexto("router.post('/devoluciones/:id/anular'");
+  assert.match(h, /AND dvi\.destino = 'proveedor'\r?\n\s+AND COALESCE\(dvi\.descuenta_al_productor, 1\) = 1`\)/);
+  assert.match(h, /precioFirmeDetalle\(db, x\.oc_id, 'anular esta devolución'\);\r?\n\s+if \(firme\) return res\.status\(400\)/);
+  const PF = leer('src/servicios/sg_perfeccionada.js');
+  assert.match(PF, /l = db\.prepare\(SQL_LIQUIDACION_GRUPO\)\.get\(oc, oc\);/);
+});
