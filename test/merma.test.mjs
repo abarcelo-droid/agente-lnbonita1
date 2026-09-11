@@ -143,7 +143,9 @@ test('la solapa está en Stock, no en Reprocesos', () => {
   const i = PANEL.indexOf('id="sec-sg-stock"');
   // Hasta donde empieza la solapa de partidas, no «los próximos 2.600 caracteres»:
   // la cuarta solapa (devoluciones al proveedor, V1044) empujó la de merma afuera.
-  const b = PANEL.slice(i, PANEL.indexOf('<div id="sg-st-tab-partidas">', i));
+  const fin = PANEL.indexOf('<div id="sg-st-tab-partidas">', i);
+  assert.ok(fin > i, 'no está la marca de la solapa de partidas: el corte miraría el archivo entero');
+  const b = PANEL.slice(i, fin);
   assert.match(b, /onclick="sgStockTab\('merma'\)">🗑️ Merma<\/button>/);
   assert.match(b, /id="sg-st-tab-merma"/);
   // Y las tres solapas se manejan por una tabla: con ifs encadenados, agregar la

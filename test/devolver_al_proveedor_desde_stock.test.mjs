@@ -622,54 +622,9 @@ test('se marca anulada ANTES de recalcular, o la partida la seguiría contando',
 // 6 · LA AUDITORÍA: TODO LO QUE RESTA LA MERMA RESTA TAMBIÉN ESTA SALIDA
 // ══════════════════════════════════════════════════════════════════════════
 
-test('ninguna cuenta de «lo que queda» se olvidó de la devolución desde la cámara', () => {
-  // Es la trampa de esta salida: más de veinte lugares cuentan cuánto queda de una
-  // partida, cada uno a mano. Si mañana alguien escribe el veintiuno restando la
-  // merma y no esto, acá sale.
-  //
-  // Los que restan la merma y NO tienen que restar la devolución, con su razón:
-  const NO_VAN = {
-    // separar por calidad: la madre tiene que conservar al menos los kilos tirados;
-    // los cajones devueltos ya los topea bultosDisponibles.
-    'const kgTirados = r2(kgDecomisado(db, madre.id));': 'kgTirados',
-    // la cubeta es un lote sin orden de compra: la devolución no la acepta.
-    'const dispCubeta = ': 'cubeta',
-    'const restante = (cubeta.kg_reales': 'cubeta',
-  };
-  const faltan = [];
-  const lineas = SG.split('\n');
-  for (let n = 0; n < lineas.length; n++) {
-    const l = lineas[n];
-    if (!/kgDecomisado\(db, /.test(l)) continue;
-    if (/^function kgDecomisado/.test(l)) continue;
-    if (Object.keys(NO_VAN).some((k) => l.includes(k))) continue;
-    // La devolución puede estar en la misma línea o en la siguiente.
-    const tramo = l + (lineas[n + 1] || '');
-    if (!/kgDevueltoCamara\(db, /.test(tramo)) faltan.push((n + 1) + ': ' + l.trim().slice(0, 90));
-  }
-  assert.deepEqual(faltan, [], 'restan la merma y no la devolución desde la cámara');
-
-  // Lo mismo en cajones.
-  for (const l of lineas) {
-    if (/bultosDecomisado\(db, loteId\) - bultosTransformado\(db, loteId\)/.test(l)) {
-      const n = lineas.indexOf(l);
-      assert.match(l + lineas[n + 1], /bultosDevueltoCamara\(db, loteId\)/, 'en cajones: ' + l.trim());
-    }
-  }
-
-  // Y en SQL: toda resta de la merma en una fórmula de kilos del lote.
-  const sql = [
-    hasta(SG, 'const KG_VIGENTE_STOCK =', '\r\n'),
-    hasta(SG, 'const KG_DISPONIBLE =', '\r\n'),
-    hasta(SG, 'const KG_EN_CAMARA =', '\r\n'),
-    hasta(SG, 'const KG_VIGENTE = ', '\r\n'),
-    hasta(SG, 'const KG_VIG = `', '`;'),
-    hasta(DBSG, 'const MARGEN_COSTO_KG = `', '`;'),
-  ];
-  for (const s of sql) {
-    assert.match(s, /SUM_DEV_CAMARA|sg_devolucion_stock_items/, 'no resta la devolución: ' + s.slice(0, 60));
-  }
-});
+// La auditoría de «todo lo que resta la merma resta la devolución» vive en
+// devolucion_camara_corrida.test.mjs: la que estaba acá miraba que el nombre apareciera
+// cerca, y un «+» en lugar de un «-» pasaba en verde.
 
 test('las otras preguntas de «¿ya salió algo de este lote?» también la ven', () => {
   // Separar por calidad y deshacer la separación preguntan si salió algo. Deshacer
