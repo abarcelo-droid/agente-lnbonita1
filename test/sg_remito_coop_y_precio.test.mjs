@@ -19,6 +19,13 @@ const cuerpo = (nombre, largo = 3000) => {
   assert.ok(i > 0, 'no existe ' + nombre);
   return PANEL.slice(i, i + largo);
 };
+// Hasta donde termina la función. La ficha del remito creció con el flete de cada
+// renglón (V1045) y lo buscado quedó fuera de la ventana de caracteres.
+const funcion = (nombre) => {
+  const i = PANEL.indexOf(nombre);
+  assert.ok(i > 0, 'no existe ' + nombre);
+  return PANEL.slice(i, PANEL.indexOf('\r\n}', i));
+};
 
 // ══ 1 · LA CUADRILLA SALE DEL CATÁLOGO ═════════════════════════════════════
 
@@ -141,7 +148,7 @@ test('y el precio que no cambió no se toca ni deja rastro', () => {
 // ── LA PANTALLA ────────────────────────────────────────────────────────────
 
 test('el precio es un campo, no un número muerto', () => {
-  const b = cuerpo('function sgDespVer(id){', 6200);
+  const b = funcion('function sgDespVer(id){');
   assert.match(b, /var puedeEd = lnbPuedeOperar\('sg-ventas'\) && !d\.facturado;/);
   assert.match(b, /id="sg-dped-'\+i\+'"/);
   assert.match(b, /Por qué cambia el precio/);
@@ -157,7 +164,7 @@ test('el subtotal se rehace mientras se escribe', () => {
 
 test('si ya se facturó se dice POR QUÉ, no se muestra apagado', () => {
   // Un campo deshabilitado sin explicación se lee como que falta un permiso.
-  const b = cuerpo('function sgDespVer(id){', 8200);
+  const b = funcion('function sgDespVer(id){');
   assert.match(b, /🔒 Este remito ya se facturó/);
   assert.match(b, /Se corrige con una nota de crédito/);
 });

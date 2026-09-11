@@ -2288,6 +2288,12 @@ try {
   // se declararon más que los de la partida. NULL = el papel dice lo mismo que el
   // galpón, que es el caso de todos los remitos que ya existen.
   if (addCol('sg_despacho_items',   'kg_declarados',        'REAL')) added.push('sg_despacho_items.kg_declarados');
+  // EL FLETE QUE SE PACTÓ PARA ESTE RENGLÓN, por cajón (V1045). Pablo, 9/9/2026: «el
+  // flete de salida se valoriza por línea de producto, no por remito: el monto de
+  // flete puede variar dependiendo del producto». Es lo que se PACTÓ al armar el
+  // remito; lo que se paga de verdad llega con la cuenta del fletero y vive en
+  // sg_gasto_flete_lineas. NULL = no se dijo, o el flete no lo pone San Gerónimo.
+  if (addCol('sg_despacho_items',   'flete_por_bulto',      'REAL')) added.push('sg_despacho_items.flete_por_bulto');
   if (addCol('sg_lote_decomisos',   'bultos',               'INTEGER')) added.push('sg_lote_decomisos.bultos');
   if (addCol('sg_transformaciones', 'bultos_transformados', 'INTEGER')) added.push('sg_transformaciones.bultos_transformados');
   if (addCol('sg_reprocesos',       'bultos_procesados',    'INTEGER')) added.push('sg_reprocesos.bultos_procesados');
@@ -2318,6 +2324,28 @@ try {
   backfill('sg_reservas',         'bultos',               'kg',               'lote_id');
   backfill('sg_despacho_items',   'bultos',               'kg_despachados',   'lote_id');
 } catch (e) { console.error('[DB] SG F3-A bultos movimiento:', e.message); }
+
+// ── EL FLETE DE SALIDA, RENGLÓN POR RENGLÓN (V1045) ─────────────────────────────
+//
+// Lo que se le paga al fletero por cada producto del remito. El TOTAL sigue en
+// sg_gastos_directos.monto —lo leen la factura del fletero, su cuenta corriente y el
+// margen del remito— y es siempre la suma de estas filas: lo arma la valorización.
+//
+// Cuelga del GASTO y no del renglón del remito: si el gasto se anula, sus renglones
+// dejan de valer solos, sin tener que borrarlos. Sin REFERENCES: las dos claves son
+// lógicas, como el resto de lo que apunta a remitos desde Gastos Directos.
+try {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS sg_gasto_flete_lineas (
+      id               INTEGER PRIMARY KEY AUTOINCREMENT,
+      gasto_id         INTEGER NOT NULL,
+      despacho_item_id INTEGER NOT NULL,
+      monto            REAL NOT NULL,
+      UNIQUE (gasto_id, despacho_item_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_sg_gfl_item ON sg_gasto_flete_lineas(despacho_item_id);
+  `);
+} catch (e) { console.error('[DB] SG sg_gasto_flete_lineas:', e.message); }
 
 // ── F3-B (complemento): backfill de sg_lotes.bultos = ROUND(kg_reales / kg_por_bulto) ───────────
 // F1 (#477) dejó sg_lotes.bultos NULL (sin backfill). F3-B valida el despacho contra

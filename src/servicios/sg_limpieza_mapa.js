@@ -87,6 +87,7 @@ registrar({
   aviso: 'La solapa «Repasos» todavía no tiene datos. El ALTA de las cooperativas no se toca: '
     + 'lo que se borra son las descargas.',
   tablas: [
+    { tabla: 'sg_gasto_flete_lineas', que_es: 'lo que costó el flete de salida de cada producto del remito' },
     { tabla: 'sg_gastos_directos', que_es: 'fletes de entrada y salida, descargas y control de cooperativa' },
     { tabla: 'sg_gastos_directos_lote', que_es: 'gastos imputados a una partida' },
     { tabla: 'sg_gastos_globales_periodo', que_es: 'los gastos del mes que van al resultado del período' },

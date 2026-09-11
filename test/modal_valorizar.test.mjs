@@ -149,7 +149,11 @@ test('la tabla del modal tiene anchos por columna y no pide barra lateral', () =
 test('la primera columna dice PARTIDA, que es lo que el operador busca', () => {
   const i = PANEL.indexOf('id="sg-val-modal"');
   const b = PANEL.slice(i, i + 3000);
-  assert.match(b, /<th style="width:\d+%">Partida<\/th>/);
+  // Desde la V1045 lleva id: el flete de salida la rotula «Remito». Para todos los
+  // demás sigue diciendo Partida, que es lo que se prueba.
+  assert.match(b, /<th style="width:\d+%" id="sg-val-th-ref">Partida<\/th>/);
+  const j = PANEL.indexOf('function sgGdsValAbrir(opts){');
+  assert.match(PANEL.slice(j, PANEL.indexOf('\r\n}', j)), /if\(thR\) thR\.textContent=opts\.refLbl\|\|'Partida';/);
 });
 
 test('TODO lo que se cuelga del cuerpo ocupa el ancho entero', () => {

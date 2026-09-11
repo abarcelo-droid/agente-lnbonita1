@@ -10196,6 +10196,98 @@ function syncGastoFleteDespacho(db, despachoId, fleteroId, fechaServicio, userId
     VALUES ('flete_salida', ?, ?, 'pendiente_valorizar', ?, ?)`).run(despachoId, fleteroId, fechaServicio, userId);
 }
 
+// ══ EL FLETE DE SALIDA SE VALORIZA POR RENGLÓN (V1045) ═══════════════════════
+//
+// Pablo, 9/9/2026: «el flete de salida se valoriza por línea de producto, no por
+// remito: el monto de flete puede variar dependiendo del producto».
+//
+// Un camión con tomate y con zapallo no cobra lo mismo por cajón. El remito tenía UN
+// monto y la cuenta del fletero se valorizaba con UN número por remito, así que
+// ningún producto sabía cuánto flete le tocó.
+//
+// El total del gasto sigue en sg_gastos_directos.monto —lo leen la factura del
+// fletero, su cuenta corriente y el margen del remito— y es SIEMPRE la suma de sus
+// renglones: lo calcula el servidor, no lo recibe.
+
+// Un importe que llega de una pantalla: un número de verdad, o NaN. Vacío, null,
+// true/false, «Infinity» y texto NO son importes — Number() los volvería 0, 1 o
+// infinito, y ésos pasan cualquier «>= 0».
+function importeValido(v) {
+  if (v == null || typeof v === 'boolean') return NaN;
+  if (typeof v === 'string' && v.trim() === '') return NaN;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : NaN;
+}
+
+// ── LO QUE YA ESTÁ EN LA FACTURA DEL PROVEEDOR NO SE REVALORIZA (V1045) ──────
+//
+// La factura guardó cuánto sumaban sus operaciones y con eso armó el asiento y la
+// deuda. Cambiar el importe después dejaba la factura diciendo una cosa y el gasto
+// otra, sin que ninguna pantalla lo mostrara. Vale para las TRES puertas que
+// valorizan —fletes de salida y cooperativa, y las dos del flete de entrada— y las
+// listas lo dicen con la misma condición, para no ofrecer un botón que rebota.
+function facturaVivaDelGasto(db, gastoId) {
+  return db.prepare(`SELECT f.numero FROM sg_factura_gasto_items fi
+    JOIN sg_facturas_gasto f ON f.id = fi.factura_id AND f.activo = 1
+    WHERE fi.gasto_id = ? LIMIT 1`).get(gastoId) || null;
+}
+function mensajeFacturaViva(numero) {
+  return `Una de esas operaciones ya está en la factura ${numero || ''} del proveedor: `
+    + 'para cambiarle el importe, primero hay que anular esa factura.';
+}
+const SQL_GASTO_FACTURADO = `EXISTS (SELECT 1 FROM sg_factura_gasto_items fi
+               JOIN sg_facturas_gasto f ON f.id = fi.factura_id AND f.activo = 1
+              WHERE fi.gasto_id = g.id) AS facturada`;
+
+// Reparte un total entre renglones por sus cajones, al centavo, y el redondeo lo
+// absorbe el último: la suma tiene que dar EXACTO lo que se repartió.
+function repartirPorBultos(total, filas) {
+  const t = Math.round((Number(total) || 0) * 100);
+  const tot = filas.reduce((a, f) => a + (Number(f.bultos) || 0), 0);
+  if (!(t > 0) || !(tot > 0)) return filas.map(() => null);
+  let usado = 0;
+  return filas.map((f, i) => {
+    if (i === filas.length - 1) return (t - usado) / 100;
+    const c = Math.round(t * (Number(f.bultos) || 0) / tot);
+    usado += c;
+    return c / 100;
+  });
+}
+
+// Los renglones del remito de un gasto de flete de salida, con lo que hay para
+// proponer en cada uno:
+//   · lo ya valorizado renglón por renglón, si existe;
+//   · si el gasto se valorizó antes de la V1045 —un número por remito—, ese número
+//     repartido por cajones, para que corregirlo no sea empezar de cero;
+//   · si no, lo pactado en el remito: cajones × flete por cajón;
+//   · y en los remitos viejos, que tenían un solo monto pactado, ése repartido.
+function lineasFleteSalida(db, g) {
+  const filas = db.prepare(`SELECT di.id AS despacho_item_id, di.bultos, di.kg_despachados,
+      di.flete_por_bulto, pr.nombre AS producto_nombre, l.codigo_lote, o.trazabilidad AS partida
+    FROM sg_despacho_items di
+    LEFT JOIN sg_productos pr ON pr.id = di.producto_id
+    LEFT JOIN sg_lotes l ON l.id = di.lote_id
+    LEFT JOIN sg_oc_items oi ON oi.id = l.oc_item_id
+    LEFT JOIN sg_oc o ON o.id = oi.oc_id
+    WHERE di.despacho_id = ? ORDER BY di.id`).all(g.despacho_id);
+  const valor = new Map(db.prepare('SELECT despacho_item_id, monto FROM sg_gasto_flete_lineas WHERE gasto_id=?')
+    .all(g.id).map((x) => [Number(x.despacho_item_id), Number(x.monto)]));
+  let prop;
+  if (valor.size) {
+    prop = filas.map((f) => (valor.has(Number(f.despacho_item_id)) ? valor.get(Number(f.despacho_item_id)) : null));
+  } else if (g.estado === 'valorizado' && Number(g.monto) > 0) {
+    prop = repartirPorBultos(g.monto, filas);
+  } else if (filas.some((f) => f.flete_por_bulto != null)) {
+    // Cero también: un flete pactado en cero es un dato, no «no se dijo».
+    prop = filas.map((f) => (f.flete_por_bulto != null
+      ? Math.round(Number(f.flete_por_bulto) * (Number(f.bultos) || 0) * 100) / 100 : null));
+  } else {
+    const d = db.prepare('SELECT flete_monto FROM sg_despachos WHERE id=?').get(g.despacho_id);
+    prop = repartirPorBultos(d && d.flete_monto, filas);
+  }
+  return filas.map((f, i) => ({ ...f, monto: prop[i], valorizado: valor.size ? 1 : 0 }));
+}
+
 // FASE 2 — sincroniza el gasto de la COOPERATIVA (carga/descarga) de una operación. Genérico:
 // tipo='descarga_ingreso' cuelga de recepcion_id; tipo='carga_salida' cuelga de despacho_id.
 // Idempotente: un solo pendiente por (operación, tipo). Sin proveedor → anula el pendiente.
@@ -10315,10 +10407,35 @@ const postRemito = (req, res) => {
       const dec = validarKgDeclarados({ esCadena, kgNominal: kg, kgDeclarados: it.kg_declarados,
         etiqueta: 'Lote ' + loteId });
       if (!dec.ok) return res.status(400).json({ ok: false, error: dec.error });
+      // EL FLETE DE ESTE RENGLÓN, por cajón (V1045). Vacío = no se dijo.
+      let fleteBulto = null;
+      if (it.flete_por_bulto != null && it.flete_por_bulto !== '') {
+        fleteBulto = importeValido(it.flete_por_bulto);
+        if (!(fleteBulto >= 0)) {
+          return res.status(400).json({ ok: false, error: `Lote ${loteId}: el flete por cajón tiene que ser un número, de cero para arriba` });
+        }
+      }
       pedidoLote[loteId] = (pedidoLote[loteId] || 0) + bultos;
       lineas.push({ it, origen: 'lote', loteId, bultos, kgPorBulto, kg, kgDeclarados: dec.kg,
-        presentacionId: lp.presentacion_id, envaseId: lp.envase_id });
+        presentacionId: lp.presentacion_id, envaseId: lp.envase_id, fleteBulto });
     }
+    // ── EL FLETE SE PACTA POR PRODUCTO, NO POR REMITO (V1045) ────────────────
+    //
+    // Sólo cuando la plata la pone San Gerónimo: si lo paga el otro no nos interesa
+    // el costo, y un número guardado que nadie va a usar aparece después en un
+    // informe como si fuera plata nuestra. Es la misma regla que ya tenía el monto.
+    //
+    // El monto del remito ya no se tipea: es la suma de los renglones. Si ningún
+    // renglón trae flete se respeta el monto suelto, que es lo que manda quien
+    // todavía no habla de renglones.
+    // Y sin fletero no hay flete: no hay a quién pagárselo ni gasto que valorizar.
+    const pone = !!b.fletero_id && FLETE_SG_PONE_LA_PLATA(fleteDeRemito(b).cargo, fleteDeRemito(b).quien);
+    if (!pone) for (const ln of lineas) ln.fleteBulto = null;
+    const conFlete = lineas.filter((ln) => ln.fleteBulto != null);
+    const fleteRemito = !pone ? null
+      : (conFlete.length
+          ? r2(conFlete.reduce((a, ln) => a + ln.fleteBulto * ln.bultos, 0))
+          : (Number(b.flete_monto) > 0 ? Number(b.flete_monto) : null));
     for (const loteId of Object.keys(pedidoLote)) {
       const lote = db.prepare('SELECT estado FROM sg_lotes WHERE id=? AND activo=1').get(loteId);
       if (!lote) return res.status(400).json({ ok: false, error: 'Lote inexistente: ' + loteId });
@@ -10353,11 +10470,9 @@ const postRemito = (req, res) => {
         // todavía lo leen; la verdad vive en las dos columnas de abajo.
         fleteDeRemito(b).cargo === 'nosotros' ? 'nosotros' : 'vendedor',
         fleteDeRemito(b).cargo, fleteDeRemito(b).quien,
-        // El monto sólo cuando la plata la pone San Gerónimo: si lo paga el otro no
-        // nos interesa el costo, y un número guardado que nadie va a usar aparece
-        // después en un informe como si fuera plata nuestra.
-        FLETE_SG_PONE_LA_PLATA(fleteDeRemito(b).cargo, fleteDeRemito(b).quien)
-          ? (Number(b.flete_monto) > 0 ? Number(b.flete_monto) : null) : null);
+        // El monto sólo cuando la plata la pone San Gerónimo, y desde la V1045 es la
+        // suma de lo pactado en cada renglón: se arma arriba.
+        fleteRemito);
       const despachoId = info.lastInsertRowid;
       // PARTE B — si se asignó fletero, queda un gasto de flete de salida PENDIENTE de valorizar.
       syncGastoFleteDespacho(db, despachoId, fleteroId, val(b.fecha_despacho), uid(req), fleteDeRemito(b));
@@ -10368,8 +10483,8 @@ const postRemito = (req, res) => {
       const ins = db.prepare(`INSERT INTO sg_despacho_items
         (despacho_id, origen, lote_id, oc_item_id, producto_id, presentacion_id, envase_id, kg_por_bulto,
          cantidad_presentaciones, bultos, kg_despachados, precio_por_kg, precio_lista_por_kg,
-         nota_precio, subtotal, margen_estimado, piso_id, modo_precio, kg_declarados)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`);
+         nota_precio, subtotal, margen_estimado, piso_id, modo_precio, kg_declarados, flete_por_bulto)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`);
       const lotesAfectados = new Set();
       let totalBultos = 0;   // FASE 2 — bultos del despacho (para la carga de la cooperativa)
       for (const ln of lineas) {
@@ -10427,7 +10542,9 @@ const postRemito = (req, res) => {
           (it.modo_precio === 'bulto') ? 'bulto' : 'kilo',
           // Los del papel. NO entran al subtotal ni al margen de arriba ni a
           // descontarDeUbicacion de abajo: ésos son del galpón.
-          ln.kgDeclarados != null ? ln.kgDeclarados : null);
+          ln.kgDeclarados != null ? ln.kgDeclarados : null,
+          // El flete pactado para este producto, por cajón (V1045).
+          ln.fleteBulto != null ? ln.fleteBulto : null);
         if (ln.origen === 'lote') {
           // SACAR DEL PISO DE OTRO TAMPOCO. Si sólo se controlara recibir, se
           // podría vaciar el piso ajeno armando un remito. Cuando la línea no
@@ -10696,6 +10813,13 @@ router.get('/despachos/:id', requireAuth, (req, res) => {
     d.flete_salida = db.prepare("SELECT COALESCE(SUM(monto),0) s FROM sg_gastos_directos WHERE despacho_id=? AND tipo_gasto='flete_salida' AND estado='valorizado' AND activo=1").get(req.params.id).s;
     d.carga_salida = db.prepare("SELECT COALESCE(SUM(monto),0) s FROM sg_gastos_directos WHERE despacho_id=? AND tipo_gasto='carga_salida' AND estado='valorizado' AND activo=1").get(req.params.id).s;
     d.carga_salida_estado = db.prepare("SELECT estado, monto, unidad, cantidad FROM sg_gastos_directos WHERE despacho_id=? AND tipo_gasto='carga_salida' AND activo=1 AND estado!='anulado' ORDER BY id DESC LIMIT 1").get(req.params.id) || null;
+    // EL FLETE DE CADA PRODUCTO (V1045): lo valorizado renglón por renglón, del gasto
+    // vivo. Un gasto anulado no le deja flete a nadie.
+    const fleteLinea = new Map(db.prepare(`SELECT fl.despacho_item_id, fl.monto FROM sg_gasto_flete_lineas fl
+      JOIN sg_gastos_directos g ON g.id = fl.gasto_id
+      WHERE g.despacho_id = ? AND g.tipo_gasto = 'flete_salida' AND g.estado = 'valorizado' AND g.activo = 1`)
+      .all(req.params.id).map((x) => [Number(x.despacho_item_id), Number(x.monto)]));
+    for (const it of d.items) it.flete_linea = fleteLinea.has(Number(it.id)) ? fleteLinea.get(Number(it.id)) : null;
     const margen = db.prepare("SELECT COALESCE(SUM(margen_estimado),0) s FROM sg_despacho_items WHERE despacho_id=?").get(req.params.id).s;
     d.margen = margen; d.margen_neto = margen - (d.flete_salida || 0) - (d.carga_salida || 0);
     res.json({ ok: true, data: d });
@@ -11551,6 +11675,8 @@ router.get('/control-coop', requireAuth, (req, res) => {
              g.proveedor_servicio_id AS cooperativa_id,
              co.razon_social    AS cooperativa_nombre,
              g.unidad, g.cantidad, g.estado, g.monto, g.fecha_valorizacion, g.cuenta_ref,
+             -- Si ya está en la factura de la cooperativa, la fila no ofrece Editar (V1045).
+             ${SQL_GASTO_FACTURADO},
              u.nombre           AS recibido_por_nombre
       FROM sg_recepciones r
       LEFT JOIN sg_gastos_directos g
@@ -11760,6 +11886,8 @@ router.get('/fletes-entrada', requireAuth, (req, res) => {
              -- Si el papel está. Sin esto no hay forma de saber a qué fletes les
              -- falta la factura sin abrirlos uno por uno.
              (g.storage_key IS NOT NULL) AS tiene_archivo,
+             -- Ya en la factura del fletero: la fila no ofrece Corregir (V1045).
+             ${SQL_GASTO_FACTURADO},
              pv.razon_social AS fletero_nombre
         FROM sg_recepciones r
         JOIN sg_oc o ON o.id = r.oc_id
@@ -12659,6 +12787,9 @@ router.post('/fletes-entrada/valorizar-cuenta', requireAuth, (req, res) => {
         const ya = db.prepare(`SELECT * FROM sg_gastos_directos WHERE recepcion_id=?
           AND tipo_gasto='flete_entrada' AND activo=1 AND estado<>'anulado'`).get(rec.id);
         if (ya) {
+          // Ya en la factura del fletero: no se pisa lo que el papel dijo (V1045).
+          const fac = facturaVivaDelGasto(db, ya.id);
+          if (fac) throw new Error(mensajeFacturaViva(fac.numero));
           db.prepare(`UPDATE sg_gastos_directos SET estado='valorizado', monto=?,
             proveedor_servicio_id=?, fecha_valorizacion=?, valorizado_por=?, cuenta_ref=?
            WHERE id=?`).run(monto, fletero, fecha, uid(req), ref, ya.id);
@@ -12731,6 +12862,9 @@ router.post('/fletes-entrada/:recepcionId/valorizar', requireAuth, (req, res) =>
       const ya = db.prepare(`SELECT * FROM sg_gastos_directos WHERE recepcion_id=?
         AND tipo_gasto='flete_entrada' AND activo=1 AND estado<>'anulado'`).get(rec.id);
       if (ya) {
+        // Ya en la factura del fletero: no se pisa lo que el papel dijo (V1045).
+        const fac = facturaVivaDelGasto(db, ya.id);
+        if (fac) throw new Error(mensajeFacturaViva(fac.numero));
         db.prepare(`UPDATE sg_gastos_directos SET estado='valorizado', monto=?,
           proveedor_servicio_id=?, fecha_valorizacion=?, valorizado_por=?,
           observaciones=COALESCE(?, observaciones) WHERE id=?`)
@@ -12850,7 +12984,7 @@ router.get('/gastos-servicio', requireAuth, (req, res) => {
     if (req.query.estado) { where.push('g.estado=?'); params.push(req.query.estado); }
     if (req.query.proveedor_id) { where.push('g.proveedor_servicio_id=?'); params.push(req.query.proveedor_id); }
     const rows = db.prepare(`
-      SELECT g.*, (g.storage_key IS NOT NULL) AS tiene_archivo,
+      SELECT g.*, (g.storage_key IS NOT NULL) AS tiene_archivo, ${SQL_GASTO_FACTURADO},
         pv.razon_social AS fletero_nombre,
         d.numero AS despacho_numero, d.fecha_despacho, c.razon_social AS cliente_nombre,
         r.numero_recepcion, oc.trazabilidad AS partida, oc.numero AS oc_numero,
@@ -12867,6 +13001,7 @@ router.get('/gastos-servicio', requireAuth, (req, res) => {
         COALESCE(c.razon_social, prov.razon_social) AS contraparte,
         COALESCE(d.fecha_despacho, r.fecha_recepcion, g.fecha_servicio) AS operacion_fecha,
         (SELECT COALESCE(SUM(kg_despachados),0) FROM sg_despacho_items WHERE despacho_id=d.id) AS kg,
+        (SELECT COALESCE(SUM(bultos),0) FROM sg_despacho_items WHERE despacho_id=d.id) AS bultos,
         uv.nombre AS valorizado_por_nombre
       FROM sg_gastos_directos g
       LEFT JOIN sg_proveedores pv ON pv.id=g.proveedor_servicio_id
@@ -12877,12 +13012,16 @@ router.get('/gastos-servicio', requireAuth, (req, res) => {
       LEFT JOIN sg_proveedores prov ON prov.id=oc.proveedor_id
       LEFT JOIN usuarios uv ON uv.id=g.valorizado_por
       WHERE ${where.join(' AND ')} ORDER BY g.id DESC`).all(...params);
+    // El flete de salida se valoriza por renglón (V1045): cada remito trae sus productos.
+    for (const g of rows) if (g.tipo_gasto === 'flete_salida' && g.despacho_id) g.lineas = lineasFleteSalida(db, g);
     res.json({ ok: true, data: rows });
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
 // Valorizar la cuenta de un fletero: asigna monto + fecha + cuenta_ref común a sus gastos
 // pendientes. items=[{id, monto}] (el front ya calculó montos, sea a mano o por prorrateo).
+// El flete de salida va POR RENGLÓN (V1045): items=[{id, lineas:[{despacho_item_id, monto}]}]
+// y el monto del gasto es la suma, no lo que venga en `monto`.
 router.post('/gastos-servicio/valorizar', requireAuth, (req, res) => {
   const db = getDb();
   try {
@@ -12914,9 +13053,53 @@ router.post('/gastos-servicio/valorizar', requireAuth, (req, res) => {
       let n = 0;
       const recepciones = new Set();   // FASE 2 — recepciones con descarga valorizada → recalcular costo
       for (const it of items) {
-        const monto = Number(it.monto);
+        let monto = importeValido(it.monto);
+        const g0 = db.prepare(`SELECT id, tipo_gasto, despacho_id FROM sg_gastos_directos
+          WHERE id=? AND proveedor_servicio_id=? AND estado <> 'anulado' AND activo=1`).get(it.id, b.proveedor_servicio_id);
+        // Anulado, de otro proveedor o inexistente: no se toca, como siempre —la
+        // pantalla avisa si no se valorizó ninguna—. Y no se le piden renglones a lo que
+        // no se va a tocar: un remito anulado con el cuadro abierto tiraba la cuenta entera.
+        if (!g0) continue;
+        // Lo que ya está en la factura del proveedor no se revaloriza (V1045): ver
+        // facturaVivaDelGasto. Antes de mirar el tipo: vale para todos.
+        const fac = facturaVivaDelGasto(db, g0.id);
+        if (fac) throw new Error(mensajeFacturaViva(fac.numero));
+        // ── EL FLETE DE SALIDA, POR RENGLÓN (V1045) ────────────────────────────
+        //
+        // Cada producto del remito con su importe, aunque sea cero, y el total del
+        // gasto es la suma: lo que diga `monto` no cuenta. Un renglón que falta
+        // dejaría el total bien y a un producto sin flete, que es lo que se arregla.
+        const lineasFlete = [];
+        if (g0 && g0.tipo_gasto === 'flete_salida') {
+          const ls = Array.isArray(it.lineas) ? it.lineas : [];
+          if (!ls.length) {
+            throw new Error('El flete de salida se valoriza por producto: falta el importe de cada renglón del remito.');
+          }
+          const delRemito = new Set(db.prepare('SELECT id FROM sg_despacho_items WHERE despacho_id=?')
+            .all(g0.despacho_id).map((x) => Number(x.id)));
+          const vistos = new Set();
+          for (const ln of ls) {
+            if (!ln || typeof ln !== 'object') throw new Error('Un renglón del remito vino vacío.');
+            const diId = Number(ln.despacho_item_id);
+            if (!delRemito.has(diId)) throw new Error('Un renglón no es de ese remito.');
+            if (vistos.has(diId)) throw new Error('Un renglón del remito vino dos veces.');
+            const m = importeValido(ln.monto);
+            if (!(m >= 0)) throw new Error('Falta el flete de un producto del remito, o es negativo.');
+            vistos.add(diId);
+            lineasFlete.push({ diId, monto: r2(m) });
+          }
+          if (vistos.size !== delRemito.size) {
+            throw new Error('Faltan productos del remito: cada renglón lleva su flete, aunque sea cero.');
+          }
+          monto = r2(lineasFlete.reduce((a, x) => a + x.monto, 0));
+        }
         if (!(monto >= 0)) throw new Error('Monto inválido en una operación');
         const ch = upd.run(monto, fecha, uid(req), ref, it.id, b.proveedor_servicio_id).changes;
+        if (ch && lineasFlete.length) {
+          db.prepare('DELETE FROM sg_gasto_flete_lineas WHERE gasto_id=?').run(g0.id);
+          const insL = db.prepare('INSERT INTO sg_gasto_flete_lineas (gasto_id, despacho_item_id, monto) VALUES (?,?,?)');
+          for (const x of lineasFlete) insL.run(g0.id, x.diId, x.monto);
+        }
         n += ch;
         if (ch) {
           const g = db.prepare('SELECT tipo_gasto, recepcion_id FROM sg_gastos_directos WHERE id=?').get(it.id);

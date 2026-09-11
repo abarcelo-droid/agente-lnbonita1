@@ -8112,8 +8112,13 @@ input[type=number]{-moz-appearance:textfield;appearance:textfield}
                 <option value="productor">El productor directamente</option>
                 <option value="san_geronimo">Lo adelanta San Gerónimo</option>
               </select></div>
-            <div class="fl" id="sg-desp-flete-monto-wrap" style="display:none"><label>Monto de flete ($)</label>
-              <input type="number" id="sg-desp-flete-monto" min="0" step="0.01" placeholder="lo que se pactó"></div>
+            <!-- EL FLETE SE PACTA POR PRODUCTO (V1045). Pablo, 9/9/2026: «el flete de
+                 salida se valoriza por línea de producto, no por remito: el monto de
+                 flete puede variar dependiendo del producto». Acá ya no se tipea: es la
+                 suma de lo que se puso en cada renglón. -->
+            <div class="fl" id="sg-desp-flete-monto-wrap" style="display:none"><label>Flete del remito</label>
+              <div id="sg-desp-flete-total" style="padding:7px 0;font-weight:700">$ 0</div>
+              <div style="font-size:11px;color:var(--mut)">Se pone por cajón en cada renglón</div></div>
           </div>
           <!-- QUÉ IMPLICA LO QUE SE ELIGIÓ. El que arma el remito elegía a ciegas
                entre opciones con consecuencias distintas. -->
@@ -8188,8 +8193,8 @@ input[type=number]{-moz-appearance:textfield;appearance:textfield}
       <div class="ab-table-wrap ff" style="overflow-x:hidden !important">
         <table class="pa-tbl" style="table-layout:fixed;width:100%">
         <thead><tr>
-          <th style="width:22%">Partida</th>
-          <th style="width:20%">Detalle</th>
+          <th style="width:22%" id="sg-val-th-ref">Partida</th>
+          <th style="width:20%" id="sg-val-th-sub">Detalle</th>
           <th style="width:12%">Fecha</th>
           <th style="width:12%;text-align:right">Cant.</th>
           <th style="width:17%;text-align:right">$ por unidad</th>
@@ -23186,6 +23191,35 @@ SG_MANUAL.gastos = { titulo: 'Gastos Directos', html:
   + '<p>Los fletes valorizados <b>antes</b> de esta versión tienen el total con IVA adentro. '
   + 'Se corrigen entrando de nuevo a <b>Valorizar</b> y poniendo el neto.</p>'
 
+  + '<h3>🚚 El flete de salida, producto por producto <span class="ver">V1045</span></h3>'
+  + '<p>Pablo: <i>«el monto de flete puede variar dependiendo del producto»</i>. Un camión que '
+  + 'lleva tomate y zapallo no cobra lo mismo por cajón, y hasta ahora la cuenta del fletero se '
+  + 'valorizaba con <b>un número por remito</b>: ningún producto sabía cuánto flete le tocó.</p>'
+  + '<ul>'
+  + '<li>La bandeja de pendientes muestra, en cada remito, <b>qué productos lleva</b> y cuántos '
+  + 'cajones.</li>'
+  + '<li><b>💵 Valorizar cuenta</b> abre <b>una fila por producto</b> de cada remito, en '
+  + '<b>cajones</b>: se pone el precio por cajón o el total del renglón, y el otro sale solo. '
+  + 'Cada fila arranca con <b>lo que se pactó en el remito</b>.</li>'
+  + '<li><b>Total a repartir</b> sigue estando: lo reparte <b>por cajones</b> entre todos los '
+  + 'productos, al centavo: la suma da exacto el total de la cuenta.</li>'
+  + '<li>Un remito se valoriza <b>entero</b>: cada producto con su importe, <b>aunque sea cero</b>. '
+  + 'Uno a medias no se guarda y la pantalla dice cuál. Los que quedan todos vacíos se dejan '
+  + 'para otra cuenta.</li>'
+  + '<li>Lo que suma el remito sigue siendo lo que va a la <b>factura del fletero</b>, a su '
+  + '<b>cuenta corriente</b> y al <b>margen del remito</b>. En la lista de valorizados y en la '
+  + 'ficha del remito se ve cuánto le tocó a cada producto.</li>'
+  + '<li>Uno ya valorizado se corrige con <b>✏️ Editar</b>, en <b>Valorizados</b>, producto por '
+  + 'producto.</li>'
+  + '</ul>'
+  + '<div class="ojo"><b>Lo que ya está en una factura no se revaloriza</b> — en ninguna de las '
+  + 'solapas. La factura guardó cuánto sumaban sus operaciones y con eso armó el asiento y la '
+  + 'deuda: cambiar el importe dejaba la factura diciendo una cosa y el gasto otra. Para '
+  + 'corregirlo, primero se anula la factura. La fila lo dice con <b>🔒</b> en vez de ofrecer el '
+  + 'botón.</div>'
+  + '<p>Los remitos valorizados <b>antes</b> de esta versión tienen un solo número: si se '
+  + 'corrigen, sus productos arrancan con ese número <b>repartido por cajones</b>.</p>'
+
   + '<h3>La cuenta del fletero, de una vez <span class="ver">V1031</span></h3>'
   + '<p>El fletero trae ocho camiones en la semana y manda <b>una</b> cuenta. En <b>Fletes de '
   + 'entrada</b> ahora se valoriza igual que en <b>Fletes de salida</b>: se elige el fletero, se '
@@ -23297,7 +23331,8 @@ SG_MANUAL.gastos = { titulo: 'Gastos Directos', html:
   + 'proveedor: un fletero que además fuera el proveedor de una cooperativa metía sus '
   + 'fletes en la factura de la descarga, y se contabilizaban con el modelo equivocado.</li>'
   + '<li>El <b>flete de salida</b> cuelga de un <b>remito</b>, no de una partida: la '
-  + 'columna muestra el remito y el cliente.</li>'
+  + 'columna muestra el remito y el cliente. Lo que suma cada remito es la suma de sus '
+  + 'productos <span class="ver">V1045</span>.</li>'
   + '</ul>'
   + '<div class="ojo"><b>El flete de entrada ya se contabiliza al valorizarlo.</b> Su '
   + 'factura NO lo vuelve a asentar —sería contar el gasto dos veces—: queda el '
@@ -23451,6 +23486,9 @@ SG_MANUAL.gastos = { titulo: 'Gastos Directos', html:
 
   + '<h3>Qué cambió, y desde cuándo</h3>'
   + '<ul>'
+  + '<li><span class="ver">V1045</span> El <b>flete de salida se valoriza por producto</b>, en '
+  + 'cajones, y arranca con lo pactado en el remito; uno valorizado se corrige con <b>✏️ Editar</b>. '
+  + 'Y nada que ya esté en una factura se puede revalorizar: la fila muestra 🔒.</li>'
   + '<li><span class="ver">V1003</span> El botón <b>💵 Valorizar</b> está en la fila. '
   + 'Antes el aviso mandaba a una solapa vieja que ya no existía: la descarga quedaba '
   + '«a valorizar» para siempre y la partida trabada, sin ningún lugar donde '
@@ -24171,6 +24209,12 @@ SG_MANUAL.ventas = { titulo: 'Remitos y Facturación', html:
   + 'todavía falta saber <b>si lo adelantó San Gerónimo</b> —porque entonces hay que '
   + 'recuperárselo en la liquidación—. Ese par de preguntas es lo que decide si el gasto entra '
   + 'al costo o se le descuenta a alguien.</li>'
+  + '<li><b>🚚 Flete de cada producto</b> <span class="ver">V1045</span>. Cuando el flete lo pone '
+  + 'San Gerónimo, cada renglón tiene su casillero <b>Flete de este producto</b>, <b>por cajón</b>: '
+  + 'un cajón de tomate y uno de zapallo no cuestan lo mismo de llevar. El renglón muestra lo que '
+  + 'da, y el <b>flete del remito es la suma</b> — ya no se tipea un monto suelto. Es lo que se '
+  + '<b>pactó</b>: lo que se paga de verdad se pone cuando llega la cuenta del fletero, en Gastos '
+  + 'Directos, y arranca con esto. Es optativo; si no se sabe todavía, se deja vacío.</li>'
   + '<li><b>Cooperativa de carga y bultos.</b> Es lo que después se le paga a la cuadrilla: si '
   + 'no queda cargado acá, el gasto aparece sin respaldo cuando llegue la factura. '
   + '<span class="ver">V1041</span> <b>Los bultos no se escriben</b>: son la suma de los cajones '
@@ -24365,6 +24409,8 @@ SG_MANUAL.ventas = { titulo: 'Remitos y Facturación', html:
   + 'sola línea</b>.</li>'
   + '<li><b>V1043</b> — lo que se le <b>devuelve al productor</b> se le descuenta de verdad de lo '
   + 'que se le debe.</li>'
+  + '<li><b>V1045</b> — el <b>flete se pone por producto</b>, por cajón, en cada renglón; el del '
+  + 'remito es la suma. En la ficha del remito cada renglón muestra su flete.</li>'
   + '<li><b>V1044</b> — un remito con una devolución al productor ya no se anula sin anular antes '
   + 'la devolución; la devolución no se anula con la partida firme; y la partida que tuvo una '
   + 'devolución al productor <b>se puede liquidar</b> (antes la pantalla mandaba los cajones que '
@@ -25067,7 +25113,6 @@ function sgDespOpen(modo){
   // no mira la pregunta obtiene el comportamiento de antes, no uno nuevo.
   eid('sg-desp-flete-cargo').value='nosotros';
   eid('sg-desp-flete-quien').value='productor';
-  eid('sg-desp-flete-monto').value='';
   sgDespFleteCargo();
   // Proveedores de servicio: fletero (flete de salida) y cooperativa (carga). Ambos del mismo catálogo.
   api('/api/sg/proveedores-servicio').then(function(r){
@@ -25121,6 +25166,31 @@ function sgDespOnAdd(tipo, fuenteId, kg, meta){
   sgDespRender();
 }
 function sgDespDelItem(i){ SG.despItems.splice(i,1); sgDespRender(); }
+
+// ══ EL FLETE, PRODUCTO POR PRODUCTO (V1045) ═══════════════════════════════
+//
+// Pablo, 9/9/2026: «el flete de salida se valoriza por línea de producto, no por
+// remito: el monto de flete puede variar dependiendo del producto».
+//
+// Se pone POR CAJÓN, que es como cotiza el fletero, y el renglón muestra lo que da.
+// Sólo aparece cuando la plata la pone San Gerónimo: con el flete del cliente o del
+// productor no hay nada que pactar. Es la misma pregunta que ya decidía el monto.
+function sgDespFletePide(){
+  var hay = !!(eid('sg-desp-fletero')||{}).value;
+  var cargo = (eid('sg-desp-flete-cargo')||{}).value || 'nosotros';
+  var quien = (eid('sg-desp-flete-quien')||{}).value || 'productor';
+  return hay && sgDespFletePideMonto(cargo, quien);
+}
+function sgDespFleteLinea(it){
+  var f = Number(it && it.flete_bulto);
+  if (it == null || it.flete_bulto === '' || it.flete_bulto == null || isNaN(f)) return null;
+  return Math.round(f * (Number(it.bultos) || 0) * 100) / 100;
+}
+function sgDespFleteSet(i, v){
+  var it = SG.despItems[i]; if (!it) return;
+  it.flete_bulto = (v === '' || isNaN(Number(v))) ? '' : Number(v);
+  sgDespRender();
+}
 
 // ══ LOS KILOS DEL PAPEL, EN EL REMITO A UNA CADENA ═══════════════════════
 //
@@ -25209,6 +25279,7 @@ function sgDespRender(){
     + '<option value="kg"' + (SG_DESP_UNI === 'kg' ? ' selected' : '') + '>kilo</option>'
     + '<option value="bulto"' + (SG_DESP_UNI === 'bulto' ? ' selected' : '') + '>bulto</option>'
     + '</select></div>';
+  var fletePide = sgDespFletePide();
   eid('sg-desp-lines').innerHTML = cab + SG.despItems.map(function(it,i){
     var enViaje=it.origen==='oc_item';
     var lote=enViaje?null:sgDespLoteDe(it);
@@ -25270,6 +25341,20 @@ function sgDespRender(){
             + ' · se le puede facturar hasta lo que dice el remito</div>'
           : '')
       +'<input placeholder="por qué ese precio (lo ve el que factura)" value="'+esc(it.nota||'')+'" onchange="sgDespUpdNR('+i+',\'nota\',this.value)" style="grid-column:1/-1;font-size:11.5px;padding:3px 6px">'
+      // EL FLETE DE ESTE PRODUCTO (V1045), por cajón. Sólo si la plata es nuestra.
+      +((fletePide && !enViaje)
+          ? ('<div style="grid-column:1/-1;display:flex;align-items:center;gap:8px;flex-wrap:wrap;'
+            +'font-size:11.5px;margin:0 0 4px">'
+            +'<span style="color:var(--mut)">🚚 Flete de este producto</span>'
+            +'<input type="number" min="0" step="0.01" placeholder="$ por cajón"'
+            +' value="'+(it.flete_bulto===''||it.flete_bulto==null?'':it.flete_bulto)+'"'
+            +' onchange="sgDespFleteSet('+i+',this.value)"'
+            +' title="lo que cobra el fletero por cada cajón de este producto"'
+            +' style="width:120px;padding:3px 6px;font-size:11.5px">'
+            +'<span style="color:var(--mut)">'
+            +(sgDespFleteLinea(it)!=null ? ('= '+sgMoney2(sgDespFleteLinea(it))+' por '+nr(Number(it.bultos)||0)+' cj') : '')
+            +'</span></div>')
+          : '')
       +info+'</div>';
   }).join('');
   sgDespTotal();
@@ -25293,6 +25378,13 @@ function sgDespBultosCoop(){
 }
 function sgDespTotal(){
   sgDespBultosCoop();
+  // El flete del remito es la suma de sus renglones (V1045): no se tipea.
+  var ft = eid('sg-desp-flete-total');
+  if (ft) {
+    var fl = 0;
+    (SG.despItems || []).forEach(function(it){ fl += sgDespFleteLinea(it) || 0; });
+    ft.textContent = sgMoney2(Math.round(fl * 100) / 100);
+  }
   var tot=0, enViaje=0;
   SG.despItems.forEach(function(it){
     tot += sgDespKgPapel(it) * (Number(it.precio)||0);
@@ -25356,9 +25448,12 @@ function sgDespFleteCargo(){
   var pide = hay && sgDespFletePideMonto(cargo, quien);
   var mw = eid('sg-desp-flete-monto-wrap');
   if (mw) mw.style.display = pide ? '' : 'none';
-  // Y SE LIMPIA. Un monto escrito de antes se guardaría como un flete que nadie va
-  // a pagar, y aparecería en el costo o en la liquidación del productor.
-  if (!pide) { var m=eid('sg-desp-flete-monto'); if(m) m.value=''; }
+  // Y SE LIMPIA. Un flete escrito de antes se guardaría como un flete que nadie va
+  // a pagar, y aparecería en el costo o en la liquidación del productor. Desde la
+  // V1045 vive en cada renglón, así que se limpia en cada renglón.
+  if (!pide) (SG.despItems || []).forEach(function(it){ it.flete_bulto = ''; });
+  // Los renglones muestran o esconden su casillero de flete.
+  if (eid('sg-desp-lines')) sgDespRender();
   var ay = eid('sg-desp-flete-ayuda');
   if (ay) {
     var clave = (cargo === 'productor') ? ('productor|'+quien) : cargo;
@@ -25392,7 +25487,10 @@ function sgDespGuardar(){
       // CÓMO SE PACTÓ ESTE RENGLÓN. El precio viaja por kilo igual; esto es para
       // que la liquidación que llegue después hable en la misma unidad que el trato
       // (Pablo, 31/8/2026).
-      modo_precio: sgDespPorBulto(it) ? 'bulto' : 'kilo' });
+      modo_precio: sgDespPorBulto(it) ? 'bulto' : 'kilo',
+      // EL FLETE DE ESTE PRODUCTO, por cajón (V1045). Sólo si la plata es nuestra;
+      // el servidor lo vuelve a preguntar igual.
+      flete_por_bulto: (sgDespFletePide() && it.flete_bulto!=='' && it.flete_bulto!=null) ? Number(it.flete_bulto) : null });
   }
   if(!items.length){ toast('Cargá al menos una línea con cajones','er'); return; }
   var body={ cliente_id:Number(cli), pedido_id:eid('sg-desp-ped').value?Number(eid('sg-desp-ped').value):null,
@@ -25402,7 +25500,7 @@ function sgDespGuardar(){
     // productor de su liquidación.
     flete_a_cargo:eid('sg-desp-flete-cargo').value,
     flete_pagado_por:eid('sg-desp-flete-quien').value,
-    flete_monto:eid('sg-desp-flete-monto').value!==''?Number(eid('sg-desp-flete-monto').value):null,
+    // El monto del flete ya no viaja: es la suma de los renglones (V1045).
     // Es el id del CATÁLOGO, no el del proveedor: el servidor saca de ahí a
     // quién se le paga, igual que en la recepción.
     cooperativa_catalogo_id:eid('sg-desp-coop').value?Number(eid('sg-desp-coop').value):null,
@@ -25803,15 +25901,19 @@ function sgGdsRenderPend(){
   c.innerHTML=Object.keys(grupos).map(function(k){
     var gr=grupos[k];
     var totKg=gr.items.reduce(function(a,x){return a+(Number(x.kg)||0);},0);
+    var totCj=gr.items.reduce(function(a,x){return a+(Number(x.bultos)||0);},0);
     var filas=gr.items.map(function(x){
-      return '<tr><td><code>'+esc(x.despacho_numero||'—')+'</code></td><td>'+esc(x.cliente_nombre||'—')+'</td><td>'+(x.fecha_despacho||'—')+'</td><td style="text-align:right">'+nr(x.kg)+'</td></tr>';
+      return '<tr><td><code>'+esc(x.despacho_numero||'—')+'</code></td><td>'+esc(x.cliente_nombre||'—')
+        // Qué lleva cada remito: el flete se pone por producto (V1045).
+        +((x.lineas||[]).length?('<div style="font-size:11px;color:var(--mut)">'+(x.lineas||[]).map(function(l){ return escH(l.producto_nombre||'—')+' ×'+nr(l.bultos)+' cj'; }).join(' · ')+'</div>'):'')
+        +'</td><td>'+(x.fecha_despacho||'—')+'</td><td style="text-align:right">'+nr(x.bultos)+'</td><td style="text-align:right">'+nr(x.kg)+'</td></tr>';
     }).join('');
     return '<div style="border:1px solid var(--bor);border-radius:10px;padding:12px;margin-bottom:12px">'
       +'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;gap:10px;flex-wrap:wrap">'
-      +'<div style="font-weight:700">🚚 '+esc(gr.nombre)+' <span style="font-weight:400;color:var(--mut);font-size:12px">· '+gr.items.length+' remito(s) · '+nr(totKg)+' kg</span></div>'
+      +'<div style="font-weight:700">🚚 '+esc(gr.nombre)+' <span style="font-weight:400;color:var(--mut);font-size:12px">· '+gr.items.length+' remito(s) · '+nr(totCj)+' cj · '+nr(totKg)+' kg</span></div>'
       +(gr.id?'<button class="btn bb bs" onclick="sgGdsValOpen('+gr.id+')">💵 Valorizar cuenta</button>':'')
       +'</div>'
-      +'<table class="pa-tbl"><thead><tr><th>Remito</th><th>Cliente</th><th>Fecha</th><th style="text-align:right">Kg</th></tr></thead><tbody>'+filas+'</tbody></table>'
+      +'<table class="pa-tbl"><thead><tr><th>Remito</th><th>Cliente</th><th>Fecha</th><th style="text-align:right">Cajones</th><th style="text-align:right">Kg</th></tr></thead><tbody>'+filas+'</tbody></table>'
       +'</div>';
   }).join('');
 }
@@ -25820,7 +25922,17 @@ function sgGdsRenderVal(){
   if(!SGGD.rows.length){ c.innerHTML='<div class="emp" style="padding:30px">Sin fletes valorizados todavía.</div>'; return; }
   c.innerHTML='<div class="ab-table-wrap"><table class="pa-tbl"><thead><tr><th>Fletero</th><th>Remito</th><th>Cliente</th><th>Fecha serv.</th><th>Valorizado</th><th>Cuenta</th><th style="text-align:right">Monto</th></tr></thead><tbody>'
     +SGGD.rows.map(function(g){
-      return '<tr><td>'+esc(g.fletero_nombre||'—')+'</td><td><code>'+esc(g.despacho_numero||'—')+'</code></td><td>'+esc(g.cliente_nombre||'—')+'</td><td>'+(g.fecha_servicio||'—')+'</td><td>'+(g.fecha_valorizacion||'—')+'</td><td style="font-size:11px;color:var(--mut)">'+esc(g.cuenta_ref||'—')+'</td><td style="text-align:right;font-weight:700">'+sgMoney(g.monto)+'</td></tr>';
+      // Y lo que le tocó a cada producto (V1045), abajo del cliente: una columna más
+      // pediría barra lateral.
+      var ls=(g.lineas||[]).filter(function(l){ return l.valorizado && l.monto!=null; });
+      return '<tr><td>'+esc(g.fletero_nombre||'—')+'</td><td><code>'+esc(g.despacho_numero||'—')+'</code></td><td>'+esc(g.cliente_nombre||'—')
+        +(ls.length?('<div style="font-size:11px;color:var(--mut)">'+ls.map(function(l){ return escH(l.producto_nombre||'—')+' '+sgMoney(l.monto); }).join(' · ')+'</div>'):'')
+        +'</td><td>'+(g.fecha_servicio||'—')+'</td><td>'+(g.fecha_valorizacion||'—')+'</td><td style="font-size:11px;color:var(--mut)">'+esc(g.cuenta_ref||'—')+'</td><td style="text-align:right;font-weight:700">'+sgMoney(g.monto)
+        // Se corrige acá, con sus productos; si ya está en la factura del fletero, no (V1045).
+        +(g.facturada
+            ? '<div style="font-size:10.5px;font-weight:400;color:var(--mut)" title="Ya está en la factura del fletero: para corregirlo, primero se anula la factura">🔒 facturado</div>'
+            : '<div><button class="btn bo bs" onclick="sgGdsValEditar('+g.id+')">✏️ Editar</button></div>')
+        +'</td></tr>';
     }).join('')+'</tbody></table></div>';
 }
 // ── Valorización de una cuenta (fletero o cooperativa). GENÉRICA: prorratea por `base`
@@ -25834,8 +25946,14 @@ function sgGdsValAbrir(opts){   // opts:{prov, nombre, items:[{id,ref,sub,fecha,
   // los lotes. Con la dirección por parámetro, el cuadro es uno solo.
   SGGD.valRuta=opts.ruta||'/api/sg/gastos-servicio/valorizar';
   SGGD.valCuerpo=opts.cuerpo||null;
+  // POR RENGLÓN (V1045): cada fila es un producto de un remito, y al guardar se
+  // agrupan de nuevo por remito. Sin esto el cuadro sigue siendo uno por operación.
+  SGGD.valPorLinea=!!opts.porLinea;
+  var thR=eid('sg-val-th-ref'), thS=eid('sg-val-th-sub');
+  if(thR) thR.textContent=opts.refLbl||'Partida';
+  if(thS) thS.textContent=opts.subLbl||'Detalle';
   SGGD.valItems=(opts.items||[]).map(function(x){
-    return {id:x.id, ref:x.ref, sub:x.sub, fecha:x.fecha, base:Number(x.base)||0,
+    return {id:x.id, ref:x.ref, sub:x.sub, fecha:x.fecha, base:Number(x.base)||0, diId:x.diId,
       unidadLbl:x.unidadLbl||'',
       // El importe que ya tenía, para poder corregirlo. Abrir en blanco obligaba
       // a acordarse de cuánto se había puesto — y a volver a tipearlo entero.
@@ -25843,18 +25961,59 @@ function sgGdsValAbrir(opts){   // opts:{prov, nombre, items:[{id,ref,sub,fecha,
   });
   // Corrigiendo, el título lo dice: abrir el mismo cuadro con el importe ya
   // puesto y el mismo rótulo hace dudar de si se está por duplicar el gasto.
-  var yaTiene=(opts.items||[]).some(function(x){ return x.monto!=='' && x.monto!=null; });
+  // Quien abre puede decirlo (V1045): el flete de salida llega con lo PACTADO puesto,
+  // y eso no es una valorización anterior. Los demás siguen como siempre.
+  var yaTiene=(opts.editando!=null) ? !!opts.editando
+    : (opts.items||[]).some(function(x){ return x.monto!=='' && x.monto!=null; });
   eid('sg-val-tit').textContent=(yaTiene?'Editar valorización — ':'Valorizar cuenta — ')+SGGD.valNombre;
   document.querySelector('input[name="sg-val-modo"][value="remito"]').checked=true;
   eid('sg-val-total').value='';
   sgGdsValModo();
   eid('sg-val-modal').classList.add('on');
 }
-function sgGdsValOpen(provId){   // FLETE (Fase 1) → base=kg
+// ── EL FLETE DE SALIDA SE VALORIZA POR PRODUCTO (V1045) ──────────────────────
+//
+// Pablo, 9/9/2026: «el flete de salida se valoriza por línea de producto, no por
+// remito: el monto de flete puede variar dependiendo del producto».
+//
+// Una fila por PRODUCTO de cada remito, en cajones —el fletero cotiza por cajón—, y
+// arranca con lo que se pactó en el remito. Repartir un total sigue existiendo: lo
+// reparte por cajones entre todos los renglones.
+function sgGdsValItemsFlete(gastos){
+  var items=[];
+  gastos.forEach(function(g){
+    (g.lineas||[]).forEach(function(l, k){
+      items.push({ id:g.id, diId:l.despacho_item_id,
+        // El remito y el cliente sólo en su primer renglón: los demás son del mismo camión.
+        ref:(k===0?g.despacho_numero:''),
+        sub:(l.producto_nombre||'—')+(l.partida?(' · '+l.partida):'')+(k===0&&g.cliente_nombre?(' — '+g.cliente_nombre):''),
+        fecha:(k===0?g.fecha_despacho:''), base:l.bultos, unidadLbl:'cj', monto:l.monto });
+    });
+  });
+  return items;
+}
+function sgGdsValOpen(provId){
   var pend=SGGD.rows.filter(function(g){return String(g.proveedor_servicio_id)===String(provId);});
   if(!pend.length){ toast('Sin remitos pendientes','er'); return; }
-  sgGdsValAbrir({ prov:provId, nombre:pend[0].fletero_nombre||'', reload:sgGdsLoad,
-    items:pend.map(function(g){ return {id:g.id, ref:g.despacho_numero, sub:g.cliente_nombre, fecha:g.fecha_despacho, base:g.kg, unidadLbl:'kg'}; }) });
+  var items=sgGdsValItemsFlete(pend);
+  if(!items.length){ toast('Esos remitos no tienen renglones','er'); return; }
+  sgGdsValAbrir({ prov:provId, nombre:pend[0].fletero_nombre||'', reload:sgGdsLoad, porLinea:true,
+    editando:false, refLbl:'Remito', subLbl:'Producto', items:items });
+}
+// ── CORREGIR UN FLETE DE SALIDA YA VALORIZADO (V1045) ────────────────────────
+//
+// Pablo, 3/9/2026: «permitime editar la valorización». La cooperativa ya tenía su
+// ✏️ Editar; el flete de salida no, así que un importe mal puesto no tenía arreglo
+// desde la pantalla. Se corrige de a un remito, con sus productos. Si ya está en la
+// factura del fletero, no: la fila muestra 🔒 y esto lo repite por las dudas.
+function sgGdsValEditar(gastoId){
+  var g=(SGGD.rows||[]).filter(function(x){ return String(x.id)===String(gastoId); })[0];
+  if(!g){ toast('Ese flete ya no está en la lista','er'); sgGdsLoad(); return; }
+  if(g.facturada){ toast('Ya está en la factura del fletero: para corregirlo, primero anulá la factura','er'); return; }
+  var items=sgGdsValItemsFlete([g]);
+  if(!items.length){ toast('Ese remito no tiene renglones','er'); return; }
+  sgGdsValAbrir({ prov:g.proveedor_servicio_id, nombre:g.fletero_nombre||'', reload:sgGdsLoad, porLinea:true,
+    editando:true, refLbl:'Remito', subLbl:'Producto', items:items });
 }
 function sgGdsValModo(){
   var varias=(SGGD.valItems||[]).length>=2;
@@ -25873,9 +26032,12 @@ function sgGdsValRender(){
   // nada, y bajar de renglón no produce barra lateral.
   var cel='white-space:normal;word-break:break-word';
   eid('sg-val-items').innerHTML=SGGD.valItems.map(function(it,i){
-    return '<tr><td style="'+cel+'"><code>'+escH(it.ref||'—')+'</code></td>'
+    // Por renglón (V1045), el remito y la fecha van sólo en el primero de cada camión:
+    // en los siguientes un «—» se lee como que falta el dato.
+    var enBlanco=SGGD.valPorLinea?'':'—';
+    return '<tr><td style="'+cel+'">'+(it.ref?('<code>'+escH(it.ref)+'</code>'):enBlanco)+'</td>'
       +'<td style="'+cel+'">'+escH(it.sub||'—')+'</td>'
-      +'<td style="'+cel+';white-space:nowrap">'+escH(it.fecha||'—')+'</td>'
+      +'<td style="'+cel+';white-space:nowrap">'+escH(it.fecha||enBlanco)+'</td>'
       +'<td style="text-align:right;'+cel+'">'+nr(it.base)+(it.unidadLbl?(' '+escH(it.unidadLbl)):'')+'</td>'
       +'<td style="text-align:right"><input type="number" min="0" step="0.01" value="'+sgGdsValUnit(it)+'" '+(ro?('readonly style="background:rgba(128,128,128,.12);'+inSty+'"'):('style="'+inSty+'"'))+' oninput="sgGdsValPorUnidad('+i+',this.value)" title="lo que cobra por '+escH(it.unidadLbl||'unidad')+'"></td>'
       +'<td style="text-align:right"><input type="number" min="0" step="0.01" value="'+(it.monto!==''&&it.monto!=null?it.monto:'')+'" '+(ro?('readonly style="background:rgba(128,128,128,.12);'+inSty+'"'):('style="'+inSty+'"'))+' oninput="sgGdsValMonto('+i+',this.value)"></td></tr>';
@@ -25944,10 +26106,20 @@ function sgGdsValMonto(i,v){
   if(otro) otro.value=sgGdsValUnit(it);
   sgGdsValResumen();
 }
+// AL CENTAVO, y el redondeo lo absorbe el último renglón (V1045): redondeando cada
+// uno por su cuenta, la suma se corría unos centavos de la cuenta del proveedor, y
+// al cargar su factura aparecía una diferencia que pedía motivo sin que nadie se
+// hubiera equivocado. Con una fila por producto hay más renglones y más redondeos.
 function sgGdsProrratear(){
   var total=Number(eid('sg-val-total').value)||0;
   var totBase=SGGD.valItems.reduce(function(a,x){return a+(x.base||0);},0);
-  SGGD.valItems.forEach(function(it){ it.monto = totBase>0 ? Math.round((total*(it.base/totBase))*100)/100 : 0; });
+  var cents=Math.round(total*100), usado=0, n=SGGD.valItems.length;
+  SGGD.valItems.forEach(function(it, i){
+    if(!(totBase>0)){ it.monto=0; return; }
+    if(i===n-1){ it.monto=(cents-usado)/100; return; }
+    var c=Math.round(cents*((it.base||0)/totBase));
+    usado+=c; it.monto=c/100;
+  });
   sgGdsValRender();
 }
 function sgGdsValResumen(){
@@ -25961,6 +26133,29 @@ function sgGdsValResumen(){
 }
 function sgGdsValGuardar(){
   var items=SGGD.valItems.filter(function(it){return it.monto!==''&&Number(it.monto)>=0;}).map(function(it){return {id:it.id,monto:Number(it.monto)};});
+  // POR PRODUCTO (V1045): los renglones vuelven a juntarse por remito. Un remito con
+  // todos vacíos se deja para después; uno a medias NO, porque el servidor lo
+  // rechazaría entero y el que carga no sabría cuál. Cero es un importe: el producto
+  // que no pagó flete lleva cero, no vacío.
+  if(SGGD.valPorLinea){
+    var grupos={}, orden=[], aMedias=null;
+    SGGD.valItems.forEach(function(it){
+      if(!grupos[it.id]){ grupos[it.id]={id:it.id, ref:'', lineas:[], vacios:0}; orden.push(it.id); }
+      var gr=grupos[it.id];
+      if(it.ref) gr.ref=it.ref;
+      var vacio=(it.monto===''||it.monto==null||isNaN(Number(it.monto)));
+      if(vacio) gr.vacios++;
+      gr.lineas.push({despacho_item_id:it.diId, monto:vacio?'':Number(it.monto)});
+    });
+    items=[];
+    orden.forEach(function(id){
+      var gr=grupos[id];
+      if(gr.vacios===gr.lineas.length) return;
+      if(gr.vacios>0){ if(!aMedias) aMedias=gr; return; }
+      items.push({id:gr.id, lineas:gr.lineas});
+    });
+    if(aMedias){ toast('Remito '+(aMedias.ref||'')+': falta el flete de un producto. Si no pagó flete, poné 0.','er'); return; }
+  }
   if(!items.length){ toast('Cargá al menos un monto','er'); return; }
   var cuerpo = SGGD.valCuerpo
     ? SGGD.valCuerpo(items)
@@ -26149,8 +26344,12 @@ function sgFePintar(){
             : '<span style="color:#9a3412">falta</span>')
         + '</td>'
       + '<td style="text-align:right">'
-        + '<button class="btn ' + (val ? 'bo' : 'bb') + ' bs" onclick="sgFeOpen(' + x.recepcion_id + ')">'
-        + (val ? 'Corregir' : 'Valorizar') + '</button></td></tr>';
+        // Ya en la factura del fletero (V1045): corregirlo rebotaría, así que no se ofrece.
+        + (x.facturada
+            ? '<span style="font-size:11px;color:var(--mut)" title="Ya está en la factura del fletero: para corregirlo, primero se anula la factura">🔒 facturado</span>'
+            : '<button class="btn ' + (val ? 'bo' : 'bb') + ' bs" onclick="sgFeOpen(' + x.recepcion_id + ')">'
+              + (val ? 'Corregir' : 'Valorizar') + '</button>')
+        + '</td></tr>';
   }).join('')
     : '<tr><td colspan="9" class="emp">'
       + (SGFE.estado === 'valorizado'
@@ -26942,7 +27141,10 @@ function sgCcoopRender(){
                   // Pablo, 3/9/2026: «permitime editar la valorización». El importe
                   // se carga a mano mirando lo que dijo la cuadrilla: un cero de más
                   // se arrastraba al costo de la partida sin forma de arreglarlo.
-                  ? '<button class="btn bo bs" onclick="sgCcoopValorizar(' + f.gasto_id + ')">✏️ Editar</button>'
+                  ? (f.facturada
+                      // Ya en la factura de la cooperativa (V1045): corregirlo rebotaría.
+                      ? '<span style="font-size:11px;color:var(--mut)" title="Ya está en la factura de la cooperativa: para corregirla, primero se anula la factura">🔒 facturada</span>'
+                      : '<button class="btn bo bs" onclick="sgCcoopValorizar(' + f.gasto_id + ')">✏️ Editar</button>')
                   : '<button class="btn bb bs" onclick="sgCcoopValorizar(' + f.gasto_id + ')">💵 Valorizar</button>'))
             + '</td>'
           + '</tr>';
@@ -27744,8 +27946,13 @@ function sgDespVer(id){
         +'<option value="bulto"'+(SG_DPED_UNI==='bulto'?' selected':'')+'>bulto</option>'
         +'</select></div>';
     }
+    // EL FLETE DE CADA PRODUCTO (V1045): lo que se valorizó para ese renglón, o lo que
+    // se pactó mientras la cuenta del fletero no llegue. Sin flete, no hay columna.
+    var hayFlete = (d.items||[]).some(function(x){ return x.flete_linea != null || x.flete_por_bulto != null; });
     h+='<table class="pa-tbl" style="margin-bottom:12px"><thead><tr><th>Lote</th><th>Producto</th><th style="text-align:right">Kg</th><th style="text-align:right">'
-      +(SG_DPED_UNI==='bulto'?'$/bulto':'$/kg')+'</th><th style="text-align:right">Subtotal</th><th style="text-align:right">Margen</th></tr></thead><tbody>';
+      +(SG_DPED_UNI==='bulto'?'$/bulto':'$/kg')+'</th><th style="text-align:right">Subtotal</th>'
+      +(hayFlete?'<th style="text-align:right">Flete</th>':'')
+      +'<th style="text-align:right">Margen</th></tr></thead><tbody>';
     (d.items||[]).forEach(function(it, i){
       var kpbF = Number(it.kg_por_bulto) || ((Number(it.bultos)>0 && Number(it.kg_despachados)>0)
         ? +(Number(it.kg_despachados)/Number(it.bultos)).toFixed(4) : 0);
@@ -27765,6 +27972,16 @@ function sgDespVer(id){
         +'<td style="text-align:right">'+nr(it.kg_despachados)+'</td>'
         +'<td style="text-align:right">'+pcell+'</td>'
         +'<td style="text-align:right" id="sg-dpsub-'+i+'">'+sgMoney(it.subtotal)+'</td>'
+        +(hayFlete
+            ? ('<td style="text-align:right">'
+              +(it.flete_linea != null
+                  ? sgMoney(it.flete_linea)
+                  : (it.flete_por_bulto != null
+                      ? ('<span style="color:var(--mut)" title="lo pactado en el remito: la cuenta del fletero todavía no se valorizó">'
+                        +sgMoney(Math.round(Number(it.flete_por_bulto)*(Number(it.bultos)||0)*100)/100)+' pactado</span>')
+                      : '—'))
+              +'</td>')
+            : '')
         +'<td style="text-align:right;color:'+((it.margen_estimado||0)>=0?'#16a34a':'#dc2626')+'">'+sgMoney(it.margen_estimado)+'</td></tr>';
     });
     h+='</tbody></table>';

@@ -152,7 +152,8 @@ test('el remito recuerda cómo se pactó', () => {
   assert.match(SG, /\(it\.modo_precio === 'bulto'\) \? 'bulto' : 'kilo'[,)]/);
   // Y corregir el precio por cajón deja el remito diciendo que se pactó por cajón.
   assert.match(SG, /db\.prepare\('UPDATE sg_despacho_items SET modo_precio=\? WHERE id=\?'\)\.run\(p\.modo, p\.id\)/);
-  assert.match(PANEL, /modo_precio: sgDespPorBulto\(it\) \? 'bulto' : 'kilo' \}\)/);
+  // Puede no ser lo último del renglón: después se sumó el flete (V1045).
+  assert.match(PANEL, /modo_precio: sgDespPorBulto\(it\) \? 'bulto' : 'kilo'[,}]/);
   assert.match(PANEL, /modo_precio: sgDespEdPorBulto\(i\) \? 'bulto' : 'kilo' \}; \}\)/);
 });
 
