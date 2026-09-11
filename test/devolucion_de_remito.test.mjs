@@ -514,10 +514,17 @@ test('lo devuelto NO se le puede facturar al súper', () => {
   //
   // Los tres lugares: lo que se OFRECE (dos listados) y lo que se ACEPTA (el que
   // emite). El botón que no se ofrece se llama igual por la dirección.
-  const ofrecen = (SG.match(/kgDesp - kgFact - kgDevueltoItem\(db, r\.despacho_item_id\)/g) || []).length;
+  //
+  // Desde la V1040 los tres hacen la cuenta en UNA función, kgPendienteItem, porque
+  // al súper se le pueden declarar más kilos que los de la partida y la cuenta pasó a
+  // tener una vuelta más. Se verifica que los tres la usen, que la función reste lo
+  // devuelto, y se CORRE la resta.
+  const ofrecen = (SG.match(/const kgPend = kgPendienteItem\(db, r\.despacho_item_id, r\);/g) || []).length;
   assert.equal(ofrecen, 2, 'los dos listados tienen que restar lo devuelto');
   const i = SG.indexOf('const postEmitir');
-  assert.match(SG.slice(i, i + 4200), /kgDocumentadoItem\(db, diId\)\r?\n\s*- kgDevueltoItem\(db, diId\);/);
+  assert.match(SG.slice(i, SG.indexOf('\r\n};', i)), /const kgPend = kgPendienteItem\(db, diId, di\);/);
+  const f = SG.slice(SG.indexOf('function kgPendienteItem('), SG.indexOf('\r\n}', SG.indexOf('function kgPendienteItem(')));
+  assert.match(f, /kgDevueltoItem\(db, despachoItemId\)/);
 });
 
 // ── 12 · EL TABLERO CUENTA LO MISMO QUE LA VENTA ──────────────────

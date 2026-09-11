@@ -2215,6 +2215,10 @@ try {
   if (addCol('sg_despachos',        'turno',                'TEXT')) added.push('sg_despachos.turno');
   if (addCol('sg_despachos',        'oc_cliente',           'TEXT')) added.push('sg_despachos.oc_cliente');
   if (addCol('sg_despacho_items',   'modo_precio',          'TEXT')) added.push('sg_despacho_items.modo_precio');
+  // LOS KILOS DEL PAPEL (Pablo, 9/9/2026). Sólo en remitos a cadenas y sólo cuando
+  // se declararon más que los de la partida. NULL = el papel dice lo mismo que el
+  // galpón, que es el caso de todos los remitos que ya existen.
+  if (addCol('sg_despacho_items',   'kg_declarados',        'REAL')) added.push('sg_despacho_items.kg_declarados');
   if (addCol('sg_lote_decomisos',   'bultos',               'INTEGER')) added.push('sg_lote_decomisos.bultos');
   if (addCol('sg_transformaciones', 'bultos_transformados', 'INTEGER')) added.push('sg_transformaciones.bultos_transformados');
   if (addCol('sg_reprocesos',       'bultos_procesados',    'INTEGER')) added.push('sg_reprocesos.bultos_procesados');

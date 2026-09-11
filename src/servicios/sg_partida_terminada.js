@@ -24,6 +24,7 @@
 // El redondeo del repo: los bultos se cuentan enteros pero llegan como REAL de SQLite y
 // arrastran coma flotante. Sin esto, 44.99999 contra 45 da "falta 1 bulto".
 import { gastosSinFactura } from './sg_gastos_facturados.js';
+import { kgPapelSql } from './sg_kilos_del_papel.js';
 
 const r2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
 
@@ -99,9 +100,14 @@ export function avanceDePartida(db, ocId) {
 
 // Lo despachado que todavía no tiene comprobante, en pesos. La misma cuenta que ya hace
 // GET /partidas/:id/venta: kilos despachados menos kilos facturados, por su precio.
+//
+// EN KILOS DEL PAPEL (V1040). Lo facturado se mide en el papel; si lo despachado se
+// midiera en el galpón, un remito al súper que declaró 15 kg de 14 y se facturó
+// entero daría −1 kg, y esa resta se come lo que otro renglón tiene sin facturar: el
+// freno dejaría liquidar una partida con mercadería vendida y sin comprobante.
 export function sinFacturarDePartida(db, ocId, facturaCuenta) {
   const f = db.prepare(`
-    SELECT COALESCE(SUM((di.kg_despachados
+    SELECT COALESCE(SUM((${kgPapelSql('di')}
         - COALESCE((SELECT SUM(fd.kg) FROM sg_factura_despachos fd
             JOIN sg_ven_facturas fv ON fv.id = fd.factura_id
            WHERE fd.despacho_item_id = di.id AND ${facturaCuenta('fv')}),0))

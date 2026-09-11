@@ -77,7 +77,10 @@ test('y lo que se GUARDA vuelve a kilo', () => {
 
 test('el remito se ARMA en la unidad elegida', () => {
   const i = PANEL.indexOf('function sgDespRender(){');
-  const b = PANEL.slice(i, i + 3000);
+  // Hasta donde TERMINA la función, no «los próximos N caracteres»: con cada
+  // renglón que se le agrega, lo buscado queda fuera de la ventana y el test se
+  // pone en rojo sin que nada se haya roto.
+  const b = PANEL.slice(i, PANEL.indexOf('\r\n}', i));
   assert.match(b, /El precio se pone por/);
   assert.match(b, /sgDespUniCambio\(this\.value\)/);
   assert.match(b, /sgDespPrecioVista\(it\)/);
@@ -110,7 +113,7 @@ test('la otra unidad queda SIEMPRE a la vista', () => {
   // Es el control que evita guardar $/bulto creyendo que son $/kg — el mismo que ya
   // tiene la corrección de la partida del lado de la compra.
   const i = PANEL.indexOf('function sgDespRender(){');
-  assert.match(PANEL.slice(i, i + 4200), /cajones de ' \+ nr\(sgDespKpb\(it\)\)/);
+  assert.match(PANEL.slice(i, PANEL.indexOf('\r\n}', i)), /cajones de ' \+ nr\(sgDespKpb\(it\)\)/);
   const j = PANEL.indexOf('function sgDespEdUpd(i, valor){');
   assert.match(PANEL.slice(j, j + 1600), /var e = eid\('sg-dpeq-' \+ i\);/);
 });
@@ -143,8 +146,10 @@ test('el remito recuerda cómo se pactó', () => {
   const DB = fs.readFileSync(path.join(RAIZ, 'src/servicios/db_sg.js'), 'utf8');
   assert.match(DB, /addCol\('sg_despacho_items',\s+'modo_precio',\s+'TEXT'\)/);
   const SG = fs.readFileSync(path.join(RAIZ, 'src/rutas/sg.js'), 'utf8');
-  assert.match(SG, /nota_precio, subtotal, margen_estimado, piso_id, modo_precio\)/);
-  assert.match(SG, /\(it\.modo_precio === 'bulto'\) \? 'bulto' : 'kilo'\);/);
+  // La columna puede no ser la última: después se le sumaron los kilos del papel
+  // (V1040). Lo que importa es que esté y que salga del renglón.
+  assert.match(SG, /nota_precio, subtotal, margen_estimado, piso_id, modo_precio[,)]/);
+  assert.match(SG, /\(it\.modo_precio === 'bulto'\) \? 'bulto' : 'kilo'[,)]/);
   // Y corregir el precio por cajón deja el remito diciendo que se pactó por cajón.
   assert.match(SG, /db\.prepare\('UPDATE sg_despacho_items SET modo_precio=\? WHERE id=\?'\)\.run\(p\.modo, p\.id\)/);
   assert.match(PANEL, /modo_precio: sgDespPorBulto\(it\) \? 'bulto' : 'kilo' \}\)/);
