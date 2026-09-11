@@ -3061,6 +3061,43 @@ input[type=number]{-moz-appearance:textfield;appearance:textfield}
          Un formulario aparte sería una segunda copia de las reglas de stock: el
          mismo modal se abre en modo cadena. -->
     <div class="sgv-sub" id="sgv-sub-remsuper">
+      <style>
+        /* ── TODO EN UNA LÍNEA (Pablo, 9/9/2026) ─────────────────────────────
+           «Acomodame todos los datos en los remitos de supermercado para que
+           podamos ver todo en una línea».
+
+           Sin reglas de ancho, «Qué se vendió», la razón social o el turno partían
+           cada remito en tres o cuatro renglones, y la tabla corría de costado.
+           Mirar diez remitos era leer cuarenta renglones.
+
+           Anchos fijos por columna y cada celda en un renglón: lo que no entra se
+           recorta con «…» y el texto COMPLETO queda en el cartelito que aparece al
+           pasar el mouse, así que no se esconde nada. Los números (total) y los
+           botones no se recortan nunca: son lo que se viene a buscar y a apretar. */
+        #sgv-sub-remsuper .ab-table-wrap{overflow-x:hidden !important}
+        #sgv-sub-remsuper table{table-layout:fixed;width:100%}
+        #sgv-sub-remsuper th,#sgv-sub-remsuper td{white-space:nowrap}
+        #sgv-sub-remsuper th:nth-child(1),#sgv-sub-remsuper td:nth-child(1){width:15%}
+        #sgv-sub-remsuper th:nth-child(2),#sgv-sub-remsuper td:nth-child(2){width:8%}
+        #sgv-sub-remsuper th:nth-child(3),#sgv-sub-remsuper td:nth-child(3){width:10%}
+        #sgv-sub-remsuper th:nth-child(4),#sgv-sub-remsuper td:nth-child(4){width:9%}
+        #sgv-sub-remsuper th:nth-child(5),#sgv-sub-remsuper td:nth-child(5){width:14%}
+        #sgv-sub-remsuper th:nth-child(6),#sgv-sub-remsuper td:nth-child(6){width:auto}
+        #sgv-sub-remsuper th:nth-child(7),#sgv-sub-remsuper td:nth-child(7){width:10%}
+        #sgv-sub-remsuper th:nth-child(8),#sgv-sub-remsuper td:nth-child(8){width:9%}
+        #sgv-sub-remsuper th:nth-child(9),#sgv-sub-remsuper td:nth-child(9){width:128px}
+        #sgv-sub-remsuper td:nth-child(-n+6),#sgv-sub-remsuper td:nth-child(8){overflow:hidden;text-overflow:ellipsis}
+        #sgv-sub-remsuper td:nth-child(1) code{font-size:11px}
+        #sgv-sub-remsuper td:nth-child(8) .bdg{max-width:100%;overflow:hidden;text-overflow:ellipsis;
+          display:inline-block;vertical-align:middle}
+        #sgv-sub-remsuper td:nth-child(9){text-align:right}
+        #sgv-sub-remsuper td:nth-child(9) .btn{padding:3px 6px;margin-left:1px}
+        /* En un teléfono no hay ancho para una línea: ahí sí se desplaza. */
+        @media(max-width:900px){
+          #sgv-sub-remsuper .ab-table-wrap{overflow-x:auto !important}
+          #sgv-sub-remsuper table{table-layout:auto}
+        }
+      </style>
       <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px">
         <div style="font-size:11.5px;color:var(--mut)">
           Los remitos a clientes marcados como <b>Supermercado</b> o con categoría <b>Retail</b>.
@@ -21958,6 +21995,21 @@ function sgPedVer(id){
 function sgLoadDespachos(){ sgDespListar('normal'); }
 function sgRemSuperLoad(){ sgDespListar('super'); }
 
+// La fecha del remito en la lista de cadenas: 11/09/26. La completa queda en el
+// cartelito. Dos caracteres de año alcanzan en una lista del año en curso, y ganan
+// el lugar que necesita «Qué se vendió».
+function sgDespFechaCorta(f){
+  var m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(f || ''));
+  return m ? (m[3] + '/' + m[2] + '/' + m[1].slice(2)) : (f || '—');
+}
+// Un atributo title seguro: el cartelito que muestra lo que la celda recorta.
+// Con escH y no con esc: esc está pensado para meter texto en un onclick y le pone
+// una barra delante a cada apóstrofo, así que «D'Angelo» se leería «D\'Angelo».
+function sgDespTit(v){
+  var t = String(v == null ? '' : v).trim();
+  return t ? (' title="' + escH(t) + '"') : '';
+}
+
 function sgDespListar(modo){
   var sup = (modo === 'super');
   var tb = eid(sup ? 'sg-tb-remsuper' : 'sg-tb-despachos'); if (!tb) return;
@@ -21975,11 +22027,20 @@ function sgDespListar(modo){
       // El TURNO y la OC de la cadena van a la vista: son los dos datos por los
       // que llama el que está coordinando la descarga.
       var extra = sup
-        ? ('<td>'+esc(d.turno||'—')+'</td><td>'+esc(d.oc_cliente||'—')+'</td>')
-        : ('<td>'+esc(d.cliente_alias||'—')+'</td>');
-      return '<tr><td><code>'+esc(d.numero||'')+'</code></td><td>'+(d.fecha_despacho||'—')+'</td>'
+        ? ('<td'+sgDespTit(d.turno)+'>'+escH(d.turno||'—')+'</td>'
+          +'<td'+sgDespTit(d.oc_cliente)+'>'+escH(d.oc_cliente||'—')+'</td>')
+        : ('<td>'+escH(d.cliente_alias||'—')+'</td>');
+      // EN LA DE CADENAS, EL NOMBRE CORTO. «Coto» se lee de un vistazo; «COTO
+      // CENTRO INTEGRAL DE COMERCIALIZACION SA» no entra en una línea. La razón
+      // social completa queda en el cartelito, que es donde se la va a buscar si hace
+      // falta. La lista normal sigue igual: ya tiene su propia columna de alias.
+      var cliVista = sup ? (d.cliente_alias || d.cliente_nombre) : d.cliente_nombre;
+      return '<tr><td'+(sup?sgDespTit(d.numero):'')+'><code>'+escH(d.numero||'')+'</code></td>'
+        +'<td'+(sup?sgDespTit(d.fecha_despacho):'')+'>'
+          +(sup?sgDespFechaCorta(d.fecha_despacho):(d.fecha_despacho||'—'))+'</td>'
         +extra
-        +'<td>'+esc(d.cliente_nombre||'—')+'</td><td>'+esc(d.vendido||'—')+'</td>'
+        +'<td'+(sup?sgDespTit(d.cliente_nombre):'')+'>'+escH(cliVista||'—')+'</td>'
+        +'<td'+(sup?sgDespTit(d.vendido):'')+'>'+escH(d.vendido||'—')+'</td>'
         +'<td style="text-align:right">'+sgMoney(d.total)+'</td>'
         +'<td style="text-align:center"><span class="bdg bok">'+(SG_ESTDESP[d.estado]||d.estado)+'</span></td>'
         +'<td style="text-align:right;white-space:nowrap">'
@@ -23775,7 +23836,11 @@ SG_MANUAL.ventas = { titulo: 'Remitos y Facturación', html:
   + '<ul>'
   + '<li><b>📄 Emisión de Remitos</b> — la mercadería que sale para un cliente común.</li>'
   + '<li><b>🏪 Remitos Supermercados</b> — lo mismo para las cadenas, que además piden '
-  + '<b>turno</b> y <b>número de orden de compra</b> en el papel.</li>'
+  + '<b>turno</b> y <b>número de orden de compra</b> en el papel. '
+  + '<span class="ver">V1042</span> <b>Cada remito ocupa una sola línea.</b> Lo que no entra '
+  + '—el detalle de qué se vendió, un turno largo— se corta con «…», y <b>al pasar el mouse '
+  + 'aparece completo</b>. El cliente se ve por su <b>nombre corto</b> y la razón social queda '
+  + 'en ese mismo cartelito. El total y los botones no se cortan nunca.</li>'
   + '<li><b>💵 Facturación Puesto</b> — la venta del mostrador: sale y se factura en el acto.</li>'
   + '<li><b>🏪 Facturación Supermercados</b> — facturar los remitos ya entregados a las cadenas.</li>'
   + '<li><b>↩️ Devoluciones</b> — la mercadería que vuelve.</li>'
@@ -23966,6 +24031,8 @@ SG_MANUAL.ventas = { titulo: 'Remitos y Facturación', html:
   + 'tocar el stock; y el remito impreso trae <b>envase y kg por bulto</b>.</li>'
   + '<li><b>V1041</b> — los <b>bultos de la cooperativa de carga</b> se cuentan solos, de los '
   + 'renglones del remito.</li>'
+  + '<li><b>V1042</b> — la lista de <b>remitos a supermercados</b> muestra cada remito <b>en una '
+  + 'sola línea</b>.</li>'
   + '</ul>'
 };
 
