@@ -192,7 +192,8 @@ test('el PDF imprime el bloque, con el total de cada comprobante', () => {
 test('y junta los comprobantes de TODAS las partidas del grupo, sin repetir', () => {
   // Una liquidación puede cubrir varias partidas desde el 29/8. Una misma factura
   // del fletero puede cubrir dos de ellas.
-  const f = trozo(LIQ, 'function comprobantesDeLaLiquidacion(liq) {', '\r\n}');
+  // Desde la V1046 recibe también opts: al emitir se guarda la copia con el flete de salida.
+  const f = trozo(LIQ, 'function comprobantesDeLaLiquidacion(liq, opts) {', '\r\n}');
   assert.match(f, /SELECT oc_id FROM liquidacion_partidas WHERE liquidacion_id=\?/);
   assert.match(f, /if \(liq && liq\.oc_id\) ocs\.add/, 'se olvida de las de una sola partida');
   assert.match(f, /vistos\.has\(String\(c\.factura_id\)\)/);

@@ -13,7 +13,7 @@ import { crearAsiento } from '../servicios/asientos.js';
 import { lineasAsientoLiquidacion } from '../servicios/asiento-liquidacion.js';
 import { objetivoCerradoGrupo, cierraContraLoAcordado } from '../servicios/sg_acordado.js';
 import { frenoParaLiquidar } from '../servicios/sg_partida_terminada.js';
-import { comprobantesDeLaPartida } from '../servicios/sg_gastos_facturados.js';
+import { comprobantesDeLaPartida, resumenSalidaAdelantada } from '../servicios/sg_gastos_facturados.js';
 import { facturaCuenta } from '../servicios/factura-cuenta.js';
 import path    from 'path';
 import fs      from 'fs';
@@ -122,6 +122,10 @@ try { db.exec("ALTER TABLE liquidaciones ADD COLUMN merma_liquidada INTEGER"); }
 // como se cargó. El asiento sale de acá, así que tiene que quedar guardado o no
 // hay forma de explicar el asiento después.
 try { db.exec("ALTER TABLE liquidaciones ADD COLUMN grilla_json TEXT"); } catch(_){}
+// LOS COMPROBANTES QUE SE CITARON AL EMITIR (V1046). El PDF se arma de la base cada vez
+// que se imprime: sin la copia, una reimpresión podía citar una factura que llegó
+// después, o un flete que esa liquidación nunca descontó.
+try { db.exec("ALTER TABLE liquidaciones ADD COLUMN comprobantes_json TEXT"); } catch(_){}
 // ══ UNA LIQUIDACIÓN ES DEUDA CON EL PRODUCTOR, Y SE PAGA ══════════════
 //
 // Una partida se documenta con factura O con liquidación. Si se documenta con
@@ -365,6 +369,34 @@ router.get('/:id', function(req, res) {
 // ─────────────────────────────────────────────────────────────────────────────
 // POST / — crea
 // ─────────────────────────────────────────────────────────────────────────────
+
+// ── LA FILA «FLETE» NO PUEDE TRAER MENOS QUE LO QUE SE LE ADELANTÓ (V1046) ──────
+//
+// La pantalla prellena en la fila «Flete» el flete de salida que San Gerónimo le
+// adelantó al productor, pero el casillero se puede tocar —el flete de ENTRADA
+// adelantado todavía se tipea a mano—. Sin este control se podía borrar y emitir
+// igual: el PDF citaría la factura del fletero como descontada y al productor no se le
+// habría descontado nada. Por debajo no; por encima sí, porque en la misma fila entra
+// el flete de la orden.
+//
+// Sólo a pizarra: a precio cerrado lo absorbemos nosotros (Pablo, 11/9/2026), y además
+// resumenSalidaAdelantada ya da cero para esas partidas.
+function frenoFleteSalidaEnGrilla(db, partidas, d) {
+  if (String((d && d.modo_precio) || '') === 'cerrado') return null;
+  const debe = Math.round((partidas || []).reduce(
+    (a, p) => a + (Number(resumenSalidaAdelantada(db, p.oc_id).neto) || 0), 0) * 100) / 100;
+  if (!(debe > 0)) return null;
+  const g = (d && d.grilla && d.grilla.fiscal) || {};
+  const fila = Math.round((Number(g.flete) || 0) * 100) / 100;
+  if (fila + 0.01 >= debe) return null;
+  const plata = (x) => '$' + Number(x).toLocaleString('es-AR',
+    { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  return 'La fila «Flete» tiene ' + plata(fila) + ' y el flete de salida que San Gerónimo le adelantó '
+    + 'al productor es ' + plata(debe) + ': la liquidación no puede descontarle menos, porque la factura '
+    + 'del fletero se cita como descontada. Volvé a abrir la liquidación desde la partida para que se '
+    + 'complete sola.';
+}
+
 router.post('/', function(req, res) {
   const d = req.body || {};
   if (!d.n_liquidacion) return res.status(400).json({ error: 'Falta N° de liquidación' });
@@ -477,6 +509,11 @@ router.post('/', function(req, res) {
       }
     }
   }
+  // Y lo que se le adelantó de flete de salida no se le descuenta de menos (V1046).
+  {
+    const fleteMal = frenoFleteSalidaEnGrilla(db, partidas, d);
+    if (fleteMal) return res.status(400).json({ error: fleteMal });
+  }
   if (String(d.modo_precio || '') === 'cerrado') {
     const ocId = ocIdBody;
     if (!ocId) {
@@ -564,6 +601,8 @@ router.post('/', function(req, res) {
   const dup = db.prepare("SELECT id FROM liquidaciones WHERE n_liquidacion = ? AND eliminado_en IS NULL").get(d.n_liquidacion);
   if (dup) return res.status(400).json({ error: 'Ya existe una liquidación con N° ' + d.n_liquidacion });
 
+  // Los comprobantes que esta liquidación cita, guardados como salen hoy (V1046).
+  const compsEmitidos = comprobantesDeLaLiquidacion({ oc_ids: partidas.map((p) => p.oc_id) }, { alEmitir: true });
   try {
     const r = db.prepare(`
       INSERT INTO liquidaciones (
@@ -572,8 +611,8 @@ router.post('/', function(req, res) {
         iva_letra, articulos, mermas, conceptos, neto, total,
         cai_numero, cai_vencimiento, codigo_barras, texto_original, creado_por_id, oc_id,
         dif_gestion, dif_motivo, modo_precio, bultos_ingresados, bultos_liquidados, grilla_json,
-        merma_liquidada
-      ) VALUES (?, ?, ?, ?,  ?, ?, ?, ?, ?, ?,  ?, ?, ?, ?, ?, ?,  ?, ?, ?, ?, ?, ?,  ?, ?, ?, ?, ?, ?,  ?)
+        merma_liquidada, comprobantes_json
+      ) VALUES (?, ?, ?, ?,  ?, ?, ?, ?, ?, ?,  ?, ?, ?, ?, ?, ?,  ?, ?, ?, ?, ?, ?,  ?, ?, ?, ?, ?, ?,  ?, ?)
     `).run(
       d.n_liquidacion, d.fecha, d.fecha_ingreso || null, d.prov_codigo || null,
       d.remitente_nombre || null, d.remitente_cuit || null, d.remitente_localidad || null,
@@ -599,7 +638,8 @@ router.post('/', function(req, res) {
       // SÓLO CON UNA PARTIDA. En un grupo cada una tiene su respuesta y meter la de la
       // primera acá diría que el grupo entero se resolvió así. Las respuestas de
       // verdad viven en liquidacion_partidas, una fila por partida.
-      partidas.length === 1 ? partidas[0].merma_liquidada : null
+      partidas.length === 1 ? partidas[0].merma_liquidada : null,
+      JSON.stringify(compsEmitidos)
     );
     // ── Y DE QUÉ PARTIDAS ES ──────────────────────────────────
     //
@@ -785,22 +825,40 @@ function _drawBarcode(doc, code, x, y, moduleW, height) {
 //
 // Vive acá y no en el armador del PDF porque la pantalla lo va a pedir también:
 // el que liquida tiene que ver qué comprobantes va a citar ANTES de imprimir.
-function comprobantesDeLaLiquidacion(liq) {
+function comprobantesDeLaLiquidacion(liq, opts) {
+  // LO QUE SE CITÓ AL EMITIR (V1046): el papel se reimprime igual que salió.
+  if (liq && liq.comprobantes_json) {
+    try { const g = JSON.parse(liq.comprobantes_json); if (Array.isArray(g)) return g; } catch (_) { /* se arma de nuevo, abajo */ }
+  }
   const ocs = new Set();
   // El oc_id de la cabecera es el de las liquidaciones de UNA partida; las
   // agrupadas lo tienen en liquidacion_partidas, una fila por partida. Se leen las
-  // dos: una liquidación vieja tiene la cabecera y ninguna fila.
+  // dos: una liquidación vieja tiene la cabecera y ninguna fila. Y al emitir todavía
+  // no hay filas: vienen en oc_ids.
   if (liq && liq.oc_id) ocs.add(Number(liq.oc_id));
+  for (const x of ((liq && liq.oc_ids) || [])) if (x) ocs.add(Number(x));
   if (liq && liq.id) {
     for (const p of db.prepare('SELECT oc_id FROM liquidacion_partidas WHERE liquidacion_id=?')
       .all(Number(liq.id))) {
       if (p && p.oc_id) ocs.add(Number(p.oc_id));
     }
   }
+  // Sin la copia guardada es una liquidación de ANTES de la V1046, y ésas no le
+  // descontaban el flete de salida adelantado a nadie: se arma sin él. Al emitir, con él.
+  const conSalida = !!(opts && opts.alEmitir);
+  // Una misma factura puede cubrir dos partidas del grupo —un remito lleva mercadería
+  // de varias—: se cita UNA vez, pero lo imputado es lo de TODAS (V1046). Quedarse con
+  // lo de la primera decía en el papel menos de lo que se descontó arriba.
   const vistos = new Map();
   for (const ocId of ocs) {
-    for (const c of comprobantesDeLaPartida(dbSg, ocId)) {
-      if (!vistos.has(String(c.factura_id))) vistos.set(String(c.factura_id), c);
+    for (const c of comprobantesDeLaPartida(dbSg, ocId, { salida: conSalida })) {
+      if (!vistos.has(String(c.factura_id))) {
+        vistos.set(String(c.factura_id), Object.assign({}, c, { conceptos: [...(c.conceptos || [])] }));
+      } else {
+        const x = vistos.get(String(c.factura_id));
+        x.imputado = Math.round(((Number(x.imputado) || 0) + (Number(c.imputado) || 0)) * 100) / 100;
+        for (const k of (c.conceptos || [])) if (!x.conceptos.includes(k)) x.conceptos.push(k);
+      }
     }
   }
   return [...vistos.values()];
