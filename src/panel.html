@@ -14737,9 +14737,13 @@ function liqVentaCab(ocId, mas){
       // entró. Dejarlo editable era ofrecer la única forma de liquidar mal: de
       // menos, y el productor cobra menos de lo que le corresponde.
       + '<label style="font-size:11.5px;color:var(--mut)">Bultos a liquidar<br>'
-        + '<input id="liq-bultos-liq" type="number" step="1" min="0" value="' + (r.bultos_ingresados || 0) + '"'
+        // LOS QUE QUEDARON (V1044): los que entraron menos los que se le devolvieron al
+        // productor sin firmar. Es el mismo número que controla el servidor; si fueran
+        // los que entraron, la partida con una devolución no se liquidaría nunca.
+        + '<input id="liq-bultos-liq" type="number" step="1" min="0" value="'
+          + (r.bultos_a_liquidar != null ? r.bultos_a_liquidar : (r.bultos_ingresados || 0)) + '"'
         + ' readonly tabindex="-1"'
-        + ' title="Se liquida la partida entera: el sistema no deja liquidar hasta que salió todo"'
+        + ' title="Se liquida la partida entera, sin lo que se le devolvió al productor: el sistema no deja liquidar hasta que salió todo"'
         + ' style="width:130px;padding:6px 8px;border-radius:6px;border:1px solid var(--bor);'
         + 'background:var(--bor2,#f1f5f9);color:var(--mut);cursor:not-allowed"></label>'
       + '<div style="flex:1;min-width:200px;align-self:flex-end" id="liq-avance"></div></div>';
@@ -15212,7 +15216,9 @@ function liqDesdePartida(r){
   // aparecía recién en el control de cierre.
   if (cc) {
     var antes = String(cc.value || '');
-    cc.value = Number(r.bultos_ingresados) || Number(r.bultos_vendidos) || '';
+    // Sin lo que se le devolvió al productor (V1044): es lo que el servidor deja liquidar.
+    cc.value = (r.bultos_a_liquidar != null ? Number(r.bultos_a_liquidar) : Number(r.bultos_ingresados))
+      || Number(r.bultos_vendidos) || '';
     if (String(cc.value) !== antes) liqArtSync();
   }
   var ul = eid('liq-cerr-uni'), cl = eid('liq-cerr-cant-lbl');
@@ -15248,7 +15254,7 @@ function liqDesdePartida(r){
   if (acEl) {
     acEl.innerHTML = Number(ac.total)
       ? '<span style="color:var(--mut)">La orden pactó </span><b>' + sgMoney(ac.total) + '</b>'
-        + '<span style="color:var(--mut)"> por ' + nr(r.bultos_ingresados)
+        + '<span style="color:var(--mut)"> por ' + nr(r.bultos_a_liquidar != null ? r.bultos_a_liquidar : r.bultos_ingresados)
         + ' ' + ((r.unidad === 'bulto') ? 'bultos' : 'kilos') + ' recibidos'
         + (Number(ac.precio_por_bulto)
             ? ' · ' + sgMoney(ac.precio_por_bulto) + ' por ' + ((r.unidad === 'bulto') ? 'bulto' : 'kilo')
@@ -15303,7 +15309,7 @@ function liqBultosAvance(){
   var a = eid('liq-avance'); if (!a) return;
   var i = Number((eid('liq-bultos-in') || {}).value) || 0;
   var v = Number((eid('liq-bultos-liq') || {}).value) || 0;
-  a.innerHTML = sgAvanceBarra(v, i, (LIQ.venta || {}).bultos_merma, (LIQ.venta || {}).bultos_devueltos_prov);
+  a.innerHTML = sgAvanceBarra(v, i, (LIQ.venta || {}).bultos_merma, (LIQ.venta || {}).bultos_descontados_prov);
 }
 
 function liqDePartida(ocId, partida, proveedor){

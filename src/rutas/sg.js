@@ -17,7 +17,7 @@ import { kgDelPapel, kgPendienteDelPapel, validarKgDeclarados, kgPapelSql }
 import { subirArchivo, obtenerArchivo, storageConfigurado } from '../servicios/storage.js';
 import { facturaCuenta, deudaFactura, deudaGestionFactura, noEsNotaDeCredito, signoFactura }
   from '../servicios/factura-cuenta.js';
-import { acordadoDeOC, precioUnicoDeOC } from '../servicios/sg_acordado.js';
+import { acordadoDeOC, precioUnicoDeOC, recibidoDeOC } from '../servicios/sg_acordado.js';
 // Una partida documentada con factura o liquidación tiene el precio FIRME.
 import { frenoPrecioFirme, precioFirmeDetalle } from '../servicios/sg_perfeccionada.js';
 import { estadoRescate, restaurar as restaurarRescate }
@@ -3396,11 +3396,19 @@ function partidasRecibidas(db, comoSeDocumenta) {
            -- con la mitad en el depósito es fijarle precio a lo que todavía no
            -- se sabe cuánto va a rendir. En BULTOS, que es como se cuenta el
            -- camión y como lo cuenta el proveedor.
-           (SELECT COALESCE(SUM(di.bultos),0) FROM sg_despacho_items di
+           -- NETO DE LO QUE EL CLIENTE DEVOLVIÓ AL PISO: volvió a estar adentro. Sin
+           -- restarlo, un cajón devuelto al stock y después devuelto al proveedor se
+           -- contaba dos veces, y la partida figuraba terminada con mercadería adentro.
+           ((SELECT COALESCE(SUM(di.bultos),0) FROM sg_despacho_items di
               JOIN sg_despachos d ON d.id = di.despacho_id AND d.activo = 1
               JOIN sg_lotes l ON l.id = di.lote_id AND l.activo = 1
               JOIN sg_oc_items i ON i.id = l.oc_item_id
-             WHERE i.oc_id = o.id) AS bultos_vendidos,
+             WHERE i.oc_id = o.id)
+            - (SELECT COALESCE(SUM(dvi.bultos),0) FROM sg_devolucion_items dvi
+                JOIN sg_devoluciones dv ON dv.id = dvi.devolucion_id AND dv.estado = 'registrada'
+                JOIN sg_lotes l ON l.id = dvi.lote_id AND l.activo = 1
+                JOIN sg_oc_items i ON i.id = l.oc_item_id
+               WHERE i.oc_id = o.id AND dvi.destino = 'stock')) AS bultos_vendidos,
            -- LA MERMA TAMBIÉN TERMINA LA PARTIDA. Pablo, 24/8/2026: "lo que tiene
            -- que estar terminada es la partida: en una de 60 bultos ingresados
            -- puede pasar que tengamos vendidos 55 y 5 sean merma. Obviamente esos
@@ -4010,13 +4018,23 @@ function ventaDePartida(db, ocId) {
         COALESCE(SUM(l.bultos),0) AS bultos, COALESCE(SUM(l.kg_reales),0) AS kg
         FROM sg_lotes l JOIN sg_oc_items i ON i.id = l.oc_item_id
        WHERE i.oc_id = ? AND l.activo = 1`).get(ocId);
-    const sal = db.prepare(`SELECT
+    const sal0 = db.prepare(`SELECT
         COALESCE(SUM(di.bultos),0) AS bultos, COALESCE(SUM(di.kg_despachados),0) AS kg
         FROM sg_despacho_items di
         JOIN sg_despachos d ON d.id = di.despacho_id AND d.activo = 1
         JOIN sg_lotes l ON l.id = di.lote_id AND l.activo = 1
         JOIN sg_oc_items i ON i.id = l.oc_item_id
        WHERE i.oc_id = ?`).get(ocId);
+    // Neto de lo que el cliente devolvió al piso: volvió a estar adentro (V1044).
+    const volvioPiso = db.prepare(`SELECT
+        COALESCE(SUM(dvi.bultos),0) AS bultos, COALESCE(SUM(dvi.kg),0) AS kg
+        FROM sg_devolucion_items dvi
+        JOIN sg_devoluciones dv ON dv.id = dvi.devolucion_id AND dv.estado = 'registrada'
+        JOIN sg_lotes l ON l.id = dvi.lote_id AND l.activo = 1
+        JOIN sg_oc_items i ON i.id = l.oc_item_id
+       WHERE i.oc_id = ? AND dvi.destino = 'stock'`).get(ocId);
+    const sal = { bultos: r2((sal0 && sal0.bultos) - (volvioPiso && volvioPiso.bultos)),
+      kg: r2((sal0 && sal0.kg) - (volvioPiso && volvioPiso.kg)) };
 
     // ── LA MERMA, CON SU DETALLE ─────────────────────────────────
     //
@@ -4288,6 +4306,16 @@ function ventaDePartida(db, ocId) {
         JOIN sg_oc_items i ON i.id = l.oc_item_id
        WHERE i.oc_id = ?`).get(ocId).s);
     const terminado = r2(bultosOut + mermaBultos + devueltosProv);
+    // ── LO QUE SE LE LIQUIDA ES LO QUE QUEDÓ ─────────────────────────────
+    //
+    // «Siempre vamos a tener que liquidar los 55» — Pablo, 29/8: los que entraron. Pero
+    // desde la V1043 lo que se le DEVUELVE al productor con la partida sin firmar baja
+    // lo que se le debe, y el control de la liquidación (objetivoCerrado) mide contra
+    // lo recibido SIN esos cajones. La pantalla seguía proponiendo los que entraron, de
+    // sólo lectura: 50 contra un tope de 40, y la partida no se podía liquidar nunca.
+    //
+    // Es la misma cuenta que usa el control, así que los dos dicen lo mismo.
+    const aLiquidar = recibidoDeOC(db, ocId);
     return { ok: true,
       oc_id: ocId,
       partida: oc.trazabilidad || oc.numero,
@@ -4374,6 +4402,10 @@ function ventaDePartida(db, ocId) {
       bultos_ingresados: bultosIn, bultos_vendidos: bultosOut,
       bultos_merma: mermaBultos, kg_merma: mermaKg, mermas,
       bultos_devueltos_prov: devueltosProv,
+      bultos_a_liquidar: aLiquidar.bultos,
+      kg_a_liquidar: aLiquidar.kg,
+      // Los que entraron y NO se liquidan porque se le devolvieron sin firmar.
+      bultos_descontados_prov: r2(Math.max(0, bultosIn - aLiquidar.bultos)),
       bultos_terminados: terminado,
       bultos_en_deposito: r2(Math.max(0, bultosIn - terminado)),
       kg_ingresados: r2(tot && tot.kg), kg_vendidos: r2(sal && sal.kg),
@@ -4525,6 +4557,10 @@ function fusionarVentas(partes) {
     bultos_ingresados: sum((p) => p.bultos_ingresados),
     bultos_vendidos: sum((p) => p.bultos_vendidos),
     bultos_merma: sum((p) => p.bultos_merma),
+    // Y lo devuelto al proveedor, en el grupo igual que en cada una.
+    bultos_devueltos_prov: sum((p) => p.bultos_devueltos_prov),
+    bultos_a_liquidar: sum((p) => p.bultos_a_liquidar),
+    bultos_descontados_prov: sum((p) => p.bultos_descontados_prov),
     kg_merma: sum((p) => p.kg_merma),
     bultos_terminados: sum((p) => p.bultos_terminados),
     bultos_en_deposito: sum((p) => p.bultos_en_deposito),
@@ -9364,7 +9400,14 @@ router.get('/decomisos', requireAuth, (req, res) => {
         d.bultos, d.foto_ruta, d.foto_nombre,
         -- Lo que costó lo que se tiró: la partida ya lo pagó y no va a entrar un
         -- peso por eso. Es la plata de la merma, que es lo que se mira.
-        ROUND(d.kg * COALESCE(l.costo_final / NULLIF(l.kg_reales,0), 0), 2) AS costo
+        -- Lo que entró MENOS lo devuelto al proveedor que se llevó su costo (V1044). Una
+        -- devolución sin firmar baja el costo total; si los kilos que entraron no bajaran
+        -- con ella, la merma aparecería costando menos de lo que costó. No es el kilo
+        -- vigente: ése ya no cuenta la propia merma y la inflaría.
+        ROUND(d.kg * COALESCE(l.costo_final / NULLIF(l.kg_reales
+          - COALESCE((SELECT SUM(dvc.kg) FROM sg_devolucion_stock_items dvc
+              JOIN sg_devoluciones_stock dsc ON dsc.id = dvc.devolucion_id AND dsc.estado = 'registrada'
+              WHERE dvc.lote_id = l.id AND dvc.descuenta_al_productor = 1),0), 0), 0), 2) AS costo
       FROM sg_lote_decomisos d
       JOIN sg_lotes l ON l.id=d.lote_id
       LEFT JOIN sg_productos pr ON pr.id=l.producto_id
@@ -10982,6 +11025,16 @@ router.post('/lotes/:id/devolver-proveedor', requireAuth, express.json(), (req, 
           `De esa partida quedan ${disp || 0} cajón(es) en la cámara: no se pueden devolver ${bultos}.` });
       }
       kg = r2(bultos * kpb);
+      // ── Y LOS KILOS ────────────────────────────────────────────────────
+      // Los cajones no alcanzan: una transformación no siempre escribe sus cajones y
+      // un reproceso puede llevarse más kilos que cajones × factor. Controlando sólo
+      // cajones se podían devolver kilos que ya no están: el disponible, el costo y lo
+      // que se le debe quedaban en negativo.
+      const dispKg = r2(db.prepare(`SELECT ${KG_DISPONIBLE} AS d FROM sg_lotes l WHERE l.id=?`).get(lote.id).d);
+      if (kg > dispKg + 0.01) {
+        return res.status(400).json({ ok: false, error:
+          `De esa partida quedan ${dispKg} kg en la cámara: ${bultos} cajón(es) son ${kg} kg y no alcanzan.` });
+      }
     } else {
       kg = r2(b.kg);
       if (!(kg > 0)) return res.status(400).json({ ok: false, error: 'Poné cuántos kilos se devuelven.' });
@@ -11000,7 +11053,22 @@ router.post('/lotes/:id/devolver-proveedor', requireAuth, express.json(), (req, 
     if (!/^\d{4}-\d{2}-\d{2}$/.test(fecha)) {
       return res.status(400).json({ ok: false, error: 'La fecha no es válida.' });
     }
-    const pisoId = (b.piso_id != null && b.piso_id !== '') ? Number(b.piso_id) : null;
+    let pisoId = (b.piso_id != null && b.piso_id !== '') ? Number(b.piso_id) : null;
+    // ── DE QUÉ PISO SALE: SI LA PARTIDA ESTÁ UBICADA, SE DICE ──────────────
+    //
+    // Sin piso, descontarDeUbicacion reparte por orden de piso y no anota de cuál sacó:
+    // podía llevarse los cajones del piso de OTRA persona, y al anular no había a
+    // dónde devolverlos — la suma de los pisos dejaba de dar lo disponible para siempre.
+    //
+    // Y al revés: si la partida no está ubicada en ningún piso —la de antes de los
+    // pisos—, no se anota ninguno aunque venga. Si se anotara, anular crearía un piso
+    // con cajones que nunca estuvieron ahí.
+    const ubicada = db.prepare(`SELECT 1 FROM sg_lote_ubicaciones
+      WHERE lote_id=? AND (COALESCE(bultos,0) > 0 OR COALESCE(kg,0) > 0) LIMIT 1`).get(lote.id);
+    if (ubicada && !pisoId) {
+      return res.status(400).json({ ok: false, error: 'Elegí de qué piso sale la mercadería.' });
+    }
+    if (!ubicada) pisoId = null;
     if (pisoId) {
       const noPuede = exigirPiso(db, req, pisoId, 'devolver mercadería');
       if (noPuede) return res.status(403).json({ ok: false, error: noPuede });
@@ -11038,6 +11106,9 @@ router.post('/lotes/:id/devolver-proveedor', requireAuth, express.json(), (req, 
       // Y la partida se entera: el costo —si no estaba firme— y el estado.
       recalcCostoLote(db, lote.id);
       recalcEstadoLote(db, lote.id);
+      // El margen guardado de lo que ya se remitió de esta partida sale del costo por
+      // kilo: si la devolución lo cambió, se rehace ahora y no en el próximo arranque.
+      recalcMargenDespachos(db, lote.id);
       return { id: Number(devId), numero, descuenta_al_productor: descuenta };
     })();
 
@@ -11080,6 +11151,25 @@ router.post('/devoluciones-stock/:id/anular', requireAuth, express.json(), (req,
       const firme = precioFirmeDetalle(db, x.oc_id, 'anular esta devolución');
       if (firme) return res.status(400).json({ ok: false, error: firme.error, firme: firme.firme });
     }
+    // ── NI UN COSTO QUE YA VIAJÓ A OTRO LOTE ───────────────────────────────
+    //
+    // Si DESPUÉS de la devolución salió mercadería de ese lote a una transformación o
+    // un reproceso, el costo que se llevó quedó congelado al costo por kilo de ese
+    // momento —que ya tenía descontada la devolución—. Anularla recalcula la partida
+    // sin la devolución y deja el costo mal repartido entre los dos lotes. Es el mismo
+    // freno que ya tiene corregir un lote. Se compara por día, del lado seguro.
+    const viajo = db.prepare(`SELECT 1 FROM sg_devolucion_stock_items it
+      WHERE it.devolucion_id = ? AND (
+        EXISTS (SELECT 1 FROM sg_transformaciones t WHERE t.lote_origen_id = it.lote_id
+                 AND substr(t.fecha,1,10) >= substr(?,1,10))
+        OR EXISTS (SELECT 1 FROM sg_reprocesos r WHERE r.lote_madre_id = it.lote_id AND r.estado = 'activo'
+                 AND substr(r.fecha,1,10) >= substr(?,1,10)))`).get(dv.id, dv.creado_en || '', dv.creado_en || '');
+    if (viajo) {
+      return res.status(400).json({ ok: false, error:
+        'Después de esta devolución salió mercadería de esa partida a una transformación o un reproceso, '
+        + 'y se llevó el costo de ese momento. Anularla dejaría el costo mal repartido entre los lotes: '
+        + 'hay que deshacer primero la transformación o el reproceso.' });
+    }
     db.transaction(() => {
       const its = db.prepare('SELECT * FROM sg_devolucion_stock_items WHERE devolucion_id=?').all(dv.id);
       // Primero se marca anulada: así, cuando se recalcula la partida, ya no la cuenta.
@@ -11092,6 +11182,7 @@ router.post('/devoluciones-stock/:id/anular', requireAuth, express.json(), (req,
         if (it.piso_id) ubicMover(db, it.lote_id, it.piso_id, Number(it.bultos) || 0, Number(it.kg) || 0);
         recalcCostoLote(db, it.lote_id);
         recalcEstadoLote(db, it.lote_id);
+        recalcMargenDespachos(db, it.lote_id);
       }
     })();
     res.json({ ok: true });

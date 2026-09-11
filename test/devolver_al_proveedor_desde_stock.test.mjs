@@ -67,9 +67,9 @@ function base() {
       modificado_en TEXT);
     CREATE TABLE sg_lote_decomisos (lote_id INTEGER, kg REAL, bultos REAL);
     CREATE TABLE sg_transformaciones (lote_origen_id INTEGER, kg_transformados REAL,
-      bultos_transformados REAL, costo_transferido REAL);
+      bultos_transformados REAL, costo_transferido REAL, fecha TEXT);
     CREATE TABLE sg_reprocesos (lote_madre_id INTEGER, kg_procesados REAL, bultos_procesados REAL,
-      estado TEXT, costo_madre_consumido REAL);
+      estado TEXT, costo_madre_consumido REAL, fecha TEXT);
     CREATE TABLE sg_despachos (id INTEGER PRIMARY KEY, activo INTEGER);
     CREATE TABLE sg_despacho_items (id INTEGER PRIMARY KEY, despacho_id INTEGER, lote_id INTEGER,
       kg_despachados REAL, bultos REAL);
@@ -79,6 +79,10 @@ function base() {
     CREATE TABLE sg_gastos_directos_lote (lote_id INTEGER, monto REAL, activo INTEGER);
     CREATE TABLE sg_gastos_directos (recepcion_id INTEGER, tipo_gasto TEXT, estado TEXT, activo INTEGER, monto REAL);
     CREATE TABLE sg_recepciones (id INTEGER PRIMARY KEY, oc_id INTEGER);
+    CREATE TABLE sg_lote_ubicaciones (id INTEGER PRIMARY KEY, lote_id INTEGER, piso_id INTEGER,
+      bultos REAL, kg REAL);
+    -- La partida está entera en el piso 4.
+    INSERT INTO sg_lote_ubicaciones (lote_id, piso_id, bultos, kg) VALUES (1, 4, 50, 1000);
     INSERT INTO sg_oc VALUES (7, 3, 'nosotros', 'OC-7');
     INSERT INTO sg_oc_items VALUES (70, 7);
     INSERT INTO sg_lotes (id, codigo_lote, estado, bultos, kg_reales, kg_por_bulto, oc_item_id,
@@ -262,6 +266,42 @@ test('la partida termina aunque parte se haya devuelto', async () => {
   assert.equal(a.recibidos - a.terminado, 0);
 });
 
+test('un cajón que el cliente devolvió al piso y después se le devolvió al proveedor cuenta UNA vez', async () => {
+  // Remito de 40, el cliente devuelve 25 al piso, y esos 25 se le devuelven al proveedor.
+  // Salieron 40 (15 vendidos + 25 devueltos) y quedan 10 en la cámara. Contando lo
+  // remitido sin restar lo que volvió, daba 65 y la partida figuraba terminada con
+  // mercadería adentro: se podía liquidar con stock en la cámara.
+  const P = await import(pathToFileURL(path.join(RAIZ, 'src/servicios/sg_partida_terminada.js')).href + '?dos');
+  const db = base();
+  db.exec(`INSERT INTO sg_despachos VALUES (1, 1); INSERT INTO sg_despacho_items VALUES (1, 1, 1, 800, 40);
+    INSERT INTO sg_devoluciones VALUES (1, 'registrada');
+    INSERT INTO sg_devolucion_items VALUES (1, 1, 1, 500, 25, 'stock', 1);`);
+  devolver(db, { bultos: 25, kg: 500, descuenta: 0 });
+  const a = P.avanceDePartida(db, 7);
+  assert.equal(a.vendidos, 15);
+  assert.equal(a.terminado, 40);
+  assert.equal(a.faltan, 10);
+  assert.equal(a.terminada, false, 'la partida figura terminada con 10 cajones en la cámara');
+  assert.match(P.frenoPartidaSinTerminar(db, 7), /25 devueltos al proveedor\) y quedan 10/);
+  // Y las otras dos puertas cuentan igual.
+  assert.match(SG, /- \(SELECT COALESCE\(SUM\(dvi\.bultos\),0\) FROM sg_devolucion_items dvi[\s\S]{0,300}dvi\.destino = 'stock'\)\) AS bultos_vendidos,/);
+  assert.match(SG, /const sal = \{ bultos: r2\(\(sal0 && sal0\.bultos\) - \(volvioPiso && volvioPiso\.bultos\)\),/);
+});
+
+test('la liquidación propone lo que QUEDÓ, que es lo que el servidor deja liquidar', () => {
+  // Proponía los que entraron, de sólo lectura: 50 contra un tope de 40 en una partida
+  // con 10 cajones devueltos al productor sin firmar. No se podía liquidar nunca.
+  assert.match(SG, /const aLiquidar = recibidoDeOC\(db, ocId\);/);
+  assert.match(SG, /bultos_a_liquidar: aLiquidar\.bultos,/);
+  assert.match(SG, /bultos_descontados_prov: r2\(Math\.max\(0, bultosIn - aLiquidar\.bultos\)\),/);
+  // Y la liquidación agrupada suma lo mismo.
+  assert.match(SG, /bultos_a_liquidar: sum\(\(p\) => p\.bultos_a_liquidar\),/);
+  assert.match(PANEL, /\(r\.bultos_a_liquidar != null \? r\.bultos_a_liquidar : \(r\.bultos_ingresados \|\| 0\)\)/);
+  assert.match(PANEL, /cc\.value = \(r\.bultos_a_liquidar != null \? Number\(r\.bultos_a_liquidar\) : Number\(r\.bultos_ingresados\)\)/);
+  // La barra: lo que se liquida + lo descontado vuelve a dar lo que entró.
+  assert.match(PANEL, /sgAvanceBarra\(v, i, \(LIQ\.venta \|\| \{\}\)\.bultos_merma, \(LIQ\.venta \|\| \{\}\)\.bultos_descontados_prov\)/);
+});
+
 test('el panel dice lo mismo que el servidor sobre la partida terminada', () => {
   const src = hasta(PANEL, 'function sgPartTerminada(p){', '\r\n}') + '\n'
     + hasta(PANEL, 'function sgPartFaltaTxt(p){', '\r\n}') + '\n'
@@ -314,6 +354,7 @@ function montarAlta(db, opts = {}) {
     },
     recalcCostoLote: () => { hechos.recalcCosto++; },
     recalcEstadoLote: () => { hechos.recalcEstado++; },
+    recalcMargenDespachos: () => { hechos.recalcMargen = (hechos.recalcMargen || 0) + 1; },
   };
   db.transaction = (fnx) => (...a) => {
     db.exec('BEGIN');
@@ -347,6 +388,8 @@ test('registra la devolución, saca del piso y avisa a la partida', () => {
   assert.deepEqual(hechos.descontado, [{ lote: 1, bultos: 10, kg: 200, piso: 4 }]);
   assert.equal(hechos.recalcCosto, 1);
   assert.equal(hechos.recalcEstado, 1);
+  // Y el margen guardado de lo ya remitido de la partida se rehace ahora.
+  assert.equal(hechos.recalcMargen, 1);
 });
 
 test('sin motivo no se registra', () => {
@@ -360,18 +403,18 @@ test('sin motivo no se registra', () => {
 test('en cajones enteros, y no más de los que quedan', () => {
   const db = base();
   const { correr } = montarAlta(db);
-  assert.match(correr(1, { bultos: 2.5, motivo: 'x' }).error, /cajones enteros/);
-  assert.match(correr(1, { bultos: 51, motivo: 'x' }).error, /quedan 50 cajón/);
+  assert.match(correr(1, { bultos: 2.5, motivo: 'x', piso_id: 4 }).error, /cajones enteros/);
+  assert.match(correr(1, { bultos: 51, motivo: 'x', piso_id: 4 }).error, /quedan 50 cajón/);
   // Lo ya devuelto cuenta: dos devoluciones no pueden llevarse más de lo que hay.
   devolver(db, { bultos: 45, kg: 900 });
-  assert.match(correr(1, { bultos: 10, motivo: 'x' }).error, /quedan 5 cajón/);
+  assert.match(correr(1, { bultos: 10, motivo: 'x', piso_id: 4 }).error, /quedan 5 cajón/);
 });
 
 test('una partida sin orden de compra no tiene a quién devolverle nada', () => {
   // Un reproceso, una apertura: eso es una merma.
   const db = base();
   db.prepare('UPDATE sg_lotes SET oc_item_id=NULL WHERE id=1').run();
-  const r = montarAlta(db).correr(1, { bultos: 10, motivo: 'x' });
+  const r = montarAlta(db).correr(1, { bultos: 10, motivo: 'x', piso_id: 4 });
   assert.equal(r.code, 400);
   assert.match(r.error, /se carga como merma/);
 });
@@ -407,7 +450,7 @@ test('una partida con factor pero sin cajones contados se devuelve igual, en kil
   // pidiera cajones, esa partida no se podría devolver nunca desde la pantalla.
   const db = base();
   db.prepare('UPDATE sg_lotes SET bultos=NULL WHERE id=1').run();
-  const r = montarAlta(db).correr(1, { bultos: 5, kg: 100, motivo: 'x' });
+  const r = montarAlta(db).correr(1, { bultos: 5, kg: 100, motivo: 'x', piso_id: 4 });
   assert.equal(r.code, 200, r.error);
   assert.equal(db.prepare('SELECT kg FROM sg_devolucion_stock_items').get().kg, 100);
   // Y la pantalla manda las dos.
@@ -419,11 +462,11 @@ test('una fecha que no es fecha no se guarda', () => {
   // Se guardaba lo que viniera, y la lista lo dibujaba: una puerta para meter código en
   // la pantalla de quien la abra.
   const db = base();
-  const r = montarAlta(db).correr(1, { bultos: 2, motivo: 'x', fecha: '<img src=x onerror=alert(1)>' });
+  const r = montarAlta(db).correr(1, { bultos: 2, motivo: 'x', piso_id: 4, fecha: '<img src=x onerror=alert(1)>' });
   assert.equal(r.code, 400);
   assert.match(r.error, /fecha no es válida/);
   // Sin fecha, la de hoy.
-  assert.equal(montarAlta(db).correr(1, { bultos: 2, motivo: 'x' }).code, 200);
+  assert.equal(montarAlta(db).correr(1, { bultos: 2, motivo: 'x', piso_id: 4 }).code, 200);
   assert.match(db.prepare('SELECT fecha FROM sg_devoluciones_stock').get().fecha, /^\d{4}-\d{2}-\d{2}$/);
   // Y las dos listas la escapan igual, por si llega por otro lado.
   assert.match(hasta(PANEL, 'function sgDvpLoad(){', '\r\n}'), /escH\(sgDespFechaCorta\(d\.fecha\)\)/);
@@ -435,12 +478,42 @@ test('el aviso dice QUÉ hizo firme la partida', () => {
   assert.match(b, /factura: 'llegó la factura', liquidacion: 'se liquidó', marca: 'se marcó a mano como firme'/);
 });
 
+test('los KILOS también se controlan, no sólo los cajones', () => {
+  // Una transformación no siempre escribe sus cajones: quedan 50 cajones «disponibles»
+  // y 800 kg. Controlando sólo cajones se devolvían 1.000 kg de 800, y el disponible,
+  // el costo y la deuda quedaban en negativo.
+  const db = base();
+  db.exec("INSERT INTO sg_transformaciones VALUES (1, 200, NULL, 20000, '2026-09-11 10:00:00')");
+  const r = montarAlta(db).correr(1, { bultos: 50, motivo: 'x', piso_id: 4 });
+  assert.equal(r.code, 400);
+  assert.match(r.error, /quedan 800 kg/);
+  assert.equal(db.prepare('SELECT COUNT(*) n FROM sg_devolucion_stock_items').get().n, 0);
+});
+
+test('si la partida está ubicada, el piso es obligatorio', () => {
+  // Sin piso se repartía por orden de piso —podía llevarse los cajones de otro— y no
+  // se anotaba de cuál: al anular no había a dónde devolverlos.
+  const db = base();
+  const r = montarAlta(db).correr(1, { bultos: 10, motivo: 'x' });
+  assert.equal(r.code, 400);
+  assert.match(r.error, /Elegí de qué piso sale/);
+});
+
+test('y si no está ubicada en ningún piso, no se anota ninguno aunque venga', () => {
+  // Si se anotara, anular crearía un piso con cajones que nunca estuvieron ahí.
+  const db = base();
+  db.exec('DELETE FROM sg_lote_ubicaciones');
+  const r = montarAlta(db).correr(1, { bultos: 10, motivo: 'x', piso_id: 9 });
+  assert.equal(r.code, 200, r.error);
+  assert.equal(db.prepare('SELECT piso_id FROM sg_devolucion_stock_items').get().piso_id, null);
+});
+
 test('la partida a granel se devuelve en kilos', () => {
   const db = base();
   db.prepare('UPDATE sg_lotes SET bultos=NULL, kg_por_bulto=NULL WHERE id=1').run();
   const { correr } = montarAlta(db);
-  assert.match(correr(1, { kg: 1200, motivo: 'x' }).error, /quedan 1000 kg/);
-  const r = correr(1, { kg: 150.5, motivo: 'x' });
+  assert.match(correr(1, { kg: 1200, motivo: 'x', piso_id: 4 }).error, /quedan 1000 kg/);
+  const r = correr(1, { kg: 150.5, motivo: 'x', piso_id: 4 });
   assert.equal(r.code, 200, r.error);
   assert.equal(db.prepare('SELECT kg FROM sg_devolucion_stock_items').get().kg, 150.5);
 });
@@ -457,6 +530,7 @@ function montarAnular(db, id, opts = {}) {
     ubicMover: (d, lote, piso, b, k) => movidos.push({ lote, piso, b, k }),
     recalcCostoLote: (d, l) => recalc.push(['costo', l]),
     recalcEstadoLote: (d, l) => recalc.push(['estado', l]),
+    recalcMargenDespachos: (d, l) => recalc.push(['margen', l]),
     precioFirmeDetalle: () => opts.firme
       ? { error: 'La partida ya tiene factura: anulala primero.', firme: { como: 'factura', id: 1 } } : null,
   };
@@ -480,7 +554,7 @@ test('anular devuelve la mercadería al piso del que salió, y avisa a la partid
   assert.equal(correr({ motivo: 'se cargó a la partida equivocada' }).code, 200);
   assert.equal(db.prepare('SELECT estado FROM sg_devoluciones_stock WHERE id=?').get(id).estado, 'anulada');
   assert.deepEqual(movidos, [{ lote: 1, piso: 4, b: 10, k: 200 }]);
-  assert.deepEqual(recalc, [['costo', 1], ['estado', 1]]);
+  assert.deepEqual(recalc, [['costo', 1], ['estado', 1], ['margen', 1]]);
   // Y ya no cuenta como salida.
   assert.equal(kg(db, F.KG_DISPONIBLE), 1000);
 });
@@ -504,6 +578,27 @@ test('pero la que no bajó la deuda se anula igual: sólo devuelve la mercaderí
   db.prepare('UPDATE sg_devolucion_stock_items SET piso_id=4').run();
   const r = montarAnular(db, id, { firme: true }).correr({ motivo: 'se cargó mal' });
   assert.equal(r.code, 200, r.error);
+});
+
+test('no se anula si después salió mercadería a una transformación: el costo ya viajó', () => {
+  // La transformación se llevó el costo por kilo de ese momento, que ya tenía
+  // descontada la devolución. Anularla deja el costo mal repartido entre los dos lotes.
+  const db = base();
+  const id = devolver(db, { bultos: 10, kg: 200 });
+  db.prepare("UPDATE sg_devoluciones_stock SET creado_en='2026-09-10 09:00:00' WHERE id=?").run(id);
+  db.exec("INSERT INTO sg_transformaciones VALUES (1, 100, 5, 10000, '2026-09-11 10:00:00')");
+  const { correr, movidos } = montarAnular(db, id);
+  const r = correr({ motivo: 'se cargó mal' });
+  assert.equal(r.code, 400);
+  assert.match(r.error, /deshacer primero la transformación o el reproceso/);
+  assert.deepEqual(movidos, []);
+  // Una transformación de ANTES de la devolución no frena: su costo se llevó el
+  // número de antes, y anular vuelve justo a ese estado.
+  const db2 = base();
+  const id2 = devolver(db2, { bultos: 10, kg: 200 });
+  db2.prepare("UPDATE sg_devoluciones_stock SET creado_en='2026-09-10 09:00:00' WHERE id=?").run(id2);
+  db2.exec("INSERT INTO sg_transformaciones VALUES (1, 100, 5, 10000, '2026-09-01 10:00:00')");
+  assert.equal(montarAnular(db2, id2).correr({ motivo: 'se cargó mal' }).code, 200);
 });
 
 test('y la devolución de un REMITO tiene el mismo freno', () => {

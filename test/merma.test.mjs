@@ -211,7 +211,10 @@ test('el listado muestra el COSTO de lo que se tiró', () => {
   // entrar un peso por esa mercadería y la partida ya la pagó.
   const b = trozo("router.get('/decomisos'", '\r\n});');
   assert.match(b, /d\.bultos, d\.foto_ruta, d\.foto_nombre,/);
-  assert.match(b, /ROUND\(d\.kg \* COALESCE\(l\.costo_final \/ NULLIF\(l\.kg_reales,0\), 0\), 2\) AS costo/);
+  // Por lo que entró MENOS lo devuelto al proveedor que se llevó su costo (V1044): si no,
+  // una devolución sin firmar baja el costo total y la merma parece costar menos.
+  assert.match(b, /ROUND\(d\.kg \* COALESCE\(l\.costo_final \/ NULLIF\(l\.kg_reales\s+- COALESCE\(\(SELECT SUM\(dvc\.kg\) FROM sg_devolucion_stock_items dvc/);
+  assert.match(b, /WHERE dvc\.lote_id = l\.id AND dvc\.descuenta_al_productor = 1\),0\), 0\), 0\), 2\) AS costo/);
   const i = PANEL.indexOf('function sgMermaLoad(){');
   const c = PANEL.slice(i, i + 2000);
   assert.match(c, /Se tiraron ' \+ sgMoney/);

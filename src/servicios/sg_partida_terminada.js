@@ -28,15 +28,17 @@ import { kgPapelSql } from './sg_kilos_del_papel.js';
 
 const r2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
 
-// La tabla la crea db_sg.js al arrancar; una base de prueba puede no tenerla.
-const _devCamara = new WeakMap();
-function _hayDevCamara(db) {
-  if (!_devCamara.has(db)) {
-    _devCamara.set(db, !!db.prepare(`SELECT 1 FROM sqlite_master
-      WHERE type='table' AND name='sg_devolucion_stock_items'`).get());
+// Las tablas las crea db_sg.js al arrancar; una base de prueba puede no tenerlas.
+const _tablas = new WeakMap();
+function _hayTabla(db, nombre) {
+  if (!_tablas.has(db)) _tablas.set(db, new Map());
+  const m = _tablas.get(db);
+  if (!m.has(nombre)) {
+    m.set(nombre, !!db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(nombre));
   }
-  return _devCamara.get(db);
+  return m.get(nombre);
 }
+const _hayDevCamara = (db) => _hayTabla(db, 'sg_devolucion_stock_items');
 
 export function avanceDePartida(db, ocId) {
   const id = Number(ocId);
@@ -50,12 +52,23 @@ export function avanceDePartida(db, ocId) {
   const recibidos = uno(`SELECT COALESCE(SUM(l.bultos),0) AS n
       FROM sg_lotes l JOIN sg_oc_items i ON i.id = l.oc_item_id
      WHERE i.oc_id = ? AND l.activo = 1`);
-  const vendidos = uno(`SELECT COALESCE(SUM(di.bultos),0) AS n
+  const remitidos = uno(`SELECT COALESCE(SUM(di.bultos),0) AS n
       FROM sg_despacho_items di
       JOIN sg_despachos d ON d.id = di.despacho_id AND d.activo = 1
       JOIN sg_lotes l ON l.id = di.lote_id AND l.activo = 1
       JOIN sg_oc_items i ON i.id = l.oc_item_id
      WHERE i.oc_id = ?`);
+  // LO VENDIDO ES LO REMITIDO MENOS LO QUE EL CLIENTE DEVOLVIÓ AL PISO: eso volvió a
+  // estar adentro. Sin restarlo, un cajón devuelto al stock y después devuelto al
+  // proveedor se contaba dos veces, y la partida daba terminada con mercadería adentro
+  // — o sea, se podía liquidar con stock en la cámara.
+  const volvieron = _hayTabla(db, 'sg_devolucion_items') ? uno(`SELECT COALESCE(SUM(dvi.bultos),0) AS n
+      FROM sg_devolucion_items dvi
+      JOIN sg_devoluciones dv ON dv.id = dvi.devolucion_id AND dv.estado = 'registrada'
+      JOIN sg_lotes l ON l.id = dvi.lote_id AND l.activo = 1
+      JOIN sg_oc_items i ON i.id = l.oc_item_id
+     WHERE i.oc_id = ? AND dvi.destino = 'stock'`) : 0;
+  const vendidos = r2(remitidos - volvieron);
   const merma = uno(`SELECT COALESCE(SUM(dc.bultos),0) AS n
       FROM sg_lote_decomisos dc
       JOIN sg_lotes l ON l.id = dc.lote_id AND l.activo = 1
@@ -221,7 +234,8 @@ export function frenoPartidaSinTerminar(db, ocId) {
   const b = (n) => Number(n).toLocaleString('es-AR');
   return 'Esa partida todavía no está terminada: de ' + b(a.recibidos) + ' bulto(s) '
     + 'salieron ' + b(a.terminado) + ' (' + b(a.vendidos) + ' vendidos'
-    + (a.merma > 0 ? ' y ' + b(a.merma) + ' de merma' : '')
+    + (a.merma > 0 ? ', ' + b(a.merma) + ' de merma' : '')
+    + (a.devueltos > 0 ? ', ' + b(a.devueltos) + ' devueltos al proveedor' : '')
     + ') y quedan ' + b(a.faltan) + ' en el depósito. '
     + 'Se liquida cuando salió todo: lo que queda adentro todavía no se sabe cuánto va a rendir.';
 }
