@@ -11793,7 +11793,54 @@ router.get('/control-coop', requireAuth, (req, res) => {
       if (!f.gasto_id) c.sin_asignar++;
       c.monto += num(f.monto);
     }
-    res.json({ ok: true, data: { filas, totales, por_cooperativa: Object.values(porCoop) } });
+    // ── LAS CARGAS DE SALIDA (V1047) ────────────────────────────────────────
+    //
+    // Pablo, 11/9/2026: «punto 2 OK avanzar». Un remito con cooperativa de carga deja
+    // anotados los bultos que se le pagan a la cuadrilla, y no había ninguna pantalla
+    // donde ponerles el importe: la carga no llegaba nunca a la factura de la
+    // cooperativa, ni a su cuenta corriente, ni al margen del remito.
+    //
+    // Van aparte de las descargas porque cuelgan de un REMITO, no de una recepción. Y
+    // la fila sale del GASTO: una carga sin cooperativa no llega a crearlo, así que
+    // «sin cooperativa» acá no tiene nada que mostrar. Los mismos filtros, con la fecha
+    // del remito.
+    const wc = ["g.tipo_gasto = 'carga_salida'", 'g.activo = 1', "g.estado <> 'anulado'"], pc = [];
+    // LO QUE FALTA VALORIZAR NO SE ESCONDE POR LA FECHA. Una carga sin importe no frena
+    // nada —la descarga sin valorizar frena la liquidación; la carga no—, así que la de
+    // un remito del mes pasado, fuera del período, se olvidaba: el margen del remito
+    // quedaba alto y a la cuadrilla no se le facturaba nunca. «Desde» recorta lo valorizado.
+    if (req.query.desde) { wc.push("(COALESCE(d.fecha_despacho, g.fecha_servicio) >= ? OR g.estado = 'pendiente_valorizar')"); pc.push(String(req.query.desde)); }
+    if (req.query.hasta) { wc.push('COALESCE(d.fecha_despacho, g.fecha_servicio) <= ?'); pc.push(String(req.query.hasta)); }
+    if (req.query.cooperativa_id) { wc.push('g.proveedor_servicio_id = ?'); pc.push(Number(req.query.cooperativa_id)); }
+    if (req.query.estado === 'sin_coop') wc.push('1 = 0');
+    else if (req.query.estado) { wc.push('g.estado = ?'); pc.push(String(req.query.estado)); }
+    const cargas = db.prepare(`
+      SELECT g.id AS gasto_id, g.despacho_id,
+             -- Como en las descargas, cooperativa_id es el PROVEEDOR al que se le paga:
+             -- es con lo que se valoriza y se factura.
+             g.proveedor_servicio_id AS cooperativa_id,
+             COALESCE(sc.nombre, co.razon_social) AS cooperativa_nombre,
+             -- Y a quién se le factura: el filtro de arriba lista proveedores, no cuadrillas.
+             co.razon_social AS proveedor_servicio_nombre,
+             d.numero AS numero_remito, d.activo AS remito_activo,
+             COALESCE(d.fecha_despacho, g.fecha_servicio) AS fecha,
+             cl.razon_social AS cliente_nombre,
+             g.unidad, g.cantidad, g.estado, g.monto, g.fecha_valorizacion,
+             ${SQL_GASTO_FACTURADO}
+        FROM sg_gastos_directos g
+        LEFT JOIN sg_despachos d     ON d.id  = g.despacho_id
+        LEFT JOIN sg_clientes cl     ON cl.id = d.cliente_id
+        LEFT JOIN sg_proveedores co  ON co.id = g.proveedor_servicio_id
+        LEFT JOIN sg_cooperativas sc ON sc.id = g.cooperativa_id
+       WHERE ${wc.join(' AND ')}
+       ORDER BY fecha DESC, g.id DESC`).all(...pc);
+    const totales_cargas = {
+      cargas: cargas.length,
+      bultos: cargas.reduce((a, f) => a + num(f.cantidad), 0),
+      pendientes: cargas.filter((f) => f.estado === 'pendiente_valorizar').length,
+      monto: r2(cargas.reduce((a, f) => a + num(f.monto), 0)),
+    };
+    res.json({ ok: true, data: { filas, totales, por_cooperativa: Object.values(porCoop), cargas, totales_cargas } });
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
@@ -12223,7 +12270,7 @@ router.put('/gastos-factura/modelo', requireAdmin, (req, res) => {
 // LOS TIPOS SON UNA LISTA porque la cooperativa hace DOS cosas: baja el camión
 // que entra (descarga_ingreso) y carga el que sale (carga_salida). Las dos se le
 // facturan juntas y la solapa de Control Cooperativa ya las lista juntas
-// (?tipo=carga_salida,descarga_ingreso). Con un solo tipo, la carga de salida
+// (desde la V1047, en su propia tabla de cargas de salida). Con un solo tipo, la carga de salida
 // quedaba sin ningún circuito y dejaba de poder facturarse — antes entraba porque
 // la lista no filtraba por tipo, que era el otro problema.
 const CIRCUITOS_FACTURA = {

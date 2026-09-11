@@ -4372,6 +4372,16 @@ input[type=number]{-moz-appearance:textfield;appearance:textfield}
     <div id="sgcc-kpis" class="sgcc-kpis"></div>
     <div id="sgcc-coops"></div>
     <div id="sgcc-detalle"><div class="emp">Cargando…</div></div>
+
+    <!-- ══ 📦 LAS CARGAS DE SALIDA (V1047) ═══════════════════════════════════
+         Pablo, 11/9/2026: «punto 2 OK avanzar». El remito con cooperativa de carga
+         dejaba anotados los bultos que se le pagan a la cuadrilla y no había dónde
+         ponerles el importe. Tabla aparte: cuelgan de un remito, no de una partida,
+         y mezclarlas con las descargas cambiaba las columnas de las dos. -->
+    <div style="font-weight:700;font-size:12px;text-transform:uppercase;letter-spacing:.04em;color:var(--mut);margin:22px 0 8px">
+      📦 Cargas de salida — lo que la cooperativa subió a los camiones de los remitos
+    </div>
+    <div id="sgcc-cargas"><div class="emp">Cargando…</div></div>
   
     </div>
     <div class="sggd-pane" id="sggd-pane-repaso"><div class="emp" style="padding:40px">🔁 Repasos — próximamente (Fase 3).</div></div>
@@ -23208,8 +23218,28 @@ SG_MANUAL.gastos = { titulo: 'Gastos Directos', html:
   + '<li><b>🚚 Fletes de salida</b> — lo que costó llevarle la mercadería al cliente.</li>'
   + '<li><b>🚛 Fletes de entrada</b> — lo que costó traerla. Entra al costo de la partida.</li>'
   + '<li><b>🤝 Control Cooperativa</b> — las descargas: qué cuadrilla bajó cada camión y '
-  + 'cuánto cobró.</li>'
+  + 'cuánto cobró. Y <span class="ver">V1047</span> las <b>cargas de salida</b> de los remitos.</li>'
   + '<li><b>🔁 Repasos</b> — el trabajo de reacondicionar mercadería que llegó mal.</li>'
+  + '</ul>'
+
+  + '<h3>📦 Las cargas de salida <span class="ver">V1047</span></h3>'
+  + '<p>Cuando un remito lleva <b>cooperativa de carga</b>, la cuadrilla que subió la mercadería '
+  + 'queda anotada con los <b>bultos del remito</b>. Hasta ahora no había dónde ponerle el importe: '
+  + 'nunca llegaba a la factura de la cooperativa ni al margen del remito.</p>'
+  + '<ul>'
+  + '<li>Están en <b>🤝 Control Cooperativa</b>, en su propia tabla <b>📦 Cargas de salida</b>, abajo '
+  + 'de las descargas: cuelgan de un <b>remito</b>, no de una partida. Los mismos filtros de fecha, '
+  + 'cooperativa y estado valen para las dos, con una diferencia: <b>las que faltan valorizar '
+  + 'aparecen aunque el remito sea de antes del período</b>. Una carga sin importe no frena nada, y '
+  + 'fuera del período se olvidaba.</li>'
+  + '<li>La columna Cooperativa dice la <b>cuadrilla</b> y, abajo, <b>a quién se le factura</b>: es el '
+  + 'nombre que lista el filtro.</li>'
+  + '<li>Se valorizan con <b>💵 Valorizar</b> en la fila, con el mismo cuadro: por bulto o el total. '
+  + 'Una ya valorizada se corrige con <b>✏️ Editar</b>; si ya está en la factura, la fila muestra 🔒.</li>'
+  + '<li>Se facturan con <b>🧾 Ingresar factura</b>, junto con las descargas de la misma cooperativa: '
+  + 'en la lista, la carga muestra el cliente del remito.</li>'
+  + '<li>Es costo de la <b>venta</b>: no toca el costo de la partida y <b>no se le descuenta al '
+  + 'productor</b>. Resta del <b>margen del remito</b>.</li>'
   + '</ul>'
 
   + '<h3>Anular una factura de servicio <span class="ver">V1015</span></h3>'
@@ -23548,6 +23578,8 @@ SG_MANUAL.gastos = { titulo: 'Gastos Directos', html:
 
   + '<h3>Qué cambió, y desde cuándo</h3>'
   + '<ul>'
+  + '<li><span class="ver">V1047</span> Las <b>cargas de salida</b> de la cooperativa se valorizan en '
+  + 'Control Cooperativa, en su propia tabla, y llegan a su factura.</li>'
   + '<li><span class="ver">V1046</span> El flete de salida que San Gerónimo le <b>adelantó al '
   + 'productor</b> se le descuenta en su liquidación, y no resta del margen del remito.</li>'
   + '<li><span class="ver">V1045</span> El <b>flete de salida se valoriza por producto</b>, en '
@@ -24290,7 +24322,9 @@ SG_MANUAL.ventas = { titulo: 'Remitos y Facturación', html:
   + '<span class="ver">V1041</span> <b>Los bultos no se escriben</b>: son la suma de los cajones '
   + 'del remito y se actualizan solos a medida que se cargan renglones. Antes había que '
   + 'tipearlos, y lo tipeado le ganaba a la suma — con esa cantidad se reparte la factura de '
-  + 'la cuadrilla entre los remitos, así que un número de memoria le pasaba costo a otro.</li>'
+  + 'la cuadrilla entre los remitos, así que un número de memoria le pasaba costo a otro. '
+  + '<span class="ver">V1047</span> El importe se pone en <b>Gastos Directos → Control Cooperativa → '
+  + '📦 Cargas de salida</b>.</li>'
   + '</ul>'
   + '<div class="ojo"><b>No se puede remitir mercadería en viaje.</b> Sólo aparece lo que ya está '
   + 'en un piso del galpón: prometer lo que todavía viene es la forma de quedar mal dos veces, '
@@ -24479,15 +24513,17 @@ SG_MANUAL.ventas = { titulo: 'Remitos y Facturación', html:
   + 'sola línea</b>.</li>'
   + '<li><b>V1043</b> — lo que se le <b>devuelve al productor</b> se le descuenta de verdad de lo '
   + 'que se le debe.</li>'
-  + '<li><b>V1046</b> — el flete que San Gerónimo le adelanta al productor se le descuenta en su '
-  + 'liquidación y no resta del margen del remito.</li>'
-  + '<li><b>V1045</b> — el <b>flete se pone por producto</b>, por cajón, en cada renglón; el del '
-  + 'remito es la suma. En la ficha del remito cada renglón muestra su flete.</li>'
   + '<li><b>V1044</b> — un remito con una devolución al productor ya no se anula sin anular antes '
   + 'la devolución; la devolución no se anula con la partida firme; y la partida que tuvo una '
   + 'devolución al productor <b>se puede liquidar</b> (antes la pantalla mandaba los cajones que '
   + 'entraron y el servidor la rechazaba). Lo que falta facturar ya no cuenta lo que el cliente '
   + 'devolvió.</li>'
+  + '<li><b>V1045</b> — el <b>flete se pone por producto</b>, por cajón, en cada renglón; el del '
+  + 'remito es la suma. En la ficha del remito cada renglón muestra su flete.</li>'
+  + '<li><b>V1046</b> — el flete que San Gerónimo le adelanta al productor se le descuenta en su '
+  + 'liquidación y no resta del margen del remito.</li>'
+  + '<li><b>V1047</b> — la carga de la cooperativa se valoriza en Control Cooperativa y llega a su '
+  + 'factura.</li>'
   + '</ul>'
 };
 
@@ -26076,7 +26112,8 @@ function sgGdsRenderVal(){
     }).join('')+'</tbody></table></div>';
 }
 // ── Valorización de una cuenta (fletero o cooperativa). GENÉRICA: prorratea por `base`
-//    (kg para flete; bultos/pallets para cargas/descargas). Reusada por Fletes y Cargas/Descargas.
+//    (kg para flete; bultos/pallets para cargas/descargas). Reusada por los fletes y por Control
+//    Cooperativa, que valoriza las descargas y las cargas de salida.
 function sgGdsValAbrir(opts){   // opts:{prov, nombre, items:[{id,ref,sub,fecha,base,unidadLbl}], reload, ruta, cuerpo}
   SGGD.valProv=opts.prov; SGGD.valNombre=opts.nombre||''; SGGD.valReload=opts.reload||sgGdsLoad;
   // A DÓNDE VA. Estaba clavado en /gastos-servicio/valorizar, así que este cuadro
@@ -26698,21 +26735,6 @@ function sgFeGuardar(){
   });
 }
 
-// ── FASE 2 — Cargas y Descargas (cooperativa). Reusa el modelo + la valorización del flete. ──
-var SGCD={ estado:'pendiente_valorizar', rows:[] };
-function sgCdsTipoLbl(t){ return t==='descarga_ingreso'?'Descarga (ingreso)':(t==='carga_salida'?'Carga (salida)':t); }
-function sgCdsInit(){
-  api('/api/sg/proveedores-servicio?solo_marcados=1').then(function(r){
-    var fls=(r&&r.ok)?r.data:[];
-    eid('sgcd-filtro-coop').innerHTML='<option value="">— Todas —</option>'+fls.map(function(f){return '<option value="'+f.id+'">'+esc(f.razon_social)+'</option>';}).join('');
-  });
-  sgCdsLoad();
-}
-function sgCdsEstado(e){
-  SGCD.estado=e;
-  document.querySelectorAll('.sg-mod .sgcd-est').forEach(function(el){var on=el.dataset.e===e; el.classList.toggle('on',on); el.style.background=on?'var(--burg)':''; el.style.color=on?'#fff':'var(--mut)';});
-  sgCdsLoad();
-}
 // ── CONTROL COOPERATIVA ───────────────────────────────────────────────────
 // Lo que la cooperativa descargó, acumulado. Se alimenta solo desde el paso 3
 // de la recepción: no hay nada que cargar acá, sólo que mirar.
@@ -26862,7 +26884,7 @@ var SG_MODELOS = {
     // proveedor al que se le factura—.
     facturaTit: '🧾 Ingresar factura de descarga',
     provs: 'coops', ref: 'Partida', refCol: 'proveedor_mercaderia', refColTit: 'Proveedor',
-    vacio: 'No hay descargas valorizadas sin facturar de este proveedor.',
+    vacio: 'No hay descargas ni cargas valorizadas sin facturar de este proveedor.',
     titulo: 'Asiento contable de las descargas',
     que: 'las descargas',
     sub: 'Con qué asiento modelo se contabilizan las facturas de las cooperativas. Es el '
@@ -27191,13 +27213,19 @@ function sgCcoopLoad(){
       // Sin esto, un error del servidor se veía igual que un período sin
       // descargas: "no hay nada" cuando en realidad no se pudo preguntar.
       eid('sgcc-kpis').innerHTML = ''; eid('sgcc-coops').innerHTML = '';
+      if (eid('sgcc-cargas')) eid('sgcc-cargas').innerHTML = '<div class="emp" style="padding:20px;color:var(--err)">'
+        + 'Tampoco se pudieron leer las cargas de salida.</div>';
       eid('sgcc-detalle').innerHTML = '<div class="emp" style="padding:34px;color:var(--err)">No se pudieron leer las descargas'
         + ((r && r.error) ? (': ' + esc(r.error)) : '.') + ' Probá de nuevo con ↻ Actualizar.</div>';
       return;
     }
     var d = r.data;
     SGCC.filas = d.filas || []; SGCC.tot = d.totales; SGCC.por = d.por_cooperativa || [];
+    // Las cargas de salida, aparte (V1047). Se pintan fuera de sgCcoopRender: ésa
+    // termina antes si no hay descargas, y las cargas tienen que verse igual.
+    SGCC.cargas = d.cargas || []; SGCC.totCargas = d.totales_cargas || null;
     sgCcoopRender();
+    sgCcoopRenderCargas();
   });
 }
 
@@ -27597,7 +27625,8 @@ function sgFgPintar(){
         + ' onchange="sgFgMarcar(' + f.id + ',this.checked)" style="width:auto"></td>'
       + '<td style="' + cel + '"><code>'
         + escH(f.partida || f.numero_remito || f.numero_recepcion || '—') + '</code></td>'
-      + '<td style="' + cel + '">' + escH(f[cc.refCol] || '—') + '</td>'
+      // Una CARGA de salida no tiene proveedor de mercadería: tiene cliente (V1047).
+      + '<td style="' + cel + '">' + escH(f[cc.refCol] || (f.cliente ? ('cliente: ' + f.cliente) : '—')) + '</td>'
       + '<td style="' + cel + '">' + esc(f.fecha_servicio || f.fecha_valorizacion || '—') + '</td>'
       + '<td style="text-align:right">' + sgMoney(f.monto) + '</td></tr>';
   }).join('');
@@ -27876,6 +27905,93 @@ function sgFgGuardar(){
   });
 }
 
+// ══ 📦 LAS CARGAS DE SALIDA, CON SU BOTÓN (V1047) ═══════════════════════════
+//
+// El mismo cuadro y el mismo botón que la descarga, en su propia tabla. La carga es
+// costo de la VENTA: no toca el costo de la partida ni se le descuenta al productor;
+// resta del margen del remito, que ya la leía.
+function sgCcoopRenderCargas(){
+  var box = eid('sgcc-cargas'); if (!box) return;
+  var cs = SGCC.cargas || [];
+  if (SGCC.estado === 'sin_coop') {
+    box.innerHTML = '<div class="emp" style="padding:20px">Una carga sin cooperativa no deja nada que '
+      + 'pagar: con este filtro no hay cargas que mostrar.</div>';
+    return;
+  }
+  if (!cs.length) {
+    box.innerHTML = '<div class="emp" style="padding:20px">Ninguna carga de salida con estos filtros.</div>';
+    return;
+  }
+  var t = SGCC.totCargas || {};
+  var cel = 'overflow:hidden;text-overflow:ellipsis;white-space:nowrap';
+  box.innerHTML = '<div style="font-size:12.5px;color:var(--mut);margin-bottom:8px">'
+      + nr(t.cargas || cs.length) + ' carga(s) · ' + nr(t.bultos || 0) + ' bultos · '
+      + (Number(t.pendientes) > 0 ? '<b style="color:#9a3412">' + nr(t.pendientes) + ' a valorizar</b>' : '0 a valorizar')
+      + ' · valorizado ' + sgMoney(t.monto || 0) + '</div>'
+    // NADA DE BARRA LATERAL: anchos fijos y lo largo se corta con «…».
+    + '<div class="ab-table-wrap" style="overflow-x:hidden !important"><table class="pa-tbl" style="table-layout:fixed;width:100%"><thead><tr>'
+    // La de la acción, con lugar para «💵 Valorizar» entero: con nowrap y sin barra
+    // lateral, un botón que no entra se corta.
+    + '<th style="width:10%">Fecha</th><th style="width:13%">Remito</th><th style="width:18%">Cliente</th>'
+    + '<th style="width:16%">Cooperativa</th><th style="width:8%;text-align:right">Bultos</th>'
+    + '<th style="width:11%">Estado</th><th style="width:11%;text-align:right">Monto</th><th style="width:13%"></th>'
+    + '</tr></thead><tbody>'
+    + cs.map(function(f){
+        var estado = f.estado === 'valorizado' ? '<span class="bdg bok">✅ valorizada</span>'
+          : '<span class="bdg bcc">⏳ a valorizar</span>';
+        return '<tr>'
+          + '<td>' + escH(f.fecha || '—') + '</td>'
+          + '<td style="' + cel + '"><code>' + escH(f.numero_remito || '—') + '</code>'
+            // Un remito anulado con la carga ya valorizada: la cuadrilla trabajó igual
+            // y se le debe. Se muestra, y se dice.
+            // Sólo si el remito EXISTE y está anulado: sin remito, remito_activo viene vacío.
+            + ((f.remito_activo != null && Number(f.remito_activo) === 0)
+                ? '<div style="font-size:10.5px;color:#9a3412">remito anulado</div>' : '')
+            + '</td>'
+          + '<td style="' + cel + '" title="' + escH(f.cliente_nombre || '') + '">' + escH(f.cliente_nombre || '—') + '</td>'
+          // La cuadrilla, y abajo a quién se le factura: es el nombre que lista el filtro.
+          + '<td style="' + cel + '" title="' + escH(f.cooperativa_nombre || '') + '">' + escH(f.cooperativa_nombre || '—')
+            + ((f.proveedor_servicio_nombre && f.proveedor_servicio_nombre !== f.cooperativa_nombre)
+                ? '<div style="font-size:10.5px;color:var(--mut);' + cel + '">' + escH(f.proveedor_servicio_nombre) + '</div>'
+                : '')
+            + '</td>'
+          + '<td style="text-align:right">' + nr(f.cantidad) + '</td>'
+          + '<td>' + estado + '</td>'
+          + '<td style="text-align:right">' + (f.monto != null ? sgMoney(f.monto) : '—')
+            + ((f.monto != null && Number(f.cantidad) > 0)
+                ? '<div style="font-size:10.5px;color:var(--mut)">'
+                  + sgMoney(Math.round((Number(f.monto) / Number(f.cantidad)) * 100) / 100)
+                  + ' / ' + escH(f.unidad || 'bulto') + '</div>'
+                : '') + '</td>'
+          + '<td style="text-align:right;white-space:nowrap">'
+            + (f.estado === 'valorizado'
+                ? (f.facturada
+                    ? '<span style="font-size:11px;color:var(--mut)" title="Ya está en la factura de la cooperativa: para corregirla, primero se anula la factura">🔒 facturada</span>'
+                    : '<button class="btn bo bs" onclick="sgCcoopValorizarCarga(' + f.gasto_id + ')">✏️ Editar</button>')
+                : '<button class="btn bb bs" onclick="sgCcoopValorizarCarga(' + f.gasto_id + ')">💵 Valorizar</button>')
+            + '</td></tr>';
+      }).join('')
+    + '</tbody></table></div>'
+    + '<div style="font-size:11.5px;color:var(--mut);margin-top:10px">La carga es costo de la '
+    + '<b>venta</b>: no toca el costo de la partida y resta del margen del remito. Se factura con '
+    + '<b>🧾 Ingresar factura</b>, junto con las descargas de la misma cooperativa. Las que faltan '
+    + 'valorizar aparecen aunque el remito sea de antes del período.</div>';
+}
+function sgCcoopValorizarCarga(gastoId){
+  var f = (SGCC.cargas || []).filter(function(x){ return String(x.gasto_id) === String(gastoId); })[0];
+  if (!f) { toast('Esa carga ya no está en la lista', 'er'); sgCcoopLoad(); return; }
+  if (f.facturada) { toast('Ya está en la factura de la cooperativa: para corregirla, primero anulá la factura', 'er'); return; }
+  sgGdsValAbrir({
+    prov: f.cooperativa_id,
+    nombre: f.cooperativa_nombre || '',
+    reload: sgCcoopLoad,
+    refLbl: 'Remito', subLbl: 'Cliente',
+    editando: f.estado === 'valorizado',
+    items: [{ id: f.gasto_id, ref: f.numero_remito || '', sub: f.cliente_nombre || '', fecha: f.fecha,
+      base: f.cantidad, unidadLbl: f.unidad || 'bulto', monto: f.monto }]
+  });
+}
+
 // Asignar la cooperativa de una descarga que entró sin saber de quién fue.
 // Cierra el caso que abre la opción "no sé todavía" del paso 3 de la recepción:
 // sin esto esas filas serían un callejón sin salida, porque las recepciones no
@@ -27920,50 +28036,6 @@ function sgCcoopAsigGuardar(){
   });
 }
 
-function sgCdsLoad(){
-  var prov=eid('sgcd-filtro-coop').value;
-  api('/api/sg/gastos-servicio?tipo=carga_salida,descarga_ingreso&estado='+SGCD.estado+(prov?('&proveedor_id='+prov):'')).then(function(r){
-    SGCD.rows=(r&&r.ok)?r.data:[];
-    if(SGCD.estado==='pendiente_valorizar') sgCdsRenderPend(); else sgCdsRenderVal();
-  });
-}
-function sgCdsRenderPend(){
-  var c=eid('sgcd-content');
-  if(!SGCD.rows.length){ c.innerHTML='<div class="emp" style="padding:30px">Sin cargas/descargas pendientes. 🎉</div>'; return; }
-  var grupos={};
-  SGCD.rows.forEach(function(g){ var k=g.proveedor_servicio_id||'0'; if(!grupos[k])grupos[k]={nombre:g.fletero_nombre||'(sin cooperativa)',id:g.proveedor_servicio_id,items:[]}; grupos[k].items.push(g); });
-  c.innerHTML=Object.keys(grupos).map(function(k){
-    var gr=grupos[k];
-    var filas=gr.items.map(function(x){
-      var tipoBadge=x.tipo_gasto==='descarga_ingreso'?'<span class="bdg bcc">Descarga ↓</span>':'<span class="bdg bok">Carga ↑</span>';
-      // LA PARTIDA, no el número interno de la recepción: es el número que
-      // está en la orden, en el lote y en la factura, y el único que sirve
-      // para cruzar la cuenta de la cooperativa contra algo.
-      return '<tr><td>'+tipoBadge+'</td><td><code>'+esc(x.operacion_ref||'—')+'</code></td><td>'+esc(x.contraparte||x.cliente_nombre||'—')+'</td><td>'+(x.operacion_fecha||'—')+'</td><td style="text-align:right">'+nr(x.cantidad)+' '+esc(x.unidad||'')+'</td></tr>';
-    }).join('');
-    return '<div style="border:1px solid var(--bor);border-radius:10px;padding:12px;margin-bottom:12px">'
-      +'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;gap:10px;flex-wrap:wrap">'
-      +'<div style="font-weight:700">📦 '+esc(gr.nombre)+' <span style="font-weight:400;color:var(--mut);font-size:12px">· '+gr.items.length+' operación(es)</span></div>'
-      +(gr.id?'<button class="btn bb bs" onclick="sgCdsValOpen('+gr.id+')">💵 Valorizar cuenta</button>':'')
-      +'</div>'
-      +'<table class="pa-tbl"><thead><tr><th>Tipo</th><th>Operación</th><th>Cliente</th><th>Fecha</th><th style="text-align:right">Cant.</th></tr></thead><tbody>'+filas+'</tbody></table>'
-      +'</div>';
-  }).join('');
-}
-function sgCdsRenderVal(){
-  var c=eid('sgcd-content');
-  if(!SGCD.rows.length){ c.innerHTML='<div class="emp" style="padding:30px">Sin cargas/descargas valorizadas todavía.</div>'; return; }
-  c.innerHTML='<div class="ab-table-wrap"><table class="pa-tbl"><thead><tr><th>Cooperativa</th><th>Tipo</th><th>Operación</th><th>Fecha serv.</th><th style="text-align:right">Cant.</th><th>Cuenta</th><th style="text-align:right">Monto</th></tr></thead><tbody>'
-    +SGCD.rows.map(function(g){
-      return '<tr><td>'+esc(g.fletero_nombre||'—')+'</td><td>'+esc(sgCdsTipoLbl(g.tipo_gasto))+'</td><td><code>'+esc(g.operacion_ref||'—')+'</code></td><td>'+(g.fecha_servicio||'—')+'</td><td style="text-align:right">'+nr(g.cantidad)+' '+esc(g.unidad||'')+'</td><td style="font-size:11px;color:var(--mut)">'+esc(g.cuenta_ref||'—')+'</td><td style="text-align:right;font-weight:700">'+sgMoney(g.monto)+'</td></tr>';
-    }).join('')+'</tbody></table></div>';
-}
-function sgCdsValOpen(provId){
-  var pend=SGCD.rows.filter(function(g){return String(g.proveedor_servicio_id)===String(provId);});
-  if(!pend.length){ toast('Sin operaciones pendientes','er'); return; }
-  sgGdsValAbrir({ prov:provId, nombre:pend[0].fletero_nombre||'', reload:sgCdsLoad,
-    items:pend.map(function(g){ return {id:g.id, ref:sgCdsTipoLbl(g.tipo_gasto)+' · '+(g.operacion_ref||''), sub:g.cliente_nombre||'—', fecha:g.operacion_fecha, base:g.cantidad, unidadLbl:g.unidad||''}; }) });
-}
 // ══ Y AL MODIFICARLO, LA MISMA UNIDAD ════════════════════════════════════
 //
 // Pablo, 30/8/2026: «en la modificación del remito también». El precio se acordó por
