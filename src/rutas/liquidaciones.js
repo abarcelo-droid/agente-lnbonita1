@@ -13,7 +13,7 @@ import { crearAsiento } from '../servicios/asientos.js';
 import { lineasAsientoLiquidacion } from '../servicios/asiento-liquidacion.js';
 import { objetivoCerradoGrupo, cierraContraLoAcordado } from '../servicios/sg_acordado.js';
 import { frenoParaLiquidar } from '../servicios/sg_partida_terminada.js';
-import { comprobantesDeLaPartida, resumenSalidaAdelantada } from '../servicios/sg_gastos_facturados.js';
+import { comprobantesDeLaPartida, resumenSalidaAdelantada, fleteEntradaAdelantado } from '../servicios/sg_gastos_facturados.js';
 import { facturaCuenta } from '../servicios/factura-cuenta.js';
 import path    from 'path';
 import fs      from 'fs';
@@ -372,9 +372,9 @@ router.get('/:id', function(req, res) {
 
 // ── LA FILA «FLETE» NO PUEDE TRAER MENOS QUE LO QUE SE LE ADELANTÓ (V1046) ──────
 //
-// La pantalla prellena en la fila «Flete» el flete de salida que San Gerónimo le
-// adelantó al productor, pero el casillero se puede tocar —el flete de ENTRADA
-// adelantado todavía se tipea a mano—. Sin este control se podía borrar y emitir
+// La pantalla prellena en la fila «Flete» el flete que San Gerónimo le adelantó al
+// productor —el de salida y, desde la V1048, también el de entrada—, pero el casillero
+// se puede tocar. Sin este control se podía borrar y emitir
 // igual: el PDF citaría la factura del fletero como descontada y al productor no se le
 // habría descontado nada. Por debajo no; por encima sí, porque en la misma fila entra
 // el flete de la orden.
@@ -383,16 +383,18 @@ router.get('/:id', function(req, res) {
 // resumenSalidaAdelantada ya da cero para esas partidas.
 function frenoFleteSalidaEnGrilla(db, partidas, d) {
   if (String((d && d.modo_precio) || '') === 'cerrado') return null;
+  // De salida y, desde la V1048, también de entrada.
   const debe = Math.round((partidas || []).reduce(
-    (a, p) => a + (Number(resumenSalidaAdelantada(db, p.oc_id).neto) || 0), 0) * 100) / 100;
+    (a, p) => a + (Number(resumenSalidaAdelantada(db, p.oc_id).neto) || 0)
+      + (Number(fleteEntradaAdelantado(db, p.oc_id).neto) || 0), 0) * 100) / 100;
   if (!(debe > 0)) return null;
   const g = (d && d.grilla && d.grilla.fiscal) || {};
   const fila = Math.round((Number(g.flete) || 0) * 100) / 100;
   if (fila + 0.01 >= debe) return null;
   const plata = (x) => '$' + Number(x).toLocaleString('es-AR',
     { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-  return 'La fila «Flete» tiene ' + plata(fila) + ' y el flete de salida que San Gerónimo le adelantó '
-    + 'al productor es ' + plata(debe) + ': la liquidación no puede descontarle menos, porque la factura '
+  return 'La fila «Flete» tiene ' + plata(fila) + ' y el flete que San Gerónimo le adelantó al '
+    + 'productor —de entrada y de salida— es ' + plata(debe) + ': la liquidación no puede descontarle menos, porque la factura '
     + 'del fletero se cita como descontada. Volvé a abrir la liquidación desde la partida para que se '
     + 'complete sola.';
 }

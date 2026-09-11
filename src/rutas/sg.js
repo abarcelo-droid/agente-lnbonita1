@@ -59,7 +59,7 @@ import { filtrarCosto, puedeVerCosto } from '../servicios/sg_costo_visible.js';
 // Lo que falta valorizar para poder liquidar. Vive con el freno de la partida
 // terminada porque es la misma pregunta: si esta partida esta lista.
 import { gastosSinValorizar } from '../servicios/sg_partida_terminada.js';
-import { gastosSinFactura, comprobantesDeLaPartida, resumenSalidaAdelantada } from '../servicios/sg_gastos_facturados.js';
+import { gastosSinFactura, comprobantesDeLaPartida, resumenSalidaAdelantada, esFleteEntradaAdelantado, fleteEntradaAdelantado } from '../servicios/sg_gastos_facturados.js';
 
 const router = express.Router();
 
@@ -2064,6 +2064,11 @@ function recalcCostoLote(db, loteId) {
   // margen de todo lo que se venda de ella saldría bajo por un gasto ajeno.
   // Se mira el flete_a_cargo de la ORDEN y no una marca en el gasto: así hay
   // una sola verdad y no dos que se pueden contradecir.
+  //
+  // SÓLO A PIZARRA (V1048). A precio cerrado el productor cobra lo pactado y ese flete
+  // no se le descuenta —Pablo, 11/9/2026: «lo absorbemos nosotros»—, así que SÍ es
+  // costo de la partida. Es el espejo exacto de esFleteEntradaAdelantado: el del
+  // vendedor entra sólo si lo adelantamos nosotros Y no es a pizarra.
   let descarga = 0;
   if (lote.recepcion_id) {
     const dt = db.prepare(`SELECT COALESCE(SUM(g.monto),0) s FROM sg_gastos_directos g
@@ -2071,7 +2076,9 @@ function recalcCostoLote(db, loteId) {
       LEFT JOIN sg_oc o ON o.id = r.oc_id
       WHERE g.recepcion_id=? AND g.tipo_gasto IN ('descarga_ingreso','flete_entrada')
         AND g.estado='valorizado' AND g.activo=1
-        AND NOT (g.tipo_gasto='flete_entrada' AND COALESCE(o.flete_a_cargo,'') = 'vendedor')`)
+        AND NOT (g.tipo_gasto='flete_entrada' AND COALESCE(o.flete_a_cargo,'') = 'vendedor'
+                 AND NOT (COALESCE(o.flete_pagado_por,'') = 'san_geronimo'
+                          AND COALESCE(o.tipo_precio,'') <> 'pizarra'))`)
       .get(lote.recepcion_id).s;
     if (dt > 0) {
       const totKgRec = db.prepare("SELECT COALESCE(SUM(kg_reales),0) s FROM sg_lotes WHERE recepcion_id=? AND activo=1").get(lote.recepcion_id).s;
@@ -3988,7 +3995,7 @@ function ventaDePartida(db, ocId) {
     // nombre de ese productor, y tipear a mano el CUIT de un comprobante que uno
     // emite es la forma más barata de emitirlo mal.
     const oc = db.prepare(`SELECT o.id, o.trazabilidad, o.numero, o.fecha_oc, o.tipo_precio,
-        o.flete_a_cargo, o.flete_monto, o.flete_con_iva,
+        o.flete_a_cargo, o.flete_pagado_por, o.flete_monto, o.flete_con_iva,
         -- ¿EL PRECIO PACTADO TRAE EL IVA ADENTRO? Es la diferencia entre pagarle al
         -- productor lo que dice el papel o eso más un 10,5% -- y la pantalla lo
         -- daba por supuesto sin decirlo en ningún lado.
@@ -4287,8 +4294,15 @@ function ventaDePartida(db, ocId) {
       facturado: fFiscal,
       hay_factura: fHayFactura ? 1 : 0,
       dif_gestion: fHayFactura ? r2(fAcordado - fFiscal) : 0,
-      // Se prellena sólo cuando corresponde; el resto es información.
-      se_cobra: oc.flete_a_cargo === 'comprador' && fMonto > 0 ? 1 : 0,
+      // Se prellena sólo cuando corresponde; el resto es información. Desde la V1048
+      // también el del VENDEDOR que adelantó San Gerónimo, a pizarra (ver
+      // esFleteEntradaAdelantado): «en caso de corresponder se debe descontar de la
+      // liquidación». Ése se cobra aunque la orden no tenga monto, si ya hay factura.
+      se_cobra: ((oc.flete_a_cargo === 'comprador' && fMonto > 0)
+        || (esFleteEntradaAdelantado(oc) && (fMonto > 0 || fHayFactura))) ? 1 : 0,
+      adelantado: esFleteEntradaAdelantado(oc) ? 1 : 0,
+      // Los viajes de ese flete que todavía no se valorizaron: frenan la liquidación.
+      entrada_sin_valorizar: esFleteEntradaAdelantado(oc) ? fleteEntradaAdelantado(db, ocId).sin_valorizar : 0,
       // EL DE SALIDA QUE SE LE ADELANTÓ (V1046). Aparte, porque no sale de la orden
       // sino de los remitos: lo valorizado para los productos de esta partida. Se
       // SUMA al de arriba en la pantalla. Va al 21 como cualquier servicio que se le
@@ -4558,6 +4572,11 @@ function fusionarVentas(partes) {
         iva: suma((f) => f.iva),
         se_cobra: cobrables.length ? 1 : 0,
         a_cargo: cobrables.length ? 'comprador' : ((p0.flete || {}).a_cargo || null),
+        // El de entrada adelantado (V1048): «lo adelantó San Gerónimo» sólo si TODO lo que
+        // se cobra lo es —si no, el cartel lo diría del flete de un comprador—, y los
+        // viajes sin valorizar, de todas.
+        adelantado: (cobrables.length && cobrables.every((p) => (p.flete || {}).adelantado)) ? 1 : 0,
+        entrada_sin_valorizar: partes.reduce((a, p) => a + (Number((p.flete || {}).entrada_sin_valorizar) || 0), 0),
         // El de salida adelantado se suma de TODAS: cada partida trae sólo lo suyo,
         // así que no hay nada que repetir (V1046).
         salida: (function(){
@@ -6413,6 +6432,9 @@ router.put('/oc/:id/documenta', requireAuth, (req, res) => {
       db.prepare(`UPDATE sg_oc SET documenta=?, tipo_precio=?, tipo_fiscal=?,
         modificado_en=datetime('now','localtime'), modificado_por=? WHERE id=?`)
         .run(destino, precioNuevo, fiscalNuevo, uid(req), oc.id);
+      // EL COSTO DEL LOTE MIRA EL TIPO DE PRECIO (V1048): el flete de entrada adelantado
+      // entra al costo a precio cerrado y no a pizarra. Cambiar la condición lo rehace.
+      if (precioNuevo !== oc.tipo_precio) recalcLotesDeOC(db, oc.id);
       // Y SE DA DE BAJA EL COMPROBANTE DEL OTRO CIRCUITO. Si esta partida tenía
       // una factura de compra cargada —con su asiento ya anulado, que es lo
       // único que el freno de arriba deja pasar— y ahora se documenta con
@@ -7384,6 +7406,8 @@ router.post('/oc/:id/completar', requireAuth, (req, res) => {
         b.comercial_id ? Number(b.comercial_id) : oc.comercial_id,
         circ.tipoPrecio, circ.tipoFiscal, circ.documenta,
         val(b.observaciones) || null, uid(req), oc.id);
+      // Si cambió el tipo de precio, el costo de lo que ya entró se rehace (V1048).
+      if (circ.tipoPrecio !== oc.tipo_precio) recalcLotesDeOC(db, oc.id);
 
       // LA MISMA CUENTA QUE EL ENDPOINT DE PRECIOS. Acá se valorizaba el lote con el
       // precio BRUTO, sin mirar precio_incluye_iva: una orden cargada con IVA adentro
@@ -7736,6 +7760,10 @@ router.put('/oc/:id', requireAuth, (req, res) => {
       sets.push(`modificado_en=datetime('now','localtime')`, 'modificado_por=?'); vals.push(uid(req), req.params.id);
       db.prepare(`UPDATE sg_oc SET ${sets.join(',')} WHERE id=?`).run(...vals);
       generarVencimientos(db, Number(req.params.id));
+      // Si cambió quién paga el flete, el costo de lo que ya entró se rehace (V1048).
+      if (['flete_a_cargo', 'flete_pagado_por'].some((c) => req.body[c] !== undefined)) {
+        recalcLotesDeOC(db, Number(req.params.id));
+      }
     }
     res.json({ ok: true, data: { id: Number(req.params.id) } });
   } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
@@ -10199,6 +10227,17 @@ const FLETE_A_RECUPERAR = (cargo, quien) =>
 //
 // Un gasto valorizado por remito, antes de la V1045, se recupera entero sólo si TODO
 // el remito es de una sola partida a pizarra: es la misma regla que usa la liquidación.
+// Rehace el costo de todos los lotes de una orden, y el margen de lo que ya salió de
+// ellos. Para cuando cambia algo de la orden que el costo mira —el tipo de precio,
+// quién paga el flete— (V1048).
+function recalcLotesDeOC(db, ocId) {
+  for (const l of db.prepare(`SELECT l.id FROM sg_lotes l JOIN sg_oc_items i ON i.id = l.oc_item_id
+      WHERE i.oc_id = ? AND l.activo = 1`).all(Number(ocId))) {
+    recalcCostoLote(db, l.id);
+    recalcMargenDespachos(db, l.id);
+  }
+}
+
 function fleteARecuperarDeRemito(db, despachoId) {
   const g = db.prepare(`SELECT id, monto FROM sg_gastos_directos
     WHERE despacho_id = ? AND tipo_gasto = 'flete_salida' AND activo = 1 AND estado = 'valorizado'
@@ -10207,7 +10246,16 @@ function fleteARecuperarDeRemito(db, despachoId) {
   const renglones = Number(db.prepare('SELECT COUNT(*) AS n FROM sg_gasto_flete_lineas WHERE gasto_id = ?')
     .get(g.id).n) || 0;
   if (renglones > 0) {
-    return r2(db.prepare(`SELECT COALESCE(SUM(fl.monto),0) AS s FROM sg_gasto_flete_lineas fl
+    // Sin lo que el cliente devolvió: el flete de eso es pérdida de la partida (V1048).
+    // Por cajón o por kilo, la mayor: la misma regla que la liquidación (parteDevuelta,
+    // sg_gastos_facturados.js).
+    return r2(db.prepare(`SELECT COALESCE(SUM(fl.monto * (1 - MIN(1, MAX(
+          COALESCE((SELECT SUM(dvi.bultos) FROM sg_devolucion_items dvi
+            JOIN sg_devoluciones dv ON dv.id = dvi.devolucion_id AND dv.estado = 'registrada'
+           WHERE dvi.despacho_item_id = di.id) / NULLIF(di.bultos, 0), 0),
+          COALESCE((SELECT SUM(dvi.kg) FROM sg_devolucion_items dvi
+            JOIN sg_devoluciones dv ON dv.id = dvi.devolucion_id AND dv.estado = 'registrada'
+           WHERE dvi.despacho_item_id = di.id) / NULLIF(di.kg_despachados, 0), 0))))),0) AS s FROM sg_gasto_flete_lineas fl
       JOIN sg_despacho_items di ON di.id = fl.despacho_item_id
       JOIN sg_lotes l ON l.id = di.lote_id
       JOIN sg_oc_items oi ON oi.id = l.oc_item_id
@@ -10221,7 +10269,19 @@ function fleteARecuperarDeRemito(db, despachoId) {
     LEFT JOIN sg_oc_items oi ON oi.id = l.oc_item_id
     LEFT JOIN sg_oc o ON o.id = oi.oc_id
    WHERE di.despacho_id = ?`).get(despachoId);
-  return (Number(r.n) > 0 && Number(r.ocs) === 1 && Number(r.piz) === Number(r.n)) ? r2(g.monto) : 0;
+  if (!(Number(r.n) > 0 && Number(r.ocs) === 1 && Number(r.piz) === Number(r.n))) return 0;
+  // Entero, menos la parte de lo que el cliente devolvió (V1048).
+  // Por cajón o por kilo, la mayor: la misma regla que la liquidación.
+  const devuelto = (col) => `COALESCE((SELECT SUM(dvi.${col}) FROM sg_devolucion_items dvi
+        JOIN sg_devoluciones dv ON dv.id = dvi.devolucion_id AND dv.estado = 'registrada'
+        JOIN sg_despacho_items d2 ON d2.id = dvi.despacho_item_id
+       WHERE d2.despacho_id = ?),0)`;
+  const b = db.prepare(`SELECT COALESCE(SUM(di.bultos),0) AS bultos, ${devuelto('bultos')} AS dev_bultos,
+      COALESCE(SUM(di.kg_despachados),0) AS kg, ${devuelto('kg')} AS dev_kg
+    FROM sg_despacho_items di WHERE di.despacho_id = ?`).get(despachoId, despachoId, despachoId);
+  const parte = (d, t) => Number(t) > 0 ? (Number(d) || 0) / Number(t) : 0;
+  const dev = Math.min(1, Math.max(parte(b.dev_bultos, b.bultos), parte(b.dev_kg, b.kg)));
+  return r2(Number(g.monto) * (1 - dev));
 }
 
 // El vocabulario viejo (`flete_paga`: 'nosotros' | 'vendedor') se traduce al nuevo.
@@ -11983,7 +12043,7 @@ router.get('/fletes-entrada', requireAuth, (req, res) => {
     // Una recepción por fila: el flete se paga por viaje, no por orden.
     const rows = db.prepare(`
       SELECT r.id AS recepcion_id, r.numero_recepcion, r.fecha_recepcion, r.oc_id,
-             o.trazabilidad AS partida, o.numero AS oc_numero, o.flete_a_cargo, o.flete_pagado_por,
+             o.trazabilidad AS partida, o.numero AS oc_numero, o.flete_a_cargo, o.flete_pagado_por, o.tipo_precio,
              o.flete_monto, o.flete_modalidad, o.flete_cantidad, o.flete_precio_unit,
              p.razon_social AS proveedor_nombre,
              (SELECT COALESCE(SUM(l.kg_reales),0) FROM sg_lotes l
@@ -11998,6 +12058,9 @@ router.get('/fletes-entrada', requireAuth, (req, res) => {
                WHERE l.recepcion_id = r.id AND l.activo = 1) AS bultos,
              (SELECT COUNT(*) FROM sg_lotes l
                WHERE l.recepcion_id = r.id AND l.activo = 1 AND l.bultos IS NULL) AS lotes_sin_bultos,
+             -- Si el viaje todavía tiene mercadería (V1048).
+             (SELECT COUNT(*) FROM sg_lotes l
+               WHERE l.recepcion_id = r.id AND l.activo = 1) AS lotes,
              g.id AS gasto_id, g.estado AS gasto_estado, g.monto AS gasto_monto,
              g.proveedor_servicio_id, g.cuenta_ref, g.fecha_valorizacion,
              -- LA MARCA DE LOS VIEJOS. Desde la V1015 valorizar NO guarda alícuota
@@ -12035,6 +12098,9 @@ router.get('/fletes-entrada', requireAuth, (req, res) => {
     //     Gerónimo —se le descuenta al productor de su liquidación— y por eso
     //     tampoco entra al costo de la partida (ver recalcCostoLote).
     const adelantado = (x) => x.flete_a_cargo === 'vendedor' && x.flete_pagado_por === 'san_geronimo';
+    // A precio cerrado ese flete lo absorbemos nosotros (V1048): no hay nada que
+    // recuperarle al productor, y el cartel no puede decir que sí.
+    const aRecuperar = (x) => adelantado(x) && x.tipo_precio === 'pizarra';
     // Los bultos de TODA la orden, para repartir entre viajes lo que se pactó
     // por la orden entera. Se cuenta sobre rows, que ya trae todas sus
     // recepciones: el filtro por estado es de acá para abajo.
@@ -12046,9 +12112,13 @@ router.get('/fletes-entrada', requireAuth, (req, res) => {
         const f = fleteDeViaje(x, x, pesoPorOC[x.oc_id] || 0);
         return { ...x, estimado: f.monto, estimado_base: f.base, prorrateado: f.prorrateado,
           viajes_de_la_orden: rows.filter((y) => y.oc_id === x.oc_id).length,
-          a_recuperar: adelantado(x) };
+          a_recuperar: aRecuperar(x) };
       })
-      .filter((x) => x.estimado > 0 || x.gasto_id)
+      // EL ADELANTADO A PIZARRA SE MUESTRA AUNQUE LA ORDEN NO TENGA MONTO (V1048). La
+      // liquidación no se deja emitir hasta que esté valorizado, y sin la fila no habría
+      // dónde valorizarlo: la partida quedaba trabada para siempre. Mientras el viaje
+      // tenga mercadería: la misma condición que el freno (fleteEntradaAdelantado).
+      .filter((x) => x.estimado > 0 || x.gasto_id || (aRecuperar(x) && x.lotes > 0))
       .filter((x) => (estado === 'valorizado')
         ? x.gasto_estado === 'valorizado'
         : x.gasto_estado !== 'valorizado');

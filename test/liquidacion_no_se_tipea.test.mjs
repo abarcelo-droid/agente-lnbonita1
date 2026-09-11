@@ -154,7 +154,7 @@ test('lo que el sistema HOY no puede calcular sigue abierto', () => {
   // Trabarlo dejaría liquidaciones que no se pueden emitir. Cada uno con su
   // motivo escrito al lado.
   assert.equal(calculada('descarga', 'f'), false, 'descarga: puede estar sin valorizar');
-  assert.equal(calculada('flete', 'f'), false, 'flete: el adelantado por SG no llega solo');
+  assert.equal(calculada('flete', 'f'), false, 'flete: en la fila puede ir algo más que se le cobre');
   assert.equal(calculada('gastos_admin', 'f'), false, 'a precio abierto nada lo calcula');
 });
 

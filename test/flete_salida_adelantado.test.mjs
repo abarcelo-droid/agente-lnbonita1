@@ -24,7 +24,7 @@ const LIQ = leer('src/rutas/liquidaciones.js');
 const SERV_GF = leer('src/servicios/sg_gastos_facturados.js');
 const SERV_PT = leer('src/servicios/sg_partida_terminada.js');
 
-const { fletesSalidaAdelantados, resumenSalidaAdelantada, comprobantesDeLaPartida } =
+const { fletesSalidaAdelantados, resumenSalidaAdelantada, comprobantesDeLaPartida, fleteEntradaAdelantado } =
   await import(pathToFileURL(path.join(RAIZ, 'src/servicios/sg_gastos_facturados.js')).href);
 const { frenoParaLiquidar } =
   await import(pathToFileURL(path.join(RAIZ, 'src/servicios/sg_partida_terminada.js')).href);
@@ -46,8 +46,11 @@ const tramo = (txt, desde, hasta) => {
 function base({ cargo = 'productor', quien = 'san_geronimo' } = {}) {
   const db = new DatabaseSync(':memory:');
   db.exec(`
-    CREATE TABLE sg_oc (id INTEGER PRIMARY KEY, tipo_precio TEXT);
-    INSERT INTO sg_oc VALUES (7, 'pizarra'), (8, 'pizarra');
+    CREATE TABLE sg_oc (id INTEGER PRIMARY KEY, tipo_precio TEXT, flete_a_cargo TEXT, flete_pagado_por TEXT);
+    CREATE TABLE sg_devoluciones (id INTEGER PRIMARY KEY, despacho_id INTEGER, estado TEXT);
+    CREATE TABLE sg_devolucion_items (id INTEGER PRIMARY KEY, devolucion_id INTEGER, despacho_item_id INTEGER,
+      lote_id INTEGER, bultos REAL, kg REAL, destino TEXT);
+    INSERT INTO sg_oc (id, tipo_precio) VALUES (7, 'pizarra'), (8, 'pizarra');
     CREATE TABLE sg_oc_items (id INTEGER PRIMARY KEY, oc_id INTEGER);
     CREATE TABLE sg_lotes (id INTEGER PRIMARY KEY, oc_item_id INTEGER, bultos INTEGER, activo INTEGER DEFAULT 1);
     CREATE TABLE sg_despachos (id INTEGER PRIMARY KEY, numero TEXT, activo INTEGER DEFAULT 1,
@@ -313,7 +316,8 @@ test('el grupo, corrido: suma el flete de salida de todas y lo imputado de la mi
 
 test('la venta de la partida trae el flete de salida con IVA al 21, y el grupo lo suma', () => {
   assert.match(SG, /salida: \(function\(\)\{\r?\n\s+const s = resumenSalidaAdelantada\(db, ocId\);\r?\n\s+return Object\.assign\(\{\}, s, \{ iva: r2\(s\.neto \* IVA_SERVICIOS \/ 100\) \}\);/);
-  assert.match(SG, /import \{ gastosSinFactura, comprobantesDeLaPartida, resumenSalidaAdelantada \} from '\.\.\/servicios\/sg_gastos_facturados\.js';/);
+  // Desde la V1048 trae también el flete de entrada adelantado.
+  assert.match(SG, /import \{ gastosSinFactura, comprobantesDeLaPartida, resumenSalidaAdelantada, [^}]*\} from '\.\.\/servicios\/sg_gastos_facturados\.js';/);
   const fusion = tramo(SG, 'function fusionarVentas(', '\r\n}');
   assert.match(fusion, /const ss = partes\.map\(\(p\) => \(p\.flete \|\| \{\}\)\.salida \|\| \{\}\);/);
   assert.match(fusion, /neto: n\(\(s\) => s\.neto\), iva: n\(\(s\) => s\.iva\),/);
@@ -376,11 +380,11 @@ test('la pantalla frena igual que el servidor, primero valorizar y después la f
   assert.deepEqual(frenosPantalla({ sin_valorizar: 0, sin_factura: 0 }), []);
 });
 
-test('la celda del flete sigue abierta, y dice por qué: el de ENTRADA adelantado todavía va a mano', () => {
+test('la celda del flete sigue abierta, y dice por qué', () => {
   const j = PANEL.indexOf('function liqCeldaCalculada(k, amb){');
   const antes = PANEL.slice(j - 4600, j);
-  assert.match(antes, /V1046, el de SALIDA que San Gerónimo le adelantó, renglón por renglón/);
-  assert.match(antes, /de ENTRADA que adelantó San Gerónimo por el productor todavía no lo trae/);
+  assert.match(antes, /el de SALIDA\r?\n\/\/\s+que San Gerónimo le adelantó \(V1046\)/);
+  assert.match(antes, /el servidor no deja emitir/);
 });
 
 // ══ 5 · EL MARGEN DEL REMITO NO LO RESTA ═══════════════════════════════════
@@ -510,7 +514,7 @@ test('manual de Liquidaciones: cada afirmación, contra el código', () => {
   assert.match(M, /con IVA al 21%/);
   assert.match(M, /<b>Sólo a pizarra<\/b>: a precio cerrado el productor cobra lo pactado entero y ese flete lo absorbemos nosotros/);
   assert.match(SG, /const IVA_SERVICIOS = 21;/);
-  assert.match(M, /Siguen <b>a mano<\/b>: el flete de <b>entrada<\/b> que San Gerónimo le adelantó/);
+  assert.match(M, /Siguen <b>a mano<\/b>: los gastos administrativos a precio abierto/);
   // El papel.
   assert.match(M, /<b>emisor, CUIT, número, fecha y el total<\/b> de la factura, entero/);
   assert.match(LIQ, /doc\.text\('COMPROBANTES DE TERCEROS QUE SE DESCUENTAN', L, y\);/);
@@ -570,14 +574,14 @@ function fuenteLIQ(firma) {
 }
 
 test('la fila «Flete» no puede traer menos que lo adelantado; más sí; a precio cerrado no se mira', () => {
-  const frenoGrilla = new Function('resumenSalidaAdelantada',
-    fuenteLIQ('function frenoFleteSalidaEnGrilla(') + '\nreturn frenoFleteSalidaEnGrilla;')(resumenSalidaAdelantada);
+  const frenoGrilla = new Function('resumenSalidaAdelantada', 'fleteEntradaAdelantado',
+    fuenteLIQ('function frenoFleteSalidaEnGrilla(') + '\nreturn frenoFleteSalidaEnGrilla;')(resumenSalidaAdelantada, fleteEntradaAdelantado);
   const db = base();
   valorizar(db, 3000, 2000);
   facturar(db);
   const dos = [{ oc_id: 7 }, { oc_id: 8 }];
   const con = (flete, modo = 'abierto') => ({ modo_precio: modo, grilla: { fiscal: { flete } } });
-  assert.match(frenoGrilla(db, dos, con(4000)), /La fila «Flete» tiene \$4\.000,00 y el flete de salida .* es \$5\.000,00/);
+  assert.match(frenoGrilla(db, dos, con(4000)), /La fila «Flete» tiene \$4\.000,00 y el flete que San Gerónimo le adelantó .* es \$5\.000,00/);
   assert.equal(frenoGrilla(db, dos, con(5000)), null);
   assert.equal(frenoGrilla(db, dos, con(6200)), null, 'con el flete de la orden encima también tiene que pasar');
   assert.equal(frenoGrilla(db, dos, con(0, 'cerrado')), null);
