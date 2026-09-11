@@ -9529,7 +9529,12 @@ const KG_DISPONIBLE = `(l.kg_reales - ${SUM_DECOMISO} - ${SUM_TRANSF} - ${SUM_DE
 //
 // `kg_reales` es lo que pesó la balanza el día que bajó el camión, y eso no se
 // reescribe: es un hecho. Lo que la devolución al productor cambia es cuánto de esa
-// partida terminó siendo NUESTRA, que es la cuenta de la que sale lo que le debemos.
+// partida terminó siendo NUESTRA.
+//
+// OJO: ESTA FÓRMULA NO LA USA NINGUNA PANTALLA. Durante una semana fue la única
+// cuenta que descontaba la devolución, y como nadie la llamaba, lo acordado con el
+// productor seguía saliendo de todo lo recibido. LO QUE SE LE DEBE SALE DE
+// devueltoPorItemDeOC() en servicios/sg_acordado.js (V1043), por ítem y a su precio.
 const KG_INGRESADO_NETO = `(l.kg_reales - ${SUM_DEV_PROV})`;
 
 // ── LO QUE HAY DE VERDAD EN LA CÁMARA ─────────────────────────────────────

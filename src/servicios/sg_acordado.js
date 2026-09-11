@@ -52,6 +52,62 @@ export function mermaPorItemDeOC(db, ocId) {
   return { bultos, kg, hay: bultos > 0 || kg > 0, porItem };
 }
 
+// ══ LO QUE SE LE DEVOLVIÓ AL PRODUCTOR, POR ÍTEM ═════════════════════════
+//
+// Pablo, 2/9/2026: si la mercadería vuelve al productor y la partida NO estaba
+// firme, «sí baja lo que se le debe». Si ya estaba firme, «una vez liquidado ya
+// todo es firme»: se registra igual y es pérdida nuestra.
+//
+// LA DECISIÓN YA ESTABA TOMADA, Y NADIE LA LEÍA. La devolución calcula y guarda en
+// cada renglón si le descuenta al productor (descuenta_al_productor), y en
+// rutas/sg.js había una fórmula que la usaba —KG_INGRESADO_NETO—. Pero esa fórmula
+// no la llamaba ninguna pantalla: sólo los tests. Lo acordado con el productor
+// salía de TODO lo recibido, así que la devolución quedaba anotada como «le
+// descuenta» y el productor cobraba igual la mercadería que se le había devuelto.
+//
+// POR ÍTEM Y NO PRORRATEADO, igual que la merma: diez cajones de ciruela devueltos
+// descuentan diez cajones de ciruela, no «diez cajones al precio promedio».
+//
+// SIN OPCIÓN, a diferencia de la merma. La merma se puede pagar o no —la
+// liquidación ofrece las dos cuentas— porque la mercadería se tiró acá. La devuelta
+// la tiene el productor: cobrársela sería cobrarle dos veces lo mismo.
+//
+// La tabla la crea db_sg.js al arrancar. Si no existe —una base de prueba que no la
+// armó—, no hay devoluciones: se cuenta cero en vez de tirar la pantalla.
+const _hayDevoluciones = new WeakMap();
+export function devueltoPorItemDeOC(db, ocId) {
+  if (!_hayDevoluciones.has(db)) {
+    _hayDevoluciones.set(db, !!db.prepare(`SELECT 1 FROM sqlite_master
+      WHERE type='table' AND name='sg_devolucion_items'`).get()
+      && !!db.prepare(`SELECT 1 FROM sqlite_master
+      WHERE type='table' AND name='sg_devoluciones'`).get());
+  }
+  const porItem = new Map();
+  if (!_hayDevoluciones.get(db)) return { bultos: 0, kg: 0, hay: false, porItem };
+  // La marca congelada manda, no el estado de hoy de la partida: si se recalculara,
+  // liquidar la partida haría que las devoluciones viejas dejaran de descontar de
+  // golpe. NULL cuenta como que descuenta: son las filas de antes de la marca.
+  const rows = db.prepare(`SELECT l.oc_item_id AS item,
+      COALESCE(SUM(dvi.bultos),0) AS bultos,
+      COALESCE(SUM(dvi.kg),0) AS kg,
+      COALESCE(SUM(CASE WHEN COALESCE(l.bultos,0) > 0 THEN dvi.kg ELSE 0 END),0) AS kg_con_bultos
+    FROM sg_devolucion_items dvi
+    JOIN sg_devoluciones dv ON dv.id = dvi.devolucion_id AND dv.estado = 'registrada'
+    JOIN sg_lotes l ON l.id = dvi.lote_id AND l.activo = 1
+    JOIN sg_oc_items i ON i.id = l.oc_item_id
+   WHERE i.oc_id = ? AND dvi.destino = 'proveedor'
+     AND COALESCE(dvi.descuenta_al_productor, 1) = 1
+   GROUP BY l.oc_item_id`).all(ocId);
+  let bultos = 0, kg = 0;
+  for (const x of rows) {
+    porItem.set(x.item, { bultos: Number(x.bultos) || 0, kg: r2(x.kg),
+      kg_con_bultos: r2(x.kg_con_bultos) });
+    bultos += Number(x.bultos) || 0;
+    kg = r2(kg + Number(x.kg));
+  }
+  return { bultos, kg, hay: bultos > 0 || kg > 0, porItem };
+}
+
 // La consulta se compila UNA vez por base y se reusa: el listado de órdenes la
 // llama una vez por fila, y compilar la misma sentencia doscientas veces para
 // pintar una pantalla es trabajo que no hace falta.
@@ -77,19 +133,23 @@ export function acordadoDeOC(db, ocId, opts) {
     WHERE i.oc_id=?`));
   const its = _stmtAcordado.get(db).all(ocId);
   const mer = (opts && opts.sinMermas) ? mermaPorItemDeOC(db, ocId) : null;
+  // Lo devuelto al productor, SIEMPRE: no es una de las dos cuentas de la merma.
+  const dev = devueltoPorItemDeOC(db, ocId);
   let total = 0;
   const detalle = [];
   for (const it of its) {
     const pk = it.precio_estimado_por_kg != null ? Number(it.precio_estimado_por_kg) : null;
     const kpb = Number(it.kg_por_bulto) || 0;
     const m = (mer && mer.porItem.get(it.id)) || { bultos: 0, kg: 0, kg_con_bultos: 0 };
+    const dv = dev.porItem.get(it.id) || { bultos: 0, kg: 0, kg_con_bultos: 0 };
     // LO BRUTO DECIDE LA BASE, LO NETO DECIDE EL IMPORTE. Si una partida entró en
     // cajones y se mermó entera, descontar primero la haría caer a la cuenta por
-    // kilo y cambiaría de qué se está hablando: se pactó por cajón igual.
+    // kilo y cambiaría de qué se está hablando: se pactó por cajón igual. Lo mismo
+    // si se devolvió entera: se pactó por cajón y se debe cero por cajón.
     const bultosBrutos = Number(it.bultos_recibidos) || 0;
-    const bultos = Math.max(0, bultosBrutos - m.bultos);
-    const kgRecibidos = Math.max(0, r2(Number(it.kg_recibidos) - m.kg));
-    const kgConBultos = Math.max(0, r2(Number(it.kg_con_bultos) - m.kg_con_bultos));
+    const bultos = Math.max(0, bultosBrutos - m.bultos - dv.bultos);
+    const kgRecibidos = Math.max(0, r2(Number(it.kg_recibidos) - m.kg - dv.kg));
+    const kgConBultos = Math.max(0, r2(Number(it.kg_con_bultos) - m.kg_con_bultos - dv.kg_con_bultos));
     const precioBulto = (pk != null && kpb > 0) ? r2(pk * kpb) : null;
     let importe = null, base = null;
     if (pk != null) {
@@ -162,12 +222,18 @@ export function precioUnicoDeOC(db, ocId) {
 
 // Las unidades que efectivamente entraron, en la misma unidad en que se pactó. Es
 // contra esto que se sabe si la liquidación es por TODO o por una parte.
+//
+// Sin lo devuelto al productor: esos cajones son suyos otra vez. Si se contaran,
+// liquidarle todo lo que quedó se vería como «una parte» de lo recibido, y el cierre
+// de la partida pediría una segunda liquidación por mercadería que ya tiene él.
 export function recibidoDeOC(db, ocId) {
   const r = db.prepare(`SELECT COALESCE(SUM(l.bultos),0) AS bultos,
         COALESCE(SUM(l.kg_reales),0) AS kg
       FROM sg_lotes l JOIN sg_oc_items i ON i.id = l.oc_item_id
      WHERE i.oc_id = ? AND l.activo = 1`).get(ocId) || { bultos: 0, kg: 0 };
-  return { bultos: Number(r.bultos) || 0, kg: r2(r.kg) };
+  const dev = devueltoPorItemDeOC(db, ocId);
+  return { bultos: Math.max(0, (Number(r.bultos) || 0) - dev.bultos),
+    kg: Math.max(0, r2(Number(r.kg) - dev.kg)) };
 }
 
 // Las alícuotas que ARCA admite. Cuando la orden no dice a cuál se pactó, no se
