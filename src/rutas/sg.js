@@ -1691,7 +1691,8 @@ router.post('/facturas/directa', requireAuth, async (req, res) => {
     fecha_despacho: b.fecha || new Date().toISOString().slice(0, 10),
     transporte: b.transporte || null, chofer: b.chofer || null, dominio: b.dominio || null,
     fletero_id: b.fletero_id || null,
-    cooperativa_id: b.cooperativa_id || null, cooperativa_bultos: b.cooperativa_bultos,
+    // Los bultos de la cooperativa no viajan: el remito los cuenta de sus renglones.
+    cooperativa_id: b.cooperativa_id || null,
     observaciones: b.observaciones || 'Facturación Puesto',
     items: items.map((it) => ({ origen: 'lote', lote_id: it.lote_id, bultos: it.bultos,
       kg_despachados: it.kg_despachados, precio_por_kg: it.precio_por_kg,
@@ -10292,8 +10293,6 @@ const postRemito = (req, res) => {
       }
       for (const loteId of lotesAfectados) recalcEstadoLote(db, loteId);
       // FASE 2 — si se asignó cooperativa, queda una CARGA DE SALIDA pendiente (cobra por bulto).
-      // El despacho es kg-based y no captura bultos por línea → se usa el total de bultos que
-      // carga el operador (cooperativa_bultos); como fallback, la suma de presentaciones (si la hubiera).
       // ── LA CUADRILLA QUE CARGA SALE DEL CATÁLOGO DE COOPERATIVAS ────
       //
       // Pablo, 28/8/2026: «acá debería tomar sólo los que están dados de alta en
@@ -10313,7 +10312,23 @@ const postRemito = (req, res) => {
         if (!c) throw new Error('La cooperativa elegida no existe o está dada de baja');
         coopId = c.proveedor_id;
       }
-      const coopBultos = (b.cooperativa_bultos != null && b.cooperativa_bultos !== '') ? Number(b.cooperativa_bultos) : (totalBultos || null);
+      // ── LOS BULTOS DE LA CUADRILLA SON LOS DEL REMITO ────────────────────
+      //
+      // Pablo, 9/9/2026: «Bultos para la cooperativa: debería sumar la cantidad de
+      // bultos que se declaren en el remito, que salga automático».
+      //
+      // Se tipeaban aparte, y lo tipeado le ganaba a la suma: la suma sólo entraba
+      // si el casillero quedaba vacío. Eran dos números para lo mismo —cuántos
+      // cajones subieron al camión— y el que se le pagaba a la cooperativa era el
+      // que alguien escribió de memoria, no el que dice el papel que firmó el chofer.
+      // Y esa cantidad es con la que la valorización PRORRATEA la factura de la
+      // cuadrilla entre los remitos: un número mal tipeado le pasa costo de un
+      // remito a otro.
+      //
+      // Ahora es la suma de los renglones, siempre. Lo que venga en el cuerpo del
+      // pedido se ignora — es la misma regla que la descarga de la recepción, que
+      // cuenta los bultos que se recibieron y no pregunta.
+      const coopBultos = totalBultos || null;
       syncGastoCoop(db, { tipo: 'carga_salida', despachoId, proveedorId: coopId, cooperativaId: coopCatId, unidad: 'bulto', cantidad: coopBultos, fechaServicio: val(b.fecha_despacho), userId: uid(req) });
       if (b.pedido_id) {
         db.prepare("UPDATE sg_pedidos SET estado='despachado_parcial', modificado_en=datetime('now','localtime') WHERE id=? AND estado IN ('borrador','confirmado')").run(b.pedido_id);

@@ -46,7 +46,12 @@ test('lo que viaja es el id del CATÁLOGO, y el servidor saca de ahí a quién s
   assert.match(PANEL, /cooperativa_catalogo_id:eid\('sg-desp-coop'\)\.value\?Number\(eid\('sg-desp-coop'\)\.value\):null/);
   const i = SG.indexOf('LA CUADRILLA QUE CARGA SALE DEL CATÁLOGO DE COOPERATIVAS');
   assert.ok(i > 0, 'el servidor no acepta la cooperativa del catálogo');
-  const b = SG.slice(i, i + 1600);
+  // Hasta la línea que carga el gasto, no «los próximos 1.600 caracteres»: en la
+  // V1041 se sumó arriba de esa línea la explicación de por qué los bultos se cuentan
+  // solos, y la ventana dejó afuera justo lo que se buscaba.
+  const fin = SG.indexOf("syncGastoCoop(db, { tipo: 'carga_salida'", i);
+  assert.ok(fin > i, 'no está la carga de salida');
+  const b = SG.slice(i, SG.indexOf('\n', fin));
   assert.match(b, /SELECT id, proveedor_id FROM sg_cooperativas WHERE id=\? AND activo=1/);
   assert.match(b, /coopId = c\.proveedor_id;/);
   assert.match(b, /La cooperativa elegida no existe o está dada de baja/);
