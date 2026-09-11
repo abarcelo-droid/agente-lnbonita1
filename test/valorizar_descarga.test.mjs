@@ -205,7 +205,9 @@ test('y el freno de la liquidación manda al botón nuevo', () => {
 
 test('el pie de la tabla también', () => {
   const i = PANEL.indexOf('function sgCcoopRender(){');
-  const b = PANEL.slice(i, i + 6000);
+  // Hasta donde termina la función, no «6.000 caracteres»: el candado de lo ya
+  // facturado (V1045) empujó el pie fuera de la ventana.
+  const b = PANEL.slice(i, PANEL.indexOf('\r\n}', i));
   assert.match(b, /El importe se pone con /);
   assert.match(b, /hasta '\s*\n?\s*\+ 'que no entre, la partida no se puede liquidar/);
 });

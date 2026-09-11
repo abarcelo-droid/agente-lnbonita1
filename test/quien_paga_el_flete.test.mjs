@@ -181,7 +181,9 @@ test('y la pregunta que sí cambia algo ocupó su lugar', () => {
   const b = PANEL.slice(i, i + 3600);
   assert.match(b, /flete_a_cargo:eid\('sg-desp-flete-cargo'\)\.value,/);
   assert.match(b, /flete_pagado_por:eid\('sg-desp-flete-quien'\)\.value,/);
-  assert.match(b, /flete_monto:eid\('sg-desp-flete-monto'\)\.value!==''/);
+  // Desde la V1045 el flete viaja POR RENGLÓN, por cajón, y sólo si la plata es nuestra.
+  assert.match(b, /flete_por_bulto: \(sgDespFletePide\(\) && it\.flete_bulto!=='' && it\.flete_bulto!=null\) \? Number\(it\.flete_bulto\) : null/);
+  assert.ok(!/flete_monto:eid\(/.test(b), 'volvió el monto único del remito');
 });
 
 test('el cartel dice si se descuenta o no en la liquidación', () => {
@@ -208,7 +210,9 @@ test('el bloque aparece sólo cuando hay fletero, y el monto sólo si ponemos la
   assert.match(b, /var hay = !!\(eid\('sg-desp-fletero'\)\|\|\{\}\)\.value;/);
   assert.match(b, /qw\.style\.display = \(hay && cargo === 'productor'\) \? '' : 'none';/);
   assert.match(b, /var pide = hay && sgDespFletePideMonto\(cargo, quien\);/);
-  assert.match(b, /if \(!pide\) \{ var m=eid\('sg-desp-flete-monto'\); if\(m\) m\.value=''; \}/);
+  // Y SE LIMPIA en cada renglón (V1045): un flete escrito de antes se guardaría como
+  // un flete que nadie va a pagar.
+  assert.match(b, /if \(!pide\) \(SG\.despItems \|\| \[\]\)\.forEach\(function\(it\)\{ it\.flete_bulto = ''; \}\);/);
   // Y la regla del front espeja la del servidor.
   const j = PANEL.indexOf('function sgDespFletePideMonto(cargo, quien){');
   const r = PANEL.slice(j, j + 260);

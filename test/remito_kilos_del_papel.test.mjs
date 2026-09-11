@@ -245,8 +245,9 @@ test('el servidor pregunta si es cadena con la regla de las listas, no con la pa
   assert.match(post, /validarKgDeclarados\(\{ esCadena, kgNominal: kg, kgDeclarados: it\.kg_declarados,/);
   assert.match(post, /if \(!dec\.ok\) return res\.status\(400\)\.json\(\{ ok: false, error: dec\.error \}\);/);
   // Y se guarda.
-  assert.match(post, /piso_id, modo_precio, kg_declarados\)/);
-  assert.match(post, /ln\.kgDeclarados != null \? ln\.kgDeclarados : null\);/);
+  // Puede no ser la última columna: después se sumó el flete del renglón (V1045).
+  assert.match(post, /piso_id, modo_precio, kg_declarados[,)]/);
+  assert.match(post, /ln\.kgDeclarados != null \? ln\.kgDeclarados : null[,)]/);
 });
 
 test('la columna existe, y los remitos viejos quedan sin declaración', () => {
