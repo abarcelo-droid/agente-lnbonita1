@@ -14,7 +14,7 @@ import { cuentaCorrienteDe, cuentasDeCobranza, modeloCobranzaLineas,
          cuentaCarteraCheques }
   from '../servicios/asiento-cobranza.js';
 import { repartirAmbito, partesDeMedio } from '../servicios/sg_cobro_ambito.js';
-import { kgDelPapel } from '../servicios/sg_kilos_del_papel.js';
+import { kgPendienteDelPapel } from '../servicios/sg_kilos_del_papel.js';
 import { puedeMoverCuenta } from './sg_tesoreria.js';
 // EL ASIENTO DE VENTA VIVE EN UN SOLO LUGAR. Estaba acá adentro y el otro
 // camino que emite facturas —la facturación directa, por afip-wsfe-emision—
@@ -480,10 +480,18 @@ router.post('/liquidaciones', requireAuth, (req, res) => {
             const yaLiq = db.prepare(`SELECT COALESCE(SUM(ld.kg),0) s FROM sg_liquidacion_despachos ld
               JOIN sg_ven_liquidaciones l ON l.id=ld.liquidacion_id
               WHERE ld.despacho_item_id=? AND COALESCE(l.estado,'') <> 'anulada'`).get(diId).s;
-            const pend = Math.round((kgDelPapel(di) - yaFac - yaLiq) * 100) / 100;
+            // SIN LO QUE EL CLIENTE DEVOLVIÓ (V1050): no se le documenta lo que ya no
+            // tiene, igual que no se le factura. La misma cuenta que la factura
+            // (kgPendienteItem, rutas/sg.js): lo devuelto viene en kilos del galpón y
+            // kgPendienteDelPapel lo lleva a kilos del papel.
+            const devuelto = Number(db.prepare(`SELECT COALESCE(SUM(dvi.kg),0) s FROM sg_devolucion_items dvi
+              JOIN sg_devoluciones dv ON dv.id = dvi.devolucion_id AND dv.estado = 'registrada'
+              WHERE dvi.despacho_item_id=?`).get(diId).s) || 0;
+            const pend = kgPendienteDelPapel(di, yaFac + yaLiq, devuelto);
             if (kg > pend + 0.01) {
               throw new Error('Ese renglón del remito tiene ' + pend + ' kg pendientes y se '
-                + 'quieren liquidar ' + kg + '. Puede que lo hayan facturado desde otra pantalla.');
+                + 'quieren liquidar ' + kg + '. Puede que lo hayan facturado desde otra pantalla, o que el '
+                + 'cliente haya devuelto parte.');
             }
           }
           insV.run(liqId, Number(v.despacho_id), diId, kg);

@@ -170,9 +170,10 @@ test('las tres puertas de la factura cuentan en kilos del papel', () => {
 
 test('y la liquidación que manda la cadena, también', () => {
   // La cadena liquida los kilos que recibió, que son los que dijo el remito.
-  assert.match(VEN, /import \{ kgDelPapel \} from '\.\.\/servicios\/sg_kilos_del_papel\.js';/);
+  assert.match(VEN, /import \{ kgPendienteDelPapel \} from '\.\.\/servicios\/sg_kilos_del_papel\.js';/);
   assert.match(VEN, /SELECT kg_despachados, kg_declarados FROM sg_despacho_items WHERE id=\?/);
-  assert.match(VEN, /const pend = Math\.round\(\(kgDelPapel\(di\) - yaFac - yaLiq\) \* 100\) \/ 100;/);
+  // Con lo devuelto adentro (V1050): kgPendienteDelPapel mide en el papel y lleva ahí lo devuelto.
+  assert.match(VEN, /const pend = kgPendienteDelPapel\(di, yaFac \+ yaLiq, devuelto\);/);
 });
 
 // ── Y LAS SUMAS EN SQL QUE RESTAN LO FACTURADO ─────────────────────────────
@@ -218,7 +219,8 @@ test('las otras dos sumas usan la misma regla', () => {
   assert.match(venta, /SUM\(\(\$\{kgPapelSql\('di'\)\}/);
   const cc = hasta(SG, "router.get('/cc-clientes'", '\r\n});');
   const usos = (cc.match(/\$\{kgPapelSql\('di'\)\}/g) || []).length;
-  assert.equal(usos, 2, 'la columna «sin comprobante» tiene que medir en el papel en la suma Y en el filtro');
+  // En la suma Y en el filtro, lo remitido y —desde la V1050— lo devuelto.
+  assert.equal(usos, 4, 'la columna «sin comprobante» tiene que medir en el papel en la suma Y en el filtro');
   assert.ok(!/\(di\.kg_despachados\s*\r?\n\s*- COALESCE\(\(SELECT SUM\(fd\.kg\)/.test(SG),
     'quedó una resta de lo facturado contra los kilos del galpón');
 });
@@ -403,5 +405,6 @@ test('«todo lo remitido y sin facturar cuenta en kilos del papel» — freno y 
   assert.match(hasta(PT, 'export function sinFacturarDePartida(', '\r\n}'), /\$\{kgPapelSql\('di'\)\}/);
   const MANCC = plano(hasta(PANEL, 'SG_MANUAL.ccclientes = ', 'SG_MANUAL.catalogo'));
   assert.match(MANCC, /<span class="ver">V1040<\/span> A una cadena, esa columna cuenta <b>los kilos que dijo el remito<\/b>/);
-  assert.equal((hasta(SG, "router.get('/cc-clientes'", '\r\n});').match(/\$\{kgPapelSql\('di'\)\}/g) || []).length, 2);
+  assert.equal((hasta(SG, "router.get('/cc-clientes'", '\r\n});').match(/\$\{kgPapelSql\('di'\)\}/g) || []).length, 4,
+    'lo remitido y lo devuelto (V1050), en la suma y en el filtro');
 });

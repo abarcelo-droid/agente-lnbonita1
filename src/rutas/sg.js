@@ -13518,7 +13518,15 @@ router.get('/cc-clientes', requireAuth, (req, res) => {
                      - COALESCE((SELECT SUM(ld.kg) FROM sg_liquidacion_despachos ld
                          JOIN sg_ven_liquidaciones lq ON lq.id=ld.liquidacion_id
                         WHERE ld.despacho_item_id=di.id
-                          AND COALESCE(lq.estado,'') <> 'anulada'),0))
+                          AND COALESCE(lq.estado,'') <> 'anulada'),0)
+                     -- SIN LO QUE EL CLIENTE DEVOLVIÓ (V1050). Pablo, 11/9/2026: «el pendiente
+                     -- de comprobante debería descontar lo que se devolvió, por supuesto». Esa
+                     -- mercadería no se le va a facturar nunca, igual que en la lista de lo
+                     -- facturable. Viene en kilos del galpón: se lleva a kilos del papel.
+                     - COALESCE(COALESCE((SELECT SUM(dvi.kg) FROM sg_devolucion_items dvi
+                         JOIN sg_devoluciones dv ON dv.id = dvi.devolucion_id AND dv.estado = 'registrada'
+                        WHERE dvi.despacho_item_id = di.id),0)
+                       * (${kgPapelSql('di')} / NULLIF(di.kg_despachados, 0)), 0))
                    * COALESCE(di.precio_por_kg,0))
                     FROM sg_despacho_items di
                     JOIN sg_despachos d ON d.id=di.despacho_id AND d.activo=1
@@ -13531,7 +13539,11 @@ router.get('/cc-clientes', requireAuth, (req, res) => {
                           - COALESCE((SELECT SUM(ld.kg) FROM sg_liquidacion_despachos ld
                               JOIN sg_ven_liquidaciones lq ON lq.id=ld.liquidacion_id
                              WHERE ld.despacho_item_id=di.id
-                               AND COALESCE(lq.estado,'') <> 'anulada'),0)) > 0.01),0)
+                               AND COALESCE(lq.estado,'') <> 'anulada'),0)
+                          - COALESCE(COALESCE((SELECT SUM(dvi.kg) FROM sg_devolucion_items dvi
+                         JOIN sg_devoluciones dv ON dv.id = dvi.devolucion_id AND dv.estado = 'registrada'
+                        WHERE dvi.despacho_item_id = di.id),0)
+                       * (${kgPapelSql('di')} / NULLIF(di.kg_despachados, 0)), 0)) > 0.01),0)
           AS pendiente_comprobante,
         -- ── LA MITAD DE GESTIÓN, EN SU PROPIA COLUMNA ────────────────────
         -- Ya estaba SUMADA adentro de «documentado» —por eso el saldo cerraba—
