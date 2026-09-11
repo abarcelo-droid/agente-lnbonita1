@@ -75,7 +75,7 @@ test('cambiar los bultos de arriba baja al renglón', () => {
   // oninput dejó de existir y el renglón se sincroniza donde se fija el número.
   assert.match(PANEL, /if \(String\(cc\.value\) !== antes\) liqArtSync\(\);/);
   const i = PANEL.indexOf('function liqArtSync(){');
-  const b = PANEL.slice(i, i + 3600);
+  const b = PANEL.slice(i, PANEL.indexOf('\r\n}', i));
   assert.match(b, /if \(!liqArtDerivado\(\)\) return;/, 'no toca la liquidación suelta');
   // SÓLO con un producto: si la partida trae dos, los bultos de arriba son el
   // TOTAL y metérselos al primer renglón le adjudica a un producto lo que entró
@@ -91,7 +91,8 @@ test('cambiar los bultos de arriba baja al renglón', () => {
   // Y CON UNA SOLA PARTIDA manda lo que se tipeó arriba: es el campo que el operador
   // tiene delante. Con varias, cada una trae lo suyo de su orden.
   assert.match(b, /var una = \(ps\.length === 1\);/);
-  assert.match(b, /var ing = una \? \(cant > 0 \? cant : \(Number\(p\.bultos_ingresados\) \|\| 0\)\)/);
+  // Lo que se LIQUIDA de cada partida (V1044): lo que entró menos lo devuelto al productor.
+  assert.match(b, /var ing = una \? \(cant > 0 \? cant : \(liqALiquidarDe\(p\) \|\| 0\)\)/);
 });
 
 test('el precio se lee con separador de miles, no crudo', () => {

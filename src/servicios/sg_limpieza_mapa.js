@@ -134,6 +134,10 @@ registrar({
     { tabla: 'sg_lote_traslados', que_es: 'los pases de un piso a otro' },
     { tabla: 'sg_lote_ubicaciones', que_es: 'cuánto hay de cada partida en cada piso' },
     { tabla: 'sg_lote_decomisos', que_es: 'los decomisos parciales' },
+    // Lo devuelto al proveedor desde la cámara (V1044). Los renglones antes que la
+    // cabecera: cuelgan de ella con clave foránea.
+    { tabla: 'sg_devolucion_stock_items', que_es: 'los renglones de las devoluciones al proveedor' },
+    { tabla: 'sg_devoluciones_stock', que_es: 'las devoluciones al proveedor desde la cámara' },
     { tabla: 'sg_lote_semaforo_historial', que_es: 'los cambios de semáforo' },
     { tabla: 'sg_transformaciones', que_es: 'las transformaciones de unidad (cajón a cubeta)' },
     { tabla: 'sg_reprocesos', que_es: 'los reprocesos con clasificación' },

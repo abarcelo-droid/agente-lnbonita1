@@ -332,7 +332,9 @@ test('sgOcCantidad sigue viva: la usa el otro listado', () => {
 });
 
 test('sgAvanceBarra tampoco se tocó: la usan las liquidaciones', () => {
-  assert.match(PANEL, /function sgAvanceBarra\(vendidos, ingresados, merma\)\{/);
+  // Los tres de siempre, en el mismo orden. Desde la V1044 hay un cuarto OPCIONAL —lo
+  // devuelto al proveedor desde la cámara—: quien la llama con tres sigue igual.
+  assert.match(PANEL, /function sgAvanceBarra\(vendidos, ingresados, merma(, devueltos)?\)\{/);
   // Y allá ≥100 sigue siendo verde, que es lo correcto para lo vendido.
   assert.match(PANEL, /var col = pct >= 100 \? '#16a34a'/);
 });

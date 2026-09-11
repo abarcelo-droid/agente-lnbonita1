@@ -142,9 +142,17 @@ test('la respuesta es UNA, no una consulta copiada en cada endpoint', () => {
   // devolución le descuenta al productor. La segunda no se puede sacar aunque la
   // primera exista: entre que se abre la pantalla y se aprieta el botón, la
   // partida se pudo haber liquidado.
+  //
+  // Y LA DOCE, del 11/9/2026: devolverle al proveedor mercadería de la CÁMARA. Es la
+  // misma pregunta que la de arriba —¿esta devolución le baja lo que se le debe?— desde
+  // otra puerta, y congela la marca igual.
   const usos = (SG.match(/frenoPrecioFirme\(db,/g) || []).length
              + (SG.match(/precioFirmeDetalle\(db,/g) || []).length;
-  assert.equal(usos, 11, 'todas las puertas usan la misma función');
+  //
+  // Y LA TRECE Y LA CATORCE, del mismo día: ANULAR una devolución al productor —la de
+  // la cámara y la de un remito— con la partida ya firme. Si la devolución bajó la
+  // deuda, anularla la subiría otra vez con el precio cerrado.
+  assert.equal(usos, 14, 'todas las puertas usan la misma función');
   // Y no volvieron las copias que había, cada una con su propio mensaje: son la
   // huella de que alguien volvió a escribir la pregunta en vez de preguntarla.
   assert.doesNotMatch(SG, /Anulá el asiento primero: si se corrigen los kilos/);

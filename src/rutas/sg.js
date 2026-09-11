@@ -17,7 +17,7 @@ import { kgDelPapel, kgPendienteDelPapel, validarKgDeclarados, kgPapelSql }
 import { subirArchivo, obtenerArchivo, storageConfigurado } from '../servicios/storage.js';
 import { facturaCuenta, deudaFactura, deudaGestionFactura, noEsNotaDeCredito, signoFactura }
   from '../servicios/factura-cuenta.js';
-import { acordadoDeOC, precioUnicoDeOC } from '../servicios/sg_acordado.js';
+import { acordadoDeOC, precioUnicoDeOC, recibidoDeOC } from '../servicios/sg_acordado.js';
 // Una partida documentada con factura o liquidación tiene el precio FIRME.
 import { frenoPrecioFirme, precioFirmeDetalle } from '../servicios/sg_perfeccionada.js';
 import { estadoRescate, restaurar as restaurarRescate }
@@ -2081,7 +2081,20 @@ function recalcCostoLote(db, loteId) {
   // Caso 2 (decisión 3/opción B): el costo que SALIÓ por transformaciones se descuenta del
   // origen, así inventario (origen remanente + lotes-cubeta) suma el total sin doble conteo.
   const transferido = costoTransferido(db, loteId);
-  const costoFinal = (lote.costo_base || 0) + gd + descarga - transferido;
+  // ── LO DEVUELTO AL PROVEEDOR SE LLEVA SU COSTO — si la partida no estaba firme ──
+  //
+  // Esos kilos no se le van a pagar: salen de lo que se le debe (acordadoDeOC) y
+  // tienen que salir también de lo que costó la partida. Si salieran sólo de los
+  // kilos, el costo por kilo de lo que queda subiría como si se hubiera tirado.
+  //
+  // Al precio de la partida y sin los gastos: el flete y la descarga se pagaron por
+  // el camión entero y siguen siendo costo de lo que quedó.
+  //
+  // Con la partida firme no se descuenta nada: se pagó igual, y que el costo por
+  // kilo de lo que queda suba es exactamente la pérdida. Y se calcula acá, no se
+  // guarda: en una compra a pizarra el precio se cierra después.
+  const devuelto = r2((Number(lote.precio_unitario_kg) || 0) * kgDevueltoCamaraConCosto(db, loteId));
+  const costoFinal = (lote.costo_base || 0) + gd + descarga - transferido - devuelto;
   db.prepare("UPDATE sg_lotes SET costo_final=?, modificado_en=datetime('now','localtime') WHERE id=?").run(costoFinal, loteId);
   return costoFinal;
 }
@@ -2645,7 +2658,8 @@ function crearLotesSinOC(db, { recepcionId, productoId, fechaIngreso, lotes, use
 // transformado_de=origen, costo CARGADO = snapshot (kg × costo/kg vigente del origen). Registra
 // la fila en sg_transformaciones y reduce costo_final + estado del origen (recalc). Devuelve datos.
 function crearLoteTransformado(db, { origen, productoDestinoId, kg, factor, presentacionId, bultos, userId }) {
-  const kgVigOrigen = (origen.kg_reales || 0) - kgDecomisado(db, origen.id) - kgTransformado(db, origen.id);
+  const kgVigOrigen = (origen.kg_reales || 0) - kgDecomisado(db, origen.id) - kgTransformado(db, origen.id)
+    - kgDevueltoCamara(db, origen.id);
   const costoKgOrigen = kgVigOrigen > 0 ? (origen.costo_final || 0) / kgVigOrigen : 0;
   const costoTransf = +(kg * costoKgOrigen).toFixed(2);
   // F4-A — identidad de bulto OPCIONAL en el destino: si vienen, nace lote-bulto; si no, kg puro (igual que hoy).
@@ -3382,11 +3396,19 @@ function partidasRecibidas(db, comoSeDocumenta) {
            -- con la mitad en el depósito es fijarle precio a lo que todavía no
            -- se sabe cuánto va a rendir. En BULTOS, que es como se cuenta el
            -- camión y como lo cuenta el proveedor.
-           (SELECT COALESCE(SUM(di.bultos),0) FROM sg_despacho_items di
+           -- NETO DE LO QUE EL CLIENTE DEVOLVIÓ AL PISO: volvió a estar adentro. Sin
+           -- restarlo, un cajón devuelto al stock y después devuelto al proveedor se
+           -- contaba dos veces, y la partida figuraba terminada con mercadería adentro.
+           ((SELECT COALESCE(SUM(di.bultos),0) FROM sg_despacho_items di
               JOIN sg_despachos d ON d.id = di.despacho_id AND d.activo = 1
               JOIN sg_lotes l ON l.id = di.lote_id AND l.activo = 1
               JOIN sg_oc_items i ON i.id = l.oc_item_id
-             WHERE i.oc_id = o.id) AS bultos_vendidos,
+             WHERE i.oc_id = o.id)
+            - (SELECT COALESCE(SUM(dvi.bultos),0) FROM sg_devolucion_items dvi
+                JOIN sg_devoluciones dv ON dv.id = dvi.devolucion_id AND dv.estado = 'registrada'
+                JOIN sg_lotes l ON l.id = dvi.lote_id AND l.activo = 1
+                JOIN sg_oc_items i ON i.id = l.oc_item_id
+               WHERE i.oc_id = o.id AND dvi.destino = 'stock')) AS bultos_vendidos,
            -- LA MERMA TAMBIÉN TERMINA LA PARTIDA. Pablo, 24/8/2026: "lo que tiene
            -- que estar terminada es la partida: en una de 60 bultos ingresados
            -- puede pasar que tengamos vendidos 55 y 5 sean merma. Obviamente esos
@@ -3398,6 +3420,13 @@ function partidasRecibidas(db, comoSeDocumenta) {
               JOIN sg_lotes l ON l.id = dc.lote_id AND l.activo = 1
               JOIN sg_oc_items i ON i.id = l.oc_item_id
              WHERE i.oc_id = o.id) AS bultos_merma,
+           -- Y LO DEVUELTO AL PROVEEDOR DESDE LA CÁMARA: también salió del depósito.
+           -- Firme o no, ya no está adentro, así que la partida puede terminar.
+           (SELECT COALESCE(SUM(it.bultos),0) FROM sg_devolucion_stock_items it
+              JOIN sg_devoluciones_stock ds ON ds.id = it.devolucion_id AND ds.estado = 'registrada'
+              JOIN sg_lotes l ON l.id = it.lote_id AND l.activo = 1
+              JOIN sg_oc_items i ON i.id = l.oc_item_id
+             WHERE i.oc_id = o.id) AS bultos_devueltos_prov,
            (SELECT COUNT(*) FROM sg_lotes l
               JOIN sg_oc_items i ON i.id = l.oc_item_id
              WHERE i.oc_id = o.id AND l.activo = 1 AND l.precio_unitario_kg IS NULL) AS lotes_sin_precio,
@@ -3989,13 +4018,23 @@ function ventaDePartida(db, ocId) {
         COALESCE(SUM(l.bultos),0) AS bultos, COALESCE(SUM(l.kg_reales),0) AS kg
         FROM sg_lotes l JOIN sg_oc_items i ON i.id = l.oc_item_id
        WHERE i.oc_id = ? AND l.activo = 1`).get(ocId);
-    const sal = db.prepare(`SELECT
+    const sal0 = db.prepare(`SELECT
         COALESCE(SUM(di.bultos),0) AS bultos, COALESCE(SUM(di.kg_despachados),0) AS kg
         FROM sg_despacho_items di
         JOIN sg_despachos d ON d.id = di.despacho_id AND d.activo = 1
         JOIN sg_lotes l ON l.id = di.lote_id AND l.activo = 1
         JOIN sg_oc_items i ON i.id = l.oc_item_id
        WHERE i.oc_id = ?`).get(ocId);
+    // Neto de lo que el cliente devolvió al piso: volvió a estar adentro (V1044).
+    const volvioPiso = db.prepare(`SELECT
+        COALESCE(SUM(dvi.bultos),0) AS bultos, COALESCE(SUM(dvi.kg),0) AS kg
+        FROM sg_devolucion_items dvi
+        JOIN sg_devoluciones dv ON dv.id = dvi.devolucion_id AND dv.estado = 'registrada'
+        JOIN sg_lotes l ON l.id = dvi.lote_id AND l.activo = 1
+        JOIN sg_oc_items i ON i.id = l.oc_item_id
+       WHERE i.oc_id = ? AND dvi.destino = 'stock'`).get(ocId);
+    const sal = { bultos: r2((sal0 && sal0.bultos) - (volvioPiso && volvioPiso.bultos)),
+      kg: r2((sal0 && sal0.kg) - (volvioPiso && volvioPiso.kg)) };
 
     // ── LA MERMA, CON SU DETALLE ─────────────────────────────────
     //
@@ -4090,7 +4129,12 @@ function ventaDePartida(db, ocId) {
       SELECT COALESCE(SUM((${kgPapelSql('di')}
           - COALESCE((SELECT SUM(fd.kg) FROM sg_factura_despachos fd
               JOIN sg_ven_facturas fv ON fv.id = fd.factura_id
-             WHERE fd.despacho_item_id = di.id AND ${facturaCuenta('fv')}),0))
+             WHERE fd.despacho_item_id = di.id AND ${facturaCuenta('fv')}),0)
+          -- Sin lo que el cliente devolvió, igual que el freno (V1044).
+          - COALESCE((SELECT SUM(dvi.kg) FROM sg_devolucion_items dvi
+              JOIN sg_devoluciones dv ON dv.id = dvi.devolucion_id AND dv.estado = 'registrada'
+             WHERE dvi.despacho_item_id = di.id),0)
+            * (${kgPapelSql('di')} / NULLIF(di.kg_despachados, 0)))
         * COALESCE(di.precio_por_kg,0)),0) AS monto
         FROM sg_despacho_items di
         JOIN sg_despachos d ON d.id = di.despacho_id AND d.activo = 1
@@ -4259,7 +4303,24 @@ function ventaDePartida(db, ocId) {
     // TERMINADO = lo que ya no está en el depósito: vendido + merma. Es lo que
     // decide si la partida se puede liquidar, porque lo que queda adentro
     // todavía no se sabe cuánto va a rendir.
-    const terminado = r2(bultosOut + mermaBultos);
+    // Y lo que se le devolvió al proveedor desde la cámara: tampoco está adentro.
+    const devueltosProv = r2(db.prepare(`SELECT COALESCE(SUM(it.bultos),0) s
+        FROM sg_devolucion_stock_items it
+        JOIN sg_devoluciones_stock ds ON ds.id = it.devolucion_id AND ds.estado = 'registrada'
+        JOIN sg_lotes l ON l.id = it.lote_id AND l.activo = 1
+        JOIN sg_oc_items i ON i.id = l.oc_item_id
+       WHERE i.oc_id = ?`).get(ocId).s);
+    const terminado = r2(bultosOut + mermaBultos + devueltosProv);
+    // ── LO QUE SE LE LIQUIDA ES LO QUE QUEDÓ ─────────────────────────────
+    //
+    // «Siempre vamos a tener que liquidar los 55» — Pablo, 29/8: los que entraron. Pero
+    // desde la V1043 lo que se le DEVUELVE al productor con la partida sin firmar baja
+    // lo que se le debe, y el control de la liquidación (objetivoCerrado) mide contra
+    // lo recibido SIN esos cajones. La pantalla seguía proponiendo los que entraron, de
+    // sólo lectura: 50 contra un tope de 40, y la partida no se podía liquidar nunca.
+    //
+    // Es la misma cuenta que usa el control, así que los dos dicen lo mismo.
+    const aLiquidar = recibidoDeOC(db, ocId);
     return { ok: true,
       oc_id: ocId,
       partida: oc.trazabilidad || oc.numero,
@@ -4345,6 +4406,11 @@ function ventaDePartida(db, ocId) {
       articulos: articulos.concat(mermaArticulos),
       bultos_ingresados: bultosIn, bultos_vendidos: bultosOut,
       bultos_merma: mermaBultos, kg_merma: mermaKg, mermas,
+      bultos_devueltos_prov: devueltosProv,
+      bultos_a_liquidar: aLiquidar.bultos,
+      kg_a_liquidar: aLiquidar.kg,
+      // Los que entraron y NO se liquidan porque se le devolvieron sin firmar.
+      bultos_descontados_prov: r2(Math.max(0, bultosIn - aLiquidar.bultos)),
       bultos_terminados: terminado,
       bultos_en_deposito: r2(Math.max(0, bultosIn - terminado)),
       kg_ingresados: r2(tot && tot.kg), kg_vendidos: r2(sal && sal.kg),
@@ -4420,6 +4486,9 @@ function fusionarVentas(partes) {
     partidas: partes.map((p) => ({
       oc_id: p.oc_id, partida: p.partida, unidad: p.unidad,
       bultos_ingresados: p.bultos_ingresados, bultos_merma: p.bultos_merma,
+      // Lo que se le liquida a CADA partida del grupo: lo que entró menos lo que se le
+      // devolvió sin firmar. Es lo que viaja al servidor como bultos liquidados.
+      bultos_a_liquidar: p.bultos_a_liquidar,
       kg_merma: p.kg_merma,
       acordado_total: (p.acordado || {}).total,
       acordado_sin_mermas: (p.acordado || {}).total_sin_mermas,
@@ -4496,6 +4565,10 @@ function fusionarVentas(partes) {
     bultos_ingresados: sum((p) => p.bultos_ingresados),
     bultos_vendidos: sum((p) => p.bultos_vendidos),
     bultos_merma: sum((p) => p.bultos_merma),
+    // Y lo devuelto al proveedor, en el grupo igual que en cada una.
+    bultos_devueltos_prov: sum((p) => p.bultos_devueltos_prov),
+    bultos_a_liquidar: sum((p) => p.bultos_a_liquidar),
+    bultos_descontados_prov: sum((p) => p.bultos_descontados_prov),
     kg_merma: sum((p) => p.kg_merma),
     bultos_terminados: sum((p) => p.bultos_terminados),
     bultos_en_deposito: sum((p) => p.bultos_en_deposito),
@@ -5452,6 +5525,14 @@ function frenosDeEdicionLote(db, loteId, opts) {
     return { error: 'De este lote salió mercadería a una transformación o un reproceso: parte de su '
       + 'costo ya viajó a otro lote. Corregirlo dejaría la plata contada mal en los dos lados.' };
   }
+  // ── Y EL LOTE DEL QUE SE LE DEVOLVIÓ MERCADERÍA AL PROVEEDOR ─────────────
+  // Bajarle los kilos por debajo de lo devuelto deja el stock en negativo, y borrarlo
+  // hace que la devolución deje de bajar lo que se le debe —lo acordado sólo mira
+  // lotes activos—. Se anula la devolución primero, desde Stock.
+  if (!soloPrecio && kgDevueltoCamara(db, loteId) > 0.01) {
+    return { error: 'De este lote se le devolvió mercadería al proveedor desde Stock. Para corregir '
+      + 'sus cantidades, anulá primero esa devolución: si no, el stock y lo que se le debe quedan mal.' };
+  }
   // ESTE FRENA TAMBIÉN EL PRECIO, y es el que más importa que frene. El costo de un
   // lote hijo NO sale de su precio: recalcCostoLote toma la rama de transformado_de y
   // usa el snapshot que se le cargó en costo_base. Pero la corrección escribe
@@ -5507,7 +5588,8 @@ function recalcMargenDespachos(db, loteId) {
     - COALESCE((SELECT SUM(kg_transformados) FROM sg_transformaciones
                  WHERE lote_origen_id = l.id),0)
     - COALESCE((SELECT SUM(kg_procesados) FROM sg_reprocesos
-                 WHERE lote_madre_id = l.id AND estado='activo'),0)`;
+                 WHERE lote_madre_id = l.id AND estado='activo'),0)
+    - ${SUM_DEV_CAMARA}`;
   // Con los kilos vigentes en cero el costo por kilo va a CERO, no a nulo: es lo que
   // hace el alta del remito, y lo que este recálculo tiene que espejar.
   db.prepare(`UPDATE sg_despacho_items
@@ -5679,7 +5761,7 @@ router.post('/lotes/:id/reclasificar', requireAuth, express.json(), (req, res) =
     // fantasma en la lista y sin nada adentro. Si además ya se despachó algo, sí
     // se parte: esos 70 salieron como primera y eso no se reescribe.
     const salio = kgDespachados(db, madre.id) > 0.01 || kgDecomisado(db, madre.id) > 0.01
-      || kgTransformado(db, madre.id) > 0.01;
+      || kgTransformado(db, madre.id) > 0.01 || kgDevueltoCamara(db, madre.id) > 0.01;
     if (bultos === disp && !salio) {
       const antes = madre.calidad;
       db.prepare(`UPDATE sg_lotes SET calidad=?, semaforo=COALESCE(?, semaforo),
@@ -5720,7 +5802,7 @@ router.post('/lotes/:id/reclasificaciones/:rid/anular', requireAuth, express.jso
     if (!hijo || !madre) return res.status(404).json({ ok: false, error: 'Partida no encontrada' });
     if (!hijo.activo) return res.status(400).json({ ok: false, error: 'Ese lote ya no existe' });
     const salio = kgDespachados(db, hijo.id) > 0.01 || kgDecomisado(db, hijo.id) > 0.01
-      || kgTransformado(db, hijo.id) > 0.01;
+      || kgTransformado(db, hijo.id) > 0.01 || kgDevueltoCamara(db, hijo.id) > 0.01;
     if (salio) {
       return res.status(400).json({ ok: false, error:
         'De los bultos de ' + hijo.calidad + ' ya salió mercadería: su costo viajó a esa venta y '
@@ -5876,7 +5958,7 @@ router.put('/lotes/:id/calidad', requireAuth, (req, res) => {
       return res.status(400).json({ ok: false, error: 'Calidad inválida' });
     }
     const disp = (l.kg_reales || 0) - kgDespachados(db, l.id)
-               - kgDecomisado(db, l.id) - kgTransformado(db, l.id);
+               - kgDecomisado(db, l.id) - kgTransformado(db, l.id) - kgDevueltoCamara(db, l.id);
     if (!(disp > 0.01)) {
       return res.status(400).json({ ok: false,
         error: 'Esta partida ya no está en stock: salió entera. Su costo ya viajó a la venta, '
@@ -8866,6 +8948,19 @@ router.get('/lotes/:id/movimientos', requireAuth, (req, res) => {
         ref: dv.numero || dv.remito || null });
     }
 
+    // LO QUE SE LE DEVOLVIÓ AL PROVEEDOR DESDE LA CÁMARA. Sale del saldo como la
+    // merma, pero con otro nombre: no se tiró, se la llevó él. Sin esta línea el
+    // control de abajo diría que el saldo no cierra.
+    for (const x of db.prepare(`SELECT it.kg, it.bultos, it.descuenta_al_productor, ds.numero, ds.fecha, ds.motivo
+        FROM sg_devolucion_stock_items it
+        JOIN sg_devoluciones_stock ds ON ds.id = it.devolucion_id AND ds.estado = 'registrada'
+       WHERE it.lote_id = ? ORDER BY ds.fecha, ds.id`).all(id)) {
+      movs.push({ tipo: 'devolucion_proveedor', fecha: x.fecha, kg: -(Number(x.kg) || 0), bultos: x.bultos,
+        detalle: 'Devuelta al proveedor desde la cámara' + (x.motivo ? ' — ' + x.motivo : '')
+          + (Number(x.descuenta_al_productor) === 1 ? '' : ' (la partida ya estaba firme: pérdida nuestra)'),
+        ref: x.numero || null });
+    }
+
     // LA MERMA. Lo que se tiró, con su motivo: sin el motivo es un número que no
     // se le puede reclamar a nadie.
     for (const x of db.prepare(`SELECT kg, bultos, motivo, fecha FROM sg_lote_decomisos
@@ -9020,7 +9115,8 @@ router.post('/lotes/:id/decomiso', requireAuth, sgUpload.single('foto'), (req, r
     const lote = db.prepare('SELECT id, kg_reales, estado, semaforo FROM sg_lotes WHERE id=? AND activo=1').get(req.params.id);
     if (!lote) return res.status(404).json({ ok: false, error: 'Lote no encontrado' });
     if (lote.estado === 'bajado') return res.status(400).json({ ok: false, error: 'El lote está dado de baja' });
-    const disp = (lote.kg_reales || 0) - kgDespachados(db, lote.id) - kgDecomisado(db, lote.id) - kgTransformado(db, lote.id);
+    const disp = (lote.kg_reales || 0) - kgDespachados(db, lote.id) - kgDecomisado(db, lote.id) - kgTransformado(db, lote.id)
+      - kgDevueltoCamara(db, lote.id);
     if (kg > disp + 0.01) return res.status(400).json({ ok: false, error: `No podés decomisar ${kg}kg: hay ${disp.toFixed(1)}kg disponibles` });
     // ── DE QUÉ PISO SALE ──────────────────────────────────────────────
     //
@@ -9100,7 +9196,8 @@ router.post('/lotes/:id/transformar', requireAuth, (req, res) => {
     if (!db.prepare('SELECT id FROM sg_productos WHERE id=? AND activo=1').get(productoDestinoId)) {
       return res.status(400).json({ ok: false, error: 'Producto destino inválido' });
     }
-    const disp = (origen.kg_reales || 0) - kgDespachados(db, origen.id) - kgDecomisado(db, origen.id) - kgTransformado(db, origen.id);
+    const disp = (origen.kg_reales || 0) - kgDespachados(db, origen.id) - kgDecomisado(db, origen.id) - kgTransformado(db, origen.id)
+      - kgDevueltoCamara(db, origen.id);
     // forma "1 caja entera": sin kg → todo el disponible; forma "X kg": kg explícito del body.
     const kg = (req.body?.kg != null && req.body?.kg !== '') ? Number(req.body.kg) : +disp.toFixed(2);
     if (!(kg > 0)) return res.status(400).json({ ok: false, error: 'kg a transformar debe ser > 0' });
@@ -9186,7 +9283,8 @@ router.post('/lotes/:id/reproceso', requireAuth, (req, res) => {
 
     // kg_procesados: si no viene, = aprovechable (sin merma). Debe ser ≥ Σ kg hijos (la diferencia
     // es la merma) y ≤ disponible de la madre.
-    const disp = (madre.kg_reales || 0) - kgDespachados(db, madre.id) - kgDecomisado(db, madre.id) - kgTransformado(db, madre.id);
+    const disp = (madre.kg_reales || 0) - kgDespachados(db, madre.id) - kgDecomisado(db, madre.id) - kgTransformado(db, madre.id)
+      - kgDevueltoCamara(db, madre.id);
     const kgProcesados = (b.kg_procesados != null && b.kg_procesados !== '') ? Number(b.kg_procesados) : +sumaKgHijos.toFixed(2);
     if (!(kgProcesados > 0)) return res.status(400).json({ ok: false, error: 'kg_procesados debe ser > 0' });
     if (kgProcesados < sumaKgHijos - 0.01) return res.status(400).json({ ok: false, error: `kg_procesados (${kgProcesados}) no puede ser menor que la suma de los hijos (${sumaKgHijos.toFixed(2)})` });
@@ -9234,7 +9332,8 @@ router.post('/lotes/:id/reproceso', requireAuth, (req, res) => {
     // reproceso no registra bultos_procesados (la madre no tiene cajones). bultos_merma no aplica.
 
     // costo que SALE de la madre = kg_procesados × costo/kg vigente (incluye el costo de la merma).
-    const kgVigMadre = (madre.kg_reales || 0) - kgDecomisado(db, madre.id) - kgTransformado(db, madre.id);
+    const kgVigMadre = (madre.kg_reales || 0) - kgDecomisado(db, madre.id) - kgTransformado(db, madre.id)
+      - kgDevueltoCamara(db, madre.id);
     const costoKgMadre = kgVigMadre > 0 ? (madre.costo_final || 0) / kgVigMadre : 0;
     const costoMadreConsumido = +(kgProcesados * costoKgMadre).toFixed(2);
     const totalRepartir = +(costoMadreConsumido + gasto).toFixed(2);
@@ -9309,7 +9408,14 @@ router.get('/decomisos', requireAuth, (req, res) => {
         d.bultos, d.foto_ruta, d.foto_nombre,
         -- Lo que costó lo que se tiró: la partida ya lo pagó y no va a entrar un
         -- peso por eso. Es la plata de la merma, que es lo que se mira.
-        ROUND(d.kg * COALESCE(l.costo_final / NULLIF(l.kg_reales,0), 0), 2) AS costo
+        -- Lo que entró MENOS lo devuelto al proveedor que se llevó su costo (V1044). Una
+        -- devolución sin firmar baja el costo total; si los kilos que entraron no bajaran
+        -- con ella, la merma aparecería costando menos de lo que costó. No es el kilo
+        -- vigente: ése ya no cuenta la propia merma y la inflaría.
+        ROUND(d.kg * COALESCE(l.costo_final / NULLIF(l.kg_reales
+          - COALESCE((SELECT SUM(dvc.kg) FROM sg_devolucion_stock_items dvc
+              JOIN sg_devoluciones_stock dsc ON dsc.id = dvc.devolucion_id AND dsc.estado = 'registrada'
+              WHERE dvc.lote_id = l.id AND dvc.descuenta_al_productor = 1),0), 0), 0), 2) AS costo
       FROM sg_lote_decomisos d
       JOIN sg_lotes l ON l.id=d.lote_id
       LEFT JOIN sg_productos pr ON pr.id=l.producto_id
@@ -9375,7 +9481,8 @@ function recalcEstadoLote(db, loteId) {
     // F3-C — umbral en BULTOS (cajón entero). vigentes = lote.bultos − Σ bultos decomisados − Σ
     // bultos transformados/reprocesados (activos). Si se despacharon todos los cajones vigentes →
     // total. Son enteros: comparación exacta, sin tolerancia.
-    const bultosVig = l.bultos - bultosDecomisado(db, loteId) - bultosTransformado(db, loteId);
+    const bultosVig = l.bultos - bultosDecomisado(db, loteId) - bultosTransformado(db, loteId)
+      - bultosDevueltoCamara(db, loteId);
     const despB = bultosDespachados(db, loteId);
     if (despB > 0 && despB >= bultosVig) estado = 'despachado_total';
     else if (despB > 0) estado = 'despachado_parcial';
@@ -9392,7 +9499,8 @@ function recalcEstadoLote(db, loteId) {
       - db.prepare(`SELECT COALESCE(SUM(dvi.kg),0) s FROM sg_devolucion_items dvi
           JOIN sg_devoluciones dv ON dv.id=dvi.devolucion_id AND dv.estado='registrada'
          WHERE dvi.lote_id=? AND dvi.destino='stock'`).get(loteId).s;
-    const kgVig = (l.kg_reales || 0) - kgDecomisado(db, loteId) - kgTransformado(db, loteId);
+    const kgVig = (l.kg_reales || 0) - kgDecomisado(db, loteId) - kgTransformado(db, loteId)
+      - kgDevueltoCamara(db, loteId);
     if (desp >= kgVig - 0.01 && desp > 0) estado = 'despachado_total';
     else if (desp > 0) estado = 'despachado_parcial';
   }
@@ -9414,6 +9522,38 @@ function kgDespachados(db, loteId) {
   return db.prepare(`SELECT COALESCE(SUM(di.kg_despachados),0) s
     FROM sg_despacho_items di JOIN sg_despachos d ON d.id=di.despacho_id AND d.activo=1
     WHERE di.lote_id=?`).get(loteId).s;
+}
+
+// ── LO QUE SE LE DEVOLVIÓ AL PROVEEDOR DESDE LA CÁMARA ──────────────────
+//
+// Es una SALIDA MÁS del lote, como la merma o lo remitido: la mercadería estaba en un
+// piso y se la llevó el proveedor. Todo lo que cuenta cuánto queda de una partida
+// —lo disponible, los cajones, lo vigente para el costo por kilo, el estado, lo que
+// frena tirar o reprocesar— la tiene que restar. Si uno solo se olvida, esos cajones
+// se ofrecen para remitir cuando ya los tiene el proveedor.
+//
+// Viven acá, al lado de las otras salidas, y hay un test que audita que todo lugar
+// que resta la merma reste también ésta.
+//
+// Sólo cuentan las REGISTRADAS: anular la devolución devuelve la mercadería al piso,
+// así que tiene que volver a lo disponible.
+function kgDevueltoCamara(db, loteId) {
+  return Number(db.prepare(`SELECT COALESCE(SUM(it.kg),0) s FROM sg_devolucion_stock_items it
+    JOIN sg_devoluciones_stock ds ON ds.id = it.devolucion_id AND ds.estado = 'registrada'
+    WHERE it.lote_id = ?`).get(loteId).s) || 0;
+}
+function bultosDevueltoCamara(db, loteId) {
+  return Number(db.prepare(`SELECT COALESCE(SUM(it.bultos),0) s FROM sg_devolucion_stock_items it
+    JOIN sg_devoluciones_stock ds ON ds.id = it.devolucion_id AND ds.estado = 'registrada'
+    WHERE it.lote_id = ?`).get(loteId).s) || 0;
+}
+// Los kilos que además SE LLEVARON COSTO: los de la partida que no estaba firme. Los
+// de una partida firme salen de los kilos pero no del costo —ya se pagaron—, y ahí
+// el costo por kilo de lo que queda sube: es la pérdida, y es de nuestro lado.
+function kgDevueltoCamaraConCosto(db, loteId) {
+  return Number(db.prepare(`SELECT COALESCE(SUM(it.kg),0) s FROM sg_devolucion_stock_items it
+    JOIN sg_devoluciones_stock ds ON ds.id = it.devolucion_id AND ds.estado = 'registrada'
+    WHERE it.lote_id = ? AND it.descuenta_al_productor = 1`).get(loteId).s) || 0;
 }
 
 // kg decomisados (merma) de un lote — Σ de sg_lote_decomisos. NO toca kg_reales.
@@ -9478,7 +9618,8 @@ function bultosTransformado(db, loteId) {
 function bultosDisponibles(db, loteId) {
   const l = db.prepare('SELECT bultos FROM sg_lotes WHERE id=?').get(loteId);
   if (!l || l.bultos == null) return null;
-  return l.bultos - bultosDespachados(db, loteId) - bultosDecomisado(db, loteId) - bultosTransformado(db, loteId);
+  return l.bultos - bultosDespachados(db, loteId) - bultosDecomisado(db, loteId) - bultosTransformado(db, loteId)
+    - bultosDevueltoCamara(db, loteId);
 }
 // Fragmento SQL espejo de SUM_TRANSF en bultos (transformaciones + reprocesos activos del lote 'l').
 const SUM_TRANSF_BULTOS = "(COALESCE((SELECT SUM(bultos_transformados) FROM sg_transformaciones WHERE lote_origen_id=l.id),0)"
@@ -9489,6 +9630,11 @@ const SUM_TRANSF_BULTOS = "(COALESCE((SELECT SUM(bultos_transformados) FROM sg_t
 // son la verdad única; cualquier endpoint de lectura los compone. (KG_VIGENTE de costeo —línea
 // ~2760— es OTRA cosa: NO resta reprocesos; no se toca acá.)
 const SUM_DECOMISO   = "COALESCE((SELECT SUM(kg) FROM sg_lote_decomisos WHERE lote_id=l.id),0)";
+// Lo devuelto al proveedor desde la cámara, en SQL y ligado al alias `l`. Es el espejo
+// de kgDevueltoCamara(): una sola cuenta escrita en los dos idiomas.
+const SUM_DEV_CAMARA = "COALESCE((SELECT SUM(dvc.kg) FROM sg_devolucion_stock_items dvc"
+  + " JOIN sg_devoluciones_stock dsc ON dsc.id=dvc.devolucion_id AND dsc.estado='registrada'"
+  + " WHERE dvc.lote_id=l.id),0)";
 const SUM_DESPACHADO = "COALESCE((SELECT SUM(di.kg_despachados) FROM sg_despacho_items di"
   + " JOIN sg_despachos d ON d.id=di.despacho_id AND d.activo=1 WHERE di.lote_id=l.id),0)";
 
@@ -9519,9 +9665,9 @@ const SUM_DEV_PROV = "COALESCE((SELECT SUM(dvi.kg) FROM sg_devolucion_items dvi"
   + " AND COALESCE(dvi.descuenta_al_productor,1)=1),0)";
 
 // kg vigentes (disponibilidad) = kg_reales − Σ decomisos − (transformaciones + reprocesos activos).
-const KG_VIGENTE_STOCK = `(l.kg_reales - ${SUM_DECOMISO} - ${SUM_TRANSF})`;
+const KG_VIGENTE_STOCK = `(l.kg_reales - ${SUM_DECOMISO} - ${SUM_TRANSF} - ${SUM_DEV_CAMARA})`;
 // kg disponibles (vendibles) = kg vigentes − Σ despachado + Σ lo que volvió al piso.
-const KG_DISPONIBLE = `(l.kg_reales - ${SUM_DECOMISO} - ${SUM_TRANSF} - ${SUM_DESPACHADO} + ${SUM_DEV_STOCK})`;
+const KG_DISPONIBLE = `(l.kg_reales - ${SUM_DECOMISO} - ${SUM_TRANSF} - ${SUM_DESPACHADO} + ${SUM_DEV_STOCK} - ${SUM_DEV_CAMARA})`;
 
 // ── LO QUE ENTRÓ DE VERDAD A LA PARTIDA ───────────────────────────────────
 //
@@ -9551,7 +9697,7 @@ const KG_INGRESADO_NETO = `(l.kg_reales - ${SUM_DEV_PROV})`;
 //
 // Los decomisos también faltaban: eso ya venía mal de antes y se arregla de paso —
 // sobrevaluaba los lotes con decomiso.
-const KG_EN_CAMARA = `(l.kg_reales - COALESCE(de.kg,0) - ${SUM_TRANSF} - ${SUM_DECOMISO} + ${SUM_DEV_STOCK})`;
+const KG_EN_CAMARA = `(l.kg_reales - COALESCE(de.kg,0) - ${SUM_TRANSF} - ${SUM_DECOMISO} + ${SUM_DEV_STOCK} - ${SUM_DEV_CAMARA})`;
 
 // ══ EL KILO POR BULTO EFECTIVO, EN SQL ══════════════════════════════════
 //
@@ -10239,7 +10385,8 @@ const postRemito = (req, res) => {
           productoId = lote.producto_id;
           // costo_final del lote es el costo TOTAL → costo/kg sobre kg VIGENTES (kg_reales − decomiso
           // − transformado), así la merma revalúa lo despachado. (mismo cálculo que el front del modal.)
-          const kgVig = (lote.kg_reales || 0) - kgDecomisado(db, ln.loteId) - kgTransformado(db, ln.loteId);
+          const kgVig = (lote.kg_reales || 0) - kgDecomisado(db, ln.loteId) - kgTransformado(db, ln.loteId)
+            - kgDevueltoCamara(db, ln.loteId);
           costoPorKg = kgVig > 0 ? (lote.costo_final || 0) / kgVig : 0;
         } else {
           // EN VIAJE NO SIEMPRE HAY COSTO. Si la compra es a pizarra, el precio
@@ -10816,6 +10963,291 @@ router.post('/despachos/:id/devolver', requireAuth, express.json(), (req, res) =
   } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
 });
 
+// ══ ↩️ DEVOLVERLE AL PROVEEDOR MERCADERÍA QUE ESTÁ EN LA CÁMARA ══════════════
+//
+// Pablo, 9/9/2026: «Desde el stock también necesitamos poder devolver mercadería al
+// proveedor».
+//
+// La devolución de arriba parte de un remito: la mercadería ya estaba con el cliente.
+// Ésta parte del PISO. Por eso hace lo que hace un remito —baja lo disponible, los
+// cajones y el piso— pero no le vende nada a nadie: se la lleva el proveedor.
+//
+// Las reglas son las mismas que Pablo fijó el 2/9 para devolver al productor:
+//   · si la partida NO está firme, baja lo que se le debe y el costo de la partida;
+//   · si ya está firme —con factura o liquidación—, se registra igual y es pérdida
+//     nuestra: «una vez liquidado ya todo es firme».
+//   · la decisión se toma ACÁ y queda congelada en el renglón.
+//
+// Y sale su remito de devolución: es el papel que se sube al camión del proveedor.
+router.post('/lotes/:id/devolver-proveedor', requireAuth, express.json(), (req, res) => {
+  const db = getDb();
+  try {
+    const b = req.body || {};
+    const motivo = String(b.motivo || '').trim();
+    // EL MOTIVO ES OBLIGATORIO, igual que en la merma: una devolución sin decir por
+    // qué, a los dos meses, no se le puede reclamar a nadie — y es justo lo que se le
+    // va a reclamar al proveedor.
+    if (!motivo) return res.status(400).json({ ok: false, error:
+      'Poné por qué se devuelve: es lo que después se le reclama al proveedor.' });
+
+    const lote = db.prepare(`SELECT l.id, l.codigo_lote, l.estado, l.bultos, l.kg_reales, l.oc_item_id,
+        COALESCE(l.kg_por_bulto, ps.factor_conversion) AS kg_por_bulto, i.oc_id, o.proveedor_id
+      FROM sg_lotes l
+      LEFT JOIN sg_presentaciones ps ON ps.id = l.presentacion_id
+      LEFT JOIN sg_oc_items i ON i.id = l.oc_item_id
+      LEFT JOIN sg_oc o ON o.id = i.oc_id
+      WHERE l.id=? AND l.activo=1`).get(req.params.id);
+    if (!lote) return res.status(404).json({ ok: false, error: 'Partida no encontrada' });
+    if (lote.estado === 'bajado') return res.status(400).json({ ok: false, error: 'La partida está dada de baja' });
+    // SE LE DEVUELVE AL PROVEEDOR DE LA ORDEN. Una partida sin orden —un reproceso,
+    // una apertura— no tiene un proveedor a quien devolverle nada ni una deuda que
+    // bajar: eso es una merma, y se carga como merma.
+    if (!lote.oc_id || !lote.proveedor_id) {
+      return res.status(400).json({ ok: false, error:
+        'Esa partida no viene de una orden de compra: no hay proveedor a quien devolvérsela. '
+        + 'Si hay que sacarla del stock, se carga como merma.' });
+    }
+
+    // ── EN CAJONES ENTEROS, como sale todo del galpón ─────────────────────
+    //
+    // «La devolución tiene que ser en las mismas unidades en que se remitió» —
+    // Pablo, 2/9. Medio cajón no existe. La partida que entró pesada a granel, sin
+    // cajones, se devuelve en kilos.
+    const kpb = kpbEfectivo(lote);
+    const conCajones = (Number(lote.bultos) || 0) > 0 && kpb > 0;
+    let bultos = 0, kg = 0;
+    // LA PANTALLA MANDA LAS DOS COSAS —los cajones que se eligieron y los kilos que
+    // son— y ACÁ se decide cuál vale. El selector cuenta en cajones cuando la partida
+    // tiene un factor, pero una partida pesada en la balanza puede tener el factor y
+    // ningún cajón contado: si el servidor pidiera cajones igual, esa partida no se
+    // podría devolver nunca desde la pantalla.
+    if (conCajones) {
+      bultos = Number(b.bultos);
+      if (!(bultos > 0) || Math.abs(bultos - Math.round(bultos)) > 1e-6) {
+        return res.status(400).json({ ok: false, error: 'Poné cuántos cajones enteros se devuelven.' });
+      }
+      bultos = Math.round(bultos);
+      const disp = bultosDisponibles(db, lote.id);
+      if (disp == null || bultos > disp) {
+        return res.status(400).json({ ok: false, error:
+          `De esa partida quedan ${disp || 0} cajón(es) en la cámara: no se pueden devolver ${bultos}.` });
+      }
+      kg = r2(bultos * kpb);
+      // ── Y LOS KILOS ────────────────────────────────────────────────────
+      // Los cajones no alcanzan: una transformación no siempre escribe sus cajones y
+      // un reproceso puede llevarse más kilos que cajones × factor. Controlando sólo
+      // cajones se podían devolver kilos que ya no están: el disponible, el costo y lo
+      // que se le debe quedaban en negativo.
+      const dispKg = r2(db.prepare(`SELECT ${KG_DISPONIBLE} AS d FROM sg_lotes l WHERE l.id=?`).get(lote.id).d);
+      if (kg > dispKg + 0.01) {
+        return res.status(400).json({ ok: false, error:
+          `De esa partida quedan ${dispKg} kg en la cámara: ${bultos} cajón(es) son ${kg} kg y no alcanzan.` });
+      }
+    } else {
+      kg = r2(b.kg);
+      if (!(kg > 0)) return res.status(400).json({ ok: false, error: 'Poné cuántos kilos se devuelven.' });
+      const disp = r2(db.prepare(`SELECT ${KG_DISPONIBLE} AS d FROM sg_lotes l WHERE l.id=?`).get(lote.id).d);
+      if (kg > disp + 0.01) {
+        return res.status(400).json({ ok: false, error:
+          `De esa partida quedan ${disp} kg en la cámara: no se pueden devolver ${kg}.` });
+      }
+    }
+
+    // ── DE QUÉ PISO SALE ───────────────────────────────────────────────────
+    // Misma regla que la merma: si tiene dueño, lo toca sólo él. Opcional sólo para
+    // la mercadería de antes de los pisos, que no está ubicada en ningún lado.
+    // UNA FECHA ES UNA FECHA. Sin esto se guardaba lo que viniera, y la lista lo dibuja.
+    const fecha = (b.fecha == null || b.fecha === '') ? new Date().toISOString().slice(0, 10) : String(b.fecha);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(fecha)) {
+      return res.status(400).json({ ok: false, error: 'La fecha no es válida.' });
+    }
+    let pisoId = (b.piso_id != null && b.piso_id !== '') ? Number(b.piso_id) : null;
+    // ── DE QUÉ PISO SALE: SI LA PARTIDA ESTÁ UBICADA, SE DICE ──────────────
+    //
+    // Sin piso, descontarDeUbicacion reparte por orden de piso y no anota de cuál sacó:
+    // podía llevarse los cajones del piso de OTRA persona, y al anular no había a
+    // dónde devolverlos — la suma de los pisos dejaba de dar lo disponible para siempre.
+    //
+    // Y al revés: si la partida no está ubicada en ningún piso —la de antes de los
+    // pisos—, no se anota ninguno aunque venga. Si se anotara, anular crearía un piso
+    // con cajones que nunca estuvieron ahí.
+    const ubicada = db.prepare(`SELECT 1 FROM sg_lote_ubicaciones
+      WHERE lote_id=? AND (COALESCE(bultos,0) > 0 OR COALESCE(kg,0) > 0) LIMIT 1`).get(lote.id);
+    if (ubicada && !pisoId) {
+      return res.status(400).json({ ok: false, error: 'Elegí de qué piso sale la mercadería.' });
+    }
+    if (!ubicada) pisoId = null;
+    if (pisoId) {
+      const noPuede = exigirPiso(db, req, pisoId, 'devolver mercadería');
+      if (noPuede) return res.status(403).json({ ok: false, error: noPuede });
+    }
+
+    // ── ¿LE BAJA LO QUE SE LE DEBE? ────────────────────────────────────────
+    // Se decide ACÁ y se guarda. Si se recalculara después, liquidar la partida haría
+    // que esta devolución dejara de descontar de golpe.
+    const firme = precioFirmeDetalle(db, lote.oc_id, 'descontarle esta devolución al proveedor');
+    const descuenta = firme ? 0 : 1;
+
+    const salida = db.transaction(() => {
+      // ÚLTIMA PALABRA, YA ADENTRO: otro pudo haber remitido o devuelto cajones de la
+      // misma partida entre la validación y esta línea.
+      if (conCajones) {
+        const disp = bultosDisponibles(db, lote.id);
+        if (disp == null || bultos > disp) {
+          throw new Error('Alguien acaba de sacar cajones de esta partida: volvé a abrir la ventana.');
+        }
+      }
+      const numero = nextNumero(db, 'SG-DVP', 'sg_devoluciones_stock', 'numero');
+      const devId = db.prepare(`INSERT INTO sg_devoluciones_stock
+          (numero, proveedor_id, fecha, motivo, chofer, dominio, estado, creado_por)
+        VALUES (?,?,?,?,?,?, 'registrada', ?)`).run(
+        numero, lote.proveedor_id, fecha,
+        motivo, val(b.chofer), val(b.dominio), uid(req)).lastInsertRowid;
+      db.prepare(`INSERT INTO sg_devolucion_stock_items
+          (devolucion_id, lote_id, piso_id, bultos, kg, descuenta_al_productor)
+        VALUES (?,?,?,?,?,?)`).run(devId, lote.id, pisoId, bultos, kg, descuenta);
+      // SALE DEL PISO. Si el piso elegido no tiene tanto, se corta y la transacción
+      // vuelve todo atrás: una devolución registrada con el piso intacto es un piso
+      // que dice tener lo que ya se llevó el proveedor.
+      const r = descontarDeUbicacion(db, lote.id, bultos, kg, pisoId);
+      if (!r.ok) throw new Error(r.error);
+      // Y la partida se entera: el costo —si no estaba firme— y el estado.
+      recalcCostoLote(db, lote.id);
+      recalcEstadoLote(db, lote.id);
+      // El margen guardado de lo que ya se remitió de esta partida sale del costo por
+      // kilo: si la devolución lo cambió, se rehace ahora y no en el próximo arranque.
+      recalcMargenDespachos(db, lote.id);
+      return { id: Number(devId), numero, descuenta_al_productor: descuenta };
+    })();
+
+    res.json({ ok: true, data: {
+      ...salida,
+      // Lo que la pantalla tiene que decir después de guardar, sin adivinar.
+      aviso: descuenta ? null
+        : 'La partida ya tenía el precio firme ('
+          + ({ factura: 'llegó la factura', liquidacion: 'se liquidó', marca: 'se marcó a mano como firme' }[firme.firme.como]
+             || 'precio cerrado')
+          + '): la devolución se registró, pero no le baja lo que se le debe al proveedor. '
+          + 'Si él manda una nota de crédito, se carga en su cuenta corriente.',
+    } });
+  } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
+});
+
+// Anularla: la mercadería vuelve al piso del que salió, y la partida recupera los
+// kilos y el costo. No se borra: el papel salió con el camión.
+router.post('/devoluciones-stock/:id/anular', requireAuth, express.json(), (req, res) => {
+  const db = getDb();
+  try {
+    const dv = db.prepare("SELECT * FROM sg_devoluciones_stock WHERE id=? AND estado='registrada'").get(req.params.id);
+    if (!dv) return res.status(404).json({ ok: false, error: 'No encontrada o ya anulada' });
+    const motivo = String((req.body && req.body.motivo) || '').trim();
+    if (!motivo) return res.status(400).json({ ok: false, error:
+      'Poné el motivo: una devolución anulada sin motivo, a los dos meses, es un número que nadie puede explicar.' });
+    // ── LO FIRME NO SE REABRE ──────────────────────────────────────────────
+    //
+    // Si la devolución BAJÓ la deuda y después la partida quedó firme —llegó la
+    // factura del proveedor, o se liquidó—, anularla subiría otra vez lo que se le
+    // debe y el costo, con el precio ya cerrado. Es la misma regla que deshacer una
+    // separación por calidad: se anula primero el comprobante.
+    //
+    // La que no bajó la deuda (la partida ya estaba firme al registrarla) se puede
+    // anular igual: sólo devuelve la mercadería al piso.
+    const itsFirme = db.prepare(`SELECT DISTINCT i.oc_id FROM sg_devolucion_stock_items it
+      JOIN sg_lotes l ON l.id = it.lote_id JOIN sg_oc_items i ON i.id = l.oc_item_id
+      WHERE it.devolucion_id = ? AND it.descuenta_al_productor = 1`).all(dv.id);
+    for (const x of itsFirme) {
+      const firme = precioFirmeDetalle(db, x.oc_id, 'anular esta devolución');
+      if (firme) return res.status(400).json({ ok: false, error: firme.error, firme: firme.firme });
+    }
+    // ── NI UN COSTO QUE YA VIAJÓ A OTRO LOTE ───────────────────────────────
+    //
+    // Si DESPUÉS de la devolución salió mercadería de ese lote a una transformación o
+    // un reproceso, el costo que se llevó quedó congelado al costo por kilo de ese
+    // momento —que ya tenía descontada la devolución—. Anularla recalcula la partida
+    // sin la devolución y deja el costo mal repartido entre los dos lotes. Es el mismo
+    // freno que ya tiene corregir un lote. Se compara por día, del lado seguro.
+    // CON LA HORA, no con el día: una transformación de esa misma mañana, ANTERIOR a la
+    // devolución, se llevó el costo de antes y no molesta. Las dos fechas salen de
+    // datetime('now','localtime'), así que se comparan tal cual.
+    //
+    // Y la revertida también cuenta: revertirla no le devuelve el costo a esta partida
+    // —vuelve a un lote nuevo—, así que el reparto sigue armado con el número de ese
+    // momento.
+    const viajo = db.prepare(`SELECT 1 FROM sg_devolucion_stock_items it
+      WHERE it.devolucion_id = ? AND (
+        EXISTS (SELECT 1 FROM sg_transformaciones t WHERE t.lote_origen_id = it.lote_id
+                 AND t.fecha >= ?)
+        OR EXISTS (SELECT 1 FROM sg_reprocesos r WHERE r.lote_madre_id = it.lote_id AND r.estado = 'activo'
+                 AND r.fecha >= ?))`).get(dv.id, dv.creado_en || '', dv.creado_en || '');
+    if (viajo) {
+      // NO SE PROMETE UNA SALIDA QUE NO HAY. Deshacer la transformación no destraba:
+      // el costo no vuelve a esta partida. Se dice eso.
+      return res.status(400).json({ ok: false, error:
+        'Después de esta devolución salió mercadería de esa partida a una transformación o un reproceso, '
+        + 'y se llevó el costo de ese momento. Anularla dejaría el costo mal repartido entre los lotes, '
+        + 'y eso no se arregla deshaciendo la transformación: esta devolución ya no se puede anular desde acá.' });
+    }
+    db.transaction(() => {
+      const its = db.prepare('SELECT * FROM sg_devolucion_stock_items WHERE devolucion_id=?').all(dv.id);
+      // Primero se marca anulada: así, cuando se recalcula la partida, ya no la cuenta.
+      db.prepare(`UPDATE sg_devoluciones_stock SET estado='anulada',
+        anulado_en=datetime('now','localtime'), anulado_por=?, anulado_motivo=? WHERE id=?`)
+        .run(uid(req), motivo, dv.id);
+      for (const it of its) {
+        // Vuelve al MISMO piso. Sin piso —mercadería de antes de los pisos— no hay
+        // dónde ponerla, igual que no había de dónde sacarla.
+        if (it.piso_id) ubicMover(db, it.lote_id, it.piso_id, Number(it.bultos) || 0, Number(it.kg) || 0);
+        recalcCostoLote(db, it.lote_id);
+        recalcEstadoLote(db, it.lote_id);
+        recalcMargenDespachos(db, it.lote_id);
+      }
+    })();
+    res.json({ ok: true });
+  } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
+});
+
+// La lista, para la solapa de Stock.
+router.get('/devoluciones-stock', requireAuth, (req, res) => {
+  const db = getDb();
+  try {
+    const rows = db.prepare(`SELECT dv.*, p.razon_social AS proveedor_nombre,
+        (SELECT COALESCE(SUM(kg),0) FROM sg_devolucion_stock_items WHERE devolucion_id=dv.id) AS kg,
+        (SELECT COALESCE(SUM(bultos),0) FROM sg_devolucion_stock_items WHERE devolucion_id=dv.id) AS bultos,
+        (SELECT GROUP_CONCAT(l.codigo_lote, ', ') FROM sg_devolucion_stock_items it
+           JOIN sg_lotes l ON l.id = it.lote_id WHERE it.devolucion_id=dv.id) AS partidas,
+        (SELECT GROUP_CONCAT(DISTINCT pr.nombre) FROM sg_devolucion_stock_items it
+           JOIN sg_lotes l ON l.id = it.lote_id LEFT JOIN sg_productos pr ON pr.id = l.producto_id
+          WHERE it.devolucion_id=dv.id) AS productos,
+        (SELECT MIN(descuenta_al_productor) FROM sg_devolucion_stock_items WHERE devolucion_id=dv.id) AS descuenta
+      FROM sg_devoluciones_stock dv
+      LEFT JOIN sg_proveedores p ON p.id = dv.proveedor_id
+      ORDER BY dv.id DESC LIMIT 300`).all();
+    res.json({ ok: true, data: rows });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// Una sola, con sus renglones: es lo que imprime el remito de devolución.
+router.get('/devoluciones-stock/:id', requireAuth, (req, res) => {
+  const db = getDb();
+  try {
+    const dv = db.prepare(`SELECT dv.*, p.razon_social AS proveedor_nombre, p.cuit AS proveedor_cuit
+      FROM sg_devoluciones_stock dv LEFT JOIN sg_proveedores p ON p.id = dv.proveedor_id
+      WHERE dv.id=?`).get(req.params.id);
+    if (!dv) return res.status(404).json({ ok: false, error: 'No encontrada' });
+    dv.items = db.prepare(`SELECT it.*, l.codigo_lote, pr.nombre AS producto_nombre,
+        ev.nombre AS envase_nombre, ps.nombre AS piso_nombre, o.numero AS oc_numero
+      FROM sg_devolucion_stock_items it
+      JOIN sg_lotes l ON l.id = it.lote_id
+      LEFT JOIN sg_productos pr ON pr.id = l.producto_id
+      LEFT JOIN sg_envases ev ON ev.id = l.envase_id
+      LEFT JOIN sg_pisos ps ON ps.id = it.piso_id
+      LEFT JOIN sg_oc_items i ON i.id = l.oc_item_id
+      LEFT JOIN sg_oc o ON o.id = i.oc_id
+      WHERE it.devolucion_id=? ORDER BY it.id`).all(dv.id);
+    res.json({ ok: true, data: dv });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
 // Anular una devolución mal cargada. No se borra: el papel salió y el cliente tiene
 // su copia. Lo que volvió al piso se saca de vuelta.
 router.post('/devoluciones/:id/anular', requireAuth, express.json(), (req, res) => {
@@ -10826,6 +11258,16 @@ router.post('/devoluciones/:id/anular', requireAuth, express.json(), (req, res) 
     const motivo = String(req.body.motivo || '').trim();
     if (!motivo) return res.status(400).json({ ok: false, error:
       'Poné el motivo: una devolución anulada sin motivo, a los dos meses, es un número que nadie puede explicar.' });
+    // LO FIRME NO SE REABRE. Desde la V1043 lo que vuelve al productor BAJA de verdad lo
+    // que se le debe: anular esa devolución con la partida ya firme subiría la deuda
+    // otra vez después de cerrado el precio.
+    for (const x of db.prepare(`SELECT DISTINCT i.oc_id FROM sg_devolucion_items dvi
+        JOIN sg_lotes l ON l.id = dvi.lote_id JOIN sg_oc_items i ON i.id = l.oc_item_id
+        WHERE dvi.devolucion_id = ? AND dvi.destino = 'proveedor'
+          AND COALESCE(dvi.descuenta_al_productor, 1) = 1`).all(dv.id)) {
+      const firme = precioFirmeDetalle(db, x.oc_id, 'anular esta devolución');
+      if (firme) return res.status(400).json({ ok: false, error: firme.error, firme: firme.firme });
+    }
     db.transaction(() => {
       for (const it of db.prepare('SELECT * FROM sg_devolucion_items WHERE devolucion_id=?').all(dv.id)) {
         // Se deshace exactamente lo que se hizo: lo que quedó en el piso se saca; lo
@@ -10920,6 +11362,23 @@ router.post('/despachos/:id/anular', requireAuth, (req, res) => {
         FROM sg_factura_despachos fd JOIN sg_ven_facturas f ON f.id = fd.factura_id
        WHERE fd.despacho_id = ? AND ${facturaCuenta('f')} AND ${noEsNotaDeCredito('f')}
        ORDER BY f.id DESC LIMIT 1`).get(d.id) : null;
+    // ── NI UNO CON UNA DEVOLUCIÓN AL PRODUCTOR ───────────────────────────
+    //
+    // Anular el remito anulaba de arrastre sus devoluciones. Las que volvieron al PISO
+    // pueden irse con él. Las que se le devolvieron al PRODUCTOR no: esa mercadería la
+    // tiene él, bajó lo que se le debe, y anularla de arrastre la hacía reaparecer en
+    // lo disponible y le subía la deuda otra vez — con la partida ya firme incluso,
+    // salteando el freno que tiene la devolución en su propia puerta.
+    const alProd = db.prepare(`SELECT dv.numero FROM sg_devoluciones dv
+      WHERE dv.despacho_id = ? AND dv.estado = 'registrada'
+        AND EXISTS (SELECT 1 FROM sg_devolucion_items dvi
+                     WHERE dvi.devolucion_id = dv.id AND dvi.destino = 'proveedor')
+      LIMIT 1`).get(d.id);
+    if (alProd) {
+      return res.status(409).json({ ok: false, error:
+        `El remito ${d.numero || d.id} tiene una devolución al productor (${alProd.numero}). Esa `
+        + 'mercadería ya la tiene él: anulá primero la devolución desde Devoluciones, y después el remito.' });
+    }
     if (fact) {
       return res.status(409).json({ ok: false, error:
         `El remito ${d.numero || d.id} ya está facturado con el comprobante ${fact.numero}. `
@@ -13936,7 +14395,7 @@ router.get('/cc-proveedores/:id', requireAuth, (req, res) => {
 // baja costo_final → el costo/kg sube (concentración). La transformación SÍ baja costo_final
 // (decisión 3) y a la vez el denominador → el costo/kg queda ESTABLE (sin merma, el costo
 // viaja con la mercadería al lote-cubeta).
-const KG_VIGENTE = "(l.kg_reales - COALESCE((SELECT SUM(kg) FROM sg_lote_decomisos WHERE lote_id=l.id),0) - COALESCE((SELECT SUM(kg_transformados) FROM sg_transformaciones WHERE lote_origen_id=l.id),0))";
+const KG_VIGENTE = "(l.kg_reales - COALESCE((SELECT SUM(kg) FROM sg_lote_decomisos WHERE lote_id=l.id),0) - COALESCE((SELECT SUM(kg_transformados) FROM sg_transformaciones WHERE lote_origen_id=l.id),0) - " + SUM_DEV_CAMARA + ")";
 const COSTO_KG = `(COALESCE(l.costo_final,0)/NULLIF(${KG_VIGENTE},0))`;
 // Margen de una línea de despacho calculado desde el costo por kg (no depende del
 // margen_estimado guardado → robusto frente a datos viejos).

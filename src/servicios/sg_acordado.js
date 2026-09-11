@@ -75,28 +75,44 @@ export function mermaPorItemDeOC(db, ocId) {
 // La tabla la crea db_sg.js al arrancar. Si no existe —una base de prueba que no la
 // armó—, no hay devoluciones: se cuenta cero en vez de tirar la pantalla.
 const _hayDevoluciones = new WeakMap();
+const _hayTabla = (db, nombre) => !!db.prepare(
+  "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(nombre);
 export function devueltoPorItemDeOC(db, ocId) {
   if (!_hayDevoluciones.has(db)) {
-    _hayDevoluciones.set(db, !!db.prepare(`SELECT 1 FROM sqlite_master
-      WHERE type='table' AND name='sg_devolucion_items'`).get()
-      && !!db.prepare(`SELECT 1 FROM sqlite_master
-      WHERE type='table' AND name='sg_devoluciones'`).get());
+    _hayDevoluciones.set(db, {
+      remito: _hayTabla(db, 'sg_devolucion_items') && _hayTabla(db, 'sg_devoluciones'),
+      // Y LA QUE SALE DE LA CÁMARA (V1044): mercadería que estaba en un piso y se le
+      // devolvió al proveedor. Es la misma deuda que baja, así que es la misma cuenta.
+      stock: _hayTabla(db, 'sg_devolucion_stock_items') && _hayTabla(db, 'sg_devoluciones_stock'),
+    });
   }
+  const hay = _hayDevoluciones.get(db);
   const porItem = new Map();
-  if (!_hayDevoluciones.get(db)) return { bultos: 0, kg: 0, hay: false, porItem };
+  if (!hay.remito && !hay.stock) return { bultos: 0, kg: 0, hay: false, porItem };
   // La marca congelada manda, no el estado de hoy de la partida: si se recalculara,
   // liquidar la partida haría que las devoluciones viejas dejaran de descontar de
   // golpe. NULL cuenta como que descuenta: son las filas de antes de la marca.
+  const partes = [];
+  if (hay.remito) {
+    partes.push(`SELECT dvi.lote_id, dvi.bultos, dvi.kg
+      FROM sg_devolucion_items dvi
+      JOIN sg_devoluciones dv ON dv.id = dvi.devolucion_id AND dv.estado = 'registrada'
+     WHERE dvi.destino = 'proveedor' AND COALESCE(dvi.descuenta_al_productor, 1) = 1`);
+  }
+  if (hay.stock) {
+    partes.push(`SELECT it.lote_id, it.bultos, it.kg
+      FROM sg_devolucion_stock_items it
+      JOIN sg_devoluciones_stock ds ON ds.id = it.devolucion_id AND ds.estado = 'registrada'
+     WHERE it.descuenta_al_productor = 1`);
+  }
   const rows = db.prepare(`SELECT l.oc_item_id AS item,
-      COALESCE(SUM(dvi.bultos),0) AS bultos,
-      COALESCE(SUM(dvi.kg),0) AS kg,
-      COALESCE(SUM(CASE WHEN COALESCE(l.bultos,0) > 0 THEN dvi.kg ELSE 0 END),0) AS kg_con_bultos
-    FROM sg_devolucion_items dvi
-    JOIN sg_devoluciones dv ON dv.id = dvi.devolucion_id AND dv.estado = 'registrada'
-    JOIN sg_lotes l ON l.id = dvi.lote_id AND l.activo = 1
+      COALESCE(SUM(d.bultos),0) AS bultos,
+      COALESCE(SUM(d.kg),0) AS kg,
+      COALESCE(SUM(CASE WHEN COALESCE(l.bultos,0) > 0 THEN d.kg ELSE 0 END),0) AS kg_con_bultos
+    FROM (${partes.join(' UNION ALL ')}) d
+    JOIN sg_lotes l ON l.id = d.lote_id AND l.activo = 1
     JOIN sg_oc_items i ON i.id = l.oc_item_id
-   WHERE i.oc_id = ? AND dvi.destino = 'proveedor'
-     AND COALESCE(dvi.descuenta_al_productor, 1) = 1
+   WHERE i.oc_id = ?
    GROUP BY l.oc_item_id`).all(ocId);
   let bultos = 0, kg = 0;
   for (const x of rows) {

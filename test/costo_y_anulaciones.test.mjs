@@ -74,7 +74,9 @@ test('un remito ya facturado no se puede anular a secas', () => {
   // Y que el freno use la regla compartida de qué factura cuenta: una rechazada
   // por AFIP no debería trabar la anulación del remito.
   const i = SG.indexOf('ya está facturado');
-  const tramo = SG.slice(Math.max(0, i - 800), i);
+  // Desde el comienzo del handler, no «800 caracteres para atrás»: entre la consulta de
+  // la factura y el mensaje se sumó el freno de la devolución al productor (V1044).
+  const tramo = SG.slice(SG.lastIndexOf("router.post('/despachos/:id/anular'", i), i);
   assert.match(tramo, /facturaCuenta\('f'\)/,
     'el freno tiene que usar facturaCuenta: una factura rechazada no cuenta');
 });

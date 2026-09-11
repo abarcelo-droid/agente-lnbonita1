@@ -249,9 +249,14 @@ test('los bultos recibidos salen de la partida, no de un campo que puede no exis
   //
   // No se veía mientras el precio por cajón se prellenaba —ahí la base salía de
   // multiplicar— y apareció en cuanto una partida tuvo DOS precios.
-  const i = PANEL.indexOf('var _recib = Number((eid(\'liq-bultos-in\') || {}).value)');
-  assert.ok(i > 0, 'el despeje sigue leyendo sólo el campo');
-  assert.match(PANEL.slice(i, i + 220), /\|\| Number\(\(\(LIQ\.venta\) \|\| \{\}\)\.bultos_ingresados\) \|\| 0;/);
+  // Desde la V1044 lee PRIMERO lo que se liquida —lo que entró menos lo que se le
+  // devolvió al productor—, y sigue sin depender del campo: si el campo no existe,
+  // la partida lo contesta.
+  const i = PANEL.indexOf('var _recib = (_v.bultos_a_liquidar != null ? Number(_v.bultos_a_liquidar) : null)');
+  assert.ok(i > 0, 'el despeje no lee lo que se liquida');
+  const b = PANEL.slice(i, PANEL.indexOf(';', i) + 1);
+  assert.match(b, /\|\| Number\(\(eid\('liq-bultos-in'\) \|\| \{\}\)\.value\)/);
+  assert.match(b, /\|\| Number\(_v\.bultos_ingresados\) \|\| 0;/);
 });
 
 test('y el despeje se rehace cuando el cuadro ya está dibujado', () => {

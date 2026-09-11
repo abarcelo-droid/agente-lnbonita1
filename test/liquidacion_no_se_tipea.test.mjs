@@ -54,7 +54,12 @@ test('los bultos a liquidar son los que entraron, y no se tipean', () => {
 test('y el de arriba dice el mismo número que el de abajo', () => {
   // Es el mismo dato dicho dos veces en la misma pantalla: si uno se pudiera
   // tocar y el otro no, se contradicen.
-  assert.match(PANEL, /cc\.value = Number\(r\.bultos_ingresados\) \|\| Number\(r\.bultos_vendidos\) \|\| '';/);
+  //
+  // Desde la V1044 los dos dicen lo que QUEDÓ para liquidar —lo que entró menos lo que se
+  // le devolvió al productor sin firmar—, que es lo que controla el servidor. Lo que
+  // importa es que salgan del MISMO dato, con el mismo respaldo.
+  assert.match(PANEL, /cc\.value = \(r\.bultos_a_liquidar != null \? Number\(r\.bultos_a_liquidar\) : Number\(r\.bultos_ingresados\)\)\r?\n\s*\|\| Number\(r\.bultos_vendidos\) \|\| '';/);
+  assert.match(PANEL, /id="liq-bultos-liq"[^\n]*\r?\n\s*\+ \(r\.bultos_a_liquidar != null \? r\.bultos_a_liquidar : \(r\.bultos_ingresados \|\| 0\)\)/);
 });
 
 test('el renglón del artículo se sincroniza donde se fija el número', () => {
