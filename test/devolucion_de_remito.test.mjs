@@ -55,6 +55,8 @@ const FORMULAS = (() => {
     // SUM_DEV_PROV se escribe entero y no con el armador `SUM_DEV`, porque además
     // del destino mira la marca congelada: va en varias líneas.
     trozo('const SUM_DEV_PROV ', ';\r\n') + ';',
+    // La devolución al proveedor desde la cámara (V1044): otra salida del lote.
+    trozo('const SUM_DEV_CAMARA ', ';\r\n') + ';',
     trozo('const KG_VIGENTE_STOCK =', '\r\n'),
     trozo('const KG_DISPONIBLE =', '\r\n'),
     trozo('const KG_INGRESADO_NETO =', '\r\n'),
@@ -78,6 +80,10 @@ function base() {
     CREATE TABLE sg_devolucion_items (id INTEGER PRIMARY KEY, devolucion_id INTEGER,
       despacho_item_id INTEGER, lote_id INTEGER, kg REAL, bultos REAL, destino TEXT, piso_id INTEGER,
       descuenta_al_productor INTEGER);
+    -- La devolución al proveedor desde la cámara (V1044): las fórmulas la restan.
+    CREATE TABLE sg_devoluciones_stock (id INTEGER PRIMARY KEY, estado TEXT);
+    CREATE TABLE sg_devolucion_stock_items (id INTEGER PRIMARY KEY, devolucion_id INTEGER,
+      lote_id INTEGER, kg REAL, bultos REAL, descuenta_al_productor INTEGER);
     -- Una partida de 1000 kg. Salieron 400 con un remito.
     INSERT INTO sg_lotes VALUES (1, 1000, 50);
     INSERT INTO sg_despachos VALUES (7, 1);

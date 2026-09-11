@@ -124,8 +124,11 @@ function traerMargen() {
   const i = SG.indexOf('function recalcMargenDespachos(db, loteId) {');
   assert.ok(i > 0);
   const src = SG.slice(i, SG.indexOf('\n}', i) + 2);
+  // SUM_DEV_CAMARA la usa el divisor (V1044): se trae del router, no se copia.
+  const jSum = SG.indexOf('const SUM_DEV_CAMARA ');
+  const sum = SG.slice(jSum, SG.indexOf(';\r\n', jSum) + 1);
   // eslint-disable-next-line no-new-func
-  return new Function(src + '; return recalcMargenDespachos;')();
+  return new Function(sum + '\n' + src + '; return recalcMargenDespachos;')();
 }
 const recalcMargen = traerMargen();
 
@@ -141,6 +144,10 @@ function baseMargen() {
       kg_transformados REAL);
     CREATE TABLE sg_reprocesos (id INTEGER PRIMARY KEY, lote_madre_id INTEGER,
       estado TEXT, kg_procesados REAL);
+    -- La devolución al proveedor desde la cámara (V1044): las fórmulas la restan.
+    CREATE TABLE sg_devoluciones_stock (id INTEGER PRIMARY KEY, estado TEXT);
+    CREATE TABLE sg_devolucion_stock_items (id INTEGER PRIMARY KEY, devolucion_id INTEGER,
+      lote_id INTEGER, kg REAL, bultos REAL, descuenta_al_productor INTEGER);
   `);
   db.prepare('INSERT INTO sg_lotes VALUES (1, 1000, 500000)').run();   // $500/kg
   db.prepare('INSERT INTO sg_despachos VALUES (1, 1), (2, 0)').run();  // el 2 está anulado

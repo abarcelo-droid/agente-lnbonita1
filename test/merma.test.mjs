@@ -46,6 +46,10 @@ test('lo que se tira sale de lo disponible', () => {
     CREATE TABLE sg_devolucion_items (id INTEGER PRIMARY KEY, devolucion_id INTEGER,
       despacho_item_id INTEGER, lote_id INTEGER, kg REAL, bultos REAL, destino TEXT, piso_id INTEGER,
       descuenta_al_productor INTEGER);
+    -- La devolución al proveedor desde la cámara (V1044): las fórmulas la restan.
+    CREATE TABLE sg_devoluciones_stock (id INTEGER PRIMARY KEY, estado TEXT);
+    CREATE TABLE sg_devolucion_stock_items (id INTEGER PRIMARY KEY, devolucion_id INTEGER,
+      lote_id INTEGER, kg REAL, bultos REAL, descuenta_al_productor INTEGER);
     INSERT INTO sg_lotes VALUES (1, 1000, 50);
   `);
   const src = [
@@ -55,6 +59,7 @@ test('lo que se tira sale de lo disponible', () => {
     trozo('const SUM_DEV = (destino)', ';\r\n') + ';',
     trozo('const SUM_DEV_STOCK =', '\r\n'),
     trozo('const SUM_DEV_PROV ', ';\r\n') + ';',
+    trozo('const SUM_DEV_CAMARA ', ';\r\n') + ';',
     trozo('const KG_VIGENTE_STOCK =', '\r\n'),
     trozo('const KG_DISPONIBLE =', '\r\n'),
   ].join('\n');
@@ -74,7 +79,8 @@ test('lo que se tira sale de lo disponible', () => {
 
 test('no se puede tirar más de lo que hay', () => {
   const b = trozo("router.post('/lotes/:id/decomiso'", '\r\n});');
-  assert.match(b, /const disp = \(lote\.kg_reales \|\| 0\) - kgDespachados\(db, lote\.id\) - kgDecomisado\(db, lote\.id\) - kgTransformado\(db, lote\.id\);/);
+  // Y lo devuelto al proveedor desde la cámara (V1044): tampoco se puede tirar.
+  assert.match(b, /const disp = \(lote\.kg_reales \|\| 0\) - kgDespachados\(db, lote\.id\) - kgDecomisado\(db, lote\.id\) - kgTransformado\(db, lote\.id\)\r?\n\s*- kgDevueltoCamara\(db, lote\.id\);/);
   assert.match(b, /if \(kg > disp \+ 0\.01\)/);
 });
 
@@ -135,15 +141,18 @@ test('la solapa está en Stock, no en Reprocesos', () => {
   // Tirar mercadería es una operación de STOCK: el que la carga está parado en la
   // cámara mirando la partida, no reprocesando nada.
   const i = PANEL.indexOf('id="sec-sg-stock"');
-  const b = PANEL.slice(i, i + 2600);
+  // Hasta donde empieza la solapa de partidas, no «los próximos 2.600 caracteres»:
+  // la cuarta solapa (devoluciones al proveedor, V1044) empujó la de merma afuera.
+  const b = PANEL.slice(i, PANEL.indexOf('<div id="sg-st-tab-partidas">', i));
   assert.match(b, /onclick="sgStockTab\('merma'\)">🗑️ Merma<\/button>/);
   assert.match(b, /id="sg-st-tab-merma"/);
   // Y las tres solapas se manejan por una tabla: con ifs encadenados, agregar la
   // cuarta es tocar cinco líneas y olvidarse de alguna.
   // SG_STOCK_TABS se declara ARRIBA de la funcion: se corta desde ahi.
   const j = PANEL.indexOf('var SG_STOCK_TABS =');
-  const c = PANEL.slice(j, j + 800);
-  assert.match(c, /var SG_STOCK_TABS = \['partidas', 'pisos', 'merma'\];/);
+  const c = PANEL.slice(j, j + 900);
+  // La lista creció con la cuarta (V1044): lo que importa es que merma siga en ella.
+  assert.match(c, /var SG_STOCK_TABS = \['partidas', 'pisos', 'merma'(, '[a-z]+')*\];/);
   assert.match(c, /if \(elegida === 'merma'\) sgMermaLoad\(\);/);
 });
 

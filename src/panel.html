@@ -2872,6 +2872,13 @@ input[type=number]{-moz-appearance:textfield;appearance:textfield}
            —lo que hay, dónde está— y el que la carga está parado en la cámara
            mirando la partida, no reprocesando nada. -->
       <button class="btn bo" id="sg-st-tb-merma" onclick="sgStockTab('merma')">🗑️ Merma</button>
+      <!-- ── ↩️ DEVOLUCIONES AL PROVEEDOR ─────────────────────────────────
+           Pablo, 9/9/2026: «desde el stock también necesitamos poder devolver
+           mercadería al proveedor». Va al lado de la merma porque es lo mismo para
+           la cámara —la mercadería sale del piso sin venderse— y distinto para la
+           plata: la merma la paga la partida, la devolución se la lleva el
+           proveedor. -->
+      <button class="btn bo" id="sg-st-tb-devprov" onclick="sgStockTab('devprov')">↩️ Devoluciones al proveedor</button>
       <button class="btn bo bs" style="margin-left:auto" onclick="sgManualAbrir('stock')">❓ ¿Cómo se usa?</button>
     </div>
     <div id="sg-st-tab-merma" style="display:none">
@@ -2905,6 +2912,43 @@ input[type=number]{-moz-appearance:textfield;appearance:textfield}
           <th style="text-align:right">Cajones</th><th style="text-align:right">Costo</th>
           <th>Motivo</th><th style="text-align:center">Foto</th></tr></thead>
         <tbody id="sg-tb-merma"><tr><td colspan="7" class="emp">Cargando…</td></tr></tbody>
+      </table></div>
+    </div>
+    <div id="sg-st-tab-devprov" style="display:none">
+      <style>
+        /* Una línea por devolución y nada de costado, como la lista de merma. */
+        #sg-st-tab-devprov .ab-table-wrap{overflow-x:hidden !important}
+        #sg-st-tab-devprov table{table-layout:fixed;width:100%}
+        #sg-st-tab-devprov th,#sg-st-tab-devprov td{white-space:nowrap}
+        #sg-st-tab-devprov th:nth-child(1),#sg-st-tab-devprov td:nth-child(1){width:15%}
+        #sg-st-tab-devprov th:nth-child(2),#sg-st-tab-devprov td:nth-child(2){width:8%}
+        #sg-st-tab-devprov th:nth-child(3),#sg-st-tab-devprov td:nth-child(3){width:16%}
+        #sg-st-tab-devprov th:nth-child(4),#sg-st-tab-devprov td:nth-child(4){width:auto}
+        #sg-st-tab-devprov th:nth-child(5),#sg-st-tab-devprov td:nth-child(5){width:8%}
+        #sg-st-tab-devprov th:nth-child(6),#sg-st-tab-devprov td:nth-child(6){width:9%}
+        #sg-st-tab-devprov th:nth-child(7),#sg-st-tab-devprov td:nth-child(7){width:10%}
+        #sg-st-tab-devprov th:nth-child(8),#sg-st-tab-devprov td:nth-child(8){width:84px}
+        #sg-st-tab-devprov td:nth-child(-n+4),#sg-st-tab-devprov td:nth-child(7){overflow:hidden;text-overflow:ellipsis}
+        #sg-st-tab-devprov td:nth-child(8){text-align:right}
+        #sg-st-tab-devprov td:nth-child(8) .btn{padding:3px 6px}
+        @media(max-width:900px){
+          #sg-st-tab-devprov .ab-table-wrap{overflow-x:auto !important}
+          #sg-st-tab-devprov table{table-layout:auto}
+        }
+      </style>
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;flex-wrap:wrap;margin-bottom:10px">
+        <div style="font-size:11.5px;color:var(--mut);max-width:62ch">
+          Mercadería que está en la cámara y <b>se le devuelve al proveedor</b>. Sale de la
+          partida y del piso con su remito de devolución. Si la partida no tenía el precio
+          firme, <b>baja lo que se le debe</b> y el costo de la partida.
+        </div>
+        <button class="btn bb" id="sg-dvp-btn-nueva" onclick="sgDvpAbrir()">+ Devolver al proveedor</button>
+      </div>
+      <div class="ab-table-wrap"><table class="pa-tbl">
+        <thead><tr><th>N°</th><th>Fecha</th><th>Proveedor</th><th>Qué se devolvió</th>
+          <th style="text-align:right">Cajones</th><th style="text-align:right">Kg</th>
+          <th style="text-align:center">Deuda</th><th></th></tr></thead>
+        <tbody id="sg-tb-devprov"><tr><td colspan="8" class="emp">Cargando…</td></tr></tbody>
       </table></div>
     </div>
     <div id="sg-st-tab-partidas">
@@ -7650,6 +7694,54 @@ input[type=number]{-moz-appearance:textfield;appearance:textfield}
         <div style="text-align:right;margin-top:14px">
           <button class="btn bo" onclick="closeMB('sg-merma-modal')">Cancelar</button>
           <button class="btn bd" id="sg-merma-btn" onclick="sgMermaGuardar()">Registrar la merma</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ══ ↩️ DEVOLVERLE AL PROVEEDOR MERCADERÍA DE LA CÁMARA ════════════════════
+     Pablo, 9/9/2026: «desde el stock también necesitamos poder devolver
+     mercadería al proveedor».
+
+     El mismo buscador que la merma —producto, partida, piso— porque para la
+     cámara es la misma operación: sale mercadería de un piso sin venderse. Lo que
+     cambia es a quién va y qué pasa con la plata, y eso lo dice la pantalla antes
+     de guardar. Va al nivel de arriba, con los demás modales. -->
+<div class="ab-modal-overlay sg-mod" id="sg-dvp-modal">
+  <div class="ab-modal" style="width:min(900px,96vw);max-width:96vw;max-height:90vh;overflow-y:auto;overflow-x:hidden">
+    <div class="mhd"><div class="mht">↩️ Devolverle mercadería al proveedor</div>
+      <button class="mcl" onclick="closeMB('sg-dvp-modal')">×</button></div>
+    <div class="mbd">
+      <div class="sgr-card">
+        <div class="fl"><label>¿Qué se devuelve? <span style="color:var(--err)">*</span></label>
+          <div id="sg-dvp-pick"></div></div>
+        <div id="sg-dvp-sel" style="margin-top:10px"></div>
+
+        <!-- EL MOTIVO ES OBLIGATORIO: es lo que después se le reclama al proveedor. -->
+        <div class="fl" style="margin-top:10px"><label>¿Por qué se devuelve? <span style="color:var(--err)">*</span></label>
+          <select id="sg-dvp-motivo-sel" onchange="sgDvpMotivo()">
+            <option value="">— Elegí el motivo —</option>
+            <option>Llegó en mal estado</option>
+            <option>No es la calidad que se pactó</option>
+            <option>Calibre o tamaño distinto al pedido</option>
+            <option>No es el producto que se pidió</option>
+            <option>Sobrante que el proveedor retira</option>
+            <option value="otro">Otro (lo escribo)</option>
+          </select>
+          <input id="sg-dvp-motivo" maxlength="200" placeholder="detalle" style="margin-top:6px"></div>
+
+        <div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin-top:10px">
+          <div class="fl"><label>Fecha</label><input type="date" id="sg-dvp-fecha"></div>
+          <div class="fl"><label>Chofer</label><input id="sg-dvp-chofer" maxlength="80" placeholder="quién se la lleva"></div>
+          <div class="fl"><label>Dominio</label><input id="sg-dvp-dominio" maxlength="20" placeholder="patente"></div>
+        </div>
+
+        <!-- LO QUE PASA CON LA PLATA, dicho ANTES de guardar y también después. -->
+        <div id="sg-dvp-aviso" style="font-size:12px;margin-top:10px"></div>
+        <div style="text-align:right;margin-top:14px">
+          <button class="btn bo" onclick="closeMB('sg-dvp-modal')">Cancelar</button>
+          <button class="btn bb" id="sg-dvp-btn" onclick="sgDvpGuardar()">Registrar la devolución</button>
         </div>
       </div>
     </div>
@@ -14341,7 +14433,7 @@ function sgLoadOcRecibidas(){
 // sabe cuánto va a rendir.
 //
 // En BULTOS, que es como se cuenta el camión y como lo cuenta el proveedor.
-function sgAvanceBarra(vendidos, ingresados, merma){
+function sgAvanceBarra(vendidos, ingresados, merma, devueltos){
   // LO QUE CUENTA ES QUE LA PARTIDA ESTÉ TERMINADA, no sólo vendida.
   //
   // Pablo, 24/8/2026: "en una partida de 60 bultos ingresados puede pasar que
@@ -14352,10 +14444,12 @@ function sgAvanceBarra(vendidos, ingresados, merma){
   // en rojo para siempre y nunca daba "lista para liquidar". Lo que decide es que
   // no quede nada en el depósito: adentro todavía no se sabe cuánto va a rendir.
   var v = Number(vendidos) || 0, i = Number(ingresados) || 0, mm = Number(merma) || 0;
+  // Lo devuelto al proveedor desde la cámara también salió (V1044).
+  var dv = Number(devueltos) || 0;
   if (!(i > 0)) {
     return '<span style="color:var(--mut);font-size:11.5px">sin bultos cargados</span>';
   }
-  var term = v + mm;
+  var term = v + mm + dv;
   var pct = Math.round((term / i) * 1000) / 10;
   // Verde / amarillo / rojo. El corte en 80 es de Pablo.
   var col = pct >= 100 ? '#16a34a' : (pct >= 80 ? '#d19a1a' : '#dc2626');
@@ -14366,7 +14460,8 @@ function sgAvanceBarra(vendidos, ingresados, merma){
   // La merma se NOMBRA, no se esconde adentro del porcentaje: el que mira tiene
   // que saber que esos bultos salieron pero no los va a cobrar nadie.
   var det = nr(v) + ' de ' + nr(i) + ' bultos'
-    + (mm ? ' + ' + nr(mm) + ' de merma' : '');
+    + (mm ? ' + ' + nr(mm) + ' de merma' : '')
+    + (dv ? ' + ' + nr(dv) + ' devueltos al proveedor' : '');
   return '<div title="' + det + (mm ? ' (la merma sale a precio 0)' : '') + '">'
     + '<div style="height:8px;border-radius:6px;background:' + fondo + ';overflow:hidden">'
       + '<div style="height:100%;width:' + ancho + '%;background:' + col + '"></div></div>'
@@ -14423,7 +14518,8 @@ function liqCnt(id, n){
 function sgPartTerminada(p){
   var rec = Number(p.bultos_recibidos) || 0;
   if (rec <= 0) return false;                       // sin recibir no es terminada: es sin empezar
-  var fuera = (Number(p.bultos_vendidos) || 0) + (Number(p.bultos_merma) || 0);
+  var fuera = (Number(p.bultos_vendidos) || 0) + (Number(p.bultos_merma) || 0)
+    + (Number(p.bultos_devueltos_prov) || 0);
   return fuera >= rec - 0.01;                       // el centavo es contra la coma flotante
 }
 
@@ -14431,10 +14527,12 @@ function sgPartFaltaTxt(p){
   var rec = Number(p.bultos_recibidos) || 0;
   if (rec <= 0) return 'Todavía no entró mercadería de esta partida.';
   var vend = Number(p.bultos_vendidos) || 0, mer = Number(p.bultos_merma) || 0;
-  var faltan = Math.max(0, Math.round((rec - vend - mer) * 100) / 100);
+  var dev = Number(p.bultos_devueltos_prov) || 0;
+  var faltan = Math.max(0, Math.round((rec - vend - mer - dev) * 100) / 100);
   return 'Se liquida cuando salió todo. De ' + nr(rec) + ' bulto(s) salieron '
-    + nr(vend + mer) + ' (' + nr(vend) + ' vendidos'
-    + (mer > 0 ? ' y ' + nr(mer) + ' de merma' : '')
+    + nr(vend + mer + dev) + ' (' + nr(vend) + ' vendidos'
+    + (mer > 0 ? ', ' + nr(mer) + ' de merma' : '')
+    + (dev > 0 ? ', ' + nr(dev) + ' devueltos al proveedor' : '')
     + ') y quedan ' + nr(faltan) + ' en el depósito.';
 }
 
@@ -14460,7 +14558,7 @@ function sgLiqPartidasLoad(){
           + ' onchange="sgLiqSelCambio()" title="Liquidar junto con otras del mismo productor"></td>'
         : '<td></td>';
       return sgPartFila(p,
-        '<td>' + sgAvanceBarra(p.bultos_vendidos, p.bultos_recibidos, p.bultos_merma) + '</td>'
+        '<td>' + sgAvanceBarra(p.bultos_vendidos, p.bultos_recibidos, p.bultos_merma, p.bultos_devueltos_prov) + '</td>'
         + '<td style="text-align:center">'
         // DOS COSAS DISTINTAS, y antes las dos decían «cerrado»: CÓMO SE PACTÓ la
         // compra (abierto / cerrado, lo que decide a qué precio se liquida) y si
@@ -15205,7 +15303,7 @@ function liqBultosAvance(){
   var a = eid('liq-avance'); if (!a) return;
   var i = Number((eid('liq-bultos-in') || {}).value) || 0;
   var v = Number((eid('liq-bultos-liq') || {}).value) || 0;
-  a.innerHTML = sgAvanceBarra(v, i, (LIQ.venta || {}).bultos_merma);
+  a.innerHTML = sgAvanceBarra(v, i, (LIQ.venta || {}).bultos_merma, (LIQ.venta || {}).bultos_devueltos_prov);
 }
 
 function liqDePartida(ocId, partida, proveedor){
@@ -18786,7 +18884,7 @@ function sgStockBultosCell(l){
 // Tres solapas: lo que hay (partidas), dónde está (pisos) y lo que se tiró (merma).
 // Se manejan por una tabla y no con ifs encadenados: agregar una cuarta era tocar
 // cinco líneas y olvidarse de alguna.
-var SG_STOCK_TABS = ['partidas', 'pisos', 'merma'];
+var SG_STOCK_TABS = ['partidas', 'pisos', 'merma', 'devprov'];
 function sgStockTab(cual){
   var elegida = (SG_STOCK_TABS.indexOf(cual) >= 0) ? cual : 'partidas';
   SG_STOCK_TABS.forEach(function(t){
@@ -18795,6 +18893,7 @@ function sgStockTab(cual){
   });
   if (elegida === 'pisos') sgPiLoad();
   if (elegida === 'merma') sgMermaLoad();
+  if (elegida === 'devprov') sgDvpLoad();
 }
 
 function sgLoteVer(id){
@@ -22189,6 +22288,187 @@ function sgMermaGuardar(){
 }
 
 // ══════════════════════════════════════════════════════════════════════════
+// ↩️ DEVOLVERLE AL PROVEEDOR MERCADERÍA DE LA CÁMARA
+// ══════════════════════════════════════════════════════════════════════════
+//
+// Pablo, 9/9/2026: «desde el stock también necesitamos poder devolver mercadería al
+// proveedor». Se devuelve UNA partida por vez, como la merma: el motivo es de esa
+// mercadería y de ninguna otra.
+var SGDVP = { sel: null };
+
+function sgDvpAbrir(){
+  SGDVP.sel = null;
+  // ABRE EN BLANCO: un formulario que sólo se esconde conserva lo de la vez pasada, y
+  // acá eso sería devolverle al proveedor la partida de otro.
+  eid('sg-dvp-motivo').value = ''; eid('sg-dvp-motivo-sel').value = '';
+  eid('sg-dvp-motivo').style.display = '';
+  eid('sg-dvp-chofer').value = ''; eid('sg-dvp-dominio').value = '';
+  eid('sg-dvp-fecha').value = new Date().toISOString().slice(0, 10);
+  eid('sg-dvp-aviso').innerHTML = '';
+  eid('sg-dvp-btn').disabled = true;
+  sgModalArriba('sg-dvp-modal');
+  sgDvpPintar();
+  // El mismo buscador que la merma: sólo lo que está en la cámara, por cajón y por
+  // piso. Lo que viene en camino no se puede devolver: todavía no llegó.
+  sgItemPicker({ contenedor:'sg-dvp-pick', modo:'merma', onAdd: sgDvpElegir });
+}
+
+function sgDvpElegir(tipo, fuenteId, kg, meta){
+  if (tipo !== 'lote') return;
+  var disp = Number(meta.kg_disponibles) || 0;
+  if (kg > disp + 0.01) { toast('No se puede devolver más de lo que hay: quedan ' + nr(disp) + ' kg', 'er'); return; }
+  SGDVP.sel = { lote_id: fuenteId, kg: kg, bultos: meta.bultos, kg_por_bulto: meta.kg_por_bulto,
+    codigo_lote: meta.codigo_lote || meta.label, producto: meta.producto_nombre || '',
+    piso_id: meta.piso_id || null, piso_nombre: meta.piso_nombre || '', kg_disponibles: disp };
+  sgDvpPintar();
+}
+function sgDvpQuitar(){ SGDVP.sel = null; sgDvpPintar(); }
+
+function sgDvpPintar(){
+  var d = eid('sg-dvp-sel'), b = eid('sg-dvp-btn'); if (!d) return;
+  var x = SGDVP.sel;
+  if (!x) {
+    d.innerHTML = '<div style="font-size:12px;color:var(--mut)">Elegí el producto, después la partida, '
+      + 'escribí los cajones en el renglón del piso del que salen y apretá «+».</div>';
+    if (b) b.disabled = true;
+    return;
+  }
+  d.innerHTML = '<div style="padding:8px 10px;border:1px solid var(--bor);border-radius:8px">'
+    + '<div style="display:flex;gap:8px;align-items:center;justify-content:space-between">'
+      + '<div style="font-size:12.5px;min-width:0">'
+        + '<b>' + escH(x.producto || '') + '</b> · <code>' + escH(x.codigo_lote || '') + '</code>'
+        + (x.piso_nombre ? (' · 🏢 ' + escH(x.piso_nombre)) : '')
+        + '<div style="font-weight:700;margin-top:2px">'
+          + (x.bultos != null ? (nr(x.bultos) + ' cajones = ' + sgMilShow(x.kg) + ' kg') : (sgMilShow(x.kg) + ' kg'))
+        + '</div></div>'
+      + '<button class="btn bo bs" onclick="sgDvpQuitar()">Cambiar</button></div>'
+    // LO QUE PASA CON LA PLATA, antes de guardar. La regla la aplica el servidor —si
+    // la partida ya tiene precio firme no descuenta— y lo confirma después.
+    + '<div style="font-size:11.5px;color:var(--mut);margin-top:6px">Sale de la partida y del piso y '
+      + 'se la lleva el proveedor. Si la partida <b>no tiene el precio firme</b>, baja lo que se le '
+      + 'debe y el costo; si ya lo tiene, se registra igual y es pérdida nuestra.</div></div>';
+  if (b) b.disabled = false;
+}
+
+function sgDvpMotivo(){
+  var sel = eid('sg-dvp-motivo-sel').value, txt = eid('sg-dvp-motivo');
+  if (sel && sel !== 'otro') { txt.value = sel; txt.style.display = 'none'; }
+  else { if (sel === 'otro') txt.value = ''; txt.style.display = ''; txt.focus(); }
+}
+
+function sgDvpGuardar(){
+  var x = SGDVP.sel; if (!x) { toast('Elegí la partida', 'er'); return; }
+  var motivo = String(eid('sg-dvp-motivo').value || '').trim();
+  if (!motivo) { toast('El motivo es obligatorio: es lo que después se le reclama al proveedor', 'er'); return; }
+  var body = { motivo: motivo, piso_id: x.piso_id || null,
+    fecha: eid('sg-dvp-fecha').value || null,
+    chofer: (eid('sg-dvp-chofer').value || '').trim(), dominio: (eid('sg-dvp-dominio').value || '').trim() };
+  // En cajones si la partida los tiene; en kilos si entró pesada a granel.
+  if (x.bultos != null && Number(x.bultos) > 0) body.bultos = Number(x.bultos); else body.kg = Number(x.kg);
+  var b = eid('sg-dvp-btn'); b.disabled = true;
+  api('/api/sg/lotes/' + x.lote_id + '/devolver-proveedor', 'POST', body).then(function(r){
+    b.disabled = false;
+    if (!r || !r.ok) { toast((r && r.error) || 'No se pudo registrar la devolución', 'er'); return; }
+    toast('Devolución ' + (r.data.numero || '') + ' registrada', 'ok');
+    SGDVP.sel = null;
+    sgDvpLoad();
+    if (typeof sgLoadStock === 'function' && eid('sg-st-tab-partidas')
+        && eid('sg-st-tab-partidas').style.display !== 'none') sgLoadStock();
+    // EL REMITO SALE SOLO: es el papel que se sube al camión del proveedor.
+    sgDvpImprimir(r.data.id);
+    // SI NO BAJÓ LO QUE SE LE DEBE, LA VENTANA NO SE CIERRA: adentro queda lo que hay
+    // que leer. Un cartelito que se va solo no alcanza para decir «esto es pérdida».
+    if (r.data.aviso) {
+      eid('sg-dvp-aviso').innerHTML = '<div style="border:1.5px solid #e0a72e;background:rgba(224,167,46,.10);'
+        + 'border-radius:8px;padding:9px 11px;color:#9a3412">⚠️ ' + escH(r.data.aviso) + '</div>';
+      sgDvpPintar();
+      eid('sg-dvp-btn').disabled = true;
+      return;
+    }
+    closeMB('sg-dvp-modal');
+  });
+}
+
+function sgDvpLoad(){
+  var tb = eid('sg-tb-devprov'); if (!tb) return;
+  var nb = eid('sg-dvp-btn-nueva');
+  if (nb) nb.style.display = lnbPuedeOperar('sg-stock') ? '' : 'none';
+  tb.innerHTML = '<tr><td colspan="8" class="emp">Cargando…</td></tr>';
+  api('/api/sg/devoluciones-stock').then(function(r){
+    var rows = (r && r.ok) ? (r.data || []) : [];
+    if (!rows.length) { tb.innerHTML = '<tr><td colspan="8" class="emp">Todavía no se le devolvió nada a ningún proveedor.</td></tr>'; return; }
+    tb.innerHTML = rows.map(function(d){
+      var anulada = d.estado === 'anulada';
+      var que = (d.productos || '') + (d.partidas ? (' · ' + d.partidas) : '');
+      var deuda = anulada ? '<span class="bdg ber" title="' + escH(d.anulado_motivo || '') + '">Anulada</span>'
+        : (Number(d.descuenta) === 1
+            ? '<span class="bdg bok" title="Le bajó lo que se le debe y el costo de la partida">Descontó</span>'
+            : '<span class="bdg bpe" title="La partida ya tenía el precio firme: es pérdida nuestra">Firme</span>');
+      return '<tr' + (anulada ? ' style="opacity:.55"' : '') + '>'
+        + '<td title="' + escH(d.numero || '') + '"><code>' + escH(d.numero || '') + '</code></td>'
+        + '<td title="' + escH(d.fecha || '') + '">' + sgDespFechaCorta(d.fecha) + '</td>'
+        + '<td title="' + escH(d.proveedor_nombre || '') + '">' + escH(d.proveedor_nombre || '—') + '</td>'
+        + '<td title="' + escH(que + ' — ' + (d.motivo || '')) + '">' + escH(que || '—') + '</td>'
+        + '<td style="text-align:right">' + nr(d.bultos) + '</td>'
+        + '<td style="text-align:right">' + sgMilShow(d.kg) + '</td>'
+        + '<td style="text-align:center">' + deuda + '</td>'
+        + '<td>'
+          + '<button class="btn bo bs" title="Imprimir el remito de devolución" onclick="sgDvpImprimir(' + d.id + ')">🖨</button>'
+          + ((!anulada && lnbPuedeAnular('sg-stock'))
+              ? ' <button class="btn bd bs" title="Anular la devolución" onclick="sgDvpAnular(' + d.id + ')">✖</button>' : '')
+        + '</td></tr>';
+    }).join('');
+  });
+}
+
+// ── EL REMITO DE DEVOLUCIÓN ────────────────────────────────────────────────
+// Lo firma el chofer del proveedor: es la prueba de que se la llevó y de cuánto.
+function sgDvpImprimir(id){
+  api('/api/sg/devoluciones-stock/' + id).then(function(r){
+    if (!r || !r.ok) { toast((r && r.error) || 'No se pudo abrir la devolución', 'er'); return; }
+    var d = r.data, its = d.items || [];
+    var h = '<h1>Remito de devolución ' + escH(d.numero || '') + '</h1>'
+      + '<h2>PUENTE CORDON SA · San Ger\u00f3nimo · MCBA Nave 4</h2>'
+      + (d.estado === 'anulada' ? '<div style="border:2px solid #b91c1c;color:#b91c1c;font-weight:700;'
+          + 'padding:6px 10px;margin:0 0 12px;text-align:center">ANULADA — ' + escH(d.anulado_motivo || '') + '</div>' : '')
+      + '<table style="margin-bottom:14px"><tbody>'
+      + '<tr><td><b>Se le devuelve a</b></td><td>' + escH(d.proveedor_nombre || '—')
+        + (d.proveedor_cuit ? (' · CUIT ' + escH(d.proveedor_cuit)) : '') + '</td>'
+        + '<td><b>Fecha</b></td><td>' + escH(d.fecha || '—') + '</td></tr>'
+      + '<tr><td><b>Chofer / dominio</b></td><td>' + escH(d.chofer || '—') + ' · ' + escH(d.dominio || '—') + '</td>'
+        + '<td><b>Motivo</b></td><td>' + escH(d.motivo || '—') + '</td></tr>'
+      + '</tbody></table>'
+      + '<table><thead><tr><th>Orden</th><th>Partida</th><th>Producto</th><th>Envase</th>'
+      + '<th class="d">Cajones</th><th class="d">Kg/bulto</th><th class="d">Kg</th></tr></thead><tbody>'
+      + its.map(function(it){
+          var bu = Number(it.bultos) || 0, kg = Number(it.kg) || 0;
+          return '<tr><td>' + escH(it.oc_numero || '—') + '</td><td><code>' + escH(it.codigo_lote || '') + '</code></td>'
+            + '<td>' + escH(it.producto_nombre || '') + '</td><td>' + escH(it.envase_nombre || '—') + '</td>'
+            + '<td class="d">' + (bu > 0 ? nr(bu) : '—') + '</td>'
+            + '<td class="d">' + (bu > 0 ? sgMilShow(Math.round(kg / bu * 100) / 100) : '—') + '</td>'
+            + '<td class="d">' + sgMilShow(kg) + '</td></tr>';
+        }).join('')
+      + '</tbody></table>'
+      + '<div style="margin-top:34px;display:flex;gap:40px;font-size:11px">'
+      + '<div style="flex:1;border-top:1px solid #333;padding-top:4px">Entregué conforme</div>'
+      + '<div style="flex:1;border-top:1px solid #333;padding-top:4px">Recib\u00ed conforme (proveedor)</div></div>';
+    _ccImprimir('Devolución ' + (d.numero || ''), h);
+  });
+}
+
+function sgDvpAnular(id){
+  var motivo = prompt('¿Por qué se anula? La mercadería vuelve al piso del que salió.');
+  if (motivo == null) return;
+  motivo = String(motivo).trim();
+  if (!motivo) { toast('Poné el motivo: sin él, a los dos meses nadie puede explicar esta anulación', 'er'); return; }
+  api('/api/sg/devoluciones-stock/' + id + '/anular', 'POST', { motivo: motivo }).then(function(r){
+    if (!r || !r.ok) { toast((r && r.error) || 'No se pudo anular', 'er'); return; }
+    toast('Devolución anulada: la mercadería volvió al piso', 'ok');
+    sgDvpLoad();
+  });
+}
+
+// ══════════════════════════════════════════════════════════════════════════
 // 💡 MEJORAS — UNA SOLA PUERTA PARA PEDIR QUE ALGO SE ARREGLE
 // ══════════════════════════════════════════════════════════════════════════
 //
@@ -24112,13 +24392,15 @@ SG_MANUAL.stock = { titulo: 'Stock', html:
   + 'vence</b>. Todo lo que se ve acá nació en una recepción y va a morir en un '
   + 'remito o en una merma — no se carga stock a mano.</p>'
 
-  + '<h3>Las tres solapas</h3>'
+  + '<h3>Las cuatro solapas</h3>'
   + '<ul>'
   + '<li><b>Partidas</b> — qué hay, con su costo por kilo, su calidad y a cuántos '
   + 'días vence. El punto de color es el semáforo.</li>'
   + '<li><b>Por piso</b> — dónde está. La suma de los pisos tiene que dar exactamente '
   + 'lo disponible: si no da, hay mercadería anotada en un lugar donde no está.</li>'
   + '<li><b>Merma</b> — lo que se tiró.</li>'
+  + '<li><b>Devoluciones al proveedor</b> <span class="ver">V1044</span> — lo que se le '
+  + 'devolvió al proveedor desde la cámara.</li>'
   + '</ul>'
 
   + '<h3>🗑️ Merma <span class="ver">V993</span></h3>'
@@ -24164,8 +24446,36 @@ SG_MANUAL.stock = { titulo: 'Stock', html:
   + 'entrada aparte y se explica en el motivo — dejar borrar mermas es dejar que '
   + 'desaparezca la única prueba de por qué faltan kilos.</div>'
 
+  + '<h3>↩️ Devolverle mercadería al proveedor <span class="ver">V1044</span></h3>'
+  + '<p>Para la mercadería que <b>está en la cámara</b> y se la lleva el proveedor: llegó en '
+  + 'mal estado, no es la calidad que se pactó, no es lo que se pidió. Se abre con '
+  + '<b>+ Devolver al proveedor</b> y se elige igual que la merma: producto, partida y los '
+  + 'cajones en el renglón del piso del que salen.</p>'
+  + '<ul>'
+  + '<li><b>Para la cámara es como la merma</b>: baja lo <b>disponible</b>, los <b>cajones</b> y '
+  + 'el <b>piso</b>. Esos cajones no se pueden remitir más.</li>'
+  + '<li><b>Para la plata, no.</b> Si la partida <b>no tiene el precio firme</b> —no llegó la '
+  + 'factura ni se liquidó—, <b>baja lo que se le debe al proveedor</b>, por producto y a su '
+  + 'precio, y <b>baja el costo de la partida</b>: el costo por kilo de lo que queda no cambia.</li>'
+  + '<li>Si la partida <b>ya tenía el precio firme</b>, la devolución se registra igual pero '
+  + '<b>no le baja la deuda</b>: es pérdida nuestra. La ventana <b>no se cierra</b> y lo dice. Si '
+  + 'el proveedor manda una nota de crédito, se carga en su cuenta corriente.</li>'
+  + '<li><b>El motivo es obligatorio</b>: es lo que después se le reclama.</li>'
+  + '<li>Al registrarla <b>sale su remito de devolución</b>, con la orden, la partida, el '
+  + 'envase y los kilos: es el papel que firma el chofer del proveedor.</li>'
+  + '</ul>'
+  + '<div class="ojo">Sólo se puede devolver una partida que <b>viene de una orden de '
+  + 'compra</b>: de ahí sale a quién se le devuelve y qué deuda baja. Una partida que salió '
+  + 'de un reproceso no tiene proveedor — si hay que sacarla, es una merma.</div>'
+  + '<p>Anular una devolución pide <b>motivo</b> y la mercadería <b>vuelve al piso del que '
+  + 'salió</b>, con su costo.</p>'
+  + '<p>No es lo mismo que la devolución de <b>Remitos y Facturación</b>: aquélla parte del '
+  + 'remito de un cliente —la mercadería ya estaba afuera—; ésta, de la cámara.</p>'
+
   + '<h3>Qué cambió, y desde cuándo</h3>'
   + '<ul>'
+  + '<li><span class="ver">V1044</span> Se le puede <b>devolver mercadería al proveedor '
+  + 'desde la cámara</b>, con su remito de devolución.</li>'
   + '<li><span class="ver">V994</span> La merma se elige con el <b>mismo buscador que '
   + 'la facturación</b> —producto y después partida— y cada partida se abre <b>por '
   + 'piso</b>: se dice de dónde sale. Antes salía por orden de piso, así que podía '

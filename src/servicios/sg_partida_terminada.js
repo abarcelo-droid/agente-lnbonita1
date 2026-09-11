@@ -28,6 +28,16 @@ import { kgPapelSql } from './sg_kilos_del_papel.js';
 
 const r2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
 
+// La tabla la crea db_sg.js al arrancar; una base de prueba puede no tenerla.
+const _devCamara = new WeakMap();
+function _hayDevCamara(db) {
+  if (!_devCamara.has(db)) {
+    _devCamara.set(db, !!db.prepare(`SELECT 1 FROM sqlite_master
+      WHERE type='table' AND name='sg_devolucion_stock_items'`).get());
+  }
+  return _devCamara.get(db);
+}
+
 export function avanceDePartida(db, ocId) {
   const id = Number(ocId);
   if (!Number.isInteger(id) || id <= 0) return null;
@@ -51,10 +61,20 @@ export function avanceDePartida(db, ocId) {
       JOIN sg_lotes l ON l.id = dc.lote_id AND l.activo = 1
       JOIN sg_oc_items i ON i.id = l.oc_item_id
      WHERE i.oc_id = ?`);
+  // LO DEVUELTO AL PROVEEDOR DESDE LA CÁMARA (V1044). Salió del depósito igual que lo
+  // vendido y lo tirado: sin esto, la partida a la que se le devolvieron cajones no
+  // terminaría nunca y no se podría liquidar. Se suma a lo terminado y NO se resta de
+  // lo recibido: hacer las dos cosas lo contaría dos veces.
+  const devueltos = _hayDevCamara(db) ? uno(`SELECT COALESCE(SUM(it.bultos),0) AS n
+      FROM sg_devolucion_stock_items it
+      JOIN sg_devoluciones_stock ds ON ds.id = it.devolucion_id AND ds.estado = 'registrada'
+      JOIN sg_lotes l ON l.id = it.lote_id AND l.activo = 1
+      JOIN sg_oc_items i ON i.id = l.oc_item_id
+     WHERE i.oc_id = ?`) : 0;
 
-  const terminado = r2(vendidos + merma);
+  const terminado = r2(vendidos + merma + devueltos);
   return {
-    recibidos, vendidos, merma, terminado,
+    recibidos, vendidos, merma, devueltos, terminado,
     faltan: r2(Math.max(0, recibidos - terminado)),
     // Con un bulto de tolerancia no: se cuenta por unidad. El centavo de tolerancia
     // es contra la coma flotante, no contra la mercadería.

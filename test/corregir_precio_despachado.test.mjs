@@ -31,7 +31,11 @@ const PANEL = fs.readFileSync(path.join(RAIZ, 'src/panel.html'), 'utf8');
 function traerFreno() {
   const i = SG.indexOf('function frenosDeEdicionLote(db, loteId, opts) {');
   assert.ok(i > 0, 'no existe frenosDeEdicionLote con la opción');
-  const src = SG.slice(i, SG.indexOf('\n}', i) + 2);
+  // El freno pregunta también por lo devuelto al proveedor desde la cámara (V1044):
+  // se trae la función de verdad, no una copia.
+  const k = SG.indexOf('function kgDevueltoCamara(db, loteId) {');
+  assert.ok(k > 0, 'no existe kgDevueltoCamara');
+  const src = SG.slice(k, SG.indexOf('\n}', k) + 2) + '\n' + SG.slice(i, SG.indexOf('\n}', i) + 2);
   const r2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
   // precioFirmeDetalle vive en otro módulo y se inyecta: acá se prueban los frenos
   // de ESTE archivo, y el de la partida documentada ya tiene sus propios tests.
@@ -58,6 +62,10 @@ function base(opts = {}) {
     CREATE TABLE sg_lote_reclasificaciones (id INTEGER PRIMARY KEY, lote_origen_id INTEGER,
       lote_destino_id INTEGER, anulada_en TEXT);
     CREATE TABLE sg_lote_decomisos (id INTEGER PRIMARY KEY, lote_id INTEGER, kg REAL);
+    -- La devolución al proveedor desde la cámara (V1044): las fórmulas la restan.
+    CREATE TABLE sg_devoluciones_stock (id INTEGER PRIMARY KEY, estado TEXT);
+    CREATE TABLE sg_devolucion_stock_items (id INTEGER PRIMARY KEY, devolucion_id INTEGER,
+      lote_id INTEGER, kg REAL, bultos REAL, descuenta_al_productor INTEGER);
   `);
   db.prepare('INSERT INTO sg_oc_items VALUES (1, 7)').run();
   db.prepare(`INSERT INTO sg_lotes (id, kg_reales, bultos, oc_item_id, transformado_de, reproceso_id)
@@ -256,8 +264,11 @@ test('la cuenta del margen corre y da', () => {
   // Margen = 300.000 − 180 × (810.000/810) = 300.000 − 180.000 = 120.000.
   const i = SG.indexOf('function recalcMargenDespachos(db, loteId) {');
   const src = SG.slice(i, SG.indexOf('\n}', i) + 2);
+  // SUM_DEV_CAMARA la usa el divisor (V1044): se trae del router, no se copia.
+  const jSum = SG.indexOf('const SUM_DEV_CAMARA ');
+  const sum = SG.slice(jSum, SG.indexOf(';\r\n', jSum) + 1);
   // eslint-disable-next-line no-new-func
-  const recalc = new Function(src + '; return recalcMargenDespachos;')();
+  const recalc = new Function(sum + '\n' + src + '; return recalcMargenDespachos;')();
   const db = base({ despachado: 180, subtotal: 300000, margen: 999 });
   db.exec('ALTER TABLE sg_lotes ADD COLUMN costo_final REAL');
   db.prepare('UPDATE sg_lotes SET costo_final = 810000 WHERE id = 1').run();
@@ -271,8 +282,11 @@ test('y con la partida mermada usa los kilos VIGENTES, no los que entraron', () 
   // merma concentra el costo en lo que queda, y ésa es la cuenta que hizo el remito.
   const i = SG.indexOf('function recalcMargenDespachos(db, loteId) {');
   const src = SG.slice(i, SG.indexOf('\n}', i) + 2);
+  // SUM_DEV_CAMARA la usa el divisor (V1044): se trae del router, no se copia.
+  const jSum = SG.indexOf('const SUM_DEV_CAMARA ');
+  const sum = SG.slice(jSum, SG.indexOf(';\r\n', jSum) + 1);
   // eslint-disable-next-line no-new-func
-  const recalc = new Function(src + '; return recalcMargenDespachos;')();
+  const recalc = new Function(sum + '\n' + src + '; return recalcMargenDespachos;')();
   const db = base({ despachado: 180, subtotal: 300000 });
   db.exec('ALTER TABLE sg_lotes ADD COLUMN costo_final REAL');
   db.prepare('UPDATE sg_lotes SET costo_final = 810000 WHERE id = 1').run();

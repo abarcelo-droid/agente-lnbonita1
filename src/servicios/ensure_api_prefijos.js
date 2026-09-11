@@ -158,7 +158,10 @@ const PREFIJOS = [
   // 'sg/pisos' y 'sg/stock-pisos' entran acá porque Pisos se plegó adentro de
   // Stock como solapa. Quedan declaradas TAMBIÉN bajo sg-pisos —el módulo se
   // escondió pero no se borró— para no sacarle el acceso a quien ya lo tenía.
-  ['sg-stock',           'sg/lotes,sg/disponibilidad,sg/decomisos,sg/pisos,sg/stock-pisos'],
+  // 'sg/devoluciones-stock' aparte: el prefijo matchea por segmento completo, así
+  // que ni 'sg/lotes' ni 'sg/devoluciones' (que es de Ventas) la cubren. Sin
+  // declararla, exigirNivel la dejaría pasar para cualquiera con sesión.
+  ['sg-stock',           'sg/lotes,sg/disponibilidad,sg/decomisos,sg/pisos,sg/stock-pisos,sg/devoluciones-stock'],
   // Los pisos son la apertura del stock: quien administra el stock los maneja,
   // y la pantalla propia tambien.
   ['sg-pisos',           'sg/pisos,sg/stock-pisos'],

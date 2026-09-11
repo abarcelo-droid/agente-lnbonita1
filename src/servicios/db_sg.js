@@ -1967,6 +1967,70 @@ try {
   console.error('[DB] SG migración sg_recepciones (oc_id nullable):', e.message);
 }
 
+// VA ACÁ Y NO JUNTO A LAS DEVOLUCIONES DE REMITO: el arreglo de márgenes de abajo
+// divide por los kilos vigentes de cada partida, y esos kilos restan lo devuelto
+// desde la cámara. Si la tabla se creara después, el primer arranque en una base
+// nueva contestaría «no such table» y se saltearía el arreglo.
+//
+// ══ LA DEVOLUCIÓN AL PROVEEDOR DESDE EL STOCK ══════════════════════════════
+//
+// Pablo, 9/9/2026: «Desde el stock también necesitamos poder devolver mercadería
+// al proveedor».
+//
+// ES OTRA SALIDA, NO LA MISMA CON OTRO NOMBRE. La devolución de arriba parte de un
+// remito: la mercadería ya había salido con el cliente, y lo que vuelve al productor
+// no toca lo disponible. Ésta parte de la CÁMARA: la mercadería está en un piso
+// nuestro, y devolverla la saca de lo disponible, del piso y —si la partida no
+// estaba firme— del costo y de lo que se le debe al productor.
+//
+// POR QUÉ TABLAS PROPIAS. Las de arriba exigen el renglón del remito (NOT NULL), y
+// SQLite no deja sacar esa obligación sin rehacer la tabla: rehacer una tabla con
+// datos de producción al arrancar es un riesgo que no hace falta correr. Y no va en
+// sg_lote_decomisos: la liquidación le lista al productor las mermas como
+// «mercadería que se tiró», y ésta no se tiró — la tiene él.
+//
+// Sin FK hacia sg_lotes ni sg_pisos, igual que sg_liquidacion_despachos: una FK
+// desde acá hace fallar los DELETE de otra parte del módulo.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS sg_devoluciones_stock (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    numero         TEXT UNIQUE,
+    -- A quien se le devuelve: el proveedor de la orden de la partida.
+    proveedor_id   INTEGER,
+    fecha          TEXT,
+    -- Obligatorio: una devolucion sin motivo no se le puede reclamar a nadie.
+    motivo         TEXT NOT NULL,
+    chofer         TEXT,
+    dominio        TEXT,
+    -- 'registrada' | 'anulada'. Se anula, no se borra: el papel salio con el camion.
+    estado         TEXT NOT NULL DEFAULT 'registrada',
+    creado_en      TEXT DEFAULT (datetime('now','localtime')),
+    creado_por     INTEGER,
+    anulado_en     TEXT,
+    anulado_por    INTEGER,
+    anulado_motivo TEXT
+  );
+
+  CREATE TABLE IF NOT EXISTS sg_devolucion_stock_items (
+    id                     INTEGER PRIMARY KEY AUTOINCREMENT,
+    devolucion_id          INTEGER NOT NULL REFERENCES sg_devoluciones_stock(id),
+    lote_id                INTEGER NOT NULL,
+    -- De que piso salio. NULL solo para mercaderia de antes de los pisos.
+    piso_id                INTEGER,
+    bultos                 REAL NOT NULL DEFAULT 0,
+    kg                     REAL NOT NULL DEFAULT 0,
+    -- Se decide al registrar y queda congelado, igual que en la devolucion de un
+    -- remito: 1 si la partida NO estaba firme (baja lo que se le debe y el costo),
+    -- 0 si ya estaba firme (se registra igual y es perdida nuestra).
+    -- El COSTO no se guarda: lo calcula recalcCostoLote con el precio de la partida.
+    -- Congelarlo aca estaria mal en una compra a pizarra: el precio se cierra despues
+    -- y lo devuelto tiene que salir a ESE precio, no a cero.
+    descuenta_al_productor INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_sg_dvpit_dev  ON sg_devolucion_stock_items(devolucion_id);
+  CREATE INDEX IF NOT EXISTS idx_sg_dvpit_lote ON sg_devolucion_stock_items(lote_id);
+`);
+
 // ── BACKFILL idempotente: margen_estimado por kg ────────────────────────────────
 // Bug F4: el margen se grababa como subtotal − kg_despachados × costo_final, pero
 // costo_final es el costo TOTAL del lote, no por kg. El front del modal ya calculaba
@@ -1989,7 +2053,12 @@ const MARGEN_COSTO_KG = `COALESCE(
     l.kg_reales
     - COALESCE((SELECT SUM(kg) FROM sg_lote_decomisos WHERE lote_id = l.id),0)
     - COALESCE((SELECT SUM(kg_transformados) FROM sg_transformaciones
-                 WHERE lote_origen_id = l.id),0), 0), 0)`;
+                 WHERE lote_origen_id = l.id),0)
+    -- Lo devuelto al proveedor desde la camara, igual que el remito: si no, cada
+    -- arranque reescribiria el margen con otro divisor.
+    - COALESCE((SELECT SUM(dvc.kg) FROM sg_devolucion_stock_items dvc
+                 JOIN sg_devoluciones_stock dsc ON dsc.id = dvc.devolucion_id AND dsc.estado = 'registrada'
+                 WHERE dvc.lote_id = l.id),0), 0), 0)`;
 try {
   db.exec(`
     UPDATE sg_despacho_items
