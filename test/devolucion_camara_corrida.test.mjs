@@ -85,7 +85,8 @@ function base(opts = {}) {
     CREATE TABLE sg_pisos (id INTEGER PRIMARY KEY, nombre TEXT, codigo TEXT, orden INTEGER);
     CREATE TABLE sg_lote_ubicaciones (id INTEGER PRIMARY KEY AUTOINCREMENT, lote_id INTEGER, piso_id INTEGER,
       bultos REAL NOT NULL DEFAULT 0, kg REAL NOT NULL DEFAULT 0, UNIQUE(lote_id, piso_id));
-    CREATE TABLE sg_oc (id INTEGER PRIMARY KEY, proveedor_id INTEGER, flete_a_cargo TEXT, numero TEXT);
+    CREATE TABLE sg_oc (id INTEGER PRIMARY KEY, proveedor_id INTEGER, flete_a_cargo TEXT, numero TEXT, tipo_precio TEXT,
+      flete_pagado_por TEXT);
     CREATE TABLE sg_oc_items (id INTEGER PRIMARY KEY, oc_id INTEGER, precio_estimado_por_kg REAL,
       modo_carga TEXT, kg_por_bulto REAL, presentacion_id INTEGER);
     CREATE TABLE sg_presentaciones (id INTEGER PRIMARY KEY, factor_conversion REAL);
@@ -114,7 +115,7 @@ function base(opts = {}) {
     INSERT INTO sg_productos VALUES (1, 'Tomate');
     INSERT INTO sg_envases VALUES (1, 'Cajón');
     INSERT INTO sg_pisos VALUES (4, 'Cámara 1', 'C1', 1), (5, 'Cámara 2', 'C2', 2);
-    INSERT INTO sg_oc VALUES (7, 3, 'nosotros', 'OC-7');
+    INSERT INTO sg_oc VALUES (7, 3, 'nosotros', 'OC-7', NULL, NULL);
     INSERT INTO sg_oc_items VALUES (70, 7, 100, 'bulto', 20, NULL);
   `);
   db.prepare(`INSERT INTO sg_lotes (id, codigo_lote, estado, bultos, kg_reales, kg_por_bulto, oc_item_id,
@@ -566,7 +567,8 @@ test('la liquidación MANDA lo que quedó, no sólo lo muestra', () => {
   const db = base();
   alta(db).correr({ bultos: 10, kg: 200, piso_id: 5, motivo: 'x' });
   // El control de la liquidación mira cómo se pactó la orden.
-  db.exec("ALTER TABLE sg_oc ADD COLUMN tipo_precio TEXT; ALTER TABLE sg_oc ADD COLUMN precio_incluye_iva INTEGER; ALTER TABLE sg_oc ADD COLUMN iva_alicuota_oc REAL; UPDATE sg_oc SET tipo_precio='firme', precio_incluye_iva=1, iva_alicuota_oc=10.5;");
+  // tipo_precio ya viene en la base (V1048: el costo del lote lo mira).
+  db.exec("ALTER TABLE sg_oc ADD COLUMN precio_incluye_iva INTEGER; ALTER TABLE sg_oc ADD COLUMN iva_alicuota_oc REAL; UPDATE sg_oc SET tipo_precio='firme', precio_incluye_iva=1, iva_alicuota_oc=10.5;");
   assert.equal(A.objetivoCerradoGrupo(db, [{ ocId: 7, cantidad: 40 }]).ok !== false, true);
   assert.match(A.objetivoCerradoGrupo(db, [{ ocId: 7, cantidad: 50 }]).motivo, /entraron 40 bultos/);
 });

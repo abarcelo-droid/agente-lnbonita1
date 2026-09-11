@@ -67,7 +67,8 @@ test('la regla coincide con lo que dice la ayuda de la pantalla', () => {
 test('y con lo que hace el costo del lote, que es de donde sale la regla', () => {
   // recalcCostoLote excluye del costo el flete a cargo del vendedor — los dos
   // casos— pero el adelantado igual se paga y se recupera.
-  assert.match(SG, /AND NOT \(g\.tipo_gasto='flete_entrada' AND COALESCE\(o\.flete_a_cargo,''\) = 'vendedor'\)/);
+  // Desde la V1048, sólo a pizarra: a precio cerrado lo absorbemos y es costo de la partida.
+  assert.match(SG, /AND NOT \(g\.tipo_gasto='flete_entrada' AND COALESCE\(o\.flete_a_cargo,''\) = 'vendedor'\r?\n\s+AND NOT \(COALESCE\(o\.flete_pagado_por,''\) = 'san_geronimo'\r?\n\s+AND COALESCE\(o\.tipo_precio,''\) <> 'pizarra'\)\)/);
 });
 
 // ── LA PANTALLA ────────────────────────────────────────────────────────────

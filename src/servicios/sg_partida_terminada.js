@@ -23,7 +23,7 @@
 
 // El redondeo del repo: los bultos se cuentan enteros pero llegan como REAL de SQLite y
 // arrastran coma flotante. Sin esto, 44.99999 contra 45 da "falta 1 bulto".
-import { gastosSinFactura, resumenSalidaAdelantada } from './sg_gastos_facturados.js';
+import { gastosSinFactura, resumenSalidaAdelantada, fleteEntradaAdelantado } from './sg_gastos_facturados.js';
 import { kgPapelSql } from './sg_kilos_del_papel.js';
 
 const r2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
@@ -204,6 +204,19 @@ export function frenoParaLiquidar(db, ocId, facturaCuenta) {
       + 'cobró el fletero. Valorizalo en «Gastos Directos → Fletes de entrada» y después '
       + 'cargá su factura.';
   }
+  // ── Y EL FLETE DE ENTRADA QUE SE LE ADELANTÓ (V1048) ─────────────────────────
+  //
+  // Ahora llega solo a la fila «Flete», así que tiene que estar valorizado. Un viaje sin
+  // valorizar no deja fila de gasto: se mira la recepción. Va ACÁ, con los otros «sin
+  // valorizar» y antes de pedir la factura: primero se sabe cuánto, después llega el papel.
+  const ent = fleteEntradaAdelantado(db, ocId);
+  if (ent.sin_valorizar > 0) {
+    return 'El flete de entrada de esta partida lo adelantó San Gerónimo y '
+      + (ent.sin_valorizar === 1 ? 'un viaje todavía no está valorizado'
+        : ent.sin_valorizar + ' viajes todavía no están valorizados')
+      + ': no se sabe cuánto descontarle al productor. Valorizalo en «Gastos Directos → Fletes de '
+      + 'entrada» y después cargá la factura del fletero.';
+  }
 
   // ── SIN LA FACTURA DEL TERCERO NO SE LIQUIDA ────────────────────────────
   //
@@ -251,6 +264,7 @@ export function frenoParaLiquidar(db, ocId, facturaCuenta) {
       + 'citar el comprobante —CUIT, razón social, número y total— o la declaración jurada queda mal. '
       + 'Cargala en «Gastos Directos → Fletes de salida → 🧾 Ingresar factura» y volvé.';
   }
+
   return null;
 }
 

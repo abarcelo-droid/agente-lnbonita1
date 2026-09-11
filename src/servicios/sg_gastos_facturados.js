@@ -108,6 +108,31 @@ function hayTabla(db, nombre) {
   return m.get(nombre);
 }
 
+// ── LO QUE EL CLIENTE DEVOLVIÓ, COMO PARTE DEL RENGLÓN (V1048) ─────────────────
+//
+// Pablo, 11/9/2026: «el flete de salida cuando el cliente devuelve mercadería es
+// pérdida de la partida». El flete de lo devuelto NO se le descuenta al productor:
+// queda como costo en el margen del remito. Por cajón, que es como se paga el flete,
+// y nunca más que el renglón entero. Una devolución anulada no cuenta.
+function parteDevuelta(db, alias) {
+  if (!hayTabla(db, 'sg_devolucion_items') || !hayTabla(db, 'sg_devoluciones')) return '0';
+  const dev = (col) => `(SELECT SUM(dvi.${col}) FROM sg_devolucion_items dvi
+      JOIN sg_devoluciones dv ON dv.id = dvi.devolucion_id AND dv.estado = 'registrada'
+     WHERE dvi.despacho_item_id = ${alias}.id)`;
+  // Por cajón, y si el renglón no tiene cajones cargados —los viejos, o los de kilos
+  // declarados— por kilos del galpón. La mayor de las dos: que un registro a medias no
+  // haga descontarle al productor el flete de lo que ya volvió.
+  return `MIN(1, MAX(COALESCE(${dev('bultos')} / NULLIF(${alias}.bultos, 0), 0),
+                     COALESCE(${dev('kg')} / NULLIF(${alias}.kg_despachados, 0), 0)))`;
+}
+function devueltosDelRemito(db, col) {
+  if (!hayTabla(db, 'sg_devolucion_items') || !hayTabla(db, 'sg_devoluciones')) return '0';
+  return `(SELECT COALESCE(SUM(dvi.${col}),0) FROM sg_devolucion_items dvi
+      JOIN sg_devoluciones dv ON dv.id = dvi.devolucion_id AND dv.estado = 'registrada'
+      JOIN sg_despacho_items di5 ON di5.id = dvi.despacho_item_id
+     WHERE di5.despacho_id = d.id)`;
+}
+
 export function fletesSalidaAdelantados(db, ocId) {
   // Una base sin los renglones del flete (la de un test viejo, o una que todavía no
   // migró) no tiene fletes de salida por renglón: no hay nada que descontar.
@@ -123,7 +148,8 @@ export function fletesSalidaAdelantados(db, ocId) {
   return db.prepare(`
     SELECT g.id, g.estado, g.fecha_servicio, d.numero AS remito,
            pv.razon_social AS prestador,
-           (SELECT COALESCE(SUM(fl.monto),0) FROM sg_gasto_flete_lineas fl
+           -- Sin lo que el cliente devolvió: eso es pérdida de la partida (V1048).
+           (SELECT COALESCE(SUM(fl.monto * (1 - ${parteDevuelta(db, 'di')})),0) FROM sg_gasto_flete_lineas fl
               JOIN sg_despacho_items di ON di.id = fl.despacho_item_id
               JOIN sg_lotes l ON l.id = di.lote_id
               JOIN sg_oc_items oi ON oi.id = l.oc_item_id
@@ -137,6 +163,10 @@ export function fletesSalidaAdelantados(db, ocId) {
               JOIN sg_oc_items oi3 ON oi3.id = l3.oc_item_id
              WHERE di3.despacho_id = d.id AND oi3.oc_id = ?) AS items_partida,
            g.monto AS monto_gasto,
+           (SELECT COALESCE(SUM(di4.bultos),0) FROM sg_despacho_items di4 WHERE di4.despacho_id = d.id) AS bultos_remito,
+           ${devueltosDelRemito(db, 'bultos')} AS bultos_devueltos_remito,
+           (SELECT COALESCE(SUM(di4.kg_despachados),0) FROM sg_despacho_items di4 WHERE di4.despacho_id = d.id) AS kg_remito,
+           ${devueltosDelRemito(db, 'kg')} AS kg_devueltos_remito,
            f.id            AS factura_id,
            f.tipo_comprobante, f.punto_venta, f.numero, f.fecha_emision,
            f.cuit_emisor, f.neto AS factura_neto, f.iva_monto AS factura_iva,
@@ -163,8 +193,13 @@ export function fletesSalidaAdelantados(db, ocId) {
     // es de cada una y hay que valorizarlo por producto.
     const entero = x.estado === 'valorizado' && !(Number(x.renglones) > 0)
       && Number(x.items_remito) > 0 && Number(x.items_partida) === Number(x.items_remito);
+    // Entero, menos la parte de lo que el cliente devolvió (V1048).
+    // Por cajón o por kilo, la mayor: la misma regla que por renglón (parteDevuelta).
+    const parte = (d, t) => Number(t) > 0 ? (Number(d) || 0) / Number(t) : 0;
+    const dev = Math.min(1, Math.max(parte(x.bultos_devueltos_remito, x.bultos_remito),
+                                     parte(x.kg_devueltos_remito, x.kg_remito)));
     return Object.assign({}, x, entero
-      ? { imputado: Math.round((Number(x.monto_gasto) || 0) * 100) / 100, por_remito_entero: 1 }
+      ? { imputado: Math.round((Number(x.monto_gasto) || 0) * (1 - dev) * 100) / 100, por_remito_entero: 1 }
       : { por_remito_entero: 0 });
   });
 }
@@ -190,6 +225,47 @@ export function resumenSalidaAdelantada(db, ocId) {
     remitos_sin_factura: valorizados.filter((x) => Number(x.imputado) > 0 && !x.factura_id)
       .map((x) => x.remito).filter(Boolean),
   };
+}
+
+// ══ EL FLETE DE ENTRADA QUE SAN GERÓNIMO LE ADELANTÓ AL PRODUCTOR (V1048) ═══
+//
+// Pablo, 11/9/2026: «el flete adelantado, en caso de corresponder, se debe descontar
+// de la liquidación». Hasta la V1047 el de entrada se tipeaba a mano en la fila
+// «Flete». Corresponde con el flete a cargo del VENDEDOR, adelantado por San Gerónimo,
+// y en una partida A PIZARRA: a precio cerrado lo absorbemos nosotros, la misma regla
+// que el de salida, y entra al costo de la partida.
+export function esFleteEntradaAdelantado(oc) {
+  return !!oc && oc.flete_a_cargo === 'vendedor' && oc.flete_pagado_por === 'san_geronimo'
+    && oc.tipo_precio === 'pizarra';
+}
+
+// Lo que la liquidación necesita: si corresponde, cuántos viajes faltan valorizar —un
+// viaje sin valorizar no deja fila de gasto, así que se mira la RECEPCIÓN— y lo que
+// dicen las facturas del fletero de esos viajes, que es lo que se descuenta.
+export function fleteEntradaAdelantado(db, ocId) {
+  const nada = { corresponde: 0, sin_valorizar: 0, neto: 0 };
+  if (!hayTabla(db, 'sg_oc') || !hayTabla(db, 'sg_recepciones')) return nada;
+  const id = Number(ocId);
+  const oc = db.prepare('SELECT flete_a_cargo, flete_pagado_por, tipo_precio FROM sg_oc WHERE id = ?').get(id);
+  if (!esFleteEntradaAdelantado(oc)) return nada;
+  // UN VIAJE QUE SE QUEDÓ SIN MERCADERÍA NO SE VALORIZA. Si todos sus lotes se borraron
+  // por mal cargados, no hubo flete que pagar: exigirlo obligaba a inventar un importe,
+  // y después la factura de un fletero por un viaje que no existió.
+  const conLotes = hayTabla(db, 'sg_lotes')
+    ? 'AND EXISTS (SELECT 1 FROM sg_lotes l WHERE l.recepcion_id = r.id AND l.activo = 1)' : '';
+  const sinVal = db.prepare(`SELECT COUNT(*) AS n FROM sg_recepciones r
+     WHERE r.oc_id = ? AND r.activo = 1
+       AND NOT EXISTS (SELECT 1 FROM sg_gastos_directos g
+                        WHERE g.recepcion_id = r.id AND g.tipo_gasto = 'flete_entrada'
+                          AND g.activo = 1 AND g.estado = 'valorizado')
+       ${conLotes}`).get(id).n;
+  const neto = db.prepare(`SELECT COALESCE(SUM(fi.neto),0) AS s FROM sg_gastos_directos g
+      JOIN sg_recepciones r ON r.id = g.recepcion_id AND r.activo = 1
+      JOIN sg_factura_gasto_items fi ON fi.gasto_id = g.id
+      JOIN sg_facturas_gasto f ON f.id = fi.factura_id AND f.activo = 1
+     WHERE r.oc_id = ? AND g.tipo_gasto = 'flete_entrada' AND g.activo = 1 AND g.estado <> 'anulado'`).get(id).s;
+  return { corresponde: 1, sin_valorizar: Number(sinVal) || 0,
+    neto: Math.round((Number(neto) || 0) * 100) / 100 };
 }
 
 // LO QUE VA IMPRESO. Una línea por comprobante citado, con lo que la declaración

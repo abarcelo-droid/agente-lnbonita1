@@ -13160,7 +13160,9 @@ var SG_FLETE_AYUDA = {
     + 'No aparece en la bandeja de fletes de entrada.',
   'vendedor|san_geronimo': '<b>Lo adelanta San Gerónimo y se le recupera al productor.</b> '
     + 'Aparece en <b>Fletes de entrada</b> para cargar la factura del fletero, pero '
-    + '<b>NO entra al costo de la partida</b>: es plata a recuperar, se le descuenta de su liquidación.'
+    + '<b>NO entra al costo de la partida</b>: es plata a recuperar, se le descuenta de su liquidación. '
+    + '<b>Sólo a pizarra</b>: a precio cerrado el productor cobra lo pactado, ese flete lo absorbemos '
+    + 'nosotros y entra al costo de la partida.'
 };
 // ¿HAY QUE CARGAR EL IMPORTE DEL FLETE?
 //
@@ -14879,6 +14881,12 @@ function liqVentaCab(ocId, mas){
         + 'liquidación tiene que citar el comprobante —CUIT, razón social, número y total—. Cargala '
         + 'en <b>Gastos Directos → Fletes de salida → 🧾 Ingresar factura</b>.');
     }
+    // ── EL FLETE DE ENTRADA QUE SE LE ADELANTÓ (V1048) ──────────────
+    if (Number((r.flete || {}).entrada_sin_valorizar) > 0) {
+      frenos.push('El <b>flete de entrada</b> lo adelantó San Gerónimo y todavía hay viajes <b>sin '
+        + 'valorizar</b>: no se sabe cuánto descontarle al productor. Valorizalo en <b>Gastos '
+        + 'Directos → Fletes de entrada</b> y después cargá la factura del fletero.');
+    }
     LIQ.frenos = frenos;
     // Y los comprobantes que la liquidación va a citar, para poder mostrarlos
     // ANTES de imprimir: el que liquida tiene que ver con qué papeles se está
@@ -15183,6 +15191,8 @@ function liqDesdePartida(r){
     pg('liq-g-f-flete', Math.round(((Number(fl.neto) || 0) + fSal) * 100) / 100);
     pg('liq-g-f-iva_flete', Math.round(((Number(fl.iva) || 0) + fSalIva) * 100) / 100);
     LIQ.origen.flete = 'de la orden de compra' + (fl.con_iva ? ' (el monto venía con IVA)' : '')
+      // El de entrada adelantado (V1048) sale de la misma fila: se dice de quién es.
+      + (fl.adelantado ? ' — lo adelantó San Gerónimo' : '')
       + (txtSal ? ' + ' + txtSal : '');
   } else if (fSal > 0) {
     pg('liq-g-f-flete', fSal);
@@ -23240,6 +23250,8 @@ SG_MANUAL.gastos = { titulo: 'Gastos Directos', html:
   + 'en la lista, la carga muestra el cliente del remito.</li>'
   + '<li>Es costo de la <b>venta</b>: no toca el costo de la partida y <b>no se le descuenta al '
   + 'productor</b>. Resta del <b>margen del remito</b>.</li>'
+  + '<li><span class="ver">V1015</span> Se contabiliza con el <b>mismo asiento modelo que la '
+  + 'descarga</b>: van juntas en la factura de la cooperativa.</li>'
   + '</ul>'
 
   + '<h3>Anular una factura de servicio <span class="ver">V1015</span></h3>'
@@ -23305,6 +23317,15 @@ SG_MANUAL.gastos = { titulo: 'Gastos Directos', html:
   + '<li><b>Sólo en las partidas a pizarra</b>. A <b>precio cerrado</b> el productor cobra lo pactado '
   + 'entero: ese flete lo absorbemos nosotros y sí resta del margen del remito. Lo mismo lo de un '
   + 'renglón sin partida, como un lote de reproceso.</li>'
+  + '<li><span class="ver">V1048</span> Si el cliente <b>devuelve</b> mercadería, el flete de lo '
+  + 'devuelto no se le descuenta al productor: es <b>pérdida de la partida</b> y queda en el margen '
+  + 'del remito.</li>'
+  + '<li><span class="ver">V1048</span> El flete de <b>entrada</b> que adelanta San Gerónimo se le '
+  + 'descuenta igual, solo, en la liquidación a pizarra, y frena si tiene viajes sin valorizar. A '
+  + 'precio cerrado entra al costo de la partida. Esos viajes aparecen en <b>Fletes de entrada</b> '
+  + 'aunque el comprador no haya dejado pactado el monto en la orden: el importe se escribe al '
+  + 'valorizar. Un viaje que se quedó sin mercadería —sus lotes se borraron por mal cargados— no '
+  + 'pide valorizarse. Y si la orden cambia de condición, el costo de lo que ya entró se rehace.</li>'
   + '<li>Mientras no esté <b>valorizado por producto</b> y con la <b>factura del fletero</b> '
   + 'cargada, esa partida <b>no se puede liquidar</b>.</li>'
   + '<li>Uno valorizado <b>antes de la V1045</b> —un número por remito— se toma <b>entero</b> si todo '
@@ -23578,6 +23599,8 @@ SG_MANUAL.gastos = { titulo: 'Gastos Directos', html:
 
   + '<h3>Qué cambió, y desde cuándo</h3>'
   + '<ul>'
+  + '<li><span class="ver">V1048</span> El flete de <b>entrada</b> adelantado se descuenta solo en la '
+  + 'liquidación, y el de salida de lo devuelto es pérdida de la partida.</li>'
   + '<li><span class="ver">V1047</span> Las <b>cargas de salida</b> de la cooperativa se valorizan en '
   + 'Control Cooperativa, en su propia tabla, y llegan a su factura.</li>'
   + '<li><span class="ver">V1046</span> El flete de salida que San Gerónimo le <b>adelantó al '
@@ -24454,6 +24477,9 @@ SG_MANUAL.ventas = { titulo: 'Remitos y Facturación', html:
   + 'otra vez.</li>'
   + '</ul>'
   + '<p>Anular una devolución pide <b>motivo</b> y devuelve el piso a como estaba.</p>'
+  + '<p><span class="ver">V1048</span> Si el remito llevaba <b>flete adelantado al productor</b>, el '
+  + 'flete de lo que el cliente devolvió <b>no se le descuenta</b>: es pérdida de la partida y queda en '
+  + 'el margen del remito.</p>'
 
   + '<h3>Lo que frena una anulación</h3>'
   + '<p>Un <b>remito ya facturado no se anula</b>. Primero va la <b>nota de crédito</b>; recién '
@@ -24524,6 +24550,8 @@ SG_MANUAL.ventas = { titulo: 'Remitos y Facturación', html:
   + 'liquidación y no resta del margen del remito.</li>'
   + '<li><b>V1047</b> — la carga de la cooperativa se valoriza en Control Cooperativa y llega a su '
   + 'factura.</li>'
+  + '<li><b>V1048</b> — el flete de salida de lo que el cliente devuelve no se le descuenta al '
+  + 'productor: es pérdida de la partida.</li>'
   + '</ul>'
 };
 
@@ -24555,6 +24583,8 @@ SG_MANUAL.liquidaciones = { titulo: 'Liquidaciones', html:
   + '<li><span class="ver">V1046</span> el <b>flete de salida que San Gerónimo le adelantó</b> al '
   + 'productor está sin valorizar por producto, o sin la factura del fletero (en las partidas a '
   + 'pizarra).</li>'
+  + '<li><span class="ver">V1048</span> el <b>flete de entrada que San Gerónimo le adelantó</b> tiene '
+  + 'viajes sin valorizar (en las partidas a pizarra).</li>'
   + '</ul>'
   + '<div class="ojo"><b>Sin la factura del tercero no se liquida.</b> Descontarle al productor lo '
   + 'que se le pagó a otro es trasladarle un comprobante, y la liquidación tiene que citarlo.</div>'
@@ -24571,8 +24601,10 @@ SG_MANUAL.liquidaciones = { titulo: 'Liquidaciones', html:
   + 'los dos, se suman en la misma fila. <b>Sólo a pizarra</b>: a precio cerrado el productor cobra '
   + 'lo pactado entero y ese flete lo absorbemos nosotros. El casillero se puede tocar, pero <b>no '
   + 'por debajo</b> de lo adelantado: el sistema no deja emitir.</li>'
-  + '<li>Siguen <b>a mano</b>: el flete de <b>entrada</b> que San Gerónimo le adelantó al productor, '
-  + 'y los gastos administrativos a precio abierto.</li>'
+  + '<li><span class="ver">V1048</span> Y también el flete de <b>entrada</b> que San Gerónimo le '
+  + 'adelantó al productor, con la misma regla: sólo a pizarra. Y si el cliente devolvió mercadería, '
+  + 'el flete de salida de lo devuelto <b>no se le descuenta</b>: es pérdida de la partida.</li>'
+  + '<li>Siguen <b>a mano</b>: los gastos administrativos a precio abierto.</li>'
   + '</ul>'
 
   + '<h3>El papel: los comprobantes de terceros</h3>'
@@ -24590,6 +24622,8 @@ SG_MANUAL.liquidaciones = { titulo: 'Liquidaciones', html:
   + '<li><span class="ver">V1046</span> Esta pantalla estrena su <b>¿Cómo se usa?</b>. El flete de '
   + 'salida que San Gerónimo le adelantó al productor <b>se le descuenta solo</b> en la liquidación '
   + 'de cada partida a pizarra, y frena si falta valorizarlo por producto o cargar su factura.</li>'
+  + '<li><span class="ver">V1048</span> También el flete de <b>entrada</b> adelantado llega solo, y el '
+  + 'flete de salida de lo que el cliente devolvió no se le descuenta al productor.</li>'
   + '</ul>'
 };
 
@@ -24859,8 +24893,10 @@ SG_MANUAL.oc = { titulo: 'Órdenes de Compra', html:
       '<b>Comprador</b>: es gasto nuestro y entra al costo de la partida. '
       + '<b>Vendedor y lo paga él</b>: ya viene en el precio, no tocamos plata. '
       + '<b>Vendedor pero lo adelanta San Gerónimo</b>: le pagamos al fletero y se le '
-      + 'descuenta de su liquidación.',
-      'Los dos primeros casos aparecen en Gastos Directos → Fletes de entrada. El '
+      + 'descuenta de su liquidación. <span class="ver">V1048</span> Se le descuenta <b>solo</b> '
+      + 'en las partidas a pizarra; a precio cerrado lo absorbemos nosotros y entra al costo de la '
+      + 'partida. Si la condición de la orden cambia después, el costo de lo que ya entró se rehace.',
+      'El primero y el último aparecen en Gastos Directos → Fletes de entrada. El '
       + 'monto sólo se pide cuando la plata la ponemos nosotros: si lo paga el otro, '
       + 'no nos interesa el costo.')
 
@@ -45760,10 +45796,11 @@ function liqComisionCalcular(){
 //     valoriza cuando se le paga a la cooperativa — otro reloj. Hasta que el
 //     aviso lleve a la pantalla donde se valoriza, el campo a mano es la única
 //     salida.
-//   · FLETE: trae el de la orden cuando es a cargo del comprador y, desde la
-//     V1046, el de SALIDA que San Gerónimo le adelantó, renglón por renglón. El
-//     de ENTRADA que adelantó San Gerónimo por el productor todavía no lo trae,
-//     así que a mano es la única forma de cobrarlo.
+//   · FLETE: trae el de la orden cuando es a cargo del comprador; el de SALIDA
+//     que San Gerónimo le adelantó (V1046), renglón por renglón; y el de ENTRADA
+//     que adelantó San Gerónimo por el productor (V1048). Sigue abierta porque en
+//     la misma fila puede ir algo más que se le cobre; por debajo de lo adelantado,
+//     el servidor no deja emitir.
 //   · GASTOS ADMINISTRATIVOS a precio abierto: nada lo calcula. A precio cerrado
 //     lo escribe el despeje, y ahí ya queda trabado por el bloqueo del modo.
 // ── ¿SE PUEDE CONFIAR EN LAS VENTAS QUE TRAJO EL SERVIDOR? ──────────────
