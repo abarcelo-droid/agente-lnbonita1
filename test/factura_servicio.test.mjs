@@ -176,7 +176,7 @@ test('la misma operación no puede entrar dos veces en la misma factura', () => 
 test('el asiento se arma con las MISMAS funciones que la factura de mercadería', () => {
   // Si fueran dos, un día darían distinto y habría dos maneras de asentar una
   // compra de servicio.
-  const b = trozo(SG, 'function asientoDeFacturaGasto(db, b, valorizado, clave) {', SALTO + '}');
+  const b = trozo(SG, 'function asientoDeFacturaGasto(db, b, valorizado, clave, grupos) {', SALTO + '}');
   assert.match(b, /armarAsientoFactura\(lineas, \{/);
   assert.match(b, /lineasGestionFactura\(lineas, \{ dif_gestion: dif, dif_motivo: b\.dif_motivo \}\)/);
   // La clave la pone el circuito; la de la descarga queda de respaldo porque era
@@ -193,7 +193,7 @@ test('la diferencia va en el MISMO asiento, con ámbito gestión', () => {
   // clavaba el renglón `base.lineas.concat(gestion` —la forma, no la conducta— y
   // por eso no dijo nada cuando esa misma línea dejaba las fiscales sin debe ni
   // haber. Ahora se mira lo que devuelve: una sola lista, con los dos ámbitos.
-  const b = trozo(SG, 'function asientoDeFacturaGasto(db, b, valorizado, clave) {', SALTO + '}');
+  const b = trozo(SG, 'function asientoDeFacturaGasto(db, b, valorizado, clave, grupos) {', SALTO + '}');
   assert.match(b, /const todas = fiscales\.concat\(gestion/);
   assert.match(b, /lineas: todas/);
   assert.ok(!/ambito: 'gestion'/.test(b),
@@ -429,7 +429,8 @@ function circuitos() {
   const src = trozo(SG, 'const CIRCUITOS_FACTURA = {', SALTO + '};');
   return new Function("const CLAVE_MODELO_GASTO='asiento_modelo_descarga',"
     + "CLAVE_MODELO_FLETE='asiento_modelo_flete',"
-    + "CLAVE_MODELO_FLETE_SALIDA='asiento_modelo_flete_salida';\n"
+    + "CLAVE_MODELO_FLETE_SALIDA='asiento_modelo_flete_salida',"
+    + "CLAVE_MODELO_CARGA='asiento_modelo_carga_salida';\n"
     + src + '\nreturn CIRCUITOS_FACTURA;')();
 }
 
@@ -441,6 +442,8 @@ test('los tres circuitos, cada uno con SU tipo de gasto y SU asiento modelo', ()
   // se quedaba sin circuito y dejaba de poder facturarse.
   assert.deepEqual(c.descarga.tipos, ['descarga_ingreso', 'carga_salida']);
   assert.equal(c.descarga.clave, 'asiento_modelo_descarga');
+  // Y la carga de salida, con su propio modelo (V1051): la factura sigue siendo una.
+  assert.deepEqual(c.descarga.claves, { carga_salida: 'asiento_modelo_carga_salida' });
   assert.deepEqual(c.flete_entrada.tipos, ['flete_entrada']);
   assert.equal(c.flete_entrada.clave, 'asiento_modelo_flete');
   assert.deepEqual(c.flete_salida.tipos, ['flete_salida']);
@@ -582,8 +585,9 @@ test('la factura guarda de qué circuito es', () => {
   assert.match(b, /c\.circuito, uid\(req\)\)\.lastInsertRowid/);
   assert.match(DBSG, /\['circuito',\s+'TEXT'\]/);
   // Y el asiento dice de qué circuito es: «Factura de servicio 0001-12» no
-  // distingue una descarga de un flete cuando se lo mira desde el mayor.
-  assert.match(b, /descripcion: 'Factura de ' \+ c\.label \+ ' ' \+ numero/);
+  // distingue una descarga de un flete cuando se lo mira desde el mayor. Desde la
+  // V1051 dice también si la de la cooperativa trae cargas de salida.
+  assert.match(b, /descripcion: 'Factura de ' \+ etiquetaDeFacturaGasto\(c, elegidos\) \+ ' ' \+ numero/);
 });
 
 test('el mismo modal para los tres, con el circuito explícito', () => {

@@ -224,8 +224,13 @@ test('el filtro de estado resalta el chip que se apretó', () => {
   // Y ese contenedor existe de verdad, con sus cuatro chips.
   const j = PANEL.indexOf('id="sggd-pane-coop"');
   assert.ok(j > 0, 'no existe el pane de Control Cooperativa');
-  const pane = PANEL.slice(j, j + 4000);
-  assert.equal((pane.match(/class="sgcc-est/g) || []).length, 4);
+  // Desde el primer chip, no «4.000 caracteres desde el pane»: el botón y el aviso del
+  // asiento modelo de las cargas (V1051) empujaron los chips fuera de esa ventana.
+  const k = PANEL.indexOf('class="sgcc-est', j);
+  const sig = PANEL.indexOf('id="sggd-pane-', j + 10);
+  assert.ok(k > j && (sig < 0 || k < sig), 'los chips no están adentro del pane de Control Cooperativa');
+  const chips = PANEL.slice(k, k + 2500);
+  assert.equal((chips.match(/class="sgcc-est/g) || []).length, 4);
 });
 
 // ── 7 · Y LA PANTALLA TIENE SU MANUAL, QUE ES LA REGLA ─────────────────────

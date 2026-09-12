@@ -12322,6 +12322,51 @@ router.put('/gastos-factura/modelo', requireAdmin, (req, res) => {
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
+// ══ LA CARGA DE SALIDA, CON SU PROPIO ASIENTO MODELO (V1051) ══════════════════
+//
+// Pablo, 12/9/2026: «separalos, permitime hacer asientos modelos distintos».
+//
+// La cooperativa hace dos trabajos y los factura juntos, pero no son el mismo gasto:
+// la descarga es costo de la MERCADERÍA que entra y la carga es costo de la VENTA que
+// sale. Con un solo modelo las dos iban a la misma cuenta y el estado de resultados no
+// las podía separar — lo mismo que ya se había separado entre el flete de entrada y el
+// de salida.
+//
+// La factura sigue siendo UNA, porque el papel es uno: su asiento lleva la parte de las
+// descargas contra el modelo de la descarga y la de las cargas contra éste
+// (asientoCompuestoDeFacturaGasto). Mientras no se elija, la carga va con el de la
+// descarga, como hasta la V1050.
+const CLAVE_MODELO_CARGA = 'asiento_modelo_carga_salida';
+
+router.get('/gastos-factura/modelo-carga', requireAuth, (req, res) => {
+  const db = getDb();
+  try {
+    const modelos = db.prepare('SELECT id, nombre FROM sg_asientos_modelo WHERE activo=1 ORDER BY nombre').all();
+    const cfg = db.prepare('SELECT valor FROM sg_config WHERE clave=?').get(CLAVE_MODELO_CARGA);
+    const modeloId = cfg && cfg.valor ? Number(cfg.valor) : null;
+    if (!modeloId) return res.json({ ok: true, data: { modelo: null, modelos } });
+    const m = db.prepare('SELECT * FROM sg_asientos_modelo WHERE id=? AND activo=1').get(modeloId);
+    if (!m) return res.json({ ok: true, data: { modelo: null, id_perdido: modeloId, modelos } });
+    m.lineas = lineasModeloDe(db, CLAVE_MODELO_CARGA) || [];
+    const faltan = queLeFaltaAlModelo(m.lineas, 'lo que se le queda debiendo a la cooperativa');
+    res.json({ ok: true, data: { modelo: m, faltan, modelos } });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// Parametrizar es de administrador, igual que el de la descarga.
+router.put('/gastos-factura/modelo-carga', requireAdmin, (req, res) => {
+  const db = getDb();
+  try {
+    const id = req.body?.modelo_id ? Number(req.body.modelo_id) : null;
+    if (id && !db.prepare('SELECT 1 FROM sg_asientos_modelo WHERE id=? AND activo=1').get(id)) {
+      return res.status(400).json({ ok: false, error: 'Ese asiento modelo no existe' });
+    }
+    db.prepare(`INSERT INTO sg_config (clave, valor) VALUES (?,?)
+      ON CONFLICT(clave) DO UPDATE SET valor=excluded.valor`).run(CLAVE_MODELO_CARGA, id ? String(id) : '');
+    res.json({ ok: true, data: { modelo_id: id } });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
 // ══ LOS TRES CIRCUITOS QUE SE FACTURAN ═════════════════════════════════════
 //
 // Pablo, 7/9/2026: «necesito el lugar donde contabilizar la factura, con la misma
@@ -12343,8 +12388,12 @@ router.put('/gastos-factura/modelo', requireAdmin, (req, res) => {
 // (desde la V1047, en su propia tabla de cargas de salida). Con un solo tipo, la carga de salida
 // quedaba sin ningún circuito y dejaba de poder facturarse — antes entraba porque
 // la lista no filtraba por tipo, que era el otro problema.
+//
+// Y cada tipo puede tener su propio asiento modelo (claves, V1051): la carga de salida
+// es costo de la venta y la descarga de la mercadería. La factura sigue siendo una.
 const CIRCUITOS_FACTURA = {
   descarga:      { tipos: ['descarga_ingreso', 'carga_salida'], clave: CLAVE_MODELO_GASTO,
+                   claves: { carga_salida: CLAVE_MODELO_CARGA },
                    label: 'descarga', debiendo: 'lo que se le queda debiendo a la cooperativa' },
   flete_entrada: { tipos: ['flete_entrada'],  clave: CLAVE_MODELO_FLETE,
                    label: 'flete de entrada', debiendo: 'lo que se le debe al fletero' },
@@ -12473,7 +12522,12 @@ function difDeFacturaGasto(valorizado, neto) {
 // `clave` es la del circuito: descarga, flete de entrada o flete de salida. Antes
 // estaba clavada en la de la descarga, que era la única que se facturaba.
 //
-function asientoDeFacturaGasto(db, b, valorizado, clave) {
+// `grupos` (V1051): lo valorizado de la factura, sumado por asiento modelo
+// (gruposDeFacturaGasto). Con más de uno —la factura de la cooperativa con descargas y
+// cargas— cada parte va contra el suyo; con uno solo, es el de esa parte.
+function asientoDeFacturaGasto(db, b, valorizado, clave, grupos) {
+  if (grupos && grupos.length > 1) return asientoCompuestoDeFacturaGasto(db, b, grupos);
+  if (grupos && grupos.length === 1) clave = grupos[0].clave;
   const lineas = lineasModeloDe(db, clave || CLAVE_MODELO_GASTO);
   if (!lineas || !lineas.length) {
     return { sin_modelo: true, lineas: [], debe: 0, haber: 0, diferencia: 0, balancea: false };
@@ -12527,6 +12581,117 @@ function asientoDeFacturaGasto(db, b, valorizado, clave) {
     balancea: Object.values(totales).every((t) => t.balancea) });
 }
 
+// ── UNA FACTURA, DOS MODELOS (V1051) ──────────────────────────────────────────
+//
+// La factura de la cooperativa trae descargas y cargas, y cada parte va contra la cuenta
+// de su modelo. El NETO del papel se reparte en proporción a lo valorizado de cada parte
+// —la última se lleva los centavos, para que la suma dé exacta— y lo mismo el IVA. El
+// total también, y la última se queda con lo que falte para el del papel: si el papel no
+// cierra con su neto y su IVA, el asiento compuesto tampoco balancea, igual que el simple.
+//
+// La diferencia de gestión de cada parte es lo valorizado de esa parte menos su neto:
+// sumadas dan la de la factura, y como el reparto es proporcional tienen el mismo signo.
+//
+// Lo que cae en la misma cuenta, del mismo lado y del mismo ámbito se junta: la deuda
+// con la cooperativa y el IVA crédito fiscal quedan en UNA línea, como en cualquier
+// factura. Si a una parte le falta el modelo, la factura queda sin asiento, igual que
+// con uno solo.
+function asientoCompuestoDeFacturaGasto(db, b, grupos) {
+  const m = montosDeFacturaGasto(b);
+  const V = r2(grupos.reduce((a, g) => a + (Number(g.valorizado) || 0), 0));
+  const juntas = new Map();
+  const partes = [];
+  let restoNeto = m.neto, restoIva = m.iva_monto, restoTotal = m.total;
+  for (let i = 0; i < grupos.length; i++) {
+    const g = grupos[i];
+    const lineas = lineasModeloDe(db, g.clave);
+    if (!lineas || !lineas.length) {
+      return { sin_modelo: true, lineas: [], debe: 0, haber: 0, diferencia: 0, balancea: false };
+    }
+    const ultima = i === grupos.length - 1;
+    const f = V > 0 ? (Number(g.valorizado) || 0) / V : 1 / grupos.length;
+    const neto = ultima ? r2(restoNeto) : r2(m.neto * f);
+    const iva = ultima ? r2(restoIva) : r2(m.iva_monto * f);
+    const total = ultima ? r2(restoTotal) : r2(neto + iva);
+    restoNeto = r2(restoNeto - neto);
+    restoIva = r2(restoIva - iva);
+    restoTotal = r2(restoTotal - total);
+    const base = armarAsientoFactura(lineas, {
+      neto, iva_monto: iva, total,
+      percepcion_iva: 0, percepcion_ganancias: 0, percepciones_iibb: [],
+    });
+    const dif = difDeFacturaGasto(g.valorizado, neto);
+    const gestion = dif ? lineasGestionFactura(lineas, { dif_gestion: dif, dif_motivo: b.dif_motivo }) : [];
+    const fiscales = base.lineas.map((l) => Object.assign({}, l, {
+      debe:  l.lado === 'debe'  ? l.monto : 0,
+      haber: l.lado === 'haber' ? l.monto : 0,
+      ambito: 'fiscal',
+    }));
+    const deGestion = gestion.map((x) => {
+      const c = lineas.find((l) => l.cuenta_id === x.cuenta_id) || {};
+      return Object.assign({}, x, { cuenta_codigo: c.cuenta_codigo, cuenta_nombre: c.cuenta_nombre });
+    });
+    for (const l of fiscales.concat(deGestion)) {
+      const lado = l.debe > 0 ? 'debe' : (l.haber > 0 ? 'haber' : (l.lado || 'debe'));
+      const k = [l.ambito, l.cuenta_id, lado, l.tipo_linea || '', l.motivo || ''].join('|');
+      const x = juntas.get(k);
+      if (!x) { juntas.set(k, Object.assign({}, l)); continue; }
+      x.debe = r2((x.debe || 0) + (l.debe || 0));
+      x.haber = r2((x.haber || 0) + (l.haber || 0));
+      if (l.monto != null) x.monto = r2((x.monto || 0) + (l.monto || 0));
+    }
+    partes.push({ clave: g.clave, valorizado: r2(g.valorizado), neto, iva, dif_gestion: dif });
+  }
+  const lineas = [...juntas.values()];
+  const totales = {};
+  for (const l of lineas) {
+    const t = (totales[l.ambito] = totales[l.ambito] || { debe: 0, haber: 0 });
+    t.debe = r2(t.debe + (l.debe || 0));
+    t.haber = r2(t.haber + (l.haber || 0));
+  }
+  for (const t of Object.values(totales)) t.balancea = Math.abs(t.debe - t.haber) < 0.01;
+  const fiscal = totales.fiscal || { debe: 0, haber: 0 };
+  return { lineas, totales, partes, montos: m, dif_gestion: difDeFacturaGasto(V, m.neto),
+    debe: fiscal.debe, haber: fiscal.haber, diferencia: r2(fiscal.debe - fiscal.haber),
+    balancea: Object.values(totales).every((t) => t.balancea) };
+}
+
+// De qué asiento modelo es cada operación, sumado por modelo (V1051). Un tipo con modelo
+// propio que todavía no se eligió va con el del circuito: la factura no puede quedar sin
+// asiento por un modelo que falta parametrizar, y la pantalla ya avisa que falta. El del
+// circuito va primero.
+function gruposDeFacturaGasto(db, c, operaciones) {
+  const conModelo = new Map();
+  const tiene = (k) => { if (!conModelo.has(k)) conModelo.set(k, !!lineasModeloDe(db, k)); return conModelo.get(k); };
+  const porClave = new Map([[c.clave, null]]);
+  let crudo = 0;
+  for (const o of operaciones || []) {
+    let k = (c.claves && c.claves[o.tipo_gasto]) || c.clave;
+    if (k !== c.clave && !tiene(k)) k = c.clave;
+    // Sin redondear hasta el final: un importe valorizado con más de dos decimales,
+    // redondeado en cada suma, hacía que las partes sumaran un centavo distinto de lo
+    // valorizado de la factura, y el asiento inventaba una diferencia de gestión.
+    porClave.set(k, (porClave.get(k) || 0) + (Number(o.monto) || 0));
+    crudo += Number(o.monto) || 0;
+  }
+  const grupos = [...porClave].filter(([, v]) => v != null).map(([clave, v]) => ({ clave, valorizado: r2(v) }));
+  // Las partes suman exacto lo valorizado de la factura: la última se queda con los centavos.
+  if (grupos.length > 1) {
+    const antes = r2(grupos.slice(0, -1).reduce((a, g) => a + g.valorizado, 0));
+    grupos[grupos.length - 1].valorizado = r2(r2(crudo) - antes);
+  }
+  return grupos;
+}
+
+// Cómo se nombra en el mayor (V1051): una factura de la cooperativa con cargas no es
+// sólo «de descarga».
+const ETIQUETA_TIPO_GASTO = { descarga_ingreso: 'descarga', carga_salida: 'carga de salida' };
+function etiquetaDeFacturaGasto(c, operaciones) {
+  if (!c.claves) return c.label;
+  const hay = c.tipos.filter((t) => (operaciones || []).some((o) => o.tipo_gasto === t));
+  return hay.length ? hay.map((t) => ETIQUETA_TIPO_GASTO[t] || t).join(' y ') : c.label;
+}
+
 router.post('/gastos-factura/asiento-preview', requireAuth, express.json(), (req, res) => {
   const db = getDb();
   try {
@@ -12544,8 +12709,13 @@ router.post('/gastos-factura/asiento-preview', requireAuth, express.json(), (req
       return res.json({ ok: true, data: { solo_comprobante: true, lineas: [], totales: {},
         valorizado, montos: m, dif_gestion: difDeFacturaGasto(valorizado, m.neto) } });
     }
+    // Cada parte contra su modelo (V1051): la carga de salida tiene el suyo. Las
+    // operaciones y su tipo se leen de la base, no del pedido.
+    const grupos = gruposDeFacturaGasto(db, c,
+      operacionesValorizadas(db, ids, Number(b.proveedor_servicio_id), c.tipos));
     res.json({ ok: true, data: Object.assign(
-      asientoDeFacturaGasto(db, b, valorizado, c.clave), { valorizado }) });
+      asientoDeFacturaGasto(db, b, valorizado, c.clave, grupos),
+      { valorizado, modelos: grupos.map((g) => g.clave) }) });
   } catch (e) { res.status(400).json({ ok: false, error: e.message }); }
 });
 
@@ -12587,6 +12757,17 @@ function sumaValorizada(db, ids, prov, tipos) {
       AND estado='valorizado' AND activo=1`)
     .get(...ids, prov, ...tipos);
   return r2(r.s);
+}
+
+// Las operaciones elegidas con su tipo, leídas de la base con los mismos filtros que la
+// suma (V1051): el reparto por modelo tampoco puede salir de lo que manda el navegador.
+function operacionesValorizadas(db, ids, prov, tipos) {
+  if (!ids.length || !prov || !tipos || !tipos.length) return [];
+  const q = ids.map(() => '?').join(',');
+  const t = tipos.map(() => '?').join(',');
+  return db.prepare(`SELECT id, monto, tipo_gasto FROM sg_gastos_directos
+    WHERE id IN (${q}) AND proveedor_servicio_id=? AND tipo_gasto IN (${t})
+      AND estado='valorizado' AND activo=1`).all(...ids, prov, ...tipos);
 }
 
 // El papel de una factura de servicio. Storage propio y no facturaStorage:
@@ -12739,7 +12920,7 @@ router.post('/gastos-factura', facturaGastoUpload.single('archivo'), requireAuth
     // asiento_id sólo si el asiento SIGUE VIVO: uno anulado a mano desde Asientos
     // Contables dejaría el gasto fuera del libro y la factura no lo repondría.
     const elegidos = db.prepare(`SELECT g.id, g.monto,
-        CASE WHEN a.id IS NOT NULL AND COALESCE(a.anulado,0)=0 THEN g.asiento_id END AS asiento_id
+        CASE WHEN a.id IS NOT NULL AND COALESCE(a.anulado,0)=0 THEN g.asiento_id END AS asiento_id, g.tipo_gasto
       FROM sg_gastos_directos g LEFT JOIN sg_asientos a ON a.id = g.asiento_id
       WHERE g.id IN (${q}) AND g.proveedor_servicio_id=? AND g.tipo_gasto IN (${t})
         AND g.estado='valorizado' AND g.activo=1
@@ -12823,7 +13004,9 @@ router.post('/gastos-factura', facturaGastoUpload.single('archivo'), requireAuth
       // queda una deuda que existe para el proveedor y no para la contabilidad.
       const as = soloComprobante
         ? { sin_modelo: false, lineas: [], totales: {} }
-        : asientoDeFacturaGasto(db, Object.assign({}, b, { total: m.total }), valorizado, c.clave);
+        : asientoDeFacturaGasto(db, Object.assign({}, b, { total: m.total }), valorizado, c.clave,
+            // Cada parte contra su modelo (V1051).
+            gruposDeFacturaGasto(db, c, elegidos));
       if (!as.sin_modelo && as.lineas.length) {
         // Por ÁMBITO, que es como lo valida crearAsiento. El `balancea` de
         // armarAsientoFactura no ve las líneas de gestión.
@@ -12835,7 +13018,7 @@ router.post('/gastos-factura', facturaGastoUpload.single('archivo'), requireAuth
         }
         const r = crearAsiento(db, {
           fecha: val(b.fecha_emision) || null,
-          descripcion: 'Factura de ' + c.label + ' ' + numero,
+          descripcion: 'Factura de ' + etiquetaDeFacturaGasto(c, elegidos) + ' ' + numero,
           // Así se ata el asiento a su comprobante en todo el módulo: con el
           // código de referencia. Sin esto, entrando por Asientos Contables no
           // hay forma de volver a la factura que lo generó.

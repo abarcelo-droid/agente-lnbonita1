@@ -1542,6 +1542,12 @@ const CIRCUITOS = [
     donde: 'El flete que lleva la mercadería al cliente. No entra al costo de la partida.' },
   { clave: 'asiento_modelo_descarga', label: 'Descarga y servicios',
     donde: 'La factura de la cooperativa o la cuadrilla que descargó el camión.' },
+  // LA CARGA DE SALIDA, APARTE (V1051). La cooperativa la factura junto con la descarga,
+  // pero una es costo de la mercadería y la otra de la venta: con un solo modelo irían a
+  // la misma cuenta.
+  { clave: 'asiento_modelo_carga_salida', label: 'Carga de salida',
+    donde: 'La parte de la factura de la cooperativa que cargó el camión que sale al cliente. '
+         + 'Es costo de la venta. Mientras no se elija, va con el modelo de la descarga.' },
   // LA COBRANZA ES LA CONTRACARA DE LA VENTA, no una variante suya: la venta
   // carga la cuenta corriente del cliente y la cobranza la descarga contra donde
   // entró la plata. Sin modelo propio, la cuenta del cliente había que cargarla

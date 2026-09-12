@@ -4327,10 +4327,17 @@ input[type=number]{-moz-appearance:textfield;appearance:textfield}
     <div id="sggd-modelo-falta" style="display:none;border:1.5px solid #e0a72e;
          background:rgba(224,167,46,.10);border-radius:8px;padding:9px 12px;
          margin-bottom:12px;font-size:12.5px;color:#9a3412"></div>
+    <!-- Y EL DE LAS CARGAS DE SALIDA, APARTE (V1051): la cooperativa factura las dos
+         juntas, pero una es costo de la mercadería y la otra de la venta. -->
+    <div id="sgcarga-modelo-falta" style="display:none;border:1.5px solid #e0a72e;
+         background:rgba(224,167,46,.10);border-radius:8px;padding:9px 12px;
+         margin-bottom:12px;font-size:12.5px;color:#9a3412"></div>
 
-    <div style="display:flex;justify-content:flex-end;gap:8px;margin-bottom:12px">
+    <div style="display:flex;justify-content:flex-end;flex-wrap:wrap;gap:8px;margin-bottom:12px">
       <button class="btn bo" id="sggd-modelo-btn" style="display:none"
               onclick="sgModeloAbrir('descarga')">⚙️ Asiento modelo</button>
+      <button class="btn bo" id="sgcarga-modelo-btn" style="display:none"
+              onclick="sgModeloAbrir('carga')">⚙️ Asiento modelo</button>
       <button class="btn bo" onclick="sgFgAbrir('descarga')">🧾 Ingresar factura</button>
       <button class="btn bb" onclick="sgCoopOpen()">+ Nueva cooperativa</button>
       <button class="btn bo" onclick="sgCcoopLoad()">↻ Actualizar</button>
@@ -11712,7 +11719,7 @@ function sgAsientoModeloVisible(){
   var admin = sgAsientoEsAdmin();
   ['sgfm-modelo-box', 'liq-modelo-box',
    'sggd-modelo-btn', 'sgfe-modelo-btn', 'sgfs-modelo-btn',
-   'sgfd-modelo-btn', 'sgcob-modelo-btn'].forEach(function(id){
+   'sgfd-modelo-btn', 'sgcob-modelo-btn', 'sgcarga-modelo-btn'].forEach(function(id){
     var e = document.getElementById(id);
     if (e) e.style.display = admin ? '' : 'none';
   });
@@ -23133,6 +23140,9 @@ SG_MANUAL.modelos = { titulo: 'Asiento Modelo', html:
   + '<li><b>Flete de entrada</b> — el flete de la mercadería que entra, cuando lo paga '
   + 'San Gerónimo.</li>'
   + '<li><b>Descarga y servicios</b> — la factura de la cooperativa que bajó el camión.</li>'
+  + '<li><span class="ver">V1051</span> <b>Carga de salida</b> — la parte de esa misma factura que '
+  + 'cargó el camión que sale al cliente. Es costo de la <b>venta</b>, no de la mercadería, y por eso '
+  + 'va aparte. Mientras no se elija, las cargas van con el modelo de la descarga.</li>'
   + '</ul>'
 
   + '<div class="ojo"><b>Un circuito sin modelo no genera asiento.</b> La operación se '
@@ -23174,6 +23184,8 @@ SG_MANUAL.modelos = { titulo: 'Asiento Modelo', html:
   + 'cuentas que toca. Es <b>el mismo valor</b>, no una segunda configuración: se '
   + 'guarda en un solo lugar y las dos pantallas muestran lo mismo. Dos puertas al '
   + 'mismo cuarto, para no hacer cambiar de pantalla al que está trabajando.</p>'
+  + '<p><span class="ver">V1051</span> Al lado está el de <b>Carga de salida</b>, con su propio '
+  + 'botón: <b>⚙️ Asiento modelo de cargas</b>.</p>'
 
   + '<h3>El de COBRANZAS, y por qué apareció <span class="ver">V1029</span></h3>'
   + '<p>Es la <b>contracara de la venta</b>: la venta carga la cuenta corriente del cliente y la '
@@ -23250,8 +23262,12 @@ SG_MANUAL.gastos = { titulo: 'Gastos Directos', html:
   + 'en la lista, la carga muestra el cliente del remito.</li>'
   + '<li>Es costo de la <b>venta</b>: no toca el costo de la partida y <b>no se le descuenta al '
   + 'productor</b>. Resta del <b>margen del remito</b>.</li>'
-  + '<li><span class="ver">V1015</span> Se contabiliza con el <b>mismo asiento modelo que la '
-  + 'descarga</b>: van juntas en la factura de la cooperativa.</li>'
+  + '<li><span class="ver">V1051</span> Tiene su <b>propio asiento modelo</b>, aparte del de la '
+  + 'descarga: la carga es costo de la venta y la descarga es costo de la mercadería. Se elige con '
+  + '<b>⚙️ Asiento modelo de cargas</b>, al lado del de descargas. Se sigue facturando <b>junto con '
+  + 'la descarga</b>, en la misma factura: la parte de las cargas va contra su modelo y la de las '
+  + 'descargas contra el suyo, con el IVA y la deuda con la cooperativa en el mismo asiento. Mientras '
+  + 'no se elija, va con el de la descarga, como hasta la V1050.</li>'
   + '</ul>'
 
   + '<h3>Anular una factura de servicio <span class="ver">V1015</span></h3>'
@@ -23520,6 +23536,8 @@ SG_MANUAL.gastos = { titulo: 'Gastos Directos', html:
   + 'Asiento Modelo: se guarda en un solo lugar, y cambiarlo en cualquiera de las dos '
   + 'pantallas lo cambia en las dos. Está acá porque es donde se trabaja — el que '
   + 'ingresa la factura tiene que ver contra qué va a entrar sin cambiar de pantalla.</li>'
+  + '<li><span class="ver">V1051</span> Al lado está <b>⚙️ Asiento modelo de cargas</b>, para las '
+  + 'cargas de salida: es el circuito «Carga de salida» de Contabilidad SG.</li>'
   + '<li>El <b>selector lo ve sólo la administración</b>. Elegir el modelo es '
   + 'parametrizar, y se hace una vez.</li>'
   + '<li>Si el modelo <b>no sirve</b> —le falta la línea de Proveedores, o alguna cuenta '
@@ -23608,6 +23626,8 @@ SG_MANUAL.gastos = { titulo: 'Gastos Directos', html:
 
   + '<h3>Qué cambió, y desde cuándo</h3>'
   + '<ul>'
+  + '<li><span class="ver">V1051</span> La <b>carga de salida</b> tiene su propio asiento modelo, '
+  + 'aunque se facture junto con la descarga.</li>'
   + '<li><span class="ver">V1049</span> Una factura que cita una liquidación viva no se puede anular: la '
   + 'fila muestra 🔒. Su asiento tampoco se anula suelto desde Asientos.</li>'
   + '<li><span class="ver">V1048</span> El flete de <b>entrada</b> adelantado se descuenta solo en la '
@@ -26876,6 +26896,7 @@ function sgCcoopInit(){
   // el botón ↻ y después de cada asignación. El asiento modelo no cambia porque
   // se mueva una fecha, y rehacer el bloque cerraba el cuadro abierto.
   sgModeloCargar('descarga');
+  sgModeloCargar('carga');
   // Arranca mostrando el mes en curso: es el corte con el que se paga.
   var hoy = new Date();
   var d1 = new Date(hoy.getFullYear(), hoy.getMonth(), 1);
@@ -26944,6 +26965,22 @@ var SG_MODELOS = {
     sub: 'Con qué asiento modelo se contabilizan las facturas de las cooperativas. Es el '
        + 'mismo que el circuito «Descarga y servicios» de Contabilidad SG: se guarda en un '
        + 'solo lugar y cambiarlo acá lo cambia en las dos pantallas.',
+    // Con dos botones en la misma solapa, cada uno dice de qué es (V1051).
+    etiqueta: 'de descargas',
+  },
+  // LA CARGA DE SALIDA, CON SU PROPIO MODELO (V1051). No lleva «ingresar factura»: se
+  // factura junto con la descarga, en la misma factura de la cooperativa, y cada parte va
+  // contra su modelo.
+  carga: {
+    ruta: '/api/sg/gastos-factura/modelo-carga',
+    btn: 'sgcarga-modelo-btn', av: 'sgcarga-modelo-falta',
+    titulo: 'Asiento contable de las cargas de salida',
+    que: 'las cargas de salida',
+    sub: 'Con qué asiento modelo se contabilizan las cargas de salida de las facturas de las '
+       + 'cooperativas. Es un circuito APARTE de la descarga: la carga es costo de la venta y la '
+       + 'descarga es costo de la mercadería. Es el circuito «Carga de salida» de Contabilidad SG. '
+       + 'Mientras no se elija, las cargas van con el modelo de la descarga.',
+    etiqueta: 'de cargas',
   },
   flete_entrada: {
     ruta: '/api/sg/flete/modelo',
@@ -27014,6 +27051,8 @@ function sgModeloCargar(k){
   api(c.ruta).then(function(r){
     SG_MODELO_EST[k] = (r && r.ok) ? r.data : null;
     sgModeloEstado(k);
+    // El aviso de la carga depende de si la descarga tiene modelo (V1051), y llegan por separado.
+    if (k === 'descarga' && SG_MODELO_EST.carga !== undefined) sgModeloEstado('carga');
     // El bloque de Descuento super mira esta respuesta para saber si hay cuenta
     // donde medirlo. Llega después de que la ventana se abrió, así que se repinta
     // acá: si no, la primera vez siempre diría que falta.
@@ -27032,6 +27071,8 @@ function sgModeloEstado(k){
   var m = d && d.modelo, faltan = (d && d.faltan) || [];
   var mal = !m || faltan.length;
   btn.textContent = mal ? '⚠️ Asiento modelo' : '⚙️ Asiento modelo';
+  // Con dos botones en la misma solapa —descargas y cargas— cada uno dice de qué es (V1051).
+  if (c.etiqueta) btn.textContent += ' ' + c.etiqueta;
   btn.title = m ? ('Se contabiliza con: ' + m.nombre) : 'Todavía no se eligió';
   av.style.display = mal ? '' : 'none';
   if (mal) {
@@ -27040,6 +27081,21 @@ function sgModeloEstado(k){
     // porque sin la cuenta corriente el asiento no se puede armar. Decir «se
     // guarda igual» sería mentirle al que está por cobrar.
     var noEntra = (k === 'cobranza');
+    // LA CARGA SIN MODELO PROPIO NO QUEDA SIN ASIENTO: va con el de la descarga (V1051).
+    // Decir «no se están contabilizando» mandaría a buscar un agujero que no existe.
+    if (!m && k === 'carga') {
+      // Y si la descarga TAMPOCO tiene, no va con nada: la factura queda sin asiento.
+      // Mientras no se sabe —las dos respuestas llegan por separado— se dice lo común.
+      var desc = SG_MODELO_EST.descarga;
+      av.innerHTML = (!desc || desc.modelo)
+        ? ('<b>Las cargas de salida se están contabilizando con el asiento modelo de la '
+          + 'descarga.</b> Todavía no se eligió uno propio' + (d && d.id_perdido ? ' (el que estaba se dio de baja)' : '')
+          + ': la carga es costo de la venta y la descarga, de la mercadería. ')
+        : ('<b>Las cargas de salida no se están contabilizando:</b> no tienen asiento modelo propio y '
+          + 'la descarga tampoco. La factura se guarda igual y queda sin asiento. ');
+      av.innerHTML += '<a href="#" onclick="sgModeloAbrir(\'carga\');return false">Elegirlo</a>.';
+      return;
+    }
     av.innerHTML = !m
       ? ('<b>' + escH(c.que.charAt(0).toUpperCase() + c.que.slice(1))
          + (noEntra ? ' no se pueden registrar.' : ' no se están contabilizando.')
@@ -27048,7 +27104,10 @@ function sgModeloEstado(k){
          + (noEntra
              ? ': sin él no se sabe contra qué cuenta corriente se cancela el cobro, y el cobro '
                + 'no entra. No se configura cliente por cliente. '
-             : ': la operación se guarda igual y queda sin asiento. ')
+             : ': la operación se guarda igual y queda sin asiento. '
+               // Y la factura de la cooperativa, entera, con su parte de cargas (V1051).
+               + (k === 'descarga' ? 'Una factura de la cooperativa con descargas queda entera sin '
+                  + 'asiento, también su parte de cargas. ' : ''))
          + '<a href="#" onclick="sgModeloAbrir(\'' + k + '\');return false">Elegirlo</a>.')
       : ('<b>El asiento modelo no sirve para contabilizar:</b> ' + faltan.map(escH).join(' · ')
          + '. <a href="#" onclick="sgModeloAbrir(\'' + k + '\');return false">Revisarlo</a>.');
@@ -27205,7 +27264,10 @@ function sgModeloPintar(k){
   if (!m){
     box.innerHTML = '<div style="color:#9a3412;font-weight:600;margin-bottom:8px">'
       + '⚠️ Todavía no se eligió con qué asiento se contabilizan ' + escH(SG_MODELOS[k].que) + ': '
-      + 'la operación se va a guardar sin contabilizar.'
+      // La carga no queda sin asiento: va con el de la descarga (V1051).
+      + (k === 'carga' && (!SG_MODELO_EST.descarga || SG_MODELO_EST.descarga.modelo)
+          ? 'mientras tanto van con el modelo de la descarga.'
+          : 'la operación se va a guardar sin contabilizar.')
       + (d.id_perdido ? ' (El que estaba elegido se dio de baja.)' : '')
       + '</div>'
       + (esAdmin ? sel
@@ -27244,7 +27306,8 @@ function sgModeloGuardar(k){
     sel.disabled = false;
     if (!r || !r.ok){ toast((r && r.error) || 'No se pudo guardar', 'er'); sgModeloCargar(k); return; }
     toast(sel.value ? ('Ya se contabilizan ' + c.que + ' con ese modelo')
-                    : 'Sin modelo: la operación no va a asentar', 'ok');
+                    : (k === 'carga' ? 'Sin modelo propio: las cargas van con el de la descarga'
+                                     : 'Sin modelo: la operación no va a asentar'), 'ok');
     // Recarga el estado (botón y aviso) y, como el modal está abierto, lo repinta.
     sgModeloCargar(k);
     // Y si la venta se está cargando en este momento, el cuadro del asiento que
@@ -27808,6 +27871,8 @@ function sgFgAsiento(){
     if (!r || !r.ok){ caja.innerHTML = ''; SGFG.asiento = null; return; }
     SGFG.asiento = r.data;
     var cc = SG_MODELOS[SGFG.circuito] || {};
+    // Con qué modelos se arma (V1051): la carga de salida tiene el suyo.
+    var usados = r.data.modelos || [];
     // EL TEXTO NOMBRA AL CIRCUITO QUE FALTA, NO SIEMPRE A LAS DESCARGAS. Con el
     // texto clavado, facturando un flete sin su modelo la pantalla mandaba al
     // administrador a tocar el de la descarga —que está y funciona—: rompía el
@@ -27823,7 +27888,9 @@ function sgFgAsiento(){
          + 'La factura se va a guardar igual y va a quedar sin contabilizar: un administrador tiene '
          + 'que elegir el modelo con <b>⚙️ Asiento modelo</b>.</div>')
       : sgAsientoCuadro(r.data, 'Así se va a contabilizar',
-          'el asiento modelo de ' + (cc.que || 'este circuito'));
+          usados.length > 1 ? 'el asiento modelo de las descargas y el de las cargas de salida'
+            : (usados[0] === 'asiento_modelo_carga_salida' ? 'el asiento modelo de las cargas de salida'
+            : 'el asiento modelo de ' + (cc.que || 'este circuito')));
   });
 }
 
@@ -76120,7 +76187,9 @@ function sgctCircPintar(filas) {
 }
 
 function sgctCircSelect(c) {
-  var opts = '<option value="">— Sin elegir: no genera asiento —</option>'
+  // La carga de salida sin modelo propio no queda sin asiento: va con el de la descarga (V1051).
+  var opts = '<option value="">' + (c.clave === 'asiento_modelo_carga_salida'
+      ? '— Sin elegir: va con el de la descarga —' : '— Sin elegir: no genera asiento —') + '</option>'
     + SGCTCIRC.modelos.map(function(m) {
         return '<option value="' + m.id + '"' + (m.id === c.modelo_id ? ' selected' : '') + '>'
           + sgctEsc(m.nombre) + '</option>';
@@ -76143,7 +76212,9 @@ function sgctCircGuardar(clave, sel) {
   }).then(function(r) {
     sel.disabled = false;
     if (!r || !r.ok) { toast((r && r.error) || 'No se pudo guardar', 'er'); sgctCircCargar(); return; }
-    toast(sel.value ? 'Circuito contabilizado con ese modelo' : 'Circuito sin modelo: no va a asentar', 'ok');
+    toast(sel.value ? 'Circuito contabilizado con ese modelo'
+      : (clave === 'asiento_modelo_carga_salida' ? 'Sin modelo propio: las cargas van con el de la descarga'
+                                                : 'Circuito sin modelo: no va a asentar'), 'ok');
     sgctCircCargar();
   });
 }

@@ -275,7 +275,7 @@ test('manual de Gastos Directos: lo devuelto, el de entrada, y la carga con el a
   assert.match(M, /el flete de lo devuelto no se le descuenta al productor: es <b>pérdida de la partida<\/b>/);
   assert.match(M, /El flete de <b>entrada<\/b> que adelanta San Gerónimo se le descuenta igual, solo, en la liquidación a pizarra/);
   assert.match(M, /A precio cerrado entra al costo de la partida/);
-  assert.match(M, /Se contabiliza con el <b>mismo asiento modelo que la descarga<\/b>/);
+  assert.match(M, /Tiene su <b>propio asiento modelo<\/b>, aparte del de la descarga/);
   // Y así es: la carga está en el circuito de la descarga.
   assert.match(SG, /descarga:\s+\{ tipos: \['descarga_ingreso', 'carga_salida'\]/);
 });
@@ -354,7 +354,7 @@ test('un viaje que se quedó sin mercadería no pide valorizarse: no hubo flete 
   assert.match(manual('gastos'), /Un viaje que se quedó sin mercadería —sus lotes se borraron por mal cargados— no pide valorizarse/);
 });
 
-test('la carga de la cooperativa lleva el asiento de la descarga desde la V1015, no desde la V1048', () => {
-  assert.match(manual('gastos'), /<span class="ver">V1015<\/span> Se contabiliza con el <b>mismo asiento modelo que la descarga<\/b>/);
+test('la carga de la cooperativa tiene su propio asiento modelo desde la V1051', () => {
+  assert.match(manual('gastos'), /<span class="ver">V1051<\/span> Tiene su <b>propio asiento modelo<\/b>/);
   assert.ok(!/entrada<\/b> adelantado todavía se tipea a mano|el flete de ENTRADA\r?\n\/\/ adelantado todavía se tipea a mano/.test(LIQ));
 });
