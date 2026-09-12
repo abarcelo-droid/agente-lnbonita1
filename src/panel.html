@@ -346,6 +346,8 @@ input[type=number]{-moz-appearance:textfield;appearance:textfield}
   <div class="ni" data-sec="sg-pisos"></div>
   <div class="ni" data-sec="sg-pedidos"></div>
   <div class="ni" data-sec="sg-remitos-pend"></div>
+  <!-- P&L Abasto (V1052): mismo PUENTE sin texto que los de arriba. -->
+  <div class="ni" data-sec="pl-abasto"></div>
 
   <div class="ng" style="margin-top:8px">General</div>
   <div class="ni on" data-sec="inicio"><span class="dot"></span>Inicio</div>
@@ -5508,6 +5510,95 @@ input[type=number]{-moz-appearance:textfield;appearance:textfield}
      vendedor". Un informe fijo por pregunta obliga a desarrollar cada pregunta nueva.
      La rentabilidad sólo aparece si el nivel del módulo alcanza: esta pantalla la
      abren los comerciales. -->
+<!-- ══ P&L ABASTO (V1052) ═════════════════════════════════════════════════════
+     Pablo, 12/9/2026: «dentro de Informes vamos a agregar un submódulo que se llama
+     P&L Abasto... voy a subir un Excel con el libro diario que nos trae el otro
+     sistema». El cuadro se arma con ese libro diario, no con la contabilidad del panel.
+     SIN BARRA DE COSTADO: hasta doce meses por vez, con anchos fijos. -->
+<div class="sec sg-mod" id="sec-pl-abasto">
+  <style>
+    #sec-pl-abasto .pla-f{display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;margin-bottom:10px}
+    #sec-pl-abasto .pla-f label{font-size:11px;color:var(--mut);display:block;margin-bottom:3px}
+    #sec-pl-abasto .pla-f select,#sec-pl-abasto .pla-f input{
+      padding:5px 8px;border:1px solid var(--bor);border-radius:6px;background:var(--bg);font-size:12.5px}
+    #sec-pl-abasto .pla-tab{display:inline-block;padding:9px 16px;cursor:pointer;border-bottom:2px solid transparent;
+      color:var(--mut);font-weight:600}
+    #sec-pl-abasto .pla-tab.on{color:var(--burg);border-bottom-color:var(--burg)}
+    #sec-pl-abasto .pla-pane{display:none;margin-top:12px} #sec-pl-abasto .pla-pane.on{display:block}
+    #sec-pl-abasto .ab-table-wrap{overflow-x:hidden !important}
+    #sec-pl-abasto .pla-tbl{table-layout:fixed;width:100%;max-width:98vw;border-collapse:collapse;
+      font-size:11px;font-variant-numeric:tabular-nums}
+    #sec-pl-abasto .pla-tbl th,#sec-pl-abasto .pla-tbl td{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+      padding:4px 4px;border-bottom:1px solid var(--bor);text-align:right}
+    #sec-pl-abasto .pla-tbl th{font-size:10.5px;color:var(--mut);background:var(--bg)}
+    #sec-pl-abasto .pla-tbl th:first-child,#sec-pl-abasto .pla-tbl td:first-child{text-align:left}
+    #sec-pl-abasto .pla-rub td{background:#f8fafc;font-weight:700}
+    #sec-pl-abasto .pla-rub td:first-child{cursor:pointer}
+    #sec-pl-abasto .pla-cta td{color:#475569;font-size:10px}
+    #sec-pl-abasto .pla-cta td:first-child{padding-left:22px}
+    #sec-pl-abasto .pla-sub td{background:#dbeafe;font-weight:700}
+    #sec-pl-abasto .pla-res td{background:#0a2744;color:#fff;font-weight:700}
+    #sec-pl-abasto .pla-pos{color:#15803d} #sec-pl-abasto .pla-neg{color:#dc2626}
+    #sec-pl-abasto .pla-res .pla-pos,#sec-pl-abasto .pla-res .pla-neg{color:#fff}
+    #sec-pl-abasto .pla-pct{display:block;font-size:9.5px;color:var(--mut);font-weight:400}
+    #sec-pl-abasto .pla-res .pla-pct{color:#cbd5e1}
+    #sec-pl-abasto .pla-dnd{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,2fr);gap:12px}
+    #sec-pl-abasto .pla-zonas{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+    #sec-pl-abasto .pla-zona{border:1.5px dashed var(--bor);border-radius:10px;padding:8px;min-height:110px;background:var(--bg)}
+    #sec-pl-abasto .pla-zona.sobre{border-color:var(--burg);background:rgba(128,0,32,.05)}
+    #sec-pl-abasto .pla-zona h4{margin:0 0 6px;font-size:12.5px}
+    #sec-pl-abasto .pla-chip{border:1px solid var(--bor);border-radius:7px;padding:4px 7px;margin:0 0 5px;
+      background:var(--pan,#fff);cursor:grab;font-size:11.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    #sec-pl-abasto .pla-chip small{color:var(--mut)}
+    #sec-pl-abasto .pla-chip.pend{border-color:#f59e0b;background:#fffbeb}
+    #sec-pl-abasto .pla-def{font-size:9.5px;color:#92400e;margin-left:4px}
+    @media(max-width:900px){ #sec-pl-abasto .ab-table-wrap{overflow-x:auto !important}
+      #sec-pl-abasto .pla-tbl{table-layout:auto}
+      #sec-pl-abasto .pla-dnd,#sec-pl-abasto .pla-zonas{grid-template-columns:1fr} }
+  </style>
+  <div class="ph"><div><div class="ph-t">📊 P&amp;L Abasto</div>
+      <div class="ph-s">El estado de resultados de cada mes, armado con el libro diario del otro sistema</div></div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;align-self:center">
+      <button class="btn bo bs" onclick="sgManualAbrir('plabasto')">❓ ¿Cómo se usa?</button>
+      <button class="btn bb" id="pla-subir-btn" style="display:none" onclick="plaCargaAbrir()">📤 Subir libro diario</button>
+    </div>
+  </div>
+  <div id="pla-aviso" style="font-size:12px;color:var(--mut);margin:6px 0 4px"></div>
+  <div style="border-bottom:1px solid var(--bor)">
+    <div class="pla-tab on" data-pla="resultado" onclick="plaTab('resultado')">Resultado</div>
+    <div class="pla-tab" data-pla="rubros" onclick="plaTab('rubros')">Configurar rubros</div>
+  </div>
+  <div class="pla-pane on" id="pla-pane-resultado">
+    <div class="pla-f">
+      <div><label>Desde</label><select id="pla-desde" data-sin-buscador="1"></select></div>
+      <div><label>Hasta</label><select id="pla-hasta" data-sin-buscador="1"></select></div>
+      <button class="btn bo" onclick="plaCargar()">↻ Actualizar</button>
+      <div><label>Importes en</label><select id="pla-unidad" data-sin-buscador="1" onchange="plaUnidadCambiar()">
+        <option value="1">Pesos</option><option value="1000">Miles</option><option value="1000000">Millones</option>
+      </select></div>
+      <div style="font-size:11px;color:var(--mut);align-self:center">Clic en un rubro: sus cuentas · doble clic en un
+        importe: los asientos · el importe exacto, pasando el mouse</div>
+    </div>
+    <div class="ab-table-wrap"><table class="pla-tbl" id="pla-tabla"></table></div>
+  </div>
+  <div class="pla-pane" id="pla-pane-rubros">
+    <div class="pla-f">
+      <div><label>Buscar cuenta</label><input id="pla-rub-q" placeholder="código o nombre" oninput="plaRubrosPintar()"></div>
+      <span id="pla-rub-pend" style="font-size:12px;color:#92400e;align-self:center"></span>
+      <button class="btn bb" id="pla-rub-guardar" onclick="plaRubrosGuardar()" disabled>💾 Guardar</button>
+      <button class="btn bo" id="pla-rub-reset" onclick="plaRubrosRestablecer()">Volver a los de por defecto</button>
+    </div>
+    <div class="pla-dnd">
+      <div class="pla-zona" data-rubro="sin_asignar" ondragover="plaSobre(event,this)"
+           ondragleave="this.classList.remove('sobre')" ondrop="plaSoltar(event,this)">
+        <h4>Sin asignar <small style="font-weight:400;color:var(--mut)">— no entran al resultado</small></h4>
+        <div id="pla-zona-sin_asignar"></div>
+      </div>
+      <div class="pla-zonas" id="pla-zonas"></div>
+    </div>
+  </div>
+</div>
+
 <div class="sec sg-mod" id="sec-informes-comercial">
   <style>
     #sec-informes-comercial .inf-f{display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;margin-bottom:12px}
@@ -7978,6 +8069,40 @@ input[type=number]{-moz-appearance:textfield;appearance:textfield}
      Tres modales iguales serían tres lugares donde arreglar lo mismo, y el que
      se olvide queda distinto. El título, el texto y el cuerpo los pone
      sgModeloAbrir(clave) según de qué circuito se trate. -->
+<!-- ══ P&L ABASTO: SUBIR EL LIBRO DIARIO (V1052) ══════════════════════════════
+     Una ventana, porque es cargar. Y no se cierra al guardar: adentro queda lo que hay
+     que leer, qué período se reemplazó. -->
+<div class="ab-modal-overlay sg-mod" id="pla-carga-modal">
+  <div class="ab-modal" style="width:min(640px,96vw);max-width:96vw;max-height:90vh;overflow-y:auto;overflow-x:hidden">
+    <div class="mhd"><div class="mht">📤 Subir libro diario</div>
+      <button class="mcl" onclick="closeMB('pla-carga-modal')">×</button></div>
+    <div style="font-size:12.5px;color:var(--mut);margin-bottom:10px">El Excel del libro diario que exporta el
+      otro sistema (.xls o .xlsx). Reemplaza lo cargado <b>entre la primera y la última fecha del archivo</b>;
+      lo de afuera no se toca.</div>
+    <input type="file" id="pla-carga-archivo" accept=".xls,.xlsx" onchange="plaCargaArchivo(this)">
+    <div id="pla-carga-resumen" style="margin-top:12px;font-size:13px"></div>
+    <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:16px">
+      <button class="btn bo" onclick="closeMB('pla-carga-modal')">Cerrar</button>
+      <button class="btn bb" id="pla-carga-btn" onclick="plaCargaGuardar()" disabled>Guardar en el panel</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══ P&L ABASTO: LOS ASIENTOS DE UN IMPORTE (V1052) ═════════════════════════ -->
+<div class="ab-modal-overlay sg-mod" id="pla-detalle-modal">
+  <div class="ab-modal" style="width:min(1000px,96vw);max-width:96vw;max-height:90vh;overflow-y:auto;overflow-x:hidden">
+    <div class="mhd"><div class="mht" id="pla-detalle-tit">🔍 Asientos</div>
+      <button class="mcl" onclick="closeMB('pla-detalle-modal')">×</button></div>
+    <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:8px">
+      <input id="pla-detalle-q" placeholder="Buscar en la lista" oninput="plaDetallePintar()"
+             style="padding:5px 8px;border:1px solid var(--bor);border-radius:6px;min-width:220px">
+      <span id="pla-detalle-nota" style="font-size:11.5px;color:var(--mut)"></span>
+    </div>
+    <div class="ab-table-wrap" style="overflow-x:hidden !important">
+      <table class="pa-tbl" id="pla-detalle-tabla" style="table-layout:fixed;width:100%;font-size:12px"></table></div>
+  </div>
+</div>
+
 <div class="ab-modal-overlay sg-mod" id="sg-modelo-modal">
   <div class="ab-modal" style="width:min(760px,96vw);max-width:96vw;max-height:90vh;overflow-y:auto;overflow-x:hidden">
     <div class="mhd"><div class="mht" id="sg-modelo-tit">⚙️ Asiento contable</div>
@@ -24135,6 +24260,73 @@ SG_MANUAL.cajabancos = { titulo: 'Caja y Bancos', html:
   + 'día y lo hace quien tenga permiso en el módulo.</p>'
 };
 
+// ── P&L ABASTO (V1052) ────────────────────────────────────────────────────
+SG_MANUAL.plabasto = { titulo: 'P&L Abasto', html:
+  '<h3>Qué es</h3>'
+  + '<p>El <b>estado de resultados de Abasto, mes por mes</b>: ventas, costos, márgenes y resultado neto. '
+  + '<span class="ver">V1052</span> Se arma con el <b>libro diario del otro sistema</b>, que se sube acá '
+  + 'como Excel: no sale de la contabilidad del panel.</p>'
+
+  + '<h3>Subir el libro diario</h3>'
+  + '<ul>'
+  + '<li>Con <b>📤 Subir libro diario</b> se elige el Excel que exporta el otro sistema (.xls o .xlsx). Antes '
+  + 'de guardar muestra lo que leyó: cuántos renglones, de qué fecha a qué fecha y cuántas cuentas.</li>'
+  + '<li>Al guardar <b>reemplaza lo cargado entre la primera y la última fecha del archivo</b>; lo de afuera '
+  + 'no se toca. Sirve igual el diario acumulado del año que uno de un solo día.</li>'
+  + '<li>Antes de guardar dice <b>cuántos renglones ya cargados se reemplazan</b>. Si el archivo trae menos de '
+  + 'los que borra, o le cambia el nombre a varias cuentas conocidas —puede ser de otra empresa o estar '
+  + 'recortado—, <b>pide confirmar</b>: reemplazar no se puede deshacer.</li>'
+  + '<li>Lee <b>todas las hojas</b> (cuando el archivo es grande, el otro sistema lo parte en dos), reconoce '
+  + 'las columnas por lo que traen aunque los títulos vengan corridos, y <b>saltea</b> los títulos, el total '
+  + 'y el número de página.</li>'
+  + '<li>Si el debe y el haber del archivo no dan igual, <b>lo avisa y lo guarda igual</b>: conviene revisarlo '
+  + 'en el otro sistema.</li>'
+  + '</ul>'
+
+  + '<h3>Cómo se lee el cuadro</h3>'
+  + '<ul>'
+  + '<li>Una columna por mes, <b>del más nuevo al más viejo</b>, y adelante el <b>TOTAL</b> del período. '
+  + '<b>Hasta 12 meses por vez</b>, para que entre en la pantalla sin barra de costado.</li>'
+  + '<li>Los importes se ven en <b>pesos, miles o millones</b>: se elige arriba, y el importe exacto aparece '
+  + 'pasando el mouse.</li>'
+  + '<li>El importe de cada cuenta es <b>haber − debe</b>: los ingresos quedan en <b>verde</b> y los gastos en '
+  + '<b>rojo</b>, con el signo menos. Por eso los subtotales son sumas: <b>MARGEN BRUTO</b> = ventas + costos '
+  + 'variables; <b>EBITDA</b> = margen bruto + costos fijos; <b>EBT</b> = EBITDA + costos financieros; y el '
+  + '<b>RESULTADO NETO</b> suma los seis rubros.</li>'
+  + '<li>Debajo de cada rubro y subtotal, en gris, el <b>% sobre las ventas</b> de ese mes.</li>'
+  + '<li><b>Clic en un rubro</b>: se abren sus cuentas. <b>Doble clic en un importe</b>: los asientos que lo '
+  + 'forman, con su fecha, el número de asiento, la <b>contrapartida</b> —las otras cuentas del mismo asiento: el '
+  + 'cliente de una venta, cuando el otro sistema la cargó con su cobro en el mismo asiento—, el debe y el haber.</li>'
+  + '<li>Sólo entran las <b>cuentas de resultado</b>. Las que empiezan con 1, 2 o 3 son del patrimonio '
+  + '—caja, clientes, proveedores, IVA— y no están en el cuadro.</li>'
+  + '</ul>'
+
+  + '<h3>Configurar rubros</h3>'
+  + '<ul>'
+  + '<li>Cada cuenta va a un rubro: Ventas, Costos variables, Costos fijos, Costos financieros, Impuestos u '
+  + 'Otros. Se cambia <b>arrastrándola</b> a otro rubro, y se confirma con <b>💾 Guardar</b>.</li>'
+  + '<li>Las que nadie clasificó dicen <b>por defecto</b>: la compra de mercadería y el costo de lo vendido van '
+  + 'a costos variables; los intereses, los gastos bancarios, la diferencia de cambio y el rendimiento del FCI, a '
+  + 'financieros; los impuestos, por su nombre; el resto del 4.1, a ventas —salvo lo que el mismo plan marca como '
+  + 'gasto con «G -», que va a Otros—; y lo demás a <b>Otros</b>, para repartir a mano. <b>Costos fijos arranca '
+  + 'vacío.</b> Lo que está en Otros cuenta igual para el resultado neto.</li>'
+  + '<li>Lo arrastrado a <b>Sin asignar</b> no entra al resultado.</li>'
+  + '<li>Una cuenta nueva que traiga un Excel nuevo entra con su rubro por defecto, sin tocar lo ya '
+  + 'clasificado. <b>Volver a los de por defecto</b> borra toda la clasificación guardada, y por eso pide el '
+  + 'nivel <b>Anular</b>.</li>'
+  + '</ul>'
+
+  + '<h3>Quién puede</h3>'
+  + '<p>Con el nivel <b>Ver</b> se mira el cuadro y los asientos. Subir el libro diario y guardar los rubros '
+  + 'pide <b>Operar</b>; volver los rubros a los de por defecto, <b>Anular</b>.</p>'
+
+  + '<h3>Qué cambió, y desde cuándo</h3>'
+  + '<ul>'
+  + '<li><span class="ver">V1052</span> Nace la pantalla: subir el libro diario, el cuadro por mes, los rubros '
+  + 'y los asientos de cada importe.</li>'
+  + '</ul>'
+};
+
 SG_MANUAL.ccclientes = { titulo: 'Cuenta corriente de clientes', html:
   '<p>Cuánto nos debe cada cliente, y por qué. Es la pantalla desde la que se <b>registra un '
   + 'cobro</b> y desde la que se ve, comprobante por comprobante, qué quedó pendiente.</p>'
@@ -36848,6 +37040,7 @@ function loadSec(s) {
     'sg-importacion': function(){ sgImpInit(); },
     'informes-comercial': function(){ infInit(); },
     'share': function(){ shInit(); },
+    'pl-abasto': function(){ plaInit(); },
     'sg-catalogo':   function(){ sgLoadCaches(function(){ sgCatSub('productos'); }); },
     'sg-reportes':   function(){ sgRepInit(); },
     'personal-padron':     function(){ ppOpenModulo('padron'); },
@@ -43080,6 +43273,579 @@ function infExportar(){
 // selectores de ventana, que se llenan una sola vez con lo que el servidor dice que hay
 // cargado: ofrecer un año vacío es hacer perder un clic.
 var IA = { data:null, opo:null, tipos:{} };
+
+// ══ P&L ABASTO (V1052) ═══════════════════════════════════════════════════════
+//
+// Pablo, 12/9/2026: «dentro de Informes vamos a agregar un submódulo que se llama P&L
+// Abasto... la info para armar el cuadro de resultados va a ser el Excel que te voy a
+// subir dentro del panel».
+//
+// EL EXCEL SE LEE ACÁ, en el navegador, y al servidor viajan sólo los renglones ya
+// ordenados: pesan la mitad que el archivo y el servidor no se queda leyendo un Excel
+// mientras los demás trabajan.
+var PLA = { datos: null, abiertos: {}, cuentas: null, pend: {}, detalle: null, lectura: null, previa: null, unidad: null };
+
+// ── LEER EL LIBRO DIARIO ─────────────────────────────────────────────────────
+//
+// El del otro sistema tiene tres mañas, vistas en el archivo real (diario040626.xls):
+//   · los TÍTULOS ESTÁN CORRIDOS dos columnas: dicen «Código de Cuenta, Nombre, Debe,
+//     Haber, Saldo» y los datos vienen Fecha, Asiento, Código, Nombre, Debe, Haber. Por
+//     eso las columnas se reconocen por lo que TIENEN, no por cómo se llaman.
+//   · cuando es grande lo PARTE EN VARIAS HOJAS (el Excel viejo no admite más de 65.536
+//     filas por hoja): se leen todas.
+//   · al final trae una fila con el total y otra con «Página 1 de 1»: se descartan.
+// `hojas` es una lista de hojas, y cada hoja una lista de filas de celdas.
+var PLA_COD = /^\d+(\.\d+)+$/;
+
+function plaFecha(v){
+  if (v instanceof Date && !isNaN(v)) {
+    // AL MEDIODÍA ANTES DE LEER EL DÍA: una fecha del Excel puede venir con la hora corrida
+    // y caer en el día anterior.
+    var d = new Date(v.getTime() + 12 * 3600 * 1000);
+    return d.getFullYear() + '-' + ('0' + (d.getMonth() + 1)).slice(-2) + '-' + ('0' + d.getDate()).slice(-2);
+  }
+  var s = String(v == null ? '' : v).trim(), m;
+  if ((m = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/.exec(s))) return m[3] + '-' + ('0' + m[2]).slice(-2) + '-' + ('0' + m[1]).slice(-2);
+  if ((m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s))) return m[1] + '-' + m[2] + '-' + m[3];
+  return null;
+}
+
+// Un importe: número, o texto en castellano («1.234.567,89»). Vacío es cero.
+function plaNumero(v){
+  if (typeof v === 'number') return isFinite(v) ? v : NaN;
+  var s = String(v == null ? '' : v).trim();
+  if (!s) return 0;
+  if (/,\d{1,4}$/.test(s) || /\.\d{3}(\.|,|$)/.test(s)) s = s.replace(/\./g, '').replace(',', '.');
+  var n = Number(s);
+  return isFinite(n) ? n : NaN;
+}
+
+// Dónde está cada cosa: la columna que más fechas trae y la que más códigos de cuenta.
+// El nombre va pegado al código y detrás el debe y el haber; el asiento, entre la fecha
+// y el código cuando hay lugar.
+function plaColumnas(hojas){
+  var cuenta = {}, fechas = {}, vistas = 0;
+  for (var h = 0; h < hojas.length && vistas < 400; h++) {
+    var fs = hojas[h] || [];
+    for (var i = 0; i < fs.length && vistas < 400; i++) {
+      var f = fs[i] || [], jc = -1, jf = -1;
+      for (var j = 0; j < f.length; j++) {
+        if (jc < 0 && PLA_COD.test(String(f[j] == null ? '' : f[j]).trim())) jc = j;
+        if (jf < 0 && plaFecha(f[j])) jf = j;
+      }
+      if (jc < 0 || jf < 0) continue;
+      vistas++;
+      cuenta[jc] = (cuenta[jc] || 0) + 1;
+      fechas[jf] = (fechas[jf] || 0) + 1;
+    }
+  }
+  var mas = function(o){ var k = null; for (var x in o) if (k === null || o[x] > o[k]) k = x; return k === null ? -1 : Number(k); };
+  var c = mas(cuenta), fe = mas(fechas);
+  if (!vistas || c < 0 || fe < 0) return null;
+  return { fecha: fe, asiento: (c - fe === 2) ? fe + 1 : -1, cuenta: c, nombre: c + 1, debe: c + 2, haber: c + 3 };
+}
+
+function plaLeerLibroDiario(hojas){
+  hojas = hojas || [];
+  var col = plaColumnas(hojas);
+  if (!col) return { error: 'No reconozco este archivo como un libro diario: no encuentro filas con fecha y código de cuenta.' };
+  var renglones = [], cuentas = {}, descartadas = 0, desde = null, hasta = null, debe = 0, haber = 0;
+  var meses = {}, deResultado = {};
+  for (var h = 0; h < hojas.length; h++) {
+    var fs = hojas[h] || [];
+    for (var i = 0; i < fs.length; i++) {
+      var f = fs[i] || [];
+      var fecha = plaFecha(f[col.fecha]);
+      var cod = String(f[col.cuenta] == null ? '' : f[col.cuenta]).trim();
+      if (!fecha || !PLA_COD.test(cod)) { descartadas++; continue; }
+      var d = plaNumero(f[col.debe]), hb = plaNumero(f[col.haber]);
+      if (isNaN(d) || isNaN(hb)) {
+        return { error: 'La fila ' + (i + 1) + ' de la hoja ' + (h + 1) + ' tiene un importe que no es un número.' };
+      }
+      if (!d && !hb) { descartadas++; continue; }
+      // Cuatro decimales alcanzan —el archivo trae hasta cuatro— y achican lo que viaja.
+      d = Math.round(d * 10000) / 10000;
+      hb = Math.round(hb * 10000) / 10000;
+      var asiento = (col.asiento >= 0 && f[col.asiento] != null) ? String(f[col.asiento]).trim() : '';
+      renglones.push([fecha, asiento, cod, d, hb]);
+      if (!(cod in cuentas)) cuentas[cod] = String(f[col.nombre] == null ? '' : f[col.nombre]).trim() || cod;
+      if (!/^[123]/.test(cod)) deResultado[cod] = 1;
+      if (!desde || fecha < desde) desde = fecha;
+      if (!hasta || fecha > hasta) hasta = fecha;
+      meses[fecha.slice(0, 7)] = 1;
+      debe += d;
+      haber += hb;
+    }
+  }
+  if (!renglones.length) return { error: 'El archivo no trae renglones de asientos con importe.' };
+  return { renglones: renglones, cuentas: cuentas, descartadas: descartadas, desde: desde, hasta: hasta,
+    meses: Object.keys(meses).sort(), cuentas_resultado: Object.keys(deResultado).length,
+    debe: Math.round(debe * 100) / 100, haber: Math.round(haber * 100) / 100 };
+}
+
+function plaFechaTxt(f){ return f ? f.slice(8, 10) + '/' + f.slice(5, 7) + '/' + f.slice(0, 4) : '—'; }
+function plaImporte(v){
+  return (v < 0 ? '-' : '') + '$ ' + Math.abs(Number(v) || 0).toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+var PLA_MES = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
+function plaMesTxt(m){ return PLA_MES[Number(m.slice(5, 7)) - 1] + ' ' + m.slice(0, 4); }
+// El encabezado de la columna, corto: «Sep 25». Con doce meses, «Septiembre 2025» no entra.
+function plaMesCorto(m){ return PLA_MES[Number(m.slice(5, 7)) - 1] + ' ' + m.slice(2, 4); }
+
+// ── SUBIR ─────────────────────────────────────────────────────────────────────
+function plaCargaAbrir(){
+  // SE ABRE EN BLANCO: lo leído la vez pasada no puede quedar listo para guardarse.
+  PLA.lectura = null;
+  PLA.previa = null;
+  var a = eid('pla-carga-archivo'); if (a) a.value = '';
+  eid('pla-carga-resumen').innerHTML = '';
+  var b = eid('pla-carga-btn'); b.disabled = true; b.textContent = 'Guardar en el panel';
+  sgModalArriba('pla-carga-modal');
+}
+
+function plaCargaArchivo(input){
+  var file = input.files && input.files[0];
+  var caja = eid('pla-carga-resumen');
+  PLA.lectura = null;
+  eid('pla-carga-btn').disabled = true;
+  if (!file) { caja.innerHTML = ''; return; }
+  if (typeof XLSX === 'undefined') {
+    caja.innerHTML = '<div style="color:var(--err)">No se pudo cargar el lector de Excel. Recargá la página y probá de nuevo.</div>';
+    return;
+  }
+  caja.innerHTML = 'Leyendo ' + escH(file.name) + '…';
+  var reader = new FileReader();
+  reader.onload = function(e){
+    var lec;
+    try {
+      var wb = XLSX.read(new Uint8Array(e.target.result), { type: 'array', cellDates: true });
+      var hojas = wb.SheetNames.map(function(n){
+        return XLSX.utils.sheet_to_json(wb.Sheets[n], { header: 1, raw: true, defval: null, blankrows: false });
+      });
+      lec = plaLeerLibroDiario(hojas);
+    } catch (err) { lec = { error: 'No se pudo leer el archivo: ' + err.message }; }
+    if (lec.error) { caja.innerHTML = '<div style="color:var(--err)">' + escH(lec.error) + '</div>'; return; }
+    lec.archivo = file.name;
+    PLA.lectura = lec;
+    PLA.previa = null;
+    caja.innerHTML = plaResumenLectura(lec, null);
+    // ANTES DE OFRECER GUARDAR: cuánto se va a reemplazar, y si el archivo parece otro.
+    api('/api/pl-abasto/previa', 'POST', { desde: lec.desde, hasta: lec.hasta, entran: lec.renglones.length,
+        cuentas: lec.cuentas }).then(function(r){
+      if (PLA.lectura !== lec) return;   // mientras tanto se eligió otro archivo
+      if (!r || !r.ok) {
+        caja.innerHTML += '<div style="color:var(--err)">' + escH((r && r.error) || 'No se pudo revisar qué se reemplaza') + '</div>';
+        return;
+      }
+      PLA.previa = r.data;
+      caja.innerHTML = plaResumenLectura(lec, r.data);
+      plaCargaBoton();
+    });
+  };
+  reader.onerror = function(){ caja.innerHTML = '<div style="color:var(--err)">No se pudo abrir el archivo.</div>'; };
+  reader.readAsArrayBuffer(file);
+}
+
+function plaResumenLectura(lec, previa){
+  var dif = Math.round((lec.debe - lec.haber) * 100) / 100;
+  return '<div style="border:1px solid var(--bor);border-radius:8px;padding:10px 12px;background:var(--bg)">'
+    + '<div><b>' + nr(lec.renglones.length) + '</b> renglones de asientos, del <b>' + plaFechaTxt(lec.desde)
+    + '</b> al <b>' + plaFechaTxt(lec.hasta) + '</b> (' + lec.meses.length + (lec.meses.length === 1 ? ' mes' : ' meses') + ').</div>'
+    + '<div>' + nr(lec.cuentas_resultado) + ' cuentas de resultado, de ' + nr(Object.keys(lec.cuentas).length) + ' en total.</div>'
+    + (lec.descartadas ? '<div style="color:var(--mut)">Se saltearon ' + nr(lec.descartadas)
+        + ' filas que no son renglones: títulos, totales, número de página.</div>' : '')
+    // NO FRENA: el archivo es del otro sistema y acá no se puede corregir. Se dice.
+    + (Math.abs(dif) >= 0.01 ? '<div style="color:#92400e;margin-top:4px">⚠️ El archivo no balancea: el debe y el haber '
+        + 'difieren en ' + plaImporte(dif) + '. Se guarda igual; conviene revisarlo en el otro sistema.</div>' : '')
+    + '<div style="margin-top:6px">Al guardar, <b>se reemplaza</b> lo cargado del ' + plaFechaTxt(lec.desde)
+    + ' al ' + plaFechaTxt(lec.hasta) + '.'
+    + (previa ? (previa.existentes ? ' Son <b>' + nr(previa.existentes) + '</b> renglones que ya estaban cargados.'
+                                   : ' No había nada cargado de ese período.') : '') + '</div>'
+    // UN ARCHIVO EQUIVOCADO BORRA UN PERÍODO: si lo parece, se pide tildar antes de guardar.
+    + (previa && (previa.avisos || []).length
+        ? '<div style="border:1.5px solid #fca5a5;background:rgba(252,165,165,.16);border-radius:8px;'
+          + 'padding:9px 12px;margin-top:8px;color:#991b1b"><b>⚠️ ¿Es el libro diario que corresponde?</b> '
+          + escH(previa.avisos.join('; ')) + '. Reemplazar borra lo que había y no se puede deshacer.'
+          + ((previa.ejemplos || []).length ? '<div style="font-size:11.5px;margin-top:4px">Por ejemplo: '
+              + previa.ejemplos.slice(0, 3).map(function(e){
+                  return escH(e.cuenta + ': «' + e.antes + '» → «' + e.ahora + '»'); }).join(' · ') + '</div>' : '')
+          + '<label style="display:block;margin-top:6px;font-weight:600"><input type="checkbox" id="pla-carga-confirma"'
+          + ' onchange="plaCargaBoton()"> Sí, es el que corresponde: reemplazar igual</label></div>'
+        : '')
+    + '</div>';
+}
+
+// Se puede guardar con el archivo leído, la previa a la vista y, si hay avisos, tildado.
+function plaCargaBoton(){
+  var b = eid('pla-carga-btn'); if (!b) return;
+  var p = PLA.previa, chk = eid('pla-carga-confirma');
+  b.disabled = !(PLA.lectura && p && (!(p.avisos || []).length || (chk && chk.checked)));
+}
+
+function plaCargaGuardar(){
+  var lec = PLA.lectura; if (!lec) return;
+  var btn = eid('pla-carga-btn');
+  btn.disabled = true; btn.textContent = 'Guardando…';
+  var chk = eid('pla-carga-confirma');
+  api('/api/pl-abasto/cargar', 'POST', { archivo: lec.archivo, cuentas: lec.cuentas, renglones: lec.renglones,
+      confirmar: !!(chk && chk.checked) }).then(function(r){
+    btn.textContent = 'Guardar en el panel';
+    if (!r || !r.ok) { plaCargaBoton(); toast((r && r.error) || 'No se pudo guardar', 'er'); return; }
+    // NO SE CIERRA: qué se reemplazó es lo que hay que leer.
+    PLA.lectura = null;
+    PLA.previa = null;
+    var d = r.data;
+    eid('pla-carga-resumen').innerHTML = '<div style="border:1.5px solid #86efac;background:#f0fdf4;border-radius:8px;'
+      + 'padding:10px 12px;color:#166534"><b>✓ Guardado.</b> ' + nr(d.renglones) + ' renglones del '
+      + plaFechaTxt(d.desde) + ' al ' + plaFechaTxt(d.hasta)
+      + (d.reemplazados ? '. Reemplazaron ' + nr(d.reemplazados) + ' que ya estaban cargados de ese período.' : '.') + '</div>';
+    toast('Libro diario guardado', 'ok');
+    PLA.cuentas = null;
+    plaCargar(true);
+  });
+}
+
+// ── EL CUADRO ─────────────────────────────────────────────────────────────────
+function plaInit(){
+  // Subir y clasificar es operar; volver a los de por defecto borra trabajo hecho, y es
+  // anular. Al que no llega no se le ofrece un botón que rebota.
+  var op = lnbPuedeOperar('pl-abasto'), an = lnbPuedeAnular('pl-abasto');
+  ['pla-subir-btn', 'pla-rub-guardar'].forEach(function(id){
+    var e = eid(id); if (e) e.style.display = op ? '' : 'none';
+  });
+  var rs = eid('pla-rub-reset'); if (rs) rs.style.display = an ? '' : 'none';
+  // SE ENTRA LIMPIO: lo arrastrado y no guardado en la visita anterior no puede quedar
+  // esperando un Guardar que lo escriba sin que nadie lo vea.
+  PLA.cuentas = null;
+  PLA.pend = {};
+  plaTab('resultado');
+  plaCargar(true);
+}
+
+function plaTab(t){
+  document.querySelectorAll('#sec-pl-abasto .pla-tab').forEach(function(el){
+    el.classList.toggle('on', el.getAttribute('data-pla') === t); });
+  document.querySelectorAll('#sec-pl-abasto .pla-pane').forEach(function(el){
+    el.classList.toggle('on', el.id === 'pla-pane-' + t); });
+  if (t === 'rubros') plaRubrosCargar();
+}
+
+function plaCargar(inicial){
+  var q = '';
+  if (!inicial) {
+    var de = (eid('pla-desde') || {}).value, ha = (eid('pla-hasta') || {}).value;
+    if (de && ha) {
+      if (de > ha) { var x = de; de = ha; ha = x; }
+      // HASTA DOCE MESES CON DATOS: más no entran en la pantalla sin barra de costado. Se
+      // cuentan los que tienen movimientos, no los del almanaque: con un mes sin carga en el
+      // medio, el período que la pantalla trae por defecto no se podía volver a pedir.
+      var dentro = ((PLA.datos || {}).meses_disponibles || []).filter(function(m){ return m >= de && m <= ha; }).length;
+      if (dentro > 12) { toast('Elegí hasta 12 meses por vez', 'er'); return; }
+      q = '?desde=' + de + '&hasta=' + ha;
+    }
+  }
+  eid('pla-tabla').innerHTML = '<tr><td style="text-align:left">Cargando…</td></tr>';
+  api('/api/pl-abasto/resultado' + q).then(function(r){
+    if (!r || !r.ok) {
+      eid('pla-tabla').innerHTML = '<tr><td style="text-align:left;color:var(--err)">'
+        + escH((r && r.error) || 'No se pudo leer el resultado') + '</td></tr>';
+      return;
+    }
+    PLA.datos = r.data;
+    plaSelectores(r.data);
+    plaAviso(r.data);
+    plaPintar();
+  });
+}
+
+function plaSelectores(d){
+  var opts = function(sel){
+    return (d.meses_disponibles || []).slice().reverse().map(function(m){
+      return '<option value="' + m + '"' + (m === sel ? ' selected' : '') + '>' + plaMesTxt(m) + '</option>'; }).join('');
+  };
+  eid('pla-desde').innerHTML = opts(d.desde);
+  eid('pla-hasta').innerHTML = opts(d.hasta);
+}
+
+function plaAviso(d){
+  var u = d.ultima_carga, caja = eid('pla-aviso');
+  if (!u) {
+    caja.innerHTML = '<b>Todavía no se subió ningún libro diario.</b> '
+      + (lnbPuedeOperar('pl-abasto') ? 'Apretá «📤 Subir libro diario».' : 'Pedile a quien lo administra que lo suba.');
+    return;
+  }
+  var enOtros = (d.cuentas || []).filter(function(c){ return !c.elegido && c.rubro === 'otros'; }).length;
+  caja.innerHTML = 'Última carga: <b>' + escH(u.archivo || 'sin nombre') + '</b>, del ' + plaFechaTxt(u.desde)
+    + ' al ' + plaFechaTxt(u.hasta) + ' · subida el ' + escH(String(u.creado_en || '').slice(0, 16))
+    + (u.usuario ? ' por ' + escH(u.usuario) : '')
+    + (enOtros ? ' · <span style="color:#92400e">' + enOtros + ' cuenta(s) están en «Otros» por defecto: '
+        + 'clasificalas en «Configurar rubros».</span>' : '');
+}
+
+// ── LA CASCADA ────────────────────────────────────────────────────────────────
+// Los gastos ya vienen negativos (haber − debe), así que TODO ES SUMA: el margen bruto es
+// ventas + costos variables, y así hacia abajo. El resultado neto suma los seis rubros.
+var PLA_SUBTOTALES = [
+  { despues: 'costos_variables', k: 'margen', label: 'MARGEN BRUTO', suma: ['ventas', 'costos_variables'] },
+  { despues: 'costos_fijos', k: 'ebitda', label: 'EBITDA', suma: ['ventas', 'costos_variables', 'costos_fijos'] },
+  { despues: 'costos_financieros', k: 'ebt', label: 'EBT (antes de impuestos)',
+    suma: ['ventas', 'costos_variables', 'costos_fijos', 'costos_financieros'] },
+];
+
+function plaTotales(d){
+  var meses = d.meses || [], rub = {}, porRubro = {};
+  var r2 = function(n){ return Math.round(n * 100) / 100; };
+  var cols = meses.concat('TOTAL');
+  (d.rubros || []).forEach(function(r){
+    rub[r.k] = {}; porRubro[r.k] = [];
+    cols.forEach(function(m){ rub[r.k][m] = 0; });
+  });
+  (d.cuentas || []).forEach(function(c){
+    if (!rub[c.rubro]) return;   // sin asignar: no entra al resultado
+    var t = 0;
+    meses.forEach(function(m){ var v = Number(c.meses[m]) || 0; rub[c.rubro][m] += v; t += v; });
+    rub[c.rubro].TOTAL += t;
+    porRubro[c.rubro].push({ c: c, total: r2(t) });
+  });
+  Object.keys(rub).forEach(function(k){ cols.forEach(function(m){ rub[k][m] = r2(rub[k][m]); }); });
+  var sumar = function(ks){
+    var o = {};
+    cols.forEach(function(m){ o[m] = r2(ks.reduce(function(a, k){ return a + ((rub[k] || {})[m] || 0); }, 0)); });
+    return o;
+  };
+  var sub = {};
+  PLA_SUBTOTALES.forEach(function(s){ sub[s.k] = sumar(s.suma); });
+  sub.neto = sumar(Object.keys(rub));
+  // Adentro de cada rubro, el que más pesa arriba: en ventas el mayor ingreso, en los
+  // gastos el más negativo.
+  Object.keys(porRubro).forEach(function(k){
+    porRubro[k].sort(function(a, b){ return k === 'ventas' ? b.total - a.total : a.total - b.total; });
+  });
+  return { rubros: rub, subtotales: sub, cuentas: porRubro };
+}
+
+// ── LA UNIDAD ─────────────────────────────────────────────────────────────────
+// Con doce meses en la pantalla, un importe de once cifras no entra en su columna y se
+// cortaba. Se elige en qué se ven —pesos, miles o millones— y el exacto queda al pasar el
+// mouse. La primera vez se elige sola por el tamaño de los números; después, la que eligió
+// cada uno.
+function plaUnidadGuardada(){
+  try { return Number(localStorage.getItem('pla-unidad')) || null; } catch (_) { return null; }
+}
+function plaUnidadAuto(T){
+  var max = 0;
+  Object.keys(T.rubros).forEach(function(k){ max = Math.max(max, Math.abs(T.rubros[k].TOTAL || 0)); });
+  return max >= 1e8 ? 1e6 : (max >= 1e5 ? 1e3 : 1);
+}
+function plaUnidadCambiar(){
+  PLA.unidad = Number((eid('pla-unidad') || {}).value) || 1;
+  try { localStorage.setItem('pla-unidad', String(PLA.unidad)); } catch (_) { /* sin almacenamiento: vale igual */ }
+  plaPintar();
+}
+
+function plaCelda(v, ventas, conPct){
+  if (v == null || Math.abs(v) < 0.5) return '<span style="color:var(--mut)">—</span>';
+  var u = PLA.unidad || 1, dec = u >= 1e6 ? 1 : 0;
+  var txt = (v < 0 ? '-' : '') + (Math.abs(v) / u).toLocaleString('es-AR', { minimumFractionDigits: dec, maximumFractionDigits: dec });
+  var pct = (conPct && ventas) ? '<span class="pla-pct">'
+    + (Math.round(v / ventas * 1000) / 10).toLocaleString('es-AR') + '%</span>' : '';
+  return '<span class="' + (v < 0 ? 'pla-neg' : 'pla-pos') + '">' + txt + '</span>' + pct;
+}
+
+function plaPintar(){
+  var d = PLA.datos, tb = eid('pla-tabla'); if (!d || !tb) return;
+  if (!d.meses || !d.meses.length) {
+    tb.innerHTML = '<tr><td style="text-align:left;color:var(--mut)">' + ((d.meses_disponibles || []).length
+      ? 'No hay movimientos en ese período.' : 'Todavía no hay datos: subí el libro diario.') + '</td></tr>';
+    return;
+  }
+  var T = plaTotales(d);
+  if (!PLA.unidad) PLA.unidad = plaUnidadGuardada() || plaUnidadAuto(T);
+  var su = eid('pla-unidad'); if (su) su.value = String(PLA.unidad);
+  // Del mes más nuevo al más viejo, con el total adelante.
+  var orden = ['TOTAL'].concat(d.meses.slice().reverse());
+  var ventas = T.rubros.ventas || {};
+  var ancho = Math.floor(820 / orden.length) / 10;
+  var h = '<colgroup><col style="width:' + (100 - ancho * orden.length).toFixed(1) + '%">'
+    + orden.map(function(){ return '<col style="width:' + ancho + '%">'; }).join('') + '</colgroup>'
+    + '<thead><tr><th>Concepto</th>' + orden.map(function(m){
+        return '<th' + (m === 'TOTAL' ? '>TOTAL' : ' title="' + plaMesTxt(m) + '">' + plaMesCorto(m)) + '</th>'; }).join('')
+    + '</tr></thead><tbody>';
+  var fila = function(clase, etiqueta, valores, pct, dbl, clic){
+    return '<tr class="' + clase + '"><td title="' + escH(etiqueta) + '"' + (clic ? ' onclick="' + clic + '"' : '') + '>'
+      + escH(etiqueta) + '</td>'
+      + orden.map(function(m){
+          var v = valores[m];
+          return '<td' + (v ? ' title="' + plaImporte(v) + '"' : '') + (dbl ? ' ondblclick="' + dbl(m) + '"' : '') + '>'
+            + plaCelda(v, ventas[m], pct) + '</td>';
+        }).join('') + '</tr>';
+  };
+  (d.rubros || []).forEach(function(r){
+    // Una cuenta sin importe en ningún mes del período no se muestra.
+    var cuentas = T.cuentas[r.k].filter(function(x){
+      return orden.some(function(m){ return Math.abs(m === 'TOTAL' ? x.total : (Number(x.c.meses[m]) || 0)) >= 1; });
+    });
+    if (cuentas.length) {
+      var abierto = !!PLA.abiertos[r.k];
+      h += fila('pla-rub', (abierto ? '▼ ' : '▶ ') + r.ico + ' ' + r.label, T.rubros[r.k], true,
+        function(m){ return "plaDetalle('rubro','" + r.k + "','" + m + "')"; }, "plaToggle('" + r.k + "')");
+      if (abierto) cuentas.forEach(function(x){
+        var vs = { TOTAL: x.total };
+        d.meses.forEach(function(m){ vs[m] = Number(x.c.meses[m]) || 0; });
+        h += fila('pla-cta', x.c.cuenta + ' · ' + x.c.nombre, vs, false,
+          function(m){ return "plaDetalle('cuenta','" + escH(x.c.cuenta) + "','" + m + "')"; });
+      });
+    }
+    // EL SUBTOTAL VA AUNQUE SU RUBRO ESTÉ VACÍO: el EBITDA existe aunque no haya costos fijos.
+    PLA_SUBTOTALES.forEach(function(s){ if (s.despues === r.k) h += fila('pla-sub', s.label, T.subtotales[s.k], true); });
+  });
+  h += fila('pla-res', '⭐ RESULTADO NETO', T.subtotales.neto, true);
+  tb.innerHTML = h + '</tbody>';
+}
+
+function plaToggle(k){ PLA.abiertos[k] = !PLA.abiertos[k]; plaPintar(); }
+
+// ── LOS ASIENTOS DE UN IMPORTE ────────────────────────────────────────────────
+function plaDetalle(tipo, clave, mes){
+  var d = PLA.datos; if (!d) return;
+  var desde = mes === 'TOTAL' ? d.desde : mes, hasta = mes === 'TOTAL' ? d.hasta : mes;
+  var rub = (d.rubros || []).filter(function(r){ return r.k === clave; })[0];
+  var cta = tipo === 'cuenta' ? (d.cuentas || []).filter(function(c){ return c.cuenta === clave; })[0] : null;
+  var titulo = (tipo === 'rubro' ? (rub ? rub.label : clave) : (cta ? cta.cuenta + ' · ' + cta.nombre : clave))
+    + ' — ' + (mes === 'TOTAL' ? plaMesTxt(desde) + ' a ' + plaMesTxt(hasta) : plaMesTxt(mes));
+  PLA.detalle = { tipo: tipo, filas: [], total: null, recortado: 0 };
+  eid('pla-detalle-tit').textContent = '🔍 ' + titulo;
+  eid('pla-detalle-q').value = '';
+  eid('pla-detalle-nota').textContent = 'Cargando…';
+  eid('pla-detalle-tabla').innerHTML = '';
+  sgModalArriba('pla-detalle-modal');
+  api('/api/pl-abasto/detalle?' + (tipo === 'rubro' ? 'rubro=' : 'cuenta=') + encodeURIComponent(clave)
+      + '&desde=' + desde + '&hasta=' + hasta).then(function(r){
+    if (!r || !r.ok) { eid('pla-detalle-nota').textContent = (r && r.error) || 'No se pudo leer el detalle'; return; }
+    PLA.detalle.filas = r.data.filas || [];
+    PLA.detalle.total = r.data.total;
+    PLA.detalle.recortado = r.data.recortado;
+    plaDetallePintar();
+  });
+}
+
+function plaDetallePintar(){
+  var D = PLA.detalle; if (!D || !D.total) return;
+  var q = sgNorm(String(eid('pla-detalle-q').value || '').trim());
+  var filas = D.filas.filter(function(f){
+    return !q || sgNorm([f.fecha, plaFechaTxt(f.fecha), f.asiento, f.cuenta, f.nombre, f.contrapartida].join(' ')).indexOf(q) >= 0;
+  });
+  var conCuenta = D.tipo === 'rubro', span = conCuenta ? 4 : 3;
+  eid('pla-detalle-nota').textContent = (D.recortado ? 'Se muestran los ' + nr(D.filas.length) + ' más recientes de '
+    + nr(D.total.renglones) + '; el total es de todos. ' : '') + (q ? nr(filas.length) + ' coinciden con la búsqueda.' : '');
+  // Con búsqueda, los totales son de lo que se ve; sin búsqueda, de TODOS los renglones.
+  var sD = 0, sH = 0;
+  filas.forEach(function(f){ sD += Number(f.debe) || 0; sH += Number(f.haber) || 0; });
+  var tD = q ? sD : D.total.debe, tH = q ? sH : D.total.haber, n = q ? filas.length : D.total.renglones;
+  eid('pla-detalle-tabla').innerHTML = '<colgroup><col style="width:11%"><col style="width:9%">'
+    + (conCuenta ? '<col style="width:22%">' : '') + '<col><col style="width:14%"><col style="width:14%"></colgroup>'
+    + '<thead><tr><th>Fecha</th><th>Asiento</th>' + (conCuenta ? '<th>Cuenta</th>' : '')
+    + '<th>Contrapartida</th><th style="text-align:right">Debe</th><th style="text-align:right">Haber</th></tr></thead><tbody>'
+    + filas.map(function(f){
+        return '<tr><td>' + plaFechaTxt(f.fecha) + '</td><td>' + escH(f.asiento || '') + '</td>'
+          + (conCuenta ? '<td title="' + escH(f.cuenta + ' · ' + (f.nombre || '')) + '">' + escH(f.nombre || f.cuenta) + '</td>' : '')
+          + '<td title="' + escH(f.contrapartida || '') + '">' + escH(f.contrapartida || '—') + '</td>'
+          + '<td style="text-align:right;color:#dc2626">' + (Number(f.debe) ? plaImporte(f.debe) : '') + '</td>'
+          + '<td style="text-align:right;color:#15803d">' + (Number(f.haber) ? plaImporte(f.haber) : '') + '</td></tr>';
+      }).join('')
+    + '</tbody><tfoot>'
+    + '<tr><td colspan="' + span + '"><b>TOTAL (' + nr(n) + ' movimientos)</b></td>'
+    + '<td style="text-align:right"><b>' + plaImporte(tD) + '</b></td><td style="text-align:right"><b>' + plaImporte(tH) + '</b></td></tr>'
+    // HABER − DEBE, como la celda del cuadro: con el signo al revés, una venta de +621
+    // millones abría un detalle con el saldo en negativo.
+    + '<tr><td colspan="' + span + '"><b>SALDO (Haber − Debe, como en el cuadro)</b></td>'
+    + '<td colspan="2" style="text-align:right"><b>' + plaImporte(Math.round((tH - tD) * 100) / 100) + '</b></td></tr></tfoot>';
+}
+
+// ── CONFIGURAR RUBROS ─────────────────────────────────────────────────────────
+function plaRubrosCargar(){
+  if (PLA.cuentas) { plaRubrosPintar(); return; }
+  eid('pla-zonas').innerHTML = 'Cargando…';
+  api('/api/pl-abasto/cuentas').then(function(r){
+    if (!r || !r.ok) {
+      eid('pla-zonas').innerHTML = '<div style="color:var(--err)">' + escH((r && r.error) || 'No se pudieron leer las cuentas') + '</div>';
+      return;
+    }
+    PLA.cuentas = r.data;
+    PLA.pend = {};
+    plaRubrosPintar();
+  });
+}
+
+function plaRubroActual(c){ return PLA.pend[c.cuenta] || c.rubro; }
+
+function plaRubrosPintar(){
+  var D = PLA.cuentas; if (!D) return;
+  var q = sgNorm(String((eid('pla-rub-q') || {}).value || '').trim());
+  var chip = function(c){
+    if (q && sgNorm(c.cuenta + ' ' + c.nombre).indexOf(q) < 0) return '';
+    var pend = PLA.pend[c.cuenta] != null;
+    return '<div class="pla-chip' + (pend ? ' pend' : '') + '" draggable="true" data-cuenta="' + escH(c.cuenta) + '"'
+      + ' ondragstart="plaArrastrar(event)" title="' + escH(c.cuenta + ' · ' + c.nombre + ' · ' + plaImporte(c.importe)) + '">'
+      + escH(c.nombre) + ' <small>' + escH(c.cuenta) + '</small>'
+      + (!c.elegido && !pend ? '<span class="pla-def">por defecto</span>' : '') + '</div>';
+  };
+  var de = function(k){ return (D.cuentas || []).filter(function(c){ return plaRubroActual(c) === k; }); };
+  eid('pla-zona-sin_asignar').innerHTML = de('sin_asignar').map(chip).join('')
+    || '<div style="font-size:11px;color:var(--mut)">Arrastrá acá lo que no tiene que entrar al resultado.</div>';
+  eid('pla-zonas').innerHTML = (D.rubros || []).map(function(r){
+    var cs = de(r.k);
+    return '<div class="pla-zona" data-rubro="' + r.k + '" ondragover="plaSobre(event,this)"'
+      + ' ondragleave="this.classList.remove(\'sobre\')" ondrop="plaSoltar(event,this)">'
+      + '<h4>' + r.ico + ' ' + escH(r.label) + ' <small style="font-weight:400;color:var(--mut)">(' + cs.length + ')</small></h4>'
+      + cs.map(chip).join('') + '</div>';
+  }).join('');
+  var n = Object.keys(PLA.pend).length;
+  eid('pla-rub-pend').textContent = n ? n + ' cambio(s) sin guardar' : '';
+  eid('pla-rub-guardar').disabled = !n;
+}
+
+function plaArrastrar(ev){
+  ev.dataTransfer.setData('text/plain', ev.currentTarget.getAttribute('data-cuenta'));
+  ev.dataTransfer.effectAllowed = 'move';
+}
+function plaSobre(ev, zona){ ev.preventDefault(); zona.classList.add('sobre'); }
+function plaSoltar(ev, zona){
+  ev.preventDefault();
+  zona.classList.remove('sobre');
+  var cuenta = ev.dataTransfer.getData('text/plain'), rubro = zona.getAttribute('data-rubro');
+  var c = ((PLA.cuentas || {}).cuentas || []).filter(function(x){ return x.cuenta === cuenta; })[0];
+  if (!c || !rubro) return;
+  // Devolverla al rubro que ya tenía guardado no es un cambio. Soltar una «por defecto» en
+  // su mismo rubro sí: la confirma.
+  if (rubro === c.rubro && c.elegido) delete PLA.pend[cuenta]; else PLA.pend[cuenta] = rubro;
+  plaRubrosPintar();
+}
+
+// EL GUARDADO ES EXPLÍCITO: reordenar veinte cuentas y que cada soltada escriba dejaría
+// estados a medio hacer en el cuadro de otro que lo esté mirando.
+function plaRubrosGuardar(){
+  var n = Object.keys(PLA.pend).length; if (!n) return;
+  var btn = eid('pla-rub-guardar'); btn.disabled = true;
+  api('/api/pl-abasto/rubros', 'PUT', { rubros: PLA.pend }).then(function(r){
+    if (!r || !r.ok) { btn.disabled = false; toast((r && r.error) || 'No se pudo guardar', 'er'); return; }
+    toast('Rubros guardados', 'ok');
+    PLA.cuentas = null;
+    plaRubrosCargar();
+    plaCargar();
+  });
+}
+
+function plaRubrosRestablecer(){
+  if (!confirm('¿Volver todas las cuentas a su rubro por defecto? Se pierde la clasificación guardada.')) return;
+  api('/api/pl-abasto/rubros', 'DELETE').then(function(r){
+    if (!r || !r.ok) { toast((r && r.error) || 'No se pudo', 'er'); return; }
+    toast('Las cuentas volvieron a su rubro por defecto', 'ok');
+    PLA.cuentas = null;
+    plaRubrosCargar();
+    plaCargar();
+  });
+}
 
 function infTab(t){
   INF.tab=t;

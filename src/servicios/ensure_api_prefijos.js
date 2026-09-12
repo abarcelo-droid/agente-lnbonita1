@@ -55,6 +55,9 @@ const PREFIJOS = [
   ['informes-comercial', 'informes'],
   // SHARE (participacion en el CD de Carrefour). Router propio de un solo modulo.
   ['share', 'share'],
+  // P&L ABASTO (V1052). Router propio de un solo módulo: subir el libro diario y guardar
+  // los rubros pide 'operar'.
+  ['pl-abasto', 'pl-abasto'],
   // ── Contabilidad de Puente Cordón ──────────────────────────────────────
   ['adm-asientos',       'pa/cuentas/asientos'],
   ['adm-plan-cuentas',   'pa/cuentas,pa/cuentas/secciones,pa/cuentas/titulos,pa/cuentas/config-impositiva'],
