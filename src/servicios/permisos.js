@@ -290,6 +290,10 @@ const LECTURA_CONTROLADA = new Set([
   // comercial: no corresponde que la vea cualquiera que tenga usuario, y menos que se la
   // pueda bajar en Excel. Entra en la lista por eso.
   '/api/share',
+  // P&L ABASTO (V1052): el resultado de la empresa, mes por mes, y cada asiento que lo
+  // forma. Es plata: sin declararlo, el que no tiene el módulo lo lee escribiendo la
+  // dirección.
+  '/api/pl-abasto',
   // LAS DEVOLUCIONES DE SAN GERÓNIMO: qué le devolvió cada cliente, de qué remito y
   // por cuánta plata. Pablo, 2/9/2026: «devoluciones debería estar con el mismo
   // código de autorización que configuramos los usuarios en el menú donde está».

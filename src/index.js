@@ -45,6 +45,7 @@ import { guardarSnapshotCRM } from "./servicios/db.js";
 import { syncSheets } from "./servicios/sheets.js";
 import informesRouter      from "./rutas/informes.js";
 import shareRouter         from "./rutas/share.js";
+import plAbastoRouter      from "./rutas/pl_abasto.js";
 
 // Scheduler: snapshot CRM + sync sheets a medianoche
 function programarSnapshotCRM() {
@@ -229,6 +230,8 @@ app.post("/webhook", async (req, res) => {
 // APIs
 app.use("/api/informes", informesRouter);
 app.use("/api/share", shareRouter);
+// P&L Abasto (V1052): el estado de resultados armado con el libro diario del otro sistema.
+app.use("/api/pl-abasto", plAbastoRouter);
 app.use("/api", panelRouter);
 app.use("/api", nuevosRouter);
 app.use("/api", cobranzaRouter);
