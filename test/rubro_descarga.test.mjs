@@ -34,12 +34,13 @@ test('las dos pantallas guardan el modelo de la descarga en la MISMA clave', () 
 
 // ── UN SOLO CHEQUEO DE «¿SIRVE ESTE MODELO?» ──────────────────────────────
 
-test('el chequeo del modelo está escrito UNA vez, y lo usan los cinco circuitos', () => {
+test('el chequeo del modelo está escrito UNA vez, y lo usan los seis circuitos', () => {
   // Estaba copiado TRES veces —liquidación, factura de mercadería y flete— y la
   // descarga iba a ser la cuarta. Copias de la misma regla son reglas distintas:
-  // se corrige una y las otras quedan como estaban.
+  // se corrige una y las otras quedan como estaban. El sexto es la carga de salida
+  // (V1051), que tiene su propio modelo.
   assert.equal((SG.match(/function queLeFaltaAlModelo\(/g) || []).length, 1);
-  assert.equal((SG.match(/queLeFaltaAlModelo\(m\.lineas,/g) || []).length, 5,
+  assert.equal((SG.match(/queLeFaltaAlModelo\(m\.lineas,/g) || []).length, 6,
     'algún circuito dejó de usar el chequeo común');
   // Y no quedó ninguna copia suelta.
   assert.equal((SG.match(/faltan\.push\('no tiene ninguna línea'\)/g) || []).length, 1,
@@ -248,7 +249,7 @@ test('los circuitos salen de UNA tabla, no de una copia cada uno', () => {
   // La COBRANZA se sumó el 8/9/2026: es la contracara de la venta y hasta
   // entonces no tenía modelo, así que la cuenta corriente se pedía por cliente.
   assert.deepEqual(Object.keys(t).sort(),
-    ['cobranza', 'descarga', 'flete_entrada', 'flete_salida', 'venta']);
+    ['carga', 'cobranza', 'descarga', 'flete_entrada', 'flete_salida', 'venta']);
   // Y no lleva facturaTit: a la venta no se le ingresa una factura, se EMITE.
   assert.ok(!t.venta.facturaTit, 'la venta no tiene ventana de ingresar factura');
   assert.ok(!t.cobranza.facturaTit, 'a una cobranza no se le ingresa una factura');

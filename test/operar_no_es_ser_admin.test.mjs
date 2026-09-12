@@ -171,6 +171,11 @@ test('quedan menos de 62 escrituras pidiendo admin', () => {
   // el de arriba, con más detalle. Y no podía ser requireAuth: sin prefijo declarado
   // exigirNivel deja pasar, y con prefijo el nivel no alcanza — quien escribe las
   // cuentas del libro decide contra qué rubro entra la plata de la empresa.
+  //
+  // Y a 64 el 12/9/2026: PUT /gastos-factura/modelo-carga elige contra qué cuentas se
+  // contabilizan las cargas de salida de la cooperativa, que desde la V1051 tienen su
+  // propio asiento modelo. Es parametrizar, igual que el de la descarga; ingresar la
+  // factura sigue siendo requireAuth.
   const n = escrituras().filter((e) => e.guarda === 'requireAdmin').length;
-  assert.ok(n <= 63, 'subió a ' + n + ': revisá si alguno es trabajo del día');
+  assert.ok(n <= 64, 'subió a ' + n + ': revisá si alguno es trabajo del día');
 });

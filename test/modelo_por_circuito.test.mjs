@@ -93,6 +93,7 @@ test('los siete circuitos que asientan están, y arrancan sin modelo', () => {
   assert.ok(r.ok);
   const claves = r.data.circuitos.map(c => c.clave);
   assert.deepEqual(claves.slice().sort(), [
+    'asiento_modelo_carga_salida',
     'asiento_modelo_cobranza',
     'asiento_modelo_descarga',
     'asiento_modelo_factura_mercaderia',
