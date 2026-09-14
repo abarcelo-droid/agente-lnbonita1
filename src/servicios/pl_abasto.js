@@ -11,16 +11,21 @@
 
 const r2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
 
-// Los seis rubros del cuadro, en el orden en que se leen.
+// Los títulos del cuadro, en el orden en que se leen. Pablo, 14/9/2026: «vamos a cambiar los
+// TÍTULOS, van a ser: VENTAS, UTILIDAD, DESCUENTOS SUPER, COSTOS ASOCIADOS A LAS VENTAS, COSTOS
+// FIJOS, COSTOS VARIABLES, COSTOS FINANCIEROS, IMPUESTOS». «Otros» dejó de existir. `corto` es
+// la etiqueta de la lista de cuentas, donde el nombre entero no entra.
 export const RUBROS = [
-  { k: 'ventas',             label: 'Ventas',             ico: '💰' },
-  { k: 'costos_variables',   label: 'Costos variables',   ico: '📉' },
-  { k: 'costos_fijos',       label: 'Costos fijos',       ico: '🏢' },
-  { k: 'costos_financieros', label: 'Costos financieros', ico: '🏦' },
-  { k: 'impuestos',          label: 'Impuestos',          ico: '🏛️' },
-  { k: 'otros',              label: 'Otros',              ico: '📦' },
+  { k: 'ventas',             label: 'VENTAS',                        corto: 'Ventas',          ico: '💰' },
+  { k: 'utilidad',           label: 'UTILIDAD',                      corto: 'Utilidad',        ico: '📈' },
+  { k: 'descuentos_super',   label: 'DESCUENTOS SUPER',              corto: 'Desc. super',     ico: '🏷️' },
+  { k: 'costos_ventas',      label: 'COSTOS ASOCIADOS A LAS VENTAS', corto: 'C. asoc. ventas', ico: '🚚' },
+  { k: 'costos_fijos',       label: 'COSTOS FIJOS',                  corto: 'C. fijos',        ico: '🏢' },
+  { k: 'costos_variables',   label: 'COSTOS VARIABLES',              corto: 'C. variables',    ico: '📉' },
+  { k: 'costos_financieros', label: 'COSTOS FINANCIEROS',            corto: 'C. financieros',  ico: '🏦' },
+  { k: 'impuestos',          label: 'IMPUESTOS',                     corto: 'Impuestos',       ico: '🏛️' },
 ];
-// Lo que no entra al resultado.
+// Una cuenta sin título: no suma al resultado hasta que se la clasifique.
 export const SIN_ASIGNAR = 'sin_asignar';
 const CLAVES = new Set(RUBROS.map((r) => r.k).concat(SIN_ASIGNAR));
 export const esRubro = (k) => CLAVES.has(String(k));
@@ -32,34 +37,33 @@ export function esCuentaDeResultado(cuenta) {
   return /^\d/.test(c) && !/^[123]/.test(c);
 }
 
-// ── A QUÉ RUBRO VA UNA CUENTA QUE NADIE CLASIFICÓ ─────────────────────────────
+// ── A QUÉ TÍTULO VA UNA CUENTA QUE NADIE CLASIFICÓ ──────────────────────────────
 //
 // Es el punto de partida, no la decisión: la clasificación la hace Pablo en «Configurar
-// rubros» y queda guardada. Sale del plan de cuentas del libro diario de Abasto, donde
-// todo el resultado cuelga del 4 y mezcla ingresos con gastos (el 4.1 tiene «VENTAS» y
-// también «G - COMPRA MERCADERIA»):
-//   · la compra de mercadería y el costo de lo vendido (4.2.01)  → costos variables
+// rubros» y queda guardada. Por defecto va SÓLO lo que el plan de cuentas de Abasto dice solo
+// (todo el resultado cuelga del 4, y el 4.1 mezcla ingresos con gastos «G - …»):
+//   · los descuentos al súper, por su nombre                     → descuentos super
 //   · intereses y gastos bancarios (4.2.05.02), la diferencia de cambio (4.1.08), los
 //     gastos bancarios del cierre de cambio (4.2.06.08), y por su nombre cualquier
 //     interés y el rendimiento del FCI                           → costos financieros
 //   · los impuestos, por su nombre —también ingresos brutos y los créditos del decreto
 //     814 y la ley 27541—                                          → impuestos
-//   · el resto del 4.1: ventas, comisiones y fletes ganados, descuentos → ventas, salvo
-//     lo que el mismo plan marca como gasto con «G -»
-//   · todo lo demás                                               → otros, para repartir
-// Lo que queda en Otros cuenta igual para el resultado neto: nada se pierde por no estar
-// clasificado todavía.
+//   · el resto del 4.1 que no es gasto «G -»: ventas, y comisiones, descargas y fletes
+//     ganados en liquidaciones                                     → ventas
+//   · TODO LO DEMÁS ARRANCA SIN TÍTULO, la compra de mercadería también. Pablo, 14/9/2026:
+//     «yo decido manualmente dónde va cada rubro». Una cuenta sin título no suma al
+//     resultado, se ve en la lista de cuentas sin etiqueta, y el cuadro avisa cuántas hay.
 const IMPUESTO = /(impuesto|imp\.|ingresos br|iibb|sellos|ley 25413|adicional lh|inmobiliario|decreto 814|ley 27541)/i;
 export function rubroPorDefecto(cuenta, nombre) {
   const c = String(cuenta == null ? '' : cuenta).trim();
   const n = String(nombre == null ? '' : nombre);
   if (!esCuentaDeResultado(c)) return SIN_ASIGNAR;
-  if (c.startsWith('4.2.01') || c.startsWith('4.1.01.01') || /compra mercader/i.test(n)) return 'costos_variables';
+  if (/descuentos? super/i.test(n)) return 'descuentos_super';
   if (c.startsWith('4.2.05.02') || c.startsWith('4.1.08') || c.startsWith('4.2.06.08')
       || /inter[eé]s|rendimiento fci/i.test(n)) return 'costos_financieros';
   if (IMPUESTO.test(n)) return 'impuestos';
-  if (c.startsWith('4.1')) return /^G\s*-/i.test(n.trim()) ? 'otros' : 'ventas';
-  return 'otros';
+  if (c.startsWith('4.1') && !/^G\s*-/i.test(n.trim())) return 'ventas';
+  return SIN_ASIGNAR;
 }
 
 // ── ¿ES EL ARCHIVO QUE CORRESPONDE? ───────────────────────────────────────────

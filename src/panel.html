@@ -5547,9 +5547,25 @@ input[type=number]{-moz-appearance:textfield;appearance:textfield}
     #sec-pl-abasto .pla-res .pla-pct{color:#cbd5e1}
     #sec-pl-abasto .pla-dnd{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,2fr);gap:12px}
     #sec-pl-abasto .pla-zonas{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
-    #sec-pl-abasto .pla-zona{border:1.5px dashed var(--bor);border-radius:10px;padding:8px;min-height:110px;background:var(--bg)}
-    #sec-pl-abasto .pla-zona.sobre{border-color:var(--burg);background:rgba(128,0,32,.05)}
-    #sec-pl-abasto .pla-zona h4{margin:0 0 6px;font-size:12.5px}
+    #sec-pl-abasto .pla-zona{border:1.5px dashed var(--bor);border-radius:10px;padding:8px;min-height:110px;
+      max-height:260px;overflow-y:auto;overflow-x:hidden;background:var(--bg)}
+    #sec-pl-abasto .pla-zona.sobre,#sec-pl-abasto .pla-lista.sobre{border-color:var(--burg);background:rgba(128,0,32,.05)}
+    #sec-pl-abasto .pla-zona h4{margin:0 0 6px;font-size:12px;position:sticky;top:-8px;background:var(--bg);padding:3px 0}
+    #sec-pl-abasto .pla-lista{border:1.5px dashed var(--bor);border-radius:10px;background:var(--bg);display:flex;
+      flex-direction:column;max-height:800px}
+    #sec-pl-abasto .pla-lista-hd{background:#0a2744;color:#fff;padding:9px 12px;border-radius:8px 8px 0 0;font-size:12px}
+    #sec-pl-abasto .pla-lista-hd span{color:#cbd5e1;margin-left:6px;font-size:11px}
+    #sec-pl-abasto #pla-rub-q{width:100%;box-sizing:border-box;padding:6px 9px;border:1px solid var(--bor);border-radius:6px;
+      background:var(--pan,#fff);font-size:12.5px}
+    #sec-pl-abasto .pla-lista-cuerpo{overflow-y:auto;overflow-x:hidden;padding:0 8px 8px;flex:1}
+    #sec-pl-abasto .pla-fila{display:flex;align-items:center;gap:8px;border:1px solid var(--bor);border-radius:7px;
+      padding:5px 8px;margin:0 0 5px;background:var(--pan,#fff);cursor:grab;font-size:11.5px}
+    #sec-pl-abasto .pla-fila.pend{border-color:#f59e0b;background:#fffbeb}
+    #sec-pl-abasto .pla-fila code{color:var(--mut);font-size:10px;flex:0 0 auto}
+    #sec-pl-abasto .pla-fila .n{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    #sec-pl-abasto .pla-badge{flex:0 0 auto;font-size:10px;font-weight:700;border:1px solid;border-radius:10px;
+      padding:1px 7px;white-space:nowrap;background:var(--pan,#fff)}
+    #sec-pl-abasto .pla-badge.def{border-style:dashed}
     #sec-pl-abasto .pla-chip{border:1px solid var(--bor);border-radius:7px;padding:4px 7px;margin:0 0 5px;
       background:var(--pan,#fff);cursor:grab;font-size:11.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
     #sec-pl-abasto .pla-chip small{color:var(--mut)}
@@ -5600,16 +5616,24 @@ input[type=number]{-moz-appearance:textfield;appearance:textfield}
   </div>
   <div class="pla-pane" id="pla-pane-rubros">
     <div class="pla-f">
-      <div><label>Buscar cuenta</label><input id="pla-rub-q" placeholder="código o nombre" oninput="plaRubrosPintar()"></div>
       <span id="pla-rub-pend" style="font-size:12px;color:#92400e;align-self:center"></span>
       <button class="btn bb" id="pla-rub-guardar" onclick="plaRubrosGuardar()" disabled>💾 Guardar</button>
       <button class="btn bo" id="pla-rub-reset" onclick="plaRubrosRestablecer()">Volver a los de por defecto</button>
     </div>
     <div class="pla-dnd">
-      <div class="pla-zona" data-rubro="sin_asignar" ondragover="plaSobre(event,this)"
+      <!-- LA LISTA ENTERA (V1056). Pablo, 14/9/2026: «en la parte izquierda deben figurarme la
+           TOTALIDAD de los rubros que tienen movimientos. Si están seleccionados en algún Título
+           debe mostrarme en cuál... no quiero perder ninguno de vista». Soltar acá le saca el
+           título a una cuenta. -->
+      <div class="pla-lista" data-rubro="sin_asignar" ondragover="plaSobre(event,this)"
            ondragleave="this.classList.remove('sobre')" ondrop="plaSoltar(event,this)">
-        <h4>Sin asignar <small style="font-weight:400;color:var(--mut)">— no entran al resultado</small></h4>
-        <div id="pla-zona-sin_asignar"></div>
+        <div class="pla-lista-hd"><b>CUENTAS CONTABLES</b><span id="pla-rub-cuenta"></span></div>
+        <div style="padding:8px">
+          <input id="pla-rub-q" placeholder="🔍 Buscar por nombre o código" oninput="plaRubrosPintar()">
+          <label style="display:block;margin-top:6px;font-size:11.5px;color:var(--mut)">
+            <input type="checkbox" id="pla-rub-solo" onchange="plaRubrosPintar()"> Sólo las que no tienen título</label>
+        </div>
+        <div class="pla-lista-cuerpo" id="pla-rub-lista"></div>
       </div>
       <div class="pla-zonas" id="pla-zonas"></div>
     </div>
@@ -24385,9 +24409,10 @@ SG_MANUAL.plabasto = { titulo: 'P&L Abasto', html:
   + '<li>Los importes se ven en <b>pesos, miles o millones</b>: se elige arriba, y el importe exacto aparece '
   + 'pasando el mouse.</li>'
   + '<li>El importe de cada cuenta es <b>haber − debe</b>: los ingresos quedan en <b>verde</b> y los gastos en '
-  + '<b>rojo</b>, con el signo menos. Por eso los subtotales son sumas: <b>MARGEN BRUTO</b> = ventas + costos '
-  + 'variables; <b>EBITDA</b> = margen bruto + costos fijos; <b>EBT</b> = EBITDA + costos financieros; y el '
-  + '<b>RESULTADO NETO</b> suma los seis rubros.</li>'
+  + '<b>rojo</b>, con el signo menos. <span class="ver">V1056</span> Por eso los subtotales son sumas: '
+  + '<b>MARGEN BRUTO</b> = ventas + utilidad + descuentos super + costos asociados a las ventas; <b>EBITDA</b> = '
+  + 'margen bruto + costos fijos + costos variables; <b>EBT</b> = EBITDA + costos financieros; y el '
+  + '<b>RESULTADO NETO</b> suma los ocho títulos.</li>'
   + '<li>Debajo de cada rubro y subtotal, en gris, el <b>% sobre las ventas</b> de ese mes.</li>'
   + '<li><b>Clic en un rubro</b>: se abren sus cuentas. <b>Doble clic en un importe</b>: los asientos que lo '
   + 'forman, con su fecha, el número de asiento, la <b>contrapartida</b> —las otras cuentas del mismo asiento: el '
@@ -24417,7 +24442,7 @@ SG_MANUAL.plabasto = { titulo: 'P&L Abasto', html:
   + '<h3>Exportar</h3>'
   + '<ul>'
   + '<li><span class="ver">V1054</span> <b>⬇️ Exportar CSV</b> baja el cuadro del período elegido para abrirlo en '
-  + 'Excel: los seis rubros con <b>todas sus cuentas y sus ajustes</b> —aunque en la pantalla estén cerrados—, '
+  + 'Excel: los ocho títulos con <b>todas sus cuentas y sus ajustes</b> —aunque en la pantalla estén cerrados—, '
   + 'los subtotales y el resultado neto.</li>'
   + '<li>Los importes van <b>en pesos con centavos</b>, aunque en la pantalla se vean en miles o millones; '
   + 'con el cuadro en dólares, sale en dólares; si falta la cotización de algún mes, no se exporta.</li>'
@@ -24454,14 +24479,18 @@ SG_MANUAL.plabasto = { titulo: 'P&L Abasto', html:
 
   + '<h3>Configurar rubros</h3>'
   + '<ul>'
-  + '<li>Cada cuenta va a un rubro: Ventas, Costos variables, Costos fijos, Costos financieros, Impuestos u '
-  + 'Otros. Se cambia <b>arrastrándola</b> a otro rubro, y se confirma con <b>💾 Guardar</b>.</li>'
-  + '<li>Las que nadie clasificó dicen <b>por defecto</b>: la compra de mercadería y el costo de lo vendido van '
-  + 'a costos variables; los intereses, los gastos bancarios, la diferencia de cambio y el rendimiento del FCI, a '
-  + 'financieros; los impuestos, por su nombre; el resto del 4.1, a ventas —salvo lo que el mismo plan marca como '
-  + 'gasto con «G -», que va a Otros—; y lo demás a <b>Otros</b>, para repartir a mano. <b>Costos fijos arranca '
-  + 'vacío.</b> Lo que está en Otros cuenta igual para el resultado neto.</li>'
-  + '<li>Lo arrastrado a <b>Sin asignar</b> no entra al resultado.</li>'
+  + '<li><span class="ver">V1056</span> Los títulos son <b>VENTAS, UTILIDAD, DESCUENTOS SUPER, COSTOS ASOCIADOS A '
+  + 'LAS VENTAS, COSTOS FIJOS, COSTOS VARIABLES, COSTOS FINANCIEROS e IMPUESTOS</b>. Cada cuenta se lleva a uno '
+  + '<b>arrastrándola</b>, y se confirma con <b>💾 Guardar</b>.</li>'
+  + '<li>A la izquierda está la <b>lista entera de las cuentas con movimientos</b>, cada una con la etiqueta del '
+  + 'título que tiene; la que no lleva etiqueta no tiene título. Se busca por nombre o código, y se pueden ver '
+  + '<b>sólo las que no tienen título</b>. Arrastrar una cuenta a la lista le saca el título.</li>'
+  + '<li>Por defecto va sólo lo que el plan de cuentas dice solo: los descuentos al súper, por su nombre, a '
+  + 'descuentos super; los intereses, los gastos bancarios, la diferencia de cambio y el rendimiento del FCI, a '
+  + 'costos financieros; los impuestos, por su nombre; y el resto del 4.1 que no es gasto «G -» —ventas, y '
+  + 'comisiones, descargas y fletes ganados— a ventas. <b>Todo lo demás arranca sin título</b>, la compra de '
+  + 'mercadería también: el título lo decide quien clasifica. La etiqueta punteada es un título por defecto.</li>'
+  + '<li>Una cuenta <b>sin título no suma al resultado</b>, y arriba del cuadro se avisa cuántas hay.</li>'
   + '<li>Una cuenta nueva que traiga un Excel nuevo entra con su rubro por defecto, sin tocar lo ya '
   + 'clasificado. <b>Volver a los de por defecto</b> borra toda la clasificación guardada, y por eso pide el '
   + 'nivel <b>Anular</b>.</li>'
@@ -24474,6 +24503,8 @@ SG_MANUAL.plabasto = { titulo: 'P&L Abasto', html:
 
   + '<h3>Qué cambió, y desde cuándo</h3>'
   + '<ul>'
+  + '<li><span class="ver">V1056</span> Los títulos nuevos, la lista entera de cuentas con el título de cada una, '
+  + 'y lo que el plan de cuentas no dice solo arranca sin título.</li>'
   + '<li><span class="ver">V1055</span> El cuadro en dólares, con la cotización de cada mes.</li>'
   + '<li><span class="ver">V1054</span> Ajustes manuales por rubro, y exportar el cuadro a CSV.</li>'
   + '<li><span class="ver">V1053</span> Solapa <b>No balancea</b>: los días en que el libro diario no cierra y los '
@@ -43735,22 +43766,27 @@ function plaAviso(d){
       + (lnbPuedeOperar('pl-abasto') ? 'Apretá «📤 Subir libro diario».' : 'Pedile a quien lo administra que lo suba.');
     return;
   }
-  var enOtros = (d.cuentas || []).filter(function(c){ return !c.elegido && c.rubro === 'otros'; }).length;
+  // UNA CUENTA SIN TÍTULO NO SUMA AL RESULTADO: se dice cuántas hay con movimientos en el período.
+  var sinTitulo = (d.cuentas || []).filter(function(c){ return c.rubro === 'sin_asignar'; }).length;
   caja.innerHTML = 'Última carga: <b>' + escH(u.archivo || 'sin nombre') + '</b>, del ' + plaFechaTxt(u.desde)
     + ' al ' + plaFechaTxt(u.hasta) + ' · subida el ' + escH(String(u.creado_en || '').slice(0, 16))
     + (u.usuario ? ' por ' + escH(u.usuario) : '')
-    + (enOtros ? ' · <span style="color:#92400e">' + enOtros + ' cuenta(s) están en «Otros» por defecto: '
-        + 'clasificalas en «Configurar rubros».</span>' : '');
+    + (sinTitulo ? ' · <span style="color:#92400e">⚠️ ' + sinTitulo + (sinTitulo === 1 ? ' cuenta con movimientos no tiene'
+        : ' cuentas con movimientos no tienen') + ' título y no suman al resultado: asignalas en «Configurar rubros».</span>' : '');
 }
 
 // ── LA CASCADA ────────────────────────────────────────────────────────────────
-// Los gastos ya vienen negativos (haber − debe), así que TODO ES SUMA: el margen bruto es
-// ventas + costos variables, y así hacia abajo. El resultado neto suma los seis rubros.
+// Los gastos ya vienen negativos (haber − debe), así que TODO ES SUMA. Con los títulos nuevos
+// (Pablo, 14/9/2026) el MARGEN BRUTO va después de los costos asociados a las ventas, el EBITDA
+// después de los costos variables y el EBT después de los financieros. El resultado neto suma
+// los ocho títulos; lo que no tiene título no suma.
 var PLA_SUBTOTALES = [
-  { despues: 'costos_variables', k: 'margen', label: 'MARGEN BRUTO', suma: ['ventas', 'costos_variables'] },
-  { despues: 'costos_fijos', k: 'ebitda', label: 'EBITDA', suma: ['ventas', 'costos_variables', 'costos_fijos'] },
+  { despues: 'costos_ventas', k: 'margen', label: 'MARGEN BRUTO',
+    suma: ['ventas', 'utilidad', 'descuentos_super', 'costos_ventas'] },
+  { despues: 'costos_variables', k: 'ebitda', label: 'EBITDA',
+    suma: ['ventas', 'utilidad', 'descuentos_super', 'costos_ventas', 'costos_fijos', 'costos_variables'] },
   { despues: 'costos_financieros', k: 'ebt', label: 'EBT (antes de impuestos)',
-    suma: ['ventas', 'costos_variables', 'costos_fijos', 'costos_financieros'] },
+    suma: ['ventas', 'utilidad', 'descuentos_super', 'costos_ventas', 'costos_fijos', 'costos_variables', 'costos_financieros'] },
 ];
 
 function plaTotales(d){
@@ -43786,10 +43822,10 @@ function plaTotales(d){
   var sub = {};
   PLA_SUBTOTALES.forEach(function(s){ sub[s.k] = sumar(s.suma); });
   sub.neto = sumar(Object.keys(rub));
-  // Adentro de cada rubro, el que más pesa arriba: en ventas el mayor ingreso, en los
-  // gastos el más negativo.
+  // Adentro de cada título, el que más pesa arriba, sea ingreso o gasto: con ocho títulos,
+  // decidir por el nombre cuál es de ingresos ya no alcanza.
   Object.keys(porRubro).forEach(function(k){
-    porRubro[k].sort(function(a, b){ return k === 'ventas' ? b.total - a.total : a.total - b.total; });
+    porRubro[k].sort(function(a, b){ return Math.abs(b.total) - Math.abs(a.total); });
   });
   return { rubros: rub, subtotales: sub, cuentas: porRubro, ajustes: ajustes };
 }
@@ -44358,22 +44394,45 @@ function plaRubrosCargar(){
 
 function plaRubroActual(c){ return PLA.pend[c.cuenta] || c.rubro; }
 
+// El color de la etiqueta de cada título en la lista de cuentas.
+var PLA_COLOR = { ventas: '#15803d', utilidad: '#0f766e', descuentos_super: '#b45309', costos_ventas: '#9a3412',
+  costos_fijos: '#1d4ed8', costos_variables: '#a16207', costos_financieros: '#7e22ce', impuestos: '#b91c1c' };
+
 function plaRubrosPintar(){
   var D = PLA.cuentas; if (!D) return;
   var q = sgNorm(String((eid('pla-rub-q') || {}).value || '').trim());
+  var solo = !!(eid('pla-rub-solo') || {}).checked;
+  var titulo = {};
+  (D.rubros || []).forEach(function(r){ titulo[r.k] = r; });
+  var busca = function(c){ return !q || sgNorm(c.cuenta + ' ' + c.nombre).indexOf(q) >= 0; };
+  var ayuda = function(c){ return escH(c.cuenta + ' · ' + c.nombre + ' · ' + plaImporte(c.importe)); };
+  var todas = D.cuentas || [];
+  var sin = todas.filter(function(c){ return plaRubroActual(c) === 'sin_asignar'; });
+  // LA LISTA ENTERA, cada cuenta con la etiqueta de su título; la que no tiene título, sin
+  // etiqueta. Punteada, la de por defecto.
+  eid('pla-rub-cuenta').textContent = todas.length + ' con movimientos' + (sin.length ? ' · ' + sin.length + ' sin título' : '');
+  eid('pla-rub-lista').innerHTML = todas.filter(function(c){
+    return busca(c) && (!solo || plaRubroActual(c) === 'sin_asignar');
+  }).map(function(c){
+    var pend = PLA.pend[c.cuenta] != null, t = titulo[plaRubroActual(c)], def = !c.elegido && !pend;
+    return '<div class="pla-fila' + (pend ? ' pend' : '') + '" draggable="true" data-cuenta="' + escH(c.cuenta) + '"'
+      + ' ondragstart="plaArrastrar(event)" title="' + ayuda(c) + '"><code>' + escH(c.cuenta) + '</code>'
+      + '<span class="n">' + escH(c.nombre) + '</span>'
+      + (t ? '<span class="pla-badge' + (def ? ' def' : '') + '" style="color:' + (PLA_COLOR[t.k] || 'var(--mut)') + '"'
+          + ' title="' + escH(t.label + (def ? ' · por defecto' : '')) + '">' + escH(t.corto) + '</span>' : '')
+      + '</div>';
+  }).join('') || '<div style="font-size:11.5px;color:var(--mut);padding:6px">'
+    + (todas.length ? 'Ninguna coincide.' : 'Todavía no hay libro diario cargado.') + '</div>';
   var chip = function(c){
-    if (q && sgNorm(c.cuenta + ' ' + c.nombre).indexOf(q) < 0) return '';
+    if (!busca(c)) return '';
     var pend = PLA.pend[c.cuenta] != null;
     return '<div class="pla-chip' + (pend ? ' pend' : '') + '" draggable="true" data-cuenta="' + escH(c.cuenta) + '"'
-      + ' ondragstart="plaArrastrar(event)" title="' + escH(c.cuenta + ' · ' + c.nombre + ' · ' + plaImporte(c.importe)) + '">'
+      + ' ondragstart="plaArrastrar(event)" title="' + ayuda(c) + '">'
       + escH(c.nombre) + ' <small>' + escH(c.cuenta) + '</small>'
       + (!c.elegido && !pend ? '<span class="pla-def">por defecto</span>' : '') + '</div>';
   };
-  var de = function(k){ return (D.cuentas || []).filter(function(c){ return plaRubroActual(c) === k; }); };
-  eid('pla-zona-sin_asignar').innerHTML = de('sin_asignar').map(chip).join('')
-    || '<div style="font-size:11px;color:var(--mut)">Arrastrá acá lo que no tiene que entrar al resultado.</div>';
   eid('pla-zonas').innerHTML = (D.rubros || []).map(function(r){
-    var cs = de(r.k);
+    var cs = todas.filter(function(c){ return plaRubroActual(c) === r.k; });
     return '<div class="pla-zona" data-rubro="' + r.k + '" ondragover="plaSobre(event,this)"'
       + ' ondragleave="this.classList.remove(\'sobre\')" ondrop="plaSoltar(event,this)">'
       + '<h4>' + r.ico + ' ' + escH(r.label) + ' <small style="font-weight:400;color:var(--mut)">(' + cs.length + ')</small></h4>'
