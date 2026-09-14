@@ -21,7 +21,8 @@
 import express from 'express';
 import db from '../servicios/db.js';
 import { RUBROS, SIN_ASIGNAR, esRubro, esCuentaDeResultado, rubroPorDefecto, validarCarga,
-  avisosDeReemplazo, asientosSinPareja, validarAjuste } from '../servicios/pl_abasto.js';
+  avisosDeReemplazo, asientosSinPareja, validarAjuste, TIPOS_DOLAR, esTipoDolar, promedioMensual,
+  validarCotizaciones } from '../servicios/pl_abasto.js';
 
 const router = express.Router();
 
@@ -88,6 +89,14 @@ db.exec(`
     importe   REAL NOT NULL,
     PRIMARY KEY (ajuste_id, mes)
   );
+  CREATE TABLE IF NOT EXISTS pl_abasto_cotizaciones (
+    mes            TEXT PRIMARY KEY,
+    cotizacion     REAL NOT NULL,
+    origen         TEXT NOT NULL,
+    tipo           TEXT,
+    modificado_por INTEGER,
+    modificado_en  TEXT DEFAULT (datetime('now','localtime'))
+  );
 `);
 
 const MES = /^\d{4}-(0[1-9]|1[0-2])$/;
@@ -97,6 +106,9 @@ const FECHA = /^\d{4}-\d{2}-\d{2}$/;
 const DETALLE_MAX = 1000;
 // Los asientos sin pareja de lo que no balancea, a lo sumo. En un año entero son cientos.
 const NB_MAX = 2000;
+// La historia del dólar, día por día: argentinadatos.com, pública, gratis y sin clave.
+const COTIZ_URL = 'https://api.argentinadatos.com/v1/cotizaciones/dolares/';
+const COTIZ_TIMEOUT_MS = 20000;
 
 function r2(n) {
   return Math.round((Number(n) || 0) * 100) / 100;
@@ -170,6 +182,52 @@ function escribirMesesDeAjuste(db, id, meses) {
   for (const [m, v] of Object.entries(meses)) {
     if (v == null) del.run(id, m); else up.run(id, m, v);
   }
+}
+
+// ── LA COTIZACIÓN DE CADA MES ────────────────────────────────────────────────
+function cotizacionesDelPeriodo(db, desde, hasta) {
+  const out = {};
+  for (const x of db.prepare(`SELECT mes, cotizacion, origen, tipo FROM pl_abasto_cotizaciones
+      WHERE mes BETWEEN ? AND ?`).all(desde, hasta)) {
+    out[x.mes] = { cotizacion: x.cotizacion, origen: x.origen, tipo: x.tipo };
+  }
+  return out;
+}
+
+// Trae la historia del dólar elegido y le pone a cada mes con movimientos el promedio de sus
+// días. LA CARGADA A MANO NO SE PISA: si alguien la fijó, es porque quiere ESE valor.
+// `pedir` es fetch; los tests le pasan uno propio.
+async function traerCotizaciones(db, tipo, usuario, pedir) {
+  if (!esTipoDolar(tipo)) return { status: 400, body: { ok: false, error: 'Elegí qué dólar traer.' } };
+  const meses = db.prepare('SELECT DISTINCT mes FROM pl_abasto_movimientos ORDER BY mes').all().map((x) => x.mes);
+  if (!meses.length) return { status: 400, body: { ok: false, error: 'Todavía no hay libro diario cargado.' } };
+  let dias;
+  try {
+    const r = await pedir(COTIZ_URL + tipo, { headers: { accept: 'application/json' },
+      signal: AbortSignal.timeout(COTIZ_TIMEOUT_MS) });
+    if (!r.ok) throw new Error('respondió ' + r.status);
+    dias = await r.json();
+  } catch (e) {
+    return { status: 502, body: { ok: false, error: 'No se pudo consultar la cotización (' + e.message
+      + '). Probá de nuevo más tarde, o cargala a mano.' } };
+  }
+  const prom = promedioMensual(dias, meses);
+  const manuales = new Set(db.prepare("SELECT mes FROM pl_abasto_cotizaciones WHERE origen = 'manual'").all()
+    .map((x) => x.mes));
+  const up = db.prepare(`INSERT INTO pl_abasto_cotizaciones (mes, cotizacion, origen, tipo, modificado_por, modificado_en)
+      VALUES (?,?,'mercado',?,?,datetime('now','localtime'))
+    ON CONFLICT(mes) DO UPDATE SET cotizacion = excluded.cotizacion, origen = excluded.origen, tipo = excluded.tipo,
+      modificado_por = excluded.modificado_por, modificado_en = excluded.modificado_en`);
+  let traidos = 0;
+  db.transaction(() => {
+    for (const [mes, v] of Object.entries(prom)) {
+      if (manuales.has(mes)) continue;
+      up.run(mes, v, tipo, usuario);
+      traidos++;
+    }
+  })();
+  return { status: 200, body: { ok: true, data: { tipo, traidos,
+    manuales: meses.filter((m) => manuales.has(m)).length, sin_dato: meses.filter((m) => !(m in prom)) } } };
 }
 
 // Los ajustes vivos con importe en el período, cada uno con sus meses y quién lo cargó.
@@ -260,7 +318,7 @@ router.get('/resultado', requireAuth, (req, res) => {
     if (desde > hasta) [desde, hasta] = [hasta, desde];
     const meses = disponibles.filter((m) => m >= desde && m <= hasta);
     const base = { rubros: RUBROS, meses_disponibles: disponibles, ultima_carga: ultima, desde, hasta, meses };
-    if (!meses.length) return res.json({ ok: true, data: Object.assign(base, { cuentas: [], ajustes: [] }) });
+    if (!meses.length) return res.json({ ok: true, data: Object.assign(base, { cuentas: [], ajustes: [], cotizaciones: {} }) });
 
     const filas = db.prepare(`SELECT cuenta, mes, ROUND(SUM(haber) - SUM(debe), 2) AS importe
         FROM pl_abasto_movimientos WHERE mes BETWEEN ? AND ? GROUP BY cuenta, mes`).all(desde, hasta);
@@ -278,7 +336,7 @@ router.get('/resultado', requireAuth, (req, res) => {
       c.meses[f.mes] = f.importe;
     }
     res.json({ ok: true, data: Object.assign(base, { cuentas: [...porCuenta.values()],
-      ajustes: ajustesDelPeriodo(db, desde, hasta) }) });
+      ajustes: ajustesDelPeriodo(db, desde, hasta), cotizaciones: cotizacionesDelPeriodo(db, desde, hasta) }) });
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
@@ -328,6 +386,45 @@ router.delete('/rubros', requireAuth, (req, res) => {
     const n = db.prepare('DELETE FROM pl_abasto_rubros').run().changes;
     res.json({ ok: true, data: { borradas: n } });
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// ── LAS COTIZACIONES ─────────────────────────────────────────────────────────
+// Una por cada mes con movimientos, cargada o no: la ventana es la lista para completar.
+router.get('/cotizaciones', requireAuth, (req, res) => {
+  try {
+    const guardadas = new Map(db.prepare(`SELECT c.mes, c.cotizacion, c.origen, c.tipo, c.modificado_en,
+        u.nombre AS modificado_por
+      FROM pl_abasto_cotizaciones c LEFT JOIN usuarios u ON u.id = c.modificado_por`).all().map((x) => [x.mes, x]));
+    const meses = db.prepare('SELECT DISTINCT mes FROM pl_abasto_movimientos ORDER BY mes DESC').all().map((x) => {
+      const g = guardadas.get(x.mes);
+      return g ? { mes: x.mes, cotizacion: g.cotizacion, origen: g.origen, tipo: g.tipo,
+        modificado_por: g.modificado_por, modificado_en: g.modificado_en } : { mes: x.mes, cotizacion: null };
+    });
+    res.json({ ok: true, data: { tipos: TIPOS_DOLAR, meses } });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// A mano: gana sobre la traída. Vacío saca la de ese mes.
+router.put('/cotizaciones', requireAuth, (req, res) => {
+  try {
+    const v = validarCotizaciones(req.body);
+    if (v.error) return res.status(400).json({ ok: false, error: v.error });
+    const up = db.prepare(`INSERT INTO pl_abasto_cotizaciones (mes, cotizacion, origen, tipo, modificado_por, modificado_en)
+        VALUES (?,?,'manual',NULL,?,datetime('now','localtime'))
+      ON CONFLICT(mes) DO UPDATE SET cotizacion = excluded.cotizacion, origen = 'manual', tipo = NULL,
+        modificado_por = excluded.modificado_por, modificado_en = excluded.modificado_en`);
+    const del = db.prepare('DELETE FROM pl_abasto_cotizaciones WHERE mes = ?');
+    db.transaction(() => {
+      for (const [m, x] of Object.entries(v.meses)) { if (x == null) del.run(m); else up.run(m, x, usuarioId(req)); }
+    })();
+    res.json({ ok: true, data: { guardadas: Object.keys(v.meses).length } });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+router.post('/cotizaciones/traer', requireAuth, (req, res) => {
+  traerCotizaciones(db, String((req.body && req.body.tipo) || ''), usuarioId(req), fetch)
+    .then((r) => res.status(r.status).json(r.body))
+    .catch((e) => res.status(500).json({ ok: false, error: e.message }));
 });
 
 // ── CARGAR, CORREGIR Y ELIMINAR UN AJUSTE MANUAL ─────────────────────────────

@@ -209,3 +209,56 @@ export function validarAjuste(body) {
   }
   return { nombre, rubro, meses };
 }
+
+// ── EL CUADRO EN DÓLARES ──────────────────────────────────────────────────────
+//
+// Cada mes se pasa a dólares con SU cotización: dividir un año de pesos por el dólar de hoy
+// mezcla la inflación con el resultado. La cotización de un mes es el PROMEDIO del valor
+// venta de sus días —el resultado se fue haciendo a lo largo del mes, no el último día— del
+// dólar que se elija, o la que se cargue a mano, que gana siempre. Qué dólar usar lo decide
+// quien trae las cotizaciones: no hay uno por defecto.
+export const TIPOS_DOLAR = [
+  { k: 'oficial', label: 'Oficial' },
+  { k: 'mayorista', label: 'Mayorista' },
+  { k: 'bolsa', label: 'MEP (bolsa)' },
+  { k: 'blue', label: 'Blue' },
+];
+export const esTipoDolar = (k) => TIPOS_DOLAR.some((t) => t.k === k);
+
+// Los días que devuelve la fuente ([{ fecha: 'AAAA-MM-DD', venta }]) → { 'AAAA-MM': promedio }
+// de los meses pedidos. Un día sin venta válida no cuenta.
+export function promedioMensual(dias, meses) {
+  const quiero = new Set(meses || []);
+  const acc = new Map();
+  for (const d of Array.isArray(dias) ? dias : []) {
+    const mes = String((d && d.fecha) || '').slice(0, 7);
+    const v = Number(d && d.venta);
+    if (!quiero.has(mes) || !Number.isFinite(v) || v <= 0) continue;
+    const a = acc.get(mes) || { s: 0, n: 0 };
+    a.s += v;
+    a.n++;
+    acc.set(mes, a);
+  }
+  const out = {};
+  for (const [mes, a] of acc) out[mes] = r2(a.s / a.n);
+  return out;
+}
+
+// Una carga a mano: { meses: { 'AAAA-MM': valor | vacío } }. Vacío es sacar la de ese mes.
+export function validarCotizaciones(body) {
+  const b = body || {};
+  const entrada = (b.meses && typeof b.meses === 'object' && !Array.isArray(b.meses)) ? b.meses : null;
+  if (!entrada || !Object.keys(entrada).length) return { error: 'No hay cotizaciones para guardar.' };
+  if (Object.keys(entrada).length > 120) return { error: 'Son demasiados meses para guardar de una vez.' };
+  const meses = {};
+  for (const [m, v] of Object.entries(entrada)) {
+    if (!MES_AJUSTE.test(m)) return { error: 'Ese mes no se entiende: ' + m + '.' };
+    if (v == null || v === '') { meses[m] = null; continue; }
+    const n = Number(v);
+    if (typeof v === 'boolean' || !Number.isFinite(n) || n <= 0 || n >= 1e7) {
+      return { error: 'La cotización de ' + m + ' tiene que ser un número mayor que cero.' };
+    }
+    meses[m] = r2(n);
+  }
+  return { meses };
+}
