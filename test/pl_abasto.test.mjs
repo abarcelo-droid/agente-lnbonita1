@@ -67,7 +67,7 @@ function base() {
 }
 function rutas(db, { detalleMax } = {}) {
   return new Function('db', 'SVC', [
-    'const { RUBROS, SIN_ASIGNAR, esRubro, esCuentaDeResultado, rubroPorDefecto, validarCarga, avisosDeReemplazo, asientosSinPareja } = SVC;',
+    'const { RUBROS, SIN_ASIGNAR, esRubro, esCuentaDeResultado, rubroPorDefecto, validarCarga, avisosDeReemplazo, asientosSinPareja, validarAjuste } = SVC;',
     lineaConst('MES'),
     lineaConst('NB_MAX'),
     lineaConst('FECHA'),
@@ -77,6 +77,9 @@ function rutas(db, { detalleMax } = {}) {
     fuente(RUTA, 'function rubrosDeCuentas('),
     fuente(RUTA, 'function contrapartidas('),
     fuente(RUTA, 'function reemplazo('),
+    fuente(RUTA, 'function ajusteVivo('),
+    fuente(RUTA, 'function escribirMesesDeAjuste('),
+    fuente(RUTA, 'function ajustesDelPeriodo('),
     'return {',
     '  previa: ' + handler("router.post('/previa'") + ',',
     '  cargar: ' + handler("router.post('/cargar'") + ',',
@@ -86,6 +89,9 @@ function rutas(db, { detalleMax } = {}) {
     '  restablecer: ' + handler("router.delete('/rubros'") + ',',
     '  detalle: ' + handler("router.get('/detalle'") + ',',
     '  noBalancea: ' + handler("router.get('/no-balancea'") + ',',
+    '  ajusteNuevo: ' + handler("router.post('/ajustes'") + ',',
+    '  ajusteCorregir: ' + handler("router.put('/ajustes/:id'") + ',',
+    '  ajusteEliminar: ' + handler("router.delete('/ajustes/:id'") + ',',
     '};',
   ].join('\n'))(db, SVC);
 }
@@ -340,7 +346,7 @@ test('los asientos de un importe: con la contrapartida, y el total de todos aunq
 
 // ══ 4 · LA PANTALLA ════════════════════════════════════════════════════════════════
 
-const PANTALLA = (datos, abiertos = {}, unidad) => {
+const PANTALLA = (datos, abiertos = {}, unidad, op) => {
   const tb = { innerHTML: '' };
   new Function('PLA', 'eid', 'escH', [
     /^var PLA_MES = .*;\r?$/m.exec(PANEL)[0],
@@ -354,7 +360,7 @@ const PANTALLA = (datos, abiertos = {}, unidad) => {
     fuente(PANEL, 'function plaCelda(v, ventas, conPct){'),
     fuente(PANEL, 'function plaPintar(){'),
     'plaPintar();',
-  ].join('\n'))({ datos, abiertos, unidad }, () => tb, (x) => String(x));
+  ].join('\n'))({ datos, abiertos, unidad, op }, () => tb, (x) => String(x));
   return tb.innerHTML;
 };
 const TOTALES = new Function([
@@ -568,7 +574,209 @@ test('manual V1053: la solapa No balancea dice lo que la ruta hace', () => {
   assert.match(M, /<span class="ver">V1053<\/span> Solapa <b>No balancea<\/b>/);
 });
 
-// ══ 6 · EL MENÚ, LA DIRECCIÓN Y EL PERMISO ═══════════════════════════════════════════
+// ══ 6 · AJUSTES MANUALES Y EXPORTAR (V1054) ═════════════════════════════════════════
+
+test('un ajuste manual se valida: nombre, uno de los seis rubros, meses y números', () => {
+  const ok = SVC.validarAjuste({ nombre: '  Amortización   rodados ', rubro: 'costos_fijos',
+    meses: { '2025-08': -150000.456, '2025-07': '', '2025-09': 0, '2025-10': '-2500.5' } });
+  assert.equal(ok.error, undefined, ok.error);
+  assert.equal(ok.nombre, 'Amortización rodados');
+  assert.deepEqual(ok.meses, { '2025-08': -150000.46, '2025-07': null, '2025-09': null, '2025-10': -2500.5 });
+  assert.match(SVC.validarAjuste({ nombre: ' ', rubro: 'otros', meses: {} }).error, /Falta el nombre/);
+  assert.match(SVC.validarAjuste({ nombre: 'x'.repeat(81), rubro: 'otros', meses: {} }).error, /muy largo/);
+  assert.match(SVC.validarAjuste({ nombre: 'x', rubro: 'sin_asignar', meses: {} }).error, /rubro/,
+    'un ajuste sin asignar no entraría a ningún lado');
+  assert.match(SVC.validarAjuste({ nombre: 'x', rubro: 'ganancias', meses: {} }).error, /rubro/);
+  assert.match(SVC.validarAjuste({ nombre: 'x', rubro: 'otros' }).error, /Faltan los importes/);
+  assert.match(SVC.validarAjuste({ nombre: 'x', rubro: 'otros', meses: { '2025-13': 1 } }).error, /mes no se entiende/);
+  assert.match(SVC.validarAjuste({ nombre: 'x', rubro: 'otros', meses: { '2025-08': 'mucho' } }).error, /no es un número/);
+  assert.match(SVC.validarAjuste({ nombre: 'x', rubro: 'otros', meses: { '2025-08': true } }).error, /no es un número/);
+});
+
+test('los ajustes: se agregan, se corrigen sólo en los meses que vienen, no quedan vacíos y se eliminan con baja', () => {
+  const db = base();
+  const R = rutas(db);
+  llamar(R.cargar, { body: CARGA_A });
+  llamar(R.cargar, { body: CARGA_B });
+  assert.equal(llamar(R.ajusteNuevo, { body: { nombre: 'Vacío', rubro: 'otros', meses: { '2025-08': '' } } }).code, 400,
+    'guardó un ajuste sin importes');
+  const n = llamar(R.ajusteNuevo, { body: { nombre: 'Amortización', rubro: 'costos_fijos',
+    meses: { '2025-07': -1000, '2025-08': -1000, '2025-09': -1000 } } });
+  assert.equal(n.code, 200, JSON.stringify(n.body));
+  const id = n.body.data.id;
+  const periodo = { query: { desde: '2025-07', hasta: '2025-09' } };
+  let d = llamar(R.resultado, periodo).body.data;
+  assert.equal(d.ajustes.length, 1);
+  assert.deepEqual(d.ajustes[0].meses, { '2025-07': -1000, '2025-08': -1000, '2025-09': -1000 });
+  assert.equal(d.ajustes[0].rubro, 'costos_fijos');
+  assert.equal(d.ajustes[0].creado_por, 'Pablo');
+  assert.deepEqual(Object.keys(llamar(R.resultado, { query: { desde: '2025-08', hasta: '2025-08' } }).body.data.ajustes[0].meses),
+    ['2025-08'], 'trae meses fuera del período');
+  // Corregir: agosto cambia, septiembre se saca, julio no viene y queda como estaba.
+  const c = llamar(R.ajusteCorregir, { params: { id: String(id) }, body: { nombre: 'Amortización rodados',
+    rubro: 'costos_fijos', meses: { '2025-08': -2500, '2025-09': null } } });
+  assert.equal(c.code, 200, JSON.stringify(c.body));
+  d = llamar(R.resultado, periodo).body.data;
+  assert.deepEqual(d.ajustes[0].meses, { '2025-07': -1000, '2025-08': -2500 });
+  assert.equal(d.ajustes[0].nombre, 'Amortización rodados');
+  assert.equal(d.ajustes[0].modificado_por, 'Pablo');
+  // Vaciarlo no es la manera de sacarlo.
+  const vacio = llamar(R.ajusteCorregir, { params: { id: String(id) }, body: { nombre: 'x', rubro: 'costos_fijos',
+    meses: { '2025-07': null, '2025-08': '' } } });
+  assert.equal(vacio.code, 400);
+  assert.match(vacio.body.error, /eliminalo/);
+  assert.equal(db.prepare('SELECT COUNT(*) n FROM pl_abasto_ajuste_meses WHERE ajuste_id = ?').get(id).n, 2, 'lo vació igual');
+  assert.equal(db.prepare('SELECT nombre FROM pl_abasto_ajustes WHERE id = ?').get(id).nombre, 'Amortización rodados');
+  assert.equal(llamar(R.ajusteCorregir, { params: { id: '999' }, body: { nombre: 'x', rubro: 'otros',
+    meses: { '2025-08': 1 } } }).code, 404);
+  // Eliminar: baja lógica, con quién y cuándo, y sale del cuadro.
+  assert.equal(llamar(R.ajusteEliminar, { params: { id: String(id) } }).code, 200);
+  assert.deepEqual(llamar(R.resultado, periodo).body.data.ajustes, []);
+  const baja = db.prepare('SELECT eliminado_en, eliminado_por FROM pl_abasto_ajustes WHERE id = ?').get(id);
+  assert.ok(baja.eliminado_en, 'lo borró en vez de darlo de baja');
+  assert.equal(baja.eliminado_por, 5);
+  assert.equal(llamar(R.ajusteEliminar, { params: { id: String(id) } }).code, 404);
+  assert.equal(llamar(R.ajusteCorregir, { params: { id: String(id) }, body: { nombre: 'x', rubro: 'otros',
+    meses: { '2025-08': 1 } } }).code, 404, 'corrige un ajuste eliminado');
+  // Eliminar va por DELETE, que exigirNivel le pide a quien puede anular.
+  assert.match(RUTA, /router\.delete\('\/ajustes\/:id', requireAuth,/);
+  assert.deepEqual(llamar(R.resultado, { query: { desde: '2030-01', hasta: '2030-02' } }).body.data.ajustes, []);
+});
+
+const AJUSTES = [
+  { id: 7, rubro: 'costos_fijos', nombre: 'Amortización', meses: { '2025-07': -100, '2025-08': -300, '2025-06': -9999 } },
+  { id: 8, rubro: 'ventas', nombre: 'Venta sin factura', meses: { '2025-08': 500 } },
+];
+
+test('la cascada suma los ajustes como una cuenta más, sólo en los meses del cuadro', () => {
+  const T = TOTALES(Object.assign({}, DATOS, { ajustes: AJUSTES }));
+  assert.deepEqual(T.rubros.costos_fijos, { '2025-07': -100, '2025-08': -300, TOTAL: -400 }, 'un mes fuera del cuadro entró al total');
+  assert.deepEqual(T.rubros.ventas, { '2025-07': 1000, '2025-08': 5500, TOTAL: 6500 });
+  assert.deepEqual(T.subtotales.margen, { '2025-07': 600, '2025-08': 4600, TOTAL: 5200 });
+  assert.deepEqual(T.subtotales.ebitda, { '2025-07': 500, '2025-08': 4300, TOTAL: 4800 });
+  assert.deepEqual(T.subtotales.neto, { '2025-07': 450, '2025-08': 4200, TOTAL: 4650 });
+  assert.deepEqual(T.ajustes.costos_fijos.map((x) => [x.a.id, x.total]), [[7, -400]]);
+});
+
+test('la tabla: el ajuste se ve adentro de su rubro, y un rubro con sólo ajustes aparece', () => {
+  const datos = Object.assign({}, DATOS, { ajustes: AJUSTES });
+  const h = PANTALLA(datos);
+  assert.ok(h.includes('Costos fijos'), 'lo cargado a mano en costos fijos no se ve en ningún lado');
+  assert.ok(!h.includes('Ajuste: Amortización'), 'el ajuste se ve sin abrir el rubro');
+  const abierto = PANTALLA(datos, { costos_fijos: true });
+  assert.match(abierto, /<tr class="pla-aju"><td title="✎ Ajuste: Amortización" onclick="plaAjusteAbrir\(7\)">/);
+  assert.match(abierto, /ondblclick="plaAjusteAbrir\(7\)"/);
+  assert.ok(!abierto.includes('Agregar un ajuste manual'), 'le ofrece cargar un ajuste a quien sólo mira');
+  assert.match(PANTALLA(datos, { costos_fijos: true }, undefined, true),
+    /onclick="plaAjusteAbrir\(null,'costos_fijos'\)">\+ Agregar un ajuste manual a Costos fijos</);
+});
+
+test('los asientos de un rubro traen sus ajustes, y el saldo da lo mismo que la celda', () => {
+  const aj = new Function([fuente(PANEL, 'function plaDetalleAjustes(d, rubro, desde, hasta){'), 'return plaDetalleAjustes;'].join('\n'))();
+  const datos = Object.assign({}, DATOS, { ajustes: AJUSTES });
+  assert.deepEqual(aj(datos, 'ventas', '2025-07', '2025-08'), [{ mes: '2025-08', nombre: 'Venta sin factura', debe: 0, haber: 500 }]);
+  assert.deepEqual(aj(datos, 'costos_fijos', '2025-08', '2025-08').map((f) => [f.mes, f.debe, f.haber]), [['2025-08', 300, 0]],
+    'un gasto va al debe, y sólo el mes pedido');
+  const els = { 'pla-detalle-q': { value: '' }, 'pla-detalle-nota': {}, 'pla-detalle-tabla': {} };
+  const pintar = (D) => new Function('PLA', 'eid', 'sgNorm', 'nr', 'escH', [
+    /^var PLA_MES = .*;\r?$/m.exec(PANEL)[0],
+    fuente(PANEL, 'function plaMesTxt(m){'), fuente(PANEL, 'function plaFechaTxt(f){'), fuente(PANEL, 'function plaImporte(v){'),
+    fuente(PANEL, 'function plaDetallePintar(){'), 'plaDetallePintar();'].join('\n'))(
+    { detalle: D }, (id) => els[id], (s) => String(s).toLowerCase(), String, String);
+  const D = { tipo: 'rubro', recortado: 0, total: { renglones: 1, debe: 0, haber: 5000 },
+    filas: [{ fecha: '2025-08-10', asiento: '1', cuenta: '4.1.01', nombre: 'VENTAS', contrapartida: '', debe: 0, haber: 5000 }],
+    ajustes: aj(datos, 'ventas', '2025-08', '2025-08') };
+  pintar(D);
+  const t = els['pla-detalle-tabla'].innerHTML;
+  assert.match(t, /TOTAL \(2 movimientos\)/);
+  assert.match(t, /como en el cuadro\)<\/b><\/td><td colspan="2" style="text-align:right"><b>\$ 5\.500,00<\/b>/,
+    'el saldo no da lo mismo que la celda: 5.000 del libro más 500 del ajuste');
+  assert.match(t, /✎ Venta sin factura/);
+  pintar({ tipo: 'rubro', recortado: 0, total: { renglones: 0, debe: 0, haber: 0 }, filas: [],
+    ajustes: aj(datos, 'costos_fijos', '2025-07', '2025-08') });
+  assert.match(els['pla-detalle-tabla'].innerHTML, /como en el cuadro\)<\/b><\/td><td colspan="2" style="text-align:right"><b>-\$ 400,00<\/b>/);
+  els['pla-detalle-q'].value = 'factura';
+  pintar(D);
+  assert.match(els['pla-detalle-tabla'].innerHTML, /TOTAL \(1 movimientos\)/);
+  assert.match(fuente(PANEL, 'function plaDetalle(tipo, clave, mes){'),
+    /ajustes: tipo === 'rubro' \? plaDetalleAjustes\(d, clave, desde, hasta\) : \[\]/);
+});
+
+test('exportar: el cuadro entero, en pesos con centavos, con punto y coma y coma decimal', () => {
+  const csv = new Function('PLA', [
+    /^var PLA_MES = .*;\r?$/m.exec(PANEL)[0],
+    hasta(PANEL, 'var PLA_SUBTOTALES = [', '];'),
+    fuente(PANEL, 'function plaMesTxt(m){'),
+    fuente(PANEL, 'function plaTotales(d){'),
+    fuente(PANEL, 'function plaCsv(d){'),
+    'return plaCsv;'].join('\n'))({ unidad: 1e6 });
+  const datos = Object.assign({}, DATOS, { ajustes: AJUSTES, cuentas: DATOS.cuentas.concat([
+    { cuenta: '4.2.09', nombre: 'Gastos; "varios"', rubro: 'otros', meses: { '2025-07': -12.3 } },
+    { cuenta: '4.2.10', nombre: '=HIPERVINCULO("x")', rubro: 'otros', meses: { '2025-08': -1 } }]) });
+  const txt = csv(datos);
+  assert.ok(txt.startsWith('\ufeff'), 'sin la marca del principio, el Excel lee mal los acentos');
+  assert.deepEqual(txt.slice(1).split('\r\n'), [
+    'Tipo;Concepto;Cuenta;TOTAL;Ago 2025;Jul 2025',
+    'Rubro;Ventas;;6500,00;5500,00;1000,00',
+    'Cuenta;COMISIONES;4.1.02;3500,00;3500,00;0,00',
+    'Cuenta;VENTAS;4.1.01;2500,00;1500,00;1000,00',
+    'Ajuste manual;Venta sin factura;;500,00;500,00;0,00',
+    'Rubro;Costos variables;;-1300,00;-900,00;-400,00',
+    'Cuenta;COSTO;4.2.01;-1300,00;-900,00;-400,00',
+    'Subtotal;MARGEN BRUTO;;5200,00;4600,00;600,00',
+    'Rubro;Costos fijos;;-400,00;-300,00;-100,00',
+    'Ajuste manual;Amortización;;-400,00;-300,00;-100,00',
+    'Subtotal;EBITDA;;4800,00;4300,00;500,00',
+    'Rubro;Costos financieros;;-100,00;-100,00;0,00',
+    'Cuenta;INTERESES;4.2.05;-100,00;-100,00;0,00',
+    'Subtotal;EBT (antes de impuestos);;4700,00;4200,00;500,00',
+    'Rubro;Impuestos;;-50,00;0,00;-50,00',
+    'Cuenta;IIBB;4.2.06;-50,00;0,00;-50,00',
+    'Rubro;Otros;;-13,30;-1,00;-12,30',
+    'Cuenta;"Gastos; ""varios""";4.2.09;-12,30;0,00;-12,30',
+    'Cuenta;"\'=HIPERVINCULO(""x"")";4.2.10;-1,00;-1,00;0,00',
+    'Resultado;RESULTADO NETO;;4636,70;4199,00;437,70',
+  ]);
+  // Un rubro vacío también va: la estructura es la misma todos los meses.
+  assert.ok(csv(DATOS).includes('\r\nRubro;Costos fijos;;0,00;0,00;0,00\r\n'));
+  // Y va en pesos aunque la pantalla esté en millones.
+  assert.ok(!/PLA\.unidad/.test(fuente(PANEL, 'function plaCsv(d){')));
+});
+
+test('la ventana del ajuste: se abre en blanco o con el ajuste, lee los importes, y eliminar pide anular', () => {
+  const abrir = fuente(PANEL, 'function plaAjusteAbrir(id, rubro){');
+  assert.match(abrir, /PLA\.ajuste = \{ id: a \? a\.id : null \};/);
+  assert.match(abrir, /nom\.value = a \? a\.nombre : '';/);
+  assert.match(abrir, /sel\.value = a \? a\.rubro : \(rubro \|\| ''\);/);
+  assert.match(abrir, /eid\('pla-ajuste-eliminar'\)\.style\.display = \(a && lnbPuedeAnular\('pl-abasto'\)\) \? '' : 'none';/);
+  assert.match(fuente(PANEL, 'function plaAjusteEliminar(){'), /api\('\/api\/pl-abasto\/ajustes\/' \+ A\.id, 'DELETE'\)/);
+  assert.match(fuente(PANEL, 'function plaAjusteGuardar(){'), /closeMB\('pla-ajuste-modal'\)/);
+  const leerAj = new Function([fuente(PANEL, 'function plaNumero(v){'), fuente(PANEL, 'function plaAjusteLeer(inputs){'),
+    'return plaAjusteLeer;'].join('\n'))();
+  const inp = (mes, value) => ({ value, getAttribute: () => mes });
+  assert.deepEqual(leerAj([inp('2025-08', '-150.000,5'), inp('2025-07', ''), inp('2025-06', '0')]),
+    { meses: { '2025-08': -150000.5, '2025-07': null, '2025-06': null }, total: -150000.5, malo: null });
+  assert.equal(leerAj([inp('2025-08', 'mucho'), inp('2025-07', '1')]).malo, '2025-08');
+  const ini = fuente(PANEL, 'function plaInit(){');
+  assert.match(ini, /\['pla-subir-btn', 'pla-rub-guardar', 'pla-ajuste-btn'\]\.forEach/);
+  assert.match(ini, /PLA\.op = op;/);
+  assert.match(PANEL, /<div class="ab-modal-overlay sg-mod" id="pla-ajuste-modal">/);
+});
+
+test('manual V1054: los ajustes van con su signo y se corrigen por mes, eliminar pide anular, y el CSV va en pesos', () => {
+  const M = manual();
+  assert.match(M, /<b>Cada importe va con el signo con que pesa en el resultado<\/b>: un gasto en negativo/);
+  assert.match(fuente(PANEL, 'function plaTotales(d){'), /var v = Number\(a\.meses\[m\]\) \|\| 0; rub\[a\.rubro\]\[m\] \+= v;/);
+  assert.match(M, /La ventana muestra <b>los meses del período que se está mirando<\/b>; los otros meses del mismo ajuste quedan como estaban/);
+  assert.match(M, /Aparece <b>adentro de su rubro<\/b>/);
+  assert.match(M, /En los asientos de un rubro \(doble clic\) aparecen también sus ajustes/);
+  assert.match(M, /Un ajuste no puede quedar sin importes: para sacarlo se <b>elimina<\/b>, y eso pide el nivel <b>Anular<\/b>/);
+  assert.match(M, /<b>⬇️ Exportar CSV<\/b> baja el cuadro del período elegido/);
+  assert.match(M, /Los importes van <b>en pesos con centavos<\/b>, aunque en la pantalla se vean en miles o millones/);
+  assert.match(M, /<span class="ver">V1054<\/span> Ajustes manuales por rubro, y exportar el cuadro a CSV/);
+});
+
+// ══ 7 · EL MENÚ, LA DIRECCIÓN Y EL PERMISO ═══════════════════════════════════════════
 
 test('está en el menú de Informes, con su dirección controlada al leer y al escribir', () => {
   const IX = leer('src/index.js');
@@ -595,7 +803,7 @@ test('está en el menú de Informes, con su dirección controlada al leer y al e
   assert.match(fuente(PANEL, 'function plaRubrosRestablecer(){'), /api\('\/api\/pl-abasto\/rubros', 'DELETE'\)/);
 });
 
-// ══ 7 · EL «¿CÓMO SE USA?» DICE LO QUE EL CÓDIGO HACE ═════════════════════════════════
+// ══ 8 · EL «¿CÓMO SE USA?» DICE LO QUE EL CÓDIGO HACE ═════════════════════════════════
 
 const manual = () => {
   const i = PANEL.indexOf('SG_MANUAL.plabasto = {');
@@ -624,7 +832,7 @@ test('manual: reemplaza el período del archivo, haber − debe, hasta 12 meses,
   assert.ok(!SVC.RUBROS.some((r) => r.k === 'costos_fijos' && /costos_fijos/.test(fuente(leer('src/servicios/pl_abasto.js'), 'export function rubroPorDefecto('))));
   assert.match(M, /cuando el otro sistema la cargó con su cobro en el mismo asiento/);
   assert.match(M, /<b>Volver a los de por defecto<\/b> borra toda la clasificación guardada, y por eso pide el nivel <b>Anular<\/b>/);
-  assert.match(M, /Subir el libro diario y guardar los rubros pide <b>Operar<\/b>; volver los rubros a los de por defecto, <b>Anular<\/b>/);
+  assert.match(M, /Subir el libro diario, guardar los rubros y cargar o corregir un ajuste pide <b>Operar<\/b>; volver los rubros a los de por defecto y eliminar un ajuste, <b>Anular<\/b>/);
 });
 
 test('los manuales no citan una versión que el panel todavía no alcanzó', () => {
