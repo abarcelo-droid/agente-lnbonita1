@@ -1034,7 +1034,7 @@ test('la lista en la pantalla: todas, con el grupo del plan, la etiqueta de su t
   assert.ok(!solo.includes('COTO'), 'la casilla trae las del patrimonio');
   assert.match(els['pla-zonas'].innerHTML, /COSTOS ASOCIADOS A LAS VENTAS <small[^>]*>\(0\)<\/small>/);
   // Soltar en la lista le saca el título.
-  assert.match(PANEL, /<div class="pla-lista" data-rubro="sin_asignar" ondragover="plaSobre\(event,this\)"/);
+  assert.match(PANEL, /<div class="pla-lista" data-rubro="sin_asignar">/);
 });
 
 test('el cuadro avisa cuántas cuentas no tienen título, porque no suman', () => {
@@ -1142,12 +1142,12 @@ test('también en VENTAS en la pantalla: soltarla en VENTAS la deja en los dos, 
     hasta(PANEL, 'var PLA_GRUPOS = {', '};'), fuente(PANEL, 'function plaGrupoCuenta(cuenta){'),
     hasta(PANEL, 'var PLA_COLOR = {', '};'), fuente(PANEL, 'function plaImporte(v, usd){'),
     fuente(PANEL, 'function plaRubroActual(c){'), ...PINTAR_RUBROS(),
-    fuente(PANEL, 'function plaSoltar(ev, zona){'), fuente(PANEL, 'function plaVentasPend(c, si){'),
+    fuente(PANEL, 'function plaCuentaDe(cuenta){'), fuente(PANEL, 'function plaSoltarEn(cuenta, rubro){'),
+    fuente(PANEL, 'function plaVentasPend(c, si){'),
     fuente(PANEL, 'function plaTambienVentas(c){'), fuente(PANEL, 'function plaQuitarVentas(cuenta){'),
-    'return { pintar: plaRubrosPintar, soltar: plaSoltar, quitar: plaQuitarVentas };'].join('\n'))(
+    'return { pintar: plaRubrosPintar, soltar: plaSoltarEn, quitar: plaQuitarVentas };'].join('\n'))(
     PLA, eid, String, (s) => String(s).toLowerCase());
-  const soltar = (cuenta, rubro) => F.soltar({ preventDefault() {}, dataTransfer: { getData: () => cuenta } },
-    { classList: { remove() {} }, getAttribute: () => rubro });
+  const soltar = (cuenta, rubro) => F.soltar(cuenta, rubro);
   F.pintar();
   assert.match(els['pla-rub-lista'].innerHTML,
     /<span class="n">SUELDOS<\/span><span class="pla-badge"[^>]*>C\. fijos<\/span><span class="pla-badge" style="color:#15803d" title="También en VENTAS">\+ Ventas<\/span>/);
@@ -1204,10 +1204,10 @@ test('soltar una cuenta cambia sólo su fila y las cajas, sin volver a dibujar l
     hasta(PANEL, 'var PLA_GRUPOS = {', '};'), fuente(PANEL, 'function plaGrupoCuenta(cuenta){'),
     hasta(PANEL, 'var PLA_COLOR = {', '};'), fuente(PANEL, 'function plaImporte(v, usd){'),
     fuente(PANEL, 'function plaRubroActual(c){'), ...PINTAR_RUBROS(),
-    fuente(PANEL, 'function plaSoltar(ev, zona){'), fuente(PANEL, 'function plaVentasPend(c, si){'),
-    fuente(PANEL, 'function plaTambienVentas(c){'), 'return plaSoltar;'].join('\n'))(PLA, eid, String, (s) => String(s).toLowerCase());
-  const a = (rubro) => soltar({ preventDefault() {}, dataTransfer: { getData: () => '4.2.04' } },
-    { classList: { remove() {} }, getAttribute: () => rubro });
+    fuente(PANEL, 'function plaCuentaDe(cuenta){'), fuente(PANEL, 'function plaSoltarEn(cuenta, rubro){'),
+    fuente(PANEL, 'function plaVentasPend(c, si){'),
+    fuente(PANEL, 'function plaTambienVentas(c){'), 'return plaSoltarEn;'].join('\n'))(PLA, eid, String, (s) => String(s).toLowerCase());
+  const a = (rubro) => soltar('4.2.04', rubro);
   a('costos_fijos');
   assert.equal(pintadasLista, 0, 'soltar volvió a dibujar la lista entera');
   assert.match(filaNueva, /<span class="n">ELECTRICIDAD<\/span><span class="pla-badge" style="color:#1d4ed8" title="COSTOS FIJOS">C\. fijos<\/span>/);
@@ -1219,13 +1219,83 @@ test('soltar una cuenta cambia sólo su fila y las cajas, sin volver a dibujar l
   assert.equal(pintadasLista, 1);
 });
 
-test('pasar por encima de una caja no la vuelve a marcar a cada movimiento del mouse', () => {
-  const sobre = new Function(fuente(PANEL, 'function plaSobre(ev, zona){') + '\nreturn plaSobre;')();
-  let agregadas = 0;
-  const cls = new Set();
-  const zona = { classList: { contains: (c) => cls.has(c), add: (c) => { agregadas++; cls.add(c); } } };
-  for (let i = 0; i < 20; i++) sobre({ preventDefault() {} }, zona);
-  assert.equal(agregadas, 1, 'cada movimiento del mouse vuelve a marcar la caja');
+test('arrastrar con el puntero: un clic elige, moverse arrastra, soltar lleva al título, y nada queda colgado', () => {
+  // Pablo, 14/9/2026: «no hay caso, se me queda la manito seleccionada y no puedo hacer nada» (V1060).
+  const clases = () => { const s = new Set(); return { add: (c) => s.add(c), remove: (c) => s.delete(c), contains: (c) => s.has(c) }; };
+  const body = { hijos: [], classList: clases(),
+    appendChild(e) { this.hijos.push(e); e.parentNode = this; },
+    removeChild(e) { this.hijos.splice(this.hijos.indexOf(e), 1); e.parentNode = null; } };
+  const zona = { classList: clases(), getAttribute: () => 'costos_fijos' };
+  let debajo = null;
+  const documento = { body, createElement: () => ({ style: {}, className: '', textContent: '' }),
+    elementFromPoint: () => (debajo ? { closest: (sel) => (sel === '#sec-pl-abasto [data-rubro]' ? debajo : null) } : null),
+    querySelectorAll: () => [], querySelector: () => null };
+  const els = { 'pla-rub-q': { value: '' }, 'pla-rub-solo': { checked: false } };
+  const eid = (id) => (els[id] = els[id] || {});
+  const PLA = { pend: {}, pendVentas: {}, sel: null, cuentas: { rubros: RUBROS, cuentas: [
+    { cuenta: '4.2.04', nombre: 'ELECTRICIDAD', rubro: 'sin_asignar', elegido: 0, importe: -1, resultado: 1, tambien_ventas: 0 }] } };
+  const F = new Function('PLA', 'eid', 'escH', 'sgNorm', 'document', [
+    hasta(PANEL, 'var PLA_GRUPOS = {', '};'), fuente(PANEL, 'function plaGrupoCuenta(cuenta){'),
+    hasta(PANEL, 'var PLA_COLOR = {', '};'), fuente(PANEL, 'function plaImporte(v, usd){'),
+    fuente(PANEL, 'function plaRubroActual(c){'), ...PINTAR_RUBROS(), 'var PLA_DRAG = null;',
+    ...['function plaCuentaDe(cuenta){', 'function plaTomar(ev, el){', 'function plaZonaEn(x, y){', 'function plaMover(ev){',
+      'function plaAutoScroll(x, y){', 'function plaLargar(ev){', 'function plaCancelarArrastre(){', 'function plaElegir(cuenta){',
+      'function plaClicZona(ev, zona){', 'function plaSoltarEn(cuenta, rubro){', 'function plaVentasPend(c, si){',
+      'function plaTambienVentas(c){'].map((f) => fuente(PANEL, f)),
+    'return { tomar: plaTomar, mover: plaMover, largar: plaLargar, clicZona: plaClicZona, drag: function(){ return PLA_DRAG; } };',
+  ].join('\n'))(PLA, eid, String, (s) => String(s).toLowerCase(), documento);
+  let liberadas = 0;
+  const fila = { getAttribute: () => '4.2.04', setPointerCapture() {}, releasePointerCapture() { liberadas++; } };
+  const ev = (x, y, id = 1) => ({ button: 0, pointerId: id, clientX: x, clientY: y, target: {}, preventDefault() {} });
+  // Un clic, aunque la mano tiemble tres píxeles: elige la cuenta, no la arrastra.
+  F.tomar(ev(100, 100), fila); F.mover(ev(102, 101)); F.largar(ev(102, 101));
+  assert.equal(PLA.sel, '4.2.04', 'un clic no elige la cuenta');
+  assert.equal(body.hijos.length, 0, 'un clic dejó una cuenta volando');
+  assert.match(els['pla-rub-sel'].innerHTML, /Elegida: <b>ELECTRICIDAD<\/b>/);
+  // Otro clic en la misma la suelta.
+  F.tomar(ev(100, 100), fila); F.largar(ev(100, 100));
+  assert.equal(PLA.sel, null);
+  // Arrastrar: viaja con el puntero, marca la caja de abajo y al soltar la lleva ahí.
+  F.tomar(ev(100, 100), fila);
+  debajo = zona;
+  F.mover(ev(160, 140));
+  assert.equal(body.hijos.length, 1, 'no se ve la cuenta viajando con el puntero');
+  assert.ok(body.classList.contains('pla-arrastrando'));
+  assert.ok(zona.classList.contains('sobre'), 'no marca la caja de abajo');
+  F.mover(ev(170, 150, 2));
+  assert.equal(body.hijos[0].style.left, '174px', 'otro puntero movió la cuenta');
+  F.largar(ev(170, 150));
+  assert.deepEqual(PLA.pend, { '4.2.04': 'costos_fijos' });
+  assert.equal(body.hijos.length, 0, 'quedó la cuenta volando después de soltar');
+  assert.ok(!body.classList.contains('pla-arrastrando'), 'quedó la manito tomada');
+  assert.ok(!zona.classList.contains('sobre'));
+  assert.equal(liberadas, 3, 'no suelta el puntero');
+  assert.equal(F.drag(), null);
+  // Soltar fuera de toda caja no cambia nada.
+  F.tomar(ev(100, 100), fila); debajo = null; F.mover(ev(300, 300)); F.largar(ev(300, 300));
+  assert.deepEqual(PLA.pend, { '4.2.04': 'costos_fijos' });
+  assert.equal(body.hijos.length, 0);
+  // Dos clics: elegirla y clic en un título. Un clic en una cuenta de adentro de la caja no la lleva.
+  F.tomar(ev(100, 100), fila); F.largar(ev(100, 100));
+  F.clicZona({ target: { closest: (s) => (s === '.pla-chip, button' ? {} : null) } }, { getAttribute: () => 'impuestos' });
+  assert.deepEqual(PLA.pend, { '4.2.04': 'costos_fijos' }, 'el clic en una cuenta de la caja llevó la elegida');
+  F.clicZona({ target: { closest: () => null } }, { getAttribute: () => 'impuestos' });
+  assert.deepEqual(PLA.pend, { '4.2.04': 'impuestos' });
+  assert.equal(PLA.sel, null, 'después de llevarla sigue elegida');
+});
+
+test('sin el arrastre del navegador: ninguna cuenta es draggable, y el puntero y Esc quedan escuchados', () => {
+  const funcs = PINTAR_RUBROS().join('\n');
+  assert.ok(!/draggable|ondragstart|ondrop|ondragover/.test(funcs), 'queda el arrastre del navegador en las cuentas o las cajas');
+  assert.ok(!/ondragover|ondrop|draggable/.test(hasta(PANEL, '<div class="sec sg-mod" id="sec-pl-abasto">',
+    '<div class="sec sg-mod" id="sec-informes-comercial">')));
+  assert.equal((funcs.match(/onpointerdown="plaTomar\(event,this\)"/g) || []).length, 3, 'las filas y las cuentas de las cajas se toman con el puntero');
+  assert.match(funcs, /onclick="plaClicZona\(event,this\)"/);
+  assert.match(PANEL, /document\.addEventListener\('pointermove', plaMover\);\r?\n\s+document\.addEventListener\('pointerup', plaLargar\);\r?\n\s+document\.addEventListener\('pointercancel', plaCancelarArrastre\);/);
+  assert.match(PANEL, /if \(e\.key === 'Escape' && \(PLA_DRAG \|\| PLA\.sel\)\) \{ plaCancelarArrastre\(\); plaElegir\(null\); \}/);
+  assert.match(PANEL, /window\.addEventListener\('blur', plaCancelarArrastre\);/);
+  assert.match(PANEL, /#sec-pl-abasto \.pla-fila,#sec-pl-abasto \.pla-chip\{touch-action:none;user-select:none;-webkit-user-select:none\}/);
+  assert.match(PANEL, /<div id="pla-rub-sel" class="pla-sel"><\/div>/);
 });
 
 test('los importes salen de un solo formateador, y dicen lo mismo que antes', () => {
@@ -1245,21 +1315,11 @@ test('la lista no dibuja las filas que no se ven, y los títulos quedan a la vis
     'las filas se corren al bajar por la lista');
   assert.match(PANEL, /#sec-pl-abasto \.pla-lista-cuerpo\{[^}]*contain:content\}/);
   assert.match(PANEL, /#sec-pl-abasto \.pla-zona\{[^}]*contain:content\}/);
-  // Salir de una caja es salir de verdad, no pasar a una fila de adentro.
-  const salir = new Function(fuente(PANEL, 'function plaSalir(ev, zona){') + '\nreturn plaSalir;')();
-  let apagadas = 0;
-  const caja = { contains: (x) => x === 'fila', classList: { remove: () => { apagadas++; } } };
-  salir({ relatedTarget: 'fila' }, caja);
-  assert.equal(apagadas, 0, 'pasar a una fila de adentro apaga la marca de la caja');
-  salir({ relatedTarget: 'afuera' }, caja);
-  assert.equal(apagadas, 1);
-  assert.match(PANEL, /<div class="pla-lista" data-rubro="sin_asignar" ondragover="plaSobre\(event,this\)"\r?\n\s+ondragleave="plaSalir\(event,this\)"/);
-  assert.match(fuente(PANEL, 'function plaRubrosZonasPintar(){'), /ondragleave="plaSalir\(event,this\)"/);
   assert.match(PANEL, /#sec-pl-abasto \.pla-zonas\{[^}]*position:sticky;top:8px;max-height:calc\(100vh - 120px\);overflow-y:auto/);
   assert.match(PANEL, /#sec-pl-abasto \.pla-lista\{[^}]*max-height:calc\(100vh - 120px\)\}/);
   assert.match(PANEL, /<input type="checkbox" id="pla-rub-solo" onchange="plaRubrosPintar\(\)" style="width:auto;margin:0 5px 0 0;vertical-align:middle">/);
-  const soltar = fuente(PANEL, 'function plaSoltar(ev, zona){');
-  assert.equal((soltar.match(/plaRubrosTocar\(cuenta\);/g) || []).length, 2);
+  const soltar = fuente(PANEL, 'function plaSoltarEn(cuenta, rubro){');
+  assert.equal((soltar.match(/plaRubrosTocar\(cuenta\);/g) || []).length, 1);
   assert.ok(!/plaRubrosPintar\(\)/.test(soltar), 'soltar vuelve a dibujar todo');
   assert.match(fuente(PANEL, 'function plaQuitarVentas(cuenta){'), /plaRubrosTocar\(cuenta\);/);
 });
@@ -1268,6 +1328,14 @@ test('manual V1059: los títulos quedan a la vista mientras se baja por la lista
   const M = manual();
   assert.match(M, /Los títulos quedan <b>fijos a la derecha<\/b> mientras se baja por la lista, así se arrastra sin perderlos de vista/);
   assert.match(M, /<span class="ver">V1059<\/span> Configurar rubros responde enseguida con cientos de cuentas/);
+});
+
+test('manual V1060: arrastrar con el puntero, dos clics, y Esc cancela', () => {
+  const M = manual();
+  assert.match(M, /<b>Arrastrar<\/b>: se aprieta sobre la cuenta, se mueve y se suelta sobre el título; la cuenta viaja con el puntero/);
+  assert.match(M, /Soltar afuera o apretar <b>Esc<\/b> cancela/);
+  assert.match(M, /<b>Sin arrastrar<\/b>: un clic en la cuenta la elige y un clic en el título la lleva ahí/);
+  assert.match(M, /<span class="ver">V1060<\/span> Arrastrar ya no se engancha, y también se puede clasificar con dos clics/);
 });
 
 // ══ 7 · EL MENÚ, LA DIRECCIÓN Y EL PERMISO ═══════════════════════════════════════════
