@@ -5569,6 +5569,16 @@ input[type=number]{-moz-appearance:textfield;appearance:textfield}
     #sec-pl-abasto .pla-badge.def{border-style:dashed}
     #sec-pl-abasto .pla-badge + .pla-badge{margin-left:-4px}
     #sec-pl-abasto .pla-x{border:0;background:none;color:#991b1b;font-weight:700;cursor:pointer;margin-left:4px;padding:0 3px}
+    #sec-pl-abasto .pla-fila,#sec-pl-abasto .pla-chip{touch-action:none;user-select:none;-webkit-user-select:none}
+    #sec-pl-abasto .pla-elegida{outline:2px solid var(--burg);outline-offset:1px}
+    #sec-pl-abasto .pla-dnd.eligiendo .pla-zona{cursor:pointer}
+    #sec-pl-abasto .pla-sel{margin:0 0 8px;padding:7px 10px;border:1.5px solid var(--burg);border-radius:8px;
+      background:rgba(128,0,32,.05);font-size:12.5px}
+    #sec-pl-abasto .pla-sel:empty{display:none}
+    .pla-fantasma{position:fixed;z-index:10000;pointer-events:none;background:#0a2744;color:#fff;font-size:12px;
+      padding:5px 10px;border-radius:7px;box-shadow:0 6px 18px rgba(0,0,0,.25);max-width:320px;white-space:nowrap;
+      overflow:hidden;text-overflow:ellipsis}
+    body.pla-arrastrando,body.pla-arrastrando *{cursor:grabbing !important;user-select:none !important}
     #sec-pl-abasto .pla-grupo{font-size:10.5px;font-weight:700;color:var(--mut);letter-spacing:.05em;margin:10px 2px 5px}
     #sec-pl-abasto .pla-chip{border:1px solid var(--bor);border-radius:7px;padding:4px 7px;margin:0 0 5px;
       background:var(--pan,#fff);cursor:grab;font-size:11.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -5625,13 +5635,13 @@ input[type=number]{-moz-appearance:textfield;appearance:textfield}
       <button class="btn bb" id="pla-rub-guardar" onclick="plaRubrosGuardar()" disabled>💾 Guardar</button>
       <button class="btn bo" id="pla-rub-reset" onclick="plaRubrosRestablecer()">Volver a los de por defecto</button>
     </div>
+    <div id="pla-rub-sel" class="pla-sel"></div>
     <div class="pla-dnd">
       <!-- LA LISTA ENTERA (V1056). Pablo, 14/9/2026: «en la parte izquierda deben figurarme la
            TOTALIDAD de los rubros que tienen movimientos. Si están seleccionados en algún Título
            debe mostrarme en cuál... no quiero perder ninguno de vista». Soltar acá le saca el
            título a una cuenta. -->
-      <div class="pla-lista" data-rubro="sin_asignar" ondragover="plaSobre(event,this)"
-           ondragleave="plaSalir(event,this)" ondrop="plaSoltar(event,this)">
+      <div class="pla-lista" data-rubro="sin_asignar">
         <div class="pla-lista-hd"><b>CUENTAS CONTABLES</b><span id="pla-rub-cuenta"></span></div>
         <div style="padding:8px">
           <input id="pla-rub-q" placeholder="🔍 Buscar por nombre o código" oninput="plaRubrosPintar()">
@@ -24493,6 +24503,10 @@ SG_MANUAL.plabasto = { titulo: 'P&L Abasto', html:
   + 'también las del patrimonio —clientes, proveedores, bancos, IVA—, agrupadas en activo, pasivo, patrimonio '
   + 'neto y resultados. Se busca por nombre o código, y se pueden ver <b>sólo las de resultado sin título</b>, '
   + 'que son las que faltan clasificar. Arrastrar una cuenta a la lista le saca el título.</li>'
+  + '<li><span class="ver">V1060</span> <b>Arrastrar</b>: se aprieta sobre la cuenta, se mueve y se suelta sobre el '
+  + 'título; la cuenta viaja con el puntero. Cerca del borde, la lista y la columna de títulos bajan solas. Soltar '
+  + 'afuera o apretar <b>Esc</b> cancela. <b>Sin arrastrar</b>: un clic en la cuenta la elige y un clic en el título la '
+  + 'lleva ahí; arriba aparece «Elegida», con <b>Sacarle el título</b> y <b>Cancelar</b>.</li>'
   + '<li><span class="ver">V1059</span> Los títulos quedan <b>fijos a la derecha</b> mientras se baja por la lista, '
   + 'así se arrastra sin perderlos de vista. Soltar una cuenta cambia sólo esa fila: la lista entera no se vuelve a '
   + 'dibujar.</li>'
@@ -24519,6 +24533,7 @@ SG_MANUAL.plabasto = { titulo: 'P&L Abasto', html:
 
   + '<h3>Qué cambió, y desde cuándo</h3>'
   + '<ul>'
+  + '<li><span class="ver">V1060</span> Arrastrar ya no se engancha, y también se puede clasificar con dos clics.</li>'
   + '<li><span class="ver">V1059</span> Configurar rubros responde enseguida con cientos de cuentas, y los títulos '
   + 'no se pierden de vista al arrastrar.</li>'
   + '<li><span class="ver">V1058</span> Una cuenta puede estar también en VENTAS, además de su título, y suma en '
@@ -43734,6 +43749,7 @@ function plaInit(){
   PLA.cuentas = null;
   PLA.pend = {};
   PLA.pendVentas = {};
+  PLA.sel = null;
   PLA.nb = null;
   plaTab('resultado');
   plaCargar(true);
@@ -44447,8 +44463,8 @@ var PLA_COLOR = { ventas: '#15803d', utilidad: '#0f766e', descuentos_super: '#b4
 // y con la casilla.
 function plaRubrosFila(c, titulo){
   var pend = PLA.pend[c.cuenta] != null, t = titulo[plaRubroActual(c)], def = !c.elegido && !pend;
-  return '<div class="pla-fila' + (pend ? ' pend' : '') + '" draggable="true" data-cuenta="' + escH(c.cuenta) + '"'
-    + ' ondragstart="plaArrastrar(event)" title="' + escH(c.cuenta + ' · ' + c.nombre + ' · ' + plaImporte(c.importe)) + '">'
+  return '<div class="pla-fila' + (pend ? ' pend' : '') + (PLA.sel === c.cuenta ? ' pla-elegida' : '') + '" data-cuenta="' + escH(c.cuenta) + '"'
+    + ' onpointerdown="plaTomar(event,this)" title="' + escH(c.cuenta + ' · ' + c.nombre + ' · ' + plaImporte(c.importe)) + '">'
     + '<code>' + escH(c.cuenta) + '</code><span class="n">' + escH(c.nombre) + '</span>'
     + (t ? '<span class="pla-badge' + (def ? ' def' : '') + '" style="color:' + (PLA_COLOR[t.k] || 'var(--mut)') + '"'
         + ' title="' + escH(t.label + (def ? ' · por defecto' : '')) + '">' + escH(t.corto) + '</span>' : '')
@@ -44497,16 +44513,16 @@ function plaRubrosZonasPintar(){
   var chip = function(c){
     if (!busca(c)) return '';
     var pend = PLA.pend[c.cuenta] != null;
-    return '<div class="pla-chip' + (pend ? ' pend' : '') + '" draggable="true" data-cuenta="' + escH(c.cuenta) + '"'
-      + ' ondragstart="plaArrastrar(event)" title="' + ayuda(c) + '">'
+    return '<div class="pla-chip' + (pend ? ' pend' : '') + (PLA.sel === c.cuenta ? ' pla-elegida' : '') + '" data-cuenta="' + escH(c.cuenta) + '"'
+      + ' onpointerdown="plaTomar(event,this)" title="' + ayuda(c) + '">'
       + escH(c.nombre) + ' <small>' + escH(c.cuenta) + '</small>'
       + (!c.elegido && !pend ? '<span class="pla-def">por defecto</span>' : '') + '</div>';
   };
   var repetida = function(c){
     if (!busca(c)) return '';
     var t = titulo[plaRubroActual(c)];
-    return '<div class="pla-chip' + (PLA.pendVentas[c.cuenta] != null ? ' pend' : '') + '" draggable="true"'
-      + ' data-cuenta="' + escH(c.cuenta) + '" ondragstart="plaArrastrar(event)" title="' + ayuda(c) + '">'
+    return '<div class="pla-chip' + (PLA.pendVentas[c.cuenta] != null ? ' pend' : '') + '"'
+      + ' data-cuenta="' + escH(c.cuenta) + '" onpointerdown="plaTomar(event,this)" title="' + ayuda(c) + '">'
       + escH(c.nombre) + ' <small>' + escH(c.cuenta) + '</small>'
       + '<span class="pla-def">también en ' + escH(t ? t.label : '') + '</span>'
       + '<button type="button" class="pla-x" title="Sacarla de VENTAS" onclick="plaQuitarVentas(\'' + escH(c.cuenta) + '\')">×</button></div>';
@@ -44514,8 +44530,7 @@ function plaRubrosZonasPintar(){
   eid('pla-zonas').innerHTML = (D.rubros || []).map(function(r){
     var cs = todas.filter(function(c){ return plaRubroActual(c) === r.k; });
     var reps = r.k === 'ventas' ? todas.filter(plaTambienVentas) : [];
-    return '<div class="pla-zona" data-rubro="' + r.k + '" ondragover="plaSobre(event,this)"'
-      + ' ondragleave="plaSalir(event,this)" ondrop="plaSoltar(event,this)">'
+    return '<div class="pla-zona" data-rubro="' + r.k + '" onclick="plaClicZona(event,this)">'
       + '<h4>' + r.ico + ' ' + escH(r.label) + ' <small style="font-weight:400;color:var(--mut)">(' + (cs.length + reps.length)
       + ')</small></h4>' + cs.map(chip).join('') + reps.map(repetida).join('') + '</div>';
   }).join('');
@@ -44541,32 +44556,140 @@ function plaRubrosTocar(cuenta){
   plaRubrosZonasPintar();
 }
 
-function plaArrastrar(ev){
-  ev.dataTransfer.setData('text/plain', ev.currentTarget.getAttribute('data-cuenta'));
-  ev.dataTransfer.effectAllowed = 'move';
+// ── ARRASTRAR SIN EL ARRASTRE DEL NAVEGADOR (V1060) ─────────────────────────────
+// Pablo, 14/9/2026: «no hay caso, se me queda la manito seleccionada y no puedo hacer nada». El
+// arrastre del navegador (draggable) en Windows lo maneja el sistema, y con el touchpad o el mouse
+// de una notebook se quedaba enganchado. Ahora lo lleva la pantalla con el puntero: se aprieta
+// sobre una cuenta, se mueve, y al soltar va al título que está debajo. Soltar afuera, Esc o
+// perder la ventana cancelan siempre. Y sin arrastrar: un clic elige la cuenta y un clic en un
+// título la lleva.
+var PLA_DRAG = null;
+
+function plaCuentaDe(cuenta){
+  return ((PLA.cuentas || {}).cuentas || []).filter(function(x){ return x.cuenta === cuenta; })[0] || null;
 }
-function plaSobre(ev, zona){ ev.preventDefault(); if (!zona.classList.contains('sobre')) zona.classList.add('sobre'); }
-// Salir de verdad, no pasar a una fila de adentro: si no, la marca se prende y se apaga a cada fila.
-function plaSalir(ev, zona){ if (!ev.relatedTarget || !zona.contains(ev.relatedTarget)) zona.classList.remove('sobre'); }
-function plaSoltar(ev, zona){
-  ev.preventDefault();
-  zona.classList.remove('sobre');
-  var cuenta = ev.dataTransfer.getData('text/plain'), rubro = zona.getAttribute('data-rubro');
-  var c = ((PLA.cuentas || {}).cuentas || []).filter(function(x){ return x.cuenta === cuenta; })[0];
+
+function plaTomar(ev, el){
+  if (ev.button !== 0 || (ev.target && ev.target.closest && ev.target.closest('button'))) return;
+  plaCancelarArrastre();
+  PLA_DRAG = { cuenta: el.getAttribute('data-cuenta'), id: ev.pointerId, x0: ev.clientX, y0: ev.clientY,
+    el: el, activo: false, zona: null, fantasma: null };
+  try { el.setPointerCapture(ev.pointerId); } catch (e) { /* sin captura: igual anda */ }
+  if (ev.preventDefault) ev.preventDefault();
+}
+
+// La caja de título que está debajo del puntero; la lista es «sin título».
+function plaZonaEn(x, y){
+  var e = document.elementFromPoint(x, y);
+  return e && e.closest ? e.closest('#sec-pl-abasto [data-rubro]') : null;
+}
+
+function plaMover(ev){
+  var D = PLA_DRAG; if (!D || ev.pointerId !== D.id) return;
+  if (!D.activo) {
+    // Hasta que no se mueve un poco es un clic, no un arrastre.
+    if (Math.abs(ev.clientX - D.x0) + Math.abs(ev.clientY - D.y0) < 6) return;
+    D.activo = true;
+    var c = plaCuentaDe(D.cuenta);
+    D.fantasma = document.createElement('div');
+    D.fantasma.className = 'pla-fantasma';
+    D.fantasma.textContent = c ? c.nombre : D.cuenta;
+    document.body.appendChild(D.fantasma);
+    document.body.classList.add('pla-arrastrando');
+  }
+  D.fantasma.style.left = (ev.clientX + 14) + 'px';
+  D.fantasma.style.top = (ev.clientY + 10) + 'px';
+  var z = plaZonaEn(ev.clientX, ev.clientY);
+  if (z !== D.zona) {
+    if (D.zona) D.zona.classList.remove('sobre');
+    if (z) z.classList.add('sobre');
+    D.zona = z;
+  }
+  plaAutoScroll(ev.clientX, ev.clientY);
+}
+
+// Cerca del borde de la lista o de la columna de títulos, baja o sube sola.
+function plaAutoScroll(x, y){
+  ['pla-zonas', 'pla-rub-lista'].forEach(function(id){
+    var e = eid(id); if (!e || !e.getBoundingClientRect) return;
+    var r = e.getBoundingClientRect();
+    if (x < r.left || x > r.right) return;
+    if (y < r.top + 40 && y > r.top - 30) e.scrollTop -= 16;
+    else if (y > r.bottom - 40 && y < r.bottom + 30) e.scrollTop += 16;
+  });
+}
+
+function plaLargar(ev){
+  var D = PLA_DRAG; if (!D || ev.pointerId !== D.id) return;
+  var rubro = D.zona ? D.zona.getAttribute('data-rubro') : null;
+  plaCancelarArrastre();
+  if (D.activo) { if (rubro) plaSoltarEn(D.cuenta, rubro); }
+  else plaElegir(PLA.sel === D.cuenta ? null : D.cuenta);
+}
+
+function plaCancelarArrastre(){
+  var D = PLA_DRAG; if (!D) return;
+  PLA_DRAG = null;
+  try { D.el.releasePointerCapture(D.id); } catch (e) { /* ya no la tenía */ }
+  if (D.fantasma && D.fantasma.parentNode) D.fantasma.parentNode.removeChild(D.fantasma);
+  if (D.zona) D.zona.classList.remove('sobre');
+  document.body.classList.remove('pla-arrastrando');
+}
+
+// UN CLIC ELIGE LA CUENTA; otro clic en un título la lleva ahí.
+function plaElegir(cuenta){
+  PLA.sel = cuenta || null;
+  var c = plaCuentaDe(PLA.sel), aviso = eid('pla-rub-sel');
+  if (typeof document !== 'undefined' && document.querySelectorAll) {
+    var marcadas = document.querySelectorAll('#sec-pl-abasto .pla-elegida');
+    for (var i = 0; i < marcadas.length; i++) marcadas[i].classList.remove('pla-elegida');
+    if (c) {
+      var suyas = document.querySelectorAll('#sec-pl-abasto [data-cuenta="' + c.cuenta + '"]');
+      for (var j = 0; j < suyas.length; j++) suyas[j].classList.add('pla-elegida');
+    }
+    var dnd = document.querySelector('#sec-pl-abasto .pla-dnd');
+    if (dnd) dnd.classList.toggle('eligiendo', !!c);
+  }
+  if (aviso) aviso.innerHTML = c ? 'Elegida: <b>' + escH(c.nombre) + '</b> — hacé clic en el título donde va. '
+    + '<button type="button" class="btn bo bs" onclick="plaSoltarEn(PLA.sel,\'sin_asignar\')">Sacarle el título</button> '
+    + '<button type="button" class="btn bo bs" onclick="plaElegir(null)">Cancelar</button>' : '';
+}
+
+function plaClicZona(ev, zona){
+  if (!PLA.sel) return;
+  // Un clic en una cuenta de adentro la elige a ella: no lleva la anterior.
+  if (ev.target && ev.target.closest && ev.target.closest('.pla-chip, button')) return;
+  plaSoltarEn(PLA.sel, zona.getAttribute('data-rubro'));
+}
+
+function plaSoltarEn(cuenta, rubro){
+  var c = plaCuentaDe(cuenta);
   if (!c || !rubro) return;
   var actual = plaRubroActual(c);
   // SÓLO VENTAS SE REPITE: soltar en VENTAS una cuenta que ya tiene otro título la deja en los dos.
   if (rubro === 'ventas' && actual !== 'ventas' && actual !== 'sin_asignar') {
     plaVentasPend(c, 1);
-    plaRubrosTocar(cuenta);
-    return;
+  } else {
+    // Devolverla al rubro que ya tenía guardado no es un cambio. Soltar una «por defecto» en su
+    // mismo rubro sí: la confirma.
+    if (rubro === c.rubro && c.elegido) delete PLA.pend[cuenta]; else PLA.pend[cuenta] = rubro;
+    // Pasarla a VENTAS como título, o a la lista, le saca la repetición.
+    if (rubro === 'ventas' || rubro === 'sin_asignar') plaVentasPend(c, 0);
   }
-  // Devolverla al rubro que ya tenía guardado no es un cambio. Soltar una «por defecto» en
-  // su mismo rubro sí: la confirma.
-  if (rubro === c.rubro && c.elegido) delete PLA.pend[cuenta]; else PLA.pend[cuenta] = rubro;
-  // Pasarla a VENTAS como título, o a la lista, le saca la repetición.
-  if (rubro === 'ventas' || rubro === 'sin_asignar') plaVentasPend(c, 0);
+  PLA.sel = null;
+  var aviso = eid('pla-rub-sel'); if (aviso) aviso.innerHTML = '';
+  if (typeof document !== 'undefined' && document.querySelector) {
+    var dnd = document.querySelector('#sec-pl-abasto .pla-dnd'); if (dnd) dnd.classList.remove('eligiendo');
+  }
   plaRubrosTocar(cuenta);
+}
+
+if (typeof document !== 'undefined' && document.addEventListener) {
+  document.addEventListener('pointermove', plaMover);
+  document.addEventListener('pointerup', plaLargar);
+  document.addEventListener('pointercancel', plaCancelarArrastre);
+  document.addEventListener('keydown', function(e){ if (e.key === 'Escape' && (PLA_DRAG || PLA.sel)) { plaCancelarArrastre(); plaElegir(null); } });
+  window.addEventListener('blur', plaCancelarArrastre);
 }
 
 // Lo que se va a guardar de «también en VENTAS»: volver a como estaba no es un cambio.
