@@ -67,9 +67,11 @@ function base() {
 }
 function rutas(db, { detalleMax } = {}) {
   return new Function('db', 'SVC', [
-    'const { RUBROS, SIN_ASIGNAR, esRubro, esCuentaDeResultado, rubroPorDefecto, validarCarga, avisosDeReemplazo, asientosSinPareja, validarAjuste } = SVC;',
+    'const { RUBROS, SIN_ASIGNAR, esRubro, esCuentaDeResultado, rubroPorDefecto, validarCarga, avisosDeReemplazo, asientosSinPareja, validarAjuste, TIPOS_DOLAR, esTipoDolar, promedioMensual, validarCotizaciones } = SVC;',
     lineaConst('MES'),
     lineaConst('NB_MAX'),
+    lineaConst('COTIZ_URL'),
+    lineaConst('COTIZ_TIMEOUT_MS'),
     lineaConst('FECHA'),
     detalleMax ? 'const DETALLE_MAX = ' + detalleMax + ';' : lineaConst('DETALLE_MAX'),
     fuente(RUTA, 'function r2('),
@@ -80,6 +82,8 @@ function rutas(db, { detalleMax } = {}) {
     fuente(RUTA, 'function ajusteVivo('),
     fuente(RUTA, 'function escribirMesesDeAjuste('),
     fuente(RUTA, 'function ajustesDelPeriodo('),
+    fuente(RUTA, 'function cotizacionesDelPeriodo('),
+    fuente(RUTA, 'async function traerCotizaciones('),
     'return {',
     '  previa: ' + handler("router.post('/previa'") + ',',
     '  cargar: ' + handler("router.post('/cargar'") + ',',
@@ -92,6 +96,9 @@ function rutas(db, { detalleMax } = {}) {
     '  ajusteNuevo: ' + handler("router.post('/ajustes'") + ',',
     '  ajusteCorregir: ' + handler("router.put('/ajustes/:id'") + ',',
     '  ajusteEliminar: ' + handler("router.delete('/ajustes/:id'") + ',',
+    '  cotizaciones: ' + handler("router.get('/cotizaciones'") + ',',
+    '  cotizGuardar: ' + handler("router.put('/cotizaciones'") + ',',
+    '  traer: traerCotizaciones,',
     '};',
   ].join('\n'))(db, SVC);
 }
@@ -346,21 +353,23 @@ test('los asientos de un importe: con la contrapartida, y el total de todos aunq
 
 // ══ 4 · LA PANTALLA ════════════════════════════════════════════════════════════════
 
-const PANTALLA = (datos, abiertos = {}, unidad, op) => {
+const PANTALLA = (datos, abiertos = {}, unidad, op, moneda) => {
   const tb = { innerHTML: '' };
   new Function('PLA', 'eid', 'escH', [
     /^var PLA_MES = .*;\r?$/m.exec(PANEL)[0],
     hasta(PANEL, 'var PLA_SUBTOTALES = [', '];'),
     fuente(PANEL, 'function plaMesTxt(m){'),
     fuente(PANEL, 'function plaMesCorto(m){'),
-    fuente(PANEL, 'function plaImporte(v){'),
+    fuente(PANEL, 'function plaImporte(v, usd){'),
     fuente(PANEL, 'function plaTotales(d){'),
+    fuente(PANEL, 'function plaUnidadClave(){'),
+    fuente(PANEL, 'function plaEnMoneda(d, moneda){'),
     fuente(PANEL, 'function plaUnidadGuardada(){'),
     fuente(PANEL, 'function plaUnidadAuto(T){'),
     fuente(PANEL, 'function plaCelda(v, ventas, conPct){'),
     fuente(PANEL, 'function plaPintar(){'),
     'plaPintar();',
-  ].join('\n'))({ datos, abiertos, unidad, op }, () => tb, (x) => String(x));
+  ].join('\n'))({ datos, abiertos, unidad, op, moneda }, () => tb, (x) => String(x));
   return tb.innerHTML;
 };
 const TOTALES = new Function([
@@ -531,7 +540,7 @@ test('la solapa en la pantalla: el día cerrado, al abrirlo sus asientos y rengl
   const els = { 'pla-nb-tabla': { innerHTML: '' }, 'pla-nb-resumen': { innerHTML: '' } };
   const pintar = (nb, abiertos) => new Function('PLA', 'eid', 'escH', 'nr', [
     /^var PLA_MES = .*;\r?$/m.exec(PANEL)[0],
-    fuente(PANEL, 'function plaMesTxt(m){'), fuente(PANEL, 'function plaFechaTxt(f){'), fuente(PANEL, 'function plaImporte(v){'),
+    fuente(PANEL, 'function plaMesTxt(m){'), fuente(PANEL, 'function plaFechaTxt(f){'), fuente(PANEL, 'function plaImporte(v, usd){'),
     fuente(PANEL, 'function plaNbResumen(d){'), fuente(PANEL, 'function plaNbPintar(){'), 'plaNbPintar();',
   ].join('\n'))({ nb, nbAbiertos: abiertos || {} }, (id) => els[id], String, String);
   const NB = { meses_disponibles: ['2026-07'], desde: '2026-07', hasta: '2026-07', total: { diferencia: -12323225.19 },
@@ -680,7 +689,7 @@ test('los asientos de un rubro traen sus ajustes, y el saldo da lo mismo que la 
   const els = { 'pla-detalle-q': { value: '' }, 'pla-detalle-nota': {}, 'pla-detalle-tabla': {} };
   const pintar = (D) => new Function('PLA', 'eid', 'sgNorm', 'nr', 'escH', [
     /^var PLA_MES = .*;\r?$/m.exec(PANEL)[0],
-    fuente(PANEL, 'function plaMesTxt(m){'), fuente(PANEL, 'function plaFechaTxt(f){'), fuente(PANEL, 'function plaImporte(v){'),
+    fuente(PANEL, 'function plaMesTxt(m){'), fuente(PANEL, 'function plaFechaTxt(f){'), fuente(PANEL, 'function plaImporte(v, usd){'),
     fuente(PANEL, 'function plaDetallePintar(){'), 'plaDetallePintar();'].join('\n'))(
     { detalle: D }, (id) => els[id], (s) => String(s).toLowerCase(), String, String);
   const D = { tipo: 'rubro', recortado: 0, total: { renglones: 1, debe: 0, haber: 5000 },
@@ -708,7 +717,7 @@ test('exportar: el cuadro entero, en pesos con centavos, con punto y coma y coma
     hasta(PANEL, 'var PLA_SUBTOTALES = [', '];'),
     fuente(PANEL, 'function plaMesTxt(m){'),
     fuente(PANEL, 'function plaTotales(d){'),
-    fuente(PANEL, 'function plaCsv(d){'),
+    fuente(PANEL, 'function plaCsv(d, usd){'),
     'return plaCsv;'].join('\n'))({ unidad: 1e6 });
   const datos = Object.assign({}, DATOS, { ajustes: AJUSTES, cuentas: DATOS.cuentas.concat([
     { cuenta: '4.2.09', nombre: 'Gastos; "varios"', rubro: 'otros', meses: { '2025-07': -12.3 } },
@@ -740,7 +749,7 @@ test('exportar: el cuadro entero, en pesos con centavos, con punto y coma y coma
   // Un rubro vacío también va: la estructura es la misma todos los meses.
   assert.ok(csv(DATOS).includes('\r\nRubro;Costos fijos;;0,00;0,00;0,00\r\n'));
   // Y va en pesos aunque la pantalla esté en millones.
-  assert.ok(!/PLA\.unidad/.test(fuente(PANEL, 'function plaCsv(d){')));
+  assert.ok(!/PLA\.unidad/.test(fuente(PANEL, 'function plaCsv(d, usd){')));
 });
 
 test('la ventana del ajuste: se abre en blanco o con el ajuste, lee los importes, y eliminar pide anular', () => {
@@ -774,6 +783,128 @@ test('manual V1054: los ajustes van con su signo y se corrigen por mes, eliminar
   assert.match(M, /<b>⬇️ Exportar CSV<\/b> baja el cuadro del período elegido/);
   assert.match(M, /Los importes van <b>en pesos con centavos<\/b>, aunque en la pantalla se vean en miles o millones/);
   assert.match(M, /<span class="ver">V1054<\/span> Ajustes manuales por rubro, y exportar el cuadro a CSV/);
+});
+
+// ══ 6b · EN DÓLARES (V1055) ═════════════════════════════════════════════════════════
+
+test('en dólares: la cotización de cada mes es el promedio de sus días, y la carga a mano se valida', () => {
+  assert.deepEqual(SVC.promedioMensual([
+    { fecha: '2025-07-01', venta: 1200 }, { fecha: '2025-07-02', venta: 1300 }, { fecha: '2025-07-03', venta: 1284.03 },
+    { fecha: '2025-08-01', venta: 0 }, { fecha: '2025-08-02', venta: null }, { fecha: '2025-09-01', venta: 1400 },
+  ], ['2025-07', '2025-08']), { '2025-07': 1261.34 }, 'un día sin venta, o un mes que no se pidió, entró al promedio');
+  assert.deepEqual(SVC.TIPOS_DOLAR.map((t) => t.k), ['oficial', 'mayorista', 'bolsa', 'blue']);
+  assert.deepEqual(SVC.validarCotizaciones({ meses: { '2025-07': '1284.5', '2025-08': '' } }).meses,
+    { '2025-07': 1284.5, '2025-08': null });
+  assert.match(SVC.validarCotizaciones({ meses: { '2025-07': 0 } }).error, /mayor que cero/);
+  assert.match(SVC.validarCotizaciones({ meses: { '2025-07': 'mucho' } }).error, /mayor que cero/);
+  assert.match(SVC.validarCotizaciones({ meses: { julio: 1 } }).error, /mes no se entiende/);
+  assert.match(SVC.validarCotizaciones({}).error, /No hay cotizaciones/);
+});
+
+test('las cotizaciones: se traen del mercado sin pisar las cargadas a mano, y el cuadro las trae', async () => {
+  const db = base();
+  const R = rutas(db);
+  llamar(R.cargar, { body: CARGA_A });
+  llamar(R.cargar, { body: CARGA_B });
+  // Julio a mano, antes de traer. Y una de un mes fuera del período, que el cuadro no trae.
+  assert.equal(llamar(R.cotizGuardar, { body: { meses: { '2025-07': 1300, '2025-06': 999 } } }).code, 200);
+  const pedidos = [];
+  const fetchFalso = async (url) => {
+    pedidos.push(url);
+    return { ok: true, status: 200, json: async () => [
+      { fecha: '2025-07-01', venta: 1000 }, { fecha: '2025-08-01', venta: 1250 }, { fecha: '2025-08-02', venta: 1350 }] };
+  };
+  const t = await R.traer(db, 'blue', 5, fetchFalso);
+  assert.equal(t.status, 200, JSON.stringify(t.body));
+  assert.deepEqual(pedidos, ['https://api.argentinadatos.com/v1/cotizaciones/dolares/blue']);
+  assert.deepEqual(t.body.data, { tipo: 'blue', traidos: 1, manuales: 1, sin_dato: ['2025-09'] });
+  const lista = llamar(R.cotizaciones, {}).body.data.meses;
+  assert.deepEqual(lista.map((x) => [x.mes, x.cotizacion, x.origen]),
+    [['2025-09', null, undefined], ['2025-08', 1300, 'mercado'], ['2025-07', 1300, 'manual']],
+    'traer del mercado pisó la cargada a mano');
+  assert.equal(lista[1].tipo, 'blue');
+  assert.equal(lista[2].modificado_por, 'Pablo');
+  // Una fuente que falla no rompe nada, y lo dice.
+  const mal = await R.traer(db, 'blue', 5, async () => ({ ok: false, status: 503 }));
+  assert.equal(mal.status, 502);
+  assert.match(mal.body.error, /No se pudo consultar la cotización \(respondió 503\)/);
+  assert.equal((await R.traer(db, 'cripto', 5, fetchFalso)).status, 400, 'trae un dólar que no se ofrece');
+  // El cuadro trae la cotización de cada mes del período.
+  const d = llamar(R.resultado, { query: { desde: '2025-07', hasta: '2025-09' } }).body.data;
+  assert.deepEqual(Object.keys(d.cotizaciones).sort(), ['2025-07', '2025-08']);
+  assert.equal(d.cotizaciones['2025-08'].cotizacion, 1300);
+  // A mano: vacío la saca, y un número malo no guarda nada.
+  assert.equal(llamar(R.cotizGuardar, { body: { meses: { '2025-08': '' } } }).code, 200);
+  assert.equal(llamar(R.cotizaciones, {}).body.data.meses[1].cotizacion, null);
+  assert.equal(llamar(R.cotizGuardar, { body: { meses: { '2025-09': -5 } } }).code, 400);
+  // La ruta la llama con el fetch de verdad.
+  assert.match(RUTA, /traerCotizaciones\(db, String\(\(req\.body && req\.body\.tipo\) \|\| ''\), usuarioId\(req\), fetch\)/);
+});
+
+test('en dólares: cada mes con su cotización, el total es la suma, y un mes sin cotización se avisa', () => {
+  const conv = new Function([fuente(PANEL, 'function plaEnMoneda(d, moneda){'), 'return plaEnMoneda;'].join('\n'))();
+  const datos = Object.assign({}, DATOS, { ajustes: AJUSTES,
+    cotizaciones: { '2025-07': { cotizacion: 1000 }, '2025-08': { cotizacion: 1250 } } });
+  assert.equal(conv(datos, 'ars').datos, datos, 'en pesos no tiene que tocar nada');
+  const u = conv(datos, 'usd');
+  assert.deepEqual(u.sin, []);
+  assert.deepEqual(u.datos.cuentas[0].meses, { '2025-07': 1, '2025-08': 1.2 });
+  assert.equal(datos.cuentas[0].meses['2025-07'], 1000, 'pasar a dólares cambió los pesos');
+  const T = TOTALES(u.datos);
+  assert.deepEqual(T.rubros.ventas, { '2025-07': 1, '2025-08': 4.4, TOTAL: 5.4 },
+    'el total en dólares no es la suma de los meses, cada uno con su cotización (el ajuste también se pasa)');
+  const sinAgo = conv(Object.assign({}, datos, { cotizaciones: { '2025-07': { cotizacion: 1000 } } }), 'usd');
+  assert.deepEqual(sinAgo.sin, ['2025-08']);
+  assert.equal(sinAgo.datos.cuentas[1].meses['2025-08'], undefined);
+  // La tabla dice U$S, y el exacto también.
+  const h = PANTALLA(datos, {}, 1, false, 'usd');
+  assert.match(h, /<th>Concepto \(U\$S\)<\/th>/);
+  assert.match(h, /title="U\$S 4,40"/);
+  assert.match(PANTALLA(datos, {}, 1), /<th>Concepto<\/th>/);
+  // El CSV, en la moneda de la pantalla y sin huecos.
+  const csv = new Function('PLA', [
+    /^var PLA_MES = .*;\r?$/m.exec(PANEL)[0], hasta(PANEL, 'var PLA_SUBTOTALES = [', '];'),
+    fuente(PANEL, 'function plaMesTxt(m){'), fuente(PANEL, 'function plaTotales(d){'), fuente(PANEL, 'function plaCsv(d, usd){'),
+    'return plaCsv;'].join('\n'))({});
+  assert.equal(csv(u.datos, true).slice(1).split('\r\n')[0], 'Tipo;Concepto;Cuenta;TOTAL U$S;Ago 2025;Jul 2025');
+  const exp = fuente(PANEL, 'function plaExportar(){');
+  assert.match(exp, /if \(usd && conv\.sin\.length\) \{/);
+  assert.match(exp, /plaCsv\(conv\.datos, usd\)/);
+  // La unidad se recuerda por moneda, y al cambiar de moneda se vuelve a elegir.
+  assert.match(fuente(PANEL, 'function plaUnidadClave(){'), /'pla-unidad' \+ \(PLA\.moneda === 'usd' \? '-usd' : ''\)/);
+  assert.match(fuente(PANEL, 'function plaMonedaCambiar(){'), /PLA\.unidad = null;/);
+});
+
+test('la ventana de cotizaciones: sin dólar por defecto, guarda sólo lo que se cambió, y traer no la cierra', () => {
+  const cambios = new Function([fuente(PANEL, 'function plaNumero(v){'), fuente(PANEL, 'function plaCotizCambios(inputs){'),
+    'return plaCotizCambios;'].join('\n'))();
+  const inp = (mes, value, antes) => ({ value, getAttribute: (k) => (k === 'data-mes' ? mes : antes) });
+  assert.deepEqual(cambios([inp('2025-09', '1284,03', '1284.03'), inp('2025-08', '1.530', '1500'),
+    inp('2025-07', '', '1300'), inp('2025-06', '', '')]), { meses: { '2025-08': 1530, '2025-07': null }, n: 2, malo: null },
+    'guardar volvería «a mano» una cotización traída que nadie tocó');
+  assert.equal(cambios([inp('2025-09', '-3', '')]).malo, '2025-09');
+  assert.equal(cambios([inp('2025-09', 'mucho', '')]).malo, '2025-09');
+  const abrir = fuente(PANEL, 'function plaCotizAbrir(){');
+  assert.match(abrir, /'<option value="">¿Qué dólar\?<\/option>'/);
+  assert.match(abrir, /PLA\.cotiz = null;/);
+  assert.ok(!/closeMB/.test(fuente(PANEL, 'function plaCotizTraer(){')), 'traer cierra la ventana y no se lee qué trajo');
+  assert.match(PANEL, /<div class="ab-modal-overlay sg-mod" id="pla-cotiz-modal">/);
+});
+
+test('manual V1055: cada mes con su cotización, el promedio del dólar elegido, lo manual gana', () => {
+  const M = manual();
+  assert.match(M, /Cada mes se pasa a dólares con <b>su cotización<\/b>/);
+  assert.match(M, /el <b>promedio del valor venta<\/b> de los días de ese mes/);
+  assert.match(M, /<b>No hay un dólar por defecto<\/b>/);
+  assert.match(M, /Una cotización <b>cargada a mano gana siempre<\/b>/);
+  assert.match(RUTA, /if \(manuales\.has\(mes\)\) continue;/);
+  assert.match(M, /El <b>TOTAL<\/b> en dólares es la suma de los meses/);
+  assert.match(M, /Un mes <b>sin cotización<\/b> no suma en dólares, y arriba del cuadro se avisa cuál es/);
+  assert.match(M, /Los asientos de un importe \(doble clic\) siguen en pesos/);
+  assert.ok(!/plaEnMoneda/.test(fuente(PANEL, 'function plaDetalle(tipo, clave, mes){')));
+  assert.match(M, /con el cuadro en dólares, sale en dólares; si falta la cotización de algún mes, no se exporta/);
+  assert.match(M, /Traer o cargar las cotizaciones del dólar pide <b>Operar<\/b>/);
+  assert.match(M, /<span class="ver">V1055<\/span> El cuadro en dólares/);
 });
 
 // ══ 7 · EL MENÚ, LA DIRECCIÓN Y EL PERMISO ═══════════════════════════════════════════

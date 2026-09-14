@@ -5586,11 +5586,16 @@ input[type=number]{-moz-appearance:textfield;appearance:textfield}
       <div><label>Importes en</label><select id="pla-unidad" data-sin-buscador="1" onchange="plaUnidadCambiar()">
         <option value="1">Pesos</option><option value="1000">Miles</option><option value="1000000">Millones</option>
       </select></div>
+      <div><label>Moneda</label><select id="pla-moneda" data-sin-buscador="1" onchange="plaMonedaCambiar()">
+        <option value="ars">Pesos</option><option value="usd">Dólares</option>
+      </select></div>
+      <button class="btn bo" onclick="plaCotizAbrir()">💱 Cotizaciones</button>
       <button class="btn bo" id="pla-ajuste-btn" style="display:none" onclick="plaAjusteAbrir(null)">✎ Ajuste manual</button>
       <button class="btn bo" onclick="plaExportar()">⬇️ Exportar CSV</button>
       <div style="font-size:11px;color:var(--mut);align-self:center">Clic en un rubro: sus cuentas y ajustes · doble
         clic en un importe: los asientos · el importe exacto, pasando el mouse</div>
     </div>
+    <div id="pla-moneda-aviso" style="font-size:12px;color:#92400e;margin:0 0 6px"></div>
     <div class="ab-table-wrap"><table class="pla-tbl" id="pla-tabla"></table></div>
   </div>
   <div class="pla-pane" id="pla-pane-rubros">
@@ -8122,6 +8127,38 @@ input[type=number]{-moz-appearance:textfield;appearance:textfield}
     </div>
     <div class="ab-table-wrap" style="overflow-x:hidden !important">
       <table class="pa-tbl" id="pla-detalle-tabla" style="table-layout:fixed;width:100%;font-size:12px"></table></div>
+  </div>
+</div>
+
+<!-- ══ P&L ABASTO: LAS COTIZACIONES DEL DÓLAR (V1055) ═════════════════════════
+     Una ventana, porque es cargar. Traer del mercado no la cierra: queda para leer qué se
+     trajo y qué mes quedó sin dato. -->
+<div class="ab-modal-overlay sg-mod" id="pla-cotiz-modal">
+  <style>
+    #pla-cotiz-modal input,#pla-cotiz-modal select{padding:5px 8px;border:1px solid var(--bor);border-radius:6px;
+      background:var(--bg);font-size:12.5px;box-sizing:border-box}
+    #pla-cotiz-modal .pla-cz-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px 10px;margin-top:12px}
+    #pla-cotiz-modal .pla-cz-grid label{font-size:11px;color:var(--mut)}
+    #pla-cotiz-modal .pla-cz-grid input{width:100%;text-align:right;font-variant-numeric:tabular-nums;margin-top:2px}
+    #pla-cotiz-modal .pla-cz-grid small{display:block;font-size:10px;color:var(--mut)}
+    @media(max-width:600px){ #pla-cotiz-modal .pla-cz-grid{grid-template-columns:repeat(2,minmax(0,1fr))} }
+  </style>
+  <div class="ab-modal" style="width:min(680px,96vw);max-width:96vw;max-height:90vh;overflow-y:auto;overflow-x:hidden">
+    <div class="mhd"><div class="mht">💱 Cotizaciones del dólar</div>
+      <button class="mcl" onclick="closeMB('pla-cotiz-modal')">×</button></div>
+    <div style="font-size:12.5px;color:var(--mut);margin-bottom:10px">Cada mes se pasa a dólares con <b>su</b>
+      cotización: el promedio del valor venta de sus días, del dólar que se elija. Una cargada a mano gana siempre.</div>
+    <div id="pla-cotiz-traer" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+      <select id="pla-cotiz-tipo" data-sin-buscador="1"></select>
+      <button class="btn bo" id="pla-cotiz-traer-btn" onclick="plaCotizTraer()">⬇️ Traer del mercado</button>
+      <span style="font-size:11px;color:var(--mut)">De argentinadatos.com, pública y gratis.</span>
+    </div>
+    <div id="pla-cotiz-nota" style="margin-top:8px;font-size:12.5px"></div>
+    <div class="pla-cz-grid" id="pla-cotiz-meses"></div>
+    <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px">
+      <button class="btn bo" onclick="closeMB('pla-cotiz-modal')">Cerrar</button>
+      <button class="btn bb" id="pla-cotiz-guardar" onclick="plaCotizGuardar()">Guardar las cargadas a mano</button>
+    </div>
   </div>
 </div>
 
@@ -24382,7 +24419,23 @@ SG_MANUAL.plabasto = { titulo: 'P&L Abasto', html:
   + '<li><span class="ver">V1054</span> <b>⬇️ Exportar CSV</b> baja el cuadro del período elegido para abrirlo en '
   + 'Excel: los seis rubros con <b>todas sus cuentas y sus ajustes</b> —aunque en la pantalla estén cerrados—, '
   + 'los subtotales y el resultado neto.</li>'
-  + '<li>Los importes van <b>en pesos con centavos</b>, aunque en la pantalla se vean en miles o millones.</li>'
+  + '<li>Los importes van <b>en pesos con centavos</b>, aunque en la pantalla se vean en miles o millones; '
+  + 'con el cuadro en dólares, sale en dólares; si falta la cotización de algún mes, no se exporta.</li>'
+  + '</ul>'
+
+  + '<h3>En dólares</h3>'
+  + '<ul>'
+  + '<li><span class="ver">V1055</span> Con <b>Moneda: Dólares</b> el cuadro se ve en dólares. Cada mes se pasa a '
+  + 'dólares con <b>su cotización</b>: dividir un año de pesos por el dólar de hoy mezclaría la inflación con el '
+  + 'resultado.</li>'
+  + '<li>Las cotizaciones se cargan en <b>💱 Cotizaciones</b>. <b>Traer del mercado</b> pone en cada mes el '
+  + '<b>promedio del valor venta</b> de los días de ese mes, del dólar que se elija: oficial, mayorista, MEP o blue. '
+  + '<b>No hay un dólar por defecto</b>: lo elige quien las trae. Salen de argentinadatos.com, pública y gratis.</li>'
+  + '<li>Una cotización <b>cargada a mano gana siempre</b>: traer del mercado no la pisa. Borrarla la saca.</li>'
+  + '<li>El <b>TOTAL</b> en dólares es la suma de los meses, cada uno con la suya. Un mes <b>sin cotización</b> no '
+  + 'suma en dólares, y arriba del cuadro se avisa cuál es.</li>'
+  + '<li>Los ajustes manuales se cargan en pesos y se pasan igual que las cuentas. Los asientos de un importe '
+  + '(doble clic) siguen en pesos, como están en el libro diario.</li>'
   + '</ul>'
 
   + '<h3>No balancea</h3>'
@@ -24417,10 +24470,11 @@ SG_MANUAL.plabasto = { titulo: 'P&L Abasto', html:
   + '<h3>Quién puede</h3>'
   + '<p>Con el nivel <b>Ver</b> se mira el cuadro y los asientos, y se exporta. Subir el libro diario, guardar '
   + 'los rubros y cargar o corregir un ajuste pide <b>Operar</b>; volver los rubros a los de por defecto y '
-  + 'eliminar un ajuste, <b>Anular</b>.</p>'
+  + 'eliminar un ajuste, <b>Anular</b>. Traer o cargar las cotizaciones del dólar pide <b>Operar</b>.</p>'
 
   + '<h3>Qué cambió, y desde cuándo</h3>'
   + '<ul>'
+  + '<li><span class="ver">V1055</span> El cuadro en dólares, con la cotización de cada mes.</li>'
   + '<li><span class="ver">V1054</span> Ajustes manuales por rubro, y exportar el cuadro a CSV.</li>'
   + '<li><span class="ver">V1053</span> Solapa <b>No balancea</b>: los días en que el libro diario no cierra y los '
   + 'asientos que lo explican.</li>'
@@ -43386,7 +43440,7 @@ var IA = { data:null, opo:null, tipos:{} };
 // ordenados: pesan la mitad que el archivo y el servidor no se queda leyendo un Excel
 // mientras los demás trabajan.
 var PLA = { datos: null, abiertos: {}, cuentas: null, pend: {}, detalle: null, lectura: null, previa: null, unidad: null,
-  nb: null, nbAbiertos: {}, ajuste: null, op: false };
+  nb: null, nbAbiertos: {}, ajuste: null, op: false, moneda: 'ars', cotiz: null };
 
 // ── LEER EL LIBRO DIARIO ─────────────────────────────────────────────────────
 //
@@ -43487,8 +43541,8 @@ function plaLeerLibroDiario(hojas){
 }
 
 function plaFechaTxt(f){ return f ? f.slice(8, 10) + '/' + f.slice(5, 7) + '/' + f.slice(0, 4) : '—'; }
-function plaImporte(v){
-  return (v < 0 ? '-' : '') + '$ ' + Math.abs(Number(v) || 0).toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+function plaImporte(v, usd){
+  return (v < 0 ? '-' : '') + (usd ? 'U$S ' : '$ ') + Math.abs(Number(v) || 0).toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 var PLA_MES = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
 function plaMesTxt(m){ return PLA_MES[Number(m.slice(5, 7)) - 1] + ' ' + m.slice(0, 4); }
@@ -43745,8 +43799,9 @@ function plaTotales(d){
 // cortaba. Se elige en qué se ven —pesos, miles o millones— y el exacto queda al pasar el
 // mouse. La primera vez se elige sola por el tamaño de los números; después, la que eligió
 // cada uno.
+function plaUnidadClave(){ return 'pla-unidad' + (PLA.moneda === 'usd' ? '-usd' : ''); }
 function plaUnidadGuardada(){
-  try { return Number(localStorage.getItem('pla-unidad')) || null; } catch (_) { return null; }
+  try { return Number(localStorage.getItem(plaUnidadClave())) || null; } catch (_) { return null; }
 }
 function plaUnidadAuto(T){
   var max = 0;
@@ -43755,7 +43810,7 @@ function plaUnidadAuto(T){
 }
 function plaUnidadCambiar(){
   PLA.unidad = Number((eid('pla-unidad') || {}).value) || 1;
-  try { localStorage.setItem('pla-unidad', String(PLA.unidad)); } catch (_) { /* sin almacenamiento: vale igual */ }
+  try { localStorage.setItem(plaUnidadClave(), String(PLA.unidad)); } catch (_) { /* sin almacenamiento: vale igual */ }
   plaPintar();
 }
 
@@ -43775,6 +43830,12 @@ function plaPintar(){
       ? 'No hay movimientos en ese período.' : 'Todavía no hay datos: subí el libro diario.') + '</td></tr>';
     return;
   }
+  // EN DÓLARES, cada mes con su cotización; lo de abajo se arma igual sobre esos importes.
+  var conv = plaEnMoneda(d, PLA.moneda);
+  d = conv.datos;
+  var av = eid('pla-moneda-aviso');
+  if (av) av.innerHTML = conv.sin.length ? '⚠️ Sin cotización: <b>' + conv.sin.map(function(m){ return plaMesTxt(m); }).join(', ')
+    + '</b>. Esos meses no suman en dólares: cargala en «💱 Cotizaciones».' : '';
   var T = plaTotales(d);
   if (!PLA.unidad) PLA.unidad = plaUnidadGuardada() || plaUnidadAuto(T);
   var su = eid('pla-unidad'); if (su) su.value = String(PLA.unidad);
@@ -43784,7 +43845,7 @@ function plaPintar(){
   var ancho = Math.floor(820 / orden.length) / 10;
   var h = '<colgroup><col style="width:' + (100 - ancho * orden.length).toFixed(1) + '%">'
     + orden.map(function(){ return '<col style="width:' + ancho + '%">'; }).join('') + '</colgroup>'
-    + '<thead><tr><th>Concepto</th>' + orden.map(function(m){
+    + '<thead><tr><th>Concepto' + (PLA.moneda === 'usd' ? ' (U$S)' : '') + '</th>' + orden.map(function(m){
         return '<th' + (m === 'TOTAL' ? '>TOTAL' : ' title="' + plaMesTxt(m) + '">' + plaMesCorto(m)) + '</th>'; }).join('')
     + '</tr></thead><tbody>';
   var fila = function(clase, etiqueta, valores, pct, dbl, clic){
@@ -43792,7 +43853,7 @@ function plaPintar(){
       + escH(etiqueta) + '</td>'
       + orden.map(function(m){
           var v = valores[m];
-          return '<td' + (v ? ' title="' + plaImporte(v) + '"' : '') + (dbl ? ' ondblclick="' + dbl(m) + '"' : '') + '>'
+          return '<td' + (v ? ' title="' + plaImporte(v, PLA.moneda === 'usd') + '"' : '') + (dbl ? ' ondblclick="' + dbl(m) + '"' : '') + '>'
             + plaCelda(v, ventas[m], pct) + '</td>';
         }).join('') + '</tr>';
   };
@@ -43903,6 +43964,132 @@ function plaDetallePintar(){
     // millones abría un detalle con el saldo en negativo.
     + '<tr><td colspan="' + span + '"><b>SALDO (Haber − Debe, como en el cuadro)</b></td>'
     + '<td colspan="2" style="text-align:right"><b>' + plaImporte(Math.round((tH - tD) * 100) / 100) + '</b></td></tr></tfoot>';
+}
+
+// ── EN DÓLARES ────────────────────────────────────────────────────────────────
+// Cada mes dividido por SU cotización: el promedio del dólar elegido en ese mes, o la cargada
+// a mano. Se pasan las cuentas y los ajustes, y la cascada, la tabla y el CSV se arman igual
+// sobre esos importes. Un mes sin cotización queda afuera, y se devuelve cuál es.
+function plaEnMoneda(d, moneda){
+  if (moneda !== 'usd') return { datos: d, sin: [] };
+  var cot = d.cotizaciones || {};
+  var de = function(m){ return cot[m] && Number(cot[m].cotizacion) > 0 ? Number(cot[m].cotizacion) : 0; };
+  var pasar = function(meses){
+    var o = {};
+    Object.keys(meses || {}).forEach(function(m){
+      if (de(m)) o[m] = Math.round(Number(meses[m]) / de(m) * 100) / 100;
+    });
+    return o;
+  };
+  return {
+    sin: (d.meses || []).filter(function(m){ return !de(m); }),
+    datos: Object.assign({}, d, {
+      cuentas: (d.cuentas || []).map(function(c){ return Object.assign({}, c, { meses: pasar(c.meses) }); }),
+      ajustes: (d.ajustes || []).map(function(a){ return Object.assign({}, a, { meses: pasar(a.meses) }); })
+    })
+  };
+}
+
+function plaMonedaCambiar(){
+  PLA.moneda = (eid('pla-moneda') || {}).value === 'usd' ? 'usd' : 'ars';
+  // La escala de una moneda no sirve para la otra: se vuelve a elegir (y se recuerda por moneda).
+  PLA.unidad = null;
+  plaPintar();
+}
+
+// ── LAS COTIZACIONES ──────────────────────────────────────────────────────────
+function plaCotizAbrir(){
+  var op = lnbPuedeOperar('pl-abasto');
+  // SE ABRE EN BLANCO: lo escrito y no guardado la vez pasada no queda listo para guardarse.
+  PLA.cotiz = null;
+  eid('pla-cotiz-nota').textContent = '';
+  eid('pla-cotiz-meses').innerHTML = 'Cargando…';
+  eid('pla-cotiz-traer').style.display = op ? 'flex' : 'none';
+  eid('pla-cotiz-guardar').style.display = op ? '' : 'none';
+  sgModalArriba('pla-cotiz-modal');
+  api('/api/pl-abasto/cotizaciones').then(function(r){
+    if (!r || !r.ok) {
+      eid('pla-cotiz-meses').innerHTML = '<div style="color:var(--err)">' + escH((r && r.error) || 'No se pudieron leer') + '</div>';
+      return;
+    }
+    PLA.cotiz = r.data;
+    // Sin dólar por defecto: el que trae elige cuál.
+    eid('pla-cotiz-tipo').innerHTML = '<option value="">¿Qué dólar?</option>' + (r.data.tipos || []).map(function(t){
+      return '<option value="' + t.k + '">' + escH(t.label) + '</option>'; }).join('');
+    plaCotizPintar(op);
+  });
+}
+
+function plaCotizOrigen(x, tipos){
+  if (x.cotizacion == null) return 'sin cotización';
+  if (x.origen === 'manual') return 'a mano';
+  var t = (tipos || []).filter(function(y){ return y.k === x.tipo; })[0];
+  return 'promedio del ' + (t ? t.label : x.tipo);
+}
+
+function plaCotizPintar(op){
+  var C = PLA.cotiz; if (!C) return;
+  eid('pla-cotiz-meses').innerHTML = (C.meses || []).length ? C.meses.map(function(x){
+    var v = x.cotizacion == null ? '' : String(x.cotizacion);
+    return '<label>' + plaMesTxt(x.mes) + '<input data-mes="' + x.mes + '" data-antes="' + v + '" inputmode="decimal"'
+      + (op ? '' : ' disabled') + ' value="' + v.replace('.', ',') + '"><small>' + escH(plaCotizOrigen(x, C.tipos)) + '</small></label>';
+  }).join('') : '<div style="color:var(--mut)">Todavía no hay libro diario cargado.</div>';
+}
+
+// Sólo lo que se cambió: guardar no puede volver «a mano» una cotización traída que nadie tocó.
+function plaCotizCambios(inputs){
+  var meses = {}, malo = null, n = 0;
+  for (var i = 0; i < inputs.length; i++) {
+    var m = inputs[i].getAttribute('data-mes'), s = String(inputs[i].value || '').trim();
+    var v = s ? plaNumero(s) : null;
+    if (s && !(v > 0)) { if (!malo) malo = m; continue; }
+    if (v != null) v = Math.round(v * 100) / 100;
+    if ((v == null ? '' : String(v)) === String(inputs[i].getAttribute('data-antes') || '')) continue;
+    meses[m] = v;
+    n++;
+  }
+  return { meses: meses, n: n, malo: malo };
+}
+
+function plaCotizGuardar(){
+  var L = plaCotizCambios(document.querySelectorAll('#pla-cotiz-meses input[data-mes]'));
+  if (L.malo) { toast('La cotización de ' + plaMesTxt(L.malo) + ' tiene que ser un número mayor que cero', 'er'); return; }
+  if (!L.n) { toast('No cambiaste ninguna cotización', 'er'); return; }
+  var btn = eid('pla-cotiz-guardar');
+  btn.disabled = true;
+  api('/api/pl-abasto/cotizaciones', 'PUT', { meses: L.meses }).then(function(r){
+    btn.disabled = false;
+    if (!r || !r.ok) { toast((r && r.error) || 'No se pudieron guardar', 'er'); return; }
+    toast('Cotizaciones guardadas', 'ok');
+    closeMB('pla-cotiz-modal');
+    plaCargar();
+  });
+}
+
+function plaCotizTraer(){
+  var tipo = eid('pla-cotiz-tipo').value;
+  if (!tipo) { toast('Elegí qué dólar traer', 'er'); return; }
+  var btn = eid('pla-cotiz-traer-btn');
+  btn.disabled = true;
+  eid('pla-cotiz-nota').textContent = 'Consultando…';
+  api('/api/pl-abasto/cotizaciones/traer', 'POST', { tipo: tipo }).then(function(r){
+    btn.disabled = false;
+    if (!r || !r.ok) {
+      eid('pla-cotiz-nota').innerHTML = '<span style="color:var(--err)">' + escH((r && r.error) || 'No se pudo traer') + '</span>';
+      return;
+    }
+    var x = r.data;
+    // NO SE CIERRA: qué se trajo, qué respetó y qué quedó sin dato es lo que hay que leer.
+    eid('pla-cotiz-nota').innerHTML = '<span style="color:#166534">✓ ' + nr(x.traidos) + (x.traidos === 1 ? ' mes' : ' meses')
+      + ' con el promedio del dólar elegido.</span>'
+      + (x.manuales ? ' Las ' + nr(x.manuales) + ' cargadas a mano no se tocaron.' : '')
+      + ((x.sin_dato || []).length ? ' <span style="color:#92400e">Sin dato: '
+          + x.sin_dato.map(function(m){ return plaMesTxt(m); }).join(', ') + '.</span>' : '');
+    plaCargar();
+    api('/api/pl-abasto/cotizaciones').then(function(r2){
+      if (r2 && r2.ok) { PLA.cotiz = r2.data; plaCotizPintar(lnbPuedeOperar('pl-abasto')); }
+    });
+  });
 }
 
 // ── LOS AJUSTES DE UN RUBRO, EN SUS ASIENTOS ─────────────────────────────────
@@ -44030,7 +44217,7 @@ function plaAjusteEliminar(){
 // el resultado neto. En pesos con centavos aunque la pantalla muestre miles o millones —en el
 // Excel se redondea a gusto; al revés no se puede—, con punto y coma y coma decimal, que es
 // como lo abre el Excel en castellano.
-function plaCsv(d){
+function plaCsv(d, usd){
   var T = plaTotales(d);
   var cols = ['TOTAL'].concat(d.meses.slice().reverse());
   var celda = function(v){
@@ -44040,7 +44227,7 @@ function plaCsv(d){
   // Un nombre que empieza con = + - @ el Excel lo toma como fórmula.
   var texto = function(v){ var s = String(v == null ? '' : v); return /^[=+\-@]/.test(s) ? "'" + s : s; };
   var num = function(v){ return (Math.round((Number(v) || 0) * 100) / 100).toFixed(2).replace('.', ','); };
-  var filas = [['Tipo', 'Concepto', 'Cuenta'].concat(cols.map(function(m){ return m === 'TOTAL' ? 'TOTAL' : plaMesTxt(m); }))];
+  var filas = [['Tipo', 'Concepto', 'Cuenta'].concat(cols.map(function(m){ return m === 'TOTAL' ? (usd ? 'TOTAL U$S' : 'TOTAL') : plaMesTxt(m); }))];
   var linea = function(tipo, concepto, cuenta, valores){
     filas.push([tipo, texto(concepto), texto(cuenta)].concat(cols.map(function(m){ return num(valores[m]); })));
   };
@@ -44063,9 +44250,16 @@ function plaCsv(d){
 function plaExportar(){
   var d = PLA.datos;
   if (!d || !(d.meses || []).length) { toast('No hay nada para exportar', 'er'); return; }
+  var usd = PLA.moneda === 'usd', conv = plaEnMoneda(d, PLA.moneda);
+  // EN DÓLARES, SIN HUECOS: un mes sin cotización saldría en cero y el total mentiría.
+  if (usd && conv.sin.length) {
+    toast('Faltan cotizaciones de ' + conv.sin.map(function(m){ return plaMesTxt(m); }).join(', ')
+      + ': cargalas o exportá en pesos', 'er');
+    return;
+  }
   var a = document.createElement('a');
-  a.href = URL.createObjectURL(new Blob([plaCsv(d)], { type: 'text/csv;charset=utf-8' }));
-  a.download = 'PL_Abasto_' + d.desde + '_a_' + d.hasta + '.csv';
+  a.href = URL.createObjectURL(new Blob([plaCsv(conv.datos, usd)], { type: 'text/csv;charset=utf-8' }));
+  a.download = 'PL_Abasto_' + d.desde + '_a_' + d.hasta + (usd ? '_USD' : '') + '.csv';
   a.click();
   URL.revokeObjectURL(a.href);
 }
