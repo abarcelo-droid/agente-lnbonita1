@@ -97,6 +97,11 @@ db.exec(`
     modificado_por INTEGER,
     modificado_en  TEXT DEFAULT (datetime('now','localtime'))
   );
+  CREATE TABLE IF NOT EXISTS pl_abasto_ventas_extra (
+    cuenta         TEXT PRIMARY KEY,
+    modificado_por INTEGER,
+    modificado_en  TEXT DEFAULT (datetime('now','localtime'))
+  );
 `);
 
 // LOS TÍTULOS CAMBIARON (V1056). Una clasificación guardada con un título que ya no existe
@@ -140,7 +145,15 @@ function rubrosDeCuentas(db) {
   const nombres = new Map(db.prepare('SELECT cuenta, nombre FROM pl_abasto_cuentas').all()
     .map((x) => [x.cuenta, x.nombre]));
   const rubroDe = (cuenta) => elegidos.get(cuenta) || rubroPorDefecto(cuenta, nombres.get(cuenta));
-  return { elegidos, nombres, rubroDe };
+  // SÓLO VENTAS SE REPITE (V1058). Pablo, 14/9/2026: «sólo para el título VENTAS, permitime
+  // repetir rubros: que un rubro esté categorizado en ventas y un subrubro más». Y que sume en
+  // los dos. Una cuenta sin título, o que ya tiene VENTAS como título, no se repite.
+  const extra = new Set(db.prepare('SELECT cuenta FROM pl_abasto_ventas_extra').all().map((x) => x.cuenta));
+  const tambienVentas = (cuenta) => {
+    const r = rubroDe(cuenta);
+    return extra.has(cuenta) && r !== 'ventas' && r !== SIN_ASIGNAR ? 1 : 0;
+  };
+  return { elegidos, nombres, rubroDe, tambienVentas };
 }
 
 // LAS OTRAS CUENTAS DE CADA ASIENTO. El libro diario del otro sistema no trae glosa ni
@@ -337,7 +350,7 @@ router.get('/resultado', requireAuth, (req, res) => {
 
     const filas = db.prepare(`SELECT cuenta, mes, ROUND(SUM(haber) - SUM(debe), 2) AS importe
         FROM pl_abasto_movimientos WHERE mes BETWEEN ? AND ? GROUP BY cuenta, mes`).all(desde, hasta);
-    const { elegidos, nombres, rubroDe } = rubrosDeCuentas(db);
+    const { elegidos, nombres, rubroDe, tambienVentas } = rubrosDeCuentas(db);
     const porCuenta = new Map();
     for (const f of filas) {
       // Las de resultado siempre; una del patrimonio, sólo si alguien le puso un título.
@@ -346,7 +359,7 @@ router.get('/resultado', requireAuth, (req, res) => {
       if (!c) {
         const nombre = nombres.get(f.cuenta) || f.cuenta;
         c = { cuenta: f.cuenta, nombre, rubro: rubroDe(f.cuenta), rubro_defecto: rubroPorDefecto(f.cuenta, nombre),
-              elegido: elegidos.has(f.cuenta) ? 1 : 0, meses: {} };
+              elegido: elegidos.has(f.cuenta) ? 1 : 0, tambien_ventas: tambienVentas(f.cuenta), meses: {} };
         porCuenta.set(f.cuenta, c);
       }
       c.meses[f.mes] = f.importe;
@@ -363,12 +376,12 @@ router.get('/cuentas', requireAuth, (req, res) => {
   try {
     const totales = new Map(db.prepare(`SELECT cuenta, ROUND(SUM(haber) - SUM(debe), 2) AS importe,
         COUNT(*) AS renglones FROM pl_abasto_movimientos GROUP BY cuenta`).all().map((x) => [x.cuenta, x]));
-    const { elegidos, nombres, rubroDe } = rubrosDeCuentas(db);
+    const { elegidos, nombres, rubroDe, tambienVentas } = rubrosDeCuentas(db);
     // TODAS LAS QUE TIENEN MOVIMIENTOS, con título o sin él, y también las del patrimonio: que
     // ninguna se pierda de vista. Pablo, 14/9/2026: «¿por qué me escondés algunos rubros, por
     // ejemplo COTO, IVA? Quiero ver todo y a lo sumo no asignar».
     const cuentas = [...nombres.keys()].filter((c) => totales.has(c)).sort().map((c) => ({
-      cuenta: c, nombre: nombres.get(c), resultado: esCuentaDeResultado(c) ? 1 : 0, rubro: rubroDe(c), rubro_defecto: rubroPorDefecto(c, nombres.get(c)),
+      cuenta: c, nombre: nombres.get(c), resultado: esCuentaDeResultado(c) ? 1 : 0, rubro: rubroDe(c), tambien_ventas: tambienVentas(c), rubro_defecto: rubroPorDefecto(c, nombres.get(c)),
       elegido: elegidos.has(c) ? 1 : 0,
       importe: (totales.get(c) || {}).importe || 0, renglones: (totales.get(c) || {}).renglones || 0,
     }));
@@ -379,25 +392,49 @@ router.get('/cuentas', requireAuth, (req, res) => {
 // ── GUARDAR LA CLASIFICACIÓN ─────────────────────────────────────────────────
 router.put('/rubros', requireAuth, (req, res) => {
   try {
-    const cambios = (req.body && req.body.rubros && typeof req.body.rubros === 'object') ? req.body.rubros : null;
-    if (!cambios || !Object.keys(cambios).length) {
+    const b = req.body || {};
+    const cambios = (b.rubros && typeof b.rubros === 'object') ? b.rubros : {};
+    const ventas = (b.ventas && typeof b.ventas === 'object') ? b.ventas : {};
+    if (!Object.keys(cambios).length && !Object.keys(ventas).length) {
       return res.status(400).json({ ok: false, error: 'No hay cambios para guardar.' });
     }
     // CUALQUIER CUENTA DEL LIBRO DIARIO, también una del patrimonio: arranca sin título y el
     // título lo decide quien clasifica.
     const conocida = db.prepare('SELECT 1 AS si FROM pl_abasto_cuentas WHERE cuenta = ?');
-    for (const [c, r] of Object.entries(cambios)) {
+    for (const c of Object.keys(cambios).concat(Object.keys(ventas))) {
       if (!conocida.get(c)) {
         return res.status(400).json({ ok: false, error: 'La cuenta ' + c + ' no está en el libro diario.' });
       }
+    }
+    for (const r of Object.values(cambios)) {
       if (!esRubro(r)) return res.status(400).json({ ok: false, error: 'Ese rubro no existe: ' + r });
+    }
+    // También en VENTAS, sólo una cuenta que —con los cambios de este mismo guardado— tiene otro título.
+    const { rubroDe } = rubrosDeCuentas(db);
+    for (const [c, si] of Object.entries(ventas)) {
+      const t = cambios[c] || rubroDe(c);
+      if (si && (t === 'ventas' || t === SIN_ASIGNAR)) {
+        return res.status(400).json({ ok: false,
+          error: 'La cuenta ' + c + ' tiene que tener otro título para estar también en VENTAS.' });
+      }
     }
     const up = db.prepare(`INSERT INTO pl_abasto_rubros (cuenta, rubro, modificado_por, modificado_en)
         VALUES (?,?,?,datetime('now','localtime'))
       ON CONFLICT(cuenta) DO UPDATE SET rubro = excluded.rubro, modificado_por = excluded.modificado_por,
         modificado_en = excluded.modificado_en`);
-    db.transaction(() => { for (const [c, r] of Object.entries(cambios)) up.run(c, r, usuarioId(req)); })();
-    res.json({ ok: true, data: { guardadas: Object.keys(cambios).length } });
+    const conVentas = db.prepare(`INSERT INTO pl_abasto_ventas_extra (cuenta, modificado_por, modificado_en)
+        VALUES (?,?,datetime('now','localtime'))
+      ON CONFLICT(cuenta) DO UPDATE SET modificado_por = excluded.modificado_por, modificado_en = excluded.modificado_en`);
+    const sinVentas = db.prepare('DELETE FROM pl_abasto_ventas_extra WHERE cuenta = ?');
+    db.transaction(() => {
+      for (const [c, r] of Object.entries(cambios)) {
+        up.run(c, r, usuarioId(req));
+        // Pasarla a VENTAS como título, o sacarle el título, le saca la repetición.
+        if (r === 'ventas' || r === SIN_ASIGNAR) sinVentas.run(c);
+      }
+      for (const [c, si] of Object.entries(ventas)) { if (si) conVentas.run(c, usuarioId(req)); else sinVentas.run(c); }
+    })();
+    res.json({ ok: true, data: { guardadas: Object.keys(cambios).length, ventas: Object.keys(ventas).length } });
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
@@ -406,6 +443,7 @@ router.put('/rubros', requireAuth, (req, res) => {
 router.delete('/rubros', requireAuth, (req, res) => {
   try {
     const n = db.prepare('DELETE FROM pl_abasto_rubros').run().changes;
+    db.prepare('DELETE FROM pl_abasto_ventas_extra').run();
     res.json({ ok: true, data: { borradas: n } });
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
@@ -568,7 +606,7 @@ router.get('/detalle', requireAuth, (req, res) => {
     const desde = String(req.query.desde || ''), hasta = String(req.query.hasta || '');
     if (!MES.test(desde) || !MES.test(hasta)) return res.status(400).json({ ok: false, error: 'Falta el período.' });
     let cuentas = [];
-    const { rubroDe } = rubrosDeCuentas(db);
+    const { rubroDe, tambienVentas } = rubrosDeCuentas(db);
     if (req.query.cuenta) {
       const c = String(req.query.cuenta);
       // Las que están en el cuadro: las de resultado, y una del patrimonio con título.
@@ -579,7 +617,7 @@ router.get('/detalle', requireAuth, (req, res) => {
     } else if (esRubro(req.query.rubro) && req.query.rubro !== SIN_ASIGNAR) {
       cuentas = db.prepare('SELECT DISTINCT cuenta FROM pl_abasto_movimientos WHERE mes BETWEEN ? AND ?')
         .all(desde, hasta).map((x) => x.cuenta)
-        .filter((c) => rubroDe(c) === req.query.rubro);
+        .filter((c) => rubroDe(c) === req.query.rubro || (req.query.rubro === 'ventas' && tambienVentas(c)));
     } else {
       return res.status(400).json({ ok: false, error: 'Falta la cuenta o el rubro.' });
     }
