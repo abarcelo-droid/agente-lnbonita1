@@ -999,8 +999,9 @@ test('la lista en la pantalla: todas, con el grupo del plan, la etiqueta de su t
     hasta(PANEL, 'var PLA_COLOR = {', '};'),
     fuente(PANEL, 'function plaImporte(v, usd){'),
     fuente(PANEL, 'function plaRubroActual(c){'),
+    fuente(PANEL, 'function plaTambienVentas(c){'),
     fuente(PANEL, 'function plaRubrosPintar(){'), 'plaRubrosPintar();'].join('\n'))(
-    { pend, cuentas: { rubros: RUBROS, cuentas: [
+    { pend, pendVentas: {}, cuentas: { rubros: RUBROS, cuentas: [
       { cuenta: '1.1.03.01.000.6105', nombre: 'COTO', rubro: 'sin_asignar', elegido: 0, importe: 5, resultado: 0 },
       { cuenta: '2.1.03.01.000.0000', nombre: 'IVA Debito Fiscal', rubro: 'sin_asignar', elegido: 0, importe: 1, resultado: 0 },
       { cuenta: '4.1.01', nombre: 'VENTAS', rubro: 'ventas', elegido: 0, importe: 1, resultado: 1 },
@@ -1058,6 +1059,126 @@ test('manual V1057: la lista tiene también las del patrimonio, y lo que falta c
   assert.match(M, /se pueden ver <b>sólo las de resultado sin título<\/b>, que son las que faltan clasificar/);
   assert.match(PANEL, /id="pla-rub-solo" onchange="plaRubrosPintar\(\)"> Sólo las de resultado sin título<\/label>/);
   assert.match(M, /<span class="ver">V1057<\/span> La lista de cuentas muestra también las del patrimonio/);
+});
+
+// ══ 6d · SÓLO VENTAS SE REPITE (V1058) ═══════════════════════════════════════════════
+//
+// Pablo, 14/9/2026: «sólo para el título VENTAS, permitime repetir rubros: que un rubro esté
+// categorizado en ventas y un subrubro más». Y ante la pregunta, que cuente dos veces, en los dos.
+
+test('también en VENTAS: se guarda con su título, y se saca al pasarla a VENTAS, a la lista, con la × o volviendo a los de por defecto', () => {
+  const db = base();
+  const R = rutas(db);
+  llamar(R.cargar, { body: CARGA_A });
+  llamar(R.cargar, { body: CARGA_B });
+  const E = '4.2.04.14.000.0000';   // G - Electricidad
+  const repetidas = () => db.prepare('SELECT COUNT(*) n FROM pl_abasto_ventas_extra').get().n;
+  assert.equal(llamar(R.rubros, { body: { ventas: { [E]: 1 } } }).code, 400, 'repitió en VENTAS una cuenta sin título');
+  // Con su título en el mismo guardado, sí.
+  assert.equal(llamar(R.rubros, { body: { rubros: { [E]: 'costos_fijos' }, ventas: { [E]: 1 } } }).code, 200);
+  const e = llamar(R.resultado, { query: { desde: '2025-07', hasta: '2025-09' } }).body.data.cuentas.find((c) => c.cuenta === E);
+  assert.equal(e.rubro, 'costos_fijos');
+  assert.equal(e.tambien_ventas, 1);
+  assert.equal(llamar(R.cuentas, {}).body.data.cuentas.find((c) => c.cuenta === E).tambien_ventas, 1);
+  // Los asientos de VENTAS la traen, y los de su título también.
+  const sept = { desde: '2025-09', hasta: '2025-09' };
+  assert.deepEqual(llamar(R.detalle, { query: Object.assign({ rubro: 'ventas' }, sept) }).body.data.filas.map((f) => f.cuenta), [E]);
+  assert.deepEqual(llamar(R.detalle, { query: Object.assign({ rubro: 'costos_fijos' }, sept) }).body.data.filas.map((f) => f.cuenta), [E]);
+  // Una con VENTAS de título no se repite, ni aunque haya quedado marcada.
+  assert.equal(llamar(R.rubros, { body: { ventas: { '4.1.01.00.000.0000': 1 } } }).code, 400);
+  db.prepare("INSERT INTO pl_abasto_ventas_extra (cuenta) VALUES ('4.1.01.00.000.0000')").run();
+  assert.equal(llamar(R.cuentas, {}).body.data.cuentas.find((c) => c.cuenta === '4.1.01.00.000.0000').tambien_ventas, 0,
+    'una cuenta con VENTAS de título figura también en VENTAS');
+  db.prepare("DELETE FROM pl_abasto_ventas_extra WHERE cuenta = '4.1.01.00.000.0000'").run();
+  // Pasarla a VENTAS como título le saca la repetición; sacarle el título, también.
+  assert.equal(llamar(R.rubros, { body: { rubros: { [E]: 'ventas' } } }).code, 200);
+  assert.equal(repetidas(), 0);
+  llamar(R.rubros, { body: { rubros: { [E]: 'impuestos' }, ventas: { [E]: 1 } } });
+  assert.equal(repetidas(), 1);
+  llamar(R.rubros, { body: { rubros: { [E]: 'sin_asignar' } } });
+  assert.equal(repetidas(), 0);
+  // La ×.
+  llamar(R.rubros, { body: { rubros: { [E]: 'impuestos' }, ventas: { [E]: 1 } } });
+  assert.equal(llamar(R.rubros, { body: { ventas: { [E]: 0 } } }).code, 200);
+  assert.equal(repetidas(), 0);
+  // Volver a los de por defecto.
+  llamar(R.rubros, { body: { ventas: { [E]: 1 } } });
+  assert.equal(repetidas(), 1);
+  llamar(R.restablecer, {});
+  assert.equal(repetidas(), 0, 'volver a los de por defecto dejó la repetición');
+  assert.equal(llamar(R.rubros, { body: {} }).code, 400);
+});
+
+test('también en VENTAS suma en los dos: el resultado neto la cuenta dos veces, y cada subtotal debajo de los dos', () => {
+  const uno = (cuenta, rubro, v, tambien) => ({ cuenta, nombre: cuenta, rubro, tambien_ventas: tambien ? 1 : 0, meses: { '2025-07': v } });
+  const d = { rubros: RUBROS, meses: ['2025-07'], meses_disponibles: ['2025-07'], cuentas: [
+    uno('4.1.01', 'ventas', 1000), uno('4.1.02', 'utilidad', 200, true), uno('4.2.05', 'costos_fijos', -50, true)] };
+  const T = TOTALES(d);
+  assert.deepEqual(T.rubros.ventas, { '2025-07': 1150, TOTAL: 1150 }, 'VENTAS no suma las que están también ahí');
+  assert.equal(T.rubros.utilidad.TOTAL, 200);
+  assert.equal(T.rubros.costos_fijos.TOTAL, -50);
+  assert.equal(T.subtotales.margen.TOTAL, 1350, 'la de utilidad va dos veces en el margen; la de costos fijos, una');
+  assert.equal(T.subtotales.ebitda.TOTAL, 1300);
+  assert.equal(T.subtotales.neto.TOTAL, 1300, 'el resultado neto no cuenta dos veces las repetidas');
+  assert.deepEqual(T.cuentas.ventas.map((x) => [x.c.cuenta, x.tambien || null]),
+    [['4.1.01', null], ['4.1.02', 'utilidad'], ['4.2.05', 'costos_fijos']]);
+  // Una con VENTAS de título no se suma dos veces en VENTAS.
+  assert.equal(TOTALES({ rubros: RUBROS, meses: ['2025-07'], cuentas: [uno('4.1.01', 'ventas', 1000, true)] }).rubros.ventas.TOTAL, 1000);
+  assert.ok(PANTALLA(d, { ventas: true }).includes('4.1.02 · 4.1.02 · también en UTILIDAD'), 'en VENTAS no dice en qué otro título está');
+});
+
+test('también en VENTAS en la pantalla: soltarla en VENTAS la deja en los dos, con su etiqueta y su ×', () => {
+  const els = { 'pla-rub-q': { value: '' }, 'pla-rub-solo': { checked: false } };
+  const eid = (id) => (els[id] = els[id] || {});
+  const PLA = { pend: {}, pendVentas: {}, cuentas: { rubros: RUBROS, cuentas: [
+    { cuenta: '4.1.02', nombre: 'COMISIONES', rubro: 'utilidad', elegido: 1, importe: 1, resultado: 1, tambien_ventas: 0 },
+    { cuenta: '4.2.04', nombre: 'ELECTRICIDAD', rubro: 'sin_asignar', elegido: 0, importe: -1, resultado: 1, tambien_ventas: 0 },
+    { cuenta: '4.2.05', nombre: 'SUELDOS', rubro: 'costos_fijos', elegido: 1, importe: -1, resultado: 1, tambien_ventas: 1 }] } };
+  const F = new Function('PLA', 'eid', 'escH', 'sgNorm', [
+    hasta(PANEL, 'var PLA_GRUPOS = {', '};'), fuente(PANEL, 'function plaGrupoCuenta(cuenta){'),
+    hasta(PANEL, 'var PLA_COLOR = {', '};'), fuente(PANEL, 'function plaImporte(v, usd){'),
+    fuente(PANEL, 'function plaRubroActual(c){'), fuente(PANEL, 'function plaRubrosPintar(){'),
+    fuente(PANEL, 'function plaSoltar(ev, zona){'), fuente(PANEL, 'function plaVentasPend(c, si){'),
+    fuente(PANEL, 'function plaTambienVentas(c){'), fuente(PANEL, 'function plaQuitarVentas(cuenta){'),
+    'return { pintar: plaRubrosPintar, soltar: plaSoltar, quitar: plaQuitarVentas };'].join('\n'))(
+    PLA, eid, String, (s) => String(s).toLowerCase());
+  const soltar = (cuenta, rubro) => F.soltar({ preventDefault() {}, dataTransfer: { getData: () => cuenta } },
+    { classList: { remove() {} }, getAttribute: () => rubro });
+  F.pintar();
+  assert.match(els['pla-rub-lista'].innerHTML,
+    /<span class="n">SUELDOS<\/span><span class="pla-badge"[^>]*>C\. fijos<\/span><span class="pla-badge" style="color:#15803d" title="También en VENTAS">\+ Ventas<\/span>/);
+  assert.match(els['pla-zonas'].innerHTML,
+    /SUELDOS <small>4\.2\.05<\/small><span class="pla-def">también en COSTOS FIJOS<\/span><button type="button" class="pla-x" title="Sacarla de VENTAS" onclick="plaQuitarVentas\('4\.2\.05'\)">×<\/button>/);
+  // Soltar en VENTAS una con otro título: queda en los dos, y su título no cambia.
+  soltar('4.1.02', 'ventas');
+  assert.deepEqual(PLA.pendVentas, { '4.1.02': 1 });
+  assert.deepEqual(PLA.pend, {}, 'soltarla en VENTAS le cambió el título');
+  // Soltar en VENTAS una sin título: VENTAS es su título, no una repetición.
+  soltar('4.2.04', 'ventas');
+  assert.deepEqual(PLA.pend, { '4.2.04': 'ventas' });
+  assert.equal(PLA.pendVentas['4.2.04'], undefined);
+  // La × la saca de VENTAS, y deja de verse ahí.
+  F.quitar('4.2.05');
+  assert.deepEqual(PLA.pendVentas, { '4.1.02': 1, '4.2.05': 0 });
+  assert.ok(!els['pla-zonas'].innerHTML.includes("plaQuitarVentas('4.2.05')"), 'sacada con la ×, sigue en VENTAS');
+  // Volver a ponerla no es un cambio.
+  soltar('4.2.05', 'ventas');
+  assert.equal(PLA.pendVentas['4.2.05'], undefined);
+  // Llevarla a la lista le saca el título y la repetición.
+  soltar('4.2.05', 'sin_asignar');
+  assert.deepEqual(PLA.pend, { '4.2.04': 'ventas', '4.2.05': 'sin_asignar' });
+  assert.equal(PLA.pendVentas['4.2.05'], 0);
+  assert.equal(els['pla-rub-pend'].textContent, '4 cambio(s) sin guardar');
+  assert.match(fuente(PANEL, 'function plaRubrosGuardar(){'), /\{ rubros: PLA\.pend, ventas: PLA\.pendVentas \}/);
+});
+
+test('manual V1058: sólo VENTAS se repite, y suma en los dos', () => {
+  const M = manual();
+  assert.match(M, /<b>Sólo VENTAS se puede repetir<\/b>: una cuenta que ya tiene otro título se arrastra también a VENTAS y queda en los dos/);
+  assert.match(M, /<b>Suma en los dos títulos<\/b>: el resultado neto la cuenta dos veces, y también cada subtotal que queda debajo de los dos/);
+  assert.match(M, /Pasarla a VENTAS como su título, o sacarle el título, le saca la repetición/);
+  assert.match(RUTA, /if \(r === 'ventas' \|\| r === SIN_ASIGNAR\) sinVentas\.run\(c\);/);
+  assert.match(M, /<span class="ver">V1058<\/span> Una cuenta puede estar también en VENTAS/);
 });
 
 // ══ 7 · EL MENÚ, LA DIRECCIÓN Y EL PERMISO ═══════════════════════════════════════════

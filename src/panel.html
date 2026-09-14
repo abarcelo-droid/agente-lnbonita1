@@ -5566,6 +5566,8 @@ input[type=number]{-moz-appearance:textfield;appearance:textfield}
     #sec-pl-abasto .pla-badge{flex:0 0 auto;font-size:10px;font-weight:700;border:1px solid;border-radius:10px;
       padding:1px 7px;white-space:nowrap;background:var(--pan,#fff)}
     #sec-pl-abasto .pla-badge.def{border-style:dashed}
+    #sec-pl-abasto .pla-badge + .pla-badge{margin-left:-4px}
+    #sec-pl-abasto .pla-x{border:0;background:none;color:#991b1b;font-weight:700;cursor:pointer;margin-left:4px;padding:0 3px}
     #sec-pl-abasto .pla-grupo{font-size:10.5px;font-weight:700;color:var(--mut);letter-spacing:.05em;margin:10px 2px 5px}
     #sec-pl-abasto .pla-chip{border:1px solid var(--bor);border-radius:7px;padding:4px 7px;margin:0 0 5px;
       background:var(--pan,#fff);cursor:grab;font-size:11.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -24495,6 +24497,11 @@ SG_MANUAL.plabasto = { titulo: 'P&L Abasto', html:
   + 'comisiones, descargas y fletes ganados— a ventas. <b>Todo lo demás arranca sin título</b>, la compra de '
   + 'mercadería también: el título lo decide quien clasifica. La etiqueta punteada es un título por defecto.</li>'
   + '<li>Una cuenta <b>sin título no suma al resultado</b>, y arriba del cuadro se avisa cuántas hay.</li>'
+  + '<li><span class="ver">V1058</span> <b>Sólo VENTAS se puede repetir</b>: una cuenta que ya tiene otro título se '
+  + 'arrastra también a VENTAS y queda en los dos. En VENTAS se ve con «también en …» y una × para sacarla, y en la '
+  + 'lista lleva además la etiqueta «+ Ventas». <b>Suma en los dos títulos</b>: el resultado neto la cuenta dos veces, '
+  + 'y también cada subtotal que queda debajo de los dos. Pasarla a VENTAS como su título, o sacarle el título, le '
+  + 'saca la repetición.</li>'
   + '<li>Una cuenta nueva que traiga un Excel nuevo entra con su rubro por defecto, sin tocar lo ya '
   + 'clasificado. <b>Volver a los de por defecto</b> borra toda la clasificación guardada, y por eso pide el '
   + 'nivel <b>Anular</b>.</li>'
@@ -24507,6 +24514,8 @@ SG_MANUAL.plabasto = { titulo: 'P&L Abasto', html:
 
   + '<h3>Qué cambió, y desde cuándo</h3>'
   + '<ul>'
+  + '<li><span class="ver">V1058</span> Una cuenta puede estar también en VENTAS, además de su título, y suma en '
+  + 'los dos.</li>'
   + '<li><span class="ver">V1057</span> La lista de cuentas muestra también las del patrimonio —clientes, '
   + 'proveedores, bancos, IVA—, y a una se le puede poner título.</li>'
   + '<li><span class="ver">V1056</span> Los títulos nuevos, la lista entera de cuentas con el título de cada una, '
@@ -43477,7 +43486,8 @@ var IA = { data:null, opo:null, tipos:{} };
 // ordenados: pesan la mitad que el archivo y el servidor no se queda leyendo un Excel
 // mientras los demás trabajan.
 var PLA = { datos: null, abiertos: {}, cuentas: null, pend: {}, detalle: null, lectura: null, previa: null, unidad: null,
-  nb: null, nbAbiertos: {}, ajuste: null, op: false, moneda: 'ars', cotiz: null };
+  nb: null, nbAbiertos: {}, ajuste: null, op: false, moneda: 'ars', cotiz: null,
+  pendVentas: {} };
 
 // ── LEER EL LIBRO DIARIO ─────────────────────────────────────────────────────
 //
@@ -43714,6 +43724,7 @@ function plaInit(){
   // esperando un Guardar que lo escriba sin que nadie lo vea.
   PLA.cuentas = null;
   PLA.pend = {};
+  PLA.pendVentas = {};
   PLA.nb = null;
   plaTab('resultado');
   plaCargar(true);
@@ -43809,6 +43820,12 @@ function plaTotales(d){
     meses.forEach(function(m){ var v = Number(c.meses[m]) || 0; rub[c.rubro][m] += v; t += v; });
     rub[c.rubro].TOTAL += t;
     porRubro[c.rubro].push({ c: c, total: r2(t) });
+    // TAMBIÉN EN VENTAS (V1058): suma otra vez, en VENTAS. Pablo eligió que cuente en los dos.
+    if (c.tambien_ventas && c.rubro !== 'ventas' && rub.ventas) {
+      meses.forEach(function(m){ rub.ventas[m] += Number(c.meses[m]) || 0; });
+      rub.ventas.TOTAL += t;
+      porRubro.ventas.push({ c: c, total: r2(t), tambien: c.rubro });
+    }
   });
   // LOS AJUSTES MANUALES SUMAN A SU RUBRO COMO UNA CUENTA MÁS: ya vienen con el signo con que
   // pesan, y así entran a los subtotales, al % sobre ventas y al resultado neto.
@@ -43917,7 +43934,8 @@ function plaPintar(){
         cuentas.forEach(function(x){
           var vs = { TOTAL: x.total };
           d.meses.forEach(function(m){ vs[m] = Number(x.c.meses[m]) || 0; });
-          h += fila('pla-cta', x.c.cuenta + ' · ' + x.c.nombre, vs, false,
+          var otro = x.tambien ? ((d.rubros || []).filter(function(y){ return y.k === x.tambien; })[0] || {}).label : '';
+          h += fila('pla-cta', x.c.cuenta + ' · ' + x.c.nombre + (otro ? ' · también en ' + otro : ''), vs, false,
             function(m){ return "plaDetalle('cuenta','" + escH(x.c.cuenta) + "','" + m + "')"; });
         });
         ajustes.forEach(function(x){
@@ -44394,6 +44412,7 @@ function plaRubrosCargar(){
     }
     PLA.cuentas = r.data;
     PLA.pend = {};
+    PLA.pendVentas = {};
     plaRubrosPintar();
   });
 }
@@ -44439,6 +44458,8 @@ function plaRubrosPintar(){
       + '<span class="n">' + escH(c.nombre) + '</span>'
       + (t ? '<span class="pla-badge' + (def ? ' def' : '') + '" style="color:' + (PLA_COLOR[t.k] || 'var(--mut)') + '"'
           + ' title="' + escH(t.label + (def ? ' · por defecto' : '')) + '">' + escH(t.corto) + '</span>' : '')
+      + (plaTambienVentas(c) ? '<span class="pla-badge" style="color:' + PLA_COLOR.ventas + '" title="También en VENTAS">'
+          + '+ Ventas</span>' : '')
       + '</div>';
   }).join('') || '<div style="font-size:11.5px;color:var(--mut);padding:6px">'
     + (todas.length ? 'Ninguna coincide.' : 'Todavía no hay libro diario cargado.') + '</div>';
@@ -44450,14 +44471,24 @@ function plaRubrosPintar(){
       + escH(c.nombre) + ' <small>' + escH(c.cuenta) + '</small>'
       + (!c.elegido && !pend ? '<span class="pla-def">por defecto</span>' : '') + '</div>';
   };
+  var repetida = function(c){
+    if (!busca(c)) return '';
+    var t = titulo[plaRubroActual(c)];
+    return '<div class="pla-chip' + (PLA.pendVentas[c.cuenta] != null ? ' pend' : '') + '" draggable="true"'
+      + ' data-cuenta="' + escH(c.cuenta) + '" ondragstart="plaArrastrar(event)" title="' + ayuda(c) + '">'
+      + escH(c.nombre) + ' <small>' + escH(c.cuenta) + '</small>'
+      + '<span class="pla-def">también en ' + escH(t ? t.label : '') + '</span>'
+      + '<button type="button" class="pla-x" title="Sacarla de VENTAS" onclick="plaQuitarVentas(\'' + escH(c.cuenta) + '\')">×</button></div>';
+  };
   eid('pla-zonas').innerHTML = (D.rubros || []).map(function(r){
     var cs = todas.filter(function(c){ return plaRubroActual(c) === r.k; });
+    var reps = r.k === 'ventas' ? todas.filter(plaTambienVentas) : [];
     return '<div class="pla-zona" data-rubro="' + r.k + '" ondragover="plaSobre(event,this)"'
       + ' ondragleave="this.classList.remove(\'sobre\')" ondrop="plaSoltar(event,this)">'
-      + '<h4>' + r.ico + ' ' + escH(r.label) + ' <small style="font-weight:400;color:var(--mut)">(' + cs.length + ')</small></h4>'
-      + cs.map(chip).join('') + '</div>';
+      + '<h4>' + r.ico + ' ' + escH(r.label) + ' <small style="font-weight:400;color:var(--mut)">(' + (cs.length + reps.length)
+      + ')</small></h4>' + cs.map(chip).join('') + reps.map(repetida).join('') + '</div>';
   }).join('');
-  var n = Object.keys(PLA.pend).length;
+  var n = Object.keys(PLA.pend).length + Object.keys(PLA.pendVentas).length;
   eid('pla-rub-pend').textContent = n ? n + ' cambio(s) sin guardar' : '';
   eid('pla-rub-guardar').disabled = !n;
 }
@@ -44473,18 +44504,46 @@ function plaSoltar(ev, zona){
   var cuenta = ev.dataTransfer.getData('text/plain'), rubro = zona.getAttribute('data-rubro');
   var c = ((PLA.cuentas || {}).cuentas || []).filter(function(x){ return x.cuenta === cuenta; })[0];
   if (!c || !rubro) return;
+  var actual = plaRubroActual(c);
+  // SÓLO VENTAS SE REPITE: soltar en VENTAS una cuenta que ya tiene otro título la deja en los dos.
+  if (rubro === 'ventas' && actual !== 'ventas' && actual !== 'sin_asignar') {
+    plaVentasPend(c, 1);
+    plaRubrosPintar();
+    return;
+  }
   // Devolverla al rubro que ya tenía guardado no es un cambio. Soltar una «por defecto» en
   // su mismo rubro sí: la confirma.
   if (rubro === c.rubro && c.elegido) delete PLA.pend[cuenta]; else PLA.pend[cuenta] = rubro;
+  // Pasarla a VENTAS como título, o a la lista, le saca la repetición.
+  if (rubro === 'ventas' || rubro === 'sin_asignar') plaVentasPend(c, 0);
+  plaRubrosPintar();
+}
+
+// Lo que se va a guardar de «también en VENTAS»: volver a como estaba no es un cambio.
+function plaVentasPend(c, si){
+  if (!!si === !!c.tambien_ventas) delete PLA.pendVentas[c.cuenta]; else PLA.pendVentas[c.cuenta] = si ? 1 : 0;
+}
+
+// ¿Está también en VENTAS, contando lo que todavía no se guardó? Sin título, o con VENTAS de título, no.
+function plaTambienVentas(c){
+  var t = plaRubroActual(c);
+  var si = PLA.pendVentas[c.cuenta] != null ? PLA.pendVentas[c.cuenta] : c.tambien_ventas;
+  return !!si && t !== 'ventas' && t !== 'sin_asignar';
+}
+
+function plaQuitarVentas(cuenta){
+  var c = ((PLA.cuentas || {}).cuentas || []).filter(function(x){ return x.cuenta === cuenta; })[0];
+  if (!c) return;
+  plaVentasPend(c, 0);
   plaRubrosPintar();
 }
 
 // EL GUARDADO ES EXPLÍCITO: reordenar veinte cuentas y que cada soltada escriba dejaría
 // estados a medio hacer en el cuadro de otro que lo esté mirando.
 function plaRubrosGuardar(){
-  var n = Object.keys(PLA.pend).length; if (!n) return;
+  var n = Object.keys(PLA.pend).length + Object.keys(PLA.pendVentas).length; if (!n) return;
   var btn = eid('pla-rub-guardar'); btn.disabled = true;
-  api('/api/pl-abasto/rubros', 'PUT', { rubros: PLA.pend }).then(function(r){
+  api('/api/pl-abasto/rubros', 'PUT', { rubros: PLA.pend, ventas: PLA.pendVentas }).then(function(r){
     if (!r || !r.ok) { btn.disabled = false; toast((r && r.error) || 'No se pudo guardar', 'er'); return; }
     toast('Rubros guardados', 'ok');
     PLA.cuentas = null;
