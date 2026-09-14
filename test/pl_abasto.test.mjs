@@ -47,6 +47,10 @@ function handler(firma) {
   const m = re.exec(RUTA);
   return RUTA.slice(j, m.index + m[0].length - 2);
 }
+// La lista y las cajas de Configurar rubros (V1059: se dibujan por separado).
+const PINTAR_RUBROS = () => ['function plaRubrosFila(c, titulo){', 'function plaRubrosTitulos(){', 'function plaRubrosBusca(){',
+  'function plaRubrosListaPintar(){', 'function plaRubrosZonasPintar(){', 'function plaRubrosTocar(cuenta){',
+  'function plaRubrosPintar(){'].map((f) => fuente(PANEL, f));
 const lineaConst = (nombre) => {
   const m = new RegExp('^const ' + nombre + ' = .*;\\r?$', 'm').exec(RUTA);
   assert.ok(m, 'no está ' + nombre);
@@ -1000,7 +1004,7 @@ test('la lista en la pantalla: todas, con el grupo del plan, la etiqueta de su t
     fuente(PANEL, 'function plaImporte(v, usd){'),
     fuente(PANEL, 'function plaRubroActual(c){'),
     fuente(PANEL, 'function plaTambienVentas(c){'),
-    fuente(PANEL, 'function plaRubrosPintar(){'), 'plaRubrosPintar();'].join('\n'))(
+    ...PINTAR_RUBROS(), 'plaRubrosPintar();'].join('\n'))(
     { pend, pendVentas: {}, cuentas: { rubros: RUBROS, cuentas: [
       { cuenta: '1.1.03.01.000.6105', nombre: 'COTO', rubro: 'sin_asignar', elegido: 0, importe: 5, resultado: 0 },
       { cuenta: '2.1.03.01.000.0000', nombre: 'IVA Debito Fiscal', rubro: 'sin_asignar', elegido: 0, importe: 1, resultado: 0 },
@@ -1057,7 +1061,7 @@ test('manual V1057: la lista tiene también las del patrimonio, y lo que falta c
   const M = manual();
   assert.match(M, /Están <b>todas<\/b>, también las del patrimonio —clientes, proveedores, bancos, IVA—, agrupadas en activo, pasivo, patrimonio neto y resultados/);
   assert.match(M, /se pueden ver <b>sólo las de resultado sin título<\/b>, que son las que faltan clasificar/);
-  assert.match(PANEL, /id="pla-rub-solo" onchange="plaRubrosPintar\(\)"> Sólo las de resultado sin título<\/label>/);
+  assert.match(PANEL, /id="pla-rub-solo" onchange="plaRubrosPintar\(\)" style="[^"]*"> Sólo las de resultado sin título<\/label>/);
   assert.match(M, /<span class="ver">V1057<\/span> La lista de cuentas muestra también las del patrimonio/);
 });
 
@@ -1137,7 +1141,7 @@ test('también en VENTAS en la pantalla: soltarla en VENTAS la deja en los dos, 
   const F = new Function('PLA', 'eid', 'escH', 'sgNorm', [
     hasta(PANEL, 'var PLA_GRUPOS = {', '};'), fuente(PANEL, 'function plaGrupoCuenta(cuenta){'),
     hasta(PANEL, 'var PLA_COLOR = {', '};'), fuente(PANEL, 'function plaImporte(v, usd){'),
-    fuente(PANEL, 'function plaRubroActual(c){'), fuente(PANEL, 'function plaRubrosPintar(){'),
+    fuente(PANEL, 'function plaRubroActual(c){'), ...PINTAR_RUBROS(),
     fuente(PANEL, 'function plaSoltar(ev, zona){'), fuente(PANEL, 'function plaVentasPend(c, si){'),
     fuente(PANEL, 'function plaTambienVentas(c){'), fuente(PANEL, 'function plaQuitarVentas(cuenta){'),
     'return { pintar: plaRubrosPintar, soltar: plaSoltar, quitar: plaQuitarVentas };'].join('\n'))(
@@ -1179,6 +1183,91 @@ test('manual V1058: sólo VENTAS se repite, y suma en los dos', () => {
   assert.match(M, /Pasarla a VENTAS como su título, o sacarle el título, le saca la repetición/);
   assert.match(RUTA, /if \(r === 'ventas' \|\| r === SIN_ASIGNAR\) sinVentas\.run\(c\);/);
   assert.match(M, /<span class="ver">V1058<\/span> Una cuenta puede estar también en VENTAS/);
+});
+
+// ══ 6e · QUE NO SE TILDE (V1059) ════════════════════════════════════════════════════
+//
+// Pablo, 14/9/2026: «no anda arrastrar rubros de un lado a otro, y cuando quiero operar es como
+// que se tilda». En un Chrome de verdad, con las 873 cuentas reales y el procesador de una
+// notebook común, cada soltada congelaba el panel casi un segundo: volvía a dibujar la lista
+// entera. Y con 768 de alto, la caja de destino quedaba fuera de la vista.
+
+test('soltar una cuenta cambia sólo su fila y las cajas, sin volver a dibujar la lista entera', () => {
+  let pintadasLista = 0, filaNueva = null;
+  const lista = { querySelector: (sel) => (sel === '.pla-fila[data-cuenta="4.2.04"]' ? { set outerHTML(h) { filaNueva = h; } } : null) };
+  Object.defineProperty(lista, 'innerHTML', { set() { pintadasLista++; }, get() { return ''; } });
+  const els = { 'pla-rub-lista': lista, 'pla-rub-q': { value: '' }, 'pla-rub-solo': { checked: false } };
+  const eid = (id) => (els[id] = els[id] || {});
+  const PLA = { pend: {}, pendVentas: {}, cuentas: { rubros: RUBROS, cuentas: [
+    { cuenta: '4.2.04', nombre: 'ELECTRICIDAD', rubro: 'sin_asignar', elegido: 0, importe: -1, resultado: 1, tambien_ventas: 0 }] } };
+  const soltar = new Function('PLA', 'eid', 'escH', 'sgNorm', [
+    hasta(PANEL, 'var PLA_GRUPOS = {', '};'), fuente(PANEL, 'function plaGrupoCuenta(cuenta){'),
+    hasta(PANEL, 'var PLA_COLOR = {', '};'), fuente(PANEL, 'function plaImporte(v, usd){'),
+    fuente(PANEL, 'function plaRubroActual(c){'), ...PINTAR_RUBROS(),
+    fuente(PANEL, 'function plaSoltar(ev, zona){'), fuente(PANEL, 'function plaVentasPend(c, si){'),
+    fuente(PANEL, 'function plaTambienVentas(c){'), 'return plaSoltar;'].join('\n'))(PLA, eid, String, (s) => String(s).toLowerCase());
+  const a = (rubro) => soltar({ preventDefault() {}, dataTransfer: { getData: () => '4.2.04' } },
+    { classList: { remove() {} }, getAttribute: () => rubro });
+  a('costos_fijos');
+  assert.equal(pintadasLista, 0, 'soltar volvió a dibujar la lista entera');
+  assert.match(filaNueva, /<span class="n">ELECTRICIDAD<\/span><span class="pla-badge" style="color:#1d4ed8" title="COSTOS FIJOS">C\. fijos<\/span>/);
+  assert.match(els['pla-zonas'].innerHTML, /ELECTRICIDAD <small>4\.2\.04<\/small>/);
+  assert.equal(els['pla-rub-pend'].textContent, '1 cambio(s) sin guardar');
+  // Con la casilla de «sólo sin título» la fila tiene que salir de la lista: ahí sí va entera.
+  els['pla-rub-solo'].checked = true;
+  a('costos_variables');
+  assert.equal(pintadasLista, 1);
+});
+
+test('pasar por encima de una caja no la vuelve a marcar a cada movimiento del mouse', () => {
+  const sobre = new Function(fuente(PANEL, 'function plaSobre(ev, zona){') + '\nreturn plaSobre;')();
+  let agregadas = 0;
+  const cls = new Set();
+  const zona = { classList: { contains: (c) => cls.has(c), add: (c) => { agregadas++; cls.add(c); } } };
+  for (let i = 0; i < 20; i++) sobre({ preventDefault() {} }, zona);
+  assert.equal(agregadas, 1, 'cada movimiento del mouse vuelve a marcar la caja');
+});
+
+test('los importes salen de un solo formateador, y dicen lo mismo que antes', () => {
+  const imp = new Function(fuente(PANEL, 'function plaImporte(v, usd){') + '\nreturn plaImporte;')();
+  assert.equal(imp(-1234.5), '-$ 1.234,50');
+  assert.equal(imp(1234.5, true), 'U$S 1.234,50');
+  const f = imp.fmt;
+  assert.ok(f instanceof Intl.NumberFormat, 'arma un formateador por cada número');
+  imp(1);
+  assert.equal(imp.fmt, f);
+});
+
+test('la lista no dibuja las filas que no se ven, y los títulos quedan a la vista mientras se baja', () => {
+  // Sin content-visibility: con filas que se dibujan recién al verse, la lista se corría al bajar y en
+  // Chrome se agarró la cuenta de al lado. El dibujo se aísla con contain, que no cambia tamaños.
+  assert.ok(!/content-visibility/.test(hasta(PANEL, '<div class="sec sg-mod" id="sec-pl-abasto">', '</style>')),
+    'las filas se corren al bajar por la lista');
+  assert.match(PANEL, /#sec-pl-abasto \.pla-lista-cuerpo\{[^}]*contain:content\}/);
+  assert.match(PANEL, /#sec-pl-abasto \.pla-zona\{[^}]*contain:content\}/);
+  // Salir de una caja es salir de verdad, no pasar a una fila de adentro.
+  const salir = new Function(fuente(PANEL, 'function plaSalir(ev, zona){') + '\nreturn plaSalir;')();
+  let apagadas = 0;
+  const caja = { contains: (x) => x === 'fila', classList: { remove: () => { apagadas++; } } };
+  salir({ relatedTarget: 'fila' }, caja);
+  assert.equal(apagadas, 0, 'pasar a una fila de adentro apaga la marca de la caja');
+  salir({ relatedTarget: 'afuera' }, caja);
+  assert.equal(apagadas, 1);
+  assert.match(PANEL, /<div class="pla-lista" data-rubro="sin_asignar" ondragover="plaSobre\(event,this\)"\r?\n\s+ondragleave="plaSalir\(event,this\)"/);
+  assert.match(fuente(PANEL, 'function plaRubrosZonasPintar(){'), /ondragleave="plaSalir\(event,this\)"/);
+  assert.match(PANEL, /#sec-pl-abasto \.pla-zonas\{[^}]*position:sticky;top:8px;max-height:calc\(100vh - 120px\);overflow-y:auto/);
+  assert.match(PANEL, /#sec-pl-abasto \.pla-lista\{[^}]*max-height:calc\(100vh - 120px\)\}/);
+  assert.match(PANEL, /<input type="checkbox" id="pla-rub-solo" onchange="plaRubrosPintar\(\)" style="width:auto;margin:0 5px 0 0;vertical-align:middle">/);
+  const soltar = fuente(PANEL, 'function plaSoltar(ev, zona){');
+  assert.equal((soltar.match(/plaRubrosTocar\(cuenta\);/g) || []).length, 2);
+  assert.ok(!/plaRubrosPintar\(\)/.test(soltar), 'soltar vuelve a dibujar todo');
+  assert.match(fuente(PANEL, 'function plaQuitarVentas(cuenta){'), /plaRubrosTocar\(cuenta\);/);
+});
+
+test('manual V1059: los títulos quedan a la vista mientras se baja por la lista', () => {
+  const M = manual();
+  assert.match(M, /Los títulos quedan <b>fijos a la derecha<\/b> mientras se baja por la lista, así se arrastra sin perderlos de vista/);
+  assert.match(M, /<span class="ver">V1059<\/span> Configurar rubros responde enseguida con cientos de cuentas/);
 });
 
 // ══ 7 · EL MENÚ, LA DIRECCIÓN Y EL PERMISO ═══════════════════════════════════════════

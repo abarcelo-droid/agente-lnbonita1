@@ -5545,19 +5545,20 @@ input[type=number]{-moz-appearance:textfield;appearance:textfield}
     #sec-pl-abasto .pla-res .pla-pos,#sec-pl-abasto .pla-res .pla-neg{color:#fff}
     #sec-pl-abasto .pla-pct{display:block;font-size:9.5px;color:var(--mut);font-weight:400}
     #sec-pl-abasto .pla-res .pla-pct{color:#cbd5e1}
-    #sec-pl-abasto .pla-dnd{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,2fr);gap:12px}
-    #sec-pl-abasto .pla-zonas{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
-    #sec-pl-abasto .pla-zona{border:1.5px dashed var(--bor);border-radius:10px;padding:8px;min-height:110px;
-      max-height:260px;overflow-y:auto;overflow-x:hidden;background:var(--bg)}
+    #sec-pl-abasto .pla-dnd{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,2fr);gap:12px;align-items:start}
+    #sec-pl-abasto .pla-zonas{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;align-content:start;
+      position:sticky;top:8px;max-height:calc(100vh - 120px);overflow-y:auto;overflow-x:hidden}
+    #sec-pl-abasto .pla-zona{border:1.5px dashed var(--bor);border-radius:10px;padding:8px;min-height:90px;
+      max-height:220px;overflow-y:auto;overflow-x:hidden;background:var(--bg);contain:content}
     #sec-pl-abasto .pla-zona.sobre,#sec-pl-abasto .pla-lista.sobre{border-color:var(--burg);background:rgba(128,0,32,.05)}
     #sec-pl-abasto .pla-zona h4{margin:0 0 6px;font-size:12px;position:sticky;top:-8px;background:var(--bg);padding:3px 0}
     #sec-pl-abasto .pla-lista{border:1.5px dashed var(--bor);border-radius:10px;background:var(--bg);display:flex;
-      flex-direction:column;max-height:800px}
+      flex-direction:column;max-height:calc(100vh - 120px)}
     #sec-pl-abasto .pla-lista-hd{background:#0a2744;color:#fff;padding:9px 12px;border-radius:8px 8px 0 0;font-size:12px}
     #sec-pl-abasto .pla-lista-hd span{color:#cbd5e1;margin-left:6px;font-size:11px}
     #sec-pl-abasto #pla-rub-q{width:100%;box-sizing:border-box;padding:6px 9px;border:1px solid var(--bor);border-radius:6px;
       background:var(--pan,#fff);font-size:12.5px}
-    #sec-pl-abasto .pla-lista-cuerpo{overflow-y:auto;overflow-x:hidden;padding:0 8px 8px;flex:1}
+    #sec-pl-abasto .pla-lista-cuerpo{overflow-y:auto;overflow-x:hidden;padding:0 8px 8px;flex:1;contain:content}
     #sec-pl-abasto .pla-fila{display:flex;align-items:center;gap:8px;border:1px solid var(--bor);border-radius:7px;
       padding:5px 8px;margin:0 0 5px;background:var(--pan,#fff);cursor:grab;font-size:11.5px}
     #sec-pl-abasto .pla-fila.pend{border-color:#f59e0b;background:#fffbeb}
@@ -5582,7 +5583,8 @@ input[type=number]{-moz-appearance:textfield;appearance:textfield}
     #sec-pl-abasto .pla-nb-ren td{color:#475569;font-size:11px}
     @media(max-width:900px){ #sec-pl-abasto .ab-table-wrap{overflow-x:auto !important}
       #sec-pl-abasto .pla-tbl{table-layout:auto}
-      #sec-pl-abasto .pla-dnd,#sec-pl-abasto .pla-zonas{grid-template-columns:1fr} }
+      #sec-pl-abasto .pla-dnd,#sec-pl-abasto .pla-zonas{grid-template-columns:1fr}
+      #sec-pl-abasto .pla-zonas{position:static;max-height:none} }
   </style>
   <div class="ph"><div><div class="ph-t">📊 P&amp;L Abasto</div>
       <div class="ph-s">El estado de resultados de cada mes, armado con el libro diario del otro sistema</div></div>
@@ -5629,12 +5631,12 @@ input[type=number]{-moz-appearance:textfield;appearance:textfield}
            debe mostrarme en cuál... no quiero perder ninguno de vista». Soltar acá le saca el
            título a una cuenta. -->
       <div class="pla-lista" data-rubro="sin_asignar" ondragover="plaSobre(event,this)"
-           ondragleave="this.classList.remove('sobre')" ondrop="plaSoltar(event,this)">
+           ondragleave="plaSalir(event,this)" ondrop="plaSoltar(event,this)">
         <div class="pla-lista-hd"><b>CUENTAS CONTABLES</b><span id="pla-rub-cuenta"></span></div>
         <div style="padding:8px">
           <input id="pla-rub-q" placeholder="🔍 Buscar por nombre o código" oninput="plaRubrosPintar()">
-          <label style="display:block;margin-top:6px;font-size:11.5px;color:var(--mut)">
-            <input type="checkbox" id="pla-rub-solo" onchange="plaRubrosPintar()"> Sólo las de resultado sin título</label>
+          <label style="display:block;margin-top:6px;font-size:11.5px;color:var(--mut);text-transform:none;letter-spacing:0;cursor:pointer">
+            <input type="checkbox" id="pla-rub-solo" onchange="plaRubrosPintar()" style="width:auto;margin:0 5px 0 0;vertical-align:middle"> Sólo las de resultado sin título</label>
         </div>
         <div class="pla-lista-cuerpo" id="pla-rub-lista"></div>
       </div>
@@ -24491,6 +24493,9 @@ SG_MANUAL.plabasto = { titulo: 'P&L Abasto', html:
   + 'también las del patrimonio —clientes, proveedores, bancos, IVA—, agrupadas en activo, pasivo, patrimonio '
   + 'neto y resultados. Se busca por nombre o código, y se pueden ver <b>sólo las de resultado sin título</b>, '
   + 'que son las que faltan clasificar. Arrastrar una cuenta a la lista le saca el título.</li>'
+  + '<li><span class="ver">V1059</span> Los títulos quedan <b>fijos a la derecha</b> mientras se baja por la lista, '
+  + 'así se arrastra sin perderlos de vista. Soltar una cuenta cambia sólo esa fila: la lista entera no se vuelve a '
+  + 'dibujar.</li>'
   + '<li>Por defecto va sólo lo que el plan de cuentas dice solo: los descuentos al súper, por su nombre, a '
   + 'descuentos super; los intereses, los gastos bancarios, la diferencia de cambio y el rendimiento del FCI, a '
   + 'costos financieros; los impuestos, por su nombre; y el resto del 4.1 que no es gasto «G -» —ventas, y '
@@ -24514,6 +24519,8 @@ SG_MANUAL.plabasto = { titulo: 'P&L Abasto', html:
 
   + '<h3>Qué cambió, y desde cuándo</h3>'
   + '<ul>'
+  + '<li><span class="ver">V1059</span> Configurar rubros responde enseguida con cientos de cuentas, y los títulos '
+  + 'no se pierden de vista al arrastrar.</li>'
   + '<li><span class="ver">V1058</span> Una cuenta puede estar también en VENTAS, además de su título, y suma en '
   + 'los dos.</li>'
   + '<li><span class="ver">V1057</span> La lista de cuentas muestra también las del patrimonio —clientes, '
@@ -43589,7 +43596,9 @@ function plaLeerLibroDiario(hojas){
 
 function plaFechaTxt(f){ return f ? f.slice(8, 10) + '/' + f.slice(5, 7) + '/' + f.slice(0, 4) : '—'; }
 function plaImporte(v, usd){
-  return (v < 0 ? '-' : '') + (usd ? 'U$S ' : '$ ') + Math.abs(Number(v) || 0).toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  // UN SOLO FORMATEADOR (V1059): con cientos de cuentas en pantalla, armar uno por número frenaba.
+  var f = plaImporte.fmt || (plaImporte.fmt = new Intl.NumberFormat('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }));
+  return (v < 0 ? '-' : '') + (usd ? 'U$S ' : '$ ') + f.format(Math.abs(Number(v) || 0));
 }
 var PLA_MES = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
 function plaMesTxt(m){ return PLA_MES[Number(m.slice(5, 7)) - 1] + ' ' + m.slice(0, 4); }
@@ -44430,39 +44439,61 @@ function plaGrupoCuenta(cuenta){
 var PLA_COLOR = { ventas: '#15803d', utilidad: '#0f766e', descuentos_super: '#b45309', costos_ventas: '#9a3412',
   costos_fijos: '#1d4ed8', costos_variables: '#a16207', costos_financieros: '#7e22ce', impuestos: '#b91c1c' };
 
-function plaRubrosPintar(){
-  var D = PLA.cuentas; if (!D) return;
-  var q = sgNorm(String((eid('pla-rub-q') || {}).value || '').trim());
-  var solo = !!(eid('pla-rub-solo') || {}).checked;
+// ── LA LISTA Y LAS CAJAS ──────────────────────────────────────────────────────
+// V1059. Pablo, 14/9/2026: «no anda arrastrar rubros de un lado a otro, y cuando quiero operar se
+// tilda». Con las 873 cuentas de la lista, cada soltada volvía a dibujar la lista entera: en una
+// notebook común, casi un segundo congelado por cuenta, y la caja de destino fuera de la vista.
+// Ahora soltar cambia sólo esa fila y las cajas; la lista entera se dibuja al abrir, al buscar
+// y con la casilla.
+function plaRubrosFila(c, titulo){
+  var pend = PLA.pend[c.cuenta] != null, t = titulo[plaRubroActual(c)], def = !c.elegido && !pend;
+  return '<div class="pla-fila' + (pend ? ' pend' : '') + '" draggable="true" data-cuenta="' + escH(c.cuenta) + '"'
+    + ' ondragstart="plaArrastrar(event)" title="' + escH(c.cuenta + ' · ' + c.nombre + ' · ' + plaImporte(c.importe)) + '">'
+    + '<code>' + escH(c.cuenta) + '</code><span class="n">' + escH(c.nombre) + '</span>'
+    + (t ? '<span class="pla-badge' + (def ? ' def' : '') + '" style="color:' + (PLA_COLOR[t.k] || 'var(--mut)') + '"'
+        + ' title="' + escH(t.label + (def ? ' · por defecto' : '')) + '">' + escH(t.corto) + '</span>' : '')
+    + (plaTambienVentas(c) ? '<span class="pla-badge" style="color:' + PLA_COLOR.ventas + '" title="También en VENTAS">'
+        + '+ Ventas</span>' : '')
+    + '</div>';
+}
+
+function plaRubrosTitulos(){
   var titulo = {};
-  (D.rubros || []).forEach(function(r){ titulo[r.k] = r; });
-  var busca = function(c){ return !q || sgNorm(c.cuenta + ' ' + c.nombre).indexOf(q) >= 0; };
-  var ayuda = function(c){ return escH(c.cuenta + ' · ' + c.nombre + ' · ' + plaImporte(c.importe)); };
-  var todas = D.cuentas || [];
-  // Las de resultado sin título son las que faltan clasificar; las del patrimonio arrancan así.
-  var faltan = todas.filter(function(c){ return c.resultado && plaRubroActual(c) === 'sin_asignar'; });
-  // LA LISTA ENTERA —también las del patrimonio—, cada cuenta con la etiqueta de su título; la
-  // que no tiene título, sin etiqueta. Punteada, la de por defecto. Con un encabezado por grupo
-  // del plan de cuentas.
-  eid('pla-rub-cuenta').textContent = todas.length + ' con movimientos'
-    + (faltan.length ? ' · ' + faltan.length + ' de resultado sin título' : '');
+  ((PLA.cuentas || {}).rubros || []).forEach(function(r){ titulo[r.k] = r; });
+  return titulo;
+}
+
+function plaRubrosBusca(){
+  var q = sgNorm(String((eid('pla-rub-q') || {}).value || '').trim());
+  return function(c){ return !q || sgNorm(c.cuenta + ' ' + c.nombre).indexOf(q) >= 0; };
+}
+
+// LA LISTA ENTERA —también las del patrimonio—, cada cuenta con la etiqueta de su título; la que
+// no tiene título, sin etiqueta. Punteada, la de por defecto. Con un encabezado por grupo.
+function plaRubrosListaPintar(){
+  var D = PLA.cuentas; if (!D) return;
+  var busca = plaRubrosBusca(), titulo = plaRubrosTitulos(), todas = D.cuentas || [];
+  var solo = !!(eid('pla-rub-solo') || {}).checked;
   var grupo = '';
   eid('pla-rub-lista').innerHTML = todas.filter(function(c){
     return busca(c) && (!solo || (c.resultado && plaRubroActual(c) === 'sin_asignar'));
   }).map(function(c){
-    var pend = PLA.pend[c.cuenta] != null, t = titulo[plaRubroActual(c)], def = !c.elegido && !pend;
     var g = plaGrupoCuenta(c.cuenta), cab = g !== grupo ? '<div class="pla-grupo">' + g + '</div>' : '';
     grupo = g;
-    return cab + '<div class="pla-fila' + (pend ? ' pend' : '') + '" draggable="true" data-cuenta="' + escH(c.cuenta) + '"'
-      + ' ondragstart="plaArrastrar(event)" title="' + ayuda(c) + '"><code>' + escH(c.cuenta) + '</code>'
-      + '<span class="n">' + escH(c.nombre) + '</span>'
-      + (t ? '<span class="pla-badge' + (def ? ' def' : '') + '" style="color:' + (PLA_COLOR[t.k] || 'var(--mut)') + '"'
-          + ' title="' + escH(t.label + (def ? ' · por defecto' : '')) + '">' + escH(t.corto) + '</span>' : '')
-      + (plaTambienVentas(c) ? '<span class="pla-badge" style="color:' + PLA_COLOR.ventas + '" title="También en VENTAS">'
-          + '+ Ventas</span>' : '')
-      + '</div>';
+    return cab + plaRubrosFila(c, titulo);
   }).join('') || '<div style="font-size:11.5px;color:var(--mut);padding:6px">'
     + (todas.length ? 'Ninguna coincide.' : 'Todavía no hay libro diario cargado.') + '</div>';
+}
+
+// Las cajas de los títulos, el contador y lo que falta guardar: son pocas cuentas, van enteras.
+function plaRubrosZonasPintar(){
+  var D = PLA.cuentas; if (!D) return;
+  var busca = plaRubrosBusca(), titulo = plaRubrosTitulos(), todas = D.cuentas || [];
+  var ayuda = function(c){ return escH(c.cuenta + ' · ' + c.nombre + ' · ' + plaImporte(c.importe)); };
+  // Las de resultado sin título son las que faltan clasificar; las del patrimonio arrancan así.
+  var faltan = todas.filter(function(c){ return c.resultado && plaRubroActual(c) === 'sin_asignar'; });
+  eid('pla-rub-cuenta').textContent = todas.length + ' con movimientos'
+    + (faltan.length ? ' · ' + faltan.length + ' de resultado sin título' : '');
   var chip = function(c){
     if (!busca(c)) return '';
     var pend = PLA.pend[c.cuenta] != null;
@@ -44484,7 +44515,7 @@ function plaRubrosPintar(){
     var cs = todas.filter(function(c){ return plaRubroActual(c) === r.k; });
     var reps = r.k === 'ventas' ? todas.filter(plaTambienVentas) : [];
     return '<div class="pla-zona" data-rubro="' + r.k + '" ondragover="plaSobre(event,this)"'
-      + ' ondragleave="this.classList.remove(\'sobre\')" ondrop="plaSoltar(event,this)">'
+      + ' ondragleave="plaSalir(event,this)" ondrop="plaSoltar(event,this)">'
       + '<h4>' + r.ico + ' ' + escH(r.label) + ' <small style="font-weight:400;color:var(--mut)">(' + (cs.length + reps.length)
       + ')</small></h4>' + cs.map(chip).join('') + reps.map(repetida).join('') + '</div>';
   }).join('');
@@ -44493,11 +44524,30 @@ function plaRubrosPintar(){
   eid('pla-rub-guardar').disabled = !n;
 }
 
+function plaRubrosPintar(){
+  if (!PLA.cuentas) return;
+  plaRubrosListaPintar();
+  plaRubrosZonasPintar();
+}
+
+// Después de soltar una cuenta: sólo su fila, y las cajas. Con la casilla puesta la fila puede
+// tener que salir de la lista: ahí sí se dibuja entera.
+function plaRubrosTocar(cuenta){
+  var lista = eid('pla-rub-lista');
+  var c = ((PLA.cuentas || {}).cuentas || []).filter(function(x){ return x.cuenta === cuenta; })[0];
+  var fila = (lista && lista.querySelector && c) ? lista.querySelector('.pla-fila[data-cuenta="' + cuenta + '"]') : null;
+  if (!fila || (eid('pla-rub-solo') || {}).checked) plaRubrosListaPintar();
+  else fila.outerHTML = plaRubrosFila(c, plaRubrosTitulos());
+  plaRubrosZonasPintar();
+}
+
 function plaArrastrar(ev){
   ev.dataTransfer.setData('text/plain', ev.currentTarget.getAttribute('data-cuenta'));
   ev.dataTransfer.effectAllowed = 'move';
 }
-function plaSobre(ev, zona){ ev.preventDefault(); zona.classList.add('sobre'); }
+function plaSobre(ev, zona){ ev.preventDefault(); if (!zona.classList.contains('sobre')) zona.classList.add('sobre'); }
+// Salir de verdad, no pasar a una fila de adentro: si no, la marca se prende y se apaga a cada fila.
+function plaSalir(ev, zona){ if (!ev.relatedTarget || !zona.contains(ev.relatedTarget)) zona.classList.remove('sobre'); }
 function plaSoltar(ev, zona){
   ev.preventDefault();
   zona.classList.remove('sobre');
@@ -44508,7 +44558,7 @@ function plaSoltar(ev, zona){
   // SÓLO VENTAS SE REPITE: soltar en VENTAS una cuenta que ya tiene otro título la deja en los dos.
   if (rubro === 'ventas' && actual !== 'ventas' && actual !== 'sin_asignar') {
     plaVentasPend(c, 1);
-    plaRubrosPintar();
+    plaRubrosTocar(cuenta);
     return;
   }
   // Devolverla al rubro que ya tenía guardado no es un cambio. Soltar una «por defecto» en
@@ -44516,7 +44566,7 @@ function plaSoltar(ev, zona){
   if (rubro === c.rubro && c.elegido) delete PLA.pend[cuenta]; else PLA.pend[cuenta] = rubro;
   // Pasarla a VENTAS como título, o a la lista, le saca la repetición.
   if (rubro === 'ventas' || rubro === 'sin_asignar') plaVentasPend(c, 0);
-  plaRubrosPintar();
+  plaRubrosTocar(cuenta);
 }
 
 // Lo que se va a guardar de «también en VENTAS»: volver a como estaba no es un cambio.
@@ -44535,7 +44585,7 @@ function plaQuitarVentas(cuenta){
   var c = ((PLA.cuentas || {}).cuentas || []).filter(function(x){ return x.cuenta === cuenta; })[0];
   if (!c) return;
   plaVentasPend(c, 0);
-  plaRubrosPintar();
+  plaRubrosTocar(cuenta);
 }
 
 // EL GUARDADO ES EXPLÍCITO: reordenar veinte cuentas y que cada soltada escriba dejaría
