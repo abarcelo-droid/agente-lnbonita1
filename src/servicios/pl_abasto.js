@@ -131,3 +131,45 @@ export function validarCarga(body) {
   }
   return { renglones, cuentas, desde, hasta, debe: r2(debe), haber: r2(haber) };
 }
+
+// ── LO QUE NO BALANCEA ────────────────────────────────────────────────────────
+//
+// Pablo, 14/9/2026: «esto de que el asiento no balancea es perfecto, necesito que me lo
+// agregues como una solapa, con el detalle de todo lo que no balancea».
+//
+// En el libro diario del otro sistema un tercio de los asientos no cierra solo, y casi
+// todos por la misma razón: la operación quedó partida en DOS números —la compra en uno y
+// su pago en otro, el mismo día— y cada mitad compensa exactamente a la otra. Eso no es un
+// error, y listarlo tapaba lo que sí lo es. En diario091426.xls: 2.746 asientos que no
+// cierran, 2.664 de a pares; la diferencia de −$22,7 millones la explican los 82 que
+// quedan solos, en 35 días. (Y el mismo archivo lo confirma: al final de cada día imprime
+// la diferencia del día, y esas 72 cifras suman justo la del archivo.)
+//
+// Por eso lo que no balancea se mira POR DÍA, y adentro de cada día se apartan las parejas
+// —dos asientos con diferencias opuestas al centavo—. Los que quedan sin pareja suman la
+// diferencia del día, a lo sumo con unos centavos de redondeo: el archivo trae cuatro
+// decimales y cada asiento se redondea al centavo (en el diario de abril, 6 días de 199).
+export function asientosSinPareja(asientos) {
+  const libres = new Map();
+  let emparejados = 0;
+  const orden = (asientos || []).slice().sort((a, b) => String(a.fecha).localeCompare(String(b.fecha))
+    || String(a.asiento).localeCompare(String(b.asiento), undefined, { numeric: true }));
+  for (const x of orden) {
+    const centavos = Math.round((Number(x.debe) - Number(x.haber)) * 100);
+    if (!centavos) continue;
+    const opuestos = libres.get(x.fecha + '|' + -centavos);
+    if (opuestos && opuestos.length) {
+      opuestos.shift();
+      emparejados += 2;
+      continue;
+    }
+    const k = x.fecha + '|' + centavos;
+    if (!libres.has(k)) libres.set(k, []);
+    libres.get(k).push(x);
+  }
+  const solos = [].concat(...libres.values());
+  // Del día más nuevo al más viejo, y adentro del día la diferencia más grande arriba.
+  solos.sort((a, b) => String(b.fecha).localeCompare(String(a.fecha))
+    || Math.abs(b.debe - b.haber) - Math.abs(a.debe - a.haber));
+  return { solos, emparejados };
+}

@@ -20,7 +20,7 @@
 import express from 'express';
 import db from '../servicios/db.js';
 import { RUBROS, SIN_ASIGNAR, esRubro, esCuentaDeResultado, rubroPorDefecto, validarCarga,
-  avisosDeReemplazo } from '../servicios/pl_abasto.js';
+  avisosDeReemplazo, asientosSinPareja } from '../servicios/pl_abasto.js';
 
 const router = express.Router();
 
@@ -77,6 +77,8 @@ const FECHA = /^\d{4}-\d{2}-\d{2}$/;
 // Los asientos de un importe, a lo sumo. Los de VENTAS de un mes son más de mil: se
 // muestran los más recientes, y el total es siempre de todos.
 const DETALLE_MAX = 1000;
+// Los asientos sin pareja de lo que no balancea, a lo sumo. En un año entero son cientos.
+const NB_MAX = 2000;
 
 function r2(n) {
   return Math.round((Number(n) || 0) * 100) / 100;
@@ -269,6 +271,67 @@ router.delete('/rubros', requireAuth, (req, res) => {
   try {
     const n = db.prepare('DELETE FROM pl_abasto_rubros').run().changes;
     res.json({ ok: true, data: { borradas: n } });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// ── LO QUE NO BALANCEA ───────────────────────────────────────────────────────
+// Los días en que el debe y el haber no dan igual y, en cada uno, los asientos sin pareja
+// que explican la diferencia, con sus renglones (ver asientosSinPareja).
+router.get('/no-balancea', requireAuth, (req, res) => {
+  try {
+    const disponibles = db.prepare('SELECT DISTINCT mes FROM pl_abasto_movimientos ORDER BY mes').all()
+      .map((x) => x.mes);
+    let desde = String(req.query.desde || ''), hasta = String(req.query.hasta || '');
+    // Sin período, todo lo cargado: es una lista y no columnas, no hay tope de meses.
+    if (!MES.test(desde) || !MES.test(hasta)) {
+      desde = disponibles[0] || '';
+      hasta = disponibles[disponibles.length - 1] || '';
+    }
+    if (desde > hasta) [desde, hasta] = [hasta, desde];
+    const t = db.prepare(`SELECT COUNT(*) AS renglones, ROUND(COALESCE(SUM(debe),0), 2) AS debe,
+        ROUND(COALESCE(SUM(haber),0), 2) AS haber, ROUND(COALESCE(SUM(debe) - SUM(haber),0), 2) AS diferencia
+      FROM pl_abasto_movimientos WHERE mes BETWEEN ? AND ?`).get(desde, hasta);
+    const dias = db.prepare(`SELECT fecha, COUNT(*) AS renglones, ROUND(SUM(debe), 2) AS debe,
+        ROUND(SUM(haber), 2) AS haber, ROUND(SUM(debe) - SUM(haber), 2) AS diferencia
+      FROM pl_abasto_movimientos WHERE mes BETWEEN ? AND ?
+      GROUP BY fecha HAVING ABS(SUM(debe) - SUM(haber)) >= 0.005 ORDER BY fecha DESC`).all(desde, hasta)
+      .map((d) => Object.assign({}, d, { asientos: [] }));
+    const porDia = new Map(dias.map((d) => [d.fecha, d]));
+    let noCierran = 0, emparejados = 0, sinPareja = 0, recortado = 0;
+    if (dias.length) {
+      // Sólo los días que no balancean: en uno que da cero, lo que no cierra se compensa.
+      const asientos = db.prepare(`SELECT asiento, fecha, COUNT(*) AS renglones, ROUND(SUM(debe), 2) AS debe,
+          ROUND(SUM(haber), 2) AS haber
+        FROM pl_abasto_movimientos WHERE mes BETWEEN ? AND ?
+        GROUP BY asiento, fecha HAVING ABS(SUM(debe) - SUM(haber)) >= 0.005`).all(desde, hasta)
+        .filter((a) => porDia.has(a.fecha));
+      noCierran = asientos.length;
+      const p = asientosSinPareja(asientos);
+      emparejados = p.emparejados;
+      sinPareja = p.solos.length;
+      const solos = p.solos.slice(0, NB_MAX);
+      recortado = sinPareja > solos.length ? 1 : 0;
+      const renglones = new Map();
+      for (let i = 0; i < solos.length; i += 400) {
+        const lote = solos.slice(i, i + 400);
+        const donde = lote.map(() => '(m.asiento = ? AND m.fecha = ?)').join(' OR ');
+        const filas = db.prepare(`SELECT m.asiento, m.fecha, m.cuenta, COALESCE(c.nombre, m.cuenta) AS nombre,
+            m.debe, m.haber
+          FROM pl_abasto_movimientos m LEFT JOIN pl_abasto_cuentas c ON c.cuenta = m.cuenta
+          WHERE ${donde} ORDER BY m.id`).all(...lote.flatMap((a) => [a.asiento, a.fecha]));
+        for (const r of filas) {
+          const k = r.asiento + '|' + r.fecha;
+          if (!renglones.has(k)) renglones.set(k, []);
+          renglones.get(k).push({ cuenta: r.cuenta, nombre: r.nombre, debe: r.debe, haber: r.haber });
+        }
+      }
+      for (const a of solos) {
+        porDia.get(a.fecha).asientos.push(Object.assign({}, a, { diferencia: r2(a.debe - a.haber),
+          renglones: renglones.get(a.asiento + '|' + a.fecha) || [] }));
+      }
+    }
+    res.json({ ok: true, data: { meses_disponibles: disponibles, desde, hasta, total: t, dias,
+      no_cierran: noCierran, emparejados, sin_pareja: sinPareja, recortado } });
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
