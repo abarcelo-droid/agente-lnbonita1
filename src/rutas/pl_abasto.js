@@ -340,7 +340,8 @@ router.get('/resultado', requireAuth, (req, res) => {
     const { elegidos, nombres, rubroDe } = rubrosDeCuentas(db);
     const porCuenta = new Map();
     for (const f of filas) {
-      if (!esCuentaDeResultado(f.cuenta)) continue;
+      // Las de resultado siempre; una del patrimonio, sólo si alguien le puso un título.
+      if (!esCuentaDeResultado(f.cuenta) && rubroDe(f.cuenta) === SIN_ASIGNAR) continue;
       let c = porCuenta.get(f.cuenta);
       if (!c) {
         const nombre = nombres.get(f.cuenta) || f.cuenta;
@@ -363,9 +364,11 @@ router.get('/cuentas', requireAuth, (req, res) => {
     const totales = new Map(db.prepare(`SELECT cuenta, ROUND(SUM(haber) - SUM(debe), 2) AS importe,
         COUNT(*) AS renglones FROM pl_abasto_movimientos GROUP BY cuenta`).all().map((x) => [x.cuenta, x]));
     const { elegidos, nombres, rubroDe } = rubrosDeCuentas(db);
-    // TODAS LAS QUE TIENEN MOVIMIENTOS, con título o sin él: que ninguna se pierda de vista.
-    const cuentas = [...nombres.keys()].filter((c) => esCuentaDeResultado(c) && totales.has(c)).sort().map((c) => ({
-      cuenta: c, nombre: nombres.get(c), rubro: rubroDe(c), rubro_defecto: rubroPorDefecto(c, nombres.get(c)),
+    // TODAS LAS QUE TIENEN MOVIMIENTOS, con título o sin él, y también las del patrimonio: que
+    // ninguna se pierda de vista. Pablo, 14/9/2026: «¿por qué me escondés algunos rubros, por
+    // ejemplo COTO, IVA? Quiero ver todo y a lo sumo no asignar».
+    const cuentas = [...nombres.keys()].filter((c) => totales.has(c)).sort().map((c) => ({
+      cuenta: c, nombre: nombres.get(c), resultado: esCuentaDeResultado(c) ? 1 : 0, rubro: rubroDe(c), rubro_defecto: rubroPorDefecto(c, nombres.get(c)),
       elegido: elegidos.has(c) ? 1 : 0,
       importe: (totales.get(c) || {}).importe || 0, renglones: (totales.get(c) || {}).renglones || 0,
     }));
@@ -380,9 +383,12 @@ router.put('/rubros', requireAuth, (req, res) => {
     if (!cambios || !Object.keys(cambios).length) {
       return res.status(400).json({ ok: false, error: 'No hay cambios para guardar.' });
     }
+    // CUALQUIER CUENTA DEL LIBRO DIARIO, también una del patrimonio: arranca sin título y el
+    // título lo decide quien clasifica.
+    const conocida = db.prepare('SELECT 1 AS si FROM pl_abasto_cuentas WHERE cuenta = ?');
     for (const [c, r] of Object.entries(cambios)) {
-      if (!esCuentaDeResultado(c)) {
-        return res.status(400).json({ ok: false, error: 'La cuenta ' + c + ' no es de resultado.' });
+      if (!conocida.get(c)) {
+        return res.status(400).json({ ok: false, error: 'La cuenta ' + c + ' no está en el libro diario.' });
       }
       if (!esRubro(r)) return res.status(400).json({ ok: false, error: 'Ese rubro no existe: ' + r });
     }
@@ -562,15 +568,18 @@ router.get('/detalle', requireAuth, (req, res) => {
     const desde = String(req.query.desde || ''), hasta = String(req.query.hasta || '');
     if (!MES.test(desde) || !MES.test(hasta)) return res.status(400).json({ ok: false, error: 'Falta el período.' });
     let cuentas = [];
+    const { rubroDe } = rubrosDeCuentas(db);
     if (req.query.cuenta) {
       const c = String(req.query.cuenta);
-      if (!esCuentaDeResultado(c)) return res.status(400).json({ ok: false, error: 'Esa cuenta no es de resultado.' });
+      // Las que están en el cuadro: las de resultado, y una del patrimonio con título.
+      if (!esCuentaDeResultado(c) && rubroDe(c) === SIN_ASIGNAR) {
+        return res.status(400).json({ ok: false, error: 'Esa cuenta no está en el cuadro.' });
+      }
       cuentas = [c];
     } else if (esRubro(req.query.rubro) && req.query.rubro !== SIN_ASIGNAR) {
-      const { rubroDe } = rubrosDeCuentas(db);
       cuentas = db.prepare('SELECT DISTINCT cuenta FROM pl_abasto_movimientos WHERE mes BETWEEN ? AND ?')
         .all(desde, hasta).map((x) => x.cuenta)
-        .filter((c) => esCuentaDeResultado(c) && rubroDe(c) === req.query.rubro);
+        .filter((c) => rubroDe(c) === req.query.rubro);
     } else {
       return res.status(400).json({ ok: false, error: 'Falta la cuenta o el rubro.' });
     }
