@@ -5566,6 +5566,7 @@ input[type=number]{-moz-appearance:textfield;appearance:textfield}
     #sec-pl-abasto .pla-badge{flex:0 0 auto;font-size:10px;font-weight:700;border:1px solid;border-radius:10px;
       padding:1px 7px;white-space:nowrap;background:var(--pan,#fff)}
     #sec-pl-abasto .pla-badge.def{border-style:dashed}
+    #sec-pl-abasto .pla-grupo{font-size:10.5px;font-weight:700;color:var(--mut);letter-spacing:.05em;margin:10px 2px 5px}
     #sec-pl-abasto .pla-chip{border:1px solid var(--bor);border-radius:7px;padding:4px 7px;margin:0 0 5px;
       background:var(--pan,#fff);cursor:grab;font-size:11.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
     #sec-pl-abasto .pla-chip small{color:var(--mut)}
@@ -5631,7 +5632,7 @@ input[type=number]{-moz-appearance:textfield;appearance:textfield}
         <div style="padding:8px">
           <input id="pla-rub-q" placeholder="🔍 Buscar por nombre o código" oninput="plaRubrosPintar()">
           <label style="display:block;margin-top:6px;font-size:11.5px;color:var(--mut)">
-            <input type="checkbox" id="pla-rub-solo" onchange="plaRubrosPintar()"> Sólo las que no tienen título</label>
+            <input type="checkbox" id="pla-rub-solo" onchange="plaRubrosPintar()"> Sólo las de resultado sin título</label>
         </div>
         <div class="pla-lista-cuerpo" id="pla-rub-lista"></div>
       </div>
@@ -24417,8 +24418,9 @@ SG_MANUAL.plabasto = { titulo: 'P&L Abasto', html:
   + '<li><b>Clic en un rubro</b>: se abren sus cuentas. <b>Doble clic en un importe</b>: los asientos que lo '
   + 'forman, con su fecha, el número de asiento, la <b>contrapartida</b> —las otras cuentas del mismo asiento: el '
   + 'cliente de una venta, cuando el otro sistema la cargó con su cobro en el mismo asiento—, el debe y el haber.</li>'
-  + '<li>Sólo entran las <b>cuentas de resultado</b>. Las que empiezan con 1, 2 o 3 son del patrimonio '
-  + '—caja, clientes, proveedores, IVA— y no están en el cuadro.</li>'
+  + '<li>Entran las <b>cuentas de resultado</b>. Las que empiezan con 1, 2 o 3 son del patrimonio —caja, '
+  + 'clientes, proveedores, IVA—: <span class="ver">V1057</span> se ven igual en la lista de Configurar rubros, '
+  + 'arrancan sin título y no están en el cuadro; si alguien les pone uno, entran.</li>'
   + '</ul>'
 
   + '<h3>Ajustes manuales</h3>'
@@ -24483,8 +24485,10 @@ SG_MANUAL.plabasto = { titulo: 'P&L Abasto', html:
   + 'LAS VENTAS, COSTOS FIJOS, COSTOS VARIABLES, COSTOS FINANCIEROS e IMPUESTOS</b>. Cada cuenta se lleva a uno '
   + '<b>arrastrándola</b>, y se confirma con <b>💾 Guardar</b>.</li>'
   + '<li>A la izquierda está la <b>lista entera de las cuentas con movimientos</b>, cada una con la etiqueta del '
-  + 'título que tiene; la que no lleva etiqueta no tiene título. Se busca por nombre o código, y se pueden ver '
-  + '<b>sólo las que no tienen título</b>. Arrastrar una cuenta a la lista le saca el título.</li>'
+  + 'título que tiene; la que no lleva etiqueta no tiene título. <span class="ver">V1057</span> Están <b>todas</b>, '
+  + 'también las del patrimonio —clientes, proveedores, bancos, IVA—, agrupadas en activo, pasivo, patrimonio '
+  + 'neto y resultados. Se busca por nombre o código, y se pueden ver <b>sólo las de resultado sin título</b>, '
+  + 'que son las que faltan clasificar. Arrastrar una cuenta a la lista le saca el título.</li>'
   + '<li>Por defecto va sólo lo que el plan de cuentas dice solo: los descuentos al súper, por su nombre, a '
   + 'descuentos super; los intereses, los gastos bancarios, la diferencia de cambio y el rendimiento del FCI, a '
   + 'costos financieros; los impuestos, por su nombre; y el resto del 4.1 que no es gasto «G -» —ventas, y '
@@ -24503,6 +24507,8 @@ SG_MANUAL.plabasto = { titulo: 'P&L Abasto', html:
 
   + '<h3>Qué cambió, y desde cuándo</h3>'
   + '<ul>'
+  + '<li><span class="ver">V1057</span> La lista de cuentas muestra también las del patrimonio —clientes, '
+  + 'proveedores, bancos, IVA—, y a una se le puede poner título.</li>'
   + '<li><span class="ver">V1056</span> Los títulos nuevos, la lista entera de cuentas con el título de cada una, '
   + 'y lo que el plan de cuentas no dice solo arranca sin título.</li>'
   + '<li><span class="ver">V1055</span> El cuadro en dólares, con la cotización de cada mes.</li>'
@@ -44394,6 +44400,13 @@ function plaRubrosCargar(){
 
 function plaRubroActual(c){ return PLA.pend[c.cuenta] || c.rubro; }
 
+// El grupo del plan de cuentas, por el primer dígito: la lista entera tiene cientos de cuentas.
+var PLA_GRUPOS = { '1': 'ACTIVO', '2': 'PASIVO', '3': 'PATRIMONIO NETO' };
+function plaGrupoCuenta(cuenta){
+  var d = String(cuenta || '').charAt(0);
+  return d + ' · ' + (PLA_GRUPOS[d] || 'RESULTADOS');
+}
+
 // El color de la etiqueta de cada título en la lista de cuentas.
 var PLA_COLOR = { ventas: '#15803d', utilidad: '#0f766e', descuentos_super: '#b45309', costos_ventas: '#9a3412',
   costos_fijos: '#1d4ed8', costos_variables: '#a16207', costos_financieros: '#7e22ce', impuestos: '#b91c1c' };
@@ -44407,15 +44420,21 @@ function plaRubrosPintar(){
   var busca = function(c){ return !q || sgNorm(c.cuenta + ' ' + c.nombre).indexOf(q) >= 0; };
   var ayuda = function(c){ return escH(c.cuenta + ' · ' + c.nombre + ' · ' + plaImporte(c.importe)); };
   var todas = D.cuentas || [];
-  var sin = todas.filter(function(c){ return plaRubroActual(c) === 'sin_asignar'; });
-  // LA LISTA ENTERA, cada cuenta con la etiqueta de su título; la que no tiene título, sin
-  // etiqueta. Punteada, la de por defecto.
-  eid('pla-rub-cuenta').textContent = todas.length + ' con movimientos' + (sin.length ? ' · ' + sin.length + ' sin título' : '');
+  // Las de resultado sin título son las que faltan clasificar; las del patrimonio arrancan así.
+  var faltan = todas.filter(function(c){ return c.resultado && plaRubroActual(c) === 'sin_asignar'; });
+  // LA LISTA ENTERA —también las del patrimonio—, cada cuenta con la etiqueta de su título; la
+  // que no tiene título, sin etiqueta. Punteada, la de por defecto. Con un encabezado por grupo
+  // del plan de cuentas.
+  eid('pla-rub-cuenta').textContent = todas.length + ' con movimientos'
+    + (faltan.length ? ' · ' + faltan.length + ' de resultado sin título' : '');
+  var grupo = '';
   eid('pla-rub-lista').innerHTML = todas.filter(function(c){
-    return busca(c) && (!solo || plaRubroActual(c) === 'sin_asignar');
+    return busca(c) && (!solo || (c.resultado && plaRubroActual(c) === 'sin_asignar'));
   }).map(function(c){
     var pend = PLA.pend[c.cuenta] != null, t = titulo[plaRubroActual(c)], def = !c.elegido && !pend;
-    return '<div class="pla-fila' + (pend ? ' pend' : '') + '" draggable="true" data-cuenta="' + escH(c.cuenta) + '"'
+    var g = plaGrupoCuenta(c.cuenta), cab = g !== grupo ? '<div class="pla-grupo">' + g + '</div>' : '';
+    grupo = g;
+    return cab + '<div class="pla-fila' + (pend ? ' pend' : '') + '" draggable="true" data-cuenta="' + escH(c.cuenta) + '"'
       + ' ondragstart="plaArrastrar(event)" title="' + ayuda(c) + '"><code>' + escH(c.cuenta) + '</code>'
       + '<span class="n">' + escH(c.nombre) + '</span>'
       + (t ? '<span class="pla-badge' + (def ? ' def' : '') + '" style="color:' + (PLA_COLOR[t.k] || 'var(--mut)') + '"'

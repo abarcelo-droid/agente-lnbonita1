@@ -322,8 +322,8 @@ test('la clasificación se guarda, pisa la de por defecto, y se puede volver atr
   const R = rutas(db);
   llamar(R.cargar, { body: CARGA_B });
   assert.equal(llamar(R.rubros, { body: { rubros: { '4.2.04.14.000.0000': 'ganancias' } } }).code, 400);
-  assert.equal(llamar(R.rubros, { body: { rubros: { '1.1.01.03.001.0000': 'costos_fijos' } } }).code, 400,
-    'deja clasificar una cuenta del patrimonio');
+  assert.equal(llamar(R.rubros, { body: { rubros: { '9.9.99.99.999.9999': 'costos_fijos' } } }).code, 400,
+    'deja clasificar una cuenta que no está en el libro diario');
   assert.equal(llamar(R.rubros, { body: { rubros: { '4.2.04.14.000.0000': 'costos_fijos' } } }).code, 200);
   const c = llamar(R.cuentas, {}).body.data.cuentas.find((x) => x.cuenta === '4.2.04.14.000.0000');
   assert.equal(c.rubro, 'costos_fijos');
@@ -331,8 +331,10 @@ test('la clasificación se guarda, pisa la de por defecto, y se puede volver atr
   assert.equal(c.elegido, 1);
   assert.equal(llamar(R.restablecer, {}).body.data.borradas, 1);
   assert.equal(llamar(R.cuentas, {}).body.data.cuentas.find((x) => x.cuenta === '4.2.04.14.000.0000').rubro, 'sin_asignar');
-  // Las cuentas del patrimonio no se ofrecen para clasificar.
-  assert.ok(!llamar(R.cuentas, {}).body.data.cuentas.some((x) => /^[123]/.test(x.cuenta)));
+  // Las del patrimonio también se ofrecen, marcadas, y arrancan sin título.
+  const banco = llamar(R.cuentas, {}).body.data.cuentas.find((x) => x.cuenta === '1.1.01.03.001.0000');
+  assert.equal(banco.resultado, 0);
+  assert.equal(banco.rubro, 'sin_asignar');
   // Volver a los de por defecto borra trabajo hecho: va por DELETE, que pide anular.
   assert.match(RUTA, /router\.delete\('\/rubros', requireAuth,/);
   assert.ok(!/rubros\/restablecer/.test(RUTA));
@@ -957,42 +959,74 @@ test('lo guardado con un título que ya no existe se migra, y un ajuste no deja 
   assert.match(RUTA, /^migrarTitulos\(db\);\r?$/m, 'la migración no corre al arrancar');
 });
 
-test('la lista de cuentas: todas las que tienen movimientos, y ninguna que ya no los tenga', () => {
+test('la lista de cuentas: todas las que tienen movimientos, también las del patrimonio, y ninguna que ya no los tenga', () => {
   const db = base();
   const R = rutas(db);
   llamar(R.cargar, { body: CARGA_A });
   // La segunda carga reemplaza agosto: los intereses del 20/8 ya no tienen movimientos.
   llamar(R.cargar, { body: CARGA_B });
   const cs = llamar(R.cuentas, {}).body.data.cuentas.map((x) => x.cuenta);
-  assert.deepEqual(cs, ['4.1.01.00.000.0000', '4.1.01.01.000.0000', '4.2.04.14.000.0000']);
+  // Pablo, 14/9/2026: «¿por qué me escondés algunos rubros, por ejemplo COTO, IVA?».
+  assert.deepEqual(cs, ['1.1.01.03.001.0000', '1.1.03.01.000.6427', '2.1.01.01.000.0012', '2.1.03.01.000.0000',
+    '4.1.01.00.000.0000', '4.1.01.01.000.0000', '4.2.04.14.000.0000']);
 });
 
-test('la lista en la pantalla: cada cuenta con la etiqueta de su título, y sin etiqueta la que no tiene', () => {
+test('una cuenta del patrimonio arranca sin título, y si se le pone uno entra al cuadro y a sus asientos', () => {
+  const db = base();
+  const R = rutas(db);
+  llamar(R.cargar, { body: CARGA_A });
+  const periodo = { query: { desde: '2025-07', hasta: '2025-08' } };
+  assert.ok(!llamar(R.resultado, periodo).body.data.cuentas.some((c) => c.cuenta === '2.1.03.01.000.0000'),
+    'una del patrimonio sin título entró al cuadro');
+  const julio = { desde: '2025-07', hasta: '2025-07' };
+  assert.equal(llamar(R.detalle, { query: Object.assign({ cuenta: '2.1.03.01.000.0000' }, julio) }).code, 400);
+  assert.equal(llamar(R.rubros, { body: { rubros: { '2.1.03.01.000.0000': 'impuestos' } } }).code, 200);
+  const iva = llamar(R.resultado, periodo).body.data.cuentas.find((c) => c.cuenta === '2.1.03.01.000.0000');
+  assert.ok(iva, 'con título no entra al cuadro');
+  assert.equal(iva.rubro, 'impuestos');
+  assert.equal(iva.meses['2025-07'], 91221.72);
+  assert.deepEqual(llamar(R.detalle, { query: Object.assign({ rubro: 'impuestos' }, julio) }).body.data.filas.map((f) => f.cuenta),
+    ['2.1.03.01.000.0000']);
+  assert.equal(llamar(R.detalle, { query: Object.assign({ cuenta: '2.1.03.01.000.0000' }, julio) }).code, 200);
+});
+
+test('la lista en la pantalla: todas, con el grupo del plan, la etiqueta de su título, y sin etiqueta la que no tiene', () => {
   const els = { 'pla-rub-q': { value: '' }, 'pla-rub-solo': { checked: false } };
   const eid = (id) => (els[id] = els[id] || {});
   const pintar = (pend) => new Function('PLA', 'eid', 'escH', 'sgNorm', [
+    hasta(PANEL, 'var PLA_GRUPOS = {', '};'),
+    fuente(PANEL, 'function plaGrupoCuenta(cuenta){'),
     hasta(PANEL, 'var PLA_COLOR = {', '};'),
     fuente(PANEL, 'function plaImporte(v, usd){'),
     fuente(PANEL, 'function plaRubroActual(c){'),
     fuente(PANEL, 'function plaRubrosPintar(){'), 'plaRubrosPintar();'].join('\n'))(
     { pend, cuentas: { rubros: RUBROS, cuentas: [
-      { cuenta: '4.1.01', nombre: 'VENTAS', rubro: 'ventas', elegido: 0, importe: 1 },
-      { cuenta: '4.2.04', nombre: 'ELECTRICIDAD', rubro: 'sin_asignar', elegido: 0, importe: -1 },
-      { cuenta: '4.2.05', nombre: 'SUELDOS', rubro: 'costos_fijos', elegido: 1, importe: -1 },
-      { cuenta: '4.2.06', nombre: 'FLETES', rubro: 'sin_asignar', elegido: 0, importe: -1 }] } },
+      { cuenta: '1.1.03.01.000.6105', nombre: 'COTO', rubro: 'sin_asignar', elegido: 0, importe: 5, resultado: 0 },
+      { cuenta: '2.1.03.01.000.0000', nombre: 'IVA Debito Fiscal', rubro: 'sin_asignar', elegido: 0, importe: 1, resultado: 0 },
+      { cuenta: '4.1.01', nombre: 'VENTAS', rubro: 'ventas', elegido: 0, importe: 1, resultado: 1 },
+      { cuenta: '4.2.04', nombre: 'ELECTRICIDAD', rubro: 'sin_asignar', elegido: 0, importe: -1, resultado: 1 },
+      { cuenta: '4.2.05', nombre: 'SUELDOS', rubro: 'costos_fijos', elegido: 1, importe: -1, resultado: 1 },
+      { cuenta: '4.2.06', nombre: 'FLETES', rubro: 'sin_asignar', elegido: 0, importe: -1, resultado: 1 }] } },
     eid, String, (s) => String(s).toLowerCase());
   pintar({ '4.2.06': 'costos_ventas' });
   const L = els['pla-rub-lista'].innerHTML;
-  assert.equal((L.match(/class="pla-fila/g) || []).length, 4, 'la lista no las muestra a todas');
+  assert.equal((L.match(/class="pla-fila/g) || []).length, 6, 'la lista no las muestra a todas');
+  assert.match(L, /<div class="pla-grupo">1 · ACTIVO<\/div><div class="pla-fila"[^>]*><code>1\.1\.03\.01\.000\.6105<\/code><span class="n">COTO<\/span><\/div>/,
+    'COTO no está, o tiene una etiqueta que no le corresponde');
+  assert.match(L, /<div class="pla-grupo">2 · PASIVO<\/div>/);
+  assert.equal((L.match(/4 · RESULTADOS/g) || []).length, 1, 'el encabezado del grupo se repite');
   assert.match(L, /<span class="n">VENTAS<\/span><span class="pla-badge def" style="color:#15803d" title="VENTAS · por defecto">Ventas<\/span>/);
   assert.match(L, /<span class="n">SUELDOS<\/span><span class="pla-badge" style="color:#1d4ed8" title="COSTOS FIJOS">C\. fijos<\/span>/);
   assert.match(L, /<span class="n">ELECTRICIDAD<\/span><\/div>/, 'una cuenta sin título lleva etiqueta');
   assert.match(L, /<span class="n">FLETES<\/span><span class="pla-badge" style="color:#9a3412" title="COSTOS ASOCIADOS A LAS VENTAS">C\. asoc\. ventas<\/span>/,
     'la etiqueta no muestra el título recién arrastrado');
-  assert.equal(els['pla-rub-cuenta'].textContent, '4 con movimientos · 1 sin título');
+  assert.equal(els['pla-rub-cuenta'].textContent, '6 con movimientos · 1 de resultado sin título',
+    'las del patrimonio sin título cuentan como si faltara clasificarlas');
   els['pla-rub-solo'].checked = true;
   pintar({});
-  assert.equal((els['pla-rub-lista'].innerHTML.match(/class="pla-fila/g) || []).length, 2, 'sólo las que no tienen título');
+  const solo = els['pla-rub-lista'].innerHTML;
+  assert.equal((solo.match(/class="pla-fila/g) || []).length, 2, 'sólo las de resultado sin título');
+  assert.ok(!solo.includes('COTO'), 'la casilla trae las del patrimonio');
   assert.match(els['pla-zonas'].innerHTML, /COSTOS ASOCIADOS A LAS VENTAS <small[^>]*>\(0\)<\/small>/);
   // Soltar en la lista le saca el título.
   assert.match(PANEL, /<div class="pla-lista" data-rubro="sin_asignar" ondragover="plaSobre\(event,this\)"/);
@@ -1016,6 +1050,14 @@ test('manual V1056: los títulos, la lista entera, y lo que no es obvio arranca 
   assert.match(fuente(PANEL, 'function plaTotales(d){'), /if \(!rub\[c\.rubro\]\) return;/);
   assert.match(M, /<b>MARGEN BRUTO<\/b> = ventas \+ utilidad \+ descuentos super \+ costos asociados a las ventas; <b>EBITDA<\/b> = margen bruto \+ costos fijos \+ costos variables/);
   assert.match(M, /<span class="ver">V1056<\/span> Los títulos nuevos/);
+});
+
+test('manual V1057: la lista tiene también las del patrimonio, y lo que falta clasificar son las de resultado', () => {
+  const M = manual();
+  assert.match(M, /Están <b>todas<\/b>, también las del patrimonio —clientes, proveedores, bancos, IVA—, agrupadas en activo, pasivo, patrimonio neto y resultados/);
+  assert.match(M, /se pueden ver <b>sólo las de resultado sin título<\/b>, que son las que faltan clasificar/);
+  assert.match(PANEL, /id="pla-rub-solo" onchange="plaRubrosPintar\(\)"> Sólo las de resultado sin título<\/label>/);
+  assert.match(M, /<span class="ver">V1057<\/span> La lista de cuentas muestra también las del patrimonio/);
 });
 
 // ══ 7 · EL MENÚ, LA DIRECCIÓN Y EL PERMISO ═══════════════════════════════════════════
@@ -1063,7 +1105,7 @@ test('manual: reemplaza el período del archivo, haber − debe, hasta 12 meses,
   assert.match(RUTA, /ROUND\(SUM\(haber\) - SUM\(debe\), 2\) AS importe/);
   assert.match(M, /<b>Hasta 12 meses por vez<\/b>/);
   assert.match(M, /Los importes se ven en <b>pesos, miles o millones<\/b>/);
-  assert.match(M, /Sólo entran las <b>cuentas de resultado<\/b>\. Las que empiezan con 1, 2 o 3 son del patrimonio/);
+  assert.match(M, /Entran las <b>cuentas de resultado<\/b>\. Las que empiezan con 1, 2 o 3 son del patrimonio —caja, clientes, proveedores, IVA—: <span class="ver">V1057<\/span> se ven igual en la lista de Configurar rubros, arrancan sin título y no están en el cuadro; si alguien les pone uno, entran/);
   assert.equal(SVC.esCuentaDeResultado('1.1.01'), false);
   assert.match(M, /Lee <b>todas las hojas<\/b>/);
   assert.match(fuente(PANEL, 'function plaCargaArchivo(input){'), /wb\.SheetNames\.map\(function\(n\)\{/);
