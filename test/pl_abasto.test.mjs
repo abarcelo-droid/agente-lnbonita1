@@ -79,6 +79,7 @@ function rutas(db, { detalleMax } = {}) {
     fuente(RUTA, 'function rubrosDeCuentas('),
     fuente(RUTA, 'function contrapartidas('),
     fuente(RUTA, 'function reemplazo('),
+    fuente(RUTA, 'function migrarTitulos('),
     fuente(RUTA, 'function ajusteVivo('),
     fuente(RUTA, 'function escribirMesesDeAjuste('),
     fuente(RUTA, 'function ajustesDelPeriodo('),
@@ -99,6 +100,7 @@ function rutas(db, { detalleMax } = {}) {
     '  cotizaciones: ' + handler("router.get('/cotizaciones'") + ',',
     '  cotizGuardar: ' + handler("router.put('/cotizaciones'") + ',',
     '  traer: traerCotizaciones,',
+    '  migrar: migrarTitulos,',
     '};',
   ].join('\n'))(db, SVC);
 }
@@ -132,14 +134,19 @@ const CARGA_B = { archivo: 'diario_b.xls', cuentas: NOMBRES, renglones: [
 
 // ══ 1 · LAS REGLAS ═══════════════════════════════════════════════════════════════
 
-test('el rubro por defecto, con las cuentas reales del libro diario de Abasto', () => {
+test('el título por defecto, con las cuentas reales del libro diario de Abasto', () => {
   const casos = [
     ['4.1.01.00.000.0000', 'VENTAS', 'ventas'],
     ['4.1.02.00.000.0000', 'Comisiones Ganadas - Liquidaciones', 'ventas'],
-    ['4.1.07.03.000.0000', 'Descuento Super - por Ac comerciales', 'ventas'],
-    ['4.1.01.01.000.0000', 'G - COMPRA MERCADERIA', 'costos_variables'],
-    ['4.2.01.00.000.0000', 'Costo de Mercadería Vendida', 'costos_variables'],
-    ['4.1.03.00.000.0001', 'G - Descargas Pagadas', 'otros'],
+    ['4.1.05.00.000.0000', 'Fletes Ganados - Liquidaciones', 'ventas'],
+    ['4.1.07.01.000.0000', 'Descuentos super', 'descuentos_super'],
+    ['4.1.07.03.000.0000', 'Descuento Super - por Ac comerciales', 'descuentos_super'],
+    ['4.2.04.19.000.0000', 'G- Descuentos Super - SS On line', 'descuentos_super'],
+    // Pablo, 14/9/2026: «yo decido manualmente dónde va cada rubro».
+    ['4.1.01.01.000.0000', 'G - COMPRA MERCADERIA', 'sin_asignar'],
+    ['4.2.01.00.000.0000', 'Costo de Mercadería Vendida', 'sin_asignar'],
+    ['4.1.03.00.000.0001', 'G - Descargas Pagadas', 'sin_asignar'],
+    ['4.2.06.07.000.0000', 'Descuentos Cedidos', 'sin_asignar'],
     ['4.2.05.02.006.0000', 'G - Intereses por Descubierto', 'costos_financieros'],
     ['4.2.05.02.009.0002', 'Comision plataforma InvoiTrade', 'costos_financieros'],
     ['4.1.08.01.000.0000', 'Diferencia Cierre de Cambio', 'costos_financieros'],
@@ -152,14 +159,16 @@ test('el rubro por defecto, con las cuentas reales del libro diario de Abasto', 
     ['4.1.06.01.000.0000', 'Desc obtenidos IIBB', 'impuestos'],
     ['4.1.06.02.000.0000', 'DETRACCION ART 23 LEY 27541 / DTO 438-2', 'impuestos'],
     ['4.1.06.03.000.0000', 'Decreto 814', 'impuestos'],
-    ['4.2.04.14.000.0000', 'G - Electricidad', 'otros'],
+    ['4.2.04.14.000.0000', 'G - Electricidad', 'sin_asignar'],
     ['1.1.01.03.001.0000', 'BANCO FRANCES', 'sin_asignar'],
     ['2.1.03.01.000.0000', 'IVA Debito Fiscal', 'sin_asignar'],
     ['3.1.01.00.000.0000', 'Capital', 'sin_asignar'],
   ];
   for (const [c, n, r] of casos) assert.equal(SVC.rubroPorDefecto(c, n), r, c + ' ' + n);
-  assert.deepEqual(SVC.RUBROS.map((x) => x.k),
-    ['ventas', 'costos_variables', 'costos_fijos', 'costos_financieros', 'impuestos', 'otros']);
+  // Los títulos, en el orden y con las palabras de Pablo.
+  assert.deepEqual(SVC.RUBROS.map((x) => x.label), ['VENTAS', 'UTILIDAD', 'DESCUENTOS SUPER',
+    'COSTOS ASOCIADOS A LAS VENTAS', 'COSTOS FIJOS', 'COSTOS VARIABLES', 'COSTOS FINANCIEROS', 'IMPUESTOS']);
+  assert.ok(!SVC.RUBROS.some((x) => x.k === 'otros'), '«Otros» dejó de existir');
 });
 
 test('la carga se valida renglón por renglón, y uno malo frena todo', () => {
@@ -297,8 +306,8 @@ test('el cuadro: haber − debe por cuenta y mes, sólo las de resultado, con su
   assert.deepEqual(Object.keys(porCuenta).sort(), ['4.1.01.00.000.0000', '4.1.01.01.000.0000', '4.2.04.14.000.0000']);
   assert.equal(porCuenta['4.1.01.00.000.0000'].meses['2025-07'], 868778.28, 'la venta es positiva');
   assert.equal(porCuenta['4.1.01.01.000.0000'].meses['2025-08'], -700000, 'la compra es negativa, y es la de la segunda carga');
-  assert.equal(porCuenta['4.1.01.01.000.0000'].rubro, 'costos_variables');
-  assert.equal(porCuenta['4.2.04.14.000.0000'].rubro, 'otros');
+  assert.equal(porCuenta['4.1.01.01.000.0000'].rubro, 'sin_asignar');
+  assert.equal(porCuenta['4.2.04.14.000.0000'].rubro, 'sin_asignar');
   assert.equal(porCuenta['4.2.04.14.000.0000'].elegido, 0);
   assert.equal(d.ultima_carga.archivo, 'diario_b.xls');
   assert.equal(d.ultima_carga.usuario, 'Pablo');
@@ -313,15 +322,15 @@ test('la clasificación se guarda, pisa la de por defecto, y se puede volver atr
   const R = rutas(db);
   llamar(R.cargar, { body: CARGA_B });
   assert.equal(llamar(R.rubros, { body: { rubros: { '4.2.04.14.000.0000': 'ganancias' } } }).code, 400);
-  assert.equal(llamar(R.rubros, { body: { rubros: { '1.1.01.03.001.0000': 'otros' } } }).code, 400,
+  assert.equal(llamar(R.rubros, { body: { rubros: { '1.1.01.03.001.0000': 'costos_fijos' } } }).code, 400,
     'deja clasificar una cuenta del patrimonio');
   assert.equal(llamar(R.rubros, { body: { rubros: { '4.2.04.14.000.0000': 'costos_fijos' } } }).code, 200);
   const c = llamar(R.cuentas, {}).body.data.cuentas.find((x) => x.cuenta === '4.2.04.14.000.0000');
   assert.equal(c.rubro, 'costos_fijos');
-  assert.equal(c.rubro_defecto, 'otros');
+  assert.equal(c.rubro_defecto, 'sin_asignar');
   assert.equal(c.elegido, 1);
   assert.equal(llamar(R.restablecer, {}).body.data.borradas, 1);
-  assert.equal(llamar(R.cuentas, {}).body.data.cuentas.find((x) => x.cuenta === '4.2.04.14.000.0000').rubro, 'otros');
+  assert.equal(llamar(R.cuentas, {}).body.data.cuentas.find((x) => x.cuenta === '4.2.04.14.000.0000').rubro, 'sin_asignar');
   // Las cuentas del patrimonio no se ofrecen para clasificar.
   assert.ok(!llamar(R.cuentas, {}).body.data.cuentas.some((x) => /^[123]/.test(x.cuenta)));
   // Volver a los de por defecto borra trabajo hecho: va por DELETE, que pide anular.
@@ -338,8 +347,8 @@ test('los asientos de un importe: con la contrapartida, y el total de todos aunq
   assert.deepEqual({ ...d.total }, { renglones: 1, debe: 0, haber: 868778.28 });
   assert.equal(d.recortado, 0);
   const todo = llamar(rutas(db, { detalleMax: 1 }).detalle,
-    { query: { rubro: 'otros', desde: '2025-08', hasta: '2025-08' } }).body.data;
-  assert.equal(todo.filas.length, 0, 'intereses es financiero, no otros');
+    { query: { rubro: 'costos_fijos', desde: '2025-08', hasta: '2025-08' } }).body.data;
+  assert.equal(todo.filas.length, 0, 'intereses es financiero, no costos fijos');
   assert.equal(llamar(rutas(db).detalle, { query: { cuenta: '1.1.01.03.001.0000', desde: '2025-08', hasta: '2025-08' } }).code, 400);
   assert.equal(llamar(rutas(db).detalle, { query: { rubro: 'ventas' } }).code, 400);
   llamar(rutas(db).cargar, { body: { cuentas: NOMBRES, renglones: [
@@ -383,7 +392,7 @@ const DATOS = {
   cuentas: [
     { cuenta: '4.1.01', nombre: 'VENTAS', rubro: 'ventas', meses: { '2025-07': 1000, '2025-08': 1500 } },
     { cuenta: '4.1.02', nombre: 'COMISIONES', rubro: 'ventas', meses: { '2025-08': 3500 } },
-    { cuenta: '4.2.01', nombre: 'COSTO', rubro: 'costos_variables', meses: { '2025-07': -400, '2025-08': -900 } },
+    { cuenta: '4.2.01', nombre: 'COSTO', rubro: 'costos_ventas', meses: { '2025-07': -400, '2025-08': -900 } },
     { cuenta: '4.2.05', nombre: 'INTERESES', rubro: 'costos_financieros', meses: { '2025-08': -100 } },
     { cuenta: '4.2.06', nombre: 'IIBB', rubro: 'impuestos', meses: { '2025-07': -50 } },
     { cuenta: '4.9.99', nombre: 'FUERA', rubro: 'sin_asignar', meses: { '2025-07': -99999 } },
@@ -400,8 +409,8 @@ test('la cascada suma: margen bruto, EBITDA, EBT y resultado neto', () => {
   assert.deepEqual(T.cuentas.ventas.map((x) => x.c.cuenta), ['4.1.02', '4.1.01']);
   // Adentro de los gastos, el más negativo arriba.
   assert.deepEqual(TOTALES(Object.assign({}, DATOS, { cuentas: [
-    { cuenta: 'a', rubro: 'otros', meses: { '2025-07': -10 } },
-    { cuenta: 'b', rubro: 'otros', meses: { '2025-07': -500 } }] })).cuentas.otros.map((x) => x.c.cuenta), ['b', 'a']);
+    { cuenta: 'a', rubro: 'costos_fijos', meses: { '2025-07': -10 } },
+    { cuenta: 'b', rubro: 'costos_fijos', meses: { '2025-07': -500 } }] })).cuentas.costos_fijos.map((x) => x.c.cuenta), ['b', 'a']);
 });
 
 test('la tabla: el mes más nuevo a la izquierda, los subtotales siempre, y las cuentas al abrir', () => {
@@ -410,7 +419,7 @@ test('la tabla: el mes más nuevo a la izquierda, los subtotales siempre, y las 
   assert.ok(h.indexOf('>Ago 25</th>') < h.indexOf('>Jul 25</th>'), 'los meses no van del más nuevo al más viejo');
   assert.match(h, /<th title="Ago 2025">Ago 25<\/th>/);
   for (const t of ['MARGEN BRUTO', 'EBITDA', 'EBT (antes de impuestos)', '⭐ RESULTADO NETO']) assert.ok(h.includes(t), t);
-  assert.ok(!h.includes('Costos fijos'), 'muestra un rubro vacío');
+  assert.ok(!h.includes('COSTOS FIJOS'), 'muestra un título vacío');
   assert.ok(!h.includes('FUERA'));
   assert.ok(!h.includes('4.1.01 · VENTAS'), 'las cuentas se ven sin abrir el rubro');
   assert.match(h, /<span class="pla-pct">82%<\/span>/, 'el % sobre ventas del margen de agosto');
@@ -585,21 +594,21 @@ test('manual V1053: la solapa No balancea dice lo que la ruta hace', () => {
 
 // ══ 6 · AJUSTES MANUALES Y EXPORTAR (V1054) ═════════════════════════════════════════
 
-test('un ajuste manual se valida: nombre, uno de los seis rubros, meses y números', () => {
+test('un ajuste manual se valida: nombre, uno de los títulos, meses y números', () => {
   const ok = SVC.validarAjuste({ nombre: '  Amortización   rodados ', rubro: 'costos_fijos',
     meses: { '2025-08': -150000.456, '2025-07': '', '2025-09': 0, '2025-10': '-2500.5' } });
   assert.equal(ok.error, undefined, ok.error);
   assert.equal(ok.nombre, 'Amortización rodados');
   assert.deepEqual(ok.meses, { '2025-08': -150000.46, '2025-07': null, '2025-09': null, '2025-10': -2500.5 });
-  assert.match(SVC.validarAjuste({ nombre: ' ', rubro: 'otros', meses: {} }).error, /Falta el nombre/);
-  assert.match(SVC.validarAjuste({ nombre: 'x'.repeat(81), rubro: 'otros', meses: {} }).error, /muy largo/);
+  assert.match(SVC.validarAjuste({ nombre: ' ', rubro: 'costos_fijos', meses: {} }).error, /Falta el nombre/);
+  assert.match(SVC.validarAjuste({ nombre: 'x'.repeat(81), rubro: 'costos_fijos', meses: {} }).error, /muy largo/);
   assert.match(SVC.validarAjuste({ nombre: 'x', rubro: 'sin_asignar', meses: {} }).error, /rubro/,
     'un ajuste sin asignar no entraría a ningún lado');
   assert.match(SVC.validarAjuste({ nombre: 'x', rubro: 'ganancias', meses: {} }).error, /rubro/);
-  assert.match(SVC.validarAjuste({ nombre: 'x', rubro: 'otros' }).error, /Faltan los importes/);
-  assert.match(SVC.validarAjuste({ nombre: 'x', rubro: 'otros', meses: { '2025-13': 1 } }).error, /mes no se entiende/);
-  assert.match(SVC.validarAjuste({ nombre: 'x', rubro: 'otros', meses: { '2025-08': 'mucho' } }).error, /no es un número/);
-  assert.match(SVC.validarAjuste({ nombre: 'x', rubro: 'otros', meses: { '2025-08': true } }).error, /no es un número/);
+  assert.match(SVC.validarAjuste({ nombre: 'x', rubro: 'costos_fijos' }).error, /Faltan los importes/);
+  assert.match(SVC.validarAjuste({ nombre: 'x', rubro: 'costos_fijos', meses: { '2025-13': 1 } }).error, /mes no se entiende/);
+  assert.match(SVC.validarAjuste({ nombre: 'x', rubro: 'costos_fijos', meses: { '2025-08': 'mucho' } }).error, /no es un número/);
+  assert.match(SVC.validarAjuste({ nombre: 'x', rubro: 'costos_fijos', meses: { '2025-08': true } }).error, /no es un número/);
 });
 
 test('los ajustes: se agregan, se corrigen sólo en los meses que vienen, no quedan vacíos y se eliminan con baja', () => {
@@ -607,7 +616,7 @@ test('los ajustes: se agregan, se corrigen sólo en los meses que vienen, no que
   const R = rutas(db);
   llamar(R.cargar, { body: CARGA_A });
   llamar(R.cargar, { body: CARGA_B });
-  assert.equal(llamar(R.ajusteNuevo, { body: { nombre: 'Vacío', rubro: 'otros', meses: { '2025-08': '' } } }).code, 400,
+  assert.equal(llamar(R.ajusteNuevo, { body: { nombre: 'Vacío', rubro: 'costos_fijos', meses: { '2025-08': '' } } }).code, 400,
     'guardó un ajuste sin importes');
   const n = llamar(R.ajusteNuevo, { body: { nombre: 'Amortización', rubro: 'costos_fijos',
     meses: { '2025-07': -1000, '2025-08': -1000, '2025-09': -1000 } } });
@@ -636,7 +645,7 @@ test('los ajustes: se agregan, se corrigen sólo en los meses que vienen, no que
   assert.match(vacio.body.error, /eliminalo/);
   assert.equal(db.prepare('SELECT COUNT(*) n FROM pl_abasto_ajuste_meses WHERE ajuste_id = ?').get(id).n, 2, 'lo vació igual');
   assert.equal(db.prepare('SELECT nombre FROM pl_abasto_ajustes WHERE id = ?').get(id).nombre, 'Amortización rodados');
-  assert.equal(llamar(R.ajusteCorregir, { params: { id: '999' }, body: { nombre: 'x', rubro: 'otros',
+  assert.equal(llamar(R.ajusteCorregir, { params: { id: '999' }, body: { nombre: 'x', rubro: 'costos_fijos',
     meses: { '2025-08': 1 } } }).code, 404);
   // Eliminar: baja lógica, con quién y cuándo, y sale del cuadro.
   assert.equal(llamar(R.ajusteEliminar, { params: { id: String(id) } }).code, 200);
@@ -645,7 +654,7 @@ test('los ajustes: se agregan, se corrigen sólo en los meses que vienen, no que
   assert.ok(baja.eliminado_en, 'lo borró en vez de darlo de baja');
   assert.equal(baja.eliminado_por, 5);
   assert.equal(llamar(R.ajusteEliminar, { params: { id: String(id) } }).code, 404);
-  assert.equal(llamar(R.ajusteCorregir, { params: { id: String(id) }, body: { nombre: 'x', rubro: 'otros',
+  assert.equal(llamar(R.ajusteCorregir, { params: { id: String(id) }, body: { nombre: 'x', rubro: 'costos_fijos',
     meses: { '2025-08': 1 } } }).code, 404, 'corrige un ajuste eliminado');
   // Eliminar va por DELETE, que exigirNivel le pide a quien puede anular.
   assert.match(RUTA, /router\.delete\('\/ajustes\/:id', requireAuth,/);
@@ -670,14 +679,14 @@ test('la cascada suma los ajustes como una cuenta más, sólo en los meses del c
 test('la tabla: el ajuste se ve adentro de su rubro, y un rubro con sólo ajustes aparece', () => {
   const datos = Object.assign({}, DATOS, { ajustes: AJUSTES });
   const h = PANTALLA(datos);
-  assert.ok(h.includes('Costos fijos'), 'lo cargado a mano en costos fijos no se ve en ningún lado');
+  assert.ok(h.includes('COSTOS FIJOS'), 'lo cargado a mano en costos fijos no se ve en ningún lado');
   assert.ok(!h.includes('Ajuste: Amortización'), 'el ajuste se ve sin abrir el rubro');
   const abierto = PANTALLA(datos, { costos_fijos: true });
   assert.match(abierto, /<tr class="pla-aju"><td title="✎ Ajuste: Amortización" onclick="plaAjusteAbrir\(7\)">/);
   assert.match(abierto, /ondblclick="plaAjusteAbrir\(7\)"/);
   assert.ok(!abierto.includes('Agregar un ajuste manual'), 'le ofrece cargar un ajuste a quien sólo mira');
   assert.match(PANTALLA(datos, { costos_fijos: true }, undefined, true),
-    /onclick="plaAjusteAbrir\(null,'costos_fijos'\)">\+ Agregar un ajuste manual a Costos fijos</);
+    /onclick="plaAjusteAbrir\(null,'costos_fijos'\)">\+ Agregar un ajuste manual a COSTOS FIJOS</);
 });
 
 test('los asientos de un rubro traen sus ajustes, y el saldo da lo mismo que la celda', () => {
@@ -720,34 +729,36 @@ test('exportar: el cuadro entero, en pesos con centavos, con punto y coma y coma
     fuente(PANEL, 'function plaCsv(d, usd){'),
     'return plaCsv;'].join('\n'))({ unidad: 1e6 });
   const datos = Object.assign({}, DATOS, { ajustes: AJUSTES, cuentas: DATOS.cuentas.concat([
-    { cuenta: '4.2.09', nombre: 'Gastos; "varios"', rubro: 'otros', meses: { '2025-07': -12.3 } },
-    { cuenta: '4.2.10', nombre: '=HIPERVINCULO("x")', rubro: 'otros', meses: { '2025-08': -1 } }]) });
+    { cuenta: '4.2.09', nombre: 'Gastos; "varios"', rubro: 'costos_fijos', meses: { '2025-07': -12.3 } },
+    { cuenta: '4.2.10', nombre: '=HIPERVINCULO("x")', rubro: 'costos_fijos', meses: { '2025-08': -1 } }]) });
   const txt = csv(datos);
   assert.ok(txt.startsWith('\ufeff'), 'sin la marca del principio, el Excel lee mal los acentos');
   assert.deepEqual(txt.slice(1).split('\r\n'), [
     'Tipo;Concepto;Cuenta;TOTAL;Ago 2025;Jul 2025',
-    'Rubro;Ventas;;6500,00;5500,00;1000,00',
+    'Rubro;VENTAS;;6500,00;5500,00;1000,00',
     'Cuenta;COMISIONES;4.1.02;3500,00;3500,00;0,00',
     'Cuenta;VENTAS;4.1.01;2500,00;1500,00;1000,00',
     'Ajuste manual;Venta sin factura;;500,00;500,00;0,00',
-    'Rubro;Costos variables;;-1300,00;-900,00;-400,00',
+    'Rubro;UTILIDAD;;0,00;0,00;0,00',
+    'Rubro;DESCUENTOS SUPER;;0,00;0,00;0,00',
+    'Rubro;COSTOS ASOCIADOS A LAS VENTAS;;-1300,00;-900,00;-400,00',
     'Cuenta;COSTO;4.2.01;-1300,00;-900,00;-400,00',
     'Subtotal;MARGEN BRUTO;;5200,00;4600,00;600,00',
-    'Rubro;Costos fijos;;-400,00;-300,00;-100,00',
-    'Ajuste manual;Amortización;;-400,00;-300,00;-100,00',
-    'Subtotal;EBITDA;;4800,00;4300,00;500,00',
-    'Rubro;Costos financieros;;-100,00;-100,00;0,00',
-    'Cuenta;INTERESES;4.2.05;-100,00;-100,00;0,00',
-    'Subtotal;EBT (antes de impuestos);;4700,00;4200,00;500,00',
-    'Rubro;Impuestos;;-50,00;0,00;-50,00',
-    'Cuenta;IIBB;4.2.06;-50,00;0,00;-50,00',
-    'Rubro;Otros;;-13,30;-1,00;-12,30',
+    'Rubro;COSTOS FIJOS;;-413,30;-301,00;-112,30',
     'Cuenta;"Gastos; ""varios""";4.2.09;-12,30;0,00;-12,30',
     'Cuenta;"\'=HIPERVINCULO(""x"")";4.2.10;-1,00;-1,00;0,00',
+    'Ajuste manual;Amortización;;-400,00;-300,00;-100,00',
+    'Rubro;COSTOS VARIABLES;;0,00;0,00;0,00',
+    'Subtotal;EBITDA;;4786,70;4299,00;487,70',
+    'Rubro;COSTOS FINANCIEROS;;-100,00;-100,00;0,00',
+    'Cuenta;INTERESES;4.2.05;-100,00;-100,00;0,00',
+    'Subtotal;EBT (antes de impuestos);;4686,70;4199,00;487,70',
+    'Rubro;IMPUESTOS;;-50,00;0,00;-50,00',
+    'Cuenta;IIBB;4.2.06;-50,00;0,00;-50,00',
     'Resultado;RESULTADO NETO;;4636,70;4199,00;437,70',
   ]);
-  // Un rubro vacío también va: la estructura es la misma todos los meses.
-  assert.ok(csv(DATOS).includes('\r\nRubro;Costos fijos;;0,00;0,00;0,00\r\n'));
+  // Un título vacío también va: la estructura es la misma todos los meses.
+  assert.ok(csv(DATOS).includes('\r\nRubro;COSTOS FIJOS;;0,00;0,00;0,00\r\n'));
   // Y va en pesos aunque la pantalla esté en millones.
   assert.ok(!/PLA\.unidad/.test(fuente(PANEL, 'function plaCsv(d, usd){')));
 });
@@ -907,6 +918,106 @@ test('manual V1055: cada mes con su cotización, el promedio del dólar elegido,
   assert.match(M, /<span class="ver">V1055<\/span> El cuadro en dólares/);
 });
 
+// ══ 6c · LOS TÍTULOS NUEVOS Y LA LISTA ENTERA (V1056) ═══════════════════════════════
+//
+// Pablo, 14/9/2026: «en la parte izquierda deben figurarme la TOTALIDAD de los rubros que
+// tienen movimientos. Si están seleccionados en algún Título debe mostrarme en cuál... no
+// quiero perder ninguno de vista. Además vamos a cambiar los TÍTULOS».
+
+test('la cascada con los títulos nuevos: margen, EBITDA y EBT donde los puso Pablo', () => {
+  const uno = (rubro, v) => ({ cuenta: rubro, nombre: rubro, rubro, meses: { '2025-07': v } });
+  const d = { rubros: RUBROS, meses: ['2025-07'], meses_disponibles: ['2025-07'], cuentas: [
+    uno('ventas', 1000), uno('utilidad', 200), uno('descuentos_super', -100), uno('costos_ventas', -300),
+    uno('costos_fijos', -50), uno('costos_variables', -40), uno('costos_financieros', -20), uno('impuestos', -10),
+    uno('sin_asignar', -9999)] };
+  const T = TOTALES(d);
+  assert.equal(T.subtotales.margen.TOTAL, 800, 'el margen bruto es ventas + utilidad + descuentos + costos asociados');
+  assert.equal(T.subtotales.ebitda.TOTAL, 710, 'el EBITDA suma costos fijos y costos variables');
+  assert.equal(T.subtotales.ebt.TOTAL, 690);
+  assert.equal(T.subtotales.neto.TOTAL, 680, 'una cuenta sin título sumó al resultado');
+  const h = PANTALLA(d);
+  const pos = (t) => { const i = h.indexOf(t); assert.ok(i > 0, 'no está ' + t); return i; };
+  assert.ok(pos('COSTOS ASOCIADOS A LAS VENTAS') < pos('MARGEN BRUTO') && pos('MARGEN BRUTO') < pos('COSTOS FIJOS'));
+  assert.ok(pos('COSTOS VARIABLES') < pos('EBITDA') && pos('EBITDA') < pos('COSTOS FINANCIEROS'));
+  assert.ok(pos('COSTOS FINANCIEROS') < pos('EBT (antes') && pos('EBT (antes') < pos('IMPUESTOS'));
+});
+
+test('lo guardado con un título que ya no existe se migra, y un ajuste no deja de sumar', () => {
+  const db = base();
+  const R = rutas(db);
+  db.exec(`INSERT INTO pl_abasto_rubros (cuenta, rubro) VALUES ('4.2.04.14.000.0000', 'otros'),
+    ('4.2.05.02.006.0000', 'costos_financieros'), ('4.2.04.15.000.0000', 'sin_asignar');
+    INSERT INTO pl_abasto_ajustes (id, rubro, nombre) VALUES (1, 'otros', 'Viejo'), (2, 'ventas', 'Bien');`);
+  assert.deepEqual({ ...R.migrar(db) }, { rubros: 1, ajustes: 1 });
+  assert.deepEqual(db.prepare('SELECT cuenta, rubro FROM pl_abasto_rubros ORDER BY cuenta').all().map((x) => [x.cuenta, x.rubro]),
+    [['4.2.04.15.000.0000', 'sin_asignar'], ['4.2.05.02.006.0000', 'costos_financieros']]);
+  assert.deepEqual(db.prepare('SELECT rubro FROM pl_abasto_ajustes ORDER BY id').all().map((x) => x.rubro),
+    ['costos_variables', 'ventas'], 'un ajuste en «otros» dejaría de sumar sin que nadie lo vea');
+  assert.deepEqual({ ...R.migrar(db) }, { rubros: 0, ajustes: 0 });
+  assert.match(RUTA, /^migrarTitulos\(db\);\r?$/m, 'la migración no corre al arrancar');
+});
+
+test('la lista de cuentas: todas las que tienen movimientos, y ninguna que ya no los tenga', () => {
+  const db = base();
+  const R = rutas(db);
+  llamar(R.cargar, { body: CARGA_A });
+  // La segunda carga reemplaza agosto: los intereses del 20/8 ya no tienen movimientos.
+  llamar(R.cargar, { body: CARGA_B });
+  const cs = llamar(R.cuentas, {}).body.data.cuentas.map((x) => x.cuenta);
+  assert.deepEqual(cs, ['4.1.01.00.000.0000', '4.1.01.01.000.0000', '4.2.04.14.000.0000']);
+});
+
+test('la lista en la pantalla: cada cuenta con la etiqueta de su título, y sin etiqueta la que no tiene', () => {
+  const els = { 'pla-rub-q': { value: '' }, 'pla-rub-solo': { checked: false } };
+  const eid = (id) => (els[id] = els[id] || {});
+  const pintar = (pend) => new Function('PLA', 'eid', 'escH', 'sgNorm', [
+    hasta(PANEL, 'var PLA_COLOR = {', '};'),
+    fuente(PANEL, 'function plaImporte(v, usd){'),
+    fuente(PANEL, 'function plaRubroActual(c){'),
+    fuente(PANEL, 'function plaRubrosPintar(){'), 'plaRubrosPintar();'].join('\n'))(
+    { pend, cuentas: { rubros: RUBROS, cuentas: [
+      { cuenta: '4.1.01', nombre: 'VENTAS', rubro: 'ventas', elegido: 0, importe: 1 },
+      { cuenta: '4.2.04', nombre: 'ELECTRICIDAD', rubro: 'sin_asignar', elegido: 0, importe: -1 },
+      { cuenta: '4.2.05', nombre: 'SUELDOS', rubro: 'costos_fijos', elegido: 1, importe: -1 },
+      { cuenta: '4.2.06', nombre: 'FLETES', rubro: 'sin_asignar', elegido: 0, importe: -1 }] } },
+    eid, String, (s) => String(s).toLowerCase());
+  pintar({ '4.2.06': 'costos_ventas' });
+  const L = els['pla-rub-lista'].innerHTML;
+  assert.equal((L.match(/class="pla-fila/g) || []).length, 4, 'la lista no las muestra a todas');
+  assert.match(L, /<span class="n">VENTAS<\/span><span class="pla-badge def" style="color:#15803d" title="VENTAS · por defecto">Ventas<\/span>/);
+  assert.match(L, /<span class="n">SUELDOS<\/span><span class="pla-badge" style="color:#1d4ed8" title="COSTOS FIJOS">C\. fijos<\/span>/);
+  assert.match(L, /<span class="n">ELECTRICIDAD<\/span><\/div>/, 'una cuenta sin título lleva etiqueta');
+  assert.match(L, /<span class="n">FLETES<\/span><span class="pla-badge" style="color:#9a3412" title="COSTOS ASOCIADOS A LAS VENTAS">C\. asoc\. ventas<\/span>/,
+    'la etiqueta no muestra el título recién arrastrado');
+  assert.equal(els['pla-rub-cuenta'].textContent, '4 con movimientos · 1 sin título');
+  els['pla-rub-solo'].checked = true;
+  pintar({});
+  assert.equal((els['pla-rub-lista'].innerHTML.match(/class="pla-fila/g) || []).length, 2, 'sólo las que no tienen título');
+  assert.match(els['pla-zonas'].innerHTML, /COSTOS ASOCIADOS A LAS VENTAS <small[^>]*>\(0\)<\/small>/);
+  // Soltar en la lista le saca el título.
+  assert.match(PANEL, /<div class="pla-lista" data-rubro="sin_asignar" ondragover="plaSobre\(event,this\)"/);
+});
+
+test('el cuadro avisa cuántas cuentas no tienen título, porque no suman', () => {
+  const caja = {};
+  new Function('eid', 'escH', 'lnbPuedeOperar', [fuente(PANEL, 'function plaFechaTxt(f){'), fuente(PANEL, 'function plaAviso(d){'),
+    'plaAviso({ ultima_carga: { archivo: "d.xls", desde: "2026-07-01", hasta: "2026-09-14" }, cuentas: ['
+    + '{ rubro: "sin_asignar", elegido: 0 }, { rubro: "sin_asignar", elegido: 1 }, { rubro: "ventas", elegido: 0 }] });'].join('\n'))(
+    () => caja, String, () => true);
+  assert.match(caja.innerHTML, /⚠️ 2 cuentas con movimientos no tienen título y no suman al resultado: asignalas en «Configurar rubros»/);
+});
+
+test('manual V1056: los títulos, la lista entera, y lo que no es obvio arranca sin título', () => {
+  const M = manual();
+  assert.match(M, /Los títulos son <b>VENTAS, UTILIDAD, DESCUENTOS SUPER, COSTOS ASOCIADOS A LAS VENTAS, COSTOS FIJOS, COSTOS VARIABLES, COSTOS FINANCIEROS e IMPUESTOS<\/b>/);
+  assert.match(M, /A la izquierda está la <b>lista entera de las cuentas con movimientos<\/b>, cada una con la etiqueta del título que tiene/);
+  assert.match(M, /Arrastrar una cuenta a la lista le saca el título/);
+  assert.match(M, /Una cuenta <b>sin título no suma al resultado<\/b>, y arriba del cuadro se avisa cuántas hay/);
+  assert.match(fuente(PANEL, 'function plaTotales(d){'), /if \(!rub\[c\.rubro\]\) return;/);
+  assert.match(M, /<b>MARGEN BRUTO<\/b> = ventas \+ utilidad \+ descuentos super \+ costos asociados a las ventas; <b>EBITDA<\/b> = margen bruto \+ costos fijos \+ costos variables/);
+  assert.match(M, /<span class="ver">V1056<\/span> Los títulos nuevos/);
+});
+
 // ══ 7 · EL MENÚ, LA DIRECCIÓN Y EL PERMISO ═══════════════════════════════════════════
 
 test('está en el menú de Informes, con su dirección controlada al leer y al escribir', () => {
@@ -957,9 +1068,10 @@ test('manual: reemplaza el período del archivo, haber − debe, hasta 12 meses,
   assert.match(M, /Lee <b>todas las hojas<\/b>/);
   assert.match(fuente(PANEL, 'function plaCargaArchivo(input){'), /wb\.SheetNames\.map\(function\(n\)\{/);
   assert.match(M, /<b>lo avisa y lo guarda igual<\/b>/);
-  assert.match(M, /el resto del 4\.1, a ventas —salvo lo que el mismo plan marca como gasto con «G -», que va a Otros—/);
-  assert.equal(SVC.rubroPorDefecto('4.1.13.00.000.0000', 'G - Alquiler espacio físico'), 'otros');
-  assert.match(M, /<b>Costos fijos arranca vacío\.<\/b>/);
+  assert.match(M, /el resto del 4\.1 que no es gasto «G -» —ventas, y comisiones, descargas y fletes ganados— a ventas/);
+  assert.equal(SVC.rubroPorDefecto('4.1.13.00.000.0000', 'G - Alquiler espacio físico'), 'sin_asignar');
+  assert.match(M, /<b>Todo lo demás arranca sin título<\/b>, la compra de mercadería también/);
+  assert.equal(SVC.rubroPorDefecto('4.1.01.01.000.0000', 'G - COMPRA MERCADERIA'), 'sin_asignar');
   assert.ok(!SVC.RUBROS.some((r) => r.k === 'costos_fijos' && /costos_fijos/.test(fuente(leer('src/servicios/pl_abasto.js'), 'export function rubroPorDefecto('))));
   assert.match(M, /cuando el otro sistema la cargó con su cobro en el mismo asiento/);
   assert.match(M, /<b>Volver a los de por defecto<\/b> borra toda la clasificación guardada, y por eso pide el nivel <b>Anular<\/b>/);

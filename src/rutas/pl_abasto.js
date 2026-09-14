@@ -99,6 +99,21 @@ db.exec(`
   );
 `);
 
+// LOS TÍTULOS CAMBIARON (V1056). Una clasificación guardada con un título que ya no existe
+// —«otros»— se borra, y la cuenta vuelve a su título por defecto, que para un gasto es ninguno:
+// no suma y se ve en la lista sin etiqueta. Un ajuste manual, en cambio, no puede quedar sin
+// título, porque dejaría de sumar sin que nadie lo vea: pasa a costos variables, donde iba el
+// gasto genérico, y el resultado neto no se mueve.
+function migrarTitulos(db) {
+  const validos = RUBROS.map((r) => r.k);
+  const q = validos.map(() => '?').join(',');
+  const rubros = db.prepare(`DELETE FROM pl_abasto_rubros WHERE rubro NOT IN (${q}, ?)`).run(...validos, SIN_ASIGNAR).changes;
+  const ajustes = db.prepare(`UPDATE pl_abasto_ajustes SET rubro = 'costos_variables' WHERE rubro NOT IN (${q})`)
+    .run(...validos).changes;
+  return { rubros, ajustes };
+}
+migrarTitulos(db);
+
 const MES = /^\d{4}-(0[1-9]|1[0-2])$/;
 const FECHA = /^\d{4}-\d{2}-\d{2}$/;
 // Los asientos de un importe, a lo sumo. Los de VENTAS de un mes son más de mil: se
@@ -348,7 +363,8 @@ router.get('/cuentas', requireAuth, (req, res) => {
     const totales = new Map(db.prepare(`SELECT cuenta, ROUND(SUM(haber) - SUM(debe), 2) AS importe,
         COUNT(*) AS renglones FROM pl_abasto_movimientos GROUP BY cuenta`).all().map((x) => [x.cuenta, x]));
     const { elegidos, nombres, rubroDe } = rubrosDeCuentas(db);
-    const cuentas = [...nombres.keys()].filter(esCuentaDeResultado).sort().map((c) => ({
+    // TODAS LAS QUE TIENEN MOVIMIENTOS, con título o sin él: que ninguna se pierda de vista.
+    const cuentas = [...nombres.keys()].filter((c) => esCuentaDeResultado(c) && totales.has(c)).sort().map((c) => ({
       cuenta: c, nombre: nombres.get(c), rubro: rubroDe(c), rubro_defecto: rubroPorDefecto(c, nombres.get(c)),
       elegido: elegidos.has(c) ? 1 : 0,
       importe: (totales.get(c) || {}).importe || 0, renglones: (totales.get(c) || {}).renglones || 0,
