@@ -15,12 +15,13 @@
 // gastos negativos, y todos los subtotales del cuadro son sumas.
 //
 // El nivel lo decide exigirNivel por la dirección (/api/pl-abasto, declarada en
-// ensure_api_prefijos.js y con la lectura controlada en permisos.js): 'ver' mira, subir
-// el diario y guardar los rubros pide 'operar'.
+// ensure_api_prefijos.js y con la lectura controlada en permisos.js): 'ver' mira; subir
+// el diario, guardar los rubros y cargar o corregir un ajuste manual pide 'operar'; volver
+// los rubros a los de por defecto y eliminar un ajuste, 'anular'.
 import express from 'express';
 import db from '../servicios/db.js';
 import { RUBROS, SIN_ASIGNAR, esRubro, esCuentaDeResultado, rubroPorDefecto, validarCarga,
-  avisosDeReemplazo, asientosSinPareja } from '../servicios/pl_abasto.js';
+  avisosDeReemplazo, asientosSinPareja, validarAjuste } from '../servicios/pl_abasto.js';
 
 const router = express.Router();
 
@@ -69,6 +70,23 @@ db.exec(`
     rubro          TEXT NOT NULL,
     modificado_por INTEGER,
     modificado_en  TEXT DEFAULT (datetime('now','localtime'))
+  );
+  CREATE TABLE IF NOT EXISTS pl_abasto_ajustes (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    rubro          TEXT NOT NULL,
+    nombre         TEXT NOT NULL,
+    creado_por     INTEGER,
+    creado_en      TEXT DEFAULT (datetime('now','localtime')),
+    modificado_por INTEGER,
+    modificado_en  TEXT,
+    eliminado_por  INTEGER,
+    eliminado_en   TEXT
+  );
+  CREATE TABLE IF NOT EXISTS pl_abasto_ajuste_meses (
+    ajuste_id INTEGER NOT NULL,
+    mes       TEXT NOT NULL,
+    importe   REAL NOT NULL,
+    PRIMARY KEY (ajuste_id, mes)
   );
 `);
 
@@ -138,6 +156,43 @@ function reemplazo(db, desde, hasta, entran, cuentas) {
   return { existentes, entran: Number(entran) || 0, distintos: cambian.length, ejemplos: cambian.slice(0, 5) };
 }
 
+// ── AJUSTES MANUALES ─────────────────────────────────────────────────────────
+function ajusteVivo(db, id) {
+  return db.prepare('SELECT id FROM pl_abasto_ajustes WHERE id = ? AND eliminado_en IS NULL').get(Number(id)) || null;
+}
+
+// Los importes que vienen se escriben y los vacíos se borran. LOS MESES QUE NO VIENEN QUEDAN
+// COMO ESTABAN: la ventana muestra los del período que se está mirando, no todos.
+function escribirMesesDeAjuste(db, id, meses) {
+  const up = db.prepare(`INSERT INTO pl_abasto_ajuste_meses (ajuste_id, mes, importe) VALUES (?,?,?)
+    ON CONFLICT(ajuste_id, mes) DO UPDATE SET importe = excluded.importe`);
+  const del = db.prepare('DELETE FROM pl_abasto_ajuste_meses WHERE ajuste_id = ? AND mes = ?');
+  for (const [m, v] of Object.entries(meses)) {
+    if (v == null) del.run(id, m); else up.run(id, m, v);
+  }
+}
+
+// Los ajustes vivos con importe en el período, cada uno con sus meses y quién lo cargó.
+function ajustesDelPeriodo(db, desde, hasta) {
+  const porId = new Map();
+  const filas = db.prepare(`SELECT a.id, a.rubro, a.nombre, a.creado_en, a.modificado_en,
+      uc.nombre AS creado_por, um.nombre AS modificado_por, m.mes, m.importe
+    FROM pl_abasto_ajustes a
+    JOIN pl_abasto_ajuste_meses m ON m.ajuste_id = a.id
+    LEFT JOIN usuarios uc ON uc.id = a.creado_por
+    LEFT JOIN usuarios um ON um.id = a.modificado_por
+    WHERE a.eliminado_en IS NULL AND m.mes BETWEEN ? AND ?
+    ORDER BY a.id, m.mes`).all(desde, hasta);
+  for (const x of filas) {
+    if (!porId.has(x.id)) {
+      porId.set(x.id, { id: x.id, rubro: x.rubro, nombre: x.nombre, creado_por: x.creado_por, creado_en: x.creado_en,
+        modificado_por: x.modificado_por, modificado_en: x.modificado_en, meses: {} });
+    }
+    porId.get(x.id).meses[x.mes] = x.importe;
+  }
+  return [...porId.values()];
+}
+
 // ── ANTES DE GUARDAR: QUÉ SE VA A REEMPLAZAR ─────────────────────────────────
 // Liviana: viajan el período, cuántos renglones entran y los nombres de las cuentas, no los
 // renglones. La pantalla la pide apenas lee el archivo.
@@ -205,7 +260,7 @@ router.get('/resultado', requireAuth, (req, res) => {
     if (desde > hasta) [desde, hasta] = [hasta, desde];
     const meses = disponibles.filter((m) => m >= desde && m <= hasta);
     const base = { rubros: RUBROS, meses_disponibles: disponibles, ultima_carga: ultima, desde, hasta, meses };
-    if (!meses.length) return res.json({ ok: true, data: Object.assign(base, { cuentas: [] }) });
+    if (!meses.length) return res.json({ ok: true, data: Object.assign(base, { cuentas: [], ajustes: [] }) });
 
     const filas = db.prepare(`SELECT cuenta, mes, ROUND(SUM(haber) - SUM(debe), 2) AS importe
         FROM pl_abasto_movimientos WHERE mes BETWEEN ? AND ? GROUP BY cuenta, mes`).all(desde, hasta);
@@ -222,7 +277,8 @@ router.get('/resultado', requireAuth, (req, res) => {
       }
       c.meses[f.mes] = f.importe;
     }
-    res.json({ ok: true, data: Object.assign(base, { cuentas: [...porCuenta.values()] }) });
+    res.json({ ok: true, data: Object.assign(base, { cuentas: [...porCuenta.values()],
+      ajustes: ajustesDelPeriodo(db, desde, hasta) }) });
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
@@ -271,6 +327,58 @@ router.delete('/rubros', requireAuth, (req, res) => {
   try {
     const n = db.prepare('DELETE FROM pl_abasto_rubros').run().changes;
     res.json({ ok: true, data: { borradas: n } });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// ── CARGAR, CORREGIR Y ELIMINAR UN AJUSTE MANUAL ─────────────────────────────
+router.post('/ajustes', requireAuth, (req, res) => {
+  try {
+    const v = validarAjuste(req.body);
+    if (v.error) return res.status(400).json({ ok: false, error: v.error });
+    if (!Object.values(v.meses).some((x) => x != null)) {
+      return res.status(400).json({ ok: false, error: 'Cargá el importe de al menos un mes.' });
+    }
+    let id = null;
+    db.transaction(() => {
+      id = Number(db.prepare('INSERT INTO pl_abasto_ajustes (rubro, nombre, creado_por) VALUES (?,?,?)')
+        .run(v.rubro, v.nombre, usuarioId(req)).lastInsertRowid);
+      escribirMesesDeAjuste(db, id, v.meses);
+    })();
+    res.json({ ok: true, data: { id } });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+router.put('/ajustes/:id', requireAuth, (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    if (!ajusteVivo(db, id)) return res.status(404).json({ ok: false, error: 'Ese ajuste no existe o ya fue eliminado.' });
+    const v = validarAjuste(req.body);
+    if (v.error) return res.status(400).json({ ok: false, error: v.error });
+    // UN AJUSTE SIN IMPORTES NO SE GUARDA: vaciarlo sería eliminarlo sin el nivel que elimina.
+    const quedan = new Map(db.prepare('SELECT mes, importe FROM pl_abasto_ajuste_meses WHERE ajuste_id = ?').all(id)
+      .map((x) => [x.mes, x.importe]));
+    for (const [m, x] of Object.entries(v.meses)) { if (x == null) quedan.delete(m); else quedan.set(m, x); }
+    if (!quedan.size) {
+      return res.status(400).json({ ok: false, error: 'El ajuste quedaría sin importes: para sacarlo, eliminalo.' });
+    }
+    db.transaction(() => {
+      db.prepare(`UPDATE pl_abasto_ajustes SET rubro = ?, nombre = ?, modificado_por = ?,
+          modificado_en = datetime('now','localtime') WHERE id = ?`).run(v.rubro, v.nombre, usuarioId(req), id);
+      escribirMesesDeAjuste(db, id, v.meses);
+    })();
+    res.json({ ok: true, data: { id, meses: quedan.size } });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// Eliminarlo saca del resultado algo que alguien cargó: va por DELETE, y exigirNivel le pide
+// el nivel de anular. Baja lógica: queda quién y cuándo.
+router.delete('/ajustes/:id', requireAuth, (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    if (!ajusteVivo(db, id)) return res.status(404).json({ ok: false, error: 'Ese ajuste no existe o ya fue eliminado.' });
+    db.prepare(`UPDATE pl_abasto_ajustes SET eliminado_por = ?, eliminado_en = datetime('now','localtime')
+      WHERE id = ?`).run(usuarioId(req), id);
+    res.json({ ok: true, data: { id } });
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 

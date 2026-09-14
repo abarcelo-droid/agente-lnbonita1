@@ -173,3 +173,39 @@ export function asientosSinPareja(asientos) {
     || Math.abs(b.debe - b.haber) - Math.abs(a.debe - a.haber));
   return { solos, emparejados };
 }
+
+// ── UN AJUSTE MANUAL ──────────────────────────────────────────────────────────
+//
+// Lo que el libro diario no trae y el resultado tiene que mostrar —una amortización, un
+// sueldo que se paga por fuera, una provisión— se carga a mano en un rubro, mes por mes, Y
+// CON EL SIGNO CON QUE PESA en el resultado: un gasto en negativo, un ingreso en positivo.
+// Así entra a la cascada como una cuenta más, sin reglas aparte.
+//
+// Vacío o cero en un mes es SACAR el importe de ese mes: vuelve null.
+const MES_AJUSTE = /^\d{4}-(0[1-9]|1[0-2])$/;
+export const AJUSTE_MESES_MAX = 36;
+export function validarAjuste(body) {
+  const b = body || {};
+  const nombre = String(b.nombre == null ? '' : b.nombre).trim().replace(/\s+/g, ' ');
+  if (!nombre) return { error: 'Falta el nombre del ajuste.' };
+  if (nombre.length > 80) return { error: 'El nombre del ajuste es muy largo: hasta 80 letras.' };
+  const rubro = String(b.rubro == null ? '' : b.rubro);
+  // Uno de los seis: un ajuste «sin asignar» no entraría a ningún lado.
+  if (!RUBROS.some((r) => r.k === rubro)) return { error: 'Elegí a qué rubro va el ajuste.' };
+  const entrada = (b.meses && typeof b.meses === 'object' && !Array.isArray(b.meses)) ? b.meses : null;
+  if (!entrada) return { error: 'Faltan los importes del ajuste.' };
+  const claves = Object.keys(entrada);
+  if (claves.length > AJUSTE_MESES_MAX) return { error: 'Son demasiados meses para guardar de una vez.' };
+  const meses = {};
+  for (const m of claves) {
+    if (!MES_AJUSTE.test(m)) return { error: 'Ese mes no se entiende: ' + m + '.' };
+    const v = entrada[m];
+    if (v == null || v === '') { meses[m] = null; continue; }
+    const n = Number(v);
+    if (typeof v === 'boolean' || !Number.isFinite(n) || Math.abs(n) >= 1e13) {
+      return { error: 'El importe de ' + m + ' no es un número.' };
+    }
+    meses[m] = r2(n) || null;
+  }
+  return { nombre, rubro, meses };
+}

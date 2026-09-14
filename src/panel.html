@@ -5536,6 +5536,9 @@ input[type=number]{-moz-appearance:textfield;appearance:textfield}
     #sec-pl-abasto .pla-rub td:first-child{cursor:pointer}
     #sec-pl-abasto .pla-cta td{color:#475569;font-size:10px}
     #sec-pl-abasto .pla-cta td:first-child{padding-left:22px}
+    #sec-pl-abasto .pla-aju td{color:#b45309;font-style:italic;font-size:10px}
+    #sec-pl-abasto .pla-aju td:first-child{padding-left:22px;cursor:pointer}
+    #sec-pl-abasto .pla-aju-add td{font-size:10.5px;color:var(--burg);cursor:pointer;padding-left:22px;font-weight:600}
     #sec-pl-abasto .pla-sub td{background:#dbeafe;font-weight:700}
     #sec-pl-abasto .pla-res td{background:#0a2744;color:#fff;font-weight:700}
     #sec-pl-abasto .pla-pos{color:#15803d} #sec-pl-abasto .pla-neg{color:#dc2626}
@@ -5583,8 +5586,10 @@ input[type=number]{-moz-appearance:textfield;appearance:textfield}
       <div><label>Importes en</label><select id="pla-unidad" data-sin-buscador="1" onchange="plaUnidadCambiar()">
         <option value="1">Pesos</option><option value="1000">Miles</option><option value="1000000">Millones</option>
       </select></div>
-      <div style="font-size:11px;color:var(--mut);align-self:center">Clic en un rubro: sus cuentas · doble clic en un
-        importe: los asientos · el importe exacto, pasando el mouse</div>
+      <button class="btn bo" id="pla-ajuste-btn" style="display:none" onclick="plaAjusteAbrir(null)">✎ Ajuste manual</button>
+      <button class="btn bo" onclick="plaExportar()">⬇️ Exportar CSV</button>
+      <div style="font-size:11px;color:var(--mut);align-self:center">Clic en un rubro: sus cuentas y ajustes · doble
+        clic en un importe: los asientos · el importe exacto, pasando el mouse</div>
     </div>
     <div class="ab-table-wrap"><table class="pla-tbl" id="pla-tabla"></table></div>
   </div>
@@ -8117,6 +8122,42 @@ input[type=number]{-moz-appearance:textfield;appearance:textfield}
     </div>
     <div class="ab-table-wrap" style="overflow-x:hidden !important">
       <table class="pa-tbl" id="pla-detalle-tabla" style="table-layout:fixed;width:100%;font-size:12px"></table></div>
+  </div>
+</div>
+
+<!-- ══ P&L ABASTO: UN AJUSTE MANUAL (V1054) ═══════════════════════════════════
+     Una ventana, porque es cargar. Se abre en blanco o con el ajuste que se tocó; guardar
+     la cierra, porque no queda nada que leer. -->
+<div class="ab-modal-overlay sg-mod" id="pla-ajuste-modal">
+  <style>
+    #pla-ajuste-modal .pla-aj-lbl{font-size:11px;color:var(--mut);display:block;margin-bottom:3px}
+    #pla-ajuste-modal input,#pla-ajuste-modal select{padding:5px 8px;border:1px solid var(--bor);border-radius:6px;
+      background:var(--bg);font-size:12.5px;width:100%;box-sizing:border-box}
+    #pla-ajuste-modal .pla-aj-meses{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px 10px;margin-top:12px}
+    #pla-ajuste-modal .pla-aj-meses label{font-size:11px;color:var(--mut)}
+    #pla-ajuste-modal .pla-aj-meses input{text-align:right;font-variant-numeric:tabular-nums;margin-top:2px}
+    @media(max-width:600px){ #pla-ajuste-modal .pla-aj-meses{grid-template-columns:repeat(2,minmax(0,1fr))} }
+  </style>
+  <div class="ab-modal" style="width:min(640px,96vw);max-width:96vw;max-height:90vh;overflow-y:auto;overflow-x:hidden">
+    <div class="mhd"><div class="mht" id="pla-ajuste-tit">✎ Ajuste manual</div>
+      <button class="mcl" onclick="closeMB('pla-ajuste-modal')">×</button></div>
+    <div style="font-size:12.5px;color:var(--mut);margin-bottom:10px">Lo que el libro diario no trae y el resultado
+      tiene que mostrar. Se suma a su rubro como una cuenta más. <b>Cada importe va con el signo con que pesa en el
+      resultado:</b> un gasto en negativo (-150.000), un ingreso en positivo.</div>
+    <div style="display:grid;grid-template-columns:minmax(0,2fr) minmax(0,1fr);gap:10px">
+      <div><label class="pla-aj-lbl">Nombre</label>
+        <input id="pla-ajuste-nombre" maxlength="80" placeholder="Ej.: Amortización de rodados"></div>
+      <div><label class="pla-aj-lbl">Rubro</label><select id="pla-ajuste-rubro" data-sin-buscador="1"></select></div>
+    </div>
+    <div class="pla-aj-meses" id="pla-ajuste-meses"></div>
+    <div id="pla-ajuste-total" style="margin-top:10px;font-size:13px;text-align:right"></div>
+    <div id="pla-ajuste-quien" style="margin-top:6px;font-size:11px;color:var(--mut)"></div>
+    <div style="display:flex;gap:8px;align-items:center;margin-top:16px">
+      <button class="btn bo" id="pla-ajuste-eliminar" style="display:none;color:var(--err)" onclick="plaAjusteEliminar()">🗑 Eliminar</button>
+      <span style="flex:1"></span>
+      <button class="btn bo" onclick="closeMB('pla-ajuste-modal')">Cancelar</button>
+      <button class="btn bb" id="pla-ajuste-guardar" onclick="plaAjusteGuardar()">Guardar</button>
+    </div>
   </div>
 </div>
 
@@ -24318,6 +24359,32 @@ SG_MANUAL.plabasto = { titulo: 'P&L Abasto', html:
   + '—caja, clientes, proveedores, IVA— y no están en el cuadro.</li>'
   + '</ul>'
 
+  + '<h3>Ajustes manuales</h3>'
+  + '<ul>'
+  + '<li><span class="ver">V1054</span> Lo que el libro diario no trae y el resultado tiene que mostrar —una '
+  + 'amortización, un sueldo que se paga por fuera, una provisión— se carga con <b>✎ Ajuste manual</b>: un '
+  + 'nombre, el rubro y el importe de cada mes.</li>'
+  + '<li><b>Cada importe va con el signo con que pesa en el resultado</b>: un gasto en negativo (-150.000), un '
+  + 'ingreso en positivo. Se suma a su rubro como una cuenta más, así que mueve los subtotales, el % sobre '
+  + 'ventas y el resultado neto.</li>'
+  + '<li>Aparece <b>adentro de su rubro</b>, debajo de las cuentas, en naranja. Con un clic se abre para '
+  + 'corregirlo. Un rubro que sólo tiene ajustes también se muestra.</li>'
+  + '<li>La ventana muestra <b>los meses del período que se está mirando</b>; los otros meses del mismo ajuste '
+  + 'quedan como estaban. Borrar el importe de un mes lo saca de ese mes.</li>'
+  + '<li>En los asientos de un rubro (doble clic) aparecen también sus ajustes, para que el saldo dé lo mismo '
+  + 'que la celda.</li>'
+  + '<li>Un ajuste no puede quedar sin importes: para sacarlo se <b>elimina</b>, y eso pide el nivel '
+  + '<b>Anular</b>. Sale del resultado de todos los meses.</li>'
+  + '</ul>'
+
+  + '<h3>Exportar</h3>'
+  + '<ul>'
+  + '<li><span class="ver">V1054</span> <b>⬇️ Exportar CSV</b> baja el cuadro del período elegido para abrirlo en '
+  + 'Excel: los seis rubros con <b>todas sus cuentas y sus ajustes</b> —aunque en la pantalla estén cerrados—, '
+  + 'los subtotales y el resultado neto.</li>'
+  + '<li>Los importes van <b>en pesos con centavos</b>, aunque en la pantalla se vean en miles o millones.</li>'
+  + '</ul>'
+
   + '<h3>No balancea</h3>'
   + '<ul>'
   + '<li><span class="ver">V1053</span> Muestra <b>los días en que el debe y el haber del libro diario no dan '
@@ -24348,11 +24415,13 @@ SG_MANUAL.plabasto = { titulo: 'P&L Abasto', html:
   + '</ul>'
 
   + '<h3>Quién puede</h3>'
-  + '<p>Con el nivel <b>Ver</b> se mira el cuadro y los asientos. Subir el libro diario y guardar los rubros '
-  + 'pide <b>Operar</b>; volver los rubros a los de por defecto, <b>Anular</b>.</p>'
+  + '<p>Con el nivel <b>Ver</b> se mira el cuadro y los asientos, y se exporta. Subir el libro diario, guardar '
+  + 'los rubros y cargar o corregir un ajuste pide <b>Operar</b>; volver los rubros a los de por defecto y '
+  + 'eliminar un ajuste, <b>Anular</b>.</p>'
 
   + '<h3>Qué cambió, y desde cuándo</h3>'
   + '<ul>'
+  + '<li><span class="ver">V1054</span> Ajustes manuales por rubro, y exportar el cuadro a CSV.</li>'
   + '<li><span class="ver">V1053</span> Solapa <b>No balancea</b>: los días en que el libro diario no cierra y los '
   + 'asientos que lo explican.</li>'
   + '<li><span class="ver">V1052</span> Nace la pantalla: subir el libro diario, el cuadro por mes, los rubros '
@@ -43317,7 +43386,7 @@ var IA = { data:null, opo:null, tipos:{} };
 // ordenados: pesan la mitad que el archivo y el servidor no se queda leyendo un Excel
 // mientras los demás trabajan.
 var PLA = { datos: null, abiertos: {}, cuentas: null, pend: {}, detalle: null, lectura: null, previa: null, unidad: null,
-  nb: null, nbAbiertos: {} };
+  nb: null, nbAbiertos: {}, ajuste: null, op: false };
 
 // ── LEER EL LIBRO DIARIO ─────────────────────────────────────────────────────
 //
@@ -43545,10 +43614,11 @@ function plaInit(){
   // Subir y clasificar es operar; volver a los de por defecto borra trabajo hecho, y es
   // anular. Al que no llega no se le ofrece un botón que rebota.
   var op = lnbPuedeOperar('pl-abasto'), an = lnbPuedeAnular('pl-abasto');
-  ['pla-subir-btn', 'pla-rub-guardar'].forEach(function(id){
+  ['pla-subir-btn', 'pla-rub-guardar', 'pla-ajuste-btn'].forEach(function(id){
     var e = eid(id); if (e) e.style.display = op ? '' : 'none';
   });
   var rs = eid('pla-rub-reset'); if (rs) rs.style.display = an ? '' : 'none';
+  PLA.op = op;
   // SE ENTRA LIMPIO: lo arrastrado y no guardado en la visita anterior no puede quedar
   // esperando un Guardar que lo escriba sin que nadie lo vea.
   PLA.cuentas = null;
@@ -43630,11 +43700,11 @@ var PLA_SUBTOTALES = [
 ];
 
 function plaTotales(d){
-  var meses = d.meses || [], rub = {}, porRubro = {};
+  var meses = d.meses || [], rub = {}, porRubro = {}, ajustes = {};
   var r2 = function(n){ return Math.round(n * 100) / 100; };
   var cols = meses.concat('TOTAL');
   (d.rubros || []).forEach(function(r){
-    rub[r.k] = {}; porRubro[r.k] = [];
+    rub[r.k] = {}; porRubro[r.k] = []; ajustes[r.k] = [];
     cols.forEach(function(m){ rub[r.k][m] = 0; });
   });
   (d.cuentas || []).forEach(function(c){
@@ -43643,6 +43713,15 @@ function plaTotales(d){
     meses.forEach(function(m){ var v = Number(c.meses[m]) || 0; rub[c.rubro][m] += v; t += v; });
     rub[c.rubro].TOTAL += t;
     porRubro[c.rubro].push({ c: c, total: r2(t) });
+  });
+  // LOS AJUSTES MANUALES SUMAN A SU RUBRO COMO UNA CUENTA MÁS: ya vienen con el signo con que
+  // pesan, y así entran a los subtotales, al % sobre ventas y al resultado neto.
+  (d.ajustes || []).forEach(function(a){
+    if (!rub[a.rubro]) return;
+    var t = 0;
+    meses.forEach(function(m){ var v = Number(a.meses[m]) || 0; rub[a.rubro][m] += v; t += v; });
+    rub[a.rubro].TOTAL += t;
+    ajustes[a.rubro].push({ a: a, total: r2(t) });
   });
   Object.keys(rub).forEach(function(k){ cols.forEach(function(m){ rub[k][m] = r2(rub[k][m]); }); });
   var sumar = function(ks){
@@ -43658,7 +43737,7 @@ function plaTotales(d){
   Object.keys(porRubro).forEach(function(k){
     porRubro[k].sort(function(a, b){ return k === 'ventas' ? b.total - a.total : a.total - b.total; });
   });
-  return { rubros: rub, subtotales: sub, cuentas: porRubro };
+  return { rubros: rub, subtotales: sub, cuentas: porRubro, ajustes: ajustes };
 }
 
 // ── LA UNIDAD ─────────────────────────────────────────────────────────────────
@@ -43722,16 +43801,30 @@ function plaPintar(){
     var cuentas = T.cuentas[r.k].filter(function(x){
       return orden.some(function(m){ return Math.abs(m === 'TOTAL' ? x.total : (Number(x.c.meses[m]) || 0)) >= 1; });
     });
-    if (cuentas.length) {
+    // Un ajuste también. Y un rubro que sólo tiene ajustes se ve igual: lo cargado a mano en
+    // Costos fijos —que arranca vacío— sumaba al resultado sin aparecer en ningún lado.
+    var ajustes = T.ajustes[r.k].filter(function(x){
+      return d.meses.some(function(m){ return !!(Number(x.a.meses[m]) || 0); });
+    });
+    if (cuentas.length || ajustes.length) {
       var abierto = !!PLA.abiertos[r.k];
       h += fila('pla-rub', (abierto ? '▼ ' : '▶ ') + r.ico + ' ' + r.label, T.rubros[r.k], true,
         function(m){ return "plaDetalle('rubro','" + r.k + "','" + m + "')"; }, "plaToggle('" + r.k + "')");
-      if (abierto) cuentas.forEach(function(x){
-        var vs = { TOTAL: x.total };
-        d.meses.forEach(function(m){ vs[m] = Number(x.c.meses[m]) || 0; });
-        h += fila('pla-cta', x.c.cuenta + ' · ' + x.c.nombre, vs, false,
-          function(m){ return "plaDetalle('cuenta','" + escH(x.c.cuenta) + "','" + m + "')"; });
-      });
+      if (abierto) {
+        cuentas.forEach(function(x){
+          var vs = { TOTAL: x.total };
+          d.meses.forEach(function(m){ vs[m] = Number(x.c.meses[m]) || 0; });
+          h += fila('pla-cta', x.c.cuenta + ' · ' + x.c.nombre, vs, false,
+            function(m){ return "plaDetalle('cuenta','" + escH(x.c.cuenta) + "','" + m + "')"; });
+        });
+        ajustes.forEach(function(x){
+          var vs = { TOTAL: x.total }, abrir = 'plaAjusteAbrir(' + Number(x.a.id) + ')';
+          d.meses.forEach(function(m){ vs[m] = Number(x.a.meses[m]) || 0; });
+          h += fila('pla-aju', '✎ Ajuste: ' + x.a.nombre, vs, false, function(){ return abrir; }, abrir);
+        });
+        if (PLA.op) h += '<tr class="pla-aju-add"><td colspan="' + (orden.length + 1) + '" onclick="plaAjusteAbrir(null,\''
+          + r.k + '\')">+ Agregar un ajuste manual a ' + escH(r.label) + '</td></tr>';
+      }
     }
     // EL SUBTOTAL VA AUNQUE SU RUBRO ESTÉ VACÍO: el EBITDA existe aunque no haya costos fijos.
     PLA_SUBTOTALES.forEach(function(s){ if (s.despues === r.k) h += fila('pla-sub', s.label, T.subtotales[s.k], true); });
@@ -43750,7 +43843,8 @@ function plaDetalle(tipo, clave, mes){
   var cta = tipo === 'cuenta' ? (d.cuentas || []).filter(function(c){ return c.cuenta === clave; })[0] : null;
   var titulo = (tipo === 'rubro' ? (rub ? rub.label : clave) : (cta ? cta.cuenta + ' · ' + cta.nombre : clave))
     + ' — ' + (mes === 'TOTAL' ? plaMesTxt(desde) + ' a ' + plaMesTxt(hasta) : plaMesTxt(mes));
-  PLA.detalle = { tipo: tipo, filas: [], total: null, recortado: 0 };
+  PLA.detalle = { tipo: tipo, filas: [], total: null, recortado: 0,
+    ajustes: tipo === 'rubro' ? plaDetalleAjustes(d, clave, desde, hasta) : [] };
   eid('pla-detalle-tit').textContent = '🔍 ' + titulo;
   eid('pla-detalle-q').value = '';
   eid('pla-detalle-nota').textContent = 'Cargando…';
@@ -43772,17 +43866,29 @@ function plaDetallePintar(){
   var filas = D.filas.filter(function(f){
     return !q || sgNorm([f.fecha, plaFechaTxt(f.fecha), f.asiento, f.cuenta, f.nombre, f.contrapartida].join(' ')).indexOf(q) >= 0;
   });
+  var ajustes = (D.ajustes || []).filter(function(f){
+    return !q || sgNorm(['ajuste manual', f.nombre, plaMesTxt(f.mes)].join(' ')).indexOf(q) >= 0;
+  });
   var conCuenta = D.tipo === 'rubro', span = conCuenta ? 4 : 3;
   eid('pla-detalle-nota').textContent = (D.recortado ? 'Se muestran los ' + nr(D.filas.length) + ' más recientes de '
-    + nr(D.total.renglones) + '; el total es de todos. ' : '') + (q ? nr(filas.length) + ' coinciden con la búsqueda.' : '');
+    + nr(D.total.renglones) + '; el total es de todos. ' : '') + (q ? nr(filas.length + ajustes.length) + ' coinciden con la búsqueda.' : '');
   // Con búsqueda, los totales son de lo que se ve; sin búsqueda, de TODOS los renglones.
-  var sD = 0, sH = 0;
-  filas.forEach(function(f){ sD += Number(f.debe) || 0; sH += Number(f.haber) || 0; });
-  var tD = q ? sD : D.total.debe, tH = q ? sH : D.total.haber, n = q ? filas.length : D.total.renglones;
+  var sD = 0, sH = 0, aD = 0, aH = 0, todos = D.ajustes || [];
+  filas.concat(ajustes).forEach(function(f){ sD += Number(f.debe) || 0; sH += Number(f.haber) || 0; });
+  // LOS AJUSTES DEL RUBRO ENTRAN AL TOTAL: la celda los suma, y el saldo tiene que dar lo mismo.
+  todos.forEach(function(f){ aD += f.debe; aH += f.haber; });
+  var tD = q ? sD : D.total.debe + aD, tH = q ? sH : D.total.haber + aH;
+  var n = q ? filas.length + ajustes.length : D.total.renglones + todos.length;
   eid('pla-detalle-tabla').innerHTML = '<colgroup><col style="width:11%"><col style="width:9%">'
     + (conCuenta ? '<col style="width:22%">' : '') + '<col><col style="width:14%"><col style="width:14%"></colgroup>'
     + '<thead><tr><th>Fecha</th><th>Asiento</th>' + (conCuenta ? '<th>Cuenta</th>' : '')
     + '<th>Contrapartida</th><th style="text-align:right">Debe</th><th style="text-align:right">Haber</th></tr></thead><tbody>'
+    + ajustes.map(function(f){
+        return '<tr style="color:#b45309;font-style:italic"><td>' + plaMesTxt(f.mes) + '</td><td>—</td>'
+          + (conCuenta ? '<td title="' + escH(f.nombre) + '">✎ ' + escH(f.nombre) + '</td>' : '')
+          + '<td>Ajuste manual</td><td style="text-align:right">' + (f.debe ? plaImporte(f.debe) : '') + '</td>'
+          + '<td style="text-align:right">' + (f.haber ? plaImporte(f.haber) : '') + '</td></tr>';
+      }).join('')
     + filas.map(function(f){
         return '<tr><td>' + plaFechaTxt(f.fecha) + '</td><td>' + escH(f.asiento || '') + '</td>'
           + (conCuenta ? '<td title="' + escH(f.cuenta + ' · ' + (f.nombre || '')) + '">' + escH(f.nombre || f.cuenta) + '</td>' : '')
@@ -43797,6 +43903,171 @@ function plaDetallePintar(){
     // millones abría un detalle con el saldo en negativo.
     + '<tr><td colspan="' + span + '"><b>SALDO (Haber − Debe, como en el cuadro)</b></td>'
     + '<td colspan="2" style="text-align:right"><b>' + plaImporte(Math.round((tH - tD) * 100) / 100) + '</b></td></tr></tfoot>';
+}
+
+// ── LOS AJUSTES DE UN RUBRO, EN SUS ASIENTOS ─────────────────────────────────
+// La celda los suma, así que el detalle también: como renglones, el importe negativo en el
+// debe y el positivo en el haber. Así el saldo da lo mismo que la celda.
+function plaDetalleAjustes(d, rubro, desde, hasta){
+  var out = [];
+  (d.ajustes || []).forEach(function(a){
+    if (a.rubro !== rubro) return;
+    (d.meses || []).forEach(function(m){
+      var v = Number(a.meses[m]) || 0;
+      if (!v || m < desde || m > hasta) return;
+      out.push({ mes: m, nombre: a.nombre, debe: v < 0 ? -v : 0, haber: v > 0 ? v : 0 });
+    });
+  });
+  return out;
+}
+
+// ── AJUSTES MANUALES ──────────────────────────────────────────────────────────
+//
+// Lo que el libro diario no trae —una amortización, un sueldo que se paga por fuera, una
+// provisión— se carga a mano: un nombre, un rubro y el importe de cada mes, CON EL SIGNO CON
+// QUE PESA (un gasto en negativo). Entra a la cascada como una cuenta más.
+//
+// La ventana muestra los meses del período que se está mirando y guarda sólo ésos: los otros
+// meses del mismo ajuste quedan como estaban.
+function plaAjusteAbrir(id, rubro){
+  var d = PLA.datos;
+  if (!d || !(d.meses || []).length) { toast('Primero hay que subir el libro diario', 'er'); return; }
+  var a = id ? (d.ajustes || []).filter(function(x){ return x.id === id; })[0] : null;
+  if (id && !a) { toast('Ese ajuste ya no está: actualizá el cuadro', 'er'); return; }
+  var op = lnbPuedeOperar('pl-abasto');
+  // SE ABRE EN BLANCO, o con el ajuste que se tocó: nunca con lo escrito la vez anterior.
+  PLA.ajuste = { id: a ? a.id : null };
+  eid('pla-ajuste-tit').textContent = a ? '✎ ' + a.nombre : '✎ Nuevo ajuste manual';
+  var nom = eid('pla-ajuste-nombre');
+  nom.value = a ? a.nombre : '';
+  nom.disabled = !op;
+  var sel = eid('pla-ajuste-rubro');
+  sel.innerHTML = '<option value="">Elegí el rubro…</option>' + (d.rubros || []).map(function(r){
+    return '<option value="' + r.k + '">' + r.ico + ' ' + escH(r.label) + '</option>'; }).join('');
+  sel.value = a ? a.rubro : (rubro || '');
+  sel.disabled = !op;
+  eid('pla-ajuste-meses').innerHTML = d.meses.slice().reverse().map(function(m){
+    var v = a ? Number(a.meses[m]) || 0 : 0;
+    return '<label>' + plaMesTxt(m) + '<input data-mes="' + m + '" inputmode="decimal" oninput="plaAjusteTotal()"'
+      + (op ? '' : ' disabled') + ' value="' + (v ? v.toLocaleString('es-AR', { maximumFractionDigits: 2 }) : '') + '"></label>';
+  }).join('');
+  eid('pla-ajuste-quien').textContent = a ? 'Cargado por ' + (a.creado_por || '—') + ' el '
+    + plaFechaTxt(String(a.creado_en || '').slice(0, 10)) + (a.modificado_en ? ' · corregido por '
+    + (a.modificado_por || '—') + ' el ' + plaFechaTxt(String(a.modificado_en).slice(0, 10)) : '') : '';
+  var g = eid('pla-ajuste-guardar');
+  g.style.display = op ? '' : 'none';
+  g.disabled = false;
+  // Eliminarlo saca del resultado algo que alguien cargó: pide anular.
+  eid('pla-ajuste-eliminar').style.display = (a && lnbPuedeAnular('pl-abasto')) ? '' : 'none';
+  plaAjusteTotal();
+  sgModalArriba('pla-ajuste-modal');
+}
+
+// Los importes de la ventana: vacío o cero es sacar ese mes; lo que no es un número frena.
+function plaAjusteLeer(inputs){
+  var meses = {}, total = 0, malo = null;
+  for (var i = 0; i < inputs.length; i++) {
+    var m = inputs[i].getAttribute('data-mes'), s = String(inputs[i].value || '').trim();
+    if (!s) { meses[m] = null; continue; }
+    var v = plaNumero(s);
+    if (isNaN(v)) { if (!malo) malo = m; continue; }
+    v = Math.round(v * 100) / 100;
+    meses[m] = v || null;
+    total += v;
+  }
+  return { meses: meses, total: Math.round(total * 100) / 100, malo: malo };
+}
+
+function plaAjusteInputs(){ return document.querySelectorAll('#pla-ajuste-meses input[data-mes]'); }
+
+function plaAjusteTotal(){
+  var L = plaAjusteLeer(plaAjusteInputs()), caja = eid('pla-ajuste-total');
+  if (L.malo) {
+    caja.innerHTML = '<span style="color:var(--err)">El importe de ' + plaMesTxt(L.malo) + ' no es un número.</span>';
+    return;
+  }
+  caja.innerHTML = 'En estos meses: <b style="color:' + (L.total < 0 ? '#dc2626' : '#15803d') + '">' + plaImporte(L.total)
+    + '</b> · ' + (L.total < 0 ? 'resta al resultado' : (L.total > 0 ? 'suma al resultado' : 'todavía no mueve el resultado'));
+}
+
+function plaAjusteGuardar(){
+  var A = PLA.ajuste; if (!A) return;
+  var nombre = String(eid('pla-ajuste-nombre').value || '').trim(), rubro = eid('pla-ajuste-rubro').value;
+  if (!nombre) { toast('Poné un nombre al ajuste', 'er'); return; }
+  if (!rubro) { toast('Elegí a qué rubro va', 'er'); return; }
+  var L = plaAjusteLeer(plaAjusteInputs());
+  if (L.malo) { toast('El importe de ' + plaMesTxt(L.malo) + ' no es un número', 'er'); return; }
+  var btn = eid('pla-ajuste-guardar');
+  btn.disabled = true;
+  api('/api/pl-abasto/ajustes' + (A.id ? '/' + A.id : ''), A.id ? 'PUT' : 'POST',
+      { nombre: nombre, rubro: rubro, meses: L.meses }).then(function(r){
+    btn.disabled = false;
+    if (!r || !r.ok) { toast((r && r.error) || 'No se pudo guardar el ajuste', 'er'); return; }
+    toast(A.id ? 'Ajuste corregido' : 'Ajuste agregado', 'ok');
+    // Guardar la cierra —no queda nada que leer— y deja abierto el rubro, para ver dónde entró.
+    PLA.abiertos[rubro] = true;
+    PLA.ajuste = null;
+    closeMB('pla-ajuste-modal');
+    plaCargar();
+  });
+}
+
+function plaAjusteEliminar(){
+  var A = PLA.ajuste; if (!A || !A.id) return;
+  if (!confirm('¿Eliminar este ajuste? Sale del resultado de todos los meses, también de los que no se ven.')) return;
+  api('/api/pl-abasto/ajustes/' + A.id, 'DELETE').then(function(r){
+    if (!r || !r.ok) { toast((r && r.error) || 'No se pudo eliminar el ajuste', 'er'); return; }
+    toast('Ajuste eliminado', 'ok');
+    PLA.ajuste = null;
+    closeMB('pla-ajuste-modal');
+    plaCargar();
+  });
+}
+
+// ── EXPORTAR ──────────────────────────────────────────────────────────────────
+// El cuadro del período elegido, del mes más nuevo al más viejo, pero ENTERO: los seis rubros
+// con todas sus cuentas y sus ajustes aunque en la pantalla estén cerrados, los subtotales y
+// el resultado neto. En pesos con centavos aunque la pantalla muestre miles o millones —en el
+// Excel se redondea a gusto; al revés no se puede—, con punto y coma y coma decimal, que es
+// como lo abre el Excel en castellano.
+function plaCsv(d){
+  var T = plaTotales(d);
+  var cols = ['TOTAL'].concat(d.meses.slice().reverse());
+  var celda = function(v){
+    var s = String(v == null ? '' : v);
+    return /[";\r\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+  };
+  // Un nombre que empieza con = + - @ el Excel lo toma como fórmula.
+  var texto = function(v){ var s = String(v == null ? '' : v); return /^[=+\-@]/.test(s) ? "'" + s : s; };
+  var num = function(v){ return (Math.round((Number(v) || 0) * 100) / 100).toFixed(2).replace('.', ','); };
+  var filas = [['Tipo', 'Concepto', 'Cuenta'].concat(cols.map(function(m){ return m === 'TOTAL' ? 'TOTAL' : plaMesTxt(m); }))];
+  var linea = function(tipo, concepto, cuenta, valores){
+    filas.push([tipo, texto(concepto), texto(cuenta)].concat(cols.map(function(m){ return num(valores[m]); })));
+  };
+  var deMeses = function(total, meses){
+    var o = { TOTAL: total };
+    d.meses.forEach(function(m){ o[m] = Number(meses[m]) || 0; });
+    return o;
+  };
+  var pesa = function(meses){ return d.meses.some(function(m){ return Math.abs(Number(meses[m]) || 0) >= 0.005; }); };
+  (d.rubros || []).forEach(function(r){
+    linea('Rubro', r.label, '', T.rubros[r.k]);
+    T.cuentas[r.k].forEach(function(x){ if (pesa(x.c.meses)) linea('Cuenta', x.c.nombre, x.c.cuenta, deMeses(x.total, x.c.meses)); });
+    T.ajustes[r.k].forEach(function(x){ if (pesa(x.a.meses)) linea('Ajuste manual', x.a.nombre, '', deMeses(x.total, x.a.meses)); });
+    PLA_SUBTOTALES.forEach(function(s){ if (s.despues === r.k) linea('Subtotal', s.label, '', T.subtotales[s.k]); });
+  });
+  linea('Resultado', 'RESULTADO NETO', '', T.subtotales.neto);
+  return '\ufeff' + filas.map(function(f){ return f.map(celda).join(';'); }).join('\r\n');
+}
+
+function plaExportar(){
+  var d = PLA.datos;
+  if (!d || !(d.meses || []).length) { toast('No hay nada para exportar', 'er'); return; }
+  var a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([plaCsv(d)], { type: 'text/csv;charset=utf-8' }));
+  a.download = 'PL_Abasto_' + d.desde + '_a_' + d.hasta + '.csv';
+  a.click();
+  URL.revokeObjectURL(a.href);
 }
 
 // ── LO QUE NO BALANCEA ────────────────────────────────────────────────────────
