@@ -67,8 +67,9 @@ function base() {
 }
 function rutas(db, { detalleMax } = {}) {
   return new Function('db', 'SVC', [
-    'const { RUBROS, SIN_ASIGNAR, esRubro, esCuentaDeResultado, rubroPorDefecto, validarCarga, avisosDeReemplazo } = SVC;',
+    'const { RUBROS, SIN_ASIGNAR, esRubro, esCuentaDeResultado, rubroPorDefecto, validarCarga, avisosDeReemplazo, asientosSinPareja } = SVC;',
     lineaConst('MES'),
+    lineaConst('NB_MAX'),
     lineaConst('FECHA'),
     detalleMax ? 'const DETALLE_MAX = ' + detalleMax + ';' : lineaConst('DETALLE_MAX'),
     fuente(RUTA, 'function r2('),
@@ -84,6 +85,7 @@ function rutas(db, { detalleMax } = {}) {
     '  rubros: ' + handler("router.put('/rubros'") + ',',
     '  restablecer: ' + handler("router.delete('/rubros'") + ',',
     '  detalle: ' + handler("router.get('/detalle'") + ',',
+    '  noBalancea: ' + handler("router.get('/no-balancea'") + ',',
     '};',
   ].join('\n'))(db, SVC);
 }
@@ -452,7 +454,121 @@ test('el saldo del detalle tiene el signo de la celda: haber − debe', () => {
   assert.match(p, /plaImporte\(Math\.round\(\(tH - tD\) \* 100\) \/ 100\)/);
 });
 
-// ══ 5 · EL MENÚ, LA DIRECCIÓN Y EL PERMISO ═══════════════════════════════════════════
+// ══ 5 · LO QUE NO BALANCEA (V1053) ═══════════════════════════════════════════════════
+//
+// Pablo, 14/9/2026: «esto de que el asiento no balancea es perfecto, necesito que me lo
+// agregues como una solapa, con el detalle de todo lo que no balancea».
+
+test('lo que no balancea: las dos mitades de una operación se compensan, y los que quedan solos suman la diferencia', () => {
+  const A = (asiento, fecha, debe, haber) => ({ asiento, fecha, debe, haber });
+  const r = SVC.asientosSinPareja([
+    A('372811', '2026-07-06', 6795000, 0),      // la compra
+    A('372977', '2026-07-06', 0, 6795000),      // su pago, en otro número: se compensan
+    A('373340', '2026-07-06', 0, 2762500),      // sola
+    A('380001', '2026-07-07', 0, 6795000),      // opuesta a la compra pero de OTRO día: no es su pareja
+    A('14', '2026-07-06', 100, 0), A('15', '2026-07-06', 100, 0), A('16', '2026-07-06', 0, 100),
+    A('17', '2026-07-06', 50, 50),              // cierra: no es de lo que no balancea
+  ]);
+  assert.equal(r.emparejados, 4);
+  assert.deepEqual(r.solos.map((x) => x.asiento), ['380001', '373340', '15'],
+    'el día más nuevo arriba, y adentro la diferencia más grande');
+  const delDia = r.solos.filter((x) => x.fecha === '2026-07-06').reduce((s, x) => s + x.debe - x.haber, 0);
+  assert.equal(delDia, 6795000 - 6795000 - 2762500 + 100 + 100 - 100, 'los que quedan solos no suman la diferencia del día');
+});
+
+test('la solapa No balancea: los días que no cierran, sus asientos sin pareja con renglones, y todo lo cargado', () => {
+  const db = base();
+  const R = rutas(db);
+  const N = Object.assign({}, NOMBRES, { '1.1.01.03.006.0000': 'Cheques Propios', '1.1.03.01.000.6105': 'CENCOSUD' });
+  assert.equal(llamar(R.cargar, { body: { cuentas: N, renglones: [
+    // 6/7: la compra y su pago en dos números (se compensan), y un cobro de CENCOSUD solo.
+    ['2026-07-06', '372811', '4.1.01.01.000.0000', 6795000, 0],
+    ['2026-07-06', '372977', '1.1.01.03.006.0000', 0, 6795000],
+    ['2026-07-06', '373340', '1.1.03.01.000.6105', 0, 12323225.19],
+    // 7/7: un asiento completo.
+    ['2026-07-07', '373400', '4.1.01.00.000.0000', 0, 1000], ['2026-07-07', '373400', '1.1.01.03.001.0000', 1000, 0],
+    // 8/8: dos asientos que no cierran solos, pero el día sí.
+    ['2026-08-08', '374003', '4.1.01.01.000.0000', 4080000, 0],
+    ['2026-08-08', '374160', '1.1.01.03.006.0000', 0, 2040000], ['2026-08-08', '374160', '1.1.01.03.006.0000', 0, 2040000],
+    // 9/9: una venta al súper que no cierra, con dos renglones.
+    ['2026-09-09', '380782', '4.1.01.00.000.0000', 0, 1596672], ['2026-09-09', '380782', '1.1.03.01.000.6105', 1796256, 0],
+  ] } }).code, 200);
+  const d = llamar(R.noBalancea, {}).body.data;
+  assert.equal(d.desde, '2026-07', 'sin período no muestra todo lo cargado');
+  assert.equal(d.hasta, '2026-09');
+  assert.deepEqual(d.dias.map((x) => [x.fecha, x.diferencia]), [['2026-09-09', 199584], ['2026-07-06', -12323225.19]]);
+  assert.equal(d.total.diferencia, -12123641.19);
+  assert.equal(d.no_cierran, 4, 'los del 8/8 cuentan, y ese día balancea');
+  assert.equal(d.emparejados, 2);
+  assert.equal(d.sin_pareja, 2);
+  assert.deepEqual(d.dias[1].asientos.map((a) => [a.asiento, a.diferencia]), [['373340', -12323225.19]]);
+  assert.deepEqual(d.dias[1].asientos[0].renglones,
+    [{ cuenta: '1.1.03.01.000.6105', nombre: 'CENCOSUD', debe: 0, haber: 12323225.19 }]);
+  assert.equal(d.dias[0].asientos[0].renglones.length, 2);
+  assert.deepEqual(llamar(R.noBalancea, { query: { desde: '2026-09', hasta: '2026-09' } }).body.data.dias.map((x) => x.fecha),
+    ['2026-09-09']);
+  assert.deepEqual(llamar(R.noBalancea, { query: { desde: '2026-08', hasta: '2026-08' } }).body.data.dias, []);
+  // Con más asientos sin pareja que el tope, se recorta y se dice.
+  const corto = llamar(rutasConNb(db, 1).noBalancea, {}).body.data;
+  assert.equal(corto.recortado, 1);
+  assert.equal(corto.dias.reduce((s, x) => s + x.asientos.length, 0), 1);
+});
+
+// Las rutas con otro tope de asientos sin pareja.
+function rutasConNb(db, max) {
+  return new Function('db', 'SVC', [
+    'const { asientosSinPareja } = SVC;', lineaConst('MES'), 'const NB_MAX = ' + max + ';', fuente(RUTA, 'function r2('),
+    'return { noBalancea: ' + handler("router.get('/no-balancea'") + ' };'].join('\n'))(db, SVC);
+}
+
+test('la solapa en la pantalla: el día cerrado, al abrirlo sus asientos y renglones, y el resumen de las parejas', () => {
+  const els = { 'pla-nb-tabla': { innerHTML: '' }, 'pla-nb-resumen': { innerHTML: '' } };
+  const pintar = (nb, abiertos) => new Function('PLA', 'eid', 'escH', 'nr', [
+    /^var PLA_MES = .*;\r?$/m.exec(PANEL)[0],
+    fuente(PANEL, 'function plaMesTxt(m){'), fuente(PANEL, 'function plaFechaTxt(f){'), fuente(PANEL, 'function plaImporte(v){'),
+    fuente(PANEL, 'function plaNbResumen(d){'), fuente(PANEL, 'function plaNbPintar(){'), 'plaNbPintar();',
+  ].join('\n'))({ nb, nbAbiertos: abiertos || {} }, (id) => els[id], String, String);
+  const NB = { meses_disponibles: ['2026-07'], desde: '2026-07', hasta: '2026-07', total: { diferencia: -12323225.19 },
+    no_cierran: 3, emparejados: 2, sin_pareja: 1, recortado: 0,
+    dias: [{ fecha: '2026-07-06', debe: 6795000, haber: 19118225.19, diferencia: -12323225.19, asientos: [
+      { asiento: '373340', debe: 0, haber: 12323225.19, diferencia: -12323225.19,
+        renglones: [{ cuenta: '1.1.03.01.000.6105', nombre: 'CENCOSUD', debe: 0, haber: 12323225.19 }] }] }] };
+  pintar(NB);
+  const t = els['pla-nb-tabla'].innerHTML, s = els['pla-nb-resumen'].innerHTML;
+  assert.match(t, /<tr class="pla-nb-dia" onclick="plaNbToggle\('2026-07-06'\)"><td>▶ 06\/07\/2026<\/td><td>1 asiento sin pareja<\/td>/);
+  assert.ok(!t.includes('CENCOSUD'), 'los renglones se ven sin abrir el día');
+  assert.match(t, /<span class="pla-neg">-\$ 12\.323\.225,19<\/span>/);
+  assert.match(s, /No balancean <b>1 día<\/b>, y lo explican <b>1 asiento sin pareja<\/b>/);
+  assert.match(s, /Otros 2 asientos de esos días no cierran solos pero se compensan de a dos/);
+  pintar(NB, { '2026-07-06': true });
+  assert.match(els['pla-nb-tabla'].innerHTML, /<td>Asiento 373340<\/td><td>1 renglón<\/td>/);
+  assert.match(els['pla-nb-tabla'].innerHTML, /1\.1\.03\.01\.000\.6105 · CENCOSUD/);
+  pintar(Object.assign({}, NB, { dias: [] }));
+  assert.match(els['pla-nb-resumen'].innerHTML, /✓ Del <b>Jul 2026<\/b> al <b>Jul 2026<\/b> el libro diario balancea/);
+  // Se pide sola la primera vez que se abre, y una carga nueva la vuelve a pedir.
+  assert.match(fuente(PANEL, 'function plaTab(t){'), /if \(t === 'nobalancea' && !PLA\.nb\) plaNbCargar\(true\);/);
+  assert.match(fuente(PANEL, 'function plaCargaGuardar(){'), /PLA\.nb = null;/);
+  assert.match(PANEL, /<div class="pla-tab" data-pla="nobalancea" onclick="plaTab\('nobalancea'\)">No balancea<\/div>/);
+  assert.match(fuente(PANEL, 'function plaResumenLectura(lec, previa){'), /el detalle queda en la solapa «No balancea»/);
+});
+
+test('manual V1053: la solapa No balancea dice lo que la ruta hace', () => {
+  const M = manual();
+  const nb = handler("router.get('/no-balancea'");
+  assert.match(M, /<b>los días en que el debe y el haber del libro diario no dan igual<\/b>, del más nuevo al más viejo/);
+  assert.match(nb, /GROUP BY fecha HAVING ABS\(SUM\(debe\) - SUM\(haber\)\) >= 0\.005 ORDER BY fecha DESC/);
+  assert.match(M, /Sin elegir nada muestra <b>todo lo cargado<\/b>/);
+  assert.match(nb, /desde = disponibles\[0\] \|\| '';/);
+  assert.match(M, /Esos asientos <b>suman la diferencia del día<\/b>, a lo sumo con unos centavos de redondeo: el otro sistema lleva cuatro decimales/);
+  assert.match(fuente(PANEL, 'function plaLeerLibroDiario(hojas){'), /d = Math\.round\(d \* 10000\) \/ 10000;/);
+  assert.match(M, /<b>partida en dos números<\/b>/);
+  assert.match(M, /Ésos <b>no se listan<\/b>, porque no son error: se cuentan arriba/);
+  assert.match(M, /Un día en que lo que no cierra se compensa entero no aparece: ese día balancea/);
+  assert.match(M, /<b>lo avisa y lo guarda igual<\/b>: el detalle queda en la solapa <b>No balancea<\/b>/);
+  assert.match(M, /<span class="ver">V1053<\/span> Solapa <b>No balancea<\/b>/);
+});
+
+// ══ 6 · EL MENÚ, LA DIRECCIÓN Y EL PERMISO ═══════════════════════════════════════════
 
 test('está en el menú de Informes, con su dirección controlada al leer y al escribir', () => {
   const IX = leer('src/index.js');
@@ -479,7 +595,7 @@ test('está en el menú de Informes, con su dirección controlada al leer y al e
   assert.match(fuente(PANEL, 'function plaRubrosRestablecer(){'), /api\('\/api\/pl-abasto\/rubros', 'DELETE'\)/);
 });
 
-// ══ 6 · EL «¿CÓMO SE USA?» DICE LO QUE EL CÓDIGO HACE ═════════════════════════════════
+// ══ 7 · EL «¿CÓMO SE USA?» DICE LO QUE EL CÓDIGO HACE ═════════════════════════════════
 
 const manual = () => {
   const i = PANEL.indexOf('SG_MANUAL.plabasto = {');

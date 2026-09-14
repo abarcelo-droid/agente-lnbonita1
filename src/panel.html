@@ -5552,6 +5552,12 @@ input[type=number]{-moz-appearance:textfield;appearance:textfield}
     #sec-pl-abasto .pla-chip small{color:var(--mut)}
     #sec-pl-abasto .pla-chip.pend{border-color:#f59e0b;background:#fffbeb}
     #sec-pl-abasto .pla-def{font-size:9.5px;color:#92400e;margin-left:4px}
+    #sec-pl-abasto .pla-nb{font-size:12px}
+    #sec-pl-abasto .pla-nb th:nth-child(2),#sec-pl-abasto .pla-nb td:nth-child(2){text-align:left}
+    #sec-pl-abasto .pla-nb-dia td{background:#f8fafc;font-weight:700;cursor:pointer}
+    #sec-pl-abasto .pla-nb-as td{font-weight:600}
+    #sec-pl-abasto .pla-nb-as td:first-child{padding-left:18px}
+    #sec-pl-abasto .pla-nb-ren td{color:#475569;font-size:11px}
     @media(max-width:900px){ #sec-pl-abasto .ab-table-wrap{overflow-x:auto !important}
       #sec-pl-abasto .pla-tbl{table-layout:auto}
       #sec-pl-abasto .pla-dnd,#sec-pl-abasto .pla-zonas{grid-template-columns:1fr} }
@@ -5567,6 +5573,7 @@ input[type=number]{-moz-appearance:textfield;appearance:textfield}
   <div style="border-bottom:1px solid var(--bor)">
     <div class="pla-tab on" data-pla="resultado" onclick="plaTab('resultado')">Resultado</div>
     <div class="pla-tab" data-pla="rubros" onclick="plaTab('rubros')">Configurar rubros</div>
+    <div class="pla-tab" data-pla="nobalancea" onclick="plaTab('nobalancea')">No balancea</div>
   </div>
   <div class="pla-pane on" id="pla-pane-resultado">
     <div class="pla-f">
@@ -5596,6 +5603,16 @@ input[type=number]{-moz-appearance:textfield;appearance:textfield}
       </div>
       <div class="pla-zonas" id="pla-zonas"></div>
     </div>
+  </div>
+  <div class="pla-pane" id="pla-pane-nobalancea">
+    <div class="pla-f">
+      <div><label>Desde</label><select id="pla-nb-desde" data-sin-buscador="1"></select></div>
+      <div><label>Hasta</label><select id="pla-nb-hasta" data-sin-buscador="1"></select></div>
+      <button class="btn bo" onclick="plaNbCargar()">↻ Actualizar</button>
+      <div style="font-size:11px;color:var(--mut);align-self:center">Clic en un día: sus asientos sin pareja y sus renglones</div>
+    </div>
+    <div id="pla-nb-resumen" style="font-size:12.5px;margin:2px 0 10px"></div>
+    <div class="ab-table-wrap"><table class="pla-tbl pla-nb" id="pla-nb-tabla"></table></div>
   </div>
 </div>
 
@@ -24279,8 +24296,8 @@ SG_MANUAL.plabasto = { titulo: 'P&L Abasto', html:
   + '<li>Lee <b>todas las hojas</b> (cuando el archivo es grande, el otro sistema lo parte en dos), reconoce '
   + 'las columnas por lo que traen aunque los títulos vengan corridos, y <b>saltea</b> los títulos, el total '
   + 'y el número de página.</li>'
-  + '<li>Si el debe y el haber del archivo no dan igual, <b>lo avisa y lo guarda igual</b>: conviene revisarlo '
-  + 'en el otro sistema.</li>'
+  + '<li>Si el debe y el haber del archivo no dan igual, <b>lo avisa y lo guarda igual</b>: el detalle queda en '
+  + 'la solapa <b>No balancea</b>.</li>'
   + '</ul>'
 
   + '<h3>Cómo se lee el cuadro</h3>'
@@ -24299,6 +24316,20 @@ SG_MANUAL.plabasto = { titulo: 'P&L Abasto', html:
   + 'cliente de una venta, cuando el otro sistema la cargó con su cobro en el mismo asiento—, el debe y el haber.</li>'
   + '<li>Sólo entran las <b>cuentas de resultado</b>. Las que empiezan con 1, 2 o 3 son del patrimonio '
   + '—caja, clientes, proveedores, IVA— y no están en el cuadro.</li>'
+  + '</ul>'
+
+  + '<h3>No balancea</h3>'
+  + '<ul>'
+  + '<li><span class="ver">V1053</span> Muestra <b>los días en que el debe y el haber del libro diario no dan '
+  + 'igual</b>, del más nuevo al más viejo, con la diferencia de cada uno (debe − haber). Arriba, la diferencia '
+  + 'de todo el período. Sin elegir nada muestra <b>todo lo cargado</b>; con Desde y Hasta se acota.</li>'
+  + '<li>Con un <b>clic en un día</b> se abren los <b>asientos sin pareja</b> que explican la diferencia, cada '
+  + 'uno con sus renglones: cuenta, debe y haber. Esos asientos <b>suman la diferencia del día</b>, a lo sumo con '
+  + 'unos centavos de redondeo: el otro sistema lleva cuatro decimales.</li>'
+  + '<li>En el libro diario del otro sistema muchos asientos no cierran solos porque la operación quedó '
+  + '<b>partida en dos números</b> —la compra en uno y el pago en otro, el mismo día— y cada mitad compensa '
+  + 'al centavo a la otra. Ésos <b>no se listan</b>, porque no son error: se cuentan arriba.</li>'
+  + '<li>Un día en que lo que no cierra se compensa entero no aparece: ese día balancea.</li>'
   + '</ul>'
 
   + '<h3>Configurar rubros</h3>'
@@ -24322,6 +24353,8 @@ SG_MANUAL.plabasto = { titulo: 'P&L Abasto', html:
 
   + '<h3>Qué cambió, y desde cuándo</h3>'
   + '<ul>'
+  + '<li><span class="ver">V1053</span> Solapa <b>No balancea</b>: los días en que el libro diario no cierra y los '
+  + 'asientos que lo explican.</li>'
   + '<li><span class="ver">V1052</span> Nace la pantalla: subir el libro diario, el cuadro por mes, los rubros '
   + 'y los asientos de cada importe.</li>'
   + '</ul>'
@@ -43283,7 +43316,8 @@ var IA = { data:null, opo:null, tipos:{} };
 // EL EXCEL SE LEE ACÁ, en el navegador, y al servidor viajan sólo los renglones ya
 // ordenados: pesan la mitad que el archivo y el servidor no se queda leyendo un Excel
 // mientras los demás trabajan.
-var PLA = { datos: null, abiertos: {}, cuentas: null, pend: {}, detalle: null, lectura: null, previa: null, unidad: null };
+var PLA = { datos: null, abiertos: {}, cuentas: null, pend: {}, detalle: null, lectura: null, previa: null, unidad: null,
+  nb: null, nbAbiertos: {} };
 
 // ── LEER EL LIBRO DIARIO ─────────────────────────────────────────────────────
 //
@@ -43456,7 +43490,7 @@ function plaResumenLectura(lec, previa){
         + ' filas que no son renglones: títulos, totales, número de página.</div>' : '')
     // NO FRENA: el archivo es del otro sistema y acá no se puede corregir. Se dice.
     + (Math.abs(dif) >= 0.01 ? '<div style="color:#92400e;margin-top:4px">⚠️ El archivo no balancea: el debe y el haber '
-        + 'difieren en ' + plaImporte(dif) + '. Se guarda igual; conviene revisarlo en el otro sistema.</div>' : '')
+        + 'difieren en ' + plaImporte(dif) + '. Se guarda igual, y el detalle queda en la solapa «No balancea».</div>' : '')
     + '<div style="margin-top:6px">Al guardar, <b>se reemplaza</b> lo cargado del ' + plaFechaTxt(lec.desde)
     + ' al ' + plaFechaTxt(lec.hasta) + '.'
     + (previa ? (previa.existentes ? ' Son <b>' + nr(previa.existentes) + '</b> renglones que ya estaban cargados.'
@@ -43501,6 +43535,7 @@ function plaCargaGuardar(){
       + (d.reemplazados ? '. Reemplazaron ' + nr(d.reemplazados) + ' que ya estaban cargados de ese período.' : '.') + '</div>';
     toast('Libro diario guardado', 'ok');
     PLA.cuentas = null;
+    PLA.nb = null;
     plaCargar(true);
   });
 }
@@ -43518,6 +43553,7 @@ function plaInit(){
   // esperando un Guardar que lo escriba sin que nadie lo vea.
   PLA.cuentas = null;
   PLA.pend = {};
+  PLA.nb = null;
   plaTab('resultado');
   plaCargar(true);
 }
@@ -43528,6 +43564,7 @@ function plaTab(t){
   document.querySelectorAll('#sec-pl-abasto .pla-pane').forEach(function(el){
     el.classList.toggle('on', el.id === 'pla-pane-' + t); });
   if (t === 'rubros') plaRubrosCargar();
+  if (t === 'nobalancea' && !PLA.nb) plaNbCargar(true);
 }
 
 function plaCargar(inicial){
@@ -43761,6 +43798,83 @@ function plaDetallePintar(){
     + '<tr><td colspan="' + span + '"><b>SALDO (Haber − Debe, como en el cuadro)</b></td>'
     + '<td colspan="2" style="text-align:right"><b>' + plaImporte(Math.round((tH - tD) * 100) / 100) + '</b></td></tr></tfoot>';
 }
+
+// ── LO QUE NO BALANCEA ────────────────────────────────────────────────────────
+// Los días en que el libro diario no da debe = haber y, adentro de cada uno, los asientos
+// sin pareja que explican la diferencia. Los que no cierran solos pero se compensan de a
+// dos —la operación partida en dos números— no se listan: se cuentan (ver
+// asientosSinPareja en servicios/pl_abasto.js).
+function plaNbCargar(inicial){
+  var q = '';
+  if (!inicial) {
+    var de = (eid('pla-nb-desde') || {}).value, ha = (eid('pla-nb-hasta') || {}).value;
+    if (de && ha) q = '?desde=' + de + '&hasta=' + ha;
+  }
+  eid('pla-nb-resumen').textContent = 'Cargando…';
+  eid('pla-nb-tabla').innerHTML = '';
+  api('/api/pl-abasto/no-balancea' + q).then(function(r){
+    if (!r || !r.ok) {
+      eid('pla-nb-resumen').innerHTML = '<span style="color:var(--err)">' + escH((r && r.error) || 'No se pudo leer') + '</span>';
+      return;
+    }
+    PLA.nb = r.data;
+    PLA.nbAbiertos = {};
+    var opts = function(sel){
+      return (r.data.meses_disponibles || []).slice().reverse().map(function(m){
+        return '<option value="' + m + '"' + (m === sel ? ' selected' : '') + '>' + plaMesTxt(m) + '</option>'; }).join('');
+    };
+    eid('pla-nb-desde').innerHTML = opts(r.data.desde);
+    eid('pla-nb-hasta').innerHTML = opts(r.data.hasta);
+    plaNbPintar();
+  });
+}
+
+function plaNbResumen(d){
+  if (!(d.meses_disponibles || []).length) return 'Todavía no hay datos: subí el libro diario.';
+  var periodo = 'Del <b>' + plaMesTxt(d.desde) + '</b> al <b>' + plaMesTxt(d.hasta) + '</b>';
+  if (!(d.dias || []).length) {
+    return '<span style="color:#166534">✓ ' + periodo + ' el libro diario balancea: el debe y el haber dan igual todos los días.</span>';
+  }
+  var nd = d.dias.length;
+  return periodo + ' el debe y el haber difieren en <b>' + plaImporte(d.total.diferencia) + '</b> (debe − haber). '
+    + 'No balancean <b>' + nr(nd) + (nd === 1 ? ' día' : ' días') + '</b>, y lo explican <b>' + nr(d.sin_pareja)
+    + (d.sin_pareja === 1 ? ' asiento sin pareja' : ' asientos sin pareja') + '</b>.'
+    + (d.emparejados ? '<div style="color:var(--mut);margin-top:3px">Otros ' + nr(d.emparejados) + ' asientos de esos días no '
+        + 'cierran solos pero se compensan de a dos —la operación quedó partida en dos números, el mismo día—: no son '
+        + 'error y no se listan.</div>' : '')
+    + (d.recortado ? '<div style="color:#92400e;margin-top:3px">Se muestran los primeros ' + nr(d.dias.reduce(function(s, x){
+        return s + x.asientos.length; }, 0)) + ' asientos: elegí un período más corto para ver el resto.</div>' : '');
+}
+
+function plaNbPintar(){
+  var d = PLA.nb, tb = eid('pla-nb-tabla'); if (!d || !tb) return;
+  eid('pla-nb-resumen').innerHTML = plaNbResumen(d);
+  if (!(d.dias || []).length) { tb.innerHTML = ''; return; }
+  var dif = function(v){ return '<span class="' + (v < 0 ? 'pla-neg' : 'pla-pos') + '">' + plaImporte(v) + '</span>'; };
+  var imp = function(v){ return Number(v) ? plaImporte(v) : ''; };
+  var h = '<colgroup><col style="width:17%"><col><col style="width:15%"><col style="width:15%"><col style="width:15%"></colgroup>'
+    + '<thead><tr><th>Día / asiento</th><th>Cuenta</th><th>Debe</th><th>Haber</th><th>Diferencia</th></tr></thead><tbody>';
+  d.dias.forEach(function(dia){
+    var abierto = !!PLA.nbAbiertos[dia.fecha], n = dia.asientos.length;
+    h += '<tr class="pla-nb-dia" onclick="plaNbToggle(\'' + dia.fecha + '\')"><td>' + (abierto ? '▼ ' : '▶ ')
+      + plaFechaTxt(dia.fecha) + '</td><td>' + nr(n) + (n === 1 ? ' asiento sin pareja' : ' asientos sin pareja') + '</td>'
+      + '<td>' + plaImporte(dia.debe) + '</td><td>' + plaImporte(dia.haber) + '</td><td>' + dif(dia.diferencia) + '</td></tr>';
+    if (!abierto) return;
+    dia.asientos.forEach(function(a){
+      var nr_ = a.renglones.length;
+      h += '<tr class="pla-nb-as"><td>Asiento ' + escH(a.asiento || 's/n') + '</td><td>' + nr_
+        + (nr_ === 1 ? ' renglón' : ' renglones') + '</td><td>' + imp(a.debe) + '</td><td>' + imp(a.haber) + '</td>'
+        + '<td>' + dif(a.diferencia) + '</td></tr>';
+      a.renglones.forEach(function(x){
+        h += '<tr class="pla-nb-ren"><td></td><td title="' + escH(x.cuenta + ' · ' + x.nombre) + '">' + escH(x.cuenta)
+          + ' · ' + escH(x.nombre) + '</td><td>' + imp(x.debe) + '</td><td>' + imp(x.haber) + '</td><td></td></tr>';
+      });
+    });
+  });
+  tb.innerHTML = h + '</tbody>';
+}
+
+function plaNbToggle(f){ PLA.nbAbiertos[f] = !PLA.nbAbiertos[f]; plaNbPintar(); }
 
 // ── CONFIGURAR RUBROS ─────────────────────────────────────────────────────────
 function plaRubrosCargar(){
