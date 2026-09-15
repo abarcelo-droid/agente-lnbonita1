@@ -105,6 +105,7 @@ function rutas(db, { detalleMax } = {}) {
     '  cotizGuardar: ' + handler("router.put('/cotizaciones'") + ',',
     '  traer: traerCotizaciones,',
     '  migrar: migrarTitulos,',
+    '  asiento: ' + handler("router.get('/asiento'") + ',',
     '};',
   ].join('\n'))(db, SVC);
 }
@@ -1128,7 +1129,7 @@ test('también en VENTAS suma en los dos: el resultado neto la cuenta dos veces,
     [['4.1.01', null], ['4.1.02', 'utilidad'], ['4.2.05', 'costos_fijos']]);
   // Una con VENTAS de título no se suma dos veces en VENTAS.
   assert.equal(TOTALES({ rubros: RUBROS, meses: ['2025-07'], cuentas: [uno('4.1.01', 'ventas', 1000, true)] }).rubros.ventas.TOTAL, 1000);
-  assert.ok(PANTALLA(d, { ventas: true }).includes('4.1.02 · 4.1.02 · también en UTILIDAD'), 'en VENTAS no dice en qué otro título está');
+  assert.ok(PANTALLA(d, { ventas: true }).includes('>4.1.02 · también en UTILIDAD</td>'), 'en VENTAS no dice en qué otro título está');
 });
 
 test('también en VENTAS en la pantalla: soltarla en VENTAS la deja en los dos, con su etiqueta y su ×', () => {
@@ -1336,6 +1337,189 @@ test('manual V1060: arrastrar con el puntero, dos clics, y Esc cancela', () => {
   assert.match(M, /Soltar afuera o apretar <b>Esc<\/b> cancela/);
   assert.match(M, /<b>Sin arrastrar<\/b>: un clic en la cuenta la elige y un clic en el título la lleva ahí/);
   assert.match(M, /<span class="ver">V1060<\/span> Arrastrar ya no se engancha, y también se puede clasificar con dos clics/);
+});
+
+// ══ 6f · LA ×, LOS NOMBRES ENTEROS Y EL EXCEL DE LO QUE NO BALANCEA (V1061) ═════════════
+//
+// Pablo, 15/9/2026: «agregame en cada uno de los rubros una pequeña cruz, para que vuelvan al
+// general de rubros. En el cuadro de resultados no es tan importante el número de rubro, pero sí
+// que la descripción se lea completa. Por último, en el No balancea debés permitirme bajar un
+// Excel para enviar a revisar».
+
+test('cada cuenta de un título tiene su ×, que la devuelve a la lista sin título', () => {
+  const els = { 'pla-rub-q': { value: '' }, 'pla-rub-solo': { checked: false } };
+  const eid = (id) => (els[id] = els[id] || {});
+  const PLA = { pend: {}, pendVentas: {}, sel: null, cuentas: { rubros: RUBROS, cuentas: [
+    { cuenta: '4.2.05', nombre: 'SUELDOS', rubro: 'costos_fijos', elegido: 1, importe: -1, resultado: 1, tambien_ventas: 1 },
+    { cuenta: '4.1.02', nombre: 'COMISIONES', rubro: 'ventas', elegido: 0, importe: 1, resultado: 1, tambien_ventas: 0 }] } };
+  const F = new Function('PLA', 'eid', 'escH', 'sgNorm', [
+    hasta(PANEL, 'var PLA_GRUPOS = {', '};'), fuente(PANEL, 'function plaGrupoCuenta(cuenta){'),
+    hasta(PANEL, 'var PLA_COLOR = {', '};'), fuente(PANEL, 'function plaImporte(v, usd){'),
+    fuente(PANEL, 'function plaRubroActual(c){'), ...PINTAR_RUBROS(),
+    fuente(PANEL, 'function plaCuentaDe(cuenta){'), fuente(PANEL, 'function plaSoltarEn(cuenta, rubro){'),
+    fuente(PANEL, 'function plaVentasPend(c, si){'), fuente(PANEL, 'function plaTambienVentas(c){'),
+    'return { pintar: plaRubrosPintar, soltarEn: plaSoltarEn };'].join('\n'))(PLA, eid, String, (s) => String(s).toLowerCase());
+  F.pintar();
+  const Z = els['pla-zonas'].innerHTML;
+  assert.match(Z, /SUELDOS <small>4\.2\.05<\/small><button type="button" class="pla-x" title="Devolverla a la lista, sin título" onclick="plaSoltarEn\('4\.2\.05','sin_asignar'\)">×<\/button><\/div>/,
+    'la cuenta de COSTOS FIJOS no tiene su ×');
+  assert.match(Z, /COMISIONES <small>4\.1\.02<\/small><span class="pla-def">por defecto<\/span><button type="button" class="pla-x" title="Devolverla a la lista, sin título"/);
+  // La repetida en VENTAS conserva su × de «sacarla de VENTAS».
+  assert.match(Z, /también en COSTOS FIJOS<\/span><button type="button" class="pla-x" title="Sacarla de VENTAS"/);
+  // Y la × hace lo que dice: vuelve a la lista, y le saca también la repetición.
+  F.soltarEn('4.2.05', 'sin_asignar');
+  assert.deepEqual(PLA.pend, { '4.2.05': 'sin_asignar' });
+  assert.equal(PLA.pendVentas['4.2.05'], 0);
+  // Tocar la × no arrastra ni elige: el puntero ignora los botones.
+  assert.match(fuente(PANEL, 'function plaTomar(ev, el){'), /ev\.target\.closest\('button'\)\)\) return;/);
+  assert.match(fuente(PANEL, 'function plaClicZona(ev, zona){'), /closest\('\.pla-chip, button'\)\) return;/);
+});
+
+test('en el cuadro cada cuenta se ve con su nombre entero; el número queda al pasar el mouse', () => {
+  const datos = Object.assign({}, DATOS, { cuentas: DATOS.cuentas.concat([
+    { cuenta: '4.1.07.03.000.0000', nombre: 'Descuento Super - por Ac comerciales', rubro: 'ventas', meses: { '2025-08': -10 } }]) });
+  const h = PANTALLA(datos, { ventas: true });
+  assert.match(h, /<tr class="pla-cta"><td title="4\.1\.07\.03\.000\.0000 · Descuento Super - por Ac comerciales">Descuento Super - por Ac comerciales<\/td>/,
+    'la fila de la cuenta sigue empezando por el número');
+  assert.match(PANEL, /#sec-pl-abasto \.pla-cta td:first-child,#sec-pl-abasto \.pla-aju td:first-child\{white-space:normal;overflow:visible;\r?\n\s+text-overflow:clip;overflow-wrap:anywhere\}/);
+  // Con TOTAL y dos meses, cada columna de importes se lleva el 11%: el resto es para el concepto.
+  assert.match(h, /<colgroup><col style="width:67\.0%"><col style="width:11%">/);
+  // Con doce meses, como antes: sin barra de costado.
+  const doce = Object.assign({}, DATOS, { meses: ['2025-01', '2025-02', '2025-03', '2025-04', '2025-05', '2025-06', '2025-07', '2025-08', '2025-09', '2025-10', '2025-11', '2025-12'] });
+  assert.match(PANTALLA(doce), /<colgroup><col style="width:18\.1%"><col style="width:6\.3%">/);
+});
+
+const NB_PLANILLA = { desde: '2026-07', hasta: '2026-09', total: { diferencia: -12123641.19 }, sin_pareja: 2, emparejados: 2, recortado: 0,
+  dias: [
+    { fecha: '2026-09-09', debe: 1796256, haber: 1596672, diferencia: 199584, asientos: [
+      { asiento: '380782', diferencia: 199584, renglones: [
+        { cuenta: '4.1.01.00.000.0000', nombre: 'VENTAS', debe: 0, haber: 1596672 },
+        { cuenta: '1.1.03.01.000.6105', nombre: 'CENCOSUD', debe: 1796256, haber: 0 }] }] },
+    { fecha: '2026-07-06', debe: 6795000, haber: 19118225.194, diferencia: -12323225.19, asientos: [
+      { asiento: '373340', diferencia: -12323225.19, renglones: [
+        { cuenta: '1.1.03.01.000.6105', nombre: 'CENCOSUD', debe: 0, haber: 12323225.19 }] }] }] };
+const NB_EXCEL = () => new Function('PLA', 'toast', 'XLSX', [
+  /^var PLA_MES = .*;\r?$/m.exec(PANEL)[0], fuente(PANEL, 'function plaMesTxt(m){'), fuente(PANEL, 'function plaFechaTxt(f){'),
+  fuente(PANEL, 'function plaNbFilas(d){'), fuente(PANEL, 'function plaNbFormato(hoja, desdeFila, columnas){'),
+  fuente(PANEL, 'function plaNbExcel(){'), 'return { filas: plaNbFilas, excel: plaNbExcel };'].join('\n'));
+
+test('No balancea: el Excel para mandar a revisar trae los días y los renglones de cada asiento sin pareja', () => {
+  const F = NB_EXCEL()({}, () => {}, {});
+  const P = F.filas(NB_PLANILLA);
+  assert.deepEqual(P.dias.slice(0, 5), [['P&L Abasto — lo que no balancea'], ['Período', 'Jul 2026 a Sep 2026'],
+    ['Diferencia del período (debe − haber)', -12123641.19], ['Asientos sin pareja', 2], ['Asientos que se compensan de a dos (no se listan)', 2]]);
+  assert.deepEqual(P.dias.slice(5), [[], ['Fecha', 'Debe', 'Haber', 'Diferencia (debe − haber)', 'Asientos sin pareja'],
+    ['09/09/2026', 1796256, 1596672, 199584, 1], ['06/07/2026', 6795000, 19118225.19, -12323225.19, 1]]);
+  assert.deepEqual(P.asientos, [
+    ['Fecha', 'Asiento', 'Cuenta', 'Nombre de la cuenta', 'Debe', 'Haber', 'Diferencia del asiento'],
+    ['09/09/2026', '380782', '4.1.01.00.000.0000', 'VENTAS', 0, 1596672, 199584],
+    ['09/09/2026', '380782', '1.1.03.01.000.6105', 'CENCOSUD', 1796256, 0, ''],
+    ['06/07/2026', '373340', '1.1.03.01.000.6105', 'CENCOSUD', 0, 12323225.19, -12323225.19]],
+    'la diferencia del asiento va en su primer renglón, para no sumarla dos veces');
+  // Con más asientos de los que entran, se avisa en la planilla.
+  assert.match(F.filas(Object.assign({}, NB_PLANILLA, { recortado: 1 })).dias[5][1], /Hay más asientos sin pareja/);
+});
+
+test('No balancea: el botón arma un .xlsx de dos hojas, con los importes como números con dos decimales', () => {
+  // Un SheetJS de mentira que arma las celdas como el de verdad: A1, B1… con t 'n' o 's'.
+  const letra = (c) => String.fromCharCode(65 + c);
+  let bajado = null, avisos = [];
+  const XLSX = {
+    utils: {
+      book_new: () => ({ hojas: [] }),
+      aoa_to_sheet: (aoa) => { const h = {}; aoa.forEach((f, r) => f.forEach((v, c) => { h[letra(c) + (r + 1)] = { t: typeof v === 'number' ? 'n' : 's', v }; })); return h; },
+      decode_cell: (k) => ({ c: k.charCodeAt(0) - 65, r: Number(k.slice(1)) - 1 }),
+      book_append_sheet: (l, h, n) => l.hojas.push([n, h]),
+    },
+    writeFile: (l, nombre) => { bajado = { l, nombre }; },
+  };
+  const F = NB_EXCEL()({ nb: NB_PLANILLA }, (t) => avisos.push(t), XLSX);
+  F.excel();
+  assert.ok(bajado, 'no bajó nada');
+  assert.equal(bajado.nombre, 'No_balancea_2026-07_a_2026-09.xlsx');
+  assert.deepEqual(bajado.l.hojas.map((x) => x[0]), ['Días', 'Asientos sin pareja']);
+  const [dias, asientos] = bajado.l.hojas.map((x) => x[1]);
+  assert.equal(dias.D9.v, -12323225.19);
+  assert.equal(dias.D9.z, '#,##0.00', 'la diferencia del día no tiene formato de importe');
+  assert.equal(dias.E9.z, undefined, 'la cantidad de asientos salió con decimales');
+  assert.equal(dias.B3.z, '#,##0.00', 'la diferencia del período no tiene formato de importe');
+  assert.equal(dias.B4.z, undefined);
+  assert.equal(asientos.F2.z, '#,##0.00');
+  assert.equal(asientos.G2.z, '#,##0.00');
+  assert.ok(dias['!cols'] && asientos['!cols'], 'sin ancho de columnas');
+  // Sin nada que no balancee, o sin el armador del Excel, avisa y no baja nada.
+  bajado = null;
+  NB_EXCEL()({ nb: Object.assign({}, NB_PLANILLA, { dias: [] }) }, (t) => avisos.push(t), XLSX).excel();
+  assert.equal(bajado, null);
+  assert.match(avisos.pop(), /no hay nada que no balancee/);
+  assert.match(PANEL, /<button class="btn bo" onclick="plaNbExcel\(\)">⬇️ Descargar Excel<\/button>/);
+});
+
+test('el asiento completo: todos sus renglones, del patrimonio también, con sus totales', () => {
+  // Pablo, 15/9/2026: «aquí sería bueno que me muestre el asiento completo».
+  const db = base();
+  const R = rutas(db);
+  llamar(R.cargar, { body: CARGA_A });
+  const a = llamar(R.asiento, { query: { asiento: '373353', fecha: '2025-07-13' } });
+  assert.equal(a.code, 200, JSON.stringify(a.body));
+  assert.deepEqual(a.body.data.renglones.map((x) => [x.cuenta, x.nombre, x.debe, x.haber]), [
+    ['4.1.01.00.000.0000', 'VENTAS', 0, 868778.2805], ['2.1.03.01.000.0000', 'IVA Debito Fiscal', 0, 91221.7195],
+    ['1.1.03.01.000.6427', 'CRUZ OSCAR FABIAN', 960000, 0]]);
+  assert.deepEqual([a.body.data.debe, a.body.data.haber, a.body.data.diferencia], [960000, 960000, 0]);
+  // El mismo número en otra fecha es otro asiento.
+  assert.equal(llamar(R.asiento, { query: { asiento: '373353', fecha: '2025-07-14' } }).code, 404);
+  assert.equal(llamar(R.asiento, { query: { asiento: '373353' } }).code, 400);
+});
+
+test('los asientos de un importe: un clic abre el asiento entero debajo, dice si balancea, y otro clic lo cierra', () => {
+  const A = { asiento: '380782', fecha: '2026-09-11', debe: 2013984, haber: 1796256, renglones: [
+    { cuenta: '4.1.01.00.000.0000', nombre: 'VENTAS', debe: 0, haber: 1596672 },
+    { cuenta: '4.1.07.01.000.0000', nombre: 'Descuentos super', debe: 217728, haber: 0 },
+    { cuenta: '2.1.03.02.000.0000', nombre: 'Percepciones Ingresos Brutos a Pagar', debe: 0, haber: 199584 },
+    { cuenta: '1.1.03.01.000.6105', nombre: 'CENCOSUD', debe: 1796256, haber: 0 }] };
+  const fuentes = [/^var PLA_MES = .*;\r?$/m.exec(PANEL)[0], fuente(PANEL, 'function plaFechaTxt(f){'),
+    fuente(PANEL, 'function plaImporte(v, usd){'), fuente(PANEL, 'function plaAsientoHtml(a){')];
+  const html = new Function('escH', fuentes.concat('return plaAsientoHtml;').join('\n'))(String);
+  const h = html(A);
+  assert.match(h, /Asiento <b>380782<\/b> del 11\/09\/2026 · 4 renglones/);
+  assert.match(h, /<td>2\.1\.03\.02\.000\.0000<\/td><td title="Percepciones Ingresos Brutos a Pagar">Percepciones Ingresos Brutos a Pagar<\/td>/,
+    'no están las cuentas del patrimonio');
+  assert.match(h, /⚠️ No balancea por \$ 217\.728,00/);
+  assert.match(html(Object.assign({}, A, { haber: 2013984 })), /✓ Balancea/);
+  // La lista: cada renglón con asiento se abre con un clic.
+  assert.match(fuente(PANEL, 'function plaDetallePintar(){'), /class="pla-det-fila" title="Clic: ver el asiento completo" onclick="plaAsientoVer\(this,/);
+  // Abrir, cerrar, y volver a abrir sin pedirlo de nuevo.
+  const cls = () => { const s = new Set(); return { add: (c) => s.add(c), remove: (c) => s.delete(c), contains: (c) => s.has(c) }; };
+  const doc = { createElement: () => ({ attrs: {}, firstChild: { innerHTML: '' }, classList: cls(),
+    setAttribute(k, v) { this.attrs[k] = v; }, getAttribute(k) { return this.attrs[k]; } }) };
+  const tbody = { hijos: [], insertBefore(e) { this.hijos.push(e); e.parentNode = this; }, removeChild(e) { this.hijos.splice(this.hijos.indexOf(e), 1); } };
+  const tr = { parentNode: tbody, nextSibling: null, children: { length: 6 }, classList: cls() };
+  let pedidos = [];
+  const PLA = { detalle: { filas: [] } };
+  const ver = new Function('PLA', 'document', 'api', 'escH', fuentes.concat(fuente(PANEL, 'function plaAsientoVer(tr, asiento, fecha){'),
+    'return plaAsientoVer;').join('\n'))(PLA, doc, (url) => { pedidos.push(url); return { then(cb) { cb({ ok: true, data: A }); } }; }, String);
+  ver(tr, '380782', '2026-09-11');
+  assert.deepEqual(pedidos, ['/api/pl-abasto/asiento?asiento=380782&fecha=2026-09-11']);
+  assert.equal(tbody.hijos.length, 1, 'no abre el asiento debajo del renglón');
+  assert.match(tbody.hijos[0].firstChild.innerHTML, /No balancea por/);
+  assert.ok(tr.classList.contains('abierta'));
+  tr.nextSibling = tbody.hijos[0];
+  ver(tr, '380782', '2026-09-11');
+  assert.equal(tbody.hijos.length, 0, 'un segundo clic no lo cierra');
+  assert.ok(!tr.classList.contains('abierta'));
+  tr.nextSibling = null;
+  ver(tr, '380782', '2026-09-11');
+  assert.equal(pedidos.length, 1, 'lo vuelve a pedir al servidor');
+  assert.equal(tbody.hijos.length, 1);
+});
+
+test('manual V1061: la ×, los nombres enteros, y el Excel de lo que no balancea', () => {
+  assert.match(manual(), /En los asientos de un importe, <b>un clic en un renglón abre el asiento completo<\/b> debajo: todas sus cuentas —las del patrimonio también— con su debe y su haber, y abajo si balancea o por cuánto no/);
+  const M = manual();
+  assert.match(M, /Cada cuenta adentro de un título tiene una <b>×<\/b> que la devuelve a la lista, sin título/);
+  assert.match(M, /cada cuenta se ve con su <b>nombre completo<\/b>: si es largo baja de renglón\. El número de la cuenta aparece pasando el mouse/);
+  assert.match(M, /<b>⬇️ Descargar Excel<\/b> baja lo que no balancea del período elegido para mandarlo a revisar: una hoja con los días y otra con los renglones de cada asiento sin pareja/);
+  assert.match(M, /<span class="ver">V1061<\/span> Una × en cada cuenta de un título/);
 });
 
 // ══ 7 · EL MENÚ, LA DIRECCIÓN Y EL PERMISO ═══════════════════════════════════════════

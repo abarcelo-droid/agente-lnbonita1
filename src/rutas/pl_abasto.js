@@ -600,6 +600,25 @@ router.get('/no-balancea', requireAuth, (req, res) => {
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
+// ── UN ASIENTO ENTERO ────────────────────────────────────────────────────────
+// V1061. Pablo, 15/9/2026, mirando los asientos de un importe: «aquí sería bueno que me muestre el
+// asiento completo». Todos sus renglones —los del patrimonio también— con sus totales. Un asiento
+// es su número y su fecha, como en la contrapartida.
+router.get('/asiento', requireAuth, (req, res) => {
+  try {
+    const asiento = String(req.query.asiento || '').trim(), fecha = String(req.query.fecha || '');
+    if (!asiento || !FECHA.test(fecha)) return res.status(400).json({ ok: false, error: 'Falta el asiento o su fecha.' });
+    const renglones = db.prepare(`SELECT m.cuenta, COALESCE(c.nombre, m.cuenta) AS nombre, m.debe, m.haber
+      FROM pl_abasto_movimientos m LEFT JOIN pl_abasto_cuentas c ON c.cuenta = m.cuenta
+      WHERE m.asiento = ? AND m.fecha = ? ORDER BY m.id`).all(asiento, fecha)
+      .map((x) => ({ cuenta: x.cuenta, nombre: x.nombre, debe: x.debe, haber: x.haber }));
+    if (!renglones.length) return res.status(404).json({ ok: false, error: 'Ese asiento no está en el libro diario cargado.' });
+    const debe = r2(renglones.reduce((s, x) => s + (Number(x.debe) || 0), 0));
+    const haber = r2(renglones.reduce((s, x) => s + (Number(x.haber) || 0), 0));
+    res.json({ ok: true, data: { asiento, fecha, renglones, debe, haber, diferencia: r2(debe - haber) } });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
 // ── LOS ASIENTOS DE UN IMPORTE ───────────────────────────────────────────────
 router.get('/detalle', requireAuth, (req, res) => {
   try {
