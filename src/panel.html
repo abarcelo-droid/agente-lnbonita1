@@ -5536,6 +5536,14 @@ input[type=number]{-moz-appearance:textfield;appearance:textfield}
     #sec-pl-abasto .pla-rub td:first-child{cursor:pointer}
     #sec-pl-abasto .pla-cta td{color:#475569;font-size:10px}
     #sec-pl-abasto .pla-cta td:first-child{padding-left:22px}
+    #pla-detalle-modal .pla-det-fila{cursor:pointer}
+    #pla-detalle-modal .pla-det-fila.abierta td{background:#eef2ff}
+    #pla-detalle-modal .pla-det-asiento > td{white-space:normal;background:var(--bg)}
+    #pla-detalle-modal .pla-asiento{margin:2px 0 8px 22px;border-left:3px solid var(--burg);padding:6px 10px}
+    #pla-detalle-modal .pla-asiento-tit{font-size:12px;color:var(--mut);margin-bottom:4px}
+    #pla-detalle-modal .pla-asiento-tbl td{font-size:11.5px;padding:3px 6px}
+    #sec-pl-abasto .pla-cta td:first-child,#sec-pl-abasto .pla-aju td:first-child{white-space:normal;overflow:visible;
+      text-overflow:clip;overflow-wrap:anywhere}
     #sec-pl-abasto .pla-aju td{color:#b45309;font-style:italic;font-size:10px}
     #sec-pl-abasto .pla-aju td:first-child{padding-left:22px;cursor:pointer}
     #sec-pl-abasto .pla-aju-add td{font-size:10.5px;color:var(--burg);cursor:pointer;padding-left:22px;font-weight:600}
@@ -5658,6 +5666,7 @@ input[type=number]{-moz-appearance:textfield;appearance:textfield}
       <div><label>Desde</label><select id="pla-nb-desde" data-sin-buscador="1"></select></div>
       <div><label>Hasta</label><select id="pla-nb-hasta" data-sin-buscador="1"></select></div>
       <button class="btn bo" onclick="plaNbCargar()">↻ Actualizar</button>
+      <button class="btn bo" onclick="plaNbExcel()">⬇️ Descargar Excel</button>
       <div style="font-size:11px;color:var(--mut);align-self:center">Clic en un día: sus asientos sin pareja y sus renglones</div>
     </div>
     <div id="pla-nb-resumen" style="font-size:12.5px;margin:2px 0 10px"></div>
@@ -24432,6 +24441,11 @@ SG_MANUAL.plabasto = { titulo: 'P&L Abasto', html:
   + '<li><b>Clic en un rubro</b>: se abren sus cuentas. <b>Doble clic en un importe</b>: los asientos que lo '
   + 'forman, con su fecha, el número de asiento, la <b>contrapartida</b> —las otras cuentas del mismo asiento: el '
   + 'cliente de una venta, cuando el otro sistema la cargó con su cobro en el mismo asiento—, el debe y el haber.</li>'
+  + '<li><span class="ver">V1061</span> Adentro de cada rubro, cada cuenta se ve con su <b>nombre completo</b>: si es '
+  + 'largo baja de renglón. El número de la cuenta aparece pasando el mouse.</li>'
+  + '<li><span class="ver">V1061</span> En los asientos de un importe, <b>un clic en un renglón abre el asiento '
+  + 'completo</b> debajo: todas sus cuentas —las del patrimonio también— con su debe y su haber, y abajo si balancea o '
+  + 'por cuánto no. Otro clic lo cierra.</li>'
   + '<li>Entran las <b>cuentas de resultado</b>. Las que empiezan con 1, 2 o 3 son del patrimonio —caja, '
   + 'clientes, proveedores, IVA—: <span class="ver">V1057</span> se ven igual en la lista de Configurar rubros, '
   + 'arrancan sin título y no están en el cuadro; si alguien les pone uno, entran.</li>'
@@ -24491,6 +24505,9 @@ SG_MANUAL.plabasto = { titulo: 'P&L Abasto', html:
   + '<b>partida en dos números</b> —la compra en uno y el pago en otro, el mismo día— y cada mitad compensa '
   + 'al centavo a la otra. Ésos <b>no se listan</b>, porque no son error: se cuentan arriba.</li>'
   + '<li>Un día en que lo que no cierra se compensa entero no aparece: ese día balancea.</li>'
+  + '<li><span class="ver">V1061</span> <b>⬇️ Descargar Excel</b> baja lo que no balancea del período elegido para '
+  + 'mandarlo a revisar: una hoja con los días y otra con los renglones de cada asiento sin pareja, con la diferencia '
+  + 'del asiento en su primer renglón. Los importes van como números, para sumar y filtrar.</li>'
   + '</ul>'
 
   + '<h3>Configurar rubros</h3>'
@@ -24507,6 +24524,8 @@ SG_MANUAL.plabasto = { titulo: 'P&L Abasto', html:
   + 'título; la cuenta viaja con el puntero. Cerca del borde, la lista y la columna de títulos bajan solas. Soltar '
   + 'afuera o apretar <b>Esc</b> cancela. <b>Sin arrastrar</b>: un clic en la cuenta la elige y un clic en el título la '
   + 'lleva ahí; arriba aparece «Elegida», con <b>Sacarle el título</b> y <b>Cancelar</b>.</li>'
+  + '<li><span class="ver">V1061</span> Cada cuenta adentro de un título tiene una <b>×</b> que la devuelve a la lista, '
+  + 'sin título. En VENTAS, la × de una cuenta repetida la saca sólo de VENTAS.</li>'
   + '<li><span class="ver">V1059</span> Los títulos quedan <b>fijos a la derecha</b> mientras se baja por la lista, '
   + 'así se arrastra sin perderlos de vista. Soltar una cuenta cambia sólo esa fila: la lista entera no se vuelve a '
   + 'dibujar.</li>'
@@ -24533,6 +24552,8 @@ SG_MANUAL.plabasto = { titulo: 'P&L Abasto', html:
 
   + '<h3>Qué cambió, y desde cuándo</h3>'
   + '<ul>'
+  + '<li><span class="ver">V1061</span> Una × en cada cuenta de un título, el nombre completo de las cuentas en el cuadro, '
+  + 'el asiento completo en los asientos de un importe, y el Excel de lo que no balancea.</li>'
   + '<li><span class="ver">V1060</span> Arrastrar ya no se engancha, y también se puede clasificar con dos clics.</li>'
   + '<li><span class="ver">V1059</span> Configurar rubros responde enseguida con cientos de cuentas, y los títulos '
   + 'no se pierden de vista al arrastrar.</li>'
@@ -43926,14 +43947,15 @@ function plaPintar(){
   // Del mes más nuevo al más viejo, con el total adelante.
   var orden = ['TOTAL'].concat(d.meses.slice().reverse());
   var ventas = T.rubros.ventas || {};
-  var ancho = Math.floor(820 / orden.length) / 10;
+  // Cada columna de importes, a lo sumo el 11%: con pocos meses, el resto es para leer el concepto entero.
+  var ancho = Math.min(Math.floor(820 / orden.length) / 10, 11);
   var h = '<colgroup><col style="width:' + (100 - ancho * orden.length).toFixed(1) + '%">'
     + orden.map(function(){ return '<col style="width:' + ancho + '%">'; }).join('') + '</colgroup>'
     + '<thead><tr><th>Concepto' + (PLA.moneda === 'usd' ? ' (U$S)' : '') + '</th>' + orden.map(function(m){
         return '<th' + (m === 'TOTAL' ? '>TOTAL' : ' title="' + plaMesTxt(m) + '">' + plaMesCorto(m)) + '</th>'; }).join('')
     + '</tr></thead><tbody>';
-  var fila = function(clase, etiqueta, valores, pct, dbl, clic){
-    return '<tr class="' + clase + '"><td title="' + escH(etiqueta) + '"' + (clic ? ' onclick="' + clic + '"' : '') + '>'
+  var fila = function(clase, etiqueta, valores, pct, dbl, clic, ayuda){
+    return '<tr class="' + clase + '"><td title="' + escH(ayuda || etiqueta) + '"' + (clic ? ' onclick="' + clic + '"' : '') + '>'
       + escH(etiqueta) + '</td>'
       + orden.map(function(m){
           var v = valores[m];
@@ -43960,8 +43982,11 @@ function plaPintar(){
           var vs = { TOTAL: x.total };
           d.meses.forEach(function(m){ vs[m] = Number(x.c.meses[m]) || 0; });
           var otro = x.tambien ? ((d.rubros || []).filter(function(y){ return y.k === x.tambien; })[0] || {}).label : '';
-          h += fila('pla-cta', x.c.cuenta + ' · ' + x.c.nombre + (otro ? ' · también en ' + otro : ''), vs, false,
-            function(m){ return "plaDetalle('cuenta','" + escH(x.c.cuenta) + "','" + m + "')"; });
+          // V1061. Pablo, 15/9/2026: «en el cuadro de resultados no es tan importante el número de rubro,
+          // pero sí que la descripción se lea completa». El número queda al pasar el mouse.
+          h += fila('pla-cta', x.c.nombre + (otro ? ' · también en ' + otro : ''), vs, false,
+            function(m){ return "plaDetalle('cuenta','" + escH(x.c.cuenta) + "','" + m + "')"; }, null,
+            x.c.cuenta + ' · ' + x.c.nombre);
         });
         ajustes.forEach(function(x){
           var vs = { TOTAL: x.total }, abrir = 'plaAjusteAbrir(' + Number(x.a.id) + ')';
@@ -44036,7 +44061,9 @@ function plaDetallePintar(){
           + '<td style="text-align:right">' + (f.haber ? plaImporte(f.haber) : '') + '</td></tr>';
       }).join('')
     + filas.map(function(f){
-        return '<tr><td>' + plaFechaTxt(f.fecha) + '</td><td>' + escH(f.asiento || '') + '</td>'
+        // V1061: un clic en el renglón abre el asiento entero debajo.
+        return '<tr' + (f.asiento ? ' class="pla-det-fila" title="Clic: ver el asiento completo" onclick="plaAsientoVer(this,\''
+            + escH(f.asiento) + '\',\'' + escH(f.fecha) + '\')"' : '') + '><td>' + plaFechaTxt(f.fecha) + '</td><td>' + escH(f.asiento || '') + '</td>'
           + (conCuenta ? '<td title="' + escH(f.cuenta + ' · ' + (f.nombre || '')) + '">' + escH(f.nombre || f.cuenta) + '</td>' : '')
           + '<td title="' + escH(f.contrapartida || '') + '">' + escH(f.contrapartida || '—') + '</td>'
           + '<td style="text-align:right;color:#dc2626">' + (Number(f.debe) ? plaImporte(f.debe) : '') + '</td>'
@@ -44174,6 +44201,54 @@ function plaCotizTraer(){
     api('/api/pl-abasto/cotizaciones').then(function(r2){
       if (r2 && r2.ok) { PLA.cotiz = r2.data; plaCotizPintar(lnbPuedeOperar('pl-abasto')); }
     });
+  });
+}
+
+// ── EL ASIENTO ENTERO, DEBAJO DEL RENGLÓN (V1061) ─────────────────────────────
+// Pablo, 15/9/2026: «aquí sería bueno que me muestre el asiento completo». Un clic en un renglón
+// de los asientos de un importe abre el asiento debajo, con todas sus cuentas y si balancea; otro
+// clic lo cierra. Se agrega sólo esa fila: la lista, que puede tener mil, no se vuelve a dibujar.
+function plaAsientoHtml(a){
+  var n = (a.renglones || []).length;
+  var dif = Math.round(((Number(a.debe) || 0) - (Number(a.haber) || 0)) * 100) / 100;
+  return '<div class="pla-asiento"><div class="pla-asiento-tit">Asiento <b>' + escH(a.asiento) + '</b> del '
+    + plaFechaTxt(a.fecha) + ' · ' + n + (n === 1 ? ' renglón' : ' renglones') + '</div>'
+    + '<table class="pa-tbl pla-asiento-tbl" style="table-layout:fixed;width:100%"><colgroup><col style="width:22%"><col>'
+    + '<col style="width:17%"><col style="width:17%"></colgroup><tbody>'
+    + (a.renglones || []).map(function(x){
+        return '<tr><td>' + escH(x.cuenta) + '</td><td title="' + escH(x.nombre) + '">' + escH(x.nombre) + '</td>'
+          + '<td style="text-align:right;color:#dc2626">' + (Number(x.debe) ? plaImporte(x.debe) : '') + '</td>'
+          + '<td style="text-align:right;color:#15803d">' + (Number(x.haber) ? plaImporte(x.haber) : '') + '</td></tr>';
+      }).join('')
+    + '</tbody><tfoot><tr><td colspan="2"><b>' + (Math.abs(dif) < 0.005 ? '✓ Balancea' : '⚠️ No balancea por ' + plaImporte(dif))
+    + '</b></td><td style="text-align:right"><b>' + plaImporte(a.debe) + '</b></td><td style="text-align:right"><b>'
+    + plaImporte(a.haber) + '</b></td></tr></tfoot></table></div>';
+}
+
+function plaAsientoVer(tr, asiento, fecha){
+  var D = PLA.detalle; if (!D || !tr || !tr.parentNode) return;
+  var clave = asiento + '|' + fecha, sig = tr.nextSibling;
+  // Ya abierto: se cierra.
+  if (sig && sig.getAttribute && sig.getAttribute('data-asiento') === clave) {
+    sig.parentNode.removeChild(sig);
+    tr.classList.remove('abierta');
+    return;
+  }
+  var fila = document.createElement('tr');
+  fila.className = 'pla-det-asiento';
+  fila.setAttribute('data-asiento', clave);
+  fila.innerHTML = '<td colspan="' + tr.children.length + '">Cargando el asiento…</td>';
+  tr.parentNode.insertBefore(fila, sig);
+  tr.classList.add('abierta');
+  D.asientos = D.asientos || {};
+  if (D.asientos[clave]) { fila.firstChild.innerHTML = plaAsientoHtml(D.asientos[clave]); return; }
+  api('/api/pl-abasto/asiento?asiento=' + encodeURIComponent(asiento) + '&fecha=' + encodeURIComponent(fecha)).then(function(r){
+    if (!r || !r.ok) {
+      fila.firstChild.innerHTML = '<span style="color:var(--err)">' + escH((r && r.error) || 'No se pudo leer el asiento') + '</span>';
+      return;
+    }
+    D.asientos[clave] = r.data;
+    fila.firstChild.innerHTML = plaAsientoHtml(r.data);
   });
 }
 
@@ -44426,6 +44501,60 @@ function plaNbPintar(){
 
 function plaNbToggle(f){ PLA.nbAbiertos[f] = !PLA.nbAbiertos[f]; plaNbPintar(); }
 
+// ── BAJAR LO QUE NO BALANCEA (V1061) ──────────────────────────────────────────
+// Pablo, 15/9/2026: «en el No balancea debés permitirme bajar un Excel para enviar a revisar».
+// Dos hojas: los días que no balancean, y los renglones de cada asiento sin pareja con la
+// diferencia del asiento en su primer renglón —así se suma sin contarla dos veces—. Los importes
+// van como números, para que quien lo revisa pueda sumar y filtrar.
+function plaNbFilas(d){
+  var r2 = function(n){ return Math.round((Number(n) || 0) * 100) / 100; };
+  var dias = [['P&L Abasto — lo que no balancea'],
+    ['Período', plaMesTxt(d.desde) + ' a ' + plaMesTxt(d.hasta)],
+    ['Diferencia del período (debe − haber)', r2(d.total && d.total.diferencia)],
+    ['Asientos sin pareja', Number(d.sin_pareja) || 0],
+    ['Asientos que se compensan de a dos (no se listan)', Number(d.emparejados) || 0]];
+  if (d.recortado) dias.push(['Atención', 'Hay más asientos sin pareja de los que trae esta planilla: elegí un período más corto.']);
+  dias.push([], ['Fecha', 'Debe', 'Haber', 'Diferencia (debe − haber)', 'Asientos sin pareja']);
+  var asientos = [['Fecha', 'Asiento', 'Cuenta', 'Nombre de la cuenta', 'Debe', 'Haber', 'Diferencia del asiento']];
+  (d.dias || []).forEach(function(dia){
+    dias.push([plaFechaTxt(dia.fecha), r2(dia.debe), r2(dia.haber), r2(dia.diferencia), (dia.asientos || []).length]);
+    (dia.asientos || []).forEach(function(a){
+      (a.renglones || []).forEach(function(x, i){
+        asientos.push([plaFechaTxt(dia.fecha), a.asiento || '', x.cuenta, x.nombre, r2(x.debe), r2(x.haber),
+          i === 0 ? r2(a.diferencia) : '']);
+      });
+    });
+  });
+  return { dias: dias, asientos: asientos };
+}
+
+// Los importes con separador de miles y dos decimales; las cantidades, como vienen.
+function plaNbFormato(hoja, desdeFila, columnas){
+  Object.keys(hoja).forEach(function(k){
+    if (k.charAt(0) === '!') return;
+    var p = XLSX.utils.decode_cell(k), c = hoja[k];
+    if (c && c.t === 'n' && p.r >= desdeFila && columnas.indexOf(p.c) >= 0) c.z = '#,##0.00';
+  });
+}
+
+function plaNbExcel(){
+  var d = PLA.nb;
+  if (!d || !(d.dias || []).length) { toast('En este período no hay nada que no balancee', 'er'); return; }
+  if (typeof XLSX === 'undefined') { toast('No se pudo cargar el armado del Excel: recargá la página', 'er'); return; }
+  var F = plaNbFilas(d), cab = 0;
+  while (cab < F.dias.length && F.dias[cab][0] !== 'Fecha') cab++;
+  var libro = XLSX.utils.book_new();
+  var h1 = XLSX.utils.aoa_to_sheet(F.dias), h2 = XLSX.utils.aoa_to_sheet(F.asientos);
+  h1['!cols'] = [{ wch: 46 }, { wch: 18 }, { wch: 18 }, { wch: 24 }, { wch: 20 }];
+  h2['!cols'] = [{ wch: 12 }, { wch: 10 }, { wch: 22 }, { wch: 42 }, { wch: 16 }, { wch: 16 }, { wch: 22 }];
+  plaNbFormato(h1, cab + 1, [1, 2, 3]);
+  if (h1.B3) h1.B3.z = '#,##0.00';   // la diferencia del período; las cantidades de abajo, sin decimales
+  plaNbFormato(h2, 1, [4, 5, 6]);
+  XLSX.utils.book_append_sheet(libro, h1, 'Días');
+  XLSX.utils.book_append_sheet(libro, h2, 'Asientos sin pareja');
+  XLSX.writeFile(libro, 'No_balancea_' + d.desde + '_a_' + d.hasta + '.xlsx');
+}
+
 // ── CONFIGURAR RUBROS ─────────────────────────────────────────────────────────
 function plaRubrosCargar(){
   if (PLA.cuentas) { plaRubrosPintar(); return; }
@@ -44516,7 +44645,11 @@ function plaRubrosZonasPintar(){
     return '<div class="pla-chip' + (pend ? ' pend' : '') + (PLA.sel === c.cuenta ? ' pla-elegida' : '') + '" data-cuenta="' + escH(c.cuenta) + '"'
       + ' onpointerdown="plaTomar(event,this)" title="' + ayuda(c) + '">'
       + escH(c.nombre) + ' <small>' + escH(c.cuenta) + '</small>'
-      + (!c.elegido && !pend ? '<span class="pla-def">por defecto</span>' : '') + '</div>';
+      + (!c.elegido && !pend ? '<span class="pla-def">por defecto</span>' : '')
+      // V1061. Pablo, 15/9/2026: «agregame en cada uno de los rubros una pequeña cruz, para que
+      // vuelvan al general de rubros».
+      + '<button type="button" class="pla-x" title="Devolverla a la lista, sin título" onclick="plaSoltarEn(\'' + escH(c.cuenta)
+      + '\',\'sin_asignar\')">×</button></div>';
   };
   var repetida = function(c){
     if (!busca(c)) return '';
