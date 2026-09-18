@@ -272,6 +272,24 @@ db.exec(`
   );
   CREATE UNIQUE INDEX IF NOT EXISTS idx_sp_outbox_dedup ON sp_outbox(dedup_key);
   CREATE INDEX IF NOT EXISTS idx_sp_outbox_pend ON sp_outbox(estado, intentos);
+
+  -- A QUIÉN LE LLEGAN LOS MAILS DEL CIRCUITO (V1065).
+  -- Pablo, 18/9/2026: «necesito que me dejes configurar si llega mail al usuario o no,
+  -- porque me llegan demasiados mails».
+  --
+  -- SIN FILA = RECIBE. Sólo se guarda la excepción, y por eso la tabla lista a los
+  -- APAGADOS: en un circuito de autorizaciones el default tiene que ser enterarse, y un
+  -- usuario nuevo —o uno que se cree después de esta pantalla— empieza recibiendo.
+  --
+  -- Apagar el aviso NO es sacar el permiso: el que lo tiene apagado sigue viendo la
+  -- solicitud en su bandeja y sigue pudiendo resolverla. Lo que se apaga es el mail.
+  -- usuario_id es puntero blando, sin REFERENCES: usuarios es de otro módulo.
+  CREATE TABLE IF NOT EXISTS sp_avisos_usuario (
+    usuario_id      INTEGER PRIMARY KEY,
+    recibe          INTEGER NOT NULL DEFAULT 1,
+    actualizado_en  TEXT DEFAULT (datetime('now','localtime')),
+    actualizado_por INTEGER
+  );
 `);
 
 // ── MIGRACIONES IDEMPOTENTES ──────────────────────────────────────────────

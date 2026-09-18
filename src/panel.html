@@ -36080,14 +36080,36 @@ function sgRepExport(){
   </div>
   <input type="hidden" id="sp-aut-paso">
   <div class="sp-chica" style="margin-bottom:10px">
-    El aviso va al <strong>mail del usuario</strong>, el que tiene cargado en su ficha.
-    No se configura aparte: si la dirección está mal, hay que corregirla en Usuarios.
-    Los marcados como <em>solo aviso</em> reciben el mail pero no pueden resolver el paso.
+    El aviso va al <strong>mail del usuario</strong>, el que tiene cargado en su ficha: si la dirección
+    está mal, hay que corregirla en Usuarios. Los marcados como <em>solo aviso</em> reciben el mail pero
+    no pueden resolver el paso. A quién le llega el mail y a quién no se maneja en
+    <strong>Quién recibe los avisos</strong>.
   </div>
   <div id="sp-aut-lista"></div>
   <div class="ab-modal-footer">
     <button class="btn bo" onclick="document.getElementById('sp-mb-aut').classList.remove('on')">Cancelar</button>
     <button class="btn bb" onclick="spAutGuardar()">Guardar habilitados</button>
+  </div>
+</div>
+</div>
+
+<!-- Modal: quién recibe los avisos por mail (V1065) -->
+<div class="ab-modal-overlay" id="sp-mb-avisos">
+<div class="ab-modal" style="width:620px;max-height:90vh;overflow-y:auto">
+  <div class="mhd">
+    <div><div class="mht">Quién recibe los avisos por mail</div></div>
+    <button class="mcl" onclick="document.getElementById('sp-mb-avisos').classList.remove('on')">×</button>
+  </div>
+  <div class="sp-chica" style="margin-bottom:10px">
+    Destildar a alguien le <strong>saca los mails</strong> del circuito de pagos: tanto el «te toca a vos»
+    de cada paso como las novedades de sus propias solicitudes.
+    <strong>No le saca el permiso</strong>: las solicitudes le siguen apareciendo en su bandeja y las puede
+    resolver igual. Un usuario nuevo arranca recibiendo.
+  </div>
+  <div id="sp-avisos-lista"></div>
+  <div class="ab-modal-footer">
+    <button class="btn bo" onclick="document.getElementById('sp-mb-avisos').classList.remove('on')">Cancelar</button>
+    <button class="btn bb" onclick="spAvisosGuardar()">Guardar</button>
   </div>
 </div>
 </div>
@@ -74706,6 +74728,10 @@ function spAyudaHtml(d) {
   html += '<h3>Cosas que conviene saber</h3><ul style="padding-left:20px">'
     + '<li>Los mails salen de <strong>erp@lnbonita.com.ar</strong>. Si no te llegan, fijate en spam y avisá: '
       + 'la dirección que se usa es la que tenés cargada en tu usuario.</li>'
+    + '<li><strong>Si te llegan demasiados mails</strong>, un administrador te los puede apagar desde '
+      + '<strong>Circuito y avisos → Quién recibe los avisos</strong>. Apagarlos no te saca nada: las '
+      + 'solicitudes te siguen apareciendo en tu bandeja y las seguís pudiendo resolver; lo único que '
+      + 'dejás de recibir es el mail.</li>'
     + '<li>Todo queda registrado: quién hizo qué, cuándo y con qué comentario. El historial está en cada solicitud.</li>'
     + '<li>Los administradores pueden resolver cualquier paso, incluso los propios. Cuando lo hacen, queda marcado '
       + 'en el historial.</li>'
@@ -74788,6 +74814,69 @@ function spAyudaEnviar() {
   });
 }
 
+// ── Quién recibe los avisos por mail (V1065) ──────────────────────────────
+// Pablo, 18/9/2026: «necesito que me dejes configurar si llega mail al usuario o no,
+// porque me llegan demasiados mails». Un tilde por persona, que maneja un administrador.
+//
+// Qué pasos quedarían sin nadie a quien avisar lo calcula el SERVIDOR y se muestra al
+// abrir y al guardar. Repetir esa cuenta acá sería tener dos verdades sobre quién está
+// habilitado, y la del panel envejecería sola.
+function spAvisosAbrir() {
+  var caja = document.getElementById('sp-avisos-lista');
+  caja.innerHTML = '<div class="emp">Cargando…</div>';
+  document.getElementById('sp-mb-avisos').classList.add('on');
+  spApi('/avisos-usuarios').then(function(r) {
+    if (!r.ok) { caja.innerHTML = '<div class="emp" style="color:var(--err)">' + spEsc(r.error) + '</div>'; return; }
+    SP.avisos = r.data || [];
+    spAvisosPintar(r.sin_aviso || []);
+  });
+}
+
+function spAvisosAlerta(sinAviso) {
+  if (!sinAviso || !sinAviso.length) return '';
+  return '<div style="background:rgba(245,158,11,.12);border-radius:8px;padding:9px 12px;font-size:12px;margin-bottom:10px">'
+    + '⚠ Así como está, <strong>nadie recibe el aviso</strong> de: '
+    + sinAviso.map(function(x) { return spEsc(x); }).join(', ')
+    + '. Esas solicitudes igual aparecen en la bandeja, pero nadie se entera hasta entrar a mirar.</div>';
+}
+
+function spAvisosPintar(sinAviso) {
+  var html = spAvisosAlerta(sinAviso)
+    + '<div class="ab-table-wrap" style="max-height:340px;overflow:auto">'
+    + '<table class="pa-tbl" style="font-size:12px"><thead><tr>'
+    + '<th style="width:60px">Recibe</th><th>Nombre</th><th>Mail al que le llega</th><th>Rol</th>'
+    + '</tr></thead><tbody>'
+    + (SP.avisos || []).map(function(u) {
+        return '<tr><td><input type="checkbox" class="sp-av-u" data-uid="' + u.id + '"'
+          + (u.recibe ? ' checked' : '') + '></td>'
+          + '<td>' + spEsc(u.nombre) + '</td>'
+          + '<td class="sp-chica">' + spEsc(u.email || '— sin mail cargado —') + '</td>'
+          + '<td class="sp-chica">' + spEsc(u.rol) + '</td></tr>';
+      }).join('')
+    + '</tbody></table></div>';
+  document.getElementById('sp-avisos-lista').innerHTML = html;
+}
+
+function spAvisosGuardar() {
+  var apagados = [];
+  document.querySelectorAll('.sp-av-u').forEach(function(chk) {
+    if (!chk.checked) apagados.push(parseInt(chk.getAttribute('data-uid'), 10));
+  });
+  spApi('/avisos-usuarios', { method: 'PUT', body: JSON.stringify({ apagados: apagados }) })
+    .then(function(r) {
+      if (!r.ok) { spErr(r); return; }
+      document.getElementById('sp-mb-avisos').classList.remove('on');
+      // Que un paso quede sin nadie a quien avisar no impide guardar —puede ser a
+      // propósito, durante unos días— pero no puede pasar en silencio.
+      if (r.sin_aviso && r.sin_aviso.length) {
+        alert('Se guardó, pero nadie va a recibir el aviso de:\n\n' + r.sin_aviso.join('\n')
+          + '\n\nEsas solicitudes igual aparecen en la bandeja de los habilitados.');
+      } else {
+        toast(r.apagados ? '✓ Listo: ' + r.apagados + ' sin avisos por mail' : '✓ Todos reciben los avisos', 'ok');
+      }
+    });
+}
+
 // ── Circuito: quién está habilitado en cada paso ──────────────────────────
 
 function spCircuitoCargar() {
@@ -74851,10 +74940,15 @@ function spCircuitoRender() {
 
   // ── Avisos por mail ─────────────────────────────────────────────────────
   html += '<div style="font-size:12px;font-weight:700;margin:18px 0 6px">Avisos por mail</div>'
-    + '<div class="sp-chica" style="margin-bottom:8px">El aviso va al <strong>mail cargado en la ficha del usuario</strong>. '
-    + 'No hay una configuración de mails aparte: si una dirección está mal, se corrige en Usuarios. '
+    + '<div class="sp-chica" style="margin-bottom:8px">El aviso va al <strong>mail cargado en la ficha del usuario</strong>: '
+    + 'si una dirección está mal, se corrige en Usuarios. '
+    // V1065: y ahora sí hay dónde apagarlos por persona. El texto decía que no existía.
+    + '<strong>Quién recibe los avisos</strong> permite apagárselos a alguien sin sacarle el permiso. '
     + 'El mail avisa y linkea al panel; aprobar exige iniciar sesión, para que la autorización quede atribuida a una persona.</div>'
-    + '<div style="margin-bottom:10px"><button class="btn bo bs" onclick="spProbarMail()" style="font-size:11px">✉ Mandar un mail de prueba</button></div>';
+    + '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">'
+    + '<button class="btn bo bs" onclick="spProbarMail()" style="font-size:11px">✉ Mandar un mail de prueba</button>'
+    + '<button class="btn bo bs" onclick="spAvisosAbrir()" style="font-size:11px">🔕 Quién recibe los avisos</button>'
+    + '</div>';
 
   if (SP.outbox) {
     var res = {};
