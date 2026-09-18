@@ -409,10 +409,11 @@ const DATOS = {
 test('la cascada suma: margen bruto, EBITDA, EBT y resultado neto', () => {
   const T = TOTALES(DATOS);
   assert.deepEqual(T.rubros.ventas, { '2025-07': 1000, '2025-08': 5000, TOTAL: 6000 });
-  assert.deepEqual(T.subtotales.margen, { '2025-07': 600, '2025-08': 4100, TOTAL: 4700 });
+  // V1062: VENTAS no entra a la cascada; es la base de los porcentajes.
+  assert.deepEqual(T.subtotales.margen, { '2025-07': -400, '2025-08': -900, TOTAL: -1300 });
   assert.deepEqual(T.subtotales.ebitda, T.subtotales.margen, 'sin costos fijos, el EBITDA es el margen');
-  assert.deepEqual(T.subtotales.ebt, { '2025-07': 600, '2025-08': 4000, TOTAL: 4600 });
-  assert.deepEqual(T.subtotales.neto, { '2025-07': 550, '2025-08': 4000, TOTAL: 4550 }, 'sin asignar entró al resultado');
+  assert.deepEqual(T.subtotales.ebt, { '2025-07': -400, '2025-08': -1000, TOTAL: -1400 });
+  assert.deepEqual(T.subtotales.neto, { '2025-07': -450, '2025-08': -1000, TOTAL: -1450 }, 'sin asignar entró al resultado');
   assert.deepEqual(T.cuentas.ventas.map((x) => x.c.cuenta), ['4.1.02', '4.1.01']);
   // Adentro de los gastos, el más negativo arriba.
   assert.deepEqual(TOTALES(Object.assign({}, DATOS, { cuentas: [
@@ -429,7 +430,8 @@ test('la tabla: el mes más nuevo a la izquierda, los subtotales siempre, y las 
   assert.ok(!h.includes('COSTOS FIJOS'), 'muestra un título vacío');
   assert.ok(!h.includes('FUERA'));
   assert.ok(!h.includes('4.1.01 · VENTAS'), 'las cuentas se ven sin abrir el rubro');
-  assert.match(h, /<span class="pla-pct">82%<\/span>/, 'el % sobre ventas del margen de agosto');
+  // V1062: el margen ya no suma la venta, así que sobre las ventas de agosto da -18%.
+  assert.match(h, /<span class="pla-pct">-18%<\/span>/, 'el % sobre ventas del margen de agosto');
   assert.match(h, /ondblclick="plaDetalle\('rubro','ventas','2025-08'\)"/);
   const abierto = PANTALLA(DATOS, { ventas: true });
   assert.ok(abierto.includes('4.1.01 · VENTAS'));
@@ -677,9 +679,9 @@ test('la cascada suma los ajustes como una cuenta más, sólo en los meses del c
   const T = TOTALES(Object.assign({}, DATOS, { ajustes: AJUSTES }));
   assert.deepEqual(T.rubros.costos_fijos, { '2025-07': -100, '2025-08': -300, TOTAL: -400 }, 'un mes fuera del cuadro entró al total');
   assert.deepEqual(T.rubros.ventas, { '2025-07': 1000, '2025-08': 5500, TOTAL: 6500 });
-  assert.deepEqual(T.subtotales.margen, { '2025-07': 600, '2025-08': 4600, TOTAL: 5200 });
-  assert.deepEqual(T.subtotales.ebitda, { '2025-07': 500, '2025-08': 4300, TOTAL: 4800 });
-  assert.deepEqual(T.subtotales.neto, { '2025-07': 450, '2025-08': 4200, TOTAL: 4650 });
+  assert.deepEqual(T.subtotales.margen, { '2025-07': -400, '2025-08': -900, TOTAL: -1300 });
+  assert.deepEqual(T.subtotales.ebitda, { '2025-07': -500, '2025-08': -1200, TOTAL: -1700 });
+  assert.deepEqual(T.subtotales.neto, { '2025-07': -550, '2025-08': -1300, TOTAL: -1850 });
   assert.deepEqual(T.ajustes.costos_fijos.map((x) => [x.a.id, x.total]), [[7, -400]]);
 });
 
@@ -750,19 +752,19 @@ test('exportar: el cuadro entero, en pesos con centavos, con punto y coma y coma
     'Rubro;DESCUENTOS SUPER;;0,00;0,00;0,00',
     'Rubro;COSTOS ASOCIADOS A LAS VENTAS;;-1300,00;-900,00;-400,00',
     'Cuenta;COSTO;4.2.01;-1300,00;-900,00;-400,00',
-    'Subtotal;MARGEN BRUTO;;5200,00;4600,00;600,00',
+    'Subtotal;MARGEN BRUTO;;-1300,00;-900,00;-400,00',
     'Rubro;COSTOS FIJOS;;-413,30;-301,00;-112,30',
     'Cuenta;"Gastos; ""varios""";4.2.09;-12,30;0,00;-12,30',
     'Cuenta;"\'=HIPERVINCULO(""x"")";4.2.10;-1,00;-1,00;0,00',
     'Ajuste manual;Amortización;;-400,00;-300,00;-100,00',
     'Rubro;COSTOS VARIABLES;;0,00;0,00;0,00',
-    'Subtotal;EBITDA;;4786,70;4299,00;487,70',
+    'Subtotal;EBITDA;;-1713,30;-1201,00;-512,30',
     'Rubro;COSTOS FINANCIEROS;;-100,00;-100,00;0,00',
     'Cuenta;INTERESES;4.2.05;-100,00;-100,00;0,00',
-    'Subtotal;EBT (antes de impuestos);;4686,70;4199,00;487,70',
+    'Subtotal;EBT (antes de impuestos);;-1813,30;-1301,00;-512,30',
     'Rubro;IMPUESTOS;;-50,00;0,00;-50,00',
     'Cuenta;IIBB;4.2.06;-50,00;0,00;-50,00',
-    'Resultado;RESULTADO NETO;;4636,70;4199,00;437,70',
+    'Resultado;RESULTADO NETO;;-1863,30;-1301,00;-562,30',
   ]);
   // Un título vacío también va: la estructura es la misma todos los meses.
   assert.ok(csv(DATOS).includes('\r\nRubro;COSTOS FIJOS;;0,00;0,00;0,00\r\n'));
@@ -938,10 +940,10 @@ test('la cascada con los títulos nuevos: margen, EBITDA y EBT donde los puso Pa
     uno('costos_fijos', -50), uno('costos_variables', -40), uno('costos_financieros', -20), uno('impuestos', -10),
     uno('sin_asignar', -9999)] };
   const T = TOTALES(d);
-  assert.equal(T.subtotales.margen.TOTAL, 800, 'el margen bruto es ventas + utilidad + descuentos + costos asociados');
-  assert.equal(T.subtotales.ebitda.TOTAL, 710, 'el EBITDA suma costos fijos y costos variables');
-  assert.equal(T.subtotales.ebt.TOTAL, 690);
-  assert.equal(T.subtotales.neto.TOTAL, 680, 'una cuenta sin título sumó al resultado');
+  assert.equal(T.subtotales.margen.TOTAL, -200, 'el margen bruto es utilidad + descuentos + costos asociados');
+  assert.equal(T.subtotales.ebitda.TOTAL, -290, 'el EBITDA suma costos fijos y costos variables');
+  assert.equal(T.subtotales.ebt.TOTAL, -310);
+  assert.equal(T.subtotales.neto.TOTAL, -320, 'una cuenta sin título, o VENTAS, sumó al resultado');
   const h = PANTALLA(d);
   const pos = (t) => { const i = h.indexOf(t); assert.ok(i > 0, 'no está ' + t); return i; };
   assert.ok(pos('COSTOS ASOCIADOS A LAS VENTAS') < pos('MARGEN BRUTO') && pos('MARGEN BRUTO') < pos('COSTOS FIJOS'));
@@ -1054,7 +1056,7 @@ test('manual V1056: los títulos, la lista entera, y lo que no es obvio arranca 
   assert.match(M, /Arrastrar una cuenta a la lista le saca el título/);
   assert.match(M, /Una cuenta <b>sin título no suma al resultado<\/b>, y arriba del cuadro se avisa cuántas hay/);
   assert.match(fuente(PANEL, 'function plaTotales(d){'), /if \(!rub\[c\.rubro\]\) return;/);
-  assert.match(M, /<b>MARGEN BRUTO<\/b> = ventas \+ utilidad \+ descuentos super \+ costos asociados a las ventas; <b>EBITDA<\/b> = margen bruto \+ costos fijos \+ costos variables/);
+  assert.match(M, /<b>MARGEN BRUTO<\/b> = utilidad \+ descuentos super \+ costos asociados a las ventas; <b>EBITDA<\/b> = margen bruto \+ costos fijos \+ costos variables/);
   assert.match(M, /<span class="ver">V1056<\/span> Los títulos nuevos/);
 });
 
@@ -1122,9 +1124,10 @@ test('también en VENTAS suma en los dos: el resultado neto la cuenta dos veces,
   assert.deepEqual(T.rubros.ventas, { '2025-07': 1150, TOTAL: 1150 }, 'VENTAS no suma las que están también ahí');
   assert.equal(T.rubros.utilidad.TOTAL, 200);
   assert.equal(T.rubros.costos_fijos.TOTAL, -50);
-  assert.equal(T.subtotales.margen.TOTAL, 1350, 'la de utilidad va dos veces en el margen; la de costos fijos, una');
-  assert.equal(T.subtotales.ebitda.TOTAL, 1300);
-  assert.equal(T.subtotales.neto.TOTAL, 1300, 'el resultado neto no cuenta dos veces las repetidas');
+  // V1062: en VENTAS suman para la base de los porcentajes; al resultado suman desde su título.
+  assert.equal(T.subtotales.margen.TOTAL, 200, 'la repetida en VENTAS se contó dos veces en el margen');
+  assert.equal(T.subtotales.ebitda.TOTAL, 150);
+  assert.equal(T.subtotales.neto.TOTAL, 150, 'el resultado neto cuenta dos veces las repetidas');
   assert.deepEqual(T.cuentas.ventas.map((x) => [x.c.cuenta, x.tambien || null]),
     [['4.1.01', null], ['4.1.02', 'utilidad'], ['4.2.05', 'costos_fijos']]);
   // Una con VENTAS de título no se suma dos veces en VENTAS.
@@ -1180,7 +1183,7 @@ test('también en VENTAS en la pantalla: soltarla en VENTAS la deja en los dos, 
 test('manual V1058: sólo VENTAS se repite, y suma en los dos', () => {
   const M = manual();
   assert.match(M, /<b>Sólo VENTAS se puede repetir<\/b>: una cuenta que ya tiene otro título se arrastra también a VENTAS y queda en los dos/);
-  assert.match(M, /<b>Suma en los dos títulos<\/b>: el resultado neto la cuenta dos veces, y también cada subtotal que queda debajo de los dos/);
+  assert.match(M, /<b>Repetirla en VENTAS no la cuenta dos veces<\/b>: suma al resultado desde su propio título, y en VENTAS suma sólo para la base de los porcentajes/);
   assert.match(M, /Pasarla a VENTAS como su título, o sacarle el título, le saca la repetición/);
   assert.match(RUTA, /if \(r === 'ventas' \|\| r === SIN_ASIGNAR\) sinVentas\.run\(c\);/);
   assert.match(M, /<span class="ver">V1058<\/span> Una cuenta puede estar también en VENTAS/);
@@ -1520,6 +1523,53 @@ test('manual V1061: la ×, los nombres enteros, y el Excel de lo que no balancea
   assert.match(M, /cada cuenta se ve con su <b>nombre completo<\/b>: si es largo baja de renglón\. El número de la cuenta aparece pasando el mouse/);
   assert.match(M, /<b>⬇️ Descargar Excel<\/b> baja lo que no balancea del período elegido para mandarlo a revisar: una hoja con los días y otra con los renglones de cada asiento sin pareja/);
   assert.match(M, /<span class="ver">V1061<\/span> Una × en cada cuenta de un título/);
+});
+
+// ══ 6g · LA VENTA NO SE CUENTA DOS VECES (V1062) ═══════════════════════════════════════
+//
+// Pablo, 17/9/2026: «estamos sumando ventas y Utilidad; en realidad la venta la estamos tomando
+// dos veces. Entonces las cuentas para ir descontando siempre hacelas a partir de Utilidad, pero
+// para calcular los porcentajes hacelas siempre sobre la base de VENTAS».
+
+test('la cascada arranca en UTILIDAD, y los porcentajes van sobre VENTAS', () => {
+  const uno = (rubro, v) => ({ cuenta: rubro, nombre: rubro, rubro, meses: { '2025-07': v } });
+  const d = { rubros: RUBROS, meses: ['2025-07'], meses_disponibles: ['2025-07'], cuentas: [
+    uno('ventas', 1000), uno('utilidad', 300), uno('descuentos_super', -100), uno('costos_ventas', -60),
+    uno('costos_fijos', -50), uno('costos_variables', -40), uno('costos_financieros', -20), uno('impuestos', -10)] };
+  const T = TOTALES(d);
+  assert.equal(T.rubros.ventas.TOTAL, 1000, 'VENTAS sigue mostrando su total');
+  assert.equal(T.subtotales.margen.TOTAL, 140, 'el margen bruto todavía suma las ventas');
+  assert.equal(T.subtotales.ebitda.TOTAL, 50);
+  assert.equal(T.subtotales.ebt.TOTAL, 30);
+  assert.equal(T.subtotales.neto.TOTAL, 20, 'el resultado neto suma las ventas además de su título');
+  // Los porcentajes, sobre VENTAS: el margen es el 14% de 1.000.
+  const h = PANTALLA(d);
+  assert.match(h, /<span class="pla-pos">140<\/span><span class="pla-pct">14%<\/span>/);
+  assert.match(h, /<span class="pla-pos">1\.000<\/span><span class="pla-pct">100%<\/span>/);
+  // Y se dice dónde: en la fila de VENTAS, pasando el mouse.
+  assert.match(h, /<td title="VENTAS es la base de los porcentajes: no suma al resultado, sus cuentas suman desde su título"/);
+});
+
+test('el cuadro avisa si una cuenta quedó con VENTAS como título: no sumaría a ningún lado', () => {
+  const caja = {};
+  const aviso = (cuentas) => {
+    new Function('eid', 'escH', 'lnbPuedeOperar', [fuente(PANEL, 'function plaFechaTxt(f){'), fuente(PANEL, 'function plaAviso(d){'),
+      'plaAviso({ ultima_carga: { archivo: "d.xls", desde: "2026-07-01", hasta: "2026-09-14" }, cuentas: ' + JSON.stringify(cuentas) + ' });'].join('\n'))(
+      () => caja, String, () => true);
+    return caja.innerHTML;
+  };
+  assert.match(aviso([{ rubro: 'ventas' }, { rubro: 'ventas' }, { rubro: 'utilidad' }]),
+    /⚠️ 2 cuentas tienen <b>VENTAS<\/b> como título: VENTAS es la base de los porcentajes y no suma al resultado/);
+  assert.ok(!/como título/.test(aviso([{ rubro: 'utilidad' }, { rubro: 'costos_fijos' }])), 'avisa sin que haya ninguna');
+});
+
+test('manual V1062: la cascada arranca en UTILIDAD y VENTAS es la base de los porcentajes', () => {
+  const M = manual();
+  assert.match(M, /<b>VENTAS no suma al resultado<\/b>: es la <b>base de los porcentajes<\/b>/);
+  assert.match(M, /Sus cuentas suman desde el título donde están —por ejemplo, repetidas en UTILIDAD—, así la venta no se cuenta dos veces/);
+  assert.match(M, /Si una cuenta queda con <b>VENTAS como título<\/b>, no suma a ningún lado y el cuadro lo avisa arriba/);
+  assert.match(M, /<span class="ver">V1062<\/span> La cascada arranca en UTILIDAD y VENTAS queda como base de los porcentajes/);
+  assert.match(fuente(PANEL, 'function plaTotales(d){'), /sub\.neto = sumar\(Object\.keys\(rub\)\.filter\(function\(k\)\{ return k !== 'ventas'; \}\)\);/);
 });
 
 // ══ 7 · EL MENÚ, LA DIRECCIÓN Y EL PERMISO ═══════════════════════════════════════════
