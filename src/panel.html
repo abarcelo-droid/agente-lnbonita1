@@ -5571,8 +5571,22 @@ input[type=number]{-moz-appearance:textfield;appearance:textfield}
     #sec-pl-abasto .pla-res td{background:#0a2744;color:#fff;font-weight:700}
     #sec-pl-abasto .pla-pos{color:#15803d} #sec-pl-abasto .pla-neg{color:#dc2626}
     #sec-pl-abasto .pla-res .pla-pos,#sec-pl-abasto .pla-res .pla-neg{color:#fff}
-    #sec-pl-abasto .pla-pct{display:block;font-size:9.5px;color:var(--mut);font-weight:400}
+    /* EL MARGEN ES LO QUE SE MIRA (V1064). Pablo, 18/9/2026: «me gustaría ver mejor y más
+       grande los % márgenes, que son en definitiva lo que revisamos». El porcentaje de los
+       SUBTOTALES —margen bruto, EBITDA, EBT y resultado neto— se lee de un vistazo y con el
+       color de su signo, incluso más grande que el importe: la pregunta es cómo cerró, y el
+       importe es el respaldo. El de cada rubro queda un escalón atrás, legible pero segundo. */
+    #sec-pl-abasto .pla-pct{display:block;font-size:10px;color:var(--mut);font-weight:600;line-height:1.3}
+    #sec-pl-abasto .pla-sub .pla-pct,#sec-pl-abasto .pla-res .pla-pct{font-size:14px;font-weight:800;letter-spacing:-.02em}
+    #sec-pl-abasto .pla-sub td,#sec-pl-abasto .pla-res td{padding-top:7px;padding-bottom:7px}
+    /* Y el NOMBRE del margen, del tamaño de lo que dice: con el % a 14 px y «MARGEN BRUTO» a 11,
+       la fila quedaba a media máquina. Son las cuatro filas que se revisan. */
+    #sec-pl-abasto .pla-sub td:first-child{font-size:12.5px;letter-spacing:.01em}
+    #sec-pl-abasto .pla-res td:first-child{font-size:13px;letter-spacing:.01em}
+    #sec-pl-abasto .pla-sub .pla-pct-pos{color:#15803d} #sec-pl-abasto .pla-sub .pla-pct-neg{color:#b91c1c}
+    /* Sobre el azul oscuro del resultado, los mismos dos colores no se leen: van los claros. */
     #sec-pl-abasto .pla-res .pla-pct{color:#cbd5e1}
+    #sec-pl-abasto .pla-res .pla-pct-pos{color:#4ade80} #sec-pl-abasto .pla-res .pla-pct-neg{color:#fca5a5}
     #sec-pl-abasto .pla-dnd{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,2fr);gap:12px;align-items:start}
     #sec-pl-abasto .pla-zonas{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;align-content:start;
       position:sticky;top:8px;max-height:calc(100vh - 120px);overflow-y:auto;overflow-x:hidden}
@@ -24474,7 +24488,10 @@ SG_MANUAL.plabasto = { titulo: 'P&L Abasto', html:
   + '<li><span class="ver">V1062</span> <b>VENTAS no suma al resultado</b>: es la <b>base de los porcentajes</b>. Sus '
   + 'cuentas suman desde el título donde están —por ejemplo, repetidas en UTILIDAD—, así la venta no se cuenta dos '
   + 'veces. Si una cuenta queda con <b>VENTAS como título</b>, no suma a ningún lado y el cuadro lo avisa arriba.</li>'
-  + '<li>Debajo de cada rubro y subtotal, en gris, el <b>% sobre las ventas</b> de ese mes.</li>'
+  + '<li>Debajo de cada rubro y subtotal, el <b>% sobre las ventas</b> de ese mes. <span class="ver">V1064</span> '
+  + 'El de los <b>márgenes</b> —margen bruto, EBITDA, EBT y resultado neto— se ve <b>grande y con el color de su '
+  + 'signo</b>: verde si es positivo, rojo si es negativo. Es lo que se mira primero, así que va adelante del '
+  + 'importe; el de cada rubro queda más chico, un escalón atrás.</li>'
   + '<li><b>Clic en un rubro</b>: se abren sus cuentas. <b>Doble clic en un importe</b>: los asientos que lo '
   + 'forman, con su fecha, el número de asiento, la <b>contrapartida</b> —las otras cuentas del mismo asiento: el '
   + 'cliente de una venta, cuando el otro sistema la cargó con su cobro en el mismo asiento—, el debe y el haber.</li>'
@@ -24599,6 +24616,8 @@ SG_MANUAL.plabasto = { titulo: 'P&L Abasto', html:
 
   + '<h3>Qué cambió, y desde cuándo</h3>'
   + '<ul>'
+  + '<li><span class="ver">V1064</span> Los márgenes se leen de un vistazo: el % de los subtotales, grande y con '
+  + 'el color de su signo.</li>'
   + '<li><span class="ver">V1063</span> El cuadro con el concepto angosto y las columnas Concepto y TOTAL fijas, '
   + 'hasta 24 meses, el tilde de los que no balancean en los asientos de un importe, y la hoja de patrones en el '
   + 'Excel de No balancea.</li>'
@@ -43988,8 +44007,9 @@ function plaCelda(v, ventas, conPct){
   if (v == null || Math.abs(v) < 0.5) return '<span style="color:var(--mut)">—</span>';
   var u = PLA.unidad || 1, dec = u >= 1e6 ? 1 : 0;
   var txt = (v < 0 ? '-' : '') + (Math.abs(v) / u).toLocaleString('es-AR', { minimumFractionDigits: dec, maximumFractionDigits: dec });
-  var pct = (conPct && ventas) ? '<span class="pla-pct">'
-    + (Math.round(v / ventas * 1000) / 10).toLocaleString('es-AR') + '%</span>' : '';
+  var p = ventas ? Math.round(v / ventas * 1000) / 10 : 0;
+  var pct = (conPct && ventas) ? '<span class="pla-pct ' + (p < 0 ? 'pla-pct-neg' : 'pla-pct-pos') + '">'
+    + p.toLocaleString('es-AR') + '%</span>' : '';
   return '<span class="' + (v < 0 ? 'pla-neg' : 'pla-pos') + '">' + txt + '</span>' + pct;
 }
 
