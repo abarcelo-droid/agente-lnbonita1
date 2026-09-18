@@ -182,6 +182,37 @@ function contrapartidas(db, filas) {
   return filas;
 }
 
+// ── QUÉ RENGLONES ESTÁN EN UN ASIENTO QUE NO BALANCEA (V1063) ────────────────
+// Pablo, 17/9/2026: «dentro del detalle de asientos, un tilde para ver los "no balancea", así
+// podemos investigarlos más fácilmente».
+//
+// Son EXACTAMENTE los que lista la solapa No balancea, con la misma regla y la misma función:
+// el día no cierra, y adentro de ese día el asiento no tiene otro que lo compense al centavo.
+// Marcar sólo «debe ≠ haber» señalaría de más: un tercio de los asientos del otro sistema no
+// cierran solos porque la operación viene partida en dos números, y eso no es un error.
+function marcarSinPareja(db, filas) {
+  for (const f of filas) f.sin_pareja = 0;
+  const fechas = [...new Set(filas.map((f) => f.fecha).filter(Boolean))];
+  const dias = [];
+  for (let i = 0; i < fechas.length; i += 400) {
+    const lote = fechas.slice(i, i + 400);
+    const q = lote.map(() => '?').join(',');
+    dias.push(...db.prepare(`SELECT fecha FROM pl_abasto_movimientos WHERE fecha IN (${q})
+      GROUP BY fecha HAVING ABS(SUM(debe) - SUM(haber)) >= 0.005`).all(...lote).map((x) => x.fecha));
+  }
+  const solos = new Set();
+  for (let i = 0; i < dias.length; i += 400) {
+    const lote = dias.slice(i, i + 400);
+    const q = lote.map(() => '?').join(',');
+    const asientos = db.prepare(`SELECT asiento, fecha, ROUND(SUM(debe), 2) AS debe, ROUND(SUM(haber), 2) AS haber
+      FROM pl_abasto_movimientos WHERE fecha IN (${q})
+      GROUP BY asiento, fecha HAVING ABS(SUM(debe) - SUM(haber)) >= 0.005`).all(...lote);
+    for (const a of asientosSinPareja(asientos).solos) solos.add(a.asiento + '|' + a.fecha);
+  }
+  for (const f of filas) f.sin_pareja = solos.has(f.asiento + '|' + f.fecha) ? 1 : 0;
+  return filas;
+}
+
 // ── LO QUE SE VA A REEMPLAZAR ────────────────────────────────────────────────
 // Cuántos renglones ya cargados borra la carga, y qué cuentas conocidas cambian de nombre:
 // es lo que delata un archivo equivocado.
@@ -652,6 +683,7 @@ router.get('/detalle', requireAuth, (req, res) => {
       FROM pl_abasto_movimientos m LEFT JOIN pl_abasto_cuentas c ON c.cuenta = m.cuenta
       WHERE ${donde} ORDER BY m.fecha DESC, m.id DESC LIMIT ${DETALLE_MAX}`).all(desde, hasta, ...cuentas);
     contrapartidas(db, filas);
+    marcarSinPareja(db, filas);
     res.json({ ok: true, data: { filas, total, recortado: total.renglones > filas.length ? 1 : 0 } });
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
