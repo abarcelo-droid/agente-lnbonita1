@@ -36,18 +36,21 @@ export function render(texto, vars) {
  * dedupKey hace el encolado idempotente: si el mismo aviso se intenta encolar dos
  * veces (doble submit, reintento), la segunda no inserta nada.
  */
-export function encolar({ solicitudId, eventoId, dedupKey, destinatarios, asunto, cuerpo, html }) {
+export function encolar({ solicitudId, eventoId, dedupKey, destinatarios, asunto, cuerpo, html, motivo }) {
   const dest = (Array.isArray(destinatarios) ? destinatarios : [destinatarios])
     .map(x => String(x || '').trim()).filter(Boolean);
   if (!dest.length) {
     // Sin destinatario no se encola un mail que nunca va a salir: se deja el
-    // registro como descartado, que es lo que después explica el silencio.
+    // registro como descartado, que es lo que después explica el silencio. El MOTIVO lo
+    // puede precisar quien encola (V1065): no es lo mismo que nadie tenga el mail cargado
+    // que que los avisos estén apagados a propósito.
     try {
       db.prepare(`
         INSERT OR IGNORE INTO sp_outbox (solicitud_id, evento_id, dedup_key, destinatarios,
                                          asunto, cuerpo_texto, estado, ultimo_error)
-        VALUES (?,?,?,?,?,?, 'descartado', 'sin destinatarios con mail cargado')
-      `).run(solicitudId || null, eventoId || null, dedupKey, '', asunto || '(sin asunto)', cuerpo || '');
+        VALUES (?,?,?,?,?,?, 'descartado', ?)
+      `).run(solicitudId || null, eventoId || null, dedupKey, '', asunto || '(sin asunto)', cuerpo || '',
+             motivo || 'sin destinatarios con mail cargado');
     } catch (_) { /* el UNIQUE de dedup_key ya lo cubrió */ }
     return null;
   }

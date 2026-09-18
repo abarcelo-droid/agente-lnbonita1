@@ -341,6 +341,9 @@ test('las notificaciones leen usuarios.email — por eso había que sincronizarl
   // Es la razón de todo esto: si el aviso saliera de personas.mail, no haría falta
   // nada. Sale de usuarios, así que usuarios tiene que estar al día.
   const SP = fs.readFileSync(path.join(RAIZ, 'src/rutas/sp.js'), 'utf8');
-  assert.match(SP, /SELECT nombre, email FROM usuarios WHERE id=\?/);
+  // Las columnas que trae la consulta pueden cambiar —desde la V1065 también pide el
+  // id, para saber si esa persona tiene los avisos apagados—; lo que este test clava es
+  // que el mail del aviso sale de USUARIOS, que es la razón de sincronizarlo.
+  assert.match(SP, /SELECT [\w, ]*email[\w, ]*FROM usuarios WHERE id=\?/);
   assert.match(SP, /SELECT id, nombre, email, rol FROM usuarios/);
 });

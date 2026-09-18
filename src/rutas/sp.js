@@ -162,6 +162,66 @@ function varsDe(sol, extra) {
   };
 }
 
+// ── QUIÉN RECIBE LOS MAILS DEL CIRCUITO (V1065) ───────────────────────────
+// Pablo, 18/9/2026: «necesito que me dejes configurar si llega mail al usuario o no,
+// porque me llegan demasiados mails».
+//
+// UNA SOLA PUERTA. Los avisos salen por dos lados —el «te toca a vos» de cada paso y
+// las novedades al solicitante— y los dos arman su lista de destinatarios con mailsDe().
+// Filtrar en cada llamada dejaría sin interruptor a la tercera que alguien escriba
+// mañana, que es exactamente como se rompen estas cosas.
+//
+// APAGAR EL AVISO NO ES SACAR EL PERMISO: el que lo tiene apagado sigue viendo la
+// solicitud en su bandeja y sigue pudiendo resolverla. Lo único que no le llega es el
+// mail.
+function apagados() {
+  try {
+    return new Set(db.prepare('SELECT usuario_id FROM sp_avisos_usuario WHERE recibe=0')
+      .all().map(x => x.usuario_id));
+  } catch (e) {
+    // Ante la duda se avisa: un error leyendo la preferencia no puede dejar a todo el
+    // circuito sin mails, porque nadie se enteraría de que dejó de avisar.
+    console.error('[SP] No se pudo leer quién recibe avisos:', e.message);
+    return new Set();
+  }
+}
+
+function mailsDe(usuarios) {
+  const off = apagados();
+  return (usuarios || []).filter(u => u && u.email && !off.has(u.id)).map(u => u.email);
+}
+
+// Por qué quedó sin destinatarios, para que el outbox lo explique: no es lo mismo que
+// nadie tenga el mail cargado que que todos lo hayan apagado a propósito.
+function motivoSinDestino(usuarios) {
+  const conMail = (usuarios || []).filter(u => u && u.email);
+  if (!conMail.length) return null;   // el motivo de siempre: nadie tiene mail
+  return 'todos los que correspondían tienen los avisos de pagos apagados';
+}
+
+// Los pasos que, con estos avisos apagados, quedarían sin NADIE a quien avisarle. El
+// circuito no se traba —la solicitud sigue en la bandeja— pero nadie se entera hasta
+// que alguien entra a mirar, así que se dice antes y después de guardar.
+function pasosSinAviso(off) {
+  try {
+    const v = versionActiva();
+    if (!v) return [];
+    const def = armarSnapshot(v.id);
+    const ficticia = { id: 0, solicitante_id: 0 };
+    const out = [];
+    for (const p of (def.pasos || [])) {
+      if (p.tipo === 'final_ok' || p.tipo === 'final_rechazo') continue;
+      const { resolutores, watchers } = resolverAutorizados(def, p.clave, ficticia);
+      const gente = [...resolutores, ...watchers].filter(u => u.email);
+      if (gente.length && gente.every(u => off.has(u.id))) out.push(p.nombre || p.clave);
+    }
+    return out;
+  } catch (e) {
+    console.error('[SP] No se pudo revisar qué pasos quedan sin aviso:', e.message);
+    return [];
+  }
+}
+
 // Encola el aviso de "te toca a vos" a los habilitados del paso destino, más los
 // watchers. Se llama DENTRO de la transacción.
 function avisarPaso(def, sol, pasoClave, eventoId) {
@@ -187,7 +247,8 @@ function avisarPaso(def, sol, pasoClave, eventoId) {
     const elegido = puedenActuar.filter(u => u.id === sol.autorizador_id);
     if (elegido.length) destinatarios = elegido;
   }
-  const dest = [...destinatarios, ...watchers].map(u => u.email).filter(Boolean);
+  const gente = [...destinatarios, ...watchers];
+  const dest = mailsDe(gente);
 
   const pl = plantillaDe(def, 'paso:' + pasoClave);
   const asunto = pl ? pl.asunto : 'Te toca revisar {{numero}} · {{proveedor}}';
@@ -233,6 +294,7 @@ function avisarPaso(def, sol, pasoClave, eventoId) {
     solicitudId: sol.id, eventoId,
     dedupKey: `paso:${sol.id}:${pasoClave}:${eventoId}`,
     destinatarios: dest,
+    motivo: dest.length ? null : motivoSinDestino(gente),
     asunto: render(asunto, vars),
     cuerpo: texto,
     html: htmlConBotones(texto, acciones)
@@ -379,16 +441,18 @@ function avisarSolicitante(def, sol, evento, eventoId, extra) {
   // La del flujo primero —es la que el usuario puede escribir a su gusto— y si
   // no hay, la de código. Nunca se sale sin avisar.
   const pl = plantillaDe(def, 'evento:' + evento) || AVISO_BASE[evento] || AVISO_BASE.movimiento;
-  const u = db.prepare('SELECT nombre, email FROM usuarios WHERE id=?').get(sol.solicitante_id);
+  const u = db.prepare('SELECT id, nombre, email FROM usuarios WHERE id=?').get(sol.solicitante_id);
   const vars = varsDe(sol, {
     destinatario: (u && u.nombre) || sol.solicitante_nombre || '', ...(extra || {}) });
   // SIN MAIL CARGADO NO SE SALE EN SILENCIO. Se encola igual, sin destinatario:
   // el outbox lo deja como descartado con el motivo, y eso es lo que después
   // explica por qué el solicitante no se enteró. Antes no quedaba ni el rastro.
+  const dest = mailsDe(u ? [u] : []);
   encolar({
     solicitudId: sol.id, eventoId,
     dedupKey: `sol:${sol.id}:${evento}:${eventoId}`,
-    destinatarios: (u && u.email) ? [u.email] : [],
+    destinatarios: dest,
+    motivo: dest.length ? null : motivoSinDestino(u ? [u] : []),
     asunto: render(pl.asunto, vars), cuerpo: render(pl.cuerpo, vars)
   });
 }
@@ -1559,6 +1623,37 @@ router.post('/probar-mail', wrap((req, res) => {
   });
   procesarEnBackground();
   res.json({ ok: true, email: u.email, nombre: u.nombre });
+}));
+
+// ── QUIÉN RECIBE LOS AVISOS (V1065) ───────────────────────────────────────
+// Es PARAMETRIZAR: lo configura un administrador, no cada uno el suyo. Pablo lo pidió
+// así porque el problema es de volumen y lo resuelve de una sola vez para todos.
+router.get('/avisos-usuarios', wrap((req, res) => {
+  if (!esAdmin(req)) throw Object.assign(new Error('Solo administradores'), { status: 403 });
+  const off = apagados();
+  const data = db.prepare(`
+    SELECT id, nombre, email, rol FROM usuarios WHERE activo=1 ORDER BY nombre
+  `).all().map(u => Object.assign({}, u, { recibe: off.has(u.id) ? 0 : 1 }));
+  res.json({ ok: true, data, sin_aviso: pasosSinAviso(off) });
+}));
+
+// Se manda la lista COMPLETA de apagados, como los habilitados de un paso: así dos
+// administradores editando a la vez no terminan con una mezcla de las dos ediciones.
+router.put('/avisos-usuarios', wrap((req, res) => {
+  if (!esAdmin(req)) throw Object.assign(new Error('Solo administradores'), { status: 403 });
+  const lista = req.body?.apagados;
+  if (!Array.isArray(lista)) throw bad('Falta la lista de quiénes no reciben avisos');
+  const ids = [...new Set(lista.map(Number).filter(n => Number.isInteger(n) && n > 0))];
+  if (ids.length > 1000) throw bad('Demasiados usuarios de una vez');
+  db.transaction(() => {
+    db.prepare('DELETE FROM sp_avisos_usuario').run();
+    const ins = db.prepare(`
+      INSERT INTO sp_avisos_usuario (usuario_id, recibe, actualizado_en, actualizado_por)
+      VALUES (?, 0, datetime('now','localtime'), ?)
+    `);
+    for (const id of ids) ins.run(id, req.user.id);
+  })();
+  res.json({ ok: true, apagados: ids.length, sin_aviso: pasosSinAviso(new Set(ids)) });
 }));
 
 // ══════════════════════════════════════════════════════════════════════════
