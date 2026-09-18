@@ -36088,7 +36088,7 @@ function sgRepExport(){
   <div id="sp-aut-lista"></div>
   <div class="ab-modal-footer">
     <button class="btn bo" onclick="document.getElementById('sp-mb-aut').classList.remove('on')">Cancelar</button>
-    <button class="btn bb" onclick="spAutGuardar()">Guardar habilitados</button>
+    <button class="btn bb" id="sp-aut-btn" onclick="spAutGuardar()">Guardar habilitados</button>
   </div>
 </div>
 </div>
@@ -74733,6 +74733,9 @@ function spAyudaHtml(d) {
       + 'solicitudes te siguen apareciendo en tu bandeja y las seguís pudiendo resolver; lo único que '
       + 'dejás de recibir es el mail.</li>'
     + '<li>Todo queda registrado: quién hizo qué, cuándo y con qué comentario. El historial está en cada solicitud.</li>'
+    + '<li><strong>«Solo aviso» no es «habilitado»</strong>: quien está marcado así recibe el mail del paso '
+      + 'pero <strong>no puede resolverlo</strong>. Cada paso necesita al menos una persona sin ese tilde, o '
+      + 'queda sin dueño y no se pueden crear solicitudes nuevas.</li>'
     + '<li>Los administradores pueden resolver cualquier paso, incluso los propios. Cuando lo hacen, queda marcado '
       + 'en el historial.</li>'
     // La solapa Tiempos es solo para administradores: mandar a un comprador a una
@@ -74903,7 +74906,14 @@ function spCircuitoRender() {
     if (!val.ok) {
       html += '<div style="background:rgba(239,68,68,.1);border:1px solid var(--err);border-radius:8px;padding:10px 12px;font-size:12px;margin-bottom:10px">'
         + '<strong style="color:var(--err)">El circuito tiene problemas y no se pueden crear solicitudes:</strong>'
-        + '<ul style="margin:6px 0 0 18px">' + val.errores.map(function(e) { return '<li>' + spEsc(e) + '</li>'; }).join('') + '</ul></div>';
+        + '<ul style="margin:6px 0 0 18px">' + val.errores.map(function(e) { return '<li>' + spEsc(e) + '</li>'; }).join('') + '</ul>'
+        // Con el error solo, el que lo lee tiene que adivinar qué tilde mover.
+        + (val.errores.some(function(e) { return e.indexOf('no tiene nadie habilitado') >= 0; })
+            ? '<div class="sp-chica" style="margin-top:6px">Se arregla en <strong>Cambiar</strong>, en la fila '
+              + 'de ese paso: los marcados <em>solo aviso</em> reciben el mail pero no resuelven, así que '
+              + 'destildá <em>solo aviso</em> a alguien o tildá <strong>Todos los administradores</strong>.</div>'
+            : '')
+        + '</div>';
     }
     if (val.warnings.length) {
       html += '<div style="background:rgba(245,158,11,.12);border-radius:8px;padding:9px 12px;font-size:12px;margin-bottom:10px">'
@@ -75011,13 +75021,13 @@ function spAutorizadosAbrir(pasoClave) {
   });
 
   var html = '<label style="display:flex;gap:7px;align-items:center;padding:6px 4px;font-size:13px;cursor:pointer;border-bottom:1px solid var(--bor)">'
-    + '<input type="checkbox" id="sp-aut-rol-admin"' + (rolAdmin ? ' checked' : '') + '>'
+    + '<input type="checkbox" id="sp-aut-rol-admin"' + (rolAdmin ? ' checked' : '') + ' onchange="spAutCuenta()">'
     + '<span><strong>Todos los administradores</strong>'
     + '<div class="sp-chica">Conviene dejarlo mientras se prueba, para que nunca quede un paso sin nadie</div></span></label>';
 
   if (paso && paso.tipo === 'inicio') {
     html += '<label style="display:flex;gap:7px;align-items:center;padding:6px 4px;font-size:13px;cursor:pointer;border-bottom:1px solid var(--bor)">'
-      + '<input type="checkbox" id="sp-aut-solicitante"' + (solicitante ? ' checked' : '') + '>'
+      + '<input type="checkbox" id="sp-aut-solicitante"' + (solicitante ? ' checked' : '') + ' onchange="spAutCuenta()">'
       + '<span><strong>El propio solicitante</strong>'
       + '<div class="sp-chica">Es lo que le permite al comprador enviar SU solicitud</div></span></label>';
   }
@@ -75029,18 +75039,69 @@ function spAutorizadosAbrir(pasoClave) {
     + '<th style="width:80px">Solo aviso</th></tr></thead><tbody>'
     + (SP.usuarios || []).map(function(u) {
         return '<tr><td><input type="checkbox" class="sp-aut-u" data-uid="' + u.id + '"'
-          + (marcado[u.id] ? ' checked' : '') + '></td>'
+          + (marcado[u.id] ? ' checked' : '') + ' onchange="spAutSync(this)"></td>'
           + '<td>' + spEsc(u.nombre) + '</td>'
           + '<td class="sp-chica">' + spEsc(u.email || '') + '</td>'
           + '<td class="sp-chica">' + spEsc(u.rol) + '</td>'
           + '<td><input type="checkbox" class="sp-aut-w" data-uid="' + u.id + '"'
-          + (watcher[u.id] ? ' checked' : '') + ' title="Recibe el aviso pero no puede resolver"></td>'
+          + (watcher[u.id] ? ' checked' : '') + ' onchange="spAutSync(this)"'
+          + ' title="Recibe el aviso pero no puede resolver el paso"></td>'
           + '</tr>';
       }).join('')
-    + '</tbody></table></div>';
+    + '</tbody></table></div>'
+    // Cuántos pueden resolver, en vivo: es el número que decide si el paso queda con
+    // dueño, y verlo recién después de guardar es verlo cuando el circuito ya se rompió.
+    + '<div id="sp-aut-cuenta" style="margin-top:8px;font-size:12px"></div>';
 
   document.getElementById('sp-aut-lista').innerHTML = html;
+  spAutCuenta();
   document.getElementById('sp-mb-aut').classList.add('on');
+}
+
+// «Solo aviso» sin «Sí» no se guardaba: spAutGuardar recorre los tildados en «Sí», así que
+// ese tilde se perdía en silencio. Ahora una cosa implica la otra: marcar «solo aviso»
+// incluye a la persona, y sacarla del paso le saca también el «solo aviso».
+function spAutSync(chk) {
+  var uid = chk.getAttribute('data-uid');
+  var si = document.querySelector('.sp-aut-u[data-uid="' + uid + '"]');
+  var w = document.querySelector('.sp-aut-w[data-uid="' + uid + '"]');
+  if (si && w) {
+    if (chk.classList.contains('sp-aut-w') && w.checked) si.checked = true;
+    if (chk.classList.contains('sp-aut-u') && !si.checked) w.checked = false;
+  }
+  spAutCuenta();
+}
+
+// Los que PUEDEN RESOLVER: los administradores si está tildado, el solicitante en el paso
+// inicial, y las personas tildadas que no estén en «solo aviso».
+function spAutResuelven() {
+  var n = 0;
+  var rol = document.getElementById('sp-aut-rol-admin');
+  if (rol && rol.checked) n++;
+  var sol = document.getElementById('sp-aut-solicitante');
+  if (sol && sol.checked) n++;
+  document.querySelectorAll('.sp-aut-u').forEach(function(chk) {
+    if (!chk.checked) return;
+    var w = document.querySelector('.sp-aut-w[data-uid="' + chk.getAttribute('data-uid') + '"]');
+    if (!(w && w.checked)) n++;
+  });
+  return n;
+}
+
+function spAutCuenta() {
+  var caja = document.getElementById('sp-aut-cuenta');
+  if (!caja) return;
+  var n = spAutResuelven();
+  var btn = document.getElementById('sp-aut-btn');
+  if (n) {
+    caja.innerHTML = '<span class="sp-bad sp-ok">Pueden resolver este paso: ' + n + '</span>';
+  } else {
+    caja.innerHTML = '<span class="sp-bad sp-err">Nadie puede resolver este paso</span>'
+      + '<div class="sp-chica" style="margin-top:3px">Los marcados <em>solo aviso</em> reciben el mail '
+      + 'pero no resuelven. Dejá a alguien sin <em>solo aviso</em>, o tildá <strong>Todos los '
+      + 'administradores</strong>. Con el paso sin dueño no se pueden crear solicitudes nuevas.</div>';
+  }
+  if (btn) { btn.disabled = !n; btn.style.opacity = n ? '' : '.5'; }
 }
 
 function spAutGuardar() {
@@ -75056,6 +75117,12 @@ function spAutGuardar() {
     out.push({ tipo: 'usuario', usuario_id: uid, watcher: w && w.checked ? 1 : 0 });
   });
   if (!out.length) return toast('Tiene que quedar al menos uno habilitado, o el paso se traba', 'er');
+  // El servidor lo corta igual (V1066); acá se evita el viaje y se explica en la pantalla
+  // donde está el tilde que hay que sacar.
+  if (!spAutResuelven()) {
+    return toast('Nadie podría resolver este paso: los «solo aviso» no resuelven. Dejá a alguien '
+      + 'sin ese tilde o marcá «Todos los administradores».', 'er');
+  }
 
   spApi('/circuito/pasos/' + encodeURIComponent(pasoClave) + '/autorizados',
     { method: 'PUT', body: JSON.stringify({ autorizados: out }) }).then(function(r) {
