@@ -24433,10 +24433,13 @@ SG_MANUAL.plabasto = { titulo: 'P&L Abasto', html:
   + '<li>Los importes se ven en <b>pesos, miles o millones</b>: se elige arriba, y el importe exacto aparece '
   + 'pasando el mouse.</li>'
   + '<li>El importe de cada cuenta es <b>haber − debe</b>: los ingresos quedan en <b>verde</b> y los gastos en '
-  + '<b>rojo</b>, con el signo menos. <span class="ver">V1056</span> Por eso los subtotales son sumas: '
-  + '<b>MARGEN BRUTO</b> = ventas + utilidad + descuentos super + costos asociados a las ventas; <b>EBITDA</b> = '
+  + '<b>rojo</b>, con el signo menos. <span class="ver">V1062</span> Por eso los subtotales son sumas, y arrancan en '
+  + 'UTILIDAD: <b>MARGEN BRUTO</b> = utilidad + descuentos super + costos asociados a las ventas; <b>EBITDA</b> = '
   + 'margen bruto + costos fijos + costos variables; <b>EBT</b> = EBITDA + costos financieros; y el '
-  + '<b>RESULTADO NETO</b> suma los ocho títulos.</li>'
+  + '<b>RESULTADO NETO</b> suma todo eso más los impuestos.</li>'
+  + '<li><span class="ver">V1062</span> <b>VENTAS no suma al resultado</b>: es la <b>base de los porcentajes</b>. Sus '
+  + 'cuentas suman desde el título donde están —por ejemplo, repetidas en UTILIDAD—, así la venta no se cuenta dos '
+  + 'veces. Si una cuenta queda con <b>VENTAS como título</b>, no suma a ningún lado y el cuadro lo avisa arriba.</li>'
   + '<li>Debajo de cada rubro y subtotal, en gris, el <b>% sobre las ventas</b> de ese mes.</li>'
   + '<li><b>Clic en un rubro</b>: se abren sus cuentas. <b>Doble clic en un importe</b>: los asientos que lo '
   + 'forman, con su fecha, el número de asiento, la <b>contrapartida</b> —las otras cuentas del mismo asiento: el '
@@ -24537,9 +24540,9 @@ SG_MANUAL.plabasto = { titulo: 'P&L Abasto', html:
   + '<li>Una cuenta <b>sin título no suma al resultado</b>, y arriba del cuadro se avisa cuántas hay.</li>'
   + '<li><span class="ver">V1058</span> <b>Sólo VENTAS se puede repetir</b>: una cuenta que ya tiene otro título se '
   + 'arrastra también a VENTAS y queda en los dos. En VENTAS se ve con «también en …» y una × para sacarla, y en la '
-  + 'lista lleva además la etiqueta «+ Ventas». <b>Suma en los dos títulos</b>: el resultado neto la cuenta dos veces, '
-  + 'y también cada subtotal que queda debajo de los dos. Pasarla a VENTAS como su título, o sacarle el título, le '
-  + 'saca la repetición.</li>'
+  + 'lista lleva además la etiqueta «+ Ventas». <span class="ver">V1062</span> <b>Repetirla en VENTAS no la cuenta dos '
+  + 'veces</b>: suma al resultado desde su propio título, y en VENTAS suma sólo para la base de los porcentajes. '
+  + 'Pasarla a VENTAS como su título, o sacarle el título, le saca la repetición.</li>'
   + '<li>Una cuenta nueva que traiga un Excel nuevo entra con su rubro por defecto, sin tocar lo ya '
   + 'clasificado. <b>Volver a los de por defecto</b> borra toda la clasificación guardada, y por eso pide el '
   + 'nivel <b>Anular</b>.</li>'
@@ -24552,6 +24555,8 @@ SG_MANUAL.plabasto = { titulo: 'P&L Abasto', html:
 
   + '<h3>Qué cambió, y desde cuándo</h3>'
   + '<ul>'
+  + '<li><span class="ver">V1062</span> La cascada arranca en UTILIDAD y VENTAS queda como base de los porcentajes: '
+  + 'la venta no se cuenta dos veces.</li>'
   + '<li><span class="ver">V1061</span> Una × en cada cuenta de un título, el nombre completo de las cuentas en el cuadro, '
   + 'el asiento completo en los asientos de un importe, y el Excel de lo que no balancea.</li>'
   + '<li><span class="ver">V1060</span> Arrastrar ya no se engancha, y también se puede clasificar con dos clics.</li>'
@@ -43831,25 +43836,35 @@ function plaAviso(d){
   }
   // UNA CUENTA SIN TÍTULO NO SUMA AL RESULTADO: se dice cuántas hay con movimientos en el período.
   var sinTitulo = (d.cuentas || []).filter(function(c){ return c.rubro === 'sin_asignar'; }).length;
+  // VENTAS es la base de los porcentajes: una cuenta que lo tenga de título no suma a ningún lado.
+  var soloVentas = (d.cuentas || []).filter(function(c){ return c.rubro === 'ventas'; }).length;
   caja.innerHTML = 'Última carga: <b>' + escH(u.archivo || 'sin nombre') + '</b>, del ' + plaFechaTxt(u.desde)
     + ' al ' + plaFechaTxt(u.hasta) + ' · subida el ' + escH(String(u.creado_en || '').slice(0, 16))
     + (u.usuario ? ' por ' + escH(u.usuario) : '')
     + (sinTitulo ? ' · <span style="color:#92400e">⚠️ ' + sinTitulo + (sinTitulo === 1 ? ' cuenta con movimientos no tiene'
-        : ' cuentas con movimientos no tienen') + ' título y no suman al resultado: asignalas en «Configurar rubros».</span>' : '');
+        : ' cuentas con movimientos no tienen') + ' título y no suman al resultado: asignalas en «Configurar rubros».</span>' : '')
+    + (soloVentas ? ' · <span style="color:#92400e">⚠️ ' + soloVentas + (soloVentas === 1 ? ' cuenta tiene' : ' cuentas tienen')
+        + ' <b>VENTAS</b> como título: VENTAS es la base de los porcentajes y no suma al resultado. Llevalas a su título '
+        + '—por ejemplo UTILIDAD— y repetilas en VENTAS.</span>' : '');
 }
 
 // ── LA CASCADA ────────────────────────────────────────────────────────────────
-// Los gastos ya vienen negativos (haber − debe), así que TODO ES SUMA. Con los títulos nuevos
-// (Pablo, 14/9/2026) el MARGEN BRUTO va después de los costos asociados a las ventas, el EBITDA
-// después de los costos variables y el EBT después de los financieros. El resultado neto suma
-// los ocho títulos; lo que no tiene título no suma.
+// Los gastos ya vienen negativos (haber − debe), así que TODO ES SUMA. El MARGEN BRUTO va después
+// de los costos asociados a las ventas, el EBITDA después de los costos variables y el EBT después
+// de los financieros.
+//
+// Y LA CASCADA ARRANCA EN UTILIDAD. Pablo, 17/9/2026: «estamos sumando ventas y utilidad; en
+// realidad la venta la estamos tomando dos veces. Entonces las cuentas para ir descontando siempre
+// hacelas a partir de Utilidad, pero para calcular los porcentajes hacelas siempre sobre la base de
+// VENTAS». La cuenta de ventas vive en su título —repetida en VENTAS— y desde ahí suma; VENTAS
+// queda como la base de los porcentajes y no entra a los subtotales ni al resultado neto.
 var PLA_SUBTOTALES = [
   { despues: 'costos_ventas', k: 'margen', label: 'MARGEN BRUTO',
-    suma: ['ventas', 'utilidad', 'descuentos_super', 'costos_ventas'] },
+    suma: ['utilidad', 'descuentos_super', 'costos_ventas'] },
   { despues: 'costos_variables', k: 'ebitda', label: 'EBITDA',
-    suma: ['ventas', 'utilidad', 'descuentos_super', 'costos_ventas', 'costos_fijos', 'costos_variables'] },
+    suma: ['utilidad', 'descuentos_super', 'costos_ventas', 'costos_fijos', 'costos_variables'] },
   { despues: 'costos_financieros', k: 'ebt', label: 'EBT (antes de impuestos)',
-    suma: ['ventas', 'utilidad', 'descuentos_super', 'costos_ventas', 'costos_fijos', 'costos_variables', 'costos_financieros'] },
+    suma: ['utilidad', 'descuentos_super', 'costos_ventas', 'costos_fijos', 'costos_variables', 'costos_financieros'] },
 ];
 
 function plaTotales(d){
@@ -43890,7 +43905,8 @@ function plaTotales(d){
   };
   var sub = {};
   PLA_SUBTOTALES.forEach(function(s){ sub[s.k] = sumar(s.suma); });
-  sub.neto = sumar(Object.keys(rub));
+  // VENTAS no suma al resultado: sus cuentas ya suman desde el título donde están.
+  sub.neto = sumar(Object.keys(rub).filter(function(k){ return k !== 'ventas'; }));
   // Adentro de cada título, el que más pesa arriba, sea ingreso o gasto: con ocho títulos,
   // decidir por el nombre cuál es de ingresos ya no alcanza.
   Object.keys(porRubro).forEach(function(k){
@@ -43976,7 +43992,8 @@ function plaPintar(){
     if (cuentas.length || ajustes.length) {
       var abierto = !!PLA.abiertos[r.k];
       h += fila('pla-rub', (abierto ? '▼ ' : '▶ ') + r.ico + ' ' + r.label, T.rubros[r.k], true,
-        function(m){ return "plaDetalle('rubro','" + r.k + "','" + m + "')"; }, "plaToggle('" + r.k + "')");
+        function(m){ return "plaDetalle('rubro','" + r.k + "','" + m + "')"; }, "plaToggle('" + r.k + "')",
+        r.k === 'ventas' ? 'VENTAS es la base de los porcentajes: no suma al resultado, sus cuentas suman desde su título' : '');
       if (abierto) {
         cuentas.forEach(function(x){
           var vs = { TOTAL: x.total };
