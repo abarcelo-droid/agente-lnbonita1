@@ -496,6 +496,23 @@ router.put('/circuito/pasos/:clave/autorizados', wrap((req, res) => {
   const lista = req.body?.autorizados;
   if (!Array.isArray(lista)) throw bad('Faltan los autorizados');
 
+  // UN PASO NO SE GUARDA SIN NADIE QUE PUEDA RESOLVERLO (V1066).
+  //
+  // Los marcados «solo aviso» (watcher) reciben el mail pero NO resuelven. Con todos así
+  // el paso queda sin dueño, y eso no traba sólo ese paso: validarDefinicion lo marca
+  // como error y POST /solicitudes deja de aceptar solicitudes nuevas. Ya pasó, con «OK
+  // del supervisor» y «Confección de la orden» el 18/9/2026.
+  //
+  // Se corta ACÁ y no sólo en la pantalla porque es el único lugar que no se puede
+  // esquivar, y se corta ANTES de escribir: avisar después de guardar es avisar cuando el
+  // circuito ya está roto.
+  const finales = paso.tipo === 'final_ok' || paso.tipo === 'final_rechazo';
+  if (!finales && !lista.some(a => !a.watcher)) {
+    throw bad(`«${paso.nombre}» quedaría sin nadie que pueda resolverlo: los marcados `
+      + '«solo aviso» reciben el mail pero no resuelven el paso. Dejá al menos una persona '
+      + 'sin «solo aviso», o tildá «Todos los administradores».');
+  }
+
   db.transaction(() => {
     db.prepare('DELETE FROM sp_paso_autorizados WHERE paso_id=?').run(paso.id);
     const ins = db.prepare(`
