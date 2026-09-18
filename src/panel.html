@@ -24563,10 +24563,12 @@ SG_MANUAL.plabasto = { titulo: 'P&L Abasto', html:
   + '<b>partida en dos números</b> —la compra en uno y el pago en otro, el mismo día— y cada mitad compensa '
   + 'al centavo a la otra. Ésos <b>no se listan</b>, porque no son error: se cuentan arriba.</li>'
   + '<li>Un día en que lo que no cierra se compensa entero no aparece: ese día balancea.</li>'
-  + '<li><span class="ver">V1061</span> <b>⬇️ Descargar Excel</b> baja lo que no balancea del período elegido para '
-  + 'mandarlo a revisar: una hoja con los días y otra con los renglones de cada asiento sin pareja, con la diferencia '
-  + 'del asiento en su primer renglón. Los importes van como números, para sumar y filtrar.</li>'
-  + '<li><span class="ver">V1063</span> Ese Excel trae además la hoja <b>Patrones</b>, que es lo que se le manda '
+  + '<li><span class="ver">V1067</span> <b>⬇️ Descargar Excel</b> baja lo que no balancea del período elegido para '
+  + 'mandarlo a revisar, en dos hojas simples: <b>Asientos</b>, con <b>un asiento por fila</b> —fecha, número, las '
+  + 'cuentas que tiene, debe, haber y por cuánto no balancea— y el <b>TOTAL</b> del período al pie, como un libro; y '
+  + '<b>Detalle</b>, con los renglones de cada asiento, abajo la línea <b>No balancea por</b>, y una <b>fila en '
+  + 'blanco</b> antes del asiento siguiente. Los importes van como números, para sumar y filtrar.</li>'
+  + '<li><span class="ver">V1063</span> Y una tercera hoja, <b>Patrones</b>, que es lo que se le manda '
   + 'a quien mantiene el otro sistema: los asientos sin pareja agrupados <b>por tipo</b> —un solo renglón, sólo '
   + 'cuentas de resultado, sólo del patrimonio, o mezcla de las dos— y <b>por combinación de cuentas</b>, de la '
   + 'que más se repite a la que menos, cada uno con cuántos asientos son, cuánta diferencia hacen y <b>un asiento '
@@ -24616,6 +24618,8 @@ SG_MANUAL.plabasto = { titulo: 'P&L Abasto', html:
 
   + '<h3>Qué cambió, y desde cuándo</h3>'
   + '<ul>'
+  + '<li><span class="ver">V1067</span> El Excel de No balancea, más simple: una hoja con un asiento por fila y su '
+  + 'total, y otra con el detalle de cada uno separado por una fila en blanco.</li>'
   + '<li><span class="ver">V1064</span> Los márgenes se leen de un vistazo: el % de los subtotales, grande y con '
   + 'el color de su signo.</li>'
   + '<li><span class="ver">V1063</span> El cuadro con el concepto angosto y las columnas Concepto y TOTAL fijas, '
@@ -44653,12 +44657,13 @@ function plaNbPintar(){
 
 function plaNbToggle(f){ PLA.nbAbiertos[f] = !PLA.nbAbiertos[f]; plaNbPintar(); }
 
-// ── BAJAR LO QUE NO BALANCEA (V1061, con patrones desde la V1063) ─────────────
-// Pablo, 15/9/2026: «en el No balancea debés permitirme bajar un Excel para enviar a revisar».
-// TRES hojas: los días que no balancean; los renglones de cada asiento sin pareja, con el tipo,
-// el patrón y la diferencia en su primer renglón —así se suma y se filtra por asiento, sin
-// contarlo tantas veces como renglones tenga—; y el resumen por tipo y por combinación de
-// cuentas. Los importes van como números, para que quien lo revisa pueda sumar y filtrar.
+// ── BAJAR LO QUE NO BALANCEA (V1061; simplificado en la V1067) ────────────────
+// Pablo, 15/9/2026: «en el No balancea debés permitirme bajar un Excel para enviar a revisar»,
+// y el 18/9: «me inclino porque sea más simple».
+// TRES hojas, pero las dos que se leen son las primeras: ASIENTOS —uno por fila, con el total
+// del período al pie, como un libro— y DETALLE —los renglones de cada asiento, su diferencia, y
+// una fila en blanco entre uno y el siguiente—. La tercera, PATRONES, es la que se le manda a
+// quien mantiene el otro sistema. Los importes van como números, para sumar y filtrar.
 // ── DE QUÉ TIPO ES LO QUE NO BALANCEA (V1063) ─────────────────────────────────
 // Pablo, 17/9/2026: «mejorá mucho el Excel de NO BALANCEA: si podés separalos por tipo, si hay
 // algún patrón o algo, para pasarle al programador actual y que pueda mejorarlos».
@@ -44715,27 +44720,38 @@ function plaNbAgrupar(d, clave){
 
 function plaNbFilas(d){
   var r2 = function(n){ return Math.round((Number(n) || 0) * 100) / 100; };
-  var dias = [['P&L Abasto — lo que no balancea'],
-    ['Período', plaMesTxt(d.desde) + ' a ' + plaMesTxt(d.hasta)],
-    ['Diferencia del período (debe − haber)', r2(d.total && d.total.diferencia)],
-    ['Asientos sin pareja', Number(d.sin_pareja) || 0],
-    ['Asientos que se compensan de a dos (no se listan)', Number(d.emparejados) || 0]];
-  if (d.recortado) dias.push(['Atención', 'Hay más asientos sin pareja de los que trae esta planilla: elegí un período más corto.']);
-  dias.push([], ['Fecha', 'Debe', 'Haber', 'Diferencia (debe − haber)', 'Asientos sin pareja']);
-  var asientos = [['Fecha', 'Asiento', 'Tipo', 'Patrón (las cuentas del asiento)', 'Cuenta',
-    'Nombre de la cuenta', 'Debe', 'Haber', 'Diferencia del asiento']];
+  // ── HOJA 1 · TODOS LOS ASIENTOS Y EL TOTAL, TIPO LIBRO ──────────────────────
+  // Pablo, 18/9/2026: «una hoja donde muestre todos los asientos que no balancean y el
+  // total, tipo diario de IVA». UNA FILA POR ASIENTO —no por renglón—, así se lee de
+  // corrido y la suma del pie es la diferencia del período, sin contar nada dos veces.
+  var asientos = [['P&L Abasto — asientos que no balancean'],
+    ['Período', plaMesTxt(d.desde) + ' a ' + plaMesTxt(d.hasta)]];
+  if (d.recortado) asientos.push(['Atención', 'Hay más asientos sin pareja de los que trae esta planilla: elegí un período más corto.']);
+  asientos.push([], ['Fecha', 'Asiento', 'Cuentas del asiento', 'Debe', 'Haber', 'Diferencia (debe − haber)']);
+  // ── HOJA 2 · EL DETALLE, UN ASIENTO ABAJO DEL OTRO ─────────────────────────
+  // «un detalle de cada asiento y la diferencia por la que no balancea, separando con una
+  // fila en blanco para que quede prolijo». La fecha y el número van en el primer renglón
+  // de cada asiento: repetidos en todos, tapan lo que se está mirando.
+  var detalle = [['Fecha', 'Asiento', 'Cuenta', 'Nombre de la cuenta', 'Debe', 'Haber', 'Diferencia']];
+  var cuantos = 0, totDebe = 0, totHaber = 0, totDif = 0;
   (d.dias || []).forEach(function(dia){
-    dias.push([plaFechaTxt(dia.fecha), r2(dia.debe), r2(dia.haber), r2(dia.diferencia), (dia.asientos || []).length]);
     (dia.asientos || []).forEach(function(a){
-      // El tipo, el patrón y la diferencia van en el PRIMER renglón del asiento: así se filtra
-      // y se suma por asiento, sin contar cada uno tantas veces como renglones tenga.
+      cuantos++;
+      totDebe += Number(a.debe) || 0;
+      totHaber += Number(a.haber) || 0;
+      totDif += Number(a.diferencia) || 0;
+      asientos.push([plaFechaTxt(dia.fecha), a.asiento || '', plaNbPatron(a),
+        r2(a.debe), r2(a.haber), r2(a.diferencia)]);
       (a.renglones || []).forEach(function(x, i){
-        asientos.push([plaFechaTxt(dia.fecha), a.asiento || '', i === 0 ? plaNbTipo(a) : '',
-          i === 0 ? plaNbPatron(a) : '', x.cuenta, x.nombre, r2(x.debe), r2(x.haber),
-          i === 0 ? r2(a.diferencia) : '']);
+        detalle.push([i === 0 ? plaFechaTxt(dia.fecha) : '', i === 0 ? (a.asiento || '') : '',
+          x.cuenta, x.nombre, r2(x.debe), r2(x.haber), '']);
       });
+      detalle.push(['', '', '', 'No balancea por', r2(a.debe), r2(a.haber), r2(a.diferencia)]);
+      detalle.push([]);
     });
   });
+  asientos.push([], ['TOTAL', cuantos + (cuantos === 1 ? ' asiento' : ' asientos'), '',
+    r2(totDebe), r2(totHaber), r2(totDif)]);
   // La hoja para el programador del otro sistema: los dos resúmenes con las mismas columnas,
   // uno por forma del asiento y otro por combinación de cuentas.
   var cab = ['Tipo o combinación de cuentas', 'Asientos', 'Renglones', 'Diferencia (debe − haber)',
@@ -44747,7 +44763,7 @@ function plaNbFilas(d){
   plaNbAgrupar(d, plaNbTipo).forEach(function(x){ patrones.push([x.k, x.n, x.renglones, r2(x.dif), x.ejemplo]); });
   patrones.push([], ['POR COMBINACIÓN DE CUENTAS — de la que más se repite a la que menos'], cab);
   plaNbAgrupar(d, plaNbPatron).forEach(function(x){ patrones.push([x.k, x.n, x.renglones, r2(x.dif), x.ejemplo]); });
-  return { dias: dias, asientos: asientos, patrones: patrones };
+  return { asientos: asientos, detalle: detalle, patrones: patrones };
 }
 
 // Los importes con separador de miles y dos decimales; las cantidades, como vienen.
@@ -44763,21 +44779,18 @@ function plaNbExcel(){
   var d = PLA.nb;
   if (!d || !(d.dias || []).length) { toast('En este período no hay nada que no balancee', 'er'); return; }
   if (typeof XLSX === 'undefined') { toast('No se pudo cargar el armado del Excel: recargá la página', 'er'); return; }
-  var F = plaNbFilas(d), cab = 0;
-  while (cab < F.dias.length && F.dias[cab][0] !== 'Fecha') cab++;
+  var F = plaNbFilas(d);
   var libro = XLSX.utils.book_new();
-  var h1 = XLSX.utils.aoa_to_sheet(F.dias), h2 = XLSX.utils.aoa_to_sheet(F.asientos);
+  var h1 = XLSX.utils.aoa_to_sheet(F.asientos), h2 = XLSX.utils.aoa_to_sheet(F.detalle);
   var h3 = XLSX.utils.aoa_to_sheet(F.patrones);
-  h1['!cols'] = [{ wch: 46 }, { wch: 18 }, { wch: 18 }, { wch: 24 }, { wch: 20 }];
-  h2['!cols'] = [{ wch: 12 }, { wch: 10 }, { wch: 28 }, { wch: 60 }, { wch: 22 }, { wch: 42 },
-    { wch: 16 }, { wch: 16 }, { wch: 22 }];
+  h1['!cols'] = [{ wch: 12 }, { wch: 12 }, { wch: 60 }, { wch: 18 }, { wch: 18 }, { wch: 24 }];
+  h2['!cols'] = [{ wch: 12 }, { wch: 12 }, { wch: 22 }, { wch: 42 }, { wch: 16 }, { wch: 16 }, { wch: 20 }];
   h3['!cols'] = [{ wch: 62 }, { wch: 12 }, { wch: 12 }, { wch: 24 }, { wch: 24 }];
-  plaNbFormato(h1, cab + 1, [1, 2, 3]);
-  if (h1.B3) h1.B3.z = '#,##0.00';   // la diferencia del período; las cantidades de abajo, sin decimales
-  plaNbFormato(h2, 1, [6, 7, 8]);
+  plaNbFormato(h1, 3, [3, 4, 5]);    // los importes de cada asiento y los del total
+  plaNbFormato(h2, 1, [4, 5, 6]);
   plaNbFormato(h3, 5, [3]);          // la diferencia de cada grupo; asientos y renglones son cantidades
-  XLSX.utils.book_append_sheet(libro, h1, 'Días');
-  XLSX.utils.book_append_sheet(libro, h2, 'Asientos sin pareja');
+  XLSX.utils.book_append_sheet(libro, h1, 'Asientos');
+  XLSX.utils.book_append_sheet(libro, h2, 'Detalle');
   XLSX.utils.book_append_sheet(libro, h3, 'Patrones');
   XLSX.writeFile(libro, 'No_balancea_' + d.desde + '_a_' + d.hasta + '.xlsx');
 }

@@ -1412,11 +1412,11 @@ test('en el cuadro cada cuenta se ve con su nombre entero; el número queda al p
 const NB_PLANILLA = { desde: '2026-07', hasta: '2026-09', total: { diferencia: -12123641.19 }, sin_pareja: 2, emparejados: 2, recortado: 0,
   dias: [
     { fecha: '2026-09-09', debe: 1796256, haber: 1596672, diferencia: 199584, asientos: [
-      { asiento: '380782', diferencia: 199584, renglones: [
+      { asiento: '380782', debe: 1796256, haber: 1596672, diferencia: 199584, renglones: [
         { cuenta: '4.1.01.00.000.0000', nombre: 'VENTAS', debe: 0, haber: 1596672 },
         { cuenta: '1.1.03.01.000.6105', nombre: 'CENCOSUD', debe: 1796256, haber: 0 }] }] },
     { fecha: '2026-07-06', debe: 6795000, haber: 19118225.194, diferencia: -12323225.19, asientos: [
-      { asiento: '373340', diferencia: -12323225.19, renglones: [
+      { asiento: '373340', debe: 0, haber: 12323225.19, diferencia: -12323225.19, renglones: [
         { cuenta: '1.1.03.01.000.6105', nombre: 'CENCOSUD', debe: 0, haber: 12323225.19 }] }] }] };
 const NB_EXCEL = () => new Function('PLA', 'toast', 'XLSX', [
   /^var PLA_MES = .*;\r?$/m.exec(PANEL)[0], fuente(PANEL, 'function plaMesTxt(m){'), fuente(PANEL, 'function plaFechaTxt(f){'),
@@ -1426,27 +1426,48 @@ const NB_EXCEL = () => new Function('PLA', 'toast', 'XLSX', [
   fuente(PANEL, 'function plaNbExcel(){'),
   'return { filas: plaNbFilas, excel: plaNbExcel, tipo: plaNbTipo, patron: plaNbPatron, agrupar: plaNbAgrupar };'].join('\n'));
 
-test('No balancea: el Excel para mandar a revisar trae los días y los renglones de cada asiento sin pareja', () => {
+// Pablo, 18/9/2026: «me inclino porque sea más simple: una hoja donde muestre todos los
+// asientos que no balancean y el total, tipo diario de IVA; y en la otra solapa un detalle de
+// cada asiento y la diferencia por la que no balancea, separando con una fila en blanco».
+
+test('No balancea: la hoja de asientos lleva uno por fila y cierra con el total del período', () => {
   const F = NB_EXCEL()({}, () => {}, {});
   const P = F.filas(NB_PLANILLA);
-  assert.deepEqual(P.dias.slice(0, 5), [['P&L Abasto — lo que no balancea'], ['Período', 'Jul 2026 a Sep 2026'],
-    ['Diferencia del período (debe − haber)', -12123641.19], ['Asientos sin pareja', 2], ['Asientos que se compensan de a dos (no se listan)', 2]]);
-  assert.deepEqual(P.dias.slice(5), [[], ['Fecha', 'Debe', 'Haber', 'Diferencia (debe − haber)', 'Asientos sin pareja'],
-    ['09/09/2026', 1796256, 1596672, 199584, 1], ['06/07/2026', 6795000, 19118225.19, -12323225.19, 1]]);
   assert.deepEqual(P.asientos, [
-    ['Fecha', 'Asiento', 'Tipo', 'Patrón (las cuentas del asiento)', 'Cuenta', 'Nombre de la cuenta',
-      'Debe', 'Haber', 'Diferencia del asiento'],
-    ['09/09/2026', '380782', 'Mezcla de resultado y patrimonio', 'CENCOSUD + VENTAS',
-      '4.1.01.00.000.0000', 'VENTAS', 0, 1596672, 199584],
-    ['09/09/2026', '380782', '', '', '1.1.03.01.000.6105', 'CENCOSUD', 1796256, 0, ''],
-    ['06/07/2026', '373340', 'Un solo renglón', 'CENCOSUD',
-      '1.1.03.01.000.6105', 'CENCOSUD', 0, 12323225.19, -12323225.19]],
-    'el tipo, el patrón y la diferencia van en el primer renglón, para no contarlos dos veces');
-  // Con más asientos de los que entran, se avisa en la planilla.
-  assert.match(F.filas(Object.assign({}, NB_PLANILLA, { recortado: 1 })).dias[5][1], /Hay más asientos sin pareja/);
+    ['P&L Abasto — asientos que no balancean'],
+    ['Período', 'Jul 2026 a Sep 2026'],
+    [],
+    ['Fecha', 'Asiento', 'Cuentas del asiento', 'Debe', 'Haber', 'Diferencia (debe − haber)'],
+    ['09/09/2026', '380782', 'CENCOSUD + VENTAS', 1796256, 1596672, 199584],
+    ['06/07/2026', '373340', 'CENCOSUD', 0, 12323225.19, -12323225.19],
+    [],
+    ['TOTAL', '2 asientos', '', 1796256, 13919897.19, -12123641.19]]);
+  // El total del pie tiene que dar la diferencia que el servidor informa para el período: si
+  // no, la planilla y la pantalla estarían contando cosas distintas.
+  assert.equal(P.asientos[P.asientos.length - 1][5], NB_PLANILLA.total.diferencia);
+  // Un solo asiento se dice en singular, que es lo que se lee al pie.
+  const uno = F.filas(Object.assign({}, NB_PLANILLA, { dias: [NB_PLANILLA.dias[1]] }));
+  assert.equal(uno.asientos[uno.asientos.length - 1][1], '1 asiento');
+  // Y si hay más de los que entran, se avisa arriba de todo.
+  assert.match(F.filas(Object.assign({}, NB_PLANILLA, { recortado: 1 })).asientos[2][1], /Hay más asientos sin pareja/);
 });
 
-test('No balancea: el botón arma un .xlsx de dos hojas, con los importes como números con dos decimales', () => {
+test('No balancea: el detalle va un asiento abajo del otro, con su diferencia y una fila en blanco', () => {
+  const F = NB_EXCEL()({}, () => {}, {});
+  const P = F.filas(NB_PLANILLA);
+  assert.deepEqual(P.detalle, [
+    ['Fecha', 'Asiento', 'Cuenta', 'Nombre de la cuenta', 'Debe', 'Haber', 'Diferencia'],
+    ['09/09/2026', '380782', '4.1.01.00.000.0000', 'VENTAS', 0, 1596672, ''],
+    ['', '', '1.1.03.01.000.6105', 'CENCOSUD', 1796256, 0, ''],
+    ['', '', '', 'No balancea por', 1796256, 1596672, 199584],
+    [],
+    ['06/07/2026', '373340', '1.1.03.01.000.6105', 'CENCOSUD', 0, 12323225.19, ''],
+    ['', '', '', 'No balancea por', 0, 12323225.19, -12323225.19],
+    []],
+    'la fecha y el número van sólo en el primer renglón, y entre asiento y asiento va una fila en blanco');
+});
+
+test('No balancea: el botón arma un .xlsx de tres hojas, con los importes como números con dos decimales', () => {
   // Un SheetJS de mentira que arma las celdas como el de verdad: A1, B1… con t 'n' o 's'.
   const letra = (c) => String.fromCharCode(65 + c);
   let bajado = null, avisos = [];
@@ -1463,22 +1484,27 @@ test('No balancea: el botón arma un .xlsx de dos hojas, con los importes como n
   F.excel();
   assert.ok(bajado, 'no bajó nada');
   assert.equal(bajado.nombre, 'No_balancea_2026-07_a_2026-09.xlsx');
-  assert.deepEqual(bajado.l.hojas.map((x) => x[0]), ['Días', 'Asientos sin pareja', 'Patrones']);
-  const [dias, asientos, patrones] = bajado.l.hojas.map((x) => x[1]);
-  assert.equal(dias.D9.v, -12323225.19);
-  assert.equal(dias.D9.z, '#,##0.00', 'la diferencia del día no tiene formato de importe');
-  assert.equal(dias.E9.z, undefined, 'la cantidad de asientos salió con decimales');
-  assert.equal(dias.B3.z, '#,##0.00', 'la diferencia del período no tiene formato de importe');
-  assert.equal(dias.B4.z, undefined);
-  assert.equal(asientos.G2.z, '#,##0.00');
-  assert.equal(asientos.H2.z, '#,##0.00');
-  assert.equal(asientos.I2.z, '#,##0.00');
-  assert.equal(asientos.C2.z, undefined, 'el tipo no es un importe');
+  assert.deepEqual(bajado.l.hojas.map((x) => x[0]), ['Asientos', 'Detalle', 'Patrones']);
+  const [asientos, detalle, patrones] = bajado.l.hojas.map((x) => x[1]);
+  // La hoja de asientos: cada fila con sus tres importes, y el total del pie también.
+  assert.equal(asientos.F5.v, 199584);
+  assert.equal(asientos.D5.z, '#,##0.00');
+  assert.equal(asientos.E5.z, '#,##0.00');
+  assert.equal(asientos.F5.z, '#,##0.00', 'la diferencia del asiento no tiene formato de importe');
+  assert.equal(asientos.C5.z, undefined, 'las cuentas no son un importe');
+  assert.equal(asientos.F8.v, -12123641.19, 'el total no quedó al pie de la hoja');
+  assert.equal(asientos.F8.z, '#,##0.00', 'el total no tiene formato de importe');
+  // El detalle: debe, haber y la diferencia del cierre de cada asiento.
+  assert.equal(detalle.E2.z, '#,##0.00');
+  assert.equal(detalle.F2.z, '#,##0.00');
+  assert.equal(detalle.G4.v, 199584);
+  assert.equal(detalle.G4.z, '#,##0.00');
+  assert.equal(detalle.C2.z, undefined, 'el número de cuenta no es un importe');
   // La hoja de patrones: la diferencia con formato de importe, y las cantidades sin decimales.
   assert.equal(patrones.D7.z, '#,##0.00');
   assert.equal(patrones.B7.z, undefined, 'la cantidad de asientos salió con decimales');
   assert.equal(patrones.C7.z, undefined, 'la cantidad de renglones salió con decimales');
-  assert.ok(dias['!cols'] && asientos['!cols'] && patrones['!cols'], 'sin ancho de columnas');
+  assert.ok(asientos['!cols'] && detalle['!cols'] && patrones['!cols'], 'sin ancho de columnas');
   // Sin nada que no balancee, o sin el armador del Excel, avisa y no baja nada.
   bajado = null;
   NB_EXCEL()({ nb: Object.assign({}, NB_PLANILLA, { dias: [] }) }, (t) => avisos.push(t), XLSX).excel();
@@ -1550,7 +1576,7 @@ test('manual V1061: la ×, los nombres enteros, y el Excel de lo que no balancea
   const M = manual();
   assert.match(M, /Cada cuenta adentro de un título tiene una <b>×<\/b> que la devuelve a la lista, sin título/);
   assert.match(M, /cada cuenta se ve con su <b>nombre completo<\/b>: si es largo baja de renglón\. El número de la cuenta aparece pasando el mouse/);
-  assert.match(M, /<b>⬇️ Descargar Excel<\/b> baja lo que no balancea del período elegido para mandarlo a revisar: una hoja con los días y otra con los renglones de cada asiento sin pareja/);
+  assert.match(M, /<b>⬇️ Descargar Excel<\/b> baja lo que no balancea del período elegido para mandarlo a revisar, en dos hojas simples: <b>Asientos<\/b>, con <b>un asiento por fila<\/b>/);
   assert.match(M, /<span class="ver">V1061<\/span> Una × en cada cuenta de un título/);
 });
 
@@ -1939,7 +1965,7 @@ test('manual V1063: el cuadro que entra con más meses, el tilde de los que no b
   assert.match(M, /Con pocos meses no hay barra: las columnas se estiran y ocupan la pantalla/);
   assert.match(M, /el tilde <b>⚠️ Sólo los que no balancean<\/b> deja únicamente los movimientos cuyo asiento <b>quedó sin pareja<\/b>/);
   assert.match(M, /con el tilde puesto el total de abajo es el de lo que se ve/);
-  assert.match(M, /Ese Excel trae además la hoja <b>Patrones<\/b>/);
+  assert.match(M, /<b>Patrones<\/b>, que es lo que se le manda a quien mantiene el otro sistema/);
   assert.match(M, /agrupados <b>por tipo<\/b> —un solo renglón, sólo cuentas de resultado, sólo del patrimonio, o mezcla de las dos— y <b>por combinación de cuentas<\/b>/);
   assert.match(M, /<b>un asiento de ejemplo<\/b> para ir a buscarlo/);
   assert.match(M, /<span class="ver">V1063<\/span> El cuadro con el concepto angosto y las columnas Concepto y TOTAL fijas/);
@@ -1950,4 +1976,13 @@ test('manual V1064: el % de los márgenes, grande y con el color de su signo', (
   assert.match(M, /El de los <b>márgenes<\/b> —margen bruto, EBITDA, EBT y resultado neto— se ve <b>grande y con el color de su signo<\/b>: verde si es positivo, rojo si es negativo/);
   assert.match(M, /el de cada rubro queda más chico, un escalón atrás/);
   assert.match(M, /<span class="ver">V1064<\/span> Los márgenes se leen de un vistazo/);
+});
+
+test('manual V1067: el Excel de No balancea, en dos hojas simples', () => {
+  const M = manual();
+  assert.match(M, /y el <b>TOTAL<\/b> del período al pie, como un libro/);
+  assert.match(M, /<b>Detalle<\/b>, con los renglones de cada asiento, abajo la línea <b>No balancea por<\/b>, y una <b>fila en blanco<\/b> antes del asiento siguiente/);
+  assert.match(M, /<span class="ver">V1067<\/span> El Excel de No balancea, más simple/);
+  // Y la hoja de patrones sigue siendo la tercera, no la que se lee todos los días.
+  assert.match(M, /Y una tercera hoja, <b>Patrones<\/b>/);
 });
