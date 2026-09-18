@@ -5526,8 +5526,28 @@ input[type=number]{-moz-appearance:textfield;appearance:textfield}
     #sec-pl-abasto .pla-tab.on{color:var(--burg);border-bottom-color:var(--burg)}
     #sec-pl-abasto .pla-pane{display:none;margin-top:12px} #sec-pl-abasto .pla-pane.on{display:block}
     #sec-pl-abasto .ab-table-wrap{overflow-x:hidden !important}
+    /* LA EXCEPCIÓN A «NADA DE BARRAS LATERALES», Y POR LA MISMA RAZÓN QUE LA REGLA (V1063).
+       Pablo, 17/9/2026: «se van a ir agregando meses, por lo que es necesario que la columna
+       Concepto y la columna Total queden siempre fijas y tener una barra desplazadora lateral
+       para el detalle de cada uno de los meses». La regla está para que el número que importa
+       no haya que ir a buscarlo arrastrando la tabla: acá el que importa es el TOTAL, y queda
+       clavado a la vista —con el concepto— mientras los meses se recorren. Vale SÓLO para el
+       cuadro del resultado; No balancea sigue entrando entero. */
+    #pla-pane-resultado .ab-table-wrap{overflow-x:auto !important}
     #sec-pl-abasto .pla-tbl{table-layout:fixed;width:100%;max-width:98vw;border-collapse:collapse;
       font-size:11px;font-variant-numeric:tabular-nums}
+    #pla-tabla{max-width:none}
+    #pla-pane-resultado .pla-tbl th:first-child,#pla-pane-resultado .pla-tbl td:first-child{
+      position:sticky;left:0;z-index:2}
+    #pla-pane-resultado .pla-tbl th:nth-child(2),#pla-pane-resultado .pla-tbl td:nth-child(2){
+      position:sticky;left:248px;z-index:1}
+    /* Una celda pegada tiene que ser OPACA, o los meses se leen por debajo al correr la barra. */
+    #pla-pane-resultado .pla-tbl td:first-child,#pla-pane-resultado .pla-tbl td:nth-child(2){background:var(--pan,#fff)}
+    #pla-pane-resultado .pla-rub td:first-child,#pla-pane-resultado .pla-rub td:nth-child(2){background:#f8fafc}
+    #pla-pane-resultado .pla-sub td:first-child,#pla-pane-resultado .pla-sub td:nth-child(2){background:#dbeafe}
+    #pla-pane-resultado .pla-res td:first-child,#pla-pane-resultado .pla-res td:nth-child(2){background:#0a2744}
+    /* «+ Agregar un ajuste» es una fila de una sola celda con colspan: pegada, taparía los meses. */
+    #pla-pane-resultado .pla-aju-add td{position:static}
     #sec-pl-abasto .pla-tbl th,#sec-pl-abasto .pla-tbl td{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
       padding:4px 4px;border-bottom:1px solid var(--bor);text-align:right}
     #sec-pl-abasto .pla-tbl th{font-size:10.5px;color:var(--mut);background:var(--bg)}
@@ -8171,6 +8191,9 @@ input[type=number]{-moz-appearance:textfield;appearance:textfield}
     <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:8px">
       <input id="pla-detalle-q" placeholder="Buscar en la lista" oninput="plaDetallePintar()"
              style="padding:5px 8px;border:1px solid var(--bor);border-radius:6px;min-width:220px">
+      <label style="font-size:11.5px;color:var(--mut);cursor:pointer;white-space:nowrap">
+        <input type="checkbox" id="pla-detalle-nb" onchange="plaDetallePintar()"
+               style="vertical-align:middle;margin:0 5px 0 0">⚠️ Sólo los que no balancean<span id="pla-detalle-nb-n"></span></label>
       <span id="pla-detalle-nota" style="font-size:11.5px;color:var(--mut)"></span>
     </div>
     <div class="ab-table-wrap" style="overflow-x:hidden !important">
@@ -23223,6 +23246,12 @@ var SG_MANUAL_COMUN =
   + 'distinto: en unas las tildes importaban y en otras no. Ahora es <b>una sola '
   + 'manera</b> en todo el panel, así que lo que se aprende en una pantalla sirve '
   + 'en las demás.</div>'
+  + '<h3>🖥️ Trabajar a pantalla completa <span class="ver">V1063</span></h3>'
+  + '<p>Debajo del reloj, el menú de la izquierda tiene <b>dos botones</b>: uno lo '
+  + '<b>angosta</b> —quedan sólo los iconos— y el otro lo <b>esconde del todo</b>, para que la '
+  + 'pantalla en la que se está trabajando use todo el ancho. Con el menú escondido queda una '
+  + '<b>pestaña ☰</b> pegada al borde izquierdo: un clic y vuelve. El panel se acuerda de cómo '
+  + 'se dejó la próxima vez que se entra.</p>'
   + '<h3>🪟 Salir de una ventana</h3>'
   + '<p>Una ventana de carga <b>no se cierra haciendo clic afuera</b>: se sale con '
   + '<b>Cancelar</b>, con el botón de guardar, o con la <b>×</b>. Un clic al costado '
@@ -24429,7 +24458,12 @@ SG_MANUAL.plabasto = { titulo: 'P&L Abasto', html:
   + '<h3>Cómo se lee el cuadro</h3>'
   + '<ul>'
   + '<li>Una columna por mes, <b>del más nuevo al más viejo</b>, y adelante el <b>TOTAL</b> del período. '
-  + '<b>Hasta 12 meses por vez</b>, para que entre en la pantalla sin barra de costado.</li>'
+  + '<span class="ver">V1063</span> <b>Hasta 24 meses por vez</b>: dos años.</li>'
+  + '<li><span class="ver">V1063</span> La columna del <b>concepto es angosta</b>, para que manden los '
+  + 'números, y <b>Concepto y TOTAL quedan fijos</b>: los meses se recorren con la <b>barra de abajo del '
+  + 'cuadro</b> y esas dos columnas no se mueven, así que el total está a la vista por más meses que se '
+  + 'agreguen. Con pocos meses no hay barra: las columnas se estiran y ocupan la pantalla. El nombre '
+  + 'completo de cada cuenta se sigue leyendo entero, bajando de renglón si hace falta.</li>'
   + '<li>Los importes se ven en <b>pesos, miles o millones</b>: se elige arriba, y el importe exacto aparece '
   + 'pasando el mouse.</li>'
   + '<li>El importe de cada cuenta es <b>haber − debe</b>: los ingresos quedan en <b>verde</b> y los gastos en '
@@ -24449,6 +24483,10 @@ SG_MANUAL.plabasto = { titulo: 'P&L Abasto', html:
   + '<li><span class="ver">V1061</span> En los asientos de un importe, <b>un clic en un renglón abre el asiento '
   + 'completo</b> debajo: todas sus cuentas —las del patrimonio también— con su debe y su haber, y abajo si balancea o '
   + 'por cuánto no. Otro clic lo cierra.</li>'
+  + '<li><span class="ver">V1063</span> En esa misma lista, el tilde <b>⚠️ Sólo los que no balancean</b> deja '
+  + 'únicamente los movimientos cuyo asiento <b>quedó sin pareja</b> —los mismos que lista la solapa No '
+  + 'balancea—, y al lado del tilde dice cuántos son. Cada uno lleva un <b>⚠️</b> aunque el tilde esté sin '
+  + 'poner, y con el tilde puesto el total de abajo es el de lo que se ve.</li>'
   + '<li>Entran las <b>cuentas de resultado</b>. Las que empiezan con 1, 2 o 3 son del patrimonio —caja, '
   + 'clientes, proveedores, IVA—: <span class="ver">V1057</span> se ven igual en la lista de Configurar rubros, '
   + 'arrancan sin título y no están en el cuadro; si alguien les pone uno, entran.</li>'
@@ -24511,6 +24549,12 @@ SG_MANUAL.plabasto = { titulo: 'P&L Abasto', html:
   + '<li><span class="ver">V1061</span> <b>⬇️ Descargar Excel</b> baja lo que no balancea del período elegido para '
   + 'mandarlo a revisar: una hoja con los días y otra con los renglones de cada asiento sin pareja, con la diferencia '
   + 'del asiento en su primer renglón. Los importes van como números, para sumar y filtrar.</li>'
+  + '<li><span class="ver">V1063</span> Ese Excel trae además la hoja <b>Patrones</b>, que es lo que se le manda '
+  + 'a quien mantiene el otro sistema: los asientos sin pareja agrupados <b>por tipo</b> —un solo renglón, sólo '
+  + 'cuentas de resultado, sólo del patrimonio, o mezcla de las dos— y <b>por combinación de cuentas</b>, de la '
+  + 'que más se repite a la que menos, cada uno con cuántos asientos son, cuánta diferencia hacen y <b>un asiento '
+  + 'de ejemplo</b> para ir a buscarlo. En la pantalla, cada asiento dice de qué tipo es, y arriba se lee el '
+  + 'patrón que más se repite: casi siempre es el mismo circuito fallando siempre.</li>'
   + '</ul>'
 
   + '<h3>Configurar rubros</h3>'
@@ -24555,6 +24599,9 @@ SG_MANUAL.plabasto = { titulo: 'P&L Abasto', html:
 
   + '<h3>Qué cambió, y desde cuándo</h3>'
   + '<ul>'
+  + '<li><span class="ver">V1063</span> El cuadro con el concepto angosto y las columnas Concepto y TOTAL fijas, '
+  + 'hasta 24 meses, el tilde de los que no balancean en los asientos de un importe, y la hoja de patrones en el '
+  + 'Excel de No balancea.</li>'
   + '<li><span class="ver">V1062</span> La cascada arranca en UTILIDAD y VENTAS queda como base de los porcentajes: '
   + 'la venta no se cuenta dos veces.</li>'
   + '<li><span class="ver">V1061</span> Una × en cada cuenta de un título, el nombre completo de las cuentas en el cuadro, '
@@ -43796,11 +43843,13 @@ function plaCargar(inicial){
     var de = (eid('pla-desde') || {}).value, ha = (eid('pla-hasta') || {}).value;
     if (de && ha) {
       if (de > ha) { var x = de; de = ha; ha = x; }
-      // HASTA DOCE MESES CON DATOS: más no entran en la pantalla sin barra de costado. Se
-      // cuentan los que tienen movimientos, no los del almanaque: con un mes sin carga en el
-      // medio, el período que la pantalla trae por defecto no se podía volver a pedir.
+      // HASTA 24 MESES CON DATOS, dos años (V1063). Eran doce «porque más no entraban en la
+      // pantalla sin barra de costado», y ahora el cuadro tiene barra para los meses con el
+      // concepto y el TOTAL fijos. Se cuentan los que tienen movimientos, no los del almanaque:
+      // con un mes sin carga en el medio, el período que la pantalla trae por defecto no se
+      // podía volver a pedir.
       var dentro = ((PLA.datos || {}).meses_disponibles || []).filter(function(m){ return m >= de && m <= ha; }).length;
-      if (dentro > 12) { toast('Elegí hasta 12 meses por vez', 'er'); return; }
+      if (dentro > 24) { toast('Elegí hasta 24 meses por vez', 'er'); return; }
       q = '?desde=' + de + '&hasta=' + ha;
     }
   }
@@ -43944,9 +43993,26 @@ function plaCelda(v, ventas, conPct){
   return '<span class="' + (v < 0 ? 'pla-neg' : 'pla-pos') + '">' + txt + '</span>' + pct;
 }
 
+// LOS ANCHOS DEL CUADRO (V1063). Pablo: «donde están encolumnados los conceptos ocupa mucho
+// lugar; hacé esa columna más fina para darle más protagonismo a los números».
+// El concepto tiene un ancho FIJO y angosto —el mismo que el CSS usa para pegar la columna del
+// TOTAL a su derecha— y los meses se reparten lo que sobra: con pocos se estiran y entra todo
+// sin barra; con muchos se achican hasta su mínimo legible y ahí aparece la barra de abajo.
+// El TOTAL va un tercio más ancho, que es la columna que más cifras tiene.
+var PLA_ANCHO = { concepto: 248, mes: 92, caja: 1180 };
+
+function plaAnchos(caja, columnas){
+  var libre = Math.max(300, (Number(caja) || PLA_ANCHO.caja) - PLA_ANCHO.concepto - 2);
+  var mes = Math.max(PLA_ANCHO.mes, Math.floor(libre / (columnas + 0.3)));
+  var total = Math.round(mes * 1.3);
+  return { concepto: PLA_ANCHO.concepto, mes: mes, total: total,
+    tabla: PLA_ANCHO.concepto + total + mes * (columnas - 1) };
+}
+
 function plaPintar(){
   var d = PLA.datos, tb = eid('pla-tabla'); if (!d || !tb) return;
   if (!d.meses || !d.meses.length) {
+    if (tb.style) tb.style.width = '';
     tb.innerHTML = '<tr><td style="text-align:left;color:var(--mut)">' + ((d.meses_disponibles || []).length
       ? 'No hay movimientos en ese período.' : 'Todavía no hay datos: subí el libro diario.') + '</td></tr>';
     return;
@@ -43963,10 +44029,10 @@ function plaPintar(){
   // Del mes más nuevo al más viejo, con el total adelante.
   var orden = ['TOTAL'].concat(d.meses.slice().reverse());
   var ventas = T.rubros.ventas || {};
-  // Cada columna de importes, a lo sumo el 11%: con pocos meses, el resto es para leer el concepto entero.
-  var ancho = Math.min(Math.floor(820 / orden.length) / 10, 11);
-  var h = '<colgroup><col style="width:' + (100 - ancho * orden.length).toFixed(1) + '%">'
-    + orden.map(function(){ return '<col style="width:' + ancho + '%">'; }).join('') + '</colgroup>'
+  var A = plaAnchos(tb.parentNode && tb.parentNode.clientWidth, orden.length);
+  if (tb.style) tb.style.width = A.tabla + 'px';
+  var h = '<colgroup><col style="width:' + A.concepto + 'px"><col style="width:' + A.total + 'px">'
+    + d.meses.map(function(){ return '<col style="width:' + A.mes + 'px">'; }).join('') + '</colgroup>'
     + '<thead><tr><th>Concepto' + (PLA.moneda === 'usd' ? ' (U$S)' : '') + '</th>' + orden.map(function(m){
         return '<th' + (m === 'TOTAL' ? '>TOTAL' : ' title="' + plaMesTxt(m) + '">' + plaMesCorto(m)) + '</th>'; }).join('')
     + '</tr></thead><tbody>';
@@ -44035,6 +44101,7 @@ function plaDetalle(tipo, clave, mes){
     ajustes: tipo === 'rubro' ? plaDetalleAjustes(d, clave, desde, hasta) : [] };
   eid('pla-detalle-tit').textContent = '🔍 ' + titulo;
   eid('pla-detalle-q').value = '';
+  var nb = eid('pla-detalle-nb'); if (nb) nb.checked = false;
   eid('pla-detalle-nota').textContent = 'Cargando…';
   eid('pla-detalle-tabla').innerHTML = '';
   sgModalArriba('pla-detalle-modal');
@@ -44051,22 +44118,33 @@ function plaDetalle(tipo, clave, mes){
 function plaDetallePintar(){
   var D = PLA.detalle; if (!D || !D.total) return;
   var q = sgNorm(String(eid('pla-detalle-q').value || '').trim());
+  // V1063: el tilde deja sólo los renglones de asientos sin pareja —los mismos de la solapa
+  // No balancea—, para investigarlos sin salir de acá. Un ajuste manual no es un asiento: con
+  // el tilde puesto no va.
+  var soloNb = !!(eid('pla-detalle-nb') || {}).checked;
+  var conNb = D.filas.filter(function(f){ return f.sin_pareja; }).length;
+  var cn = eid('pla-detalle-nb-n'); if (cn) cn.textContent = conNb ? ' (' + nr(conNb) + ')' : '';
   var filas = D.filas.filter(function(f){
+    if (soloNb && !f.sin_pareja) return false;
     return !q || sgNorm([f.fecha, plaFechaTxt(f.fecha), f.asiento, f.cuenta, f.nombre, f.contrapartida].join(' ')).indexOf(q) >= 0;
   });
-  var ajustes = (D.ajustes || []).filter(function(f){
+  var ajustes = (soloNb ? [] : (D.ajustes || [])).filter(function(f){
     return !q || sgNorm(['ajuste manual', f.nombre, plaMesTxt(f.mes)].join(' ')).indexOf(q) >= 0;
   });
   var conCuenta = D.tipo === 'rubro', span = conCuenta ? 4 : 3;
   eid('pla-detalle-nota').textContent = (D.recortado ? 'Se muestran los ' + nr(D.filas.length) + ' más recientes de '
-    + nr(D.total.renglones) + '; el total es de todos. ' : '') + (q ? nr(filas.length + ajustes.length) + ' coinciden con la búsqueda.' : '');
+    + nr(D.total.renglones) + '; el total es de todos. ' : '')
+    + (soloNb ? (filas.length ? 'Sólo los que no balancean: ' + nr(filas.length) + ' de ' + nr(D.filas.length) + '. '
+        : 'Ninguno de estos movimientos está en un asiento sin pareja. ') : '')
+    + (q ? nr(filas.length + ajustes.length) + ' coinciden con la búsqueda.' : '');
   // Con búsqueda, los totales son de lo que se ve; sin búsqueda, de TODOS los renglones.
   var sD = 0, sH = 0, aD = 0, aH = 0, todos = D.ajustes || [];
   filas.concat(ajustes).forEach(function(f){ sD += Number(f.debe) || 0; sH += Number(f.haber) || 0; });
   // LOS AJUSTES DEL RUBRO ENTRAN AL TOTAL: la celda los suma, y el saldo tiene que dar lo mismo.
   todos.forEach(function(f){ aD += f.debe; aH += f.haber; });
-  var tD = q ? sD : D.total.debe + aD, tH = q ? sH : D.total.haber + aH;
-  var n = q ? filas.length + ajustes.length : D.total.renglones + todos.length;
+  var filtra = q || soloNb;
+  var tD = filtra ? sD : D.total.debe + aD, tH = filtra ? sH : D.total.haber + aH;
+  var n = filtra ? filas.length + ajustes.length : D.total.renglones + todos.length;
   eid('pla-detalle-tabla').innerHTML = '<colgroup><col style="width:11%"><col style="width:9%">'
     + (conCuenta ? '<col style="width:22%">' : '') + '<col><col style="width:14%"><col style="width:14%"></colgroup>'
     + '<thead><tr><th>Fecha</th><th>Asiento</th>' + (conCuenta ? '<th>Cuenta</th>' : '')
@@ -44080,7 +44158,9 @@ function plaDetallePintar(){
     + filas.map(function(f){
         // V1061: un clic en el renglón abre el asiento entero debajo.
         return '<tr' + (f.asiento ? ' class="pla-det-fila" title="Clic: ver el asiento completo" onclick="plaAsientoVer(this,\''
-            + escH(f.asiento) + '\',\'' + escH(f.fecha) + '\')"' : '') + '><td>' + plaFechaTxt(f.fecha) + '</td><td>' + escH(f.asiento || '') + '</td>'
+            + escH(f.asiento) + '\',\'' + escH(f.fecha) + '\')"' : '') + '><td>' + plaFechaTxt(f.fecha) + '</td><td>'
+          + (f.sin_pareja ? '<span title="Este asiento no balancea: está en la solapa No balancea">⚠️</span> ' : '')
+          + escH(f.asiento || '') + '</td>'
           + (conCuenta ? '<td title="' + escH(f.cuenta + ' · ' + (f.nombre || '')) + '">' + escH(f.nombre || f.cuenta) + '</td>' : '')
           + '<td title="' + escH(f.contrapartida || '') + '">' + escH(f.contrapartida || '—') + '</td>'
           + '<td style="text-align:right;color:#dc2626">' + (Number(f.debe) ? plaImporte(f.debe) : '') + '</td>'
@@ -44484,8 +44564,19 @@ function plaNbResumen(d){
     + (d.emparejados ? '<div style="color:var(--mut);margin-top:3px">Otros ' + nr(d.emparejados) + ' asientos de esos días no '
         + 'cierran solos pero se compensan de a dos —la operación quedó partida en dos números, el mismo día—: no son '
         + 'error y no se listan.</div>' : '')
+    + plaNbPatronTxt(d)
     + (d.recortado ? '<div style="color:#92400e;margin-top:3px">Se muestran los primeros ' + nr(d.dias.reduce(function(s, x){
         return s + x.asientos.length; }, 0)) + ' asientos: elegí un período más corto para ver el resto.</div>' : '');
+}
+
+// El patrón que más se repite, arriba de todo: es la pregunta que Pablo le va a hacer al otro
+// sistema, y contestarla no debería pedir bajar el Excel.
+function plaNbPatronTxt(d){
+  var p = plaNbAgrupar(d, plaNbPatron)[0];
+  if (!p || p.n < 2) return '';
+  return '<div style="color:var(--mut);margin-top:3px">El patrón que más se repite es <b>'
+    + escH(p.k) + '</b>: ' + nr(p.n) + ' asientos. <b>⬇️ Descargar Excel</b> los trae separados '
+    + 'por tipo y por combinación de cuentas, para mandarlos a revisar.</div>';
 }
 
 function plaNbPintar(){
@@ -44505,7 +44596,9 @@ function plaNbPintar(){
     dia.asientos.forEach(function(a){
       var nr_ = a.renglones.length;
       h += '<tr class="pla-nb-as"><td>Asiento ' + escH(a.asiento || 's/n') + '</td><td>' + nr_
-        + (nr_ === 1 ? ' renglón' : ' renglones') + '</td><td>' + imp(a.debe) + '</td><td>' + imp(a.haber) + '</td>'
+        + (nr_ === 1 ? ' renglón' : ' renglones')
+        + ' · <span style="font-weight:400;color:var(--mut)">' + escH(plaNbTipo(a)) + '</span>'
+        + '</td><td>' + imp(a.debe) + '</td><td>' + imp(a.haber) + '</td>'
         + '<td>' + dif(a.diferencia) + '</td></tr>';
       a.renglones.forEach(function(x){
         h += '<tr class="pla-nb-ren"><td></td><td title="' + escH(x.cuenta + ' · ' + x.nombre) + '">' + escH(x.cuenta)
@@ -44518,11 +44611,66 @@ function plaNbPintar(){
 
 function plaNbToggle(f){ PLA.nbAbiertos[f] = !PLA.nbAbiertos[f]; plaNbPintar(); }
 
-// ── BAJAR LO QUE NO BALANCEA (V1061) ──────────────────────────────────────────
+// ── BAJAR LO QUE NO BALANCEA (V1061, con patrones desde la V1063) ─────────────
 // Pablo, 15/9/2026: «en el No balancea debés permitirme bajar un Excel para enviar a revisar».
-// Dos hojas: los días que no balancean, y los renglones de cada asiento sin pareja con la
-// diferencia del asiento en su primer renglón —así se suma sin contarla dos veces—. Los importes
-// van como números, para que quien lo revisa pueda sumar y filtrar.
+// TRES hojas: los días que no balancean; los renglones de cada asiento sin pareja, con el tipo,
+// el patrón y la diferencia en su primer renglón —así se suma y se filtra por asiento, sin
+// contarlo tantas veces como renglones tenga—; y el resumen por tipo y por combinación de
+// cuentas. Los importes van como números, para que quien lo revisa pueda sumar y filtrar.
+// ── DE QUÉ TIPO ES LO QUE NO BALANCEA (V1063) ─────────────────────────────────
+// Pablo, 17/9/2026: «mejorá mucho el Excel de NO BALANCEA: si podés separalos por tipo, si hay
+// algún patrón o algo, para pasarle al programador actual y que pueda mejorarlos».
+//
+// Van dos cosas distintas, porque contestan dos preguntas distintas:
+//   · el TIPO es la FORMA del asiento —un solo renglón, sólo resultado, sólo patrimonio,
+//     mezcla—: dice qué le falta.
+//   · el PATRÓN son las CUENTAS que tiene, sin repetir y siempre en el mismo orden: es lo que
+//     delata que el mismo circuito falla siempre, y es con lo que el otro sistema se arregla.
+// Con los libros diarios reales de Abasto: de 1.067 asientos sin pareja de abril, 434 —cuatro
+// de cada diez— son la MISMA combinación de cuentas, y 133 tienen un solo renglón.
+function plaNbEsResultado(c){
+  var s = String(c == null ? '' : c).trim();
+  return /^\d/.test(s) && !/^[123]/.test(s);
+}
+
+function plaNbTipo(a){
+  var r = (a && a.renglones) || [];
+  if (r.length <= 1) return 'Un solo renglón';
+  var res = r.filter(function(x){ return plaNbEsResultado(x.cuenta); }).length;
+  if (!res) return 'Sólo cuentas del patrimonio';
+  if (res === r.length) return 'Sólo cuentas de resultado';
+  return 'Mezcla de resultado y patrimonio';
+}
+
+function plaNbPatron(a){
+  var vistas = {}, nombres = [];
+  ((a && a.renglones) || []).forEach(function(x){
+    var n = x.nombre || x.cuenta;
+    if (!vistas[n]) { vistas[n] = 1; nombres.push(n); }
+  });
+  return nombres.sort().join(' + ') || '(sin renglones)';
+}
+
+// Cuántos asientos y cuánta diferencia hay de cada uno, del más repetido al menos, con un
+// asiento de ejemplo para ir a buscarlo al otro sistema.
+function plaNbAgrupar(d, clave){
+  var m = {}, orden = [];
+  (d.dias || []).forEach(function(dia){
+    (dia.asientos || []).forEach(function(a){
+      var k = clave(a), x = m[k];
+      if (!x) {
+        x = m[k] = { k: k, n: 0, dif: 0, renglones: 0,
+          ejemplo: (a.asiento || 's/n') + ' del ' + plaFechaTxt(dia.fecha) };
+        orden.push(x);
+      }
+      x.n++;
+      x.dif += Number(a.diferencia) || 0;
+      x.renglones += ((a.renglones) || []).length;
+    });
+  });
+  return orden.sort(function(p, q){ return q.n - p.n || Math.abs(q.dif) - Math.abs(p.dif); });
+}
+
 function plaNbFilas(d){
   var r2 = function(n){ return Math.round((Number(n) || 0) * 100) / 100; };
   var dias = [['P&L Abasto — lo que no balancea'],
@@ -44532,17 +44680,32 @@ function plaNbFilas(d){
     ['Asientos que se compensan de a dos (no se listan)', Number(d.emparejados) || 0]];
   if (d.recortado) dias.push(['Atención', 'Hay más asientos sin pareja de los que trae esta planilla: elegí un período más corto.']);
   dias.push([], ['Fecha', 'Debe', 'Haber', 'Diferencia (debe − haber)', 'Asientos sin pareja']);
-  var asientos = [['Fecha', 'Asiento', 'Cuenta', 'Nombre de la cuenta', 'Debe', 'Haber', 'Diferencia del asiento']];
+  var asientos = [['Fecha', 'Asiento', 'Tipo', 'Patrón (las cuentas del asiento)', 'Cuenta',
+    'Nombre de la cuenta', 'Debe', 'Haber', 'Diferencia del asiento']];
   (d.dias || []).forEach(function(dia){
     dias.push([plaFechaTxt(dia.fecha), r2(dia.debe), r2(dia.haber), r2(dia.diferencia), (dia.asientos || []).length]);
     (dia.asientos || []).forEach(function(a){
+      // El tipo, el patrón y la diferencia van en el PRIMER renglón del asiento: así se filtra
+      // y se suma por asiento, sin contar cada uno tantas veces como renglones tenga.
       (a.renglones || []).forEach(function(x, i){
-        asientos.push([plaFechaTxt(dia.fecha), a.asiento || '', x.cuenta, x.nombre, r2(x.debe), r2(x.haber),
+        asientos.push([plaFechaTxt(dia.fecha), a.asiento || '', i === 0 ? plaNbTipo(a) : '',
+          i === 0 ? plaNbPatron(a) : '', x.cuenta, x.nombre, r2(x.debe), r2(x.haber),
           i === 0 ? r2(a.diferencia) : '']);
       });
     });
   });
-  return { dias: dias, asientos: asientos };
+  // La hoja para el programador del otro sistema: los dos resúmenes con las mismas columnas,
+  // uno por forma del asiento y otro por combinación de cuentas.
+  var cab = ['Tipo o combinación de cuentas', 'Asientos', 'Renglones', 'Diferencia (debe − haber)',
+    'Un asiento de ejemplo'];
+  var patrones = [['P&L Abasto — los patrones de lo que no balancea'],
+    ['Período', plaMesTxt(d.desde) + ' a ' + plaMesTxt(d.hasta)],
+    ['Asientos sin pareja', Number(d.sin_pareja) || 0],
+    [], ['POR TIPO DE ASIENTO'], cab];
+  plaNbAgrupar(d, plaNbTipo).forEach(function(x){ patrones.push([x.k, x.n, x.renglones, r2(x.dif), x.ejemplo]); });
+  patrones.push([], ['POR COMBINACIÓN DE CUENTAS — de la que más se repite a la que menos'], cab);
+  plaNbAgrupar(d, plaNbPatron).forEach(function(x){ patrones.push([x.k, x.n, x.renglones, r2(x.dif), x.ejemplo]); });
+  return { dias: dias, asientos: asientos, patrones: patrones };
 }
 
 // Los importes con separador de miles y dos decimales; las cantidades, como vienen.
@@ -44562,13 +44725,18 @@ function plaNbExcel(){
   while (cab < F.dias.length && F.dias[cab][0] !== 'Fecha') cab++;
   var libro = XLSX.utils.book_new();
   var h1 = XLSX.utils.aoa_to_sheet(F.dias), h2 = XLSX.utils.aoa_to_sheet(F.asientos);
+  var h3 = XLSX.utils.aoa_to_sheet(F.patrones);
   h1['!cols'] = [{ wch: 46 }, { wch: 18 }, { wch: 18 }, { wch: 24 }, { wch: 20 }];
-  h2['!cols'] = [{ wch: 12 }, { wch: 10 }, { wch: 22 }, { wch: 42 }, { wch: 16 }, { wch: 16 }, { wch: 22 }];
+  h2['!cols'] = [{ wch: 12 }, { wch: 10 }, { wch: 28 }, { wch: 60 }, { wch: 22 }, { wch: 42 },
+    { wch: 16 }, { wch: 16 }, { wch: 22 }];
+  h3['!cols'] = [{ wch: 62 }, { wch: 12 }, { wch: 12 }, { wch: 24 }, { wch: 24 }];
   plaNbFormato(h1, cab + 1, [1, 2, 3]);
   if (h1.B3) h1.B3.z = '#,##0.00';   // la diferencia del período; las cantidades de abajo, sin decimales
-  plaNbFormato(h2, 1, [4, 5, 6]);
+  plaNbFormato(h2, 1, [6, 7, 8]);
+  plaNbFormato(h3, 5, [3]);          // la diferencia de cada grupo; asientos y renglones son cantidades
   XLSX.utils.book_append_sheet(libro, h1, 'Días');
   XLSX.utils.book_append_sheet(libro, h2, 'Asientos sin pareja');
+  XLSX.utils.book_append_sheet(libro, h3, 'Patrones');
   XLSX.writeFile(libro, 'No_balancea_' + d.desde + '_a_' + d.hasta + '.xlsx');
 }
 

@@ -23,6 +23,7 @@ const LS_RECIENTES = 'lnb-recientes';
 const LS_DENSITY   = 'lnb-sidebar-density';
 const LS_COLLAPSED = 'lnb-sidebar-collapsed-groups';
 const LS_SOCIEDAD  = 'lnb-sidebar-sociedad';
+const LS_MENU      = 'lnb-sidebar-oculto';
 const MAX_RECIENTES = 4;
 
 // ── QUÉ VERSIÓN ESTÁS VIENDO ──────────────────────────────────────────────
@@ -36,7 +37,7 @@ const MAX_RECIENTES = 4;
 // SE ACTUALIZA A MANO, en el mismo cambio que se mergea. Sacarlo de git en el
 // arranque sonaba mejor, pero Railway despliega desde una copia sin historial:
 // diría siempre lo mismo y mentiría, que es peor que no estar.
-const VERSION = 'V1062';
+const VERSION = 'V1063';
 
 let SIDEBAR_DATA = { grupos: [], modulos: [] };
 let SOCIEDADES = [];                             // array de {id, nombre, funcion}
@@ -228,10 +229,15 @@ function buildSidebar(){
       </div>
     </div>
 
-    <!-- Toggle compacto -->
-    <button class="sb2-density-toggle" data-action="density" title="Colapsar / expandir sidebar">
-      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="m15 18-6-6 6-6"/></svg>
-    </button>
+    <!-- Angostar el menú, o esconderlo del todo para trabajar a pantalla completa (V1063) -->
+    <div class="sb2-acciones">
+      <button class="sb2-density-toggle" data-action="density" title="Angostar / ensanchar el menú">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="m15 18-6-6 6-6"/></svg>
+      </button>
+      <button class="sb2-density-toggle" data-action="full" title="Pantalla completa: esconder el menú">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M9 4H4v5M4 4l6 6M15 20h5v-5M20 20l-6-6"/></svg>
+      </button>
+    </div>
 
     <!-- Favoritos -->
     <div id="sb2-favoritos-wrap"></div>
@@ -280,6 +286,16 @@ function buildSidebar(){
     </div>
   `;
   document.body.appendChild(cmdk);
+
+  // La pestaña que trae el menú de vuelta (V1063).
+  const volver = document.createElement('button');
+  volver.className = 'sb2-volver';
+  volver.id = 'sb2-volver';
+  volver.title = 'Mostrar el menú';
+  volver.textContent = '\u2630';
+  volver.addEventListener('click', () => esconderMenu(false));
+  document.body.appendChild(volver);
+  menuGuardado();
 
   renderSocSelector();
   renderFavoritos();
@@ -704,6 +720,7 @@ function attachEventListeners(){
       const action = actionEl.dataset.action;
       if (action === 'cmdk')     { e.preventDefault(); openCmdK(); return; }
       if (action === 'density')  { toggleDensity(); return; }
+      if (action === 'full')     { esconderMenu(true); return; }
       if (action === 'hoy')      { irAClima(); return; }
       if (action === 'user-menu'){ openUserMenu(); return; }
       if (action === 'cog')      { openUserMenu(); return; }
@@ -845,6 +862,25 @@ function toggleDensity(){
   const next = cur === 'comfortable' ? 'compact' : 'comfortable';
   sb.setAttribute('data-density', next);
   localStorage.setItem(LS_DENSITY, next);
+}
+
+// ── PANTALLA COMPLETA (V1063) ────────────────────────────────────────────────
+// Pablo, 17/9/2026: «¿podemos hacer que la barra de costado se esconda para tener pantalla
+// completa en donde estamos trabajando? Eso ahorra espacio y podemos ver mejor».
+//
+// El menú se esconde ENTERO —angostarlo ya existía y sigue— y queda una pestaña pegada al
+// borde para traerlo de vuelta. La pestaña vive en el <body>: colgada del menú se escondería
+// con él y no habría con qué volver. La elección se recuerda, porque el que trabaja en una
+// pantalla ancha la quiere ancha siempre.
+function esconderMenu(si){
+  document.body.classList.toggle('lnb-menu-oculto', !!si);
+  try { localStorage.setItem(LS_MENU, si ? '1' : ''); } catch(e){}
+}
+
+function menuGuardado(){
+  let g = '';
+  try { g = localStorage.getItem(LS_MENU) || ''; } catch(e){}
+  if (g) esconderMenu(true);
 }
 
 function openUserMenu(){

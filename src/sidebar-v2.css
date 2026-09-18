@@ -597,9 +597,45 @@
   background: rgba(255,255,255,.1);
   color: #fff;
 }
-.sb2[data-density="compact"] .sb2-density-toggle{
-  margin: 8px auto 0;
+.sb2[data-density="compact"] [data-action="density"]{
   transform: scaleX(-1);
+}
+
+/* ═══════════ Pantalla completa (V1063) ═══════════
+   Pablo: «que la barra de costado se esconda para tener pantalla completa». El menú se va
+   entero y la pantalla que se está mirando se queda con todo el ancho; la pestaña del borde
+   lo trae de vuelta. */
+.sb2-acciones{
+  display: flex; gap: 6px;
+  margin: 8px var(--sb2-pad-x) 0;
+}
+.sb2-acciones .sb2-density-toggle{ margin: 0; flex: 1 }
+.sb2[data-density="compact"] .sb2-acciones{
+  flex-direction: column; align-items: center;
+  margin: 8px auto 0;
+}
+.sb2[data-density="compact"] .sb2-acciones .sb2-density-toggle{ flex: none; width: 30px }
+
+body.lnb-menu-oculto .sb2{ display: none }
+.sb2-volver{ display: none }
+body.lnb-menu-oculto .sb2-volver{
+  position: fixed; left: 0; top: 12px;
+  z-index: 60;
+  display: flex; align-items: center; justify-content: center;
+  width: 28px; height: 40px; padding: 0;
+  border: 0; border-radius: 0 10px 10px 0;
+  background: #0F2647; color: #FBF7EE;
+  font-size: 15px; line-height: 1; cursor: pointer;
+  box-shadow: 0 6px 18px rgba(0,0,0,.28);
+}
+body.lnb-menu-oculto .sb2-volver:hover{ background: #1B3A6B }
+
+/* En el teléfono no aplica: ahí el menú ya vive fuera de la pantalla y se abre con el dedo.
+   Como la elección se recuerda, el que lo escondió en la computadora se quedaría sin menú y
+   sin manera de abrirlo. */
+@media (max-width: 760px){
+  body.lnb-menu-oculto .sb2{ display: flex }
+  body.lnb-menu-oculto .sb2-volver{ display: none }
 }
 
 /* Mobile */
