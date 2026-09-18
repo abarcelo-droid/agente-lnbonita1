@@ -441,7 +441,7 @@ test('la tabla: el mes más nuevo a la izquierda, los subtotales siempre, y las 
   assert.ok(!h.includes('FUERA'));
   assert.ok(!h.includes('4.1.01 · VENTAS'), 'las cuentas se ven sin abrir el rubro');
   // V1062: el margen ya no suma la venta, así que sobre las ventas de agosto da -18%.
-  assert.match(h, /<span class="pla-pct">-18%<\/span>/, 'el % sobre ventas del margen de agosto');
+  assert.match(h, /<span class="pla-pct pla-pct-neg">-18%<\/span>/, 'el % sobre ventas del margen de agosto');
   assert.match(h, /ondblclick="plaDetalle\('rubro','ventas','2025-08'\)"/);
   const abierto = PANTALLA(DATOS, { ventas: true });
   assert.ok(abierto.includes('4.1.01 · VENTAS'));
@@ -1573,8 +1573,8 @@ test('la cascada arranca en UTILIDAD, y los porcentajes van sobre VENTAS', () =>
   assert.equal(T.subtotales.neto.TOTAL, 20, 'el resultado neto suma las ventas además de su título');
   // Los porcentajes, sobre VENTAS: el margen es el 14% de 1.000.
   const h = PANTALLA(d);
-  assert.match(h, /<span class="pla-pos">140<\/span><span class="pla-pct">14%<\/span>/);
-  assert.match(h, /<span class="pla-pos">1\.000<\/span><span class="pla-pct">100%<\/span>/);
+  assert.match(h, /<span class="pla-pos">140<\/span><span class="pla-pct pla-pct-pos">14%<\/span>/);
+  assert.match(h, /<span class="pla-pos">1\.000<\/span><span class="pla-pct pla-pct-pos">100%<\/span>/);
   // Y se dice dónde: en la fila de VENTAS, pasando el mouse.
   assert.match(h, /<td title="VENTAS es la base de los porcentajes: no suma al resultado, sus cuentas suman desde su título"/);
 });
@@ -1839,6 +1839,57 @@ test('el patrón que más se repite se lee en la pantalla, sin bajar el Excel', 
     /El patrón que más se repite es <b>CENCOSUD \+ VENTAS<\/b>: 2 asientos/);
 });
 
+// ══ 7f · EL MARGEN ES LO QUE SE MIRA (V1064) ══════════════════════════════════════════
+//
+// Pablo, 18/9/2026: «una cuestión de diseño nomás: me gustaría ver mejor y más grande los %
+// márgenes, que son en definitiva lo que revisamos».
+
+// El font-size de una regla del CSS del módulo, para comparar jerarquías de verdad y no
+// confiar en que el número esté escrito en algún lado.
+const tamano = (selector) => {
+  const re = new RegExp(selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '[^{}]*\\{[^}]*font-size:([\\d.]+)px');
+  const m = re.exec(PANEL);
+  assert.ok(m, 'no está el tamaño de ' + selector);
+  return Number(m[1]);
+};
+
+test('el % de los márgenes se ve más grande que el del rubro y que el propio importe', () => {
+  const pctRubro = tamano('#sec-pl-abasto .pla-pct');
+  const pctMargen = tamano('#sec-pl-abasto .pla-sub .pla-pct,#sec-pl-abasto .pla-res .pla-pct');
+  const importe = tamano('#sec-pl-abasto .pla-tbl');
+  assert.ok(pctMargen > pctRubro + 2, 'el % del margen no se despega del de los rubros: ' + pctMargen + ' vs ' + pctRubro);
+  assert.ok(pctMargen > importe, 'el % del margen no manda sobre el importe: ' + pctMargen + ' vs ' + importe);
+  assert.ok(pctRubro >= 10, 'el % de los rubros quedó ilegible: ' + pctRubro);
+  // Y las filas de subtotal respiran, o el número grande queda apretado contra el de arriba.
+  assert.match(PANEL, /#sec-pl-abasto \.pla-sub td,#sec-pl-abasto \.pla-res td\{padding-top:7px;padding-bottom:7px\}/);
+  // El NOMBRE del margen también pesa: con el % a 14 px y la etiqueta a 11, la fila quedaba a
+  // media máquina.
+  assert.ok(tamano('#sec-pl-abasto .pla-sub td:first-child') > importe,
+    'la etiqueta del subtotal quedó del tamaño de una fila cualquiera');
+  assert.ok(tamano('#sec-pl-abasto .pla-res td:first-child') >= tamano('#sec-pl-abasto .pla-sub td:first-child'),
+    'el resultado neto no manda sobre los subtotales');
+});
+
+test('el % lleva el color de su signo, y sobre el azul del resultado no se pierde', () => {
+  const h = PANTALLA(DATOS);
+  // Agosto: el margen es -18% de las ventas → rojo. Las ventas, 100% → verde.
+  assert.match(h, /<span class="pla-pct pla-pct-neg">-18%<\/span>/);
+  assert.match(h, /<span class="pla-pct pla-pct-pos">100%<\/span>/);
+  // El color lo decide el PORCENTAJE que se lee, no el importe: con ventas negativas el % da
+  // positivo y tiene que verse verde aunque el importe esté en rojo.
+  const alReves = { rubros: RUBROS, meses: ['2025-07'], meses_disponibles: ['2025-07'], cuentas: [
+    { cuenta: '4.1.01', nombre: 'VENTAS', rubro: 'ventas', meses: { '2025-07': -1000 } },
+    { cuenta: '4.2.01', nombre: 'COSTO', rubro: 'costos_ventas', meses: { '2025-07': -500 } }] };
+  assert.match(PANTALLA(alReves), /<span class="pla-neg">-500<\/span><span class="pla-pct pla-pct-pos">50%<\/span>/);
+  // Los colores: verde y rojo en los subtotales; los claros sobre el azul del resultado neto.
+  assert.match(PANEL, /#sec-pl-abasto \.pla-sub \.pla-pct-pos\{color:#15803d\} #sec-pl-abasto \.pla-sub \.pla-pct-neg\{color:#b91c1c\}/);
+  assert.match(PANEL, /#sec-pl-abasto \.pla-res \.pla-pct-pos\{color:#4ade80\} #sec-pl-abasto \.pla-res \.pla-pct-neg\{color:#fca5a5\}/);
+  // Sin base de ventas no hay % que pintar: la celda queda con su importe y nada más.
+  const sinVentas = { rubros: RUBROS, meses: ['2025-07'], meses_disponibles: ['2025-07'], cuentas: [
+    { cuenta: '4.2.01', nombre: 'COSTO', rubro: 'costos_ventas', meses: { '2025-07': -500 } }] };
+  assert.ok(!PANTALLA(sinVentas).includes('pla-pct'), 'inventa un porcentaje sin ventas contra qué medir');
+});
+
 // ══ 8 · EL «¿CÓMO SE USA?» DICE LO QUE EL CÓDIGO HACE ═════════════════════════════════
 
 const manual = () => {
@@ -1892,4 +1943,11 @@ test('manual V1063: el cuadro que entra con más meses, el tilde de los que no b
   assert.match(M, /agrupados <b>por tipo<\/b> —un solo renglón, sólo cuentas de resultado, sólo del patrimonio, o mezcla de las dos— y <b>por combinación de cuentas<\/b>/);
   assert.match(M, /<b>un asiento de ejemplo<\/b> para ir a buscarlo/);
   assert.match(M, /<span class="ver">V1063<\/span> El cuadro con el concepto angosto y las columnas Concepto y TOTAL fijas/);
+});
+
+test('manual V1064: el % de los márgenes, grande y con el color de su signo', () => {
+  const M = manual();
+  assert.match(M, /El de los <b>márgenes<\/b> —margen bruto, EBITDA, EBT y resultado neto— se ve <b>grande y con el color de su signo<\/b>: verde si es positivo, rojo si es negativo/);
+  assert.match(M, /el de cada rubro queda más chico, un escalón atrás/);
+  assert.match(M, /<span class="ver">V1064<\/span> Los márgenes se leen de un vistazo/);
 });
