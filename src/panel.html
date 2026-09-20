@@ -8199,16 +8199,31 @@ input[type=number]{-moz-appearance:textfield;appearance:textfield}
 
 <!-- ══ P&L ABASTO: LOS ASIENTOS DE UN IMPORTE (V1052) ═════════════════════════ -->
 <div class="ab-modal-overlay sg-mod" id="pla-detalle-modal">
+  <style>
+    /* SE SOLAPABA TODO AL TILDAR (V1068). Pablo, 20/9/2026. El tilde iba en un <label> con
+       white-space:nowrap y sin frenar la compresión del flex: cuando la nota de al lado se
+       hacía larga —«Ninguno de estos movimientos está en un asiento sin pareja»—, el
+       navegador comprimía el label, y como el texto no puede partirse, DESBORDABA encima de
+       la nota. Ahora el tilde no se comprime (flex:0 0 auto) y la que envuelve es la nota.
+       Y se le saca el label global del panel (text-transform:uppercase + letter-spacing):
+       ese estilo es para rótulos de campo, no para una frase que se lee — en mayúsculas
+       además ocupa más ancho, que era justo lo que faltaba. */
+    #pla-detalle-modal .pla-det-filtros{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:8px}
+    #pla-detalle-modal #pla-detalle-q{padding:5px 8px;border:1px solid var(--bor);border-radius:6px;
+      flex:1 1 220px;min-width:180px}
+    #pla-detalle-modal .pla-det-nb{display:inline-flex;align-items:center;gap:5px;flex:0 0 auto;
+      font-size:11.5px;color:var(--mut);cursor:pointer;white-space:nowrap;
+      text-transform:none;letter-spacing:0}
+    #pla-detalle-modal .pla-det-nb input{flex:0 0 auto;width:auto;margin:0}
+    #pla-detalle-modal #pla-detalle-nota{font-size:11.5px;color:var(--mut);flex:1 1 200px;min-width:0}
+  </style>
   <div class="ab-modal" style="width:min(1000px,96vw);max-width:96vw;max-height:90vh;overflow-y:auto;overflow-x:hidden">
     <div class="mhd"><div class="mht" id="pla-detalle-tit">🔍 Asientos</div>
       <button class="mcl" onclick="closeMB('pla-detalle-modal')">×</button></div>
-    <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:8px">
-      <input id="pla-detalle-q" placeholder="Buscar en la lista" oninput="plaDetallePintar()"
-             style="padding:5px 8px;border:1px solid var(--bor);border-radius:6px;min-width:220px">
-      <label style="font-size:11.5px;color:var(--mut);cursor:pointer;white-space:nowrap">
-        <input type="checkbox" id="pla-detalle-nb" onchange="plaDetallePintar()"
-               style="vertical-align:middle;margin:0 5px 0 0">⚠️ Sólo los que no balancean<span id="pla-detalle-nb-n"></span></label>
-      <span id="pla-detalle-nota" style="font-size:11.5px;color:var(--mut)"></span>
+    <div class="pla-det-filtros">
+      <input id="pla-detalle-q" placeholder="Buscar en la lista" oninput="plaDetallePintar()">
+      <label class="pla-det-nb"><input type="checkbox" id="pla-detalle-nb" onchange="plaDetallePintar()">⚠️ Sólo los que no balancean<span id="pla-detalle-nb-n"></span></label>
+      <span id="pla-detalle-nota"></span>
     </div>
     <div class="ab-table-wrap" style="overflow-x:hidden !important">
       <table class="pa-tbl" id="pla-detalle-tabla" style="table-layout:fixed;width:100%;font-size:12px"></table></div>
@@ -24618,6 +24633,8 @@ SG_MANUAL.plabasto = { titulo: 'P&L Abasto', html:
 
   + '<h3>Qué cambió, y desde cuándo</h3>'
   + '<ul>'
+  + '<li><span class="ver">V1068</span> En los asientos de un importe, el tilde de los que no balancean dejó de '
+  + 'montarse sobre el texto de al lado.</li>'
   + '<li><span class="ver">V1067</span> El Excel de No balancea, más simple: una hoja con un asiento por fila y su '
   + 'total, y otra con el detalle de cada uno separado por una fila en blanco.</li>'
   + '<li><span class="ver">V1064</span> Los márgenes se leen de un vistazo: el % de los subtotales, grande y con '

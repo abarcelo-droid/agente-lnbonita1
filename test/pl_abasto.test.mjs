@@ -1986,3 +1986,42 @@ test('manual V1067: el Excel de No balancea, en dos hojas simples', () => {
   // Y la hoja de patrones sigue siendo la tercera, no la que se lee todos los días.
   assert.match(M, /Y una tercera hoja, <b>Patrones<\/b>/);
 });
+
+// ══ 7g · EL TILDE NO SE MONTA SOBRE LA NOTA (V1068) ═══════════════════════════════════
+//
+// Pablo, 20/9/2026, con la ventana abierta y el tilde puesto: «corregime esto, que cuando
+// tildo asientos que no cuadran se solapa todo».
+//
+// El <label> del tilde iba con white-space:nowrap y sin frenar la compresión del flex. Con
+// la nota larga al lado —«Ninguno de estos movimientos está en un asiento sin pareja»— el
+// navegador lo comprimía, y como el texto no se puede partir, DESBORDABA por encima de ella.
+
+test('el tilde no se comprime, la que envuelve es la nota', () => {
+  const i = PANEL.indexOf('#pla-detalle-modal .pla-det-filtros');
+  assert.ok(i > 0, 'no está el estilo de los filtros de la ventana');
+  const css = PANEL.slice(i, PANEL.indexOf('</style>', i));
+  // Lo que causaba el solapamiento: el tilde tiene que quedar fijo.
+  assert.match(css, /\.pla-det-nb\{[^}]*flex:0 0 auto/);
+  assert.match(css, /\.pla-det-nb\{[^}]*white-space:nowrap/);
+  // Y la nota es la que cede: puede achicarse hasta cero y bajar de renglón.
+  assert.match(css, /#pla-detalle-nota\{[^}]*flex:1 1 200px;min-width:0/);
+  // El buscador también cede, en vez de clavar su ancho y empujar a los otros dos.
+  assert.match(css, /#pla-detalle-q\{[^}]*flex:1 1 220px/);
+  // La casilla no se estira con los inputs de la ventana.
+  assert.match(css, /\.pla-det-nb input\{flex:0 0 auto;width:auto;margin:0\}/);
+});
+
+test('el tilde se lee como una frase, no como un rótulo de campo', () => {
+  const i = PANEL.indexOf('#pla-detalle-modal .pla-det-filtros');
+  const css = PANEL.slice(i, PANEL.indexOf('</style>', i));
+  // El panel pone TODOS los label en mayúsculas y con letter-spacing. Acá no: es una frase,
+  // y en mayúsculas ocupa más ancho, que era justo lo que faltaba.
+  assert.match(css, /\.pla-det-nb\{[^}]*text-transform:none/);
+  assert.match(css, /\.pla-det-nb\{[^}]*letter-spacing:0/);
+  // Y el HTML usa la clase: los estilos sueltos del label viejo no vuelven.
+  assert.match(PANEL, /<label class="pla-det-nb"><input type="checkbox" id="pla-detalle-nb" onchange="plaDetallePintar\(\)">/);
+  assert.ok(!/<label style="font-size:11\.5px;color:var\(--mut\);cursor:pointer;white-space:nowrap">/.test(PANEL),
+    'volvió el label con estilos sueltos');
+  // Y queda anotado en el historial del manual, que es donde Pablo mira qué cambió.
+  assert.match(manual(), /<span class="ver">V1068<\/span> En los asientos de un importe, el tilde de los que no balancean dejó de montarse sobre el texto de al lado/);
+});
