@@ -818,7 +818,10 @@ test('manual V1054: los ajustes van con su signo y se corrigen por mes, eliminar
   assert.match(M, /La ventana muestra <b>los meses del período que se está mirando<\/b>; los otros meses del mismo ajuste quedan como estaban/);
   assert.match(M, /Aparece <b>adentro de su rubro<\/b>/);
   assert.match(M, /En los asientos de un rubro \(doble clic\) aparecen también sus ajustes/);
-  assert.match(M, /Un ajuste no puede quedar sin importes: para sacarlo se <b>elimina<\/b>, y eso pide el nivel <b>Anular<\/b>/);
+  // V1070: un ajuste SI puede quedar sin importes (nace pendiente). Lo que sigue valiendo, y
+  // es lo que este test cuida desde la V1054, es que VACIAR uno cargado no sea la puerta de
+  // atras para sacarlo: para eso se elimina, con el nivel que elimina.
+  assert.match(M, /<b>Vaciar<\/b> un ajuste que ya tenía importes <b>no<\/b> es la manera de sacarlo: para eso se <b>elimina<\/b>, y eso pide el nivel <b>Anular<\/b>/);
   assert.match(M, /<b>⬇️ Exportar CSV<\/b> baja el cuadro del período elegido/);
   assert.match(M, /Los importes van <b>en pesos con centavos<\/b>, aunque en la pantalla se vean en miles o millones/);
   assert.match(M, /<span class="ver">V1054<\/span> Ajustes manuales por rubro, y exportar el cuadro a CSV/);
@@ -1714,7 +1717,7 @@ test('el cuadro sale con esos anchos, y Concepto y TOTAL quedan pegados mientras
     assert.ok(PANEL.includes('#pla-pane-resultado .' + clase + ' td:first-child,#pla-pane-resultado .'
       + clase + ' td:nth-child(2){background:' + fondo + '}'), clase + ' pegada sin fondo');
   }
-  assert.match(PANEL, /#pla-pane-resultado \.pla-aju-add td\{position:static\}/,
+  assert.match(PANEL, /#pla-pane-resultado \.pla-aju-add td,#pla-pane-resultado \.pla-aju-pend td\{position:static\}/,
     'la fila de agregar un ajuste es un colspan: pegada taparía los meses');
 });
 
@@ -2173,4 +2176,154 @@ test('el ancho se vuelve a calcular cuando cambia la caja, sin repintar de mas',
   assert.match(o, /else plaAltoCaja\(\);/);
   assert.match(o, /if \(!wrap \|\| PLA_RO\) return;/, 'se engancharia un observador nuevo por cada visita');
   assert.match(fuente(PANEL, 'function plaInit(){'), /plaObservarCaja\(\);/);
+});
+
+// ══ 7i · UN AJUSTE PUEDE QUEDAR PENDIENTE (V1070) ═════════════════════════════════════
+//
+// Pablo, 20/9/2026: «dejame agregar los ajustes manuales con todos los valores en cero, a
+// medida que voy consiguiendo la info lo voy agregando, pero es importante que los impute a
+// todos ahí para no olvidarme ninguno».
+//
+// No se guardan ceros —un cero sigue queriendo decir «sacá el importe de ese mes»—: el estado
+// PENDIENTE se deriva de no tener ninguna fila de mes. Así no hay columna nueva ni migración, y
+// un pendiente se ve en todos los períodos, que es justamente lo que se pidió.
+
+test('un ajuste nace sin importes sólo si se pide, y se ve en cualquier período', () => {
+  const db = base();
+  const R = rutas(db);
+  llamar(R.cargar, { body: CARGA_A });
+  // Sin la bandera, un alta sin importes sigue siendo el error de siempre.
+  const sinBandera = llamar(R.ajusteNuevo, { body: { nombre: 'Seguro anual', rubro: 'costos_fijos', meses: {} } });
+  assert.equal(sinBandera.code, 400);
+  assert.match(sinBandera.body.error, /Cargá el importe de al menos un mes/);
+  // Con la bandera, se guarda.
+  const alta = llamar(R.ajusteNuevo, { body: { nombre: 'Seguro anual', rubro: 'costos_fijos', meses: {}, pendiente: true } });
+  assert.equal(alta.code, 200, JSON.stringify(alta.body));
+  // Y vuelve en CUALQUIER período: no tiene mes al que pertenecer.
+  for (const [desde, hasta] of [['2025-07', '2025-07'], ['2025-08', '2025-08'], ['2025-07', '2025-09']]) {
+    const d = llamar(R.resultado, { query: { desde, hasta } }).body.data;
+    const p = (d.ajustes || []).filter((a) => a.nombre === 'Seguro anual')[0];
+    assert.ok(p, 'el pendiente no volvió en ' + desde + '..' + hasta);
+    assert.equal(p.pendiente, 1);
+    assert.deepEqual(p.meses, {});
+  }
+  // Si vienen importes, la bandera se ignora: gana lo cargado.
+  const conPlata = llamar(R.ajusteNuevo, { body: { nombre: 'Con plata', rubro: 'costos_fijos',
+    meses: { '2025-08': -500 }, pendiente: true } });
+  assert.equal(conPlata.code, 200);
+  const d2 = llamar(R.resultado, { query: { desde: '2025-08', hasta: '2025-08' } }).body.data;
+  assert.equal((d2.ajustes || []).filter((a) => a.nombre === 'Con plata')[0].pendiente, 0);
+});
+
+test('un ajuste con importes fuera del período sigue sin volver: el pendiente no es un colador', () => {
+  const db = base();
+  const R = rutas(db);
+  llamar(R.cargar, { body: CARGA_A });
+  llamar(R.ajusteNuevo, { body: { nombre: 'Sólo en julio', rubro: 'costos_fijos', meses: { '2025-07': -100 } } });
+  const d = llamar(R.resultado, { query: { desde: '2025-08', hasta: '2025-08' } }).body.data;
+  assert.deepEqual((d.ajustes || []).map((a) => a.nombre), [],
+    'con el LEFT JOIN pelado, un ajuste de otro mes vuelve vacío y parece pendiente');
+});
+
+test('al pendiente se le puede corregir el nombre, y deja de serlo con el primer importe', () => {
+  const db = base();
+  const R = rutas(db);
+  llamar(R.cargar, { body: CARGA_A });
+  const id = llamar(R.ajusteNuevo, { body: { nombre: 'Seguro', rubro: 'costos_fijos', meses: {}, pendiente: true } }).body.data.id;
+  // Corregirle el nombre sin cargarle plata: se puede, porque NO tenía importes.
+  assert.equal(llamar(R.ajusteCorregir, { params: { id: String(id) },
+    body: { nombre: 'Seguro anual de la flota', rubro: 'costos_fijos', meses: {} } }).code, 200);
+  // Cargarle el primero lo saca de pendiente.
+  assert.equal(llamar(R.ajusteCorregir, { params: { id: String(id) },
+    body: { nombre: 'Seguro anual de la flota', rubro: 'costos_fijos', meses: { '2025-08': -750 } } }).code, 200);
+  const d = llamar(R.resultado, { query: { desde: '2025-08', hasta: '2025-08' } }).body.data;
+  const a = (d.ajustes || []).filter((x) => x.id === id)[0];
+  assert.equal(a.pendiente, 0);
+  assert.deepEqual(a.meses, { '2025-08': -750 });
+  // Y VACIAR uno que YA tenía importes sigue sin ser la manera de sacarlo.
+  const vaciar = llamar(R.ajusteCorregir, { params: { id: String(id) },
+    body: { nombre: 'Seguro anual de la flota', rubro: 'costos_fijos', meses: { '2025-08': null } } });
+  assert.equal(vaciar.code, 400);
+  assert.match(vaciar.body.error, /para sacarlo, eliminalo/);
+});
+
+const PEND = { id: 9, rubro: 'costos_fijos', nombre: 'Seguro anual', meses: {}, pendiente: 1 };
+
+test('un pendiente no mueve ni un peso del resultado', () => {
+  const conPend = TOTALES(Object.assign({}, DATOS, { ajustes: AJUSTES.concat([PEND]) }));
+  const sinPend = TOTALES(Object.assign({}, DATOS, { ajustes: AJUSTES }));
+  assert.deepEqual(conPend.rubros.costos_fijos, sinPend.rubros.costos_fijos);
+  assert.deepEqual(conPend.subtotales.neto, sinPend.subtotales.neto);
+});
+
+test('el pendiente se ve en su rubro, con su propio renglón y sin una fila de guiones', () => {
+  const datos = Object.assign({}, DATOS, { ajustes: [PEND] });
+  const h = PANTALLA(datos, { costos_fijos: true });
+  // El rubro se dibuja aunque su único contenido sea un pendiente, y avisa cuántos tiene.
+  assert.match(h, /<tr class="pla-rub"><td title="Tiene 1 ajuste manual sin importe todavía"[^>]*>▼ 🏢 COSTOS FIJOS ⏳1<\/td>/);
+  // Y el pendiente va en un renglón propio, que es además su única puerta de vuelta.
+  assert.match(h, /<tr class="pla-aju-pend" onclick="plaAjusteAbrir\(9\)"><td colspan="4" title="Clic: cargarle el importe">⏳ Seguro anual — falta cargar el importe: todavía no suma al resultado<\/td><\/tr>/);
+  // Nada de «✎ Ajuste: … — — —»: eso se lee como un dato roto, no como algo que falta.
+  assert.ok(!h.includes('✎ Ajuste: Seguro anual'), 'el pendiente salió como una fila de guiones');
+  // El fondo ambar es lo que lo hace leer como algo que falta, y la regla de las celdas pegadas
+  // lo pisaba: medido en Chrome daba blanco.
+  assert.match(PANEL, /#pla-pane-resultado \.pla-tbl \.pla-aju-pend td\{background:#fffbeb\}/);
+});
+
+test('el aviso de arriba cuenta los ajustes que esperan su importe', () => {
+  const aviso = (d) => {
+    const caja = { innerHTML: '' };
+    new Function('eid', 'escH', 'plaFechaTxt', 'lnbPuedeOperar', [
+      fuente(PANEL, 'function plaAviso(d){'), 'plaAviso(' + JSON.stringify(d) + ');',
+    ].join('\n'))(() => caja, (x) => String(x), (f) => String(f), () => true);
+    return caja.innerHTML;
+  };
+  const base = { ultima_carga: { archivo: 'diario.xls', desde: '2026-07-01', hasta: '2026-09-14', creado_en: '2026-09-18 09:36' }, cuentas: [] };
+  const con = aviso(Object.assign({}, base, { ajustes: [PEND, { id: 10, pendiente: 1 }, { id: 11, meses: { '2025-08': -5 } }] }));
+  assert.match(con, /⏳ 2 ajustes manuales todavía sin importe: no suman al resultado hasta que se les cargue\./);
+  assert.match(con, /<span style="color:#92400e">⏳ 2/, 'el aviso tiene que ir con el color de los otros avisos');
+  const uno = aviso(Object.assign({}, base, { ajustes: [PEND] }));
+  assert.match(uno, /⏳ 1 ajuste manual todavía sin importe/);
+  assert.ok(!aviso(Object.assign({}, base, { ajustes: [] })).includes('⏳'), 'sin pendientes no se avisa nada');
+});
+
+test('el CSV lleva los pendientes con su tipo y en cero', () => {
+  const csv = new Function('PLA', [
+    /^var PLA_MES = .*;\r?$/m.exec(PANEL)[0],
+    hasta(PANEL, 'var PLA_SUBTOTALES = [', '];'),
+    fuente(PANEL, 'function plaMesTxt(m){'),
+    fuente(PANEL, 'function plaTotales(d){'),
+    fuente(PANEL, 'function plaCsv(d, usd){'),
+    'return plaCsv;'].join('\n'))({ unidad: 1e6 });
+  const filas = csv(Object.assign({}, DATOS, { ajustes: [PEND] })).slice(1).split('\r\n');
+  const pend = filas.filter((f) => f.indexOf('Ajuste pendiente') === 0);
+  assert.deepEqual(pend, ['Ajuste pendiente;Seguro anual;;0,00;0,00;0,00'],
+    'el pendiente no salió al Excel, o salió con otro número');
+});
+
+test('la ventana avisa que va a quedar pendiente antes de guardar', () => {
+  const total = fuente(PANEL, 'function plaAjusteTotal(){');
+  assert.match(total, /var vacio = !Object\.keys\(L\.meses\)\.some\(function\(m\)\{ return L\.meses\[m\] != null; \}\);/);
+  // El cartel tiene que decir QUE va a pasar: donde queda anotado y que no suma. En el fuente
+  // la frase viaja partida en dos strings, asi que se clava en dos.
+  assert.match(total, /queda <b>pendiente<\/b>/);
+  assert.match(total, /anotado en su rubro para no olvidarlo\. No suma al resultado/);
+  assert.match(total, /btn\.textContent = 'Guardar como pendiente'/);
+  // Y al guardar se pide explícitamente: sin la bandera, el servidor lo rechaza.
+  const guardar = fuente(PANEL, 'function plaAjusteGuardar(){');
+  assert.match(guardar, /var pendiente = !Object\.keys\(L\.meses\)\.some\(function\(m\)\{ return L\.meses\[m\] != null; \}\);/);
+  assert.match(guardar, /meses: L\.meses, pendiente: pendiente/);
+  assert.match(guardar, /'Ajuste anotado como pendiente'/);
+});
+
+test('manual V1070: el ajuste pendiente, y lo que sigue valiendo', () => {
+  const M = manual();
+  assert.match(M, /Un ajuste puede <b>nacer sin importes<\/b>, como recordatorio de algo que todavía no se sabe cuánto es/);
+  assert.match(M, /Aparece dentro de su rubro con un <b>⏳<\/b> diciendo que falta cargarlo/);
+  assert.match(M, /sale al CSV como <b>Ajuste pendiente<\/b>/);
+  assert.match(M, /Un pendiente se ve en <b>todos los períodos<\/b>/);
+  // La mitad que NO cambió: vaciar no es la manera de sacarlo.
+  assert.match(M, /<b>Vaciar<\/b> un ajuste que ya tenía importes <b>no<\/b> es la manera de sacarlo/);
+  assert.ok(!/Un ajuste no puede quedar sin importes/.test(M), 'el manual sigue diciendo lo contrario');
+  assert.match(M, /<span class="ver">V1070<\/span> Un ajuste manual puede quedar pendiente/);
 });

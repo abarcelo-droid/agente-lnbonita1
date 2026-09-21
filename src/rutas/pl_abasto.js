@@ -292,21 +292,29 @@ async function traerCotizaciones(db, tipo, usuario, pedir) {
 // Los ajustes vivos con importe en el período, cada uno con sus meses y quién lo cargó.
 function ajustesDelPeriodo(db, desde, hasta) {
   const porId = new Map();
+  // UN AJUSTE PENDIENTE NO TIENE MESES (V1070). El estado se DERIVA de no tener ninguna fila en
+  // pl_abasto_ajuste_meses: sin columna nueva y sin migrar nada. El LEFT JOIN con el filtro de
+  // mes EN EL ON es lo que deja pasar esas filas; el NOT EXISTS evita que se cuele un ajuste que
+  // SÍ tiene importes pero fuera del período que se está mirando —ése sigue sin volver, como
+  // hasta ahora—. Un pendiente, en cambio, se ve en TODOS los períodos: no tiene mes al que
+  // pertenecer, y la gracia es justamente no perderlo de vista.
   const filas = db.prepare(`SELECT a.id, a.rubro, a.nombre, a.creado_en, a.modificado_en,
       uc.nombre AS creado_por, um.nombre AS modificado_por, m.mes, m.importe
     FROM pl_abasto_ajustes a
-    JOIN pl_abasto_ajuste_meses m ON m.ajuste_id = a.id
+    LEFT JOIN pl_abasto_ajuste_meses m ON m.ajuste_id = a.id AND m.mes BETWEEN ? AND ?
     LEFT JOIN usuarios uc ON uc.id = a.creado_por
     LEFT JOIN usuarios um ON um.id = a.modificado_por
-    WHERE a.eliminado_en IS NULL AND m.mes BETWEEN ? AND ?
+    WHERE a.eliminado_en IS NULL
+      AND (m.mes IS NOT NULL OR NOT EXISTS (SELECT 1 FROM pl_abasto_ajuste_meses t WHERE t.ajuste_id = a.id))
     ORDER BY a.id, m.mes`).all(desde, hasta);
   for (const x of filas) {
     if (!porId.has(x.id)) {
       porId.set(x.id, { id: x.id, rubro: x.rubro, nombre: x.nombre, creado_por: x.creado_por, creado_en: x.creado_en,
-        modificado_por: x.modificado_por, modificado_en: x.modificado_en, meses: {} });
+        modificado_por: x.modificado_por, modificado_en: x.modificado_en, meses: {}, pendiente: 0 });
     }
-    porId.get(x.id).meses[x.mes] = x.importe;
+    if (x.mes != null) porId.get(x.id).meses[x.mes] = x.importe;
   }
+  for (const a of porId.values()) if (!Object.keys(a.meses).length) a.pendiente = 1;
   return [...porId.values()];
 }
 
@@ -523,7 +531,11 @@ router.post('/ajustes', requireAuth, (req, res) => {
   try {
     const v = validarAjuste(req.body);
     if (v.error) return res.status(400).json({ ok: false, error: v.error });
-    if (!Object.values(v.meses).some((x) => x != null)) {
+    // NACER PENDIENTE ES A PROPÓSITO, NO UN DESCUIDO (V1070): hay que pedirlo. Sin la bandera,
+    // un alta sin importes sigue siendo el error de siempre —alguien que se olvidó de escribir—.
+    // Y si vienen importes, gana lo cargado: la bandera se ignora.
+    const pendiente = !!(req.body && req.body.pendiente);
+    if (!Object.values(v.meses).some((x) => x != null) && !pendiente) {
       return res.status(400).json({ ok: false, error: 'Cargá el importe de al menos un mes.' });
     }
     let id = null;
@@ -542,11 +554,16 @@ router.put('/ajustes/:id', requireAuth, (req, res) => {
     if (!ajusteVivo(db, id)) return res.status(404).json({ ok: false, error: 'Ese ajuste no existe o ya fue eliminado.' });
     const v = validarAjuste(req.body);
     if (v.error) return res.status(400).json({ ok: false, error: v.error });
-    // UN AJUSTE SIN IMPORTES NO SE GUARDA: vaciarlo sería eliminarlo sin el nivel que elimina.
-    const quedan = new Map(db.prepare('SELECT mes, importe FROM pl_abasto_ajuste_meses WHERE ajuste_id = ?').all(id)
+    // VACIAR UN AJUSTE QUE YA TENÍA IMPORTES SIGUE SIN SER LA MANERA DE SACARLO: eso sería
+    // eliminarlo sin el nivel que elimina. Pero a uno que YA ESTABA PENDIENTE (V1070) se le
+    // puede corregir el nombre o el rubro sin obligarlo a tener un importe que todavía no se
+    // sabe: por eso el 400 mira si TENÍA algo, no si va a quedar vacío.
+    const antes = new Map(db.prepare('SELECT mes, importe FROM pl_abasto_ajuste_meses WHERE ajuste_id = ?').all(id)
       .map((x) => [x.mes, x.importe]));
+    const tenia = antes.size > 0;
+    const quedan = new Map(antes);
     for (const [m, x] of Object.entries(v.meses)) { if (x == null) quedan.delete(m); else quedan.set(m, x); }
-    if (!quedan.size) {
+    if (!quedan.size && tenia) {
       return res.status(400).json({ ok: false, error: 'El ajuste quedaría sin importes: para sacarlo, eliminalo.' });
     }
     db.transaction(() => {
