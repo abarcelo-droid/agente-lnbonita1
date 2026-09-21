@@ -8288,27 +8288,47 @@ input[type=number]{-moz-appearance:textfield;appearance:textfield}
   <style>
     #pla-cotiz-modal input,#pla-cotiz-modal select{padding:5px 8px;border:1px solid var(--bor);border-radius:6px;
       background:var(--bg);font-size:12.5px;box-sizing:border-box}
-    #pla-cotiz-modal .pla-cz-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px 10px;margin-top:12px}
-    #pla-cotiz-modal .pla-cz-grid label{font-size:11px;color:var(--mut)}
-    #pla-cotiz-modal .pla-cz-grid input{width:100%;text-align:right;font-variant-numeric:tabular-nums;margin-top:2px}
-    #pla-cotiz-modal .pla-cz-grid small{display:block;font-size:10px;color:var(--mut)}
-    @media(max-width:600px){ #pla-cotiz-modal .pla-cz-grid{grid-template-columns:repeat(2,minmax(0,1fr))} }
+    /* UNA TABLA, UN RENGLON POR MES (V1071): el propuesto y el confirmado se leen en la misma
+       linea o no se comparan. Anchos fijos y ellipsis, que aca tampoco hay barra de costado. */
+    #pla-cotiz-modal .pla-cz-tbl{width:100%;table-layout:fixed;border-collapse:collapse;margin-top:12px;font-size:12.5px}
+    #pla-cotiz-modal .pla-cz-tbl th{text-align:left;font-size:11px;color:var(--mut);font-weight:600;
+      padding:5px 6px;border-bottom:1px solid var(--bor2);position:sticky;top:0;z-index:2;
+      background:var(--pan,#fff)}
+    #pla-cotiz-modal .pla-cz-tbl td{padding:4px 6px;border-bottom:1px solid var(--bor);
+      overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    #pla-cotiz-modal .pla-cz-tbl th.n,#pla-cotiz-modal .pla-cz-tbl td.n{text-align:right;font-variant-numeric:tabular-nums}
+    #pla-cotiz-modal .pla-cz-tbl input{width:100%;text-align:right;font-variant-numeric:tabular-nums}
+    #pla-cotiz-modal .pla-cz-b{background:none;border:0;padding:0;cursor:pointer;color:var(--pri);font-size:11.5px}
+    #pla-cotiz-modal .pla-cz-b:hover{text-decoration:underline}
+    #pla-cotiz-modal .pla-cz-tbl tr.pla-cz-hoy td{background:#eff6ff}
+    @media(max-width:600px){
+      #pla-cotiz-modal .pla-cz-tbl{table-layout:auto;font-size:11px}
+      #pla-cotiz-modal .pla-cz-tbl col{width:auto}
+      #pla-cotiz-modal .pla-cz-tbl td{white-space:normal;text-overflow:clip}
+      #pla-cotiz-modal .pla-cz-tbl th,#pla-cotiz-modal .pla-cz-tbl td{padding:3px 4px}
+      #pla-cotiz-modal .pla-cz-tbl input{width:52px;padding:4px}
+      #pla-cotiz-modal .pla-cz-tbl .pla-cz-quien{display:none}
+    }
   </style>
-  <div class="ab-modal" style="width:min(680px,96vw);max-width:96vw;max-height:90vh;overflow-y:auto;overflow-x:hidden">
+  <div class="ab-modal" style="width:min(860px,96vw);max-width:96vw;max-height:90vh;overflow-y:auto;overflow-x:hidden">
     <div class="mhd"><div class="mht">💱 Cotizaciones del dólar</div>
       <button class="mcl" onclick="closeMB('pla-cotiz-modal')">×</button></div>
     <div style="font-size:12.5px;color:var(--mut);margin-bottom:10px">Cada mes se pasa a dólares con <b>su</b>
-      cotización: el promedio del valor venta de sus días, del dólar que se elija. Una cargada a mano gana siempre.</div>
+      cotización. El mercado <b>propone</b> el promedio del valor venta de los días de ese mes; el que manda es el
+      que <b>vos confirmás</b>, y se ve al lado para saber contra qué estás decidiendo.</div>
     <div id="pla-cotiz-traer" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
       <select id="pla-cotiz-tipo" data-sin-buscador="1"></select>
       <button class="btn bo" id="pla-cotiz-traer-btn" onclick="plaCotizTraer()">⬇️ Traer del mercado</button>
+      <button class="btn bo" id="pla-cotiz-todos" style="display:none" onclick="plaCotizUsarTodos()">⚡ Usar todos los propuestos</button>
+      <button class="btn bo" id="pla-cotiz-limpiar" style="display:none" onclick="plaCotizLimpiar()">🧹 Borrar todo lo cargado a mano</button>
       <span style="font-size:11px;color:var(--mut)">De argentinadatos.com, pública y gratis.</span>
     </div>
     <div id="pla-cotiz-nota" style="margin-top:8px;font-size:12.5px"></div>
-    <div class="pla-cz-grid" id="pla-cotiz-meses"></div>
+    <div id="pla-cotiz-frescura" style="margin-top:6px;font-size:12px"></div>
+    <table class="pla-cz-tbl" id="pla-cotiz-tabla"></table>
     <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px">
       <button class="btn bo" onclick="closeMB('pla-cotiz-modal')">Cerrar</button>
-      <button class="btn bb" id="pla-cotiz-guardar" onclick="plaCotizGuardar()">Guardar las cargadas a mano</button>
+      <button class="btn bb" id="pla-cotiz-guardar" onclick="plaCotizGuardar()">Guardar lo confirmado</button>
     </div>
   </div>
 </div>
@@ -24622,7 +24642,23 @@ SG_MANUAL.plabasto = { titulo: 'P&L Abasto', html:
   + '<li>Las cotizaciones se cargan en <b>💱 Cotizaciones</b>. <b>Traer del mercado</b> pone en cada mes el '
   + '<b>promedio del valor venta</b> de los días de ese mes, del dólar que se elija: oficial, mayorista, MEP o blue. '
   + '<b>No hay un dólar por defecto</b>: lo elige quien las trae. Salen de argentinadatos.com, pública y gratis.</li>'
-  + '<li>Una cotización <b>cargada a mano gana siempre</b>: traer del mercado no la pisa. Borrarla la saca.</li>'
+  + '<li><span class="ver">V1071</span> Cada mes tiene <b>dos números</b>: el que <b>propone el mercado</b> y el '
+  + 'que alguien <b>confirmó a mano</b>. Manda el confirmado —traer del mercado no lo pisa—, pero la propuesta se '
+  + 'le sigue actualizando al lado, para ver contra qué se está decidiendo.</li>'
+  + '<li>En la ventana cada mes es un <b>renglón</b>: Mes · Propuesto · Confirmado · Estado · Quién y cuándo · '
+  + 'Acciones. Se confirma escribiendo el número en <b>Confirmado</b> y apretando <b>Guardar lo confirmado</b>. '
+  + 'La casilla vacía quiere decir «sin confirmar»: ahí se usa lo del mercado.</li>'
+  + '<li><b>⚡ Usar el propuesto</b> saca lo confirmado y vuelve a la cotización del mercado. En un mes que '
+  + '<b>nunca se trajo</b> el mismo botón dice <b>🗑️ Borrar</b>, porque no hay a qué volver: ese mes queda '
+  + '<b>sin cotización</b> y deja de sumar en dólares, y se avisa antes. Arriba, <b>⚡ Usar los propuestos</b> '
+  + 'hace lo mismo con todos los que tienen uno.</li>'
+  + '<li><b>🧹 Borrar todo lo cargado a mano</b> deja el cuadro como lo propone el mercado. Borra decisiones de '
+  + 'otro, así que pide el nivel <b>Anular</b>.</li>'
+  + '<li>El <b>mes en curso</b> viene marcado: su promedio es el de los días que van y cambia todos los días. Si '
+  + 'lo último que trajiste tiene <b>más de 3 días</b>, la ventana lo avisa arriba. También se marcan los meses '
+  + 'cuyo <b>libro diario todavía no se subió</b>: la cotización se puede dejar cargada de antes.</li>'
+  + '<li>La <b>moneda elegida se recuerda</b> en cada navegador: el que mira en dólares entra en dólares. Si '
+  + 'todavía no hay ninguna cotización cargada, la pantalla vuelve a pesos y lo dice.</li>'
   + '<li>El <b>TOTAL</b> en dólares es la suma de los meses, cada uno con la suya. Un mes <b>sin cotización</b> no '
   + 'suma en dólares, y arriba del cuadro se avisa cuál es.</li>'
   + '<li>Los ajustes manuales se cargan en pesos y se pasan igual que las cuentas. Los asientos de un importe '
@@ -24692,10 +24728,14 @@ SG_MANUAL.plabasto = { titulo: 'P&L Abasto', html:
   + '<h3>Quién puede</h3>'
   + '<p>Con el nivel <b>Ver</b> se mira el cuadro y los asientos, y se exporta. Subir el libro diario, guardar '
   + 'los rubros y cargar o corregir un ajuste pide <b>Operar</b>; volver los rubros a los de por defecto y '
-  + 'eliminar un ajuste, <b>Anular</b>. Traer o cargar las cotizaciones del dólar pide <b>Operar</b>.</p>'
+  + 'eliminar un ajuste, <b>Anular</b>. Traer o cargar las cotizaciones del dólar pide <b>Operar</b>; borrar de '
+  + 'una vez todas las cargadas a mano, <b>Anular</b>.</p>'
 
   + '<h3>Qué cambió, y desde cuándo</h3>'
   + '<ul>'
+  + '<li><span class="ver">V1071</span> Las cotizaciones, mes por mes: lo que propone el mercado al lado de lo '
+  + 'que se confirmó a mano, con quién lo confirmó y cuándo, y un botón para volver al propuesto. Y la moneda '
+  + 'elegida se recuerda.</li>'
   + '<li><span class="ver">V1069</span> El cuadro se lee como una planilla: encabezado de meses fijo y barra '
   + 'para correrlos arriba y abajo, las dos a la vista. La de abajo quedaba al final de la tabla, a 600 px por '
   + 'debajo de la pantalla.</li>'
@@ -43992,6 +44032,14 @@ function plaCargar(inicial){
       return;
     }
     PLA.datos = r.data;
+    // Al entrar, la moneda que quedó elegida la última vez —si todavía se puede.
+    if (inicial) {
+      PLA.moneda = plaMonedaInicial(r.data);
+      PLA.unidad = null;
+      if (plaMonedaGuardada() === 'usd' && PLA.moneda !== 'usd') {
+        toast('Lo dejé en pesos: todavía no hay ninguna cotización cargada');
+      }
+    }
     plaSelectores(r.data);
     plaAviso(r.data);
     plaPintar();
@@ -44232,8 +44280,8 @@ function plaPintar(){
   var conv = plaEnMoneda(d, PLA.moneda);
   d = conv.datos;
   var av = eid('pla-moneda-aviso');
-  if (av) av.innerHTML = conv.sin.length ? '⚠️ Sin cotización: <b>' + conv.sin.map(function(m){ return plaMesTxt(m); }).join(', ')
-    + '</b>. Esos meses no suman en dólares: cargala en «💱 Cotizaciones».' : '';
+  if (av) av.innerHTML = plaMonedaCartel(conv.sin);
+  var sm = eid('pla-moneda'); if (sm) sm.value = PLA.moneda;
   var T = plaTotales(d);
   if (!PLA.unidad) PLA.unidad = plaUnidadGuardada() || plaUnidadAuto(T);
   var su = eid('pla-unidad'); if (su) su.value = String(PLA.unidad);
@@ -44428,26 +44476,70 @@ function plaEnMoneda(d, moneda){
   };
 }
 
+// LA MONEDA SE RECUERDA POR NAVEGADOR (V1071). El que mira el P&L en dólares lo mira SIEMPRE
+// en dólares, y volver a elegirla en cada visita es la manera más fácil de leer un número en la
+// moneda equivocada. Lo que se recuerda es la PREFERENCIA, no el dato: si todavía no hay
+// ninguna cotización cargada, la pantalla vuelve a pesos y lo dice —un cuadro en dólares con
+// todas las celdas vacías no informa nada—.
+function plaMonedaGuardada(){
+  try { return localStorage.getItem('pla-moneda') === 'usd' ? 'usd' : 'ars'; } catch (_) { return 'ars'; }
+}
+function plaHayCotizacion(d){
+  var c = (d || {}).cotizaciones || {};
+  return Object.keys(c).some(function(m){ return Number((c[m] || {}).cotizacion) > 0; });
+}
+function plaMonedaInicial(d){
+  if (plaMonedaGuardada() !== 'usd') return 'ars';
+  return plaHayCotizacion(d) ? 'usd' : 'ars';
+}
+
+// EN QUÉ MONEDA SE ESTÁ LEYENDO, dicho arriba del cuadro: un número sin moneda es un número que
+// alguien va a leer en la otra.
+function plaMonedaCartel(sin){
+  if (PLA.moneda !== 'usd') return '';
+  return '<span style="color:var(--mut)">💲 En dólares: cada mes dividido por <b>su</b> cotización, y el TOTAL '
+    + 'es la suma de los meses ya pasados a dólares.</span>'
+    + ((sin || []).length ? ' ⚠️ Sin cotización: <b>' + sin.map(function(m){ return plaMesTxt(m); }).join(', ')
+      + '</b>. Esos meses no suman: cargala en «💱 Cotizaciones».' : '');
+}
+
 function plaMonedaCambiar(){
   PLA.moneda = (eid('pla-moneda') || {}).value === 'usd' ? 'usd' : 'ars';
+  try { localStorage.setItem('pla-moneda', PLA.moneda); } catch (_) { /* sin almacenamiento: vale igual */ }
   // La escala de una moneda no sirve para la otra: se vuelve a elegir (y se recuerda por moneda).
   PLA.unidad = null;
   plaPintar();
 }
 
 // ── LAS COTIZACIONES ──────────────────────────────────────────────────────────
+//
+// CADA MES TIENE DOS NÚMEROS (V1071), no uno: el que PROPONE el mercado y el que alguien
+// CONFIRMÓ a mano. Manda el confirmado —la regla de la V1055 no se toca— pero la propuesta se
+// sigue actualizando al lado, porque decidir sin ver contra qué es decidir a ciegas.
+//
+// Por eso «⚡ Usar el propuesto» y «🗑️ Borrar» son la MISMA acción: sacar lo confirmado. Lo
+// que cambia es a qué se vuelve —al propuesto si ese mes se trajo alguna vez, a nada si no—,
+// y el botón lo dice ANTES de apretarlo. Dos botones que hacen lo mismo con distinto nombre
+// serían dos maneras de aprender lo mismo.
+var PLA_COTIZ_VIEJA_DIAS = 3;
+
 function plaCotizAbrir(){
   var op = lnbPuedeOperar('pl-abasto');
   // SE ABRE EN BLANCO: lo escrito y no guardado la vez pasada no queda listo para guardarse.
   PLA.cotiz = null;
   eid('pla-cotiz-nota').textContent = '';
-  eid('pla-cotiz-meses').innerHTML = 'Cargando…';
+  eid('pla-cotiz-frescura').textContent = '';
+  eid('pla-cotiz-tabla').innerHTML = '<tbody><tr><td>Cargando…</td></tr></tbody>';
   eid('pla-cotiz-traer').style.display = op ? 'flex' : 'none';
   eid('pla-cotiz-guardar').style.display = op ? '' : 'none';
+  // Borrar TODO lo confirmado tira decisiones de otro —el tipo de cambio que eligió para cada
+  // mes—, y eso es anular, no operar. El servidor pide el mismo nivel: acá no se ofrece.
+  eid('pla-cotiz-limpiar').style.display = lnbPuedeAnular('pl-abasto') ? '' : 'none';
   sgModalArriba('pla-cotiz-modal');
   api('/api/pl-abasto/cotizaciones').then(function(r){
     if (!r || !r.ok) {
-      eid('pla-cotiz-meses').innerHTML = '<div style="color:var(--err)">' + escH((r && r.error) || 'No se pudieron leer') + '</div>';
+      eid('pla-cotiz-tabla').innerHTML = '<tbody><tr><td style="color:var(--err)">'
+        + escH((r && r.error) || 'No se pudieron leer') + '</td></tr></tbody>';
       return;
     }
     PLA.cotiz = r.data;
@@ -44458,20 +44550,103 @@ function plaCotizAbrir(){
   });
 }
 
-function plaCotizOrigen(x, tipos){
-  if (x.cotizacion == null) return 'sin cotización';
-  if (x.origen === 'manual') return 'a mano';
-  var t = (tipos || []).filter(function(y){ return y.k === x.tipo; })[0];
-  return 'promedio del ' + (t ? t.label : x.tipo);
+function plaCotizTipoTxt(tipo, tipos){
+  var t = (tipos || []).filter(function(y){ return y.k === tipo; })[0];
+  return t ? t.label : (tipo || '');
+}
+
+// Qué se está usando en ese mes, dicho en dos palabras y con el color del caso.
+function plaCotizEstado(x, C){
+  if (x.origen === 'manual') return { txt: '✓ Confirmado a mano', color: '#166534' };
+  if (x.cotizacion != null) return { txt: 'Del mercado · ' + plaCotizTipoTxt(x.tipo, (C || {}).tipos), color: 'var(--mut)' };
+  return { txt: '⚠ Sin cotización', color: '#92400e' };
+}
+
+// Lo que hay que saber de ESE mes antes de decidir: que su libro todavía no está, o que el mes
+// no terminó y su promedio es el de los días que van. Dos palabras en el renglón —entero no
+// entra y se corta— y la explicación en el globito, que es donde se va a buscar.
+function plaCotizNotaMes(x, C){
+  var n = [];
+  if (x.sin_libro) n.push('sin libro');
+  if (x.mes === (C || {}).mes_actual) n.push('mes en curso');
+  return n.join(' · ');
+}
+function plaCotizNotaAyuda(x, C){
+  var n = [];
+  if (x.sin_libro) n.push('el libro diario de este mes todavía no se subió');
+  if (x.mes === (C || {}).mes_actual) n.push('mes en curso: el promedio es el de los días que van');
+  return n.join(' · ');
+}
+
+// LO QUE SE TRAJO ENVEJECE, y el mes en curso es el que más: su promedio cambia todos los días.
+function plaCotizFrescura(C){
+  var ult = '';
+  ((C || {}).meses || []).forEach(function(x){ if (x.propuesto_en && x.propuesto_en > ult) ult = x.propuesto_en; });
+  if (!ult) return '<span style="color:var(--mut)">Todavía no trajiste ninguna cotización del mercado.</span>';
+  var f = ult.slice(8, 10) + '/' + ult.slice(5, 7) + '/' + ult.slice(0, 4);
+  var dias = Math.floor((Date.now() - new Date(ult.replace(' ', 'T')).getTime()) / 86400000);
+  if (dias >= PLA_COTIZ_VIEJA_DIAS) {
+    return '<span style="color:#92400e">⚠️ Lo último que trajiste del mercado es del ' + f + ', hace ' + dias
+      + ' días. El mes en curso cambia todos los días: conviene traerlo de nuevo.</span>';
+  }
+  return '<span style="color:var(--mut)">Lo último que trajiste del mercado es del ' + f + '.</span>';
+}
+
+// Los meses confirmados a mano que TIENEN a qué volver. Los otros no entran en «usar todos»:
+// ahí volver no sería volver, sería quedarse sin cotización.
+function plaCotizConPropuesto(C){
+  return ((C || {}).meses || []).filter(function(x){ return x.origen === 'manual' && x.propuesto != null; });
 }
 
 function plaCotizPintar(op){
   var C = PLA.cotiz; if (!C) return;
-  eid('pla-cotiz-meses').innerHTML = (C.meses || []).length ? C.meses.map(function(x){
-    var v = x.cotizacion == null ? '' : String(x.cotizacion);
-    return '<label>' + plaMesTxt(x.mes) + '<input data-mes="' + x.mes + '" data-antes="' + v + '" inputmode="decimal"'
-      + (op ? '' : ' disabled') + ' value="' + v.replace('.', ',') + '"><small>' + escH(plaCotizOrigen(x, C.tipos)) + '</small></label>';
-  }).join('') : '<div style="color:var(--mut)">Todavía no hay libro diario cargado.</div>';
+  eid('pla-cotiz-frescura').innerHTML = plaCotizFrescura(C);
+  var conProp = plaCotizConPropuesto(C).length, bt = eid('pla-cotiz-todos');
+  if (bt) {
+    bt.style.display = (op && conProp) ? '' : 'none';
+    if (conProp) bt.textContent = '⚡ Usar ' + (conProp === 1 ? 'el propuesto' : 'los ' + conProp + ' propuestos');
+  }
+  if (!(C.meses || []).length) {
+    eid('pla-cotiz-tabla').innerHTML = '<tbody><tr><td style="color:var(--mut)">Todavía no hay libro diario '
+      + 'cargado.</td></tr></tbody>';
+    return;
+  }
+  eid('pla-cotiz-tabla').innerHTML = '<colgroup><col style="width:78px"><col style="width:104px">'
+    + '<col style="width:108px"><col style="width:190px"><col class="pla-cz-quien"><col style="width:128px"></colgroup>'
+    + '<thead><tr><th>Mes</th><th class="n">Propuesto</th><th class="n">Confirmado</th><th>Estado</th>'
+    + '<th class="pla-cz-quien">Quién y cuándo</th><th>Acciones</th></tr></thead><tbody>'
+    + C.meses.map(function(x){ return plaCotizFila(x, C, op); }).join('') + '</tbody>';
+}
+
+function plaCotizFila(x, C, op){
+  // EL INPUT LLEVA SÓLO LO CONFIRMADO: si también trajera lo del mercado, el propuesto estaría
+  // escrito dos veces en el mismo renglón y no se sabría cuál de los dos se decidió.
+  var conf = (x.origen === 'manual' && x.cotizacion != null) ? String(x.cotizacion) : '';
+  var e = plaCotizEstado(x, C), nota = plaCotizNotaMes(x, C), ayuda = plaCotizNotaAyuda(x, C);
+  var quien = x.modificado_por ? escH(x.modificado_por) + (x.modificado_en
+    ? ' · ' + x.modificado_en.slice(8, 10) + '/' + x.modificado_en.slice(5, 7) : '') : '<span style="color:var(--mut)">—</span>';
+  var propT = x.propuesto == null ? 'Ese mes nunca se trajo del mercado'
+    : plaCotizTipoTxt(x.propuesto_tipo, C.tipos) + (x.propuesto_en ? ' · traído el ' + x.propuesto_en.slice(0, 10) : '');
+  return '<tr' + (x.mes === C.mes_actual ? ' class="pla-cz-hoy"' : '') + '>'
+    + '<td title="' + plaMesTxt(x.mes) + (ayuda ? ' — ' + escH(ayuda) : '') + '">' + plaMesTxt(x.mes) + '</td>'
+    + '<td class="n" title="' + escH(propT) + '">'
+      + (x.propuesto == null ? '<span style="color:var(--mut)">—</span>' : plaImporte(x.propuesto)) + '</td>'
+    + '<td class="n"><input data-mes="' + x.mes + '" data-antes="' + conf + '" inputmode="decimal"'
+      + ' placeholder="(sin confirmar)"' + (op ? '' : ' disabled') + ' value="' + conf.replace('.', ',') + '"></td>'
+    + '<td style="color:' + e.color + '" title="' + escH(e.txt + (ayuda ? ' — ' + ayuda : '')) + '">' + e.txt
+      + (nota ? ' <span style="color:#92400e">· ' + escH(nota) + '</span>' : '') + '</td>'
+    + '<td class="pla-cz-quien">' + quien + '</td>'
+    + '<td>' + plaCotizAccion(x, op) + '</td></tr>';
+}
+
+// UNA acción con dos finales, y el botón dice cuál toca antes de apretarlo.
+function plaCotizAccion(x, op){
+  if (!op || x.origen !== 'manual') return '<span style="color:var(--mut)">—</span>';
+  return x.propuesto == null
+    ? '<button class="pla-cz-b" onclick="plaCotizVolver(&quot;' + x.mes + '&quot;)"'
+      + ' title="Ese mes nunca se trajo del mercado: queda sin cotización">🗑️ Borrar</button>'
+    : '<button class="pla-cz-b" onclick="plaCotizVolver(&quot;' + x.mes + '&quot;)"'
+      + ' title="Vuelve a ' + plaImporte(x.propuesto) + ', lo que propone el mercado">⚡ Usar el propuesto</button>';
 }
 
 // Sólo lo que se cambió: guardar no puede volver «a mano» una cotización traída que nadie tocó.
@@ -44490,7 +44665,7 @@ function plaCotizCambios(inputs){
 }
 
 function plaCotizGuardar(){
-  var L = plaCotizCambios(document.querySelectorAll('#pla-cotiz-meses input[data-mes]'));
+  var L = plaCotizCambios(document.querySelectorAll('#pla-cotiz-tabla input[data-mes]'));
   if (L.malo) { toast('La cotización de ' + plaMesTxt(L.malo) + ' tiene que ser un número mayor que cero', 'er'); return; }
   if (!L.n) { toast('No cambiaste ninguna cotización', 'er'); return; }
   var btn = eid('pla-cotiz-guardar');
@@ -44520,13 +44695,66 @@ function plaCotizTraer(){
     // NO SE CIERRA: qué se trajo, qué respetó y qué quedó sin dato es lo que hay que leer.
     eid('pla-cotiz-nota').innerHTML = '<span style="color:#166534">✓ ' + nr(x.traidos) + (x.traidos === 1 ? ' mes' : ' meses')
       + ' con el promedio del dólar elegido.</span>'
-      + (x.manuales ? ' Las ' + nr(x.manuales) + ' cargadas a mano no se tocaron.' : '')
+      + (x.manuales ? ' Las ' + nr(x.manuales) + ' confirmadas a mano no se tocaron'
+          + (x.propuestos ? ', pero se les actualizó el propuesto.' : '.') : '')
       + ((x.sin_dato || []).length ? ' <span style="color:#92400e">Sin dato: '
           + x.sin_dato.map(function(m){ return plaMesTxt(m); }).join(', ') + '.</span>' : '');
     plaCargar();
-    api('/api/pl-abasto/cotizaciones').then(function(r2){
-      if (r2 && r2.ok) { PLA.cotiz = r2.data; plaCotizPintar(lnbPuedeOperar('pl-abasto')); }
-    });
+    plaCotizRefrescar();
+  });
+}
+
+function plaCotizRefrescar(){
+  api('/api/pl-abasto/cotizaciones').then(function(r){
+    if (r && r.ok) { PLA.cotiz = r.data; plaCotizPintar(lnbPuedeOperar('pl-abasto')); }
+  });
+}
+
+// Sacar lo confirmado de un mes. Si ese mes se trajo alguna vez vuelve al propuesto; si nunca
+// se trajo queda SIN cotización, y eso hay que avisarlo: un mes sin cotización no suma en
+// dólares, y el total pasaría a ser de menos meses sin que nadie lo haya pedido.
+function plaCotizVolver(mes){
+  var x = (((PLA.cotiz || {}).meses) || []).filter(function(y){ return y.mes === mes; })[0] || {};
+  if (x.propuesto == null && !confirm(plaMesTxt(mes) + ' nunca se trajo del mercado: si le sacás lo cargado a mano '
+    + 'queda sin cotización y ese mes deja de sumar en dólares. ¿Lo saco igual?')) return;
+  var meses = {};
+  meses[mes] = null;
+  plaCotizMandar(meses, x.propuesto == null
+    ? plaMesTxt(mes) + ' quedó sin cotización'
+    : plaMesTxt(mes) + ' volvió a ' + plaImporte(x.propuesto) + ', lo que propone el mercado');
+}
+
+function plaCotizUsarTodos(){
+  var L = plaCotizConPropuesto(PLA.cotiz);
+  if (!L.length) { toast('No hay ningún mes confirmado a mano que tenga una propuesta del mercado', 'er'); return; }
+  if (!confirm('Los ' + L.length + ' meses confirmados a mano vuelven a la cotización que propone el mercado. '
+    + 'Lo que cargaste a mano se pierde. ¿Sigo?')) return;
+  var meses = {};
+  L.forEach(function(x){ meses[x.mes] = null; });
+  plaCotizMandar(meses, L.length + (L.length === 1 ? ' mes volvió' : ' meses volvieron') + ' al propuesto del mercado');
+}
+
+// Limpiar TODO va por DELETE: el servidor le pide el nivel de anular, igual que «Volver a los
+// de por defecto» de los rubros. Cada mes vuelve al propuesto, y el que nunca se trajo se va.
+function plaCotizLimpiar(){
+  var L = (((PLA.cotiz || {}).meses) || []).filter(function(x){ return x.origen === 'manual'; });
+  if (!L.length) { toast('No hay ninguna cotización cargada a mano', 'er'); return; }
+  if (!confirm('Se borran las ' + L.length + ' cotizaciones cargadas a mano. Cada mes vuelve a la que propone el '
+    + 'mercado, y el que nunca se trajo queda sin cotización. ¿Sigo?')) return;
+  api('/api/pl-abasto/cotizaciones', 'DELETE').then(function(r){
+    if (!r || !r.ok) { toast((r && r.error) || 'No se pudieron borrar', 'er'); return; }
+    toast(r.data.volvieron + ' al propuesto · ' + r.data.borradas + ' sin cotización', 'ok');
+    plaCargar();
+    plaCotizRefrescar();
+  });
+}
+
+function plaCotizMandar(meses, ok){
+  api('/api/pl-abasto/cotizaciones', 'PUT', { meses: meses }).then(function(r){
+    if (!r || !r.ok) { toast((r && r.error) || 'No se pudo guardar', 'er'); return; }
+    toast(ok, 'ok');
+    plaCargar();
+    plaCotizRefrescar();
   });
 }
 
