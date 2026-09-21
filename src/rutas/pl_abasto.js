@@ -182,6 +182,41 @@ const ORDEN_DETALLE = {
 // valida validarCarga y la columna no tiene NOT NULL): agrupando por asiento+fecha a secas, TODOS
 // los renglones sin número de un mismo día se fusionarían en un bloque que no es un asiento.
 const GRUPO_SQL = "CASE WHEN COALESCE(m.asiento,'') = '' THEN 'X' || m.id ELSE 'A' || m.asiento || '|' || m.fecha END";
+
+// ── BUSCAR UN ASIENTO EN TODO EL LIBRO (V1077) ───────────────────────────────
+//
+// Pablo, 21/9/2026: «quiero un buscador acá también para buscar cualquier tipo de asiento, que se
+// abra una ventana y me busque todo».
+//
+// Es OTRA cosa que la lupa del cuadro (V1074): aquélla filtra lo que se está mirando, y ésta va a
+// buscar al libro entero. Y es la única que encuentra clientes y proveedores, porque esos nombres
+// están en cuentas del PATRIMONIO, que no entran al cuadro.
+//
+// SQLite no sabe de acentos y su LOWER() sólo toca ASCII —la Ñ y las vocales acentuadas quedan
+// como están—, así que se normaliza a mano con el MISMO criterio que sgNorm en la pantalla: se
+// sacan los acentos de las vocales y la ñ se respeta, que es una letra del idioma. Sin esto,
+// «peña» no encontraría «PEÑA» y «comision» no encontraría «Comisión».
+const SIN_ACENTO = [['á', 'a'], ['é', 'e'], ['í', 'i'], ['ó', 'o'], ['ú', 'u'], ['ü', 'u'],
+  ['Á', 'a'], ['É', 'e'], ['Í', 'i'], ['Ó', 'o'], ['Ú', 'u'], ['Ü', 'u'], ['Ñ', 'ñ']];
+function normSql(x) {
+  return 'LOWER(' + SIN_ACENTO.reduce((s, [a, b]) => `REPLACE(${s},'${a}','${b}')`, x) + ')';
+}
+// LAS CUENTAS SE NORMALIZAN UNA VEZ, NO UNA VEZ POR RENGLÓN. Son 873 contra 96.361: aplicarle
+// los trece REPLACE a cada movimiento costaba 824 ms por búsqueda —medido con el libro real—, y
+// así baja a 279. El CTE se materializa a propósito: sin eso, SQLite puede volver a calcularlo
+// por fila y no se gana nada. Se llama «c» en el FROM para que las consultas de abajo sigan
+// pidiendo c.nombre como si fuera la tabla.
+const CUENTAS_BUSCA = `cbus AS MATERIALIZED (SELECT cuenta, nombre,
+  ${normSql("nombre || ' ' || cuenta")} AS busca FROM pl_abasto_cuentas)`;
+// Lo que se busca de cada renglón: el nombre de la cuenta, su número y el número de asiento. El
+// número de asiento no pasa por el normalizador porque son dígitos.
+const BUSCA_SQL = "(COALESCE(c.busca, LOWER(m.cuenta)) || ' ' || COALESCE(m.asiento,''))";
+// Por palabras sueltas y en cualquier orden, como el resto del panel. Se limita a seis: cada una
+// es un LIKE más sobre el libro entero, y nadie busca con siete palabras.
+function palabrasDeBusqueda(texto) {
+  return SIN_ACENTO.reduce((s, [a, b]) => s.split(a).join(b), String(texto || ''))
+    .toLowerCase().split(/\s+/).filter(Boolean).slice(0, 6);
+}
 // Los asientos sin pareja de lo que no balancea, a lo sumo. En un año entero son cientos.
 const NB_MAX = 2000;
 // La historia del dólar, día por día: argentinadatos.com, pública, gratis y sin clave.
@@ -815,6 +850,23 @@ router.get('/detalle', requireAuth, (req, res) => {
   try {
     const desde = String(req.query.desde || ''), hasta = String(req.query.hasta || '');
     if (!MES.test(desde) || !MES.test(hasta)) return res.status(400).json({ ok: false, error: 'Falta el período.' });
+    const vacio = { renglones: 0, debe: 0, haber: 0 };
+    let donde, params;
+    const buscar = String(req.query.buscar || '').trim();
+    if (buscar) {
+      // Siempre hay al menos una palabra: acá se llega con `buscar` ya recortado y no vacío.
+      const palabras = palabrasDeBusqueda(buscar);
+      // El % y el _ del usuario son texto, no comodines: sin escaparlos, buscar «%» trae todo.
+      const like = (p) => '%' + p.replace(/[\\%_]/g, (c) => '\\' + c) + '%';
+      donde = 'm.mes BETWEEN ? AND ? AND '
+        + palabras.map(() => `${BUSCA_SQL} LIKE ? ESCAPE '\\'`).join(' AND ');
+      params = [desde, hasta, ...palabras.map(like)];
+      // BUSCANDO ENTRA EL ASIENTO ENTERO, no sólo el renglón que coincide: la cuenta del
+      // proveedor coincide, pero lo que hay que ver es contra qué se registró. Por eso los
+      // renglones se piden SÓLO por el período —el grupo ya los acota al asiento encontrado—.
+      return detalleDe(req, res, donde, params, vacio, 'm.mes BETWEEN ? AND ?', [desde, hasta],
+        CUENTAS_BUSCA);
+    }
     let cuentas = [];
     const { rubroDe, tambienVentas } = rubrosDeCuentas(db);
     if (req.query.cuenta) {
@@ -831,13 +883,26 @@ router.get('/detalle', requireAuth, (req, res) => {
     } else {
       return res.status(400).json({ ok: false, error: 'Falta la cuenta o el rubro.' });
     }
-    const vacio = { renglones: 0, debe: 0, haber: 0 };
     if (!cuentas.length) return res.json({ ok: true, data: { filas: [], total: vacio, recortado: 0 } });
     const q = cuentas.map(() => '?').join(',');
-    const donde = `m.mes BETWEEN ? AND ? AND m.cuenta IN (${q})`;
-    const total = db.prepare(`SELECT COUNT(*) AS renglones, ROUND(COALESCE(SUM(m.debe),0), 2) AS debe,
+    donde = `m.mes BETWEEN ? AND ? AND m.cuenta IN (${q})`;
+    params = [desde, hasta, ...cuentas];
+    return detalleDe(req, res, donde, params, vacio);
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// El cuerpo del detalle, con el «de dónde salen las filas» ya resuelto: por rubro, por cuenta o
+// por lo que se buscó. EL JOIN A LAS CUENTAS VA EN TODAS LAS CONSULTAS, también en la del total:
+// el buscador mira el NOMBRE de la cuenta, y sin el join ese nombre no existe.
+function detalleDe(req, res, donde, params, vacio, dondeFilas, paramsFilas, cte) {
+  try {
+    // De dónde sale «c»: la tabla de cuentas, o el CTE con el nombre ya normalizado del buscador.
+    const con = cte ? 'WITH ' + cte + ' ' : '';
+    const tablaC = cte ? 'cbus' : 'pl_abasto_cuentas';
+    const total = db.prepare(`${con}SELECT COUNT(*) AS renglones, ROUND(COALESCE(SUM(m.debe),0), 2) AS debe,
         ROUND(COALESCE(SUM(m.haber),0), 2) AS haber
-      FROM pl_abasto_movimientos m WHERE ${donde}`).get(desde, hasta, ...cuentas);
+      FROM pl_abasto_movimientos m LEFT JOIN ${tablaC} c ON c.cuenta = m.cuenta
+      WHERE ${donde}`).get(...params);
     const col = ORDEN_DETALLE[String(req.query.orden || '')] ? String(req.query.orden) : 'fecha';
     const desc = String(req.query.desc || '1') !== '0';
     const completo = String(req.query.completo || '') === '1';
@@ -846,11 +911,12 @@ router.get('/detalle', requireAuth, (req, res) => {
     // cuando se pide al revés. Así el primero de la lista es siempre el que el encabezado promete.
     const agg = desc ? 'MAX' : 'MIN';
     const sent = desc ? 'DESC' : 'ASC';
-    const grupos = db.prepare(`SELECT ${GRUPO_SQL} AS g, ${agg}(${ORDEN_DETALLE[col]}) AS k
-      FROM pl_abasto_movimientos m LEFT JOIN pl_abasto_cuentas c ON c.cuenta = m.cuenta
-      WHERE ${donde} GROUP BY g ORDER BY k ${sent}, g ${sent} LIMIT ${tope}`).all(desde, hasta, ...cuentas);
-    const cuantos = db.prepare(`SELECT COUNT(*) AS n FROM (SELECT ${GRUPO_SQL} AS g
-      FROM pl_abasto_movimientos m WHERE ${donde} GROUP BY g)`).get(desde, hasta, ...cuentas).n;
+    const grupos = db.prepare(`${con}SELECT ${GRUPO_SQL} AS g, ${agg}(${ORDEN_DETALLE[col]}) AS k
+      FROM pl_abasto_movimientos m LEFT JOIN ${tablaC} c ON c.cuenta = m.cuenta
+      WHERE ${donde} GROUP BY g ORDER BY k ${sent}, g ${sent} LIMIT ${tope}`).all(...params);
+    const cuantos = db.prepare(`${con}SELECT COUNT(*) AS n FROM (SELECT ${GRUPO_SQL} AS g
+      FROM pl_abasto_movimientos m LEFT JOIN ${tablaC} c ON c.cuenta = m.cuenta
+      WHERE ${donde} GROUP BY g)`).get(...params).n;
     const puesto = new Map(grupos.map((x, i) => [x.g, i]));
     const filas = [];
     for (let i = 0; i < grupos.length; i += 400) {
@@ -859,7 +925,7 @@ router.get('/detalle', requireAuth, (req, res) => {
       filas.push(...db.prepare(`SELECT m.fecha, m.asiento, m.cuenta, COALESCE(c.nombre, m.cuenta) AS nombre,
           m.debe, m.haber, m.id, ${GRUPO_SQL} AS grupo
         FROM pl_abasto_movimientos m LEFT JOIN pl_abasto_cuentas c ON c.cuenta = m.cuenta
-        WHERE ${donde} AND ${GRUPO_SQL} IN (${q2})`).all(desde, hasta, ...cuentas, ...lote));
+        WHERE ${dondeFilas || donde} AND ${GRUPO_SQL} IN (${q2})`).all(...(paramsFilas || params), ...lote));
     }
     // El orden final: los asientos como los eligió la consulta, y adentro de cada uno el mismo
     // criterio, para que el primer renglón de cada bloque sea el que lo puso donde está.
@@ -873,13 +939,19 @@ router.get('/detalle', requireAuth, (req, res) => {
     });
     contrapartidas(db, filas);
     marcarSinPareja(db, filas);
-    const data = { filas, total, orden: col, desc: desc ? 1 : 0, asientos_total: cuantos,
+    // BUSCANDO, EL PIE SUMA LO QUE SE VE. El total de arriba cuenta los renglones que coinciden,
+    // pero abajo se muestran los asientos ENTEROS: dejar ese total sería un pie que no es la suma
+    // de su propia lista, que es el defecto que más confunde en esta pantalla.
+    const suyo = dondeFilas ? { renglones: filas.length,
+      debe: r2(filas.reduce((s, f) => s + (Number(f.debe) || 0), 0)),
+      haber: r2(filas.reduce((s, f) => s + (Number(f.haber) || 0), 0)) } : total;
+    const data = { filas, total: suyo, orden: col, desc: desc ? 1 : 0, asientos_total: cuantos,
       recortado: cuantos > grupos.length ? 1 : 0 };
     // PARA EL EXCEL: los asientos ENTEROS, con las cuentas que NO son de este rubro —que son
     // justamente las que explican la operación cuando alguien lo manda a revisar—.
     if (completo) data.asientos = asientosEnteros(db, filas);
     res.json({ ok: true, data });
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
-});
+}
 
 export default router;
