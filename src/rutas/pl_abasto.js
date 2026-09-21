@@ -211,12 +211,17 @@ const CUENTAS_BUSCA = `cbus AS MATERIALIZED (SELECT cuenta, nombre,
 // Lo que se busca de cada renglón: el nombre de la cuenta, su número y el número de asiento. El
 // número de asiento no pasa por el normalizador porque son dígitos.
 const BUSCA_SQL = "(COALESCE(c.busca, LOWER(m.cuenta)) || ' ' || COALESCE(m.asiento,''))";
-// Por palabras sueltas y en cualquier orden, como el resto del panel. Se limita a seis: cada una
-// es un LIKE más sobre el libro entero, y nadie busca con siete palabras.
+// Por palabras sueltas y en cualquier orden, como el resto del panel. Devuelve TODAS: el recorte
+// se hace afuera, para poder decir cuántas se usaron.
 function palabrasDeBusqueda(texto) {
   return SIN_ACENTO.reduce((s, [a, b]) => s.split(a).join(b), String(texto || ''))
-    .toLowerCase().split(/\s+/).filter(Boolean).slice(0, 6);
+    .toLowerCase().split(/\s+/).filter(Boolean);
 }
+// SEIS PALABRAS, Y SE AVISA. Cada una es otro barrido del libro entero —medido: una palabra
+// tarda un tercio de lo que tardan seis—. Y como van con Y, tirar las de más AFLOJA el filtro:
+// el que escribe ocho para acotar recibe MÁS asientos, no menos. Un buscador que devuelve de más
+// en silencio es peor que uno que devuelve de menos, porque el de menos se nota.
+const BUSCA_PALABRAS_MAX = 6;
 // Los asientos sin pareja de lo que no balancea, a lo sumo. En un año entero son cientos.
 const NB_MAX = 2000;
 // La historia del dólar, día por día: argentinadatos.com, pública, gratis y sin clave.
@@ -855,7 +860,8 @@ router.get('/detalle', requireAuth, (req, res) => {
     const buscar = String(req.query.buscar || '').trim();
     if (buscar) {
       // Siempre hay al menos una palabra: acá se llega con `buscar` ya recortado y no vacío.
-      const palabras = palabrasDeBusqueda(buscar);
+      const todas = palabrasDeBusqueda(buscar);
+      const palabras = todas.slice(0, BUSCA_PALABRAS_MAX);
       // El % y el _ del usuario son texto, no comodines: sin escaparlos, buscar «%» trae todo.
       const like = (p) => '%' + p.replace(/[\\%_]/g, (c) => '\\' + c) + '%';
       donde = 'm.mes BETWEEN ? AND ? AND '
@@ -865,7 +871,7 @@ router.get('/detalle', requireAuth, (req, res) => {
       // proveedor coincide, pero lo que hay que ver es contra qué se registró. Por eso los
       // renglones se piden SÓLO por el período —el grupo ya los acota al asiento encontrado—.
       return detalleDe(req, res, donde, params, vacio, 'm.mes BETWEEN ? AND ?', [desde, hasta],
-        CUENTAS_BUSCA);
+        CUENTAS_BUSCA, { palabras: palabras.length, palabras_pedidas: todas.length });
     }
     let cuentas = [];
     const { rubroDe, tambienVentas } = rubrosDeCuentas(db);
@@ -894,7 +900,7 @@ router.get('/detalle', requireAuth, (req, res) => {
 // El cuerpo del detalle, con el «de dónde salen las filas» ya resuelto: por rubro, por cuenta o
 // por lo que se buscó. EL JOIN A LAS CUENTAS VA EN TODAS LAS CONSULTAS, también en la del total:
 // el buscador mira el NOMBRE de la cuenta, y sin el join ese nombre no existe.
-function detalleDe(req, res, donde, params, vacio, dondeFilas, paramsFilas, cte) {
+function detalleDe(req, res, donde, params, vacio, dondeFilas, paramsFilas, cte, extra) {
   try {
     // De dónde sale «c»: la tabla de cuentas, o el CTE con el nombre ya normalizado del buscador.
     const con = cte ? 'WITH ' + cte + ' ' : '';
@@ -945,8 +951,8 @@ function detalleDe(req, res, donde, params, vacio, dondeFilas, paramsFilas, cte)
     const suyo = dondeFilas ? { renglones: filas.length,
       debe: r2(filas.reduce((s, f) => s + (Number(f.debe) || 0), 0)),
       haber: r2(filas.reduce((s, f) => s + (Number(f.haber) || 0), 0)) } : total;
-    const data = { filas, total: suyo, orden: col, desc: desc ? 1 : 0, asientos_total: cuantos,
-      recortado: cuantos > grupos.length ? 1 : 0 };
+    const data = Object.assign({ filas, total: suyo, orden: col, desc: desc ? 1 : 0,
+      asientos_total: cuantos, recortado: cuantos > grupos.length ? 1 : 0 }, extra || {});
     // PARA EL EXCEL: los asientos ENTEROS, con las cuentas que NO son de este rubro —que son
     // justamente las que explican la operación cuando alguien lo manda a revisar—.
     if (completo) data.asientos = asientosEnteros(db, filas);

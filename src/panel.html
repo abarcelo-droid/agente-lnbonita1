@@ -24648,6 +24648,10 @@ SG_MANUAL.plabasto = { titulo: 'P&L Abasto', html:
   + 'elegido— y abre la ventana de asientos con lo que encuentra; la <b>lupa de abajo filtra lo que estás '
   + 'mirando</b> en el cuadro. Y el de arriba <b>es la única que encuentra un cliente o un proveedor</b>: esos '
   + 'nombres están en cuentas del patrimonio, que no entran al cuadro.</li>'
+  + '<li><span class="ver">V1078</span> En esa ventana se ve la <b>cuenta de cada renglón</b> —es lo único '
+  + 'que cambia de una fila a otra— y se puede ordenar por ahí. Y si escribís <b>más de 6 palabras</b> se '
+  + 'buscan las primeras 6 y la ventana te lo dice: con más palabras la búsqueda trae <b>de más</b>, no de '
+  + 'menos, porque tienen que estar todas.</li>'
   + '<li>Busca por <b>número de asiento, número de cuenta o nombre de cuenta</b>, por palabras sueltas en '
   + 'cualquier orden y con que lo contenga. Si un renglón coincide <b>se trae el asiento entero</b>, porque lo '
   + 'que hay que ver es contra qué se registró. La ventana es la misma de siempre: se ordena por cualquier '
@@ -24816,6 +24820,8 @@ SG_MANUAL.plabasto = { titulo: 'P&L Abasto', html:
   + '<li><span class="ver">V1072</span> El cuadro dejó de temblar al llegar al final de los meses. Las dos '
   + 'barras no corrían lo mismo —la de arriba se quedaba 15 px antes, los que el cuadro pierde con su barra '
   + 'de bajar— y se devolvían la tabla la una a la otra.</li>'
+  + '<li><span class="ver">V1078</span> En la ventana de buscar se ve la cuenta de cada renglón, y se avisa '
+  + 'si la búsqueda tenía más de 6 palabras.</li>'
   + '<li><span class="ver">V1077</span> Un buscador de asientos en la barra de arriba, que busca en el '
   + 'libro entero: por número de asiento, por cuenta o por el nombre de un proveedor.</li>'
   + '<li><span class="ver">V1076</span> Ordenar los asientos de un importe por cualquier columna, y bajarlos '
@@ -44662,6 +44668,8 @@ function plaDetPedir(){
     D.total = r.data.total;
     D.recortado = r.data.recortado;
     D.asientosTotal = r.data.asientos_total;
+    D.palabras = r.data.palabras;
+    D.palabrasPedidas = r.data.palabras_pedidas;
     plaDetallePintar();
   });
 }
@@ -44740,12 +44748,21 @@ function plaDetallePintar(){
   var ajustes = (soloNb ? [] : (D.ajustes || [])).filter(function(f){
     return !partes.length || plaCoincide(['ajuste manual', f.nombre, plaMesTxt(f.mes)].join(' '), partes);
   });
-  var conCuenta = D.tipo === 'rubro', span = conCuenta ? 4 : 3;
+  // LA COLUMNA CUENTA SE ESCONDE SÓLO CUANDO SOBRA (V1078). Mirando UNA cuenta, todos los
+  // renglones son de ella y el nombre ya está en el título de la ventana. Pero buscando es al
+  // revés: cada renglón es de una cuenta distinta, y el que coincidió es justamente el único
+  // cuyo nombre no se veía en ningún lado —había que deducirlo leyendo la contrapartida de sus
+  // hermanos, o abrir el asiento—. Y de paso no se podía ordenar por Cuenta, porque el
+  // encabezado que llama a plaDetOrden('cuenta') no se dibujaba.
+  var conCuenta = D.tipo !== 'cuenta', span = conCuenta ? 4 : 3;
   // EL AVISO DEL RECORTE CUENTA ASIENTOS, no renglones, y no dice «los más recientes» salvo que
   // se esté mirando por fecha: ordenando por importe, los que se trajeron son los más grandes.
   var cuales = D.orden === 'fecha' ? (D.desc ? 'los más recientes' : 'los más viejos')
     : (D.desc ? 'los más grandes por ' + D.orden : 'los más chicos por ' + D.orden);
-  eid('pla-detalle-nota').textContent = (D.recortado ? 'Se muestran ' + cuales + ': '
+  eid('pla-detalle-nota').textContent = (D.palabrasPedidas > D.palabras
+      ? 'Se buscó con las primeras ' + nr(D.palabras) + ' palabras de las ' + nr(D.palabrasPedidas)
+        + ' que escribiste: con más, la búsqueda trae de más, no de menos. ' : '')
+    + (D.recortado ? 'Se muestran ' + cuales + ': '
       + nr(plaDetGrupos(D.filas).length) + ' asientos de ' + nr(D.asientosTotal || 0) + '; el total es de todos. ' : '')
     + (soloNb ? (filas.length ? 'Sólo los que no balancean: ' + nr(filas.length) + ' de ' + nr(D.filas.length) + '. '
         : 'Ninguno de estos movimientos está en un asiento sin pareja. ') : '')
