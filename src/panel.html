@@ -5532,11 +5532,22 @@ input[type=number]{-moz-appearance:textfield;appearance:textfield}
        para el detalle de cada uno de los meses». La regla está para que el número que importa
        no haya que ir a buscarlo arrastrando la tabla: acá el que importa es el TOTAL, y queda
        clavado a la vista —con el concepto— mientras los meses se recorren. Vale SÓLO para el
-       cuadro del resultado; No balancea sigue entrando entero. */
-    #pla-pane-resultado .ab-table-wrap{overflow-x:auto !important}
+       cuadro del resultado; No balancea sigue entrando entero.
+
+       V1069, Pablo: «poné la barra arriba y abajo si no». La caja pasó a scrollear en los DOS
+       ejes y el cuadro se lee como una planilla: se acota al alto de la pantalla —si no, la
+       barra de abajo queda al final de la tabla, medido a 648 px fuera de la ventana— y con eso
+       aparece una segunda barra VERTICAL, adentro de una página que ya tiene la suya. Es a
+       propósito: la de la página mueve el panel entero y ésta mueve sólo el cuadro, que es lo
+       que permite que el encabezado de meses y las dos columnas fijas no se vayan nunca. */
+    #pla-pane-resultado .ab-table-wrap{overflow:auto !important;
+      max-height:max(320px,calc(100vh - 300px))}
     #sec-pl-abasto .pla-tbl{table-layout:fixed;width:100%;max-width:98vw;border-collapse:collapse;
       font-size:11px;font-variant-numeric:tabular-nums}
     #pla-tabla{max-width:none}
+    /* Con border-collapse:collapse los bordes son de la TABLA: una celda pegada se lleva el
+       fondo pero no la línea, y al correr la barra las líneas quedan atrás. Sólo el cuadro. */
+    #pla-pane-resultado .pla-tbl{border-collapse:separate;border-spacing:0}
     #pla-pane-resultado .pla-tbl th:first-child,#pla-pane-resultado .pla-tbl td:first-child{
       position:sticky;left:0;z-index:2}
     #pla-pane-resultado .pla-tbl th:nth-child(2),#pla-pane-resultado .pla-tbl td:nth-child(2){
@@ -5548,6 +5559,25 @@ input[type=number]{-moz-appearance:textfield;appearance:textfield}
     #pla-pane-resultado .pla-res td:first-child,#pla-pane-resultado .pla-res td:nth-child(2){background:#0a2744}
     /* «+ Agregar un ajuste» es una fila de una sola celda con colspan: pegada, taparía los meses. */
     #pla-pane-resultado .pla-aju-add td{position:static}
+    /* EL ENCABEZADO NO SE VA (V1069). Una barra para correr los meses sirve si además se sabe
+       QUÉ MES es cada columna. Las dos celdas de la esquina quedan pegadas en los DOS ejes, así
+       que van arriba de todo: el cuerpo abajo (1 y 2), el encabezado 6, las esquinas 7 y 8. La
+       línea de 2 px que el CSS base pone en «thead tr» no se pinta con border-collapse:separate,
+       así que la repone el box-shadow. */
+    #pla-pane-resultado .pla-tbl thead th{position:sticky;top:0;z-index:6;
+      background:var(--bg);box-shadow:inset 0 -2px 0 var(--bor)}
+    #pla-pane-resultado .pla-tbl thead th:nth-child(2){left:248px;z-index:7}
+    #pla-pane-resultado .pla-tbl thead th:first-child{left:0;z-index:8}
+    /* LA BARRA, TAMBIÉN ARRIBA (V1069). Pablo, 20/9/2026: «poné la barra arriba y abajo si no».
+       La de abajo existe desde la V1063, pero vive al final de la tabla: con los rubros abiertos el
+       cuadro mide 1.342 px y su borde inferior queda 648 px por debajo de la pantalla —medido en
+       Chrome—, así que para correr los meses había que bajar hasta el fondo. Ésta va PEGADA ARRIBA
+       (sticky), se ve siempre, y las dos se mueven juntas. Se muestra sólo si hay algo que correr. */
+    #pla-pane-resultado .pla-barra{position:sticky;top:0;z-index:10;display:none;
+      overflow-x:auto;overflow-y:hidden;height:15px;background:var(--pan,#fff);
+      border-bottom:1px solid var(--bor)}
+    #pla-pane-resultado .pla-barra.on{display:block}
+    #pla-pane-resultado .pla-barra div{height:1px}
     #sec-pl-abasto .pla-tbl th,#sec-pl-abasto .pla-tbl td{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
       padding:4px 4px;border-bottom:1px solid var(--bor);text-align:right}
     #sec-pl-abasto .pla-tbl th{font-size:10.5px;color:var(--mut);background:var(--bg)}
@@ -5634,9 +5664,20 @@ input[type=number]{-moz-appearance:textfield;appearance:textfield}
     #sec-pl-abasto .pla-nb-as td:first-child{padding-left:18px}
     #sec-pl-abasto .pla-nb-ren td{color:#475569;font-size:11px}
     @media(max-width:900px){ #sec-pl-abasto .ab-table-wrap{overflow-x:auto !important}
+      /* En un teléfono no hay alto que acotar; y con table-layout:auto el concepto puede pasar
+         los 248 px y la columna TOTAL —clavada ahí— se le monta encima. Se sueltan las dos. */
+      #pla-pane-resultado .ab-table-wrap{max-height:none !important}
+      #pla-pane-resultado .pla-tbl th,#pla-pane-resultado .pla-tbl td{position:static !important}
+      #pla-pane-resultado .pla-barra{display:none !important}
       #sec-pl-abasto .pla-tbl{table-layout:auto}
       #sec-pl-abasto .pla-dnd,#sec-pl-abasto .pla-zonas{grid-template-columns:1fr}
       #sec-pl-abasto .pla-zonas{position:static;max-height:none} }
+    /* IMPRIMIR: sin esto el cuadro saldría cortado al alto de la ventana, porque el alto va como
+       estilo inline y un inline le gana a cualquier regla sin !important. */
+    @media print{
+      #pla-pane-resultado .ab-table-wrap{max-height:none !important;overflow:visible !important}
+      #pla-pane-resultado .pla-barra{display:none !important}
+      #pla-pane-resultado .pla-tbl thead th{position:static} }
   </style>
   <div class="ph"><div><div class="ph-t">📊 P&amp;L Abasto</div>
       <div class="ph-s">El estado de resultados de cada mes, armado con el libro diario del otro sistema</div></div>
@@ -5669,6 +5710,7 @@ input[type=number]{-moz-appearance:textfield;appearance:textfield}
         clic en un importe: los asientos · el importe exacto, pasando el mouse</div>
     </div>
     <div id="pla-moneda-aviso" style="font-size:12px;color:#92400e;margin:0 0 6px"></div>
+    <div class="pla-barra" id="pla-barra-arriba" aria-hidden="true"><div id="pla-barra-fantasma"></div></div>
     <div class="ab-table-wrap"><table class="pla-tbl" id="pla-tabla"></table></div>
   </div>
   <div class="pla-pane" id="pla-pane-rubros">
@@ -24489,8 +24531,8 @@ SG_MANUAL.plabasto = { titulo: 'P&L Abasto', html:
   + '<li>Una columna por mes, <b>del más nuevo al más viejo</b>, y adelante el <b>TOTAL</b> del período. '
   + '<span class="ver">V1063</span> <b>Hasta 24 meses por vez</b>: dos años.</li>'
   + '<li><span class="ver">V1063</span> La columna del <b>concepto es angosta</b>, para que manden los '
-  + 'números, y <b>Concepto y TOTAL quedan fijos</b>: los meses se recorren con la <b>barra de abajo del '
-  + 'cuadro</b> y esas dos columnas no se mueven, así que el total está a la vista por más meses que se '
+  + 'números, y <b>Concepto y TOTAL quedan fijos</b>: los meses se recorren con la barra del cuadro y esas '
+  + 'dos columnas no se mueven, así que el total está a la vista por más meses que se '
   + 'agreguen. Con pocos meses no hay barra: las columnas se estiran y ocupan la pantalla. El nombre '
   + 'completo de cada cuenta se sigue leyendo entero, bajando de renglón si hace falta.</li>'
   + '<li>Los importes se ven en <b>pesos, miles o millones</b>: se elige arriba, y el importe exacto aparece '
@@ -24515,6 +24557,11 @@ SG_MANUAL.plabasto = { titulo: 'P&L Abasto', html:
   + '<li><span class="ver">V1061</span> En los asientos de un importe, <b>un clic en un renglón abre el asiento '
   + 'completo</b> debajo: todas sus cuentas —las del patrimonio también— con su debe y su haber, y abajo si balancea o '
   + 'por cuánto no. Otro clic lo cierra.</li>'
+  + '<li><span class="ver">V1069</span> El cuadro <b>se recorre dentro de su propia caja</b>, que llega hasta '
+  + 'el pie de la pantalla: el <b>encabezado de meses queda fijo arriba</b> —por más que se baje, siempre se '
+  + 'sabe qué mes es cada columna— y hay <b>dos barras para correr los meses</b>, una <b>arriba</b> y otra '
+  + '<b>abajo</b> del cuadro, las dos siempre a la vista y moviéndose juntas: da igual cuál se use. Aparecen '
+  + 'sólo cuando hay meses que no entran; si entran todos, no están.</li>'
   + '<li><span class="ver">V1063</span> En esa misma lista, el tilde <b>⚠️ Sólo los que no balancean</b> deja '
   + 'únicamente los movimientos cuyo asiento <b>quedó sin pareja</b> —los mismos que lista la solapa No '
   + 'balancea—, y al lado del tilde dice cuántos son. Cada uno lleva un <b>⚠️</b> aunque el tilde esté sin '
@@ -24633,6 +24680,9 @@ SG_MANUAL.plabasto = { titulo: 'P&L Abasto', html:
 
   + '<h3>Qué cambió, y desde cuándo</h3>'
   + '<ul>'
+  + '<li><span class="ver">V1069</span> El cuadro se lee como una planilla: encabezado de meses fijo y barra '
+  + 'para correrlos arriba y abajo, las dos a la vista. La de abajo quedaba al final de la tabla, a 600 px por '
+  + 'debajo de la pantalla.</li>'
   + '<li><span class="ver">V1068</span> En los asientos de un importe, el tilde de los que no balancean dejó de '
   + 'montarse sobre el texto de al lado.</li>'
   + '<li><span class="ver">V1067</span> El Excel de No balancea, más simple: una hoja con un asiento por fila y su '
@@ -43888,6 +43938,7 @@ function plaInit(){
   PLA.nb = null;
   plaTab('resultado');
   plaCargar(true);
+  plaObservarCaja();
 }
 
 function plaTab(t){
@@ -44064,18 +44115,92 @@ function plaCelda(v, ventas, conPct){
 // El TOTAL va un tercio más ancho, que es la columna que más cifras tiene.
 var PLA_ANCHO = { concepto: 248, mes: 92, caja: 1180 };
 
+// LOS 18 PX SON LA BARRA VERTICAL (V1069). El ancho se mide ANTES de acotar el alto, así que
+// todavía no existe la barra vertical que la caja va a tener: sin descontarla, la tabla sale
+// ~15 px más ancha de lo que entra y aparece una barra horizontal de unos pocos píxeles que no
+// debería estar (medido: tabla 1512 contra una caja de 1506).
 function plaAnchos(caja, columnas){
-  var libre = Math.max(300, (Number(caja) || PLA_ANCHO.caja) - PLA_ANCHO.concepto - 2);
+  var libre = Math.max(300, (Number(caja) || PLA_ANCHO.caja) - PLA_ANCHO.concepto - 18);
   var mes = Math.max(PLA_ANCHO.mes, Math.floor(libre / (columnas + 0.3)));
   var total = Math.round(mes * 1.3);
   return { concepto: PLA_ANCHO.concepto, mes: mes, total: total,
     tabla: PLA_ANCHO.concepto + total + mes * (columnas - 1) };
 }
 
+// EL ALTO DE LA CAJA (V1069). El encabezado del panel cambia de alto con la ventana, con el
+// zoom y con el menú escondido (V1063): un número fijo deja el cuadro corto en un monitor y
+// desbordado en una notebook. Piso de 320 px —el encabezado más doce renglones—: por debajo de
+// eso deja de ser un cuadro y conviene que scrollee la página.
+function plaAltoDisponible(alto, top){
+  return Math.max(320, Math.round((alto || 0) - (top || 0) - 16));
+}
+
+function plaAltoCaja(){
+  if (typeof document === 'undefined' || typeof window === 'undefined') return;
+  var wrap = document.querySelector('#pla-pane-resultado .ab-table-wrap');
+  if (!wrap || !wrap.style) return;
+  if (window.innerWidth <= 900) { wrap.style.maxHeight = ''; return; }   // en el teléfono, nada
+  var r = wrap.getBoundingClientRect();
+  wrap.style.maxHeight = plaAltoDisponible(window.innerHeight, r.top + (window.pageYOffset || 0)) + 'px';
+}
+
+// EL ANCHO DEL CUADRO CAMBIA SIN QUE NADIE PINTE (V1069): agrandar la ventana, el zoom, salir de
+// pantalla partida, esconder el menú. Un solo observador cubre los cuatro casos; sin él la tabla
+// se queda con el ancho de antes —barra donde ya no hace falta, o un hueco a la derecha—.
+var PLA_RO = null, PLA_ANCHO_PREV = 0, PLA_RO_TMR = null;
+function plaObservarCaja(){
+  if (typeof document === 'undefined' || typeof ResizeObserver === 'undefined') return;
+  var wrap = document.querySelector('#pla-pane-resultado .ab-table-wrap');
+  if (!wrap || PLA_RO) return;
+  PLA_ANCHO_PREV = wrap.clientWidth;
+  PLA_RO = new ResizeObserver(function(){
+    clearTimeout(PLA_RO_TMR);
+    PLA_RO_TMR = setTimeout(function(){
+      var w = wrap.clientWidth;
+      // Si lo que cambió fue el ALTO —porque acabamos de ponerle el max-height— no se vuelve a
+      // pintar: sólo se recalcula, da lo mismo y no dispara nada más. Con la pantalla cerrada el
+      // ancho da 0, y pintar ahí dejaría clavados los anchos por defecto.
+      if (w > 0 && Math.abs(w - PLA_ANCHO_PREV) > 2) { PLA_ANCHO_PREV = w; plaPintar(); }
+      else plaAltoCaja();
+    }, 120);
+  });
+  PLA_RO.observe(wrap);
+}
+
+// LA BARRA DE ARRIBA (V1069). Lleva adentro un div del ANCHO DE LA TABLA: eso es lo que le da algo
+// que correr. Las dos barras se copian el scroll la una a la otra, con una guarda para que el eco de
+// una no vuelva a mover a la otra. Si el cuadro entra entero, la barra de arriba no se muestra: una
+// barra que no corre nada es ruido.
+function plaBarraArriba(ancho){
+  var caja = eid('pla-barra-arriba'), fantasma = eid('pla-barra-fantasma');
+  // El cuadro se dibuja también fuera del navegador —los tests corren plaPintar con un eid de
+  // mentira y sin document—, así que se sale antes de tocar nada de todo eso.
+  if (!caja || !fantasma || !caja.classList || typeof document === 'undefined') return;
+  var wrap = document.querySelector('#pla-pane-resultado .ab-table-wrap');
+  if (!wrap) return;
+  fantasma.style.width = (ancho || 0) + 'px';
+  var hay = (ancho || 0) > wrap.clientWidth + 1;
+  caja.classList.toggle('on', hay);
+  if (!hay || caja._pla) return;
+  caja._pla = 1;
+  // SE COMPARAN VALORES, NO SE MARCA UN ECO. Con un flag, si al copiar el scroll el valor ya era
+  // el mismo —en los topes, o un arrastre que no llegó a mover un píxel— el evento de vuelta no
+  // se dispara, el flag queda encendido y se come el movimiento SIGUIENTE: la barra se traba una
+  // vez y anda a la otra, que es el peor tipo de falla para reportar. Comparar no guarda estado.
+  var sinc = function(a, b){
+    a.addEventListener('scroll', function(){
+      if (Math.round(a.scrollLeft) !== Math.round(b.scrollLeft)) b.scrollLeft = a.scrollLeft;
+    }, { passive: true });
+  };
+  sinc(caja, wrap);
+  sinc(wrap, caja);
+}
+
 function plaPintar(){
   var d = PLA.datos, tb = eid('pla-tabla'); if (!d || !tb) return;
   if (!d.meses || !d.meses.length) {
     if (tb.style) tb.style.width = '';
+    plaBarraArriba(0);
     tb.innerHTML = '<tr><td style="text-align:left;color:var(--mut)">' + ((d.meses_disponibles || []).length
       ? 'No hay movimientos en ese período.' : 'Todavía no hay datos: subí el libro diario.') + '</td></tr>';
     return;
@@ -44148,6 +44273,10 @@ function plaPintar(){
   });
   h += fila('pla-res', '⭐ RESULTADO NETO', T.subtotales.neto, true);
   tb.innerHTML = h + '</tbody>';
+  // Primero el alto: al aparecer la barra vertical, el ancho visible baja unos 15 px, y es con
+  // ese número que se decide si hace falta la barra de los meses.
+  plaAltoCaja();
+  plaBarraArriba(A.tabla);
 }
 
 function plaToggle(k){ PLA.abiertos[k] = !PLA.abiertos[k]; plaPintar(); }
