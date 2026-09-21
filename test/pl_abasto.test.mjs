@@ -380,7 +380,7 @@ test('los asientos de un importe: con la contrapartida, y el total de todos aunq
 // ══ 4 · LA PANTALLA ════════════════════════════════════════════════════════════════
 
 let TABLA = null;   // la tabla del último PANTALLA(), para mirarle el ancho (V1063)
-const PANTALLA = (datos, abiertos = {}, unidad, op, moneda, caja = 1180) => {
+const PANTALLA = (datos, abiertos = {}, unidad, op, moneda, caja = 1180, busca = '') => {
   const tb = { innerHTML: '', style: {}, parentNode: { clientWidth: caja } };
   TABLA = tb;
   new Function('PLA', 'eid', 'escH', [
@@ -395,6 +395,13 @@ const PANTALLA = (datos, abiertos = {}, unidad, op, moneda, caja = 1180) => {
     fuente(PANEL, 'function plaUnidadClave(){'),
     fuente(PANEL, 'function plaEnMoneda(d, moneda){'),
     fuente(PANEL, 'function plaMonedaCartel(sin){'),
+    fuente(PANEL, 'function sgNorm(s){'),
+    fuente(PANEL, 'function plaBuscaNorm(){'),
+    fuente(PANEL, 'function plaCoincide(txt, q){'),
+    fuente(PANEL, 'function plaTextoCuenta(c, rubro){'),
+    fuente(PANEL, 'function plaTextoAjuste(a, rubro){'),
+    fuente(PANEL, 'function plaFiltrar(d, q){'),
+    fuente(PANEL, 'function plaBuscaCartel(d, q){'),
     fuente(PANEL, 'function plaUnidadGuardada(){'),
     fuente(PANEL, 'function plaUnidadAuto(T){'),
     fuente(PANEL, 'function plaCelda(v, ventas, conPct){'),
@@ -403,7 +410,7 @@ const PANTALLA = (datos, abiertos = {}, unidad, op, moneda, caja = 1180) => {
     fuente(PANEL, 'function plaBarraArriba(){'),
     fuente(PANEL, 'function plaPintar(){'),
     'plaPintar();',
-  ].join('\n'))({ datos, abiertos, unidad, op, moneda }, () => tb, (x) => String(x));
+  ].join('\n'))({ datos, abiertos, unidad, op, moneda, busca }, () => tb, (x) => String(x));
   return tb.innerHTML;
 };
 const TOTALES = new Function([
@@ -935,7 +942,10 @@ test('en dólares: cada mes con su cotización, el total es la suma, y un mes si
   assert.equal(csv(u.datos, true).slice(1).split('\r\n')[0], 'Tipo;Concepto;Cuenta;TOTAL U$S;Ago 2025;Jul 2025');
   const exp = fuente(PANEL, 'function plaExportar(){');
   assert.match(exp, /if \(usd && conv\.sin\.length\) \{/);
-  assert.match(exp, /plaCsv\(conv\.datos, usd\)/);
+  // V1074: con un filtro puesto, el CSV baja LO QUE SE VE.
+  assert.match(exp, /var datos = q \? plaFiltrar\(conv\.datos, q\) : conv\.datos;/,
+    'el CSV baja el cuadro entero aunque en pantalla haya tres cuentas');
+  assert.match(exp, /plaCsv\(datos, usd\)/);
   // La unidad se recuerda por moneda, y al cambiar de moneda se vuelve a elegir.
   assert.match(fuente(PANEL, 'function plaUnidadClave(){'), /'pla-unidad' \+ \(PLA\.moneda === 'usd' \? '-usd' : ''\)/);
   assert.match(fuente(PANEL, 'function plaMonedaCambiar(){'), /PLA\.unidad = null;/);
@@ -2569,6 +2579,173 @@ test('el ancho se vuelve a calcular cuando cambia la caja, sin repintar de mas',
     /if \(tb\.parentNode && tb\.parentNode\.offsetWidth\) PLA_ANCHO_PREV = tb\.parentNode\.offsetWidth;/);
   const car = fuente(PANEL, 'function plaCargar(inicial){');
   assert.match(car, /Cargando…/, 'ya no hay cartel de carga: revisar de nuevo este test');
+});
+
+// ══ 7j · LA LUPA DEL CUADRO (V1074) ══════════════════════════════════════════════════
+//
+// Pablo, 21/9/2026: «abajo poné una lupa con un campo para buscar… SIEMPRE la búsqueda debe ser
+// con CONTIENE porque puedo buscar el nombre del proveedor o cualquier cosa ahí».
+//
+// Se busca con sgNorm, el único normalizador del panel: sin acentos y con la ñ intacta.
+
+const BUSCA = new Function('PLA', [
+  fuente(PANEL, 'function sgNorm(s){'),
+  fuente(PANEL, 'function plaBuscaNorm(){'),
+  fuente(PANEL, 'function plaCoincide(txt, q){'),
+  fuente(PANEL, 'function plaTextoCuenta(c, rubro){'),
+  fuente(PANEL, 'function plaTextoAjuste(a, rubro){'),
+  fuente(PANEL, 'function plaFiltrar(d, q){'),
+  fuente(PANEL, 'function plaBuscaCartel(d, q){'),
+  ['return { norm: plaBuscaNorm, coincide: plaCoincide, filtrar: plaFiltrar,',
+    '  cartel: plaBuscaCartel, cuenta: plaTextoCuenta };'].join('\n'),
+].join('\n'));
+
+const DATOS_B = {
+  rubros: RUBROS, meses: ['2026-07', '2026-08'], meses_disponibles: ['2026-07', '2026-08'],
+  cuentas: [
+    { cuenta: '4.1.01.01.0001', nombre: 'VENTAS COTO CICSA', rubro: 'ventas', meses: { '2026-07': 1000, '2026-08': 1500 } },
+    { cuenta: '4.2.04.14.0000', nombre: 'FLETES PEÑA S.A.', rubro: 'costos_fijos', meses: { '2026-07': -300, '2026-08': -200 } },
+    { cuenta: '4.2.04.15.0000', nombre: 'COMISIÓN DEL DISTRIBUIDOR', rubro: 'costos_variables', meses: { '2026-08': -120 } },
+    { cuenta: '4.2.09.99.0000', nombre: 'GASTOS VARIOS', rubro: 'costos_fijos', meses: { '2026-07': -50 } },
+  ],
+  ajustes: [
+    { id: 7, rubro: 'costos_fijos', nombre: 'Seguro de la flota de PEÑA', meses: { '2026-07': -80 } },
+    { id: 8, rubro: 'impuestos', nombre: 'IIBB del trimestre', meses: { '2026-08': -40 } },
+  ],
+};
+
+test('la lupa busca CONTIENE, sin acentos y con la ñ intacta', () => {
+  const B = BUSCA({ busca: '' });
+  // CONTIENE, no «empieza con»: el nombre del otro sistema trae el proveedor en el medio.
+  assert.ok(B.coincide('VENTAS COTO CICSA', 'coto'));
+  assert.ok(B.coincide('VENTAS COTO CICSA', 'cicsa'));
+  assert.ok(!B.coincide('VENTAS COTO CICSA', 'carrefour'));
+  // Sin acentos: nadie los escribe al buscar.
+  assert.ok(B.coincide('COMISIÓN DEL DISTRIBUIDOR', 'comision'));
+  // Y al reves, escrito con acento en la lupa: lo que se escribe pasa por el mismo molde antes
+  // de comparar, asi que encuentra igual.
+  const conAcento = BUSCA({ busca: 'COMISIÓN' });
+  assert.deepEqual(conAcento.filtrar(DATOS_B, conAcento.norm()).cuentas.map((x) => x.nombre),
+    ['COMISIÓN DEL DISTRIBUIDOR']);
+  // PERO LA Ñ SE RESPETA: es una letra del idioma y tiene tecla propia. Si se cayera, «peña»
+  // encontraría «pena» y al revés, que es justo el error que la regla del panel no quiere.
+  assert.ok(B.coincide('FLETES PEÑA S.A.', 'peña'));
+  assert.ok(!B.coincide('FLETES PEÑA S.A.', 'pena'));
+  assert.ok(!B.coincide('PENALIDADES', 'peña'));
+  // Lo que se escribe en la lupa pasa por el mismo molde, y los espacios de los costados no cuentan.
+  assert.equal(BUSCA({ busca: '  PEÑA  ' }).norm(), 'peña');
+  assert.equal(BUSCA({ busca: 'Comisión' }).norm(), 'comision');
+  assert.equal(BUSCA({ busca: '' }).norm(), '');
+});
+
+test('se busca por todo lo que se lee en el renglón, y por el número con y sin puntos', () => {
+  const B = BUSCA({ busca: '' });
+  const c = DATOS_B.cuentas[1];
+  // EL NÚMERO VA DOS VECES: nadie lo escribe igual, y «4.2.04» y «4204» son la misma cuenta.
+  assert.ok(B.coincide(B.cuenta(c, 'COSTOS FIJOS'), '4.2.04'));
+  assert.ok(B.coincide(B.cuenta(c, 'COSTOS FIJOS'), '42041'));
+  // Y el nombre del rubro, para poder pedir el rubro entero.
+  assert.ok(B.coincide(B.cuenta(c, 'COSTOS FIJOS'), 'costos fijos'));
+  const f = (q) => B.filtrar(DATOS_B, q);
+  assert.deepEqual(f('coto').cuentas.map((x) => x.nombre), ['VENTAS COTO CICSA']);
+  assert.deepEqual(f('coto').ajustes, []);
+  // Un proveedor que está en una cuenta Y en un ajuste manual aparece en los dos lados.
+  assert.deepEqual(f('peña').cuentas.map((x) => x.nombre), ['FLETES PEÑA S.A.']);
+  assert.deepEqual(f('peña').ajustes.map((x) => x.nombre), ['Seguro de la flota de PEÑA']);
+  // Un ajuste se encuentra también por la palabra «ajuste», que es como se ve en el cuadro.
+  assert.equal(f('ajuste').ajustes.length, 2);
+  // Y el período no se toca: buscar filtra el cuadro, no vuelve a pedir datos.
+  assert.deepEqual(f('coto').meses, DATOS_B.meses);
+});
+
+test('con la lupa puesta el cuadro muestra lo encontrado, y lo dice: no es el resultado del mes', () => {
+  // Sin filtro, el cuadro de siempre: subtotales y RESULTADO NETO.
+  const todo = PANTALLA(DATOS_B, {}, 1, false, 'ars', 1180, '');
+  assert.match(todo, /RESULTADO NETO/);
+  assert.match(todo, /EBITDA/);
+  assert.ok(!/TOTAL DE LO ENCONTRADO/.test(todo));
+  // Con filtro: sólo los rubros con coincidencias, y ABIERTOS aunque nadie los haya abierto.
+  const h = PANTALLA(DATOS_B, {}, 1, false, 'ars', 1180, 'peña');
+  assert.match(h, /FLETES PEÑA S\.A\./, 'encontró la cuenta pero no la muestra: el rubro quedó cerrado');
+  assert.match(h, /Seguro de la flota de PEÑA/);
+  assert.ok(!/GASTOS VARIOS/.test(h), 'muestra cuentas que no coinciden');
+  assert.ok(!/COTO/.test(h));
+  // NI SUBTOTALES NI RESULTADO NETO: un «EBITDA» de dos renglones sueltos no es un EBITDA, y
+  // decirle RESULTADO NETO a la suma de una búsqueda es pedir que alguien lea otra cosa.
+  assert.ok(!/EBITDA/.test(h), 'un subtotal de lo filtrado no significa nada');
+  assert.ok(!/MARGEN BRUTO/.test(h));
+  assert.ok(!/RESULTADO NETO/.test(h));
+  assert.match(h, /⭐ TOTAL DE LO ENCONTRADO/);
+  // Y los importes son los de lo encontrado: -380 (la cuenta) y -80 (el ajuste) = -460.
+  const T = TOTALES(BUSCA({ busca: '' }).filtrar(DATOS_B, 'peña'));
+  assert.equal(T.subtotales.neto.TOTAL, -580);
+  assert.equal(T.rubros.costos_fijos.TOTAL, -580);
+  // EL % SOBRE VENTAS NO SE DIBUJA con el filtro puesto: la base también quedó filtrada, así que
+  // seria un porcentaje sobre unas ventas que no son las del período. Se prueba buscando algo que
+  // SI deja ventas en pie —si no quedan ventas, el % no se dibuja igual y el test no diría nada—.
+  assert.ok(!/pla-pct/.test(h), 'con el filtro puesto el % se calcula sobre unas ventas que no son');
+  const soloVentas = PANTALLA(DATOS_B, {}, 1, false, 'ars', 1180, 'coto');
+  assert.match(soloVentas, /VENTAS COTO CICSA/);
+  assert.ok(!/pla-pct/.test(soloVentas), 'el % del rubro se sigue dibujando sobre la base filtrada');
+  assert.match(PANTALLA(DATOS_B, {}, 1, false, 'ars', 1180, ''), /pla-pct/, 'sin filtro el % tiene que estar');
+  // Al que puede operar no se le ofrece agregar un ajuste desde una lista filtrada.
+  assert.ok(!/Agregar un ajuste manual/.test(PANTALLA(DATOS_B, {}, 1, true, 'ars', 1180, 'peña')));
+  assert.match(PANTALLA(DATOS_B, { costos_fijos: true }, 1, true, 'ars', 1180, ''), /Agregar un ajuste manual/);
+});
+
+test('la lupa avisa cuántos encontró, y cuando no encuentra nada lo dice en el cuadro', () => {
+  const B = BUSCA({ busca: '' });
+  assert.equal(B.cartel(DATOS_B, ''), '', 'sin buscar nada no hay nada que aclarar');
+  const c1 = B.cartel(B.filtrar(DATOS_B, 'peña'), 'peña');
+  assert.match(c1, /<b>1 cuenta y 1 ajuste<\/b>/);
+  assert.match(c1, /los importes son los de lo encontrado, no los del período/);
+  assert.match(B.cartel(B.filtrar(DATOS_B, 'costos fijos'), 'costos fijos'), /<b>2 cuentas y 1 ajuste<\/b>/);
+  assert.match(B.cartel(B.filtrar(DATOS_B, 'coto'), 'coto'), /<b>1 cuenta<\/b>/);
+  assert.match(B.cartel(B.filtrar(DATOS_B, 'nada'), 'nada'), /No hay nada que diga eso/);
+  // Y en el cuadro, en vez de un total en cero que parece un dato.
+  const h = PANTALLA(DATOS_B, {}, 1, false, 'ars', 1180, 'carrefour');
+  assert.match(h, /No hay ninguna cuenta ni ajuste que diga «carrefour»/);
+  assert.ok(!/TOTAL DE LO ENCONTRADO/.test(h), 'un total de nada se lee como un dato');
+});
+
+test('la lupa está pegada al cuadro, y los botones quedaron arriba', () => {
+  // Pegada a lo que filtra: puesta arriba, al lado de Desde y Hasta, se leería como si filtrara
+  // el período.
+  const iBotones = PANEL.indexOf('onclick="plaExportar()"');
+  const iLupa = PANEL.indexOf('<div class="pla-busca">');
+  const iBarra = PANEL.indexOf('<div class="pla-barra" id="pla-barra-arriba"');
+  const iCuadro = PANEL.indexOf('<div class="ab-table-wrap"><table class="pla-tbl" id="pla-tabla">');
+  assert.ok(iBotones > 0 && iLupa > iBotones, 'la lupa quedó arriba de los botones');
+  assert.ok(iBarra > iLupa && iCuadro > iBarra, 'la lupa no está pegada al cuadro');
+  assert.match(PANEL, /<input id="pla-buscar" autocomplete="off" oninput="plaBuscarTeclas\(\)"/);
+  assert.match(PANEL, /placeholder="Buscar una cuenta, un ajuste, un proveedor…"/);
+  assert.match(PANEL, /<button class="pla-bx" id="pla-buscar-x"/);
+  // Se entra sin filtro puesto: si no, la visita siguiente arranca con medio cuadro escondido.
+  const init = fuente(PANEL, 'function plaInit(){');
+  assert.match(init, /PLA\.busca = '';/);
+  assert.match(init, /var eb = eid\('pla-buscar'\); if \(eb\) eb\.value = '';/);
+  // Escribir no dibuja en cada tecla: con novecientas cuentas eso se siente.
+  const teclas = fuente(PANEL, 'function plaBuscarTeclas(){');
+  assert.match(teclas, /clearTimeout\(PLA_BUSCA_TMR\)/);
+  assert.match(teclas, /setTimeout\(function\(\)\{ PLA\.busca = v; plaPintar\(\); \}, 150\)/);
+  // Y la ✕ deja el cuadro entero y el foco donde estaba.
+  const limpiar = fuente(PANEL, 'function plaBuscarLimpiar(){');
+  assert.match(limpiar, /PLA\.busca = '';/);
+  assert.match(limpiar, /e\.focus\(\)/);
+});
+
+test('manual V1074: la lupa, el contenido, y que los importes son los de lo encontrado', () => {
+  const M = manual();
+  assert.match(M, /<span class="ver">V1074<\/span>/);
+  assert.match(M, /<span class="ver">V1074<\/span> Una <b>lupa<\/b> abajo del cuadro para buscar cualquier cosa/,
+    'no quedó anotado en «Qué cambió, y desde cuándo»');
+  assert.match(M, /La <b>lupa<\/b> de abajo del todo filtra el cuadro/);
+  assert.match(M, /alcanza con que <b>lo contenga<\/b>/);
+  assert.match(M, /los importes que se ven pasan a ser los de <b>lo encontrado<\/b>/);
+  assert.match(M, /el renglón de abajo dice <b>TOTAL DE LO ENCONTRADO<\/b>/);
+  // Lo que el manual AFIRMA, contra el código.
+  assert.match(fuente(PANEL, 'function plaCoincide(txt, q){'), /sgNorm/);
+  assert.match(fuente(PANEL, 'function plaPintar(){'), /q \? '⭐ TOTAL DE LO ENCONTRADO' : '⭐ RESULTADO NETO'/);
 });
 
 // ══ 7i · UN AJUSTE PUEDE QUEDAR PENDIENTE (V1070) ═════════════════════════════════════
