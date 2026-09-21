@@ -393,6 +393,9 @@ const PANTALLA = (datos, abiertos = {}, unidad, op, moneda, caja = 1180) => {
     fuente(PANEL, 'function plaUnidadGuardada(){'),
     fuente(PANEL, 'function plaUnidadAuto(T){'),
     fuente(PANEL, 'function plaCelda(v, ventas, conPct){'),
+    fuente(PANEL, 'function plaAltoDisponible(alto, top){'),
+    fuente(PANEL, 'function plaAltoCaja(){'),
+    fuente(PANEL, 'function plaBarraArriba(ancho){'),
     fuente(PANEL, 'function plaPintar(){'),
     'plaPintar();',
   ].join('\n'))({ datos, abiertos, unidad, op, moneda }, () => tb, (x) => String(x));
@@ -1403,10 +1406,12 @@ test('en el cuadro cada cuenta se ve con su nombre entero; el número queda al p
   assert.match(PANEL, /#sec-pl-abasto \.pla-cta td:first-child,#sec-pl-abasto \.pla-aju td:first-child\{white-space:normal;overflow:visible;\r?\n\s+text-overflow:clip;overflow-wrap:anywhere\}/);
   // V1063: el concepto va angosto y en píxeles, y con dos meses las columnas se estiran para
   // llenar la pantalla. El concepto ya no se lleva dos tercios del cuadro.
-  assert.match(h, /^<colgroup><col style="width:248px"><col style="width:365px"><col style="width:281px"><col style="width:281px"><\/colgroup>/);
+  assert.match(h, /^<colgroup><col style="width:248px"><col style="width:359px"><col style="width:276px"><col style="width:276px"><\/colgroup>/);
   // Con doce meses las columnas llegan a su mínimo, y ahí es donde aparece la barra de abajo.
   const doce = Object.assign({}, DATOS, { meses: ['2025-01', '2025-02', '2025-03', '2025-04', '2025-05', '2025-06', '2025-07', '2025-08', '2025-09', '2025-10', '2025-11', '2025-12'] });
   assert.match(PANTALLA(doce), /^<colgroup><col style="width:248px"><col style="width:120px">(<col style="width:92px">){12}<\/colgroup>/);
+  // Con doce meses los meses ya están en su mínimo, así que el colchón de la barra vertical no
+  // los toca: lo que cambia es cuándo aparece la barra, no el ancho mínimo de una columna.
 });
 
 const NB_PLANILLA = { desde: '2026-07', hasta: '2026-09', total: { diferencia: -12123641.19 }, sin_pareja: 2, emparejados: 2, recortado: 0,
@@ -1690,12 +1695,15 @@ test('el cuadro sale con esos anchos, y Concepto y TOTAL quedan pegados mientras
   const A = anchos(1180, 3);   // TOTAL + dos meses
   assert.ok(h.startsWith('<colgroup><col style="width:' + PLA_ANCHO.concepto + 'px"><col style="width:'
     + A.total + 'px"><col style="width:' + A.mes + 'px"><col style="width:' + A.mes + 'px"></colgroup>'), h.slice(0, 200));
+  // El ancho se reparte descontando la barra vertical de la caja: sin eso la tabla sale más
+  // ancha de lo que entra y aparece una barra horizontal de unos pocos píxeles.
+  assert.ok(A.tabla <= 1180 - 16, 'la tabla no deja lugar para la barra vertical: ' + A.tabla);
   assert.equal(TABLA.style.width, A.tabla + 'px', 'la tabla no se lleva su ancho: las columnas pegadas se desalinean');
   // Sin meses no queda el ancho de la vez anterior.
   PANTALLA({ rubros: RUBROS, meses: [], meses_disponibles: [] });
   assert.equal(TABLA.style.width, '');
-  // La barra, SÓLO en el cuadro del resultado; No balancea sigue entrando entero.
-  assert.match(PANEL, /#pla-pane-resultado \.ab-table-wrap\{overflow-x:auto !important\}/);
+  // La caja del cuadro scrollea sola y llega hasta el pie de la pantalla; No balancea, no.
+  assert.match(PANEL, /#pla-pane-resultado \.ab-table-wrap\{overflow:auto !important;\r?\n\s+max-height:max\(320px,calc\(100vh - 300px\)\)\}/);
   assert.match(PANEL, /#sec-pl-abasto \.ab-table-wrap\{overflow-x:hidden !important\}/);
   // Las dos primeras columnas, pegadas, y la del TOTAL justo donde termina el concepto.
   assert.match(PANEL, /#pla-pane-resultado \.pla-tbl th:first-child,#pla-pane-resultado \.pla-tbl td:first-child\{\r?\n\s+position:sticky;left:0;z-index:2\}/);
@@ -1961,7 +1969,7 @@ test('manual V1063: el cuadro que entra con más meses, el tilde de los que no b
   assert.match(M, /<b>Hasta 24 meses por vez<\/b>: dos años/);
   assert.match(fuente(PANEL, 'function plaCargar(inicial){'), /dentro > 24/);
   assert.match(M, /La columna del <b>concepto es angosta<\/b>, para que manden los números, y <b>Concepto y TOTAL quedan fijos<\/b>/);
-  assert.match(M, /los meses se recorren con la <b>barra de abajo del cuadro<\/b>/);
+  assert.match(M, /los meses se recorren con la barra del cuadro/);
   assert.match(M, /Con pocos meses no hay barra: las columnas se estiran y ocupan la pantalla/);
   assert.match(M, /el tilde <b>⚠️ Sólo los que no balancean<\/b> deja únicamente los movimientos cuyo asiento <b>quedó sin pareja<\/b>/);
   assert.match(M, /con el tilde puesto el total de abajo es el de lo que se ve/);
@@ -2024,4 +2032,145 @@ test('el tilde se lee como una frase, no como un rótulo de campo', () => {
     'volvió el label con estilos sueltos');
   // Y queda anotado en el historial del manual, que es donde Pablo mira qué cambió.
   assert.match(manual(), /<span class="ver">V1068<\/span> En los asientos de un importe, el tilde de los que no balancean dejó de montarse sobre el texto de al lado/);
+});
+
+// ══ 7h · LA BARRA DE LOS MESES, TAMBIÉN ARRIBA (V1069) ════════════════════════════════
+//
+// Pablo, 20/9/2026: «poné la barra arriba y abajo si no». La de abajo existe desde la V1063,
+// pero vive al final de la tabla: medido en Chrome, con los rubros abiertos el cuadro mide
+// 1.342 px y su borde inferior queda 648 px POR DEBAJO de la pantalla. O sea: estaba, y no se
+// podía tocar sin bajar hasta el fondo.
+
+// La barra con un DOM de mentira: dos cajas que scrollean y un fantasma que les da el ancho.
+const BARRA = (anchoTabla, anchoVisible) => {
+  const clases = new Set();
+  const caja = { scrollLeft: 0, clientWidth: anchoVisible, scrollWidth: anchoTabla, style: {},
+    classList: { toggle: (c, v) => { if (v) clases.add(c); else clases.delete(c); } },
+    h: {}, addEventListener(t, f) { this.h[t] = f; } };
+  const fantasma = { style: {} };
+  const wrap = { scrollLeft: 0, clientWidth: anchoVisible, h: {}, addEventListener(t, f) { this.h[t] = f; } };
+  const els = { 'pla-barra-arriba': caja, 'pla-barra-fantasma': fantasma };
+  new Function('eid', 'document', [
+    fuente(PANEL, 'function plaBarraArriba(ancho){'),
+    'plaBarraArriba(' + anchoTabla + ');',
+  ].join('\n'))((id) => els[id], { querySelector: () => wrap });
+  return { caja, fantasma, wrap, clases };
+};
+
+test('las dos barras se mueven juntas, y ninguna le devuelve el eco a la otra', () => {
+  const b = BARRA(2576, 1536);
+  assert.equal(b.fantasma.style.width, '2576px', 'sin el ancho de la tabla, la barra de arriba no corre nada');
+  assert.ok(b.clases.has('on'), 'con 24 meses la barra de arriba tiene que verse');
+  // Mover la de arriba mueve el cuadro...
+  b.caja.scrollLeft = 420;
+  b.caja.h.scroll();
+  assert.equal(b.wrap.scrollLeft, 420);
+  // ...y el eco de ese movimiento no lo devuelve, porque ya están en el mismo lugar.
+  b.wrap.h.scroll();
+  assert.equal(b.caja.scrollLeft, 420, 'las barras se empujan solas');
+  // Y al revés: mover el cuadro mueve la de arriba.
+  b.wrap.scrollLeft = 900;
+  b.wrap.h.scroll();
+  assert.equal(b.caja.scrollLeft, 900);
+  // EL CASO QUE TRABABA EL MECANISMO VIEJO. Con un flag de «esto es un eco», copiar un valor que
+  // YA ERA IGUAL no dispara el evento de vuelta, el flag queda encendido y se come el movimiento
+  // siguiente. Acá se copia un valor igual a propósito, dos veces, y el de después tiene que pasar.
+  b.caja.h.scroll();
+  b.wrap.h.scroll();
+  b.wrap.scrollLeft = 300;
+  b.wrap.h.scroll();
+  assert.equal(b.caja.scrollLeft, 300, 'el mecanismo se trabó: la barra dejó de seguir al cuadro');
+  b.caja.scrollLeft = 77;
+  b.caja.h.scroll();
+  assert.equal(b.wrap.scrollLeft, 77);
+});
+
+test('si el cuadro entra entero, la barra de arriba no se muestra ni engancha nada', () => {
+  const b = BARRA(1100, 1536);
+  assert.equal(b.fantasma.style.width, '1100px');
+  assert.ok(!b.clases.has('on'), 'una barra que no corre nada es ruido');
+  assert.deepEqual(Object.keys(b.caja.h), [], 'engancha el scroll aunque no haga falta');
+});
+
+test('la barra va arriba del cuadro, pegada, y se dibuja en cada pintada', () => {
+  assert.match(PANEL, /#pla-pane-resultado \.pla-barra\{position:sticky;top:0;z-index:10;display:none;/);
+  assert.match(PANEL, /#pla-pane-resultado \.pla-barra\.on\{display:block\}/);
+  const i = PANEL.indexOf('<div class="pla-barra" id="pla-barra-arriba"');
+  const j = PANEL.indexOf('<div class="ab-table-wrap"><table class="pla-tbl" id="pla-tabla">');
+  assert.ok(i > 0 && j > i, 'la barra de arriba no está arriba del cuadro');
+  // Se pinta con el mismo ancho que se le puso a la tabla, y sin meses no queda colgada.
+  const p = fuente(PANEL, 'function plaPintar(){');
+  assert.match(p, /plaBarraArriba\(A\.tabla\);/);
+  assert.match(p, /plaBarraArriba\(0\);/);
+  // Y la de abajo sigue estando: son las dos, no una en lugar de la otra. Vive en el borde de
+  // la caja, que está acotada al alto de la pantalla, así que ahora también se alcanza.
+  assert.match(PANEL, /#pla-pane-resultado \.ab-table-wrap\{overflow:auto !important;/);
+  assert.match(PANEL, /max-height:max\(320px,calc\(100vh - 300px\)\)\}/);
+  // El manual lo cuenta: son dos y da igual cuál se use.
+  const M = manual();
+  assert.match(M, /hay <b>dos barras para correr los meses<\/b>, una <b>arriba<\/b> y otra <b>abajo<\/b> del cuadro, las dos siempre a la vista y moviéndose juntas/);
+  assert.match(M, /el <b>encabezado de meses queda fijo arriba<\/b>/);
+  assert.match(M, /Aparecen sólo cuando hay meses que no entran/);
+  assert.match(M, /<span class="ver">V1069<\/span> El cuadro se lee como una planilla/);
+});
+
+test('el alto de la caja se mide contra la ventana, y nunca queda una ranura', () => {
+  const alto = new Function([fuente(PANEL, 'function plaAltoDisponible(alto, top){'),
+    'return plaAltoDisponible;'].join('\n'))();
+  // Una ventana de 1000 con el cuadro arrancando a 307: hasta el pie, menos un respiro.
+  assert.equal(alto(1000, 307), 677);
+  // En una notebook baja, o con el cuadro muy abajo, no se achica mas alla del piso.
+  assert.equal(alto(700, 520), 320);
+  assert.equal(alto(0, 0), 320, 'sin medida todavia, la caja no puede nacer en cero');
+  // Se mide, no se estima: sale de la ventana y de donde arranca la caja.
+  const caja = fuente(PANEL, 'function plaAltoCaja(){');
+  assert.match(caja, /getBoundingClientRect\(\)/);
+  assert.match(caja, /window\.innerHeight/);
+  assert.match(caja, /if \(window\.innerWidth <= 900\) \{ wrap\.style\.maxHeight = ''; return; \}/);
+  // Y se recalcula al pintar, ANTES de decidir si hace falta la barra de los meses.
+  const p = fuente(PANEL, 'function plaPintar(){');
+  const iAlto = p.indexOf('plaAltoCaja();'), iBarra = p.indexOf('plaBarraArriba(A.tabla);');
+  // Las dos tienen que estar, y en ese orden: con indexOf a secas, la que falta da -1 y el
+  // orden parece cumplirse igual.
+  assert.ok(iAlto > 0, 'el alto de la caja no se recalcula al pintar');
+  assert.ok(iBarra > iAlto, 'la barra decide con el ancho de antes de que aparezca la barra vertical');
+});
+
+test('el encabezado de meses queda fijo, y las esquinas por encima de todo', () => {
+  assert.match(PANEL, /#pla-pane-resultado \.pla-tbl thead th\{position:sticky;top:0;z-index:6;/);
+  assert.match(PANEL, /#pla-pane-resultado \.pla-tbl thead th:nth-child\(2\)\{left:248px;z-index:7\}/);
+  assert.match(PANEL, /#pla-pane-resultado \.pla-tbl thead th:first-child\{left:0;z-index:8\}/);
+  // La esquina esta pegada en los dos ejes: tiene que ir arriba del resto del encabezado.
+  const z = (re) => Number(re.exec(PANEL)[1]);
+  const thead = z(/thead th\{position:sticky;top:0;z-index:(\d+);/);
+  const esq2 = z(/thead th:nth-child\(2\)\{left:248px;z-index:(\d+)\}/);
+  const esq1 = z(/thead th:first-child\{left:0;z-index:(\d+)\}/);
+  const barra = z(/\.pla-barra\{position:sticky;top:0;z-index:(\d+);/);
+  assert.ok(esq1 > esq2 && esq2 > thead, 'la escalera de z-index quedo mal: se montan entre si');
+  assert.ok(barra > esq1, 'la barra de arriba queda debajo del encabezado');
+  // Con los bordes de la tabla, una celda pegada se lleva el fondo pero no la linea.
+  assert.match(PANEL, /#pla-pane-resultado \.pla-tbl\{border-collapse:separate;border-spacing:0\}/);
+  assert.match(PANEL, /box-shadow:inset 0 -2px 0 var\(--bor\)/);
+});
+
+test('en el telefono se suelta todo, y al imprimir no sale cortado', () => {
+  const movil = hasta(PANEL, '@media(max-width:900px){ #sec-pl-abasto .ab-table-wrap', '} }');
+  assert.match(movil, /#pla-pane-resultado \.ab-table-wrap\{max-height:none !important\}/);
+  assert.match(movil, /#pla-pane-resultado \.pla-tbl th,#pla-pane-resultado \.pla-tbl td\{position:static !important\}/,
+    'en el telefono el concepto puede pasar los 248px y el TOTAL se le monta encima');
+  assert.match(movil, /#pla-pane-resultado \.pla-barra\{display:none !important\}/);
+  const print = hasta(PANEL, '@media print{', '} }');
+  assert.match(print, /max-height:none !important;overflow:visible !important/,
+    'el alto va como estilo inline: sin !important, imprimir sale cortado');
+  assert.match(print, /#pla-pane-resultado \.pla-barra\{display:none !important\}/);
+});
+
+test('el ancho se vuelve a calcular cuando cambia la caja, sin repintar de mas', () => {
+  const o = fuente(PANEL, 'function plaObservarCaja(){');
+  assert.match(o, /new ResizeObserver/);
+  assert.match(o, /if \(w > 0 && Math\.abs\(w - PLA_ANCHO_PREV\) > 2\) \{ PLA_ANCHO_PREV = w; plaPintar\(\); \}/,
+    'sin el umbral y el ancho > 0, repinta en bucle o con la pantalla cerrada');
+  assert.match(o, /else plaAltoCaja\(\);/);
+  assert.match(o, /if \(!wrap \|\| PLA_RO\) return;/, 'se engancharia un observador nuevo por cada visita');
+  assert.match(fuente(PANEL, 'function plaInit(){'), /plaObservarCaja\(\);/);
 });
