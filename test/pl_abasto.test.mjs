@@ -91,11 +91,12 @@ function rutas(db, { detalleMax } = {}) {
     fuente(RUTA, 'function rubrosDeCuentas('),
     fuente(RUTA, 'function contrapartidas('),
     fuente(RUTA, 'function asientosEnteros('),
-    fuente(RUTA, 'function detalleDe(req, res, donde, params, vacio, dondeFilas, paramsFilas, cte) {'),
+    fuente(RUTA, 'function detalleDe(req, res, donde, params, vacio, dondeFilas, paramsFilas, cte, extra) {'),
     fuente(RUTA, 'function normSql(x) {'),
     fuente(RUTA, 'function palabrasDeBusqueda(texto) {'),
     hasta(RUTA, 'const SIN_ACENTO = [', '];'),
     lineaConst('BUSCA_SQL'),
+    lineaConst('BUSCA_PALABRAS_MAX'),
     hasta(RUTA, 'const CUENTAS_BUSCA = `', '`;'),
     fuente(RUTA, 'function marcarSinPareja('),
     fuente(RUTA, 'function reemplazo('),
@@ -577,8 +578,15 @@ test('lo que se busca ordena, se recorta y se baja a Excel igual que cualquier d
   // La búsqueda no se arma pegando el texto en el SQL: va como parámetro.
   assert.match(RUTA, /LIKE \? ESCAPE/);
   assert.ok(!/LIKE '%' \+/.test(RUTA));
-  // Y se limita a seis palabras: cada una es otro barrido del libro entero.
-  assert.match(RUTA, /\.slice\(0, 6\)/);
+  // SEIS PALABRAS, Y SE AVISA. Cada una es otro barrido del libro entero. Y como van con Y,
+  // tirar las de más AFLOJA el filtro: el que escribe ocho para acotar recibe MÁS asientos, no
+  // menos. Devolver de más en silencio es peor que devolver de menos, porque el de menos se nota.
+  assert.match(RUTA, /const BUSCA_PALABRAS_MAX = 6;/);
+  const muchas = BUS(db, 'peña hermanos sa uno dos tres cuatro cinco').body.data;
+  assert.equal(muchas.palabras, 6);
+  assert.equal(muchas.palabras_pedidas, 8, 'no dice cuántas palabras se quedaron afuera');
+  const pocas = BUS(db, 'peña').body.data;
+  assert.deepEqual([pocas.palabras, pocas.palabras_pedidas], [1, 1]);
 });
 
 test('la ventana de buscar: el libro entero, y lo dice en el título', () => {
@@ -605,6 +613,25 @@ test('la ventana de buscar: el libro entero, y lo dice en el título', () => {
   // de asientos distintos, y ese número no es ninguna celda.
   assert.match(fuente(PANEL, 'function plaDetallePintar(){'),
     /D\.tipo === 'buscar' \? 'SALDO de lo encontrado \(Haber − Debe\)'/);
+});
+
+test('buscando, la ventana muestra la cuenta de cada renglón: es lo único distinto en cada fila', () => {
+  const h = DET_PINTAR(DET_BASE({ tipo: 'buscar' }), DET_ELS());
+  // MIRANDO UNA CUENTA la columna sobra —todos los renglones son de ella y su nombre está en el
+  // título de la ventana—. BUSCANDO es al revés: cada renglón es de una cuenta distinta, y el que
+  // coincidió es justo el único cuyo nombre no se veía; había que deducirlo leyendo la
+  // contrapartida de sus hermanos, o abrir el asiento, con mil asientos en la lista.
+  assert.match(h, /onclick="plaDetOrden\('cuenta'\)">Cuenta/,
+    'buscando no se ve la cuenta de cada renglón, ni se puede ordenar por ahí');
+  assert.match(h, /INTERESES/);
+  assert.match(h, /COMISIONES PEÑA/);
+  const hc = DET_PINTAR(DET_BASE({ tipo: 'cuenta' }), DET_ELS());
+  assert.ok(!/plaDetOrden\('cuenta'\)/.test(hc), 'la columna sobra: todos los renglones son de la misma cuenta');
+  // Y el pie ocupa las columnas que corresponden en cada caso.
+  assert.match(h, /<td colspan="4"><b>TOTAL/);
+  assert.match(hc, /<td colspan="3"><b>TOTAL/);
+  // El Excel siempre trae Cuenta y Nombre: ahora la planilla y la pantalla dicen lo mismo.
+  assert.match(fuente(PANEL, 'function plaDetLibroFilas(data, D){'), /'Cuenta', 'Nombre de la cuenta'/);
 });
 
 test('manual V1077: el buscador de asientos, y en qué se diferencia de la lupa del cuadro', () => {
@@ -2931,6 +2958,26 @@ test('el aviso del recorte cuenta asientos, y no dice «los más recientes» cua
   const els3 = DET_ELS();
   DET_PINTAR(DET_BASE({ recortado: 0, orden: 'debe' }), els3);
   assert.ok(!/Se muestran/.test(els3['pla-detalle-nota'].textContent), 'avisa un recorte que no hubo');
+  // Y SI SE RECORTARON LAS PALABRAS, TAMBIÉN. Tirar las de más AFLOJA el filtro —van con Y—, así
+  // que el que escribió ocho para acotar recibe MÁS asientos y tiene que saberlo.
+  const els4 = DET_ELS();
+  DET_PINTAR(DET_BASE({ tipo: 'buscar', palabras: 6, palabrasPedidas: 8 }), els4);
+  assert.match(els4['pla-detalle-nota'].textContent,
+    /Se buscó con las primeras 6 palabras de las 8 que escribiste/);
+  const els5 = DET_ELS();
+  DET_PINTAR(DET_BASE({ tipo: 'buscar', palabras: 2, palabrasPedidas: 2 }), els5);
+  assert.ok(!/Se buscó con las primeras/.test(els5['pla-detalle-nota'].textContent),
+    'avisa un recorte de palabras que no hubo');
+});
+
+test('manual V1078: la cuenta se ve buscando, y el límite de palabras se avisa', () => {
+  const M = manual();
+  assert.match(M, /<span class="ver">V1078<\/span> En esa ventana se ve la <b>cuenta de cada renglón<\/b>/);
+  assert.match(M, /si escribís <b>más de 6 palabras<\/b> se buscan las primeras 6 y la ventana te lo dice/);
+  assert.match(M, /<span class="ver">V1078<\/span> En la ventana de buscar se ve la cuenta de cada renglón/);
+  // Lo que el manual AFIRMA, contra el código.
+  assert.match(fuente(PANEL, 'function plaDetallePintar(){'), /var conCuenta = D\.tipo !== 'cuenta'/);
+  assert.match(RUTA, /const BUSCA_PALABRAS_MAX = 6;/);
 });
 
 test('los asientos abiertos sobreviven al repintado: escribir una letra ya no cerraba el que se leía', () => {
