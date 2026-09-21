@@ -150,6 +150,38 @@ const FECHA = /^\d{4}-\d{2}-\d{2}$/;
 // Los asientos de un importe, a lo sumo. Los de VENTAS de un mes son más de mil: se
 // muestran los más recientes, y el total es siempre de todos.
 const DETALLE_MAX = 1000;
+// El Excel se baja para mandarlo a revisar, así que aguanta bastante más que la pantalla.
+const EXCEL_MAX = 5000;
+
+// ── CÓMO SE ORDENA EL DETALLE (V1076) ────────────────────────────────────────
+//
+// Pablo, 21/9/2026: «que permita ordenar de mayor a menor cualquiera de las columnas los
+// movimientos… obviamente siempre respetando mostrar todo el asiento junto».
+//
+// DOS COSAS QUE NO SE PUEDEN HACER EN LA PANTALLA, y por eso el orden vive acá:
+//
+// 1. EL TOPE CUENTA ASIENTOS, NO RENGLONES. Recortando por renglón, el asiento número mil entra
+//    partido a la mitad y «todo el asiento junto» pasa a ser mentira justo en el borde.
+// 2. ORDENAR LO YA TRAÍDO SERÍA MENTIR. La consulta traía los 1.000 renglones MÁS RECIENTES; si
+//    la pantalla los ordenara por importe, el primero sería «el más grande de los últimos mil»,
+//    no el más grande del período —y el operador ordena por importe justamente para encontrar
+//    ése—. Con el orden acá, los 1.000 que se traen son los 1.000 que corresponden.
+//
+// Y MANDA EL RENGLÓN, NO LA SUMA DEL ASIENTO (decisión de Pablo, 21/9): la clave de cada asiento
+// es su renglón más grande en esa columna, así el primero de la lista es literalmente el importe
+// más alto. Adentro del asiento los renglones van con el mismo criterio, de modo que el primer
+// renglón de cada bloque baja de mayor a menor y el orden se verifica a ojo.
+const ORDEN_DETALLE = {
+  fecha: 'm.fecha',
+  asiento: 'm.asiento',
+  cuenta: "COALESCE(c.nombre, m.cuenta)",
+  debe: 'm.debe',
+  haber: 'm.haber',
+};
+// UN RENGLÓN SIN NÚMERO DE ASIENTO ES SU PROPIO GRUPO. El asiento es opcional en la carga (lo
+// valida validarCarga y la columna no tiene NOT NULL): agrupando por asiento+fecha a secas, TODOS
+// los renglones sin número de un mismo día se fusionarían en un bloque que no es un asiento.
+const GRUPO_SQL = "CASE WHEN COALESCE(m.asiento,'') = '' THEN 'X' || m.id ELSE 'A' || m.asiento || '|' || m.fecha END";
 // Los asientos sin pareja de lo que no balancea, a lo sumo. En un año entero son cientos.
 const NB_MAX = 2000;
 // La historia del dólar, día por día: argentinadatos.com, pública, gratis y sin clave.
@@ -729,6 +761,40 @@ router.get('/no-balancea', requireAuth, (req, res) => {
 // V1061. Pablo, 15/9/2026, mirando los asientos de un importe: «aquí sería bueno que me muestre el
 // asiento completo». Todos sus renglones —los del patrimonio también— con sus totales. Un asiento
 // es su número y su fecha, como en la contrapartida.
+// Los asientos completos de un conjunto de renglones: todas sus cuentas, no sólo las del rubro.
+// Se piden por número Y fecha porque el mismo número se repite entre ejercicios.
+function asientosEnteros(db, filas) {
+  const claves = [];
+  const vistas = new Set();
+  for (const f of filas) {
+    if (!f.asiento) continue;
+    const k = f.asiento + '|' + f.fecha;
+    if (!vistas.has(k)) { vistas.add(k); claves.push({ asiento: f.asiento, fecha: f.fecha }); }
+  }
+  const out = [];
+  for (let i = 0; i < claves.length; i += 400) {
+    const lote = claves.slice(i, i + 400);
+    const q = lote.map(() => '?').join(',');
+    const reng = db.prepare(`SELECT m.asiento, m.fecha, m.cuenta, COALESCE(c.nombre, m.cuenta) AS nombre,
+        m.debe, m.haber
+      FROM pl_abasto_movimientos m LEFT JOIN pl_abasto_cuentas c ON c.cuenta = m.cuenta
+      WHERE m.asiento IN (${q}) ORDER BY m.id`).all(...lote.map((x) => x.asiento));
+    const por = new Map();
+    for (const x of reng) {
+      const k = x.asiento + '|' + x.fecha;
+      if (!por.has(k)) por.set(k, []);
+      por.get(k).push({ cuenta: x.cuenta, nombre: x.nombre, debe: x.debe, haber: x.haber });
+    }
+    for (const c of lote) {
+      const renglones = por.get(c.asiento + '|' + c.fecha) || [];
+      const debe = r2(renglones.reduce((s, x) => s + (Number(x.debe) || 0), 0));
+      const haber = r2(renglones.reduce((s, x) => s + (Number(x.haber) || 0), 0));
+      out.push({ asiento: c.asiento, fecha: c.fecha, renglones, debe, haber, diferencia: r2(debe - haber) });
+    }
+  }
+  return out;
+}
+
 router.get('/asiento', requireAuth, (req, res) => {
   try {
     const asiento = String(req.query.asiento || '').trim(), fecha = String(req.query.fecha || '');
@@ -772,13 +838,47 @@ router.get('/detalle', requireAuth, (req, res) => {
     const total = db.prepare(`SELECT COUNT(*) AS renglones, ROUND(COALESCE(SUM(m.debe),0), 2) AS debe,
         ROUND(COALESCE(SUM(m.haber),0), 2) AS haber
       FROM pl_abasto_movimientos m WHERE ${donde}`).get(desde, hasta, ...cuentas);
-    const filas = db.prepare(`SELECT m.fecha, m.asiento, m.cuenta, COALESCE(c.nombre, m.cuenta) AS nombre,
-        m.debe, m.haber
+    const col = ORDEN_DETALLE[String(req.query.orden || '')] ? String(req.query.orden) : 'fecha';
+    const desc = String(req.query.desc || '1') !== '0';
+    const completo = String(req.query.completo || '') === '1';
+    const tope = completo ? EXCEL_MAX : DETALLE_MAX;
+    // La clave del asiento: su renglón más grande cuando se pide de mayor a menor, el más chico
+    // cuando se pide al revés. Así el primero de la lista es siempre el que el encabezado promete.
+    const agg = desc ? 'MAX' : 'MIN';
+    const sent = desc ? 'DESC' : 'ASC';
+    const grupos = db.prepare(`SELECT ${GRUPO_SQL} AS g, ${agg}(${ORDEN_DETALLE[col]}) AS k
       FROM pl_abasto_movimientos m LEFT JOIN pl_abasto_cuentas c ON c.cuenta = m.cuenta
-      WHERE ${donde} ORDER BY m.fecha DESC, m.id DESC LIMIT ${DETALLE_MAX}`).all(desde, hasta, ...cuentas);
+      WHERE ${donde} GROUP BY g ORDER BY k ${sent}, g ${sent} LIMIT ${tope}`).all(desde, hasta, ...cuentas);
+    const cuantos = db.prepare(`SELECT COUNT(*) AS n FROM (SELECT ${GRUPO_SQL} AS g
+      FROM pl_abasto_movimientos m WHERE ${donde} GROUP BY g)`).get(desde, hasta, ...cuentas).n;
+    const puesto = new Map(grupos.map((x, i) => [x.g, i]));
+    const filas = [];
+    for (let i = 0; i < grupos.length; i += 400) {
+      const lote = grupos.slice(i, i + 400).map((x) => x.g);
+      const q2 = lote.map(() => '?').join(',');
+      filas.push(...db.prepare(`SELECT m.fecha, m.asiento, m.cuenta, COALESCE(c.nombre, m.cuenta) AS nombre,
+          m.debe, m.haber, m.id, ${GRUPO_SQL} AS grupo
+        FROM pl_abasto_movimientos m LEFT JOIN pl_abasto_cuentas c ON c.cuenta = m.cuenta
+        WHERE ${donde} AND ${GRUPO_SQL} IN (${q2})`).all(desde, hasta, ...cuentas, ...lote));
+    }
+    // El orden final: los asientos como los eligió la consulta, y adentro de cada uno el mismo
+    // criterio, para que el primer renglón de cada bloque sea el que lo puso donde está.
+    const valor = (f) => (col === 'cuenta' ? f.nombre : f[col]);
+    filas.sort((a, b) => {
+      const pa = puesto.get(a.grupo), pb = puesto.get(b.grupo);
+      if (pa !== pb) return pa - pb;
+      const va = valor(a), vb = valor(b);
+      if (va !== vb) return (va > vb ? 1 : -1) * (desc ? -1 : 1);
+      return a.id - b.id;
+    });
     contrapartidas(db, filas);
     marcarSinPareja(db, filas);
-    res.json({ ok: true, data: { filas, total, recortado: total.renglones > filas.length ? 1 : 0 } });
+    const data = { filas, total, orden: col, desc: desc ? 1 : 0, asientos_total: cuantos,
+      recortado: cuantos > grupos.length ? 1 : 0 };
+    // PARA EL EXCEL: los asientos ENTEROS, con las cuentas que NO son de este rubro —que son
+    // justamente las que explican la operación cuando alguien lo manda a revisar—.
+    if (completo) data.asientos = asientosEnteros(db, filas);
+    res.json({ ok: true, data });
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 

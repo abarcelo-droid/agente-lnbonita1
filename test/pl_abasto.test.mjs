@@ -83,10 +83,14 @@ function rutas(db, { detalleMax } = {}) {
     lineaConst('COTIZ_TIMEOUT_MS'),
     lineaConst('FECHA'),
     detalleMax ? 'const DETALLE_MAX = ' + detalleMax + ';' : lineaConst('DETALLE_MAX'),
+    lineaConst('EXCEL_MAX'),
+    lineaConst('GRUPO_SQL'),
+    hasta(RUTA, 'const ORDEN_DETALLE = {', '};'),
     fuente(RUTA, 'function r2('),
     fuente(RUTA, 'function usuarioId('),
     fuente(RUTA, 'function rubrosDeCuentas('),
     fuente(RUTA, 'function contrapartidas('),
+    fuente(RUTA, 'function asientosEnteros('),
     fuente(RUTA, 'function marcarSinPareja('),
     fuente(RUTA, 'function reemplazo('),
     fuente(RUTA, 'function migrarTitulos('),
@@ -375,6 +379,114 @@ test('los asientos de un importe: con la contrapartida, y el total de todos aunq
   assert.equal(corto.total.renglones, 3);
   assert.equal(corto.recortado, 1);
   assert.equal(corto.filas[0].fecha, '2025-07-15', 'los más recientes primero');
+});
+
+// ══ 4b · ORDENAR EL DETALLE, Y EL TOPE QUE CUENTA ASIENTOS (V1076) ═════════════════
+//
+// Pablo, 21/9/2026: «que permita ordenar de mayor a menor cualquiera de las columnas los
+// movimientos… obviamente siempre respetando mostrar todo el asiento junto», y eligió que
+// mande EL RENGLÓN más grande, no la suma del asiento.
+
+// Un libro chico y a propósito: el importe MÁS GRANDE es el MÁS VIEJO. Con el tope contando
+// renglones y el orden hecho en la pantalla, ese renglón no llegaría nunca.
+const CARGA_ORD = { archivo: 'orden.xls', cuentas: NOMBRES, renglones: [
+  // el más viejo, y el más grande de todos
+  ['2025-07-01', '100', '4.2.05.02.006.0000', 9000000, 0],
+  ['2025-07-01', '100', '1.1.01.03.001.0000', 0, 9000000],
+  // un asiento con DOS renglones del mismo rubro: es el que no se puede partir
+  ['2025-07-10', '200', '4.2.05.02.006.0000', 30, 0],
+  ['2025-07-10', '200', '4.2.05.02.006.0000', 500000, 0],
+  ['2025-07-10', '200', '1.1.01.03.001.0000', 0, 500030],
+  // los más recientes, chicos
+  ['2025-07-20', '300', '4.2.05.02.006.0000', 700, 0],
+  ['2025-07-20', '300', '1.1.01.03.001.0000', 0, 700],
+  ['2025-07-25', '400', '4.2.05.02.006.0000', 40, 0],
+  ['2025-07-25', '400', '1.1.01.03.001.0000', 0, 40],
+] };
+const DET = (db, q, max) => llamar(rutas(db, max ? { detalleMax: max } : {}).detalle,
+  { query: Object.assign({ rubro: 'costos_financieros', desde: '2025-07', hasta: '2025-07' }, q) }).body.data;
+
+test('ordenar por importe mira TODO el período, no los últimos que entraron en el tope', () => {
+  const db = base();
+  llamar(rutas(db).cargar, { body: CARGA_ORD });
+  // Por defecto, como siempre: lo más nuevo primero.
+  const porFecha = DET(db, {});
+  assert.equal(porFecha.orden, 'fecha');
+  assert.equal(porFecha.desc, 1);
+  assert.equal(porFecha.filas[0].fecha, '2025-07-25');
+  // DE MAYOR A MENOR: el primer renglón es el importe más alto del período, no el más alto de
+  // los que entraron por ser recientes. Con tope de DOS asientos, el de 9.000.000 —que es el
+  // más VIEJO— tiene que venir igual: si el orden se hiciera en la pantalla sobre lo ya traído,
+  // ese renglón no estaría y el número de arriba sería mentira.
+  const grandes = DET(db, { orden: 'debe', desc: '1' }, 2);
+  assert.equal(grandes.filas[0].debe, 9000000, 'el más grande del período no llegó a la pantalla');
+  assert.equal(grandes.filas[0].asiento, '100');
+  assert.equal(grandes.orden, 'debe');
+  // Y EL TOPE CUENTA ASIENTOS, NO RENGLONES: el segundo asiento entra ENTERO, con sus dos
+  // renglones del rubro. Recortando por renglón, el asiento 200 entraría partido.
+  assert.deepEqual(grandes.filas.map((f) => [f.asiento, f.debe]),
+    [['100', 9000000], ['200', 500000], ['200', 30]],
+    'el asiento se partió al llegar al tope, o el renglón chico del asiento quedó afuera');
+  assert.equal(grandes.asientos_total, 4);
+  assert.equal(grandes.recortado, 1, 'no avisa que hay más asientos de los que trajo');
+  // ADENTRO DEL ASIENTO, EL MISMO CRITERIO: el renglón que lo puso ahí va primero, así el
+  // primer renglón de cada bloque baja de mayor a menor y el orden se verifica a ojo.
+  assert.deepEqual(grandes.filas.filter((f) => f.asiento === '200').map((f) => f.debe), [500000, 30]);
+  // Al revés, de menor a mayor.
+  const chicos = DET(db, { orden: 'debe', desc: '0' });
+  assert.equal(chicos.filas[0].debe, 30, 'de menor a mayor no arranca por el más chico');
+  assert.equal(chicos.desc, 0);
+  assert.deepEqual(chicos.filas.filter((f) => f.asiento === '200').map((f) => f.debe), [30, 500000]);
+  // El total del pie sigue siendo el de TODOS los renglones del período, recortado o no.
+  assert.equal(grandes.total.renglones, 5);
+  assert.equal(grandes.total.debe, 9500770);
+  // Una columna que no existe no rompe nada: se ordena por fecha, como siempre.
+  assert.equal(DET(db, { orden: 'loquesea' }).orden, 'fecha');
+});
+
+test('un renglón sin número de asiento es su propio grupo, no se fusiona con los del mismo día', () => {
+  const db = base();
+  // Tres renglones del mismo día SIN número de asiento: son tres cosas distintas, no un asiento
+  // de tres renglones. El asiento es opcional en la carga y la columna lo acepta vacío.
+  llamar(rutas(db).cargar, { body: { archivo: 'sin.xls', cuentas: NOMBRES, renglones: [
+    ['2025-07-05', '', '4.2.05.02.006.0000', 100, 0],
+    ['2025-07-05', '', '4.2.05.02.006.0000', 300, 0],
+    ['2025-07-05', '', '4.2.05.02.006.0000', 200, 0],
+  ] } });
+  const d = DET(db, { orden: 'debe', desc: '1' });
+  assert.equal(d.asientos_total, 3, 'los tres se fusionaron en un solo bloque');
+  assert.deepEqual(d.filas.map((f) => f.debe), [300, 200, 100]);
+  // Y con el tope en uno, viene UNO solo: si fueran un grupo, vendrían los tres.
+  assert.equal(DET(db, { orden: 'debe', desc: '1' }, 1).filas.length, 1);
+});
+
+test('para el Excel se piden los asientos ENTEROS, con las cuentas que no son del rubro', () => {
+  const db = base();
+  llamar(rutas(db).cargar, { body: CARGA_ORD });
+  const normal = DET(db, { orden: 'debe' });
+  assert.equal(normal.asientos, undefined, 'la pantalla se trae los asientos enteros sin necesitarlos');
+  const x = DET(db, { orden: 'debe', completo: '1' });
+  assert.ok(Array.isArray(x.asientos));
+  assert.deepEqual(x.asientos.map((a) => a.asiento), ['100', '200', '300', '400']);
+  const a100 = x.asientos[0];
+  // LAS CUENTAS QUE NO SON DEL RUBRO SON JUSTAMENTE LAS QUE EXPLICAN LA OPERACIÓN: sin el banco
+  // del otro lado, el que recibe la planilla no puede revisar nada.
+  assert.deepEqual(a100.renglones.map((r) => [r.cuenta, r.debe, r.haber]),
+    [['4.2.05.02.006.0000', 9000000, 0], ['1.1.01.03.001.0000', 0, 9000000]]);
+  assert.deepEqual([a100.debe, a100.haber, a100.diferencia], [9000000, 9000000, 0]);
+  // Y el asiento con dos renglones del rubro trae los tres.
+  assert.equal(x.asientos[1].renglones.length, 3);
+  // EL EXCEL NO HEREDA EL TOPE DE LA PANTALLA: las mil filas existen por lo que cuesta dibujarlas,
+  // no por lo que cuesta traerlas. Con el tope de la pantalla en UNO, el Excel igual trae todo.
+  const chico = llamar(rutas(db, { detalleMax: 1 }).detalle, { query: { rubro: 'costos_financieros',
+    desde: '2025-07', hasta: '2025-07', orden: 'debe', completo: '1' } }).body.data;
+  assert.equal(chico.asientos.length, 4, 'el Excel se baja recortado al tope de la pantalla');
+  assert.equal(chico.recortado, 0, 'el Excel avisa un recorte que no hubo');
+  assert.equal(llamar(rutas(db, { detalleMax: 1 }).detalle, { query: { rubro: 'costos_financieros',
+    desde: '2025-07', hasta: '2025-07', orden: 'debe' } }).body.data.recortado, 1);
+  // El tope del Excel es más alto que el de la pantalla: se baja para mandarlo a revisar.
+  assert.match(RUTA, /const EXCEL_MAX = (\d+);/);
+  assert.ok(Number(/const EXCEL_MAX = (\d+);/.exec(RUTA)[1]) > Number(/const DETALLE_MAX = (\d+);/.exec(RUTA)[1]));
 });
 
 // ══ 4 · LA PANTALLA ════════════════════════════════════════════════════════════════
@@ -739,9 +851,12 @@ test('los asientos de un rubro traen sus ajustes, y el saldo da lo mismo que la 
   const pintar = (D) => new Function('PLA', 'eid', 'sgNorm', 'nr', 'escH', [
     /^var PLA_MES = .*;\r?$/m.exec(PANEL)[0],
     fuente(PANEL, 'function plaMesTxt(m){'), fuente(PANEL, 'function plaFechaTxt(f){'), fuente(PANEL, 'function plaImporte(v, usd){'),
+    fuente(PANEL, 'function plaDetGrupos(filas){'), fuente(PANEL, 'function plaDetTexto(f){'),
+    fuente(PANEL, 'function plaDetSeleccion(filas, partes, soloNb){'),
+    fuente(PANEL, 'function plaCoincide(txt, partes){'), fuente(PANEL, 'function plaDetReabrir(){'),
     fuente(PANEL, 'function plaDetallePintar(){'), 'plaDetallePintar();'].join('\n'))(
     { detalle: D }, (id) => els[id], (s) => String(s).toLowerCase(), String, String);
-  const D = { tipo: 'rubro', recortado: 0, total: { renglones: 1, debe: 0, haber: 5000 },
+  const D = { tipo: 'rubro', recortado: 0, orden: 'fecha', desc: 1, total: { renglones: 1, debe: 0, haber: 5000 },
     filas: [{ fecha: '2025-08-10', asiento: '1', cuenta: '4.1.01', nombre: 'VENTAS', contrapartida: '', debe: 0, haber: 5000 }],
     ajustes: aj(datos, 'ventas', '2025-08', '2025-08') };
   pintar(D);
@@ -1813,7 +1928,9 @@ test('los asientos de un importe: un clic abre el asiento entero debajo, dice si
   assert.match(h, /⚠️ No balancea por \$ 217\.728,00/);
   assert.match(html(Object.assign({}, A, { haber: 2013984 })), /✓ Balancea/);
   // La lista: cada renglón con asiento se abre con un clic.
-  assert.match(fuente(PANEL, 'function plaDetallePintar(){'), /class="pla-det-fila" title="Clic: ver el asiento completo" onclick="plaAsientoVer\(this,/);
+  assert.match(fuente(PANEL, 'function plaDetallePintar(){'),
+    /title="Clic: ver el asiento completo" onclick="plaAsientoVer\(this,/);
+  assert.match(fuente(PANEL, 'function plaDetallePintar(){'), /pla-det-fila/);
   // Abrir, cerrar, y volver a abrir sin pedirlo de nuevo.
   const cls = () => { const s = new Set(); return { add: (c) => s.add(c), remove: (c) => s.delete(c), contains: (c) => s.has(c) }; };
   const doc = { createElement: () => ({ attrs: {}, firstChild: { innerHTML: '' }, classList: cls(),
@@ -2032,7 +2149,11 @@ const DETALLE = (filas, o = {}) => {
   new Function('PLA', 'eid', 'escH', 'nr', 'sgNorm', [
     /^var PLA_MES = .*;\r?$/m.exec(PANEL)[0],
     fuente(PANEL, 'function plaMesTxt(m){'), fuente(PANEL, 'function plaFechaTxt(f){'),
-    fuente(PANEL, 'function plaImporte(v, usd){'), fuente(PANEL, 'function plaDetallePintar(){'),
+    fuente(PANEL, 'function plaImporte(v, usd){'),
+    fuente(PANEL, 'function plaDetGrupos(filas){'), fuente(PANEL, 'function plaDetTexto(f){'),
+    fuente(PANEL, 'function plaDetSeleccion(filas, partes, soloNb){'),
+    fuente(PANEL, 'function plaCoincide(txt, partes){'), fuente(PANEL, 'function plaDetReabrir(){'),
+    fuente(PANEL, 'function plaDetallePintar(){'),
     'plaDetallePintar();'].join('\n'))({ detalle: D }, (id) => els[id], String, String,
     (x) => String(x).toLowerCase());
   return els;
@@ -2579,6 +2700,186 @@ test('el ancho se vuelve a calcular cuando cambia la caja, sin repintar de mas',
     /if \(tb\.parentNode && tb\.parentNode\.offsetWidth\) PLA_ANCHO_PREV = tb\.parentNode\.offsetWidth;/);
   const car = fuente(PANEL, 'function plaCargar(inicial){');
   assert.match(car, /Cargando…/, 'ya no hay cartel de carga: revisar de nuevo este test');
+});
+
+// ══ 7k · ORDENAR LA VENTANA, Y EL EXCEL PARA MANDAR A REVISAR (V1076) ═══════════════
+//
+// Pablo, 21/9/2026: «que permita ordenar de mayor a menor cualquiera de las columnas los
+// movimientos… obviamente siempre respetando mostrar todo el asiento junto. Además sería bueno
+// poder bajar desde ahí mismo un Excel los asientos de ese rubro en particular».
+
+// Dos asientos del mismo rubro; el 500 tiene DOS renglones y es el que no se puede partir.
+const FILAS_D = [
+  { fecha: '2026-03-10', asiento: '500', cuenta: '4.2.05', nombre: 'INTERESES', contrapartida: 'Banco Galicia',
+    debe: 900000, haber: 0, grupo: 'A500|2026-03-10', id: 1, sin_pareja: 0 },
+  { fecha: '2026-03-10', asiento: '500', cuenta: '4.2.05', nombre: 'COMISIONES PEÑA', contrapartida: 'Banco Galicia',
+    debe: 120, haber: 0, grupo: 'A500|2026-03-10', id: 2, sin_pareja: 0 },
+  { fecha: '2026-05-02', asiento: '700', cuenta: '4.2.05', nombre: 'GASTOS BANCARIOS', contrapartida: 'Banco Nación',
+    debe: 400000, haber: 0, grupo: 'A700|2026-05-02', id: 3, sin_pareja: 1 },
+];
+const DET_ELS = () => ({ 'pla-detalle-q': { value: '' }, 'pla-detalle-nota': {},
+  'pla-detalle-tabla': {}, 'pla-detalle-nb': { checked: false }, 'pla-detalle-nb-n': {} });
+const DET_PINTAR = (D, els) => {
+  new Function('PLA', 'eid', 'sgNorm', 'nr', 'escH', 'plaFechaTxt', [
+    /^var PLA_MES = .*;\r?$/m.exec(PANEL)[0],
+    fuente(PANEL, 'function plaMesTxt(m){'), fuente(PANEL, 'function plaImporte(v, usd){'),
+    fuente(PANEL, 'function plaDetGrupos(filas){'), fuente(PANEL, 'function plaDetTexto(f){'),
+    fuente(PANEL, 'function plaCoincide(txt, partes){'), fuente(PANEL, 'function plaDetSeleccion(filas, partes, soloNb){'),
+    fuente(PANEL, 'function plaDetReabrir(){'), fuente(PANEL, 'function plaDetallePintar(){'),
+    'plaDetallePintar();'].join('\n'))({ detalle: D }, (id) => els[id],
+    new Function([fuente(PANEL, 'function sgNorm(s){'), 'return sgNorm;'].join('\n'))(), String, String,
+    (f) => String(f));
+  return els['pla-detalle-tabla'].innerHTML;
+};
+const DET_BASE = (extra) => Object.assign({ tipo: 'rubro', titulo: 'COSTOS FINANCIEROS — Mar 2026 a May 2026',
+  clave: 'costos_financieros', desde: '2026-03', hasta: '2026-05', orden: 'fecha', desc: 1,
+  recortado: 0, asientosTotal: 2, abiertos: {}, asientos: {}, ajustes: [],
+  filas: FILAS_D.map((f) => Object.assign({}, f)),
+  // EL TOTAL DEL PERÍODO ES OTRO, a propósito: el de la ventana sale de un COUNT sobre todos los
+  // renglones, y el del Excel tiene que ser el de las filas que están en el Excel.
+  total: { renglones: 99, debe: 9999999, haber: 0 } }, extra || {});
+
+test('la ventana ordena por cualquier columna, y el asiento no se parte', () => {
+  const els = DET_ELS();
+  const h = DET_PINTAR(DET_BASE({ orden: 'debe', desc: 1 }), els);
+  // El encabezado se aprieta y dice por cuál y para dónde.
+  assert.match(h, /onclick="plaDetOrden\('debe'\)">Debe ▼</);
+  assert.match(h, /onclick="plaDetOrden\('fecha'\)">Fecha</);
+  assert.match(h, /onclick="plaDetOrden\('contrapartida'\)">Contrapartida</);
+  assert.ok(!/Fecha ▼/.test(h), 'dos columnas dicen estar ordenando a la vez');
+  // LOS RENGLONES DEL MISMO ASIENTO, PEGADOS: el de 120 va debajo del de 900.000 aunque haya un
+  // movimiento de 400.000 en el medio. Es lo que Pablo pidió con «todo el asiento junto».
+  const porFila = h.split('<tr').slice(1)
+    .map((x) => ((/(INTERESES|COMISIONES PEÑA|GASTOS BANCARIOS)/.exec(x) || [])[1])).filter(Boolean);
+  assert.deepEqual(porFila, ['INTERESES', 'COMISIONES PEÑA', 'GASTOS BANCARIOS']);
+  // Y el bloque se VE: sin la línea, la columna parece desordenada —el 120 antes del 400.000—.
+  assert.match(h, /class="pla-det-fila pla-det-g0"/);
+  // EL GRUPO LO MANDA EL SERVIDOR, que ya sabe distinguir dos renglones sin número de asiento del
+  // mismo día. Armándolo acá con asiento+fecha, esos dos se fusionarían en un bloque que no es un
+  // asiento: mismo día, sin número, cuentas distintas, moviéndose juntos al tope de un orden.
+  const sinNumero = DET_BASE({ orden: 'debe', filas: [
+    { fecha: '2026-04-01', asiento: '', cuenta: '4.2.05', nombre: 'UNO', contrapartida: '', debe: 50, haber: 0, grupo: 'X10', id: 10 },
+    { fecha: '2026-04-01', asiento: '', cuenta: '4.2.05', nombre: 'DOS', contrapartida: '', debe: 40, haber: 0, grupo: 'X11', id: 11 },
+  ] });
+  const hs = DET_PINTAR(sinNumero, DET_ELS());
+  assert.ok(!/pla-det-g0/.test(hs), 'dos renglones sin número de asiento quedaron pegados como un solo asiento');
+  assert.equal((h.match(/pla-det-g0/g) || []).length, 1, 'la marca de bloque va en el primero de cada asiento de más de un renglón');
+  // Ordenar por contrapartida se resuelve acá: se arma después de elegir las filas y el servidor
+  // no la tiene. El resto vuelve a pedirse, porque el tope recorta y ordenar lo traído mentiría.
+  const o = fuente(PANEL, 'function plaDetOrden(col){');
+  assert.match(o, /if \(col === 'contrapartida'\) plaDetallePintar\(\);\r?\n  else plaDetPedir\(\);/);
+  assert.match(o, /if \(D\.orden === col\) D\.desc = D\.desc \? 0 : 1;/);
+  assert.match(o, /D\.desc = \(col === 'cuenta' \|\| col === 'contrapartida'\) \? 0 : 1;/);
+  assert.match(fuente(PANEL, 'function plaDetUrl(extra){'), /'&orden=' \+ encodeURIComponent\(D\.orden\)/);
+});
+
+test('buscar en la ventana trae el asiento entero, con el renglón que coincide marcado', () => {
+  const els = DET_ELS();
+  els['pla-detalle-q'].value = 'peña';
+  const h = DET_PINTAR(DET_BASE({ orden: 'debe' }), els);
+  // El renglón que coincide es el de 120, pero entra TODO su asiento: sin las otras cuentas, el
+  // que recibe la planilla no puede revisar nada.
+  assert.match(h, /COMISIONES PEÑA/);
+  assert.match(h, /INTERESES/, 'del asiento que coincide se ve un solo renglón');
+  assert.ok(!/GASTOS BANCARIOS/.test(h), 'entró un asiento que no coincide con nada');
+  assert.match(h, /pla-det-hit/, 'no se marca cuál fue el renglón que coincidió');
+  assert.equal((h.match(/pla-det-hit/g) || []).length, 1, 'se marcan renglones que no coinciden');
+  assert.match(els['pla-detalle-nota'].textContent, /1 asiento coincide con la búsqueda; de cada uno se muestran todos sus renglones/);
+  // Y con los totales de lo que se ve: 900.000 + 120.
+  assert.match(h, /900\.120,00/);
+});
+
+test('el aviso del recorte cuenta asientos, y no dice «los más recientes» cuando se ordena por importe', () => {
+  const els = DET_ELS();
+  DET_PINTAR(DET_BASE({ recortado: 1, asientosTotal: 900, orden: 'debe', desc: 1 }), els);
+  assert.match(els['pla-detalle-nota'].textContent, /Se muestran los más grandes por debe: 2 asientos de 900/);
+  const els2 = DET_ELS();
+  DET_PINTAR(DET_BASE({ recortado: 1, asientosTotal: 900, orden: 'fecha', desc: 1 }), els2);
+  assert.match(els2['pla-detalle-nota'].textContent, /Se muestran los más recientes: 2 asientos de 900/);
+  const els3 = DET_ELS();
+  DET_PINTAR(DET_BASE({ recortado: 0, orden: 'debe' }), els3);
+  assert.ok(!/Se muestran/.test(els3['pla-detalle-nota'].textContent), 'avisa un recorte que no hubo');
+});
+
+test('los asientos abiertos sobreviven al repintado: escribir una letra ya no cerraba el que se leía', () => {
+  const r = fuente(PANEL, 'function plaDetReabrir(){');
+  assert.match(r, /if \(!D\.abiertos\[clave\] \|\| !D\.asientos\[clave\]\) return;/);
+  assert.match(r, /insertBefore\(fila, tr\.nextSibling\)/);
+  // Se dibuja del cache que YA existía: no hay que volver a pedir nada.
+  assert.ok(!/api\(/.test(r), 'vuelve a pedir al servidor un asiento que ya tenía');
+  assert.match(fuente(PANEL, 'function plaDetallePintar(){'), /plaDetReabrir\(\);\r?\n\}/);
+  // Y abrir/cerrar deja anotado qué quedó abierto.
+  const v = fuente(PANEL, 'function plaAsientoVer(tr, asiento, fecha){');
+  assert.match(v, /delete D\.abiertos\[clave\];/);
+  assert.match(v, /D\.abiertos\[clave\] = 1;/);
+});
+
+test('el Excel del detalle: dos hojas, y el total es la suma de las filas de la hoja', () => {
+  const els = DET_ELS();
+  const libro = new Function('PLA', 'eid', 'sgNorm', 'plaFechaTxt', [
+    /^var PLA_MES = .*;\r?$/m.exec(PANEL)[0],
+    fuente(PANEL, 'function plaMesTxt(m){'),
+    fuente(PANEL, 'function plaDetGrupos(filas){'), fuente(PANEL, 'function plaDetTexto(f){'),
+    fuente(PANEL, 'function plaCoincide(txt, partes){'), fuente(PANEL, 'function plaDetSeleccion(filas, partes, soloNb){'),
+    fuente(PANEL, 'function plaDetLibroFilas(data, D){'), 'return plaDetLibroFilas;'].join('\n'))(
+    {}, (id) => els[id],
+    new Function([fuente(PANEL, 'function sgNorm(s){'), 'return sgNorm;'].join('\n'))(), (f) => String(f));
+  const data = { filas: FILAS_D.map((f) => Object.assign({}, f)), recortado: 0, asientos: [
+    { asiento: '500', fecha: '2026-03-10', diferencia: 0, debe: 900120, haber: 900120, renglones: [
+      { cuenta: '4.2.05', nombre: 'INTERESES', debe: 900000, haber: 0 },
+      { cuenta: '4.2.05', nombre: 'COMISIONES PEÑA', debe: 120, haber: 0 },
+      { cuenta: '1.1.01', nombre: 'BANCO GALICIA', debe: 0, haber: 900120 }] },
+    { asiento: '700', fecha: '2026-05-02', diferencia: 400000, debe: 400000, haber: 0, renglones: [
+      { cuenta: '4.2.05', nombre: 'GASTOS BANCARIOS', debe: 400000, haber: 0 }] },
+  ] };
+  const F = libro(data, DET_BASE({ orden: 'debe', desc: 1 }));
+  // ── HOJA 1: de dónde salió, y el total que cierra con sus propias filas ──
+  assert.match(F.movimientos[0][0], /P&L Abasto — COSTOS FINANCIEROS/);
+  assert.deepEqual(F.movimientos[1], ['Ordenado por', 'debe (de mayor a menor)']);
+  const tot = F.movimientos.filter((f) => f[0] === 'TOTAL')[0];
+  assert.deepEqual([tot[1], tot[5], tot[6]], ['3 movimientos', 1300120, 0],
+    'el TOTAL del Excel no es la suma de las filas del Excel');
+  assert.deepEqual(F.movimientos.filter((f) => String(f[0]).indexOf('SALDO') === 0)[0][6], -1300120);
+  // El que quedó sin pareja va marcado, y sólo ése.
+  assert.equal(F.movimientos.filter((f) => f[7] === 'No balancea').length, 1);
+  // ── HOJA 2: el asiento entero, con las cuentas que NO son del rubro ──
+  assert.ok(F.asientos.some((f) => f[3] === 'BANCO GALICIA'), 'sin la cuenta del banco no se puede revisar nada');
+  // UN ASIENTO QUE NO CIERRA SOLO NO ES UN ERROR: en este libro una operación viene partida en
+  // dos asientos del mismo día. Marcarlos a todos «no balancea» haría reportar errores que no
+  // existen. Sólo se señala el que quedó SIN PAREJA.
+  const estados = F.asientos.filter((f) => f[3] === 'Total del asiento').map((f) => f[7]);
+  assert.deepEqual(estados, ['Balancea', 'NO BALANCEA — quedó sin pareja: éste hay que mirarlo']);
+  const mediaOperacion = Object.assign({}, data, { filas: FILAS_D.map(function(f){
+    return Object.assign({}, f, { sin_pareja: 0 }); }) });
+  assert.deepEqual(libro(mediaOperacion, DET_BASE({})).asientos
+    .filter((f) => f[3] === 'Total del asiento').map((f) => f[7]),
+    ['Balancea', 'Se compensa con otro asiento del mismo día'],
+    'un asiento que se compensa con otro del mismo día sale como error');
+  // ── y las dos hojas hablan del MISMO universo ──
+  els['pla-detalle-q'].value = 'peña';
+  const G = libro(data, DET_BASE({}));
+  assert.ok(!G.movimientos.some((f) => f[3] === 'GASTOS BANCARIOS'));
+  assert.ok(!G.asientos.some((f) => f[1] === '700'), 'la hoja 2 trae asientos que no están en la hoja 1');
+  assert.match(G.movimientos[2][0], /Buscando/);
+  // El recorte viaja DENTRO del archivo: el que lo abre no se acuerda de lo que decía la pantalla.
+  els['pla-detalle-q'].value = '';
+  const H = libro(Object.assign({}, data, { recortado: 1 }), DET_BASE({}));
+  assert.ok(H.movimientos.some((f) => f[0] === 'Atención'));
+  // Y se pide con el tope grande, no con el de la pantalla.
+  assert.match(fuente(PANEL, 'function plaDetExcel(){'), /plaDetUrl\('&completo=1'\)/);
+  assert.match(fuente(PANEL, 'function plaDetExcel(){'), /typeof XLSX === 'undefined'/);
+});
+
+test('manual V1076: ordenar por cualquier columna, el asiento junto, y el Excel', () => {
+  const M = manual();
+  assert.match(M, /<span class="ver">V1076<\/span>/);
+  assert.match(M, /Un <b>clic en el título de una columna<\/b> ordena por ahí/);
+  assert.match(M, /El <b>asiento nunca se parte<\/b>/);
+  assert.match(M, /<b>⬇️ Excel<\/b>/);
+  assert.match(M, /<span class="ver">V1076<\/span> Ordenar los asientos de un importe por cualquier columna/);
+  // Lo que el manual AFIRMA, contra el código.
+  assert.match(RUTA, /GROUP BY g ORDER BY k/);
+  assert.match(PANEL, /onclick="plaDetOrden/);
 });
 
 // ══ 7j · LA LUPA DEL CUADRO (V1074) ══════════════════════════════════════════════════
