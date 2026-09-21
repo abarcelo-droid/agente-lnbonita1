@@ -400,7 +400,7 @@ const PANTALLA = (datos, abiertos = {}, unidad, op, moneda, caja = 1180) => {
     fuente(PANEL, 'function plaCelda(v, ventas, conPct){'),
     fuente(PANEL, 'function plaAltoDisponible(alto, top){'),
     fuente(PANEL, 'function plaAltoCaja(){'),
-    fuente(PANEL, 'function plaBarraArriba(ancho){'),
+    fuente(PANEL, 'function plaBarraArriba(){'),
     fuente(PANEL, 'function plaPintar(){'),
     'plaPintar();',
   ].join('\n'))({ datos, abiertos, unidad, op, moneda }, () => tb, (x) => String(x));
@@ -2295,24 +2295,121 @@ test('el tilde se lee como una frase, no como un rótulo de campo', () => {
 // podía tocar sin bajar hasta el fondo.
 
 // La barra con un DOM de mentira: dos cajas que scrollean y un fantasma que les da el ancho.
-const BARRA = (anchoTabla, anchoVisible) => {
+//
+// DOS COSAS QUE EL MOCK VIEJO NO TENÍA, Y QUE SON EL BUG ENTERO (V1072):
+//   1) LAS DOS CAJAS NO MIDEN IGUAL. El cuadro pierde el ancho de su barra VERTICAL; la de
+//      arriba, que no la tiene, es esos ~15 px más ancha.
+//   2) EL NAVEGADOR RECORTA. Escribir un scrollLeft más allá del tope deja el tope, no el número
+//      que se escribió — y es justamente ahí donde las dos barras se peleaban.
+const recorta = (o) => {
+  let v = 0;
+  Object.defineProperty(o, 'scrollLeft', {
+    get() { return v; },
+    set(x) { v = Math.min(Math.max(0, x), Math.max(0, o.scrollWidth - o.clientWidth)); },
+  });
+  return o;
+};
+const BARRA = (anchoTabla, anchoVisible, barraVertical = 15) => {
   const clases = new Set();
-  const caja = { scrollLeft: 0, clientWidth: anchoVisible, scrollWidth: anchoTabla, style: {},
-    classList: { toggle: (c, v) => { if (v) clases.add(c); else clases.delete(c); } },
-    h: {}, addEventListener(t, f) { this.h[t] = f; } };
   const fantasma = { style: {} };
-  const wrap = { scrollLeft: 0, clientWidth: anchoVisible, h: {}, addEventListener(t, f) { this.h[t] = f; } };
+  const caja = recorta({ clientWidth: anchoVisible + barraVertical, style: {},
+    get scrollWidth() { return Math.max(this.clientWidth, parseInt(fantasma.style.width, 10) || 0); },
+    classList: { toggle: (c, v) => { if (v) clases.add(c); else clases.delete(c); } },
+    h: {}, addEventListener(t, f) { this.h[t] = f; } });
+  const wrap = recorta({ clientWidth: anchoVisible, scrollWidth: Math.max(anchoVisible, anchoTabla),
+    h: {}, addEventListener(t, f) { this.h[t] = f; } });
   const els = { 'pla-barra-arriba': caja, 'pla-barra-fantasma': fantasma };
   new Function('eid', 'document', [
-    fuente(PANEL, 'function plaBarraArriba(ancho){'),
-    'plaBarraArriba(' + anchoTabla + ');',
+    fuente(PANEL, 'function plaBarraArriba(){'),
+    'plaBarraArriba();',
   ].join('\n'))((id) => els[id], { querySelector: () => wrap });
-  return { caja, fantasma, wrap, clases };
+  const tope = (e) => Math.max(0, e.scrollWidth - e.clientWidth);
+  // El aviso de scroll le llega SÓLO a la que se movió de verdad —eso es lo que hace el
+  // navegador— y se sigue la cadena hasta que ninguna se mueva más. Devuelve cuántas vueltas
+  // hicieron falta: si se pelean, no termina nunca.
+  let avisoC = 0, avisoW = 0;
+  const asentar = () => {
+    let vueltas = 0;
+    for (; vueltas < 20; vueltas++) {
+      let hubo = false;
+      if (wrap.scrollLeft !== avisoW) { avisoW = wrap.scrollLeft; hubo = true; if (wrap.h.scroll) wrap.h.scroll(); }
+      if (caja.scrollLeft !== avisoC) { avisoC = caja.scrollLeft; hubo = true; if (caja.h.scroll) caja.h.scroll(); }
+      if (!hubo) break;
+    }
+    return vueltas;
+  };
+  return { caja, fantasma, wrap, clases, tope, asentar };
 };
+
+// ══ 7h-bis · EL TEMBLOR DEL CUADRO (V1072) ═══════════════════════════════════════════
+//
+// Pablo, 21/9/2026: «pasa algo con la pantalla del P&L que se tilda y no para de parpadear…
+// me da la impresión que es algo con las barras de desplazamiento, es en el único lugar
+// donde pasa». Medido en Chrome con el libro diario real: la de abajo llegaba a 58 y la de
+// arriba sólo a 43 —los 15 px de la barra vertical del cuadro—, así que al llegar al final la
+// de arriba le devolvía el cuadro para atrás. Con la rueda, el recorrido era 58 → 43 → 58.
+
+test('las dos barras corren EXACTAMENTE lo mismo: el cuadro no salta para atrás en el final', () => {
+  const b = BARRA(1564, 1506);   // los números medidos en Chrome con los rubros abiertos
+  assert.equal(b.tope(b.wrap), 58);
+  assert.equal(b.tope(b.caja), 58,
+    'las dos barras llegan a lugares distintos: al final, una le devuelve el cuadro a la otra');
+  // El fantasma NO lleva el ancho de la tabla: lleva lo que desborda más la caja de arriba. Con
+  // el ancho de la tabla, la de arriba —15 px más ancha— se queda corta por esos mismos 15 px.
+  assert.equal(b.fantasma.style.width, '1579px');
+  // El usuario lleva el cuadro hasta el final y suelta: tiene que QUEDARSE ahí.
+  b.wrap.scrollLeft = 99999;
+  assert.equal(b.wrap.scrollLeft, 58);
+  const vueltas = b.asentar();
+  assert.equal(b.wrap.scrollLeft, 58, 'el cuadro se volvió para atrás solo al llegar al final');
+  assert.equal(b.caja.scrollLeft, 58);
+  assert.ok(vueltas <= 2, 'las barras se siguen peleando el scroll: ' + vueltas + ' vueltas');
+  // Y al revés, desde la de arriba.
+  b.caja.scrollLeft = 99999;
+  assert.equal(b.asentar() <= 2, true);
+  assert.equal(b.wrap.scrollLeft, 58);
+  // CON ZOOM, EL SCROLL TRAE DECIMALES. Dos números que caen en el mismo píxel son el mismo lugar
+  // de la pantalla: copiar uno sobre el otro sería moverse, moverse avisa, y avisar vuelve a
+  // copiar. Una pelea de a fracciones de píxel se ve exactamente igual que el temblor.
+  const z = BARRA(1564, 1506);
+  z.wrap.scrollLeft = 30.4;
+  z.asentar();
+  z.caja.scrollLeft = 30.2;
+  const vueltasZ = z.asentar();
+  assert.ok(vueltasZ <= 2, 'se pelean por decimales: ' + vueltasZ + ' vueltas');
+  assert.equal(z.wrap.scrollLeft, 30.4, 'un decimal de diferencia movió el cuadro');
+});
+
+test('manual V1072: el cuadro dejó de temblar, y las dos barras llegan al final', () => {
+  const M = manual();
+  assert.match(M, /<span class="ver">V1072<\/span> El cuadro dejó de temblar al llegar al final de los meses/);
+  assert.match(M, /las dos llegan hasta el final/);
+  // Lo que el manual AFIRMA, contra el código: el fantasma se mide con la caja de arriba, no con
+  // el ancho de la tabla, que es lo que dejaba a una 15 px corta.
+  const b = fuente(PANEL, 'function plaBarraArriba(){');
+  assert.match(b, /fantasma\.style\.width = \(desborde \+ caja\.clientWidth\) \+ 'px';/);
+  assert.ok(!/plaBarraArriba\(ancho\)/.test(PANEL), 'todavía se dibuja con el ancho de la tabla');
+});
+
+test('aunque una barra no llegue tan lejos como la otra, no la arrastra para atrás', () => {
+  // El cinturón de seguridad: si por lo que sea los topes quedan distintos —un decimal del zoom,
+  // un repintado a mitad de camino— el que no llega deja al otro donde está.
+  const b = BARRA(1564, 1506);
+  b.caja.clientWidth = 1572;            // la de arriba se queda sin recorrido
+  assert.equal(b.tope(b.caja), 7);
+  b.wrap.scrollLeft = 58;
+  const vueltas = b.asentar();
+  assert.equal(b.wrap.scrollLeft, 58, 'la barra corta arrastró el cuadro para atrás');
+  assert.ok(vueltas <= 2, 'se pelean: ' + vueltas + ' vueltas');
+  // Y mientras el cuadro esté dentro de lo que la corta SÍ alcanza, se siguen como siempre.
+  b.wrap.scrollLeft = 5;
+  b.asentar();
+  assert.equal(b.caja.scrollLeft, 5, 'dejaron de seguirse cuando sí podían');
+});
 
 test('las dos barras se mueven juntas, y ninguna le devuelve el eco a la otra', () => {
   const b = BARRA(2576, 1536);
-  assert.equal(b.fantasma.style.width, '2576px', 'sin el ancho de la tabla, la barra de arriba no corre nada');
+  assert.equal(b.fantasma.style.width, '2591px', 'sin fantasma, la barra de arriba no corre nada');
   assert.ok(b.clases.has('on'), 'con 24 meses la barra de arriba tiene que verse');
   // Mover la de arriba mueve el cuadro...
   b.caja.scrollLeft = 420;
@@ -2340,7 +2437,7 @@ test('las dos barras se mueven juntas, y ninguna le devuelve el eco a la otra', 
 
 test('si el cuadro entra entero, la barra de arriba no se muestra ni engancha nada', () => {
   const b = BARRA(1100, 1536);
-  assert.equal(b.fantasma.style.width, '1100px');
+  assert.equal(b.fantasma.style.width, '0px', 'le queda un fantasma ancho y la barra corre sin nada detrás');
   assert.ok(!b.clases.has('on'), 'una barra que no corre nada es ruido');
   assert.deepEqual(Object.keys(b.caja.h), [], 'engancha el scroll aunque no haga falta');
 });
@@ -2353,8 +2450,10 @@ test('la barra va arriba del cuadro, pegada, y se dibuja en cada pintada', () =>
   assert.ok(i > 0 && j > i, 'la barra de arriba no está arriba del cuadro');
   // Se pinta con el mismo ancho que se le puso a la tabla, y sin meses no queda colgada.
   const p = fuente(PANEL, 'function plaPintar(){');
-  assert.match(p, /plaBarraArriba\(A\.tabla\);/);
-  assert.match(p, /plaBarraArriba\(0\);/);
+  assert.equal((p.match(/plaBarraArriba\(\);/g) || []).length, 2, 'sin meses la barra queda colgada');
+  // El alto se mide DOS veces: la barra de arriba, al aparecer, empuja el cuadro 16 px para
+  // abajo, y medido antes de eso el cuadro se pasa de la pantalla por esos mismos 16 px.
+  assert.match(p, /plaAltoCaja\(\);\r?\n  plaBarraArriba\(\);\r?\n  plaAltoCaja\(\);/);
   // Y la de abajo sigue estando: son las dos, no una en lugar de la otra. Vive en el borde de
   // la caja, que está acotada al alto de la pantalla, así que ahora también se alcanza.
   assert.match(PANEL, /#pla-pane-resultado \.ab-table-wrap\{overflow:auto !important;/);
@@ -2380,13 +2479,18 @@ test('el alto de la caja se mide contra la ventana, y nunca queda una ranura', (
   assert.match(caja, /getBoundingClientRect\(\)/);
   assert.match(caja, /window\.innerHeight/);
   assert.match(caja, /if \(window\.innerWidth <= 900\) \{ wrap\.style\.maxHeight = ''; return; \}/);
-  // Y se recalcula al pintar, ANTES de decidir si hace falta la barra de los meses.
+  // Y se recalcula al pintar: ANTES de decidir si hace falta la barra de los meses —la barra
+  // vertical le come unos 15 px al ancho visible y es con ese número que se decide— y OTRA VEZ
+  // después, porque la barra de arriba, al aparecer, empuja el cuadro 16 px para abajo.
+  // Se mira el final de la función: arriba de todo hay otra llamada a la barra, la del caso
+  // «no hay meses», y con un indexOf a secas el orden parecería estar al revés.
   const p = fuente(PANEL, 'function plaPintar(){');
-  const iAlto = p.indexOf('plaAltoCaja();'), iBarra = p.indexOf('plaBarraArriba(A.tabla);');
-  // Las dos tienen que estar, y en ese orden: con indexOf a secas, la que falta da -1 y el
-  // orden parece cumplirse igual.
+  const cola = p.slice(p.lastIndexOf("tb.innerHTML = h + '</tbody>';"));
+  const iAlto = cola.indexOf('plaAltoCaja();'), iBarra = cola.indexOf('plaBarraArriba();');
   assert.ok(iAlto > 0, 'el alto de la caja no se recalcula al pintar');
   assert.ok(iBarra > iAlto, 'la barra decide con el ancho de antes de que aparezca la barra vertical');
+  assert.ok(cola.indexOf('plaAltoCaja();', iBarra) > iBarra,
+    'el alto queda medido con el cuadro 16 px más arriba de donde termina');
 });
 
 test('el encabezado de meses queda fijo, y las esquinas por encima de todo', () => {
