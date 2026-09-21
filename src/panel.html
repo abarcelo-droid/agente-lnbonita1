@@ -24589,7 +24589,8 @@ SG_MANUAL.plabasto = { titulo: 'P&L Abasto', html:
   + '<li><span class="ver">V1069</span> El cuadro <b>se recorre dentro de su propia caja</b>, que llega hasta '
   + 'el pie de la pantalla: el <b>encabezado de meses queda fijo arriba</b> —por más que se baje, siempre se '
   + 'sabe qué mes es cada columna— y hay <b>dos barras para correr los meses</b>, una <b>arriba</b> y otra '
-  + '<b>abajo</b> del cuadro, las dos siempre a la vista y moviéndose juntas: da igual cuál se use. Aparecen '
+  + '<b>abajo</b> del cuadro, las dos siempre a la vista y moviéndose juntas: da igual cuál se use, y las '
+  + 'dos llegan hasta el final <span class="ver">V1072</span>. Aparecen '
   + 'sólo cuando hay meses que no entran; si entran todos, no están.</li>'
   + '<li><span class="ver">V1063</span> En esa misma lista, el tilde <b>⚠️ Sólo los que no balancean</b> deja '
   + 'únicamente los movimientos cuyo asiento <b>quedó sin pareja</b> —los mismos que lista la solapa No '
@@ -24739,6 +24740,9 @@ SG_MANUAL.plabasto = { titulo: 'P&L Abasto', html:
   + '<li><span class="ver">V1069</span> El cuadro se lee como una planilla: encabezado de meses fijo y barra '
   + 'para correrlos arriba y abajo, las dos a la vista. La de abajo quedaba al final de la tabla, a 600 px por '
   + 'debajo de la pantalla.</li>'
+  + '<li><span class="ver">V1072</span> El cuadro dejó de temblar al llegar al final de los meses. Las dos '
+  + 'barras no corrían lo mismo —la de arriba se quedaba 15 px antes, los que el cuadro pierde con su barra '
+  + 'de bajar— y se devolvían la tabla la una a la otra.</li>'
   + '<li><span class="ver">V1068</span> En los asientos de un importe, el tilde de los que no balancean dejó de '
   + 'montarse sobre el texto de al lado.</li>'
   + '<li><span class="ver">V1067</span> El Excel de No balancea, más simple: una hoja con un asiento por fila y su '
@@ -44238,29 +44242,51 @@ function plaObservarCaja(){
   PLA_RO.observe(wrap);
 }
 
-// LA BARRA DE ARRIBA (V1069). Lleva adentro un div del ANCHO DE LA TABLA: eso es lo que le da algo
-// que correr. Las dos barras se copian el scroll la una a la otra, con una guarda para que el eco de
-// una no vuelva a mover a la otra. Si el cuadro entra entero, la barra de arriba no se muestra: una
-// barra que no corre nada es ruido.
-function plaBarraArriba(ancho){
+// LA BARRA DE ARRIBA (V1069, corregida en la V1072). Lleva adentro un div que le da algo que
+// correr, y las dos barras se copian el scroll la una a la otra. Si el cuadro entra entero no se
+// muestra: una barra que no corre nada es ruido.
+//
+// EL RECORRIDO DE LAS DOS TIENE QUE SER EL MISMO, Y ESE ERA EL BUG (V1072). El fantasma llevaba
+// el ancho de la TABLA, pero la caja de arriba es unos 15 px más ancha que la del cuadro: el
+// cuadro perdió esos píxeles con su propia barra VERTICAL, y la de arriba no la tiene. Con la
+// tabla en 1564 y el cuadro en 1506, el cuadro podía correr 58 px y la de arriba sólo 43. Al
+// llegar al final, la de arriba se clavaba en 43 y le DEVOLVÍA esos 43 al cuadro: la tabla
+// saltaba 15 px para atrás sola. Medido en Chrome: con la rueda contra el tope el recorrido era
+// 58 → 43 → 58, y mientras se arrastraba temblaba en cada cuadro de animación. Por eso «se tilda
+// y no para de parpadear», y por eso sólo pasaba acá —es la única pantalla con dos barras—.
+//
+// Se iguala el RECORRIDO, no el ancho de la tabla: el fantasma mide lo que desborda el cuadro más
+// la caja de arriba, así los dos topes dan el mismo número sin tener que saber cuánto mide una
+// barra —que depende del sistema, del navegador y del zoom—.
+function plaBarraArriba(){
   var caja = eid('pla-barra-arriba'), fantasma = eid('pla-barra-fantasma');
   // El cuadro se dibuja también fuera del navegador —los tests corren plaPintar con un eid de
   // mentira y sin document—, así que se sale antes de tocar nada de todo eso.
   if (!caja || !fantasma || !caja.classList || typeof document === 'undefined') return;
   var wrap = document.querySelector('#pla-pane-resultado .ab-table-wrap');
   if (!wrap) return;
-  fantasma.style.width = (ancho || 0) + 'px';
-  var hay = (ancho || 0) > wrap.clientWidth + 1;
+  var desborde = Math.max(0, wrap.scrollWidth - wrap.clientWidth);
+  var hay = desborde > 1;
   caja.classList.toggle('on', hay);
-  if (!hay || caja._pla) return;
+  if (!hay) { fantasma.style.width = '0px'; return; }
+  // Se mide DESPUÉS de mostrarla: escondida, su ancho es cero.
+  fantasma.style.width = (desborde + caja.clientWidth) + 'px';
+  if (caja._pla) return;
   caja._pla = 1;
   // SE COMPARAN VALORES, NO SE MARCA UN ECO. Con un flag, si al copiar el scroll el valor ya era
   // el mismo —en los topes, o un arrastre que no llegó a mover un píxel— el evento de vuelta no
   // se dispara, el flag queda encendido y se come el movimiento SIGUIENTE: la barra se traba una
   // vez y anda a la otra, que es el peor tipo de falla para reportar. Comparar no guarda estado.
+  //
+  // Y SI EL OTRO NO LLEGA TAN LEJOS, NO SE LO MUEVE. Aunque los dos topes queden distintos —un
+  // decimal del zoom, un repintado a mitad de camino—, mejor que las dos barras queden corridas
+  // un rato a que se peleen: el que no llega devolvería un valor más chico, el otro lo copiaría,
+  // y eso es el temblor. Recortar no alcanza; hay que no empujar.
   var sinc = function(a, b){
     a.addEventListener('scroll', function(){
-      if (Math.round(a.scrollLeft) !== Math.round(b.scrollLeft)) b.scrollLeft = a.scrollLeft;
+      var v = a.scrollLeft;
+      if (v > Math.max(0, b.scrollWidth - b.clientWidth)) return;
+      if (Math.round(v) !== Math.round(b.scrollLeft)) b.scrollLeft = v;
     }, { passive: true });
   };
   sinc(caja, wrap);
@@ -44271,7 +44297,7 @@ function plaPintar(){
   var d = PLA.datos, tb = eid('pla-tabla'); if (!d || !tb) return;
   if (!d.meses || !d.meses.length) {
     if (tb.style) tb.style.width = '';
-    plaBarraArriba(0);
+    plaBarraArriba();
     tb.innerHTML = '<tr><td style="text-align:left;color:var(--mut)">' + ((d.meses_disponibles || []).length
       ? 'No hay movimientos en ese período.' : 'Todavía no hay datos: subí el libro diario.') + '</td></tr>';
     return;
@@ -44359,9 +44385,13 @@ function plaPintar(){
   h += fila('pla-res', '⭐ RESULTADO NETO', T.subtotales.neto, true);
   tb.innerHTML = h + '</tbody>';
   // Primero el alto: al aparecer la barra vertical, el ancho visible baja unos 15 px, y es con
-  // ese número que se decide si hace falta la barra de los meses.
+  // ese número que se decide si hace falta la barra de los meses. Y el alto OTRA VEZ al final,
+  // porque la barra de arriba, al aparecer, empuja el cuadro 16 px para abajo: medido antes de
+  // eso, el alto se pasaba de la pantalla por esos mismos 16 px. La segunda pasada no cuesta
+  // nada cuando nada se movió —escribir el mismo max-height no cambia el tamaño de nada—.
   plaAltoCaja();
-  plaBarraArriba(A.tabla);
+  plaBarraArriba();
+  plaAltoCaja();
 }
 
 function plaToggle(k){ PLA.abiertos[k] = !PLA.abiertos[k]; plaPintar(); }
