@@ -5519,6 +5519,15 @@ input[type=number]{-moz-appearance:textfield;appearance:textfield}
   <style>
     #sec-pl-abasto .pla-f{display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;margin-bottom:10px}
     #sec-pl-abasto .pla-f label{font-size:11px;color:var(--mut);display:block;margin-bottom:3px}
+    /* LA LUPA VA PEGADA AL CUADRO (V1074), que es lo que filtra: puesta arriba, al lado de Desde
+       y Hasta, se leería como si filtrara el período. */
+    #sec-pl-abasto .pla-busca{display:flex;gap:8px;align-items:center;margin:0 0 6px;flex-wrap:wrap}
+    #sec-pl-abasto .pla-busca .pla-lupa{font-size:13px;opacity:.75}
+    #sec-pl-abasto .pla-busca input{flex:0 1 340px;min-width:170px;padding:5px 8px;
+      border:1px solid var(--bor);border-radius:6px;background:var(--bg);font-size:12.5px}
+    #sec-pl-abasto .pla-bx{background:none;border:0;cursor:pointer;color:var(--mut);font-size:13px;
+      padding:2px 4px;line-height:1}
+    #sec-pl-abasto .pla-bx:hover{color:var(--txt)}
     #sec-pl-abasto .pla-f select,#sec-pl-abasto .pla-f input{
       padding:5px 8px;border:1px solid var(--bor);border-radius:6px;background:var(--bg);font-size:12.5px}
     #sec-pl-abasto .pla-tab{display:inline-block;padding:9px 16px;cursor:pointer;border-bottom:2px solid transparent;
@@ -5716,10 +5725,18 @@ input[type=number]{-moz-appearance:textfield;appearance:textfield}
       <button class="btn bo" onclick="plaCotizAbrir()">💱 Cotizaciones</button>
       <button class="btn bo" id="pla-ajuste-btn" style="display:none" onclick="plaAjusteAbrir(null)">✎ Ajuste manual</button>
       <button class="btn bo" onclick="plaExportar()">⬇️ Exportar CSV</button>
-      <div style="font-size:11px;color:var(--mut);align-self:center">Clic en un rubro: sus cuentas y ajustes · doble
-        clic en un importe: los asientos · el importe exacto, pasando el mouse</div>
+      <div style="font-size:11px;color:var(--mut);align-self:center">Clic en un rubro: sus cuentas ·
+        doble clic en un importe: sus asientos · el importe exacto, pasando el mouse</div>
     </div>
     <div id="pla-moneda-aviso" style="font-size:12px;color:#92400e;margin:0 0 6px"></div>
+    <div class="pla-busca">
+      <span class="pla-lupa" aria-hidden="true">🔍</span>
+      <input id="pla-buscar" autocomplete="off" oninput="plaBuscarTeclas()"
+        placeholder="Buscar una cuenta, un ajuste, un proveedor…">
+      <button class="pla-bx" id="pla-buscar-x" style="display:none" onclick="plaBuscarLimpiar()"
+        title="Sacar el filtro">✕</button>
+      <span id="pla-buscar-n" style="font-size:12px"></span>
+    </div>
     <div class="pla-barra" id="pla-barra-arriba" aria-hidden="true"><div id="pla-barra-fantasma"></div></div>
     <div class="ab-table-wrap"><table class="pla-tbl" id="pla-tabla"></table></div>
   </div>
@@ -24593,6 +24610,17 @@ SG_MANUAL.plabasto = { titulo: 'P&L Abasto', html:
   + '<b>abajo</b> del cuadro, las dos siempre a la vista y moviéndose juntas: da igual cuál se use, y las '
   + 'dos llegan hasta el final <span class="ver">V1072</span>. Aparecen '
   + 'sólo cuando hay meses que no entran; si entran todos, no están.</li>'
+  + '<li><span class="ver">V1074</span> La <b>lupa</b> de abajo del todo filtra el cuadro: se escribe cualquier '
+  + 'cosa —el nombre de una cuenta, el de un proveedor, el de un ajuste, el número de la cuenta con o sin '
+  + 'puntos, o el nombre del rubro— y <b>no hace falta que empiece igual</b>: alcanza con que <b>lo contenga</b>. '
+  + 'No distingue mayúsculas ni acentos, pero la <b>ñ sí</b>: «peña» no encuentra «pena».</li>'
+  + '<li>Con la lupa puesta quedan <b>sólo los renglones que coinciden</b>, con su rubro abierto, y '
+  + 'los importes que se ven pasan a ser los de <b>lo encontrado</b>. Por eso desaparecen los subtotales '
+  + '—un EBITDA de tres renglones sueltos no es un EBITDA— y el renglón de abajo dice <b>TOTAL DE LO '
+  + 'ENCONTRADO</b> en vez de RESULTADO NETO. Al lado de la lupa dice cuántos encontró; con la <b>✕</b> '
+  + 'vuelve el cuadro entero.</li>'
+  + '<li>Con la lupa puesta, <b>⬇️ Exportar CSV</b> baja <b>lo que se ve</b>, y el nombre del archivo dice '
+  + 'qué se buscó.</li>'
   + '<li><span class="ver">V1063</span> En esa misma lista, el tilde <b>⚠️ Sólo los que no balancean</b> deja '
   + 'únicamente los movimientos cuyo asiento <b>quedó sin pareja</b> —los mismos que lista la solapa No '
   + 'balancea—, y al lado del tilde dice cuántos son. Cada uno lleva un <b>⚠️</b> aunque el tilde esté sin '
@@ -24744,6 +24772,8 @@ SG_MANUAL.plabasto = { titulo: 'P&L Abasto', html:
   + '<li><span class="ver">V1072</span> El cuadro dejó de temblar al llegar al final de los meses. Las dos '
   + 'barras no corrían lo mismo —la de arriba se quedaba 15 px antes, los que el cuadro pierde con su barra '
   + 'de bajar— y se devolvían la tabla la una a la otra.</li>'
+  + '<li><span class="ver">V1074</span> Una <b>lupa</b> abajo del cuadro para buscar cualquier cosa —un '
+  + 'proveedor, una cuenta, un ajuste— con sólo que lo contenga.</li>'
   + '<li><span class="ver">V1073</span> Y dejó de dibujarse dos veces: al abrir o cerrar un rubro, las '
   + 'columnas se reacomodaban una segunda vez un instante después. El lugar de la barra de bajar ahora está '
   + 'reservado desde el principio, así que el ancho ya no cambia solo. De paso, el cuadro llega justo al pie '
@@ -43761,7 +43791,7 @@ var IA = { data:null, opo:null, tipos:{} };
 // mientras los demás trabajan.
 var PLA = { datos: null, abiertos: {}, cuentas: null, pend: {}, detalle: null, lectura: null, previa: null, unidad: null,
   nb: null, nbAbiertos: {}, ajuste: null, op: false, moneda: 'ars', cotiz: null,
-  pendVentas: {} };
+  pendVentas: {}, busca: '' };
 
 // ── LEER EL LIBRO DIARIO ─────────────────────────────────────────────────────
 //
@@ -44003,6 +44033,10 @@ function plaInit(){
   PLA.pendVentas = {};
   PLA.sel = null;
   PLA.nb = null;
+  // SE ENTRA SIN FILTRO: un buscador con algo escrito de la visita anterior esconde la mitad del
+  // cuadro y nadie mira el campito para darse cuenta.
+  PLA.busca = '';
+  var eb = eid('pla-buscar'); if (eb) eb.value = '';
   plaTab('resultado');
   plaCargar(true);
   plaObservarCaja();
@@ -44323,6 +44357,66 @@ function plaBarraArriba(){
   sinc(wrap, caja);
 }
 
+// ── BUSCAR EN EL CUADRO (V1074) ───────────────────────────────────────────────
+//
+// Pablo, 21/9/2026: «abajo poné una lupa con un campo para buscar… SIEMPRE la búsqueda debe ser
+// con CONTIENE porque puedo buscar el nombre del proveedor o cualquier cosa ahí».
+//
+// Se busca con sgNorm, el ÚNICO normalizador del panel —sin acentos y con la ñ intacta, que es
+// una letra del idioma y tiene tecla propia—. Y CONTIENE, no «empieza con»: el nombre que trae el
+// libro diario del otro sistema suele llevar el proveedor en el medio.
+var PLA_BUSCA_TMR = null;
+function plaBuscaNorm(){ return sgNorm(String(PLA.busca || '')).trim(); }
+function plaCoincide(txt, q){ return sgNorm(String(txt == null ? '' : txt)).indexOf(q) >= 0; }
+
+// TODO LO QUE SE LEE EN EL RENGLÓN entra en la búsqueda, y el número de cuenta va dos veces: con
+// puntos y sin ellos, porque nadie lo escribe igual y «4.2.04» y «4204» son la misma cuenta.
+// También el nombre del rubro, para poder pedir «costos fijos» y que salga el rubro entero.
+function plaTextoCuenta(c, rubro){
+  var n = String(c.cuenta == null ? '' : c.cuenta);
+  return [c.nombre, n, n.replace(/\./g, ''), rubro].join(' ');
+}
+function plaTextoAjuste(a, rubro){ return [a.nombre, 'ajuste', rubro].join(' '); }
+
+// SE FILTRAN LOS DATOS, NO LAS FILAS. Si se filtraran las filas, cada rubro seguiría mostrando el
+// total de TODAS sus cuentas arriba de las tres que quedaron: un número que no se corresponde con
+// nada de lo que se ve. Filtrando los datos, los totales de abajo son los de lo encontrado.
+function plaFiltrar(d, q){
+  var lab = {};
+  (d.rubros || []).forEach(function(r){ lab[r.k] = r.label; });
+  return Object.assign({}, d, {
+    cuentas: (d.cuentas || []).filter(function(c){ return plaCoincide(plaTextoCuenta(c, lab[c.rubro] || ''), q); }),
+    ajustes: (d.ajustes || []).filter(function(a){ return plaCoincide(plaTextoAjuste(a, lab[a.rubro] || ''), q); })
+  });
+}
+
+function plaBuscarTeclas(){
+  var v = (eid('pla-buscar') || {}).value || '';
+  clearTimeout(PLA_BUSCA_TMR);
+  // Un rebote corto: con novecientas cuentas, dibujar en cada tecla se siente pesado.
+  PLA_BUSCA_TMR = setTimeout(function(){ PLA.busca = v; plaPintar(); }, 150);
+}
+function plaBuscarLimpiar(){
+  var e = eid('pla-buscar'); if (e) { e.value = ''; e.focus(); }
+  clearTimeout(PLA_BUSCA_TMR);
+  PLA.busca = '';
+  plaPintar();
+}
+
+// QUÉ SE ESTÁ VIENDO, dicho al lado de la lupa. Con un filtro puesto, los importes de abajo son
+// los de LO ENCONTRADO y no los del período: eso hay que decirlo, o alguien lee el total de una
+// búsqueda como si fuera el resultado del mes.
+function plaBuscaCartel(d, q){
+  if (!q) return '';
+  var c = (d.cuentas || []).length, a = (d.ajustes || []).length;
+  if (!c && !a) return '<span style="color:#92400e">No hay nada que diga eso.</span>';
+  var p = [];
+  if (c) p.push(c + (c === 1 ? ' cuenta' : ' cuentas'));
+  if (a) p.push(a + (a === 1 ? ' ajuste' : ' ajustes'));
+  return '<b>' + p.join(' y ') + '</b> <span style="color:#92400e">· los importes son los de lo '
+    + 'encontrado, no los del período</span>';
+}
+
 function plaPintar(){
   var d = PLA.datos, tb = eid('pla-tabla'); if (!d || !tb) return;
   if (!d.meses || !d.meses.length) {
@@ -44335,6 +44429,10 @@ function plaPintar(){
   // EN DÓLARES, cada mes con su cotización; lo de abajo se arma igual sobre esos importes.
   var conv = plaEnMoneda(d, PLA.moneda);
   d = conv.datos;
+  var q = plaBuscaNorm();
+  if (q) d = plaFiltrar(d, q);
+  var bn = eid('pla-buscar-n'); if (bn) bn.innerHTML = plaBuscaCartel(d, q);
+  var bx = eid('pla-buscar-x'); if (bx && bx.style) bx.style.display = q ? '' : 'none';
   var av = eid('pla-moneda-aviso');
   if (av) av.innerHTML = plaMonedaCartel(conv.sin);
   var sm = eid('pla-moneda'); if (sm) sm.value = PLA.moneda;
@@ -44375,9 +44473,12 @@ function plaPintar(){
     // conseguir. Va en su propia lista y, si un rubro sólo tiene pendientes, se dibuja igual.
     var pendientes = T.ajustes[r.k].filter(function(x){ return !!x.a.pendiente; });
     if (cuentas.length || ajustes.length || pendientes.length) {
-      var abierto = !!PLA.abiertos[r.k];
+      // BUSCANDO, LOS RUBROS SE ABREN SOLOS: si no, se encuentra algo y no se ve. Lo que el
+      // usuario abrió a mano no se toca —PLA.abiertos queda como estaba— y al sacar el filtro
+      // vuelve a estar como lo dejó.
+      var abierto = !!PLA.abiertos[r.k] || !!q;
       h += fila('pla-rub', (abierto ? '▼ ' : '▶ ') + r.ico + ' ' + r.label
-          + (pendientes.length ? ' ⏳' + pendientes.length : ''), T.rubros[r.k], true,
+          + (pendientes.length ? ' ⏳' + pendientes.length : ''), T.rubros[r.k], !q,
         function(m){ return "plaDetalle('rubro','" + r.k + "','" + m + "')"; }, "plaToggle('" + r.k + "')",
         pendientes.length ? (pendientes.length === 1 ? 'Tiene 1 ajuste manual sin importe todavía'
             : 'Tiene ' + pendientes.length + ' ajustes manuales sin importe todavía')
@@ -44405,14 +44506,22 @@ function plaPintar(){
             + (orden.length + 1) + '" title="Clic: cargarle el importe">⏳ ' + escH(x.a.nombre)
             + ' — falta cargar el importe: todavía no suma al resultado</td></tr>';
         });
-        if (PLA.op) h += '<tr class="pla-aju-add"><td colspan="' + (orden.length + 1) + '" onclick="plaAjusteAbrir(null,\''
+        if (PLA.op && !q) h += '<tr class="pla-aju-add"><td colspan="' + (orden.length + 1) + '" onclick="plaAjusteAbrir(null,\''
           + r.k + '\')">+ Agregar un ajuste manual a ' + escH(r.label) + '</td></tr>';
       }
     }
     // EL SUBTOTAL VA AUNQUE SU RUBRO ESTÉ VACÍO: el EBITDA existe aunque no haya costos fijos.
-    PLA_SUBTOTALES.forEach(function(s){ if (s.despues === r.k) h += fila('pla-sub', s.label, T.subtotales[s.k], true); });
+    // Pero NO con un filtro puesto: un «EBITDA» de tres cuentas sueltas no es un EBITDA.
+    if (!q) PLA_SUBTOTALES.forEach(function(s){ if (s.despues === r.k) h += fila('pla-sub', s.label, T.subtotales[s.k], true); });
   });
-  h += fila('pla-res', '⭐ RESULTADO NETO', T.subtotales.neto, true);
+  // Y el renglón de abajo CAMBIA DE NOMBRE con el filtro puesto: decirle RESULTADO NETO a la suma
+  // de una búsqueda es la manera más fácil de que alguien saque una foto y lea otra cosa.
+  if (q && !(d.cuentas || []).length && !(d.ajustes || []).length) {
+    h += '<tr><td colspan="' + (orden.length + 1) + '" style="text-align:left;color:var(--mut)">'
+      + 'No hay ninguna cuenta ni ajuste que diga «' + escH(PLA.busca) + '».</td></tr>';
+  } else {
+    h += fila('pla-res', q ? '⭐ TOTAL DE LO ENCONTRADO' : '⭐ RESULTADO NETO', T.subtotales.neto, !q);
+  }
   tb.innerHTML = h + '</tbody>';
   // Primero el alto: al aparecer la barra vertical, el ancho visible baja unos 15 px, y es con
   // ese número que se decide si hace falta la barra de los meses. Y el alto OTRA VEZ al final,
@@ -45051,9 +45160,14 @@ function plaExportar(){
       + ': cargalas o exportá en pesos', 'er');
     return;
   }
+  // CON UN FILTRO PUESTO SE BAJA LO QUE SE VE (V1074), y el nombre del archivo lo dice: bajar el
+  // cuadro entero cuando en pantalla hay tres cuentas sería una planilla que no es la que se pidió.
+  var q = plaBuscaNorm();
+  var datos = q ? plaFiltrar(conv.datos, q) : conv.datos;
   var a = document.createElement('a');
-  a.href = URL.createObjectURL(new Blob([plaCsv(conv.datos, usd)], { type: 'text/csv;charset=utf-8' }));
-  a.download = 'PL_Abasto_' + d.desde + '_a_' + d.hasta + (usd ? '_USD' : '') + '.csv';
+  a.href = URL.createObjectURL(new Blob([plaCsv(datos, usd)], { type: 'text/csv;charset=utf-8' }));
+  a.download = 'PL_Abasto_' + d.desde + '_a_' + d.hasta + (usd ? '_USD' : '')
+    + (q ? '_buscando_' + String(PLA.busca).replace(/[^\w\-]+/g, '_').slice(0, 24) : '') + '.csv';
   a.click();
   URL.revokeObjectURL(a.href);
 }
