@@ -94,6 +94,8 @@ function rutas(db, { detalleMax } = {}) {
     fuente(RUTA, 'function escribirMesesDeAjuste('),
     fuente(RUTA, 'function ajustesDelPeriodo('),
     fuente(RUTA, 'function cotizacionesDelPeriodo('),
+    fuente(RUTA, 'function volverAlPropuesto('),
+    fuente(RUTA, 'function migrarCotizaciones('),
     fuente(RUTA, 'async function traerCotizaciones('),
     'return {',
     '  previa: ' + handler("router.post('/previa'") + ',',
@@ -109,8 +111,10 @@ function rutas(db, { detalleMax } = {}) {
     '  ajusteEliminar: ' + handler("router.delete('/ajustes/:id'") + ',',
     '  cotizaciones: ' + handler("router.get('/cotizaciones'") + ',',
     '  cotizGuardar: ' + handler("router.put('/cotizaciones'") + ',',
+    '  cotizLimpiar: ' + handler("router.delete('/cotizaciones'") + ',',
     '  traer: traerCotizaciones,',
     '  migrar: migrarTitulos,',
+    '  migrarCotiz: migrarCotizaciones,',
     '  asiento: ' + handler("router.get('/asiento'") + ',',
     '};',
   ].join('\n'))(db, SVC);
@@ -390,6 +394,7 @@ const PANTALLA = (datos, abiertos = {}, unidad, op, moneda, caja = 1180) => {
     fuente(PANEL, 'function plaTotales(d){'),
     fuente(PANEL, 'function plaUnidadClave(){'),
     fuente(PANEL, 'function plaEnMoneda(d, moneda){'),
+    fuente(PANEL, 'function plaMonedaCartel(sin){'),
     fuente(PANEL, 'function plaUnidadGuardada(){'),
     fuente(PANEL, 'function plaUnidadAuto(T){'),
     fuente(PANEL, 'function plaCelda(v, ventas, conPct){'),
@@ -859,13 +864,22 @@ test('las cotizaciones: se traen del mercado sin pisar las cargadas a mano, y el
   const t = await R.traer(db, 'blue', 5, fetchFalso);
   assert.equal(t.status, 200, JSON.stringify(t.body));
   assert.deepEqual(pedidos, ['https://api.argentinadatos.com/v1/cotizaciones/dolares/blue']);
-  assert.deepEqual(t.body.data, { tipo: 'blue', traidos: 1, manuales: 1, sin_dato: ['2025-09'] });
+  assert.deepEqual(t.body.data, { tipo: 'blue', traidos: 1, propuestos: 1, manuales: 1, sin_dato: ['2025-09'] });
   const lista = llamar(R.cotizaciones, {}).body.data.meses;
-  assert.deepEqual(lista.map((x) => [x.mes, x.cotizacion, x.origen]),
-    [['2025-09', null, undefined], ['2025-08', 1300, 'mercado'], ['2025-07', 1300, 'manual']],
+  // V1071: la lista son TODOS los meses, los del libro y los que sólo tienen cotización —junio
+  // se cargó a mano y su libro todavía no se subió: esconderlo sería perderlo de vista—.
+  assert.deepEqual(lista.map((x) => [x.mes, x.cotizacion, x.origen, x.sin_libro]),
+    [['2025-09', null, null, 0], ['2025-08', 1300, 'mercado', 0], ['2025-07', 1300, 'manual', 0],
+      ['2025-06', 999, 'manual', 1]],
     'traer del mercado pisó la cargada a mano');
   assert.equal(lista[1].tipo, 'blue');
   assert.equal(lista[2].modificado_por, 'Pablo');
+  // V1071: al mes confirmado a mano NO se le toca la cotización, pero sí se le guarda lo que
+  // propone el mercado. Sin eso no hay contra qué comparar ni a qué volver.
+  assert.equal(lista[2].cotizacion, 1300, 'traer del mercado pisó la confirmada a mano');
+  assert.equal(lista[2].propuesto, 1000);
+  assert.equal(lista[2].propuesto_tipo, 'blue');
+  assert.ok(lista[2].propuesto_en, 'no quedó cuándo se trajo esa propuesta');
   // Una fuente que falla no rompe nada, y lo dice.
   const mal = await R.traer(db, 'blue', 5, async () => ({ ok: false, status: 503 }));
   assert.equal(mal.status, 502);
@@ -875,9 +889,19 @@ test('las cotizaciones: se traen del mercado sin pisar las cargadas a mano, y el
   const d = llamar(R.resultado, { query: { desde: '2025-07', hasta: '2025-09' } }).body.data;
   assert.deepEqual(Object.keys(d.cotizaciones).sort(), ['2025-07', '2025-08']);
   assert.equal(d.cotizaciones['2025-08'].cotizacion, 1300);
-  // A mano: vacío la saca, y un número malo no guarda nada.
-  assert.equal(llamar(R.cotizGuardar, { body: { meses: { '2025-08': '' } } }).code, 200);
-  assert.equal(llamar(R.cotizaciones, {}).body.data.meses[1].cotizacion, null);
+  // V1071 · BORRAR LO CONFIRMADO VUELVE AL PROPUESTO, no tira el mes. Julio está a mano en
+  // 1300 y el mercado propuso 1000: al borrarlo queda en 1000, marcado como del mercado.
+  const vaciarJulio = llamar(R.cotizGuardar, { body: { meses: { '2025-07': '' } } });
+  assert.equal(vaciarJulio.code, 200);
+  assert.deepEqual(vaciarJulio.body.data, { guardadas: 1, volvieron: 1, borradas: 0 });
+  const trasBorrar = llamar(R.cotizaciones, {}).body.data.meses;
+  assert.deepEqual([trasBorrar[2].mes, trasBorrar[2].cotizacion, trasBorrar[2].origen, trasBorrar[2].tipo],
+    ['2025-07', 1000, 'mercado', 'blue']);
+  // Y un mes que NUNCA se trajo no tiene a qué volver: ahí sí se borra la fila.
+  const vaciarJunio = llamar(R.cotizGuardar, { body: { meses: { '2025-06': '' } } });
+  assert.deepEqual(vaciarJunio.body.data, { guardadas: 1, volvieron: 0, borradas: 1 });
+  assert.ok(!llamar(R.cotizaciones, {}).body.data.meses.some((x) => x.mes === '2025-06'),
+    'un mes sin libro ni cotización no tiene por qué seguir en la lista');
   assert.equal(llamar(R.cotizGuardar, { body: { meses: { '2025-09': -5 } } }).code, 400);
   // La ruta la llama con el fetch de verdad.
   assert.match(RUTA, /traerCotizaciones\(db, String\(\(req\.body && req\.body\.tipo\) \|\| ''\), usuarioId\(req\), fetch\)/);
@@ -933,13 +957,239 @@ test('la ventana de cotizaciones: sin dólar por defecto, guarda sólo lo que se
   assert.match(PANEL, /<div class="ab-modal-overlay sg-mod" id="pla-cotiz-modal">/);
 });
 
+// ══ 5b · CADA MES, DOS NÚMEROS: EL PROPUESTO Y EL CONFIRMADO (V1071) ════════════════
+//
+// El brief que dejó Pablo: «el blue automático es una estimación. El dueño/contadora confirma
+// el tipo de cambio real que quiere usar para cada mes. Lo confirmado tiene prioridad».
+// La regla de la V1055 —lo de a mano gana— no cambia; lo que se agrega es PODER VER contra qué
+// se está decidiendo, y poder volver.
+
+const PLA_COTIZ_DIAS = Number(/^var PLA_COTIZ_VIEJA_DIAS = (\d+);\r?$/m.exec(PANEL)[1]);
+const COTIZ = (PLA, eid) => new Function('PLA', 'eid', 'escH', [
+  /^var PLA_MES = .*;\r?$/m.exec(PANEL)[0],
+  fuente(PANEL, 'function plaMesTxt(m){'),
+  fuente(PANEL, 'function plaImporte(v, usd){'),
+  /^var PLA_COTIZ_VIEJA_DIAS = .*;\r?$/m.exec(PANEL)[0],
+  fuente(PANEL, 'function plaCotizTipoTxt(tipo, tipos){'),
+  fuente(PANEL, 'function plaCotizEstado(x, C){'),
+  fuente(PANEL, 'function plaCotizNotaMes(x, C){'),
+  fuente(PANEL, 'function plaCotizNotaAyuda(x, C){'),
+  fuente(PANEL, 'function plaCotizFrescura(C){'),
+  fuente(PANEL, 'function plaCotizConPropuesto(C){'),
+  fuente(PANEL, 'function plaCotizAccion(x, op){'),
+  fuente(PANEL, 'function plaCotizFila(x, C, op){'),
+  fuente(PANEL, 'function plaCotizPintar(op){'),
+  ['return { estado: plaCotizEstado, nota: plaCotizNotaMes, ayuda: plaCotizNotaAyuda, frescura: plaCotizFrescura,',
+    '  conProp: plaCotizConPropuesto, accion: plaCotizAccion, fila: plaCotizFila, pintar: plaCotizPintar };'].join('\n'),
+].join('\n'))(PLA, eid, (x) => String(x));
+// Un timestamp local de hace n días, escrito como lo escribe SQLite.
+const haceDias = (n) => {
+  const d = new Date(Date.now() - n * 86400000), p = (x) => String(x).padStart(2, '0');
+  return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate()) + ' '
+    + p(d.getHours()) + ':' + p(d.getMinutes()) + ':00';
+};
+const MESES_CZ = () => ({ tipos: [{ k: 'blue', label: 'Blue' }, { k: 'oficial', label: 'Oficial' }],
+  mes_actual: '2025-09',
+  meses: [
+    { mes: '2025-09', cotizacion: 1400, origen: 'mercado', tipo: 'blue', propuesto: 1400, propuesto_tipo: 'blue',
+      propuesto_en: haceDias(0), modificado_por: 'Pablo', modificado_en: haceDias(0), sin_libro: 0 },
+    { mes: '2025-08', cotizacion: 1300, origen: 'manual', tipo: null, propuesto: 1250, propuesto_tipo: 'blue',
+      propuesto_en: haceDias(0), modificado_por: 'Pablo', modificado_en: '2025-09-20 18:30:00', sin_libro: 0 },
+    { mes: '2025-07', cotizacion: 1100, origen: 'manual', tipo: null, propuesto: null, propuesto_tipo: null,
+      propuesto_en: null, modificado_por: 'Pablo', modificado_en: '2025-09-19 10:00:00', sin_libro: 1 },
+    { mes: '2025-06', cotizacion: null, origen: null, tipo: null, propuesto: null, propuesto_tipo: null,
+      propuesto_en: null, modificado_por: null, modificado_en: null, sin_libro: 0 },
+  ] });
+
+test('la ventana de cotizaciones: un renglón por mes, el propuesto al lado del confirmado', () => {
+  const C = MESES_CZ(), E = {};
+  const eid = (id) => (E[id] || (E[id] = { innerHTML: '', textContent: '', style: {} }));
+  const F = COTIZ({ cotiz: C }, eid);
+  // QUÉ SE ESTÁ USANDO EN ESE MES, en dos palabras.
+  assert.equal(F.estado(C.meses[0], C).txt, 'Del mercado · Blue');
+  assert.equal(F.estado(C.meses[1], C).txt, '✓ Confirmado a mano');
+  assert.equal(F.estado(C.meses[3], C).txt, '⚠ Sin cotización');
+  // Las dos cosas que hay que saber de un mes antes de decidir: en el renglón van en dos
+  // palabras —entero no entra y se corta con puntos suspensivos— y enteras, en el globito.
+  assert.equal(F.nota(C.meses[0], C), 'mes en curso');
+  assert.equal(F.nota(C.meses[2], C), 'sin libro');
+  assert.equal(F.nota(C.meses[1], C), '');
+  assert.match(F.ayuda(C.meses[0], C), /el promedio es el de los días que van/);
+  assert.match(F.ayuda(C.meses[2], C), /el libro diario de este mes todavía no se subió/);
+  // EL INPUT LLEVA SÓLO LO CONFIRMADO. Si también trajera lo del mercado, el mismo número
+  // estaría escrito dos veces en el renglón y no se sabría cuál de los dos se decidió —y
+  // guardar lo volvería «a mano» sin que nadie lo haya confirmado—.
+  const fMer = F.fila(C.meses[0], C, true), fMan = F.fila(C.meses[1], C, true);
+  assert.match(fMer, /data-antes=""/);
+  assert.match(fMer, /placeholder="\(sin confirmar\)"/);
+  assert.ok(!/value="1400"/.test(fMer), 'lo del mercado también se escribió en Confirmado');
+  assert.match(fMan, /data-antes="1300"/);
+  assert.match(fMan, /value="1300"/);
+  // Y el propuesto se ve IGUAL en el mes confirmado a mano: es contra qué se está decidiendo.
+  assert.match(fMan, /<td class="n" title="[^"]*">\$ 1\.250,00<\/td>/,
+    'el propuesto no se ve en su columna: queda sólo en el globito de la acción');
+  assert.match(fMan, /title="Blue · traído el \d{4}-\d{2}-\d{2}"/, 'no dice qué dólar propuso ni cuándo');
+  assert.match(fMer, /<td title="Sep 2025 — mes en curso: el promedio es el de los días que van">Sep 2025<\/td>/,
+    'la explicación del renglón no queda ni en el globito del mes');
+  assert.ok(fMan.indexOf('Pablo') >= 0 && fMan.indexOf('20/09') >= 0, 'no se ve quién lo confirmó ni cuándo');
+  // UNA acción con dos finales, y el botón dice cuál toca ANTES de apretarlo.
+  assert.match(F.accion(C.meses[1], true), /⚡ Usar el propuesto/);
+  assert.match(F.accion(C.meses[1], true), /plaCotizVolver\(&quot;2025-08&quot;\)/);
+  assert.match(F.accion(C.meses[2], true), /🗑️ Borrar/);
+  assert.ok(!/Usar el propuesto/.test(F.accion(C.meses[2], true)), 'ofrece volver a un propuesto que no existe');
+  assert.ok(!/plaCotizVolver/.test(F.accion(C.meses[0], true)), 'un mes del mercado no tiene nada que sacar');
+  assert.ok(!/plaCotizVolver/.test(F.accion(C.meses[1], false)), 'al que sólo mira se le ofrece igual');
+  // La tabla entera.
+  F.pintar(true);
+  const h = E['pla-cotiz-tabla'].innerHTML;
+  assert.equal((h.match(/<tr/g) || []).length, 5, 'una fila por mes, más el encabezado');
+  assert.match(h, /<th>Mes<\/th><th class="n">Propuesto<\/th><th class="n">Confirmado<\/th><th>Estado<\/th>/);
+  assert.match(h, /<th class="pla-cz-quien">Quién y cuándo<\/th><th>Acciones<\/th>/);
+  assert.match(h, /<tr class="pla-cz-hoy">/, 'el mes en curso no queda marcado');
+  assert.equal((h.match(/input data-mes=/g) || []).length, 4);
+  // El global sólo cuenta los que TIENEN a qué volver: el de julio se quedaría sin cotización.
+  assert.deepEqual(F.conProp(C).map((x) => x.mes), ['2025-08']);
+  assert.equal(E['pla-cotiz-todos'].textContent, '⚡ Usar el propuesto');
+  assert.equal(E['pla-cotiz-todos'].style.display, '');
+  F.pintar(false);
+  assert.equal(E['pla-cotiz-todos'].style.display, 'none', 'al que sólo mira se le ofrece usar los propuestos');
+  assert.equal((E['pla-cotiz-tabla'].innerHTML.match(/ disabled value=/g) || []).length, 4,
+    'al que sólo mira le quedan casillas donde escribir');
+  // Sin libro diario, la tabla no sale vacía sin decir por qué.
+  const V = COTIZ({ cotiz: { tipos: [], meses: [] } }, eid);
+  V.pintar(true);
+  assert.match(E['pla-cotiz-tabla'].innerHTML, /Todavía no hay libro diario cargado/);
+  assert.equal(E['pla-cotiz-todos'].style.display, 'none');
+});
+
+test('la ventana dice cuándo se trajo por última vez, y avisa cuando eso ya quedó viejo', () => {
+  const F = COTIZ({}, () => ({ style: {} }));
+  assert.equal(PLA_COTIZ_DIAS, 3);
+  assert.match(F.frescura({ meses: [{ propuesto_en: null }] }), /Todavía no trajiste ninguna cotización/);
+  assert.ok(!/⚠️/.test(F.frescura({ meses: [{ propuesto_en: haceDias(PLA_COTIZ_DIAS - 1) }] })));
+  const viejo = F.frescura({ meses: [{ propuesto_en: haceDias(5) }] });
+  assert.match(viejo, /⚠️/);
+  assert.match(viejo, /hace 5 días/);
+  assert.match(viejo, /conviene traerlo de nuevo/);
+  // Se queda con la MÁS NUEVA de todas, venga en el orden que venga: la cotización vieja de un
+  // mes cerrado es lo normal, y no tiene por qué hacer parecer vieja a la de ayer.
+  const hoy = haceDias(0);
+  const mezcla = F.frescura({ meses: [{ propuesto_en: hoy }, { propuesto_en: haceDias(90) }] });
+  assert.ok(!/⚠️/.test(mezcla), 'un mes viejo hace parecer viejo a todo lo demás');
+  assert.match(mezcla, new RegExp('es del ' + hoy.slice(8, 10) + '/' + hoy.slice(5, 7) + '/' + hoy.slice(0, 4)));
+});
+
+test('la moneda se recuerda, pero no se entra en dólares a un cuadro que no tiene ninguna', () => {
+  const mk = (guardado) => new Function('localStorage', [
+    fuente(PANEL, 'function plaMonedaGuardada(){'),
+    fuente(PANEL, 'function plaHayCotizacion(d){'),
+    fuente(PANEL, 'function plaMonedaInicial(d){'),
+    'return { guardada: plaMonedaGuardada, inicial: plaMonedaInicial };',
+  ].join('\n'))({ getItem: () => guardado });
+  const conCotiz = { cotizaciones: { '2025-08': { cotizacion: 1300 } } };
+  assert.equal(mk('usd').inicial(conCotiz), 'usd');
+  assert.equal(mk('ars').inicial(conCotiz), 'ars');
+  assert.equal(mk(null).guardada(), 'ars');
+  // LO QUE SE RECUERDA ES LA PREFERENCIA, NO EL DATO: un cuadro en dólares con todas las celdas
+  // vacías no informa nada, así que si todavía no hay ninguna cotización se vuelve a pesos.
+  assert.equal(mk('usd').inicial({ cotizaciones: {} }), 'ars');
+  assert.equal(mk('usd').inicial({ cotizaciones: { '2025-08': { cotizacion: null } } }), 'ars');
+  assert.equal(mk('usd').inicial({}), 'ars');
+  // Y sin almacenamiento —una ventana privada— la pantalla abre igual.
+  assert.equal(new Function([fuente(PANEL, 'function plaMonedaGuardada(){'), 'return plaMonedaGuardada;'].join('\n'))()(),
+    'ars', 'sin localStorage la pantalla no abre');
+  const carg = fuente(PANEL, 'function plaCargar(inicial){');
+  assert.match(carg, /PLA\.moneda = plaMonedaInicial\(r\.data\);/);
+  assert.match(carg, /if \(plaMonedaGuardada\(\) === 'usd' && PLA\.moneda !== 'usd'\)/, 'vuelve a pesos sin decirlo');
+  assert.match(fuente(PANEL, 'function plaMonedaCambiar(){'), /localStorage\.setItem\('pla-moneda', PLA\.moneda\)/);
+  // Y el selector muestra siempre la moneda de verdad, no la que quedó escrita en el HTML.
+  assert.match(fuente(PANEL, 'function plaPintar(){'), /var sm = eid\('pla-moneda'\); if \(sm\) sm\.value = PLA\.moneda;/);
+  // El cartel de arriba dice en qué moneda se está leyendo: un número sin moneda se lee en la otra.
+  const cartel = (moneda) => new Function('PLA', [/^var PLA_MES = .*;\r?$/m.exec(PANEL)[0],
+    fuente(PANEL, 'function plaMesTxt(m){'), fuente(PANEL, 'function plaMonedaCartel(sin){'),
+    'return plaMonedaCartel;'].join('\n'))({ moneda: moneda });
+  assert.equal(cartel('ars')(['2025-08']), '', 'en pesos no hay nada que aclarar');
+  assert.match(cartel('usd')([]), /En dólares: cada mes dividido por <b>su<\/b> cotización/);
+  assert.match(cartel('usd')(['2025-08']), /Sin cotización: <b>Ago 2025<\/b>/);
+});
+
+test('las cotizaciones: borrar todo lo cargado a mano deja cada mes en lo que propone el mercado', async () => {
+  const db = base();
+  const R = rutas(db);
+  llamar(R.cargar, { body: CARGA_A });
+  llamar(R.cargar, { body: CARGA_B });
+  const fetchFalso = async () => ({ ok: true, status: 200, json: async () => [
+    { fecha: '2025-07-05', venta: 1000 }, { fecha: '2025-08-05', venta: 1200 }] });
+  assert.equal((await R.traer(db, 'blue', 5, fetchFalso)).status, 200);
+  // Dos a mano: una sobre un mes que el mercado propuso, y una sobre uno que nunca se trajo.
+  assert.equal(llamar(R.cotizGuardar, { body: { meses: { '2025-07': 1500, '2025-09': 1800 } } }).code, 200);
+  const l = llamar(R.cotizLimpiar, {});
+  assert.equal(l.code, 200);
+  assert.deepEqual(l.body.data, { limpiadas: 2, volvieron: 1, borradas: 1 });
+  const m = llamar(R.cotizaciones, {}).body.data.meses;
+  assert.deepEqual(m.map((x) => [x.mes, x.cotizacion, x.origen]),
+    [['2025-09', null, null], ['2025-08', 1200, 'mercado'], ['2025-07', 1000, 'mercado']],
+    'limpiar dejó meses sin cotización que el mercado sí había propuesto');
+  assert.match(llamar(R.cotizaciones, {}).body.data.mes_actual, /^\d{4}-\d{2}$/);
+  // Y limpiar de nuevo no tiene nada que hacer: no borra lo que trajo el mercado.
+  assert.deepEqual(llamar(R.cotizLimpiar, {}).body.data, { limpiadas: 0, volvieron: 0, borradas: 0 });
+  assert.equal(llamar(R.cotizaciones, {}).body.data.meses.length, 3);
+});
+
+test('las cotizaciones de antes se migran: la traída queda como su propia propuesta, la de a mano no', () => {
+  const db = base();
+  const R = rutas(db);
+  db.exec('DROP TABLE pl_abasto_cotizaciones');
+  db.exec(`CREATE TABLE pl_abasto_cotizaciones (mes TEXT PRIMARY KEY, cotizacion REAL NOT NULL,
+    origen TEXT NOT NULL DEFAULT 'manual', tipo TEXT, modificado_por INTEGER, modificado_en TEXT)`);
+  db.exec(`INSERT INTO pl_abasto_cotizaciones (mes, cotizacion, origen, tipo, modificado_en) VALUES
+    ('2025-08', 1200, 'mercado', 'blue', '2025-09-01 10:00:00'),
+    ('2025-07', 1500, 'manual', NULL, '2025-09-01 10:00:00')`);
+  R.migrarCotiz(db);
+  const f = db.prepare('SELECT mes, propuesto, propuesto_tipo, propuesto_en FROM pl_abasto_cotizaciones ORDER BY mes')
+    .all();
+  // UNA CARGADA A MANO NO SE INVENTA UNA PROPUESTA: nadie la trajo del mercado, y si se la
+  // copiara, «⚡ usar el propuesto» la devolvería a ella misma diciendo que es del mercado.
+  assert.deepEqual(f.map((x) => [x.mes, x.propuesto, x.propuesto_tipo]),
+    [['2025-07', null, null], ['2025-08', 1200, 'blue']]);
+  assert.equal(f[1].propuesto_en, '2025-09-01 10:00:00', 'la propuesta migrada perdió la fecha en que se trajo');
+  // Y correrla de nuevo no pisa lo que ya está.
+  db.prepare("UPDATE pl_abasto_cotizaciones SET cotizacion = 1250 WHERE mes = '2025-08'").run();
+  R.migrarCotiz(db);
+  assert.equal(db.prepare("SELECT propuesto FROM pl_abasto_cotizaciones WHERE mes = '2025-08'").get().propuesto, 1200);
+});
+
+test('manual V1071: los dos números de cada mes, la acción que vuelve, y la moneda recordada', () => {
+  const M = manual();
+  assert.match(M, /Cada mes tiene <b>dos números<\/b>/);
+  assert.match(M, /Manda el confirmado —traer del mercado no lo pisa—/);
+  assert.match(M, /el mismo botón dice <b>🗑️ Borrar<\/b>/);
+  assert.match(M, /<b>🧹 Borrar todo lo cargado a mano<\/b>/);
+  assert.match(M, /Borra decisiones de otro, así que pide el nivel <b>Anular<\/b>/);
+  assert.match(M, /cada mes es un <b>renglón<\/b>: Mes · Propuesto · Confirmado · Estado · Quién y cuándo · Acciones/);
+  assert.match(M, /borrar de una vez todas las cargadas a mano, <b>Anular<\/b>/);
+  assert.match(M, /<b>más de 3 días<\/b>/);
+  assert.equal(PLA_COTIZ_DIAS, 3, 'el manual dice 3 días y el panel usa otro número');
+  assert.match(M, /La <b>moneda elegida se recuerda<\/b> en cada navegador/);
+  assert.match(M, /<span class="ver">V1071<\/span> Las cotizaciones, mes por mes/);
+  // Lo que el manual AFIRMA, contra el código:
+  assert.match(PANEL, /eid\('pla-cotiz-limpiar'\)\.style\.display = lnbPuedeAnular\('pl-abasto'\) \? '' : 'none';/);
+  assert.match(RUTA, /router\.delete\('\/cotizaciones', requireAuth/);
+  assert.match(fuente(PANEL, 'function plaCotizVolver(mes){'),
+    /nunca se trajo del mercado[\s\S]*queda sin cotización/, 'saca la última cotización sin avisar');
+  assert.match(PANEL, /<table class="pla-cz-tbl" id="pla-cotiz-tabla"><\/table>/);
+});
+
 test('manual V1055: cada mes con su cotización, el promedio del dólar elegido, lo manual gana', () => {
   const M = manual();
   assert.match(M, /Cada mes se pasa a dólares con <b>su cotización<\/b>/);
   assert.match(M, /el <b>promedio del valor venta<\/b> de los días de ese mes/);
   assert.match(M, /<b>No hay un dólar por defecto<\/b>/);
-  assert.match(M, /Una cotización <b>cargada a mano gana siempre<\/b>/);
-  assert.match(RUTA, /if \(manuales\.has\(mes\)\) continue;/);
+  assert.match(M, /Manda el confirmado —traer del mercado no lo pisa—/);
+  // V1071: la regla sigue siendo la misma —lo confirmado a mano no se pisa— pero ahora el mes
+  // manual igual recibe la propuesta del mercado, en sus propias columnas.
+  assert.match(RUTA, /if \(manuales\.has\(mes\)\) \{ upPropuesto\.run\(v, tipo, mes\); propuestos\+\+; continue; \}/);
+  assert.match(RUTA, /SET propuesto = \?, propuesto_tipo = \?, propuesto_en = datetime\('now','localtime'\)/);
   assert.match(M, /El <b>TOTAL<\/b> en dólares es la suma de los meses/);
   assert.match(M, /Un mes <b>sin cotización<\/b> no suma en dólares, y arriba del cuadro se avisa cuál es/);
   assert.match(M, /Los asientos de un importe \(doble clic\) siguen en pesos/);

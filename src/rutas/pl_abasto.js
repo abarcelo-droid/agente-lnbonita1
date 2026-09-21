@@ -91,9 +91,16 @@ db.exec(`
   );
   CREATE TABLE IF NOT EXISTS pl_abasto_cotizaciones (
     mes            TEXT PRIMARY KEY,
-    cotizacion     REAL NOT NULL,
-    origen         TEXT NOT NULL,
+    cotizacion     REAL NOT NULL,   -- la que se USA para convertir ese mes
+    origen         TEXT NOT NULL,   -- 'manual' (confirmada a mano) | 'mercado'
     tipo           TEXT,
+    -- LO QUE PROPONE EL MERCADO, aparte de lo confirmado (V1071). Antes se guardaba un solo
+    -- número: al cargar uno a mano se perdía el del mercado y no había con qué compararlo ni
+    -- con qué volver. Ahora traer del mercado actualiza SIEMPRE el propuesto, aunque el mes
+    -- esté confirmado a mano.
+    propuesto      REAL,
+    propuesto_tipo TEXT,
+    propuesto_en   TEXT,
     modificado_por INTEGER,
     modificado_en  TEXT DEFAULT (datetime('now','localtime'))
   );
@@ -118,6 +125,25 @@ function migrarTitulos(db) {
   return { rubros, ajustes };
 }
 migrarTitulos(db);
+
+// LAS COLUMNAS DEL PROPUESTO, EN UNA BASE QUE YA TIENE DATOS (V1071). Molde de db_pa.js: PRAGMA
+// + ALTER guardado, sin tirar nunca en el top-level —eso tumbaría el arranque del server—. Y el
+// relleno: lo que hoy está marcado como traído del mercado ES una propuesta, así que se copia a
+// su lugar. Las filas cargadas a mano quedan sin propuesto hasta que alguien traiga del mercado.
+function migrarCotizaciones(db) {
+  try {
+    const cols = db.prepare('PRAGMA table_info(pl_abasto_cotizaciones)').all().map((c) => c.name);
+    for (const [col, tipo] of [['propuesto', 'REAL'], ['propuesto_tipo', 'TEXT'], ['propuesto_en', 'TEXT']]) {
+      if (!cols.includes(col)) db.exec(`ALTER TABLE pl_abasto_cotizaciones ADD COLUMN ${col} ${tipo}`);
+    }
+    db.prepare(`UPDATE pl_abasto_cotizaciones SET propuesto = cotizacion, propuesto_tipo = tipo,
+        propuesto_en = modificado_en
+      WHERE origen = 'mercado' AND propuesto IS NULL`).run();
+  } catch (e) {
+    console.error('[PL Abasto] No se pudieron migrar las cotizaciones:', e.message);
+  }
+}
+migrarCotizaciones(db);
 
 const MES = /^\d{4}-(0[1-9]|1[0-2])$/;
 const FECHA = /^\d{4}-\d{2}-\d{2}$/;
@@ -246,9 +272,10 @@ function escribirMesesDeAjuste(db, id, meses) {
 // ── LA COTIZACIÓN DE CADA MES ────────────────────────────────────────────────
 function cotizacionesDelPeriodo(db, desde, hasta) {
   const out = {};
-  for (const x of db.prepare(`SELECT mes, cotizacion, origen, tipo FROM pl_abasto_cotizaciones
-      WHERE mes BETWEEN ? AND ?`).all(desde, hasta)) {
-    out[x.mes] = { cotizacion: x.cotizacion, origen: x.origen, tipo: x.tipo };
+  for (const x of db.prepare(`SELECT mes, cotizacion, origen, tipo, propuesto, propuesto_en
+      FROM pl_abasto_cotizaciones WHERE mes BETWEEN ? AND ?`).all(desde, hasta)) {
+    out[x.mes] = { cotizacion: x.cotizacion, origen: x.origen, tipo: x.tipo,
+      propuesto: x.propuesto, propuesto_en: x.propuesto_en };
   }
   return out;
 }
@@ -273,19 +300,28 @@ async function traerCotizaciones(db, tipo, usuario, pedir) {
   const prom = promedioMensual(dias, meses);
   const manuales = new Set(db.prepare("SELECT mes FROM pl_abasto_cotizaciones WHERE origen = 'manual'").all()
     .map((x) => x.mes));
-  const up = db.prepare(`INSERT INTO pl_abasto_cotizaciones (mes, cotizacion, origen, tipo, modificado_por, modificado_en)
-      VALUES (?,?,'mercado',?,?,datetime('now','localtime'))
+  // DOS SENTENCIAS, PORQUE SON DOS COSAS DISTINTAS (V1071). En un mes sin confirmar, lo traído
+  // se usa Y queda como propuesta. En un mes CONFIRMADO A MANO sólo se actualiza la propuesta:
+  // la cotización que se usa no se toca —es la regla de la V1055, lo de a mano gana— pero ahora
+  // se puede ver contra qué se está decidiendo, y volver.
+  const upMercado = db.prepare(`INSERT INTO pl_abasto_cotizaciones
+      (mes, cotizacion, origen, tipo, propuesto, propuesto_tipo, propuesto_en, modificado_por, modificado_en)
+      VALUES (?,?,'mercado',?,?,?,datetime('now','localtime'),?,datetime('now','localtime'))
     ON CONFLICT(mes) DO UPDATE SET cotizacion = excluded.cotizacion, origen = excluded.origen, tipo = excluded.tipo,
+      propuesto = excluded.propuesto, propuesto_tipo = excluded.propuesto_tipo, propuesto_en = excluded.propuesto_en,
       modificado_por = excluded.modificado_por, modificado_en = excluded.modificado_en`);
-  let traidos = 0;
+  const upPropuesto = db.prepare(`UPDATE pl_abasto_cotizaciones
+      SET propuesto = ?, propuesto_tipo = ?, propuesto_en = datetime('now','localtime')
+    WHERE mes = ?`);
+  let traidos = 0, propuestos = 0;
   db.transaction(() => {
     for (const [mes, v] of Object.entries(prom)) {
-      if (manuales.has(mes)) continue;
-      up.run(mes, v, tipo, usuario);
+      if (manuales.has(mes)) { upPropuesto.run(v, tipo, mes); propuestos++; continue; }
+      upMercado.run(mes, v, tipo, v, tipo, usuario);
       traidos++;
     }
   })();
-  return { status: 200, body: { ok: true, data: { tipo, traidos,
+  return { status: 200, body: { ok: true, data: { tipo, traidos, propuestos,
     manuales: meses.filter((m) => manuales.has(m)).length, sin_dato: meses.filter((m) => !(m in prom)) } } };
 }
 
@@ -492,18 +528,39 @@ router.delete('/rubros', requireAuth, (req, res) => {
 router.get('/cotizaciones', requireAuth, (req, res) => {
   try {
     const guardadas = new Map(db.prepare(`SELECT c.mes, c.cotizacion, c.origen, c.tipo, c.modificado_en,
-        u.nombre AS modificado_por
+        c.propuesto, c.propuesto_tipo, c.propuesto_en, u.nombre AS modificado_por
       FROM pl_abasto_cotizaciones c LEFT JOIN usuarios u ON u.id = c.modificado_por`).all().map((x) => [x.mes, x]));
-    const meses = db.prepare('SELECT DISTINCT mes FROM pl_abasto_movimientos ORDER BY mes DESC').all().map((x) => {
-      const g = guardadas.get(x.mes);
-      return g ? { mes: x.mes, cotizacion: g.cotizacion, origen: g.origen, tipo: g.tipo,
-        modificado_por: g.modificado_por, modificado_en: g.modificado_en } : { mes: x.mes, cotizacion: null };
+    // LOS MESES SON LA UNIÓN (V1071): puede haber una cotización cargada para un mes cuyo libro
+    // diario todavía no se subió. Esconderla sería perderla de vista justo cuando llegue.
+    const conLibro = new Set(db.prepare('SELECT DISTINCT mes FROM pl_abasto_movimientos').all().map((x) => x.mes));
+    const meses = db.prepare(`SELECT mes FROM pl_abasto_movimientos
+      UNION SELECT mes FROM pl_abasto_cotizaciones ORDER BY mes DESC`).all().map((x) => {
+      const g = guardadas.get(x.mes) || {};
+      return { mes: x.mes, cotizacion: g.cotizacion == null ? null : g.cotizacion, origen: g.origen || null,
+        tipo: g.tipo || null, propuesto: g.propuesto == null ? null : g.propuesto,
+        propuesto_tipo: g.propuesto_tipo || null, propuesto_en: g.propuesto_en || null,
+        modificado_por: g.modificado_por || null, modificado_en: g.modificado_en || null,
+        sin_libro: conLibro.has(x.mes) ? 0 : 1 };
     });
-    res.json({ ok: true, data: { tipos: TIPOS_DOLAR, meses } });
+    const mesActual = db.prepare("SELECT strftime('%Y-%m','now','localtime') AS m").get().m;
+    res.json({ ok: true, data: { tipos: TIPOS_DOLAR, meses, mes_actual: mesActual } });
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
-// A mano: gana sobre la traída. Vacío saca la de ese mes.
+// BORRAR LO CONFIRMADO NO ES TIRAR EL MES (V1071): vuelve a lo que propone el mercado, que es
+// lo que el brief llama «🗑️ Borrar». Sólo si ese mes nunca se trajo —no hay propuesta— se
+// borra la fila entera, que es lo que hacía siempre.
+function volverAlPropuesto(db, mes, usuario) {
+  const r = db.prepare(`UPDATE pl_abasto_cotizaciones
+      SET cotizacion = propuesto, origen = 'mercado', tipo = propuesto_tipo,
+          modificado_por = ?, modificado_en = datetime('now','localtime')
+    WHERE mes = ? AND propuesto IS NOT NULL`).run(usuario, mes);
+  if (r.changes) return 'volvio';
+  db.prepare('DELETE FROM pl_abasto_cotizaciones WHERE mes = ?').run(mes);
+  return 'borrada';
+}
+
+// A mano: gana sobre la traída. Vacío vuelve al propuesto del mercado.
 router.put('/cotizaciones', requireAuth, (req, res) => {
   try {
     const v = validarCotizaciones(req.body);
@@ -512,11 +569,31 @@ router.put('/cotizaciones', requireAuth, (req, res) => {
         VALUES (?,?,'manual',NULL,?,datetime('now','localtime'))
       ON CONFLICT(mes) DO UPDATE SET cotizacion = excluded.cotizacion, origen = 'manual', tipo = NULL,
         modificado_por = excluded.modificado_por, modificado_en = excluded.modificado_en`);
-    const del = db.prepare('DELETE FROM pl_abasto_cotizaciones WHERE mes = ?');
+    let volvieron = 0, borradas = 0;
     db.transaction(() => {
-      for (const [m, x] of Object.entries(v.meses)) { if (x == null) del.run(m); else up.run(m, x, usuarioId(req)); }
+      for (const [m, x] of Object.entries(v.meses)) {
+        if (x == null) { if (volverAlPropuesto(db, m, usuarioId(req)) === 'volvio') volvieron++; else borradas++; }
+        else up.run(m, x, usuarioId(req));
+      }
     })();
-    res.json({ ok: true, data: { guardadas: Object.keys(v.meses).length } });
+    res.json({ ok: true, data: { guardadas: Object.keys(v.meses).length, volvieron, borradas } });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// Limpiar de una vez todo lo confirmado a mano. Borra decisiones de alguien —el tipo de cambio
+// que eligió para cada mes—, así que va por DELETE: exigirNivel le pide el nivel de ANULAR, igual
+// que «Volver a los de por defecto» de los rubros. Cada mes vuelve a lo que propone el mercado.
+router.delete('/cotizaciones', requireAuth, (req, res) => {
+  try {
+    const manuales = db.prepare("SELECT mes FROM pl_abasto_cotizaciones WHERE origen = 'manual' ORDER BY mes")
+      .all().map((x) => x.mes);
+    let volvieron = 0, borradas = 0;
+    db.transaction(() => {
+      for (const mes of manuales) {
+        if (volverAlPropuesto(db, mes, usuarioId(req)) === 'volvio') volvieron++; else borradas++;
+      }
+    })();
+    res.json({ ok: true, data: { limpiadas: manuales.length, volvieron, borradas } });
   } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
