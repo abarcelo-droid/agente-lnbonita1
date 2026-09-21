@@ -5557,8 +5557,12 @@ input[type=number]{-moz-appearance:textfield;appearance:textfield}
     #pla-pane-resultado .pla-rub td:first-child,#pla-pane-resultado .pla-rub td:nth-child(2){background:#f8fafc}
     #pla-pane-resultado .pla-sub td:first-child,#pla-pane-resultado .pla-sub td:nth-child(2){background:#dbeafe}
     #pla-pane-resultado .pla-res td:first-child,#pla-pane-resultado .pla-res td:nth-child(2){background:#0a2744}
-    /* «+ Agregar un ajuste» es una fila de una sola celda con colspan: pegada, taparía los meses. */
-    #pla-pane-resultado .pla-aju-add td{position:static}
+    /* «+ Agregar un ajuste» y el ajuste pendiente son filas de una sola celda con colspan:
+       pegadas, taparían los meses. */
+    #pla-pane-resultado .pla-aju-add td,#pla-pane-resultado .pla-aju-pend td{position:static}
+    /* El fondo del pendiente lo pisaba la regla de las celdas pegadas —gana por especificidad y
+       lo dejaba blanco—, y ese color ambar es lo que lo hace leer como algo que falta. */
+    #pla-pane-resultado .pla-tbl .pla-aju-pend td{background:#fffbeb}
     /* EL ENCABEZADO NO SE VA (V1069). Una barra para correr los meses sirve si además se sabe
        QUÉ MES es cada columna. Las dos celdas de la esquina quedan pegadas en los DOS ejes, así
        que van arriba de todo: el cuerpo abajo (1 y 2), el encabezado 6, las esquinas 7 y 8. La
@@ -5597,6 +5601,11 @@ input[type=number]{-moz-appearance:textfield;appearance:textfield}
     #sec-pl-abasto .pla-aju td{color:#b45309;font-style:italic;font-size:10px}
     #sec-pl-abasto .pla-aju td:first-child{padding-left:22px;cursor:pointer}
     #sec-pl-abasto .pla-aju-add td{font-size:10.5px;color:var(--burg);cursor:pointer;padding-left:22px;font-weight:600}
+    /* EL AJUSTE QUE TODAVÍA NO TIENE IMPORTE (V1070). Va con el color de los avisos del módulo y
+       SIN columnas de números: una fila de guiones se lee como un dato roto, no como algo que
+       falta conseguir. */
+    #sec-pl-abasto .pla-aju-pend td{font-size:10.5px;color:#92400e;background:#fffbeb;
+      padding-left:22px;cursor:pointer;font-style:italic}
     #sec-pl-abasto .pla-sub td{background:#dbeafe;font-weight:700}
     #sec-pl-abasto .pla-res td{background:#0a2744;color:#fff;font-weight:700}
     #sec-pl-abasto .pla-pos{color:#15803d} #sec-pl-abasto .pla-neg{color:#dc2626}
@@ -24585,8 +24594,15 @@ SG_MANUAL.plabasto = { titulo: 'P&L Abasto', html:
   + 'quedan como estaban. Borrar el importe de un mes lo saca de ese mes.</li>'
   + '<li>En los asientos de un rubro (doble clic) aparecen también sus ajustes, para que el saldo dé lo mismo '
   + 'que la celda.</li>'
-  + '<li>Un ajuste no puede quedar sin importes: para sacarlo se <b>elimina</b>, y eso pide el nivel '
-  + '<b>Anular</b>. Sale del resultado de todos los meses.</li>'
+  + '<li><span class="ver">V1070</span> Un ajuste puede <b>nacer sin importes</b>, como recordatorio de algo '
+  + 'que todavía no se sabe cuánto es: se guarda con su <b>nombre y su rubro</b> y queda <b>pendiente</b>. '
+  + 'Aparece dentro de su rubro con un <b>⏳</b> diciendo que falta cargarlo, se cuenta arriba del cuadro con los '
+  + 'otros avisos, <b>no suma nada</b> al resultado y sale al CSV como <b>Ajuste pendiente</b>. Deja de estar '
+  + 'pendiente en cuanto se le carga el primer importe. Un pendiente se ve en <b>todos los períodos</b>: no tiene '
+  + 'mes al que pertenecer.</li>'
+  + '<li><b>Vaciar</b> un ajuste que ya tenía importes <b>no</b> es la manera de sacarlo: para eso se '
+  + '<b>elimina</b>, y eso pide el nivel <b>Anular</b> —también para un pendiente cargado por error—. Sale del '
+  + 'resultado de todos los meses.</li>'
   + '</ul>'
 
   + '<h3>Exportar</h3>'
@@ -24706,6 +24722,8 @@ SG_MANUAL.plabasto = { titulo: 'P&L Abasto', html:
   + '<li><span class="ver">V1056</span> Los títulos nuevos, la lista entera de cuentas con el título de cada una, '
   + 'y lo que el plan de cuentas no dice solo arranca sin título.</li>'
   + '<li><span class="ver">V1055</span> El cuadro en dólares, con la cotización de cada mes.</li>'
+  + '<li><span class="ver">V1070</span> Un ajuste manual puede quedar pendiente: se anota el concepto y el '
+  + 'importe se carga cuando se consigue.</li>'
   + '<li><span class="ver">V1054</span> Ajustes manuales por rubro, y exportar el cuadro a CSV.</li>'
   + '<li><span class="ver">V1053</span> Solapa <b>No balancea</b>: los días en que el libro diario no cierra y los '
   + 'asientos que lo explican.</li>'
@@ -44000,6 +44018,9 @@ function plaAviso(d){
   var sinTitulo = (d.cuentas || []).filter(function(c){ return c.rubro === 'sin_asignar'; }).length;
   // VENTAS es la base de los porcentajes: una cuenta que lo tenga de título no suma a ningún lado.
   var soloVentas = (d.cuentas || []).filter(function(c){ return c.rubro === 'ventas'; }).length;
+  // LOS AJUSTES QUE ESPERAN SU IMPORTE (V1070). Pablo los carga para no olvidarse ninguno, así
+  // que el número va arriba, con los otros avisos: es la lista de lo que falta conseguir.
+  var pendientes = (d.ajustes || []).filter(function(a){ return !!a.pendiente; }).length;
   caja.innerHTML = 'Última carga: <b>' + escH(u.archivo || 'sin nombre') + '</b>, del ' + plaFechaTxt(u.desde)
     + ' al ' + plaFechaTxt(u.hasta) + ' · subida el ' + escH(String(u.creado_en || '').slice(0, 16))
     + (u.usuario ? ' por ' + escH(u.usuario) : '')
@@ -44007,7 +44028,9 @@ function plaAviso(d){
         : ' cuentas con movimientos no tienen') + ' título y no suman al resultado: asignalas en «Configurar rubros».</span>' : '')
     + (soloVentas ? ' · <span style="color:#92400e">⚠️ ' + soloVentas + (soloVentas === 1 ? ' cuenta tiene' : ' cuentas tienen')
         + ' <b>VENTAS</b> como título: VENTAS es la base de los porcentajes y no suma al resultado. Llevalas a su título '
-        + '—por ejemplo UTILIDAD— y repetilas en VENTAS.</span>' : '');
+        + '—por ejemplo UTILIDAD— y repetilas en VENTAS.</span>' : '')
+    + (pendientes ? ' · <span style="color:#92400e">⏳ ' + pendientes + (pendientes === 1 ? ' ajuste manual todavía sin importe'
+        : ' ajustes manuales todavía sin importe') + ': no suman al resultado hasta que se les cargue.</span>' : '');
 }
 
 // ── LA CASCADA ────────────────────────────────────────────────────────────────
@@ -44243,11 +44266,18 @@ function plaPintar(){
     var ajustes = T.ajustes[r.k].filter(function(x){
       return d.meses.some(function(m){ return !!(Number(x.a.meses[m]) || 0); });
     });
-    if (cuentas.length || ajustes.length) {
+    // UN AJUSTE PENDIENTE NO PASA POR EL FILTRO DE ARRIBA (V1070) —no tiene importe en ningún
+    // mes— y sin embargo es el que MÁS hay que ver: es el recordatorio de algo que falta
+    // conseguir. Va en su propia lista y, si un rubro sólo tiene pendientes, se dibuja igual.
+    var pendientes = T.ajustes[r.k].filter(function(x){ return !!x.a.pendiente; });
+    if (cuentas.length || ajustes.length || pendientes.length) {
       var abierto = !!PLA.abiertos[r.k];
-      h += fila('pla-rub', (abierto ? '▼ ' : '▶ ') + r.ico + ' ' + r.label, T.rubros[r.k], true,
+      h += fila('pla-rub', (abierto ? '▼ ' : '▶ ') + r.ico + ' ' + r.label
+          + (pendientes.length ? ' ⏳' + pendientes.length : ''), T.rubros[r.k], true,
         function(m){ return "plaDetalle('rubro','" + r.k + "','" + m + "')"; }, "plaToggle('" + r.k + "')",
-        r.k === 'ventas' ? 'VENTAS es la base de los porcentajes: no suma al resultado, sus cuentas suman desde su título' : '');
+        pendientes.length ? (pendientes.length === 1 ? 'Tiene 1 ajuste manual sin importe todavía'
+            : 'Tiene ' + pendientes.length + ' ajustes manuales sin importe todavía')
+          : (r.k === 'ventas' ? 'VENTAS es la base de los porcentajes: no suma al resultado, sus cuentas suman desde su título' : ''));
       if (abierto) {
         cuentas.forEach(function(x){
           var vs = { TOTAL: x.total };
@@ -44263,6 +44293,13 @@ function plaPintar(){
           var vs = { TOTAL: x.total }, abrir = 'plaAjusteAbrir(' + Number(x.a.id) + ')';
           d.meses.forEach(function(m){ vs[m] = Number(x.a.meses[m]) || 0; });
           h += fila('pla-aju', '✎ Ajuste: ' + x.a.nombre, vs, false, function(){ return abrir; }, abrir);
+        });
+        // Los pendientes, al final: son los que hay que ir a buscar, y el renglón es su única
+        // puerta de vuelta —no hay ninguna lista de ajustes en el panel—.
+        pendientes.forEach(function(x){
+          h += '<tr class="pla-aju-pend" onclick="plaAjusteAbrir(' + Number(x.a.id) + ')"><td colspan="'
+            + (orden.length + 1) + '" title="Clic: cargarle el importe">⏳ ' + escH(x.a.nombre)
+            + ' — falta cargar el importe: todavía no suma al resultado</td></tr>';
         });
         if (PLA.op) h += '<tr class="pla-aju-add"><td colspan="' + (orden.length + 1) + '" onclick="plaAjusteAbrir(null,\''
           + r.k + '\')">+ Agregar un ajuste manual a ' + escH(r.label) + '</td></tr>';
@@ -44622,6 +44659,17 @@ function plaAjusteTotal(){
     caja.innerHTML = '<span style="color:var(--err)">El importe de ' + plaMesTxt(L.malo) + ' no es un número.</span>';
     return;
   }
+  // SIN NINGÚN IMPORTE ESCRITO, EL AJUSTE VA A NACER PENDIENTE (V1070): hay que decirlo antes de
+  // guardar, no después. Un «$ 0» no distingue «todavía no sé» de «es cero».
+  var vacio = !Object.keys(L.meses).some(function(m){ return L.meses[m] != null; });
+  var btn = eid('pla-ajuste-guardar');
+  if (vacio) {
+    caja.innerHTML = '<span style="color:#92400e">⏳ Todavía sin importes: queda <b>pendiente</b>, '
+      + 'anotado en su rubro para no olvidarlo. No suma al resultado.</span>';
+    if (btn) btn.textContent = 'Guardar como pendiente';
+    return;
+  }
+  if (btn) btn.textContent = 'Guardar';
   caja.innerHTML = 'En estos meses: <b style="color:' + (L.total < 0 ? '#dc2626' : '#15803d') + '">' + plaImporte(L.total)
     + '</b> · ' + (L.total < 0 ? 'resta al resultado' : (L.total > 0 ? 'suma al resultado' : 'todavía no mueve el resultado'));
 }
@@ -44635,11 +44683,14 @@ function plaAjusteGuardar(){
   if (L.malo) { toast('El importe de ' + plaMesTxt(L.malo) + ' no es un número', 'er'); return; }
   var btn = eid('pla-ajuste-guardar');
   btn.disabled = true;
+  // Nacer pendiente se PIDE (V1070): sin la bandera, un alta sin importes sigue siendo el error
+  // de siempre —alguien que se olvidó de escribir el número—.
+  var pendiente = !Object.keys(L.meses).some(function(m){ return L.meses[m] != null; });
   api('/api/pl-abasto/ajustes' + (A.id ? '/' + A.id : ''), A.id ? 'PUT' : 'POST',
-      { nombre: nombre, rubro: rubro, meses: L.meses }).then(function(r){
+      { nombre: nombre, rubro: rubro, meses: L.meses, pendiente: pendiente }).then(function(r){
     btn.disabled = false;
     if (!r || !r.ok) { toast((r && r.error) || 'No se pudo guardar el ajuste', 'er'); return; }
-    toast(A.id ? 'Ajuste corregido' : 'Ajuste agregado', 'ok');
+    toast(A.id ? 'Ajuste corregido' : (pendiente ? 'Ajuste anotado como pendiente' : 'Ajuste agregado'), 'ok');
     // Guardar la cierra —no queda nada que leer— y deja abierto el rubro, para ver dónde entró.
     PLA.abiertos[rubro] = true;
     PLA.ajuste = null;
@@ -44690,6 +44741,8 @@ function plaCsv(d, usd){
     linea('Rubro', r.label, '', T.rubros[r.k]);
     T.cuentas[r.k].forEach(function(x){ if (pesa(x.c.meses)) linea('Cuenta', x.c.nombre, x.c.cuenta, deMeses(x.total, x.c.meses)); });
     T.ajustes[r.k].forEach(function(x){ if (pesa(x.a.meses)) linea('Ajuste manual', x.a.nombre, '', deMeses(x.total, x.a.meses)); });
+    // Los pendientes también salen, en cero y con su tipo: el Excel es la lista de lo que falta.
+    T.ajustes[r.k].forEach(function(x){ if (x.a.pendiente) linea('Ajuste pendiente', x.a.nombre, '', deMeses(0, {})); });
     PLA_SUBTOTALES.forEach(function(s){ if (s.despues === r.k) linea('Subtotal', s.label, '', T.subtotales[s.k]); });
   });
   linea('Resultado', 'RESULTADO NETO', '', T.subtotales.neto);
