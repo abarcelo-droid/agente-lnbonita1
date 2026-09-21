@@ -5523,6 +5523,7 @@ input[type=number]{-moz-appearance:textfield;appearance:textfield}
        y Hasta, se leería como si filtrara el período. */
     #sec-pl-abasto .pla-busca{display:flex;gap:8px;align-items:center;margin:0 0 6px;flex-wrap:wrap}
     #sec-pl-abasto .pla-busca .pla-lupa{font-size:13px;opacity:.75}
+    #sec-pl-abasto .pla-f input.pla-asi-q{flex:0 1 250px;min-width:180px}
     #sec-pl-abasto .pla-busca input{flex:0 1 340px;min-width:170px;padding:5px 8px;
       border:1px solid var(--bor);border-radius:6px;background:var(--bg);font-size:12.5px}
     #sec-pl-abasto .pla-bx{background:none;border:0;cursor:pointer;color:var(--mut);font-size:13px;
@@ -5725,17 +5726,25 @@ input[type=number]{-moz-appearance:textfield;appearance:textfield}
       <button class="btn bo" onclick="plaCotizAbrir()">💱 Cotizaciones</button>
       <button class="btn bo" id="pla-ajuste-btn" style="display:none" onclick="plaAjusteAbrir(null)">✎ Ajuste manual</button>
       <button class="btn bo" onclick="plaExportar()">⬇️ Exportar CSV</button>
-      <div style="font-size:11px;color:var(--mut);align-self:center">Clic en un rubro: sus cuentas ·
-        doble clic en un importe: sus asientos · el importe exacto, pasando el mouse</div>
+      <!-- BUSCAR UN ASIENTO EN TODO EL LIBRO (V1077). Es otra cosa que la lupa de abajo: aquélla
+           filtra lo que se está mirando, y ésta va a buscar al libro entero —y es la única que
+           encuentra un cliente o un proveedor, porque esos nombres están en cuentas del
+           patrimonio, que no entran al cuadro—. Por eso los dos carteles lo dicen. -->
+      <div><label>Buscar un asiento</label><input id="pla-asi-q" class="pla-asi-q" autocomplete="off"
+        placeholder="Nº de asiento, cuenta, proveedor… (en todo el libro)"
+        onkeydown="if (event.key === 'Enter') plaBuscarAsientos()"></div>
+      <button class="btn bo" onclick="plaBuscarAsientos()">🔎 Buscar</button>
     </div>
     <div id="pla-moneda-aviso" style="font-size:12px;color:#92400e;margin:0 0 6px"></div>
     <div class="pla-busca">
       <span class="pla-lupa" aria-hidden="true">🔍</span>
       <input id="pla-buscar" autocomplete="off" oninput="plaBuscarTeclas()"
-        placeholder="Buscar una cuenta, un ajuste, un proveedor…">
+        placeholder="Filtrar el cuadro: una cuenta, un ajuste, un rubro…">
       <button class="pla-bx" id="pla-buscar-x" style="display:none" onclick="plaBuscarLimpiar()"
         title="Sacar el filtro">✕</button>
       <span id="pla-buscar-n" style="font-size:12px"></span>
+      <span style="font-size:11px;color:var(--mut);margin-left:auto">Clic en un rubro: sus cuentas ·
+        doble clic en un importe: sus asientos · el importe exacto, pasando el mouse</span>
     </div>
     <div class="pla-barra" id="pla-barra-arriba" aria-hidden="true"><div id="pla-barra-fantasma"></div></div>
     <div class="ab-table-wrap"><table class="pla-tbl" id="pla-tabla"></table></div>
@@ -24634,6 +24643,15 @@ SG_MANUAL.plabasto = { titulo: 'P&L Abasto', html:
   + '<b>abajo</b> del cuadro, las dos siempre a la vista y moviéndose juntas: da igual cuál se use, y las '
   + 'dos llegan hasta el final <span class="ver">V1072</span>. Aparecen '
   + 'sólo cuando hay meses que no entran; si entran todos, no están.</li>'
+  + '<li><span class="ver">V1077</span> <b>Son dos buscadores y hacen cosas distintas.</b> El de la barra '
+  + 'de arriba, <b>Buscar un asiento</b>, va al <b>libro entero</b> —todos los meses cargados, no el período '
+  + 'elegido— y abre la ventana de asientos con lo que encuentra; la <b>lupa de abajo filtra lo que estás '
+  + 'mirando</b> en el cuadro. Y el de arriba <b>es la única que encuentra un cliente o un proveedor</b>: esos '
+  + 'nombres están en cuentas del patrimonio, que no entran al cuadro.</li>'
+  + '<li>Busca por <b>número de asiento, número de cuenta o nombre de cuenta</b>, por palabras sueltas en '
+  + 'cualquier orden y con que lo contenga. Si un renglón coincide <b>se trae el asiento entero</b>, porque lo '
+  + 'que hay que ver es contra qué se registró. La ventana es la misma de siempre: se ordena por cualquier '
+  + 'columna, se despliega cada asiento y se baja el Excel.</li>'
   + '<li><span class="ver">V1074</span> La <b>lupa</b> de abajo del todo filtra el cuadro: se escribe cualquier '
   + 'cosa —el nombre de una cuenta, el de un proveedor, el de un ajuste, el número de la cuenta con o sin '
   + 'puntos, o el nombre del rubro— y <b>no hace falta que empiece igual</b>: alcanza con que <b>lo contenga</b>. '
@@ -24798,6 +24816,8 @@ SG_MANUAL.plabasto = { titulo: 'P&L Abasto', html:
   + '<li><span class="ver">V1072</span> El cuadro dejó de temblar al llegar al final de los meses. Las dos '
   + 'barras no corrían lo mismo —la de arriba se quedaba 15 px antes, los que el cuadro pierde con su barra '
   + 'de bajar— y se devolvían la tabla la una a la otra.</li>'
+  + '<li><span class="ver">V1077</span> Un buscador de asientos en la barra de arriba, que busca en el '
+  + 'libro entero: por número de asiento, por cuenta o por el nombre de un proveedor.</li>'
   + '<li><span class="ver">V1076</span> Ordenar los asientos de un importe por cualquier columna, y bajarlos '
   + 'a un Excel para mandar a revisar.</li>'
   + '<li><span class="ver">V1074</span> Una <b>lupa</b> abajo del cuadro para buscar cualquier cosa —un '
@@ -44596,12 +44616,38 @@ function plaDetalle(tipo, clave, mes){
   sgModalArriba('pla-detalle-modal');
 }
 
+// BUSCAR UN ASIENTO EN TODO EL LIBRO (V1077). Pablo, 21/9/2026: «quiero un buscador acá también
+// para buscar cualquier tipo de asiento, que se abra una ventana y me busque todo».
+//
+// Se abre LA MISMA ventana que el doble clic en un importe: ya tiene el orden por columna, el
+// asiento junto, el clic que despliega el asiento entero y el Excel de dos hojas. Una pantalla
+// nueva sería una segunda manera de hacer lo mismo, y habría que enseñarla aparte.
+function plaBuscarAsientos(){
+  var q = String((eid('pla-asi-q') || {}).value || '').trim();
+  if (!q) { toast('Escribí qué asiento buscar', 'er'); return; }
+  var ms = ((PLA.datos || {}).meses_disponibles) || [];
+  if (!ms.length) { toast('Todavía no hay libro diario cargado', 'er'); return; }
+  // TODO EL LIBRO, no el período del cuadro: «que me busque todo». El título lo dice, porque si
+  // no, no encontrar algo se lee como que no existe cuando en realidad quedó fuera del período.
+  var desde = ms[0], hasta = ms[ms.length - 1];
+  PLA.detalle = { tipo: 'buscar', clave: q, desde: desde, hasta: hasta,
+    titulo: 'Asientos que dicen «' + q + '» — todo el libro, de ' + plaMesTxt(desde) + ' a ' + plaMesTxt(hasta),
+    filas: [], total: null, recortado: 0, orden: 'fecha', desc: 1, abiertos: {}, asientos: {}, ajustes: [] };
+  eid('pla-detalle-tit').textContent = '🔎 ' + PLA.detalle.titulo;
+  eid('pla-detalle-q').value = '';
+  var nb = eid('pla-detalle-nb'); if (nb) nb.checked = false;
+  eid('pla-detalle-tabla').innerHTML = '';
+  plaDetPedir();
+  sgModalArriba('pla-detalle-modal');
+}
+
 // La dirección de lo que se está mirando, con el orden puesto. EL ORDEN LO HACE EL SERVIDOR: la
 // ventana trae hasta mil asientos, así que ordenar acá daría «el más grande de los mil que se
 // trajeron», no el más grande del período —y ordenar por importe es justamente para encontrar ése—.
 function plaDetUrl(extra){
   var D = PLA.detalle;
-  return '/api/pl-abasto/detalle?' + (D.tipo === 'rubro' ? 'rubro=' : 'cuenta=') + encodeURIComponent(D.clave)
+  var como = D.tipo === 'buscar' ? 'buscar=' : (D.tipo === 'rubro' ? 'rubro=' : 'cuenta=');
+  return '/api/pl-abasto/detalle?' + como + encodeURIComponent(D.clave)
     + '&desde=' + D.desde + '&hasta=' + D.hasta + '&orden=' + encodeURIComponent(D.orden)
     + '&desc=' + (D.desc ? 1 : 0) + (extra || '');
 }
@@ -44751,7 +44797,8 @@ function plaDetallePintar(){
     + '<td style="text-align:right"><b>' + plaImporte(tD) + '</b></td><td style="text-align:right"><b>' + plaImporte(tH) + '</b></td></tr>'
     // HABER − DEBE, como la celda del cuadro: con el signo al revés, una venta de +621
     // millones abría un detalle con el saldo en negativo.
-    + '<tr><td colspan="' + span + '"><b>SALDO (Haber − Debe, como en el cuadro)</b></td>'
+    + '<tr><td colspan="' + span + '"><b>' + (D.tipo === 'buscar' ? 'SALDO de lo encontrado (Haber − Debe)'
+        : 'SALDO (Haber − Debe, como en el cuadro)') + '</b></td>'
     + '<td colspan="2" style="text-align:right"><b>' + plaImporte(Math.round((tH - tD) * 100) / 100) + '</b></td></tr></tfoot>';
   plaDetReabrir();
 }

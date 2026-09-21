@@ -91,6 +91,12 @@ function rutas(db, { detalleMax } = {}) {
     fuente(RUTA, 'function rubrosDeCuentas('),
     fuente(RUTA, 'function contrapartidas('),
     fuente(RUTA, 'function asientosEnteros('),
+    fuente(RUTA, 'function detalleDe(req, res, donde, params, vacio, dondeFilas, paramsFilas, cte) {'),
+    fuente(RUTA, 'function normSql(x) {'),
+    fuente(RUTA, 'function palabrasDeBusqueda(texto) {'),
+    hasta(RUTA, 'const SIN_ACENTO = [', '];'),
+    lineaConst('BUSCA_SQL'),
+    hasta(RUTA, 'const CUENTAS_BUSCA = `', '`;'),
     fuente(RUTA, 'function marcarSinPareja('),
     fuente(RUTA, 'function reemplazo('),
     fuente(RUTA, 'function migrarTitulos('),
@@ -487,6 +493,132 @@ test('para el Excel se piden los asientos ENTEROS, con las cuentas que no son de
   // El tope del Excel es más alto que el de la pantalla: se baja para mandarlo a revisar.
   assert.match(RUTA, /const EXCEL_MAX = (\d+);/);
   assert.ok(Number(/const EXCEL_MAX = (\d+);/.exec(RUTA)[1]) > Number(/const DETALLE_MAX = (\d+);/.exec(RUTA)[1]));
+});
+
+// ══ 4c · BUSCAR UN ASIENTO EN TODO EL LIBRO (V1077) ════════════════════════════════
+//
+// Pablo, 21/9/2026: «quiero un buscador acá también para buscar cualquier tipo de asiento, que se
+// abra una ventana y me busque todo». Es OTRA cosa que la lupa del cuadro: aquélla filtra lo que
+// se está mirando; ésta va al libro entero, y es la única que encuentra un cliente o un proveedor
+// —esos nombres están en cuentas del PATRIMONIO, que no entran al cuadro—.
+
+const CARGA_BUS = { archivo: 'buscar.xls', cuentas: Object.assign({}, NOMBRES, {
+  '1.1.03.01.000.9001': 'PEÑA HERMANOS S.A.',
+  '2.1.01.01.000.7777': 'COMISIÓN DE VENTAS',
+}), renglones: [
+  ['2025-07-08', '900', '4.1.01.00.000.0000', 0, 50000],
+  ['2025-07-08', '900', '1.1.03.01.000.9001', 50000, 0],
+  ['2025-08-09', '901', '2.1.01.01.000.7777', 300, 0],
+  ['2025-08-09', '901', '1.1.01.03.001.0000', 0, 300],
+] };
+const BUS = (db, q, extra) => llamar(rutas(db).detalle,
+  { query: Object.assign({ buscar: q, desde: '2025-07', hasta: '2025-08' }, extra || {}) });
+
+test('el buscador de asientos va al libro entero: encuentra clientes y proveedores, que no están en el cuadro', () => {
+  const db = base();
+  llamar(rutas(db).cargar, { body: CARGA_BUS });
+  // UNA CUENTA DEL PATRIMONIO NO ESTÁ EN EL CUADRO —pedirla por cuenta= rebota— y sin embargo es
+  // justo donde vive el nombre del proveedor. Por eso este buscador existe.
+  assert.equal(llamar(rutas(db).detalle,
+    { query: { cuenta: '1.1.03.01.000.9001', desde: '2025-07', hasta: '2025-08' } }).code, 400);
+  const d = BUS(db, 'peña').body.data;
+  assert.equal(d.filas.length, 2, 'encontró el renglón del proveedor pero no su asiento entero');
+  assert.deepEqual(d.filas.map((f) => f.asiento), ['900', '900']);
+  assert.ok(d.filas.some((f) => f.nombre === 'PEÑA HERMANOS S.A.'));
+  // Y EL PIE SUMA LO QUE SE VE: abajo están los asientos ENTEROS, así que el total no puede ser
+  // el de los renglones que coincidieron —sería un pie que no es la suma de su propia lista—.
+  assert.deepEqual([d.total.renglones, d.total.debe, d.total.haber], [2, 50000, 50000]);
+  // LA Ñ SE RESPETA: «pena» no puede encontrar «PEÑA», ni al revés.
+  assert.equal(BUS(db, 'pena').body.data.filas.length, 0);
+  // Los acentos SÍ se sacan, de los dos lados: SQLite no lo hace solo y su LOWER() ni siquiera
+  // baja las mayúsculas acentuadas.
+  assert.equal(BUS(db, 'comision').body.data.filas.length, 2, 'buscar sin acento no encuentra lo acentuado');
+  assert.equal(BUS(db, 'COMISIÓN').body.data.filas.length, 2);
+  // Por palabras sueltas y en cualquier orden, como el resto del panel.
+  assert.equal(BUS(db, 'hermanos peña').body.data.filas.length, 2);
+  assert.equal(BUS(db, 'peña comision').body.data.filas.length, 0, 'alcanza con que esté UNA de las palabras');
+  // Por número de asiento y por número de cuenta.
+  assert.equal(BUS(db, '901').body.data.filas.length, 2);
+  assert.equal(BUS(db, '1.1.03.01.000.9001').body.data.filas.length, 2);
+  // UNA CUENTA SIN NOMBRE SE ENCUENTRA POR SU NÚMERO. El libro puede traer un movimiento de una
+  // cuenta que no vino en la lista de nombres: sin eso, ese renglón sería inencontrable.
+  db.prepare("INSERT INTO pl_abasto_movimientos (fecha, mes, asiento, cuenta, debe, haber)"
+    + " VALUES ('2025-08-20','2025-08','950','9.9.99.99.999.1234',77,0)").run();
+  assert.equal(BUS(db, '9.9.99').body.data.filas.length, 1, 'una cuenta sin nombre no se encuentra ni por su número');
+  // El % y el _ son texto, no comodines: sin escaparlos, buscar «%» traería el libro entero.
+  assert.equal(BUS(db, '%').body.data.filas.length, 0, 'un comodín del usuario trae todo');
+  assert.equal(BUS(db, '_').body.data.filas.length, 0);
+  // Sin nada que buscar, no se busca.
+  assert.equal(BUS(db, '   ').code, 400);
+  // Y lo que no está, no está: sin filas, pero con la forma completa para que la ventana pinte.
+  const nada = BUS(db, 'carrefour').body.data;
+  assert.deepEqual(nada.filas, []);
+  assert.deepEqual([nada.total.debe, nada.total.haber], [0, 0]);
+  assert.equal(nada.asientos_total, 0);
+  assert.equal(nada.total.renglones, 0);
+});
+
+test('lo que se busca ordena, se recorta y se baja a Excel igual que cualquier detalle', () => {
+  const db = base();
+  llamar(rutas(db).cargar, { body: CARGA_BUS });
+  // El mismo orden del servidor que el detalle de un rubro: el renglón más grande manda.
+  const porDebe = BUS(db, 'peña', { orden: 'debe', desc: '1' }).body.data;
+  assert.equal(porDebe.orden, 'debe');
+  assert.equal(porDebe.filas[0].debe, 50000);
+  // Y el mismo Excel, con los asientos enteros.
+  const x = BUS(db, 'peña', { completo: '1' }).body.data;
+  assert.deepEqual(x.asientos.map((a) => a.asiento), ['900']);
+  assert.equal(x.asientos[0].renglones.length, 2);
+  // El tope cuenta asientos también acá.
+  const corto = llamar(rutas(db, { detalleMax: 1 }).detalle,
+    { query: { buscar: 'a', desde: '2025-07', hasta: '2025-08' } }).body.data;
+  assert.equal(corto.asientos_total, 2);
+  assert.equal(corto.recortado, 1);
+  // La búsqueda no se arma pegando el texto en el SQL: va como parámetro.
+  assert.match(RUTA, /LIKE \? ESCAPE/);
+  assert.ok(!/LIKE '%' \+/.test(RUTA));
+  // Y se limita a seis palabras: cada una es otro barrido del libro entero.
+  assert.match(RUTA, /\.slice\(0, 6\)/);
+});
+
+test('la ventana de buscar: el libro entero, y lo dice en el título', () => {
+  const f = fuente(PANEL, 'function plaBuscarAsientos(){');
+  // TODO EL LIBRO, no el período del cuadro: si no, no encontrar algo se lee como que no existe
+  // cuando en realidad quedó afuera del período elegido.
+  assert.match(f, /var desde = ms\[0\], hasta = ms\[ms\.length - 1\];/);
+  assert.match(f, /titulo: 'Asientos que dicen «' \+ q \+ '» — todo el libro, de '/);
+  assert.match(f, /tipo: 'buscar'/);
+  // Se abre LA MISMA ventana del detalle: ya tiene el orden, el asiento junto y el Excel.
+  assert.match(f, /sgModalArriba\('pla-detalle-modal'\)/);
+  assert.match(f, /plaDetPedir\(\)/);
+  // Sin texto o sin libro, avisa en vez de abrir una ventana vacía.
+  assert.match(f, /if \(!q\) \{ toast\('Escribí qué asiento buscar', 'er'\); return; \}/);
+  assert.match(f, /if \(!ms\.length\)/);
+  // La dirección lleva buscar=, y el resto del mecanismo no se entera.
+  assert.match(fuente(PANEL, 'function plaDetUrl(extra){'),
+    /var como = D\.tipo === 'buscar' \? 'buscar=' : \(D\.tipo === 'rubro' \? 'rubro=' : 'cuenta='\);/);
+  // El campo está en la barra de arriba, y con Enter alcanza.
+  assert.match(PANEL, /<input id="pla-asi-q" class="pla-asi-q" autocomplete="off"/);
+  assert.match(PANEL, /onkeydown="if \(event\.key === 'Enter'\) plaBuscarAsientos\(\)"/);
+  assert.match(PANEL, /placeholder="Nº de asiento, cuenta, proveedor… \(en todo el libro\)"/);
+  // Y el saldo del pie deja de decir «como en el cuadro»: buscando, lo que se ve son renglones
+  // de asientos distintos, y ese número no es ninguna celda.
+  assert.match(fuente(PANEL, 'function plaDetallePintar(){'),
+    /D\.tipo === 'buscar' \? 'SALDO de lo encontrado \(Haber − Debe\)'/);
+});
+
+test('manual V1077: el buscador de asientos, y en qué se diferencia de la lupa del cuadro', () => {
+  const M = manual();
+  assert.match(M, /<span class="ver">V1077<\/span>/);
+  assert.match(M, /<b>Son dos buscadores y hacen cosas distintas\.<\/b>/);
+  assert.match(M, /<b>Buscar un asiento<\/b>, va al <b>libro entero<\/b>/);
+  assert.match(M, /la <b>lupa de abajo filtra lo que estás mirando<\/b>/);
+  assert.match(M, /<b>es la única que encuentra un cliente o un proveedor<\/b>/);
+  assert.match(M, /<span class="ver">V1077<\/span> Un buscador de asientos/);
+  // Lo que el manual AFIRMA, contra el código.
+  assert.match(RUTA, /const CUENTAS_BUSCA = `cbus AS MATERIALIZED/,
+    'el nombre de cada cuenta se vuelve a normalizar en cada uno de los 96.000 renglones');
+  assert.match(PANEL, /onclick="plaBuscarAsientos\(\)">🔎 Buscar<\/button>/);
 });
 
 // ══ 4 · LA PANTALLA ════════════════════════════════════════════════════════════════
@@ -3030,7 +3162,8 @@ test('la lupa está pegada al cuadro, y los botones quedaron arriba', () => {
   assert.ok(iBotones > 0 && iLupa > iBotones, 'la lupa quedó arriba de los botones');
   assert.ok(iBarra > iLupa && iCuadro > iBarra, 'la lupa no está pegada al cuadro');
   assert.match(PANEL, /<input id="pla-buscar" autocomplete="off" oninput="plaBuscarTeclas\(\)"/);
-  assert.match(PANEL, /placeholder="Buscar una cuenta, un ajuste, un proveedor…"/);
+  assert.match(PANEL, /placeholder="Filtrar el cuadro: una cuenta, un ajuste, un rubro…"/,
+    'los dos carteles tienen que decir cuál filtra el cuadro y cuál va al libro entero');
   assert.match(PANEL, /<button class="pla-bx" id="pla-buscar-x"/);
   // Se entra sin filtro puesto: si no, la visita siguiente arranca con medio cuadro escondido.
   const init = fuente(PANEL, 'function plaInit(){');
