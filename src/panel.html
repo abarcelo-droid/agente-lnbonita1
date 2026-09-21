@@ -8285,6 +8285,14 @@ input[type=number]{-moz-appearance:textfield;appearance:textfield}
       text-transform:none;letter-spacing:0}
     #pla-detalle-modal .pla-det-nb input{flex:0 0 auto;width:auto;margin:0}
     #pla-detalle-modal #pla-detalle-nota{font-size:11.5px;color:var(--mut);flex:1 1 200px;min-width:0}
+    /* ORDENAR (V1076): el encabezado se aprieta, y la flecha dice por cuál y para dónde. */
+    #pla-detalle-modal thead th{cursor:pointer;user-select:none;white-space:nowrap}
+    #pla-detalle-modal thead th:hover{color:var(--pri)}
+    /* Y el asiento se ve COMO BLOQUE: sin esta línea, ordenando por importe la columna parece
+       desordenada —los renglones de abajo de un asiento pueden ser mayores que el primero del
+       asiento siguiente— y el orden se lee como que se rompió. */
+    #pla-detalle-modal tr.pla-det-g0 td{border-top:2px solid var(--bor2)}
+    #pla-detalle-modal tr.pla-det-hit td{background:#fef9c3}
   </style>
   <div class="ab-modal" style="width:min(1000px,96vw);max-width:96vw;max-height:90vh;overflow-y:auto;overflow-x:hidden">
     <div class="mhd"><div class="mht" id="pla-detalle-tit">🔍 Asientos</div>
@@ -8292,6 +8300,7 @@ input[type=number]{-moz-appearance:textfield;appearance:textfield}
     <div class="pla-det-filtros">
       <input id="pla-detalle-q" placeholder="Buscar en la lista" oninput="plaDetallePintar()">
       <label class="pla-det-nb"><input type="checkbox" id="pla-detalle-nb" onchange="plaDetallePintar()">⚠️ Sólo los que no balancean<span id="pla-detalle-nb-n"></span></label>
+      <button class="btn bo" id="pla-detalle-excel" onclick="plaDetExcel()" style="flex:0 0 auto">⬇️ Excel</button>
       <span id="pla-detalle-nota"></span>
     </div>
     <div class="ab-table-wrap" style="overflow-x:hidden !important">
@@ -24601,6 +24610,21 @@ SG_MANUAL.plabasto = { titulo: 'P&L Abasto', html:
   + 'cliente de una venta, cuando el otro sistema la cargó con su cobro en el mismo asiento—, el debe y el haber.</li>'
   + '<li><span class="ver">V1061</span> Adentro de cada rubro, cada cuenta se ve con su <b>nombre completo</b>: si es '
   + 'largo baja de renglón. El número de la cuenta aparece pasando el mouse.</li>'
+  + '<li><span class="ver">V1076</span> Un <b>clic en el título de una columna</b> ordena por ahí, y otro clic '
+  + 'da vuelta el orden: los importes y la fecha arrancan de mayor a menor, los textos de la A a la Z. El '
+  + '<b>asiento nunca se parte</b>: si tiene dos renglones de este rubro van pegados, y lo que manda es su '
+  + 'renglón más grande. Por eso la columna puede no bajar renglón por renglón; una línea separa un asiento '
+  + 'del siguiente.</li>'
+  + '<li>El orden lo resuelve el servidor, así que <b>mira todo el período</b> y no sólo lo que entró en la '
+  + 'pantalla —el aviso de arriba dice cuántos asientos se trajeron y de cuántos—. La única que se ordena en '
+  + 'la pantalla es <b>Contrapartida</b>, que se arma después de elegir los movimientos.</li>'
+  + '<li>Buscando, si un renglón coincide <b>entra su asiento entero</b>, con el renglón que coincidió '
+  + 'marcado: medio asiento no sirve para revisar nada.</li>'
+  + '<li><b>⬇️ Excel</b> baja lo que estás viendo, en dos hojas: <b>Movimientos</b>, con el mismo orden y el '
+  + 'mismo filtro y un total que cierra con sus propias filas, y <b>Asientos completos</b>, con cada asiento '
+  + 'entero —las cuentas que no son del rubro incluidas, que son las que explican la operación—. Cada asiento '
+  + 'dice si <b>balancea</b>, si <b>se compensa con otro del mismo día</b> o si <b>quedó sin pareja</b>: sólo '
+  + 'esos últimos hay que mirarlos.</li>'
   + '<li><span class="ver">V1061</span> En los asientos de un importe, <b>un clic en un renglón abre el asiento '
   + 'completo</b> debajo: todas sus cuentas —las del patrimonio también— con su debe y su haber, y abajo si balancea o '
   + 'por cuánto no. Otro clic lo cierra.</li>'
@@ -24774,6 +24798,8 @@ SG_MANUAL.plabasto = { titulo: 'P&L Abasto', html:
   + '<li><span class="ver">V1072</span> El cuadro dejó de temblar al llegar al final de los meses. Las dos '
   + 'barras no corrían lo mismo —la de arriba se quedaba 15 px antes, los que el cuadro pierde con su barra '
   + 'de bajar— y se devolvían la tabla la una a la otra.</li>'
+  + '<li><span class="ver">V1076</span> Ordenar los asientos de un importe por cualquier columna, y bajarlos '
+  + 'a un Excel para mandar a revisar.</li>'
   + '<li><span class="ver">V1074</span> Una <b>lupa</b> abajo del cuadro para buscar cualquier cosa —un '
   + 'proveedor, una cuenta, un ajuste— con sólo que lo contenga.</li>'
   + '<li><span class="ver">V1073</span> Y dejó de dibujarse dos veces: al abrir o cerrar un rubro, las '
@@ -44559,46 +44585,129 @@ function plaDetalle(tipo, clave, mes){
   var cta = tipo === 'cuenta' ? (d.cuentas || []).filter(function(c){ return c.cuenta === clave; })[0] : null;
   var titulo = (tipo === 'rubro' ? (rub ? rub.label : clave) : (cta ? cta.cuenta + ' · ' + cta.nombre : clave))
     + ' — ' + (mes === 'TOTAL' ? plaMesTxt(desde) + ' a ' + plaMesTxt(hasta) : plaMesTxt(mes));
-  PLA.detalle = { tipo: tipo, filas: [], total: null, recortado: 0,
+  PLA.detalle = { tipo: tipo, clave: clave, desde: desde, hasta: hasta, titulo: titulo,
+    filas: [], total: null, recortado: 0, orden: 'fecha', desc: 1, abiertos: {}, asientos: {},
     ajustes: tipo === 'rubro' ? plaDetalleAjustes(d, clave, desde, hasta) : [] };
   eid('pla-detalle-tit').textContent = '🔍 ' + titulo;
   eid('pla-detalle-q').value = '';
   var nb = eid('pla-detalle-nb'); if (nb) nb.checked = false;
-  eid('pla-detalle-nota').textContent = 'Cargando…';
   eid('pla-detalle-tabla').innerHTML = '';
+  plaDetPedir();
   sgModalArriba('pla-detalle-modal');
-  api('/api/pl-abasto/detalle?' + (tipo === 'rubro' ? 'rubro=' : 'cuenta=') + encodeURIComponent(clave)
-      + '&desde=' + desde + '&hasta=' + hasta).then(function(r){
+}
+
+// La dirección de lo que se está mirando, con el orden puesto. EL ORDEN LO HACE EL SERVIDOR: la
+// ventana trae hasta mil asientos, así que ordenar acá daría «el más grande de los mil que se
+// trajeron», no el más grande del período —y ordenar por importe es justamente para encontrar ése—.
+function plaDetUrl(extra){
+  var D = PLA.detalle;
+  return '/api/pl-abasto/detalle?' + (D.tipo === 'rubro' ? 'rubro=' : 'cuenta=') + encodeURIComponent(D.clave)
+    + '&desde=' + D.desde + '&hasta=' + D.hasta + '&orden=' + encodeURIComponent(D.orden)
+    + '&desc=' + (D.desc ? 1 : 0) + (extra || '');
+}
+
+function plaDetPedir(){
+  var D = PLA.detalle;
+  eid('pla-detalle-nota').textContent = 'Cargando…';
+  api(plaDetUrl()).then(function(r){
     if (!r || !r.ok) { eid('pla-detalle-nota').textContent = (r && r.error) || 'No se pudo leer el detalle'; return; }
-    PLA.detalle.filas = r.data.filas || [];
-    PLA.detalle.total = r.data.total;
-    PLA.detalle.recortado = r.data.recortado;
+    if (PLA.detalle !== D) return;             // se cerró o se abrió otro mientras tanto
+    D.filas = r.data.filas || [];
+    D.total = r.data.total;
+    D.recortado = r.data.recortado;
+    D.asientosTotal = r.data.asientos_total;
     plaDetallePintar();
   });
+}
+
+// CONTRAPARTIDA es la única que se ordena acá: se arma en el servidor DESPUÉS de elegir las filas
+// —es el resumen de las otras cuentas del asiento—, así que no hay por dónde ordenarla allá.
+function plaDetOrden(col){
+  var D = PLA.detalle; if (!D) return;
+  // Segundo clic sobre la misma: da vuelta. Primera vez: los importes y la fecha de mayor a
+  // menor, que es lo que se busca; los textos, de la A a la Z.
+  if (D.orden === col) D.desc = D.desc ? 0 : 1;
+  else { D.orden = col; D.desc = (col === 'cuenta' || col === 'contrapartida') ? 0 : 1; }
+  if (col === 'contrapartida') plaDetallePintar();
+  else plaDetPedir();
+}
+
+// EL ASIENTO ES LA UNIDAD (V1076). Pablo, 21/9/2026: «obviamente siempre respetando mostrar todo
+// el asiento junto». Un asiento puede tener varios renglones del mismo rubro, y partirlo en dos
+// lugares de la lista hace imposible atar un número con el otro. El servidor ya manda el grupo
+// de cada renglón; los ajustes manuales no son asientos y cada uno es el suyo.
+function plaDetGrupos(filas){
+  var orden = [], por = {};
+  filas.forEach(function(f, i){
+    var g = f.grupo || ('X' + i);
+    if (!por[g]) { por[g] = []; orden.push(g); }
+    por[g].push(f);
+  });
+  return orden.map(function(g){ return por[g]; });
+}
+
+// LO QUE SE LEE EN EL RENGLÓN, para el buscador de la ventana.
+function plaDetTexto(f){
+  return [f.fecha, plaFechaTxt(f.fecha), f.asiento, f.cuenta, f.nombre, f.contrapartida].join(' ');
+}
+
+// QUÉ ASIENTOS QUEDAN, con el buscador y el tilde puestos. UN SOLO LUGAR lo decide: la pantalla y
+// el Excel tienen que mostrar lo mismo, o la planilla que se manda a revisar no es la que se vio.
+// Si un renglón coincide entra su asiento ENTERO, y el que coincidió queda marcado.
+function plaDetSeleccion(filas, partes, soloNb){
+  var grupos = plaDetGrupos(filas).filter(function(g){
+    if (soloNb && !g.some(function(f){ return f.sin_pareja; })) return false;
+    if (!partes.length) return true;
+    return g.some(function(f){ return plaCoincide(plaDetTexto(f), partes); });
+  });
+  grupos.forEach(function(g){
+    g.forEach(function(f){ f._hit = partes.length ? plaCoincide(plaDetTexto(f), partes) : 0; });
+  });
+  return grupos;
 }
 
 function plaDetallePintar(){
   var D = PLA.detalle; if (!D || !D.total) return;
   var q = sgNorm(String(eid('pla-detalle-q').value || '').trim());
+  var partes = q.split(/\s+/).filter(Boolean);
   // V1063: el tilde deja sólo los renglones de asientos sin pareja —los mismos de la solapa
   // No balancea—, para investigarlos sin salir de acá. Un ajuste manual no es un asiento: con
   // el tilde puesto no va.
   var soloNb = !!(eid('pla-detalle-nb') || {}).checked;
   var conNb = D.filas.filter(function(f){ return f.sin_pareja; }).length;
   var cn = eid('pla-detalle-nb-n'); if (cn) cn.textContent = conNb ? ' (' + nr(conNb) + ')' : '';
-  var filas = D.filas.filter(function(f){
-    if (soloNb && !f.sin_pareja) return false;
-    return !q || sgNorm([f.fecha, plaFechaTxt(f.fecha), f.asiento, f.cuenta, f.nombre, f.contrapartida].join(' ')).indexOf(q) >= 0;
-  });
+  // BUSCAR TRAE EL ASIENTO ENTERO (decisión de Pablo, 21/9): si un renglón coincide, entran todos
+  // los de su asiento y se resalta el que coincidió. Filtrando renglón por renglón, de un asiento
+  // de cuatro se veía uno y el que recibe la planilla no puede revisar nada.
+  var grupos = plaDetSeleccion(D.filas, partes, soloNb);
+  // La contrapartida se arma después de elegir las filas, así que se ordena acá y no en el servidor.
+  if (D.orden === 'contrapartida') {
+    grupos.sort(function(a, b){
+      return (D.desc ? -1 : 1) * String(a[0].contrapartida || '').localeCompare(String(b[0].contrapartida || ''));
+    });
+  }
+  var filas = [];
+  grupos.forEach(function(g){ g.forEach(function(f, i){ f._g0 = i === 0 && g.length > 1 ? 1 : 0; filas.push(f); }); });
+  // LOS AJUSTES MANUALES QUEDAN CLAVADOS ARRIBA, fuera del orden: no tienen fecha de asiento ni
+  // número, así que ordenarlos junto a los movimientos sería inventarles los dos. Son un puñado y
+  // son los únicos renglones que alguien puede corregir desde acá.
   var ajustes = (soloNb ? [] : (D.ajustes || [])).filter(function(f){
-    return !q || sgNorm(['ajuste manual', f.nombre, plaMesTxt(f.mes)].join(' ')).indexOf(q) >= 0;
+    return !partes.length || plaCoincide(['ajuste manual', f.nombre, plaMesTxt(f.mes)].join(' '), partes);
   });
   var conCuenta = D.tipo === 'rubro', span = conCuenta ? 4 : 3;
-  eid('pla-detalle-nota').textContent = (D.recortado ? 'Se muestran los ' + nr(D.filas.length) + ' más recientes de '
-    + nr(D.total.renglones) + '; el total es de todos. ' : '')
+  // EL AVISO DEL RECORTE CUENTA ASIENTOS, no renglones, y no dice «los más recientes» salvo que
+  // se esté mirando por fecha: ordenando por importe, los que se trajeron son los más grandes.
+  var cuales = D.orden === 'fecha' ? (D.desc ? 'los más recientes' : 'los más viejos')
+    : (D.desc ? 'los más grandes por ' + D.orden : 'los más chicos por ' + D.orden);
+  eid('pla-detalle-nota').textContent = (D.recortado ? 'Se muestran ' + cuales + ': '
+      + nr(plaDetGrupos(D.filas).length) + ' asientos de ' + nr(D.asientosTotal || 0) + '; el total es de todos. ' : '')
     + (soloNb ? (filas.length ? 'Sólo los que no balancean: ' + nr(filas.length) + ' de ' + nr(D.filas.length) + '. '
         : 'Ninguno de estos movimientos está en un asiento sin pareja. ') : '')
-    + (q ? nr(filas.length + ajustes.length) + ' coinciden con la búsqueda.' : '');
+    + (q ? nr(grupos.length) + (grupos.length === 1 ? ' asiento coincide' : ' asientos coinciden')
+        + ' con la búsqueda; de cada uno se muestran todos sus renglones. ' : '')
+    + ((D.ajustes || []).length && !soloNb ? nr(D.ajustes.length) + ' ajuste'
+        + ((D.ajustes || []).length === 1 ? '' : 's') + ' manual'
+        + ((D.ajustes || []).length === 1 ? '' : 'es') + ', siempre arriba.' : '');
   // Con búsqueda, los totales son de lo que se ve; sin búsqueda, de TODOS los renglones.
   var sD = 0, sH = 0, aD = 0, aH = 0, todos = D.ajustes || [];
   filas.concat(ajustes).forEach(function(f){ sD += Number(f.debe) || 0; sH += Number(f.haber) || 0; });
@@ -44609,8 +44718,15 @@ function plaDetallePintar(){
   var n = filtra ? filas.length + ajustes.length : D.total.renglones + todos.length;
   eid('pla-detalle-tabla').innerHTML = '<colgroup><col style="width:11%"><col style="width:9%">'
     + (conCuenta ? '<col style="width:22%">' : '') + '<col><col style="width:14%"><col style="width:14%"></colgroup>'
-    + '<thead><tr><th>Fecha</th><th>Asiento</th>' + (conCuenta ? '<th>Cuenta</th>' : '')
-    + '<th>Contrapartida</th><th style="text-align:right">Debe</th><th style="text-align:right">Haber</th></tr></thead><tbody>'
+    + '<thead><tr>' + [['fecha', 'Fecha', ''], ['asiento', 'Asiento', '']]
+        .concat(conCuenta ? [['cuenta', 'Cuenta', '']] : [])
+        .concat([['contrapartida', 'Contrapartida', ''], ['debe', 'Debe', 'text-align:right'],
+          ['haber', 'Haber', 'text-align:right']])
+        .map(function(c){
+          return '<th' + (c[2] ? ' style="' + c[2] + '"' : '') + ' title="Clic: ordenar por acá"'
+            + ' onclick="plaDetOrden(\'' + c[0] + '\')">' + c[1]
+            + (D.orden === c[0] ? (D.desc ? ' ▼' : ' ▲') : '') + '</th>';
+        }).join('') + '</tr></thead><tbody>'
     + ajustes.map(function(f){
         return '<tr style="color:#b45309;font-style:italic"><td>' + plaMesTxt(f.mes) + '</td><td>—</td>'
           + (conCuenta ? '<td title="' + escH(f.nombre) + '">✎ ' + escH(f.nombre) + '</td>' : '')
@@ -44619,7 +44735,9 @@ function plaDetallePintar(){
       }).join('')
     + filas.map(function(f){
         // V1061: un clic en el renglón abre el asiento entero debajo.
-        return '<tr' + (f.asiento ? ' class="pla-det-fila" title="Clic: ver el asiento completo" onclick="plaAsientoVer(this,\''
+        var cls = (f.asiento ? 'pla-det-fila' : '') + (f._g0 ? ' pla-det-g0' : '') + (f._hit ? ' pla-det-hit' : '');
+        return '<tr' + (cls ? ' class="' + cls.trim() + '"' : '')
+            + (f.asiento ? ' title="Clic: ver el asiento completo" onclick="plaAsientoVer(this,\''
             + escH(f.asiento) + '\',\'' + escH(f.fecha) + '\')"' : '') + '><td>' + plaFechaTxt(f.fecha) + '</td><td>'
           + (f.sin_pareja ? '<span title="Este asiento no balancea: está en la solapa No balancea">⚠️</span> ' : '')
           + escH(f.asiento || '') + '</td>'
@@ -44635,6 +44753,121 @@ function plaDetallePintar(){
     // millones abría un detalle con el saldo en negativo.
     + '<tr><td colspan="' + span + '"><b>SALDO (Haber − Debe, como en el cuadro)</b></td>'
     + '<td colspan="2" style="text-align:right"><b>' + plaImporte(Math.round((tH - tD) * 100) / 100) + '</b></td></tr></tfoot>';
+  plaDetReabrir();
+}
+
+// LOS ASIENTOS ABIERTOS SOBREVIVEN AL REPINTADO (V1076). Se dibujan con innerHTML, así que hasta
+// hoy escribir UNA letra en el buscador cerraba el asiento que se estaba leyendo. Se recuerdan por
+// su clave y se vuelven a poner del cache que ya existía: no hace falta pedirlos de nuevo. Y al
+// reordenar, el asiento se mueve con su panel pegado, que es lo que quiere decir «junto».
+function plaDetReabrir(){
+  var D = PLA.detalle; if (!D || !D.abiertos) return;
+  var tb = eid('pla-detalle-tabla'); if (!tb || !tb.querySelectorAll) return;
+  [].slice.call(tb.querySelectorAll('tr.pla-det-fila')).forEach(function(tr){
+    var m = /plaAsientoVer\(this,'([^']*)','([^']*)'\)/.exec(tr.getAttribute('onclick') || '');
+    if (!m) return;
+    var clave = m[1] + '|' + m[2];
+    if (!D.abiertos[clave] || !D.asientos[clave]) return;
+    if (tr.nextSibling && tr.nextSibling.getAttribute
+      && tr.nextSibling.getAttribute('data-asiento') === clave) return;
+    var fila = document.createElement('tr');
+    fila.className = 'pla-det-asiento';
+    fila.setAttribute('data-asiento', clave);
+    fila.innerHTML = '<td colspan="' + tr.children.length + '">' + plaAsientoHtml(D.asientos[clave]) + '</td>';
+    tr.parentNode.insertBefore(fila, tr.nextSibling);
+    tr.classList.add('abierta');
+  });
+}
+
+// ── EL EXCEL DEL DETALLE (V1076) ──────────────────────────────────────────────
+//
+// Pablo, 21/9/2026: «sería bueno poder bajar desde ahí mismo un Excel los asientos de ese rubro en
+// particular, para poder mandar a revisar».
+//
+// NO SE ARMA CON LO QUE QUEDÓ EN PANTALLA. La ventana trae hasta mil asientos y su pie muestra el
+// total de TODOS —eso está dicho en una nota que no viaja al archivo—, así que la planilla saldría
+// con un TOTAL que no es la suma de sus propias filas, que es el peor defecto posible en algo que
+// se manda a un tercero. Se vuelve a pedir con un tope más alto, y el total de la hoja es el de
+// las filas de la hoja.
+function plaDetExcel(){
+  var D = PLA.detalle; if (!D || !D.total) return;
+  if (typeof XLSX === 'undefined') { toast('No se pudo cargar el armado del Excel: recargá la página', 'er'); return; }
+  var btn = eid('pla-detalle-excel');
+  if (btn) btn.disabled = true;
+  api(plaDetUrl('&completo=1')).then(function(r){
+    if (btn) btn.disabled = false;
+    if (!r || !r.ok) { toast((r && r.error) || 'No se pudo armar el Excel', 'er'); return; }
+    var F = plaDetLibroFilas(r.data, D);
+    var libro = XLSX.utils.book_new();
+    var h1 = XLSX.utils.aoa_to_sheet(F.movimientos), h2 = XLSX.utils.aoa_to_sheet(F.asientos);
+    h1['!cols'] = [{ wch: 12 }, { wch: 12 }, { wch: 22 }, { wch: 42 }, { wch: 44 }, { wch: 16 }, { wch: 16 }, { wch: 14 }];
+    h2['!cols'] = [{ wch: 12 }, { wch: 12 }, { wch: 22 }, { wch: 42 }, { wch: 16 }, { wch: 16 }, { wch: 18 }, { wch: 46 }];
+    plaNbFormato(h1, 4, [5, 6]);
+    plaNbFormato(h2, 1, [4, 5, 6]);
+    XLSX.utils.book_append_sheet(libro, h1, 'Movimientos');
+    XLSX.utils.book_append_sheet(libro, h2, 'Asientos completos');
+    XLSX.writeFile(libro, 'PL_Abasto_' + String(D.titulo || 'detalle').replace(/[^\w]+/g, '_').slice(0, 60) + '.xlsx');
+    toast('Excel bajado', 'ok');
+  });
+}
+
+// Las dos hojas. La primera es LO QUE SE VE —mismo buscador, mismo tilde, mismo orden—; la segunda
+// es cada asiento entero, uno abajo del otro y con una fila en blanco en el medio, igual que el
+// Excel de No balancea, que es el que ya se usa para mandar a revisar.
+function plaDetLibroFilas(data, D){
+  var r2 = function(n){ return Math.round((Number(n) || 0) * 100) / 100; };
+  var partes = sgNorm(String((eid('pla-detalle-q') || {}).value || '').trim()).split(/\s+/).filter(Boolean);
+  var soloNb = !!(eid('pla-detalle-nb') || {}).checked;
+  var grupos = plaDetSeleccion(data.filas || [], partes, soloNb);
+  var mov = [['P&L Abasto — ' + (D.titulo || '')],
+    ['Ordenado por', D.orden + (D.desc ? ' (de mayor a menor)' : ' (de menor a mayor)')]];
+  if (partes.length) mov.push(['Buscando', String((eid('pla-detalle-q') || {}).value || '')
+    + ' — de cada asiento que coincide van TODOS sus renglones']);
+  if (soloNb) mov.push(['Filtro', 'Sólo los asientos que no balancean']);
+  if (data.recortado) mov.push(['Atención', 'Hay más asientos de los que entraron en esta planilla: acotá el período.']);
+  mov.push([], ['Fecha', 'Asiento', 'Cuenta', 'Nombre de la cuenta', 'Contrapartida', 'Debe', 'Haber', '¿No balancea?']);
+  var sD = 0, sH = 0, n = 0;
+  // Los ajustes manuales primero, como en la pantalla: si no, el total no cierra con la celda.
+  (soloNb ? [] : (D.ajustes || [])).forEach(function(f){
+    if (partes.length && !plaCoincide(['ajuste manual', f.nombre, plaMesTxt(f.mes)].join(' '), partes)) return;
+    n++; sD += r2(f.debe); sH += r2(f.haber);
+    mov.push([plaMesTxt(f.mes), '', '', 'Ajuste manual: ' + f.nombre, '', r2(f.debe), r2(f.haber), '']);
+  });
+  grupos.forEach(function(g){
+    g.forEach(function(f){
+      // Se suma lo REDONDEADO, que es lo que va escrito en la celda: con cientos de movimientos,
+      // los centavos que se descartan al escribir hacen que el pie no cuadre con su columna.
+      n++; sD += r2(f.debe); sH += r2(f.haber);
+      mov.push([plaFechaTxt(f.fecha), f.asiento || '', f.cuenta || '', f.nombre || '', f.contrapartida || '',
+        r2(f.debe), r2(f.haber), f.sin_pareja ? 'No balancea' : '']);
+    });
+  });
+  mov.push([], ['TOTAL', n + (n === 1 ? ' movimiento' : ' movimientos'), '', '', '', r2(sD), r2(sH)],
+    ['SALDO (Haber − Debe, como en el cuadro)', '', '', '', '', '', r2(sH - sD)]);
+  // ── HOJA 2 · el asiento entero, con las cuentas que NO son del rubro ──
+  var quedaron = {};
+  grupos.forEach(function(g){ g.forEach(function(f){ if (f.asiento) quedaron[f.asiento + '|' + f.fecha] = 1; }); });
+  // UN ASIENTO QUE NO CIERRA SOLO NO ES UN ERROR. En el libro del otro sistema, una operación
+  // viene partida en dos asientos del mismo día que se compensan entre ellos: marcarlos a todos
+  // «NO BALANCEA» le haría reportar al que revisa cientos de errores que no existen. Los únicos
+  // que hay que mirar son los que quedaron SIN PAREJA, que son los mismos que lista la solapa
+  // No balancea y los que la pantalla marca con ⚠️.
+  var sinPareja = {};
+  (data.filas || []).forEach(function(f){ if (f.sin_pareja && f.asiento) sinPareja[f.asiento + '|' + f.fecha] = 1; });
+  var det = [['Fecha', 'Asiento', 'Cuenta', 'Nombre de la cuenta', 'Debe', 'Haber', 'Diferencia (debe − haber)', 'Estado']];
+  (data.asientos || []).forEach(function(a){
+    if (!quedaron[a.asiento + '|' + a.fecha]) return;
+    (a.renglones || []).forEach(function(x, i){
+      det.push([i === 0 ? plaFechaTxt(a.fecha) : '', i === 0 ? (a.asiento || '') : '',
+        x.cuenta, x.nombre, r2(x.debe), r2(x.haber), '', '']);
+    });
+    var estado = !a.diferencia ? 'Balancea'
+      : (sinPareja[a.asiento + '|' + a.fecha] ? 'NO BALANCEA — quedó sin pareja: éste hay que mirarlo'
+        : 'Se compensa con otro asiento del mismo día');
+    det.push(['', '', '', 'Total del asiento', r2(a.debe), r2(a.haber), r2(a.diferencia), estado]);
+    det.push([]);
+  });
+  return { movimientos: mov, asientos: det };
 }
 
 // ── EN DÓLARES ────────────────────────────────────────────────────────────────
@@ -44968,11 +45201,14 @@ function plaAsientoVer(tr, asiento, fecha){
   var D = PLA.detalle; if (!D || !tr || !tr.parentNode) return;
   var clave = asiento + '|' + fecha, sig = tr.nextSibling;
   // Ya abierto: se cierra.
+  D.abiertos = D.abiertos || {};
   if (sig && sig.getAttribute && sig.getAttribute('data-asiento') === clave) {
     sig.parentNode.removeChild(sig);
     tr.classList.remove('abierta');
+    delete D.abiertos[clave];
     return;
   }
+  D.abiertos[clave] = 1;
   var fila = document.createElement('tr');
   fila.className = 'pla-det-asiento';
   fila.setAttribute('data-asiento', clave);
