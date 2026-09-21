@@ -398,7 +398,7 @@ const PANTALLA = (datos, abiertos = {}, unidad, op, moneda, caja = 1180) => {
     fuente(PANEL, 'function plaUnidadGuardada(){'),
     fuente(PANEL, 'function plaUnidadAuto(T){'),
     fuente(PANEL, 'function plaCelda(v, ventas, conPct){'),
-    fuente(PANEL, 'function plaAltoDisponible(alto, top){'),
+    fuente(PANEL, 'function plaAltoDisponible(alto, top, abajo){'),
     fuente(PANEL, 'function plaAltoCaja(){'),
     fuente(PANEL, 'function plaBarraArriba(){'),
     fuente(PANEL, 'function plaPintar(){'),
@@ -1659,7 +1659,7 @@ test('en el cuadro cada cuenta se ve con su nombre entero; el número queda al p
   assert.match(PANEL, /#sec-pl-abasto \.pla-cta td:first-child,#sec-pl-abasto \.pla-aju td:first-child\{white-space:normal;overflow:visible;\r?\n\s+text-overflow:clip;overflow-wrap:anywhere\}/);
   // V1063: el concepto va angosto y en píxeles, y con dos meses las columnas se estiran para
   // llenar la pantalla. El concepto ya no se lleva dos tercios del cuadro.
-  assert.match(h, /^<colgroup><col style="width:248px"><col style="width:359px"><col style="width:276px"><col style="width:276px"><\/colgroup>/);
+  assert.match(h, /^<colgroup><col style="width:248px"><col style="width:365px"><col style="width:281px"><col style="width:281px"><\/colgroup>/);
   // Con doce meses las columnas llegan a su mínimo, y ahí es donde aparece la barra de abajo.
   const doce = Object.assign({}, DATOS, { meses: ['2025-01', '2025-02', '2025-03', '2025-04', '2025-05', '2025-06', '2025-07', '2025-08', '2025-09', '2025-10', '2025-11', '2025-12'] });
   assert.match(PANTALLA(doce), /^<colgroup><col style="width:248px"><col style="width:120px">(<col style="width:92px">){12}<\/colgroup>/);
@@ -1948,15 +1948,18 @@ test('el cuadro sale con esos anchos, y Concepto y TOTAL quedan pegados mientras
   const A = anchos(1180, 3);   // TOTAL + dos meses
   assert.ok(h.startsWith('<colgroup><col style="width:' + PLA_ANCHO.concepto + 'px"><col style="width:'
     + A.total + 'px"><col style="width:' + A.mes + 'px"><col style="width:' + A.mes + 'px"></colgroup>'), h.slice(0, 200));
-  // El ancho se reparte descontando la barra vertical de la caja: sin eso la tabla sale más
-  // ancha de lo que entra y aparece una barra horizontal de unos pocos píxeles.
-  assert.ok(A.tabla <= 1180 - 16, 'la tabla no deja lugar para la barra vertical: ' + A.tabla);
+  // EL HUECO DE LA BARRA VERTICAL LO RESERVA EL CSS (V1073), así que el ancho que llega acá ya
+  // viene sin él y no hay que descontarlo otra vez: los 18 px que se restaban eran ese mismo
+  // hueco por segunda vez —21 a 23 px de tabla sin usar—. Queda un respiro de 4.
+  assert.ok(A.tabla <= 1180, 'la tabla sale más ancha que su caja: ' + A.tabla);
+  assert.ok(A.tabla > 1180 - 16, 'se sigue descontando la barra dos veces: ' + A.tabla);
+  assert.match(PANEL, /\.ab-table-wrap\{overflow:auto !important;scrollbar-gutter:stable;/);
   assert.equal(TABLA.style.width, A.tabla + 'px', 'la tabla no se lleva su ancho: las columnas pegadas se desalinean');
   // Sin meses no queda el ancho de la vez anterior.
   PANTALLA({ rubros: RUBROS, meses: [], meses_disponibles: [] });
   assert.equal(TABLA.style.width, '');
   // La caja del cuadro scrollea sola y llega hasta el pie de la pantalla; No balancea, no.
-  assert.match(PANEL, /#pla-pane-resultado \.ab-table-wrap\{overflow:auto !important;\r?\n\s+max-height:max\(320px,calc\(100vh - 300px\)\)\}/);
+  assert.match(PANEL, /#pla-pane-resultado \.ab-table-wrap\{overflow:auto !important;scrollbar-gutter:stable;\r?\n\s+max-height:max\(320px,calc\(100vh - 300px\)\)\}/);
   assert.match(PANEL, /#sec-pl-abasto \.ab-table-wrap\{overflow-x:hidden !important\}/);
   // Las dos primeras columnas, pegadas, y la del TOTAL justo donde termina el concepto.
   assert.match(PANEL, /#pla-pane-resultado \.pla-tbl th:first-child,#pla-pane-resultado \.pla-tbl td:first-child\{\r?\n\s+position:sticky;left:0;z-index:2\}/);
@@ -2380,6 +2383,16 @@ test('las dos barras corren EXACTAMENTE lo mismo: el cuadro no salta para atrás
   assert.equal(z.wrap.scrollLeft, 30.4, 'un decimal de diferencia movió el cuadro');
 });
 
+test('manual V1073: el cuadro dejó de dibujarse dos veces, y llega justo al pie', () => {
+  const M = manual();
+  assert.match(M, /<span class="ver">V1073<\/span> Y dejó de dibujarse dos veces/);
+  assert.match(M, /El lugar de la barra de bajar ahora está reservado desde el principio/);
+  assert.match(M, /la página quedaba con una barra de bajar al pedo/);
+  // Lo que el manual AFIRMA, contra el código.
+  assert.match(PANEL, /\.ab-table-wrap\{overflow:auto !important;scrollbar-gutter:stable;/);
+  assert.match(fuente(PANEL, 'function plaAltoCaja(){'), /getComputedStyle\(m\)\.paddingBottom/);
+});
+
 test('manual V1072: el cuadro dejó de temblar, y las dos barras llegan al final', () => {
   const M = manual();
   assert.match(M, /<span class="ver">V1072<\/span> El cuadro dejó de temblar al llegar al final de los meses/);
@@ -2456,7 +2469,7 @@ test('la barra va arriba del cuadro, pegada, y se dibuja en cada pintada', () =>
   assert.match(p, /plaAltoCaja\(\);\r?\n  plaBarraArriba\(\);\r?\n  plaAltoCaja\(\);/);
   // Y la de abajo sigue estando: son las dos, no una en lugar de la otra. Vive en el borde de
   // la caja, que está acotada al alto de la pantalla, así que ahora también se alcanza.
-  assert.match(PANEL, /#pla-pane-resultado \.ab-table-wrap\{overflow:auto !important;/);
+  assert.match(PANEL, /#pla-pane-resultado \.ab-table-wrap\{overflow:auto !important;scrollbar-gutter:stable;/);
   assert.match(PANEL, /max-height:max\(320px,calc\(100vh - 300px\)\)\}/);
   // El manual lo cuenta: son dos y da igual cuál se use.
   const M = manual();
@@ -2467,15 +2480,25 @@ test('la barra va arriba del cuadro, pegada, y se dibuja en cada pintada', () =>
 });
 
 test('el alto de la caja se mide contra la ventana, y nunca queda una ranura', () => {
-  const alto = new Function([fuente(PANEL, 'function plaAltoDisponible(alto, top){'),
+  const alto = new Function([fuente(PANEL, 'function plaAltoDisponible(alto, top, abajo){'),
     'return plaAltoDisponible;'].join('\n'))();
-  // Una ventana de 1000 con el cuadro arrancando a 307: hasta el pie, menos un respiro.
-  assert.equal(alto(1000, 307), 677);
+  // Una ventana de 1000, el cuadro arrancando a 307 y 28 px de aire abajo: hasta el pie.
+  assert.equal(alto(1000, 307, 28), 657);
+  assert.equal(alto(1000, 307, 0), 685, 'el aire de abajo no se descuenta');
   // En una notebook baja, o con el cuadro muy abajo, no se achica mas alla del piso.
-  assert.equal(alto(700, 520), 320);
-  assert.equal(alto(0, 0), 320, 'sin medida todavia, la caja no puede nacer en cero');
+  assert.equal(alto(700, 520, 28), 320);
+  assert.equal(alto(0, 0, 0), 320, 'sin medida todavia, la caja no puede nacer en cero');
+  // EL AIRE DE ABAJO SE MIDE (V1073). Con 16 px fijos el cuadro terminaba mas abajo del pie de la
+  // ventana —el panel tiene 28 de relleno— y la PAGINA se quedaba con una barra de bajar que no
+  // hacia falta: medido en Chrome antes del arreglo, 13 px de sobra, siempre.
   // Se mide, no se estima: sale de la ventana y de donde arranca la caja.
   const caja = fuente(PANEL, 'function plaAltoCaja(){');
+  assert.match(caja, /getComputedStyle\(m\)\.paddingBottom/);
+  assert.ok(!/getBoundingClientRect\(\)\.bottom - r\.bottom/.test(caja),
+    'el aire se mide contra el pie de main, que contiene al cuadro: la cuenta se muerde la cola');
+  // Y NO SE ESCRIBE SI NO CAMBIO: escribirlo le cambia el tamano a lo que el observador mira, y
+  // ese aviso se lo manda este mismo codigo a si mismo.
+  assert.match(caja, /if \(wrap\.style\.maxHeight !== v\) wrap\.style\.maxHeight = v;/);
   assert.match(caja, /getBoundingClientRect\(\)/);
   assert.match(caja, /window\.innerHeight/);
   assert.match(caja, /if \(window\.innerWidth <= 900\) \{ wrap\.style\.maxHeight = ''; return; \}/);
@@ -2512,13 +2535,15 @@ test('el encabezado de meses queda fijo, y las esquinas por encima de todo', () 
 
 test('en el telefono se suelta todo, y al imprimir no sale cortado', () => {
   const movil = hasta(PANEL, '@media(max-width:900px){ #sec-pl-abasto .ab-table-wrap', '} }');
-  assert.match(movil, /#pla-pane-resultado \.ab-table-wrap\{max-height:none !important\}/);
+  assert.match(movil, /#pla-pane-resultado \.ab-table-wrap\{max-height:none !important;scrollbar-gutter:auto\}/,
+    'el hueco de la barra vertical sirve donde el alto esta acotado; en el telefono es margen de mas');
   assert.match(movil, /#pla-pane-resultado \.pla-tbl th,#pla-pane-resultado \.pla-tbl td\{position:static !important\}/,
     'en el telefono el concepto puede pasar los 248px y el TOTAL se le monta encima');
   assert.match(movil, /#pla-pane-resultado \.pla-barra\{display:none !important\}/);
   const print = hasta(PANEL, '@media print{', '} }');
   assert.match(print, /max-height:none !important;overflow:visible !important/,
     'el alto va como estilo inline: sin !important, imprimir sale cortado');
+  assert.match(print, /scrollbar-gutter:auto/, 'en el papel no hay barras que reservar');
   assert.match(print, /#pla-pane-resultado \.pla-barra\{display:none !important\}/);
 });
 
@@ -2530,6 +2555,20 @@ test('el ancho se vuelve a calcular cuando cambia la caja, sin repintar de mas',
   assert.match(o, /else plaAltoCaja\(\);/);
   assert.match(o, /if \(!wrap \|\| PLA_RO\) return;/, 'se engancharia un observador nuevo por cada visita');
   assert.match(fuente(PANEL, 'function plaInit(){'), /plaObservarCaja\(\);/);
+  // EL OBSERVADOR MIRA EL BORDE, NO EL CONTENIDO (V1073). El ancho de contenido baja unos 15 px
+  // en cuanto la caja saca su barra vertical —o sea en cuanto se abre un rubro—, y eso lo provoca
+  // el propio dibujo: leido como «cambio la ventana», mandaba a dibujar todo de nuevo. Medido en
+  // Chrome: dos reconstrucciones completas por cada clic, con 150 ms entre una y otra, y las
+  // columnas cambiando de ancho en el medio. El borde exterior no se mueve por una barra de
+  // adentro. Las dos mediciones tienen que ser del borde, o la comparacion no significa nada.
+  assert.equal((o.match(/wrap\.offsetWidth/g) || []).length, 2, 'todavia se mide el ancho de contenido');
+  assert.ok(!/wrap\.clientWidth/.test(o), 'el observador se despierta con su propia barra vertical');
+  // Y el dibujo deja anotado el ancho con el que termino: si no, el primero de cada entrada se
+  // compara contra una medicion vieja —la tomada con el cartel «Cargando…» puesto— y dispara otro.
+  assert.match(fuente(PANEL, 'function plaPintar(){'),
+    /if \(tb\.parentNode && tb\.parentNode\.offsetWidth\) PLA_ANCHO_PREV = tb\.parentNode\.offsetWidth;/);
+  const car = fuente(PANEL, 'function plaCargar(inicial){');
+  assert.match(car, /Cargando…/, 'ya no hay cartel de carga: revisar de nuevo este test');
 });
 
 // ══ 7i · UN AJUSTE PUEDE QUEDAR PENDIENTE (V1070) ═════════════════════════════════════

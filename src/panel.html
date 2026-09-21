@@ -5540,7 +5540,7 @@ input[type=number]{-moz-appearance:textfield;appearance:textfield}
        aparece una segunda barra VERTICAL, adentro de una página que ya tiene la suya. Es a
        propósito: la de la página mueve el panel entero y ésta mueve sólo el cuadro, que es lo
        que permite que el encabezado de meses y las dos columnas fijas no se vayan nunca. */
-    #pla-pane-resultado .ab-table-wrap{overflow:auto !important;
+    #pla-pane-resultado .ab-table-wrap{overflow:auto !important;scrollbar-gutter:stable;
       max-height:max(320px,calc(100vh - 300px))}
     #sec-pl-abasto .pla-tbl{table-layout:fixed;width:100%;max-width:98vw;border-collapse:collapse;
       font-size:11px;font-variant-numeric:tabular-nums}
@@ -5675,7 +5675,7 @@ input[type=number]{-moz-appearance:textfield;appearance:textfield}
     @media(max-width:900px){ #sec-pl-abasto .ab-table-wrap{overflow-x:auto !important}
       /* En un teléfono no hay alto que acotar; y con table-layout:auto el concepto puede pasar
          los 248 px y la columna TOTAL —clavada ahí— se le monta encima. Se sueltan las dos. */
-      #pla-pane-resultado .ab-table-wrap{max-height:none !important}
+      #pla-pane-resultado .ab-table-wrap{max-height:none !important;scrollbar-gutter:auto}
       #pla-pane-resultado .pla-tbl th,#pla-pane-resultado .pla-tbl td{position:static !important}
       #pla-pane-resultado .pla-barra{display:none !important}
       #sec-pl-abasto .pla-tbl{table-layout:auto}
@@ -5684,7 +5684,8 @@ input[type=number]{-moz-appearance:textfield;appearance:textfield}
     /* IMPRIMIR: sin esto el cuadro saldría cortado al alto de la ventana, porque el alto va como
        estilo inline y un inline le gana a cualquier regla sin !important. */
     @media print{
-      #pla-pane-resultado .ab-table-wrap{max-height:none !important;overflow:visible !important}
+      #pla-pane-resultado .ab-table-wrap{max-height:none !important;overflow:visible !important;
+        scrollbar-gutter:auto}
       #pla-pane-resultado .pla-barra{display:none !important}
       #pla-pane-resultado .pla-tbl thead th{position:static} }
   </style>
@@ -24743,6 +24744,10 @@ SG_MANUAL.plabasto = { titulo: 'P&L Abasto', html:
   + '<li><span class="ver">V1072</span> El cuadro dejó de temblar al llegar al final de los meses. Las dos '
   + 'barras no corrían lo mismo —la de arriba se quedaba 15 px antes, los que el cuadro pierde con su barra '
   + 'de bajar— y se devolvían la tabla la una a la otra.</li>'
+  + '<li><span class="ver">V1073</span> Y dejó de dibujarse dos veces: al abrir o cerrar un rubro, las '
+  + 'columnas se reacomodaban una segunda vez un instante después. El lugar de la barra de bajar ahora está '
+  + 'reservado desde el principio, así que el ancho ya no cambia solo. De paso, el cuadro llega justo al pie '
+  + 'de la pantalla: antes sobresalía unos píxeles y la página quedaba con una barra de bajar al pedo.</li>'
   + '<li><span class="ver">V1068</span> En los asientos de un importe, el tilde de los que no balancean dejó de '
   + 'montarse sobre el texto de al lado.</li>'
   + '<li><span class="ver">V1067</span> El Excel de No balancea, más simple: una hoja con un asiento por fila y su '
@@ -44194,8 +44199,13 @@ var PLA_ANCHO = { concepto: 248, mes: 92, caja: 1180 };
 // todavía no existe la barra vertical que la caja va a tener: sin descontarla, la tabla sale
 // ~15 px más ancha de lo que entra y aparece una barra horizontal de unos pocos píxeles que no
 // debería estar (medido: tabla 1512 contra una caja de 1506).
+// El ancho visible YA viene sin el hueco de la barra vertical: lo reserva el CSS con
+// scrollbar-gutter (V1073), y antes de eso lo descontaba clientWidth cuando la barra estaba.
+// Los 18 px que se restaban acá eran ese mismo hueco por segunda vez —21 a 23 px de tabla que
+// no se usaban—. Queda un respiro de 4 px, que es lo que hace falta para que un redondeo no
+// saque una barra horizontal de dos píxeles.
 function plaAnchos(caja, columnas){
-  var libre = Math.max(300, (Number(caja) || PLA_ANCHO.caja) - PLA_ANCHO.concepto - 18);
+  var libre = Math.max(300, (Number(caja) || PLA_ANCHO.caja) - PLA_ANCHO.concepto - 4);
   var mes = Math.max(PLA_ANCHO.mes, Math.floor(libre / (columnas + 0.3)));
   var total = Math.round(mes * 1.3);
   return { concepto: PLA_ANCHO.concepto, mes: mes, total: total,
@@ -44206,8 +44216,12 @@ function plaAnchos(caja, columnas){
 // zoom y con el menú escondido (V1063): un número fijo deja el cuadro corto en un monitor y
 // desbordado en una notebook. Piso de 320 px —el encabezado más doce renglones—: por debajo de
 // eso deja de ser un cuadro y conviene que scrollee la página.
-function plaAltoDisponible(alto, top){
-  return Math.max(320, Math.round((alto || 0) - (top || 0) - 16));
+//
+// LO QUE HAY DEBAJO TAMBIÉN SE MIDE (V1073). Antes se restaban 16 px a ojo y no alcanzaban: el
+// panel tiene 28 px de aire abajo, así que el cuadro terminaba más abajo del pie de la ventana
+// y la PÁGINA se quedaba con una barra de bajar que no hacía falta —medido: 13 px de sobra—.
+function plaAltoDisponible(alto, top, abajo){
+  return Math.max(320, Math.round((alto || 0) - (top || 0) - (abajo || 0) - 8));
 }
 
 function plaAltoCaja(){
@@ -44215,23 +44229,39 @@ function plaAltoCaja(){
   var wrap = document.querySelector('#pla-pane-resultado .ab-table-wrap');
   if (!wrap || !wrap.style) return;
   if (window.innerWidth <= 900) { wrap.style.maxHeight = ''; return; }   // en el teléfono, nada
-  var r = wrap.getBoundingClientRect();
-  wrap.style.maxHeight = plaAltoDisponible(window.innerHeight, r.top + (window.pageYOffset || 0)) + 'px';
+  var r = wrap.getBoundingClientRect(), y = window.pageYOffset || 0;
+  // Lo que queda DEBAJO del cuadro es el aire del panel, y ES EL RELLENO DE <main>: se lee de ahí.
+  // Contra el pie de main no sirve —main contiene al propio cuadro, así que mientras el cuadro no
+  // está acotado su pie está abajo de todo y la cuenta se muerde la cola: el alto se iba al piso
+  // de 320 px—. Y contra el alto del documento tampoco: ahí adentro hay pantallas escondidas.
+  var m = document.querySelector('main');
+  var abajo = m ? Math.round(parseFloat(getComputedStyle(m).paddingBottom) || 0) : 0;
+  var v = plaAltoDisponible(window.innerHeight, r.top + y, abajo) + 'px';
+  // Y NO SE ESCRIBE SI NO CAMBIÓ: escribirlo le cambia el tamaño a lo que el observador de acá
+  // abajo está mirando, o sea que este mismo código se manda un aviso a sí mismo.
+  if (wrap.style.maxHeight !== v) wrap.style.maxHeight = v;
 }
 
 // EL ANCHO DEL CUADRO CAMBIA SIN QUE NADIE PINTE (V1069): agrandar la ventana, el zoom, salir de
 // pantalla partida, esconder el menú. Un solo observador cubre los cuatro casos; sin él la tabla
 // se queda con el ancho de antes —barra donde ya no hace falta, o un hueco a la derecha—.
+//
+// SE MIRA EL BORDE (offsetWidth), NO EL CONTENIDO (clientWidth) — V1073. El clientWidth baja unos
+// 15 px en cuanto la caja saca su barra vertical, o sea en cuanto se abre un rubro, y eso es un
+// cambio que provoca el propio dibujo: el observador lo leía como «cambió la ventana» y mandaba a
+// dibujar todo de nuevo. Se veía como un salto de las columnas 150 ms después de cada clic. El
+// borde exterior no se mueve cuando aparece una barra adentro, así que ahora sólo llegan los
+// cambios de verdad. El clientWidth se sigue usando para repartir las columnas, que es su oficio.
 var PLA_RO = null, PLA_ANCHO_PREV = 0, PLA_RO_TMR = null;
 function plaObservarCaja(){
   if (typeof document === 'undefined' || typeof ResizeObserver === 'undefined') return;
   var wrap = document.querySelector('#pla-pane-resultado .ab-table-wrap');
   if (!wrap || PLA_RO) return;
-  PLA_ANCHO_PREV = wrap.clientWidth;
+  PLA_ANCHO_PREV = wrap.offsetWidth;
   PLA_RO = new ResizeObserver(function(){
     clearTimeout(PLA_RO_TMR);
     PLA_RO_TMR = setTimeout(function(){
-      var w = wrap.clientWidth;
+      var w = wrap.offsetWidth;
       // Si lo que cambió fue el ALTO —porque acabamos de ponerle el max-height— no se vuelve a
       // pintar: sólo se recalcula, da lo mismo y no dispara nada más. Con la pantalla cerrada el
       // ancho da 0, y pintar ahí dejaría clavados los anchos por defecto.
@@ -44392,6 +44422,10 @@ function plaPintar(){
   plaAltoCaja();
   plaBarraArriba();
   plaAltoCaja();
+  // CON QUÉ ANCHO QUEDÓ (V1073): el observador compara contra esto, y si no se actualiza acá,
+  // el primer dibujo de cada entrada queda comparándose contra una medición vieja —la que se
+  // tomó con el cartel «Cargando…» puesto— y manda a dibujar todo una segunda vez.
+  if (tb.parentNode && tb.parentNode.offsetWidth) PLA_ANCHO_PREV = tb.parentNode.offsetWidth;
 }
 
 function plaToggle(k){ PLA.abiertos[k] = !PLA.abiertos[k]; plaPintar(); }
