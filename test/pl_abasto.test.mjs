@@ -397,7 +397,7 @@ const PANTALLA = (datos, abiertos = {}, unidad, op, moneda, caja = 1180, busca =
     fuente(PANEL, 'function plaMonedaCartel(sin){'),
     fuente(PANEL, 'function sgNorm(s){'),
     fuente(PANEL, 'function plaBuscaNorm(){'),
-    fuente(PANEL, 'function plaCoincide(txt, q){'),
+    fuente(PANEL, 'function plaCoincide(txt, partes){'),
     fuente(PANEL, 'function plaTextoCuenta(c, rubro){'),
     fuente(PANEL, 'function plaTextoAjuste(a, rubro){'),
     fuente(PANEL, 'function plaFiltrar(d, q){'),
@@ -2591,7 +2591,7 @@ test('el ancho se vuelve a calcular cuando cambia la caja, sin repintar de mas',
 const BUSCA = new Function('PLA', [
   fuente(PANEL, 'function sgNorm(s){'),
   fuente(PANEL, 'function plaBuscaNorm(){'),
-  fuente(PANEL, 'function plaCoincide(txt, q){'),
+  fuente(PANEL, 'function plaCoincide(txt, partes){'),
   fuente(PANEL, 'function plaTextoCuenta(c, rubro){'),
   fuente(PANEL, 'function plaTextoAjuste(a, rubro){'),
   fuente(PANEL, 'function plaFiltrar(d, q){'),
@@ -2617,11 +2617,11 @@ const DATOS_B = {
 test('la lupa busca CONTIENE, sin acentos y con la ñ intacta', () => {
   const B = BUSCA({ busca: '' });
   // CONTIENE, no «empieza con»: el nombre del otro sistema trae el proveedor en el medio.
-  assert.ok(B.coincide('VENTAS COTO CICSA', 'coto'));
-  assert.ok(B.coincide('VENTAS COTO CICSA', 'cicsa'));
-  assert.ok(!B.coincide('VENTAS COTO CICSA', 'carrefour'));
+  assert.ok(B.coincide('VENTAS COTO CICSA', ['coto']));
+  assert.ok(B.coincide('VENTAS COTO CICSA', ['cicsa']));
+  assert.ok(!B.coincide('VENTAS COTO CICSA', ['carrefour']));
   // Sin acentos: nadie los escribe al buscar.
-  assert.ok(B.coincide('COMISIÓN DEL DISTRIBUIDOR', 'comision'));
+  assert.ok(B.coincide('COMISIÓN DEL DISTRIBUIDOR', ['comision']));
   // Y al reves, escrito con acento en la lupa: lo que se escribe pasa por el mismo molde antes
   // de comparar, asi que encuentra igual.
   const conAcento = BUSCA({ busca: 'COMISIÓN' });
@@ -2629,23 +2629,34 @@ test('la lupa busca CONTIENE, sin acentos y con la ñ intacta', () => {
     ['COMISIÓN DEL DISTRIBUIDOR']);
   // PERO LA Ñ SE RESPETA: es una letra del idioma y tiene tecla propia. Si se cayera, «peña»
   // encontraría «pena» y al revés, que es justo el error que la regla del panel no quiere.
-  assert.ok(B.coincide('FLETES PEÑA S.A.', 'peña'));
-  assert.ok(!B.coincide('FLETES PEÑA S.A.', 'pena'));
-  assert.ok(!B.coincide('PENALIDADES', 'peña'));
+  assert.ok(B.coincide('FLETES PEÑA S.A.', ['peña']));
+  assert.ok(!B.coincide('FLETES PEÑA S.A.', ['pena']));
+  assert.ok(!B.coincide('PENALIDADES', ['peña']));
   // Lo que se escribe en la lupa pasa por el mismo molde, y los espacios de los costados no cuentan.
   assert.equal(BUSCA({ busca: '  PEÑA  ' }).norm(), 'peña');
   assert.equal(BUSCA({ busca: 'Comisión' }).norm(), 'comision');
   assert.equal(BUSCA({ busca: '' }).norm(), '');
+
+  // POR PALABRAS SUELTAS Y EN CUALQUIER ORDEN, como los otros setenta y un buscadores del panel:
+  // tienen que estar TODAS, pero da igual el orden. Si acá se buscara la frase entera, esta
+  // pantalla se portaria distinto que el resto y el operador no tiene por que saber donde esta.
+  const F = (q) => BUSCA({ busca: '' }).filtrar(DATOS_B, q).cuentas.map((x) => x.nombre);
+  assert.deepEqual(F('fletes peña'), ['FLETES PEÑA S.A.']);
+  assert.deepEqual(F('peña fletes'), ['FLETES PEÑA S.A.'], 'busca la frase entera y no las palabras');
+  assert.deepEqual(F('peña   fletes'), ['FLETES PEÑA S.A.'], 'dos espacios de mas y no encuentra nada');
+  assert.deepEqual(F('peña\tfletes'), ['FLETES PEÑA S.A.'],
+    'pegado de un Excel entre las palabras viene un TABULADOR, no un espacio, y no encuentra nada');
+  assert.deepEqual(F('coto peña'), [], 'alcanza con que este UNA de las palabras');
 });
 
 test('se busca por todo lo que se lee en el renglón, y por el número con y sin puntos', () => {
   const B = BUSCA({ busca: '' });
   const c = DATOS_B.cuentas[1];
   // EL NÚMERO VA DOS VECES: nadie lo escribe igual, y «4.2.04» y «4204» son la misma cuenta.
-  assert.ok(B.coincide(B.cuenta(c, 'COSTOS FIJOS'), '4.2.04'));
-  assert.ok(B.coincide(B.cuenta(c, 'COSTOS FIJOS'), '42041'));
+  assert.ok(B.coincide(B.cuenta(c, 'COSTOS FIJOS'), ['4.2.04']));
+  assert.ok(B.coincide(B.cuenta(c, 'COSTOS FIJOS'), ['42041']));
   // Y el nombre del rubro, para poder pedir el rubro entero.
-  assert.ok(B.coincide(B.cuenta(c, 'COSTOS FIJOS'), 'costos fijos'));
+  assert.ok(B.coincide(B.cuenta(c, 'COSTOS FIJOS'), ['costos', 'fijos']));
   const f = (q) => B.filtrar(DATOS_B, q);
   assert.deepEqual(f('coto').cuentas.map((x) => x.nombre), ['VENTAS COTO CICSA']);
   assert.deepEqual(f('coto').ajustes, []);
@@ -2740,11 +2751,12 @@ test('manual V1074: la lupa, el contenido, y que los importes son los de lo enco
   assert.match(M, /<span class="ver">V1074<\/span> Una <b>lupa<\/b> abajo del cuadro para buscar cualquier cosa/,
     'no quedó anotado en «Qué cambió, y desde cuándo»');
   assert.match(M, /La <b>lupa<\/b> de abajo del todo filtra el cuadro/);
+  assert.match(M, /<span class="ver">V1075<\/span> Se pueden escribir <b>varias palabras en cualquier orden<\/b>/);
   assert.match(M, /alcanza con que <b>lo contenga<\/b>/);
   assert.match(M, /los importes que se ven pasan a ser los de <b>lo encontrado<\/b>/);
   assert.match(M, /el renglón de abajo dice <b>TOTAL DE LO ENCONTRADO<\/b>/);
   // Lo que el manual AFIRMA, contra el código.
-  assert.match(fuente(PANEL, 'function plaCoincide(txt, q){'), /sgNorm/);
+  assert.match(fuente(PANEL, 'function plaCoincide(txt, partes){'), /sgNorm/);
   assert.match(fuente(PANEL, 'function plaPintar(){'), /q \? '⭐ TOTAL DE LO ENCONTRADO' : '⭐ RESULTADO NETO'/);
 });
 
