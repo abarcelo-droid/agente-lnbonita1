@@ -1893,6 +1893,22 @@ router.put('/planes/:id/existencias/:insumoId', wrap((req, res) => {
 // ── Compras (seguimiento de lo pedido contra lo que el plan requiere) ─────
 // La cantidad va en UNIDAD DE COMPRA, la misma en la que el plan dice "a comprar".
 
+// EL PRECIO QUE SE PROPONE para una compra: el del proveedor que se escribió, y si ese nombre no
+// es ninguno de los cargados, el del preferido —que es con el que se costea el plan—. Se propone
+// y se puede corregir: lo que se guarda es lo que se pactó, no lo que el sistema supone.
+function precioDeProveedor(insumoId, proveedorTexto) {
+  const nombre = String(proveedorTexto || '').trim();
+  if (nombre) {
+    const p = db.prepare(`SELECT precio_ref, moneda FROM pli_insumo_proveedores
+       WHERE insumo_id=? AND nombre=? COLLATE NOCASE AND eliminado_en IS NULL`).get(insumoId, nombre);
+    if (p && Number(p.precio_ref) > 0) return { precio: p.precio_ref, moneda: p.moneda };
+  }
+  const pref = db.prepare(`SELECT precio_ref, moneda FROM pli_insumo_proveedores
+     WHERE insumo_id=? AND preferido=1 AND eliminado_en IS NULL`).get(insumoId);
+  if (pref && Number(pref.precio_ref) > 0) return { precio: pref.precio_ref, moneda: pref.moneda };
+  return { precio: null, moneda: null };
+}
+
 router.get('/planes/:id/compras', wrap((req, res) => {
   const soc = getSociedadId(req);
   const plan = getPlan(soc, parseInt(req.params.id, 10));
@@ -1917,13 +1933,21 @@ router.post('/planes/:id/compras', wrap((req, res) => {
   if (!fecha) throw bad('La fecha es obligatoria');
   const cantidad = vNum(b.cantidad, 'La cantidad', { min: 1e-9 });
   const estado = ['pedido', 'recibido', 'cancelado'].includes(b.estado) ? b.estado : 'pedido';
+  const prov = vTexto(b.proveedor_texto, 'El proveedor', { max: 120 }) || ins.proveedor_texto || null;
+  // Si no viene precio, se propone el del proveedor. Y queda CONGELADO: la orden que se manda
+  // dice ese número, y que mañana cambie la lista de precios no puede cambiarlo.
+  const sug = precioDeProveedor(insumoId, prov);
+  const precio = b.precio === undefined || b.precio === null || b.precio === ''
+    ? sug.precio : vNum(b.precio, 'El precio', { min: 0 });
+  const moneda = ['ARS', 'USD'].includes(b.moneda) ? b.moneda : (precio === sug.precio ? sug.moneda : 'ARS');
   const r = db.prepare(`
-    INSERT INTO pli_compras (plan_id, insumo_id, fecha, cantidad, proveedor_texto, nro_orden, estado, notas, creado_por_id, actualizado_por_id)
-    VALUES (?,?,?,?,?,?,?,?,?,?)
-  `).run(plan.id, insumoId, fecha, cantidad,
-         vTexto(b.proveedor_texto, 'El proveedor', { max: 120 }) || ins.proveedor_texto || null,
+    INSERT INTO pli_compras (plan_id, insumo_id, fecha, cantidad, proveedor_texto, nro_orden, estado, notas,
+      precio, moneda, creado_por_id, actualizado_por_id)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+  `).run(plan.id, insumoId, fecha, cantidad, prov,
          vTexto(b.nro_orden, 'El número de orden', { max: 60 }), estado,
-         vTexto(b.notas, 'Las notas', { max: 300 }), req.user.id, req.user.id);
+         vTexto(b.notas, 'Las notas', { max: 300 }),
+         precio, precio === null ? null : (moneda || 'ARS'), req.user.id, req.user.id);
   logPli('compra', r.lastInsertRowid, 'alta',
     { plan_id: plan.id, insumo: ins.nombre, cantidad, unidad: ins.unidad_compra, fecha }, req.user.id);
   res.json({ ok: true, id: r.lastInsertRowid });
@@ -1938,18 +1962,85 @@ router.patch('/planes/:id/compras/:compraId', wrap((req, res) => {
   const b = req.body || {};
   const estado = b.estado === undefined ? a.estado : String(b.estado);
   if (!['pedido', 'recibido', 'cancelado'].includes(estado)) throw bad('Estado inválido');
+  // El precio se corrige a mano y nada más: acá NO se vuelve a proponer el del proveedor, porque
+  // corregir la cantidad de una orden ya mandada no puede cambiarle el precio por atrás.
+  const precio = b.precio === undefined ? a.precio
+    : (b.precio === null || b.precio === '' ? null : vNum(b.precio, 'El precio', { min: 0 }));
+  const moneda = b.moneda === undefined ? a.moneda : (['ARS', 'USD'].includes(b.moneda) ? b.moneda : a.moneda);
   db.prepare(`
     UPDATE pli_compras SET fecha=?, cantidad=?, proveedor_texto=?, nro_orden=?, estado=?, notas=?,
-      actualizado_en=${AHORA}, actualizado_por_id=? WHERE id=?
+      precio=?, moneda=?, actualizado_en=${AHORA}, actualizado_por_id=? WHERE id=?
   `).run(b.fecha === undefined ? a.fecha : vFecha(b.fecha, 'La fecha'),
          b.cantidad === undefined ? a.cantidad : vNum(b.cantidad, 'La cantidad', { min: 1e-9 }),
          b.proveedor_texto === undefined ? a.proveedor_texto : vTexto(b.proveedor_texto, 'El proveedor', { max: 120 }),
          b.nro_orden === undefined ? a.nro_orden : vTexto(b.nro_orden, 'El número de orden', { max: 60 }),
          estado,
          b.notas === undefined ? a.notas : vTexto(b.notas, 'Las notas', { max: 300 }),
+         precio, precio === null ? null : (moneda || 'ARS'),
          req.user.id, cid);
   logPli('compra', cid, 'edicion', { antes: a, despues: b }, req.user.id);
   res.json({ ok: true });
+}));
+
+// EL TOTAL DE UNA ORDEN, O NADA. Sólo se puede sumar si TODOS los renglones tienen precio y
+// están en la MISMA moneda: un total que deja afuera un renglón es menos de lo que el proveedor
+// va a facturar, y pesos más dólares no es plata de ninguna clase. Cuando no se puede, el
+// documento dice POR QUÉ, que es más útil que no mostrar nada.
+function totalDeOrden(renglones) {
+  const conPrecio = renglones.filter((r) => r.precio != null);
+  const monedas = [...new Set(conPrecio.map((r) => r.moneda || 'ARS'))];
+  const sePuede = monedas.length === 1 && conPrecio.length === renglones.length && renglones.length > 0;
+  return {
+    total: sePuede ? Math.round(renglones.reduce((s, r) => s + r.precio * r.cantidad, 0) * 100) / 100 : null,
+    moneda: monedas.length === 1 ? monedas[0] : null,
+    sin_precio: renglones.length - conPrecio.length,
+    varias_monedas: monedas.length > 1 ? 1 : 0,
+  };
+}
+
+// ── LA ORDEN DE COMPRA (V1080) ────────────────────────────────────────────
+//
+// Pablo, 21/9/2026: «en compras registradas, sería bueno que en cada una de las compras me deje
+// imprimir un pequeño documento tipo Orden de compra… no es nada oficial pero sí es importante
+// para poder mandarle al proveedor y que el precio quede firme».
+//
+// VARIAS COMPRAS PUEDEN SER UNA SOLA ORDEN: si comparten proveedor y número de orden, salen como
+// renglones del mismo documento. Mandarle al proveedor tres papeles con el mismo número por tres
+// insumos del mismo pedido es pedirle que los junte él.
+router.get('/planes/:id/compras/:compraId/orden', wrap((req, res) => {
+  const soc = getSociedadId(req);
+  const plan = getPlan(soc, parseInt(req.params.id, 10));
+  const cid = parseInt(req.params.compraId, 10);
+  const base = db.prepare(`SELECT * FROM pli_compras WHERE id=? AND plan_id=? AND eliminado_en IS NULL`).get(cid, plan.id);
+  if (!base) throw notFound('Compra no encontrada');
+  const nro = String(base.nro_orden || '').trim();
+  const prov = String(base.proveedor_texto || '').trim();
+  // Sin número de orden no hay con qué juntarlas: el documento es el de esta compra sola.
+  const renglones = (nro && prov)
+    ? db.prepare(`SELECT c.*, i.nombre AS insumo_nombre, i.unidad_compra, i.unidad_uso, i.factor_compra,
+           i.codigo AS insumo_codigo
+        FROM pli_compras c JOIN pli_insumos i ON i.id = c.insumo_id
+        WHERE c.plan_id=? AND c.eliminado_en IS NULL AND c.estado <> 'cancelado'
+          AND TRIM(COALESCE(c.nro_orden,''))=? COLLATE NOCASE
+          AND TRIM(COALESCE(c.proveedor_texto,''))=? COLLATE NOCASE
+        ORDER BY c.id`).all(plan.id, nro, prov)
+    : db.prepare(`SELECT c.*, i.nombre AS insumo_nombre, i.unidad_compra, i.unidad_uso, i.factor_compra,
+           i.codigo AS insumo_codigo
+        FROM pli_compras c JOIN pli_insumos i ON i.id = c.insumo_id
+        WHERE c.id=?`).all(cid);
+  const { total, moneda, sin_precio, varias_monedas } = totalDeOrden(renglones);
+  res.json({ ok: true, data: {
+    sociedad: PUENTE_CORDON,
+    plan: { id: plan.id, nombre: plan.nombre },
+    nro_orden: nro || null,
+    proveedor: prov || null,
+    fecha: base.fecha,
+    renglones: renglones.map((r) => ({ id: r.id, insumo: r.insumo_nombre, codigo: r.insumo_codigo,
+      cantidad: r.cantidad, unidad: r.unidad_compra, precio: r.precio, moneda: r.moneda,
+      subtotal: r.precio == null ? null : Math.round(r.precio * r.cantidad * 100) / 100,
+      estado: r.estado, notas: r.notas, fecha_entrega: r.fecha_entrega })),
+    total, moneda, sin_precio, varias_monedas,
+  } });
 }));
 
 router.delete('/planes/:id/compras/:compraId', wrap((req, res) => {

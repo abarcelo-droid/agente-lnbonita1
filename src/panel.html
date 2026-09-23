@@ -36037,6 +36037,61 @@ function sgRepExport(){
   </div>
 </div>
 
+<!-- ══ LA ORDEN DE COMPRA, PARA MANDARLE AL PROVEEDOR (V1080) ═══════════════════
+     Pablo, 21/9/2026: «un pequeño documento tipo Orden de compra… no es nada oficial pero sí es
+     importante para poder mandarle al proveedor y que el precio quede firme».
+     Es de LEER Y MANDAR, no de cargar: por eso se puede cerrar con la ×, con Cerrar y con un clic
+     afuera —acá no hay nada escrito que se pueda perder—. -->
+<div class="ab-modal-overlay" id="pli-mb-orden">
+<style>
+  #pli-mb-orden .ab-modal{width:min(820px,96vw);max-width:96vw;max-height:90vh;overflow-y:auto;overflow-x:hidden}
+  .pli-oc{background:#fff;color:#111;padding:18px 20px;border:1px solid var(--bor);border-radius:8px}
+  .pli-oc-cab{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;
+    border-bottom:2px solid #111;padding-bottom:10px;margin-bottom:12px}
+  .pli-oc-emp{font-size:17px;font-weight:800;letter-spacing:.02em}
+  .pli-oc-nro{font-size:15px;font-weight:800}
+  .pli-oc-chico{font-size:11px;color:#555}
+  .pli-oc-datos{width:100%;font-size:12px;margin-bottom:12px;border-collapse:collapse}
+  .pli-oc-datos td{padding:3px 6px;vertical-align:top}
+  .pli-oc-datos td:nth-child(odd){color:#555;width:1%;white-space:nowrap}
+  /* Sin barra de costado: los anchos se reparten y lo largo parte de renglón. */
+  .pli-oc-tbl{width:100%;table-layout:fixed;border-collapse:collapse;font-size:12px}
+  .pli-oc-tbl th{text-align:left;font-size:10.5px;text-transform:uppercase;letter-spacing:.04em;
+    color:#555;border-bottom:1px solid #999;padding:5px 6px}
+  .pli-oc-tbl td{padding:5px 6px;border-bottom:1px solid #e5e7eb;word-break:break-word}
+  .pli-oc-tbl tfoot td{border-top:2px solid #111;border-bottom:0;padding-top:8px;font-size:13px;
+    white-space:nowrap}
+  .pli-oc-nota{font-size:11px;color:#555;font-style:italic}
+  .pli-oc-aviso{margin-top:8px;font-size:11.5px;color:#92400e}
+  .pli-oc-pie{margin-top:14px;font-size:11px;color:#555;border-top:1px solid #e5e7eb;padding-top:8px}
+  .pli-oc-firmas{display:flex;gap:40px;margin-top:34px;font-size:11px;color:#555}
+  .pli-oc-firmas div{flex:1;border-top:1px solid #111;padding-top:5px}
+  /* AL IMPRIMIR SALE SÓLO EL DOCUMENTO. Sin esto se imprime el panel entero y la orden queda en
+     la tercera hoja, con el menú y todo alrededor. */
+  @media print{
+    body.pli-imprimiendo>*{display:none !important}
+    body.pli-imprimiendo #pli-mb-orden{display:block !important;position:static !important;
+      background:none !important;padding:0 !important}
+    body.pli-imprimiendo #pli-mb-orden .ab-modal{box-shadow:none !important;border:0 !important;
+      width:auto !important;max-width:none !important;max-height:none !important;overflow:visible !important}
+    body.pli-imprimiendo #pli-mb-orden .mhd,
+    body.pli-imprimiendo #pli-mb-orden .ab-modal-footer{display:none !important}
+    body.pli-imprimiendo .pli-oc{border:0;padding:0}
+  }
+</style>
+<div class="ab-modal">
+  <div class="mhd">
+    <div><div class="mht">🖨️ Orden de compra</div></div>
+    <button class="mcl" onclick="document.getElementById('pli-mb-orden').classList.remove('on')">×</button>
+  </div>
+  <div class="pli-oc" id="pli-orden-doc"></div>
+  <div class="ab-modal-footer">
+    <button class="btn bo" onclick="document.getElementById('pli-mb-orden').classList.remove('on')">Cerrar</button>
+    <button class="btn bb" onclick="pliOrdenImprimir()">🖨️ Imprimir</button>
+  </div>
+</div>
+</div>
+
 <!-- Modal: registrar compra -->
 <div class="ab-modal-overlay" id="pli-mb-compra">
 <div class="ab-modal" style="width:560px">
@@ -36065,6 +36120,19 @@ function sgRepExport(){
   <div class="fg" style="margin-top:8px">
     <div class="fl ff"><label>Proveedor</label><input id="pli-cmp-prov" list="pli-dl-prov" class="pli-inp"></div>
     <div class="fl"><label>Nº de orden</label><input id="pli-cmp-orden" class="pli-inp"></div>
+  </div>
+  <!-- EL PRECIO QUEDA FIRME EN LA COMPRA (V1080). Se propone el del proveedor, pero lo que se
+       guarda es lo que se pactó: la orden que se manda dice ese número y no cambia más. -->
+  <div class="fg" style="margin-top:8px">
+    <div class="fl"><label>Precio por unidad de compra</label>
+      <input id="pli-cmp-precio" type="number" step="any" min="0" class="pli-inp pli-inp-num"
+        placeholder="el del proveedor">
+      <div class="pli-cel-chica" id="pli-cmp-precio-ayuda">Si lo dejás vacío se usa el del proveedor. Queda
+        firme en la orden.</div>
+    </div>
+    <div class="fl"><label>Moneda</label>
+      <select id="pli-cmp-moneda" class="pli-inp"><option value="ARS">ARS</option><option value="USD">USD</option></select>
+    </div>
   </div>
   <div class="fl ff" style="margin-top:8px"><label>Notas</label><input id="pli-cmp-notas" class="pli-inp"></div>
   <div class="ab-modal-footer">
@@ -73872,7 +73940,8 @@ function pliCmpRenderHechas(cont) {
   } else {
     html += '<div class="ab-table-wrap"><table class="pa-tbl" style="font-size:12px"><thead><tr>'
       + '<th>Fecha</th><th>Insumo</th><th style="text-align:right">Cantidad</th><th>Proveedor</th>'
-      + '<th>Nº orden</th><th>Estado</th><th style="width:80px"></th></tr></thead><tbody>';
+      + '<th>Nº orden</th><th style="text-align:right">Precio</th><th>Estado</th>'
+      + '<th style="width:112px"></th></tr></thead><tbody>';
     PLI.cmpCompras.forEach(function(c) {
       var badge = c.estado === 'recibido' ? 'pli-ok' : (c.estado === 'cancelado' ? 'pli-gris' : 'pli-warn');
       html += '<tr' + (c.estado === 'cancelado' ? ' style="opacity:.55"' : '') + '>'
@@ -73881,8 +73950,11 @@ function pliCmpRenderHechas(cont) {
         + '<td class="pli-num">' + pliN(c.cantidad) + ' <span class="pli-cel-chica">' + pliEsc(c.unidad_compra) + '</span></td>'
         + '<td class="pli-cel-chica">' + pliEsc(c.proveedor_texto || '—') + '</td>'
         + '<td class="pli-cel-chica">' + pliEsc(c.nro_orden || '—') + '</td>'
+        + '<td class="pli-num">' + (c.precio == null ? '<span class="pli-cel-chica">sin precio</span>'
+            : pliEsc(c.moneda || 'ARS') + ' ' + pliN(c.precio)) + '</td>'
         + '<td><span class="pli-badge ' + badge + '">' + pliEsc(c.estado) + '</span></td>'
         + '<td style="text-align:right;white-space:nowrap">'
+          + '<button class="btn bo bs" onclick="pliOrdenAbrir(' + c.id + ')" title="Orden de compra para mandarle al proveedor" style="padding:2px 6px;font-size:11px">🖨️</button> '
           + '<button class="btn bo bs" onclick="pliCompraAbrir(' + c.id + ')" style="padding:2px 6px;font-size:11px">✏️</button> '
           + '<button class="btn bd bs" onclick="pliCompraBorrar(' + c.id + ')" style="padding:2px 6px;font-size:11px">🗑</button>'
         + '</td></tr>';
@@ -73892,6 +73964,81 @@ function pliCmpRenderHechas(cont) {
   html += '<div class="pli-cel-chica" style="margin-top:8px">Las canceladas no cuentan como cubiertas. '
     + 'Las pedidas sí, porque ya están comprometidas.</div>';
   cont.innerHTML = html;
+}
+
+// ── LA ORDEN DE COMPRA, PARA MANDARLE AL PROVEEDOR (V1080) ────────────────
+//
+// Pablo, 21/9/2026: «sería bueno que en cada una de las compras me deje imprimir un pequeño
+// documento tipo Orden de compra… no es nada oficial pero sí es importante para poder mandarle al
+// proveedor y que el precio quede firme».
+//
+// NO ES UN COMPROBANTE FISCAL y el documento lo dice: es el papel con el que se le confirma a un
+// proveedor qué se le pidió y a qué precio. Por eso no inventa nada que el sistema no sepa —de
+// IVA no dice una palabra, porque este módulo no lo maneja— y las notas de la compra salen
+// impresas, que es donde se aclara lo que haga falta.
+function pliOrdenAbrir(id) {
+  if (!PLI.cmpPlanId) return;
+  pliApi('/planes/' + PLI.cmpPlanId + '/compras/' + id + '/orden').then(function(r) {
+    if (!r.ok) { pliErr(r); return; }
+    PLI.orden = r.data;
+    document.getElementById('pli-orden-doc').innerHTML = pliOrdenHtml(r.data);
+    document.getElementById('pli-mb-orden').classList.add('on');
+  });
+}
+
+function pliOrdenHtml(d) {
+  var hoy = pliHoyISO();
+  var plata = function(v, m) { return v == null ? '—' : (m || 'ARS') + ' ' + pliN(v, 2); };
+  var h = '<div class="pli-oc-cab">'
+    + '<div><div class="pli-oc-emp">' + pliEsc(d.sociedad) + '</div>'
+    + '<div class="pli-oc-chico">Orden de compra · no es un comprobante fiscal</div></div>'
+    + '<div style="text-align:right">'
+      + '<div class="pli-oc-nro">Nº ' + pliEsc(d.nro_orden || 's/n') + '</div>'
+      + '<div class="pli-oc-chico">Emitida el ' + pliEsc(hoy) + '</div></div></div>'
+    + '<table class="pli-oc-datos"><tr><td>Proveedor</td><td><b>' + pliEsc(d.proveedor || '—') + '</b></td>'
+      + '<td>Fecha del pedido</td><td>' + pliEsc(d.fecha) + '</td></tr></table>'
+    + '<table class="pli-oc-tbl">'
+    + '<colgroup><col style="width:10%"><col style="width:25%"><col style="width:11%"><col style="width:8%">'
+    + '<col style="width:15%"><col style="width:18%"><col style="width:13%"></colgroup>'
+    + '<thead><tr><th>Código</th><th>Insumo</th>'
+      + '<th style="text-align:right">Cantidad</th><th>Unidad</th>'
+      + '<th style="text-align:right">Precio unitario</th><th style="text-align:right">Subtotal</th>'
+      + '<th>Entrega</th></tr></thead><tbody>';
+  (d.renglones || []).forEach(function(r) {
+    h += '<tr><td>' + pliEsc(r.codigo || '—') + '</td><td>' + pliEsc(r.insumo) + '</td>'
+      + '<td style="text-align:right">' + pliN(r.cantidad) + '</td><td>' + pliEsc(r.unidad) + '</td>'
+      + '<td style="text-align:right">' + plata(r.precio, r.moneda) + '</td>'
+      + '<td style="text-align:right">' + plata(r.subtotal, r.moneda) + '</td>'
+      + '<td>' + pliEsc(r.fecha_entrega || '—') + '</td></tr>';
+    if (r.notas) h += '<tr><td></td><td colspan="6" class="pli-oc-nota">' + pliEsc(r.notas) + '</td></tr>';
+  });
+  h += '</tbody>';
+  // EL TOTAL SÓLO SI SE PUEDE SUMAR: con un renglón sin precio, o con dos monedas, cualquier
+  // número de abajo sería mentira. Se dice por qué no está, que es más útil que no decir nada.
+  if (d.total != null) {
+    h += '<tfoot><tr><td colspan="5" style="text-align:right"><b>TOTAL</b></td>'
+      + '<td style="text-align:right"><b>' + plata(d.total, d.moneda) + '</b></td><td></td></tr></tfoot>';
+  }
+  h += '</table>';
+  if (d.total == null) {
+    h += '<div class="pli-oc-aviso">' + (d.varias_monedas
+      ? 'No se totaliza: hay renglones en pesos y en dólares.'
+      : 'No se totaliza: ' + (d.sin_precio === 1 ? 'un renglón no tiene' : d.sin_precio + ' renglones no tienen')
+        + ' precio pactado.') + '</div>';
+  }
+  h += '<div class="pli-oc-pie">Los importes son los pactados con el proveedor, en la moneda indicada. '
+    + 'Este documento no es una factura ni un remito.</div>'
+    + '<div class="pli-oc-firmas"><div>Firma y aclaración — ' + pliEsc(d.sociedad) + '</div>'
+    + '<div>Recibido — ' + pliEsc(d.proveedor || 'proveedor') + '</div></div>';
+  return h;
+}
+
+// Se imprime LA VENTANA, no la pantalla: el @media print de abajo esconde todo lo demás. Sin eso
+// salen tres hojas del panel entero y la orden en el medio.
+function pliOrdenImprimir() {
+  document.body.classList.add('pli-imprimiendo');
+  window.print();
+  setTimeout(function() { document.body.classList.remove('pli-imprimiendo'); }, 300);
 }
 
 // ── Alta y edición de compras ─────────────────────────────────────────────
@@ -73929,6 +74076,11 @@ function pliCompraAbrir(id) {
   document.getElementById('pli-cmp-prov').value = c ? (c.proveedor_texto || '') : '';
   document.getElementById('pli-cmp-orden').value = c ? (c.nro_orden || '') : '';
   document.getElementById('pli-cmp-notas').value = c ? (c.notas || '') : '';
+  document.getElementById('pli-cmp-precio').value = c && c.precio != null ? c.precio : '';
+  document.getElementById('pli-cmp-moneda').value = c && c.moneda ? c.moneda : 'ARS';
+  document.getElementById('pli-cmp-precio-ayuda').textContent = c
+    ? 'Queda firme en la orden. Vacío: la compra queda sin precio pactado.'
+    : 'Si lo dejás vacío se usa el del proveedor. Queda firme en la orden.';
   pliCompraUnidad();
   document.getElementById('pli-mb-compra').classList.add('on');
 }
@@ -73950,7 +74102,11 @@ function pliCompraGuardar() {
     estado: document.getElementById('pli-cmp-estado').value,
     proveedor_texto: document.getElementById('pli-cmp-prov').value.trim(),
     nro_orden: document.getElementById('pli-cmp-orden').value.trim(),
-    notas: document.getElementById('pli-cmp-notas').value.trim()
+    notas: document.getElementById('pli-cmp-notas').value.trim(),
+    // Vacío quiere decir «el del proveedor» en el alta, y «sacale el precio» al corregir: el
+    // servidor distingue los dos casos, acá se manda tal cual lo que se escribió.
+    precio: document.getElementById('pli-cmp-precio').value.trim(),
+    moneda: document.getElementById('pli-cmp-moneda').value
   };
   if (!body.insumo_id) return toast('Elegí el insumo', 'er');
   if (!body.fecha) return toast('Falta la fecha', 'er');

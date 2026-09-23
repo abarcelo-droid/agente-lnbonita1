@@ -461,6 +461,12 @@ try {
   // Sin esto, un plan CONFIRMADO perdía el reparto semanal y la pestaña Comprar
   // —que es para lo que se confirma un plan— quedaba vacía.
   addCol('pli_plan_resultado', 'buckets_json',  'TEXT');
+  // EL PRECIO DE UNA COMPRA SE CONGELA EN LA COMPRA (V1080). Pablo, 21/9/2026, pidiendo la orden
+  // de compra imprimible: «es importante para poder mandarle al proveedor y que el precio quede
+  // firme». Si el documento leyera el precio del proveedor al momento de imprimir, mañana saldría
+  // otro número con el mismo número de orden — que es exactamente lo contrario de firme.
+  addCol('pli_compras', 'precio',  'REAL');
+  addCol('pli_compras', 'moneda',  'TEXT');
   addCol('pli_insumo_precios', 'tc_usado',      'REAL');
   addCol('pli_insumo_precios', 'tc_origen',     'TEXT');
   // De qué proveedor es ese precio. NULL en los registros viejos: son del insumo,
