@@ -87,7 +87,7 @@ test('el precio queda CONGELADO en la compra: cambiar la lista de precios no toc
   assert.equal(c.moneda, 'ARS');
   // Y el alta lo guarda, en vez de leerlo al imprimir.
   const alta = fuente(RUTA, "router.post('/planes/:id/compras'");
-  assert.match(alta, /const sug = precioDeProveedor\(insumoId, prov\);/);
+  assert.match(alta, /const { precio, moneda } = precioDeLaCompra\(insumoId, prov, b\);/);
   assert.match(alta, /INSERT INTO pli_compras \(plan_id, insumo_id, fecha, cantidad, proveedor_texto, nro_orden, estado, notas,\r?\n\s+precio, moneda,/);
   // La edición NO vuelve a proponer: corregir la cantidad de una orden mandada no puede cambiarle
   // el precio por atrás.
@@ -128,6 +128,60 @@ test('el total de una orden: sólo si todos tienen precio y están en la misma m
   // Y los centavos se redondean a dos, o el total sale con quince decimales.
   assert.equal(totalDe([r(0.1, 'ARS', 3)]).total, 0.3);
   assert.deepEqual(totalDe([]), { total: null, moneda: null, sin_precio: 0, varias_monedas: 0 });
+});
+
+const precioCompra = (db) => new Function('db', 'vNum', [
+  fuente(RUTA, 'function precioDeProveedor(insumoId, proveedorTexto)'),
+  fuente(RUTA, 'function precioDeLaCompra(insumoId, proveedorTexto, b)'),
+  'return precioDeLaCompra;',
+].join('\n'))(db, (v) => Number(v));
+
+test('un precio en dólares no se guarda como pesos: la moneda viaja con el precio', () => {
+  const db = base();
+  db.prepare("UPDATE pli_insumo_proveedores SET precio_ref=1.20, moneda='USD' WHERE id=10").run();
+  const p = precioCompra(db);
+  // EL CAMINO QUE LA PANTALLA RECOMIENDA: dejar el precio vacío para que use el del proveedor. La
+  // pantalla manda SIEMPRE una moneda —el selector arrancaba en ARS y no lo movía nadie—, así que
+  // el proveedor que cotiza USD 1,20 quedaba guardado como ARS 1,20, y eso decía el papel.
+  assert.deepEqual(p(1, 'CARTOCOR', { moneda: 'ARS' }), { precio: 1.2, moneda: 'USD' },
+    'el precio vino del proveedor y la moneda del selector: el documento dice otro número');
+  assert.deepEqual(p(1, 'CARTOCOR', { precio: '', moneda: 'ARS' }), { precio: 1.2, moneda: 'USD' });
+  // Si el usuario ESCRIBE el precio, manda su moneda: ahí sí eligió las dos cosas.
+  assert.deepEqual(p(1, 'CARTOCOR', { precio: 2500, moneda: 'ARS' }), { precio: 2500, moneda: 'ARS' });
+  assert.deepEqual(p(1, 'CARTOCOR', { precio: 3, moneda: 'USD' }), { precio: 3, moneda: 'USD' });
+  // Una moneda que no existe no se guarda: pesos, que es la de la casa.
+  assert.deepEqual(p(1, 'CARTOCOR', { precio: 10, moneda: 'EUR' }), { precio: 10, moneda: 'ARS' });
+  // Sin precio de proveedor no se inventa ni número ni moneda.
+  assert.deepEqual(p(999, 'NADIE', {}), { precio: null, moneda: null });
+});
+
+test('una compra cancelada no emite orden, ni la suya ni la de al lado', () => {
+  const orden = fuente(RUTA, "router.get('/planes/:id/compras/:compraId/orden'");
+  // EL FILTRO DE CANCELADAS SACABA A LA PROPIA COMPRA que se apretó: el documento salía con los
+  // OTROS renglones de ese número de orden —sin el que se pidió imprimir— y si era la única,
+  // con número, proveedor, firmas y la tabla vacía.
+  assert.match(orden, /if \(base\.estado === 'cancelado'\) \{/);
+  assert.match(orden, /no se emite una orden de algo que se dio de baja/);
+  // Y si después de juntar no quedó ningún renglón, tampoco sale un papel vacío.
+  assert.match(orden, /if \(!renglones\.length\) throw notFound/);
+  // En la pantalla, a una cancelada no se le ofrece el botón.
+  const i = PANEL.lastIndexOf('Compras registradas</div>');
+  const trozo = PANEL.slice(i, i + 3000);
+  assert.match(trozo, /c\.estado === 'cancelado' \? ''/);
+});
+
+test('la pantalla dice qué precio y qué moneda van a quedar firmes antes de guardar', () => {
+  const f = fuente(PANEL, 'function pliCompraPrecioSugerido()');
+  // El selector se pone en la moneda del insumo: si no, se escribe 1,20 pensando en dólares y
+  // queda guardado 1,20 pesos.
+  assert.match(f, /if \(!editando && i && Number\(i\.precio_ref\) > 0\) sel\.value = i\.moneda \|\| 'ARS';/);
+  // Y se lee el número que se va a usar, con su moneda, antes de apretar Guardar.
+  assert.match(f, /'Vacío: se usa ' \+ \(i\.moneda \|\| 'ARS'\) \+ ' ' \+ pliN\(i\.precio_ref, 2\)/);
+  // Un insumo sin precio de proveedor lo dice, en vez de prometer uno que no existe.
+  assert.match(f, /Este insumo no tiene precio de proveedor/);
+  // Y editando no se pisa la moneda de una compra ya pactada.
+  assert.match(f, /var editando = !!document\.getElementById\('pli-cmp-id'\)\.value;/);
+  assert.match(fuente(PANEL, 'function pliCompraUnidad()'), /pliCompraPrecioSugerido\(\);/);
 });
 
 // ── EL DOCUMENTO ───────────────────────────────────────────────────────────

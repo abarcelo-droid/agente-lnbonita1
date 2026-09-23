@@ -73954,7 +73954,10 @@ function pliCmpRenderHechas(cont) {
             : pliEsc(c.moneda || 'ARS') + ' ' + pliN(c.precio)) + '</td>'
         + '<td><span class="pli-badge ' + badge + '">' + pliEsc(c.estado) + '</span></td>'
         + '<td style="text-align:right;white-space:nowrap">'
-          + '<button class="btn bo bs" onclick="pliOrdenAbrir(' + c.id + ')" title="Orden de compra para mandarle al proveedor" style="padding:2px 6px;font-size:11px">🖨️</button> '
+          // A una compra cancelada no se le emite orden: el botón no se ofrece, y el servidor
+          // tampoco la deja pasar.
+          + (c.estado === 'cancelado' ? ''
+            : '<button class="btn bo bs" onclick="pliOrdenAbrir(' + c.id + ')" title="Orden de compra para mandarle al proveedor" style="padding:2px 6px;font-size:11px">🖨️</button> ')
           + '<button class="btn bo bs" onclick="pliCompraAbrir(' + c.id + ')" style="padding:2px 6px;font-size:11px">✏️</button> '
           + '<button class="btn bd bs" onclick="pliCompraBorrar(' + c.id + ')" style="padding:2px 6px;font-size:11px">🗑</button>'
         + '</td></tr>';
@@ -74062,6 +74065,27 @@ function pliCompraUnidad() {
   if (i && i.proveedor_texto && !document.getElementById('pli-cmp-prov').value) {
     document.getElementById('pli-cmp-prov').value = i.proveedor_texto;
   }
+  pliCompraPrecioSugerido();
+}
+
+// QUÉ PRECIO VA A QUEDAR FIRME, DICHO ANTES DE GUARDAR (V1081). El selector de moneda arrancaba
+// siempre en ARS y no lo movía nadie: el que compra a un proveedor que cotiza en dólares escribía
+// 1,20 pensando en dólares y quedaba guardado 1,20 pesos. Ahora el selector se pone en la moneda
+// del insumo y abajo se lee el número que se va a usar si el campo queda vacío.
+function pliCompraPrecioSugerido() {
+  var id = parseInt(document.getElementById('pli-cmp-insumo').value, 10);
+  var i = PLI.insumos.filter(function(x) { return x.id === id; })[0];
+  var campo = document.getElementById('pli-cmp-precio');
+  var sel = document.getElementById('pli-cmp-moneda');
+  var ayuda = document.getElementById('pli-cmp-precio-ayuda');
+  if (!campo || !sel || !ayuda) return;
+  var editando = !!document.getElementById('pli-cmp-id').value;
+  if (!editando && i && Number(i.precio_ref) > 0) sel.value = i.moneda || 'ARS';
+  ayuda.textContent = editando
+    ? 'Queda firme en la orden. Vacío: la compra queda sin precio pactado.'
+    : (i && Number(i.precio_ref) > 0
+      ? 'Vacío: se usa ' + (i.moneda || 'ARS') + ' ' + pliN(i.precio_ref, 2) + ', el del proveedor. Queda firme en la orden.'
+      : 'Este insumo no tiene precio de proveedor: si lo dejás vacío, la compra queda sin precio pactado.');
 }
 
 function pliCompraAbrir(id) {
@@ -74078,9 +74102,6 @@ function pliCompraAbrir(id) {
   document.getElementById('pli-cmp-notas').value = c ? (c.notas || '') : '';
   document.getElementById('pli-cmp-precio').value = c && c.precio != null ? c.precio : '';
   document.getElementById('pli-cmp-moneda').value = c && c.moneda ? c.moneda : 'ARS';
-  document.getElementById('pli-cmp-precio-ayuda').textContent = c
-    ? 'Queda firme en la orden. Vacío: la compra queda sin precio pactado.'
-    : 'Si lo dejás vacío se usa el del proveedor. Queda firme en la orden.';
   pliCompraUnidad();
   document.getElementById('pli-mb-compra').classList.add('on');
 }

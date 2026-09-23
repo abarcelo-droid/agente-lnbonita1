@@ -1922,6 +1922,23 @@ router.get('/planes/:id/compras', wrap((req, res) => {
   res.json({ ok: true, data });
 }));
 
+// Con qué precio y en qué moneda queda una compra. EL PRECIO Y LA MONEDA VIAJAN JUNTOS (V1081):
+// este módulo es bimonetario y un número sin su moneda no es un precio. Tomando el precio del
+// proveedor pero la moneda de un selector aparte —que arrancaba siempre en pesos—, un proveedor
+// que cotiza USD 1,20 quedaba guardado como ARS 1,20, y eso es lo que decía el papel que se le
+// manda. Si el usuario escribe el precio, manda su moneda; si lo deja vacío, viene la del
+// proveedor con su número.
+function precioDeLaCompra(insumoId, proveedorTexto, b) {
+  const escrito = !(b.precio === undefined || b.precio === null || b.precio === '');
+  if (escrito) {
+    return { precio: vNum(b.precio, 'El precio', { min: 0 }),
+      moneda: ['ARS', 'USD'].includes(b.moneda) ? b.moneda : 'ARS' };
+  }
+  const sug = precioDeProveedor(insumoId, proveedorTexto);
+  // La moneda del proveedor no puede faltar: la columna es NOT NULL con 'ARS' por defecto.
+  return { precio: sug.precio, moneda: sug.precio == null ? null : sug.moneda };
+}
+
 router.post('/planes/:id/compras', wrap((req, res) => {
   const soc = getSociedadId(req);
   const plan = getPlan(soc, parseInt(req.params.id, 10));
@@ -1936,10 +1953,12 @@ router.post('/planes/:id/compras', wrap((req, res) => {
   const prov = vTexto(b.proveedor_texto, 'El proveedor', { max: 120 }) || ins.proveedor_texto || null;
   // Si no viene precio, se propone el del proveedor. Y queda CONGELADO: la orden que se manda
   // dice ese número, y que mañana cambie la lista de precios no puede cambiarlo.
-  const sug = precioDeProveedor(insumoId, prov);
-  const precio = b.precio === undefined || b.precio === null || b.precio === ''
-    ? sug.precio : vNum(b.precio, 'El precio', { min: 0 });
-  const moneda = ['ARS', 'USD'].includes(b.moneda) ? b.moneda : (precio === sug.precio ? sug.moneda : 'ARS');
+  //
+  // EL PRECIO Y LA MONEDA VIAJAN JUNTOS (V1081). Este módulo es bimonetario y un número sin su
+  // moneda no es un precio: tomando el precio del proveedor pero la moneda de lo que mandó la
+  // pantalla, un proveedor que cotiza USD 1,20 quedaba guardado como ARS 1,20 —y el papel que se
+  // le manda diría eso—. La moneda viene con el precio que se usó, no de un selector aparte.
+  const { precio, moneda } = precioDeLaCompra(insumoId, prov, b);
   const r = db.prepare(`
     INSERT INTO pli_compras (plan_id, insumo_id, fecha, cantidad, proveedor_texto, nro_orden, estado, notas,
       precio, moneda, creado_por_id, actualizado_por_id)
@@ -2013,6 +2032,13 @@ router.get('/planes/:id/compras/:compraId/orden', wrap((req, res) => {
   const cid = parseInt(req.params.compraId, 10);
   const base = db.prepare(`SELECT * FROM pli_compras WHERE id=? AND plan_id=? AND eliminado_en IS NULL`).get(cid, plan.id);
   if (!base) throw notFound('Compra no encontrada');
+  // SE CORTA EN LA PUERTA (V1081). Una compra cancelada no tiene orden que emitir, y dejarla pasar
+  // era peor que un error: el filtro de canceladas del armado de abajo la sacaba A ELLA, así que
+  // salía un documento con los OTROS renglones de su número de orden —sin el que se apretó— o,
+  // si era la única, un papel con número, proveedor y firmas y la tabla vacía.
+  if (base.estado === 'cancelado') {
+    throw bad('Esa compra está cancelada: no se emite una orden de algo que se dio de baja.');
+  }
   const nro = String(base.nro_orden || '').trim();
   const prov = String(base.proveedor_texto || '').trim();
   // Sin número de orden no hay con qué juntarlas: el documento es el de esta compra sola.
@@ -2028,6 +2054,9 @@ router.get('/planes/:id/compras/:compraId/orden', wrap((req, res) => {
            i.codigo AS insumo_codigo
         FROM pli_compras c JOIN pli_insumos i ON i.id = c.insumo_id
         WHERE c.id=?`).all(cid);
+  // Después de juntar, tiene que quedar algo. Un documento sin renglones igual trae número,
+  // proveedor y firmas: se manda sin que nadie note que está vacío.
+  if (!renglones.length) throw notFound('Esa compra ya no está en el plan.');
   const { total, moneda, sin_precio, varias_monedas } = totalDeOrden(renglones);
   res.json({ ok: true, data: {
     sociedad: PUENTE_CORDON,
