@@ -1985,13 +1985,18 @@ router.post('/planes/:id/compras', wrap((req, res) => {
   const { precio, moneda } = precioDeLaCompra(insumoId, prov, b);
   const r = db.prepare(`
     INSERT INTO pli_compras (plan_id, insumo_id, fecha, cantidad, proveedor_texto, nro_orden, estado, notas,
-      precio, moneda, lugar_entrega, creado_por_id, actualizado_por_id)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+      precio, moneda, lugar_entrega, fecha_entrega, creado_por_id, actualizado_por_id)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
   `).run(plan.id, insumoId, fecha, cantidad, prov,
          vTexto(b.nro_orden, 'El número de orden', { max: 60 }), estado,
          vTexto(b.notas, 'Las notas', { max: 300 }),
          precio, precio === null ? null : (moneda || 'ARS'),
-         vTexto(b.lugar_entrega, 'El lugar de entrega', { max: 160 }), req.user.id, req.user.id);
+         vTexto(b.lugar_entrega, 'El lugar de entrega', { max: 160 }),
+         // PARA CUÁNDO (V1086). La columna existía desde el día uno marcada «RESERVADO» y ningún
+         // endpoint la escribía: el documento que se le manda al proveedor tenía una columna
+         // «Entrega» que decía «—» en todos los renglones. Dónde entregar sin para cuándo es media
+         // pregunta: son el mismo renglón de la conversación con el proveedor.
+         vFecha(b.fecha_entrega, 'La fecha de entrega'), req.user.id, req.user.id);
   logPli('compra', r.lastInsertRowid, 'alta',
     { plan_id: plan.id, insumo: ins.nombre, cantidad, unidad: ins.unidad_compra, fecha }, req.user.id);
   res.json({ ok: true, id: r.lastInsertRowid });
@@ -2014,10 +2019,7 @@ router.patch('/planes/:id/compras/:compraId', wrap((req, res) => {
     throw bad('Esta compra no tiene recepción confirmada. Usá el botón 📦 para decir cuánto llegó: '
       + 'marcarla como recibida acá no sumaría nada al stock.');
   }
-  // EL INSUMO DE UNA COMPRA RECIBIDA NO SE CAMBIA. El stock ya entró en el insumo viejo: moverlo
-  // sería sacar de uno y poner en otro, y si se hiciera mal quedarían los dos mal. Primero se
-  // deshace la recepción, que es una decisión explícita y queda anotada.
-  // NI LA CANTIDAD POR DEBAJO DE LO QUE YA ENTRÓ (V1084). Corregir la cantidad de una orden mal
+  // LA CANTIDAD NO BAJA POR DEBAJO DE LO QUE YA ENTRÓ (V1084). Corregir la cantidad de una orden mal
   // tipeada es de todos los días, y nadie espera que el sistema deje contradecir un remito ya
   // firmado: quedaba una compra que decía «pedí 10, recibí 100», con la orden impresa en 10 y el
   // depósito con 100. Es el mismo criterio que el de abajo para el insumo, aplicado al campo que
@@ -2028,8 +2030,20 @@ router.patch('/planes/:id/compras/:compraId', wrap((req, res) => {
       + 'llegó menos, corregí la recepción con el botón 📦; si la orden estaba mal, deshacé la '
       + 'recepción primero.');
   }
-  if (recibida && b.insumo_id !== undefined && parseInt(b.insumo_id, 10) !== a.insumo_id) {
-    throw bad('Esta compra ya se recibió y su mercadería entró al stock de ese insumo. Deshacé la recepción antes de cambiarlo.');
+  // EL INSUMO DE UNA COMPRA NO SE CAMBIA EDITÁNDOLA (V1086).
+  //
+  // Para una compra RECIBIDA, porque el stock ya entró en el insumo viejo: moverlo sería sacar de
+  // uno y poner en otro, y si se hiciera mal quedarían los dos mal.
+  //
+  // Y PARA EL RESTO, porque el UPDATE de abajo nunca tocó insumo_id: la pantalla dejaba elegir otro,
+  // contestaba «✓ Compra registrada» y la lista seguía mostrando el viejo. Un ok mentiroso es peor
+  // que un error, porque el que lo cambió se va convencido de que quedó. La puerta se cierra de los
+  // dos lados —acá y en la pantalla— y se dice qué hacer en su lugar.
+  if (b.insumo_id !== undefined && parseInt(b.insumo_id, 10) !== a.insumo_id) {
+    throw bad(recibida
+      ? 'Esta compra ya se recibió y su mercadería entró al stock de ese insumo. Deshacé la recepción antes de cambiarlo.'
+      : 'El insumo de una compra no se cambia: borrá esta compra y cargala de nuevo con el insumo que '
+        + 'va. Así el número de orden y el precio quedan atados al insumo correcto.');
   }
   // Y PONERLA EN 'pedido' O 'cancelado' A MANO DEVUELVE EL STOCK. Sin esto, cancelar una compra
   // recibida dejaba en el depósito mercadería que nadie recibió —y es el camino natural: se
@@ -2042,7 +2056,8 @@ router.patch('/planes/:id/compras/:compraId', wrap((req, res) => {
   const moneda = b.moneda === undefined ? a.moneda : (['ARS', 'USD'].includes(b.moneda) ? b.moneda : a.moneda);
   db.prepare(`
     UPDATE pli_compras SET fecha=?, cantidad=?, proveedor_texto=?, nro_orden=?, estado=?, notas=?,
-      precio=?, moneda=?, lugar_entrega=?, actualizado_en=${AHORA}, actualizado_por_id=? WHERE id=?
+      precio=?, moneda=?, lugar_entrega=?, fecha_entrega=?, actualizado_en=${AHORA},
+      actualizado_por_id=? WHERE id=?
   `).run(b.fecha === undefined ? a.fecha : vFecha(b.fecha, 'La fecha'),
          b.cantidad === undefined ? a.cantidad : vNum(b.cantidad, 'La cantidad', { min: 1e-9 }),
          b.proveedor_texto === undefined ? a.proveedor_texto : vTexto(b.proveedor_texto, 'El proveedor', { max: 120 }),
@@ -2051,6 +2066,7 @@ router.patch('/planes/:id/compras/:compraId', wrap((req, res) => {
          b.notas === undefined ? a.notas : vTexto(b.notas, 'Las notas', { max: 300 }),
          precio, precio === null ? null : (moneda || 'ARS'),
          b.lugar_entrega === undefined ? a.lugar_entrega : vTexto(b.lugar_entrega, 'El lugar de entrega', { max: 160 }),
+         b.fecha_entrega === undefined ? a.fecha_entrega : vFecha(b.fecha_entrega, 'La fecha de entrega'),
          req.user.id, cid);
   logPli('compra', cid, 'edicion', { antes: a, despues: b }, req.user.id);
   res.json({ ok: true });
