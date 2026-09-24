@@ -23,6 +23,7 @@ const RAIZ = process.env.LNB_RAIZ
   || path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const leer = (rel) => fs.readFileSync(path.join(RAIZ, rel), 'utf8');
 const ORG = leer('src/rutas/org.js');
+const SERV = leer('src/servicios/logo_empresa.js');
 const DDL_ORG = leer('src/servicios/db_org.js');
 const RUTA = leer('src/rutas/planificacion.js');
 const PANEL = leer('src/panel.html');
@@ -41,7 +42,7 @@ function fuente(txt, firma) {
 // Una línea `const X = ...;` tal como está escrita, para que la prueba use el valor REAL y no una
 // copia que mañana quede desfasada.
 function lineaConst(txt, nombre) {
-  const re = new RegExp('^\\s*const ' + nombre + ' = .*$', 'm');
+  const re = new RegExp('^\\s*(?:export )?const ' + nombre + ' = .*$', 'm');
   const m = re.exec(txt);
   assert.ok(m, 'no está el const ' + nombre);
   return m[0].trim();
@@ -106,10 +107,12 @@ test('la orden manda el logo y el id de la empresa, y los saca de esa función',
 
 // ── 2 · SÓLO ENTRA UNA IMAGEN ──────────────────────────────────────────────
 
+// El validador vive en servicios/logo_empresa.js y no adentro del router: lo usan la ruta que sube
+// el logo y la siembra del arranque que deja cargado el logo de la casa. Se lee de ahí.
 const validar = () => new Function([
-  lineaConst(ORG, 'LOGO_FORMATO'),
-  lineaConst(ORG, 'LOGO_MAX'),
-  fuente(ORG, 'function validarLogo(txt)'),
+  lineaConst(SERV, 'LOGO_FORMATO').replace('export ', ''),
+  lineaConst(SERV, 'LOGO_MAX').replace('export ', ''),
+  fuente(SERV, 'function validarLogo(txt)').replace('export ', ''),
   'return { validarLogo, LOGO_MAX };',
 ].join('\n'))();
 
@@ -256,7 +259,7 @@ test('la imagen se reduce en la pantalla antes de subirla, y el techo es el mism
   assert.match(red, /toDataURL\('image\/jpeg', 0\.85\)/);
   // Y EL MISMO NÚMERO QUE VALIDA EL SERVIDOR: si la pantalla corta más arriba que el servidor, el
   // que sube un logo grande recibe un error en vez de una imagen reducida.
-  const max = /const LOGO_MAX = (\d+);/.exec(ORG)[1];
+  const max = /const LOGO_MAX = (\d+);/.exec(SERV)[1];
   assert.match(red, new RegExp('png\\.length <= ' + max));
 });
 
