@@ -4,9 +4,12 @@
 // Vínculos opcionales: usuarios.persona_id, proveedores.sociedad_id.
 // Fase 1: solo modelado. No toca el flujo de login ni los permisos actuales.
 
+import fs from 'fs';
 import { getDb } from './db.js';
 // El mail de la ficha tiene que llegar al usuario, que es a donde salen los avisos.
 import { arrastrarMailesDePersonas } from './mail_persona.js';
+// El mismo filtro que valida el logo que se sube por la pantalla.
+import { logoDeArchivo } from './logo_empresa.js';
 
 const db = getDb();
 
@@ -168,6 +171,65 @@ try {
     console.log(`[ORG] Seed: ${sociedades.length} sociedades + áreas creadas`);
   } catch(e) {
     console.error("[ORG] Error seed:", e.message);
+  }
+})();
+
+// ── EL LOGO DE LA CASA, YA CARGADO ────────────────────────────────────
+//
+// Pablo, 24/9/2026: «el logo de la empresa lo tenés… poné el de La Niña Bonita».
+// Es la marca del grupo, y Puente Cordón es la sociedad que compra: el papel lo
+// firma Puente Cordón y arriba va el logo con el que el proveedor la reconoce.
+//
+// VA ACÁ ABAJO, DESPUÉS DE seedOrg(), Y NO ARRIBA: las sociedades nacen en ese
+// bloque, ochenta líneas más arriba de donde estaba esto. Corriendo antes, una
+// instalación nueva no encontraba a Puente Cordón y se quedaba sin logo hasta el
+// segundo arranque.
+//
+// CORRE UNA SOLA VEZ EN LA VIDA DE LA BASE, con el mismo `sistema_flags` que usan
+// los otros arranques de una sola vez. Es lo que hace que sacarlo desde la pantalla
+// quede sacado: sin la marca, el deploy siguiente lo volvería a poner y no habría
+// manera de quitarlo.
+//
+// Y NO PISA NADA: si ya hay un logo cargado —porque alguien subió el suyo— la
+// siembra no lo toca.
+(function sembrarLogoDeLaCasa() {
+  const FLAG = 'logo_casa_puente_cordon_v1';
+  try {
+    db.exec(`CREATE TABLE IF NOT EXISTS sistema_flags (
+      key TEXT PRIMARY KEY, valor TEXT, ejecutado_en TEXT DEFAULT (datetime('now','localtime')))`);
+    if (db.prepare('SELECT 1 FROM sistema_flags WHERE key = ?').get(FLAG)) return;
+
+    // Se busca por NOMBRE, igual que el cerrojo de empresa de cada módulo: un logo
+    // guardado contra el id equivocado sale impreso en los papeles de otra empresa.
+    const soc = db.prepare("SELECT id FROM sociedades WHERE nombre = 'Puente Cordón SA'").get()
+             || db.prepare("SELECT id FROM sociedades WHERE nombre LIKE 'Puente Cord%'").get();
+    // SIN MARCAR LA BANDERA. Con esto abajo de seedOrg() la sociedad tiene que estar,
+    // así que llegar acá es raro —una base a la que le vaciaron sociedades a mano, o
+    // un seed que falló—. Se reintenta en el arranque siguiente en vez de marcar:
+    // marcarla dejaría esa base sin logo para siempre y nadie sabría por qué.
+    if (!soc) return;
+
+    const ya = db.prepare('SELECT 1 FROM sociedad_logos WHERE sociedad_id = ?').get(soc.id);
+    if (!ya) {
+      // EL REDUCIDO, no el de 1559 px que usan los PDF. La pantalla achica a 460 px
+      // todo logo que se sube —«se imprime a 56 px de alto, guardarlo más grande no se
+      // ve un gramo mejor»— y la siembra no puede ser la excepción a su propia regla:
+      // acá son 600 px, 21 KB en vez de 63, y lo que entra a la base es un tercio.
+      const arch = new URL('../logo-documentos.jpg', import.meta.url);
+      const logo = logoDeArchivo(fs.readFileSync(arch), 'logo-documentos.jpg');
+      // Si el archivo no está o no es una imagen, se deja sin sembrar y SIN marcar:
+      // mejor el recuadro para subirlo que un logo roto arriba de una orden. Y se
+      // avisa, porque si no se reintenta en cada arranque sin que nadie se entere.
+      if (!logo) { console.warn('[LOGO] El archivo del logo no es una imagen válida'); return; }
+      db.prepare('INSERT INTO sociedad_logos (sociedad_id, logo) VALUES (?,?)').run(soc.id, logo);
+      console.log('[LOGO] Cargado el logo de la casa para ' + soc.id);
+    }
+    db.prepare('INSERT OR REPLACE INTO sistema_flags (key, valor) VALUES (?,?)')
+      .run(FLAG, ya ? 'ya-tenia' : 'sembrado');
+  } catch (e) {
+    // Que no arranque el sistema por un logo sería absurdo. Se reintenta en el
+    // próximo deploy, porque la bandera no quedó marcada.
+    console.warn('[LOGO] No se pudo cargar el logo de la casa:', e.message);
   }
 })();
 

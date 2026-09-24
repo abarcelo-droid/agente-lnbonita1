@@ -74260,7 +74260,8 @@ function pliOrdenHtml(d) {
 
 // EL PANEL TAMBIÉN MIRA EL FORMATO, no sólo el servidor. Este texto se pega dentro del src de un
 // <img>: si alguna vez entrara algo raro por otra puerta, acá no se dibuja en vez de romper el
-// documento. Es el mismo filtro que valida el servidor (rutas/org.js).
+// documento. Es el mismo filtro que valida el servidor (servicios/logo_empresa.js), y hay un test
+// que falla si los dos textos dejan de ser idénticos.
 var PLI_LOGO_FORMATO = /^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/]+={0,2}$/;
 
 function pliOrdenLogoHtml(d) {
@@ -74273,8 +74274,8 @@ function pliOrdenLogoHtml(d) {
   // Al que no puede cambiarlo no se le ofrece: apretaría y le contestaría 403.
   return admin
     ? '<div class="pli-oc-logo-vacio" onclick="pliLogoElegir()">🖼️ Subir el logo de la empresa</div>'
-      + '<div class="pli-oc-solo-pantalla">Se guarda en la empresa: sale en este papel y en los '
-      + 'documentos que vengan. PNG, JPG o WEBP.</div>'
+      + '<div class="pli-oc-solo-pantalla">Sale en el encabezado de estas órdenes de compra. '
+      + 'PNG, JPG o WEBP.</div>'
     : '';
 }
 
@@ -74336,12 +74337,19 @@ function pliLogoGuardar(dataUrl) {
     if (!r.ok) { toast(r.error || 'No se pudo guardar el logo', 'er'); return; }
     PLI.orden.logo = r.logo;
     document.getElementById('pli-orden-doc').innerHTML = pliOrdenHtml(PLI.orden);
-    toast(r.logo ? '✓ Logo guardado: sale en todos los documentos de la empresa' : 'Logo quitado', 'ok');
+    // QUÉ CAMBIA DE VERDAD. Antes decía «sale en todos los documentos de la empresa» y no es
+    // cierto: el único papel que lee el logo de la empresa es esta orden de compra. Los demás
+    // —facturas, liquidaciones, remitos— usan el archivo del sistema y no se enteran. Prometer de
+    // más es peor que no decir nada: se aprieta «quitarlo», se ve cambiar esta orden, y se sigue
+    // viendo el logo viejo en todo lo demás sin entender por qué.
+    toast(r.logo ? '✓ Logo guardado: sale en la orden de compra de este módulo' : 'Logo quitado', 'ok');
   }).catch(function() { toast('Error de red: el logo no se guardó', 'er'); });
 }
 
 function pliLogoQuitar() {
-  if (!confirm('El logo se saca de TODOS los documentos de la empresa, no sólo de esta orden. ¿Sigo?')) return;
+  if (!confirm('Se saca del encabezado de las órdenes de compra de Planificación de Insumos. '
+    + 'Los demás documentos del sistema usan su propio logo y no cambian.\n\n'
+    + 'Y no vuelve solo: para tenerlo de nuevo hay que subirlo. ¿Sigo?')) return;
   pliLogoGuardar('');
 }
 

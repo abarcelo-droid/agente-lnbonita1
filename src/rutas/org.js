@@ -13,6 +13,8 @@ import { fallasMigracion } from '../servicios/db_pa.js';
 // El mail de una persona es UNO SOLO: se edite en la ficha o en Usuarios, el otro
 // lado queda igual. El porqué está en el servicio.
 import { sincronizarMailAUsuario, esMailReal } from '../servicios/mail_persona.js';
+// El formato y el techo del logo de una empresa, en un solo lugar.
+import { validarLogo } from '../servicios/logo_empresa.js';
 
 const router = express.Router();
 const db = () => getDb();
@@ -87,29 +89,9 @@ router.patch('/sociedades/:id', requireAdmin, (req, res) => {
 // siguiente, y el logo tendría que volver a subirse cada vez. Lo único que
 // sobrevive es el volumen con clientes.db.
 //
-// Y SE ACEPTAN TRES FORMATOS Y NADA MÁS. Este texto termina metido en el `src` de
-// un <img> del documento que se imprime: si se aceptara cualquier cosa, una
-// comilla adentro cerraría el atributo y lo que siguiera sería marcado, y un SVG
-// puede traer el suyo propio. Con este filtro el texto no puede tener comillas ni
-// signos de mayor o menor: es una imagen de mapa de bits en base64 o no entra.
-const LOGO_FORMATO = /^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/]+={0,2}$/;
-// 250.000 caracteres de base64 son unos 185 KB de imagen: de sobra para un logo, y
-// poco para que la foto de 4 MB de un celular termine en la base y en cada
-// impresión. La pantalla la reduce antes de mandarla; esto es el techo, para el
-// que llame a la API por su cuenta.
-const LOGO_MAX = 250000;
-
-function validarLogo(txt) {
-  const s = String(txt == null ? '' : txt).trim();
-  if (!s) return null;                        // vacío: se quita el logo
-  if (s.length > LOGO_MAX) {
-    throw new Error('La imagen es muy grande (hasta 185 KB). Probá con una más chica o recortada.');
-  }
-  if (!LOGO_FORMATO.test(s)) {
-    throw new Error('El logo tiene que ser una imagen PNG, JPG o WEBP.');
-  }
-  return s;
-}
+// QUÉ SE ACEPTA está en servicios/logo_empresa.js, porque lo usan dos lugares: esta
+// ruta y la siembra del arranque que deja cargado el logo de la casa. Dos copias de
+// un filtro de seguridad es como no tener ninguno.
 
 router.get('/sociedades/:id/logo', (req, res) => {
   try {
