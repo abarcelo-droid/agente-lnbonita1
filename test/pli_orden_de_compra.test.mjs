@@ -251,8 +251,11 @@ test('cancelar, borrar o cambiarle el insumo a una compra recibida no descuadra 
   assert.match(edicion, /if \(recibida && estado !== 'recibido'\) revertirRecepcion\(a, req\.user\.id\);/);
   // Y el insumo no se cambia: el stock ya entró en el viejo. Se mira la CONDICIÓN, no el
   // mensaje: el texto queda escrito igual aunque el cerrojo no se aplique nunca.
+  //
+  // Desde la V1086 el cerrojo NO mira `recibida`: se cerró para todas, porque el UPDATE nunca
+  // escribió insumo_id y para las no recibidas la pantalla contestaba «✓» sin cambiar nada.
   assert.match(edicion,
-    /if \(recibida && b\.insumo_id !== undefined && parseInt\(b\.insumo_id, 10\) !== a\.insumo_id\) \{/);
+    /if \(b\.insumo_id !== undefined && parseInt\(b\.insumo_id, 10\) !== a\.insumo_id\) \{/);
   assert.match(edicion, /ya se recibió y su mercadería entró al stock de ese insumo/);
   const baja = fuente(RUTA, "router.delete('/planes/:id/compras/:compraId'");
   assert.match(baja, /revertirRecepcion\(a, req\.user\.id\);/);

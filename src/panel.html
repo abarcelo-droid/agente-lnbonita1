@@ -36158,6 +36158,7 @@ function sgRepExport(){
     <div class="fl"><label>Cantidad *</label>
       <input id="pli-cmp-cant" type="number" step="any" min="0" class="pli-inp pli-inp-num">
       <div class="pli-cel-chica" id="pli-cmp-unidad">en unidad de compra</div>
+      <div class="pli-cel-chica" id="pli-cmp-insumo-nota" style="color:#92400e"></div>
     </div>
     <div class="fl"><label>Estado</label>
       <!-- «Recibido» NO está acá a propósito (V1084): a ese estado se llega con el botón 📦,
@@ -36190,8 +36191,15 @@ function sgRepExport(){
   </div>
   <!-- DÓNDE SE ENTREGA (V1082): va en la compra porque cambia pedido por pedido —el depósito, la
        finca, o que lo retira el proveedor—. Se propone el último que se usó. -->
-  <div class="fl ff" style="margin-top:8px"><label>Lugar de entrega</label>
-    <input id="pli-cmp-lugar" list="pli-dl-lugar" class="pli-inp" placeholder="Ej: Planta Puente Cordón"></div>
+  <div class="fg" style="margin-top:8px">
+    <div class="fl ff"><label>Lugar de entrega</label>
+      <input id="pli-cmp-lugar" list="pli-dl-lugar" class="pli-inp" placeholder="Ej: Planta Puente Cordón"></div>
+    <!-- PARA CUÁNDO (V1086): va al lado del dónde porque son el mismo renglón de la conversación
+         con el proveedor, y porque el documento ya tenía la columna «Entrega» esperándola. -->
+    <div class="fl"><label>Entregar el</label>
+      <input id="pli-cmp-fentrega" type="date" class="pli-inp">
+      <div class="pli-cel-chica">Sale impreso en la orden. Vacío: el renglón no lleva fecha.</div></div>
+  </div>
   <datalist id="pli-dl-lugar"></datalist>
   <div class="fl ff" style="margin-top:8px"><label>Notas</label><input id="pli-cmp-notas" class="pli-inp"></div>
   <div class="ab-modal-footer">
@@ -74184,6 +74192,10 @@ function pliOrdenAbrir(id) {
 function pliOrdenHtml(d) {
   var hoy = pliHoyISO();
   var plata = function(v, m) { return v == null ? '—' : (m || 'ARS') + ' ' + pliN(v, 2); };
+  // LA COLUMNA «ENTREGA», SÓLO SI ALGÚN RENGLÓN LA TIENE (V1086). Una columna que dice «—» en todas
+  // las filas de un papel que se manda afuera enseña a leer el documento por arriba, y es el mismo
+  // documento donde el precio tiene que quedar firme.
+  var conEntrega = (d.renglones || []).some(function(r) { return !!r.fecha_entrega; });
   var h = '<div class="pli-oc-cab">'
     + '<div>' + pliOrdenLogoHtml(d) + '<div class="pli-oc-emp">' + pliEsc(d.sociedad) + '</div>'
     + '<div class="pli-oc-chico">Orden de compra · no es un comprobante fiscal</div></div>'
@@ -74198,26 +74210,30 @@ function pliOrdenHtml(d) {
       + (d.lugar_entrega ? '<tr><td>Entregar en</td><td colspan="3"><b>'
         + pliEsc(d.lugar_entrega) + '</b></td></tr>' : '') + '</table>'
     + '<table class="pli-oc-tbl">'
-    + '<colgroup><col style="width:10%"><col style="width:25%"><col style="width:11%"><col style="width:8%">'
-    + '<col style="width:15%"><col style="width:18%"><col style="width:13%"></colgroup>'
+    + '<colgroup><col style="width:10%"><col style="width:' + (conEntrega ? '25' : '33') + '%">'
+    + '<col style="width:11%"><col style="width:8%">'
+    + '<col style="width:15%"><col style="width:18%">'
+    + (conEntrega ? '<col style="width:13%">' : '') + '</colgroup>'
     + '<thead><tr><th>Código</th><th>Insumo</th>'
       + '<th style="text-align:right">Cantidad</th><th>Unidad</th>'
       + '<th style="text-align:right">Precio unitario</th><th style="text-align:right">Subtotal</th>'
-      + '<th>Entrega</th></tr></thead><tbody>';
+      + (conEntrega ? '<th>Entrega</th>' : '') + '</tr></thead><tbody>';
   (d.renglones || []).forEach(function(r) {
     h += '<tr><td>' + pliEsc(r.codigo || '—') + '</td><td>' + pliEsc(r.insumo) + '</td>'
       + '<td style="text-align:right">' + pliN(r.cantidad) + '</td><td>' + pliEsc(r.unidad) + '</td>'
       + '<td style="text-align:right">' + plata(r.precio, r.moneda) + '</td>'
       + '<td style="text-align:right">' + plata(r.subtotal, r.moneda) + '</td>'
-      + '<td>' + pliEsc(r.fecha_entrega || '—') + '</td></tr>';
-    if (r.notas) h += '<tr><td></td><td colspan="6" class="pli-oc-nota">' + pliEsc(r.notas) + '</td></tr>';
+      + (conEntrega ? '<td>' + pliEsc(r.fecha_entrega || '—') + '</td>' : '') + '</tr>';
+    if (r.notas) h += '<tr><td></td><td colspan="' + (conEntrega ? 6 : 5) + '" class="pli-oc-nota">'
+      + pliEsc(r.notas) + '</td></tr>';
   });
   h += '</tbody>';
   // EL TOTAL SÓLO SI SE PUEDE SUMAR: con un renglón sin precio, o con dos monedas, cualquier
   // número de abajo sería mentira. Se dice por qué no está, que es más útil que no decir nada.
   if (d.total != null) {
     h += '<tfoot><tr><td colspan="5" style="text-align:right"><b>TOTAL</b></td>'
-      + '<td style="text-align:right"><b>' + plata(d.total, d.moneda) + '</b></td><td></td></tr></tfoot>';
+      + '<td style="text-align:right"><b>' + plata(d.total, d.moneda) + '</b></td>'
+      + (conEntrega ? '<td></td>' : '') + '</tr></tfoot>';
   }
   h += '</table>';
   if (d.total == null) {
@@ -74405,6 +74421,13 @@ function pliCompraAbrir(id) {
   document.getElementById('pli-cmp-fecha').value = c ? c.fecha : pliHoyISO();
   document.getElementById('pli-cmp-cant').value = c ? c.cantidad : '';
   pliCompraEstadoOpciones(c);
+  // EL INSUMO DE UNA COMPRA YA CARGADA NO SE CAMBIA (V1086). El selector dejaba elegir otro, el
+  // servidor nunca lo escribía y la pantalla contestaba «✓ Compra registrada»: el que lo cambió se
+  // iba convencido de que había quedado. Ahora se ve con candado y dice qué hacer en su lugar.
+  var selIns = document.getElementById('pli-cmp-insumo');
+  selIns.disabled = !!c;
+  document.getElementById('pli-cmp-insumo-nota').textContent = c
+    ? 'El insumo no se cambia: borrá esta compra y cargala de nuevo.' : '';
   document.getElementById('pli-cmp-prov').value = c ? (c.proveedor_texto || '') : '';
   document.getElementById('pli-cmp-orden').value = c ? (c.nro_orden || '') : '';
   document.getElementById('pli-cmp-notas').value = c ? (c.notas || '') : '';
@@ -74412,6 +74435,7 @@ function pliCompraAbrir(id) {
   // escribirlo en cada compra es la manera más fácil de que termine vacío.
   pliLugaresUsados();
   document.getElementById('pli-cmp-lugar').value = c ? (c.lugar_entrega || '') : (PLI.ultimoLugar || '');
+  document.getElementById('pli-cmp-fentrega').value = c ? (c.fecha_entrega || '') : '';
   document.getElementById('pli-cmp-precio').value = c && c.precio != null ? c.precio : '';
   document.getElementById('pli-cmp-moneda').value = c && c.moneda ? c.moneda : 'ARS';
   pliCompraUnidad();
@@ -74437,6 +74461,7 @@ function pliCompraGuardar() {
     nro_orden: document.getElementById('pli-cmp-orden').value.trim(),
     notas: document.getElementById('pli-cmp-notas').value.trim(),
     lugar_entrega: document.getElementById('pli-cmp-lugar').value.trim(),
+    fecha_entrega: document.getElementById('pli-cmp-fentrega').value || null,
     // Vacío quiere decir «el del proveedor» en el alta, y «sacale el precio» al corregir: el
     // servidor distingue los dos casos, acá se manda tal cual lo que se escribió.
     precio: document.getElementById('pli-cmp-precio').value.trim(),
