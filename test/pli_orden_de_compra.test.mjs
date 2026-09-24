@@ -164,10 +164,10 @@ test('una compra cancelada no emite orden, ni la suya ni la de al lado', () => {
   assert.match(orden, /no se emite una orden de algo que se dio de baja/);
   // Y si después de juntar no quedó ningún renglón, tampoco sale un papel vacío.
   assert.match(orden, /if \(!renglones\.length\) throw notFound/);
-  // En la pantalla, a una cancelada no se le ofrece el botón.
-  const i = PANEL.lastIndexOf('Compras registradas</div>');
-  const trozo = PANEL.slice(i, i + 3000);
-  assert.match(trozo, /c\.estado === 'cancelado' \? ''/);
+  // En la pantalla, a una cancelada no se le ofrece el botón. Se lee la función que dibuja la
+  // lista, no un pedazo de N caracteres: un comentario nuevo corría el recorte y el test fallaba
+  // sin que nada estuviera roto.
+  assert.match(fuente(PANEL, 'function pliCmpRenderHechas(cont)'), /c\.estado === 'cancelado' \? ''/);
 });
 
 test('la pantalla dice qué precio y qué moneda van a quedar firmes antes de guardar', () => {
@@ -377,10 +377,7 @@ test('al imprimir sale sólo el documento, no el panel entero', () => {
 });
 
 test('el botón está en cada compra, y la lista muestra el precio que quedó firme', () => {
-  // El primer «Compras registradas» del archivo es un comentario: la tabla se dibuja despues.
-  const i = PANEL.lastIndexOf('Compras registradas</div>');
-  assert.ok(i > 0, 'no encontre donde se dibuja la tabla de compras');
-  const trozo = PANEL.slice(i, i + 3000);
+  const trozo = fuente(PANEL, 'function pliCmpRenderHechas(cont)');
   assert.match(trozo, /onclick="pliOrdenAbrir\(' \+ c\.id \+ '\)"/);
   assert.match(trozo, /title="Orden de compra para mandarle al proveedor"/);
   // El precio se ve en la lista: si no, no hay manera de saber cuál va a salir impreso.

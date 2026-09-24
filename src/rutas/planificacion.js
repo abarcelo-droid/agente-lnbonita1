@@ -1950,6 +1950,21 @@ router.post('/planes/:id/compras', wrap((req, res) => {
   if (!fecha) throw bad('La fecha es obligatoria');
   const cantidad = vNum(b.cantidad, 'La cantidad', { min: 1e-9 });
   const estado = ['pedido', 'recibido', 'cancelado'].includes(b.estado) ? b.estado : 'pedido';
+  // A «RECIBIDO» SE LLEGA RECIBIENDO, Y POR NINGÚN OTRO LADO (V1084).
+  //
+  // El selector de Estado del formulario ofrecía «Recibido» y ni el alta ni la corrección movían
+  // stock: el camino más obvio —el que el operador encuentra primero— hacía exactamente lo que
+  // Pablo pidió que dejara de pasar. Y era peor que no hacer nada, porque a partir de ahí la
+  // palabra «recibido» dejaba de significar «entró al depósito»: quedaban compras recibidas con
+  // stock movido y compras recibidas sin mover, iguales en la lista.
+  //
+  // Es la misma regla que el CLAUDE.md ya tiene para anular: la acción que MUEVE algo necesita su
+  // propia dirección, y la puerta lateral se cierra.
+  if (estado === 'recibido') {
+    throw bad('Para que una compra quede recibida hay que recibirla con el botón 📦: ahí se dice '
+      + 'cuánto llegó y con qué remito, y eso es lo que entra al stock. Registrala como Pedido y '
+      + 'confirmá la recepción — es un clic más y el depósito queda bien.');
+  }
   const prov = vTexto(b.proveedor_texto, 'El proveedor', { max: 120 }) || ins.proveedor_texto || null;
   // Si no viene precio, se propone el del proveedor. Y queda CONGELADO: la orden que se manda
   // dice ese número, y que mañana cambie la lista de precios no puede cambiarlo.
@@ -1983,9 +1998,27 @@ router.patch('/planes/:id/compras/:compraId', wrap((req, res) => {
   const estado = b.estado === undefined ? a.estado : String(b.estado);
   if (!['pedido', 'recibido', 'cancelado'].includes(estado)) throw bad('Estado inválido');
   const recibida = Number(a.recibido_cantidad) > 0;
+  // Ponerla en «recibido» a mano tampoco (V1084). Una compra que YA se recibió puede seguir
+  // guardándose con su estado —el formulario lo manda siempre— pero una que no, no puede
+  // convertirse en recibida por el selector: eso no movería un gramo de stock.
+  if (estado === 'recibido' && !recibida) {
+    throw bad('Esta compra no tiene recepción confirmada. Usá el botón 📦 para decir cuánto llegó: '
+      + 'marcarla como recibida acá no sumaría nada al stock.');
+  }
   // EL INSUMO DE UNA COMPRA RECIBIDA NO SE CAMBIA. El stock ya entró en el insumo viejo: moverlo
   // sería sacar de uno y poner en otro, y si se hiciera mal quedarían los dos mal. Primero se
   // deshace la recepción, que es una decisión explícita y queda anotada.
+  // NI LA CANTIDAD POR DEBAJO DE LO QUE YA ENTRÓ (V1084). Corregir la cantidad de una orden mal
+  // tipeada es de todos los días, y nadie espera que el sistema deje contradecir un remito ya
+  // firmado: quedaba una compra que decía «pedí 10, recibí 100», con la orden impresa en 10 y el
+  // depósito con 100. Es el mismo criterio que el de abajo para el insumo, aplicado al campo que
+  // mueve el stock.
+  if (recibida && b.cantidad !== undefined
+      && vNum(b.cantidad, 'La cantidad', { min: 1e-9 }) < Number(a.recibido_cantidad)) {
+    throw bad('De esta compra ya entraron ' + a.recibido_cantidad + ' al depósito. Si de verdad '
+      + 'llegó menos, corregí la recepción con el botón 📦; si la orden estaba mal, deshacé la '
+      + 'recepción primero.');
+  }
   if (recibida && b.insumo_id !== undefined && parseInt(b.insumo_id, 10) !== a.insumo_id) {
     throw bad('Esta compra ya se recibió y su mercadería entró al stock de ese insumo. Deshacé la recepción antes de cambiarlo.');
   }
@@ -2080,6 +2113,19 @@ router.post('/planes/:id/compras/:compraId/recepcion', wrap((req, res) => {
   if (!c) throw notFound('Compra no encontrada');
   if (c.estado === 'cancelado') throw bad('Esa compra está cancelada: no se puede recibir.');
   const cantidad = vNum(req.body?.cantidad, 'La cantidad recibida', { min: 1e-9 });
+  // TECHO CONTRA LO PEDIDO (V1084). El campo es libre y el error caro: la ventana dice «en MILLAR
+  // — al stock entra por unidad (1 MILLAR = 1.000)», así que el que tipea en la unidad que el
+  // cartel le acaba de nombrar se come un x1.000 —8.000 en vez de 8— y el factor lo multiplica en
+  // vez de frenarlo. Y un stock inflado es invisible: es exactamente lo que el módulo espera ver
+  // después de recibir, así que el plan deja de comprar ese insumo y nadie se entera.
+  //
+  // Si de verdad llegó más de lo pedido —pasa, el proveedor completa un pallet— se corrige primero
+  // la cantidad de la compra, que es lo que dice la orden y lo que se le va a pagar.
+  if (cantidad > Number(c.cantidad)) {
+    throw bad('Se pidieron ' + c.cantidad + ' y estás recibiendo ' + cantidad + '. Si de verdad '
+      + 'llegó más, corregí primero la cantidad de la compra: la orden y la factura tienen que '
+      + 'decir lo mismo.');
+  }
   const fecha = vFecha(req.body?.fecha, 'La fecha de recepción') || hoyISO();
   const remito = vTexto(req.body?.remito, 'El remito', { max: 60 });
   let movido = null;
@@ -2233,11 +2279,27 @@ function armarContexto(soc, plan) {
   // El stock vive en el INSUMO, no en el plan: es lo que hay en el depósito, uno
   // solo, y el mismo para cualquier plan que se calcule.
   const existencias = stockDeInsumos(soc);
-  // Lo ya pedido cubre necesidad igual que la existencia. Las canceladas no
-  // cuentan; las pedidas y las recibidas sí (lo pedido ya está comprometido).
+  // LO QUE CUBRE ES LO QUE TODAVÍA ESTÁ EN VIAJE, NO LO PEDIDO (V1084).
+  //
+  // La cobertura se arma sumando DOS cosas contra la misma necesidad: lo que hay en el depósito
+  // (`existencias`) y lo que está comprado. Desde que confirmar una recepción le SUMA la mercadería
+  // al stock del insumo (V1082), contar además la compra entera contaba la misma mercadería dos
+  // veces: con necesidad 200 y una compra de 100 ya recibida, el plan decía «a comprar 0» cuando
+  // faltaban 100. Medido corriendo el motor, no leído.
+  //
+  // Así que lo comprado es lo que FALTA LLEGAR: `cantidad − recibido`. Lo que ya llegó cubre por el
+  // depósito, y cada millar se cuenta exactamente una vez.
+  //
+  // El MAX(0, …) es para los casos raros de datos viejos donde lo recibido supera lo pedido: sin
+  // él, ese renglón RESTARÍA cobertura y el plan mandaría a comprar de más.
+  //
+  // Y COALESCE resuelve solo el caso de las compras marcadas «recibido» a mano antes de que
+  // existiera la recepción: no movieron stock, `recibido_cantidad` es NULL, y siguen contando
+  // enteras como en viaje. Que es la verdad: nadie las vio llegar.
   const comprado = new Map(
     db.prepare(`
-      SELECT insumo_id, SUM(cantidad) AS total FROM pli_compras
+      SELECT insumo_id, SUM(MAX(0, cantidad - COALESCE(recibido_cantidad, 0))) AS total
+      FROM pli_compras
       WHERE plan_id=? AND eliminado_en IS NULL AND estado <> 'cancelado'
       GROUP BY insumo_id
     `).all(plan.id).map(c => [c.insumo_id, c.total])
@@ -2266,9 +2328,12 @@ function bucketsDesdeSnapshot(plan) {
       recetas: new Map(s.recetas || []),
       insumos: new Map((s.insumos || []).map(i => [i.id, i])),
       existencias: stockDeInsumos(plan.sociedad_id),
+      // Lo mismo que en armarContexto: lo que cubre es lo que todavía viene (V1084). Si acá
+      // quedara la cuenta vieja, el número cambiaría al confirmar el plan.
       comprado: new Map(
         db.prepare(`
-          SELECT insumo_id, SUM(cantidad) AS total FROM pli_compras
+          SELECT insumo_id, SUM(MAX(0, cantidad - COALESCE(recibido_cantidad, 0))) AS total
+          FROM pli_compras
           WHERE plan_id=? AND eliminado_en IS NULL AND estado <> 'cancelado'
           GROUP BY insumo_id
         `).all(plan.id).map(c => [c.insumo_id, c.total])
