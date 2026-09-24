@@ -21,7 +21,7 @@ import { cotizacionVigente, fijarCotizacionManual, TIPOS as TIPOS_DOLAR } from '
 // El cerrojo de empresa. Antes cada router tenia su propia copia de esta
 // logica y todas ADIVINABAN cuando no les llegaba el dato: siete caian a
 // Puente Cordon y dos a San Geronimo. El por que esta en el servicio.
-import { exigirEmpresa, empresaFija, PUENTE_CORDON } from '../servicios/sociedad_modulo.js';
+import { exigirEmpresa, empresaFija, empresaDelModulo, PUENTE_CORDON } from '../servicios/sociedad_modulo.js';
 
 const router = express.Router();
 
@@ -2109,6 +2109,21 @@ router.delete('/planes/:id/compras/:compraId/recepcion', wrap((req, res) => {
   res.json({ ok: true });
 }));
 
+// ── EL LOGO DE LA EMPRESA, EN EL PAPEL QUE SE MANDA AFUERA (V1083) ────────
+//
+// Pablo, 24/9/2026: «a la orden de compra también podés agregarle el logo de la empresa».
+//
+// SE BUSCA POR NOMBRE, NO POR EL id QUE DEVOLVIÓ empresaFija. Esa función cae a 1 cuando no
+// encuentra la sociedad —está puesto a propósito, para no apagar el módulo— y el id 1 puede ser
+// cualquier empresa. Un papel que se manda afuera con el logo de OTRA empresa es peor que uno sin
+// logo: el nombre que se imprime y el logo que se imprime tienen que salir de la misma fila.
+function logoDeLaEmpresa() {
+  const emp = empresaDelModulo(PUENTE_CORDON);
+  if (!emp) return { sociedad_id: null, logo: null };
+  const fila = db.prepare('SELECT logo FROM sociedad_logos WHERE sociedad_id=?').get(emp.id);
+  return { sociedad_id: emp.id, logo: fila && fila.logo ? fila.logo : null };
+}
+
 // ── LA ORDEN DE COMPRA (V1080) ────────────────────────────────────────────
 //
 // Pablo, 21/9/2026: «en compras registradas, sería bueno que en cada una de las compras me deje
@@ -2150,8 +2165,13 @@ router.get('/planes/:id/compras/:compraId/orden', wrap((req, res) => {
   // proveedor y firmas: se manda sin que nadie note que está vacío.
   if (!renglones.length) throw notFound('Esa compra ya no está en el plan.');
   const { total, moneda, sin_precio, varias_monedas } = totalDeOrden(renglones);
+  const { sociedad_id, logo } = logoDeLaEmpresa();
   res.json({ ok: true, data: {
     sociedad: PUENTE_CORDON,
+    // El id va para que la pantalla sepa a qué empresa le está subiendo el logo. Sin esto tendría
+    // que adivinarlo, que es la misma puerta por la que entraba la empresa equivocada.
+    sociedad_id,
+    logo,
     plan: { id: plan.id, nombre: plan.nombre },
     nro_orden: nro || null,
     proveedor: prov || null,

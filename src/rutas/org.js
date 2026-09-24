@@ -80,6 +80,70 @@ router.patch('/sociedades/:id', requireAdmin, (req, res) => {
   } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
 });
 
+// ─── EL LOGO DE LA EMPRESA (V1083) ─────────────────────────────────────
+//
+// SE GUARDA EN LA BASE Y NO COMO ARCHIVO. Railway rearma el contenedor en cada
+// deploy: un archivo subido al directorio de la aplicación desaparece en el merge
+// siguiente, y el logo tendría que volver a subirse cada vez. Lo único que
+// sobrevive es el volumen con clientes.db.
+//
+// Y SE ACEPTAN TRES FORMATOS Y NADA MÁS. Este texto termina metido en el `src` de
+// un <img> del documento que se imprime: si se aceptara cualquier cosa, una
+// comilla adentro cerraría el atributo y lo que siguiera sería marcado, y un SVG
+// puede traer el suyo propio. Con este filtro el texto no puede tener comillas ni
+// signos de mayor o menor: es una imagen de mapa de bits en base64 o no entra.
+const LOGO_FORMATO = /^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/]+={0,2}$/;
+// 250.000 caracteres de base64 son unos 185 KB de imagen: de sobra para un logo, y
+// poco para que la foto de 4 MB de un celular termine en la base y en cada
+// impresión. La pantalla la reduce antes de mandarla; esto es el techo, para el
+// que llame a la API por su cuenta.
+const LOGO_MAX = 250000;
+
+function validarLogo(txt) {
+  const s = String(txt == null ? '' : txt).trim();
+  if (!s) return null;                        // vacío: se quita el logo
+  if (s.length > LOGO_MAX) {
+    throw new Error('La imagen es muy grande (hasta 185 KB). Probá con una más chica o recortada.');
+  }
+  if (!LOGO_FORMATO.test(s)) {
+    throw new Error('El logo tiene que ser una imagen PNG, JPG o WEBP.');
+  }
+  return s;
+}
+
+router.get('/sociedades/:id/logo', (req, res) => {
+  try {
+    const row = db().prepare('SELECT logo, subido_en FROM sociedad_logos WHERE sociedad_id = ?')
+      .get(parseInt(req.params.id));
+    res.json({ ok: true, logo: row ? row.logo : null, subido_en: row ? row.subido_en : null });
+  } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// Cargar el logo es PARAMETRIZAR —se hace una vez y sale en todo lo que se manda
+// afuera—, así que va con requireAdmin y no con el permiso de operar.
+router.put('/sociedades/:id/logo', requireAdmin, (req, res) => {
+  const id = parseInt(req.params.id);
+  let logo;
+  try { logo = validarLogo(req.body ? req.body.logo : null); }
+  catch(e) { return res.status(400).json({ ok: false, error: e.message }); }
+  try {
+    // Tiene que ser una empresa que existe: un logo guardado contra un id que no
+    // está no lo va a leer nadie, y el que lo subió se queda creyendo que quedó.
+    const soc = db().prepare('SELECT id FROM sociedades WHERE id = ?').get(id);
+    if (!soc) return res.status(404).json({ ok: false, error: 'No existe esa empresa' });
+    if (!logo) {
+      db().prepare('DELETE FROM sociedad_logos WHERE sociedad_id = ?').run(id);
+      return res.json({ ok: true, logo: null });
+    }
+    db().prepare(`
+      INSERT INTO sociedad_logos (sociedad_id, logo, subido_por_id) VALUES (?,?,?)
+      ON CONFLICT(sociedad_id) DO UPDATE SET logo = excluded.logo,
+        subido_en = datetime('now','localtime'), subido_por_id = excluded.subido_por_id
+    `).run(id, logo, req.user && req.user.id ? req.user.id : null);
+    res.json({ ok: true, logo });
+  } catch(e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
 // ─── ÁREAS ─────────────────────────────────────────────────────────────
 router.get('/areas', (req, res) => {
   const sociedad_id = req.query.sociedad_id ? parseInt(req.query.sociedad_id) : null;

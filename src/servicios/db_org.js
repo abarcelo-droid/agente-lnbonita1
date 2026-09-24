@@ -70,6 +70,31 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_pa_area ON personas_areas(area_id);
 `);
 
+// ── EL LOGO DE LA EMPRESA, PARA LOS PAPELES QUE SE MANDAN AFUERA ───────
+//
+// Pablo, 24/9/2026: «a la orden de compra también podés agregarle el logo de la
+// empresa». Es del NEGOCIO, no de la orden de compra: el mismo logo le sirve a
+// cualquier documento que salga a nombre de esa sociedad, así que vive acá y no
+// adentro del módulo que lo estrenó.
+//
+// EN TABLA APARTE, NO EN UNA COLUMNA DE `sociedades`. La imagen pesa cien veces
+// más que la ficha entera, y los listados de empresas leen con `SELECT *` —el de
+// la pantalla de Organización y el del selector de arriba—: una columna acá se
+// mandaría en cada carga de pantalla, de cada empresa, para nada. Aparte, el peso
+// se lee sólo cuando hay un documento que lo va a usar.
+//
+// SIN FOREIGN KEY, como el resto del proyecto: con foreign_keys=ON una FK acá
+// haría fallar cualquier baja de una sociedad, y un logo huérfano no rompe nada
+// porque no lo lee nadie más.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS sociedad_logos (
+    sociedad_id   INTEGER PRIMARY KEY,
+    logo          TEXT NOT NULL,
+    subido_en     TEXT DEFAULT (datetime('now','localtime')),
+    subido_por_id INTEGER
+  );
+`);
+
 // ─── ALTERs opcionales en tablas existentes ────────────────────────────
 // Vinculan registros viejos al nuevo modelo sin romper nada.
 try { db.exec("ALTER TABLE usuarios ADD COLUMN persona_id INTEGER REFERENCES personas(id)"); } catch(_) {}
