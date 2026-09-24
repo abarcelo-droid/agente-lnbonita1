@@ -72696,7 +72696,9 @@ function pliCoberturaHtml(c) {
   (c.insumo_inexistente || []).forEach(function(i) { items.push('Falta un insumo usado en la receta de "' + i.producto + '"'); });
   (c.unidad_desincronizada || []).forEach(function(u) { items.push('"' + u.insumo + '" cambió de unidad (' + u.unidad_receta + ' → ' + u.unidad_insumo + '): regrabá la receta de "' + u.producto + '"'); });
   (c.mix_excedido || []).forEach(function(m) { items.push('"' + m.nombre + '": los subproductos suman ' + pliN(m.suma_pct, 2) + '% (más de 100)'); });
-  (c.existencia_supera_necesidad || []).forEach(function(e) { items.push('"' + e.insumo + '": declaraste ' + pliN(e.declarada) + ' ' + e.unidad_uso + ' pero la necesidad es ' + pliN(e.necesidad)); });
+  // «DECLARASTE» SÓLO CUANDO ALGUIEN LO DECLARÓ (V1085). Cuando el stock entró por una recepción
+  // no lo declaró nadie, y el aviso ya no frena: va abajo, entre las advertencias.
+  (c.existencia_supera_necesidad || []).forEach(function(e) { items.push('"' + e.insumo + '": declaraste ' + pliN(e.declarada) + ' ' + e.unidad_uso + ' de stock pero el plan consume ' + pliN(e.necesidad) + ' — revisá si es un error de carga'); });
 
   if (!items.length) return '<div class="pli-badge pli-ok" style="display:block;padding:8px 12px">✔ Cobertura completa</div>';
   return '<div style="background:rgba(239,68,68,.1);border:1px solid var(--err);border-radius:8px;padding:10px 12px;font-size:12px">'
