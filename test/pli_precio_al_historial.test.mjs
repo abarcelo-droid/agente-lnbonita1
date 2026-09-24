@@ -52,8 +52,8 @@ function base() {
   }
   // Las columnas que la tabla ganó DESPUÉS, por migración: se leen de db_pli.js igual que el
   // CREATE, así que si mañana se agrega una, este banco de pruebas la tiene sin tocarlo.
-  for (const m of DDL.match(/addCol\('[a-z_]+',\s*'[a-z_]+',\s*'[A-Z]+'\)/g) || []) {
-    const [, t, col, tipo] = /addCol\('([a-z_]+)',\s*'([a-z_]+)',\s*'([A-Z]+)'\)/.exec(m);
+  for (const m of DDL.match(/addCol\('[a-z_]+',\s*'[a-z_]+',\s*'[^']+'\)/g) || []) {
+    const [, t, col, tipo] = /addCol\('([a-z_]+)',\s*'([a-z_]+)',\s*'([^']+)'\)/.exec(m);
     if (!TABLAS.includes(t)) continue;
     const ya = db.prepare(`PRAGMA table_info(${t})`).all().map((c) => c.name);
     if (!ya.includes(col)) db.exec(`ALTER TABLE ${t} ADD COLUMN ${col} ${tipo}`);

@@ -36037,6 +36037,35 @@ function sgRepExport(){
   </div>
 </div>
 
+<!-- ══ CONFIRMAR LA RECEPCIÓN (V1082) ═══════════════════════════════════════════
+     Pablo, 24/9/2026: «tengo que poder confirmar la recepción de la orden de compra para que me
+     afecte el stock y me lo ponga como recibido». Con la cantidad editable, porque el proveedor
+     puede mandar menos: al stock entra lo que llegó, no lo que se pidió. -->
+<div class="ab-modal-overlay" id="pli-mb-recep">
+<div class="ab-modal" style="width:480px">
+  <div class="mhd">
+    <div><div class="mht">📦 Confirmar recepción</div></div>
+    <button class="mcl" onclick="document.getElementById('pli-mb-recep').classList.remove('on')">×</button>
+  </div>
+  <div id="pli-rec-que" class="pli-cel-chica" style="margin-bottom:10px"></div>
+  <div class="fg">
+    <div class="fl"><label>Cuánto llegó *</label>
+      <input id="pli-rec-cant" type="number" step="any" min="0" class="pli-inp pli-inp-num">
+      <div class="pli-cel-chica" id="pli-rec-unidad"></div>
+    </div>
+    <div class="fl"><label>Fecha de recepción</label><input id="pli-rec-fecha" type="date" class="pli-inp"></div>
+  </div>
+  <div class="fl ff" style="margin-top:8px"><label>Remito del proveedor</label>
+    <input id="pli-rec-remito" class="pli-inp" placeholder="opcional"></div>
+  <div id="pli-rec-aviso" class="pli-cel-chica" style="margin-top:10px"></div>
+  <div class="ab-modal-footer">
+    <button class="btn bd" id="pli-rec-deshacer" style="display:none" onclick="pliRecepDeshacer()">Deshacer la recepción</button>
+    <button class="btn bo" onclick="document.getElementById('pli-mb-recep').classList.remove('on')">Cancelar</button>
+    <button class="btn bb" onclick="pliRecepGuardar()">Confirmar y sumar al stock</button>
+  </div>
+</div>
+</div>
+
 <!-- ══ LA ORDEN DE COMPRA, PARA MANDARLE AL PROVEEDOR (V1080) ═══════════════════
      Pablo, 21/9/2026: «un pequeño documento tipo Orden de compra… no es nada oficial pero sí es
      importante para poder mandarle al proveedor y que el precio quede firme».
@@ -36134,6 +36163,11 @@ function sgRepExport(){
       <select id="pli-cmp-moneda" class="pli-inp"><option value="ARS">ARS</option><option value="USD">USD</option></select>
     </div>
   </div>
+  <!-- DÓNDE SE ENTREGA (V1082): va en la compra porque cambia pedido por pedido —el depósito, la
+       finca, o que lo retira el proveedor—. Se propone el último que se usó. -->
+  <div class="fl ff" style="margin-top:8px"><label>Lugar de entrega</label>
+    <input id="pli-cmp-lugar" list="pli-dl-lugar" class="pli-inp" placeholder="Ej: Planta Puente Cordón"></div>
+  <datalist id="pli-dl-lugar"></datalist>
   <div class="fl ff" style="margin-top:8px"><label>Notas</label><input id="pli-cmp-notas" class="pli-inp"></div>
   <div class="ab-modal-footer">
     <button class="btn bo" onclick="document.getElementById('pli-mb-compra').classList.remove('on')">Cancelar</button>
@@ -73947,7 +73981,11 @@ function pliCmpRenderHechas(cont) {
       html += '<tr' + (c.estado === 'cancelado' ? ' style="opacity:.55"' : '') + '>'
         + '<td>' + pliEsc(c.fecha) + '</td>'
         + '<td>' + pliEsc(c.insumo_nombre) + '</td>'
-        + '<td class="pli-num">' + pliN(c.cantidad) + ' <span class="pli-cel-chica">' + pliEsc(c.unidad_compra) + '</span></td>'
+        + '<td class="pli-num">' + pliN(c.cantidad) + ' <span class="pli-cel-chica">' + pliEsc(c.unidad_compra) + '</span>'
+          // Lo que REALMENTE llegó, cuando es menos de lo pedido: si no, «recibido» se lee como
+          // que entró todo y el que mira el plan cuenta con mercadería que no está.
+          + (c.recibido_cantidad != null && Number(c.recibido_cantidad) !== Number(c.cantidad)
+            ? '<div class="pli-cel-chica">llegaron ' + pliN(c.recibido_cantidad) + '</div>' : '') + '</td>'
         + '<td class="pli-cel-chica">' + pliEsc(c.proveedor_texto || '—') + '</td>'
         + '<td class="pli-cel-chica">' + pliEsc(c.nro_orden || '—') + '</td>'
         + '<td class="pli-num">' + (c.precio == null ? '<span class="pli-cel-chica">sin precio</span>'
@@ -73956,6 +73994,10 @@ function pliCmpRenderHechas(cont) {
         + '<td style="text-align:right;white-space:nowrap">'
           // A una compra cancelada no se le emite orden: el botón no se ofrece, y el servidor
           // tampoco la deja pasar.
+          + (c.estado === 'cancelado' ? ''
+            : '<button class="btn bo bs" onclick="pliRecepAbrir(' + c.id + ')" title="'
+              + (c.recibido_cantidad != null ? 'Ver o corregir la recepción' : 'Confirmar la recepción y sumar al stock')
+              + '" style="padding:2px 6px;font-size:11px">📦</button> ')
           + (c.estado === 'cancelado' ? ''
             : '<button class="btn bo bs" onclick="pliOrdenAbrir(' + c.id + ')" title="Orden de compra para mandarle al proveedor" style="padding:2px 6px;font-size:11px">🖨️</button> ')
           + '<button class="btn bo bs" onclick="pliCompraAbrir(' + c.id + ')" style="padding:2px 6px;font-size:11px">✏️</button> '
@@ -73967,6 +74009,81 @@ function pliCmpRenderHechas(cont) {
   html += '<div class="pli-cel-chica" style="margin-top:8px">Las canceladas no cuentan como cubiertas. '
     + 'Las pedidas sí, porque ya están comprometidas.</div>';
   cont.innerHTML = html;
+}
+
+// Los lugares que ya se usaron, para no escribirlos de nuevo. Salen de las compras que hay en
+// pantalla: no hace falta una tabla de lugares para dos o tres depósitos.
+function pliLugaresUsados() {
+  var vistos = [], dl = document.getElementById('pli-dl-lugar');
+  (PLI.cmpCompras || []).forEach(function(c) {
+    var l = (c.lugar_entrega || '').trim();
+    if (l && vistos.indexOf(l) < 0) vistos.push(l);
+  });
+  if (!PLI.ultimoLugar && vistos.length) PLI.ultimoLugar = vistos[0];
+  if (dl) dl.innerHTML = vistos.map(function(l) { return '<option value="' + pliEsc(l) + '">'; }).join('');
+}
+
+// ── CONFIRMAR LA RECEPCIÓN (V1082) ────────────────────────────────────────
+//
+// Pablo, 24/9/2026: «tengo que poder confirmar la recepción de la orden de compra para que me
+// afecte el stock y me lo ponga como recibido». Con la cantidad editable, porque el proveedor
+// puede mandar menos de lo pedido: al stock entra lo que llegó.
+function pliRecepAbrir(id) {
+  var c = (PLI.cmpCompras || []).filter(function(x) { return x.id === id; })[0];
+  if (!c) return;
+  PLI.recep = c;
+  var i = PLI.insumos.filter(function(x) { return x.id === c.insumo_id; })[0];
+  var ya = c.recibido_cantidad != null;
+  document.getElementById('pli-rec-que').innerHTML = '<b>' + pliEsc(c.insumo_nombre) + '</b> · '
+    + pliEsc(c.proveedor_texto || 'sin proveedor') + ' · pedido: <b>' + pliN(c.cantidad) + ' '
+    + pliEsc(c.unidad_compra) + '</b>';
+  document.getElementById('pli-rec-cant').value = ya ? c.recibido_cantidad : c.cantidad;
+  document.getElementById('pli-rec-fecha').value = c.recibido_fecha || pliHoyISO();
+  document.getElementById('pli-rec-remito').value = c.recibido_remito || '';
+  // EN QUÉ UNIDAD ENTRA AL STOCK, dicho antes de confirmar: la compra va en unidad de compra y el
+  // stock del insumo en unidad de uso. Recibir 8 millares son 8.000 etiquetas, y el que confirma
+  // tiene que ver ese número para darse cuenta si se equivocó de casillero.
+  document.getElementById('pli-rec-unidad').textContent = i
+    ? 'en ' + i.unidad_compra + (Number(i.factor_compra) !== 1
+      ? ' — al stock entra por ' + i.unidad_uso + ' (1 ' + i.unidad_compra + ' = ' + pliN(i.factor_compra) + ')' : '')
+    : '';
+  document.getElementById('pli-rec-aviso').innerHTML = ya
+    ? '<span style="color:#92400e">Ya se recibieron <b>' + pliN(c.recibido_cantidad) + ' '
+      + pliEsc(c.unidad_compra) + '</b>. Si corregís la cantidad, al stock se le suma o se le resta la diferencia.</span>'
+    : 'Al confirmar, esta cantidad se le suma al stock del insumo y la compra queda como recibida.';
+  document.getElementById('pli-rec-deshacer').style.display = ya ? '' : 'none';
+  document.getElementById('pli-mb-recep').classList.add('on');
+}
+
+function pliRecepGuardar() {
+  var c = PLI.recep; if (!c) return;
+  var cant = document.getElementById('pli-rec-cant').value;
+  if (!(Number(cant) > 0)) return toast('¿Cuánto llegó?', 'er');
+  pliApi('/planes/' + PLI.cmpPlanId + '/compras/' + c.id + '/recepcion', { method: 'POST', body: JSON.stringify({
+    cantidad: cant,
+    fecha: document.getElementById('pli-rec-fecha').value,
+    remito: document.getElementById('pli-rec-remito').value.trim(),
+  }) }).then(function(r) {
+    if (!r.ok) { pliErr(r); return; }
+    toast('✓ Recibido y sumado al stock', 'ok');
+    document.getElementById('pli-mb-recep').classList.remove('on');
+    pliCmpCargar();
+    // El stock del insumo cambió: la lista de insumos que tiene la pantalla queda vieja.
+    if (typeof pliInsCargar === 'function') pliInsCargar();
+  });
+}
+
+function pliRecepDeshacer() {
+  var c = PLI.recep; if (!c) return;
+  if (!confirm('Se le restan ' + pliN(c.recibido_cantidad) + ' ' + c.unidad_compra
+    + ' al stock y la compra vuelve a quedar pedida. ¿Sigo?')) return;
+  pliApi('/planes/' + PLI.cmpPlanId + '/compras/' + c.id + '/recepcion', { method: 'DELETE' }).then(function(r) {
+    if (!r.ok) { pliErr(r); return; }
+    toast('Recepción deshecha', 'ok');
+    document.getElementById('pli-mb-recep').classList.remove('on');
+    pliCmpCargar();
+    if (typeof pliInsCargar === 'function') pliInsCargar();
+  });
 }
 
 // ── LA ORDEN DE COMPRA, PARA MANDARLE AL PROVEEDOR (V1080) ────────────────
@@ -73999,7 +74116,12 @@ function pliOrdenHtml(d) {
       + '<div class="pli-oc-nro">Nº ' + pliEsc(d.nro_orden || 's/n') + '</div>'
       + '<div class="pli-oc-chico">Emitida el ' + pliEsc(hoy) + '</div></div></div>'
     + '<table class="pli-oc-datos"><tr><td>Proveedor</td><td><b>' + pliEsc(d.proveedor || '—') + '</b></td>'
-      + '<td>Fecha del pedido</td><td>' + pliEsc(d.fecha) + '</td></tr></table>'
+      + '<td>Fecha del pedido</td><td>' + pliEsc(d.fecha) + '</td></tr>'
+      // DÓNDE SE ENTREGA: sin esto el proveedor tiene que preguntar, y es de las primeras cosas
+      // que mira. Si no se cargó, el renglón no se dibuja en vez de decir «—», que en un papel
+      // que se manda afuera se lee como que no hay que entregarlo en ningún lado.
+      + (d.lugar_entrega ? '<tr><td>Entregar en</td><td colspan="3"><b>'
+        + pliEsc(d.lugar_entrega) + '</b></td></tr>' : '') + '</table>'
     + '<table class="pli-oc-tbl">'
     + '<colgroup><col style="width:10%"><col style="width:25%"><col style="width:11%"><col style="width:8%">'
     + '<col style="width:15%"><col style="width:18%"><col style="width:13%"></colgroup>'
@@ -74100,6 +74222,10 @@ function pliCompraAbrir(id) {
   document.getElementById('pli-cmp-prov').value = c ? (c.proveedor_texto || '') : '';
   document.getElementById('pli-cmp-orden').value = c ? (c.nro_orden || '') : '';
   document.getElementById('pli-cmp-notas').value = c ? (c.notas || '') : '';
+  // El lugar de entrega se propone: casi siempre se pide a la misma planta, y volver a
+  // escribirlo en cada compra es la manera más fácil de que termine vacío.
+  pliLugaresUsados();
+  document.getElementById('pli-cmp-lugar').value = c ? (c.lugar_entrega || '') : (PLI.ultimoLugar || '');
   document.getElementById('pli-cmp-precio').value = c && c.precio != null ? c.precio : '';
   document.getElementById('pli-cmp-moneda').value = c && c.moneda ? c.moneda : 'ARS';
   pliCompraUnidad();
@@ -74124,6 +74250,7 @@ function pliCompraGuardar() {
     proveedor_texto: document.getElementById('pli-cmp-prov').value.trim(),
     nro_orden: document.getElementById('pli-cmp-orden').value.trim(),
     notas: document.getElementById('pli-cmp-notas').value.trim(),
+    lugar_entrega: document.getElementById('pli-cmp-lugar').value.trim(),
     // Vacío quiere decir «el del proveedor» en el alta, y «sacale el precio» al corregir: el
     // servidor distingue los dos casos, acá se manda tal cual lo que se escribió.
     precio: document.getElementById('pli-cmp-precio').value.trim(),
@@ -74137,6 +74264,7 @@ function pliCompraGuardar() {
              : pliApi(base, { method: 'POST', body: JSON.stringify(body) });
   p.then(function(r) {
     if (!r.ok) { pliErr(r); return; }
+    PLI.ultimoLugar = body.lugar_entrega || PLI.ultimoLugar;
     toast('✓ Compra registrada', 'ok');
     document.getElementById('pli-mb-compra').classList.remove('on');
     pliCmpCargar();
