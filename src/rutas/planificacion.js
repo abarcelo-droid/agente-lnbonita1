@@ -792,6 +792,15 @@ function registrarPrecioProveedor(insumoId, provId, d, origen, userId) {
 // que cargar el mismo número en cada plan, y un insumo que no estaba en ningún
 // plan no tenía dónde anotar su stock aunque el depósito lo tuviera.
 // En unidad de USO, que es en la que la receta lo consume.
+// Los insumos con al menos una recepción confirmada. Ver dónde se usa en armarContexto.
+function insumosConRecepcion() {
+  return new Set(
+    db.prepare(`SELECT DISTINCT insumo_id FROM pli_compras
+        WHERE eliminado_en IS NULL AND recibido_cantidad IS NOT NULL AND recibido_cantidad > 0`)
+      .all().map(r => r.insumo_id)
+  );
+}
+
 function stockDeInsumos(soc) {
   return new Map(
     db.prepare('SELECT id, stock_inicial FROM pli_insumos WHERE sociedad_id=? AND eliminado_en IS NULL')
@@ -2279,6 +2288,10 @@ function armarContexto(soc, plan) {
   // El stock vive en el INSUMO, no en el plan: es lo que hay en el depósito, uno
   // solo, y el mismo para cualquier plan que se calcule.
   const existencias = stockDeInsumos(soc);
+  // Qué insumos tienen mercadería que ENTRÓ POR UNA RECEPCIÓN (V1085): con eso el motor sabe si un
+  // stock que supera la necesidad es un tipeo o un sobrante explicable. Se mira en todo el módulo y
+  // no sólo en este plan: la mercadería que llegó por el plan pasado está en el mismo depósito.
+  const recibidos = insumosConRecepcion();
   // LO QUE CUBRE ES LO QUE TODAVÍA ESTÁ EN VIAJE, NO LO PEDIDO (V1084).
   //
   // La cobertura se arma sumando DOS cosas contra la misma necesidad: lo que hay en el depósito
@@ -2304,7 +2317,7 @@ function armarContexto(soc, plan) {
       GROUP BY insumo_id
     `).all(plan.id).map(c => [c.insumo_id, c.total])
   );
-  return { plan, productos, objetivos, recetas, insumos, existencias, comprado };
+  return { plan, productos, objetivos, recetas, insumos, existencias, comprado, recibidos };
 }
 
 // Los planes confirmados ANTES de que existiera buckets_json no tienen el
@@ -2328,6 +2341,7 @@ function bucketsDesdeSnapshot(plan) {
       recetas: new Map(s.recetas || []),
       insumos: new Map((s.insumos || []).map(i => [i.id, i])),
       existencias: stockDeInsumos(plan.sociedad_id),
+      recibidos: insumosConRecepcion(),
       // Lo mismo que en armarContexto: lo que cubre es lo que todavía viene (V1084). Si acá
       // quedara la cuenta vieja, el número cambiaría al confirmar el plan.
       comprado: new Map(

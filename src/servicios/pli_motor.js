@@ -134,6 +134,7 @@ function fmtFormula(q, unidadProd, linea, aporte, unidadUso) {
  *   insumos     Map(insumo_id -> insumo)
  *   existencias Map(insumo_id -> cantidad en unidad de uso)
  *   comprado    Map(insumo_id -> bultos ya comprados, en unidad de compra)
+ *   recibidos   Set(insumo_id) con recepciones confirmadas — opcional
  * @returns {{lineas, cobertura, totales_por_moneda, advertencias}}
  *
  * Cada línea trae además `buckets[]`: el detalle por semana de cosecha con la
@@ -148,6 +149,11 @@ export function calcularPlan(ctx) {
   // Lo ya comprado por insumo, en UNIDAD DE COMPRA. Cubre necesidad igual que la
   // existencia, y se aplica a las semanas más tempranas primero.
   const comprado    = ctx.comprado || new Map();
+  // LOS INSUMOS QUE TIENEN RECEPCIONES CONFIRMADAS (V1085). Sirve para una sola cosa: saber si un
+  // stock que supera la necesidad es un tipeo —que hay que frenar— o mercadería que de verdad
+  // llegó, que no. Opcional: sin esto el motor se comporta exactamente como antes, y los planes
+  // que ya están confirmados no cambian de veredicto.
+  const recibidos   = ctx.recibidos || new Set();
 
   // MODO COSTEO: se usa para sacar el costo unitario de un producto, no para
   // comprar. Apaga el lot sizing (múltiplo, mínimo del proveedor y ceil) porque
@@ -187,6 +193,9 @@ export function calcularPlan(ctx) {
     // la cantidad completa, este caso no existe más.
     receta_no_computa: [],
     existencia_supera_necesidad: [],
+    // El mismo sobrante, cuando SÍ se puede explicar: la mercadería entró por una recepción. No
+    // bloquea, avisa. Ver más abajo.
+    sobra_por_recepcion: [],
     insumos_sin_precio: [],
     ratios_sospechosos: []
   };
@@ -475,7 +484,18 @@ export function calcularPlan(ctx) {
     if (declarada > brutaTotal + EPS) {
       // El clamp absorbía en silencio un tipeo de 120.000 por 12.000 y la fila
       // mostraba "a comprar 0" como si fuera correcto.
-      cobertura.existencia_supera_necesidad.push({
+      //
+      // PERO NO TODO SOBRANTE ES UN TIPEO (V1085). Este chequeo se escribió cuando el stock se
+      // cargaba a mano y era el único origen posible. Desde que hay recepciones, el módulo mismo
+      // produce sobrantes: manda comprar 80 millares porque el pallet viene de a 10 y hacían falta
+      // 75, se reciben esos 80, y al confirmar el plan siguiente se bloqueaba por el sobrante que
+      // él mismo prescribió. El operador no tiene nada que corregir y la única salida era tildar
+      // «forzar» todas las veces — que es como se apaga un semáforo.
+      //
+      // Así que con recepciones el sobrante AVISA en vez de frenar. Sin ellas, frena igual que
+      // antes: ahí el número lo escribió alguien y el tipeo de 120.000 por 12.000 sigue existiendo.
+      const balde = recibidos.has(insumoId) ? cobertura.sobra_por_recepcion : cobertura.existencia_supera_necesidad;
+      balde.push({
         insumo_id: insumoId, insumo: ins.nombre,
         declarada, necesidad: brutaTotal, unidad_uso: ins.unidad_uso
       });
@@ -645,6 +665,12 @@ export function calcularPlan(ctx) {
   }
   for (const p of cobertura.productos_sin_objetivo) {
     advertencias.push(`"${p.nombre}" no tiene objetivo cargado en este plan`);
+  }
+  // El sobrante explicable se dice, con las dos cantidades: es plata parada en el depósito y hay
+  // que poder verla. Pero no frena, porque no hay nada que corregir.
+  for (const e of cobertura.sobra_por_recepcion) {
+    advertencias.push(`"${e.insumo}": hay ${fmtNum(e.declarada)} ${e.unidad_uso} en el depósito y `
+      + `el plan consume ${fmtNum(e.necesidad)} — sobrante de lo que ya se recibió`);
   }
 
   return { lineas, cobertura, totales_por_moneda, advertencias };
