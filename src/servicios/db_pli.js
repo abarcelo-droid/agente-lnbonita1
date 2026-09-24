@@ -467,6 +467,18 @@ try {
   // otro número con el mismo número de orden — que es exactamente lo contrario de firme.
   addCol('pli_compras', 'precio',  'REAL');
   addCol('pli_compras', 'moneda',  'TEXT');
+  // DÓNDE SE ENTREGA (V1082). Pablo, 24/9/2026: «no tengo lugar para poner lugar de entrega, que
+  // es importante». Va en la COMPRA y no en la empresa: la misma planta compra para el depósito,
+  // para la finca y para retirar el proveedor, y eso cambia pedido por pedido.
+  addCol('pli_compras', 'lugar_entrega', 'TEXT');
+  // LA RECEPCIÓN. recibido_cantidad es LO QUE YA SE LE SUMÓ AL STOCK, en unidad de compra: con ese
+  // número, confirmar dos veces no duplica, corregir ajusta por la diferencia y deshacer resta
+  // exactamente lo que entró. Sin él, la única manera de saber cuánto revertir sería adivinar.
+  addCol('pli_compras', 'recibido_cantidad', 'REAL');
+  addCol('pli_compras', 'recibido_fecha',    'TEXT');
+  addCol('pli_compras', 'recibido_remito',   'TEXT');
+  addCol('pli_compras', 'recibido_en',       'TEXT');
+  addCol('pli_compras', 'recibido_por_id',   'INTEGER');
   addCol('pli_insumo_precios', 'tc_usado',      'REAL');
   addCol('pli_insumo_precios', 'tc_origen',     'TEXT');
   // De qué proveedor es ese precio. NULL en los registros viejos: son del insumo,

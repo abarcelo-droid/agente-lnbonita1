@@ -1961,12 +1961,13 @@ router.post('/planes/:id/compras', wrap((req, res) => {
   const { precio, moneda } = precioDeLaCompra(insumoId, prov, b);
   const r = db.prepare(`
     INSERT INTO pli_compras (plan_id, insumo_id, fecha, cantidad, proveedor_texto, nro_orden, estado, notas,
-      precio, moneda, creado_por_id, actualizado_por_id)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+      precio, moneda, lugar_entrega, creado_por_id, actualizado_por_id)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
   `).run(plan.id, insumoId, fecha, cantidad, prov,
          vTexto(b.nro_orden, 'El número de orden', { max: 60 }), estado,
          vTexto(b.notas, 'Las notas', { max: 300 }),
-         precio, precio === null ? null : (moneda || 'ARS'), req.user.id, req.user.id);
+         precio, precio === null ? null : (moneda || 'ARS'),
+         vTexto(b.lugar_entrega, 'El lugar de entrega', { max: 160 }), req.user.id, req.user.id);
   logPli('compra', r.lastInsertRowid, 'alta',
     { plan_id: plan.id, insumo: ins.nombre, cantidad, unidad: ins.unidad_compra, fecha }, req.user.id);
   res.json({ ok: true, id: r.lastInsertRowid });
@@ -1981,6 +1982,17 @@ router.patch('/planes/:id/compras/:compraId', wrap((req, res) => {
   const b = req.body || {};
   const estado = b.estado === undefined ? a.estado : String(b.estado);
   if (!['pedido', 'recibido', 'cancelado'].includes(estado)) throw bad('Estado inválido');
+  const recibida = Number(a.recibido_cantidad) > 0;
+  // EL INSUMO DE UNA COMPRA RECIBIDA NO SE CAMBIA. El stock ya entró en el insumo viejo: moverlo
+  // sería sacar de uno y poner en otro, y si se hiciera mal quedarían los dos mal. Primero se
+  // deshace la recepción, que es una decisión explícita y queda anotada.
+  if (recibida && b.insumo_id !== undefined && parseInt(b.insumo_id, 10) !== a.insumo_id) {
+    throw bad('Esta compra ya se recibió y su mercadería entró al stock de ese insumo. Deshacé la recepción antes de cambiarlo.');
+  }
+  // Y PONERLA EN 'pedido' O 'cancelado' A MANO DEVUELVE EL STOCK. Sin esto, cancelar una compra
+  // recibida dejaba en el depósito mercadería que nadie recibió —y es el camino natural: se
+  // cancela desde el mismo formulario donde se la editó—.
+  if (recibida && estado !== 'recibido') revertirRecepcion(a, req.user.id);
   // El precio se corrige a mano y nada más: acá NO se vuelve a proponer el del proveedor, porque
   // corregir la cantidad de una orden ya mandada no puede cambiarle el precio por atrás.
   const precio = b.precio === undefined ? a.precio
@@ -1988,7 +2000,7 @@ router.patch('/planes/:id/compras/:compraId', wrap((req, res) => {
   const moneda = b.moneda === undefined ? a.moneda : (['ARS', 'USD'].includes(b.moneda) ? b.moneda : a.moneda);
   db.prepare(`
     UPDATE pli_compras SET fecha=?, cantidad=?, proveedor_texto=?, nro_orden=?, estado=?, notas=?,
-      precio=?, moneda=?, actualizado_en=${AHORA}, actualizado_por_id=? WHERE id=?
+      precio=?, moneda=?, lugar_entrega=?, actualizado_en=${AHORA}, actualizado_por_id=? WHERE id=?
   `).run(b.fecha === undefined ? a.fecha : vFecha(b.fecha, 'La fecha'),
          b.cantidad === undefined ? a.cantidad : vNum(b.cantidad, 'La cantidad', { min: 1e-9 }),
          b.proveedor_texto === undefined ? a.proveedor_texto : vTexto(b.proveedor_texto, 'El proveedor', { max: 120 }),
@@ -1996,6 +2008,7 @@ router.patch('/planes/:id/compras/:compraId', wrap((req, res) => {
          estado,
          b.notas === undefined ? a.notas : vTexto(b.notas, 'Las notas', { max: 300 }),
          precio, precio === null ? null : (moneda || 'ARS'),
+         b.lugar_entrega === undefined ? a.lugar_entrega : vTexto(b.lugar_entrega, 'El lugar de entrega', { max: 160 }),
          req.user.id, cid);
   logPli('compra', cid, 'edicion', { antes: a, despues: b }, req.user.id);
   res.json({ ok: true });
@@ -2016,6 +2029,85 @@ function totalDeOrden(renglones) {
     varias_monedas: monedas.length > 1 ? 1 : 0,
   };
 }
+
+// ── RECIBIR UNA COMPRA MUEVE EL STOCK (V1082) ─────────────────────────────
+//
+// Pablo, 24/9/2026: «tengo que poder confirmar la recepción de la orden de compra para que me
+// afecte el stock y me lo ponga como recibido». Y eligió poder decir CUÁNTO llegó, porque el
+// proveedor puede mandar menos de lo pedido.
+//
+// UNA SOLA PUERTA, Y MUEVE LA DIFERENCIA. El stock no se suma «al confirmar»: se lleva a lo que
+// corresponde según lo que ya se había aplicado, que queda anotado en la compra. Así confirmar
+// dos veces no duplica, corregir de 8.000 a 6.000 devuelve 2.000, y deshacer resta lo que entró.
+//
+// Y SE CONVIERTE DE UNIDAD. La compra está en unidad de COMPRA —millares, bolsones— y el stock
+// del insumo vive en unidad de USO, que es en la que la receta lo consume. Recibir 8 millares de
+// etiquetas y sumarle 8 al stock sería errarle por mil.
+function moverStockPorRecepcion(compra, nuevaCantidad, userId) {
+  const ins = db.prepare('SELECT id, factor_compra, unidad_uso, unidad_compra FROM pli_insumos WHERE id=?')
+    .get(compra.insumo_id);
+  if (!ins) throw bad('El insumo de esa compra ya no existe');
+  const antes = Number(compra.recibido_cantidad) || 0;
+  const delta = (Number(nuevaCantidad) || 0) - antes;
+  if (!delta) return { delta: 0, en_uso: 0 };
+  const enUso = Math.round(delta * (Number(ins.factor_compra) || 1) * 1e6) / 1e6;
+  // El stock no puede quedar negativo: si alguien lo corrigió a mano a la baja entre medio,
+  // deshacer restaría más de lo que hay. Se frena en cero y queda en el log.
+  db.prepare(`UPDATE pli_insumos
+      SET stock_inicial = MAX(0, ROUND(stock_inicial + ?, 6)), stock_actualizado_en=${AHORA}
+    WHERE id=?`).run(enUso, ins.id);
+  logPli('insumo', ins.id, 'stock_por_recepcion',
+    { compra_id: compra.id, delta_compra: delta, delta_uso: enUso, unidad: ins.unidad_uso }, userId);
+  return { delta, en_uso: enUso, unidad_uso: ins.unidad_uso };
+}
+
+// Deshacer lo aplicado y dejar la compra sin recepción. Se usa al desconfirmar, al cancelar y al
+// borrar: si el stock no vuelve, el depósito queda con mercadería que nadie recibió.
+const revertirRecepcion = db.transaction((compra, userId) => {
+  if (!(Number(compra.recibido_cantidad) > 0)) return false;
+  moverStockPorRecepcion(compra, 0, userId);
+  db.prepare(`UPDATE pli_compras SET recibido_cantidad=NULL, recibido_fecha=NULL, recibido_remito=NULL,
+      recibido_en=NULL, recibido_por_id=NULL, actualizado_en=${AHORA}, actualizado_por_id=? WHERE id=?`)
+    .run(userId, compra.id);
+  return true;
+});
+
+router.post('/planes/:id/compras/:compraId/recepcion', wrap((req, res) => {
+  const soc = getSociedadId(req);
+  const plan = getPlan(soc, parseInt(req.params.id, 10));
+  const cid = parseInt(req.params.compraId, 10);
+  const c = db.prepare('SELECT * FROM pli_compras WHERE id=? AND plan_id=? AND eliminado_en IS NULL').get(cid, plan.id);
+  if (!c) throw notFound('Compra no encontrada');
+  if (c.estado === 'cancelado') throw bad('Esa compra está cancelada: no se puede recibir.');
+  const cantidad = vNum(req.body?.cantidad, 'La cantidad recibida', { min: 1e-9 });
+  const fecha = vFecha(req.body?.fecha, 'La fecha de recepción') || hoyISO();
+  const remito = vTexto(req.body?.remito, 'El remito', { max: 60 });
+  let movido = null;
+  db.transaction(() => {
+    movido = moverStockPorRecepcion(c, cantidad, req.user.id);
+    db.prepare(`UPDATE pli_compras SET estado='recibido', recibido_cantidad=?, recibido_fecha=?,
+        recibido_remito=?, recibido_en=${AHORA}, recibido_por_id=?,
+        actualizado_en=${AHORA}, actualizado_por_id=? WHERE id=?`)
+      .run(cantidad, fecha, remito, req.user.id, req.user.id, cid);
+  })();
+  logPli('compra', cid, 'recepcion', { cantidad, fecha, remito, stock: movido }, req.user.id);
+  res.json({ ok: true, data: { cantidad, movido } });
+}));
+
+router.delete('/planes/:id/compras/:compraId/recepcion', wrap((req, res) => {
+  const soc = getSociedadId(req);
+  const plan = getPlan(soc, parseInt(req.params.id, 10));
+  const cid = parseInt(req.params.compraId, 10);
+  const c = db.prepare('SELECT * FROM pli_compras WHERE id=? AND plan_id=? AND eliminado_en IS NULL').get(cid, plan.id);
+  if (!c) throw notFound('Compra no encontrada');
+  db.transaction(() => {
+    revertirRecepcion(c, req.user.id);
+    db.prepare(`UPDATE pli_compras SET estado='pedido', actualizado_en=${AHORA}, actualizado_por_id=? WHERE id=?`)
+      .run(req.user.id, cid);
+  })();
+  logPli('compra', cid, 'recepcion_deshecha', { devuelto: c.recibido_cantidad }, req.user.id);
+  res.json({ ok: true });
+}));
 
 // ── LA ORDEN DE COMPRA (V1080) ────────────────────────────────────────────
 //
@@ -2064,6 +2156,10 @@ router.get('/planes/:id/compras/:compraId/orden', wrap((req, res) => {
     nro_orden: nro || null,
     proveedor: prov || null,
     fecha: base.fecha,
+    // Dónde se entrega: el de la compra que se apretó, y si esa no lo tiene, el primero que haya
+    // entre los renglones de la misma orden —es un dato de la orden, no de cada renglón—.
+    lugar_entrega: base.lugar_entrega
+      || (renglones.map((r) => r.lugar_entrega).filter(Boolean)[0] || null),
     renglones: renglones.map((r) => ({ id: r.id, insumo: r.insumo_nombre, codigo: r.insumo_codigo,
       cantidad: r.cantidad, unidad: r.unidad_compra, precio: r.precio, moneda: r.moneda,
       subtotal: r.precio == null ? null : Math.round(r.precio * r.cantidad * 100) / 100,
@@ -2078,8 +2174,14 @@ router.delete('/planes/:id/compras/:compraId', wrap((req, res) => {
   const cid = parseInt(req.params.compraId, 10);
   const a = db.prepare('SELECT * FROM pli_compras WHERE id=? AND plan_id=? AND eliminado_en IS NULL').get(cid, plan.id);
   if (!a) throw notFound('Compra no encontrada');
-  db.prepare(`UPDATE pli_compras SET eliminado_en=${AHORA}, eliminado_por_id=? WHERE id=?`).run(req.user.id, cid);
-  logPli('compra', cid, 'baja', { insumo_id: a.insumo_id, cantidad: a.cantidad }, req.user.id);
+  // BORRAR UNA COMPRA RECIBIDA DEVUELVE EL STOCK. Si no, en el depósito queda anotada mercadería
+  // que entró por una compra que ya no existe, y no hay de dónde sacar que sobraba.
+  db.transaction(() => {
+    revertirRecepcion(a, req.user.id);
+    db.prepare(`UPDATE pli_compras SET eliminado_en=${AHORA}, eliminado_por_id=? WHERE id=?`).run(req.user.id, cid);
+  })();
+  logPli('compra', cid, 'baja',
+    { insumo_id: a.insumo_id, cantidad: a.cantidad, stock_devuelto: a.recibido_cantidad || 0 }, req.user.id);
   res.json({ ok: true });
 }));
 

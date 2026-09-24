@@ -42,8 +42,8 @@ function base() {
   }
   // Las columnas que llegaron por migración, leídas de db_pli.js: si mañana se agrega otra, este
   // banco de pruebas la toma sin que haya que tocarlo.
-  for (const m of DDL.match(/addCol\('[a-z_]+',\s*'[a-z_]+',\s*'[A-Z]+'\)/g) || []) {
-    const [, t, col, tipo] = /addCol\('([a-z_]+)',\s*'([a-z_]+)',\s*'([A-Z]+)'\)/.exec(m);
+  for (const m of DDL.match(/addCol\('[a-z_]+',\s*'[a-z_]+',\s*'[^']+'\)/g) || []) {
+    const [, t, col, tipo] = /addCol\('([a-z_]+)',\s*'([a-z_]+)',\s*'([^']+)'\)/.exec(m);
     if (!TABLAS.includes(t)) continue;
     if (!db.prepare(`PRAGMA table_info(${t})`).all().map((c) => c.name).includes(col)) {
       db.exec(`ALTER TABLE ${t} ADD COLUMN ${col} ${tipo}`);
@@ -182,6 +182,116 @@ test('la pantalla dice qué precio y qué moneda van a quedar firmes antes de gu
   // Y editando no se pisa la moneda de una compra ya pactada.
   assert.match(f, /var editando = !!document\.getElementById\('pli-cmp-id'\)\.value;/);
   assert.match(fuente(PANEL, 'function pliCompraUnidad()'), /pliCompraPrecioSugerido\(\);/);
+});
+
+// ── RECIBIR MUEVE EL STOCK (V1082) ─────────────────────────────────────────
+//
+// Pablo, 24/9/2026: «tengo que poder confirmar la recepción de la orden de compra para que me
+// afecte el stock y me lo ponga como recibido», y eligió poder decir CUÁNTO llegó.
+const mover = (db) => new Function('db', 'bad', 'logPli', 'AHORA', [
+  fuente(RUTA, 'function moverStockPorRecepcion(compra, nuevaCantidad, userId)'),
+  'return moverStockPorRecepcion;',
+].join('\n'))(db, (m) => { throw new Error(m); }, () => {}, "datetime('now','localtime')");
+
+const stockDe = (db, id) => db.prepare('SELECT stock_inicial FROM pli_insumos WHERE id=?').get(id || 1).stock_inicial;
+
+test('al recibir, la cantidad se convierte a la unidad en la que vive el stock', () => {
+  const db = base();
+  // UN MILLAR DE ETIQUETAS SON MIL ETIQUETAS. La compra va en unidad de COMPRA y el stock del
+  // insumo en unidad de USO, que es en la que la receta lo consume: sumar 8 «millares» como 8
+  // sería errarle por mil, y el plan diría que falta comprar todo de nuevo.
+  db.exec(`INSERT INTO pli_insumos (id, sociedad_id, nombre, unidad_compra, unidad_uso, factor_compra, stock_inicial)
+           VALUES (2, 1, 'ETIQUETA DAMASCO', 'MILLAR', 'unidad', 1000, 500)`);
+  const m = mover(db);
+  const r = m({ id: 1, insumo_id: 2, recibido_cantidad: null }, 8, 5);
+  assert.deepEqual([r.delta, r.en_uso], [8, 8000]);
+  assert.equal(stockDe(db, 2), 8500, 'el stock quedó en la unidad equivocada');
+});
+
+test('recibir dos veces no duplica: se mueve la DIFERENCIA con lo ya aplicado', () => {
+  const db = base();
+  db.prepare('UPDATE pli_insumos SET factor_compra=1, stock_inicial=0 WHERE id=1').run();
+  const m = mover(db);
+  m({ id: 1, insumo_id: 1, recibido_cantidad: null }, 8000, 5);
+  assert.equal(stockDe(db), 8000);
+  // Confirmar de nuevo lo MISMO no suma nada: es el mismo hecho, no dos entregas.
+  // Ni siquiera toca el insumo: sin el corte, escribiría un movimiento de cero y dejaría dicho
+  // que el stock se actualizó hoy, cuando no se movió nada.
+  db.prepare("UPDATE pli_insumos SET stock_actualizado_en='2020-01-01' WHERE id=1").run();
+  assert.equal(m({ id: 1, insumo_id: 1, recibido_cantidad: 8000 }, 8000, 5).delta, 0);
+  assert.equal(stockDe(db), 8000);
+  assert.equal(db.prepare('SELECT stock_actualizado_en t FROM pli_insumos WHERE id=1').get().t, '2020-01-01',
+    'un movimiento de cero dejó dicho que el stock se tocó');
+  // Corregir a menos devuelve la diferencia: llegaron 6.000 de los 8.000 que se habían anotado.
+  m({ id: 1, insumo_id: 1, recibido_cantidad: 8000 }, 6000, 5);
+  assert.equal(stockDe(db), 6000, 'corregir la cantidad recibida no ajustó el stock');
+  // Y a más, la suma.
+  m({ id: 1, insumo_id: 1, recibido_cantidad: 6000 }, 9000, 5);
+  assert.equal(stockDe(db), 9000);
+  // Deshacer devuelve todo.
+  m({ id: 1, insumo_id: 1, recibido_cantidad: 9000 }, 0, 5);
+  assert.equal(stockDe(db), 0);
+});
+
+test('el stock no queda negativo aunque alguien lo haya corregido a mano por abajo', () => {
+  const db = base();
+  db.prepare('UPDATE pli_insumos SET factor_compra=1, stock_inicial=0 WHERE id=1').run();
+  const m = mover(db);
+  m({ id: 1, insumo_id: 1, recibido_cantidad: null }, 500, 5);
+  // Entre medio alguien arqueó el depósito y lo dejó en 100.
+  db.prepare('UPDATE pli_insumos SET stock_inicial=100 WHERE id=1').run();
+  m({ id: 1, insumo_id: 1, recibido_cantidad: 500 }, 0, 5);
+  assert.equal(stockDe(db), 0, 'el stock quedó en negativo, que no es una cantidad posible');
+});
+
+test('cancelar, borrar o cambiarle el insumo a una compra recibida no descuadra el depósito', () => {
+  const edicion = fuente(RUTA, "router.patch('/planes/:id/compras/:compraId'");
+  // Cancelarla desde el formulario es el camino natural, y sin esto dejaba en el depósito
+  // mercadería que nadie recibió.
+  assert.match(edicion, /if \(recibida && estado !== 'recibido'\) revertirRecepcion\(a, req\.user\.id\);/);
+  // Y el insumo no se cambia: el stock ya entró en el viejo. Se mira la CONDICIÓN, no el
+  // mensaje: el texto queda escrito igual aunque el cerrojo no se aplique nunca.
+  assert.match(edicion,
+    /if \(recibida && b\.insumo_id !== undefined && parseInt\(b\.insumo_id, 10\) !== a\.insumo_id\) \{/);
+  assert.match(edicion, /ya se recibió y su mercadería entró al stock de ese insumo/);
+  const baja = fuente(RUTA, "router.delete('/planes/:id/compras/:compraId'");
+  assert.match(baja, /revertirRecepcion\(a, req\.user\.id\);/);
+  // Todo lo que toca el stock va en una transacción: a medio camino, el depósito queda mintiendo.
+  assert.match(baja, /db\.transaction\(\(\) => \{/);
+  const recep = fuente(RUTA, "router.post('/planes/:id/compras/:compraId/recepcion'");
+  assert.match(recep, /db\.transaction\(\(\) => \{/);
+  // Una compra cancelada no se recibe.
+  assert.match(recep, /está cancelada: no se puede recibir/);
+});
+
+test('la ventana de recepción propone lo pedido y dice en qué unidad entra al stock', () => {
+  const f = fuente(PANEL, 'function pliRecepAbrir(id)');
+  assert.match(f, /document\.getElementById\('pli-rec-cant'\)\.value = ya \? c\.recibido_cantidad : c\.cantidad;/);
+  // EN QUÉ UNIDAD ENTRA, antes de confirmar: es el número que hay que poder revisar.
+  assert.match(f, /al stock entra por ' \+ i\.unidad_uso/);
+  // Y si ya estaba recibida, que se va a mover la diferencia.
+  assert.match(f, /al stock se le suma o se le resta la diferencia/);
+  assert.match(f, /pli-rec-deshacer'\)\.style\.display = ya \? '' : 'none';/);
+  // Lo que realmente llegó se ve en la lista cuando es menos de lo pedido: si no, «recibido» se
+  // lee como que entró todo.
+  const i = PANEL.lastIndexOf('Compras registradas</div>');
+  assert.match(PANEL.slice(i, i + 3500), /llegaron ' \+ pliN\(c\.recibido_cantidad\)/);
+});
+
+test('el lugar de entrega va en la compra, sale en el documento y se propone el último', () => {
+  assert.match(PANEL, /<input id="pli-cmp-lugar" list="pli-dl-lugar"/);
+  // Se propone el último usado: casi siempre se pide a la misma planta, y volver a escribirlo en
+  // cada compra es la manera más fácil de que termine vacío.
+  assert.match(fuente(PANEL, 'function pliCompraAbrir(id)'), /\(PLI\.ultimoLugar \|\| ''\)/);
+  assert.match(fuente(PANEL, 'function pliLugaresUsados()'), /dl\.innerHTML = vistos\.map/);
+  // En el documento, y SIN renglón si está vacío: un «—» en un papel que se manda afuera se lee
+  // como que no hay que entregarlo en ningún lado.
+  const doc = fuente(PANEL, 'function pliOrdenHtml(d)');
+  assert.match(doc, /d\.lugar_entrega \? '<tr><td>Entregar en<\/td>/);
+  assert.match(armar(DOC({ lugar_entrega: 'Planta Puente Cordón' })), /Entregar en[\s\S]*Planta Puente Cordón/);
+  assert.ok(!/Entregar en/.test(armar(DOC())), 'dibuja el renglón del lugar aunque esté vacío');
+  // Y el servidor lo manda: sin esto el documento nunca lo vería.
+  assert.match(fuente(RUTA, "router.get('/planes/:id/compras/:compraId/orden'"), /lugar_entrega: base\.lugar_entrega/);
 });
 
 // ── EL DOCUMENTO ───────────────────────────────────────────────────────────
