@@ -295,10 +295,12 @@ test('el lugar de entrega va en la compra, sale en el documento y se propone el 
 });
 
 // ── EL DOCUMENTO ───────────────────────────────────────────────────────────
-const armar = new Function('pliEsc', 'pliN', 'pliHoyISO', [
+const armar = new Function('pliEsc', 'pliN', 'pliHoyISO', 'window', [
+  'var PLI_LOGO_FORMATO = ' + /var PLI_LOGO_FORMATO = (.*);/.exec(PANEL)[1] + ';',
+  fuente(PANEL, 'function pliOrdenLogoHtml(d)'),
   fuente(PANEL, 'function pliOrdenHtml(d)'), 'return pliOrdenHtml;',
 ].join('\n'))((s) => String(s == null ? '' : s), (n, d) => Number(n).toFixed(d === undefined ? 0 : d),
-  () => '2026-09-23');
+  () => '2026-09-23', { LNB_USER: { rol: 'admin' } });
 
 const DOC = (extra) => Object.assign({
   sociedad: 'Puente Cordón SA', nro_orden: 'OC-880', proveedor: 'CARTOCOR', fecha: '2026-09-02',

@@ -36095,6 +36095,17 @@ function sgRepExport(){
   .pli-oc-pie{margin-top:14px;font-size:11px;color:#555;border-top:1px solid #e5e7eb;padding-top:8px}
   .pli-oc-firmas{display:flex;gap:40px;margin-top:34px;font-size:11px;color:#555}
   .pli-oc-firmas div{flex:1;border-top:1px solid #111;padding-top:5px}
+  /* EL LOGO DE LA EMPRESA (V1083). Con techo de alto: un logo grande empujaría la tabla a la
+     segunda hoja, y el papel tiene que entrar en una. */
+  .pli-oc-logo{max-height:56px;max-width:230px;object-fit:contain;display:block;margin-bottom:7px}
+  /* Mientras FALTA, el recuadro ocupa lugar y se puede apretar: eso es accionable. Una vez
+     cargado queda sólo el logo y las dos acciones en letra chica. */
+  .pli-oc-logo-vacio{display:inline-flex;align-items:center;gap:6px;font-size:11px;color:#6b7280;
+    border:1px dashed #cbd5e1;border-radius:6px;padding:5px 9px;margin-bottom:7px;
+    cursor:pointer;background:#fff}
+  .pli-oc-logo-vacio:hover{border-color:#94a3b8;color:#374151}
+  .pli-oc-solo-pantalla{font-size:10.5px;color:#6b7280;margin-bottom:7px}
+  .pli-oc-solo-pantalla a{color:#6b7280;text-decoration:underline;cursor:pointer}
   /* AL IMPRIMIR SALE SÓLO EL DOCUMENTO. Sin esto se imprime el panel entero y la orden queda en
      la tercera hoja, con el menú y todo alrededor. */
   @media print{
@@ -36106,6 +36117,11 @@ function sgRepExport(){
     body.pli-imprimiendo #pli-mb-orden .mhd,
     body.pli-imprimiendo #pli-mb-orden .ab-modal-footer{display:none !important}
     body.pli-imprimiendo .pli-oc{border:0;padding:0}
+    /* LO QUE ES DE LA PANTALLA NO SALE EN EL PAPEL. El recuadro para subir el logo y el
+       «cambiarlo» son ayudas para el que emite: en la hoja que recibe el proveedor serían un
+       botón muerto. Va sin el body.pli-imprimiendo a propósito, así también queda afuera si
+       alguien imprime con Ctrl+P en vez del botón. */
+    .pli-oc-logo-vacio, .pli-oc-solo-pantalla{display:none !important}
   }
 </style>
 <div class="ab-modal">
@@ -36114,6 +36130,9 @@ function sgRepExport(){
     <button class="mcl" onclick="document.getElementById('pli-mb-orden').classList.remove('on')">×</button>
   </div>
   <div class="pli-oc" id="pli-orden-doc"></div>
+  <!-- El logo se elige desde el recuadro del documento; este campo es el que abre el explorador. -->
+  <input type="file" id="pli-logo-file" accept="image/png,image/jpeg,image/webp"
+         style="display:none" onchange="pliLogoArchivo(this)">
   <div class="ab-modal-footer">
     <button class="btn bo" onclick="document.getElementById('pli-mb-orden').classList.remove('on')">Cerrar</button>
     <button class="btn bb" onclick="pliOrdenImprimir()">🖨️ Imprimir</button>
@@ -74110,7 +74129,7 @@ function pliOrdenHtml(d) {
   var hoy = pliHoyISO();
   var plata = function(v, m) { return v == null ? '—' : (m || 'ARS') + ' ' + pliN(v, 2); };
   var h = '<div class="pli-oc-cab">'
-    + '<div><div class="pli-oc-emp">' + pliEsc(d.sociedad) + '</div>'
+    + '<div>' + pliOrdenLogoHtml(d) + '<div class="pli-oc-emp">' + pliEsc(d.sociedad) + '</div>'
     + '<div class="pli-oc-chico">Orden de compra · no es un comprobante fiscal</div></div>'
     + '<div style="text-align:right">'
       + '<div class="pli-oc-nro">Nº ' + pliEsc(d.nro_orden || 's/n') + '</div>'
@@ -74160,6 +74179,100 @@ function pliOrdenHtml(d) {
 
 // Se imprime LA VENTANA, no la pantalla: el @media print de abajo esconde todo lo demás. Sin eso
 // salen tres hojas del panel entero y la orden en el medio.
+// ── EL LOGO DE LA EMPRESA (V1083) ─────────────────────────────────────────
+//
+// Pablo, 24/9/2026: «a la orden de compra también podés agregarle el logo de la empresa».
+//
+// Se guarda en la EMPRESA, no en la orden: el mismo logo le va a servir a cualquier papel que
+// salga a nombre de Puente Cordón. Y se sube desde acá, que es donde se nota que falta.
+
+// EL PANEL TAMBIÉN MIRA EL FORMATO, no sólo el servidor. Este texto se pega dentro del src de un
+// <img>: si alguna vez entrara algo raro por otra puerta, acá no se dibuja en vez de romper el
+// documento. Es el mismo filtro que valida el servidor (rutas/org.js).
+var PLI_LOGO_FORMATO = /^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/]+={0,2}$/;
+
+function pliOrdenLogoHtml(d) {
+  var admin = !!(window.LNB_USER && window.LNB_USER.rol === 'admin');
+  if (d.logo && PLI_LOGO_FORMATO.test(d.logo)) {
+    return '<img class="pli-oc-logo" src="' + d.logo + '" alt="' + pliEsc(d.sociedad) + '">'
+      + (admin ? '<div class="pli-oc-solo-pantalla"><a onclick="pliLogoElegir()">cambiar el logo</a>'
+        + ' · <a onclick="pliLogoQuitar()">quitarlo</a></div>' : '');
+  }
+  // Al que no puede cambiarlo no se le ofrece: apretaría y le contestaría 403.
+  return admin
+    ? '<div class="pli-oc-logo-vacio" onclick="pliLogoElegir()">🖼️ Subir el logo de la empresa</div>'
+      + '<div class="pli-oc-solo-pantalla">Se guarda en la empresa: sale en este papel y en los '
+      + 'documentos que vengan. PNG, JPG o WEBP.</div>'
+    : '';
+}
+
+function pliLogoElegir() {
+  var inp = document.getElementById('pli-logo-file');
+  if (!inp) return;
+  // Se limpia antes de abrir: si no, elegir DOS VECES el mismo archivo —lo que hace cualquiera que
+  // se equivocó de imagen y vuelve— no dispara el change y parece que el panel se colgó.
+  inp.value = '';
+  inp.click();
+}
+
+function pliLogoArchivo(inp) {
+  var f = inp.files && inp.files[0];
+  if (!f) return;
+  var fr = new FileReader();
+  fr.onerror = function() { toast('No pude leer ese archivo', 'er'); };
+  fr.onload = function() {
+    var img = new Image();
+    img.onload = function() { pliLogoGuardar(pliLogoReducir(img)); };
+    img.onerror = function() { toast('Ese archivo no es una imagen que pueda mostrar', 'er'); };
+    img.src = fr.result;
+  };
+  fr.readAsDataURL(f);
+}
+
+// SE REDUCE EN LA PANTALLA, ANTES DE SUBIRLA. El logo se imprime a 56 px de alto: guardar la foto
+// de 4 MB de un celular tal cual la dejaría en la base y la haría viajar en cada impresión sin que
+// se vea un gramo mejor. 460 px de ancho es el doble de lo que se dibuja, que es lo que le hace
+// falta a una impresora.
+function pliLogoReducir(img) {
+  var esc = Math.min(1, 460 / (img.width || 1), 230 / (img.height || 1));
+  var c = document.createElement('canvas');
+  c.width = Math.max(1, Math.round((img.width || 1) * esc));
+  c.height = Math.max(1, Math.round((img.height || 1) * esc));
+  c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+  // PNG PRIMERO, que es el único que respeta el fondo transparente: un logo con su recuadro blanco
+  // encima del papel se ve pegoteado. Si pesa demasiado —pasa cuando el «logo» es una foto— se
+  // pasa a JPG sobre fondo blanco, que para eso pesa mucho menos.
+  var png = c.toDataURL('image/png');
+  if (png.length <= 250000) return png;
+  var c2 = document.createElement('canvas');
+  c2.width = c.width; c2.height = c.height;
+  var g = c2.getContext('2d');
+  g.fillStyle = '#fff'; g.fillRect(0, 0, c2.width, c2.height);
+  g.drawImage(c, 0, 0);
+  return c2.toDataURL('image/jpeg', 0.85);
+}
+
+function pliLogoGuardar(dataUrl) {
+  // A QUÉ EMPRESA. El id lo dice el documento que se está mirando: la pantalla no lo elige ni lo
+  // adivina, así que el logo no puede terminar cargado en otra sociedad.
+  var soc = PLI.orden && PLI.orden.sociedad_id;
+  if (!soc) return toast('No sé de qué empresa es esta orden', 'er');
+  fetch('/api/org/sociedades/' + soc + '/logo', {
+    method: 'PUT', credentials: 'include', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ logo: dataUrl }),
+  }).then(function(r) { return r.json(); }).then(function(r) {
+    if (!r.ok) { toast(r.error || 'No se pudo guardar el logo', 'er'); return; }
+    PLI.orden.logo = r.logo;
+    document.getElementById('pli-orden-doc').innerHTML = pliOrdenHtml(PLI.orden);
+    toast(r.logo ? '✓ Logo guardado: sale en todos los documentos de la empresa' : 'Logo quitado', 'ok');
+  }).catch(function() { toast('Error de red: el logo no se guardó', 'er'); });
+}
+
+function pliLogoQuitar() {
+  if (!confirm('El logo se saca de TODOS los documentos de la empresa, no sólo de esta orden. ¿Sigo?')) return;
+  pliLogoGuardar('');
+}
+
 function pliOrdenImprimir() {
   document.body.classList.add('pli-imprimiendo');
   window.print();
