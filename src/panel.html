@@ -36049,7 +36049,7 @@ function sgRepExport(){
   </div>
   <div id="pli-rec-que" class="pli-cel-chica" style="margin-bottom:10px"></div>
   <div class="fg">
-    <div class="fl"><label>Cuánto llegó *</label>
+    <div class="fl"><label id="pli-rec-lbl">Cuánto llegó *</label>
       <input id="pli-rec-cant" type="number" step="any" min="0" class="pli-inp pli-inp-num">
       <div class="pli-cel-chica" id="pli-rec-unidad"></div>
     </div>
@@ -36057,6 +36057,8 @@ function sgRepExport(){
   </div>
   <div class="fl ff" style="margin-top:8px"><label>Remito del proveedor</label>
     <input id="pli-rec-remito" class="pli-inp" placeholder="opcional"></div>
+  <button class="btn bo bs" id="pli-rec-sumar" style="display:none;margin-top:8px"
+          onclick="pliRecepSumar()">＋ llegó otra entrega: sumarla al total</button>
   <div id="pli-rec-aviso" class="pli-cel-chica" style="margin-top:10px"></div>
   <div class="ab-modal-footer">
     <button class="btn bd" id="pli-rec-deshacer" style="display:none" onclick="pliRecepDeshacer()">Deshacer la recepción</button>
@@ -36158,9 +36160,13 @@ function sgRepExport(){
       <div class="pli-cel-chica" id="pli-cmp-unidad">en unidad de compra</div>
     </div>
     <div class="fl"><label>Estado</label>
+      <!-- «Recibido» NO está acá a propósito (V1084): a ese estado se llega con el botón 📦,
+           que es el que pregunta cuánto llegó y se lo suma al stock. Marcarlo en este selector no
+           movía un gramo de depósito, y la palabra «recibido» dejaba de significar lo que dice.
+           Para una compra ya recibida la opción se agrega al vuelo, para que el guardado no la
+           devuelva a «pedido». -->
       <select id="pli-cmp-estado" class="pli-inp">
         <option value="pedido">Pedido</option>
-        <option value="recibido">Recibido</option>
         <option value="cancelado">Cancelado (no cuenta)</option>
       </select>
     </div>
@@ -71094,6 +71100,8 @@ function pliInsAbrir(id) {
   document.getElementById('pli-ins-moq').value = i ? i.moq : 0;
   document.getElementById('pli-ins-precio').value = i ? i.precio_ref : 0;
   document.getElementById('pli-ins-stock').value = i ? (i.stock_inicial || 0) : 0;
+  // SE GUARDA LO QUE SE ABRIÓ, PARA NO PISAR LO QUE PASÓ MIENTRAS (V1084). Ver pliInsGuardar.
+  PLI.stockAlAbrir = document.getElementById('pli-ins-stock').value;
   pliInsStockEquiv();
   document.getElementById('pli-ins-moneda').value = i ? i.moneda : 'ARS';
   document.getElementById('pli-ins-lead').value = i ? (i.lead_time_dias === null || i.lead_time_dias === undefined ? 15 : i.lead_time_dias) : 15;
@@ -71116,12 +71124,19 @@ function pliInsGuardar() {
     multiplo_compra: document.getElementById('pli-ins-multiplo').value,
     moq: document.getElementById('pli-ins-moq').value,
     precio_ref: document.getElementById('pli-ins-precio').value,
-    stock_inicial: document.getElementById('pli-ins-stock').value,
     moneda: document.getElementById('pli-ins-moneda').value,
     lead_time_dias: document.getElementById('pli-ins-lead').value,
     modo_provision: document.getElementById('pli-ins-modo').value,
     notas: document.getElementById('pli-ins-notas').value.trim()
   };
+  // EL STOCK VIAJA SÓLO SI SE TOCÓ (V1084). Antes iba en TODO guardado de la ficha, con el valor
+  // que tenía la casilla cuando se abrió. Con eso, alguien que abre la ficha a las 10, recibe una
+  // compra de 8.000 a las 10:05 y a las 10:10 guarda un cambio de plazo de entrega, le borraba los
+  // 8.000 del depósito — y la compra seguía diciendo que los había aplicado, así que deshacerla
+  // después restaba 8.000 que ya no estaban. No hace falta mala intención ni dos personas: alcanza
+  // con dos pestañas. El servidor conserva el valor de la fila cuando el campo no viene.
+  var stock = document.getElementById('pli-ins-stock').value;
+  if (!id || String(stock) !== String(PLI.stockAlAbrir)) body.stock_inicial = stock;
   if (!body.nombre) return toast('El nombre es obligatorio', 'er');
   if (!body.unidad_uso || !body.unidad_compra) return toast('Faltan las unidades', 'er');
   var p = id ? pliApi('/insumos/' + id, { method: 'PATCH', body: JSON.stringify(body) })
@@ -73858,7 +73873,7 @@ function pliCmpRenderSemanas(cont) {
            : '🍈 <em>sin fecha asignada</em>') + '</div>'
       + '<div class="ab-table-wrap"><table class="pa-tbl" style="font-size:12px"><thead><tr>'
       + '<th>Insumo</th><th style="text-align:right">Necesidad</th><th style="text-align:right">Del stock</th>'
-      + '<th style="text-align:right">Ya comprado</th><th style="text-align:right">A pedir</th>'
+      + '<th style="text-align:right" title="Lo pedido que todavía no llegó. Lo que ya llegó está en el stock del insumo.">En viaje</th><th style="text-align:right">A pedir</th>'
       + '<th style="min-width:120px">Pedir hasta</th></tr></thead><tbody>';
     porSemana[s].sort(function(a, b) {
       return String(a.l.insumo_nombre).localeCompare(String(b.l.insumo_nombre), 'es');
@@ -73882,7 +73897,7 @@ function pliCmpRenderSemanas(cont) {
 function pliSobranteDetalle(l) {
   var u = l.unidad_compra || '';
   return 'Stock ' + pliN(l.stock_bultos || 0) + ' ' + u
-    + ' + comprado ' + pliN(l.ya_comprado_bultos || 0) + ' ' + u
+    + ' + en viaje ' + pliN(l.ya_comprado_bultos || 0) + ' ' + u
     + ' − consumo del plan ' + pliN(l.necesidad_bultos || 0) + ' ' + u
     + ' = sobran ' + pliN(l.remanente_bultos || 0) + ' ' + u
     + '. El consumo incluye la merma.';
@@ -73937,7 +73952,7 @@ function pliCmpRenderHechas(cont) {
     // El stock a la vista: si no, cargar existencias hace bajar el pendiente y no
     // se entiende por qué.
     + '<th style="text-align:right">Stock<div class="pli-cel-chica">en depósito</div></th>'
-    + '<th style="text-align:right">Ya comprado</th><th style="text-align:right">Pendiente</th>'
+    + '<th style="text-align:right" title="Lo pedido que todavía no llegó. Lo que ya llegó está en el stock del insumo.">En viaje</th><th style="text-align:right">Pendiente</th>'
     + '<th style="text-align:right">Va a sobrar<div class="pli-cel-chica">stock + compras − consumo</div></th>'
     + '<th style="min-width:130px">Avance</th></tr></thead><tbody>';
   // Los números ya vienen calculados por pliCmpUrgenciaDe, que es la MISMA cuenta
@@ -73997,6 +74012,16 @@ function pliCmpRenderHechas(cont) {
       + '<th style="width:112px"></th></tr></thead><tbody>';
     PLI.cmpCompras.forEach(function(c) {
       var badge = c.estado === 'recibido' ? 'pli-ok' : (c.estado === 'cancelado' ? 'pli-gris' : 'pli-warn');
+      // «RECIBIDO» A SECAS SE LEE COMO «ENTRÓ TODO» (V1084). De una compra de la que llegó el 60%
+      // el pedido sigue abierto, y quien mira la lista lo da por cerrado. Y la que quedó marcada
+      // recibida a mano, de antes de que existiera la recepción, no movió stock: también hay que
+      // poder distinguirla de un vistazo, porque es la que hay que recibir de verdad.
+      var falta = c.estado === 'recibido' && c.recibido_cantidad != null
+        && Number(c.recibido_cantidad) < Number(c.cantidad);
+      var sinRecibir = c.estado === 'recibido' && c.recibido_cantidad == null;
+      var etiqueta = falta ? 'recibido en parte' : (sinRecibir ? 'recibido · sin confirmar' : c.estado);
+      if (falta) badge = 'pli-warn';
+      if (sinRecibir) badge = 'pli-err';
       html += '<tr' + (c.estado === 'cancelado' ? ' style="opacity:.55"' : '') + '>'
         + '<td>' + pliEsc(c.fecha) + '</td>'
         + '<td>' + pliEsc(c.insumo_nombre) + '</td>'
@@ -74009,7 +74034,10 @@ function pliCmpRenderHechas(cont) {
         + '<td class="pli-cel-chica">' + pliEsc(c.nro_orden || '—') + '</td>'
         + '<td class="pli-num">' + (c.precio == null ? '<span class="pli-cel-chica">sin precio</span>'
             : pliEsc(c.moneda || 'ARS') + ' ' + pliN(c.precio)) + '</td>'
-        + '<td><span class="pli-badge ' + badge + '">' + pliEsc(c.estado) + '</span></td>'
+        + '<td><span class="pli-badge ' + badge + '"'
+          + (sinRecibir ? ' title="Quedó marcada recibida sin pasar por la recepción: no sumó nada al'
+            + ' stock. Usá el botón 📦 para decir cuánto llegó."' : '')
+          + '>' + pliEsc(etiqueta) + '</span></td>'
         + '<td style="text-align:right;white-space:nowrap">'
           // A una compra cancelada no se le emite orden: el botón no se ofrece, y el servidor
           // tampoco la deja pasar.
@@ -74025,8 +74053,11 @@ function pliCmpRenderHechas(cont) {
     });
     html += '</tbody></table></div>';
   }
-  html += '<div class="pli-cel-chica" style="margin-top:8px">Las canceladas no cuentan como cubiertas. '
-    + 'Las pedidas sí, porque ya están comprometidas.</div>';
+  // Qué cubre qué, dicho donde se ve (V1084). Antes decía «las pedidas sí, porque ya están
+  // comprometidas» y con la recepción eso pasó a contar dos veces la misma mercadería.
+  html += '<div class="pli-cel-chica" style="margin-top:8px">Lo que <b>ya llegó</b> cubre por el '
+    + 'stock del insumo; lo <b>pedido que todavía no llegó</b> cuenta como en viaje. '
+    + 'Las canceladas no cuentan.</div>';
   cont.innerHTML = html;
 }
 
@@ -74056,6 +74087,12 @@ function pliRecepAbrir(id) {
   document.getElementById('pli-rec-que').innerHTML = '<b>' + pliEsc(c.insumo_nombre) + '</b> · '
     + pliEsc(c.proveedor_texto || 'sin proveedor') + ' · pedido: <b>' + pliN(c.cantidad) + ' '
     + pliEsc(c.unidad_compra) + '</b>';
+  // EL NÚMERO ES EL TOTAL RECIBIDO, NO LO DE ESTA ENTREGA (V1084). Es lo que hace que confirmar
+  // dos veces no duplique, pero el que ya recibió 60 y hoy recibe 40 lee «cuánto llegó», escribe 40
+  // y el servidor le RESTA 20 al stock. Así que cuando ya hay algo recibido el campo se llama por
+  // su nombre, y para sumar una entrega nueva hay un botón que hace la cuenta.
+  document.getElementById('pli-rec-lbl').textContent = ya ? 'Total recibido *' : 'Cuánto llegó *';
+  document.getElementById('pli-rec-sumar').style.display = ya ? '' : 'none';
   document.getElementById('pli-rec-cant').value = ya ? c.recibido_cantidad : c.cantidad;
   document.getElementById('pli-rec-fecha').value = c.recibido_fecha || pliHoyISO();
   document.getElementById('pli-rec-remito').value = c.recibido_remito || '';
@@ -74072,6 +74109,23 @@ function pliRecepAbrir(id) {
     : 'Al confirmar, esta cantidad se le suma al stock del insumo y la compra queda como recibida.';
   document.getElementById('pli-rec-deshacer').style.display = ya ? '' : 'none';
   document.getElementById('pli-mb-recep').classList.add('on');
+}
+
+// SUMAR UNA ENTREGA NUEVA SIN HACER LA CUENTA A MANO (V1084). El campo de arriba es el total, así
+// que la segunda entrega se suma: pedirle al operador que calcule 60 + 40 es pedirle el error.
+function pliRecepSumar() {
+  var c = PLI.recep; if (!c) return;
+  var mas = prompt('¿Cuánto llegó AHORA, en ' + c.unidad_compra + '? Se lo sumo a los '
+    + pliN(c.recibido_cantidad) + ' que ya habían entrado.');
+  if (mas === null) return;
+  var n = Number(String(mas).replace(',', '.'));
+  if (!(n > 0)) return toast('Poné cuánto llegó', 'er');
+  document.getElementById('pli-rec-cant').value =
+    Math.round((Number(c.recibido_cantidad) + n) * 1e6) / 1e6;
+  // El remito viejo queda a la vista: el de la entrega nueva lo pisa, y es lo que se cruza contra
+  // la factura. Por eso se avisa en vez de cambiarlo solo.
+  toast('Total ' + pliN(Number(document.getElementById('pli-rec-cant').value))
+    + ' — poné el remito de esta entrega', 'ok');
 }
 
 function pliRecepGuardar() {
@@ -74291,6 +74345,23 @@ function pliCompraOpcionesInsumo(sel) {
         }).join('');
 }
 
+// EL ESTADO DE UNA COMPRA YA RECIBIDA SOBREVIVE AL GUARDADO (V1084). El formulario manda el estado
+// siempre; si la opción no existiera, el selector caería en «Pedido» y guardar cualquier corrección
+// —el plazo, el proveedor— le devolvería el stock sin que nadie lo pida. Así que para esas compras
+// la opción se agrega, y queda anotado de dónde salió el estado.
+function pliCompraEstadoOpciones(c) {
+  var sel = document.getElementById('pli-cmp-estado');
+  var extra = sel.querySelector('option[value="recibido"]');
+  if (extra) sel.removeChild(extra);
+  if (c && c.recibido_cantidad != null) {
+    var o = document.createElement('option');
+    o.value = 'recibido';
+    o.textContent = 'Recibido (por la recepción del ' + (c.recibido_fecha || 'remito') + ')';
+    sel.appendChild(o);
+  }
+  sel.value = c ? c.estado : 'pedido';
+}
+
 function pliCompraUnidad() {
   var id = parseInt(document.getElementById('pli-cmp-insumo').value, 10);
   var i = PLI.insumos.filter(function(x) { return x.id === id; })[0];
@@ -74331,7 +74402,7 @@ function pliCompraAbrir(id) {
   pliCompraOpcionesInsumo(c ? c.insumo_id : null);
   document.getElementById('pli-cmp-fecha').value = c ? c.fecha : pliHoyISO();
   document.getElementById('pli-cmp-cant').value = c ? c.cantidad : '';
-  document.getElementById('pli-cmp-estado').value = c ? c.estado : 'pedido';
+  pliCompraEstadoOpciones(c);
   document.getElementById('pli-cmp-prov').value = c ? (c.proveedor_texto || '') : '';
   document.getElementById('pli-cmp-orden').value = c ? (c.nro_orden || '') : '';
   document.getElementById('pli-cmp-notas').value = c ? (c.notas || '') : '';
