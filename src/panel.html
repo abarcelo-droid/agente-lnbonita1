@@ -36824,6 +36824,15 @@ function sgRepExport(){
     /* La celda que se puede abrir tiene que parecerlo antes de que la aprieten. */
     #sec-fp-flujo .fp-abrible { cursor:pointer; text-decoration:underline dotted; text-underline-offset:3px }
     #sec-fp-flujo .fp-abrible:hover { background:rgba(20,60,120,.08) }
+    /* Un encabezado que ordena tiene que parecerlo antes de que lo aprieten. */
+    #fp-mb-semana th.fp-ord { cursor:pointer; user-select:none; white-space:nowrap }
+    #fp-mb-semana th.fp-ord:hover { background:rgba(20,60,120,.08) }
+    #fp-mb-semana th.fp-ord .fp-flecha { color:var(--mut); font-size:10px; margin-left:3px }
+    #fp-mb-semana th.fp-ord.on .fp-flecha { color:var(--burg) }
+    /* El beneficiario es lo único de largo variable: parte de renglón en vez de
+       empujar la tabla y sacar una barra de costado. */
+    #fp-mb-semana table { table-layout:fixed; width:100% }
+    #fp-mb-semana td { word-break:break-word }
   </style>
 
   <div style="display:flex;gap:2px;border-bottom:1px solid var(--bor);margin-bottom:14px">
@@ -77465,7 +77474,10 @@ function btCargasCargar() {
    saldo inicial es una fila aparte y entra una sola vez.
 */
 
-var FP = { proy: null, conceptos: [], prestamos: [], cheques: [], saldos: [], impFilas: null, pane: 'flujo' };
+var FP = { proy: null, conceptos: [], prestamos: [], cheques: [], saldos: [], impFilas: null, pane: 'flujo',
+  // Lo que está abierto en el detalle de la semana, para poder reordenarlo sin volver a pedírselo
+  // al servidor: son los cheques que ya están en pantalla.
+  sem: { filas: [], orden: 'fecha_pago', desc: false, aviso: '' } };
 
 function fpApi(path, opts) {
   opts = opts || {};
@@ -77492,14 +77504,28 @@ function fpN(n, dec) {
   var d = (dec === undefined) ? 0 : dec;
   return v.toLocaleString('es-AR', { minimumFractionDigits: d, maximumFractionDigits: d });
 }
-// Millones abreviados: con 26 columnas de 9 dígitos no entra nada en pantalla.
-function fpM(n) {
+// EL MONTO EXACTO, SIEMPRE (V1088).
+//
+// Pablo, 7/10/2026: «quiero ver el monto exacto de los cheques… no me los muestres ni en miles ni
+// en millones. Cuando pido detalle tampoco».
+//
+// Acá había un abreviador a millones, puesto porque con 26 columnas de 9 dígitos no entra nada en
+// pantalla. El problema es cierto y la respuesta era la equivocada: «3.646,2M» no se puede cruzar
+// contra el resumen del banco, que es exactamente para lo que se mira este cuadro. Un número
+// redondeado en una pantalla de plata no informa, tranquiliza.
+//
+// El ancho se resuelve donde corresponde: el cuadro ya se corre de costado y tiene la columna de
+// conceptos clavada a la izquierda, así que se lee igual.
+// Los centavos salen SÓLO si los hay: un cheque de 4.500.000 no se escribe «4.500.000,00», y uno
+// de 4.500.000,50 no se puede escribir «4.500.001» —que es lo que hacía el listado de cheques, y
+// también la casilla de las filas que se cargan a mano: abrirla y volver a guardar redondeaba—.
+function fpNum(n) {
   var v = Number(n) || 0;
-  if (!v) return '—';
-  var a = Math.abs(v);
-  if (a >= 1e6) return (v / 1e6).toLocaleString('es-AR', { maximumFractionDigits: 1 }) + 'M';
-  if (a >= 1e3) return (v / 1e3).toLocaleString('es-AR', { maximumFractionDigits: 0 }) + 'k';
-  return fpN(v);
+  return fpN(v, Number.isInteger(v) ? 0 : 2);
+}
+function fpMonto(n) {
+  var v = Number(n) || 0;
+  return v ? fpNum(v) : '—';
 }
 function fpErr(r) { toast(r && r.error ? r.error : 'Error', 'er'); }
 
@@ -77675,7 +77701,7 @@ function fpPintarGrilla() {
            fpEsc(f.nombre) + '</td>';
       f.montos.forEach(function(m, i) {
         if (f.editable) {
-          h += '<td class="fp-num"><input class="fp-cel" value="' + (m ? fpN(m) : '') + '"' +
+          h += '<td class="fp-num"><input class="fp-cel" value="' + (m ? fpNum(m) : '') + '"' +
                ' data-c="' + f.concepto_id + '" data-s="' + p.semanas[i] + '"' +
                ' onchange="fpCelda(this)" onfocus="this.select()"></td>';
         } else if (f.origen === 'cheques' && m) {
@@ -77684,33 +77710,33 @@ function fpPintarGrilla() {
           // ir a la otra solapa y filtrar por fechas a mano.
           h += '<td class="fp-num fp-calc fp-abrible" title="Ver los cheques de esta semana"'
              + ' onclick="fpChequesDeSemana(' + i + ',' + (f.naturaleza === 'ingreso' ? 1 : 0) + ')">'
-             + fpM(m) + '</td>';
+             + fpMonto(m) + '</td>';
         } else {
-          h += '<td class="fp-num fp-calc" title="' + fpEsc(fpDetalleTxt(f.detalle[i])) + '">' + fpM(m) + '</td>';
+          h += '<td class="fp-num fp-calc" title="' + fpEsc(fpDetalleTxt(f.detalle[i])) + '">' + fpMonto(m) + '</td>';
         }
       });
-      h += '<td class="fp-num"><b>' + fpM(f.total) + '</b></td></tr>';
+      h += '<td class="fp-num"><b>' + fpMonto(f.total) + '</b></td></tr>';
     });
     if (!hubo) h += '<tr><td colspan="' + (p.semanas.length + 2) + '" class="fp-chica" style="padding:8px 12px">sin conceptos</td></tr>';
   };
 
   pintarBloque('ingreso', 'Ingresos');
   h += '<tr class="fp-tot"><td>Total ingresos</td>';
-  p.ingresos.forEach(function(m) { h += '<td class="fp-num">' + fpM(m) + '</td>'; });
-  h += '<td class="fp-num">' + fpM(p.ingresos.reduce(function(a, b) { return a + b; }, 0)) + '</td></tr>';
+  p.ingresos.forEach(function(m) { h += '<td class="fp-num">' + fpMonto(m) + '</td>'; });
+  h += '<td class="fp-num">' + fpMonto(p.ingresos.reduce(function(a, b) { return a + b; }, 0)) + '</td></tr>';
 
   pintarBloque('egreso', 'Egresos');
   h += '<tr class="fp-tot"><td>Total egresos</td>';
-  p.egresos.forEach(function(m) { h += '<td class="fp-num">' + fpM(m) + '</td>'; });
-  h += '<td class="fp-num">' + fpM(p.egresos.reduce(function(a, b) { return a + b; }, 0)) + '</td></tr>';
+  p.egresos.forEach(function(m) { h += '<td class="fp-num">' + fpMonto(m) + '</td>'; });
+  h += '<td class="fp-num">' + fpMonto(p.egresos.reduce(function(a, b) { return a + b; }, 0)) + '</td></tr>';
 
   h += '<tr class="fp-tot"><td>Neto de la semana</td>';
-  p.neto.forEach(function(m) { h += '<td class="fp-num' + (m < 0 ? ' fp-rojo' : '') + '">' + fpM(m) + '</td>'; });
-  h += '<td class="fp-num">' + fpM(p.neto.reduce(function(a, b) { return a + b; }, 0)) + '</td></tr>';
+  p.neto.forEach(function(m) { h += '<td class="fp-num' + (m < 0 ? ' fp-rojo' : '') + '">' + fpMonto(m) + '</td>'; });
+  h += '<td class="fp-num">' + fpMonto(p.neto.reduce(function(a, b) { return a + b; }, 0)) + '</td></tr>';
 
   h += '<tr class="fp-acum"><td title="Saldo inicial + todo lo que entró y salió hasta esa semana">' +
        'Saldo acumulado <span class="fp-chica">(desde ' + fpN(p.saldo_inicial) + ')</span></td>';
-  p.acumulado.forEach(function(m) { h += '<td class="fp-num' + (m < 0 ? ' fp-rojo' : '') + '">' + fpM(m) + '</td>'; });
+  p.acumulado.forEach(function(m) { h += '<td class="fp-num' + (m < 0 ? ' fp-rojo' : '') + '">' + fpMonto(m) + '</td>'; });
   h += '<td></td></tr>';
 
   h += '</tbody></table>';
@@ -78127,7 +78153,7 @@ function fpChequesCargar() {
     if (!r.ok) { cont.innerHTML = '<div class="fp-vacio">' + fpEsc(r.error) + '</div>'; return; }
     FP.cheques = r.data;
     document.getElementById('fp-chq-resumen').innerHTML =
-      r.total + ' cheque(s) · total <b>' + fpN(r.monto_total) + '</b>' +
+      r.total + ' cheque(s) · total <b>' + fpMonto(r.monto_total) + '</b>' +
       (r.total > r.tope ? ' — se muestran los primeros ' + r.tope : '');
     if (!r.data.length) {
       cont.innerHTML = '<div class="fp-vacio">No hay cheques con ese filtro. Subilos con <b>Importar del Excel</b>.</div>';
@@ -78139,7 +78165,7 @@ function fpChequesCargar() {
       var b = { pendiente: 'fp-warn', pagado: 'fp-ok', anulado: 'fp-gris' }[c.estado] || 'fp-gris';
       h += '<tr><td><b>' + fpEsc(c.numero) + '</b></td><td>' + fpEsc(c.banco || '—') + '</td>' +
         '<td>' + fpEsc(c.fecha_pago || '—') + '</td>' +
-        '<td class="fp-num">' + fpN(c.monto) + '</td>' +
+        '<td class="fp-num">' + fpMonto(c.monto) + '</td>' +
         '<td>' + fpEsc(c.beneficiario || '') + '</td>' +
         '<td><span class="fp-badge ' + b + '">' + fpEsc(c.estado) + '</span></td>' +
         '<td style="white-space:nowrap">' +
@@ -78386,7 +78412,7 @@ function fpImportar(preview) {
         (r.se_dan_de_baja
           ? '<div style="background:#fef2f2;border:1px solid #fca5a5;border-radius:8px;padding:10px 13px;'
             + 'font-size:12px;margin-top:8px"><b>Se dan de baja ' + r.se_dan_de_baja + ' cheque(s)</b> '
-            + 'por ' + fpM(r.se_dan_de_baja_monto) + ': estaban cargados, siguen pendientes y '
+            + 'por ' + fpMonto(r.se_dan_de_baja_monto) + ': estaban cargados, siguen pendientes y '
             + '<b>ya no vienen en este archivo</b>. El Excel del banco es la foto completa del día, '
             + 'así que se toman por cobrados, anulados o cambiados.'
             + '<div style="margin-top:4px">Los marcados <b>pagados</b> y los cargados a mano no se tocan.</div>'
@@ -78422,24 +78448,103 @@ function fpChequesDeSemana(i, esIngreso) {
   fpApi('/cheques/semana?desde=' + desde + '&hasta=' + hasta + '&tipo=' + tipo
         + (i === 0 ? '&incluir_anteriores=1' : '')).then(function(r) {
     if (!r.ok) { cont.innerHTML = '<div class="fp-vacio">' + fpEsc(r.error || 'Error') + '</div>'; return; }
-    var f = r.data || [];
-    if (!f.length) { cont.innerHTML = '<div class="fp-vacio">No hay cheques en esta semana.</div>'; return; }
-    cont.innerHTML = '<div class="fp-chica" style="margin-bottom:8px">'
-      + '<b>' + f.length + '</b> cheque(s) · total <b>' + fpM(r.total) + '</b>'
-      + (i === 0 ? ' — incluye los vencidos de antes, que la proyección suma en la primera semana' : '')
-      + '</div>'
-      + '<div class="ab-table-wrap"><table class="pa-tbl"><thead><tr>'
-      + '<th>N°</th><th>Banco</th><th>Beneficiario</th><th>Fecha</th><th style="text-align:right">Monto</th>'
-      + '</tr></thead><tbody>'
-      + f.map(function(c) {
-          return '<tr><td style="font-family:ui-monospace,Consolas,monospace">' + fpEsc(c.numero) + '</td>'
-            + '<td>' + fpEsc(c.banco || '—') + '</td>'
-            + '<td>' + fpEsc(c.beneficiario || '—') + '</td>'
-            + '<td>' + fpFecha(c.fecha_pago) + '</td>'
-            + '<td class="fp-num">' + fpM(c.monto) + '</td></tr>';
-        }).join('')
-      + '</tbody></table></div>';
+    // El orden arranca como viene del servidor: por fecha, y dentro de cada día el más grande
+    // arriba. Es con lo que se sale a pagar.
+    FP.sem = { filas: r.data || [], orden: 'fecha_pago', desc: false,
+      aviso: i === 0 ? ' — incluye los vencidos de antes, que la proyección suma en la primera semana' : '' };
+    fpSemPintar();
   });
+}
+
+// ── EL DETALLE SE ORDENA POR CUALQUIER COLUMNA (V1088) ────────────────────
+//
+// Pablo, 7/10/2026: «permitime ordenar por cualquiera de las columnas». Con 85 cheques en una
+// semana, la pregunta no es siempre la misma: a veces es cuál es el más grande, a veces todos los
+// de un banco juntos, y a veces los de un beneficiario que llamó preguntando.
+//
+// Se ordena lo que YA está en pantalla, sin volver a pedirlo: son los mismos cheques.
+var FP_SEM_COLS = [
+  { k: 'numero',       t: 'N°',           num: true  },
+  { k: 'banco',        t: 'Banco',        num: false },
+  { k: 'beneficiario', t: 'Beneficiario', num: false },
+  { k: 'fecha_pago',   t: 'Fecha',        num: false },
+  { k: 'monto',        t: 'Monto',        num: true, der: true },
+];
+
+function fpSemOrdenar(k) {
+  if (FP.sem.orden === k) { FP.sem.desc = !FP.sem.desc; }
+  else {
+    FP.sem.orden = k;
+    // La plata arranca de mayor a menor, que es lo que se busca cuando se la ordena; el resto
+    // alfabético o cronológico, que es como se lee una lista.
+    FP.sem.desc = (k === 'monto');
+  }
+  fpSemPintar();
+}
+
+function fpSemPintar() {
+  var cont = document.getElementById('fp-sem-cuerpo');
+  var f = (FP.sem.filas || []).slice();
+  if (!f.length) { cont.innerHTML = '<div class="fp-vacio">No hay cheques en esta semana.</div>'; return; }
+
+  var col = FP_SEM_COLS.filter(function(c) { return c.k === FP.sem.orden; })[0] || FP_SEM_COLS[3];
+  var vacio = function(v) { return v === null || v === undefined || String(v).trim() === ''; };
+  // SIN NORMALIZAR: ac\u00e1 se ORDENA, no se busca. `localeCompare` con 'es' ya pone \u00ab\u00c1lvarez\u00bb entre
+  // \u00abAlvarez\u00bb y \u00abAyala\u00bb, y no distingue may\u00fasculas de min\u00fasculas \u2014 verificado contra los nombres
+  // reales. Sacarle los acentos primero no cambia una sola fila y ser\u00eda el cuarto normalizador del
+  // panel. Lo \u00fanico que s\u00ed hace falta es recortar los espacios: un beneficiario que empieza con un
+  // espacio se ir\u00eda al principio de la lista por un error de tipeo invisible.
+  var txt = function(v) { return String(v === null || v === undefined ? '' : v).trim(); };
+  f.sort(function(a, b) {
+    var x = a[col.k], y = b[col.k];
+    // Los vacíos van SIEMPRE al final, se ordene para donde se ordene: un banco en blanco arriba
+    // de todo tapa la lista justo cuando se la está mirando ordenada por banco.
+    if (vacio(x) !== vacio(y)) return vacio(x) ? 1 : -1;
+    var r;
+    if (col.num) {
+      // El N° de cheque es un número escrito como texto, y no todos tienen la misma cantidad de
+      // dígitos: ordenado alfabéticamente, 900353433 queda ANTES de 90035337 y la lista no se
+      // puede seguir con el talonario en la mano.
+      var nx = Number(x), ny = Number(y);
+      r = (isFinite(nx) && isFinite(ny)) ? nx - ny : txt(x).localeCompare(txt(y), 'es');
+    } else {
+      // La fecha viene como 2026-10-05, así que comparada como texto queda cronológica.
+      r = txt(x).localeCompare(txt(y), 'es');
+    }
+    return FP.sem.desc ? -r : r;
+  });
+
+  // El total es el de TODOS los cheques de la ventana, no el de lo que se ve: ordenar no cambia
+  // cuánta plata hay.
+  var total = (FP.sem.filas || []).reduce(function(a, c) { return a + (Number(c.monto) || 0); }, 0);
+  var flecha = function(k) {
+    if (FP.sem.orden !== k) return '<span class="fp-flecha">↕</span>';
+    return '<span class="fp-flecha">' + (FP.sem.desc ? '▼' : '▲') + '</span>';
+  };
+
+  cont.innerHTML = '<div class="fp-chica" style="margin-bottom:8px">'
+    + '<b>' + f.length + '</b> cheque(s) · total <b>' + fpMonto(total) + '</b>'
+    + fpEsc(FP.sem.aviso)
+    + '</div>'
+    + '<div class="ab-table-wrap"><table class="pa-tbl">'
+    + '<colgroup><col style="width:17%"><col style="width:20%"><col><col style="width:13%">'
+      + '<col style="width:21%"></colgroup>'
+    + '<thead><tr>'
+    + FP_SEM_COLS.map(function(c) {
+        return '<th class="fp-ord' + (FP.sem.orden === c.k ? ' on' : '') + '"'
+          + (c.der ? ' style="text-align:right"' : '')
+          + ' title="Ordenar por ' + c.t + '" onclick="fpSemOrdenar(\'' + c.k + '\')">'
+          + c.t + flecha(c.k) + '</th>';
+      }).join('')
+    + '</tr></thead><tbody>'
+    + f.map(function(c) {
+        return '<tr><td style="font-family:ui-monospace,Consolas,monospace">' + fpEsc(c.numero) + '</td>'
+          + '<td>' + fpEsc(c.banco || '—') + '</td>'
+          + '<td>' + fpEsc(c.beneficiario || '—') + '</td>'
+          + '<td>' + fpFecha(c.fecha_pago) + '</td>'
+          + '<td class="fp-num">' + fpMonto(c.monto) + '</td></tr>';
+      }).join('')
+    + '</tbody></table></div>';
 }
 
 // ══════════════════════════════════════════════════════════════════════════
