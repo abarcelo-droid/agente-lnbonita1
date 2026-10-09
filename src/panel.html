@@ -283,6 +283,7 @@ input[type=number]{-moz-appearance:textfield;appearance:textfield}
     <div class="ni" data-sec="pa-despachos"><span class="dot dc"></span>🚚 Despachos</div>
     <div class="ni" data-sec="informes-comercial"><span class="dot da"></span>📊 Informes comerciales</div>
     <div class="ni" data-sec="share"><span class="dot db"></span>🛒 SHARE Carrefour</div>
+    <div class="ni" data-sec="contactos"><span class="dot dc"></span>📇 Contactos</div>
   </div>
 
   <div class="ni-grp" data-grp="ven-ventas">Administración de Ventas<span class="ni-caret">▾</span></div>
@@ -6458,6 +6459,212 @@ input[type=number]{-moz-appearance:textfield;appearance:textfield}
     <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:14px">
       <button class="btn bo" id="sh-lote-cerrar" onclick="shLoteCerrar()">Cancelar</button>
       <button class="btn bb" id="sh-lote-ok" onclick="shLoteCorrer()">Cargar</button>
+    </div>
+  </div>
+</div>
+
+
+<!-- ═══════════════════════════════════════════════════════════════════════════════════
+     CONTACTOS COMERCIALES — la agenda del área
+     ═══════════════════════════════════════════════════════════════════════════════════
+     Dos pantallas en una: el BUSCADOR (una caja, y encima la lista con el motivo por el
+     que trajo a cada uno) y la FICHA.
+
+     El buscador mira adentro de TODO, incluidas las charlas: la pregunta que el módulo
+     existe para contestar es "¿quién me habló de brócoli?", y eso no está en ningún campo
+     — está escrito en el resumen de una conversación de hace cuatro meses.
+
+     LOS MESES VAN DE JULIO A JUNIO, como todo el año comercial de la casa. La grilla de
+     doce celdas arranca en JUL. Si alguien la lee como enero, un productor de melón pasa
+     a ser de invierno.
+     ═══════════════════════════════════════════════════════════════════════════════════ -->
+<div class="sec sg-mod" id="sec-contactos">
+  <style>
+    /* SIN BARRA DE DESPLAZAMIENTO LATERAL (CLAUDE.md): anchos fijos, se parte sólo el
+       nombre y el motivo —lo de largo variable— y el resto se trunca con ellipsis. */
+    #sec-contactos .pa-tbl{table-layout:fixed;width:100%;max-width:98vw}
+    #sec-contactos .pa-tbl th,#sec-contactos .pa-tbl td{
+      white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding:7px 8px;font-size:12.5px;
+      vertical-align:top}
+    #sec-contactos .pa-tbl td.ct-w,#sec-contactos .pa-tbl th.ct-w{white-space:normal;word-break:break-word}
+    #sec-contactos .ab-table-wrap{overflow-x:hidden !important}
+    @media(max-width:900px){ #sec-contactos .ab-table-wrap{overflow-x:auto !important}
+                             #sec-contactos .pa-tbl{table-layout:auto} }
+
+    /* LA CAJA DE BÚSQUEDA ES LA PANTALLA. Grande a propósito: es lo primero y casi lo
+       único que se usa. */
+    #sec-contactos .ct-buscar{display:flex;gap:9px;align-items:center;margin-bottom:11px}
+    #sec-contactos .ct-buscar input{
+      flex:1;padding:12px 15px;font-size:15px;border:2px solid var(--bor);border-radius:10px;
+      background:var(--bg)}
+    #sec-contactos .ct-buscar input:focus{border-color:var(--burg);outline:none}
+    #sec-contactos .ct-f{display:flex;gap:9px;flex-wrap:wrap;align-items:flex-end;margin-bottom:13px}
+    #sec-contactos .ct-f label{font-size:11px;color:var(--mut);display:block;margin-bottom:3px}
+    #sec-contactos .ct-f select,#sec-contactos .ct-f input{
+      padding:5px 8px;border:1px solid var(--bor);border-radius:6px;background:var(--bg);font-size:12.5px}
+
+    /* El MOTIVO por el que apareció cada uno. Sin esto hay que abrir la ficha para
+       entender por qué está en la lista — y con una búsqueda que mira adentro de las
+       charlas, "por qué apareció" no es nada obvio. */
+    #sec-contactos .ct-why{display:inline-block;padding:1px 7px;border-radius:9px;font-size:10px;
+      font-weight:600;background:var(--bor);color:var(--mut);margin-right:4px}
+    #sec-contactos .ct-why-ch{background:#fff3cd;color:#7a5c00}
+    #sec-contactos .ct-ext{font-size:11px;color:var(--mut);font-style:italic;margin-top:3px;
+      white-space:normal;line-height:1.45}
+
+    #sec-contactos .ct-chip{display:inline-block;padding:1px 7px;border-radius:9px;font-size:10.5px;font-weight:600}
+    #sec-contactos .ct-ch-prov{background:#e6f4ea;color:#1a7f37}
+    #sec-contactos .ct-ch-cli{background:#e7f0fd;color:#14539a}
+    #sec-contactos .ct-ch-amb{background:#f3e8fd;color:#6b2fa0}
+    #sec-contactos .ct-ch-otro{background:var(--bor);color:var(--mut)}
+    /* Lo pendiente se ve en la lista, no sólo en la bandeja: el que busca a alguien por
+       otro motivo tiene que enterarse ahí mismo de que le quedó algo colgado con él. */
+    #sec-contactos .ct-pend{background:#fdecec;color:#b3261e;font-weight:700}
+
+    /* LA GRILLA DE DOCE MESES. Arranca en JULIO. Se usa en tres lugares —la lista, la
+       ficha y el editor— con la misma forma, para que las franjas se comparen de un
+       vistazo sin tener que leer los nombres de los meses cada vez. */
+    #sec-contactos .ct-mg{display:inline-flex;gap:1px;vertical-align:middle}
+    #sec-contactos .ct-mg i{
+      width:13px;height:15px;border-radius:2px;background:var(--bor);display:inline-block;
+      font-size:0;cursor:default}
+    #sec-contactos .ct-mg i.on{background:var(--burg)}
+    /* La franja OBSERVADA —lo que efectivamente le compramos— va en otro tono, para que
+       se distinga de la DECLARADA a simple vista. Son dos cosas distintas y el hueco
+       entre ellas es justamente la oportunidad. */
+    #sec-contactos .ct-mg.ct-obs i.on{background:#9ab;opacity:.85}
+    #sec-contactos .ct-mg-ed i{width:26px;height:22px;cursor:pointer;font-size:9px;
+      line-height:22px;text-align:center;color:var(--mut);font-style:normal}
+    #sec-contactos .ct-mg-ed i.on{color:#fff}
+    #sec-contactos .ct-mlbl{display:inline-flex;gap:1px;font-size:8px;color:var(--mut)}
+    #sec-contactos .ct-mlbl span{width:13px;text-align:center}
+
+    #sec-contactos .ct-pane{display:none} #sec-contactos .ct-pane.on{display:block}
+    #sec-contactos .ct-tab{padding:7px 13px;cursor:pointer;font-size:12.5px;font-weight:600;
+      border-radius:6px;color:var(--mut)}
+    #sec-contactos .ct-tab.on{background:var(--burg);color:#fff}
+    #sec-contactos .ct-tab .ct-cnt{margin-left:5px;background:var(--bor);border-radius:9px;
+      padding:0 6px;font-size:10.5px}
+    #sec-contactos .ct-tab.on .ct-cnt{background:rgba(255,255,255,.25);color:#fff}
+
+    /* LA FICHA */
+    #sec-contactos .ct-fbox{border:1px solid var(--bor);border-radius:11px;padding:15px;margin-bottom:13px}
+    #sec-contactos .ct-fbox h4{margin:0 0 9px;font-size:12px;text-transform:uppercase;
+      letter-spacing:.4px;color:var(--mut)}
+    #sec-contactos .ct-medio{display:flex;align-items:center;gap:8px;padding:5px 0;font-size:13px}
+    #sec-contactos .ct-medio .ct-pref{color:#d4a017;cursor:pointer;font-size:14px}
+    #sec-contactos .ct-charla{border-left:3px solid var(--bor);padding:3px 0 9px 11px;margin-bottom:10px}
+    #sec-contactos .ct-charla.ct-c-pend{border-left-color:#b3261e}
+    #sec-contactos .ct-charla .ct-c-hd{font-size:11px;color:var(--mut);margin-bottom:3px}
+    #sec-contactos .ct-charla .ct-c-tx{font-size:13px;line-height:1.5;white-space:pre-wrap}
+    #sec-contactos .ct-charla .ct-c-paso{font-size:12px;margin-top:5px;padding:4px 8px;
+      border-radius:6px;background:var(--bg2,#f6f6f6)}
+    /* El hueco: lo que ofrece y nunca le compramos. Es la conclusión del módulo, así que
+       se pinta — no se deja como una fila más de una tabla. */
+    #sec-contactos .ct-hueco{background:#fff8e6;border:1px solid #f0d9a0;border-radius:9px;
+      padding:11px 13px;font-size:12.5px;line-height:1.6}
+    #sec-contactos .ct-nd{font-size:11.5px;color:var(--mut);font-style:italic}
+    #sec-contactos .ct-vacio{text-align:center;padding:34px;color:var(--mut);font-size:13px}
+  </style>
+
+  <div class="ph">
+    <div><div class="ph-t">📇 Contactos comerciales</div>
+      <div class="ph-s">La agenda del área: quién es cada uno, cómo se lo ubica, qué produce
+        y <b>qué se habló la última vez</b>. El buscador mira adentro de las charlas.</div></div>
+    <div style="display:flex;gap:8px">
+      <button class="btn bb" onclick="ctNuevo()">+ Contacto</button></div>
+  </div>
+
+  <div style="display:inline-flex;gap:2px;background:var(--bg);border:1px solid var(--bor);
+              border-radius:8px;padding:3px;margin-bottom:13px;flex-wrap:wrap">
+    <div class="ct-tab on" data-t="buscar" onclick="ctTab('buscar')">🔎 Buscador</div>
+    <div class="ct-tab"    data-t="pend"   onclick="ctTab('pend')">📌 Me toca<span class="ct-cnt" id="ct-cnt-pend">·</span></div>
+  </div>
+
+  <!-- ── EL BUSCADOR ──────────────────────────────────────────────────────────────── -->
+  <div class="ct-pane on" data-p="buscar">
+    <div class="ct-buscar">
+      <input id="ct-q" type="search" placeholder="Nombre, empresa, teléfono, mail, producto, o algo que se dijo en una charla…"
+             oninput="ctBuscarDebounce()">
+    </div>
+    <div class="ct-f">
+      <div><label>Es</label><select id="ct-f-tipo" onchange="ctBuscar()">
+        <option value="">Todos</option>
+        <option value="proveedor">Proveedor</option>
+        <option value="cliente">Cliente</option>
+        <option value="ambos">Las dos cosas</option>
+        <option value="otro">Otro</option></select></div>
+      <div><label>Zona</label><select id="ct-f-zona" onchange="ctBuscar()"><option value="">Todas</option></select></div>
+      <div><label>Producto</label><select id="ct-f-prod" onchange="ctBuscar()"><option value="">Todos</option></select></div>
+      <!-- "Quién tiene melón en noviembre". Es el filtro que convierte la agenda en una
+           herramienta de salida a buscar mercadería. -->
+      <div><label>Tiene algo en</label><select id="ct-f-mes" onchange="ctBuscar()"><option value="">Cualquier mes</option></select></div>
+      <div><label>Atiende</label><select id="ct-f-vend" onchange="ctBuscar()"><option value="">Cualquiera</option></select></div>
+      <div><label>&nbsp;</label><label style="font-size:11.5px;color:var(--tx)">
+        <input type="checkbox" id="ct-f-inact" onchange="ctBuscar()" style="vertical-align:-1px"> ver inactivos</label></div>
+      <div><label>&nbsp;</label><button class="btn bo bs" onclick="ctLimpiar()">Limpiar</button></div>
+    </div>
+    <div id="ct-lista"></div>
+  </div>
+
+  <!-- ── LA BANDEJA DE "ME TOCA" ──────────────────────────────────────────────────────
+       Lo que convierte la agenda en una gestión y no en un cuaderno: qué quedó pendiente
+       y ya vence. Sin esta pantalla, un "próximo paso" anotado en una charla se lee el mes
+       que viene, cuando ya no sirve. -->
+  <div class="ct-pane" data-p="pend">
+    <div class="ct-f">
+      <div><label>Lo que vence hasta</label><input type="date" id="ct-p-hasta" onchange="ctPendientes()"></div>
+      <div><label>&nbsp;</label><span class="ct-nd">Lo marcado hecho desaparece de acá, pero
+        sigue en la ficha: lo hecho también es historia.</span></div>
+    </div>
+    <div id="ct-pend-lista"></div>
+  </div>
+
+  <!-- ── LA FICHA ─────────────────────────────────────────────────────────────────── -->
+  <div class="ab-modal" id="ct-ficha-modal" style="display:none">
+    <div class="ab-modal-c" style="max-width:860px;width:96vw">
+      <div class="mhd"><div class="mht" id="ct-ficha-tit">Contacto</div>
+        <button class="mcl" onclick="ctFichaCerrar()">×</button></div>
+      <div id="ct-ficha-body"></div>
+    </div>
+  </div>
+
+  <!-- ── ALTA / EDICIÓN ───────────────────────────────────────────────────────────── -->
+  <div class="ab-modal" id="ct-ed-modal" style="display:none">
+    <div class="ab-modal-c" style="max-width:720px;width:96vw">
+      <div class="mhd"><div class="mht" id="ct-ed-tit">Nuevo contacto</div>
+        <button class="mcl" onclick="ctEdCerrar()">×</button></div>
+      <div id="ct-ed-body"></div>
+      <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:14px">
+        <button class="btn bo" onclick="ctEdCerrar()">Cancelar</button>
+        <button class="btn bb" onclick="ctEdGuardar()">Guardar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── UNA CHARLA ───────────────────────────────────────────────────────────────── -->
+  <div class="ab-modal" id="ct-ch-modal" style="display:none">
+    <div class="ab-modal-c" style="max-width:600px;width:96vw">
+      <div class="mhd"><div class="mht" id="ct-ch-tit">Qué se habló</div>
+        <button class="mcl" onclick="ctChCerrar()">×</button></div>
+      <div id="ct-ch-body"></div>
+      <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:14px">
+        <button class="btn bo" onclick="ctChCerrar()">Cancelar</button>
+        <button class="btn bb" onclick="ctChGuardar()">Guardar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── QUÉ PRODUCE ──────────────────────────────────────────────────────────────── -->
+  <div class="ab-modal" id="ct-pr-modal" style="display:none">
+    <div class="ab-modal-c" style="max-width:560px;width:96vw">
+      <div class="mhd"><div class="mht" id="ct-pr-tit">Qué produce</div>
+        <button class="mcl" onclick="ctPrCerrar()">×</button></div>
+      <div id="ct-pr-body"></div>
+      <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:14px">
+        <button class="btn bo" onclick="ctPrCerrar()">Cancelar</button>
+        <button class="btn bb" onclick="ctPrGuardar()">Guardar</button>
+      </div>
     </div>
   </div>
 </div>
@@ -37746,6 +37953,7 @@ function loadSec(s) {
     'sg-importacion': function(){ sgImpInit(); },
     'informes-comercial': function(){ infInit(); },
     'share': function(){ shInit(); },
+    'contactos': function(){ ctInit(); },
     'pl-abasto': function(){ plaInit(); },
     'sg-catalogo':   function(){ sgLoadCaches(function(){ sgCatSub('productos'); }); },
     'sg-reportes':   function(){ sgRepInit(); },
@@ -51617,6 +51825,705 @@ var _inpGondola=eid('gondola-query');
 if(_inpGondola) _inpGondola.addEventListener('keydown', function(e){
   if(e.key==='Enter'){ var q=elv('gondola-query'); if(q) buscarGondola(q); }
 });
+
+// ═══════════════════════════════════════════════════════════════════════════════════════
+// CONTACTOS COMERCIALES — la agenda del área
+// ═══════════════════════════════════════════════════════════════════════════════════════
+// El buscador mira adentro de TODO, incluidas las charlas, y la lista dice POR DÓNDE
+// encontró a cada uno. Eso último no es decoración: con una búsqueda que entra al texto de
+// las conversaciones, "por qué apareció este" deja de ser obvio, y sin el motivo hay que
+// abrir cada ficha para entenderlo.
+//
+// LOS MESES VAN DE JULIO A JUNIO, como todo el año comercial de la casa. La grilla de doce
+// celdas arranca en JUL. Está dicho acá, en el router y en la base a propósito: leerla como
+// enero convierte a un productor de melón en uno de invierno, y nada avisa.
+const CT_MESES = ['JUL','AGO','SEP','OCT','NOV','DIC','ENE','FEB','MAR','ABR','MAY','JUN'];
+const CT_MESES_LARGO = ['Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre',
+                        'Enero','Febrero','Marzo','Abril','Mayo','Junio'];
+let CT_OPC = null;        // los desplegables, cacheados
+let CT_FICHA = null;      // la ficha abierta
+let CT_ED = null;         // lo que se está editando
+let CT_TIMER = null;
+
+const ctEsc = (s) => String(s == null ? '' : s)
+  .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+const ctHoy = () => new Date().toISOString().slice(0,10);
+const ctNum = (n) => (Number(n)||0).toLocaleString('es-AR');
+
+async function ctApi(url, opts) {
+  const r = await fetch('/api/sg/contactos' + url, Object.assign({
+    headers: { 'content-type': 'application/json' },
+  }, opts || {}));
+  const j = await r.json().catch(() => ({ ok:false, error:'respuesta ilegible' }));
+  if (!r.ok || !j.ok) throw new Error(j.error || ('error ' + r.status));
+  return j;
+}
+
+function ctTab(t) {
+  document.querySelectorAll('#sec-contactos .ct-tab').forEach(e =>
+    e.classList.toggle('on', e.dataset.t === t));
+  document.querySelectorAll('#sec-contactos .ct-pane').forEach(e =>
+    e.classList.toggle('on', e.dataset.p === t));
+  if (t === 'pend') ctPendientes();
+}
+
+// ── LA GRILLA DE MESES ────────────────────────────────────────────────────────────────
+// Una sola función para los tres lugares donde aparece (lista, ficha y editor): si cada
+// uno la dibujara a su manera, las franjas no se podrían comparar de un vistazo, que es
+// todo el punto de dibujarlas.
+function ctMesesGrilla(mascara, clase) {
+  const m = /^[01]{12}$/.test(String(mascara||'')) ? String(mascara) : '000000000000';
+  let h = '<span class="ct-mg ' + (clase||'') + '">';
+  for (let i = 0; i < 12; i++) {
+    h += '<i class="' + (m[i]==='1'?'on':'') + '" title="' + CT_MESES_LARGO[i] + '"></i>';
+  }
+  return h + '</span>';
+}
+function ctMesesRotulo() {
+  return '<span class="ct-mlbl">' + CT_MESES.map(x => '<span>'+x[0]+'</span>').join('') + '</span>';
+}
+
+// ── EL BUSCADOR ───────────────────────────────────────────────────────────────────────
+// Se espera a que la persona deje de tipear. Sin esto, "brocoli" son ocho consultas y la
+// que contesta última no es necesariamente la de la palabra entera: la lista termina
+// mostrando los resultados de "brocol".
+function ctBuscarDebounce() {
+  clearTimeout(CT_TIMER);
+  CT_TIMER = setTimeout(ctBuscar, 260);
+}
+
+function ctLimpiar() {
+  ['ct-q','ct-f-zona','ct-f-prod','ct-f-mes','ct-f-vend','ct-f-tipo'].forEach(id => {
+    const e = document.getElementById(id); if (e) e.value = '';
+  });
+  const i = document.getElementById('ct-f-inact'); if (i) i.checked = false;
+  ctBuscar();
+}
+
+async function ctBuscar() {
+  const cont = document.getElementById('ct-lista');
+  if (!cont) return;
+  const v = (id) => { const e = document.getElementById(id); return e ? e.value : ''; };
+  const qs = new URLSearchParams();
+  if (v('ct-q'))      qs.set('q', v('ct-q'));
+  if (v('ct-f-tipo')) qs.set('tipo', v('ct-f-tipo'));
+  if (v('ct-f-zona')) qs.set('zona', v('ct-f-zona'));
+  if (v('ct-f-prod')) qs.set('producto', v('ct-f-prod'));
+  if (v('ct-f-mes'))  qs.set('mes', v('ct-f-mes'));
+  if (v('ct-f-vend')) qs.set('vendedor', v('ct-f-vend'));
+  const inact = document.getElementById('ct-f-inact');
+  if (inact && inact.checked) qs.set('inactivos', '1');
+
+  cont.innerHTML = '<div class="ct-vacio">Buscando…</div>';
+  try {
+    const j = await ctApi('/?' + qs.toString());
+    ctPintarLista(j.contactos, !!v('ct-q'));
+  } catch (e) {
+    cont.innerHTML = '<div class="ct-vacio">No se pudo buscar: ' + ctEsc(e.message) + '</div>';
+  }
+}
+
+const CT_CHIP = {
+  proveedor: ['ct-ch-prov', 'Proveedor'],
+  cliente:   ['ct-ch-cli',  'Cliente'],
+  ambos:     ['ct-ch-amb',  'Las dos'],
+  otro:      ['ct-ch-otro', 'Otro'],
+};
+
+function ctPintarLista(filas, hayQ) {
+  const cont = document.getElementById('ct-lista');
+  if (!filas || !filas.length) {
+    // UNA LISTA VACÍA TIENE QUE DECIR QUE ESTÁ VACÍA PORQUE NO HAY, no quedarse en blanco:
+    // en blanco se lee como "se rompió" y el comercial vuelve a cargar al mismo contacto.
+    cont.innerHTML = '<div class="ct-vacio">' + (hayQ
+      ? 'Nadie con eso. El buscador mira nombre, empresa, teléfono, mail, lo que produce,'
+        + ' la zona, las etiquetas y <b>el texto de las charlas</b> — si no aparece, no está cargado.'
+      : 'Todavía no hay contactos cargados. El botón <b>+ Contacto</b> arranca el primero.')
+      + '</div>';
+    return;
+  }
+  let h = '<div class="ab-table-wrap"><table class="pa-tbl"><thead><tr>'
+        + '<th class="ct-w" style="width:26%">Quién</th>'
+        + '<th style="width:9%">Es</th>'
+        + '<th style="width:17%">Cómo se lo ubica</th>'
+        + '<th class="ct-w" style="width:21%">Qué produce / compra</th>'
+        + '<th style="width:16%">Última charla</th>'
+        + '<th style="width:11%">&nbsp;</th>'
+        + '</tr></thead><tbody>';
+  for (const c of filas) {
+    const chip = CT_CHIP[c.tipo] || CT_CHIP.otro;
+    // El motivo de la aparición. Y el extracto de la charla cuando matcheó ahí: encontrar
+    // a alguien "por una charla" sin ver cuál obliga a abrir la ficha y leerla entera.
+    let why = '';
+    if (hayQ && c.porque && c.porque.length) {
+      why = '<div style="margin-top:3px">' + c.porque.map(p =>
+        '<span class="ct-why' + (p === 'una charla' ? ' ct-why-ch' : '') + '">' + ctEsc(p) + '</span>'
+      ).join('') + '</div>';
+    }
+    if (c.charla_match) {
+      why += '<div class="ct-ext">' + ctEsc(c.charla_match.fecha) + ' · «'
+           + ctEsc(c.charla_match.extracto) + '»</div>';
+    }
+    const medio = c.medio_principal
+      ? (c.medio_tipo === 'mail' ? '✉️ ' : '📞 ') + ctEsc(c.medio_principal)
+      : '<span class="ct-nd">sin teléfono ni mail</span>';
+    const ultima = c.ultima_charla
+      ? ctEsc(c.ultima_charla) + (c.charlas > 1 ? ' <span class="ct-nd">(' + c.charlas + ')</span>' : '')
+      : '<span class="ct-nd">nunca</span>';
+    const pend = c.pendientes > 0
+      ? ' <span class="ct-chip ct-pend" title="Tiene algo pendiente">' + c.pendientes + ' pendiente'
+        + (c.pendientes > 1 ? 's' : '') + '</span>' : '';
+
+    h += '<tr>'
+      + '<td class="ct-w"><b>' + ctEsc(c.nombre) + '</b>' + pend
+      +   (c.activo ? '' : ' <span class="ct-nd">(inactivo)</span>')
+      +   (c.empresa ? '<div class="ct-nd" style="font-style:normal">' + ctEsc(c.empresa)
+            + (c.cargo ? ' · ' + ctEsc(c.cargo) : '') + '</div>' : '')
+      +   (c.zona ? '<div class="ct-nd">' + ctEsc(c.zona)
+            + (c.localidad ? ', ' + ctEsc(c.localidad) : '') + '</div>' : '')
+      +   why + '</td>'
+      + '<td><span class="ct-chip ' + chip[0] + '">' + chip[1] + '</span></td>'
+      + '<td title="' + ctEsc(c.medio_principal || '') + '">' + medio + '</td>'
+      + '<td class="ct-w">' + (c.productos ? ctEsc(c.productos) : '<span class="ct-nd">—</span>') + '</td>'
+      + '<td>' + ultima + '</td>'
+      + '<td style="text-align:right"><button class="btn bo bs" onclick="ctAbrir(' + c.id + ')">Ver</button></td>'
+      + '</tr>';
+  }
+  cont.innerHTML = h + '</tbody></table></div>'
+    + '<div class="ct-nd" style="margin-top:9px">' + filas.length + ' contacto'
+    + (filas.length === 1 ? '' : 's') + '.</div>';
+}
+
+// ── LOS DESPLEGABLES ──────────────────────────────────────────────────────────────────
+async function ctOpciones() {
+  if (CT_OPC) return CT_OPC;
+  const j = await ctApi('/opciones');
+  CT_OPC = j;
+  const llenar = (id, lista, vacio) => {
+    const e = document.getElementById(id);
+    if (!e) return;
+    const antes = e.value;
+    e.innerHTML = '<option value="">' + vacio + '</option>'
+      + (lista || []).map(x => '<option>' + ctEsc(x) + '</option>').join('');
+    e.value = antes;
+  };
+  llenar('ct-f-zona', j.zonas, 'Todas');
+  llenar('ct-f-prod', j.productos, 'Todos');
+  llenar('ct-f-vend', j.vendedores, 'Cualquiera');
+  const m = document.getElementById('ct-f-mes');
+  if (m) {
+    m.innerHTML = '<option value="">Cualquier mes</option>'
+      + CT_MESES_LARGO.map((n, i) => '<option value="' + (i+1) + '">' + n + '</option>').join('');
+  }
+  return j;
+}
+
+// ── LA BANDEJA DE "ME TOCA" ───────────────────────────────────────────────────────────
+async function ctPendientes() {
+  const cont = document.getElementById('ct-pend-lista');
+  if (!cont) return;
+  const h = document.getElementById('ct-p-hasta');
+  if (h && !h.value) h.value = ctHoy();
+  cont.innerHTML = '<div class="ct-vacio">Cargando…</div>';
+  try {
+    const j = await ctApi('/pendientes?hasta=' + encodeURIComponent((h && h.value) || ctHoy()));
+    const cnt = document.getElementById('ct-cnt-pend');
+    if (cnt) cnt.textContent = j.pendientes.length || '·';
+    if (!j.pendientes.length) {
+      cont.innerHTML = '<div class="ct-vacio">No queda nada pendiente hasta esa fecha.</div>';
+      return;
+    }
+    let t = '<div class="ab-table-wrap"><table class="pa-tbl"><thead><tr>'
+      + '<th style="width:10%">Vence</th><th class="ct-w" style="width:22%">Quién</th>'
+      + '<th style="width:16%">Cómo se lo ubica</th>'
+      + '<th class="ct-w" style="width:30%">Qué quedó</th>'
+      + '<th class="ct-w" style="width:12%">De la charla</th>'
+      + '<th style="width:10%">&nbsp;</th></tr></thead><tbody>';
+    for (const p of j.pendientes) {
+      // Lo vencido se marca. Un listado donde el de ayer y el de la semana que viene se
+      // ven igual no sirve para decidir a quién llamar primero.
+      const vencido = p.proximo_el && p.proximo_el < ctHoy();
+      t += '<tr>'
+        + '<td' + (vencido ? ' class="ct-pend" style="background:none"' : '') + '>'
+        +   ctEsc(p.proximo_el) + (vencido ? ' ⚠' : '') + '</td>'
+        + '<td class="ct-w"><b>' + ctEsc(p.nombre) + '</b>'
+        +   (p.empresa ? '<div class="ct-nd" style="font-style:normal">' + ctEsc(p.empresa) + '</div>' : '') + '</td>'
+        + '<td title="' + ctEsc(p.medio_principal || '') + '">'
+        +   (p.medio_principal ? ctEsc(p.medio_principal) : '<span class="ct-nd">—</span>') + '</td>'
+        + '<td class="ct-w">' + ctEsc(p.proximo_paso) + '</td>'
+        + '<td class="ct-w"><span class="ct-nd">' + ctEsc(p.fecha) + '</span></td>'
+        + '<td style="text-align:right;white-space:nowrap">'
+        +   '<button class="btn bo bs" onclick="ctHecho(' + p.contacto_id + ',' + p.id + ')">✓ Hecho</button> '
+        +   '<button class="btn bo bs" onclick="ctAbrir(' + p.contacto_id + ')">Ver</button></td>'
+        + '</tr>';
+    }
+    cont.innerHTML = t + '</tbody></table></div>';
+  } catch (e) {
+    cont.innerHTML = '<div class="ct-vacio">No se pudo cargar: ' + ctEsc(e.message) + '</div>';
+  }
+}
+
+async function ctHecho(cid, chid) {
+  try {
+    await ctApi('/' + cid + '/charlas/' + chid, { method:'PATCH', body: JSON.stringify({ hecho:true }) });
+    ctPendientes();
+    if (CT_FICHA && CT_FICHA.id === cid) ctAbrir(cid);
+  } catch (e) { alert('No se pudo marcar: ' + e.message); }
+}
+
+// ── LA FICHA ──────────────────────────────────────────────────────────────────────────
+async function ctAbrir(id) {
+  const m = document.getElementById('ct-ficha-modal');
+  const b = document.getElementById('ct-ficha-body');
+  m.style.display = 'flex';
+  b.innerHTML = '<div class="ct-vacio">Cargando…</div>';
+  try {
+    const j = await ctApi('/' + id);
+    CT_FICHA = j.contacto;
+    ctPintarFicha(j.contacto);
+  } catch (e) {
+    b.innerHTML = '<div class="ct-vacio">No se pudo abrir: ' + ctEsc(e.message) + '</div>';
+  }
+}
+function ctFichaCerrar() {
+  document.getElementById('ct-ficha-modal').style.display = 'none';
+  CT_FICHA = null;
+}
+
+function ctPintarFicha(c) {
+  const chip = CT_CHIP[c.tipo] || CT_CHIP.otro;
+  document.getElementById('ct-ficha-tit').innerHTML =
+    ctEsc(c.nombre) + ' <span class="ct-chip ' + chip[0] + '">' + chip[1] + '</span>';
+
+  let h = '';
+
+  // ── QUIÉN ES Y CÓMO SE LO UBICA ──
+  h += '<div class="ct-fbox"><h4>Quién es</h4>'
+    + '<div style="font-size:13px;line-height:1.7">'
+    + (c.empresa ? '<b>' + ctEsc(c.empresa) + '</b>' + (c.cargo ? ' · ' + ctEsc(c.cargo) : '') + '<br>' : '')
+    + (c.zona ? '📍 ' + ctEsc(c.zona) + (c.localidad ? ', ' + ctEsc(c.localidad) : '') + '<br>' : '')
+    + (c.vendedor ? 'Lo atiende <b>' + ctEsc(c.vendedor) + '</b><br>' : '')
+    + (c.etiquetas ? '🏷️ ' + ctEsc(c.etiquetas) + '<br>' : '')
+    + (c.notas ? '<div style="margin-top:7px;white-space:pre-wrap">' + ctEsc(c.notas) + '</div>' : '')
+    + '</div>'
+    + '<div style="margin-top:10px"><button class="btn bo bs" onclick="ctEditar()">✏️ Editar</button> '
+    + '<button class="btn bo bs" onclick="ctBaja()">Dar de baja</button></div></div>';
+
+  h += '<div class="ct-fbox"><h4>Cómo se lo ubica</h4>';
+  if (!c.medios.length) {
+    h += '<div class="ct-nd">Sin teléfono ni mail. Es lo primero que hace falta.</div>';
+  } else {
+    for (const m of c.medios) {
+      const ico = m.tipo === 'mail' ? '✉️' : (m.tipo === 'whatsapp' ? '💬' : '📞');
+      // La estrella marca el preferido: un productor tiene el celular, el del galpón y el
+      // del hijo, y el que sabe cuál atiende es el comercial, no el sistema.
+      h += '<div class="ct-medio">'
+        + '<span class="ct-pref" title="' + (m.preferido ? 'Es el preferido' : 'Marcar como preferido') + '"'
+        +   ' onclick="ctPreferido(' + m.id + ')">' + (m.preferido ? '★' : '☆') + '</span>'
+        + '<span>' + ico + ' <b>' + ctEsc(m.valor) + '</b></span>'
+        + (m.nota ? '<span class="ct-nd">' + ctEsc(m.nota) + '</span>' : '')
+        + '<button class="btn bo bs" style="margin-left:auto" onclick="ctMedioBorrar(' + m.id + ')">×</button>'
+        + '</div>';
+    }
+  }
+  h += '<div style="margin-top:9px"><button class="btn bo bs" onclick="ctMedioNuevo()">+ Teléfono o mail</button></div></div>';
+
+  // ── QUÉ PRODUCE: LO DECLARADO ──
+  if (c.tipo === 'proveedor' || c.tipo === 'ambos' || c.productos.length) {
+    h += '<div class="ct-fbox"><h4>Qué produce, y cuándo <span class="ct-nd">· lo que nos dijo</span></h4>';
+    if (!c.productos.length) {
+      h += '<div class="ct-nd">Nada cargado todavía.</div>';
+    } else {
+      h += '<div style="margin-bottom:5px;padding-left:1px">' + ctMesesRotulo()
+         + ' <span class="ct-nd">el año arranca en JULIO</span></div>';
+      h += '<div class="ab-table-wrap"><table class="pa-tbl"><thead><tr>'
+        + '<th class="ct-w" style="width:28%">Producto</th><th style="width:26%">Cuándo</th>'
+        + '<th style="width:20%">Ventana</th><th style="width:16%">Volumen</th>'
+        + '<th style="width:10%">&nbsp;</th></tr></thead><tbody>';
+      for (const p of c.productos) {
+        h += '<tr><td class="ct-w"><b>' + ctEsc(p.producto) + '</b>'
+          + (p.variedad ? '<div class="ct-nd" style="font-style:normal">' + ctEsc(p.variedad) + '</div>' : '')
+          + (p.notas ? '<div class="ct-nd">' + ctEsc(p.notas) + '</div>' : '') + '</td>'
+          + '<td>' + ctMesesGrilla(p.meses) + '</td>'
+          + '<td>' + (p.ventana ? ctEsc(p.ventana) : '<span class="ct-nd">sin definir</span>') + '</td>'
+          + '<td>' + (p.volumen ? ctEsc(p.volumen) : '<span class="ct-nd">—</span>') + '</td>'
+          + '<td style="text-align:right;white-space:nowrap">'
+          +   '<button class="btn bo bs" onclick="ctPrEditar(' + p.id + ')">✏️</button> '
+          +   '<button class="btn bo bs" onclick="ctPrBorrar(' + p.id + ')">×</button></td></tr>';
+      }
+      h += '</tbody></table></div>';
+    }
+    h += '<div style="margin-top:9px"><button class="btn bo bs" onclick="ctPrNuevo()">+ Producto</button></div></div>';
+  }
+
+  // ── LO QUE LA BASE YA SABE ──
+  // Va SEPARADO de lo declarado, no mezclado. El hueco entre las dos cosas —ofrece brócoli
+  // y nunca le compramos brócoli— es justamente la oportunidad, y mezclándolas no se ve.
+  if (c.ofrece_sin_comprar && c.ofrece_sin_comprar.length) {
+    h += '<div class="ct-hueco"><b>⭐ Ofrece y nunca le compramos</b><br>'
+      + c.ofrece_sin_comprar.map(x => '· <b>' + ctEsc(x.producto) + '</b>'
+          + (x.variedad ? ' (' + ctEsc(x.variedad) + ')' : '')
+          + (x.ventana ? ' — ' + ctEsc(x.ventana) : '')).join('<br>')
+      + '<div class="ct-nd" style="margin-top:6px">Sale de cruzar lo que nos dijo con lo que'
+      + ' efectivamente le compramos. Es la razón de cargar esta ficha.</div></div>';
+  }
+
+  if (c.compras) {
+    h += '<div class="ct-fbox"><h4>Qué le compramos <span class="ct-nd">· lo que dicen las ventas</span></h4>';
+    if (c.compras.sin_datos) {
+      // La diferencia entre "no trajo nada" y "el nombre no coincide con el de la planilla".
+      // Un cero se lee como lo primero y manda a alguien a reclamarle a un productor que trajo.
+      h += '<div class="ct-nd">No hay ventas con el proveedor «' + ctEsc(c.proveedor_nombre) + '».'
+        + ' O nunca le compramos, o el nombre no es el que usa la planilla.</div>';
+    } else {
+      h += '<div style="margin-bottom:5px">' + ctMesesRotulo() + '</div>'
+        + '<div class="ab-table-wrap"><table class="pa-tbl"><thead><tr>'
+        + '<th class="ct-w" style="width:32%">Producto</th><th style="width:26%">Cuándo trajo</th>'
+        + '<th style="width:21%" class="ct-nd">Kilos</th><th style="width:21%" class="ct-nd">USD</th>'
+        + '</tr></thead><tbody>';
+      for (const p of c.compras.productos) {
+        h += '<tr><td class="ct-w"><b>' + ctEsc(p.producto) + '</b></td>'
+          + '<td>' + ctMesesGrilla(p.meses, 'ct-obs')
+          + ' <span class="ct-nd">' + ctEsc(p.ventana) + '</span></td>'
+          + '<td style="text-align:right">' + ctNum(p.kilos) + ' K</td>'
+          + '<td style="text-align:right">USD ' + ctNum(p.usd) + '</td></tr>';
+      }
+      h += '</tbody></table></div>';
+    }
+    h += '</div>';
+  }
+
+  if (c.ventas) {
+    h += '<div class="ct-fbox"><h4>Qué nos compra <span class="ct-nd">· lo que dicen las ventas</span></h4>';
+    if (c.ventas.sin_datos) {
+      h += '<div class="ct-nd">No hay ventas al cliente «' + ctEsc(c.cliente_nombre) + '».'
+        + ' O nunca le vendimos, o el nombre no es el que usa la planilla.</div>';
+    } else {
+      h += '<div class="ab-table-wrap"><table class="pa-tbl"><thead><tr>'
+        + '<th class="ct-w" style="width:46%">Producto</th>'
+        + '<th style="width:18%">Kilos</th><th style="width:18%">USD</th>'
+        + '<th style="width:18%">Última</th></tr></thead><tbody>';
+      for (const p of c.ventas.productos) {
+        h += '<tr><td class="ct-w">' + ctEsc(p.producto) + '</td>'
+          + '<td style="text-align:right">' + ctNum(p.kilos) + ' K</td>'
+          + '<td style="text-align:right">USD ' + ctNum(p.usd) + '</td>'
+          + '<td class="ct-nd">' + ctEsc(p.ultimo_periodo || '') + '</td></tr>';
+      }
+      h += '</tbody></table></div><div class="ct-nd" style="margin-top:6px">Total: '
+        + ctNum(c.ventas.kilos) + ' K · USD ' + ctNum(c.ventas.usd) + '</div>';
+    }
+    h += '</div>';
+  }
+
+  // ── QUÉ SE HABLÓ ──
+  // Es lo que el usuario pidió por nombre y lo que hace que la ficha valga la pena volver a
+  // abrir. Lo pendiente se marca en rojo arriba de todo.
+  h += '<div class="ct-fbox"><h4>Qué se habló</h4>';
+  if (c.pendientes.length) {
+    h += '<div style="background:#fdecec;border-radius:8px;padding:9px 11px;margin-bottom:11px;font-size:12.5px">'
+      + '<b style="color:#b3261e">Pendiente</b><br>'
+      + c.pendientes.map(p => '· ' + ctEsc(p.proximo_paso)
+          + (p.proximo_el ? ' <span class="ct-nd">para el ' + ctEsc(p.proximo_el) + '</span>'
+                          : ' <span class="ct-nd">sin fecha</span>')
+          + ' <button class="btn bo bs" onclick="ctHecho(' + c.id + ',' + p.id + ')">✓</button>').join('<br>')
+      + '</div>';
+  }
+  if (!c.charlas.length) {
+    h += '<div class="ct-nd">Todavía no se anotó ninguna charla.</div>';
+  } else {
+    for (const ch of c.charlas) {
+      const pend = ch.proximo_paso && !ch.hecho_en;
+      const ico = { whatsapp:'💬', mail:'✉️', visita:'🤝', telefono:'📞' }[ch.canal] || '·';
+      h += '<div class="ct-charla' + (pend ? ' ct-c-pend' : '') + '">'
+        + '<div class="ct-c-hd">' + ico + ' ' + ctEsc(ch.fecha)
+        +   (ch.usuario ? ' · ' + ctEsc(ch.usuario) : '')
+        +   ' <button class="btn bo bs" style="padding:0 5px;font-size:10px" onclick="ctChBorrar(' + ch.id + ')">×</button></div>'
+        + '<div class="ct-c-tx">' + ctEsc(ch.resumen) + '</div>'
+        + (ch.proximo_paso ? '<div class="ct-c-paso">'
+            + (ch.hecho_en ? '✓ ' : '→ ') + ctEsc(ch.proximo_paso)
+            + (ch.proximo_el ? ' <span class="ct-nd">' + ctEsc(ch.proximo_el) + '</span>' : '')
+            + (ch.hecho_en ? ' <span class="ct-nd">hecho el ' + ctEsc(ch.hecho_en) + '</span>'
+                           : ' <button class="btn bo bs" onclick="ctHecho(' + c.id + ',' + ch.id + ')">✓ Hecho</button>')
+            + '</div>' : '')
+        + '</div>';
+    }
+  }
+  h += '<div style="margin-top:9px"><button class="btn bb bs" onclick="ctChNuevo()">+ Anotar una charla</button></div></div>';
+
+  document.getElementById('ct-ficha-body').innerHTML = h;
+}
+
+// ── ALTA Y EDICIÓN ────────────────────────────────────────────────────────────────────
+function ctNuevo() { ctEdAbrir(null); }
+function ctEditar() { if (CT_FICHA) ctEdAbrir(CT_FICHA); }
+
+async function ctEdAbrir(c) {
+  await ctOpciones().catch(() => {});
+  CT_ED = c;
+  document.getElementById('ct-ed-tit').textContent = c ? 'Editar contacto' : 'Nuevo contacto';
+  const val = (k) => ctEsc(c ? (c[k] || '') : '');
+  const lista = (nombre) => ((CT_OPC && CT_OPC[nombre]) || [])
+    .map(x => '<option>' + ctEsc(x) + '</option>').join('');
+  document.getElementById('ct-ed-body').innerHTML =
+      '<div class="ct-f" style="margin-bottom:0">'
+    + '<div style="flex:1;min-width:200px"><label>Nombre *</label>'
+    +   '<input id="ct-ed-nombre" style="width:100%" value="' + val('nombre') + '"></div>'
+    + '<div style="flex:1;min-width:200px"><label>Empresa</label>'
+    +   '<input id="ct-ed-empresa" style="width:100%" value="' + val('empresa') + '"></div>'
+    + '</div>'
+    + '<div class="ct-f" style="margin-bottom:0">'
+    + '<div><label>Cargo</label><input id="ct-ed-cargo" value="' + val('cargo') + '" placeholder="Dueño, compradora…"></div>'
+    + '<div><label>Es *</label><select id="ct-ed-tipo">'
+    +   ['proveedor','cliente','ambos','otro'].map(t =>
+          '<option value="' + t + '"' + ((c && c.tipo === t) || (!c && t === 'proveedor') ? ' selected' : '') + '>'
+          + (CT_CHIP[t] ? CT_CHIP[t][1] : t) + '</option>').join('')
+    +   '</select></div>'
+    + '<div><label>Zona</label><input id="ct-ed-zona" value="' + val('zona') + '" list="ct-dl-zonas">'
+    +   '<datalist id="ct-dl-zonas">' + lista('zonas') + '</datalist></div>'
+    + '<div><label>Localidad</label><input id="ct-ed-localidad" value="' + val('localidad') + '"></div>'
+    + '<div><label>Lo atiende</label><input id="ct-ed-vendedor" value="' + val('vendedor') + '" list="ct-dl-vend">'
+    +   '<datalist id="ct-dl-vend">' + lista('vendedores') + '</datalist></div>'
+    + '</div>'
+    // ── EL VÍNCULO CON EL PADRÓN ES POR NOMBRE ──
+    // Es como se vincula todo lo comercial en este sistema: la planilla de ventas trae
+    // nombres, no ids. Si no coincide, la ficha lo dice en vez de mostrar cero.
+    + '<div class="ct-f" style="margin-bottom:0;margin-top:6px">'
+    + '<div style="flex:1;min-width:200px"><label>Nombre en la planilla como PROVEEDOR</label>'
+    +   '<input id="ct-ed-prov" style="width:100%" value="' + val('proveedor_nombre') + '"></div>'
+    + '<div style="flex:1;min-width:200px"><label>Nombre en la planilla como CLIENTE</label>'
+    +   '<input id="ct-ed-cli" style="width:100%" value="' + val('cliente_nombre') + '"></div>'
+    + '</div>'
+    + '<div class="ct-nd" style="margin:3px 0 9px">Es lo que trae a la ficha lo que de verdad'
+    + ' le compramos o le vendimos. Tiene que estar escrito igual que en la planilla.</div>'
+    + '<div><label style="font-size:11px;color:var(--mut)">Etiquetas</label>'
+    +   '<input id="ct-ed-etiquetas" style="width:100%;padding:5px 8px;border:1px solid var(--bor);border-radius:6px;background:var(--bg)"'
+    +   ' value="' + val('etiquetas') + '" placeholder="confiable, paga a 30, no manda fruta chica…"></div>'
+    + '<div class="ct-nd" style="margin:3px 0 9px">Texto libre, separado por comas. El buscador'
+    + ' las mira: es para poder preguntar después por algo que no tiene campo propio.</div>'
+    + '<div><label style="font-size:11px;color:var(--mut)">Notas</label>'
+    +   '<textarea id="ct-ed-notas" rows="3" style="width:100%;padding:6px 8px;border:1px solid var(--bor);'
+    +   'border-radius:6px;background:var(--bg);font-size:12.5px;font-family:inherit">' + val('notas') + '</textarea></div>';
+  document.getElementById('ct-ed-modal').style.display = 'flex';
+}
+function ctEdCerrar() { document.getElementById('ct-ed-modal').style.display = 'none'; CT_ED = null; }
+
+async function ctEdGuardar() {
+  const g = (id) => { const e = document.getElementById(id); return e ? e.value.trim() : ''; };
+  if (!g('ct-ed-nombre')) { alert('Falta el nombre.'); return; }
+  const cuerpo = {
+    nombre: g('ct-ed-nombre'), empresa: g('ct-ed-empresa'), cargo: g('ct-ed-cargo'),
+    tipo: g('ct-ed-tipo'), zona: g('ct-ed-zona'), localidad: g('ct-ed-localidad'),
+    vendedor: g('ct-ed-vendedor'), proveedor_nombre: g('ct-ed-prov'),
+    cliente_nombre: g('ct-ed-cli'), etiquetas: g('ct-ed-etiquetas'), notas: g('ct-ed-notas'),
+  };
+  try {
+    const nuevo = !CT_ED;
+    const j = nuevo
+      ? await ctApi('/', { method:'POST', body: JSON.stringify(cuerpo) })
+      : await ctApi('/' + CT_ED.id, { method:'PATCH', body: JSON.stringify(cuerpo) });
+    ctEdCerrar();
+    CT_OPC = null;                       // pudo aparecer una zona o un vendedor nuevos
+    await ctOpciones().catch(() => {});
+    ctBuscar();
+    // Recién cargado, lo que sigue es ponerle el teléfono y anotar la charla: se abre la
+    // ficha sola, para no obligar a buscarlo de nuevo en la lista.
+    ctAbrir(nuevo ? j.id : CT_ED.id);
+  } catch (e) { alert('No se pudo guardar: ' + e.message); }
+}
+
+async function ctBaja() {
+  if (!CT_FICHA) return;
+  // Se avisa qué se pierde de verdad, que no es la ficha: son las charlas.
+  if (!confirm('Dar de baja a ' + CT_FICHA.nombre + '?\n\nSe esconde del buscador. Las '
+    + CT_FICHA.charlas.length + ' charla(s) quedan guardadas.')) return;
+  try {
+    await ctApi('/' + CT_FICHA.id + '/eliminar', { method:'POST' });
+    ctFichaCerrar(); ctBuscar();
+  } catch (e) { alert('No se pudo: ' + e.message); }
+}
+
+// ── MEDIOS ────────────────────────────────────────────────────────────────────────────
+async function ctMedioNuevo() {
+  if (!CT_FICHA) return;
+  const valor = prompt('Teléfono o mail:');
+  if (!valor || !valor.trim()) return;
+  // El tipo se adivina en vez de preguntarlo: una arroba es un mail y no hay más caso.
+  const tipo = valor.includes('@') ? 'mail' : 'telefono';
+  try {
+    await ctApi('/' + CT_FICHA.id + '/medios', { method:'POST',
+      body: JSON.stringify({ tipo, valor: valor.trim(), preferido: !CT_FICHA.medios.length }) });
+    ctAbrir(CT_FICHA.id);
+  } catch (e) { alert('No se pudo: ' + e.message); }
+}
+async function ctPreferido(mid) {
+  if (!CT_FICHA) return;
+  try {
+    await ctApi('/' + CT_FICHA.id + '/medios/' + mid + '/preferido', { method:'POST' });
+    ctAbrir(CT_FICHA.id);
+  } catch (e) { alert('No se pudo: ' + e.message); }
+}
+async function ctMedioBorrar(mid) {
+  if (!CT_FICHA || !confirm('Borrar este teléfono o mail?')) return;
+  try {
+    await ctApi('/' + CT_FICHA.id + '/medios/' + mid, { method:'DELETE' });
+    ctAbrir(CT_FICHA.id);
+  } catch (e) { alert('No se pudo: ' + e.message); }
+}
+
+// ── QUÉ PRODUCE ───────────────────────────────────────────────────────────────────────
+let CT_PR = null;
+function ctPrNuevo() { ctPrAbrir(null); }
+function ctPrEditar(pid) {
+  ctPrAbrir((CT_FICHA && CT_FICHA.productos.find(p => p.id === pid)) || null);
+}
+function ctPrAbrir(p) {
+  CT_PR = p;
+  document.getElementById('ct-pr-tit').textContent = p ? 'Qué produce' : 'Agregar producto';
+  const m = (p && /^[01]{12}$/.test(p.meses || '')) ? p.meses : '000000000000';
+  // LAS DOCE CELDAS SE TOCAN, no se elige un desde y un hasta: hay productores con una
+  // cosecha temprana y una tardía, y un rango las aplasta en una sola ventana que diría
+  // que trae en los meses del medio, cuando no trae.
+  let celdas = '<span class="ct-mg ct-mg-ed" id="ct-pr-mg">';
+  for (let i = 0; i < 12; i++) {
+    celdas += '<i class="' + (m[i]==='1'?'on':'') + '" data-i="' + i + '"'
+           +  ' onclick="ctPrTocar(' + i + ')">' + CT_MESES[i] + '</i>';
+  }
+  celdas += '</span>';
+  document.getElementById('ct-pr-body').innerHTML =
+      '<div class="ct-f" style="margin-bottom:0">'
+    + '<div style="flex:1;min-width:180px"><label>Producto *</label>'
+    +   '<input id="ct-pr-prod" style="width:100%" value="' + ctEsc(p ? p.producto : '') + '"'
+    +   ' list="ct-dl-prod"><datalist id="ct-dl-prod">'
+    +   ((CT_OPC && CT_OPC.productos) || []).map(x => '<option>' + ctEsc(x) + '</option>').join('')
+    +   '</datalist></div>'
+    + '<div><label>Variedad</label><input id="ct-pr-var" value="' + ctEsc(p ? (p.variedad||'') : '') + '"></div>'
+    + '<div><label>Volumen</label><input id="ct-pr-vol" value="' + ctEsc(p ? (p.volumen||'') : '') + '"'
+    +   ' placeholder="2 camiones por semana"></div></div>'
+    + '<div style="margin-top:11px"><label style="font-size:11px;color:var(--mut)">'
+    +   'En qué meses lo tiene — <b>el año arranca en JULIO</b></label>'
+    + '<div style="margin-top:4px">' + celdas + '</div>'
+    + '<div class="ct-nd" style="margin-top:5px" id="ct-pr-vent"></div></div>'
+    + '<div style="margin-top:9px"><label style="font-size:11px;color:var(--mut)">Notas</label>'
+    + '<input id="ct-pr-notas" style="width:100%;padding:5px 8px;border:1px solid var(--bor);'
+    +   'border-radius:6px;background:var(--bg)" value="' + ctEsc(p ? (p.notas||'') : '') + '"></div>';
+  document.getElementById('ct-pr-modal').style.display = 'flex';
+  ctPrVentana();
+}
+function ctPrCerrar() { document.getElementById('ct-pr-modal').style.display = 'none'; CT_PR = null; }
+function ctPrTocar(i) {
+  const c = document.querySelector('#ct-pr-mg i[data-i="' + i + '"]');
+  if (c) c.classList.toggle('on');
+  ctPrVentana();
+}
+function ctPrMascara() {
+  let m = '';
+  for (let i = 0; i < 12; i++) {
+    const c = document.querySelector('#ct-pr-mg i[data-i="' + i + '"]');
+    m += (c && c.classList.contains('on')) ? '1' : '0';
+  }
+  return m;
+}
+// Se dice en palabras mientras se tocan las celdas: doce cuadraditos pintados son fáciles
+// de pintar mal de a uno, y "NOV a MAR" se lee de un vistazo.
+function ctPrVentana() {
+  const e = document.getElementById('ct-pr-vent');
+  if (!e) return;
+  const m = ctPrMascara();
+  const tramos = [];
+  for (let i = 0; i < 12; i++) {
+    if (m[i] !== '1') continue;
+    if (tramos.length && tramos[tramos.length-1][1] === i-1) tramos[tramos.length-1][1] = i;
+    else tramos.push([i, i]);
+  }
+  e.innerHTML = tramos.length
+    ? 'Ventana: <b>' + tramos.map(([a,b]) => a===b ? CT_MESES[a] : CT_MESES[a]+' a '+CT_MESES[b]).join(' y ') + '</b>'
+    : 'Sin meses marcados.';
+}
+async function ctPrGuardar() {
+  if (!CT_FICHA) return;
+  const g = (id) => { const e = document.getElementById(id); return e ? e.value.trim() : ''; };
+  if (!g('ct-pr-prod')) { alert('Falta el producto.'); return; }
+  const cuerpo = { producto: g('ct-pr-prod'), variedad: g('ct-pr-var'),
+                   meses: ctPrMascara(), volumen: g('ct-pr-vol'), notas: g('ct-pr-notas') };
+  try {
+    if (CT_PR) await ctApi('/' + CT_FICHA.id + '/productos/' + CT_PR.id,
+                           { method:'PATCH', body: JSON.stringify(cuerpo) });
+    else       await ctApi('/' + CT_FICHA.id + '/productos',
+                           { method:'POST', body: JSON.stringify(cuerpo) });
+    ctPrCerrar(); CT_OPC = null; ctAbrir(CT_FICHA.id);
+  } catch (e) { alert('No se pudo guardar: ' + e.message); }
+}
+async function ctPrBorrar(pid) {
+  if (!CT_FICHA || !confirm('Borrar este producto de la ficha?')) return;
+  try {
+    await ctApi('/' + CT_FICHA.id + '/productos/' + pid, { method:'DELETE' });
+    ctAbrir(CT_FICHA.id);
+  } catch (e) { alert('No se pudo: ' + e.message); }
+}
+
+// ── QUÉ SE HABLÓ ──────────────────────────────────────────────────────────────────────
+function ctChNuevo() {
+  if (!CT_FICHA) return;
+  document.getElementById('ct-ch-body').innerHTML =
+      '<div class="ct-f" style="margin-bottom:0">'
+    + '<div><label>Cuándo</label><input type="date" id="ct-ch-fecha" value="' + ctHoy() + '"></div>'
+    + '<div><label>Por dónde</label><select id="ct-ch-canal">'
+    +   '<option value="telefono">📞 Teléfono</option><option value="whatsapp">💬 WhatsApp</option>'
+    +   '<option value="mail">✉️ Mail</option><option value="visita">🤝 Visita</option>'
+    +   '<option value="otro">Otro</option></select></div></div>'
+    + '<div style="margin-top:9px"><label style="font-size:11px;color:var(--mut)">Qué se habló *</label>'
+    + '<textarea id="ct-ch-res" rows="5" style="width:100%;padding:7px 9px;border:1px solid var(--bor);'
+    +   'border-radius:7px;background:var(--bg);font-size:13px;font-family:inherit"'
+    +   ' placeholder="Lo que dijo, con las palabras que usó."></textarea></div>'
+    // EL BUSCADOR ENTRA ACÁ ADENTRO. Vale la pena decirlo donde se escribe: cambia cómo se
+    // escribe la nota. "Me ofreció brócoli" se encuentra; "me ofreció algo nuevo" no.
+    + '<div class="ct-nd" style="margin:3px 0 11px">El buscador mira este texto. Nombrar los'
+    + ' productos y las cosas concretas es lo que después permite preguntar'
+    + ' <b>¿quién me habló de brócoli?</b></div>'
+    + '<div class="ct-f" style="margin-bottom:0">'
+    + '<div style="flex:1;min-width:220px"><label>Qué quedó pendiente</label>'
+    +   '<input id="ct-ch-paso" style="width:100%" placeholder="Pedirle precio del brócoli"></div>'
+    + '<div><label>Para cuándo</label><input type="date" id="ct-ch-el"></div></div>'
+    + '<div class="ct-nd" style="margin-top:3px">Con fecha aparece en <b>Me toca</b>. Sin'
+    + ' próximo paso, la charla es una nota: el mes que viene no se sabe si quedó algo.</div>';
+  document.getElementById('ct-ch-modal').style.display = 'flex';
+}
+function ctChCerrar() { document.getElementById('ct-ch-modal').style.display = 'none'; }
+
+async function ctChGuardar() {
+  if (!CT_FICHA) return;
+  const g = (id) => { const e = document.getElementById(id); return e ? e.value.trim() : ''; };
+  if (!g('ct-ch-res')) { alert('Falta lo que se habló.'); return; }
+  try {
+    await ctApi('/' + CT_FICHA.id + '/charlas', { method:'POST', body: JSON.stringify({
+      fecha: g('ct-ch-fecha') || undefined, canal: g('ct-ch-canal'), resumen: g('ct-ch-res'),
+      proximo_paso: g('ct-ch-paso'), proximo_el: g('ct-ch-el') }) });
+    ctChCerrar(); ctAbrir(CT_FICHA.id);
+    const cnt = document.getElementById('ct-cnt-pend');
+    if (cnt && g('ct-ch-paso') && g('ct-ch-el')) ctPendientes();
+  } catch (e) { alert('No se pudo guardar: ' + e.message); }
+}
+
+async function ctChBorrar(chid) {
+  if (!CT_FICHA || !confirm('Borrar esta charla?\n\nSe pierde lo que se anotó de esa conversación.')) return;
+  try {
+    await ctApi('/' + CT_FICHA.id + '/charlas/' + chid + '/eliminar', { method:'POST' });
+    ctAbrir(CT_FICHA.id);
+  } catch (e) { alert('No se pudo: ' + e.message); }
+}
+
+// El arranque de la pantalla. La bandeja se consulta también acá, no sólo al entrar a su
+// solapa: el número en la pestaña es lo que hace que alguien la abra.
+async function ctInit() {
+  await ctOpciones().catch(() => {});
+  ctBuscar();
+  try {
+    const j = await ctApi('/pendientes?hasta=' + ctHoy());
+    const cnt = document.getElementById('ct-cnt-pend');
+    if (cnt) cnt.textContent = j.pendientes.length || '·';
+  } catch (e) {}
+}
+
 </script>
 
 <!-- MODAL GONDOLA SUPERMERCADOS -->

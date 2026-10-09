@@ -55,6 +55,11 @@ const PREFIJOS = [
   ['informes-comercial', 'informes'],
   // SHARE (participacion en el CD de Carrefour). Router propio de un solo modulo.
   ['share', 'share'],
+  // La agenda comercial. 'ver' alcanza para buscar; cargar una ficha o una charla pide
+  // 'operar'. Sin esta línea, moduloDeRuta devuelve null y exigirNivel deja pasar a
+  // cualquiera con sesión — que es exactamente lo que no queremos con una lista de
+  // teléfonos directos de compradores y productores.
+  ['contactos', 'sg/contactos'],
   // P&L ABASTO (V1052). Router propio de un solo módulo: subir el libro diario y guardar
   // los rubros pide 'operar'.
   ['pl-abasto', 'pl-abasto'],
