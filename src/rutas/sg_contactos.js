@@ -3,6 +3,22 @@
 // La agenda del área. Montado en /api/sg/contactos, ANTES del sgRouter genérico (que
 // matchea /api/sg/*) — igual que contable, ventas y tesorería.
 //
+// ── DOS NIVELES ─────────────────────────────────────────────────────────────────────
+// Las direcciones vienen en dos familias, y la diferencia no es de forma:
+//
+//   /api/sg/contactos           → PERSONAS. A quién se llama: cargo, teléfonos, charlas.
+//   /api/sg/contactos/empresas  → CUENTAS. Qué produce, en qué meses, el vínculo con la
+//                                 planilla, la zona, quién la atiende.
+//
+// Los productos cuelgan de la EMPRESA (POST /empresas/:id/productos), no de la persona.
+// Pablo, 9/10/2026: la empresa es la que tiene la venta de producción de cada producto. La
+// razón larga está en db_sg_contactos.js: cargando al dueño y al encargado de la misma
+// finca, el calendario de melón quedaba cargado dos veces y a la semana estaban distintos.
+//
+// Y LAS RUTAS DE /empresas VAN ANTES DE /:id. Express resuelve por orden: con /:id primero,
+// un GET a /empresas entra ahí con id="empresas" y contesta «no existe ese contacto». El
+// archivo compila igual y el error aparece recién cuando alguien abre la pantalla.
+//
 // La lógica de verdad vive en servicios/contactos.js, que recibe la db por parámetro y
 // por eso tiene tests que corren sin better-sqlite3. Acá queda lo que es de HTTP: quién
 // puede, qué empresa, y traducir el cuerpo del pedido a esas funciones.
@@ -16,6 +32,7 @@ import db from '../servicios/db_sg_contactos.js';
 import { exigirEmpresa, SAN_GERONIMO } from '../servicios/sociedad_modulo.js';
 import {
   buscar, ficha, pendientes, opciones, mascaraValida,
+  buscarEmpresas, fichaEmpresa, charlasDeEmpresa, empresaPorNombre,
   observadoProveedor, observadoCliente, ofreceYNoLeCompramos,
   TIPOS, CANALES, MESES,
 } from '../servicios/contactos.js';
@@ -61,6 +78,7 @@ router.get('/', (req, res) => {
       vendedor: req.query.vendedor,
       producto: req.query.producto,
       mes: req.query.mes,
+      empresa_id: req.query.empresa_id,
       etiqueta: req.query.etiqueta,
       incluir_inactivos: req.query.inactivos === '1',
       limite: req.query.limite,
@@ -86,50 +104,260 @@ router.get('/pendientes', (req, res) => {
   } catch (e) { res.status(500).json({ ok: false, error: String(e.message || e) }); }
 });
 
-// ── LA FICHA ──────────────────────────────────────────────────────────────────────────
-// Trae lo DECLARADO (lo que el comercial cargó) y lo OBSERVADO (lo que dicen las ventas)
-// por separado. Separado a propósito: la diferencia entre las dos cosas —ofrece brócoli y
-// nunca le compramos brócoli— es justamente la oportunidad, y mezclándolas no se ve.
+// ── LA EMPRESA: LA CUENTA COMERCIAL ───────────────────────────────────────────────────
+// De acá cuelgan los productos y el vínculo con la planilla. Ver db_sg_contactos.js: la
+// finca produce melón una sola vez, y el que lo cuenta por teléfono puede ser cualquiera.
+const CAMPOS_EMP = ['nombre', 'tipo', 'zona', 'localidad',
+                    'cliente_nombre', 'proveedor_nombre', 'vendedor', 'etiquetas', 'notas'];
+
+// Encuentra la empresa por nombre o la crea. Es lo que hace que cargar a la segunda persona
+// de Giglio caiga en la finca que ya existe sin que el comercial tenga que saber que existe.
+function empresaDeNombre(nombre, datos, usuarioId) {
+  const n = txt(nombre);
+  if (!n) return null;
+  const ya = empresaPorNombre(db, n);
+  if (ya) return ya;
+  const d = datos || {};
+  const r = db.prepare('INSERT INTO sg_contacto_empresas'
+    + ' (nombre, tipo, zona, localidad, cliente_nombre, proveedor_nombre, vendedor,'
+    + '  etiquetas, notas, creado_por_id) VALUES (?,?,?,?,?,?,?,?,?,?)').run(
+    n, TIPOS.includes(d.tipo) ? d.tipo : 'otro', txt(d.zona), txt(d.localidad),
+    txt(d.cliente_nombre), txt(d.proveedor_nombre), txt(d.vendedor),
+    txt(d.etiquetas), txt(d.notas), usuarioId || null);
+  return db.prepare('SELECT * FROM sg_contacto_empresas WHERE id = ?').get(Number(r.lastInsertRowid));
+}
+
+router.get('/empresas', (req, res) => {
+  try {
+    const r = buscarEmpresas(db, {
+      q: req.query.q, tipo: req.query.tipo, zona: req.query.zona,
+      vendedor: req.query.vendedor, producto: req.query.producto, mes: req.query.mes,
+      incluir_inactivos: req.query.inactivos === '1', limite: req.query.limite,
+    });
+    res.json({ ok: true, empresas: r, total: r.length });
+  } catch (e) { res.status(500).json({ ok: false, error: String(e.message || e) }); }
+});
+
+// La ficha de la cuenta: qué produce, quiénes son sus personas, y TODO lo que se habló con
+// cualquiera de ellas. El historial de una cuenta es uno solo aunque las personas sean tres.
+router.get('/empresas/:id', (req, res) => {
+  try {
+    const e = fichaEmpresa(db, req.params.id);
+    if (!e) return res.status(404).json({ ok: false, error: 'no existe esa empresa' });
+    e.charlas = charlasDeEmpresa(db, e.id);
+    e.pendientes = e.charlas.filter((c) => c.proximo_paso && !c.hecho_en);
+    if (e.proveedor_nombre) {
+      e.compras = observadoProveedor(db, e.proveedor_nombre);
+      e.ofrece_sin_comprar = ofreceYNoLeCompramos(e.productos, e.compras);
+    }
+    if (e.cliente_nombre) e.ventas = observadoCliente(db, e.cliente_nombre);
+    res.json({ ok: true, empresa: e });
+  } catch (e) { res.status(500).json({ ok: false, error: String(e.message || e) }); }
+});
+
+router.post('/empresas', (req, res) => {
+  try {
+    const b = req.body || {};
+    const nombre = txt(b.nombre);
+    if (!nombre) return res.status(400).json({ ok: false, error: 'falta el nombre de la empresa' });
+    // Dos fichas de la misma finca son dos historiales con la mitad de las charlas cada
+    // uno, que es justo lo que este módulo viene a evitar. Se devuelve la que ya hay.
+    const ya = empresaPorNombre(db, nombre);
+    if (ya) {
+      return res.status(409).json({ ok: false, error: 'ya existe «' + ya.nombre + '»',
+                                    empresa_id: ya.id });
+    }
+    const e = empresaDeNombre(nombre, b, req._user.id);
+    guardarProductos(e.id, b.productos);
+    res.json({ ok: true, id: e.id, empresa: fichaEmpresa(db, e.id) });
+  } catch (e) { res.status(500).json({ ok: false, error: String(e.message || e) }); }
+});
+
+router.patch('/empresas/:id', (req, res) => {
+  try {
+    const b = req.body || {};
+    const sets = [], par = [];
+    for (const c of CAMPOS_EMP) {
+      if (!(c in b)) continue;
+      if (c === 'nombre') {
+        const n = txt(b.nombre);
+        if (!n) return res.status(400).json({ ok: false, error: 'el nombre no puede quedar vacío' });
+        const otra = empresaPorNombre(db, n);
+        if (otra && String(otra.id) !== String(req.params.id)) {
+          return res.status(409).json({ ok: false, error: 'ya hay otra empresa llamada «' + otra.nombre + '»' });
+        }
+        sets.push('nombre = ?'); par.push(n); continue;
+      }
+      if (c === 'tipo') {
+        if (!TIPOS.includes(b.tipo)) return res.status(400).json({ ok: false, error: 'tipo inválido' });
+        sets.push('tipo = ?'); par.push(b.tipo); continue;
+      }
+      sets.push(c + ' = ?'); par.push(txt(b[c]));
+    }
+    if ('activo' in b) { sets.push('activo = ?'); par.push(b.activo ? 1 : 0); }
+    if (!sets.length) return res.status(400).json({ ok: false, error: 'nada que cambiar' });
+
+    sets.push("actualizado_en = datetime('now','localtime')");
+    par.push(req.params.id);
+    const r = db.prepare('UPDATE sg_contacto_empresas SET ' + sets.join(', ')
+      + ' WHERE id = ? AND eliminado_en IS NULL').run(...par);
+    if (!r.changes) return res.status(404).json({ ok: false, error: 'no existe esa empresa' });
+
+    // El nombre de la empresa está DENORMALIZADO en cada persona (para que el buscador
+    // mire una sola tabla). Si se renombra la finca y no se reescribe ahí, la lista sigue
+    // mostrando el nombre viejo y nadie entiende por qué.
+    if ('nombre' in b) {
+      db.prepare('UPDATE sg_contactos SET empresa = ? WHERE empresa_id = ?')
+        .run(txt(b.nombre), req.params.id);
+    }
+    res.json({ ok: true, empresa: fichaEmpresa(db, req.params.id) });
+  } catch (e) { res.status(500).json({ ok: false, error: String(e.message || e) }); }
+});
+
+// Baja blanda de la cuenta. Se lleva a su gente de la lista del día —si la finca dejó de
+// trabajar con nosotros, el encargado no tiene por qué seguir apareciendo— pero NO borra
+// nada: las personas, sus teléfonos y los años de charlas quedan.
+router.post('/empresas/:id/eliminar', (req, res) => {
+  try {
+    const r = db.prepare("UPDATE sg_contacto_empresas SET eliminado_en = datetime('now','localtime')"
+      + ' WHERE id = ? AND eliminado_en IS NULL').run(req.params.id);
+    if (!r.changes) return res.status(404).json({ ok: false, error: 'no existe esa empresa' });
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ ok: false, error: String(e.message || e) }); }
+});
+
+// ── QUÉ PRODUCE, Y CUÁNDO — DE LA EMPRESA ─────────────────────────────────────────────
+function guardarProductos(empresaId, productos) {
+  if (!Array.isArray(productos) || !empresaId) return;
+  const ins = db.prepare('INSERT INTO sg_contacto_productos'
+    + ' (empresa_id,producto,variedad,meses,volumen,notas) VALUES (?,?,?,?,?,?)');
+  for (const p of productos) {
+    const prod = txt(p && p.producto);
+    if (!prod) continue;
+    const meses = mascaraValida(p.meses) ? p.meses : '000000000000';
+    ins.run(empresaId, prod.toUpperCase(), txt(p.variedad), meses, txt(p.volumen), txt(p.notas));
+  }
+}
+
+router.post('/empresas/:id/productos', (req, res) => {
+  try {
+    const b = req.body || {};
+    const prod = txt(b.producto);
+    if (!prod) return res.status(400).json({ ok: false, error: 'falta el producto' });
+    // Una máscara rota se rechaza en vez de guardarse como está: guardada, la ficha
+    // dibujaría una ventana cualquiera y nadie sabría que es basura.
+    if (b.meses != null && !mascaraValida(b.meses)) {
+      return res.status(400).json({ ok: false, error: 'los meses tienen que ser 12 ceros y unos, el primero es JULIO' });
+    }
+    const e = db.prepare('SELECT id FROM sg_contacto_empresas WHERE id = ? AND eliminado_en IS NULL').get(req.params.id);
+    if (!e) return res.status(404).json({ ok: false, error: 'no existe esa empresa' });
+    // El mismo producto dos veces en la misma finca son dos ventanas que se contradicen y
+    // ninguna pantalla puede decir cuál vale. Se avisa en vez de duplicar.
+    const ya = db.prepare('SELECT id FROM sg_contacto_productos WHERE empresa_id = ? AND upper(producto) = ?')
+      .get(req.params.id, prod.toUpperCase());
+    if (ya) {
+      return res.status(409).json({ ok: false, producto_id: ya.id,
+        error: 'esta empresa ya tiene ' + prod.toUpperCase() + ' cargado: corregí esa ventana en vez de agregar otra' });
+    }
+    const r = db.prepare('INSERT INTO sg_contacto_productos'
+      + ' (empresa_id,producto,variedad,meses,volumen,notas) VALUES (?,?,?,?,?,?)')
+      .run(req.params.id, prod.toUpperCase(), txt(b.variedad),
+           b.meses || '000000000000', txt(b.volumen), txt(b.notas));
+    res.json({ ok: true, id: Number(r.lastInsertRowid), productos: fichaEmpresa(db, req.params.id).productos });
+  } catch (e) { res.status(500).json({ ok: false, error: String(e.message || e) }); }
+});
+
+router.patch('/empresas/:id/productos/:pid', (req, res) => {
+  try {
+    const b = req.body || {};
+    if (b.meses != null && !mascaraValida(b.meses)) {
+      return res.status(400).json({ ok: false, error: 'los meses tienen que ser 12 ceros y unos, el primero es JULIO' });
+    }
+    const sets = [], par = [];
+    for (const c of ['producto', 'variedad', 'meses', 'volumen', 'notas']) {
+      if (!(c in b)) continue;
+      sets.push(c + ' = ?');
+      par.push(c === 'producto' ? (txt(b.producto) || '').toUpperCase() : (c === 'meses' ? b.meses : txt(b[c])));
+    }
+    if (!sets.length) return res.status(400).json({ ok: false, error: 'nada que cambiar' });
+    par.push(req.params.pid, req.params.id);
+    const r = db.prepare('UPDATE sg_contacto_productos SET ' + sets.join(', ')
+      + ' WHERE id = ? AND empresa_id = ?').run(...par);
+    if (!r.changes) return res.status(404).json({ ok: false, error: 'no existe ese producto' });
+    res.json({ ok: true, productos: fichaEmpresa(db, req.params.id).productos });
+  } catch (e) { res.status(500).json({ ok: false, error: String(e.message || e) }); }
+});
+
+router.delete('/empresas/:id/productos/:pid', (req, res) => {
+  try {
+    const r = db.prepare('DELETE FROM sg_contacto_productos WHERE id = ? AND empresa_id = ?')
+      .run(req.params.pid, req.params.id);
+    if (!r.changes) return res.status(404).json({ ok: false, error: 'no existe ese producto' });
+    res.json({ ok: true, productos: fichaEmpresa(db, req.params.id).productos });
+  } catch (e) { res.status(500).json({ ok: false, error: String(e.message || e) }); }
+});
+
+// ── LA FICHA DE UNA PERSONA ───────────────────────────────────────────────────────────
+// Trae lo de la persona (cargo, teléfonos, sus charlas), lo de su EMPRESA (lo que produce,
+// el vínculo con la planilla, quiénes más trabajan ahí) y, al lado de lo declarado, lo
+// OBSERVADO: lo que dicen las ventas.
+//
+// Separado a propósito, en los dos ejes. Declarado vs observado, porque la diferencia
+// —ofrece brócoli y nunca le compramos brócoli— es justamente la oportunidad. Y persona vs
+// empresa, porque el melón es de la finca: si se aplanaran, el que corrige la ventana desde
+// la ficha de Juan creería que la corrigió para Juan solo.
 router.get('/:id', (req, res) => {
   try {
     const f = ficha(db, req.params.id);
     if (!f) return res.status(404).json({ ok: false, error: 'no existe ese contacto' });
 
-    if (f.proveedor_nombre) {
-      f.compras = observadoProveedor(db, f.proveedor_nombre);
+    // Los vínculos con la planilla son DE LA EMPRESA: es la finca la que factura.
+    const e = f.empresa;
+    if (e && e.proveedor_nombre) {
+      f.compras = observadoProveedor(db, e.proveedor_nombre);
       f.ofrece_sin_comprar = ofreceYNoLeCompramos(f.productos, f.compras);
     }
-    if (f.cliente_nombre) f.ventas = observadoCliente(db, f.cliente_nombre);
+    if (e && e.cliente_nombre) f.ventas = observadoCliente(db, e.cliente_nombre);
     res.json({ ok: true, contacto: f });
   } catch (e) { res.status(500).json({ ok: false, error: String(e.message || e) }); }
 });
 
-// ── ALTA Y EDICIÓN ────────────────────────────────────────────────────────────────────
-const CAMPOS = ['nombre', 'empresa', 'cargo', 'tipo', 'zona', 'localidad',
-                'cliente_nombre', 'proveedor_nombre', 'vendedor', 'etiquetas', 'notas'];
+// ── ALTA Y EDICIÓN DE UNA PERSONA ─────────────────────────────────────────────────────
+// De la persona son su nombre, su cargo y sus notas. El resto —tipo, zona, vínculos con la
+// planilla, quién la atiende— es de la EMPRESA, y se toca en la ficha de la empresa.
+const CAMPOS = ['nombre', 'cargo', 'notas'];
 
 router.post('/', (req, res) => {
   try {
     const b = req.body || {};
     const nombre = txt(b.nombre);
     if (!nombre) return res.status(400).json({ ok: false, error: 'falta el nombre' });
-    const tipo = TIPOS.includes(b.tipo) ? b.tipo : 'otro';
 
-    const r = db.prepare(`INSERT INTO sg_contactos
-      (nombre, empresa, cargo, tipo, zona, localidad, cliente_nombre, proveedor_nombre,
-       vendedor, etiquetas, notas, creado_por_id)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`).run(
-      nombre, txt(b.empresa), txt(b.cargo), tipo, txt(b.zona), txt(b.localidad),
-      txt(b.cliente_nombre), txt(b.proveedor_nombre), txt(b.vendedor),
-      txt(b.etiquetas), txt(b.notas), req._user.id || null);
+    // TODA PERSONA TIENE UNA EMPRESA, Y SI TRABAJA SOLA LA EMPRESA ES ELLA.
+    // Se puede mandar el id de una que ya existe, o el nombre —y entonces cae en la que ya
+    // hay o se crea—. Sin nada, la empresa es la persona: un fletero que trabaja solo es
+    // una cuenta comercial de una persona, y eso es lo que de verdad es. La alternativa era
+    // un empresa_id nulo y los mismos campos duplicados en las dos tablas.
+    let emp = null;
+    if (b.empresa_id) {
+      emp = db.prepare('SELECT * FROM sg_contacto_empresas WHERE id = ? AND eliminado_en IS NULL')
+        .get(b.empresa_id);
+      if (!emp) return res.status(400).json({ ok: false, error: 'esa empresa no existe' });
+    } else {
+      emp = empresaDeNombre(txt(b.empresa) || nombre, b, req._user.id);
+    }
+
+    const r = db.prepare('INSERT INTO sg_contactos'
+      + ' (nombre, empresa_id, empresa, cargo, notas, creado_por_id) VALUES (?,?,?,?,?,?)').run(
+      nombre, emp.id, emp.nombre, txt(b.cargo), txt(b.notas), req._user.id || null);
     const id = Number(r.lastInsertRowid);
 
-    // Los medios y los productos pueden venir en el mismo alta: cargar un contacto y
-    // después su teléfono en dos pantallas distintas es la forma de que el teléfono no se
-    // cargue nunca.
+    // Los medios pueden venir en el mismo alta: cargar un contacto y después su teléfono en
+    // dos pantallas distintas es la forma de que el teléfono no se cargue nunca.
     guardarMedios(id, b.medios);
-    guardarProductos(id, b.productos);
-    res.json({ ok: true, id, contacto: ficha(db, id) });
+    // Y los productos van a la EMPRESA, no a la persona.
+    guardarProductos(emp.id, b.productos);
+    res.json({ ok: true, id, empresa_id: emp.id, contacto: ficha(db, id) });
   } catch (e) { res.status(500).json({ ok: false, error: String(e.message || e) }); }
 });
 
@@ -144,19 +372,25 @@ router.patch('/:id', (req, res) => {
         if (!n) return res.status(400).json({ ok: false, error: 'el nombre no puede quedar vacío' });
         sets.push('nombre = ?'); par.push(n); continue;
       }
-      if (c === 'tipo') {
-        if (!TIPOS.includes(b.tipo)) return res.status(400).json({ ok: false, error: 'tipo inválido' });
-        sets.push('tipo = ?'); par.push(b.tipo); continue;
-      }
-      sets.push(`${c} = ?`); par.push(txt(b[c]));
+      sets.push(c + ' = ?'); par.push(txt(b[c]));
+    }
+    // PASAR UNA PERSONA DE UNA EMPRESA A OTRA. Es lo que pasa cuando el comprador de una
+    // cadena se va a la competencia: la persona es la misma y su historial de charlas se va
+    // con ella, pero la cuenta es otra.
+    if ('empresa_id' in b) {
+      const emp = db.prepare('SELECT * FROM sg_contacto_empresas WHERE id = ? AND eliminado_en IS NULL')
+        .get(b.empresa_id);
+      if (!emp) return res.status(400).json({ ok: false, error: 'esa empresa no existe' });
+      sets.push('empresa_id = ?'); par.push(emp.id);
+      sets.push('empresa = ?');    par.push(emp.nombre);
     }
     if ('activo' in b) { sets.push('activo = ?'); par.push(b.activo ? 1 : 0); }
     if (!sets.length) return res.status(400).json({ ok: false, error: 'nada que cambiar' });
 
     sets.push("actualizado_en = datetime('now','localtime')");
     par.push(req.params.id);
-    const r = db.prepare(`UPDATE sg_contactos SET ${sets.join(', ')}
-                           WHERE id = ? AND eliminado_en IS NULL`).run(...par);
+    const r = db.prepare('UPDATE sg_contactos SET ' + sets.join(', ')
+      + ' WHERE id = ? AND eliminado_en IS NULL').run(...par);
     if (!r.changes) return res.status(404).json({ ok: false, error: 'no existe ese contacto' });
     res.json({ ok: true, contacto: ficha(db, req.params.id) });
   } catch (e) { res.status(500).json({ ok: false, error: String(e.message || e) }); }
@@ -166,8 +400,8 @@ router.patch('/:id', (req, res) => {
 // ficha, son las charlas: el historial de lo que se habló con esa persona durante años.
 router.post('/:id/eliminar', (req, res) => {
   try {
-    const r = db.prepare(`UPDATE sg_contactos SET eliminado_en = datetime('now','localtime')
-                           WHERE id = ? AND eliminado_en IS NULL`).run(req.params.id);
+    const r = db.prepare("UPDATE sg_contactos SET eliminado_en = datetime('now','localtime')"
+      + ' WHERE id = ? AND eliminado_en IS NULL').run(req.params.id);
     if (!r.changes) return res.status(404).json({ ok: false, error: 'no existe ese contacto' });
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ ok: false, error: String(e.message || e) }); }
@@ -216,67 +450,6 @@ router.delete('/:id/medios/:mid', (req, res) => {
       .run(req.params.mid, req.params.id);
     if (!r.changes) return res.status(404).json({ ok: false, error: 'no existe ese medio' });
     res.json({ ok: true, medios: ficha(db, req.params.id).medios });
-  } catch (e) { res.status(500).json({ ok: false, error: String(e.message || e) }); }
-});
-
-// ── QUÉ PRODUCE, Y CUÁNDO ─────────────────────────────────────────────────────────────
-function guardarProductos(id, productos) {
-  if (!Array.isArray(productos)) return;
-  const ins = db.prepare(`INSERT INTO sg_contacto_productos
-                          (contacto_id,producto,variedad,meses,volumen,notas) VALUES (?,?,?,?,?,?)`);
-  for (const p of productos) {
-    const prod = txt(p && p.producto);
-    if (!prod) continue;
-    const meses = mascaraValida(p.meses) ? p.meses : '000000000000';
-    ins.run(id, prod.toUpperCase(), txt(p.variedad), meses, txt(p.volumen), txt(p.notas));
-  }
-}
-
-router.post('/:id/productos', (req, res) => {
-  try {
-    const b = req.body || {};
-    const prod = txt(b.producto);
-    if (!prod) return res.status(400).json({ ok: false, error: 'falta el producto' });
-    // Una máscara rota se rechaza en vez de guardarse como está: guardada, la ficha
-    // dibujaría una ventana cualquiera y nadie sabría que es basura.
-    if (b.meses != null && !mascaraValida(b.meses)) {
-      return res.status(400).json({ ok: false, error: 'los meses tienen que ser 12 ceros y unos, el primero es JULIO' });
-    }
-    const r = db.prepare(`INSERT INTO sg_contacto_productos
-                          (contacto_id,producto,variedad,meses,volumen,notas) VALUES (?,?,?,?,?,?)`)
-      .run(req.params.id, prod.toUpperCase(), txt(b.variedad),
-           b.meses || '000000000000', txt(b.volumen), txt(b.notas));
-    res.json({ ok: true, id: Number(r.lastInsertRowid), productos: ficha(db, req.params.id).productos });
-  } catch (e) { res.status(500).json({ ok: false, error: String(e.message || e) }); }
-});
-
-router.patch('/:id/productos/:pid', (req, res) => {
-  try {
-    const b = req.body || {};
-    if (b.meses != null && !mascaraValida(b.meses)) {
-      return res.status(400).json({ ok: false, error: 'los meses tienen que ser 12 ceros y unos, el primero es JULIO' });
-    }
-    const sets = [], par = [];
-    for (const c of ['producto', 'variedad', 'meses', 'volumen', 'notas']) {
-      if (!(c in b)) continue;
-      sets.push(`${c} = ?`);
-      par.push(c === 'producto' ? (txt(b.producto) || '').toUpperCase() : (c === 'meses' ? b.meses : txt(b[c])));
-    }
-    if (!sets.length) return res.status(400).json({ ok: false, error: 'nada que cambiar' });
-    par.push(req.params.pid, req.params.id);
-    const r = db.prepare(`UPDATE sg_contacto_productos SET ${sets.join(', ')}
-                           WHERE id = ? AND contacto_id = ?`).run(...par);
-    if (!r.changes) return res.status(404).json({ ok: false, error: 'no existe ese producto' });
-    res.json({ ok: true, productos: ficha(db, req.params.id).productos });
-  } catch (e) { res.status(500).json({ ok: false, error: String(e.message || e) }); }
-});
-
-router.delete('/:id/productos/:pid', (req, res) => {
-  try {
-    const r = db.prepare('DELETE FROM sg_contacto_productos WHERE id = ? AND contacto_id = ?')
-      .run(req.params.pid, req.params.id);
-    if (!r.changes) return res.status(404).json({ ok: false, error: 'no existe ese producto' });
-    res.json({ ok: true, productos: ficha(db, req.params.id).productos });
   } catch (e) { res.status(500).json({ ok: false, error: String(e.message || e) }); }
 });
 

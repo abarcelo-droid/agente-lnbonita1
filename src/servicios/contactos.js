@@ -2,12 +2,33 @@
 // ── EL BUSCADOR DE CONTACTOS, Y LO QUE LA BASE YA SABE ───────────────────────────────
 // Dos cosas viven acá: cómo se busca, y cómo se arma la ficha.
 //
+// ── DOS NIVELES: LA EMPRESA Y LA PERSONA ────────────────────────────────────────────
+// La EMPRESA es la cuenta comercial: lo que produce y en qué meses, el vínculo con la
+// planilla, la zona, quién la atiende. La PERSONA es a quién se llama: su cargo, sus
+// teléfonos y las charlas que se tuvieron con ella. Varias personas cuelgan de la misma
+// empresa — ver db_sg_contactos.js, que es donde está la razón.
+//
+// Acá eso aparece dos veces, y las dos importan:
+//
+//   buscar() devuelve PERSONAS con su empresa al lado. El que escribe «giglio» o «melon»
+//   no sabe ni le importa si eso es de la persona o de la finca, y lo que quiere es a
+//   quién llamar.
+//
+//   buscarEmpresas() devuelve CUENTAS. «Quién tiene melón en noviembre» es una pregunta
+//   sobre fincas, y contestarla con tres filas de Giglio —una por persona— es contestarla
+//   mal.
+//
+// En la ficha los dos niveles van SEPARADOS y no aplanados (`c` y `c.empresa`): si se
+// mezclaran, la pantalla no podría decir que el melón es de la finca, y el que corrige la
+// ventana desde la ficha de Juan creería que la corrigió para Juan solo.
+//
 // ── POR QUÉ EL BUSCADOR MIRA TAMBIÉN ADENTRO DE LAS CHARLAS ──────────────────────────
 // Un buscador que sólo mira nombre y empresa sirve cuando uno YA sabe a quién busca. El
 // caso de verdad es al revés: "¿quién me habló de brócoli?", "¿con quién había quedado en
 // volver a llamar?". Eso está escrito en el resumen de una charla y en ningún campo.
 //
-// Por eso se busca en: nombre, empresa, cargo, zona, localidad, etiquetas, notas, los
+// Por eso se busca en: nombre de la persona, nombre de la empresa, cargo, zona,
+// localidad, etiquetas, notas, los
 // teléfonos y mails, los productos declarados, y el texto de las charlas. Y la respuesta
 // DICE POR DÓNDE MATCHEÓ (`porque`), porque encontrar a alguien sin saber por qué apareció
 // obliga a abrir la ficha para entenderlo.
@@ -71,8 +92,13 @@ const plano = (s) => TILDES.reduce((t, [de, a]) => t.split(de).join(a), String(s
 const like = (s) => '%' + plano(s).trim() + '%';
 
 // ── EL BUSCADOR ──────────────────────────────────────────────────────────────────────
-// Devuelve los contactos que matchean, con por dónde matchearon y un pedacito del texto
-// de la charla cuando el match fue ahí.
+// Devuelve las PERSONAS que matchean, cada una con su empresa, por dónde matcheó y un
+// pedacito del texto de la charla cuando el match fue ahí.
+//
+// Busca en los dos niveles a la vez, y eso es a propósito: el que escribe "giglio" no sabe
+// ni le importa si eso es el nombre de la persona o el de la finca. Lo mismo con el melón,
+// que ahora es de la empresa: tiene que seguir trayendo a las personas a las que se puede
+// llamar para conseguirlo.
 export function buscar(db, opciones) {
   const o = opciones || {};
   const q = String(o.q || '').trim();
@@ -80,19 +106,25 @@ export function buscar(db, opciones) {
 
   const cond = ['c.eliminado_en IS NULL'];
   const par = [];
-  if (!o.incluir_inactivos) cond.push('c.activo = 1');
+  if (!o.incluir_inactivos) {
+    // Una empresa dada de baja se lleva a su gente: si la finca dejó de trabajar con
+    // nosotros, no tiene sentido que el encargado siga apareciendo en la lista del día.
+    cond.push("c.activo = 1 AND IFNULL(e.activo,1) = 1 AND e.eliminado_en IS NULL");
+  }
   if (o.tipo && TIPOS.includes(o.tipo)) {
+    // El tipo es DE LA EMPRESA: es la finca la que vende, no el encargado del galpón.
     // 'ambos' es un tipo guardado, pero pedir "clientes" tiene que traer también a los que
     // son las dos cosas: si no, el que compra y vende desaparece de las dos listas.
     if (o.tipo === 'cliente' || o.tipo === 'proveedor') {
-      cond.push("(c.tipo = ? OR c.tipo = 'ambos')"); par.push(o.tipo);
-    } else { cond.push('c.tipo = ?'); par.push(o.tipo); }
+      cond.push("(e.tipo = ? OR e.tipo = 'ambos')"); par.push(o.tipo);
+    } else { cond.push('e.tipo = ?'); par.push(o.tipo); }
   }
-  if (o.zona)     { cond.push('c.zona = ?');     par.push(o.zona); }
-  if (o.vendedor) { cond.push('c.vendedor = ?'); par.push(o.vendedor); }
+  if (o.zona)       { cond.push('e.zona = ?');       par.push(o.zona); }
+  if (o.vendedor)   { cond.push('e.vendedor = ?');   par.push(o.vendedor); }
+  if (o.empresa_id) { cond.push('c.empresa_id = ?'); par.push(o.empresa_id); }
   if (o.producto) {
-    cond.push(`EXISTS (SELECT 1 FROM sg_contacto_productos p
-                        WHERE p.contacto_id = c.id AND p.producto = ?)`);
+    cond.push('EXISTS (SELECT 1 FROM sg_contacto_productos p'
+            + '         WHERE p.empresa_id = c.empresa_id AND p.producto = ?)');
     par.push(o.producto);
   }
   // Un mes de la máscara: "¿quién tiene melón en noviembre?". La posición se valida acá y
@@ -100,8 +132,8 @@ export function buscar(db, opciones) {
   if (o.mes != null && o.mes !== '') {
     const i = parseInt(o.mes, 10);
     if (i >= 1 && i <= 12) {
-      cond.push(`EXISTS (SELECT 1 FROM sg_contacto_productos p
-                          WHERE p.contacto_id = c.id AND substr(p.meses, ?, 1) = '1')`);
+      cond.push('EXISTS (SELECT 1 FROM sg_contacto_productos p'
+              + "         WHERE p.empresa_id = c.empresa_id AND substr(p.meses, ?, 1) = '1')");
       par.push(i);
     }
   }
@@ -113,48 +145,68 @@ export function buscar(db, opciones) {
   // envuelve o se escriben las condiciones dos veces. Se envuelve: duplicarlas es garantizar
   // que algún día una se toque y la otra no, y entonces la lista trae a alguien y no sabe
   // decir por qué.
-  const marcas = q ? `,
-           CASE WHEN ${sinT('c.nombre')} LIKE ? OR ${sinT("IFNULL(c.empresa,'')")} LIKE ? THEN 1 ELSE 0 END AS m_nombre,
-           CASE WHEN EXISTS (SELECT 1 FROM sg_contacto_medios m
-                              WHERE m.contacto_id = c.id AND m.valor LIKE ?) THEN 1 ELSE 0 END AS m_medio,
-           CASE WHEN EXISTS (SELECT 1 FROM sg_contacto_productos p
-                              WHERE p.contacto_id = c.id
-                                AND (${sinT('p.producto')} LIKE ? OR ${sinT("IFNULL(p.variedad,'')")} LIKE ?)) THEN 1 ELSE 0 END AS m_producto,
-           CASE WHEN EXISTS (SELECT 1 FROM sg_contacto_charlas ch
-                              WHERE ch.contacto_id = c.id AND ch.eliminado_en IS NULL
-                                AND (${sinT('ch.resumen')} LIKE ? OR ${sinT("IFNULL(ch.proximo_paso,'')")} LIKE ?)) THEN 1 ELSE 0 END AS m_charla,
-           CASE WHEN ${sinT("IFNULL(c.etiquetas,'')")} LIKE ? OR ${sinT("IFNULL(c.notas,'')")} LIKE ?
-                  OR ${sinT("IFNULL(c.zona,'')")} LIKE ? OR ${sinT("IFNULL(c.localidad,'')")} LIKE ?
-                  OR ${sinT("IFNULL(c.cargo,'')")} LIKE ? THEN 1 ELSE 0 END AS m_otro` : '';
+  const marcas = q ? ','
+    + " CASE WHEN " + sinT('c.nombre') + " LIKE ? OR " + sinT("IFNULL(e.nombre,'')") + " LIKE ? THEN 1 ELSE 0 END AS m_nombre,"
+    + " CASE WHEN EXISTS (SELECT 1 FROM sg_contacto_medios m"
+    + "                    WHERE m.contacto_id = c.id AND m.valor LIKE ?) THEN 1 ELSE 0 END AS m_medio,"
+    // El producto es de la EMPRESA, así que se busca por empresa_id. Si esto siguiera
+    // mirando contacto_id, "melon" no encontraría a nadie y la lista vacía se leería como
+    // "no tenemos quién nos traiga melón".
+    + " CASE WHEN EXISTS (SELECT 1 FROM sg_contacto_productos p"
+    + "                    WHERE p.empresa_id = c.empresa_id"
+    + "                      AND (" + sinT('p.producto') + " LIKE ? OR " + sinT("IFNULL(p.variedad,'')") + " LIKE ?)) THEN 1 ELSE 0 END AS m_producto,"
+    + " CASE WHEN EXISTS (SELECT 1 FROM sg_contacto_charlas ch"
+    + "                    WHERE ch.contacto_id = c.id AND ch.eliminado_en IS NULL"
+    + "                      AND (" + sinT('ch.resumen') + " LIKE ? OR " + sinT("IFNULL(ch.proximo_paso,'')") + " LIKE ?)) THEN 1 ELSE 0 END AS m_charla,"
+    + " CASE WHEN " + sinT("IFNULL(e.etiquetas,'')") + " LIKE ? OR " + sinT("IFNULL(e.notas,'')") + " LIKE ?"
+    + "        OR " + sinT("IFNULL(e.zona,'')") + " LIKE ? OR " + sinT("IFNULL(e.localidad,'')") + " LIKE ?"
+    + "        OR " + sinT("IFNULL(c.cargo,'')") + " LIKE ? OR " + sinT("IFNULL(c.notas,'')") + " LIKE ? THEN 1 ELSE 0 END AS m_otro"
+    : '';
 
-  const interna = `
-    SELECT c.*,
-           (SELECT valor FROM sg_contacto_medios m
-             WHERE m.contacto_id = c.id ORDER BY m.preferido DESC, m.id LIMIT 1) AS medio_principal,
-           (SELECT tipo FROM sg_contacto_medios m
-             WHERE m.contacto_id = c.id ORDER BY m.preferido DESC, m.id LIMIT 1) AS medio_tipo,
-           (SELECT COUNT(*) FROM sg_contacto_charlas ch
-             WHERE ch.contacto_id = c.id AND ch.eliminado_en IS NULL) AS charlas,
-           (SELECT MAX(fecha) FROM sg_contacto_charlas ch
-             WHERE ch.contacto_id = c.id AND ch.eliminado_en IS NULL) AS ultima_charla,
-           (SELECT COUNT(*) FROM sg_contacto_charlas ch
-             WHERE ch.contacto_id = c.id AND ch.eliminado_en IS NULL
-               AND ch.proximo_paso IS NOT NULL AND ch.proximo_paso <> '' AND ch.hecho_en IS NULL) AS pendientes,
-           (SELECT group_concat(p.producto, ', ') FROM sg_contacto_productos p
-             WHERE p.contacto_id = c.id) AS productos${marcas}
-      FROM sg_contactos c
-     WHERE ${cond.join(' AND ')}`;
+  // La empresa entra con LEFT JOIN y no con JOIN: una persona a la que por lo que sea le
+  // quedó un empresa_id que no resuelve tiene que seguir apareciendo en la lista. Un JOIN
+  // la haría desaparecer sin ningún error, que es la peor forma de perder un contacto.
+  const interna = ''
+    + ' SELECT c.*,'
+    + '        e.id AS emp_id, e.nombre AS empresa, e.tipo, e.zona, e.localidad,'
+    + '        e.vendedor, e.etiquetas, e.cliente_nombre, e.proveedor_nombre,'
+    + '        (SELECT valor FROM sg_contacto_medios m'
+    + '          WHERE m.contacto_id = c.id ORDER BY m.preferido DESC, m.id LIMIT 1) AS medio_principal,'
+    + '        (SELECT tipo FROM sg_contacto_medios m'
+    + '          WHERE m.contacto_id = c.id ORDER BY m.preferido DESC, m.id LIMIT 1) AS medio_tipo,'
+    + '        (SELECT COUNT(*) FROM sg_contacto_charlas ch'
+    + '          WHERE ch.contacto_id = c.id AND ch.eliminado_en IS NULL) AS charlas,'
+    + '        (SELECT MAX(fecha) FROM sg_contacto_charlas ch'
+    + '          WHERE ch.contacto_id = c.id AND ch.eliminado_en IS NULL) AS ultima_charla,'
+    + '        (SELECT COUNT(*) FROM sg_contacto_charlas ch'
+    + '          WHERE ch.contacto_id = c.id AND ch.eliminado_en IS NULL'
+    + "            AND ch.proximo_paso IS NOT NULL AND ch.proximo_paso <> '' AND ch.hecho_en IS NULL) AS pendientes,"
+    // Los productos son DE LA EMPRESA, así que la fila de cada persona de Giglio muestra
+    // lo mismo. Es correcto: la finca produce melón una sola vez.
+    + "        (SELECT group_concat(p.producto, ', ') FROM sg_contacto_productos p"
+    + '          WHERE p.empresa_id = c.empresa_id) AS productos,'
+    // Cuántas personas MÁS hay en la misma empresa. La lista lo dice para que se entienda
+    // por qué aparecen dos filas con el mismo melón, y para poder saltar a la otra.
+    + '        (SELECT COUNT(*) - 1 FROM sg_contactos o'
+    + '          WHERE o.empresa_id = c.empresa_id AND o.eliminado_en IS NULL AND o.activo = 1) AS otros_en_empresa'
+    + marcas
+    + '   FROM sg_contactos c'
+    + '   LEFT JOIN sg_contacto_empresas e ON e.id = c.empresa_id'
+    + '  WHERE ' + cond.join(' AND ');
 
   // Los parámetros van en el orden en que aparecen los ? en el TEXTO: primero los de las
   // marcas (están en el SELECT), después los de los filtros, y el límite al final.
-  const parQ = q ? Array(12).fill(like(q)) : [];
+  const parQ = q ? Array(13).fill(like(q)) : [];
+  // Y después de los pendientes se ordena POR EMPRESA, para que las personas de la misma
+  // finca caigan juntas en vez de repartidas por el alfabeto.
+  const orden = ' ORDER BY t.pendientes DESC, t.empresa COLLATE NOCASE, t.nombre COLLATE NOCASE LIMIT ?';
   const sql = q
-    ? `SELECT * FROM (${interna}) t
-        WHERE t.m_nombre = 1 OR t.m_medio = 1 OR t.m_producto = 1 OR t.m_charla = 1 OR t.m_otro = 1
-        ORDER BY t.pendientes DESC, t.nombre COLLATE NOCASE LIMIT ?`
+    ? 'SELECT * FROM (' + interna + ') t'
+      + ' WHERE t.m_nombre = 1 OR t.m_medio = 1 OR t.m_producto = 1 OR t.m_charla = 1 OR t.m_otro = 1'
+      + orden
     // El que tiene algo pendiente va primero: un listado alfabético puro esconde lo único
     // que hay que hacer hoy.
-    : `SELECT * FROM (${interna}) t ORDER BY t.pendientes DESC, t.nombre COLLATE NOCASE LIMIT ?`;
+    : 'SELECT * FROM (' + interna + ') t' + orden;
 
   const filas = db.prepare(sql).all(...parQ, ...par, limite);
 
@@ -171,16 +223,102 @@ export function buscar(db, opciones) {
     // Si matcheó por una charla, se devuelve el pedacito: encontrar a alguien "por una
     // charla" sin ver cuál obliga a abrir la ficha para entender por qué apareció.
     if (q && f.m_charla) {
-      const ch = db.prepare(`
-        SELECT fecha, resumen FROM sg_contacto_charlas
-         WHERE contacto_id = ? AND eliminado_en IS NULL
-           AND (${sinT('resumen')} LIKE ? OR ${sinT("IFNULL(proximo_paso,'')")} LIKE ?)
-         ORDER BY fecha DESC LIMIT 1`).get(f.id, like(q), like(q));
+      const ch = db.prepare(
+        ' SELECT fecha, resumen FROM sg_contacto_charlas'
+        + '  WHERE contacto_id = ? AND eliminado_en IS NULL'
+        + '    AND (' + sinT('resumen') + ' LIKE ? OR ' + sinT("IFNULL(proximo_paso,'')") + ' LIKE ?)'
+        + '  ORDER BY fecha DESC LIMIT 1').get(f.id, like(q), like(q));
       if (ch) r.charla_match = { fecha: ch.fecha, extracto: extracto(ch.resumen, q) };
     }
     delete r.m_nombre; delete r.m_medio; delete r.m_producto; delete r.m_charla; delete r.m_otro;
     return r;
   });
+}
+
+// ── LAS EMPRESAS ─────────────────────────────────────────────────────────────────────
+// La otra forma de mirar la misma agenda: por cuenta comercial en vez de por persona.
+//
+// Es la vista que sirve para salir a buscar mercadería —"quién tiene melón en noviembre"
+// es una pregunta sobre FINCAS, no sobre personas— y la que evita leer tres filas de
+// Giglio cuando Giglio es una.
+export function buscarEmpresas(db, opciones) {
+  const o = opciones || {};
+  const q = String(o.q || '').trim();
+  const limite = Math.min(Math.max(parseInt(o.limite, 10) || 60, 1), 300);
+
+  const cond = ['e.eliminado_en IS NULL'];
+  const par = [];
+  if (!o.incluir_inactivos) cond.push('e.activo = 1');
+  if (o.tipo && TIPOS.includes(o.tipo)) {
+    if (o.tipo === 'cliente' || o.tipo === 'proveedor') {
+      cond.push("(e.tipo = ? OR e.tipo = 'ambos')"); par.push(o.tipo);
+    } else { cond.push('e.tipo = ?'); par.push(o.tipo); }
+  }
+  if (o.zona)     { cond.push('e.zona = ?');     par.push(o.zona); }
+  if (o.vendedor) { cond.push('e.vendedor = ?'); par.push(o.vendedor); }
+  if (o.producto) {
+    cond.push('EXISTS (SELECT 1 FROM sg_contacto_productos p'
+            + '         WHERE p.empresa_id = e.id AND p.producto = ?)');
+    par.push(o.producto);
+  }
+  if (o.mes != null && o.mes !== '') {
+    const i = parseInt(o.mes, 10);
+    if (i >= 1 && i <= 12) {
+      cond.push('EXISTS (SELECT 1 FROM sg_contacto_productos p'
+              + "         WHERE p.empresa_id = e.id AND substr(p.meses, ?, 1) = '1')");
+      par.push(i);
+    }
+  }
+  // Acá el texto libre busca también adentro de LAS PERSONAS de la empresa y de SUS
+  // charlas: lo que se habló con el encargado es información de la cuenta, no sólo de él.
+  // Buscar "brocoli" tiene que traer la finca aunque lo haya dicho el hijo.
+  if (q) {
+    cond.push('(' + sinT('e.nombre') + ' LIKE ? OR ' + sinT("IFNULL(e.zona,'')") + ' LIKE ?'
+      + ' OR ' + sinT("IFNULL(e.localidad,'')") + ' LIKE ? OR ' + sinT("IFNULL(e.etiquetas,'')") + ' LIKE ?'
+      + ' OR ' + sinT("IFNULL(e.notas,'')") + ' LIKE ?'
+      + ' OR EXISTS (SELECT 1 FROM sg_contacto_productos p WHERE p.empresa_id = e.id'
+      + '             AND (' + sinT('p.producto') + ' LIKE ? OR ' + sinT("IFNULL(p.variedad,'')") + ' LIKE ?))'
+      + ' OR EXISTS (SELECT 1 FROM sg_contactos c WHERE c.empresa_id = e.id'
+      + '             AND c.eliminado_en IS NULL AND ' + sinT('c.nombre') + ' LIKE ?)'
+      + ' OR EXISTS (SELECT 1 FROM sg_contacto_charlas ch'
+      + '             JOIN sg_contactos c2 ON c2.id = ch.contacto_id'
+      + '            WHERE c2.empresa_id = e.id AND ch.eliminado_en IS NULL'
+      + '              AND ' + sinT('ch.resumen') + ' LIKE ?))');
+    for (let i = 0; i < 9; i++) par.push(like(q));
+  }
+
+  return db.prepare(''
+    + ' SELECT e.*,'
+    + '        (SELECT COUNT(*) FROM sg_contactos c'
+    + '          WHERE c.empresa_id = e.id AND c.eliminado_en IS NULL AND c.activo = 1) AS personas,'
+    + "        (SELECT group_concat(c.nombre, ', ') FROM sg_contactos c"
+    + '          WHERE c.empresa_id = e.id AND c.eliminado_en IS NULL AND c.activo = 1) AS quienes,'
+    + "        (SELECT group_concat(p.producto, ', ') FROM sg_contacto_productos p"
+    + '          WHERE p.empresa_id = e.id) AS productos,'
+    + '        (SELECT MAX(ch.fecha) FROM sg_contacto_charlas ch'
+    + '          JOIN sg_contactos c3 ON c3.id = ch.contacto_id'
+    + '         WHERE c3.empresa_id = e.id AND ch.eliminado_en IS NULL) AS ultima_charla,'
+    + '        (SELECT COUNT(*) FROM sg_contacto_charlas ch'
+    + '          JOIN sg_contactos c4 ON c4.id = ch.contacto_id'
+    + '         WHERE c4.empresa_id = e.id AND ch.eliminado_en IS NULL'
+    + "           AND ch.proximo_paso IS NOT NULL AND ch.proximo_paso <> '' AND ch.hecho_en IS NULL) AS pendientes"
+    + '   FROM sg_contacto_empresas e'
+    + '  WHERE ' + cond.join(' AND ')
+    + '  ORDER BY pendientes DESC, e.nombre COLLATE NOCASE'
+    + '  LIMIT ?').all(...par, limite);
+}
+
+// Buscar una empresa por su nombre, para no crear dos fichas de la misma finca. Sin tildes
+// y sin mayúsculas: 'giglio hnos srl' encuentra 'GIGLIO HNOS SRL'.
+//
+// Es lo que usa el alta: el que carga a la segunda persona de Giglio escribe el nombre de
+// la finca y cae en la que ya existe, sin tener que saber que existe.
+export function empresaPorNombre(db, nombre) {
+  const n = plano(String(nombre || '').trim());
+  if (!n) return null;
+  return db.prepare(
+    ' SELECT * FROM sg_contacto_empresas'
+    + '  WHERE eliminado_en IS NULL AND lower(' + sinT('nombre') + ') = lower(?) LIMIT 1').get(n) || null;
 }
 
 // Un pedazo del texto alrededor de lo buscado. Sin esto habría que mostrar la charla
@@ -197,57 +335,131 @@ export function extracto(texto, q, largo) {
   return (desde > 0 ? '…' : '') + t.slice(desde, hasta) + (hasta < t.length ? '…' : '');
 }
 
-// ── LA FICHA ─────────────────────────────────────────────────────────────────────────
+// ── LA FICHA DE UNA PERSONA ──────────────────────────────────────────────────────────
+// Trae lo de la persona (cargo, teléfonos, sus charlas) Y lo de su empresa (lo que produce,
+// el vínculo con la planilla), más quiénes más trabajan ahí.
+//
+// Los dos niveles van SEPARADOS en la respuesta —`c` y `c.empresa`— y no aplanados: si se
+// mezclaran, la pantalla no podría decir que el melón es de la finca y no de Juan, y el que
+// corrige la ventana desde la ficha de Juan creería que la corrigió para Juan solo.
 export function ficha(db, id) {
   const c = db.prepare('SELECT * FROM sg_contactos WHERE id = ? AND eliminado_en IS NULL').get(id);
   if (!c) return null;
+
   c.medios = db.prepare(
     'SELECT * FROM sg_contacto_medios WHERE contacto_id = ? ORDER BY preferido DESC, id').all(id);
-  c.productos = db.prepare(
-    'SELECT * FROM sg_contacto_productos WHERE contacto_id = ? ORDER BY producto').all(id)
-    .map((p) => Object.assign(p, {
-      meses_nombres: mesesDeMascara(p.meses),
-      ventana: ventanaEnPalabras(p.meses),
-    }));
-  c.charlas = db.prepare(`
-    SELECT * FROM sg_contacto_charlas
-     WHERE contacto_id = ? AND eliminado_en IS NULL
-     ORDER BY fecha DESC, id DESC`).all(id);
+
+  c.empresa = c.empresa_id ? fichaEmpresa(db, c.empresa_id, { sin_personas: false }) : null;
+  // Los productos se leen de la empresa, pero se dejan también acá arriba porque es donde
+  // los busca todo lo que ya estaba escrito —la pantalla, ofreceYNoLeCompramos, los tests—
+  // y porque leídos desde la ficha de una persona son igual de ciertos: lo que la finca
+  // produce es lo que esa persona puede ofrecer.
+  c.productos = c.empresa ? c.empresa.productos : [];
+
+  c.charlas = db.prepare(''
+    + ' SELECT * FROM sg_contacto_charlas'
+    + '  WHERE contacto_id = ? AND eliminado_en IS NULL'
+    + '  ORDER BY fecha DESC, id DESC').all(id);
   c.ultima_charla = c.charlas[0] || null;
   // Lo que quedó pendiente y todavía no se marcó hecho. Es lo primero que hay que ver al
   // abrir una ficha: si quedé en llamarlo el martes, eso manda sobre todo lo demás.
   c.pendientes = c.charlas.filter((x) => x.proximo_paso && !x.hecho_en);
+
+  // LO QUE SE HABLÓ CON LOS OTROS DE LA MISMA EMPRESA.
+  // Va aparte de `charlas` a propósito, porque no es lo mismo: antes de llamar a Juan hay
+  // que saber que el martes el encargado ya dijo que no hay fruta, pero no se le puede
+  // atribuir a Juan algo que dijo otro. Cada una trae con quién fue.
+  c.charlas_empresa = c.empresa_id ? db.prepare(''
+    + ' SELECT ch.*, o.nombre AS con_quien, o.cargo AS con_cargo'
+    + '   FROM sg_contacto_charlas ch'
+    + '   JOIN sg_contactos o ON o.id = ch.contacto_id'
+    + '  WHERE o.empresa_id = ? AND o.id <> ? AND ch.eliminado_en IS NULL'
+    + '    AND o.eliminado_en IS NULL'
+    + '  ORDER BY ch.fecha DESC, ch.id DESC').all(c.empresa_id, id) : [];
+
   return c;
+}
+
+// ── LA FICHA DE UNA EMPRESA ──────────────────────────────────────────────────────────
+// La cuenta comercial: qué produce, en qué meses, quiénes son sus personas y todo lo que se
+// habló con cualquiera de ellas. Es la vista que se mira antes de salir a buscar fruta.
+export function fichaEmpresa(db, id, opts) {
+  const o = opts || {};
+  const e = db.prepare(
+    'SELECT * FROM sg_contacto_empresas WHERE id = ? AND eliminado_en IS NULL').get(id);
+  if (!e) return null;
+
+  e.productos = db.prepare(
+    'SELECT * FROM sg_contacto_productos WHERE empresa_id = ? ORDER BY producto').all(id)
+    .map((p) => Object.assign(p, {
+      meses_nombres: mesesDeMascara(p.meses),
+      ventana: ventanaEnPalabras(p.meses),
+    }));
+
+  if (!o.sin_personas) {
+    // Con el medio preferido de cada una: la pregunta al abrir la ficha de una finca es «a
+    // quién llamo», y tener que entrar a cada persona para ver su teléfono la hace inútil.
+    e.personas = db.prepare(''
+      + ' SELECT c.id, c.nombre, c.cargo, c.activo, c.notas,'
+      + '        (SELECT valor FROM sg_contacto_medios m'
+      + '          WHERE m.contacto_id = c.id ORDER BY m.preferido DESC, m.id LIMIT 1) AS medio_principal,'
+      + '        (SELECT tipo FROM sg_contacto_medios m'
+      + '          WHERE m.contacto_id = c.id ORDER BY m.preferido DESC, m.id LIMIT 1) AS medio_tipo,'
+      + '        (SELECT COUNT(*) FROM sg_contacto_charlas ch'
+      + '          WHERE ch.contacto_id = c.id AND ch.eliminado_en IS NULL) AS charlas,'
+      + '        (SELECT MAX(fecha) FROM sg_contacto_charlas ch'
+      + '          WHERE ch.contacto_id = c.id AND ch.eliminado_en IS NULL) AS ultima_charla'
+      + '   FROM sg_contactos c'
+      + '  WHERE c.empresa_id = ? AND c.eliminado_en IS NULL'
+      + '  ORDER BY c.activo DESC, c.nombre COLLATE NOCASE').all(id);
+  }
+  return e;
+}
+
+// Todo lo que se habló con cualquiera de la empresa, con quién fue cada una. Para la ficha
+// de la empresa, donde el historial de la cuenta es uno solo aunque las personas sean tres.
+export function charlasDeEmpresa(db, id) {
+  return db.prepare(''
+    + ' SELECT ch.*, c.nombre AS con_quien, c.cargo AS con_cargo, c.id AS con_id'
+    + '   FROM sg_contacto_charlas ch'
+    + '   JOIN sg_contactos c ON c.id = ch.contacto_id'
+    + '  WHERE c.empresa_id = ? AND ch.eliminado_en IS NULL AND c.eliminado_en IS NULL'
+    + '  ORDER BY ch.fecha DESC, ch.id DESC').all(id);
 }
 
 // Lo que hay que hacer, de todos los contactos. `hasta` en ISO; sin él, todo lo vencido y
 // lo de hoy.
 export function pendientes(db, hasta) {
   const tope = hasta || new Date().toISOString().slice(0, 10);
-  return db.prepare(`
-    SELECT ch.id, ch.contacto_id, ch.fecha, ch.proximo_paso, ch.proximo_el, ch.usuario,
-           c.nombre, c.empresa, c.tipo,
-           (SELECT valor FROM sg_contacto_medios m
-             WHERE m.contacto_id = c.id ORDER BY m.preferido DESC, m.id LIMIT 1) AS medio_principal
-      FROM sg_contacto_charlas ch
-      JOIN sg_contactos c ON c.id = ch.contacto_id
-     WHERE ch.eliminado_en IS NULL AND c.eliminado_en IS NULL
-       AND ch.proximo_paso IS NOT NULL AND ch.proximo_paso <> ''
-       AND ch.hecho_en IS NULL
-       AND ch.proximo_el IS NOT NULL AND ch.proximo_el <= ?
-     ORDER BY ch.proximo_el`).all(tope);
+  return db.prepare(''
+    + ' SELECT ch.id, ch.contacto_id, ch.fecha, ch.proximo_paso, ch.proximo_el, ch.usuario,'
+    + '        c.nombre, c.cargo, c.empresa_id,'
+    // El nombre de la empresa sale del LEFT JOIN y, si no resuelve, de la copia
+    // denormalizada que la persona guarda. Antes que mostrar un renglón sin empresa.
+    + '        COALESCE(e.nombre, c.empresa) AS empresa, e.tipo, e.zona,'
+    + '        (SELECT valor FROM sg_contacto_medios m'
+    + '          WHERE m.contacto_id = c.id ORDER BY m.preferido DESC, m.id LIMIT 1) AS medio_principal'
+    + '   FROM sg_contacto_charlas ch'
+    + '   JOIN sg_contactos c ON c.id = ch.contacto_id'
+    + '   LEFT JOIN sg_contacto_empresas e ON e.id = c.empresa_id'
+    + '  WHERE ch.eliminado_en IS NULL AND c.eliminado_en IS NULL'
+    + "    AND ch.proximo_paso IS NOT NULL AND ch.proximo_paso <> ''"
+    + '    AND ch.hecho_en IS NULL'
+    + '    AND ch.proximo_el IS NOT NULL AND ch.proximo_el <= ?'
+    + '  ORDER BY ch.proximo_el').all(tope);
 }
 
 // Para llenar los desplegables sin inventarlos: sale de lo que hay cargado.
+// La zona y el vendedor salen de LAS EMPRESAS, que es donde viven desde la V1091.
 export function opciones(db) {
   const col = (c, t) => db.prepare(
-    `SELECT DISTINCT ${c} v FROM ${t} WHERE ${c} IS NOT NULL AND ${c} <> '' ORDER BY ${c}`
+    'SELECT DISTINCT ' + c + ' v FROM ' + t + ' WHERE ' + c + " IS NOT NULL AND " + c + " <> '' ORDER BY " + c
   ).all().map((r) => r.v);
   return {
-    zonas: col('zona', 'sg_contactos'),
-    vendedores: col('vendedor', 'sg_contactos'),
+    zonas: col('zona', 'sg_contacto_empresas'),
+    vendedores: col('vendedor', 'sg_contacto_empresas'),
     productos: col('producto', 'sg_contacto_productos'),
-    empresas: col('empresa', 'sg_contactos'),
+    empresas: col('nombre', 'sg_contacto_empresas'),
     tipos: TIPOS, canales: CANALES, meses: MESES,
   };
 }
