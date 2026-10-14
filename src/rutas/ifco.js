@@ -4625,6 +4625,45 @@ router.get('/ocr/status', function(req, res) {
   res.json({ enabled: OCR_ENABLED && !!ANTHROPIC_API_KEY, model: OCR_MODEL });
 });
 
+// ── CUANDO EL LECTOR DE REMITOS SE CAE ───────────────────────────────────────────────
+// Lo que el operador veía era esto, tal cual, en el teléfono y en inglés:
+//
+//   Error en OCR: 400 {"type":"error","error":{"type":"invalid_request_error","message":
+//   "Your credit balance is too low to access the Anthropic API. Please go to Plans &
+//   Billing to upgrade or purchase credits."}}
+//
+// Santiago está parado en el galpón con el remito en la mano. Ese texto no le dice qué
+// hacer, no es culpa suya, y encima lo invita a ir a una pantalla de facturación que no
+// puede abrir. El motivo técnico es para el log y para el panel, no para él.
+//
+// Y la distinción que SÍ le importa no es por qué se cayó: es si puede seguir
+// trabajando. Por eso todo lo que haga fallar la llamada se responde igual —el lector no
+// está— y la app lo deja cargar a mano.
+function _motivoOcr(e) {
+  const crudo = String((e && e.message) || e || '');
+  const st = (e && (e.status || e.statusCode)) || 0;
+  // El saldo es el único caso que hay que poder distinguir de un lado a otro: no se
+  // arregla reintentando ni sacando otra foto, lo tiene que destrabar alguien.
+  if (/credit balance|insufficient|billing/i.test(crudo)) {
+    return { operador: 'El lector de remitos quedó sin servicio. Cargalo a mano y avisá a la oficina.',
+             admin: 'La cuenta de la API se quedó sin crédito.', caido: true, crudo: crudo };
+  }
+  if (st === 429 || /rate.?limit|overloaded/i.test(crudo)) {
+    return { operador: 'El lector está saturado. Cargalo a mano, o probá de nuevo en un minuto.',
+             admin: 'La API contestó 429 / sobrecargada.', caido: true, crudo: crudo };
+  }
+  if (st === 401 || st === 403 || /authentication|api.?key|permission/i.test(crudo)) {
+    return { operador: 'El lector de remitos no está disponible. Cargalo a mano y avisá a la oficina.',
+             admin: 'La API rechazó la credencial (401/403): revisar ANTHROPIC_API_KEY.', caido: true, crudo: crudo };
+  }
+  if (/timeout|ETIMEDOUT|ECONNRESET|ENOTFOUND|fetch failed|network/i.test(crudo)) {
+    return { operador: 'No se pudo llegar al lector de remitos. Cargalo a mano.',
+             admin: 'No hubo respuesta de la API (red o timeout).', caido: true, crudo: crudo };
+  }
+  return { operador: 'El lector de remitos no pudo leer la foto. Cargalo a mano.',
+           admin: 'Falla no clasificada del OCR.', caido: true, crudo: crudo };
+}
+
 // Helper: extraer JSON limpio del texto que devuelve Claude
 function _extraerJson(texto) {
   if (!texto) return null;
@@ -4639,7 +4678,8 @@ function _extraerJson(texto) {
 // POST /ocr/remito-super  multipart: foto + tipo (despacho|sellado)
 router.post('/ocr/remito-super', upload.single('foto'), async function(req, res) {
   if (!OCR_ENABLED || !ANTHROPIC_API_KEY) {
-    return res.status(503).json({ error: 'OCR deshabilitado en este entorno' });
+    return res.status(503).json({ error: 'El lector de remitos no está disponible. Cargalo a mano.',
+                                  ocr_caido: true, motivo_admin: 'OCR deshabilitado o sin ANTHROPIC_API_KEY.' });
   }
   if (!req.file) return res.status(400).json({ error: 'Falta archivo "foto"' });
   const tipo = (req.body && req.body.tipo) || 'despacho';
@@ -4647,7 +4687,8 @@ router.post('/ocr/remito-super', upload.single('foto'), async function(req, res)
     return res.status(400).json({ error: 'tipo debe ser "despacho", "sellado" o "completo"' });
   }
   const client = await _getAnthropic();
-  if (!client) return res.status(503).json({ error: 'OCR no disponible (SDK no cargado)' });
+  if (!client) return res.status(503).json({ error: 'El lector de remitos no está disponible. Cargalo a mano.',
+                                             ocr_caido: true, motivo_admin: 'El SDK de Anthropic no cargó.' });
 
   // Leer la foto y mandarla en base64
   const filePath = path.join(UPLOAD_DIR, req.file.filename);
@@ -4760,8 +4801,17 @@ router.post('/ocr/remito-super', upload.single('foto'), async function(req, res)
       tokens: message.usage || null
     });
   } catch(e) {
-    console.error('[IFCO][OCR] Error llamando a Claude:', e);
-    res.status(502).json({ error: 'Error en OCR: ' + (e.message || 'desconocido'), escaneo_path: escaneo_path });
+    // El motivo técnico va al log, no a la cara del que está cargando el remito.
+    const m = _motivoOcr(e);
+    console.error('[IFCO][OCR] ' + m.admin + ' — ' + m.crudo);
+    res.status(502).json({
+      error: m.operador,
+      // `ocr_caido` es lo que le dice a la app que esto no se arregla con otra foto, y que
+      // tiene que ofrecer la carga a mano en vez de un callejón sin salida.
+      ocr_caido: m.caido,
+      motivo_admin: m.admin,
+      escaneo_path: escaneo_path
+    });
   }
 });
 
@@ -4847,8 +4897,14 @@ router.post('/ocr/match-sellado', upload.single('foto'), async function(req, res
     const datos = _extraerJson(texto);
     nRemito = (datos && datos.n_remito_ifco) ? String(datos.n_remito_ifco).trim() : null;
   } catch(e) {
-    console.error('[IFCO][match-sellado] Error en OCR:', e);
-    return res.status(502).json({ error: 'Error en OCR: ' + (e.message || 'desconocido'), escaneo_path: escaneo_path });
+    const m = _motivoOcr(e);
+    console.error('[IFCO][match-sellado] ' + m.admin + ' — ' + m.crudo);
+    return res.status(502).json({
+      error: m.operador,
+      ocr_caido: m.caido,
+      motivo_admin: m.admin,
+      escaneo_path: escaneo_path
+    });
   }
 
   if (!nRemito) {
