@@ -35539,13 +35539,13 @@ function sgRepExport(){
       <div class="mht">🔏 Cargar como sellado directo</div>
       <button class="mcl" onclick="document.getElementById('ifco-mb-sellado-directo').classList.remove('on')">x</button>
     </div>
-    <div style="background:#ecfdf5;border-left:3px solid #10b981;border-radius:4px;padding:10px 14px;margin-bottom:14px;font-size:12px;color:#065f46">
+    <div id="ifco-sd-aviso" style="background:#ecfdf5;border-left:3px solid #10b981;border-radius:4px;padding:10px 14px;margin-bottom:14px;font-size:12px;color:#065f46">
       <b>✨ Este remito no estaba en el sistema.</b> Se va a crear directamente en estado <b>SELLADO</b> con los datos que detectamos del OCR. Verificá los datos antes de guardar.
     </div>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">
       <div>
         <label style="font-size:11px;color:var(--mut);text-transform:uppercase">N° Remito</label>
-        <input id="ifco-sd-nremito" type="text" readonly style="width:100%;padding:8px 10px;border-radius:7px;border:1px solid var(--bor);background:#f3f4f6;font-family:monospace">
+        <input id="ifco-sd-nremito" type="text" placeholder="00015-XXXXXXXX" style="width:100%;padding:8px 10px;border-radius:7px;border:1px solid var(--bor);background:var(--bg);font-family:monospace">
       </div>
       <div>
         <label style="font-size:11px;color:var(--mut);text-transform:uppercase">Cadena / Cliente *</label>
@@ -64419,7 +64419,9 @@ async function ifcoOnFotoDespacho(ev) {
       document.getElementById('ifco-r-loading').style.display = 'none';
       if (!r.ok || !data.datos) {
         const msg = (data && data.error) || ('HTTP ' + r.status);
-        document.getElementById('ifco-r-ocr-error').textContent = '⚠️ La IA no pudo leer la foto: ' + msg + '. Cargá los campos manualmente.';
+        document.getElementById('ifco-r-ocr-error').textContent = data && data.ocr_caido
+          ? '⚠️ ' + msg + ' La foto se guarda igual.'
+          : '⚠️ La IA no pudo leer la foto: ' + msg + '. Cargá los campos manualmente.';
         document.getElementById('ifco-r-ocr-error').style.display = 'block';
         // Igual avanzamos al paso 2 con la foto guardada
         IFCO._fotoDespachoPath = data && data.escaneo_path ? data.escaneo_path : null;
@@ -65198,12 +65200,21 @@ async function ifcoCargarSelladoFoto(ev) {
     const r = await fetch('/api/ifco/ocr/match-sellado', { method:'POST', credentials:'include', body:fd });
     const data = await r.json();
 
-    // Caso: OCR no leyó el número
+    // Caso: el LECTOR está caído (sin crédito, saturado, sin red). No se arregla sacando
+    // otra foto, así que no se ofrece: se va derecho a la carga a mano, con la foto puesta.
+    if (data.ocr_caido) {
+      _ifcoSelladoDirectoAMano(file, data);
+      return;
+    }
+
+    // Caso: el lector anduvo pero no leyó el número. Acá sí tiene sentido otra foto —
+    // pero con la salida a mano al lado, no como único camino.
     if (data.accion === 'sin_numero' || (!data.ok && !data.accion)) {
       _ifcoCargarSelladoMostrarError(
         '⚠️ La IA no pudo leer el N° de remito',
-        (data.error || 'Probá con una foto más nítida o cargalo manualmente.'),
-        true
+        (data.error || 'Probá con una foto más nítida, o cargalo a mano.'),
+        true,
+        file
       );
       return;
     }
@@ -65253,6 +65264,7 @@ async function ifcoCargarSelladoFoto(ev) {
       document.getElementById('ifco-sd-recibida').value = '';
       document.getElementById('ifco-sd-rechazada').value = '0';
       document.getElementById('ifco-sd-rechazo-destino-wrap').style.display = 'none';
+      _ifcoSdAviso(null);   // pudo haber quedado el de "lector caído" del remito anterior
       document.getElementById('ifco-mb-sellado-directo').classList.add('on');
       // Activar mostrar/ocultar destino-rechazo según cantidad
       document.getElementById('ifco-sd-rechazada').oninput = function(){
@@ -65266,23 +65278,81 @@ async function ifcoCargarSelladoFoto(ev) {
 
     _ifcoCargarSelladoMostrarError('⚠️ Respuesta inesperada', JSON.stringify(data), true);
   } catch(e) {
-    _ifcoCargarSelladoMostrarError('⚠️ Error', _ifcoEsc(e.message), true);
+    _ifcoCargarSelladoMostrarError('⚠️ No se pudo leer el remito',
+      _ifcoEsc(e.message) + '<br>Podés cargarlo a mano.', true, file);
   }
+}
+
+// ── CARGAR EL SELLADO A MANO, CON LA FOTO PUESTA ────────────────────────────────────
+// El mismo mini-modal de siempre —el que se usa cuando el remito no está en la base— con
+// todo en blanco. La foto va igual: queda como respaldo escaneado del remito, que es lo
+// que se mira cuando el súper discute una cantidad seis meses después.
+function _ifcoSelladoDirectoAMano(file, data) {
+  document.getElementById('ifco-mb-cargar-sellado').classList.remove('on');
+  IFCO._sdData = {
+    n_remito_ifco: (data && data.n_remito_ifco) || '',
+    escaneo_path: (data && data.escaneo_path) || null,
+    file: file
+  };
+  document.getElementById('ifco-sd-nremito').value = IFCO._sdData.n_remito_ifco;
+  document.getElementById('ifco-sd-cadena').value = '';
+  document.getElementById('ifco-sd-recibida').value = '';
+  document.getElementById('ifco-sd-rechazada').value = '0';
+  document.getElementById('ifco-sd-rechazo-destino-wrap').style.display = 'none';
+  document.getElementById('ifco-sd-rechazada').oninput = function(){
+    const v = parseInt(this.value) || 0;
+    document.getElementById('ifco-sd-rechazo-destino-wrap').style.display = v > 0 ? 'block' : 'none';
+  };
+  _ifcoSdAviso(data);
+  document.getElementById('ifco-mb-sellado-directo').classList.add('on');
+  setTimeout(function(){
+    const el = document.getElementById('ifco-sd-nremito');
+    if (el) { el.focus(); el.select(); }
+  }, 60);
+}
+
+// El cartel de arriba del mini-modal, en sus dos estados. Sin el de "a mano", el formulario
+// en blanco queda debajo de «Se va a crear con los datos que detectamos del OCR» — un
+// cartel que miente es peor que ninguno.
+//
+// Los dos textos viven juntos a propósito: separados, el día que se toque uno el otro queda
+// contando otra historia.
+const IFCO_SD_AVISO_OK = '<b>✨ Este remito no estaba en el sistema.</b> Se va a crear directamente en estado <b>SELLADO</b> con los datos que detectamos del OCR. Verificá los datos antes de guardar.';
+function _ifcoSdAviso(data) {
+  const el = document.getElementById('ifco-sd-aviso');
+  if (!el) return;
+  if (!data || !data.ocr_caido) {
+    el.style.cssText = 'background:#ecfdf5;border-left:3px solid #10b981;border-radius:4px;padding:10px 14px;margin-bottom:14px;font-size:12px;color:#065f46';
+    el.innerHTML = IFCO_SD_AVISO_OK;
+    return;
+  }
+  el.style.cssText = 'background:#fffbeb;border-left:3px solid #f59e0b;border-radius:4px;padding:10px 14px;margin-bottom:14px;font-size:12px;color:#92400e';
+  el.innerHTML = '<b>⚠️ El lector de remitos no está disponible.</b> '
+    + _ifcoEsc((data && data.error) || 'Cargá los datos a mano.')
+    + '<br>El remito se crea igual, en estado <b>SELLADO</b>, y la foto queda guardada.';
 }
 
 // Helper: muestra el panel de error/bloqueo dentro del modal
 // puedeReintentar: si true, ofrece botón "Probar otra foto"
-function _ifcoCargarSelladoMostrarError(titulo, mensajeHtml, puedeReintentar) {
+function _ifcoCargarSelladoMostrarError(titulo, mensajeHtml, puedeReintentar, file) {
   document.getElementById('ifco-cs-step-loading').style.display = 'none';
   document.getElementById('ifco-cs-step-foto').style.display = 'none';
   const div = document.getElementById('ifco-cs-step-error');
+  // La foto no entra en un onclick —es un File, no un string—, así que viaja por acá.
+  IFCO._csFile = file || null;
+  IFCO._csData = { ocr_caido: true, error: 'El lector no pudo leer el remito.' };
   div.style.display = 'block';
   div.innerHTML =
     '<div style="background:#fef2f2;border:1px solid #fca5a5;border-radius:8px;padding:14px 16px;color:#991b1b">' +
       '<div style="font-weight:600;margin-bottom:6px">'+titulo+'</div>' +
       '<div style="font-size:13px">'+mensajeHtml+'</div>' +
       (puedeReintentar
-        ? '<div style="margin-top:12px"><button class="btn bo" onclick="ifcoAbrirCargarSellado()">↻ Probar otra foto</button></div>'
+        // Y al lado, la salida a mano: «probar otra foto» como único botón deja al que
+        // tiene el remito en la mano sin nada que hacer cuando la foto no es el problema.
+        ? '<div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap">'
+          + '<button class="btn bo" onclick="ifcoAbrirCargarSellado()">↻ Probar otra foto</button>'
+          + (file ? '<button class="btn bb" onclick="_ifcoSelladoDirectoAMano(IFCO._csFile, IFCO._csData)">✏️ Cargarlo a mano</button>' : '')
+          + '</div>'
         : '') +
     '</div>';
 }
@@ -65332,8 +65402,14 @@ async function ifcoSelladoDirectoGuardar() {
   if (!cadena) { alert('Seleccioná la cadena/cliente'); return; }
   if (recibida <= 0 && rechazada <= 0) { alert('Indicá al menos cantidad recibida o rechazada'); return; }
 
-  const sd = IFCO._sdData;
-  if (!sd || !sd.n_remito_ifco) { alert('Faltan datos. Cerrá y volvé a empezar.'); return; }
+  const sd = IFCO._sdData || {};
+  // EL N° SALE DEL CAMPO, no de lo que leyó el OCR: el operador lo puede corregir —y
+  // cuando el lector está caído lo escribe entero—. Antes esto leía sólo _sdData, así que
+  // tipear el número no servía de nada.
+  const nRemito = (document.getElementById('ifco-sd-nremito').value || '').trim()
+                  || sd.n_remito_ifco || '';
+  if (!nRemito) { alert('Escribí el N° de remito'); return; }
+  sd.n_remito_ifco = nRemito;
 
   const btn = document.getElementById('ifco-sd-btn-guardar');
   btn.disabled = true;
@@ -65680,7 +65756,9 @@ async function ifcoOnFotoSellado(ev) {
       document.getElementById('ifco-s-loading').style.display = 'none';
       if (!r.ok || !data.datos) {
         const msg = (data && data.error) || ('HTTP ' + r.status);
-        document.getElementById('ifco-s-ocr-error').textContent = '⚠️ La IA no pudo leer la foto: ' + msg + '. Cargá los campos manualmente.';
+        document.getElementById('ifco-s-ocr-error').textContent = data && data.ocr_caido
+          ? '⚠️ ' + msg + ' La foto se guarda igual.'
+          : '⚠️ La IA no pudo leer la foto: ' + msg + '. Cargá los campos manualmente.';
         document.getElementById('ifco-s-ocr-error').style.display = 'block';
         IFCO._fotoSelladoPath = data && data.escaneo_path ? data.escaneo_path : null;
         ifcoSaltarOcrSellado();
