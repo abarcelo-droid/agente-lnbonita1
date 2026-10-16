@@ -221,3 +221,100 @@ test('un showError sin salida no se queda con el botón del error anterior', () 
   assert.match(js, /if \(salida && salida\.fn\)/);
   assert.match(js, /btn\.onclick = null/);
 });
+
+// ══ Y EL PANEL, QUE ME COMÍ LA PRIMERA VEZ ════════════════════════════════════
+//
+// 16/10/2026. Arreglé la app del teléfono y no miré el panel. El mensaje nuevo
+// del servidor llegó igual —eso estuvo bien— pero la pantalla de escritorio tenía
+// el MISMO callejón: «⚠️ La IA no pudo leer el N° de remito», el texto diciendo
+// «cargalo a mano», y abajo sólo «Probar otra foto» y «Cancelar».
+//
+// O sea que lo dejé peor que antes: el mensaje prometía algo que la pantalla no
+// daba. Sacar otra foto no arregla una cuenta sin crédito.
+//
+// Y había un tercero escondido: el N° del sellado directo era `readonly` y el
+// guardado lo leía de IFCO._sdData, no del campo. Sin un campo escribible no hay
+// carga a mano posible — y Pablo ya había pedido poder corregir ese número
+// («no siempre lo lee bien»), que estaba hecho en el teléfono y no acá.
+const PANEL = fs.readFileSync(path.join(RAIZ, 'src/panel.html'), 'utf8');
+const fnPanel = (nombre) => trozo(PANEL, 'function ' + nombre + '(', '\r\n}')
+  .replace(/'\s*\r?\n\s*\+ '/g, '');
+
+test('EL PANEL YA NO DEJA AL OPERADOR SIN SALIDA', () => {
+  // Es el caso de la captura: antes caía en _ifcoCargarSelladoMostrarError y ahí
+  // terminaba el camino.
+  const js = fnPanel('ifcoCargarSelladoFoto');
+  assert.match(js, /if \(data\.ocr_caido\) \{\s*\r?\n\s*_ifcoSelladoDirectoAMano\(file, data\);/,
+    'el lector caído no va derecho a la carga a mano');
+  // Y el orden importa: tiene que mirarse ANTES del caso "no leyó el número", que
+  // es el que mostraba el cartel.
+  assert.ok(js.indexOf('data.ocr_caido') < js.indexOf("accion === 'sin_numero'"),
+    'el caído se evalúa después del sin_numero: vuelve a caer en el cartel');
+});
+
+test('el formulario del panel es el que YA EXISTÍA, no uno nuevo', () => {
+  // Es el mismo mini-modal al que se llega cuando el remito no está en la base.
+  // Inventar otro habría sido una segunda pantalla que mantener.
+  const js = fnPanel('_ifcoSelladoDirectoAMano');
+  assert.match(js, /ifco-mb-sellado-directo'\)\.classList\.add\('on'\)/);
+  assert.match(js, /ifco-mb-cargar-sellado'\)\.classList\.remove\('on'\)/);
+});
+
+test('LA FOTO SE SUBE IGUAL desde el panel', () => {
+  // Sin esto el remito queda sin su respaldo escaneado, que es lo que se mira
+  // cuando el súper discute una cantidad seis meses después.
+  assert.match(fnPanel('_ifcoSelladoDirectoAMano'), /file: file/);
+  assert.match(fnPanel('_ifcoSelladoDirectoAMano'), /escaneo_path:/);
+});
+
+test('EL N° DEL SELLADO DIRECTO SE PUEDE TIPEAR', () => {
+  // Era readonly y gris. Sin esto, «cargalo a mano» es una frase vacía.
+  const input = (PANEL.match(/<input id="ifco-sd-nremito"[^>]*>/) || [''])[0];
+  assert.ok(input, 'no está el input del N°');
+  assert.ok(!/readonly/.test(input), 'el N° volvió a ser de sólo lectura: ' + input);
+  assert.match(input, /placeholder="00015-/, 'no dice qué formato va');
+});
+
+test('y el guardado LEE ESE CAMPO, no lo que leyó el OCR', () => {
+  // Es la mitad que faltaba: con el input editable pero el guardado mirando
+  // IFCO._sdData, tipear el número no servía de nada y la pantalla no lo decía.
+  const js = fnPanel('ifcoSelladoDirectoGuardar');
+  assert.match(js, /const nRemito = \(document\.getElementById\('ifco-sd-nremito'\)\.value \|\| ''\)\.trim\(\)/);
+  assert.match(js, /if \(!nRemito\) \{ alert\('Escribí el N° de remito'\); return; \}/,
+    'deja guardar sin número');
+});
+
+test('el cartel del panel no sigue diciendo "lo detectamos del OCR"', () => {
+  // Arriba de un formulario en blanco sería mentira.
+  const js = fnPanel('_ifcoSdAviso');
+  assert.match(js, /El lector de remitos no está disponible/);
+  assert.match(js, /la foto queda guardada/);
+  assert.match(PANEL, /<div id="ifco-sd-aviso"/, 'el cartel no tiene id: no se puede cambiar');
+  // Los dos textos viven juntos, como en la app del teléfono.
+  assert.match(PANEL, /const IFCO_SD_AVISO_OK =/);
+});
+
+test('Y VUELVE A SU LUGAR en el remito siguiente', () => {
+  // El camino normal (crear_nuevo) lo restaura: si no, el primero cargado a mano
+  // deja el cartel amarillo puesto para siempre.
+  assert.match(fnPanel('ifcoCargarSelladoFoto'), /_ifcoSdAviso\(null\)/);
+});
+
+test('una foto mala en el panel ofrece las DOS cosas', () => {
+  // Ahí sí tiene sentido probar otra foto — pero no como único camino.
+  const js = fnPanel('_ifcoCargarSelladoMostrarError');
+  assert.match(js, /Probar otra foto/);
+  assert.match(js, /Cargarlo a mano/);
+  // El File no entra en un onclick, así que viaja por IFCO._csFile.
+  assert.match(js, /IFCO\._csFile = file \|\| null/);
+});
+
+test('los otros dos caminos del panel dejan de culpar a la IA', () => {
+  // Cuando el lector está caído la IA no «no pudo leer»: nunca llegó a mirar la
+  // foto. Esos dos ya caían al formulario solos —eso estaba bien— pero el texto
+  // le echaba la culpa al que sacó la foto.
+  for (const campo of ['r', 's']) {
+    const i = PANEL.indexOf("document.getElementById('ifco-" + campo + "-ocr-error').textContent = data && data.ocr_caido");
+    assert.ok(i > 0, 'ifco-' + campo + '-ocr-error sigue culpando a la IA siempre');
+  }
+});
