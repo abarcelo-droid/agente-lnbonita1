@@ -7,6 +7,10 @@ import path    from "path";
 import fs      from "fs";
 import { fileURLToPath } from "url";
 import { MODELO_OCR } from "../config/ia.js";
+// La llamada pasa por servicios/ia.js: es lo que la deja registrada —qué función,
+// cuántos tokens, cuánto costó— para que la pantalla de Consumo de IA pueda decir
+// quién se está comiendo el crédito.
+import { llamarIA, hayIA } from "../servicios/ia.js";
 import db from "../servicios/db.js";
 import { enviarMail } from "../servicios/mail.js";
 import nodemailer from "nodemailer";
@@ -467,19 +471,11 @@ try {
 const OCR_ENABLED = String(process.env.IFCO_OCR_ENABLED || '').toLowerCase() === 'true';
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY || '';
 const OCR_MODEL = MODELO_OCR;
-let _anthropicClient = null;
+// El cliente vive en servicios/ia.js, que es el único que llama. Acá queda sólo el
+// portón: si la IA no está disponible, se contesta sin intentar.
 async function _getAnthropic() {
   if (!OCR_ENABLED || !ANTHROPIC_API_KEY) return null;
-  if (_anthropicClient) return _anthropicClient;
-  try {
-    const mod = await import('@anthropic-ai/sdk');
-    const Anthropic = mod.default || mod.Anthropic;
-    _anthropicClient = new Anthropic({ apiKey: ANTHROPIC_API_KEY });
-    return _anthropicClient;
-  } catch(e) {
-    console.error('[IFCO][OCR] No se pudo cargar @anthropic-ai/sdk:', e.message);
-    return null;
-  }
+  return hayIA() ? true : null;
 }
 
 // Prepara la imagen del remito para el OCR: la redimensiona server-side antes de mandarla.
@@ -4770,7 +4766,9 @@ router.post('/ocr/remito-super', upload.single('foto'), async function(req, res)
   const escaneo_path = '/data/ifco/' + req.file.filename;
 
   try {
-    const message = await client.messages.create({
+    // 'completo' y 'despacho' leen el remito entero; 'sellado' lee sólo lo del sello.
+    // Se miden aparte porque son dos trabajos distintos y cuestan distinto.
+    const message = await llamarIA(tipo === 'sellado' ? 'ifco-ocr-sellado' : 'ifco-ocr-remito', {
       model: OCR_MODEL,
       max_tokens: 1024,
       messages: [{
@@ -4882,7 +4880,7 @@ router.post('/ocr/match-sellado', upload.single('foto'), async function(req, res
 
   let nRemito = null;
   try {
-    const message = await client.messages.create({
+    const message = await llamarIA('ifco-ocr-sellado', {
       model: OCR_MODEL,
       max_tokens: 256,
       messages: [{

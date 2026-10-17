@@ -1,5 +1,6 @@
-import Anthropic from "@anthropic-ai/sdk";
 import { MODELO_CHAT } from "../config/ia.js";
+// Pasa por servicios/ia.js para quedar registrada en el consumo.
+import { llamarIA } from "../servicios/ia.js";
 import { obtenerSesion, guardarSesion } from "../servicios/db.js";
 import {
   registrarActividad,
@@ -9,7 +10,6 @@ import {
   estaActiva,
 } from "../servicios/conversaciones.js";
 
-const client     = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 const MAX_HISTORIAL = 24;
 
 // Frases que indican que el agente necesita instrucción del equipo
@@ -42,7 +42,7 @@ Aplicá esta instrucción en tu próxima respuesta de forma natural, como si fue
 
   sesion.mensajes.push({ role: "user", content: mensajeUsuario });
 
-  const response = await client.messages.create({
+  const response = await llamarIA('whatsapp-agente', {
     model:      MODELO_CHAT,
     max_tokens: 1024,
     system:     promptFinal,
@@ -76,7 +76,7 @@ export async function generarResumen(telefono) {
   const sesion = obtenerSesion(telefono);
   if (!sesion.mensajes.length) return "Sin mensajes aún.";
 
-  const response = await client.messages.create({
+  const response = await llamarIA('whatsapp-resumen', {
     model:      MODELO_CHAT,
     max_tokens: 300,
     system:     "Sos un asistente que resume conversaciones de ventas de forma muy breve. Máximo 3 líneas. Incluí: qué quiere el cliente, en qué punto está la charla, y si hay algo pendiente.",
