@@ -19,6 +19,8 @@ import path    from 'path';
 import fs      from 'fs';
 import { fileURLToPath } from 'url';
 import { MODELO_RAPIDO } from '../config/ia.js';
+// Pasa por servicios/ia.js para quedar registrada en el consumo.
+import { llamarIA, hayIA } from '../servicios/ia.js';
 import db from '../servicios/db.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -220,19 +222,9 @@ function _formatNumLiq(punto, num) {
 // Anthropic SDK (lazy)
 // ─────────────────────────────────────────────────────────────────────────────
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
-let _anthropic = null;
+// El cliente vive en servicios/ia.js. Acá queda sólo el portón.
 async function _getAnthropic() {
-  if (!ANTHROPIC_API_KEY) return null;
-  if (_anthropic) return _anthropic;
-  try {
-    const mod = await import('@anthropic-ai/sdk');
-    const Anthropic = mod.default || mod.Anthropic;
-    _anthropic = new Anthropic({ apiKey: ANTHROPIC_API_KEY });
-    return _anthropic;
-  } catch(e) {
-    console.error('[LIQ] No se pudo cargar @anthropic-ai/sdk:', e.message);
-    return null;
-  }
+  return hayIA() ? true : null;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -319,7 +311,7 @@ router.post('/parse', async function(req, res) {
       'Devolvé SOLO el JSON, sin markdown ni explicaciones.'
     ].join('\n');
 
-    const message = await client.messages.create({
+    const message = await llamarIA('liquidacion-parseo', {
       model: MODELO_RAPIDO,
       max_tokens: 4096,
       messages: [{ role: 'user', content: prompt }]

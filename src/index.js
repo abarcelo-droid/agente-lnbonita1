@@ -36,6 +36,7 @@ import sgContableRouter    from "./rutas/sg_contable.js";
 import sgVentasRouter       from "./rutas/sg_ventas.js";
 import sgTesoreriaRouter    from "./rutas/sg_tesoreria.js";
 import sgContactosRouter   from "./rutas/sg_contactos.js";
+import iaUsoRouter        from "./rutas/ia_uso.js";
 import adminRouter         from "./rutas/admin.js";
 import planificacionRouter from "./rutas/planificacion.js";
 import spRouter            from "./rutas/sp.js";
@@ -261,6 +262,7 @@ app.use("/api/sg/contable",  sgContableRouter);
 app.use("/api/sg/ventas",    sgVentasRouter);
 app.use("/api/sg/tesoreria", sgTesoreriaRouter);
 app.use("/api/sg/contactos", sgContactosRouter);
+app.use("/api/ia-uso",      iaUsoRouter);
 app.use("/api/sg",     sgRouter);
 app.use("/api/admin",  adminRouter);
 app.use("/api/pli",    planificacionRouter);   // Planificación Insumos (módulo independiente)

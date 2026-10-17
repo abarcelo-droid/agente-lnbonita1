@@ -284,6 +284,7 @@ input[type=number]{-moz-appearance:textfield;appearance:textfield}
     <div class="ni" data-sec="informes-comercial"><span class="dot da"></span>📊 Informes comerciales</div>
     <div class="ni" data-sec="share"><span class="dot db"></span>🛒 SHARE Carrefour</div>
     <div class="ni" data-sec="contactos"><span class="dot dc"></span>📇 Contactos</div>
+    <div class="ni" data-sec="ia-uso"><span class="dot da"></span>⚡ Consumo de IA</div>
   </div>
 
   <div class="ni-grp" data-grp="ven-ventas">Administración de Ventas<span class="ni-caret">▾</span></div>
@@ -6702,6 +6703,115 @@ input[type=number]{-moz-appearance:textfield;appearance:textfield}
   </div>
 </div>
 
+
+<!-- ═══════════════════════════════════════════════════════════════════════════════════
+     CONSUMO DE IA — qué función se come el crédito
+     ═══════════════════════════════════════════════════════════════════════════════════
+     Andy, 17/10/2026: «¿Si armamos un lugar en el panel donde podamos ver cuánto consume
+     cada cosa? Creo que va a ser muy práctico a futuro».
+
+     El 14/10 la cuenta de la API se quedó sin crédito, el lector de remitos dejó de leer,
+     y no hubo forma de saber qué lo había consumido: todas las funciones usan la misma
+     clave, así que la consola de Anthropic las muestra como un solo número.
+
+     La pantalla contesta tres preguntas, en ese orden:
+       1. ¿Cuánto llevamos este mes?
+       2. ¿QUIÉN se lo está comiendo?   ← es para lo que se abre
+       3. ¿Qué pasó el día del pico?
+     ═══════════════════════════════════════════════════════════════════════════════════ -->
+<div class="sec" id="sec-ia-uso">
+  <style>
+    /* SIN BARRA DE DESPLAZAMIENTO LATERAL (CLAUDE.md): anchos fijos, se parte sólo la
+       etiqueta —lo único de largo variable— y el resto se trunca. */
+    #sec-ia-uso .pa-tbl{table-layout:fixed;width:100%;max-width:98vw}
+    #sec-ia-uso .pa-tbl th,#sec-ia-uso .pa-tbl td{
+      white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding:7px 9px;font-size:12.5px}
+    #sec-ia-uso .pa-tbl td.iu-w,#sec-ia-uso .pa-tbl th.iu-w{white-space:normal;word-break:break-word}
+    #sec-ia-uso .ab-table-wrap{overflow-x:hidden !important}
+    @media(max-width:900px){ #sec-ia-uso .ab-table-wrap{overflow-x:auto !important}
+                             #sec-ia-uso .pa-tbl{table-layout:auto} }
+    #sec-ia-uso .iu-num{text-align:right;font-variant-numeric:tabular-nums}
+
+    #sec-ia-uso .iu-f{display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;margin-bottom:14px}
+    #sec-ia-uso .iu-f label{font-size:11px;color:var(--mut);display:block;margin-bottom:3px}
+    #sec-ia-uso .iu-f input,#sec-ia-uso .iu-f select{
+      padding:5px 8px;border:1px solid var(--bor);border-radius:6px;background:var(--bg);font-size:12.5px}
+
+    #sec-ia-uso .iu-kpis{display:flex;gap:11px;flex-wrap:wrap;margin-bottom:16px}
+    #sec-ia-uso .iu-kpi{flex:1;min-width:150px;padding:12px 15px;border-radius:10px;background:var(--bg2,#f5f5f5)}
+    #sec-ia-uso .iu-kpi b{display:block;font-size:22px;font-weight:700;font-variant-numeric:tabular-nums;margin-top:2px}
+    #sec-ia-uso .iu-kpi .iu-sub{font-size:11px;color:var(--mut)}
+
+    /* LA CURVA POR DÍA. Es lo que distingue «se consumió parejo» de «pasó algo el martes»,
+       que es exactamente lo que no se pudo saber cuando la cuenta se quedó sin crédito.
+       Barras y no números: un pico se ve, una tabla de treinta filas se lee. */
+    #sec-ia-uso .iu-dias{display:flex;align-items:flex-end;gap:2px;height:90px;
+      padding:8px 0;border-bottom:1px solid var(--bor);margin-bottom:4px}
+    #sec-ia-uso .iu-dia{flex:1;min-width:4px;background:var(--burg);border-radius:2px 2px 0 0;
+      position:relative;cursor:default;min-height:1px}
+    #sec-ia-uso .iu-dia:hover{opacity:.75}
+    #sec-ia-uso .iu-dias-pie{display:flex;justify-content:space-between;font-size:10.5px;color:var(--mut)}
+
+    /* La barra de participación de cada función sobre el total. Es la forma más rápida de
+       ver quién pesa sin leer el número. */
+    #sec-ia-uso .iu-bar{position:relative;height:14px;border-radius:4px;background:var(--bor);overflow:hidden}
+    #sec-ia-uso .iu-bar i{position:absolute;left:0;top:0;bottom:0;background:var(--burg)}
+    #sec-ia-uso .iu-chip{display:inline-block;padding:1px 7px;border-radius:9px;font-size:10.5px;font-weight:600}
+    #sec-ia-uso .iu-ch-caro{background:#fdecec;color:#b3261e}
+    #sec-ia-uso .iu-ch-barato{background:#e6f4ea;color:#1a7f37}
+    #sec-ia-uso .iu-ch-falla{background:#fff3cd;color:#7a5c00}
+    #sec-ia-uso .iu-nd{font-size:11.5px;color:var(--mut);font-style:italic}
+    #sec-ia-uso .iu-vacio{text-align:center;padding:34px;color:var(--mut);font-size:13px}
+    #sec-ia-uso .iu-pane{display:none} #sec-ia-uso .iu-pane.on{display:block}
+    #sec-ia-uso .iu-tab{padding:7px 13px;cursor:pointer;font-size:12.5px;font-weight:600;
+      border-radius:6px;color:var(--mut)}
+    #sec-ia-uso .iu-tab.on{background:var(--burg);color:#fff}
+  </style>
+
+  <div class="ph">
+    <div><div class="ph-t">⚡ Consumo de IA</div>
+      <div class="ph-s">Qué función usa la IA, cuánto y cuánto cuesta. El crédito es uno solo
+        para todo el sistema: acá se ve quién se lo está comiendo.</div></div>
+    <div style="display:flex;gap:8px">
+      <button class="btn bo bs" onclick="sgManualAbrir('ia-uso')">❓ ¿Cómo se usa?</button></div>
+  </div>
+
+  <div class="iu-f">
+    <div><label>Desde</label><input type="date" id="iu-desde" onchange="iuCargar()"></div>
+    <div><label>Hasta</label><input type="date" id="iu-hasta" onchange="iuCargar()"></div>
+    <div><label>&nbsp;</label><button class="btn bo bs" onclick="iuPreset(7)">7 días</button></div>
+    <div><label>&nbsp;</label><button class="btn bo bs" onclick="iuPreset(30)">30 días</button></div>
+    <div><label>&nbsp;</label><button class="btn bo bs" onclick="iuPreset(90)">90 días</button></div>
+  </div>
+
+  <div class="iu-kpis" id="iu-kpis"></div>
+
+  <!-- La curva. Va antes de la tabla a propósito: un pico se ve de un vistazo y es lo
+       primero que uno quiere saber cuando abre esto porque algo pasó. -->
+  <div id="iu-curva" style="margin-bottom:18px"></div>
+
+  <div style="display:inline-flex;gap:2px;background:var(--bg);border:1px solid var(--bor);
+              border-radius:8px;padding:3px;margin-bottom:13px;flex-wrap:wrap">
+    <div class="iu-tab on" data-t="funcion" onclick="iuTab('funcion')">🧩 Por función</div>
+    <div class="iu-tab"    data-t="detalle" onclick="iuTab('detalle')">🔍 Llamada por llamada</div>
+  </div>
+
+  <div class="iu-pane on" data-p="funcion">
+    <div id="iu-funciones"></div>
+    <div id="iu-sin-uso" style="margin-top:14px"></div>
+  </div>
+
+  <div class="iu-pane" data-p="detalle">
+    <div class="iu-f">
+      <div><label>Función</label><select id="iu-d-funcion" onchange="iuDetalle()">
+        <option value="">Todas</option></select></div>
+      <div><label>&nbsp;</label><label style="font-size:11.5px;color:var(--tx)">
+        <input type="checkbox" id="iu-d-fallidas" onchange="iuDetalle()" style="vertical-align:-1px">
+        sólo las que fallaron</label></div>
+    </div>
+    <div id="iu-detalle"></div>
+  </div>
+</div>
 
   <div class="sec sg-mod" id="sec-sg-importacion">
     <style>
@@ -25881,6 +25991,85 @@ SG_MANUAL.contactos = { titulo: 'Contactos comerciales', html:
   + 'de conversaciones con esa persona. Por eso la baja esconde y no borra.</div>'
 };
 
+SG_MANUAL['ia-uso'] = { titulo: 'Consumo de IA', html:
+  '<p>Varias pantallas del sistema usan <b>inteligencia artificial</b>: el lector de remitos '
+  + 'de IFCO, la lectura de facturas y documentos, el parseo de liquidaciones, el detector de '
+  + 'duplicados y el buscador. Todas gastan del <b>mismo crédito</b>. Acá se ve cuánto gasta '
+  + 'cada una.</p>'
+
+  + '<div class="ojo"><b>Por qué existe esta pantalla.</b> El 14/10/2026 la cuenta se quedó sin '
+  + 'crédito y el lector de remitos dejó de leer. Al buscar qué lo había consumido apareció el '
+  + 'problema de fondo: <b>no había forma de saberlo</b>. Las doce funciones usan la misma clave, '
+  + 'así que la consola de Anthropic las muestra como un solo número por modelo. Ahora cada '
+  + 'llamada queda anotada con el nombre de la función que la hizo.</div>'
+
+  + '<h3>💵 Los cuatro números de arriba <span class="ver">V1094</span></h3>'
+  + '<ul>'
+  + '<li><b>Gasto del período</b> — lo que se consumió en el rango elegido, y cuántas llamadas '
+  + 'fueron.</li>'
+  + '<li><b>Por día</b> — el promedio, y <b>a cuánto da por mes a ese ritmo</b>. Es lo que '
+  + 'convierte «gastamos 4 dólares» en «esto son 40 por mes»: el número suelto no dice si hay '
+  + 'que preocuparse.</li>'
+  + '<li><b>Tokens</b> — la unidad en la que se cobra. Entran los de la pregunta (incluida la '
+  + 'foto o el PDF, que pesan) y salen los de la respuesta.</li>'
+  + '<li><b>Fallaron</b> — las llamadas que no salieron. <b>No se cobran</b>, pero son la señal '
+  + 'de que algo se rompió: cien fallas seguidas no cuestan nada y sí avisan.</li>'
+  + '</ul>'
+
+  + '<h3>📈 La curva por día <span class="ver">V1094</span></h3>'
+  + '<p>Una barra por día, y es <b>la pregunta más útil de la pantalla</b>:</p>'
+  + '<ul>'
+  + '<li><b>Pendiente pareja</b> → se consumió normal. Si el crédito se acabó, simplemente hay '
+  + 'que recargarlo.</li>'
+  + '<li><b>Un pico en días puntuales</b> → ahí pasó algo, y la tabla de abajo dice qué función '
+  + 'fue.</li>'
+  + '</ul>'
+  + '<p>Pasando el mouse por encima de cada barra se ve el día, el gasto y cuántas llamadas.</p>'
+
+  + '<h3>🧩 Quién se lo come <span class="ver">V1094</span></h3>'
+  + '<p>La tabla va <b>ordenada por gasto, no por cantidad</b>. Eso es a propósito y es lo que '
+  + 'hace útil a la pantalla: <b>dos lecturas de factura pueden costar más que cien remitos</b>, '
+  + 'porque una factura escaneada entra como imágenes y pesa, y porque usa un modelo más caro.</p>'
+  + '<ul>'
+  + '<li><b>Peso</b> — qué porcentaje del gasto total se lleva esa función.</li>'
+  + '<li><b>Por llamada</b> — lo que cuesta cada vez. Es el número comparable entre funciones: '
+  + 'el total depende de cuánto se usó, el unitario de qué tan cara es.</li>'
+  + '<li>Debajo del nombre está el <b>modelo</b> que usa. Los de la familia <i>sonnet</i> son '
+  + 'varias veces más caros que los <i>haiku</i>.</li>'
+  + '</ul>'
+  + '<p>Al pie aparece lo que <b>no se usó</b> en el período. Una función que dejó de aparecer es '
+  + 'tan informativa como una que se disparó: puede ser que nadie la necesitó, o que se rompió y '
+  + 'nadie avisó.</p>'
+
+  + '<h3>🔍 Llamada por llamada <span class="ver">V1094</span></h3>'
+  + '<p>La segunda solapa lista cada llamada con la fecha, <b>quién la hizo</b>, lo que costó y '
+  + 'cuánto tardó. Es para mirar un día puntual: se elige el rango arriba, se filtra por función, '
+  + 'y se puede pedir <b>sólo las que fallaron</b> — que vienen con el motivo técnico al lado '
+  + '(sin crédito, saturada, credencial rechazada).</p>'
+
+  + '<h3>⚠️ El costo es una ESTIMACIÓN <span class="ver">V1094</span></h3>'
+  + '<p>Se calcula con los <b>precios de lista</b> vigentes al momento de cada llamada, y se '
+  + 'congela ahí: si mañana baja un precio, los informes de marzo siguen diciendo lo que se pagó '
+  + 'en marzo.</p>'
+  + '<div class="ojo">Sirve para saber <b>quién gasta</b> y para detectar un pico, que es para lo '
+  + 'que se hizo. <b>La factura es la de Anthropic</b>, y puede no dar idéntico: hay descuentos, '
+  + 'redondeos y conceptos que no pasan por acá. Para conciliar plata, la fuente es la consola.</div>'
+
+  + '<h3>🔑 Por qué lo ve sólo un administrador</h3>'
+  + '<p>Es gasto de la empresa, no el trabajo del día. Es la misma línea que separa '
+  + '<b>parametrizar</b> de <b>operar</b>: el que carga un remito no necesita saber cuánto cuesta '
+  + 'leerlo, y mostrárselo lo único que hace es invitarlo a no usar el lector.</p>'
+
+  + '<h3>💡 Qué hacer con esto</h3>'
+  + '<ul>'
+  + '<li><b>Antes de que se acabe.</b> Mirando el promedio por día y la proyección mensual se '
+  + 'sabe cuándo recargar, en vez de enterarse porque una pantalla dejó de andar.</li>'
+  + '<li><b>Cuando algo se dispara.</b> La curva dice qué día y la tabla qué función.</li>'
+  + '<li><b>Cuando algo se rompe en silencio.</b> Una función con muchas fallas, o una que '
+  + 'desapareció de la lista, son dos formas de que algo esté mal sin que nadie reclame.</li>'
+  + '</ul>'
+};
+
 SG_MANUAL.stock = { titulo: 'Stock', html:
   '<p>Stock contesta tres preguntas: <b>qué hay</b>, <b>dónde está</b> y <b>cuándo '
   + 'vence</b>. Todo lo que se ve acá nació en una recepción y va a morir en un '
@@ -38178,6 +38367,7 @@ function loadSec(s) {
     'informes-comercial': function(){ infInit(); },
     'share': function(){ shInit(); },
     'contactos': function(){ ctInit(); },
+    'ia-uso': function(){ iuInit(); },
     'pl-abasto': function(){ plaInit(); },
     'sg-catalogo':   function(){ sgLoadCaches(function(){ sgCatSub('productos'); }); },
     'sg-reportes':   function(){ sgRepInit(); },
@@ -53143,6 +53333,231 @@ async function ctInit() {
     const cnt = document.getElementById('ct-cnt-pend');
     if (cnt) cnt.textContent = j.pendientes.length || '·';
   } catch (e) {}
+}
+
+
+// ═══════════════════════════════════════════════════════════════════════════════════════
+// CONSUMO DE IA — qué función se come el crédito
+// ═══════════════════════════════════════════════════════════════════════════════════════
+// El 14/10 la cuenta de la API se quedó sin crédito y el lector de remitos dejó de leer.
+// Al buscar qué lo había consumido apareció el problema de fondo: no había forma de
+// saberlo. Todas las funciones usan la MISMA clave, así que la consola de Anthropic las
+// muestra como un solo número por modelo.
+//
+// Cada llamada queda anotada en `ia_uso` (ver servicios/ia.js, que es el único lugar del
+// sistema que llama a la IA). Esta pantalla la lee.
+//
+// EL ORDEN DE LA PANTALLA ES EL ORDEN DE LAS PREGUNTAS: cuánto llevamos, quién se lo come,
+// qué pasó ese día. Por eso la curva va antes de la tabla — un pico se ve, una tabla de
+// treinta filas se lee.
+let IU = { datos: null };
+
+const iuEsc = (s) => String(s == null ? '' : s)
+  .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+const iuNum = (n) => (Number(n)||0).toLocaleString('es-AR');
+// El gasto se muestra con los decimales que hagan falta para que no sea "USD 0,00": una
+// llamada de OCR cuesta fracciones de centavo, y redondear a dos decimales haría que el
+// 80% de las filas dijeran cero.
+function iuUsd(n) {
+  const v = Number(n) || 0;
+  if (v === 0) return 'USD 0';
+  if (v < 0.01) return 'USD ' + v.toFixed(4);
+  if (v < 1) return 'USD ' + v.toFixed(3);
+  return 'USD ' + v.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+const iuHoy = () => new Date().toISOString().slice(0,10);
+
+function iuTab(t) {
+  document.querySelectorAll('#sec-ia-uso .iu-tab').forEach(e => e.classList.toggle('on', e.dataset.t === t));
+  document.querySelectorAll('#sec-ia-uso .iu-pane').forEach(e => e.classList.toggle('on', e.dataset.p === t));
+  if (t === 'detalle') iuDetalle();
+}
+
+function iuPreset(dias) {
+  const h = new Date();
+  const d = new Date(h.getTime() - (dias - 1) * 86400000);
+  document.getElementById('iu-desde').value = d.toISOString().slice(0,10);
+  document.getElementById('iu-hasta').value = h.toISOString().slice(0,10);
+  iuCargar();
+}
+
+function iuRango() {
+  const d = document.getElementById('iu-desde');
+  const h = document.getElementById('iu-hasta');
+  if (h && !h.value) h.value = iuHoy();
+  if (d && !d.value) d.value = new Date(Date.now() - 29*86400000).toISOString().slice(0,10);
+  return 'desde=' + encodeURIComponent(d.value) + '&hasta=' + encodeURIComponent(h.value);
+}
+
+async function iuCargar() {
+  const cont = document.getElementById('iu-funciones');
+  if (!cont) return;
+  cont.innerHTML = '<div class="iu-vacio">Cargando…</div>';
+  try {
+    const r = await fetch('/api/ia-uso/?' + iuRango(), { credentials:'include' });
+    const j = await r.json();
+    if (!r.ok || !j.ok) throw new Error(j.error || ('error ' + r.status));
+    IU.datos = j;
+    iuPintarKpis(j);
+    iuPintarCurva(j);
+    iuPintarFunciones(j);
+    iuLlenarFiltro(j);
+  } catch (e) {
+    cont.innerHTML = '<div class="iu-vacio">No se pudo cargar: ' + iuEsc(e.message) + '</div>';
+  }
+}
+
+function iuPintarKpis(j) {
+  const t = j.total || {};
+  const dias = Math.max(1, (j.por_dia || []).length);
+  const prom = (t.usd || 0) / dias;
+  // La proyección a 30 días es lo que convierte «gastamos 4 dólares» en «esto son 40 por
+  // mes»: el número suelto no dice si hay que preocuparse.
+  const mes = prom * 30;
+  document.getElementById('iu-kpis').innerHTML =
+      '<div class="iu-kpi"><span class="iu-sub">Gasto del período</span><b>' + iuUsd(t.usd) + '</b>'
+    +   '<span class="iu-sub">' + iuNum(t.llamadas) + ' llamada' + (t.llamadas === 1 ? '' : 's') + '</span></div>'
+    + '<div class="iu-kpi"><span class="iu-sub">Por día</span><b>' + iuUsd(prom) + '</b>'
+    +   '<span class="iu-sub">a este ritmo, ' + iuUsd(mes) + ' por mes</span></div>'
+    + '<div class="iu-kpi"><span class="iu-sub">Tokens</span><b>' + iuNum((t.tok_entrada||0) + (t.tok_salida||0)) + '</b>'
+    +   '<span class="iu-sub">' + iuNum(t.tok_entrada) + ' entraron · ' + iuNum(t.tok_salida) + ' salieron</span></div>'
+    // Las fallidas no cuestan, pero son la señal de que algo se rompió. Van en rojo sólo
+    // cuando hay: un cero permanente en rojo deja de leerse a los dos días.
+    + '<div class="iu-kpi"><span class="iu-sub">Fallaron</span><b'
+    +   ((t.fallidas||0) > 0 ? ' style="color:#b3261e"' : '') + '>' + iuNum(t.fallidas) + '</b>'
+    +   '<span class="iu-sub">' + ((t.fallidas||0) > 0
+          ? 'no se cobran, pero algo pasó' : 'todo salió bien') + '</span></div>';
+}
+
+// LA CURVA POR DÍA. Es la que separa «se consumió parejo» de «pasó algo el martes».
+function iuPintarCurva(j) {
+  const dias = j.por_dia || [];
+  const cont = document.getElementById('iu-curva');
+  if (!dias.length) { cont.innerHTML = ''; return; }
+  const max = Math.max.apply(null, dias.map(d => d.costo_mil || 0)) || 1;
+  const barras = dias.map(function(d){
+    const alt = Math.max(1, Math.round((d.costo_mil || 0) / max * 100));
+    return '<div class="iu-dia" style="height:' + alt + '%" title="'
+      + iuEsc(d.dia) + ': ' + iuUsd(d.usd) + ' · ' + iuNum(d.llamadas) + ' llamadas"></div>';
+  }).join('');
+  cont.innerHTML = '<div class="iu-dias">' + barras + '</div>'
+    + '<div class="iu-dias-pie"><span>' + iuEsc(dias[0].dia) + '</span>'
+    + '<span>día más caro: ' + iuUsd(max/1000) + '</span>'
+    + '<span>' + iuEsc(dias[dias.length-1].dia) + '</span></div>';
+}
+
+function iuPintarFunciones(j) {
+  const filas = j.por_funcion || [];
+  const cont = document.getElementById('iu-funciones');
+  if (!filas.length) {
+    cont.innerHTML = '<div class="iu-vacio">No hubo ninguna llamada a la IA en este período.</div>';
+    document.getElementById('iu-sin-uso').innerHTML = '';
+    return;
+  }
+  const totalMil = (j.total && j.total.costo_mil) || 1;
+  let h = '<div class="ab-table-wrap"><table class="pa-tbl"><thead><tr>'
+    + '<th class="iu-w" style="width:27%">Qué función</th>'
+    + '<th style="width:16%">Peso</th>'
+    + '<th style="width:12%">Gasto</th>'
+    + '<th style="width:11%">Llamadas</th>'
+    + '<th style="width:12%">Por llamada</th>'
+    + '<th style="width:12%">Tokens</th>'
+    + '<th style="width:10%">Tarda</th>'
+    + '</tr></thead><tbody>';
+  for (const f of filas) {
+    const pct = Math.round((f.costo_mil || 0) / totalMil * 100);
+    const porLlamada = (f.usd || 0) / Math.max(1, f.llamadas);
+    const falla = (f.fallidas || 0) > 0
+      ? ' <span class="iu-chip iu-ch-falla">' + f.fallidas + ' falló' + (f.fallidas > 1 ? 'ron' : '') + '</span>' : '';
+    h += '<tr>'
+      + '<td class="iu-w"><b>' + iuEsc(f.etiqueta) + '</b>' + falla
+      +   '<div class="iu-nd" style="font-style:normal">' + iuEsc(f.modelo) + '</div></td>'
+      + '<td><div class="iu-bar"><i style="width:' + pct + '%"></i></div>'
+      +   '<div class="iu-nd" style="font-style:normal">' + pct + '%</div></td>'
+      + '<td class="iu-num">' + iuUsd(f.usd) + '</td>'
+      + '<td class="iu-num">' + iuNum(f.llamadas) + '</td>'
+      + '<td class="iu-num">' + iuUsd(porLlamada) + '</td>'
+      + '<td class="iu-num">' + iuNum((f.tok_entrada||0) + (f.tok_salida||0)) + '</td>'
+      + '<td class="iu-num">' + (f.ms_prom ? (f.ms_prom/1000).toFixed(1) + 's' : '—') + '</td>'
+      + '</tr>';
+  }
+  h += '</tbody></table></div>'
+    + '<div class="iu-nd" style="margin-top:9px">Ordenado por gasto, no por cantidad: dos'
+    + ' lecturas de factura pueden costar más que cien remitos. El costo es una estimación'
+    + ' con los precios de lista — la factura es la de Anthropic.</div>';
+  cont.innerHTML = h;
+
+  // LO QUE NO SE USÓ. Una función que dejó de aparecer es tan informativa como una que se
+  // disparó: puede ser que nadie la necesitó, o que se rompió y nadie avisó.
+  const sin = j.sin_uso || [];
+  document.getElementById('iu-sin-uso').innerHTML = sin.length
+    ? '<div class="iu-nd">Sin usar en este período: '
+      + sin.map(f => iuEsc(f.etiqueta)).join(' · ') + '</div>'
+    : '';
+}
+
+function iuLlenarFiltro(j) {
+  const sel = document.getElementById('iu-d-funcion');
+  if (!sel) return;
+  const antes = sel.value;
+  const todas = (j.por_funcion || []).map(f => ({ k: f.funcion, e: f.etiqueta }));
+  sel.innerHTML = '<option value="">Todas</option>'
+    + todas.map(f => '<option value="' + iuEsc(f.k) + '">' + iuEsc(f.e) + '</option>').join('');
+  sel.value = antes;
+}
+
+async function iuDetalle() {
+  const cont = document.getElementById('iu-detalle');
+  if (!cont) return;
+  const fn = document.getElementById('iu-d-funcion');
+  const fa = document.getElementById('iu-d-fallidas');
+  let qs = iuRango() + '&limite=300';
+  if (fn && fn.value) qs += '&funcion=' + encodeURIComponent(fn.value);
+  if (fa && fa.checked) qs += '&solo_fallidas=1';
+  cont.innerHTML = '<div class="iu-vacio">Cargando…</div>';
+  try {
+    const r = await fetch('/api/ia-uso/detalle?' + qs, { credentials:'include' });
+    const j = await r.json();
+    if (!r.ok || !j.ok) throw new Error(j.error || ('error ' + r.status));
+    if (!j.llamadas.length) {
+      cont.innerHTML = '<div class="iu-vacio">No hay llamadas con ese filtro.</div>';
+      return;
+    }
+    let h = '<div class="ab-table-wrap"><table class="pa-tbl"><thead><tr>'
+      + '<th style="width:15%">Cuándo</th>'
+      + '<th class="iu-w" style="width:25%">Qué función</th>'
+      + '<th style="width:13%">Quién</th>'
+      + '<th style="width:11%">Gasto</th>'
+      + '<th style="width:13%">Tokens</th>'
+      + '<th style="width:9%">Tardó</th>'
+      + '<th class="iu-w" style="width:14%">Resultado</th>'
+      + '</tr></thead><tbody>';
+    for (const l of j.llamadas) {
+      h += '<tr>'
+        + '<td>' + iuEsc(l.creado_en) + '</td>'
+        + '<td class="iu-w">' + iuEsc(l.etiqueta) + '</td>'
+        + '<td>' + (l.usuario ? iuEsc(l.usuario) : '<span class="iu-nd">—</span>') + '</td>'
+        + '<td class="iu-num">' + iuUsd(l.usd) + '</td>'
+        + '<td class="iu-num">' + iuNum((l.tok_entrada||0) + (l.tok_salida||0)) + '</td>'
+        + '<td class="iu-num">' + (l.ms ? (l.ms/1000).toFixed(1) + 's' : '—') + '</td>'
+        + '<td class="iu-w">' + (l.ok
+            ? '<span class="iu-chip iu-ch-barato">bien</span>'
+            : '<span class="iu-chip iu-ch-caro">falló</span> <span class="iu-nd">'
+              + iuEsc(l.error || '') + '</span>') + '</td>'
+        + '</tr>';
+    }
+    cont.innerHTML = h + '</tbody></table></div>';
+  } catch (e) {
+    cont.innerHTML = '<div class="iu-vacio">No se pudo cargar: ' + iuEsc(e.message) + '</div>';
+  }
+}
+
+function iuInit() {
+  const h = document.getElementById('iu-hasta');
+  const d = document.getElementById('iu-desde');
+  if (h && !h.value) h.value = iuHoy();
+  if (d && !d.value) d.value = new Date(Date.now() - 29*86400000).toISOString().slice(0,10);
+  iuCargar();
 }
 
 </script>

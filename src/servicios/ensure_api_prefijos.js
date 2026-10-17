@@ -60,6 +60,8 @@ const PREFIJOS = [
   // cualquiera con sesión — que es exactamente lo que no queremos con una lista de
   // teléfonos directos de compradores y productores.
   ['contactos', 'sg/contactos'],
+  // El consumo de IA: sólo lectura, y el router además exige admin por su cuenta.
+  ['ia-uso', 'ia-uso'],
   // P&L ABASTO (V1052). Router propio de un solo módulo: subir el libro diario y guardar
   // los rubros pide 'operar'.
   ['pl-abasto', 'pl-abasto'],
