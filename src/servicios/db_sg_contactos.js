@@ -187,6 +187,22 @@ for (const sql of [
   "ALTER TABLE sg_contactos ADD COLUMN empresa_id INTEGER",
   "ALTER TABLE sg_contacto_productos ADD COLUMN empresa_id INTEGER",
   "ALTER TABLE sg_contacto_charlas ADD COLUMN hecho_en TEXT",
+  // ── LA FOTO DE LA TARJETA ─────────────────────────────────────────────────────────
+  // Una foto, sin lector ni nada: la tarjeta que te dieron en la mano, guardada donde se
+  // la puede volver a mirar. Lo que se tipea igual son el teléfono y el mail, que son lo
+  // que el buscador tiene que poder encontrar — una foto no se busca.
+  //
+  // Se guarda la RUTA, no el archivo: una foto adentro de la base la infla y rompe el
+  // backup del volume. Mismo criterio que las fotos de la recepción.
+  //
+  // Y el archivo NO va a data/sg: esa carpeta la sirve express.static ANTES del portón de
+  // sesión, o sea que queda en una URL alcanzable sin cookie. La foto de una tarjeta ES
+  // el teléfono directo de un comprador de cadena, que es exactamente lo que este módulo
+  // decidió no dejar al alcance de cualquiera. Va a data/contactos/, que no se sirve
+  // estática, y se entrega por GET /:id/tarjeta, que pasa por requireAuth.
+  "ALTER TABLE sg_contactos ADD COLUMN tarjeta_path TEXT",
+  "ALTER TABLE sg_contactos ADD COLUMN tarjeta_nombre TEXT",
+  "ALTER TABLE sg_contactos ADD COLUMN tarjeta_en TEXT",
   // Van DESPUÉS de los ALTER, a propósito: en una base que ya existía la columna
   // empresa_id no estaba hasta recién, y un CREATE INDEX sobre una columna que no
   // existe se lleva puesto el arranque del módulo.

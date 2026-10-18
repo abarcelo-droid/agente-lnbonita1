@@ -198,9 +198,12 @@ test('y el manual lleva el V### al lado de cada cosa, como pide CLAUDE.md', () =
   const vers = [...MANUAL.matchAll(/<span class="ver">(V\d+)<\/span>/g)].map((m) => m[1]);
   assert.ok(vers.length >= 6, 'sólo ' + vers.length + ' entradas numeradas');
   assert.equal(new Set(vers).size, 1, 'hay versiones mezcladas: ' + [...new Set(vers)].join(', '));
-  // Y es la que se está publicando.
-  assert.match(leer('src/sidebar-v2.js'), new RegExp("const VERSION = '" + vers[0] + "';"),
-    'el manual dice ' + vers[0] + ' y el VERSION del panel dice otra cosa');
+  // Y no puede ser del futuro. Antes esto exigía que fuera IGUAL al VERSION del panel,
+  // y estaba mal: una entrada del manual lleva la versión en la que salió y se queda con
+  // ella. Al PR siguiente —que no tocó Galpón— el test se ponía rojo solo.
+  const actual = parseInt((/const VERSION = 'V(\d+)';/.exec(leer('src/sidebar-v2.js')) || [, 0])[1], 10);
+  const dice = parseInt(vers[0].slice(1), 10);
+  assert.ok(dice <= actual, 'el manual dice ' + vers[0] + ' y el panel va en V' + actual);
 });
 
 // ── 3 · SIN BARRA DE DESPLAZAMIENTO LATERAL ───────────────────────────────

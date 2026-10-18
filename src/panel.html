@@ -6480,94 +6480,167 @@ input[type=number]{-moz-appearance:textfield;appearance:textfield}
      doce celdas arranca en JUL. Si alguien la lee como enero, un productor de melón pasa
      a ser de invierno.
      ═══════════════════════════════════════════════════════════════════════════════════ -->
-<div class="sec sg-mod" id="sec-contactos">
+<div class="sec sg-mod ct-ui" id="sec-contactos">
   <style>
     /* SIN BARRA DE DESPLAZAMIENTO LATERAL (CLAUDE.md): anchos fijos, se parte sólo el
        nombre y el motivo —lo de largo variable— y el resto se trunca con ellipsis. */
-    #sec-contactos .pa-tbl{table-layout:fixed;width:100%;max-width:98vw}
-    #sec-contactos .pa-tbl th,#sec-contactos .pa-tbl td{
+    .ct-ui .pa-tbl{table-layout:fixed;width:100%;max-width:98vw}
+    .ct-ui .pa-tbl th,.ct-ui .pa-tbl td{
       white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding:7px 8px;font-size:12.5px;
       vertical-align:top}
-    #sec-contactos .pa-tbl td.ct-w,#sec-contactos .pa-tbl th.ct-w{white-space:normal;word-break:break-word}
-    #sec-contactos .ab-table-wrap{overflow-x:hidden !important}
-    @media(max-width:900px){ #sec-contactos .ab-table-wrap{overflow-x:auto !important}
-                             #sec-contactos .pa-tbl{table-layout:auto} }
+    .ct-ui .pa-tbl td.ct-w,.ct-ui .pa-tbl th.ct-w{white-space:normal;word-break:break-word}
+    .ct-ui .ab-table-wrap{overflow-x:hidden !important}
+    @media(max-width:900px){ .ct-ui .ab-table-wrap{overflow-x:auto !important}
+                             .ct-ui .pa-tbl{table-layout:auto} }
 
     /* LA CAJA DE BÚSQUEDA ES LA PANTALLA. Grande a propósito: es lo primero y casi lo
        único que se usa. */
-    #sec-contactos .ct-buscar{display:flex;gap:9px;align-items:center;margin-bottom:11px}
-    #sec-contactos .ct-buscar input{
+    .ct-ui .ct-buscar{display:flex;gap:9px;align-items:center;margin-bottom:11px}
+    .ct-ui .ct-buscar input{
       flex:1;padding:12px 15px;font-size:15px;border:2px solid var(--bor);border-radius:10px;
       background:var(--bg)}
-    #sec-contactos .ct-buscar input:focus{border-color:var(--burg);outline:none}
-    #sec-contactos .ct-f{display:flex;gap:9px;flex-wrap:wrap;align-items:flex-end;margin-bottom:13px}
-    #sec-contactos .ct-f label{font-size:11px;color:var(--mut);display:block;margin-bottom:3px}
-    #sec-contactos .ct-f select,#sec-contactos .ct-f input{
+    .ct-ui .ct-buscar input:focus{border-color:var(--burg);outline:none}
+    .ct-ui .ct-f{display:flex;gap:9px;flex-wrap:wrap;align-items:flex-end;margin-bottom:13px}
+    .ct-ui .ct-f label{font-size:11px;color:var(--mut);display:block;margin-bottom:3px}
+    .ct-ui .ct-f select,.ct-ui .ct-f input{
       padding:5px 8px;border:1px solid var(--bor);border-radius:6px;background:var(--bg);font-size:12.5px}
 
     /* El MOTIVO por el que apareció cada uno. Sin esto hay que abrir la ficha para
        entender por qué está en la lista — y con una búsqueda que mira adentro de las
        charlas, "por qué apareció" no es nada obvio. */
-    #sec-contactos .ct-why{display:inline-block;padding:1px 7px;border-radius:9px;font-size:10px;
+    .ct-ui .ct-why{display:inline-block;padding:1px 7px;border-radius:9px;font-size:10px;
       font-weight:600;background:var(--bor);color:var(--mut);margin-right:4px}
-    #sec-contactos .ct-why-ch{background:#fff3cd;color:#7a5c00}
-    #sec-contactos .ct-ext{font-size:11px;color:var(--mut);font-style:italic;margin-top:3px;
+    .ct-ui .ct-why-ch{background:#fff3cd;color:#7a5c00}
+    .ct-ui .ct-ext{font-size:11px;color:var(--mut);font-style:italic;margin-top:3px;
       white-space:normal;line-height:1.45}
 
-    #sec-contactos .ct-chip{display:inline-block;padding:1px 7px;border-radius:9px;font-size:10.5px;font-weight:600}
-    #sec-contactos .ct-ch-prov{background:#e6f4ea;color:#1a7f37}
-    #sec-contactos .ct-ch-cli{background:#e7f0fd;color:#14539a}
-    #sec-contactos .ct-ch-amb{background:#f3e8fd;color:#6b2fa0}
-    #sec-contactos .ct-ch-otro{background:var(--bor);color:var(--mut)}
+    .ct-ui .ct-chip{display:inline-block;padding:1px 7px;border-radius:9px;font-size:10.5px;font-weight:600}
+    .ct-ui .ct-ch-prov{background:#e6f4ea;color:#1a7f37}
+    .ct-ui .ct-ch-cli{background:#e7f0fd;color:#14539a}
+    .ct-ui .ct-ch-amb{background:#f3e8fd;color:#6b2fa0}
+    .ct-ui .ct-ch-otro{background:var(--bor);color:var(--mut)}
     /* Lo pendiente se ve en la lista, no sólo en la bandeja: el que busca a alguien por
        otro motivo tiene que enterarse ahí mismo de que le quedó algo colgado con él. */
-    #sec-contactos .ct-pend{background:#fdecec;color:#b3261e;font-weight:700}
+    .ct-ui .ct-pend{background:#fdecec;color:#b3261e;font-weight:700}
 
     /* LA GRILLA DE DOCE MESES. Arranca en JULIO. Se usa en tres lugares —la lista, la
        ficha y el editor— con la misma forma, para que las franjas se comparen de un
        vistazo sin tener que leer los nombres de los meses cada vez. */
-    #sec-contactos .ct-mg{display:inline-flex;gap:1px;vertical-align:middle}
-    #sec-contactos .ct-mg i{
+    .ct-ui .ct-mg{display:inline-flex;gap:1px;vertical-align:middle}
+    .ct-ui .ct-mg i{
       width:13px;height:15px;border-radius:2px;background:var(--bor);display:inline-block;
       font-size:0;cursor:default}
-    #sec-contactos .ct-mg i.on{background:var(--burg)}
+    .ct-ui .ct-mg i.on{background:var(--burg)}
     /* La franja OBSERVADA —lo que efectivamente le compramos— va en otro tono, para que
        se distinga de la DECLARADA a simple vista. Son dos cosas distintas y el hueco
        entre ellas es justamente la oportunidad. */
-    #sec-contactos .ct-mg.ct-obs i.on{background:#9ab;opacity:.85}
-    #sec-contactos .ct-mg-ed i{width:26px;height:22px;cursor:pointer;font-size:9px;
+    .ct-ui .ct-mg.ct-obs i.on{background:#9ab;opacity:.85}
+    .ct-ui .ct-mg-ed i{width:26px;height:22px;cursor:pointer;font-size:9px;
       line-height:22px;text-align:center;color:var(--mut);font-style:normal}
-    #sec-contactos .ct-mg-ed i.on{color:#fff}
-    #sec-contactos .ct-mlbl{display:inline-flex;gap:1px;font-size:8px;color:var(--mut)}
-    #sec-contactos .ct-mlbl span{width:13px;text-align:center}
+    .ct-ui .ct-mg-ed i.on{color:#fff}
+    .ct-ui .ct-mlbl{display:inline-flex;gap:1px;font-size:8px;color:var(--mut)}
+    .ct-ui .ct-mlbl span{width:13px;text-align:center}
 
-    #sec-contactos .ct-pane{display:none} #sec-contactos .ct-pane.on{display:block}
-    #sec-contactos .ct-tab{padding:7px 13px;cursor:pointer;font-size:12.5px;font-weight:600;
+    .ct-ui .ct-pane{display:none} .ct-ui .ct-pane.on{display:block}
+    .ct-ui .ct-tab{padding:7px 13px;cursor:pointer;font-size:12.5px;font-weight:600;
       border-radius:6px;color:var(--mut)}
-    #sec-contactos .ct-tab.on{background:var(--burg);color:#fff}
-    #sec-contactos .ct-tab .ct-cnt{margin-left:5px;background:var(--bor);border-radius:9px;
+    .ct-ui .ct-tab.on{background:var(--burg);color:#fff}
+    .ct-ui .ct-tab .ct-cnt{margin-left:5px;background:var(--bor);border-radius:9px;
       padding:0 6px;font-size:10.5px}
-    #sec-contactos .ct-tab.on .ct-cnt{background:rgba(255,255,255,.25);color:#fff}
+    .ct-ui .ct-tab.on .ct-cnt{background:rgba(255,255,255,.25);color:#fff}
 
     /* LA FICHA */
-    #sec-contactos .ct-fbox{border:1px solid var(--bor);border-radius:11px;padding:15px;margin-bottom:13px}
-    #sec-contactos .ct-fbox h4{margin:0 0 9px;font-size:12px;text-transform:uppercase;
+    .ct-ui .ct-fbox{border:1px solid var(--bor);border-radius:11px;padding:15px;margin-bottom:13px}
+    .ct-ui .ct-fbox h4{margin:0 0 9px;font-size:12px;text-transform:uppercase;
       letter-spacing:.4px;color:var(--mut)}
-    #sec-contactos .ct-medio{display:flex;align-items:center;gap:8px;padding:5px 0;font-size:13px}
-    #sec-contactos .ct-medio .ct-pref{color:#d4a017;cursor:pointer;font-size:14px}
-    #sec-contactos .ct-charla{border-left:3px solid var(--bor);padding:3px 0 9px 11px;margin-bottom:10px}
-    #sec-contactos .ct-charla.ct-c-pend{border-left-color:#b3261e}
-    #sec-contactos .ct-charla .ct-c-hd{font-size:11px;color:var(--mut);margin-bottom:3px}
-    #sec-contactos .ct-charla .ct-c-tx{font-size:13px;line-height:1.5;white-space:pre-wrap}
-    #sec-contactos .ct-charla .ct-c-paso{font-size:12px;margin-top:5px;padding:4px 8px;
+    .ct-ui .ct-medio{display:flex;align-items:center;gap:8px;padding:5px 0;font-size:13px}
+    .ct-ui .ct-medio .ct-pref{color:#d4a017;cursor:pointer;font-size:14px}
+    .ct-ui .ct-charla{border-left:3px solid var(--bor);padding:3px 0 9px 11px;margin-bottom:10px}
+    .ct-ui .ct-charla.ct-c-pend{border-left-color:#b3261e}
+    .ct-ui .ct-charla .ct-c-hd{font-size:11px;color:var(--mut);margin-bottom:3px}
+    .ct-ui .ct-charla .ct-c-tx{font-size:13px;line-height:1.5;white-space:pre-wrap}
+    .ct-ui .ct-charla .ct-c-paso{font-size:12px;margin-top:5px;padding:4px 8px;
       border-radius:6px;background:var(--bg2,#f6f6f6)}
     /* El hueco: lo que ofrece y nunca le compramos. Es la conclusión del módulo, así que
        se pinta — no se deja como una fila más de una tabla. */
-    #sec-contactos .ct-hueco{background:#fff8e6;border:1px solid #f0d9a0;border-radius:9px;
+    .ct-ui .ct-hueco{background:#fff8e6;border:1px solid #f0d9a0;border-radius:9px;
       padding:11px 13px;font-size:12.5px;line-height:1.6}
-    #sec-contactos .ct-nd{font-size:11.5px;color:var(--mut);font-style:italic}
-    #sec-contactos .ct-vacio{text-align:center;padding:34px;color:var(--mut);font-size:13px}
-  </style>
+    .ct-ui .ct-nd{font-size:11.5px;color:var(--mut);font-style:italic}
+    .ct-ui .ct-vacio{text-align:center;padding:34px;color:var(--mut);font-size:13px}
+  
+    /* ── SE EDITA DONDE SE LEE ──────────────────────────────────────────────────
+       Un campo se ve como texto hasta que se lo toca; ahí se vuelve un casillero y
+       se guarda solo al salir. Es UN mecanismo para los dieciocho campos de las dos
+       fichas, no dieciocho formularios: el que escriba el campo diecinueve mañana
+       lo tiene gratis.
+
+       El subrayado punteado es todo el aviso de que se puede tocar. Un botón de
+       lápiz por campo convertiría la ficha en una grilla de botones, que es lo
+       contrario de lo que se pidió. */
+    .ct-ui .ct-cmp{display:inline-block;vertical-align:top;margin:0 16px 9px 0;max-width:100%}
+    .ct-ui .ct-cmp > label{display:block;font-size:10.5px;color:var(--mut);
+      text-transform:uppercase;letter-spacing:.3px;margin-bottom:1px}
+    .ct-ui .ct-cv{font-size:13.5px;line-height:1.5;cursor:text;border-radius:5px;
+      padding:2px 5px;margin-left:-5px;border-bottom:1px dashed transparent;
+      min-width:70px;min-height:21px;white-space:pre-wrap;word-break:break-word}
+    .ct-ui .ct-cv:hover{background:var(--bg2,#f4f4f4);border-bottom-color:var(--bor)}
+    .ct-ui .ct-cv.ct-cv-vacio{color:var(--mut);font-style:italic}
+    .ct-ui .ct-cmp-ancho{display:block;margin-right:0}
+    .ct-ui .ct-cmp input,.ct-ui .ct-cmp select,.ct-ui .ct-cmp textarea{
+      font-size:13.5px;padding:3px 6px;border:1px solid var(--burg);border-radius:5px;
+      background:var(--bg);color:var(--fg);font-family:inherit;width:100%;box-sizing:border-box}
+    .ct-ui .ct-cmp textarea{line-height:1.5;resize:vertical}
+    /* Mientras guarda y cuando falla. Un campo que vuelve solo al valor viejo sin
+       decir nada se lee como «no se guardó porque sí». */
+    .ct-ui .ct-cv.ct-guardando{opacity:.5}
+    .ct-ui .ct-cmp-err{font-size:11px;color:#b3261e;margin-top:2px}
+
+    /* ── EL ENCABEZADO DE LA FICHA ──────────────────────────────────────────────
+       Lo primero que se mira: quién es, de qué empresa, y cómo se lo llama. Antes
+       había que bajar dos bloques para encontrar el teléfono. */
+    .ct-ui .ct-hero{display:flex;gap:15px;align-items:flex-start;padding:15px;
+      border:1px solid var(--bor);border-radius:11px;margin-bottom:13px;
+      background:var(--bg2,#fafafa)}
+    .ct-ui .ct-hero-d{flex:1;min-width:0}
+    .ct-ui .ct-hero-n{font-size:19px;font-weight:700;line-height:1.25}
+    .ct-ui .ct-hero-s{font-size:12.5px;color:var(--mut);margin-top:2px}
+    /* Los teléfonos como chapas que se tocan: en el celular abre el teléfono, en la
+       compu abre WhatsApp o el mail. Eran un renglón de texto para copiar a mano. */
+    .ct-ui .ct-tel{display:inline-flex;align-items:center;gap:5px;padding:3px 10px;
+      border-radius:16px;background:var(--bg);border:1px solid var(--bor);
+      font-size:12.5px;text-decoration:none;color:var(--fg);margin:4px 5px 0 0}
+    .ct-ui .ct-tel:hover{border-color:var(--burg)}
+    .ct-ui .ct-tel.ct-tel-pref{border-color:var(--burg);font-weight:600}
+
+    /* ── LA TARJETA ─────────────────────────────────────────────────────────────
+       Una foto y nada más: ni lector ni OCR. Lo que se tipea igual son el teléfono y
+       el mail, que es lo que el buscador tiene que encontrar — una foto no se busca.
+       Está para lo otro: la cara del logo, el cargo impreso, el teléfono que no se
+       cargó todavía. */
+    .ct-ui .ct-tj{width:148px;flex-shrink:0}
+    .ct-ui .ct-tj img{width:148px;height:92px;object-fit:cover;border-radius:8px;
+      border:1px solid var(--bor);cursor:zoom-in;display:block;background:var(--bg)}
+    .ct-ui .ct-tj-no{width:148px;height:92px;border:1px dashed var(--bor);border-radius:8px;
+      display:flex;align-items:center;justify-content:center;text-align:center;
+      font-size:10.5px;color:var(--mut);cursor:pointer;line-height:1.35;padding:6px;
+      box-sizing:border-box}
+    .ct-ui .ct-tj-no:hover{border-color:var(--burg);color:var(--burg)}
+    .ct-ui .ct-tj-pie{font-size:10px;color:var(--mut);margin-top:4px;text-align:center}
+    .ct-ui .ct-tj-pie a{cursor:pointer;text-decoration:underline}
+    .ct-ui #ct-foto-body img{max-width:100%;max-height:78vh;border-radius:8px;display:block}
+
+    /* ── LO QUE SE AGREGA, AGREGADO ACÁ MISMO ───────────────────────────────────
+       El renglón en blanco que aparece abajo de la lista. Reemplaza a las ventanas
+       y a los prompt() del navegador, que no se podían ni corregir ni cancelar. */
+    .ct-ui .ct-alta{border:1px dashed var(--bor);border-radius:9px;padding:11px;
+      margin-top:9px;background:var(--bg2,#fafafa)}
+    .ct-ui .ct-alta label{font-size:10.5px;color:var(--mut);display:block;margin-bottom:2px}
+    .ct-ui .ct-alta input,.ct-ui .ct-alta select,.ct-ui .ct-alta textarea{
+      padding:5px 8px;border:1px solid var(--bor);border-radius:6px;background:var(--bg);
+      color:var(--fg);font-size:12.5px;font-family:inherit}
+    .ct-ui .ct-alta-f{display:flex;gap:9px;flex-wrap:wrap;align-items:flex-end}
+    .ct-ui .ct-alta-err{font-size:11.5px;color:#b3261e;margin-top:6px}
+</style>
 
   <div class="ph">
     <div><div class="ph-t">📇 Contactos comerciales</div>
@@ -6630,9 +6703,54 @@ input[type=number]{-moz-appearance:textfield;appearance:textfield}
     <div id="ct-emp-lista"></div>
   </div>
 
+</div>
+
+<!-- ══════════════════════════════════════════════════════════════════════════════════
+     LAS VENTANAS DE CONTACTOS
+     ══════════════════════════════════════════════════════════════════════════════════
+     Andy, 18/10/2026: «no me convence mucho cómo está armado, como que se van abriendo
+     ventanas una abajo de otra para modificar; prefiero algo más como que entrás a la
+     ficha y ahí ves todo, más visual, y de ahí mismo editás».
+
+     Eran SEIS, y encadenadas: se abría la ficha de la empresa, de ahí «✏️ Editar» abría
+     otra ventana encima, y para corregir un producto una tercera. Cada salto perdía de
+     vista lo que se estaba mirando, que es justo lo que una ficha tiene que mostrar.
+
+     Ahora son DOS fichas y UNA de alta, y la regla es:
+
+       · DESDE LA LISTA se abre una ventana —es la regla de CLAUDE.md, y es lo que avisa
+         que se dejó de mirar y se empezó a cargar.
+       · DENTRO DE LA FICHA no se abre ninguna más: todo se edita donde se lee.
+
+     La ventana de alta pide lo mínimo (un nombre, y la empresa) y abre la ficha. El resto
+     —cargo, zona, teléfonos, productos, notas— se completa ahí adentro, con el contexto
+     a la vista.
+
+     ── Y VIVEN FUERA DE #sec-contactos ───────────────────────────────────────────────
+     Estaban ADENTRO, que es lo que CLAUDE.md prohíbe. Dos consecuencias reales:
+
+     1. El audit de ventanas no las veía. Mira `ab-modal-overlay`, `mb` y las escritas a
+        mano; éstas eran `ab-modal` a secas, una cuarta familia. Eran las 6 únicas de las
+        161 de esa familia que colgaban de una pantalla — el audit ahora las mira.
+     2. Se abrían con style.display, no con la clase `on`, así que quedaban afuera del
+        MutationObserver que reparte el z-index. Una ventana abierta desde adentro de otra
+        podía quedar DETRÁS. Ahora usan `on` y entran al mecanismo de siempre.
+
+     El CSS de la ficha está scopeado en `.ct-ui`, no en `#sec-contactos`: si no, moverlas
+     afuera las dejaba sin un solo estilo. -->
+
   <!-- ── LA FICHA DE UNA PERSONA ──────────────────────────────────────────────────── -->
-  <div class="ab-modal" id="ct-ficha-modal" style="display:none">
-    <div class="ab-modal-c" style="max-width:860px;width:96vw">
+
+  <!-- Las listas sugeridas de los casilleros de Contactos. Van acá, afuera y una sola vez:
+       antes se reescribían adentro de cada formulario, y como los formularios se fueron, se
+       habrían ido con ellos. Las llena ctOpciones(). -->
+  <datalist id="ct-dl-zonas" data-perm="1"></datalist>
+  <datalist id="ct-dl-vend"  data-perm="1"></datalist>
+  <datalist id="ct-dl-prod"  data-perm="1"></datalist>
+  <datalist id="ct-dl-emp"   data-perm="1"></datalist>
+
+  <div class="ab-modal-overlay ct-ui" id="ct-ficha-modal">
+    <div class="ab-modal" style="width:min(880px,96vw);max-width:96vw">
       <div class="mhd"><div class="mht" id="ct-ficha-tit">Contacto</div>
         <button class="mcl" onclick="ctFichaCerrar()">×</button></div>
       <div id="ct-ficha-body"></div>
@@ -6642,67 +6760,44 @@ input[type=number]{-moz-appearance:textfield;appearance:textfield}
   <!-- ── LA FICHA DE UNA EMPRESA ──────────────────────────────────────────────────────
        La cuenta comercial: qué produce, quiénes trabajan ahí y todo lo que se habló con
        cualquiera de ellos. Es la que se mira antes de salir a buscar fruta. -->
-  <div class="ab-modal" id="ct-emp-modal" style="display:none">
-    <div class="ab-modal-c" style="max-width:900px;width:96vw">
+  <div class="ab-modal-overlay ct-ui" id="ct-emp-modal">
+    <div class="ab-modal" style="width:min(920px,96vw);max-width:96vw">
       <div class="mhd"><div class="mht" id="ct-emp-tit">Empresa</div>
         <button class="mcl" onclick="ctEmpCerrar()">×</button></div>
       <div id="ct-emp-body"></div>
     </div>
   </div>
 
-  <!-- ── ALTA / EDICIÓN DE UNA PERSONA ───────────────────────────────────────────────
-       De la persona son su nombre, su cargo y sus notas. El resto es de la empresa. -->
-  <div class="ab-modal" id="ct-ed-modal" style="display:none">
-    <div class="ab-modal-c" style="max-width:620px;width:96vw">
-      <div class="mhd"><div class="mht" id="ct-ed-tit">Nueva persona</div>
-        <button class="mcl" onclick="ctEdCerrar()">×</button></div>
-      <div id="ct-ed-body"></div>
+  <!-- ── EL ALTA ──────────────────────────────────────────────────────────────────────
+       UNA sola ventana para las dos altas, porque son el mismo gesto: poner un nombre y
+       entrar a la ficha. Pide lo mínimo a propósito — un formulario largo acá obliga a
+       tener todos los datos juntos justo cuando no se los tiene, que es cuando alguien te
+       acaba de dar una tarjeta. -->
+  <div class="ab-modal-overlay ct-ui sg-mod" id="ct-nuevo-modal">
+    <div class="ab-modal" style="width:min(560px,96vw);max-width:96vw">
+      <div class="mhd"><div class="mht" id="ct-nv-tit">Nueva persona</div>
+        <button class="mcl" onclick="ctNvCerrar()">×</button></div>
+      <div id="ct-nv-body"></div>
+      <div id="ct-nv-error" style="display:none;margin-top:11px" class="ojo"></div>
       <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:14px">
-        <button class="btn bo" onclick="ctEdCerrar()">Cancelar</button>
-        <button class="btn bb" onclick="ctEdGuardar()">Guardar</button>
+        <button class="btn bo" onclick="ctNvCerrar()">Cancelar</button>
+        <button class="btn bb" onclick="ctNvGuardar()">Crear y abrir la ficha</button>
       </div>
     </div>
   </div>
 
-  <!-- ── ALTA / EDICIÓN DE UNA EMPRESA ───────────────────────────────────────────── -->
-  <div class="ab-modal" id="ct-eemp-modal" style="display:none">
-    <div class="ab-modal-c" style="max-width:720px;width:96vw">
-      <div class="mhd"><div class="mht" id="ct-eemp-tit">Nueva empresa</div>
-        <button class="mcl" onclick="ctEEmpCerrar()">×</button></div>
-      <div id="ct-eemp-body"></div>
-      <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:14px">
-        <button class="btn bo" onclick="ctEEmpCerrar()">Cancelar</button>
-        <button class="btn bb" onclick="ctEEmpGuardar()">Guardar</button>
-      </div>
+  <!-- ── LA TARJETA, EN GRANDE ────────────────────────────────────────────────────────
+       Un visor de sólo lectura. Éste SÍ se cierra al clic afuera, y no contradice la
+       regla: lo que la regla protege es el trabajo cargado a medias, y acá no hay nada
+       que perder — se está mirando una foto. -->
+  <div class="ab-modal-overlay ct-ui" id="ct-foto-modal" onclick="ctFotoCerrar()">
+    <div class="ab-modal" style="width:auto;max-width:min(1000px,96vw)"
+         onclick="event.stopPropagation()">
+      <div class="mhd"><div class="mht" id="ct-foto-tit">Tarjeta</div>
+        <button class="mcl" onclick="ctFotoCerrar()">×</button></div>
+      <div id="ct-foto-body" style="text-align:center"></div>
     </div>
   </div>
-
-  <!-- ── UNA CHARLA ───────────────────────────────────────────────────────────────── -->
-  <div class="ab-modal" id="ct-ch-modal" style="display:none">
-    <div class="ab-modal-c" style="max-width:600px;width:96vw">
-      <div class="mhd"><div class="mht" id="ct-ch-tit">Qué se habló</div>
-        <button class="mcl" onclick="ctChCerrar()">×</button></div>
-      <div id="ct-ch-body"></div>
-      <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:14px">
-        <button class="btn bo" onclick="ctChCerrar()">Cancelar</button>
-        <button class="btn bb" onclick="ctChGuardar()">Guardar</button>
-      </div>
-    </div>
-  </div>
-
-  <!-- ── QUÉ PRODUCE LA EMPRESA ───────────────────────────────────────────────────── -->
-  <div class="ab-modal" id="ct-pr-modal" style="display:none">
-    <div class="ab-modal-c" style="max-width:560px;width:96vw">
-      <div class="mhd"><div class="mht" id="ct-pr-tit">Qué produce</div>
-        <button class="mcl" onclick="ctPrCerrar()">×</button></div>
-      <div id="ct-pr-body"></div>
-      <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:14px">
-        <button class="btn bo" onclick="ctPrCerrar()">Cancelar</button>
-        <button class="btn bb" onclick="ctPrGuardar()">Guardar</button>
-      </div>
-    </div>
-  </div>
-</div>
 
 
 <!-- ═══════════════════════════════════════════════════════════════════════════════════
@@ -6929,7 +7024,7 @@ input[type=number]{-moz-appearance:textfield;appearance:textfield}
        Un formulario de carga no vive metido en una pantalla: se abre en una ventana. Que
        se abra es lo que le dice al operador que dejó de mirar y empezó a cargar. -->
   <div class="ab-modal-overlay sg-mod" id="gal-rango-modal">
-    <div class="ab-modal-c" style="max-width:520px;width:96vw">
+    <div class="ab-modal" style="width:min(520px,96vw);max-width:96vw">
       <div class="mhd"><div class="mht" id="gal-rango-tit">Tarjetas de la cuadrilla</div>
         <button class="mcl" onclick="galRangoCerrar()">×</button></div>
       <div class="sgr-card">
@@ -6955,7 +7050,7 @@ input[type=number]{-moz-appearance:textfield;appearance:textfield}
        Tres maneras, que son tres momentos: la tanda de una cuadrilla al empezar la
        temporada, un rango a mano, o las sueltas que se perdieron. -->
   <div class="ab-modal-overlay sg-mod" id="gal-print-modal">
-    <div class="ab-modal-c" style="max-width:560px;width:96vw">
+    <div class="ab-modal" style="width:min(560px,96vw);max-width:96vw">
       <div class="mhd"><div class="mht">Imprimir tarjetas</div>
         <button class="mcl" onclick="galPrintCerrar()">×</button></div>
       <div class="sgr-card">
@@ -26034,14 +26129,62 @@ SG_MANUAL.contactos = { titulo: 'Contactos comerciales', html:
   + '<b>qué produce o compra, con sus meses</b>.</p>'
   + '<p><b>En la ficha de la PERSONA:</b> su cargo, sus teléfonos y mails, sus notas, y las '
   + 'charlas que se tuvieron con ella.</p>'
-  + '<div class="ojo">Si algo está en el lugar que no va, se nota: el formulario de una '
-  + 'persona <b>no pide la zona</b>, y el de la empresa <b>no pide el cargo</b>. Buscar '
-  + 'cualquiera de las dos cosas en la ventana equivocada es la señal de que ese dato es del '
-  + 'otro nivel.</div>'
+  + '<div class="ojo">Si algo está en el lugar que no va, se nota: en la ficha de una '
+  + 'persona <b>no hay dónde poner la zona</b>, y en la de la empresa <b>no hay dónde '
+  + 'poner el cargo</b>. Buscar cualquiera de las dos cosas en la ficha equivocada es la '
+  + 'señal de que ese dato es del otro nivel.</div>'
   + '<p>La ficha de una persona <b>muestra lo de su empresa en un bloque aparte</b>, con el '
-  + 'aviso de que eso es de la cuenta y no de ella, y con el botón <b>Ver la empresa</b> '
+  + 'aviso de que eso es de la cuenta y no de ella, y con el botón <b>Abrir la ficha de la empresa</b> '
   + 'para ir a tocarlo. Abajo lista <b>quién más trabaja ahí</b>, con su teléfono y un clic '
   + 'para abrirlo.</p>'
+
+  + '<h3>✏️ Se edita donde se lee <span class="ver">V1097</span></h3>'
+  + '<p><b>No hay botón de Editar, y no se abre ninguna ventana más.</b> Entrás a la ficha '
+  + 'y cada dato se toca: el cargo, la zona, las notas, el nombre. El campo se vuelve un '
+  + 'casillero, se escribe, y <b>se guarda solo al salir</b>.</p>'
+  + '<ul>'
+  + '<li><b>Guarda al salir del casillero</b>, y sólo si cambió algo. También con '
+  + '<b>Enter</b>. En los cuadros de varias líneas Enter hace un renglón nuevo, así que '
+  + 'ahí se guarda saliendo o con <b>Ctrl+Enter</b>.</li>'
+  + '<li><b>Escape</b> cancela y deja el valor que estaba.</li>'
+  + '<li>Si algo falla, el aviso aparece <b>debajo del campo</b> y el valor viejo vuelve. '
+  + 'Un campo que se revierte sin decir nada se lee como que no se guardó porque sí.</li>'
+  + '<li>Se guarda <b>un campo por vez</b>: lo que un compañero cambió mientras tanto en '
+  + 'otro campo no se pisa.</li>'
+  + '</ul>'
+  + '<div class="ojo"><b>Por qué cambió.</b> Andy, 18/10/2026: <i>«se van abriendo ventanas '
+  + 'una abajo de otra para modificar; prefiero algo más como que entrás a la ficha y ahí '
+  + 'ves todo, más visual, y de ahí mismo editás»</i>. Eran seis ventanas encadenadas: la '
+  + 'ficha de la empresa, encima el formulario para editarla, y encima otro para corregir '
+  + 'un producto. Cada salto tapaba justamente lo que uno estaba mirando.</div>'
+  + '<p><b>La única ventana que queda es la de ALTA</b>, y se abre desde la lista. Pide lo '
+  + 'mínimo —un nombre, y la empresa— y abre la ficha. El resto se completa ahí adentro: '
+  + 'pedir los catorce campos juntos obliga a tener todos los datos justo cuando no se los '
+  + 'tiene, que es cuando alguien te acaba de dar una tarjeta en una reunión.</p>'
+  + '<p>Lo que se <b>agrega</b> —un teléfono, otra persona de la finca, un producto, una '
+  + 'charla— aparece como un renglón en blanco <b>debajo de la lista</b>, con su Cancelar. '
+  + 'El teléfono y el mail se pedían antes con el cuadrito gris del navegador, que no se '
+  + 'puede corregir ni deja elegir si el número es de WhatsApp.</p>'
+
+  + '<h3>🪪 La foto de la tarjeta <span class="ver">V1097</span></h3>'
+  + '<p>Arriba a la izquierda de la ficha de cada persona hay un lugar para <b>la foto de '
+  + 'su tarjeta</b>. Se toca, se elige la foto —o se la saca con la cámara desde el '
+  + 'celular— y queda. Click en la foto para verla en grande.</p>'
+  + '<ul>'
+  + '<li><b>Una por persona.</b> Subir otra reemplaza la anterior: la tarjeta es una, y una '
+  + 'galería obliga a elegir cuál mirar cada vez que se abre la ficha.</li>'
+  + '<li>En la lista de <b>quiénes trabajan acá</b> de la empresa, el 🪪 marca a los que '
+  + 'tienen la tarjeta guardada.</li>'
+  + '<li><b>Sacarla borra la foto de verdad.</b> El teléfono y el mail quedan: están '
+  + 'tipeados aparte.</li>'
+  + '</ul>'
+  + '<div class="ojo"><b>La foto NO reemplaza cargar el teléfono.</b> No hay lector ni nada '
+  + 'que la lea: <b>el buscador no puede mirar adentro de una foto</b>. Si el número está '
+  + 'sólo en la tarjeta, buscarlo no lo encuentra y la ficha dice «sin teléfono». La foto '
+  + 'está para lo otro: el logo, el cargo impreso, el dato que todavía no se cargó.</div>'
+  + '<p>La foto <b>no queda en una dirección pública</b>: se pide con la sesión puesta, como '
+  + 'el resto de la agenda. Es el teléfono directo de un comprador o de un productor, que es '
+  + 'justamente lo que este módulo no deja al alcance de cualquiera que tenga un usuario.</p>'
 
   + '<h3>🔎 Se busca escribiendo, y el buscador entra a las charlas <span class="ver">V1090</span></h3>'
   + '<p>La caja de arriba mira <b>los dos niveles a la vez</b>: el nombre de la persona, el de '
@@ -52825,6 +52968,17 @@ async function ctOpciones() {
   llenar('ct-f-zona', j.zonas, 'Todas');
   llenar('ct-f-prod', j.productos, 'Todos');
   llenar('ct-f-vend', j.vendedores, 'Cualquiera');
+  // Y las listas sugeridas de los casilleros de las fichas. Son <datalist>, no <select>:
+  // no tienen opción vacía y no filtran — sugieren mientras se escribe, que es lo que hace
+  // falta cuando el valor puede ser uno nuevo (una zona donde todavía no compramos).
+  const sugerir = (id, lista) => {
+    const e = document.getElementById(id);
+    if (e) e.innerHTML = (lista || []).map(x => '<option>' + ctEsc(x) + '</option>').join('');
+  };
+  sugerir('ct-dl-zonas', j.zonas);
+  sugerir('ct-dl-vend',  j.vendedores);
+  sugerir('ct-dl-prod',  j.productos);
+  sugerir('ct-dl-emp',   j.empresas);
   const m = document.getElementById('ct-f-mes');
   if (m) {
     m.innerHTML = '<option value="">Cualquier mes</option>'
@@ -52891,12 +53045,160 @@ async function ctHecho(cid, chid) {
 }
 
 // ── LA FICHA DE UNA PERSONA ───────────────────────────────────────────────────────────
+/* ══════════════════════════════════════════════════════════════════════════════════
+   SE EDITA DONDE SE LEE
+   ══════════════════════════════════════════════════════════════════════════════════
+   Andy, 18/10/2026: «prefiero algo más como que entrás a la ficha y ahí ves todo, más
+   visual, y de ahí mismo editás».
+
+   Antes cada corrección abría otra ventana encima de la ficha: cambiar el cargo de una
+   persona eran tres clics y perder de vista la ficha que se estaba mirando. Y el
+   formulario traía los catorce campos juntos para cambiar uno.
+
+   Ahora un campo se ve como texto hasta que se lo toca; ahí se vuelve un casillero y se
+   guarda solo al salir. UN mecanismo para los dieciocho campos de las dos fichas, no
+   dieciocho formularios — el campo diecinueve que alguien escriba mañana lo tiene gratis.
+
+   ── QUÉ SE GUARDA Y CUÁNDO ────────────────────────────────────────────────────────
+   Al salir del casillero, y sólo si cambió. Escape cancela. Enter guarda en los de una
+   línea; en los de varias Enter es un renglón nuevo y se guarda saliendo o con Ctrl+Enter.
+
+   No hay botón «Guardar». Es a propósito: con guardado por campo, un botón no tendría
+   qué guardar la mitad de las veces, y la otra mitad invita a pensar que lo que se tipeó
+   antes de apretarlo no se guardó.                                                      */
+
+// Los campos que cambian algo más que su propio renglón: el nombre está en el título y
+// en la lista de atrás, el tipo pinta la chapa, la empresa mueve la persona de cuenta.
+// Ésos repintan la ficha entera; el resto sólo se actualiza a sí mismo, para no
+// destruirle el casillero al que ya hizo clic en el campo siguiente.
+const CT_CMP_REPINTA = ['nombre', 'tipo', 'empresa'];
+
+// Un campo editable. `ent` es 'persona' o 'empresa' — de ahí sale a qué dirección pegarle.
+function ctCampo(ent, id, campo, valor, opts) {
+  const o = opts || {};
+  const v = valor == null ? '' : String(valor);
+  const vacio = o.vacio || 'sin cargar';
+  return '<div class="ct-cmp' + (o.ancho ? ' ct-cmp-ancho' : '') + '"'
+    + (o.estilo ? ' style="' + o.estilo + '"' : '')
+    + ' data-ent="' + ent + '" data-id="' + id + '" data-campo="' + campo + '"'
+    + ' data-tipo="' + (o.tipo || 'text') + '"'
+    + (o.lista ? ' data-lista="' + o.lista + '"' : '')
+    + ' data-vacio="' + ctEsc(vacio) + '">'
+    + (o.etiqueta === false ? '' : '<label>' + ctEsc(o.etiqueta || campo) + '</label>')
+    + '<div class="ct-cv' + (v ? '' : ' ct-cv-vacio') + '" data-v="' + ctEsc(v) + '"'
+    +   ' title="Tocá para editar" onclick="ctCmpEditar(this)">'
+    +   (v ? ctEsc(o.ver ? o.ver(v) : v) : ctEsc(vacio)) + '</div></div>';
+}
+
+function ctCmpEditar(el) {
+  const box = el.parentNode;
+  if (box.querySelector('input,select,textarea')) return;   // ya está abierto
+  const tipo = box.dataset.tipo || 'text';
+  const v = el.dataset.v || '';
+
+  let inp;
+  if (tipo === 'textarea') {
+    inp = document.createElement('textarea');
+    inp.rows = Math.max(3, Math.min(12, v.split('\n').length + 1));
+  } else if (tipo === 'select') {
+    inp = document.createElement('select');
+    // Por ahora el único select de una ficha es el tipo de empresa, y sus etiquetas ya
+    // viven en CT_CHIP: repetirlas acá sería tener dos listas que se van a separar.
+    inp.innerHTML = Object.keys(CT_CHIP).map(t =>
+      '<option value="' + t + '"' + (t === v ? ' selected' : '') + '>' + CT_CHIP[t][1] + '</option>').join('');
+  } else {
+    inp = document.createElement('input');
+    inp.type = tipo === 'date' ? 'date' : 'text';
+    if (box.dataset.lista) inp.setAttribute('list', box.dataset.lista);
+  }
+  inp.value = v;
+  // El casillero toma el ancho que ya ocupaba el texto, para que la ficha no salte.
+  if (!box.classList.contains('ct-cmp-ancho') && tipo !== 'textarea') {
+    inp.style.width = Math.max(120, Math.min(420, el.offsetWidth + 40)) + 'px';
+  }
+  el.style.display = 'none';
+  box.appendChild(inp);
+  inp.focus();
+  if (inp.select) inp.select();
+
+  let cerrado = false;
+  const salir = (guardar) => {
+    if (cerrado) return;
+    cerrado = true;
+    const nuevo = inp.value;
+    inp.remove();
+    el.style.display = '';
+    if (guardar) ctCmpGuardar(box, el, nuevo);
+  };
+  inp.addEventListener('blur', () => salir(true));
+  inp.addEventListener('keydown', (ev) => {
+    if (ev.key === 'Escape') { ev.preventDefault(); salir(false); }
+    // En el de varias líneas, Enter es un renglón nuevo: se guarda saliendo o con Ctrl.
+    if (ev.key === 'Enter' && (tipo !== 'textarea' || ev.ctrlKey || ev.metaKey)) {
+      ev.preventDefault(); salir(true);
+    }
+  });
+  if (tipo === 'select') inp.addEventListener('change', () => salir(true));
+}
+
+async function ctCmpGuardar(box, el, valor) {
+  const campo = box.dataset.campo;
+  const previo = el.dataset.v || '';
+  if (valor === previo) return;                 // no cambió: no se pide nada
+
+  const ent = box.dataset.ent, id = box.dataset.id;
+  el.classList.add('ct-guardando');
+  const err = box.querySelector('.ct-cmp-err');
+  if (err) err.remove();
+
+  try {
+    const cuerpo = {};
+    cuerpo[campo] = valor;
+    const url = ent === 'empresa' ? '/empresas/' + id : '/' + id;
+    const j = await ctApi(url, { method: 'PATCH', body: JSON.stringify(cuerpo) });
+    el.classList.remove('ct-guardando');
+
+    if (ent === 'empresa' && j.empresa) CT_EMP = j.empresa;
+    if (ent === 'persona' && j.contacto) CT_FICHA = j.contacto;
+
+    // La lista de atrás queda vieja si no se la refresca, y es lo primero que se ve al
+    // cerrar la ficha. No se espera: no cambia nada de lo que está abierto.
+    ctRecargar();
+    CT_OPC = null;
+
+    if (CT_CMP_REPINTA.includes(campo)) {
+      if (ent === 'empresa') { ctPintarEmpresa(CT_EMP); if (CT_FICHA) ctAbrir(CT_FICHA.id); }
+      else ctPintarFicha(CT_FICHA);
+      return;
+    }
+    el.dataset.v = valor;
+    el.className = 'ct-cv' + (valor ? '' : ' ct-cv-vacio');
+    el.textContent = valor || (box.dataset.vacio || 'sin cargar');
+  } catch (e) {
+    // Volver al valor viejo sin decir nada se lee como «no se guardó porque sí», y el que
+    // acaba de tipear media nota no se entera de que la perdió.
+    // No hace falta restaurar nada: el texto a la vista NUNCA se tocó. Sólo se lo
+    // actualiza al guardar bien, así que al fallar ya está mostrando el valor viejo.
+    // Antes había acá un el.innerHTML = anterior que no hacía nada — lo encontró una
+    // mutación: borrar esa línea no ponía en rojo ningún test, y no podía, porque entre
+    // la captura y la restauración no pasaba nada que cambiara el innerHTML.
+    el.classList.remove('ct-guardando');
+    const m = document.createElement('div');
+    m.className = 'ct-cmp-err';
+    m.textContent = e.message;
+    box.appendChild(m);
+  }
+}
+
+/* ══════════════════════════════════════════════════════════════════════════════════
+   LA FICHA DE UNA PERSONA
+   ══════════════════════════════════════════════════════════════════════════════════ */
 async function ctAbrir(id) {
-  const m = document.getElementById('ct-ficha-modal');
   const b = document.getElementById('ct-ficha-body');
-  m.style.display = 'flex';
+  document.getElementById('ct-ficha-modal').classList.add('on');
   b.innerHTML = '<div class="ct-vacio">Cargando…</div>';
   try {
+    await ctOpciones().catch(() => {});
     const j = await ctApi('/' + id);
     CT_FICHA = j.contacto;
     ctPintarFicha(j.contacto);
@@ -52905,32 +53207,64 @@ async function ctAbrir(id) {
   }
 }
 function ctFichaCerrar() {
-  document.getElementById('ct-ficha-modal').style.display = 'none';
+  document.getElementById('ct-ficha-modal').classList.remove('on');
   CT_FICHA = null;
+}
+
+// Un teléfono o un mail como chapa que se toca: en el celular abre el teléfono, en la
+// compu WhatsApp o el mail. Eran un renglón de texto para copiar a mano.
+function ctMedioLink(m) {
+  const v = String(m.valor || '');
+  if (m.tipo === 'mail') return 'mailto:' + v;
+  const n = v.replace(/[^\d+]/g, '');
+  if (m.tipo === 'whatsapp') return 'https://wa.me/' + n.replace(/^\+/, '');
+  return 'tel:' + n;
 }
 
 function ctPintarFicha(c) {
   const e = c.empresa;
   document.getElementById('ct-ficha-tit').innerHTML =
-    ctEsc(c.nombre) + (c.cargo ? ' <span class="ct-nd" style="font-style:normal">· '
-      + ctEsc(c.cargo) + '</span>' : '')
-    + (e ? ' ' + ctChip(e.tipo) : '');
+    ctEsc(c.nombre) + (e ? ' <span class="ct-nd" style="font-style:normal">· '
+      + ctEsc(e.nombre) + '</span> ' + ctChip(e.tipo) : '');
 
   let h = '';
 
-  // ── LA PERSONA ──
-  h += '<div class="ct-fbox"><h4>La persona</h4>'
-    + '<div style="font-size:13px;line-height:1.7">'
-    + (c.cargo ? '<b>' + ctEsc(c.cargo) + '</b>' + (e ? ' en ' + ctEsc(e.nombre) : '') + '<br>' : '')
-    + (c.notas ? '<div style="margin-top:7px;white-space:pre-wrap">' + ctEsc(c.notas) + '</div>' : '')
-    + (!c.cargo && !c.notas ? '<span class="ct-nd">Sin cargo ni notas.</span>' : '')
-    + '</div>'
-    + '<div style="margin-top:10px"><button class="btn bo bs" onclick="ctEditar()">✏️ Editar</button> '
-    + '<button class="btn bo bs" onclick="ctBaja()">Dar de baja</button></div></div>';
+  // ── EL ENCABEZADO ──
+  // Quién es, de dónde, y cómo se lo llama — todo arriba. Antes el teléfono estaba dos
+  // bloques más abajo y había que bajar para la pregunta más frecuente de la pantalla.
+  h += '<div class="ct-hero">' + ctTarjetaHtml(c)
+    + '<div class="ct-hero-d">'
+    + ctCampo('persona', c.id, 'nombre', c.nombre, { etiqueta: false,
+        estilo: 'display:block;margin:0 0 2px' })
+    + ctCampo('persona', c.id, 'cargo', c.cargo, { etiqueta: 'Cargo',
+        vacio: 'sin cargo' })
+    + (e ? '<div class="ct-hero-s" style="margin-top:4px">'
+        + '<a class="ct-link" onclick="ctEmpAbrir(' + e.id + ')"><b>' + ctEsc(e.nombre) + '</b></a>'
+        + (e.zona ? ' · 📍 ' + ctEsc(e.zona) + (e.localidad ? ', ' + ctEsc(e.localidad) : '') : '')
+        + (e.vendedor ? ' · la atiende ' + ctEsc(e.vendedor) : '') + '</div>' : '');
 
-  h += '<div class="ct-fbox"><h4>Cómo se lo ubica</h4>';
+  // Los medios, como chapas, acá arriba.
+  h += '<div style="margin-top:7px">';
   if (!c.medios.length) {
-    h += '<div class="ct-nd">Sin teléfono ni mail. Es lo primero que hace falta.</div>';
+    h += '<span class="ct-nd">Sin teléfono ni mail. Es lo primero que hace falta.</span>';
+  } else {
+    h += c.medios.map(m => {
+      const ico = m.tipo === 'mail' ? '✉️' : (m.tipo === 'whatsapp' ? '💬' : '📞');
+      return '<a class="ct-tel' + (m.preferido ? ' ct-tel-pref' : '') + '"'
+        + ' href="' + ctEsc(ctMedioLink(m)) + '" target="_blank" rel="noopener"'
+        + ' title="' + (m.preferido ? 'El preferido' : 'Abrir') + '">'
+        + ico + ' ' + ctEsc(m.valor) + '</a>';
+    }).join('');
+  }
+  h += '</div></div></div>';
+
+  // ── CÓMO SE LO UBICA ──
+  // La chapa de arriba abre; acá se administra. Separado a propósito: marcar el preferido
+  // y borrar un número son gestos raros, y mezclarlos con el link hace que un clic para
+  // llamar borre un teléfono.
+  h += '<div class="ct-fbox"><h4>Teléfonos y mails</h4>';
+  if (!c.medios.length) {
+    h += '<div class="ct-nd">Ninguno todavía.</div>';
   } else {
     for (const m of c.medios) {
       const ico = m.tipo === 'mail' ? '✉️' : (m.tipo === 'whatsapp' ? '💬' : '📞');
@@ -52945,25 +53279,32 @@ function ctPintarFicha(c) {
         + '</div>';
     }
   }
-  h += '<div style="margin-top:9px"><button class="btn bo bs" onclick="ctMedioNuevo()">+ Teléfono o mail</button></div></div>';
+  // Se agrega ACÁ, no en un prompt() del navegador: un prompt no se puede corregir, no
+  // tiene «cancelar» de verdad y no deja elegir si es WhatsApp.
+  h += '<div id="ct-medio-alta"></div>'
+    + '<div style="margin-top:9px"><button class="btn bo bs" onclick="ctMedioAlta()">'
+    + '+ Teléfono o mail</button></div></div>';
+
+  // ── NOTAS DE LA PERSONA ──
+  h += '<div class="ct-fbox"><h4>Notas de ' + ctEsc(c.nombre.split(' ')[0]) + '</h4>'
+    + ctCampo('persona', c.id, 'notas', c.notas, { tipo: 'textarea', ancho: true,
+        etiqueta: false, vacio: 'Tocá acá para anotar algo de esta persona.' })
+    + '<div class="ct-nd" style="margin-top:5px">Lo que es de la empresa —la zona, qué'
+    + ' produce, el vínculo con la planilla— se edita en la ficha de la empresa.</div></div>';
 
   // ── SU EMPRESA ──
-  // Va en un bloque APARTE y con su propio botón de editar, no mezclado con lo de arriba:
-  // lo que está acá es de la finca y lo tocan también los compañeros. Mezclarlo haría creer
-  // que corregir la ventana del melón desde la ficha de Juan la corrige para Juan solo.
+  // Va en un bloque APARTE: lo que está acá es de la cuenta y lo tocan también los
+  // compañeros. Mezclarlo haría creer que corregir la ventana del melón desde la ficha de
+  // Juan la corrige para Juan solo.
   if (e) {
     h += '<div class="ct-fbox ct-emp-box"><h4>Su empresa <span class="ct-nd">· lo de acá es de la cuenta,'
       + ' no de ' + ctEsc(c.nombre.split(' ')[0]) + '</span></h4>'
       + '<div style="display:flex;align-items:center;gap:9px;flex-wrap:wrap">'
       + '<b style="font-size:14px">' + ctEsc(e.nombre) + '</b>' + ctChip(e.tipo)
-      + (e.zona ? '<span class="ct-nd">📍 ' + ctEsc(e.zona)
-          + (e.localidad ? ', ' + ctEsc(e.localidad) : '') + '</span>' : '')
-      + (e.vendedor ? '<span class="ct-nd">la atiende ' + ctEsc(e.vendedor) + '</span>' : '')
-      + '<button class="btn bo bs" style="margin-left:auto" onclick="ctEmpAbrir(' + e.id + ')">Ver la empresa</button>'
-      + '</div>'
-      + (e.etiquetas ? '<div class="ct-nd" style="margin-top:5px">🏷️ ' + ctEsc(e.etiquetas) + '</div>' : '');
+      + (e.etiquetas ? '<span class="ct-nd">🏷️ ' + ctEsc(e.etiquetas) + '</span>' : '')
+      + '<button class="btn bb bs" style="margin-left:auto" onclick="ctEmpAbrir(' + e.id + ')">'
+      + 'Abrir la ficha de la empresa</button></div>';
 
-    // Qué produce la finca.
     if (e.productos && e.productos.length) {
       h += '<div style="margin-top:11px;margin-bottom:4px">' + ctMesesRotulo()
          + ' <span class="ct-nd">el año arranca en JULIO</span></div>'
@@ -52973,32 +53314,35 @@ function ctPintarFicha(c) {
              + (p.ventana ? ' <span class="ct-nd">· ' + ctEsc(p.ventana) + '</span>' : '')
              + '</div>').join('');
     } else {
-      h += '<div class="ct-nd" style="margin-top:9px">Todavía no se cargó qué produce o compra.</div>';
+      h += '<div class="ct-nd" style="margin-top:9px">Todavía no se cargó qué produce o compra.'
+         + ' Se carga en la ficha de la empresa.</div>';
     }
 
-    // Quiénes más trabajan ahí. Es la mitad del pedido de Pablo: poder saltar del dueño al
-    // encargado sin volver a buscarlo en la lista.
+    // Quiénes más trabajan ahí: poder saltar del dueño al encargado sin volver a buscarlo.
     const otros = (e.personas || []).filter(p => p.id !== c.id);
     if (otros.length) {
       h += '<div style="margin-top:12px"><h4 style="margin-bottom:5px">Quién más trabaja ahí</h4>'
         + otros.map(p => '<div style="font-size:12.5px;padding:2px 0">'
+            + (p.tiene_tarjeta ? '🪪 ' : '')
             + '<a class="ct-link" onclick="ctAbrir(' + p.id + ')">' + ctEsc(p.nombre) + '</a>'
             + (p.cargo ? ' <span class="ct-nd">' + ctEsc(p.cargo) + '</span>' : '')
             + (p.medio_principal ? ' <span class="ct-nd">· ' + ctEsc(p.medio_principal) + '</span>' : '')
             + '</div>').join('') + '</div>';
     }
-    h += '<div style="margin-top:10px"><button class="btn bo bs" onclick="ctPersonaNuevaEn(' + e.id + ')">'
-      + '+ Otra persona de ' + ctEsc(e.nombre) + '</button></div>';
     h += '</div>';
   } else {
     h += '<div class="ct-hueco">Esta persona no tiene empresa. Eso no debería pasar: lo que'
       + ' produce y el vínculo con la planilla cuelgan de la empresa, así que sin ella la'
-      + ' ficha no puede mostrarlos. Se arregla con <b>Editar</b>.</div>';
+      + ' ficha no puede mostrarlos. Se arregla poniéndole una abajo.'
+      + '<div style="margin-top:8px">'
+      + ctCampo('persona', c.id, 'empresa', '', { etiqueta: 'Empresa',
+          lista: 'ct-dl-emp', vacio: 'escribí el nombre de la finca' })
+      + '</div></div>';
   }
 
   // ── LO QUE LA BASE YA SABE ──
-  // Va SEPARADO de lo declarado, no mezclado. El hueco entre las dos cosas —ofrece brócoli
-  // y nunca le compramos brócoli— es justamente la oportunidad, y mezclándolas no se ve.
+  // Va SEPARADO de lo declarado. El hueco entre las dos cosas —ofrece brócoli y nunca le
+  // compramos brócoli— es justamente la oportunidad, y mezclándolas no se ve.
   h += ctBloquesObservado(c, e);
 
   // ── QUÉ SE HABLÓ ──
@@ -53012,13 +53356,16 @@ function ctPintarFicha(c) {
           + ' <button class="btn bo bs" onclick="ctHecho(' + c.id + ',' + p.id + ')">✓</button>').join('<br>')
       + '</div>';
   }
+  h += '<div id="ct-charla-alta"></div>'
+    + '<div style="margin:0 0 11px"><button class="btn bb bs" onclick="ctChAlta()">'
+    + '+ Anotar una charla</button></div>';
   h += c.charlas.length ? c.charlas.map(ch => ctCharlaHtml(ch, c.id)).join('')
     : '<div class="ct-nd">Todavía no se anotó ninguna charla con esta persona.</div>';
-  h += '<div style="margin-top:9px"><button class="btn bb bs" onclick="ctChNuevo()">+ Anotar una charla</button></div></div>';
+  h += '</div>';
 
-  // LO QUE SE HABLÓ CON LOS OTROS DE LA MISMA EMPRESA.
-  // Aparte, porque no es lo mismo: antes de llamar a Juan hay que saber que el martes el
-  // encargado ya dijo que no hay fruta, pero no se le puede atribuir a Juan lo que dijo otro.
+  // LO QUE SE HABLÓ CON LOS OTROS DE LA MISMA EMPRESA. Aparte, porque no es lo mismo:
+  // antes de llamar a Juan hay que saber que el martes el encargado ya dijo que no hay
+  // fruta, pero no se le puede atribuir a Juan lo que dijo otro.
   if (c.charlas_empresa && c.charlas_empresa.length) {
     h += '<div class="ct-fbox"><h4>Y lo que se habló con los otros de '
       + ctEsc(e ? e.nombre : 'la empresa') + '</h4>'
@@ -53026,8 +53373,85 @@ function ctPintarFicha(c) {
       + '</div>';
   }
 
+  h += '<div style="text-align:right;margin-top:4px">'
+    + '<button class="btn bo bs" onclick="ctBaja()">Dar de baja a ' + ctEsc(c.nombre) + '</button></div>';
+
   document.getElementById('ct-ficha-body').innerHTML = h;
 }
+
+/* ══ LA FOTO DE LA TARJETA ══════════════════════════════════════════════════════════
+   Una foto y nada más: ni lector, ni OCR. Lo que se tipea igual son el teléfono y el
+   mail — una foto no se busca, y el buscador es la mitad de este módulo. Está para lo
+   otro: el logo, el cargo impreso, el número que todavía no se cargó.
+
+   La imagen se pide a /api/sg/contactos/:id/tarjeta, que pasa por sesión. No es una
+   carpeta pública: la foto de una tarjeta ES el teléfono directo de un comprador. */
+function ctTarjetaUrl(id) {
+  // El sello de tiempo es un rompe-caché: sin él, reemplazar la foto sigue mostrando la
+  // vieja hasta que alguien recargue el panel.
+  return '/api/sg/contactos/' + id + '/tarjeta?t=' + (CT_TJ_V[id] || 0);
+}
+const CT_TJ_V = {};
+
+function ctTarjetaHtml(c) {
+  let h = '<div class="ct-tj">';
+  if (c.tiene_tarjeta) {
+    h += '<img src="' + ctTarjetaUrl(c.id) + '" alt="Tarjeta de ' + ctEsc(c.nombre) + '"'
+      +  ' onclick="ctFotoAbrir()" title="Ver en grande">'
+      +  '<div class="ct-tj-pie"><a onclick="ctTarjetaElegir()">cambiar</a> · '
+      +  '<a onclick="ctTarjetaBorrar()">sacar</a></div>';
+  } else {
+    h += '<div class="ct-tj-no" onclick="ctTarjetaElegir()">🪪<br>Agregar la foto<br>de la tarjeta</div>';
+  }
+  h += '<input type="file" id="ct-tj-file" accept="image/*" style="display:none"'
+    +  ' onchange="ctTarjetaSubir(this)"></div>';
+  return h;
+}
+function ctTarjetaElegir() {
+  const f = document.getElementById('ct-tj-file');
+  if (f) { f.value = ''; f.click(); }
+}
+async function ctTarjetaSubir(input) {
+  if (!CT_FICHA || !input.files || !input.files[0]) return;
+  const fd = new FormData();
+  fd.append('tarjeta', input.files[0]);
+  const caja = input.parentNode;
+  caja.style.opacity = '.5';
+  try {
+    // Sin content-type a mano: FormData le pone el suyo con el separador, y pisarlo con
+    // application/json deja a multer sin poder leer el archivo.
+    const r = await fetch('/api/sg/contactos/' + CT_FICHA.id + '/tarjeta',
+      { method: 'POST', body: fd });
+    const j = await r.json().catch(() => ({ ok: false, error: 'respuesta ilegible' }));
+    if (!r.ok || !j.ok) throw new Error(j.error || ('error ' + r.status));
+    CT_TJ_V[CT_FICHA.id] = Date.now();
+    CT_FICHA = j.contacto;
+    ctPintarFicha(CT_FICHA);
+    if (CT_EMP) ctEmpAbrir(CT_EMP.id);
+  } catch (e) {
+    caja.style.opacity = '';
+    alert('No se pudo subir la foto: ' + e.message);
+  }
+}
+async function ctTarjetaBorrar() {
+  if (!CT_FICHA) return;
+  if (!confirm('¿Sacar la foto de la tarjeta de ' + CT_FICHA.nombre + '?\n\n'
+    + 'El teléfono y el mail quedan: están cargados aparte.')) return;
+  try {
+    const j = await ctApi('/' + CT_FICHA.id + '/tarjeta', { method: 'DELETE' });
+    CT_FICHA = j.contacto;
+    ctPintarFicha(CT_FICHA);
+    if (CT_EMP) ctEmpAbrir(CT_EMP.id);
+  } catch (e) { alert('No se pudo: ' + e.message); }
+}
+function ctFotoAbrir() {
+  if (!CT_FICHA || !CT_FICHA.tiene_tarjeta) return;
+  document.getElementById('ct-foto-tit').textContent = 'Tarjeta de ' + CT_FICHA.nombre;
+  document.getElementById('ct-foto-body').innerHTML =
+    '<img src="' + ctTarjetaUrl(CT_FICHA.id) + '" alt="Tarjeta">';
+  document.getElementById('ct-foto-modal').classList.add('on');
+}
+function ctFotoCerrar() { document.getElementById('ct-foto-modal').classList.remove('on'); }
 
 // Una charla dibujada. Igual en los tres lugares donde aparece —la ficha de la persona, la
 // de sus compañeros y la de la empresa— para que se lean igual.
@@ -53113,13 +53537,17 @@ function ctBloquesObservado(d, e) {
   return h;
 }
 
-// ── LA FICHA DE UNA EMPRESA ───────────────────────────────────────────────────────────
+
+
+/* ══════════════════════════════════════════════════════════════════════════════════
+   LA FICHA DE UNA EMPRESA
+   ══════════════════════════════════════════════════════════════════════════════════ */
 async function ctEmpAbrir(id) {
-  const m = document.getElementById('ct-emp-modal');
   const b = document.getElementById('ct-emp-body');
-  m.style.display = 'flex';
+  document.getElementById('ct-emp-modal').classList.add('on');
   b.innerHTML = '<div class="ct-vacio">Cargando…</div>';
   try {
+    await ctOpciones().catch(() => {});
     const j = await ctApi('/empresas/' + id);
     CT_EMP = j.empresa;
     ctPintarEmpresa(j.empresa);
@@ -53128,25 +53556,45 @@ async function ctEmpAbrir(id) {
   }
 }
 function ctEmpCerrar() {
-  document.getElementById('ct-emp-modal').style.display = 'none';
+  document.getElementById('ct-emp-modal').classList.remove('on');
   CT_EMP = null;
 }
 
 function ctPintarEmpresa(e) {
   document.getElementById('ct-emp-tit').innerHTML = ctEsc(e.nombre) + ' ' + ctChip(e.tipo);
+  const C = (campo, valor, opts) => ctCampo('empresa', e.id, campo, valor, opts);
   let h = '';
 
+  // ── LA CUENTA ──
+  // Los ocho campos, todos editables donde se leen. Antes era un bloque de texto con un
+  // botón que abría otra ventana con los ocho juntos para corregir uno.
+  h += '<div class="ct-hero"><div class="ct-hero-d">'
+    + C('nombre', e.nombre, { etiqueta: false, estilo: 'display:block;margin:0 0 6px' })
+    + '<div>'
+    + C('tipo', e.tipo, { etiqueta: 'Es', tipo: 'select',
+        ver: (v) => (CT_CHIP[v] || CT_CHIP.otro)[1] })
+    + C('zona', e.zona, { etiqueta: 'Zona', lista: 'ct-dl-zonas' })
+    + C('localidad', e.localidad, { etiqueta: 'Localidad' })
+    + C('vendedor', e.vendedor, { etiqueta: 'La atiende', lista: 'ct-dl-vend' })
+    + '</div></div></div>';
+
   h += '<div class="ct-fbox"><h4>La cuenta</h4>'
-    + '<div style="font-size:13px;line-height:1.7">'
-    + (e.zona ? '📍 ' + ctEsc(e.zona) + (e.localidad ? ', ' + ctEsc(e.localidad) : '') + '<br>' : '')
-    + (e.vendedor ? 'La atiende <b>' + ctEsc(e.vendedor) + '</b><br>' : '')
-    + (e.etiquetas ? '🏷️ ' + ctEsc(e.etiquetas) + '<br>' : '')
-    + (e.proveedor_nombre ? 'En la planilla, como proveedor: <b>' + ctEsc(e.proveedor_nombre) + '</b><br>' : '')
-    + (e.cliente_nombre ? 'En la planilla, como cliente: <b>' + ctEsc(e.cliente_nombre) + '</b><br>' : '')
-    + (e.notas ? '<div style="margin-top:7px;white-space:pre-wrap">' + ctEsc(e.notas) + '</div>' : '')
+    + C('etiquetas', e.etiquetas, { etiqueta: 'Etiquetas', ancho: true,
+        vacio: 'confiable, paga a 30, no manda fruta chica…' })
+    + '<div class="ct-nd" style="margin:-4px 0 11px">Texto libre, separado por comas. El'
+    + ' buscador las mira: es para preguntar después por algo que no tiene campo propio.</div>'
+    // ── EL VÍNCULO CON LA PLANILLA ES POR NOMBRE ──
+    + '<div>'
+    + C('proveedor_nombre', e.proveedor_nombre, { etiqueta: 'En la planilla, como proveedor',
+        vacio: 'sin vincular' })
+    + C('cliente_nombre', e.cliente_nombre, { etiqueta: 'En la planilla, como cliente',
+        vacio: 'sin vincular' })
     + '</div>'
-    + '<div style="margin-top:10px"><button class="btn bo bs" onclick="ctEEmpEditar()">✏️ Editar</button> '
-    + '<button class="btn bo bs" onclick="ctEmpBaja()">Dar de baja</button></div></div>';
+    + '<div class="ct-nd" style="margin:-4px 0 11px">Es lo que trae a la ficha lo que de'
+    + ' verdad le compramos o le vendimos. Tiene que estar escrito igual que en la planilla.</div>'
+    + C('notas', e.notas, { tipo: 'textarea', ancho: true, etiqueta: 'Notas',
+        vacio: 'Tocá acá para anotar algo de esta cuenta.' })
+    + '</div>';
 
   // ── QUIÉNES TRABAJAN ACÁ ──
   // Con el teléfono de cada uno: la pregunta al abrir la ficha de una finca es «a quién
@@ -53160,7 +53608,7 @@ function ctPintarEmpresa(e) {
       + '<th style="width:24%">Cómo se lo ubica</th><th style="width:16%">Última charla</th>'
       + '<th style="width:10%">&nbsp;</th></tr></thead><tbody>';
     for (const p of e.personas) {
-      h += '<tr><td class="ct-w"><b>' + ctEsc(p.nombre) + '</b>'
+      h += '<tr><td class="ct-w">' + (p.tiene_tarjeta ? '🪪 ' : '') + '<b>' + ctEsc(p.nombre) + '</b>'
         + (p.activo ? '' : ' <span class="ct-nd">(inactivo)</span>') + '</td>'
         + '<td>' + (p.cargo ? ctEsc(p.cargo) : '<span class="ct-nd">—</span>') + '</td>'
         + '<td title="' + ctEsc(p.medio_principal || '') + '">'
@@ -53174,11 +53622,13 @@ function ctPintarEmpresa(e) {
     }
     h += '</tbody></table></div>';
   }
-  h += '<div style="margin-top:9px"><button class="btn bo bs" onclick="ctPersonaNuevaEn(' + e.id + ')">'
+  h += '<div id="ct-persona-alta"></div>'
+    + '<div style="margin-top:9px"><button class="btn bo bs" onclick="ctPersonaAlta()">'
     + '+ Persona</button></div></div>';
 
   // ── QUÉ PRODUCE: LO DECLARADO ──
-  // Acá se carga y se corrige, UNA VEZ para toda la finca. Es el cambio que pidió Pablo.
+  // Se carga y se corrige UNA VEZ para toda la finca. Cada renglón se abre ACÁ MISMO en
+  // vez de en otra ventana: corregir un mes era abrir un modal arriba del modal.
   h += '<div class="ct-fbox"><h4>Qué produce, y cuándo <span class="ct-nd">· lo que nos dijo</span></h4>';
   if (!e.productos.length) {
     h += '<div class="ct-nd">Nada cargado todavía.</div>';
@@ -53197,12 +53647,13 @@ function ctPintarEmpresa(e) {
         + '<td>' + (p.ventana ? ctEsc(p.ventana) : '<span class="ct-nd">sin definir</span>') + '</td>'
         + '<td>' + (p.volumen ? ctEsc(p.volumen) : '<span class="ct-nd">—</span>') + '</td>'
         + '<td style="text-align:right;white-space:nowrap">'
-        +   '<button class="btn bo bs" onclick="ctPrEditar(' + p.id + ')">✏️</button> '
+        +   '<button class="btn bo bs" onclick="ctPrAlta(' + p.id + ')">✏️</button> '
         +   '<button class="btn bo bs" onclick="ctPrBorrar(' + p.id + ')">×</button></td></tr>';
     }
     h += '</tbody></table></div>';
   }
-  h += '<div style="margin-top:9px"><button class="btn bo bs" onclick="ctPrNuevo()">+ Producto</button></div>'
+  h += '<div id="ct-pr-alta"></div>'
+    + '<div style="margin-top:9px"><button class="btn bo bs" onclick="ctPrAlta(null)">+ Producto</button></div>'
     + '<div class="ct-nd" style="margin-top:6px">Se carga una vez para toda la empresa: todas'
     + ' las personas de acá ven lo mismo.</div></div>';
 
@@ -53221,277 +53672,161 @@ function ctPintarEmpresa(e) {
           + ' <button class="btn bo bs" onclick="ctHecho(' + p.contacto_id + ',' + p.id + ')">✓</button>').join('<br>')
       + '</div>';
   }
+  // La charla es DE UNA PERSONA, siempre: la dijo alguien con nombre y apellido. Por eso
+  // acá no hay botón para anotar una — se anota en la ficha de quien habló.
   h += (e.charlas && e.charlas.length)
     ? e.charlas.map(ch => ctCharlaHtml(ch, ch.contacto_id, true)).join('')
-    : '<div class="ct-nd">Todavía no se anotó ninguna charla con nadie de esta empresa.</div>';
+    : '<div class="ct-nd">Todavía no se anotó ninguna charla con nadie de esta empresa.'
+      + ' Se anotan en la ficha de cada persona: la charla la tuvo alguien.</div>';
   h += '</div>';
+
+  h += '<div style="text-align:right;margin-top:4px">'
+    + '<button class="btn bo bs" onclick="ctEmpBaja()">Dar de baja a ' + ctEsc(e.nombre) + '</button></div>';
 
   document.getElementById('ct-emp-body').innerHTML = h;
 }
 
-// ── ALTA Y EDICIÓN DE UNA PERSONA ─────────────────────────────────────────────────────
-// De la persona son su nombre, su cargo y sus notas. El resto es de la empresa, y se toca
-// en la ficha de la empresa — por eso este formulario es corto.
-function ctNuevo() { ctEdAbrir(null, null); }
-function ctEditar() { if (CT_FICHA) ctEdAbrir(CT_FICHA, null); }
-// Desde la ficha de una empresa: la empresa viene puesta y no se puede confundir.
-function ctPersonaNuevaEn(empId) { ctEdAbrir(null, empId); }
+/* ══ LO QUE SE AGREGA, AGREGADO ACÁ MISMO ═══════════════════════════════════════════
+   Los cuatro «+» de las dos fichas abren un renglón en blanco DEBAJO de la lista, no
+   una ventana encima. Dos de ellos eran prompt() del navegador, que no se puede
+   corregir, no tiene cancelar de verdad y no deja elegir si el número es WhatsApp. */
 
-async function ctEdAbrir(c, empId) {
-  await ctOpciones().catch(() => {});
-  CT_ED = c;
-  const emp = empId || (c && c.empresa_id) || null;
-  const empNombre = (c && c.empresa && c.empresa.nombre)
-    || (emp && CT_EMP && CT_EMP.id === emp ? CT_EMP.nombre : '');
-  document.getElementById('ct-ed-tit').textContent = c ? 'Editar persona' : 'Nueva persona';
-  const val = (k) => ctEsc(c ? (c[k] || '') : '');
-
-  document.getElementById('ct-ed-body').innerHTML =
-      '<div class="ct-f" style="margin-bottom:0">'
-    + '<div style="flex:1;min-width:210px"><label>Nombre *</label>'
-    +   '<input id="ct-ed-nombre" style="width:100%" value="' + val('nombre') + '"></div>'
-    + '<div><label>Cargo</label><input id="ct-ed-cargo" value="' + val('cargo') + '"'
-    +   ' placeholder="Dueño, compradora, encargado…"></div>'
-    + '</div>'
-    // ── LA EMPRESA ──
-    // Se escribe el nombre y cae en la que ya existe; si no existe, se crea. Es lo que hace
-    // que cargar a la segunda persona de Giglio no arme una segunda ficha de Giglio.
-    + '<div style="margin-top:11px"><label style="font-size:11px;color:var(--mut)">Empresa *</label>'
-    + '<input id="ct-ed-empresa" style="width:100%;padding:6px 9px;border:1px solid var(--bor);'
-    +   'border-radius:7px;background:var(--bg)" value="' + ctEsc(empNombre) + '" list="ct-dl-emp"'
-    +   ' placeholder="GIGLIO HNOS SRL">'
-    + '<datalist id="ct-dl-emp">'
-    +   ((CT_OPC && CT_OPC.empresas) || []).map(x => '<option>' + ctEsc(x) + '</option>').join('')
-    + '</datalist>'
-    + '<input type="hidden" id="ct-ed-empid" value="' + (emp || '') + '"></div>'
-    + '<div class="ct-nd" style="margin:3px 0 11px">Si la empresa ya está cargada, escribila'
-    + ' igual y cae en esa misma — <b>el dueño y el encargado de la misma finca comparten'
-    + ' lo que produce</b>, así no queda cargado dos veces. Dejándolo vacío, la empresa es'
-    + ' la persona (sirve para un fletero que trabaja solo).</div>'
-    + '<div><label style="font-size:11px;color:var(--mut)">Notas de esta persona</label>'
-    +   '<textarea id="ct-ed-notas" rows="3" style="width:100%;padding:6px 8px;border:1px solid var(--bor);'
-    +   'border-radius:6px;background:var(--bg);font-size:12.5px;font-family:inherit">' + val('notas') + '</textarea></div>'
-    + '<div class="ct-nd" style="margin-top:3px">Lo que es de la empresa —la zona, qué'
-    + ' produce, el vínculo con la planilla, quién la atiende— se carga en la ficha de la'
-    + ' empresa.</div>';
-  document.getElementById('ct-ed-modal').style.display = 'flex';
+// El renglón se arma, se mete y se le da el foco. Siempre uno solo abierto por lista: el
+// segundo clic en «+» reemplaza al primero en vez de apilar renglones vacíos.
+function ctAltaAbrir(donde, html, foco) {
+  const c = document.getElementById(donde);
+  if (!c) return;
+  c.innerHTML = '<div class="ct-alta">' + html
+    + '<div class="ct-alta-err" id="' + donde + '-err" style="display:none"></div></div>';
+  const f = document.getElementById(foco);
+  if (f) f.focus();
 }
-function ctEdCerrar() { document.getElementById('ct-ed-modal').style.display = 'none'; CT_ED = null; }
-
-async function ctEdGuardar() {
-  const g = (id) => { const e = document.getElementById(id); return e ? e.value.trim() : ''; };
-  if (!g('ct-ed-nombre')) { alert('Falta el nombre.'); return; }
-  const cuerpo = { nombre: g('ct-ed-nombre'), cargo: g('ct-ed-cargo'), notas: g('ct-ed-notas') };
-  // Si el nombre tipeado es el de la empresa que ya venía puesta, se manda el id; si lo
-  // cambió, manda el nombre y el backend resuelve (cae en la que hay, o la crea).
-  const empNombre = g('ct-ed-empresa');
-  const empId = g('ct-ed-empid');
-  try {
-    const nuevo = !CT_ED;
-    let j;
-    if (nuevo) {
-      if (empId && empNombre && CT_OPC && (CT_OPC.empresas || []).includes(empNombre)) {
-        cuerpo.empresa_id = Number(empId);
-      } else if (empNombre) { cuerpo.empresa = empNombre; }
-      j = await ctApi('/', { method:'POST', body: JSON.stringify(cuerpo) });
-    } else {
-      j = await ctApi('/' + CT_ED.id, { method:'PATCH', body: JSON.stringify(cuerpo) });
-    }
-    // El id SE GUARDA ANTES de cerrar: ctEdCerrar() pone CT_ED en null, y pedirle el id
-    // después tira «Cannot read properties of null» — el cambio queda guardado pero la
-    // pantalla no se refresca, así que parece que no se guardó.
-    const quien = nuevo ? j.id : CT_ED.id;
-    ctEdCerrar();
-    CT_OPC = null;                       // pudo aparecer una empresa nueva
-    await ctOpciones().catch(() => {});
-    ctRecargar();
-    if (CT_EMP) ctEmpAbrir(CT_EMP.id);
-    // Recién cargada, lo que sigue es ponerle el teléfono y anotar la charla: se abre la
-    // ficha sola, para no obligar a buscarla de nuevo en la lista.
-    ctAbrir(quien);
-  } catch (e) { alert('No se pudo guardar: ' + e.message); }
+function ctAltaCerrar(donde) {
+  const c = document.getElementById(donde);
+  if (c) c.innerHTML = '';
 }
+function ctAltaError(donde, msg) {
+  const e = document.getElementById(donde + '-err');
+  if (e) { e.textContent = msg; e.style.display = ''; }
+}
+// Ya hay un ctTrim() en el panel, de otra pantalla, y no recorta. Éste sí: los avisos
+// de «falta el nombre» tienen que saltar también cuando se tipearon tres espacios.
+const ctTrim = (id) => { const e = document.getElementById(id); return e ? e.value.trim() : ''; };
 
-async function ctBaja() {
+// ── UN TELÉFONO O UN MAIL ──
+function ctMedioAlta() {
   if (!CT_FICHA) return;
-  // Se avisa qué se pierde de verdad, que no es la ficha: son las charlas.
-  if (!confirm('Dar de baja a ' + CT_FICHA.nombre + '?\n\nSe esconde del buscador. Las '
-    + CT_FICHA.charlas.length + ' charla(s) quedan guardadas.')) return;
-  try {
-    await ctApi('/' + CT_FICHA.id + '/eliminar', { method:'POST' });
-    ctFichaCerrar(); ctRecargar();
-    if (CT_EMP) ctEmpAbrir(CT_EMP.id);
-  } catch (e) { alert('No se pudo: ' + e.message); }
+  ctAltaAbrir('ct-medio-alta',
+      '<div class="ct-alta-f">'
+    + '<div style="flex:1;min-width:170px"><label>Teléfono o mail</label>'
+    +   '<input id="ct-md-valor" style="width:100%" placeholder="2622 45-6789 o juan@finca.com"'
+    +   ' onkeydown="if(event.key===\'Enter\')ctMedioGuardar()"></div>'
+    + '<div><label>Qué es</label><select id="ct-md-tipo">'
+    +   '<option value="">(se adivina)</option><option value="telefono">📞 Teléfono</option>'
+    +   '<option value="whatsapp">💬 WhatsApp</option><option value="mail">✉️ Mail</option></select></div>'
+    + '<div style="flex:1;min-width:130px"><label>Nota</label>'
+    +   '<input id="ct-md-nota" style="width:100%" placeholder="el del galpón"></div>'
+    + '<div><button class="btn bb bs" onclick="ctMedioGuardar()">Agregar</button> '
+    +   '<button class="btn bo bs" onclick="ctAltaCerrar(\'ct-medio-alta\')">Cancelar</button></div>'
+    + '</div>', 'ct-md-valor');
 }
-
-// ── ALTA Y EDICIÓN DE UNA EMPRESA ─────────────────────────────────────────────────────
-function ctEmpNueva() { ctEEmpAbrir(null); }
-function ctEEmpEditar() { if (CT_EMP) ctEEmpAbrir(CT_EMP); }
-
-async function ctEEmpAbrir(e) {
-  await ctOpciones().catch(() => {});
-  CT_EEMP = e;
-  document.getElementById('ct-eemp-tit').textContent = e ? 'Editar empresa' : 'Nueva empresa';
-  const val = (k) => ctEsc(e ? (e[k] || '') : '');
-  const lista = (nombre) => ((CT_OPC && CT_OPC[nombre]) || [])
-    .map(x => '<option>' + ctEsc(x) + '</option>').join('');
-  document.getElementById('ct-eemp-body').innerHTML =
-      '<div class="ct-f" style="margin-bottom:0">'
-    + '<div style="flex:1;min-width:230px"><label>Nombre de la empresa *</label>'
-    +   '<input id="ct-ee-nombre" style="width:100%" value="' + val('nombre') + '"></div>'
-    + '<div><label>Es *</label><select id="ct-ee-tipo">'
-    +   ['proveedor','cliente','ambos','otro'].map(t =>
-          '<option value="' + t + '"' + ((e && e.tipo === t) || (!e && t === 'proveedor') ? ' selected' : '') + '>'
-          + (CT_CHIP[t] ? CT_CHIP[t][1] : t) + '</option>').join('')
-    +   '</select></div></div>'
-    + '<div class="ct-f" style="margin-bottom:0">'
-    + '<div><label>Zona</label><input id="ct-ee-zona" value="' + val('zona') + '" list="ct-dl-zonas">'
-    +   '<datalist id="ct-dl-zonas">' + lista('zonas') + '</datalist></div>'
-    + '<div><label>Localidad</label><input id="ct-ee-localidad" value="' + val('localidad') + '"></div>'
-    + '<div><label>La atiende</label><input id="ct-ee-vendedor" value="' + val('vendedor') + '" list="ct-dl-vend">'
-    +   '<datalist id="ct-dl-vend">' + lista('vendedores') + '</datalist></div>'
-    + '</div>'
-    // ── EL VÍNCULO CON EL PADRÓN ES POR NOMBRE ──
-    // Es como se vincula todo lo comercial en este sistema: la planilla de ventas trae
-    // nombres, no ids. Si no coincide, la ficha lo dice en vez de mostrar cero.
-    + '<div class="ct-f" style="margin-bottom:0;margin-top:6px">'
-    + '<div style="flex:1;min-width:200px"><label>Nombre en la planilla como PROVEEDOR</label>'
-    +   '<input id="ct-ee-prov" style="width:100%" value="' + val('proveedor_nombre') + '"></div>'
-    + '<div style="flex:1;min-width:200px"><label>Nombre en la planilla como CLIENTE</label>'
-    +   '<input id="ct-ee-cli" style="width:100%" value="' + val('cliente_nombre') + '"></div>'
-    + '</div>'
-    + '<div class="ct-nd" style="margin:3px 0 9px">Es lo que trae a la ficha lo que de verdad'
-    + ' le compramos o le vendimos. Tiene que estar escrito igual que en la planilla.</div>'
-    + '<div><label style="font-size:11px;color:var(--mut)">Etiquetas</label>'
-    +   '<input id="ct-ee-etiquetas" style="width:100%;padding:5px 8px;border:1px solid var(--bor);border-radius:6px;background:var(--bg)"'
-    +   ' value="' + val('etiquetas') + '" placeholder="confiable, paga a 30, no manda fruta chica…"></div>'
-    + '<div class="ct-nd" style="margin:3px 0 9px">Texto libre, separado por comas. El buscador'
-    + ' las mira: es para poder preguntar después por algo que no tiene campo propio.</div>'
-    + '<div><label style="font-size:11px;color:var(--mut)">Notas</label>'
-    +   '<textarea id="ct-ee-notas" rows="3" style="width:100%;padding:6px 8px;border:1px solid var(--bor);'
-    +   'border-radius:6px;background:var(--bg);font-size:12.5px;font-family:inherit">' + val('notas') + '</textarea></div>';
-  document.getElementById('ct-eemp-modal').style.display = 'flex';
-}
-function ctEEmpCerrar() { document.getElementById('ct-eemp-modal').style.display = 'none'; CT_EEMP = null; }
-
-async function ctEEmpGuardar() {
-  const g = (id) => { const e = document.getElementById(id); return e ? e.value.trim() : ''; };
-  if (!g('ct-ee-nombre')) { alert('Falta el nombre de la empresa.'); return; }
-  const cuerpo = {
-    nombre: g('ct-ee-nombre'), tipo: g('ct-ee-tipo'), zona: g('ct-ee-zona'),
-    localidad: g('ct-ee-localidad'), vendedor: g('ct-ee-vendedor'),
-    proveedor_nombre: g('ct-ee-prov'), cliente_nombre: g('ct-ee-cli'),
-    etiquetas: g('ct-ee-etiquetas'), notas: g('ct-ee-notas'),
-  };
-  try {
-    const nueva = !CT_EEMP;
-    const j = nueva
-      ? await ctApi('/empresas', { method:'POST', body: JSON.stringify(cuerpo) })
-      : await ctApi('/empresas/' + CT_EEMP.id, { method:'PATCH', body: JSON.stringify(cuerpo) });
-    const cual = nueva ? j.id : CT_EEMP.id;    // antes de cerrar, ver arriba
-    ctEEmpCerrar();
-    CT_OPC = null;
-    await ctOpciones().catch(() => {});
-    ctRecargar();
-    ctEmpAbrir(cual);
-  } catch (e) {
-    // Dos fichas de la misma finca son dos historiales con la mitad de las charlas cada
-    // uno. El backend lo rechaza y dice cuál es la que ya hay: se ofrece abrirla, que es
-    // lo que la persona quería hacer.
-    if (e.datos && e.datos.empresa_id) {
-      if (confirm(e.message + '\n\n¿Abrir la que ya está cargada?')) {
-        ctEEmpCerrar(); ctEmpAbrir(e.datos.empresa_id);
-      }
-      return;
-    }
-    alert('No se pudo guardar: ' + e.message);
-  }
-}
-
-async function ctEmpBaja() {
-  if (!CT_EMP) return;
-  if (!confirm('Dar de baja a ' + CT_EMP.nombre + '?\n\nSe esconde de las listas, con sus '
-    + ((CT_EMP.personas || []).length) + ' persona(s). Nada se borra: los teléfonos y las '
-    + 'charlas quedan.')) return;
-  try {
-    await ctApi('/empresas/' + CT_EMP.id + '/eliminar', { method:'POST' });
-    ctEmpCerrar(); ctFichaCerrar(); ctRecargar();
-  } catch (e) { alert('No se pudo: ' + e.message); }
-}
-
-// ── MEDIOS ────────────────────────────────────────────────────────────────────────────
-async function ctMedioNuevo() {
+async function ctMedioGuardar() {
   if (!CT_FICHA) return;
-  const valor = prompt('Teléfono o mail:');
-  if (!valor || !valor.trim()) return;
-  // El tipo se adivina en vez de preguntarlo: una arroba es un mail y no hay más caso.
-  const tipo = valor.includes('@') ? 'mail' : 'telefono';
+  const valor = ctTrim('ct-md-valor');
+  if (!valor) return ctAltaError('ct-medio-alta', 'Falta el teléfono o el mail.');
+  // El tipo se adivina si no lo eligieron: una arroba es un mail y no hay más caso.
+  const tipo = ctTrim('ct-md-tipo') || (valor.includes('@') ? 'mail' : 'telefono');
   try {
-    await ctApi('/' + CT_FICHA.id + '/medios', { method:'POST',
-      body: JSON.stringify({ tipo, valor: valor.trim(), preferido: !CT_FICHA.medios.length }) });
+    await ctApi('/' + CT_FICHA.id + '/medios', { method: 'POST', body: JSON.stringify({
+      tipo, valor, nota: ctTrim('ct-md-nota'), preferido: !CT_FICHA.medios.length }) });
     ctAbrir(CT_FICHA.id);
-  } catch (e) { alert('No se pudo: ' + e.message); }
+  } catch (e) { ctAltaError('ct-medio-alta', e.message); }
 }
 async function ctPreferido(mid) {
   if (!CT_FICHA) return;
   try {
-    await ctApi('/' + CT_FICHA.id + '/medios/' + mid + '/preferido', { method:'POST' });
+    await ctApi('/' + CT_FICHA.id + '/medios/' + mid + '/preferido', { method: 'POST' });
     ctAbrir(CT_FICHA.id);
   } catch (e) { alert('No se pudo: ' + e.message); }
 }
 async function ctMedioBorrar(mid) {
   if (!CT_FICHA || !confirm('Borrar este teléfono o mail?')) return;
   try {
-    await ctApi('/' + CT_FICHA.id + '/medios/' + mid, { method:'DELETE' });
+    await ctApi('/' + CT_FICHA.id + '/medios/' + mid, { method: 'DELETE' });
     ctAbrir(CT_FICHA.id);
   } catch (e) { alert('No se pudo: ' + e.message); }
 }
 
-// ── QUÉ PRODUCE: DE LA EMPRESA ────────────────────────────────────────────────────────
-// Se carga y se corrige UNA VEZ para toda la finca. Es el cambio que pidió Pablo: antes
-// colgaba de la persona y el dueño y el encargado tenían dos calendarios distintos.
-function ctPrNuevo() { ctPrAbrir(null); }
-function ctPrEditar(pid) {
-  ctPrAbrir((CT_EMP && CT_EMP.productos.find(p => p.id === pid)) || null);
+// ── OTRA PERSONA DE LA MISMA EMPRESA ──
+function ctPersonaAlta() {
+  if (!CT_EMP) return;
+  ctAltaAbrir('ct-persona-alta',
+      '<div class="ct-alta-f">'
+    + '<div style="flex:1;min-width:180px"><label>Nombre</label>'
+    +   '<input id="ct-pa-nombre" style="width:100%"'
+    +   ' onkeydown="if(event.key===\'Enter\')ctPersonaGuardar()"></div>'
+    + '<div style="flex:1;min-width:150px"><label>Cargo</label>'
+    +   '<input id="ct-pa-cargo" style="width:100%" placeholder="Dueño, compradora, encargado…"></div>'
+    + '<div><button class="btn bb bs" onclick="ctPersonaGuardar()">Agregar</button> '
+    +   '<button class="btn bo bs" onclick="ctAltaCerrar(\'ct-persona-alta\')">Cancelar</button></div>'
+    + '</div><div class="ct-nd" style="margin-top:5px">Se suma a <b>' + ctEsc(CT_EMP.nombre)
+    + '</b>. Los teléfonos y la tarjeta se cargan en su ficha.</div>', 'ct-pa-nombre');
 }
-function ctPrAbrir(p) {
-  if (!CT_EMP) { alert('Los productos se cargan en la ficha de la empresa.'); return; }
-  CT_PR = p;
-  document.getElementById('ct-pr-tit').textContent =
-    (p ? 'Qué produce' : 'Agregar producto') + ' · ' + CT_EMP.nombre;
+async function ctPersonaGuardar() {
+  if (!CT_EMP) return;
+  const nombre = ctTrim('ct-pa-nombre');
+  if (!nombre) return ctAltaError('ct-persona-alta', 'Falta el nombre.');
+  try {
+    await ctApi('/', { method: 'POST', body: JSON.stringify({
+      nombre, cargo: ctTrim('ct-pa-cargo'), empresa_id: CT_EMP.id }) });
+    ctRecargar();
+    ctEmpAbrir(CT_EMP.id);
+  } catch (e) { ctAltaError('ct-persona-alta', e.message); }
+}
+
+// ── QUÉ PRODUCE ──
+// El renglón del producto, con las doce celdas de meses. Se abre debajo de la tabla, con
+// el calendario a la vista: antes había que abrir una ventana que tapaba justamente la
+// tabla con la que uno estaba comparando.
+function ctPrAlta(pid) {
+  if (!CT_EMP) return;
+  const p = pid ? (CT_EMP.productos || []).find(x => x.id === pid) : null;
+  CT_PR = p || null;
   const m = (p && /^[01]{12}$/.test(p.meses || '')) ? p.meses : '000000000000';
   // LAS DOCE CELDAS SE TOCAN, no se elige un desde y un hasta: hay productores con una
   // cosecha temprana y una tardía, y un rango las aplasta en una sola ventana que diría
   // que trae en los meses del medio, cuando no trae.
   let celdas = '<span class="ct-mg ct-mg-ed" id="ct-pr-mg">';
   for (let i = 0; i < 12; i++) {
-    celdas += '<i class="' + (m[i]==='1'?'on':'') + '" data-i="' + i + '"'
+    celdas += '<i class="' + (m[i] === '1' ? 'on' : '') + '" data-i="' + i + '"'
            +  ' onclick="ctPrTocar(' + i + ')">' + CT_MESES[i] + '</i>';
   }
   celdas += '</span>';
-  document.getElementById('ct-pr-body').innerHTML =
-      '<div class="ct-nd" style="margin-bottom:9px">Es de <b>' + ctEsc(CT_EMP.nombre)
-    + '</b>, no de una persona: todas las personas de esa empresa van a ver esto.</div>'
-    + '<div class="ct-f" style="margin-bottom:0">'
-    + '<div style="flex:1;min-width:180px"><label>Producto *</label>'
-    +   '<input id="ct-pr-prod" style="width:100%" value="' + ctEsc(p ? p.producto : '') + '"'
-    +   ' list="ct-dl-prod"><datalist id="ct-dl-prod">'
-    +   ((CT_OPC && CT_OPC.productos) || []).map(x => '<option>' + ctEsc(x) + '</option>').join('')
-    +   '</datalist></div>'
-    + '<div><label>Variedad</label><input id="ct-pr-var" value="' + ctEsc(p ? (p.variedad||'') : '') + '"></div>'
-    + '<div><label>Volumen</label><input id="ct-pr-vol" value="' + ctEsc(p ? (p.volumen||'') : '') + '"'
-    +   ' placeholder="2 camiones por semana"></div></div>'
-    + '<div style="margin-top:11px"><label style="font-size:11px;color:var(--mut)">'
-    +   'En qué meses lo tiene — <b>el año arranca en JULIO</b></label>'
-    + '<div style="margin-top:4px">' + celdas + '</div>'
-    + '<div class="ct-nd" style="margin-top:5px" id="ct-pr-vent"></div></div>'
-    + '<div style="margin-top:9px"><label style="font-size:11px;color:var(--mut)">Notas</label>'
-    + '<input id="ct-pr-notas" style="width:100%;padding:5px 8px;border:1px solid var(--bor);'
-    +   'border-radius:6px;background:var(--bg)" value="' + ctEsc(p ? (p.notas||'') : '') + '"></div>';
-  document.getElementById('ct-pr-modal').style.display = 'flex';
+
+  ctAltaAbrir('ct-pr-alta',
+      '<div class="ct-nd" style="margin-bottom:8px">Es de <b>' + ctEsc(CT_EMP.nombre)
+    + '</b>, <b>no de una persona</b>: todas las personas de esa empresa van a ver esto.</div>'
+    + '<div class="ct-alta-f">'
+    + '<div style="flex:1;min-width:160px"><label>Producto</label>'
+    +   '<input id="ct-pr-prod" style="width:100%" list="ct-dl-prod" value="'
+    +   ctEsc(p ? p.producto : '') + '"></div>'
+    + '<div style="flex:1;min-width:120px"><label>Variedad</label>'
+    +   '<input id="ct-pr-var" style="width:100%" value="' + ctEsc(p ? (p.variedad || '') : '') + '"></div>'
+    + '<div style="flex:1;min-width:130px"><label>Volumen</label>'
+    +   '<input id="ct-pr-vol" style="width:100%" placeholder="2 camiones por semana" value="'
+    +   ctEsc(p ? (p.volumen || '') : '') + '"></div></div>'
+    + '<div style="margin-top:10px"><label>En qué meses lo tiene — <b>el año arranca en JULIO</b></label>'
+    + '<div style="margin-top:3px">' + celdas + '</div>'
+    + '<div class="ct-nd" style="margin-top:4px" id="ct-pr-vent"></div></div>'
+    + '<div class="ct-alta-f" style="margin-top:9px">'
+    + '<div style="flex:1;min-width:200px"><label>Notas</label>'
+    +   '<input id="ct-pr-notas" style="width:100%" value="' + ctEsc(p ? (p.notas || '') : '') + '"></div>'
+    + '<div><button class="btn bb bs" onclick="ctPrGuardar()">' + (p ? 'Guardar' : 'Agregar') + '</button> '
+    +   '<button class="btn bo bs" onclick="ctPrCerrar()">Cancelar</button></div></div>',
+    'ct-pr-prod');
   ctPrVentana();
 }
-function ctPrCerrar() { document.getElementById('ct-pr-modal').style.display = 'none'; CT_PR = null; }
+function ctPrCerrar() { ctAltaCerrar('ct-pr-alta'); CT_PR = null; }
 function ctPrTocar(i) {
   const c = document.querySelector('#ct-pr-mg i[data-i="' + i + '"]');
   if (c) c.classList.toggle('on');
@@ -53514,102 +53849,206 @@ function ctPrVentana() {
   const tramos = [];
   for (let i = 0; i < 12; i++) {
     if (m[i] !== '1') continue;
-    if (tramos.length && tramos[tramos.length-1][1] === i-1) tramos[tramos.length-1][1] = i;
+    if (tramos.length && tramos[tramos.length - 1][1] === i - 1) tramos[tramos.length - 1][1] = i;
     else tramos.push([i, i]);
   }
   e.innerHTML = tramos.length
-    ? 'Ventana: <b>' + tramos.map(([a,b]) => a===b ? CT_MESES[a] : CT_MESES[a]+' a '+CT_MESES[b]).join(' y ') + '</b>'
+    ? 'Ventana: <b>' + tramos.map(([a, b]) => a === b ? CT_MESES[a] : CT_MESES[a] + ' a ' + CT_MESES[b]).join(' y ') + '</b>'
     : 'Sin meses marcados.';
 }
 async function ctPrGuardar() {
   if (!CT_EMP) return;
-  const g = (id) => { const e = document.getElementById(id); return e ? e.value.trim() : ''; };
-  if (!g('ct-pr-prod')) { alert('Falta el producto.'); return; }
-  const cuerpo = { producto: g('ct-pr-prod'), variedad: g('ct-pr-var'),
-                   meses: ctPrMascara(), volumen: g('ct-pr-vol'), notas: g('ct-pr-notas') };
+  if (!ctTrim('ct-pr-prod')) return ctAltaError('ct-pr-alta', 'Falta el producto.');
+  const cuerpo = { producto: ctTrim('ct-pr-prod'), variedad: ctTrim('ct-pr-var'),
+                   meses: ctPrMascara(), volumen: ctTrim('ct-pr-vol'), notas: ctTrim('ct-pr-notas') };
   try {
     if (CT_PR) await ctApi('/empresas/' + CT_EMP.id + '/productos/' + CT_PR.id,
-                           { method:'PATCH', body: JSON.stringify(cuerpo) });
+                           { method: 'PATCH', body: JSON.stringify(cuerpo) });
     else       await ctApi('/empresas/' + CT_EMP.id + '/productos',
-                           { method:'POST', body: JSON.stringify(cuerpo) });
+                           { method: 'POST', body: JSON.stringify(cuerpo) });
     const id = CT_EMP.id;
-    ctPrCerrar(); CT_OPC = null; ctEmpAbrir(id);
+    CT_PR = null; CT_OPC = null;
+    ctEmpAbrir(id);
     if (CT_FICHA) ctAbrir(CT_FICHA.id);
   } catch (e) {
     // El mismo producto dos veces en la misma finca son dos ventanas que se contradicen.
-    // El backend lo rechaza y dice cuál corregir.
+    // El backend lo rechaza y dice cuál corregir — y acá se abre ESA, en el mismo renglón.
     if (e.datos && e.datos.producto_id) {
-      alert(e.message);
-      const ya = CT_EMP.productos.find(p => p.id === e.datos.producto_id);
-      if (ya) ctPrAbrir(ya);
+      ctAltaError('ct-pr-alta', e.message);
+      const ya = (CT_EMP.productos || []).find(p => p.id === e.datos.producto_id);
+      if (ya) setTimeout(() => ctPrAlta(ya.id), 1200);
       return;
     }
-    alert('No se pudo guardar: ' + e.message);
+    ctAltaError('ct-pr-alta', e.message);
   }
 }
 async function ctPrBorrar(pid) {
   if (!CT_EMP || !confirm('Borrar este producto de la empresa?\n\nLo dejan de ver todas las '
     + 'personas de ' + CT_EMP.nombre + '.')) return;
   try {
-    await ctApi('/empresas/' + CT_EMP.id + '/productos/' + pid, { method:'DELETE' });
+    await ctApi('/empresas/' + CT_EMP.id + '/productos/' + pid, { method: 'DELETE' });
     const id = CT_EMP.id;
     ctEmpAbrir(id);
     if (CT_FICHA) ctAbrir(CT_FICHA.id);
   } catch (e) { alert('No se pudo: ' + e.message); }
 }
 
-// ── QUÉ SE HABLÓ ──────────────────────────────────────────────────────────────────────
+// ── UNA CHARLA ──
 // La charla es DE LA PERSONA: la dijo alguien, con nombre y apellido. Lo que es de la
 // cuenta es el historial junto, que la ficha de la empresa arma sumando las de todos.
-function ctChNuevo() {
+function ctChAlta() {
   if (!CT_FICHA) return;
-  document.getElementById('ct-ch-tit').textContent = 'Qué se habló con ' + CT_FICHA.nombre;
-  document.getElementById('ct-ch-body').innerHTML =
-      '<div class="ct-f" style="margin-bottom:0">'
+  ctAltaAbrir('ct-charla-alta',
+      '<div class="ct-alta-f">'
     + '<div><label>Cuándo</label><input type="date" id="ct-ch-fecha" value="' + ctHoy() + '"></div>'
     + '<div><label>Por dónde</label><select id="ct-ch-canal">'
     +   '<option value="telefono">📞 Teléfono</option><option value="whatsapp">💬 WhatsApp</option>'
     +   '<option value="mail">✉️ Mail</option><option value="visita">🤝 Visita</option>'
     +   '<option value="otro">Otro</option></select></div></div>'
-    + '<div style="margin-top:9px"><label style="font-size:11px;color:var(--mut)">Qué se habló *</label>'
-    + '<textarea id="ct-ch-res" rows="5" style="width:100%;padding:7px 9px;border:1px solid var(--bor);'
-    +   'border-radius:7px;background:var(--bg);font-size:13px;font-family:inherit"'
+    + '<div style="margin-top:8px"><label>Qué se habló</label>'
+    + '<textarea id="ct-ch-res" rows="4" style="width:100%;box-sizing:border-box"'
     +   ' placeholder="Lo que dijo, con las palabras que usó."></textarea></div>'
     // EL BUSCADOR ENTRA ACÁ ADENTRO. Vale la pena decirlo donde se escribe: cambia cómo se
-    // escribe la nota. "Me ofreció brócoli" se encuentra; "me ofreció algo nuevo" no.
-    + '<div class="ct-nd" style="margin:3px 0 11px">El buscador mira este texto. Nombrar los'
+    // escribe la nota. «Me ofreció brócoli» se encuentra; «me ofreció algo nuevo» no.
+    + '<div class="ct-nd" style="margin:3px 0 9px">El buscador mira este texto. Nombrar los'
     + ' productos y las cosas concretas es lo que después permite preguntar'
     + ' <b>¿quién me habló de brócoli?</b></div>'
-    + '<div class="ct-f" style="margin-bottom:0">'
-    + '<div style="flex:1;min-width:220px"><label>Qué quedó pendiente</label>'
+    + '<div class="ct-alta-f">'
+    + '<div style="flex:1;min-width:200px"><label>Qué quedó pendiente</label>'
     +   '<input id="ct-ch-paso" style="width:100%" placeholder="Pedirle precio del brócoli"></div>'
-    + '<div><label>Para cuándo</label><input type="date" id="ct-ch-el"></div></div>'
-    + '<div class="ct-nd" style="margin-top:3px">Con fecha aparece en <b>Me toca</b>. Sin'
-    + ' próximo paso, la charla es una nota: el mes que viene no se sabe si quedó algo.</div>';
-  document.getElementById('ct-ch-modal').style.display = 'flex';
+    + '<div><label>Para cuándo</label><input type="date" id="ct-ch-el"></div>'
+    + '<div><button class="btn bb bs" onclick="ctChGuardar()">Guardar</button> '
+    +   '<button class="btn bo bs" onclick="ctAltaCerrar(\'ct-charla-alta\')">Cancelar</button></div></div>'
+    + '<div class="ct-nd" style="margin-top:4px">Con fecha aparece en <b>Me toca</b>. Sin'
+    + ' próximo paso, la charla es una nota: el mes que viene no se sabe si quedó algo.</div>',
+    'ct-ch-res');
 }
-function ctChCerrar() { document.getElementById('ct-ch-modal').style.display = 'none'; }
-
 async function ctChGuardar() {
   if (!CT_FICHA) return;
-  const g = (id) => { const e = document.getElementById(id); return e ? e.value.trim() : ''; };
-  if (!g('ct-ch-res')) { alert('Falta lo que se habló.'); return; }
+  if (!ctTrim('ct-ch-res')) return ctAltaError('ct-charla-alta', 'Falta lo que se habló.');
   try {
-    await ctApi('/' + CT_FICHA.id + '/charlas', { method:'POST', body: JSON.stringify({
-      fecha: g('ct-ch-fecha') || undefined, canal: g('ct-ch-canal'), resumen: g('ct-ch-res'),
-      proximo_paso: g('ct-ch-paso'), proximo_el: g('ct-ch-el') }) });
-    ctChCerrar(); ctAbrir(CT_FICHA.id);
+    await ctApi('/' + CT_FICHA.id + '/charlas', { method: 'POST', body: JSON.stringify({
+      fecha: ctTrim('ct-ch-fecha') || undefined, canal: ctTrim('ct-ch-canal'),
+      resumen: ctTrim('ct-ch-res'), proximo_paso: ctTrim('ct-ch-paso'),
+      proximo_el: ctTrim('ct-ch-el') }) });
+    const conPaso = ctTrim('ct-ch-paso') && ctTrim('ct-ch-el');
+    ctAbrir(CT_FICHA.id);
     if (CT_EMP) ctEmpAbrir(CT_EMP.id);
-    if (g('ct-ch-paso') && g('ct-ch-el')) ctPendientes();
-  } catch (e) { alert('No se pudo guardar: ' + e.message); }
+    if (conPaso) ctPendientes();
+  } catch (e) { ctAltaError('ct-charla-alta', e.message); }
 }
-
 async function ctChBorrar(chid) {
   if (!CT_FICHA || !confirm('Borrar esta charla?\n\nSe pierde lo que se anotó de esa conversación.')) return;
   try {
-    await ctApi('/' + CT_FICHA.id + '/charlas/' + chid + '/eliminar', { method:'POST' });
+    await ctApi('/' + CT_FICHA.id + '/charlas/' + chid + '/eliminar', { method: 'POST' });
     ctAbrir(CT_FICHA.id);
     if (CT_EMP) ctEmpAbrir(CT_EMP.id);
+  } catch (e) { alert('No se pudo: ' + e.message); }
+}
+
+/* ══ EL ALTA, DESDE LA LISTA ════════════════════════════════════════════════════════
+   La ÚNICA ventana que se abre desde la pantalla, y la regla de CLAUDE.md es por qué:
+   que se abra una ventana es lo que avisa que se dejó de mirar y se empezó a cargar.
+
+   Pide lo mínimo y abre la ficha. Un formulario largo acá obliga a tener todos los datos
+   juntos justo cuando no se los tiene — que es cuando alguien te acaba de dar la tarjeta
+   en una reunión. */
+let CT_NV = null;        // 'persona' | 'empresa'
+
+function ctNuevo()    { ctNvAbrir('persona'); }
+function ctEmpNueva() { ctNvAbrir('empresa'); }
+
+async function ctNvAbrir(que) {
+  await ctOpciones().catch(() => {});
+  CT_NV = que;
+  document.getElementById('ct-nv-tit').textContent = que === 'empresa' ? 'Nueva empresa' : 'Nueva persona';
+  document.getElementById('ct-nv-error').style.display = 'none';
+  const dl = (n) => '<datalist id="ct-dl-' + n + '">'
+    + (((CT_OPC && CT_OPC[n === 'emp' ? 'empresas' : n]) || [])
+        .map(x => '<option>' + ctEsc(x) + '</option>').join('')) + '</datalist>';
+
+  document.getElementById('ct-nv-body').innerHTML = que === 'empresa'
+    ? '<div class="sgr-card"><div><label>Nombre de la empresa</label>'
+      + '<input id="ct-nv-nombre" style="width:100%" placeholder="GIGLIO HNOS SRL"></div>'
+      + '<div style="margin-top:10px"><label>Es</label><select id="ct-nv-tipo">'
+      + Object.keys(CT_CHIP).map(t => '<option value="' + t + '">' + CT_CHIP[t][1] + '</option>').join('')
+      + '</select></div>'
+      + '<div class="ct-nd" style="margin-top:9px">La zona, qué produce, el vínculo con la'
+      + ' planilla y las notas se cargan <b>en la ficha</b>, que se abre al crearla.</div></div>'
+    : '<div class="sgr-card"><div><label>Nombre de la persona</label>'
+      + '<input id="ct-nv-nombre" style="width:100%" placeholder="Juan Giglio"></div>'
+      + '<div style="margin-top:10px"><label>Empresa</label>'
+      + '<input id="ct-nv-empresa" style="width:100%" list="ct-dl-emp" placeholder="GIGLIO HNOS SRL">'
+      + dl('emp') + '</div>'
+      + '<div class="ct-nd" style="margin-top:5px">Si la empresa ya está cargada, escribila'
+      + ' igual y cae en esa misma — <b>el dueño y el encargado de la misma finca comparten'
+      + ' lo que produce</b>. Dejándola vacía, la empresa es la persona (sirve para un'
+      + ' fletero que trabaja solo).</div>'
+      + '<div class="ct-nd" style="margin-top:7px">El cargo, los teléfonos y la foto de la'
+      + ' tarjeta se cargan <b>en la ficha</b>, que se abre al crearla.</div></div>';
+  document.getElementById('ct-nuevo-modal').classList.add('on');
+  const n = document.getElementById('ct-nv-nombre');
+  if (n) n.focus();
+}
+function ctNvCerrar() {
+  document.getElementById('ct-nuevo-modal').classList.remove('on');
+  CT_NV = null;
+}
+function ctNvError(msg) {
+  const e = document.getElementById('ct-nv-error');
+  e.innerHTML = msg;
+  e.style.display = '';
+}
+async function ctNvGuardar() {
+  const nombre = ctTrim('ct-nv-nombre');
+  if (!nombre) return ctNvError('Falta el nombre.');
+  try {
+    if (CT_NV === 'empresa') {
+      const j = await ctApi('/empresas', { method: 'POST',
+        body: JSON.stringify({ nombre, tipo: ctTrim('ct-nv-tipo') }) });
+      ctNvCerrar(); CT_OPC = null; ctRecargar();
+      ctEmpAbrir(j.id);
+    } else {
+      const emp = ctTrim('ct-nv-empresa');
+      const j = await ctApi('/', { method: 'POST',
+        body: JSON.stringify(emp ? { nombre, empresa: emp } : { nombre }) });
+      ctNvCerrar(); CT_OPC = null; ctRecargar();
+      ctAbrir(j.id);
+    }
+  } catch (e) {
+    // Dos fichas de la misma finca son dos historiales con la mitad de las charlas cada
+    // uno. El backend lo rechaza y dice cuál es la que ya hay: se ofrece abrirla, que es
+    // lo que la persona quería hacer.
+    if (e.datos && e.datos.empresa_id) {
+      const id = e.datos.empresa_id;
+      ctNvError(ctEsc(e.message) + ' <a class="ct-link" onclick="ctNvCerrar();ctEmpAbrir('
+        + id + ')"><b>Abrir la que ya está</b></a>');
+      return;
+    }
+    ctNvError(ctEsc(e.message));
+  }
+}
+
+async function ctBaja() {
+  if (!CT_FICHA) return;
+  // Se avisa qué se pierde de verdad, que no es la ficha: son las charlas.
+  if (!confirm('Dar de baja a ' + CT_FICHA.nombre + '?\n\nSe esconde del buscador. Las '
+    + CT_FICHA.charlas.length + ' charla(s) quedan guardadas.')) return;
+  try {
+    await ctApi('/' + CT_FICHA.id + '/eliminar', { method: 'POST' });
+    ctFichaCerrar(); ctRecargar();
+    if (CT_EMP) ctEmpAbrir(CT_EMP.id);
+  } catch (e) { alert('No se pudo: ' + e.message); }
+}
+
+async function ctEmpBaja() {
+  if (!CT_EMP) return;
+  if (!confirm('Dar de baja a ' + CT_EMP.nombre + '?\n\nSe esconde de las listas, con sus '
+    + ((CT_EMP.personas || []).length) + ' persona(s). Nada se borra: los teléfonos y las '
+    + 'charlas quedan.')) return;
+  try {
+    await ctApi('/empresas/' + CT_EMP.id + '/eliminar', { method: 'POST' });
+    ctEmpCerrar(); ctFichaCerrar(); ctRecargar();
   } catch (e) { alert('No se pudo: ' + e.message); }
 }
 
