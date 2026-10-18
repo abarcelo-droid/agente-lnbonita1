@@ -172,8 +172,10 @@ test('CREAR DOS FICHAS DE LA MISMA FINCA SE RECHAZA, y ofrece abrir la que hay',
   assert.match(h, /status\(409\)/);
   assert.match(h, /empresa_id: ya\.id/, 'el 409 no dice cuál es la que ya está');
   // Y la pantalla usa ese id para ofrecer abrirla, en vez de dejar un alert sin salida.
-  assert.match(fn('ctEEmpGuardar'), /e\.datos\.empresa_id/);
-  assert.match(fn('ctEEmpGuardar'), /Abrir la que ya está cargada/);
+  // El alta de las dos cosas —persona y empresa— la hace una sola ventana desde la
+  // lista (V1097): adentro de la ficha ya no se abre ninguna.
+  assert.match(fn('ctNvGuardar'), /e\.datos\.empresa_id/);
+  assert.match(fn('ctNvGuardar'), /Abrir la que ya está/);
   // La base, por abajo.
   const db = vacia();
   db.prepare("INSERT INTO sg_contacto_empresas (nombre,tipo) VALUES ('GIGLIO HNOS SRL','proveedor')").run();
@@ -189,22 +191,34 @@ test('AFIRMA QUE SIN EMPRESA LA EMPRESA ES LA PERSONA', () => {
   assert.match(handler('post', '/'), /empresaDeNombre\(txt\(b\.empresa\) \|\| nombre, b, req\._user\.id\)/);
 });
 
-test('AFIRMA QUE CADA FORMULARIO PIDE LO SUYO Y NO LO DEL OTRO', () => {
-  // Es la prueba de que los dos niveles no son un adorno: el manual dice que el
-  // de la persona no pide la zona y el de la empresa no pide el cargo, y eso se
-  // puede verificar en el HTML que arma cada uno.
-  assert.match(MANUAL, /el formulario de una persona <b>no pide la zona<\/b>/);
-  assert.match(MANUAL, /el de la empresa <b>no pide el cargo<\/b>/);
-  const persona = fn('ctEdAbrir').replace(/^[\s\S]*?ct-ed-body/, '');
-  assert.match(persona, /ct-ed-nombre/);
-  assert.match(persona, /ct-ed-cargo/);
-  assert.ok(!/ct-ed-zona/.test(persona), 'el editor de persona pide la zona');
-  assert.ok(!/ct-ed-tipo/.test(persona), 'el editor de persona pide el tipo');
-  const empresa = fn('ctEEmpAbrir').replace(/^[\s\S]*?ct-eemp-body/, '');
-  assert.match(empresa, /ct-ee-zona/);
-  assert.match(empresa, /ct-ee-tipo/);
-  assert.ok(!/ct-ee-cargo/.test(empresa), 'el editor de empresa pide el cargo');
-  // Y en el backend igual: los campos de cada uno son listas separadas.
+test('AFIRMA QUE CADA FICHA TIENE LO SUYO Y NO LO DEL OTRO', () => {
+  // Es la prueba de que los dos niveles no son un adorno: el manual dice que en la
+  // ficha de la persona no hay dónde poner la zona y en la de la empresa no hay
+  // dónde poner el cargo. Desde la V1097 no hay dos formularios que mirar — los
+  // campos se editan en la ficha — así que se miran los campos que cada ficha
+  // DIBUJA, que es lo que el operador tiene delante.
+  assert.match(MANUAL, /en la ficha de una persona <b>no hay dónde poner la zona<\/b>/);
+  assert.match(MANUAL, /en la de la empresa <b>no hay dónde poner el cargo<\/b>/);
+
+  // Los campos editables de cada ficha, sacados de sus llamadas a ctCampo().
+  const campos = (f, ent) => [...fn(f).matchAll(
+    new RegExp("ctCampo\\('" + ent + "'[^,]*,[^,]*, '([a-z_]+)'", 'g'))].map((m) => m[1]);
+  const persona = campos('ctPintarFicha', 'persona');
+  const empresa = campos('ctPintarEmpresa', 'empresa')
+    // ctPintarEmpresa usa un atajo C(...) para no repetir el ent en cada campo.
+    .concat([...fn('ctPintarEmpresa').matchAll(/\bC\('([a-z_]+)'/g)].map((m) => m[1]));
+
+  assert.ok(persona.includes('nombre'), 'la ficha de la persona no deja editar el nombre');
+  assert.ok(persona.includes('cargo'),  'la ficha de la persona no deja editar el cargo');
+  assert.ok(!persona.includes('zona'),  'la ficha de la persona pide la zona');
+  assert.ok(!persona.includes('tipo'),  'la ficha de la persona pide el tipo');
+
+  assert.ok(empresa.includes('zona'),   'la ficha de la empresa no deja editar la zona');
+  assert.ok(empresa.includes('tipo'),   'la ficha de la empresa no deja editar el tipo');
+  assert.ok(!empresa.includes('cargo'), 'la ficha de la empresa pide el cargo');
+
+  // Y en el backend igual: los campos de cada uno son listas separadas. Es lo que de
+  // verdad lo impide — la ficha es la cara, el router es la puerta.
   assert.match(ROUTER, /const CAMPOS = \['nombre', 'cargo', 'notas'\]/);
   assert.match(ROUTER, /const CAMPOS_EMP = \['nombre', 'tipo', 'zona', 'localidad',/);
 });
@@ -215,7 +229,7 @@ test('afirma que la ficha de la persona muestra lo de la empresa APARTE, con su 
   const f = fn('ctPintarFicha');
   assert.match(f, /<h4>Su empresa/);
   assert.match(f, /lo de acá es de la cuenta/);
-  assert.match(f, /Ver la empresa/);
+  assert.match(f, /Abrir la ficha de la empresa/);
   // Y la respuesta trae los dos niveles separados, no aplanados.
   const { db, juan } = agenda();
   const d = ficha(db, juan);
@@ -390,7 +404,7 @@ test('afirma que los productos se cargan EN LA FICHA DE LA EMPRESA', () => {
   assert.ok(ROUTER.includes("router.post('/empresas/:id/productos'"));
   assert.ok(!/router\.post\('\/:id\/productos'/.test(ROUTER),
     'volvió la dirección que cuelga el producto de la persona');
-  assert.match(fn('ctPrAbrir'), /no de una persona/);
+  assert.match(fn('ctPrAlta'), /no de una persona/);
   assert.match(fn('ctPintarEmpresa'), /Se carga una vez para toda la empresa/);
 });
 
@@ -502,7 +516,7 @@ test('afirma que el buscador mira el texto de la charla — y lo avisa al escrib
   assert.match(MANUAL, /El buscador mira este texto/);
   // No alcanza con que el manual lo diga: tiene que estar escrito donde se
   // tipea, que es donde cambia cómo se redacta la nota.
-  const js = fn('ctChNuevo');
+  const js = fn('ctChAlta');
   assert.match(js, /El buscador mira este texto/);
   assert.match(js, /quién me habló de brócoli/);
 });
@@ -580,7 +594,7 @@ test('afirma que el preferido es el que muestran la lista y la bandeja', () => {
 
 test('afirma que lo que tiene arroba se guarda como mail', () => {
   assert.match(MANUAL, /lo que tiene <b>arroba<\/b> se guarda como mail/);
-  assert.match(fn('ctMedioNuevo'), /valor\.includes\('@'\) \? 'mail' : 'telefono'/);
+  assert.match(fn('ctMedioGuardar'), /valor\.includes\('@'\) \? 'mail' : 'telefono'/);
 });
 
 // ── 10 · LOS TIPOS ─────────────────────────────────────────────────────────

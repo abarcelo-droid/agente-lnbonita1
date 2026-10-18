@@ -28,6 +28,10 @@
 // comercial de la casa. Está dicho acá además de en db_sg_contactos.js a propósito: el
 // que escriba un cliente de esta API no va a leer el archivo de la base.
 import express from 'express';
+import multer from 'multer';
+import path from 'path';
+import fs from 'fs';
+import { fileURLToPath } from 'url';
 import db from '../servicios/db_sg_contactos.js';
 import { exigirEmpresa, SAN_GERONIMO } from '../servicios/sociedad_modulo.js';
 import {
@@ -38,6 +42,87 @@ import {
 } from '../servicios/contactos.js';
 
 const router = express.Router();
+
+// ══ LA FOTO DE LA TARJETA ════════════════════════════════════════════════════════════
+// Una foto y nada más: ni lector, ni OCR, ni IA. La tarjeta que te dieron en la mano,
+// guardada donde se la puede volver a mirar. Lo que se tipea igual son el teléfono y el
+// mail — una foto no se busca, y el buscador es la mitad de este módulo.
+//
+// ── POR QUÉ ESTA CARPETA Y NO data/sg ───────────────────────────────────────────────
+// Las otras fotos del sistema van a data/sg, data/ifco, data/uploads — y esas carpetas
+// las sirve express.static ANTES del portón de sesión (index.js:110-115). Lo que entra
+// ahí queda en una URL del mismo origen que el panel y alcanzable SIN COOKIE.
+//
+// Para una foto de un cajón eso da igual. Acá no: la foto de una tarjeta ES el teléfono
+// directo y el mail de un comprador de cadena o de un productor, que es exactamente lo
+// que este router ya decidió no dejar al alcance de cualquiera (ver requireAuth abajo).
+// Dejarla en una carpeta pública sería sacar por la ventana lo que la puerta cuida.
+//
+// Por eso data/contactos/ NO está en ningún express.static, y la foto sale sólo por
+// GET /:id/tarjeta, que pasa por el requireAuth de este router.
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const TARJETAS_DIR = path.join(__dirname, '../../data/contactos');
+fs.mkdirSync(TARJETAS_DIR, { recursive: true });
+
+// Lista blanca de extensiones, no del nombre que mandaron. El accept="image/*" del
+// formulario es una sugerencia del selector de archivos y no existe para un pedido armado
+// a mano; sin esto, un «tarjeta.html» con un <script> adentro se guarda igual.
+//
+// Acá además el archivo nunca se sirve como HTML —el GET manda su Content-Type desde la
+// extensión y un Content-Disposition— pero la lista va igual: es más barato no escribir
+// el archivo peligroso que acordarse de servirlo bien en todos lados.
+const EXT_IMAGEN = ['.jpg', '.jpeg', '.png', '.webp', '.heic', '.heif'];
+const TIPO_DE_EXT = {
+  '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png',
+  '.webp': 'image/webp', '.heic': 'image/heic', '.heif': 'image/heif',
+};
+const extDe = (f) => (path.extname((f && f.originalname) || '') || '').toLowerCase();
+
+const subirTarjeta = multer({
+  storage: multer.diskStorage({
+    destination: (req, file, cb) => cb(null, TARJETAS_DIR),
+    filename: (req, file, cb) => {
+      const ext = EXT_IMAGEN.includes(extDe(file)) ? extDe(file) : '.jpg';
+      cb(null, 'tarjeta_' + Date.now() + '_' + Math.floor(Math.random() * 1e6) + ext);
+    },
+  }),
+  // 12 MB: una foto de celular moderno sin comprimir pasa los 8 con facilidad, y el que
+  // saca la foto en una reunión no la va a achicar antes de subirla.
+  limits: { fileSize: 12 * 1024 * 1024 },
+  fileFilter: (req, file, cb) => {
+    if (EXT_IMAGEN.includes(extDe(file)) && /^image\//.test(String(file.mimetype || ''))) {
+      return cb(null, true);
+    }
+    const err = new Error('La tarjeta se guarda como foto: jpg, png, webp o heic.');
+    err.code = 'TIPO_NO_PERMITIDO';
+    cb(err);
+  },
+});
+
+// Sin envolver a multer, pasarse del tamaño devuelve un HTML 500 y la pantalla se come un
+// error de JSON en vez de decir qué pasó.
+function conTarjeta(req, res, next) {
+  subirTarjeta.single('tarjeta')(req, res, (err) => {
+    if (!err) return next();
+    if (err.code === 'TIPO_NO_PERMITIDO') {
+      return res.status(400).json({ ok: false, error: err.message });
+    }
+    return res.status(400).json({
+      ok: false,
+      error: err.code === 'LIMIT_FILE_SIZE'
+        ? 'La foto pesa más de 12 MB. Sacala de nuevo con menos calidad, o recortala.'
+        : 'No se pudo subir la foto: ' + err.message,
+    });
+  });
+}
+
+// Borrar el archivo viejo al reemplazarlo. Si falla no pasa nada grave —queda un archivo
+// huérfano— así que no corta la operación: lo que importa es que la foto nueva entre.
+function borrarArchivo(nombre) {
+  if (!nombre) return;
+  try { fs.unlinkSync(path.join(TARJETAS_DIR, path.basename(nombre))); }
+  catch (e) { if (e.code !== 'ENOENT') console.error('[CONTACTOS] no pude borrar la tarjeta:', e.message); }
+}
 
 // Parado en otra sociedad no se toca la agenda de San Gerónimo, ni siquiera teniendo
 // permiso para entrar a San Gerónimo: hay que cambiar el selector y operar desde ahí.
@@ -377,10 +462,22 @@ router.patch('/:id', (req, res) => {
     // PASAR UNA PERSONA DE UNA EMPRESA A OTRA. Es lo que pasa cuando el comprador de una
     // cadena se va a la competencia: la persona es la misma y su historial de charlas se va
     // con ella, pero la cuenta es otra.
-    if ('empresa_id' in b) {
-      const emp = db.prepare('SELECT * FROM sg_contacto_empresas WHERE id = ? AND eliminado_en IS NULL')
-        .get(b.empresa_id);
-      if (!emp) return res.status(400).json({ ok: false, error: 'esa empresa no existe' });
+    //
+    // Se puede mandar el `empresa_id`, o el NOMBRE en `empresa` — y entonces cae en la que
+    // ya hay, o se crea. Es la misma regla que el alta, y a propósito: con sólo el id, la
+    // ficha tendría que resolver el nombre a un id por su cuenta antes de guardar, y eso
+    // son dos maneras distintas de hacer lo mismo según desde dónde se lo haga.
+    if ('empresa_id' in b || 'empresa' in b) {
+      let emp = null;
+      if (b.empresa_id) {
+        emp = db.prepare('SELECT * FROM sg_contacto_empresas WHERE id = ? AND eliminado_en IS NULL')
+          .get(b.empresa_id);
+        if (!emp) return res.status(400).json({ ok: false, error: 'esa empresa no existe' });
+      } else {
+        const n = txt(b.empresa);
+        if (!n) return res.status(400).json({ ok: false, error: 'la empresa no puede quedar vacía' });
+        emp = empresaDeNombre(n, {}, req._user.id);
+      }
       sets.push('empresa_id = ?'); par.push(emp.id);
       sets.push('empresa = ?');    par.push(emp.nombre);
     }
@@ -502,6 +599,80 @@ router.post('/:id/charlas/:cid/eliminar', (req, res) => {
       .run(req.params.cid, req.params.id);
     if (!r.changes) return res.status(404).json({ ok: false, error: 'no existe esa charla' });
     res.json({ ok: true, charlas: ficha(db, req.params.id).charlas });
+  } catch (e) { res.status(500).json({ ok: false, error: String(e.message || e) }); }
+});
+
+// ══ LA TARJETA DE UNA PERSONA ════════════════════════════════════════════════════════
+
+// Subirla o reemplazarla. Una sola por persona: la tarjeta es una, y una galería obliga a
+// elegir cuál mirar cada vez que se abre la ficha.
+router.post('/:id/tarjeta', conTarjeta, (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ ok: false, error: 'no llegó ninguna foto' });
+    const c = db.prepare('SELECT tarjeta_path FROM sg_contactos WHERE id = ? AND eliminado_en IS NULL')
+      .get(req.params.id);
+    if (!c) {
+      // La persona no existe, pero multer YA escribió el archivo: sin esto queda tirado
+      // para siempre en el disco del servidor.
+      borrarArchivo(req.file.filename);
+      return res.status(404).json({ ok: false, error: 'no existe ese contacto' });
+    }
+    const anterior = c.tarjeta_path;
+    db.prepare("UPDATE sg_contactos SET tarjeta_path = ?, tarjeta_nombre = ?,"
+      + " tarjeta_en = datetime('now','localtime'),"
+      + " actualizado_en = datetime('now','localtime') WHERE id = ?")
+      .run(req.file.filename, req.file.originalname || null, req.params.id);
+    // Recién DESPUÉS de que la nueva quedó guardada. Al revés, un error en el UPDATE deja
+    // a la persona sin ninguna de las dos.
+    if (anterior && anterior !== req.file.filename) borrarArchivo(anterior);
+    res.json({ ok: true, contacto: ficha(db, req.params.id) });
+  } catch (e) {
+    if (req.file) borrarArchivo(req.file.filename);
+    res.status(500).json({ ok: false, error: String(e.message || e) });
+  }
+});
+
+// Mirarla. Pasa por el requireAuth del router, que es el motivo de que el archivo no viva
+// en una carpeta servida estática (ver el comentario de arriba).
+router.get('/:id/tarjeta', (req, res) => {
+  try {
+    const c = db.prepare('SELECT tarjeta_path, tarjeta_nombre FROM sg_contactos'
+      + ' WHERE id = ? AND eliminado_en IS NULL').get(req.params.id);
+    if (!c || !c.tarjeta_path) return res.status(404).json({ ok: false, error: 'no tiene tarjeta cargada' });
+    // basename(): la ruta sale de nuestra propia base, pero si alguna vez entrara un
+    // '../../' por ahí, esto lo deja en la carpeta y no en el resto del disco.
+    const f = path.join(TARJETAS_DIR, path.basename(c.tarjeta_path));
+    if (!fs.existsSync(f)) {
+      return res.status(404).json({ ok: false, error: 'la foto no está en el servidor' });
+    }
+    const ext = path.extname(f).toLowerCase();
+    res.set({
+      'Content-Type': TIPO_DE_EXT[ext] || 'application/octet-stream',
+      // inline para poder verla en la ficha; el filename es para cuando se la baja.
+      'Content-Disposition': 'inline; filename="'
+        + String(c.tarjeta_nombre || 'tarjeta' + ext).replace(/[^\w.\- ]/g, '_') + '"',
+      // Privada: es la agenda. Sin esto un proxy compartido podría guardarla y
+      // devolvérsela a otro.
+      'Cache-Control': 'private, max-age=300',
+      'X-Content-Type-Options': 'nosniff',
+    });
+    res.sendFile(f);
+  } catch (e) { res.status(500).json({ ok: false, error: String(e.message || e) }); }
+});
+
+// Sacarla. Acá SÍ se borra el archivo de verdad: no es un dato del que haya historia que
+// conservar —el teléfono y el mail están tipeados aparte— y una foto de una tarjeta que
+// alguien pidió sacar no tiene por qué quedar en el disco.
+router.delete('/:id/tarjeta', (req, res) => {
+  try {
+    const c = db.prepare('SELECT tarjeta_path FROM sg_contactos WHERE id = ? AND eliminado_en IS NULL')
+      .get(req.params.id);
+    if (!c) return res.status(404).json({ ok: false, error: 'no existe ese contacto' });
+    borrarArchivo(c.tarjeta_path);
+    db.prepare("UPDATE sg_contactos SET tarjeta_path = NULL, tarjeta_nombre = NULL,"
+      + " tarjeta_en = NULL, actualizado_en = datetime('now','localtime') WHERE id = ?")
+      .run(req.params.id);
+    res.json({ ok: true, contacto: ficha(db, req.params.id) });
   } catch (e) { res.status(500).json({ ok: false, error: String(e.message || e) }); }
 });
 

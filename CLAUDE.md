@@ -128,6 +128,71 @@ Lo audita `test/un_solo_buscador.test.mjs`, que monta el buscador sobre un selec
 de mentira y **le escribe**: verifica qué opciones quedan, no que el código diga
 `sgNorm`.
 
+### LA VENTANA ES `ab-modal-overlay` POR FUERA Y `ab-modal` POR DENTRO
+
+Y no al revés. Lo de afuera es el **fondo oscuro** —`display:none` de oficio,
+`display:flex` con la clase `on`— y lo de adentro es la **tarjeta**: el fondo, el borde,
+el relleno, el `max-height` y el `overflow-y`.
+
+**`ab-modal-c` no existe: no tiene una sola regla en todo el repo.** Estaba escrito en
+ocho lugares y funcionaba de casualidad, porque afuera llevaban `ab-modal` —que tiene el
+aspecto de tarjeta— haciendo de las dos cosas a la vez. Pasarlas al overlay de verdad las
+dejó sin un solo estilo, y eso **compila igual**: se ve recién abriendo la ventana.
+
+Y explica un síntoma que parecía otra cosa. Andy, 18/10/2026: *«se van abriendo ventanas
+una abajo de otra»*. Sin overlay no hay fondo oscuro, así que una ventana abierta sobre
+otra no se distingue de la de abajo — y además queda afuera del `MutationObserver` que
+reparte el z-index, que sólo mira `ab-modal-overlay` y `mb`.
+
+Lo clava `test/ventanas_del_panel.test.mjs`, que ahora verifica que **toda clase `ab-modal*`
+que se use tenga al menos una regla CSS**, y que audita también la familia `ab-modal`
+suelta —161 en el panel— distinguiendo la tarjeta de adentro del overlay por si cuelga o
+no de uno.
+
+### ADENTRO DE UNA FICHA NO SE ABRE OTRA VENTANA
+
+Andy, 18/10/2026: *«no me convence mucho cómo está armado, como que se van abriendo
+ventanas una abajo de otra para modificar; prefiero algo más como que entrás a la ficha y
+ahí ves todo, más visual, y de ahí mismo editás»*.
+
+La regla de arriba —**un formulario de carga se abre en una ventana**— es sobre un
+formulario metido en una PANTALLA. Una ficha ya es una ventana, así que ahí no aplica, y
+encadenar una segunda encima tapa justamente lo que se está mirando.
+
+La línea queda así:
+
+- **Desde la LISTA se abre una ventana.** Es lo que avisa que se dejó de mirar y se empezó
+  a cargar. Pide **lo mínimo** y abre la ficha: un formulario largo obliga a tener todos
+  los datos juntos justo cuando no se los tiene.
+- **Adentro de la FICHA, todo se edita donde se lee.** Un campo se ve como texto hasta que
+  se lo toca; ahí se vuelve un casillero y se guarda solo al salir, **un campo por vez**.
+  Lo que se agrega —un teléfono, un producto, una charla— aparece como un renglón en
+  blanco debajo de su lista, nunca en otra ventana ni en un `prompt()`.
+
+El mecanismo es **uno solo** (`ctCampo` / `ctCmpEditar` / `ctCmpGuardar` en `panel.html`),
+no un formulario por campo: el campo diecinueve que alguien escriba mañana lo tiene gratis.
+Se prueba **ejecutándolo** contra un DOM de mentira en
+`test/contactos_ficha_editable.test.mjs` —se toca, se escribe, se sale y se mira qué se
+mandó— porque lo que puede estar mal (que guarde sin cambios y pise lo de un compañero,
+que Escape guarde igual) se ve idéntico en pantalla.
+
+### UNA FOTO NO SE BUSCA
+
+Se puede guardar la foto de la tarjeta de un contacto, y **no reemplaza tipear el teléfono**:
+el buscador no mira adentro de una imagen. La foto está para lo otro —el logo, el cargo
+impreso, el dato que todavía no se cargó— y el manual lo dice con esas palabras.
+
+**Y no va a `data/sg`.** Esa carpeta, `data/ifco`, `data/uploads` y las demás las sirve
+`express.static` **antes** del portón de sesión (`index.js:110-115`): lo que entra ahí queda
+en una URL del mismo origen que el panel y alcanzable **sin cookie**. Para la foto de un
+cajón da igual; la foto de una tarjeta **es** el teléfono directo de un comprador de cadena.
+
+Va a `data/contactos/`, que no está en ningún `express.static`, y sale sólo por
+`GET /api/sg/contactos/:id/tarjeta`, que pasa por `requireAuth`. En la base se guarda la
+RUTA, y esa ruta **no sale en ningún JSON**: la ficha y el buscador devuelven
+`tiene_tarjeta` (sí/no) y borran `tarjeta_path` — hay que hacerlo en los DOS lugares,
+porque los dos hacen `SELECT *`.
+
 ### UN MODAL NO SE CIERRA AL CLIC AFUERA
 
 Pablo, 6/9/2026: *«si hago click fuera de esa ventana se cierra... y pierdo toda

@@ -231,6 +231,15 @@ export function buscar(db, opciones) {
       if (ch) r.charla_match = { fecha: ch.fecha, extracto: extracto(ch.resumen, q) };
     }
     delete r.m_nombre; delete r.m_medio; delete r.m_producto; delete r.m_charla; delete r.m_otro;
+    // La ruta del archivo de la tarjeta NO sale: es una ruta del disco del servidor, la
+    // lista no la usa —la foto se pide a /:id/tarjeta, que pasa por sesión— y publicarla
+    // es contar cómo está armado el disco de adentro para nada.
+    //
+    // Va acá ADEMÁS de en ficha(): el `SELECT c.*` de esta consulta se la trae igual, y
+    // cuando se agregó la columna este lugar no se notó. Lo que la lista sí necesita es
+    // el sí/no, para poder marcar quién tiene la tarjeta guardada.
+    r.tiene_tarjeta = !!r.tarjeta_path;
+    delete r.tarjeta_path;
     return r;
   });
 }
@@ -377,6 +386,14 @@ export function ficha(db, id) {
     + '    AND o.eliminado_en IS NULL'
     + '  ORDER BY ch.fecha DESC, ch.id DESC').all(c.empresa_id, id) : [];
 
+  // ── LA TARJETA SALE COMO UN SÍ/NO, NO COMO LA RUTA ────────────────────────────────
+  // `tarjeta_path` es una ruta del disco del servidor y no tiene por qué salir de acá: la
+  // pantalla no la usa —pide GET /:id/tarjeta, que pasa por sesión— y publicarla es
+  // contar cómo está armado el disco de adentro para nada. Se borra del objeto, no se
+  // deja de guardar.
+  c.tiene_tarjeta = !!c.tarjeta_path;
+  delete c.tarjeta_path;
+
   return c;
 }
 
@@ -408,7 +425,10 @@ export function fichaEmpresa(db, id, opts) {
       + '        (SELECT COUNT(*) FROM sg_contacto_charlas ch'
       + '          WHERE ch.contacto_id = c.id AND ch.eliminado_en IS NULL) AS charlas,'
       + '        (SELECT MAX(fecha) FROM sg_contacto_charlas ch'
-      + '          WHERE ch.contacto_id = c.id AND ch.eliminado_en IS NULL) AS ultima_charla'
+      + '          WHERE ch.contacto_id = c.id AND ch.eliminado_en IS NULL) AS ultima_charla,'
+      // Sí/no, nunca la ruta (ver el comentario en ficha()). Sirve para que la lista de
+      // la empresa muestre quién tiene la tarjeta guardada sin pedir cada ficha.
+      + '        (c.tarjeta_path IS NOT NULL) AS tiene_tarjeta'
       + '   FROM sg_contactos c'
       + '  WHERE c.empresa_id = ? AND c.eliminado_en IS NULL'
       + '  ORDER BY c.activo DESC, c.nombre COLLATE NOCASE').all(id);

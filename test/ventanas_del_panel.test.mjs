@@ -38,12 +38,36 @@ function clases(tag) {
 //
 // Un audit que no ve la mitad de lo que audita da una tranquilidad falsa, que es
 // peor que no tenerlo.
+//
+// Y se le escapaba una CUARTA familia. `ab-modal` significa DOS cosas en este
+// archivo, y ahí estaba el agujero:
+//
+//   · 155 veces es la TARJETA DE ADENTRO de un overlay — el rectángulo blanco.
+//     Ésa no es una ventana y no hay que auditarla.
+//   · 6 veces era el overlay MISMO, con el display puesto a mano en el style.
+//     Ésas sí lo eran, y eran las únicas seis del panel que colgaban de una
+//     pantalla: justo lo que este archivo dice estar cuidando, y no lo veía.
+//
+// Se distinguen por dónde están: una tarjeta vive ADENTRO de un overlay; un
+// overlay, no. Las seis eran las de Contactos y se arreglaron al rehacer la
+// ficha editable (V1097); la familia entró al audit en el mismo PR para que la
+// séptima que alguien escriba mañana no vuelva a pasar de largo.
+//
+// Dos auditorías que miran «casi todo» no suman: suman la ilusión de que lo que
+// no aparece es porque está bien.
+function dentroDeOverlay(pos) {
+  return ancestros(pos).some((t) => clases(t).includes('ab-modal-overlay'));
+}
 function ventanas() {
   const out = [];
   for (const m of PANEL.matchAll(/<div\b[^>]*>/g)) {
     const c = clases(m[0]);
     const aMano = /position:fixed;inset:0/.test(m[0]) && /z-index/.test(m[0]);
-    if (!c.includes('ab-modal-overlay') && !c.includes('mb') && !aMano) continue;
+    // `ab-modal` suelto cuenta sólo si NO cuelga de un overlay (ver arriba).
+    const abModalSuelto = c.includes('ab-modal') && !c.includes('ab-modal-overlay')
+      && !dentroDeOverlay(m.index);
+    if (!c.includes('ab-modal-overlay') && !abModalSuelto
+        && !c.includes('mb') && !aMano) continue;
     out.push({
       clases: c.join(' '),
       id: (m[0].match(/id="([^"]+)"/) || [, null])[1],
@@ -139,6 +163,29 @@ test('UNA sola manera de darle altura a la ventana, la abra quien la abra', () =
   assert.match(obs, /classList\.contains\('ab-modal-overlay'\) \|\| t\.classList\.contains\('mb'\)/);
   // Y el helper sigue existiendo: es la forma explícita de abrir.
   assert.match(PANEL, /function sgModalArriba\(id\)\{/);
+});
+
+test('LA TARJETA DE ADENTRO USA UNA CLASE QUE EXISTE', () => {
+  // Las ventanas de Contactos tenían adentro un <div class="ab-modal-c">, y esa
+  // clase NO TIENE UNA SOLA REGLA en todo el repo. Funcionaba de casualidad:
+  // afuera llevaban `ab-modal`, que sí tiene el fondo, el borde y el relleno, y
+  // hacía de tarjeta y de overlay a la vez. Al pasarlas a `ab-modal-overlay` —que
+  // es un fondo oscuro transparente— la tarjeta se quedó sin un solo estilo.
+  //
+  // Compila igual, el test de sintaxis pasa, y se ve recién abriéndola. Lo que lo
+  // encontró fue mirar si la clase existía, así que eso es lo que se clava.
+  //
+  // De paso explica el síntoma original: sin overlay no había fondo oscuro, y por
+  // eso una ventana abierta sobre otra no se distinguía de la de abajo.
+  const usadas = new Set();
+  for (const m of PANEL.matchAll(/class="([^"]*)"/g)) {
+    for (const c of m[1].split(/\s+/)) if (/^ab-modal/.test(c)) usadas.add(c);
+  }
+  assert.ok(usadas.size >= 2, 'el regex no encontró las clases ab-modal*');
+  const huerfanas = [...usadas].filter((c) =>
+    !new RegExp('\\.' + c.replace(/-/g, '\\-') + '(?![\\w-])').test(PANEL));
+  assert.deepEqual(huerfanas, [],
+    'se usan clases ab-modal* que no tienen ninguna regla CSS: el elemento sale sin estilo');
 });
 
 test('y ninguna se cierra al clic afuera', () => {
