@@ -62,6 +62,15 @@ const PREFIJOS = [
   ['contactos', 'sg/contactos'],
   // El consumo de IA: sólo lectura, y el router además exige admin por su cuenta.
   ['ia-uso', 'ia-uso'],
+  // 🏭 GALPÓN. Configurar las cuadrillas y los rangos de tarjetas pide 'operar'. Sin
+  // esta línea, moduloDeRuta devuelve null y exigirNivel deja pasar a cualquiera con
+  // sesión — y un rango mal puesto le atribuye los kilos de una cuadrilla a otra toda
+  // la temporada.
+  //
+  // Cuando entren el volcado y el tablero, CADA UNO se declara con sus propias
+  // direcciones: el prefijo pelado 'galpon' le daría las rutas de los cuatro a un solo
+  // menú, que es la trampa que este archivo advierte arriba.
+  ['galpon-config', 'galpon/config,galpon/cuadrillas,galpon/tarjetas'],
   // P&L ABASTO (V1052). Router propio de un solo módulo: subir el libro diario y guardar
   // los rubros pide 'operar'.
   ['pl-abasto', 'pl-abasto'],
