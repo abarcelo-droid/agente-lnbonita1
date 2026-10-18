@@ -21,7 +21,7 @@ import { crearEsquema } from '../src/servicios/share_ddl.js';
 // share_import.js importa xlsx, así que también se carga a demanda: con el import
 // arriba, el archivo moría antes de llegar a ningún test.
 let XLSX = null, importar = null, analizar = null, recalcularKg = null, reclasificarFamilias = null;
-let falta = null;
+let falta = false;
 try {
   XLSX = await import('xlsx');
   ({ importar, analizar, recalcularKg, reclasificarFamilias } =
