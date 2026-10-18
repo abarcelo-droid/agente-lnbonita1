@@ -245,10 +245,21 @@ no ofrezca lo que va a rebotar.
   está (`xlsx`, `jspdf`) lo cargan **a demanda** y se **saltean** si falta,
   diciendo cuál falta y que se arregla con `npm install`. Donde hay
   `node_modules` corren igual que siempre.
-  **Si ves un rojo, es un rojo de verdad.** Y si ves que los salteados suben de
-  27, alguien rompió otra cosa: `test/suite_sin_rojos_permanentes.test.mjs`
-  vigila que el salteo siga siendo condicional y que ningún test nuevo se
-  escape del envoltorio.
+  **Si ves un rojo, es un rojo de verdad.** Y **acá los salteados son 0**:
+  `test/suite_sin_rojos_permanentes.test.mjs` vigila que el salteo siga siendo
+  condicional y que ningún test nuevo se escape del envoltorio.
+- **`{ skip: null }` NO ES LO MISMO QUE `{ skip: false }`.** Esta línea decía que
+  los salteados eran 27 y que había que preocuparse recién si subían. Eran 27
+  porque el envoltorio arrancaba en `let falta = null`, y con `null` node:test
+  **corre el cuerpo igual** pero anota el resultado en el balde de los salteados:
+  esos 27 tests se ejecutaban, un rojo adentro no contaba, y `npm test` salía con
+  **exit code 0**. Nunca contaron desde el día que se escribió el envoltorio.
+
+  Era justo lo que `suite_sin_rojos_permanentes.test.mjs` decía estar cuidando, y
+  lo dejó pasar porque auditaba el TEXTO del archivo —que estaba perfecto— en vez
+  de la conducta. Arreglado el 18/10/2026 (V1095): `falta` arranca en `false`, y
+  el guard ahora **corre** el idioma en un proceso aparte y mira el exit code.
+  Si escribís un test que se saltea condicionalmente, el centinela va en `false`.
 - No hay `node_modules`: no se puede levantar el server ni usar better-sqlite3. Los
   tests usan `node:sqlite` (viene con Node 24) y copian `src/servicios` a un temporal
   reemplazando sólo los módulos que abren la base. Ver `test/plata_sg.test.mjs`.

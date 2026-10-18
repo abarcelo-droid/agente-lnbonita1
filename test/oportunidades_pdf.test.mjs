@@ -25,7 +25,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 let generarOportunidadesPDF = null, agruparPorCliente = null, GUIA = null;
-let falta = null;
+let falta = false;
 try {
   const m = await import('../src/servicios/oportunidadesPDF.js');
   ({ generarOportunidadesPDF, agruparPorCliente, GUIA } = m);
