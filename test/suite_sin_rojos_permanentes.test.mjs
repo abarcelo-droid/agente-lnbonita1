@@ -25,9 +25,13 @@ const RAIZ = process.env.LNB_RAIZ
   || path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const CLAUDE = fs.readFileSync(path.join(RAIZ, 'CLAUDE.md'), 'utf8');
 
+// ESTA LISTA ES EL REGISTRO: un archivo que use el envoltorio y no esté acá, no lo
+// vigila nadie. Se anota al escribirlo, no después.
 const CONDICIONALES = [
   { archivo: 'share_import.test.mjs', paquete: 'xlsx' },
   { archivo: 'oportunidades_pdf.test.mjs', paquete: 'jspdf' },
+  { archivo: 'galpon_tarjetas_pdf.test.mjs', paquete: 'jspdf' },
+  { archivo: 'galpon_router.test.mjs', paquete: 'express' },
 ];
 
 const leer = (f) => fs.readFileSync(path.join(RAIZ, 'test', f), 'utf8');

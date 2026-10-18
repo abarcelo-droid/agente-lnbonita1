@@ -285,6 +285,7 @@ input[type=number]{-moz-appearance:textfield;appearance:textfield}
     <div class="ni" data-sec="share"><span class="dot db"></span>🛒 SHARE Carrefour</div>
     <div class="ni" data-sec="contactos"><span class="dot dc"></span>📇 Contactos</div>
     <div class="ni" data-sec="ia-uso"><span class="dot da"></span>⚡ Consumo de IA</div>
+    <div class="ni" data-sec="galpon-config"><span class="dot da"></span>⚙️ Galpón · Configuración</div>
   </div>
 
   <div class="ni-grp" data-grp="ven-ventas">Administración de Ventas<span class="ni-caret">▾</span></div>
@@ -6812,6 +6813,192 @@ input[type=number]{-moz-appearance:textfield;appearance:textfield}
     <div id="iu-detalle"></div>
   </div>
 </div>
+
+  <!-- ══════════════════════════════════════════════════════════════════════════════
+       🏭 GALPÓN · CONFIGURACIÓN
+       ══════════════════════════════════════════════════════════════════════════════
+       Lo que hay que dejar listo ANTES del primer camión: qué cuadrilla es de qué color,
+       qué tarjetas le tocan, y cuánto pesa un IFCO vacío.
+
+       Es la única pantalla del módulo con plazo físico: las tarjetas hay que imprimirlas,
+       cortarlas y repartirlas. -->
+  <div class="sec sg-mod" id="sec-galpon-config">
+    <style>
+      /* SIN BARRA DE DESPLAZAMIENTO LATERAL (CLAUDE.md): anchos fijos por columna, se
+         parte sólo el nombre de la cuadrilla —lo único de largo variable— y el resto se
+         trunca. La clase .ab-table-wrap trae su propio overflow-x:auto, así que hace
+         falta el !important para ganarle. */
+      #sec-galpon-config .gal-tbl{table-layout:fixed;width:100%;max-width:98vw}
+      #sec-galpon-config .gal-tbl th,#sec-galpon-config .gal-tbl td{
+        white-space:nowrap;overflow:hidden;text-overflow:ellipsis;vertical-align:middle}
+      #sec-galpon-config .gal-tbl td.gal-w,#sec-galpon-config .gal-tbl th.gal-w{
+        white-space:normal;word-break:break-word}
+      #sec-galpon-config .ab-table-wrap{overflow-x:hidden !important}
+      @media(max-width:900px){ #sec-galpon-config .ab-table-wrap{overflow-x:auto !important}
+                               #sec-galpon-config .gal-tbl{table-layout:auto} }
+      #sec-galpon-config .gal-num{text-align:right;font-variant-numeric:tabular-nums}
+
+      /* La muestra de color. Redonda y grande: es lo que se mira, no el hex. */
+      #sec-galpon-config .gal-sw{display:inline-block;width:22px;height:22px;border-radius:50%;
+        border:2px solid rgba(0,0,0,.14);vertical-align:middle;cursor:pointer}
+      #sec-galpon-config .gal-sw.ro{cursor:default}
+      #sec-galpon-config .gal-sin{color:var(--mut);font-style:italic;font-size:11.5px}
+
+      /* Los rangos de una cuadrilla, como chapitas. Varias filas por cuadrilla es lo
+         normal: la tanda se amplía a mitad de temporada sin tocar la anterior. */
+      #sec-galpon-config .gal-rg{display:inline-block;padding:1px 8px;border-radius:9px;
+        background:var(--bg2,#f1f1f1);font-size:11.5px;font-variant-numeric:tabular-nums;
+        margin:1px 3px 1px 0}
+      #sec-galpon-config .gal-rg b{font-weight:600}
+      #sec-galpon-config .gal-rg i{font-style:normal;color:#b3261e;cursor:pointer;
+        margin-left:5px;font-weight:700}
+
+      #sec-galpon-config .gal-cfg{display:flex;gap:14px;flex-wrap:wrap;align-items:flex-end;
+        padding:14px;border:1px solid var(--bor);border-radius:10px;margin-bottom:18px}
+      #sec-galpon-config .gal-cfg label{font-size:11px;color:var(--mut);display:block;margin-bottom:3px}
+      #sec-galpon-config .gal-cfg input{padding:6px 9px;border:1px solid var(--bor);
+        border-radius:7px;font-size:13px;background:var(--bg);color:var(--fg)}
+      #sec-galpon-config .gal-cfg .gal-ay{font-size:10.5px;color:var(--mut);margin-top:3px;max-width:230px}
+      #sec-galpon-config .gal-vacio{text-align:center;padding:34px;color:var(--mut);font-size:13px}
+    </style>
+
+    <div class="ph">
+      <div><div class="ph-t">🏭 Galpón · Configuración</div>
+        <div class="ph-s">De qué color es cada cuadrilla, qué tarjetas le tocan y cuánto
+          pesa un IFCO vacío. Las tarjetas se imprimen desde acá.</div></div>
+      <div style="display:flex;gap:8px">
+        <button class="btn bo bs" onclick="galPrintAbrir()">🖨️ Imprimir tarjetas</button>
+        <button class="btn bo bs" onclick="sgManualAbrir('galpon-config')">❓ ¿Cómo se usa?</button></div>
+    </div>
+
+    <!-- ── LAS CUADRILLAS ───────────────────────────────────────────────────────────
+         Salen de Personal (pa_cuadrillas). Acá NO se dan de alta: lo que se les agrega
+         es el color y el rango de tarjetas, que es lo único que el galpón necesita. -->
+    <h3 style="margin:0 0 9px;font-size:14px">Cuadrillas y sus tarjetas</h3>
+    <div id="gal-aviso-ro" style="display:none;margin-bottom:10px" class="ojo">
+      Para cambiar un color o asignar tarjetas hace falta ser administrador: un rango mal
+      puesto le atribuye los kilos de una cuadrilla a otra toda la temporada. Imprimir sí
+      podés.</div>
+    <div class="ab-table-wrap">
+      <table class="pa-tbl gal-tbl">
+        <colgroup><col style="width:30%"><col style="width:9%"><col style="width:12%">
+                  <col style="width:30%"><col style="width:19%"></colgroup>
+        <thead><tr>
+          <th class="gal-w">Cuadrilla</th><th>Color</th><th class="gal-num">Tarjetas</th>
+          <th class="gal-w">Rangos</th><th></th>
+        </tr></thead>
+        <tbody id="gal-cuad-body"></tbody>
+      </table>
+    </div>
+
+    <!-- ── LOS PARÁMETROS ───────────────────────────────────────────────────────────
+         Se tocan una vez por temporada. La tara entra a TODAS las restas del día: con
+         2 kg de tara y 300 IFCOs, equivocarse en medio kilo son 150 kg inventados. -->
+    <h3 style="margin:20px 0 9px;font-size:14px">Parámetros del galpón</h3>
+    <div class="gal-cfg">
+      <div>
+        <label>Tara del IFCO vacío (kg)</label>
+        <input type="number" step="0.01" min="0" id="gal-tara" style="width:120px">
+        <div class="gal-ay">Se le resta al bruto de la balanza en cada volcado.</div>
+      </div>
+      <div>
+        <label>Objetivo de ritmo (kg/hora)</label>
+        <input type="number" step="1" min="0" id="gal-obj" style="width:120px">
+        <div class="gal-ay">El tablero pinta el ritmo real contra este número.</div>
+      </div>
+      <div style="flex:1;min-width:240px">
+        <label>Motivos para marcar un IFCO observado</label>
+        <input type="text" id="gal-motivos" style="width:100%">
+        <div class="gal-ay" style="max-width:none">Separados por coma. Son los botones que
+          ve el que vuelca: texto libre serían cuarenta maneras de escribir «golpeado» y
+          ningún informe posible.</div>
+      </div>
+      <div><button class="btn bp" id="gal-cfg-guardar" onclick="galCfgGuardar()">Guardar</button></div>
+    </div>
+  </div>
+
+
+  <!-- ══════════════════════════════════════════════════════════════════════════════
+       LAS DOS VENTANAS DEL GALPÓN
+       ══════════════════════════════════════════════════════════════════════════════
+       Van FUERA de toda .sec (CLAUDE.md): con .sec{display:none}, una ventana que cuelga
+       de una pantalla sólo se abre desde ésa, y desde otra el botón corre sin que se vea
+       nada. Y no se cierran al clic afuera: un clic al costado es un accidente. -->
+
+  <!-- ── ASIGNARLE TARJETAS A UNA CUADRILLA ────────────────────────────────────────
+       Un formulario de carga no vive metido en una pantalla: se abre en una ventana. Que
+       se abra es lo que le dice al operador que dejó de mirar y empezó a cargar. -->
+  <div class="ab-modal-overlay sg-mod" id="gal-rango-modal">
+    <div class="ab-modal-c" style="max-width:520px;width:96vw">
+      <div class="mhd"><div class="mht" id="gal-rango-tit">Tarjetas de la cuadrilla</div>
+        <button class="mcl" onclick="galRangoCerrar()">×</button></div>
+      <div class="sgr-card">
+        <div style="display:flex;gap:12px;flex-wrap:wrap">
+          <div><label>Desde el N°</label>
+            <input type="number" min="1" step="1" id="gal-rg-desde" oninput="galRangoCuenta()" style="width:140px"></div>
+          <div><label>Hasta el N°</label>
+            <input type="number" min="1" step="1" id="gal-rg-hasta" oninput="galRangoCuenta()" style="width:140px"></div>
+        </div>
+        <div style="margin-top:10px"><label>Nota (opcional)</label>
+          <input type="text" id="gal-rg-notas" placeholder="ej: reposición de las perdidas en noviembre"></div>
+        <div id="gal-rg-cuenta" style="margin-top:10px;font-size:12px;color:var(--mut)"></div>
+        <div id="gal-rg-error" style="display:none;margin-top:10px" class="ojo"></div>
+      </div>
+      <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:14px">
+        <button class="btn bo" onclick="galRangoCerrar()">Cancelar</button>
+        <button class="btn bp" onclick="galRangoGuardar()">Asignar tarjetas</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── IMPRIMIR ──────────────────────────────────────────────────────────────────
+       Tres maneras, que son tres momentos: la tanda de una cuadrilla al empezar la
+       temporada, un rango a mano, o las sueltas que se perdieron. -->
+  <div class="ab-modal-overlay sg-mod" id="gal-print-modal">
+    <div class="ab-modal-c" style="max-width:560px;width:96vw">
+      <div class="mhd"><div class="mht">Imprimir tarjetas</div>
+        <button class="mcl" onclick="galPrintCerrar()">×</button></div>
+      <div class="sgr-card">
+        <div><label>Qué imprimir</label>
+          <select id="gal-pr-modo" onchange="galPrintModo()">
+            <option value="cuadrilla">La tanda entera de una cuadrilla</option>
+            <option value="rango">Un rango de números</option>
+            <option value="ids">Tarjetas sueltas (reposición)</option>
+          </select></div>
+
+        <div id="gal-pr-cuadrilla" style="margin-top:10px">
+          <label>Cuadrilla</label>
+          <select id="gal-pr-cid"></select>
+        </div>
+
+        <div id="gal-pr-rango" style="display:none;margin-top:10px">
+          <div style="display:flex;gap:12px;flex-wrap:wrap">
+            <div><label>Desde el N°</label>
+              <input type="number" min="1" step="1" id="gal-pr-desde" style="width:140px"></div>
+            <div><label>Hasta el N°</label>
+              <input type="number" min="1" step="1" id="gal-pr-hasta" style="width:140px"></div>
+          </div>
+        </div>
+
+        <div id="gal-pr-ids" style="display:none;margin-top:10px">
+          <label>Números, separados por coma</label>
+          <input type="text" id="gal-pr-lista" placeholder="7, 9, 11">
+        </div>
+
+        <div class="ojo" style="margin-top:12px">
+          Salen 8 por hoja A4. Cada tarjeta lleva su número <b>grande y en tinta</b>: si un
+          día no anda el lector, el cuadrillero la engancha igual y alguien anota el número
+          a mano. Las tarjetas son <b>reutilizables</b> — vuelven al campo después del
+          volcado.</div>
+        <div id="gal-pr-error" style="display:none;margin-top:10px" class="ojo"></div>
+      </div>
+      <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:14px">
+        <button class="btn bo" onclick="galPrintCerrar()">Cancelar</button>
+        <button class="btn bp" onclick="galPrintIr()">Abrir el PDF</button>
+      </div>
+    </div>
+  </div>
+
 
   <div class="sec sg-mod" id="sec-sg-importacion">
     <style>
@@ -25991,6 +26178,108 @@ SG_MANUAL.contactos = { titulo: 'Contactos comerciales', html:
   + 'de conversaciones con esa persona. Por eso la baja esconde y no borra.</div>'
 };
 
+SG_MANUAL['galpon-config'] = { titulo: 'Galpón · Configuración', html:
+  '<p>Puente Cordón cosecha, vuelca en el galpón, selecciona, embala y despacha. Hasta '
+  + 'ahora el sistema no guardaba <b>nada</b> de eso: los costos de mano de obra estaban, '
+  + 'pero <b>los kilos no los registraba nadie</b>. Este módulo es el primero que los mide, '
+  + 'y esta pantalla es lo que hay que dejar listo <b>antes</b> de que llegue el primer '
+  + 'camión.</p>'
+
+  + '<div class="ojo"><b>Lo único con plazo físico.</b> Las tarjetas hay que imprimirlas, '
+  + 'cortarlas y repartirlas en el campo. Si el día de la cosecha no están, no hay parche '
+  + 'de software que lo arregle a las siete de la mañana.</div>'
+
+  + '<h3>🎫 Las tarjetas <span class="ver">V1096</span></h3>'
+  + '<p>En el campo no hay tecnología. Cada cuadrilla tiene <b>tarjetas QR reutilizables de '
+  + 'su color</b>: el cuadrillero engancha una en cada IFCO que llena, y las tarjetas '
+  + '<b>vuelven al campo</b> después del volcado. No se imprime una por cosechada.</p>'
+  + '<ul>'
+  + '<li><b>La tarjeta no identifica al IFCO ni a la persona: identifica a la CUADRILLA.</b> '
+  + 'Por eso lo que se configura acá es un <i>rango de números</i> por cuadrilla, y no una '
+  + 'tarjeta por fila. Los kilos se miden por cuadrilla, que es como se paga el jornal.</li>'
+  + '<li><b>El color es para agarrarla, no para leerla.</b> A tres metros se ve el color, no '
+  + 'el texto. Si no elegís uno, el sistema le da a cada cuadrilla el primero de la paleta '
+  + 'que no esté usando otra — dejarlo a mano termina en dos cuadrillas del mismo color, '
+  + 'que es el único error que el color no puede corregir.</li>'
+  + '<li><b>El número va grande y en tinta.</b> Si un día no anda el lector, o se cayó '
+  + 'internet, el cuadrillero engancha la tarjeta igual y alguien anota el número en un '
+  + 'papel. Una tarjeta que sólo se puede leer con una máquina deja de servir justo el día '
+  + 'que la máquina falla.</li>'
+  + '<li>El QR lleva <b>el número pelado</b>, sin dirección web. La lectora USB se comporta '
+  + 'como un teclado: escanear <i>tipea</i> el contenido en el casillero que tenga el foco, '
+  + 'así que una dirección adentro del QR escribiría la dirección entera.</li>'
+  + '</ul>'
+
+  + '<h3>🖨️ Cómo se imprimen <span class="ver">V1096</span></h3>'
+  + '<p>Salen <b>8 por hoja A4</b>. El botón <b>Imprimir tarjetas</b> de arriba abre una '
+  + 'ventana con tres maneras, que son tres momentos distintos:</p>'
+  + '<ul>'
+  + '<li><b>La tanda entera de una cuadrilla</b> — al empezar la temporada. Imprime todos '
+  + 'sus rangos juntos. Es lo mismo que el botón 🖨️ de su fila.</li>'
+  + '<li><b>Un rango de números</b> — a mano. Si el rango cruza dos cuadrillas, cada tarjeta '
+  + 'sale con la suya: que salieran todas con el nombre de la primera sería peor que salir '
+  + 'sin nombre, porque la tarjeta diría algo falso.</li>'
+  + '<li><b>Tarjetas sueltas</b> — reposición de las que se perdieron o se arruinaron. Es la '
+  + 'operación más frecuente después del primer día.</li>'
+  + '</ul>'
+  + '<p>El PDF se abre en una pestaña nueva, en el visor del navegador, y de ahí se manda a '
+  + 'imprimir. <b>Cortar por el marco gris.</b></p>'
+
+  + '<h3>📐 Cuántas tarjetas necesita cada cuadrilla <span class="ver">V1096</span></h3>'
+  + '<p>La columna <b>Tarjetas</b> es el número que dice si alcanzan. La cuenta es simple: '
+  + 'tantas como IFCOs llene la cuadrilla <b>entre un volcado y el siguiente</b>, más un '
+  + 'margen. Si una cuadrilla llena 300 IFCOs por día y tiene 80 tarjetas, van a faltar a '
+  + 'media mañana.</p>'
+  + '<p>Se puede <b>ampliar la tanda a mitad de temporada</b> sin tocar la anterior: se le '
+  + 'agrega otro rango y el color se hereda solo.</p>'
+
+  + '<div class="ojo"><b>Dos cuadrillas no pueden compartir un número.</b> El sistema lo '
+  + 'rechaza al guardar, y dice con quién se pisa. No es una formalidad: si una misma '
+  + 'tarjeta fuera de dos cuadrillas, se le atribuiría a una de las dos para siempre y '
+  + '<b>los kilos de la otra desaparecerían sin que nadie lo note</b> hasta fin de '
+  + 'temporada.</div>'
+
+  + '<h3>❌ Dar de baja un rango <span class="ver">V1096</span></h3>'
+  + '<p>La <b>×</b> de cada chapita lo da de baja. <b>No borra nada:</b> los volcados ya '
+  + 'cargados guardaron su cuadrilla <i>congelada</i> en el momento, así que no cambian. El '
+  + 'rango queda apagado y sus números quedan libres para otra cuadrilla la temporada que '
+  + 'viene.</p>'
+
+  + '<h3>⚖️ La tara del IFCO <span class="ver">V1096</span></h3>'
+  + '<p>Lo que pesa un IFCO <b>vacío</b>, en kilos. Se le resta al bruto de la balanza en '
+  + '<b>cada</b> volcado.</p>'
+  + '<div class="ojo"><b>Es el número más caro de esta pantalla.</b> Entra a todas las '
+  + 'restas del día: con 300 IFCOs, equivocarse en medio kilo son 150 kg inventados o '
+  + 'perdidos, y no hay forma de darse cuenta mirando un volcado. Pesá un IFCO vacío de los '
+  + 'que se usan y poné ese número — no el del catálogo.</div>'
+
+  + '<h3>🎯 El objetivo de ritmo <span class="ver">V1096</span></h3>'
+  + '<p>En kg por hora. No cambia ningún cálculo: es contra qué se pinta el ritmo real en el '
+  + 'tablero. Sirve para ver en el momento si el galpón va atrasado, no después.</p>'
+
+  + '<h3>⚠️ Los motivos de calidad <span class="ver">V1096</span></h3>'
+  + '<p>Son los botones que ve el que vuelca cuando marca un IFCO como observado. Se '
+  + 'escriben separados por coma y <b>se eligen con un toque, no se escriben</b>: texto libre '
+  + 'serían cuarenta maneras de escribir «golpeado» y ningún informe posible al final de la '
+  + 'temporada.</p>'
+
+  + '<h3>👤 Quién puede qué <span class="ver">V1096</span></h3>'
+  + '<ul>'
+  + '<li><b>Cualquiera con el módulo</b> puede mirar la configuración e <b>imprimir</b> '
+  + 'tarjetas. El que las imprime a las seis de la mañana no suele ser el administrador.</li>'
+  + '<li><b>Sólo el administrador</b> cambia colores, asigna rangos y toca la tara. Es '
+  + 'parametrizar, se hace una vez por temporada, y un número mal puesto se arrastra todo '
+  + 'el año.</li>'
+  + '</ul>'
+
+  + '<h3>🔗 De dónde salen las cuadrillas <span class="ver">V1096</span></h3>'
+  + '<p>De <b>Personal → Cuadrillas</b>. Acá <b>no se dan de alta</b>: lo único que el '
+  + 'galpón les agrega es el color y el rango de tarjetas. Una cuadrilla nueva aparece sola '
+  + 'en esta lista, sin tarjetas, que es la señal de que le falta configurarse.</p>'
+  + '<p>Y esta pantalla es de <b>Puente Cordón</b>. Parado en otra empresa no se configura '
+  + 'ni se imprime nada de acá.</p>'
+};
+
 SG_MANUAL['ia-uso'] = { titulo: 'Consumo de IA', html:
   '<p>Varias pantallas del sistema usan <b>inteligencia artificial</b>: el lector de remitos '
   + 'de IFCO, la lectura de facturas y documentos, el parseo de liquidaciones, el detector de '
@@ -38368,6 +38657,7 @@ function loadSec(s) {
     'share': function(){ shInit(); },
     'contactos': function(){ ctInit(); },
     'ia-uso': function(){ iuInit(); },
+    'galpon-config': function(){ galInit(); },
     'pl-abasto': function(){ plaInit(); },
     'sg-catalogo':   function(){ sgLoadCaches(function(){ sgCatSub('productos'); }); },
     'sg-reportes':   function(){ sgRepInit(); },
@@ -53558,6 +53848,254 @@ function iuInit() {
   if (h && !h.value) h.value = iuHoy();
   if (d && !d.value) d.value = new Date(Date.now() - 29*86400000).toISOString().slice(0,10);
   iuCargar();
+}
+
+
+/* ══════════════════════════════════════════════════════════════════════════════════
+   🏭 GALPÓN · CONFIGURACIÓN
+   ══════════════════════════════════════════════════════════════════════════════════
+   Lo que hay que dejar listo antes del primer camión. La pantalla es una lista —las
+   cuadrillas— y lo que se CARGA desde ella se abre en ventana, que es la regla del
+   panel: que se abra una ventana es lo que avisa que se dejó de mirar y se empezó a
+   cargar. */
+var GAL = { cuadrillas: [], colores: [], config: null, cid: null };
+
+function galAdmin(){ return !!(window.LNB_USER && window.LNB_USER.rol === 'admin'); }
+function galEsc(s){ return String(s == null ? '' : s)
+  .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+
+async function galInit(){
+  var ro = document.getElementById('gal-aviso-ro');
+  if (ro) ro.style.display = galAdmin() ? 'none' : '';
+  ['gal-tara','gal-obj','gal-motivos'].forEach(function(id){
+    var e = document.getElementById(id); if (e) e.disabled = !galAdmin();
+  });
+  var g = document.getElementById('gal-cfg-guardar');
+  if (g) g.style.display = galAdmin() ? '' : 'none';
+  await galCargar();
+}
+
+async function galCargar(){
+  try {
+    var r = await fetch('/api/galpon/config', { credentials:'include' });
+    var j = await r.json();
+    if (!j.ok) throw new Error(j.error || 'no se pudo leer la configuración');
+    GAL.config = j.config; GAL.colores = j.colores || [];
+    var t = document.getElementById('gal-tara');    if (t) t.value = j.config.tara_ifco;
+    var o = document.getElementById('gal-obj');     if (o) o.value = j.config.objetivo_kg_hora;
+    var m = document.getElementById('gal-motivos'); if (m) m.value = (j.config.motivos_calidad||[]).join(', ');
+
+    var rc = await fetch('/api/galpon/cuadrillas', { credentials:'include' });
+    var jc = await rc.json();
+    if (!jc.ok) throw new Error(jc.error || 'no se pudieron leer las cuadrillas');
+    GAL.cuadrillas = jc.cuadrillas || [];
+    galPintar();
+  } catch (e) {
+    var b = document.getElementById('gal-cuad-body');
+    if (b) b.innerHTML = '<tr><td colspan="5" class="gal-vacio">'
+      + galEsc(e.message) + '</td></tr>';
+  }
+}
+
+function galPintar(){
+  var b = document.getElementById('gal-cuad-body'); if (!b) return;
+  if (!GAL.cuadrillas.length){
+    // Las cuadrillas salen de Personal: si no hay, el problema no se arregla acá y
+    // decir "no hay datos" mandaría a buscarlo en el lugar equivocado.
+    b.innerHTML = '<tr><td colspan="5" class="gal-vacio">No hay cuadrillas activas. '
+      + 'Se dan de alta en <b>Personal → Cuadrillas</b>; acá se les asignan las tarjetas.</td></tr>';
+    return;
+  }
+  var adm = galAdmin();
+  b.innerHTML = GAL.cuadrillas.map(function(c){
+    var sw = c.color
+      ? '<span class="gal-sw' + (adm ? '' : ' ro') + '" style="background:' + galEsc(c.color) + '"'
+        + (adm ? ' onclick="galColor(' + c.id + ')" title="Cambiar el color"' : '') + '></span>'
+      : '<span class="gal-sin">sin color</span>';
+    var rangos = (c.rangos || []).length
+      ? c.rangos.map(function(r){
+          return '<span class="gal-rg"><b>' + r.desde_id + '–' + r.hasta_id + '</b>'
+            + (adm ? '<i onclick="galRangoBaja(' + r.id + ',' + r.desde_id + ',' + r.hasta_id + ')"'
+                   + ' title="Dar de baja este rango">×</i>' : '') + '</span>';
+        }).join('')
+      : '<span class="gal-sin">sin tarjetas asignadas</span>';
+    return '<tr>'
+      + '<td class="gal-w"><b>' + galEsc(c.nombre) + '</b>'
+        + (c.tipo === 'pool' ? ' <span class="gal-sin">(pool)</span>' : '') + '</td>'
+      + '<td>' + sw + '</td>'
+      + '<td class="gal-num">' + (c.tarjetas || 0) + '</td>'
+      + '<td class="gal-w">' + rangos + '</td>'
+      + '<td style="text-align:right">'
+        + (adm ? '<button class="btn bo bs" onclick="galRangoAbrir(' + c.id + ')">+ Tarjetas</button> ' : '')
+        + '<button class="btn bo bs" onclick="galPrintCuadrilla(' + c.id + ')"'
+        + (c.tarjetas ? '' : ' disabled title="Todavía no tiene tarjetas asignadas"')
+        + '>🖨️</button></td>'
+      + '</tr>';
+  }).join('');
+}
+
+/* ── LOS PARÁMETROS ─────────────────────────────────────────────────────────────── */
+async function galCfgGuardar(){
+  var body = {
+    tara_ifco: document.getElementById('gal-tara').value,
+    objetivo_kg_hora: document.getElementById('gal-obj').value,
+    motivos_calidad: document.getElementById('gal-motivos').value,
+  };
+  try {
+    var r = await fetch('/api/galpon/config', { method:'PUT', credentials:'include',
+      headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
+    var j = await r.json();
+    if (!j.ok) return alert(j.error || 'no se pudo guardar');
+    GAL.config = j.config;
+    alert('Guardado.');
+  } catch (e) { alert('No se pudo guardar: ' + e.message); }
+}
+
+/* ── EL COLOR ───────────────────────────────────────────────────────────────────
+   Un prompt y no una ventana: elegir un color de una paleta de siete no es cargar
+   nada, es un toque. La regla de la ventana es para los FORMULARIOS DE CARGA. */
+async function galColor(cid){
+  var c = GAL.cuadrillas.filter(function(x){ return x.id === cid; })[0]; if (!c) return;
+  var lista = GAL.colores.map(function(x, i){ return (i+1) + ') ' + x.nombre; }).join('   ');
+  var n = prompt('Color de ' + c.nombre + '\n\n' + lista + '\n\nNúmero:');
+  if (n === null) return;
+  var el = GAL.colores[parseInt(n, 10) - 1];
+  if (!el) return alert('No existe ese número.');
+  try {
+    var r = await fetch('/api/galpon/cuadrillas/' + cid + '/color', { method:'PATCH',
+      credentials:'include', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ color: el.hex }) });
+    var j = await r.json();
+    if (!j.ok) return alert(j.error || 'no se pudo cambiar el color');
+    await galCargar();
+  } catch (e) { alert('No se pudo cambiar el color: ' + e.message); }
+}
+
+/* ── LA VENTANA DE TARJETAS ─────────────────────────────────────────────────────
+   Se abre EN BLANCO siempre. Un formulario que sólo se esconde conserva lo que
+   tenía, y acá eso sería asignarle a una cuadrilla el rango que se tipeó para otra. */
+function galRangoAbrir(cid){
+  var c = GAL.cuadrillas.filter(function(x){ return x.id === cid; })[0]; if (!c) return;
+  GAL.cid = cid;
+  document.getElementById('gal-rango-tit').textContent = 'Tarjetas de ' + c.nombre;
+  document.getElementById('gal-rg-desde').value = '';
+  document.getElementById('gal-rg-hasta').value = '';
+  document.getElementById('gal-rg-notas').value = '';
+  document.getElementById('gal-rg-error').style.display = 'none';
+  // Un arranque sugerido: el número siguiente a la última tarjeta que haya dado alguien.
+  // Es lo que evita el error más caro de esta pantalla —dos rangos que se pisan— sin
+  // impedir tipear otra cosa.
+  var tope = 0;
+  GAL.cuadrillas.forEach(function(x){ (x.rangos||[]).forEach(function(r){
+    if (r.hasta_id > tope) tope = r.hasta_id; }); });
+  document.getElementById('gal-rg-desde').value = tope + 1;
+  galRangoCuenta();
+  document.getElementById('gal-rango-modal').classList.add('on');
+}
+function galRangoCerrar(){
+  document.getElementById('gal-rango-modal').classList.remove('on');
+  GAL.cid = null;
+}
+function galRangoCuenta(){
+  var d = parseInt(document.getElementById('gal-rg-desde').value, 10);
+  var h = parseInt(document.getElementById('gal-rg-hasta').value, 10);
+  var e = document.getElementById('gal-rg-cuenta');
+  if (!e) return;
+  if (!isFinite(d) || !isFinite(h) || h < d) { e.textContent = ''; return; }
+  var n = h - d + 1;
+  e.innerHTML = '<b>' + n + '</b> tarjetas, ' + Math.ceil(n / 8) + ' hoja'
+    + (Math.ceil(n/8) === 1 ? '' : 's') + ' para imprimir.';
+}
+async function galRangoGuardar(){
+  var cid = GAL.cid; if (!cid) return;
+  var err = document.getElementById('gal-rg-error');
+  err.style.display = 'none';
+  try {
+    var r = await fetch('/api/galpon/cuadrillas/' + cid + '/tarjetas', { method:'POST',
+      credentials:'include', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({
+        desde_id: document.getElementById('gal-rg-desde').value,
+        hasta_id: document.getElementById('gal-rg-hasta').value,
+        notas: document.getElementById('gal-rg-notas').value || null,
+      }) });
+    var j = await r.json();
+    if (!j.ok){
+      // El error se muestra ADENTRO de la ventana y la ventana no se cierra: el que
+      // pisó un rango tiene que poder corregir el número sin volver a tipear todo.
+      err.innerHTML = galEsc(j.error);
+      err.style.display = '';
+      return;
+    }
+    galRangoCerrar();
+    await galCargar();
+  } catch (e) {
+    err.textContent = 'No se pudo guardar: ' + e.message;
+    err.style.display = '';
+  }
+}
+async function galRangoBaja(id, d, h){
+  if (!confirm('¿Dar de baja las tarjetas ' + d + '–' + h + '?\n\n'
+    + 'Los volcados ya cargados no cambian: cada uno guardó su cuadrilla.')) return;
+  try {
+    var r = await fetch('/api/galpon/tarjetas/' + id, { method:'DELETE', credentials:'include' });
+    var j = await r.json();
+    if (!j.ok) return alert(j.error || 'no se pudo dar de baja');
+    await galCargar();
+  } catch (e) { alert('No se pudo dar de baja: ' + e.message); }
+}
+
+/* ── LA VENTANA DE IMPRIMIR ─────────────────────────────────────────────────────── */
+function galPrintAbrir(cid){
+  var sel = document.getElementById('gal-pr-cid');
+  sel.innerHTML = GAL.cuadrillas.map(function(c){
+    return '<option value="' + c.id + '"' + (c.tarjetas ? '' : ' disabled')
+      + '>' + galEsc(c.nombre) + (c.tarjetas ? ' (' + c.tarjetas + ')' : ' — sin tarjetas')
+      + '</option>';
+  }).join('');
+  document.getElementById('gal-pr-modo').value = 'cuadrilla';
+  document.getElementById('gal-pr-desde').value = '';
+  document.getElementById('gal-pr-hasta').value = '';
+  document.getElementById('gal-pr-lista').value = '';
+  document.getElementById('gal-pr-error').style.display = 'none';
+  if (cid) sel.value = String(cid);
+  galPrintModo();
+  document.getElementById('gal-print-modal').classList.add('on');
+}
+function galPrintCuadrilla(cid){ galPrintAbrir(cid); }
+function galPrintCerrar(){ document.getElementById('gal-print-modal').classList.remove('on'); }
+function galPrintModo(){
+  var m = document.getElementById('gal-pr-modo').value;
+  document.getElementById('gal-pr-cuadrilla').style.display = m === 'cuadrilla' ? '' : 'none';
+  document.getElementById('gal-pr-rango').style.display     = m === 'rango'     ? '' : 'none';
+  document.getElementById('gal-pr-ids').style.display       = m === 'ids'       ? '' : 'none';
+}
+function galPrintIr(){
+  var m = document.getElementById('gal-pr-modo').value, qs = '';
+  var err = document.getElementById('gal-pr-error');
+  err.style.display = 'none';
+  if (m === 'cuadrilla'){
+    var cid = document.getElementById('gal-pr-cid').value;
+    if (!cid) { err.textContent = 'Elegí una cuadrilla.'; err.style.display = ''; return; }
+    qs = 'cuadrilla_id=' + encodeURIComponent(cid);
+  } else if (m === 'rango'){
+    var d = parseInt(document.getElementById('gal-pr-desde').value, 10);
+    var h = parseInt(document.getElementById('gal-pr-hasta').value, 10);
+    if (!isFinite(d) || !isFinite(h) || h < d){
+      err.textContent = 'Revisá el rango: el "desde" tiene que ser menor o igual al "hasta".';
+      err.style.display = ''; return;
+    }
+    qs = 'desde=' + d + '&hasta=' + h;
+  } else {
+    var ids = (document.getElementById('gal-pr-lista').value || '')
+      .split(',').map(function(x){ return parseInt(x, 10); })
+      .filter(function(n){ return isFinite(n) && n > 0; });
+    if (!ids.length){ err.textContent = 'Escribí al menos un número.'; err.style.display = ''; return; }
+    qs = 'ids=' + ids.join(',');
+  }
+  // Se abre en una pestaña nueva, en el visor del navegador, y de ahí se imprime. La
+  // ventana se cierra sola: acá no queda nada para leer después, a diferencia de un CAE.
+  window.open('/api/galpon/tarjetas.pdf?' + qs, '_blank');
+  galPrintCerrar();
 }
 
 </script>

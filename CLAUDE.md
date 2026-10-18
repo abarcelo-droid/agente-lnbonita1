@@ -365,6 +365,54 @@ Al 8/9/2026 quedan **18 de 23 pantallas de SG sin manual**. Las que tienen: Ingr
 Órdenes de Compra, Stock, Gastos Directos, Asiento Modelo, Reprocesos y Remitos y
 Facturación.
 
+### 🏭 GALPÓN — lo que pasa entre el árbol y el pallet
+
+Puente Cordón cosecha, vuelca en el galpón, selecciona, embala y despacha. Hasta la
+V1096 el sistema **no guardaba un solo kilo de eso**: `pa_costos_lote` y
+`pa_costos_campaña` tienen la plata de la mano de obra, pero el volumen no lo registraba
+nadie. Este módulo es el primero que lo mide.
+
+**OJO CON EL NOMBRE.** «Galpón» ya significaba otra cosa acá: en IFCO, un galpón es un
+PROVEEDOR que guarda cajones (una fila de `proveedores`, ver `rutas/ifco.js`). Esto es el
+galpón de EMPAQUE. Por eso el prefijo de tabla `gal_` y las claves `galpon-*`, que no
+chocan con `ifco_`.
+
+**NADA SE PUEDE RECHAZAR DESPUÉS DEL HECHO: LA FRUTA YA ESTÁ EN LA TOLVA.** Es el
+principio que ordena todo el módulo y es al revés que en el resto del panel. Tarjeta
+repetida, número fuera de rango, balanza desconectada: ninguno puede bloquear la carga.
+Todos devuelven el problema DESCRITO para marcar la fila `a_revisar`, y alguien lo
+resuelve después. Un volcado que se niega a guardar es un IFCO que se perdió.
+
+Por eso las funciones de `servicios/galpon.js` devuelven siempre `{..., ok, motivo}` y
+**nunca tiran**.
+
+La excepción es la CONFIGURACIÓN, donde todavía no pasó nada: dos rangos de tarjetas que
+se pisan se rechazan con 409 antes de escribir. Si una misma tarjeta fuera de dos
+cuadrillas, se le atribuiría a una para siempre y los kilos de la otra desaparecerían sin
+que nadie lo note hasta fin de temporada.
+
+**LAS CUADRILLAS SON DE PERSONAL, Y NO SE LES AGREGAN COLUMNAS.** `pa_cuadrillas` la
+mantiene otro módulo. Lo que el galpón necesita —un color y un rango de tarjetas— vive en
+`gal_cuadrilla_tarjetas`, una tabla satélite. Agregarle una columna a la tabla de Personal
+es más corto y es la trampa: la hace nuestra para siempre. Y **sin FK** hacia `pa_*`
+(regla de más arriba: JOINs de lectura sí, FKs cruzadas no).
+
+**LA TARJETA IDENTIFICA A LA CUADRILLA, NO AL IFCO NI A LA PERSONA.** Son reutilizables y
+vuelven al campo después del volcado; por eso se configura un RANGO por cuadrilla y no una
+tarjeta por fila. Los kilos se miden por cuadrilla, que es como se paga el jornal.
+
+**El QR lleva el número pelado** (`contenidoQR` en `galponTarjetasPDF.js`). La lectora USB
+se comporta como un TECLADO: escanear TIPEA el contenido en el campo que tenga el foco, así
+que una URL adentro del QR escribiría la URL entera en el casillero del número. Y el número
+va grande y en tinta: una tarjeta que sólo se lee con una máquina deja de servir justo el
+día que la máquina falla.
+
+**El PDF de tarjetas va con `compress: true`**, y no es cosmético: jsPDF embebe cada QR
+como PNG sin comprimir y 16 tarjetas pesaban 3.037 KB — las 500 de una temporada, casi
+100 MB. Comprimido son 22 KB y 603 KB. La contra es que el texto deja de ser greppable
+dentro del binario, que es como se prueba `oportunidades_pdf`; acá se infla el stream con
+zlib y se leen los `(texto) Tj`, que es más fiel porque lee lo que se DIBUJÓ.
+
 ### Validación antes de entregar
 - **`npm test` SIEMPRE.** Esta sección decía "no hay tests" y contradecía a la de
   Limitaciones del entorno, setenta líneas más arriba, que dice lo contrario y es la
