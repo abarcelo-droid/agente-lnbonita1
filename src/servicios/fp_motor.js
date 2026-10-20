@@ -157,6 +157,14 @@ export function proyectar({ desde, semanas = 13, saldoInicial = 0, conceptos = [
     return exacto || comodin;
   }
 
+  // PLATA CON FECHA ILEGIBLE (V1098). `celda()` devuelve FUERA por dos motivos muy distintos:
+  // porque el movimiento cae más allá del horizonte —correcto, no entra— o porque su fecha no se
+  // puede leer. El segundo caso es un movimiento que EXISTE y que no está sumado en ningún total,
+  // igual que un banco que no matchea ninguna fila, y hasta ahora se iba sin que nadie se enterara.
+  // Se cuenta aparte para poder decirlo.
+  const sinFecha = { items: 0, monto: 0 };
+  const fechaIlegible = (f) => !lunesDe(f);
+
   const huerfanos = { items: 0, monto: 0, bancos: [] };
   const bancosSueltos = new Set();
   function sinFila(banco, monto) {
@@ -168,6 +176,11 @@ export function proyectar({ desde, semanas = 13, saldoInicial = 0, conceptos = [
   const cPrestamos = conceptos.filter(c => c.origen === 'prestamos');
   for (const q of cuotas) {
     const dia = diaDeCuota(q.periodo, q.semana_debito);
+    if (fechaIlegible(dia)) {
+      sinFecha.items++;
+      sinFecha.monto = round2(sinFecha.monto + (Number(q.capital) || 0) + (Number(q.interes) || 0));
+      continue;
+    }
     const i = celda(dia);
     if (i === FUERA) continue;                      // fuera del horizonte: correcto que no entre
     const monto = round2((Number(q.capital) || 0) + (Number(q.interes) || 0));
@@ -181,6 +194,11 @@ export function proyectar({ desde, semanas = 13, saldoInicial = 0, conceptos = [
 
   const cCheques = conceptos.filter(c => c.origen === 'cheques');
   for (const ch of cheques) {
+    if (fechaIlegible(ch.fecha_pago)) {
+      sinFecha.items++;
+      sinFecha.monto = round2(sinFecha.monto + (Number(ch.monto) || 0));
+      continue;
+    }
     const i = celda(ch.fecha_pago);
     if (i === FUERA) continue;
     const monto = round2(ch.monto);
@@ -242,6 +260,9 @@ export function proyectar({ desde, semanas = 13, saldoInicial = 0, conceptos = [
     // fila. Se informa SIEMPRE, aunque sea cero: un flujo de fondos donde algo
     // puede evaporarse sin aviso no sirve para decidir nada.
     huerfanos,
+    // Lo mismo por el otro motivo: la fecha no se pudo leer. Es la otra puerta por la que un
+    // movimiento se caía del cuadro sin dejar rastro.
+    sin_fecha: sinFecha,
   };
 }
 

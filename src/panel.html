@@ -80657,6 +80657,16 @@ function fpPintarKpis() {
          'en el préstamo o el cheque.</div>';
   }
 
+  // LA OTRA PUERTA POR LA QUE SE CAE PLATA DEL CUADRO (V1098): una fecha que no se puede leer. El
+  // motor no la puede ubicar en ninguna semana y la saltea; sin este aviso, el movimiento existe,
+  // no está en ningún total, y no hay manera de darse cuenta.
+  if (p.sin_fecha && p.sin_fecha.items) {
+    a += '<div style="background:#fee2e2;border:1px solid #fca5a5;border-radius:8px;padding:10px 13px;font-size:12px;margin-bottom:10px">' +
+         '<b>⚠ ' + fpMonto(p.sin_fecha.monto) + ' quedaron fuera del flujo</b> — ' + p.sin_fecha.items +
+         ' movimiento(s) tienen una <b>fecha que no se puede leer</b>, así que no están sumados en ' +
+         'ninguna semana. Revisá la fecha de esos cheques o cuotas: tiene que ser una fecha de verdad.</div>';
+  }
+
   if (sf.dispersion_dias > 7) {
     a += '<div style="background:#fef3c7;border:1px solid #fcd34d;border-radius:8px;padding:9px 13px;font-size:12px;margin-bottom:10px">' +
          '<b>Los saldos de banco son de fechas distintas</b> (del ' + fpDdMm(sf.min) + ' al ' + fpDdMm(sf.max) +
@@ -81178,10 +81188,26 @@ function fpChequesCargar() {
   });
 }
 
+// EL CUADRO SE RECALCULA SOLO (V1098).
+//
+// Pablo, 20/10/2026: «la suma en el detalle no me coincide con lo que me informás en la tabla
+// general». Y no coincidía: el cuadro se calculaba una sola vez, al apretar Proyectar, y NINGUNA de
+// las cinco cosas que cambian la plata lo volvía a calcular — importar el Excel, marcar un cheque
+// pagado, borrarlo, cargar un saldo o borrarlo—. El detalle de la celda, en cambio, consulta en
+// vivo. Así que después de subir el Excel el cuadro seguía mostrando la foto anterior y el detalle
+// la de ahora: dos números verdaderos de dos momentos distintos, sin nada que lo dijera.
+//
+// Se recalcula sólo si YA hay un cuadro: al que todavía no apretó Proyectar no se le pide al
+// servidor una cuenta que no está mirando.
+function fpRecalcular() {
+  if (FP.proy) fpProyectar();
+}
+
 function fpChequeEstado(id, estado) {
   fpApi('/cheques/' + id, { method: 'PATCH', body: JSON.stringify({ estado: estado }) }).then(function(r) {
     if (!r.ok) return fpErr(r);
     fpChequesCargar();
+    fpRecalcular();
   });
 }
 function fpChequeBorrar(id) {
@@ -81189,6 +81215,7 @@ function fpChequeBorrar(id) {
   fpApi('/cheques/' + id, { method: 'DELETE' }).then(function(r) {
     if (!r.ok) return fpErr(r);
     fpChequesCargar();
+    fpRecalcular();
   });
 }
 
@@ -81422,6 +81449,8 @@ function fpImportar(preview) {
           + (r.se_dan_de_baja ? ', ' + r.se_dan_de_baja + ' dados de baja' : ''));
     document.getElementById('fp-mb-import').classList.remove('on');
     fpChequesCargar();
+    // Subir el Excel es lo que MÁS cambia el cuadro: 400 cheques de una.
+    fpRecalcular();
   });
 }
 
@@ -81433,6 +81462,13 @@ function fpImportar(preview) {
 function fpChequesDeSemana(i, esIngreso) {
   var p = FP.proy; if (!p || !p.semanas || !p.semanas[i]) return;
   var desde = p.semanas[i];
+  // CUÁNTO DICE EL CUADRO PARA ESTA CELDA. Se suman TODAS las filas de cheques de ese signo,
+  // porque la consulta del detalle no filtra por banco: es el mismo conjunto. Se compara abajo, y
+  // si no da igual se dice — dos números distintos en dos ventanas, callados, es lo que hizo
+  // perder una tarde.
+  var enElCuadro = (p.filas || []).filter(function(f) {
+    return f.origen === 'cheques' && (f.naturaleza === 'ingreso') === !!esIngreso;
+  }).reduce(function(a, f) { return a + (Number((f.montos || [])[i]) || 0); }, 0);
   // El fin de semana: el día anterior a la que sigue, o +6 si es la última.
   var hasta = p.semanas[i + 1]
     ? new Date(new Date(p.semanas[i + 1] + 'T00:00:00').getTime() - 86400000).toISOString().slice(0, 10)
@@ -81448,7 +81484,7 @@ function fpChequesDeSemana(i, esIngreso) {
     if (!r.ok) { cont.innerHTML = '<div class="fp-vacio">' + fpEsc(r.error || 'Error') + '</div>'; return; }
     // El orden arranca como viene del servidor: por fecha, y dentro de cada día el más grande
     // arriba. Es con lo que se sale a pagar.
-    FP.sem = { filas: r.data || [], orden: 'fecha_pago', desc: false,
+    FP.sem = { filas: r.data || [], orden: 'fecha_pago', desc: false, enElCuadro: enElCuadro,
       aviso: i === 0 ? ' — incluye los vencidos de antes, que la proyección suma en la primera semana' : '' };
     fpSemPintar();
   });
@@ -81520,7 +81556,20 @@ function fpSemPintar() {
     return '<span class="fp-flecha">' + (FP.sem.desc ? '▼' : '▲') + '</span>';
   };
 
-  cont.innerHTML = '<div class="fp-chica" style="margin-bottom:8px">'
+  // SI EL CUADRO DICE OTRA COSA, SE DICE ACÁ (V1098). Los dos números salen de la misma base, así
+  // que una diferencia significa que el cuadro quedó viejo: se calculó antes del último cambio.
+  // Mostrarlos en dos ventanas sin decir nada es lo que hace dudar de todo el módulo.
+  var dif = Number(FP.sem.enElCuadro || 0) - total;
+  var aviso = Math.abs(dif) > 0.009
+    ? '<div style="background:#fee2e2;border:1px solid #fca5a5;border-radius:8px;padding:10px 13px;'
+      + 'font-size:12px;margin-bottom:10px"><b>⚠ El cuadro dice ' + fpMonto(FP.sem.enElCuadro)
+      + ' y acá hay ' + fpMonto(total) + '</b> — una diferencia de ' + fpMonto(Math.abs(dif)) + '. '
+      + 'Los dos salen de los mismos cheques, así que el cuadro quedó viejo: apretá '
+      + '<b>Proyectar</b> y vuelve a cuadrar. Lo de esta ventana es lo que hay <b>ahora</b>.</div>'
+    : '';
+
+  cont.innerHTML = aviso
+    + '<div class="fp-chica" style="margin-bottom:8px">'
     + '<b>' + f.length + '</b> cheque(s) · total <b>' + fpMonto(total) + '</b>'
     + fpEsc(FP.sem.aviso)
     + '</div>'
@@ -81588,6 +81637,8 @@ function fpSaldoGuardar() {
     toast(r.actualizado ? 'Saldo actualizado' : 'Saldo cargado');
     closeMB('fp-sal-modal');
     fpSaldosCargar();
+    // El saldo de banco es el punto de partida del acumulado: cambia TODA la fila.
+    fpRecalcular();
   });
 }
 
@@ -81596,6 +81647,8 @@ function fpSaldoBorrar(id) {
   fpApi('/saldos/' + id, { method: 'DELETE' }).then(function(r) {
     if (!r.ok) return fpErr(r);
     fpSaldosCargar();
+    // Sacar un saldo mueve el punto de partida igual que cargarlo.
+    fpRecalcular();
   });
 }
 </script>
