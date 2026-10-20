@@ -7,6 +7,9 @@ import path from 'path';
 import bcrypt from 'bcrypt';
 import { fileURLToPath } from 'url';
 import { MODELO_CHAT } from '../config/ia.js';
+// La llamada pasa por servicios/ia.js, que la deja registrada: leer una factura con
+// visión es de lo más caro que hace este sistema, y hasta ahora no quedaba rastro.
+import { llamarIA } from '../servicios/ia.js';
 import { getDb } from '../servicios/db.js';
 import dbPa from '../servicios/db_pa.js'; // DB contable — asientos, proveedores
 
@@ -974,14 +977,7 @@ router.post('/leer-remito', requireAuth, async (req, res) => {
     const insumos = db.prepare('SELECT nombre, componente_madre FROM pa_insumos WHERE activo=1 ORDER BY nombre').all();
     const insNombres = insumos.map(i => i.nombre).join(', ');
 
-    const response = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': apiKey,
-        'anthropic-version': '2023-06-01'
-      },
-      body: JSON.stringify({
+    const data = await llamarIA('compra-leer-remito', {
         model: MODELO_CHAT,
         max_tokens: 1000,
         messages: [{
@@ -1030,13 +1026,7 @@ Solo devolvé el JSON, sin texto adicional.`
             }
           ]
         }]
-      })
     });
-
-    const data = await response.json();
-    if (!response.ok) {
-      return res.status(500).json({ ok: false, error: data.error?.message || 'Error de API' });
-    }
 
     const txt = (data.content || []).filter(b => b.type === 'text').map(b => b.text).join('\n')
       .replace(/```json|```/g, '').trim();
@@ -3082,14 +3072,7 @@ router.post('/combustible/leer-ticket', requireAuth, async (req, res) => {
   if (!apiKey) return res.status(500).json({ ok: false, error: 'API key no configurada' });
 
   try {
-    const response = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': apiKey,
-        'anthropic-version': '2023-06-01'
-      },
-      body: JSON.stringify({
+    const data = await llamarIA('combustible-leer-ticket', {
         model: MODELO_CHAT,
         max_tokens: 500,
         messages: [{
@@ -3112,12 +3095,7 @@ Devolvé SOLO un JSON válido sin markdown ni comentarios:
 Solo devolvé el JSON, sin texto adicional.` }
           ]
         }]
-      })
     });
-
-    const data = await response.json();
-    if (!response.ok)
-      return res.status(500).json({ ok: false, error: data.error?.message || 'Error de API' });
     const txt = (data.content || []).filter(b => b.type === 'text').map(b => b.text).join('\n')
       .replace(/```json|```/g, '').trim();
     let parsed;

@@ -283,6 +283,9 @@ input[type=number]{-moz-appearance:textfield;appearance:textfield}
     <div class="ni" data-sec="pa-despachos"><span class="dot dc"></span>🚚 Despachos</div>
     <div class="ni" data-sec="informes-comercial"><span class="dot da"></span>📊 Informes comerciales</div>
     <div class="ni" data-sec="share"><span class="dot db"></span>🛒 SHARE Carrefour</div>
+    <div class="ni" data-sec="contactos"><span class="dot dc"></span>📇 Contactos</div>
+    <div class="ni" data-sec="ia-uso"><span class="dot da"></span>⚡ Consumo de IA</div>
+    <div class="ni" data-sec="galpon-config"><span class="dot da"></span>⚙️ Galpón · Configuración</div>
   </div>
 
   <div class="ni-grp" data-grp="ven-ventas">Administración de Ventas<span class="ni-caret">▾</span></div>
@@ -6461,6 +6464,635 @@ input[type=number]{-moz-appearance:textfield;appearance:textfield}
     </div>
   </div>
 </div>
+
+
+<!-- ═══════════════════════════════════════════════════════════════════════════════════
+     CONTACTOS COMERCIALES — la agenda del área
+     ═══════════════════════════════════════════════════════════════════════════════════
+     Dos pantallas en una: el BUSCADOR (una caja, y encima la lista con el motivo por el
+     que trajo a cada uno) y la FICHA.
+
+     El buscador mira adentro de TODO, incluidas las charlas: la pregunta que el módulo
+     existe para contestar es "¿quién me habló de brócoli?", y eso no está en ningún campo
+     — está escrito en el resumen de una conversación de hace cuatro meses.
+
+     LOS MESES VAN DE JULIO A JUNIO, como todo el año comercial de la casa. La grilla de
+     doce celdas arranca en JUL. Si alguien la lee como enero, un productor de melón pasa
+     a ser de invierno.
+     ═══════════════════════════════════════════════════════════════════════════════════ -->
+<div class="sec sg-mod ct-ui" id="sec-contactos">
+  <style>
+    /* SIN BARRA DE DESPLAZAMIENTO LATERAL (CLAUDE.md): anchos fijos, se parte sólo el
+       nombre y el motivo —lo de largo variable— y el resto se trunca con ellipsis. */
+    .ct-ui .pa-tbl{table-layout:fixed;width:100%;max-width:98vw}
+    .ct-ui .pa-tbl th,.ct-ui .pa-tbl td{
+      white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding:7px 8px;font-size:12.5px;
+      vertical-align:top}
+    .ct-ui .pa-tbl td.ct-w,.ct-ui .pa-tbl th.ct-w{white-space:normal;word-break:break-word}
+    .ct-ui .ab-table-wrap{overflow-x:hidden !important}
+    @media(max-width:900px){ .ct-ui .ab-table-wrap{overflow-x:auto !important}
+                             .ct-ui .pa-tbl{table-layout:auto} }
+
+    /* LA CAJA DE BÚSQUEDA ES LA PANTALLA. Grande a propósito: es lo primero y casi lo
+       único que se usa. */
+    .ct-ui .ct-buscar{display:flex;gap:9px;align-items:center;margin-bottom:11px}
+    .ct-ui .ct-buscar input{
+      flex:1;padding:12px 15px;font-size:15px;border:2px solid var(--bor);border-radius:10px;
+      background:var(--bg)}
+    .ct-ui .ct-buscar input:focus{border-color:var(--burg);outline:none}
+    .ct-ui .ct-f{display:flex;gap:9px;flex-wrap:wrap;align-items:flex-end;margin-bottom:13px}
+    .ct-ui .ct-f label{font-size:11px;color:var(--mut);display:block;margin-bottom:3px}
+    .ct-ui .ct-f select,.ct-ui .ct-f input{
+      padding:5px 8px;border:1px solid var(--bor);border-radius:6px;background:var(--bg);font-size:12.5px}
+
+    /* El MOTIVO por el que apareció cada uno. Sin esto hay que abrir la ficha para
+       entender por qué está en la lista — y con una búsqueda que mira adentro de las
+       charlas, "por qué apareció" no es nada obvio. */
+    .ct-ui .ct-why{display:inline-block;padding:1px 7px;border-radius:9px;font-size:10px;
+      font-weight:600;background:var(--bor);color:var(--mut);margin-right:4px}
+    .ct-ui .ct-why-ch{background:#fff3cd;color:#7a5c00}
+    .ct-ui .ct-ext{font-size:11px;color:var(--mut);font-style:italic;margin-top:3px;
+      white-space:normal;line-height:1.45}
+
+    .ct-ui .ct-chip{display:inline-block;padding:1px 7px;border-radius:9px;font-size:10.5px;font-weight:600}
+    .ct-ui .ct-ch-prov{background:#e6f4ea;color:#1a7f37}
+    .ct-ui .ct-ch-cli{background:#e7f0fd;color:#14539a}
+    .ct-ui .ct-ch-amb{background:#f3e8fd;color:#6b2fa0}
+    .ct-ui .ct-ch-otro{background:var(--bor);color:var(--mut)}
+    /* Lo pendiente se ve en la lista, no sólo en la bandeja: el que busca a alguien por
+       otro motivo tiene que enterarse ahí mismo de que le quedó algo colgado con él. */
+    .ct-ui .ct-pend{background:#fdecec;color:#b3261e;font-weight:700}
+
+    /* LA GRILLA DE DOCE MESES. Arranca en JULIO. Se usa en tres lugares —la lista, la
+       ficha y el editor— con la misma forma, para que las franjas se comparen de un
+       vistazo sin tener que leer los nombres de los meses cada vez. */
+    .ct-ui .ct-mg{display:inline-flex;gap:1px;vertical-align:middle}
+    .ct-ui .ct-mg i{
+      width:13px;height:15px;border-radius:2px;background:var(--bor);display:inline-block;
+      font-size:0;cursor:default}
+    .ct-ui .ct-mg i.on{background:var(--burg)}
+    /* La franja OBSERVADA —lo que efectivamente le compramos— va en otro tono, para que
+       se distinga de la DECLARADA a simple vista. Son dos cosas distintas y el hueco
+       entre ellas es justamente la oportunidad. */
+    .ct-ui .ct-mg.ct-obs i.on{background:#9ab;opacity:.85}
+    .ct-ui .ct-mg-ed i{width:26px;height:22px;cursor:pointer;font-size:9px;
+      line-height:22px;text-align:center;color:var(--mut);font-style:normal}
+    .ct-ui .ct-mg-ed i.on{color:#fff}
+    .ct-ui .ct-mlbl{display:inline-flex;gap:1px;font-size:8px;color:var(--mut)}
+    .ct-ui .ct-mlbl span{width:13px;text-align:center}
+
+    .ct-ui .ct-pane{display:none} .ct-ui .ct-pane.on{display:block}
+    .ct-ui .ct-tab{padding:7px 13px;cursor:pointer;font-size:12.5px;font-weight:600;
+      border-radius:6px;color:var(--mut)}
+    .ct-ui .ct-tab.on{background:var(--burg);color:#fff}
+    .ct-ui .ct-tab .ct-cnt{margin-left:5px;background:var(--bor);border-radius:9px;
+      padding:0 6px;font-size:10.5px}
+    .ct-ui .ct-tab.on .ct-cnt{background:rgba(255,255,255,.25);color:#fff}
+
+    /* LA FICHA */
+    .ct-ui .ct-fbox{border:1px solid var(--bor);border-radius:11px;padding:15px;margin-bottom:13px}
+    .ct-ui .ct-fbox h4{margin:0 0 9px;font-size:12px;text-transform:uppercase;
+      letter-spacing:.4px;color:var(--mut)}
+    .ct-ui .ct-medio{display:flex;align-items:center;gap:8px;padding:5px 0;font-size:13px}
+    .ct-ui .ct-medio .ct-pref{color:#d4a017;cursor:pointer;font-size:14px}
+    .ct-ui .ct-charla{border-left:3px solid var(--bor);padding:3px 0 9px 11px;margin-bottom:10px}
+    .ct-ui .ct-charla.ct-c-pend{border-left-color:#b3261e}
+    .ct-ui .ct-charla .ct-c-hd{font-size:11px;color:var(--mut);margin-bottom:3px}
+    .ct-ui .ct-charla .ct-c-tx{font-size:13px;line-height:1.5;white-space:pre-wrap}
+    .ct-ui .ct-charla .ct-c-paso{font-size:12px;margin-top:5px;padding:4px 8px;
+      border-radius:6px;background:var(--bg2,#f6f6f6)}
+    /* El hueco: lo que ofrece y nunca le compramos. Es la conclusión del módulo, así que
+       se pinta — no se deja como una fila más de una tabla. */
+    .ct-ui .ct-hueco{background:#fff8e6;border:1px solid #f0d9a0;border-radius:9px;
+      padding:11px 13px;font-size:12.5px;line-height:1.6}
+    .ct-ui .ct-nd{font-size:11.5px;color:var(--mut);font-style:italic}
+    .ct-ui .ct-vacio{text-align:center;padding:34px;color:var(--mut);font-size:13px}
+  
+    /* ── SE EDITA DONDE SE LEE ──────────────────────────────────────────────────
+       Un campo se ve como texto hasta que se lo toca; ahí se vuelve un casillero y
+       se guarda solo al salir. Es UN mecanismo para los dieciocho campos de las dos
+       fichas, no dieciocho formularios: el que escriba el campo diecinueve mañana
+       lo tiene gratis.
+
+       El subrayado punteado es todo el aviso de que se puede tocar. Un botón de
+       lápiz por campo convertiría la ficha en una grilla de botones, que es lo
+       contrario de lo que se pidió. */
+    .ct-ui .ct-cmp{display:inline-block;vertical-align:top;margin:0 16px 9px 0;max-width:100%}
+    .ct-ui .ct-cmp > label{display:block;font-size:10.5px;color:var(--mut);
+      text-transform:uppercase;letter-spacing:.3px;margin-bottom:1px}
+    .ct-ui .ct-cv{font-size:13.5px;line-height:1.5;cursor:text;border-radius:5px;
+      padding:2px 5px;margin-left:-5px;border-bottom:1px dashed transparent;
+      min-width:70px;min-height:21px;white-space:pre-wrap;word-break:break-word}
+    .ct-ui .ct-cv:hover{background:var(--bg2,#f4f4f4);border-bottom-color:var(--bor)}
+    .ct-ui .ct-cv.ct-cv-vacio{color:var(--mut);font-style:italic}
+    .ct-ui .ct-cmp-ancho{display:block;margin-right:0}
+    .ct-ui .ct-cmp input,.ct-ui .ct-cmp select,.ct-ui .ct-cmp textarea{
+      font-size:13.5px;padding:3px 6px;border:1px solid var(--burg);border-radius:5px;
+      background:var(--bg);color:var(--fg);font-family:inherit;width:100%;box-sizing:border-box}
+    .ct-ui .ct-cmp textarea{line-height:1.5;resize:vertical}
+    /* Mientras guarda y cuando falla. Un campo que vuelve solo al valor viejo sin
+       decir nada se lee como «no se guardó porque sí». */
+    .ct-ui .ct-cv.ct-guardando{opacity:.5}
+    .ct-ui .ct-cmp-err{font-size:11px;color:#b3261e;margin-top:2px}
+
+    /* ── EL ENCABEZADO DE LA FICHA ──────────────────────────────────────────────
+       Lo primero que se mira: quién es, de qué empresa, y cómo se lo llama. Antes
+       había que bajar dos bloques para encontrar el teléfono. */
+    .ct-ui .ct-hero{display:flex;gap:15px;align-items:flex-start;padding:15px;
+      border:1px solid var(--bor);border-radius:11px;margin-bottom:13px;
+      background:var(--bg2,#fafafa)}
+    .ct-ui .ct-hero-d{flex:1;min-width:0}
+    .ct-ui .ct-hero-n{font-size:19px;font-weight:700;line-height:1.25}
+    .ct-ui .ct-hero-s{font-size:12.5px;color:var(--mut);margin-top:2px}
+    /* Los teléfonos como chapas que se tocan: en el celular abre el teléfono, en la
+       compu abre WhatsApp o el mail. Eran un renglón de texto para copiar a mano. */
+    .ct-ui .ct-tel{display:inline-flex;align-items:center;gap:5px;padding:3px 10px;
+      border-radius:16px;background:var(--bg);border:1px solid var(--bor);
+      font-size:12.5px;text-decoration:none;color:var(--fg);margin:4px 5px 0 0}
+    .ct-ui .ct-tel:hover{border-color:var(--burg)}
+    .ct-ui .ct-tel.ct-tel-pref{border-color:var(--burg);font-weight:600}
+
+    /* ── LA TARJETA ─────────────────────────────────────────────────────────────
+       Una foto y nada más: ni lector ni OCR. Lo que se tipea igual son el teléfono y
+       el mail, que es lo que el buscador tiene que encontrar — una foto no se busca.
+       Está para lo otro: la cara del logo, el cargo impreso, el teléfono que no se
+       cargó todavía. */
+    .ct-ui .ct-tj{width:148px;flex-shrink:0}
+    .ct-ui .ct-tj img{width:148px;height:92px;object-fit:cover;border-radius:8px;
+      border:1px solid var(--bor);cursor:zoom-in;display:block;background:var(--bg)}
+    .ct-ui .ct-tj-no{width:148px;height:92px;border:1px dashed var(--bor);border-radius:8px;
+      display:flex;align-items:center;justify-content:center;text-align:center;
+      font-size:10.5px;color:var(--mut);cursor:pointer;line-height:1.35;padding:6px;
+      box-sizing:border-box}
+    .ct-ui .ct-tj-no:hover{border-color:var(--burg);color:var(--burg)}
+    .ct-ui .ct-tj-pie{font-size:10px;color:var(--mut);margin-top:4px;text-align:center}
+    .ct-ui .ct-tj-pie a{cursor:pointer;text-decoration:underline}
+    .ct-ui #ct-foto-body img{max-width:100%;max-height:78vh;border-radius:8px;display:block}
+
+    /* ── LO QUE SE AGREGA, AGREGADO ACÁ MISMO ───────────────────────────────────
+       El renglón en blanco que aparece abajo de la lista. Reemplaza a las ventanas
+       y a los prompt() del navegador, que no se podían ni corregir ni cancelar. */
+    .ct-ui .ct-alta{border:1px dashed var(--bor);border-radius:9px;padding:11px;
+      margin-top:9px;background:var(--bg2,#fafafa)}
+    .ct-ui .ct-alta label{font-size:10.5px;color:var(--mut);display:block;margin-bottom:2px}
+    .ct-ui .ct-alta input,.ct-ui .ct-alta select,.ct-ui .ct-alta textarea{
+      padding:5px 8px;border:1px solid var(--bor);border-radius:6px;background:var(--bg);
+      color:var(--fg);font-size:12.5px;font-family:inherit}
+    .ct-ui .ct-alta-f{display:flex;gap:9px;flex-wrap:wrap;align-items:flex-end}
+    .ct-ui .ct-alta-err{font-size:11.5px;color:#b3261e;margin-top:6px}
+</style>
+
+  <div class="ph">
+    <div><div class="ph-t">📇 Contactos comerciales</div>
+      <div class="ph-s">La agenda del área, en dos niveles: la <b>empresa</b> —qué produce
+        y en qué meses— y las <b>personas</b> a las que se llama, con qué se habló la última
+        vez. Varias personas comparten empresa. El buscador mira adentro de las charlas.</div></div>
+    <div style="display:flex;gap:8px">
+      <button class="btn bo bs" onclick="sgManualAbrir('contactos')">❓ ¿Cómo se usa?</button>
+      <button class="btn bo" onclick="ctEmpNueva()">+ Empresa</button>
+      <button class="btn bb" onclick="ctNuevo()">+ Persona</button></div>
+  </div>
+
+  <div style="display:inline-flex;gap:2px;background:var(--bg);border:1px solid var(--bor);
+              border-radius:8px;padding:3px;margin-bottom:13px;flex-wrap:wrap">
+    <div class="ct-tab on" data-t="buscar" onclick="ctTab('buscar')">🔎 Personas</div>
+    <div class="ct-tab"    data-t="emp"    onclick="ctTab('emp')">🏢 Empresas</div>
+    <div class="ct-tab"    data-t="pend"   onclick="ctTab('pend')">📌 Me toca<span class="ct-cnt" id="ct-cnt-pend">·</span></div>
+  </div>
+
+  <!-- ── EL BUSCADOR DE PERSONAS ──────────────────────────────────────────────────────
+       Busca en los dos niveles a la vez: el que escribe "giglio" o "melon" no sabe ni le
+       importa si eso es de la persona o de la finca, y lo que quiere es a quién llamar. -->
+  <div class="ct-pane on" data-p="buscar">
+    <div class="ct-buscar">
+      <input id="ct-q" type="search" placeholder="Nombre, empresa, teléfono, mail, producto, o algo que se dijo en una charla…"
+             oninput="ctBuscarDebounce()">
+    </div>
+    <div class="ct-f" id="ct-filtros">
+      <div><label>Es</label><select id="ct-f-tipo" onchange="ctRecargar()">
+        <option value="">Todos</option>
+        <option value="proveedor">Proveedor</option>
+        <option value="cliente">Cliente</option>
+        <option value="ambos">Las dos cosas</option>
+        <option value="otro">Otro</option></select></div>
+      <div><label>Zona</label><select id="ct-f-zona" onchange="ctRecargar()"><option value="">Todas</option></select></div>
+      <div><label>Producto</label><select id="ct-f-prod" onchange="ctRecargar()"><option value="">Todos</option></select></div>
+      <!-- "Quién tiene melón en noviembre". Es el filtro que convierte la agenda en una
+           herramienta de salida a buscar mercadería. -->
+      <div><label>Tiene algo en</label><select id="ct-f-mes" onchange="ctRecargar()"><option value="">Cualquier mes</option></select></div>
+      <div><label>Atiende</label><select id="ct-f-vend" onchange="ctRecargar()"><option value="">Cualquiera</option></select></div>
+      <div><label>&nbsp;</label><label style="font-size:11.5px;color:var(--tx)">
+        <input type="checkbox" id="ct-f-inact" onchange="ctRecargar()" style="vertical-align:-1px"> ver inactivos</label></div>
+      <div><label>&nbsp;</label><button class="btn bo bs" onclick="ctLimpiar()">Limpiar</button></div>
+    </div>
+    <div id="ct-lista"></div>
+  </div>
+
+  <!-- ── LA VISTA POR EMPRESA ─────────────────────────────────────────────────────────
+       La misma agenda mirada por cuenta comercial. "Quién tiene melón en noviembre" es
+       una pregunta sobre FINCAS, y contestarla con tres filas de Giglio —una por cada
+       persona— es contestarla mal. -->
+  <div class="ct-pane" data-p="emp">
+    <div class="ct-buscar">
+      <input id="ct-eq" type="search" placeholder="Empresa, zona, producto, el nombre de alguien que trabaje ahí…"
+             oninput="ctBuscarDebounce()">
+    </div>
+    <div class="ct-nd" style="margin-bottom:11px">Usa los mismos filtros de arriba.
+      Lo que produce cada empresa y el vínculo con la planilla se cargan acá: así el dueño y
+      el encargado de la misma finca no tienen el calendario cargado dos veces.</div>
+    <div id="ct-emp-lista"></div>
+  </div>
+
+</div>
+
+<!-- ══════════════════════════════════════════════════════════════════════════════════
+     LAS VENTANAS DE CONTACTOS
+     ══════════════════════════════════════════════════════════════════════════════════
+     Andy, 18/10/2026: «no me convence mucho cómo está armado, como que se van abriendo
+     ventanas una abajo de otra para modificar; prefiero algo más como que entrás a la
+     ficha y ahí ves todo, más visual, y de ahí mismo editás».
+
+     Eran SEIS, y encadenadas: se abría la ficha de la empresa, de ahí «✏️ Editar» abría
+     otra ventana encima, y para corregir un producto una tercera. Cada salto perdía de
+     vista lo que se estaba mirando, que es justo lo que una ficha tiene que mostrar.
+
+     Ahora son DOS fichas y UNA de alta, y la regla es:
+
+       · DESDE LA LISTA se abre una ventana —es la regla de CLAUDE.md, y es lo que avisa
+         que se dejó de mirar y se empezó a cargar.
+       · DENTRO DE LA FICHA no se abre ninguna más: todo se edita donde se lee.
+
+     La ventana de alta pide lo mínimo (un nombre, y la empresa) y abre la ficha. El resto
+     —cargo, zona, teléfonos, productos, notas— se completa ahí adentro, con el contexto
+     a la vista.
+
+     ── Y VIVEN FUERA DE #sec-contactos ───────────────────────────────────────────────
+     Estaban ADENTRO, que es lo que CLAUDE.md prohíbe. Dos consecuencias reales:
+
+     1. El audit de ventanas no las veía. Mira `ab-modal-overlay`, `mb` y las escritas a
+        mano; éstas eran `ab-modal` a secas, una cuarta familia. Eran las 6 únicas de las
+        161 de esa familia que colgaban de una pantalla — el audit ahora las mira.
+     2. Se abrían con style.display, no con la clase `on`, así que quedaban afuera del
+        MutationObserver que reparte el z-index. Una ventana abierta desde adentro de otra
+        podía quedar DETRÁS. Ahora usan `on` y entran al mecanismo de siempre.
+
+     El CSS de la ficha está scopeado en `.ct-ui`, no en `#sec-contactos`: si no, moverlas
+     afuera las dejaba sin un solo estilo. -->
+
+  <!-- ── LA FICHA DE UNA PERSONA ──────────────────────────────────────────────────── -->
+
+  <!-- Las listas sugeridas de los casilleros de Contactos. Van acá, afuera y una sola vez:
+       antes se reescribían adentro de cada formulario, y como los formularios se fueron, se
+       habrían ido con ellos. Las llena ctOpciones(). -->
+  <datalist id="ct-dl-zonas" data-perm="1"></datalist>
+  <datalist id="ct-dl-vend"  data-perm="1"></datalist>
+  <datalist id="ct-dl-prod"  data-perm="1"></datalist>
+  <datalist id="ct-dl-emp"   data-perm="1"></datalist>
+
+  <div class="ab-modal-overlay ct-ui" id="ct-ficha-modal">
+    <div class="ab-modal" style="width:min(880px,96vw);max-width:96vw">
+      <div class="mhd"><div class="mht" id="ct-ficha-tit">Contacto</div>
+        <button class="mcl" onclick="ctFichaCerrar()">×</button></div>
+      <div id="ct-ficha-body"></div>
+    </div>
+  </div>
+
+  <!-- ── LA FICHA DE UNA EMPRESA ──────────────────────────────────────────────────────
+       La cuenta comercial: qué produce, quiénes trabajan ahí y todo lo que se habló con
+       cualquiera de ellos. Es la que se mira antes de salir a buscar fruta. -->
+  <div class="ab-modal-overlay ct-ui" id="ct-emp-modal">
+    <div class="ab-modal" style="width:min(920px,96vw);max-width:96vw">
+      <div class="mhd"><div class="mht" id="ct-emp-tit">Empresa</div>
+        <button class="mcl" onclick="ctEmpCerrar()">×</button></div>
+      <div id="ct-emp-body"></div>
+    </div>
+  </div>
+
+  <!-- ── EL ALTA ──────────────────────────────────────────────────────────────────────
+       UNA sola ventana para las dos altas, porque son el mismo gesto: poner un nombre y
+       entrar a la ficha. Pide lo mínimo a propósito — un formulario largo acá obliga a
+       tener todos los datos juntos justo cuando no se los tiene, que es cuando alguien te
+       acaba de dar una tarjeta. -->
+  <div class="ab-modal-overlay ct-ui sg-mod" id="ct-nuevo-modal">
+    <div class="ab-modal" style="width:min(560px,96vw);max-width:96vw">
+      <div class="mhd"><div class="mht" id="ct-nv-tit">Nueva persona</div>
+        <button class="mcl" onclick="ctNvCerrar()">×</button></div>
+      <div id="ct-nv-body"></div>
+      <div id="ct-nv-error" style="display:none;margin-top:11px" class="ojo"></div>
+      <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:14px">
+        <button class="btn bo" onclick="ctNvCerrar()">Cancelar</button>
+        <button class="btn bb" onclick="ctNvGuardar()">Crear y abrir la ficha</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── LA TARJETA, EN GRANDE ────────────────────────────────────────────────────────
+       Un visor de sólo lectura. Éste SÍ se cierra al clic afuera, y no contradice la
+       regla: lo que la regla protege es el trabajo cargado a medias, y acá no hay nada
+       que perder — se está mirando una foto. -->
+  <div class="ab-modal-overlay ct-ui" id="ct-foto-modal" onclick="ctFotoCerrar()">
+    <div class="ab-modal" style="width:auto;max-width:min(1000px,96vw)"
+         onclick="event.stopPropagation()">
+      <div class="mhd"><div class="mht" id="ct-foto-tit">Tarjeta</div>
+        <button class="mcl" onclick="ctFotoCerrar()">×</button></div>
+      <div id="ct-foto-body" style="text-align:center"></div>
+    </div>
+  </div>
+
+
+<!-- ═══════════════════════════════════════════════════════════════════════════════════
+     CONSUMO DE IA — qué función se come el crédito
+     ═══════════════════════════════════════════════════════════════════════════════════
+     Andy, 17/10/2026: «¿Si armamos un lugar en el panel donde podamos ver cuánto consume
+     cada cosa? Creo que va a ser muy práctico a futuro».
+
+     El 14/10 la cuenta de la API se quedó sin crédito, el lector de remitos dejó de leer,
+     y no hubo forma de saber qué lo había consumido: todas las funciones usan la misma
+     clave, así que la consola de Anthropic las muestra como un solo número.
+
+     La pantalla contesta tres preguntas, en ese orden:
+       1. ¿Cuánto llevamos este mes?
+       2. ¿QUIÉN se lo está comiendo?   ← es para lo que se abre
+       3. ¿Qué pasó el día del pico?
+     ═══════════════════════════════════════════════════════════════════════════════════ -->
+<div class="sec" id="sec-ia-uso">
+  <style>
+    /* SIN BARRA DE DESPLAZAMIENTO LATERAL (CLAUDE.md): anchos fijos, se parte sólo la
+       etiqueta —lo único de largo variable— y el resto se trunca. */
+    #sec-ia-uso .pa-tbl{table-layout:fixed;width:100%;max-width:98vw}
+    #sec-ia-uso .pa-tbl th,#sec-ia-uso .pa-tbl td{
+      white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding:7px 9px;font-size:12.5px}
+    #sec-ia-uso .pa-tbl td.iu-w,#sec-ia-uso .pa-tbl th.iu-w{white-space:normal;word-break:break-word}
+    #sec-ia-uso .ab-table-wrap{overflow-x:hidden !important}
+    @media(max-width:900px){ #sec-ia-uso .ab-table-wrap{overflow-x:auto !important}
+                             #sec-ia-uso .pa-tbl{table-layout:auto} }
+    #sec-ia-uso .iu-num{text-align:right;font-variant-numeric:tabular-nums}
+
+    #sec-ia-uso .iu-f{display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;margin-bottom:14px}
+    #sec-ia-uso .iu-f label{font-size:11px;color:var(--mut);display:block;margin-bottom:3px}
+    #sec-ia-uso .iu-f input,#sec-ia-uso .iu-f select{
+      padding:5px 8px;border:1px solid var(--bor);border-radius:6px;background:var(--bg);font-size:12.5px}
+
+    #sec-ia-uso .iu-kpis{display:flex;gap:11px;flex-wrap:wrap;margin-bottom:16px}
+    #sec-ia-uso .iu-kpi{flex:1;min-width:150px;padding:12px 15px;border-radius:10px;background:var(--bg2,#f5f5f5)}
+    #sec-ia-uso .iu-kpi b{display:block;font-size:22px;font-weight:700;font-variant-numeric:tabular-nums;margin-top:2px}
+    #sec-ia-uso .iu-kpi .iu-sub{font-size:11px;color:var(--mut)}
+
+    /* LA CURVA POR DÍA. Es lo que distingue «se consumió parejo» de «pasó algo el martes»,
+       que es exactamente lo que no se pudo saber cuando la cuenta se quedó sin crédito.
+       Barras y no números: un pico se ve, una tabla de treinta filas se lee. */
+    #sec-ia-uso .iu-dias{display:flex;align-items:flex-end;gap:2px;height:90px;
+      padding:8px 0;border-bottom:1px solid var(--bor);margin-bottom:4px}
+    #sec-ia-uso .iu-dia{flex:1;min-width:4px;background:var(--burg);border-radius:2px 2px 0 0;
+      position:relative;cursor:default;min-height:1px}
+    #sec-ia-uso .iu-dia:hover{opacity:.75}
+    #sec-ia-uso .iu-dias-pie{display:flex;justify-content:space-between;font-size:10.5px;color:var(--mut)}
+
+    /* La barra de participación de cada función sobre el total. Es la forma más rápida de
+       ver quién pesa sin leer el número. */
+    #sec-ia-uso .iu-bar{position:relative;height:14px;border-radius:4px;background:var(--bor);overflow:hidden}
+    #sec-ia-uso .iu-bar i{position:absolute;left:0;top:0;bottom:0;background:var(--burg)}
+    #sec-ia-uso .iu-chip{display:inline-block;padding:1px 7px;border-radius:9px;font-size:10.5px;font-weight:600}
+    #sec-ia-uso .iu-ch-caro{background:#fdecec;color:#b3261e}
+    #sec-ia-uso .iu-ch-barato{background:#e6f4ea;color:#1a7f37}
+    #sec-ia-uso .iu-ch-falla{background:#fff3cd;color:#7a5c00}
+    #sec-ia-uso .iu-nd{font-size:11.5px;color:var(--mut);font-style:italic}
+    #sec-ia-uso .iu-vacio{text-align:center;padding:34px;color:var(--mut);font-size:13px}
+    #sec-ia-uso .iu-pane{display:none} #sec-ia-uso .iu-pane.on{display:block}
+    #sec-ia-uso .iu-tab{padding:7px 13px;cursor:pointer;font-size:12.5px;font-weight:600;
+      border-radius:6px;color:var(--mut)}
+    #sec-ia-uso .iu-tab.on{background:var(--burg);color:#fff}
+  </style>
+
+  <div class="ph">
+    <div><div class="ph-t">⚡ Consumo de IA</div>
+      <div class="ph-s">Qué función usa la IA, cuánto y cuánto cuesta. El crédito es uno solo
+        para todo el sistema: acá se ve quién se lo está comiendo.</div></div>
+    <div style="display:flex;gap:8px">
+      <button class="btn bo bs" onclick="sgManualAbrir('ia-uso')">❓ ¿Cómo se usa?</button></div>
+  </div>
+
+  <div class="iu-f">
+    <div><label>Desde</label><input type="date" id="iu-desde" onchange="iuCargar()"></div>
+    <div><label>Hasta</label><input type="date" id="iu-hasta" onchange="iuCargar()"></div>
+    <div><label>&nbsp;</label><button class="btn bo bs" onclick="iuPreset(7)">7 días</button></div>
+    <div><label>&nbsp;</label><button class="btn bo bs" onclick="iuPreset(30)">30 días</button></div>
+    <div><label>&nbsp;</label><button class="btn bo bs" onclick="iuPreset(90)">90 días</button></div>
+  </div>
+
+  <div class="iu-kpis" id="iu-kpis"></div>
+
+  <!-- La curva. Va antes de la tabla a propósito: un pico se ve de un vistazo y es lo
+       primero que uno quiere saber cuando abre esto porque algo pasó. -->
+  <div id="iu-curva" style="margin-bottom:18px"></div>
+
+  <div style="display:inline-flex;gap:2px;background:var(--bg);border:1px solid var(--bor);
+              border-radius:8px;padding:3px;margin-bottom:13px;flex-wrap:wrap">
+    <div class="iu-tab on" data-t="funcion" onclick="iuTab('funcion')">🧩 Por función</div>
+    <div class="iu-tab"    data-t="detalle" onclick="iuTab('detalle')">🔍 Llamada por llamada</div>
+  </div>
+
+  <div class="iu-pane on" data-p="funcion">
+    <div id="iu-funciones"></div>
+    <div id="iu-sin-uso" style="margin-top:14px"></div>
+  </div>
+
+  <div class="iu-pane" data-p="detalle">
+    <div class="iu-f">
+      <div><label>Función</label><select id="iu-d-funcion" onchange="iuDetalle()">
+        <option value="">Todas</option></select></div>
+      <div><label>&nbsp;</label><label style="font-size:11.5px;color:var(--tx)">
+        <input type="checkbox" id="iu-d-fallidas" onchange="iuDetalle()" style="vertical-align:-1px">
+        sólo las que fallaron</label></div>
+    </div>
+    <div id="iu-detalle"></div>
+  </div>
+</div>
+
+  <!-- ══════════════════════════════════════════════════════════════════════════════
+       🏭 GALPÓN · CONFIGURACIÓN
+       ══════════════════════════════════════════════════════════════════════════════
+       Lo que hay que dejar listo ANTES del primer camión: qué cuadrilla es de qué color,
+       qué tarjetas le tocan, y cuánto pesa un IFCO vacío.
+
+       Es la única pantalla del módulo con plazo físico: las tarjetas hay que imprimirlas,
+       cortarlas y repartirlas. -->
+  <div class="sec sg-mod" id="sec-galpon-config">
+    <style>
+      /* SIN BARRA DE DESPLAZAMIENTO LATERAL (CLAUDE.md): anchos fijos por columna, se
+         parte sólo el nombre de la cuadrilla —lo único de largo variable— y el resto se
+         trunca. La clase .ab-table-wrap trae su propio overflow-x:auto, así que hace
+         falta el !important para ganarle. */
+      #sec-galpon-config .gal-tbl{table-layout:fixed;width:100%;max-width:98vw}
+      #sec-galpon-config .gal-tbl th,#sec-galpon-config .gal-tbl td{
+        white-space:nowrap;overflow:hidden;text-overflow:ellipsis;vertical-align:middle}
+      #sec-galpon-config .gal-tbl td.gal-w,#sec-galpon-config .gal-tbl th.gal-w{
+        white-space:normal;word-break:break-word}
+      #sec-galpon-config .ab-table-wrap{overflow-x:hidden !important}
+      @media(max-width:900px){ #sec-galpon-config .ab-table-wrap{overflow-x:auto !important}
+                               #sec-galpon-config .gal-tbl{table-layout:auto} }
+      #sec-galpon-config .gal-num{text-align:right;font-variant-numeric:tabular-nums}
+
+      /* La muestra de color. Redonda y grande: es lo que se mira, no el hex. */
+      #sec-galpon-config .gal-sw{display:inline-block;width:22px;height:22px;border-radius:50%;
+        border:2px solid rgba(0,0,0,.14);vertical-align:middle;cursor:pointer}
+      #sec-galpon-config .gal-sw.ro{cursor:default}
+      #sec-galpon-config .gal-sin{color:var(--mut);font-style:italic;font-size:11.5px}
+
+      /* Los rangos de una cuadrilla, como chapitas. Varias filas por cuadrilla es lo
+         normal: la tanda se amplía a mitad de temporada sin tocar la anterior. */
+      #sec-galpon-config .gal-rg{display:inline-block;padding:1px 8px;border-radius:9px;
+        background:var(--bg2,#f1f1f1);font-size:11.5px;font-variant-numeric:tabular-nums;
+        margin:1px 3px 1px 0}
+      #sec-galpon-config .gal-rg b{font-weight:600}
+      #sec-galpon-config .gal-rg i{font-style:normal;color:#b3261e;cursor:pointer;
+        margin-left:5px;font-weight:700}
+
+      #sec-galpon-config .gal-cfg{display:flex;gap:14px;flex-wrap:wrap;align-items:flex-end;
+        padding:14px;border:1px solid var(--bor);border-radius:10px;margin-bottom:18px}
+      #sec-galpon-config .gal-cfg label{font-size:11px;color:var(--mut);display:block;margin-bottom:3px}
+      #sec-galpon-config .gal-cfg input{padding:6px 9px;border:1px solid var(--bor);
+        border-radius:7px;font-size:13px;background:var(--bg);color:var(--fg)}
+      #sec-galpon-config .gal-cfg .gal-ay{font-size:10.5px;color:var(--mut);margin-top:3px;max-width:230px}
+      #sec-galpon-config .gal-vacio{text-align:center;padding:34px;color:var(--mut);font-size:13px}
+    </style>
+
+    <div class="ph">
+      <div><div class="ph-t">🏭 Galpón · Configuración</div>
+        <div class="ph-s">De qué color es cada cuadrilla, qué tarjetas le tocan y cuánto
+          pesa un IFCO vacío. Las tarjetas se imprimen desde acá.</div></div>
+      <div style="display:flex;gap:8px">
+        <button class="btn bo bs" onclick="galPrintAbrir()">🖨️ Imprimir tarjetas</button>
+        <button class="btn bo bs" onclick="sgManualAbrir('galpon-config')">❓ ¿Cómo se usa?</button></div>
+    </div>
+
+    <!-- ── LAS CUADRILLAS ───────────────────────────────────────────────────────────
+         Salen de Personal (pa_cuadrillas). Acá NO se dan de alta: lo que se les agrega
+         es el color y el rango de tarjetas, que es lo único que el galpón necesita. -->
+    <h3 style="margin:0 0 9px;font-size:14px">Cuadrillas y sus tarjetas</h3>
+    <div id="gal-aviso-ro" style="display:none;margin-bottom:10px" class="ojo">
+      Para cambiar un color o asignar tarjetas hace falta ser administrador: un rango mal
+      puesto le atribuye los kilos de una cuadrilla a otra toda la temporada. Imprimir sí
+      podés.</div>
+    <div class="ab-table-wrap">
+      <table class="pa-tbl gal-tbl">
+        <colgroup><col style="width:30%"><col style="width:9%"><col style="width:12%">
+                  <col style="width:30%"><col style="width:19%"></colgroup>
+        <thead><tr>
+          <th class="gal-w">Cuadrilla</th><th>Color</th><th class="gal-num">Tarjetas</th>
+          <th class="gal-w">Rangos</th><th></th>
+        </tr></thead>
+        <tbody id="gal-cuad-body"></tbody>
+      </table>
+    </div>
+
+    <!-- ── LOS PARÁMETROS ───────────────────────────────────────────────────────────
+         Se tocan una vez por temporada. La tara entra a TODAS las restas del día: con
+         2 kg de tara y 300 IFCOs, equivocarse en medio kilo son 150 kg inventados. -->
+    <h3 style="margin:20px 0 9px;font-size:14px">Parámetros del galpón</h3>
+    <div class="gal-cfg">
+      <div>
+        <label>Tara del IFCO vacío (kg)</label>
+        <input type="number" step="0.01" min="0" id="gal-tara" style="width:120px">
+        <div class="gal-ay">Se le resta al bruto de la balanza en cada volcado.</div>
+      </div>
+      <div>
+        <label>Objetivo de ritmo (kg/hora)</label>
+        <input type="number" step="1" min="0" id="gal-obj" style="width:120px">
+        <div class="gal-ay">El tablero pinta el ritmo real contra este número.</div>
+      </div>
+      <div style="flex:1;min-width:240px">
+        <label>Motivos para marcar un IFCO observado</label>
+        <input type="text" id="gal-motivos" style="width:100%">
+        <div class="gal-ay" style="max-width:none">Separados por coma. Son los botones que
+          ve el que vuelca: texto libre serían cuarenta maneras de escribir «golpeado» y
+          ningún informe posible.</div>
+      </div>
+      <div><button class="btn bp" id="gal-cfg-guardar" onclick="galCfgGuardar()">Guardar</button></div>
+    </div>
+  </div>
+
+
+  <!-- ══════════════════════════════════════════════════════════════════════════════
+       LAS DOS VENTANAS DEL GALPÓN
+       ══════════════════════════════════════════════════════════════════════════════
+       Van FUERA de toda .sec (CLAUDE.md): con .sec{display:none}, una ventana que cuelga
+       de una pantalla sólo se abre desde ésa, y desde otra el botón corre sin que se vea
+       nada. Y no se cierran al clic afuera: un clic al costado es un accidente. -->
+
+  <!-- ── ASIGNARLE TARJETAS A UNA CUADRILLA ────────────────────────────────────────
+       Un formulario de carga no vive metido en una pantalla: se abre en una ventana. Que
+       se abra es lo que le dice al operador que dejó de mirar y empezó a cargar. -->
+  <div class="ab-modal-overlay sg-mod" id="gal-rango-modal">
+    <div class="ab-modal" style="width:min(520px,96vw);max-width:96vw">
+      <div class="mhd"><div class="mht" id="gal-rango-tit">Tarjetas de la cuadrilla</div>
+        <button class="mcl" onclick="galRangoCerrar()">×</button></div>
+      <div class="sgr-card">
+        <div style="display:flex;gap:12px;flex-wrap:wrap">
+          <div><label>Desde el N°</label>
+            <input type="number" min="1" step="1" id="gal-rg-desde" oninput="galRangoCuenta()" style="width:140px"></div>
+          <div><label>Hasta el N°</label>
+            <input type="number" min="1" step="1" id="gal-rg-hasta" oninput="galRangoCuenta()" style="width:140px"></div>
+        </div>
+        <div style="margin-top:10px"><label>Nota (opcional)</label>
+          <input type="text" id="gal-rg-notas" placeholder="ej: reposición de las perdidas en noviembre"></div>
+        <div id="gal-rg-cuenta" style="margin-top:10px;font-size:12px;color:var(--mut)"></div>
+        <div id="gal-rg-error" style="display:none;margin-top:10px" class="ojo"></div>
+      </div>
+      <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:14px">
+        <button class="btn bo" onclick="galRangoCerrar()">Cancelar</button>
+        <button class="btn bp" onclick="galRangoGuardar()">Asignar tarjetas</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── IMPRIMIR ──────────────────────────────────────────────────────────────────
+       Tres maneras, que son tres momentos: la tanda de una cuadrilla al empezar la
+       temporada, un rango a mano, o las sueltas que se perdieron. -->
+  <div class="ab-modal-overlay sg-mod" id="gal-print-modal">
+    <div class="ab-modal" style="width:min(560px,96vw);max-width:96vw">
+      <div class="mhd"><div class="mht">Imprimir tarjetas</div>
+        <button class="mcl" onclick="galPrintCerrar()">×</button></div>
+      <div class="sgr-card">
+        <div><label>Qué imprimir</label>
+          <select id="gal-pr-modo" onchange="galPrintModo()">
+            <option value="cuadrilla">La tanda entera de una cuadrilla</option>
+            <option value="rango">Un rango de números</option>
+            <option value="ids">Tarjetas sueltas (reposición)</option>
+          </select></div>
+
+        <div id="gal-pr-cuadrilla" style="margin-top:10px">
+          <label>Cuadrilla</label>
+          <select id="gal-pr-cid"></select>
+        </div>
+
+        <div id="gal-pr-rango" style="display:none;margin-top:10px">
+          <div style="display:flex;gap:12px;flex-wrap:wrap">
+            <div><label>Desde el N°</label>
+              <input type="number" min="1" step="1" id="gal-pr-desde" style="width:140px"></div>
+            <div><label>Hasta el N°</label>
+              <input type="number" min="1" step="1" id="gal-pr-hasta" style="width:140px"></div>
+          </div>
+        </div>
+
+        <div id="gal-pr-ids" style="display:none;margin-top:10px">
+          <label>Números, separados por coma</label>
+          <input type="text" id="gal-pr-lista" placeholder="7, 9, 11">
+        </div>
+
+        <div class="ojo" style="margin-top:12px">
+          Salen 8 por hoja A4. Cada tarjeta lleva su número <b>grande y en tinta</b>: si un
+          día no anda el lector, el cuadrillero la engancha igual y alguien anota el número
+          a mano. Las tarjetas son <b>reutilizables</b> — vuelven al campo después del
+          volcado.</div>
+        <div id="gal-pr-error" style="display:none;margin-top:10px" class="ojo"></div>
+      </div>
+      <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:14px">
+        <button class="btn bo" onclick="galPrintCerrar()">Cancelar</button>
+        <button class="btn bp" onclick="galPrintIr()">Abrir el PDF</button>
+      </div>
+    </div>
+  </div>
 
 
   <div class="sec sg-mod" id="sec-sg-importacion">
@@ -25450,6 +26082,426 @@ SG_MANUAL.reprocesos = { titulo: 'Reprocesos', html:
   + 'que trae la pantalla <b>con la madre ya cargada</b>.</p>'
 };
 
+SG_MANUAL.contactos = { titulo: 'Contactos comerciales', html:
+  '<p>Es <b>la agenda del área</b>: quién es cada persona con la que trabajamos, cómo se la '
+  + 'ubica, qué produce o qué compra, y <b>qué se habló la última vez</b>. Se carga una vez y '
+  + 'se consulta todos los días.</p>'
+
+  + '<div class="ojo"><b>Esto no reemplaza al padrón.</b> El padrón de clientes y de '
+  + 'proveedores tiene las empresas con su CUIT y su condición de IVA, que es lo que hace '
+  + 'falta para facturar. Acá está lo que hace falta para <b>vender y comprar</b>: a quién se '
+  + 'llama, qué tiene, cuándo lo tiene y qué se habló. Y acá hay <b>personas</b>, que en el '
+  + 'padrón no entran: ahí no hay lugar para Juan, el hijo de Giglio, que atiende el teléfono '
+  + 'del galpón. Cuando se va la compradora de una cadena no se da de baja la cadena: se da de '
+  + 'baja a la persona y la empresa sigue.</div>'
+
+  + '<h3>🏢 Dos niveles: la EMPRESA y la PERSONA <span class="ver">V1091</span></h3>'
+  + '<p>La pantalla tiene <b>dos solapas</b> y la diferencia no es de forma:</p>'
+  + '<ul>'
+  + '<li><b>🏢 Empresas</b> es la <b>cuenta comercial</b>: qué produce y en qué meses, el '
+  + 'vínculo con la planilla de ventas, la zona, quién la atiende. <b>Es con la empresa que '
+  + 'se hacen los negocios.</b></li>'
+  + '<li><b>🔎 Personas</b> es <b>a quién se llama</b>: el cargo, los teléfonos, y las '
+  + 'charlas que se tuvieron con esa persona.</li>'
+  + '</ul>'
+  + '<p>Las dos se buscan con la misma caja y los mismos filtros. Y una empresa se '
+  + 'encuentra también por <b>el nombre de cualquiera que trabaje ahí</b> y por lo que se '
+  + 'dijo en sus charlas: el que se acuerda del encargado y no de la razón social tiene '
+  + 'que llegar igual.</p>'
+  + '<p><b>Varias personas comparten la misma empresa.</b> El dueño de la finca y el '
+  + 'encargado del galpón son dos personas de una sola cuenta: se los carga por separado, '
+  + 'cada uno con su teléfono y su cargo, y <b>lo que la finca produce se carga una sola '
+  + 'vez</b>.</p>'
+  + '<div class="ojo"><b>Por qué importa.</b> Antes lo que producía la empresa colgaba de '
+  + 'cada persona. Cargando al dueño y al encargado, el calendario de melón quedaba cargado '
+  + '<b>dos veces</b> — y a la semana uno tenía la ventana corregida y el otro no, sin que '
+  + 'ninguna pantalla pudiera decir cuál era la buena. Peor: «quién tiene melón en '
+  + 'noviembre» devolvía <b>dos filas de la misma finca</b>, como si fueran dos '
+  + 'proveedores.</div>'
+  + '<p>Al cargar una persona se escribe el nombre de su empresa. <b>Si ya está cargada, cae '
+  + 'en esa misma</b> —sin importar las mayúsculas ni las tildes—, así que cargar al segundo '
+  + 'contacto de una finca no arma una ficha nueva. Dejándolo vacío, <b>la empresa es la '
+  + 'persona</b>: sirve para un fletero que trabaja solo.</p>'
+
+  + '<h3>🗂️ Qué se carga en cada lugar <span class="ver">V1091</span></h3>'
+  + '<p><b>En la ficha de la EMPRESA:</b> si es proveedor o cliente, la zona y la localidad, '
+  + 'quién la atiende, las etiquetas, los nombres con los que aparece en la planilla, y '
+  + '<b>qué produce o compra, con sus meses</b>.</p>'
+  + '<p><b>En la ficha de la PERSONA:</b> su cargo, sus teléfonos y mails, sus notas, y las '
+  + 'charlas que se tuvieron con ella.</p>'
+  + '<div class="ojo">Si algo está en el lugar que no va, se nota: en la ficha de una '
+  + 'persona <b>no hay dónde poner la zona</b>, y en la de la empresa <b>no hay dónde '
+  + 'poner el cargo</b>. Buscar cualquiera de las dos cosas en la ficha equivocada es la '
+  + 'señal de que ese dato es del otro nivel.</div>'
+  + '<p>La ficha de una persona <b>muestra lo de su empresa en un bloque aparte</b>, con el '
+  + 'aviso de que eso es de la cuenta y no de ella, y con el botón <b>Abrir la ficha de la empresa</b> '
+  + 'para ir a tocarlo. Abajo lista <b>quién más trabaja ahí</b>, con su teléfono y un clic '
+  + 'para abrirlo.</p>'
+
+  + '<h3>✏️ Se edita donde se lee <span class="ver">V1097</span></h3>'
+  + '<p><b>No hay botón de Editar, y no se abre ninguna ventana más.</b> Entrás a la ficha '
+  + 'y cada dato se toca: el cargo, la zona, las notas, el nombre. El campo se vuelve un '
+  + 'casillero, se escribe, y <b>se guarda solo al salir</b>.</p>'
+  + '<ul>'
+  + '<li><b>Guarda al salir del casillero</b>, y sólo si cambió algo. También con '
+  + '<b>Enter</b>. En los cuadros de varias líneas Enter hace un renglón nuevo, así que '
+  + 'ahí se guarda saliendo o con <b>Ctrl+Enter</b>.</li>'
+  + '<li><b>Escape</b> cancela y deja el valor que estaba.</li>'
+  + '<li>Si algo falla, el aviso aparece <b>debajo del campo</b> y el valor viejo vuelve. '
+  + 'Un campo que se revierte sin decir nada se lee como que no se guardó porque sí.</li>'
+  + '<li>Se guarda <b>un campo por vez</b>: lo que un compañero cambió mientras tanto en '
+  + 'otro campo no se pisa.</li>'
+  + '</ul>'
+  + '<div class="ojo"><b>Por qué cambió.</b> Andy, 18/10/2026: <i>«se van abriendo ventanas '
+  + 'una abajo de otra para modificar; prefiero algo más como que entrás a la ficha y ahí '
+  + 'ves todo, más visual, y de ahí mismo editás»</i>. Eran seis ventanas encadenadas: la '
+  + 'ficha de la empresa, encima el formulario para editarla, y encima otro para corregir '
+  + 'un producto. Cada salto tapaba justamente lo que uno estaba mirando.</div>'
+  + '<p><b>La única ventana que queda es la de ALTA</b>, y se abre desde la lista. Pide lo '
+  + 'mínimo —un nombre, y la empresa— y abre la ficha. El resto se completa ahí adentro: '
+  + 'pedir los catorce campos juntos obliga a tener todos los datos justo cuando no se los '
+  + 'tiene, que es cuando alguien te acaba de dar una tarjeta en una reunión.</p>'
+  + '<p>Lo que se <b>agrega</b> —un teléfono, otra persona de la finca, un producto, una '
+  + 'charla— aparece como un renglón en blanco <b>debajo de la lista</b>, con su Cancelar. '
+  + 'El teléfono y el mail se pedían antes con el cuadrito gris del navegador, que no se '
+  + 'puede corregir ni deja elegir si el número es de WhatsApp.</p>'
+
+  + '<h3>🪪 La foto de la tarjeta <span class="ver">V1097</span></h3>'
+  + '<p>Arriba a la izquierda de la ficha de cada persona hay un lugar para <b>la foto de '
+  + 'su tarjeta</b>. Se toca, se elige la foto —o se la saca con la cámara desde el '
+  + 'celular— y queda. Click en la foto para verla en grande.</p>'
+  + '<ul>'
+  + '<li><b>Una por persona.</b> Subir otra reemplaza la anterior: la tarjeta es una, y una '
+  + 'galería obliga a elegir cuál mirar cada vez que se abre la ficha.</li>'
+  + '<li>En la lista de <b>quiénes trabajan acá</b> de la empresa, el 🪪 marca a los que '
+  + 'tienen la tarjeta guardada.</li>'
+  + '<li><b>Sacarla borra la foto de verdad.</b> El teléfono y el mail quedan: están '
+  + 'tipeados aparte.</li>'
+  + '</ul>'
+  + '<div class="ojo"><b>La foto NO reemplaza cargar el teléfono.</b> No hay lector ni nada '
+  + 'que la lea: <b>el buscador no puede mirar adentro de una foto</b>. Si el número está '
+  + 'sólo en la tarjeta, buscarlo no lo encuentra y la ficha dice «sin teléfono». La foto '
+  + 'está para lo otro: el logo, el cargo impreso, el dato que todavía no se cargó.</div>'
+  + '<p>La foto <b>no queda en una dirección pública</b>: se pide con la sesión puesta, como '
+  + 'el resto de la agenda. Es el teléfono directo de un comprador o de un productor, que es '
+  + 'justamente lo que este módulo no deja al alcance de cualquiera que tenga un usuario.</p>'
+
+  + '<h3>🔎 Se busca escribiendo, y el buscador entra a las charlas <span class="ver">V1090</span></h3>'
+  + '<p>La caja de arriba mira <b>los dos niveles a la vez</b>: el nombre de la persona, el de '
+  + 'su empresa, <b>un pedazo del '
+  + 'teléfono</b>, el mail, lo que produce la empresa, la zona, la localidad, el cargo, las '
+  + 'etiquetas, las notas y <b>el texto de las charlas</b>. El que escribe <i>giglio</i> o '
+  + '<i>melon</i> no sabe ni le importa si eso es de la persona o de la finca: lo que quiere es '
+  + 'a quién llamar.</p>'
+  + '<ul>'
+  + '<li>Lo más importante: buscar <i>brocoli</i> encuentra al productor que en agosto te dijo '
+  + 'que este año planta brócoli — <b>aunque brócoli no esté en ningún campo de su ficha</b>. '
+  + 'Está escrito en el resumen de esa charla.</li>'
+  + '<li><b>No hace falta poner tildes.</b> <i>brocoli</i> encuentra «brócoli», <i>limon</i> '
+  + 'encuentra «Limón» y <i>cordoba</i> encuentra «Córdoba».</li>'
+  + '<li>El teléfono se busca <b>por el pedazo que uno se acuerda</b>: <i>422-1100</i> alcanza, '
+  + 'no hace falta el número entero.</li>'
+  + '<li>Si no hay nadie, <b>lo dice y enumera dónde buscó</b>. No se queda en blanco haciendo '
+  + 'creer que se rompió.</li>'
+  + '</ul>'
+  + '<p>Cada fila de la lista dice <b>por dónde</b> apareció esa persona —«nombre», «teléfono o '
+  + 'mail», «lo que produce», «una charla», «zona, etiqueta o nota»— y cuando fue por una charla '
+  + '<b>muestra el pedacito</b> con la fecha.</p>'
+  + '<div class="ojo">El motivo no es un adorno. Con un buscador que entra al texto de las '
+  + 'conversaciones, <b>«por qué apareció este» deja de ser obvio</b>: sin el motivo habría que '
+  + 'abrir cada ficha para entenderlo.</div>'
+
+  + '<h3>🗓️ Qué produce y en qué meses — el año arranca en JULIO <span class="ver">V1091</span></h3>'
+  + '<p>Se carga <b>en la ficha de la EMPRESA</b>, una vez para toda la finca: todas las '
+  + 'personas de esa empresa van a ver lo mismo. De cada producto <b>se tocan los meses</b> '
+  + 'en los que lo tiene. La grilla son <b>doce casilleros y el primero es julio</b>, igual que el '
+  + 'año comercial de toda la casa. Mientras se tocan, abajo se lee la ventana en palabras: '
+  + '<i>NOV a MAR</i>.</p>'
+  + '<ul>'
+  + '<li>Se tocan los meses <b>de a uno</b> y no se elige un «desde» y un «hasta» a propósito: hay '
+  + 'productores con una <b>cosecha temprana y una tardía</b>, y un rango las aplastaría en una '
+  + 'sola ventana que diría que trae en los meses del medio, cuando no trae. Esos aparecen como '
+  + '<i>JUL a AGO y MAY a JUN</i>.</li>'
+  + '<li>El filtro <b>«Tiene algo en»</b> es el que sirve para salir a buscar mercadería: contesta '
+  + '<b>quién tiene melón en noviembre</b> sin leer ficha por ficha. Desde la solapa '
+  + '<b>🏢 Empresas</b> contesta con <b>una fila por finca</b>, que es como se mira para salir '
+  + 'a comprar.</li>'
+  + '<li><b>El mismo producto no se puede cargar dos veces en la misma empresa.</b> Si ya '
+  + 'está, la pantalla lo dice y ofrece corregir esa ventana — dos ventanas del mismo melón '
+  + 'se contradicen y nadie puede decir cuál vale.</li>'
+  + '</ul>'
+
+  + '<h3>⭐ Lo que ofrece y nunca le compramos <span class="ver">V1090</span></h3>'
+  + '<p>La ficha muestra <b>dos cosas distintas, una al lado de la otra</b>:</p>'
+  + '<ul>'
+  + '<li><b>Qué produce</b> — lo que la persona <b>nos dijo</b>. Lo carga el comercial.</li>'
+  + '<li><b>Qué le compramos</b> — lo que <b>efectivamente</b> le compramos, con los kilos, los '
+  + 'dólares y los meses reales. <b>Sale de las ventas: nadie lo tipea.</b></li>'
+  + '</ul>'
+  + '<p>Las dos ventanas se dibujan con la misma grilla de doce meses, una debajo de la otra y en '
+  + 'tonos distintos, para compararlas de un vistazo.</p>'
+  + '<div class="ojo"><b>El hueco entre las dos es la oportunidad</b>, y por eso van separadas y '
+  + 'no mezcladas. Si alguien ofrece brócoli y nunca le compramos brócoli, el cuadro amarillo '
+  + '<b>⭐ Ofrece y nunca le compramos</b> lo dice con nombre y ventana. Es la razón de cargar '
+  + 'esta ficha.</div>'
+
+  + '<h3>🔗 El vínculo con la planilla es POR NOMBRE <span class="ver">V1091</span></h3>'
+  + '<p>Se carga <b>en la ficha de la empresa</b> —es la finca la que factura, no la persona '
+  + 'que atiende el teléfono—. Para que traiga lo que de verdad le compramos o le vendimos, hay que escribir '
+  + '<b>el nombre con el que esa empresa aparece en la planilla de ventas</b>, en los campos '
+  + '«Nombre en la planilla como PROVEEDOR» y «como CLIENTE». Es como se vincula todo lo '
+  + 'comercial en este sistema: la planilla trae nombres, no códigos.</p>'
+  + '<div class="ojo">Si el nombre <b>no coincide</b>, la ficha lo dice: «no hay ventas con el '
+  + 'proveedor X — o nunca le compramos, o el nombre no es el que usa la planilla». <b>No muestra '
+  + 'cero.</b> Un cero se leería como «no trajo nada» y mandaría a alguien a reclamarle a un '
+  + 'productor que sí trajo.</div>'
+  + '<p>Y ojo con lo mismo al revés: si en la planilla le cambian el nombre a una empresa, <b>el '
+  + 'vínculo se corta sin avisar</b> y la ficha empieza a decir que no hay ventas. Se arregla '
+  + 'escribiendo el nombre nuevo.</p>'
+
+  + '<h3>💬 Qué se habló <span class="ver">V1091</span></h3>'
+  + '<p>Cada conversación se anota con la fecha, <b>por dónde fue</b> (teléfono, WhatsApp, mail, '
+  + 'visita) y lo que se dijo. Queda guardado <b>quién la cargó</b>: seis meses después, «¿a quién '
+  + 'le dijo eso?» es la primera pregunta que genera una nota vieja.</p>'
+  + '<p><b>La charla es de la persona</b> —la dijo alguien, con nombre y apellido— pero el '
+  + '<b>historial es de la cuenta</b>. La ficha de una persona muestra sus charlas y, aparte, '
+  + '«lo que se habló con los otros de la empresa», cada una con quién fue. La ficha de la '
+  + 'empresa las junta todas.</p>'
+  + '<div class="ojo">Van separadas a propósito: antes de llamar al dueño hay que saber que el '
+  + 'martes el encargado ya dijo que no hay fruta, pero <b>no se le puede atribuir a uno lo que '
+  + 'dijo el otro</b>.</div>'
+  + '<div class="ojo"><b>Conviene nombrar los productos y las cosas concretas.</b> El buscador '
+  + 'mira este texto, así que «me ofreció brócoli» se encuentra y «me ofreció algo nuevo» no. '
+  + 'Cómo se escribe la nota decide si sirve dentro de cuatro meses.</div>'
+
+  + '<h3>📌 Me toca — lo pendiente es una gestión, no una nota <span class="ver">V1090</span></h3>'
+  + '<p>Cada charla puede dejar un <b>próximo paso</b> y <b>para cuándo</b>. Eso es lo que la hace '
+  + 'aparecer en la solapa <b>📌 Me toca</b>, ordenada por fecha y con <b>lo vencido marcado</b>. '
+  + 'El número de la pestaña es cuánto hay pendiente para hoy.</p>'
+  + '<ul>'
+  + '<li>El botón <b>✓ Hecho</b> lo saca de la bandeja. <b>La charla no se borra</b>: queda en la '
+  + 'ficha marcada como hecha, porque lo hecho también es historia.</li>'
+  + '<li>Un próximo paso <b>sin fecha</b> no entra a la bandeja —no habría por dónde ordenarla— '
+  + 'pero sí se ve en la ficha, para no perderlo.</li>'
+  + '<li>Lo pendiente <b>se ve también en la lista del buscador</b>, en rojo. El que busca a '
+  + 'alguien por otro motivo tiene que enterarse ahí mismo de que le quedó algo colgado con él.</li>'
+  + '</ul>'
+  + '<p>Una charla <b>sin</b> próximo paso es apenas una nota: el mes que viene se lee y no se sabe '
+  + 'si quedó algo por hacer.</p>'
+
+  + '<h3>📞 Varios teléfonos, y el que atiende</h3>'
+  + '<p>Se cargan <b>todos</b> los teléfonos y mails que haga falta —el celular, el del galpón, el '
+  + 'del hijo— y uno queda marcado con la <b>★</b> como preferido: es el que muestra la lista y el '
+  + 'que trae la bandeja de pendientes. <b>Hay uno solo</b>: marcar otro le saca la estrella al '
+  + 'anterior.</p>'
+  + '<p>El tipo se adivina solo: lo que tiene <b>arroba</b> se guarda como mail.</p>'
+
+  + '<h3>🏷️ Etiquetas y notas</h3>'
+  + '<p>Texto libre, separado por comas: <i>confiable, paga a 30, no manda fruta chica</i>. '
+  + '<b>El buscador las mira</b>, así que sirven para poder preguntar después por algo que no '
+  + 'tiene campo propio. Es el lugar de lo que uno sabe y no entra en ninguna casilla.</p>'
+
+  + '<h3>👤 Es proveedor, cliente, las dos cosas, u otro</h3>'
+  + '<p>Pedir el filtro <b>«Proveedor»</b> trae también a los que son <b>las dos cosas</b>, y lo '
+  + 'mismo con «Cliente». Si no, el que compra y vende <b>desaparecería de las dos listas</b>, que '
+  + 'es donde menos se lo busca y más se lo necesita.</p>'
+  + '<p><b>«Otro»</b> existe para el transportista o el técnico: tampoco son ninguna de las dos y '
+  + 'hay que poder guardarlos igual. Si no entran acá, terminan en el teléfono de alguien.</p>'
+
+  + '<h3>🗑️ Dar de baja <span class="ver">V1091</span></h3>'
+  + '<p><b>Dar de baja una EMPRESA se lleva a su gente</b> de las listas del día: si la finca '
+  + 'dejó de trabajar con nosotros, el encargado no tiene por qué seguir apareciendo. No borra '
+  + 'nada — las personas, sus teléfonos y las charlas quedan, y el nombre de la empresa queda '
+  + 'libre para volver a usarse.</p>'
+  + '<p>Dar de baja una <b>persona</b>:</p>'
+  + '<p>Esconde a la persona del buscador —se la puede volver a ver tildando <b>«ver '
+  + 'inactivos»</b>— y <b>las charlas quedan guardadas</b>. Antes de confirmar, el aviso dice '
+  + 'cuántas son.</p>'
+  + '<div class="ojo">Lo que se perdería al borrar un contacto <b>no es la ficha</b>: son los años '
+  + 'de conversaciones con esa persona. Por eso la baja esconde y no borra.</div>'
+};
+
+SG_MANUAL['galpon-config'] = { titulo: 'Galpón · Configuración', html:
+  '<p>Puente Cordón cosecha, vuelca en el galpón, selecciona, embala y despacha. Hasta '
+  + 'ahora el sistema no guardaba <b>nada</b> de eso: los costos de mano de obra estaban, '
+  + 'pero <b>los kilos no los registraba nadie</b>. Este módulo es el primero que los mide, '
+  + 'y esta pantalla es lo que hay que dejar listo <b>antes</b> de que llegue el primer '
+  + 'camión.</p>'
+
+  + '<div class="ojo"><b>Lo único con plazo físico.</b> Las tarjetas hay que imprimirlas, '
+  + 'cortarlas y repartirlas en el campo. Si el día de la cosecha no están, no hay parche '
+  + 'de software que lo arregle a las siete de la mañana.</div>'
+
+  + '<h3>🎫 Las tarjetas <span class="ver">V1096</span></h3>'
+  + '<p>En el campo no hay tecnología. Cada cuadrilla tiene <b>tarjetas QR reutilizables de '
+  + 'su color</b>: el cuadrillero engancha una en cada IFCO que llena, y las tarjetas '
+  + '<b>vuelven al campo</b> después del volcado. No se imprime una por cosechada.</p>'
+  + '<ul>'
+  + '<li><b>La tarjeta no identifica al IFCO ni a la persona: identifica a la CUADRILLA.</b> '
+  + 'Por eso lo que se configura acá es un <i>rango de números</i> por cuadrilla, y no una '
+  + 'tarjeta por fila. Los kilos se miden por cuadrilla, que es como se paga el jornal.</li>'
+  + '<li><b>El color es para agarrarla, no para leerla.</b> A tres metros se ve el color, no '
+  + 'el texto. Si no elegís uno, el sistema le da a cada cuadrilla el primero de la paleta '
+  + 'que no esté usando otra — dejarlo a mano termina en dos cuadrillas del mismo color, '
+  + 'que es el único error que el color no puede corregir.</li>'
+  + '<li><b>El número va grande y en tinta.</b> Si un día no anda el lector, o se cayó '
+  + 'internet, el cuadrillero engancha la tarjeta igual y alguien anota el número en un '
+  + 'papel. Una tarjeta que sólo se puede leer con una máquina deja de servir justo el día '
+  + 'que la máquina falla.</li>'
+  + '<li>El QR lleva <b>el número pelado</b>, sin dirección web. La lectora USB se comporta '
+  + 'como un teclado: escanear <i>tipea</i> el contenido en el casillero que tenga el foco, '
+  + 'así que una dirección adentro del QR escribiría la dirección entera.</li>'
+  + '</ul>'
+
+  + '<h3>🖨️ Cómo se imprimen <span class="ver">V1096</span></h3>'
+  + '<p>Salen <b>8 por hoja A4</b>. El botón <b>Imprimir tarjetas</b> de arriba abre una '
+  + 'ventana con tres maneras, que son tres momentos distintos:</p>'
+  + '<ul>'
+  + '<li><b>La tanda entera de una cuadrilla</b> — al empezar la temporada. Imprime todos '
+  + 'sus rangos juntos. Es lo mismo que el botón 🖨️ de su fila.</li>'
+  + '<li><b>Un rango de números</b> — a mano. Si el rango cruza dos cuadrillas, cada tarjeta '
+  + 'sale con la suya: que salieran todas con el nombre de la primera sería peor que salir '
+  + 'sin nombre, porque la tarjeta diría algo falso.</li>'
+  + '<li><b>Tarjetas sueltas</b> — reposición de las que se perdieron o se arruinaron. Es la '
+  + 'operación más frecuente después del primer día.</li>'
+  + '</ul>'
+  + '<p>El PDF se abre en una pestaña nueva, en el visor del navegador, y de ahí se manda a '
+  + 'imprimir. <b>Cortar por el marco gris.</b></p>'
+
+  + '<h3>📐 Cuántas tarjetas necesita cada cuadrilla <span class="ver">V1096</span></h3>'
+  + '<p>La columna <b>Tarjetas</b> es el número que dice si alcanzan. La cuenta es simple: '
+  + 'tantas como IFCOs llene la cuadrilla <b>entre un volcado y el siguiente</b>, más un '
+  + 'margen. Si una cuadrilla llena 300 IFCOs por día y tiene 80 tarjetas, van a faltar a '
+  + 'media mañana.</p>'
+  + '<p>Se puede <b>ampliar la tanda a mitad de temporada</b> sin tocar la anterior: se le '
+  + 'agrega otro rango y el color se hereda solo.</p>'
+
+  + '<div class="ojo"><b>Dos cuadrillas no pueden compartir un número.</b> El sistema lo '
+  + 'rechaza al guardar, y dice con quién se pisa. No es una formalidad: si una misma '
+  + 'tarjeta fuera de dos cuadrillas, se le atribuiría a una de las dos para siempre y '
+  + '<b>los kilos de la otra desaparecerían sin que nadie lo note</b> hasta fin de '
+  + 'temporada.</div>'
+
+  + '<h3>❌ Dar de baja un rango <span class="ver">V1096</span></h3>'
+  + '<p>La <b>×</b> de cada chapita lo da de baja. <b>No borra nada:</b> los volcados ya '
+  + 'cargados guardaron su cuadrilla <i>congelada</i> en el momento, así que no cambian. El '
+  + 'rango queda apagado y sus números quedan libres para otra cuadrilla la temporada que '
+  + 'viene.</p>'
+
+  + '<h3>⚖️ La tara del IFCO <span class="ver">V1096</span></h3>'
+  + '<p>Lo que pesa un IFCO <b>vacío</b>, en kilos. Se le resta al bruto de la balanza en '
+  + '<b>cada</b> volcado.</p>'
+  + '<div class="ojo"><b>Es el número más caro de esta pantalla.</b> Entra a todas las '
+  + 'restas del día: con 300 IFCOs, equivocarse en medio kilo son 150 kg inventados o '
+  + 'perdidos, y no hay forma de darse cuenta mirando un volcado. Pesá un IFCO vacío de los '
+  + 'que se usan y poné ese número — no el del catálogo.</div>'
+
+  + '<h3>🎯 El objetivo de ritmo <span class="ver">V1096</span></h3>'
+  + '<p>En kg por hora. No cambia ningún cálculo: es contra qué se pinta el ritmo real en el '
+  + 'tablero. Sirve para ver en el momento si el galpón va atrasado, no después.</p>'
+
+  + '<h3>⚠️ Los motivos de calidad <span class="ver">V1096</span></h3>'
+  + '<p>Son los botones que ve el que vuelca cuando marca un IFCO como observado. Se '
+  + 'escriben separados por coma y <b>se eligen con un toque, no se escriben</b>: texto libre '
+  + 'serían cuarenta maneras de escribir «golpeado» y ningún informe posible al final de la '
+  + 'temporada.</p>'
+
+  + '<h3>👤 Quién puede qué <span class="ver">V1096</span></h3>'
+  + '<ul>'
+  + '<li><b>Cualquiera con el módulo</b> puede mirar la configuración e <b>imprimir</b> '
+  + 'tarjetas. El que las imprime a las seis de la mañana no suele ser el administrador.</li>'
+  + '<li><b>Sólo el administrador</b> cambia colores, asigna rangos y toca la tara. Es '
+  + 'parametrizar, se hace una vez por temporada, y un número mal puesto se arrastra todo '
+  + 'el año.</li>'
+  + '</ul>'
+
+  + '<h3>🔗 De dónde salen las cuadrillas <span class="ver">V1096</span></h3>'
+  + '<p>De <b>Personal → Cuadrillas</b>. Acá <b>no se dan de alta</b>: lo único que el '
+  + 'galpón les agrega es el color y el rango de tarjetas. Una cuadrilla nueva aparece sola '
+  + 'en esta lista, sin tarjetas, que es la señal de que le falta configurarse.</p>'
+  + '<p>Y esta pantalla es de <b>Puente Cordón</b>. Parado en otra empresa no se configura '
+  + 'ni se imprime nada de acá.</p>'
+};
+
+SG_MANUAL['ia-uso'] = { titulo: 'Consumo de IA', html:
+  '<p>Varias pantallas del sistema usan <b>inteligencia artificial</b>: el lector de remitos '
+  + 'de IFCO, la lectura de facturas y documentos, el parseo de liquidaciones, el detector de '
+  + 'duplicados y el buscador. Todas gastan del <b>mismo crédito</b>. Acá se ve cuánto gasta '
+  + 'cada una.</p>'
+
+  + '<div class="ojo"><b>Por qué existe esta pantalla.</b> El 14/10/2026 la cuenta se quedó sin '
+  + 'crédito y el lector de remitos dejó de leer. Al buscar qué lo había consumido apareció el '
+  + 'problema de fondo: <b>no había forma de saberlo</b>. Las doce funciones usan la misma clave, '
+  + 'así que la consola de Anthropic las muestra como un solo número por modelo. Ahora cada '
+  + 'llamada queda anotada con el nombre de la función que la hizo.</div>'
+
+  + '<h3>💵 Los cuatro números de arriba <span class="ver">V1094</span></h3>'
+  + '<ul>'
+  + '<li><b>Gasto del período</b> — lo que se consumió en el rango elegido, y cuántas llamadas '
+  + 'fueron.</li>'
+  + '<li><b>Por día</b> — el promedio, y <b>a cuánto da por mes a ese ritmo</b>. Es lo que '
+  + 'convierte «gastamos 4 dólares» en «esto son 40 por mes»: el número suelto no dice si hay '
+  + 'que preocuparse.</li>'
+  + '<li><b>Tokens</b> — la unidad en la que se cobra. Entran los de la pregunta (incluida la '
+  + 'foto o el PDF, que pesan) y salen los de la respuesta.</li>'
+  + '<li><b>Fallaron</b> — las llamadas que no salieron. <b>No se cobran</b>, pero son la señal '
+  + 'de que algo se rompió: cien fallas seguidas no cuestan nada y sí avisan.</li>'
+  + '</ul>'
+
+  + '<h3>📈 La curva por día <span class="ver">V1094</span></h3>'
+  + '<p>Una barra por día, y es <b>la pregunta más útil de la pantalla</b>:</p>'
+  + '<ul>'
+  + '<li><b>Pendiente pareja</b> → se consumió normal. Si el crédito se acabó, simplemente hay '
+  + 'que recargarlo.</li>'
+  + '<li><b>Un pico en días puntuales</b> → ahí pasó algo, y la tabla de abajo dice qué función '
+  + 'fue.</li>'
+  + '</ul>'
+  + '<p>Pasando el mouse por encima de cada barra se ve el día, el gasto y cuántas llamadas.</p>'
+
+  + '<h3>🧩 Quién se lo come <span class="ver">V1094</span></h3>'
+  + '<p>La tabla va <b>ordenada por gasto, no por cantidad</b>. Eso es a propósito y es lo que '
+  + 'hace útil a la pantalla: <b>dos lecturas de factura pueden costar más que cien remitos</b>, '
+  + 'porque una factura escaneada entra como imágenes y pesa, y porque usa un modelo más caro.</p>'
+  + '<ul>'
+  + '<li><b>Peso</b> — qué porcentaje del gasto total se lleva esa función.</li>'
+  + '<li><b>Por llamada</b> — lo que cuesta cada vez. Es el número comparable entre funciones: '
+  + 'el total depende de cuánto se usó, el unitario de qué tan cara es.</li>'
+  + '<li>Debajo del nombre está el <b>modelo</b> que usa. Los de la familia <i>sonnet</i> son '
+  + 'varias veces más caros que los <i>haiku</i>.</li>'
+  + '</ul>'
+  + '<p>Al pie aparece lo que <b>no se usó</b> en el período. Una función que dejó de aparecer es '
+  + 'tan informativa como una que se disparó: puede ser que nadie la necesitó, o que se rompió y '
+  + 'nadie avisó.</p>'
+
+  + '<h3>🔍 Llamada por llamada <span class="ver">V1094</span></h3>'
+  + '<p>La segunda solapa lista cada llamada con la fecha, <b>quién la hizo</b>, lo que costó y '
+  + 'cuánto tardó. Es para mirar un día puntual: se elige el rango arriba, se filtra por función, '
+  + 'y se puede pedir <b>sólo las que fallaron</b> — que vienen con el motivo técnico al lado '
+  + '(sin crédito, saturada, credencial rechazada).</p>'
+
+  + '<h3>⚠️ El costo es una ESTIMACIÓN <span class="ver">V1094</span></h3>'
+  + '<p>Se calcula con los <b>precios de lista</b> vigentes al momento de cada llamada, y se '
+  + 'congela ahí: si mañana baja un precio, los informes de marzo siguen diciendo lo que se pagó '
+  + 'en marzo.</p>'
+  + '<div class="ojo">Sirve para saber <b>quién gasta</b> y para detectar un pico, que es para lo '
+  + 'que se hizo. <b>La factura es la de Anthropic</b>, y puede no dar idéntico: hay descuentos, '
+  + 'redondeos y conceptos que no pasan por acá. Para conciliar plata, la fuente es la consola.</div>'
+
+  + '<h3>🔑 Por qué lo ve sólo un administrador</h3>'
+  + '<p>Es gasto de la empresa, no el trabajo del día. Es la misma línea que separa '
+  + '<b>parametrizar</b> de <b>operar</b>: el que carga un remito no necesita saber cuánto cuesta '
+  + 'leerlo, y mostrárselo lo único que hace es invitarlo a no usar el lector.</p>'
+
+  + '<h3>💡 Qué hacer con esto</h3>'
+  + '<ul>'
+  + '<li><b>Antes de que se acabe.</b> Mirando el promedio por día y la proyección mensual se '
+  + 'sabe cuándo recargar, en vez de enterarse porque una pantalla dejó de andar.</li>'
+  + '<li><b>Cuando algo se dispara.</b> La curva dice qué día y la tabla qué función.</li>'
+  + '<li><b>Cuando algo se rompe en silencio.</b> Una función con muchas fallas, o una que '
+  + 'desapareció de la lista, son dos formas de que algo esté mal sin que nadie reclame.</li>'
+  + '</ul>'
+};
+
 SG_MANUAL.stock = { titulo: 'Stock', html:
   '<p>Stock contesta tres preguntas: <b>qué hay</b>, <b>dónde está</b> y <b>cuándo '
   + 'vence</b>. Todo lo que se ve acá nació en una recepción y va a morir en un '
@@ -35108,13 +36160,13 @@ function sgRepExport(){
       <div class="mht">🔏 Cargar como sellado directo</div>
       <button class="mcl" onclick="document.getElementById('ifco-mb-sellado-directo').classList.remove('on')">x</button>
     </div>
-    <div style="background:#ecfdf5;border-left:3px solid #10b981;border-radius:4px;padding:10px 14px;margin-bottom:14px;font-size:12px;color:#065f46">
+    <div id="ifco-sd-aviso" style="background:#ecfdf5;border-left:3px solid #10b981;border-radius:4px;padding:10px 14px;margin-bottom:14px;font-size:12px;color:#065f46">
       <b>✨ Este remito no estaba en el sistema.</b> Se va a crear directamente en estado <b>SELLADO</b> con los datos que detectamos del OCR. Verificá los datos antes de guardar.
     </div>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">
       <div>
         <label style="font-size:11px;color:var(--mut);text-transform:uppercase">N° Remito</label>
-        <input id="ifco-sd-nremito" type="text" readonly style="width:100%;padding:8px 10px;border-radius:7px;border:1px solid var(--bor);background:#f3f4f6;font-family:monospace">
+        <input id="ifco-sd-nremito" type="text" placeholder="00015-XXXXXXXX" style="width:100%;padding:8px 10px;border-radius:7px;border:1px solid var(--bor);background:var(--bg);font-family:monospace">
       </div>
       <div>
         <label style="font-size:11px;color:var(--mut);text-transform:uppercase">Cadena / Cliente *</label>
@@ -37746,6 +38798,9 @@ function loadSec(s) {
     'sg-importacion': function(){ sgImpInit(); },
     'informes-comercial': function(){ infInit(); },
     'share': function(){ shInit(); },
+    'contactos': function(){ ctInit(); },
+    'ia-uso': function(){ iuInit(); },
+    'galpon-config': function(){ galInit(); },
     'pl-abasto': function(){ plaInit(); },
     'sg-catalogo':   function(){ sgLoadCaches(function(){ sgCatSub('productos'); }); },
     'sg-reportes':   function(){ sgRepInit(); },
@@ -51617,6 +52672,1871 @@ var _inpGondola=eid('gondola-query');
 if(_inpGondola) _inpGondola.addEventListener('keydown', function(e){
   if(e.key==='Enter'){ var q=elv('gondola-query'); if(q) buscarGondola(q); }
 });
+
+// ═══════════════════════════════════════════════════════════════════════════════════════
+// CONTACTOS COMERCIALES — la agenda del área
+// ═══════════════════════════════════════════════════════════════════════════════════════
+// DOS NIVELES, y la distinción es la pantalla entera:
+//
+//   LA EMPRESA es la cuenta comercial: qué produce, en qué meses, el vínculo con la
+//   planilla de ventas, la zona, quién la atiende.
+//
+//   LA PERSONA es a quién se llama: su cargo, sus teléfonos, y las charlas que se tuvieron
+//   con ella. Varias personas cuelgan de la misma empresa.
+//
+// Pablo, 9/10/2026: «tenés que dejar relacionar a dos personas con la misma empresa, donde
+// la empresa es la que tiene la venta de producción de cada producto». Antes los productos
+// colgaban de la persona, y cargando al dueño y al encargado de Giglio el calendario de
+// melón quedaba cargado DOS VECES: a la semana uno tenía la ventana corregida y el otro no.
+//
+// En la pantalla eso se ve en que la ficha de una persona muestra el bloque de su empresa
+// SEPARADO —con su propio botón de editar— y no mezclado con lo suyo. Si se mezclara, el
+// que corrige la ventana desde la ficha de Juan creería que la corrigió para Juan solo.
+//
+// El buscador mira adentro de TODO, incluidas las charlas, y la lista dice POR DÓNDE
+// encontró a cada uno. Eso último no es decoración: con una búsqueda que entra al texto de
+// las conversaciones, "por qué apareció este" deja de ser obvio.
+//
+// LOS MESES VAN DE JULIO A JUNIO, como todo el año comercial de la casa. La grilla de doce
+// celdas arranca en JUL. Está dicho acá, en el router y en la base a propósito: leerla como
+// enero convierte a un productor de melón en uno de invierno, y nada avisa.
+const CT_MESES = ['JUL','AGO','SEP','OCT','NOV','DIC','ENE','FEB','MAR','ABR','MAY','JUN'];
+const CT_MESES_LARGO = ['Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre',
+                        'Enero','Febrero','Marzo','Abril','Mayo','Junio'];
+let CT_OPC = null;        // los desplegables, cacheados
+let CT_FICHA = null;      // la persona abierta
+let CT_EMP = null;        // la empresa abierta
+let CT_ED = null;         // la persona que se está editando
+let CT_EEMP = null;       // la empresa que se está editando
+let CT_PR = null;         // el producto que se está editando
+let CT_VISTA = 'buscar';
+let CT_TIMER = null;
+
+const ctEsc = (s) => String(s == null ? '' : s)
+  .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+const ctHoy = () => new Date().toISOString().slice(0,10);
+const ctNum = (n) => (Number(n)||0).toLocaleString('es-AR');
+
+async function ctApi(url, opts) {
+  const r = await fetch('/api/sg/contactos' + url, Object.assign({
+    headers: { 'content-type': 'application/json' },
+  }, opts || {}));
+  const j = await r.json().catch(() => ({ ok:false, error:'respuesta ilegible' }));
+  if (!r.ok || !j.ok) { const e = new Error(j.error || ('error ' + r.status)); e.datos = j; throw e; }
+  return j;
+}
+
+function ctTab(t) {
+  CT_VISTA = t;
+  document.querySelectorAll('#sec-contactos .ct-tab').forEach(e =>
+    e.classList.toggle('on', e.dataset.t === t));
+  document.querySelectorAll('#sec-contactos .ct-pane').forEach(e =>
+    e.classList.toggle('on', e.dataset.p === t));
+  // Los filtros son los mismos para las dos listas —zona, producto, mes— así que la caja
+  // se muda en vez de duplicarse: dos juegos de filtros se desincronizan y entonces las
+  // dos solapas contestan cosas distintas sin que nadie haya tocado nada.
+  const f = document.getElementById('ct-filtros');
+  const destino = document.querySelector('#sec-contactos .ct-pane[data-p="' + t + '"]');
+  if (f && destino && t !== 'pend') {
+    const ancla = destino.querySelector('.ct-buscar');
+    if (ancla && ancla.nextSibling !== f) destino.insertBefore(f, ancla.nextSibling);
+  }
+  if (t === 'pend') ctPendientes();
+  else if (t === 'emp') ctBuscarEmpresas();
+  else ctBuscar();
+}
+
+// ── LA GRILLA DE MESES ────────────────────────────────────────────────────────────────
+// Una sola función para los tres lugares donde aparece (lista, ficha y editor): si cada
+// uno la dibujara a su manera, las franjas no se podrían comparar de un vistazo, que es
+// todo el punto de dibujarlas.
+function ctMesesGrilla(mascara, clase) {
+  const m = /^[01]{12}$/.test(String(mascara||'')) ? String(mascara) : '000000000000';
+  let h = '<span class="ct-mg ' + (clase||'') + '">';
+  for (let i = 0; i < 12; i++) {
+    h += '<i class="' + (m[i]==='1'?'on':'') + '" title="' + CT_MESES_LARGO[i] + '"></i>';
+  }
+  return h + '</span>';
+}
+function ctMesesRotulo() {
+  return '<span class="ct-mlbl">' + CT_MESES.map(x => '<span>'+x[0]+'</span>').join('') + '</span>';
+}
+
+// ── EL BUSCADOR ───────────────────────────────────────────────────────────────────────
+// Se espera a que la persona deje de tipear. Sin esto, "brocoli" son ocho consultas y la
+// que contesta última no es necesariamente la de la palabra entera: la lista termina
+// mostrando los resultados de "brocol".
+function ctBuscarDebounce() {
+  clearTimeout(CT_TIMER);
+  CT_TIMER = setTimeout(ctRecargar, 260);
+}
+function ctRecargar() {
+  if (CT_VISTA === 'emp') ctBuscarEmpresas(); else ctBuscar();
+}
+
+const ctVal = (id) => { const e = document.getElementById(id); return e ? e.value : ''; };
+
+// Los filtros compartidos, armados una vez: las dos listas preguntan lo mismo.
+function ctFiltros() {
+  const qs = new URLSearchParams();
+  if (ctVal('ct-f-tipo')) qs.set('tipo', ctVal('ct-f-tipo'));
+  if (ctVal('ct-f-zona')) qs.set('zona', ctVal('ct-f-zona'));
+  if (ctVal('ct-f-prod')) qs.set('producto', ctVal('ct-f-prod'));
+  if (ctVal('ct-f-mes'))  qs.set('mes', ctVal('ct-f-mes'));
+  if (ctVal('ct-f-vend')) qs.set('vendedor', ctVal('ct-f-vend'));
+  const inact = document.getElementById('ct-f-inact');
+  if (inact && inact.checked) qs.set('inactivos', '1');
+  return qs;
+}
+
+function ctLimpiar() {
+  ['ct-q','ct-eq','ct-f-zona','ct-f-prod','ct-f-mes','ct-f-vend','ct-f-tipo'].forEach(id => {
+    const e = document.getElementById(id); if (e) e.value = '';
+  });
+  const i = document.getElementById('ct-f-inact'); if (i) i.checked = false;
+  ctRecargar();
+}
+
+async function ctBuscar() {
+  const cont = document.getElementById('ct-lista');
+  if (!cont) return;
+  const qs = ctFiltros();
+  if (ctVal('ct-q')) qs.set('q', ctVal('ct-q'));
+  cont.innerHTML = '<div class="ct-vacio">Buscando…</div>';
+  try {
+    const j = await ctApi('/?' + qs.toString());
+    ctPintarLista(j.contactos, !!ctVal('ct-q'));
+  } catch (e) {
+    cont.innerHTML = '<div class="ct-vacio">No se pudo buscar: ' + ctEsc(e.message) + '</div>';
+  }
+}
+
+const CT_CHIP = {
+  proveedor: ['ct-ch-prov', 'Proveedor'],
+  cliente:   ['ct-ch-cli',  'Cliente'],
+  ambos:     ['ct-ch-amb',  'Las dos'],
+  otro:      ['ct-ch-otro', 'Otro'],
+};
+const ctChip = (tipo) => {
+  const c = CT_CHIP[tipo] || CT_CHIP.otro;
+  return '<span class="ct-chip ' + c[0] + '">' + c[1] + '</span>';
+};
+
+function ctPintarLista(filas, hayQ) {
+  const cont = document.getElementById('ct-lista');
+  if (!filas || !filas.length) {
+    // UNA LISTA VACÍA TIENE QUE DECIR QUE ESTÁ VACÍA PORQUE NO HAY, no quedarse en blanco:
+    // en blanco se lee como "se rompió" y el comercial vuelve a cargar al mismo contacto.
+    cont.innerHTML = '<div class="ct-vacio">' + (hayQ
+      ? 'Nadie con eso. El buscador mira el nombre de la persona y el de la empresa, el'
+        + ' teléfono, el mail, lo que produce, la zona, las etiquetas y <b>el texto de las'
+        + ' charlas</b> — si no aparece, no está cargado.'
+      : 'Todavía no hay personas cargadas. El botón <b>+ Persona</b> arranca la primera.')
+      + '</div>';
+    return;
+  }
+  let h = '<div class="ab-table-wrap"><table class="pa-tbl"><thead><tr>'
+        + '<th class="ct-w" style="width:24%">Quién</th>'
+        + '<th class="ct-w" style="width:21%">Empresa</th>'
+        + '<th style="width:8%">Es</th>'
+        + '<th style="width:15%">Cómo se lo ubica</th>'
+        + '<th class="ct-w" style="width:16%">Qué produce / compra</th>'
+        + '<th style="width:9%">Charla</th>'
+        + '<th style="width:7%">&nbsp;</th>'
+        + '</tr></thead><tbody>';
+  for (const c of filas) {
+    // El motivo de la aparición. Y el extracto de la charla cuando matcheó ahí: encontrar
+    // a alguien "por una charla" sin ver cuál obliga a abrir la ficha y leerla entera.
+    let why = '';
+    if (hayQ && c.porque && c.porque.length) {
+      why = '<div style="margin-top:3px">' + c.porque.map(p =>
+        '<span class="ct-why' + (p === 'una charla' ? ' ct-why-ch' : '') + '">' + ctEsc(p) + '</span>'
+      ).join('') + '</div>';
+    }
+    if (c.charla_match) {
+      why += '<div class="ct-ext">' + ctEsc(c.charla_match.fecha) + ' · «'
+           + ctEsc(c.charla_match.extracto) + '»</div>';
+    }
+    const medio = c.medio_principal
+      ? (c.medio_tipo === 'mail' ? '✉️ ' : '📞 ') + ctEsc(c.medio_principal)
+      : '<span class="ct-nd">sin teléfono ni mail</span>';
+    const ultima = c.ultima_charla
+      ? ctEsc(c.ultima_charla) + (c.charlas > 1 ? ' <span class="ct-nd">(' + c.charlas + ')</span>' : '')
+      : '<span class="ct-nd">nunca</span>';
+    const pend = c.pendientes > 0
+      ? ' <span class="ct-chip ct-pend" title="Tiene algo pendiente">' + c.pendientes + ' pendiente'
+        + (c.pendientes > 1 ? 's' : '') + '</span>' : '';
+    // CUÁNTOS MÁS HAY EN LA MISMA EMPRESA. Sin esto, dos filas con el mismo melón parecen
+    // dos proveedores distintos — y son el dueño y el encargado de la misma finca.
+    const otros = c.otros_en_empresa > 0
+      ? '<div class="ct-nd">+' + c.otros_en_empresa + ' persona'
+        + (c.otros_en_empresa > 1 ? 's' : '') + ' más acá</div>' : '';
+
+    h += '<tr>'
+      + '<td class="ct-w"><b>' + ctEsc(c.nombre) + '</b>' + pend
+      +   (c.activo ? '' : ' <span class="ct-nd">(inactivo)</span>')
+      +   (c.cargo ? '<div class="ct-nd" style="font-style:normal">' + ctEsc(c.cargo) + '</div>' : '')
+      +   why + '</td>'
+      + '<td class="ct-w">' + (c.emp_id
+          ? '<a class="ct-link" onclick="ctEmpAbrir(' + c.emp_id + ')">' + ctEsc(c.empresa) + '</a>'
+          : '<span class="ct-nd">sin empresa</span>')
+      +   (c.zona ? '<div class="ct-nd">' + ctEsc(c.zona)
+            + (c.localidad ? ', ' + ctEsc(c.localidad) : '') + '</div>' : '')
+      +   otros + '</td>'
+      + '<td>' + ctChip(c.tipo) + '</td>'
+      + '<td title="' + ctEsc(c.medio_principal || '') + '">' + medio + '</td>'
+      + '<td class="ct-w">' + (c.productos ? ctEsc(c.productos) : '<span class="ct-nd">—</span>') + '</td>'
+      + '<td>' + ultima + '</td>'
+      + '<td style="text-align:right"><button class="btn bo bs" onclick="ctAbrir(' + c.id + ')">Ver</button></td>'
+      + '</tr>';
+  }
+  cont.innerHTML = h + '</tbody></table></div>'
+    + '<div class="ct-nd" style="margin-top:9px">' + filas.length + ' persona'
+    + (filas.length === 1 ? '' : 's') + '.</div>';
+}
+
+// ── LA LISTA DE EMPRESAS ──────────────────────────────────────────────────────────────
+async function ctBuscarEmpresas() {
+  const cont = document.getElementById('ct-emp-lista');
+  if (!cont) return;
+  const qs = ctFiltros();
+  if (ctVal('ct-eq')) qs.set('q', ctVal('ct-eq'));
+  cont.innerHTML = '<div class="ct-vacio">Buscando…</div>';
+  try {
+    const j = await ctApi('/empresas?' + qs.toString());
+    ctPintarEmpresas(j.empresas, !!ctVal('ct-eq'));
+  } catch (e) {
+    cont.innerHTML = '<div class="ct-vacio">No se pudo buscar: ' + ctEsc(e.message) + '</div>';
+  }
+}
+
+function ctPintarEmpresas(filas, hayQ) {
+  const cont = document.getElementById('ct-emp-lista');
+  if (!filas || !filas.length) {
+    cont.innerHTML = '<div class="ct-vacio">' + (hayQ
+      ? 'Ninguna empresa con eso. Se busca por su nombre, su zona, lo que produce, <b>el'
+        + ' nombre de cualquiera que trabaje ahí</b> y el texto de sus charlas.'
+      : 'Todavía no hay empresas cargadas. Se crean solas al cargar una persona, o con'
+        + ' <b>+ Empresa</b>.') + '</div>';
+    return;
+  }
+  let h = '<div class="ab-table-wrap"><table class="pa-tbl"><thead><tr>'
+        + '<th class="ct-w" style="width:24%">Empresa</th>'
+        + '<th style="width:8%">Es</th>'
+        + '<th class="ct-w" style="width:24%">Quiénes trabajan ahí</th>'
+        + '<th class="ct-w" style="width:24%">Qué produce / compra</th>'
+        + '<th style="width:12%">Última charla</th>'
+        + '<th style="width:8%">&nbsp;</th>'
+        + '</tr></thead><tbody>';
+  for (const e of filas) {
+    const pend = e.pendientes > 0
+      ? ' <span class="ct-chip ct-pend">' + e.pendientes + ' pendiente'
+        + (e.pendientes > 1 ? 's' : '') + '</span>' : '';
+    h += '<tr>'
+      + '<td class="ct-w"><b>' + ctEsc(e.nombre) + '</b>' + pend
+      +   (e.activo ? '' : ' <span class="ct-nd">(inactiva)</span>')
+      +   (e.zona ? '<div class="ct-nd">' + ctEsc(e.zona)
+            + (e.localidad ? ', ' + ctEsc(e.localidad) : '') + '</div>' : '')
+      +   (e.vendedor ? '<div class="ct-nd">la atiende ' + ctEsc(e.vendedor) + '</div>' : '') + '</td>'
+      + '<td>' + ctChip(e.tipo) + '</td>'
+      + '<td class="ct-w">' + (e.quienes ? ctEsc(e.quienes) : '<span class="ct-nd">nadie cargado</span>')
+      +   '<div class="ct-nd">' + (e.personas || 0) + ' persona'
+      +   ((e.personas || 0) === 1 ? '' : 's') + '</div></td>'
+      + '<td class="ct-w">' + (e.productos ? ctEsc(e.productos) : '<span class="ct-nd">—</span>') + '</td>'
+      + '<td>' + (e.ultima_charla ? ctEsc(e.ultima_charla) : '<span class="ct-nd">nunca</span>') + '</td>'
+      + '<td style="text-align:right"><button class="btn bo bs" onclick="ctEmpAbrir(' + e.id + ')">Ver</button></td>'
+      + '</tr>';
+  }
+  cont.innerHTML = h + '</tbody></table></div>'
+    + '<div class="ct-nd" style="margin-top:9px">' + filas.length + ' empresa'
+    + (filas.length === 1 ? '' : 's') + '.</div>';
+}
+
+// ── LOS DESPLEGABLES ──────────────────────────────────────────────────────────────────
+async function ctOpciones() {
+  if (CT_OPC) return CT_OPC;
+  const j = await ctApi('/opciones');
+  CT_OPC = j;
+  const llenar = (id, lista, vacio) => {
+    const e = document.getElementById(id);
+    if (!e) return;
+    const antes = e.value;
+    e.innerHTML = '<option value="">' + vacio + '</option>'
+      + (lista || []).map(x => '<option>' + ctEsc(x) + '</option>').join('');
+    e.value = antes;
+  };
+  llenar('ct-f-zona', j.zonas, 'Todas');
+  llenar('ct-f-prod', j.productos, 'Todos');
+  llenar('ct-f-vend', j.vendedores, 'Cualquiera');
+  // Y las listas sugeridas de los casilleros de las fichas. Son <datalist>, no <select>:
+  // no tienen opción vacía y no filtran — sugieren mientras se escribe, que es lo que hace
+  // falta cuando el valor puede ser uno nuevo (una zona donde todavía no compramos).
+  const sugerir = (id, lista) => {
+    const e = document.getElementById(id);
+    if (e) e.innerHTML = (lista || []).map(x => '<option>' + ctEsc(x) + '</option>').join('');
+  };
+  sugerir('ct-dl-zonas', j.zonas);
+  sugerir('ct-dl-vend',  j.vendedores);
+  sugerir('ct-dl-prod',  j.productos);
+  sugerir('ct-dl-emp',   j.empresas);
+  const m = document.getElementById('ct-f-mes');
+  if (m) {
+    m.innerHTML = '<option value="">Cualquier mes</option>'
+      + CT_MESES_LARGO.map((n, i) => '<option value="' + (i+1) + '">' + n + '</option>').join('');
+  }
+  return j;
+}
+
+// ── LA BANDEJA DE "ME TOCA" ───────────────────────────────────────────────────────────
+async function ctPendientes() {
+  const cont = document.getElementById('ct-pend-lista');
+  if (!cont) return;
+  const h = document.getElementById('ct-p-hasta');
+  if (h && !h.value) h.value = ctHoy();
+  cont.innerHTML = '<div class="ct-vacio">Cargando…</div>';
+  try {
+    const j = await ctApi('/pendientes?hasta=' + encodeURIComponent((h && h.value) || ctHoy()));
+    const cnt = document.getElementById('ct-cnt-pend');
+    if (cnt) cnt.textContent = j.pendientes.length || '·';
+    if (!j.pendientes.length) {
+      cont.innerHTML = '<div class="ct-vacio">No queda nada pendiente hasta esa fecha.</div>';
+      return;
+    }
+    let t = '<div class="ab-table-wrap"><table class="pa-tbl"><thead><tr>'
+      + '<th style="width:9%">Vence</th><th class="ct-w" style="width:19%">Quién</th>'
+      + '<th class="ct-w" style="width:18%">Empresa</th>'
+      + '<th style="width:14%">Cómo se lo ubica</th>'
+      + '<th class="ct-w" style="width:26%">Qué quedó</th>'
+      + '<th style="width:14%">&nbsp;</th></tr></thead><tbody>';
+    for (const p of j.pendientes) {
+      // Lo vencido se marca. Un listado donde el de ayer y el de la semana que viene se
+      // ven igual no sirve para decidir a quién llamar primero.
+      const vencido = p.proximo_el && p.proximo_el < ctHoy();
+      t += '<tr>'
+        + '<td' + (vencido ? ' class="ct-pend" style="background:none"' : '') + '>'
+        +   ctEsc(p.proximo_el) + (vencido ? ' ⚠' : '') + '</td>'
+        + '<td class="ct-w"><b>' + ctEsc(p.nombre) + '</b>'
+        +   (p.cargo ? '<div class="ct-nd" style="font-style:normal">' + ctEsc(p.cargo) + '</div>' : '') + '</td>'
+        + '<td class="ct-w">' + (p.empresa_id
+            ? '<a class="ct-link" onclick="ctEmpAbrir(' + p.empresa_id + ')">' + ctEsc(p.empresa || '') + '</a>'
+            : ctEsc(p.empresa || '—')) + '</td>'
+        + '<td title="' + ctEsc(p.medio_principal || '') + '">'
+        +   (p.medio_principal ? ctEsc(p.medio_principal) : '<span class="ct-nd">—</span>') + '</td>'
+        + '<td class="ct-w">' + ctEsc(p.proximo_paso)
+        +   '<div class="ct-nd">de la charla del ' + ctEsc(p.fecha) + '</div></td>'
+        + '<td style="text-align:right;white-space:nowrap">'
+        +   '<button class="btn bo bs" onclick="ctHecho(' + p.contacto_id + ',' + p.id + ')">✓ Hecho</button> '
+        +   '<button class="btn bo bs" onclick="ctAbrir(' + p.contacto_id + ')">Ver</button></td>'
+        + '</tr>';
+    }
+    cont.innerHTML = t + '</tbody></table></div>';
+  } catch (e) {
+    cont.innerHTML = '<div class="ct-vacio">No se pudo cargar: ' + ctEsc(e.message) + '</div>';
+  }
+}
+
+async function ctHecho(cid, chid) {
+  try {
+    await ctApi('/' + cid + '/charlas/' + chid, { method:'PATCH', body: JSON.stringify({ hecho:true }) });
+    ctPendientes();
+    if (CT_FICHA && CT_FICHA.id === cid) ctAbrir(cid);
+    if (CT_EMP) ctEmpAbrir(CT_EMP.id);
+  } catch (e) { alert('No se pudo marcar: ' + e.message); }
+}
+
+// ── LA FICHA DE UNA PERSONA ───────────────────────────────────────────────────────────
+/* ══════════════════════════════════════════════════════════════════════════════════
+   SE EDITA DONDE SE LEE
+   ══════════════════════════════════════════════════════════════════════════════════
+   Andy, 18/10/2026: «prefiero algo más como que entrás a la ficha y ahí ves todo, más
+   visual, y de ahí mismo editás».
+
+   Antes cada corrección abría otra ventana encima de la ficha: cambiar el cargo de una
+   persona eran tres clics y perder de vista la ficha que se estaba mirando. Y el
+   formulario traía los catorce campos juntos para cambiar uno.
+
+   Ahora un campo se ve como texto hasta que se lo toca; ahí se vuelve un casillero y se
+   guarda solo al salir. UN mecanismo para los dieciocho campos de las dos fichas, no
+   dieciocho formularios — el campo diecinueve que alguien escriba mañana lo tiene gratis.
+
+   ── QUÉ SE GUARDA Y CUÁNDO ────────────────────────────────────────────────────────
+   Al salir del casillero, y sólo si cambió. Escape cancela. Enter guarda en los de una
+   línea; en los de varias Enter es un renglón nuevo y se guarda saliendo o con Ctrl+Enter.
+
+   No hay botón «Guardar». Es a propósito: con guardado por campo, un botón no tendría
+   qué guardar la mitad de las veces, y la otra mitad invita a pensar que lo que se tipeó
+   antes de apretarlo no se guardó.                                                      */
+
+// Los campos que cambian algo más que su propio renglón: el nombre está en el título y
+// en la lista de atrás, el tipo pinta la chapa, la empresa mueve la persona de cuenta.
+// Ésos repintan la ficha entera; el resto sólo se actualiza a sí mismo, para no
+// destruirle el casillero al que ya hizo clic en el campo siguiente.
+const CT_CMP_REPINTA = ['nombre', 'tipo', 'empresa'];
+
+// Un campo editable. `ent` es 'persona' o 'empresa' — de ahí sale a qué dirección pegarle.
+function ctCampo(ent, id, campo, valor, opts) {
+  const o = opts || {};
+  const v = valor == null ? '' : String(valor);
+  const vacio = o.vacio || 'sin cargar';
+  return '<div class="ct-cmp' + (o.ancho ? ' ct-cmp-ancho' : '') + '"'
+    + (o.estilo ? ' style="' + o.estilo + '"' : '')
+    + ' data-ent="' + ent + '" data-id="' + id + '" data-campo="' + campo + '"'
+    + ' data-tipo="' + (o.tipo || 'text') + '"'
+    + (o.lista ? ' data-lista="' + o.lista + '"' : '')
+    + ' data-vacio="' + ctEsc(vacio) + '">'
+    + (o.etiqueta === false ? '' : '<label>' + ctEsc(o.etiqueta || campo) + '</label>')
+    + '<div class="ct-cv' + (v ? '' : ' ct-cv-vacio') + '" data-v="' + ctEsc(v) + '"'
+    +   ' title="Tocá para editar" onclick="ctCmpEditar(this)">'
+    +   (v ? ctEsc(o.ver ? o.ver(v) : v) : ctEsc(vacio)) + '</div></div>';
+}
+
+function ctCmpEditar(el) {
+  const box = el.parentNode;
+  if (box.querySelector('input,select,textarea')) return;   // ya está abierto
+  const tipo = box.dataset.tipo || 'text';
+  const v = el.dataset.v || '';
+
+  let inp;
+  if (tipo === 'textarea') {
+    inp = document.createElement('textarea');
+    inp.rows = Math.max(3, Math.min(12, v.split('\n').length + 1));
+  } else if (tipo === 'select') {
+    inp = document.createElement('select');
+    // Por ahora el único select de una ficha es el tipo de empresa, y sus etiquetas ya
+    // viven en CT_CHIP: repetirlas acá sería tener dos listas que se van a separar.
+    inp.innerHTML = Object.keys(CT_CHIP).map(t =>
+      '<option value="' + t + '"' + (t === v ? ' selected' : '') + '>' + CT_CHIP[t][1] + '</option>').join('');
+  } else {
+    inp = document.createElement('input');
+    inp.type = tipo === 'date' ? 'date' : 'text';
+    if (box.dataset.lista) inp.setAttribute('list', box.dataset.lista);
+  }
+  inp.value = v;
+  // El casillero toma el ancho que ya ocupaba el texto, para que la ficha no salte.
+  if (!box.classList.contains('ct-cmp-ancho') && tipo !== 'textarea') {
+    inp.style.width = Math.max(120, Math.min(420, el.offsetWidth + 40)) + 'px';
+  }
+  el.style.display = 'none';
+  box.appendChild(inp);
+  inp.focus();
+  if (inp.select) inp.select();
+
+  let cerrado = false;
+  const salir = (guardar) => {
+    if (cerrado) return;
+    cerrado = true;
+    const nuevo = inp.value;
+    inp.remove();
+    el.style.display = '';
+    if (guardar) ctCmpGuardar(box, el, nuevo);
+  };
+  inp.addEventListener('blur', () => salir(true));
+  inp.addEventListener('keydown', (ev) => {
+    if (ev.key === 'Escape') { ev.preventDefault(); salir(false); }
+    // En el de varias líneas, Enter es un renglón nuevo: se guarda saliendo o con Ctrl.
+    if (ev.key === 'Enter' && (tipo !== 'textarea' || ev.ctrlKey || ev.metaKey)) {
+      ev.preventDefault(); salir(true);
+    }
+  });
+  if (tipo === 'select') inp.addEventListener('change', () => salir(true));
+}
+
+async function ctCmpGuardar(box, el, valor) {
+  const campo = box.dataset.campo;
+  const previo = el.dataset.v || '';
+  if (valor === previo) return;                 // no cambió: no se pide nada
+
+  const ent = box.dataset.ent, id = box.dataset.id;
+  el.classList.add('ct-guardando');
+  const err = box.querySelector('.ct-cmp-err');
+  if (err) err.remove();
+
+  try {
+    const cuerpo = {};
+    cuerpo[campo] = valor;
+    const url = ent === 'empresa' ? '/empresas/' + id : '/' + id;
+    const j = await ctApi(url, { method: 'PATCH', body: JSON.stringify(cuerpo) });
+    el.classList.remove('ct-guardando');
+
+    if (ent === 'empresa' && j.empresa) CT_EMP = j.empresa;
+    if (ent === 'persona' && j.contacto) CT_FICHA = j.contacto;
+
+    // La lista de atrás queda vieja si no se la refresca, y es lo primero que se ve al
+    // cerrar la ficha. No se espera: no cambia nada de lo que está abierto.
+    ctRecargar();
+    CT_OPC = null;
+
+    if (CT_CMP_REPINTA.includes(campo)) {
+      if (ent === 'empresa') { ctPintarEmpresa(CT_EMP); if (CT_FICHA) ctAbrir(CT_FICHA.id); }
+      else ctPintarFicha(CT_FICHA);
+      return;
+    }
+    el.dataset.v = valor;
+    el.className = 'ct-cv' + (valor ? '' : ' ct-cv-vacio');
+    el.textContent = valor || (box.dataset.vacio || 'sin cargar');
+  } catch (e) {
+    // Volver al valor viejo sin decir nada se lee como «no se guardó porque sí», y el que
+    // acaba de tipear media nota no se entera de que la perdió.
+    // No hace falta restaurar nada: el texto a la vista NUNCA se tocó. Sólo se lo
+    // actualiza al guardar bien, así que al fallar ya está mostrando el valor viejo.
+    // Antes había acá un el.innerHTML = anterior que no hacía nada — lo encontró una
+    // mutación: borrar esa línea no ponía en rojo ningún test, y no podía, porque entre
+    // la captura y la restauración no pasaba nada que cambiara el innerHTML.
+    el.classList.remove('ct-guardando');
+    const m = document.createElement('div');
+    m.className = 'ct-cmp-err';
+    m.textContent = e.message;
+    box.appendChild(m);
+  }
+}
+
+/* ══════════════════════════════════════════════════════════════════════════════════
+   LA FICHA DE UNA PERSONA
+   ══════════════════════════════════════════════════════════════════════════════════ */
+async function ctAbrir(id) {
+  const b = document.getElementById('ct-ficha-body');
+  document.getElementById('ct-ficha-modal').classList.add('on');
+  b.innerHTML = '<div class="ct-vacio">Cargando…</div>';
+  try {
+    await ctOpciones().catch(() => {});
+    const j = await ctApi('/' + id);
+    CT_FICHA = j.contacto;
+    ctPintarFicha(j.contacto);
+  } catch (e) {
+    b.innerHTML = '<div class="ct-vacio">No se pudo abrir: ' + ctEsc(e.message) + '</div>';
+  }
+}
+function ctFichaCerrar() {
+  document.getElementById('ct-ficha-modal').classList.remove('on');
+  CT_FICHA = null;
+}
+
+// Un teléfono o un mail como chapa que se toca: en el celular abre el teléfono, en la
+// compu WhatsApp o el mail. Eran un renglón de texto para copiar a mano.
+function ctMedioLink(m) {
+  const v = String(m.valor || '');
+  if (m.tipo === 'mail') return 'mailto:' + v;
+  const n = v.replace(/[^\d+]/g, '');
+  if (m.tipo === 'whatsapp') return 'https://wa.me/' + n.replace(/^\+/, '');
+  return 'tel:' + n;
+}
+
+function ctPintarFicha(c) {
+  const e = c.empresa;
+  document.getElementById('ct-ficha-tit').innerHTML =
+    ctEsc(c.nombre) + (e ? ' <span class="ct-nd" style="font-style:normal">· '
+      + ctEsc(e.nombre) + '</span> ' + ctChip(e.tipo) : '');
+
+  let h = '';
+
+  // ── EL ENCABEZADO ──
+  // Quién es, de dónde, y cómo se lo llama — todo arriba. Antes el teléfono estaba dos
+  // bloques más abajo y había que bajar para la pregunta más frecuente de la pantalla.
+  h += '<div class="ct-hero">' + ctTarjetaHtml(c)
+    + '<div class="ct-hero-d">'
+    + ctCampo('persona', c.id, 'nombre', c.nombre, { etiqueta: false,
+        estilo: 'display:block;margin:0 0 2px' })
+    + ctCampo('persona', c.id, 'cargo', c.cargo, { etiqueta: 'Cargo',
+        vacio: 'sin cargo' })
+    + (e ? '<div class="ct-hero-s" style="margin-top:4px">'
+        + '<a class="ct-link" onclick="ctEmpAbrir(' + e.id + ')"><b>' + ctEsc(e.nombre) + '</b></a>'
+        + (e.zona ? ' · 📍 ' + ctEsc(e.zona) + (e.localidad ? ', ' + ctEsc(e.localidad) : '') : '')
+        + (e.vendedor ? ' · la atiende ' + ctEsc(e.vendedor) : '') + '</div>' : '');
+
+  // Los medios, como chapas, acá arriba.
+  h += '<div style="margin-top:7px">';
+  if (!c.medios.length) {
+    h += '<span class="ct-nd">Sin teléfono ni mail. Es lo primero que hace falta.</span>';
+  } else {
+    h += c.medios.map(m => {
+      const ico = m.tipo === 'mail' ? '✉️' : (m.tipo === 'whatsapp' ? '💬' : '📞');
+      return '<a class="ct-tel' + (m.preferido ? ' ct-tel-pref' : '') + '"'
+        + ' href="' + ctEsc(ctMedioLink(m)) + '" target="_blank" rel="noopener"'
+        + ' title="' + (m.preferido ? 'El preferido' : 'Abrir') + '">'
+        + ico + ' ' + ctEsc(m.valor) + '</a>';
+    }).join('');
+  }
+  h += '</div></div></div>';
+
+  // ── CÓMO SE LO UBICA ──
+  // La chapa de arriba abre; acá se administra. Separado a propósito: marcar el preferido
+  // y borrar un número son gestos raros, y mezclarlos con el link hace que un clic para
+  // llamar borre un teléfono.
+  h += '<div class="ct-fbox"><h4>Teléfonos y mails</h4>';
+  if (!c.medios.length) {
+    h += '<div class="ct-nd">Ninguno todavía.</div>';
+  } else {
+    for (const m of c.medios) {
+      const ico = m.tipo === 'mail' ? '✉️' : (m.tipo === 'whatsapp' ? '💬' : '📞');
+      // La estrella marca el preferido: un productor tiene el celular, el del galpón y el
+      // del hijo, y el que sabe cuál atiende es el comercial, no el sistema.
+      h += '<div class="ct-medio">'
+        + '<span class="ct-pref" title="' + (m.preferido ? 'Es el preferido' : 'Marcar como preferido') + '"'
+        +   ' onclick="ctPreferido(' + m.id + ')">' + (m.preferido ? '★' : '☆') + '</span>'
+        + '<span>' + ico + ' <b>' + ctEsc(m.valor) + '</b></span>'
+        + (m.nota ? '<span class="ct-nd">' + ctEsc(m.nota) + '</span>' : '')
+        + '<button class="btn bo bs" style="margin-left:auto" onclick="ctMedioBorrar(' + m.id + ')">×</button>'
+        + '</div>';
+    }
+  }
+  // Se agrega ACÁ, no en un prompt() del navegador: un prompt no se puede corregir, no
+  // tiene «cancelar» de verdad y no deja elegir si es WhatsApp.
+  h += '<div id="ct-medio-alta"></div>'
+    + '<div style="margin-top:9px"><button class="btn bo bs" onclick="ctMedioAlta()">'
+    + '+ Teléfono o mail</button></div></div>';
+
+  // ── NOTAS DE LA PERSONA ──
+  h += '<div class="ct-fbox"><h4>Notas de ' + ctEsc(c.nombre.split(' ')[0]) + '</h4>'
+    + ctCampo('persona', c.id, 'notas', c.notas, { tipo: 'textarea', ancho: true,
+        etiqueta: false, vacio: 'Tocá acá para anotar algo de esta persona.' })
+    + '<div class="ct-nd" style="margin-top:5px">Lo que es de la empresa —la zona, qué'
+    + ' produce, el vínculo con la planilla— se edita en la ficha de la empresa.</div></div>';
+
+  // ── SU EMPRESA ──
+  // Va en un bloque APARTE: lo que está acá es de la cuenta y lo tocan también los
+  // compañeros. Mezclarlo haría creer que corregir la ventana del melón desde la ficha de
+  // Juan la corrige para Juan solo.
+  if (e) {
+    h += '<div class="ct-fbox ct-emp-box"><h4>Su empresa <span class="ct-nd">· lo de acá es de la cuenta,'
+      + ' no de ' + ctEsc(c.nombre.split(' ')[0]) + '</span></h4>'
+      + '<div style="display:flex;align-items:center;gap:9px;flex-wrap:wrap">'
+      + '<b style="font-size:14px">' + ctEsc(e.nombre) + '</b>' + ctChip(e.tipo)
+      + (e.etiquetas ? '<span class="ct-nd">🏷️ ' + ctEsc(e.etiquetas) + '</span>' : '')
+      + '<button class="btn bb bs" style="margin-left:auto" onclick="ctEmpAbrir(' + e.id + ')">'
+      + 'Abrir la ficha de la empresa</button></div>';
+
+    if (e.productos && e.productos.length) {
+      h += '<div style="margin-top:11px;margin-bottom:4px">' + ctMesesRotulo()
+         + ' <span class="ct-nd">el año arranca en JULIO</span></div>'
+         + e.productos.map(p => '<div style="font-size:12.5px;padding:2px 0">'
+             + ctMesesGrilla(p.meses) + ' <b>' + ctEsc(p.producto) + '</b>'
+             + (p.variedad ? ' <span class="ct-nd">' + ctEsc(p.variedad) + '</span>' : '')
+             + (p.ventana ? ' <span class="ct-nd">· ' + ctEsc(p.ventana) + '</span>' : '')
+             + '</div>').join('');
+    } else {
+      h += '<div class="ct-nd" style="margin-top:9px">Todavía no se cargó qué produce o compra.'
+         + ' Se carga en la ficha de la empresa.</div>';
+    }
+
+    // Quiénes más trabajan ahí: poder saltar del dueño al encargado sin volver a buscarlo.
+    const otros = (e.personas || []).filter(p => p.id !== c.id);
+    if (otros.length) {
+      h += '<div style="margin-top:12px"><h4 style="margin-bottom:5px">Quién más trabaja ahí</h4>'
+        + otros.map(p => '<div style="font-size:12.5px;padding:2px 0">'
+            + (p.tiene_tarjeta ? '🪪 ' : '')
+            + '<a class="ct-link" onclick="ctAbrir(' + p.id + ')">' + ctEsc(p.nombre) + '</a>'
+            + (p.cargo ? ' <span class="ct-nd">' + ctEsc(p.cargo) + '</span>' : '')
+            + (p.medio_principal ? ' <span class="ct-nd">· ' + ctEsc(p.medio_principal) + '</span>' : '')
+            + '</div>').join('') + '</div>';
+    }
+    h += '</div>';
+  } else {
+    h += '<div class="ct-hueco">Esta persona no tiene empresa. Eso no debería pasar: lo que'
+      + ' produce y el vínculo con la planilla cuelgan de la empresa, así que sin ella la'
+      + ' ficha no puede mostrarlos. Se arregla poniéndole una abajo.'
+      + '<div style="margin-top:8px">'
+      + ctCampo('persona', c.id, 'empresa', '', { etiqueta: 'Empresa',
+          lista: 'ct-dl-emp', vacio: 'escribí el nombre de la finca' })
+      + '</div></div>';
+  }
+
+  // ── LO QUE LA BASE YA SABE ──
+  // Va SEPARADO de lo declarado. El hueco entre las dos cosas —ofrece brócoli y nunca le
+  // compramos brócoli— es justamente la oportunidad, y mezclándolas no se ve.
+  h += ctBloquesObservado(c, e);
+
+  // ── QUÉ SE HABLÓ ──
+  h += '<div class="ct-fbox"><h4>Qué se habló con ' + ctEsc(c.nombre) + '</h4>';
+  if (c.pendientes.length) {
+    h += '<div style="background:#fdecec;border-radius:8px;padding:9px 11px;margin-bottom:11px;font-size:12.5px">'
+      + '<b style="color:#b3261e">Pendiente</b><br>'
+      + c.pendientes.map(p => '· ' + ctEsc(p.proximo_paso)
+          + (p.proximo_el ? ' <span class="ct-nd">para el ' + ctEsc(p.proximo_el) + '</span>'
+                          : ' <span class="ct-nd">sin fecha</span>')
+          + ' <button class="btn bo bs" onclick="ctHecho(' + c.id + ',' + p.id + ')">✓</button>').join('<br>')
+      + '</div>';
+  }
+  h += '<div id="ct-charla-alta"></div>'
+    + '<div style="margin:0 0 11px"><button class="btn bb bs" onclick="ctChAlta()">'
+    + '+ Anotar una charla</button></div>';
+  h += c.charlas.length ? c.charlas.map(ch => ctCharlaHtml(ch, c.id)).join('')
+    : '<div class="ct-nd">Todavía no se anotó ninguna charla con esta persona.</div>';
+  h += '</div>';
+
+  // LO QUE SE HABLÓ CON LOS OTROS DE LA MISMA EMPRESA. Aparte, porque no es lo mismo:
+  // antes de llamar a Juan hay que saber que el martes el encargado ya dijo que no hay
+  // fruta, pero no se le puede atribuir a Juan lo que dijo otro.
+  if (c.charlas_empresa && c.charlas_empresa.length) {
+    h += '<div class="ct-fbox"><h4>Y lo que se habló con los otros de '
+      + ctEsc(e ? e.nombre : 'la empresa') + '</h4>'
+      + c.charlas_empresa.map(ch => ctCharlaHtml(ch, ch.contacto_id, true)).join('')
+      + '</div>';
+  }
+
+  h += '<div style="text-align:right;margin-top:4px">'
+    + '<button class="btn bo bs" onclick="ctBaja()">Dar de baja a ' + ctEsc(c.nombre) + '</button></div>';
+
+  document.getElementById('ct-ficha-body').innerHTML = h;
+}
+
+/* ══ LA FOTO DE LA TARJETA ══════════════════════════════════════════════════════════
+   Una foto y nada más: ni lector, ni OCR. Lo que se tipea igual son el teléfono y el
+   mail — una foto no se busca, y el buscador es la mitad de este módulo. Está para lo
+   otro: el logo, el cargo impreso, el número que todavía no se cargó.
+
+   La imagen se pide a /api/sg/contactos/:id/tarjeta, que pasa por sesión. No es una
+   carpeta pública: la foto de una tarjeta ES el teléfono directo de un comprador. */
+function ctTarjetaUrl(id) {
+  // El sello de tiempo es un rompe-caché: sin él, reemplazar la foto sigue mostrando la
+  // vieja hasta que alguien recargue el panel.
+  return '/api/sg/contactos/' + id + '/tarjeta?t=' + (CT_TJ_V[id] || 0);
+}
+const CT_TJ_V = {};
+
+function ctTarjetaHtml(c) {
+  let h = '<div class="ct-tj">';
+  if (c.tiene_tarjeta) {
+    h += '<img src="' + ctTarjetaUrl(c.id) + '" alt="Tarjeta de ' + ctEsc(c.nombre) + '"'
+      +  ' onclick="ctFotoAbrir()" title="Ver en grande">'
+      +  '<div class="ct-tj-pie"><a onclick="ctTarjetaElegir()">cambiar</a> · '
+      +  '<a onclick="ctTarjetaBorrar()">sacar</a></div>';
+  } else {
+    h += '<div class="ct-tj-no" onclick="ctTarjetaElegir()">🪪<br>Agregar la foto<br>de la tarjeta</div>';
+  }
+  h += '<input type="file" id="ct-tj-file" accept="image/*" style="display:none"'
+    +  ' onchange="ctTarjetaSubir(this)"></div>';
+  return h;
+}
+function ctTarjetaElegir() {
+  const f = document.getElementById('ct-tj-file');
+  if (f) { f.value = ''; f.click(); }
+}
+async function ctTarjetaSubir(input) {
+  if (!CT_FICHA || !input.files || !input.files[0]) return;
+  const fd = new FormData();
+  fd.append('tarjeta', input.files[0]);
+  const caja = input.parentNode;
+  caja.style.opacity = '.5';
+  try {
+    // Sin content-type a mano: FormData le pone el suyo con el separador, y pisarlo con
+    // application/json deja a multer sin poder leer el archivo.
+    const r = await fetch('/api/sg/contactos/' + CT_FICHA.id + '/tarjeta',
+      { method: 'POST', body: fd });
+    const j = await r.json().catch(() => ({ ok: false, error: 'respuesta ilegible' }));
+    if (!r.ok || !j.ok) throw new Error(j.error || ('error ' + r.status));
+    CT_TJ_V[CT_FICHA.id] = Date.now();
+    CT_FICHA = j.contacto;
+    ctPintarFicha(CT_FICHA);
+    if (CT_EMP) ctEmpAbrir(CT_EMP.id);
+  } catch (e) {
+    caja.style.opacity = '';
+    alert('No se pudo subir la foto: ' + e.message);
+  }
+}
+async function ctTarjetaBorrar() {
+  if (!CT_FICHA) return;
+  if (!confirm('¿Sacar la foto de la tarjeta de ' + CT_FICHA.nombre + '?\n\n'
+    + 'El teléfono y el mail quedan: están cargados aparte.')) return;
+  try {
+    const j = await ctApi('/' + CT_FICHA.id + '/tarjeta', { method: 'DELETE' });
+    CT_FICHA = j.contacto;
+    ctPintarFicha(CT_FICHA);
+    if (CT_EMP) ctEmpAbrir(CT_EMP.id);
+  } catch (e) { alert('No se pudo: ' + e.message); }
+}
+function ctFotoAbrir() {
+  if (!CT_FICHA || !CT_FICHA.tiene_tarjeta) return;
+  document.getElementById('ct-foto-tit').textContent = 'Tarjeta de ' + CT_FICHA.nombre;
+  document.getElementById('ct-foto-body').innerHTML =
+    '<img src="' + ctTarjetaUrl(CT_FICHA.id) + '" alt="Tarjeta">';
+  document.getElementById('ct-foto-modal').classList.add('on');
+}
+function ctFotoCerrar() { document.getElementById('ct-foto-modal').classList.remove('on'); }
+
+// Una charla dibujada. Igual en los tres lugares donde aparece —la ficha de la persona, la
+// de sus compañeros y la de la empresa— para que se lean igual.
+function ctCharlaHtml(ch, cid, conQuien) {
+  const pend = ch.proximo_paso && !ch.hecho_en;
+  const ico = { whatsapp:'💬', mail:'✉️', visita:'🤝', telefono:'📞' }[ch.canal] || '·';
+  return '<div class="ct-charla' + (pend ? ' ct-c-pend' : '') + '">'
+    + '<div class="ct-c-hd">' + ico + ' ' + ctEsc(ch.fecha)
+    +   (conQuien && ch.con_quien ? ' · con <b>' + ctEsc(ch.con_quien) + '</b>'
+          + (ch.con_cargo ? ' (' + ctEsc(ch.con_cargo) + ')' : '') : '')
+    +   (ch.usuario ? ' · lo anotó ' + ctEsc(ch.usuario) : '')
+    +   (conQuien ? '' : ' <button class="btn bo bs" style="padding:0 5px;font-size:10px"'
+          + ' onclick="ctChBorrar(' + ch.id + ')">×</button>')
+    +   '</div>'
+    + '<div class="ct-c-tx">' + ctEsc(ch.resumen) + '</div>'
+    + (ch.proximo_paso ? '<div class="ct-c-paso">'
+        + (ch.hecho_en ? '✓ ' : '→ ') + ctEsc(ch.proximo_paso)
+        + (ch.proximo_el ? ' <span class="ct-nd">' + ctEsc(ch.proximo_el) + '</span>' : '')
+        + (ch.hecho_en ? ' <span class="ct-nd">hecho el ' + ctEsc(ch.hecho_en) + '</span>'
+                       : ' <button class="btn bo bs" onclick="ctHecho(' + cid + ',' + ch.id + ')">✓ Hecho</button>')
+        + '</div>' : '')
+    + '</div>';
+}
+
+// Los bloques de lo OBSERVADO. Se arman una vez y se usan en las dos fichas: si cada una
+// los dibujara a su manera, la de la persona y la de la empresa dirían lo mismo distinto.
+function ctBloquesObservado(d, e) {
+  let h = '';
+  if (d.ofrece_sin_comprar && d.ofrece_sin_comprar.length) {
+    h += '<div class="ct-hueco"><b>⭐ Ofrece y nunca le compramos</b><br>'
+      + d.ofrece_sin_comprar.map(x => '· <b>' + ctEsc(x.producto) + '</b>'
+          + (x.variedad ? ' (' + ctEsc(x.variedad) + ')' : '')
+          + (x.ventana ? ' — ' + ctEsc(x.ventana) : '')).join('<br>')
+      + '<div class="ct-nd" style="margin-top:6px">Sale de cruzar lo que nos dijo con lo que'
+      + ' efectivamente le compramos. Es la razón de cargar esta ficha.</div></div>';
+  }
+  if (d.compras) {
+    h += '<div class="ct-fbox"><h4>Qué le compramos <span class="ct-nd">· lo que dicen las ventas</span></h4>';
+    if (d.compras.sin_datos) {
+      // La diferencia entre "no trajo nada" y "el nombre no coincide con la planilla". Un
+      // cero se lee como lo primero y manda a alguien a reclamarle a un productor que trajo.
+      h += '<div class="ct-nd">No hay ventas con el proveedor «'
+        + ctEsc(e ? e.proveedor_nombre : '') + '».'
+        + ' O nunca le compramos, o el nombre no es el que usa la planilla.</div>';
+    } else {
+      h += '<div style="margin-bottom:5px">' + ctMesesRotulo() + '</div>'
+        + '<div class="ab-table-wrap"><table class="pa-tbl"><thead><tr>'
+        + '<th class="ct-w" style="width:32%">Producto</th><th style="width:26%">Cuándo trajo</th>'
+        + '<th style="width:21%">Kilos</th><th style="width:21%">USD</th>'
+        + '</tr></thead><tbody>';
+      for (const p of d.compras.productos) {
+        h += '<tr><td class="ct-w"><b>' + ctEsc(p.producto) + '</b></td>'
+          + '<td>' + ctMesesGrilla(p.meses, 'ct-obs')
+          + ' <span class="ct-nd">' + ctEsc(p.ventana) + '</span></td>'
+          + '<td style="text-align:right">' + ctNum(p.kilos) + ' K</td>'
+          + '<td style="text-align:right">USD ' + ctNum(p.usd) + '</td></tr>';
+      }
+      h += '</tbody></table></div>';
+    }
+    h += '</div>';
+  }
+  if (d.ventas) {
+    h += '<div class="ct-fbox"><h4>Qué nos compra <span class="ct-nd">· lo que dicen las ventas</span></h4>';
+    if (d.ventas.sin_datos) {
+      h += '<div class="ct-nd">No hay ventas al cliente «' + ctEsc(e ? e.cliente_nombre : '') + '».'
+        + ' O nunca le vendimos, o el nombre no es el que usa la planilla.</div>';
+    } else {
+      h += '<div class="ab-table-wrap"><table class="pa-tbl"><thead><tr>'
+        + '<th class="ct-w" style="width:46%">Producto</th>'
+        + '<th style="width:18%">Kilos</th><th style="width:18%">USD</th>'
+        + '<th style="width:18%">Última</th></tr></thead><tbody>';
+      for (const p of d.ventas.productos) {
+        h += '<tr><td class="ct-w">' + ctEsc(p.producto) + '</td>'
+          + '<td style="text-align:right">' + ctNum(p.kilos) + ' K</td>'
+          + '<td style="text-align:right">USD ' + ctNum(p.usd) + '</td>'
+          + '<td class="ct-nd">' + ctEsc(p.ultimo_periodo || '') + '</td></tr>';
+      }
+      h += '</tbody></table></div><div class="ct-nd" style="margin-top:6px">Total: '
+        + ctNum(d.ventas.kilos) + ' K · USD ' + ctNum(d.ventas.usd) + '</div>';
+    }
+    h += '</div>';
+  }
+  return h;
+}
+
+
+
+/* ══════════════════════════════════════════════════════════════════════════════════
+   LA FICHA DE UNA EMPRESA
+   ══════════════════════════════════════════════════════════════════════════════════ */
+async function ctEmpAbrir(id) {
+  const b = document.getElementById('ct-emp-body');
+  document.getElementById('ct-emp-modal').classList.add('on');
+  b.innerHTML = '<div class="ct-vacio">Cargando…</div>';
+  try {
+    await ctOpciones().catch(() => {});
+    const j = await ctApi('/empresas/' + id);
+    CT_EMP = j.empresa;
+    ctPintarEmpresa(j.empresa);
+  } catch (e) {
+    b.innerHTML = '<div class="ct-vacio">No se pudo abrir: ' + ctEsc(e.message) + '</div>';
+  }
+}
+function ctEmpCerrar() {
+  document.getElementById('ct-emp-modal').classList.remove('on');
+  CT_EMP = null;
+}
+
+function ctPintarEmpresa(e) {
+  document.getElementById('ct-emp-tit').innerHTML = ctEsc(e.nombre) + ' ' + ctChip(e.tipo);
+  const C = (campo, valor, opts) => ctCampo('empresa', e.id, campo, valor, opts);
+  let h = '';
+
+  // ── LA CUENTA ──
+  // Los ocho campos, todos editables donde se leen. Antes era un bloque de texto con un
+  // botón que abría otra ventana con los ocho juntos para corregir uno.
+  h += '<div class="ct-hero"><div class="ct-hero-d">'
+    + C('nombre', e.nombre, { etiqueta: false, estilo: 'display:block;margin:0 0 6px' })
+    + '<div>'
+    + C('tipo', e.tipo, { etiqueta: 'Es', tipo: 'select',
+        ver: (v) => (CT_CHIP[v] || CT_CHIP.otro)[1] })
+    + C('zona', e.zona, { etiqueta: 'Zona', lista: 'ct-dl-zonas' })
+    + C('localidad', e.localidad, { etiqueta: 'Localidad' })
+    + C('vendedor', e.vendedor, { etiqueta: 'La atiende', lista: 'ct-dl-vend' })
+    + '</div></div></div>';
+
+  h += '<div class="ct-fbox"><h4>La cuenta</h4>'
+    + C('etiquetas', e.etiquetas, { etiqueta: 'Etiquetas', ancho: true,
+        vacio: 'confiable, paga a 30, no manda fruta chica…' })
+    + '<div class="ct-nd" style="margin:-4px 0 11px">Texto libre, separado por comas. El'
+    + ' buscador las mira: es para preguntar después por algo que no tiene campo propio.</div>'
+    // ── EL VÍNCULO CON LA PLANILLA ES POR NOMBRE ──
+    + '<div>'
+    + C('proveedor_nombre', e.proveedor_nombre, { etiqueta: 'En la planilla, como proveedor',
+        vacio: 'sin vincular' })
+    + C('cliente_nombre', e.cliente_nombre, { etiqueta: 'En la planilla, como cliente',
+        vacio: 'sin vincular' })
+    + '</div>'
+    + '<div class="ct-nd" style="margin:-4px 0 11px">Es lo que trae a la ficha lo que de'
+    + ' verdad le compramos o le vendimos. Tiene que estar escrito igual que en la planilla.</div>'
+    + C('notas', e.notas, { tipo: 'textarea', ancho: true, etiqueta: 'Notas',
+        vacio: 'Tocá acá para anotar algo de esta cuenta.' })
+    + '</div>';
+
+  // ── QUIÉNES TRABAJAN ACÁ ──
+  // Con el teléfono de cada uno: la pregunta al abrir la ficha de una finca es «a quién
+  // llamo», y tener que entrar a cada persona para ver su número la hace inútil.
+  h += '<div class="ct-fbox"><h4>Quiénes trabajan acá</h4>';
+  if (!e.personas || !e.personas.length) {
+    h += '<div class="ct-nd">Nadie cargado todavía.</div>';
+  } else {
+    h += '<div class="ab-table-wrap"><table class="pa-tbl"><thead><tr>'
+      + '<th class="ct-w" style="width:30%">Quién</th><th style="width:20%">Cargo</th>'
+      + '<th style="width:24%">Cómo se lo ubica</th><th style="width:16%">Última charla</th>'
+      + '<th style="width:10%">&nbsp;</th></tr></thead><tbody>';
+    for (const p of e.personas) {
+      h += '<tr><td class="ct-w">' + (p.tiene_tarjeta ? '🪪 ' : '') + '<b>' + ctEsc(p.nombre) + '</b>'
+        + (p.activo ? '' : ' <span class="ct-nd">(inactivo)</span>') + '</td>'
+        + '<td>' + (p.cargo ? ctEsc(p.cargo) : '<span class="ct-nd">—</span>') + '</td>'
+        + '<td title="' + ctEsc(p.medio_principal || '') + '">'
+        +   (p.medio_principal ? (p.medio_tipo === 'mail' ? '✉️ ' : '📞 ') + ctEsc(p.medio_principal)
+              : '<span class="ct-nd">sin teléfono</span>') + '</td>'
+        + '<td>' + (p.ultima_charla ? ctEsc(p.ultima_charla)
+              + (p.charlas > 1 ? ' <span class="ct-nd">(' + p.charlas + ')</span>' : '')
+              : '<span class="ct-nd">nunca</span>') + '</td>'
+        + '<td style="text-align:right"><button class="btn bo bs" onclick="ctAbrir(' + p.id + ')">Ver</button></td>'
+        + '</tr>';
+    }
+    h += '</tbody></table></div>';
+  }
+  h += '<div id="ct-persona-alta"></div>'
+    + '<div style="margin-top:9px"><button class="btn bo bs" onclick="ctPersonaAlta()">'
+    + '+ Persona</button></div></div>';
+
+  // ── QUÉ PRODUCE: LO DECLARADO ──
+  // Se carga y se corrige UNA VEZ para toda la finca. Cada renglón se abre ACÁ MISMO en
+  // vez de en otra ventana: corregir un mes era abrir un modal arriba del modal.
+  h += '<div class="ct-fbox"><h4>Qué produce, y cuándo <span class="ct-nd">· lo que nos dijo</span></h4>';
+  if (!e.productos.length) {
+    h += '<div class="ct-nd">Nada cargado todavía.</div>';
+  } else {
+    h += '<div style="margin-bottom:5px;padding-left:1px">' + ctMesesRotulo()
+       + ' <span class="ct-nd">el año arranca en JULIO</span></div>';
+    h += '<div class="ab-table-wrap"><table class="pa-tbl"><thead><tr>'
+      + '<th class="ct-w" style="width:28%">Producto</th><th style="width:26%">Cuándo</th>'
+      + '<th style="width:20%">Ventana</th><th style="width:16%">Volumen</th>'
+      + '<th style="width:10%">&nbsp;</th></tr></thead><tbody>';
+    for (const p of e.productos) {
+      h += '<tr><td class="ct-w"><b>' + ctEsc(p.producto) + '</b>'
+        + (p.variedad ? '<div class="ct-nd" style="font-style:normal">' + ctEsc(p.variedad) + '</div>' : '')
+        + (p.notas ? '<div class="ct-nd">' + ctEsc(p.notas) + '</div>' : '') + '</td>'
+        + '<td>' + ctMesesGrilla(p.meses) + '</td>'
+        + '<td>' + (p.ventana ? ctEsc(p.ventana) : '<span class="ct-nd">sin definir</span>') + '</td>'
+        + '<td>' + (p.volumen ? ctEsc(p.volumen) : '<span class="ct-nd">—</span>') + '</td>'
+        + '<td style="text-align:right;white-space:nowrap">'
+        +   '<button class="btn bo bs" onclick="ctPrAlta(' + p.id + ')">✏️</button> '
+        +   '<button class="btn bo bs" onclick="ctPrBorrar(' + p.id + ')">×</button></td></tr>';
+    }
+    h += '</tbody></table></div>';
+  }
+  h += '<div id="ct-pr-alta"></div>'
+    + '<div style="margin-top:9px"><button class="btn bo bs" onclick="ctPrAlta(null)">+ Producto</button></div>'
+    + '<div class="ct-nd" style="margin-top:6px">Se carga una vez para toda la empresa: todas'
+    + ' las personas de acá ven lo mismo.</div></div>';
+
+  h += ctBloquesObservado(e, e);
+
+  // ── TODO LO QUE SE HABLÓ CON LA CUENTA ──
+  // El historial de una cuenta es uno solo aunque las personas sean tres.
+  h += '<div class="ct-fbox"><h4>Todo lo que se habló con ' + ctEsc(e.nombre) + '</h4>';
+  if (e.pendientes && e.pendientes.length) {
+    h += '<div style="background:#fdecec;border-radius:8px;padding:9px 11px;margin-bottom:11px;font-size:12.5px">'
+      + '<b style="color:#b3261e">Pendiente</b><br>'
+      + e.pendientes.map(p => '· ' + ctEsc(p.proximo_paso)
+          + ' <span class="ct-nd">con ' + ctEsc(p.con_quien || '') + '</span>'
+          + (p.proximo_el ? ' <span class="ct-nd">para el ' + ctEsc(p.proximo_el) + '</span>'
+                          : ' <span class="ct-nd">sin fecha</span>')
+          + ' <button class="btn bo bs" onclick="ctHecho(' + p.contacto_id + ',' + p.id + ')">✓</button>').join('<br>')
+      + '</div>';
+  }
+  // La charla es DE UNA PERSONA, siempre: la dijo alguien con nombre y apellido. Por eso
+  // acá no hay botón para anotar una — se anota en la ficha de quien habló.
+  h += (e.charlas && e.charlas.length)
+    ? e.charlas.map(ch => ctCharlaHtml(ch, ch.contacto_id, true)).join('')
+    : '<div class="ct-nd">Todavía no se anotó ninguna charla con nadie de esta empresa.'
+      + ' Se anotan en la ficha de cada persona: la charla la tuvo alguien.</div>';
+  h += '</div>';
+
+  h += '<div style="text-align:right;margin-top:4px">'
+    + '<button class="btn bo bs" onclick="ctEmpBaja()">Dar de baja a ' + ctEsc(e.nombre) + '</button></div>';
+
+  document.getElementById('ct-emp-body').innerHTML = h;
+}
+
+/* ══ LO QUE SE AGREGA, AGREGADO ACÁ MISMO ═══════════════════════════════════════════
+   Los cuatro «+» de las dos fichas abren un renglón en blanco DEBAJO de la lista, no
+   una ventana encima. Dos de ellos eran prompt() del navegador, que no se puede
+   corregir, no tiene cancelar de verdad y no deja elegir si el número es WhatsApp. */
+
+// El renglón se arma, se mete y se le da el foco. Siempre uno solo abierto por lista: el
+// segundo clic en «+» reemplaza al primero en vez de apilar renglones vacíos.
+function ctAltaAbrir(donde, html, foco) {
+  const c = document.getElementById(donde);
+  if (!c) return;
+  c.innerHTML = '<div class="ct-alta">' + html
+    + '<div class="ct-alta-err" id="' + donde + '-err" style="display:none"></div></div>';
+  const f = document.getElementById(foco);
+  if (f) f.focus();
+}
+function ctAltaCerrar(donde) {
+  const c = document.getElementById(donde);
+  if (c) c.innerHTML = '';
+}
+function ctAltaError(donde, msg) {
+  const e = document.getElementById(donde + '-err');
+  if (e) { e.textContent = msg; e.style.display = ''; }
+}
+// Ya hay un ctTrim() en el panel, de otra pantalla, y no recorta. Éste sí: los avisos
+// de «falta el nombre» tienen que saltar también cuando se tipearon tres espacios.
+const ctTrim = (id) => { const e = document.getElementById(id); return e ? e.value.trim() : ''; };
+
+// ── UN TELÉFONO O UN MAIL ──
+function ctMedioAlta() {
+  if (!CT_FICHA) return;
+  ctAltaAbrir('ct-medio-alta',
+      '<div class="ct-alta-f">'
+    + '<div style="flex:1;min-width:170px"><label>Teléfono o mail</label>'
+    +   '<input id="ct-md-valor" style="width:100%" placeholder="2622 45-6789 o juan@finca.com"'
+    +   ' onkeydown="if(event.key===\'Enter\')ctMedioGuardar()"></div>'
+    + '<div><label>Qué es</label><select id="ct-md-tipo">'
+    +   '<option value="">(se adivina)</option><option value="telefono">📞 Teléfono</option>'
+    +   '<option value="whatsapp">💬 WhatsApp</option><option value="mail">✉️ Mail</option></select></div>'
+    + '<div style="flex:1;min-width:130px"><label>Nota</label>'
+    +   '<input id="ct-md-nota" style="width:100%" placeholder="el del galpón"></div>'
+    + '<div><button class="btn bb bs" onclick="ctMedioGuardar()">Agregar</button> '
+    +   '<button class="btn bo bs" onclick="ctAltaCerrar(\'ct-medio-alta\')">Cancelar</button></div>'
+    + '</div>', 'ct-md-valor');
+}
+async function ctMedioGuardar() {
+  if (!CT_FICHA) return;
+  const valor = ctTrim('ct-md-valor');
+  if (!valor) return ctAltaError('ct-medio-alta', 'Falta el teléfono o el mail.');
+  // El tipo se adivina si no lo eligieron: una arroba es un mail y no hay más caso.
+  const tipo = ctTrim('ct-md-tipo') || (valor.includes('@') ? 'mail' : 'telefono');
+  try {
+    await ctApi('/' + CT_FICHA.id + '/medios', { method: 'POST', body: JSON.stringify({
+      tipo, valor, nota: ctTrim('ct-md-nota'), preferido: !CT_FICHA.medios.length }) });
+    ctAbrir(CT_FICHA.id);
+  } catch (e) { ctAltaError('ct-medio-alta', e.message); }
+}
+async function ctPreferido(mid) {
+  if (!CT_FICHA) return;
+  try {
+    await ctApi('/' + CT_FICHA.id + '/medios/' + mid + '/preferido', { method: 'POST' });
+    ctAbrir(CT_FICHA.id);
+  } catch (e) { alert('No se pudo: ' + e.message); }
+}
+async function ctMedioBorrar(mid) {
+  if (!CT_FICHA || !confirm('Borrar este teléfono o mail?')) return;
+  try {
+    await ctApi('/' + CT_FICHA.id + '/medios/' + mid, { method: 'DELETE' });
+    ctAbrir(CT_FICHA.id);
+  } catch (e) { alert('No se pudo: ' + e.message); }
+}
+
+// ── OTRA PERSONA DE LA MISMA EMPRESA ──
+function ctPersonaAlta() {
+  if (!CT_EMP) return;
+  ctAltaAbrir('ct-persona-alta',
+      '<div class="ct-alta-f">'
+    + '<div style="flex:1;min-width:180px"><label>Nombre</label>'
+    +   '<input id="ct-pa-nombre" style="width:100%"'
+    +   ' onkeydown="if(event.key===\'Enter\')ctPersonaGuardar()"></div>'
+    + '<div style="flex:1;min-width:150px"><label>Cargo</label>'
+    +   '<input id="ct-pa-cargo" style="width:100%" placeholder="Dueño, compradora, encargado…"></div>'
+    + '<div><button class="btn bb bs" onclick="ctPersonaGuardar()">Agregar</button> '
+    +   '<button class="btn bo bs" onclick="ctAltaCerrar(\'ct-persona-alta\')">Cancelar</button></div>'
+    + '</div><div class="ct-nd" style="margin-top:5px">Se suma a <b>' + ctEsc(CT_EMP.nombre)
+    + '</b>. Los teléfonos y la tarjeta se cargan en su ficha.</div>', 'ct-pa-nombre');
+}
+async function ctPersonaGuardar() {
+  if (!CT_EMP) return;
+  const nombre = ctTrim('ct-pa-nombre');
+  if (!nombre) return ctAltaError('ct-persona-alta', 'Falta el nombre.');
+  try {
+    await ctApi('/', { method: 'POST', body: JSON.stringify({
+      nombre, cargo: ctTrim('ct-pa-cargo'), empresa_id: CT_EMP.id }) });
+    ctRecargar();
+    ctEmpAbrir(CT_EMP.id);
+  } catch (e) { ctAltaError('ct-persona-alta', e.message); }
+}
+
+// ── QUÉ PRODUCE ──
+// El renglón del producto, con las doce celdas de meses. Se abre debajo de la tabla, con
+// el calendario a la vista: antes había que abrir una ventana que tapaba justamente la
+// tabla con la que uno estaba comparando.
+function ctPrAlta(pid) {
+  if (!CT_EMP) return;
+  const p = pid ? (CT_EMP.productos || []).find(x => x.id === pid) : null;
+  CT_PR = p || null;
+  const m = (p && /^[01]{12}$/.test(p.meses || '')) ? p.meses : '000000000000';
+  // LAS DOCE CELDAS SE TOCAN, no se elige un desde y un hasta: hay productores con una
+  // cosecha temprana y una tardía, y un rango las aplasta en una sola ventana que diría
+  // que trae en los meses del medio, cuando no trae.
+  let celdas = '<span class="ct-mg ct-mg-ed" id="ct-pr-mg">';
+  for (let i = 0; i < 12; i++) {
+    celdas += '<i class="' + (m[i] === '1' ? 'on' : '') + '" data-i="' + i + '"'
+           +  ' onclick="ctPrTocar(' + i + ')">' + CT_MESES[i] + '</i>';
+  }
+  celdas += '</span>';
+
+  ctAltaAbrir('ct-pr-alta',
+      '<div class="ct-nd" style="margin-bottom:8px">Es de <b>' + ctEsc(CT_EMP.nombre)
+    + '</b>, <b>no de una persona</b>: todas las personas de esa empresa van a ver esto.</div>'
+    + '<div class="ct-alta-f">'
+    + '<div style="flex:1;min-width:160px"><label>Producto</label>'
+    +   '<input id="ct-pr-prod" style="width:100%" list="ct-dl-prod" value="'
+    +   ctEsc(p ? p.producto : '') + '"></div>'
+    + '<div style="flex:1;min-width:120px"><label>Variedad</label>'
+    +   '<input id="ct-pr-var" style="width:100%" value="' + ctEsc(p ? (p.variedad || '') : '') + '"></div>'
+    + '<div style="flex:1;min-width:130px"><label>Volumen</label>'
+    +   '<input id="ct-pr-vol" style="width:100%" placeholder="2 camiones por semana" value="'
+    +   ctEsc(p ? (p.volumen || '') : '') + '"></div></div>'
+    + '<div style="margin-top:10px"><label>En qué meses lo tiene — <b>el año arranca en JULIO</b></label>'
+    + '<div style="margin-top:3px">' + celdas + '</div>'
+    + '<div class="ct-nd" style="margin-top:4px" id="ct-pr-vent"></div></div>'
+    + '<div class="ct-alta-f" style="margin-top:9px">'
+    + '<div style="flex:1;min-width:200px"><label>Notas</label>'
+    +   '<input id="ct-pr-notas" style="width:100%" value="' + ctEsc(p ? (p.notas || '') : '') + '"></div>'
+    + '<div><button class="btn bb bs" onclick="ctPrGuardar()">' + (p ? 'Guardar' : 'Agregar') + '</button> '
+    +   '<button class="btn bo bs" onclick="ctPrCerrar()">Cancelar</button></div></div>',
+    'ct-pr-prod');
+  ctPrVentana();
+}
+function ctPrCerrar() { ctAltaCerrar('ct-pr-alta'); CT_PR = null; }
+function ctPrTocar(i) {
+  const c = document.querySelector('#ct-pr-mg i[data-i="' + i + '"]');
+  if (c) c.classList.toggle('on');
+  ctPrVentana();
+}
+function ctPrMascara() {
+  let m = '';
+  for (let i = 0; i < 12; i++) {
+    const c = document.querySelector('#ct-pr-mg i[data-i="' + i + '"]');
+    m += (c && c.classList.contains('on')) ? '1' : '0';
+  }
+  return m;
+}
+// Se dice en palabras mientras se tocan las celdas: doce cuadraditos pintados son fáciles
+// de pintar mal de a uno, y "NOV a MAR" se lee de un vistazo.
+function ctPrVentana() {
+  const e = document.getElementById('ct-pr-vent');
+  if (!e) return;
+  const m = ctPrMascara();
+  const tramos = [];
+  for (let i = 0; i < 12; i++) {
+    if (m[i] !== '1') continue;
+    if (tramos.length && tramos[tramos.length - 1][1] === i - 1) tramos[tramos.length - 1][1] = i;
+    else tramos.push([i, i]);
+  }
+  e.innerHTML = tramos.length
+    ? 'Ventana: <b>' + tramos.map(([a, b]) => a === b ? CT_MESES[a] : CT_MESES[a] + ' a ' + CT_MESES[b]).join(' y ') + '</b>'
+    : 'Sin meses marcados.';
+}
+async function ctPrGuardar() {
+  if (!CT_EMP) return;
+  if (!ctTrim('ct-pr-prod')) return ctAltaError('ct-pr-alta', 'Falta el producto.');
+  const cuerpo = { producto: ctTrim('ct-pr-prod'), variedad: ctTrim('ct-pr-var'),
+                   meses: ctPrMascara(), volumen: ctTrim('ct-pr-vol'), notas: ctTrim('ct-pr-notas') };
+  try {
+    if (CT_PR) await ctApi('/empresas/' + CT_EMP.id + '/productos/' + CT_PR.id,
+                           { method: 'PATCH', body: JSON.stringify(cuerpo) });
+    else       await ctApi('/empresas/' + CT_EMP.id + '/productos',
+                           { method: 'POST', body: JSON.stringify(cuerpo) });
+    const id = CT_EMP.id;
+    CT_PR = null; CT_OPC = null;
+    ctEmpAbrir(id);
+    if (CT_FICHA) ctAbrir(CT_FICHA.id);
+  } catch (e) {
+    // El mismo producto dos veces en la misma finca son dos ventanas que se contradicen.
+    // El backend lo rechaza y dice cuál corregir — y acá se abre ESA, en el mismo renglón.
+    if (e.datos && e.datos.producto_id) {
+      ctAltaError('ct-pr-alta', e.message);
+      const ya = (CT_EMP.productos || []).find(p => p.id === e.datos.producto_id);
+      if (ya) setTimeout(() => ctPrAlta(ya.id), 1200);
+      return;
+    }
+    ctAltaError('ct-pr-alta', e.message);
+  }
+}
+async function ctPrBorrar(pid) {
+  if (!CT_EMP || !confirm('Borrar este producto de la empresa?\n\nLo dejan de ver todas las '
+    + 'personas de ' + CT_EMP.nombre + '.')) return;
+  try {
+    await ctApi('/empresas/' + CT_EMP.id + '/productos/' + pid, { method: 'DELETE' });
+    const id = CT_EMP.id;
+    ctEmpAbrir(id);
+    if (CT_FICHA) ctAbrir(CT_FICHA.id);
+  } catch (e) { alert('No se pudo: ' + e.message); }
+}
+
+// ── UNA CHARLA ──
+// La charla es DE LA PERSONA: la dijo alguien, con nombre y apellido. Lo que es de la
+// cuenta es el historial junto, que la ficha de la empresa arma sumando las de todos.
+function ctChAlta() {
+  if (!CT_FICHA) return;
+  ctAltaAbrir('ct-charla-alta',
+      '<div class="ct-alta-f">'
+    + '<div><label>Cuándo</label><input type="date" id="ct-ch-fecha" value="' + ctHoy() + '"></div>'
+    + '<div><label>Por dónde</label><select id="ct-ch-canal">'
+    +   '<option value="telefono">📞 Teléfono</option><option value="whatsapp">💬 WhatsApp</option>'
+    +   '<option value="mail">✉️ Mail</option><option value="visita">🤝 Visita</option>'
+    +   '<option value="otro">Otro</option></select></div></div>'
+    + '<div style="margin-top:8px"><label>Qué se habló</label>'
+    + '<textarea id="ct-ch-res" rows="4" style="width:100%;box-sizing:border-box"'
+    +   ' placeholder="Lo que dijo, con las palabras que usó."></textarea></div>'
+    // EL BUSCADOR ENTRA ACÁ ADENTRO. Vale la pena decirlo donde se escribe: cambia cómo se
+    // escribe la nota. «Me ofreció brócoli» se encuentra; «me ofreció algo nuevo» no.
+    + '<div class="ct-nd" style="margin:3px 0 9px">El buscador mira este texto. Nombrar los'
+    + ' productos y las cosas concretas es lo que después permite preguntar'
+    + ' <b>¿quién me habló de brócoli?</b></div>'
+    + '<div class="ct-alta-f">'
+    + '<div style="flex:1;min-width:200px"><label>Qué quedó pendiente</label>'
+    +   '<input id="ct-ch-paso" style="width:100%" placeholder="Pedirle precio del brócoli"></div>'
+    + '<div><label>Para cuándo</label><input type="date" id="ct-ch-el"></div>'
+    + '<div><button class="btn bb bs" onclick="ctChGuardar()">Guardar</button> '
+    +   '<button class="btn bo bs" onclick="ctAltaCerrar(\'ct-charla-alta\')">Cancelar</button></div></div>'
+    + '<div class="ct-nd" style="margin-top:4px">Con fecha aparece en <b>Me toca</b>. Sin'
+    + ' próximo paso, la charla es una nota: el mes que viene no se sabe si quedó algo.</div>',
+    'ct-ch-res');
+}
+async function ctChGuardar() {
+  if (!CT_FICHA) return;
+  if (!ctTrim('ct-ch-res')) return ctAltaError('ct-charla-alta', 'Falta lo que se habló.');
+  try {
+    await ctApi('/' + CT_FICHA.id + '/charlas', { method: 'POST', body: JSON.stringify({
+      fecha: ctTrim('ct-ch-fecha') || undefined, canal: ctTrim('ct-ch-canal'),
+      resumen: ctTrim('ct-ch-res'), proximo_paso: ctTrim('ct-ch-paso'),
+      proximo_el: ctTrim('ct-ch-el') }) });
+    const conPaso = ctTrim('ct-ch-paso') && ctTrim('ct-ch-el');
+    ctAbrir(CT_FICHA.id);
+    if (CT_EMP) ctEmpAbrir(CT_EMP.id);
+    if (conPaso) ctPendientes();
+  } catch (e) { ctAltaError('ct-charla-alta', e.message); }
+}
+async function ctChBorrar(chid) {
+  if (!CT_FICHA || !confirm('Borrar esta charla?\n\nSe pierde lo que se anotó de esa conversación.')) return;
+  try {
+    await ctApi('/' + CT_FICHA.id + '/charlas/' + chid + '/eliminar', { method: 'POST' });
+    ctAbrir(CT_FICHA.id);
+    if (CT_EMP) ctEmpAbrir(CT_EMP.id);
+  } catch (e) { alert('No se pudo: ' + e.message); }
+}
+
+/* ══ EL ALTA, DESDE LA LISTA ════════════════════════════════════════════════════════
+   La ÚNICA ventana que se abre desde la pantalla, y la regla de CLAUDE.md es por qué:
+   que se abra una ventana es lo que avisa que se dejó de mirar y se empezó a cargar.
+
+   Pide lo mínimo y abre la ficha. Un formulario largo acá obliga a tener todos los datos
+   juntos justo cuando no se los tiene — que es cuando alguien te acaba de dar la tarjeta
+   en una reunión. */
+let CT_NV = null;        // 'persona' | 'empresa'
+
+function ctNuevo()    { ctNvAbrir('persona'); }
+function ctEmpNueva() { ctNvAbrir('empresa'); }
+
+async function ctNvAbrir(que) {
+  await ctOpciones().catch(() => {});
+  CT_NV = que;
+  document.getElementById('ct-nv-tit').textContent = que === 'empresa' ? 'Nueva empresa' : 'Nueva persona';
+  document.getElementById('ct-nv-error').style.display = 'none';
+  const dl = (n) => '<datalist id="ct-dl-' + n + '">'
+    + (((CT_OPC && CT_OPC[n === 'emp' ? 'empresas' : n]) || [])
+        .map(x => '<option>' + ctEsc(x) + '</option>').join('')) + '</datalist>';
+
+  document.getElementById('ct-nv-body').innerHTML = que === 'empresa'
+    ? '<div class="sgr-card"><div><label>Nombre de la empresa</label>'
+      + '<input id="ct-nv-nombre" style="width:100%" placeholder="GIGLIO HNOS SRL"></div>'
+      + '<div style="margin-top:10px"><label>Es</label><select id="ct-nv-tipo">'
+      + Object.keys(CT_CHIP).map(t => '<option value="' + t + '">' + CT_CHIP[t][1] + '</option>').join('')
+      + '</select></div>'
+      + '<div class="ct-nd" style="margin-top:9px">La zona, qué produce, el vínculo con la'
+      + ' planilla y las notas se cargan <b>en la ficha</b>, que se abre al crearla.</div></div>'
+    : '<div class="sgr-card"><div><label>Nombre de la persona</label>'
+      + '<input id="ct-nv-nombre" style="width:100%" placeholder="Juan Giglio"></div>'
+      + '<div style="margin-top:10px"><label>Empresa</label>'
+      + '<input id="ct-nv-empresa" style="width:100%" list="ct-dl-emp" placeholder="GIGLIO HNOS SRL">'
+      + dl('emp') + '</div>'
+      + '<div class="ct-nd" style="margin-top:5px">Si la empresa ya está cargada, escribila'
+      + ' igual y cae en esa misma — <b>el dueño y el encargado de la misma finca comparten'
+      + ' lo que produce</b>. Dejándola vacía, la empresa es la persona (sirve para un'
+      + ' fletero que trabaja solo).</div>'
+      + '<div class="ct-nd" style="margin-top:7px">El cargo, los teléfonos y la foto de la'
+      + ' tarjeta se cargan <b>en la ficha</b>, que se abre al crearla.</div></div>';
+  document.getElementById('ct-nuevo-modal').classList.add('on');
+  const n = document.getElementById('ct-nv-nombre');
+  if (n) n.focus();
+}
+function ctNvCerrar() {
+  document.getElementById('ct-nuevo-modal').classList.remove('on');
+  CT_NV = null;
+}
+function ctNvError(msg) {
+  const e = document.getElementById('ct-nv-error');
+  e.innerHTML = msg;
+  e.style.display = '';
+}
+async function ctNvGuardar() {
+  const nombre = ctTrim('ct-nv-nombre');
+  if (!nombre) return ctNvError('Falta el nombre.');
+  try {
+    if (CT_NV === 'empresa') {
+      const j = await ctApi('/empresas', { method: 'POST',
+        body: JSON.stringify({ nombre, tipo: ctTrim('ct-nv-tipo') }) });
+      ctNvCerrar(); CT_OPC = null; ctRecargar();
+      ctEmpAbrir(j.id);
+    } else {
+      const emp = ctTrim('ct-nv-empresa');
+      const j = await ctApi('/', { method: 'POST',
+        body: JSON.stringify(emp ? { nombre, empresa: emp } : { nombre }) });
+      ctNvCerrar(); CT_OPC = null; ctRecargar();
+      ctAbrir(j.id);
+    }
+  } catch (e) {
+    // Dos fichas de la misma finca son dos historiales con la mitad de las charlas cada
+    // uno. El backend lo rechaza y dice cuál es la que ya hay: se ofrece abrirla, que es
+    // lo que la persona quería hacer.
+    if (e.datos && e.datos.empresa_id) {
+      const id = e.datos.empresa_id;
+      ctNvError(ctEsc(e.message) + ' <a class="ct-link" onclick="ctNvCerrar();ctEmpAbrir('
+        + id + ')"><b>Abrir la que ya está</b></a>');
+      return;
+    }
+    ctNvError(ctEsc(e.message));
+  }
+}
+
+async function ctBaja() {
+  if (!CT_FICHA) return;
+  // Se avisa qué se pierde de verdad, que no es la ficha: son las charlas.
+  if (!confirm('Dar de baja a ' + CT_FICHA.nombre + '?\n\nSe esconde del buscador. Las '
+    + CT_FICHA.charlas.length + ' charla(s) quedan guardadas.')) return;
+  try {
+    await ctApi('/' + CT_FICHA.id + '/eliminar', { method: 'POST' });
+    ctFichaCerrar(); ctRecargar();
+    if (CT_EMP) ctEmpAbrir(CT_EMP.id);
+  } catch (e) { alert('No se pudo: ' + e.message); }
+}
+
+async function ctEmpBaja() {
+  if (!CT_EMP) return;
+  if (!confirm('Dar de baja a ' + CT_EMP.nombre + '?\n\nSe esconde de las listas, con sus '
+    + ((CT_EMP.personas || []).length) + ' persona(s). Nada se borra: los teléfonos y las '
+    + 'charlas quedan.')) return;
+  try {
+    await ctApi('/empresas/' + CT_EMP.id + '/eliminar', { method: 'POST' });
+    ctEmpCerrar(); ctFichaCerrar(); ctRecargar();
+  } catch (e) { alert('No se pudo: ' + e.message); }
+}
+
+// El arranque de la pantalla. La bandeja se consulta también acá, no sólo al entrar a su
+// solapa: el número en la pestaña es lo que hace que alguien la abra.
+async function ctInit() {
+  await ctOpciones().catch(() => {});
+  ctBuscar();
+  try {
+    const j = await ctApi('/pendientes?hasta=' + ctHoy());
+    const cnt = document.getElementById('ct-cnt-pend');
+    if (cnt) cnt.textContent = j.pendientes.length || '·';
+  } catch (e) {}
+}
+
+
+// ═══════════════════════════════════════════════════════════════════════════════════════
+// CONSUMO DE IA — qué función se come el crédito
+// ═══════════════════════════════════════════════════════════════════════════════════════
+// El 14/10 la cuenta de la API se quedó sin crédito y el lector de remitos dejó de leer.
+// Al buscar qué lo había consumido apareció el problema de fondo: no había forma de
+// saberlo. Todas las funciones usan la MISMA clave, así que la consola de Anthropic las
+// muestra como un solo número por modelo.
+//
+// Cada llamada queda anotada en `ia_uso` (ver servicios/ia.js, que es el único lugar del
+// sistema que llama a la IA). Esta pantalla la lee.
+//
+// EL ORDEN DE LA PANTALLA ES EL ORDEN DE LAS PREGUNTAS: cuánto llevamos, quién se lo come,
+// qué pasó ese día. Por eso la curva va antes de la tabla — un pico se ve, una tabla de
+// treinta filas se lee.
+let IU = { datos: null };
+
+const iuEsc = (s) => String(s == null ? '' : s)
+  .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+const iuNum = (n) => (Number(n)||0).toLocaleString('es-AR');
+// El gasto se muestra con los decimales que hagan falta para que no sea "USD 0,00": una
+// llamada de OCR cuesta fracciones de centavo, y redondear a dos decimales haría que el
+// 80% de las filas dijeran cero.
+function iuUsd(n) {
+  const v = Number(n) || 0;
+  if (v === 0) return 'USD 0';
+  if (v < 0.01) return 'USD ' + v.toFixed(4);
+  if (v < 1) return 'USD ' + v.toFixed(3);
+  return 'USD ' + v.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+const iuHoy = () => new Date().toISOString().slice(0,10);
+
+function iuTab(t) {
+  document.querySelectorAll('#sec-ia-uso .iu-tab').forEach(e => e.classList.toggle('on', e.dataset.t === t));
+  document.querySelectorAll('#sec-ia-uso .iu-pane').forEach(e => e.classList.toggle('on', e.dataset.p === t));
+  if (t === 'detalle') iuDetalle();
+}
+
+function iuPreset(dias) {
+  const h = new Date();
+  const d = new Date(h.getTime() - (dias - 1) * 86400000);
+  document.getElementById('iu-desde').value = d.toISOString().slice(0,10);
+  document.getElementById('iu-hasta').value = h.toISOString().slice(0,10);
+  iuCargar();
+}
+
+function iuRango() {
+  const d = document.getElementById('iu-desde');
+  const h = document.getElementById('iu-hasta');
+  if (h && !h.value) h.value = iuHoy();
+  if (d && !d.value) d.value = new Date(Date.now() - 29*86400000).toISOString().slice(0,10);
+  return 'desde=' + encodeURIComponent(d.value) + '&hasta=' + encodeURIComponent(h.value);
+}
+
+async function iuCargar() {
+  const cont = document.getElementById('iu-funciones');
+  if (!cont) return;
+  cont.innerHTML = '<div class="iu-vacio">Cargando…</div>';
+  try {
+    const r = await fetch('/api/ia-uso/?' + iuRango(), { credentials:'include' });
+    const j = await r.json();
+    if (!r.ok || !j.ok) throw new Error(j.error || ('error ' + r.status));
+    IU.datos = j;
+    iuPintarKpis(j);
+    iuPintarCurva(j);
+    iuPintarFunciones(j);
+    iuLlenarFiltro(j);
+  } catch (e) {
+    cont.innerHTML = '<div class="iu-vacio">No se pudo cargar: ' + iuEsc(e.message) + '</div>';
+  }
+}
+
+function iuPintarKpis(j) {
+  const t = j.total || {};
+  const dias = Math.max(1, (j.por_dia || []).length);
+  const prom = (t.usd || 0) / dias;
+  // La proyección a 30 días es lo que convierte «gastamos 4 dólares» en «esto son 40 por
+  // mes»: el número suelto no dice si hay que preocuparse.
+  const mes = prom * 30;
+  document.getElementById('iu-kpis').innerHTML =
+      '<div class="iu-kpi"><span class="iu-sub">Gasto del período</span><b>' + iuUsd(t.usd) + '</b>'
+    +   '<span class="iu-sub">' + iuNum(t.llamadas) + ' llamada' + (t.llamadas === 1 ? '' : 's') + '</span></div>'
+    + '<div class="iu-kpi"><span class="iu-sub">Por día</span><b>' + iuUsd(prom) + '</b>'
+    +   '<span class="iu-sub">a este ritmo, ' + iuUsd(mes) + ' por mes</span></div>'
+    + '<div class="iu-kpi"><span class="iu-sub">Tokens</span><b>' + iuNum((t.tok_entrada||0) + (t.tok_salida||0)) + '</b>'
+    +   '<span class="iu-sub">' + iuNum(t.tok_entrada) + ' entraron · ' + iuNum(t.tok_salida) + ' salieron</span></div>'
+    // Las fallidas no cuestan, pero son la señal de que algo se rompió. Van en rojo sólo
+    // cuando hay: un cero permanente en rojo deja de leerse a los dos días.
+    + '<div class="iu-kpi"><span class="iu-sub">Fallaron</span><b'
+    +   ((t.fallidas||0) > 0 ? ' style="color:#b3261e"' : '') + '>' + iuNum(t.fallidas) + '</b>'
+    +   '<span class="iu-sub">' + ((t.fallidas||0) > 0
+          ? 'no se cobran, pero algo pasó' : 'todo salió bien') + '</span></div>';
+}
+
+// LA CURVA POR DÍA. Es la que separa «se consumió parejo» de «pasó algo el martes».
+function iuPintarCurva(j) {
+  const dias = j.por_dia || [];
+  const cont = document.getElementById('iu-curva');
+  if (!dias.length) { cont.innerHTML = ''; return; }
+  const max = Math.max.apply(null, dias.map(d => d.costo_mil || 0)) || 1;
+  const barras = dias.map(function(d){
+    const alt = Math.max(1, Math.round((d.costo_mil || 0) / max * 100));
+    return '<div class="iu-dia" style="height:' + alt + '%" title="'
+      + iuEsc(d.dia) + ': ' + iuUsd(d.usd) + ' · ' + iuNum(d.llamadas) + ' llamadas"></div>';
+  }).join('');
+  cont.innerHTML = '<div class="iu-dias">' + barras + '</div>'
+    + '<div class="iu-dias-pie"><span>' + iuEsc(dias[0].dia) + '</span>'
+    + '<span>día más caro: ' + iuUsd(max/1000) + '</span>'
+    + '<span>' + iuEsc(dias[dias.length-1].dia) + '</span></div>';
+}
+
+function iuPintarFunciones(j) {
+  const filas = j.por_funcion || [];
+  const cont = document.getElementById('iu-funciones');
+  if (!filas.length) {
+    cont.innerHTML = '<div class="iu-vacio">No hubo ninguna llamada a la IA en este período.</div>';
+    document.getElementById('iu-sin-uso').innerHTML = '';
+    return;
+  }
+  const totalMil = (j.total && j.total.costo_mil) || 1;
+  let h = '<div class="ab-table-wrap"><table class="pa-tbl"><thead><tr>'
+    + '<th class="iu-w" style="width:27%">Qué función</th>'
+    + '<th style="width:16%">Peso</th>'
+    + '<th style="width:12%">Gasto</th>'
+    + '<th style="width:11%">Llamadas</th>'
+    + '<th style="width:12%">Por llamada</th>'
+    + '<th style="width:12%">Tokens</th>'
+    + '<th style="width:10%">Tarda</th>'
+    + '</tr></thead><tbody>';
+  for (const f of filas) {
+    const pct = Math.round((f.costo_mil || 0) / totalMil * 100);
+    const porLlamada = (f.usd || 0) / Math.max(1, f.llamadas);
+    const falla = (f.fallidas || 0) > 0
+      ? ' <span class="iu-chip iu-ch-falla">' + f.fallidas + ' falló' + (f.fallidas > 1 ? 'ron' : '') + '</span>' : '';
+    h += '<tr>'
+      + '<td class="iu-w"><b>' + iuEsc(f.etiqueta) + '</b>' + falla
+      +   '<div class="iu-nd" style="font-style:normal">' + iuEsc(f.modelo) + '</div></td>'
+      + '<td><div class="iu-bar"><i style="width:' + pct + '%"></i></div>'
+      +   '<div class="iu-nd" style="font-style:normal">' + pct + '%</div></td>'
+      + '<td class="iu-num">' + iuUsd(f.usd) + '</td>'
+      + '<td class="iu-num">' + iuNum(f.llamadas) + '</td>'
+      + '<td class="iu-num">' + iuUsd(porLlamada) + '</td>'
+      + '<td class="iu-num">' + iuNum((f.tok_entrada||0) + (f.tok_salida||0)) + '</td>'
+      + '<td class="iu-num">' + (f.ms_prom ? (f.ms_prom/1000).toFixed(1) + 's' : '—') + '</td>'
+      + '</tr>';
+  }
+  h += '</tbody></table></div>'
+    + '<div class="iu-nd" style="margin-top:9px">Ordenado por gasto, no por cantidad: dos'
+    + ' lecturas de factura pueden costar más que cien remitos. El costo es una estimación'
+    + ' con los precios de lista — la factura es la de Anthropic.</div>';
+  cont.innerHTML = h;
+
+  // LO QUE NO SE USÓ. Una función que dejó de aparecer es tan informativa como una que se
+  // disparó: puede ser que nadie la necesitó, o que se rompió y nadie avisó.
+  const sin = j.sin_uso || [];
+  document.getElementById('iu-sin-uso').innerHTML = sin.length
+    ? '<div class="iu-nd">Sin usar en este período: '
+      + sin.map(f => iuEsc(f.etiqueta)).join(' · ') + '</div>'
+    : '';
+}
+
+function iuLlenarFiltro(j) {
+  const sel = document.getElementById('iu-d-funcion');
+  if (!sel) return;
+  const antes = sel.value;
+  const todas = (j.por_funcion || []).map(f => ({ k: f.funcion, e: f.etiqueta }));
+  sel.innerHTML = '<option value="">Todas</option>'
+    + todas.map(f => '<option value="' + iuEsc(f.k) + '">' + iuEsc(f.e) + '</option>').join('');
+  sel.value = antes;
+}
+
+async function iuDetalle() {
+  const cont = document.getElementById('iu-detalle');
+  if (!cont) return;
+  const fn = document.getElementById('iu-d-funcion');
+  const fa = document.getElementById('iu-d-fallidas');
+  let qs = iuRango() + '&limite=300';
+  if (fn && fn.value) qs += '&funcion=' + encodeURIComponent(fn.value);
+  if (fa && fa.checked) qs += '&solo_fallidas=1';
+  cont.innerHTML = '<div class="iu-vacio">Cargando…</div>';
+  try {
+    const r = await fetch('/api/ia-uso/detalle?' + qs, { credentials:'include' });
+    const j = await r.json();
+    if (!r.ok || !j.ok) throw new Error(j.error || ('error ' + r.status));
+    if (!j.llamadas.length) {
+      cont.innerHTML = '<div class="iu-vacio">No hay llamadas con ese filtro.</div>';
+      return;
+    }
+    let h = '<div class="ab-table-wrap"><table class="pa-tbl"><thead><tr>'
+      + '<th style="width:15%">Cuándo</th>'
+      + '<th class="iu-w" style="width:25%">Qué función</th>'
+      + '<th style="width:13%">Quién</th>'
+      + '<th style="width:11%">Gasto</th>'
+      + '<th style="width:13%">Tokens</th>'
+      + '<th style="width:9%">Tardó</th>'
+      + '<th class="iu-w" style="width:14%">Resultado</th>'
+      + '</tr></thead><tbody>';
+    for (const l of j.llamadas) {
+      h += '<tr>'
+        + '<td>' + iuEsc(l.creado_en) + '</td>'
+        + '<td class="iu-w">' + iuEsc(l.etiqueta) + '</td>'
+        + '<td>' + (l.usuario ? iuEsc(l.usuario) : '<span class="iu-nd">—</span>') + '</td>'
+        + '<td class="iu-num">' + iuUsd(l.usd) + '</td>'
+        + '<td class="iu-num">' + iuNum((l.tok_entrada||0) + (l.tok_salida||0)) + '</td>'
+        + '<td class="iu-num">' + (l.ms ? (l.ms/1000).toFixed(1) + 's' : '—') + '</td>'
+        + '<td class="iu-w">' + (l.ok
+            ? '<span class="iu-chip iu-ch-barato">bien</span>'
+            : '<span class="iu-chip iu-ch-caro">falló</span> <span class="iu-nd">'
+              + iuEsc(l.error || '') + '</span>') + '</td>'
+        + '</tr>';
+    }
+    cont.innerHTML = h + '</tbody></table></div>';
+  } catch (e) {
+    cont.innerHTML = '<div class="iu-vacio">No se pudo cargar: ' + iuEsc(e.message) + '</div>';
+  }
+}
+
+function iuInit() {
+  const h = document.getElementById('iu-hasta');
+  const d = document.getElementById('iu-desde');
+  if (h && !h.value) h.value = iuHoy();
+  if (d && !d.value) d.value = new Date(Date.now() - 29*86400000).toISOString().slice(0,10);
+  iuCargar();
+}
+
+
+/* ══════════════════════════════════════════════════════════════════════════════════
+   🏭 GALPÓN · CONFIGURACIÓN
+   ══════════════════════════════════════════════════════════════════════════════════
+   Lo que hay que dejar listo antes del primer camión. La pantalla es una lista —las
+   cuadrillas— y lo que se CARGA desde ella se abre en ventana, que es la regla del
+   panel: que se abra una ventana es lo que avisa que se dejó de mirar y se empezó a
+   cargar. */
+var GAL = { cuadrillas: [], colores: [], config: null, cid: null };
+
+function galAdmin(){ return !!(window.LNB_USER && window.LNB_USER.rol === 'admin'); }
+function galEsc(s){ return String(s == null ? '' : s)
+  .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+
+async function galInit(){
+  var ro = document.getElementById('gal-aviso-ro');
+  if (ro) ro.style.display = galAdmin() ? 'none' : '';
+  ['gal-tara','gal-obj','gal-motivos'].forEach(function(id){
+    var e = document.getElementById(id); if (e) e.disabled = !galAdmin();
+  });
+  var g = document.getElementById('gal-cfg-guardar');
+  if (g) g.style.display = galAdmin() ? '' : 'none';
+  await galCargar();
+}
+
+async function galCargar(){
+  try {
+    var r = await fetch('/api/galpon/config', { credentials:'include' });
+    var j = await r.json();
+    if (!j.ok) throw new Error(j.error || 'no se pudo leer la configuración');
+    GAL.config = j.config; GAL.colores = j.colores || [];
+    var t = document.getElementById('gal-tara');    if (t) t.value = j.config.tara_ifco;
+    var o = document.getElementById('gal-obj');     if (o) o.value = j.config.objetivo_kg_hora;
+    var m = document.getElementById('gal-motivos'); if (m) m.value = (j.config.motivos_calidad||[]).join(', ');
+
+    var rc = await fetch('/api/galpon/cuadrillas', { credentials:'include' });
+    var jc = await rc.json();
+    if (!jc.ok) throw new Error(jc.error || 'no se pudieron leer las cuadrillas');
+    GAL.cuadrillas = jc.cuadrillas || [];
+    galPintar();
+  } catch (e) {
+    var b = document.getElementById('gal-cuad-body');
+    if (b) b.innerHTML = '<tr><td colspan="5" class="gal-vacio">'
+      + galEsc(e.message) + '</td></tr>';
+  }
+}
+
+function galPintar(){
+  var b = document.getElementById('gal-cuad-body'); if (!b) return;
+  if (!GAL.cuadrillas.length){
+    // Las cuadrillas salen de Personal: si no hay, el problema no se arregla acá y
+    // decir "no hay datos" mandaría a buscarlo en el lugar equivocado.
+    b.innerHTML = '<tr><td colspan="5" class="gal-vacio">No hay cuadrillas activas. '
+      + 'Se dan de alta en <b>Personal → Cuadrillas</b>; acá se les asignan las tarjetas.</td></tr>';
+    return;
+  }
+  var adm = galAdmin();
+  b.innerHTML = GAL.cuadrillas.map(function(c){
+    var sw = c.color
+      ? '<span class="gal-sw' + (adm ? '' : ' ro') + '" style="background:' + galEsc(c.color) + '"'
+        + (adm ? ' onclick="galColor(' + c.id + ')" title="Cambiar el color"' : '') + '></span>'
+      : '<span class="gal-sin">sin color</span>';
+    var rangos = (c.rangos || []).length
+      ? c.rangos.map(function(r){
+          return '<span class="gal-rg"><b>' + r.desde_id + '–' + r.hasta_id + '</b>'
+            + (adm ? '<i onclick="galRangoBaja(' + r.id + ',' + r.desde_id + ',' + r.hasta_id + ')"'
+                   + ' title="Dar de baja este rango">×</i>' : '') + '</span>';
+        }).join('')
+      : '<span class="gal-sin">sin tarjetas asignadas</span>';
+    return '<tr>'
+      + '<td class="gal-w"><b>' + galEsc(c.nombre) + '</b>'
+        + (c.tipo === 'pool' ? ' <span class="gal-sin">(pool)</span>' : '') + '</td>'
+      + '<td>' + sw + '</td>'
+      + '<td class="gal-num">' + (c.tarjetas || 0) + '</td>'
+      + '<td class="gal-w">' + rangos + '</td>'
+      + '<td style="text-align:right">'
+        + (adm ? '<button class="btn bo bs" onclick="galRangoAbrir(' + c.id + ')">+ Tarjetas</button> ' : '')
+        + '<button class="btn bo bs" onclick="galPrintCuadrilla(' + c.id + ')"'
+        + (c.tarjetas ? '' : ' disabled title="Todavía no tiene tarjetas asignadas"')
+        + '>🖨️</button></td>'
+      + '</tr>';
+  }).join('');
+}
+
+/* ── LOS PARÁMETROS ─────────────────────────────────────────────────────────────── */
+async function galCfgGuardar(){
+  var body = {
+    tara_ifco: document.getElementById('gal-tara').value,
+    objetivo_kg_hora: document.getElementById('gal-obj').value,
+    motivos_calidad: document.getElementById('gal-motivos').value,
+  };
+  try {
+    var r = await fetch('/api/galpon/config', { method:'PUT', credentials:'include',
+      headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
+    var j = await r.json();
+    if (!j.ok) return alert(j.error || 'no se pudo guardar');
+    GAL.config = j.config;
+    alert('Guardado.');
+  } catch (e) { alert('No se pudo guardar: ' + e.message); }
+}
+
+/* ── EL COLOR ───────────────────────────────────────────────────────────────────
+   Un prompt y no una ventana: elegir un color de una paleta de siete no es cargar
+   nada, es un toque. La regla de la ventana es para los FORMULARIOS DE CARGA. */
+async function galColor(cid){
+  var c = GAL.cuadrillas.filter(function(x){ return x.id === cid; })[0]; if (!c) return;
+  var lista = GAL.colores.map(function(x, i){ return (i+1) + ') ' + x.nombre; }).join('   ');
+  var n = prompt('Color de ' + c.nombre + '\n\n' + lista + '\n\nNúmero:');
+  if (n === null) return;
+  var el = GAL.colores[parseInt(n, 10) - 1];
+  if (!el) return alert('No existe ese número.');
+  try {
+    var r = await fetch('/api/galpon/cuadrillas/' + cid + '/color', { method:'PATCH',
+      credentials:'include', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ color: el.hex }) });
+    var j = await r.json();
+    if (!j.ok) return alert(j.error || 'no se pudo cambiar el color');
+    await galCargar();
+  } catch (e) { alert('No se pudo cambiar el color: ' + e.message); }
+}
+
+/* ── LA VENTANA DE TARJETAS ─────────────────────────────────────────────────────
+   Se abre EN BLANCO siempre. Un formulario que sólo se esconde conserva lo que
+   tenía, y acá eso sería asignarle a una cuadrilla el rango que se tipeó para otra. */
+function galRangoAbrir(cid){
+  var c = GAL.cuadrillas.filter(function(x){ return x.id === cid; })[0]; if (!c) return;
+  GAL.cid = cid;
+  document.getElementById('gal-rango-tit').textContent = 'Tarjetas de ' + c.nombre;
+  document.getElementById('gal-rg-desde').value = '';
+  document.getElementById('gal-rg-hasta').value = '';
+  document.getElementById('gal-rg-notas').value = '';
+  document.getElementById('gal-rg-error').style.display = 'none';
+  // Un arranque sugerido: el número siguiente a la última tarjeta que haya dado alguien.
+  // Es lo que evita el error más caro de esta pantalla —dos rangos que se pisan— sin
+  // impedir tipear otra cosa.
+  var tope = 0;
+  GAL.cuadrillas.forEach(function(x){ (x.rangos||[]).forEach(function(r){
+    if (r.hasta_id > tope) tope = r.hasta_id; }); });
+  document.getElementById('gal-rg-desde').value = tope + 1;
+  galRangoCuenta();
+  document.getElementById('gal-rango-modal').classList.add('on');
+}
+function galRangoCerrar(){
+  document.getElementById('gal-rango-modal').classList.remove('on');
+  GAL.cid = null;
+}
+function galRangoCuenta(){
+  var d = parseInt(document.getElementById('gal-rg-desde').value, 10);
+  var h = parseInt(document.getElementById('gal-rg-hasta').value, 10);
+  var e = document.getElementById('gal-rg-cuenta');
+  if (!e) return;
+  if (!isFinite(d) || !isFinite(h) || h < d) { e.textContent = ''; return; }
+  var n = h - d + 1;
+  e.innerHTML = '<b>' + n + '</b> tarjetas, ' + Math.ceil(n / 8) + ' hoja'
+    + (Math.ceil(n/8) === 1 ? '' : 's') + ' para imprimir.';
+}
+async function galRangoGuardar(){
+  var cid = GAL.cid; if (!cid) return;
+  var err = document.getElementById('gal-rg-error');
+  err.style.display = 'none';
+  try {
+    var r = await fetch('/api/galpon/cuadrillas/' + cid + '/tarjetas', { method:'POST',
+      credentials:'include', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({
+        desde_id: document.getElementById('gal-rg-desde').value,
+        hasta_id: document.getElementById('gal-rg-hasta').value,
+        notas: document.getElementById('gal-rg-notas').value || null,
+      }) });
+    var j = await r.json();
+    if (!j.ok){
+      // El error se muestra ADENTRO de la ventana y la ventana no se cierra: el que
+      // pisó un rango tiene que poder corregir el número sin volver a tipear todo.
+      err.innerHTML = galEsc(j.error);
+      err.style.display = '';
+      return;
+    }
+    galRangoCerrar();
+    await galCargar();
+  } catch (e) {
+    err.textContent = 'No se pudo guardar: ' + e.message;
+    err.style.display = '';
+  }
+}
+async function galRangoBaja(id, d, h){
+  if (!confirm('¿Dar de baja las tarjetas ' + d + '–' + h + '?\n\n'
+    + 'Los volcados ya cargados no cambian: cada uno guardó su cuadrilla.')) return;
+  try {
+    var r = await fetch('/api/galpon/tarjetas/' + id, { method:'DELETE', credentials:'include' });
+    var j = await r.json();
+    if (!j.ok) return alert(j.error || 'no se pudo dar de baja');
+    await galCargar();
+  } catch (e) { alert('No se pudo dar de baja: ' + e.message); }
+}
+
+/* ── LA VENTANA DE IMPRIMIR ─────────────────────────────────────────────────────── */
+function galPrintAbrir(cid){
+  var sel = document.getElementById('gal-pr-cid');
+  sel.innerHTML = GAL.cuadrillas.map(function(c){
+    return '<option value="' + c.id + '"' + (c.tarjetas ? '' : ' disabled')
+      + '>' + galEsc(c.nombre) + (c.tarjetas ? ' (' + c.tarjetas + ')' : ' — sin tarjetas')
+      + '</option>';
+  }).join('');
+  document.getElementById('gal-pr-modo').value = 'cuadrilla';
+  document.getElementById('gal-pr-desde').value = '';
+  document.getElementById('gal-pr-hasta').value = '';
+  document.getElementById('gal-pr-lista').value = '';
+  document.getElementById('gal-pr-error').style.display = 'none';
+  if (cid) sel.value = String(cid);
+  galPrintModo();
+  document.getElementById('gal-print-modal').classList.add('on');
+}
+function galPrintCuadrilla(cid){ galPrintAbrir(cid); }
+function galPrintCerrar(){ document.getElementById('gal-print-modal').classList.remove('on'); }
+function galPrintModo(){
+  var m = document.getElementById('gal-pr-modo').value;
+  document.getElementById('gal-pr-cuadrilla').style.display = m === 'cuadrilla' ? '' : 'none';
+  document.getElementById('gal-pr-rango').style.display     = m === 'rango'     ? '' : 'none';
+  document.getElementById('gal-pr-ids').style.display       = m === 'ids'       ? '' : 'none';
+}
+function galPrintIr(){
+  var m = document.getElementById('gal-pr-modo').value, qs = '';
+  var err = document.getElementById('gal-pr-error');
+  err.style.display = 'none';
+  if (m === 'cuadrilla'){
+    var cid = document.getElementById('gal-pr-cid').value;
+    if (!cid) { err.textContent = 'Elegí una cuadrilla.'; err.style.display = ''; return; }
+    qs = 'cuadrilla_id=' + encodeURIComponent(cid);
+  } else if (m === 'rango'){
+    var d = parseInt(document.getElementById('gal-pr-desde').value, 10);
+    var h = parseInt(document.getElementById('gal-pr-hasta').value, 10);
+    if (!isFinite(d) || !isFinite(h) || h < d){
+      err.textContent = 'Revisá el rango: el "desde" tiene que ser menor o igual al "hasta".';
+      err.style.display = ''; return;
+    }
+    qs = 'desde=' + d + '&hasta=' + h;
+  } else {
+    var ids = (document.getElementById('gal-pr-lista').value || '')
+      .split(',').map(function(x){ return parseInt(x, 10); })
+      .filter(function(n){ return isFinite(n) && n > 0; });
+    if (!ids.length){ err.textContent = 'Escribí al menos un número.'; err.style.display = ''; return; }
+    qs = 'ids=' + ids.join(',');
+  }
+  // Se abre en una pestaña nueva, en el visor del navegador, y de ahí se imprime. La
+  // ventana se cierra sola: acá no queda nada para leer después, a diferencia de un CAE.
+  window.open('/api/galpon/tarjetas.pdf?' + qs, '_blank');
+  galPrintCerrar();
+}
+
 </script>
 
 <!-- MODAL GONDOLA SUPERMERCADOS -->
@@ -62891,7 +65811,9 @@ async function ifcoOnFotoDespacho(ev) {
       document.getElementById('ifco-r-loading').style.display = 'none';
       if (!r.ok || !data.datos) {
         const msg = (data && data.error) || ('HTTP ' + r.status);
-        document.getElementById('ifco-r-ocr-error').textContent = '⚠️ La IA no pudo leer la foto: ' + msg + '. Cargá los campos manualmente.';
+        document.getElementById('ifco-r-ocr-error').textContent = data && data.ocr_caido
+          ? '⚠️ ' + msg + ' La foto se guarda igual.'
+          : '⚠️ La IA no pudo leer la foto: ' + msg + '. Cargá los campos manualmente.';
         document.getElementById('ifco-r-ocr-error').style.display = 'block';
         // Igual avanzamos al paso 2 con la foto guardada
         IFCO._fotoDespachoPath = data && data.escaneo_path ? data.escaneo_path : null;
@@ -63670,12 +66592,21 @@ async function ifcoCargarSelladoFoto(ev) {
     const r = await fetch('/api/ifco/ocr/match-sellado', { method:'POST', credentials:'include', body:fd });
     const data = await r.json();
 
-    // Caso: OCR no leyó el número
+    // Caso: el LECTOR está caído (sin crédito, saturado, sin red). No se arregla sacando
+    // otra foto, así que no se ofrece: se va derecho a la carga a mano, con la foto puesta.
+    if (data.ocr_caido) {
+      _ifcoSelladoDirectoAMano(file, data);
+      return;
+    }
+
+    // Caso: el lector anduvo pero no leyó el número. Acá sí tiene sentido otra foto —
+    // pero con la salida a mano al lado, no como único camino.
     if (data.accion === 'sin_numero' || (!data.ok && !data.accion)) {
       _ifcoCargarSelladoMostrarError(
         '⚠️ La IA no pudo leer el N° de remito',
-        (data.error || 'Probá con una foto más nítida o cargalo manualmente.'),
-        true
+        (data.error || 'Probá con una foto más nítida, o cargalo a mano.'),
+        true,
+        file
       );
       return;
     }
@@ -63725,6 +66656,7 @@ async function ifcoCargarSelladoFoto(ev) {
       document.getElementById('ifco-sd-recibida').value = '';
       document.getElementById('ifco-sd-rechazada').value = '0';
       document.getElementById('ifco-sd-rechazo-destino-wrap').style.display = 'none';
+      _ifcoSdAviso(null);   // pudo haber quedado el de "lector caído" del remito anterior
       document.getElementById('ifco-mb-sellado-directo').classList.add('on');
       // Activar mostrar/ocultar destino-rechazo según cantidad
       document.getElementById('ifco-sd-rechazada').oninput = function(){
@@ -63738,23 +66670,81 @@ async function ifcoCargarSelladoFoto(ev) {
 
     _ifcoCargarSelladoMostrarError('⚠️ Respuesta inesperada', JSON.stringify(data), true);
   } catch(e) {
-    _ifcoCargarSelladoMostrarError('⚠️ Error', _ifcoEsc(e.message), true);
+    _ifcoCargarSelladoMostrarError('⚠️ No se pudo leer el remito',
+      _ifcoEsc(e.message) + '<br>Podés cargarlo a mano.', true, file);
   }
+}
+
+// ── CARGAR EL SELLADO A MANO, CON LA FOTO PUESTA ────────────────────────────────────
+// El mismo mini-modal de siempre —el que se usa cuando el remito no está en la base— con
+// todo en blanco. La foto va igual: queda como respaldo escaneado del remito, que es lo
+// que se mira cuando el súper discute una cantidad seis meses después.
+function _ifcoSelladoDirectoAMano(file, data) {
+  document.getElementById('ifco-mb-cargar-sellado').classList.remove('on');
+  IFCO._sdData = {
+    n_remito_ifco: (data && data.n_remito_ifco) || '',
+    escaneo_path: (data && data.escaneo_path) || null,
+    file: file
+  };
+  document.getElementById('ifco-sd-nremito').value = IFCO._sdData.n_remito_ifco;
+  document.getElementById('ifco-sd-cadena').value = '';
+  document.getElementById('ifco-sd-recibida').value = '';
+  document.getElementById('ifco-sd-rechazada').value = '0';
+  document.getElementById('ifco-sd-rechazo-destino-wrap').style.display = 'none';
+  document.getElementById('ifco-sd-rechazada').oninput = function(){
+    const v = parseInt(this.value) || 0;
+    document.getElementById('ifco-sd-rechazo-destino-wrap').style.display = v > 0 ? 'block' : 'none';
+  };
+  _ifcoSdAviso(data);
+  document.getElementById('ifco-mb-sellado-directo').classList.add('on');
+  setTimeout(function(){
+    const el = document.getElementById('ifco-sd-nremito');
+    if (el) { el.focus(); el.select(); }
+  }, 60);
+}
+
+// El cartel de arriba del mini-modal, en sus dos estados. Sin el de "a mano", el formulario
+// en blanco queda debajo de «Se va a crear con los datos que detectamos del OCR» — un
+// cartel que miente es peor que ninguno.
+//
+// Los dos textos viven juntos a propósito: separados, el día que se toque uno el otro queda
+// contando otra historia.
+const IFCO_SD_AVISO_OK = '<b>✨ Este remito no estaba en el sistema.</b> Se va a crear directamente en estado <b>SELLADO</b> con los datos que detectamos del OCR. Verificá los datos antes de guardar.';
+function _ifcoSdAviso(data) {
+  const el = document.getElementById('ifco-sd-aviso');
+  if (!el) return;
+  if (!data || !data.ocr_caido) {
+    el.style.cssText = 'background:#ecfdf5;border-left:3px solid #10b981;border-radius:4px;padding:10px 14px;margin-bottom:14px;font-size:12px;color:#065f46';
+    el.innerHTML = IFCO_SD_AVISO_OK;
+    return;
+  }
+  el.style.cssText = 'background:#fffbeb;border-left:3px solid #f59e0b;border-radius:4px;padding:10px 14px;margin-bottom:14px;font-size:12px;color:#92400e';
+  el.innerHTML = '<b>⚠️ El lector de remitos no está disponible.</b> '
+    + _ifcoEsc((data && data.error) || 'Cargá los datos a mano.')
+    + '<br>El remito se crea igual, en estado <b>SELLADO</b>, y la foto queda guardada.';
 }
 
 // Helper: muestra el panel de error/bloqueo dentro del modal
 // puedeReintentar: si true, ofrece botón "Probar otra foto"
-function _ifcoCargarSelladoMostrarError(titulo, mensajeHtml, puedeReintentar) {
+function _ifcoCargarSelladoMostrarError(titulo, mensajeHtml, puedeReintentar, file) {
   document.getElementById('ifco-cs-step-loading').style.display = 'none';
   document.getElementById('ifco-cs-step-foto').style.display = 'none';
   const div = document.getElementById('ifco-cs-step-error');
+  // La foto no entra en un onclick —es un File, no un string—, así que viaja por acá.
+  IFCO._csFile = file || null;
+  IFCO._csData = { ocr_caido: true, error: 'El lector no pudo leer el remito.' };
   div.style.display = 'block';
   div.innerHTML =
     '<div style="background:#fef2f2;border:1px solid #fca5a5;border-radius:8px;padding:14px 16px;color:#991b1b">' +
       '<div style="font-weight:600;margin-bottom:6px">'+titulo+'</div>' +
       '<div style="font-size:13px">'+mensajeHtml+'</div>' +
       (puedeReintentar
-        ? '<div style="margin-top:12px"><button class="btn bo" onclick="ifcoAbrirCargarSellado()">↻ Probar otra foto</button></div>'
+        // Y al lado, la salida a mano: «probar otra foto» como único botón deja al que
+        // tiene el remito en la mano sin nada que hacer cuando la foto no es el problema.
+        ? '<div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap">'
+          + '<button class="btn bo" onclick="ifcoAbrirCargarSellado()">↻ Probar otra foto</button>'
+          + (file ? '<button class="btn bb" onclick="_ifcoSelladoDirectoAMano(IFCO._csFile, IFCO._csData)">✏️ Cargarlo a mano</button>' : '')
+          + '</div>'
         : '') +
     '</div>';
 }
@@ -63804,8 +66794,14 @@ async function ifcoSelladoDirectoGuardar() {
   if (!cadena) { alert('Seleccioná la cadena/cliente'); return; }
   if (recibida <= 0 && rechazada <= 0) { alert('Indicá al menos cantidad recibida o rechazada'); return; }
 
-  const sd = IFCO._sdData;
-  if (!sd || !sd.n_remito_ifco) { alert('Faltan datos. Cerrá y volvé a empezar.'); return; }
+  const sd = IFCO._sdData || {};
+  // EL N° SALE DEL CAMPO, no de lo que leyó el OCR: el operador lo puede corregir —y
+  // cuando el lector está caído lo escribe entero—. Antes esto leía sólo _sdData, así que
+  // tipear el número no servía de nada.
+  const nRemito = (document.getElementById('ifco-sd-nremito').value || '').trim()
+                  || sd.n_remito_ifco || '';
+  if (!nRemito) { alert('Escribí el N° de remito'); return; }
+  sd.n_remito_ifco = nRemito;
 
   const btn = document.getElementById('ifco-sd-btn-guardar');
   btn.disabled = true;
@@ -64152,7 +67148,9 @@ async function ifcoOnFotoSellado(ev) {
       document.getElementById('ifco-s-loading').style.display = 'none';
       if (!r.ok || !data.datos) {
         const msg = (data && data.error) || ('HTTP ' + r.status);
-        document.getElementById('ifco-s-ocr-error').textContent = '⚠️ La IA no pudo leer la foto: ' + msg + '. Cargá los campos manualmente.';
+        document.getElementById('ifco-s-ocr-error').textContent = data && data.ocr_caido
+          ? '⚠️ ' + msg + ' La foto se guarda igual.'
+          : '⚠️ La IA no pudo leer la foto: ' + msg + '. Cargá los campos manualmente.';
         document.getElementById('ifco-s-ocr-error').style.display = 'block';
         IFCO._fotoSelladoPath = data && data.escaneo_path ? data.escaneo_path : null;
         ifcoSaltarOcrSellado();

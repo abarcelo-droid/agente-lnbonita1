@@ -16,6 +16,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import os from 'node:os';
+import { spawnSync } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -23,20 +25,28 @@ const RAIZ = process.env.LNB_RAIZ
   || path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const CLAUDE = fs.readFileSync(path.join(RAIZ, 'CLAUDE.md'), 'utf8');
 
+// ESTA LISTA ES EL REGISTRO: un archivo que use el envoltorio y no esté acá, no lo
+// vigila nadie. Se anota al escribirlo, no después.
 const CONDICIONALES = [
   { archivo: 'share_import.test.mjs', paquete: 'xlsx' },
   { archivo: 'oportunidades_pdf.test.mjs', paquete: 'jspdf' },
+  { archivo: 'galpon_tarjetas_pdf.test.mjs', paquete: 'jspdf' },
+  { archivo: 'galpon_router.test.mjs', paquete: 'express' },
+  { archivo: 'contactos_tarjeta.test.mjs', paquete: 'express' },
 ];
 
 const leer = (f) => fs.readFileSync(path.join(RAIZ, 'test', f), 'utf8');
 
-test('el salteo es CONDICIONAL: arranca en null y sólo lo prende un catch', () => {
+test('el salteo es CONDICIONAL: arranca APAGADO y sólo lo prende un catch', () => {
   // Si `falta` estuviera puesto a mano —o si el catch abarcara de más— los tests
   // se saltearían también donde el paquete está, y nadie lo notaría: un salteo no
   // se ve, a diferencia de un rojo.
+  //
+  // Y tiene que arrancar en `false`, no en `null`: ver el test de abajo, que es el
+  // que descubrió por qué. `null` saltea igual que una cadena.
   for (const { archivo } of CONDICIONALES) {
     const s = leer(archivo);
-    assert.match(s, /^let falta = null;$/m, archivo + ': falta no arranca en null');
+    assert.match(s, /^let falta = false;$/m, archivo + ': falta no arranca en false');
     // La ÚNICA asignación de `falta` está adentro de un catch.
     // Se busca la asignación al MOTIVO (una cadena), no el `= null` de arriba: con
     // el lookahead pegado al \s* la expresión hacía backtracking y contaba las dos.
@@ -47,6 +57,67 @@ test('el salteo es CONDICIONAL: arranca en null y sólo lo prende un catch', () 
       archivo + ': falta se prende fuera de un catch');
   }
 });
+
+// ── Y ACÁ SE LO CORRE, QUE ES LO ÚNICO QUE PRUEBA QUE FUNCIONA ────────────
+//
+// Los tests de arriba LEEN el archivo, y por eso no vieron lo que estuvo roto
+// desde el día que se escribió el envoltorio: con `let falta = null`, node:test
+// marca **# SKIP** igual que con una cadena, pero **corre el cuerpo lo mismo** y
+// mete el resultado en el balde de los salteados. O sea: los 27 tests corrían, un
+// rojo adentro de ellos no contaba, y `npm test` salía con **exit code 0**.
+//
+// Exactamente lo que este archivo decía estar cuidando. Lo dejaba pasar porque se
+// fijaba en el texto —que estaba perfecto— en vez de en la conducta.
+//
+// `{ skip: false }` corre y cuenta. `{ skip: null }` no. La diferencia no se ve
+// leyendo, así que se ejecuta.
+// El valor inicial y el envoltorio NO se escriben acá: se SACAN del archivo de
+// verdad. Así este test no prueba un idioma de laboratorio — prueba el que está
+// puesto, y se cae si mañana alguien vuelve a escribir `null`.
+function idioma(archivo) {
+  const s = leer(archivo);
+  const ini = /^let falta = (.+);$/m.exec(s);
+  const env = /^const t = \(nombre, fn\) => test\(.+\);$/m.exec(s);
+  assert.ok(ini, archivo + ': no encuentro el valor inicial de falta');
+  assert.ok(env, archivo + ': no encuentro el envoltorio');
+  return { inicial: ini[1], envoltorio: env[0] };
+}
+
+const CASOS = [
+  { nombre: 'CON EL PAQUETE PRESENTE, un rojo adentro del envoltorio se ve',
+    presente: true, exito: false },
+  { nombre: 'y con el paquete ausente, se saltea de verdad',
+    presente: false, exito: true },
+];
+
+for (const caso of CASOS) {
+  for (const { archivo } of CONDICIONALES) test(caso.nombre + ' — ' + archivo, () => {
+    const { inicial, envoltorio } = idioma(archivo);
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'lnb-salteo-'));
+    const f = path.join(dir, 'caso.test.mjs');
+    try {
+      fs.writeFileSync(f,
+        "import test from 'node:test';\n"
+        + 'let falta = ' + inicial + ';\n'
+        // Con el paquete ausente, el catch le asigna el motivo. Se simula igual.
+        + (caso.presente ? '' : "falta = 'falta el paquete tal: corre npm install';\n")
+        + envoltorio + '\n'
+        + 't("el de prueba", () => { throw new Error("ROJO"); });\n');
+      // SIN `NODE_TEST_CONTEXT`: node:test se lo pone al proceso, el hijo lo
+      // hereda, se cree un subproceso del runner de arriba y reporta para él en
+      // vez de resolver su propio exit code — que es justamente lo que se mide
+      // acá. Sin sacarlo, el hijo sale 0 siempre y el test pasa por la razón
+      // equivocada.
+      const env = Object.assign({}, process.env);
+      delete env.NODE_TEST_CONTEXT;
+      const r = spawnSync(process.execPath, ['--test', f], { encoding: 'utf8', env });
+      assert.equal(r.status === 0, caso.exito,
+        'exit code ' + r.status + ' con falta=' + inicial + ' en ' + archivo + '\n' + (r.stdout || '').slice(-600));
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+}
 
 test('y el motivo dice qué hacer para que corran', () => {
   // «skipped» sin explicación es indistinguible de un test roto y abandonado.

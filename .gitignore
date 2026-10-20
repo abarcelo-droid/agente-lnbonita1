@@ -24,3 +24,5 @@ migracion/
 # Python: cache de compilación (lo genera py_compile al validar el agente)
 __pycache__/
 *.pyc
+.tmp-galpon-*/
+.tmp-ctj-*/

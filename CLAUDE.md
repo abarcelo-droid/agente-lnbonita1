@@ -128,6 +128,71 @@ Lo audita `test/un_solo_buscador.test.mjs`, que monta el buscador sobre un selec
 de mentira y **le escribe**: verifica qué opciones quedan, no que el código diga
 `sgNorm`.
 
+### LA VENTANA ES `ab-modal-overlay` POR FUERA Y `ab-modal` POR DENTRO
+
+Y no al revés. Lo de afuera es el **fondo oscuro** —`display:none` de oficio,
+`display:flex` con la clase `on`— y lo de adentro es la **tarjeta**: el fondo, el borde,
+el relleno, el `max-height` y el `overflow-y`.
+
+**`ab-modal-c` no existe: no tiene una sola regla en todo el repo.** Estaba escrito en
+ocho lugares y funcionaba de casualidad, porque afuera llevaban `ab-modal` —que tiene el
+aspecto de tarjeta— haciendo de las dos cosas a la vez. Pasarlas al overlay de verdad las
+dejó sin un solo estilo, y eso **compila igual**: se ve recién abriendo la ventana.
+
+Y explica un síntoma que parecía otra cosa. Andy, 18/10/2026: *«se van abriendo ventanas
+una abajo de otra»*. Sin overlay no hay fondo oscuro, así que una ventana abierta sobre
+otra no se distingue de la de abajo — y además queda afuera del `MutationObserver` que
+reparte el z-index, que sólo mira `ab-modal-overlay` y `mb`.
+
+Lo clava `test/ventanas_del_panel.test.mjs`, que ahora verifica que **toda clase `ab-modal*`
+que se use tenga al menos una regla CSS**, y que audita también la familia `ab-modal`
+suelta —161 en el panel— distinguiendo la tarjeta de adentro del overlay por si cuelga o
+no de uno.
+
+### ADENTRO DE UNA FICHA NO SE ABRE OTRA VENTANA
+
+Andy, 18/10/2026: *«no me convence mucho cómo está armado, como que se van abriendo
+ventanas una abajo de otra para modificar; prefiero algo más como que entrás a la ficha y
+ahí ves todo, más visual, y de ahí mismo editás»*.
+
+La regla de arriba —**un formulario de carga se abre en una ventana**— es sobre un
+formulario metido en una PANTALLA. Una ficha ya es una ventana, así que ahí no aplica, y
+encadenar una segunda encima tapa justamente lo que se está mirando.
+
+La línea queda así:
+
+- **Desde la LISTA se abre una ventana.** Es lo que avisa que se dejó de mirar y se empezó
+  a cargar. Pide **lo mínimo** y abre la ficha: un formulario largo obliga a tener todos
+  los datos juntos justo cuando no se los tiene.
+- **Adentro de la FICHA, todo se edita donde se lee.** Un campo se ve como texto hasta que
+  se lo toca; ahí se vuelve un casillero y se guarda solo al salir, **un campo por vez**.
+  Lo que se agrega —un teléfono, un producto, una charla— aparece como un renglón en
+  blanco debajo de su lista, nunca en otra ventana ni en un `prompt()`.
+
+El mecanismo es **uno solo** (`ctCampo` / `ctCmpEditar` / `ctCmpGuardar` en `panel.html`),
+no un formulario por campo: el campo diecinueve que alguien escriba mañana lo tiene gratis.
+Se prueba **ejecutándolo** contra un DOM de mentira en
+`test/contactos_ficha_editable.test.mjs` —se toca, se escribe, se sale y se mira qué se
+mandó— porque lo que puede estar mal (que guarde sin cambios y pise lo de un compañero,
+que Escape guarde igual) se ve idéntico en pantalla.
+
+### UNA FOTO NO SE BUSCA
+
+Se puede guardar la foto de la tarjeta de un contacto, y **no reemplaza tipear el teléfono**:
+el buscador no mira adentro de una imagen. La foto está para lo otro —el logo, el cargo
+impreso, el dato que todavía no se cargó— y el manual lo dice con esas palabras.
+
+**Y no va a `data/sg`.** Esa carpeta, `data/ifco`, `data/uploads` y las demás las sirve
+`express.static` **antes** del portón de sesión (`index.js:110-115`): lo que entra ahí queda
+en una URL del mismo origen que el panel y alcanzable **sin cookie**. Para la foto de un
+cajón da igual; la foto de una tarjeta **es** el teléfono directo de un comprador de cadena.
+
+Va a `data/contactos/`, que no está en ningún `express.static`, y sale sólo por
+`GET /api/sg/contactos/:id/tarjeta`, que pasa por `requireAuth`. En la base se guarda la
+RUTA, y esa ruta **no sale en ningún JSON**: la ficha y el buscador devuelven
+`tiene_tarjeta` (sí/no) y borran `tarjeta_path` — hay que hacerlo en los DOS lugares,
+porque los dos hacen `SELECT *`.
+
 ### UN MODAL NO SE CIERRA AL CLIC AFUERA
 
 Pablo, 6/9/2026: *«si hago click fuera de esa ventana se cierra... y pierdo toda
@@ -245,10 +310,21 @@ no ofrezca lo que va a rebotar.
   está (`xlsx`, `jspdf`) lo cargan **a demanda** y se **saltean** si falta,
   diciendo cuál falta y que se arregla con `npm install`. Donde hay
   `node_modules` corren igual que siempre.
-  **Si ves un rojo, es un rojo de verdad.** Y si ves que los salteados suben de
-  27, alguien rompió otra cosa: `test/suite_sin_rojos_permanentes.test.mjs`
-  vigila que el salteo siga siendo condicional y que ningún test nuevo se
-  escape del envoltorio.
+  **Si ves un rojo, es un rojo de verdad.** Y **acá los salteados son 0**:
+  `test/suite_sin_rojos_permanentes.test.mjs` vigila que el salteo siga siendo
+  condicional y que ningún test nuevo se escape del envoltorio.
+- **`{ skip: null }` NO ES LO MISMO QUE `{ skip: false }`.** Esta línea decía que
+  los salteados eran 27 y que había que preocuparse recién si subían. Eran 27
+  porque el envoltorio arrancaba en `let falta = null`, y con `null` node:test
+  **corre el cuerpo igual** pero anota el resultado en el balde de los salteados:
+  esos 27 tests se ejecutaban, un rojo adentro no contaba, y `npm test` salía con
+  **exit code 0**. Nunca contaron desde el día que se escribió el envoltorio.
+
+  Era justo lo que `suite_sin_rojos_permanentes.test.mjs` decía estar cuidando, y
+  lo dejó pasar porque auditaba el TEXTO del archivo —que estaba perfecto— en vez
+  de la conducta. Arreglado el 18/10/2026 (V1095): `falta` arranca en `false`, y
+  el guard ahora **corre** el idioma en un proceso aparte y mira el exit code.
+  Si escribís un test que se saltea condicionalmente, el centinela va en `false`.
 - No hay `node_modules`: no se puede levantar el server ni usar better-sqlite3. Los
   tests usan `node:sqlite` (viene con Node 24) y copian `src/servicios` a un temporal
   reemplazando sólo los módulos que abren la base. Ver `test/plata_sg.test.mjs`.
@@ -353,6 +429,54 @@ correspondiente. Si no nos perdemos»*.
 Al 8/9/2026 quedan **18 de 23 pantallas de SG sin manual**. Las que tienen: Ingresos,
 Órdenes de Compra, Stock, Gastos Directos, Asiento Modelo, Reprocesos y Remitos y
 Facturación.
+
+### 🏭 GALPÓN — lo que pasa entre el árbol y el pallet
+
+Puente Cordón cosecha, vuelca en el galpón, selecciona, embala y despacha. Hasta la
+V1096 el sistema **no guardaba un solo kilo de eso**: `pa_costos_lote` y
+`pa_costos_campaña` tienen la plata de la mano de obra, pero el volumen no lo registraba
+nadie. Este módulo es el primero que lo mide.
+
+**OJO CON EL NOMBRE.** «Galpón» ya significaba otra cosa acá: en IFCO, un galpón es un
+PROVEEDOR que guarda cajones (una fila de `proveedores`, ver `rutas/ifco.js`). Esto es el
+galpón de EMPAQUE. Por eso el prefijo de tabla `gal_` y las claves `galpon-*`, que no
+chocan con `ifco_`.
+
+**NADA SE PUEDE RECHAZAR DESPUÉS DEL HECHO: LA FRUTA YA ESTÁ EN LA TOLVA.** Es el
+principio que ordena todo el módulo y es al revés que en el resto del panel. Tarjeta
+repetida, número fuera de rango, balanza desconectada: ninguno puede bloquear la carga.
+Todos devuelven el problema DESCRITO para marcar la fila `a_revisar`, y alguien lo
+resuelve después. Un volcado que se niega a guardar es un IFCO que se perdió.
+
+Por eso las funciones de `servicios/galpon.js` devuelven siempre `{..., ok, motivo}` y
+**nunca tiran**.
+
+La excepción es la CONFIGURACIÓN, donde todavía no pasó nada: dos rangos de tarjetas que
+se pisan se rechazan con 409 antes de escribir. Si una misma tarjeta fuera de dos
+cuadrillas, se le atribuiría a una para siempre y los kilos de la otra desaparecerían sin
+que nadie lo note hasta fin de temporada.
+
+**LAS CUADRILLAS SON DE PERSONAL, Y NO SE LES AGREGAN COLUMNAS.** `pa_cuadrillas` la
+mantiene otro módulo. Lo que el galpón necesita —un color y un rango de tarjetas— vive en
+`gal_cuadrilla_tarjetas`, una tabla satélite. Agregarle una columna a la tabla de Personal
+es más corto y es la trampa: la hace nuestra para siempre. Y **sin FK** hacia `pa_*`
+(regla de más arriba: JOINs de lectura sí, FKs cruzadas no).
+
+**LA TARJETA IDENTIFICA A LA CUADRILLA, NO AL IFCO NI A LA PERSONA.** Son reutilizables y
+vuelven al campo después del volcado; por eso se configura un RANGO por cuadrilla y no una
+tarjeta por fila. Los kilos se miden por cuadrilla, que es como se paga el jornal.
+
+**El QR lleva el número pelado** (`contenidoQR` en `galponTarjetasPDF.js`). La lectora USB
+se comporta como un TECLADO: escanear TIPEA el contenido en el campo que tenga el foco, así
+que una URL adentro del QR escribiría la URL entera en el casillero del número. Y el número
+va grande y en tinta: una tarjeta que sólo se lee con una máquina deja de servir justo el
+día que la máquina falla.
+
+**El PDF de tarjetas va con `compress: true`**, y no es cosmético: jsPDF embebe cada QR
+como PNG sin comprimir y 16 tarjetas pesaban 3.037 KB — las 500 de una temporada, casi
+100 MB. Comprimido son 22 KB y 603 KB. La contra es que el texto deja de ser greppable
+dentro del binario, que es como se prueba `oportunidades_pdf`; acá se infla el stream con
+zlib y se leen los `(texto) Tj`, que es más fiel porque lee lo que se DIBUJÓ.
 
 ### Validación antes de entregar
 - **`npm test` SIEMPRE.** Esta sección decía "no hay tests" y contradecía a la de

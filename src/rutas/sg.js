@@ -47,6 +47,9 @@ import { detectarDuplicado, normalizar, ratio } from '../servicios/dedup.js';
 import Anthropic from '@anthropic-ai/sdk';
 // El model ID sale SIEMPRE de config/ia.js: es la fuente única del repo.
 import { MODELO_CHAT } from '../config/ia.js';
+// La llamada pasa por servicios/ia.js, que la deja registrada. Leer un documento de
+// importación con visión es de lo más caro que hace el sistema.
+import { llamarIA } from '../servicios/ia.js';
 import { generarOcPDF } from '../servicios/ocPDF.js';
 import { generarRecepcionCalidadPDF } from '../servicios/recepcionCalidadPDF.js';
 import { autenticar as afipAutenticar, ambienteActual as afipAmbiente } from '../servicios/afip-wsaa.js';
@@ -5442,16 +5445,14 @@ REGLAS:
     const headers = {
       'Content-Type': 'application/json',
       'x-api-key': process.env.ANTHROPIC_API_KEY,
-      'anthropic-version': '2023-06-01',
+      // La clave y la versión las pone el SDK; acá queda sólo el beta del PDF.
     };
     if (esPDF) headers['anthropic-beta'] = 'pdfs-2024-09-25';
 
-    const resp = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST', headers,
-      body: JSON.stringify({ model: MODELO_CHAT, max_tokens: 1500,
-        messages: [{ role: 'user', content: [contenido, { type: 'text', text: prompt }] }] }),
-    });
-    const data = await resp.json();
+    const data = await llamarIA('sg-leer-factura-mercaderia', {
+      model: MODELO_CHAT, max_tokens: 1500,
+      messages: [{ role: 'user', content: [contenido, { type: 'text', text: prompt }] }],
+    }, { headers });
     const txt = (data.content || []).filter((b) => b.type === 'text').map((b) => b.text).join('\n');
     if (!txt) return res.status(502).json({ ok: false, error: 'La lectura no devolvió nada' });
 
@@ -12844,16 +12845,14 @@ REGLAS:
     const headers = {
       'Content-Type': 'application/json',
       'x-api-key': process.env.ANTHROPIC_API_KEY,
-      'anthropic-version': '2023-06-01',
+      // La clave y la versión las pone el SDK; acá queda sólo el beta del PDF.
     };
     if (esPDF) headers['anthropic-beta'] = 'pdfs-2024-09-25';
 
-    const resp = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST', headers,
-      body: JSON.stringify({ model: MODELO_CHAT, max_tokens: 1200,
-        messages: [{ role: 'user', content: [contenido, { type: 'text', text: prompt }] }] }),
-    });
-    const data = await resp.json();
+    const data = await llamarIA('sg-leer-factura-gastos', {
+      model: MODELO_CHAT, max_tokens: 1200,
+      messages: [{ role: 'user', content: [contenido, { type: 'text', text: prompt }] }],
+    }, { headers });
     const txt = (data.content || []).filter((x) => x.type === 'text').map((x) => x.text).join('\n');
     if (!txt) return res.status(502).json({ ok: false, error: 'La lectura no devolvió nada' });
 
@@ -16661,8 +16660,7 @@ router.post('/embarques/leer-factura', requireAdmin, uploadDoc, async (req, res)
       + '- La suma de los importe_usd tiene que dar el total_usd. Si no da, decilo en observaciones en\n'
       + '  vez de forzar los números.';
 
-    const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
-    const resp = await client.messages.create({
+    const resp = await llamarIA('import-leer-factura', {
       model: MODELO_CHAT,
       max_tokens: 3000,
       messages: [{ role: 'user', content: [contenido, { type: 'text', text: prompt }] }],
@@ -17479,8 +17477,7 @@ REGLAS:
 - Este embarque es del proveedor "${emb.proveedor_nombre}". Si el emisor del documento es otro,
   dejá igual el que leíste y avisalo en observaciones: puede ser un papel de otro embarque.` : ''}`;
 
-    const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
-    const resp = await client.messages.create({
+    const resp = await llamarIA('import-leer-doc', {
       model: MODELO_CHAT,
       max_tokens: 800,
       messages: [{ role: 'user', content: [contenido, { type: 'text', text: prompt }] }],

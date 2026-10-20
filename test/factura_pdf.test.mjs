@@ -114,11 +114,14 @@ function lector({ apiKey, respuesta } = {}) {
 
   const cap = {};
   const router = { post: (p, mw, h) => { cap.h = h; cap.mw = mw; } };
-  new Function('getDb', 'router', 'requireAuth', 'process', 'fetch', 'MODELO_CHAT', 'console', src)(
+  // Desde que TODA llamada a la IA pasa por servicios/ia.js (para quedar registrada en
+  // el Consumo de IA), el handler ya no usa fetch: usa llamarIA, que devuelve el
+  // mensaje directo en vez de una Response. El doble cambia igual.
+  new Function('getDb', 'router', 'requireAuth', 'process', 'llamarIA', 'MODELO_CHAT', 'console', src)(
     () => db, router,
     function requireAuth() {},
     { env: apiKey ? { ANTHROPIC_API_KEY: apiKey } : {} },
-    async () => ({ json: async () => respuesta }),
+    async () => respuesta,
     'claude-x', console);
 
   return async (body) => {

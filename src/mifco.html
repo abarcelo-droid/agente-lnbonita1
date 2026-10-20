@@ -346,7 +346,7 @@ body{padding-bottom:env(safe-area-inset-bottom)}
 
 <!-- Pantalla CREAR + SELLAR (no hay match, todo de una) -->
 <div class="view" id="view-crear-sellado">
-  <div class="alert warn">No encontré ese N° en la base. Revisá los datos antes de crear y sellar.</div>
+  <div class="alert warn" id="ns-aviso">No encontré ese N° en la base. Revisá los datos antes de crear y sellar.</div>
   <div class="fld">
     <label>N° remito IFCO *</label>
     <input id="ns-numero" type="text" placeholder="00015-XXXXXXXX">
@@ -412,7 +412,7 @@ body{padding-bottom:env(safe-area-inset-bottom)}
 
 <!-- Pantalla CONFIRMAR DESPACHO (flujo despacho normal, sin sellado) -->
 <div class="view" id="view-confirmar-despacho">
-  <div class="alert ok">Datos prellenados por la IA. Revisá antes de guardar.</div>
+  <div class="alert ok" id="d-aviso">Datos prellenados por la IA. Revisá antes de guardar.</div>
   <div class="fld">
     <label>N° remito IFCO *</label>
     <input id="d-numero" type="text" placeholder="00015-XXXXXXXX">
@@ -472,7 +472,8 @@ body{padding-bottom:env(safe-area-inset-bottom)}
     <div style="font-size:36px;margin-bottom:8px" id="err-icon">⚠️</div>
     <div style="font-size:16px;font-weight:600;margin-bottom:6px" id="err-titulo">Algo salió mal</div>
     <div style="font-size:14px;color:var(--mut);margin-bottom:18px" id="err-detalle">—</div>
-    <button class="btn bb full" onclick="goHome()">Volver al inicio</button>
+    <button class="btn bb full lg" id="err-salida" style="display:none;margin-bottom:8px"></button>
+    <button class="btn bo full" onclick="goHome()">Volver al inicio</button>
   </div>
 </div>
 
@@ -715,10 +716,24 @@ function setFotoPrev(prevId, file) {
   el.querySelector('img').src = S.fotoUrl;
 }
 
-function showError(titulo, detalle, icon) {
+function showError(titulo, detalle, icon, salida) {
   $('err-titulo').textContent = titulo || 'Algo salió mal';
   $('err-detalle').innerHTML = detalle || '—';
   $('err-icon').textContent = icon || '⚠️';
+  // Cuando hay algo que SÍ se puede hacer, se ofrece acá. Un cartel con un solo botón que
+  // devuelve al principio no es una salida: es el final del camino, y el que está parado
+  // en el galpón con el remito en la mano se queda sin nada.
+  const btn = $('err-salida');
+  if (btn) {
+    if (salida && salida.fn) {
+      btn.textContent = salida.texto || 'Seguir a mano';
+      btn.onclick = salida.fn;
+      btn.style.display = '';
+    } else {
+      btn.onclick = null;
+      btn.style.display = 'none';
+    }
+  }
   showView('view-error', { title:'Error' });
 }
 
@@ -835,6 +850,7 @@ async function crearNuevoDesdeFoto(data, file) {
     $('ns-numero').value = (data && data.n_remito_ifco) || '';
     $('ns-fecha').value = todayISO();
     aplicarDepositoUsuario('ns-origen', 'ns-prov-wrap', 'ns-prov');
+    avisoNormal('ns-aviso');
     showView('view-crear-sellado', { title:'Crear y sellar' });
     return;
   }
@@ -847,7 +863,11 @@ async function crearNuevoDesdeFoto(data, file) {
     const r2 = await _fetchConFeedback('/api/ifco/ocr/remito-super', { method:'POST', credentials:'include', body:fd2 }, { mensaje:'Leyendo todos los datos del remito…' });
     const d2 = await r2.json();
     if (!r2.ok || !d2.datos) {
-      showError('No se pudieron leer los datos', d2.error || 'Probá manual desde el panel.', '📷');
+      // Mismo criterio que en el despacho, y acá el camino a mano YA estaba escrito tres
+      // líneas más arriba: es el mismo `if (!file)` del principio de esta función.
+      if (d2 && d2.ocr_caido) { crearSelladoAMano(data, file, d2); return; }
+      showError('No se pudieron leer los datos', d2.error || 'Probá con una foto mejor.', '📷',
+        { texto: 'Cargarlo a mano', fn: function(){ crearSelladoAMano(data, file, d2); } });
       return;
     }
     S.escaneoPath = d2.escaneo_path;
@@ -863,10 +883,80 @@ async function crearNuevoDesdeFoto(data, file) {
     toggleRechNS();
     aplicarDepositoUsuario('ns-origen', 'ns-prov-wrap', 'ns-prov');
     setFotoPrev('ns-foto-prev', file);
+    avisoNormal('ns-aviso');
     showView('view-crear-sellado', { title:'Crear y sellar' });
   } catch(e) {
     showError('Error de conexión', e.message, '⚠️');
   }
+}
+
+// ── CARGAR A MANO, CON LA FOTO PUESTA ────────────────────────────────────────────────
+// El mismo formulario de siempre, en blanco. La foto va igual: S.fotoFile ya está cargada
+// desde antes de llamar al lector, así que el despacho queda con su respaldo escaneado
+// aunque los datos los haya tipeado una persona.
+function cargarDespachoAMano(file, data) {
+  S.fotoFile = file || S.fotoFile;
+  S.escaneoPath = (data && data.escaneo_path) || S.escaneoPath;
+  S.ocrData = null;
+  $('d-numero').value = '';
+  $('d-fecha').value  = todayISO();
+  $('d-cadena').value = '';
+  $('d-cant').value   = '';
+  $('d-origen').value = 'san_geronimo';
+  toggleProvOrigenD();
+  aplicarDepositoUsuario('d-origen', 'd-prov-wrap', 'd-prov');
+  if (file) setFotoPrev('d-foto-prev', file);
+  avisoAMano('d-aviso', data);
+  showView('view-confirmar-despacho', { title:'Cargar a mano' });
+  setTimeout(function(){ var el=$('d-numero'); if(el) el.focus(); }, 60);
+}
+
+function crearSelladoAMano(data, file, d2) {
+  S.fotoFile = file || S.fotoFile;
+  S.escaneoPath = (d2 && d2.escaneo_path) || S.escaneoPath;
+  S.ocrData = null;
+  // El N° que el operador ya corrigió a mano no se pierde: es lo único que puede venir
+  // bueno de la pasada anterior.
+  $('ns-numero').value = (data && data.n_remito_ifco) || '';
+  $('ns-fecha').value  = todayISO();
+  $('ns-cadena').value = '';
+  $('ns-cant').value   = '';
+  $('ns-recib').value  = '';
+  $('ns-rech').value   = 0;
+  $('ns-origen').value = 'san_geronimo';
+  toggleProvOrigenNS();
+  toggleRechNS();
+  aplicarDepositoUsuario('ns-origen', 'ns-prov-wrap', 'ns-prov');
+  if (file) setFotoPrev('ns-foto-prev', file);
+  avisoAMano('ns-aviso', d2);
+  showView('view-crear-sellado', { title:'Cargar a mano' });
+  setTimeout(function(){ var el=$('ns-numero'); if(el) el.focus(); }, 60);
+}
+
+// El cartel de arriba del formulario, en sus dos estados. Sin el de "a mano", un
+// formulario en blanco se lee como que la foto no se sacó — y el operador la vuelve a
+// sacar tres veces antes de darse cuenta de que tiene que tipear.
+//
+// Los dos textos viven juntos a propósito: separados, el día que se toque uno el otro
+// queda contando otra historia.
+const AVISO_NORMAL = {
+  'd-aviso':  ['alert ok',   'Datos prellenados por la IA. Revisá antes de guardar.'],
+  'ns-aviso': ['alert warn', 'No encontré ese N° en la base. Revisá los datos antes de crear y sellar.'],
+};
+function avisoAMano(id, data) {
+  const el = $(id);
+  if (!el) return;
+  el.className = 'alert warn';
+  el.innerHTML = '<b>El lector de remitos no está disponible.</b><br>'
+    + ((data && data.error) ? esc(data.error) : 'Cargá los datos a mano.')
+    + '<br>La foto se guarda igual.';
+}
+function avisoNormal(id) {
+  const el = $(id);
+  const v = AVISO_NORMAL[id];
+  if (!el || !v) return;
+  el.className = v[0];
+  el.textContent = v[1];
 }
 
 // Pantalla de corrección manual del N° (sin_numero / bloqueado).
@@ -1159,7 +1249,11 @@ async function onFotoDespacho(ev) {
     const r = await _fetchConFeedback('/api/ifco/ocr/remito-super', { method:'POST', credentials:'include', body:fd }, { mensaje:'Leyendo los datos del remito…' });
     const data = await r.json();
     if (!r.ok || !data.datos) {
-      showError('No se pudieron leer los datos', (data && data.error) || 'Probá con una foto mejor.', '📷');
+      // El lector caído NO es una foto mala: no se arregla sacando otra. Se sigue a mano.
+      if (data && data.ocr_caido) { cargarDespachoAMano(file, data); return; }
+      showError('No se pudieron leer los datos',
+        (data && data.error) || 'Probá con una foto mejor.', '📷',
+        { texto: 'Cargarlo a mano', fn: function(){ cargarDespachoAMano(file, data); } });
       return;
     }
     S.escaneoPath = data.escaneo_path;
@@ -1173,6 +1267,7 @@ async function onFotoDespacho(ev) {
     toggleProvOrigenD();
     aplicarDepositoUsuario('d-origen', 'd-prov-wrap', 'd-prov');
     setFotoPrev('d-foto-prev', file);
+    avisoNormal('d-aviso');   // pudo haber quedado el de "cargalo a mano" del remito anterior
     showView('view-confirmar-despacho', { title:'Confirmar despacho' });
   } catch(e) {
     showError('Error de conexión', e.message, '⚠️');

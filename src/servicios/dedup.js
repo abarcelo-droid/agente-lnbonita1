@@ -16,6 +16,8 @@
 
 import Anthropic from '@anthropic-ai/sdk';
 import { MODELO_RAPIDO } from '../config/ia.js';
+// Pasa por servicios/ia.js para quedar registrada en el consumo.
+import { llamarIA } from './ia.js';
 
 // ── CONFIG (calibrable sin tocar la lógica) ───────────────────────────────────
 // Umbral de similitud [0..1] que dispara el BLOQUEO en el fuzzy. Subilo para ser
@@ -77,8 +79,7 @@ async function detectarSemantico(nombre, filas) {
       `EXISTENTES:\n${lista}\n\n` +
       'Respondé SOLO un JSON, sin texto extra: {"match_index": <número de la lista o null>}. ' +
       'null si el candidato es genuinamente nuevo.';
-    const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
-    const resp = await client.messages.create({
+    const resp = await llamarIA('catalogo-duplicados', {
       model: MODELO_SEMANTICO,
       max_tokens: 64,
       messages: [{ role: 'user', content: prompt }],
