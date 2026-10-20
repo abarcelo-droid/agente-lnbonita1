@@ -77659,7 +77659,7 @@ function fpPintarKpis() {
          'en el préstamo o el cheque.</div>';
   }
 
-  // LA OTRA PUERTA POR LA QUE SE CAE PLATA DEL CUADRO (V1089): una fecha que no se puede leer. El
+  // LA OTRA PUERTA POR LA QUE SE CAE PLATA DEL CUADRO (V1098): una fecha que no se puede leer. El
   // motor no la puede ubicar en ninguna semana y la saltea; sin este aviso, el movimiento existe,
   // no está en ningún total, y no hay manera de darse cuenta.
   if (p.sin_fecha && p.sin_fecha.items) {
@@ -78190,7 +78190,7 @@ function fpChequesCargar() {
   });
 }
 
-// EL CUADRO SE RECALCULA SOLO (V1089).
+// EL CUADRO SE RECALCULA SOLO (V1098).
 //
 // Pablo, 20/10/2026: «la suma en el detalle no me coincide con lo que me informás en la tabla
 // general». Y no coincidía: el cuadro se calculaba una sola vez, al apretar Proyectar, y NINGUNA de
@@ -78558,7 +78558,7 @@ function fpSemPintar() {
     return '<span class="fp-flecha">' + (FP.sem.desc ? '▼' : '▲') + '</span>';
   };
 
-  // SI EL CUADRO DICE OTRA COSA, SE DICE ACÁ (V1089). Los dos números salen de la misma base, así
+  // SI EL CUADRO DICE OTRA COSA, SE DICE ACÁ (V1098). Los dos números salen de la misma base, así
   // que una diferencia significa que el cuadro quedó viejo: se calculó antes del último cambio.
   // Mostrarlos en dos ventanas sin decir nada es lo que hace dudar de todo el módulo.
   var dif = Number(FP.sem.enElCuadro || 0) - total;

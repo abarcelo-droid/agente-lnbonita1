@@ -157,7 +157,7 @@ export function proyectar({ desde, semanas = 13, saldoInicial = 0, conceptos = [
     return exacto || comodin;
   }
 
-  // PLATA CON FECHA ILEGIBLE (V1089). `celda()` devuelve FUERA por dos motivos muy distintos:
+  // PLATA CON FECHA ILEGIBLE (V1098). `celda()` devuelve FUERA por dos motivos muy distintos:
   // porque el movimiento cae más allá del horizonte —correcto, no entra— o porque su fecha no se
   // puede leer. El segundo caso es un movimiento que EXISTE y que no está sumado en ningún total,
   // igual que un banco que no matchea ninguna fila, y hasta ahora se iba sin que nadie se enterara.
