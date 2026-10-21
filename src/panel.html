@@ -24185,14 +24185,14 @@ SG_MANUAL.pli = { titulo: 'Planificación de Insumos', html:
 
   + sgManCampo('Unidad de USO',
       'En la que la receta consume el insumo: una etiqueta, una caja, un metro de film.',
-      'Es la unidad en la que se guarda el STOCK del depósito.', 'V1098')
+      'Es la unidad en la que se guarda el STOCK del depósito.', 'V1099')
 
   + sgManCampo('Se compra por / Equivalencia',
       'En la que se le habla al proveedor: el millar de etiquetas, el bolsón, el pallet. La '
       + 'equivalencia dice cuántas unidades de uso trae una de compra.',
       'Todo lo que entra o sale del depósito —una recepción, una entrega a un proveedor— se carga '
       + 'en unidad de COMPRA y se convierte con esta equivalencia.',
-      'V1098')
+      'V1099')
 
   + '<p class="nota">Si la equivalencia está mal, <b>todo</b> está mal y por un factor de mil. '
   + 'Recibir 8 millares son 8.000 etiquetas: con la equivalencia en 1, el plan creería que en el '
@@ -24219,13 +24219,13 @@ SG_MANUAL.pli = { titulo: 'Planificación de Insumos', html:
 
   + sgManCampo('Stock',
       'Lo que YA está en el depósito, incluida la mercadería de las compras que se recibieron.',
-      'Lo mueve la recepción. Una compra recibida deja de contar como pedida.', 'V1098')
+      'Lo mueve la recepción. Una compra recibida deja de contar como pedida.', 'V1099')
 
   + sgManCampo('En viaje',
       'Lo que está comprado y <b>todavía no llegó</b>: la cantidad de la compra menos lo recibido.',
       'Antes esta columna se llamaba «ya comprado» y contaba la compra entera, así que lo recibido '
       + 'se contaba dos veces y el plan decía «a comprar 0» cuando faltaba la mitad.',
-      'V1098')
+      'V1099')
 
   + '<p class="nota">Una compra marcada «recibido · sin confirmar» es la que alguien puso en ese '
   + 'estado a mano, sin pasar por el botón 📦: <b>no sumó nada al depósito</b>. Es la que hay que '
@@ -24261,19 +24261,19 @@ SG_MANUAL.pli = { titulo: 'Planificación de Insumos', html:
       + 'compró y fue directo al proveedor sin pasar por acá.',
       'Es lo que decide si el plan va a mandar a comprar esa mercadería de nuevo. No se puede '
       + 'entregar más de lo que hay en el depósito.',
-      'V1098')
+      'V1099')
 
   + sgManCampo('Factura de compra (por renglón)',
       'El comprobante con el que se COMPRÓ ese insumo: es el papel que respalda en cuánto se lo '
       + 'valuó. Va por renglón porque un mismo remito puede llevar tres insumos de tres facturas.',
-      'No es el comprobante de la entrega: ése va arriba, en la cabecera.', 'V1098')
+      'No es el comprobante de la entrega: ése va arriba, en la cabecera.', 'V1099')
 
   + sgManCampo('La diferencia',
       'En la solapa <b>Facturas de recupero</b>: lo que le cobraste menos lo que te costó todo lo '
       + 'que esa factura cubre. En verde ganaste, en rojo perdiste.',
       'No se puede mirar fila por fila en la lista de entregas, porque una factura puede cubrir '
       + 'varias: ahí el importe sería el de la factura entera repetido en cada una.',
-      'V1098')
+      'V1099')
 
   + '<p class="nota">Cuando la entrega está valuada en una moneda y la factura en otra, la '
   + 'diferencia <b>no se calcula</b> y se dice por qué. Restar pesos contra dólares con una '
@@ -81411,7 +81411,7 @@ function fpPintarKpis() {
          'en el préstamo o el cheque.</div>';
   }
 
-  // LA OTRA PUERTA POR LA QUE SE CAE PLATA DEL CUADRO (V1098): una fecha que no se puede leer. El
+  // LA OTRA PUERTA POR LA QUE SE CAE PLATA DEL CUADRO (V1099): una fecha que no se puede leer. El
   // motor no la puede ubicar en ninguna semana y la saltea; sin este aviso, el movimiento existe,
   // no está en ningún total, y no hay manera de darse cuenta.
   if (p.sin_fecha && p.sin_fecha.items) {
@@ -81942,7 +81942,7 @@ function fpChequesCargar() {
   });
 }
 
-// EL CUADRO SE RECALCULA SOLO (V1098).
+// EL CUADRO SE RECALCULA SOLO (V1099).
 //
 // Pablo, 20/10/2026: «la suma en el detalle no me coincide con lo que me informás en la tabla
 // general». Y no coincidía: el cuadro se calculaba una sola vez, al apretar Proyectar, y NINGUNA de
@@ -82310,7 +82310,7 @@ function fpSemPintar() {
     return '<span class="fp-flecha">' + (FP.sem.desc ? '▼' : '▲') + '</span>';
   };
 
-  // SI EL CUADRO DICE OTRA COSA, SE DICE ACÁ (V1098). Los dos números salen de la misma base, así
+  // SI EL CUADRO DICE OTRA COSA, SE DICE ACÁ (V1099). Los dos números salen de la misma base, así
   // que una diferencia significa que el cuadro quedó viejo: se calculó antes del último cambio.
   // Mostrarlos en dos ventanas sin decir nada es lo que hace dudar de todo el módulo.
   var dif = Number(FP.sem.enElCuadro || 0) - total;
