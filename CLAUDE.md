@@ -533,6 +533,36 @@ curl -s https://agente-lnbonita1-production.up.railway.app/static/sidebar-v2.js 
 `/static` manda `Cache-Control: no-cache`, así que lo que devuelve ese curl es lo
 que ve el navegador: si ahí dice V746, el problema no es la caché de nadie.
 
+### ANTES DE CULPAR A RAILWAY, MIRÁ SI GITHUB LE AVISÓ
+
+21/10/2026: dos merges seguidos no desplegaron. Producción quedó dos versiones
+atrás y la pantalla nueva no aparecía. No era Railway: **GitHub tenía un
+incidente abierto con los webhooks degradados** y nunca le entregó el aviso.
+
+Son cuatro situaciones distintas y se separan con dos comandos:
+
+```bash
+# ¿Railway creó el deploy para ESE commit? Si da 0, no se enteró.
+gh api "repos/{owner}/{repo}/deployments?sha=<sha>" --jq 'length'
+
+# ¿GitHub está entregando webhooks?
+curl -s https://www.githubstatus.com/api/v2/components.json | node -e "let s='';\
+process.stdin.on('data',d=>s+=d).on('end',()=>{const j=JSON.parse(s);\
+console.log(j.components.filter(c=>['Webhooks','Pull Requests','Actions']\
+.includes(c.name)).map(c=>c.name+': '+c.status).join(' · '));});"
+```
+
+* **Deploy creado y en cola** → esperar. Son tres proyectos y van de a uno.
+* **Deploy creado y `failure`** → mirar el log con el `log_url` del status.
+* **Cero deploys y webhooks degradados** → es GitHub. Y lo que importa:
+  **los avisos que se pierden NO se reenvían**. Cuando GitHub se recupera,
+  Railway sigue sin enterarse de los merges de la ventana caída: hace falta un
+  push NUEVO a main, o apretar Redeploy en Railway.
+* **Cero deploys y GitHub operativo** → ahí sí es la conexión de Railway.
+
+Y no concluir nada con una sola medición: la primera vez que esto pasó di por
+hecho que la integración de Railway se había caído, y era GitHub.
+
 ### DOS NÚMEROS DE LA MISMA OPERACIÓN: FISCAL Y GESTIÓN
 
 El comprador cierra el tomate en 20.000 y la factura llega por 10.000. A AFIP se
