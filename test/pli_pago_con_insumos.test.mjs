@@ -644,6 +644,79 @@ test('las dos listas nuevas no sacan barra de costado', () => {
   assert.match(PANEL, /#pli-pag-cont td \{ word-break:break-word \}/);
 });
 
+test('el proveedor se elige de los que ya usaste, no se vuelve a tipear', () => {
+  // DE QUE EL NOMBRE COINCIDA DEPENDE QUE EL RECUPERO SE PUEDA MARCAR: la entrega y la factura se
+  // cruzan comparando ese texto. Escrito a mano dos veces, «Cartocor SA» y «CARTOCOR S.A.» son dos
+  // proveedores distintos — con razón, pero el problema lo crea la pantalla al hacerlo tipear.
+  const f = fuente(PANEL, 'function pliPagProveedores()');
+  // Los de los insumos, más los que ya se usaron en entregas y en facturas.
+  assert.match(f, /\(PLI\.proveedores \|\| \[\]\)\.forEach\(sumar\)/);
+  assert.match(f, /\(PLI\.entregas \|\| \[\]\)\.forEach/);
+  assert.match(f, /\(PLI\.recuperos \|\| \[\]\)\.forEach/);
+  // Sin repetir, y sin importar cómo se escribió la primera vez.
+  assert.match(f, /vistos\[k\]/);
+  assert.match(f, /t\.toLowerCase\(\)/);
+  // Se llena al cargar la solapa, que es cuando los datos están.
+  assert.match(fuente(PANEL, 'function pliPagCargar()'), /pliPagProveedores\(\);/);
+  // Y las dos ventanas lo usan.
+  assert.match(PANEL, /id="pli-ent-prov" list="pli-dl-prov"/);
+  assert.match(PANEL, /id="pli-rec-f-prov" list="pli-dl-prov"/);
+
+  // Corrido: tres maneras de escribir el mismo proveedor dan UNA sola opción.
+  const dl = { innerHTML: '' };
+  new Function('document', 'PLI', 'pliEsc', [
+    fuente(PANEL, 'function pliPagProveedores()'), 'pliPagProveedores();',
+  ].join('\n'))({ getElementById: () => dl },
+    { proveedores: ['CARTOCOR'], entregas: [{ proveedor_texto: 'cartocor' }, { proveedor_texto: 'SMURFIT' }],
+      recuperos: [{ proveedor_texto: ' Cartocor ' }] }, (s) => String(s));
+  assert.equal((dl.innerHTML.match(/<option/g) || []).length, 2, 'repitió el mismo proveedor');
+  assert.match(dl.innerHTML, /value="CARTOCOR"/);
+  assert.match(dl.innerHTML, /value="SMURFIT"/);
+});
+
+test('la moneda del renglón arranca en la del insumo, y no se pisa si la tocaste', () => {
+  // El selector arrancaba siempre en Pesos: un insumo que se compra en dólares se valuaba en
+  // pesos con el mismo número, mil veces más chico, y la diferencia contra la factura salía
+  // absurda sin que nada lo dijera.
+  const cambiar = (lineas, insumos) => {
+    const PLI = { entLineas: lineas, insumos };
+    new Function('PLI', 'pliEntTotal', [
+      fuente(PANEL, 'function pliEntLineaCambio(i, campo, valor)'),
+      'return pliEntLineaCambio;',
+    ].join('\n'))(PLI, () => {})(0, 'insumo_id', '7');
+    return PLI.entLineas[0];
+  };
+  const INS = [{ id: 7, nombre: 'ETIQUETA', moneda: 'USD' }];
+  assert.equal(cambiar([{ moneda: 'ARS' }], INS).moneda, 'USD', 'no propuso la moneda del insumo');
+  // Si ya la tocaste a mano, manda la tuya: se propone, no se impone. Y se prueba TOCÁNDOLA con
+  // la función, no poniendo la marca a mano: el que anota que la tocaste es justamente el renglón
+  // que podría faltar.
+  const linea = { moneda: 'ARS' };
+  const cambio = new Function('PLI', 'pliEntTotal', [
+    fuente(PANEL, 'function pliEntLineaCambio(i, campo, valor)'), 'return pliEntLineaCambio;',
+  ].join('\n'))({ entLineas: [linea], insumos: INS }, () => {});
+  cambio(0, 'moneda', 'ARS');          // el operador la elige
+  cambio(0, 'insumo_id', '7');         // y después elige el insumo, que es USD
+  assert.equal(linea.moneda, 'ARS', 'le pisó la moneda que el operador había elegido');
+  // Y un insumo sin moneda no la borra.
+  assert.equal(cambiar([{ moneda: 'ARS' }], [{ id: 7, nombre: 'X' }]).moneda, 'ARS');
+});
+
+test('recién creada, la entrega se vuelve a abrir para poder adjuntar el papel', () => {
+  // Adjuntar la factura es lo último que pidió Pablo, y mientras la entrega no existe no hay dónde
+  // colgarla: sin esto hay que buscarla en la lista y entrar de nuevo.
+  const g = fuente(PANEL, 'function pliEntregaGuardar()');
+  assert.match(g, /var recien = !id && r\.id;/);
+  assert.match(g, /pliPagCargar\(\)\.then\(function\(\) \{/);
+  assert.match(g, /if \(recien\) pliEntregaAbrir\(r\.id\);/);
+  // Y se reabre DESPUÉS de recargar, o la lista todavía no tendría la entrega nueva.
+  assert.ok(g.indexOf('pliPagCargar().then') < g.indexOf('pliEntregaAbrir(r.id)'));
+  // Corregir una que ya existía no reabre nada: ya estabas ahí.
+  assert.match(g, /!id && r\.id/);
+  // Para eso pliPagCargar tiene que devolver su promesa.
+  assert.match(fuente(PANEL, 'function pliPagCargar()'), /return Promise\.all/);
+});
+
 test('después de entregar, la lista de insumos se recarga', () => {
   // El stock de los insumos cambió: dejar la lista vieja es mostrar un depósito que ya no existe.
   for (const firma of ['function pliEntregaGuardar()', 'function pliEntregaBorrar(id)']) {
