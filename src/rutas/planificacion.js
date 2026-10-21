@@ -30,6 +30,18 @@ const router = express.Router();
 // memoryStorage porque subirArchivo() recibe un buffer.
 const subida = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
 
+// QUÉ SE ACEPTA COMO PAPEL, Y CÓMO SE DEVUELVE.
+//
+// Los adjuntos se bajan desde el MISMO ORIGEN que el panel y con `inline`, así que un archivo
+// .html subido como «factura» se abriría como una página adentro de la sesión del que lo mira. El
+// tipo que llega en el pedido lo escribe el que sube —no lo verifica nadie—, de modo que el filtro
+// tiene que estar de los dos lados: no se guarda lo que no es un papel, y al devolverlo el tipo
+// sale de esta lista y no del dato guardado.
+//
+// Es la misma lista que usa el expediente documental de SG.
+const PAPEL_MIMES = new Set(['application/pdf', 'image/jpeg', 'image/png']);
+const PAPEL_MAX = 10 * 1024 * 1024;
+
 // ── Helpers de request ────────────────────────────────────────────────────
 
 router.use((req, res, next) => {
@@ -1035,9 +1047,14 @@ router.get('/archivos/:archivoId', async (req, res) => {
     if (!a) return res.status(404).json({ ok: false, error: 'Archivo no encontrado' });
     if (!storageConfigurado()) return res.status(503).json({ ok: false, error: 'Almacenamiento no configurado' });
     const stream = await obtenerArchivo(a.storage_key);
+    // Mismo criterio que los adjuntos de las entregas: el tipo sale de la lista, no del dato.
+    const tipo = PAPEL_MIMES.has(a.mime) ? a.mime : 'application/octet-stream';
     res.set({
-      'Content-Type': a.mime || 'application/octet-stream',
-      'Content-Disposition': `inline; filename="${String(a.nombre).replace(/"/g, '')}"`
+      'Content-Type': tipo,
+      'X-Content-Type-Options': 'nosniff',
+      'Cache-Control': 'private, no-store',
+      'Content-Disposition': `${tipo === 'application/octet-stream' ? 'attachment' : 'inline'}; `
+        + `filename="${String(a.nombre).replace(/"/g, '')}"`
     });
     stream.pipe(res);
   } catch (e) {
@@ -2087,6 +2104,466 @@ function totalDeOrden(renglones) {
     varias_monedas: monedas.length > 1 ? 1 : 0,
   };
 }
+
+// ══════════════════════════════════════════════════════════════════════════
+// PAGARLE A UN PROVEEDOR CON INSUMOS
+// ══════════════════════════════════════════════════════════════════════════
+//
+// Pablo, 20/10/2026: «a veces hay proveedores a los que les pagamos con INSUMOS… necesito un lugar
+// donde llevar el registro de lo que se le entregó, la factura del insumo, el costo de ese insumo
+// (dólares o pesos), la cantidad… y saber si lo recuperé mediante factura al proveedor».
+//
+// Son dos cosas distintas que hay que poder mirar juntas: la ENTREGA —mercadería que sale, y lo que
+// nos costó— y el RECUPERO —la factura que le hacemos, y a qué precio se la cobramos—. La
+// diferencia entre las dos es lo que se gana o se pierde, y es justo lo que no se ve en un cuaderno.
+
+// LA MISMA PUERTA DE LA RECEPCIÓN, PERO AL REVÉS (ver moverStockPorRecepcion).
+//
+// `stock_aplicado` recuerda, en unidad de USO, lo que YA se le descontó al insumo por esta línea.
+// Con ese número guardar dos veces no descuenta dos veces, corregir la cantidad ajusta por la
+// diferencia, y anular o borrar devuelve exactamente lo que salió.
+//
+// Y SE CONVIERTE DE UNIDAD: la línea está en unidad de COMPRA —es la unidad en la que se habla con
+// el proveedor— y el stock vive en unidad de USO. Entregar 8 millares de etiquetas y descontarle 8
+// al depósito sería errarle por mil.
+function moverStockPorEntrega(linea, objetivoCompra, mueveStock, userId) {
+  const ins = db.prepare('SELECT id, factor_compra, unidad_uso, unidad_compra, stock_inicial FROM pli_insumos WHERE id=?')
+    .get(linea.insumo_id);
+  if (!ins) throw bad('El insumo de esa entrega ya no existe');
+  const factor = Number(ins.factor_compra) || 1;
+  const objetivo = mueveStock ? Math.round((Number(objetivoCompra) || 0) * factor * 1e6) / 1e6 : 0;
+  const antes = Number(linea.stock_aplicado) || 0;
+  const delta = Math.round((objetivo - antes) * 1e6) / 1e6;
+  if (!delta) {
+    // Sin movimiento no se toca el stock —ni se le estampa la fecha de actualización a un insumo
+    // que no cambió— pero la anotación se deja igual: es la que dice cuánto hay que devolver.
+    db.prepare('UPDATE pli_entrega_lineas SET stock_aplicado=? WHERE id=?').run(objetivo, linea.id);
+    return { delta: 0 };
+  }
+  // NO SE ENTREGA MÁS DE LO QUE HAY. El stock del módulo es un número solo, así que dejarlo en
+  // negativo —o taparlo con un MAX(0, …)— rompe la cuenta de lo que se puede devolver: `delta`
+  // dejaría de ser lo que realmente salió. Se frena y se dice con los dos números, que es lo
+  // mismo que hace el tope de la recepción.
+  if (delta > 0 && delta > (Number(ins.stock_inicial) || 0) + 1e-6) {
+    throw bad(`De ${ins.unidad_uso === ins.unidad_compra ? '' : 'este insumo '}hay `
+      + `${redondear(Number(ins.stock_inicial) || 0)} ${ins.unidad_uso} en el depósito y estás entregando `
+      + `${redondear(delta)}. Cargá primero la compra que lo trajo, o destildá «sale de nuestro depósito» `
+      + `si esta mercadería va directo del proveedor al proveedor.`);
+  }
+  db.prepare(`UPDATE pli_insumos SET stock_inicial = ROUND(stock_inicial - ?, 6),
+      stock_actualizado_en=${AHORA} WHERE id=?`).run(delta, ins.id);
+  // MOVER EL STOCK Y ANOTAR LO APLICADO SON EL MISMO ACTO, y por eso pasan por acá los dos. Si la
+  // anotación viviera afuera, alcanzaría con un `return` en el medio para que el depósito diga una
+  // cosa y la línea otra — y a partir de ahí no hay manera de saber cuánto devolver.
+  db.prepare('UPDATE pli_entrega_lineas SET stock_aplicado=? WHERE id=?').run(objetivo, linea.id);
+  logPli('insumo', ins.id, 'stock_por_entrega',
+    { linea_id: linea.id || null, entrega_id: linea.entrega_id || null, delta_uso: delta, unidad: ins.unidad_uso }, userId);
+  return { delta, unidad_uso: ins.unidad_uso };
+}
+
+const redondear = (n) => Math.round((Number(n) || 0) * 1e6) / 1e6;
+
+// Devolver al stock TODO lo que una entrega sacó. Se usa al borrarla y al destildar que sale del
+// depósito: si no vuelve, el depósito queda con menos mercadería de la que tiene.
+const devolverStockDeEntrega = (lineas, userId) => {
+  for (const l of lineas) if (Number(l.stock_aplicado)) moverStockPorEntrega(l, 0, false, userId);
+};
+
+// Las líneas de una entrega, con lo que hace falta para mostrarlas y para costear.
+function lineasDeEntrega(entregaId) {
+  return db.prepare(`SELECT l.*, i.nombre AS insumo_nombre, i.codigo AS insumo_codigo,
+      i.unidad_compra, i.unidad_uso, i.factor_compra
+    FROM pli_entrega_lineas l JOIN pli_insumos i ON i.id = l.insumo_id
+    WHERE l.entrega_id=? ORDER BY l.id`).all(entregaId);
+}
+
+// EL COSTO DE LA ENTREGA, sólo si se puede sumar. Con una línea sin costo o con dos monedas
+// distintas, cualquier total sería mentira — el mismo criterio que el total de la orden de compra.
+function costoDeEntrega(lineas) {
+  let total = 0, moneda = null, sinCosto = 0, variasMonedas = false;
+  for (const l of lineas) {
+    if (l.costo_unitario == null) { sinCosto++; continue; }
+    if (moneda === null) moneda = l.moneda || 'ARS';
+    else if ((l.moneda || 'ARS') !== moneda) variasMonedas = true;
+    total += Number(l.costo_unitario) * Number(l.cantidad);
+  }
+  if (sinCosto || variasMonedas || moneda === null) {
+    return { costo: null, moneda, sin_costo: sinCosto, varias_monedas: variasMonedas };
+  }
+  return { costo: Math.round(total * 100) / 100, moneda, sin_costo: 0, varias_monedas: false };
+}
+
+function entregaDe(soc, id) {
+  const e = db.prepare('SELECT * FROM pli_entregas WHERE id=? AND sociedad_id=? AND eliminado_en IS NULL')
+    .get(parseInt(id, 10), soc);
+  if (!e) throw notFound('Entrega no encontrada');
+  return e;
+}
+
+// Valida y normaliza los renglones que manda la pantalla. Una entrega sin renglones no es una
+// entrega: es un papel en blanco.
+function leerLineas(b, soc) {
+  const crudas = Array.isArray(b?.lineas) ? b.lineas : null;
+  if (!crudas || !crudas.length) throw bad('La entrega tiene que llevar al menos un insumo');
+  if (crudas.length > 100) throw bad('Son demasiados renglones para una sola entrega (máximo 100)');
+  return crudas.map((l, n) => {
+    const insumoId = vNum(l.insumo_id, `El insumo del renglón ${n + 1}`, { entero: true, min: 1 });
+    const ins = db.prepare('SELECT id FROM pli_insumos WHERE id=? AND sociedad_id=? AND eliminado_en IS NULL')
+      .get(insumoId, soc);
+    if (!ins) throw bad(`El insumo del renglón ${n + 1} no existe o es de otra sociedad`);
+    const costo = l.costo_unitario === undefined || l.costo_unitario === null || l.costo_unitario === ''
+      ? null : vNum(l.costo_unitario, `El costo del renglón ${n + 1}`, { min: 0 });
+    return {
+      insumo_id: insumoId,
+      cantidad: vNum(l.cantidad, `La cantidad del renglón ${n + 1}`, { min: 1e-9 }),
+      costo_unitario: costo,
+      moneda: ['ARS', 'USD'].includes(l.moneda) ? l.moneda : 'ARS',
+      factura_compra: vTexto(l.factura_compra, 'La factura de compra', { max: 60 }),
+      notas: vTexto(l.notas, 'Las notas', { max: 200 }),
+    };
+  });
+}
+
+router.get('/entregas', wrap((req, res) => {
+  const soc = getSociedadId(req);
+  const filas = db.prepare(`SELECT e.*, r.numero AS recupero_numero, r.fecha AS recupero_fecha,
+      r.importe AS recupero_importe, r.moneda AS recupero_moneda
+    FROM pli_entregas e
+    LEFT JOIN pli_recuperos r ON r.id = e.recupero_id AND r.eliminado_en IS NULL
+    WHERE e.sociedad_id=? AND e.eliminado_en IS NULL
+    ORDER BY e.fecha DESC, e.id DESC`).all(soc);
+  const data = filas.map((e) => {
+    const lineas = lineasDeEntrega(e.id);
+    return { ...e, lineas, ...costoDeEntrega(lineas),
+      adjuntos: db.prepare(`SELECT COUNT(*) n FROM pli_adjuntos
+        WHERE entidad='entrega' AND entidad_id=? AND eliminado_en IS NULL`).get(e.id).n };
+  });
+  res.json({ ok: true, data });
+}));
+
+router.post('/entregas', wrap((req, res) => {
+  const soc = getSociedadId(req);
+  const b = req.body || {};
+  const prov = vTexto(b.proveedor_texto, 'El proveedor', { max: 120 });
+  if (!prov) throw bad('¿A qué proveedor se le entregó?');
+  const fecha = vFecha(b.fecha, 'La fecha');
+  if (!fecha) throw bad('La fecha es obligatoria');
+  const mueve = b.mueve_stock === undefined ? 1 : (b.mueve_stock ? 1 : 0);
+  const lineas = leerLineas(b, soc);
+  let id = null;
+  db.transaction(() => {
+    const r = db.prepare(`INSERT INTO pli_entregas
+      (sociedad_id, proveedor_texto, fecha, comprobante, mueve_stock, notas, creado_por_id, actualizado_por_id)
+      VALUES (?,?,?,?,?,?,?,?)`)
+      .run(soc, prov, fecha, vTexto(b.comprobante, 'El comprobante', { max: 60 }), mueve,
+           vTexto(b.notas, 'Las notas', { max: 300 }), req.user.id, req.user.id);
+    id = r.lastInsertRowid;
+    const ins = db.prepare(`INSERT INTO pli_entrega_lineas
+      (entrega_id, insumo_id, cantidad, costo_unitario, moneda, factura_compra, notas) VALUES (?,?,?,?,?,?,?)`);
+    for (const l of lineas) {
+      const li = ins.run(id, l.insumo_id, l.cantidad, l.costo_unitario, l.moneda, l.factura_compra, l.notas);
+      moverStockPorEntrega({ id: li.lastInsertRowid, entrega_id: id, insumo_id: l.insumo_id, stock_aplicado: 0 },
+        l.cantidad, mueve, req.user.id);
+    }
+  })();
+  logPli('entrega', id, 'alta', { proveedor: prov, fecha, renglones: lineas.length, mueve_stock: mueve }, req.user.id);
+  res.json({ ok: true, id });
+}));
+
+// La edición REEMPLAZA los renglones. Es lo que hace que el stock no pueda quedar a medias: se
+// devuelve todo lo que la entrega había sacado y se vuelve a aplicar lo que queda, en una sola
+// transacción. Corregir renglón por renglón sería la puerta por la que se cuela un descuadre.
+router.patch('/entregas/:id', wrap((req, res) => {
+  const soc = getSociedadId(req);
+  const e = entregaDe(soc, req.params.id);
+  const b = req.body || {};
+  // UNA ENTREGA YA RECUPERADA NO SE TOCA. La factura que le hicimos al proveedor dice un importe
+  // contra esta mercadería: cambiarle la cantidad después deja el papel diciendo otra cosa.
+  if (e.recupero_id) {
+    throw bad('Esta entrega ya está recuperada con una factura. Desvinculala de la factura antes de corregirla.');
+  }
+  const mueve = b.mueve_stock === undefined ? e.mueve_stock : (b.mueve_stock ? 1 : 0);
+  const lineas = b.lineas === undefined ? null : leerLineas(b, soc);
+  db.transaction(() => {
+    const viejas = lineasDeEntrega(e.id);
+    if (lineas) {
+      devolverStockDeEntrega(viejas, req.user.id);
+      db.prepare('DELETE FROM pli_entrega_lineas WHERE entrega_id=?').run(e.id);
+      const ins = db.prepare(`INSERT INTO pli_entrega_lineas
+        (entrega_id, insumo_id, cantidad, costo_unitario, moneda, factura_compra, notas) VALUES (?,?,?,?,?,?,?)`);
+      for (const l of lineas) {
+        const li = ins.run(e.id, l.insumo_id, l.cantidad, l.costo_unitario, l.moneda, l.factura_compra, l.notas);
+        moverStockPorEntrega({ id: li.lastInsertRowid, entrega_id: e.id, insumo_id: l.insumo_id, stock_aplicado: 0 },
+          l.cantidad, mueve, req.user.id);
+      }
+    } else if (mueve !== e.mueve_stock) {
+      // Cambió sólo el tilde: se aplica o se devuelve todo, sin tocar los renglones.
+      for (const l of viejas) moverStockPorEntrega(l, l.cantidad, mueve, req.user.id);
+    }
+    db.prepare(`UPDATE pli_entregas SET proveedor_texto=?, fecha=?, comprobante=?, mueve_stock=?, notas=?,
+        actualizado_en=${AHORA}, actualizado_por_id=? WHERE id=?`)
+      .run(b.proveedor_texto === undefined ? e.proveedor_texto : (vTexto(b.proveedor_texto, 'El proveedor', { max: 120 }) || e.proveedor_texto),
+           b.fecha === undefined ? e.fecha : (vFecha(b.fecha, 'La fecha') || e.fecha),
+           b.comprobante === undefined ? e.comprobante : vTexto(b.comprobante, 'El comprobante', { max: 60 }),
+           mueve,
+           b.notas === undefined ? e.notas : vTexto(b.notas, 'Las notas', { max: 300 }),
+           req.user.id, e.id);
+  })();
+  logPli('entrega', e.id, 'edicion', { antes: e, mueve_stock: mueve }, req.user.id);
+  res.json({ ok: true });
+}));
+
+router.delete('/entregas/:id', wrap((req, res) => {
+  const soc = getSociedadId(req);
+  const e = entregaDe(soc, req.params.id);
+  if (e.recupero_id) {
+    throw bad('Esta entrega está recuperada con una factura. Desvinculala antes de borrarla.');
+  }
+  db.transaction(() => {
+    // BORRARLA DEVUELVE EL STOCK. Si no, en el depósito falta mercadería que salió por una entrega
+    // que ya no existe, y no hay de dónde deducir que faltaba.
+    devolverStockDeEntrega(lineasDeEntrega(e.id), req.user.id);
+    db.prepare(`UPDATE pli_entregas SET eliminado_en=${AHORA}, eliminado_por_id=? WHERE id=?`).run(req.user.id, e.id);
+  })();
+  logPli('entrega', e.id, 'baja', { proveedor: e.proveedor_texto, fecha: e.fecha }, req.user.id);
+  res.json({ ok: true });
+}));
+
+// ── LAS FACTURAS DE RECUPERO ──────────────────────────────────────────────
+
+// CUÁNTO CUBRE UNA FACTURA, QUE ES EL NÚMERO QUE HAY QUE MIRAR.
+//
+// Pablo pidió esto para saber si recuperó lo que entregó. Entonces el dato no es el importe de la
+// factura solo: es ese importe CONTRA lo que costaron las entregas que cubre. La diferencia es lo
+// que se gana o se pierde en la operación.
+//
+// Se suma AGRUPADO POR MONEDA, y sólo se resta cuando hay una sola y es la de la factura. Con dos
+// monedas, o facturando en pesos lo que se valuó en dólares, restar daría un número inventado —y
+// convertir con una cotización elegida acá sería peor: la pantalla mostraría una ganancia que
+// depende de un tipo de cambio que nadie eligió.
+function loQueCubre(recuperoId) {
+  const filas = db.prepare(`SELECT l.cantidad, l.costo_unitario, l.moneda
+      FROM pli_entrega_lineas l
+      JOIN pli_entregas e ON e.id = l.entrega_id
+     WHERE e.recupero_id=? AND e.eliminado_en IS NULL`).all(recuperoId);
+  const por = {};
+  let sinCosto = 0;
+  for (const l of filas) {
+    if (l.costo_unitario == null) { sinCosto++; continue; }
+    const m = l.moneda || 'ARS';
+    por[m] = Math.round(((por[m] || 0) + Number(l.costo_unitario) * Number(l.cantidad)) * 100) / 100;
+  }
+  return { por, sin_costo: sinCosto };
+}
+
+router.get('/recuperos', wrap((req, res) => {
+  const soc = getSociedadId(req);
+  const filas = db.prepare(`SELECT r.*,
+      (SELECT COUNT(*) FROM pli_entregas e WHERE e.recupero_id=r.id AND e.eliminado_en IS NULL) AS entregas,
+      (SELECT COUNT(*) FROM pli_adjuntos a WHERE a.entidad='recupero' AND a.entidad_id=r.id AND a.eliminado_en IS NULL) AS adjuntos
+    FROM pli_recuperos r WHERE r.sociedad_id=? AND r.eliminado_en IS NULL
+    ORDER BY r.fecha DESC, r.id DESC`).all(soc);
+  const data = filas.map((r) => {
+    const c = loQueCubre(r.id);
+    const monedas = Object.keys(c.por);
+    // Se resta sólo si se puede: una sola moneda, la misma de la factura, y ningún renglón sin
+    // costo. En cualquier otro caso se dice por qué no, que es más útil que un número que no es.
+    const comparable = monedas.length === 1 && monedas[0] === r.moneda && !c.sin_costo && r.importe != null;
+    return { ...r, cubre: c.por, cubre_sin_costo: c.sin_costo,
+      diferencia: comparable ? Math.round((Number(r.importe) - c.por[monedas[0]]) * 100) / 100 : null,
+      comparable };
+  });
+  res.json({ ok: true, data });
+}));
+
+router.post('/recuperos', wrap((req, res) => {
+  const soc = getSociedadId(req);
+  const b = req.body || {};
+  const prov = vTexto(b.proveedor_texto, 'El proveedor', { max: 120 });
+  if (!prov) throw bad('¿A qué proveedor se le facturó?');
+  const fecha = vFecha(b.fecha, 'La fecha');
+  if (!fecha) throw bad('La fecha es obligatoria');
+  const r = db.prepare(`INSERT INTO pli_recuperos
+    (sociedad_id, proveedor_texto, fecha, numero, importe, moneda, notas, creado_por_id, actualizado_por_id)
+    VALUES (?,?,?,?,?,?,?,?,?)`)
+    .run(soc, prov, fecha, vTexto(b.numero, 'El número', { max: 60 }),
+         b.importe === undefined || b.importe === null || b.importe === '' ? null : vNum(b.importe, 'El importe', { min: 0 }),
+         ['ARS', 'USD'].includes(b.moneda) ? b.moneda : 'ARS',
+         vTexto(b.notas, 'Las notas', { max: 300 }), req.user.id, req.user.id);
+  logPli('recupero', r.lastInsertRowid, 'alta', { proveedor: prov, fecha, numero: b.numero }, req.user.id);
+  res.json({ ok: true, id: r.lastInsertRowid });
+}));
+
+router.patch('/recuperos/:id', wrap((req, res) => {
+  const soc = getSociedadId(req);
+  const a = db.prepare('SELECT * FROM pli_recuperos WHERE id=? AND sociedad_id=? AND eliminado_en IS NULL')
+    .get(parseInt(req.params.id, 10), soc);
+  if (!a) throw notFound('Factura no encontrada');
+  const b = req.body || {};
+  db.prepare(`UPDATE pli_recuperos SET proveedor_texto=?, fecha=?, numero=?, importe=?, moneda=?, notas=?,
+      actualizado_en=${AHORA}, actualizado_por_id=? WHERE id=?`)
+    .run(b.proveedor_texto === undefined ? a.proveedor_texto : (vTexto(b.proveedor_texto, 'El proveedor', { max: 120 }) || a.proveedor_texto),
+         b.fecha === undefined ? a.fecha : (vFecha(b.fecha, 'La fecha') || a.fecha),
+         b.numero === undefined ? a.numero : vTexto(b.numero, 'El número', { max: 60 }),
+         b.importe === undefined ? a.importe
+           : (b.importe === null || b.importe === '' ? null : vNum(b.importe, 'El importe', { min: 0 })),
+         b.moneda === undefined ? a.moneda : (['ARS', 'USD'].includes(b.moneda) ? b.moneda : a.moneda),
+         b.notas === undefined ? a.notas : vTexto(b.notas, 'Las notas', { max: 300 }),
+         req.user.id, a.id);
+  logPli('recupero', a.id, 'edicion', { antes: a, despues: b }, req.user.id);
+  res.json({ ok: true });
+}));
+
+router.delete('/recuperos/:id', wrap((req, res) => {
+  const soc = getSociedadId(req);
+  const a = db.prepare('SELECT * FROM pli_recuperos WHERE id=? AND sociedad_id=? AND eliminado_en IS NULL')
+    .get(parseInt(req.params.id, 10), soc);
+  if (!a) throw notFound('Factura no encontrada');
+  db.transaction(() => {
+    // LAS ENTREGAS VUELVEN A QUEDAR PENDIENTES. Si el puntero quedara apuntando a una factura
+    // borrada, esas entregas se verían recuperadas por un papel que ya no existe.
+    db.prepare(`UPDATE pli_entregas SET recupero_id=NULL, actualizado_en=${AHORA}, actualizado_por_id=?
+      WHERE recupero_id=? AND eliminado_en IS NULL`).run(req.user.id, a.id);
+    db.prepare(`UPDATE pli_recuperos SET eliminado_en=${AHORA}, eliminado_por_id=? WHERE id=?`).run(req.user.id, a.id);
+  })();
+  logPli('recupero', a.id, 'baja', { numero: a.numero, proveedor: a.proveedor_texto }, req.user.id);
+  res.json({ ok: true });
+}));
+
+// Marcar una entrega contra una factura, o soltarla (recupero_id: null).
+router.post('/entregas/:id/recupero', wrap((req, res) => {
+  const soc = getSociedadId(req);
+  const e = entregaDe(soc, req.params.id);
+  const crudo = req.body?.recupero_id;
+  if (crudo === null || crudo === undefined || crudo === '') {
+    db.prepare(`UPDATE pli_entregas SET recupero_id=NULL, actualizado_en=${AHORA}, actualizado_por_id=? WHERE id=?`)
+      .run(req.user.id, e.id);
+    logPli('entrega', e.id, 'recupero_soltado', { era: e.recupero_id }, req.user.id);
+    return res.json({ ok: true });
+  }
+  const rid = vNum(crudo, 'La factura', { entero: true, min: 1 });
+  const f = db.prepare('SELECT * FROM pli_recuperos WHERE id=? AND sociedad_id=? AND eliminado_en IS NULL').get(rid, soc);
+  if (!f) throw notFound('Esa factura no existe');
+  // LA FACTURA Y LA ENTREGA TIENEN QUE SER DEL MISMO PROVEEDOR. Recuperar con una factura hecha a
+  // otro es el error que deja la cuenta corriente de los dos mal y no se nota hasta que se concilia.
+  //
+  // Se comparan como los compara TODO el módulo —TRIM y COLLATE NOCASE, igual que el armado de la
+  // orden de compra— y no con un normalizador propio. Si algún día hay que empatar los acentos,
+  // hay que hacerlo en los doce lugares, no en éste.
+  const mismo = db.prepare('SELECT 1 n WHERE TRIM(?) = TRIM(?) COLLATE NOCASE')
+    .get(f.proveedor_texto || '', e.proveedor_texto || '');
+  if (!mismo) {
+    throw bad(`Esa factura es de «${f.proveedor_texto}» y la entrega es de «${e.proveedor_texto}». `
+      + 'Una entrega se recupera con una factura hecha al mismo proveedor.');
+  }
+  db.prepare(`UPDATE pli_entregas SET recupero_id=?, actualizado_en=${AHORA}, actualizado_por_id=? WHERE id=?`)
+    .run(rid, req.user.id, e.id);
+  logPli('entrega', e.id, 'recuperado', { recupero_id: rid, numero: f.numero }, req.user.id);
+  res.json({ ok: true });
+}));
+
+
+// ── LOS PAPELES ───────────────────────────────────────────────────────────
+// Mismo mecanismo que los adjuntos del insumo: a R2, se bajan por proxy y la baja es lógica.
+
+// SIN PROTOTIPO: con un objeto literal, «constructor», «__proto__» y otras diez palabras heredadas
+// de Object devuelven algo truthy, pasan el guard y llegan a interpolarse como nombre de tabla. No
+// es una inyección —lo que se interpola sale del prototipo, no del pedido— pero convierte un 400
+// que explica en un 500 que no dice nada. Object.create(null) no tiene prototipo que heredar.
+const ENTIDADES = Object.assign(Object.create(null), { entrega: 'pli_entregas', recupero: 'pli_recuperos' });
+
+function dueñoDeAdjunto(soc, entidad, id) {
+  const tabla = ENTIDADES[entidad];
+  if (!tabla) throw bad('Entidad inválida');
+  const r = db.prepare(`SELECT id FROM ${tabla} WHERE id=? AND sociedad_id=? AND eliminado_en IS NULL`)
+    .get(parseInt(id, 10), soc);
+  if (!r) throw notFound(entidad === 'entrega' ? 'Entrega no encontrada' : 'Factura no encontrada');
+  return r;
+}
+
+router.get('/adjuntos/:entidad/:id', wrap((req, res) => {
+  const soc = getSociedadId(req);
+  dueñoDeAdjunto(soc, req.params.entidad, req.params.id);
+  const data = db.prepare(`SELECT id, nombre, mime, tamano, creado_en FROM pli_adjuntos
+    WHERE entidad=? AND entidad_id=? AND eliminado_en IS NULL ORDER BY creado_en DESC, id DESC`)
+    .all(req.params.entidad, parseInt(req.params.id, 10));
+  res.json({ ok: true, data, storage_ok: storageConfigurado() });
+}));
+
+router.post('/adjuntos/:entidad/:id', subida.single('archivo'), async (req, res) => {
+  try {
+    const soc = getSociedadId(req);
+    const entidad = req.params.entidad;
+    if (!ENTIDADES[entidad]) return res.status(400).json({ ok: false, error: 'Entidad inválida' });
+    const id = parseInt(req.params.id, 10);
+    const tabla = ENTIDADES[entidad];
+    const dueño = db.prepare(`SELECT id FROM ${tabla} WHERE id=? AND sociedad_id=? AND eliminado_en IS NULL`).get(id, soc);
+    if (!dueño) return res.status(404).json({ ok: false, error: 'No encontrado' });
+    if (!storageConfigurado()) {
+      return res.status(503).json({ ok: false, error: 'El almacenamiento de archivos no está configurado (faltan credenciales de R2)' });
+    }
+    if (!req.file) return res.status(400).json({ ok: false, error: 'Falta el archivo' });
+    const mime = req.file.mimetype || 'application/octet-stream';
+    if (!PAPEL_MIMES.has(mime)) {
+      return res.status(400).json({ ok: false, error: 'El papel tiene que ser un PDF, un JPG o un PNG.' });
+    }
+    if ((req.file.size || 0) > PAPEL_MAX) {
+      return res.status(400).json({ ok: false, error: 'El archivo supera los 10 MB.' });
+    }
+    const limpio = String(req.file.originalname || 'archivo').replace(/[^\w.\-]+/g, '_').slice(-80);
+    const key = `pli/${entidad}s/${id}/${randomUUID()}-${limpio}`;
+    await subirArchivo(req.file.buffer, key, mime);
+    const r = db.prepare(`INSERT INTO pli_adjuntos
+      (entidad, entidad_id, storage_key, nombre, mime, tamano, creado_por_id) VALUES (?,?,?,?,?,?,?)`)
+      .run(entidad, id, key, req.file.originalname || limpio, mime, req.file.size || null, req.user.id);
+    logPli(entidad, id, 'adjunto_alta', { adjunto_id: r.lastInsertRowid, nombre: req.file.originalname }, req.user.id);
+    res.json({ ok: true, id: r.lastInsertRowid });
+  } catch (e) {
+    console.error('[PLI] Error subiendo adjunto:', e.message);
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+router.get('/adjunto/:id', async (req, res) => {
+  try {
+    const soc = getSociedadId(req);
+    const a = db.prepare('SELECT * FROM pli_adjuntos WHERE id=? AND eliminado_en IS NULL')
+      .get(parseInt(req.params.id, 10));
+    if (!a) return res.status(404).json({ ok: false, error: 'Archivo no encontrado' });
+    // SE VERIFICA LA SOCIEDAD POR SU DUEÑO. Sin esto, el id del archivo en la URL alcanza para
+    // bajarse el remito de otra empresa.
+    try { dueñoDeAdjunto(soc, a.entidad, a.entidad_id); }
+    catch (_) { return res.status(404).json({ ok: false, error: 'Archivo no encontrado' }); }
+    if (!storageConfigurado()) return res.status(503).json({ ok: false, error: 'Almacenamiento no configurado' });
+    const stream = await obtenerArchivo(a.storage_key);
+    // EL TIPO SALE DE LA LISTA, NO DEL DATO GUARDADO. Lo que no esté en ella se baja como archivo
+    // en vez de abrirse, y `nosniff` evita que el navegador adivine por el contenido: entre las dos
+    // cosas, nada que haya entrado por otra puerta puede ejecutarse adentro del panel.
+    const tipo = PAPEL_MIMES.has(a.mime) ? a.mime : 'application/octet-stream';
+    res.set({
+      'Content-Type': tipo,
+      'X-Content-Type-Options': 'nosniff',
+      'Cache-Control': 'private, no-store',
+      'Content-Disposition': `${tipo === 'application/octet-stream' ? 'attachment' : 'inline'}; `
+        + `filename="${String(a.nombre).replace(/"/g, '')}"`,
+    });
+    stream.pipe(res);
+  } catch (e) {
+    console.error('[PLI] Error bajando adjunto:', e.message);
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+router.delete('/adjunto/:id', wrap((req, res) => {
+  const soc = getSociedadId(req);
+  const a = db.prepare('SELECT * FROM pli_adjuntos WHERE id=? AND eliminado_en IS NULL')
+    .get(parseInt(req.params.id, 10));
+  if (!a) throw notFound('Archivo no encontrado');
+  dueñoDeAdjunto(soc, a.entidad, a.entidad_id);
+  db.prepare(`UPDATE pli_adjuntos SET eliminado_en=${AHORA}, eliminado_por_id=? WHERE id=?`).run(req.user.id, a.id);
+  logPli(a.entidad, a.entidad_id, 'adjunto_baja', { adjunto_id: a.id, nombre: a.nombre }, req.user.id);
+  res.json({ ok: true });
+}));
 
 // ── RECIBIR UNA COMPRA MUEVE EL STOCK (V1082) ─────────────────────────────
 //
