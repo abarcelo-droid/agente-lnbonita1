@@ -74228,13 +74228,39 @@ function pliPagVista(v) {
 function pliPagCargar() {
   var cont = document.getElementById('pli-pag-cont');
   cont.innerHTML = '<div class="pli-vacio">Cargando…</div>';
-  Promise.all([pliApi('/entregas'), pliApi('/recuperos')]).then(function(rs) {
+  return Promise.all([pliApi('/entregas'), pliApi('/recuperos')]).then(function(rs) {
     if (!rs[0].ok) { pliErr(rs[0]); return; }
     if (!rs[1].ok) { pliErr(rs[1]); return; }
     PLI.entregas = rs[0].data || [];
     PLI.recuperos = rs[1].data || [];
+    pliPagProveedores();
     pliPagVista(PLI.pagVista || 'entregas');
   });
+}
+
+// EL NOMBRE DEL PROVEEDOR TIENE QUE COINCIDIR, o el recupero no se puede marcar: la entrega y la
+// factura se cruzan comparando ese texto. Escrito a mano dos veces, «Cartocor SA» y «CARTOCOR
+// S.A.» son dos proveedores distintos y el sistema avisa que no son el mismo — con razón, pero
+// el problema lo creó la pantalla al hacerlo tipear.
+//
+// Así que a la lista de los proveedores de los insumos se le suman los que YA se usaron acá. Es
+// el mismo criterio del lugar de entrega: proponer lo que ya existe en vez de pedir que se repita.
+function pliPagProveedores() {
+  var dl = document.getElementById('pli-dl-prov');
+  if (!dl) return;
+  var vistos = {}, salida = [];
+  var sumar = function(p) {
+    var t = String(p || '').trim();
+    if (!t) return;
+    var k = t.toLowerCase();
+    if (vistos[k]) return;
+    vistos[k] = 1;
+    salida.push(t);
+  };
+  (PLI.proveedores || []).forEach(sumar);
+  (PLI.entregas || []).forEach(function(e) { sumar(e.proveedor_texto); });
+  (PLI.recuperos || []).forEach(function(f) { sumar(f.proveedor_texto); });
+  dl.innerHTML = salida.map(function(p) { return '<option value="' + pliEsc(p) + '">'; }).join('');
 }
 
 // Lo que se le entregó, en una línea: «8 MILLAR ETIQUETA · 200 UN CAJA».
@@ -74411,6 +74437,15 @@ function pliEntLineaSacar(i) {
 // redibuja la tabla, y si el dato viviera en los campos se perdería en cada redibujo.
 function pliEntLineaCambio(i, campo, valor) {
   PLI.entLineas[i][campo] = valor;
+  // AL ELEGIR EL INSUMO SE PROPONE SU MONEDA. El selector arrancaba siempre en Pesos, así que un
+  // insumo que se compra en dólares se valuaba en pesos con el mismo número: el costo quedaba mil
+  // veces más chico y la diferencia contra la factura salía absurda. Se propone, no se impone —
+  // si ya se tocó la moneda a mano, no se pisa.
+  if (campo === 'insumo_id' && !PLI.entLineas[i].monedaTocada) {
+    var ins = (PLI.insumos || []).filter(function(x) { return x.id === Number(valor); })[0];
+    if (ins && ins.moneda) PLI.entLineas[i].moneda = ins.moneda;
+  }
+  if (campo === 'moneda') PLI.entLineas[i].monedaTocada = 1;
   pliEntTotal();
 }
 
@@ -74440,7 +74475,8 @@ function pliEntLineasPintar() {
             + pliN(ins.factor_compra) + '</div>' : '') : '—') + '</td>'
       + '<td><input type="number" step="any" min="0" class="pli-inp pli-inp-num" value="' + pliEsc(l.costo_unitario)
         + '" oninput="pliEntLineaCambio(' + i + ',\'costo_unitario\',this.value)"></td>'
-      + '<td><select class="pli-inp" onchange="pliEntLineaCambio(' + i + ',\'moneda\',this.value)">'
+      + '<td><select class="pli-inp" onchange="pliEntLineaCambio(' + i + ',\'moneda\',this.value)"'
+        + (ins && ins.moneda && !l.monedaTocada ? ' title="Es la moneda del precio de ' + pliEsc(ins.nombre) + '"' : '') + '>'
         + '<option value="ARS"' + (l.moneda === 'USD' ? '' : ' selected') + '>Pesos</option>'
         + '<option value="USD"' + (l.moneda === 'USD' ? ' selected' : '') + '>Dólares</option></select></td>'
       + '<td><input class="pli-inp" value="' + pliEsc(l.factura_compra || '') + '" placeholder="Nº"'
@@ -74518,9 +74554,15 @@ function pliEntregaGuardar() {
     if (!r.ok) return pliErr(r);
     toast('✓ Entrega registrada', 'ok');
     document.getElementById('pli-mb-entrega').classList.remove('on');
-    pliPagCargar();
     // El stock de los insumos cambió: la lista que tiene la pantalla quedó vieja.
     if (typeof pliInsCargar === 'function') pliInsCargar();
+    var recien = !id && r.id;
+    pliPagCargar().then(function() {
+      // ADJUNTAR LA FACTURA ES LO ÚLTIMO QUE PIDIÓ PABLO, y mientras la entrega no existe no hay
+      // dónde colgarla. Recién creada se vuelve a abrir sola, así el papel se adjunta en el mismo
+      // momento en vez de obligar a buscarla en la lista y entrar de nuevo.
+      if (recien) pliEntregaAbrir(r.id);
+    });
   });
 }
 
