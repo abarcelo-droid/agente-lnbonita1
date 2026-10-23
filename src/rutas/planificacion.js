@@ -2193,6 +2193,45 @@ function costoDeEntrega(lineas) {
   return { costo: Math.round(total * 100) / 100, moneda, sin_costo: 0, varias_monedas: false };
 }
 
+// LO QUE SE LE COBRÓ, con el mismo criterio que el costo: sólo se suma si se puede sumar.
+function cobradoDeEntrega(lineas) {
+  let total = 0, moneda = null, sinPrecio = 0, variasMonedas = false;
+  for (const l of lineas) {
+    if (l.precio_unitario == null) { sinPrecio++; continue; }
+    const m = l.moneda_precio || l.moneda || 'ARS';
+    if (moneda === null) moneda = m;
+    else if (m !== moneda) variasMonedas = true;
+    total += Number(l.precio_unitario) * Number(l.cantidad);
+  }
+  if (sinPrecio || variasMonedas || moneda === null) {
+    return { cobrado: null, moneda_cobrado: moneda, sin_precio: sinPrecio, varias_monedas_precio: variasMonedas };
+  }
+  return { cobrado: Math.round(total * 100) / 100, moneda_cobrado: moneda,
+    sin_precio: 0, varias_monedas_precio: false };
+}
+
+// EL RESULTADO DE LA ENTREGA: lo que le cobramos menos lo que nos costó.
+//
+// Se resta SÓLO si las dos puntas están completas y en la MISMA moneda. Convertir con una
+// cotización elegida acá daría una ganancia que depende de un tipo de cambio que nadie eligió — el
+// mismo criterio que la diferencia de la factura de recupero.
+function resultadoDeEntrega(lineas) {
+  const c = costoDeEntrega(lineas);
+  const v = cobradoDeEntrega(lineas);
+  const comparable = c.costo != null && v.cobrado != null && c.moneda === v.moneda_cobrado;
+  return { ...c, ...v,
+    resultado: comparable ? Math.round((v.cobrado - c.costo) * 100) / 100 : null,
+    comparable };
+}
+
+// Y EL RESULTADO DE UN RENGLÓN, para verlo de dónde sale. Misma regla: sin las dos puntas en la
+// misma moneda no hay resta posible.
+function resultadoDeLinea(l) {
+  if (l.costo_unitario == null || l.precio_unitario == null) return null;
+  if ((l.moneda_precio || l.moneda || 'ARS') !== (l.moneda || 'ARS')) return null;
+  return Math.round((Number(l.precio_unitario) - Number(l.costo_unitario)) * Number(l.cantidad) * 100) / 100;
+}
+
 function entregaDe(soc, id) {
   const e = db.prepare('SELECT * FROM pli_entregas WHERE id=? AND sociedad_id=? AND eliminado_en IS NULL')
     .get(parseInt(id, 10), soc);
@@ -2213,11 +2252,18 @@ function leerLineas(b, soc) {
     if (!ins) throw bad(`El insumo del renglón ${n + 1} no existe o es de otra sociedad`);
     const costo = l.costo_unitario === undefined || l.costo_unitario === null || l.costo_unitario === ''
       ? null : vNum(l.costo_unitario, `El costo del renglón ${n + 1}`, { min: 0 });
+    const precio = l.precio_unitario === undefined || l.precio_unitario === null || l.precio_unitario === ''
+      ? null : vNum(l.precio_unitario, `El precio del renglón ${n + 1}`, { min: 0 });
     return {
       insumo_id: insumoId,
       cantidad: vNum(l.cantidad, `La cantidad del renglón ${n + 1}`, { min: 1e-9 }),
       costo_unitario: costo,
       moneda: ['ARS', 'USD'].includes(l.moneda) ? l.moneda : 'ARS',
+      precio_unitario: precio,
+      // Sin moneda propia manda la del costo: es lo que pasa cuando se compra y se factura en lo
+      // mismo, que es el caso de siempre.
+      moneda_precio: ['ARS', 'USD'].includes(l.moneda_precio) ? l.moneda_precio
+        : (['ARS', 'USD'].includes(l.moneda) ? l.moneda : 'ARS'),
       factura_compra: vTexto(l.factura_compra, 'La factura de compra', { max: 60 }),
       notas: vTexto(l.notas, 'Las notas', { max: 200 }),
     };
@@ -2233,8 +2279,8 @@ router.get('/entregas', wrap((req, res) => {
     WHERE e.sociedad_id=? AND e.eliminado_en IS NULL
     ORDER BY e.fecha DESC, e.id DESC`).all(soc);
   const data = filas.map((e) => {
-    const lineas = lineasDeEntrega(e.id);
-    return { ...e, lineas, ...costoDeEntrega(lineas),
+    const lineas = lineasDeEntrega(e.id).map((l) => ({ ...l, resultado: resultadoDeLinea(l) }));
+    return { ...e, lineas, ...resultadoDeEntrega(lineas),
       adjuntos: db.prepare(`SELECT COUNT(*) n FROM pli_adjuntos
         WHERE entidad='entrega' AND entidad_id=? AND eliminado_en IS NULL`).get(e.id).n };
   });
@@ -2259,9 +2305,11 @@ router.post('/entregas', wrap((req, res) => {
            vTexto(b.notas, 'Las notas', { max: 300 }), req.user.id, req.user.id);
     id = r.lastInsertRowid;
     const ins = db.prepare(`INSERT INTO pli_entrega_lineas
-      (entrega_id, insumo_id, cantidad, costo_unitario, moneda, factura_compra, notas) VALUES (?,?,?,?,?,?,?)`);
+      (entrega_id, insumo_id, cantidad, costo_unitario, moneda, precio_unitario, moneda_precio,
+       factura_compra, notas) VALUES (?,?,?,?,?,?,?,?,?)`);
     for (const l of lineas) {
-      const li = ins.run(id, l.insumo_id, l.cantidad, l.costo_unitario, l.moneda, l.factura_compra, l.notas);
+      const li = ins.run(id, l.insumo_id, l.cantidad, l.costo_unitario, l.moneda,
+        l.precio_unitario, l.moneda_precio, l.factura_compra, l.notas);
       moverStockPorEntrega({ id: li.lastInsertRowid, entrega_id: id, insumo_id: l.insumo_id, stock_aplicado: 0 },
         l.cantidad, mueve, req.user.id);
     }
@@ -2290,9 +2338,11 @@ router.patch('/entregas/:id', wrap((req, res) => {
       devolverStockDeEntrega(viejas, req.user.id);
       db.prepare('DELETE FROM pli_entrega_lineas WHERE entrega_id=?').run(e.id);
       const ins = db.prepare(`INSERT INTO pli_entrega_lineas
-        (entrega_id, insumo_id, cantidad, costo_unitario, moneda, factura_compra, notas) VALUES (?,?,?,?,?,?,?)`);
+        (entrega_id, insumo_id, cantidad, costo_unitario, moneda, precio_unitario, moneda_precio,
+         factura_compra, notas) VALUES (?,?,?,?,?,?,?,?,?)`);
       for (const l of lineas) {
-        const li = ins.run(e.id, l.insumo_id, l.cantidad, l.costo_unitario, l.moneda, l.factura_compra, l.notas);
+        const li = ins.run(e.id, l.insumo_id, l.cantidad, l.costo_unitario, l.moneda,
+          l.precio_unitario, l.moneda_precio, l.factura_compra, l.notas);
         moverStockPorEntrega({ id: li.lastInsertRowid, entrega_id: e.id, insumo_id: l.insumo_id, stock_aplicado: 0 },
           l.cantidad, mueve, req.user.id);
       }
@@ -2342,18 +2392,27 @@ router.delete('/entregas/:id', wrap((req, res) => {
 // convertir con una cotización elegida acá sería peor: la pantalla mostraría una ganancia que
 // depende de un tipo de cambio que nadie eligió.
 function loQueCubre(recuperoId) {
-  const filas = db.prepare(`SELECT l.cantidad, l.costo_unitario, l.moneda
+  const filas = db.prepare(`SELECT l.cantidad, l.costo_unitario, l.moneda, l.precio_unitario, l.moneda_precio
       FROM pli_entrega_lineas l
       JOIN pli_entregas e ON e.id = l.entrega_id
      WHERE e.recupero_id=? AND e.eliminado_en IS NULL`).all(recuperoId);
-  const por = {};
-  let sinCosto = 0;
+  const por = {}, cobrado = {};
+  let sinCosto = 0, sinPrecio = 0;
   for (const l of filas) {
-    if (l.costo_unitario == null) { sinCosto++; continue; }
-    const m = l.moneda || 'ARS';
-    por[m] = Math.round(((por[m] || 0) + Number(l.costo_unitario) * Number(l.cantidad)) * 100) / 100;
+    if (l.costo_unitario == null) sinCosto++;
+    else {
+      const m = l.moneda || 'ARS';
+      por[m] = Math.round(((por[m] || 0) + Number(l.costo_unitario) * Number(l.cantidad)) * 100) / 100;
+    }
+    // LO FACTURADO SEGÚN LOS RENGLONES. El importe de la factura y la suma de los precios tienen
+    // que dar lo mismo: si no dan, uno de los dos está mal tipeado, y eso hay que poder verlo.
+    if (l.precio_unitario == null) sinPrecio++;
+    else {
+      const mp = l.moneda_precio || l.moneda || 'ARS';
+      cobrado[mp] = Math.round(((cobrado[mp] || 0) + Number(l.precio_unitario) * Number(l.cantidad)) * 100) / 100;
+    }
   }
-  return { por, sin_costo: sinCosto };
+  return { por, sin_costo: sinCosto, cobrado, sin_precio: sinPrecio };
 }
 
 router.get('/recuperos', wrap((req, res) => {
@@ -2369,7 +2428,14 @@ router.get('/recuperos', wrap((req, res) => {
     // Se resta sólo si se puede: una sola moneda, la misma de la factura, y ningún renglón sin
     // costo. En cualquier otro caso se dice por qué no, que es más útil que un número que no es.
     const comparable = monedas.length === 1 && monedas[0] === r.moneda && !c.sin_costo && r.importe != null;
+    // Y EL CONTROL DEL PAPEL: lo que dice la factura contra lo que suman los precios de sus
+    // renglones. Tienen que ser el mismo número; si no, hay un error de tipeo en una de las dos
+    // puntas y es mejor verlo acá que cuando el proveedor lo discuta.
+    const mc = Object.keys(c.cobrado);
+    const cuadra = mc.length === 1 && mc[0] === r.moneda && !c.sin_precio && r.importe != null
+      ? Math.round((Number(r.importe) - c.cobrado[mc[0]]) * 100) / 100 : null;
     return { ...r, cubre: c.por, cubre_sin_costo: c.sin_costo,
+      cobrado: c.cobrado, cobrado_sin_precio: c.sin_precio, descuadre: cuadra,
       diferencia: comparable ? Math.round((Number(r.importe) - c.por[monedas[0]]) * 100) / 100 : null,
       comparable };
   });
