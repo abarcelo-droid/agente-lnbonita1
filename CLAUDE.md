@@ -535,9 +535,20 @@ que ve el navegador: si ahí dice V746, el problema no es la caché de nadie.
 
 ### ANTES DE CULPAR A RAILWAY, MIRÁ SI GITHUB LE AVISÓ
 
-21/10/2026: dos merges seguidos no desplegaron. Producción quedó dos versiones
-atrás y la pantalla nueva no aparecía. No era Railway: **GitHub tenía un
-incidente abierto con los webhooks degradados** y nunca le entregó el aviso.
+21/10/2026: tres merges seguidos no desplegaron y producción quedó tres
+versiones atrás. GitHub tenía ese día un incidente con los webhooks degradados,
+así que di por hecho que era eso. **Me equivoqué, y la cronología lo probaba:**
+
+* el primer merge fue a las 14:10 UTC y el incidente empezó a las 14:52 —
+  cuarenta minutos DESPUÉS;
+* el tercero se mergeó con los webhooks ya operativos y tampoco desplegó.
+
+Era Railway, que había dejado de reaccionar entre el 20 a las 15:27 y el 21 a
+las 14:10. El incidente de GitHub fue una coincidencia que se superpuso, y
+mirarlo primero costó medio día apuntando al lado equivocado.
+
+**UN INCIDENTE QUE COINCIDE NO ES LA CAUSA.** Antes de aceptarlo, comparar la
+hora: si el primer síntoma es anterior al incidente, el incidente no lo explica.
 
 Son cuatro situaciones distintas y se separan con dos comandos:
 
