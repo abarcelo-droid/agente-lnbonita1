@@ -24268,16 +24268,32 @@ SG_MANUAL.pli = { titulo: 'Planificación de Insumos', html:
       + 'valuó. Va por renglón porque un mismo remito puede llevar tres insumos de tres facturas.',
       'No es el comprobante de la entrega: ése va arriba, en la cabecera.', 'V1099')
 
-  + sgManCampo('La diferencia',
-      'En la solapa <b>Facturas de recupero</b>: lo que le cobraste menos lo que te costó todo lo '
-      + 'que esa factura cubre. En verde ganaste, en rojo perdiste.',
-      'No se puede mirar fila por fila en la lista de entregas, porque una factura puede cubrir '
-      + 'varias: ahí el importe sería el de la factura entera repetido en cada una.',
-      'V1099')
+  + sgManCampo('Le cobramos (por renglón)',
+      'El precio al que le facturaste ESE insumo al proveedor, con su moneda. Es la otra punta de '
+      + '«Nos costó», que está en el renglón de al lado.',
+      'De la resta de las dos sale el RESULTADO de la entrega. Se carga en la misma ventana, '
+      + 'debajo del costo, para no tener que ir a buscarlo a otra pantalla.',
+      'V1103')
 
-  + '<p class="nota">Cuando la entrega está valuada en una moneda y la factura en otra, la '
-  + 'diferencia <b>no se calcula</b> y se dice por qué. Restar pesos contra dólares con una '
-  + 'cotización que nadie eligió daría una ganancia inventada.</p>'
+  + sgManCampo('Resultado',
+      'Lo que le cobraste menos lo que te costó: por renglón en la ventana, y sumado para toda la '
+      + 'entrega en la lista. En verde ganaste, en rojo perdiste.',
+      'Es el número que dice si pagarle con mercadería convino. No se calcula si falta una de las '
+      + 'dos puntas, o si el costo y el precio están en monedas distintas: se dice por qué.',
+      'V1103')
+
+  + sgManCampo('La diferencia de la factura',
+      'En la solapa <b>Facturas de recupero</b>: lo que le cobraste menos lo que te costó todo lo '
+      + 'que esa factura cubre. Una factura puede cubrir varias entregas.',
+      'Abajo del importe avisa cuando la factura <b>no coincide con los renglones</b> que cubre: '
+      + 'eso es un error de tipeo en una de las dos puntas, y conviene verlo ahí y no cuando el '
+      + 'proveedor lo discuta.',
+      'V1103')
+
+  + '<p class="nota">Cuando las dos puntas están en monedas distintas —el costo en dólares y el '
+  + 'precio en pesos, o la factura en una y los renglones en otra— la resta <b>no se hace</b> y se '
+  + 'dice por qué. Restar pesos contra dólares con una cotización que nadie eligió daría una '
+  + 'ganancia inventada.</p>'
 
   + '<h3>Lo que no se puede deshacer solo</h3>'
 
@@ -37231,10 +37247,11 @@ function sgRepExport(){
 <!-- ══ LA ENTREGA AL PROVEEDOR ══════════════════════════════════════════════════
      Un remito: un comprobante con varios insumos adentro. -->
 <div class="ab-modal-overlay" id="pli-mb-entrega">
-<div class="ab-modal" style="width:860px;max-height:92vh;overflow-y:auto">
+<div class="ab-modal" style="width:min(1040px,96vw);max-height:92vh;overflow-y:auto">
   <div class="mhd">
     <div><div class="mht">🤝 Entrega al proveedor</div>
-      <div class="pli-cel-chica">Mercadería que sale como pago. Lo que acá se carga es lo que a NOSOTROS nos costó.</div></div>
+      <div class="pli-cel-chica">Mercadería que sale como pago. De cada insumo va lo que a NOSOTROS nos costó
+        y lo que le COBRAMOS al proveedor: la diferencia es el resultado de la entrega.</div></div>
     <button class="mcl" onclick="document.getElementById('pli-mb-entrega').classList.remove('on')">×</button>
   </div>
   <input type="hidden" id="pli-ent-id">
@@ -74291,11 +74308,13 @@ function pliPagRender() {
   // SIN BARRA DE COSTADO: los anchos se reparten y lo único de largo variable —lo que se
   // entregó— parte de renglón. Lo que se iría de pantalla es justamente la plata.
   var h = '<div class="ab-table-wrap"><table class="pa-tbl" style="font-size:12px;table-layout:fixed">'
-    + '<colgroup><col style="width:9%"><col style="width:16%"><col style="width:13%"><col>'
-      + '<col style="width:14%"><col style="width:15%"><col style="width:80px"></colgroup>'
+    + '<colgroup><col style="width:8%"><col style="width:14%"><col style="width:11%"><col>'
+      + '<col style="width:12%"><col style="width:12%"><col style="width:12%">'
+      + '<col style="width:12%"><col style="width:80px"></colgroup>'
     + '<thead><tr>'
     + '<th>Fecha</th><th>Proveedor</th><th>Comprobante</th><th>Qué se entregó</th>'
-    + '<th style="text-align:right">Nos costó</th><th>Recupero</th><th></th>'
+    + '<th style="text-align:right">Nos costó</th><th style="text-align:right">Le cobramos</th>'
+    + '<th style="text-align:right">Resultado</th><th>Recupero</th><th></th>'
     + '</tr></thead><tbody>';
   filas.forEach(function(e) {
     // LO QUE FALTA RECUPERAR ES LO QUE HAY QUE MIRAR, así que se ve de lejos.
@@ -74326,6 +74345,15 @@ function pliPagRender() {
       + '<td class="pli-num">' + (e.costo == null
           ? '<span class="pli-cel-chica">' + (e.varias_monedas ? 'dos monedas' : 'sin costo') + '</span>'
           : pliPlata(e.costo, e.moneda)) + '</td>'
+      + '<td class="pli-num">' + (e.cobrado == null
+          ? '<span class="pli-cel-chica">' + (e.varias_monedas_precio ? 'dos monedas' : 'sin precio') + '</span>'
+          : pliPlata(e.cobrado, e.moneda_cobrado)) + '</td>'
+      // EL RESULTADO: lo que le cobramos menos lo que nos costó. Es lo que Pablo vino a registrar.
+      + '<td class="pli-num">' + (e.comparable
+          ? '<b style="color:' + (e.resultado < 0 ? '#b91c1c' : '#166534') + '">'
+            + (e.resultado > 0 ? '+' : '') + pliPlata(e.resultado, e.moneda) + '</b>'
+          : '<span class="pli-cel-chica">'
+            + (e.costo == null || e.cobrado == null ? 'falta una punta' : 'monedas distintas') + '</span>') + '</td>'
       + '<td>' + rec + '</td>'
       + '<td style="text-align:right;white-space:nowrap">'
         + (e.recupero_id
@@ -74343,10 +74371,11 @@ function pliPagRender() {
       + '</td></tr>';
   });
   cont.innerHTML = h + '</tbody></table></div>'
-    + '<div class="pli-cel-chica" style="margin-top:8px">«Nos costó» es lo que la mercadería nos costó '
-    + 'a nosotros. Para ver si lo recuperaste —y por cuánto— andá a <b>Facturas de recupero</b>: ahí '
-    + 'cada factura se compara contra todo lo que cubre. Una factura puede cubrir varias entregas, '
-    + 'así que ese número no se puede mirar fila por fila.</div>';
+    + '<div class="pli-cel-chica" style="margin-top:8px"><b>Resultado</b> es lo que le cobraste menos '
+    + 'lo que te costó, de esa entrega: en verde ganaste, en rojo perdiste. Cuando falta una de las '
+    + 'dos puntas, o están en monedas distintas, se dice en vez de poner un número que no significa '
+    + 'nada. En <b>Facturas de recupero</b> está el control del papel: si el importe de la factura '
+    + 'coincide con lo que suman los precios de los renglones que cubre.</div>';
 }
 
 function pliPagFacturas(cont) {
@@ -74360,7 +74389,7 @@ function pliPagFacturas(cont) {
     + '<colgroup><col style="width:10%"><col><col style="width:14%"><col style="width:15%">'
       + '<col style="width:18%"><col style="width:15%"><col style="width:76px"></colgroup>'
     + '<thead><tr>'
-    + '<th>Fecha</th><th>Proveedor</th><th>Nº</th><th style="text-align:right">Le cobramos</th>'
+    + '<th>Fecha</th><th>Proveedor</th><th>Nº</th><th style="text-align:right">Dice la factura</th>'
     + '<th style="text-align:right">Nos costó lo que cubre</th>'
     + '<th style="text-align:right">Diferencia</th><th></th></tr></thead><tbody>';
   filas.forEach(function(f) {
@@ -74378,9 +74407,17 @@ function pliPagFacturas(cont) {
       : '<span class="pli-cel-chica">' + (!f.entregas ? '—'
         : (f.importe == null ? 'la factura no tiene importe'
           : (f.cubre_sin_costo ? 'falta el costo de un renglón' : 'monedas distintas'))) + '</span>';
+    // EL CONTROL DEL PAPEL. El importe que dice la factura y lo que suman los precios de sus
+    // renglones tienen que ser el mismo número: si no lo son, hay un error de tipeo en una de las
+    // dos puntas, y es mejor verlo acá que cuando el proveedor lo discuta.
+    var des = f.descuadre;
+    var aviso = (des !== null && des !== undefined && Math.abs(des) > 0.009)
+      ? '<div class="pli-cel-chica" style="color:#b91c1c" title="Los renglones de las entregas que '
+        + 'cubre suman otra cosa">no coincide con los renglones por ' + pliPlata(Math.abs(des), f.moneda) + '</div>'
+      : '';
     h += '<tr><td>' + pliEsc(f.fecha) + '</td><td><b>' + pliEsc(f.proveedor_texto) + '</b></td>'
       + '<td class="pli-cel-chica">' + pliEsc(f.numero || 's/n') + (f.adjuntos ? ' 📎' + f.adjuntos : '') + '</td>'
-      + '<td class="pli-num">' + pliPlata(f.importe, f.moneda) + '</td>'
+      + '<td class="pli-num">' + pliPlata(f.importe, f.moneda) + aviso + '</td>'
       + '<td class="pli-num">' + txtCubre
         + '<div class="pli-cel-chica">' + (f.entregas || 0) + ' entrega(s)</div></td>'
       + '<td class="pli-num">' + dif + '</td>'
@@ -74409,7 +74446,8 @@ function pliEntregaAbrir(id) {
   document.getElementById('pli-ent-notas').value = e ? (e.notas || '') : '';
   PLI.entLineas = e ? (e.lineas || []).map(function(l) {
     return { insumo_id: l.insumo_id, cantidad: l.cantidad, costo_unitario: l.costo_unitario,
-      moneda: l.moneda, factura_compra: l.factura_compra || '' };
+      moneda: l.moneda, precio_unitario: l.precio_unitario, moneda_precio: l.moneda_precio || l.moneda,
+      factura_compra: l.factura_compra || '' };
   }) : [pliEntLineaVacia()];
   pliEntLineasPintar();
   pliAdjPintar('entrega', e ? e.id : null, 'pli-ent-adjuntos');
@@ -74419,7 +74457,8 @@ function pliEntregaAbrir(id) {
 // Un renglón en blanco, en un solo lugar: tres copias del mismo objeto son tres oportunidades de
 // que una se olvide de un campo nuevo.
 function pliEntLineaVacia() {
-  return { insumo_id: '', cantidad: '', costo_unitario: '', moneda: 'ARS', factura_compra: '' };
+  return { insumo_id: '', cantidad: '', costo_unitario: '', moneda: 'ARS',
+    precio_unitario: '', moneda_precio: 'ARS', factura_compra: '' };
 }
 
 function pliEntLineaAgregar() {
@@ -74445,16 +74484,37 @@ function pliEntLineaCambio(i, campo, valor) {
     var ins = (PLI.insumos || []).filter(function(x) { return x.id === Number(valor); })[0];
     if (ins && ins.moneda) PLI.entLineas[i].moneda = ins.moneda;
   }
-  if (campo === 'moneda') PLI.entLineas[i].monedaTocada = 1;
+  if (campo === 'moneda') {
+    PLI.entLineas[i].monedaTocada = 1;
+    // La moneda del precio acompaña a la del costo mientras nadie la haya tocado aparte: comprar y
+    // facturar en lo mismo es el caso de siempre, y tener que elegirla dos veces es la manera de
+    // que una quede mal.
+    if (!PLI.entLineas[i].monedaPrecioTocada) PLI.entLineas[i].moneda_precio = valor;
+  }
+  if (campo === 'moneda_precio') PLI.entLineas[i].monedaPrecioTocada = 1;
+  if (campo === 'insumo_id' && !PLI.entLineas[i].monedaPrecioTocada) {
+    PLI.entLineas[i].moneda_precio = PLI.entLineas[i].moneda;
+  }
   pliEntTotal();
+}
+
+// EL RESULTADO DE UN RENGLÓN. Sin las dos puntas, o con monedas distintas, no hay resta posible:
+// se dice en vez de poner un número que no significa nada.
+function pliLineaResultado(l) {
+  var c = l.costo_unitario, v = l.precio_unitario;
+  if (c === '' || c === null || c === undefined || v === '' || v === null || v === undefined) return null;
+  if ((l.moneda_precio || l.moneda || 'ARS') !== (l.moneda || 'ARS')) return null;
+  return Math.round((Number(v) - Number(c)) * Number(l.cantidad || 0) * 100) / 100;
 }
 
 function pliEntLineasPintar() {
   var opts = (PLI.insumos || []).filter(function(i) { return i.modo_provision === 'compra' || !i.modo_provision; });
   var h = '<div class="ab-table-wrap"><table class="pa-tbl" style="font-size:12px;margin-top:6px"><thead><tr>'
-    + '<th>Insumo</th><th style="text-align:right;width:100px">Cantidad</th><th style="width:62px">Unidad</th>'
-    + '<th style="text-align:right;width:110px">Costo unitario</th><th style="width:82px">Moneda</th>'
-    + '<th style="width:120px" title="El comprobante con el que compraste ese insumo: es el papel '
+    + '<th>Insumo</th><th style="text-align:right;width:92px">Cantidad</th><th style="width:56px">Unidad</th>'
+    + '<th style="text-align:right;width:150px" title="Lo que a NOSOTROS nos costó">Nos costó</th>'
+    + '<th style="text-align:right;width:150px" title="Lo que le COBRAMOS al proveedor por ese insumo">Le cobramos</th>'
+    + '<th style="text-align:right;width:110px">Resultado</th>'
+    + '<th style="width:104px" title="El comprobante con el que compraste ese insumo: es el papel '
       + 'que respalda en cuánto lo valuaste">Factura de compra</th>'
     + '<th style="width:34px"></th></tr></thead><tbody>';
   PLI.entLineas.forEach(function(l, i) {
@@ -74473,12 +74533,34 @@ function pliEntLineasPintar() {
       + '<td class="pli-cel-chica">' + (ins ? pliEsc(ins.unidad_compra)
           + (Number(ins.factor_compra) !== 1 ? '<div title="Al stock entra por ' + pliEsc(ins.unidad_uso) + '">×'
             + pliN(ins.factor_compra) + '</div>' : '') : '—') + '</td>'
-      + '<td><input type="number" step="any" min="0" class="pli-inp pli-inp-num" value="' + pliEsc(l.costo_unitario)
-        + '" oninput="pliEntLineaCambio(' + i + ',\'costo_unitario\',this.value)"></td>'
-      + '<td><select class="pli-inp" onchange="pliEntLineaCambio(' + i + ',\'moneda\',this.value)"'
+      // EL NÚMERO Y SU MONEDA, JUNTOS. Separados en dos columnas, con dos números y dos monedas
+      // por renglón, la tabla se vuelve ilegible y se termina leyendo el precio con la moneda del
+      // costo — que es exactamente el error que esto tiene que evitar.
+      + '<td style="white-space:nowrap"><input type="number" step="any" min="0" class="pli-inp pli-inp-num"'
+        + ' style="width:84px;display:inline-block" value="' + pliEsc(l.costo_unitario)
+        + '" oninput="pliEntLineaCambio(' + i + ',\'costo_unitario\',this.value)">'
+        + '<select class="pli-inp" style="width:58px;display:inline-block;margin-left:3px"'
+        + ' onchange="pliEntLineaCambio(' + i + ',\'moneda\',this.value)"'
         + (ins && ins.moneda && !l.monedaTocada ? ' title="Es la moneda del precio de ' + pliEsc(ins.nombre) + '"' : '') + '>'
-        + '<option value="ARS"' + (l.moneda === 'USD' ? '' : ' selected') + '>Pesos</option>'
-        + '<option value="USD"' + (l.moneda === 'USD' ? ' selected' : '') + '>Dólares</option></select></td>'
+        + '<option value="ARS"' + (l.moneda === 'USD' ? '' : ' selected') + '>$</option>'
+        + '<option value="USD"' + (l.moneda === 'USD' ? ' selected' : '') + '>US$</option></select></td>'
+      + '<td style="white-space:nowrap"><input type="number" step="any" min="0" class="pli-inp pli-inp-num"'
+        + ' style="width:84px;display:inline-block" value="' + pliEsc(l.precio_unitario)
+        + '" oninput="pliEntLineaCambio(' + i + ',\'precio_unitario\',this.value)">'
+        + '<select class="pli-inp" style="width:58px;display:inline-block;margin-left:3px"'
+        + ' onchange="pliEntLineaCambio(' + i + ',\'moneda_precio\',this.value)">'
+        + '<option value="ARS"' + ((l.moneda_precio || l.moneda) === 'USD' ? '' : ' selected') + '>$</option>'
+        + '<option value="USD"' + ((l.moneda_precio || l.moneda) === 'USD' ? ' selected' : '') + '>US$</option></select></td>'
+      + '<td class="pli-num">' + (function() {
+          var r = pliLineaResultado(l);
+          if (r === null) {
+            // Dos monedas distintas no se restan; y si falta una punta, todavía no hay resultado.
+            return '<span class="pli-cel-chica">'
+              + ((l.moneda_precio || l.moneda) !== l.moneda ? 'otra moneda' : '—') + '</span>';
+          }
+          return '<b style="color:' + (r < 0 ? '#b91c1c' : '#166534') + '">'
+            + (r > 0 ? '+' : '') + pliPlata(r, l.moneda) + '</b>';
+        })() + '</td>'
       + '<td><input class="pli-inp" value="' + pliEsc(l.factura_compra || '') + '" placeholder="Nº"'
         + ' oninput="pliEntLineaCambio(' + i + ',\'factura_compra\',this.value)"></td>'
       + '<td><button class="btn bd bs" onclick="pliEntLineaSacar(' + i + ')" style="padding:2px 6px;font-size:11px">🗑</button></td>'
@@ -74500,7 +74582,16 @@ function pliEntLineasValidas() {
 // sería mentira — el mismo criterio que el total de la orden de compra.
 function pliEntTotal() {
   var t = 0, moneda = null, falta = 0, varias = false;
+  var tv = 0, monedaV = null, faltaV = 0, variasV = false;
   pliEntLineasValidas().forEach(function(l) {
+    var p = l.precio_unitario;
+    if (p === '' || p === null || p === undefined) faltaV++;
+    else {
+      var mp = l.moneda_precio || l.moneda || 'ARS';
+      if (monedaV === null) monedaV = mp;
+      else if (mp !== monedaV) variasV = true;
+      tv += Number(p) * Number(l.cantidad || 0);
+    }
     if (l.costo_unitario === '' || l.costo_unitario === null || l.costo_unitario === undefined) { falta++; return; }
     if (moneda === null) moneda = l.moneda || 'ARS';
     else if ((l.moneda || 'ARS') !== moneda) varias = true;
@@ -74520,7 +74611,27 @@ function pliEntTotal() {
     ? '<span style="color:#92400e">No se totaliza: '
       + (varias ? 'hay renglones en pesos y en dólares' : 'falta el costo de ' + (falta === 1 ? 'un renglón' : falta + ' renglones'))
       + '</span>'
-    : 'Nos costó <b>' + pliPlata(Math.round(t * 100) / 100, moneda) + '</b>');
+    : 'Nos costó <b>' + pliPlata(Math.round(t * 100) / 100, moneda) + '</b>')
+    // LO QUE SE LE COBRÓ Y EL RESULTADO, con la misma regla: sólo se resta si las dos puntas están
+    // completas y en la misma moneda.
+    + (function() {
+        var cobrado = (faltaV || variasV || monedaV === null) ? null : Math.round(tv * 100) / 100;
+        var costo = (falta || varias || moneda === null) ? null : Math.round(t * 100) / 100;
+        if (cobrado === null) {
+          return '<div>' + (variasV ? 'Le cobramos: hay renglones en pesos y en dólares'
+            : (faltaV ? 'Le cobramos: falta el precio de ' + (faltaV === 1 ? 'un renglón' : faltaV + ' renglones')
+              : '')) + '</div>';
+        }
+        var h = '<div>Le cobramos <b>' + pliPlata(cobrado, monedaV) + '</b></div>';
+        if (costo === null || moneda !== monedaV) {
+          return h + '<div class="pli-cel-chica">El resultado se calcula cuando las dos puntas están '
+            + 'completas y en la misma moneda.</div>';
+        }
+        var r = Math.round((cobrado - costo) * 100) / 100;
+        return h + '<div style="font-size:14px;margin-top:3px">Resultado de la entrega: '
+          + '<b style="color:' + (r < 0 ? '#b91c1c' : '#166534') + '">'
+          + (r > 0 ? '+' : '') + pliPlata(r, moneda) + '</b></div>';
+      })();
 }
 
 function pliEntregaGuardar() {
@@ -74536,6 +74647,8 @@ function pliEntregaGuardar() {
     .map(function(l) {
       return { insumo_id: Number(l.insumo_id), cantidad: l.cantidad,
         costo_unitario: l.costo_unitario === '' ? null : l.costo_unitario, moneda: l.moneda || 'ARS',
+        precio_unitario: l.precio_unitario === '' ? null : l.precio_unitario,
+        moneda_precio: l.moneda_precio || l.moneda || 'ARS',
         factura_compra: l.factura_compra || '' };
     });
   if (!lineas.length) return toast('Poné al menos un insumo con cantidad', 'er');

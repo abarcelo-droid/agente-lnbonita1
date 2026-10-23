@@ -595,6 +595,16 @@ try {
   addCol('pli_insumos', 'stock_actualizado_en', 'TEXT');
   // Por si la tabla se creó antes de que existiera la columna (una base de prueba del día anterior).
   addCol('pli_entrega_lineas', 'factura_compra', 'TEXT');
+  // A CUÁNTO SE LO COBRAMOS AL PROVEEDOR, por renglón. Pablo, 23/10/2026: «necesito que me pongas
+  // cuánto le cobramos al proveedor por ese insumo, línea por línea, así podemos registrar un
+  // resultado de la entrega». La diferencia contra el costo ES el resultado, y vive en el renglón
+  // porque es donde se puede ver de qué insumo salió.
+  //
+  // Con su PROPIA moneda: valuar en dólares lo que se compró en dólares y facturarlo en pesos es
+  // el caso normal con un proveedor local, y meterlo en una sola moneda obligaría a inventar una
+  // conversión. `moneda` (la de al lado) es la del COSTO; ésta es la del precio.
+  addCol('pli_entrega_lineas', 'precio_unitario', 'REAL');
+  addCol('pli_entrega_lineas', 'moneda_precio',   'TEXT');
 } catch (e) {
   console.error('[PLI] Error en migraciones:', e.message);
 }

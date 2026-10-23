@@ -275,6 +275,246 @@ test('los centavos no se pierden en el total', () => {
   assert.equal(costoDe([L(3, 1811.3, 'ARS')]).costo, 5433.9);
 });
 
+// ── EL RESULTADO DE LA ENTREGA ─────────────────────────────────────────────
+//
+// Pablo, 23/10/2026: «necesito que me pongas cuánto le cobramos al proveedor por ese insumo, línea
+// por línea, así podemos registrar un resultado de la entrega».
+
+const resultadoDe = new Function([
+  fuente(RUTA, 'function costoDeEntrega(lineas)'),
+  fuente(RUTA, 'function cobradoDeEntrega(lineas)'),
+  fuente(RUTA, 'function resultadoDeEntrega(lineas)'),
+  'return resultadoDeEntrega;',
+].join('\n'))();
+const resLinea = new Function([fuente(RUTA, 'function resultadoDeLinea(l)'), 'return resultadoDeLinea;'].join('\n'))();
+const LC = (cantidad, costo, precio, moneda, moneda_precio) =>
+  ({ cantidad, costo_unitario: costo, precio_unitario: precio, moneda, moneda_precio });
+
+test('el resultado es lo que le cobramos menos lo que nos costó', () => {
+  const r = resultadoDe([LC(100, 1000, 1200, 'ARS'), LC(10, 500, 600, 'ARS')]);
+  assert.equal(r.costo, 105000);
+  assert.equal(r.cobrado, 126000);
+  assert.equal(r.resultado, 21000);
+  assert.equal(r.comparable, true);
+  // Y en rojo cuando se cobró menos de lo que costó, que es el caso que hay que poder ver.
+  assert.equal(resultadoDe([LC(100, 1000, 900, 'ARS')]).resultado, -10000);
+  // LOS CENTAVOS NO SE PIERDEN, ni en lo cobrado ni en el resultado: es plata que se discute con
+  // el proveedor, y medio peso de diferencia contra su factura es media hora de buscar dónde está.
+  const c = resultadoDe([LC(3, 1000, 2000.15, 'ARS')]);
+  assert.equal(c.cobrado, 6000.45);
+  assert.equal(c.resultado, 3000.45);
+});
+
+test('sin una de las dos puntas no hay resultado, y se dice cuál falta', () => {
+  const sinPrecio = resultadoDe([LC(100, 1000, null, 'ARS')]);
+  assert.equal(sinPrecio.resultado, null);
+  assert.equal(sinPrecio.sin_precio, 1);
+  assert.equal(sinPrecio.costo, 100000, 'el costo se sigue pudiendo mirar');
+  const sinCosto = resultadoDe([LC(100, null, 1200, 'ARS')]);
+  assert.equal(sinCosto.resultado, null);
+  assert.equal(sinCosto.sin_costo, 1);
+  assert.equal(sinCosto.cobrado, 120000);
+});
+
+test('con el costo en dólares y el precio en pesos NO se resta', () => {
+  // Es el caso normal: se compra en dólares y se le factura en pesos al proveedor local. Restar
+  // esos dos números daría una ganancia que depende de un tipo de cambio que nadie eligió.
+  const r = resultadoDe([LC(100, 10, 12000, 'USD', 'ARS')]);
+  assert.equal(r.costo, 1000);
+  assert.equal(r.cobrado, 1200000);
+  assert.equal(r.resultado, null, 'restó pesos contra dólares');
+  assert.equal(r.comparable, false);
+});
+
+test('dos renglones con monedas distintas tampoco se suman', () => {
+  const r = resultadoDe([LC(1, 100, 120, 'ARS'), LC(1, 10, 12, 'USD', 'USD')]);
+  assert.equal(r.costo, null);
+  assert.equal(r.cobrado, null);
+  assert.equal(r.varias_monedas, true);
+  assert.equal(r.varias_monedas_precio, true);
+  assert.equal(r.resultado, null);
+});
+
+test('el resultado de cada renglón, para ver de qué insumo sale', () => {
+  assert.equal(resLinea(LC(100, 1000, 1200, 'ARS')), 20000);
+  assert.equal(resLinea(LC(100, 1000, 900, 'ARS')), -10000);
+  assert.equal(resLinea(LC(100, 1000, null, 'ARS')), null);
+  assert.equal(resLinea(LC(100, null, 1200, 'ARS')), null);
+  assert.equal(resLinea(LC(100, 10, 12000, 'USD', 'ARS')), null, 'restó monedas distintas');
+  // Sin moneda del precio manda la del costo: comprar y facturar en lo mismo es el caso de siempre.
+  assert.equal(resLinea({ cantidad: 2, costo_unitario: 100, precio_unitario: 150, moneda: 'USD' }), 100);
+  // Y los centavos no se pierden.
+  assert.equal(resLinea(LC(3, 1811.3, 2000.15, 'ARS')), 566.55);
+});
+
+test('el precio y su moneda se leen, se guardan y vuelven', () => {
+  const f = fuente(RUTA, 'function leerLineas(b, soc)');
+  assert.match(f, /El precio del renglón \$\{n \+ 1\}/);
+  assert.match(f, /precio_unitario: precio,/);
+  // Sin moneda propia hereda la del costo.
+  assert.match(f, /moneda_precio: \['ARS', 'USD'\]\.includes\(l\.moneda_precio\) \? l\.moneda_precio/);
+  const db = base();
+  db.exec(`INSERT INTO pli_entregas (id, sociedad_id, proveedor_texto, fecha)
+           VALUES (1, 1, 'CARTOCOR', '2026-10-23')`);
+  db.prepare(`INSERT INTO pli_entrega_lineas (entrega_id, insumo_id, cantidad, costo_unitario, moneda,
+                precio_unitario, moneda_precio) VALUES (1, 1, 8, 1000, 'ARS', 1300, 'ARS')`).run();
+  const l = db.prepare('SELECT * FROM pli_entrega_lineas WHERE entrega_id=1').get();
+  assert.equal(l.precio_unitario, 1300);
+  assert.equal(l.moneda_precio, 'ARS');
+  assert.equal(resLinea(l), 2400);
+});
+
+test('la factura se controla contra los precios de los renglones que cubre', () => {
+  // El importe que dice el papel y lo que suman los precios tienen que ser el mismo número: si no
+  // lo son, hay un error de tipeo en una de las dos puntas, y es mejor verlo acá que cuando el
+  // proveedor lo discuta.
+  const db = base();
+  db.exec(`INSERT INTO pli_recuperos (id, sociedad_id, proveedor_texto, fecha, importe, moneda)
+           VALUES (9, 1, 'CARTOCOR', '2026-10-23', 130000, 'ARS')`);
+  db.exec(`INSERT INTO pli_entregas (id, sociedad_id, proveedor_texto, fecha, recupero_id)
+           VALUES (5, 1, 'CARTOCOR', '2026-10-23', 9)`);
+  db.prepare(`INSERT INTO pli_entrega_lineas (entrega_id, insumo_id, cantidad, costo_unitario, moneda,
+                precio_unitario, moneda_precio) VALUES (5, 1, 100, 1000, 'ARS', 1300, 'ARS')`).run();
+  const cubre = new Function('db', [fuente(RUTA, 'function loQueCubre(recuperoId)'), 'return loQueCubre;'].join('\n'))(db);
+  const c = cubre(9);
+  assert.deepEqual(c.por, { ARS: 100000 }, 'lo que costó');
+  assert.deepEqual(c.cobrado, { ARS: 130000 }, 'lo que se le cobró según los renglones');
+  assert.equal(c.sin_precio, 0);
+  // Y lo cobrado se junta POR MONEDA, igual que el costo: un renglón facturado en dólares no se
+  // puede meter en la misma bolsa que uno facturado en pesos.
+  db.prepare(`INSERT INTO pli_entrega_lineas (entrega_id, insumo_id, cantidad, costo_unitario, moneda,
+                precio_unitario, moneda_precio) VALUES (5, 1, 2, 10, 'USD', 15, 'USD')`).run();
+  assert.deepEqual(cubre(9).cobrado, { ARS: 130000, USD: 30 });
+  assert.deepEqual(cubre(9).por, { ARS: 100000, USD: 20 });
+
+  // EL CONTROL, CORRIDO. Se saca el mapeo real de la ruta y se le da la factura y lo que cubre.
+  const ruta = fuente(RUTA, "router.get('/recuperos'");
+  assert.match(ruta, /descuadre: cuadra/);
+  const control = new Function('r', 'c', [
+    /const mc = Object\.keys[\s\S]*?: null;/.exec(ruta)[0], 'return cuadra;',
+  ].join('\n'));
+  // La factura dice 130.000 y los renglones suman 130.000: cuadra.
+  assert.equal(control({ importe: 130000, moneda: 'ARS' }, { cobrado: { ARS: 130000 }, sin_precio: 0, por: { ARS: 100000 } }), 0);
+  // Dice 125.000 y los renglones 130.000: hay 5.000 de diferencia, y se compara contra lo COBRADO,
+  // no contra el costo — comparar contra el costo daría 25.000 y no sería un descuadre, sería la
+  // ganancia.
+  assert.equal(control({ importe: 125000, moneda: 'ARS' }, { cobrado: { ARS: 130000 }, sin_precio: 0, por: { ARS: 100000 } }), -5000);
+  // Con dos monedas, o con un renglón sin precio, no se compara.
+  assert.equal(control({ importe: 130000, moneda: 'ARS' }, { cobrado: { ARS: 1, USD: 1 }, sin_precio: 0, por: {} }), null);
+  assert.equal(control({ importe: 130000, moneda: 'ARS' }, { cobrado: { ARS: 130000 }, sin_precio: 1, por: {} }), null);
+  assert.equal(control({ importe: null, moneda: 'ARS' }, { cobrado: { ARS: 130000 }, sin_precio: 0, por: {} }), null);
+
+  // Y la pantalla lo avisa, con el número de la diferencia.
+  const p = fuente(PANEL, 'function pliPagFacturas(cont)');
+  assert.match(p, /no coincide con los renglones por/);
+  assert.match(p, /Math\.abs\(des\) > 0\.009/);
+});
+
+test('la lista muestra el resultado de cada entrega', () => {
+  const f = fuente(PANEL, 'function pliPagRender()');
+  assert.match(f, /<th style="text-align:right">Le cobramos<\/th>/);
+  assert.match(f, /<th style="text-align:right">Resultado<\/th>/);
+  assert.match(f, /e\.comparable/);
+  // En verde ganaste, en rojo perdiste.
+  assert.match(f, /e\.resultado < 0 \? '#b91c1c' : '#166534'/);
+  // Y cuando no se puede restar, se dice cuál es el motivo.
+  assert.match(f, /falta una punta/);
+  assert.match(f, /monedas distintas/);
+});
+
+test('la ventana calcula el resultado del renglón y el de la entrega', () => {
+  const r = new Function('l', [
+    fuente(PANEL, 'function pliLineaResultado(l)'), 'return pliLineaResultado(l);',
+  ].join('\n'));
+  assert.equal(r({ cantidad: 100, costo_unitario: 1000, precio_unitario: 1200, moneda: 'ARS', moneda_precio: 'ARS' }), 20000);
+  assert.equal(r({ cantidad: 100, costo_unitario: 1000, precio_unitario: '', moneda: 'ARS' }), null);
+  assert.equal(r({ cantidad: 1, costo_unitario: 10, precio_unitario: 12000, moneda: 'USD', moneda_precio: 'ARS' }), null);
+  // EL PIE DE LA VENTANA, CORRIDO: es el número que se lee justo antes de apretar Guardar.
+  const pie = (lineas) => {
+    let html = '';
+    const doc = { getElementById: () => ({ set innerHTML(v) { html = v; } }) };
+    new Function('document', 'PLI', 'pliN', 'pliEsc', 'pliPlata', [
+      fuente(PANEL, 'function pliEntLineasValidas()'),
+      fuente(PANEL, 'function pliEntTotal()'), 'pliEntTotal();',
+    ].join('\n'))(doc, { entLineas: lineas }, (n, d) => Number(n).toFixed(d || 0),
+      (s) => String(s), (v, m) => (m || 'ARS') + ' ' + Number(v).toFixed(2));
+    return html;
+  };
+  const LL = (cantidad, costo, precio, moneda, moneda_precio) =>
+    ({ insumo_id: 1, cantidad, costo_unitario: costo, precio_unitario: precio, moneda, moneda_precio });
+
+  const ok = pie([LL(100, 1000, 1200, 'ARS', 'ARS')]);
+  assert.match(ok, /Nos costó.*ARS 100000\.00/);
+  assert.match(ok, /Le cobramos.*ARS 120000\.00/);
+  assert.match(ok, /Resultado de la entrega.*\+ARS 20000\.00/);
+  // Y SE VE: escrito pero escondido con CSS es lo mismo que no estar, y un test que sólo busca el
+  // texto no lo distingue.
+  assert.ok(!/display:none[^<]*Resultado de la entrega/.test(ok), 'el resultado se dibuja oculto');
+  // En rojo cuando se perdió.
+  assert.match(pie([LL(100, 1000, 900, 'ARS', 'ARS')]), /Resultado de la entrega.*ARS -?10000\.00/);
+  // Con monedas distintas NO se resta: se dice que falta para poder hacerlo.
+  const mixto = pie([LL(100, 10, 12000, 'USD', 'ARS')]);
+  assert.ok(!/Resultado de la entrega/.test(mixto), 'restó pesos contra dólares');
+  assert.match(mixto, /El resultado se calcula cuando las dos puntas están/);
+  // Y sin precio, tampoco: se dice cuántos renglones faltan.
+  assert.match(pie([LL(100, 1000, '', 'ARS', 'ARS')]), /falta el precio de un renglón/);
+});
+
+test('el renglón dibuja el costo y el precio que tiene cargados', () => {
+  // Si el campo sale en blanco al reabrir la entrega, el primer guardado le borra el precio sin
+  // que nadie lo note. Se dibuja la tabla de verdad y se mira qué trae cada casilla.
+  const cajas = {};
+  const doc = { getElementById: (id) => ({ set innerHTML(v) { cajas[id] = v; } }) };
+  new Function('document', 'PLI', 'pliEsc', 'pliN', 'pliPlata', 'pliEntTotal', [
+    fuente(PANEL, 'function pliLineaResultado(l)'),
+    fuente(PANEL, 'function pliEntLineasPintar()'), 'pliEntLineasPintar();',
+  ].join('\n'))(doc,
+    { insumos: [{ id: 1, nombre: 'ETIQUETA', unidad_compra: 'MILLAR', unidad_uso: 'unidad',
+      factor_compra: 1000, modo_provision: 'compra' }],
+      entLineas: [{ insumo_id: 1, cantidad: 8, costo_unitario: 1811.3, precio_unitario: 2000.15,
+        moneda: 'ARS', moneda_precio: 'ARS', factura_compra: 'A-0001' }] },
+    (s) => String(s == null ? '' : s), (n, d) => Number(n).toFixed(d || 0),
+    (v, m) => (m || 'ARS') + ' ' + Number(v).toFixed(2), () => {});
+
+  const h = cajas['pli-ent-lineas'];
+  assert.match(h, /value="1811\.3"/, 'el costo cargado no se dibuja');
+  assert.match(h, /value="2000\.15"/, 'el precio cargado no se dibuja');
+  assert.match(h, /value="A-0001"/, 'la factura de compra no se dibuja');
+  // Y el resultado del renglón, calculado: (2000,15 − 1811,3) × 8.
+  assert.match(h, /\+ARS 1510\.80/);
+  // La unidad y el factor, que es lo que evita confundir millares con unidades.
+  assert.match(h, /MILLAR/);
+  assert.match(h, /×1000/);
+});
+
+test('el precio viaja al guardar y vuelve al abrir', () => {
+  // Si no viaja, lo que se cargó no queda; y si no vuelve, corregir cualquier otra cosa lo borra.
+  const g = fuente(PANEL, 'function pliEntregaGuardar()');
+  assert.match(g, /precio_unitario: l\.precio_unitario === '' \? null : l\.precio_unitario/);
+  assert.match(g, /moneda_precio: l\.moneda_precio \|\| l\.moneda \|\| 'ARS'/);
+  const a = fuente(PANEL, 'function pliEntregaAbrir(id)');
+  assert.match(a, /precio_unitario: l\.precio_unitario/);
+  assert.match(a, /moneda_precio: l\.moneda_precio \|\| l\.moneda/);
+  // Y el renglón en blanco los trae, o el primero que se cargue sale sin ellos.
+  assert.match(fuente(PANEL, 'function pliEntLineaVacia()'), /precio_unitario: ''/);
+  assert.match(fuente(PANEL, 'function pliEntLineaVacia()'), /moneda_precio: 'ARS'/);
+});
+
+test('la moneda del precio acompaña a la del costo hasta que se la toca', () => {
+  // Comprar y facturar en lo mismo es el caso de siempre: elegir la moneda dos veces es la manera
+  // de que una quede mal.
+  const linea = { moneda: 'ARS', moneda_precio: 'ARS' };
+  const cambio = new Function('PLI', 'pliEntTotal', [
+    fuente(PANEL, 'function pliEntLineaCambio(i, campo, valor)'), 'return pliEntLineaCambio;',
+  ].join('\n'))({ entLineas: [linea], insumos: [] }, () => {});
+  cambio(0, 'moneda', 'USD');
+  assert.equal(linea.moneda_precio, 'USD', 'la moneda del precio no siguió a la del costo');
+  // Pero si se la tocó aparte, manda la elegida: es el caso de comprar en dólares y facturar en pesos.
+  cambio(0, 'moneda_precio', 'ARS');
+  cambio(0, 'moneda', 'USD');
+  assert.equal(linea.moneda_precio, 'ARS', 'le pisó la moneda del precio que se había elegido');
+});
+
 // ── LO QUE SE CARGA ────────────────────────────────────────────────────────
 
 test('una entrega sin renglones no es una entrega', () => {
@@ -289,7 +529,9 @@ test('una entrega sin renglones no es una entrega', () => {
 
 test('la moneda de cada renglón es pesos o dólares, y nada más', () => {
   const f = fuente(RUTA, 'function leerLineas(b, soc)');
-  assert.match(f, /\['ARS', 'USD'\]\.includes\(l\.moneda\) \? l\.moneda : 'ARS'/);
+  // Anclado a la PROPIEDAD, no a la expresión suelta: la misma expresión aparece también como
+  // respaldo de la moneda del precio, así que buscarla a secas pasaba aunque ésta se aflojara.
+  assert.match(f, /^\s+moneda: \['ARS', 'USD'\]\.includes\(l\.moneda\) \? l\.moneda : 'ARS',$/m);
   // Y la tabla lo vuelve a decir: un valor raro por otra puerta tampoco entra.
   const t = DDL.slice(DDL.indexOf('CREATE TABLE IF NOT EXISTS pli_entrega_lineas'));
   assert.match(t.slice(0, t.indexOf('\n  );')), /CHECK\(moneda IN \('ARS','USD'\)\)/);
@@ -477,7 +719,7 @@ test('el importe de la factura no se repite en cada entrega que cubre', () => {
   assert.match(f, /cubre ' \+ fac\.entregas \+ ' entregas/);
   // Y el pie deja de prometer una resta que no se puede hacer ahí.
   assert.ok(!/la diferencia entre\s+'\s*\+\s*'las dos es lo que se gana/.test(f));
-  assert.match(f, /ese número no se puede mirar fila por fila/);
+  assert.match(f, /el control del papel/);
 });
 
 test('la factura compara su importe contra TODO lo que cubre, por moneda', () => {
@@ -492,8 +734,8 @@ test('la factura compara su importe contra TODO lo que cubre, por moneda', () =>
                 VALUES (?, 1, 1, 100000, 'ARS')`).run(id);
   }
   const cubre = new Function('db', [fuente(RUTA, 'function loQueCubre(recuperoId)'), 'return loQueCubre;'].join('\n'))(db);
-  assert.deepEqual(cubre(9), { por: { ARS: 300000 }, sin_costo: 0 },
-    'suma las tres entregas, no una');
+  assert.deepEqual(cubre(9).por, { ARS: 300000 }, 'suma las tres entregas, no una');
+  assert.equal(cubre(9).sin_costo, 0);
   // Con dos monedas NO se mezclan: restar pesos contra dólares con una cotización que nadie
   // eligió daría una ganancia inventada.
   db.prepare(`INSERT INTO pli_entrega_lineas (entrega_id, insumo_id, cantidad, costo_unitario, moneda)
@@ -569,15 +811,53 @@ test('lo que el manual dice del stock y de la entrega es cierto', () => {
   assert.match(RUTA, /mueve_stock/);
 });
 
-test('lo que el manual dice de la diferencia es lo que la pantalla calcula', () => {
-  assert.match(MANUAL, /lo que le cobraste menos lo que te costó/);
+test('lo que el manual dice de «le cobramos» es donde de verdad se guarda', () => {
+  // El nombre del campo y su versión, que es lo que el operador busca en la lista del manual.
+  assert.match(MANUAL, /<b>Le cobramos \(por renglón\)<span class="ver">V1103<\/span><\/b>/);
+  assert.match(MANUAL, /El precio al que le facturaste ESE insumo al proveedor, con su moneda/);
+  // «con su moneda», y por renglón: las dos columnas viven en el renglón, no en la cabecera.
+  assert.match(DDL, /addCol\('pli_entrega_lineas', 'precio_unitario', 'REAL'\)/);
+  assert.match(DDL, /addCol\('pli_entrega_lineas', 'moneda_precio', *'TEXT'\)/);
+  // «Se carga en la misma ventana, debajo del costo»: el input está en el renglón de la ventana.
+  assert.match(MANUAL, /Se carga en la misma ventana/);
+  assert.match(fuente(PANEL, 'function pliEntLineasPintar()'), /precio_unitario\\',this\.value/);
+  assert.match(fuente(PANEL, 'function pliEntLineasPintar()'), /moneda_precio\\',this\.value/);
+});
+
+test('lo que el manual dice del resultado es lo que el código calcula', () => {
+  assert.match(MANUAL, /<b>Resultado<span class="ver">V1103<\/span><\/b>/);
+  assert.match(MANUAL, /Lo que le cobraste menos lo que te costó/);
+  // Por renglón, y multiplicado por la cantidad: el precio es UNITARIO.
+  assert.match(fuente(RUTA, 'function resultadoDeLinea(l)'),
+    /Number\(l\.precio_unitario\) - Number\(l\.costo_unitario\)\) \* Number\(l\.cantidad\)/);
+  // Sumado para toda la entrega, y en ese orden: cobrado menos costo.
+  assert.match(fuente(RUTA, 'function resultadoDeEntrega(lineas)'), /v\.cobrado - c\.costo/);
+  // «En verde ganaste, en rojo perdiste»: la lista pinta por el signo.
+  assert.match(MANUAL, /En verde ganaste, en rojo perdiste/);
+  assert.match(PANEL, /e\.resultado < 0 \? '#b91c1c' : '#166534'/);
+  // «No se calcula si falta una de las dos puntas, o si están en monedas distintas».
+  assert.match(MANUAL, /si el costo y el precio están en monedas distintas: se dice por qué/);
+  assert.match(fuente(RUTA, 'function resultadoDeEntrega(lineas)'),
+    /c\.costo != null && v\.cobrado != null && c\.moneda === v\.moneda_cobrado/);
+  assert.match(PANEL, /'falta una punta' : 'monedas distintas'/);
+});
+
+test('lo que el manual dice de la diferencia de la factura es lo que la pantalla calcula', () => {
+  assert.match(MANUAL, /lo que te costó todo lo '\s*\+ 'que esa factura cubre|que esa factura cubre/);
   assert.match(fuente(RUTA, "router.get('/recuperos'"), /Number\(r\.importe\) - c\.por\[monedas\[0\]\]/);
-  // «No se puede mirar fila por fila»: y la fila, efectivamente, no trae el importe.
-  assert.match(MANUAL, /No se puede mirar fila por fila en la lista de entregas/);
-  assert.ok(!/pliPlata\(e\.recupero_importe/.test(PANEL));
-  // «Con monedas distintas no se calcula»: y el código lo exige.
-  assert.match(MANUAL, /la diferencia <b>no se calcula<\/b> y se dice por qué/);
+  // «Una factura puede cubrir varias entregas»: lo que cubre NO lleva LIMIT.
+  assert.match(MANUAL, /Una factura puede cubrir varias entregas/);
+  assert.match(fuente(RUTA, 'function loQueCubre(recuperoId)'),
+    /WHERE e\.recupero_id=\? AND e\.eliminado_en IS NULL`\)\.all\(recuperoId\)/);
+  // «Abajo del importe avisa cuando no coincide con los renglones»: el descuadre lo manda el back
+  // y la pantalla lo pinta pegado al importe.
+  assert.match(MANUAL, /no coincide con los renglones<\/b> que cubre/);
+  assert.match(fuente(RUTA, "router.get('/recuperos'"), /descuadre: cuadra/);
+  assert.match(PANEL, /no coincide con los renglones por ' \+ pliPlata\(Math\.abs\(des\), f\.moneda\)/);
+  // «Con monedas distintas la resta no se hace»: el código lo exige en las dos cuentas.
+  assert.match(MANUAL, /la resta <b>no se hace<\/b> y se dice por qué/);
   assert.match(fuente(RUTA, "router.get('/recuperos'"), /monedas\[0\] === r\.moneda/);
+  assert.match(fuente(RUTA, "router.get('/recuperos'"), /mc\[0\] === r\.moneda/);
 });
 
 test('lo que el manual dice de la factura de compra es cierto', () => {
@@ -609,8 +889,8 @@ test('«la factura del insumo» se carga, se guarda y se ve', () => {
   assert.match(fuente(RUTA, 'function leerLineas(b, soc)'),
     /factura_compra: vTexto\(l\.factura_compra, 'La factura de compra', \{ max: 60 \}\)/);
   // Y los dos INSERT la escriben: el alta y la corrección, que reemplaza los renglones.
-  assert.equal((RUTA.match(/moneda, factura_compra, notas\) VALUES \(\?,\?,\?,\?,\?,\?,\?\)/g) || []).length, 2);
-  assert.equal((RUTA.match(/l\.moneda, l\.factura_compra, l\.notas\)/g) || []).length, 2);
+  assert.equal((RUTA.match(/factura_compra, notas\) VALUES \(\?,\?,\?,\?,\?,\?,\?,\?,\?\)/g) || []).length, 2);
+  assert.equal((RUTA.match(/l\.precio_unitario, l\.moneda_precio, l\.factura_compra, l\.notas\)/g) || []).length, 2);
 
   // La pantalla la carga, la manda y la muestra en la lista.
   assert.match(fuente(PANEL, 'function pliEntLineasPintar()'), /factura_compra\\?',this\.value/);
@@ -637,11 +917,29 @@ test('las dos listas nuevas no sacan barra de costado', () => {
   // Es la regla del proyecto, y acá lo que se iría de pantalla es justamente la plata.
   const f = fuente(PANEL, 'function pliPagRender()');
   assert.match(f, /table-layout:fixed/);
-  assert.equal((f.match(/<col[ >]/g) || []).length, 7, 'faltan anchos de columna en las entregas');
+  assert.equal((f.match(/<col[ >]/g) || []).length, 9, 'faltan anchos de columna en las entregas');
   const g = fuente(PANEL, 'function pliPagFacturas(cont)');
   assert.equal((g.match(/<col[ >]/g) || []).length, 7, 'faltan anchos de columna en las facturas');
   // Y lo único de largo variable parte de renglón en vez de empujar la tabla.
   assert.match(PANEL, /#pli-pag-cont td \{ word-break:break-word \}/);
+});
+
+test('los renglones de la ventana entran en la ventana', () => {
+  // La tabla de adentro del modal lleva anchos FIJOS en px, así que cada columna nueva la empuja
+  // contra el borde: con «le cobramos» y «resultado» son 188px más que antes. Si mañana alguien
+  // agrega una tercera y no ensancha la ventana, el .ab-table-wrap saca su barra de costado.
+  const ancho = /id="pli-mb-entrega">\s*<div class="ab-modal" style="width:min\((\d+)px/.exec(PANEL);
+  assert.ok(ancho, 'la ventana de la entrega dejó de declarar su ancho en px');
+  const f = fuente(PANEL, 'function pliEntLineasPintar()');
+  const cabeceras = f.slice(0, f.indexOf('</tr></thead>'));
+  const fijas = (cabeceras.match(/width:(\d+)px/g) || []).map((s) => parseInt(s.slice(6), 10));
+  assert.ok(fijas.length >= 6, 'los anchos de las columnas dejaron de estar fijados');
+  // El select del insumo es el único de ancho libre y es el que lleva el nombre más largo: sin
+  // 200px no se lee cuál es, y ésa es la columna que el operador mira primero.
+  const LIBRE = 200, BORDES = 40;
+  const suma = fijas.reduce((a, b) => a + b, 0);
+  assert.ok(suma + LIBRE + BORDES <= Number(ancho[1]),
+    `las columnas suman ${suma}px y la ventana mide ${ancho[1]}px: no entra`);
 });
 
 test('el proveedor se elige de los que ya usaste, no se vuelve a tipear', () => {
