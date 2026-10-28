@@ -453,8 +453,10 @@ test('y el buscador no puede borrar la línea: lo elegido nunca se filtra', () =
   const f = trozoP('function sgSelBuscable(sel, placeholder){', '\r\n}');
   assert.match(f, /if \(o\.value === elegido\) return true;/);
   // Y «no hay nada» se sigue midiendo SIN esa excepción, o el cartel no saldría
-  // nunca mientras haya algo elegido.
-  assert.match(f, /var hubo = \(sel\._todas \|\| \[\]\)\.some\(function\(o\)\{ return o\.value && coincide\(o\); \}\);/);
+  // nunca mientras haya algo elegido. Desde la V1104 la misma lista alimenta los
+  // resultados que se ven debajo del casillero, así que se filtra en vez de contar.
+  assert.match(f, /var encontradas = \(sel\._todas \|\| \[\]\)\.filter\(function\(o\)\{ return o\.value && coincide\(o\); \}\);/);
+  assert.match(f, /if \(!encontradas\.length && q\) \{/);
 });
 
 test('pero no se pierde la de Configuración impositiva', () => {
