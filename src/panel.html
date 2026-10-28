@@ -10124,6 +10124,101 @@ function sgSelBuscable(sel, placeholder){
   // (otra empresa, cuentas nuevas), hay que volver a llamar a sgSelRefrescar.
   sgSelGuardarOpciones(sel);
 
+  // ── LO QUE ENCUENTRA TIENE QUE VERSE MIENTRAS SE ESCRIBE ────────────────
+  //
+  // Pablo, 28/10/2026, sobre los insumos de Puente Cordón: «permitime buscar por
+  // CONTIENE algo que esté dentro del nombre». Y ya buscaba por contiene —se probó
+  // con sus propios insumos: «faja» dejaba las cuatro bolsas con faja—. Lo que no
+  // hacía era MOSTRARLO: el filtro dejaba el desplegable en cuatro opciones, pero el
+  // desplegable estaba CERRADO. En pantalla no cambiaba nada, y había que abrirlo
+  // para descubrir que había funcionado.
+  //
+  // Un buscador que no muestra lo que encontró no se distingue de uno roto, y el que
+  // lo usa concluye lo mismo: que no busca. Ahora los resultados caen debajo del
+  // casillero y se eligen con un clic, igual que el buscador de clientes.
+  //
+  // Va acá y no en la pantalla de insumos: son los mismos 47 desplegables.
+  var lista = document.createElement('div');
+  lista.className = 'sg-sb-lista';
+  lista.style.cssText = 'position:absolute;z-index:60;left:0;right:0;max-height:260px;'
+    + 'overflow-y:auto;background:var(--card,#fff);border:1px solid var(--bor);'
+    + 'border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,.14);display:none';
+  caja.appendChild(lista);
+  // Y APRETAR LA LISTA NO LE SACA EL FOCO AL CASILLERO. Sin esto, arrastrar su barra
+  // de desplazamiento —con veinte resultados pasa siempre— dispara el blur del
+  // casillero y la lista se cierra en el medio del arrastre.
+  lista.onmousedown = function(ev){ if (ev && ev.preventDefault) ev.preventDefault(); };
+
+  var marcado = -1;
+  var cerrar = function(){ lista.style.display = 'none'; marcado = -1; };
+  var filas = function(){
+    return lista.querySelectorAll ? [].slice.call(lista.querySelectorAll('.sg-sb-op')) : [];
+  };
+  var pintarMarca = function(){
+    filas().forEach(function(el, i){ el.style.background = (i === marcado) ? 'var(--sur)' : ''; });
+  };
+
+  // Al elegir, el desplegable vuelve a tener TODAS sus opciones. Si se quedara con
+  // las cuatro que sobrevivieron al filtro, la próxima vez que alguien lo abriera a
+  // mano —sin escribir nada— vería cuatro insumos y creería que no hay más.
+  var elegir = function(v){
+    inp.value = '';
+    sel.innerHTML = (sel._todas || []).map(function(o){
+      return '<option value="' + escH(o.value) + '">' + escH(o.text) + '</option>';
+    }).join('');
+    sel.value = v;
+    cerrar();
+    // El onchange no corre solo cuando el valor se asigna por código, y de él cuelga
+    // todo lo que la pantalla hace al elegir —la unidad, el precio, el aviso—.
+    if (typeof sel.onchange === 'function') sel.onchange();
+    else if (sel.dispatchEvent && typeof Event !== 'undefined') sel.dispatchEvent(new Event('change'));
+  };
+
+  var dibujar = function(items, texto){
+    if (!texto) return cerrar();
+    if (!items.length) {
+      lista.innerHTML = '<div class="sg-sb-vacio" style="padding:8px 12px;font-size:12.5px'
+        + ';color:var(--mut)">No hay ninguno que diga "' + escH(texto) + '"</div>';
+      lista.style.display = 'block';
+      marcado = -1;
+      return;
+    }
+    // SE MUESTRAN 60 Y SE DICE QUE HAY MÁS. Cortar en silencio es peor que no
+    // cortar: el que busca «bolsa» ve sesenta y concluye que ésas son todas.
+    lista.innerHTML = items.slice(0, 60).map(function(o){
+      return '<div class="sg-sb-op" data-v="' + escH(o.value) + '" style="padding:7px 11px'
+        + ';cursor:pointer;font-size:12.5px;border-bottom:1px solid var(--bor)">'
+        + escH(o.text) + '</div>';
+    }).join('')
+      + (items.length > 60
+        ? '<div class="sg-sb-mas" style="padding:6px 11px;font-size:11.5px;color:var(--mut)">'
+          + 'y ' + (items.length - 60) + ' más: seguí escribiendo para achicar la lista</div>'
+        : '');
+    lista.style.display = 'block';
+    marcado = 0;
+    filas().forEach(function(el, i){
+      // mousedown y no click: el blur del casillero llega ANTES que el click, y
+      // cerraría la lista justo cuando se la está apretando.
+      el.onmousedown = function(ev){ if (ev && ev.preventDefault) ev.preventDefault();
+        elegir(el.getAttribute('data-v')); };
+      el.onmouseenter = function(){ marcado = i; pintarMarca(); };
+    });
+    pintarMarca();
+    // SI NO ENTRA ABAJO, VA ARRIBA. En la mitad de abajo de una ventana la lista
+    // quedaba cortada contra el borde: se veían dos resultados de veinte, y el que
+    // mira no tiene manera de saber que hay más.
+    var abajo = true;
+    try {
+      var r = inp.getBoundingClientRect();
+      var alto = Math.min(260, items.length * 32 + 2);
+      abajo = (r.bottom + alto <= (window.innerHeight || 0)) || r.top < alto;
+    } catch (_) {}
+    lista.style.top = abajo ? '100%' : '';
+    lista.style.bottom = abajo ? '' : '100%';
+    lista.style.marginTop = abajo ? '2px' : '';
+    lista.style.marginBottom = abajo ? '' : '2px';
+  };
+
   var filtrar = function(){
     // SIN ACENTOS, como el resto del panel. Acá se comparaba con toLowerCase() a
     // secas: «comision» no encontraba «Comisión» y «Nacion» no encontraba
@@ -10161,14 +10256,35 @@ function sgSelBuscable(sel, placeholder){
     // «NO HAY NADA» SE MIDE SIN LA EXCEPCIÓN DE ARRIBA. Si se contaran las opciones
     // visibles, la elegida —que se deja siempre— haría creer que hubo resultados y
     // el cartel no aparecería nunca mientras haya algo seleccionado.
-    var hubo = (sel._todas || []).some(function(o){ return o.value && coincide(o); });
-    if (!hubo && q) {
+    var encontradas = (sel._todas || []).filter(function(o){ return o.value && coincide(o); });
+    if (!encontradas.length && q) {
       sel.innerHTML = '<option value="">(no hay nada que diga "' + escH(inp.value.trim()) + '")</option>';
     }
+    dibujar(encontradas, inp.value.trim());
   };
   inp.oninput = filtrar;
-  // Enter no manda el formulario: abre la lista con lo filtrado.
-  inp.onkeydown = function(e){ if (e.key === 'Enter') { e.preventDefault(); sel.focus(); } };
+  inp.onblur = function(){ cerrar(); };
+  inp.onkeydown = function(e){
+    var n = filas().length;
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      if (!n) return;
+      if (e.preventDefault) e.preventDefault();
+      if (marcado < 0) marcado = (e.key === 'ArrowDown') ? 0 : n - 1;
+      else marcado = (marcado + (e.key === 'ArrowDown' ? 1 : n - 1)) % n;
+      pintarMarca();
+      return;
+    }
+    if (e.key === 'Escape') { cerrar(); return; }
+    // ENTER ELIGE LO QUE SE ESTÁ MIRANDO. Antes pasaba el foco al desplegable y
+    // había que volver a buscar con las flechas lo que el filtro ya había dejado
+    // solo: escribir el nombre entero y tener que elegirlo igual a mano.
+    if (e.key === 'Enter') {
+      if (e.preventDefault) e.preventDefault();
+      var el = filas()[marcado < 0 ? 0 : marcado];
+      if (el) elegir(el.getAttribute('data-v'));
+      else sel.focus();
+    }
+  };
 }
 
 // ══ NINGUNA LISTA LARGA SE QUEDA SIN BUSCADOR ═══════════════════════════
@@ -23994,10 +24110,15 @@ var SG_MANUAL = {};
 var SG_MANUAL_COMUN =
   '<h3 class="mc">Vale en todo el panel</h3>'
   + '<h3>🔎 Buscar en una lista desplegable <span class="ver">V1037</span></h3>'
-  + '<p>Cualquier lista larga —clientes, proveedores, productos, cuentas— <b>se '
+  + '<p>Cualquier lista larga —clientes, proveedores, productos, cuentas, insumos— <b>se '
   + 'busca escribiendo</b>. Se hace clic en ella y aparece un casillero: lo que se '
   + 'escriba deja sólo lo que <b>contiene</b> eso, en cualquier parte del nombre. '
   + 'Buscar <i>galicia</i> encuentra «Banco Galicia» sin escribir «banco».</p>'
+  + '<p><b>Los resultados aparecen debajo del casillero mientras se escribe</b> '
+  + '<span class="ver">V1104</span>: se elige uno con un clic, o moviéndose con las '
+  + 'flechas ↑ ↓ y apretando Enter. Hasta esta versión el filtro trabajaba adentro '
+  + 'del desplegable <b>cerrado</b>, así que escribir no cambiaba nada en pantalla y '
+  + 'había que abrirlo para enterarse de que había funcionado.</p>'
   + '<ul>'
   + '<li><b>No hace falta poner tildes.</b> <i>comision</i> encuentra «Comisión» y '
   + '<i>nacion</i> encuentra «Banco Nación».</li>'
@@ -24005,8 +24126,8 @@ var SG_MANUAL_COMUN =
   + 'otro proveedor.</li>'
   + '<li>Se pueden poner <b>varias palabras en cualquier orden</b>: <i>galicia '
   + 'banco</i> encuentra lo mismo que <i>banco galicia</i>.</li>'
-  + '<li>Si no queda nada, lo dice — no se queda en blanco haciendo creer que la '
-  + 'lista está vacía.</li>'
+  + '<li>Si no queda nada, lo dice <b>debajo del casillero</b> — no se queda en '
+  + 'blanco haciendo creer que la lista está vacía.</li>'
   + '</ul>'
   + '<p>Las listas <b>cortas</b> no lo traen: un «Sí / No» con un buscador arriba '
   + 'es más trabajo, no menos.</p>'
