@@ -15,7 +15,7 @@ import multer from 'multer';
 import { randomUUID } from 'crypto';
 import * as XLSX from 'xlsx';
 import db from '../servicios/db_pli.js';   // este import es el que crea el schema pli_*
-import { calcularPlan, lunesDe } from '../servicios/pli_motor.js';
+import { calcularPlan, lunesDe, MODO_TEXTO } from '../servicios/pli_motor.js';
 import { subirArchivo, obtenerArchivo, storageConfigurado } from '../servicios/storage.js';
 import { cotizacionVigente, fijarCotizacionManual, TIPOS as TIPOS_DOLAR } from '../servicios/cotizacion_dolar.js';
 // El cerrojo de empresa. Antes cada router tenia su propia copia de esta
@@ -3150,6 +3150,79 @@ function adjuntarProveedores(lineas) {
   return { tc, tc_origen: origen };
 }
 
+// ── POR QUÉ UN INSUMO DE LA RECETA NO ESTÁ EN LA LISTA DE COMPRA (V1105) ──
+//
+// Pablo, 28/10/2026: «creé un insumo nuevo, y está en el plan… ¿por qué no me
+// aparece para comprar?». Estaba en la receta, el plan estaba confirmado, y la
+// pantalla no decía nada: la lista simplemente no lo tenía.
+//
+// Que un plan confirmado esté CONGELADO es a propósito y no se toca — es la única
+// defensa contra «el plan que mandé a comprar cambió solo porque alguien editó una
+// receta». Lo que faltaba es DECIRLO con nombre y apellido: no «los valores están
+// congelados» en general, sino «ESQUINERO 2 MTS entró a la receta después de
+// confirmar, por eso no está acá».
+//
+// Y hay tres puertas más por las que un insumo que la receta usa no llega a la
+// lista. Dos avisaban en la solapa Planes —la unidad que dejó de coincidir, el
+// insumo borrado— pero no en Comprar, que es donde se lo busca. La tercera —el
+// insumo que no se compra— no avisaba en ningún lado.
+//
+// Se corre el motor con las recetas de HOY y se compara contra lo que la lista
+// trae. Si el árbol de productos está roto —circular, demasiado profundo— el motor
+// tira: el aviso se calla, porque un aviso no puede dejar sin pantalla al que vino
+// a comprar.
+function fueraDelPlan(soc, plan, lineas, vivo) {
+  let v = vivo;
+  if (!v) {
+    try { v = calcularPlan(armarContexto(soc, plan)); }
+    catch (e) { return []; }
+  }
+  // Lo que la lista YA tiene. Un insumo con pendiente 0 está adentro igual: que no
+  // haya nada que pedirle es otra cosa, y la dice la propia tabla.
+  const dentro = new Set((lineas || []).map((l) => l.insumo_id));
+  const fuera = [];
+  const puesto = new Set();
+  const poner = (id, nombre, motivo, detalle) => {
+    if (!id || dentro.has(id) || puesto.has(id)) return;
+    puesto.add(id);
+    fuera.push({ insumo_id: id, insumo: nombre || ('insumo #' + id), motivo, detalle: detalle || null });
+  };
+
+  // 1. El motor de hoy lo necesita y la lista no lo tiene: entró después.
+  for (const l of v.lineas || []) {
+    if (Number(l.cant_bruta_uso) > 0) poner(l.insumo_id, l.insumo_nombre, 'receta_nueva', null);
+  }
+
+  const c = v.cobertura || {};
+  // 2. No se compra: alquiler, comodato, lo pone el cliente.
+  for (const x of c.insumos_no_se_compran || []) {
+    poner(x.insumo_id, x.insumo, 'no_se_compra', MODO_TEXTO[x.modo] || x.modo || null);
+  }
+  // 3. La receta guardó una unidad y el insumo tiene otra: el motor no multiplica
+  //    a ciegas, porque gr → kg son tres órdenes de magnitud sin un solo aviso.
+  for (const x of c.unidad_desincronizada || []) {
+    poner(x.insumo_id, x.insumo, 'unidad',
+      `la receta de «${x.producto}» dice «${x.unidad_receta}» y el insumo «${x.unidad_insumo}»`);
+  }
+  // 4. La receta apunta a un insumo que ya no está. El nombre se busca igual —la
+  //    fila puede estar sólo marcada como eliminada— porque «insumo #37» no le
+  //    dice nada a nadie.
+  const faltan = [...new Set((c.insumo_inexistente || []).map((x) => x.insumo_id).filter(Boolean))];
+  const nombres = new Map();
+  if (faltan.length) {
+    const marcas = faltan.map(() => '?').join(',');
+    for (const r of db.prepare(`SELECT id, nombre FROM pli_insumos WHERE id IN (${marcas})`).all(...faltan)) {
+      nombres.set(r.id, r.nombre);
+    }
+  }
+  for (const x of c.insumo_inexistente || []) {
+    poner(x.insumo_id, nombres.get(x.insumo_id), 'inexistente',
+      `lo usa la receta de «${x.producto}»`);
+  }
+
+  return fuera;
+}
+
 // GET a propósito (ver la nota del encabezado): tiene que funcionar para
 // usuarios solo_lectura.
 //
@@ -3165,7 +3238,8 @@ router.get('/planes/:id/calculo', wrap((req, res) => {
     const tcp = adjuntarProveedores(r.lineas);
     return res.json({
       ok: true,
-      data: { plan, ...r, ...tcp, origen: 'snapshot', confirmado_en: plan.confirmado_en }
+      data: { plan, ...r, ...tcp, fuera_del_plan: fueraDelPlan(soc, plan, r.lineas),
+              origen: 'snapshot', confirmado_en: plan.confirmado_en }
     });
   }
   const r = calcularPlan(armarContexto(soc, plan));
@@ -3188,7 +3262,8 @@ router.get('/planes/:id/calculo', wrap((req, res) => {
   const tcp = adjuntarProveedores(r.lineas);
   res.json({
     ok: true,
-    data: { plan, ...r, ...tcp, origen: plan.estado === 'confirmado' ? 'simulacion' : 'calculo' }
+    data: { plan, ...r, ...tcp, fuera_del_plan: fueraDelPlan(soc, plan, r.lineas, r),
+            origen: plan.estado === 'confirmado' ? 'simulacion' : 'calculo' }
   });
 }));
 

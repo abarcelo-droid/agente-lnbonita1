@@ -24352,6 +24352,26 @@ SG_MANUAL.pli = { titulo: 'Planificación de Insumos', html:
   + 'estado a mano, sin pasar por el botón 📦: <b>no sumó nada al depósito</b>. Es la que hay que '
   + 'recibir de verdad.</p>'
 
+  + '<h3>Confirmar el plan lo congela</h3>'
+
+  + '<p>Un plan confirmado guarda sus números tal como quedaron, y editar una receta después '
+  + '<b>no</b> los cambia. Es a propósito: si no, el plan que ya se mandó a comprar cambiaría '
+  + 'solo porque alguien tocó una receta.</p>'
+
+  + sgManCampo('Insumos que la receta usa y el plan no tiene',
+      'El aviso naranja arriba de la lista, en <b>Planes</b> y en <b>Comprar</b>. Dice QUÉ insumo '
+      + 'quedó afuera y por qué: entró a la receta después de confirmar, no se compra (alquiler, '
+      + 'comodato, lo provee el cliente), la receta guardó una unidad distinta de la del insumo, '
+      + 'o el insumo se borró.',
+      'Para que un insumo nuevo entre hay que <b>reabrir el plan y confirmarlo de nuevo</b>. '
+      + 'Mientras tanto se le puede registrar la compra igual desde <b>+ Registrar compra</b>, '
+      + 'que tiene todos los insumos y no sólo los del plan.',
+      'V1105')
+
+  + '<p class="nota">Hasta la V1105 ese insumo no aparecía y no había dónde leer por qué: desde '
+  + 'la pantalla, un insumo que está en la receta y no está en la lista se lee igual que un error '
+  + 'del sistema.</p>'
+
   + '<h3>La orden de compra</h3>'
 
   + sgManCampo('Precio y moneda',
@@ -76775,6 +76795,9 @@ function pliResultadoRender() {
   if (d.origen === 'snapshot') {
     html += '<div style="margin-top:8px;font-size:12px;color:var(--mut)">🔒 Valores congelados al confirmar el plan. Editar recetas ahora no los cambia.</div>';
   }
+  // Y CUÁL quedó afuera, con nombre y apellido: el candado de arriba lo dice en
+  // general, y en general no se puede accionar.
+  html += pliFueraDelPlanHtml(d);
 
   if (!d.lineas || !d.lineas.length) {
     html += '<div class="emp" style="padding:24px;text-align:center;margin-top:10px">Sin insumos para comprar. Cargá el objetivo y las recetas.</div>';
@@ -77796,10 +77819,58 @@ function pliCmpDetalle(insumoId) {
   if (btn) btn.textContent = '−';
 }
 
+// ── LO QUE LA RECETA USA HOY Y ESTE PLAN NO TIENE (V1105) ────────────────
+//
+// «Creé un insumo nuevo, y está en el plan… ¿por qué no me aparece para comprar?»
+// (Pablo, 28/10/2026). Estaba en la receta y el plan estaba confirmado: los
+// números de un plan confirmado están congelados A PROPÓSITO, así que el insumo
+// nuevo no entró. Pero la lista no lo decía — simplemente no lo tenía, que desde
+// la pantalla se lee igual que un error del sistema.
+//
+// El MISMO bloque en las dos pantallas donde se mira el plan: la solapa Planes,
+// que es donde está el botón de reabrir, y Comprar, que es donde se lo busca.
+function pliFueraDelPlanHtml(d) {
+  var fuera = (d && d.fuera_del_plan) || [];
+  if (!fuera.length) return '';
+  var congelado = d.origen === 'snapshot';
+  var porQue = {
+    receta_nueva: congelado
+      ? 'entró a la receta después de confirmar el plan'
+      : 'la receta lo usa pero el plan no lo tomó',
+    no_se_compra: 'no se compra',
+    unidad: 'la unidad de la receta no es la del insumo',
+    inexistente: 'el insumo ya no existe'
+  };
+  var h = '<div style="background:rgba(245,158,11,.12);border:1px solid var(--warn);'
+    + 'border-radius:8px;padding:10px 12px;font-size:12px;margin:8px 0 10px">'
+    + '<strong>' + (fuera.length === 1
+        ? 'Hay 1 insumo que la receta usa hoy y no está en este plan.'
+        : 'Hay ' + fuera.length + ' insumos que la receta usa hoy y no están en este plan.')
+    + '</strong><ul style="margin:6px 0 0 18px;padding:0">';
+  fuera.forEach(function(f) {
+    h += '<li><b>' + pliEsc(f.insumo) + '</b> — ' + pliEsc(porQue[f.motivo] || f.motivo)
+      + (f.detalle ? ': ' + pliEsc(f.detalle) : '') + '</li>';
+  });
+  h += '</ul>';
+  if (congelado && fuera.some(function(f) { return f.motivo === 'receta_nueva'; })) {
+    h += '<div style="margin-top:7px">Los números de un plan confirmado están <b>congelados</b>: '
+      + 'editar una receta ya no los cambia. Para que entre, <b>reabrí el plan y confirmalo de '
+      + 'nuevo</b> desde la solapa Planes. Mientras tanto se lo puede comprar igual con '
+      + '<b>+ Registrar compra</b>, que tiene todos los insumos.</div>';
+  }
+  return h + '</div>';
+}
+
+// Lo que las cuatro vistas de Comprar anteponen. UNA puerta: una vista nueva no
+// puede quedarse sin los avisos por olvidarse de llamar a dos funciones.
+function pliCmpAvisoBuckets() {
+  return pliCmpAvisoSnapshot() + pliFueraDelPlanHtml(PLI.cmpCalculo);
+}
+
 // Los planes confirmados antes de que se guardara el desglose semanal muestran
 // una agenda RECALCULADA sobre el snapshot congelado. Da lo mismo que ese día,
 // pero conviene decirlo en vez de presentarla como si viniera congelada.
-function pliCmpAvisoBuckets() {
+function pliCmpAvisoSnapshot() {
   var d = PLI.cmpCalculo || {};
   if (d.buckets_sin_recuperar) {
     return '<div style="background:rgba(239,68,68,.1);border:1px solid var(--err);border-radius:8px;'
@@ -77990,7 +78061,10 @@ function pliCmpRenderHechas(cont) {
     }
     return String(a.l.insumo_nombre).localeCompare(String(b.l.insumo_nombre), 'es');
   });
-  var html = '<div class="ab-table-wrap" style="margin-bottom:14px"><table class="pa-tbl" style="font-size:12px"><thead><tr>'
+  // Ésta es la vista que lista el plan ENTERO insumo por insumo, así que es donde
+  // más se nota el que no está: era la única de las cuatro sin el aviso común.
+  var html = pliCmpAvisoBuckets()
+    + '<div class="ab-table-wrap" style="margin-bottom:14px"><table class="pa-tbl" style="font-size:12px"><thead><tr>'
     // "Necesidad" y no "Requerido": es lo que el plan CONSUME, y no cambia
     // porque haya stock o compras. El requerido viejo salía del congelado neto y
     // daba 0 en cuanto el stock tapaba la necesidad.
