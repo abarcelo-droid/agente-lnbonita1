@@ -33,6 +33,7 @@ const CONDICIONALES = [
   { archivo: 'galpon_tarjetas_pdf.test.mjs', paquete: 'jspdf' },
   { archivo: 'galpon_router.test.mjs', paquete: 'express' },
   { archivo: 'contactos_tarjeta.test.mjs', paquete: 'express' },
+  { archivo: 'galpon_lote_dia_router.test.mjs', paquete: 'express' },
 ];
 
 const leer = (f) => fs.readFileSync(path.join(RAIZ, 'test', f), 'utf8');

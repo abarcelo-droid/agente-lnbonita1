@@ -36,44 +36,75 @@ const INDEX   = leer('src/index.js');
 // cada 95 columnas con `' + '`, así que casi cualquier frase que uno quiera buscar cae
 // justo arriba de un corte. Se saca la concatenación y queda la prosa corrida, que es lo
 // que el operador lee.
-const MANUAL = (() => {
-  const i = PANEL.indexOf("SG_MANUAL['galpon-config']");
-  assert.ok(i > 0, 'el módulo no tiene «¿Cómo se usa?» — escribirlo ES actualizarlo');
+function manualDe(modulo) {
+  const i = PANEL.indexOf("SG_MANUAL['" + modulo + "']");
+  assert.ok(i > 0, modulo + ' no tiene «¿Cómo se usa?» — escribirlo ES actualizarlo');
   return PANEL.slice(i, PANEL.indexOf('\n};', i))
     .replace(/'\s*\r?\n\s*\+\s*'/g, '');
-})();
+}
+const MANUAL    = manualDe('galpon-config');
+const MANUAL_LD = manualDe('galpon-lote-dia');
 
 // `assert.match` contra el manual escupe las 90 líneas enteras en cada fallo, y entre
 // tanto texto no se ve cuál era la frase. Esto dice sólo la que falta.
-function dice(frase, nota) {
-  const re = frase instanceof RegExp ? frase : new RegExp(frase);
-  assert.ok(re.test(MANUAL),
-    'EL MANUAL NO DICE: ' + (frase.source || frase) + (nota ? '\n  (' + nota + ')' : ''));
+function lector(texto) {
+  return function (frase, nota) {
+    const re = frase instanceof RegExp ? frase : new RegExp(frase);
+    assert.ok(re.test(texto),
+      'EL MANUAL NO DICE: ' + (frase.source || frase) + (nota ? '\n  (' + nota + ')' : ''));
+  };
 }
+const dice   = lector(MANUAL);
+const diceLd = lector(MANUAL_LD);
 
-// ── 1 · LAS CINCO PIEZAS DEL REGISTRO ─────────────────────────────────────
-test('el módulo se registra SIEMPRE, no sólo con la tabla vacía', () => {
+// ── 1 · LAS CINCO PIEZAS DEL REGISTRO, PARA TODOS LOS MÓDULOS ─────────────
+// Antes esto auditaba 'galpon-config' escrito a mano cinco veces. Con el módulo
+// número dos esa lista se vuelve lo mismo que la de modales_fuera_de_pantalla:
+// protege lo que alguien se acordó de anotar, y el tercero que alguien escriba
+// mañana queda afuera.
+//
+// Así que la lista sale del PROPIO ensure: cada módulo que se registre entra al
+// audit solo.
+const MODULOS = [...ENSURE.matchAll(/\['(galpon-[\w-]+)',\s*'([^']+)',\s*(\d+)\]/g)]
+  .map((m) => ({ modulo: m[1], label: m[2] }));
+
+test('hay módulos que auditar, y salen del ensure, no de una lista a mano', () => {
+  assert.ok(MODULOS.length >= 2, 'sólo encontré ' + MODULOS.length + ': el regex se rompió');
+  assert.ok(MODULOS.some((m) => m.modulo === 'galpon-config'));
+  assert.ok(MODULOS.some((m) => m.modulo === 'galpon-lote-dia'));
+});
+
+test('cada módulo se registra SIEMPRE, no sólo con la tabla vacía', () => {
   // El seed de db_org.js hace `if (n > 0) return`: agregar una fila a ese array
   // no hace nada en producción, donde la tabla ya tiene filas.
   assert.match(ENSURE, /INSERT OR IGNORE INTO modulos_config/);
-  assert.match(ENSURE, /'galpon-config'/);
   assert.match(ORG, /^import "\.\/ensure_modulo_galpon\.js";$/m,
     'el ensure existe pero nadie lo importa: no corre nunca');
+  for (const { label } of MODULOS) {
+    // El emoji va en el LABEL: el sidebar no tiene mapa de íconos para galpon-* y
+    // usa el primero del texto. Sin emoji el ítem sale pelado.
+    assert.ok(/^[^\w\s]/.test(label), 'el label no arranca con emoji: ' + label);
+  }
 });
 
-test('EL PREFIJO DE LA API ESTÁ DECLARADO, o exigirNivel deja pasar a cualquiera', () => {
-  // Sin esta línea moduloDeRuta devuelve null, el guardián no resuelve el módulo
-  // y el nivel que el admin marcó en Usuarios no se aplica.
-  const m = /\['galpon-config',\s*'([^']+)'\]/.exec(PREFIJOS);
-  assert.ok(m, 'galpon-config no está en ensure_api_prefijos.js');
+test('LOS PREFIJOS DE LA API ESTÁN DECLARADOS, o exigirNivel deja pasar a cualquiera', () => {
+  // Sin la línea, moduloDeRuta devuelve null, el guardián no resuelve el módulo y
+  // el nivel que el admin marcó en Usuarios no se aplica a nadie.
+  const declaradas = [];
+  for (const { modulo } of MODULOS) {
+    const m = new RegExp("\\['" + modulo + "',\\s*'([^']+)'\\]").exec(PREFIJOS);
+    assert.ok(m, modulo + ' no está en ensure_api_prefijos.js');
+    for (const d of m[1].split(',')) declaradas.push(d.trim().replace(/^galpon\//, ''));
+  }
   // Y están TODAS las direcciones que el router monta, no las que alguien recordó.
-  const declaradas = m[1].split(',').map((x) => x.trim().replace(/^galpon\//, ''));
+  // Cada una tiene que caer bajo ALGÚN módulo del galpón: a qué menú pertenece lo
+  // decide el que la escribió, pero quedar afuera de todos no es una opción.
   for (const r of RUTA.matchAll(/router\.(get|post|put|patch|delete)\('\/([^'/?]+)/g)) {
     assert.ok(declaradas.some((d) => r[2].startsWith(d.split('.')[0])),
-      'la ruta /' + r[2] + ' no está cubierta por el prefijo declarado');
+      'la ruta /' + r[2] + ' no está cubierta por ningún prefijo declarado');
   }
-  // Y NO se declara el prefijo pelado: le daría las rutas de los cuatro módulos
-  // del galpón a un solo menú. Es la trampa que el propio archivo advierte.
+  // Y NO se declara el prefijo pelado: le daría las rutas de los siete módulos del
+  // galpón a un solo menú. Es la trampa que el propio archivo advierte.
   assert.ok(!/\[\s*'galpon[^']*',\s*'galpon'\s*\]/.test(PREFIJOS), 'se declaró el prefijo pelado');
 });
 
@@ -82,17 +113,20 @@ test('el router está montado', () => {
   assert.match(INDEX, /app\.use\("\/api\/galpon",\s*galponRouter\);/);
 });
 
-test('LAS DOS PIEZAS DEL SIDEBAR, que hacen falta juntas', () => {
+test('LAS DOS PIEZAS DEL SIDEBAR, que hacen falta juntas, y el dispatcher', () => {
   // El sidebar de verdad lo arma /api/org/sidebar filtrado por permisos, y lo que
-  // hace es CLICKEAR este div escondido. Con una sola de las dos no pasa nada.
-  assert.match(PANEL, /<div class="ni" data-sec="galpon-config">/);
-  assert.match(PANEL, /<div class="sec sg-mod" id="sec-galpon-config">/);
-});
-
-test('y el dispatcher la sabe abrir', () => {
-  // Sin esta línea la pantalla aparece vacía: el HTML está, pero nada la carga.
-  assert.match(PANEL, /'galpon-config': function\(\)\{ galInit\(\); \}/);
-  assert.match(PANEL, /function galInit\(/);
+  // hace es CLICKEAR el div escondido. Con una sola de las dos no pasa nada, y sin
+  // la del dispatcher la pantalla abre vacía: el HTML está, pero nadie la carga.
+  for (const { modulo } of MODULOS) {
+    assert.match(PANEL, new RegExp('<div class="ni" data-sec="' + modulo + '">'),
+      'falta el puente del nav de ' + modulo);
+    assert.match(PANEL, new RegExp('<div class="sec sg-mod" id="sec-' + modulo + '">'),
+      'falta la pantalla de ' + modulo);
+    const d = new RegExp("'" + modulo + "': function\\(\\)\\{ (\\w+)\\(\\); \\}").exec(PANEL);
+    assert.ok(d, 'falta la línea del dispatcher de ' + modulo);
+    assert.ok(PANEL.includes('function ' + d[1] + '('),
+      'el dispatcher de ' + modulo + ' llama a ' + d[1] + '(), que no está definida');
+  }
 });
 
 // ── 2 · EL MANUAL, CONTRA EL CÓDIGO ───────────────────────────────────────
@@ -194,9 +228,12 @@ test('MANUAL: «esta pantalla es de Puente Cordón»', () => {
   assert.match(RUTA, /exigirEmpresa\(req, res, PUENTE_CORDON\)/);
 });
 
-test('y el manual lleva el V### al lado de cada cosa, como pide CLAUDE.md', () => {
+test('y cada manual lleva el V### al lado de cada cosa, como pide CLAUDE.md', () => {
+  for (const [nombre, texto] of [['config', MANUAL], ['lote del día', MANUAL_LD]]) {
+    const v = [...texto.matchAll(/<span class="ver">(V\d+)<\/span>/g)].map((m) => m[1]);
+    assert.ok(v.length >= 5, nombre + ': sólo ' + v.length + ' entradas numeradas');
+  }
   const vers = [...MANUAL.matchAll(/<span class="ver">(V\d+)<\/span>/g)].map((m) => m[1]);
-  assert.ok(vers.length >= 6, 'sólo ' + vers.length + ' entradas numeradas');
   assert.equal(new Set(vers).size, 1, 'hay versiones mezcladas: ' + [...new Set(vers)].join(', '));
   // Y no puede ser del futuro. Antes esto exigía que fuera IGUAL al VERSION del panel,
   // y estaba mal: una entrada del manual lleva la versión en la que salió y se queda con
@@ -225,4 +262,212 @@ test('Y CADA ABRIDOR DEJA LA VENTANA EN BLANCO', () => {
       abr.includes(id) ? id + ' no se limpia al abrir' : 'falta ' + id);
   }
   assert.match(abr, /gal-rg-error'\)\.style\.display = 'none'/);
+});
+
+// ══════════════════════════════════════════════════════════════════════════
+// 4 · MANUAL LOTE DEL DÍA, CONTRA EL CÓDIGO
+// ══════════════════════════════════════════════════════════════════════════
+// Cada afirmación con su assert al lado. Lo que se clava no es que el texto
+// exista —eso no prueba nada— sino que lo que promete siga pasando.
+
+// El JS de la pantalla, recortado del panel.
+const JS_LD = (() => {
+  const i = PANEL.indexOf('var GLD =');
+  assert.ok(i > 0, 'no encontré el JS de la pantalla');
+  return PANEL.slice(i, PANEL.indexOf('</script>', i));
+})();
+
+test('MANUAL LD: «el IFCO de las 14:30 es del lote vigente a las 14:30»', () => {
+  diceLd(/vigente <b>a las '?\n?14:30/);
+  diceLd(/el último cambio cuya hora ya pasó/);
+  // Y la regla es literalmente ésa: el último tramo del día cuya hora ya pasó.
+  assert.match(SERV, /WHERE fecha = \? AND desde_hora <= \?/);
+  assert.match(SERV, /ORDER BY desde_hora DESC, id DESC LIMIT 1/);
+});
+
+test('MANUAL LD: «el primero se propone a las 00:00, el cambio necesita su hora»', () => {
+  diceLd(/por eso el primero se propone a las <b>00:00<\/b>/);
+  // Lo decide el SERVIDOR mirando si el día ya tiene tramos: si lo decidiera la
+  // pantalla, el que llama por fuera del panel dejaría la mañana sin cubrir.
+  assert.match(RUTA, /const hora = hhmm\(b\.desde_hora\) \|\| \(hayTramos \? null : '00:00'\);/);
+  assert.match(RUTA, /Un cambio de lote necesita su hora/);
+});
+
+test('MANUAL LD: «un cambio es otra fila; la de la mañana no se borra»', () => {
+  diceLd(/No se borra la anterior/);
+  diceLd(/sigue explicando los kilos de la mañana/);
+  // Cargar un cambio INSERTA. Si actualizara la fila anterior, el tramo de la
+  // mañana desaparecería y con él la explicación de sus kilos.
+  const post = RUTA.slice(RUTA.indexOf("router.post('/lote-dia'"),
+                          RUTA.indexOf('function tramoEditable('));
+  assert.match(post, /INSERT INTO gal_lote_vigente/);
+  assert.ok(!/UPDATE gal_lote_vigente/.test(post), 'cargar un cambio pisa el tramo anterior');
+});
+
+test('MANUAL LD: «el hueco de la mañana se avisa, y el arreglo viene en un botón»', () => {
+  diceLd(/El error más fácil de cometer/);
+  diceLd(/Que arranque a las 00:00/);
+  assert.match(SERV, /export function huecoDelDia\(/);
+  // Y no se reporta hueco en un día que arranca a las 00:00, que no tiene ninguno.
+  assert.match(SERV, /if \(!primero \|\| primero\.desde_hora === '00:00'\) return null;/);
+  // El botón existe y hace el PATCH, no manda a corregirlo a otro lado.
+  assert.match(JS_LD, /onclick="galLdDesde00\(/);
+  assert.match(JS_LD, /body: JSON\.stringify\(\{ desde_hora:'00:00' \}\)/);
+});
+
+test('MANUAL LD: «EL CARTEL LO RESUELVE EL SERVIDOR, no la pantalla»', () => {
+  diceLd(/Lo resuelve el <b>servidor<\/b>/);
+  diceLd(/el cartel diría un lote y el volcado guardaría otro/);
+  // Viene resuelto en la respuesta del día...
+  assert.match(RUTA, /vigente: fecha === hoy\(\) \? \(function\(\)\{ const v = loteVigente\(db, fecha, ahora\(\)\);/);
+  // ...y la pantalla lo USA en vez de recalcularlo. Ésta es la mitad que importa:
+  // si el navegador volviera a comparar horas, serían dos copias de la única cosa
+  // que este módulo tiene que contestar igual en los dos lados.
+  assert.match(JS_LD, /if \(!j\.vigente\)/);
+  assert.match(JS_LD, /j\.vigente\.lote_nombre/);
+  assert.ok(!/desde_hora\s*<=/.test(JS_LD),
+    'la pantalla volvió a implementar la regla del vigente por su cuenta');
+});
+
+test('MANUAL LD: «mirando otro día no hay “ahora mismo”»', () => {
+  diceLd(/no hay un «ahora mismo» del martes/);
+  assert.match(RUTA, /fecha === hoy\(\)/);
+  assert.match(JS_LD, /if \(j\.fecha !== j\.hoy\)\{ el\.style\.display = 'none'; return; \}/);
+});
+
+test('MANUAL LD: «el producto se propone con el cultivo y queda editable»', () => {
+  diceLd(/Se propone el\s*cultivo que tiene cargado el lote|se propone con el cultivo/);
+  diceLd(/queda\s*editable/);
+  assert.match(SERV, /export function lotesParaElDia\(/);
+  // Es un campo de texto, no un espejo del cultivo: el cultivo dice qué árbol hay
+  // plantado, y lo que entra al galpón un martes lo sabe el que está ahí.
+  assert.match(PANEL, /<input type="text" id="gal-ld-prod"/);
+  assert.ok(!/id="gal-ld-prod"[^>]*readonly/.test(PANEL), 'el producto quedó de sólo lectura');
+  // Y el autocompletado no pisa lo tipeado a mano.
+  assert.match(JS_LD, /if \(!p\.value \|\| p\.value === GLD\.sug\) p\.value = cultivo;/);
+});
+
+test('MANUAL LD: «el cultivo que se propone es el perenne, no el de la campaña activa»', () => {
+  // Hay DOS campañas activas a la vez (anual y estacional), así que «activa = 1
+  // LIMIT 1» devuelve una de las dos sin criterio.
+  assert.match(SERV, /ORDER BY c2\.es_perenne DESC, c2\.campaña DESC LIMIT 1/);
+  // Contra el CUERPO de la función, no contra el archivo entero: el comentario de
+  // arriba cita la consulta mala para explicar por qué no se usa, y buscarla en el
+  // texto completo daba rojo por la explicación.
+  const cuerpo = SERV.slice(SERV.indexOf('export function lotesParaElDia('),
+                            SERV.indexOf('export function volcadosEnTramo('));
+  assert.ok(cuerpo.length > 200, 'no encontré el cuerpo de lotesParaElDia');
+  assert.ok(!/activa\s*=\s*1/.test(cuerpo), 'volvió a colgarse de la campaña activa');
+});
+
+test('MANUAL LD: «propone el último lote, PERO HAY QUE APRETAR CARGAR»', () => {
+  diceLd(/nada se arrastra\s*solo de un día al otro/);
+  diceLd(/La\s*propuesta ahorra tipeo; el botón es la decisión/);
+  const abrir = JS_LD.slice(JS_LD.indexOf('function galLdAbrir('),
+                            JS_LD.indexOf('function galLdCerrar('));
+  assert.match(abrir, /GLD\.tramos\[GLD\.tramos\.length - 1\]/, 'ya no propone el último');
+  // Y abrir la ventana NO guarda nada: la propuesta es una propuesta.
+  assert.ok(!/fetch\(/.test(abrir), 'abrir la ventana manda algo al servidor');
+});
+
+test('MANUAL LD: «con volcados encima el tramo no se toca» — y lo dice el servidor', () => {
+  diceLd(/aparece un <b>candado<\/b>/);
+  diceLd(/congelado/);
+  diceLd(/corregí esos volcados|corrige son <b>los volcados/);
+  assert.match(SERV, /export function volcadosEnTramo\(/);
+  assert.match(RUTA, /function tramoEditable\(id\)/);
+  // Las DOS acciones pasan por el mismo guardián: una sola puerta.
+  for (const re of [/router\.patch\('\/lote-dia\/:id'[\s\S]{0,200}?tramoEditable/,
+                    /router\.delete\('\/lote-dia\/:id'[\s\S]{0,200}?tramoEditable/]) {
+    assert.match(RUTA, re, 'una de las dos acciones no pasa por tramoEditable');
+  }
+  // Y la pantalla no ofrece el botón que va a contestar 409: el que lo aprieta
+  // cree que rompió algo.
+  assert.match(JS_LD, /var trabado = !!t\.volcados;/);
+  assert.match(JS_LD, /🔒/);
+});
+
+test('MANUAL LD: «mientras no exista el volcado, null no es cero»', () => {
+  // null = todavía no hay dónde mirar; 0 = miré y no hay. Sin la diferencia, la
+  // pantalla pondría el candado el día que exista la tabla y esté vacía.
+  assert.match(SERV, /name='gal_volcados'/);
+  assert.match(SERV, /if \(!hay\) return null;/);
+});
+
+test('MANUAL LD: «dos lotes a la misma hora se rechazan»', () => {
+  diceLd(/Dos lotes a la misma hora se rechazan/);
+  diceLd(/seguiría apareciendo en la lista/);
+  assert.match(SERV, /export function tramoChoca\(/);
+  assert.match(RUTA, /const choca = tramoChoca\(db, fecha, hora\);/);
+  assert.match(RUTA, /res\.status\(409\)/);
+  // Y abajo el cinturón: aunque entre por otro lado, la base no lo deja.
+  assert.match(DDL, /CREATE UNIQUE INDEX IF NOT EXISTS gal_lote_vig_uq ON gal_lote_vigente\(fecha, desde_hora\)/);
+});
+
+test('MANUAL LD: «la hora se guarda con el cero adelante»', () => {
+  // No está en el manual porque al operador no le importa: lo escribe el sistema.
+  // Pero es el bug más silencioso del módulo y el servidor es quien lo evita.
+  assert.match(SERV, /export function hhmm\(v\)/);
+  assert.match(SERV, /String\(h\)\.padStart\(2, '0'\)/);
+  assert.match(RUTA, /hhmm\(b\.desde_hora\)/);
+});
+
+test('MANUAL LD: «esto NO es parametrizar: lo carga el que abre el galpón»', () => {
+  diceLd(/no es parametrizar/);
+  diceLd(/el dueño cargándolo por teléfono/);
+  // Ninguna de las rutas del lote del día pide admin. Es la regla de CLAUDE.md:
+  // operar no es ser admin.
+  for (const re of [/router\.get\('\/lote-dia'[^\n]*/, /router\.get\('\/lote-vigente'[^\n]*/,
+                    /router\.get\('\/lotes'[^\n]*/, /router\.post\('\/lote-dia'[^\n]*/,
+                    /router\.patch\('\/lote-dia\/:id'[^\n]*/, /router\.delete\('\/lote-dia\/:id'[^\n]*/]) {
+    const linea = (RUTA.match(re) || [''])[0];
+    assert.ok(linea, 'no encontré la ruta ' + re);
+    assert.ok(!/requireAdmin/.test(linea), 'el trabajo del día quedó pedido a admin: ' + linea);
+  }
+  // Y el nivel lo decide exigirNivel por la URL, que es lo que hace que esto no
+  // sea una pantalla abierta a cualquiera con sesión.
+  assert.match(PREFIJOS, /\['galpon-lote-dia', 'galpon\/lote-dia,galpon\/lote-vigente,galpon\/lotes'\]/);
+});
+
+test('MANUAL LD: «sin lote cargado el IFCO se guarda igual, marcado para revisar»', () => {
+  diceLd(/se guarda igual/);
+  diceLd(/marcado para revisar/);
+  // El principio del módulo: la fruta ya está en la tolva. /lote-vigente contesta
+  // 200 con ok:false adentro, nunca 404 — un 404 dejaría al que pregunta sin
+  // saber qué hacer con el IFCO.
+  const g = RUTA.slice(RUTA.indexOf("router.get('/lote-vigente'"),
+                       RUTA.indexOf("router.post('/lote-dia'"));
+  assert.ok(!/status\(4\d\d\)/.test(g), '/lote-vigente aprendió a rechazar');
+  assert.match(g, /res\.json\(Object\.assign\(\{ fecha, hora \}, loteVigente\(db, fecha, hora\)\)\);/);
+});
+
+test('MANUAL LD: «los lotes salen de Producción, acá no se dan de alta»', () => {
+  diceLd(/Producción → Lotes/);
+  diceLd(/no se dan de\s*alta/);
+  assert.match(SERV, /FROM pa_lotes l/);
+  assert.ok(!/INSERT INTO pa_lotes|ALTER TABLE pa_lotes/.test(RUTA + SERV + DDL),
+    'el galpón le escribe a la tabla de otro módulo');
+});
+
+test('la pantalla del lote del día tampoco se arrastra de costado', () => {
+  assert.match(PANEL, /#sec-galpon-lote-dia \.ab-table-wrap\{overflow-x:hidden !important\}/);
+  assert.match(PANEL, /#sec-galpon-lote-dia \.gld-tbl\{table-layout:fixed/);
+  assert.match(PANEL, /@media\(max-width:900px\)\{ #sec-galpon-lote-dia \.ab-table-wrap\{overflow-x:auto !important\}/);
+});
+
+test('Y SU VENTANA TAMBIÉN SE ABRE EN BLANCO', () => {
+  // Un formulario que sólo se esconde CONSERVA lo que tenía. Acá eso sería cargar
+  // el lote que se tipeó y se canceló hace un rato, con la hora de aquel momento.
+  const abrir = JS_LD.slice(JS_LD.indexOf('function galLdAbrir('),
+                            JS_LD.indexOf('function galLdCerrar('));
+  assert.match(abrir, /gal-ld-error'\)\.style\.display = 'none'/);
+  assert.match(abrir, /GLD\.sug = '';/);
+  // Los tres campos se escriben SIEMPRE, por las dos ramas: la de corregir toma
+  // los valores del tramo y la de cargar los propone. Ninguna los deja como
+  // estaban.
+  for (const id of ['gal-ld-prod', 'gal-ld-hora']) {
+    const n = (abrir.match(new RegExp("getElementById\\('" + id + "'\\)\\.value =", 'g')) || []).length;
+    assert.ok(n >= 2, id + ' no se escribe en las dos ramas del abridor (' + n + ')');
+  }
+  assert.ok((abrir.match(/sel\.value =/g) || []).length >= 2, 'el select no se fija en las dos ramas');
 });

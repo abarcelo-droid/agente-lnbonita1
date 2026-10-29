@@ -71,6 +71,13 @@ const PREFIJOS = [
   // direcciones: el prefijo pelado 'galpon' le daría las rutas de los cuatro a un solo
   // menú, que es la trampa que este archivo advierte arriba.
   ['galpon-config', 'galpon/config,galpon/cuadrillas,galpon/tarjetas'],
+  // El lote del día es OPERATIVO, no parametrización: lo carga el que abre el galpón
+  // todas las mañanas. Por eso el router no pide admin y el nivel lo decide esta línea.
+  //
+  // `galpon/lotes` (la lista entre la que se elige) va acá y no en galpon-config: la
+  // usa esta pantalla y nadie más, y un prefijo compartido le daría a un menú las
+  // direcciones del otro.
+  ['galpon-lote-dia', 'galpon/lote-dia,galpon/lote-vigente,galpon/lotes'],
   // P&L ABASTO (V1052). Router propio de un solo módulo: subir el libro diario y guardar
   // los rubros pide 'operar'.
   ['pl-abasto', 'pl-abasto'],

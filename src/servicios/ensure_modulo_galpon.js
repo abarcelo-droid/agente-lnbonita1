@@ -14,7 +14,12 @@
 // más adelante, los costos. Con un módulo único y solapas adentro, el permiso es todo o
 // nada y la única forma de limitarlo es no dárselo.
 //
-// Acá se registra el primero. Los demás (volcado, tablero, costos) entran con su PR.
+// Acá se registran los que hay. Los demás (volcado, tablero, costos) entran con su PR.
+//
+// Y el orden del array NO es decorativo: el sidebar los muestra por `orden`, y el
+// galpón se usa de arriba hacia abajo —primero se configura una vez por temporada,
+// después se carga el lote todas las mañanas—. Un menú ordenado por cuándo se toca
+// cada cosa es un recordatorio del circuito; ordenado alfabéticamente no es nada.
 //
 // ── Y VA EN SU PROPIO GRUPO ─────────────────────────────────────────────────────────
 // No en Abasto SG: el galpón es de Puente Cordón, que produce. San Gerónimo comercializa.
@@ -30,7 +35,8 @@ try {
   // El emoji VA en el label: el sidebar no tiene mapa de íconos para galpon-* y usa el
   // emoji inicial del label.
   const MODULOS = [
-    ['galpon-config', '⚙️ Galpón · Configuración', 700],
+    ['galpon-config',   '⚙️ Galpón · Configuración', 700],
+    ['galpon-lote-dia', '🗓️ Galpón · Lote del día',  701],
   ];
 
   const ins = db.prepare(
