@@ -4617,8 +4617,61 @@ router.post('/recepciones-proveedor/:id/restaurar', function(req, res) {
 // OCR — Lectura automática de remitos IFCO con Claude vision
 // ════════════════════════════════════════════════════════════════════════════
 
+// ── EL SERVIDOR SE ACUERDA DE QUE EL LECTOR ESTÁ CAÍDO ──────────────────────────────
+// El arreglo de la V1092 dejó salida: cuando la foto falla, la app ofrece cargar a mano.
+// Pero la salida aparece DESPUÉS de sacar la foto y de esperar a que el OCR falle, y eso
+// está bien una vez. Con la cuenta sin crédito dos semanas son, por cada remito, una foto
+// inútil y cuarenta segundos de espera para llegar al mismo formulario.
+//
+// Andy, 29/10/2026: «estoy pensando si mejor habilitamos el cargado manual, así los
+// chicos pueden seguir trabajando».
+//
+// Así que el servidor se acuerda: la primera caída lo deja anotado, `/ocr/status` lo
+// cuenta, y la app entra directo al formulario en vez de invitar a una foto que ya sabe
+// que no se va a poder leer. Una lectura buena lo borra sola — cuando vuelva el crédito,
+// nadie tiene que acordarse de destrabar nada.
+//
+// EN MEMORIA Y NO EN UNA TABLA, a propósito. Esto no es un dato del negocio: es lo que
+// pasó en la última llamada. Después de un reinicio el primer remito del día paga una
+// foto de más y el estado se vuelve a armar solo — guardarlo en la base sería inventar
+// una fila que hay que migrar, respaldar y limpiar para no repetir UNA espera.
+let _ocrCaido = null;   // { desde, operador, admin } mientras esté caído; null si anda
+
+function _ocrAnotarCaida(m) {
+  if (!m || !m.caido) return;
+  // La primera caída manda: lo que interesa es desde CUÁNDO no anda, no cuál fue el
+  // último intento. Si cada llamada pisara la fecha, «caído desde hace dos semanas» se
+  // leería siempre como «caído desde hace un minuto».
+  if (_ocrCaido) return;
+  _ocrCaido = { desde: new Date().toISOString(), operador: m.operador, admin: m.admin };
+  console.error('[IFCO][OCR] lector marcado como CAÍDO: ' + m.admin);
+}
+
+function _ocrAnotarOk() {
+  if (!_ocrCaido) return;
+  console.log('[IFCO][OCR] el lector volvió a leer: se levanta la marca de caído');
+  _ocrCaido = null;
+}
+
 router.get('/ocr/status', function(req, res) {
-  res.json({ enabled: OCR_ENABLED && !!ANTHROPIC_API_KEY, model: OCR_MODEL });
+  const prendido = OCR_ENABLED && !!ANTHROPIC_API_KEY;
+  res.json({
+    // `enabled` es lo que ya leía el panel (ifco2.js, panel.html): no cambia de
+    // significado ni se le agrega sentido nuevo, para no tocar lo que hoy funciona.
+    enabled: prendido,
+    model: OCR_MODEL,
+    // Lo nuevo. Apagado por configuración y caído por falta de crédito son dos causas
+    // distintas, y para el que está parado con el remito en la mano son lo mismo: el
+    // lector no está. Por eso se contestan juntas.
+    caido: prendido ? !!_ocrCaido : true,
+    desde: _ocrCaido ? _ocrCaido.desde : null,
+    motivo_operador: prendido
+      ? (_ocrCaido ? _ocrCaido.operador : null)
+      : 'El lector de remitos está apagado. Cargá los remitos a mano.',
+    motivo_admin: prendido
+      ? (_ocrCaido ? _ocrCaido.admin : null)
+      : 'OCR deshabilitado o sin ANTHROPIC_API_KEY.',
+  });
 });
 
 // ── CUANDO EL LECTOR DE REMITOS SE CAE ───────────────────────────────────────────────
@@ -4798,9 +4851,11 @@ router.post('/ocr/remito-super', upload.single('foto'), async function(req, res)
       escaneo_path: escaneo_path,
       tokens: message.usage || null
     });
+    _ocrAnotarOk();
   } catch(e) {
     // El motivo técnico va al log, no a la cara del que está cargando el remito.
     const m = _motivoOcr(e);
+    _ocrAnotarCaida(m);
     console.error('[IFCO][OCR] ' + m.admin + ' — ' + m.crudo);
     res.status(502).json({
       error: m.operador,
@@ -4894,8 +4949,10 @@ router.post('/ocr/match-sellado', upload.single('foto'), async function(req, res
     const texto = (message.content || []).filter(b=>b.type==='text').map(b=>b.text).join('\n');
     const datos = _extraerJson(texto);
     nRemito = (datos && datos.n_remito_ifco) ? String(datos.n_remito_ifco).trim() : null;
+    _ocrAnotarOk();
   } catch(e) {
     const m = _motivoOcr(e);
+    _ocrAnotarCaida(m);
     console.error('[IFCO][match-sellado] ' + m.admin + ' — ' + m.crudo);
     return res.status(502).json({
       error: m.operador,
