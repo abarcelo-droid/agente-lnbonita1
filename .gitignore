@@ -25,4 +25,5 @@ migracion/
 __pycache__/
 *.pyc
 .tmp-galpon-*/
+.tmp-galld-*/
 .tmp-ctj-*/

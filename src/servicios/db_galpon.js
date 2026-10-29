@@ -98,6 +98,13 @@ db.exec(`
 for (const sql of [
   "ALTER TABLE gal_cuadrilla_tarjetas ADD COLUMN notas TEXT",
   "ALTER TABLE gal_lote_vigente ADD COLUMN producto TEXT",
+  // DOS TRAMOS A LA MISMA HORA DEL MISMO DÍA NO PUEDEN EXISTIR. loteVigente ordena por
+  // hora y después por id, así que el segundo le gana al primero EN SILENCIO: el tramo
+  // de la mañana queda listado en la pantalla, se ve igualito, y no atribuye un kilo.
+  //
+  // El router lo corta antes con un 409 que dice con qué se pisa —eso es lo que lee el
+  // operador—; esto es el cinturón de abajo, para lo que entre por otro lado.
+  "CREATE UNIQUE INDEX IF NOT EXISTS gal_lote_vig_uq ON gal_lote_vigente(fecha, desde_hora)",
 ]) { try { db.exec(sql); } catch (_) {} }
 
 // ── LOS VALORES QUE TIENEN QUE EXISTIR DESDE EL DÍA UNO ──────────────────────────────

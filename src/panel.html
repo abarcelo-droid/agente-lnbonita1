@@ -286,6 +286,7 @@ input[type=number]{-moz-appearance:textfield;appearance:textfield}
     <div class="ni" data-sec="contactos"><span class="dot dc"></span>📇 Contactos</div>
     <div class="ni" data-sec="ia-uso"><span class="dot da"></span>⚡ Consumo de IA</div>
     <div class="ni" data-sec="galpon-config"><span class="dot da"></span>⚙️ Galpón · Configuración</div>
+    <div class="ni" data-sec="galpon-lote-dia"><span class="dot da"></span>🗓️ Galpón · Lote del día</div>
   </div>
 
   <div class="ni-grp" data-grp="ven-ventas">Administración de Ventas<span class="ni-caret">▾</span></div>
@@ -7090,6 +7091,110 @@ input[type=number]{-moz-appearance:textfield;appearance:textfield}
       <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:14px">
         <button class="btn bo" onclick="galPrintCerrar()">Cancelar</button>
         <button class="btn bp" onclick="galPrintIr()">Abrir el PDF</button>
+      </div>
+    </div>
+  </div>
+
+
+  <div class="sec sg-mod" id="sec-galpon-lote-dia">
+    <style>
+      /* SIN BARRA DE DESPLAZAMIENTO LATERAL (CLAUDE.md): anchos por columna, se parte
+         sólo el nombre del lote —lo único de largo variable— y el resto se trunca. */
+      #sec-galpon-lote-dia .gld-tbl{table-layout:fixed;width:100%;max-width:98vw}
+      #sec-galpon-lote-dia .gld-tbl th,#sec-galpon-lote-dia .gld-tbl td{
+        white-space:nowrap;overflow:hidden;text-overflow:ellipsis;vertical-align:middle}
+      #sec-galpon-lote-dia .gld-tbl td.gld-w,#sec-galpon-lote-dia .gld-tbl th.gld-w{
+        white-space:normal;word-break:break-word}
+      #sec-galpon-lote-dia .ab-table-wrap{overflow-x:hidden !important}
+      @media(max-width:900px){ #sec-galpon-lote-dia .ab-table-wrap{overflow-x:auto !important}
+                               #sec-galpon-lote-dia .gld-tbl{table-layout:auto} }
+      #sec-galpon-lote-dia .gld-h{font-variant-numeric:tabular-nums;font-weight:600}
+
+      /* EL CARTEL DE ARRIBA. Es lo único que mira el que entra: qué se está cosechando
+         ahora mismo. Grande, porque se lee de pie y de paso. */
+      #sec-galpon-lote-dia .gld-ahora{border:1px solid var(--bor);border-radius:12px;
+        padding:16px 18px;margin-bottom:16px;display:flex;align-items:center;gap:16px;
+        flex-wrap:wrap}
+      #sec-galpon-lote-dia .gld-ahora.si{border-color:#2a9d8f;background:rgba(42,157,143,.07)}
+      #sec-galpon-lote-dia .gld-ahora.no{border-color:#d62828;background:rgba(214,40,40,.07)}
+      #sec-galpon-lote-dia .gld-ahora .gld-k{font-size:11px;color:var(--mut);
+        text-transform:uppercase;letter-spacing:.4px}
+      #sec-galpon-lote-dia .gld-ahora .gld-v{font-size:22px;font-weight:700;line-height:1.2}
+      #sec-galpon-lote-dia .gld-ahora .gld-sub{font-size:12.5px;color:var(--mut);margin-top:2px}
+
+      #sec-galpon-lote-dia .gld-fecha{display:flex;gap:8px;align-items:center;
+        flex-wrap:wrap;margin-bottom:14px}
+      #sec-galpon-lote-dia .gld-fecha input{padding:6px 9px;border:1px solid var(--bor);
+        border-radius:7px;font-size:13px;background:var(--bg);color:var(--fg)}
+      #sec-galpon-lote-dia .gld-vacio{text-align:center;padding:34px;color:var(--mut);font-size:13px}
+      #sec-galpon-lote-dia .gld-cand{font-size:11px;color:var(--mut);font-style:italic}
+    </style>
+
+    <div class="ph">
+      <div><div class="ph-t">🗓️ Galpón · Lote del día</div>
+        <div class="ph-s">Qué se está cosechando y desde qué hora. Cada IFCO que se vuelca
+          se queda con el lote que estaba vigente a SU hora.</div></div>
+      <div style="display:flex;gap:8px">
+        <button class="btn bp bs" onclick="galLdAbrir()">+ Cargar lote</button>
+        <button class="btn bo bs" onclick="sgManualAbrir('galpon-lote-dia')">❓ ¿Cómo se usa?</button></div>
+    </div>
+
+    <!-- ── QUÉ SE ESTÁ COSECHANDO AHORA ───────────────────────────────────────────
+         Lo primero y lo más grande. El que entra a esta pantalla entra a contestarse
+         esa pregunta, y si falta el lote tiene que verlo desde la puerta. -->
+    <div id="gld-ahora" class="gld-ahora" style="display:none"></div>
+
+    <div class="gld-fecha">
+      <label style="font-size:12px;color:var(--mut)">Día</label>
+      <input type="date" id="gld-fecha" onchange="galLdCargar()">
+      <button class="btn bo bs" onclick="galLdHoy()">Hoy</button>
+    </div>
+
+    <!-- El hueco de la mañana. Se arregla con un botón porque la causa es siempre la
+         misma: el que cargó puso la hora a la que estaba cargando, no desde cuándo vale. -->
+    <div id="gld-hueco" class="ojo" style="display:none;margin-bottom:12px"></div>
+
+    <div class="ab-table-wrap">
+      <table class="pa-tbl gld-tbl">
+        <colgroup><col style="width:16%"><col style="width:30%"><col style="width:20%">
+                  <col style="width:18%"><col style="width:16%"></colgroup>
+        <thead><tr>
+          <th>Desde — hasta</th><th class="gld-w">Lote</th><th class="gld-w">Producto</th>
+          <th>Lo cargó</th><th></th>
+        </tr></thead>
+        <tbody id="gld-body"></tbody>
+      </table>
+    </div>
+  </div>
+
+
+  <!-- ── CARGAR EL LOTE, O UN CAMBIO DE LOTE ──────────────────────────────────────
+       Fuera de toda .sec, y no se cierra al clic afuera: las dos reglas de CLAUDE.md.
+       Es la misma ventana para las dos cosas, porque son la misma operación: una fila
+       con su hora de inicio. -->
+  <div class="ab-modal-overlay sg-mod" id="gal-ld-modal">
+    <div class="ab-modal" style="width:min(560px,96vw);max-width:96vw">
+      <div class="mhd"><div class="mht" id="gal-ld-tit">Lote del día</div>
+        <button class="mcl" onclick="galLdCerrar()">×</button></div>
+      <div class="sgr-card">
+        <div><label>Lote que se está cosechando</label>
+          <select id="gal-ld-lote" onchange="galLdLotePick()"></select></div>
+
+        <div style="margin-top:10px"><label>Producto</label>
+          <input type="text" id="gal-ld-prod" placeholder="ej: Damasco">
+          <div style="font-size:10.5px;color:var(--mut);margin-top:3px">Se propone el
+            cultivo que tiene cargado el lote. El cultivo dice qué árbol hay plantado; lo
+            que entra al galpón un martes lo sabe el que está ahí.</div></div>
+
+        <div style="margin-top:10px"><label id="gal-ld-hora-lbl">Desde la hora</label>
+          <input type="time" id="gal-ld-hora" style="width:140px">
+          <div id="gal-ld-hora-ay" style="font-size:10.5px;color:var(--mut);margin-top:3px"></div></div>
+
+        <div id="gal-ld-error" style="display:none;margin-top:10px" class="ojo"></div>
+      </div>
+      <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:14px">
+        <button class="btn bo" onclick="galLdCerrar()">Cancelar</button>
+        <button class="btn bp" id="gal-ld-ok" onclick="galLdGuardar()">Cargar</button>
       </div>
     </div>
   </div>
@@ -26423,6 +26528,83 @@ SG_MANUAL['galpon-config'] = { titulo: 'Galpón · Configuración', html:
   + 'ni se imprime nada de acá.</p>'
 };
 
+SG_MANUAL['galpon-lote-dia'] = { titulo: 'Galpón · Lote del día', html:
+  '<p>Esta pantalla contesta <b>una sola pregunta</b>: qué se está cosechando. Parece poco, '
+  + 'y es lo que convierte un montón de IFCOs en kilos de un lote. Sin esto, la balanza pesa '
+  + 'fruta anónima.</p>'
+
+  + '<div class="ojo"><b>Es lo primero del día.</b> El volcado le pregunta a esta pantalla, '
+  + 'por cada IFCO, de qué lote es. Si no hay nada cargado el IFCO <b>se guarda igual</b> —la '
+  + 'fruta ya está en la tolva, nada puede rechazarla— pero entra <b>marcado para revisar</b>, '
+  + 'y alguien va a tener que resolver a mano, el mes que viene, qué se cosechó ese martes.</div>'
+
+  + '<h3>🕐 Por qué lleva hora y no sólo día <span class="ver">V1098</span></h3>'
+  + '<p>Porque el lote <b>cambia a media mañana</b>. Un día de cosecha no es un lote: son dos '
+  + 'o tres, y el IFCO que se vuelca a las 14:30 es del lote que estaba vigente <b>a las '
+  + '14:30</b>, no del que se cargó a la mañana.</p>'
+  + '<p>La regla es la misma que la de una tarifa con vigencia: <b>vale el último cambio cuya '
+  + 'hora ya pasó</b>. De ahí sale que:</p>'
+  + '<ul>'
+  + '<li><b>Con un solo lote cargado alcanza.</b> Vale para la jornada entera y la hora no '
+  + 'importa — por eso el primero se propone a las <b>00:00</b>.</li>'
+  + '<li><b>Un cambio de lote es otra fila</b>, con la hora en que se cambió. No se borra la '
+  + 'anterior: la de la mañana sigue explicando los kilos de la mañana.</li>'
+  + '</ul>'
+
+  + '<div class="ojo"><b>El error más fácil de cometer.</b> Cargar a las 08:00 y poner «desde '
+  + 'las 08:00», que es la hora a la que uno está cargando y no desde cuándo vale. El IFCO que '
+  + 'entró a las 6:40 se queda <b>sin lote</b>. La pantalla lo avisa arriba de la tabla y trae '
+  + 'el arreglo en un botón: <b>Que arranque a las 00:00</b>.</div>'
+
+  + '<h3>🟢 El cartel de arriba <span class="ver">V1098</span></h3>'
+  + '<p>Verde con el lote que se está cosechando en este momento, o <b>rojo</b> si no hay '
+  + 'ninguno. Es lo primero que se ve al entrar y se lee de pie, de paso.</p>'
+  + '<p>Lo resuelve el <b>servidor</b>, con la misma cuenta que usa el volcado para guardar. '
+  + 'No son dos cálculos parecidos: es el mismo, pedido una vez. Si fueran dos, un día el '
+  + 'cartel diría un lote y el volcado guardaría otro.</p>'
+  + '<p>Mirando un día que no es hoy el cartel no aparece: no hay un «ahora mismo» del martes '
+  + 'pasado.</p>'
+
+  + '<h3>🌳 El lote y el producto <span class="ver">V1098</span></h3>'
+  + '<p>Los lotes salen de <b>Producción → Lotes</b>, agrupados por finca. Acá <b>no se dan de '
+  + 'alta</b>, igual que las cuadrillas.</p>'
+  + '<p>El <b>producto</b> se propone con el cultivo que el lote tiene cargado, y <b>queda '
+  + 'editable</b>. El cultivo dice qué árbol hay plantado; lo que entra al galpón un martes lo '
+  + 'sabe el que está ahí. El producto es lo que después se lee en la etiqueta del pallet.</p>'
+
+  + '<h3>🔁 Al día siguiente <span class="ver">V1098</span></h3>'
+  + '<p>La ventana <b>propone</b> el último lote cargado, porque el galpón suele cosechar el '
+  + 'mismo lote varios días seguidos. Pero hay que apretar <b>Cargar</b>: nada se arrastra '
+  + 'solo de un día al otro.</p>'
+  + '<p>No es burocracia. Que la fruta de hoy quede atribuida al lote de ayer <b>sin que nadie '
+  + 'lo haya dicho</b> es exactamente el error que esta pantalla existe para evitar. La '
+  + 'propuesta ahorra tipeo; el botón es la decisión.</p>'
+
+  + '<h3>🔒 Cuándo deja de poder corregirse <span class="ver">V1098</span></h3>'
+  + '<p>Un tramo se corrige y se borra libremente <b>mientras no tenga IFCOs volcados</b>. Ése '
+  + 'es el caso normal: el error se descubre a los diez minutos de cargarlo.</p>'
+  + '<p>Con volcados encima aparece un <b>candado</b> con cuántos son. El motivo no es '
+  + 'prudencia: cada volcado <b>guardó su lote en el momento</b>, congelado, igual que el total '
+  + 'de una factura. Cambiar el tramo a las dos de la tarde <b>no corrige los IFCOs de la '
+  + 'mañana</b> — lo único que haría es dejar esos kilos apuntando a un lote que ya nadie '
+  + 'declaró, y eso no se descubre hasta que no cierran los números de la temporada.</p>'
+  + '<p>Si el lote estaba mal, lo que se corrige son <b>los volcados</b>, uno por uno, desde el '
+  + 'Tablero, que es donde se ve cuáles son.</p>'
+
+  + '<div class="ojo"><b>Dos lotes a la misma hora se rechazan.</b> El sistema se quedaría con '
+  + 'uno de los dos y los kilos del otro no se atribuirían a nada — y el tramo perdedor '
+  + 'seguiría apareciendo en la lista, igualito, como si estuviera funcionando. Es el mismo '
+  + 'caso que dos cuadrillas compartiendo un número de tarjeta, y se corta igual: antes de '
+  + 'guardar.</div>'
+
+  + '<h3>👤 Quién puede <span class="ver">V1098</span></h3>'
+  + '<p><b>Cualquiera con el módulo</b>, con nivel de operar. Esto <b>no es parametrizar</b>: '
+  + 'se carga todas las mañanas y lo hace el que abre el galpón. Pedir administrador acá '
+  + 'terminaría con el dueño cargándolo por teléfono mientras el primer camión espera.</p>'
+  + '<p>Y esta pantalla es de <b>Puente Cordón</b>. Parado en otra empresa no se carga nada '
+  + 'de acá.</p>'
+};
+
 SG_MANUAL['ia-uso'] = { titulo: 'Consumo de IA', html:
   '<p>Varias pantallas del sistema usan <b>inteligencia artificial</b>: el lector de remitos '
   + 'de IFCO, la lectura de facturas y documentos, el parseo de liquidaciones, el detector de '
@@ -38801,6 +38983,7 @@ function loadSec(s) {
     'contactos': function(){ ctInit(); },
     'ia-uso': function(){ iuInit(); },
     'galpon-config': function(){ galInit(); },
+    'galpon-lote-dia': function(){ galLdInit(); },
     'pl-abasto': function(){ plaInit(); },
     'sg-catalogo':   function(){ sgLoadCaches(function(){ sgCatSub('productos'); }); },
     'sg-reportes':   function(){ sgRepInit(); },
@@ -54535,6 +54718,261 @@ function galPrintIr(){
   // ventana se cierra sola: acá no queda nada para leer después, a diferencia de un CAE.
   window.open('/api/galpon/tarjetas.pdf?' + qs, '_blank');
   galPrintCerrar();
+}
+
+/* ══ 🗓️ GALPÓN · LOTE DEL DÍA ════════════════════════════════════════════════════
+   La pantalla contesta una sola pregunta —qué se está cosechando— y la contesta en
+   grande arriba de todo, porque se lee de pie y de paso.
+
+   Lo que NO hace es resolver el lote vigente por su cuenta. La regla («el último
+   tramo cuya hora ya pasó») vive en el servidor y viene resuelta en la respuesta: si
+   la pantalla la repitiera, tarde o temprano una de las dos copias cambiaría y el
+   cartel diría un lote y el volcado guardaría otro. */
+var GLD = { fecha: null, hoy: null, tramos: [], lotes: [], ahora: '', editId: null, sug: '' };
+
+function galLdEsc(s){ return String(s == null ? '' : s)
+  .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+
+async function galLdInit(){
+  await galLdLotes();
+  await galLdCargar();
+}
+
+async function galLdLotes(){
+  try {
+    var r = await fetch('/api/galpon/lotes', { credentials:'include' });
+    var j = await r.json();
+    GLD.lotes = j.ok ? (j.lotes || []) : [];
+  } catch (e) { GLD.lotes = []; }
+}
+
+async function galLdCargar(){
+  var f = document.getElementById('gld-fecha');
+  /* Sin fecha en la primera carga: el día lo decide el SERVIDOR. Si lo pusiera el
+     navegador, una computadora con la fecha corrida cargaría el lote en otro día y
+     nadie lo vería hasta que faltaran los kilos. */
+  var qs = (f && f.value) ? '?fecha=' + encodeURIComponent(f.value) : '';
+  try {
+    var r = await fetch('/api/galpon/lote-dia' + qs, { credentials:'include' });
+    var j = await r.json();
+    if (!j.ok) throw new Error(j.error || 'no se pudo leer el día');
+    GLD.fecha = j.fecha; GLD.hoy = j.hoy; GLD.tramos = j.tramos || []; GLD.ahora = j.ahora || '';
+    if (f) f.value = j.fecha;
+    galLdAhora(j);
+    galLdHueco(j);
+    galLdPintar();
+  } catch (e) {
+    var b = document.getElementById('gld-body');
+    if (b) b.innerHTML = '<tr><td colspan="5" class="gld-vacio">' + galLdEsc(e.message) + '</td></tr>';
+  }
+}
+
+function galLdHoy(){
+  var f = document.getElementById('gld-fecha'); if (f) f.value = '';
+  galLdCargar();
+}
+
+/* ── EL CARTEL DE ARRIBA ──────────────────────────────────────────────────────── */
+function galLdAhora(j){
+  var el = document.getElementById('gld-ahora'); if (!el) return;
+  /* Mirando un día que no es hoy no hay un "ahora" que mostrar, y un cartel que diga
+     "se está cosechando" sobre el martes pasado es una mentira con tipografía grande. */
+  if (!j.vigente){
+    if (j.fecha !== j.hoy){ el.style.display = 'none'; return; }
+    el.style.display = ''; el.className = 'gld-ahora no';
+    el.innerHTML = '<div><div class="gld-k">Ahora mismo · ' + galLdEsc(j.ahora) + '</div>'
+      + '<div class="gld-v">No hay lote cargado</div>'
+      + '<div class="gld-sub">Todo lo que se vuelque así entra <b>marcado para revisar</b>, '
+      + 'sin lote al que atribuirle los kilos.</div></div>'
+      + '<div style="margin-left:auto"><button class="btn bp" onclick="galLdAbrir()">Cargar el lote</button></div>';
+    return;
+  }
+  el.style.display = ''; el.className = 'gld-ahora si';
+  el.innerHTML = '<div><div class="gld-k">Ahora mismo · ' + galLdEsc(j.ahora) + '</div>'
+    + '<div class="gld-v">' + galLdEsc(j.vigente.lote_nombre || ('Lote ' + j.vigente.lote_id)) + '</div>'
+    + '<div class="gld-sub">' + (j.vigente.producto ? galLdEsc(j.vigente.producto) + ' · ' : '')
+    + 'desde las ' + galLdEsc(j.vigente.desde_hora) + '</div></div>'
+    + '<div style="margin-left:auto"><button class="btn bo" onclick="galLdAbrir()">Cambió el lote</button></div>';
+}
+
+/* ── EL HUECO DE LA MAÑANA ────────────────────────────────────────────────────────
+   La causa es siempre la misma: el que cargó a las ocho puso las ocho, que es la hora
+   a la que estaba cargando, no desde cuándo vale. Por eso el aviso trae el arreglo
+   puesto en un botón en vez de explicar dónde corregirlo. */
+function galLdHueco(j){
+  var el = document.getElementById('gld-hueco'); if (!el) return;
+  if (!j.hueco || !j.tramos.length){ el.style.display = 'none'; return; }
+  var primero = j.tramos[0];
+  el.style.display = '';
+  el.innerHTML = '<b>El día arranca a las ' + galLdEsc(j.hueco.desde_hora) + '.</b> '
+    + 'Lo que se vuelque antes de esa hora queda <b>sin lote</b> y entra marcado para '
+    + 'revisar. Si el lote valía desde que abrió el galpón, corregilo.'
+    + (primero.volcados ? '' : ' <button class="btn bo bs" style="margin-left:8px" '
+      + 'onclick="galLdDesde00(' + primero.id + ')">Que arranque a las 00:00</button>');
+}
+
+async function galLdDesde00(id){
+  try {
+    var r = await fetch('/api/galpon/lote-dia/' + id, { method:'PATCH', credentials:'include',
+      headers:{'Content-Type':'application/json'}, body: JSON.stringify({ desde_hora:'00:00' }) });
+    var j = await r.json();
+    if (!j.ok) return alert(j.error || 'no se pudo corregir');
+    await galLdCargar();
+  } catch (e) { alert('No se pudo corregir: ' + e.message); }
+}
+
+/* ── LA TABLA ─────────────────────────────────────────────────────────────────── */
+function galLdPintar(){
+  var b = document.getElementById('gld-body'); if (!b) return;
+  if (!GLD.tramos.length){
+    b.innerHTML = '<tr><td colspan="5" class="gld-vacio">'
+      + 'No hay ningún lote cargado para este día.<br>'
+      + 'Con un solo lote cargado alcanza: vale para la jornada entera. '
+      + 'Los cambios se agregan después, cada uno con su hora.</td></tr>';
+    return;
+  }
+  b.innerHTML = GLD.tramos.map(function(t){
+    /* Un tramo con volcados encima no se toca: cada IFCO guardó su lote en el momento,
+       así que corregirlo acá no los arregla. Se dice por qué en vez de esconder los
+       botones: un botón que desaparece sin explicación parece un error del sistema. */
+    var trabado = !!t.volcados;
+    var acc = trabado
+      ? '<span class="gld-cand" title="Corregir el tramo no cambia los IFCOs ya volcados">🔒 '
+        + t.volcados + ' volcado' + (t.volcados === 1 ? '' : 's') + '</span>'
+      : '<button class="btn bo bs" onclick="galLdAbrir(' + t.id + ')">✎</button> '
+        + '<button class="btn bo bs" onclick="galLdBorrar(' + t.id + ')">×</button>';
+    return '<tr>'
+      + '<td class="gld-h">' + galLdEsc(t.desde_hora)
+        + (t.hasta_hora ? ' — ' + galLdEsc(t.hasta_hora) : ' — fin') + '</td>'
+      + '<td class="gld-w"><b>' + galLdEsc(t.lote_nombre || ('Lote ' + t.lote_id)) + '</b></td>'
+      + '<td class="gld-w">' + (t.producto ? galLdEsc(t.producto)
+          : '<span class="gld-cand">sin producto</span>') + '</td>'
+      + '<td>' + galLdEsc(t.usuario || '—') + '</td>'
+      + '<td style="text-align:right">' + acc + '</td>'
+      + '</tr>';
+  }).join('');
+}
+
+/* ── LA VENTANA ───────────────────────────────────────────────────────────────────
+   Se abre EN BLANCO siempre (CLAUDE.md): un formulario que sólo se esconde conserva lo
+   que tenía, y acá eso sería cargar el lote que se tipeó y se canceló hace un rato. */
+function galLdAbrir(id){
+  var t = id ? GLD.tramos.filter(function(x){ return x.id === id; })[0] : null;
+  GLD.editId = t ? t.id : null;
+
+  var sel = document.getElementById('gal-ld-lote');
+  /* Agrupados por finca: una lista plana de lotes de tres fincas distintas obliga a
+     leer nombre por nombre. Y con doce o más opciones el panel le monta el buscador
+     solo, así que no hace falta uno acá. */
+  var fincas = [];
+  GLD.lotes.forEach(function(l){
+    var f = l.finca || 'Sin finca';
+    var g = fincas.filter(function(x){ return x.f === f; })[0];
+    if (!g) { g = { f: f, ls: [] }; fincas.push(g); }
+    g.ls.push(l);
+  });
+  sel.innerHTML = '<option value="">— elegí el lote —</option>'
+    + fincas.map(function(g){
+        return '<option disabled>── ' + galLdEsc(g.f) + ' ──</option>'
+          + g.ls.map(function(l){
+              return '<option value="' + l.id + '" data-cultivo="' + galLdEsc(l.cultivo || '') + '">'
+                + galLdEsc(l.nombre) + (l.cultivo ? ' · ' + galLdEsc(l.cultivo) : '') + '</option>';
+            }).join('');
+      }).join('');
+
+  document.getElementById('gal-ld-error').style.display = 'none';
+  GLD.sug = '';
+
+  if (t){
+    document.getElementById('gal-ld-tit').textContent = 'Corregir el tramo de las ' + t.desde_hora;
+    document.getElementById('gal-ld-ok').textContent = 'Guardar';
+    sel.value = String(t.lote_id);
+    document.getElementById('gal-ld-prod').value = t.producto || '';
+    document.getElementById('gal-ld-hora').value = t.desde_hora;
+  } else {
+    var primero = !GLD.tramos.length;
+    document.getElementById('gal-ld-tit').textContent = primero ? 'Lote del día' : 'Cambio de lote';
+    document.getElementById('gal-ld-ok').textContent = 'Cargar';
+    /* Se PROPONE el último lote cargado, no se carga solo. Que la fruta de hoy quede
+       atribuida al lote de ayer sin que nadie lo diga es exactamente el error que esta
+       pantalla existe para evitar: la propuesta ahorra tipeo, el Cargar es la decisión. */
+    var ult = GLD.tramos.length ? GLD.tramos[GLD.tramos.length - 1] : null;
+    sel.value = ult ? String(ult.lote_id) : '';
+    document.getElementById('gal-ld-prod').value = ult ? (ult.producto || '') : '';
+    /* El primer tramo arranca a las 00:00 para que cubra la mañana entera; los cambios
+       se proponen a la hora del SERVIDOR, que es la que no está corrida. */
+    document.getElementById('gal-ld-hora').value = primero ? '00:00' : (GLD.ahora || '');
+  }
+  var primeroAhora = !GLD.tramos.length && !t;
+  document.getElementById('gal-ld-hora-ay').innerHTML = primeroAhora
+    ? 'A las <b>00:00</b> cubre la jornada entera, incluso lo que entre antes de que abra '
+      + 'la oficina. Si el lote recién arranca más tarde, cambiala.'
+    : 'Desde esta hora y hasta el cambio siguiente. El IFCO que se vuelca a las 14:30 es '
+      + 'del lote que estaba vigente a las 14:30.';
+
+  document.getElementById('gal-ld-modal').classList.add('on');
+}
+function galLdCerrar(){
+  document.getElementById('gal-ld-modal').classList.remove('on');
+  GLD.editId = null;
+}
+
+/* Autocompletar el producto con el cultivo del lote, sin pisar lo que se haya escrito
+   a mano: sólo se reemplaza si el casillero está vacío o tiene todavía la sugerencia
+   anterior. Un autocompletado que pisa lo tipeado se desactiva solo en la cabeza del
+   operador, que aprende a corregirlo DESPUÉS de elegir. */
+function galLdLotePick(){
+  var sel = document.getElementById('gal-ld-lote');
+  var op = sel.options[sel.selectedIndex];
+  var cultivo = op ? (op.getAttribute('data-cultivo') || '') : '';
+  var p = document.getElementById('gal-ld-prod');
+  if (!p.value || p.value === GLD.sug) p.value = cultivo;
+  GLD.sug = cultivo;
+}
+
+async function galLdGuardar(){
+  var err = document.getElementById('gal-ld-error');
+  err.style.display = 'none';
+  var lote = document.getElementById('gal-ld-lote').value;
+  if (!lote && !GLD.editId){
+    err.textContent = 'Elegí el lote que se está cosechando.'; err.style.display = ''; return;
+  }
+  var body = {
+    fecha: GLD.fecha,
+    lote_id: lote || undefined,
+    producto: document.getElementById('gal-ld-prod').value,
+    desde_hora: document.getElementById('gal-ld-hora').value,
+  };
+  try {
+    var url = '/api/galpon/lote-dia' + (GLD.editId ? '/' + GLD.editId : '');
+    var r = await fetch(url, { method: GLD.editId ? 'PATCH' : 'POST', credentials:'include',
+      headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
+    var j = await r.json();
+    if (!j.ok){
+      /* El error se muestra ADENTRO y la ventana NO se cierra: el que chocó una hora
+         tiene que poder cambiarla sin volver a elegir el lote. */
+      err.innerHTML = galLdEsc(j.error);
+      err.style.display = '';
+      return;
+    }
+    galLdCerrar();
+    await galLdCargar();
+  } catch (e) {
+    err.textContent = 'No se pudo guardar: ' + e.message;
+    err.style.display = '';
+  }
+}
+
+async function galLdBorrar(id){
+  var t = GLD.tramos.filter(function(x){ return x.id === id; })[0]; if (!t) return;
+  if (!confirm('¿Borrar el tramo de las ' + t.desde_hora + ' ('
+    + (t.lote_nombre || t.lote_id) + ')?')) return;
+  try {
+    var r = await fetch('/api/galpon/lote-dia/' + id, { method:'DELETE', credentials:'include' });
+    var j = await r.json();
+    if (!j.ok) return alert(j.error || 'no se pudo borrar');
+    await galLdCargar();
+  } catch (e) { alert('No se pudo borrar: ' + e.message); }
 }
 
 </script>
