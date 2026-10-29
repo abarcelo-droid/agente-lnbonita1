@@ -285,6 +285,19 @@ body{padding-bottom:env(safe-area-inset-bottom)}
     <div>Elegir de galería</div>
     <div class="sub">Fotos o archivos del teléfono</div>
   </button>
+
+  <!-- El aviso de lector caído. Vacío y escondido mientras el lector ande: lo llena
+       pintarLectorCaido() con lo que contesta /api/ifco/ocr/status. -->
+  <div class="alert warn" id="fs-caido" style="display:none"></div>
+
+  <!-- Y la salida a mano, SIEMPRE visible. No es sólo para cuando el lector está caído:
+       un remito borroneado, una foto que no entra, el teléfono sin datos — todos
+       terminan acá, y antes había que descubrirlo fallando. -->
+  <button class="cam-btn" id="fs-mano" style="margin-top:10px" onclick="aManoSellado()">
+    <div class="ico">✏️</div>
+    <div>Cargarlo a mano</div>
+    <div class="sub">Sin foto: tipeás los datos del remito</div>
+  </button>
 </div>
 
 <!-- Pantalla SUBIR FOTO (cargar despacho) -->
@@ -305,6 +318,19 @@ body{padding-bottom:env(safe-area-inset-bottom)}
     <div class="ico">🖼️</div>
     <div>Elegir de galería</div>
     <div class="sub">Fotos o archivos del teléfono</div>
+  </button>
+
+  <!-- El aviso de lector caído. Vacío y escondido mientras el lector ande: lo llena
+       pintarLectorCaido() con lo que contesta /api/ifco/ocr/status. -->
+  <div class="alert warn" id="fd-caido" style="display:none"></div>
+
+  <!-- Y la salida a mano, SIEMPRE visible. No es sólo para cuando el lector está caído:
+       un remito borroneado, una foto que no entra, el teléfono sin datos — todos
+       terminan acá, y antes había que descubrirlo fallando. -->
+  <button class="cam-btn" id="fd-mano" style="margin-top:10px" onclick="aManoDespacho()">
+    <div class="ico">✏️</div>
+    <div>Cargarlo a mano</div>
+    <div class="sub">Sin foto: tipeás los datos del remito</div>
   </button>
 </div>
 
@@ -406,6 +432,11 @@ body{padding-bottom:env(safe-area-inset-bottom)}
       </select>
     </div>
   </div>
+  <div class="fld" id="ns-foto-fld" style="display:none">
+    <label>Foto del remito <span style="color:var(--sub);font-weight:400;text-transform:none">(opcional)</span></label>
+    <input id="ns-foto-input" type="file" accept="image/*" onchange="adjuntarFoto(event,'ns-foto-prev')">
+    <div class="hint">Aunque el lector no ande, la foto se guarda igual como respaldo.</div>
+  </div>
   <div id="ns-foto-prev" class="foto-prev" style="display:none;margin-bottom:12px"><img alt="Foto"></div>
   <button id="btn-crear-sellado" class="btn bb full lg" onclick="confirmarCrearSellado()">✓ Crear y sellar</button>
 </div>
@@ -451,6 +482,11 @@ body{padding-bottom:env(safe-area-inset-bottom)}
   <div class="fld" id="d-prov-wrap" style="display:none">
     <label>Proveedor de origen *</label>
     <select id="d-prov"><option value="">— Cargando —</option></select>
+  </div>
+  <div class="fld" id="d-foto-fld" style="display:none">
+    <label>Foto del remito <span style="color:var(--sub);font-weight:400;text-transform:none">(opcional)</span></label>
+    <input id="d-foto-input" type="file" accept="image/*" onchange="adjuntarFoto(event,'d-foto-prev')">
+    <div class="hint">Aunque el lector no ande, la foto se guarda igual como respaldo.</div>
   </div>
   <div id="d-foto-prev" class="foto-prev" style="display:none;margin-bottom:12px"><img alt="Foto"></div>
   <button class="btn bb full lg" onclick="confirmarDespacho()">✓ Crear despacho</button>
@@ -690,6 +726,36 @@ function goHome() {
   S.history = ['view-home'];
 }
 
+/* ══ EL LECTOR DE REMITOS, Y SABER SI ESTÁ ═══════════════════════════════════════
+   El servidor se acuerda de la última caída y la cuenta en /api/ifco/ocr/status. La
+   app lo consulta al entrar a cada pantalla de foto para no invitar a sacar una que
+   ya se sabe que no se va a poder leer.
+
+   Si la consulta falla, no pasa nada: queda null y la app se comporta como siempre.
+   Un aviso que no se pudo traer no puede ser el motivo de que nadie cargue un remito. */
+async function cargarEstadoOcr(que) {
+  try {
+    const r = await fetch('/api/ifco/ocr/status', { credentials:'include' });
+    const j = await r.json();
+    S.ocrEstado = (j && j.caido) ? { caido:true, error: j.motivo_operador, desde: j.desde } : null;
+  } catch (e) { S.ocrEstado = null; }
+  pintarLectorCaido(que);
+}
+
+function pintarLectorCaido(que) {
+  const el = $(que + '-caido');
+  if (!el) return;
+  if (!S.ocrEstado) { el.style.display = 'none'; return; }
+  el.style.display = '';
+  el.innerHTML = '<b>El lector de remitos no está andando.</b><br>'
+    + esc(S.ocrEstado.error || 'Cargá los remitos a mano.')
+    + '<br>Sacar la foto igual no lo arregla: se va a quedar pensando y va a terminar acá.';
+  /* Y el botón de a mano pasa al frente. La cámara se deja, porque la foto sigue
+     sirviendo de respaldo — lo que cambia es cuál es el camino que se ofrece. */
+  const b = $(que + '-mano');
+  if (b) { b.style.borderColor = '#1a3a5c'; b.style.background = '#eef4fa'; }
+}
+
 function resetState() {
   S.fotoFile = null;
   if (S.fotoUrl) { URL.revokeObjectURL(S.fotoUrl); S.fotoUrl = null; }
@@ -701,6 +767,10 @@ function resetState() {
   const _sg = $('inp-foto-sellado-gal');  if (_sg) _sg.value = '';
   const _dc = $('inp-foto-despacho-cam'); if (_dc) _dc.value = '';
   const _dg = $('inp-foto-despacho-gal'); if (_dg) _dg.value = '';
+  const _df = $('d-foto-input');  if (_df) _df.value = '';
+  const _nf = $('ns-foto-input'); if (_nf) _nf.value = '';
+  const _dp = $('d-foto-prev');   if (_dp) _dp.style.display = 'none';
+  const _np = $('ns-foto-prev');  if (_np) _np.style.display = 'none';
 }
 
 function logout() {
@@ -767,6 +837,7 @@ function fillProvSelect(selectId) {
 function goCargarSellado() {
   resetState();
   showView('view-foto-sellado', { title:'🔏 Cargar sellado' });
+  cargarEstadoOcr('fs');
 }
 
 async function onFotoSellado(ev) {
@@ -905,6 +976,7 @@ function cargarDespachoAMano(file, data) {
   $('d-origen').value = 'san_geronimo';
   toggleProvOrigenD();
   aplicarDepositoUsuario('d-origen', 'd-prov-wrap', 'd-prov');
+  mostrarCampoFoto('d', !file);
   if (file) setFotoPrev('d-foto-prev', file);
   avisoAMano('d-aviso', data);
   showView('view-confirmar-despacho', { title:'Cargar a mano' });
@@ -927,10 +999,41 @@ function crearSelladoAMano(data, file, d2) {
   toggleProvOrigenNS();
   toggleRechNS();
   aplicarDepositoUsuario('ns-origen', 'ns-prov-wrap', 'ns-prov');
+  mostrarCampoFoto('ns', !file);
   if (file) setFotoPrev('ns-foto-prev', file);
   avisoAMano('ns-aviso', d2);
   showView('view-crear-sellado', { title:'Cargar a mano' });
   setTimeout(function(){ var el=$('ns-numero'); if(el) el.focus(); }, 60);
+}
+
+/* ── ENTRAR A MANO POR DECISIÓN, no por haber fallado ──────────────────────────────
+   Reusa los MISMOS formularios que la salida de emergencia: un segundo camino con su
+   propio formulario serían dos lugares donde arreglar el mismo campo. Lo único distinto
+   es el cartel de arriba, porque las dos situaciones no son la misma y decirle «el lector
+   no está disponible» al que eligió cargar a mano es mentirle. */
+function aManoDespacho() {
+  cargarDespachoAMano(null, S.ocrEstado);
+  if (!S.ocrEstado) avisoElegido('d-aviso');
+  mostrarCampoFoto('d', true);
+}
+function aManoSellado() {
+  crearSelladoAMano(null, null, S.ocrEstado);
+  if (!S.ocrEstado) avisoElegido('ns-aviso');
+  mostrarCampoFoto('ns', true);
+}
+
+// El campo de foto sólo aparece cuando NO hay foto todavía: con una ya sacada está la
+// vista previa, y un selector de archivo al lado invita a reemplazarla sin querer.
+function mostrarCampoFoto(id, mostrar) {
+  const el = $(id + '-foto-fld');
+  if (el) el.style.display = mostrar ? '' : 'none';
+}
+
+function adjuntarFoto(ev, prevId) {
+  const f = ev.target.files && ev.target.files[0];
+  if (!f) return;
+  S.fotoFile = f;
+  setFotoPrev(prevId, f);
 }
 
 // El cartel de arriba del formulario, en sus dos estados. Sin el de "a mano", un
@@ -951,6 +1054,16 @@ function avisoAMano(id, data) {
     + ((data && data.error) ? esc(data.error) : 'Cargá los datos a mano.')
     + '<br>La foto se guarda igual.';
 }
+// El tercero: el que ELIGIÓ cargar a mano. Sin esto, el formulario le avisa de una falla
+// que no pasó, y el que lo lee sale a buscar qué se rompió.
+function avisoElegido(id) {
+  const el = $(id);
+  if (!el) return;
+  el.className = 'alert info';
+  el.innerHTML = '<b>Cargando a mano.</b> Tipeá los datos del remito. '
+    + 'Si podés, sumale la foto: se guarda como respaldo aunque nadie la lea.';
+}
+
 function avisoNormal(id) {
   const el = $(id);
   const v = AVISO_NORMAL[id];
@@ -1111,6 +1224,7 @@ async function confirmarCrearSellado() {
 function goCargarDespacho() {
   resetState();
   showView('view-foto-despacho', { title:'📥 Cargar despacho' });
+  cargarEstadoOcr('fd');
 }
 
 // ───── Enviar a SG (proveedor → depósito SG) ─────
