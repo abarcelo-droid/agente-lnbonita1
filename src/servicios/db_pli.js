@@ -370,6 +370,108 @@ db.exec(`
 
   -- Auditoría (molde pa_cuentas_log). El historial no se puede reconstruir
   -- retroactivamente: escribirlo es de la beta, la pantalla que lo muestra no.
+  -- ── PAGARLE A UN PROVEEDOR CON INSUMOS ──────────────────────────────────
+  --
+  -- Pablo, 20/10/2026: «a veces hay proveedores a los que les pagamos con INSUMOS, entonces
+  -- necesito un lugar donde llevar el registro de lo que se le entregó, la factura del insumo, el
+  -- costo de ese insumo (dólares o pesos), la cantidad… y saber si lo recuperé mediante factura al
+  -- proveedor, de vuelta, qué precio le cobramos, pesos o dólares».
+  --
+  -- Son DOS cosas que hay que poder mirar juntas y que no son la misma:
+  --   · LA ENTREGA: mercadería que sale, y lo que esa mercadería NOS costó.
+  --   · EL RECUPERO: la factura que le hacemos al proveedor, y a qué precio se la cobramos.
+  -- La diferencia entre las dos es lo que se gana o se pierde en la operación, y es justo lo que
+  -- no se puede ver cuando esto se lleva en un cuaderno.
+  --
+  -- Una entrega es un REMITO: un comprobante con varios insumos adentro. Y una factura de recupero
+  -- puede cubrir VARIAS entregas, que es como se factura de verdad. Las dos cosas las eligió Pablo.
+  CREATE TABLE IF NOT EXISTS pli_entregas (
+    id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+    sociedad_id        INTEGER NOT NULL,
+    proveedor_texto    TEXT    NOT NULL,              -- texto libre, igual que en las compras
+    fecha              TEXT    NOT NULL,
+    comprobante        TEXT,                          -- el remito o la factura con la que salió
+    -- ¿SALIÓ DE NUESTRO DEPÓSITO? Lo decide cada entrega: a veces la mercadería sale de acá y a
+    -- veces se compra y va directo al proveedor sin pasar por el depósito. Con el tilde puesto,
+    -- la entrega le descuenta stock al insumo; sin él, queda sólo como registro de la deuda.
+    mueve_stock        INTEGER NOT NULL DEFAULT 1,
+    -- La factura con la que se recuperó, o NULL si todavía no se recuperó. Puntero BLANDO, sin
+    -- FOREIGN KEY: borrar una factura no puede hacer fallar la baja, y acá se limpia a mano.
+    recupero_id        INTEGER,
+    notas              TEXT,
+    creado_en          TEXT DEFAULT (datetime('now','localtime')),
+    creado_por_id      INTEGER,
+    actualizado_en     TEXT DEFAULT (datetime('now','localtime')),
+    actualizado_por_id INTEGER,
+    eliminado_en       TEXT,
+    eliminado_por_id   INTEGER
+  );
+  CREATE INDEX IF NOT EXISTS idx_pli_entregas_soc ON pli_entregas(sociedad_id);
+  CREATE INDEX IF NOT EXISTS idx_pli_entregas_rec ON pli_entregas(recupero_id);
+
+  CREATE TABLE IF NOT EXISTS pli_entrega_lineas (
+    id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+    entrega_id         INTEGER NOT NULL REFERENCES pli_entregas(id),
+    insumo_id          INTEGER NOT NULL REFERENCES pli_insumos(id),
+    -- En unidad de COMPRA, igual que una compra y que la recepción: es la unidad en la que se
+    -- habla con el proveedor. Al stock entra convertida con el factor del insumo.
+    cantidad           REAL    NOT NULL,
+    costo_unitario     REAL,
+    moneda             TEXT    NOT NULL DEFAULT 'ARS' CHECK(moneda IN ('ARS','USD')),
+    -- LO QUE YA SE LE DESCONTÓ AL STOCK, en unidad de USO. Es el mismo ancla que
+    -- pli_compras.recibido_cantidad y existe por la misma razón: con este número, guardar dos
+    -- veces no descuenta dos veces, corregir la cantidad ajusta por la diferencia, y anular o
+    -- borrar devuelve exactamente lo que salió. Sin él habría que adivinar cuánto revertir.
+    stock_aplicado     REAL    NOT NULL DEFAULT 0,
+    -- «LA FACTURA DEL INSUMO», que Pablo nombró aparte del costo: el comprobante con el que se
+    -- COMPRÓ esa mercadería, que es el papel que respalda en cuánto se la valuó. Va por RENGLÓN y
+    -- no por entrega, porque un mismo remito puede llevar tres insumos de tres facturas distintas.
+    factura_compra     TEXT,
+    notas              TEXT
+  );
+  CREATE INDEX IF NOT EXISTS idx_pli_ent_lineas ON pli_entrega_lineas(entrega_id);
+
+  -- La factura que LE HACEMOS al proveedor para recuperar lo entregado.
+  CREATE TABLE IF NOT EXISTS pli_recuperos (
+    id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+    sociedad_id        INTEGER NOT NULL,
+    proveedor_texto    TEXT    NOT NULL,
+    fecha              TEXT    NOT NULL,
+    numero             TEXT,
+    importe            REAL,
+    moneda             TEXT    NOT NULL DEFAULT 'ARS' CHECK(moneda IN ('ARS','USD')),
+    notas              TEXT,
+    creado_en          TEXT DEFAULT (datetime('now','localtime')),
+    creado_por_id      INTEGER,
+    actualizado_en     TEXT DEFAULT (datetime('now','localtime')),
+    actualizado_por_id INTEGER,
+    eliminado_en       TEXT,
+    eliminado_por_id   INTEGER
+  );
+  CREATE INDEX IF NOT EXISTS idx_pli_recuperos_soc ON pli_recuperos(sociedad_id);
+
+  -- LOS PAPELES. «Que me permita adjuntar la factura», dijo Pablo, y es lo que convierte esto en
+  -- un expediente: el remito de la entrega y la factura del recupero, mirables desde la fila.
+  --
+  -- Tabla aparte de pli_insumo_archivos a propósito: aquélla tiene insumo_id NOT NULL con FOREIGN
+  -- KEY, así que para colgarle un archivo a una entrega habría que rehacer la tabla en una base
+  -- que ya está en producción. Lo que SÍ es uno solo es el mecanismo —subir a R2, bajar por proxy,
+  -- baja lógica—, que es lo que de verdad se desincroniza si hay dos.
+  CREATE TABLE IF NOT EXISTS pli_adjuntos (
+    id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+    entidad            TEXT    NOT NULL CHECK(entidad IN ('entrega','recupero')),
+    entidad_id         INTEGER NOT NULL,
+    storage_key        TEXT    NOT NULL,
+    nombre             TEXT    NOT NULL,
+    mime               TEXT,
+    tamano             INTEGER,
+    creado_en          TEXT DEFAULT (datetime('now','localtime')),
+    creado_por_id      INTEGER,
+    eliminado_en       TEXT,
+    eliminado_por_id   INTEGER
+  );
+  CREATE INDEX IF NOT EXISTS idx_pli_adjuntos ON pli_adjuntos(entidad, entidad_id);
+
   CREATE TABLE IF NOT EXISTS pli_log (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     entidad     TEXT    NOT NULL,
@@ -491,6 +593,18 @@ try {
   // En unidad de USO, que es la que consume la receta.
   addCol('pli_insumos', 'stock_inicial', 'REAL NOT NULL DEFAULT 0');
   addCol('pli_insumos', 'stock_actualizado_en', 'TEXT');
+  // Por si la tabla se creó antes de que existiera la columna (una base de prueba del día anterior).
+  addCol('pli_entrega_lineas', 'factura_compra', 'TEXT');
+  // A CUÁNTO SE LO COBRAMOS AL PROVEEDOR, por renglón. Pablo, 23/10/2026: «necesito que me pongas
+  // cuánto le cobramos al proveedor por ese insumo, línea por línea, así podemos registrar un
+  // resultado de la entrega». La diferencia contra el costo ES el resultado, y vive en el renglón
+  // porque es donde se puede ver de qué insumo salió.
+  //
+  // Con su PROPIA moneda: valuar en dólares lo que se compró en dólares y facturarlo en pesos es
+  // el caso normal con un proveedor local, y meterlo en una sola moneda obligaría a inventar una
+  // conversión. `moneda` (la de al lado) es la del COSTO; ésta es la del precio.
+  addCol('pli_entrega_lineas', 'precio_unitario', 'REAL');
+  addCol('pli_entrega_lineas', 'moneda_precio',   'TEXT');
 } catch (e) {
   console.error('[PLI] Error en migraciones:', e.message);
 }

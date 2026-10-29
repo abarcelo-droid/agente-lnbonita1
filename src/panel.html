@@ -10229,6 +10229,101 @@ function sgSelBuscable(sel, placeholder){
   // (otra empresa, cuentas nuevas), hay que volver a llamar a sgSelRefrescar.
   sgSelGuardarOpciones(sel);
 
+  // ── LO QUE ENCUENTRA TIENE QUE VERSE MIENTRAS SE ESCRIBE ────────────────
+  //
+  // Pablo, 28/10/2026, sobre los insumos de Puente Cordón: «permitime buscar por
+  // CONTIENE algo que esté dentro del nombre». Y ya buscaba por contiene —se probó
+  // con sus propios insumos: «faja» dejaba las cuatro bolsas con faja—. Lo que no
+  // hacía era MOSTRARLO: el filtro dejaba el desplegable en cuatro opciones, pero el
+  // desplegable estaba CERRADO. En pantalla no cambiaba nada, y había que abrirlo
+  // para descubrir que había funcionado.
+  //
+  // Un buscador que no muestra lo que encontró no se distingue de uno roto, y el que
+  // lo usa concluye lo mismo: que no busca. Ahora los resultados caen debajo del
+  // casillero y se eligen con un clic, igual que el buscador de clientes.
+  //
+  // Va acá y no en la pantalla de insumos: son los mismos 47 desplegables.
+  var lista = document.createElement('div');
+  lista.className = 'sg-sb-lista';
+  lista.style.cssText = 'position:absolute;z-index:60;left:0;right:0;max-height:260px;'
+    + 'overflow-y:auto;background:var(--card,#fff);border:1px solid var(--bor);'
+    + 'border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,.14);display:none';
+  caja.appendChild(lista);
+  // Y APRETAR LA LISTA NO LE SACA EL FOCO AL CASILLERO. Sin esto, arrastrar su barra
+  // de desplazamiento —con veinte resultados pasa siempre— dispara el blur del
+  // casillero y la lista se cierra en el medio del arrastre.
+  lista.onmousedown = function(ev){ if (ev && ev.preventDefault) ev.preventDefault(); };
+
+  var marcado = -1;
+  var cerrar = function(){ lista.style.display = 'none'; marcado = -1; };
+  var filas = function(){
+    return lista.querySelectorAll ? [].slice.call(lista.querySelectorAll('.sg-sb-op')) : [];
+  };
+  var pintarMarca = function(){
+    filas().forEach(function(el, i){ el.style.background = (i === marcado) ? 'var(--sur)' : ''; });
+  };
+
+  // Al elegir, el desplegable vuelve a tener TODAS sus opciones. Si se quedara con
+  // las cuatro que sobrevivieron al filtro, la próxima vez que alguien lo abriera a
+  // mano —sin escribir nada— vería cuatro insumos y creería que no hay más.
+  var elegir = function(v){
+    inp.value = '';
+    sel.innerHTML = (sel._todas || []).map(function(o){
+      return '<option value="' + escH(o.value) + '">' + escH(o.text) + '</option>';
+    }).join('');
+    sel.value = v;
+    cerrar();
+    // El onchange no corre solo cuando el valor se asigna por código, y de él cuelga
+    // todo lo que la pantalla hace al elegir —la unidad, el precio, el aviso—.
+    if (typeof sel.onchange === 'function') sel.onchange();
+    else if (sel.dispatchEvent && typeof Event !== 'undefined') sel.dispatchEvent(new Event('change'));
+  };
+
+  var dibujar = function(items, texto){
+    if (!texto) return cerrar();
+    if (!items.length) {
+      lista.innerHTML = '<div class="sg-sb-vacio" style="padding:8px 12px;font-size:12.5px'
+        + ';color:var(--mut)">No hay ninguno que diga "' + escH(texto) + '"</div>';
+      lista.style.display = 'block';
+      marcado = -1;
+      return;
+    }
+    // SE MUESTRAN 60 Y SE DICE QUE HAY MÁS. Cortar en silencio es peor que no
+    // cortar: el que busca «bolsa» ve sesenta y concluye que ésas son todas.
+    lista.innerHTML = items.slice(0, 60).map(function(o){
+      return '<div class="sg-sb-op" data-v="' + escH(o.value) + '" style="padding:7px 11px'
+        + ';cursor:pointer;font-size:12.5px;border-bottom:1px solid var(--bor)">'
+        + escH(o.text) + '</div>';
+    }).join('')
+      + (items.length > 60
+        ? '<div class="sg-sb-mas" style="padding:6px 11px;font-size:11.5px;color:var(--mut)">'
+          + 'y ' + (items.length - 60) + ' más: seguí escribiendo para achicar la lista</div>'
+        : '');
+    lista.style.display = 'block';
+    marcado = 0;
+    filas().forEach(function(el, i){
+      // mousedown y no click: el blur del casillero llega ANTES que el click, y
+      // cerraría la lista justo cuando se la está apretando.
+      el.onmousedown = function(ev){ if (ev && ev.preventDefault) ev.preventDefault();
+        elegir(el.getAttribute('data-v')); };
+      el.onmouseenter = function(){ marcado = i; pintarMarca(); };
+    });
+    pintarMarca();
+    // SI NO ENTRA ABAJO, VA ARRIBA. En la mitad de abajo de una ventana la lista
+    // quedaba cortada contra el borde: se veían dos resultados de veinte, y el que
+    // mira no tiene manera de saber que hay más.
+    var abajo = true;
+    try {
+      var r = inp.getBoundingClientRect();
+      var alto = Math.min(260, items.length * 32 + 2);
+      abajo = (r.bottom + alto <= (window.innerHeight || 0)) || r.top < alto;
+    } catch (_) {}
+    lista.style.top = abajo ? '100%' : '';
+    lista.style.bottom = abajo ? '' : '100%';
+    lista.style.marginTop = abajo ? '2px' : '';
+    lista.style.marginBottom = abajo ? '' : '2px';
+  };
+
   var filtrar = function(){
     // SIN ACENTOS, como el resto del panel. Acá se comparaba con toLowerCase() a
     // secas: «comision» no encontraba «Comisión» y «Nacion» no encontraba
@@ -10266,14 +10361,35 @@ function sgSelBuscable(sel, placeholder){
     // «NO HAY NADA» SE MIDE SIN LA EXCEPCIÓN DE ARRIBA. Si se contaran las opciones
     // visibles, la elegida —que se deja siempre— haría creer que hubo resultados y
     // el cartel no aparecería nunca mientras haya algo seleccionado.
-    var hubo = (sel._todas || []).some(function(o){ return o.value && coincide(o); });
-    if (!hubo && q) {
+    var encontradas = (sel._todas || []).filter(function(o){ return o.value && coincide(o); });
+    if (!encontradas.length && q) {
       sel.innerHTML = '<option value="">(no hay nada que diga "' + escH(inp.value.trim()) + '")</option>';
     }
+    dibujar(encontradas, inp.value.trim());
   };
   inp.oninput = filtrar;
-  // Enter no manda el formulario: abre la lista con lo filtrado.
-  inp.onkeydown = function(e){ if (e.key === 'Enter') { e.preventDefault(); sel.focus(); } };
+  inp.onblur = function(){ cerrar(); };
+  inp.onkeydown = function(e){
+    var n = filas().length;
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      if (!n) return;
+      if (e.preventDefault) e.preventDefault();
+      if (marcado < 0) marcado = (e.key === 'ArrowDown') ? 0 : n - 1;
+      else marcado = (marcado + (e.key === 'ArrowDown' ? 1 : n - 1)) % n;
+      pintarMarca();
+      return;
+    }
+    if (e.key === 'Escape') { cerrar(); return; }
+    // ENTER ELIGE LO QUE SE ESTÁ MIRANDO. Antes pasaba el foco al desplegable y
+    // había que volver a buscar con las flechas lo que el filtro ya había dejado
+    // solo: escribir el nombre entero y tener que elegirlo igual a mano.
+    if (e.key === 'Enter') {
+      if (e.preventDefault) e.preventDefault();
+      var el = filas()[marcado < 0 ? 0 : marcado];
+      if (el) elegir(el.getAttribute('data-v'));
+      else sel.focus();
+    }
+  };
 }
 
 // ══ NINGUNA LISTA LARGA SE QUEDA SIN BUSCADOR ═══════════════════════════
@@ -24099,10 +24215,15 @@ var SG_MANUAL = {};
 var SG_MANUAL_COMUN =
   '<h3 class="mc">Vale en todo el panel</h3>'
   + '<h3>🔎 Buscar en una lista desplegable <span class="ver">V1037</span></h3>'
-  + '<p>Cualquier lista larga —clientes, proveedores, productos, cuentas— <b>se '
+  + '<p>Cualquier lista larga —clientes, proveedores, productos, cuentas, insumos— <b>se '
   + 'busca escribiendo</b>. Se hace clic en ella y aparece un casillero: lo que se '
   + 'escriba deja sólo lo que <b>contiene</b> eso, en cualquier parte del nombre. '
   + 'Buscar <i>galicia</i> encuentra «Banco Galicia» sin escribir «banco».</p>'
+  + '<p><b>Los resultados aparecen debajo del casillero mientras se escribe</b> '
+  + '<span class="ver">V1104</span>: se elige uno con un clic, o moviéndose con las '
+  + 'flechas ↑ ↓ y apretando Enter. Hasta esta versión el filtro trabajaba adentro '
+  + 'del desplegable <b>cerrado</b>, así que escribir no cambiaba nada en pantalla y '
+  + 'había que abrirlo para enterarse de que había funcionado.</p>'
   + '<ul>'
   + '<li><b>No hace falta poner tildes.</b> <i>comision</i> encuentra «Comisión» y '
   + '<i>nacion</i> encuentra «Banco Nación».</li>'
@@ -24110,8 +24231,8 @@ var SG_MANUAL_COMUN =
   + 'otro proveedor.</li>'
   + '<li>Se pueden poner <b>varias palabras en cualquier orden</b>: <i>galicia '
   + 'banco</i> encuentra lo mismo que <i>banco galicia</i>.</li>'
-  + '<li>Si no queda nada, lo dice — no se queda en blanco haciendo creer que la '
-  + 'lista está vacía.</li>'
+  + '<li>Si no queda nada, lo dice <b>debajo del casillero</b> — no se queda en '
+  + 'blanco haciendo creer que la lista está vacía.</li>'
   + '</ul>'
   + '<p>Las listas <b>cortas</b> no lo traen: un «Sí / No» con un buscador arriba '
   + 'es más trabajo, no menos.</p>'
@@ -24281,6 +24402,152 @@ function sgManCampo(nombre, espera, liga, ver){
 // La respuesta —que acá el modelo es por CIRCUITO y no por proveedor— tiene que
 // vivir en el manual de esta pantalla, que es donde se la vino a buscar. Que
 // esté sólo en un comentario del código no le sirve a nadie.
+SG_MANUAL.pli = { titulo: 'Planificación de Insumos', html:
+  '<p>Este módulo contesta <b>una</b> pregunta: cuánto material de empaque hay que comprar para '
+  + 'la temporada, y para cuándo. Todo lo demás —las recetas, el stock, las compras— está para que '
+  + 'ese número salga bien.</p>'
+
+  + '<h3>Las dos unidades, que es lo primero que hay que entender</h3>'
+
+  + sgManCampo('Unidad de USO',
+      'En la que la receta consume el insumo: una etiqueta, una caja, un metro de film.',
+      'Es la unidad en la que se guarda el STOCK del depósito.', 'V1099')
+
+  + sgManCampo('Se compra por / Equivalencia',
+      'En la que se le habla al proveedor: el millar de etiquetas, el bolsón, el pallet. La '
+      + 'equivalencia dice cuántas unidades de uso trae una de compra.',
+      'Todo lo que entra o sale del depósito —una recepción, una entrega a un proveedor— se carga '
+      + 'en unidad de COMPRA y se convierte con esta equivalencia.',
+      'V1099')
+
+  + '<p class="nota">Si la equivalencia está mal, <b>todo</b> está mal y por un factor de mil. '
+  + 'Recibir 8 millares son 8.000 etiquetas: con la equivalencia en 1, el plan creería que en el '
+  + 'depósito hay 8 y mandaría a comprar de nuevo toda la temporada.</p>'
+
+  + '<h3>El stock</h3>'
+
+  + '<p>El depósito es <b>un número por insumo</b>, en unidad de uso, y lo mueven tres cosas: el '
+  + 'arqueo que se carga a mano, la <b>recepción</b> de una compra (suma) y la <b>entrega</b> a un '
+  + 'proveedor (resta). Ninguna otra pantalla lo toca.</p>'
+
+  + sgManCampo('Confirmar la recepción (📦)',
+      'Cuánto llegó de verdad, con qué fecha y con qué remito. El número es el TOTAL recibido de '
+      + 'esa compra, no lo de la última entrega: para sumar una entrega nueva está el botón '
+      + '«llegó otra entrega», que hace la cuenta.',
+      'Suma al stock y la compra queda recibida. No se puede recibir más de lo que se pidió: si de '
+      + 'verdad llegó más, primero se corrige la cantidad de la compra.',
+      'V1082')
+
+  + '<h3>El plan: qué cubre qué</h3>'
+
+  + '<p>Lo que falta comprar sale de restarle a la necesidad <b>dos</b> cosas, y cada una se cuenta '
+  + 'una sola vez:</p>'
+
+  + sgManCampo('Stock',
+      'Lo que YA está en el depósito, incluida la mercadería de las compras que se recibieron.',
+      'Lo mueve la recepción. Una compra recibida deja de contar como pedida.', 'V1099')
+
+  + sgManCampo('En viaje',
+      'Lo que está comprado y <b>todavía no llegó</b>: la cantidad de la compra menos lo recibido.',
+      'Antes esta columna se llamaba «ya comprado» y contaba la compra entera, así que lo recibido '
+      + 'se contaba dos veces y el plan decía «a comprar 0» cuando faltaba la mitad.',
+      'V1099')
+
+  + '<p class="nota">Una compra marcada «recibido · sin confirmar» es la que alguien puso en ese '
+  + 'estado a mano, sin pasar por el botón 📦: <b>no sumó nada al depósito</b>. Es la que hay que '
+  + 'recibir de verdad.</p>'
+
+  + '<h3>Confirmar el plan lo congela</h3>'
+
+  + '<p>Un plan confirmado guarda sus números tal como quedaron, y editar una receta después '
+  + '<b>no</b> los cambia. Es a propósito: si no, el plan que ya se mandó a comprar cambiaría '
+  + 'solo porque alguien tocó una receta.</p>'
+
+  + sgManCampo('Insumos que la receta usa y el plan no tiene',
+      'El aviso naranja arriba de la lista, en <b>Planes</b> y en <b>Comprar</b>. Dice QUÉ insumo '
+      + 'quedó afuera y por qué: entró a la receta después de confirmar, no se compra (alquiler, '
+      + 'comodato, lo provee el cliente), la receta guardó una unidad distinta de la del insumo, '
+      + 'o el insumo se borró.',
+      'Para que un insumo nuevo entre hay que <b>reabrir el plan y confirmarlo de nuevo</b>. '
+      + 'Mientras tanto se le puede registrar la compra igual desde <b>+ Registrar compra</b>, '
+      + 'que tiene todos los insumos y no sólo los del plan.',
+      'V1105')
+
+  + '<p class="nota">Hasta la V1105 ese insumo no aparecía y no había dónde leer por qué: desde '
+  + 'la pantalla, un insumo que está en la receta y no está en la lista se lee igual que un error '
+  + 'del sistema.</p>'
+
+  + '<h3>La orden de compra</h3>'
+
+  + sgManCampo('Precio y moneda',
+      'Lo que se pactó con el proveedor. Si se deja vacío se usa el del proveedor cargado en el '
+      + 'insumo, con su moneda.',
+      'Queda CONGELADO en la compra: que mañana cambie la lista de precios no puede cambiar el '
+      + 'papel que ya se mandó.',
+      'V1081')
+
+  + sgManCampo('Lugar de entrega y Entregar el',
+      'Dónde y para cuándo. Se proponen el último lugar usado; si quedan vacíos, el renglón no se '
+      + 'dibuja en el documento.',
+      'Salen impresos en la orden. Una columna que dice «—» en todas las filas de un papel que se '
+      + 'manda afuera enseña a leerlo por arriba.',
+      'V1086')
+
+  + '<p class="nota">El logo de la empresa sale del encabezado de la orden y se sube desde ahí '
+  + 'mismo. Si lo sacás, <b>no vuelve</b>: la carga automática corre una sola vez.</p>'
+
+  + '<h3>Pago con insumos</h3>'
+
+  + '<p>Para los proveedores a los que se les paga con mercadería. Son <b>dos</b> registros que hay '
+  + 'que mirar juntos y que no son lo mismo: lo que SALIÓ —y lo que nos costó— y la factura con la '
+  + 'que se RECUPERÓ —y lo que le cobramos—.</p>'
+
+  + sgManCampo('Sale de nuestro depósito',
+      'Tildado, la entrega le descuenta stock a cada insumo. Destildalo cuando la mercadería se '
+      + 'compró y fue directo al proveedor sin pasar por acá.',
+      'Es lo que decide si el plan va a mandar a comprar esa mercadería de nuevo. No se puede '
+      + 'entregar más de lo que hay en el depósito.',
+      'V1099')
+
+  + sgManCampo('Factura de compra (por renglón)',
+      'El comprobante con el que se COMPRÓ ese insumo: es el papel que respalda en cuánto se lo '
+      + 'valuó. Va por renglón porque un mismo remito puede llevar tres insumos de tres facturas.',
+      'No es el comprobante de la entrega: ése va arriba, en la cabecera.', 'V1099')
+
+  + sgManCampo('Le cobramos (por renglón)',
+      'El precio al que le facturaste ESE insumo al proveedor, con su moneda. Es la otra punta de '
+      + '«Nos costó», que está en el renglón de al lado.',
+      'De la resta de las dos sale el RESULTADO de la entrega. Se carga en la misma ventana, '
+      + 'debajo del costo, para no tener que ir a buscarlo a otra pantalla.',
+      'V1103')
+
+  + sgManCampo('Resultado',
+      'Lo que le cobraste menos lo que te costó: por renglón en la ventana, y sumado para toda la '
+      + 'entrega en la lista. En verde ganaste, en rojo perdiste.',
+      'Es el número que dice si pagarle con mercadería convino. No se calcula si falta una de las '
+      + 'dos puntas, o si el costo y el precio están en monedas distintas: se dice por qué.',
+      'V1103')
+
+  + sgManCampo('La diferencia de la factura',
+      'En la solapa <b>Facturas de recupero</b>: lo que le cobraste menos lo que te costó todo lo '
+      + 'que esa factura cubre. Una factura puede cubrir varias entregas.',
+      'Abajo del importe avisa cuando la factura <b>no coincide con los renglones</b> que cubre: '
+      + 'eso es un error de tipeo en una de las dos puntas, y conviene verlo ahí y no cuando el '
+      + 'proveedor lo discuta.',
+      'V1103')
+
+  + '<p class="nota">Cuando las dos puntas están en monedas distintas —el costo en dólares y el '
+  + 'precio en pesos, o la factura en una y los renglones en otra— la resta <b>no se hace</b> y se '
+  + 'dice por qué. Restar pesos contra dólares con una cotización que nadie eligió daría una '
+  + 'ganancia inventada.</p>'
+
+  + '<h3>Lo que no se puede deshacer solo</h3>'
+
+  + '<p>Una entrega ya recuperada no se corrige ni se borra: primero hay que soltarla de la factura '
+  + '(↩). Y el insumo de una compra o de una entrega no se cambia editando — se borra y se carga de '
+  + 'nuevo, porque el stock ya entró o salió en el insumo viejo.</p>'
+};
+
 SG_MANUAL.modelos = { titulo: 'Asiento Modelo', html:
   '<div class="ojo"><b>El de cobranza tiene una segunda puerta</b> '
   + '<span class="ver">V1039</span>: sus cuatro cuentas también se ponen desde <b>Cuenta '
@@ -26538,7 +26805,7 @@ SG_MANUAL['galpon-lote-dia'] = { titulo: 'Galpón · Lote del día', html:
   + 'fruta ya está en la tolva, nada puede rechazarla— pero entra <b>marcado para revisar</b>, '
   + 'y alguien va a tener que resolver a mano, el mes que viene, qué se cosechó ese martes.</div>'
 
-  + '<h3>🕐 Por qué lleva hora y no sólo día <span class="ver">V1098</span></h3>'
+  + '<h3>🕐 Por qué lleva hora y no sólo día <span class="ver">V1106</span></h3>'
   + '<p>Porque el lote <b>cambia a media mañana</b>. Un día de cosecha no es un lote: son dos '
   + 'o tres, y el IFCO que se vuelca a las 14:30 es del lote que estaba vigente <b>a las '
   + '14:30</b>, no del que se cargó a la mañana.</p>'
@@ -26556,7 +26823,7 @@ SG_MANUAL['galpon-lote-dia'] = { titulo: 'Galpón · Lote del día', html:
   + 'entró a las 6:40 se queda <b>sin lote</b>. La pantalla lo avisa arriba de la tabla y trae '
   + 'el arreglo en un botón: <b>Que arranque a las 00:00</b>.</div>'
 
-  + '<h3>🟢 El cartel de arriba <span class="ver">V1098</span></h3>'
+  + '<h3>🟢 El cartel de arriba <span class="ver">V1106</span></h3>'
   + '<p>Verde con el lote que se está cosechando en este momento, o <b>rojo</b> si no hay '
   + 'ninguno. Es lo primero que se ve al entrar y se lee de pie, de paso.</p>'
   + '<p>Lo resuelve el <b>servidor</b>, con la misma cuenta que usa el volcado para guardar. '
@@ -26565,14 +26832,14 @@ SG_MANUAL['galpon-lote-dia'] = { titulo: 'Galpón · Lote del día', html:
   + '<p>Mirando un día que no es hoy el cartel no aparece: no hay un «ahora mismo» del martes '
   + 'pasado.</p>'
 
-  + '<h3>🌳 El lote y el producto <span class="ver">V1098</span></h3>'
+  + '<h3>🌳 El lote y el producto <span class="ver">V1106</span></h3>'
   + '<p>Los lotes salen de <b>Producción → Lotes</b>, agrupados por finca. Acá <b>no se dan de '
   + 'alta</b>, igual que las cuadrillas.</p>'
   + '<p>El <b>producto</b> se propone con el cultivo que el lote tiene cargado, y <b>queda '
   + 'editable</b>. El cultivo dice qué árbol hay plantado; lo que entra al galpón un martes lo '
   + 'sabe el que está ahí. El producto es lo que después se lee en la etiqueta del pallet.</p>'
 
-  + '<h3>🔁 Al día siguiente <span class="ver">V1098</span></h3>'
+  + '<h3>🔁 Al día siguiente <span class="ver">V1106</span></h3>'
   + '<p>La ventana <b>propone</b> el último lote cargado, porque el galpón suele cosechar el '
   + 'mismo lote varios días seguidos. Pero hay que apretar <b>Cargar</b>: nada se arrastra '
   + 'solo de un día al otro.</p>'
@@ -26580,7 +26847,7 @@ SG_MANUAL['galpon-lote-dia'] = { titulo: 'Galpón · Lote del día', html:
   + 'lo haya dicho</b> es exactamente el error que esta pantalla existe para evitar. La '
   + 'propuesta ahorra tipeo; el botón es la decisión.</p>'
 
-  + '<h3>🔒 Cuándo deja de poder corregirse <span class="ver">V1098</span></h3>'
+  + '<h3>🔒 Cuándo deja de poder corregirse <span class="ver">V1106</span></h3>'
   + '<p>Un tramo se corrige y se borra libremente <b>mientras no tenga IFCOs volcados</b>. Ése '
   + 'es el caso normal: el error se descubre a los diez minutos de cargarlo.</p>'
   + '<p>Con volcados encima aparece un <b>candado</b> con cuántos son. El motivo no es '
@@ -26597,7 +26864,7 @@ SG_MANUAL['galpon-lote-dia'] = { titulo: 'Galpón · Lote del día', html:
   + 'caso que dos cuadrillas compartiendo un número de tarjeta, y se corta igual: antes de '
   + 'guardar.</div>'
 
-  + '<h3>👤 Quién puede <span class="ver">V1098</span></h3>'
+  + '<h3>👤 Quién puede <span class="ver">V1106</span></h3>'
   + '<p><b>Cualquiera con el módulo</b>, con nivel de operar. Esto <b>no es parametrizar</b>: '
   + 'se carga todas las mañanas y lo hace el que abre el galpón. Pedir administrador acá '
   + 'terminaría con el dueño cargándolo por teléfono mientras el primer camión espera.</p>'
@@ -37060,6 +37327,8 @@ function sgRepExport(){
   </div>
 
   <style>
+    /* Lo largo parte de renglón en vez de empujar la tabla y sacar una barra de costado. */
+    #pli-pag-cont td { word-break:break-word }
     .pli-tab { padding:10px 16px; cursor:pointer; border-bottom:2px solid transparent; color:var(--mut); font-weight:600 }
     .pli-tab.on { color: var(--burg); border-bottom-color: var(--burg) }
     .pli-pane { display:none }
@@ -37169,11 +37438,16 @@ function sgRepExport(){
     .pli-viz-modo.on { background:var(--burg); color:#fff }
   </style>
 
-  <div style="display:flex;border-bottom:1px solid var(--bor);margin-bottom:14px">
+  <div style="display:flex;align-items:center;border-bottom:1px solid var(--bor);margin-bottom:14px">
     <div class="pli-tab on" data-pli="insumos"   onclick="pliTab('insumos')">🧱 Insumos</div>
     <div class="pli-tab"    data-pli="productos" onclick="pliTab('productos')">🍈 Productos y recetas</div>
     <div class="pli-tab"    data-pli="planes"    onclick="pliTab('planes')">📊 Planes</div>
     <div class="pli-tab"    data-pli="comprar"   onclick="pliTab('comprar')">🛒 Comprar</div>
+    <!-- PAGARLE A UN PROVEEDOR CON INSUMOS. Pablo, 20/10/2026: «a veces hay proveedores a los que
+         les pagamos con INSUMOS… necesito un lugar donde llevar el registro». -->
+    <div class="pli-tab"    data-pli="pagos"     onclick="pliTab('pagos')">🤝 Pago con insumos</div>
+    <div style="flex:1"></div>
+    <button class="btn bo bs" style="margin-bottom:6px" onclick="sgManualAbrir('pli')">❓ ¿Cómo se usa?</button>
   </div>
 
   <!-- ── SOLAPA INSUMOS ─────────────────────────────────────────────── -->
@@ -37243,6 +37517,28 @@ function sgRepExport(){
   </div>
 
   <!-- ── SOLAPA COMPRAR ─────────────────────────────────────────────── -->
+  <!-- ══ PAGO CON INSUMOS ══════════════════════════════════════════════════════
+       Dos listas que se miran juntas: lo que SALIÓ (y lo que nos costó) y las facturas con las
+       que se RECUPERÓ (y a cuánto se las cobramos). La diferencia entre las dos es lo que se
+       gana o se pierde, y es justo lo que no se ve cuando esto se lleva en un cuaderno. -->
+  <div class="pli-pane" id="pli-pane-pagos">
+    <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:12px">
+      <div style="display:flex;border:1px solid var(--bor);border-radius:8px;overflow:hidden">
+        <div class="pli-pgv on" data-pli-pgv="entregas" onclick="pliPagVista('entregas')"
+             style="padding:6px 12px;cursor:pointer;font-size:12px;font-weight:600">📤 Entregas</div>
+        <div class="pli-pgv" data-pli-pgv="facturas" onclick="pliPagVista('facturas')"
+             style="padding:6px 12px;cursor:pointer;font-size:12px;font-weight:600">🧾 Facturas de recupero</div>
+      </div>
+      <label class="pli-cel-chica" style="display:flex;align-items:center;gap:6px;cursor:pointer">
+        <input type="checkbox" id="pli-pag-pendientes" style="width:auto" onchange="pliPagRender()">
+        Sólo lo que falta recuperar
+      </label>
+      <div style="flex:1"></div>
+      <button class="btn bb" id="pli-pag-nuevo" onclick="pliEntregaAbrir(null)">+ Registrar entrega</button>
+    </div>
+    <div id="pli-pag-cont"></div>
+  </div>
+
   <div class="pli-pane" id="pli-pane-comprar">
     <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:12px">
       <span class="pli-cel-chica">Plan:</span>
@@ -37270,6 +37566,107 @@ function sgRepExport(){
     <div id="pli-cmp-cont"></div>
   </div>
 </div>
+
+<!-- ══ LA ENTREGA AL PROVEEDOR ══════════════════════════════════════════════════
+     Un remito: un comprobante con varios insumos adentro. -->
+<div class="ab-modal-overlay" id="pli-mb-entrega">
+<div class="ab-modal" style="width:min(1040px,96vw);max-height:92vh;overflow-y:auto">
+  <div class="mhd">
+    <div><div class="mht">🤝 Entrega al proveedor</div>
+      <div class="pli-cel-chica">Mercadería que sale como pago. De cada insumo va lo que a NOSOTROS nos costó
+        y lo que le COBRAMOS al proveedor: la diferencia es el resultado de la entrega.</div></div>
+    <button class="mcl" onclick="document.getElementById('pli-mb-entrega').classList.remove('on')">×</button>
+  </div>
+  <input type="hidden" id="pli-ent-id">
+  <div class="fg">
+    <div class="fl ff"><label>Proveedor *</label>
+      <input id="pli-ent-prov" list="pli-dl-prov" class="pli-inp" placeholder="A quién se le entregó"></div>
+    <div class="fl"><label>Fecha *</label><input id="pli-ent-fecha" type="date" class="pli-inp"></div>
+    <div class="fl"><label>Comprobante</label>
+      <input id="pli-ent-comp" class="pli-inp" placeholder="Remito o factura"></div>
+  </div>
+  <!-- LA CASILLA QUE ELIGIÓ PABLO. A veces la mercadería sale del depósito y a veces se compra y
+       va directo al proveedor: con el tilde puesto se le descuenta stock al insumo. -->
+  <label class="pli-cel-chica" style="display:flex;align-items:center;gap:7px;cursor:pointer;margin-top:10px;
+         background:#f8fafc;border:1px solid var(--bor);border-radius:8px;padding:8px 11px">
+    <input type="checkbox" id="pli-ent-stock" checked style="width:auto">
+    <span><b>Sale de nuestro depósito</b> — se le descuenta del stock a cada insumo.
+      Destildá si esta mercadería se compró y fue directo al proveedor sin pasar por acá.</span>
+  </label>
+
+  <div style="display:flex;align-items:center;gap:10px;margin-top:14px">
+    <b style="font-size:13px">Qué se entregó</b>
+    <button class="btn bo bs" onclick="pliEntLineaAgregar()">+ Insumo</button>
+  </div>
+  <div id="pli-ent-lineas"></div>
+  <div id="pli-ent-total" class="pli-cel-chica" style="margin-top:8px;text-align:right"></div>
+
+  <div class="fl ff" style="margin-top:8px"><label>Notas</label><input id="pli-ent-notas" class="pli-inp"></div>
+  <div id="pli-ent-adjuntos" style="margin-top:12px"></div>
+  <div class="ab-modal-footer">
+    <button class="btn bo" onclick="document.getElementById('pli-mb-entrega').classList.remove('on')">Cancelar</button>
+    <button class="btn bb" onclick="pliEntregaGuardar()">Guardar</button>
+  </div>
+</div>
+</div>
+
+<!-- ══ LA FACTURA DE RECUPERO ═══════════════════════════════════════════════════
+     La que LE HACEMOS al proveedor. Puede cubrir varias entregas. -->
+<div class="ab-modal-overlay" id="pli-mb-recupero">
+<div class="ab-modal" style="width:620px;max-height:92vh;overflow-y:auto">
+  <div class="mhd">
+    <div><div class="mht">🧾 Factura al proveedor</div>
+      <div class="pli-cel-chica">Con lo que se recupera lo entregado. Acá va el precio que LE COBRAMOS.</div></div>
+    <button class="mcl" onclick="document.getElementById('pli-mb-recupero').classList.remove('on')">×</button>
+  </div>
+  <input type="hidden" id="pli-rec-f-id">
+  <div class="fg">
+    <div class="fl ff"><label>Proveedor *</label>
+      <input id="pli-rec-f-prov" list="pli-dl-prov" class="pli-inp"></div>
+    <div class="fl"><label>Fecha *</label><input id="pli-rec-f-fecha" type="date" class="pli-inp"></div>
+  </div>
+  <div class="fg" style="margin-top:8px">
+    <div class="fl"><label>Nº de factura</label><input id="pli-rec-f-nro" class="pli-inp"></div>
+    <div class="fl"><label>Importe</label>
+      <input id="pli-rec-f-importe" type="number" step="any" min="0" class="pli-inp pli-inp-num"></div>
+    <div class="fl"><label>Moneda</label>
+      <select id="pli-rec-f-moneda" class="pli-inp"><option value="ARS">Pesos</option><option value="USD">Dólares</option></select></div>
+  </div>
+  <div class="fl ff" style="margin-top:8px"><label>Notas</label><input id="pli-rec-f-notas" class="pli-inp"></div>
+  <div id="pli-rec-f-adjuntos" style="margin-top:12px"></div>
+  <div class="ab-modal-footer">
+    <button class="btn bo" onclick="document.getElementById('pli-mb-recupero').classList.remove('on')">Cancelar</button>
+    <button class="btn bb" onclick="pliRecuperoGuardar()">Guardar</button>
+  </div>
+</div>
+</div>
+
+<!-- ══ MARCAR UNA ENTREGA CONTRA UNA FACTURA ════════════════════════════════════
+     Se elige de una lista, no tipeando el número de un renglón: el panel abre una ventana para
+     esto en todos lados, y un prompt() que pide escribir «2» es la manera de marcar la factura
+     equivocada un martes a las siete. -->
+<div class="ab-modal-overlay" id="pli-mb-marcar">
+<div class="ab-modal" style="width:560px">
+  <div class="mhd">
+    <div><div class="mht">🧾 Recuperar esta entrega</div>
+      <div class="pli-cel-chica" id="pli-mar-que"></div></div>
+    <button class="mcl" onclick="document.getElementById('pli-mb-marcar').classList.remove('on')">×</button>
+  </div>
+  <div class="fl ff"><label>Factura al proveedor</label>
+    <select id="pli-mar-fact" class="pli-inp"></select>
+    <div class="pli-cel-chica">Sólo se listan las facturas hechas a ese mismo proveedor.</div></div>
+  <div class="ab-modal-footer">
+    <button class="btn bo" onclick="pliMarcarNueva()">+ Cargar una factura nueva</button>
+    <div style="flex:1"></div>
+    <button class="btn bo" onclick="document.getElementById('pli-mb-marcar').classList.remove('on')">Cancelar</button>
+    <button class="btn bb" onclick="pliMarcarGuardar()">Marcar como recuperada</button>
+  </div>
+</div>
+</div>
+
+<!-- El campo que abre el explorador para los adjuntos de entregas y facturas. -->
+<input type="file" id="pli-pag-file" accept="application/pdf,image/jpeg,image/png"
+       style="display:none" onchange="pliAdjSubir(this)">
 
 <!-- ══ CONFIRMAR LA RECEPCIÓN (V1082) ═══════════════════════════════════════════
      Pablo, 24/9/2026: «tengo que poder confirmar la recepción de la orden de compra para que me
@@ -74395,6 +74792,659 @@ function pliTab(t) {
   // La agenda depende de las recetas y de las compras, que pueden haber cambiado
   // en otra solapa: se recarga al entrar en vez de mostrar algo viejo.
   if (t === 'comprar') pliCmpInit();
+  if (t === 'pagos') pliPagCargar();
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+// PAGARLE A UN PROVEEDOR CON INSUMOS
+// ══════════════════════════════════════════════════════════════════════════
+//
+// Pablo, 20/10/2026: «a veces hay proveedores a los que les pagamos con INSUMOS… necesito un lugar
+// donde llevar el registro de lo que se le entregó, la factura del insumo, el costo de ese insumo
+// (dólares o pesos), la cantidad… y saber si lo recuperé mediante factura al proveedor, de vuelta,
+// qué precio le cobramos, pesos o dólares… que me permita adjuntar la factura».
+//
+// Dos listas que se miran juntas: lo que SALIÓ con lo que nos costó, y las facturas con las que se
+// RECUPERÓ con lo que le cobramos.
+
+function pliPagVista(v) {
+  PLI.pagVista = v;
+  document.querySelectorAll('#sec-pli-planificacion .pli-pgv').forEach(function(el) {
+    el.classList.toggle('on', el.getAttribute('data-pli-pgv') === v);
+  });
+  // El botón de arriba cambia con la vista: en Entregas da de alta una entrega y en Facturas una
+  // factura. Un «+ Nuevo» que según dónde estés hace dos cosas distintas se aprieta mal una vez.
+  var b = document.getElementById('pli-pag-nuevo');
+  b.textContent = v === 'entregas' ? '+ Registrar entrega' : '+ Nueva factura';
+  b.setAttribute('onclick', v === 'entregas' ? 'pliEntregaAbrir(null)' : 'pliRecuperoAbrir(null)');
+  document.getElementById('pli-pag-pendientes').parentNode.style.display = v === 'entregas' ? '' : 'none';
+  pliPagRender();
+}
+
+function pliPagCargar() {
+  var cont = document.getElementById('pli-pag-cont');
+  cont.innerHTML = '<div class="pli-vacio">Cargando…</div>';
+  return Promise.all([pliApi('/entregas'), pliApi('/recuperos')]).then(function(rs) {
+    if (!rs[0].ok) { pliErr(rs[0]); return; }
+    if (!rs[1].ok) { pliErr(rs[1]); return; }
+    PLI.entregas = rs[0].data || [];
+    PLI.recuperos = rs[1].data || [];
+    pliPagProveedores();
+    pliPagVista(PLI.pagVista || 'entregas');
+  });
+}
+
+// EL NOMBRE DEL PROVEEDOR TIENE QUE COINCIDIR, o el recupero no se puede marcar: la entrega y la
+// factura se cruzan comparando ese texto. Escrito a mano dos veces, «Cartocor SA» y «CARTOCOR
+// S.A.» son dos proveedores distintos y el sistema avisa que no son el mismo — con razón, pero
+// el problema lo creó la pantalla al hacerlo tipear.
+//
+// Así que a la lista de los proveedores de los insumos se le suman los que YA se usaron acá. Es
+// el mismo criterio del lugar de entrega: proponer lo que ya existe en vez de pedir que se repita.
+function pliPagProveedores() {
+  var dl = document.getElementById('pli-dl-prov');
+  if (!dl) return;
+  var vistos = {}, salida = [];
+  var sumar = function(p) {
+    var t = String(p || '').trim();
+    if (!t) return;
+    var k = t.toLowerCase();
+    if (vistos[k]) return;
+    vistos[k] = 1;
+    salida.push(t);
+  };
+  (PLI.proveedores || []).forEach(sumar);
+  (PLI.entregas || []).forEach(function(e) { sumar(e.proveedor_texto); });
+  (PLI.recuperos || []).forEach(function(f) { sumar(f.proveedor_texto); });
+  dl.innerHTML = salida.map(function(p) { return '<option value="' + pliEsc(p) + '">'; }).join('');
+}
+
+// Lo que se le entregó, en una línea: «8 MILLAR ETIQUETA · 200 UN CAJA».
+function pliEntResumen(e) {
+  return (e.lineas || []).map(function(l) {
+    return pliN(l.cantidad) + ' ' + pliEsc(l.unidad_compra) + ' ' + pliEsc(l.insumo_nombre)
+      + (l.factura_compra ? ' <span class="pli-cel-chica">(fc. ' + pliEsc(l.factura_compra) + ')</span>' : '');
+  }).join(' · ') || '—';
+}
+
+function pliPlata(v, m) {
+  return v == null ? '—' : pliEsc(m || 'ARS') + ' ' + pliN(v, 2);
+}
+
+function pliPagRender() {
+  var cont = document.getElementById('pli-pag-cont');
+  if (PLI.pagVista === 'facturas') return pliPagFacturas(cont);
+
+  var soloPend = document.getElementById('pli-pag-pendientes').checked;
+  var filas = (PLI.entregas || []).filter(function(e) { return !soloPend || !e.recupero_id; });
+  if (!filas.length) {
+    cont.innerHTML = '<div class="pli-vacio" style="padding:26px;text-align:center;color:var(--mut)">'
+      + (soloPend ? 'No queda nada por recuperar.'
+        : 'Todavía no registraste ninguna entrega. Es para cuando le pagás a un proveedor con mercadería.')
+      + '</div>';
+    return;
+  }
+  // SIN BARRA DE COSTADO: los anchos se reparten y lo único de largo variable —lo que se
+  // entregó— parte de renglón. Lo que se iría de pantalla es justamente la plata.
+  var h = '<div class="ab-table-wrap"><table class="pa-tbl" style="font-size:12px;table-layout:fixed">'
+    + '<colgroup><col style="width:8%"><col style="width:14%"><col style="width:11%"><col>'
+      + '<col style="width:12%"><col style="width:12%"><col style="width:12%">'
+      + '<col style="width:12%"><col style="width:80px"></colgroup>'
+    + '<thead><tr>'
+    + '<th>Fecha</th><th>Proveedor</th><th>Comprobante</th><th>Qué se entregó</th>'
+    + '<th style="text-align:right">Nos costó</th><th style="text-align:right">Le cobramos</th>'
+    + '<th style="text-align:right">Resultado</th><th>Recupero</th><th></th>'
+    + '</tr></thead><tbody>';
+  filas.forEach(function(e) {
+    // LO QUE FALTA RECUPERAR ES LO QUE HAY QUE MIRAR, así que se ve de lejos.
+    // EL IMPORTE DE LA FACTURA NO VA ACÁ. Una factura puede cubrir VARIAS entregas, así que
+    // repetir su importe entero en cada fila, al lado de «nos costó», invita a restar dos números
+    // que no se pueden restar: tres entregas de 100.000 contra una factura de 330.000 se leerían
+    // como +230.000 en cada fila — 690.000 contra los 30.000 que son. El número que sí se puede
+    // mirar está en la solapa de Facturas, que compara el importe contra TODO lo que cubre.
+    var fac = (PLI.recuperos || []).filter(function(f) { return f.id === e.recupero_id; })[0];
+    var rec = e.recupero_id
+      ? '<span class="pli-badge pli-ok">recuperado</span>'
+        + '<div class="pli-cel-chica">' + pliEsc(e.recupero_numero || 's/n')
+          + ' · ' + pliEsc(e.recupero_fecha || '')
+          + (fac && fac.entregas > 1 ? ' <span title="Esta factura cubre varias entregas: el total'
+            + ' contra lo entregado se ve en la solapa Facturas">· cubre ' + fac.entregas + ' entregas</span>' : '')
+          + '</div>'
+      : '<span class="pli-badge pli-warn">pendiente</span>';
+    h += '<tr>'
+      + '<td>' + pliEsc(e.fecha) + '</td>'
+      + '<td><b>' + pliEsc(e.proveedor_texto) + '</b></td>'
+      + '<td class="pli-cel-chica">' + pliEsc(e.comprobante || '—')
+        + (e.adjuntos ? ' 📎' + e.adjuntos : '')
+        // SIN EL TILDE, LA MERCADERÍA NO SALIÓ DEL DEPÓSITO y el stock no se enteró: hay que
+        // poder verlo en la lista, porque cambia lo que el plan va a mandar a comprar.
+        + (e.mueve_stock ? '' : '<div class="pli-cel-chica" style="color:#92400e">no salió del depósito</div>')
+        + '</td>'
+      + '<td class="pli-cel-chica">' + pliEntResumen(e) + '</td>'
+      + '<td class="pli-num">' + (e.costo == null
+          ? '<span class="pli-cel-chica">' + (e.varias_monedas ? 'dos monedas' : 'sin costo') + '</span>'
+          : pliPlata(e.costo, e.moneda)) + '</td>'
+      + '<td class="pli-num">' + (e.cobrado == null
+          ? '<span class="pli-cel-chica">' + (e.varias_monedas_precio ? 'dos monedas' : 'sin precio') + '</span>'
+          : pliPlata(e.cobrado, e.moneda_cobrado)) + '</td>'
+      // EL RESULTADO: lo que le cobramos menos lo que nos costó. Es lo que Pablo vino a registrar.
+      + '<td class="pli-num">' + (e.comparable
+          ? '<b style="color:' + (e.resultado < 0 ? '#b91c1c' : '#166534') + '">'
+            + (e.resultado > 0 ? '+' : '') + pliPlata(e.resultado, e.moneda) + '</b>'
+          : '<span class="pli-cel-chica">'
+            + (e.costo == null || e.cobrado == null ? 'falta una punta' : 'monedas distintas') + '</span>') + '</td>'
+      + '<td>' + rec + '</td>'
+      + '<td style="text-align:right;white-space:nowrap">'
+        + (e.recupero_id
+          ? '<button class="btn bo bs" onclick="pliEntSoltar(' + e.id + ')" title="Desvincular de la factura" style="padding:2px 6px;font-size:11px">↩</button> '
+          : '<button class="btn bo bs" onclick="pliEntRecuperar(' + e.id + ')" title="Marcar contra una factura" style="padding:2px 6px;font-size:11px">🧾</button> ')
+        // UNA ENTREGA YA RECUPERADA NO SE CORRIGE: el servidor la frena, así que el lápiz se
+        // muestra apagado y dice por qué en vez de fallar recién al guardar.
+        + (e.recupero_id
+          ? '<button class="btn bo bs" disabled title="Está recuperada con una factura: soltala primero (↩)"'
+            + ' style="padding:2px 6px;font-size:11px;opacity:.45">✏️</button> '
+          : '<button class="btn bo bs" onclick="pliEntregaAbrir(' + e.id + ')" style="padding:2px 6px;font-size:11px">✏️</button> ')
+        // El botón que borra se ofrece por NIVEL: el que no puede, apretaría y le contestaría 403.
+        + (lnbPuedeAnular('pli-planificacion') && !e.recupero_id
+          ? '<button class="btn bd bs" onclick="pliEntregaBorrar(' + e.id + ')" style="padding:2px 6px;font-size:11px">🗑</button>' : '')
+      + '</td></tr>';
+  });
+  cont.innerHTML = h + '</tbody></table></div>'
+    + '<div class="pli-cel-chica" style="margin-top:8px"><b>Resultado</b> es lo que le cobraste menos '
+    + 'lo que te costó, de esa entrega: en verde ganaste, en rojo perdiste. Cuando falta una de las '
+    + 'dos puntas, o están en monedas distintas, se dice en vez de poner un número que no significa '
+    + 'nada. En <b>Facturas de recupero</b> está el control del papel: si el importe de la factura '
+    + 'coincide con lo que suman los precios de los renglones que cubre.</div>';
+}
+
+function pliPagFacturas(cont) {
+  var filas = PLI.recuperos || [];
+  if (!filas.length) {
+    cont.innerHTML = '<div class="pli-vacio" style="padding:26px;text-align:center;color:var(--mut)">'
+      + 'Todavía no cargaste ninguna factura de recupero.</div>';
+    return;
+  }
+  var h = '<div class="ab-table-wrap"><table class="pa-tbl" style="font-size:12px">'
+    + '<colgroup><col style="width:10%"><col><col style="width:14%"><col style="width:15%">'
+      + '<col style="width:18%"><col style="width:15%"><col style="width:76px"></colgroup>'
+    + '<thead><tr>'
+    + '<th>Fecha</th><th>Proveedor</th><th>Nº</th><th style="text-align:right">Dice la factura</th>'
+    + '<th style="text-align:right">Nos costó lo que cubre</th>'
+    + '<th style="text-align:right">Diferencia</th><th></th></tr></thead><tbody>';
+  filas.forEach(function(f) {
+    // LO QUE CUBRE, POR MONEDA. Restar sólo se puede cuando hay una sola moneda y es la de la
+    // factura: facturar en pesos lo que se valuó en dólares es normal, pero la resta de esos dos
+    // números no significa nada sin un tipo de cambio que nadie eligió.
+    var cubre = Object.keys(f.cubre || {});
+    var txtCubre = cubre.length
+      ? cubre.map(function(m) { return pliPlata(f.cubre[m], m); }).join(' + ')
+        + (f.cubre_sin_costo ? ' <span style="color:#92400e">(+' + f.cubre_sin_costo + ' sin costo)</span>' : '')
+      : '<span class="pli-cel-chica">' + (f.entregas ? 'sin costo cargado' : 'no cubre ninguna entrega') + '</span>';
+    var dif = f.comparable
+      ? '<b style="color:' + (f.diferencia < 0 ? '#b91c1c' : '#166534') + '">'
+        + (f.diferencia > 0 ? '+' : '') + pliPlata(f.diferencia, f.moneda) + '</b>'
+      : '<span class="pli-cel-chica">' + (!f.entregas ? '—'
+        : (f.importe == null ? 'la factura no tiene importe'
+          : (f.cubre_sin_costo ? 'falta el costo de un renglón' : 'monedas distintas'))) + '</span>';
+    // EL CONTROL DEL PAPEL. El importe que dice la factura y lo que suman los precios de sus
+    // renglones tienen que ser el mismo número: si no lo son, hay un error de tipeo en una de las
+    // dos puntas, y es mejor verlo acá que cuando el proveedor lo discuta.
+    var des = f.descuadre;
+    var aviso = (des !== null && des !== undefined && Math.abs(des) > 0.009)
+      ? '<div class="pli-cel-chica" style="color:#b91c1c" title="Los renglones de las entregas que '
+        + 'cubre suman otra cosa">no coincide con los renglones por ' + pliPlata(Math.abs(des), f.moneda) + '</div>'
+      : '';
+    h += '<tr><td>' + pliEsc(f.fecha) + '</td><td><b>' + pliEsc(f.proveedor_texto) + '</b></td>'
+      + '<td class="pli-cel-chica">' + pliEsc(f.numero || 's/n') + (f.adjuntos ? ' 📎' + f.adjuntos : '') + '</td>'
+      + '<td class="pli-num">' + pliPlata(f.importe, f.moneda) + aviso + '</td>'
+      + '<td class="pli-num">' + txtCubre
+        + '<div class="pli-cel-chica">' + (f.entregas || 0) + ' entrega(s)</div></td>'
+      + '<td class="pli-num">' + dif + '</td>'
+      + '<td style="text-align:right;white-space:nowrap">'
+        + '<button class="btn bo bs" onclick="pliRecuperoAbrir(' + f.id + ')" style="padding:2px 6px;font-size:11px">✏️</button> '
+        + (lnbPuedeAnular('pli-planificacion')
+          ? '<button class="btn bd bs" onclick="pliRecuperoBorrar(' + f.id + ')" style="padding:2px 6px;font-size:11px">🗑</button>' : '')
+      + '</td></tr>';
+  });
+  cont.innerHTML = h + '</tbody></table></div>'
+    + '<div class="pli-cel-chica" style="margin-top:8px">La <b>diferencia</b> es lo que le cobraste '
+    + 'menos lo que te costó lo que cubre esa factura: en verde ganaste, en rojo perdiste. Cuando no '
+    + 'se puede restar —dos monedas, o un renglón sin costo— se dice por qué en vez de poner un '
+    + 'número que no significa nada.</div>';
+}
+
+// ── LA ENTREGA ────────────────────────────────────────────────────────────
+
+function pliEntregaAbrir(id) {
+  var e = (PLI.entregas || []).filter(function(x) { return x.id === id; })[0];
+  document.getElementById('pli-ent-id').value = e ? e.id : '';
+  document.getElementById('pli-ent-prov').value = e ? e.proveedor_texto : '';
+  document.getElementById('pli-ent-fecha').value = e ? e.fecha : pliHoyISO();
+  document.getElementById('pli-ent-comp').value = e ? (e.comprobante || '') : '';
+  document.getElementById('pli-ent-stock').checked = e ? !!e.mueve_stock : true;
+  document.getElementById('pli-ent-notas').value = e ? (e.notas || '') : '';
+  PLI.entLineas = e ? (e.lineas || []).map(function(l) {
+    return { insumo_id: l.insumo_id, cantidad: l.cantidad, costo_unitario: l.costo_unitario,
+      moneda: l.moneda, precio_unitario: l.precio_unitario, moneda_precio: l.moneda_precio || l.moneda,
+      factura_compra: l.factura_compra || '' };
+  }) : [pliEntLineaVacia()];
+  pliEntLineasPintar();
+  pliAdjPintar('entrega', e ? e.id : null, 'pli-ent-adjuntos');
+  document.getElementById('pli-mb-entrega').classList.add('on');
+}
+
+// Un renglón en blanco, en un solo lugar: tres copias del mismo objeto son tres oportunidades de
+// que una se olvide de un campo nuevo.
+function pliEntLineaVacia() {
+  return { insumo_id: '', cantidad: '', costo_unitario: '', moneda: 'ARS',
+    precio_unitario: '', moneda_precio: 'ARS', factura_compra: '' };
+}
+
+function pliEntLineaAgregar() {
+  PLI.entLineas.push(pliEntLineaVacia());
+  pliEntLineasPintar();
+}
+
+function pliEntLineaSacar(i) {
+  PLI.entLineas.splice(i, 1);
+  if (!PLI.entLineas.length) PLI.entLineas.push(pliEntLineaVacia());
+  pliEntLineasPintar();
+}
+
+// Lo que el operador escribe vive en PLI.entLineas, no en el DOM: agregar o sacar un renglón
+// redibuja la tabla, y si el dato viviera en los campos se perdería en cada redibujo.
+function pliEntLineaCambio(i, campo, valor) {
+  PLI.entLineas[i][campo] = valor;
+  // AL ELEGIR EL INSUMO SE PROPONE SU MONEDA. El selector arrancaba siempre en Pesos, así que un
+  // insumo que se compra en dólares se valuaba en pesos con el mismo número: el costo quedaba mil
+  // veces más chico y la diferencia contra la factura salía absurda. Se propone, no se impone —
+  // si ya se tocó la moneda a mano, no se pisa.
+  if (campo === 'insumo_id' && !PLI.entLineas[i].monedaTocada) {
+    var ins = (PLI.insumos || []).filter(function(x) { return x.id === Number(valor); })[0];
+    if (ins && ins.moneda) PLI.entLineas[i].moneda = ins.moneda;
+  }
+  if (campo === 'moneda') {
+    PLI.entLineas[i].monedaTocada = 1;
+    // La moneda del precio acompaña a la del costo mientras nadie la haya tocado aparte: comprar y
+    // facturar en lo mismo es el caso de siempre, y tener que elegirla dos veces es la manera de
+    // que una quede mal.
+    if (!PLI.entLineas[i].monedaPrecioTocada) PLI.entLineas[i].moneda_precio = valor;
+  }
+  if (campo === 'moneda_precio') PLI.entLineas[i].monedaPrecioTocada = 1;
+  if (campo === 'insumo_id' && !PLI.entLineas[i].monedaPrecioTocada) {
+    PLI.entLineas[i].moneda_precio = PLI.entLineas[i].moneda;
+  }
+  pliEntTotal();
+}
+
+// EL RESULTADO DE UN RENGLÓN. Sin las dos puntas, o con monedas distintas, no hay resta posible:
+// se dice en vez de poner un número que no significa nada.
+function pliLineaResultado(l) {
+  var c = l.costo_unitario, v = l.precio_unitario;
+  if (c === '' || c === null || c === undefined || v === '' || v === null || v === undefined) return null;
+  if ((l.moneda_precio || l.moneda || 'ARS') !== (l.moneda || 'ARS')) return null;
+  return Math.round((Number(v) - Number(c)) * Number(l.cantidad || 0) * 100) / 100;
+}
+
+function pliEntLineasPintar() {
+  var opts = (PLI.insumos || []).filter(function(i) { return i.modo_provision === 'compra' || !i.modo_provision; });
+  var h = '<div class="ab-table-wrap"><table class="pa-tbl" style="font-size:12px;margin-top:6px"><thead><tr>'
+    + '<th>Insumo</th><th style="text-align:right;width:92px">Cantidad</th><th style="width:56px">Unidad</th>'
+    + '<th style="text-align:right;width:150px" title="Lo que a NOSOTROS nos costó">Nos costó</th>'
+    + '<th style="text-align:right;width:150px" title="Lo que le COBRAMOS al proveedor por ese insumo">Le cobramos</th>'
+    + '<th style="text-align:right;width:110px">Resultado</th>'
+    + '<th style="width:104px" title="El comprobante con el que compraste ese insumo: es el papel '
+      + 'que respalda en cuánto lo valuaste">Factura de compra</th>'
+    + '<th style="width:34px"></th></tr></thead><tbody>';
+  PLI.entLineas.forEach(function(l, i) {
+    var ins = opts.filter(function(x) { return x.id === Number(l.insumo_id); })[0];
+    h += '<tr><td><select class="pli-inp" onchange="pliEntLineaCambio(' + i + ',\'insumo_id\',this.value);pliEntLineasPintar()">'
+      + '<option value="">— elegir —</option>'
+      + opts.map(function(x) {
+          return '<option value="' + x.id + '"' + (Number(l.insumo_id) === x.id ? ' selected' : '') + '>'
+            + pliEsc(x.nombre) + '</option>';
+        }).join('')
+      + '</select></td>'
+      + '<td><input type="number" step="any" min="0" class="pli-inp pli-inp-num" value="' + pliEsc(l.cantidad)
+        + '" oninput="pliEntLineaCambio(' + i + ',\'cantidad\',this.value)"></td>'
+      // LA UNIDAD, A LA VISTA: la cantidad va en unidad de COMPRA y al stock entra convertida.
+      // Entregar 8 millares son 8.000 etiquetas, y el que carga tiene que ver cuál es cuál.
+      + '<td class="pli-cel-chica">' + (ins ? pliEsc(ins.unidad_compra)
+          + (Number(ins.factor_compra) !== 1 ? '<div title="Al stock entra por ' + pliEsc(ins.unidad_uso) + '">×'
+            + pliN(ins.factor_compra) + '</div>' : '') : '—') + '</td>'
+      // EL NÚMERO Y SU MONEDA, JUNTOS. Separados en dos columnas, con dos números y dos monedas
+      // por renglón, la tabla se vuelve ilegible y se termina leyendo el precio con la moneda del
+      // costo — que es exactamente el error que esto tiene que evitar.
+      + '<td style="white-space:nowrap"><input type="number" step="any" min="0" class="pli-inp pli-inp-num"'
+        + ' style="width:84px;display:inline-block" value="' + pliEsc(l.costo_unitario)
+        + '" oninput="pliEntLineaCambio(' + i + ',\'costo_unitario\',this.value)">'
+        + '<select class="pli-inp" style="width:58px;display:inline-block;margin-left:3px"'
+        + ' onchange="pliEntLineaCambio(' + i + ',\'moneda\',this.value)"'
+        + (ins && ins.moneda && !l.monedaTocada ? ' title="Es la moneda del precio de ' + pliEsc(ins.nombre) + '"' : '') + '>'
+        + '<option value="ARS"' + (l.moneda === 'USD' ? '' : ' selected') + '>$</option>'
+        + '<option value="USD"' + (l.moneda === 'USD' ? ' selected' : '') + '>US$</option></select></td>'
+      + '<td style="white-space:nowrap"><input type="number" step="any" min="0" class="pli-inp pli-inp-num"'
+        + ' style="width:84px;display:inline-block" value="' + pliEsc(l.precio_unitario)
+        + '" oninput="pliEntLineaCambio(' + i + ',\'precio_unitario\',this.value)">'
+        + '<select class="pli-inp" style="width:58px;display:inline-block;margin-left:3px"'
+        + ' onchange="pliEntLineaCambio(' + i + ',\'moneda_precio\',this.value)">'
+        + '<option value="ARS"' + ((l.moneda_precio || l.moneda) === 'USD' ? '' : ' selected') + '>$</option>'
+        + '<option value="USD"' + ((l.moneda_precio || l.moneda) === 'USD' ? ' selected' : '') + '>US$</option></select></td>'
+      + '<td class="pli-num">' + (function() {
+          var r = pliLineaResultado(l);
+          if (r === null) {
+            // Dos monedas distintas no se restan; y si falta una punta, todavía no hay resultado.
+            return '<span class="pli-cel-chica">'
+              + ((l.moneda_precio || l.moneda) !== l.moneda ? 'otra moneda' : '—') + '</span>';
+          }
+          return '<b style="color:' + (r < 0 ? '#b91c1c' : '#166534') + '">'
+            + (r > 0 ? '+' : '') + pliPlata(r, l.moneda) + '</b>';
+        })() + '</td>'
+      + '<td><input class="pli-inp" value="' + pliEsc(l.factura_compra || '') + '" placeholder="Nº"'
+        + ' oninput="pliEntLineaCambio(' + i + ',\'factura_compra\',this.value)"></td>'
+      + '<td><button class="btn bd bs" onclick="pliEntLineaSacar(' + i + ')" style="padding:2px 6px;font-size:11px">🗑</button></td>'
+      + '</tr>';
+  });
+  document.getElementById('pli-ent-lineas').innerHTML = h + '</tbody></table></div>';
+  pliEntTotal();
+}
+
+// LOS RENGLONES QUE DE VERDAD SE VAN A GUARDAR. El que está a medio llenar —con cantidad y costo
+// pero sin el insumo elegido todavía— no se manda, así que tampoco puede sumar en el total que se
+// lee justo antes de apretar Guardar: eran 100.000 pesos de diferencia entre lo que decía la
+// ventana y lo que quedaba registrado.
+function pliEntLineasValidas() {
+  return (PLI.entLineas || []).filter(function(l) { return l.insumo_id && Number(l.cantidad) > 0; });
+}
+
+// EL COSTO, SÓLO SI SE PUEDE SUMAR. Con un renglón sin costo o con dos monedas, cualquier total
+// sería mentira — el mismo criterio que el total de la orden de compra.
+function pliEntTotal() {
+  var t = 0, moneda = null, falta = 0, varias = false;
+  var tv = 0, monedaV = null, faltaV = 0, variasV = false;
+  pliEntLineasValidas().forEach(function(l) {
+    var p = l.precio_unitario;
+    if (p === '' || p === null || p === undefined) faltaV++;
+    else {
+      var mp = l.moneda_precio || l.moneda || 'ARS';
+      if (monedaV === null) monedaV = mp;
+      else if (mp !== monedaV) variasV = true;
+      tv += Number(p) * Number(l.cantidad || 0);
+    }
+    if (l.costo_unitario === '' || l.costo_unitario === null || l.costo_unitario === undefined) { falta++; return; }
+    if (moneda === null) moneda = l.moneda || 'ARS';
+    else if ((l.moneda || 'ARS') !== moneda) varias = true;
+    t += Number(l.costo_unitario) * Number(l.cantidad || 0);
+  });
+  // Y SI HAY UN RENGLÓN A MEDIO LLENAR, SE DICE. Descartarlo en silencio al guardar es cómo
+  // desaparece un insumo entero de una entrega sin que nadie lo note.
+  var aMedias = (PLI.entLineas || []).filter(function(l) {
+    return !(l.insumo_id && Number(l.cantidad) > 0)
+      && (l.insumo_id || Number(l.cantidad) > 0 || l.costo_unitario !== '');
+  }).length;
+  var el = document.getElementById('pli-ent-total');
+  el.innerHTML = (aMedias
+    ? '<div style="color:#92400e">' + (aMedias === 1 ? 'Hay un renglón' : 'Hay ' + aMedias + ' renglones')
+      + ' sin insumo o sin cantidad: así no se guarda' + (aMedias === 1 ? '' : 'n') + '.</div>' : '')
+    + ((falta || varias || moneda === null)
+    ? '<span style="color:#92400e">No se totaliza: '
+      + (varias ? 'hay renglones en pesos y en dólares' : 'falta el costo de ' + (falta === 1 ? 'un renglón' : falta + ' renglones'))
+      + '</span>'
+    : 'Nos costó <b>' + pliPlata(Math.round(t * 100) / 100, moneda) + '</b>')
+    // LO QUE SE LE COBRÓ Y EL RESULTADO, con la misma regla: sólo se resta si las dos puntas están
+    // completas y en la misma moneda.
+    + (function() {
+        var cobrado = (faltaV || variasV || monedaV === null) ? null : Math.round(tv * 100) / 100;
+        var costo = (falta || varias || moneda === null) ? null : Math.round(t * 100) / 100;
+        if (cobrado === null) {
+          return '<div>' + (variasV ? 'Le cobramos: hay renglones en pesos y en dólares'
+            : (faltaV ? 'Le cobramos: falta el precio de ' + (faltaV === 1 ? 'un renglón' : faltaV + ' renglones')
+              : '')) + '</div>';
+        }
+        var h = '<div>Le cobramos <b>' + pliPlata(cobrado, monedaV) + '</b></div>';
+        if (costo === null || moneda !== monedaV) {
+          return h + '<div class="pli-cel-chica">El resultado se calcula cuando las dos puntas están '
+            + 'completas y en la misma moneda.</div>';
+        }
+        var r = Math.round((cobrado - costo) * 100) / 100;
+        return h + '<div style="font-size:14px;margin-top:3px">Resultado de la entrega: '
+          + '<b style="color:' + (r < 0 ? '#b91c1c' : '#166534') + '">'
+          + (r > 0 ? '+' : '') + pliPlata(r, moneda) + '</b></div>';
+      })();
+}
+
+function pliEntregaGuardar() {
+  var id = document.getElementById('pli-ent-id').value;
+  // LO QUE ESTÁ A MEDIO LLENAR FRENA, no se tira callado: un renglón con cantidad y costo pero sin
+  // insumo elegido es un insumo que alguien cargó y que iba a desaparecer de la entrega.
+  var aMedias = PLI.entLineas.filter(function(l) {
+    return !(l.insumo_id && Number(l.cantidad) > 0)
+      && (l.insumo_id || Number(l.cantidad) > 0 || l.costo_unitario !== '');
+  });
+  if (aMedias.length) return toast('Hay un renglón sin insumo o sin cantidad: completalo o sacalo', 'er');
+  var lineas = pliEntLineasValidas()
+    .map(function(l) {
+      return { insumo_id: Number(l.insumo_id), cantidad: l.cantidad,
+        costo_unitario: l.costo_unitario === '' ? null : l.costo_unitario, moneda: l.moneda || 'ARS',
+        precio_unitario: l.precio_unitario === '' ? null : l.precio_unitario,
+        moneda_precio: l.moneda_precio || l.moneda || 'ARS',
+        factura_compra: l.factura_compra || '' };
+    });
+  if (!lineas.length) return toast('Poné al menos un insumo con cantidad', 'er');
+  var body = {
+    proveedor_texto: document.getElementById('pli-ent-prov').value.trim(),
+    fecha: document.getElementById('pli-ent-fecha').value,
+    comprobante: document.getElementById('pli-ent-comp').value.trim(),
+    mueve_stock: document.getElementById('pli-ent-stock').checked ? 1 : 0,
+    notas: document.getElementById('pli-ent-notas').value.trim(),
+    lineas: lineas,
+  };
+  if (!body.proveedor_texto) return toast('¿A qué proveedor se le entregó?', 'er');
+  var p = id ? pliApi('/entregas/' + id, { method: 'PATCH', body: JSON.stringify(body) })
+             : pliApi('/entregas', { method: 'POST', body: JSON.stringify(body) });
+  p.then(function(r) {
+    if (!r.ok) return pliErr(r);
+    toast('✓ Entrega registrada', 'ok');
+    document.getElementById('pli-mb-entrega').classList.remove('on');
+    // El stock de los insumos cambió: la lista que tiene la pantalla quedó vieja.
+    if (typeof pliInsCargar === 'function') pliInsCargar();
+    var recien = !id && r.id;
+    pliPagCargar().then(function() {
+      // ADJUNTAR LA FACTURA ES LO ÚLTIMO QUE PIDIÓ PABLO, y mientras la entrega no existe no hay
+      // dónde colgarla. Recién creada se vuelve a abrir sola, así el papel se adjunta en el mismo
+      // momento en vez de obligar a buscarla en la lista y entrar de nuevo.
+      if (recien) pliEntregaAbrir(r.id);
+    });
+  });
+}
+
+function pliEntregaBorrar(id) {
+  var e = (PLI.entregas || []).filter(function(x) { return x.id === id; })[0];
+  if (!confirm('¿Borrar esta entrega?' + (e && e.mueve_stock
+    ? '\n\nLo que sacó del depósito vuelve al stock.' : ''))) return;
+  pliApi('/entregas/' + id, { method: 'DELETE' }).then(function(r) {
+    if (!r.ok) return pliErr(r);
+    toast('Entrega borrada', 'ok');
+    pliPagCargar();
+    if (typeof pliInsCargar === 'function') pliInsCargar();
+  });
+}
+
+// ── MARCARLA CONTRA UNA FACTURA ───────────────────────────────────────────
+
+function pliEntRecuperar(id) {
+  var e = (PLI.entregas || []).filter(function(x) { return x.id === id; })[0];
+  if (!e) return;
+  PLI.marcando = e;
+  // Sólo las facturas del MISMO proveedor: el servidor lo frena igual, pero ofrecer las otras es
+  // ofrecer un error.
+  var suyas = (PLI.recuperos || []).filter(function(f) {
+    return f.proveedor_texto.trim().toLowerCase() === e.proveedor_texto.trim().toLowerCase();
+  });
+  document.getElementById('pli-mar-que').innerHTML = '<b>' + pliEsc(e.proveedor_texto) + '</b> · '
+    + pliEsc(e.fecha) + ' · ' + (e.costo == null ? 'sin costo' : 'nos costó ' + pliPlata(e.costo, e.moneda));
+  document.getElementById('pli-mar-fact').innerHTML = suyas.length
+    ? suyas.map(function(f) {
+        return '<option value="' + f.id + '">' + pliEsc(f.numero || 's/n') + ' · ' + pliEsc(f.fecha)
+          + ' · ' + (f.importe == null ? 'sin importe' : pliPlata(f.importe, f.moneda)) + '</option>';
+      }).join('')
+    : '<option value="">— no hay ninguna factura cargada a este proveedor —</option>';
+  document.getElementById('pli-mb-marcar').classList.add('on');
+}
+
+// Cargar la factura sin perder de vista cuál entrega se estaba marcando: al guardarla se vuelve a
+// abrir esta ventana con la lista al día.
+function pliMarcarNueva() {
+  var e = PLI.marcando;
+  document.getElementById('pli-mb-marcar').classList.remove('on');
+  pliRecuperoAbrir(null, e ? e.proveedor_texto : '');
+}
+
+function pliMarcarGuardar() {
+  var e = PLI.marcando; if (!e) return;
+  var rid = document.getElementById('pli-mar-fact').value;
+  if (!rid) return toast('Cargá primero la factura que le hiciste a ese proveedor', 'er');
+  pliApi('/entregas/' + e.id + '/recupero', { method: 'POST', body: JSON.stringify({ recupero_id: Number(rid) }) })
+    .then(function(r) {
+      if (!r.ok) return pliErr(r);
+      toast('✓ Recuperada', 'ok');
+      document.getElementById('pli-mb-marcar').classList.remove('on');
+      PLI.marcando = null;
+      pliPagCargar();
+    });
+}
+
+function pliEntSoltar(id) {
+  if (!confirm('La entrega vuelve a quedar pendiente de recuperar. ¿Sigo?')) return;
+  pliApi('/entregas/' + id + '/recupero', { method: 'POST', body: JSON.stringify({ recupero_id: null }) })
+    .then(function(r) {
+      if (!r.ok) return pliErr(r);
+      toast('Desvinculada', 'ok');
+      pliPagCargar();
+    });
+}
+
+// ── LA FACTURA DE RECUPERO ────────────────────────────────────────────────
+
+function pliRecuperoAbrir(id, provSugerido) {
+  var f = (PLI.recuperos || []).filter(function(x) { return x.id === id; })[0];
+  document.getElementById('pli-rec-f-id').value = f ? f.id : '';
+  document.getElementById('pli-rec-f-prov').value = f ? f.proveedor_texto : (provSugerido || '');
+  document.getElementById('pli-rec-f-fecha').value = f ? f.fecha : pliHoyISO();
+  document.getElementById('pli-rec-f-nro').value = f ? (f.numero || '') : '';
+  document.getElementById('pli-rec-f-importe').value = f && f.importe != null ? f.importe : '';
+  document.getElementById('pli-rec-f-moneda').value = f ? (f.moneda || 'ARS') : 'ARS';
+  document.getElementById('pli-rec-f-notas').value = f ? (f.notas || '') : '';
+  pliAdjPintar('recupero', f ? f.id : null, 'pli-rec-f-adjuntos');
+  document.getElementById('pli-mb-recupero').classList.add('on');
+}
+
+function pliRecuperoGuardar() {
+  var id = document.getElementById('pli-rec-f-id').value;
+  var body = {
+    proveedor_texto: document.getElementById('pli-rec-f-prov').value.trim(),
+    fecha: document.getElementById('pli-rec-f-fecha').value,
+    numero: document.getElementById('pli-rec-f-nro').value.trim(),
+    importe: document.getElementById('pli-rec-f-importe').value === ''
+      ? null : document.getElementById('pli-rec-f-importe').value,
+    moneda: document.getElementById('pli-rec-f-moneda').value,
+    notas: document.getElementById('pli-rec-f-notas').value.trim(),
+  };
+  if (!body.proveedor_texto) return toast('¿A qué proveedor se le facturó?', 'er');
+  var p = id ? pliApi('/recuperos/' + id, { method: 'PATCH', body: JSON.stringify(body) })
+             : pliApi('/recuperos', { method: 'POST', body: JSON.stringify(body) });
+  p.then(function(r) {
+    if (!r.ok) return pliErr(r);
+    toast('✓ Factura guardada', 'ok');
+    document.getElementById('pli-mb-recupero').classList.remove('on');
+    var volverA = PLI.marcando;
+    pliPagCargar();
+    // Si se venía de marcar una entrega, se vuelve ahí con la lista al día en vez de dejar al
+    // operador buscando dónde estaba.
+    if (volverA && !id) setTimeout(function() { pliEntRecuperar(volverA.id); }, 250);
+  });
+}
+
+function pliRecuperoBorrar(id) {
+  var f = (PLI.recuperos || []).filter(function(x) { return x.id === id; })[0];
+  if (!confirm('¿Borrar esta factura?' + (f && f.entregas
+    ? '\n\nLas ' + f.entregas + ' entrega(s) que cubría vuelven a quedar pendientes de recuperar.' : ''))) return;
+  pliApi('/recuperos/' + id, { method: 'DELETE' }).then(function(r) {
+    if (!r.ok) return pliErr(r);
+    toast('Factura borrada', 'ok');
+    pliPagCargar();
+  });
+}
+
+// ── LOS PAPELES ───────────────────────────────────────────────────────────
+
+// MIENTRAS NO ESTÉ GUARDADA NO HAY DÓNDE COLGAR EL ARCHIVO. Decirlo es mejor que mostrar un botón
+// que va a contestar «no encontrado».
+function pliAdjPintar(entidad, id, destino) {
+  PLI.adj = { entidad: entidad, id: id, destino: destino };
+  var box = document.getElementById(destino);
+  if (!id) {
+    box.innerHTML = '<div class="pli-cel-chica">Guardá primero y después podés adjuntar el papel.</div>';
+    return;
+  }
+  box.innerHTML = '<div class="pli-cel-chica">Cargando papeles…</div>';
+  pliApi('/adjuntos/' + entidad + '/' + id).then(function(r) {
+    if (!r.ok) { box.innerHTML = '<div class="pli-cel-chica">' + pliEsc(r.error || 'Error') + '</div>'; return; }
+    var h = '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">'
+      + '<b style="font-size:12px">Papeles</b>'
+      + (r.storage_ok
+        ? '<button class="btn bo bs" onclick="pliAdjElegir()">📎 Adjuntar</button>'
+        : '<span class="pli-cel-chica" style="color:#92400e">El guardado de archivos no está configurado</span>')
+      + '</div>';
+    h += (r.data || []).length
+      ? '<div style="margin-top:6px">' + r.data.map(function(a) {
+          return '<div class="pli-cel-chica" style="display:flex;align-items:center;gap:8px;padding:3px 0">'
+            + '<a href="/api/pli/adjunto/' + a.id + '" target="_blank">📄 ' + pliEsc(a.nombre) + '</a>'
+            + '<button class="btn bd bs" onclick="pliAdjBorrar(' + a.id + ')" style="padding:1px 5px;font-size:10px">🗑</button>'
+            + '</div>';
+        }).join('') + '</div>'
+      : '<div class="pli-cel-chica" style="margin-top:4px">Todavía no adjuntaste nada.</div>';
+    box.innerHTML = h;
+  });
+}
+
+function pliAdjElegir() {
+  var inp = document.getElementById('pli-pag-file');
+  // Se limpia antes de abrir: si no, elegir DOS VECES el mismo archivo no dispara el change y
+  // parece que la pantalla se colgó.
+  inp.value = '';
+  inp.click();
+}
+
+function pliAdjSubir(inp) {
+  var f = inp.files && inp.files[0];
+  if (!f || !PLI.adj || !PLI.adj.id) return;
+  var fd = new FormData();
+  fd.append('archivo', f);
+  fetch('/api/pli/adjuntos/' + PLI.adj.entidad + '/' + PLI.adj.id,
+    { method: 'POST', credentials: 'include', body: fd })
+    .then(function(r) { return r.json(); })
+    .then(function(r) {
+      if (!r.ok) return toast(r.error || 'No se pudo subir', 'er');
+      toast('✓ Papel adjuntado', 'ok');
+      pliAdjPintar(PLI.adj.entidad, PLI.adj.id, PLI.adj.destino);
+      pliPagCargar();
+    })
+    // PASARSE DE LOS 10 MB NO ES UN ERROR DE RED. Multer corta la subida y el servidor contesta un
+    // HTML que `r.json()` no puede leer: sin esto, el que sube una foto grande lee «error de red» y
+    // vuelve a intentar con el mismo archivo.
+    .catch(function() {
+      toast('No se pudo subir. Tiene que ser un PDF, JPG o PNG de hasta 10 MB.', 'er');
+    });
+}
+
+function pliAdjBorrar(id) {
+  if (!confirm('¿Sacar este papel?')) return;
+  pliApi('/adjunto/' + id, { method: 'DELETE' }).then(function(r) {
+    if (!r.ok) return pliErr(r);
+    pliAdjPintar(PLI.adj.entidad, PLI.adj.id, PLI.adj.destino);
+    pliPagCargar();
+  });
 }
 
 // ── Temporadas ────────────────────────────────────────────────────────────
@@ -76183,6 +77233,9 @@ function pliResultadoRender() {
   if (d.origen === 'snapshot') {
     html += '<div style="margin-top:8px;font-size:12px;color:var(--mut)">🔒 Valores congelados al confirmar el plan. Editar recetas ahora no los cambia.</div>';
   }
+  // Y CUÁL quedó afuera, con nombre y apellido: el candado de arriba lo dice en
+  // general, y en general no se puede accionar.
+  html += pliFueraDelPlanHtml(d);
 
   if (!d.lineas || !d.lineas.length) {
     html += '<div class="emp" style="padding:24px;text-align:center;margin-top:10px">Sin insumos para comprar. Cargá el objetivo y las recetas.</div>';
@@ -77204,10 +78257,58 @@ function pliCmpDetalle(insumoId) {
   if (btn) btn.textContent = '−';
 }
 
+// ── LO QUE LA RECETA USA HOY Y ESTE PLAN NO TIENE (V1105) ────────────────
+//
+// «Creé un insumo nuevo, y está en el plan… ¿por qué no me aparece para comprar?»
+// (Pablo, 28/10/2026). Estaba en la receta y el plan estaba confirmado: los
+// números de un plan confirmado están congelados A PROPÓSITO, así que el insumo
+// nuevo no entró. Pero la lista no lo decía — simplemente no lo tenía, que desde
+// la pantalla se lee igual que un error del sistema.
+//
+// El MISMO bloque en las dos pantallas donde se mira el plan: la solapa Planes,
+// que es donde está el botón de reabrir, y Comprar, que es donde se lo busca.
+function pliFueraDelPlanHtml(d) {
+  var fuera = (d && d.fuera_del_plan) || [];
+  if (!fuera.length) return '';
+  var congelado = d.origen === 'snapshot';
+  var porQue = {
+    receta_nueva: congelado
+      ? 'entró a la receta después de confirmar el plan'
+      : 'la receta lo usa pero el plan no lo tomó',
+    no_se_compra: 'no se compra',
+    unidad: 'la unidad de la receta no es la del insumo',
+    inexistente: 'el insumo ya no existe'
+  };
+  var h = '<div style="background:rgba(245,158,11,.12);border:1px solid var(--warn);'
+    + 'border-radius:8px;padding:10px 12px;font-size:12px;margin:8px 0 10px">'
+    + '<strong>' + (fuera.length === 1
+        ? 'Hay 1 insumo que la receta usa hoy y no está en este plan.'
+        : 'Hay ' + fuera.length + ' insumos que la receta usa hoy y no están en este plan.')
+    + '</strong><ul style="margin:6px 0 0 18px;padding:0">';
+  fuera.forEach(function(f) {
+    h += '<li><b>' + pliEsc(f.insumo) + '</b> — ' + pliEsc(porQue[f.motivo] || f.motivo)
+      + (f.detalle ? ': ' + pliEsc(f.detalle) : '') + '</li>';
+  });
+  h += '</ul>';
+  if (congelado && fuera.some(function(f) { return f.motivo === 'receta_nueva'; })) {
+    h += '<div style="margin-top:7px">Los números de un plan confirmado están <b>congelados</b>: '
+      + 'editar una receta ya no los cambia. Para que entre, <b>reabrí el plan y confirmalo de '
+      + 'nuevo</b> desde la solapa Planes. Mientras tanto se lo puede comprar igual con '
+      + '<b>+ Registrar compra</b>, que tiene todos los insumos.</div>';
+  }
+  return h + '</div>';
+}
+
+// Lo que las cuatro vistas de Comprar anteponen. UNA puerta: una vista nueva no
+// puede quedarse sin los avisos por olvidarse de llamar a dos funciones.
+function pliCmpAvisoBuckets() {
+  return pliCmpAvisoSnapshot() + pliFueraDelPlanHtml(PLI.cmpCalculo);
+}
+
 // Los planes confirmados antes de que se guardara el desglose semanal muestran
 // una agenda RECALCULADA sobre el snapshot congelado. Da lo mismo que ese día,
 // pero conviene decirlo en vez de presentarla como si viniera congelada.
-function pliCmpAvisoBuckets() {
+function pliCmpAvisoSnapshot() {
   var d = PLI.cmpCalculo || {};
   if (d.buckets_sin_recuperar) {
     return '<div style="background:rgba(239,68,68,.1);border:1px solid var(--err);border-radius:8px;'
@@ -77398,7 +78499,10 @@ function pliCmpRenderHechas(cont) {
     }
     return String(a.l.insumo_nombre).localeCompare(String(b.l.insumo_nombre), 'es');
   });
-  var html = '<div class="ab-table-wrap" style="margin-bottom:14px"><table class="pa-tbl" style="font-size:12px"><thead><tr>'
+  // Ésta es la vista que lista el plan ENTERO insumo por insumo, así que es donde
+  // más se nota el que no está: era la única de las cuatro sin el aviso común.
+  var html = pliCmpAvisoBuckets()
+    + '<div class="ab-table-wrap" style="margin-bottom:14px"><table class="pa-tbl" style="font-size:12px"><thead><tr>'
     // "Necesidad" y no "Requerido": es lo que el plan CONSUME, y no cambia
     // porque haya stock o compras. El requerido viejo salía del congelado neto y
     // daba 0 en cuanto el stock tapaba la necesidad.
@@ -81095,6 +82199,16 @@ function fpPintarKpis() {
          'en el préstamo o el cheque.</div>';
   }
 
+  // LA OTRA PUERTA POR LA QUE SE CAE PLATA DEL CUADRO (V1099): una fecha que no se puede leer. El
+  // motor no la puede ubicar en ninguna semana y la saltea; sin este aviso, el movimiento existe,
+  // no está en ningún total, y no hay manera de darse cuenta.
+  if (p.sin_fecha && p.sin_fecha.items) {
+    a += '<div style="background:#fee2e2;border:1px solid #fca5a5;border-radius:8px;padding:10px 13px;font-size:12px;margin-bottom:10px">' +
+         '<b>⚠ ' + fpMonto(p.sin_fecha.monto) + ' quedaron fuera del flujo</b> — ' + p.sin_fecha.items +
+         ' movimiento(s) tienen una <b>fecha que no se puede leer</b>, así que no están sumados en ' +
+         'ninguna semana. Revisá la fecha de esos cheques o cuotas: tiene que ser una fecha de verdad.</div>';
+  }
+
   if (sf.dispersion_dias > 7) {
     a += '<div style="background:#fef3c7;border:1px solid #fcd34d;border-radius:8px;padding:9px 13px;font-size:12px;margin-bottom:10px">' +
          '<b>Los saldos de banco son de fechas distintas</b> (del ' + fpDdMm(sf.min) + ' al ' + fpDdMm(sf.max) +
@@ -81616,10 +82730,26 @@ function fpChequesCargar() {
   });
 }
 
+// EL CUADRO SE RECALCULA SOLO (V1099).
+//
+// Pablo, 20/10/2026: «la suma en el detalle no me coincide con lo que me informás en la tabla
+// general». Y no coincidía: el cuadro se calculaba una sola vez, al apretar Proyectar, y NINGUNA de
+// las cinco cosas que cambian la plata lo volvía a calcular — importar el Excel, marcar un cheque
+// pagado, borrarlo, cargar un saldo o borrarlo—. El detalle de la celda, en cambio, consulta en
+// vivo. Así que después de subir el Excel el cuadro seguía mostrando la foto anterior y el detalle
+// la de ahora: dos números verdaderos de dos momentos distintos, sin nada que lo dijera.
+//
+// Se recalcula sólo si YA hay un cuadro: al que todavía no apretó Proyectar no se le pide al
+// servidor una cuenta que no está mirando.
+function fpRecalcular() {
+  if (FP.proy) fpProyectar();
+}
+
 function fpChequeEstado(id, estado) {
   fpApi('/cheques/' + id, { method: 'PATCH', body: JSON.stringify({ estado: estado }) }).then(function(r) {
     if (!r.ok) return fpErr(r);
     fpChequesCargar();
+    fpRecalcular();
   });
 }
 function fpChequeBorrar(id) {
@@ -81627,6 +82757,7 @@ function fpChequeBorrar(id) {
   fpApi('/cheques/' + id, { method: 'DELETE' }).then(function(r) {
     if (!r.ok) return fpErr(r);
     fpChequesCargar();
+    fpRecalcular();
   });
 }
 
@@ -81860,6 +82991,8 @@ function fpImportar(preview) {
           + (r.se_dan_de_baja ? ', ' + r.se_dan_de_baja + ' dados de baja' : ''));
     document.getElementById('fp-mb-import').classList.remove('on');
     fpChequesCargar();
+    // Subir el Excel es lo que MÁS cambia el cuadro: 400 cheques de una.
+    fpRecalcular();
   });
 }
 
@@ -81871,6 +83004,13 @@ function fpImportar(preview) {
 function fpChequesDeSemana(i, esIngreso) {
   var p = FP.proy; if (!p || !p.semanas || !p.semanas[i]) return;
   var desde = p.semanas[i];
+  // CUÁNTO DICE EL CUADRO PARA ESTA CELDA. Se suman TODAS las filas de cheques de ese signo,
+  // porque la consulta del detalle no filtra por banco: es el mismo conjunto. Se compara abajo, y
+  // si no da igual se dice — dos números distintos en dos ventanas, callados, es lo que hizo
+  // perder una tarde.
+  var enElCuadro = (p.filas || []).filter(function(f) {
+    return f.origen === 'cheques' && (f.naturaleza === 'ingreso') === !!esIngreso;
+  }).reduce(function(a, f) { return a + (Number((f.montos || [])[i]) || 0); }, 0);
   // El fin de semana: el día anterior a la que sigue, o +6 si es la última.
   var hasta = p.semanas[i + 1]
     ? new Date(new Date(p.semanas[i + 1] + 'T00:00:00').getTime() - 86400000).toISOString().slice(0, 10)
@@ -81886,7 +83026,7 @@ function fpChequesDeSemana(i, esIngreso) {
     if (!r.ok) { cont.innerHTML = '<div class="fp-vacio">' + fpEsc(r.error || 'Error') + '</div>'; return; }
     // El orden arranca como viene del servidor: por fecha, y dentro de cada día el más grande
     // arriba. Es con lo que se sale a pagar.
-    FP.sem = { filas: r.data || [], orden: 'fecha_pago', desc: false,
+    FP.sem = { filas: r.data || [], orden: 'fecha_pago', desc: false, enElCuadro: enElCuadro,
       aviso: i === 0 ? ' — incluye los vencidos de antes, que la proyección suma en la primera semana' : '' };
     fpSemPintar();
   });
@@ -81958,7 +83098,20 @@ function fpSemPintar() {
     return '<span class="fp-flecha">' + (FP.sem.desc ? '▼' : '▲') + '</span>';
   };
 
-  cont.innerHTML = '<div class="fp-chica" style="margin-bottom:8px">'
+  // SI EL CUADRO DICE OTRA COSA, SE DICE ACÁ (V1099). Los dos números salen de la misma base, así
+  // que una diferencia significa que el cuadro quedó viejo: se calculó antes del último cambio.
+  // Mostrarlos en dos ventanas sin decir nada es lo que hace dudar de todo el módulo.
+  var dif = Number(FP.sem.enElCuadro || 0) - total;
+  var aviso = Math.abs(dif) > 0.009
+    ? '<div style="background:#fee2e2;border:1px solid #fca5a5;border-radius:8px;padding:10px 13px;'
+      + 'font-size:12px;margin-bottom:10px"><b>⚠ El cuadro dice ' + fpMonto(FP.sem.enElCuadro)
+      + ' y acá hay ' + fpMonto(total) + '</b> — una diferencia de ' + fpMonto(Math.abs(dif)) + '. '
+      + 'Los dos salen de los mismos cheques, así que el cuadro quedó viejo: apretá '
+      + '<b>Proyectar</b> y vuelve a cuadrar. Lo de esta ventana es lo que hay <b>ahora</b>.</div>'
+    : '';
+
+  cont.innerHTML = aviso
+    + '<div class="fp-chica" style="margin-bottom:8px">'
     + '<b>' + f.length + '</b> cheque(s) · total <b>' + fpMonto(total) + '</b>'
     + fpEsc(FP.sem.aviso)
     + '</div>'
@@ -82026,6 +83179,8 @@ function fpSaldoGuardar() {
     toast(r.actualizado ? 'Saldo actualizado' : 'Saldo cargado');
     closeMB('fp-sal-modal');
     fpSaldosCargar();
+    // El saldo de banco es el punto de partida del acumulado: cambia TODA la fila.
+    fpRecalcular();
   });
 }
 
@@ -82034,6 +83189,8 @@ function fpSaldoBorrar(id) {
   fpApi('/saldos/' + id, { method: 'DELETE' }).then(function(r) {
     if (!r.ok) return fpErr(r);
     fpSaldosCargar();
+    // Sacar un saldo mueve el punto de partida igual que cargarlo.
+    fpRecalcular();
   });
 }
 </script>

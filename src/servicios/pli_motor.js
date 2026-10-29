@@ -42,6 +42,14 @@ const UNIDADES_CONTABLES = new Set([
 ]);
 const esContable = (u) => UNIDADES_CONTABLES.has(String(u || '').trim().toLowerCase());
 
+// Cómo se lee cada modo de provisión que NO es comprar. El valor de la columna
+// ('provee_cliente') no es algo que se le pueda mostrar a nadie.
+export const MODO_TEXTO = {
+  alquiler_uso: 'se alquila por uso',
+  comodato: 'está en comodato',
+  provee_cliente: 'lo provee el cliente'
+};
+
 // Aritmética de fechas en UTC a propósito: sumar/restar días sobre la hora local
 // se corre un día cuando cambia el horario de verano.
 export function restarDias(fechaISO, dias) {
@@ -186,6 +194,11 @@ export function calcularPlan(ctx) {
     nodos_sin_receta: [],
     insumo_inexistente: [],
     unidad_desincronizada: [],
+    // La receta lo usa, pero el insumo NO SE COMPRA (alquiler, comodato, lo pone el
+    // cliente). Hasta la V1105 se salteaba en silencio: la receta lo pedía, el plan
+    // no lo tenía, y no había pantalla donde leer por qué. No bloquea —que no se
+    // compre es una decisión, no un error—, pero se dice.
+    insumos_no_se_compran: [],
     mix_excedido: [],
     mix_incompleto: [],
     // Se deja declarado y siempre vacío: los planes ya confirmados guardaron su
@@ -268,7 +281,17 @@ export function calcularPlan(ctx) {
         continue;
       }
 
-      if (ins.modo_provision !== 'compra') continue;   // RESERVADO v1: hoy no-op
+      // Lo que no se compra no entra en el plan de COMPRA, que es lo que este motor
+      // calcula. Pero sale de la lista sin dejar rastro, y entonces la única lectura
+      // posible desde la pantalla es "el plan se olvidó de mi insumo".
+      if (ins.modo_provision !== 'compra') {
+        if (!cobertura.insumos_no_se_compran.some((x) => x.insumo_id === ins.id)) {
+          cobertura.insumos_no_se_compran.push({
+            insumo_id: ins.id, insumo: ins.nombre, modo: ins.modo_provision
+          });
+        }
+        continue;
+      }
 
       const cantidad = num(l.cantidad);
       const porCada  = num(l.por_cada, 1);
@@ -653,6 +676,10 @@ export function calcularPlan(ctx) {
   // Advertencias blandas (no bloquean el confirmar)
   if (cobertura.insumos_sin_precio.length) {
     advertencias.push(`${cobertura.insumos_sin_precio.length} insumo(s) sin precio cargado — el total es parcial`);
+  }
+  for (const x of cobertura.insumos_no_se_compran) {
+    advertencias.push(`"${x.insumo}" no se compra (${MODO_TEXTO[x.modo] || x.modo}): `
+      + 'la receta lo usa pero no entra en el plan de compra');
   }
   for (const m of cobertura.mix_incompleto) {
     advertencias.push(`"${m.nombre}": los subproductos suman ${fmtNum(m.suma_pct, 2)}% (sin asignar ${fmtNum(m.sin_asignar, 2)}%)`);
