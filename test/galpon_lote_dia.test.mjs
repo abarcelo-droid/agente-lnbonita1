@@ -12,8 +12,8 @@
 //      pantalla se ve idéntico.
 //   2. Dos tramos a la misma hora. El segundo le gana al primero y el primero
 //      queda listado, visible, sin atribuir un kilo.
-//   3. El hueco de la mañana. El que carga a las ocho pone las ocho, y el IFCO
-//      de las 6:40 se queda sin lote.
+//   3. El arranque del día. El que carga a las ocho pone las ocho, y hay que
+//      decidir de quién es el IFCO de las 6:40. Hasta la V1107 era de nadie.
 //   4. Corregir un tramo que ya tiene volcados. No los arregla —cada uno
 //      congeló su lote— y los deja apuntando a algo que nadie declaró.
 //
@@ -25,7 +25,7 @@ import assert from 'node:assert/strict';
 import { DatabaseSync } from 'node:sqlite';
 
 import {
-  hhmm, esFecha, tramoChoca, huecoDelDia, tramosDelDia, lotesParaElDia,
+  hhmm, esFecha, tramoChoca, tramosDelDia, lotesParaElDia,
   volcadosEnTramo, loteVigente,
 } from '../src/servicios/galpon.js';
 
@@ -98,10 +98,12 @@ test('SIN EL CERO, EL LOTE DE LA MAÑANA SE VUELVE EL DE LA TARDE', () => {
   tramo(roto, '2026-11-20', '14:30', 11, 'Tarde');
 
   // El tramo de las 9 está cargado y se ve en la lista. Y NO VALE NUNCA: a las
-  // diez de la mañana no hay lote, porque '9:00' <= '10:00' es falso comparando
-  // texto. Toda la fruta de la mañana entra sin lote al que atribuirla.
+  // diez de la mañana, '9:00' <= '10:00' es falso comparando texto, así que no
+  // hay ningún tramo anterior y la fruta de la mañana se le atribuye AL LOTE DE
+  // LA TARDE. Contesta con aplomo y contesta mal, que es lo peor que puede
+  // pasarle a este dato.
   const alas10 = loteVigente(roto, '2026-11-20', '10:00');
-  assert.equal(alas10.ok, false,
+  assert.equal(alas10.lote_nombre, 'Tarde',
     'si esto cambió, el bug dejó de existir y este test ya no prueba nada');
   assert.equal(roto.prepare('SELECT COUNT(*) AS n FROM gal_lote_vigente').get().n, 2,
     'el tramo está guardado y visible: por eso nadie se entera');
@@ -156,29 +158,58 @@ test('el choque se busca con la hora YA normalizada', () => {
 });
 
 // ══════════════════════════════════════════════════════════════════════════
-// 3 · EL HUECO DE LA MAÑANA
+// 3 · EL ARRANQUE DEL DÍA (V1108)
 // ══════════════════════════════════════════════════════════════════════════
-test('un día que arranca a las 00:00 no tiene hueco', () => {
+// Hasta la V1107 esto se trataba como un AGUJERO: si el primer tramo del día no
+// era 00:00, lo anterior quedaba sin lote y la pantalla avisaba con un cartel y
+// un botón para deshacerlo.
+//
+// Andy, 30/10/2026: «porque tanto tema con la hora?». Tenía razón — el cartel se
+// lo comía justamente el que cargaba 07:00, que es la hora real de apertura del
+// galpón y el dato más fiel que se puede dar.
+//
+// Ahora: antes del primer tramo no hay un agujero, hay EL PRIMER LOTE.
+test('LO QUE ENTRA ANTES DEL PRIMER TRAMO ES DEL PRIMER LOTE, no de nadie', () => {
   const db = base();
-  tramo(db, '2026-11-20', '00:00', 10);
-  tramo(db, '2026-11-20', '13:30', 11);
-  assert.equal(huecoDelDia(db, '2026-11-20'), null);
+  tramo(db, '2026-11-20', '07:00', 10, 'Cuadro 3');
+
+  const temprano = loteVigente(db, '2026-11-20', '06:40');
+  assert.equal(temprano.ok, true, 'el IFCO de las 6:40 quedó sin lote');
+  assert.equal(temprano.lote_id, 10);
+  // Y se puede saber que vino por este camino, para que la pantalla lo diga.
+  assert.equal(temprano.antes_del_primero, true);
+
+  // Lo de después del tramo no viene marcado: cayó donde correspondía.
+  const normal = loteVigente(db, '2026-11-20', '09:00');
+  assert.equal(normal.lote_id, 10);
+  assert.ok(!normal.antes_del_primero);
 });
 
-test('UN DÍA QUE ARRANCA A LAS 08:00 DEJA LA MAÑANA SIN LOTE, y se avisa', () => {
+test('y con varios tramos, lo anterior cae en el PRIMERO y no en el último', () => {
+  // El riesgo del atajo: caer en «el único que encuentre». A las 05:00 el lote
+  // correcto es el de las 07:00, no el de las 13:30.
   const db = base();
-  tramo(db, '2026-11-20', '08:00', 10);
-  assert.deepEqual(huecoDelDia(db, '2026-11-20'), { desde_hora: '08:00' });
-  // Y es un problema de verdad, no una formalidad: el IFCO de las 6:40 no tiene lote.
-  assert.equal(loteVigente(db, '2026-11-20', '06:40').ok, false);
+  tramo(db, '2026-11-20', '13:30', 11, 'Tarde');
+  tramo(db, '2026-11-20', '07:00', 10, 'Mañana');   // cargado después, a propósito
+
+  assert.equal(loteVigente(db, '2026-11-20', '05:00').lote_nombre, 'Mañana');
+  assert.equal(loteVigente(db, '2026-11-20', '08:00').lote_nombre, 'Mañana');
+  assert.equal(loteVigente(db, '2026-11-20', '14:00').lote_nombre, 'Tarde');
 });
 
-test('un día sin nada cargado no reporta hueco: reporta que no hay nada', () => {
-  // Son dos cosas distintas y la pantalla las muestra distinto. Un "hueco de las
-  // 00:00 a las 00:00" sería ruido arriba de un día vacío.
+test('un día SIN NADA cargado sigue siendo ok:false', () => {
+  // La caída al primer tramo no puede convertirse en «siempre hay lote». Un día
+  // que nadie declaró tiene que seguir diciéndolo.
   const db = base();
-  assert.equal(huecoDelDia(db, '2026-11-20'), null);
   assert.equal(loteVigente(db, '2026-11-20', '10:00').ok, false);
+  assert.match(loteVigente(db, '2026-11-20', '10:00').motivo, /No se cargó el lote del día/);
+});
+
+test('huecoDelDia ya no existe, y eso es parte del arreglo', async () => {
+  // Si alguien la vuelve a agregar, lo más probable es que esté volviendo a
+  // avisar del agujero que se decidió que no existe.
+  const mod = await import('../src/servicios/galpon.js');
+  assert.equal(mod.huecoDelDia, undefined);
 });
 
 // ══════════════════════════════════════════════════════════════════════════
@@ -243,8 +274,19 @@ test('un lote sin cultivo cargado no rompe la lista', () => {
 // 6 · ¿YA SE VOLCÓ ALGO CONTRA ESTE TRAMO?
 // ══════════════════════════════════════════════════════════════════════════
 function conVolcados(db, filas) {
-  db.exec('CREATE TABLE gal_volcados (id INTEGER PRIMARY KEY, volcado_en TEXT)');
-  for (const f of filas) db.prepare('INSERT INTO gal_volcados (volcado_en) VALUES (?)').run(f);
+  // Desde la V1108 el libro guarda la fecha y la hora por separado, y lo que traba un
+  // tramo son SÓLO los que sacaron su lote del reloj: los que tienen hora. Una carga
+  // manual nombra su lote y no depende de ningún tramo.
+  // IF NOT EXISTS: desde la V1108 la tabla la crea db_galpon.js, que el router
+  // importa al levantarse. Crearla de nuevo revienta; así se usa la de verdad.
+  db.exec('CREATE TABLE IF NOT EXISTS gal_volcados (id INTEGER PRIMARY KEY, fecha TEXT,'
+        + ' hora TEXT, lote_id INTEGER, kilos REAL, eliminado_en TEXT)');
+  for (const f of filas) {
+    // lote_id y kilos van porque la tabla de verdad los tiene NOT NULL: cuando el
+    // router ya la creó, esta función INSERTA en la buena y no en una de mentira.
+    db.prepare('INSERT INTO gal_volcados (fecha,hora,lote_id,kilos) VALUES (?,?,?,?)')
+      .run(String(f).slice(0, 10), String(f).slice(11, 16), 10, 100);
+  }
   return db;
 }
 

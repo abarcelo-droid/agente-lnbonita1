@@ -1,0 +1,364 @@
+// ══ ⚖️ GALPÓN · CARGA DE KILOS — el router, levantado de verdad ══════════
+//
+// La lógica se prueba al lado, en test/galpon_carga.test.mjs. Acá se monta
+// `rutas/galpon.js` en un Express real y se le pega con `fetch`, porque lo que
+// importa en este archivo no se ve leyendo el código:
+//
+//   · que el cerrojo de empresa esté también en las rutas nuevas, y no sólo en
+//     las que ya estaban
+//   · que cargar kilos NO pida admin — es el trabajo del día, no parametrizar
+//   · que la firma de quién cargó salga de la COOKIE y no del cuerpo del pedido
+//   · que el lote del día se PROPONGA sin que la carga dependa de él
+//
+// -- SIN node_modules ESTE ARCHIVO SE SALTEA ENTERO, NO SE CAE -------------
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
+import { fileURLToPath } from 'node:url';
+
+const RAIZ = process.env.LNB_RAIZ
+  || path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+
+function base() {
+  const db = new DatabaseSync(':memory:');
+  db.exec(`
+    CREATE TABLE sociedades (id INTEGER PRIMARY KEY, nombre TEXT);
+    INSERT INTO sociedades (id,nombre) VALUES (7,'Puente Cordón SA'), (9,'San Gerónimo SA');
+
+    CREATE TABLE pa_sectores (id INTEGER PRIMARY KEY, nombre TEXT, tipo TEXT);
+    INSERT INTO pa_sectores (id,nombre,tipo) VALUES (1,'Frutales','frutales');
+
+    CREATE TABLE pa_lotes (id INTEGER PRIMARY KEY, nombre TEXT, sector_id INTEGER,
+                           finca TEXT, activo INTEGER DEFAULT 1);
+    INSERT INTO pa_lotes (id,nombre,sector_id,finca,activo) VALUES
+      (10,'Cuadro 3',1,'La Esperanza',1),
+      (11,'Cuadro 4',1,'La Esperanza',1);
+
+    CREATE TABLE pa_cultivos_lote (id INTEGER PRIMARY KEY, lote_id INTEGER, cultivo TEXT,
+                                   campaña TEXT, es_perenne INTEGER DEFAULT 0);
+    INSERT INTO pa_cultivos_lote (lote_id,cultivo,campaña,es_perenne) VALUES
+      (10,'Damasco','2026/27',1);
+
+    CREATE TABLE pa_cuadrillas (id INTEGER PRIMARY KEY, nombre TEXT, tipo TEXT,
+                                activo INTEGER DEFAULT 1);
+    INSERT INTO pa_cuadrillas (id,nombre,tipo,activo) VALUES
+      (1,'Norte','fija',1), (2,'Sur','pool',1);
+
+    CREATE TABLE gal_cuadrilla_tarjetas (
+      id INTEGER PRIMARY KEY AUTOINCREMENT, cuadrilla_id INTEGER NOT NULL,
+      desde_id INTEGER NOT NULL, hasta_id INTEGER NOT NULL,
+      color TEXT NOT NULL DEFAULT '#1a3a5c', activo INTEGER NOT NULL DEFAULT 1,
+      notas TEXT, creado_en TEXT);
+
+    CREATE TABLE gal_config (clave TEXT PRIMARY KEY, valor TEXT, actualizado TEXT);
+    INSERT INTO gal_config (clave,valor) VALUES ('kg_max_carga','20000');
+
+    CREATE TABLE gal_lote_vigente (
+      id INTEGER PRIMARY KEY AUTOINCREMENT, fecha TEXT NOT NULL,
+      desde_hora TEXT NOT NULL DEFAULT '00:00', lote_id INTEGER NOT NULL,
+      lote_nombre TEXT, producto TEXT, usuario_id INTEGER, usuario TEXT,
+      creado_en TEXT DEFAULT (datetime('now','localtime')));
+
+    CREATE TABLE gal_volcados (
+      id INTEGER PRIMARY KEY AUTOINCREMENT, uuid TEXT UNIQUE,
+      fecha TEXT NOT NULL, hora TEXT,
+      lote_id INTEGER NOT NULL, lote_nombre TEXT, producto TEXT,
+      cuadrilla_id INTEGER, cuadrilla TEXT,
+      kilos REAL NOT NULL, ifcos INTEGER, bruto REAL, tara REAL, tarjeta_id INTEGER,
+      origen TEXT NOT NULL DEFAULT 'manual',
+      observacion TEXT, estado TEXT NOT NULL DEFAULT 'ok', revision_motivo TEXT,
+      usuario_id INTEGER, usuario TEXT,
+      creado_en TEXT DEFAULT (datetime('now','localtime')), eliminado_en TEXT);
+  `);
+  return db;
+}
+
+let express = null;
+let falta = false;
+try {
+  express = (await import('express')).default;
+  await import('jspdf');
+  await import('qrcode');
+} catch { falta = 'falta el paquete express (o jspdf/qrcode): corre npm install para que estos tests corran'; }
+
+const t = (nombre, fn) => test(nombre, { skip: falta }, fn);
+
+async function servidor(db, usuario) {
+  const dir = fs.mkdtempSync(path.join(RAIZ, '.tmp-galkg-'));
+  fs.mkdirSync(path.join(dir, 'servicios'));
+  fs.mkdirSync(path.join(dir, 'rutas'));
+  for (const f of fs.readdirSync(path.join(RAIZ, 'src/servicios'))) {
+    if (f.endsWith('.js')) {
+      fs.copyFileSync(path.join(RAIZ, 'src/servicios', f), path.join(dir, 'servicios', f));
+    }
+  }
+  fs.copyFileSync(path.join(RAIZ, 'src/rutas/galpon.js'), path.join(dir, 'rutas', 'galpon.js'));
+  fs.writeFileSync(path.join(dir, 'servicios', 'db.js'),
+    'export default globalThis.__GAL_DB; export const getDb = () => globalThis.__GAL_DB;\n'
+    + 'export function rehacerTabla(){}\n', 'utf8');
+  globalThis.__GAL_DB = db;
+
+  const mod = await import('file:///' + path.join(dir, 'rutas', 'galpon.js').replace(/\\/g, '/'));
+  const app = express();
+  app.use(express.json());
+  app.use((req, _res, next) => {
+    req.cookies = usuario ? { lnb_user: JSON.stringify(usuario) } : {}; next();
+  });
+  app.use('/api/galpon', mod.default);
+  const srv = await new Promise((ok) => { const s = app.listen(0, () => ok(s)); });
+  const url = 'http://127.0.0.1:' + srv.address().port;
+  return {
+    pegar: (ruta, opts) => fetch(url + '/api/galpon' + ruta, opts),
+    cerrar: () => { srv.close(); fs.rmSync(dir, { recursive: true, force: true }); },
+  };
+}
+
+const ADMIN    = { id: 1, nombre: 'Andy', rol: 'admin' };
+const OPERADOR = { id: 2, nombre: 'Juan', rol: 'operador' };
+const json   = (b) => ({ method: 'POST', headers: { 'Content-Type': 'application/json' },
+                         body: JSON.stringify(b) });
+const patch  = (b) => Object.assign(json(b), { method: 'PATCH' });
+const HOY = new Date().toLocaleDateString('en-CA');
+
+// ══════════════════════════════════════════════════════════════════════════
+// 1 · QUIÉN PUEDE
+// ══════════════════════════════════════════════════════════════════════════
+t('sin sesión no se lee ni se carga nada', async () => {
+  const s = await servidor(base(), null);
+  try {
+    assert.equal((await s.pegar('/volcados')).status, 401);
+    assert.equal((await s.pegar('/volcados', json({ fecha: HOY, lote_id: 10, kilos: 100 }))).status, 401);
+    assert.equal((await s.pegar('/volcados/1', patch({ kilos: 1 }))).status, 401);
+    assert.equal((await s.pegar('/volcados/1', { method: 'DELETE' })).status, 401);
+  } finally { s.cerrar(); }
+});
+
+t('UN OPERADOR CARGA KILOS: esto no es parametrizar', async () => {
+  // Pedir admin acá terminaría con el dueño tipeando los renglones que cuenta
+  // otro, que es exactamente lo que CLAUDE.md llama «operar no es ser admin».
+  const s = await servidor(base(), OPERADOR);
+  try {
+    const r = await s.pegar('/volcados', json({ fecha: HOY, lote_id: 10, kilos: 450 }));
+    assert.equal(r.status, 200);
+    const j = await r.json();
+    assert.equal(j.ok, true);
+    assert.equal(j.fila.kilos, 450);
+
+    // Y también corrige y borra lo suyo.
+    assert.equal((await s.pegar('/volcados/' + j.id, patch({ kilos: 500 }))).status, 200);
+    assert.equal((await s.pegar('/volcados/' + j.id, { method: 'DELETE' })).status, 200);
+  } finally { s.cerrar(); }
+});
+
+t('EL CERROJO DE EMPRESA TAMBIÉN TAPA LAS RUTAS NUEVAS', async () => {
+  // El galpón es de Puente Cordón (id 7). La empresa viaja en ?sociedad_id= y
+  // en el cuerpo, NO en la cookie del usuario — por eso se prueba así.
+  const s = await servidor(base(), ADMIN);
+  try {
+    for (const [ruta, opts] of [
+      ['/volcados?sociedad_id=9', undefined],
+      ['/volcados?sociedad_id=9', json({ fecha: HOY, lote_id: 10, kilos: 100 })],
+      ['/volcados/1?sociedad_id=9', patch({ kilos: 1 })],
+      ['/volcados/1?sociedad_id=9', { method: 'DELETE' }],
+    ]) {
+      const r = await s.pegar(ruta, opts);
+      assert.equal(r.status, 403, 'pasó parado en San Gerónimo: ' + ruta);
+      assert.match((await r.json()).error, /Puente Cord/);
+    }
+    // Y parado donde corresponde, o sin decir nada, entra.
+    assert.equal((await s.pegar('/volcados?sociedad_id=7')).status, 200);
+    assert.equal((await s.pegar('/volcados')).status, 200);
+  } finally { s.cerrar(); }
+});
+
+// ══════════════════════════════════════════════════════════════════════════
+// 2 · LA FIRMA
+// ══════════════════════════════════════════════════════════════════════════
+t('QUIÉN CARGÓ SALE DE LA COOKIE, no del cuerpo del pedido', async () => {
+  // Es la firma de quién contó esos kilos. Una firma que manda el cliente no
+  // firma nada: alcanzaría con editar el JSON para cargar a nombre de otro.
+  const s = await servidor(base(), OPERADOR);
+  try {
+    const j = await (await s.pegar('/volcados', json({
+      fecha: HOY, lote_id: 10, kilos: 450,
+      usuario: 'El Gerente', usuario_id: 999,
+    }))).json();
+    assert.equal(j.fila.usuario, 'Juan');
+    assert.equal(j.fila.usuario_id, 2);
+  } finally { s.cerrar(); }
+});
+
+// ══════════════════════════════════════════════════════════════════════════
+// 3 · EL DÍA
+// ══════════════════════════════════════════════════════════════════════════
+t('el día trae las cargas y el resumen en un solo pedido', async () => {
+  // Partirlo en dos deja la mitad de arriba contradiciendo a la de abajo
+  // mientras llega la segunda respuesta.
+  const s = await servidor(base(), OPERADOR);
+  try {
+    await s.pegar('/volcados', json({ fecha: HOY, lote_id: 10, cuadrilla_id: 1, kilos: 300 }));
+    await s.pegar('/volcados', json({ fecha: HOY, lote_id: 11, cuadrilla_id: 2, kilos: 450 }));
+
+    const d = await (await s.pegar('/volcados?fecha=' + HOY)).json();
+    assert.equal(d.ok, true);
+    assert.equal(d.fecha, HOY);
+    assert.equal(d.cargas.length, 2);
+    assert.equal(d.resumen.kilos, 750);
+    assert.equal(d.resumen.por_cuadrilla.length, 2);
+    assert.equal(d.resumen.por_lote.length, 2);
+    // La última cargada arriba: es la que se acaba de tipear y la que se mira.
+    assert.equal(d.cargas[0].kilos, 450);
+  } finally { s.cerrar(); }
+});
+
+t('sin fecha contesta por HOY', async () => {
+  const s = await servidor(base(), OPERADOR);
+  try {
+    const d = await (await s.pegar('/volcados')).json();
+    assert.equal(d.fecha, HOY);
+    assert.equal(d.hoy, HOY);
+  } finally { s.cerrar(); }
+});
+
+t('EL LOTE DEL DÍA SE PROPONE, Y LA CARGA NO DEPENDE DE ÉL', async () => {
+  const s = await servidor(base(), OPERADOR);
+  try {
+    // Sin nada declarado no hay propuesta... y se carga igual. La pantalla de
+    // kilos no puede quedarse esperando a que alguien declare el lote del día.
+    let d = await (await s.pegar('/volcados?fecha=' + HOY)).json();
+    assert.equal(d.propuesta, null);
+    assert.equal((await s.pegar('/volcados',
+      json({ fecha: HOY, lote_id: 11, kilos: 100 }))).status, 200);
+
+    // Con el lote declarado, se propone ése.
+    await s.pegar('/lote-dia', json({ fecha: HOY, lote_id: 10, producto: 'Damasco' }));
+    d = await (await s.pegar('/volcados?fecha=' + HOY)).json();
+    assert.equal(d.propuesta.lote_id, 10);
+    assert.equal(d.propuesta.lote_nombre, 'Cuadro 3');
+    assert.equal(d.propuesta.producto, 'Damasco');
+  } finally { s.cerrar(); }
+});
+
+// ══════════════════════════════════════════════════════════════════════════
+// 4 · LO QUE NO ENTRA
+// ══════════════════════════════════════════════════════════════════════════
+t('lo que falta se contesta con 400 y con el motivo, no con un 500', async () => {
+  // El que lo lee es el operador parado frente al formulario. Un 500 lo manda
+  // a buscar al administrador por algo que puede arreglar él.
+  const s = await servidor(base(), OPERADOR);
+  try {
+    for (const [cuerpo, re] of [
+      [{ fecha: 'ayer', lote_id: 10, kilos: 100 }, /YYYY-MM-DD/],
+      [{ fecha: HOY, kilos: 100 }, /Falta elegir el lote/],
+      [{ fecha: HOY, lote_id: 777, kilos: 100 }, /no existe/],
+      [{ fecha: HOY, lote_id: 10 }, /no se entienden/],
+      [{ fecha: HOY, lote_id: 10, kilos: 0 }, /mayores que cero/],
+      [{ fecha: HOY, lote_id: 10, kilos: 100, cuadrilla_id: 99 }, /cuadrilla 99 no existe/],
+    ]) {
+      const r = await s.pegar('/volcados', json(cuerpo));
+      assert.equal(r.status, 400, JSON.stringify(cuerpo));
+      assert.match((await r.json()).error, re);
+    }
+    assert.equal((await (await s.pegar('/volcados?fecha=' + HOY)).json()).cargas.length, 0);
+  } finally { s.cerrar(); }
+});
+
+t('corregir o borrar algo que no existe da 404, no 500', async () => {
+  const s = await servidor(base(), OPERADOR);
+  try {
+    assert.equal((await s.pegar('/volcados/9999', patch({ kilos: 1 }))).status, 404);
+    assert.equal((await s.pegar('/volcados/9999', { method: 'DELETE' })).status, 404);
+  } finally { s.cerrar(); }
+});
+
+// ══════════════════════════════════════════════════════════════════════════
+// 5 · EL CERO DE MÁS, DE PUNTA A PUNTA
+// ══════════════════════════════════════════════════════════════════════════
+t('un número absurdo entra con 200 y vuelve marcado', async () => {
+  // Que NO sea un 400 es el punto: frenarlo enseñaría a partir el renglón en
+  // dos para esquivar el tope, y el dato quedaría mal y además irrastreable.
+  const s = await servidor(base(), OPERADOR);
+  try {
+    const r = await s.pegar('/volcados', json({ fecha: HOY, lote_id: 10, kilos: 45000 }));
+    assert.equal(r.status, 200);
+    const j = await r.json();
+    assert.equal(j.fila.estado, 'a_revisar');
+    assert.match(j.aviso, /cero de más/);
+
+    const d = await (await s.pegar('/volcados?fecha=' + HOY)).json();
+    assert.equal(d.resumen.a_revisar, 1);
+    assert.equal(d.resumen.kilos, 45000, 'lo marcado está cargado, no descartado');
+  } finally { s.cerrar(); }
+});
+
+// ══════════════════════════════════════════════════════════════════════════
+// 6 · EL DOBLE CLIC
+// ══════════════════════════════════════════════════════════════════════════
+t('DOS POST IDÉNTICOS CON EL MISMO UUID SON UNA SOLA CARGA', async () => {
+  const s = await servidor(base(), OPERADOR);
+  try {
+    const cuerpo = { uuid: 'abc-123', fecha: HOY, lote_id: 10, kilos: 450 };
+    const a = await (await s.pegar('/volcados', json(cuerpo))).json();
+    const b = await (await s.pegar('/volcados', json(cuerpo))).json();
+    assert.equal(b.ok, true, 'el reintento no puede dar error');
+    assert.equal(b.repetido, true);
+    assert.equal(b.id, a.id);
+
+    const d = await (await s.pegar('/volcados?fecha=' + HOY)).json();
+    assert.equal(d.cargas.length, 1);
+    assert.equal(d.resumen.kilos, 450);
+  } finally { s.cerrar(); }
+});
+
+// ══════════════════════════════════════════════════════════════════════════
+// 7 · CORREGIR SIN ROMPER LO DE AL LADO
+// ══════════════════════════════════════════════════════════════════════════
+t('un PATCH de kilos no se lleva puesta la cuadrilla', async () => {
+  const s = await servidor(base(), OPERADOR);
+  try {
+    const j = await (await s.pegar('/volcados', json({
+      fecha: HOY, lote_id: 10, cuadrilla_id: 2, producto: 'Damasco', kilos: 450, ifcos: 18,
+    }))).json();
+    const k = await (await s.pegar('/volcados/' + j.id, patch({ kilos: '500' }))).json();
+    assert.equal(k.fila.kilos, 500);
+    assert.equal(k.fila.cuadrilla, 'Sur');
+    assert.equal(k.fila.producto, 'Damasco');
+    assert.equal(k.fila.ifcos, 18);
+  } finally { s.cerrar(); }
+});
+
+t('borrar saca la carga del día y del resumen', async () => {
+  const s = await servidor(base(), OPERADOR);
+  try {
+    const j = await (await s.pegar('/volcados',
+      json({ fecha: HOY, lote_id: 10, kilos: 450 }))).json();
+    await s.pegar('/volcados', json({ fecha: HOY, lote_id: 10, kilos: 100 }));
+    await s.pegar('/volcados/' + j.id, { method: 'DELETE' });
+
+    const d = await (await s.pegar('/volcados?fecha=' + HOY)).json();
+    assert.equal(d.cargas.length, 1);
+    assert.equal(d.resumen.kilos, 100);
+  } finally { s.cerrar(); }
+});
+
+// ══════════════════════════════════════════════════════════════════════════
+// 8 · LA CARGA MANUAL NO TRABA EL LOTE DEL DÍA
+// ══════════════════════════════════════════════════════════════════════════
+t('con kilos cargados a mano, el tramo del día SIGUE corrigiéndose', async () => {
+  // Una carga manual nombró su lote y no depende de ningún tramo. Si la trabara
+  // igual, el que quiere arreglar un lote mal declarado no podría — y el candado
+  // no estaría protegiendo nada.
+  const s = await servidor(base(), OPERADOR);
+  try {
+    const l = await (await s.pegar('/lote-dia', json({ fecha: HOY, lote_id: 10 }))).json();
+    await s.pegar('/volcados', json({ fecha: HOY, lote_id: 10, kilos: 450 }));
+
+    const r = await s.pegar('/lote-dia/' + l.id, patch({ lote_id: 11 }));
+    assert.equal(r.status, 200, 'la carga manual trabó el tramo');
+
+    const d = await (await s.pegar('/lote-dia?fecha=' + HOY)).json();
+    assert.equal(d.tramos[0].lote_nombre, 'Cuadro 4');
+  } finally { s.cerrar(); }
+});

@@ -26,4 +26,5 @@ __pycache__/
 *.pyc
 .tmp-galpon-*/
 .tmp-galld-*/
+.tmp-galkg-*/
 .tmp-ctj-*/

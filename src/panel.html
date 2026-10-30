@@ -287,6 +287,7 @@ input[type=number]{-moz-appearance:textfield;appearance:textfield}
     <div class="ni" data-sec="ia-uso"><span class="dot da"></span>⚡ Consumo de IA</div>
     <div class="ni" data-sec="galpon-config"><span class="dot da"></span>⚙️ Galpón · Configuración</div>
     <div class="ni" data-sec="galpon-lote-dia"><span class="dot da"></span>🗓️ Galpón · Lote del día</div>
+    <div class="ni" data-sec="galpon-carga"><span class="dot da"></span>⚖️ Galpón · Carga de kilos</div>
   </div>
 
   <div class="ni-grp" data-grp="ven-ventas">Administración de Ventas<span class="ni-caret">▾</span></div>
@@ -7150,10 +7151,6 @@ input[type=number]{-moz-appearance:textfield;appearance:textfield}
       <button class="btn bo bs" onclick="galLdHoy()">Hoy</button>
     </div>
 
-    <!-- El hueco de la mañana. Se arregla con un botón porque la causa es siempre la
-         misma: el que cargó puso la hora a la que estaba cargando, no desde cuándo vale. -->
-    <div id="gld-hueco" class="ojo" style="display:none;margin-bottom:12px"></div>
-
     <div class="ab-table-wrap">
       <table class="pa-tbl gld-tbl">
         <colgroup><col style="width:16%"><col style="width:30%"><col style="width:20%">
@@ -7186,7 +7183,7 @@ input[type=number]{-moz-appearance:textfield;appearance:textfield}
             cultivo que tiene cargado el lote. El cultivo dice qué árbol hay plantado; lo
             que entra al galpón un martes lo sabe el que está ahí.</div></div>
 
-        <div style="margin-top:10px"><label id="gal-ld-hora-lbl">Desde la hora</label>
+        <div style="margin-top:10px" id="gal-ld-hora-fld"><label id="gal-ld-hora-lbl">Desde la hora</label>
           <input type="time" id="gal-ld-hora" style="width:140px">
           <div id="gal-ld-hora-ay" style="font-size:10.5px;color:var(--mut);margin-top:3px"></div></div>
 
@@ -7199,6 +7196,144 @@ input[type=number]{-moz-appearance:textfield;appearance:textfield}
     </div>
   </div>
 
+
+
+  <div class="sec sg-mod" id="sec-galpon-carga">
+    <style>
+      /* SIN BARRA DE DESPLAZAMIENTO LATERAL (CLAUDE.md): anchos por columna, se parte
+         sólo el nombre del lote y el de la cuadrilla, y el resto se trunca. Los kilos
+         son la última columna y son el número que se viene a mirar: arrastrar la tabla
+         para leerlos sería exactamente lo que esa regla prohíbe. */
+      #sec-galpon-carga .gkg-tbl{table-layout:fixed;width:100%;max-width:98vw}
+      #sec-galpon-carga .gkg-tbl th,#sec-galpon-carga .gkg-tbl td{
+        white-space:nowrap;overflow:hidden;text-overflow:ellipsis;vertical-align:middle}
+      #sec-galpon-carga .gkg-tbl td.gkg-w,#sec-galpon-carga .gkg-tbl th.gkg-w{
+        white-space:normal;word-break:break-word}
+      #sec-galpon-carga .ab-table-wrap{overflow-x:hidden !important}
+      @media(max-width:900px){ #sec-galpon-carga .ab-table-wrap{overflow-x:auto !important}
+                               #sec-galpon-carga .gkg-tbl{table-layout:auto} }
+      #sec-galpon-carga .gkg-n{font-variant-numeric:tabular-nums;text-align:right;font-weight:600}
+
+      /* LOS TOTALES DEL DÍA. Es a lo que se entra: cuánto entró hoy. */
+      #sec-galpon-carga .gkg-tot{display:flex;gap:12px;flex-wrap:wrap;margin-bottom:16px}
+      #sec-galpon-carga .gkg-t{border:1px solid var(--bor);border-radius:12px;
+        padding:12px 18px;min-width:130px}
+      #sec-galpon-carga .gkg-t .k{font-size:11px;color:var(--mut);text-transform:uppercase;
+        letter-spacing:.4px}
+      #sec-galpon-carga .gkg-t .v{font-size:24px;font-weight:700;line-height:1.2;
+        font-variant-numeric:tabular-nums}
+      #sec-galpon-carga .gkg-t.rev{border-color:#d62828;background:rgba(214,40,40,.07)}
+
+      /* LOS DOS CORTES. Por cuadrilla es como se paga el jornal; por lote es como se
+         mide el rendimiento. Son las dos preguntas que se le hacen a estos kilos. */
+      #sec-galpon-carga .gkg-cortes{display:flex;gap:16px;flex-wrap:wrap;margin-bottom:18px}
+      #sec-galpon-carga .gkg-corte{flex:1 1 300px;min-width:0;border:1px solid var(--bor);
+        border-radius:12px;padding:12px 14px}
+      #sec-galpon-carga .gkg-corte h4{margin:0 0 8px;font-size:11px;color:var(--mut);
+        text-transform:uppercase;letter-spacing:.4px}
+      #sec-galpon-carga .gkg-corte .l{display:flex;justify-content:space-between;gap:10px;
+        padding:4px 0;font-size:13px;border-top:1px dashed var(--bor)}
+      #sec-galpon-carga .gkg-corte .l:first-of-type{border-top:0}
+      #sec-galpon-carga .gkg-corte .l b{font-variant-numeric:tabular-nums;white-space:nowrap}
+      #sec-galpon-carga .gkg-corte .l span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+      #sec-galpon-carga .gkg-fecha{display:flex;gap:8px;align-items:center;
+        flex-wrap:wrap;margin-bottom:14px}
+      #sec-galpon-carga .gkg-fecha input{padding:6px 9px;border:1px solid var(--bor);
+        border-radius:7px;font-size:13px;background:var(--bg);color:var(--fg)}
+      #sec-galpon-carga .gkg-vacio{text-align:center;padding:34px;color:var(--mut);font-size:13px}
+      #sec-galpon-carga .gkg-chi{font-size:11px;color:var(--mut);font-style:italic}
+      #sec-galpon-carga .gkg-rev{color:#d62828;font-size:11px;font-weight:600}
+      /* El acuse de la ventana. Va scopeado al modal y no a la .sec porque la ventana
+         vive FUERA de toda .sec (CLAUDE.md) — una regla colgada de #sec-galpon-carga
+         no la alcanzaría, y eso compila igual: se ve recién abriéndola. */
+      #gal-kg-modal .gkg-ok{border:1px solid #2e9e5b;background:rgba(46,158,91,.10);
+        border-radius:8px;padding:9px 11px;font-size:12.5px}
+    </style>
+
+    <div class="ph">
+      <div><div class="ph-t">⚖️ Galpón · Carga de kilos</div>
+        <div class="ph-s">Cuántos kilos entraron, de qué lote y de qué cuadrilla. Mientras
+          no haya tarjetas impresas ni balanza conectada se cargan a mano — y van al mismo
+          lugar del que después salen el rendimiento y el kg por jornal.</div></div>
+      <div style="display:flex;gap:8px">
+        <button class="btn bp bs" onclick="galKgAbrir()">+ Cargar kilos</button>
+        <button class="btn bo bs" onclick="sgManualAbrir('galpon-carga')">❓ ¿Cómo se usa?</button></div>
+    </div>
+
+    <div class="gkg-fecha">
+      <label style="font-size:12px;color:var(--mut)">Día</label>
+      <input type="date" id="gkg-fecha" onchange="galKgCargar()">
+      <button class="btn bo bs" onclick="galKgHoy()">Hoy</button>
+    </div>
+
+    <div id="gkg-tot" class="gkg-tot"></div>
+    <div id="gkg-cortes" class="gkg-cortes"></div>
+
+    <div class="ab-table-wrap">
+      <table class="pa-tbl gkg-tbl">
+        <colgroup><col style="width:22%"><col style="width:13%"><col style="width:17%">
+                  <col style="width:13%"><col style="width:9%"><col style="width:16%">
+                  <col style="width:10%"></colgroup>
+        <thead><tr>
+          <th class="gkg-w">Lote</th><th class="gkg-w">Producto</th><th class="gkg-w">Cuadrilla</th>
+          <th style="text-align:right">Kilos</th><th style="text-align:right">IFCOs</th>
+          <th>Lo cargó</th><th></th>
+        </tr></thead>
+        <tbody id="gkg-body"></tbody>
+      </table>
+    </div>
+  </div>
+
+
+  <!-- ── CARGAR KILOS ─────────────────────────────────────────────────────────────
+       Fuera de toda .sec y no se cierra al clic afuera: las dos reglas de CLAUDE.md.
+
+       Y NO SE CIERRA AL GUARDAR, que es la cuarta: adentro queda el acuse de lo que
+       entró. Además es como se carga de verdad —ocho renglones seguidos—, así que
+       cerrarse y volver a abrirse ocho veces sería pelear con el que la usa. -->
+  <div class="ab-modal-overlay sg-mod" id="gal-kg-modal">
+    <div class="ab-modal" style="width:min(620px,96vw);max-width:96vw">
+      <div class="mhd"><div class="mht" id="gal-kg-tit">Cargar kilos</div>
+        <button class="mcl" onclick="galKgCerrar()">×</button></div>
+      <div class="sgr-card">
+        <div style="display:flex;gap:10px;flex-wrap:wrap">
+          <div style="flex:0 0 160px"><label>Día de cosecha</label>
+            <input type="date" id="gal-kg-fecha"></div>
+          <div style="flex:1 1 220px;min-width:0"><label>Lote</label>
+            <select id="gal-kg-lote" onchange="galKgLotePick()"></select></div>
+        </div>
+
+        <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:10px">
+          <div style="flex:1 1 200px;min-width:0"><label>Producto</label>
+            <input type="text" id="gal-kg-prod" placeholder="ej: Damasco"></div>
+          <div style="flex:1 1 200px;min-width:0"><label>Cuadrilla</label>
+            <select id="gal-kg-cuad"></select></div>
+        </div>
+
+        <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:10px">
+          <div style="flex:0 0 150px"><label>Kilos</label>
+            <input type="text" id="gal-kg-kilos" inputmode="decimal" placeholder="450"
+                   onkeydown="if(event.key==='Enter'){event.preventDefault();galKgGuardar();}">
+            <div style="font-size:10.5px;color:var(--mut);margin-top:3px">Se puede escribir
+              450,5 o 1.250</div></div>
+          <div style="flex:0 0 130px"><label>IFCOs <span style="font-weight:400;
+            text-transform:none;color:var(--mut)">(opcional)</span></label>
+            <input type="number" id="gal-kg-ifcos" min="0" step="1" placeholder=""></div>
+          <div style="flex:1 1 200px;min-width:0"><label>Observación <span style="font-weight:400;
+            text-transform:none;color:var(--mut)">(opcional)</span></label>
+            <input type="text" id="gal-kg-obs" placeholder=""></div>
+        </div>
+
+        <div id="gal-kg-error" style="display:none;margin-top:10px" class="ojo"></div>
+        <div id="gal-kg-ok" style="display:none;margin-top:10px"></div>
+      </div>
+      <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:14px">
+        <button class="btn bo" id="gal-kg-salir" onclick="galKgCerrar()">Listo</button>
+        <button class="btn bp" id="gal-kg-ok-btn" onclick="galKgGuardar()">Cargar</button>
+      </div>
+    </div>
+  </div>
 
   <div class="sec sg-mod" id="sec-sg-importacion">
     <style>
@@ -26795,6 +26930,96 @@ SG_MANUAL['galpon-config'] = { titulo: 'Galpón · Configuración', html:
   + 'ni se imprime nada de acá.</p>'
 };
 
+SG_MANUAL['galpon-carga'] = { titulo: 'Galpón · Carga de kilos', html:
+  '<p>Acá se anota <b>cuánta fruta entró al galpón</b>: cuántos kilos, de qué lote y de qué '
+  + 'cuadrilla. Es la única tabla del sistema que guarda <b>volumen</b> — hasta la V1096 no '
+  + 'había ninguna. De estos renglones salen después el rendimiento de cada lote y los kilos '
+  + 'por jornal de cada cuadrilla.</p>'
+
+  + '<div class="ojo"><b>Por qué se carga a mano.</b> El circuito final es con tarjetas QR y '
+  + 'balanza: el cuadrillero engancha una tarjeta en cada IFCO, se escanea al volcar y el peso '
+  + 'lo manda el indicador. Todavía <b>no está instalada la impresora</b>, así que no hay '
+  + 'tarjetas. Y la cosecha no espera al hardware: se carga a mano y se mide igual.</div>'
+
+  + '<h3>📒 Es el MISMO libro que va a usar el escaneo <span class="ver">V1108</span></h3>'
+  + '<p>Lo que se carga acá no es provisorio ni se va a migrar después. Entra a la misma tabla '
+  + '(<code>gal_volcados</code>) en la que va a escribir el escaneo cuando llegue: lo que cambia '
+  + 'es <b>quién llena los campos</b>, no qué se guarda.</p>'
+  + '<p>Importa porque la alternativa —una tabla provisoria y otra «de verdad»— significaría '
+  + 'mover los kilos de media temporada, y que el tablero tuviera que sumar dos lados. El libro '
+  + 'es uno.</p>'
+
+  + '<h3>✍️ Qué pide cada renglón <span class="ver">V1108</span></h3>'
+  + '<ul>'
+  + '<li><b>Día de cosecha.</b> Es el día en que se cosechó, no el día en que se tipea. Lo del '
+  + 'sábado se puede cargar el lunes y queda contado el sábado — es a propósito.</li>'
+  + '<li><b>Lote.</b> Sale de <b>Producción → Lotes</b>, agrupado por finca. Acá no se dan de '
+  + 'alta. Si en <b>Lote del día</b> hay uno declarado, viene <b>propuesto</b>; es una propuesta '
+  + 'y se puede cambiar.</li>'
+  + '<li><b>Producto.</b> Se propone con el cultivo que el lote tiene cargado y queda editable. '
+  + 'El cultivo dice qué árbol hay plantado; lo que entró un martes lo sabe el que está ahí.</li>'
+  + '<li><b>Cuadrilla.</b> Sale de <b>Personal → Cuadrillas</b>. Es opcional, pero <b>sin ella '
+  + 'estos kilos no entran en el kg por jornal</b>: es como se paga, así que conviene ponerla.</li>'
+  + '<li><b>Kilos.</b> El único obligatorio además del lote. Se puede escribir <b>450</b>, '
+  + '<b>450,5</b> o <b>1.250</b> — se entienden las tres.</li>'
+  + '<li><b>IFCOs.</b> Opcional. Vacío significa «no se contaron», que no es lo mismo que cero: '
+  + 'un cero mentiría en el promedio de kilos por IFCO.</li>'
+  + '<li><b>Observación.</b> Opcional, texto libre, para lo que no entra en ningún campo.</li>'
+  + '</ul>'
+
+  + '<h3>⌨️ Cómo se carga de verdad <span class="ver">V1108</span></h3>'
+  + '<p>La ventana <b>no se cierra al cargar</b>. Se limpian los kilos, los IFCOs y la '
+  + 'observación, y <b>quedan</b> el lote y la cuadrilla — porque una tarde de carga son ocho '
+  + 'renglones seguidos de lo mismo y cerrar la ventana ocho veces sería pelear con el que la '
+  + 'usa. Arriba queda el acuse de lo último que entró. Se sale con <b>Listo</b>.</p>'
+  + '<p>El <b>Enter</b> en el casillero de kilos carga el renglón, sin tocar el botón.</p>'
+
+  + '<div class="ojo"><b>El doble clic no duplica kilos.</b> Cada carga viaja con un número '
+  + 'propio generado en la pantalla; si el mismo llega dos veces, el servidor guarda una sola '
+  + 'fila. Es el mismo mecanismo que va a necesitar la carga sin señal cuando llegue.</div>'
+
+  + '<h3>⚠️ El cero de más <span class="ver">V1108</span></h3>'
+  + '<p>Cargando a mano, el error que de verdad pasa es escribir <b>4500</b> donde iban '
+  + '<b>450</b>. No lo agarra nadie: el número es plausible, el lote existe, la cuadrilla '
+  + 'existe — y queda adentro del rendimiento de toda la temporada.</p>'
+  + '<p>Por eso hay un <b>tope por carga</b> (20.000 kg de fábrica, se cambia en '
+  + '<b>Configuración</b>). Pasarlo <b>no frena nada</b>: la carga entra igual y queda marcada '
+  + '<b>Para revisar</b>, en rojo, con el recuadro de arriba contándolas. Frenarla enseñaría a '
+  + 'partir el renglón en dos para esquivar el tope, que es la manera de que el dato quede mal '
+  + '<i>y</i> además irrastreable.</p>'
+
+  + '<h3>✎ Corregir y borrar <span class="ver">V1108</span></h3>'
+  + '<p>Cualquier renglón se corrige y se borra, sin candado: todavía no cuelga nada de él. '
+  + 'Al corregir los kilos se vuelve a mirar el tope, así que pasar de 450 a 4.500 vuelve a '
+  + 'marcarlo.</p>'
+  + '<p>Borrar es <b>borrado blando</b>: la fila deja de contar en todos lados pero no '
+  + 'desaparece de la base. Un renglón de kilos borrado de verdad es un jornal que después no '
+  + 'se puede auditar.</p>'
+
+  + '<h3>📊 Los dos cortes de arriba <span class="ver">V1108</span></h3>'
+  + '<p><b>Por cuadrilla</b> y <b>por lote</b>, ordenados por kilos. No son decorativos: son '
+  + 'las dos preguntas que se le hacen a este dato. Por cuadrilla es <b>como se paga el '
+  + 'jornal</b>; por lote es <b>como se mide el rendimiento</b> de lo plantado.</p>'
+  + '<p>El recuadro rojo <b>Para revisar</b> aparece sólo si hay algo que revisar. Un «0» todos '
+  + 'los días enseña a no mirar ese lugar justo para el día que diga 1.</p>'
+
+  + '<h3>🔗 Con qué se vincula <span class="ver">V1108</span></h3>'
+  + '<ul>'
+  + '<li><b>Lote del día</b> propone el lote. Pero esta pantalla <b>no depende</b> de esa: se '
+  + 'pueden cargar kilos de un día en el que nadie declaró nada.</li>'
+  + '<li><b>Personal → Asistencia</b> tiene los jornales. El kg por jornal cruza los dos, y por '
+  + 'eso la cuadrilla importa.</li>'
+  + '<li><b>Producción → Lotes</b> tiene los lotes y su cultivo.</li>'
+  + '</ul>'
+
+  + '<h3>👤 Quién puede <span class="ver">V1108</span></h3>'
+  + '<p><b>Cualquiera con el módulo</b>, con nivel de operar. Cargar los kilos del día es el '
+  + 'trabajo del día, <b>no parametrizar</b>: pedir administrador acá terminaría con el dueño '
+  + 'tipeando los renglones que cuenta otro.</p>'
+  + '<p>Quien tenga <i>sólo</i> esta pantalla <b>ve</b> los lotes y las cuadrillas para elegir, '
+  + 'y <b>no puede</b> declarar el lote del día ni tocar los rangos de tarjetas.</p>'
+};
+
 SG_MANUAL['galpon-lote-dia'] = { titulo: 'Galpón · Lote del día', html:
   '<p>Esta pantalla contesta <b>una sola pregunta</b>: qué se está cosechando. Parece poco, '
   + 'y es lo que convierte un montón de IFCOs en kilos de un lote. Sin esto, la balanza pesa '
@@ -26812,16 +27037,23 @@ SG_MANUAL['galpon-lote-dia'] = { titulo: 'Galpón · Lote del día', html:
   + '<p>La regla es la misma que la de una tarifa con vigencia: <b>vale el último cambio cuya '
   + 'hora ya pasó</b>. De ahí sale que:</p>'
   + '<ul>'
-  + '<li><b>Con un solo lote cargado alcanza.</b> Vale para la jornada entera y la hora no '
-  + 'importa — por eso el primero se propone a las <b>00:00</b>.</li>'
+  + '<li><b>Con un solo lote cargado alcanza.</b> Vale para la jornada entera, y por eso '
+  + 'la ventana <b>no pregunta la hora del primero</b> <span class="ver">V1108</span>: '
+  + 'arranca cuando arranca el día.</li>'
   + '<li><b>Un cambio de lote es otra fila</b>, con la hora en que se cambió. No se borra la '
   + 'anterior: la de la mañana sigue explicando los kilos de la mañana.</li>'
   + '</ul>'
 
-  + '<div class="ojo"><b>El error más fácil de cometer.</b> Cargar a las 08:00 y poner «desde '
-  + 'las 08:00», que es la hora a la que uno está cargando y no desde cuándo vale. El IFCO que '
-  + 'entró a las 6:40 se queda <b>sin lote</b>. La pantalla lo avisa arriba de la tabla y trae '
-  + 'el arreglo en un botón: <b>Que arranque a las 00:00</b>.</div>'
+  + '<h3>🕗 Antes del primer lote no hay un agujero <span class="ver">V1108</span></h3>'
+  + '<p>Hasta la V1107 la ventana pedía la hora también para el primer lote del día, y el que '
+  + 'ponía <b>07:00</b> —la hora en que abre el galpón, o sea el dato más fiel que se podía '
+  + 'cargar— recibía un cartel avisándole de que lo volcado antes quedaba sin lote, con un '
+  + 'botón para deshacerlo. Era retar al que cargaba bien.</p>'
+  + '<p>Ese agujero <b>no puede existir</b>: si entra algo a las 6:40 y el único lote declarado '
+  + 'ese día es el de las 07:00, ése es el lote correcto. Ahora el sistema lo atribuye así, el '
+  + 'cartel no está más, y el campo de hora <b>aparece recién en el segundo</b> renglón, que es '
+  + 'donde significa algo.</p>'
+  + '<p>Un día de un solo lote se muestra como <b>«Todo el día»</b>.</p>'
 
   + '<h3>🟢 El cartel de arriba <span class="ver">V1106</span></h3>'
   + '<p>Verde con el lote que se está cosechando en este momento, o <b>rojo</b> si no hay '
@@ -39381,6 +39613,7 @@ function loadSec(s) {
     'ia-uso': function(){ iuInit(); },
     'galpon-config': function(){ galInit(); },
     'galpon-lote-dia': function(){ galLdInit(); },
+    'galpon-carga': function(){ galKgInit(); },
     'pl-abasto': function(){ plaInit(); },
     'sg-catalogo':   function(){ sgLoadCaches(function(){ sgCatSub('productos'); }); },
     'sg-reportes':   function(){ sgRepInit(); },
@@ -55156,8 +55389,7 @@ async function galLdCargar(){
     GLD.fecha = j.fecha; GLD.hoy = j.hoy; GLD.tramos = j.tramos || []; GLD.ahora = j.ahora || '';
     if (f) f.value = j.fecha;
     galLdAhora(j);
-    galLdHueco(j);
-    galLdPintar();
+      galLdPintar();
   } catch (e) {
     var b = document.getElementById('gld-body');
     if (b) b.innerHTML = '<tr><td colspan="5" class="gld-vacio">' + galLdEsc(e.message) + '</td></tr>';
@@ -55192,32 +55424,6 @@ function galLdAhora(j){
     + '<div style="margin-left:auto"><button class="btn bo" onclick="galLdAbrir()">Cambió el lote</button></div>';
 }
 
-/* ── EL HUECO DE LA MAÑANA ────────────────────────────────────────────────────────
-   La causa es siempre la misma: el que cargó a las ocho puso las ocho, que es la hora
-   a la que estaba cargando, no desde cuándo vale. Por eso el aviso trae el arreglo
-   puesto en un botón en vez de explicar dónde corregirlo. */
-function galLdHueco(j){
-  var el = document.getElementById('gld-hueco'); if (!el) return;
-  if (!j.hueco || !j.tramos.length){ el.style.display = 'none'; return; }
-  var primero = j.tramos[0];
-  el.style.display = '';
-  el.innerHTML = '<b>El día arranca a las ' + galLdEsc(j.hueco.desde_hora) + '.</b> '
-    + 'Lo que se vuelque antes de esa hora queda <b>sin lote</b> y entra marcado para '
-    + 'revisar. Si el lote valía desde que abrió el galpón, corregilo.'
-    + (primero.volcados ? '' : ' <button class="btn bo bs" style="margin-left:8px" '
-      + 'onclick="galLdDesde00(' + primero.id + ')">Que arranque a las 00:00</button>');
-}
-
-async function galLdDesde00(id){
-  try {
-    var r = await fetch('/api/galpon/lote-dia/' + id, { method:'PATCH', credentials:'include',
-      headers:{'Content-Type':'application/json'}, body: JSON.stringify({ desde_hora:'00:00' }) });
-    var j = await r.json();
-    if (!j.ok) return alert(j.error || 'no se pudo corregir');
-    await galLdCargar();
-  } catch (e) { alert('No se pudo corregir: ' + e.message); }
-}
-
 /* ── LA TABLA ─────────────────────────────────────────────────────────────────── */
 function galLdPintar(){
   var b = document.getElementById('gld-body'); if (!b) return;
@@ -55239,8 +55445,12 @@ function galLdPintar(){
       : '<button class="btn bo bs" onclick="galLdAbrir(' + t.id + ')">✎</button> '
         + '<button class="btn bo bs" onclick="galLdBorrar(' + t.id + ')">×</button>';
     return '<tr>'
-      + '<td class="gld-h">' + galLdEsc(t.desde_hora)
-        + (t.hasta_hora ? ' — ' + galLdEsc(t.hasta_hora) : ' — fin') + '</td>'
+      /* Un día de un solo lote dice «Todo el día» y no «00:00 — fin». Es la misma
+         información y es la que el operador tiene en la cabeza; la hora sólo significa
+         algo cuando hubo un cambio. */
+      + '<td class="gld-h">' + (GLD.tramos.length === 1 ? 'Todo el día'
+          : galLdEsc(t.desde_hora) + ' — ' + (t.hasta_hora ? galLdEsc(t.hasta_hora) : 'fin'))
+        + '</td>'
       + '<td class="gld-w"><b>' + galLdEsc(t.lote_nombre || ('Lote ' + t.lote_id)) + '</b></td>'
       + '<td class="gld-w">' + (t.producto ? galLdEsc(t.producto)
           : '<span class="gld-cand">sin producto</span>') + '</td>'
@@ -55300,12 +55510,16 @@ function galLdAbrir(id){
        se proponen a la hora del SERVIDOR, que es la que no está corrida. */
     document.getElementById('gal-ld-hora').value = primero ? '00:00' : (GLD.ahora || '');
   }
-  var primeroAhora = !GLD.tramos.length && !t;
-  document.getElementById('gal-ld-hora-ay').innerHTML = primeroAhora
-    ? 'A las <b>00:00</b> cubre la jornada entera, incluso lo que entre antes de que abra '
-      + 'la oficina. Si el lote recién arranca más tarde, cambiala.'
-    : 'Desde esta hora y hasta el cambio siguiente. El IFCO que se vuelca a las 14:30 es '
-      + 'del lote que estaba vigente a las 14:30.';
+  /* ── EL PRIMER LOTE DEL DÍA NO TIENE HORA QUE PREGUNTAR ──────────────────────────
+     Arranca cuando arranca el día y vale hasta que cambie. Preguntarla invitaba a poner
+     la hora de apertura del galpón —que es lo razonable— y el sistema contestaba con un
+     cartel avisando de un agujero que no existe. Andy, 30/10/2026: «porque tanto tema
+     con la hora?». La hora aparece recién en el SEGUNDO, que es donde significa algo. */
+  var esPrimero = t ? (!!GLD.tramos.length && GLD.tramos[0].id === t.id) : !GLD.tramos.length;
+  document.getElementById('gal-ld-hora-fld').style.display = esPrimero ? 'none' : '';
+  document.getElementById('gal-ld-hora-ay').innerHTML =
+    'Desde esta hora y hasta el cambio siguiente. El IFCO que se vuelca a las 14:30 es '
+    + 'del lote que estaba vigente a las 14:30.';
 
   document.getElementById('gal-ld-modal').classList.add('on');
 }
@@ -55338,8 +55552,13 @@ async function galLdGuardar(){
     fecha: GLD.fecha,
     lote_id: lote || undefined,
     producto: document.getElementById('gal-ld-prod').value,
-    desde_hora: document.getElementById('gal-ld-hora').value,
   };
+  /* La hora va SÓLO si el campo está a la vista. Mandarla escondida sería mandar lo que
+     quedó de la vez anterior, y en un PATCH eso le cambia la hora a un tramo que nadie
+     tocó. El servidor además ignora la del primero, pero el que no manda es éste. */
+  if (document.getElementById('gal-ld-hora-fld').style.display !== 'none'){
+    body.desde_hora = document.getElementById('gal-ld-hora').value;
+  }
   try {
     var url = '/api/galpon/lote-dia' + (GLD.editId ? '/' + GLD.editId : '');
     var r = await fetch(url, { method: GLD.editId ? 'PATCH' : 'POST', credentials:'include',
@@ -55358,6 +55577,294 @@ async function galLdGuardar(){
     err.textContent = 'No se pudo guardar: ' + e.message;
     err.style.display = '';
   }
+}
+
+
+/* ═══════════════════════════════════════════════════════════════════════════════════
+   ⚖️ GALPÓN · CARGA DE KILOS
+   ═══════════════════════════════════════════════════════════════════════════════════
+   Andy, 30/10/2026: «hará algo más manual... porque todavía no instalamos la impresora».
+
+   Sin impresora no hay tarjetas, sin tarjetas no hay escaneo — y la cosecha no espera al
+   hardware. Esto escribe en gal_volcados, el MISMO libro donde va a escribir el escaneo
+   cuando llegue: lo que cambia es quién llena los campos. */
+var GKG = { fecha:null, hoy:null, cargas:[], resumen:null, propuesta:null,
+            lotes:[], cuadrillas:[], editId:null, sug:'', uuid:null };
+
+function galKgEsc(s){ return String(s == null ? '' : s)
+  .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+
+/* Los kilos SIEMPRE con separador de miles y como máximo dos decimales. Un «12345.6»
+   suelto en una columna de números se lee mal justamente cuando importa. */
+function galKgNum(n, dec){ return (Number(n) || 0)
+  .toLocaleString('es-AR', { minimumFractionDigits:0, maximumFractionDigits: dec == null ? 2 : dec }); }
+
+/* El uuid lo genera el NAVEGADOR y viaja con la carga. Hoy resuelve el doble clic —dos
+   POST idénticos entran como una sola fila, porque el servidor hace INSERT OR IGNORE
+   sobre esta columna— y mañana lo va a necesitar la cola offline para reintentar sin
+   duplicar kilos. Es gratis ahora y es una migración después. */
+function galKgNuevoUuid(){
+  try { if (window.crypto && crypto.randomUUID) return crypto.randomUUID(); } catch(e){}
+  return 'gkg-' + Date.now() + '-' + Math.random().toString(36).slice(2, 10);
+}
+
+async function galKgInit(){
+  await galKgPadrones();
+  await galKgCargar();
+}
+
+/* Los lotes y las cuadrillas salen de Producción y de Personal. Acá no se dan de alta:
+   el galpón los LEE (api_lectura en ensure_api_prefijos.js), no los administra. */
+async function galKgPadrones(){
+  try {
+    var r = await fetch('/api/galpon/lotes', { credentials:'include' });
+    var j = await r.json();
+    GKG.lotes = j.ok ? (j.lotes || []) : [];
+  } catch (e) { GKG.lotes = []; }
+  try {
+    var r2 = await fetch('/api/galpon/cuadrillas', { credentials:'include' });
+    var j2 = await r2.json();
+    GKG.cuadrillas = j2.ok ? (j2.cuadrillas || []) : [];
+  } catch (e) { GKG.cuadrillas = []; }
+}
+
+async function galKgCargar(){
+  var f = document.getElementById('gkg-fecha');
+  var q = f && f.value ? ('?fecha=' + encodeURIComponent(f.value)) : '';
+  try {
+    var r = await fetch('/api/galpon/volcados' + q, { credentials:'include' });
+    var j = await r.json();
+    if (!j.ok) throw new Error(j.error || 'no se pudo leer');
+    GKG.fecha = j.fecha; GKG.hoy = j.hoy;
+    GKG.cargas = j.cargas || []; GKG.resumen = j.resumen || null;
+    GKG.propuesta = j.propuesta || null;
+    if (f && !f.value) f.value = j.fecha;
+    galKgPintarTot();
+    galKgPintarCortes();
+    galKgPintar();
+  } catch (e) {
+    var b = document.getElementById('gkg-body');
+    if (b) b.innerHTML = '<tr><td colspan="7" class="gkg-vacio">' + galKgEsc(e.message) + '</td></tr>';
+  }
+}
+
+function galKgHoy(){
+  var f = document.getElementById('gkg-fecha');
+  if (f) f.value = GKG.hoy || new Date().toLocaleDateString('en-CA');
+  galKgCargar();
+}
+
+function galKgPintarTot(){
+  var el = document.getElementById('gkg-tot'); if (!el) return;
+  var r = GKG.resumen || { kilos:0, ifcos:0, cargas:0, a_revisar:0 };
+  var t = function(k, v, cls){ return '<div class="gkg-t' + (cls ? ' ' + cls : '') + '">'
+    + '<div class="k">' + k + '</div><div class="v">' + v + '</div></div>'; };
+  var h = t('Kilos del día', galKgNum(r.kilos))
+        + t('Cargas', galKgNum(r.cargas, 0));
+  if (r.ifcos) h += t('IFCOs', galKgNum(r.ifcos, 0));
+  /* Lo marcado para revisar se muestra SÓLO si hay. Lo normal es silencioso y lo
+     excepcional es lo que ocupa lugar — un «0 para revisar» todos los días enseña a no
+     mirar ese recuadro justo para el día que diga 1. */
+  if (r.a_revisar) h += t('Para revisar', galKgNum(r.a_revisar, 0), 'rev');
+  el.innerHTML = h;
+}
+
+function galKgPintarCortes(){
+  var el = document.getElementById('gkg-cortes'); if (!el) return;
+  var r = GKG.resumen;
+  if (!r || !r.cargas){ el.innerHTML = ''; return; }
+  var caja = function(tit, filas){
+    if (!filas.length) return '';
+    return '<div class="gkg-corte"><h4>' + tit + '</h4>' + filas.map(function(x){
+      return '<div class="l"><span>' + galKgEsc(x.nombre) + '</span>'
+        + '<b>' + galKgNum(x.kilos) + ' kg</b></div>';
+    }).join('') + '</div>';
+  };
+  el.innerHTML = caja('Por cuadrilla', r.por_cuadrilla || [])
+               + caja('Por lote', r.por_lote || []);
+}
+
+function galKgPintar(){
+  var b = document.getElementById('gkg-body'); if (!b) return;
+  if (!GKG.cargas.length){
+    b.innerHTML = '<tr><td colspan="7" class="gkg-vacio">'
+      + 'Todavía no se cargó nada para este día.<br>'
+      + 'Cada renglón es una pesada: lo que trajo una cuadrilla de un lote.</td></tr>';
+    return;
+  }
+  b.innerHTML = GKG.cargas.map(function(c){
+    return '<tr>'
+      + '<td class="gkg-w"><b>' + galKgEsc(c.lote_nombre || ('Lote ' + c.lote_id)) + '</b>'
+        + (c.estado === 'a_revisar' ? '<div class="gkg-rev">⚠ '
+            + galKgEsc(c.revision_motivo || 'Para revisar') + '</div>' : '')
+        + (c.observacion ? '<div class="gkg-chi">' + galKgEsc(c.observacion) + '</div>' : '')
+        + '</td>'
+      + '<td class="gkg-w">' + (c.producto ? galKgEsc(c.producto)
+          : '<span class="gkg-chi">—</span>') + '</td>'
+      + '<td class="gkg-w">' + (c.cuadrilla ? galKgEsc(c.cuadrilla)
+          : '<span class="gkg-chi">sin cuadrilla</span>') + '</td>'
+      + '<td class="gkg-n">' + galKgNum(c.kilos) + '</td>'
+      + '<td class="gkg-n">' + (c.ifcos == null ? '<span class="gkg-chi">—</span>'
+          : galKgNum(c.ifcos, 0)) + '</td>'
+      + '<td>' + galKgEsc(c.usuario || '—') + '</td>'
+      + '<td style="text-align:right">'
+        + '<button class="btn bo bs" onclick="galKgAbrir(' + c.id + ')">✎</button> '
+        + '<button class="btn bo bs" onclick="galKgBorrar(' + c.id + ')">×</button></td>'
+      + '</tr>';
+  }).join('');
+}
+
+/* ── LA VENTANA ───────────────────────────────────────────────────────────────────
+   Se abre EN BLANCO (CLAUDE.md): un formulario que sólo se esconde conserva lo que
+   tenía, y acá eso sería cargarle los kilos de una cuadrilla a la otra. */
+function galKgAbrir(id){
+  var c = id ? GKG.cargas.filter(function(x){ return x.id === id; })[0] : null;
+  GKG.editId = c ? c.id : null;
+  GKG.uuid = galKgNuevoUuid();
+
+  var sel = document.getElementById('gal-kg-lote');
+  var porFinca = [];
+  GKG.lotes.forEach(function(l){
+    var f = l.finca || 'Sin finca';
+    var g = porFinca.filter(function(x){ return x.f === f; })[0];
+    if (!g) { g = { f: f, ls: [] }; porFinca.push(g); }
+    g.ls.push(l);
+  });
+  sel.innerHTML = '<option value="">— elegí el lote —</option>'
+    + porFinca.map(function(g){
+        return '<option disabled>── ' + galKgEsc(g.f) + ' ──</option>'
+          + g.ls.map(function(l){
+              return '<option value="' + l.id + '" data-cultivo="' + galKgEsc(l.cultivo || '') + '">'
+                + galKgEsc(l.nombre) + (l.cultivo ? ' · ' + galKgEsc(l.cultivo) : '') + '</option>';
+            }).join('');
+      }).join('');
+
+  var cu = document.getElementById('gal-kg-cuad');
+  cu.innerHTML = '<option value="">— sin cuadrilla —</option>'
+    + GKG.cuadrillas.map(function(q){
+        return '<option value="' + q.id + '">' + galKgEsc(q.nombre) + '</option>';
+      }).join('');
+
+  GKG.sug = '';
+  document.getElementById('gal-kg-error').style.display = 'none';
+  document.getElementById('gal-kg-ok').style.display = 'none';
+  document.getElementById('gal-kg-kilos').value = '';
+  document.getElementById('gal-kg-ifcos').value = '';
+  document.getElementById('gal-kg-obs').value = '';
+
+  if (c){
+    document.getElementById('gal-kg-tit').textContent = 'Corregir la carga';
+    document.getElementById('gal-kg-ok-btn').textContent = 'Guardar';
+    document.getElementById('gal-kg-salir').textContent = 'Cancelar';
+    document.getElementById('gal-kg-fecha').value = c.fecha;
+    sel.value = String(c.lote_id);
+    document.getElementById('gal-kg-prod').value = c.producto || '';
+    cu.value = c.cuadrilla_id ? String(c.cuadrilla_id) : '';
+    document.getElementById('gal-kg-kilos').value = c.kilos;
+    document.getElementById('gal-kg-ifcos').value = c.ifcos == null ? '' : c.ifcos;
+    document.getElementById('gal-kg-obs').value = c.observacion || '';
+  } else {
+    document.getElementById('gal-kg-tit').textContent = 'Cargar kilos';
+    document.getElementById('gal-kg-ok-btn').textContent = 'Cargar';
+    document.getElementById('gal-kg-salir').textContent = 'Listo';
+    document.getElementById('gal-kg-fecha').value = GKG.fecha || GKG.hoy || '';
+    /* Se PROPONE el lote declarado en «Lote del día», si hay. Es una propuesta y no una
+       obligación: esta pantalla no depende de esa — se puede cargar kilos de un día en
+       el que nadie declaró nada. Lo que hace es ahorrar el desplegable ochenta veces. */
+    var p = GKG.propuesta;
+    sel.value = p ? String(p.lote_id) : '';
+    document.getElementById('gal-kg-prod').value = p ? (p.producto || '') : '';
+    GKG.sug = p ? (p.producto || '') : '';
+  }
+
+  document.getElementById('gal-kg-modal').classList.add('on');
+  var k = document.getElementById('gal-kg-kilos');
+  if (k) setTimeout(function(){ try { k.focus(); } catch(e){} }, 60);
+}
+
+function galKgCerrar(){
+  document.getElementById('gal-kg-modal').classList.remove('on');
+  GKG.editId = null;
+}
+
+/* El producto se propone con el cultivo del lote, y sólo pisa lo que hay si lo que hay
+   es la propuesta anterior: lo que escribió una persona no se toca. */
+function galKgLotePick(){
+  var sel = document.getElementById('gal-kg-lote');
+  var o = sel.options[sel.selectedIndex];
+  var cultivo = o ? (o.getAttribute('data-cultivo') || '') : '';
+  var p = document.getElementById('gal-kg-prod');
+  if (!p.value || p.value === GKG.sug) p.value = cultivo;
+  GKG.sug = cultivo;
+}
+
+async function galKgGuardar(){
+  var err = document.getElementById('gal-kg-error');
+  var ok  = document.getElementById('gal-kg-ok');
+  err.style.display = 'none'; ok.style.display = 'none';
+
+  var lote = document.getElementById('gal-kg-lote').value;
+  if (!lote){
+    err.textContent = 'Elegí el lote del que vienen estos kilos.'; err.style.display = ''; return;
+  }
+  var body = {
+    uuid: GKG.uuid,
+    fecha: document.getElementById('gal-kg-fecha').value,
+    lote_id: lote,
+    producto: document.getElementById('gal-kg-prod').value,
+    cuadrilla_id: document.getElementById('gal-kg-cuad').value,
+    kilos: document.getElementById('gal-kg-kilos').value,
+    ifcos: document.getElementById('gal-kg-ifcos').value,
+    observacion: document.getElementById('gal-kg-obs').value,
+  };
+  var btn = document.getElementById('gal-kg-ok-btn');
+  btn.disabled = true;
+  try {
+    var url = '/api/galpon/volcados' + (GKG.editId ? '/' + GKG.editId : '');
+    var r = await fetch(url, { method: GKG.editId ? 'PATCH' : 'POST', credentials:'include',
+      headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
+    var j = await r.json();
+    if (!j.ok){
+      /* El error se muestra ADENTRO y la ventana NO se cierra: el que escribió mal los
+         kilos tiene que poder corregirlos sin volver a elegir lote y cuadrilla. */
+      err.innerHTML = galKgEsc(j.error); err.style.display = ''; return;
+    }
+    await galKgCargar();
+    if (GKG.editId){ galKgCerrar(); return; }
+
+    /* No se cierra: adentro queda el acuse. Y se limpia sólo lo que cambia de una
+       pesada a la otra —los kilos, los IFCOs, la observación—; el lote y la cuadrilla
+       quedan, porque la carga de verdad son ocho renglones seguidos de lo mismo. */
+    GKG.uuid = galKgNuevoUuid();
+    var f = j.fila || {};
+    ok.className = j.aviso ? 'ojo' : 'gkg-ok';
+    ok.style.display = '';
+    ok.innerHTML = (j.aviso ? '<b>⚠ Cargado, y marcado para revisar.</b> ' + galKgEsc(j.aviso)
+      : '<b>✓ Cargado:</b> ' + galKgNum(f.kilos) + ' kg'
+        + (f.cuadrilla ? ' · ' + galKgEsc(f.cuadrilla) : '')
+        + ' · ' + galKgEsc(f.lote_nombre || ''))
+      + '<div style="font-size:11px;margin-top:3px">Seguí cargando, o <b>Listo</b> para cerrar.</div>';
+    document.getElementById('gal-kg-kilos').value = '';
+    document.getElementById('gal-kg-ifcos').value = '';
+    document.getElementById('gal-kg-obs').value = '';
+    document.getElementById('gal-kg-kilos').focus();
+  } catch (e) {
+    err.textContent = 'No se pudo guardar: ' + e.message; err.style.display = '';
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+async function galKgBorrar(id){
+  var c = GKG.cargas.filter(function(x){ return x.id === id; })[0]; if (!c) return;
+  if (!confirm('¿Borrar la carga de ' + galKgNum(c.kilos) + ' kg ('
+    + (c.lote_nombre || c.lote_id) + ')?')) return;
+  try {
+    var r = await fetch('/api/galpon/volcados/' + id, { method:'DELETE', credentials:'include' });
+    var j = await r.json();
+    if (!j.ok) return alert(j.error || 'no se pudo borrar');
+    await galKgCargar();
+  } catch (e) { alert('No se pudo borrar: ' + e.message); }
 }
 
 async function galLdBorrar(id){

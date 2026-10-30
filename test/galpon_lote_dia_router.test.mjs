@@ -72,8 +72,19 @@ const tramo = (db, fecha, hora, loteId, nombre) => db.prepare(
   .run(fecha, hora, loteId, nombre || ('Lote ' + loteId));
 
 function conVolcados(db, filas) {
-  db.exec('CREATE TABLE gal_volcados (id INTEGER PRIMARY KEY, volcado_en TEXT)');
-  for (const f of filas) db.prepare('INSERT INTO gal_volcados (volcado_en) VALUES (?)').run(f);
+  // Desde la V1108 el libro guarda la fecha y la hora por separado, y lo que traba un
+  // tramo son SÓLO los que sacaron su lote del reloj: los que tienen hora. Una carga
+  // manual nombra su lote y no depende de ningún tramo.
+  // IF NOT EXISTS: desde la V1108 la tabla la crea db_galpon.js, que el router
+  // importa al levantarse. Crearla de nuevo revienta; así se usa la de verdad.
+  db.exec('CREATE TABLE IF NOT EXISTS gal_volcados (id INTEGER PRIMARY KEY, fecha TEXT,'
+        + ' hora TEXT, lote_id INTEGER, kilos REAL, eliminado_en TEXT)');
+  for (const f of filas) {
+    // lote_id y kilos van porque la tabla de verdad los tiene NOT NULL: cuando el
+    // router ya la creó, esta función INSERTA en la buena y no en una de mentira.
+    db.prepare('INSERT INTO gal_volcados (fecha,hora,lote_id,kilos) VALUES (?,?,?,?)')
+      .run(String(f).slice(0, 10), String(f).slice(11, 16), 10, 100);
+  }
   return db;
 }
 
@@ -158,8 +169,6 @@ t('EL PRIMER TRAMO DEL DÍA ARRANCA A LAS 00:00 SOLO', async () => {
   try {
     const j = await (await s.pegar('/lote-dia', json({ fecha: HOY, lote_id: 10 }))).json();
     assert.equal(j.desde_hora, '00:00');
-    const d = await (await s.pegar('/lote-dia?fecha=' + HOY)).json();
-    assert.equal(d.hueco, null, 'arrancando a las 00:00 no puede haber hueco');
   } finally { s.cerrar(); }
 });
 
@@ -186,6 +195,9 @@ t('la hora se guarda normalizada, venga como venga', async () => {
 t('DOS LOTES A LA MISMA HORA: 409, y dice con cuál se pisa', async () => {
   const s = await servidor(base(), OPERADOR);
   try {
+    // El PRIMERO del día va a las 00:00 lo que se mande (V1108), así que el choque
+    // se arma entre dos CAMBIOS, que es donde la hora significa algo.
+    await s.pegar('/lote-dia', json({ fecha: HOY, lote_id: 12 }));
     await s.pegar('/lote-dia', json({ fecha: HOY, lote_id: 10, desde_hora: '08:00' }));
     const r = await s.pegar('/lote-dia', json({ fecha: HOY, lote_id: 11, desde_hora: '08:00' }));
     assert.equal(r.status, 409);
@@ -264,15 +276,31 @@ t('y con el cambio de lote cargado, contesta el de SU hora', async () => {
   } finally { s.cerrar(); }
 });
 
-t('el hueco de la mañana viene marcado', async () => {
+t('LA HORA DEL PRIMER TRAMO SE IGNORA: arranca a las 00:00 (V1108)', async () => {
+  // Antes era un default que el cliente podía pisar, y el que ponía 07:00 —la
+  // hora en que abre el galpón— se comía un cartel avisándole de un agujero.
+  // Ahora el servidor la ignora, para que lo que dice la pantalla y lo que hace
+  // el sistema sean la misma cosa.
   const s = await servidor(base(), OPERADOR);
   try {
-    await s.pegar('/lote-dia', json({ fecha: HOY, lote_id: 10, desde_hora: '08:00' }));
+    const j = await (await s.pegar('/lote-dia',
+      json({ fecha: HOY, lote_id: 10, desde_hora: '08:00' }))).json();
+    assert.equal(j.ok, true);
+    assert.equal(j.desde_hora, '00:00', 'el primero del día se guardó a las 08:00');
+
+    // Y el SEGUNDO sí la respeta: ahí la hora significa algo.
+    const k = await (await s.pegar('/lote-dia',
+      json({ fecha: HOY, lote_id: 11, desde_hora: '13:30' }))).json();
+    assert.equal(k.desde_hora, '13:30');
+  } finally { s.cerrar(); }
+});
+
+t('y la respuesta del día ya no trae «hueco»', async () => {
+  const s = await servidor(base(), OPERADOR);
+  try {
+    await s.pegar('/lote-dia', json({ fecha: HOY, lote_id: 10 }));
     const d = await (await s.pegar('/lote-dia?fecha=' + HOY)).json();
-    assert.deepEqual(d.hueco, { desde_hora: '08:00' });
-    // Y se arregla con un PATCH, que es lo que hace el botón de la pantalla.
-    await s.pegar('/lote-dia/' + d.tramos[0].id, patch({ desde_hora: '00:00' }));
-    assert.equal((await (await s.pegar('/lote-dia?fecha=' + HOY)).json()).hueco, null);
+    assert.ok(!('hueco' in d), 'la pantalla volvería a pintar el cartel');
   } finally { s.cerrar(); }
 });
 

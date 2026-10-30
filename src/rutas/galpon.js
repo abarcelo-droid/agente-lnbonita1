@@ -18,8 +18,9 @@ import db from '../servicios/db_galpon.js';
 import { exigirEmpresa, PUENTE_CORDON } from '../servicios/sociedad_modulo.js';
 import {
   COLORES, config, guardarConfig, cuadrillas, rangoSuperpuesto, colorSugerido,
-  loteVigente, tramosDelDia, tramoChoca, huecoDelDia, lotesParaElDia, volcadosEnTramo,
+  loteVigente, tramosDelDia, tramoChoca, lotesParaElDia, volcadosEnTramo,
   hhmm, esFecha,
+  registrarVolcado, editarVolcado, borrarVolcado, volcadosDelDia, resumenDelDia,
 } from '../servicios/galpon.js';
 import { generarTarjetasPDF, tarjetasAImprimir } from '../servicios/galponTarjetasPDF.js';
 
@@ -304,7 +305,6 @@ router.get('/lote-dia', (req, res) => {
       ok: true,
       fecha,
       tramos,
-      hueco: huecoDelDia(db, fecha),
       hoy: hoy(),
       // EL VIGENTE LO RESUELVE EL SERVIDOR, no la pantalla. La regla —el último tramo
       // cuya hora ya pasó— es la misma que usa el volcado, y repetirla en el navegador
@@ -353,16 +353,20 @@ router.post('/lote-dia', (req, res) => {
     const lote = db.prepare('SELECT id, nombre FROM pa_lotes WHERE id = ?').get(lote_id);
     if (!lote) return res.status(400).json({ ok: false, error: 'Ese lote no existe' });
 
-    // La hora: si es el PRIMER tramo del día, por defecto arranca a las 00:00 — así el
-    // caso normal (un lote, todo el día) no deja la mañana sin cubrir, que es el error
-    // más fácil de cometer: el que carga a las ocho pone las ocho, y el IFCO de las 6:40
-    // se queda sin lote.
+    // ── EL PRIMER LOTE DEL DÍA ARRANCA A LAS 00:00, Y NO SE PREGUNTA ────────────────
+    // Antes esto era un default que el operador podía cambiar, y la pantalla le pedía la
+    // hora. El que ponía 07:00 —la hora en que abre el galpón, o sea el dato más fiel—
+    // se comía un cartel avisándole de un agujero.
     //
-    // A partir del segundo hay que decirla, porque un cambio de lote sin hora no es un
-    // cambio de lote: es pisar el anterior.
+    // No hay tal agujero: el primer lote del día es el lote del día hasta que cambie.
+    // Lo que venga en `desde_hora` se ignora a propósito, para que lo que dice la
+    // pantalla y lo que hace el sistema sean la misma cosa.
+    //
+    // A partir del SEGUNDO la hora es obligatoria, porque ahí sí significa algo: un
+    // cambio de lote sin hora no es un cambio de lote, es pisar el anterior.
     const hayTramos = db.prepare('SELECT COUNT(*) AS n FROM gal_lote_vigente WHERE fecha = ?')
       .get(fecha).n;
-    const hora = hhmm(b.desde_hora) || (hayTramos ? null : '00:00');
+    const hora = hayTramos ? hhmm(b.desde_hora) : '00:00';
     if (!hora) {
       return res.status(400).json({
         ok: false, error: 'Un cambio de lote necesita su hora: el IFCO que se vuelca a las '
@@ -471,6 +475,88 @@ router.delete('/lote-dia/:id', (req, res) => {
     res.json({ ok: true });
   } catch (e) {
     console.error('[GALPON] DELETE /lote-dia/:id:', e.message);
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════════
+// LOS KILOS, CARGADOS A MANO
+// ═══════════════════════════════════════════════════════════════════════════════════
+// Andy, 30/10/2026: *«hará algo más manual, donde se puedan cargar los kilos a mano...
+// el operador elige kilos, lote, cuadrilla, fecha, producto. Porque todavía no
+// instalamos la impresora»*.
+//
+// Sin impresora no hay tarjetas, sin tarjetas no hay escaneo — y la cosecha no espera.
+// Esto escribe en `gal_volcados`, el MISMO libro donde va a escribir el escaneo: lo que
+// cambia es quién llena los campos, no qué se guarda ni de dónde lo lee el tablero.
+//
+// ── Y VA CON requireAuth, NO CON requireAdmin ──────────────────────────────────────
+// Cargar los kilos del día es el trabajo del día, no parametrizar. El nivel lo decide
+// `exigirNivel` mirando la URL contra ensure_api_prefijos.js. Pedir admin acá obligaría
+// a que los kilos los cargue el dueño, y el que los cuenta terminaría dictándoselos.
+
+// Lo cargado un día, con su resumen. Un solo pedido: la pantalla necesita las dos cosas
+// a la vez y partirlo en dos deja la mitad de arriba contradiciendo a la de abajo
+// mientras llega la segunda respuesta.
+router.get('/volcados', (req, res) => {
+  try {
+    const fecha = esFecha(req.query.fecha) || hoy();
+    res.json({
+      ok: true,
+      fecha,
+      hoy: hoy(),
+      cargas: volcadosDelDia(db, fecha),
+      resumen: resumenDelDia(db, fecha),
+      // El lote declarado para ese día, para proponerlo en la ventana. Es una PROPUESTA:
+      // el que carga a mano elige el lote que quiera, y de hecho puede no haber ninguno
+      // declarado — la carga manual no depende del lote del día, lo aprovecha si está.
+      propuesta: (function () {
+        const v = loteVigente(db, fecha, fecha === hoy() ? ahora() : '23:59');
+        return v.ok ? { lote_id: v.lote_id, lote_nombre: v.lote_nombre, producto: v.producto } : null;
+      })(),
+    });
+  } catch (e) {
+    console.error('[GALPON] GET /volcados:', e.message);
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+router.post('/volcados', (req, res) => {
+  try {
+    const u = req._user || {};
+    const r = registrarVolcado(db, Object.assign({}, req.body || {}, {
+      // El usuario SALE DE LA COOKIE, no del cuerpo del pedido. Es la firma de quién
+      // contó esos kilos, y una firma que manda el cliente no firma nada.
+      usuario_id: u.id || null,
+      usuario: u.nombre || null,
+    }));
+    if (!r.ok) return res.status(400).json({ ok: false, error: r.motivo });
+    res.json(r);
+  } catch (e) {
+    console.error('[GALPON] POST /volcados:', e.message);
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+router.patch('/volcados/:id', (req, res) => {
+  try {
+    const r = editarVolcado(db, num(req.params.id), req.body || {});
+    if (!r.ok) return res.status(r.motivo === 'Esa carga no existe o ya se borró' ? 404 : 400)
+                        .json({ ok: false, error: r.motivo });
+    res.json(r);
+  } catch (e) {
+    console.error('[GALPON] PATCH /volcados/:id:', e.message);
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+router.delete('/volcados/:id', (req, res) => {
+  try {
+    const r = borrarVolcado(db, num(req.params.id));
+    if (!r.ok) return res.status(404).json({ ok: false, error: r.motivo });
+    res.json({ ok: true });
+  } catch (e) {
+    console.error('[GALPON] DELETE /volcados/:id:', e.message);
     res.status(500).json({ ok: false, error: e.message });
   }
 });

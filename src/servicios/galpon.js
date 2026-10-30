@@ -49,6 +49,8 @@ export function config(db) {
     motivos_calidad: (c.motivos_calidad || '').split(',').map((s) => s.trim()).filter(Boolean),
     balanza_puerto: c.balanza_puerto || '',
     balanza_baudios: Number(c.balanza_baudios) || 9600,
+    // 0 = apagado. Ver el comentario del seed en db_galpon.js.
+    kg_max_carga: Number(c.kg_max_carga) || 0,
   };
 }
 
@@ -173,23 +175,25 @@ export function loteVigente(db, fecha, hora) {
     ' SELECT * FROM gal_lote_vigente'
     + '  WHERE fecha = ? AND desde_hora <= ?'
     + '  ORDER BY desde_hora DESC, id DESC LIMIT 1').get(f, h);
-  if (!r) {
-    // Puede ser que no se cargó, o que se cargó para más tarde (el primer IFCO entró
-    // antes de la hora de inicio). Son dos problemas distintos y se dicen distinto.
-    const hayDespues = db.prepare(
-      'SELECT desde_hora FROM gal_lote_vigente WHERE fecha = ? ORDER BY desde_hora LIMIT 1').get(f);
-    return {
-      lote_id: null, ok: false,
-      motivo: hayDespues
-        ? 'El lote del día arranca a las ' + hayDespues.desde_hora + ' y esto entró ' + h
-        : 'No se cargó el lote del día ' + f,
-    };
+  // ── ANTES DEL PRIMER TRAMO NO HAY UN AGUJERO: HAY EL PRIMER LOTE ──────────────────
+  // Si el primer tramo del día quedó cargado a las 07:00 y entra algo 06:40, el lote
+  // correcto es ése: es el único que alguien declaró ese día. La versión anterior
+  // devolvía `ok:false` y mandaba esos kilos a revisar — y además obligaba a la pantalla
+  // a avisar de un agujero que no existe, que es de lo que se quejó el operador.
+  //
+  // Un día sin NINGÚN tramo sigue siendo `ok:false`: ahí sí no hay nada que elegir.
+  const fila = r || db.prepare(
+    'SELECT * FROM gal_lote_vigente WHERE fecha = ? ORDER BY desde_hora, id LIMIT 1').get(f);
+  if (!fila) {
+    return { lote_id: null, ok: false, motivo: 'No se cargó el lote del día ' + f };
   }
   return {
-    lote_id: r.lote_id,
-    lote_nombre: r.lote_nombre || null,
-    producto: r.producto || null,
-    desde_hora: r.desde_hora,
+    lote_id: fila.lote_id,
+    lote_nombre: fila.lote_nombre || null,
+    producto: fila.producto || null,
+    desde_hora: fila.desde_hora,
+    // Para que la pantalla pueda decir «es el primero del día» sin volver a preguntar.
+    antes_del_primero: !r,
     ok: true,
     motivo: null,
   };
@@ -270,14 +274,17 @@ export function tramoChoca(db, fecha, desdeHora, excluirId) {
 // Pasa de verdad y por una razón boba: el que carga la pantalla a la mañana pone la hora
 // a la que la está cargando, no la hora desde la que vale. Por eso la pantalla avisa en
 // vez de esperar a que aparezcan los volcados sin lote.
-export function huecoDelDia(db, fecha) {
-  const f = esFecha(fecha);
-  if (!f) return null;
-  const primero = db.prepare(
-    'SELECT desde_hora FROM gal_lote_vigente WHERE fecha = ? ORDER BY desde_hora LIMIT 1').get(f);
-  if (!primero || primero.desde_hora === '00:00') return null;
-  return { desde_hora: primero.desde_hora };
-}
+// ── ACÁ VIVÍA `huecoDelDia`, Y NO VUELVE ────────────────────────────────────────────
+// Devolvía la hora del primer tramo cuando no era 00:00, y la pantalla la usaba para un
+// cartel que avisaba de que lo volcado antes de esa hora quedaba sin lote. Andy,
+// 30/10/2026: *«porque tanto tema con la hora?»* — y tenía razón dos veces:
+//
+// 1. Se lo comía el que hacía lo correcto. Poner 07:00, que es cuando abre el galpón, es
+//    el dato más fiel que se puede cargar, y el sistema contestaba con una advertencia y
+//    un botón para deshacerlo.
+// 2. El agujero no puede existir. `loteVigente` ahora cae en el primer tramo del día
+//    cuando lo que entra es anterior, que es la respuesta correcta: ese lote es el único
+//    que alguien declaró ese día.
 
 // Los tramos del día con su hora de FIN, que es la de inicio del siguiente. No está en la
 // base a propósito —guardarla sería guardar dos veces el mismo dato y poder contradecirse—
@@ -324,9 +331,26 @@ export function lotesParaElDia(db) {
 // tramo no los arregla — lo único que hace es dejar esos kilos atribuidos a un lote que
 // ya nadie declaró. Por eso el router corta ahí.
 //
-// Devuelve null —no 0— mientras la tabla no exista: el volcado llega en el PR que viene y
-// hasta entonces no hay nada que proteger. La diferencia importa, porque 0 significa
-// «miré y no hay» y null significa «todavía no hay dónde mirar».
+// Devuelve null —no 0— mientras la tabla no exista. La diferencia importa, porque 0
+// significa «miré y no hay» y null significa «todavía no hay dónde mirar».
+//
+// ── SÓLO CUENTA LOS QUE SACARON SU LOTE DEL RELOJ ───────────────────────────────────
+// Una carga MANUAL nombra su lote: el operador lo eligió de la lista. Esa fila no depende
+// de ningún tramo, así que corregir el tramo no la toca y no hay nada que trabar.
+//
+// Los que sí dependen son los que entraron por escaneo, que tienen `hora` y de ahí
+// sacaron el lote. Por eso se filtra por hora y no por la fecha sola: con la carga
+// manual, trabar el tramo por existir kilos ese día sería trabarlo siempre y por nada —
+// y el que quiere arreglar un lote mal declarado se queda sin poder.
+//
+// EL `hora IS NOT NULL` ES REDUNDANTE Y VA IGUAL. `NULL >= '00:00'` ya da NULL en SQL,
+// así que las cargas manuales quedan afuera con o sin él: sacarlo no cambia una coma, y
+// se comprobó rompiéndolo (ningún test se puso en rojo, que es lo correcto).
+//
+// Está escrito porque la intención no se lee en una comparación que depende de cómo SQL
+// trata el NULL. El día que alguien escriba `COALESCE(hora, '00:00') >= ?` —que parece
+// una prolijidad— todas las cargas manuales empezarían a trabar el tramo, en silencio.
+// Con la condición a la vista, ese cambio se ve.
 export function volcadosEnTramo(db, fecha, desdeHora, hastaHora) {
   const hay = db.prepare(
     "SELECT 1 FROM sqlite_master WHERE type='table' AND name='gal_volcados'").get();
@@ -337,7 +361,289 @@ export function volcadosEnTramo(db, fecha, desdeHora, hastaHora) {
   const h = hhmm(hastaHora);
   const r = db.prepare(
     " SELECT COUNT(*) AS n FROM gal_volcados"
-    + " WHERE date(volcado_en) = ? AND time(volcado_en) >= ?"
-    + (h ? ' AND time(volcado_en) < ?' : '')).get(...(h ? [f, d, h] : [f, d]));
+    + "  WHERE fecha = ? AND eliminado_en IS NULL AND hora IS NOT NULL AND hora >= ?"
+    + (h ? ' AND hora < ?' : '')).get(...(h ? [f, d, h] : [f, d]));
   return r ? r.n : 0;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════════
+// LOS KILOS, CARGADOS A MANO
+// ═══════════════════════════════════════════════════════════════════════════════════
+// Todavía no hay impresora, así que no hay tarjetas, así que no hay escaneo. El galpón
+// igual tiene que medir: la cosecha no espera al hardware.
+//
+// El operador dice las cinco cosas que hacen falta —fecha, lote, producto, cuadrilla y
+// kilos— y eso entra al MISMO libro (`gal_volcados`) en el que va a escribir el escaneo
+// cuando llegue. Lo que cambia es quién llena los campos.
+
+// ── LOS KILOS, COMO SE ESCRIBEN ACÁ ─────────────────────────────────────────────────
+// Un operador argentino escribe «1.234,5», no «1234.5». Si el parseo no lo contempla,
+// `Number('1.234,5')` da NaN y la carga se rechaza; peor todavía, `Number('1.234')` da
+// 1,234 — mil doscientos treinta y cuatro kilos entrarían como poco más de un kilo, sin
+// error y sin que nadie lo note hasta que no cierre la temporada.
+//
+// Son DOS reglas, y la segunda es la que de verdad importa:
+//
+// 1. Si hay coma, la coma es el decimal y los puntos son miles. «1.234,5» → 1234.5.
+// 2. Sin coma, un punto seguido de EXACTAMENTE TRES dígitos (y nada más detrás) es
+//    separador de miles: «1.250» → 1250, «12.500» → 12500. Cualquier otro punto es
+//    decimal: «450.5» → 450.5, «1.25» → 1.25.
+//
+// La segunda parece un detalle y es la que evita el error grande. Acá se escribe «1.250»
+// para decir mil doscientos cincuenta kilos, y leerlo como 1,25 kg no da error ni se ve:
+// entra un número plausible, mil veces más chico, y aparece recién cuando no cierra el
+// rendimiento de la temporada. Nadie escribe tres decimales para pesar fruta.
+export function kilos(v) {
+  // El «kg» se saca SÓLO del final y después de recortar: un `$` aplicado antes del
+  // trim no matchea nada si quedó un espacio detrás, y «450 kg » se iba al tacho.
+  const s = String(v == null ? '' : v).trim()
+    .replace(/\s*kgs?\.?$/i, '').replace(/\s/g, '');
+  if (!s) return null;
+  let limpio;
+  if (s.includes(',')) limpio = s.replace(/\./g, '').replace(',', '.');
+  else if (/^-?\d{1,3}(\.\d{3})+$/.test(s)) limpio = s.replace(/\./g, '');
+  else limpio = s;
+  if (!/^-?\d+(\.\d+)?$/.test(limpio)) return null;
+  const n = Number(limpio);
+  if (!Number.isFinite(n)) return null;
+  return Math.round(n * 100) / 100;
+}
+
+// Enteros opcionales (los IFCOs). Vacío es null —no 0—: «no lo contaron» y «contaron
+// cero» son cosas distintas, y promediar kg por IFCO con los ceros de adentro miente.
+export function entero(v) {
+  const s = String(v == null ? '' : v).trim();
+  if (!s) return null;
+  const n = parseInt(s, 10);
+  return Number.isFinite(n) && n >= 0 ? n : null;
+}
+
+const txt = (v) => {
+  const s = String(v == null ? '' : v).trim();
+  return s ? s : null;
+};
+
+// ── CARGAR KILOS ────────────────────────────────────────────────────────────────────
+// Devuelve `{ok:false, motivo}` en vez de tirar, como todo el módulo.
+//
+// ── ACÁ SÍ SE RECHAZA, Y NO CONTRADICE LA REGLA ─────────────────────────────────────
+// «Nada se puede rechazar después del hecho» es sobre el VOLCADO: el operario tiene el
+// IFCO en la mano, la fruta ya está en la tolva y un rechazo es fruta que se perdió del
+// conteo. Acá es otra situación: hay una persona sentada frente al formulario que puede
+// corregir el renglón en el momento. Rechazar una fecha ilegible es lo correcto;
+// guardarla «para revisar después» es inventar trabajo para alguien.
+//
+// Lo que NO se rechaza es el número grande (abajo): ése puede ser cierto.
+export function registrarVolcado(db, d) {
+  const dd = d || {};
+
+  const fecha = esFecha(dd.fecha);
+  if (!fecha) return { ok: false, motivo: 'La fecha tiene que ser YYYY-MM-DD' };
+
+  const loteId = parseInt(dd.lote_id, 10);
+  if (!Number.isFinite(loteId) || loteId <= 0) {
+    return { ok: false, motivo: 'Falta elegir el lote' };
+  }
+  // El nombre del lote se lee de la base, NO se cree el que mandó el navegador. Si lo
+  // guardáramos como viene, dos pantallas con distinta versión del padrón escribirían
+  // dos nombres para el mismo lote y los informes mostrarían dos renglones.
+  const lote = db.prepare('SELECT id, nombre FROM pa_lotes WHERE id = ?').get(loteId);
+  if (!lote) return { ok: false, motivo: 'El lote ' + loteId + ' no existe' };
+
+  let cuadId = null, cuadNom = null;
+  if (dd.cuadrilla_id != null && String(dd.cuadrilla_id).trim() !== '') {
+    const ci = parseInt(dd.cuadrilla_id, 10);
+    const c = Number.isFinite(ci)
+      ? db.prepare('SELECT id, nombre FROM pa_cuadrillas WHERE id = ?').get(ci) : null;
+    if (!c) return { ok: false, motivo: 'La cuadrilla ' + dd.cuadrilla_id + ' no existe' };
+    cuadId = c.id; cuadNom = c.nombre;
+  }
+
+  const kg = kilos(dd.kilos);
+  if (kg === null) {
+    return { ok: false, motivo: 'Los kilos no se entienden: "' + (dd.kilos ?? '') + '"' };
+  }
+  if (kg <= 0) return { ok: false, motivo: 'Los kilos tienen que ser mayores que cero' };
+
+  // EL CERO DE MÁS. Se MARCA, no se frena: 4.500 kg en una carga puede ser cierto el día
+  // que entra un camión entero, y frenarlo enseñaría a partir el renglón en dos para
+  // esquivarlo — que es la manera de que el dato quede mal Y además irrastreable.
+  const techo = config(db).kg_max_carga;
+  let estado = 'ok', revision = null;
+  if (techo > 0 && kg > techo) {
+    estado = 'a_revisar';
+    revision = kg.toLocaleString('es-AR') + ' kg en una sola carga supera el tope de '
+             + techo.toLocaleString('es-AR') + ' kg. Suele ser un cero de más: confirmalo.';
+  }
+
+  const r = db.prepare(
+    `INSERT OR IGNORE INTO gal_volcados
+       (uuid, fecha, hora, lote_id, lote_nombre, producto, cuadrilla_id, cuadrilla,
+        kilos, ifcos, origen, observacion, estado, revision_motivo, usuario_id, usuario)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`
+  ).run(
+    txt(dd.uuid), fecha, hhmm(dd.hora), lote.id, lote.nombre, txt(dd.producto),
+    cuadId, cuadNom, kg, entero(dd.ifcos), txt(dd.origen) || 'manual',
+    txt(dd.observacion), estado, revision,
+    dd.usuario_id ?? null, txt(dd.usuario),
+  );
+
+  // El uuid repetido no es un error: es la cola reintentando. Se devuelve la fila que ya
+  // estaba, para que el que reintentó vea lo mismo que vería si hubiera entrado recién.
+  if (!r.changes) {
+    const ya = db.prepare('SELECT * FROM gal_volcados WHERE uuid = ?').get(txt(dd.uuid));
+    return { ok: true, repetido: true, id: ya ? ya.id : null, fila: ya || null, aviso: null };
+  }
+
+  const id = Number(r.lastInsertRowid);
+  return {
+    ok: true,
+    repetido: false,
+    id,
+    fila: db.prepare('SELECT * FROM gal_volcados WHERE id = ?').get(id),
+    aviso: revision,
+  };
+}
+
+// ── CORREGIR UNA CARGA ──────────────────────────────────────────────────────────────
+// Sólo lo que vino en el pedido. Un PATCH que pisara con null los campos ausentes
+// borraría la cuadrilla cada vez que alguien corrige los kilos.
+//
+// Y se revalida el tope: corregir 450 a 4500 tiene que volver a marcarla, igual que si
+// se hubiera cargado así de entrada.
+export function editarVolcado(db, id, d) {
+  const i = parseInt(id, 10);
+  if (!Number.isFinite(i)) return { ok: false, motivo: 'Id inválido' };
+  const fila = db.prepare(
+    'SELECT * FROM gal_volcados WHERE id = ? AND eliminado_en IS NULL').get(i);
+  if (!fila) return { ok: false, motivo: 'Esa carga no existe o ya se borró' };
+
+  const dd = d || {};
+  const sets = [], par = [];
+  const set = (col, val) => { sets.push(col + ' = ?'); par.push(val); };
+
+  if ('fecha' in dd) {
+    const f = esFecha(dd.fecha);
+    if (!f) return { ok: false, motivo: 'La fecha tiene que ser YYYY-MM-DD' };
+    set('fecha', f);
+  }
+  if ('lote_id' in dd) {
+    const l = db.prepare('SELECT id, nombre FROM pa_lotes WHERE id = ?')
+                .get(parseInt(dd.lote_id, 10));
+    if (!l) return { ok: false, motivo: 'El lote ' + dd.lote_id + ' no existe' };
+    set('lote_id', l.id); set('lote_nombre', l.nombre);
+  }
+  if ('cuadrilla_id' in dd) {
+    if (dd.cuadrilla_id == null || String(dd.cuadrilla_id).trim() === '') {
+      set('cuadrilla_id', null); set('cuadrilla', null);
+    } else {
+      const c = db.prepare('SELECT id, nombre FROM pa_cuadrillas WHERE id = ?')
+                  .get(parseInt(dd.cuadrilla_id, 10));
+      if (!c) return { ok: false, motivo: 'La cuadrilla ' + dd.cuadrilla_id + ' no existe' };
+      set('cuadrilla_id', c.id); set('cuadrilla', c.nombre);
+    }
+  }
+  if ('producto' in dd)    set('producto', txt(dd.producto));
+  if ('observacion' in dd) set('observacion', txt(dd.observacion));
+  if ('ifcos' in dd)       set('ifcos', entero(dd.ifcos));
+
+  let kg = fila.kilos;
+  if ('kilos' in dd) {
+    const k = kilos(dd.kilos);
+    if (k === null) return { ok: false, motivo: 'Los kilos no se entienden: "' + (dd.kilos ?? '') + '"' };
+    if (k <= 0) return { ok: false, motivo: 'Los kilos tienen que ser mayores que cero' };
+    set('kilos', k); kg = k;
+  }
+
+  if (!sets.length) return { ok: false, motivo: 'No vino nada para cambiar' };
+
+  const techo = config(db).kg_max_carga;
+  const revision = (techo > 0 && kg > techo)
+    ? kg.toLocaleString('es-AR') + ' kg en una sola carga supera el tope de '
+      + techo.toLocaleString('es-AR') + ' kg. Suele ser un cero de más: confirmalo.'
+    : null;
+  set('estado', revision ? 'a_revisar' : 'ok');
+  set('revision_motivo', revision);
+
+  par.push(i);
+  db.prepare('UPDATE gal_volcados SET ' + sets.join(', ') + ' WHERE id = ?').run(...par);
+  return {
+    ok: true,
+    fila: db.prepare('SELECT * FROM gal_volcados WHERE id = ?').get(i),
+    aviso: revision,
+  };
+}
+
+// Soft delete, como en el resto del repo: un renglón de kilos borrado de verdad es un
+// jornal que no se puede auditar después.
+export function borrarVolcado(db, id) {
+  const i = parseInt(id, 10);
+  if (!Number.isFinite(i)) return { ok: false, motivo: 'Id inválido' };
+  const r = db.prepare(
+    "UPDATE gal_volcados SET eliminado_en = datetime('now','localtime')"
+    + ' WHERE id = ? AND eliminado_en IS NULL').run(i);
+  if (!r.changes) return { ok: false, motivo: 'Esa carga no existe o ya se borró' };
+  return { ok: true };
+}
+
+// ── LO QUE SE CARGÓ UN DÍA ──────────────────────────────────────────────────────────
+export function volcadosDelDia(db, fecha) {
+  const f = esFecha(fecha);
+  if (!f) return [];
+  return db.prepare(
+    ' SELECT * FROM gal_volcados'
+    + '  WHERE fecha = ? AND eliminado_en IS NULL'
+    + '  ORDER BY id DESC').all(f);
+}
+
+// ── EL RESUMEN DEL DÍA ──────────────────────────────────────────────────────────────
+// El total, y los dos cortes que se miran de verdad: por cuadrilla (es como se paga el
+// jornal) y por lote (es como se mide el rendimiento).
+//
+// Los SUM() van repetidos en el ORDER BY en vez de usar el alias. En SQLite, `ORDER BY
+// kilos` dentro de un GROUP BY se ata a la COLUMNA `kilos` y no al `SUM(kilos)` que la
+// tapa — y entonces ordena por el valor de una fila cualquiera del grupo. Ya pasó en
+// este repo con otro alias y no se ve: la lista sale ordenada, sólo que mal.
+export function resumenDelDia(db, fecha) {
+  const f = esFecha(fecha);
+  const vacio = { kilos: 0, ifcos: 0, cargas: 0, a_revisar: 0, por_cuadrilla: [], por_lote: [] };
+  if (!f) return vacio;
+
+  const base = ' FROM gal_volcados WHERE fecha = ? AND eliminado_en IS NULL';
+  const t = db.prepare(
+    ' SELECT COUNT(*) AS cargas,'
+    + '       COALESCE(SUM(kilos),0) AS kilos,'
+    + '       COALESCE(SUM(ifcos),0) AS ifcos,'
+    + "       COALESCE(SUM(CASE WHEN estado = 'a_revisar' THEN 1 ELSE 0 END),0) AS a_revisar"
+    + base).get(f);
+
+  const porCuadrilla = db.prepare(
+    ' SELECT cuadrilla_id,'
+    + "       COALESCE(cuadrilla, '— sin cuadrilla —') AS nombre,"
+    + '       COUNT(*) AS cargas,'
+    + '       COALESCE(SUM(kilos),0) AS kilos,'
+    + '       COALESCE(SUM(ifcos),0) AS ifcos'
+    + base
+    + ' GROUP BY cuadrilla_id'
+    + ' ORDER BY SUM(kilos) DESC').all(f);
+
+  const porLote = db.prepare(
+    ' SELECT lote_id,'
+    + "       COALESCE(lote_nombre, 'Lote ' || lote_id) AS nombre,"
+    + '       producto,'
+    + '       COUNT(*) AS cargas,'
+    + '       COALESCE(SUM(kilos),0) AS kilos,'
+    + '       COALESCE(SUM(ifcos),0) AS ifcos'
+    + base
+    + ' GROUP BY lote_id'
+    + ' ORDER BY SUM(kilos) DESC').all(f);
+
+  return {
+    kilos: Math.round((t.kilos || 0) * 100) / 100,
+    ifcos: t.ifcos || 0,
+    cargas: t.cargas || 0,
+    a_revisar: t.a_revisar || 0,
+    por_cuadrilla: porCuadrilla,
+    por_lote: porLote,
+  };
 }

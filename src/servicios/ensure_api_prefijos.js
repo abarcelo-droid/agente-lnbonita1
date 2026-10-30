@@ -78,6 +78,12 @@ const PREFIJOS = [
   // usa esta pantalla y nadie más, y un prefijo compartido le daría a un menú las
   // direcciones del otro.
   ['galpon-lote-dia', 'galpon/lote-dia,galpon/lote-vigente,galpon/lotes'],
+  // LA CARGA DE KILOS (V1108). Escribe el libro de la cosecha: cada fila es volumen
+  // que después se convierte en rendimiento por lote y en kg/jornal por cuadrilla.
+  // Sólo 'galpon/volcados' — lo que esta pantalla LEE de las otras va en LECTURA, más
+  // abajo: necesita la lista de lotes y de cuadrillas para los desplegables, y no por
+  // eso puede declarar el lote del día ni tocar los rangos de tarjetas.
+  ['galpon-carga', 'galpon/volcados'],
   // P&L ABASTO (V1052). Router propio de un solo módulo: subir el libro diario y guardar
   // los rubros pide 'operar'.
   ['pl-abasto', 'pl-abasto'],
@@ -481,6 +487,15 @@ const LECTURA = [
   // La ficha de cuenta corriente abre el detalle de cada comprobante para mostrar
   // qué se vendió. Sólo LEE: los comprobantes los emite Salidas.
   ['sg-cc-clientes',        'sg/ventas/facturas'],
+
+  // 🏭 GALPÓN · Carga de kilos (V1108). Los tres desplegables de la ventana: los lotes
+  // entre los que se elige, las cuadrillas, y el lote declarado para ese día — que se
+  // PROPONE y se puede cambiar. Los tres son de otros módulos y acá sólo se leen.
+  //
+  // Va en api_lectura y no en api_prefijos justamente por eso: agregárselo allá le
+  // daría además poder de ESCRITURA sobre el lote del día, y el que carga kilos no
+  // tiene por qué poder cambiar qué lote se está cosechando.
+  ['galpon-carga',          'galpon/lotes,galpon/cuadrillas,galpon/lote-vigente'],
 ];
 
 try {

@@ -285,12 +285,17 @@ test('MANUAL LD: «el IFCO de las 14:30 es del lote vigente a las 14:30»', () =
   assert.match(SERV, /ORDER BY desde_hora DESC, id DESC LIMIT 1/);
 });
 
-test('MANUAL LD: «el primero se propone a las 00:00, el cambio necesita su hora»', () => {
-  diceLd(/por eso el primero se propone a las <b>00:00<\/b>/);
-  // Lo decide el SERVIDOR mirando si el día ya tiene tramos: si lo decidiera la
-  // pantalla, el que llama por fuera del panel dejaría la mañana sin cubrir.
-  assert.match(RUTA, /const hora = hhmm\(b\.desde_hora\) \|\| \(hayTramos \? null : '00:00'\);/);
+test('MANUAL LD: «el primero no pregunta la hora; el cambio sí» (V1108)', () => {
+  diceLd(/no pregunta la hora del primero/);
+  // Lo decide el SERVIDOR mirando si el día ya tiene tramos, y la hora que venga
+  // para el primero LA IGNORA. Si sólo lo hiciera la pantalla, el que llama por
+  // fuera del panel seguiría metiendo primeros tramos a las 08:00.
+  assert.match(RUTA, /const hora = hayTramos \? hhmm\(b\.desde_hora\) : '00:00';/);
   assert.match(RUTA, /Un cambio de lote necesita su hora/);
+  // Y la pantalla no la manda cuando el campo está escondido: mandarla escondida
+  // sería mandar lo que quedó de la vez anterior, y en un PATCH eso le cambia la
+  // hora a un tramo que nadie tocó.
+  assert.match(JS_LD, /gal-ld-hora-fld'\)\.style\.display !== 'none'/);
 });
 
 test('MANUAL LD: «un cambio es otra fila; la de la mañana no se borra»', () => {
@@ -304,15 +309,23 @@ test('MANUAL LD: «un cambio es otra fila; la de la mañana no se borra»', () =
   assert.ok(!/UPDATE gal_lote_vigente/.test(post), 'cargar un cambio pisa el tramo anterior');
 });
 
-test('MANUAL LD: «el hueco de la mañana se avisa, y el arreglo viene en un botón»', () => {
-  diceLd(/El error más fácil de cometer/);
-  diceLd(/Que arranque a las 00:00/);
-  assert.match(SERV, /export function huecoDelDia\(/);
-  // Y no se reporta hueco en un día que arranca a las 00:00, que no tiene ninguno.
-  assert.match(SERV, /if \(!primero \|\| primero\.desde_hora === '00:00'\) return null;/);
-  // El botón existe y hace el PATCH, no manda a corregirlo a otro lado.
-  assert.match(JS_LD, /onclick="galLdDesde00\(/);
-  assert.match(JS_LD, /body: JSON\.stringify\(\{ desde_hora:'00:00' \}\)/);
+test('MANUAL LD: «antes del primer lote no hay un agujero» (V1108)', () => {
+  diceLd(/Antes del primer lote no hay un agujero/);
+  diceLd(/el campo de hora <b>aparece recién en el segundo<\/b>/);
+  diceLd(/«Todo el día»/);
+
+  // Y lo que el manual afirma, contra el código:
+  // 1. El servidor atribuye lo anterior al primer tramo del día.
+  assert.match(SERV, /ORDER BY desde_hora, id LIMIT 1'\)\.get\(f\)/);
+  assert.match(SERV, /antes_del_primero: !r,/);
+  // 2. Y el cartel del agujero no está más, en ningún lado.
+  assert.ok(!/huecoDelDia\s*\(/.test(SERV.replace(/^\s*\/\/.*$/gm, '')),
+    'volvió huecoDelDia: con ella vuelve el cartel');
+  assert.ok(!/galLdDesde00|gld-hueco/.test(JS_LD), 'quedó el botón de arreglar el hueco');
+  // 3. El campo de hora se esconde para el primero.
+  assert.match(JS_LD, /gal-ld-hora-fld'\)\.style\.display = esPrimero \? 'none' : ''/);
+  // 4. Y un día de un solo tramo se muestra como «Todo el día».
+  assert.match(JS_LD, /GLD\.tramos\.length === 1 \? 'Todo el día'/);
 });
 
 test('MANUAL LD: «EL CARTEL LO RESUELVE EL SERVIDOR, no la pantalla»', () => {
@@ -470,4 +483,206 @@ test('Y SU VENTANA TAMBIÉN SE ABRE EN BLANCO', () => {
     assert.ok(n >= 2, id + ' no se escribe en las dos ramas del abridor (' + n + ')');
   }
   assert.ok((abrir.match(/sel\.value =/g) || []).length >= 2, 'el select no se fija en las dos ramas');
+});
+
+// ══════════════════════════════════════════════════════════════════════════
+// 5 · MANUAL CARGA DE KILOS, CONTRA EL CÓDIGO (V1108)
+// ══════════════════════════════════════════════════════════════════════════
+// Andy, 30/10/2026: «hará algo más manual... porque todavía no instalamos la
+// impresora». Cada afirmación del manual con su assert al lado contra el
+// router o el servicio — no contra el texto, que no prueba nada.
+const MANUAL_KG = manualDe('galpon-carga');
+const diceKg = lector(MANUAL_KG);
+
+const JS_KG = (() => {
+  const i = PANEL.indexOf('var GKG =');
+  assert.ok(i > 0, 'no encontré el JS de la carga de kilos');
+  return PANEL.slice(i, PANEL.indexOf('</script>', i));
+})();
+
+test('MANUAL KG: «es el MISMO libro que va a usar el escaneo»', () => {
+  diceKg(/<code>gal_volcados<\/code>/);
+  diceKg(/no es provisorio ni se va a migrar/);
+  // Una sola tabla de kilos, y con las columnas del escaneo puestas desde ya:
+  // agregarlas después sería un ALTER sobre datos que ya pagan jornales.
+  assert.match(DDL, /CREATE TABLE IF NOT EXISTS gal_volcados/);
+  for (const col of ['hora', 'tarjeta_id', 'bruto', 'tara', 'origen', 'uuid']) {
+    assert.match(DDL, new RegExp('\\n\\s*' + col + '\\s+(TEXT|REAL|INTEGER)'),
+      'falta la columna ' + col + ': el escaneo va a necesitar un ALTER sobre datos vivos');
+  }
+  // Y la escribe el router de la carga manual, no otro.
+  assert.match(SERV, /INSERT OR IGNORE INTO gal_volcados/);
+});
+
+test('MANUAL KG: «el día de cosecha no es el día en que se tipea»', () => {
+  diceKg(/Lo del sábado se puede cargar el lunes/);
+  // Son dos columnas distintas: la que elige el operador y la que pone la base.
+  assert.match(DDL, /fecha\s+TEXT NOT NULL,/);
+  assert.match(DDL, /creado_en\s+TEXT DEFAULT \(datetime\('now','localtime'\)\)/);
+  // La fecha SALE DEL PEDIDO y no del reloj del servidor: si la pusiera el
+  // servidor, lo del sábado quedaría contado el lunes.
+  assert.match(SERV, /const fecha = esFecha\(dd\.fecha\);/);
+});
+
+test('MANUAL KG: «se puede escribir 450, 450,5 o 1.250»', () => {
+  diceKg(/<b>450<\/b>, <b>450,5<\/b> o <b>1\.250<\/b>/);
+  // Las dos reglas del parseo, y la segunda es la que evita el error grande:
+  // «1.250» leído como 1,25 kg no da error, entra mil veces más chico.
+  assert.match(SERV, /if \(s\.includes\(','\)\) limpio = s\.replace\(\/\\\.\/g, ''\)\.replace\(',', '\.'\);/);
+  assert.match(SERV, /\{1,3\}\(\\\.\\d\{3\}\)\+/, 'se perdió la regla del punto de miles');
+});
+
+test('MANUAL KG: «los IFCOs vacíos son null, no cero»', () => {
+  diceKg(/no es lo mismo que cero/);
+  assert.match(SERV, /export function entero\(v\) \{/);
+  assert.match(SERV, /if \(!s\) return null;/);
+});
+
+test('MANUAL KG: «EL CERO DE MÁS SE MARCA Y ENTRA IGUAL»', () => {
+  diceKg(/no frena nada/);
+  diceKg(/20\.000 kg de fábrica/);
+  diceKg(/partir el renglón en dos/);
+  // El tope existe, es configurable y tiene su semilla.
+  assert.match(DDL, /\['kg_max_carga', '20000'\]/);
+  assert.match(SERV, /kg_max_carga: Number\(c\.kg_max_carga\) \|\| 0,/);
+  // Y MARCA en vez de rechazar: el estado cambia, el ok sigue siendo true.
+  const reg = SERV.slice(SERV.indexOf('export function registrarVolcado('),
+                         SERV.indexOf('export function editarVolcado('));
+  assert.match(reg, /estado = 'a_revisar';/);
+  assert.ok(!/techo[\s\S]{0,200}return \{ ok: false/.test(reg),
+    'el tope rechaza la carga: eso enseña a partir el renglón en dos');
+  // En 0 queda apagado.
+  assert.match(reg, /if \(techo > 0 && kg > techo\)/);
+});
+
+test('MANUAL KG: «el doble clic no duplica kilos»', () => {
+  diceKg(/si el mismo llega dos veces, el servidor guarda una sola fila/);
+  assert.match(DDL, /uuid\s+TEXT UNIQUE/);
+  assert.match(SERV, /INSERT OR IGNORE INTO gal_volcados/);
+  // Y el reintento devuelve la fila que YA estaba, no un error: el que apretó
+  // dos veces tiene que ver lo mismo que vería si hubiera entrado recién.
+  assert.match(SERV, /if \(!r\.changes\) \{/);
+  assert.match(SERV, /repetido: true/);
+  // La pantalla genera uno nuevo por carga, y otro después de guardar.
+  assert.ok((JS_KG.match(/galKgNuevoUuid\(\)/g) || []).length >= 3,
+    'el uuid no se renueva: dos cargas seguidas entrarían como una');
+});
+
+test('MANUAL KG: «corregir los kilos no borra la cuadrilla»', () => {
+  diceKg(/Al corregir los kilos se vuelve a mirar el tope/);
+  const ed = SERV.slice(SERV.indexOf('export function editarVolcado('),
+                        SERV.indexOf('export function borrarVolcado('));
+  // Sólo lo que VINO en el pedido. Un PATCH que pisara con null los campos
+  // ausentes borraría la cuadrilla cada vez que alguien corrige los kilos, y
+  // esos kilos saldrían del kg por jornal sin que nadie lo vea.
+  for (const campo of ['fecha', 'lote_id', 'cuadrilla_id', 'producto', 'observacion', 'ifcos', 'kilos']) {
+    assert.ok(ed.includes("'" + campo + "' in dd"),
+      'editarVolcado pisa ' + campo + ' aunque no haya venido');
+  }
+  // Y el tope se revalida en los dos sentidos.
+  assert.match(ed, /set\('estado', revision \? 'a_revisar' : 'ok'\);/);
+});
+
+test('MANUAL KG: «borrar es borrado blando»', () => {
+  diceKg(/<b>borrado blando<\/b>/);
+  assert.match(DDL, /eliminado_en TEXT/);
+  assert.match(SERV, /UPDATE gal_volcados SET eliminado_en = datetime\('now','localtime'\)/);
+  assert.ok(!/DELETE FROM gal_volcados/.test(SERV), 'hay un borrado duro de kilos');
+  // Y lo borrado deja de contar en los tres lados que leen el libro.
+  for (const fn of ['volcadosDelDia', 'resumenDelDia', 'volcadosEnTramo']) {
+    const i = SERV.indexOf('export function ' + fn + '(');
+    assert.ok(i > 0, 'no está ' + fn);
+    assert.match(SERV.slice(i, i + 1400), /eliminado_en IS NULL/,
+      fn + ' cuenta las cargas borradas');
+  }
+});
+
+test('MANUAL KG: «los dos cortes son por cuadrilla y por lote»', () => {
+  diceKg(/como se paga el jornal/);
+  diceKg(/como se mide el rendimiento/);
+  const res = SERV.slice(SERV.indexOf('export function resumenDelDia('));
+  assert.match(res, /GROUP BY cuadrilla_id/);
+  assert.match(res, /GROUP BY lote_id/);
+  // ORDENADOS POR EL TOTAL DEL GRUPO. Con el alias, SQLite ata el ORDER BY a la
+  // COLUMNA kilos y no al SUM() que la tapa: sale una lista ordenada, sólo que
+  // mal — y ordenada mal se ve igual que ordenada bien.
+  assert.ok(!/ORDER BY kilos DESC/.test(res), 'ordena por el alias y no por el SUM');
+  assert.ok((res.match(/ORDER BY SUM\(kilos\) DESC/g) || []).length === 2);
+});
+
+test('MANUAL KG: «el recuadro rojo aparece sólo si hay algo que revisar»', () => {
+  diceKg(/Un «0» todos los días enseña a no mirar ese lugar/);
+  assert.match(JS_KG, /if \(r\.a_revisar\) h \+= t\('Para revisar'/);
+});
+
+test('MANUAL KG: «la carga no depende del lote del día, lo aprovecha»', () => {
+  diceKg(/no depende<\/b> de esa/);
+  // La propuesta viene en la respuesta del día y puede ser null, y el POST no
+  // mira gal_lote_vigente para nada: se puede cargar un día que nadie declaró.
+  assert.match(RUTA, /propuesta: \(function \(\) \{/);
+  const post = RUTA.slice(RUTA.indexOf("router.post('/volcados'"),
+                          RUTA.indexOf("router.patch('/volcados/:id'"));
+  assert.ok(!/loteVigente|gal_lote_vigente/.test(post),
+    'cargar kilos quedó atado a que alguien haya declarado el lote del día');
+});
+
+test('MANUAL KG: «quién cargó sale de la cookie» y «no hace falta ser admin»', () => {
+  diceKg(/no parametrizar/);
+  diceKg(/no puede<\/b> declarar el lote del día/);
+  const post = RUTA.slice(RUTA.indexOf("router.post('/volcados'"),
+                          RUTA.indexOf("router.patch('/volcados/:id'"));
+  // Ninguna de las cuatro rutas de kilos pide admin...
+  const kg = RUTA.slice(RUTA.indexOf("router.get('/volcados'"));
+  assert.ok(!/requireAdmin/.test(kg), 'cargar kilos pide admin: lo cargaría el dueño');
+  // ...y la firma la pone el servidor, no el cuerpo del pedido.
+  assert.match(post, /usuario_id: u\.id \|\| null,/);
+  assert.match(post, /usuario: u\.nombre \|\| null,/);
+  // Y el permiso de escribir es sólo sobre sus propias direcciones: lo que lee
+  // de otros módulos va en api_lectura, que da leer y no escribir.
+  assert.match(PREFIJOS, /\['galpon-carga', 'galpon\/volcados'\]/);
+  assert.match(PREFIJOS, /\['galpon-carga',\s+'galpon\/lotes,galpon\/cuadrillas,galpon\/lote-vigente'\]/);
+});
+
+test('MANUAL KG: «la ventana no se cierra al cargar»', () => {
+  diceKg(/no se cierra al cargar/);
+  diceKg(/quedan<\/b> el lote y la cuadrilla/);
+  const g = JS_KG.slice(JS_KG.indexOf('async function galKgGuardar('),
+                        JS_KG.indexOf('async function galKgBorrar('));
+  // Cierra SÓLO al corregir; cargando sigue abierta con el acuse.
+  assert.match(g, /if \(GKG\.editId\)\{ galKgCerrar\(\); return; \}/);
+  // Y se limpia lo que cambia de una pesada a la otra, no el lote ni la cuadrilla.
+  for (const id of ['gal-kg-kilos', 'gal-kg-ifcos', 'gal-kg-obs']) {
+    assert.ok(g.includes("getElementById('" + id + "').value = ''"), 'no se limpia ' + id);
+  }
+  assert.ok(!g.includes("getElementById('gal-kg-lote').value = ''"),
+    'se limpia el lote entre cargas: ocho renglones seguidos serían ocho veces el desplegable');
+  // El Enter en los kilos carga el renglón.
+  assert.match(PANEL, /id="gal-kg-kilos"[\s\S]{0,200}galKgGuardar\(\);/);
+});
+
+test('LA VENTANA DE KILOS SE ABRE EN BLANCO, como todas', () => {
+  // Un formulario que sólo se esconde CONSERVA lo que tenía: acá eso sería
+  // cargarle a una cuadrilla los kilos que se tipearon para otra y se cancelaron.
+  const abrir = JS_KG.slice(JS_KG.indexOf('function galKgAbrir('),
+                            JS_KG.indexOf('function galKgCerrar('));
+  assert.match(abrir, /gal-kg-error'\)\.style\.display = 'none'/);
+  assert.match(abrir, /gal-kg-ok'\)\.style\.display = 'none'/);
+  for (const id of ['gal-kg-kilos', 'gal-kg-ifcos', 'gal-kg-obs']) {
+    assert.ok(abrir.includes("getElementById('" + id + "').value = ''"),
+      id + ' conserva lo de la carga anterior');
+  }
+  // Y los que se escriben en las DOS ramas: la de corregir toma los del renglón,
+  // la de cargar los propone. Ninguna los deja como estaban.
+  for (const id of ['gal-kg-fecha', 'gal-kg-prod']) {
+    const n = (abrir.match(new RegExp("getElementById\\('" + id + "'\\)\\.value =", 'g')) || []).length;
+    assert.ok(n >= 2, id + ' no se escribe en las dos ramas del abridor (' + n + ')');
+  }
+  assert.ok((abrir.match(/sel\.value =/g) || []).length >= 2, 'el select no se fija en las dos ramas');
+  assert.ok((abrir.match(/cu\.value =/g) || []).length >= 1, 'la cuadrilla no se fija al corregir');
+});
+
+test('la pantalla de kilos tampoco se arrastra de costado', () => {
+  assert.match(PANEL, /#sec-galpon-carga \.ab-table-wrap\{overflow-x:hidden !important\}/);
+  assert.match(PANEL, /#sec-galpon-carga \.gkg-tbl\{table-layout:fixed/);
+  assert.match(PANEL, /@media\(max-width:900px\)\{ #sec-galpon-carga \.ab-table-wrap\{overflow-x:auto !important\}/);
 });
