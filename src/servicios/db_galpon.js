@@ -91,6 +91,83 @@ db.exec(`
     creado_en   TEXT DEFAULT (datetime('now','localtime'))
   );
   CREATE INDEX IF NOT EXISTS gal_lote_vig_idx ON gal_lote_vigente(fecha, desde_hora);
+
+  -- ═══════════════════════════════════════════════════════════════════════════
+  -- LOS KILOS QUE ENTRARON AL GALPÓN
+  -- ═══════════════════════════════════════════════════════════════════════════
+  -- Es el libro de la cosecha: la única tabla del sistema que guarda volumen. Todo lo
+  -- demás del galpón —el rendimiento, el kg/jornal, el costo por kilo— sale de acá.
+  --
+  -- ── UNA SOLA TABLA PARA LAS DOS MANERAS DE CARGAR ──────────────────────────────
+  -- Hoy se carga A MANO: el operador elige fecha, lote, cuadrilla, producto y escribe
+  -- los kilos. Cuando lleguen la impresora y la balanza, el escaneo va a escribir en
+  -- ESTA MISMA TABLA — lo que cambia es quién llena los campos, no qué se guarda.
+  --
+  -- La alternativa era una tabla «provisoria» y otra «de verdad» después. Eso significa
+  -- migrar los kilos de media temporada, y que el tablero y los informes tengan que
+  -- sumar dos lados. El libro es uno.
+  --
+  -- Por eso están desde el día uno las columnas que la carga manual no usa (hora,
+  -- tarjeta_id, bruto, tara, origen): agregarlas ahora es gratis y agregarlas
+  -- después es un ALTER sobre datos que ya se están usando para pagar jornales.
+  CREATE TABLE IF NOT EXISTS gal_volcados (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    -- Lo genera el cliente. Hoy no hace falta, pero la cola offline del PR que viene
+    -- reintenta, y sin esto un reintento duplica kilos. Un INSERT OR IGNORE sobre el
+    -- índice único de abajo lo convierte en una sola fila.
+    uuid         TEXT UNIQUE,
+
+    -- ── CUÁNDO ───────────────────────────────────────────────────────────────────
+    -- La fecha de COSECHA, que la elige el operador: lo del sábado se carga el lunes y
+    -- tiene que quedar contado el sábado. Es distinta de creado_en, que es cuándo se
+    -- tipeó, y la diferencia es justamente lo que permite cargar atrasado.
+    fecha        TEXT NOT NULL,              -- YYYY-MM-DD
+    -- NULL en la carga manual, y es a propósito: el que tipea el lote no necesita decir
+    -- a qué hora entró. La llena el escaneo, que SÍ la necesita porque de la hora saca
+    -- el lote (gal_lote_vigente).
+    hora         TEXT,
+
+    -- ── QUÉ Y DE QUIÉN ───────────────────────────────────────────────────────────
+    -- CONGELADOS, no resueltos al leer. Los rangos de tarjetas se reasignan entre
+    -- temporadas y el lote vigente cambia durante el día: recalcular después
+    -- reescribiría la historia. Mismo criterio que el total de un comprobante.
+    lote_id      INTEGER NOT NULL,           -- → pa_lotes(id), FK lógica
+    lote_nombre  TEXT,
+    producto     TEXT,
+    cuadrilla_id INTEGER,                    -- → pa_cuadrillas(id), FK lógica
+    cuadrilla    TEXT,
+
+    -- ── CUÁNTO ───────────────────────────────────────────────────────────────────
+    -- kilos es el número que vale y el único obligatorio. En la carga manual se
+    -- escribe directo; con balanza sale de bruto − tara × ifcos, y los tres quedan
+    -- guardados para poder rehacer la cuenta.
+    kilos        REAL NOT NULL,
+    ifcos        INTEGER,
+    bruto        REAL,
+    tara         REAL,
+    tarjeta_id   INTEGER,
+    -- De dónde salió el peso: 'manual' lo tipeó una persona, 'balanza' lo leyó el
+    -- indicador. El tablero muestra cuánto se pesó a mano, que es la señal de que el
+    -- equipo no está andando — sin esta columna eso no se puede ni preguntar.
+    origen       TEXT NOT NULL DEFAULT 'manual',
+
+    observacion  TEXT,
+    -- NADA SE RECHAZA DESPUÉS DEL HECHO: LA FRUTA YA ESTÁ EN LA TOLVA. Un problema no
+    -- bloquea la carga, la marca. Ver el encabezado del módulo en CLAUDE.md.
+    estado       TEXT NOT NULL DEFAULT 'ok', -- 'ok' | 'a_revisar'
+    revision_motivo TEXT,
+
+    usuario_id   INTEGER,
+    usuario      TEXT,
+    creado_en    TEXT DEFAULT (datetime('now','localtime')),
+    -- Soft delete, como en las otras 39 tablas del repo. Un renglón de kilos borrado
+    -- de verdad es un jornal que no se puede auditar.
+    eliminado_en TEXT
+  );
+  -- Por fecha es como se lee SIEMPRE: la pantalla del día, el tablero, el informe.
+  CREATE INDEX IF NOT EXISTS gal_volc_fecha_idx ON gal_volcados(fecha);
+  CREATE INDEX IF NOT EXISTS gal_volc_lote_idx  ON gal_volcados(lote_id, fecha);
+  CREATE INDEX IF NOT EXISTS gal_volc_cuad_idx  ON gal_volcados(cuadrilla_id, fecha);
 `);
 
 // Migraciones de columnas nuevas, mismo patrón que el resto del repo: una por línea y con
@@ -123,6 +200,14 @@ for (const [clave, valor] of [
   // deja elegirlo por código); acá queda lo que se recuerda para la próxima.
   ['balanza_puerto', ''],
   ['balanza_baudios', '9600'],
+  // EL TECHO DE UNA CARGA, EN KILOS. Cargando a mano, el error que de verdad pasa es el
+  // cero de más: 4500 donde iban 450. No lo agarra nadie —el número es plausible, el
+  // lote existe, la cuadrilla existe— y queda adentro del rendimiento de la temporada.
+  //
+  // No RECHAZA: marca la fila `a_revisar` y la carga entra igual. Un techo que frena la
+  // carga es un techo que alguien va a esquivar partiendo el renglón en dos.
+  // En 0 queda apagado.
+  ['kg_max_carga', '20000'],
 ]) {
   try {
     db.prepare('INSERT OR IGNORE INTO gal_config (clave, valor) VALUES (?,?)').run(clave, valor);

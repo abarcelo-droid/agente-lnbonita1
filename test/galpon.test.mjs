@@ -281,15 +281,19 @@ test('SIN LOTE CARGADO lo dice, y no inventa uno', () => {
   assert.match(r.motivo, /2026-11-20/);
 });
 
-test('y distingue "no se cargó" de "entró antes de la hora de inicio"', () => {
-  // Son dos problemas distintos: uno se arregla cargando el lote, el otro
-  // corrigiendo la hora. Un mensaje único mandaría a buscar donde no es.
+test('lo que entra ANTES del primer tramo es de ese lote, no de nadie (V1108)', () => {
+  // Hasta la V1107 esto era un segundo motivo de error: «arranca a las 08:00 y
+  // esto entró 06:30». Se cambió porque ese error no tiene arreglo razonable —
+  // si el único lote declarado ese día es el de las 08:00, ése es el lote.
+  //
+  // Y el motivo de la queja: el que ponía 08:00 estaba cargando bien (es la hora
+  // en que abre el galpón) y el sistema lo trataba como un problema.
   const { db, lote } = galpon();
   ponerLote(db, '2026-11-20', '08:00', lote, 'Lote 4 Norte');
   const r = loteVigente(db, '2026-11-20', '06:30');
-  assert.equal(r.ok, false);
-  assert.match(r.motivo, /arranca a las 08:00/);
-  assert.match(r.motivo, /06:30/);
+  assert.equal(r.ok, true);
+  assert.equal(r.lote_id, lote);
+  assert.equal(r.antes_del_primero, true, 'la pantalla no puede saber que vino por acá');
 });
 
 test('una fecha inválida no rompe', () => {

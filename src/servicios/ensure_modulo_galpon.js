@@ -37,6 +37,11 @@ try {
   const MODULOS = [
     ['galpon-config',   '⚙️ Galpón · Configuración', 700],
     ['galpon-lote-dia', '🗓️ Galpón · Lote del día',  701],
+    // La carga de kilos a mano. Va DESPUÉS del lote del día porque ése es el orden en
+    // que se usan: a la mañana se declara qué se cosecha, durante el día se cargan los
+    // kilos. Y es un módulo aparte y no una solapa del anterior para que el que sólo
+    // carga kilos no pueda cambiar el lote declarado.
+    ['galpon-carga',    '⚖️ Galpón · Carga de kilos', 702],
   ];
 
   const ins = db.prepare(
