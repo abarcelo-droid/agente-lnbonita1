@@ -63,7 +63,7 @@ function base() {
       lote_id INTEGER NOT NULL, lote_nombre TEXT, producto TEXT, destino TEXT NOT NULL,
       presentacion_id INTEGER, presentacion TEXT, envase TEXT,
       bultos REAL, por_bulto REAL, kg_unidad REAL, kilos REAL NOT NULL,
-      tipo TEXT NOT NULL DEFAULT 'ingreso', observacion TEXT,
+      tipo TEXT NOT NULL DEFAULT 'ingreso', reparto TEXT, repartido INTEGER NOT NULL DEFAULT 0, observacion TEXT,
       estado TEXT NOT NULL DEFAULT 'ok', revision_motivo TEXT,
       usuario_id INTEGER, usuario TEXT, creado_en TEXT, eliminado_en TEXT);
   `);

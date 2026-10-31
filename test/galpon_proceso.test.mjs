@@ -32,6 +32,7 @@ import {
   kilosDeProceso, registrarProceso, editarProceso, borrarProceso,
   procesosDelDia, tableroProceso, stockGalpon, rindePorLote, lotesVolcados,
   fincasDeLotes,
+  pesosDelReparto, repartir, idsDeLotes,
 } from '../src/servicios/galpon.js';
 
 const F = '2026-11-20';
@@ -63,7 +64,7 @@ function base(techo = '50000') {
       lote_id INTEGER NOT NULL, lote_nombre TEXT, producto TEXT, destino TEXT NOT NULL,
       presentacion_id INTEGER, presentacion TEXT, envase TEXT,
       bultos REAL, por_bulto REAL, kg_unidad REAL, kilos REAL NOT NULL,
-      tipo TEXT NOT NULL DEFAULT 'ingreso', observacion TEXT,
+      tipo TEXT NOT NULL DEFAULT 'ingreso', reparto TEXT, repartido INTEGER NOT NULL DEFAULT 0, observacion TEXT,
       estado TEXT NOT NULL DEFAULT 'ok', revision_motivo TEXT,
       usuario_id INTEGER, usuario TEXT, creado_en TEXT, eliminado_en TEXT);
   `);
@@ -579,4 +580,257 @@ test('la finca se busca UNA vez, no una consulta por lote', () => {
   assert.ok(m instanceof Map);
   assert.equal(m.get(10), 'La Esperanza');
   assert.equal(m.get(999), undefined);
+});
+
+// ══════════════════════════════════════════════════════════════════════════
+// 12 · LA MEZCLA ENTRE LOTES (V1115)
+// ══════════════════════════════════════════════════════════════════════════
+// Andy, 31/10/2026: «me tiene que dejar mezclar entre los lotes porque no
+// siempre tenemos bien en claro de qué lote es cada uno. Es decir es todo
+// Damasco».
+//
+// La tolva mezcla. Pedirle al operador que elija UN lote cuando hay tres
+// adentro es pedirle que invente, y una invención entra al rinde con la misma
+// cara que un dato medido.
+test('EL REPARTO ES A PRORRATA DE LO QUE LE QUEDA A CADA UNO', () => {
+  assert.deepEqual(pesosDelReparto([3000, 1000]), [0.75, 0.25]);
+  assert.deepEqual(pesosDelReparto([1000]), [1]);
+});
+
+test('sin pendiente en ninguno, va en PARTES IGUALES', () => {
+  // No hay de dónde prorratear. Es el caso de dos lotes ya terminados a los que
+  // se les carga algo que apareció después.
+  assert.deepEqual(pesosDelReparto([0, 0]), [0.5, 0.5]);
+  assert.deepEqual(pesosDelReparto([0, 0, 0, 0]), [0.25, 0.25, 0.25, 0.25]);
+});
+
+test('UN PENDIENTE NEGATIVO NO SE LLEVA KILOS DE OTRO', () => {
+  // Un lote con más procesado que volcado tiene pendiente negativo. Prorratear
+  // sobre eso daría un peso negativo: ese lote recibiría kilos EN CONTRA y el
+  // otro más de los que se cargaron — y los dos números son creíbles.
+  assert.deepEqual(pesosDelReparto([-500, 1000]), [0, 1]);
+  const ps = pesosDelReparto([-500, 300, 700]);
+  assert.equal(ps[0], 0);
+  assert.equal(Math.round((ps[1] + ps[2]) * 100), 100);
+});
+
+test('LA SUMA DEL REPARTO ES EXACTA, no 699,99', () => {
+  // Redondear cada parte por su cuenta hace que el total deje de coincidir con
+  // lo que se cargó, y la diferencia aparece como kilos que nadie procesó. El
+  // último se queda con el resto.
+  for (const [total, pesos] of [
+    [700, [1 / 3, 1 / 3, 1 / 3]],
+    [100, [0.75, 0.25]],
+    [0.05, [0.5, 0.5]],
+    [12345.67, [0.17, 0.33, 0.5]],
+  ]) {
+    const partes = repartir(total, pesos);
+    assert.equal(partes.length, pesos.length);
+    assert.equal(partes.reduce((a, b) => Math.round((a + b) * 100) / 100, 0), total,
+      'el reparto de ' + total + ' no cierra: ' + partes.join(' + '));
+  }
+});
+
+test('UNA CARGA MEZCLADA SE GUARDA COMO UNA FILA POR LOTE', () => {
+  // Y no como una fila «mezcla»: así el rinde por lote y el stock siguen siendo
+  // un GROUP BY y no hay una sola consulta que reescribir.
+  const db = base();
+  volcar(db, 3000, 10);
+  volcar(db, 1000, 11);
+  const pr = conCatalogo(db);
+  const r = registrarProceso(db, { fecha: F, lote_ids: [10, 11],
+    presentacion_id: pr.caja, bultos: 100, uuid: 'm1' });
+
+  assert.equal(r.ok, true);
+  assert.equal(r.ids.length, 2);
+  assert.deepEqual(r.reparto.pct, [75, 25]);
+
+  const filas = procesosDelDia(db, F);
+  assert.equal(filas.length, 2);
+  const porLote = {};
+  for (const f of filas) porLote[f.lote_id] = f;
+  assert.equal(porLote[10].kilos, 525);
+  assert.equal(porLote[11].kilos, 175);
+  assert.equal(porLote[10].kilos + porLote[11].kilos, 700,
+    'el reparto no suma lo que se cargó');
+  // Los bultos también se reparten, o el stock contaría 100 cajas de un lote.
+  assert.equal(porLote[10].bultos + porLote[11].bultos, 100);
+  // Y quedan marcadas: es una estimación, no una medición.
+  for (const f of filas) {
+    assert.equal(f.repartido, 1);
+    assert.ok(f.reparto, 'la fila no quedó atada al grupo del reparto');
+  }
+  assert.equal(filas[0].reparto, filas[1].reparto);
+});
+
+test('con UN lote no cambia nada: ni reparto ni marca', () => {
+  const db = base();
+  volcar(db, 1000, 10);
+  const pr = conCatalogo(db);
+  const r = registrarProceso(db, { fecha: F, lote_ids: [10], presentacion_id: pr.caja,
+    bultos: 100, uuid: 'a' });
+  assert.equal(r.fila.kilos, 700);
+  assert.equal(r.fila.repartido, 0);
+  assert.equal(r.fila.reparto, null);
+  assert.equal(r.reparto, null);
+  // Y `lote_id` a secas sigue andando igual que antes.
+  const b = registrarProceso(db, { fecha: F, lote_id: 10, presentacion_id: pr.caja,
+    bultos: 10, uuid: 'b' });
+  assert.equal(b.fila.kilos, 70);
+});
+
+test('el doble clic de una mezcla no la duplica', () => {
+  const db = base();
+  volcar(db, 3000, 10); volcar(db, 1000, 11);
+  const pr = conCatalogo(db);
+  const a = registrarProceso(db, { fecha: F, lote_ids: [10, 11],
+    presentacion_id: pr.caja, bultos: 100, uuid: 'm1' });
+  const b = registrarProceso(db, { fecha: F, lote_ids: [10, 11],
+    presentacion_id: pr.caja, bultos: 100, uuid: 'm1' });
+  assert.equal(b.ok, true);
+  assert.equal(b.repetido, true);
+  assert.equal(procesosDelDia(db, F).length, 2);
+  assert.equal(tableroProceso(db, F, [10, 11]).procesado, 700);
+  assert.ok(a.ids.indexOf(b.id) >= 0);
+});
+
+test('BORRAR UNA DEL REPARTO LAS BORRA A TODAS', () => {
+  // Media carga deshecha deja la otra mitad atribuida a un lote y los kilos que
+  // faltan en ningún lado — y el renglón que queda se ve igual de bien que
+  // cualquier otro.
+  const db = base();
+  volcar(db, 3000, 10); volcar(db, 1000, 11);
+  const pr = conCatalogo(db);
+  const r = registrarProceso(db, { fecha: F, lote_ids: [10, 11],
+    presentacion_id: pr.caja, bultos: 100, uuid: 'm1' });
+  const b = borrarProceso(db, r.ids[0]);
+  assert.equal(b.ok, true);
+  assert.equal(b.borradas, 2);
+  assert.equal(procesosDelDia(db, F).length, 0);
+  assert.equal(stockGalpon(db).kilos, 0);
+});
+
+test('borrar una carga SUELTA no se lleva a ninguna otra', () => {
+  const db = base();
+  volcar(db, 1000, 10);
+  const pr = conCatalogo(db);
+  const a = registrarProceso(db, { fecha: F, lote_id: 10, presentacion_id: pr.caja,
+    bultos: 10, uuid: 'a' });
+  registrarProceso(db, { fecha: F, lote_id: 10, presentacion_id: pr.caja,
+    bultos: 20, uuid: 'b' });
+  assert.equal(borrarProceso(db, a.id).borradas, 1);
+  assert.equal(procesosDelDia(db, F).length, 1);
+});
+
+test('el tablero SUMA los lotes elegidos', () => {
+  // Mostrar el pendiente de uno solo mientras se carga contra tres es un número
+  // que invita a procesar de más.
+  const db = base();
+  volcar(db, 3000, 10); volcar(db, 1000, 11);
+  const pr = conCatalogo(db);
+  registrarProceso(db, { fecha: F, lote_ids: [10, 11], presentacion_id: pr.verde,
+    kilos: 400, uuid: 'm' });
+  const uno = tableroProceso(db, F, 10);
+  const dos = tableroProceso(db, F, [10, 11]);
+  assert.equal(uno.volcado, 3000);
+  assert.equal(dos.volcado, 4000);
+  assert.equal(dos.procesado, 400);
+  assert.deepEqual(dos.lotes, [10, 11]);
+  assert.equal(tableroProceso(db, F, []).volcado, 0);
+});
+
+test('idsDeLotes limpia lo que llega: repetidos, basura y ceros', () => {
+  assert.deepEqual(idsDeLotes([10, '11', 10, 0, null, 'x', -3]), [10, 11]);
+  assert.deepEqual(idsDeLotes('10'), [10]);
+  assert.deepEqual(idsDeLotes(null), []);
+  assert.deepEqual(idsDeLotes(['']), []);
+});
+
+test('un lote que no existe no deja entrar la mezcla a medias', () => {
+  const db = base();
+  volcar(db, 1000, 10);
+  const pr = conCatalogo(db);
+  const r = registrarProceso(db, { fecha: F, lote_ids: [10, 999],
+    presentacion_id: pr.caja, bultos: 10, uuid: 'a' });
+  assert.equal(r.ok, false);
+  assert.match(r.motivo, /999/);
+  assert.equal(procesosDelDia(db, F).length, 0, 'entró la mitad de la mezcla');
+});
+
+// ══════════════════════════════════════════════════════════════════════════
+// 13 · CORREGIR UNA CARGA (V1115)
+// ══════════════════════════════════════════════════════════════════════════
+test('SE PUEDE CAMBIAR EL LOTE, que es la corrección que más se usa', () => {
+  // Y el tablero ya decía que un rinde de más de 100% «se arregla corrigiendo el
+  // lote de las cargas» — algo que hasta la V1115 no se podía hacer.
+  const db = base();
+  volcar(db, 1000, 10);
+  const pr = conCatalogo(db);
+  const r = registrarProceso(db, { fecha: F, lote_id: 10, presentacion_id: pr.caja,
+    bultos: 10, uuid: 'a' });
+  const e = editarProceso(db, r.id, { lote_id: 11 });
+  assert.equal(e.ok, true);
+  assert.equal(e.fila.lote_id, 11);
+  assert.equal(e.fila.lote_nombre, 'Cuadro 4', 'no volvió a congelar el nombre');
+  assert.equal(e.fila.kilos, 70);
+  assert.equal(tableroProceso(db, F, 10).procesado, 0);
+  assert.equal(tableroProceso(db, F, 11).procesado, 70);
+});
+
+test('el lote nuevo tiene que existir', () => {
+  const db = base();
+  volcar(db, 1000, 10);
+  const pr = conCatalogo(db);
+  const r = registrarProceso(db, { fecha: F, lote_id: 10, presentacion_id: pr.caja,
+    bultos: 10, uuid: 'a' });
+  assert.equal(editarProceso(db, r.id, { lote_id: 999 }).ok, false);
+  assert.equal(procesosDelDia(db, F)[0].lote_id, 10);
+});
+
+test('CAMBIAR LA PRESENTACIÓN CAMBIA EL DESTINO Y RECALCULA', () => {
+  // Cargar comercial lo que era descarte es un error de un clic. Y dejar los
+  // kilos viejos sería una fila que miente sobre sí misma: cien cajas de 7 kg
+  // sumando 300.
+  const db = base();
+  volcar(db, 1000, 10);
+  const pr = conCatalogo(db);
+  const r = registrarProceso(db, { fecha: F, lote_id: 10, presentacion_id: pr.caja,
+    bultos: 100, uuid: 'a' });
+  assert.equal(r.fila.destino, 'comercial');
+
+  const e = editarProceso(db, r.id, { presentacion_id: pr.desc, kilos: 55 });
+  assert.equal(e.fila.destino, 'descarte');
+  assert.equal(e.fila.presentacion, 'Bin de descarte');
+  assert.equal(e.fila.kilos, 55);
+  assert.equal(e.fila.bultos, null, 'quedó con los bultos de la presentación anterior');
+  assert.equal(e.fila.por_bulto, null);
+  const st = stockGalpon(db);
+  assert.equal(st.destinos.filter((d) => d.clave === 'comercial')[0].kilos, 0);
+  assert.equal(st.destinos.filter((d) => d.clave === 'descarte')[0].kilos, 55);
+});
+
+test('de granel a bultos también recalcula', () => {
+  const db = base();
+  volcar(db, 1000, 10);
+  const pr = conCatalogo(db);
+  const r = registrarProceso(db, { fecha: F, lote_id: 10, presentacion_id: pr.verde,
+    kilos: 300, uuid: 'a' });
+  const e = editarProceso(db, r.id, { presentacion_id: pr.caja, bultos: 10 });
+  assert.equal(e.fila.destino, 'comercial');
+  assert.equal(e.fila.bultos, 10);
+  assert.equal(e.fila.kilos, 70);
+});
+
+test('corregir el lote no pisa lo que no vino', () => {
+  const db = base();
+  volcar(db, 1000, 10);
+  const pr = conCatalogo(db);
+  const r = registrarProceso(db, { fecha: F, lote_id: 10, presentacion_id: pr.caja,
+    bultos: 100, observacion: 'turno tarde', uuid: 'a', usuario: 'Andy' });
+  const e = editarProceso(db, r.id, { lote_id: 11 });
+  assert.equal(e.fila.observacion, 'turno tarde');
+  assert.equal(e.fila.bultos, 100);
+  assert.equal(e.fila.kilos, 700);
+  assert.equal(e.fila.presentacion, 'Caja cartón · 10 × 700 g');
+  assert.equal(e.fila.usuario, 'Andy');
 });

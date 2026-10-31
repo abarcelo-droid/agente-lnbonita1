@@ -240,6 +240,9 @@ db.exec(`
     -- rinde de la temporada es exactamente esta columna.
     kilos           REAL NOT NULL,
     tipo            TEXT NOT NULL DEFAULT 'ingreso',
+    -- Una carga repartida entre varios lotes: ver el comentario del ALTER más abajo.
+    reparto         TEXT,
+    repartido       INTEGER NOT NULL DEFAULT 0,
     observacion     TEXT,
     estado          TEXT NOT NULL DEFAULT 'ok',
     revision_motivo TEXT,
@@ -258,6 +261,23 @@ db.exec(`
 for (const sql of [
   "ALTER TABLE gal_cuadrilla_tarjetas ADD COLUMN notas TEXT",
   "ALTER TABLE gal_lote_vigente ADD COLUMN producto TEXT",
+  // ── CUANDO NO SE SABE DE QUÉ LOTE ES ────────────────────────────────────────────
+  // Andy, 31/10/2026: «me tiene que dejar mezclar entre los lotes porque no siempre
+  // tenemos bien en claro de qué lote es cada uno. Es decir es todo Damasco».
+  //
+  // La tolva mezcla, y pedirle al operador que elija UN lote cuando hay tres adentro
+  // es pedirle que invente. Una carga puede repartirse entre varios: se escribe una
+  // FILA POR LOTE —así el rinde por lote y el stock siguen siendo un GROUP BY y no hay
+  // una sola consulta que reescribir— y las filas de un mismo reparto comparten esto:
+  //
+  //   reparto   el uuid del grupo. Deshacer una tiene que deshacerlas a todas, o queda
+  //             media carga atribuida y la otra mitad no.
+  //   repartido 1 = estos kilos son una ESTIMACIÓN, no una medición. Importa que se
+  //             vea: el rinde de un lote hecho de prorrateos no es el mismo dato que
+  //             el de un lote que entró solo.
+  "ALTER TABLE gal_procesos ADD COLUMN reparto TEXT",
+  "ALTER TABLE gal_procesos ADD COLUMN repartido INTEGER NOT NULL DEFAULT 0",
+  "CREATE INDEX IF NOT EXISTS gal_proc_reparto_idx ON gal_procesos(reparto)",
   // DOS TRAMOS A LA MISMA HORA DEL MISMO DÍA NO PUEDEN EXISTIR. loteVigente ordena por
   // hora y después por id, así que el segundo le gana al primero EN SILENCIO: el tramo
   // de la mañana queda listado en la pantalla, se ve igualito, y no atribuye un kilo.

@@ -952,15 +952,59 @@ const numPos = (v) => {
   return n != null && n > 0 ? n : null;
 };
 
+// ── REPARTIR UNA CARGA ENTRE VARIOS LOTES ───────────────────────────────────────────
+// Andy, 31/10/2026: «me tiene que dejar mezclar entre los lotes porque no siempre
+// tenemos bien en claro de qué lote es cada uno. Es decir es todo Damasco».
+//
+// A PRORRATA DE LO QUE LE QUEDA EN LA TOLVA A CADA UNO. Es la mejor aproximación que
+// hay: si del Cuadro 3 quedan 3.000 kg sin procesar y del Cuadro 4 quedan 1.000, lo que
+// sale ahora es 75% y 25%. No es una medición y el sistema no finge que lo sea — las
+// filas quedan marcadas `repartido`.
+//
+// Partes iguales SÓLO cuando no hay de dónde prorratear (ninguno tiene pendiente, o ya
+// se procesó de más en todos). Prorratear sobre números negativos daría pesos negativos
+// y un lote llevándose kilos de otro.
+export function pesosDelReparto(pendientes) {
+  const n = pendientes.length;
+  if (!n) return [];
+  const positivos = pendientes.map((x) => (Number(x) > 0 ? Number(x) : 0));
+  const total = positivos.reduce((t, x) => t + x, 0);
+  if (total <= 0) return pendientes.map(() => 1 / n);
+  return positivos.map((x) => x / total);
+}
+
+// EL ÚLTIMO SE QUEDA CON EL RESTO. Repartir 700 en tres y redondear cada parte da
+// 699,99 o 700,01: el total deja de coincidir con lo que se cargó, y la diferencia
+// aparece como kilos que nadie procesó. Se reparten n-1 redondeados y el último es la
+// resta, así la suma cierra exacta siempre.
+export function repartir(total, pesos) {
+  const t = round2(total);
+  const partes = [];
+  let usado = 0;
+  for (let i = 0; i < pesos.length - 1; i++) {
+    const x = round2(t * pesos[i]);
+    partes.push(x);
+    usado = round2(usado + x);
+  }
+  partes.push(round2(t - usado));
+  return partes;
+}
 // ── CARGAR UN PROCESO ───────────────────────────────────────────────────────────────
 export function registrarProceso(db, d) {
   const dd = d || {};
   const fecha = esFecha(dd.fecha);
   if (!fecha) return { ok: false, motivo: 'La fecha tiene que ser YYYY-MM-DD' };
-  const loteId = parseInt(dd.lote_id, 10);
-  if (!Number.isFinite(loteId) || loteId <= 0) {
-    return { ok: false, motivo: 'Elegí el lote del que salió esto' };
+  /* UNO O VARIOS. `lote_ids` es la mezcla; `lote_id` sigue andando igual y es lo que
+     manda la pantalla cuando hay uno solo elegido. */
+  const crudos = Array.isArray(dd.lote_ids) && dd.lote_ids.length ? dd.lote_ids
+    : [dd.lote_id];
+  const lotes = [];
+  for (const x of crudos) {
+    const n = parseInt(x, 10);
+    if (Number.isFinite(n) && n > 0 && lotes.indexOf(n) < 0) lotes.push(n);
   }
+  if (!lotes.length) return { ok: false, motivo: 'Elegí el lote del que salió esto' };
+  const loteId = lotes[0];
 
   // La presentación manda: de ahí salen el destino y los dos multiplicadores. Tomarlos
   // del cuerpo del pedido dejaría que una caja de 700 g entre con el peso de un bin.
@@ -1001,30 +1045,76 @@ export function registrarProceso(db, d) {
       + 'Si la presentación está en gramos donde van kilos, la cuenta se va por mil.';
   }
 
-  // El lote y el producto se congelan desde la BASE, no desde lo que mandó la pantalla:
-  // dos pantallas con distinta versión del padrón escribirían dos nombres para el mismo
+  // Los nombres se congelan desde la BASE, no desde lo que mandó la pantalla: dos
+  // pantallas con distinta versión del padrón escribirían dos nombres para el mismo
   // lote y el informe por lote los contaría separados.
-  const lote = db.prepare('SELECT nombre FROM pa_lotes WHERE id = ?').get(loteId);
-  if (!lote) return { ok: false, motivo: 'Ese lote no existe' };
+  const nombres = [];
+  for (const id of lotes) {
+    const l = db.prepare('SELECT nombre FROM pa_lotes WHERE id = ?').get(id);
+    if (!l) return { ok: false, motivo: 'El lote ' + id + ' no existe' };
+    nombres.push(l.nombre);
+  }
 
-  const r = db.prepare(
+  /* EL REPARTO, a prorrata de lo que le queda en la tolva a cada uno. Con un lote solo
+     esto es [1] y no cambia nada de lo que había. */
+  const esMezcla = lotes.length > 1;
+  const pend = lotes.map((id) => {
+    const v = db.prepare(
+      ' SELECT COALESCE(SUM(kilos),0) AS k FROM gal_volcados'
+      + '  WHERE lote_id = ? AND eliminado_en IS NULL').get(id).k || 0;
+    const pr = db.prepare(
+      " SELECT COALESCE(SUM(CASE WHEN tipo = 'ingreso' THEN kilos ELSE -kilos END),0) AS k"
+      + '  FROM gal_procesos WHERE lote_id = ? AND eliminado_en IS NULL').get(id).k || 0;
+    return v - pr;
+  });
+  const pesos = pesosDelReparto(pend);
+  const kilosPorLote = repartir(kg, pesos);
+  const bultosPorLote = bultos == null ? lotes.map(() => null) : repartir(bultos, pesos);
+  const grupo = esMezcla ? (txt(dd.uuid) || String(Date.now()) + Math.random()) : null;
+
+  const ins = db.prepare(
     ' INSERT OR IGNORE INTO gal_procesos (uuid,fecha,lote_id,lote_nombre,producto,destino,'
     + ' presentacion_id,presentacion,envase,bultos,por_bulto,kg_unidad,kilos,tipo,'
-    + ' observacion,estado,revision_motivo,usuario_id,usuario)'
-    + " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,'ingreso',?,?,?,?,?)").run(
-    txt(dd.uuid), fecha, loteId, lote.nombre, txt(dd.producto), destino,
-    pres ? pres.id : null, pres ? pres.nombre : null, pres ? pres.envase : txt(dd.envase),
-    bultos, porBulto, kgUnidad, kg, txt(dd.observacion), estado, motivo,
-    dd.usuario_id || null, txt(dd.usuario));
+    + ' reparto,repartido,observacion,estado,revision_motivo,usuario_id,usuario)'
+    + " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,'ingreso',?,?,?,?,?,?,?)");
 
-  if (!r.changes) {
-    // Mismo uuid dos veces: el doble clic. No es un error — la carga ya entró.
-    const ya = db.prepare('SELECT * FROM gal_procesos WHERE uuid = ?').get(txt(dd.uuid));
-    return { ok: true, id: ya ? ya.id : null, fila: ya, repetido: true };
+  /* EL DOBLE CLIC. Si el primer uuid ya está, la carga entró entera y no se hace
+     nada: el INSERT OR IGNORE de abajo protege la carrera, pero mirar primero es lo
+     que deja contestar «ya estaba» en vez de «no se pudo guardar». */
+  const u0 = txt(dd.uuid) ? (esMezcla ? dd.uuid + '#' + lotes[0] : dd.uuid) : null;
+  if (u0) {
+    const ya = db.prepare('SELECT * FROM gal_procesos WHERE uuid = ?').get(u0);
+    if (ya) return { ok: true, id: ya.id, ids: [ya.id], fila: ya, repetido: true };
   }
-  const id = Number(r.lastInsertRowid);
-  return { ok: true, id, fila: db.prepare('SELECT * FROM gal_procesos WHERE id = ?').get(id),
-           aviso: motivo };
+
+  const ids = [];
+  for (let i = 0; i < lotes.length; i++) {
+    /* El uuid es UNICO, así que las filas de un reparto no pueden compartirlo: lleva
+       sufijo. La idempotencia sigue valiendo igual —el mismo doble clic manda los
+       mismos n uuids— y el grupo se reconoce por `reparto`. */
+    const u = txt(dd.uuid) ? (esMezcla ? dd.uuid + '#' + lotes[i] : dd.uuid) : null;
+    const r = ins.run(
+      u, fecha, lotes[i], nombres[i], txt(dd.producto), destino,
+      pres ? pres.id : null, pres ? pres.nombre : null,
+      pres ? pres.envase : txt(dd.envase),
+      bultosPorLote[i], porBulto, kgUnidad, kilosPorLote[i],
+      grupo, esMezcla ? 1 : 0,
+      txt(dd.observacion), estado, motivo, dd.usuario_id || null, txt(dd.usuario));
+    if (r.changes) ids.push(Number(r.lastInsertRowid));
+    else if (u) {
+      const ya = db.prepare('SELECT id FROM gal_procesos WHERE uuid = ?').get(u);
+      if (ya) ids.push(ya.id);
+    }
+  }
+  if (!ids.length) return { ok: false, motivo: 'No se pudo guardar' };
+
+  return {
+    ok: true, id: ids[0], ids,
+    fila: db.prepare('SELECT * FROM gal_procesos WHERE id = ?').get(ids[0]),
+    reparto: esMezcla ? { grupo, lotes, nombres, kilos: kilosPorLote,
+                          pct: pesos.map((x) => Math.round(x * 1000) / 10) } : null,
+    aviso: motivo,
+  };
 }
 
 // Sólo lo que VINO. Un PATCH que pise con null lo que no mandaron convierte corregir los
@@ -1047,17 +1137,57 @@ export function editarProceso(db, id, d) {
     poner('fecha', f);
   }
 
+  /* EL LOTE. Es la corrección que más se va a usar: la tolva mezcla y recién al rato
+     se sabe de dónde era. El nombre se vuelve a congelar desde la base, igual que al
+     cargar — creerle el que manda la pantalla escribiría dos nombres para el mismo
+     lote y el rinde los contaría separados. */
+  if ('lote_id' in dd) {
+    const l = parseInt(dd.lote_id, 10);
+    if (!Number.isFinite(l) || l <= 0) return { ok: false, motivo: 'Elegí el lote' };
+    const lote = db.prepare('SELECT nombre FROM pa_lotes WHERE id = ?').get(l);
+    if (!lote) return { ok: false, motivo: 'Ese lote no existe' };
+    poner('lote_id', l);
+    poner('lote_nombre', lote.nombre);
+  }
+
+  /* LA PRESENTACIÓN, que arrastra el destino y la cuenta. Cargar comercial lo que era
+     descarte es un error de un clic y hoy obligaba a borrar y cargar de nuevo.
+     Al cambiarla se recalculan los kilos con SU cuenta: dejar los viejos sería una
+     fila que miente sobre sí misma — cien cajas de 7 kg sumando 300. */
+  let pres = null;
+  if ('presentacion_id' in dd) {
+    const pid = parseInt(dd.presentacion_id, 10);
+    if (!Number.isFinite(pid) || pid <= 0) return { ok: false, motivo: 'Elegí la presentación' };
+    pres = db.prepare('SELECT * FROM gal_presentaciones WHERE id = ? AND eliminado_en IS NULL')
+             .get(pid);
+    if (!pres) return { ok: false, motivo: 'Esa presentación no existe' };
+    poner('presentacion_id', pres.id);
+    poner('presentacion', pres.nombre);
+    poner('envase', pres.envase);
+    poner('destino', pres.destino);
+    poner('por_bulto', pres.granel ? null : pres.por_bulto);
+    poner('kg_unidad', pres.granel ? null : pres.kg_unidad);
+  }
+
   let kg = fila.kilos;
-  if ('bultos' in dd && fila.bultos != null) {
-    const b = numPos(dd.bultos);
+  /* Si cambió la presentación, manda la nueva; si no, la que tenía la fila. Y eso
+     decide también QUÉ se pide: bultos o kilos. */
+  const granel = pres ? !!pres.granel : fila.bultos == null;
+  const porB = pres ? pres.por_bulto : fila.por_bulto;
+  const kgU = pres ? pres.kg_unidad : fila.kg_unidad;
+
+  if (!granel) {
+    const b = 'bultos' in dd ? numPos(dd.bultos) : fila.bultos;
     if (b == null) return { ok: false, motivo: 'Poné cuántos bultos entraron' };
-    kg = kilosDeProceso(b, fila.por_bulto, fila.kg_unidad);
+    kg = kilosDeProceso(b, porB, kgU);
+    if (kg == null) return { ok: false, motivo: 'La presentación tiene mal la cuenta' };
     poner('bultos', b);
     poner('kilos', kg);
-  } else if ('kilos' in dd && fila.bultos == null) {
-    const k = numPos(dd.kilos);
+  } else if (pres || 'kilos' in dd) {
+    const k = 'kilos' in dd ? numPos(dd.kilos) : fila.kilos;
     if (k == null) return { ok: false, motivo: 'Poné los kilos' };
     kg = k;
+    poner('bultos', null);
     poner('kilos', kg);
   }
 
@@ -1079,51 +1209,71 @@ export function editarProceso(db, id, d) {
            fila: db.prepare('SELECT * FROM gal_procesos WHERE id = ?').get(i) };
 }
 
+/* Borrar una carga REPARTIDA se las lleva a todas. Media carga deshecha deja la otra
+   mitad atribuida a un lote y los kilos que faltan en ningún lado — y nadie lo ve,
+   porque el renglón que queda se ve igual de bien que cualquier otro. */
 export function borrarProceso(db, id) {
   const i = parseInt(id, 10);
   if (!Number.isFinite(i)) return { ok: false, motivo: 'Id inválido' };
-  const r = db.prepare(
-    "UPDATE gal_procesos SET eliminado_en = datetime('now','localtime')"
-    + ' WHERE id = ? AND eliminado_en IS NULL').run(i);
-  if (!r.changes) return { ok: false, motivo: 'Ese proceso no existe o ya se borró' };
-  return { ok: true };
+  const fila = db.prepare(
+    'SELECT reparto FROM gal_procesos WHERE id = ? AND eliminado_en IS NULL').get(i);
+  if (!fila) return { ok: false, motivo: 'Ese proceso no existe o ya se borró' };
+  const r = fila.reparto
+    ? db.prepare("UPDATE gal_procesos SET eliminado_en = datetime('now','localtime')"
+        + ' WHERE reparto = ? AND eliminado_en IS NULL').run(fila.reparto)
+    : db.prepare("UPDATE gal_procesos SET eliminado_en = datetime('now','localtime')"
+        + ' WHERE id = ? AND eliminado_en IS NULL').run(i);
+  return { ok: true, borradas: r.changes };
 }
 
 // ── LO PROCESADO UN DÍA ─────────────────────────────────────────────────────────────
 export function procesosDelDia(db, fecha, loteId) {
   const f = esFecha(fecha);
   if (!f) return [];
-  const l = parseInt(loteId, 10);
-  const hayLote = Number.isFinite(l) && l > 0;
+  const ls = idsDeLotes(loteId);
   return db.prepare(
     ' SELECT * FROM gal_procesos'
     + '  WHERE fecha = ? AND eliminado_en IS NULL'
-    + (hayLote ? ' AND lote_id = ?' : '')
-    + '  ORDER BY id DESC').all(...(hayLote ? [f, l] : [f]));
+    + (ls.length ? ' AND lote_id IN (' + ls.map(() => '?').join(',') + ')' : '')
+    + '  ORDER BY id DESC').all(f, ...ls);
 }
 
 // ── EL TABLERO DEL LOTE: CUÁNTO ENTRÓ, CUÁNTO SALIÓ Y ADÓNDE ────────────────────────
 // Es lo que hace que la pantalla de proceso no sea un formulario a ciegas: mientras se
 // carga se ve cuánto queda de la tolva y cómo viene el reparto.
+// Uno, varios, o ninguno. Devuelve siempre la misma forma: una pantalla que tiene que
+// preguntar si el tablero vino vacío o vino con otra forma es una pantalla con dos
+// caminos y uno de los dos sin probar.
+export function idsDeLotes(v) {
+  const crudos = Array.isArray(v) ? v : [v];
+  const out = [];
+  for (const x of crudos) {
+    const n = parseInt(x, 10);
+    if (Number.isFinite(n) && n > 0 && out.indexOf(n) < 0) out.push(n);
+  }
+  return out;
+}
+
 export function tableroProceso(db, fecha, loteId) {
   const f = esFecha(fecha);
-  const l = parseInt(loteId, 10);
+  const ls = idsDeLotes(loteId);
   const vacio = { volcado: 0, procesado: 0, sin_procesar: 0, cargas: 0, destinos: {},
-                  rinde: null, de_mas: false };
-  if (!f || !Number.isFinite(l) || l <= 0) return vacio;
+                  rinde: null, de_mas: false, lotes: [] };
+  if (!f || !ls.length) return vacio;
+  const marcas = ls.map(() => '?').join(',');
 
   // El volcado del lote NO se corta por día: la fruta que entró el martes se puede
   // procesar el jueves, y un tablero que sólo mira hoy diría que se procesó de más.
   const v = db.prepare(
     ' SELECT COALESCE(SUM(kilos),0) AS kilos FROM gal_volcados'
-    + '  WHERE lote_id = ? AND eliminado_en IS NULL').get(l);
+    + '  WHERE lote_id IN (' + marcas + ') AND eliminado_en IS NULL').get(...ls);
 
   const filas = db.prepare(
     ' SELECT destino,'
     + "       COALESCE(SUM(CASE WHEN tipo = 'ingreso' THEN kilos ELSE -kilos END),0) AS kilos,"
     + '       COUNT(*) AS cargas'
-    + '  FROM gal_procesos WHERE lote_id = ? AND eliminado_en IS NULL'
-    + '  GROUP BY destino').all(l);
+    + '  FROM gal_procesos WHERE lote_id IN (' + marcas + ') AND eliminado_en IS NULL'
+    + '  GROUP BY destino').all(...ls);
 
   const destinos = {};
   let procesado = 0, cargas = 0;
@@ -1142,6 +1292,7 @@ export function tableroProceso(db, fecha, loteId) {
     sin_procesar: round2(volcado - procesado),
     rinde: volcado > 0 ? Math.round((destinos.comercial / volcado) * 1000) / 10 : null,
     de_mas: procesado > volcado,
+    lotes: ls,
   };
 }
 
