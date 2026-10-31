@@ -1378,3 +1378,145 @@ test('el servicio devuelve la finca en los cuatro lugares que la muestran', () =
   assert.match(ACUM, /finca: fincas\.get\(l\.gid\)/);
   assert.match(cuerpoServicio('export function resumenDelDia('), /finca: fincas\.get/);
 });
+
+// ══════════════════════════════════════════════════════════════════════════
+// 11 · ⚖️ LA BALANZA, CONTRA EL CÓDIGO (V1114)
+// ══════════════════════════════════════════════════════════════════════════
+// El parser se ejecuta de verdad en test/galpon_balanza.test.mjs. Acá se clava
+// lo que el MANUAL promete sobre cómo se comporta la pantalla.
+const JS_BAL = bloqueJs('var GBAL = {');
+const MOD_BAL = bloqueHtml('id="gal-bal-modal"');
+
+test('el archivo de la balanza se sirve y la pantalla lo carga', () => {
+  // Vive en la RAÍZ de src: estaticos_publicos.js prohíbe las subcarpetas, así
+  // que un balanza.js adentro de servicios/ daría 404 y la pantalla fallaría
+  // recién al abrirla.
+  assert.ok(fs.existsSync(path.join(RAIZ, 'src/balanza.js')));
+  assert.ok(!fs.existsSync(path.join(RAIZ, 'src/servicios/balanza.js')),
+    'está en una subcarpeta: /static no la sirve');
+  assert.match(PANEL, /<script src="\/static\/balanza\.js" defer><\/script>/);
+});
+
+test('MANUAL KG: «la balanza rellena, no carga»', () => {
+  diceKg(/La balanza rellena, no carga/);
+  diceKg(/cada vez que alguien se apoya en la plataforma/);
+  // Y es cierto: la lectura escribe el casillero y NO dispara ninguna carga.
+  const lec = JS_BAL.slice(JS_BAL.indexOf('function galBalLectura('),
+                           JS_BAL.indexOf('function galBalAbrir('));
+  assert.ok(lec.length > 200, 'el corte de galBalLectura quedó vacío');
+  assert.ok(!/galRapCargar|galKgGuardar|galPrCargarUno/.test(sinComentarios(lec)),
+    'la balanza carga sola: un peso estable crea un renglón sin que nadie lo vea');
+  assert.match(lec, /c\.value = String\(l\.kilos\);/);
+});
+
+test('MANUAL KG: «se escribe cuando está firme y cuando cambió»', () => {
+  diceKg(/cuando está firme y cuando cambió/);
+  const lec = JS_BAL.slice(JS_BAL.indexOf('function galBalLectura('),
+                           JS_BAL.indexOf('function galBalAbrir('));
+  // Inestable no escribe...
+  assert.match(lec, /if \(!l \|\| l\.estable === false\) return;/);
+  // ...pero «no dice si está estable» SÍ, que es otra cosa.
+  assert.ok(!/l\.estable !== true/.test(lec),
+    'trata «no dice» como inestable: una balanza que no manda el estado no cargaría nunca');
+  // Y no se vuelve a escribir el mismo peso, o pisaría una corrección a mano.
+  assert.match(lec, /Math\.abs\(l\.kilos - GBAL\.ultimo\) < 0\.02/);
+});
+
+test('MANUAL KG: «un peso de menos de 1 kg se ignora»', () => {
+  // Al levantar el cajón la balanza vuelve a cero, y sin esto el casillero se
+  // vacía justo antes del Enter.
+  diceKg(/vuelve a cero, y sin eso el casillero se vaciaría/);
+  assert.match(JS_BAL, /var GBAL_MIN = 1;/);
+  assert.match(JS_BAL, /if \(Math\.abs\(l\.kilos\) < GBAL_MIN\) return;/);
+});
+
+test('LA BALANZA SUELTA EL CASILLERO AL CERRAR LA VENTANA', () => {
+  // Si no, seguiría escribiendo en un campo que ya nadie ve, y el peso del
+  // cajón siguiente entraría en una ventana cerrada.
+  for (const fn of ['galRapCerrar', 'galKgCerrar']) {
+    const c = PANEL.slice(PANEL.indexOf('function ' + fn + '('),
+                          PANEL.indexOf('function ' + fn + '(') + 420);
+    assert.match(c, /galBalApuntar\(null, null\)/, fn + ' no suelta el casillero');
+  }
+  // Y lo toma al abrir cada una, apuntando a SU campo.
+  assert.match(PANEL, /galBalApuntar\('grp-kilos', 'gal-bal-chip-rap'\)/);
+  assert.match(PANEL, /galBalApuntar\('gal-kg-kilos', 'gal-bal-chip-kg'\)/);
+});
+
+test('MANUAL KG: «cada carga guarda de dónde salió el peso»', () => {
+  diceKg(/de dónde salió el peso/);
+  diceKg(/la balanza está rota y nadie '\s*\+\s*'avisó|balanza está rota/);
+  // Viaja en las dos ventanas...
+  assert.equal((PANEL.match(/origen: GBAL\.usada \? 'balanza' : 'manual',/g) || []).length, 2);
+  // ...y el servidor no se cree cualquier cosa: es una lista, no texto libre.
+  assert.match(SERV, /export const ORIGENES = \['manual', 'balanza', 'escaneo'\];/);
+  assert.match(SERV, /origenDe\(dd\.origen\)/);
+  // Y lo que no está en la lista entra como manual, no se rechaza: acá nada se
+  // rechaza después del hecho.
+  assert.match(SERV, /ORIGENES\.indexOf\(String\(v \|\| ''\)\) >= 0 \? String\(v\) : 'manual'/);
+});
+
+test('EL PESO DE LA BALANZA SE SUELTA DESPUÉS DE CARGAR', () => {
+  // Si no, una corrección a mano del cajón siguiente quedaría firmada como
+  // pesada por la balanza.
+  assert.equal((PANEL.match(/GBAL\.usada = false;/g) || []).length, 3,
+    'falta soltar GBAL.usada en alguna de las dos ventanas, o al apuntar');
+});
+
+test('MANUAL KG: «tarala vos, el sistema no le resta nada»', () => {
+  // Tarar por software encima de la tecla TARA del indicador serían dos kilos
+  // menos por cajón: una tonelada cada quinientos, sin que nada avise.
+  diceKg(/Tarala vos, con un IFCO vacío/);
+  diceKg(/una tonelada cada quinientos/);
+  assert.ok(!/tara_ifco/.test(sinComentarios(JS_BAL)),
+    'la pantalla le resta la tara al peso de la balanza');
+  // Y el seed dejó de decir que se resta, que es lo que decía y ya no es cierto.
+  assert.match(DDL, /HOY NO SE LE RESTA A NADA/);
+});
+
+test('MANUAL: «hace falta Chrome o Edge de escritorio», y la pantalla lo dice', () => {
+  diceKg(/Hace falta Chrome o Edge de escritorio/);
+  const cfg = manualDe('galpon-config');
+  assert.match(cfg, /Chrome o Edge de escritorio/);
+  // Y no sólo en el manual: el probador lo explica cuando no se puede.
+  assert.match(JS_BAL, /Web Serial '\s*\r?\n?\s*\+ 'existe sólo en|Web Serial/);
+  assert.match(JS_BAL, /no está, y no hay forma de habilitarlo/);
+});
+
+test('SIN WEB SERIAL NO SE OFRECE NADA', () => {
+  // Un botón que no puede funcionar es peor que no tenerlo: el operador lo
+  // aprieta, no pasa nada, y deja de confiar en el resto de la pantalla.
+  diceKg(/no aparece nada<\/b> y se carga '\s*\+\s*'a mano|no aparece nada/);
+  const chip = JS_BAL.slice(JS_BAL.indexOf('function galBalChip('),
+                            JS_BAL.indexOf('function galBalApuntar('));
+  assert.match(chip, /if \(!galBalHay\(\)\)\{/);
+  assert.match(chip, /el\.innerHTML = ''; return;/);
+});
+
+test('la ventana del probador vive fuera de toda pantalla', () => {
+  assert.match(PANEL, /<div class="ab-modal-overlay sg-mod" id="gal-bal-modal">/);
+  // Muestra las dos cosas: el crudo y lo interpretado. Una sola no alcanza —
+  // con el texto solo no se ve dónde corta la trama ni si son los baudios.
+  assert.match(MOD_BAL, /id="gal-bal-crudo"/);
+  assert.match(MOD_BAL, /id="gal-bal-leido"/);
+  assert.match(JS_BAL, /BAL\.hex\(bytes\)/);
+  assert.match(JS_BAL, /BAL\.visible\(texto\)/);
+});
+
+test('el puerto ya autorizado se reusa, o habría que elegirlo cada mañana', () => {
+  // El navegador pide un gesto sólo la primera vez: getPorts() devuelve los
+  // que ya se autorizaron. Sin esto, cada recarga de la pantalla es un diálogo.
+  assert.match(JS_BAL, /async function galBalReconectar\(\)/);
+  assert.match(JS_BAL, /var p = await BAL\.recordado\(\);/);
+  assert.match(JS_BAL, /\(await BAL\.recordado\(\)\) \|\| \(await BAL\.pedirPuerto\(\)\)/);
+  assert.match(PANEL, /if \(galBalHay\(\) && !BAL\.estado\.conectada\) galBalReconectar\(\);/);
+});
+
+test('los baudios se piden UNA vez y quedan', () => {
+  // La pantalla de carga no carga toda la configuración, y un pedido por cada
+  // reconexión sería uno por cada vez que se abre la ventana.
+  assert.match(JS_BAL, /if \(GBAL\.baudios\) return GBAL\.baudios;/);
+  assert.match(JS_BAL, /balanza_baudios/);
+  // Y la clave ya estaba declarada como guardable, no hace falta tocar el router.
+  assert.match(RUTA, /'balanza_puerto', 'balanza_baudios'\]/);
+});

@@ -272,7 +272,15 @@ for (const sql of [
 // primera pantalla que los lea tendría que inventarse un default por su cuenta — y dos
 // pantallas se inventarían dos distintos.
 for (const [clave, valor] of [
-  // La tara del IFCO vacío, en kg. Es lo que se le resta al bruto de la balanza.
+  // La tara del IFCO vacío, en kg.
+  //
+  // OJO: HOY NO SE LE RESTA A NADA. Esta línea decía «es lo que se le resta al bruto
+  // de la balanza» y desde la V1114 eso es falso: el indicador tiene su propia tecla
+  // TARA, y la práctica es apoyar un IFCO vacío y tararlo ahí. Restar los dos kilos
+  // de nuevo por software, encima de eso, serían dos kilos menos por cajón — una
+  // tonelada por cada quinientos, desaparecida sin que nada avise.
+  //
+  // Queda para el circuito de escaneo, donde el peso bruto va a entrar sin tarar.
   ['tara_ifco', '2.0'],
   // El objetivo de ritmo del galpón. El tablero pinta el kg/h contra esto.
   ['objetivo_kg_hora', '733'],

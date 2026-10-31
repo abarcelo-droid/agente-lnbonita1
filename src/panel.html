@@ -159,6 +159,9 @@ input[type=number]{-moz-appearance:textfield;appearance:textfield}
 <link rel="stylesheet" href="/static/ifco2.css">
 <script src="/static/lucide.min.js" defer></script>
 <script src="/static/ifco2.js" defer></script>
+<!-- La balanza por puerto serie. Sin defer no serviría: el panel la usa recién
+     cuando alguien abre la carga de kilos. -->
+<script src="/static/balanza.js" defer></script>
 <style>
   /* Evitar el FOUC del sidebar viejo: cuando carga el sidebar v2 (sb-v2),
      el nav original queda como "fuente de verdad" pero NO debe renderizarse.
@@ -7020,6 +7023,16 @@ input[type=number]{-moz-appearance:textfield;appearance:textfield}
          la pantalla de proceso: una caja mal definida multiplica mal todas las cargas
          que entren con ella, y eso es el rinde de la temporada. -->
     <div class="gal-h2" style="display:flex;align-items:baseline;gap:12px">
+      <span>⚖️ La balanza</span>
+      <button class="btn bp bs" onclick="galBalAbrir()">Probar la balanza</button>
+    </div>
+    <div class="gal-ay" style="max-width:none;margin-bottom:18px">Se conecta por el
+      puerto serie del indicador (un cable RS-232 y un adaptador a USB). Hace falta
+      <b>Chrome o Edge de escritorio</b>: en celular y en Safari no existe Web Serial.
+      El probador muestra lo que manda el aparato tal cual llega, que es la única
+      forma de ajustar la lectura sin el manual.</div>
+
+    <div class="gal-h2" style="display:flex;align-items:baseline;gap:12px">
       <span>📦 En qué sale la fruta</span>
       <button class="btn bp bs" onclick="galPresAbrir()">+ Nueva presentación</button>
     </div>
@@ -7278,6 +7291,29 @@ input[type=number]{-moz-appearance:textfield;appearance:textfield}
       #gal-kg-modal .gkg-ok{border:1px solid #2e9e5b;background:rgba(46,158,91,.10);
         border-radius:8px;padding:9px 11px;font-size:12.5px}
 
+      /* ── ⚖️ LA BALANZA ─────────────────────────────────────────────────── */
+      #gal-bal-modal .gbl-dos{display:flex;gap:12px;flex-wrap:wrap;margin-top:4px}
+      #gal-bal-modal .gbl-caja{flex:1 1 300px;min-width:0;border:1px solid var(--bor);
+        border-radius:10px;padding:10px 12px}
+      #gal-bal-modal .gbl-caja h4{margin:0 0 7px;font-size:11px;color:var(--mut);
+        text-transform:uppercase;letter-spacing:.4px}
+      /* Monoespaciada y con los bytes en columna: así se ve dónde se corta la trama. */
+      #gal-bal-modal .gbl-mono{font-family:ui-monospace,Menlo,Consolas,monospace;
+        font-size:11.5px;line-height:1.5;max-height:34vh;overflow-y:auto;
+        white-space:pre-wrap;word-break:break-all;color:var(--txt)}
+      #gal-bal-modal .gbl-mono .h{color:var(--mut)}
+      #gal-bal-modal .gbl-mono .no{color:#b3261e}
+      #gal-bal-modal .gbl-mono .si{color:#16a34a;font-weight:700}
+
+      /* El chip de la balanza adentro de las ventanas de carga. */
+      .gbl-chip{display:inline-flex;align-items:center;gap:7px;border:1px solid var(--bor);
+        border-radius:999px;padding:4px 11px;font-size:12px;margin-bottom:10px}
+      .gbl-chip b{font-variant-numeric:tabular-nums}
+      .gbl-chip.on{border-color:#16a34a;background:rgba(22,163,74,.08)}
+      .gbl-chip.mov{border-color:#d97706;background:rgba(217,119,6,.08)}
+      .gbl-chip button{border:0;background:none;color:var(--burg);cursor:pointer;
+        font-size:12px;text-decoration:underline;padding:0}
+
       /* ── ⚡ LA CARGA RÁPIDA ───────────────────────────────────────────────
          Scopeada al id de la ventana y no a la .sec, porque la ventana vive FUERA
          de toda .sec (CLAUDE.md): una regla colgada de #sec-galpon-carga no la
@@ -7370,6 +7406,7 @@ input[type=number]{-moz-appearance:textfield;appearance:textfield}
             <select id="gal-kg-cuad"></select></div>
         </div>
 
+        <div id="gal-bal-chip-kg" style="margin-top:10px"></div>
         <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:10px">
           <div style="flex:0 0 150px"><label>Kilos</label>
             <input type="text" id="gal-kg-kilos" inputmode="decimal" placeholder="450"
@@ -7462,6 +7499,7 @@ input[type=number]{-moz-appearance:textfield;appearance:textfield}
         </div>
 
         <div class="sgr-card">
+          <div id="gal-bal-chip-rap"></div>
           <div class="grp-kg">
             <div style="flex:1 1 auto;min-width:0"><label>Kilos de este cajón</label>
               <input type="text" id="grp-kilos" inputmode="decimal" autocomplete="off"
@@ -7503,6 +7541,56 @@ input[type=number]{-moz-appearance:textfield;appearance:textfield}
        son 700.000 kg en una jornada de cien cajas: el error se mete acá, una sola vez,
        y después multiplica todas las cargas que usen esta presentación. Adentro se
        guarda siempre en kilos. -->
+
+  <!-- ── ⚖️ PROBAR LA BALANZA ──────────────────────────────────────────────────────
+       Muestra lo que llega EN CRUDO —hexa y texto, con los caracteres de control a la
+       vista— al lado de lo que el parser entendió. Está así a propósito: el manual del
+       F9 no está, y adivinar el formato para después "arreglarlo" a ciegas es peor que
+       mirar los bytes una vez.
+
+       Fuera de toda .sec y sin cerrarse al clic afuera, como todas. -->
+  <div class="ab-modal-overlay sg-mod" id="gal-bal-modal">
+    <div class="ab-modal" style="width:min(720px,96vw);max-width:96vw">
+      <div class="mhd"><div class="mht">⚖️ Probar la balanza</div>
+        <button class="mcl" onclick="galBalCerrar()">×</button></div>
+
+      <div id="gal-bal-nosirve" style="display:none;margin-bottom:12px" class="ojo"></div>
+
+      <div class="sgr-card">
+        <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end">
+          <div style="flex:0 0 130px"><label>Baudios</label>
+            <select id="gal-bal-baud">
+              <option>1200</option><option>2400</option><option>4800</option>
+              <option>9600</option><option>19200</option><option>38400</option>
+              <option>57600</option><option>115200</option>
+            </select></div>
+          <button class="btn bp" id="gal-bal-conectar" onclick="galBalConectar()">Conectar</button>
+          <button class="btn bo" onclick="galBalDesconectar()">Desconectar</button>
+          <button class="btn bo" onclick="galBalLimpiar()">Limpiar</button>
+        </div>
+        <div class="gal-ay" style="max-width:none">Si no sabés los baudios, probá 9600
+          —es lo que viene de fábrica en casi todos— y si llega basura, subí o bajá.
+          Basura con el número correcto adentro es casi siempre un baudio equivocado.</div>
+        <div id="gal-bal-estado" style="margin-top:10px;font-size:13px"></div>
+      </div>
+
+      <div class="gbl-dos">
+        <div class="gbl-caja">
+          <h4>Lo que llega, tal cual</h4>
+          <div id="gal-bal-crudo" class="gbl-mono"></div>
+        </div>
+        <div class="gbl-caja">
+          <h4>Lo que se entendió</h4>
+          <div id="gal-bal-leido" class="gbl-mono"></div>
+        </div>
+      </div>
+
+      <div style="display:flex;justify-content:space-between;gap:8px;margin-top:14px">
+        <button class="btn bo" onclick="galBalGuardarBaud()">Guardar estos baudios</button>
+        <button class="btn bo" onclick="galBalCerrar()">Listo</button>
+      </div>
+    </div>
+  </div>
   <div class="ab-modal-overlay sg-mod" id="gal-pres-modal">
     <div class="ab-modal" style="width:min(560px,96vw);max-width:96vw">
       <div class="mhd"><div class="mht" id="gal-pres-tit">Nueva presentación</div>
@@ -27433,6 +27521,26 @@ SG_MANUAL['galpon-config'] = { titulo: 'Galpón · Configuración', html:
   + '<p>Sacar una del catálogo <b>no toca lo ya cargado</b>: cada proceso guarda el nombre '
   + 'de su presentación además del número, justamente para que borrarla no reescriba la '
   + 'historia.</p>'
+
+  + '<h3>⚖️ Probar la balanza <span class="ver">V1114</span></h3>'
+  + '<p>El probador abre el puerto serie y muestra <b>lo que llega tal cual</b> —en texto '
+  + 'y en hexadecimal, con los caracteres de control a la vista— al lado de <b>lo que se '
+  + 'entendió</b>: cuántos kilos y si el peso está firme.</p>'
+  + '<p>Está así a propósito. El manual del indicador no lo tenemos, y cada marca manda '
+  + 'la trama a su manera. Mirar los bytes una vez es más corto que adivinar el formato y '
+  + 'después arreglarlo a ciegas.</p>'
+  + '<ul>'
+  + '<li><b>No llega nada:</b> revisá el cable y que el indicador tenga la salida serie '
+  + 'encendida (menú <b>FUNC</b>), en modo <b>continuo</b>.</li>'
+  + '<li><b>Llega basura</b> con algún número reconocible adentro: casi siempre son los '
+  + '<b>baudios</b>. Probá 9600 primero, después 4800 y 19200.</li>'
+  + '<li><b>Llega bien pero dice «no entendí»:</b> mandame esa pantalla y ajusto la '
+  + 'lectura al formato de este aparato.</li>'
+  + '</ul>'
+  + '<p><b>Guardar estos baudios</b> deja la velocidad para que las pantallas de carga se '
+  + 'conecten solas, sin preguntar nada.</p>'
+  + '<div class="ojo">Hace falta <b>Chrome o Edge de escritorio</b>. En celular, en iPad '
+  + 'y en Safari no existe Web Serial.</div>'
 };
 
 SG_MANUAL['galpon-carga'] = { titulo: 'Galpón · Carga de kilos', html:
@@ -27525,6 +27633,40 @@ SG_MANUAL['galpon-carga'] = { titulo: 'Galpón · Carga de kilos', html:
   + 'propio generado en la pantalla; si el mismo llega dos veces, el servidor guarda una sola '
   + 'fila. Es el mismo mecanismo que va a necesitar la carga sin señal cuando llegue.</div>'
 
+  + '<h3>⚖️ La balanza <span class="ver">V1114</span></h3>'
+  + '<p>El indicador se conecta por su <b>puerto serie</b> (un cable RS-232 y un '
+  + 'adaptador a USB) y el peso entra solo en el casillero de kilos. La primera vez hay '
+  + 'que apretar <b>conectar</b> y elegir el puerto en el diálogo del navegador; después '
+  + 'se reconecta sola todas las mañanas.</p>'
+
+  + '<div class="ojo"><b>Hace falta Chrome o Edge de escritorio.</b> La tecnología que usa '
+  + '(Web Serial) <b>no existe</b> en celular, ni en iPad, ni en Safari, y no hay forma '
+  + 'de habilitarla. Por eso al lado de la balanza va una PC.</div>'
+
+  + '<p><b>La balanza rellena, no carga.</b> El peso aparece en el casillero y el cajón '
+  + 'se carga con <b>Enter</b>, igual que a mano. Cargar solo al estabilizarse parece más '
+  + 'rápido y es un renglón de kilos cada vez que alguien se apoya en la plataforma — y '
+  + 'esos renglones no los borra nadie, porque nadie los vio entrar.</p>'
+
+  + '<p>El peso se escribe <b>cuando está firme y cuando cambió</b>. Mientras el mismo '
+  + 'cajón sigue arriba no se vuelve a escribir, así que una corrección a mano no se pisa '
+  + 'sola. Y un peso de menos de <b>1 kg</b> se ignora: al levantar el cajón la balanza '
+  + 'vuelve a cero, y sin eso el casillero se vaciaría justo antes del Enter.</p>'
+
+  + '<div class="ojo"><b>Tarala vos, con un IFCO vacío.</b> Usá la tecla <b>TARA</b> del '
+  + 'indicador. El sistema <b>no</b> le resta nada al peso que llega: si tarara además de '
+  + 'la balanza, serían dos kilos de menos por cajón — una tonelada cada quinientos, sin '
+  + 'que nada avise.</div>'
+
+  + '<p>Cada carga guarda <b>de dónde salió el peso</b>: de la balanza o tipeado. No es un '
+  + 'dato de archivo — si un día la mayoría entró a mano, la balanza está rota y nadie '
+  + 'avisó.</p>'
+
+  + '<p>Si la balanza no está, o el navegador no puede, <b>no aparece nada</b> y se carga '
+  + 'a mano como siempre. Un botón que no puede funcionar es peor que no tenerlo.</p>'
+
+  + '<p>Para probarla y ajustarla está <b>⚙️ Galpón · Configuración → Probar la balanza</b>: '
+  + 'muestra lo que manda el aparato tal cual llega, al lado de lo que se entendió.</p>'
   + '<h3>⚠️ El cero de más <span class="ver">V1108</span></h3>'
   + '<p>Cargando a mano, el error que de verdad pasa es escribir <b>4500</b> donde iban '
   + '<b>450</b>. No lo agarra nadie: el número es plausible, el lote existe, la cuadrilla '
@@ -56516,11 +56658,13 @@ function galKgAbrir(id){
   }
 
   document.getElementById('gal-kg-modal').classList.add('on');
+  galBalApuntar('gal-kg-kilos', 'gal-bal-chip-kg');
   var k = document.getElementById('gal-kg-kilos');
   if (k) setTimeout(function(){ try { k.focus(); } catch(e){} }, 60);
 }
 
 function galKgCerrar(){
+  galBalApuntar(null, null);
   document.getElementById('gal-kg-modal').classList.remove('on');
   GKG.editId = null;
 }
@@ -56554,6 +56698,7 @@ async function galKgGuardar(){
     kilos: document.getElementById('gal-kg-kilos').value,
     ifcos: document.getElementById('gal-kg-ifcos').value,
     observacion: document.getElementById('gal-kg-obs').value,
+    origen: GBAL.usada ? 'balanza' : 'manual',
   };
   var btn = document.getElementById('gal-kg-ok-btn');
   btn.disabled = true;
@@ -56573,6 +56718,7 @@ async function galKgGuardar(){
     /* No se cierra: adentro queda el acuse. Y se limpia sólo lo que cambia de una
        pesada a la otra —los kilos, los IFCOs, la observación—; el lote y la cuadrilla
        quedan, porque la carga de verdad son ocho renglones seguidos de lo mismo. */
+    GBAL.usada = false;
     GKG.uuid = galKgNuevoUuid();
     var f = j.fila || {};
     ok.className = j.aviso ? 'ojo' : 'gkg-ok';
@@ -56706,6 +56852,7 @@ function galRapEmpezar(){
   galRapPintarFijo();
   document.getElementById('gal-rap-setup').style.display = 'none';
   document.getElementById('gal-rap-carga').style.display = '';
+  galBalApuntar('grp-kilos', 'gal-bal-chip-rap');
   var k = document.getElementById('grp-kilos');
   setTimeout(function(){ try { k.focus(); } catch(e){} }, 60);
 }
@@ -56713,6 +56860,7 @@ function galRapEmpezar(){
 /* Volver a elegir SIN perder la tanda: lo ya cargado está guardado y no se toca. Lo que
    cambia es de qué son los kilos que vienen. */
 function galRapCambiar(){
+  galBalApuntar(null, null);
   document.getElementById('gal-rap-carga').style.display = 'none';
   document.getElementById('gal-rap-setup').style.display = '';
 }
@@ -56747,6 +56895,9 @@ async function galRapCargar(){
     fecha: f.fecha, lote_id: f.lote_id, producto: f.producto,
     cuadrilla_id: f.cuadrilla_id, observacion: f.observacion,
     kilos: kg.value,
+    // DE DÓNDE SALIÓ EL PESO. Si un día el 80% de la temporada entró a mano, la
+    // balanza está rota y nadie avisó — con esto se ve en una consulta.
+    origen: GBAL.usada ? 'balanza' : 'manual',
     // UNO, siempre. En esta ventana una pesada es un cajón: es lo que la hace rápida
     // y es lo que hace que el promedio por cajón signifique algo. Varios juntos van
     // por la ventana larga, que pregunta cuántos.
@@ -56766,6 +56917,10 @@ async function galRapCargar(){
     /* Un uuid NUEVO por carga. El anterior ya entró, y mandarlo otra vez no haría nada:
        el servidor hace INSERT OR IGNORE sobre esa columna. Eso es lo que hace que el
        doble clic no duplique kilos — y es lo que va a necesitar la cola sin señal. */
+    /* El cajón que se acaba de cargar deja de ser «el peso de la balanza»: el que
+       viene es otro, y si no se soltara acá una corrección a mano del siguiente
+       quedaría marcada como pesada por la balanza. */
+    GBAL.usada = false;
     GRP.uuid = galKgNuevoUuid();
     GRP.tanda.unshift(Object.assign({ id: j.id, aviso: j.aviso || null }, j.fila || {}));
     galRapPintar();
@@ -56823,6 +56978,9 @@ async function galRapDeshacer(id){
    cajón en vez de uno, en la ventana que existe justamente para que cada cajón cueste lo
    menos posible. Lo cargado se va viendo en la lista de la tanda mientras tanto. */
 function galRapCerrar(){
+  // Se suelta el casillero: si no, la balanza seguiría escribiendo en un campo que
+  // ya nadie ve, y el peso del cajón siguiente entraría en la ventana cerrada.
+  galBalApuntar(null, null);
   document.getElementById('gal-rap-modal').classList.remove('on');
   GRP.fijo = null;
   galKgCargar();
@@ -56959,6 +57117,240 @@ async function galPresBorrar(id){
     if (!j.ok) return alert(j.error || 'no se pudo borrar');
     await galPresCargar();
   } catch (e) { alert('No se pudo borrar: ' + e.message); }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════════════
+   ⚖️ LA BALANZA, ENCHUFADA A LAS VENTANAS DE CARGA
+   ═══════════════════════════════════════════════════════════════════════════════════
+   El puerto y el parser viven en /static/balanza.js (BAL). Acá está lo que hace con
+   ellos el panel: el probador de Configuración y el relleno del casillero de kilos.
+
+   LA BALANZA RELLENA, NO CARGA. El peso entra en el casillero y el operador aprieta
+   Enter. Cargar solo al estabilizarse parece más rápido y es un renglón de kilos cada
+   vez que alguien se apoya en la plataforma — y esos renglones no los borra nadie
+   porque nadie los vio entrar.
+
+   Y queda guardado DE DÓNDE vino el peso. Si un día el 80% entró a mano, la balanza
+   está rota y nadie avisó. */
+var GBAL = {
+  campo: null,        // id del casillero que recibe el peso
+  chip: null,         // id del div donde va el cartel
+  ultimo: null,       // último peso estable que se escribió
+  lectura: null,      // la última lectura, estable o no
+  usada: false,       // ¿el peso del casillero vino de la balanza?
+  crudo: [], leido: [],
+  probando: false,
+  baudios: null,     // se pide una vez y queda
+};
+
+/* Los baudios salen de la configuración del galpón, y se piden UNA vez. La pantalla de
+   carga no carga toda la configuración —no la necesita para nada más—, y hacer un
+   pedido por cada reconexión sería un pedido por cada vez que se abre la ventana. */
+async function galBalBaudios(){
+  if (GBAL.baudios) return GBAL.baudios;
+  try {
+    var r = await fetch('/api/galpon/config', { credentials:'include' });
+    var j = await r.json();
+    GBAL.baudios = (j.ok && j.config && Number(j.config.balanza_baudios)) || 9600;
+  } catch (e) { GBAL.baudios = 9600; }
+  return GBAL.baudios;
+}
+
+function galBalHay(){ return typeof BAL !== 'undefined' && BAL.soportado(); }
+
+/* ── EL CARTEL DE LAS VENTANAS DE CARGA ──────────────────────────────────────── */
+function galBalChip(){
+  if (!GBAL.chip) return;
+  var el = document.getElementById(GBAL.chip); if (!el) return;
+  if (!galBalHay()){
+    /* En un navegador sin Web Serial no se ofrece nada: un botón que no puede
+       funcionar es peor que no tenerlo. Se carga a mano, que es lo que ya se hace. */
+    el.innerHTML = ''; return;
+  }
+  var l = GBAL.lectura;
+  if (!BAL.estado.conectada){
+    el.innerHTML = '<span class="gbl-chip">⚖️ balanza sin conectar '
+      + '<button onclick="galBalEnchufar()">conectar</button></span>';
+    return;
+  }
+  var cls = l && l.estable === false ? ' mov' : ' on';
+  var txt = l ? (galKgNum(l.kilos) + ' kg'
+      + (l.estable === false ? ' · moviéndose' : (l.estable === true ? ' · estable' : '')))
+    : 'conectada, esperando peso';
+  el.innerHTML = '<span class="gbl-chip' + cls + '">⚖️ <b>' + txt + '</b></span>';
+}
+
+/* Qué casillero recibe el peso. Lo fija el abridor de cada ventana y lo suelta el que
+   la cierra: sin eso, la balanza seguiría escribiendo en un campo que ya no se ve. */
+function galBalApuntar(campo, chip){
+  GBAL.campo = campo || null;
+  GBAL.chip = chip || null;
+  GBAL.ultimo = null;
+  GBAL.usada = false;
+  galBalChip();
+  if (galBalHay() && !BAL.estado.conectada) galBalReconectar();
+}
+
+/* Reconecta SIN preguntar a un puerto que ya se autorizó antes. Es lo que evita elegir
+   el puerto todas las mañanas — el navegador sólo pide el gesto la primera vez. */
+async function galBalReconectar(){
+  if (!galBalHay() || BAL.estado.conectada) return;
+  try {
+    var p = await BAL.recordado();
+    if (!p) return;
+    var b = await galBalBaudios();
+    BAL.estado.onLectura = galBalLectura;
+    BAL.estado.onEstado = function(){ galBalChip(); };
+    await BAL.conectar(p, b);
+  } catch (e) { /* queda sin conectar y se carga a mano */ }
+}
+
+// Esto sí necesita el clic: el navegador no abre el diálogo del puerto por código.
+async function galBalEnchufar(){
+  try {
+    var p = await BAL.pedirPuerto();
+    var b = await galBalBaudios();
+    BAL.estado.onLectura = galBalLectura;
+    BAL.estado.onEstado = function(){ galBalChip(); };
+    await BAL.conectar(p, b);
+  } catch (e) {
+    if (String(e.message || '').indexOf('No port selected') < 0) alert(e.message);
+  }
+  galBalChip();
+}
+
+/* El peso entra en el casillero cuando:
+     · es estable (o la balanza no dice si lo es, que no es lo mismo que inestable), y
+     · CAMBIÓ respecto del último que se escribió, y
+     · no es el cero de la plataforma vacía.
+
+   Lo del cambio importa: sin eso, el peso se vuelve a escribir cien veces por segundo
+   y pisa cualquier corrección a mano mientras el cajón sigue arriba. Y lo del cero
+   también: al levantar el cajón la balanza vuelve a 0, y sin este filtro el casillero
+   se vacía justo antes de que el operador apriete Enter. */
+var GBAL_MIN = 1;
+function galBalLectura(l){
+  GBAL.lectura = l;
+  galBalChip();
+  if (!l || l.estable === false) return;
+  if (Math.abs(l.kilos) < GBAL_MIN) return;
+  if (GBAL.ultimo != null && Math.abs(l.kilos - GBAL.ultimo) < 0.02) return;
+  var c = GBAL.campo ? document.getElementById(GBAL.campo) : null;
+  if (!c) return;
+  GBAL.ultimo = l.kilos;
+  GBAL.usada = true;
+  c.value = String(l.kilos);
+  if (typeof galPrPrevio === 'function' && GBAL.campo === 'gpr-cant') galPrPrevio();
+}
+
+/* ── EL PROBADOR ─────────────────────────────────────────────────────────────── */
+async function galBalAbrir(){
+  await galBalBaudios();
+  GBAL.crudo = []; GBAL.leido = []; GBAL.probando = true;
+  var av = document.getElementById('gal-bal-nosirve');
+  if (!galBalHay()){
+    av.innerHTML = '<b>Este navegador no puede hablar con la balanza.</b> Web Serial '
+      + 'existe sólo en <b>Chrome y Edge de escritorio</b> (Windows, Mac, Linux). En '
+      + 'celular, en iPad y en Safari no está, y no hay forma de habilitarlo.';
+    av.style.display = '';
+  } else { av.style.display = 'none'; }
+
+  var b = document.getElementById('gal-bal-baud');
+  if (b) b.value = String(GBAL.baudios || 9600);
+  galBalPintarProbador();
+  galBalEstado();
+  document.getElementById('gal-bal-modal').classList.add('on');
+}
+
+function galBalCerrar(){
+  GBAL.probando = false;
+  document.getElementById('gal-bal-modal').classList.remove('on');
+}
+
+function galBalEstado(){
+  var el = document.getElementById('gal-bal-estado'); if (!el) return;
+  if (!galBalHay()){ el.textContent = ''; return; }
+  el.innerHTML = BAL.estado.conectada
+    ? '<b style="color:#16a34a">● Conectada</b> a ' + BAL.estado.baudios + ' baudios. '
+      + 'Apoyá algo en la plataforma.'
+    : '<b style="color:var(--mut)">○ Sin conectar.</b> Apretá <b>Conectar</b> y elegí el '
+      + 'puerto del adaptador USB en el diálogo del navegador.';
+}
+
+async function galBalConectar(){
+  if (!galBalHay()) return;
+  var b = Number(document.getElementById('gal-bal-baud').value) || 9600;
+  try {
+    /* Se reusa el puerto ya autorizado si lo hay, y sólo se pide uno nuevo cuando no.
+       Preguntar siempre obligaría a elegirlo en cada prueba. */
+    var p = (await BAL.recordado()) || (await BAL.pedirPuerto());
+    BAL.estado.onCrudo = galBalCrudo;
+    BAL.estado.onLectura = galBalLeido;
+    BAL.estado.onEstado = function(e, d){ galBalEstado(); galBalChip();
+      if (e === 'error') galBalAnotar(GBAL.crudo, '✖ ' + d, 'no'); };
+    await BAL.conectar(p, b);
+  } catch (e) {
+    if (String(e.message || '').indexOf('No port selected') < 0) {
+      galBalAnotar(GBAL.crudo, '✖ ' + e.message, 'no');
+      galBalPintarProbador();
+    }
+  }
+  galBalEstado();
+}
+
+async function galBalDesconectar(){
+  if (galBalHay()) await BAL.desconectar();
+  galBalEstado(); galBalChip();
+}
+
+function galBalLimpiar(){ GBAL.crudo = []; GBAL.leido = []; galBalPintarProbador(); }
+
+function galBalAnotar(lista, txt, cls){
+  lista.push({ t: txt, c: cls || '' });
+  // Veinte alcanzan para ver el patrón; más es scroll y nada.
+  while (lista.length > 20) lista.shift();
+}
+
+function galBalCrudo(texto, bytes){
+  if (!GBAL.probando) return;
+  galBalAnotar(GBAL.crudo, BAL.visible(texto) + '\n' + '<span class="h">'
+    + BAL.hex(bytes) + '</span>');
+  galBalPintarProbador();
+}
+
+function galBalLeido(l, linea){
+  if (!GBAL.probando) return;
+  galBalAnotar(GBAL.leido, l
+    ? '<span class="si">' + galKgNum(l.kilos) + ' ' + l.unidad + '</span> · '
+      + (l.estable === true ? 'estable' : (l.estable === false ? 'moviéndose'
+        : 'no dice si está estable'))
+    : '<span class="no">no entendí</span> ' + BAL.visible(linea), l ? '' : 'no');
+  galBalPintarProbador();
+}
+
+function galBalPintarProbador(){
+  var pinta = function(id, lista, vacio){
+    var el = document.getElementById(id); if (!el) return;
+    el.innerHTML = lista.length
+      ? lista.map(function(x){ return '<div class="' + x.c + '">' + x.t + '</div>'; }).join('')
+      : '<span class="h">' + vacio + '</span>';
+    el.scrollTop = el.scrollHeight;
+  };
+  pinta('gal-bal-crudo', GBAL.crudo, 'Todavía no llegó nada.');
+  pinta('gal-bal-leido', GBAL.leido, 'Nada que interpretar todavía.');
+}
+
+async function galBalGuardarBaud(){
+  var b = document.getElementById('gal-bal-baud').value;
+  try {
+    var r = await fetch('/api/galpon/config', { method:'PUT', credentials:'include',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ balanza_baudios: b }) });
+    var j = await r.json();
+    if (!j.ok) return alert(j.error || 'no se pudo guardar');
+    GBAL.baudios = Number(b);
+    alert('Guardado. La próxima vez se conecta directo a ' + b + ' baudios.');
+  } catch (e) { alert('No se pudo guardar: ' + e.message); }
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════════════
