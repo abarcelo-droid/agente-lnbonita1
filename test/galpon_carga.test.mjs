@@ -29,6 +29,7 @@ import { DatabaseSync } from 'node:sqlite';
 import {
   kilos, entero, registrarVolcado, editarVolcado, borrarVolcado,
   volcadosDelDia, resumenDelDia, volcadosEnTramo,
+  ultimaCarga,
 } from '../src/servicios/galpon.js';
 
 // ── LA BASE: lo que el galpón lee de otros módulos, más su propio libro ───
@@ -416,4 +417,143 @@ test('y una carga borrada deja de trabar', () => {
   assert.equal(volcadosEnTramo(db, F, '00:00', null), 1);
   borrarVolcado(db, id);
   assert.equal(volcadosEnTramo(db, F, '00:00', null), 0);
+});
+
+// ══════════════════════════════════════════════════════════════════════════
+// 7 · ⚡ DE DÓNDE SALE EL ENCABEZADO DE LA CARGA RÁPIDA (V1110)
+// ══════════════════════════════════════════════════════════════════════════
+// Andy, 31/10/2026: «que ya quede guardado el último lote, comentarios y
+// cuadrilla que puso y vaya cargando sólo los cajones nuevos».
+//
+// Lo que se propone NO se guarda en ningún lado: se deduce de la última fila
+// que esa persona escribió. Así no hay una preferencia que mantener
+// sincronizada, ni que limpiar cuando alguien borra justo esa carga.
+//
+// Lo que puede salir mal es uno solo, y es caro: proponer la cuadrilla de AYER
+// y que media mañana de kilos se le anote a la gente equivocada. Los kilos son
+// creíbles, el lote existe, la cuadrilla existe: no lo agarra nadie.
+const ANDY = 7, JUAN = 8;
+function conUltima(filas) {
+  const db = base();
+  const ins = db.prepare(
+    'INSERT INTO gal_volcados (fecha,lote_id,lote_nombre,producto,cuadrilla_id,cuadrilla,'
+    + 'kilos,observacion,usuario_id,eliminado_en) VALUES (?,?,?,?,?,?,?,?,?,?)');
+  for (const f of filas) {
+    ins.run(f.fecha, f.lote_id || 10, f.lote || 'Cuadro 3', f.producto || 'Damasco',
+            f.cuad_id == null ? null : f.cuad_id, f.cuad == null ? null : f.cuad,
+            f.kilos == null ? 100 : f.kilos, f.obs == null ? null : f.obs,
+            f.usuario == null ? null : f.usuario, f.borrado || null);
+  }
+  return db;
+}
+
+test('propone LO ÚLTIMO QUE CARGÓ ESA PERSONA, con lote, cuadrilla y observación', () => {
+  const db = conUltima([
+    { fecha: F, cuad_id: 1, cuad: 'Norte', obs: 'pasada 1', usuario: ANDY },
+    { fecha: F, cuad_id: 2, cuad: 'Sur', obs: 'pasada 2', usuario: ANDY },
+  ]);
+  const u = ultimaCarga(db, F, ANDY);
+  assert.equal(u.cuadrilla, 'Sur');
+  assert.equal(u.cuadrilla_id, 2);
+  assert.equal(u.observacion, 'pasada 2');
+  assert.equal(u.lote_id, 10);
+  assert.equal(u.producto, 'Damasco');
+  assert.equal(u.de_otro_dia, false);
+  assert.equal(u.mio, true);
+});
+
+test('LO ÚLTIMO DE OTRO NO SE PROPONE COMO PROPIO mientras uno tenga lo suyo', () => {
+  // Dos personas cargando en el mismo galpón. Si gana la última fila a secas,
+  // el que vuelve de almorzar arranca con la cuadrilla del compañero.
+  const db = conUltima([
+    { fecha: F, cuad_id: 1, cuad: 'Norte', usuario: ANDY },
+    { fecha: F, cuad_id: 2, cuad: 'Sur', usuario: JUAN },
+  ]);
+  assert.equal(ultimaCarga(db, F, ANDY).cuadrilla, 'Norte');
+  assert.equal(ultimaCarga(db, F, JUAN).cuadrilla, 'Sur');
+});
+
+test('si uno no cargó nada todavía, se propone lo del día aunque sea de otro', () => {
+  // Es mejor que nada: el lote del día es casi seguro el mismo. Y abajo está la
+  // bandera que avisa cuando lo propuesto no es de esta persona.
+  const db = conUltima([{ fecha: F, cuad_id: 2, cuad: 'Sur', usuario: JUAN }]);
+  const u = ultimaCarga(db, F, ANDY);
+  assert.equal(u.cuadrilla, 'Sur');
+  assert.equal(u.mio, false);
+  assert.equal(u.de_otro_dia, false);
+});
+
+test('LO DE HOY DE UN COMPAÑERO LE GANA A LO MÍO DE AYER', () => {
+  // Juan viene cargando desde las siete el lote y la cuadrilla de hoy. Andy llega,
+  // abre la carga rápida y todavía no cargó nada: lo que le sirve es lo que está
+  // pasando HOY, no lo que él mismo cargó ayer — que sería otro lote, otra cuadrilla,
+  // y encima entraría sin el cartel porque para él sería «lo suyo».
+  const db = conUltima([
+    { fecha: '2026-11-19', lote_id: 10, lote: 'Cuadro 3', cuad_id: 1, cuad: 'Norte',
+      usuario: ANDY },
+    { fecha: F, lote_id: 11, lote: 'Cuadro 4', cuad_id: 2, cuad: 'Sur', usuario: JUAN },
+  ]);
+  const u = ultimaCarga(db, F, ANDY);
+  assert.equal(u.cuadrilla, 'Sur');
+  assert.equal(u.lote_id, 11);
+  assert.equal(u.de_otro_dia, false);
+  assert.equal(u.mio, false);
+});
+
+test('LO QUE VIENE DE OTRO DÍA VIENE MARCADO', () => {
+  // Es la bandera que hace que la pantalla pida confirmar antes de la primera
+  // carga. Sin ella, la tanda arranca con la cuadrilla de ayer en silencio.
+  const db = conUltima([
+    { fecha: '2026-11-19', cuad_id: 1, cuad: 'Norte', usuario: ANDY },
+  ]);
+  const u = ultimaCarga(db, F, ANDY);
+  assert.equal(u.cuadrilla, 'Norte');
+  assert.equal(u.de_otro_dia, true);
+  assert.equal(u.fecha, '2026-11-19');
+});
+
+test('lo del MISMO día le gana a lo de ayer, aunque lo de ayer sea más reciente de ID', () => {
+  // El id más alto es el que se escribió último, no el del día más nuevo: el
+  // sábado se puede cargar el lunes. Lo que manda para proponer es el DÍA.
+  const db = conUltima([
+    { fecha: F, cuad_id: 1, cuad: 'Norte', usuario: ANDY },
+    { fecha: '2026-11-19', cuad_id: 2, cuad: 'Sur', usuario: ANDY },
+  ]);
+  const u = ultimaCarga(db, F, ANDY);
+  assert.equal(u.cuadrilla, 'Norte');
+  assert.equal(u.de_otro_dia, false);
+});
+
+test('una carga BORRADA no se propone', () => {
+  // Alguien que borra su última carga porque estaba mal no quiere que la
+  // siguiente arranque repitiéndola.
+  const db = conUltima([
+    { fecha: F, cuad_id: 1, cuad: 'Norte', usuario: ANDY },
+    { fecha: F, cuad_id: 2, cuad: 'Sur', usuario: ANDY, borrado: '2026-11-20 10:00' },
+  ]);
+  assert.equal(ultimaCarga(db, F, ANDY).cuadrilla, 'Norte');
+});
+
+test('sin nada cargado nunca, no se propone nada y no se rompe', () => {
+  assert.equal(ultimaCarga(base(), F, ANDY), null);
+  assert.equal(ultimaCarga(base(), 'cualquier cosa', ANDY), null);
+});
+
+test('sin usuario en la cookie se propone lo último del día, sin decir que es propio', () => {
+  const db = conUltima([{ fecha: F, cuad_id: 1, cuad: 'Norte', usuario: ANDY }]);
+  const u = ultimaCarga(db, F, null);
+  assert.equal(u.cuadrilla, 'Norte');
+  assert.equal(u.mio, false);
+});
+
+test('una carga sin cuadrilla se propone SIN cuadrilla, no con la de antes', () => {
+  // Si se arrastrara la anterior, el que cargó a propósito sin cuadrilla vuelve
+  // y se la encuentra puesta.
+  const db = conUltima([
+    { fecha: F, cuad_id: 1, cuad: 'Norte', usuario: ANDY },
+    { fecha: F, cuad_id: null, cuad: null, usuario: ANDY },
+  ]);
+  const u = ultimaCarga(db, F, ANDY);
+  assert.equal(u.cuadrilla_id, null);
+  assert.equal(u.cuadrilla, null);
 });

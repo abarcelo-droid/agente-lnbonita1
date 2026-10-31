@@ -600,6 +600,49 @@ export function volcadosDelDia(db, fecha) {
     + '  ORDER BY id DESC').all(f);
 }
 
+// ── LO ÚLTIMO QUE CARGÓ ─────────────────────────────────────────────────────────────
+// Andy, 31/10/2026: «que ya quede guardado el último lote, comentarios y cuadrilla que
+// puso y vaya cargando solo los cajones nuevos».
+//
+// El encabezado de la carga rápida sale de ACÁ y no de nada guardado aparte: es la
+// última fila que esa persona escribió. No hay preferencia que mantener sincronizada ni
+// que limpiar cuando alguien borra su última carga.
+//
+// La cadena de respaldos va de lo más específico a lo más viejo, y cada escalón dice de
+// dónde vino. Eso último no es decorativo: un encabezado que viene de AYER es un
+// encabezado que nadie eligió hoy, y cargar medio día con la cuadrilla de ayer es pagarle
+// el jornal a la gente equivocada. La pantalla lo usa para pedir que lo confirmen.
+export function ultimaCarga(db, fecha, usuarioId) {
+  const f = esFecha(fecha);
+  if (!f) return null;
+  const col = ' SELECT id, fecha, lote_id, lote_nombre, producto, cuadrilla_id, cuadrilla,'
+            + '        observacion, usuario_id'
+            + '   FROM gal_volcados WHERE eliminado_en IS NULL';
+  const u = Number(usuarioId);
+  const mio = Number.isFinite(u) && u > 0 ? u : null;
+
+  let fila = null;
+  if (mio) fila = db.prepare(col + ' AND fecha = ? AND usuario_id = ? ORDER BY id DESC LIMIT 1')
+                    .get(f, mio);
+  if (!fila) fila = db.prepare(col + ' AND fecha = ? ORDER BY id DESC LIMIT 1').get(f);
+  if (!fila && mio) fila = db.prepare(col + ' AND usuario_id = ? ORDER BY id DESC LIMIT 1').get(mio);
+  if (!fila) fila = db.prepare(col + ' ORDER BY id DESC LIMIT 1').get();
+  if (!fila) return null;
+
+  return {
+    lote_id: fila.lote_id,
+    lote_nombre: fila.lote_nombre,
+    producto: fila.producto,
+    cuadrilla_id: fila.cuadrilla_id,
+    cuadrilla: fila.cuadrilla,
+    observacion: fila.observacion,
+    fecha: fila.fecha,
+    // Las dos banderas con las que la pantalla decide si pregunta o no.
+    de_otro_dia: fila.fecha !== f,
+    mio: mio != null && fila.usuario_id === mio,
+  };
+}
+
 // ── EL RESUMEN DEL DÍA ──────────────────────────────────────────────────────────────
 // El total, y los dos cortes que se miran de verdad: por cuadrilla (es como se paga el
 // jornal) y por lote (es como se mide el rendimiento).

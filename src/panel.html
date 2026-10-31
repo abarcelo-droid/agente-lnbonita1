@@ -7255,6 +7255,38 @@ input[type=number]{-moz-appearance:textfield;appearance:textfield}
          no la alcanzaría, y eso compila igual: se ve recién abriéndola. */
       #gal-kg-modal .gkg-ok{border:1px solid #2e9e5b;background:rgba(46,158,91,.10);
         border-radius:8px;padding:9px 11px;font-size:12.5px}
+
+      /* ── ⚡ LA CARGA RÁPIDA ───────────────────────────────────────────────
+         Scopeada al id de la ventana y no a la .sec, porque la ventana vive FUERA
+         de toda .sec (CLAUDE.md): una regla colgada de #sec-galpon-carga no la
+         alcanzaría, y eso compila igual — se ve recién al abrirla. */
+      #gal-rap-modal .grp-fijo{display:flex;align-items:center;justify-content:space-between;
+        gap:12px;border:2px solid var(--burg);border-radius:10px;padding:10px 14px;
+        background:var(--burl);margin-bottom:14px}
+      #gal-rap-modal .grp-f1{font-size:17px;font-weight:700;line-height:1.25;
+        color:var(--burd);overflow:hidden;text-overflow:ellipsis}
+      #gal-rap-modal .grp-f2{font-size:12px;color:var(--mut);margin-top:2px;
+        overflow:hidden;text-overflow:ellipsis}
+      /* Los kilos ocupan toda la línea y se ven de lejos: es el único campo que se
+         toca, y el operador lo mira de pie y con las manos sucias. */
+      #gal-rap-modal .grp-kg{display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap}
+      #gal-rap-modal #grp-kilos{width:100%;font-size:30px;font-weight:700;padding:8px 12px;
+        font-variant-numeric:tabular-nums}
+      #gal-rap-modal #grp-ifcos{width:100%;font-size:19px;padding:8px 10px;
+        font-variant-numeric:tabular-nums}
+      #gal-rap-modal #grp-btn{padding:14px 20px;font-size:15px}
+      #gal-rap-modal .grp-res{display:flex;gap:10px;align-items:baseline;
+        margin:4px 0 8px;font-size:13px;color:var(--mut)}
+      #gal-rap-modal .grp-res b{font-size:19px;color:var(--txt);
+        font-variant-numeric:tabular-nums}
+      #gal-rap-modal .grp-l{display:flex;align-items:center;justify-content:space-between;
+        gap:10px;padding:6px 10px;border-top:1px dashed var(--bor);font-size:13px}
+      #gal-rap-modal .grp-l:first-of-type{border-top:0}
+      #gal-rap-modal .grp-l b{font-variant-numeric:tabular-nums}
+      #gal-rap-modal .grp-l.rev{background:rgba(214,40,40,.07);border-radius:6px}
+      #gal-rap-modal .grp-vacio{font-size:12.5px;color:var(--mut);padding:10px 2px}
+      #gal-rap-modal .grp-lista{border:1px solid var(--bor);border-radius:10px;
+        padding:4px 2px;max-height:30vh;overflow-y:auto}
     </style>
 
     <div class="ph">
@@ -7263,7 +7295,8 @@ input[type=number]{-moz-appearance:textfield;appearance:textfield}
           no haya tarjetas impresas ni balanza conectada se cargan a mano — y van al mismo
           lugar del que después salen el rendimiento y el kg por jornal.</div></div>
       <div style="display:flex;gap:8px">
-        <button class="btn bp bs" onclick="galKgAbrir()">+ Cargar kilos</button>
+        <button class="btn bp bs" onclick="galRapAbrir()">⚡ Carga rápida</button>
+        <button class="btn bo bs" onclick="galKgAbrir()">+ Cargar kilos</button>
         <button class="btn bo bs" onclick="sgManualAbrir('galpon-carga')">❓ ¿Cómo se usa?</button></div>
     </div>
 
@@ -7349,6 +7382,89 @@ input[type=number]{-moz-appearance:textfield;appearance:textfield}
        Es una LISTA, no un formulario: no abre ninguna ventana y no se carga nada acá.
        Por eso la regla de CLAUDE.md sobre ventanas no aplica — lo que hay que abrir en
        una ventana es la ACCIÓN, y esta pantalla no tiene ninguna. -->
+  <!-- ── ⚡ CARGA RÁPIDA ───────────────────────────────────────────────────────────
+       Andy, 31/10/2026: «quiero que el OPERADOR tenga que sólo poner los kilos... que
+       ya quede guardado el último lote, comentarios y cuadrilla que puso y vaya
+       cargando sólo los cajones nuevos».
+
+       Dos pasos y no uno. El primero fija DE QUÉ son estos kilos y se muestra SIEMPRE
+       al abrir, aunque venga todo propuesto: es un clic por tanda, y es lo que hace que
+       atribuir los kilos sea un acto deliberado. El riesgo de una pantalla rápida no es
+       que sea lenta, es que esconda a quién se le están anotando los kilos — y eso es el
+       jornal de una cuadrilla.
+
+       Fuera de toda .sec, no se cierra al clic afuera, y no se cierra al cargar: las
+       reglas de CLAUDE.md. Esta última acá es la razón de ser de la ventana. -->
+  <div class="ab-modal-overlay sg-mod" id="gal-rap-modal">
+    <div class="ab-modal" style="width:min(560px,96vw);max-width:96vw">
+      <div class="mhd"><div class="mht">⚡ Carga rápida</div>
+        <button class="mcl" onclick="galRapCerrar()">×</button></div>
+
+      <!-- PASO 1 · DE QUÉ SON ESTOS KILOS -->
+      <div id="gal-rap-setup">
+        <div id="gal-rap-deotro" style="display:none;margin-bottom:12px" class="ojo"></div>
+        <div class="sgr-card">
+          <div style="display:flex;gap:10px;flex-wrap:wrap">
+            <div style="flex:0 0 160px"><label>Día de cosecha</label>
+              <input type="date" id="gal-rap-fecha"></div>
+            <div style="flex:1 1 220px;min-width:0"><label>Lote</label>
+              <select id="gal-rap-lote" onchange="galRapLotePick()"></select></div>
+          </div>
+          <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:10px">
+            <div style="flex:1 1 200px;min-width:0"><label>Producto</label>
+              <input type="text" id="gal-rap-prod" placeholder="ej: Damasco"></div>
+            <div style="flex:1 1 200px;min-width:0"><label>Cuadrilla</label>
+              <select id="gal-rap-cuad"></select></div>
+          </div>
+          <div style="margin-top:10px"><label>Observación <span style="font-weight:400;
+            text-transform:none;color:var(--mut)">(opcional — se repite en TODAS las cargas
+            de la tanda)</span></label>
+            <input type="text" id="gal-rap-obs" style="width:100%"></div>
+        </div>
+        <div id="gal-rap-serror" style="display:none;margin-bottom:10px" class="ojo"></div>
+        <div style="display:flex;justify-content:flex-end;gap:8px">
+          <button class="btn bo" onclick="galRapCerrar()">Cancelar</button>
+          <button class="btn bp" onclick="galRapEmpezar()">Empezar a cargar →</button>
+        </div>
+      </div>
+
+      <!-- PASO 2 · SÓLO LOS KILOS -->
+      <div id="gal-rap-carga" style="display:none">
+        <!-- El encabezado fijo ocupa lugar a propósito: es lo único que separa una
+             tanda bien atribuida de media mañana de kilos puestos en la cuadrilla
+             equivocada. -->
+        <div class="grp-fijo">
+          <div style="min-width:0">
+            <div class="grp-f1" id="gal-rap-tit"></div>
+            <div class="grp-f2" id="gal-rap-sub"></div>
+          </div>
+          <button class="btn bo bs" onclick="galRapCambiar()">Cambiar</button>
+        </div>
+
+        <div class="sgr-card">
+          <div class="grp-kg">
+            <div style="flex:1 1 auto;min-width:0"><label>Kilos</label>
+              <input type="text" id="grp-kilos" inputmode="decimal" autocomplete="off"
+                     placeholder="450" onkeydown="galRapTecla(event)"></div>
+            <div style="flex:0 0 110px"><label>IFCOs</label>
+              <input type="number" id="grp-ifcos" min="0" step="1" autocomplete="off"
+                     onkeydown="galRapTecla(event)"></div>
+            <button class="btn bp" id="grp-btn" onclick="galRapCargar()">Cargar</button>
+          </div>
+          <div style="font-size:11px;color:var(--mut);margin-top:6px">Escribí los kilos y
+            apretá <b>Enter</b>. La ventana queda abierta para el siguiente.</div>
+        </div>
+
+        <div id="grp-error" style="display:none;margin-bottom:10px" class="ojo"></div>
+        <div id="grp-tanda"></div>
+
+        <div style="display:flex;justify-content:flex-end;margin-top:14px">
+          <button class="btn bo" onclick="galRapCerrar()">Listo</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <div class="sec sg-mod" id="sec-galpon-acumulado">
     <style>
       /* SIN BARRA DE DESPLAZAMIENTO LATERAL (CLAUDE.md). Cinco columnas, todas de largo
@@ -27078,6 +27194,35 @@ SG_MANUAL['galpon-carga'] = { titulo: 'Galpón · Carga de kilos', html:
   + '<li><b>Observación.</b> Opcional, texto libre, para lo que no entra en ningún campo.</li>'
   + '</ul>'
 
+  + '<h3>⚡ Carga rápida <span class="ver">V1110</span></h3>'
+  + '<p>Andy, 31/10/2026: <i>«quiero que el operador tenga que sólo poner los kilos».</i> '
+  + 'Es el botón azul de arriba, y es la forma de cargar una tanda: una cuadrilla '
+  + 'volcando un lote durante un rato.</p>'
+  + '<p>Se abre en <b>dos pasos</b>:</p>'
+  + '<ul>'
+  + '<li><b>Primero, de qué son estos kilos.</b> Día, lote, producto, cuadrilla y una '
+  + 'observación que se va a repetir en <b>todas</b> las cargas de la tanda. Viene '
+  + 'propuesto con <b>lo último que cargaste vos</b>, así que casi siempre es apretar '
+  + 'Empezar.</li>'
+  + '<li><b>Después, sólo los kilos.</b> El casillero grande, <b>Enter</b>, y listo: el '
+  + 'siguiente cajón. Abajo se va armando la lista de la tanda con el total.</li>'
+  + '</ul>'
+
+  + '<div class="ojo"><b>Por qué hay que apretar «Empezar» igual.</b> Es un clic por '
+  + 'tanda y es a propósito. El riesgo de una pantalla rápida no es que sea lenta: es que '
+  + 'esconda <b>a quién se le están anotando los kilos</b>. Media mañana cargada con la '
+  + 'cuadrilla de ayer no la agarra nadie —los kilos son creíbles, el lote existe, la '
+  + 'cuadrilla existe— y eso es un jornal pagado a la gente equivocada.</div>'
+
+  + '<p>Por eso también el encabezado queda <b>grande y fijo arriba</b> mientras cargás, y '
+  + 'si lo propuesto viene de <b>otro día</b> la ventana lo dice antes de dejarte empezar: '
+  + 'quiere decir que todavía no se cargó nada para este día.</p>'
+  + '<p><b>Cambiar</b> vuelve al primer paso sin perder la tanda: lo ya cargado está '
+  + 'guardado y no se toca. Sirve cuando cambia la cuadrilla o el lote a media mañana.</p>'
+  + '<p><b>↩ deshacer</b>, al lado de cada renglón de la tanda, borra esa carga sin '
+  + 'preguntar: la acabás de hacer, la estás viendo, y el borrado es blando como todos.</p>'
+  + '<p>Lo que se propone <b>no se guarda en ningún lado</b>: sale de tu última carga. Si la '
+  + 'borrás, se propone la anterior.</p>'
   + '<h3>⌨️ Cómo se carga de verdad <span class="ver">V1108</span></h3>'
   + '<p>La ventana <b>no se cierra al cargar</b>. Se limpian los kilos, los IFCOs y la '
   + 'observación, y <b>quedan</b> el lote y la cuadrilla — porque una tarde de carga son ocho '
@@ -55648,6 +55793,34 @@ function galLdPintar(){
   }).join('');
 }
 
+/* Los dos desplegables, en una sola función: los usan la ventana de siempre y la de
+   carga rápida. Dos copias del mismo armado son dos lugares donde mañana el de abajo
+   queda sin el agrupado por finca y nadie se entera. */
+function galKgLlenarLote(sel){
+  var porFinca = [];
+  GKG.lotes.forEach(function(l){
+    var f = l.finca || 'Sin finca';
+    var g = porFinca.filter(function(x){ return x.f === f; })[0];
+    if (!g) { g = { f: f, ls: [] }; porFinca.push(g); }
+    g.ls.push(l);
+  });
+  sel.innerHTML = '<option value="">— elegí el lote —</option>'
+    + porFinca.map(function(g){
+        return '<option disabled>── ' + galKgEsc(g.f) + ' ──</option>'
+          + g.ls.map(function(l){
+              return '<option value="' + l.id + '" data-cultivo="' + galKgEsc(l.cultivo || '') + '">'
+                + galKgEsc(l.nombre) + (l.cultivo ? ' · ' + galKgEsc(l.cultivo) : '') + '</option>';
+            }).join('');
+      }).join('');
+}
+
+function galKgLlenarCuad(cu){
+  cu.innerHTML = '<option value="">— sin cuadrilla —</option>'
+    + GKG.cuadrillas.map(function(q){
+        return '<option value="' + q.id + '">' + galKgEsc(q.nombre) + '</option>';
+      }).join('');
+}
+
 /* ── LA VENTANA ───────────────────────────────────────────────────────────────────
    Se abre EN BLANCO siempre (CLAUDE.md): un formulario que sólo se esconde conserva lo
    que tenía, y acá eso sería cargar el lote que se tipeó y se canceló hace un rato. */
@@ -55776,7 +55949,7 @@ async function galLdGuardar(){
    Sin impresora no hay tarjetas, sin tarjetas no hay escaneo — y la cosecha no espera al
    hardware. Esto escribe en gal_volcados, el MISMO libro donde va a escribir el escaneo
    cuando llegue: lo que cambia es quién llena los campos. */
-var GKG = { fecha:null, hoy:null, cargas:[], resumen:null, propuesta:null,
+var GKG = { fecha:null, hoy:null, cargas:[], resumen:null, propuesta:null, ultimo:null,
             lotes:[], cuadrillas:[], editId:null, sug:'', uuid:null };
 
 function galKgEsc(s){ return String(s == null ? '' : s)
@@ -55826,6 +55999,7 @@ async function galKgCargar(){
     GKG.fecha = j.fecha; GKG.hoy = j.hoy;
     GKG.cargas = j.cargas || []; GKG.resumen = j.resumen || null;
     GKG.propuesta = j.propuesta || null;
+    GKG.ultimo = j.ultimo || null;
     if (f && !f.value) f.value = j.fecha;
     galKgPintarTot();
     galKgPintarCortes();
@@ -55912,27 +56086,9 @@ function galKgAbrir(id){
   GKG.uuid = galKgNuevoUuid();
 
   var sel = document.getElementById('gal-kg-lote');
-  var porFinca = [];
-  GKG.lotes.forEach(function(l){
-    var f = l.finca || 'Sin finca';
-    var g = porFinca.filter(function(x){ return x.f === f; })[0];
-    if (!g) { g = { f: f, ls: [] }; porFinca.push(g); }
-    g.ls.push(l);
-  });
-  sel.innerHTML = '<option value="">— elegí el lote —</option>'
-    + porFinca.map(function(g){
-        return '<option disabled>── ' + galKgEsc(g.f) + ' ──</option>'
-          + g.ls.map(function(l){
-              return '<option value="' + l.id + '" data-cultivo="' + galKgEsc(l.cultivo || '') + '">'
-                + galKgEsc(l.nombre) + (l.cultivo ? ' · ' + galKgEsc(l.cultivo) : '') + '</option>';
-            }).join('');
-      }).join('');
-
+  galKgLlenarLote(sel);
   var cu = document.getElementById('gal-kg-cuad');
-  cu.innerHTML = '<option value="">— sin cuadrilla —</option>'
-    + GKG.cuadrillas.map(function(q){
-        return '<option value="' + q.id + '">' + galKgEsc(q.nombre) + '</option>';
-      }).join('');
+  galKgLlenarCuad(cu);
 
   GKG.sug = '';
   document.getElementById('gal-kg-error').style.display = 'none';
@@ -56068,6 +56224,210 @@ async function galLdBorrar(id){
   } catch (e) { alert('No se pudo borrar: ' + e.message); }
 }
 
+
+/* ── ⚡ CARGA RÁPIDA ───────────────────────────────────────────────────────────────
+   Andy, 31/10/2026: «quiero que el OPERADOR tenga que sólo poner los kilos... que ya
+   quede guardado el último lote, comentarios y cuadrilla que puso y vaya cargando sólo
+   los cajones nuevos».
+
+   DOS PASOS, Y EL PRIMERO NO SE SALTEA. El encabezado viene propuesto con lo último que
+   esa persona cargó, pero hay que apretar «Empezar»: es un clic por tanda, y es lo que
+   convierte la atribución en un acto deliberado. El riesgo de una pantalla rápida no es
+   que sea lenta — es que esconda a quién se le están anotando los kilos, y eso es el
+   jornal de una cuadrilla.
+
+   Después, sólo kilos y Enter. */
+var GRP = { fijo:null, tanda:[], uuid:null };
+
+function galRapAbrir(){
+  /* Se arma EN BLANCO y se vuelve a llenar, como todas (CLAUDE.md): un formulario que
+     sólo se esconde conserva lo que tenía, y acá eso sería arrancar una tanda nueva con
+     la cuadrilla de la anterior sin que nadie la haya elegido. */
+  GRP.fijo = null; GRP.tanda = []; GRP.uuid = galKgNuevoUuid();
+
+  var sel = document.getElementById('gal-rap-lote');
+  galKgLlenarLote(sel);
+  var cu = document.getElementById('gal-rap-cuad');
+  galKgLlenarCuad(cu);
+
+  /* De dónde sale lo propuesto, en este orden: lo último que cargó esta persona, y si no
+     hay nada, el lote declarado en «Lote del día». La cuadrilla sólo puede venir de una
+     carga anterior: el lote del día no la conoce. */
+  var u = GKG.ultimo, p = GKG.propuesta;
+  document.getElementById('gal-rap-fecha').value = GKG.fecha || GKG.hoy || '';
+  sel.value = u ? String(u.lote_id) : (p ? String(p.lote_id) : '');
+  document.getElementById('gal-rap-prod').value =
+    (u && u.producto) || (p && p.producto) || '';
+  cu.value = (u && u.cuadrilla_id) ? String(u.cuadrilla_id) : '';
+  document.getElementById('gal-rap-obs').value = (u && u.observacion) || '';
+  GRP.sug = document.getElementById('gal-rap-prod').value;
+
+  /* Y SI LO PROPUESTO VIENE DE OTRO DÍA, SE DICE. Media mañana cargada con la cuadrilla
+     de ayer es el jornal pagado a la gente equivocada, y no lo agarra nadie: los kilos
+     son creíbles, el lote existe, la cuadrilla existe. */
+  var av = document.getElementById('gal-rap-deotro');
+  if (u && u.de_otro_dia){
+    av.innerHTML = '<b>Esto viene del ' + galKgEsc(u.fecha) + '</b>, que es la última vez '
+      + 'que se cargó. Todavía no hay nada cargado para este día: mirá que el lote y la '
+      + 'cuadrilla sean los de hoy antes de empezar.';
+    av.style.display = '';
+  } else { av.style.display = 'none'; }
+
+  document.getElementById('gal-rap-serror').style.display = 'none';
+  document.getElementById('grp-error').style.display = 'none';
+  document.getElementById('grp-kilos').value = '';
+  document.getElementById('grp-ifcos').value = '';
+  document.getElementById('gal-rap-setup').style.display = '';
+  document.getElementById('gal-rap-carga').style.display = 'none';
+  galRapPintar();
+  document.getElementById('gal-rap-modal').classList.add('on');
+}
+
+function galRapLotePick(){
+  var sel = document.getElementById('gal-rap-lote');
+  var o = sel.options[sel.selectedIndex];
+  var cultivo = o ? (o.getAttribute('data-cultivo') || '') : '';
+  var p = document.getElementById('gal-rap-prod');
+  if (!p.value || p.value === GRP.sug) p.value = cultivo;
+  GRP.sug = cultivo;
+}
+
+function galRapEmpezar(){
+  var err = document.getElementById('gal-rap-serror');
+  err.style.display = 'none';
+  var sel = document.getElementById('gal-rap-lote');
+  var cu  = document.getElementById('gal-rap-cuad');
+  if (!sel.value){
+    err.textContent = 'Elegí el lote del que vienen estos kilos.'; err.style.display = ''; return;
+  }
+  GRP.fijo = {
+    fecha: document.getElementById('gal-rap-fecha').value,
+    lote_id: sel.value,
+    lote_nombre: sel.options[sel.selectedIndex].textContent.split(' · ')[0],
+    producto: document.getElementById('gal-rap-prod').value,
+    cuadrilla_id: cu.value,
+    cuadrilla: cu.value ? cu.options[cu.selectedIndex].textContent : '',
+    observacion: document.getElementById('gal-rap-obs').value,
+  };
+  galRapPintarFijo();
+  document.getElementById('gal-rap-setup').style.display = 'none';
+  document.getElementById('gal-rap-carga').style.display = '';
+  var k = document.getElementById('grp-kilos');
+  setTimeout(function(){ try { k.focus(); } catch(e){} }, 60);
+}
+
+/* Volver a elegir SIN perder la tanda: lo ya cargado está guardado y no se toca. Lo que
+   cambia es de qué son los kilos que vienen. */
+function galRapCambiar(){
+  document.getElementById('gal-rap-carga').style.display = 'none';
+  document.getElementById('gal-rap-setup').style.display = '';
+}
+
+function galRapPintarFijo(){
+  var f = GRP.fijo || {};
+  document.getElementById('gal-rap-tit').textContent =
+    (f.lote_nombre || 'Lote ' + f.lote_id) + (f.producto ? ' · ' + f.producto : '');
+  var p = [];
+  p.push(f.cuadrilla ? f.cuadrilla : 'sin cuadrilla');
+  p.push(f.fecha || '');
+  if (f.observacion) p.push('«' + f.observacion + '»');
+  document.getElementById('gal-rap-sub').textContent = p.join(' · ');
+}
+
+function galRapTecla(ev){
+  if (ev.key === 'Enter'){ ev.preventDefault(); galRapCargar(); }
+}
+
+async function galRapCargar(){
+  var err = document.getElementById('grp-error');
+  err.style.display = 'none';
+  var f = GRP.fijo; if (!f) return;
+  var btn = document.getElementById('grp-btn');
+  var kg = document.getElementById('grp-kilos');
+  var body = {
+    uuid: GRP.uuid,
+    fecha: f.fecha, lote_id: f.lote_id, producto: f.producto,
+    cuadrilla_id: f.cuadrilla_id, observacion: f.observacion,
+    kilos: kg.value,
+    ifcos: document.getElementById('grp-ifcos').value,
+  };
+  btn.disabled = true;
+  try {
+    var r = await fetch('/api/galpon/volcados', { method:'POST', credentials:'include',
+      headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
+    var j = await r.json();
+    if (!j.ok){
+      /* El error se muestra ADENTRO y el casillero NO se limpia: el que escribió mal los
+         kilos los corrige sin volver a tipear nada. */
+      err.textContent = j.error; err.style.display = '';
+      kg.focus(); kg.select(); return;
+    }
+    /* Un uuid NUEVO por carga. El anterior ya entró, y mandarlo otra vez no haría nada:
+       el servidor hace INSERT OR IGNORE sobre esa columna. Eso es lo que hace que el
+       doble clic no duplique kilos — y es lo que va a necesitar la cola sin señal. */
+    GRP.uuid = galKgNuevoUuid();
+    GRP.tanda.unshift(Object.assign({ id: j.id, aviso: j.aviso || null }, j.fila || {}));
+    galRapPintar();
+    kg.value = '';
+    document.getElementById('grp-ifcos').value = '';
+    kg.focus();
+  } catch (e) {
+    err.textContent = 'No se pudo guardar: ' + e.message; err.style.display = '';
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+function galRapPintar(){
+  var el = document.getElementById('grp-tanda'); if (!el) return;
+  if (!GRP.tanda.length){
+    el.innerHTML = '<div class="grp-vacio">Todavía no cargaste nada en esta tanda.</div>';
+    return;
+  }
+  var kilos = 0, ifcos = 0;
+  GRP.tanda.forEach(function(x){ kilos += Number(x.kilos) || 0; ifcos += Number(x.ifcos) || 0; });
+  el.innerHTML = '<div class="grp-res">En esta tanda: <b>' + galKgNum(kilos) + ' kg</b>'
+      + ' · ' + GRP.tanda.length + (GRP.tanda.length === 1 ? ' carga' : ' cargas')
+      + (ifcos ? ' · ' + galKgNum(ifcos, 0) + ' IFCOs' : '') + '</div>'
+    + '<div class="grp-lista">' + GRP.tanda.map(function(x){
+        return '<div class="grp-l' + (x.estado === 'a_revisar' ? ' rev' : '') + '">'
+          + '<span>' + (x.estado === 'a_revisar' ? '⚠ ' : '')
+            + '<b>' + galKgNum(x.kilos) + ' kg</b>'
+            + (x.ifcos == null ? '' : ' · ' + galKgNum(x.ifcos, 0) + ' IFCOs')
+            + (x.aviso ? ' <span style="font-size:11px">' + galKgEsc(x.aviso) + '</span>' : '')
+          + '</span>'
+          + '<button class="btn bo bs" onclick="galRapDeshacer(' + x.id + ')">↩ deshacer</button>'
+          + '</div>';
+      }).join('') + '</div>';
+}
+
+/* Deshacer no pregunta. Es la carga que esa persona acaba de hacer, se ve en la lista, y
+   el borrado es blando: la fila queda en la base con su `eliminado_en`. Un «¿seguro?»
+   acá sería un clic más en la pantalla que existe para sacar clics. */
+async function galRapDeshacer(id){
+  try {
+    var r = await fetch('/api/galpon/volcados/' + id, { method:'DELETE', credentials:'include' });
+    var j = await r.json();
+    if (!j.ok){
+      var err = document.getElementById('grp-error');
+      err.textContent = j.error || 'no se pudo deshacer'; err.style.display = ''; return;
+    }
+    GRP.tanda = GRP.tanda.filter(function(x){ return x.id !== id; });
+    galRapPintar();
+  } catch (e) {
+    var e2 = document.getElementById('grp-error');
+    e2.textContent = 'No se pudo deshacer: ' + e.message; e2.style.display = '';
+  }
+}
+
+/* La pantalla de atrás se refresca al CERRAR y no en cada carga: son dos pedidos por
+   cajón en vez de uno, en la ventana que existe justamente para que cada cajón cueste lo
+   menos posible. Lo cargado se va viendo en la lista de la tanda mientras tanto. */
+function galRapCerrar(){
+  document.getElementById('gal-rap-modal').classList.remove('on');
+  GRP.fijo = null;
+  galKgCargar();
+}
 
 /* ═══════════════════════════════════════════════════════════════════════════════════
    📈 GALPÓN · ACUMULADO
