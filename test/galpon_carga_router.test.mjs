@@ -71,6 +71,21 @@ function base() {
       observacion TEXT, estado TEXT NOT NULL DEFAULT 'ok', revision_motivo TEXT,
       usuario_id INTEGER, usuario TEXT,
       creado_en TEXT DEFAULT (datetime('now','localtime')), eliminado_en TEXT);
+
+    CREATE TABLE gal_presentaciones (
+      id INTEGER PRIMARY KEY AUTOINCREMENT, nombre TEXT NOT NULL, destino TEXT NOT NULL,
+      envase TEXT, por_bulto REAL NOT NULL DEFAULT 1, kg_unidad REAL NOT NULL DEFAULT 1,
+      granel INTEGER NOT NULL DEFAULT 0, color TEXT, orden INTEGER NOT NULL DEFAULT 100,
+      activo INTEGER NOT NULL DEFAULT 1, creado_en TEXT, eliminado_en TEXT);
+
+    CREATE TABLE gal_procesos (
+      id INTEGER PRIMARY KEY AUTOINCREMENT, uuid TEXT UNIQUE, fecha TEXT NOT NULL,
+      lote_id INTEGER NOT NULL, lote_nombre TEXT, producto TEXT, destino TEXT NOT NULL,
+      presentacion_id INTEGER, presentacion TEXT, envase TEXT,
+      bultos REAL, por_bulto REAL, kg_unidad REAL, kilos REAL NOT NULL,
+      tipo TEXT NOT NULL DEFAULT 'ingreso', observacion TEXT,
+      estado TEXT NOT NULL DEFAULT 'ok', revision_motivo TEXT,
+      usuario_id INTEGER, usuario TEXT, creado_en TEXT, eliminado_en TEXT);
   `);
   return db;
 }
@@ -503,5 +518,131 @@ t('deshacer una carga de la tanda la saca del día', async () => {
     const d = await (await s.pegar('/volcados?fecha=' + HOY)).json();
     assert.equal(d.resumen.kilos, 200);
     assert.equal(d.cargas.length, 1);
+  } finally { s.cerrar(); }
+});
+
+// ══════════════════════════════════════════════════════════════════════════
+// 11 · 📦 EL PROCESO (V1112)
+// ══════════════════════════════════════════════════════════════════════════
+// Las cuentas se prueban en test/galpon_proceso.test.mjs. Acá, lo que sólo se
+// ve con el router levantado: quién puede qué, y que la pantalla se arme de
+// un solo pedido.
+t('CARGAR EL PROCESO NO PIDE ADMIN; EL CATÁLOGO SÍ', async () => {
+  // Empacar es el trabajo del día. Definir una caja es parametrizar: una caja
+  // mal definida multiplica mal todas las cargas que entren con ella.
+  const s = await servidor(base(), OPERADOR);
+  try {
+    const cat = await (await s.pegar('/presentaciones')).json();
+    assert.equal(cat.ok, true, 'el que empaca no puede ni leer el catálogo');
+    assert.deepEqual(cat.destinos.map((d) => d.clave), ['comercial', 'verde', 'descarte']);
+
+    assert.equal((await s.pegar('/presentaciones', json({ nombre: 'X', destino: 'verde',
+      granel: 1 }))).status, 403, 'un operador define presentaciones');
+    assert.equal((await s.pegar('/presentaciones/1', patch({ nombre: 'Y' }))).status, 403);
+    assert.equal((await s.pegar('/presentaciones/1', { method: 'DELETE' })).status, 403);
+
+    // Y en cambio carga procesos sin problema.
+    assert.equal((await s.pegar('/procesos')).status, 200);
+  } finally { s.cerrar(); }
+});
+
+t('el admin define el catálogo y el operador carga con él', async () => {
+  const db = base();
+  const a = await servidor(db, ADMIN);
+  let id;
+  try {
+    const r = await a.pegar('/presentaciones', json({ nombre: 'Caja cartón · 10 × 700 g',
+      destino: 'comercial', envase: 'Caja cartón', por_bulto: 10, kg_unidad: 0.7 }));
+    assert.equal(r.status, 200);
+    id = (await r.json()).id;
+  } finally { a.cerrar(); }
+
+  const o = await servidor(db, OPERADOR);
+  try {
+    const r = await o.pegar('/procesos', json({ fecha: HOY, lote_id: 10,
+      presentacion_id: id, bultos: 100 }));
+    assert.equal(r.status, 200);
+    const j = await r.json();
+    assert.equal(j.fila.kilos, 700);
+    // La firma sale de la cookie, no del cuerpo.
+    assert.equal(j.fila.usuario, 'Juan');
+  } finally { o.cerrar(); }
+});
+
+t('sin sesión no se lee ni se carga nada del proceso', async () => {
+  const s = await servidor(base(), null);
+  try {
+    for (const [ruta, opts] of [
+      ['/procesos', undefined],
+      ['/procesos', json({ fecha: HOY, lote_id: 10 })],
+      ['/procesos/1', patch({ bultos: 1 })],
+      ['/procesos/1', { method: 'DELETE' }],
+      ['/presentaciones', undefined],
+      ['/stock', undefined],
+    ]) assert.equal((await s.pegar(ruta, opts)).status, 401, ruta);
+  } finally { s.cerrar(); }
+});
+
+t('EL CERROJO DE EMPRESA TAPA TAMBIÉN LAS RUTAS DEL PROCESO', async () => {
+  const s = await servidor(base(), ADMIN);
+  try {
+    for (const [ruta, opts] of [
+      ['/procesos?sociedad_id=9', undefined],
+      ['/procesos?sociedad_id=9', json({ fecha: HOY, lote_id: 10 })],
+      ['/presentaciones?sociedad_id=9', undefined],
+      ['/presentaciones?sociedad_id=9', json({ nombre: 'X', destino: 'verde' })],
+      ['/stock?sociedad_id=9', undefined],
+    ]) {
+      const r = await s.pegar(ruta, opts);
+      assert.equal(r.status, 403, 'pasó parado en San Gerónimo: ' + ruta);
+      assert.match((await r.json()).error, /Puente Cord/);
+    }
+    assert.equal((await s.pegar('/procesos?sociedad_id=7')).status, 200);
+  } finally { s.cerrar(); }
+});
+
+t('LA PANTALLA SE ARMA DE UN SOLO PEDIDO', async () => {
+  // Cinco llamadas la dejan contradiciéndose a sí misma mientras llegan: el
+  // tablero de un lote con el stock de otro, las baldosas sin los lotes.
+  //
+  // Va con ADMIN porque el armado necesita crear una presentación, que es
+  // parametrización. Que el operador NO pueda crearla lo prueba el test de
+  // más arriba.
+  const db = base();
+  const s = await servidor(db, ADMIN);
+  try {
+    db.prepare("INSERT INTO gal_volcados (fecha,lote_id,lote_nombre,producto,kilos)"
+      + " VALUES (?,10,'Cuadro 3','Damasco',5000)").run(HOY);
+    const id = (await (await s.pegar('/presentaciones',
+      json({ nombre: 'Bin', destino: 'verde', granel: 1 }))).json()).id;
+    await s.pegar('/procesos', json({ fecha: HOY, lote_id: 10, presentacion_id: id,
+                                      kilos: 1200 }));
+
+    const j = await (await s.pegar('/procesos?fecha=' + HOY + '&lote_id=10')).json();
+    for (const k of ['destinos', 'presentaciones', 'lotes', 'procesos', 'tablero', 'stock']) {
+      assert.ok(k in j, 'falta ' + k + ' en la respuesta');
+    }
+    assert.equal(j.lotes[0].lote_id, 10);
+    assert.equal(j.lotes[0].sin_procesar, 3800);
+    assert.equal(j.tablero.volcado, 5000);
+    assert.equal(j.tablero.destinos.verde, 1200);
+    assert.equal(j.stock.kilos, 1200);
+    assert.equal(j.procesos.length, 1);
+  } finally { s.cerrar(); }
+});
+
+t('el catálogo de presentaciones se crea con admin aunque nadie lo pida', async () => {
+  // El operador necesita presentaciones el primer día. Sin ninguna, la pantalla
+  // de proceso no tiene baldosas y no hay forma de cargar nada.
+  const s = await servidor(base(), ADMIN);
+  try {
+    const mal = await s.pegar('/presentaciones', json({ nombre: 'Caja', destino: 'comercial',
+      por_bulto: 0, kg_unidad: 0 }));
+    assert.equal(mal.status, 400, 'aceptó una cuenta en cero: multiplicaría por nada');
+    assert.match((await mal.json()).error, /mayores que cero/);
+
+    const sinNombre = await s.pegar('/presentaciones', json({ destino: 'comercial',
+      granel: 1 }));
+    assert.equal(sinNombre.status, 400);
   } finally { s.cerrar(); }
 });

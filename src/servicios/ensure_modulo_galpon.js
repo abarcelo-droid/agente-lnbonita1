@@ -46,17 +46,20 @@ try {
     // Va aparte y no como solapa de la carga porque las miran dos personas distintas:
     // el que pesa mira su día, y el total por cuadrilla de toda la temporada es con lo
     // que se discute un jornal.
-    ['galpon-acumulado','📈 Galpón · Acumulado',      703],
+    // EL PROCESO (V1112). Va entre la carga y el acumulado porque ése es el orden en
+    // que se usa el galpón: entra fruta, se empaca, y al final se mira el rinde.
+    ['galpon-proceso',  '📦 Galpón · Proceso',       703],
+    ['galpon-acumulado','📈 Galpón · Acumulado',      704],
   ];
 
   const ins = db.prepare(
     'INSERT OR IGNORE INTO modulos_config (modulo, label, grupo, sociedad_id, tipo, orden) '
     + 'VALUES (?,?,?,?,?,?)');
   const upd = db.prepare(
-    'UPDATE modulos_config SET label=?, grupo=?, oculto=0 WHERE modulo=?');
+    'UPDATE modulos_config SET label=?, grupo=?, orden=?, oculto=0 WHERE modulo=?');
   for (const [modulo, label, orden] of MODULOS) {
     ins.run(modulo, label, 'Galpón', socId, 'operativo', orden);
-    upd.run(label, 'Galpón', modulo);
+    upd.run(label, 'Galpón', orden, modulo);
   }
 
   console.log('[ORG] Módulo Galpón verificado en modulos_config');

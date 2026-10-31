@@ -168,6 +168,89 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS gal_volc_fecha_idx ON gal_volcados(fecha);
   CREATE INDEX IF NOT EXISTS gal_volc_lote_idx  ON gal_volcados(lote_id, fecha);
   CREATE INDEX IF NOT EXISTS gal_volc_cuad_idx  ON gal_volcados(cuadrilla_id, fecha);
+  -- ═══════════════════════════════════════════════════════════════════════════
+  -- EN QUÉ SALE LA FRUTA DEL GALPÓN
+  -- ═══════════════════════════════════════════════════════════════════════════
+  -- Andy, 31/10/2026: «por ejemplo 100 cajas cartón x 10 cubetas de 700 gramos cada una».
+  --
+  -- Esa frase es una CUENTA, y es siempre la misma: bultos x unidades_por_bulto x peso de
+  -- cada unidad. Guardarla como catálogo es lo que convierte la carga en apretar una
+  -- baldosa y escribir 100 — en vez de tipear tres números y multiplicarlos a mano, que
+  -- es donde entra el error que nadie ve.
+  --
+  -- El peso va SIEMPRE en kilos acá adentro. La pantalla lo pide en gramos o en kilos y
+  -- convierte: «700» pensando en gramos y guardado como kilos son 700.000 kg en una
+  -- jornada, y el número es tan grande que parece un error de sistema y no de carga.
+  CREATE TABLE IF NOT EXISTS gal_presentaciones (
+    id        INTEGER PRIMARY KEY AUTOINCREMENT,
+    nombre    TEXT NOT NULL,                   -- 'Caja cartón 10 x 700 g'
+    destino   TEXT NOT NULL,                   -- comercial | verde | descarte
+    envase    TEXT,                            -- 'Caja cartón', 'Bin'
+    por_bulto REAL NOT NULL DEFAULT 1,         -- 10 cubetas por caja
+    kg_unidad REAL NOT NULL DEFAULT 1,         -- 0.7 kg cada cubeta
+    -- A granel no hay cuenta: se tipean los kilos. Es lo que pasa con un bin de verde o
+    -- de descarte, que se pesa entero y no tiene unidades adentro.
+    granel    INTEGER NOT NULL DEFAULT 0,
+    color     TEXT,
+    orden     INTEGER NOT NULL DEFAULT 100,
+    activo    INTEGER NOT NULL DEFAULT 1,
+    creado_en TEXT DEFAULT (datetime('now','localtime')),
+    eliminado_en TEXT
+  );
+  CREATE INDEX IF NOT EXISTS gal_pres_dest_idx ON gal_presentaciones(destino, orden);
+
+  -- ═══════════════════════════════════════════════════════════════════════════
+  -- EL PROCESO: QUÉ SALIÓ DE LO QUE ENTRÓ
+  -- ═══════════════════════════════════════════════════════════════════════════
+  -- gal_volcados tiene lo que ENTRÓ al galpón. Esta tabla tiene lo que SALIÓ, y las dos
+  -- juntas son el rinde — que es la pregunta que se le hace a una finca.
+  --
+  -- ── EL LOTE ES UNA DECLARACIÓN, NO UNA TRAZA ────────────────────────────────
+  -- Los IFCOs se vuelcan a una tolva y ahí la fruta se mezcla: no existe forma física de
+  -- decir que ESTA caja salió de AQUEL IFCO. El operador elige el lote, y eso es lo que
+  -- se guarda: una atribución declarada. Por eso el rinde puede dar más de 100% — y
+  -- cuando da, la pantalla lo muestra en vez de taparlo, porque es la señal de que la
+  -- atribución se corrió.
+  --
+  -- ── TRES DESTINOS, NO TEXTO LIBRE ───────────────────────────────────────────
+  -- comercial / verde / descarte. No son etiquetas: cada uno tiene un futuro distinto —
+  -- lo comercial se vende, lo verde vuelve a la tolva más adelante, el descarte se remata
+  -- o se tira. Texto libre serían cuarenta maneras de escribir «segunda» y ningún informe
+  -- posible, que es la misma razón por la que servicios/asientos.js tiene MOTIVOS.
+  --
+  -- ── tipo DESDE EL DÍA UNO ─────────────────────────────────────────────────
+  -- Hoy sólo se escriben ingresos. Pero lo verde se reprocesa y el descarte se remata:
+  -- las salidas son parte del negocio, no una idea. La columna cuesta una línea ahora y
+  -- una migración de media temporada después.
+  CREATE TABLE IF NOT EXISTS gal_procesos (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    uuid            TEXT UNIQUE,
+    fecha           TEXT NOT NULL,             -- YYYY-MM-DD, día de PROCESO
+    lote_id         INTEGER NOT NULL,          -- declarado, ver arriba
+    lote_nombre     TEXT,
+    producto        TEXT,
+    destino         TEXT NOT NULL,
+    presentacion_id INTEGER,
+    presentacion    TEXT,                      -- congelado: el catálogo se edita
+    envase          TEXT,
+    bultos          REAL,
+    por_bulto       REAL,
+    kg_unidad       REAL,
+    -- LO CALCULA EL SERVIDOR con los tres de arriba. Nunca lo que mandó el cliente: el
+    -- rinde de la temporada es exactamente esta columna.
+    kilos           REAL NOT NULL,
+    tipo            TEXT NOT NULL DEFAULT 'ingreso',
+    observacion     TEXT,
+    estado          TEXT NOT NULL DEFAULT 'ok',
+    revision_motivo TEXT,
+    usuario_id      INTEGER,
+    usuario         TEXT,
+    creado_en       TEXT DEFAULT (datetime('now','localtime')),
+    eliminado_en    TEXT
+  );
+  CREATE INDEX IF NOT EXISTS gal_proc_fecha_idx ON gal_procesos(fecha);
+  CREATE INDEX IF NOT EXISTS gal_proc_lote_idx  ON gal_procesos(lote_id, fecha);
+  CREATE INDEX IF NOT EXISTS gal_proc_dest_idx  ON gal_procesos(destino, fecha);
 `);
 
 // Migraciones de columnas nuevas, mismo patrón que el resto del repo: una por línea y con
@@ -208,11 +291,41 @@ for (const [clave, valor] of [
   // carga es un techo que alguien va a esquivar partiendo el renglón en dos.
   // En 0 queda apagado.
   ['kg_max_carga', '20000'],
+  // EL MISMO TECHO, PARA EL PROCESO. Acá el error de un cero de más tiene una forma
+  // propia: escribir 700 en el peso de la cubeta pensando en GRAMOS. Cien cajas de
+  // diez cubetas pasan de 700 kg a 700.000. La pantalla pide la unidad para que no
+  // pase, y esto es el cinturón de abajo. Marca, no rechaza: lo que ya se embaló,
+  // se embaló. En 0 queda apagado.
+  ['kg_max_proceso', '50000'],
 ]) {
   try {
     db.prepare('INSERT OR IGNORE INTO gal_config (clave, valor) VALUES (?,?)').run(clave, valor);
   } catch (e) { console.error('[GALPON] sembrando ' + clave + ':', e.message); }
 }
+
+// ── LAS PRESENTACIONES DEL PRIMER DÍA ───────────────────────────────────────────────
+// Sólo si la tabla está VACÍA, y acá eso es lo correcto — al revés que en los módulos,
+// donde CLAUDE.md marca el `if (n > 0) return` del seed como una trampa. La diferencia
+// es de quién es la lista: los módulos los decide el repo y tienen que aparecer sí o sí;
+// las presentaciones las arma el galpón y se borran a propósito. Resucitar una que
+// alguien sacó sería pelearse con el que la sacó, todos los arranques.
+//
+// Las tres a granel no inventan nada: un bin se pesa entero. La de cajas es, tal cual,
+// el ejemplo que dio Andy el 31/10/2026 — y se edita en Configuración como cualquier otra.
+try {
+  const n = db.prepare('SELECT COUNT(*) AS n FROM gal_presentaciones').get().n;
+  if (!n) {
+    const ins = db.prepare(
+      'INSERT INTO gal_presentaciones (nombre,destino,envase,por_bulto,kg_unidad,granel,orden)'
+      + ' VALUES (?,?,?,?,?,?,?)');
+    for (const f of [
+      ['Caja cartón · 10 × 700 g', 'comercial', 'Caja cartón', 10, 0.7, 0, 10],
+      ['A granel (kilos)',         'comercial', null,          1,  1,   1, 20],
+      ['Bin de verde',             'verde',     'Bin',         1,  1,   1, 10],
+      ['Bin de descarte',          'descarte',  'Bin',         1,  1,   1, 10],
+    ]) ins.run(...f);
+  }
+} catch (e) { console.error('[GALPON] sembrando presentaciones:', e.message); }
 
 console.log("[GALPON] Tablas de Galpón verificadas");
 

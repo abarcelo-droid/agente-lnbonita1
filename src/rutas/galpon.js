@@ -23,6 +23,9 @@ import {
   registrarVolcado, editarVolcado, borrarVolcado, volcadosDelDia, resumenDelDia,
   acumulado, rangoCargado,
   ultimaCarga,
+  DESTINOS, presentaciones, guardarPresentacion, borrarPresentacion,
+  registrarProceso, editarProceso, borrarProceso, procesosDelDia,
+  tableroProceso, stockGalpon, lotesVolcados,
 } from '../servicios/galpon.js';
 import { generarTarjetasPDF, tarjetasAImprimir } from '../servicios/galponTarjetasPDF.js';
 
@@ -586,6 +589,139 @@ router.get('/acumulado', (req, res) => {
     });
   } catch (e) {
     console.error('[GALPON] GET /acumulado:', e.message);
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+// ════════════════════════════════════════════════════════════════════════════════════
+// 📦 EL PROCESO (V1112)
+// ════════════════════════════════════════════════════════════════════════════════════
+// gal_volcados es lo que entró; esto es lo que salió. Y las dos juntas son el rinde.
+//
+// Cargar el proceso es TRABAJO DEL DÍA y va con requireAuth, como la carga de kilos. Lo
+// que pide admin es el CATÁLOGO de presentaciones, que es parametrización: una caja mal
+// definida multiplica mal todas las cargas que entren con ella.
+
+// El catálogo lo LEE cualquiera con el módulo: sin él la pantalla de proceso no tiene
+// baldosas que mostrar.
+router.get('/presentaciones', (req, res) => {
+  try {
+    res.json({ ok: true, destinos: DESTINOS,
+               presentaciones: presentaciones(db, { todas: req.query.todas === '1' }) });
+  } catch (e) {
+    console.error('[GALPON] GET /presentaciones:', e.message);
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+router.post('/presentaciones', requireAdmin, (req, res) => {
+  try {
+    const r = guardarPresentacion(db, req.body || {});
+    if (!r.ok) return res.status(400).json({ ok: false, error: r.motivo });
+    res.json(r);
+  } catch (e) {
+    console.error('[GALPON] POST /presentaciones:', e.message);
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+router.patch('/presentaciones/:id', requireAdmin, (req, res) => {
+  try {
+    const r = guardarPresentacion(db, Object.assign({}, req.body || {},
+                                                    { id: num(req.params.id) }));
+    if (!r.ok) return res.status(400).json({ ok: false, error: r.motivo });
+    res.json(r);
+  } catch (e) {
+    console.error('[GALPON] PATCH /presentaciones/:id:', e.message);
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+router.delete('/presentaciones/:id', requireAdmin, (req, res) => {
+  try {
+    const r = borrarPresentacion(db, num(req.params.id));
+    if (!r.ok) return res.status(404).json({ ok: false, error: r.motivo });
+    res.json({ ok: true });
+  } catch (e) {
+    console.error('[GALPON] DELETE /presentaciones/:id:', e.message);
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+// Todo lo que la pantalla necesita para pintarse, en UN pedido: los lotes entre los que
+// se elige, el catálogo, lo ya cargado, el tablero del lote y el stock. Partirlo en
+// cinco deja la pantalla contradiciéndose a sí misma mientras llegan las respuestas.
+router.get('/procesos', (req, res) => {
+  try {
+    const fecha = esFecha(req.query.fecha) || hoy();
+    const loteId = num(req.query.lote_id);
+    res.json({
+      ok: true,
+      fecha,
+      hoy: hoy(),
+      destinos: DESTINOS,
+      presentaciones: presentaciones(db),
+      lotes: lotesVolcados(db),
+      procesos: procesosDelDia(db, fecha, loteId),
+      tablero: tableroProceso(db, fecha, loteId),
+      stock: stockGalpon(db),
+    });
+  } catch (e) {
+    console.error('[GALPON] GET /procesos:', e.message);
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+router.post('/procesos', (req, res) => {
+  try {
+    const u = req._user || {};
+    const r = registrarProceso(db, Object.assign({}, req.body || {}, {
+      // La firma sale de la COOKIE, como en la carga de kilos: una firma que manda el
+      // cliente no firma nada.
+      usuario_id: u.id || null,
+      usuario: u.nombre || null,
+    }));
+    if (!r.ok) return res.status(400).json({ ok: false, error: r.motivo });
+    res.json(r);
+  } catch (e) {
+    console.error('[GALPON] POST /procesos:', e.message);
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+router.patch('/procesos/:id', (req, res) => {
+  try {
+    const r = editarProceso(db, num(req.params.id), req.body || {});
+    if (!r.ok) {
+      return res.status(r.motivo === 'Ese proceso no existe o ya se borró' ? 404 : 400)
+                .json({ ok: false, error: r.motivo });
+    }
+    res.json(r);
+  } catch (e) {
+    console.error('[GALPON] PATCH /procesos/:id:', e.message);
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+router.delete('/procesos/:id', (req, res) => {
+  try {
+    const r = borrarProceso(db, num(req.params.id));
+    if (!r.ok) return res.status(404).json({ ok: false, error: r.motivo });
+    res.json({ ok: true });
+  } catch (e) {
+    console.error('[GALPON] DELETE /procesos/:id:', e.message);
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+// El stock es DERIVADO: se suma gal_procesos cada vez. No hay tabla de saldos que
+// mantener al día, y por eso corregir una carga de la semana pasada lo arregla solo.
+router.get('/stock', (req, res) => {
+  try {
+    res.json({ ok: true, destinos: DESTINOS,
+               stock: stockGalpon(db, { lote_id: num(req.query.lote_id) }) });
+  } catch (e) {
+    console.error('[GALPON] GET /stock:', e.message);
     res.status(500).json({ ok: false, error: e.message });
   }
 });

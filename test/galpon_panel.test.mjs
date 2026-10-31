@@ -57,6 +57,43 @@ function lector(texto) {
 const dice   = lector(MANUAL);
 const diceLd = lector(MANUAL_LD);
 
+// Un bloque de JS del panel: desde su marcador hasta el próximo banner /* ═══ , que es
+// como están separados los módulos en panel.html. Cortar "hasta el final del archivo"
+// se traga el bloque de abajo, y entonces un assert de 'esto NO aparece' mira código
+// ajeno y pasa sin avisar.
+function bloqueJs(marcador) {
+  const i = PANEL.indexOf(marcador);
+  assert.ok(i > 0, 'no encontré el bloque ' + marcador);
+  const cortes = [PANEL.indexOf('\r\n/* ═══', i), PANEL.indexOf('</script>', i)]
+    .filter((x) => x > 0);
+  assert.ok(cortes.length, 'el bloque ' + marcador + ' no termina en ningún lado');
+  return PANEL.slice(i, Math.min(...cortes));
+}
+
+// Lo mismo para un trozo de HTML: hasta el próximo <div de primer nivel.
+function bloqueHtml(marcador) {
+  const i = PANEL.indexOf(marcador);
+  assert.ok(i > 0, 'no encontré el markup ' + marcador);
+  const fin = PANEL.indexOf('\r\n  <div class=', i);
+  return PANEL.slice(i, fin > 0 ? fin : undefined);
+}
+
+// Y el cuerpo de una función del servicio, hasta su llave de cierre en la columna 0.
+// Para los asserts de "esto NO está": el código suele EXPLICAR por qué no hace algo, y
+// entonces la explicación dispara el assert. Se miran las líneas sin sus comentarios.
+function sinComentarios(txt) {
+  // Sin ancla de fin de línea: en JS el punto no matchea el retorno de carro, y en
+  // este repo toda línea termina en uno. Con el ancla puesta, el reemplazo no
+  // matcheaba nada y el helper devolvía el texto con sus comentarios intactos — o
+  // sea, no hacía nada, y el assert que depende de él pasaba por la razón equivocada.
+  return String(txt).split('\n').map((l) => l.replace(/\/\/.*/, '')).join('\n');
+}
+
+function cuerpoServicio(firma) {
+  const i = SERV.indexOf(firma);
+  assert.ok(i > 0, 'no encontré ' + firma);
+  return SERV.slice(i, SERV.indexOf('\r\n}', i));
+}
 // ── 1 · LAS CINCO PIEZAS DEL REGISTRO, PARA TODOS LOS MÓDULOS ─────────────
 // Antes esto auditaba 'galpon-config' escrito a mano cinco veces. Con el módulo
 // número dos esa lista se vuelve lo mismo que la de modales_fuera_de_pantalla:
@@ -122,10 +159,16 @@ test('LAS DOS PIEZAS DEL SIDEBAR, que hacen falta juntas, y el dispatcher', () =
       'falta el puente del nav de ' + modulo);
     assert.match(PANEL, new RegExp('<div class="sec sg-mod" id="sec-' + modulo + '">'),
       'falta la pantalla de ' + modulo);
-    const d = new RegExp("'" + modulo + "': function\\(\\)\\{ (\\w+)\\(\\); \\}").exec(PANEL);
+    // Puede llamar a MÁS DE UNA: la configuración abre su pantalla y además carga el
+    // catálogo de presentaciones. Se verifican todas, no la primera.
+    const d = new RegExp("'" + modulo + "': function\\(\\)\\{ ([^}]*)\\}").exec(PANEL);
     assert.ok(d, 'falta la línea del dispatcher de ' + modulo);
-    assert.ok(PANEL.includes('function ' + d[1] + '('),
-      'el dispatcher de ' + modulo + ' llama a ' + d[1] + '(), que no está definida');
+    const llamadas = [...d[1].matchAll(/(\w+)\(\);/g)].map((m) => m[1]);
+    assert.ok(llamadas.length, 'el dispatcher de ' + modulo + ' no llama a nada');
+    for (const fn of llamadas) {
+      assert.ok(PANEL.includes('function ' + fn + '('),
+        'el dispatcher de ' + modulo + ' llama a ' + fn + '(), que no está definida');
+    }
   }
 });
 
@@ -233,14 +276,16 @@ test('y cada manual lleva el V### al lado de cada cosa, como pide CLAUDE.md', ()
     const v = [...texto.matchAll(/<span class="ver">(V\d+)<\/span>/g)].map((m) => m[1]);
     assert.ok(v.length >= 5, nombre + ': sólo ' + v.length + ' entradas numeradas');
   }
-  const vers = [...MANUAL.matchAll(/<span class="ver">(V\d+)<\/span>/g)].map((m) => m[1]);
-  assert.equal(new Set(vers).size, 1, 'hay versiones mezcladas: ' + [...new Set(vers)].join(', '));
-  // Y no puede ser del futuro. Antes esto exigía que fuera IGUAL al VERSION del panel,
-  // y estaba mal: una entrada del manual lleva la versión en la que salió y se queda con
-  // ella. Al PR siguiente —que no tocó Galpón— el test se ponía rojo solo.
+  // Cada entrada lleva el V### de CUANDO SALIÓ, así que un manual que se mantuvo
+  // tiene varios números: eso es lo correcto, no un problema. Lo que no puede haber es
+  // una versión del FUTURO — ahí alguien copió un número en vez de poner el suyo.
   const actual = parseInt((/const VERSION = 'V(\d+)';/.exec(leer('src/sidebar-v2.js')) || [, 0])[1], 10);
-  const dice = parseInt(vers[0].slice(1), 10);
-  assert.ok(dice <= actual, 'el manual dice ' + vers[0] + ' y el panel va en V' + actual);
+  for (const [nombre, texto] of [['config', MANUAL], ['lote del día', MANUAL_LD]]) {
+    for (const m of texto.matchAll(/<span class="ver">V(\d+)<\/span>/g)) {
+      assert.ok(parseInt(m[1], 10) <= actual,
+        nombre + ': el manual dice V' + m[1] + ' y el panel va en V' + actual);
+    }
+  }
 });
 
 // ── 3 · SIN BARRA DE DESPLAZAMIENTO LATERAL ───────────────────────────────
@@ -495,9 +540,7 @@ const MANUAL_KG = manualDe('galpon-carga');
 const diceKg = lector(MANUAL_KG);
 
 const JS_KG = (() => {
-  const i = PANEL.indexOf('var GKG =');
-  assert.ok(i > 0, 'no encontré el JS de la carga de kilos');
-  return PANEL.slice(i, PANEL.indexOf('</script>', i));
+  return bloqueJs('var GKG =');
 })();
 
 test('MANUAL KG: «es el MISMO libro que va a usar el escaneo»', () => {
@@ -635,7 +678,12 @@ test('MANUAL KG: «quién cargó sale de la cookie» y «no hace falta ser admin
   const post = RUTA.slice(RUTA.indexOf("router.post('/volcados'"),
                           RUTA.indexOf("router.patch('/volcados/:id'"));
   // Ninguna de las cuatro rutas de kilos pide admin...
-  const kg = RUTA.slice(RUTA.indexOf("router.get('/volcados'"));
+  // Acotado a las cuatro rutas de kilos: más abajo viven las del catálogo de
+  // presentaciones, que SÍ piden admin con todo derecho.
+  const iKg = RUTA.indexOf("router.get('/volcados'");
+  const kg = RUTA.slice(iKg, RUTA.indexOf('// ── CUÁNTO LLEVAMOS', iKg));
+  assert.ok(kg.length > 500 && kg.includes("router.delete('/volcados/:id'"),
+    'el corte de las rutas de kilos quedó mal: mide ' + kg.length);
   assert.ok(!/requireAdmin/.test(kg), 'cargar kilos pide admin: lo cargaría el dueño');
   // ...y la firma la pone el servidor, no el cuerpo del pedido.
   assert.match(post, /usuario_id: u\.id \|\| null,/);
@@ -698,9 +746,8 @@ test('la pantalla de kilos tampoco se arrastra de costado', () => {
 // (test/galpon_acumulado.test.mjs); acá se clava lo que el MANUAL promete.
 const MANUAL_AC = manualDe('galpon-acumulado');
 const diceAc = lector(MANUAL_AC);
-const JS_AC = PANEL.slice(PANEL.indexOf('var GAC = {'),
-                          PANEL.indexOf('\r\n</script>', PANEL.indexOf('var GAC = {')));
-const ACUM = SERV.slice(SERV.indexOf('export function acumulado('));
+const JS_AC = bloqueJs('var GAC = {');
+const ACUM = cuerpoServicio('export function acumulado(');
 
 test('MANUAL AC: «no hay nada que cerrar: suma los mismos renglones»', () => {
   diceAc(/suma los mismos renglones/i);
@@ -884,14 +931,21 @@ test('CADA PREFIJO DECLARADO LO USA ALGUNA RUTA DE VERDAD', () => {
 // ══════════════════════════════════════════════════════════════════════════
 // Andy, 31/10/2026: «quiero que el OPERADOR tenga que sólo poner los kilos...
 // que ya quede guardado el último lote, comentarios y cuadrilla que puso».
-const I_RAP = PANEL.indexOf('var GRP = {');
-const JS_RAP = PANEL.slice(I_RAP, PANEL.indexOf('📈 GALPÓN · ACUMULADO', I_RAP));
-const I_MOD = PANEL.indexOf('id="gal-rap-modal"');
-const MOD_RAP = PANEL.slice(I_MOD, PANEL.indexOf('id="sec-galpon-acumulado"', I_MOD));
-test('los cortes del panel no quedaron vacíos', () => {
-  // Un slice vacío hace que TODOS los asserts de abajo miren la nada y pasen.
+const JS_RAP = bloqueJs('var GRP = {');
+const MOD_RAP = bloqueHtml('id="gal-rap-modal"');
+test('los cortes del panel no quedaron ni vacíos ni de más', () => {
+  // Vacío hace que TODOS los asserts de abajo miren la nada y pasen. DE MÁS es peor:
+  // pasan igual, pero mirando el bloque del vecino.
   assert.ok(JS_RAP.length > 2000, 'JS_RAP mide ' + JS_RAP.length);
   assert.ok(MOD_RAP.length > 1000, 'MOD_RAP mide ' + MOD_RAP.length);
+  assert.ok(!JS_RAP.includes('var GAC'), 'JS_RAP se comió el acumulado');
+  assert.ok(!JS_RAP.includes('var GPR = {'), 'JS_RAP se comió el proceso');
+  assert.ok(!JS_RAP.includes('var GPRES'), 'JS_RAP se comió el catálogo');
+  assert.ok(!JS_AC.includes('var GPR = {'), 'JS_AC se comió el proceso');
+  assert.ok(JS_AC.length < 30000, 'JS_AC se pasó de largo: ' + JS_AC.length);
+  assert.ok(!JS_KG.includes('var GRP'), 'JS_KG se comió la carga rápida');
+  assert.ok(!MOD_RAP.includes('gal-pres-modal'), 'MOD_RAP se comió la ventana de al lado');
+  assert.ok(!ACUM.includes('registrarProceso'), 'ACUM se comió el servicio de proceso');
 });
 
 test('MANUAL KG: «se abre en dos pasos, y el segundo es sólo los kilos»', () => {
@@ -1092,4 +1146,196 @@ test('EL ENCABEZADO NO DICE «Damasco · Damasco»', () => {
   assert.match(JS_RAP, /f\.producto && f\.producto !== lote/);
   assert.match(JS_RAP, /p\.push\('1 cajón por carga'\);/,
     'el cartel fijo no dice la regla de esta ventana');
+});
+
+// ══════════════════════════════════════════════════════════════════════════
+// 9 · 📦 EL PROCESO, CONTRA EL CÓDIGO (V1112)
+// ══════════════════════════════════════════════════════════════════════════
+// Andy, 31/10/2026: «quiero un lugar para cargar el proceso... hacé algo medio
+// interactivo. Tipo un juego». Las cuentas están en
+// test/galpon_proceso.test.mjs; acá se clava lo que el MANUAL promete.
+const MANUAL_PR = manualDe('galpon-proceso');
+const dicePr = lector(MANUAL_PR);
+const JS_PR = bloqueJs('var GPR = {');
+const JS_CAT = bloqueJs('var GPRES = {');
+const SEC_PR = bloqueHtml('id="sec-galpon-proceso"');
+
+test('MANUAL PR: «se elige entre los lotes VOLCADOS, no entre todos»', () => {
+  dicePr(/Se elige entre los lotes <b>volcados<\/b>/);
+  dicePr(/sólo '\s*\+\s*'puede salir lo que entró|puede salir lo que entró/);
+  // La lista sale de gal_volcados, no de pa_lotes.
+  const lv = cuerpoServicio('export function lotesVolcados(');
+  assert.match(lv, /FROM gal_volcados WHERE eliminado_en IS NULL/);
+  assert.match(lv, /sin_procesar: round2\(v\.volcado - procesado\)/);
+  assert.match(JS_PR, /GPR\.datos && GPR\.datos\.lotes/);
+});
+
+test('MANUAL PR: «el lote es una declaración, no una traza»', () => {
+  dicePr(/no existe forma física de decir/);
+  dicePr(/el rinde puede dar más de 100%/);
+  // Y por eso «de más» se calcula y se muestra, en vez de recortarse en cero.
+  const tab = cuerpoServicio('export function tableroProceso(');
+  assert.match(tab, /de_mas: procesado > volcado,/);
+  // Sin los comentarios: el propio código EXPLICA por qué no hace Math.max(0, …), y
+  // un assert que mira el texto crudo se dispara con la explicación.
+  assert.ok(!/Math\.max\(0/.test(sinComentarios(tab)),
+    'se recorta el sobrante en cero: tapa el único aviso');
+  assert.match(JS_PR, /t\.de_mas \?/);
+});
+
+test('MANUAL PR: «son tres y son fijas, no un campo de texto»', () => {
+  dicePr(/Son tres y son fijas/);
+  assert.match(SERV, /export const DESTINOS = \[/);
+  assert.match(SERV, /const esDestino = \(v\) => DESTINOS\.some/);
+  // El destino de una carga sale de la presentación, no del cuerpo del pedido.
+  const reg = cuerpoServicio('export function registrarProceso(');
+  assert.match(reg, /const destino = pres \? pres\.destino : dd\.destino;/);
+  assert.match(reg, /if \(!esDestino\(destino\)\)/);
+});
+
+test('MANUAL PR: «cada presentación es una baldosa que ya sabe su cuenta»', () => {
+  dicePr(/sabe que son 7 kg por caja/);
+  dicePr(/se escribe <b>100<\/b> y/);
+  assert.match(JS_PR, /function galPrBaldosa\(p, d\)\{/);
+  // Los saltos y el ± están, que es lo que la hace cargable de pie.
+  assert.match(JS_PR, /\[1, 5, 10, 25\]/);
+  assert.match(JS_PR, /function galPrMas\(n\)\{/);
+  assert.match(JS_PR, /if \(ev\.key === 'Enter'\)\{ ev\.preventDefault\(\); galPrCargarUno\(\); \}/);
+});
+
+test('LOS BOTONES NO REDIBUJAN LA ZONA', () => {
+  // Un redibujado por cada +5 le saca el foco al casillero y borra lo que se
+  // venía escribiendo. Se toca el input a mano y se actualiza sólo el previo.
+  const mas = JS_PR.slice(JS_PR.indexOf('function galPrMas(n){'),
+                          JS_PR.indexOf('function galPrPresSel('));
+  assert.ok(!/galPrPintarZonas\(\)/.test(mas), 'el ± vuelve a dibujar la zona');
+  assert.match(mas, /galPrPrevio\(\);/);
+  assert.match(mas, /c\.focus\(\);/);
+});
+
+test('MANUAL PR: «el número grande es un espejo, no la fuente»', () => {
+  dicePr(/el rinde de la temporada dependería del navegador/);
+  // La pantalla previsualiza, el servidor calcula. Lo que viaja son los bultos.
+  const car = JS_PR.slice(JS_PR.indexOf('async function galPrCargarUno('),
+                          JS_PR.indexOf('function galPrPintar('));
+  assert.ok(!/kilos: *\w+ *\* *\w+/.test(car), 'la pantalla manda los kilos calculados');
+  assert.match(car, /body\.bultos = c \? c\.value : '';/);
+  assert.match(SERV, /export function kilosDeProceso\(bultos, porBulto, kgUnidad\)/);
+  const reg = cuerpoServicio('export function registrarProceso(');
+  assert.match(reg, /kg = kilosDeProceso\(bultos, porBulto, kgUnidad\);/);
+});
+
+test('MANUAL PR: «a granel se escriben los kilos y no hay cuenta»', () => {
+  dicePr(/se pesan enteras y se escriben los kilos/);
+  assert.match(JS_PR, /if \(p\.granel\) body\.kilos = c \? c\.value : '';/);
+  const reg = cuerpoServicio('export function registrarProceso(');
+  assert.match(reg, /if \(pres && !pres\.granel\) \{/);
+});
+
+test('MANUAL PR: «el volcado del lote no se corta por día»', () => {
+  dicePr(/no se corta por día/);
+  // Si lo cortara, lo que entró el martes y se procesa el jueves daría «de más»
+  // todos los días.
+  const tab = cuerpoServicio('export function tableroProceso(');
+  assert.match(tab, /FROM gal_volcados'\r?\n\s*\+ '\s*WHERE lote_id = \? AND eliminado_en IS NULL/);
+  assert.ok(!/gal_volcados[\s\S]{0,200}fecha = \?/.test(tab), 'el tablero corta el volcado por día');
+});
+
+test('MANUAL PR: «el stock no es una tabla aparte»', () => {
+  dicePr(/No es una tabla aparte/);
+  dicePr(/corregir una carga de la semana pasada lo arregla solo/);
+  const st = cuerpoServicio('export function stockGalpon(');
+  assert.match(st, /FROM gal_procesos WHERE eliminado_en IS NULL/);
+  assert.ok(!/gal_stock|gal_saldos/.test(SERV + DDL), 'apareció una tabla de saldos');
+  // Y las salidas ya restan, para el día que existan.
+  assert.match(st, /CASE WHEN tipo = 'ingreso' THEN kilos ELSE -kilos END/);
+});
+
+test('MANUAL PR: «el cero de más tiene forma de gramos»', () => {
+  dicePr(/700\.000 kg/);
+  dicePr(/marca y deja entrar/);
+  assert.match(DDL, /\['kg_max_proceso', '50000'\]/);
+  const reg = cuerpoServicio('export function registrarProceso(');
+  assert.match(reg, /estado = 'a_revisar';/);
+  // NO rechaza: después de marcar sigue y escribe.
+  const iMarca = reg.indexOf("estado = 'a_revisar'");
+  const iInsert = reg.indexOf('INSERT OR IGNORE INTO gal_procesos');
+  assert.ok(iInsert > iMarca, 'el techo corta la carga en vez de marcarla');
+});
+
+test('MANUAL CFG: «la unidad se pregunta» y el previo la muestra', () => {
+  const cfg = manualDe('galpon-config');
+  assert.match(cfg, /Por qué la unidad se pregunta/);
+  assert.match(cfg, /700\.000 kg/);
+  assert.match(PANEL, /<select id="gal-pres-uni" onchange="galPresPrevio\(\)">/);
+  assert.match(PANEL, /<option value="g">gramos<\/option>/);
+  // El previo muestra una caja Y cien: 700.000 no pasa desapercibido.
+  assert.match(PANEL, /100 bultos = <b>' \+ galKgNum\(pb \* kg \* 100\)/);
+  // Y adentro se guarda siempre en kilos.
+  assert.match(PANEL, /=== 'g' \? pe \/ 1000 : pe/);
+});
+
+test('LA CONVERSIÓN DE GRAMOS ESTÁ EN EL GUARDADO, no sólo en el previo', () => {
+  // Si estuviera sólo en el previo, la pantalla mostraría «700 kg» —correcto— y la base
+  // guardaría 700 kg por cubeta. Es el peor caso: el número que se mira está bien y el
+  // que se guarda está mil veces mal.
+  const guardar = JS_CAT.slice(JS_CAT.indexOf('async function galPresGuardar('),
+                               JS_CAT.indexOf('async function galPresBorrar('));
+  assert.ok(guardar.length > 300, 'el corte de galPresGuardar quedó vacío');
+  assert.match(guardar, /=== 'g' \? pe \/ 1000 : pe/,
+    'el guardado no convierte los gramos a kilos');
+  assert.match(guardar, /kg_unidad: granel \? 1 : kg,/);
+
+  // Y el previo la tiene por su cuenta, que es lo que deja ver el error antes de guardar.
+  const previo = JS_CAT.slice(JS_CAT.indexOf('function galPresPrevio('),
+                              JS_CAT.indexOf('async function galPresGuardar('));
+  assert.match(previo, /=== 'g' \? pe \/ 1000 : pe/);
+});
+
+test('MANUAL CFG: «sacarla del catálogo no toca lo ya cargado»', () => {
+  const cfg = manualDe('galpon-config');
+  assert.match(cfg, /no toca lo ya cargado/);
+  // Porque el proceso guarda el NOMBRE además del id.
+  assert.match(DDL, /presentacion {4}TEXT,/);
+  const reg = cuerpoServicio('export function registrarProceso(');
+  assert.match(reg, /pres \? pres\.nombre : null/);
+  // Y el borrado del catálogo es blando.
+  assert.match(SERV, /export function borrarPresentacion[\s\S]{0,300}eliminado_en = datetime/);
+});
+
+test('MANUAL AC: «el rinde es lo comercial sobre lo volcado»', () => {
+  const ac = manualDe('galpon-acumulado');
+  assert.match(ac, /es lo comercial sobre lo volcado/);
+  assert.match(ac, /promediar porcentajes le da el mismo peso/);
+  const ri = cuerpoServicio('export function rindePorLote(');
+  assert.match(ri, /rinde: m\.volcado > 0 \? Math\.round\(\(m\.comercial \/ m\.volcado\)/);
+  // El total de la tabla se calcula sobre el total, no promediando rindes.
+  assert.match(JS_AC, /rinde: tot\.volcado > 0 \? Math\.round\(\(tot\.comercial \/ tot\.volcado\)/);
+  assert.ok(!/rinde[\s\S]{0,80}\/ fs\.length/.test(JS_AC), 'promedia los rindes de cada lote');
+});
+
+test('EL RINDE VIAJA CON EL ACUMULADO, no en otro pedido', () => {
+  assert.match(ACUM, /rinde: rindePorLote\(db, d, h\),/);
+  assert.match(JS_AC, /GAC\.datos && GAC\.datos\.rinde/);
+  assert.match(JS_AC, /galAcPintarRinde\(\);/);
+});
+
+test('la pantalla de proceso tampoco se arrastra de costado', () => {
+  assert.match(PANEL, /#sec-galpon-proceso \.ab-table-wrap\{overflow-x:hidden !important\}/);
+  assert.match(PANEL, /#sec-galpon-proceso \.gpr-tbl\{table-layout:fixed/);
+  assert.match(PANEL, /#sec-galpon-acumulado \.gac-rtbl\{table-layout:fixed/);
+});
+
+test('LA PANTALLA DE PROCESO ES UNA LISTA: no abre ninguna ventana', () => {
+  // La regla de CLAUDE.md es que un formulario de carga va en una ventana. Acá
+  // la carga ES la pantalla —baldosa, número, Enter— y meterla en una ventana
+  // sería tapar el tablero justo mientras se carga contra él.
+  assert.ok(!/ab-modal-overlay/.test(SEC_PR), 'la pantalla de proceso tiene una ventana adentro');
+  // La que SÍ es un formulario —definir una presentación— vive en una ventana,
+  // y fuera de toda .sec.
+  assert.match(PANEL, /<div class="ab-modal-overlay sg-mod" id="gal-pres-modal">/);
+});
+
+test('el catálogo se carga al abrir Configuración, o la tabla sale vacía', () => {
+  assert.match(PANEL, /'galpon-config': function\(\)\{ galInit\(\); galPresCargar\(\); \}/);
 });

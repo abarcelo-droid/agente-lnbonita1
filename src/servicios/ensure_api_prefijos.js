@@ -70,7 +70,7 @@ const PREFIJOS = [
   // Cuando entren el volcado y el tablero, CADA UNO se declara con sus propias
   // direcciones: el prefijo pelado 'galpon' le daría las rutas de los cuatro a un solo
   // menú, que es la trampa que este archivo advierte arriba.
-  ['galpon-config', 'galpon/config,galpon/cuadrillas,galpon/tarjetas'],
+  ['galpon-config', 'galpon/config,galpon/cuadrillas,galpon/tarjetas,galpon/presentaciones'],
   // El lote del día es OPERATIVO, no parametrización: lo carga el que abre el galpón
   // todas las mañanas. Por eso el router no pide admin y el nivel lo decide esta línea.
   //
@@ -89,6 +89,10 @@ const PREFIJOS = [
   // exigirNivel deja pasar entera el día que alguien le cuelgue un POST —un cierre de
   // temporada, una corrección masiva— sin acordarse de volver a este archivo.
   ['galpon-acumulado', 'galpon/acumulado'],
+  // EL PROCESO (V1112). Escribe el otro libro del galpón: qué salió de lo que entró.
+  // Cargarlo es trabajo del día y pide operar, no admin — lo que pide admin es el
+  // catálogo de presentaciones, que está arriba con el resto de la parametrización.
+  ['galpon-proceso', 'galpon/procesos,galpon/stock'],
   // P&L ABASTO (V1052). Router propio de un solo módulo: subir el libro diario y guardar
   // los rubros pide 'operar'.
   ['pl-abasto', 'pl-abasto'],
@@ -501,6 +505,10 @@ const LECTURA = [
   // daría además poder de ESCRITURA sobre el lote del día, y el que carga kilos no
   // tiene por qué poder cambiar qué lote se está cosechando.
   ['galpon-carga',          'galpon/lotes,galpon/cuadrillas,galpon/lote-vigente'],
+  // 📦 GALPÓN · Proceso (V1112). Las baldosas de la pantalla son el catálogo de
+  // presentaciones. Va en api_lectura y no arriba por la misma razón de siempre:
+  // allá le daría además poder de ESCRITURA, y el que empaca no define las cajas.
+  ['galpon-proceso',        'galpon/presentaciones'],
 ];
 
 try {
