@@ -1039,3 +1039,57 @@ test('LOS DESPLEGABLES SE ARMAN EN UN SOLO LUGAR', () => {
       v + ' no usa el armador común');
   }
 });
+
+// ══════════════════════════════════════════════════════════════════════════
+// 8 · 📦 UNA PESADA ES UN CAJÓN (V1111)
+// ══════════════════════════════════════════════════════════════════════════
+// Andy, 31/10/2026: «siempre trabado en 1 cajón, porque vas cargando siempre
+// de a uno».
+test('MANUAL KG: «no hay casillero de IFCOs y cada Enter cuenta uno»', () => {
+  diceKg(/una pesada <b>es<\/b> un cajón/);
+  // El uno lo pone la pantalla, no el operador: no hay casillero que llenar.
+  assert.ok(!/grp-ifcos/.test(PANEL), 'quedó el casillero de IFCOs en la carga rápida');
+  assert.match(JS_RAP, /ifcos: 1,/);
+});
+
+test('MANUAL KG: «un campo que hay que llenar con 1 cada vez se deja vacío»', () => {
+  // Y entonces los kilos entran sin su cajón. No es sólo un casillero de menos:
+  // sin el cajón no hay promedio por cajón, que es el número con el que se ve
+  // una pesada mal tipeada.
+  diceKg(/se deja vacío a la tercera/);
+  diceKg(/el que está al '\s*\+\s*'doble salta solo|doble salta solo/);
+  assert.match(JS_RAP, /kg por cajón/);
+  assert.match(JS_RAP, /galKgNum\(kilos \/ cajones\)/);
+});
+
+test('la cuenta de la tanda habla de CAJONES y sale de lo cargado', () => {
+  // De la suma de los ifcos y no de la cantidad de renglones: si mañana una
+  // carga trae dos, la cuenta sigue estando bien sin tocar nada.
+  const pin = JS_RAP.slice(JS_RAP.indexOf('function galRapPintar('),
+                           JS_RAP.indexOf('async function galRapDeshacer('));
+  assert.match(pin, /cajones \+= Number\(x\.ifcos\) \|\| 0;/);
+  assert.match(pin, /cajones === 1 \? ' cajón' : ' cajones'/);
+  assert.ok(!/GRP\.tanda\.length \+ \(GRP\.tanda\.length === 1 \? ' cajón'/.test(pin),
+    'cuenta renglones en vez de cajones');
+});
+
+test('MANUAL KG: «varios cajones en una pesada van por la ventana larga»', () => {
+  // La excepción tiene que tener adónde ir, o el operador la resuelve poniendo
+  // 1 y el promedio miente para arriba sin que nada avise.
+  diceKg(/varios cajones en una sola pesada/);
+  diceKg(/el promedio mienta para arriba/);
+  // Y la ventana larga efectivamente lo pregunta.
+  assert.match(PANEL, /<input type="number" id="gal-kg-ifcos"/);
+  // La rápida lo dice en pantalla, no sólo en el manual: nadie abre el manual
+  // en el medio de una tanda.
+  assert.match(MOD_RAP, /Si entraron varios juntos en una sola pesada/);
+});
+
+test('EL ENCABEZADO NO DICE «Damasco · Damasco»', () => {
+  // Un lote que se llama como lo que produce salía repetido, y un cartel que
+  // parece roto hace dudar del resto de lo que dice — que es justamente lo
+  // único que separa la tanda bien atribuida de la mal atribuida.
+  assert.match(JS_RAP, /f\.producto && f\.producto !== lote/);
+  assert.match(JS_RAP, /p\.push\('1 cajón por carga'\);/,
+    'el cartel fijo no dice la regla de esta ventana');
+});
