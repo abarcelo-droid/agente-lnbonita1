@@ -7272,8 +7272,6 @@ input[type=number]{-moz-appearance:textfield;appearance:textfield}
       #gal-rap-modal .grp-kg{display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap}
       #gal-rap-modal #grp-kilos{width:100%;font-size:30px;font-weight:700;padding:8px 12px;
         font-variant-numeric:tabular-nums}
-      #gal-rap-modal #grp-ifcos{width:100%;font-size:19px;padding:8px 10px;
-        font-variant-numeric:tabular-nums}
       #gal-rap-modal #grp-btn{padding:14px 20px;font-size:15px}
       #gal-rap-modal .grp-res{display:flex;gap:10px;align-items:baseline;
         margin:4px 0 8px;font-size:13px;color:var(--mut)}
@@ -7443,16 +7441,15 @@ input[type=number]{-moz-appearance:textfield;appearance:textfield}
 
         <div class="sgr-card">
           <div class="grp-kg">
-            <div style="flex:1 1 auto;min-width:0"><label>Kilos</label>
+            <div style="flex:1 1 auto;min-width:0"><label>Kilos de este cajón</label>
               <input type="text" id="grp-kilos" inputmode="decimal" autocomplete="off"
                      placeholder="450" onkeydown="galRapTecla(event)"></div>
-            <div style="flex:0 0 110px"><label>IFCOs</label>
-              <input type="number" id="grp-ifcos" min="0" step="1" autocomplete="off"
-                     onkeydown="galRapTecla(event)"></div>
-            <button class="btn bp" id="grp-btn" onclick="galRapCargar()">Cargar</button>
+            <button class="btn bp" id="grp-btn" onclick="galRapCargar()">Cargar cajón</button>
           </div>
           <div style="font-size:11px;color:var(--mut);margin-top:6px">Escribí los kilos y
-            apretá <b>Enter</b>. La ventana queda abierta para el siguiente.</div>
+            apretá <b>Enter</b>. La ventana queda abierta para el siguiente.<br>
+            Cada carga es <b>un cajón</b>. Si entraron varios juntos en una sola pesada,
+            va por <b>+ Cargar kilos</b>, que deja poner cuántos.</div>
         </div>
 
         <div id="grp-error" style="display:none;margin-bottom:10px" class="ojo"></div>
@@ -27207,6 +27204,19 @@ SG_MANUAL['galpon-carga'] = { titulo: 'Galpón · Carga de kilos', html:
   + '<li><b>Después, sólo los kilos.</b> El casillero grande, <b>Enter</b>, y listo: el '
   + 'siguiente cajón. Abajo se va armando la lista de la tanda con el total.</li>'
   + '</ul>'
+
+  + '<h3>📦 Cada carga es UN cajón <span class="ver">V1111</span></h3>'
+  + '<p>Andy, 31/10/2026: <i>«siempre trabado en 1 cajón, porque vas cargando siempre de '
+  + 'a uno».</i> En la carga rápida una pesada <b>es</b> un cajón: no hay casillero de '
+  + 'IFCOs y cada Enter cuenta uno.</p>'
+  + '<p>Importa para algo más que ahorrarse un casillero. Un campo que hay que llenar con '
+  + '<b>1</b> cada vez se deja vacío a la tercera, y entonces los kilos entran sin su '
+  + 'cajón: el <b>promedio por cajón</b> deja de poder calcularse, y ése es el número con '
+  + 'el que se ve una pesada mal tipeada — entre veinte cajones parecidos, el que está al '
+  + 'doble salta solo. Por eso la tanda lo muestra mientras se carga.</p>'
+  + '<div class="ojo"><b>¿Y si entraron varios cajones en una sola pesada?</b> Eso va por '
+  + '<b>+ Cargar kilos</b>, la ventana larga, que pregunta cuántos. Dejarlo en 1 haría que '
+  + 'el promedio mienta para arriba sin que nada avise.</div>'
 
   + '<div class="ojo"><b>Por qué hay que apretar «Empezar» igual.</b> Es un clic por '
   + 'tanda y es a propósito. El riesgo de una pantalla rápida no es que sea lenta: es que '
@@ -56276,7 +56286,6 @@ function galRapAbrir(){
   document.getElementById('gal-rap-serror').style.display = 'none';
   document.getElementById('grp-error').style.display = 'none';
   document.getElementById('grp-kilos').value = '';
-  document.getElementById('grp-ifcos').value = '';
   document.getElementById('gal-rap-setup').style.display = '';
   document.getElementById('gal-rap-carga').style.display = 'none';
   galRapPintar();
@@ -56325,12 +56334,16 @@ function galRapCambiar(){
 
 function galRapPintarFijo(){
   var f = GRP.fijo || {};
+  var lote = f.lote_nombre || ('Lote ' + f.lote_id);
+  // Un lote que se llama como lo que produce salía «Damasco · Damasco», que parece
+  // un error de la pantalla y hace dudar de lo que dice el resto del cartel.
   document.getElementById('gal-rap-tit').textContent =
-    (f.lote_nombre || 'Lote ' + f.lote_id) + (f.producto ? ' · ' + f.producto : '');
+    lote + (f.producto && f.producto !== lote ? ' · ' + f.producto : '');
   var p = [];
   p.push(f.cuadrilla ? f.cuadrilla : 'sin cuadrilla');
   p.push(f.fecha || '');
   if (f.observacion) p.push('«' + f.observacion + '»');
+  p.push('1 cajón por carga');
   document.getElementById('gal-rap-sub').textContent = p.join(' · ');
 }
 
@@ -56349,7 +56362,10 @@ async function galRapCargar(){
     fecha: f.fecha, lote_id: f.lote_id, producto: f.producto,
     cuadrilla_id: f.cuadrilla_id, observacion: f.observacion,
     kilos: kg.value,
-    ifcos: document.getElementById('grp-ifcos').value,
+    // UNO, siempre. En esta ventana una pesada es un cajón: es lo que la hace rápida
+    // y es lo que hace que el promedio por cajón signifique algo. Varios juntos van
+    // por la ventana larga, que pregunta cuántos.
+    ifcos: 1,
   };
   btn.disabled = true;
   try {
@@ -56369,7 +56385,6 @@ async function galRapCargar(){
     GRP.tanda.unshift(Object.assign({ id: j.id, aviso: j.aviso || null }, j.fila || {}));
     galRapPintar();
     kg.value = '';
-    document.getElementById('grp-ifcos').value = '';
     kg.focus();
   } catch (e) {
     err.textContent = 'No se pudo guardar: ' + e.message; err.style.display = '';
@@ -56384,16 +56399,15 @@ function galRapPintar(){
     el.innerHTML = '<div class="grp-vacio">Todavía no cargaste nada en esta tanda.</div>';
     return;
   }
-  var kilos = 0, ifcos = 0;
-  GRP.tanda.forEach(function(x){ kilos += Number(x.kilos) || 0; ifcos += Number(x.ifcos) || 0; });
+  var kilos = 0, cajones = 0;
+  GRP.tanda.forEach(function(x){ kilos += Number(x.kilos) || 0; cajones += Number(x.ifcos) || 0; });
   el.innerHTML = '<div class="grp-res">En esta tanda: <b>' + galKgNum(kilos) + ' kg</b>'
-      + ' · ' + GRP.tanda.length + (GRP.tanda.length === 1 ? ' carga' : ' cargas')
-      + (ifcos ? ' · ' + galKgNum(ifcos, 0) + ' IFCOs' : '') + '</div>'
+      + ' · ' + cajones + (cajones === 1 ? ' cajón' : ' cajones')
+      + (cajones ? ' · ' + galKgNum(kilos / cajones) + ' kg por cajón' : '') + '</div>'
     + '<div class="grp-lista">' + GRP.tanda.map(function(x){
         return '<div class="grp-l' + (x.estado === 'a_revisar' ? ' rev' : '') + '">'
           + '<span>' + (x.estado === 'a_revisar' ? '⚠ ' : '')
             + '<b>' + galKgNum(x.kilos) + ' kg</b>'
-            + (x.ifcos == null ? '' : ' · ' + galKgNum(x.ifcos, 0) + ' IFCOs')
             + (x.aviso ? ' <span style="font-size:11px">' + galKgEsc(x.aviso) + '</span>' : '')
           + '</span>'
           + '<button class="btn bo bs" onclick="galRapDeshacer(' + x.id + ')">↩ deshacer</button>'
