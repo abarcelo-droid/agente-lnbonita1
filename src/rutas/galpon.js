@@ -22,6 +22,7 @@ import {
   hhmm, esFecha,
   registrarVolcado, editarVolcado, borrarVolcado, volcadosDelDia, resumenDelDia,
   acumulado, rangoCargado,
+  ultimaCarga,
 } from '../servicios/galpon.js';
 import { generarTarjetasPDF, tarjetasAImprimir } from '../servicios/galponTarjetasPDF.js';
 
@@ -507,6 +508,10 @@ router.get('/volcados', (req, res) => {
       fecha,
       hoy: hoy(),
       cargas: volcadosDelDia(db, fecha),
+      // El encabezado de la carga rápida: lo último que esta persona escribió, con
+      // la bandera de si viene de otro día. El usuario sale de la COOKIE: «lo último
+      // que cargué yo» preguntado por el cliente lo contesta cualquiera.
+      ultimo: ultimaCarga(db, fecha, (req._user || {}).id),
       resumen: resumenDelDia(db, fecha),
       // El lote declarado para ese día, para proponerlo en la ventana. Es una PROPUESTA:
       // el que carga a mano elige el lote que quiera, y de hecho puede no haber ninguno

@@ -445,3 +445,63 @@ t('el acumulado NO ESCRIBE nada: no tiene con qué', async () => {
     }
   } finally { s.cerrar(); }
 });
+
+// ══════════════════════════════════════════════════════════════════════════
+// 10 · ⚡ EL ENCABEZADO DE LA CARGA RÁPIDA (V1110)
+// ══════════════════════════════════════════════════════════════════════════
+t('«LO ÚLTIMO QUE CARGUÉ YO» LO DECIDE LA COOKIE, no el que pregunta', async () => {
+  // Si el cliente pudiera decir de quién quiere lo último, cualquiera arrancaría
+  // su tanda con el encabezado de otro — y los kilos saldrían firmados por él
+  // pero atribuidos a la cuadrilla del compañero.
+  const db = base();
+  const andy = await servidor(db, ADMIN);
+  try {
+    await andy.pegar('/volcados', json({ fecha: HOY, lote_id: 10, kilos: 100,
+                                         cuadrilla_id: 1, observacion: 'pasada 1' }));
+    const j = await (await andy.pegar('/volcados?fecha=' + HOY)).json();
+    assert.equal(j.ultimo.cuadrilla, 'Norte');
+    assert.equal(j.ultimo.observacion, 'pasada 1');
+    assert.equal(j.ultimo.mio, true);
+    assert.equal(j.ultimo.de_otro_dia, false);
+  } finally { andy.cerrar(); }
+
+  const juan = await servidor(db, OPERADOR);
+  try {
+    await juan.pegar('/volcados', json({ fecha: HOY, lote_id: 11, kilos: 200,
+                                         cuadrilla_id: 2 }));
+    const j = await (await juan.pegar('/volcados?fecha=' + HOY)).json();
+    assert.equal(j.ultimo.cuadrilla, 'Sur');
+    assert.equal(j.ultimo.mio, true);
+    // Y el pedido NO puede pedir lo de otro: no hay parámetro que lo permita.
+    const k = await (await juan.pegar('/volcados?fecha=' + HOY + '&usuario_id=1')).json();
+    assert.equal(k.ultimo.cuadrilla, 'Sur');
+  } finally { juan.cerrar(); }
+});
+
+t('el encabezado llega en el MISMO pedido con el que abre la pantalla', async () => {
+  // Un segundo viaje para traer tres campos deja la ventana medio llena mientras
+  // llega, y es justo la ventana que se abre para ir rápido.
+  const s = await servidor(base(), OPERADOR);
+  try {
+    const j = await (await s.pegar('/volcados?fecha=' + HOY)).json();
+    for (const k of ['cargas', 'resumen', 'propuesta', 'ultimo']) {
+      assert.ok(k in j, 'falta ' + k + ' en la respuesta');
+    }
+    assert.equal(j.ultimo, null, 'sin nada cargado el encabezado tiene que venir vacío');
+  } finally { s.cerrar(); }
+});
+
+t('deshacer una carga de la tanda la saca del día', async () => {
+  // Es el botón de la lista de la tanda, y es un borrado blando como cualquier
+  // otro: la fila queda en la base.
+  const s = await servidor(base(), OPERADOR);
+  try {
+    const a = await (await s.pegar('/volcados', json({ fecha: HOY, lote_id: 10, kilos: 100 }))).json();
+    await s.pegar('/volcados', json({ fecha: HOY, lote_id: 10, kilos: 200 }));
+    assert.equal((await s.pegar('/volcados/' + a.id, { method: 'DELETE' })).status, 200);
+
+    const d = await (await s.pegar('/volcados?fecha=' + HOY)).json();
+    assert.equal(d.resumen.kilos, 200);
+    assert.equal(d.cargas.length, 1);
+  } finally { s.cerrar(); }
+});

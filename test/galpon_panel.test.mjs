@@ -878,3 +878,164 @@ test('CADA PREFIJO DECLARADO LO USA ALGUNA RUTA DE VERDAD', () => {
     }
   }
 });
+
+// ══════════════════════════════════════════════════════════════════════════
+// 7 · ⚡ LA CARGA RÁPIDA, CONTRA EL CÓDIGO (V1110)
+// ══════════════════════════════════════════════════════════════════════════
+// Andy, 31/10/2026: «quiero que el OPERADOR tenga que sólo poner los kilos...
+// que ya quede guardado el último lote, comentarios y cuadrilla que puso».
+const I_RAP = PANEL.indexOf('var GRP = {');
+const JS_RAP = PANEL.slice(I_RAP, PANEL.indexOf('📈 GALPÓN · ACUMULADO', I_RAP));
+const I_MOD = PANEL.indexOf('id="gal-rap-modal"');
+const MOD_RAP = PANEL.slice(I_MOD, PANEL.indexOf('id="sec-galpon-acumulado"', I_MOD));
+test('los cortes del panel no quedaron vacíos', () => {
+  // Un slice vacío hace que TODOS los asserts de abajo miren la nada y pasen.
+  assert.ok(JS_RAP.length > 2000, 'JS_RAP mide ' + JS_RAP.length);
+  assert.ok(MOD_RAP.length > 1000, 'MOD_RAP mide ' + MOD_RAP.length);
+});
+
+test('MANUAL KG: «se abre en dos pasos, y el segundo es sólo los kilos»', () => {
+  diceKg(/Primero, de qué son estos kilos/);
+  diceKg(/Después, sólo los kilos/);
+  // Los dos paneles existen, y el de carga arranca escondido.
+  assert.match(MOD_RAP, /id="gal-rap-setup"/);
+  assert.match(MOD_RAP, /id="gal-rap-carga" style="display:none"/);
+  // El abridor muestra el primero y esconde el segundo, siempre.
+  assert.match(JS_RAP, /getElementById\('gal-rap-setup'\)\.style\.display = '';/);
+  assert.match(JS_RAP, /getElementById\('gal-rap-carga'\)\.style\.display = 'none';/);
+});
+
+test('MANUAL KG: «HAY QUE APRETAR EMPEZAR IGUAL» — no hay atajo que lo saltee', () => {
+  // Es la línea entre una pantalla rápida y una pantalla que esconde a quién se
+  // le anotan los kilos. Si el abridor pudiera dejar el paso 2 a la vista, la
+  // tanda arrancaría con la cuadrilla de ayer sin que nadie la haya elegido.
+  diceKg(/esconda <b>a quién se le están anotando los kilos<\/b>/);
+  const abrir = JS_RAP.slice(JS_RAP.indexOf('function galRapAbrir('),
+                             JS_RAP.indexOf('function galRapLotePick('));
+  assert.ok(!/galRapEmpezar\(\)/.test(abrir), 'el abridor empieza la tanda solo');
+  assert.match(abrir, /GRP\.fijo = null;/, 'no limpia lo fijo de la tanda anterior');
+  // Y cargar sin haber pasado por Empezar no manda nada.
+  assert.match(JS_RAP, /var f = GRP\.fijo; if \(!f\) return;/);
+});
+
+test('MANUAL KG: «viene propuesto con lo último que cargaste VOS»', () => {
+  diceKg(/lo último que cargaste vos/);
+  // Sale de GKG.ultimo, que el servidor arma con el usuario de la COOKIE.
+  assert.match(JS_RAP, /var u = GKG\.ultimo, p = GKG\.propuesta;/);
+  assert.match(RUTA, /ultimo: ultimaCarga\(db, fecha, \(req\._user \|\| \{\}\)\.id\)/);
+  assert.match(SERV, /export function ultimaCarga\(db, fecha, usuarioId\)/);
+  // Los tres campos que pidió Andy: lote, cuadrilla y observación.
+  assert.match(JS_RAP, /sel\.value = u \? String\(u\.lote_id\)/);
+  assert.match(JS_RAP, /cu\.value = \(u && u\.cuadrilla_id\)/);
+  assert.match(JS_RAP, /gal-rap-obs'\)\.value = \(u && u\.observacion\)/);
+});
+
+test('MANUAL KG: «lo que se propone NO se guarda en ningún lado»', () => {
+  diceKg(/no se guarda en ningún lado/);
+  // No hay tabla ni columna de preferencias: se deduce de gal_volcados, y por eso
+  // borrar la última carga hace que se proponga la anterior sola.
+  const ult = SERV.slice(SERV.indexOf('export function ultimaCarga('),
+                         SERV.indexOf('// ── EL RESUMEN DEL DÍA'));
+  assert.match(ult, /FROM gal_volcados WHERE eliminado_en IS NULL/);
+  assert.ok(!/INSERT|UPDATE/.test(ult), 'guarda la preferencia en algún lado');
+  assert.ok(!/gal_preferencias|gal_ultimo/.test(SERV + DDL));
+  // Y no se guarda en el navegador tampoco: eso sería una tanda que sobrevive a
+  // cambiar de computadora, y otra que no — sin forma de saber cuál es cuál.
+  assert.ok(!/localStorage|sessionStorage/.test(JS_RAP));
+});
+
+test('MANUAL KG: «si lo propuesto viene de otro día, lo dice»', () => {
+  diceKg(/si lo propuesto viene de <b>otro día<\/b> la ventana lo dice/);
+  assert.match(JS_RAP, /if \(u && u\.de_otro_dia\)\{/);
+  assert.match(JS_RAP, /Esto viene del/);
+  // Y la bandera la calcula el servidor comparando con el día que se está mirando.
+  assert.match(SERV, /de_otro_dia: fila\.fecha !== f,/);
+});
+
+test('MANUAL KG: «Cambiar vuelve al primer paso SIN perder la tanda»', () => {
+  diceKg(/vuelve al primer paso sin perder la tanda/);
+  const camb = JS_RAP.slice(JS_RAP.indexOf('function galRapCambiar('),
+                            JS_RAP.indexOf('function galRapPintarFijo('));
+  assert.ok(!/GRP\.tanda = \[\]/.test(camb), 'Cambiar borra la lista de lo ya cargado');
+  assert.match(camb, /gal-rap-setup'\)\.style\.display = '';/);
+});
+
+test('MANUAL KG: «Enter carga y la ventana queda abierta»', () => {
+  diceKg(/<b>Enter<\/b>, y listo: el siguiente cajón/);
+  assert.match(MOD_RAP, /onkeydown="galRapTecla\(event\)"/);
+  assert.match(JS_RAP, /if \(ev\.key === 'Enter'\)\{ ev\.preventDefault\(\); galRapCargar\(\); \}/);
+  // Y al cargar no se cierra: se limpia el casillero y vuelve el foco.
+  const carg = JS_RAP.slice(JS_RAP.indexOf('async function galRapCargar('),
+                            JS_RAP.indexOf('function galRapPintar('));
+  assert.ok(!/classList\.remove\('on'\)/.test(carg), 'la ventana se cierra al cargar');
+  assert.match(carg, /kg\.value = '';/);
+  assert.match(carg, /kg\.focus\(\);/);
+});
+
+test('UN UUID NUEVO POR CARGA, o la segunda del Enter seguido no entra', () => {
+  // El uuid es UNIQUE y el servidor hace INSERT OR IGNORE: reusarlo haría que la
+  // segunda pesada de la tanda se descarte en silencio. Es el mismo mecanismo
+  // que frena el doble clic, y acá se aprieta Enter veinte veces seguidas.
+  const carg = JS_RAP.slice(JS_RAP.indexOf('async function galRapCargar('),
+                            JS_RAP.indexOf('function galRapPintar('));
+  assert.match(carg, /GRP\.uuid = galKgNuevoUuid\(\);/);
+  const iOk = carg.indexOf('if (!j.ok)');
+  const iUuid = carg.indexOf('GRP.uuid = galKgNuevoUuid();');
+  assert.ok(iUuid > iOk, 'el uuid se renueva antes de saber si entró: una carga fallida '
+    + 'y reintentada se duplicaría');
+  assert.match(JS_RAP, /uuid: GRP\.uuid,/);
+});
+
+test('EL ERROR NO LIMPIA LOS KILOS', () => {
+  // Si los borrara, el que escribió mal tendría que volver a tipearlos — en la
+  // pantalla que existe para tipear lo menos posible.
+  const carg = JS_RAP.slice(JS_RAP.indexOf('async function galRapCargar('),
+                            JS_RAP.indexOf('function galRapPintar('));
+  const iErr = carg.indexOf('err.textContent = j.error;');
+  const iLimpia = carg.indexOf("kg.value = '';");
+  assert.ok(iErr > 0 && iLimpia > iErr, 'el camino del error limpia los kilos');
+  assert.match(carg, /kg\.focus\(\); kg\.select\(\); return;/);
+});
+
+test('MANUAL KG: «deshacer no pregunta», y por qué puede no preguntar', () => {
+  diceKg(/borra esa carga sin '\s*\+\s*'preguntar|sin preguntar/);
+  const des = JS_RAP.slice(JS_RAP.indexOf('async function galRapDeshacer('));
+  assert.ok(!/confirm\(/.test(des), 'deshacer pregunta: es un clic de más en la pantalla '
+    + 'que existe para sacar clics');
+  assert.match(des, /method:'DELETE'/);
+  // Y es blando porque el servidor lo hace blando, no porque la pantalla lo diga.
+  assert.match(SERV, /export function borrarVolcado\([\s\S]{0,400}eliminado_en = datetime/);
+});
+
+test('LA VENTANA RÁPIDA VIVE FUERA DE TODA PANTALLA, como todas', () => {
+  // Con .sec{display:none}, una ventana colgada de una pantalla sólo se abre
+  // desde ésa. Lo audita ventanas_del_panel.test.mjs para todas; acá queda el
+  // porqué al lado de la ventana nueva.
+  const iSec = PANEL.lastIndexOf('<div class="sec', PANEL.indexOf('id="gal-rap-modal"'));
+  const iFin = PANEL.lastIndexOf('</div>', PANEL.indexOf('id="gal-rap-modal"'));
+  assert.ok(iFin > iSec, 'la ventana rápida quedó adentro de una .sec');
+  assert.match(PANEL, /<div class="ab-modal-overlay sg-mod" id="gal-rap-modal">/,
+    'sin ab-modal-overlay no hay fondo oscuro ni z-index: se abre abajo de la otra');
+});
+
+test('el botón de la carga rápida está en la pantalla, y el otro sigue estando', () => {
+  // La ventana larga no se va: es la que corrige una carga, y la que sirve
+  // cuando hay que cargar un solo renglón de un día viejo.
+  assert.match(PANEL, /onclick="galRapAbrir\(\)">⚡ Carga rápida<\/button>/);
+  assert.match(PANEL, /onclick="galKgAbrir\(\)">\+ Cargar kilos<\/button>/);
+});
+
+test('LOS DESPLEGABLES SE ARMAN EN UN SOLO LUGAR', () => {
+  // Estaban escritos adentro de galKgAbrir. Con la segunda ventana serían dos
+  // copias, y la de abajo se quedaría sin el agrupado por finca el día que
+  // alguien toque una sola.
+  assert.match(PANEL, /function galKgLlenarLote\(sel\)\{/);
+  assert.match(PANEL, /function galKgLlenarCuad\(cu\)\{/);
+  assert.equal((PANEL.match(/── ' \+ galKgEsc\(g\.f\) \+ ' ──/g) || []).length, 1,
+    'el agrupado por finca está escrito más de una vez');
+  for (const v of ['gal-kg-lote', 'gal-rap-lote']) {
+    assert.ok(PANEL.includes("getElementById('" + v + "');\r\n  galKgLlenarLote(sel);")
+      || PANEL.includes("getElementById('" + v + "');\r\n  galKgLlenarLote(sel);\r\n"),
+      v + ' no usa el armador común');
+  }
+});
