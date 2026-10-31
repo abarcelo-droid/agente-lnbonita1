@@ -425,6 +425,17 @@ export function entero(v) {
 // flotantes arrastra el 0,000000001 hasta que un total cierra con tres decimales raros.
 const round2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
 
+// ── DE DÓNDE SALIÓ EL PESO ──────────────────────────────────────────────────────────
+// Tres, y no texto libre. Es lo que después contesta «cuánto se pesó a mano», que es
+// la señal de que la balanza dejó de andar: si un día el 80% de la temporada entró
+// tipeado, hay un equipo roto y nadie avisó. Con texto libre serían 'manual',
+// 'a mano', 'MANUAL' y ' manual' y ningún informe posible.
+export const ORIGENES = ['manual', 'balanza', 'escaneo'];
+// Lo que no está en la lista entra como manual y no se rechaza: acá nada se rechaza
+// después del hecho, y unos kilos perdidos por un origen mal escrito serían
+// exactamente eso.
+const origenDe = (v) => (ORIGENES.indexOf(String(v || '')) >= 0 ? String(v) : 'manual');
+
 const txt = (v) => {
   const s = String(v == null ? '' : v).trim();
   return s ? s : null;
@@ -490,7 +501,7 @@ export function registrarVolcado(db, d) {
      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`
   ).run(
     txt(dd.uuid), fecha, hhmm(dd.hora), lote.id, lote.nombre, txt(dd.producto),
-    cuadId, cuadNom, kg, entero(dd.ifcos), txt(dd.origen) || 'manual',
+    cuadId, cuadNom, kg, entero(dd.ifcos), origenDe(dd.origen),
     txt(dd.observacion), estado, revision,
     dd.usuario_id ?? null, txt(dd.usuario),
   );
