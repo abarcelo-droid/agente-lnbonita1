@@ -288,6 +288,7 @@ input[type=number]{-moz-appearance:textfield;appearance:textfield}
     <div class="ni" data-sec="galpon-config"><span class="dot da"></span>⚙️ Galpón · Configuración</div>
     <div class="ni" data-sec="galpon-lote-dia"><span class="dot da"></span>🗓️ Galpón · Lote del día</div>
     <div class="ni" data-sec="galpon-carga"><span class="dot da"></span>⚖️ Galpón · Carga de kilos</div>
+    <div class="ni" data-sec="galpon-proceso"><span class="dot da"></span>📦 Galpón · Proceso</div>
     <div class="ni" data-sec="galpon-acumulado"><span class="dot da"></span>📈 Galpón · Acumulado</div>
   </div>
 
@@ -7013,6 +7014,27 @@ input[type=number]{-moz-appearance:textfield;appearance:textfield}
       </div>
       <div><button class="btn bp" id="gal-cfg-guardar" onclick="galCfgGuardar()">Guardar</button></div>
     </div>
+
+    <!-- ── EN QUÉ SALE LA FRUTA ────────────────────────────────────────────────
+         El catálogo de presentaciones. Es PARAMETRIZACIÓN y por eso vive acá y no en
+         la pantalla de proceso: una caja mal definida multiplica mal todas las cargas
+         que entren con ella, y eso es el rinde de la temporada. -->
+    <div class="gal-h2" style="display:flex;align-items:baseline;gap:12px">
+      <span>📦 En qué sale la fruta</span>
+      <button class="btn bp bs" onclick="galPresAbrir()">+ Nueva presentación</button>
+    </div>
+    <div class="gal-ay" style="max-width:none;margin-bottom:10px">Cada una es una
+      baldosa en <b>📦 Galpón · Proceso</b>, y ya trae su cuenta: el operador escribe
+      cuántos bultos y los kilos salen solos.</div>
+    <div class="ab-table-wrap">
+      <table class="pa-tbl gal-tbl">
+        <colgroup><col style="width:30%"><col style="width:15%"><col style="width:16%">
+                  <col style="width:24%"><col style="width:15%"></colgroup>
+        <thead><tr><th class="gal-w">Presentación</th><th>Destino</th><th>Envase</th>
+          <th>La cuenta</th><th style="text-align:right"></th></tr></thead>
+        <tbody id="gal-pres-body"></tbody>
+      </table>
+    </div>
   </div>
 
 
@@ -7462,6 +7484,226 @@ input[type=number]{-moz-appearance:textfield;appearance:textfield}
     </div>
   </div>
 
+  <!-- ── 📦 GALPÓN · PROCESO ───────────────────────────────────────────────────────
+       Andy, 31/10/2026: «hacé algo medio interactivo la carga de proceso. O visual. Que
+       sea fácil de cargar y visualmente atractivo. Tipo un juego».
+
+       Lo que hace que se cargue rápido no es la animación: es que cada presentación sea
+       una BALDOSA que ya sabe su cuenta. Apretarla y escribir 100 es todo — los diez
+       por caja y los 700 gramos por cubeta los pone el catálogo, no el operador.
+
+       Y lo que hace que valga la pena mirarla es la barra de arriba: mientras se carga
+       se ve cuánto queda de la tolva y cómo viene el reparto. Un formulario a ciegas se
+       completa igual, pero nadie se da cuenta de que el descarte va por el 40%. -->
+
+  <!-- ── UNA PRESENTACIÓN ──────────────────────────────────────────────────────────
+       Fuera de toda .sec y sin cerrarse al clic afuera, como todas (CLAUDE.md).
+
+       EL PESO SE PIDE CON SU UNIDAD. «700» pensando en gramos y guardado como kilos
+       son 700.000 kg en una jornada de cien cajas: el error se mete acá, una sola vez,
+       y después multiplica todas las cargas que usen esta presentación. Adentro se
+       guarda siempre en kilos. -->
+  <div class="ab-modal-overlay sg-mod" id="gal-pres-modal">
+    <div class="ab-modal" style="width:min(560px,96vw);max-width:96vw">
+      <div class="mhd"><div class="mht" id="gal-pres-tit">Nueva presentación</div>
+        <button class="mcl" onclick="galPresCerrar()">×</button></div>
+      <div class="sgr-card">
+        <div style="display:flex;gap:10px;flex-wrap:wrap">
+          <div style="flex:1 1 240px;min-width:0"><label>Nombre</label>
+            <input type="text" id="gal-pres-nom" placeholder="ej: Caja cartón · 10 × 700 g"
+                   style="width:100%"></div>
+          <div style="flex:0 0 170px"><label>Destino</label>
+            <select id="gal-pres-dest">
+              <option value="comercial">Comercial</option>
+              <option value="verde">Verde</option>
+              <option value="descarte">Descarte</option>
+            </select></div>
+        </div>
+
+        <div style="margin-top:10px">
+          <label><input type="checkbox" id="gal-pres-granel" onchange="galPresGranel()"
+            style="margin-right:6px">A granel (se escriben los kilos)</label>
+          <div class="gal-ay" style="max-width:none">Un bin se pesa entero y no tiene
+            unidades adentro. Marcado esto, la pantalla de proceso pide kilos en vez de
+            bultos.</div>
+        </div>
+
+        <div id="gal-pres-cuenta" style="margin-top:10px">
+          <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end">
+            <div style="flex:0 0 150px"><label>Envase</label>
+              <input type="text" id="gal-pres-env" placeholder="Caja cartón"></div>
+            <div style="flex:0 0 130px"><label>Unidades por bulto</label>
+              <input type="number" id="gal-pres-pb" min="1" step="1" value="1"
+                     oninput="galPresPrevio()"></div>
+            <div style="flex:0 0 120px"><label>Peso de cada una</label>
+              <input type="text" id="gal-pres-peso" inputmode="decimal" placeholder="700"
+                     oninput="galPresPrevio()"></div>
+            <div style="flex:0 0 90px"><label>Unidad</label>
+              <select id="gal-pres-uni" onchange="galPresPrevio()">
+                <option value="g">gramos</option>
+                <option value="kg">kilos</option>
+              </select></div>
+          </div>
+          <div id="gal-pres-previo" style="margin-top:9px;font-size:14px;font-weight:600"></div>
+        </div>
+
+        <div id="gal-pres-error" style="display:none;margin-top:10px" class="ojo"></div>
+      </div>
+      <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:14px">
+        <button class="btn bo" onclick="galPresCerrar()">Cancelar</button>
+        <button class="btn bp" id="gal-pres-btn" onclick="galPresGuardar()">Guardar</button>
+      </div>
+    </div>
+  </div>
+  <div class="sec sg-mod" id="sec-galpon-proceso">
+    <style>
+      /* LAS TARJETAS DE LOTE. Es el paso uno y ocupa lugar a propósito: todo lo que se
+         cargue abajo se le va a anotar al que esté elegido acá. */
+      #sec-galpon-proceso .gpr-lotes{display:flex;gap:12px;flex-wrap:wrap;margin-bottom:18px}
+      #sec-galpon-proceso .gpr-lote{flex:0 1 230px;min-width:0;border:2px solid var(--bor);
+        border-radius:12px;padding:11px 14px;cursor:pointer;background:var(--sur);
+        transition:border-color .12s,box-shadow .12s}
+      #sec-galpon-proceso .gpr-lote:hover{border-color:var(--burg)}
+      #sec-galpon-proceso .gpr-lote.on{border-color:var(--burg);background:var(--burl);
+        box-shadow:0 2px 10px rgba(26,58,92,.14)}
+      #sec-galpon-proceso .gpr-lote .n{font-size:15px;font-weight:700;color:var(--burd);
+        overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+      #sec-galpon-proceso .gpr-lote .d{font-size:11.5px;color:var(--mut);margin-top:2px}
+      #sec-galpon-proceso .gpr-lote .barra{height:6px;border-radius:4px;background:var(--bor);
+        margin-top:7px;overflow:hidden}
+      #sec-galpon-proceso .gpr-lote .barra i{display:block;height:100%;background:var(--burg)}
+
+      /* EL TABLERO DEL LOTE: entró / salió / queda, y el reparto en una sola barra. */
+      #sec-galpon-proceso .gpr-tab{border:1px solid var(--bor);border-radius:12px;
+        padding:14px 16px;margin-bottom:18px;background:var(--sur)}
+      #sec-galpon-proceso .gpr-nums{display:flex;gap:22px;flex-wrap:wrap;margin-bottom:12px}
+      #sec-galpon-proceso .gpr-nums .k{font-size:11px;color:var(--mut);text-transform:uppercase;
+        letter-spacing:.4px}
+      #sec-galpon-proceso .gpr-nums .v{font-size:23px;font-weight:700;
+        font-variant-numeric:tabular-nums;line-height:1.2}
+      #sec-galpon-proceso .gpr-apilada{display:flex;height:22px;border-radius:6px;
+        overflow:hidden;background:var(--bor)}
+      #sec-galpon-proceso .gpr-apilada i{display:block;height:100%;transition:width .35s ease}
+      #sec-galpon-proceso .gpr-leyenda{display:flex;gap:16px;flex-wrap:wrap;margin-top:9px;
+        font-size:12px}
+      #sec-galpon-proceso .gpr-leyenda span{display:flex;align-items:center;gap:6px}
+      #sec-galpon-proceso .gpr-leyenda em{width:11px;height:11px;border-radius:3px;
+        display:inline-block;font-style:normal}
+      #sec-galpon-proceso .gpr-demas{margin-top:10px}
+
+      /* LAS TRES ZONAS Y SUS BALDOSAS. El color es el destino y se repite en todos lados
+         —zona, baldosa, barra, renglón— para que no haya que leer la palabra. */
+      #sec-galpon-proceso .gpr-zonas{display:flex;gap:14px;flex-wrap:wrap;margin-bottom:18px}
+      #sec-galpon-proceso .gpr-zona{flex:1 1 290px;min-width:0;border:2px solid var(--bor);
+        border-radius:14px;padding:12px 13px;background:var(--sur)}
+      #sec-galpon-proceso .gpr-zh{display:flex;align-items:baseline;justify-content:space-between;
+        gap:10px;margin-bottom:3px}
+      #sec-galpon-proceso .gpr-zh b{font-size:14px;letter-spacing:.3px;text-transform:uppercase}
+      #sec-galpon-proceso .gpr-zh .t{font-size:17px;font-weight:700;
+        font-variant-numeric:tabular-nums}
+      #sec-galpon-proceso .gpr-zn{font-size:11px;color:var(--mut);margin-bottom:10px;
+        line-height:1.35}
+      #sec-galpon-proceso .gpr-bald{border:1.5px solid var(--bor);border-radius:10px;
+        padding:9px 11px;margin-bottom:8px;cursor:pointer;background:var(--bg);
+        transition:transform .1s,border-color .12s}
+      #sec-galpon-proceso .gpr-bald:hover{transform:translateY(-1px)}
+      #sec-galpon-proceso .gpr-bald .bn{font-size:13.5px;font-weight:600;
+        overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+      #sec-galpon-proceso .gpr-bald .bc{font-size:11px;color:var(--mut);margin-top:1px}
+      #sec-galpon-proceso .gpr-bald.on{background:var(--sur);cursor:default}
+      #sec-galpon-proceso .gpr-bald.on:hover{transform:none}
+
+      /* EL CONTADOR, adentro de la baldosa elegida. Botones grandes porque se aprietan
+         de pie: −, +, y los saltos de a 5, 10 y 25. */
+      #sec-galpon-proceso .gpr-cont{margin-top:10px}
+      #sec-galpon-proceso .gpr-fila{display:flex;gap:7px;align-items:center}
+      #sec-galpon-proceso .gpr-pm{width:42px;height:42px;border-radius:9px;border:1px solid var(--bor);
+        background:var(--sur);font-size:21px;font-weight:700;cursor:pointer;line-height:1;
+        color:var(--txt)}
+      #sec-galpon-proceso .gpr-pm:hover{background:var(--burl)}
+      #sec-galpon-proceso .gpr-num{flex:1 1 auto;min-width:0;height:42px;text-align:center;
+        font-size:24px;font-weight:700;border:1px solid var(--bor);border-radius:9px;
+        background:var(--sur);color:var(--txt);font-variant-numeric:tabular-nums}
+      #sec-galpon-proceso .gpr-chips{display:flex;gap:6px;flex-wrap:wrap;margin-top:7px}
+      #sec-galpon-proceso .gpr-chip{border:1px solid var(--bor);border-radius:999px;
+        padding:3px 11px;font-size:12px;cursor:pointer;background:var(--sur);color:var(--mut)}
+      #sec-galpon-proceso .gpr-chip:hover{border-color:var(--burg);color:var(--burd)}
+      #sec-galpon-proceso .gpr-previo{margin-top:9px;display:flex;align-items:center;
+        justify-content:space-between;gap:10px}
+      #sec-galpon-proceso .gpr-previo .kg{font-size:19px;font-weight:700;
+        font-variant-numeric:tabular-nums}
+      #sec-galpon-proceso .gpr-previo .cta{font-size:11px;color:var(--mut)}
+
+      /* LO CARGADO Y EL STOCK. Sin barra lateral (CLAUDE.md): anchos fijos y lo que no
+         entra se recorta, nunca se arrastra la tabla. */
+      #sec-galpon-proceso .gpr-tbl{table-layout:fixed;width:100%;max-width:98vw}
+      #sec-galpon-proceso .gpr-tbl th,#sec-galpon-proceso .gpr-tbl td{
+        white-space:nowrap;overflow:hidden;text-overflow:ellipsis;vertical-align:middle}
+      #sec-galpon-proceso .ab-table-wrap{overflow-x:hidden !important}
+      @media(max-width:900px){ #sec-galpon-proceso .ab-table-wrap{overflow-x:auto !important} }
+      #sec-galpon-proceso .gpr-n{text-align:right;font-variant-numeric:tabular-nums}
+      #sec-galpon-proceso .gpr-pt{display:inline-block;width:9px;height:9px;border-radius:3px;
+        margin-right:6px}
+      #sec-galpon-proceso .gpr-vacio{text-align:center;padding:30px;color:var(--mut);font-size:13px}
+      #sec-galpon-proceso h3.gpr-t{font-size:12px;text-transform:uppercase;letter-spacing:.5px;
+        color:var(--mut);margin:22px 0 9px}
+      #sec-galpon-proceso .gpr-stock{display:flex;gap:14px;flex-wrap:wrap}
+      #sec-galpon-proceso .gpr-sd{flex:1 1 260px;min-width:0;border:1px solid var(--bor);
+        border-radius:12px;padding:12px 14px}
+      #sec-galpon-proceso .gpr-sd .st{display:flex;justify-content:space-between;
+        align-items:baseline;gap:10px;margin-bottom:7px}
+      #sec-galpon-proceso .gpr-sd .st b{font-size:19px;font-variant-numeric:tabular-nums}
+      #sec-galpon-proceso .gpr-sl{display:flex;justify-content:space-between;gap:10px;
+        font-size:12.5px;padding:3px 0;border-top:1px dashed var(--bor)}
+      #sec-galpon-proceso .gpr-sl span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+      #sec-galpon-proceso .gpr-sl b{font-variant-numeric:tabular-nums;white-space:nowrap}
+      #sec-galpon-proceso .gpr-flash{animation:gprFlash 1s ease}
+      @keyframes gprFlash{0%{background:rgba(22,163,74,.28)}100%{background:transparent}}
+      #sec-galpon-proceso .gpr-fecha{display:flex;gap:8px;align-items:center;
+        flex-wrap:wrap;margin-bottom:16px}
+      #sec-galpon-proceso .gpr-fecha input{padding:6px 9px;border:1px solid var(--bor);
+        border-radius:7px;font-size:13px;background:var(--sur);color:var(--txt)}
+    </style>
+
+    <div class="ph">
+      <div><div class="ph-t">📦 Galpón · Proceso</div>
+        <div class="ph-s">Qué salió de lo que entró. Se elige el lote volcado y se van
+          cargando los procesos parciales: comercial, verde y descarte. De acá sale el
+          rinde, y lo cargado queda como stock del galpón.</div></div>
+      <div style="display:flex;gap:8px">
+        <button class="btn bo bs" onclick="sgManualAbrir('galpon-proceso')">❓ ¿Cómo se usa?</button></div>
+    </div>
+
+    <div class="gpr-fecha">
+      <label style="font-size:12px;color:var(--mut)">Día de proceso</label>
+      <input type="date" id="gpr-fecha" onchange="galPrCargar()">
+      <button class="btn bo bs" onclick="galPrHoy()">Hoy</button>
+    </div>
+
+    <h3 class="gpr-t">1 · ¿De qué lote?</h3>
+    <div id="gpr-lotes" class="gpr-lotes"></div>
+
+    <div id="gpr-tablero"></div>
+    <div id="gpr-zonas" class="gpr-zonas"></div>
+
+    <h3 class="gpr-t">Lo cargado este día</h3>
+    <div class="ab-table-wrap">
+      <table class="pa-tbl gpr-tbl">
+        <colgroup><col style="width:17%"><col style="width:24%"><col style="width:17%">
+                  <col style="width:13%"><col style="width:14%"><col style="width:15%"></colgroup>
+        <thead><tr>
+          <th>Destino</th><th>Presentación</th><th>Lote</th>
+          <th style="text-align:right">Bultos</th><th style="text-align:right">Kilos</th>
+          <th style="text-align:right"></th>
+        </tr></thead>
+        <tbody id="gpr-body"></tbody>
+      </table>
+    </div>
+
+    <h3 class="gpr-t">📦 Lo que hay guardado</h3>
+    <div id="gpr-stock" class="gpr-stock"></div>
+  </div>
+
   <div class="sec sg-mod" id="sec-galpon-acumulado">
     <style>
       /* SIN BARRA DE DESPLAZAMIENTO LATERAL (CLAUDE.md). Cinco columnas, todas de largo
@@ -7522,6 +7764,18 @@ input[type=number]{-moz-appearance:textfield;appearance:textfield}
       #sec-galpon-acumulado .gac-aviso{border:1px solid var(--bor);border-radius:8px;
         padding:8px 11px;font-size:12.5px;color:var(--mut);margin-bottom:12px}
       #sec-galpon-acumulado .gac-hoy{font-weight:700}
+
+      /* EL RINDE POR LOTE. Siete columnas de largo conocido: se fijan todas y no se
+         parte ninguna, que es la regla de CLAUDE.md sobre la barra lateral. */
+      #sec-galpon-acumulado .gac-rtbl{table-layout:fixed;width:100%;max-width:98vw}
+      #sec-galpon-acumulado .gac-rtbl th,#sec-galpon-acumulado .gac-rtbl td{
+        white-space:nowrap;overflow:hidden;text-overflow:ellipsis;vertical-align:middle}
+      #sec-galpon-acumulado .gac-pt{display:inline-block;width:9px;height:9px;
+        border-radius:3px;margin-right:5px}
+      #sec-galpon-acumulado .gac-rinde-v{font-weight:700;font-variant-numeric:tabular-nums}
+      #sec-galpon-acumulado .gac-neg{color:#d62828}
+      #sec-galpon-acumulado h3.gac-t{font-size:12px;text-transform:uppercase;
+        letter-spacing:.5px;color:var(--mut);margin:22px 0 9px}
     </style>
 
     <div class="ph">
@@ -7544,6 +7798,11 @@ input[type=number]{-moz-appearance:textfield;appearance:textfield}
     <div id="gac-aviso"></div>
     <div id="gac-tot" class="gac-tot"></div>
     <div id="gac-cortes" class="gac-cortes"></div>
+
+    <!-- EL RINDE. Andy, 31/10/2026: «en lo que ya armaste de acumulado quiero ir
+         viendo rindes y todo». Es lo que entró contra lo que salió, por lote: la
+         pregunta que se le hace a una finca. -->
+    <div id="gac-rinde"></div>
 
     <div class="ab-table-wrap">
       <table class="pa-tbl gac-tbl">
@@ -27152,6 +27411,26 @@ SG_MANUAL['galpon-config'] = { titulo: 'Galpón · Configuración', html:
   + 'en esta lista, sin tarjetas, que es la señal de que le falta configurarse.</p>'
   + '<p>Y esta pantalla es de <b>Puente Cordón</b>. Parado en otra empresa no se configura '
   + 'ni se imprime nada de acá.</p>'
+
+  + '<h3>📦 En qué sale la fruta <span class="ver">V1112</span></h3>'
+  + '<p>El catálogo de <b>presentaciones</b>: cada una es una baldosa en <b>📦 Galpón · '
+  + 'Proceso</b>, y ya trae su cuenta. Una «Caja cartón · 10 × 700 g» sabe que son 7 kg por '
+  + 'caja, y el que empaca sólo escribe cuántas cajas.</p>'
+  + '<ul>'
+  + '<li><b>Destino</b>: comercial, verde o descarte. Es lo que decide en qué zona de la '
+  + 'pantalla de proceso aparece, y en qué columna del rinde suma.</li>'
+  + '<li><b>A granel</b> para lo que se pesa entero —un bin— y no tiene unidades adentro: '
+  + 'ahí la pantalla de proceso pide kilos en vez de bultos.</li>'
+  + '<li><b>Unidades por bulto</b> y <b>peso de cada una</b>, con su unidad. La ventana '
+  + 'muestra cuánto da un bulto y cuánto dan cien antes de guardar.</li>'
+  + '</ul>'
+  + '<div class="ojo"><b>Por qué la unidad se pregunta.</b> Escribir <b>700</b> pensando en '
+  + 'gramos y que se guarde como kilos convierte cien cajas en 700.000 kg. El error se mete '
+  + 'acá una sola vez y después multiplica <i>todas</i> las cargas que usen esa '
+  + 'presentación — por eso esto es parametrización y pide administrador.</div>'
+  + '<p>Sacar una del catálogo <b>no toca lo ya cargado</b>: cada proceso guarda el nombre '
+  + 'de su presentación además del número, justamente para que borrarla no reescriba la '
+  + 'historia.</p>'
 };
 
 SG_MANUAL['galpon-carga'] = { titulo: 'Galpón · Carga de kilos', html:
@@ -27291,6 +27570,76 @@ SG_MANUAL['galpon-carga'] = { titulo: 'Galpón · Carga de kilos', html:
   + 'y <b>no puede</b> declarar el lote del día ni tocar los rangos de tarjetas.</p>'
 };
 
+SG_MANUAL['galpon-proceso'] = { titulo: 'Galpón · Proceso', html:
+  '<p>Acá se anota <b>qué salió</b> de lo que entró. La carga de kilos registra la fruta '
+  + 'que llega del campo; esta pantalla registra en qué se convirtió: cuántas cajas, '
+  + 'cuántos bins de verde, cuánto descarte. Las dos juntas son el <b>rinde</b>, que es la '
+  + 'pregunta que se le hace a una finca.</p>'
+
+  + '<h3>1 · De qué lote <span class="ver">V1112</span></h3>'
+  + '<p>Se elige entre los lotes <b>volcados</b>, no entre todos los de la finca: sólo '
+  + 'puede salir lo que entró. Cada tarjeta dice cuántos kilos se volcaron y cuántos '
+  + 'quedan sin procesar — eso último es lo que contesta cuál está en la tolva ahora.</p>'
+
+  + '<div class="ojo"><b>El lote es una declaración, no una traza.</b> Los IFCOs se '
+  + 'vuelcan a una tolva y ahí la fruta se mezcla: no existe forma física de decir que '
+  + '<i>esta</i> caja salió de <i>aquel</i> IFCO. Lo que se guarda es a qué lote lo '
+  + 'atribuye el que está ahí. Por eso el rinde puede dar más de 100%, y cuando da, la '
+  + 'pantalla lo muestra en vez de taparlo: es la señal de que la atribución se corrió.</div>'
+
+  + '<h3>2 · Las tres salidas <span class="ver">V1112</span></h3>'
+  + '<ul>'
+  + '<li><b>Comercial.</b> Lo que se vende, en cubetas o a granel.</li>'
+  + '<li><b>Verde.</b> Lo que se guarda para <b>volver a procesarlo</b> más adelante.</li>'
+  + '<li><b>Descarte.</b> Se guarda también; después se remata o se tira.</li>'
+  + '</ul>'
+  + '<p>Son tres y son fijas, no un campo de texto. Cada una tiene un futuro distinto, y '
+  + 'texto libre serían cuarenta maneras de escribir «segunda» y ningún informe posible.</p>'
+
+  + '<h3>3 · Cargar es apretar una baldosa <span class="ver">V1112</span></h3>'
+  + '<p>Cada presentación es una <b>baldosa</b> que ya sabe su cuenta. Una caja de cartón '
+  + 'de 10 cubetas de 700 g sabe que son 7 kg por caja: se aprieta, se escribe <b>100</b> y '
+  + 'los 700 kg salen solos. Los botones <b>−</b> y <b>+</b> y los saltos (+1, +5, +10, +25) '
+  + 'están para contar de pie; <b>Enter</b> carga.</p>'
+  + '<p>Las que son <b>a granel</b> —un bin de verde, uno de descarte— no tienen cuenta: '
+  + 'se pesan enteras y se escriben los kilos.</p>'
+  + '<p>El número grande de al lado muestra <b>lo que va a entrar</b> antes de apretar. Es '
+  + 'un espejo: los kilos que se guardan los calcula el servidor con la presentación que '
+  + 'tiene en la base, igual que el asiento de una factura. Si los calculara la pantalla, '
+  + 'el rinde de la temporada dependería del navegador que estaba abierto.</p>'
+
+  + '<h3>📊 El tablero de arriba <span class="ver">V1112</span></h3>'
+  + '<p>Volcado, procesado, sin procesar y el rinde comercial, con la barra del reparto. '
+  + 'No es decoración: un 40% de descarte se ve <b>mientras se carga</b>, no a fin de '
+  + 'temporada. Un formulario a ciegas se completa igual y nadie se entera.</p>'
+  + '<p>El volcado del lote <b>no se corta por día</b>: lo que entró el martes se puede '
+  + 'procesar el jueves, y un tablero que sólo mirara hoy diría que se procesó de más.</p>'
+
+  + '<h3>📦 Lo que hay guardado <span class="ver">V1112</span></h3>'
+  + '<p>El stock del galpón, por destino y por presentación. <b>No es una tabla aparte</b>: '
+  + 'se suma de las mismas cargas cada vez que se abre la pantalla. Por eso corregir una '
+  + 'carga de la semana pasada lo arregla solo — un saldo guardado en su propia fila se '
+  + 'desincroniza en silencio, y acá corregir cargas viejas es lo normal, no la excepción.</p>'
+
+  + '<div class="ojo"><b>El cero de más, en esta pantalla, tiene forma de gramos.</b> Una '
+  + 'presentación cargada con <b>700</b> donde van kilos convierte cien cajas en 700.000 kg. '
+  + 'Por eso la ventana de Configuración pide la unidad (gramos o kilos) y muestra cuánto '
+  + 'da una caja y cuánto dan cien. Y hay un tope por carga que <b>marca y deja entrar</b>: '
+  + 'lo que ya se embaló, se embaló.</div>'
+
+  + '<h3>🔗 Con qué se vincula <span class="ver">V1112</span></h3>'
+  + '<ul>'
+  + '<li><b>⚖️ Carga de kilos</b> es de donde salen los lotes y los kilos volcados.</li>'
+  + '<li><b>⚙️ Configuración</b> tiene el catálogo de presentaciones: las baldosas de acá.</li>'
+  + '<li><b>📈 Acumulado</b> muestra el rinde por lote de todo el período.</li>'
+  + '</ul>'
+
+  + '<h3>👤 Quién puede <span class="ver">V1112</span></h3>'
+  + '<p><b>Cualquiera con el módulo</b>, con nivel de operar: cargar el proceso es el '
+  + 'trabajo del día. Lo que pide <b>administrador</b> es el catálogo de presentaciones, '
+  + 'que sí es parametrizar — una caja mal definida multiplica mal todas las cargas que '
+  + 'entren con ella.</p>'
+};
 SG_MANUAL['galpon-acumulado'] = { titulo: 'Galpón · Acumulado', html:
   '<p>La pantalla de <b>Carga de kilos</b> contesta <i>cuánto entró hoy</i>. Ésta contesta '
   + '<b>cuánto llevamos</b>, que es la pregunta con la que se cierra una temporada: con cuántos '
@@ -27339,6 +27688,22 @@ SG_MANUAL['galpon-acumulado'] = { titulo: 'Galpón · Acumulado', html:
   + 'solo producto, una temporada son varios — y es como se habla afuera.</li>'
   + '</ul>'
 
+  + '<h3>🍑 Rinde por lote <span class="ver">V1112</span></h3>'
+  + '<p>Lo que entró (los volcados) contra lo que salió (📦 Proceso), lote por lote. El '
+  + '<b>rinde</b> es lo comercial sobre lo volcado: es el número con el que se decide si un '
+  + 'cuadro se sigue cosechando.</p>'
+  + '<ul>'
+  + '<li><b>Sin proc.</b> es lo volcado menos lo procesado: lo que todavía está en la '
+  + 'tolva. Tiene columna propia y no está sumado adentro de un porcentaje porque también '
+  + 'es donde aparece el desfasaje de los bordes — lo volcado el último día del período se '
+  + 'procesa al siguiente, que ya queda afuera.</li>'
+  + '<li>En <b>rojo</b> quiere decir que se procesó <i>más</i> de lo volcado. No es un '
+  + 'error del sistema: la tolva mezcla la fruta de varios lotes y algo se le atribuyó al '
+  + 'lote de al lado. Se arregla corrigiendo el lote de esas cargas.</li>'
+  + '<li>El renglón <b>TODOS LOS LOTES</b> calcula su rinde sobre el <b>total</b>, no '
+  + 'promediando los rindes de cada lote: promediar porcentajes le da el mismo peso a un '
+  + 'cuadro de 200 kg que a uno de 20.000.</li>'
+  + '</ul>'
   + '<h3>📈 La tabla de abajo <span class="ver">V1109</span></h3>'
   + '<p>Un renglón por día, el más reciente arriba, y en la última columna el <b>acumulado</b>: '
   + 'cuánto se llevaba hasta ese día <i>desde el comienzo del período</i>. El acumulado del '
@@ -39953,9 +40318,10 @@ function loadSec(s) {
     'share': function(){ shInit(); },
     'contactos': function(){ ctInit(); },
     'ia-uso': function(){ iuInit(); },
-    'galpon-config': function(){ galInit(); },
+    'galpon-config': function(){ galInit(); galPresCargar(); },
     'galpon-lote-dia': function(){ galLdInit(); },
     'galpon-carga': function(){ galKgInit(); },
+    'galpon-proceso': function(){ galPrInit(); },
     'galpon-acumulado': function(){ galAcInit(); },
     'pl-abasto': function(){ plaInit(); },
     'sg-catalogo':   function(){ sgLoadCaches(function(){ sgCatSub('productos'); }); },
@@ -56235,7 +56601,9 @@ async function galLdBorrar(id){
 }
 
 
-/* ── ⚡ CARGA RÁPIDA ───────────────────────────────────────────────────────────────
+/* ═══════════════════════════════════════════════════════════════════════════════════
+   ⚡ CARGA RÁPIDA
+   ═══════════════════════════════════════════════════════════════════════════════════
    Andy, 31/10/2026: «quiero que el OPERADOR tenga que sólo poner los kilos... que ya
    quede guardado el último lote, comentarios y cuadrilla que puso y vaya cargando sólo
    los cajones nuevos».
@@ -56444,6 +56812,487 @@ function galRapCerrar(){
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════════════
+   📦 EL CATÁLOGO DE PRESENTACIONES (en Configuración)
+   ═══════════════════════════════════════════════════════════════════════════════════
+   Es parametrización: una caja mal definida multiplica mal todas las cargas que entren
+   con ella. Por eso vive en Configuración —que ya pide admin— y la pantalla de proceso
+   sólo la lee. */
+var GPRES = { lista:[], editId:null };
+
+async function galPresCargar(){
+  try {
+    var r = await fetch('/api/galpon/presentaciones?todas=1', { credentials:'include' });
+    var j = await r.json();
+    GPRES.lista = j.ok ? (j.presentaciones || []) : [];
+  } catch (e) { GPRES.lista = []; }
+  galPresPintar();
+}
+
+function galPresPintar(){
+  var b = document.getElementById('gal-pres-body'); if (!b) return;
+  var COL = { comercial:'#16a34a', verde:'#d97706', descarte:'#dc2626' };
+  if (!GPRES.lista.length){
+    b.innerHTML = '<tr><td colspan="5" class="gal-sin" style="padding:20px;text-align:center">'
+      + 'No hay ninguna. Sin presentaciones, la pantalla de proceso no tiene qué mostrar.'
+      + '</td></tr>';
+    return;
+  }
+  b.innerHTML = GPRES.lista.map(function(p){
+    var cuenta = p.granel ? '<span class="gal-sin">a granel · se escriben los kilos</span>'
+      : (galKgNum(p.por_bulto, 0) + ' × ' + galKgNum(p.kg_unidad * 1000, 0) + ' g = '
+         + '<b>' + galKgNum(p.por_bulto * p.kg_unidad) + ' kg</b> por bulto');
+    return '<tr>'
+      + '<td class="gal-w"><b>' + galKgEsc(p.nombre) + '</b></td>'
+      + '<td><span class="gal-sw ro" style="width:11px;height:11px;background:'
+        + (COL[p.destino] || '#888') + '"></span> ' + galKgEsc(p.destino) + '</td>'
+      + '<td>' + (p.envase ? galKgEsc(p.envase) : '<span class="gal-sin">—</span>') + '</td>'
+      + '<td>' + cuenta + '</td>'
+      + '<td style="text-align:right">'
+        + '<button class="btn bo bs" onclick="galPresAbrir(' + p.id + ')">✎</button> '
+        + '<button class="btn bo bs" onclick="galPresBorrar(' + p.id + ')">×</button></td>'
+      + '</tr>';
+  }).join('');
+}
+
+/* En blanco cada vez (CLAUDE.md): un formulario que sólo se esconde conserva lo que
+   tenía, y acá eso sería crear una caja nueva con el peso de la anterior. */
+function galPresAbrir(id){
+  var p = id ? GPRES.lista.filter(function(x){ return x.id === id; })[0] : null;
+  GPRES.editId = p ? p.id : null;
+  document.getElementById('gal-pres-tit').textContent = p ? 'Corregir la presentación'
+                                                           : 'Nueva presentación';
+  document.getElementById('gal-pres-nom').value = p ? p.nombre : '';
+  document.getElementById('gal-pres-dest').value = p ? p.destino : 'comercial';
+  document.getElementById('gal-pres-env').value = p ? (p.envase || '') : '';
+  document.getElementById('gal-pres-granel').checked = !!(p && p.granel);
+  document.getElementById('gal-pres-pb').value = p && !p.granel ? p.por_bulto : 1;
+  /* Se vuelve a mostrar en GRAMOS si el número es chico: así se guardó «700 g» y así
+     se vuelve a leer. Mostrar 0,7 kg obligaría a reconvertir de cabeza para corregirlo. */
+  var kg = p && !p.granel ? p.kg_unidad : null;
+  if (kg != null && kg < 1){
+    document.getElementById('gal-pres-peso').value = Math.round(kg * 1000 * 100) / 100;
+    document.getElementById('gal-pres-uni').value = 'g';
+  } else {
+    document.getElementById('gal-pres-peso').value = kg == null ? '' : kg;
+    document.getElementById('gal-pres-uni').value = 'kg';
+  }
+  document.getElementById('gal-pres-error').style.display = 'none';
+  galPresGranel();
+  document.getElementById('gal-pres-modal').classList.add('on');
+}
+
+function galPresCerrar(){ document.getElementById('gal-pres-modal').classList.remove('on'); }
+
+function galPresGranel(){
+  var g = document.getElementById('gal-pres-granel').checked;
+  document.getElementById('gal-pres-cuenta').style.display = g ? 'none' : '';
+  galPresPrevio();
+}
+
+/* El previo es el antídoto del error de los gramos: se ve «100 cajas = 700 kg» antes
+   de guardar, y 700.000 kg no pasa desapercibido. */
+function galPresPrevio(){
+  var el = document.getElementById('gal-pres-previo'); if (!el) return;
+  var pb = Number(document.getElementById('gal-pres-pb').value) || 0;
+  var pe = Number(String(document.getElementById('gal-pres-peso').value).replace(',', '.')) || 0;
+  var kg = document.getElementById('gal-pres-uni').value === 'g' ? pe / 1000 : pe;
+  if (!pb || !kg){ el.textContent = ''; return; }
+  el.innerHTML = '1 bulto = <b>' + galKgNum(pb * kg) + ' kg</b>'
+    + ' · 100 bultos = <b>' + galKgNum(pb * kg * 100) + ' kg</b>';
+}
+
+async function galPresGuardar(){
+  var err = document.getElementById('gal-pres-error');
+  err.style.display = 'none';
+  var granel = document.getElementById('gal-pres-granel').checked;
+  var pe = Number(String(document.getElementById('gal-pres-peso').value).replace(',', '.')) || 0;
+  var kg = document.getElementById('gal-pres-uni').value === 'g' ? pe / 1000 : pe;
+  var body = {
+    nombre: document.getElementById('gal-pres-nom').value,
+    destino: document.getElementById('gal-pres-dest').value,
+    envase: granel ? '' : document.getElementById('gal-pres-env').value,
+    granel: granel ? 1 : 0,
+    por_bulto: granel ? 1 : document.getElementById('gal-pres-pb').value,
+    kg_unidad: granel ? 1 : kg,
+  };
+  var btn = document.getElementById('gal-pres-btn');
+  btn.disabled = true;
+  try {
+    var url = '/api/galpon/presentaciones' + (GPRES.editId ? '/' + GPRES.editId : '');
+    var r = await fetch(url, { method: GPRES.editId ? 'PATCH' : 'POST', credentials:'include',
+      headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
+    var j = await r.json();
+    if (!j.ok){ err.textContent = j.error; err.style.display = ''; return; }
+    galPresCerrar();
+    await galPresCargar();
+  } catch (e) { err.textContent = 'No se pudo guardar: ' + e.message; err.style.display = ''; }
+  finally { btn.disabled = false; }
+}
+
+async function galPresBorrar(id){
+  var p = GPRES.lista.filter(function(x){ return x.id === id; })[0]; if (!p) return;
+  /* Lo ya cargado NO se toca: cada proceso guarda el nombre de su presentación además
+     del id, justamente para que borrarla del catálogo no reescriba la historia. */
+  if (!confirm('¿Sacar «' + p.nombre + '» del catálogo?\n\n'
+    + 'Lo ya cargado con ella no cambia.')) return;
+  try {
+    var r = await fetch('/api/galpon/presentaciones/' + id, { method:'DELETE',
+      credentials:'include' });
+    var j = await r.json();
+    if (!j.ok) return alert(j.error || 'no se pudo borrar');
+    await galPresCargar();
+  } catch (e) { alert('No se pudo borrar: ' + e.message); }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════════════
+   📦 GALPÓN · PROCESO
+   ═══════════════════════════════════════════════════════════════════════════════════
+   Andy, 31/10/2026: «quiero un lugar para cargar el proceso... eligiendo del lote
+   volcado ahí se pueden ir cargando procesos parciales... hacé algo medio interactivo.
+   Tipo un juego».
+
+   Lo que hace que se cargue rápido no es la animación: es que cada presentación sea una
+   BALDOSA que ya sabe su cuenta. Los diez por caja y los 700 gramos por cubeta los pone
+   el catálogo; el operador escribe 100 y listo.
+
+   Y los kilos los calcula el SERVIDOR con esa misma cuenta. Acá se muestra el resultado
+   antes de apretar —para que se vea lo que va a entrar— pero el número que se guarda no
+   sale nunca de esta pantalla: el rinde de la temporada es esa columna. */
+var GPR = { fecha:null, hoy:null, lote:null, datos:null, sel:null, uuid:null };
+
+function galPrEsc(s){ return String(s == null ? '' : s)
+  .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+function galPrNum(n, dec){ return (Number(n) || 0)
+  .toLocaleString('es-AR', { minimumFractionDigits:0, maximumFractionDigits: dec == null ? 2 : dec }); }
+
+function galPrDest(clave){
+  var ds = (GPR.datos && GPR.datos.destinos) || [];
+  return ds.filter(function(d){ return d.clave === clave; })[0]
+      || { clave:clave, label:clave, color:'#888', nota:'' };
+}
+
+async function galPrInit(){ await galPrCargar(); }
+
+function galPrHoy(){
+  var f = document.getElementById('gpr-fecha');
+  if (f) f.value = GPR.hoy || new Date().toLocaleDateString('en-CA');
+  galPrCargar();
+}
+
+async function galPrCargar(){
+  var f = document.getElementById('gpr-fecha');
+  var q = [];
+  if (f && f.value) q.push('fecha=' + encodeURIComponent(f.value));
+  if (GPR.lote) q.push('lote_id=' + GPR.lote);
+  try {
+    var r = await fetch('/api/galpon/procesos' + (q.length ? '?' + q.join('&') : ''),
+                        { credentials:'include' });
+    var j = await r.json();
+    if (!j.ok) throw new Error(j.error || 'no se pudo leer');
+    GPR.datos = j; GPR.fecha = j.fecha; GPR.hoy = j.hoy;
+    if (f && !f.value) f.value = j.fecha;
+    galPrPintarLotes();
+    galPrPintarTablero();
+    galPrPintarZonas();
+    galPrPintar();
+    galPrPintarStock();
+  } catch (e) {
+    var b = document.getElementById('gpr-body');
+    if (b) b.innerHTML = '<tr><td colspan="6" class="gpr-vacio">' + galPrEsc(e.message) + '</td></tr>';
+  }
+}
+
+/* ── PASO 1 · EL LOTE ────────────────────────────────────────────────────────────
+   De los lotes VOLCADOS, no de todos los de la finca: sólo puede salir lo que entró. Y
+   cada tarjeta dice cuánto le queda sin procesar, que es lo que contesta cuál está en
+   la tolva ahora mismo. */
+function galPrPintarLotes(){
+  var el = document.getElementById('gpr-lotes'); if (!el) return;
+  var ls = (GPR.datos && GPR.datos.lotes) || [];
+  if (!ls.length){
+    el.innerHTML = '<div class="gpr-vacio">Todavía no se volcó nada.<br>'
+      + 'Los kilos entran por <b>⚖️ Galpón · Carga de kilos</b>, y recién después se '
+      + 'puede cargar qué salió.</div>';
+    return;
+  }
+  el.innerHTML = ls.map(function(l){
+    var pct = l.volcado > 0 ? Math.min(100, Math.round((l.procesado / l.volcado) * 100)) : 0;
+    return '<div class="gpr-lote' + (GPR.lote === l.lote_id ? ' on' : '') + '"'
+      + ' onclick="galPrLote(' + l.lote_id + ')">'
+      + '<div class="n">' + galPrEsc(l.nombre) + '</div>'
+      + '<div class="d">' + (l.producto ? galPrEsc(l.producto) + ' · ' : '')
+        + galPrNum(l.volcado) + ' kg volcados</div>'
+      + '<div class="barra"><i style="width:' + pct + '%"></i></div>'
+      + '<div class="d">' + (l.sin_procesar > 0
+          ? 'quedan <b>' + galPrNum(l.sin_procesar) + ' kg</b> sin procesar'
+          : (l.sin_procesar < 0
+              ? '<b>' + galPrNum(-l.sin_procesar) + ' kg de más</b> procesados'
+              : 'todo procesado')) + '</div>'
+      + '</div>';
+  }).join('');
+}
+
+function galPrLote(id){
+  GPR.lote = GPR.lote === id ? null : id;
+  GPR.sel = null;
+  galPrCargar();
+}
+
+/* ── EL TABLERO ──────────────────────────────────────────────────────────────────
+   Entró, salió, queda — y el reparto en una sola barra apilada. Es lo que hace que la
+   pantalla no sea un formulario a ciegas: un 40% de descarte se ve mientras se carga,
+   no a fin de temporada. */
+function galPrPintarTablero(){
+  var el = document.getElementById('gpr-tablero'); if (!el) return;
+  var t = GPR.datos && GPR.datos.tablero;
+  if (!GPR.lote || !t){ el.innerHTML = ''; return; }
+  var tot = Math.max(t.volcado, t.procesado) || 1;
+  var tramo = function(clave){
+    var d = galPrDest(clave), kg = t.destinos[clave] || 0;
+    return kg > 0 ? '<i style="width:' + ((kg / tot) * 100) + '%;background:' + d.color + '"></i>' : '';
+  };
+  var ley = (GPR.datos.destinos || []).map(function(d){
+    var kg = t.destinos[d.clave] || 0;
+    return '<span><em style="background:' + d.color + '"></em>' + galPrEsc(d.label) + ' '
+      + '<b>' + galPrNum(kg) + ' kg</b>'
+      + (t.volcado > 0 ? ' · ' + galPrNum((kg / t.volcado) * 100, 1) + '%' : '') + '</span>';
+  }).join('');
+
+  var n = function(k, v, u){ return '<div><div class="k">' + k + '</div>'
+    + '<div class="v">' + v + (u ? ' <span style="font-size:12px;color:var(--mut)">' + u
+    + '</span>' : '') + '</div></div>'; };
+
+  el.innerHTML = '<div class="gpr-tab">'
+    + '<div class="gpr-nums">'
+      + n('Volcado', galPrNum(t.volcado), 'kg')
+      + n('Procesado', galPrNum(t.procesado), 'kg')
+      + n('Sin procesar', galPrNum(t.sin_procesar), 'kg')
+      + n('Rinde comercial', t.rinde == null ? '—' : galPrNum(t.rinde, 1) + '%')
+    + '</div>'
+    + '<div class="gpr-apilada">' + tramo('comercial') + tramo('verde') + tramo('descarte') + '</div>'
+    + '<div class="gpr-leyenda">' + ley + '</div>'
+    /* Procesar MÁS de lo volcado no se tapa con un Math.max(0, …): es la señal de que la
+       atribución a este lote se corrió —la tolva mezcla— y taparla es esconder el único
+       aviso que hay. */
+    + (t.de_mas ? '<div class="ojo gpr-demas"><b>Hay más procesado que volcado en este '
+        + 'lote.</b> La tolva mezcla la fruta de varios lotes, así que esto pasa cuando '
+        + 'una carga se le atribuyó al lote de al lado. Se arregla corrigiendo el lote '
+        + 'de las cargas, acá abajo o en la carga de kilos.</div>' : '')
+    + '</div>';
+}
+
+/* ── LAS TRES ZONAS Y SUS BALDOSAS ───────────────────────────────────────────────── */
+function galPrPintarZonas(){
+  var el = document.getElementById('gpr-zonas'); if (!el) return;
+  if (!GPR.lote){
+    el.innerHTML = '<div class="gpr-vacio" style="flex:1 1 100%">Elegí un lote de arriba '
+      + 'para empezar a cargar.</div>';
+    return;
+  }
+  var pres = (GPR.datos.presentaciones) || [];
+  var t = GPR.datos.tablero || { destinos:{} };
+  el.innerHTML = (GPR.datos.destinos || []).map(function(d){
+    var mias = pres.filter(function(p){ return p.destino === d.clave; });
+    return '<div class="gpr-zona" style="border-color:' + d.color + '33">'
+      + '<div class="gpr-zh"><b style="color:' + d.color + '">' + galPrEsc(d.label) + '</b>'
+        + '<span class="t" style="color:' + d.color + '">'
+        + galPrNum(t.destinos[d.clave] || 0) + ' kg</span></div>'
+      + '<div class="gpr-zn">' + galPrEsc(d.nota) + '</div>'
+      + (mias.length ? mias.map(function(p){ return galPrBaldosa(p, d); }).join('')
+          : '<div class="gpr-zn">No hay presentaciones para este destino. Se cargan en '
+            + '<b>⚙️ Galpón · Configuración</b>.</div>')
+      + '</div>';
+  }).join('');
+}
+
+function galPrBaldosa(p, d){
+  var sel = GPR.sel === p.id;
+  var cuenta = p.granel ? 'A granel · se escriben los kilos'
+    : (galPrNum(p.por_bulto, 0) + ' × ' + galPrNum(p.kg_unidad * 1000, 0) + ' g = '
+       + galPrNum(p.por_bulto * p.kg_unidad) + ' kg por bulto');
+  var h = '<div class="gpr-bald' + (sel ? ' on' : '') + '"'
+    + ' style="border-color:' + d.color + (sel ? '' : '55') + '"'
+    + (sel ? '' : ' onclick="galPrElegir(' + p.id + ')"') + '>'
+    + '<div class="bn">' + galPrEsc(p.nombre) + '</div>'
+    + '<div class="bc">' + cuenta + '</div>';
+  if (sel){
+    var saltos = p.granel ? [10, 50, 100, 500] : [1, 5, 10, 25];
+    h += '<div class="gpr-cont">'
+      + '<div class="gpr-fila">'
+        + '<button class="gpr-pm" onclick="galPrMas(-1)">−</button>'
+        + '<input class="gpr-num" id="gpr-cant" inputmode="decimal" autocomplete="off"'
+          + ' value="" placeholder="' + (p.granel ? 'kilos' : 'bultos') + '"'
+          + ' oninput="galPrPrevio()" onkeydown="galPrTecla(event)">'
+        + '<button class="gpr-pm" onclick="galPrMas(1)">+</button>'
+      + '</div>'
+      + '<div class="gpr-chips">' + saltos.map(function(n){
+          return '<span class="gpr-chip" onclick="galPrMas(' + n + ')">+' + n + '</span>';
+        }).join('')
+        + '<span class="gpr-chip" onclick="galPrElegir(null)">cancelar</span></div>'
+      + '<div class="gpr-previo">'
+        + '<div><div class="kg" id="gpr-previo" style="color:' + d.color + '">0 kg</div>'
+          + '<div class="cta">Enter para cargar</div></div>'
+        + '<button class="btn bp" id="gpr-btn" onclick="galPrCargarUno()">Cargar</button>'
+      + '</div>'
+      + '<div id="gpr-error" style="display:none;margin-top:9px" class="ojo"></div>'
+      + '</div>';
+  }
+  return h + '</div>';
+}
+
+function galPrElegir(id){
+  GPR.sel = id;
+  GPR.uuid = galKgNuevoUuid();
+  galPrPintarZonas();
+  var c = document.getElementById('gpr-cant');
+  if (c) setTimeout(function(){ try { c.focus(); } catch(e){} }, 50);
+}
+
+/* Los botones y los saltos tocan el casillero A MANO y no vuelven a dibujar la zona: un
+   redibujado por cada +5 le saca el foco al campo y borra lo que se venía escribiendo. */
+function galPrMas(n){
+  var c = document.getElementById('gpr-cant'); if (!c) return;
+  var v = (Number(String(c.value).replace(',', '.')) || 0) + n;
+  if (v < 0) v = 0;
+  c.value = v ? String(Math.round(v * 100) / 100) : '';
+  galPrPrevio();
+  try { c.focus(); } catch(e){}
+}
+
+function galPrPresSel(){
+  return ((GPR.datos && GPR.datos.presentaciones) || [])
+    .filter(function(p){ return p.id === GPR.sel; })[0] || null;
+}
+
+/* El previo ESPEJA la cuenta del servidor; no la reemplaza. Lo que se guarda lo calcula
+   el backend con la presentación que tiene en la base, igual que el asiento de una
+   factura (CLAUDE.md). Acá sólo se ve lo que va a entrar antes de apretar. */
+function galPrPrevio(){
+  var el = document.getElementById('gpr-previo'); if (!el) return;
+  var p = galPrPresSel(); if (!p) return;
+  var c = document.getElementById('gpr-cant');
+  var v = Number(String((c && c.value) || '').replace(',', '.')) || 0;
+  var kg = p.granel ? v : v * p.por_bulto * p.kg_unidad;
+  el.textContent = galPrNum(kg) + ' kg';
+}
+
+function galPrTecla(ev){
+  if (ev.key === 'Enter'){ ev.preventDefault(); galPrCargarUno(); }
+}
+
+async function galPrCargarUno(){
+  var p = galPrPresSel(); if (!p || !GPR.lote) return;
+  var err = document.getElementById('gpr-error');
+  var c = document.getElementById('gpr-cant');
+  var btn = document.getElementById('gpr-btn');
+  if (err) err.style.display = 'none';
+  var body = {
+    uuid: GPR.uuid,
+    fecha: GPR.fecha,
+    lote_id: GPR.lote,
+    presentacion_id: p.id,
+  };
+  if (p.granel) body.kilos = c ? c.value : '';
+  else body.bultos = c ? c.value : '';
+
+  if (btn) btn.disabled = true;
+  try {
+    var r = await fetch('/api/galpon/procesos', { method:'POST', credentials:'include',
+      headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
+    var j = await r.json();
+    if (!j.ok){
+      if (err){ err.textContent = j.error; err.style.display = ''; }
+      if (c){ c.focus(); c.select(); }
+      return;
+    }
+    /* Un uuid NUEVO por carga, y después de saber que entró: el servidor hace INSERT OR
+       IGNORE sobre esa columna, así que reusarlo haría que la segunda caja se descarte
+       en silencio. Es el mismo mecanismo que frena el doble clic en la carga de kilos. */
+    GPR.uuid = galKgNuevoUuid();
+    var sel = GPR.sel;
+    await galPrCargar();
+    GPR.sel = sel;
+    galPrPintarZonas();
+    var z = document.getElementById('gpr-zonas');
+    if (z) { z.classList.remove('gpr-flash'); void z.offsetWidth; z.classList.add('gpr-flash'); }
+    var c2 = document.getElementById('gpr-cant');
+    if (c2) setTimeout(function(){ try { c2.focus(); } catch(e){} }, 50);
+  } catch (e) {
+    if (err){ err.textContent = 'No se pudo cargar: ' + e.message; err.style.display = ''; }
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
+/* ── LO CARGADO ESTE DÍA ─────────────────────────────────────────────────────────── */
+function galPrPintar(){
+  var b = document.getElementById('gpr-body'); if (!b) return;
+  var ps = (GPR.datos && GPR.datos.procesos) || [];
+  if (!ps.length){
+    b.innerHTML = '<tr><td colspan="6" class="gpr-vacio">'
+      + (GPR.lote ? 'Todavía no se cargó nada de este lote para este día.'
+                  : 'Todavía no se cargó nada para este día.') + '</td></tr>';
+    return;
+  }
+  b.innerHTML = ps.map(function(x){
+    var d = galPrDest(x.destino);
+    return '<tr>'
+      + '<td><span class="gpr-pt" style="background:' + d.color + '"></span>'
+        + galPrEsc(d.label) + '</td>'
+      + '<td title="' + galPrEsc(x.presentacion || '') + '">'
+        + galPrEsc(x.presentacion || 'A granel')
+        + (x.estado === 'a_revisar' ? ' <b style="color:#d62828">⚠</b>' : '') + '</td>'
+      + '<td title="' + galPrEsc(x.lote_nombre || '') + '">'
+        + galPrEsc(x.lote_nombre || ('Lote ' + x.lote_id)) + '</td>'
+      + '<td class="gpr-n">' + (x.bultos == null ? '—' : galPrNum(x.bultos, 0)) + '</td>'
+      + '<td class="gpr-n"><b>' + galPrNum(x.kilos) + '</b></td>'
+      + '<td style="text-align:right">'
+        + '<button class="btn bo bs" onclick="galPrBorrar(' + x.id + ')">×</button></td>'
+      + '</tr>';
+  }).join('');
+}
+
+async function galPrBorrar(id){
+  var x = ((GPR.datos && GPR.datos.procesos) || [])
+    .filter(function(p){ return p.id === id; })[0]; if (!x) return;
+  if (!confirm('¿Borrar ' + galPrNum(x.kilos) + ' kg de '
+    + (x.presentacion || x.destino) + '?')) return;
+  try {
+    var r = await fetch('/api/galpon/procesos/' + id, { method:'DELETE', credentials:'include' });
+    var j = await r.json();
+    if (!j.ok) return alert(j.error || 'no se pudo borrar');
+    await galPrCargar();
+  } catch (e) { alert('No se pudo borrar: ' + e.message); }
+}
+
+/* ── EL STOCK ────────────────────────────────────────────────────────────────────
+   Derivado de las mismas cargas, no una tabla de saldos: corregir una carga vieja lo
+   arregla solo. Es lo que hay guardado en el galpón HOY, sin cortar por fecha — un
+   stock de un día no es un stock. */
+function galPrPintarStock(){
+  var el = document.getElementById('gpr-stock'); if (!el) return;
+  var st = GPR.datos && GPR.datos.stock;
+  if (!st || !st.kilos){
+    el.innerHTML = '<div class="gpr-vacio" style="flex:1 1 100%">Todavía no hay nada '
+      + 'guardado.</div>';
+    return;
+  }
+  el.innerHTML = st.destinos.map(function(d){
+    return '<div class="gpr-sd" style="border-color:' + d.color + '55">'
+      + '<div class="st"><span style="color:' + d.color + ';font-weight:700;font-size:13px;'
+        + 'text-transform:uppercase;letter-spacing:.3px">' + galPrEsc(d.label) + '</span>'
+        + '<b style="color:' + d.color + '">' + galPrNum(d.kilos) + ' kg</b></div>'
+      + (d.items.length ? d.items.map(function(i){
+            return '<div class="gpr-sl"><span>' + galPrEsc(i.nombre) + '</span>'
+              + '<b>' + (i.bultos ? galPrNum(i.bultos, 0) + ' b · ' : '')
+              + galPrNum(i.kilos) + ' kg</b></div>';
+          }).join('')
+        : '<div class="gpr-sl" style="border-top:0;color:var(--mut)">—</div>')
+      + '</div>';
+  }).join('');
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════════════
    📈 GALPÓN · ACUMULADO
    ═══════════════════════════════════════════════════════════════════════════════════
    Andy, 31/10/2026: «mostrame algún lugar donde vamos acumulando el total, no sólo por
@@ -56502,6 +57351,7 @@ async function galAcCargar(){
     galAcPintarAviso();
     galAcPintarTot();
     galAcPintarCortes();
+    galAcPintarRinde();
     galAcPintar();
   } catch (e) {
     var b = document.getElementById('gac-body');
@@ -56579,6 +57429,67 @@ function galAcPintarCortes(){
                + caja('Por producto', j.por_producto || []);
 }
 
+/* ── EL RINDE POR LOTE ───────────────────────────────────────────────────────────
+   Lo que entró (los volcados) contra lo que salió (el proceso), por lote. El rinde es
+   lo COMERCIAL sobre lo volcado: es el número con el que se decide si un cuadro se
+   sigue cosechando.
+
+   «Sin procesar» no es un sobrante a esconder: es lo que todavía está en la tolva, y
+   también es donde aparece el desfasaje de los bordes del período —lo volcado el
+   último día se procesa al siguiente, que ya queda afuera—. Por eso tiene columna
+   propia en vez de estar sumado adentro de un porcentaje. */
+function galAcPintarRinde(){
+  var el = document.getElementById('gac-rinde'); if (!el) return;
+  var fs = (GAC.datos && GAC.datos.rinde) || [];
+  if (!fs.length){ el.innerHTML = ''; return; }
+  var COL = { comercial:'#16a34a', verde:'#d97706', descarte:'#dc2626' };
+
+  var tot = { volcado:0, comercial:0, verde:0, descarte:0, sin_procesar:0 };
+  fs.forEach(function(f){
+    ['volcado','comercial','verde','descarte','sin_procesar'].forEach(function(k){
+      tot[k] = Math.round((tot[k] + (Number(f[k]) || 0)) * 100) / 100;
+    });
+  });
+
+  var fila = function(f, pie){
+    var neg = f.sin_procesar < 0 ? ' gac-neg' : '';
+    return '<tr' + (pie ? ' style="font-weight:700;border-top:2px solid var(--bor)"' : '') + '>'
+      + '<td title="' + galAcEsc(f.nombre) + '">' + galAcEsc(f.nombre) + '</td>'
+      + '<td class="gac-n">' + galAcNum(f.volcado) + '</td>'
+      + '<td class="gac-n">' + galAcNum(f.comercial) + '</td>'
+      + '<td class="gac-n">' + galAcNum(f.verde) + '</td>'
+      + '<td class="gac-n">' + galAcNum(f.descarte) + '</td>'
+      + '<td class="gac-n' + neg + '">' + galAcNum(f.sin_procesar) + '</td>'
+      + '<td class="gac-n gac-rinde-v">'
+        + (f.rinde == null ? '—' : galAcNum(f.rinde, 1) + '%') + '</td>'
+      + '</tr>';
+  };
+
+  el.innerHTML = '<h3 class="gac-t">Rinde por lote</h3>'
+    + '<div class="ab-table-wrap"><table class="pa-tbl gac-rtbl">'
+    + '<colgroup><col style="width:22%"><col style="width:14%"><col style="width:13%">'
+    + '<col style="width:12%"><col style="width:13%"><col style="width:14%">'
+    + '<col style="width:12%"></colgroup>'
+    + '<thead><tr><th>Lote</th><th style="text-align:right">Volcado</th>'
+    + '<th style="text-align:right"><span class="gac-pt" style="background:' + COL.comercial + '"></span>Comerc.</th>'
+    + '<th style="text-align:right"><span class="gac-pt" style="background:' + COL.verde + '"></span>Verde</th>'
+    + '<th style="text-align:right"><span class="gac-pt" style="background:' + COL.descarte + '"></span>Descarte</th>'
+    + '<th style="text-align:right">Sin proc.</th><th style="text-align:right">Rinde</th>'
+    + '</tr></thead><tbody>'
+    + fs.map(function(f){ return fila(f, false); }).join('')
+    /* El total tiene su propio rinde calculado sobre el TOTAL, no el promedio de los
+       rindes de cada lote: promediar porcentajes le da el mismo peso a un cuadro de
+       200 kg que a uno de 20.000, y el número de abajo deja de ser el de la finca. */
+    + fila(Object.assign({ nombre:'TODOS LOS LOTES' }, tot, {
+        rinde: tot.volcado > 0 ? Math.round((tot.comercial / tot.volcado) * 1000) / 10 : null,
+      }), true)
+    + '</tbody></table></div>'
+    + (tot.sin_procesar < 0
+        ? '<div class="ojo" style="margin-top:10px"><b>Se procesó más de lo volcado.</b> '
+          + 'La tolva mezcla la fruta de varios lotes, así que algo se le atribuyó al lote '
+          + 'equivocado — o quedó fruta de antes del período. Se ve lote por lote en la '
+          + 'columna «Sin proc.» en rojo.</div>' : '');
+}
 function galAcPintar(){
   var b = document.getElementById('gac-body'); if (!b) return;
   var j = GAC.datos;

@@ -47,6 +47,17 @@ function base() {
       observacion TEXT, estado TEXT NOT NULL DEFAULT 'ok', revision_motivo TEXT,
       usuario_id INTEGER, usuario TEXT,
       creado_en TEXT DEFAULT (datetime('now','localtime')), eliminado_en TEXT);
+
+    -- El acumulado cruza los volcados con el PROCESO para sacar el rinde, así que la
+    -- tabla tiene que estar: en la base de verdad la crea db_galpon.js siempre.
+    CREATE TABLE gal_procesos (
+      id INTEGER PRIMARY KEY AUTOINCREMENT, uuid TEXT UNIQUE, fecha TEXT NOT NULL,
+      lote_id INTEGER NOT NULL, lote_nombre TEXT, producto TEXT, destino TEXT NOT NULL,
+      presentacion_id INTEGER, presentacion TEXT, envase TEXT,
+      bultos REAL, por_bulto REAL, kg_unidad REAL, kilos REAL NOT NULL,
+      tipo TEXT NOT NULL DEFAULT 'ingreso', observacion TEXT,
+      estado TEXT NOT NULL DEFAULT 'ok', revision_motivo TEXT,
+      usuario_id INTEGER, usuario TEXT, creado_en TEXT, eliminado_en TEXT);
   `);
   return db;
 }
