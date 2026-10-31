@@ -418,6 +418,10 @@ export function entero(v) {
   return Number.isFinite(n) && n >= 0 ? n : null;
 }
 
+// Dos decimales, en un solo lugar. Los kilos se suman y se promedian, y una suma de
+// flotantes arrastra el 0,000000001 hasta que un total cierra con tres decimales raros.
+const round2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
+
 const txt = (v) => {
   const s = String(v == null ? '' : v).trim();
   return s ? s : null;
@@ -630,7 +634,7 @@ export function resumenDelDia(db, fecha) {
   const porLote = db.prepare(
     ' SELECT lote_id,'
     + "       COALESCE(lote_nombre, 'Lote ' || lote_id) AS nombre,"
-    + '       producto,'
+    + '       GROUP_CONCAT(DISTINCT producto) AS producto,'
     + '       COUNT(*) AS cargas,'
     + '       COALESCE(SUM(kilos),0) AS kilos,'
     + '       COALESCE(SUM(ifcos),0) AS ifcos'
@@ -645,5 +649,143 @@ export function resumenDelDia(db, fecha) {
     a_revisar: t.a_revisar || 0,
     por_cuadrilla: porCuadrilla,
     por_lote: porLote,
+  };
+}
+
+// ── DESDE CUÁNDO HAY KILOS CARGADOS ─────────────────────────────────────────────────
+// Para que la pantalla de acumulado abra mostrando TODO sin que nadie elija un desde.
+// Un rango que arranca el 1 de enero por convención esconde la mitad de la temporada
+// si la cosecha empezó antes, y nadie se entera: la pantalla muestra un número y el
+// número está mal por abajo, que es la manera en que no se nota.
+export function rangoCargado(db) {
+  const r = db.prepare(
+    ' SELECT MIN(fecha) AS primera, MAX(fecha) AS ultima,'
+    + '       COUNT(DISTINCT fecha) AS dias'
+    + '  FROM gal_volcados WHERE eliminado_en IS NULL').get();
+  return { primera: (r && r.primera) || null, ultima: (r && r.ultima) || null,
+           dias: (r && r.dias) || 0 };
+}
+
+// ── EL ACUMULADO ────────────────────────────────────────────────────────────────────
+// Andy, 31/10/2026: «mostrame algún lugar donde vamos acumulando el total, no sólo por
+// día». La pantalla de carga contesta "cuánto entró hoy"; ésta contesta "cuánto llevamos",
+// que es la pregunta de la temporada: con cuántos kilos cerró cada lote, cuánto trajo
+// cada cuadrilla, y si el ritmo sube o baja.
+//
+// Mismos cortes que el día —por cuadrilla paga el jornal, por lote mide el rendimiento—
+// más uno que recién tiene sentido en el rango: POR PRODUCTO. Un día es casi siempre de
+// un solo producto; una temporada son varios y es el corte con el que se habla afuera.
+//
+// Los SUM() van repetidos en el ORDER BY y no por alias: en SQLite `ORDER BY kilos`
+// adentro de un GROUP BY se ata a la COLUMNA y no al SUM() que la tapa, y la lista sale
+// ordenada pero mal. Ya pasó en este repo y no se ve.
+// ¿Es un día que existe de verdad? esFecha() valida la FORMA y nada más, y eso está
+// bien donde está: al cargar no se rechaza nada. Pero como extremo de un rango, un
+// '2026-13-45' se cuela, queda después de cualquier fecha, da vuelta el período y lo
+// recorta a un solo día — y la pantalla muestra un total más chico sin decir por qué.
+function fechaDeAlmanaque(v) {
+  const f = esFecha(v);
+  if (!f) return null;
+  const [a, m, d] = f.split('-').map(Number);
+  const x = new Date(Date.UTC(a, m - 1, d));
+  return (x.getUTCFullYear() === a && x.getUTCMonth() === m - 1 && x.getUTCDate() === d)
+    ? f : null;
+}
+
+export function acumulado(db, desde, hasta) {
+  let d = fechaDeAlmanaque(desde);
+  let h = fechaDeAlmanaque(hasta);
+  const r = rangoCargado(db);
+  // Sin desde o sin hasta se toma todo lo que hay. Abrir la pantalla en blanco porque
+  // faltó un parámetro es la peor respuesta posible a "cuánto llevamos".
+  if (!d) d = r.primera || h || '0000-01-01';
+  if (!h) h = r.ultima || d;
+
+  // Al revés se da dado vuelta: entre el 30 y el 1 no hay nada, y la pantalla diría
+  // 0 kg con total aplomo. Es el único sentido posible de esas dos fechas, así que se
+  // enderezan — y se avisa, porque los casilleros van a aparecer cambiados de lugar.
+  let invertido = false;
+  if (d > h) { const t = d; d = h; h = t; invertido = true; }
+
+  const base = ' FROM gal_volcados'
+             + '  WHERE fecha >= ? AND fecha <= ? AND eliminado_en IS NULL';
+
+  const t = db.prepare(
+    ' SELECT COUNT(*) AS cargas,'
+    + '       COUNT(DISTINCT fecha) AS dias,'
+    + '       COALESCE(SUM(kilos),0) AS kilos,'
+    + '       COALESCE(SUM(ifcos),0) AS ifcos,'
+    + "       COALESCE(SUM(CASE WHEN estado = 'a_revisar' THEN 1 ELSE 0 END),0) AS a_revisar"
+    + base).get(d, h);
+
+  const kilos = round2(t.kilos || 0);
+  const dias = t.dias || 0;
+
+  const corte = (col, etiqueta, extra) => db.prepare(
+    ' SELECT ' + col + ' AS gid,'
+    + '       COALESCE(' + etiqueta + ") AS nombre,"
+    + (extra ? '       ' + extra + ',' : '')
+    + '       COUNT(*) AS cargas,'
+    + '       COUNT(DISTINCT fecha) AS dias,'
+    + '       COALESCE(SUM(kilos),0) AS kilos,'
+    + '       COALESCE(SUM(ifcos),0) AS ifcos'
+    + base
+    + ' GROUP BY ' + col
+    + ' ORDER BY SUM(kilos) DESC').all(d, h);
+
+  // El porcentaje se calcula acá y no en la pantalla: es el mismo número en la tabla y
+  // en la barrita, y dos lugares que lo dividen son dos lugares que lo redondean distinto.
+  const conPct = (filas) => filas.map((f) => Object.assign({}, f, {
+    kilos: round2(f.kilos || 0),
+    pct: kilos > 0 ? Math.round(((f.kilos || 0) / kilos) * 1000) / 10 : 0,
+  }));
+
+  const porCuadrilla = conPct(corte('cuadrilla_id', "cuadrilla, '— sin cuadrilla —'"));
+  const porLote = conPct(corte('lote_id', "lote_nombre, 'Lote ' || lote_id",
+    // GROUP_CONCAT y no `producto` pelado: una columna suelta adentro de un GROUP BY la
+    // elige SQLite de una fila cualquiera del grupo. Un lote del que salieron damasco y
+    // ciruela mostraría uno solo de los dos, al azar y sin avisar.
+    'GROUP_CONCAT(DISTINCT producto) AS producto'));
+  const porProducto = conPct(corte('producto', "producto, '— sin producto —'"));
+
+  // El día a día, con el total CORRIENDO. Se suma en orden ascendente —que es el único
+  // en que un acumulado significa algo— y recién después se da vuelta para mostrar lo
+  // último arriba. Hecho al revés, el primer renglón diría los kilos del último día.
+  const dd = db.prepare(
+    ' SELECT fecha,'
+    + '       COUNT(*) AS cargas,'
+    + '       COALESCE(SUM(kilos),0) AS kilos,'
+    + '       COALESCE(SUM(ifcos),0) AS ifcos'
+    + base
+    + ' GROUP BY fecha'
+    + ' ORDER BY fecha ASC').all(d, h);
+
+  let corrido = 0;
+  for (const f of dd) {
+    f.kilos = round2(f.kilos || 0);
+    corrido = round2(corrido + f.kilos);
+    f.acumulado = corrido;
+  }
+  const porDia = dd.slice().reverse();
+
+  // El mejor día se saca de la misma lista y no con otro SELECT: una segunda consulta
+  // con otro criterio de desempate puede contestar un día distinto al que la tabla
+  // muestra arriba de todo, y entonces la pantalla se contradice sola.
+  let mejor = null;
+  for (const f of dd) if (!mejor || f.kilos > mejor.kilos) mejor = { fecha: f.fecha, kilos: f.kilos };
+
+  return {
+    desde: d, hasta: h, invertido,
+    total: { kilos, ifcos: t.ifcos || 0, cargas: t.cargas || 0,
+             a_revisar: t.a_revisar || 0, dias },
+    // Promedio por día TRABAJADO, no por día del almanaque. Dividir por los días del
+    // rango mete los domingos y los días de lluvia en el divisor y baja el promedio sin
+    // que haya pasado nada: el número deja de servir para comparar dos semanas.
+    promedio_dia: dias > 0 ? round2(kilos / dias) : 0,
+    mejor_dia: mejor,
+    por_dia: porDia,
+    por_lote: porLote,
+    por_cuadrilla: porCuadrilla,
+    por_producto: porProducto,
   };
 }

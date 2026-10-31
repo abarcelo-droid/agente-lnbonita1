@@ -288,6 +288,7 @@ input[type=number]{-moz-appearance:textfield;appearance:textfield}
     <div class="ni" data-sec="galpon-config"><span class="dot da"></span>⚙️ Galpón · Configuración</div>
     <div class="ni" data-sec="galpon-lote-dia"><span class="dot da"></span>🗓️ Galpón · Lote del día</div>
     <div class="ni" data-sec="galpon-carga"><span class="dot da"></span>⚖️ Galpón · Carga de kilos</div>
+    <div class="ni" data-sec="galpon-acumulado"><span class="dot da"></span>📈 Galpón · Acumulado</div>
   </div>
 
   <div class="ni-grp" data-grp="ven-ventas">Administración de Ventas<span class="ni-caret">▾</span></div>
@@ -7207,8 +7208,13 @@ input[type=number]{-moz-appearance:textfield;appearance:textfield}
       #sec-galpon-carga .gkg-tbl{table-layout:fixed;width:100%;max-width:98vw}
       #sec-galpon-carga .gkg-tbl th,#sec-galpon-carga .gkg-tbl td{
         white-space:nowrap;overflow:hidden;text-overflow:ellipsis;vertical-align:middle}
-      #sec-galpon-carga .gkg-tbl td.gkg-w,#sec-galpon-carga .gkg-tbl th.gkg-w{
-        white-space:normal;word-break:break-word}
+      /* El contenido puede pasar a un segundo renglón, pero SÓLO entre palabras:
+         `word-break:break-word` parte adentro de la palabra y «Damasco» se lee
+         «Da mas co». Con overflow-wrap el corte adentro de una palabra es el último
+         recurso, y el … del final avisa que quedó algo afuera.
+         Los ENCABEZADOS no se parten nunca: se recortan. */
+      #sec-galpon-carga .gkg-tbl td.gkg-w{
+        white-space:normal;word-break:normal;overflow-wrap:break-word}
       #sec-galpon-carga .ab-table-wrap{overflow-x:hidden !important}
       @media(max-width:900px){ #sec-galpon-carga .ab-table-wrap{overflow-x:auto !important}
                                #sec-galpon-carga .gkg-tbl{table-layout:auto} }
@@ -7272,7 +7278,7 @@ input[type=number]{-moz-appearance:textfield;appearance:textfield}
 
     <div class="ab-table-wrap">
       <table class="pa-tbl gkg-tbl">
-        <colgroup><col style="width:22%"><col style="width:13%"><col style="width:17%">
+        <colgroup><col style="width:20%"><col style="width:16%"><col style="width:16%">
                   <col style="width:13%"><col style="width:9%"><col style="width:16%">
                   <col style="width:10%"></colgroup>
         <thead><tr>
@@ -7332,6 +7338,111 @@ input[type=number]{-moz-appearance:textfield;appearance:textfield}
         <button class="btn bo" id="gal-kg-salir" onclick="galKgCerrar()">Listo</button>
         <button class="btn bp" id="gal-kg-ok-btn" onclick="galKgGuardar()">Cargar</button>
       </div>
+    </div>
+  </div>
+
+  <!-- ── 📈 GALPÓN · ACUMULADO ─────────────────────────────────────────────────────
+       Andy, 31/10/2026: «mostrame algún lugar donde vamos acumulando el total, no sólo
+       por día». La pantalla de Carga de kilos contesta cuánto entró HOY; ésta contesta
+       cuánto llevamos, que es la pregunta de la temporada.
+
+       Es una LISTA, no un formulario: no abre ninguna ventana y no se carga nada acá.
+       Por eso la regla de CLAUDE.md sobre ventanas no aplica — lo que hay que abrir en
+       una ventana es la ACCIÓN, y esta pantalla no tiene ninguna. -->
+  <div class="sec sg-mod" id="sec-galpon-acumulado">
+    <style>
+      /* SIN BARRA DE DESPLAZAMIENTO LATERAL (CLAUDE.md). Cinco columnas, todas de largo
+         conocido —una fecha y cuatro números—, así que se fijan y no se parte ninguna.
+         El acumulado es la última y es justo el número que se viene a mirar: tener que
+         arrastrar la tabla para leerlo sería exactamente lo que esa regla prohíbe. */
+      #sec-galpon-acumulado .gac-tbl{table-layout:fixed;width:100%;max-width:98vw}
+      #sec-galpon-acumulado .gac-tbl th,#sec-galpon-acumulado .gac-tbl td{
+        white-space:nowrap;overflow:hidden;text-overflow:ellipsis;vertical-align:middle}
+      #sec-galpon-acumulado .ab-table-wrap{overflow-x:hidden !important}
+      @media(max-width:900px){ #sec-galpon-acumulado .ab-table-wrap{overflow-x:auto !important} }
+      #sec-galpon-acumulado .gac-n{font-variant-numeric:tabular-nums;text-align:right}
+      #sec-galpon-acumulado .gac-ac{font-variant-numeric:tabular-nums;text-align:right;
+        font-weight:700}
+
+      #sec-galpon-acumulado .gac-tot{display:flex;gap:12px;flex-wrap:wrap;margin-bottom:16px}
+      #sec-galpon-acumulado .gac-t{border:1px solid var(--bor);border-radius:12px;
+        padding:12px 18px;min-width:130px}
+      #sec-galpon-acumulado .gac-t.big{background:var(--burl);border-color:var(--burg)}
+      #sec-galpon-acumulado .gac-t .k{font-size:11px;color:var(--mut);text-transform:uppercase;
+        letter-spacing:.4px}
+      #sec-galpon-acumulado .gac-t .v{font-size:24px;font-weight:700;line-height:1.2;
+        font-variant-numeric:tabular-nums}
+      #sec-galpon-acumulado .gac-t.big .v{font-size:32px}
+      #sec-galpon-acumulado .gac-t .u{font-size:12px;font-weight:600;color:var(--mut);
+        margin-left:3px}
+      #sec-galpon-acumulado .gac-t.rev{border-color:#d62828;background:rgba(214,40,40,.07)}
+
+      /* LOS TRES CORTES. Por cuadrilla es con lo que se discute un jornal, por lote es
+         el rendimiento de la finca, y por producto es como se habla afuera. En un día
+         el tercero no dice nada —casi siempre es uno solo—; en una temporada es el que
+         contesta primero. */
+      #sec-galpon-acumulado .gac-cortes{display:flex;gap:16px;flex-wrap:wrap;margin-bottom:18px}
+      #sec-galpon-acumulado .gac-corte{flex:1 1 280px;min-width:0;border:1px solid var(--bor);
+        border-radius:12px;padding:12px 14px}
+      #sec-galpon-acumulado .gac-corte h4{margin:0 0 10px;font-size:11px;color:var(--mut);
+        text-transform:uppercase;letter-spacing:.4px}
+      #sec-galpon-acumulado .gac-corte .l{padding:6px 0;font-size:13px;
+        border-top:1px dashed var(--bor)}
+      #sec-galpon-acumulado .gac-corte .l:first-of-type{border-top:0}
+      #sec-galpon-acumulado .gac-corte .lt{display:flex;justify-content:space-between;gap:10px}
+      #sec-galpon-acumulado .gac-corte .lt span{overflow:hidden;text-overflow:ellipsis;
+        white-space:nowrap}
+      #sec-galpon-acumulado .gac-corte .lt b{font-variant-numeric:tabular-nums;white-space:nowrap}
+      #sec-galpon-acumulado .gac-corte .sub{font-size:10.5px;color:var(--mut);margin-top:1px}
+      /* La barrita. Comparar dos números de cinco cifras en una columna cuesta; el largo
+         de la barra se compara de un vistazo y es el mismo dato. */
+      #sec-galpon-acumulado .gac-bar{height:4px;border-radius:3px;background:var(--bor);
+        margin-top:4px;overflow:hidden}
+      #sec-galpon-acumulado .gac-bar i{display:block;height:100%;background:var(--burg)}
+
+      #sec-galpon-acumulado .gac-rango{display:flex;gap:8px;align-items:center;
+        flex-wrap:wrap;margin-bottom:14px}
+      #sec-galpon-acumulado .gac-rango input{padding:6px 9px;border:1px solid var(--bor);
+        border-radius:7px;font-size:13px;background:var(--sur);color:var(--txt)}
+      #sec-galpon-acumulado .gac-rango label{font-size:12px;color:var(--mut)}
+      #sec-galpon-acumulado .gac-vacio{text-align:center;padding:34px;color:var(--mut);font-size:13px}
+      #sec-galpon-acumulado .gac-aviso{border:1px solid var(--bor);border-radius:8px;
+        padding:8px 11px;font-size:12.5px;color:var(--mut);margin-bottom:12px}
+      #sec-galpon-acumulado .gac-hoy{font-weight:700}
+    </style>
+
+    <div class="ph">
+      <div><div class="ph-t">📈 Galpón · Acumulado</div>
+        <div class="ph-s">Cuántos kilos llevamos, y de dónde salieron. Los mismos renglones
+          de la Carga de kilos, sumados por el período que elijas: por lote, por cuadrilla
+          y por producto.</div></div>
+      <div style="display:flex;gap:8px">
+        <button class="btn bo bs" onclick="sgManualAbrir('galpon-acumulado')">❓ ¿Cómo se usa?</button></div>
+    </div>
+
+    <div class="gac-rango">
+      <label>Desde</label><input type="date" id="gac-desde" onchange="galAcCargar()">
+      <label>Hasta</label><input type="date" id="gac-hasta" onchange="galAcCargar()">
+      <button class="btn bo bs" onclick="galAcRango('todo')">Todo</button>
+      <button class="btn bo bs" onclick="galAcRango('mes')">Este mes</button>
+      <button class="btn bo bs" onclick="galAcRango('semana')">Últimos 7 días</button>
+    </div>
+
+    <div id="gac-aviso"></div>
+    <div id="gac-tot" class="gac-tot"></div>
+    <div id="gac-cortes" class="gac-cortes"></div>
+
+    <div class="ab-table-wrap">
+      <table class="pa-tbl gac-tbl">
+        <colgroup><col style="width:28%"><col style="width:19%"><col style="width:13%">
+                  <col style="width:13%"><col style="width:27%"></colgroup>
+        <thead><tr>
+          <th>Día</th><th style="text-align:right">Kilos</th>
+          <th style="text-align:right">IFCOs</th><th style="text-align:right">Cargas</th>
+          <th style="text-align:right">Acumulado</th>
+        </tr></thead>
+        <tbody id="gac-body"></tbody>
+      </table>
     </div>
   </div>
 
@@ -27003,6 +27114,11 @@ SG_MANUAL['galpon-carga'] = { titulo: 'Galpón · Carga de kilos', html:
   + '<p>El recuadro rojo <b>Para revisar</b> aparece sólo si hay algo que revisar. Un «0» todos '
   + 'los días enseña a no mirar ese lugar justo para el día que diga 1.</p>'
 
+  + '<h3>📈 Esta pantalla es de UN día <span class="ver">V1109</span></h3>'
+  + '<p>Todo lo de acá arriba —los totales y los dos cortes— es del día que está elegido. '
+  + 'El total de la temporada, el acumulado día por día y el corte por producto están en '
+  + '<b>📈 Galpón · Acumulado</b>, que suma estos mismos renglones.</p>'
+
   + '<h3>🔗 Con qué se vincula <span class="ver">V1108</span></h3>'
   + '<ul>'
   + '<li><b>Lote del día</b> propone el lote. Pero esta pantalla <b>no depende</b> de esa: se '
@@ -27018,6 +27134,77 @@ SG_MANUAL['galpon-carga'] = { titulo: 'Galpón · Carga de kilos', html:
   + 'tipeando los renglones que cuenta otro.</p>'
   + '<p>Quien tenga <i>sólo</i> esta pantalla <b>ve</b> los lotes y las cuadrillas para elegir, '
   + 'y <b>no puede</b> declarar el lote del día ni tocar los rangos de tarjetas.</p>'
+};
+
+SG_MANUAL['galpon-acumulado'] = { titulo: 'Galpón · Acumulado', html:
+  '<p>La pantalla de <b>Carga de kilos</b> contesta <i>cuánto entró hoy</i>. Ésta contesta '
+  + '<b>cuánto llevamos</b>, que es la pregunta con la que se cierra una temporada: con cuántos '
+  + 'kilos terminó cada lote, cuánto trajo cada cuadrilla, y si el ritmo sube o baja.</p>'
+
+  + '<div class="ojo"><b>No hay nada que cerrar ni que correr.</b> Esta pantalla <b>suma los '
+  + 'mismos renglones</b> que se cargan al lado, en vivo. Si mañana alguien corrige una carga de '
+  + 'la semana pasada, el acumulado cambia solo. Un total guardado aparte sería un número que se '
+  + 'desincroniza en silencio justo cuando alguien arregla un error.</div>'
+
+  + '<h3>📅 El período <span class="ver">V1109</span></h3>'
+  + '<p>Se entra <b>sin período puesto</b>, y entonces muestra <b>todo lo que hay cargado</b>, de '
+  + 'la primera carga a la última. Es a propósito: arrancar en el 1 de enero, o en el mes '
+  + 'corriente, contestaría otra cosa más chica sin avisar que la recortó.</p>'
+  + '<ul>'
+  + '<li><b>Todo</b> vuelve a eso: de la primera carga a la última.</li>'
+  + '<li><b>Este mes</b> va del día 1 a hoy. <b>Últimos 7 días</b>, de hace seis días a hoy.</li>'
+  + '<li>Los dos casilleros se pueden poner a mano. Las dos fechas <b>entran</b> en la cuenta.</li>'
+  + '</ul>'
+  + '<p>Si las fechas quedan <b>al revés</b> —el desde después del hasta— se dan vuelta solas y '
+  + 'aparece un aviso. Entre el 30 y el 1 no hay ningún día: la pantalla habría contestado '
+  + '<b>0 kg</b> con total aplomo, como si no se hubiera cosechado nada.</p>'
+
+  + '<h3>🔢 Los números de arriba <span class="ver">V1109</span></h3>'
+  + '<ul>'
+  + '<li><b>Kilos acumulados.</b> El total del período.</li>'
+  + '<li><b>Días trabajados.</b> Días <i>con al menos una carga</i>, no días del almanaque.</li>'
+  + '<li><b>Promedio por día.</b> Kilos dividido esos días trabajados. Dividir por los días del '
+  + 'almanaque metería los domingos y los días de lluvia en el divisor: el promedio bajaría sin '
+  + 'que hubiera pasado nada y dejaría de servir para comparar dos semanas.</li>'
+  + '<li><b>Mejor día.</b> El día de más kilos del período, con su fecha.</li>'
+  + '<li><b>Para revisar</b> aparece <i>sólo</i> si hay cargas marcadas. Se resuelven desde '
+  + '<b>Carga de kilos</b>, parado en ese día.</li>'
+  + '</ul>'
+
+  + '<h3>📊 Los tres cortes <span class="ver">V1109</span></h3>'
+  + '<p>Ordenados por kilos, con el porcentaje sobre el total del período y en cuántos días '
+  + 'trabajó cada uno.</p>'
+  + '<ul>'
+  + '<li><b>Por cuadrilla.</b> Es con lo que se discute un jornal. El renglón <i>— sin cuadrilla '
+  + '—</i> junta lo que se cargó sin elegirla: esos kilos <b>no entran</b> en el kg por jornal de '
+  + 'nadie.</li>'
+  + '<li><b>Por lote.</b> El rendimiento de lo plantado, y abajo qué producto salió. Si de un '
+  + 'lote salió más de uno, <b>los lista a los dos</b>.</li>'
+  + '<li><b>Por producto.</b> Es el corte que sólo tiene sentido acá: un día es casi siempre de un '
+  + 'solo producto, una temporada son varios — y es como se habla afuera.</li>'
+  + '</ul>'
+
+  + '<h3>📈 La tabla de abajo <span class="ver">V1109</span></h3>'
+  + '<p>Un renglón por día, el más reciente arriba, y en la última columna el <b>acumulado</b>: '
+  + 'cuánto se llevaba hasta ese día <i>desde el comienzo del período</i>. El acumulado del '
+  + 'renglón de arriba de todo es el total grande.</p>'
+  + '<p>Los días en que no se cargó nada <b>no aparecen</b>. Una lista con veinte ceros entre '
+  + 'cosecha y cosecha esconde los días que importan.</p>'
+
+  + '<h3>🔗 Con qué se vincula <span class="ver">V1109</span></h3>'
+  + '<ul>'
+  + '<li><b>Galpón · Carga de kilos</b> es de donde sale todo. Acá no se carga ni se corrige '
+  + 'nada.</li>'
+  + '<li><b>Personal → Asistencia</b> tiene los jornales; el kg por jornal cruza esos días con '
+  + 'el corte por cuadrilla de acá.</li>'
+  + '<li><b>Producción → Lotes</b> tiene los lotes y su cultivo.</li>'
+  + '</ul>'
+
+  + '<h3>👤 Quién puede <span class="ver">V1109</span></h3>'
+  + '<p>Es un módulo <b>aparte</b> del de carga, y no una solapa adentro, porque los miran dos '
+  + 'personas distintas: el que pesa mira su día, y el total por cuadrilla de toda la temporada '
+  + 'es con lo que se discute plata. Dar uno no da el otro.</p>'
+  + '<p>Esta pantalla <b>sólo lee</b>: no tiene ningún botón que escriba.</p>'
 };
 
 SG_MANUAL['galpon-lote-dia'] = { titulo: 'Galpón · Lote del día', html:
@@ -39614,6 +39801,7 @@ function loadSec(s) {
     'galpon-config': function(){ galInit(); },
     'galpon-lote-dia': function(){ galLdInit(); },
     'galpon-carga': function(){ galKgInit(); },
+    'galpon-acumulado': function(){ galAcInit(); },
     'pl-abasto': function(){ plaInit(); },
     'sg-catalogo':   function(){ sgLoadCaches(function(){ sgCatSub('productos'); }); },
     'sg-reportes':   function(){ sgRepInit(); },
@@ -55699,10 +55887,11 @@ function galKgPintar(){
             + galKgEsc(c.revision_motivo || 'Para revisar') + '</div>' : '')
         + (c.observacion ? '<div class="gkg-chi">' + galKgEsc(c.observacion) + '</div>' : '')
         + '</td>'
-      + '<td class="gkg-w">' + (c.producto ? galKgEsc(c.producto)
-          : '<span class="gkg-chi">—</span>') + '</td>'
-      + '<td class="gkg-w">' + (c.cuadrilla ? galKgEsc(c.cuadrilla)
-          : '<span class="gkg-chi">sin cuadrilla</span>') + '</td>'
+      + '<td class="gkg-w" title="' + galKgEsc(c.producto || '') + '">'
+        + (c.producto ? galKgEsc(c.producto) : '<span class="gkg-chi">—</span>') + '</td>'
+      + '<td class="gkg-w" title="' + galKgEsc(c.cuadrilla || '') + '">'
+        + (c.cuadrilla ? galKgEsc(c.cuadrilla)
+            : '<span class="gkg-chi">sin cuadrilla</span>') + '</td>'
       + '<td class="gkg-n">' + galKgNum(c.kilos) + '</td>'
       + '<td class="gkg-n">' + (c.ifcos == null ? '<span class="gkg-chi">—</span>'
           : galKgNum(c.ifcos, 0)) + '</td>'
@@ -55877,6 +56066,167 @@ async function galLdBorrar(id){
     if (!j.ok) return alert(j.error || 'no se pudo borrar');
     await galLdCargar();
   } catch (e) { alert('No se pudo borrar: ' + e.message); }
+}
+
+
+/* ═══════════════════════════════════════════════════════════════════════════════════
+   📈 GALPÓN · ACUMULADO
+   ═══════════════════════════════════════════════════════════════════════════════════
+   Andy, 31/10/2026: «mostrame algún lugar donde vamos acumulando el total, no sólo por
+   día». Los mismos renglones que carga la pantalla de al lado, sumados por período.
+
+   No hay una segunda tabla ni un cierre que haya que correr: esto SUMA gal_volcados.
+   Un acumulado que se guarda aparte es un número que se desincroniza en silencio la
+   primera vez que alguien corrige una carga de la semana pasada. */
+var GAC = { datos:null, rango:null, hoy:null };
+
+function galAcEsc(s){ return String(s == null ? '' : s)
+  .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+
+function galAcNum(n, dec){ return (Number(n) || 0)
+  .toLocaleString('es-AR', { minimumFractionDigits:0, maximumFractionDigits: dec == null ? 2 : dec }); }
+
+function galAcIso(d){ return d.toLocaleDateString('en-CA'); }
+
+/* La fecha se parte a mano en lugar de hacer new Date('2026-10-28'). Una fecha sola, sin
+   hora, la toma el navegador como UTC de medianoche, y parado en Argentina (-3) eso se
+   muestra como el DÍA ANTERIOR. Es un corrimiento de un día en toda la columna, y se ve
+   normal: los kilos del lunes figuran como del domingo. */
+var GAC_DIAS = ['dom','lun','mar','mié','jue','vie','sáb'];
+function galAcFechaCorta(f){
+  var p = String(f || '').split('-');
+  if (p.length !== 3) return f || '';
+  var d = new Date(Number(p[0]), Number(p[1]) - 1, Number(p[2]));
+  if (isNaN(d.getTime())) return f;
+  return GAC_DIAS[d.getDay()] + ' ' + p[2] + '/' + p[1];
+}
+
+async function galAcInit(){
+  /* Se entra SIN rango puesto, y entonces el servidor contesta todo lo que hay. La
+     pregunta con la que se entra acá es «cuánto llevamos», y un período por defecto
+     —el mes, la semana— le contesta otra cosa más chica sin que se note que la recortó. */
+  await galAcCargar();
+}
+
+async function galAcCargar(){
+  var d = document.getElementById('gac-desde');
+  var h = document.getElementById('gac-hasta');
+  var q = [];
+  if (d && d.value) q.push('desde=' + encodeURIComponent(d.value));
+  if (h && h.value) q.push('hasta=' + encodeURIComponent(h.value));
+  try {
+    var r = await fetch('/api/galpon/acumulado' + (q.length ? '?' + q.join('&') : ''),
+                        { credentials:'include' });
+    var j = await r.json();
+    if (!j.ok) throw new Error(j.error || 'no se pudo leer');
+    GAC.datos = j; GAC.rango = j.rango || null; GAC.hoy = j.hoy;
+    /* Los casilleros se escriben con lo que el servidor RESOLVIÓ, no con lo que se pidió.
+       Si se entró sin rango, acá aparecen la primera y la última carga; y si las fechas
+       iban al revés, aparecen ya dadas vuelta — que es lo que el aviso de abajo explica. */
+    if (d) d.value = j.desde || '';
+    if (h) h.value = j.hasta || '';
+    galAcPintarAviso();
+    galAcPintarTot();
+    galAcPintarCortes();
+    galAcPintar();
+  } catch (e) {
+    var b = document.getElementById('gac-body');
+    if (b) b.innerHTML = '<tr><td colspan="5" class="gac-vacio">' + galAcEsc(e.message) + '</td></tr>';
+  }
+}
+
+function galAcRango(tipo){
+  var d = document.getElementById('gac-desde');
+  var h = document.getElementById('gac-hasta');
+  var hoy = GAC.hoy ? GAC.hoy : galAcIso(new Date());
+  if (tipo === 'todo'){ d.value = ''; h.value = ''; }
+  else if (tipo === 'mes'){ d.value = hoy.slice(0, 8) + '01'; h.value = hoy; }
+  else if (tipo === 'semana'){
+    var p = hoy.split('-');
+    var x = new Date(Number(p[0]), Number(p[1]) - 1, Number(p[2]) - 6);
+    d.value = galAcIso(x); h.value = hoy;
+  }
+  galAcCargar();
+}
+
+function galAcPintarAviso(){
+  var el = document.getElementById('gac-aviso'); if (!el) return;
+  var j = GAC.datos;
+  if (!j || !j.invertido){ el.innerHTML = ''; return; }
+  el.innerHTML = '<div class="gac-aviso">Las fechas estaban al revés y las di vuelta: '
+    + 'entre el ' + galAcEsc(j.hasta) + ' y el ' + galAcEsc(j.desde) + ' no hay ningún día, '
+    + 'y la pantalla habría contestado 0 kg como si no se hubiera cosechado nada.</div>';
+}
+
+function galAcPintarTot(){
+  var el = document.getElementById('gac-tot'); if (!el) return;
+  var j = GAC.datos; if (!j){ el.innerHTML = ''; return; }
+  var t = j.total || { kilos:0, ifcos:0, cargas:0, dias:0, a_revisar:0 };
+  var caja = function(k, v, u, cls){
+    return '<div class="gac-t' + (cls ? ' ' + cls : '') + '">'
+      + '<div class="k">' + k + '</div><div class="v">' + v
+      + (u ? '<span class="u">' + u + '</span>' : '') + '</div></div>';
+  };
+  var h = caja('Kilos acumulados', galAcNum(t.kilos), 'kg', 'big')
+        + caja('Días trabajados', galAcNum(t.dias, 0))
+        + caja('Promedio por día', galAcNum(j.promedio_dia), 'kg')
+        + caja('Cargas', galAcNum(t.cargas, 0));
+  if (t.ifcos) h += caja('IFCOs', galAcNum(t.ifcos, 0));
+  if (j.mejor_dia) h += '<div class="gac-t"><div class="k">Mejor día</div>'
+    + '<div class="v">' + galAcNum(j.mejor_dia.kilos) + '<span class="u">kg</span></div>'
+    + '<div class="k" style="margin-top:2px">'
+    + galAcEsc(galAcFechaCorta(j.mejor_dia.fecha)) + '</div></div>';
+  /* Lo marcado para revisar aparece SÓLO si hay alguno. Un «0 para revisar» todos los
+     días enseña a saltear ese recuadro justo para el día que diga 1. */
+  if (t.a_revisar) h += caja('Para revisar', galAcNum(t.a_revisar, 0), '', 'rev');
+  el.innerHTML = h;
+}
+
+function galAcPintarCortes(){
+  var el = document.getElementById('gac-cortes'); if (!el) return;
+  var j = GAC.datos;
+  if (!j || !j.total || !j.total.cargas){ el.innerHTML = ''; return; }
+  var caja = function(tit, filas, pie){
+    if (!filas.length) return '';
+    return '<div class="gac-corte"><h4>' + tit + '</h4>' + filas.map(function(x){
+      var extra = pie ? pie(x) : '';
+      return '<div class="l">'
+        + '<div class="lt"><span>' + galAcEsc(x.nombre) + '</span>'
+        + '<b>' + galAcNum(x.kilos) + ' kg</b></div>'
+        + '<div class="gac-bar"><i style="width:' + (Number(x.pct) || 0) + '%"></i></div>'
+        + '<div class="sub">' + galAcNum(x.pct, 1) + '% · ' + galAcNum(x.dias, 0)
+        + (x.dias === 1 ? ' día' : ' días')
+        + (extra ? ' · ' + galAcEsc(extra) : '') + '</div>'
+        + '</div>';
+    }).join('') + '</div>';
+  };
+  el.innerHTML = caja('Por cuadrilla', j.por_cuadrilla || [])
+               + caja('Por lote', j.por_lote || [], function(x){ return x.producto || ''; })
+               + caja('Por producto', j.por_producto || []);
+}
+
+function galAcPintar(){
+  var b = document.getElementById('gac-body'); if (!b) return;
+  var j = GAC.datos;
+  var f = (j && j.por_dia) || [];
+  if (!f.length){
+    b.innerHTML = '<tr><td colspan="5" class="gac-vacio">'
+      + ((GAC.rango && GAC.rango.primera)
+          ? 'No hay kilos cargados en este período.<br>Probá con el botón Todo.'
+          : 'Todavía no se cargó ningún kilo.<br>Se cargan desde Galpón · Carga de kilos.')
+      + '</td></tr>';
+    return;
+  }
+  b.innerHTML = f.map(function(x){
+    var eshoy = x.fecha === GAC.hoy;
+    return '<tr' + (eshoy ? ' class="gac-hoy"' : '') + '>'
+      + '<td>' + galAcEsc(galAcFechaCorta(x.fecha)) + (eshoy ? ' · hoy' : '') + '</td>'
+      + '<td class="gac-n">' + galAcNum(x.kilos) + '</td>'
+      + '<td class="gac-n">' + galAcNum(x.ifcos, 0) + '</td>'
+      + '<td class="gac-n">' + galAcNum(x.cargas, 0) + '</td>'
+      + '<td class="gac-ac">' + galAcNum(x.acumulado) + '</td>'
+      + '</tr>';
+  }).join('');
 }
 
 </script>

@@ -84,6 +84,11 @@ const PREFIJOS = [
   // abajo: necesita la lista de lotes y de cuadrillas para los desplegables, y no por
   // eso puede declarar el lote del día ni tocar los rangos de tarjetas.
   ['galpon-carga', 'galpon/volcados'],
+  // EL ACUMULADO (V1109). Hoy sólo LEE, y aun así se declara acá y no en la lista de
+  // lecturas: una dirección que no figura en ningún mapa es una dirección que
+  // exigirNivel deja pasar entera el día que alguien le cuelgue un POST —un cierre de
+  // temporada, una corrección masiva— sin acordarse de volver a este archivo.
+  ['galpon-acumulado', 'galpon/acumulado'],
   // P&L ABASTO (V1052). Router propio de un solo módulo: subir el libro diario y guardar
   // los rubros pide 'operar'.
   ['pl-abasto', 'pl-abasto'],

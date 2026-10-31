@@ -21,6 +21,7 @@ import {
   loteVigente, tramosDelDia, tramoChoca, lotesParaElDia, volcadosEnTramo,
   hhmm, esFecha,
   registrarVolcado, editarVolcado, borrarVolcado, volcadosDelDia, resumenDelDia,
+  acumulado, rangoCargado,
 } from '../servicios/galpon.js';
 import { generarTarjetasPDF, tarjetasAImprimir } from '../servicios/galponTarjetasPDF.js';
 
@@ -557,6 +558,29 @@ router.delete('/volcados/:id', (req, res) => {
     res.json({ ok: true });
   } catch (e) {
     console.error('[GALPON] DELETE /volcados/:id:', e.message);
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+// ── CUÁNTO LLEVAMOS ─────────────────────────────────────────────────────────────────
+// La pantalla de carga contesta cuánto entró HOY. Ésta contesta cuánto llevamos, que es
+// la pregunta con la que se cierra una temporada.
+//
+// Sin fechas devuelve TODO lo cargado, de la primera carga a la última. Es la respuesta
+// correcta a "cuánto llevamos" y evita que la pantalla abra en blanco esperando que
+// alguien elija un desde — un rango por defecto que arranca el 1 de enero esconde lo que
+// pasó antes y el total sale corto sin que se note.
+router.get('/acumulado', (req, res) => {
+  try {
+    const r = rangoCargado(db);
+    res.json({
+      ok: true,
+      hoy: hoy(),
+      rango: r,
+      ...acumulado(db, req.query.desde, req.query.hasta),
+    });
+  } catch (e) {
+    console.error('[GALPON] GET /acumulado:', e.message);
     res.status(500).json({ ok: false, error: e.message });
   }
 });
