@@ -600,7 +600,10 @@ test('MANUAL KG: «borrar es borrado blando»', () => {
 test('MANUAL KG: «los dos cortes son por cuadrilla y por lote»', () => {
   diceKg(/como se paga el jornal/);
   diceKg(/como se mide el rendimiento/);
-  const res = SERV.slice(SERV.indexOf('export function resumenDelDia('));
+  // Acotado al cuerpo de la función y no «hasta el final del archivo»: debajo vive
+  // ahora el acumulado (V1109), que tiene sus propios GROUP BY y los contaba de más.
+  const iRes = SERV.indexOf('export function resumenDelDia(');
+  const res = SERV.slice(iRes, SERV.indexOf('\r\n}', iRes));
   assert.match(res, /GROUP BY cuadrilla_id/);
   assert.match(res, /GROUP BY lote_id/);
   // ORDENADOS POR EL TOTAL DEL GRUPO. Con el alias, SQLite ata el ORDER BY a la
@@ -685,4 +688,193 @@ test('la pantalla de kilos tampoco se arrastra de costado', () => {
   assert.match(PANEL, /#sec-galpon-carga \.ab-table-wrap\{overflow-x:hidden !important\}/);
   assert.match(PANEL, /#sec-galpon-carga \.gkg-tbl\{table-layout:fixed/);
   assert.match(PANEL, /@media\(max-width:900px\)\{ #sec-galpon-carga \.ab-table-wrap\{overflow-x:auto !important\}/);
+});
+
+// ══════════════════════════════════════════════════════════════════════════
+// 6 · EL ACUMULADO, CONTRA EL CÓDIGO (V1109)
+// ══════════════════════════════════════════════════════════════════════════
+// Andy, 31/10/2026: «mostrame algún lugar donde vamos acumulando el total, no
+// sólo por día». Las sumas tienen su propio archivo
+// (test/galpon_acumulado.test.mjs); acá se clava lo que el MANUAL promete.
+const MANUAL_AC = manualDe('galpon-acumulado');
+const diceAc = lector(MANUAL_AC);
+const JS_AC = PANEL.slice(PANEL.indexOf('var GAC = {'),
+                          PANEL.indexOf('\r\n</script>', PANEL.indexOf('var GAC = {')));
+const ACUM = SERV.slice(SERV.indexOf('export function acumulado('));
+
+test('MANUAL AC: «no hay nada que cerrar: suma los mismos renglones»', () => {
+  diceAc(/suma los mismos renglones/i);
+  diceAc(/el acumulado cambia solo/);
+  // Y es cierto porque no existe ninguna tabla de totales: el servicio lee
+  // gal_volcados y nada más. Una tabla de acumulados es un número que se
+  // desincroniza en silencio cuando alguien corrige una carga vieja.
+  assert.match(ACUM, /FROM gal_volcados/);
+  assert.ok(!/gal_acumulado|gal_totales|gal_cierre/.test(SERV),
+    'apareció una tabla de totales guardados: el manual promete que no hay');
+  assert.ok(!/INSERT|UPDATE|DELETE/.test(ACUM),
+    'el acumulado escribe algo, y el manual dice que sólo lee');
+});
+
+test('MANUAL AC: «se entra sin período y muestra TODO»', () => {
+  diceAc(/sin período puesto/);
+  diceAc(/todo lo que hay cargado/);
+  // El servicio cae al rango completo cuando no le dan fechas...
+  assert.match(ACUM, /if \(!d\) d = r\.primera/);
+  assert.match(ACUM, /if \(!h\) h = r\.ultima/);
+  // ...y la pantalla entra sin mandar ninguna, en vez de proponer un mes.
+  assert.match(JS_AC, /if \(d && d\.value\) q\.push\('desde='/);
+  assert.match(JS_AC, /async function galAcInit\(\)\{\r?\n(?:[^}]*\r?\n)*?\s*await galAcCargar\(\);/,
+    'el abridor pone un período por defecto en vez de pedir todo');
+});
+
+test('MANUAL AC: «las dos fechas entran en la cuenta»', () => {
+  diceAc(/Las dos fechas <b>entran<\/b> en la cuenta/);
+  assert.match(ACUM, /fecha >= \? AND fecha <= \?/,
+    'el rango dejó de ser inclusivo en alguna de las dos puntas');
+});
+
+test('MANUAL AC: «si las fechas van al revés se dan vuelta y se avisa»', () => {
+  diceAc(/se dan vuelta solas y/);
+  diceAc(/0 kg<\/b> con total aplomo/);
+  assert.match(ACUM, /if \(d > h\) \{[^}]*invertido = true/);
+  // Y la pantalla muestra el aviso: darlas vuelta sin decirlo deja al que mira
+  // creyendo que pidió otra cosa.
+  assert.match(JS_AC, /if \(!j \|\| !j\.invertido\)\{ el\.innerHTML = ''; return; \}/);
+  assert.match(JS_AC, /Las fechas estaban al revés/);
+});
+
+test('MANUAL AC: «días trabajados son días, no renglones»', () => {
+  diceAc(/Días <i>con al menos una carga<\/i>, no días del almanaque/);
+  assert.match(ACUM, /COUNT\(DISTINCT fecha\) AS dias/,
+    'los días trabajados cuentan filas: el promedio sale dividido por las pesadas');
+});
+
+test('MANUAL AC: «el promedio se divide por los días trabajados»', () => {
+  diceAc(/metería los domingos y los días de lluvia en el divisor/);
+  assert.match(ACUM, /promedio_dia: dias > 0 \? round2\(kilos \/ dias\) : 0/,
+    'el promedio divide por otra cosa, o divide por cero');
+});
+
+test('MANUAL AC: «el acumulado del renglón de arriba es el total»', () => {
+  diceAc(/El acumulado del renglón de arriba de todo es el total grande/);
+  // Se suma en orden ascendente y recién después se da vuelta la lista. Al
+  // revés, el primer renglón diría los kilos del último día.
+  assert.match(ACUM, /ORDER BY fecha ASC/);
+  const iSuma = ACUM.indexOf('f.acumulado = corrido;');
+  const iVuelta = ACUM.indexOf('.slice().reverse()');
+  assert.ok(iSuma > 0 && iVuelta > iSuma,
+    'la lista se da vuelta ANTES de sumar: el acumulado queda al revés');
+});
+
+test('MANUAL AC: «los días sin cargas no aparecen»', () => {
+  diceAc(/no aparecen/);
+  // No hay relleno de días vacíos: la lista sale del GROUP BY y nada más.
+  assert.match(ACUM, /GROUP BY fecha/);
+  assert.ok(!/while \(|for \(let x = new Date/.test(ACUM),
+    'se están rellenando los días del almanaque');
+});
+
+test('MANUAL AC: «los tres cortes van ordenados por kilos, con su porcentaje»', () => {
+  diceAc(/Por cuadrilla/);
+  diceAc(/Por producto/);
+  diceAc(/es como se habla afuera/);
+  for (const g of ['cuadrilla_id', 'lote_id', 'producto']) {
+    assert.ok(ACUM.includes("corte('" + g + "'"), 'falta el corte por ' + g);
+  }
+  // Por el SUM() y no por el alias: en SQLite `ORDER BY kilos` adentro de un
+  // GROUP BY se ata a la COLUMNA y la lista sale ordenada, sólo que mal.
+  assert.match(ACUM, /ORDER BY SUM\(kilos\) DESC/);
+  assert.ok(!/ORDER BY kilos DESC/.test(ACUM), 'ordena por el alias');
+  // Y el porcentaje se calcula en UN lugar, no en la pantalla también.
+  assert.match(ACUM, /pct: kilos > 0 \?/);
+  assert.ok(!/\/ *total[.\w]* *\* *100/.test(JS_AC),
+    'la pantalla recalcula el porcentaje: dos lugares que lo redondean distinto');
+});
+
+test('MANUAL AC: «un lote del que salió más de un producto los lista a los dos»', () => {
+  diceAc(/<b>los lista a los dos<\/b>/);
+  assert.match(ACUM, /GROUP_CONCAT\(DISTINCT producto\)/,
+    'el producto del lote sale de una fila cualquiera del grupo');
+});
+
+test('MANUAL AC: «lo cargado sin cuadrilla se junta aparte»', () => {
+  diceAc(/no entran<\/b> en el kg por jornal/);
+  assert.match(ACUM, /sin cuadrilla/);
+  assert.match(ACUM, /sin producto/);
+});
+
+test('MANUAL AC: «para revisar aparece sólo si hay»', () => {
+  diceAc(/sólo<\/i> si hay cargas marcadas/);
+  assert.match(JS_AC, /if \(t\.a_revisar\) h \+= caja\('Para revisar'/);
+});
+
+test('MANUAL AC: «esta pantalla sólo lee»', () => {
+  diceAc(/no tiene ningún botón que escriba/);
+  // Ni un fetch con método, ni un onclick que guarde.
+  assert.ok(!/method:\s*'(POST|PUT|PATCH|DELETE)'/.test(JS_AC),
+    'la pantalla del acumulado escribe');
+  const sec = PANEL.slice(PANEL.indexOf('id="sec-galpon-acumulado"'),
+                          PANEL.indexOf('id="sec-sg-importacion"'));
+  assert.ok(!/galAcGuardar|galAcBorrar/.test(sec));
+});
+
+test('EL ACUMULADO ES UN MÓDULO APARTE, y el manual dice por qué', () => {
+  // Una fila de usuario_modulos = un ítem de menú = un permiso. Con una solapa
+  // adentro de la carga, dar una cosa daría la otra: el que pesa vería el total
+  // por cuadrilla de toda la temporada, que es con lo que se discute plata.
+  diceAc(/los miran dos personas distintas/);
+  assert.match(ENSURE, /\['galpon-acumulado'/);
+  assert.match(PREFIJOS, /\['galpon-acumulado', 'galpon\/acumulado'\]/);
+});
+
+test('EL MANUAL DE LA CARGA MANDA ACÁ PARA EL TOTAL', () => {
+  // Si no lo dijera, el operador sumaría los días a mano — que es exactamente
+  // lo que había antes de esta pantalla.
+  const kg = manualDe('galpon-carga');
+  assert.match(kg, /Galpón · Acumulado/,
+    'el manual de la carga no menciona dónde está el total de la temporada');
+  assert.match(kg, /V1109/, 'el puntero no lleva su número de versión');
+});
+
+test('la fecha de la tabla NO se arma con new Date(«2026-10-28»)', () => {
+  // Una fecha sola la toma el navegador como UTC de medianoche, y parado en
+  // Argentina (-3) eso se muestra como el día anterior: toda la columna
+  // corrida un día, con los kilos del lunes figurando el domingo.
+  assert.match(JS_AC, /new Date\(Number\(p\[0\]\), Number\(p\[1\]\) - 1, Number\(p\[2\]\)\)/);
+  assert.ok(!/new Date\(\s*(f|x\.fecha|j\.\w+\.fecha)\s*\)/.test(JS_AC),
+    'se está parseando la fecha con new Date(cadena): corre un día');
+});
+
+test('la pantalla del acumulado tampoco se arrastra de costado', () => {
+  assert.match(PANEL, /#sec-galpon-acumulado \.ab-table-wrap\{overflow-x:hidden !important\}/);
+  assert.match(PANEL, /#sec-galpon-acumulado \.gac-tbl\{table-layout:fixed/);
+});
+
+test('Y LA TABLA DEL DÍA NO PARTE LAS PALABRAS A LA MITAD', () => {
+  // Andy mandó la pantalla con «PRO DUC TO» apilado en tres renglones y
+  // «Damasco» en «Da mas co»: es `word-break:break-word`, que corta adentro de
+  // la palabra. Entre palabras sí; adentro de una, sólo como último recurso.
+  assert.ok(!/#sec-galpon-carga \.gkg-tbl th\.gkg-w\{/.test(PANEL),
+    'los encabezados siguen partiéndose adentro de la palabra');
+  assert.match(PANEL, /#sec-galpon-carga \.gkg-tbl td\.gkg-w\{\r?\n\s*white-space:normal;word-break:normal;overflow-wrap:break-word\}/);
+});
+
+test('CADA PREFIJO DECLARADO LO USA ALGUNA RUTA DE VERDAD', () => {
+  // Al revés que el test de arriba, que mira que ninguna ruta quede sin prefijo.
+  // Un prefijo declarado que NINGUNA ruta usa es la señal de que la dirección se
+  // movió: sigue contestando, pero ahora cae bajo el prefijo de otro módulo y la
+  // cuida el permiso del menú equivocado. Eso no da ningún error y no se ve: la
+  // pantalla abre igual, para el que no debería poder abrirla.
+  const rutas = [...RUTA.matchAll(/router\.(?:get|post|put|patch|delete)\('\/([^'/?]+)/g)]
+    .map((m) => m[1]);
+  assert.ok(rutas.length > 5, 'el regex de las rutas se rompió: ' + rutas.length);
+  for (const { modulo } of MODULOS) {
+    const m = new RegExp("\\['" + modulo + "',\\s*'([^']+)'\\]").exec(PREFIJOS);
+    for (const d of m[1].split(',')) {
+      const pref = d.trim().replace(/^galpon\//, '').split('.')[0];
+      assert.ok(rutas.some((r) => r === pref || r.startsWith(pref + '/') || r.startsWith(pref + '.')),
+        'el prefijo ' + d.trim() + ' (' + modulo + ') no lo usa ninguna ruta del router: '
+        + '¿la dirección se movió abajo del prefijo de otro módulo?');
+    }
+  }
 });

@@ -42,6 +42,11 @@ try {
     // kilos. Y es un módulo aparte y no una solapa del anterior para que el que sólo
     // carga kilos no pueda cambiar el lote declarado.
     ['galpon-carga',    '⚖️ Galpón · Carga de kilos', 702],
+    // EL ACUMULADO (V1109). La carga contesta cuánto entró hoy; ésta, cuánto llevamos.
+    // Va aparte y no como solapa de la carga porque las miran dos personas distintas:
+    // el que pesa mira su día, y el total por cuadrilla de toda la temporada es con lo
+    // que se discute un jornal.
+    ['galpon-acumulado','📈 Galpón · Acumulado',      703],
   ];
 
   const ins = db.prepare(

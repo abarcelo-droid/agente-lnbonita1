@@ -362,3 +362,86 @@ t('con kilos cargados a mano, el tramo del día SIGUE corrigiéndose', async () 
     assert.equal(d.tramos[0].lote_nombre, 'Cuadro 4');
   } finally { s.cerrar(); }
 });
+
+// ══════════════════════════════════════════════════════════════════════════
+// 9 · EL ACUMULADO (V1109)
+// ══════════════════════════════════════════════════════════════════════════
+// Andy, 31/10/2026: «mostrame algún lugar donde vamos acumulando el total, no
+// sólo por día». Las sumas se prueban en test/galpon_acumulado.test.mjs; acá
+// se prueba lo que sólo se ve con el router levantado.
+t('el acumulado se lee con sesión, sin ser admin y sin salir de Puente Cordón', async () => {
+  const sinSesion = await servidor(base(), null);
+  try { assert.equal((await sinSesion.pegar('/acumulado')).status, 401); }
+  finally { sinSesion.cerrar(); }
+
+  const s = await servidor(base(), OPERADOR);
+  try {
+    assert.equal((await s.pegar('/acumulado')).status, 200);
+    assert.equal((await s.pegar('/acumulado?sociedad_id=7')).status, 200);
+    const r = await s.pegar('/acumulado?sociedad_id=9');
+    assert.equal(r.status, 403, 'se leyó el galpón parado en San Gerónimo');
+    assert.match((await r.json()).error, /Puente Cord/);
+  } finally { s.cerrar(); }
+});
+
+t('EL ACUMULADO SUMA LO QUE SE CARGÓ, sin ningún cierre de por medio', async () => {
+  // No hay tabla de totales ni proceso que correr: la misma carga que entra por
+  // POST aparece en el acumulado en el pedido siguiente. Un total guardado
+  // aparte se desincroniza justo cuando alguien corrige un error.
+  const s = await servidor(base(), OPERADOR);
+  try {
+    await s.pegar('/volcados', json({ fecha: '2026-11-20', lote_id: 10, kilos: 100,
+                                      cuadrilla_id: 1 }));
+    await s.pegar('/volcados', json({ fecha: '2026-11-21', lote_id: 10, kilos: 250,
+                                      cuadrilla_id: 1 }));
+
+    const a = await (await s.pegar('/acumulado')).json();
+    assert.equal(a.ok, true);
+    assert.equal(a.total.kilos, 350);
+    assert.equal(a.total.dias, 2);
+    assert.equal(a.por_dia[0].acumulado, 350);
+    assert.equal(a.desde, '2026-11-20');
+    assert.equal(a.hasta, '2026-11-21');
+
+    // Y una corrección se ve enseguida en el total.
+    const id = (await (await s.pegar('/volcados?fecha=2026-11-21')).json()).cargas[0].id;
+    await s.pegar('/volcados/' + id, patch({ kilos: 50 }));
+    assert.equal((await (await s.pegar('/acumulado')).json()).total.kilos, 150);
+  } finally { s.cerrar(); }
+});
+
+t('sin fechas devuelve TODO, y el rango viene aparte para el botón Todo', async () => {
+  const s = await servidor(base(), OPERADOR);
+  try {
+    // Con la base vacía la pantalla tiene que poder distinguir «no hay nada
+    // cargado» de «no hay nada EN ESTE PERÍODO»: son dos mensajes distintos.
+    const v = await (await s.pegar('/acumulado')).json();
+    assert.equal(v.rango.primera, null);
+    assert.equal(v.total.kilos, 0);
+
+    await s.pegar('/volcados', json({ fecha: '2026-11-20', lote_id: 10, kilos: 100 }));
+    await s.pegar('/volcados', json({ fecha: '2026-11-25', lote_id: 10, kilos: 100 }));
+
+    const a = await (await s.pegar('/acumulado')).json();
+    assert.equal(a.rango.primera, '2026-11-20');
+    assert.equal(a.rango.ultima, '2026-11-25');
+    assert.equal(a.total.kilos, 200);
+
+    const b = await (await s.pegar('/acumulado?desde=2026-11-21&hasta=2026-11-30')).json();
+    assert.equal(b.total.kilos, 100);
+    assert.equal(b.rango.primera, '2026-11-20', 'el rango cargado se recortó al período');
+  } finally { s.cerrar(); }
+});
+
+t('el acumulado NO ESCRIBE nada: no tiene con qué', async () => {
+  // Es la pantalla que mira la plata de toda la temporada. Que sea de sólo
+  // lectura no es una opinión del manual: no hay ningún verbo de escritura
+  // colgado de esa dirección.
+  const s = await servidor(base(), ADMIN);
+  try {
+    for (const m of ['POST', 'PATCH', 'DELETE', 'PUT']) {
+      const r = await s.pegar('/acumulado', Object.assign(json({}), { method: m }));
+      assert.equal(r.status, 404, m + ' /acumulado contestó ' + r.status);
+    }
+  } finally { s.cerrar(); }
+});
