@@ -688,13 +688,15 @@ export function resumenDelDia(db, fecha) {
     + ' GROUP BY lote_id'
     + ' ORDER BY SUM(kilos) DESC').all(f);
 
+  const fincas = fincasDeLotes(db);
   return {
     kilos: Math.round((t.kilos || 0) * 100) / 100,
     ifcos: t.ifcos || 0,
     cargas: t.cargas || 0,
     a_revisar: t.a_revisar || 0,
     por_cuadrilla: porCuadrilla,
-    por_lote: porLote,
+    por_lote: porLote.map((l) => Object.assign(l, {
+      finca: fincas.get(l.lote_id) || null })),
   };
 }
 
@@ -787,11 +789,13 @@ export function acumulado(db, desde, hasta) {
   }));
 
   const porCuadrilla = conPct(corte('cuadrilla_id', "cuadrilla, '— sin cuadrilla —'"));
+  const fincas = fincasDeLotes(db);
   const porLote = conPct(corte('lote_id', "lote_nombre, 'Lote ' || lote_id",
     // GROUP_CONCAT y no `producto` pelado: una columna suelta adentro de un GROUP BY la
     // elige SQLite de una fila cualquiera del grupo. Un lote del que salieron damasco y
     // ciruela mostraría uno solo de los dos, al azar y sin avisar.
-    'GROUP_CONCAT(DISTINCT producto) AS producto'));
+    'GROUP_CONCAT(DISTINCT producto) AS producto'))
+    .map((l) => Object.assign(l, { finca: fincas.get(l.gid) || null }));
   const porProducto = conPct(corte('producto', "producto, '— sin producto —'"));
 
   // El día a día, con el total CORRIENDO. Se suma en orden ascendente —que es el único
@@ -1158,6 +1162,21 @@ export function stockGalpon(db, opts) {
   return { destinos: por, kilos: round2(por.reduce((t, x) => t + x.kilos, 0)) };
 }
 
+// ── LA FINCA DE CADA LOTE ───────────────────────────────────────────────────────────
+// Andy, 31/10/2026: «poneme mejor el nombre de la FINCA, porque la gente la ubica por
+// el nombre de la finca». Un lote se llama «11-12 y 16-17» y eso no ubica a nadie.
+//
+// Se LEE de pa_lotes, no se denormaliza en gal_volcados. Es al revés que el nombre del
+// lote, que sí se congela: ése forma parte de la atribución y tiene que quedar como
+// estaba. La finca es una referencia para ubicarse, y lo que sirve es la de hoy.
+//
+// JOIN de lectura hacia pa_*, sin FK, que es la regla de CLAUDE.md.
+export function fincasDeLotes(db) {
+  const m = new Map();
+  for (const l of db.prepare('SELECT id, finca FROM pa_lotes').all()) m.set(l.id, l.finca);
+  return m;
+}
+
 // ── LOS LOTES QUE SE VOLCARON ───────────────────────────────────────────────────────
 // Andy, 31/10/2026: «eligiendo del lote volcado ahí se pueden ir cargando procesos
 // parciales».
@@ -1182,9 +1201,11 @@ export function lotesVolcados(db) {
     + '  FROM gal_procesos WHERE eliminado_en IS NULL GROUP BY lote_id').all();
   const porLote = new Map(proc.map((p) => [p.lote_id, p.kilos]));
 
+  const fincas = fincasDeLotes(db);
   return vol.map((v) => {
     const procesado = round2(porLote.get(v.lote_id) || 0);
     return Object.assign({}, v, {
+      finca: fincas.get(v.lote_id) || null,
       volcado: round2(v.volcado),
       procesado,
       sin_procesar: round2(v.volcado - procesado),
@@ -1233,7 +1254,9 @@ export function rindePorLote(db, desde, hasta) {
     m.procesado = round2(m.procesado + p.kilos);
   }
 
+  const fincas = fincasDeLotes(db);
   return [...mapa.values()].map((m) => Object.assign(m, {
+    finca: fincas.get(m.lote_id) || null,
     sin_procesar: round2(m.volcado - m.procesado),
     rinde: m.volcado > 0 ? Math.round((m.comercial / m.volcado) * 1000) / 10 : null,
   })).sort((a, b) => b.volcado - a.volcado || b.procesado - a.procesado);

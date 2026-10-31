@@ -31,6 +31,7 @@ import {
   DESTINOS, presentaciones, guardarPresentacion, borrarPresentacion,
   kilosDeProceso, registrarProceso, editarProceso, borrarProceso,
   procesosDelDia, tableroProceso, stockGalpon, rindePorLote, lotesVolcados,
+  fincasDeLotes,
 } from '../src/servicios/galpon.js';
 
 const F = '2026-11-20';
@@ -528,4 +529,54 @@ test('el lote se congela desde la BASE, no desde lo que mandó la pantalla', () 
   assert.equal(r.fila.lote_nombre, 'Cuadro 3');
   assert.equal(registrarProceso(db, { fecha: F, lote_id: 999,
     presentacion_id: p.caja, bultos: 1, uuid: 'b' }).ok, false);
+});
+
+// ══════════════════════════════════════════════════════════════════════════
+// 11 · LA FINCA (V1113)
+// ══════════════════════════════════════════════════════════════════════════
+test('EL LOTE VIENE CON SU FINCA, que es como lo ubica la gente', () => {
+  // Andy, 31/10/2026: «poneme mejor el nombre de la FINCA, porque la gente la ubica
+  // por el nombre de la finca». Un lote se llama «11-12 y 16-17».
+  const db = base();
+  volcar(db, 1000, 10);
+  volcar(db, 500, 11);
+  const ls = lotesVolcados(db);
+  assert.equal(ls.filter((l) => l.lote_id === 10)[0].finca, 'La Esperanza');
+  assert.equal(ls.filter((l) => l.lote_id === 11)[0].finca, 'La Esperanza');
+  assert.equal(rindePorLote(db, '2026-11-01', '2026-11-30')[0].finca, 'La Esperanza');
+});
+
+test('LA FINCA SE LEE, NO SE CONGELA — al revés que el nombre del lote', () => {
+  // El nombre del LOTE se congela en cada carga porque forma parte de la atribución.
+  // La finca es una referencia para ubicarse: lo que sirve es la de hoy, así que si
+  // alguien renombra la finca tiene que cambiar en todos lados.
+  const db = base();
+  volcar(db, 1000, 10);
+  const p = conCatalogo(db);
+  registrarProceso(db, { fecha: F, lote_id: 10, presentacion_id: p.caja, bultos: 10, uuid: 'a' });
+
+  db.prepare("UPDATE pa_lotes SET finca = 'La Esperanza Norte', nombre = 'OTRO' WHERE id = 10").run();
+  assert.equal(lotesVolcados(db)[0].finca, 'La Esperanza Norte');
+  assert.equal(rindePorLote(db, '2026-11-01', '2026-11-30')[0].finca, 'La Esperanza Norte');
+  // Y el nombre del lote de la carga NO cambió: el proceso lo guardó.
+  assert.equal(procesosDelDia(db, F)[0].lote_nombre, 'Cuadro 3');
+  assert.equal(rindePorLote(db, '2026-11-01', '2026-11-30')[0].nombre, 'Cuadro 3');
+});
+
+test('un lote sin finca no inventa una ni rompe', () => {
+  const db = base();
+  db.prepare("INSERT INTO pa_lotes (id,nombre,finca) VALUES (12,'Suelto',NULL)").run();
+  volcar(db, 100, 12);
+  assert.equal(lotesVolcados(db)[0].finca, null);
+  assert.equal(rindePorLote(db, '2026-11-01', '2026-11-30')[0].finca, null);
+});
+
+test('la finca se busca UNA vez, no una consulta por lote', () => {
+  // Con veinte lotes volcados serían veinte SELECT adentro de un map. El helper
+  // devuelve el mapa entero y lo usan los cuatro lugares que lo necesitan.
+  const db = base();
+  const m = fincasDeLotes(db);
+  assert.ok(m instanceof Map);
+  assert.equal(m.get(10), 'La Esperanza');
+  assert.equal(m.get(999), undefined);
 });
