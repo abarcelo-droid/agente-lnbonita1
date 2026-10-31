@@ -654,7 +654,10 @@ router.delete('/presentaciones/:id', requireAdmin, (req, res) => {
 router.get('/procesos', (req, res) => {
   try {
     const fecha = esFecha(req.query.fecha) || hoy();
-    const loteId = num(req.query.lote_id);
+    /* UNO O VARIOS. Con la mezcla, lo que se está procesando puede ser de dos o tres
+       lotes a la vez, y el tablero tiene que sumarlos: mostrar el pendiente de uno solo
+       mientras se carga contra todos es un número que invita a procesar de más. */
+    const loteId = String(req.query.lote_ids || req.query.lote_id || '').split(',');
     res.json({
       ok: true,
       fecha,

@@ -7643,6 +7643,60 @@ input[type=number]{-moz-appearance:textfield;appearance:textfield}
       </div>
     </div>
   </div>
+
+  <!-- ── ✎ CORREGIR UNA CARGA DE PROCESO ──────────────────────────────────────────
+       Andy, 31/10/2026: «no quedó ningún lugar para editar los procesos, importante
+       resolver eso».
+
+       Y no era sólo una comodidad: el propio tablero dice que un rinde de más de 100%
+       «se arregla corrigiendo el lote de las cargas», y hasta ahora eso no se podía
+       hacer. Un cartel que manda a hacer algo imposible es peor que no tenerlo.
+
+       Fuera de toda .sec y sin cerrarse al clic afuera, como todas. -->
+  <div class="ab-modal-overlay sg-mod" id="gal-proc-modal">
+    <div class="ab-modal" style="width:min(620px,96vw);max-width:96vw">
+      <div class="mhd"><div class="mht">✎ Corregir la carga</div>
+        <button class="mcl" onclick="galProcCerrar()">×</button></div>
+
+      <div id="gal-proc-rep" style="display:none;margin-bottom:12px" class="ojo"></div>
+
+      <div class="sgr-card">
+        <div style="display:flex;gap:10px;flex-wrap:wrap">
+          <div style="flex:0 0 160px"><label>Día de proceso</label>
+            <input type="date" id="gal-proc-fecha"></div>
+          <div style="flex:1 1 220px;min-width:0"><label>Lote</label>
+            <select id="gal-proc-lote"></select></div>
+        </div>
+
+        <div style="margin-top:10px"><label>Presentación</label>
+          <select id="gal-proc-pres" onchange="galProcPresPick()"></select>
+          <div class="gal-ay" style="max-width:none">Cambiarla cambia también el destino
+            —comercial, verde o descarte— y vuelve a calcular los kilos con su cuenta.</div>
+        </div>
+
+        <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:10px;align-items:flex-end">
+          <div style="flex:0 0 150px"><label id="gal-proc-cant-lbl">Bultos</label>
+            <input type="text" id="gal-proc-cant" inputmode="decimal"
+                   oninput="galProcPrevio()"></div>
+          <div id="gal-proc-previo" style="font-size:17px;font-weight:700;
+               font-variant-numeric:tabular-nums;padding-bottom:6px"></div>
+        </div>
+
+        <div style="margin-top:10px"><label>Observación</label>
+          <input type="text" id="gal-proc-obs" style="width:100%"></div>
+
+        <div id="gal-proc-error" style="display:none;margin-top:10px" class="ojo"></div>
+      </div>
+
+      <div style="display:flex;justify-content:space-between;gap:8px;margin-top:14px">
+        <button class="btn bo" onclick="galProcBorrarDesdeFicha()">Borrar esta carga</button>
+        <div style="display:flex;gap:8px">
+          <button class="btn bo" onclick="galProcCerrar()">Cancelar</button>
+          <button class="btn bp" id="gal-proc-btn" onclick="galProcGuardar()">Guardar</button>
+        </div>
+      </div>
+    </div>
+  </div>
   <div class="sec sg-mod" id="sec-galpon-proceso">
     <style>
       /* LAS TARJETAS DE LOTE. Es el paso uno y ocupa lugar a propósito: todo lo que se
@@ -7664,6 +7718,15 @@ input[type=number]{-moz-appearance:textfield;appearance:textfield}
       #sec-galpon-proceso .gpr-lote .barra i{display:block;height:100%;background:var(--burg)}
 
       /* EL TABLERO DEL LOTE: entró / salió / queda, y el reparto en una sola barra. */
+      #sec-galpon-proceso .gpr-rep{border:1px solid var(--warn);border-radius:10px;
+        background:rgba(217,119,6,.07);padding:10px 13px;font-size:12.5px;
+        margin-bottom:4px}
+      #sec-galpon-proceso .gpr-rp{display:inline-block;border:1px solid var(--bor);
+        border-radius:999px;padding:1px 9px;margin:3px 5px 0 0;background:var(--sur);
+        font-variant-numeric:tabular-nums}
+      #sec-galpon-proceso .gpr-rpn{margin-top:5px;color:var(--mut)}
+      #sec-galpon-proceso .gpr-mz{font-size:10.5px;border:1px solid var(--warn);
+        color:var(--warn);border-radius:999px;padding:0 6px;white-space:nowrap}
       #sec-galpon-proceso .gpr-tab{border:1px solid var(--bor);border-radius:12px;
         padding:14px 16px;margin-bottom:18px;background:var(--sur)}
       #sec-galpon-proceso .gpr-nums{display:flex;gap:22px;flex-wrap:wrap;margin-bottom:12px}
@@ -7770,7 +7833,10 @@ input[type=number]{-moz-appearance:textfield;appearance:textfield}
       <button class="btn bo bs" onclick="galPrHoy()">Hoy</button>
     </div>
 
-    <h3 class="gpr-t">1 · ¿De qué lote?</h3>
+    <h3 class="gpr-t">1 · ¿De qué lote? <span style="text-transform:none;letter-spacing:0;
+      font-weight:400">— se puede elegir más de uno si la tolva está mezclada</span>
+      <button class="btn bo bs" style="margin-left:8px"
+        onclick="galPrTodosLosLotes()">Todos los que están en la tolva</button></h3>
     <div id="gpr-lotes" class="gpr-lotes"></div>
 
     <div id="gpr-tablero"></div>
@@ -27762,6 +27828,39 @@ SG_MANUAL['galpon-proceso'] = { titulo: 'Galpón · Proceso', html:
   + 'tiene en la base, igual que el asiento de una factura. Si los calculara la pantalla, '
   + 'el rinde de la temporada dependería del navegador que estaba abierto.</p>'
 
+  + '<h3>🔀 Cuando no se sabe de qué lote es <span class="ver">V1115</span></h3>'
+  + '<p>Andy, 31/10/2026: <i>«no siempre tenemos bien en claro de qué lote es cada uno. '
+  + 'Es decir es todo Damasco»</i>. La tolva mezcla, y elegir UN lote cuando hay tres '
+  + 'adentro es inventar — y una invención entra al rinde igual que un dato.</p>'
+  + '<p>Por eso se puede <b>marcar varios lotes a la vez</b>, o apretar <b>Todos los que '
+  + 'están en la tolva</b>. Lo que se carga se <b>reparte a prorrata de lo que le queda '
+  + 'sin procesar a cada uno</b>: si del Cuadro 3 quedan 3.000 kg y del Cuadro 4 quedan '
+  + '1.000, sale 75% y 25%. El cartel naranja lo muestra <b>antes</b> de cargar.</p>'
+  + '<ul>'
+  + '<li>Se guarda <b>una fila por lote</b>, no una sola «mezcla»: así el rinde de cada '
+  + 'lote y el stock se siguen calculando igual, sin ninguna consulta especial.</li>'
+  + '<li>Esas filas quedan marcadas <b>≈ mezcla</b>. Es una <b>estimación</b>, no una '
+  + 'medición, y tiene que poder distinguirse: el rinde de un lote hecho de prorrateos '
+  + 'no es el mismo dato que el de uno que entró solo.</li>'
+  + '<li><b>Borrar una las borra a todas.</b> Media carga deshecha deja la otra mitad '
+  + 'atribuida y los kilos que faltan en ningún lado.</li>'
+  + '<li>Si ninguno tiene pendiente, va en <b>partes iguales</b> — no hay de dónde '
+  + 'prorratear.</li>'
+  + '</ul>'
+
+  + '<h3>✎ Corregir una carga <span class="ver">V1115</span></h3>'
+  + '<p>El lápiz de cada renglón abre la carga y deja cambiar el <b>día</b>, el '
+  + '<b>lote</b>, la <b>presentación</b>, la <b>cantidad</b> y la <b>observación</b>.</p>'
+  + '<p>El lote es la corrección que más se usa, y por algo: hasta la V1115 el cartel de '
+  + '«se procesó más de lo volcado» decía que se arregla corrigiendo el lote de las '
+  + 'cargas, y eso <b>no se podía hacer</b>. Un cartel que manda a hacer algo imposible '
+  + 'es peor que no tenerlo.</p>'
+  + '<p>Cambiar la <b>presentación</b> cambia también el destino y <b>vuelve a calcular '
+  + 'los kilos</b> con la cuenta de la nueva: dejar los viejos sería una fila que miente '
+  + 'sobre sí misma — cien cajas de 7 kg sumando 300.</p>'
+  + '<div class="ojo">En una carga <b>repartida</b> se corrige <b>sólo ese pedazo</b>: '
+  + 'las de los otros lotes quedan como estaban. Si lo que está mal es el reparto entero, '
+  + 'conviene borrarla —se van todas juntas— y cargarla de nuevo. La ventana lo avisa.</div>'
   + '<h3>📊 El tablero de arriba <span class="ver">V1112</span></h3>'
   + '<p>Volcado, procesado, sin procesar y el rinde comercial, con la barra del reparto. '
   + 'No es decoración: un 40% de descarte se ve <b>mientras se carga</b>, no a fin de '
@@ -57367,7 +57466,11 @@ async function galBalGuardarBaud(){
    Y los kilos los calcula el SERVIDOR con esa misma cuenta. Acá se muestra el resultado
    antes de apretar —para que se vea lo que va a entrar— pero el número que se guarda no
    sale nunca de esta pantalla: el rinde de la temporada es esa columna. */
-var GPR = { fecha:null, hoy:null, lote:null, datos:null, sel:null, uuid:null };
+/* `lotes` es una LISTA. Andy, 31/10/2026: «me tiene que dejar mezclar entre los lotes
+   porque no siempre tenemos bien en claro de qué lote es cada uno. Es decir es todo
+   Damasco». La tolva mezcla, y pedirle al operador que elija UNO cuando hay tres
+   adentro es pedirle que invente — y una invención entra al rinde igual que un dato. */
+var GPR = { fecha:null, hoy:null, lotes:[], datos:null, sel:null, uuid:null, editId:null };
 
 function galPrEsc(s){ return String(s == null ? '' : s)
   .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
@@ -57400,7 +57503,7 @@ async function galPrCargar(){
   var f = document.getElementById('gpr-fecha');
   var q = [];
   if (f && f.value) q.push('fecha=' + encodeURIComponent(f.value));
-  if (GPR.lote) q.push('lote_id=' + GPR.lote);
+  if (GPR.lotes.length) q.push('lote_ids=' + GPR.lotes.join(','));
   try {
     var r = await fetch('/api/galpon/procesos' + (q.length ? '?' + q.join('&') : ''),
                         { credentials:'include' });
@@ -57434,7 +57537,7 @@ function galPrPintarLotes(){
   }
   el.innerHTML = ls.map(function(l){
     var pct = l.volcado > 0 ? Math.min(100, Math.round((l.procesado / l.volcado) * 100)) : 0;
-    return '<div class="gpr-lote' + (GPR.lote === l.lote_id ? ' on' : '') + '"'
+    return '<div class="gpr-lote' + (GPR.lotes.indexOf(l.lote_id) >= 0 ? ' on' : '') + '"'
       + ' onclick="galPrLote(' + l.lote_id + ')">'
       /* LA FINCA ARRIBA Y GRANDE. Un lote se llama «11-12 y 16-17» y eso no ubica a
          nadie; la finca sí. Pero el lote queda igual abajo: una finca tiene varios, y
@@ -57453,8 +57556,22 @@ function galPrPintarLotes(){
   }).join('');
 }
 
+/* Se SUMA o se SACA, no se reemplaza: tocar el segundo lote no puede apagar el primero,
+   porque elegir dos es justamente para lo que está. */
 function galPrLote(id){
-  GPR.lote = GPR.lote === id ? null : id;
+  var i = GPR.lotes.indexOf(id);
+  if (i >= 0) GPR.lotes.splice(i, 1); else GPR.lotes.push(id);
+  GPR.sel = null;
+  galPrCargar();
+}
+
+function galPrTodosLosLotes(){
+  var ls = (GPR.datos && GPR.datos.lotes) || [];
+  /* Los que todavía tienen algo sin procesar. Marcar todos los que alguna vez se
+     volcaron metería en el reparto de hoy un lote que se terminó hace un mes, y esos
+     kilos se le restarían al rinde de un cuadro que ya estaba cerrado. */
+  var vivos = ls.filter(function(l){ return l.sin_procesar > 0; });
+  GPR.lotes = (vivos.length ? vivos : ls).map(function(l){ return l.lote_id; });
   GPR.sel = null;
   galPrCargar();
 }
@@ -57466,7 +57583,7 @@ function galPrLote(id){
 function galPrPintarTablero(){
   var el = document.getElementById('gpr-tablero'); if (!el) return;
   var t = GPR.datos && GPR.datos.tablero;
-  if (!GPR.lote || !t){ el.innerHTML = ''; return; }
+  if (!GPR.lotes.length || !t){ el.innerHTML = ''; return; }
   var tot = Math.max(t.volcado, t.procesado) || 1;
   var tramo = function(clave){
     var d = galPrDest(clave), kg = t.destinos[clave] || 0;
@@ -57505,14 +57622,14 @@ function galPrPintarTablero(){
 /* ── LAS TRES ZONAS Y SUS BALDOSAS ───────────────────────────────────────────────── */
 function galPrPintarZonas(){
   var el = document.getElementById('gpr-zonas'); if (!el) return;
-  if (!GPR.lote){
+  if (!GPR.lotes.length){
     el.innerHTML = '<div class="gpr-vacio" style="flex:1 1 100%">Elegí un lote de arriba '
-      + 'para empezar a cargar.</div>';
+      + 'para empezar a cargar. Si la tolva está mezclada, elegí <b>varios</b>.</div>';
     return;
   }
   var pres = (GPR.datos.presentaciones) || [];
   var t = GPR.datos.tablero || { destinos:{} };
-  el.innerHTML = (GPR.datos.destinos || []).map(function(d){
+  el.innerHTML = galPrCartelReparto() + (GPR.datos.destinos || []).map(function(d){
     var mias = pres.filter(function(p){ return p.destino === d.clave; });
     return '<div class="gpr-zona" style="border-color:' + d.color + '33">'
       + '<div class="gpr-zh"><b style="color:' + d.color + '">' + galPrEsc(d.label) + '</b>'
@@ -57524,6 +57641,36 @@ function galPrPintarZonas(){
             + '<b>⚙️ Galpón · Configuración</b>.</div>')
       + '</div>';
   }).join('');
+}
+
+/* CÓMO SE VA A REPARTIR, antes de cargar. A prorrata de lo que le queda sin procesar a
+   cada lote: si del Cuadro 3 quedan 3.000 kg y del Cuadro 4 quedan 1.000, lo que sale
+   ahora es 75% y 25%.
+
+   Se muestra porque es una ESTIMACIÓN y no una medición. Un reparto que el sistema
+   hace callado entra al rinde de cada lote con la misma cara que un dato medido, y a
+   fin de temporada nadie puede distinguirlos. */
+function galPrCartelReparto(){
+  if (GPR.lotes.length < 2) return '';
+  var ls = ((GPR.datos && GPR.datos.lotes) || [])
+    .filter(function(l){ return GPR.lotes.indexOf(l.lote_id) >= 0; });
+  if (!ls.length) return '';
+  var pend = ls.map(function(l){ return l.sin_procesar > 0 ? l.sin_procesar : 0; });
+  var tot = pend.reduce(function(a, b){ return a + b; }, 0);
+  var pct = ls.map(function(l, i){
+    return tot > 0 ? (pend[i] / tot) * 100 : 100 / ls.length;
+  });
+  return '<div class="gpr-rep" style="flex:1 1 100%">'
+    + '<b>Mezcla de ' + ls.length + ' lotes.</b> Lo que cargues se reparte a prorrata '
+    + 'de lo que le queda sin procesar a cada uno — es una <b>estimación</b>, no una '
+    + 'medición, y las cargas quedan marcadas: '
+    + ls.map(function(l, i){
+        return '<span class="gpr-rp">' + galPrNum(pct[i], 1) + '% '
+          + galPrEsc(l.finca || l.nombre) + '</span>';
+      }).join('')
+    + (tot <= 0 ? '<div class="gpr-rpn">Ninguno tiene pendiente, así que va en partes '
+        + 'iguales.</div>' : '')
+    + '</div>';
 }
 
 function galPrBaldosa(p, d){
@@ -57602,7 +57749,7 @@ function galPrTecla(ev){
 }
 
 async function galPrCargarUno(){
-  var p = galPrPresSel(); if (!p || !GPR.lote) return;
+  var p = galPrPresSel(); if (!p || !GPR.lotes.length) return;
   var err = document.getElementById('gpr-error');
   var c = document.getElementById('gpr-cant');
   var btn = document.getElementById('gpr-btn');
@@ -57610,7 +57757,7 @@ async function galPrCargarUno(){
   var body = {
     uuid: GPR.uuid,
     fecha: GPR.fecha,
-    lote_id: GPR.lote,
+    lote_ids: GPR.lotes,
     presentacion_id: p.id,
   };
   if (p.granel) body.kilos = c ? c.value : '';
@@ -57645,13 +57792,135 @@ async function galPrCargarUno(){
   }
 }
 
+/* ── ✎ CORREGIR UNA CARGA DE PROCESO ────────────────────────────────────────────
+   Andy, 31/10/2026: «no quedó ningún lugar para editar los procesos».
+
+   Se puede cambiar el día, el LOTE —que es la corrección que más se va a usar, porque
+   la tolva mezcla y recién al rato se sabe de dónde era—, la presentación (que arrastra
+   el destino y la cuenta), la cantidad y la observación. */
+function galProcAbrir(id){
+  var x = ((GPR.datos && GPR.datos.procesos) || [])
+    .filter(function(c){ return c.id === id; })[0];
+  if (!x) return;
+  GPR.editId = id;
+
+  /* Una carga REPARTIDA se avisa antes de tocarla: corregir una fila del grupo deja las
+     otras como estaban, y el reparto deja de sumar lo que se cargó. */
+  var rep = document.getElementById('gal-proc-rep');
+  if (x.repartido){
+    rep.innerHTML = '<b>Esta carga es parte de una mezcla.</b> Se repartió entre varios lotes '
+      + 'a prorrata, y acá se corrige <b>sólo este pedazo</b>: los de los otros lotes quedan '
+      + 'como están. Si lo que está mal es el reparto entero, conviene <b>borrarla</b> —se '
+      + 'van todas juntas— y cargarla de nuevo.';
+    rep.style.display = '';
+  } else { rep.style.display = 'none'; }
+
+  document.getElementById('gal-proc-fecha').value = x.fecha || '';
+  document.getElementById('gal-proc-obs').value = x.observacion || '';
+
+  // Los lotes: TODOS los volcados, no sólo los elegidos arriba. Corregir es justamente
+  // mandarla a uno que no estaba seleccionado.
+  var sel = document.getElementById('gal-proc-lote');
+  sel.innerHTML = ((GPR.datos && GPR.datos.lotes) || []).map(function(l){
+    return '<option value="' + l.lote_id + '">'
+      + galPrEsc((l.finca ? l.finca + ' · ' : '') + l.nombre) + '</option>';
+  }).join('');
+  sel.value = String(x.lote_id);
+
+  var pr = document.getElementById('gal-proc-pres');
+  pr.innerHTML = ((GPR.datos && GPR.datos.presentaciones) || []).map(function(q){
+    return '<option value="' + q.id + '" data-granel="' + (q.granel ? 1 : 0) + '"'
+      + ' data-pb="' + q.por_bulto + '" data-ku="' + q.kg_unidad + '">'
+      + galPrEsc(q.destino + ' · ' + q.nombre) + '</option>';
+  }).join('');
+  /* Si la presentación con la que se cargó se sacó del catálogo, no está en la lista.
+     Se agrega al vuelo: sin esto el desplegable mostraría otra y guardar cambiaría la
+     presentación sin que nadie lo pidiera. */
+  if (x.presentacion_id && !pr.querySelector('option[value="' + x.presentacion_id + '"]')){
+    pr.insertAdjacentHTML('afterbegin', '<option value="' + x.presentacion_id + '"'
+      + ' data-granel="' + (x.bultos == null ? 1 : 0) + '"'
+      + ' data-pb="' + x.por_bulto + '" data-ku="' + x.kg_unidad + '">'
+      + galPrEsc((x.presentacion || 'la de esta carga') + ' (fuera del catálogo)')
+      + '</option>');
+  }
+  pr.value = x.presentacion_id ? String(x.presentacion_id) : '';
+
+  document.getElementById('gal-proc-cant').value = x.bultos == null ? x.kilos : x.bultos;
+  document.getElementById('gal-proc-error').style.display = 'none';
+  galProcPresPick(true);
+  document.getElementById('gal-proc-modal').classList.add('on');
+}
+
+function galProcCerrar(){
+  document.getElementById('gal-proc-modal').classList.remove('on');
+  GPR.editId = null;
+}
+
+function galProcPresOpt(){
+  var pr = document.getElementById('gal-proc-pres');
+  return pr.options[pr.selectedIndex] || null;
+}
+
+/* Cambiar la presentación cambia QUÉ se pide: bultos o kilos. Dejar el casillero
+   diciendo «Bultos» con una presentación a granel haría que 55 se lea como 55 bultos. */
+function galProcPresPick(inicial){
+  var o = galProcPresOpt();
+  var granel = o && o.getAttribute('data-granel') === '1';
+  document.getElementById('gal-proc-cant-lbl').textContent = granel ? 'Kilos' : 'Bultos';
+  if (!inicial) document.getElementById('gal-proc-cant').value = '';
+  galProcPrevio();
+}
+
+function galProcPrevio(){
+  var el = document.getElementById('gal-proc-previo'); if (!el) return;
+  var o = galProcPresOpt();
+  var v = Number(String(document.getElementById('gal-proc-cant').value).replace(',', '.')) || 0;
+  if (!o){ el.textContent = ''; return; }
+  var granel = o.getAttribute('data-granel') === '1';
+  var kg = granel ? v : v * Number(o.getAttribute('data-pb')) * Number(o.getAttribute('data-ku'));
+  el.textContent = galPrNum(kg) + ' kg';
+}
+
+async function galProcGuardar(){
+  var err = document.getElementById('gal-proc-error');
+  err.style.display = 'none';
+  var o = galProcPresOpt();
+  var granel = o && o.getAttribute('data-granel') === '1';
+  var cant = document.getElementById('gal-proc-cant').value;
+  var body = {
+    fecha: document.getElementById('gal-proc-fecha').value,
+    lote_id: document.getElementById('gal-proc-lote').value,
+    presentacion_id: document.getElementById('gal-proc-pres').value,
+    observacion: document.getElementById('gal-proc-obs').value,
+  };
+  if (granel) body.kilos = cant; else body.bultos = cant;
+
+  var btn = document.getElementById('gal-proc-btn');
+  btn.disabled = true;
+  try {
+    var r = await fetch('/api/galpon/procesos/' + GPR.editId, { method:'PATCH',
+      credentials:'include', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify(body) });
+    var j = await r.json();
+    if (!j.ok){ err.textContent = j.error; err.style.display = ''; return; }
+    galProcCerrar();
+    await galPrCargar();
+  } catch (e) { err.textContent = 'No se pudo guardar: ' + e.message; err.style.display = ''; }
+  finally { btn.disabled = false; }
+}
+
+async function galProcBorrarDesdeFicha(){
+  var id = GPR.editId; if (!id) return;
+  galProcCerrar();
+  await galPrBorrar(id);
+}
 /* ── LO CARGADO ESTE DÍA ─────────────────────────────────────────────────────────── */
 function galPrPintar(){
   var b = document.getElementById('gpr-body'); if (!b) return;
   var ps = (GPR.datos && GPR.datos.procesos) || [];
   if (!ps.length){
     b.innerHTML = '<tr><td colspan="6" class="gpr-vacio">'
-      + (GPR.lote ? 'Todavía no se cargó nada de este lote para este día.'
+      + (GPR.lotes.length ? 'Todavía no se cargó nada de estos lotes para este día.'
                   : 'Todavía no se cargó nada para este día.') + '</td></tr>';
     return;
   }
@@ -57666,10 +57935,15 @@ function galPrPintar(){
       + '<td title="' + galPrEsc((galPrFinca(x.lote_id) ? galPrFinca(x.lote_id) + ' · ' : '')
           + (x.lote_nombre || '')) + '">'
         + (galPrFinca(x.lote_id) ? '<b>' + galPrEsc(galPrFinca(x.lote_id)) + '</b> · ' : '')
-        + galPrEsc(x.lote_nombre || ('Lote ' + x.lote_id)) + '</td>'
+        + galPrEsc(x.lote_nombre || ('Lote ' + x.lote_id))
+        /* Repartido = estos kilos son una PRORRATA, no una medición. Sin la marca, el
+           renglón se ve igual que uno medido y a fin de temporada nadie los distingue. */
+        + (x.repartido ? ' <span class="gpr-mz" title="repartido entre varios lotes">'
+            + '≈ mezcla</span>' : '') + '</td>'
       + '<td class="gpr-n">' + (x.bultos == null ? '—' : galPrNum(x.bultos, 0)) + '</td>'
       + '<td class="gpr-n"><b>' + galPrNum(x.kilos) + '</b></td>'
       + '<td style="text-align:right">'
+        + '<button class="btn bo bs" onclick="galProcAbrir(' + x.id + ')">✎</button> '
         + '<button class="btn bo bs" onclick="galPrBorrar(' + x.id + ')">×</button></td>'
       + '</tr>';
   }).join('');
@@ -57678,8 +57952,12 @@ function galPrPintar(){
 async function galPrBorrar(id){
   var x = ((GPR.datos && GPR.datos.procesos) || [])
     .filter(function(p){ return p.id === id; })[0]; if (!x) return;
+  /* Si es una mezcla se avisa que se van TODAS. Borrar la mitad de un reparto deja
+     la otra mitad atribuida a un lote y los kilos que faltan en ningún lado. */
   if (!confirm('¿Borrar ' + galPrNum(x.kilos) + ' kg de '
-    + (x.presentacion || x.destino) + '?')) return;
+    + (x.presentacion || x.destino) + '?'
+    + (x.repartido ? '\n\nEs parte de una MEZCLA: se borran también las de los otros '
+        + 'lotes del mismo reparto.' : ''))) return;
   try {
     var r = await fetch('/api/galpon/procesos/' + id, { method:'DELETE', credentials:'include' });
     var j = await r.json();

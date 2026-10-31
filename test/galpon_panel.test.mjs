@@ -1237,7 +1237,8 @@ test('MANUAL PR: «el volcado del lote no se corta por día»', () => {
   // Si lo cortara, lo que entró el martes y se procesa el jueves daría «de más»
   // todos los días.
   const tab = cuerpoServicio('export function tableroProceso(');
-  assert.match(tab, /FROM gal_volcados'\r?\n\s*\+ '\s*WHERE lote_id = \? AND eliminado_en IS NULL/);
+  assert.match(tab, /FROM gal_volcados'[\s\S]{0,80}WHERE lote_id IN \('/,
+    'el tablero dejó de sumar el volcado de los lotes elegidos');
   assert.ok(!/gal_volcados[\s\S]{0,200}fecha = \?/.test(tab), 'el tablero corta el volcado por día');
 });
 
@@ -1519,4 +1520,108 @@ test('los baudios se piden UNA vez y quedan', () => {
   assert.match(JS_BAL, /balanza_baudios/);
   // Y la clave ya estaba declarada como guardable, no hace falta tocar el router.
   assert.match(RUTA, /'balanza_puerto', 'balanza_baudios'\]/);
+});
+
+// ══════════════════════════════════════════════════════════════════════════
+// 12 · MEZCLAR LOTES Y CORREGIR UNA CARGA (V1115)
+// ══════════════════════════════════════════════════════════════════════════
+const MOD_PROC = bloqueHtml('id="gal-proc-modal"');
+
+test('MANUAL PR: «se pueden marcar varios lotes a la vez»', () => {
+  dicePr(/marcar varios lotes a la vez/);
+  dicePr(/es todo Damasco/);
+  // Tocar el segundo no apaga el primero: se suma o se saca de la lista.
+  assert.match(JS_PR, /var i = GPR\.lotes\.indexOf\(id\);/);
+  assert.match(JS_PR, /if \(i >= 0\) GPR\.lotes\.splice\(i, 1\); else GPR\.lotes\.push\(id\);/);
+  assert.ok(!/GPR\.lote\b(?!s)/.test(sinComentarios(JS_PR)),
+    'quedó código mirando el lote único: va a leer undefined');
+  assert.match(PANEL, /onclick="galPrTodosLosLotes\(\)"/);
+});
+
+test('«todos los que están en la tolva» son los que TIENEN pendiente', () => {
+  // Marcar todos los que alguna vez se volcaron metería en el reparto de hoy un
+  // lote cerrado hace un mes, y esos kilos se le restarían a su rinde.
+  const fn = JS_PR.slice(JS_PR.indexOf('function galPrTodosLosLotes('),
+                         JS_PR.indexOf('function galPrPintarTablero('));
+  assert.match(fn, /l\.sin_procesar > 0/);
+});
+
+test('MANUAL PR: «se reparte a prorrata, y se ve ANTES de cargar»', () => {
+  dicePr(/reparte a prorrata de lo que le queda/);
+  dicePr(/El cartel naranja lo muestra <b>antes<\/b> de cargar/);
+  assert.match(JS_PR, /function galPrCartelReparto\(\)\{/);
+  assert.match(JS_PR, /if \(GPR\.lotes\.length < 2\) return '';/);
+  assert.match(JS_PR, /Mezcla de ' \+ ls\.length \+ ' lotes/);
+  // Y el cartel usa el MISMO criterio que el servidor: lo que queda sin procesar.
+  assert.match(JS_PR, /l\.sin_procesar > 0 \? l\.sin_procesar : 0/);
+  assert.match(cuerpoServicio('export function pesosDelReparto('),
+    /Number\(x\) > 0 \? Number\(x\) : 0/);
+});
+
+test('MANUAL PR: «una fila por lote, no una fila mezcla»', () => {
+  dicePr(/una fila por lote<\/b>, no una sola «mezcla»/);
+  // Por eso el rinde y el stock siguen siendo un GROUP BY lote_id sin nada especial.
+  assert.match(cuerpoServicio('export function rindePorLote('), /GROUP BY lote_id/);
+  assert.ok(!/reparto/.test(cuerpoServicio('export function rindePorLote(')),
+    'el rinde tuvo que aprender qué es un reparto: la fila por lote no alcanzó');
+});
+
+test('MANUAL PR: «quedan marcadas ≈ mezcla»', () => {
+  dicePr(/≈ mezcla/);
+  dicePr(/no es el mismo dato que el de uno que entró solo/);
+  assert.match(JS_PR, /x\.repartido \? ' <span class="gpr-mz"/);
+  assert.match(PANEL, /#sec-galpon-proceso \.gpr-mz\{/);
+  assert.match(DDL, /ADD COLUMN repartido INTEGER NOT NULL DEFAULT 0/);
+});
+
+test('MANUAL PR: «borrar una las borra a todas», y la pantalla lo avisa', () => {
+  dicePr(/Borrar una las borra a todas/);
+  assert.match(cuerpoServicio('export function borrarProceso('),
+    /WHERE reparto = \? AND eliminado_en IS NULL/);
+  // Y el confirm lo dice, que es donde se lee: nadie abre el manual para borrar.
+  assert.match(JS_PR, /Es parte de una MEZCLA/);
+});
+
+test('MANUAL PR: «el lápiz deja cambiar el día, el lote, la presentación…»', () => {
+  dicePr(/El lápiz de cada renglón/);
+  dicePr(/no se podía hacer<\/b>/);
+  assert.match(JS_PR, /onclick="galProcAbrir\(/);
+  for (const id of ['gal-proc-fecha', 'gal-proc-lote', 'gal-proc-pres',
+                    'gal-proc-cant', 'gal-proc-obs']) {
+    assert.ok(MOD_PROC.includes('id="' + id + '"'), 'falta el campo ' + id);
+  }
+  assert.match(PANEL, /<div class="ab-modal-overlay sg-mod" id="gal-proc-modal">/);
+});
+
+test('cambiar la presentación en la ficha cambia QUÉ se pide', () => {
+  // Dejar el casillero diciendo «Bultos» con una presentación a granel haría que
+  // 55 se lea como 55 bultos — y 55 bultos de 7 kg son 385, no 55.
+  assert.match(PANEL, /galProcPresPick\(\)/);
+  assert.match(PANEL, /granel \? 'Kilos' : 'Bultos'/);
+  assert.match(PANEL, /if \(granel\) body\.kilos = cant; else body\.bultos = cant;/);
+});
+
+test('una presentación que ya no está en el catálogo no se pierde al editar', () => {
+  // Sin esto el desplegable mostraría otra, y guardar cambiaría la presentación de
+  // la carga sin que nadie lo haya pedido.
+  assert.match(PANEL, /fuera del catálogo/);
+});
+
+test('MANUAL PR: «en una repartida se corrige sólo ese pedazo»', () => {
+  dicePr(/sólo ese pedazo<\/b>/);
+  const abrir = JS_PR.slice(JS_PR.indexOf('function galProcAbrir('),
+                            JS_PR.indexOf('function galProcCerrar('));
+  assert.ok(abrir.length > 400, 'el corte de galProcAbrir quedó vacío');
+  assert.match(abrir, /if \(x\.repartido\)\{/,
+    'el aviso no depende de que la carga sea repartida: o se ve siempre, o nunca');
+  assert.match(abrir, /Esta carga es parte de una mezcla/);
+  assert.match(abrir, /\} else \{ rep\.style\.display = 'none'; \}/,
+    'el aviso no se esconde en una carga normal');
+});
+
+test('el router acepta varios lotes y el tablero los suma', () => {
+  assert.match(RUTA, /req\.query\.lote_ids \|\| req\.query\.lote_id/);
+  assert.match(cuerpoServicio('export function tableroProceso('), /lote_id IN \('/);
+  assert.match(JS_PR, /q\.push\('lote_ids=' \+ GPR\.lotes\.join\(','\)\)/);
+  assert.match(JS_PR, /lote_ids: GPR\.lotes,/);
 });
