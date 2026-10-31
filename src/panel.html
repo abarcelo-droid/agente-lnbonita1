@@ -7569,6 +7569,8 @@ input[type=number]{-moz-appearance:textfield;appearance:textfield}
       #sec-galpon-proceso .gpr-lote .n{font-size:15px;font-weight:700;color:var(--burd);
         overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
       #sec-galpon-proceso .gpr-lote .d{font-size:11.5px;color:var(--mut);margin-top:2px}
+      #sec-galpon-proceso .gpr-lote .dl{font-size:12.5px;color:var(--txt);margin-top:1px;
+        overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
       #sec-galpon-proceso .gpr-lote .barra{height:6px;border-radius:4px;background:var(--bor);
         margin-top:7px;overflow:hidden}
       #sec-galpon-proceso .gpr-lote .barra i{display:block;height:100%;background:var(--burg)}
@@ -27545,6 +27547,9 @@ SG_MANUAL['galpon-carga'] = { titulo: 'Galpón · Carga de kilos', html:
   + '<p><b>Por cuadrilla</b> y <b>por lote</b>, ordenados por kilos. No son decorativos: son '
   + 'las dos preguntas que se le hacen a este dato. Por cuadrilla es <b>como se paga el '
   + 'jornal</b>; por lote es <b>como se mide el rendimiento</b> de lo plantado.</p>'
+  + '<p>En «por lote» cada renglón arranca con la <b>finca</b> '
+  + '<span class="ver">V1113</span>: es como se ubica un lote, y leer «11-12 y 16-17» '
+  + 'suelto no le dice nada a nadie.</p>'
   + '<p>El recuadro rojo <b>Para revisar</b> aparece sólo si hay algo que revisar. Un «0» todos '
   + 'los días enseña a no mirar ese lugar justo para el día que diga 1.</p>'
 
@@ -27580,6 +27585,13 @@ SG_MANUAL['galpon-proceso'] = { titulo: 'Galpón · Proceso', html:
   + '<p>Se elige entre los lotes <b>volcados</b>, no entre todos los de la finca: sólo '
   + 'puede salir lo que entró. Cada tarjeta dice cuántos kilos se volcaron y cuántos '
   + 'quedan sin procesar — eso último es lo que contesta cuál está en la tolva ahora.</p>'
+  + '<p>Arriba de cada tarjeta va la <b>finca</b>, grande, y abajo el lote '
+  + '<span class="ver">V1113</span>. Andy, 31/10/2026: <i>«la gente lo ubica por el '
+  + 'nombre de la finca»</i> — un lote se llama «11-12 y 16-17» y eso no ubica a nadie. '
+  + 'El lote sigue abajo porque una finca tiene varios, y sin él dos tarjetas de la '
+  + 'misma finca serían iguales. La finca se lee de <b>Producción → Lotes</b> cada vez: '
+  + 'si se renombra, cambia en todos lados, al revés que el nombre del lote, que queda '
+  + 'congelado en cada carga porque forma parte de la atribución.</p>'
 
   + '<div class="ojo"><b>El lote es una declaración, no una traza.</b> Los IFCOs se '
   + 'vuelcan a una tolva y ahí la fruta se mezcla: no existe forma física de decir que '
@@ -27700,6 +27712,8 @@ SG_MANUAL['galpon-acumulado'] = { titulo: 'Galpón · Acumulado', html:
   + '<li>En <b>rojo</b> quiere decir que se procesó <i>más</i> de lo volcado. No es un '
   + 'error del sistema: la tolva mezcla la fruta de varios lotes y algo se le atribuyó al '
   + 'lote de al lado. Se arregla corrigiendo el lote de esas cargas.</li>'
+  + '<li>Cada renglón arranca con la <b>finca</b> <span class="ver">V1113</span>, que es '
+  + 'como se ubica un lote. El corte «Por lote» de arriba también.</li>'
   + '<li>El renglón <b>TODOS LOS LOTES</b> calcula su rinde sobre el <b>total</b>, no '
   + 'promediando los rindes de cada lote: promediar porcentajes le da el mismo peso a un '
   + 'cuadro de 200 kg que a uno de 20.000.</li>'
@@ -56414,7 +56428,10 @@ function galKgPintarCortes(){
   var caja = function(tit, filas){
     if (!filas.length) return '';
     return '<div class="gkg-corte"><h4>' + tit + '</h4>' + filas.map(function(x){
-      return '<div class="l"><span>' + galKgEsc(x.nombre) + '</span>'
+      /* La finca adelante del lote: el nombre de un lote no ubica a nadie. En el corte
+         por cuadrilla no hay finca y el renglón queda igual que antes. */
+      var n = x.finca ? x.finca + ' · ' + x.nombre : x.nombre;
+      return '<div class="l"><span title="' + galKgEsc(n) + '">' + galKgEsc(n) + '</span>'
         + '<b>' + galKgNum(x.kilos) + ' kg</b></div>';
     }).join('') + '</div>';
   };
@@ -56965,6 +56982,14 @@ function galPrEsc(s){ return String(s == null ? '' : s)
 function galPrNum(n, dec){ return (Number(n) || 0)
   .toLocaleString('es-AR', { minimumFractionDigits:0, maximumFractionDigits: dec == null ? 2 : dec }); }
 
+/* La finca del lote, de la lista que ya vino con el pedido: no hace falta pedirla de
+   nuevo ni guardarla en cada proceso. */
+function galPrFinca(loteId){
+  var l = ((GPR.datos && GPR.datos.lotes) || [])
+    .filter(function(x){ return x.lote_id === loteId; })[0];
+  return l ? (l.finca || '') : '';
+}
+
 function galPrDest(clave){
   var ds = (GPR.datos && GPR.datos.destinos) || [];
   return ds.filter(function(d){ return d.clave === clave; })[0]
@@ -57019,9 +57044,13 @@ function galPrPintarLotes(){
     var pct = l.volcado > 0 ? Math.min(100, Math.round((l.procesado / l.volcado) * 100)) : 0;
     return '<div class="gpr-lote' + (GPR.lote === l.lote_id ? ' on' : '') + '"'
       + ' onclick="galPrLote(' + l.lote_id + ')">'
-      + '<div class="n">' + galPrEsc(l.nombre) + '</div>'
-      + '<div class="d">' + (l.producto ? galPrEsc(l.producto) + ' · ' : '')
-        + galPrNum(l.volcado) + ' kg volcados</div>'
+      /* LA FINCA ARRIBA Y GRANDE. Un lote se llama «11-12 y 16-17» y eso no ubica a
+         nadie; la finca sí. Pero el lote queda igual abajo: una finca tiene varios, y
+         sin él dos tarjetas de la misma finca serían idénticas. */
+      + '<div class="n">' + galPrEsc(l.finca || 'Sin finca') + '</div>'
+      + '<div class="dl">' + galPrEsc(l.nombre)
+        + (l.producto ? ' · ' + galPrEsc(l.producto) : '') + '</div>'
+      + '<div class="d">' + galPrNum(l.volcado) + ' kg volcados</div>'
       + '<div class="barra"><i style="width:' + pct + '%"></i></div>'
       + '<div class="d">' + (l.sin_procesar > 0
           ? 'quedan <b>' + galPrNum(l.sin_procesar) + ' kg</b> sin procesar'
@@ -57242,7 +57271,9 @@ function galPrPintar(){
       + '<td title="' + galPrEsc(x.presentacion || '') + '">'
         + galPrEsc(x.presentacion || 'A granel')
         + (x.estado === 'a_revisar' ? ' <b style="color:#d62828">⚠</b>' : '') + '</td>'
-      + '<td title="' + galPrEsc(x.lote_nombre || '') + '">'
+      + '<td title="' + galPrEsc((galPrFinca(x.lote_id) ? galPrFinca(x.lote_id) + ' · ' : '')
+          + (x.lote_nombre || '')) + '">'
+        + (galPrFinca(x.lote_id) ? '<b>' + galPrEsc(galPrFinca(x.lote_id)) + '</b> · ' : '')
         + galPrEsc(x.lote_nombre || ('Lote ' + x.lote_id)) + '</td>'
       + '<td class="gpr-n">' + (x.bultos == null ? '—' : galPrNum(x.bultos, 0)) + '</td>'
       + '<td class="gpr-n"><b>' + galPrNum(x.kilos) + '</b></td>'
@@ -57425,7 +57456,10 @@ function galAcPintarCortes(){
     }).join('') + '</div>';
   };
   el.innerHTML = caja('Por cuadrilla', j.por_cuadrilla || [])
-               + caja('Por lote', j.por_lote || [], function(x){ return x.producto || ''; })
+               /* El pie del corte por lote arranca con la FINCA: el nombre de un lote
+                  no ubica a nadie, y en una lista de seis es peor todavía. */
+               + caja('Por lote', j.por_lote || [], function(x){
+                   return [x.finca, x.producto].filter(Boolean).join(' · '); })
                + caja('Por producto', j.por_producto || []);
 }
 
@@ -57454,7 +57488,9 @@ function galAcPintarRinde(){
   var fila = function(f, pie){
     var neg = f.sin_procesar < 0 ? ' gac-neg' : '';
     return '<tr' + (pie ? ' style="font-weight:700;border-top:2px solid var(--bor)"' : '') + '>'
-      + '<td title="' + galAcEsc(f.nombre) + '">' + galAcEsc(f.nombre) + '</td>'
+      + '<td title="' + galAcEsc([f.finca, f.nombre].filter(Boolean).join(' · ')) + '">'
+        + (f.finca ? '<b>' + galAcEsc(f.finca) + '</b> · ' : '')
+        + galAcEsc(f.nombre) + '</td>'
       + '<td class="gac-n">' + galAcNum(f.volcado) + '</td>'
       + '<td class="gac-n">' + galAcNum(f.comercial) + '</td>'
       + '<td class="gac-n">' + galAcNum(f.verde) + '</td>'
@@ -57480,7 +57516,7 @@ function galAcPintarRinde(){
     /* El total tiene su propio rinde calculado sobre el TOTAL, no el promedio de los
        rindes de cada lote: promediar porcentajes le da el mismo peso a un cuadro de
        200 kg que a uno de 20.000, y el número de abajo deja de ser el de la finca. */
-    + fila(Object.assign({ nombre:'TODOS LOS LOTES' }, tot, {
+    + fila(Object.assign({ nombre:'TODOS LOS LOTES', finca:null }, tot, {
         rinde: tot.volcado > 0 ? Math.round((tot.comercial / tot.volcado) * 1000) / 10 : null,
       }), true)
     + '</tbody></table></div>'

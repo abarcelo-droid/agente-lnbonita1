@@ -37,6 +37,14 @@ import { acumulado, rangoCargado } from '../src/servicios/galpon.js';
 function base() {
   const db = new DatabaseSync(':memory:');
   db.exec(`
+    -- El corte por lote y el rinde traen la FINCA de pa_lotes con un JOIN de lectura
+    -- (Andy, 31/10/2026: «la gente lo ubica por el nombre de la finca»). En la base de
+    -- verdad la tabla está siempre; acá hace falta o el acumulado no tiene de dónde.
+    CREATE TABLE pa_lotes (id INTEGER PRIMARY KEY, nombre TEXT, finca TEXT,
+                           activo INTEGER DEFAULT 1);
+    INSERT INTO pa_lotes (id,nombre,finca) VALUES
+      (10,'Cuadro 3','La Esperanza'), (11,'Cuadro 4','Cochahual'), (12,'Suelto',NULL);
+
     CREATE TABLE gal_volcados (
       id INTEGER PRIMARY KEY AUTOINCREMENT, uuid TEXT UNIQUE,
       fecha TEXT NOT NULL, hora TEXT,
@@ -308,6 +316,24 @@ test('lo cargado sin producto también', () => {
   const sin = acumulado(db, null, null).por_producto.filter((p) => p.gid == null)[0];
   assert.ok(sin);
   assert.match(sin.nombre, /sin producto/);
+});
+
+test('EL CORTE POR LOTE TRAE LA FINCA, que es como se ubica un lote', () => {
+  // Andy, 31/10/2026: «poneme mejor el nombre de la FINCA, porque la gente la ubica
+  // por el nombre de la finca». Un lote se llama «11-12 y 16-17» y eso no ubica a
+  // nadie.
+  const a = acumulado(semana(), null, null);
+  const c3 = a.por_lote.filter((l) => l.nombre === 'Cuadro 3')[0];
+  assert.equal(c3.finca, 'La Esperanza');
+  assert.equal(a.por_lote.filter((l) => l.nombre === 'Cuadro 4')[0].finca, 'Cochahual');
+});
+
+test('un lote sin finca no inventa una', () => {
+  // Y tampoco rompe: queda en null y la pantalla pone «Sin finca».
+  const db = semana();
+  meter(db, '2026-11-23', 12, 'Suelto', 'Damasco', 1, 'Norte', 10, 1);
+  const l = acumulado(db, null, null).por_lote.filter((x) => x.nombre === 'Suelto')[0];
+  assert.equal(l.finca, null);
 });
 
 // ══════════════════════════════════════════════════════════════════════════

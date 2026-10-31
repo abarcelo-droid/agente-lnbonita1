@@ -1339,3 +1339,42 @@ test('LA PANTALLA DE PROCESO ES UNA LISTA: no abre ninguna ventana', () => {
 test('el catálogo se carga al abrir Configuración, o la tabla sale vacía', () => {
   assert.match(PANEL, /'galpon-config': function\(\)\{ galInit\(\); galPresCargar\(\); \}/);
 });
+
+// ══════════════════════════════════════════════════════════════════════════
+// 10 · LA FINCA, QUE ES COMO SE UBICA UN LOTE (V1113)
+// ══════════════════════════════════════════════════════════════════════════
+test('MANUAL PR: «arriba de cada tarjeta va la finca, y abajo el lote»', () => {
+  dicePr(/la gente lo ubica por el + 'nombre de la finca|nombre de la finca/);
+  dicePr(/El lote sigue abajo porque una finca tiene varios/);
+  assert.match(JS_PR, /galPrEsc\(l\.finca \|\| 'Sin finca'\)/);
+  // El lote NO se va: sin él, dos tarjetas de la misma finca serían iguales.
+  assert.match(JS_PR, /<div class="dl">' \+ galPrEsc\(l\.nombre\)/);
+  assert.match(PANEL, /#sec-galpon-proceso \.gpr-lote \.dl\{/);
+});
+
+test('MANUAL PR: «la finca se lee cada vez, el nombre del lote queda congelado»', () => {
+  dicePr(/si se renombra, cambia en todos lados/);
+  // Se lee de pa_lotes con un JOIN; no hay columna finca en gal_volcados ni en
+  // gal_procesos, que es lo que haría que quedara vieja.
+  assert.match(SERV, /export function fincasDeLotes\(db\)/);
+  assert.match(SERV, /SELECT id, finca FROM pa_lotes/);
+  assert.ok(!/finca\s+TEXT/.test(DDL), 'se denormalizó la finca en una tabla gal_');
+  // Y sin FK hacia pa_*, que es la regla de CLAUDE.md.
+  assert.ok(!/REFERENCES pa_/.test(DDL), 'apareció una FK cruzada hacia Personal/Producción');
+});
+
+test('la finca aparece también en el rinde y en los dos cortes por lote', () => {
+  // Es la misma queja en tres pantallas: «11-12 y 16-17» suelto no ubica a nadie.
+  assert.match(JS_AC, /f\.finca \? '<b>' \+ galAcEsc\(f\.finca\)/);
+  assert.match(JS_AC, /\[x\.finca, x\.producto\]\.filter\(Boolean\)/);
+  assert.match(JS_KG, /x\.finca \? x\.finca \+ ' · ' \+ x\.nombre : x\.nombre/);
+  // El renglón de totales del rinde no tiene finca, y una vacía le dejaría un « · ».
+  assert.match(JS_AC, /nombre:'TODOS LOS LOTES', finca:null/);
+});
+
+test('el servicio devuelve la finca en los cuatro lugares que la muestran', () => {
+  assert.match(cuerpoServicio('export function lotesVolcados('), /finca: fincas\.get/);
+  assert.match(cuerpoServicio('export function rindePorLote('), /finca: fincas\.get/);
+  assert.match(ACUM, /finca: fincas\.get\(l\.gid\)/);
+  assert.match(cuerpoServicio('export function resumenDelDia('), /finca: fincas\.get/);
+});
