@@ -288,11 +288,12 @@ input[type=number]{-moz-appearance:textfield;appearance:textfield}
     <div class="ni" data-sec="share"><span class="dot db"></span>🛒 SHARE Carrefour</div>
     <div class="ni" data-sec="contactos"><span class="dot dc"></span>📇 Contactos</div>
     <div class="ni" data-sec="ia-uso"><span class="dot da"></span>⚡ Consumo de IA</div>
-    <div class="ni" data-sec="galpon-config"><span class="dot da"></span>⚙️ Galpón · Configuración</div>
-    <div class="ni" data-sec="galpon-lote-dia"><span class="dot da"></span>🗓️ Galpón · Lote del día</div>
-    <div class="ni" data-sec="galpon-carga"><span class="dot da"></span>⚖️ Galpón · Carga de kilos</div>
-    <div class="ni" data-sec="galpon-proceso"><span class="dot da"></span>📦 Galpón · Proceso</div>
-    <div class="ni" data-sec="galpon-acumulado"><span class="dot da"></span>📈 Galpón · Acumulado</div>
+    <div class="ni" data-sec="galpon-config"><span class="dot da"></span>⚙️ Configuración</div>
+    <div class="ni" data-sec="galpon-lote-dia"><span class="dot da"></span>🗓️ Lote del día</div>
+    <div class="ni" data-sec="galpon-carga"><span class="dot da"></span>⚖️ Carga de kilos</div>
+    <div class="ni" data-sec="galpon-proceso"><span class="dot da"></span>📦 Proceso</div>
+    <div class="ni" data-sec="galpon-acumulado"><span class="dot da"></span>📈 Acumulado</div>
+    <div class="ni" data-sec="galpon-stock"><span class="dot da"></span>🚚 Stock y Despachos</div>
   </div>
 
   <div class="ni-grp" data-grp="ven-ventas">Administración de Ventas<span class="ni-caret">▾</span></div>
@@ -7063,7 +7064,7 @@ input[type=number]{-moz-appearance:textfield;appearance:textfield}
       <button class="btn bp bs" onclick="galPresAbrir()">+ Nueva presentación</button>
     </div>
     <div class="gal-ay" style="max-width:none;margin-bottom:10px">Cada una es una
-      baldosa en <b>📦 Galpón · Proceso</b>, y ya trae su cuenta: el operador escribe
+      baldosa en <b>📦 Proceso</b>, y ya trae su cuenta: el operador escribe
       cuántos bultos y los kilos salen solos.</div>
     <div class="ab-table-wrap">
       <table class="pa-tbl gal-tbl">
@@ -7194,7 +7195,7 @@ input[type=number]{-moz-appearance:textfield;appearance:textfield}
     </style>
 
     <div class="ph">
-      <div><div class="ph-t">🗓️ Galpón · Lote del día</div>
+      <div><div class="ph-t">🗓️ Lote del día</div>
         <div class="ph-s">Qué se está cosechando y desde qué hora. Cada IFCO que se vuelca
           se queda con el lote que estaba vigente a SU hora.</div></div>
       <div style="display:flex;gap:8px">
@@ -7372,7 +7373,7 @@ input[type=number]{-moz-appearance:textfield;appearance:textfield}
     </style>
 
     <div class="ph">
-      <div><div class="ph-t">⚖️ Galpón · Carga de kilos</div>
+      <div><div class="ph-t">⚖️ Carga de kilos</div>
         <div class="ph-s">Cuántos kilos entraron, de qué lote y de qué cuadrilla. Mientras
           no haya tarjetas impresas ni balanza conectada se cargan a mano — y van al mismo
           lugar del que después salen el rendimiento y el kg por jornal.</div></div>
@@ -7692,6 +7693,61 @@ input[type=number]{-moz-appearance:textfield;appearance:textfield}
        hacer. Un cartel que manda a hacer algo imposible es peor que no tenerlo.
 
        Fuera de toda .sec y sin cerrarse al clic afuera, como todas. -->
+  <div class="ab-modal-overlay sg-mod" id="gal-dsp-modal">
+    <div class="ab-modal" style="width:min(820px,96vw);max-width:96vw">
+      <div class="mh"><div class="mht" id="gal-dsp-tit">Armar despacho</div>
+        <button class="mcl" onclick="galDspCerrar()">×</button></div>
+
+      <!-- El número y el aviso quedan DESPUÉS de emitir: la ventana no se cierra al
+           guardar justamente para que se lea (CLAUDE.md). -->
+      <div id="gal-dsp-rep" style="display:none;margin-bottom:12px" class="ojo"></div>
+
+      <div class="sgr-card">
+        <div style="display:flex;gap:10px;flex-wrap:wrap">
+          <div style="flex:0 0 150px"><label>Fecha</label>
+            <input type="date" id="gal-dsp-fecha"></div>
+          <div style="flex:1 1 240px;min-width:0"><label>¿A dónde va?</label>
+            <input type="text" id="gal-dsp-dest" placeholder="San Gerónimo, feria, cliente…"></div>
+        </div>
+        <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:10px">
+          <div style="flex:1 1 180px;min-width:0"><label>Transporte</label>
+            <input type="text" id="gal-dsp-transp" placeholder="Quién lleva"></div>
+          <div style="flex:0 0 130px"><label>Patente</label>
+            <input type="text" id="gal-dsp-pat" placeholder="AB123CD"></div>
+          <div style="flex:0 0 150px"><label>Remito</label>
+            <input type="text" id="gal-dsp-rem" placeholder="Si ya se hizo"></div>
+        </div>
+        <div style="margin-top:10px"><label>Observación</label>
+          <input type="text" id="gal-dsp-obs" placeholder="Lo que haga falta aclarar"></div>
+      </div>
+
+      <!-- LO QUE SE CARGA. Se elige del stock que HAY: el selector lista lo disponible y
+           no deja tipear un lote que no tiene nada, que es la única validación del
+           galpón que frena (la fruta todavía está en la cámara). -->
+      <div class="sgr-card" id="gal-dsp-cargar" style="margin-top:12px">
+        <div style="font-weight:600;font-size:13px;margin-bottom:8px">Cargar del stock</div>
+        <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end">
+          <div style="flex:1 1 300px;min-width:0"><label>Qué</label>
+            <select id="gal-dsp-item" onchange="galDspItemPick()"></select></div>
+          <div style="flex:0 0 110px"><label id="gal-dsp-cl">Cajas</label>
+            <input type="number" id="gal-dsp-cant" min="0" step="1"
+              onkeydown="if(event.key==='Enter'){event.preventDefault();galDspAgregar()}"></div>
+          <button class="btn bp bs" style="flex:0 0 auto" onclick="galDspAgregar()">Agregar</button>
+        </div>
+        <div id="gal-dsp-disp" style="font-size:11px;color:var(--mut);margin-top:6px"></div>
+      </div>
+
+      <div id="gal-dsp-items" style="margin-top:12px"></div>
+
+      <div class="mf">
+        <button class="btn bo" onclick="galDspCerrar()">Cerrar</button>
+        <button class="btn bo" id="gal-dsp-anular" style="display:none"
+          onclick="galDspAnular()">Anular</button>
+        <button class="btn bp" id="gal-dsp-emitir" onclick="galDspEmitir()">Emitir despacho</button>
+      </div>
+    </div>
+  </div>
+
   <div class="ab-modal-overlay sg-mod" id="gal-proc-modal">
     <div class="ab-modal" style="width:min(620px,96vw);max-width:96vw">
       <div class="mhd"><div class="mht">✎ Corregir la carga</div>
@@ -7921,7 +7977,7 @@ input[type=number]{-moz-appearance:textfield;appearance:textfield}
     </style>
 
     <div class="ph">
-      <div><div class="ph-t">📦 Galpón · Proceso</div>
+      <div><div class="ph-t">📦 Proceso</div>
         <div class="ph-s">Qué salió de lo que entró. Se elige el lote volcado y se van
           cargando los procesos parciales: comercial, verde y descarte. De acá sale el
           rinde, y lo cargado queda como stock del galpón.</div></div>
@@ -7976,6 +8032,67 @@ input[type=number]{-moz-appearance:textfield;appearance:textfield}
     <div id="gpr-stock" class="gpr-stock"></div>
     <div id="gpr-stock-prod"></div>
     <div id="gpr-stock-lote"></div>
+  </div>
+
+  <!-- ════════════════════════════════════════════════════════════════════════════════
+       🚚 STOCK Y DESPACHOS
+       ════════════════════════════════════════════════════════════════════════════════
+       Andy, 1/11/2026: «quiero un módulo separado con Stock (de ahí vamos a hacer los
+       despachos)... la vuelta sería primero procesar y una vez que está en stock lo
+       despachamos».
+
+       Todo EN CAJAS, que es la unidad del camión. Andy, 31/10/2026: «los stock van en
+       cajas porque necesitamos saber qué cargar. No me interesa ahí verlo en kilos».
+       Los kilos van al lado, chicos, porque la liquidación sí se hace por kilo. -->
+  <div class="sec sg-mod" id="sec-galpon-stock">
+    <style>
+      /* SIN BARRA DE DESPLAZAMIENTO LATERAL (CLAUDE.md). Anchos fijos por columna y lo
+         único que parte es el nombre del lote; el resto se trunca con ellipsis. */
+      #sec-galpon-stock .gst-tbl{table-layout:fixed;width:100%;max-width:98vw}
+      #sec-galpon-stock .gst-tbl th,#sec-galpon-stock .gst-tbl td{
+        white-space:nowrap;overflow:hidden;text-overflow:ellipsis;vertical-align:middle}
+      #sec-galpon-stock .gst-n{font-weight:700;font-variant-numeric:tabular-nums}
+      #sec-galpon-stock .gst-kg{font-size:11px;color:var(--mut);
+        font-variant-numeric:tabular-nums}
+      #sec-galpon-stock h3.gst-t{font-size:12px;text-transform:uppercase;
+        letter-spacing:.5px;color:var(--mut);margin:22px 0 9px}
+      #sec-galpon-stock .gst-bal{display:flex;gap:10px;flex-wrap:wrap;margin:10px 0}
+      #sec-galpon-stock .gst-b{flex:1 1 150px;border:1px solid var(--bd);border-radius:9px;
+        padding:11px 13px;background:var(--pan)}
+      #sec-galpon-stock .gst-b .v{font-size:23px;font-weight:700;
+        font-variant-numeric:tabular-nums;line-height:1.1}
+      #sec-galpon-stock .gst-b .l{font-size:11px;color:var(--mut);text-transform:uppercase;
+        letter-spacing:.4px;margin-top:3px}
+      #sec-galpon-stock .gst-pt{display:inline-block;width:9px;height:9px;border-radius:3px;
+        margin-right:5px}
+      #sec-galpon-stock .gst-est{display:inline-block;padding:1px 7px;border-radius:9px;
+        font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.3px}
+      #sec-galpon-stock .gst-brr{background:#fef3c7;color:#92400e}
+      #sec-galpon-stock .gst-emi{background:#dcfce7;color:#166534}
+      #sec-galpon-stock .gst-anu{background:#fee2e2;color:#991b1b;text-decoration:line-through}
+    </style>
+
+    <div class="ph">
+      <div><div class="ph-t">🚚 Stock y Despachos</div>
+        <div class="ph-s">Qué hay guardado en cámara, en cajas, y de ahí salen los
+          despachos. Lo que se despacha se descuenta del stock; lo que se anula vuelve.</div></div>
+      <div style="display:flex;gap:8px">
+        <button class="btn bo bs" onclick="sgManualAbrir('galpon-stock')">❓ ¿Cómo se usa?</button></div>
+    </div>
+
+    <div id="gst-aviso"></div>
+    <div id="gst-bal" class="gst-bal"></div>
+
+    <h3 class="gst-t">Lo que hay en cámara</h3>
+    <div id="gst-stock"></div>
+
+    <h3 class="gst-t">Por lote</h3>
+    <div id="gst-lotes"></div>
+
+    <h3 class="gst-t" style="display:flex;align-items:center;gap:10px">Despachos
+      <button class="btn bo bs" style="margin-left:auto;text-transform:none;letter-spacing:0"
+        onclick="galDspAbrir()">+ Armar un despacho</button></h3>
+    <div id="gst-desp"></div>
   </div>
 
   <div class="sec sg-mod" id="sec-galpon-acumulado">
@@ -8132,7 +8249,7 @@ input[type=number]{-moz-appearance:textfield;appearance:textfield}
     </style>
 
     <div class="ph">
-      <div><div class="ph-t">📈 Galpón · Acumulado</div>
+      <div><div class="ph-t">📈 Acumulado</div>
         <div class="ph-s">Cuántos kilos llevamos, y de dónde salieron. Los mismos renglones
           de la Carga de kilos, sumados por el período que elijas: por lote, por cuadrilla
           y por producto.</div></div>
@@ -27971,7 +28088,7 @@ SG_MANUAL['galpon-carga'] = { titulo: 'Galpón · Carga de kilos', html:
   + '<p>Si la balanza no está, o el navegador no puede, <b>no aparece nada</b> y se carga '
   + 'a mano como siempre. Un botón que no puede funcionar es peor que no tenerlo.</p>'
 
-  + '<p>Para probarla y ajustarla está <b>⚙️ Galpón · Configuración → Probar la balanza</b>: '
+  + '<p>Para probarla y ajustarla está <b>⚙️ Configuración → Probar la balanza</b>: '
   + 'muestra lo que manda el aparato tal cual llega, al lado de lo que se entendió.</p>'
   + '<h3>⚠️ El cero de más <span class="ver">V1108</span></h3>'
   + '<p>Cargando a mano, el error que de verdad pasa es escribir <b>4500</b> donde iban '
@@ -28004,7 +28121,7 @@ SG_MANUAL['galpon-carga'] = { titulo: 'Galpón · Carga de kilos', html:
   + '<h3>📈 Esta pantalla es de UN día <span class="ver">V1109</span></h3>'
   + '<p>Todo lo de acá arriba —los totales y los dos cortes— es del día que está elegido. '
   + 'El total de la temporada, el acumulado día por día y el corte por producto están en '
-  + '<b>📈 Galpón · Acumulado</b>, que suma estos mismos renglones.</p>'
+  + '<b>📈 Acumulado</b>, que suma estos mismos renglones.</p>'
 
   + '<h3>🔗 Con qué se vincula <span class="ver">V1108</span></h3>'
   + '<ul>'
@@ -28385,6 +28502,73 @@ SG_MANUAL['galpon-acumulado'] = { titulo: 'Galpón · Acumulado', html:
   + 'personas distintas: el que pesa mira su día, y el total por cuadrilla de toda la temporada '
   + 'es con lo que se discute plata. Dar uno no da el otro.</p>'
   + '<p>Esta pantalla <b>sólo lee</b>: no tiene ningún botón que escriba.</p>'
+};
+SG_MANUAL['galpon-stock'] = { titulo: 'Stock y Despachos', html:
+  '<p class="mv">V1121</p>'
+  + '<p>Lo que quedó <b>guardado en cámara</b>, y de ahí salen los despachos. '
+  + 'La vuelta es: primero se <b>procesa</b> (📦 Proceso), eso queda en stock, y cuando '
+  + 'viene el camión se <b>despacha</b>.</p>'
+
+  + '<h3>Todo en cajas</h3>'
+  + '<p>El stock se mira y se despacha <b>en cajas</b>, no en kilos: es lo que hay que '
+  + 'contar para cargar un camión. Los kilos van al lado, más chicos, porque la '
+  + 'liquidación sí se hace por kilo. El total general de arriba sí va en kilos: sumar '
+  + 'cajas de 8 kg con bines de 400 daría un número que no significa nada físico.</p>'
+
+  + '<h3>Qué hay en cámara</h3>'
+  + '<p>Cada renglón es una <b>línea despachable</b>: lote + destino + presentación + '
+  + 'calibre. Es la unidad con la que se carga el camión — no «200 kg de damasco» sino '
+  + '«200 cajas 50/55 comerciales del lote 10». Lo que se despachó ya está descontado, '
+  + 'así que lo que figura es lo que queda.</p>'
+  + '<p>El <b>peso de una caja</b> sale del stock que hay, no del catálogo: si entraron '
+  + 'cajas de 8,2 kg y el catálogo dice 8,0, despachar 100 saca los 820 que hay.</p>'
+
+  + '<h3>Armar un despacho</h3>'
+  + '<p>El botón <b>+ Armar despacho</b> abre uno nuevo en <b>borrador</b>. Ahí se pone a '
+  + 'dónde va, quién lleva y la patente, y se van cargando líneas del selector: sólo '
+  + 'aparece lo que hay en stock, así que no se puede tipear un lote que no tiene nada. '
+  + 'Un borrador se puede dejar a medias y seguir después: el botón de su renglón dice '
+  + '<i>Seguir cargando</i>.</p>'
+  + '<p><b>A dónde va es texto libre</b> a propósito. El mismo día se despacha a San '
+  + 'Gerónimo y a la feria, y un selector de clientes ataría este módulo a una operativa '
+  + 'que todavía no está al 100%.</p>'
+
+  + '<h3>No se despacha más de lo que hay</h3>'
+  + '<p>Es la <b>única validación del galpón que frena</b>. En todo lo demás —una tarjeta '
+  + 'repetida, la balanza desconectada— la carga se guarda igual y queda marcada para '
+  + 'revisar, porque la fruta ya está en la tolva y negarse a guardar la pierde. Acá es al '
+  + 'revés: la fruta todavía está en la cámara, y un camión al que le van a faltar 50 '
+  + 'cajas no es un dato que se corrige mañana.</p>'
+  + '<p>Lo ya cargado en el mismo borrador cuenta: pedir 250 y después 250 más se frena en '
+  + 'la segunda, no suma 300 y avisa cuando el camión está cargado.</p>'
+
+  + '<h3>Emitir</h3>'
+  + '<p>Al <b>emitir</b> se le pone número (DG-26-00001), las cajas se descuentan del '
+  + 'stock y se <b>congela</b> lo que se despachó: un catálogo corregido el mes que viene '
+  + 'no cambia lo que decía el remito que salió. Un despacho emitido ya no se edita; lo '
+  + 'único que se le puede agregar es una <b>observación</b>.</p>'
+  + '<p>Un despacho vacío no se emite: gastaría un número del correlativo en un remito de '
+  + 'cero cajas.</p>'
+
+  + '<h3>Anular, no borrar</h3>'
+  + '<p>Un despacho emitido se <b>anula</b>, nunca se borra: borrarlo haría desaparecer un '
+  + 'remito que alguien tiene en la mano. Anular devuelve las cajas al stock y pide el '
+  + 'motivo. El <b>número queda gastado</b> — no se reutiliza — justamente para que el '
+  + 'correlativo pueda demostrar que no se saltea nada.</p>'
+  + '<p>Un <b>borrador</b> sí se borra: todavía no salió nada y no hay número gastado.</p>'
+
+  + '<h3>Buscar por número</h3>'
+  + '<p>Cuando llega un reclamo con un remito en la mano, el número es lo único que tiene '
+  + 'quien llama. <code>/api/galpon/despachos/numero/DG-26-00001</code> devuelve el '
+  + 'despacho con todo lo que llevaba.</p>'
+
+  + '<h3>Qué toca y qué no</h3>'
+  + '<p>Un despacho escribe en los <b>mismos renglones</b> que la carga de proceso, con '
+  + 'tipo <i>salida</i>: por eso los totales de stock, el rinde por lote y el acumulado se '
+  + 'descuentan solos y no hay dos lugares que puedan contradecirse.</p>'
+  + '<p>Este módulo <b>no toca San Gerónimo</b> todavía. La fruta termina vendiéndose por '
+  + 'ahí, pero mientras esa operativa no esté al 100% los despachos del galpón viven acá, '
+  + 'como pidió Andy.</p>'
 };
 
 SG_MANUAL['galpon-lote-dia'] = { titulo: 'Galpón · Lote del día', html:
@@ -40983,6 +41167,7 @@ function loadSec(s) {
     'galpon-carga': function(){ galKgInit(); },
     'galpon-proceso': function(){ galPrInit(); },
     'galpon-acumulado': function(){ galAcInit(); },
+    'galpon-stock': function(){ galStInit(); },
     'pl-abasto': function(){ plaInit(); },
     'sg-catalogo':   function(){ sgLoadCaches(function(){ sgCatSub('productos'); }); },
     'sg-reportes':   function(){ sgRepInit(); },
@@ -58036,7 +58221,7 @@ function galPrPintarLotes(){
   var ls = (GPR.datos && GPR.datos.lotes) || [];
   if (!ls.length){
     el.innerHTML = '<div class="gpr-vacio">Todavía no se volcó nada.<br>'
-      + 'Los kilos entran por <b>⚖️ Galpón · Carga de kilos</b>, y recién después se '
+      + 'Los kilos entran por <b>⚖️ Carga de kilos</b>, y recién después se '
       + 'puede cargar qué salió.</div>';
     return;
   }
@@ -58143,7 +58328,7 @@ function galPrPintarZonas(){
       + '<div class="gpr-zn">' + galPrEsc(d.nota) + '</div>'
       + (mias.length ? mias.map(function(p){ return galPrBaldosa(p, d); }).join('')
           : '<div class="gpr-zn">No hay presentaciones para este destino. Se cargan en '
-            + '<b>⚙️ Galpón · Configuración</b>.</div>')
+            + '<b>⚙️ Configuración</b>.</div>')
       + '</div>';
   }).join('');
 }
@@ -59252,6 +59437,337 @@ function galAcPintar(){
       + '</tr>';
   }).join('');
 }
+
+/* ════════════════════════════════════════════════════════════════════════════════════
+   🚚 STOCK Y DESPACHOS
+   ════════════════════════════════════════════════════════════════════════════════════
+   TODO EN CAJAS. Andy, 31/10/2026: «los stock van en cajas porque necesitamos saber qué
+   cargar. No me interesa ahí verlo en kilos». Las cajas van grandes; los kilos al lado,
+   chicos, porque la liquidación sí se hace por kilo.
+   ════════════════════════════════════════════════════════════════════════════════════ */
+var GST = { datos:null, desp:null, disp:null, abierto:null };
+var GST_COL = { comercial:'#15803d', verde:'#f59e0b', descarte:'#b91c1c' };
+
+function galStNum(v, dec){
+  var n = Number(v)||0;
+  return n.toLocaleString('es-AR', { minimumFractionDigits:dec==null?0:dec,
+                                     maximumFractionDigits:dec==null?0:dec });
+}
+function galStAviso(msg, tipo){
+  var el = document.getElementById('gst-aviso');
+  if(!el) return;
+  if(!msg){ el.innerHTML=''; return; }
+  el.innerHTML = '<div class="'+(tipo==='ok'?'oko':'err')+'" style="margin-bottom:10px">'
+    + galStEsc(msg) + '</div>';
+}
+function galStEsc(t){
+  return String(t==null?'':t).replace(/&/g,'&amp;').replace(/</g,'&lt;')
+    .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+async function galStCargar(){
+  try{
+    var r = await fetch('/api/galpon/stock', { credentials:'same-origin' });
+    var j = await r.json();
+    if(!j.ok) throw new Error(j.error||'No se pudo leer el stock');
+    GST.datos = j; GST.disp = j.disponible||[]; GST.desp = j.despachos||[];
+    galStPintar();
+    galStAviso('');
+  }catch(e){ galStAviso(e.message); }
+}
+
+function galStPintar(){
+  var j = GST.datos; if(!j) return;
+  /* LAS BALDOSAS: cajas grandes, kilos chicos al lado. Un total de cajas sumado entre
+     presentaciones distintas no significa nada físico —una caja de 8 kg y un bin de 400
+     no son la misma cosa—, así que el total general va en KILOS y las cajas se muestran
+     por destino, que es donde todas son la misma caja. */
+  var dest = j.stock||[];
+  var totK = dest.reduce(function(t,d){ return t+(Number(d.kilos)||0); },0);
+  var h = '<div class="gst-b"><div class="v">'+galStNum(totK,0)+'</div>'
+        + '<div class="l">kg en cámara</div></div>';
+  dest.forEach(function(d){
+    h += '<div class="gst-b"><div class="v" style="color:'+(GST_COL[d.clave]||'')+'">'
+      + galStNum(d.bultos,0)+'</div>'
+      + '<div class="l"><span class="gst-pt" style="background:'+(GST_COL[d.clave]||'#999')+'"></span>'
+      + galStEsc(d.nombre||d.clave)+'</div>'
+      + '<div class="gst-kg">'+galStNum(d.kilos,0)+' kg</div></div>';
+  });
+  document.getElementById('gst-bal').innerHTML = h;
+
+  /* QUÉ HAY, por línea despachable: es la misma unidad con la que se carga el camión,
+     así que esta tabla es la que se mira cuando preguntan «¿tenemos 200 cajas 50/55?». */
+  var d = GST.disp||[];
+  document.getElementById('gst-stock').innerHTML = d.length
+    ? '<div class="ab-table-wrap"><table class="pa-tbl gst-tbl">'
+      + '<colgroup><col style="width:24%"><col style="width:12%"><col style="width:20%">'
+      + '<col style="width:12%"><col style="width:16%"><col style="width:16%"></colgroup>'
+      + '<thead><tr><th>Lote</th><th>Destino</th><th>Presentación</th><th>Calibre</th>'
+      + '<th style="text-align:right">Cajas</th><th style="text-align:right">Kilos</th>'
+      + '</tr></thead><tbody>'
+      + d.map(function(f){
+          return '<tr><td>'+galStEsc(f.lote_nombre||('Lote '+f.lote_id))+'</td>'
+            + '<td><span class="gst-pt" style="background:'+(GST_COL[f.destino]||'#999')+'"></span>'
+            + galStEsc(f.destino)+'</td>'
+            + '<td>'+galStEsc(f.presentacion||'A granel')+'</td>'
+            + '<td>'+galStEsc(f.calibre||'—')+'</td>'
+            + '<td style="text-align:right" class="gst-n">'+galStNum(f.bultos,0)+'</td>'
+            + '<td style="text-align:right" class="gst-n">'+galStNum(f.kilos,0)+'</td></tr>';
+        }).join('')
+      + '</tbody></table></div>'
+    : '<div class="ojo">No hay nada en cámara: todo lo que entró ya se despachó.</div>';
+
+  var lo = j.lotes||[];
+  document.getElementById('gst-lotes').innerHTML = lo.length
+    ? '<div class="ab-table-wrap"><table class="pa-tbl gst-tbl">'
+      + '<colgroup><col style="width:30%"><col style="width:18%"><col style="width:17%">'
+      + '<col style="width:17%"><col style="width:18%"></colgroup>'
+      + '<thead><tr><th>Lote</th><th>Finca</th>'
+      + '<th style="text-align:right">Comercial</th><th style="text-align:right">Verde</th>'
+      + '<th style="text-align:right">Total kg</th></tr></thead><tbody>'
+      + lo.map(function(f){
+          return '<tr><td>'+galStEsc(f.nombre)+'</td><td>'+galStEsc(f.finca||'—')+'</td>'
+            + '<td style="text-align:right" class="gst-n">'+galStNum(f.comercial,0)+'</td>'
+            + '<td style="text-align:right">'+galStNum(f.verde,0)+'</td>'
+            + '<td style="text-align:right" class="gst-n">'+galStNum(f.kilos,0)+'</td></tr>';
+        }).join('')
+      + '</tbody></table></div>'
+    : '<div class="ojo">Todavía no entró nada.</div>';
+
+  galStDesp();
+}
+
+function galStDesp(){
+  var l = GST.desp||[];
+  document.getElementById('gst-desp').innerHTML = l.length
+    ? '<div class="ab-table-wrap"><table class="pa-tbl gst-tbl">'
+      + '<colgroup><col style="width:17%"><col style="width:11%"><col style="width:24%">'
+      + '<col style="width:12%"><col style="width:12%"><col style="width:24%"></colgroup>'
+      + '<thead><tr><th>Número</th><th>Fecha</th><th>A dónde</th>'
+      + '<th style="text-align:right">Cajas</th><th style="text-align:right">Kilos</th>'
+      + '<th></th></tr></thead><tbody>'
+      + l.map(function(x){
+          var cl = x.estado==='emitido' ? 'gst-emi' : (x.estado==='anulado'?'gst-anu':'gst-brr');
+          return '<tr><td>'+galStEsc(x.numero||'—')
+            + ' <span class="gst-est '+cl+'">'+galStEsc(x.estado)+'</span></td>'
+            + '<td>'+galStEsc(x.fecha)+'</td><td>'+galStEsc(x.destinatario||'—')+'</td>'
+            + '<td style="text-align:right" class="gst-n">'+galStNum(x.bultos,0)+'</td>'
+            + '<td style="text-align:right">'+galStNum(x.kilos,0)+'</td>'
+            + '<td><button class="btn bo bs" onclick="galDspAbrir('+x.id+')">'
+            + (x.estado==='borrador'?'Seguir cargando':'Ver')+'</button></td></tr>';
+        }).join('')
+      + '</tbody></table></div>'
+    : '<div class="ojo">Todavía no se despachó nada. El botón de arriba arma el primero.</div>';
+}
+
+/* ── LA VENTANA ─────────────────────────────────────────────────────────────────────
+   Abrirla con id abre uno que ya existe; sin id ARRANCA uno nuevo en el servidor, para
+   que lo que se cargue tenga dónde ir. Y DEJA LA VENTANA EN BLANCO antes de llenarla:
+   un formulario que sólo se esconde conserva lo que tenía, que en un despacho sería
+   mandarle las cajas de uno al destinatario del anterior. */
+async function galDspAbrir(id){
+  var set = function(k,v){ var e=document.getElementById(k); if(e) e.value = v==null?'':v; };
+  ['gal-dsp-fecha','gal-dsp-dest','gal-dsp-transp','gal-dsp-pat','gal-dsp-rem',
+   'gal-dsp-obs','gal-dsp-cant'].forEach(function(k){ set(k,''); });
+  document.getElementById('gal-dsp-rep').style.display='none';
+  document.getElementById('gal-dsp-items').innerHTML='';
+  GST.abierto = null;
+
+  try{
+    if(!id){
+      var r = await fetch('/api/galpon/despachos', { method:'POST',
+        headers:{'Content-Type':'application/json'}, credentials:'same-origin',
+        body: JSON.stringify({ fecha: (GST.datos&&GST.datos.hoy)||'' }) });
+      var j = await r.json();
+      if(!j.ok) throw new Error(j.error||'No se pudo abrir el despacho');
+      GST.abierto = j.despacho;
+    } else {
+      var l = (GST.desp||[]).filter(function(x){ return x.id===id; });
+      if(!l.length) { await galStCargar(); l = (GST.desp||[]).filter(function(x){ return x.id===id; }); }
+      GST.abierto = l[0];
+    }
+    galDspPintar();
+    sgModalArriba('gal-dsp-modal');
+  }catch(e){ galStAviso(e.message); }
+}
+function galDspCerrar(){
+  document.getElementById('gal-dsp-modal').classList.remove('on');
+  GST.abierto = null;
+  galStCargar();
+}
+
+function galDspPintar(){
+  var x = GST.abierto; if(!x) return;
+  var set = function(k,v){ var e=document.getElementById(k); if(e) e.value = v==null?'':v; };
+  set('gal-dsp-fecha', x.fecha); set('gal-dsp-dest', x.destinatario);
+  set('gal-dsp-transp', x.transporte); set('gal-dsp-pat', x.patente);
+  set('gal-dsp-rem', x.remito); set('gal-dsp-obs', x.observacion);
+
+  var brr = x.estado==='borrador';
+  document.getElementById('gal-dsp-tit').textContent = brr
+    ? 'Armar despacho' : ('Despacho '+(x.numero||x.id));
+  document.getElementById('gal-dsp-cargar').style.display = brr ? '' : 'none';
+  document.getElementById('gal-dsp-emitir').style.display = brr ? '' : 'none';
+  document.getElementById('gal-dsp-anular').style.display =
+    x.estado==='emitido' ? '' : 'none';
+  ['gal-dsp-fecha','gal-dsp-dest','gal-dsp-transp','gal-dsp-pat','gal-dsp-rem']
+    .forEach(function(k){ var e=document.getElementById(k); if(e) e.disabled=!brr; });
+
+  if(!brr && x.numero){
+    var r = document.getElementById('gal-dsp-rep');
+    r.style.display=''; r.className = x.estado==='anulado' ? 'err' : 'oko';
+    r.innerHTML = x.estado==='anulado'
+      ? 'Despacho <b>'+galStEsc(x.numero)+'</b> ANULADO. Las cajas volvieron al stock.'
+      : 'Despacho <b>'+galStEsc(x.numero)+'</b> emitido: '+galStNum(x.bultos,0)
+        +' cajas, '+galStNum(x.kilos,0)+' kg.';
+  }
+
+  /* El selector de qué cargar sale del STOCK, no de un catálogo: no se puede tipear un
+     lote que no tiene nada. */
+  var sel = document.getElementById('gal-dsp-item');
+  if(sel){
+    sel.innerHTML = '<option value="">— Elegir del stock —</option>'
+      + (GST.disp||[]).map(function(f,i){
+          return '<option value="'+i+'">'+galStEsc(f.lote_nombre||('Lote '+f.lote_id))
+            + ' · '+galStEsc(f.destino)+' · '+galStEsc(f.presentacion||'granel')
+            + (f.calibre?(' · '+galStEsc(f.calibre)):'')
+            + ' — '+galStNum(f.bultos,0)+' cj / '+galStNum(f.kilos,0)+' kg</option>';
+        }).join('');
+  }
+  galDspItemPick();
+  galDspItems();
+}
+
+function galDspItemPick(){
+  var i = document.getElementById('gal-dsp-item').value;
+  var f = i===''? null : (GST.disp||[])[Number(i)];
+  var granel = f && !f.bultos;
+  document.getElementById('gal-dsp-cl').textContent = granel ? 'Kilos' : 'Cajas';
+  document.getElementById('gal-dsp-disp').textContent = f
+    ? (granel ? ('Hay '+galStNum(f.kilos,0)+' kg')
+              : ('Hay '+galStNum(f.bultos,0)+' cajas de '+galStNum(f.kg_unidad,1)+' kg'))
+    : '';
+}
+
+async function galDspAgregar(){
+  var x = GST.abierto; if(!x) return;
+  var i = document.getElementById('gal-dsp-item').value;
+  var f = i===''? null : (GST.disp||[])[Number(i)];
+  if(!f) return galStAviso('Elegí qué cargar');
+  var c = Number(document.getElementById('gal-dsp-cant').value)||0;
+  if(!(c>0)) return galStAviso('Poné la cantidad');
+  var granel = !f.bultos;
+  try{
+    var r = await fetch('/api/galpon/despachos/'+x.id+'/items', { method:'POST',
+      headers:{'Content-Type':'application/json'}, credentials:'same-origin',
+      body: JSON.stringify({ lote_id:f.lote_id, destino:f.destino,
+        presentacion_id:f.presentacion_id||0, calibre:f.calibre||'',
+        bultos: granel?null:c, kilos: granel?c:null }) });
+    var j = await r.json();
+    if(!j.ok) throw new Error(j.error||'No se pudo agregar');
+    GST.abierto = j.despacho || x;
+    document.getElementById('gal-dsp-cant').value='';
+    await galStCargar();
+    GST.abierto = (GST.desp||[]).filter(function(y){ return y.id===x.id; })[0] || GST.abierto;
+    galDspPintar();
+    galStAviso('');
+  }catch(e){ galStAviso(e.message); }
+}
+
+function galDspItems(){
+  var x = GST.abierto; if(!x) return;
+  var it = x.items||[];
+  var brr = x.estado==='borrador';
+  document.getElementById('gal-dsp-items').innerHTML = it.length
+    ? '<table class="pa-tbl gst-tbl" style="width:100%;table-layout:fixed">'
+      + '<colgroup><col style="width:26%"><col style="width:14%"><col style="width:20%">'
+      + '<col style="width:14%"><col style="width:14%"><col style="width:12%"></colgroup>'
+      + '<thead><tr><th>Lote</th><th>Destino</th><th>Presentación</th>'
+      + '<th style="text-align:right">Cajas</th><th style="text-align:right">Kilos</th>'
+      + '<th></th></tr></thead><tbody>'
+      + it.map(function(f){
+          return '<tr><td>'+galStEsc(f.lote_nombre||('Lote '+f.lote_id))+'</td>'
+            + '<td>'+galStEsc(f.destino)+'</td>'
+            + '<td>'+galStEsc(f.presentacion||'A granel')
+            + (f.calibre?(' '+galStEsc(f.calibre)):'')+'</td>'
+            + '<td style="text-align:right" class="gst-n">'+galStNum(f.bultos,0)+'</td>'
+            + '<td style="text-align:right">'+galStNum(f.kilos,0)+'</td>'
+            + '<td>'+(brr?('<button class="btn bo bs" onclick="galDspSacar('+f.id+')">×</button>'):'')
+            + '</td></tr>';
+        }).join('')
+      + '</tbody><tfoot><tr style="font-weight:700"><td colspan="3">Total</td>'
+      + '<td style="text-align:right">'
+      + galStNum(it.reduce(function(t,f){ return t+(Number(f.bultos)||0); },0),0)+'</td>'
+      + '<td style="text-align:right">'
+      + galStNum(it.reduce(function(t,f){ return t+(Number(f.kilos)||0); },0),0)+'</td>'
+      + '<td></td></tr></tfoot></table>'
+    : '<div class="ojo">Todavía no cargaste nada en este despacho.</div>';
+}
+
+async function galDspSacar(id){
+  try{
+    var r = await fetch('/api/galpon/despachos/items/'+id, { method:'DELETE',
+      credentials:'same-origin' });
+    var j = await r.json();
+    if(!j.ok) throw new Error(j.error||'No se pudo sacar');
+    var ab = GST.abierto;
+    await galStCargar();
+    GST.abierto = (GST.desp||[]).filter(function(y){ return y.id===(ab&&ab.id); })[0]||null;
+    if(GST.abierto) galDspPintar(); else galDspCerrar();
+  }catch(e){ galStAviso(e.message); }
+}
+
+async function galDspGuardar(){
+  var x = GST.abierto; if(!x || x.estado!=='borrador') return true;
+  var g = function(k){ var e=document.getElementById(k); return e?e.value:''; };
+  try{
+    var r = await fetch('/api/galpon/despachos/'+x.id, { method:'PATCH',
+      headers:{'Content-Type':'application/json'}, credentials:'same-origin',
+      body: JSON.stringify({ fecha:g('gal-dsp-fecha'), destinatario:g('gal-dsp-dest'),
+        transporte:g('gal-dsp-transp'), patente:g('gal-dsp-pat'),
+        remito:g('gal-dsp-rem'), observacion:g('gal-dsp-obs') }) });
+    var j = await r.json();
+    if(!j.ok) throw new Error(j.error||'No se pudo guardar');
+    return true;
+  }catch(e){ galStAviso(e.message); return false; }
+}
+
+async function galDspEmitir(){
+  var x = GST.abierto; if(!x) return;
+  if(!(await galDspGuardar())) return;
+  if(!confirm('¿Emitir el despacho?\n\nSe le pone número y las cajas se descuentan del '
+    + 'stock. Después sólo se puede anular.')) return;
+  try{
+    var r = await fetch('/api/galpon/despachos/'+x.id+'/emitir', { method:'POST',
+      credentials:'same-origin' });
+    var j = await r.json();
+    if(!j.ok) throw new Error(j.error||'No se pudo emitir');
+    /* La ventana NO se cierra: adentro queda el número, que es lo que hay que leer
+       (CLAUDE.md). Se cierra con el botón. */
+    await galStCargar();
+    GST.abierto = (GST.desp||[]).filter(function(y){ return y.id===x.id; })[0] || j.despacho;
+    galDspPintar();
+  }catch(e){ galStAviso(e.message); }
+}
+
+async function galDspAnular(){
+  var x = GST.abierto; if(!x) return;
+  var m = prompt('¿Por qué se anula el despacho '+(x.numero||x.id)+'?\n\n'
+    + 'Las cajas vuelven al stock y el número queda gastado: no se reutiliza.');
+  if(m===null) return;
+  try{
+    var r = await fetch('/api/galpon/despachos/'+x.id+'/anular', { method:'POST',
+      headers:{'Content-Type':'application/json'}, credentials:'same-origin',
+      body: JSON.stringify({ motivo:m }) });
+    var j = await r.json();
+    if(!j.ok) throw new Error(j.error||'No se pudo anular');
+    await galStCargar();
+    GST.abierto = (GST.desp||[]).filter(function(y){ return y.id===x.id; })[0] || j.despacho;
+    galDspPintar();
+  }catch(e){ galStAviso(e.message); }
+}
+
+function galStInit(){ galStCargar(); }
 
 </script>
 

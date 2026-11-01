@@ -26,6 +26,9 @@ import {
   DESTINOS, presentaciones, guardarPresentacion, borrarPresentacion,
   lotesConDatos, guardarDatosDeLote, variedadATodos,
   palletAbierto, abrirPallet, contenidoDelPallet, cerrarPallet, reabrirPallet,
+  disponibleParaDespacho, despachos, itemsDelDespacho, abrirDespacho, editarDespacho,
+  agregarAlDespacho, sacarDelDespacho, emitirDespacho, anularDespacho, borrarDespacho,
+  despachoPorNumero,
   borrarPallet, sacarDelPallet, pallets, palletPorNumero, valorConfig,
   registrarProceso, editarProceso, borrarProceso, procesosDelDia,
   tableroProceso, stockGalpon, stockPorLote, stockPorProducto, lotesVolcados,
@@ -933,4 +936,136 @@ router.get('/pallets/numero/:numero', (req, res) => {
     res.status(500).json({ ok: false, error: e.message });
   }
 });
+
+// ════════════════════════════════════════════════════════════════════════════════════
+// 🚚 EL DESPACHO
+// ════════════════════════════════════════════════════════════════════════════════════
+// Despachar es TRABAJO DEL DÍA y va con requireAuth, como cargar kilos y cerrar pallets.
+// El que arma el camión es el que lo despacha; pedir admin acá terminaría con el dueño
+// emitiendo remitos por teléfono. El nivel lo decide exigirNivel por la URL.
+//
+// Y anular tiene su PROPIA dirección (POST .../:id/anular), por la regla de CLAUDE.md:
+// un PATCH .../:id que aceptara estado='anulado' sería una puerta lateral por donde
+// cualquiera que pueda editar anula.
+router.get('/stock', (req, res) => {
+  try {
+    res.json({
+      ok: true,
+      stock: stockGalpon(db, { lote_id: req.query.lote_id }),
+      productos: stockPorProducto(db),
+      lotes: stockPorLote(db),
+      disponible: disponibleParaDespacho(db, { destino: req.query.destino }),
+      despachos: despachos(db, { limite: 50 }),
+    });
+  } catch (e) {
+    console.error('[GALPON] GET /stock:', e.message);
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+router.get('/despachos', (req, res) => {
+  try {
+    const l = despachos(db, { estado: req.query.estado, desde: req.query.desde,
+                              hasta: req.query.hasta, limite: req.query.limite });
+    res.json({ ok: true, despachos: l.map((x) => Object.assign({}, x,
+      { items: itemsDelDespacho(db, x.id) })) });
+  } catch (e) {
+    console.error('[GALPON] GET /despachos:', e.message);
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+router.post('/despachos', (req, res) => {
+  try {
+    const u = req._user || {};
+    res.json(abrirDespacho(db, Object.assign({}, req.body || {}, {
+      usuario_id: u.id || null, usuario: u.nombre || null,
+    })));
+  } catch (e) {
+    console.error('[GALPON] POST /despachos:', e.message);
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+router.patch('/despachos/:id', (req, res) => {
+  try {
+    const r = editarDespacho(db, num(req.params.id), req.body || {});
+    if (!r.ok) return res.status(400).json({ ok: false, error: r.motivo });
+    res.json(r);
+  } catch (e) {
+    console.error('[GALPON] PATCH /despachos/:id:', e.message);
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+router.post('/despachos/:id/items', (req, res) => {
+  try {
+    const u = req._user || {};
+    const r = agregarAlDespacho(db, num(req.params.id), Object.assign({}, req.body || {}, {
+      usuario_id: u.id || null, usuario: u.nombre || null,
+    }));
+    if (!r.ok) return res.status(400).json(Object.assign({ ok: false, error: r.motivo }, r));
+    res.json(r);
+  } catch (e) {
+    console.error('[GALPON] POST /despachos/:id/items:', e.message);
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+router.delete('/despachos/items/:procesoId', (req, res) => {
+  try {
+    const r = sacarDelDespacho(db, num(req.params.procesoId));
+    if (!r.ok) return res.status(400).json({ ok: false, error: r.motivo });
+    res.json(r);
+  } catch (e) {
+    console.error('[GALPON] DELETE /despachos/items:', e.message);
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+router.post('/despachos/:id/emitir', (req, res) => {
+  try {
+    const r = emitirDespacho(db, num(req.params.id));
+    if (!r.ok) return res.status(400).json({ ok: false, error: r.motivo });
+    res.json(r);
+  } catch (e) {
+    console.error('[GALPON] POST /despachos/:id/emitir:', e.message);
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+router.post('/despachos/:id/anular', (req, res) => {
+  try {
+    const r = anularDespacho(db, num(req.params.id), (req.body || {}).motivo);
+    if (!r.ok) return res.status(400).json({ ok: false, error: r.motivo });
+    res.json(r);
+  } catch (e) {
+    console.error('[GALPON] POST /despachos/:id/anular:', e.message);
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+router.delete('/despachos/:id', (req, res) => {
+  try {
+    const r = borrarDespacho(db, num(req.params.id));
+    if (!r.ok) return res.status(400).json({ ok: false, error: r.motivo });
+    res.json({ ok: true });
+  } catch (e) {
+    console.error('[GALPON] DELETE /despachos/:id:', e.message);
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+// Buscar por número: lo que se hace cuando llega un reclamo con un remito en la mano.
+router.get('/despachos/numero/:numero', (req, res) => {
+  try {
+    const x = despachoPorNumero(db, req.params.numero);
+    if (!x) return res.status(404).json({ ok: false, error: 'No hay ningún despacho con ese número' });
+    res.json({ ok: true, despacho: x });
+  } catch (e) {
+    console.error('[GALPON] GET /despachos/numero:', e.message);
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
 export default router;

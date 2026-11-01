@@ -336,6 +336,56 @@ db.exec(`
   );
   CREATE INDEX IF NOT EXISTS gal_pallet_estado_idx ON gal_pallets(estado);
 
+  -- ═══════════════════════════════════════════════════════════════════════════
+  -- EL DESPACHO
+  -- ═══════════════════════════════════════════════════════════════════════════
+  -- Andy, 1/11/2026: «quiero un módulo separado con Stock (de ahí vamos a hacer los
+  -- despachos)... la vuelta sería primero procesar y una vez que está en stock lo
+  -- despachamos».
+  --
+  -- Un despacho es una SALIDA del stock del galpón, y no es una tabla nueva de
+  -- movimientos: cada ítem despachado escribe una fila en gal_procesos con
+  -- tipo = 'salida'. Esa columna está desde la V1115 justamente para esto, y los seis
+  -- agregados de stock ya la descuentan (stockGalpon, stockPorProducto, stockPorLote).
+  -- Una tabla aparte de salidas obligaría a sumar dos lugares para saber qué hay, y el
+  -- día que una de las dos consultas se olvide de la otra el stock miente.
+  --
+  -- ── NO SE DESPACHA MÁS DE LO QUE HAY ──────────────────────────────────────
+  -- Es la ÚNICA validación del galpón que FRENA. Todo lo demás —tarjeta repetida,
+  -- balanza desconectada— se marca a_revisar porque la fruta ya está en la tolva y
+  -- negarse a guardar la pierde. Acá es al revés: la fruta todavía está en la cámara,
+  -- y un despacho de 300 cajas cuando hay 250 no es un dato a corregir después, es un
+  -- camión al que le van a faltar 50 cuando llegue.
+  --
+  -- Y nada se rechaza después del hecho tampoco acá: un despacho emitido se ANULA
+  -- (anulado_en), que devuelve los kilos al stock y deja el número gastado. Borrar la
+  -- fila haría desaparecer un remito que alguien tiene en la mano.
+  CREATE TABLE IF NOT EXISTS gal_despachos (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    numero        TEXT UNIQUE,              -- DG-26-00001, al emitir
+    estado        TEXT NOT NULL DEFAULT 'borrador',  -- borrador | emitido | anulado
+    fecha         TEXT NOT NULL,            -- YYYY-MM-DD
+    -- A dónde va. Texto libre a propósito: el día uno se despacha a San Gerónimo y a
+    -- la feria, y un selector de clientes de SG acá ataría este módulo a una operativa
+    -- que todavía no está al 100%, que es lo que Andy pidió no mezclar.
+    destinatario  TEXT,
+    transporte    TEXT,
+    patente       TEXT,
+    remito        TEXT,                     -- el remito de verdad, si ya se hizo
+    observacion   TEXT,
+    bultos        REAL,                     -- congelados al emitir, como el pallet
+    kilos         REAL,
+    emitido_en    TEXT,
+    anulado_en    TEXT,
+    anulado_motivo TEXT,
+    creado_en     TEXT DEFAULT (datetime('now','localtime')),
+    usuario_id    INTEGER,
+    usuario       TEXT,
+    eliminado_en  TEXT
+  );
+  CREATE INDEX IF NOT EXISTS gal_desp_estado_idx ON gal_despachos(estado, fecha);
+
+
   CREATE INDEX IF NOT EXISTS gal_proc_fecha_idx ON gal_procesos(fecha);
   CREATE INDEX IF NOT EXISTS gal_proc_lote_idx  ON gal_procesos(lote_id, fecha);
   CREATE INDEX IF NOT EXISTS gal_proc_dest_idx  ON gal_procesos(destino, fecha);
@@ -361,6 +411,10 @@ for (const sql of [
   //             vea: el rinde de un lote hecho de prorrateos no es el mismo dato que
   //             el de un lote que entró solo.
   "ALTER TABLE gal_procesos ADD COLUMN reparto TEXT",
+  // ── LA SALIDA APUNTA A SU DESPACHO ─────────────────────────────────────────────
+  // Sin esto, anular un despacho obligaría a adivinar qué filas eran suyas por fecha y
+  // destino —y dos despachos del mismo día a la misma feria son indistinguibles—.
+  "ALTER TABLE gal_procesos ADD COLUMN despacho_id INTEGER",
   "ALTER TABLE gal_procesos ADD COLUMN repartido INTEGER NOT NULL DEFAULT 0",
   "CREATE INDEX IF NOT EXISTS gal_proc_reparto_idx ON gal_procesos(reparto)",
   // EL ARTÍCULO Y LOS DATOS DEL TARJETÓN (V1119). Ver los comentarios de arriba.
@@ -431,6 +485,7 @@ for (const [clave, valor] of [
   ['etq_origen', 'Carpintería, San Juan · Producto argentino'],
   // El prefijo del número de pallet. PC = Puente Cordón.
   ['pallet_prefijo', 'PC'],
+  ['despacho_prefijo', 'DG'],
 ]) {
   try {
     db.prepare('INSERT OR IGNORE INTO gal_config (clave, valor) VALUES (?,?)').run(clave, valor);
