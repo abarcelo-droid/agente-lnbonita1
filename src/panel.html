@@ -7849,6 +7849,37 @@ input[type=number]{-moz-appearance:textfield;appearance:textfield}
         font-size:12.5px;padding:3px 0;border-top:1px dashed var(--bor)}
       #sec-galpon-proceso .gpr-sl span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
       #sec-galpon-proceso .gpr-sl b{font-variant-numeric:tabular-nums;white-space:nowrap}
+
+      /* ── 🧱 EL PALLET ──────────────────────────────────────────────────
+         Bordó, como el tarjetón que va a salir: lo que se ve en pantalla y lo que
+         se imprime tienen que parecerse, o nadie relaciona una cosa con la otra. */
+      #sec-galpon-proceso .gpl{border:2px solid #9b2232;border-radius:14px;
+        padding:13px 16px;margin-bottom:18px;background:#fdf7f8}
+      #sec-galpon-proceso .gpl-h{display:flex;align-items:center;gap:14px;
+        flex-wrap:wrap;justify-content:space-between}
+      #sec-galpon-proceso .gpl-t{font-size:13px;font-weight:700;color:#9b2232;
+        text-transform:uppercase;letter-spacing:.4px}
+      #sec-galpon-proceso .gpl-n{font-size:26px;font-weight:700;color:#9b2232;
+        font-variant-numeric:tabular-nums;line-height:1.1}
+      #sec-galpon-proceso .gpl-tot{display:flex;gap:20px;flex-wrap:wrap;align-items:baseline}
+      #sec-galpon-proceso .gpl-tot b{font-size:23px;font-variant-numeric:tabular-nums}
+      #sec-galpon-proceso .gpl-tot span{font-size:11.5px;color:var(--mut)}
+      #sec-galpon-proceso .gpl-chapa{display:inline-block;background:#1a1a1a;color:#fff;
+        border-radius:999px;padding:2px 10px;font-size:11px;font-weight:700;
+        letter-spacing:.4px;margin-left:6px}
+      #sec-galpon-proceso .gpl-l{display:flex;align-items:center;justify-content:space-between;
+        gap:10px;padding:6px 0;border-top:1px dashed #e6c9ce;font-size:12.5px}
+      #sec-galpon-proceso .gpl-l:first-of-type{border-top:0}
+      #sec-galpon-proceso .gpl-l b{font-variant-numeric:tabular-nums;white-space:nowrap}
+      #sec-galpon-proceso .gpl-art{font-size:10.5px;color:var(--mut)}
+      #sec-galpon-proceso .gpl-vacio{font-size:12.5px;color:var(--mut);padding:6px 0}
+
+      /* La lista de los cerrados. Sin barra lateral, como todo (CLAUDE.md). */
+      #sec-galpon-proceso .gpl-tbl{table-layout:fixed;width:100%;max-width:98vw}
+      #sec-galpon-proceso .gpl-tbl th,#sec-galpon-proceso .gpl-tbl td{
+        white-space:nowrap;overflow:hidden;text-overflow:ellipsis;vertical-align:middle}
+      #sec-galpon-proceso .gpl-num{font-weight:700;color:#9b2232;
+        font-variant-numeric:tabular-nums}
       /* ── 📦 EL STOCK ───────────────────────────────────────────────────
          Andy, 31/10/2026: «quiero el stock bien claro, por ejemplo cuánto quedó
          guardado en el frío». Lo que le faltaba a una lista de kilos es el número
@@ -7911,6 +7942,12 @@ input[type=number]{-moz-appearance:textfield;appearance:textfield}
     <div id="gpr-lotes" class="gpr-lotes"></div>
 
     <div id="gpr-tablero"></div>
+
+    <!-- ── 🧱 EL PALLET QUE SE ESTÁ ARMANDO ─────────────────────────────────────
+         Andy, 1/11/2026: «algo más parecido a Cierre de Pallet». Va ARRIBA de las
+         baldosas: todo lo que se cargue abajo cae acá, y hay que verlo antes de
+         apretar, no después. -->
+    <div id="gpr-pallet"></div>
     <div id="gpr-zonas" class="gpr-zonas"></div>
 
     <h3 class="gpr-t">Lo cargado este día</h3>
@@ -7927,6 +7964,8 @@ input[type=number]{-moz-appearance:textfield;appearance:textfield}
         <tbody id="gpr-body"></tbody>
       </table>
     </div>
+
+    <div id="gpr-pallets"></div>
 
     <h3 class="gpr-t">📦 Lo que hay guardado</h3>
     <div class="gal-ay" style="max-width:none;margin:-4px 0 10px">Todo lo procesado que
@@ -28107,6 +28146,64 @@ SG_MANUAL['galpon-proceso'] = { titulo: 'Galpón · Proceso', html:
   + 'da una caja y cuánto dan cien. Y hay un tope por carga que <b>marca y deja entrar</b>: '
   + 'lo que ya se embaló, se embaló.</div>'
 
+  + '<h3>🧱 El pallet y su tarjetón <span class="ver">V1120</span></h3>'
+  + '<p>Andy, 1/11/2026: <i>«la parte donde cargamos el proceso tiene que ser algo más '
+  + 'parecido a Cierre de Pallet, de ahí quiero que salga un tarjetón para '
+  + 'imprimir»</i>.</p>'
+  + '<p>El pallet <b>no reemplaza la carga: la envuelve</b>. Se sigue cargando caja por '
+  + 'caja con las baldosas, y lo que cambia es que esas cajas van a parar a un pallet que '
+  + 'después se cierra y se etiqueta.</p>'
+  + '<ul>'
+  + '<li><b>El primero se abre solo</b> con la primera carga del día. Pedirle al operador '
+  + 'que lo abra antes es un paso que se va a saltear, y esa caja quedaría suelta.</li>'
+  + '<li><b>Uno solo abierto por vez.</b> Dos son dos montones en el playón y ninguna '
+  + 'forma de saber a cuál fue la caja que se acaba de cargar.</li>'
+  + '<li>El cuadro bordó de arriba muestra <b>qué tiene adentro</b> mientras se carga, '
+  + 'agrupado por artículo: eso es exactamente un renglón del tarjetón.</li>'
+  + '</ul>'
+
+  + '<h3>🔢 El número <span class="ver">V1120</span></h3>'
+  + '<p>Sale <b>al cerrar</b>, no al abrir: <b>PC-26-00001</b>, con el prefijo, el año de '
+  + 'la fecha de empaque y un correlativo. Un pallet abierto que ya tuviera número '
+  + 'saltearía uno cada vez que alguien abre uno y se arrepiente — y el correlativo tiene '
+  + 'que ser correlativo: es lo que se cita en un remito y lo que se busca cuando un '
+  + 'cliente reclama.</p>'
+  + '<div class="ojo"><b>Reabrir conserva el número.</b> Es el mismo pallet físico y la '
+  + 'etiqueta que ya puede estar pegada lo sigue identificando. Pero los totales cambian, '
+  + 'así que <b>hay que reimprimir</b>. Soltar el número tendría dos caminos y los dos '
+  + 'malos: reutilizarlo deja dos pallets con el mismo, y dejarlo libre abre un hueco que '
+  + 'después nadie puede explicar.</div>'
+
+  + '<h3>🏷️ El tarjetón <span class="ver">V1120</span></h3>'
+  + '<p>Sale solo al cerrar, y se puede volver a imprimir desde la lista de pallets '
+  + 'cerrados. Hay <b>dos modelos y los elige el contenido</b>, no el que imprime:</p>'
+  + '<ul>'
+  + '<li><b>Un solo artículo</b>: el producto en letras grandes, con su categoría, su '
+  + 'calibre y su envase, y abajo bultos, kilos, lote, fecha, cuartel y RENSPA.</li>'
+  + '<li><b>Varios</b>: una línea por artículo con su lote y su RENSPA —un pallet mixto '
+  + 'puede tener fruta de dos cuadros— y el total abajo. Se marca <b>MIXTO</b>.</li>'
+  + '</ul>'
+  + '<p>Dejarlo a criterio de quien imprime sería una etiqueta que dice DAMASCO en letras '
+  + 'de diez centímetros sobre un pallet que abajo tiene ciruela.</p>'
+  + '<p><b>PARCIAL</b> sí lo elige el operador, porque el sistema no sabe si el pallet iba '
+  + 'a llevar más: se pregunta al cerrar y va impreso, para que quien lo recibe sepa que '
+  + 'no vienen las cajas que esperaba.</p>'
+  + '<p>El <b>QR lleva el número pelado</b>, igual que las tarjetas de cuadrilla: la '
+  + 'lectora se comporta como un teclado, y una dirección adentro del QR escribiría la '
+  + 'dirección entera en el casillero donde se espera el número.</p>'
+
+  + '<div class="ojo"><b>Lo que se imprimió es lo que viajó.</b> Al cerrar se congelan '
+  + 'los totales: borrar o corregir una carga después <b>no cambia</b> la etiqueta ya '
+  + 'emitida. Si hay que cambiarla, se reabre el pallet y se reimprime.</div>'
+
+  + '<h3>↩ Sacar, borrar y reabrir <span class="ver">V1120</span></h3>'
+  + '<ul>'
+  + '<li>Un pallet <b>con cargas adentro no se borra</b>: esas cajas existen y quedarían '
+  + 'contadas en el stock y en ningún pallet.</li>'
+  + '<li>De un pallet <b>cerrado</b> no se saca nada sin reabrirlo.</li>'
+  + '<li>Si hay que repartir cien cajas entre dos pallets, se cargan <b>dos veces</b> — '
+  + 'que es lo que se hace físicamente igual.</li>'
+  + '</ul>'
   + '<h3>❄️ Cuánto quedó guardado <span class="ver">V1116</span></h3>'
   + '<div class="ojo"><b>El stock va en BULTOS, no en kilos</b> <span class="ver">V1117</span>. '
   + 'Andy, 31/10/2026: <i>«los stock van en cajas porque necesitamos saber qué cargar. '
@@ -57919,9 +58016,11 @@ async function galPrCargar(){
     if (f && !f.value) f.value = j.fecha;
     galPrPintarLotes();
     galPrPintarTablero();
+    galPrPintarPallet();
     galPrPintarZonas();
     galPrPintar();
     galPrPintarStock();
+    galPrPintarPallets();
   } catch (e) {
     var b = document.getElementById('gpr-body');
     if (b) b.innerHTML = '<tr><td colspan="7" class="gpr-vacio">' + galPrEsc(e.message) + '</td></tr>';
@@ -58323,6 +58422,157 @@ async function galProcBorrarDesdeFicha(){
   var id = GPR.editId; if (!id) return;
   galProcCerrar();
   await galPrBorrar(id);
+}
+/* ── 🧱 EL PALLET QUE SE ESTÁ ARMANDO ──────────────────────────────────────────
+   Andy, 1/11/2026: «la parte donde cargamos el proceso tiene que ser algo más parecido
+   a "Cierre de Pallet", de ahí quiero que salga un tarjetón para imprimir».
+
+   El pallet NO reemplaza la carga: la envuelve. Se sigue cargando caja por caja con las
+   baldosas de abajo, y lo que cambia es que ahora esas cajas van a parar a un pallet
+   que se cierra y se etiqueta.
+
+   Va ARRIBA de las baldosas a propósito: todo lo que se cargue abajo cae acá, y el que
+   carga tiene que ver qué hay adentro ANTES de apretar, no después. */
+function galPrPintarPallet(){
+  var el = document.getElementById('gpr-pallet'); if (!el) return;
+  var p = GPR.datos && GPR.datos.pallet_abierto;
+  if (!p){
+    /* Sin pallet abierto no se muestra un cartel vacío: el primero se abre solo con la
+       primera carga, y anunciar que no hay ninguno sería pedirle al operador que haga
+       un paso que el sistema ya hace. */
+    el.innerHTML = '';
+    return;
+  }
+  var c = p.contenido || [];
+  var bultos = 0, kilos = 0;
+  c.forEach(function(x){ bultos += Number(x.bultos) || 0; kilos += Number(x.kilos) || 0; });
+
+  el.innerHTML = '<div class="gpl">'
+    + '<div class="gpl-h">'
+      + '<div><div class="gpl-t">Pallet abierto</div>'
+        + '<div class="gpl-n">sin número todavía'
+        + (c.length > 1 ? '<span class="gpl-chapa">MIXTO</span>' : '') + '</div></div>'
+      + '<div class="gpl-tot">'
+        + '<div><b>' + galPrNum(bultos, 0) + '</b> <span>bultos</span></div>'
+        + '<div><b>' + galPrNum(kilos) + '</b> <span>kg</span></div>'
+        + '<div><b>' + c.length + '</b> <span>' + (c.length === 1 ? 'artículo' : 'artículos')
+          + '</span></div>'
+      + '</div>'
+      + '<div style="display:flex;gap:8px">'
+        + (c.length ? '<button class="btn bp" onclick="galPlCerrar(' + p.id + ')">'
+            + 'Cerrar pallet y etiquetar</button>' : '')
+        + '<button class="btn bo bs" onclick="galPlBorrar(' + p.id + ')">×</button>'
+      + '</div>'
+    + '</div>'
+    + (c.length
+        ? '<div style="margin-top:10px">' + c.map(function(x){
+            return '<div class="gpl-l"><div style="min-width:0">'
+              + '<b style="font-weight:600">' + galPrEsc(x.producto || '—')
+              + (x.variedad ? ' ' + galPrEsc(x.variedad) : '') + '</b>'
+              + '<div class="gpl-art">CAT ' + galPrEsc(x.categoria || 'I')
+                + (x.calibre ? ' · ' + galPrEsc(x.calibre) : '')
+                + (x.envase ? ' · ' + galPrEsc(x.envase) : '')
+                + ' · lote ' + galPrEsc(x.lote_nombre || '—') + '</div></div>'
+              + '<b>' + galPrNum(x.bultos, 0) + ' b · ' + galPrNum(x.kilos) + ' kg</b>'
+              + '</div>';
+          }).join('') + '</div>'
+        : '<div class="gpl-vacio">Todavía no tiene nada. Lo que cargues abajo cae acá.'
+          + '</div>')
+    + '</div>';
+}
+
+/* CERRAR es lo que le pone el número y emite la etiqueta, así que se pregunta — y se
+   pregunta de una sola vez, con lo PARCIAL adentro del mismo diálogo: un segundo cartel
+   para una casilla se contesta sin leerlo. */
+async function galPlCerrar(id){
+  var p = GPR.datos && GPR.datos.pallet_abierto;
+  var c = (p && p.contenido) || [];
+  var bultos = 0;
+  c.forEach(function(x){ bultos += Number(x.bultos) || 0; });
+  var parcial = confirm('Cerrar el pallet con ' + galPrNum(bultos, 0) + ' bultos en '
+    + c.length + (c.length === 1 ? ' artículo.' : ' artículos.')
+    + '\n\nAceptar = el pallet va COMPLETO.'
+    + '\nCancelar = todavía no lo cierro.') ? false : null;
+  if (parcial === null) return;
+  /* Lo PARCIAL se pregunta aparte y sólo después de decidir cerrar: va impreso en la
+     etiqueta, y quien recibe el pallet tiene que saber que no vienen las cajas que
+     esperaba. */
+  parcial = confirm('¿Va PARCIAL?\n\nAceptar = sí, queda impreso en la etiqueta.'
+    + '\nCancelar = no, va completo.');
+
+  try {
+    var r = await fetch('/api/galpon/pallets/' + id + '/cerrar', { method:'POST',
+      credentials:'include', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ parcial: parcial ? 1 : 0 }) });
+    var j = await r.json();
+    if (!j.ok) return alert(j.error || 'no se pudo cerrar');
+    await galPrCargar();
+    /* Y se abre el tarjetón enseguida. Cerrar un pallet y no imprimir la etiqueta es
+       un pallet sin identificar en el playón: el paso siguiente es siempre pegarla. */
+    window.open('/api/galpon/pallets/' + id + '/tarjeton.pdf', '_blank');
+  } catch (e) { alert('No se pudo cerrar: ' + e.message); }
+}
+
+async function galPlBorrar(id){
+  if (!confirm('¿Borrar este pallet abierto?\n\nLas cargas que tenga adentro NO se '
+    + 'borran: hay que sacarlas o borrarlas primero.')) return;
+  try {
+    var r = await fetch('/api/galpon/pallets/' + id, { method:'DELETE',
+      credentials:'include' });
+    var j = await r.json();
+    if (!j.ok) return alert(j.error || 'no se pudo borrar');
+    await galPrCargar();
+  } catch (e) { alert('No se pudo borrar: ' + e.message); }
+}
+
+async function galPlReabrir(id){
+  if (!confirm('¿Reabrir este pallet?\n\nEl número se conserva: es el mismo pallet. '
+    + 'Pero los totales cambian, así que hay que REIMPRIMIR la etiqueta.')) return;
+  try {
+    var r = await fetch('/api/galpon/pallets/' + id + '/reabrir', { method:'POST',
+      credentials:'include' });
+    var j = await r.json();
+    if (!j.ok) return alert(j.error || 'no se pudo reabrir');
+    await galPrCargar();
+  } catch (e) { alert('No se pudo reabrir: ' + e.message); }
+}
+
+/* La lista de los cerrados, plegada: lo de todos los días es el que se está armando. */
+var GPL_VER = false;
+function galPlVer(){ GPL_VER = !GPL_VER; galPrPintarPallets(); }
+
+function galPrPintarPallets(){
+  var el = document.getElementById('gpr-pallets'); if (!el) return;
+  var ps = ((GPR.datos && GPR.datos.pallets) || [])
+    .filter(function(p){ return p.estado === 'cerrado'; });
+  if (!ps.length){ el.innerHTML = ''; return; }
+  var cab = '<button class="gac-plg" style="margin-top:14px" onclick="galPlVer()">'
+    + (GPL_VER ? '▴ ocultar los pallets cerrados'
+        : '▾ ver los ' + ps.length + ' pallets cerrados') + '</button>';
+  if (!GPL_VER){ el.innerHTML = cab; return; }
+
+  el.innerHTML = cab
+    + '<div class="ab-table-wrap"><table class="pa-tbl gpl-tbl">'
+    + '<colgroup><col style="width:18%"><col style="width:14%"><col style="width:14%">'
+    + '<col style="width:12%"><col style="width:12%"><col style="width:30%"></colgroup>'
+    + '<thead><tr><th>Pallet</th><th>Empaque</th><th style="text-align:right">Bultos</th>'
+    + '<th style="text-align:right">Kilos</th><th></th><th style="text-align:right"></th>'
+    + '</tr></thead><tbody>'
+    + ps.map(function(p){
+        return '<tr>'
+          + '<td class="gpl-num">' + galPrEsc(p.numero || '—') + '</td>'
+          + '<td>' + galPrEsc(galAcFechaCorta(p.fecha_empaque)) + '</td>'
+          + '<td class="gpr-n"><b>' + galPrNum(p.bultos, 0) + '</b></td>'
+          + '<td class="gpr-n">' + galPrNum(p.kilos) + '</td>'
+          + '<td>' + (p.mixto ? '<span class="gpl-chapa">MIXTO</span>' : '')
+            + (p.parcial ? '<span class="gpl-chapa">PARCIAL</span>' : '') + '</td>'
+          + '<td style="text-align:right">'
+            + '<a class="btn bo bs" target="_blank" href="/api/galpon/pallets/'
+              + p.id + '/tarjeton.pdf">🖨 tarjetón</a> '
+            + '<button class="btn bo bs" onclick="galPlReabrir(' + p.id + ')">reabrir</button>'
+          + '</td></tr>';
+      }).join('')
+    + '</tbody></table></div>';
 }
 /* ── LO CARGADO ESTE DÍA ─────────────────────────────────────────────────────────── */
 function galPrPintar(){

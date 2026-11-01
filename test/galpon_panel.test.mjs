@@ -951,6 +951,13 @@ test('los cortes del panel no quedaron ni vacíos ni de más', () => {
   assert.ok(!JS_RAP.includes('var GAC'), 'JS_RAP se comió el acumulado');
   assert.ok(!JS_RAP.includes('var GPR = {'), 'JS_RAP se comió el proceso');
   assert.ok(!JS_RAP.includes('var GPRES'), 'JS_RAP se comió el catálogo');
+  // Y que los cortes lleguen hasta el FINAL de su bloque. Un banner nuevo en el medio
+  // lo parte al medio, y los asserts de la segunda mitad pasan a mirar la nada — sin
+  // que el corte quede vacío, que es lo único que este centinela miraba antes.
+  assert.ok(JS_PR.includes('function galPrPintarStock('),
+    'JS_PR se corta antes del final del bloque de proceso');
+  assert.ok(JS_AC.includes('function galAcPintar('),
+    'JS_AC se corta antes del final del bloque del acumulado');
   assert.ok(!JS_AC.includes('var GPR = {'), 'JS_AC se comió el proceso');
   assert.ok(JS_AC.length < 30000, 'JS_AC se pasó de largo: ' + JS_AC.length);
   assert.ok(!JS_KG.includes('var GRP'), 'JS_KG se comió la carga rápida');
@@ -1779,6 +1786,18 @@ test('LOS COLORES DE LOS GRÁFICOS SON LOS MISMOS EN TODAS LAS PANTALLAS', () =>
 // ══════════════════════════════════════════════════════════════════════════
 // 14 · EL ARTÍCULO Y LOS DATOS DEL TARJETÓN (V1119)
 // ══════════════════════════════════════════════════════════════════════════
+test('EL PALLET VIAJA CON LA PANTALLA DE PROCESO', () => {
+  // La pantalla de proceso ES la de cierre de pallet: si no viaja, el cuadro bordó
+  // queda vacío y el operador carga cajas sin ver adónde van — y la pantalla se ve
+  // completa igual, con las baldosas y el stock.
+  assert.ok(RUTA.includes('pallet_abierto: (function () {'),
+    'el pallet abierto no viaja en la respuesta de la pantalla');
+  assert.ok(RUTA.includes('pallets: pallets(db, { limite: 50 })'));
+  assert.ok(JS_PR.includes('GPR.datos && GPR.datos.pallet_abierto'));
+  assert.ok(JS_PR.includes('function galPrPintarPallet(){'));
+  assert.ok(JS_PR.includes('galPrPintarPallet();'));
+});
+
 test('LOS DATOS DEL LOTE VIVEN EN UNA TABLA DEL GALPÓN, no en pa_lotes', () => {
   // pa_lotes la mantiene Producción. Una columna del galpón ahí la hace nuestra
   // para siempre — misma regla que las tarjetas de las cuadrillas.

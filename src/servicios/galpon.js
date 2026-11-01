@@ -57,6 +57,15 @@ export function config(db) {
   };
 }
 
+// Una sola clave, sin convertir. config() devuelve las conocidas ya parseadas; esto es
+// para las de texto que no vale la pena agregar allá — el prefijo del pallet, los
+// renglones del pie de la etiqueta.
+export function valorConfig(db, clave, porDefecto) {
+  const f = db.prepare('SELECT valor FROM gal_config WHERE clave = ?').get(String(clave || ''));
+  const v = f && f.valor != null ? String(f.valor) : null;
+  return v && v !== '' ? v : (porDefecto == null ? null : porDefecto);
+}
+
 export function guardarConfig(db, clave, valor) {
   db.prepare(`INSERT INTO gal_config (clave, valor, actualizado)
               VALUES (?,?,datetime('now','localtime'))
@@ -1182,12 +1191,19 @@ export function registrarProceso(db, d) {
   const bultosPorLote = bultos == null ? lotes.map(() => null) : repartir(bultos, pesos);
   const grupo = esMezcla ? (txt(dd.uuid) || String(Date.now()) + Math.random()) : null;
 
+  /* AL PALLET ABIERTO. Si no hay ninguno se abre uno solo: pedirle al operador que
+     abra el pallet antes de la primera caja es un paso que se va a saltear, y la caja
+     quedaría suelta sin que nada avise. */
+  const palletId = dd.sin_pallet ? null : abrirPallet(db, { fecha_empaque: fecha,
+    usuario_id: dd.usuario_id, usuario: dd.usuario }).id;
+
   const ins = db.prepare(
     ' INSERT OR IGNORE INTO gal_procesos (uuid,fecha,lote_id,lote_nombre,producto,destino,'
     + ' presentacion_id,presentacion,envase,bultos,por_bulto,kg_unidad,kilos,tipo,'
     + ' categoria,calibre,variedad,renspa,cuartel,'
+    + ' pallet_id,'
     + ' reparto,repartido,observacion,estado,revision_motivo,usuario_id,usuario)'
-    + " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,'ingreso',?,?,?,?,?,?,?,?,?,?,?,?)");
+    + " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,'ingreso',?,?,?,?,?,?,?,?,?,?,?,?,?)");
 
   /* EL DOBLE CLIC. Si el primer uuid ya está, la carga entró entera y no se hace
      nada: el INSERT OR IGNORE de abajo protege la carrera, pero mirar primero es lo
@@ -1213,6 +1229,7 @@ export function registrarProceso(db, d) {
       (datosLote.get(lotes[i]) || {}).variedad || null,
       (datosLote.get(lotes[i]) || {}).renspa || null,
       (datosLote.get(lotes[i]) || {}).cuartel || null,
+      palletId,
       grupo, esMezcla ? 1 : 0,
       txt(dd.observacion), estado, motivo, dd.usuario_id || null, txt(dd.usuario));
     if (r.changes) ids.push(Number(r.lastInsertRowid));
@@ -1780,4 +1797,204 @@ export function rindePorLote(db, desde, hasta) {
     sin_procesar: round2(m.volcado - m.procesado),
     rinde: m.volcado > 0 ? Math.round((m.comercial / m.volcado) * 1000) / 10 : null,
   })).sort((a, b) => b.volcado - a.volcado || b.procesado - a.procesado);
+}
+
+// ════════════════════════════════════════════════════════════════════════════════════
+// 🧱 EL PALLET
+// ════════════════════════════════════════════════════════════════════════════════════
+// Andy, 1/11/2026: «la parte donde cargamos el proceso tiene que ser algo más parecido a
+// "Cierre de Pallet", de ahí quiero que salga un tarjetón para imprimir».
+//
+// El pallet no reemplaza la carga: la ENVUELVE. Se sigue cargando caja por caja contra
+// el pallet abierto, y cerrarlo es lo que le pone número y emite la etiqueta.
+
+// Un solo pallet abierto por vez. Dos abiertos a la vez son dos montones en el playón y
+// ninguna forma de saber a cuál fue la caja que se acaba de cargar — y lo que decide eso
+// no es el sistema, es dónde la apoyó el que la llevó.
+export function palletAbierto(db) {
+  return db.prepare(
+    " SELECT * FROM gal_pallets WHERE estado = 'abierto' AND eliminado_en IS NULL"
+    + '  ORDER BY id DESC LIMIT 1').get() || null;
+}
+
+export function abrirPallet(db, d) {
+  const dd = d || {};
+  const ya = palletAbierto(db);
+  if (ya) return { ok: true, id: ya.id, pallet: ya, ya_estaba: true };
+  const f = esFecha(dd.fecha_empaque) || esFecha(dd.fecha);
+  const r = db.prepare(
+    ' INSERT INTO gal_pallets (fecha_empaque, usuario_id, usuario) VALUES (?,?,?)')
+    .run(f, dd.usuario_id || null, txt(dd.usuario));
+  const id = Number(r.lastInsertRowid);
+  return { ok: true, id, pallet: db.prepare('SELECT * FROM gal_pallets WHERE id = ?').get(id) };
+}
+
+// ── LO QUE TIENE ADENTRO ────────────────────────────────────────────────────────────
+// Agrupado por ARTÍCULO —producto, variedad, categoría, calibre, envase y lote—, que es
+// exactamente un renglón del tarjetón. Dos cargas del mismo artículo y el mismo lote son
+// un solo renglón: la etiqueta dice cuántas cajas hay, no cuántas veces se apretó Enter.
+export function contenidoDelPallet(db, palletId) {
+  const id = parseInt(palletId, 10);
+  if (!Number.isFinite(id)) return [];
+  return db.prepare(
+    ' SELECT producto, variedad, categoria, calibre, envase, presentacion,'
+    + '       lote_nombre, renspa, cuartel, destino,'
+    + '       COALESCE(SUM(bultos),0) AS bultos,'
+    + '       COALESCE(SUM(kilos),0) AS kilos,'
+    + '       COUNT(*) AS cargas'
+    + '  FROM gal_procesos'
+    + "  WHERE pallet_id = ? AND eliminado_en IS NULL AND tipo = 'ingreso'"
+    + '  GROUP BY producto, variedad, categoria, calibre, envase, presentacion,'
+    + '           lote_nombre, renspa, cuartel, destino'
+    + '  ORDER BY SUM(kilos) DESC').all(id).map((r) => Object.assign(r, {
+    bultos: round2(r.bultos), kilos: round2(r.kilos),
+  }));
+}
+
+/* EL NÚMERO. PC-26-01234: prefijo, los dos dígitos del año y un correlativo de cinco.
+   Se arma con el MÁXIMO del año y no con un contador aparte: un contador que se
+   incrementa antes de escribir se saltea un número cada vez que algo falla, y el hueco
+   en la numeración de los pallets es lo que después nadie puede explicar. */
+export function proximoNumero(db, fecha) {
+  const f = esFecha(fecha) || '';
+  const anio = f ? f.slice(2, 4) : String(new Date().getFullYear()).slice(2);
+  const pref = (valorConfig(db, 'pallet_prefijo') || 'PC') + '-' + anio + '-';
+  const ult = db.prepare(
+    ' SELECT numero FROM gal_pallets WHERE numero LIKE ?'
+    + ' ORDER BY numero DESC LIMIT 1').get(pref + '%');
+  const n = ult ? (parseInt(String(ult.numero).slice(pref.length), 10) || 0) : 0;
+  return pref + String(n + 1).padStart(5, '0');
+}
+
+export function cerrarPallet(db, id, d) {
+  const i = parseInt(id, 10);
+  const dd = d || {};
+  if (!Number.isFinite(i)) return { ok: false, motivo: 'Id inválido' };
+  const p = db.prepare('SELECT * FROM gal_pallets WHERE id = ? AND eliminado_en IS NULL').get(i);
+  if (!p) return { ok: false, motivo: 'Ese pallet no existe o ya se borró' };
+  if (p.estado === 'cerrado') {
+    // No es un error: el segundo clic de un doble clic, o dos personas cerrando el mismo.
+    return { ok: true, id: i, pallet: p, ya_estaba: true };
+  }
+
+  const cont = contenidoDelPallet(db, i);
+  if (!cont.length) {
+    /* Un pallet vacío sí se rechaza, y es la única excepción a «nada se rechaza después
+       del hecho»: acá no pasó nada todavía. Cerrarlo gastaría un número del correlativo
+       en una etiqueta de cero cajas. */
+    return { ok: false, motivo: 'Este pallet no tiene nada cargado. Cargá algo o borralo.' };
+  }
+
+  const bultos = round2(cont.reduce((t, x) => t + (x.bultos || 0), 0));
+  const kilos = round2(cont.reduce((t, x) => t + x.kilos, 0));
+  // MIXTO lo decide el contenido, no el que cierra.
+  const mixto = cont.length > 1 ? 1 : 0;
+  /* Si ya tenía número —se reabrió y se vuelve a cerrar— se conserva: es el mismo
+     pallet físico y la etiqueta que puede estar pegada lo sigue identificando. Pedir
+     uno nuevo en cada cierre dejaría dos números para un solo pallet y un hueco en el
+     correlativo por cada corrección. */
+  const numero = p.numero || proximoNumero(db, p.fecha_empaque);
+
+  db.prepare(
+    " UPDATE gal_pallets SET numero = ?, estado = 'cerrado', parcial = ?, mixto = ?,"
+    + '   bultos = ?, kilos = ?, observacion = COALESCE(?, observacion),'
+    + "   cerrado_en = datetime('now','localtime')"
+    + ' WHERE id = ?').run(numero, dd.parcial ? 1 : 0, mixto, bultos, kilos,
+                           txt(dd.observacion), i);
+
+  return { ok: true, id: i, numero,
+           pallet: db.prepare('SELECT * FROM gal_pallets WHERE id = ?').get(i),
+           contenido: cont };
+}
+
+/* Reabrir uno cerrado. EL NÚMERO SE CONSERVA: es el mismo pallet físico, y la etiqueta
+   que ya puede estar pegada en el playón lo sigue identificando. Soltarlo tendría dos
+   caminos y los dos malos: reutilizarlo deja DOS pallets con el mismo número —lo peor que
+   le puede pasar a un remito— y dejarlo libre abre un hueco en el correlativo que después
+   nadie puede explicar.
+
+   Lo que sí hay que hacer es REIMPRIMIR: el número es el mismo pero los totales cambian. */
+export function reabrirPallet(db, id) {
+  const i = parseInt(id, 10);
+  if (!Number.isFinite(i)) return { ok: false, motivo: 'Id inválido' };
+  const p = db.prepare('SELECT * FROM gal_pallets WHERE id = ? AND eliminado_en IS NULL').get(i);
+  if (!p) return { ok: false, motivo: 'Ese pallet no existe' };
+  if (p.estado !== 'cerrado') return { ok: false, motivo: 'Ese pallet ya está abierto' };
+  if (palletAbierto(db)) {
+    return { ok: false, motivo: 'Ya hay un pallet abierto. Cerralo primero.' };
+  }
+  db.prepare(
+    " UPDATE gal_pallets SET estado = 'abierto', cerrado_en = NULL,"
+    + ' bultos = NULL, kilos = NULL WHERE id = ?').run(i);
+  return { ok: true, id: i, numero: p.numero };
+}
+
+export function borrarPallet(db, id) {
+  const i = parseInt(id, 10);
+  if (!Number.isFinite(i)) return { ok: false, motivo: 'Id inválido' };
+  const cont = contenidoDelPallet(db, i);
+  if (cont.length) {
+    /* Con cargas adentro no se borra: esas cajas existen y borrar el pallet las dejaría
+       sin dónde, contadas en el stock y en ningún pallet. Se sacan primero. */
+    return { ok: false, motivo: 'Tiene cargas adentro. Sacalas o borralas primero.' };
+  }
+  const r = db.prepare(
+    "UPDATE gal_pallets SET eliminado_en = datetime('now','localtime')"
+    + ' WHERE id = ? AND eliminado_en IS NULL').run(i);
+  if (!r.changes) return { ok: false, motivo: 'Ese pallet no existe o ya se borró' };
+  return { ok: true };
+}
+
+// Sacar una carga del pallet sin borrarla: la caja existe, estaba en el montón
+// equivocado. Vuelve a quedar sin pallet y se puede sumar a otro.
+export function sacarDelPallet(db, procesoId) {
+  const i = parseInt(procesoId, 10);
+  if (!Number.isFinite(i)) return { ok: false, motivo: 'Id inválido' };
+  const f = db.prepare('SELECT pallet_id FROM gal_procesos WHERE id = ? AND eliminado_en IS NULL')
+              .get(i);
+  if (!f) return { ok: false, motivo: 'Esa carga no existe' };
+  if (!f.pallet_id) return { ok: false, motivo: 'Esa carga no está en ningún pallet' };
+  const p = db.prepare('SELECT estado FROM gal_pallets WHERE id = ?').get(f.pallet_id);
+  if (p && p.estado === 'cerrado') {
+    return { ok: false, motivo: 'Ese pallet está cerrado. Reabrilo primero.' };
+  }
+  db.prepare('UPDATE gal_procesos SET pallet_id = NULL WHERE id = ?').run(i);
+  return { ok: true };
+}
+
+// ── LA LISTA ────────────────────────────────────────────────────────────────────────
+export function pallets(db, opts) {
+  const o = opts || {};
+  const cond = [], val = [];
+  if (o.estado) { cond.push('estado = ?'); val.push(o.estado); }
+  if (esFecha(o.desde)) { cond.push('fecha_empaque >= ?'); val.push(esFecha(o.desde)); }
+  if (esFecha(o.hasta)) { cond.push('fecha_empaque <= ?'); val.push(esFecha(o.hasta)); }
+  const filas = db.prepare(
+    ' SELECT * FROM gal_pallets WHERE eliminado_en IS NULL'
+    + (cond.length ? ' AND ' + cond.join(' AND ') : '')
+    + ' ORDER BY (estado = \'abierto\') DESC, id DESC'
+    + ' LIMIT ' + (Number(o.limite) > 0 ? Math.min(500, Number(o.limite)) : 200)).all(...val);
+
+  /* A los ABIERTOS se les calculan los totales al vuelo: todavía no hay nada congelado y
+     mostrar su casillero vacío sería esconder lo único que importa de un pallet abierto,
+     que es cuánto lleva. */
+  return filas.map((p) => {
+    if (p.estado === 'cerrado') return p;
+    const c = contenidoDelPallet(db, p.id);
+    return Object.assign({}, p, {
+      bultos: round2(c.reduce((t, x) => t + (x.bultos || 0), 0)),
+      kilos: round2(c.reduce((t, x) => t + x.kilos, 0)),
+      mixto: c.length > 1 ? 1 : 0,
+      lineas: c.length,
+    });
+  });
+}
+
+export function palletPorNumero(db, numero) {
+  const n = txt(numero);
+  if (!n) return null;
+  const p = db.prepare(
+    'SELECT * FROM gal_pallets WHERE numero = ? AND eliminado_en IS NULL').get(n);
+  if (!p) return null;
+  return Object.assign({}, p, { contenido: contenidoDelPallet(db, p.id) });
 }

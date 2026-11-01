@@ -55,12 +55,17 @@ function base() {
       por_bulto REAL DEFAULT 1, kg_unidad REAL DEFAULT 1, granel INTEGER DEFAULT 0, categoria TEXT NOT NULL DEFAULT 'I', calibre TEXT,
       color TEXT, orden INTEGER DEFAULT 100, activo INTEGER DEFAULT 1,
       creado_en TEXT, eliminado_en TEXT);
+    CREATE TABLE gal_pallets (id INTEGER PRIMARY KEY AUTOINCREMENT, numero TEXT UNIQUE,
+      estado TEXT NOT NULL DEFAULT 'abierto', parcial INTEGER NOT NULL DEFAULT 0,
+      mixto INTEGER NOT NULL DEFAULT 0, fecha_empaque TEXT, bultos REAL, kilos REAL,
+      observacion TEXT, abierto_en TEXT, cerrado_en TEXT, usuario_id INTEGER,
+      usuario TEXT, eliminado_en TEXT);
     CREATE TABLE gal_procesos (
       id INTEGER PRIMARY KEY AUTOINCREMENT, uuid TEXT UNIQUE, fecha TEXT NOT NULL,
       lote_id INTEGER NOT NULL, lote_nombre TEXT, producto TEXT, destino TEXT NOT NULL,
       presentacion_id INTEGER, presentacion TEXT, envase TEXT, categoria TEXT, calibre TEXT, variedad TEXT, renspa TEXT, cuartel TEXT, bultos REAL, por_bulto REAL,
       kg_unidad REAL, kilos REAL NOT NULL, tipo TEXT NOT NULL DEFAULT 'ingreso',
-      reparto TEXT, repartido INTEGER NOT NULL DEFAULT 0, observacion TEXT,
+      reparto TEXT, repartido INTEGER NOT NULL DEFAULT 0, pallet_id INTEGER, observacion TEXT,
       estado TEXT NOT NULL DEFAULT 'ok', revision_motivo TEXT, usuario_id INTEGER,
       usuario TEXT, creado_en TEXT, eliminado_en TEXT);
   `);
