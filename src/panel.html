@@ -6945,6 +6945,12 @@ input[type=number]{-moz-appearance:textfield;appearance:textfield}
         border:2px solid rgba(0,0,0,.14);vertical-align:middle;cursor:pointer}
       #sec-galpon-config .gal-sw.ro{cursor:default}
       #sec-galpon-config .gal-sin{color:var(--mut);font-style:italic;font-size:11.5px}
+      /* Los campos del tarjetón se editan en el renglón, sin ventana: son tres campos
+         cortos por lote y abrir una ventana para cada uno sería pelearse con el que
+         los carga. */
+      #sec-galpon-config input.gal-ldt{width:100%;padding:4px 7px;font-size:12.5px;
+        border:1px solid var(--bor);border-radius:6px;background:var(--sur);
+        color:var(--txt);transition:border-color .3s}
 
       /* Los rangos de una cuadrilla, como chapitas. Varias filas por cuadrilla es lo
          normal: la tanda se amplía a mitad de temporada sin tocar la anterior. */
@@ -7022,6 +7028,26 @@ input[type=number]{-moz-appearance:textfield;appearance:textfield}
          El catálogo de presentaciones. Es PARAMETRIZACIÓN y por eso vive acá y no en
          la pantalla de proceso: una caja mal definida multiplica mal todas las cargas
          que entren con ella, y eso es el rinde de la temporada. -->
+    <!-- ── LO QUE VA IMPRESO EN EL TARJETÓN ─────────────────────────────────────
+         Andy, 1/11/2026: «RENSPA los voy a cargar en los lotes». Es parametrización y
+         pide admin: un RENSPA mal cargado se imprime en cada etiqueta de ese lote. -->
+    <div class="gal-h2">🏷️ Datos de cada lote para la etiqueta</div>
+    <div class="gal-ay" style="max-width:none;margin-bottom:10px">RENSPA, variedad y
+      cuartel. Se congelan en cada carga de proceso: lo que se imprimió es lo que viajó,
+      así que corregir uno acá no cambia las etiquetas ya emitidas.
+      <button class="btn bo bs" style="margin-left:8px"
+        onclick="galLdtVariedad()">Poner una variedad a todos los lotes de un cultivo</button>
+    </div>
+    <div class="ab-table-wrap">
+      <table class="pa-tbl gal-tbl">
+        <colgroup><col style="width:26%"><col style="width:14%"><col style="width:22%">
+                  <col style="width:22%"><col style="width:16%"></colgroup>
+        <thead><tr><th class="gal-w">Lote</th><th>Cultivo</th><th>RENSPA</th>
+          <th>Variedad</th><th>Cuartel</th></tr></thead>
+        <tbody id="gal-ldt-body"></tbody>
+      </table>
+    </div>
+
     <div class="gal-h2" style="display:flex;align-items:baseline;gap:12px">
       <span>⚖️ La balanza</span>
       <button class="btn bp bs" onclick="galBalAbrir()">Probar la balanza</button>
@@ -7606,6 +7632,19 @@ input[type=number]{-moz-appearance:textfield;appearance:textfield}
               <option value="verde">Verde</option>
               <option value="descarte">Descarte</option>
             </select></div>
+        </div>
+
+        <!-- EL ARTÍCULO. Andy, 1/11/2026: «los calibres en damasco los definimos en el
+             artículo que hacemos del proceso». Dos calibres del mismo envase son dos
+             artículos distintos, y cada uno es un renglón del tarjetón. -->
+        <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:10px">
+          <div style="flex:0 0 120px"><label>Categoría</label>
+            <input type="text" id="gal-pres-cat" placeholder="I"></div>
+          <div style="flex:0 0 140px"><label>Calibre</label>
+            <input type="text" id="gal-pres-cal" placeholder="50/55"></div>
+          <div style="flex:1 1 200px;min-width:0" class="gal-ay">La categoría arranca en <b>I</b>. El calibre va vacío
+            en lo que no se calibra —el verde y el descarte— y en lo comercial es parte
+            del artículo: va impreso en cada renglón del tarjetón.</div>
         </div>
 
         <div style="margin-top:10px">
@@ -27733,6 +27772,38 @@ SG_MANUAL['galpon-config'] = { titulo: 'Galpón · Configuración', html:
   + 'conecten solas, sin preguntar nada.</p>'
   + '<div class="ojo">Hace falta <b>Chrome o Edge de escritorio</b>. En celular, en iPad '
   + 'y en Safari no existe Web Serial.</div>'
+
+  + '<h3>🏷️ Datos de cada lote para la etiqueta <span class="ver">V1119</span></h3>'
+  + '<p>Andy, 1/11/2026: <i>«RENSPA los voy a cargar en los lotes»</i>. Son los tres '
+  + 'datos que el tarjetón de pallet necesita de cada cuadro:</p>'
+  + '<ul>'
+  + '<li><b>RENSPA</b>: el número sanitario. Va impreso en cada etiqueta que salga de '
+  + 'ese lote.</li>'
+  + '<li><b>Variedad</b>: <i>Castle Brite</i> en el damasco. El botón <b>Poner una '
+  + 'variedad a todos los lotes de un cultivo</b> la copia de una: cargarla cuadro por '
+  + 'cuadro son veinte oportunidades de escribirla distinto, y «Castle Brite» y «Castle '
+  + 'brite» son dos variedades para cualquier informe. <b>No pisa el RENSPA</b>, que es '
+  + 'distinto en cada lote y el más caro de volver a cargar.</li>'
+  + '<li><b>Cuartel</b>: la subdivisión de adentro del lote, si se usa.</li>'
+  + '</ul>'
+  + '<p>Se escriben <b>en el renglón</b>, sin ventana: son tres campos cortos y se '
+  + 'guardan solos al salir del casillero.</p>'
+  + '<div class="ojo"><b>Se congelan en cada carga.</b> Lo que se imprimió es lo que '
+  + 'viajó: corregir un RENSPA acá <b>no cambia</b> las etiquetas ya emitidas, y está '
+  + 'bien que no las cambie. Lo que sí hace es corregir las que salgan de ahora en '
+  + 'adelante.</div>'
+  + '<p>La lista trae <b>todos</b> los lotes, tengan datos o no: mostrar sólo los '
+  + 'completos escondería justamente los que faltan.</p>'
+
+  + '<h3>🔖 La categoría y el calibre son parte del ARTÍCULO <span class="ver">V1119</span></h3>'
+  + '<p>Andy, 1/11/2026: <i>«los calibres en damasco los definimos en el artículo que '
+  + 'hacemos del proceso»</i>. Así que una presentación no es «una caja»: es una caja '
+  + '<b>de tal categoría y tal calibre</b>, y eso es lo que va en cada renglón del '
+  + 'tarjetón.</p>'
+  + '<p>Dos calibres del mismo envase son <b>dos artículos distintos</b> y se cargan por '
+  + 'separado — en la pantalla de proceso son dos baldosas, con el calibre a la vista.</p>'
+  + '<p>La <b>categoría</b> arranca en <b>I</b> y se cambia cuando hace falta. El '
+  + '<b>calibre</b> va vacío en lo que no se calibra: el verde y el descarte.</p>'
 };
 
 SG_MANUAL['galpon-carga'] = { titulo: 'Galpón · Carga de kilos', html:
@@ -27991,6 +28062,16 @@ SG_MANUAL['galpon-proceso'] = { titulo: 'Galpón · Proceso', html:
   + '<div class="ojo">En una carga <b>repartida</b> se corrige <b>sólo ese pedazo</b>: '
   + 'las de los otros lotes quedan como estaban. Si lo que está mal es el reparto entero, '
   + 'conviene borrarla —se van todas juntas— y cargarla de nuevo. La ventana lo avisa.</div>'
+  + '<h3>🔖 El artículo <span class="ver">V1119</span></h3>'
+  + '<p>Cada baldosa dice su <b>categoría y su calibre</b> además del envase: eso es el '
+  + 'artículo, y es lo que va en cada renglón del tarjetón del pallet. Dos calibres del '
+  + 'mismo envase son dos baldosas distintas — con cuatro envases y tres calibres hay '
+  + 'doce, y sin el calibre a la vista se aprieta la de al lado.</p>'
+  + '<p>Y cada carga se lleva congelados el <b>RENSPA</b>, la <b>variedad</b> y el '
+  + '<b>cuartel</b> del lote, que se cargan en <b>⚙️ Configuración</b>. Si falta alguno '
+  + 'la carga entra igual: el galpón no se para porque falte un dato que se completa '
+  + 'después.</p>'
+
   + '<h3>🍇 Qué fruta es <span class="ver">V1118</span></h3>'
   + '<p>Andy, 1/11/2026: <i>«en ningún lado detallamos que es damasco, después se nos va '
   + 'a empezar a mezclar la fruta... necesito diferenciarlo porque después viene uva y '
@@ -40800,7 +40881,7 @@ function loadSec(s) {
     'share': function(){ shInit(); },
     'contactos': function(){ ctInit(); },
     'ia-uso': function(){ iuInit(); },
-    'galpon-config': function(){ galInit(); galPresCargar(); },
+    'galpon-config': function(){ galInit(); galPresCargar(); galLdtCargar(); },
     'galpon-lote-dia': function(){ galLdInit(); },
     'galpon-carga': function(){ galKgInit(); },
     'galpon-proceso': function(){ galPrInit(); },
@@ -57313,6 +57394,93 @@ function galRapCerrar(){
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════════════
+   🏷️ LOS DATOS DEL LOTE QUE VAN AL TARJETÓN
+   ═══════════════════════════════════════════════════════════════════════════════════
+   Andy, 1/11/2026: «RENSPA los voy a cargar en los lotes».
+
+   Se editan DONDE SE LEEN, igual que la ficha de contactos: son tres campos cortos por
+   lote y abrir una ventana para cada uno sería pelearse con el que los carga. El campo
+   se guarda al salir, uno por vez, y sólo si cambió. */
+var GLDT = { lotes: [] };
+
+async function galLdtCargar(){
+  try {
+    var r = await fetch('/api/galpon/lote-datos', { credentials:'include' });
+    var j = await r.json();
+    GLDT.lotes = j.ok ? (j.lotes || []) : [];
+  } catch (e) { GLDT.lotes = []; }
+  galLdtPintar();
+}
+
+function galLdtPintar(){
+  var b = document.getElementById('gal-ldt-body'); if (!b) return;
+  if (!GLDT.lotes.length){
+    b.innerHTML = '<tr><td colspan="5" class="gal-sin" style="padding:18px;'
+      + ' text-align:center">No hay lotes cargados en Producción.</td></tr>';
+    return;
+  }
+  var campo = function(l, k, ph){
+    return '<input class="gal-ldt" data-lote="' + l.id + '" data-campo="' + k + '"'
+      + ' value="' + galKgEsc(l[k] || '') + '" placeholder="' + ph + '"'
+      + ' onchange="galLdtGuardar(this)">';
+  };
+  b.innerHTML = GLDT.lotes.map(function(l){
+    return '<tr>'
+      + '<td class="gal-w"><b>' + galKgEsc(l.finca || 'Sin finca') + '</b>'
+        + '<div style="font-size:11.5px;color:var(--mut)">' + galKgEsc(l.nombre) + '</div></td>'
+      + '<td>' + (l.cultivo ? galKgEsc(l.cultivo)
+          : '<span class="gal-sin">sin cultivo</span>') + '</td>'
+      + '<td>' + campo(l, 'renspa', '12.345.6.78901/00') + '</td>'
+      + '<td>' + campo(l, 'variedad', 'Castle Brite') + '</td>'
+      + '<td>' + campo(l, 'cuartel', 'C-07') + '</td>'
+      + '</tr>';
+  }).join('');
+}
+
+/* Guarda UN campo y manda los otros dos como estaban. El endpoint hace un upsert de la
+   fila entera, así que mandar sólo el que cambió borraría los otros dos — y el RENSPA
+   es el más caro de volver a cargar. */
+async function galLdtGuardar(inp){
+  var id = Number(inp.getAttribute('data-lote'));
+  var k = inp.getAttribute('data-campo');
+  var l = GLDT.lotes.filter(function(x){ return x.id === id; })[0]; if (!l) return;
+  if ((l[k] || '') === inp.value.trim()) return;   // no cambió: no se toca nada
+
+  var body = { lote_id: id, renspa: l.renspa, variedad: l.variedad, cuartel: l.cuartel };
+  body[k] = inp.value.trim();
+  try {
+    var r = await fetch('/api/galpon/lote-datos', { method:'POST', credentials:'include',
+      headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
+    var j = await r.json();
+    if (!j.ok){ alert(j.error || 'no se pudo guardar'); inp.value = l[k] || ''; return; }
+    GLDT.lotes = j.lotes || GLDT.lotes;
+    inp.style.borderColor = '#2e9e5b';
+    setTimeout(function(){ inp.style.borderColor = ''; }, 900);
+  } catch (e) { alert('No se pudo guardar: ' + e.message); inp.value = l[k] || ''; }
+}
+
+async function galLdtVariedad(){
+  var cultivos = [];
+  GLDT.lotes.forEach(function(l){
+    if (l.cultivo && cultivos.indexOf(l.cultivo) < 0) cultivos.push(l.cultivo);
+  });
+  if (!cultivos.length) return alert('Ningún lote tiene cultivo cargado en Producción.');
+  var c = prompt('¿De qué cultivo?\n\n' + cultivos.join(' · '), cultivos[0]);
+  if (!c) return;
+  var v = prompt('¿Qué variedad le pongo a todos los lotes de ' + c + '?');
+  if (!v) return;
+  try {
+    var r = await fetch('/api/galpon/lote-datos', { method:'POST', credentials:'include',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ todos_del_cultivo: c, variedad: v }) });
+    var j = await r.json();
+    if (!j.ok) return alert(j.error || 'no se pudo guardar');
+    GLDT.lotes = j.lotes || GLDT.lotes;
+    galLdtPintar();
+    alert('Listo: ' + j.lotes_tocados + ' lotes de ' + c + ' quedaron con la variedad ' + v + '.');
+  } catch (e) { alert('No se pudo guardar: ' + e.message); }
+}
+/* ═══════════════════════════════════════════════════════════════════════════════════
    📦 EL CATÁLOGO DE PRESENTACIONES (en Configuración)
    ═══════════════════════════════════════════════════════════════════════════════════
    Es parametrización: una caja mal definida multiplica mal todas las cargas que entren
@@ -57343,7 +57511,11 @@ function galPresPintar(){
       : (galKgNum(p.por_bulto, 0) + ' × ' + galKgNum(p.kg_unidad * 1000, 0) + ' g = '
          + '<b>' + galKgNum(p.por_bulto * p.kg_unidad) + ' kg</b> por bulto');
     return '<tr>'
-      + '<td class="gal-w"><b>' + galKgEsc(p.nombre) + '</b></td>'
+      + '<td class="gal-w"><b>' + galKgEsc(p.nombre) + '</b>'
+        /* El artículo abajo del nombre: dos presentaciones con el mismo envase y
+           distinto calibre se llaman casi igual, y el calibre es lo que las separa. */
+        + '<div style="font-size:11px;color:var(--mut)">CAT ' + galKgEsc(p.categoria || 'I')
+          + (p.calibre ? ' · calibre ' + galKgEsc(p.calibre) : '') + '</div></td>'
       + '<td><span class="gal-sw ro" style="width:11px;height:11px;background:'
         + (COL[p.destino] || '#888') + '"></span> ' + galKgEsc(p.destino) + '</td>'
       + '<td>' + (p.envase ? galKgEsc(p.envase) : '<span class="gal-sin">—</span>') + '</td>'
@@ -57365,6 +57537,8 @@ function galPresAbrir(id){
   document.getElementById('gal-pres-nom').value = p ? p.nombre : '';
   document.getElementById('gal-pres-dest').value = p ? p.destino : 'comercial';
   document.getElementById('gal-pres-env').value = p ? (p.envase || '') : '';
+  document.getElementById('gal-pres-cat').value = p ? (p.categoria || 'I') : 'I';
+  document.getElementById('gal-pres-cal').value = p ? (p.calibre || '') : '';
   document.getElementById('gal-pres-granel').checked = !!(p && p.granel);
   document.getElementById('gal-pres-pb').value = p && !p.granel ? p.por_bulto : 1;
   /* Se vuelve a mostrar en GRAMOS si el número es chico: así se guardó «700 g» y así
@@ -57412,6 +57586,8 @@ async function galPresGuardar(){
     nombre: document.getElementById('gal-pres-nom').value,
     destino: document.getElementById('gal-pres-dest').value,
     envase: granel ? '' : document.getElementById('gal-pres-env').value,
+    categoria: document.getElementById('gal-pres-cat').value,
+    calibre: document.getElementById('gal-pres-cal').value,
     granel: granel ? 1 : 0,
     por_bulto: granel ? 1 : document.getElementById('gal-pres-pb').value,
     kg_unidad: granel ? 1 : kg,
@@ -57905,6 +58081,9 @@ function galPrCartelReparto(){
 
 function galPrBaldosa(p, d){
   var sel = GPR.sel === p.id;
+  /* El calibre en la baldosa, que es donde se elige: con cuatro envases y tres
+     calibres hay doce baldosas, y sin el calibre a la vista se aprieta la de al lado. */
+  var art = 'CAT ' + (p.categoria || 'I') + (p.calibre ? ' · ' + p.calibre : '');
   var cuenta = p.granel ? 'A granel · se escriben los kilos'
     : (galPrNum(p.por_bulto, 0) + ' × ' + galPrNum(p.kg_unidad * 1000, 0) + ' g = '
        + galPrNum(p.por_bulto * p.kg_unidad) + ' kg por bulto');
@@ -57912,6 +58091,7 @@ function galPrBaldosa(p, d){
     + ' style="border-color:' + d.color + (sel ? '' : '55') + '"'
     + (sel ? '' : ' onclick="galPrElegir(' + p.id + ')"') + '>'
     + '<div class="bn">' + galPrEsc(p.nombre) + '</div>'
+    + '<div class="bc"><b>' + galPrEsc(art) + '</b></div>'
     + '<div class="bc">' + cuenta + '</div>';
   if (sel){
     var saltos = p.granel ? [10, 50, 100, 500] : [1, 5, 10, 25];

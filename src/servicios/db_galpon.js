@@ -169,6 +169,30 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS gal_volc_lote_idx  ON gal_volcados(lote_id, fecha);
   CREATE INDEX IF NOT EXISTS gal_volc_cuad_idx  ON gal_volcados(cuadrilla_id, fecha);
   -- ═══════════════════════════════════════════════════════════════════════════
+  -- LO QUE EL TARJETÓN NECESITA DE CADA LOTE
+  -- ═══════════════════════════════════════════════════════════════════════════
+  -- Andy, 1/11/2026: «RENSPA los voy a cargar en los lotes» y «variedad del damasco es
+  -- siempre Castle Brite».
+  --
+  -- Tabla SATÉLITE de pa_lotes, igual que gal_cuadrilla_tarjetas lo es de
+  -- pa_cuadrillas. Agregarle columnas a la tabla de Producción sería más corto y es la
+  -- trampa: esa tabla la mantiene otro módulo, y una columna del galpón ahí la hace
+  -- nuestra para siempre. Sin FK, por la regla de CLAUDE.md.
+  --
+  -- El RENSPA es un dato SANITARIO y va impreso en el tarjetón: lo que se imprimió es
+  -- lo que viajó. Por eso se congela en cada carga además de vivir acá.
+  CREATE TABLE IF NOT EXISTS gal_lote_datos (
+    lote_id   INTEGER PRIMARY KEY,        -- → pa_lotes(id), FK lógica
+    renspa    TEXT,
+    variedad  TEXT,
+    -- El cuartel: la subdivisión de adentro del lote que va en la etiqueta. En el
+    -- tarjetón de referencia es «C-07».
+    cuartel   TEXT,
+    notas     TEXT,
+    actualizado TEXT DEFAULT (datetime('now','localtime'))
+  );
+
+  -- ═══════════════════════════════════════════════════════════════════════════
   -- EN QUÉ SALE LA FRUTA DEL GALPÓN
   -- ═══════════════════════════════════════════════════════════════════════════
   -- Andy, 31/10/2026: «por ejemplo 100 cajas cartón x 10 cubetas de 700 gramos cada una».
@@ -191,6 +215,15 @@ db.exec(`
     -- A granel no hay cuenta: se tipean los kilos. Es lo que pasa con un bin de verde o
     -- de descarte, que se pesa entero y no tiene unidades adentro.
     granel    INTEGER NOT NULL DEFAULT 0,
+    -- EL ARTÍCULO. Andy, 1/11/2026: «los calibres en damasco los definimos en el
+    -- artículo que hacemos del proceso». O sea que lo que se produce no es «una caja»:
+    -- es una caja DE TAL CATEGORÍA Y TAL CALIBRE, y eso es lo que va en cada renglón
+    -- del tarjetón. Dos calibres del mismo envase son dos artículos distintos y se
+    -- cargan por separado.
+    --
+    -- La categoría arranca en I porque «siempre CAT 1 a menos que modifiquemos».
+    categoria TEXT NOT NULL DEFAULT 'I',
+    calibre   TEXT,
     color     TEXT,
     orden     INTEGER NOT NULL DEFAULT 100,
     activo    INTEGER NOT NULL DEFAULT 1,
@@ -233,6 +266,13 @@ db.exec(`
     presentacion_id INTEGER,
     presentacion    TEXT,                      -- congelado: el catálogo se edita
     envase          TEXT,
+    -- Lo que se IMPRIME en el tarjetón, congelado al cargar. Un RENSPA corregido el
+    -- mes que viene no cambia lo que decía la etiqueta que se fue en el camión.
+    categoria       TEXT,
+    calibre         TEXT,
+    variedad        TEXT,
+    renspa          TEXT,
+    cuartel         TEXT,
     bultos          REAL,
     por_bulto       REAL,
     kg_unidad       REAL,
@@ -278,6 +318,14 @@ for (const sql of [
   "ALTER TABLE gal_procesos ADD COLUMN reparto TEXT",
   "ALTER TABLE gal_procesos ADD COLUMN repartido INTEGER NOT NULL DEFAULT 0",
   "CREATE INDEX IF NOT EXISTS gal_proc_reparto_idx ON gal_procesos(reparto)",
+  // EL ARTÍCULO Y LOS DATOS DEL TARJETÓN (V1119). Ver los comentarios de arriba.
+  "ALTER TABLE gal_presentaciones ADD COLUMN categoria TEXT NOT NULL DEFAULT 'I'",
+  "ALTER TABLE gal_presentaciones ADD COLUMN calibre TEXT",
+  "ALTER TABLE gal_procesos ADD COLUMN categoria TEXT",
+  "ALTER TABLE gal_procesos ADD COLUMN calibre TEXT",
+  "ALTER TABLE gal_procesos ADD COLUMN variedad TEXT",
+  "ALTER TABLE gal_procesos ADD COLUMN renspa TEXT",
+  "ALTER TABLE gal_procesos ADD COLUMN cuartel TEXT",
   // DOS TRAMOS A LA MISMA HORA DEL MISMO DÍA NO PUEDEN EXISTIR. loteVigente ordena por
   // hora y después por id, así que el segundo le gana al primero EN SILENCIO: el tramo
   // de la mañana queda listado en la pantalla, se ve igualito, y no atribuye un kilo.

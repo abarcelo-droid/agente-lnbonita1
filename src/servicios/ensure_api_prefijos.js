@@ -70,7 +70,7 @@ const PREFIJOS = [
   // Cuando entren el volcado y el tablero, CADA UNO se declara con sus propias
   // direcciones: el prefijo pelado 'galpon' le daría las rutas de los cuatro a un solo
   // menú, que es la trampa que este archivo advierte arriba.
-  ['galpon-config', 'galpon/config,galpon/cuadrillas,galpon/tarjetas,galpon/presentaciones'],
+  ['galpon-config', 'galpon/config,galpon/cuadrillas,galpon/tarjetas,galpon/presentaciones,galpon/lote-datos'],
   // El lote del día es OPERATIVO, no parametrización: lo carga el que abre el galpón
   // todas las mañanas. Por eso el router no pide admin y el nivel lo decide esta línea.
   //
