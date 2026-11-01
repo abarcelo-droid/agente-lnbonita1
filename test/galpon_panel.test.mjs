@@ -1919,3 +1919,65 @@ test('EL MANUAL DEL STOCK dice que no se despacha más de lo que hay', () => {
   assert.match(m, /procesa/);
   assert.match(m, /se <b>anula<\/b>, nunca se borra/);
 });
+
+test('LOS ATAJOS DE DIBUJITO SE PINTAN, y el mismo de nuevo lo saca', () => {
+  // Se EJECUTA el armado contra un DOM de mentira: un audit de texto ve la
+  // lista GAL_EMOS declarada y no sabe si alguien la pinta. Sin los atajos el
+  // casillero queda solo y nadie se entera de que puede poner un emoji.
+  const i = PANEL.indexOf('var GAL_EMOS =');
+  assert.ok(i > 0, 'no encontré GAL_EMOS');
+  const fin = PANEL.indexOf('function galPresCerrar(){', i);
+  assert.ok(fin > i, 'el corte de los atajos salió vacío');
+  const nodos = { 'gal-pres-emos': { innerHTML: '' }, 'gal-pres-emo': { value: '' } };
+  const api = new Function('document',
+    PANEL.slice(i, fin) + '\nreturn { galPresEmojis, galPresEmo, GAL_EMOS };')(
+    { getElementById: (id) => nodos[id] || null });
+
+  api.galPresEmojis();
+  assert.equal((nodos['gal-pres-emos'].innerHTML.match(/<button/g) || []).length,
+    api.GAL_EMOS.length, 'no pintó todos los atajos');
+  // Dos veces no los duplica: el modal se abre y se cierra muchas veces. Sale del
+  // `innerHTML =`, que reemplaza en vez de sumar — no de un guard, que además
+  // impediría repintar si la lista cambiara en caliente.
+  api.galPresEmojis();
+  assert.equal((nodos['gal-pres-emos'].innerHTML.match(/<button/g) || []).length,
+    api.GAL_EMOS.length, 'los duplicó al reabrir');
+
+  api.galPresEmo('🍑');
+  assert.equal(nodos['gal-pres-emo'].value, '🍑');
+  // El mismo de nuevo lo SACA: es el único lugar donde se puede dejar sin
+  // dibujito después de haber puesto uno, sin seleccionar y borrar a mano.
+  api.galPresEmo('🍑');
+  assert.equal(nodos['gal-pres-emo'].value, '');
+  // Y otro distinto lo reemplaza, no lo suma.
+  api.galPresEmo('🍑'); api.galPresEmo('📦');
+  assert.equal(nodos['gal-pres-emo'].value, '📦');
+});
+
+test('el casillero del dibujito está PEGADO AL NOMBRE, en la primera fila', () => {
+  // El dibujito es la identidad de la presentación, lo mismo que el nombre.
+  // En una fila propia quedaba entre el nombre y la cuenta del bulto, que es
+  // otra cosa — y le sumaba un renglón a un modal que ya es alto.
+  const m = bloqueHtml('<div class="ab-modal-overlay sg-mod" id="gal-pres-modal">');
+  const emo = m.indexOf('id="gal-pres-emo"');
+  const nom = m.indexOf('id="gal-pres-nom"');
+  const cat = m.indexOf('id="gal-pres-cat"');
+  assert.ok(emo > 0 && nom > 0 && cat > 0, 'falta alguno de los tres campos');
+  assert.ok(emo < nom, 'el dibujito quedó después del nombre');
+  assert.ok(nom < cat, 'el nombre quedó después de la categoría');
+  // Y en la MISMA fila: entre los dos no puede cerrarse el flex.
+  assert.ok(!m.slice(emo, nom).includes('</div>\r\n        <div style="display:flex'),
+    'el dibujito quedó en una fila aparte del nombre');
+});
+
+test('la LISTA del catálogo muestra el dibujito de cada una', () => {
+  // Es donde se ve de un vistazo a cuál le falta. Sin esto habría que abrir
+  // las siete para saberlo.
+  const js = PANEL.slice(PANEL.indexOf('  b.innerHTML = GPRES.lista.map(function(p){'),
+                         PANEL.indexOf('function galPresAbrir('));
+  assert.ok(js.length > 200, 'el corte de la lista salió vacío');
+  assert.match(js, /p\.emoji/, 'la lista no pinta el emoji');
+  // Con el hueco ocupado aunque no haya: si no, los nombres quedan en zigzag.
+  assert.match(js, /display:inline-block;width:22px/);
+  assert.match(js, /aria-hidden="true"/);
+});

@@ -7624,10 +7624,13 @@ input[type=number]{-moz-appearance:textfield;appearance:textfield}
         <button class="mcl" onclick="galPresCerrar()">×</button></div>
       <div class="sgr-card">
         <div style="display:flex;gap:10px;flex-wrap:wrap">
-          <div style="flex:1 1 240px;min-width:0"><label>Nombre</label>
+          <div style="flex:0 0 62px"><label>Dibujito</label>
+            <input type="text" id="gal-pres-emo" maxlength="8" placeholder="📦"
+                   style="width:100%;font-size:21px;text-align:center;line-height:1.25"></div>
+          <div style="flex:1 1 200px;min-width:0"><label>Nombre</label>
             <input type="text" id="gal-pres-nom" placeholder="ej: Caja cartón · 10 × 700 g"
                    style="width:100%"></div>
-          <div style="flex:0 0 170px"><label>Destino</label>
+          <div style="flex:0 0 150px"><label>Destino</label>
             <select id="gal-pres-dest">
               <option value="comercial">Comercial</option>
               <option value="verde">Verde</option>
@@ -7635,21 +7638,14 @@ input[type=number]{-moz-appearance:textfield;appearance:textfield}
             </select></div>
         </div>
 
-        <!-- EL DIBUJITO. Andy, 1/11/2026: «permitime en algún lugar sumar emoticones
-             para cada presentación. Quiero que sea algo más visual el stock».
-             Es un casillero de texto, no un selector cerrado: el teclado del sistema
-             (Win+punto) tiene todos, y una lista nuestra de veinte envejece el día que
-             entre la uva. Los de abajo son un atajo, no el catálogo. -->
-        <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:10px;align-items:flex-end">
-          <div style="flex:0 0 90px"><label>Dibujito</label>
-            <input type="text" id="gal-pres-emo" maxlength="8" placeholder="📦"
-                   style="width:100%;font-size:21px;text-align:center;line-height:1.3"></div>
-          <div style="flex:1 1 300px;min-width:0">
-            <div class="gal-ay" style="margin-bottom:5px">Para encontrarlo de un vistazo en
-              el stock. Con <b>Win + .</b> se abren todos; éstos son los que más se usan:</div>
-            <div id="gal-pres-emos" class="gal-emos"></div>
-          </div>
-        </div>
+        <!-- LOS ATAJOS, debajo del casillero. Andy, 1/11/2026: «permitime en algún lugar
+             sumar emoticones para cada presentación». El casillero acepta cualquiera —el
+             teclado del sistema (Win+punto) los tiene todos— y una lista nuestra de veinte
+             envejece el día que entre la uva: éstos son un atajo, no el catálogo. -->
+        <div class="gal-emos" id="gal-pres-emos" style="margin-top:7px"></div>
+        <div class="gal-ay" style="margin-top:4px">Para encontrar la presentación de un
+          vistazo en el stock. Tocá uno, o escribí el que quieras con <b>Win + .</b> —
+          el mismo de nuevo lo saca.</div>
 
         <!-- EL ARTÍCULO. Andy, 1/11/2026: «los calibres en damasco los definimos en el
              artículo que hacemos del proceso». Dos calibres del mismo envase son dos
@@ -57869,10 +57865,14 @@ function galPresPintar(){
       : (galKgNum(p.por_bulto, 0) + ' × ' + galKgNum(p.kg_unidad * 1000, 0) + ' g = '
          + '<b>' + galKgNum(p.por_bulto * p.kg_unidad) + ' kg</b> por bulto');
     return '<tr>'
-      + '<td class="gal-w"><b>' + galKgEsc(p.nombre) + '</b>'
+      + '<td class="gal-w">'
+        + '<span aria-hidden="true" style="display:inline-block;width:22px;'
+          + 'font-size:16px">' + (p.emoji ? galKgEsc(p.emoji) : '') + '</span>'
+        + '<b>' + galKgEsc(p.nombre) + '</b>'
         /* El artículo abajo del nombre: dos presentaciones con el mismo envase y
            distinto calibre se llaman casi igual, y el calibre es lo que las separa. */
-        + '<div style="font-size:11px;color:var(--mut)">CAT ' + galKgEsc(p.categoria || 'I')
+        + '<div style="font-size:11px;color:var(--mut);margin-left:22px">CAT '
+          + galKgEsc(p.categoria || 'I')
           + (p.calibre ? ' · calibre ' + galKgEsc(p.calibre) : '') + '</div></td>'
       + '<td><span class="gal-sw ro" style="width:11px;height:11px;background:'
         + (COL[p.destino] || '#888') + '"></span> ' + galKgEsc(p.destino) + '</td>'
@@ -57922,8 +57922,7 @@ function galPresAbrir(id){
 var GAL_EMOS = ['📦','🧺','🫙','🗳️','🥡','🍑','🍇','🍈','🍅','🥬','🟢','🟡','🔴','🧊','🚚','⭐'];
 function galPresEmojis(){
   var el = document.getElementById('gal-pres-emos');
-  if (!el || el._armado) return;
-  el._armado = 1;
+  if (!el) return;
   el.innerHTML = GAL_EMOS.map(function(e){
     return '<button type="button" onclick="galPresEmo(\''+e+'\')">'+e+'</button>';
   }).join('');
