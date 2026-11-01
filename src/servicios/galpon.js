@@ -22,6 +22,9 @@
 // tres metros, y dos azules parecidos son el mismo azul. Siete, porque más de siete
 // cuadrillas simultáneas en un galpón de este tamaño no pasa — y si pasa, se repite un
 // color y el rango de IDs sigue desambiguando.
+
+// Para la versión del dibujo de una presentación: un hash del contenido.
+import crypto from 'node:crypto';
 export const COLORES = [
   { hex: '#d62828', nombre: 'Rojo' },
   { hex: '#f77f00', nombre: 'Naranja' },
@@ -1000,7 +1003,143 @@ export function presentaciones(db, opts) {
   const o = opts || {};
   let sql = ' SELECT * FROM gal_presentaciones WHERE eliminado_en IS NULL';
   if (!o.todas) sql += ' AND activo = 1';
-  return db.prepare(sql + ' ORDER BY destino, orden, id').all();
+  // sinRutaDeIcono: la ruta del archivo no sale en ningún JSON, ver arriba.
+  return sinRutaDeIcono(db.prepare(sql + ' ORDER BY destino, orden, id').all());
+}
+
+
+// ════════════════════════════════════════════════════════════════════════════════════
+// 🖼️ EL DIBUJO PROPIO DE UNA PRESENTACIÓN
+// ════════════════════════════════════════════════════════════════════════════════════
+// Andy, 1/11/2026: «quiero yo poder subirle algún dibujito desde la computadora, ya
+// estuve armando unos emoticones».
+//
+// LA PANTALLA LO ACHICA ANTES DE MANDARLO, a 96 × 96 PNG con un <canvas>. Por eso acá
+// no hay multer ni una librería de imágenes: lo que llega es un data URL de unos pocos
+// kilobytes y entra por el express.json que ya existe. Un archivo de la cámara de un
+// teléfono son 4 MB que viajan para mostrarse a 24 píxeles.
+//
+// PERO LO QUE LLEGA SE VALIDA IGUAL. Que la pantalla achique no es garantía de nada: el
+// endpoint se puede llamar con curl, y la pantalla de mañana puede tener un bug. Se
+// verifica que sea PNG DE VERDAD —los magic bytes, no lo que diga el encabezado del
+// data URL—, el tamaño en bytes y las dimensiones, que se leen del propio header del
+// PNG sin descomprimir nada.
+
+// Los ocho bytes con los que arranca todo PNG. El 0x89 inicial y el \r\n del medio
+// están justamente para que un archivo corrupto o convertido a texto se note.
+const PNG_FIRMA = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
+export const ICONO_MAX_BYTES = 400 * 1024;
+export const ICONO_MAX_LADO = 256;
+
+// Las dimensiones salen del chunk IHDR, que por norma es el primero y está siempre en
+// la misma posición: 16..19 el ancho y 20..23 el alto, big-endian.
+export function medidaPNG(buf) {
+  if (!buf || buf.length < 24) return null;
+  for (let i = 0; i < 8; i++) if (buf[i] !== PNG_FIRMA[i]) return null;
+  if (String(buf.slice(12, 16)) !== 'IHDR') return null;
+  return { ancho: buf.readUInt32BE(16), alto: buf.readUInt32BE(20) };
+}
+
+// Devuelve el Buffer, o el motivo por el que no se puede guardar. NO tira: es el patrón
+// del módulo, aunque acá sí se rechaza (ver abajo).
+export function iconoDesdeDataUrl(v) {
+  const t = txt(v);
+  if (!t) return { ok: false, motivo: 'No llegó ninguna imagen' };
+  const m = /^data:image\/png;base64,([A-Za-z0-9+/=]+)$/.exec(t);
+  /* Sólo PNG, y en particular NO SVG. Un SVG es un documento: puede traer un <script>
+     adentro, y servido desde el mismo origen que el panel ese script corre con la
+     sesión de quien lo abra. El que quiera subir un SVG lo exporta a PNG. */
+  if (!m) return { ok: false, motivo: 'La imagen tiene que ser un PNG' };
+
+  let buf;
+  try { buf = Buffer.from(m[1], 'base64'); } catch (e) {
+    return { ok: false, motivo: 'No se pudo leer la imagen' };
+  }
+  if (buf.length > ICONO_MAX_BYTES) {
+    return { ok: false, motivo: 'La imagen pesa ' + Math.round(buf.length / 1024)
+      + ' KB y el máximo son ' + Math.round(ICONO_MAX_BYTES / 1024) + ' KB' };
+  }
+  /* Los magic bytes y no el encabezado del data URL: "data:image/png" lo escribe quien
+     manda el pedido y no prueba nada sobre el contenido. */
+  const med = medidaPNG(buf);
+  if (!med) return { ok: false, motivo: 'Eso no es un PNG' };
+  if (med.ancho > ICONO_MAX_LADO || med.alto > ICONO_MAX_LADO) {
+    return { ok: false, motivo: 'La imagen es de ' + med.ancho + '×' + med.alto
+      + ' y el máximo son ' + ICONO_MAX_LADO + '×' + ICONO_MAX_LADO };
+  }
+  if (!med.ancho || !med.alto) return { ok: false, motivo: 'Esa imagen está vacía' };
+  return { ok: true, buf, medida: med };
+}
+
+/* ACÁ SÍ SE RECHAZA, y no es una excepción a «nada se rechaza después del hecho»: no
+   pasó nada todavía. La fruta no está en la tolva — esto es configuración, igual que
+   dos rangos de tarjetas que se pisan. Guardar un archivo que no es una imagen deja la
+   pantalla con un cuadradito roto que nadie sabe cómo sacar.
+
+   fs y path entran por parámetro para que el servicio siga probándose sin tocar el
+   disco, que es como está hecho el resto del módulo. */
+export function guardarIcono(db, id, dataUrl, io) {
+  const i = parseInt(id, 10);
+  if (!Number.isFinite(i)) return { ok: false, motivo: 'Id inválido' };
+  const p = db.prepare(
+    'SELECT * FROM gal_presentaciones WHERE id = ? AND eliminado_en IS NULL').get(i);
+  if (!p) return { ok: false, motivo: 'Esa presentación no existe' };
+
+  const r = iconoDesdeDataUrl(dataUrl);
+  if (!r.ok) return r;
+
+  /* El nombre lo pone el servidor y sale del ID, no de lo que mande el cliente: un
+     nombre de archivo que viene de afuera es por donde entra un "../.." y se escribe
+     en cualquier lado. */
+  const nombre = 'pres-' + i + '.png';
+  const w = io.escribir(nombre, r.buf);
+  if (!w || !w.ok) return { ok: false, motivo: (w && w.motivo) || 'No se pudo guardar' };
+
+  const v = crypto.createHash('sha1').update(r.buf).digest('hex').slice(0, 12);
+  db.prepare('UPDATE gal_presentaciones SET icono = ?, icono_v = ? WHERE id = ?')
+    .run(w.ruta, v, i);
+  return { ok: true, id: i, icono_v: v, medida: r.medida, bytes: r.buf.length };
+}
+
+export function borrarIcono(db, id, io) {
+  const i = parseInt(id, 10);
+  if (!Number.isFinite(i)) return { ok: false, motivo: 'Id inválido' };
+  const p = db.prepare(
+    'SELECT icono FROM gal_presentaciones WHERE id = ? AND eliminado_en IS NULL').get(i);
+  if (!p) return { ok: false, motivo: 'Esa presentación no existe' };
+  /* El archivo se borra DESPUÉS de soltar la referencia en la base: al revés, si el
+     borrado del archivo falla la fila queda apuntando a algo que ya no está. */
+  db.prepare('UPDATE gal_presentaciones SET icono = NULL, icono_v = NULL WHERE id = ?')
+    .run(i);
+  if (p.icono && io && io.borrar) { try { io.borrar(p.icono); } catch (e) { /* ya está */ } }
+  return { ok: true, id: i };
+}
+
+// La ruta del archivo, para servirlo. Es lo ÚNICO que la devuelve, y no es una ruta de
+// la API: la usa el handler que ya pasó por requireAuth.
+export function rutaDelIcono(db, id) {
+  const i = parseInt(id, 10);
+  if (!Number.isFinite(i)) return null;
+  const p = db.prepare(
+    'SELECT icono FROM gal_presentaciones WHERE id = ? AND eliminado_en IS NULL').get(i);
+  return (p && p.icono) || null;
+}
+
+/* LA RUTA NO SALE EN NINGÚN JSON. Las presentaciones se leen con SELECT *, así que la
+   columna viaja sola si nadie la saca: se saca acá, en un solo lugar, y todo lo que
+   devuelva presentaciones pasa por esta función. Lo que queda es icono_v, que dice si
+   hay dibujo y además sirve de cache-buster. Misma regla que tarjeta_path en los
+   contactos — ahí hay que hacerlo en DOS lugares porque hay dos SELECT *, y esa es
+   justamente la razón de que acá haya uno solo. */
+export function sinRutaDeIcono(filas) {
+  const limpiar = (f) => {
+    if (!f || typeof f !== 'object') return f;
+    const o = Object.assign({}, f);
+    o.tiene_icono = o.icono ? 1 : 0;
+    delete o.icono;
+    return o;
+  };
+  return Array.isArray(filas) ? filas.map(limpiar) : limpiar(filas);
 }
 
 export function guardarPresentacion(db, d) {
@@ -1746,7 +1885,12 @@ export function stockPorPresentacion(db, opts) {
   const lineas = saldosDeStock(db, o);
   const cat = new Map();
   for (const f of db.prepare(
-    'SELECT id, emoji, nombre, orden FROM gal_presentaciones WHERE eliminado_en IS NULL')
+  /* Las columnas nombradas son por EFICIENCIA —no traer catorce para usar cinco— y
+     NO la garantía de que la ruta del archivo no salga: eso lo da la copia campo por
+     campo de acá abajo, que es la que arma lo que se devuelve. Confundir las dos deja
+     creyendo que hay dos defensas donde hay una. */
+    'SELECT id, emoji, icono_v, nombre, orden FROM gal_presentaciones'
+    + ' WHERE eliminado_en IS NULL')
     .all()) cat.set(f.id, f);
 
   const por = new Map();
@@ -1763,6 +1907,7 @@ export function stockPorPresentacion(db, opts) {
         presentacion_id: l.presentacion_id || null,
         nombre: l.presentacion || (l.presentacion_id ? 'Presentación borrada' : 'A granel'),
         emoji: c.emoji || null,
+        icono_v: c.icono_v || null,
         orden: c.orden == null ? 100 : c.orden,
         destino: l.destino,
         granel: l.granel,

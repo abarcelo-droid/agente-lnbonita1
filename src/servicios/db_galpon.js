@@ -424,6 +424,25 @@ for (const sql of [
   // (kilos)» son dos renglones de texto que hay que LEER. El nombre sigue estando al
   // lado: el emoji no reemplaza nada, acelera encontrar.
   "ALTER TABLE gal_presentaciones ADD COLUMN emoji TEXT",
+  // ── UN DIBUJO PROPIO ───────────────────────────────────────────────────────────
+  // Andy, 1/11/2026: «quiero yo poder subirle algún dibujito desde la computadora, ya
+  // estuve armando unos emoticones».
+  //
+  // Se guarda la RUTA, no la imagen: un blob en SQLite entra en todos los SELECT * de
+  // la tabla —y en el galpón hay varios— así que cada listado del catálogo arrastraría
+  // los siete dibujos por la red para mostrar una lista de texto.
+  //
+  // Y LA RUTA NO SALE EN NINGÚN JSON. La imagen sale sólo por
+  // GET /api/galpon/presentaciones/:id/icono, que pasa por requireAuth. Es la misma
+  // regla que la foto de la tarjeta de un contacto: lo que se escribe en data/sg,
+  // data/ifco o data/uploads queda servido por express.static ANTES del portón de
+  // sesión (index.js:110-115) y es alcanzable sin cookie. Acá el dibujo de una caja no
+  // es un secreto, pero tampoco hay una sola razón para publicarlo, y el día que
+  // alguien copie este código para algo que sí lo sea arrastra el agujero.
+  "ALTER TABLE gal_presentaciones ADD COLUMN icono TEXT",
+  // Cambia cada vez que se sube uno nuevo. Va en la URL como ?v= porque si no el
+  // navegador sigue mostrando el anterior: misma dirección, misma caché.
+  "ALTER TABLE gal_presentaciones ADD COLUMN icono_v TEXT",
   "ALTER TABLE gal_procesos ADD COLUMN repartido INTEGER NOT NULL DEFAULT 0",
   "CREATE INDEX IF NOT EXISTS gal_proc_reparto_idx ON gal_procesos(reparto)",
   // EL ARTÍCULO Y LOS DATOS DEL TARJETÓN (V1119). Ver los comentarios de arriba.

@@ -52,7 +52,7 @@ function base() {
       cuartel TEXT, notas TEXT, actualizado TEXT);
     CREATE TABLE gal_presentaciones (
       id INTEGER PRIMARY KEY AUTOINCREMENT, nombre TEXT, destino TEXT, envase TEXT,
-      por_bulto REAL DEFAULT 1, kg_unidad REAL DEFAULT 1, granel INTEGER DEFAULT 0, emoji TEXT, categoria TEXT NOT NULL DEFAULT 'I', calibre TEXT,
+      por_bulto REAL DEFAULT 1, kg_unidad REAL DEFAULT 1, granel INTEGER DEFAULT 0, emoji TEXT, icono TEXT, icono_v TEXT, categoria TEXT NOT NULL DEFAULT 'I', calibre TEXT,
       color TEXT, orden INTEGER DEFAULT 100, activo INTEGER DEFAULT 1,
       creado_en TEXT, eliminado_en TEXT);
     CREATE TABLE gal_pallets (id INTEGER PRIMARY KEY AUTOINCREMENT, numero TEXT UNIQUE,
