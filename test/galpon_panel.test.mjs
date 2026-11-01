@@ -1348,7 +1348,8 @@ test('LA PANTALLA DE PROCESO ES UNA LISTA: no abre ninguna ventana', () => {
 });
 
 test('el catálogo se carga al abrir Configuración, o la tabla sale vacía', () => {
-  assert.match(PANEL, /'galpon-config': function\(\)\{ galInit\(\); galPresCargar\(\); \}/);
+  assert.match(PANEL,
+    /'galpon-config': function\(\)\{ galInit\(\); galPresCargar\(\); galLdtCargar\(\); \}/);
 });
 
 // ══════════════════════════════════════════════════════════════════════════
@@ -1773,4 +1774,61 @@ test('LOS COLORES DE LOS GRÁFICOS SON LOS MISMOS EN TODAS LAS PANTALLAS', () =>
   assert.match(JS_PR, /tr\(.comercial.\)/);
   assert.equal((PANEL.match(/var GAC_COL = \{/g) || []).length, 1,
     'hay más de una definición de la paleta');
+});
+
+// ══════════════════════════════════════════════════════════════════════════
+// 14 · EL ARTÍCULO Y LOS DATOS DEL TARJETÓN (V1119)
+// ══════════════════════════════════════════════════════════════════════════
+test('LOS DATOS DEL LOTE VIVEN EN UNA TABLA DEL GALPÓN, no en pa_lotes', () => {
+  // pa_lotes la mantiene Producción. Una columna del galpón ahí la hace nuestra
+  // para siempre — misma regla que las tarjetas de las cuadrillas.
+  assert.match(DDL, /CREATE TABLE IF NOT EXISTS gal_lote_datos \(/);
+  assert.ok(!/ALTER TABLE pa_/.test(DDL), 'el galpón le agregó una columna a Producción');
+  assert.ok(!/REFERENCES pa_/.test(DDL), 'apareció una FK cruzada');
+  assert.match(SERV, /export function datosDeLotes\(db\)/);
+});
+
+test('MANUAL CFG: «se congelan en cada carga»', () => {
+  const cfg = manualDe('galpon-config');
+  assert.match(cfg, /Se congelan en cada carga/);
+  assert.match(cfg, /no cambia<\/b> las etiquetas ya emitidas/);
+  const reg = cuerpoServicio('export function registrarProceso(');
+  assert.match(reg, /datosLote\.get\(lotes\[i\]\) \|\| \{\}\)\.renspa/);
+  assert.match(reg, /datosLote\.get\(lotes\[i\]\) \|\| \{\}\)\.variedad/);
+});
+
+test('MANUAL CFG: «la variedad se copia sin pisar el RENSPA»', () => {
+  const cfg = manualDe('galpon-config');
+  assert.match(cfg, /No pisa el RENSPA<\/b>/);
+  assert.match(cfg, /«Castle Brite» y «Castle '\s*\+\s*'brite» son dos variedades|son dos variedades/);
+  assert.match(cuerpoServicio('export function variedadATodos('),
+    /renspa: ya\.renspa, cuartel: ya\.cuartel/);
+});
+
+test('MANUAL PR: «cada baldosa dice su categoría y su calibre»', () => {
+  dicePr(/categoría y su calibre/);
+  dicePr(/se aprieta la de al lado/);
+  assert.match(JS_PR, /var art = 'CAT ' \+ \(p\.categoria \|\| 'I'\)/);
+  assert.match(JS_PR, /galPrEsc\(art\)/);
+});
+
+test('el catálogo pide la categoría y el calibre', () => {
+  const cfg = manualDe('galpon-config');
+  assert.match(cfg, /<b>categoría<\/b> arranca en <b>I<\/b>/);
+  assert.match(PANEL, /<input type="text" id="gal-pres-cat"/);
+  assert.match(PANEL, /<input type="text" id="gal-pres-cal"/);
+  assert.match(JS_CAT, /categoria: document\.getElementById\('gal-pres-cat'\)\.value,/);
+  assert.match(JS_CAT, /calibre: document\.getElementById\('gal-pres-cal'\)\.value,/);
+});
+
+test('GUARDAR UN CAMPO DEL LOTE MANDA LOS TRES', () => {
+  // El endpoint hace un upsert de la fila entera: mandar sólo el que cambió
+  // borraría los otros dos, y el RENSPA es el más caro de volver a cargar.
+  const js = bloqueJs('var GLDT = {');
+  assert.ok(js.length > 500, 'el corte del bloque quedó vacío');
+  assert.match(js,
+    /var body = \{ lote_id: id, renspa: l\.renspa, variedad: l\.variedad, cuartel: l\.cuartel \};/);
+  // Y no se manda nada si el campo no cambió: un guardado por cada clic afuera
+  // del casillero es un guardado por cada vez que alguien pasa de largo.
+  assert.match(js, /if \(\(l\[k\] \|\| ''\) === inp\.value\.trim\(\)\) return;/);
 });

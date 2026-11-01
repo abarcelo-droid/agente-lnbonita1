@@ -72,16 +72,18 @@ function base() {
       usuario_id INTEGER, usuario TEXT,
       creado_en TEXT DEFAULT (datetime('now','localtime')), eliminado_en TEXT);
 
+    CREATE TABLE gal_lote_datos (lote_id INTEGER PRIMARY KEY, renspa TEXT, variedad TEXT,
+      cuartel TEXT, notas TEXT, actualizado TEXT);
     CREATE TABLE gal_presentaciones (
       id INTEGER PRIMARY KEY AUTOINCREMENT, nombre TEXT NOT NULL, destino TEXT NOT NULL,
       envase TEXT, por_bulto REAL NOT NULL DEFAULT 1, kg_unidad REAL NOT NULL DEFAULT 1,
-      granel INTEGER NOT NULL DEFAULT 0, color TEXT, orden INTEGER NOT NULL DEFAULT 100,
+      granel INTEGER NOT NULL DEFAULT 0, categoria TEXT NOT NULL DEFAULT 'I', calibre TEXT, color TEXT, orden INTEGER NOT NULL DEFAULT 100,
       activo INTEGER NOT NULL DEFAULT 1, creado_en TEXT, eliminado_en TEXT);
 
     CREATE TABLE gal_procesos (
       id INTEGER PRIMARY KEY AUTOINCREMENT, uuid TEXT UNIQUE, fecha TEXT NOT NULL,
       lote_id INTEGER NOT NULL, lote_nombre TEXT, producto TEXT, destino TEXT NOT NULL,
-      presentacion_id INTEGER, presentacion TEXT, envase TEXT,
+      presentacion_id INTEGER, presentacion TEXT, envase TEXT, categoria TEXT, calibre TEXT, variedad TEXT, renspa TEXT, cuartel TEXT,
       bultos REAL, por_bulto REAL, kg_unidad REAL, kilos REAL NOT NULL,
       tipo TEXT NOT NULL DEFAULT 'ingreso', reparto TEXT, repartido INTEGER NOT NULL DEFAULT 0, observacion TEXT,
       estado TEXT NOT NULL DEFAULT 'ok', revision_motivo TEXT,

@@ -24,6 +24,7 @@ import { DatabaseSync } from 'node:sqlite';
 import {
   kilos, guardarPresentacion, presentaciones, registrarProceso, editarProceso,
   resumenParaPlanilla, stockPorProducto, procesosDelDia,
+  guardarDatosDeLote, lotesConDatos, variedadATodos,
 } from '../src/servicios/galpon.js';
 
 // ══════════════════════════════════════════════════════════════════════════
@@ -80,8 +81,11 @@ const F = '2026-11-20';
 function base() {
   const db = new DatabaseSync(':memory:');
   db.exec(`
-    CREATE TABLE pa_lotes (id INTEGER PRIMARY KEY, nombre TEXT, finca TEXT);
-    INSERT INTO pa_lotes VALUES (10,'Cuadro 3','El Abuelo'), (11,'Cuadro 4','La Estación'),
+    -- lotesConDatos lee la lista completa con lotesParaElDia, que junta el sector.
+    CREATE TABLE pa_sectores (id INTEGER PRIMARY KEY, nombre TEXT, tipo TEXT);
+    CREATE TABLE pa_lotes (id INTEGER PRIMARY KEY, nombre TEXT, finca TEXT,
+                           sector_id INTEGER, activo INTEGER DEFAULT 1);
+    INSERT INTO pa_lotes (id,nombre,finca) VALUES (10,'Cuadro 3','El Abuelo'), (11,'Cuadro 4','La Estación'),
                                 (12,'Parral 1','El Abuelo'), (13,'Sin cultivo','El Abuelo');
     CREATE TABLE pa_cultivos_lote (id INTEGER PRIMARY KEY AUTOINCREMENT, lote_id INTEGER,
       cultivo TEXT, campaña TEXT, es_perenne INTEGER DEFAULT 0);
@@ -91,13 +95,15 @@ function base() {
     CREATE TABLE gal_volcados (id INTEGER PRIMARY KEY AUTOINCREMENT, fecha TEXT,
       lote_id INTEGER, lote_nombre TEXT, producto TEXT, kilos REAL, ifcos INTEGER,
       eliminado_en TEXT);
+    CREATE TABLE gal_lote_datos (lote_id INTEGER PRIMARY KEY, renspa TEXT, variedad TEXT,
+      cuartel TEXT, notas TEXT, actualizado TEXT);
     CREATE TABLE gal_presentaciones (id INTEGER PRIMARY KEY AUTOINCREMENT, nombre TEXT,
       destino TEXT, envase TEXT, por_bulto REAL DEFAULT 1, kg_unidad REAL DEFAULT 1,
-      granel INTEGER DEFAULT 0, color TEXT, orden INTEGER DEFAULT 100,
+      granel INTEGER DEFAULT 0, categoria TEXT NOT NULL DEFAULT 'I', calibre TEXT, color TEXT, orden INTEGER DEFAULT 100,
       activo INTEGER DEFAULT 1, creado_en TEXT, eliminado_en TEXT);
     CREATE TABLE gal_procesos (id INTEGER PRIMARY KEY AUTOINCREMENT, uuid TEXT UNIQUE,
       fecha TEXT NOT NULL, lote_id INTEGER NOT NULL, lote_nombre TEXT, producto TEXT,
-      destino TEXT NOT NULL, presentacion_id INTEGER, presentacion TEXT, envase TEXT,
+      destino TEXT NOT NULL, presentacion_id INTEGER, presentacion TEXT, envase TEXT, categoria TEXT, calibre TEXT, variedad TEXT, renspa TEXT, cuartel TEXT,
       bultos REAL, por_bulto REAL, kg_unidad REAL, kilos REAL NOT NULL,
       tipo TEXT NOT NULL DEFAULT 'ingreso', reparto TEXT,
       repartido INTEGER NOT NULL DEFAULT 0, observacion TEXT,
@@ -311,4 +317,147 @@ test('Y CORRE UNA SOLA VEZ: lo que entre después no se toca', () => {
   // Y la marca no se duplica ni se pisa.
   assert.equal(db.prepare("SELECT valor FROM gal_config WHERE clave = 'migr_producto_damasco'").get().valor,
     marca.valor);
+});
+
+// ══════════════════════════════════════════════════════════════════════════
+// 5 · EL ARTÍCULO Y LOS DATOS DEL TARJETÓN (V1119)
+// ══════════════════════════════════════════════════════════════════════════
+// Andy, 1/11/2026: «categoría siempre CAT 1 a menos que modifiquemos», «RENSPA
+// los voy a cargar en los lotes», «variedad del damasco es siempre Castle
+// Brite», «los calibres en damasco los definimos en el artículo que hacemos
+// del proceso».
+//
+// Todo esto se IMPRIME en el tarjetón. Lo que falla callado acá no es un
+// número: es una etiqueta que sale con el RENSPA de otro cuadro y se va en un
+// camión.
+test('LA CATEGORÍA ARRANCA EN I, y el calibre es parte del artículo', () => {
+  const db = base();
+  const id = guardarPresentacion(db, { nombre: 'Caja 5 kg', destino: 'comercial',
+    por_bulto: 10, kg_unidad: 0.5, calibre: '50/55' }).id;
+  const p = presentaciones(db).filter((x) => x.id === id)[0];
+  assert.equal(p.categoria, 'I', 'no arrancó en CAT I');
+  assert.equal(p.calibre, '50/55');
+});
+
+test('y la categoría se puede cambiar cuando hace falta', () => {
+  const db = base();
+  const id = guardarPresentacion(db, { nombre: 'Caja', destino: 'comercial',
+    por_bulto: 10, kg_unidad: 0.5, categoria: 'II', calibre: '45/50' }).id;
+  assert.equal(presentaciones(db).filter((x) => x.id === id)[0].categoria, 'II');
+});
+
+test('EL ARTÍCULO SE CONGELA EN CADA CARGA', () => {
+  // Lo que se imprimió es lo que viajó: cambiar el calibre del catálogo el mes
+  // que viene no puede reescribir la etiqueta que se fue en el camión.
+  const db = base();
+  const id = guardarPresentacion(db, { nombre: 'Caja 5 kg', destino: 'comercial',
+    por_bulto: 10, kg_unidad: 0.5, calibre: '50/55' }).id;
+  const r = registrarProceso(db, { fecha: F, lote_id: 10, presentacion_id: id,
+    bultos: 40, uuid: 'a' });
+  assert.equal(r.fila.categoria, 'I');
+  assert.equal(r.fila.calibre, '50/55');
+
+  guardarPresentacion(db, { id, nombre: 'Caja 5 kg', destino: 'comercial',
+    por_bulto: 10, kg_unidad: 0.5, calibre: '60/65', categoria: 'II' });
+  assert.equal(procesosDelDia(db, F)[0].calibre, '50/55',
+    'cambiar el catálogo reescribió una etiqueta ya emitida');
+});
+
+test('EL RENSPA Y LA VARIEDAD SALEN DEL LOTE, y se congelan', () => {
+  const db = base();
+  guardarDatosDeLote(db, { lote_id: 10, renspa: '12.345.6.78901/00',
+    variedad: 'Castle Brite', cuartel: 'C-07' });
+  const id = conCaja(db);
+  const r = registrarProceso(db, { fecha: F, lote_id: 10, presentacion_id: id,
+    bultos: 10, uuid: 'a' });
+  assert.equal(r.fila.renspa, '12.345.6.78901/00');
+  assert.equal(r.fila.variedad, 'Castle Brite');
+  assert.equal(r.fila.cuartel, 'C-07');
+
+  // Corregir el RENSPA del lote no toca la etiqueta ya emitida.
+  guardarDatosDeLote(db, { lote_id: 10, renspa: 'OTRO', variedad: 'Castle Brite',
+    cuartel: 'C-07' });
+  assert.equal(procesosDelDia(db, F)[0].renspa, '12.345.6.78901/00');
+});
+
+test('CORREGIR EL LOTE SE LLEVA EL RENSPA, o la etiqueta miente', () => {
+  // Una carga movida a otro cuadro con el RENSPA del anterior es una etiqueta
+  // que miente sobre su procedencia — y el RENSPA es el dato sanitario.
+  const db = base();
+  guardarDatosDeLote(db, { lote_id: 10, renspa: 'AAA', variedad: 'Castle Brite' });
+  guardarDatosDeLote(db, { lote_id: 11, renspa: 'BBB', variedad: 'Castle Brite' });
+  const id = conCaja(db);
+  const r = registrarProceso(db, { fecha: F, lote_id: 10, presentacion_id: id,
+    bultos: 10, uuid: 'a' });
+  assert.equal(editarProceso(db, r.id, { lote_id: 11 }).fila.renspa, 'BBB');
+});
+
+test('un lote sin datos cargados no rompe la carga', () => {
+  // El galpón no se para porque falte un RENSPA: la carga entra y el dato se
+  // completa después. Nada se rechaza después del hecho.
+  const db = base();
+  const id = conCaja(db);
+  const r = registrarProceso(db, { fecha: F, lote_id: 10, presentacion_id: id,
+    bultos: 10, uuid: 'a' });
+  assert.equal(r.ok, true);
+  assert.equal(r.fila.renspa, null);
+});
+
+test('la lista de Configuración trae TODOS los lotes, con datos o sin ellos', () => {
+  // Mostrar sólo los que ya tienen cargado algo esconde justamente los que
+  // faltan, que son los que hay que completar.
+  const db = base();
+  guardarDatosDeLote(db, { lote_id: 10, renspa: 'AAA' });
+  const ls = lotesConDatos(db);
+  assert.ok(ls.length >= 4);
+  assert.equal(ls.filter((l) => l.id === 10)[0].renspa, 'AAA');
+  assert.equal(ls.filter((l) => l.id === 11)[0].renspa, null);
+});
+
+test('LA VARIEDAD SE COPIA A TODOS LOS LOTES DE UN CULTIVO', () => {
+  // «La variedad del damasco es siempre Castle Brite». Cargarla lote por lote
+  // en veinte cuadros son veinte oportunidades de escribirla distinto, y
+  // «Castle Brite» y «Castle brite» son dos variedades para cualquier informe.
+  const db = base();
+  guardarDatosDeLote(db, { lote_id: 10, renspa: 'NO ME TOQUES' });
+  const r = variedadATodos(db, 'Damasco', 'Castle Brite');
+  assert.equal(r.ok, true);
+  assert.equal(r.lotes_tocados, 2);          // los dos de damasco, no el de uva
+  const ls = lotesConDatos(db);
+  assert.equal(ls.filter((l) => l.id === 10)[0].variedad, 'Castle Brite');
+  assert.equal(ls.filter((l) => l.id === 11)[0].variedad, 'Castle Brite');
+  assert.equal(ls.filter((l) => l.id === 12)[0].variedad, null, 'le puso la variedad a la uva');
+  // Y NO pisa el RENSPA, que es distinto en cada lote y el más caro de recargar.
+  assert.equal(ls.filter((l) => l.id === 10)[0].renspa, 'NO ME TOQUES');
+});
+
+test('copiar una variedad a un cultivo que no existe no hace nada', () => {
+  const db = base();
+  assert.equal(variedadATodos(db, 'Mango', 'X').ok, false);
+  assert.equal(variedadATodos(db, 'Damasco', '').ok, false);
+});
+
+test('CAMBIAR LA PRESENTACIÓN SE LLEVA EL CALIBRE', () => {
+  // Cargar como 50/55 lo que era 45/50 es un error de un clic, y el calibre va
+  // impreso: una etiqueta con el calibre de otro artículo es mercadería que el
+  // cliente rechaza en la recepción.
+  const db = base();
+  const a = guardarPresentacion(db, { nombre: 'Caja I', destino: 'comercial',
+    por_bulto: 10, kg_unidad: 0.5, calibre: '50/55' }).id;
+  const b = guardarPresentacion(db, { nombre: 'Caja II', destino: 'comercial',
+    por_bulto: 10, kg_unidad: 0.5, calibre: '45/50', categoria: 'II' }).id;
+  const r = registrarProceso(db, { fecha: F, lote_id: 10, presentacion_id: a,
+    bultos: 10, uuid: 'x' });
+  const e = editarProceso(db, r.id, { presentacion_id: b, bultos: 10 });
+  assert.equal(e.fila.calibre, '45/50');
+  assert.equal(e.fila.categoria, 'II');
+});
+
+test('no se le cargan datos de etiqueta a un lote que no existe', () => {
+  // Una fila huérfana en la tabla satélite no se ve en ninguna pantalla y queda
+  // ahí para siempre.
+  const db = base();
+  assert.equal(guardarDatosDeLote(db, { lote_id: 999, renspa: 'X' }).ok, false);
+  assert.equal(guardarDatosDeLote(db, { renspa: 'X' }).ok, false);
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM gal_lote_datos').get().n, 0);
 });

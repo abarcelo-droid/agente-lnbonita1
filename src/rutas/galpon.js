@@ -24,6 +24,7 @@ import {
   acumulado, rangoCargado, resumenParaPlanilla,
   ultimaCarga,
   DESTINOS, presentaciones, guardarPresentacion, borrarPresentacion,
+  lotesConDatos, guardarDatosDeLote, variedadATodos,
   registrarProceso, editarProceso, borrarProceso, procesosDelDia,
   tableroProceso, stockGalpon, stockPorLote, stockPorProducto, lotesVolcados,
 } from '../servicios/galpon.js';
@@ -760,6 +761,36 @@ router.get('/resumen.xlsx', async (req, res) => {
     res.end(Buffer.from(buf));
   } catch (e) {
     console.error('[GALPON] GET /resumen.xlsx:', e.message);
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+// ── LO QUE EL TARJETÓN NECESITA DE CADA LOTE ────────────────────────────────────────
+// RENSPA, variedad y cuartel. Es PARAMETRIZACIÓN y pide admin: un RENSPA mal cargado
+// se imprime en cada etiqueta que salga de ese lote, y lo que se imprimió es lo que
+// viajó.
+router.get('/lote-datos', (req, res) => {
+  try {
+    res.json({ ok: true, lotes: lotesConDatos(db) });
+  } catch (e) {
+    console.error('[GALPON] GET /lote-datos:', e.message);
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+router.post('/lote-datos', requireAdmin, (req, res) => {
+  try {
+    const b = req.body || {};
+    /* Dos operaciones en una ruta porque son la misma cosa: copiar la variedad a todos
+       los lotes de un cultivo es cargarla veinte veces de una. Con dos rutas, la de
+       copiar habría que declararla aparte en los prefijos y es la clase de línea que se
+       olvida. */
+    const r = b.todos_del_cultivo
+      ? variedadATodos(db, b.todos_del_cultivo, b.variedad)
+      : guardarDatosDeLote(db, b);
+    if (!r.ok) return res.status(400).json({ ok: false, error: r.motivo });
+    res.json(Object.assign({ ok: true }, r, { lotes: lotesConDatos(db) }));
+  } catch (e) {
+    console.error('[GALPON] POST /lote-datos:', e.message);
     res.status(500).json({ ok: false, error: e.message });
   }
 });

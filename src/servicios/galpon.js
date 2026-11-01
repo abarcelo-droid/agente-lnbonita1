@@ -895,6 +895,75 @@ export const DESTINOS = [
 ];
 const esDestino = (v) => DESTINOS.some((d) => d.clave === v);
 
+// ── LO QUE EL TARJETÓN NECESITA DE CADA LOTE ────────────────────────────────────────
+// Andy, 1/11/2026: «RENSPA los voy a cargar en los lotes» y «variedad del damasco es
+// siempre Castle Brite».
+//
+// Vive en una tabla satélite y no en pa_lotes: esa tabla la mantiene Producción, y una
+// columna del galpón ahí la hace nuestra para siempre (misma regla que las tarjetas de
+// las cuadrillas).
+export function datosDeLotes(db) {
+  const m = new Map();
+  for (const d of db.prepare('SELECT * FROM gal_lote_datos').all()) m.set(d.lote_id, d);
+  return m;
+}
+
+// La lista para la pantalla de Configuración: TODOS los lotes activos con lo que
+// tengan cargado. Mostrar sólo los que ya tienen datos sería esconder justamente los
+// que faltan — que son los que hay que completar.
+export function lotesConDatos(db) {
+  const d = datosDeLotes(db);
+  return lotesParaElDia(db).map((l) => {
+    const x = d.get(l.id) || {};
+    return Object.assign({}, l, {
+      renspa: x.renspa || null,
+      variedad: x.variedad || null,
+      cuartel: x.cuartel || null,
+      notas: x.notas || null,
+    });
+  });
+}
+
+export function guardarDatosDeLote(db, d) {
+  const dd = d || {};
+  const id = parseInt(dd.lote_id, 10);
+  if (!Number.isFinite(id) || id <= 0) return { ok: false, motivo: 'Elegí el lote' };
+  if (!db.prepare('SELECT 1 FROM pa_lotes WHERE id = ?').get(id)) {
+    return { ok: false, motivo: 'Ese lote no existe' };
+  }
+  db.prepare(
+    ' INSERT INTO gal_lote_datos (lote_id, renspa, variedad, cuartel, notas)'
+    + ' VALUES (?,?,?,?,?)'
+    + ' ON CONFLICT(lote_id) DO UPDATE SET renspa = excluded.renspa,'
+    + '   variedad = excluded.variedad, cuartel = excluded.cuartel,'
+    + "   notas = excluded.notas, actualizado = datetime('now','localtime')")
+    .run(id, txt(dd.renspa), txt(dd.variedad), txt(dd.cuartel), txt(dd.notas));
+  return { ok: true, lote_id: id };
+}
+
+/* Copiar la variedad a todos los lotes del mismo cultivo. Andy, 1/11/2026: «la variedad
+   del damasco es siempre Castle Brite» — cargarla lote por lote en veinte cuadros es
+   veinte oportunidades de escribirla distinto, y «Castle Brite» y «Castle brite» son dos
+   variedades para cualquier informe. */
+export function variedadATodos(db, cultivo, variedad) {
+  const c = txt(cultivo), v = txt(variedad);
+  if (!c || !v) return { ok: false, motivo: 'Falta el cultivo o la variedad' };
+  const lotes = lotesParaElDia(db).filter((l) => l.cultivo === c);
+  if (!lotes.length) return { ok: false, motivo: 'No hay lotes con el cultivo ' + c };
+  for (const l of lotes) {
+    const ya = db.prepare('SELECT * FROM gal_lote_datos WHERE lote_id = ?').get(l.id) || {};
+    guardarDatosDeLote(db, {
+      lote_id: l.id, variedad: v,
+      // Lo demás se conserva: esto copia LA VARIEDAD, no pisa el RENSPA de cada lote,
+      // que es distinto en cada uno y es el dato más caro de volver a cargar.
+      renspa: ya.renspa, cuartel: ya.cuartel, notas: ya.notas,
+    });
+  }
+  // Se llama lotes_tocados y no lotes porque el router devuelve la LISTA de lotes con
+  // ese segundo nombre, y una de las dos pisaba a la otra sin que nada avisara.
+  return { ok: true, lotes_tocados: lotes.length };
+}
+
 // ── EL CATÁLOGO ─────────────────────────────────────────────────────────────────────
 export function presentaciones(db, opts) {
   const o = opts || {};
@@ -924,21 +993,27 @@ export function guardarPresentacion(db, d) {
       + 'ser números mayores que cero' };
   }
 
+  /* CAT I de fábrica: «siempre CAT 1 a menos que modifiquemos». Y el calibre puede
+     faltar —el verde y el descarte no se calibran— pero en lo comercial es parte del
+     artículo y va impreso en el tarjetón. */
+  const categoria = txt(dd.categoria) || 'I';
+  const calibre = txt(dd.calibre);
   const campos = [nombre, dd.destino, txt(dd.envase), porBulto, kgUnidad, granel,
+                  categoria, calibre,
                   txt(dd.color), Number.isFinite(Number(dd.orden)) ? Number(dd.orden) : 100,
                   dd.activo === 0 || dd.activo === false ? 0 : 1];
   const id = parseInt(dd.id, 10);
   if (Number.isFinite(id) && id > 0) {
     const r = db.prepare(
       ' UPDATE gal_presentaciones SET nombre=?, destino=?, envase=?, por_bulto=?,'
-      + ' kg_unidad=?, granel=?, color=?, orden=?, activo=?'
+      + ' kg_unidad=?, granel=?, categoria=?, calibre=?, color=?, orden=?, activo=?'
       + ' WHERE id = ? AND eliminado_en IS NULL').run(...campos, id);
     if (!r.changes) return { ok: false, motivo: 'Esa presentación no existe' };
     return { ok: true, id };
   }
   const r = db.prepare(
     ' INSERT INTO gal_presentaciones (nombre,destino,envase,por_bulto,kg_unidad,granel,'
-    + ' color,orden,activo) VALUES (?,?,?,?,?,?,?,?,?)').run(...campos);
+    + ' categoria,calibre,color,orden,activo) VALUES (?,?,?,?,?,?,?,?,?,?,?)').run(...campos);
   return { ok: true, id: Number(r.lastInsertRowid) };
 }
 
@@ -1085,6 +1160,11 @@ export function registrarProceso(db, d) {
     productos.push(txt(l.cultivo) || txt(dd.producto));
   }
 
+  /* LOS DATOS SANITARIOS, congelados al cargar. El RENSPA y la variedad van IMPRESOS
+     en el tarjetón: lo que se imprimió es lo que viajó, y corregirlos el mes que viene
+     no cambia la etiqueta que se fue en el camión. */
+  const datosLote = datosDeLotes(db);
+
   /* EL REPARTO, a prorrata de lo que le queda en la tolva a cada uno. Con un lote solo
      esto es [1] y no cambia nada de lo que había. */
   const esMezcla = lotes.length > 1;
@@ -1105,8 +1185,9 @@ export function registrarProceso(db, d) {
   const ins = db.prepare(
     ' INSERT OR IGNORE INTO gal_procesos (uuid,fecha,lote_id,lote_nombre,producto,destino,'
     + ' presentacion_id,presentacion,envase,bultos,por_bulto,kg_unidad,kilos,tipo,'
+    + ' categoria,calibre,variedad,renspa,cuartel,'
     + ' reparto,repartido,observacion,estado,revision_motivo,usuario_id,usuario)'
-    + " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,'ingreso',?,?,?,?,?,?,?)");
+    + " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,'ingreso',?,?,?,?,?,?,?,?,?,?,?,?)");
 
   /* EL DOBLE CLIC. Si el primer uuid ya está, la carga entró entera y no se hace
      nada: el INSERT OR IGNORE de abajo protege la carrera, pero mirar primero es lo
@@ -1128,6 +1209,10 @@ export function registrarProceso(db, d) {
       pres ? pres.id : null, pres ? pres.nombre : null,
       pres ? pres.envase : txt(dd.envase),
       bultosPorLote[i], porBulto, kgUnidad, kilosPorLote[i],
+      pres ? pres.categoria : null, pres ? pres.calibre : null,
+      (datosLote.get(lotes[i]) || {}).variedad || null,
+      (datosLote.get(lotes[i]) || {}).renspa || null,
+      (datosLote.get(lotes[i]) || {}).cuartel || null,
       grupo, esMezcla ? 1 : 0,
       txt(dd.observacion), estado, motivo, dd.usuario_id || null, txt(dd.usuario));
     if (r.changes) ids.push(Number(r.lastInsertRowid));
@@ -1188,6 +1273,12 @@ export function editarProceso(db, id, d) {
        uva y dejarla diciendo «damasco» es exactamente la mezcla que esto viene a
        evitar. Si el lote nuevo no tiene cultivo cargado, se deja el que tenía. */
     if (txt(lote.cultivo)) poner('producto', txt(lote.cultivo));
+    /* Y los datos sanitarios también: son del lote, y una carga movida a otro cuadro
+       con el RENSPA del anterior es una etiqueta que miente sobre su procedencia. */
+    const dl = datosDeLotes(db).get(l) || {};
+    poner('variedad', dl.variedad || null);
+    poner('renspa', dl.renspa || null);
+    poner('cuartel', dl.cuartel || null);
   }
 
   /* LA PRESENTACIÓN, que arrastra el destino y la cuenta. Cargar comercial lo que era
@@ -1205,6 +1296,8 @@ export function editarProceso(db, id, d) {
     poner('presentacion', pres.nombre);
     poner('envase', pres.envase);
     poner('destino', pres.destino);
+    poner('categoria', pres.categoria);
+    poner('calibre', pres.calibre);
     poner('por_bulto', pres.granel ? null : pres.por_bulto);
     poner('kg_unidad', pres.granel ? null : pres.kg_unidad);
   }
