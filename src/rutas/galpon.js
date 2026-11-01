@@ -21,11 +21,11 @@ import {
   loteVigente, tramosDelDia, tramoChoca, lotesParaElDia, volcadosEnTramo,
   hhmm, esFecha,
   registrarVolcado, editarVolcado, borrarVolcado, volcadosDelDia, resumenDelDia,
-  acumulado, rangoCargado,
+  acumulado, rangoCargado, resumenParaPlanilla,
   ultimaCarga,
   DESTINOS, presentaciones, guardarPresentacion, borrarPresentacion,
   registrarProceso, editarProceso, borrarProceso, procesosDelDia,
-  tableroProceso, stockGalpon, stockPorLote, lotesVolcados,
+  tableroProceso, stockGalpon, stockPorLote, stockPorProducto, lotesVolcados,
 } from '../servicios/galpon.js';
 import { generarTarjetasPDF, tarjetasAImprimir } from '../servicios/galponTarjetasPDF.js';
 
@@ -671,6 +671,8 @@ router.get('/procesos', (req, res) => {
       // El otro corte del stock: de qué lote es lo que hay guardado. No se deduce del
       // de arriba, y es el que contesta a quién se le liquida lo que está en cámara.
       stock_lotes: stockPorLote(db),
+      // De qué fruta es lo guardado. Con una sola la pantalla lo esconde.
+      stock_productos: stockPorProducto(db),
     });
   } catch (e) {
     console.error('[GALPON] GET /procesos:', e.message);
@@ -732,4 +734,33 @@ router.get('/stock', (req, res) => {
   }
 });
 
+// ── LA PLANILLA DEL RESUMEN ─────────────────────────────────────────────────────────
+// Andy, 1/11/2026: «quiero que en acumulado se pueda descargar un archivo como el que
+// te saco foto».
+//
+// ExcelJS se importa ACÁ ADENTRO y no arriba. Es el patrón del repo: un import suelto
+// en el encabezado hace que todo el router se caiga al cargarse donde no están los
+// node_modules, y con él se caen las otras veinte rutas del galpón — por una planilla
+// que nadie pidió todavía.
+router.get('/resumen.xlsx', async (req, res) => {
+  try {
+    const r = rangoCargado(db);
+    const desde = esFecha(req.query.desde) || r.primera || hoy();
+    const hasta = esFecha(req.query.hasta) || r.ultima || hoy();
+    const filas = resumenParaPlanilla(db, desde, hasta);
+
+    const { default: ExcelJS } = await import('exceljs');
+    const { galponResumenExcel } = await import('../servicios/galponResumenExcel.js');
+    const buf = await galponResumenExcel(ExcelJS, { filas, desde, hasta });
+
+    res.setHeader('Content-Type',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition',
+      'attachment; filename="galpon-resumen-' + desde + '-a-' + hasta + '.xlsx"');
+    res.end(Buffer.from(buf));
+  } catch (e) {
+    console.error('[GALPON] GET /resumen.xlsx:', e.message);
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
 export default router;

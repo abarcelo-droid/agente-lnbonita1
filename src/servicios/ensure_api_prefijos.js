@@ -88,7 +88,8 @@ const PREFIJOS = [
   // lecturas: una dirección que no figura en ningún mapa es una dirección que
   // exigirNivel deja pasar entera el día que alguien le cuelgue un POST —un cierre de
   // temporada, una corrección masiva— sin acordarse de volver a este archivo.
-  ['galpon-acumulado', 'galpon/acumulado'],
+  // Y la planilla que se baja del acumulado: misma pantalla, mismo permiso.
+  ['galpon-acumulado', 'galpon/acumulado,galpon/resumen'],
   // EL PROCESO (V1112). Escribe el otro libro del galpón: qué salió de lo que entró.
   // Cargarlo es trabajo del día y pide operar, no admin — lo que pide admin es el
   // catálogo de presentaciones, que está arriba con el resto de la parametrización.

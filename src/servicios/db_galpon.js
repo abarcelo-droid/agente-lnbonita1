@@ -355,6 +355,33 @@ try {
   }
 } catch (e) { console.error('[GALPON] sembrando presentaciones:', e.message); }
 
+// ── LO QUE SE CARGÓ ANTES DE QUE EL PRODUCTO VIAJARA ────────────────────────────────
+// Andy, 1/11/2026: «aclaro todo lo que está cargado hasta ahora en damasco, pero sí
+// necesito diferenciarlo porque después viene uva y melón».
+//
+// La columna existía y estaba siempre en NULL: la pantalla de proceso nunca la mandaba,
+// y con un solo producto el corte se veía igual de bien contando todo junto.
+//
+// CORRE UNA SOLA VEZ, marcada en gal_config. Un UPDATE ... WHERE producto IS NULL en
+// cada arranque le pondría «Damasco» a la primera carga de uva que entre sin cultivo
+// cargado en su lote — y eso ya no sería arreglar el pasado, sería ensuciar el futuro.
+try {
+  const hecha = db.prepare("SELECT valor FROM gal_config WHERE clave = 'migr_producto_damasco'").get();
+  if (!hecha) {
+    const r = db.prepare(
+      "UPDATE gal_procesos SET producto = 'Damasco' WHERE producto IS NULL OR producto = ''").run();
+    const v = db.prepare(
+      "UPDATE gal_volcados SET producto = 'Damasco' WHERE producto IS NULL OR producto = ''").run();
+    db.prepare("INSERT INTO gal_config (clave, valor) VALUES ('migr_producto_damasco', ?)")
+      .run(new Date().toISOString().slice(0, 10) + ': ' + r.changes + ' procesos, '
+           + v.changes + ' volcados');
+    if (r.changes || v.changes) {
+      console.log('[GALPON] producto=Damasco en ' + r.changes + ' procesos y '
+        + v.changes + ' volcados que estaban sin producto');
+    }
+  }
+} catch (e) { console.error('[GALPON] migración del producto:', e.message); }
+
 console.log("[GALPON] Tablas de Galpón verificadas");
 
 export default db;
