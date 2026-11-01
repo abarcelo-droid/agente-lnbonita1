@@ -888,7 +888,11 @@ test('EL MANUAL DE LA CARGA MANDA ACÁ PARA EL TOTAL', () => {
   // Si no lo dijera, el operador sumaría los días a mano — que es exactamente
   // lo que había antes de esta pantalla.
   const kg = manualDe('galpon-carga');
-  assert.match(kg, /Galpón · Acumulado/,
+  // El ítem se llamaba «Galpón · Acumulado» y desde la V1121 es «📈 Acumulado»: Andy,
+  // 1/11/2026, «sacar el galpón, es redundante». El assert sigue al nombre REAL del
+  // ítem, porque lo que importa es que el manual mande a un lugar que se pueda buscar
+  // en el menú — no que diga una frase.
+  assert.match(kg, /📈 Acumulado/,
     'el manual de la carga no menciona dónde está el total de la temporada');
   assert.match(kg, /V1109/, 'el puntero no lleva su número de versión');
 });
@@ -1850,4 +1854,68 @@ test('GUARDAR UN CAMPO DEL LOTE MANDA LOS TRES', () => {
   // Y no se manda nada si el campo no cambió: un guardado por cada clic afuera
   // del casillero es un guardado por cada vez que alguien pasa de largo.
   assert.match(js, /if \(\(l\[k\] \|\| ''\) === inp\.value\.trim\(\)\) return;/);
+});
+
+// ── 🚚 LA VENTANA DEL DESPACHO ────────────────────────────────────────────
+// Las cuatro reglas de una ventana las audita ventanas_del_panel.test.mjs, que
+// las mira TODAS. Las tres primeras —fuera de toda .sec, con sg-mod, no se
+// cierra al clic afuera— salen gratis de ahí. La CUARTA no es auditable en
+// general: «no se cierra al guardar si adentro queda algo que hay que leer»
+// depende de qué queda adentro. Así que va acá, para esta ventana.
+const JS_ST = bloqueJs('var GST = {');
+
+test('LA VENTANA NO SE CIERRA AL EMITIR: adentro queda el número', () => {
+  // Es la regla 4 de CLAUDE.md. El número del remito se emite ahí y es lo que
+  // hay que leer; cerrarse solo lo tapa y no hay dónde volver a buscarlo sin
+  // adivinar cuál de la lista era.
+  const emitir = JS_ST.slice(JS_ST.indexOf('async function galDspEmitir()'),
+                             JS_ST.indexOf('async function galDspAnular()'));
+  assert.ok(emitir.length > 200, 'el corte de galDspEmitir salió vacío');
+  assert.ok(!sinComentarios(emitir).includes('galDspCerrar('),
+    'galDspEmitir cierra la ventana y se lleva puesto el número');
+  // Y lo que queda adentro TIENE que repintarse, o la ventana muestra el
+  // borrador de antes y el número no aparece en ningún lado.
+  assert.match(emitir, /galDspPintar\(\)/);
+});
+
+test('el abridor DEJA LA VENTANA EN BLANCO antes de llenarla', () => {
+  // Un formulario que sólo se esconde CONSERVA lo que tenía (CLAUDE.md). Acá
+  // eso sería mandarle las cajas de este camión al destinatario del anterior.
+  const abrir = JS_ST.slice(JS_ST.indexOf('async function galDspAbrir(id)'),
+                            JS_ST.indexOf('function galDspCerrar()'));
+  assert.ok(abrir.length > 200, 'el corte de galDspAbrir salió vacío');
+  for (const k of ['gal-dsp-dest', 'gal-dsp-transp', 'gal-dsp-pat', 'gal-dsp-cant']) {
+    assert.ok(abrir.includes(k), 'el abridor no limpia ' + k);
+  }
+  assert.match(abrir, /GST\.abierto = null/);
+});
+
+test('EL SELECTOR DE QUÉ CARGAR SALE DEL STOCK, no de un catálogo', () => {
+  // Si saliera del catálogo de presentaciones se podría elegir un artículo que
+  // no tiene una sola caja, y el error aparecería recién al apretar Agregar.
+  assert.match(JS_ST, /GST\.disp\b/);
+  const pintar = JS_ST.slice(JS_ST.indexOf('function galDspPintar()'),
+                             JS_ST.indexOf('function galDspItemPick()'));
+  assert.match(pintar, /\(GST\.disp\|\|\[\]\)\.map/,
+    'el selector no se arma con el disponible');
+});
+
+test('el stock se muestra EN CAJAS, con los kilos al lado', () => {
+  // Andy, 31/10/2026: «los stock van en cajas porque necesitamos saber qué
+  // cargar. No me interesa ahí verlo en kilos».
+  const html = bloqueHtml('<div class="sec sg-mod" id="sec-galpon-stock">');
+  assert.match(html, /gst-kg\{font-size:11px/, 'los kilos no están en chico');
+  assert.match(JS_ST, /<th style="text-align:right">Cajas<\/th>/);
+  // Y el total general sí va en kilos: sumar cajas de 8 kg con bines de 400
+  // daría un número que no significa nada físico.
+  assert.match(JS_ST, /kg en cámara/);
+});
+
+test('EL MANUAL DEL STOCK dice que no se despacha más de lo que hay', () => {
+  const m = manualDe('galpon-stock');
+  assert.match(m, /V1121/, 'el manual no lleva su número de versión');
+  assert.match(m, /única validación del galpón que frena/);
+  // Y la vuelta del circuito, que es lo que Andy preguntó.
+  assert.match(m, /procesa/);
+  assert.match(m, /se <b>anula<\/b>, nunca se borra/);
 });

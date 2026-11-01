@@ -53,6 +53,7 @@ try {
     // que se usa el galpón: entra fruta, se empaca, y al final se mira el rinde.
     ['galpon-proceso',  '📦 Proceso',        703],
     ['galpon-acumulado','📈 Acumulado',      704],
+    ['galpon-stock',    '🚚 Stock y Despachos', 705],
   ];
 
   const ins = db.prepare(

@@ -445,6 +445,9 @@ export function entero(v) {
 // Dos decimales, en un solo lugar. Los kilos se suman y se promedian, y una suma de
 // flotantes arrastra el 0,000000001 hasta que un total cierra con tres decimales raros.
 const round2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
+// El día de hoy en hora LOCAL, no UTC: a las 21:30 de Mendoza toISOString() ya dice
+// mañana, y un despacho quedaría fechado un día después del camión.
+const hoy = () => new Date().toLocaleDateString('en-CA');
 
 // ── DE DÓNDE SALIÓ EL PESO ──────────────────────────────────────────────────────────
 // Tres, y no texto libre. Es lo que después contesta «cuánto se pesó a mano», que es
@@ -1997,4 +2000,309 @@ export function palletPorNumero(db, numero) {
     'SELECT * FROM gal_pallets WHERE numero = ? AND eliminado_en IS NULL').get(n);
   if (!p) return null;
   return Object.assign({}, p, { contenido: contenidoDelPallet(db, p.id) });
+}
+
+// ════════════════════════════════════════════════════════════════════════════════════
+// 🚚 EL DESPACHO
+// ════════════════════════════════════════════════════════════════════════════════════
+// Andy, 1/11/2026: «la vuelta sería primero procesar y una vez que está en stock lo
+// despachamos».
+//
+// Un despacho es una SALIDA del stock: cada ítem escribe una fila en gal_procesos con
+// tipo = 'salida', que es la columna que los seis agregados de stock ya descuentan. No
+// hay tabla de movimientos aparte, y eso es deliberado: dos lugares que suman el mismo
+// stock es un stock que miente el día que una consulta se olvida de la otra.
+//
+// Y SE DESPACHA EN CAJAS, no en kilos. Andy, 31/10/2026: «los stock van en cajas porque
+// necesitamos saber qué cargar. No me interesa ahí verlo en kilos». El operador pide 120
+// cajas y los kilos los deduce el servidor con el kg_unidad del stock que descuenta —
+// igual que la carga de proceso, donde kilos lo calcula el servidor y nunca el cliente.
+
+export const DESPACHO_ESTADOS = ['borrador', 'emitido', 'anulado'];
+
+// ── QUÉ SE PUEDE DESPACHAR ──────────────────────────────────────────────────────────
+// El stock disponible por línea, que es la unidad real del despacho: no «200 kg de
+// damasco» sino «la caja 50/55 comercial del lote 10». Es lo que se carga en un camión.
+/* EL SALDO POR LÍNEA, sin esconder los ceros: es lo que mira la validación del tope.
+   disponibleParaDespacho() le saca las líneas en cero porque es lo que alimenta el
+   selector —ofrecer algo que no hay es ofrecer un error—, pero la validación necesita
+   ver el cero para poder DECIRLO: «hay 0 cajas de eso» explica, «de eso no hay nada en
+   stock» hace pensar que el artículo no existe.
+
+   Y el HAVING repite la expresión en vez de usar el alias a propósito: en SQLite un
+   alias en HAVING se liga a la COLUMNA de la tabla, no a la suma, así que
+   un "HAVING bultos > 0" filtraría fila por fila y dejaría pasar las líneas agotadas. Ya
+   pasó en este repo con un GROUP BY. */
+function saldosDeStock(db, opts) {
+  const o = opts || {};
+  const filas = db.prepare(
+    ' SELECT lote_id, lote_nombre, producto, destino, presentacion_id, presentacion,'
+    + '       categoria, calibre, variedad, envase,'
+    + "       COALESCE(SUM(CASE WHEN tipo = 'ingreso' THEN bultos ELSE -bultos END),0) AS bultos,"
+    + "       COALESCE(SUM(CASE WHEN tipo = 'ingreso' THEN kilos ELSE -kilos END),0) AS kilos,"
+    /* Granel = en esta línea NUNCA hubo bultos. Deducirlo de «bultos llegó a 0» haría
+       que una línea de cajas agotada se trate como granel y pida kilos. */
+    + '       COUNT(bultos) AS con_bultos'
+    + '  FROM gal_procesos WHERE eliminado_en IS NULL'
+    + (o.destino ? ' AND destino = ?' : '')
+    + '  GROUP BY lote_id, destino, presentacion_id, categoria, calibre'
+    + '  ORDER BY destino, lote_nombre, presentacion').all(...(o.destino ? [txt(o.destino)] : []));
+
+  return filas.map((f) => Object.assign(f, {
+    bultos: round2(f.bultos), kilos: round2(f.kilos),
+    granel: !f.con_bultos,
+    /* El peso de una caja SALE DEL STOCK que hay, no del catálogo: si entraron cajas de
+       8,2 kg y el catálogo dice 8,0, despachar 100 tiene que sacar los 820 que hay. Si
+       no, quedan 20 kg fantasma que nadie puede despachar nunca. */
+    kg_unidad: f.bultos > 0 ? round2(f.kilos / f.bultos) : null,
+    clave: [f.lote_id, f.destino, f.presentacion_id || 0, f.calibre || ''].join('|'),
+  }));
+}
+
+// ── QUÉ SE PUEDE DESPACHAR ──────────────────────────────────────────────────────────
+// Lo que HAY, por línea: no «200 kg de damasco» sino «la caja 50/55 comercial del lote
+// 10». Es la unidad con la que se carga un camión, y es lo que alimenta el selector de
+// la ventana: por eso las líneas agotadas no salen.
+export function disponibleParaDespacho(db, opts) {
+  return saldosDeStock(db, opts).filter((f) => f.bultos > 0 || f.kilos > 0);
+}
+
+export function despachos(db, opts) {
+  const o = opts || {};
+  const w = ['eliminado_en IS NULL'];
+  const a = [];
+  if (o.estado && DESPACHO_ESTADOS.indexOf(o.estado) >= 0) { w.push('estado = ?'); a.push(o.estado); }
+  if (fechaDeAlmanaque(o.desde)) { w.push('fecha >= ?'); a.push(esFecha(o.desde)); }
+  if (fechaDeAlmanaque(o.hasta)) { w.push('fecha <= ?'); a.push(esFecha(o.hasta)); }
+  return db.prepare('SELECT * FROM gal_despachos WHERE ' + w.join(' AND ')
+    + ' ORDER BY fecha DESC, id DESC LIMIT ' + (parseInt(o.limite, 10) || 200)).all(...a);
+}
+
+export function itemsDelDespacho(db, despachoId) {
+  const i = parseInt(despachoId, 10);
+  if (!Number.isFinite(i)) return [];
+  return db.prepare(
+    ' SELECT * FROM gal_procesos'
+    + "  WHERE despacho_id = ? AND tipo = 'salida' AND eliminado_en IS NULL"
+    + '  ORDER BY id').all(i).map((f) => Object.assign(f, {
+      bultos: round2(f.bultos), kilos: round2(f.kilos),
+    }));
+}
+
+export function abrirDespacho(db, d) {
+  const dd = d || {};
+  const r = db.prepare(
+    " INSERT INTO gal_despachos (estado, fecha, destinatario, transporte, patente,"
+    + '   remito, observacion, usuario_id, usuario)'
+    + " VALUES ('borrador',?,?,?,?,?,?,?,?)").run(
+    esFecha(dd.fecha) || hoy(), txt(dd.destinatario), txt(dd.transporte), txt(dd.patente),
+    txt(dd.remito), txt(dd.observacion), numPos(dd.usuario_id, 0) || null, txt(dd.usuario));
+  return { ok: true, id: r.lastInsertRowid,
+           despacho: db.prepare('SELECT * FROM gal_despachos WHERE id = ?').get(r.lastInsertRowid) };
+}
+
+export function editarDespacho(db, id, d) {
+  const i = parseInt(id, 10);
+  const dd = d || {};
+  if (!Number.isFinite(i)) return { ok: false, motivo: 'Id inválido' };
+  const x = db.prepare('SELECT * FROM gal_despachos WHERE id = ? AND eliminado_en IS NULL').get(i);
+  if (!x) return { ok: false, motivo: 'Ese despacho no existe o se borró' };
+  /* Un despacho EMITIDO no se edita: el remito ya salió. Lo que cambia después —que al
+     final lo llevó otro camión— va en la observación, que sí se puede agregar. */
+  if (x.estado === 'anulado') return { ok: false, motivo: 'Ese despacho está anulado' };
+  if (x.estado === 'emitido') {
+    if (dd.observacion == null) {
+      return { ok: false, motivo: 'Ya está emitido: sólo se le puede agregar observación' };
+    }
+    db.prepare('UPDATE gal_despachos SET observacion = ? WHERE id = ?')
+      .run(txt(dd.observacion), i);
+    return { ok: true, id: i, solo_observacion: true,
+             despacho: db.prepare('SELECT * FROM gal_despachos WHERE id = ?').get(i) };
+  }
+  db.prepare(
+    ' UPDATE gal_despachos SET fecha = COALESCE(?, fecha),'
+    + '   destinatario = COALESCE(?, destinatario), transporte = COALESCE(?, transporte),'
+    + '   patente = COALESCE(?, patente), remito = COALESCE(?, remito),'
+    + '   observacion = COALESCE(?, observacion)'
+    + ' WHERE id = ?').run(esFecha(dd.fecha), txt(dd.destinatario), txt(dd.transporte),
+                           txt(dd.patente), txt(dd.remito), txt(dd.observacion), i);
+  return { ok: true, id: i,
+           despacho: db.prepare('SELECT * FROM gal_despachos WHERE id = ?').get(i) };
+}
+
+// ── CARGAR UNA LÍNEA AL DESPACHO ────────────────────────────────────────────────────
+// ACÁ ESTÁ LA ÚNICA VALIDACIÓN DEL GALPÓN QUE FRENA. No se despacha más de lo que hay:
+// la fruta todavía está en la cámara y un camión al que le faltan 50 cajas no es un dato
+// a corregir mañana. Todo lo demás del módulo marca a_revisar porque la fruta ya está en
+// la tolva y negarse a guardar la pierde; acá es al revés.
+export function agregarAlDespacho(db, despachoId, d) {
+  const i = parseInt(despachoId, 10);
+  const dd = d || {};
+  if (!Number.isFinite(i)) return { ok: false, motivo: 'Id inválido' };
+  const x = db.prepare('SELECT * FROM gal_despachos WHERE id = ? AND eliminado_en IS NULL').get(i);
+  if (!x) return { ok: false, motivo: 'Ese despacho no existe o se borró' };
+  if (x.estado !== 'borrador') {
+    return { ok: false, motivo: 'Ese despacho ya está ' + x.estado + ': no se le puede agregar' };
+  }
+
+  const lote = parseInt(dd.lote_id, 10);
+  if (!Number.isFinite(lote)) return { ok: false, motivo: 'Falta el lote' };
+  const destino = txt(dd.destino);
+  if (!DESTINOS.some((y) => y.clave === destino)) return { ok: false, motivo: 'Destino inválido' };
+
+  const pres = parseInt(dd.presentacion_id, 10) || 0;
+  const cal = txt(dd.calibre) || '';
+  /* Contra el SALDO, no contra el disponible: así una línea agotada puede contestar
+     «hay 0 cajas de eso» en vez de «no existe». */
+  const disp = saldosDeStock(db).find((f) => f.lote_id === lote
+    && f.destino === destino
+    && (f.presentacion_id || 0) === pres
+    && (f.calibre || '') === cal);
+  if (!disp) return { ok: false, motivo: 'De eso nunca entró nada al galpón' };
+
+  /* Granel: se despachan kilos. Con presentación: se despachan CAJAS y los kilos los
+     calcula el servidor, como en la carga de proceso. */
+  const granel = disp.granel;
+  const bultos = granel ? null : numPos(dd.bultos, 0);
+  const kilos = granel ? numPos(dd.kilos, 0) : round2(bultos * disp.kg_unidad);
+  if (!granel && !(bultos > 0)) return { ok: false, motivo: 'Poné cuántas cajas' };
+  if (granel && !(kilos > 0)) return { ok: false, motivo: 'Poné cuántos kilos' };
+
+  /* El disponible ya descuenta las salidas GRABADAS, incluidas las de este mismo
+     borrador: pedir 250 y después 250 más tiene que frenarse en la segunda, no sumar
+     500 y recién avisar cuando el camión está cargado. */
+  if (!granel && bultos > disp.bultos) {
+    return { ok: false, motivo: 'Hay ' + disp.bultos + ' cajas de eso y estás despachando '
+                                + bultos, disponible: disp.bultos, pedido: bultos };
+  }
+  if (granel && kilos > disp.kilos) {
+    return { ok: false, motivo: 'Hay ' + disp.kilos + ' kg de eso y estás despachando ' + kilos,
+             disponible: disp.kilos, pedido: kilos };
+  }
+
+  /* Se CONGELA lo que se despachó, igual que en la carga y en el pallet: lo que dice el
+     remito que salió no lo cambia un catálogo corregido el mes que viene. */
+  const r = db.prepare(
+    ' INSERT INTO gal_procesos (uuid, fecha, lote_id, lote_nombre, producto, destino,'
+    + '   presentacion_id, presentacion, envase, categoria, calibre, variedad,'
+    + '   bultos, kg_unidad, kilos, tipo, despacho_id, observacion, usuario_id, usuario)'
+    + " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'salida',?,?,?,?)").run(
+    txt(dd.uuid), x.fecha, lote, txt(disp.lote_nombre), txt(disp.producto), destino,
+    disp.presentacion_id || null, txt(disp.presentacion), txt(disp.envase),
+    txt(disp.categoria), txt(disp.calibre), txt(disp.variedad),
+    bultos, granel ? null : disp.kg_unidad, kilos,
+    i, txt(dd.observacion), numPos(dd.usuario_id, 0) || null, txt(dd.usuario));
+
+  return { ok: true, id: r.lastInsertRowid, bultos, kilos,
+           despacho: recalcularDespacho(db, i) };
+}
+
+export function sacarDelDespacho(db, procesoId) {
+  const i = parseInt(procesoId, 10);
+  if (!Number.isFinite(i)) return { ok: false, motivo: 'Id inválido' };
+  const f = db.prepare(
+    " SELECT * FROM gal_procesos WHERE id = ? AND tipo = 'salida' AND eliminado_en IS NULL")
+    .get(i);
+  if (!f) return { ok: false, motivo: 'Esa línea no existe' };
+  const x = db.prepare('SELECT estado FROM gal_despachos WHERE id = ?').get(f.despacho_id);
+  if (x && x.estado !== 'borrador') {
+    return { ok: false, motivo: 'Ese despacho ya está ' + x.estado + ': anulalo entero' };
+  }
+  db.prepare("UPDATE gal_procesos SET eliminado_en = datetime('now','localtime') WHERE id = ?")
+    .run(i);
+  return { ok: true, despacho: f.despacho_id ? recalcularDespacho(db, f.despacho_id) : null };
+}
+
+// Los totales del borrador se RECALCULAN de las líneas; al emitir se congelan.
+export function recalcularDespacho(db, id) {
+  const i = parseInt(id, 10);
+  const t = db.prepare(
+    " SELECT COALESCE(SUM(bultos),0) AS bultos, COALESCE(SUM(kilos),0) AS kilos"
+    + "  FROM gal_procesos WHERE despacho_id = ? AND tipo = 'salida'"
+    + '    AND eliminado_en IS NULL').get(i);
+  db.prepare('UPDATE gal_despachos SET bultos = ?, kilos = ? WHERE id = ?')
+    .run(round2(t.bultos), round2(t.kilos), i);
+  return db.prepare('SELECT * FROM gal_despachos WHERE id = ?').get(i);
+}
+
+export function proximoNumeroDespacho(db, fecha) {
+  const f = esFecha(fecha) || '';
+  const anio = f ? f.slice(2, 4) : String(new Date().getFullYear()).slice(2);
+  const pref = (valorConfig(db, 'despacho_prefijo') || 'DG') + '-' + anio + '-';
+  const ult = db.prepare(
+    ' SELECT numero FROM gal_despachos WHERE numero LIKE ?'
+    + ' ORDER BY numero DESC LIMIT 1').get(pref + '%');
+  const n = ult ? (parseInt(String(ult.numero).slice(pref.length), 10) || 0) : 0;
+  return pref + String(n + 1).padStart(5, '0');
+}
+
+export function emitirDespacho(db, id) {
+  const i = parseInt(id, 10);
+  if (!Number.isFinite(i)) return { ok: false, motivo: 'Id inválido' };
+  const x = db.prepare('SELECT * FROM gal_despachos WHERE id = ? AND eliminado_en IS NULL').get(i);
+  if (!x) return { ok: false, motivo: 'Ese despacho no existe o se borró' };
+  if (x.estado === 'emitido') return { ok: true, id: i, despacho: x, ya_estaba: true };
+  if (x.estado === 'anulado') return { ok: false, motivo: 'Ese despacho está anulado' };
+
+  const items = itemsDelDespacho(db, i);
+  /* Un despacho vacío se rechaza por lo mismo que un pallet vacío: gastaría un número
+     del correlativo en un remito de cero cajas. */
+  if (!items.length) return { ok: false, motivo: 'Este despacho no tiene nada cargado' };
+
+  /* El número se conserva si ya tenía —igual que el pallet reabierto—, así que un
+     despacho anulado y rehecho no abre un hueco en el correlativo. */
+  const numero = x.numero || proximoNumeroDespacho(db, x.fecha);
+  db.prepare(
+    " UPDATE gal_despachos SET numero = ?, estado = 'emitido', bultos = ?, kilos = ?,"
+    + "   emitido_en = datetime('now','localtime') WHERE id = ?").run(
+    numero, round2(items.reduce((t, y) => t + (y.bultos || 0), 0)),
+    round2(items.reduce((t, y) => t + y.kilos, 0)), i);
+  return { ok: true, id: i, numero,
+           despacho: db.prepare('SELECT * FROM gal_despachos WHERE id = ?').get(i), items };
+}
+
+// ── ANULAR ──────────────────────────────────────────────────────────────────────────
+// Un despacho emitido no se borra: se ANULA. Borrarlo haría desaparecer un remito que
+// alguien tiene en la mano. Anular devuelve los kilos al stock —las salidas se eliminan
+// en blando y los agregados dejan de verlas— y el número queda gastado, que es lo que
+// hace que un correlativo pueda demostrar que no se saltea nada.
+export function anularDespacho(db, id, motivo) {
+  const i = parseInt(id, 10);
+  if (!Number.isFinite(i)) return { ok: false, motivo: 'Id inválido' };
+  const x = db.prepare('SELECT * FROM gal_despachos WHERE id = ? AND eliminado_en IS NULL').get(i);
+  if (!x) return { ok: false, motivo: 'Ese despacho no existe o se borró' };
+  if (x.estado === 'anulado') return { ok: true, id: i, despacho: x, ya_estaba: true };
+  db.prepare(
+    " UPDATE gal_procesos SET eliminado_en = datetime('now','localtime')"
+    + "  WHERE despacho_id = ? AND tipo = 'salida' AND eliminado_en IS NULL").run(i);
+  db.prepare(
+    " UPDATE gal_despachos SET estado = 'anulado', anulado_en = datetime('now','localtime'),"
+    + '   anulado_motivo = ? WHERE id = ?').run(txt(motivo), i);
+  return { ok: true, id: i,
+           despacho: db.prepare('SELECT * FROM gal_despachos WHERE id = ?').get(i) };
+}
+
+// Un BORRADOR sí se borra: todavía no salió nada y no hay número gastado.
+export function borrarDespacho(db, id) {
+  const i = parseInt(id, 10);
+  if (!Number.isFinite(i)) return { ok: false, motivo: 'Id inválido' };
+  const x = db.prepare('SELECT * FROM gal_despachos WHERE id = ? AND eliminado_en IS NULL').get(i);
+  if (!x) return { ok: false, motivo: 'Ese despacho no existe o ya se borró' };
+  if (x.estado !== 'borrador') {
+    return { ok: false, motivo: 'Ese despacho está ' + x.estado + ': se anula, no se borra' };
+  }
+  db.prepare(
+    " UPDATE gal_procesos SET eliminado_en = datetime('now','localtime')"
+    + '  WHERE despacho_id = ? AND eliminado_en IS NULL').run(i);
+  db.prepare("UPDATE gal_despachos SET eliminado_en = datetime('now','localtime') WHERE id = ?")
+    .run(i);
+  return { ok: true, id: i };
+}
+
+export function despachoPorNumero(db, numero) {
+  const n = txt(numero);
+  if (!n) return null;
+  const x = db.prepare(
+    ' SELECT * FROM gal_despachos WHERE numero = ? AND eliminado_en IS NULL').get(n);
+  return x ? Object.assign(x, { items: itemsDelDespacho(db, x.id) }) : null;
 }
