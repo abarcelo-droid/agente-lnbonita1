@@ -68,7 +68,7 @@ function base(techo = '50000') {
     CREATE TABLE gal_presentaciones (
       id INTEGER PRIMARY KEY AUTOINCREMENT, nombre TEXT NOT NULL, destino TEXT NOT NULL,
       envase TEXT, por_bulto REAL NOT NULL DEFAULT 1, kg_unidad REAL NOT NULL DEFAULT 1,
-      granel INTEGER NOT NULL DEFAULT 0, emoji TEXT, categoria TEXT NOT NULL DEFAULT 'I', calibre TEXT, color TEXT, orden INTEGER NOT NULL DEFAULT 100,
+      granel INTEGER NOT NULL DEFAULT 0, emoji TEXT, icono TEXT, icono_v TEXT, categoria TEXT NOT NULL DEFAULT 'I', calibre TEXT, color TEXT, orden INTEGER NOT NULL DEFAULT 100,
       activo INTEGER NOT NULL DEFAULT 1, creado_en TEXT, eliminado_en TEXT);
 
     CREATE TABLE gal_pallets (id INTEGER PRIMARY KEY AUTOINCREMENT, numero TEXT UNIQUE,

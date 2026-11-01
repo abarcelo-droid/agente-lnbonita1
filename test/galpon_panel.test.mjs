@@ -1976,8 +1976,43 @@ test('la LISTA del catálogo muestra el dibujito de cada una', () => {
   const js = PANEL.slice(PANEL.indexOf('  b.innerHTML = GPRES.lista.map(function(p){'),
                          PANEL.indexOf('function galPresAbrir('));
   assert.ok(js.length > 200, 'el corte de la lista salió vacío');
-  assert.match(js, /p\.emoji/, 'la lista no pinta el emoji');
+  // Por galDibHtml, que decide entre el dibujo subido y el emoji en un solo
+  // lugar para las cuatro pantallas. El assert anterior miraba `p.emoji` y el
+  // markup exacto: se cayó al unificarlas, que es justamente lo que se quería.
+  assert.match(js, /galDibHtml\(p, 16\)/, 'la lista no pinta el dibujito');
   // Con el hueco ocupado aunque no haya: si no, los nombres quedan en zigzag.
   assert.match(js, /display:inline-block;width:22px/);
-  assert.match(js, /aria-hidden="true"/);
+});
+
+test('UN SOLO LUGAR DECIDE QUÉ DIBUJITO VA, y las cuatro pantallas lo usan', () => {
+  // Se pinta en la ventana del catálogo, en su lista, en las baldosas del
+  // stock y en las de Proceso. Escrito cuatro veces, el día que cambie la
+  // dirección del archivo quedan tres rotas — y se ven recién abriendo cada
+  // pantalla, que es como se descubren estas cosas en producción.
+  const usos = [...PANEL.matchAll(/galDibHtml\(/g)].length;
+  assert.ok(usos >= 4, 'sólo ' + usos + ' usos de galDibHtml: alguna lo escribe aparte');
+  // Y la URL también sale de un solo lado, con su ?v= o el navegador muestra
+  // el dibujo anterior durante el año que dura la caché.
+  const url = PANEL.slice(PANEL.indexOf('function galDibUrl(id, v){'),
+                          PANEL.indexOf('function galDibHtml('));
+  assert.ok(url.length > 50, 'el corte de galDibUrl salió vacío');
+  assert.match(url, /\?v=/);
+  assert.match(url, /encodeURIComponent/);
+  // Nadie arma esa dirección a mano en otro lado.
+  const aMano = [...PANEL.matchAll(/presentaciones\/[^'"]*\/icono/g)]
+    .map((m) => m[0]).filter((x) => !x.includes('+ id +'));
+  for (const x of aMano) {
+    assert.ok(/' \+ GPRES\.editId \+ '|\$\{/.test(x) || x.includes('/api/galpon/presentaciones/'),
+      'dirección del dibujo armada a mano: ' + x);
+  }
+
+  const di = PANEL.indexOf('function galDibHtml(p, px){');
+  assert.ok(di > 0, 'no encontré galDibHtml');
+  const dib = PANEL.slice(di, PANEL.indexOf('var GST = {', di));
+  assert.ok(dib.length > 200, 'el corte de galDibHtml salió vacío');
+  // El dibujo subido gana sobre el emoji, y los dos se esconden del lector.
+  assert.ok(dib.indexOf('icono_v') < dib.indexOf('p.emoji'),
+    'el emoji se evalúa antes que el dibujo subido');
+  assert.equal((dib.match(/aria-hidden="true"/g) || []).length, 2,
+    'alguno de los dos casos se lo lee el lector de pantalla');
 });

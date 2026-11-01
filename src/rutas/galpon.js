@@ -14,6 +14,8 @@
 // Las lecturas y el PDF van con `requireAuth`: imprimir una hoja de tarjetas no rompe
 // nada, y el que las imprime a las seis de la mañana no suele ser el admin.
 import express from 'express';
+import fs from 'node:fs';
+import path from 'node:path';
 import db from '../servicios/db_galpon.js';
 import { exigirEmpresa, PUENTE_CORDON } from '../servicios/sociedad_modulo.js';
 import {
@@ -27,7 +29,7 @@ import {
   lotesConDatos, guardarDatosDeLote, variedadATodos,
   palletAbierto, abrirPallet, contenidoDelPallet, cerrarPallet, reabrirPallet,
   disponibleParaDespacho, despachos, itemsDelDespacho, abrirDespacho, editarDespacho,
-  stockPorPresentacion,
+  stockPorPresentacion, guardarIcono, borrarIcono, rutaDelIcono,
   agregarAlDespacho, sacarDelDespacho, emitirDespacho, anularDespacho, borrarDespacho,
   despachoPorNumero,
   borrarPallet, sacarDelPallet, pallets, palletPorNumero, valorConfig,
@@ -1061,6 +1063,71 @@ router.get('/despachos/numero/:numero', (req, res) => {
   } catch (e) {
     console.error('[GALPON] GET /despachos/numero:', e.message);
     res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+
+// ── 🖼️ EL DIBUJO PROPIO DE UNA PRESENTACIÓN ─────────────────────────────────────────
+// Andy, 1/11/2026: «quiero yo poder subirle algún dibujito desde la computadora».
+//
+// VA A data/galpon/iconos, que NO está en ningún express.static. Las carpetas que sí
+// lo están —data/sg, data/ifco, data/uploads— se sirven ANTES del portón de sesión
+// (index.js:110-115), o sea alcanzables sin cookie. El dibujo de una caja no es un
+// secreto, pero tampoco hay una razón para publicarlo, y el día que alguien copie este
+// bloque para algo que sí lo sea se lleva el agujero puesto.
+const IC_DIR = path.join(process.cwd(), 'data', 'galpon', 'iconos');
+const iconoIO = {
+  escribir(nombre, buf) {
+    try {
+      fs.mkdirSync(IC_DIR, { recursive: true });
+      const ruta = path.join(IC_DIR, nombre);
+      fs.writeFileSync(ruta, buf);
+      return { ok: true, ruta };
+    } catch (e) {
+      console.error('[GALPON] guardando icono:', e.message);
+      return { ok: false, motivo: 'No se pudo guardar el archivo' };
+    }
+  },
+  borrar(ruta) { try { fs.unlinkSync(ruta); } catch (e) { /* ya no estaba */ } },
+};
+
+// Subirlo y borrarlo es PARAMETRIZAR —es el catálogo— así que va con requireAdmin,
+// igual que el resto de /presentaciones. Mirarlo es trabajo del día y va con la sesión.
+router.post('/presentaciones/:id/icono', requireAdmin, (req, res) => {
+  try {
+    const r = guardarIcono(db, num(req.params.id), (req.body || {}).imagen, iconoIO);
+    if (!r.ok) return res.status(400).json({ ok: false, error: r.motivo });
+    res.json(r);
+  } catch (e) {
+    console.error('[GALPON] POST /presentaciones/:id/icono:', e.message);
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+router.delete('/presentaciones/:id/icono', requireAdmin, (req, res) => {
+  try {
+    const r = borrarIcono(db, num(req.params.id), iconoIO);
+    if (!r.ok) return res.status(400).json({ ok: false, error: r.motivo });
+    res.json(r);
+  } catch (e) {
+    console.error('[GALPON] DELETE /presentaciones/:id/icono:', e.message);
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+router.get('/presentaciones/:id/icono', (req, res) => {
+  try {
+    const ruta = rutaDelIcono(db, num(req.params.id));
+    if (!ruta || !fs.existsSync(ruta)) return res.status(404).end();
+    /* Un año de caché y privada. La URL lleva ?v= con la versión, así que subir otro
+       dibujo cambia la dirección y el navegador lo pide de nuevo; sin el ?v= seguiría
+       mostrando el anterior para siempre. Y private porque pasa por requireAuth: un
+       proxy compartido no tiene por qué quedárselo. */
+    res.setHeader('Cache-Control', 'private, max-age=31536000, immutable');
+    res.sendFile(ruta);
+  } catch (e) {
+    console.error('[GALPON] GET /presentaciones/:id/icono:', e.message);
+    res.status(500).end();
   }
 });
 

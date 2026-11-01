@@ -23,6 +23,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
+import zlib from 'node:zlib';
 import { DatabaseSync } from 'node:sqlite';
 import { fileURLToPath } from 'node:url';
 
@@ -68,7 +69,7 @@ function base() {
     CREATE TABLE gal_presentaciones (id INTEGER PRIMARY KEY AUTOINCREMENT,
       nombre TEXT NOT NULL, destino TEXT NOT NULL, envase TEXT,
       por_bulto REAL NOT NULL DEFAULT 1, kg_unidad REAL NOT NULL DEFAULT 1,
-      granel INTEGER NOT NULL DEFAULT 0, emoji TEXT, categoria TEXT NOT NULL DEFAULT 'I',
+      granel INTEGER NOT NULL DEFAULT 0, emoji TEXT, icono TEXT, icono_v TEXT, categoria TEXT NOT NULL DEFAULT 'I',
       calibre TEXT, color TEXT, orden INTEGER NOT NULL DEFAULT 100,
       activo INTEGER NOT NULL DEFAULT 1, creado_en TEXT, eliminado_en TEXT);
     CREATE TABLE gal_pallets (id INTEGER PRIMARY KEY AUTOINCREMENT, numero TEXT UNIQUE,
@@ -160,8 +161,14 @@ function domFalso() {
 
 // El bloque de JS de la pantalla, sacado de panel.html y ejecutado de verdad.
 function pantalla(dom, pegar) {
-  const i = PANEL.indexOf('var GST = { datos:null');
-  assert.ok(i > 0, 'no encontré el bloque GST en panel.html');
+  /* Desde el bloque COMÚN del dibujito: galDibHtml y galDibUrl se usan adentro de
+     GST pero viven afuera, porque las comparten cuatro pantallas. */
+  const marca = PANEL.indexOf('   🖼️ EL DIBUJITO DE UNA PRESENTACIÓN');
+  assert.ok(marca > 0, 'no encontré el bloque del dibujito en panel.html');
+  // Desde el /* del banner: arrancar a mitad de un comentario deja el cierre
+  // suelto y new Function tira SyntaxError sin decir dónde.
+  const i = PANEL.lastIndexOf('/*', marca);
+  assert.ok(i > 0 && marca - i < 400, 'el banner del dibujito no abre comentario');
   const fin = PANEL.indexOf('function galStInit(){', i);
   assert.ok(fin > i, 'no encontré el final del bloque GST');
   const codigo = PANEL.slice(i, fin);
@@ -478,7 +485,158 @@ t('el DIBUJITO se esconde del lector de pantalla', async () => {
       presentacion_id: a.id, bultos: 10, uuid: 'u1' }));
     const p = pantalla(dom, s.pegar);
     await p.galStCargar();
-    assert.match(dom.nodos['gst-stock'].innerHTML,
-      /<span class="gst-emo" aria-hidden="true">📦<\/span>/);
+    /* Se verifica la CONDICIÓN —que el dibujito esté escondido del lector— y
+       no el markup exacto, que ahora lo arma galDibHtml en un solo lugar para
+       las cuatro pantallas. Un assert pegado al markup se cae cada vez que se
+       toca un atributo y no prueba nada más que eso. */
+    const h = dom.nodos['gst-stock'].innerHTML;
+    const m = /<span[^>]*>📦<\/span>/.exec(h);
+    assert.ok(m, 'no pintó el dibujito');
+    assert.match(m[0], /aria-hidden="true"/,
+      'el lector de pantalla le lee el dibujito');
+  } finally { s.cerrar(); }
+});
+
+// ══════════════════════════════════════════════════════════════════════════
+// 5 · EL DIBUJO PROPIO, PUNTA A PUNTA
+// ══════════════════════════════════════════════════════════════════════════
+// Andy, 1/11/2026: «quiero yo poder subirle algún dibujito desde la
+// computadora». Acá se sube por la ruta de verdad, se pide por la ruta de
+// verdad, y se mira que la baldosa lo pinte.
+function pngDePrueba(ancho, alto) {
+  const crc32 = (buf) => {
+    let c = ~0;
+    for (let i = 0; i < buf.length; i++) {
+      c ^= buf[i];
+      for (let k = 0; k < 8; k++) c = (c >>> 1) ^ (0xedb88320 & -(c & 1));
+    }
+    return ~c >>> 0;
+  };
+  const chunk = (tipo, datos) => {
+    const largo = Buffer.alloc(4); largo.writeUInt32BE(datos.length);
+    const cuerpo = Buffer.concat([Buffer.from(tipo, 'latin1'), datos]);
+    const crc = Buffer.alloc(4); crc.writeUInt32BE(crc32(cuerpo));
+    return Buffer.concat([largo, cuerpo, crc]);
+  };
+  const ihdr = Buffer.alloc(13);
+  ihdr.writeUInt32BE(ancho, 0); ihdr.writeUInt32BE(alto, 4);
+  ihdr[8] = 8; ihdr[9] = 6;
+  return Buffer.concat([
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    chunk('IHDR', ihdr),
+    chunk('IDAT', zlib.deflateSync(Buffer.alloc(alto * (1 + ancho * 4)))),
+    chunk('IEND', Buffer.alloc(0)),
+  ]);
+}
+const dataUrlPNG = (a, b) => 'data:image/png;base64,'
+  + pngDePrueba(a, b).toString('base64');
+
+t('SE SUBE, SE PIDE Y LA BALDOSA LO PINTA', async () => {
+  const db = base();
+  const s = await servidor(db, ADMIN);
+  const dom = domFalso();
+  try {
+    const a = await (await s.pegar('/presentaciones', json({ nombre: 'Carton Amarilla',
+      destino: 'comercial', envase: 'Caja', por_bulto: 1, kg_unidad: 8,
+      emoji: '📦', categoria: 'I' }))).json();
+    await s.pegar('/procesos', json({ fecha: HOY, lote_id: 10,
+      presentacion_id: a.id, bultos: 40, uuid: 'u1' }));
+
+    const sub = await (await s.pegar('/presentaciones/' + a.id + '/icono',
+      json({ imagen: dataUrlPNG(96, 96) }))).json();
+    assert.equal(sub.ok, true, sub.error);
+    assert.ok(sub.icono_v);
+
+    // Se pide por la ruta de verdad y vuelve un PNG.
+    const img = await s.pegar('/presentaciones/' + a.id + '/icono');
+    assert.equal(img.status, 200);
+    assert.equal(img.headers.get('content-type'), 'image/png');
+    const buf = Buffer.from(await img.arrayBuffer());
+    assert.deepEqual([...buf.slice(0, 4)], [0x89, 0x50, 0x4e, 0x47],
+      'lo que volvió no es un PNG');
+
+    // Y la baldosa lo pinta EN VEZ del emoji: el dibujo propio gana.
+    const p = pantalla(dom, s.pegar);
+    await p.galStCargar();
+    const h = dom.nodos['gst-stock'].innerHTML;
+    assert.match(h, new RegExp('<img src="[^"]*presentaciones/' + a.id + '/icono'),
+      'la baldosa no pinta el dibujo subido');
+    assert.match(h, new RegExp('v=' + sub.icono_v),
+      'la URL no lleva la versión: el navegador va a mostrar el anterior para siempre');
+    assert.ok(!h.includes('📦'), 'pintó el emoji además del dibujo');
+  } finally { s.cerrar(); }
+});
+
+t('LA RUTA DEL ARCHIVO NO VIAJA EN NINGUNA RESPUESTA', async () => {
+  // Misma regla que la foto de la tarjeta de un contacto: lo que se guarda
+  // queda en el disco del servidor y sale sólo por su endpoint con sesión.
+  const db = base();
+  const s = await servidor(db, ADMIN);
+  try {
+    const a = await (await s.pegar('/presentaciones', json({ nombre: 'Caja',
+      destino: 'comercial', envase: 'x', por_bulto: 1, kg_unidad: 8 }))).json();
+    await s.pegar('/procesos', json({ fecha: HOY, lote_id: 10,
+      presentacion_id: a.id, bultos: 10, uuid: 'u1' }));
+    await s.pegar('/presentaciones/' + a.id + '/icono', json({ imagen: dataUrlPNG(96, 96) }));
+
+    for (const ruta of ['/presentaciones', '/stock', '/procesos']) {
+      const txt = await (await s.pegar(ruta)).text();
+      assert.ok(!/"icono"\s*:/.test(txt), 'la ruta del archivo salió en ' + ruta);
+      assert.ok(!/data[\\/]galpon/.test(txt), 'salió la carpeta en ' + ruta);
+    }
+  } finally { s.cerrar(); }
+});
+
+t('UN SVG SE RECHAZA POR LA RUTA DE VERDAD', async () => {
+  const db = base();
+  const s = await servidor(db, ADMIN);
+  try {
+    const a = await (await s.pegar('/presentaciones', json({ nombre: 'Caja',
+      destino: 'comercial', envase: 'x', por_bulto: 1, kg_unidad: 8 }))).json();
+    const svg = '<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>';
+    const r = await s.pegar('/presentaciones/' + a.id + '/icono',
+      json({ imagen: 'data:image/svg+xml;base64,' + Buffer.from(svg).toString('base64') }));
+    assert.equal(r.status, 400);
+    // Y tampoco entra disfrazado de PNG.
+    const r2 = await s.pegar('/presentaciones/' + a.id + '/icono',
+      json({ imagen: 'data:image/png;base64,' + Buffer.from(svg).toString('base64') }));
+    assert.equal(r2.status, 400);
+    assert.equal((await s.pegar('/presentaciones/' + a.id + '/icono')).status, 404);
+  } finally { s.cerrar(); }
+});
+
+t('SUBIR EL DIBUJO ES PARAMETRIZAR: un operador no puede', async () => {
+  // Es el catálogo, igual que el resto de /presentaciones. Pero VERLO sí: lo
+  // mira todo el que abre el stock.
+  const db = base();
+  const s = await servidor(db, { id: 2, nombre: 'Juan', rol: 'operador' });
+  try {
+    const r = await s.pegar('/presentaciones/1/icono', json({ imagen: dataUrlPNG(96, 96) }));
+    assert.equal(r.status, 403);
+    assert.equal((await s.pegar('/presentaciones/1/icono', { method: 'DELETE' })).status, 403);
+    // Verlo no da 403 (da 404 porque no hay ninguno, que es otra cosa).
+    assert.equal((await s.pegar('/presentaciones/1/icono')).status, 404);
+  } finally { s.cerrar(); }
+});
+
+t('quitar el dibujo lo saca de la baldosa y vuelve el emoji', async () => {
+  const db = base();
+  const s = await servidor(db, ADMIN);
+  const dom = domFalso();
+  try {
+    const a = await (await s.pegar('/presentaciones', json({ nombre: 'Caja',
+      destino: 'comercial', envase: 'x', por_bulto: 1, kg_unidad: 8,
+      emoji: '📦' }))).json();
+    await s.pegar('/procesos', json({ fecha: HOY, lote_id: 10,
+      presentacion_id: a.id, bultos: 10, uuid: 'u1' }));
+    await s.pegar('/presentaciones/' + a.id + '/icono', json({ imagen: dataUrlPNG(96, 96) }));
+    await s.pegar('/presentaciones/' + a.id + '/icono', { method: 'DELETE' });
+
+    const p = pantalla(dom, s.pegar);
+    await p.galStCargar();
+    const h = dom.nodos['gst-stock'].innerHTML;
+    assert.ok(!h.includes('<img'), 'la baldosa sigue pintando el dibujo borrado');
+    assert.match(h, /📦/, 'no volvió el emoji');
+    assert.equal((await s.pegar('/presentaciones/' + a.id + '/icono')).status, 404);
   } finally { s.cerrar(); }
 });
