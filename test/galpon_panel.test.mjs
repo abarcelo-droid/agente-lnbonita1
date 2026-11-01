@@ -1685,9 +1685,70 @@ test('MANUAL PR: «hoy no sale nada, pero la tabla ya sabe restar»', () => {
 test('el número grande del stock está arriba de todo', () => {
   // Lo que se viene a preguntar es «cuánto hay», y eso no se contesta con tres
   // tarjetas que hay que sumar de cabeza.
-  assert.match(JS_PR, /kg guardados en total/);
+  assert.match(JS_PR, /bultos guardados · ' \+ galPrNum\(st\.kilos\)/);
   assert.match(PANEL, /#sec-galpon-proceso \.gpr-tot b\{font-size:34px/);
   assert.match(PANEL, /#sec-galpon-proceso \.gpr-sd \.hero\{font-size:30px/);
+});
+
+test('EL STOCK SE CUENTA EN BULTOS, no en kilos', () => {
+  // Andy, 31/10/2026: «los stock van en cajas porque necesitamos saber qué cargar.
+  // No me interesa ahí verlo en kilos». Es la única pantalla del galpón donde el
+  // número grande no es el kilo — porque la pregunta es otra: cuántas cajas suben
+  // al camión.
+  dicePr(/El stock va en BULTOS, no en kilos/);
+  assert.match(JS_PR, /function galPrBultos\(x\)\{/);
+  assert.match(JS_PR, /\(b == null \? 'kg' : 'bultos'\)/);
+  assert.match(JS_PR, /bultos guardados/);
+});
+
+test('lo que está A GRANEL no inventa un bulto', () => {
+  // Inventarle «1 bulto» a un bin a granel sería un número que alguien va a usar
+  // para cargar un camión.
+  assert.match(JS_PR, /x && x\.bultos > 0 \? galPrNum\(x\.bultos, 0\) : null/);
+  assert.match(JS_PR, /b == null \? 'a granel'/);
+});
+
+test('LA BARRA DEL STOCK SE REPARTE POR KILOS, no por bultos', () => {
+  // Una caja de 7 kg y un bin de 300 ocupan lo mismo contados por bulto, y la
+  // proporción saldría al revés de lo que hay. El bulto es para cargar; el kilo
+  // es para comparar.
+  const pin = JS_PR.slice(JS_PR.indexOf('function galPrPintarStock(){'),
+                          JS_PR.indexOf('function galPrVerStockLote('));
+  assert.match(pin, /d\.kilos \/ st\.kilos/);
+  assert.ok(!/d\.bultos \/ \w+\.bultos/.test(sinComentarios(pin)),
+    'la barra se reparte por bultos: la proporción sale al revés');
+});
+
+test('MANUAL AC: «cómo viene rindiendo la fruta» va PRIMERO y el lote PLEGADO', () => {
+  // Andy, 31/10/2026: «hace mucho hincapié en cada lote; lo interesante es cómo
+  // viene rindiendo en general... si me quiero meter a analizar algo del lote
+  // entro y me fijo».
+  const ac = manualDe('galpon-acumulado');
+  assert.match(ac, /Cómo viene rindiendo la fruta/);
+  assert.match(JS_AC, /function galAcPintarGeneral\(\)\{/);
+  assert.match(JS_AC, /var GAC_VERLOTES = false;/,
+    'el detalle por lote no arranca plegado');
+  assert.match(JS_AC, /if \(!GAC_VERLOTES\)\{ el\.innerHTML = cab; return; \}/);
+  // Y el titular va ANTES de los gráficos y de los cortes.
+  const i = JS_AC.indexOf('galAcPintarGeneral();');
+  const j = JS_AC.indexOf('galAcPintarGraficos();');
+  assert.ok(i > 0 && j > i, 'el titular se pinta después de los gráficos');
+});
+
+test('el stock por lote también arranca plegado', () => {
+  assert.match(JS_PR, /var GPR_VERLOTES = false;/);
+  assert.match(JS_PR, /if \(!GPR_VERLOTES\)\{ el\.innerHTML = cab; return; \}/);
+});
+
+test('EL RINDE GRANDE ES SOBRE LO VOLCADO, y el reparto sobre lo procesado', () => {
+  // Son dos preguntas distintas: cuánto de lo que entró del campo terminó vendible,
+  // y cómo se partió lo que salió de la máquina. Un solo número para las dos sería
+  // uno de los dos mal.
+  const tot = cuerpoServicio('export function procesoTotal(');
+  assert.match(tot, /out\[k\] \/ out\.procesado/);
+  assert.match(tot, /out\.comercial \/ out\.volcado/);
+  const ac = manualDe('galpon-acumulado');
+  assert.match(ac, /sobre lo <b>volcado<\/b>|Rinde sobre lo volcado|sobre lo volcado/);
 });
 
 test('LOS COLORES DE LOS GRÁFICOS SON LOS MISMOS EN TODAS LAS PANTALLAS', () => {
