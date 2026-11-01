@@ -737,15 +737,6 @@ router.delete('/procesos/:id', (req, res) => {
 
 // El stock es DERIVADO: se suma gal_procesos cada vez. No hay tabla de saldos que
 // mantener al día, y por eso corregir una carga de la semana pasada lo arregla solo.
-router.get('/stock', (req, res) => {
-  try {
-    res.json({ ok: true, destinos: DESTINOS,
-               stock: stockGalpon(db, { lote_id: num(req.query.lote_id) }) });
-  } catch (e) {
-    console.error('[GALPON] GET /stock:', e.message);
-    res.status(500).json({ ok: false, error: e.message });
-  }
-});
 
 // ── LA PLANILLA DEL RESUMEN ─────────────────────────────────────────────────────────
 // Andy, 1/11/2026: «quiero que en acumulado se pueda descargar un archivo como el que
@@ -951,11 +942,14 @@ router.get('/stock', (req, res) => {
   try {
     res.json({
       ok: true,
-      stock: stockGalpon(db, { lote_id: req.query.lote_id }),
+      hoy: hoy(),
+      destinos: DESTINOS,
+      stock: stockGalpon(db, { lote_id: num(req.query.lote_id) }),
       productos: stockPorProducto(db),
       lotes: stockPorLote(db),
       disponible: disponibleParaDespacho(db, { destino: req.query.destino }),
-      despachos: despachos(db, { limite: 50 }),
+      despachos: despachos(db, { limite: 50 }).map((x) => Object.assign({}, x,
+        { items: itemsDelDespacho(db, x.id) })),
     });
   } catch (e) {
     console.error('[GALPON] GET /stock:', e.message);

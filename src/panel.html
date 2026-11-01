@@ -59482,8 +59482,13 @@ function galStPintar(){
      presentaciones distintas no significa nada físico —una caja de 8 kg y un bin de 400
      no son la misma cosa—, así que el total general va en KILOS y las cajas se muestran
      por destino, que es donde todas son la misma caja. */
-  var dest = j.stock||[];
-  var totK = dest.reduce(function(t,d){ return t+(Number(d.kilos)||0); },0);
+  /* stockGalpon() devuelve { destinos, kilos }, NO un array: tratarlo como array
+     rompe la pantalla entera con «dest.reduce is not a function» y no queda nada que
+     mirar. Y el total sale del servidor en vez de sumarse acá: es el mismo número que
+     usan el acumulado y el rinde, así que sumarlo de nuevo en el front es una segunda
+     cuenta que puede dar distinto. */
+  var dest = (j.stock && j.stock.destinos) || [];
+  var totK = (j.stock && j.stock.kilos) || 0;
   var h = '<div class="gst-b"><div class="v">'+galStNum(totK,0)+'</div>'
         + '<div class="l">kg en cámara</div></div>';
   dest.forEach(function(d){
