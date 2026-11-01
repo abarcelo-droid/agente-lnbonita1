@@ -318,6 +318,16 @@ test('lo cargado sin producto también', () => {
   assert.match(sin.nombre, /sin producto/);
 });
 
+test('EL TOTAL DEL PERÍODO VIAJA CON EL ACUMULADO', () => {
+  // Es el titular de la pantalla: cómo viene rindiendo la fruta toda junta. Si no
+  // viajara, el encabezado quedaría vacío y nadie se enteraría — la pantalla se ve
+  // completa igual, con los gráficos abajo.
+  const a = acumulado(semana(), null, null);
+  assert.ok(a.proceso_total, 'el acumulado no trae el total del período');
+  assert.equal(typeof a.proceso_total.comercial, 'number');
+  assert.ok(a.proceso_total.pct, 'no trae el reparto en porcentaje');
+});
+
 test('EL CORTE POR LOTE TRAE LA FINCA, que es como se ubica un lote', () => {
   // Andy, 31/10/2026: «poneme mejor el nombre de la FINCA, porque la gente la ubica
   // por el nombre de la finca». Un lote se llama «11-12 y 16-17» y eso no ubica a

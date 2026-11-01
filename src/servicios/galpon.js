@@ -854,6 +854,8 @@ export function acumulado(db, desde, hasta) {
     // período y los mismos lotes que ya se están mirando.
     rinde: rindePorLote(db, d, h),
     // Lo que alimenta los dos gráficos de arriba: kilos por día y ritmo del galpón.
+    // Lo que encabeza el acumulado: cómo rindió la fruta, toda junta.
+    proceso_total: procesoTotal(db, d, h),
     por_dia_proceso: procesoPorDia(db, d, h),
   };
 }
@@ -1383,6 +1385,56 @@ export function lotesVolcados(db) {
   });
 }
 
+// ── CÓMO VIENE RINDIENDO LA FRUTA, TODA JUNTA ───────────────────────────────────────
+// Andy, 31/10/2026: «me da la impresión que hace mucho hincapié en cada lote. En
+// realidad una vez que procesamos lo interesante es cómo viene rindiendo en general la
+// fruta... mostrame gráficos de todo junto, si me quiero meter a analizar algo del lote
+// entro y me fijo».
+//
+// El mismo número que ya salía lote por lote, pero sumado: cuánto comercial, cuánto
+// verde y cuánto descarte dio el período entero. Se calcula ACÁ y no sumando en la
+// pantalla porque lo miran dos lugares —el titular del acumulado y los gráficos— y dos
+// sumas son dos redondeos distintos el día que alguien toque uno.
+export function procesoTotal(db, desde, hasta) {
+  const d = esFecha(desde), h = esFecha(hasta);
+  const vacio = { comercial: 0, verde: 0, descarte: 0, procesado: 0, volcado: 0,
+                  bultos: 0, cargas: 0, rinde: null, sin_procesar: 0, pct: {} };
+  if (!d || !h) return vacio;
+
+  const filas = db.prepare(
+    ' SELECT destino,'
+    + "       COALESCE(SUM(CASE WHEN tipo = 'ingreso' THEN kilos ELSE -kilos END),0) AS kilos,"
+    + "       COALESCE(SUM(CASE WHEN tipo = 'ingreso' THEN bultos ELSE -bultos END),0) AS bultos,"
+    + '       COUNT(*) AS cargas'
+    + '  FROM gal_procesos WHERE fecha >= ? AND fecha <= ? AND eliminado_en IS NULL'
+    + '  GROUP BY destino').all(d, h);
+
+  const v = db.prepare(
+    ' SELECT COALESCE(SUM(kilos),0) AS kilos FROM gal_volcados'
+    + '  WHERE fecha >= ? AND fecha <= ? AND eliminado_en IS NULL').get(d, h);
+
+  const out = Object.assign({}, vacio, { volcado: round2(v.kilos || 0), pct: {} });
+  for (const f of filas) {
+    out[f.destino] = round2(f.kilos);
+    out.procesado = round2(out.procesado + f.kilos);
+    out.bultos = round2(out.bultos + (f.bultos || 0));
+    out.cargas += f.cargas;
+  }
+  /* El porcentaje de cada destino es sobre lo PROCESADO, no sobre lo volcado: la
+     pregunta es cómo se repartió lo que salió de la máquina. Sobre el volcado, los tres
+     sumarían menos de 100 y el resto sería «lo que todavía está en la tolva» — que es
+     otra cosa y tiene su propio número. */
+  for (const k of ['comercial', 'verde', 'descarte']) {
+    out.pct[k] = out.procesado > 0
+      ? Math.round((out[k] / out.procesado) * 1000) / 10 : 0;
+  }
+  out.sin_procesar = round2(out.volcado - out.procesado);
+  // El rinde grande sí es contra lo VOLCADO: es cuánto de lo que entró del campo
+  // terminó siendo vendible, que es la pregunta de la finca.
+  out.rinde = out.volcado > 0
+    ? Math.round((out.comercial / out.volcado) * 1000) / 10 : null;
+  return out;
+}
 // ── QUÉ SE PROCESÓ CADA DÍA, Y CÓMO RINDIÓ ──────────────────────────────────────────
 // Andy, 31/10/2026: «quiero más gráficos. Más visual respecto a cuánto procesamos cada
 // día y cómo rindió».
