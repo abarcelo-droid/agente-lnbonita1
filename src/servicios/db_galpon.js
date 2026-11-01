@@ -283,6 +283,8 @@ db.exec(`
     -- Una carga repartida entre varios lotes: ver el comentario del ALTER más abajo.
     reparto         TEXT,
     repartido       INTEGER NOT NULL DEFAULT 0,
+    pallet_id       INTEGER,                   -- → gal_pallets(id)
+
     observacion     TEXT,
     estado          TEXT NOT NULL DEFAULT 'ok',
     revision_motivo TEXT,
@@ -291,6 +293,49 @@ db.exec(`
     creado_en       TEXT DEFAULT (datetime('now','localtime')),
     eliminado_en    TEXT
   );
+  -- ═══════════════════════════════════════════════════════════════════════════
+  -- EL PALLET
+  -- ═══════════════════════════════════════════════════════════════════════════
+  -- Andy, 1/11/2026: «la parte donde cargamos el proceso tiene que ser algo más
+  -- parecido a "Cierre de Pallet", de ahí quiero que salga un tarjetón para imprimir».
+  --
+  -- El pallet no reemplaza la carga de proceso: la ENVUELVE. Se sigue cargando caja
+  -- por caja contra el pallet abierto, y cerrarlo es lo que le pone número y emite la
+  -- etiqueta. Hacerlo al revés —cargar el pallet entero de una— obligaría a tener
+  -- todos los datos juntos justo cuando no se los tiene, que es lo que CLAUDE.md
+  -- dice de los formularios largos.
+  --
+  -- ── EL NÚMERO SE PONE AL CERRAR, NO AL ABRIR ──────────────────────────────
+  -- Un pallet abierto que ya tiene número es un número que se saltea cada vez que
+  -- alguien abre uno y se arrepiente. El correlativo tiene que ser correlativo: es lo
+  -- que se cita en un remito y lo que se busca cuando un cliente reclama.
+  CREATE TABLE IF NOT EXISTS gal_pallets (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    numero        TEXT UNIQUE,              -- PC-26-01234, recién al cerrar
+    estado        TEXT NOT NULL DEFAULT 'abierto',   -- abierto | cerrado
+    -- PARCIAL lo marca el operador: el pallet se cierra sin completarse porque se
+    -- terminó la fruta o porque se va el camión. Va impreso, porque quien lo recibe
+    -- tiene que saber que no vienen las cajas que esperaba.
+    parcial       INTEGER NOT NULL DEFAULT 0,
+    -- MIXTO se calcula al cerrar, no lo elige nadie: es si adentro hay más de un
+    -- artículo. Dejarlo a criterio del que cierra es una etiqueta que dice homogéneo
+    -- sobre un pallet que no lo es.
+    mixto         INTEGER NOT NULL DEFAULT 0,
+    fecha_empaque TEXT,                     -- el día de proceso, el que va impreso
+    -- Congelados al cerrar. El contenido se puede consultar sumando las cargas, pero
+    -- lo que se IMPRIMIÓ tiene que quedar fijo: una carga corregida después no cambia
+    -- la etiqueta que se fue en el camión.
+    bultos        REAL,
+    kilos         REAL,
+    observacion   TEXT,
+    abierto_en    TEXT DEFAULT (datetime('now','localtime')),
+    cerrado_en    TEXT,
+    usuario_id    INTEGER,
+    usuario       TEXT,
+    eliminado_en  TEXT
+  );
+  CREATE INDEX IF NOT EXISTS gal_pallet_estado_idx ON gal_pallets(estado);
+
   CREATE INDEX IF NOT EXISTS gal_proc_fecha_idx ON gal_procesos(fecha);
   CREATE INDEX IF NOT EXISTS gal_proc_lote_idx  ON gal_procesos(lote_id, fecha);
   CREATE INDEX IF NOT EXISTS gal_proc_dest_idx  ON gal_procesos(destino, fecha);
@@ -326,6 +371,11 @@ for (const sql of [
   "ALTER TABLE gal_procesos ADD COLUMN variedad TEXT",
   "ALTER TABLE gal_procesos ADD COLUMN renspa TEXT",
   "ALTER TABLE gal_procesos ADD COLUMN cuartel TEXT",
+  // EL PALLET (V1120). Una carga pertenece a un pallet, o a ninguno todavía. Si hay
+  // que repartir cien cajas entre dos pallets, se cargan dos veces — que es lo que se
+  // hace físicamente igual.
+  "ALTER TABLE gal_procesos ADD COLUMN pallet_id INTEGER",
+  "CREATE INDEX IF NOT EXISTS gal_proc_pallet_idx ON gal_procesos(pallet_id)",
   // DOS TRAMOS A LA MISMA HORA DEL MISMO DÍA NO PUEDEN EXISTIR. loteVigente ordena por
   // hora y después por id, así que el segundo le gana al primero EN SILENCIO: el tramo
   // de la mañana queda listado en la pantalla, se ve igualito, y no atribuye un kilo.
@@ -373,6 +423,14 @@ for (const [clave, valor] of [
   // pase, y esto es el cinturón de abajo. Marca, no rechaza: lo que ya se embaló,
   // se embaló. En 0 queda apagado.
   ['kg_max_proceso', '50000'],
+  // EL PIE DEL TARJETÓN. Van en la configuración y no en el código porque son datos
+  // de la empresa: el día que cambie el CUIT o la localidad, lo cambia quien lo sabe
+  // y no hace falta un PR.
+  ['etq_marca', 'LA NIÑA BONITA'],
+  ['etq_comercializa', 'San Gerónimo S.A. · CUIT 30-67325443-4'],
+  ['etq_origen', 'Carpintería, San Juan · Producto argentino'],
+  // El prefijo del número de pallet. PC = Puente Cordón.
+  ['pallet_prefijo', 'PC'],
 ]) {
   try {
     db.prepare('INSERT OR IGNORE INTO gal_config (clave, valor) VALUES (?,?)').run(clave, valor);

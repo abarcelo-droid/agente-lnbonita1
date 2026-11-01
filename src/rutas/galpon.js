@@ -25,6 +25,8 @@ import {
   ultimaCarga,
   DESTINOS, presentaciones, guardarPresentacion, borrarPresentacion,
   lotesConDatos, guardarDatosDeLote, variedadATodos,
+  palletAbierto, abrirPallet, contenidoDelPallet, cerrarPallet, reabrirPallet,
+  borrarPallet, sacarDelPallet, pallets, palletPorNumero, valorConfig,
   registrarProceso, editarProceso, borrarProceso, procesosDelDia,
   tableroProceso, stockGalpon, stockPorLote, stockPorProducto, lotesVolcados,
 } from '../servicios/galpon.js';
@@ -674,6 +676,13 @@ router.get('/procesos', (req, res) => {
       stock_lotes: stockPorLote(db),
       // De qué fruta es lo guardado. Con una sola la pantalla lo esconde.
       stock_productos: stockPorProducto(db),
+      // El pallet que se está armando y los cerrados: la pantalla de proceso ES la de
+      // cierre de pallet, así que van en el mismo pedido que todo lo demás.
+      pallet_abierto: (function () {
+        const x = palletAbierto(db);
+        return x ? Object.assign({}, x, { contenido: contenidoDelPallet(db, x.id) }) : null;
+      })(),
+      pallets: pallets(db, { limite: 50 }),
     });
   } catch (e) {
     console.error('[GALPON] GET /procesos:', e.message);
@@ -791,6 +800,136 @@ router.post('/lote-datos', requireAdmin, (req, res) => {
     res.json(Object.assign({ ok: true }, r, { lotes: lotesConDatos(db) }));
   } catch (e) {
     console.error('[GALPON] POST /lote-datos:', e.message);
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+// ════════════════════════════════════════════════════════════════════════════════════
+// 🧱 EL PALLET
+// ════════════════════════════════════════════════════════════════════════════════════
+// Cerrar un pallet es TRABAJO DEL DÍA y va con requireAuth, como cargar kilos. El que
+// arma el pallet es el que lo cierra: pedir admin acá terminaría con el dueño cerrando
+// pallets a pedido por teléfono.
+router.get('/pallets', (req, res) => {
+  try {
+    res.json({
+      ok: true,
+      abierto: (function () {
+        const a = palletAbierto(db);
+        return a ? Object.assign({}, a, { contenido: contenidoDelPallet(db, a.id) }) : null;
+      })(),
+      pallets: pallets(db, { estado: req.query.estado, desde: req.query.desde,
+                             hasta: req.query.hasta }),
+    });
+  } catch (e) {
+    console.error('[GALPON] GET /pallets:', e.message);
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+router.post('/pallets', (req, res) => {
+  try {
+    const u = req._user || {};
+    const r = abrirPallet(db, Object.assign({}, req.body || {}, {
+      usuario_id: u.id || null, usuario: u.nombre || null,
+    }));
+    if (!r.ok) return res.status(400).json({ ok: false, error: r.motivo });
+    res.json(r);
+  } catch (e) {
+    console.error('[GALPON] POST /pallets:', e.message);
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+router.post('/pallets/:id/cerrar', (req, res) => {
+  try {
+    const r = cerrarPallet(db, num(req.params.id), req.body || {});
+    if (!r.ok) return res.status(400).json({ ok: false, error: r.motivo });
+    res.json(r);
+  } catch (e) {
+    console.error('[GALPON] POST /pallets/:id/cerrar:', e.message);
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+router.post('/pallets/:id/reabrir', (req, res) => {
+  try {
+    const r = reabrirPallet(db, num(req.params.id));
+    if (!r.ok) return res.status(400).json({ ok: false, error: r.motivo });
+    res.json(r);
+  } catch (e) {
+    console.error('[GALPON] POST /pallets/:id/reabrir:', e.message);
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+router.delete('/pallets/:id', (req, res) => {
+  try {
+    const r = borrarPallet(db, num(req.params.id));
+    if (!r.ok) return res.status(400).json({ ok: false, error: r.motivo });
+    res.json({ ok: true });
+  } catch (e) {
+    console.error('[GALPON] DELETE /pallets/:id:', e.message);
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+// Sacar una carga del pallet sin borrarla: la caja existe, estaba en el montón
+// equivocado.
+router.post('/pallets/sacar/:procesoId', (req, res) => {
+  try {
+    const r = sacarDelPallet(db, num(req.params.procesoId));
+    if (!r.ok) return res.status(400).json({ ok: false, error: r.motivo });
+    res.json({ ok: true });
+  } catch (e) {
+    console.error('[GALPON] POST /pallets/sacar:', e.message);
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+// ── EL TARJETÓN ─────────────────────────────────────────────────────────────────────
+// jspdf y qrcode se importan ACÁ ADENTRO, como el resto del repo: un import suelto en
+// el encabezado se lleva puestas las otras treinta rutas del galpón donde no están los
+// node_modules.
+router.get('/pallets/:id/tarjeton.pdf', async (req, res) => {
+  try {
+    const id = num(req.params.id);
+    const p = db.prepare('SELECT * FROM gal_pallets WHERE id = ? AND eliminado_en IS NULL')
+                .get(id);
+    if (!p) return res.status(404).json({ ok: false, error: 'Ese pallet no existe' });
+    const contenido = contenidoDelPallet(db, id);
+    if (!contenido.length) {
+      return res.status(400).json({ ok: false, error: 'Ese pallet no tiene nada adentro' });
+    }
+
+    const { galponPalletPDF } = await import('../servicios/galponPalletPDF.js');
+    const buf = await galponPalletPDF(p, contenido, {
+      marca: valorConfig(db, 'etq_marca', 'LA NIÑA BONITA'),
+      comercializa: valorConfig(db, 'etq_comercializa', ''),
+      origen: valorConfig(db, 'etq_origen', ''),
+    });
+
+    res.setHeader('Content-Type', 'application/pdf');
+    /* inline y no attachment: esto se abre para mandarlo a la impresora, y un archivo
+       que se baja a Descargas obliga a buscarlo. El nombre igual va, para el que lo
+       guarde. */
+    res.setHeader('Content-Disposition',
+      'inline; filename="pallet-' + (p.numero || p.id) + '.pdf"');
+    res.end(buf);
+  } catch (e) {
+    console.error('[GALPON] GET /pallets/:id/tarjeton.pdf:', e.message);
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+// Buscar por número: es lo que se hace cuando llega un reclamo con una etiqueta en la
+// mano. El número es lo único que tiene quien llama.
+router.get('/pallets/numero/:numero', (req, res) => {
+  try {
+    const p = palletPorNumero(db, req.params.numero);
+    if (!p) return res.status(404).json({ ok: false, error: 'No hay ningún pallet con ese número' });
+    res.json({ ok: true, pallet: p });
+  } catch (e) {
+    console.error('[GALPON] GET /pallets/numero:', e.message);
     res.status(500).json({ ok: false, error: e.message });
   }
 });

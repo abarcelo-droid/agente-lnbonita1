@@ -93,7 +93,7 @@ const PREFIJOS = [
   // EL PROCESO (V1112). Escribe el otro libro del galpón: qué salió de lo que entró.
   // Cargarlo es trabajo del día y pide operar, no admin — lo que pide admin es el
   // catálogo de presentaciones, que está arriba con el resto de la parametrización.
-  ['galpon-proceso', 'galpon/procesos,galpon/stock'],
+  ['galpon-proceso', 'galpon/procesos,galpon/stock,galpon/pallets'],
   // P&L ABASTO (V1052). Router propio de un solo módulo: subir el libro diario y guardar
   // los rubros pide 'operar'.
   ['pl-abasto', 'pl-abasto'],
