@@ -111,6 +111,16 @@ test('hay módulos que auditar, y salen del ensure, no de una lista a mano', () 
   assert.ok(MODULOS.some((m) => m.modulo === 'galpon-lote-dia'));
 });
 
+test('NINGÚN MÓDULO REPITE «GALPÓN» EN SU NOMBRE', () => {
+  // Andy, 1/11/2026: «todos los módulos se llaman "Galpón:". Sacar el galpón, es
+  // redundante». Los cinco cuelgan del grupo GALPÓN, y repetirlo se come la mitad
+  // del ancho del renglón.
+  for (const { modulo, label } of MODULOS) {
+    assert.ok(!/galp[óo]n/i.test(label),
+      modulo + ' repite «Galpón» en su nombre: ' + label);
+  }
+});
+
 test('cada módulo se registra SIEMPRE, no sólo con la tabla vacía', () => {
   // El seed de db_org.js hace `if (n > 0) return`: agregar una fila a ese array
   // no hace nada en producción, donde la tabla ya tiene filas.
@@ -871,7 +881,7 @@ test('EL ACUMULADO ES UN MÓDULO APARTE, y el manual dice por qué', () => {
   // por cuadrilla de toda la temporada, que es con lo que se discute plata.
   diceAc(/los miran dos personas distintas/);
   assert.match(ENSURE, /\['galpon-acumulado'/);
-  assert.match(PREFIJOS, /\['galpon-acumulado', 'galpon\/acumulado'\]/);
+  assert.match(PREFIJOS, /\['galpon-acumulado', 'galpon\/acumulado,galpon\/resumen'\]/);
 });
 
 test('EL MANUAL DE LA CARGA MANDA ACÁ PARA EL TOTAL', () => {
@@ -1407,7 +1417,9 @@ test('MANUAL KG: «la balanza rellena, no carga»', () => {
   assert.ok(lec.length > 200, 'el corte de galBalLectura quedó vacío');
   assert.ok(!/galRapCargar|galKgGuardar|galPrCargarUno/.test(sinComentarios(lec)),
     'la balanza carga sola: un peso estable crea un renglón sin que nadie lo vea');
-  assert.match(lec, /c\.value = String\(l\.kilos\);/);
+  // Y lo escribe CON COMA: con punto, un peso de tres decimales —«12.345»— lo lee el
+  // servidor como el separador de miles, o sea doce mil trescientos cuarenta y cinco.
+  assert.match(lec, /c\.value = String\(l\.kilos\)\.replace\('\.', ','\);/);
 });
 
 test('MANUAL KG: «se escribe cuando está firme y cuando cambió»', () => {

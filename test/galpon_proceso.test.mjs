@@ -45,6 +45,16 @@ function base(techo = '50000') {
     INSERT INTO pa_lotes (id,nombre,finca) VALUES
       (10,'Cuadro 3','La Esperanza'), (11,'Cuadro 4','La Esperanza');
 
+    -- El proceso congela el PRODUCTO desde el cultivo del lote, igual que el nombre.
+
+    CREATE TABLE pa_cultivos_lote (id INTEGER PRIMARY KEY AUTOINCREMENT, lote_id INTEGER,
+
+                                   cultivo TEXT, campaña TEXT, es_perenne INTEGER DEFAULT 0);
+
+    INSERT INTO pa_cultivos_lote (lote_id,cultivo,campaña,es_perenne) VALUES
+
+      (10,'Damasco','2026/27',1), (11,'Damasco','2026/27',1);
+
     CREATE TABLE gal_config (clave TEXT PRIMARY KEY, valor TEXT, actualizado TEXT);
 
     CREATE TABLE gal_volcados (

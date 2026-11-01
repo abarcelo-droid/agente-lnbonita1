@@ -39,6 +39,11 @@ function base() {
   db.exec(`
     CREATE TABLE pa_lotes (id INTEGER PRIMARY KEY, nombre TEXT, finca TEXT);
     INSERT INTO pa_lotes VALUES (10,'Cuadro 3','La Esperanza'), (11,'Cuadro 4','Cochahual');
+    -- El proceso congela el PRODUCTO desde el cultivo del lote, igual que el nombre.
+    CREATE TABLE pa_cultivos_lote (id INTEGER PRIMARY KEY AUTOINCREMENT, lote_id INTEGER,
+                                   cultivo TEXT, campaña TEXT, es_perenne INTEGER DEFAULT 0);
+    INSERT INTO pa_cultivos_lote (lote_id,cultivo,campaña,es_perenne) VALUES
+      (10,'Damasco','2026/27',1), (11,'Damasco','2026/27',1);
     CREATE TABLE gal_config (clave TEXT PRIMARY KEY, valor TEXT, actualizado TEXT);
     CREATE TABLE gal_volcados (
       id INTEGER PRIMARY KEY AUTOINCREMENT, fecha TEXT, lote_id INTEGER, lote_nombre TEXT,

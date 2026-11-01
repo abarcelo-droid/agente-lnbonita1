@@ -396,7 +396,14 @@ export function volcadosEnTramo(db, fecha, desdeHora, hastaHora) {
 // para decir mil doscientos cincuenta kilos, y leerlo como 1,25 kg no da error ni se ve:
 // entra un número plausible, mil veces más chico, y aparece recién cuando no cierra el
 // rendimiento de la temporada. Nadie escribe tres decimales para pesar fruta.
-export function kilos(v) {
+export function kilos(v, dec) {
+  const esc = Math.pow(10, dec == null ? 2 : dec);
+  /* UN NÚMERO YA ES UN NÚMERO. La regla de los miles es para interpretar lo que
+     TIPEA una persona; aplicársela a un número hace que 12,345 entre como 12.345.
+     Pasaba con la balanza y con el peso por unidad del catálogo. */
+  if (typeof v === 'number') {
+    return Number.isFinite(v) ? Math.round(v * esc) / esc : null;
+  }
   // El «kg» se saca SÓLO del final y después de recortar: un `$` aplicado antes del
   // trim no matchea nada si quedó un espacio detrás, y «450 kg » se iba al tacho.
   const s = String(v == null ? '' : v).trim()
@@ -404,12 +411,17 @@ export function kilos(v) {
   if (!s) return null;
   let limpio;
   if (s.includes(',')) limpio = s.replace(/\./g, '').replace(',', '.');
-  else if (/^-?\d{1,3}(\.\d{3})+$/.test(s)) limpio = s.replace(/\./g, '');
+  /* Y «0.615» es seis coma quince, no seiscientos quince: nadie escribe un separador
+     de miles después de un cero. Sin esta excepción, un peso por unidad tipeado en
+     kilos se multiplicaba por mil. */
+  else if (/^-?\d{1,3}(\.\d{3})+$/.test(s) && !/^-?0\./.test(s)) {
+    limpio = s.replace(/\./g, '');
+  }
   else limpio = s;
   if (!/^-?\d+(\.\d+)?$/.test(limpio)) return null;
   const n = Number(limpio);
   if (!Number.isFinite(n)) return null;
-  return Math.round(n * 100) / 100;
+  return Math.round(n * esc) / esc;
 }
 
 // Enteros opcionales (los IFCOs). Vacío es null —no 0—: «no lo contaron» y «contaron
@@ -903,7 +915,10 @@ export function guardarPresentacion(db, d) {
   // en una presentación a granel sería un multiplicador fantasma que no se ve en ninguna
   // pantalla y aparece en el total.
   const porBulto = granel ? 1 : numPos(dd.por_bulto);
-  const kgUnidad = granel ? 1 : numPos(dd.kg_unidad);
+  // TRES decimales: una cubeta de 615 g son 0,615 kg, y dos decimales la dejan en
+  // 0,62 — cinco gramos por cubeta, que multiplicados por todas las cargas que usen
+  // esta presentación son decenas de kilos inventados.
+  const kgUnidad = granel ? 1 : numPos(dd.kg_unidad, 3);
   if (!granel && (porBulto == null || kgUnidad == null)) {
     return { ok: false, motivo: 'Las unidades por bulto y el peso de cada una tienen que '
       + 'ser números mayores que cero' };
@@ -951,8 +966,8 @@ export function kilosDeProceso(bultos, porBulto, kgUnidad) {
   return round2(b * p * k);
 }
 
-const numPos = (v) => {
-  const n = kilos(v);
+const numPos = (v, dec) => {
+  const n = kilos(v, dec);
   return n != null && n > 0 ? n : null;
 };
 
@@ -1052,11 +1067,22 @@ export function registrarProceso(db, d) {
   // Los nombres se congelan desde la BASE, no desde lo que mandó la pantalla: dos
   // pantallas con distinta versión del padrón escribirían dos nombres para el mismo
   // lote y el informe por lote los contaría separados.
-  const nombres = [];
+  const nombres = [], productos = [];
   for (const id of lotes) {
-    const l = db.prepare('SELECT nombre FROM pa_lotes WHERE id = ?').get(id);
+    const l = db.prepare(
+      ' SELECT l.nombre, cl.cultivo'
+      + '  FROM pa_lotes l'
+      + '  LEFT JOIN pa_cultivos_lote cl ON cl.id = ('
+      + '        SELECT c2.id FROM pa_cultivos_lote c2 WHERE c2.lote_id = l.id'
+      + '         ORDER BY c2.es_perenne DESC, c2.campaña DESC LIMIT 1)'
+      + ' WHERE l.id = ?').get(id);
     if (!l) return { ok: false, motivo: 'El lote ' + id + ' no existe' };
     nombres.push(l.nombre);
+    /* El cultivo del lote, con el mismo criterio que usa la ventana de carga: se
+       prefiere el PERENNE, porque un frutal no cambia de fruta de campaña en
+       campaña y hay dos campañas abiertas a la vez. Lo que manda la pantalla queda
+       como respaldo para un lote sin cultivo cargado. */
+    productos.push(txt(l.cultivo) || txt(dd.producto));
   }
 
   /* EL REPARTO, a prorrata de lo que le queda en la tolva a cada uno. Con un lote solo
@@ -1098,7 +1124,7 @@ export function registrarProceso(db, d) {
        mismos n uuids— y el grupo se reconoce por `reparto`. */
     const u = txt(dd.uuid) ? (esMezcla ? dd.uuid + '#' + lotes[i] : dd.uuid) : null;
     const r = ins.run(
-      u, fecha, lotes[i], nombres[i], txt(dd.producto), destino,
+      u, fecha, lotes[i], nombres[i], productos[i], destino,
       pres ? pres.id : null, pres ? pres.nombre : null,
       pres ? pres.envase : txt(dd.envase),
       bultosPorLote[i], porBulto, kgUnidad, kilosPorLote[i],
@@ -1148,10 +1174,20 @@ export function editarProceso(db, id, d) {
   if ('lote_id' in dd) {
     const l = parseInt(dd.lote_id, 10);
     if (!Number.isFinite(l) || l <= 0) return { ok: false, motivo: 'Elegí el lote' };
-    const lote = db.prepare('SELECT nombre FROM pa_lotes WHERE id = ?').get(l);
+    const lote = db.prepare(
+      ' SELECT l.nombre, cl.cultivo'
+      + '  FROM pa_lotes l'
+      + '  LEFT JOIN pa_cultivos_lote cl ON cl.id = ('
+      + '        SELECT c2.id FROM pa_cultivos_lote c2 WHERE c2.lote_id = l.id'
+      + '         ORDER BY c2.es_perenne DESC, c2.campaña DESC LIMIT 1)'
+      + ' WHERE l.id = ?').get(l);
     if (!lote) return { ok: false, motivo: 'Ese lote no existe' };
     poner('lote_id', l);
     poner('lote_nombre', lote.nombre);
+    /* El producto VA CON EL LOTE. Mover una carga de un cuadro de damasco a uno de
+       uva y dejarla diciendo «damasco» es exactamente la mezcla que esto viene a
+       evitar. Si el lote nuevo no tiene cultivo cargado, se deja el que tenía. */
+    if (txt(lote.cultivo)) poner('producto', txt(lote.cultivo));
   }
 
   /* LA PRESENTACIÓN, que arrastra el destino y la cuenta. Cargar comercial lo que era
@@ -1308,6 +1344,7 @@ export function stockGalpon(db, opts) {
   const o = opts || {};
   const filas = db.prepare(
     ' SELECT destino, presentacion_id,'
+    + "       COALESCE(producto, '— sin producto —') AS producto,"
     + "       COALESCE(presentacion, CASE WHEN bultos IS NULL THEN 'A granel' ELSE 'Sin presentación' END) AS nombre,"
     + "       COALESCE(SUM(CASE WHEN tipo = 'ingreso' THEN kilos ELSE -kilos END),0) AS kilos,"
     + "       COALESCE(SUM(CASE WHEN tipo = 'ingreso' THEN bultos ELSE -bultos END),0) AS bultos,"
@@ -1315,7 +1352,7 @@ export function stockGalpon(db, opts) {
     + '       COUNT(*) AS cargas'
     + '  FROM gal_procesos WHERE eliminado_en IS NULL'
     + (o.lote_id ? ' AND lote_id = ?' : '')
-    + '  GROUP BY destino, presentacion_id'
+    + '  GROUP BY destino, presentacion_id, producto'
     + '  ORDER BY destino, SUM(kilos) DESC').all(...(o.lote_id ? [parseInt(o.lote_id, 10)] : []));
 
   const por = DESTINOS.map((d) => {
@@ -1385,6 +1422,68 @@ export function lotesVolcados(db) {
   });
 }
 
+// ── EL RESUMEN QUE SE BAJA EN PLANILLA ──────────────────────────────────────────────
+// Andy, 1/11/2026: «quiero que en acumulado se pueda descargar un archivo como el que
+// te saco foto». La foto es la planilla que ya llevan a mano: una fila por día, con la
+// producción abierta POR PRESENTACIÓN.
+//
+// Es el mismo dato que ya muestran los gráficos, abierto un nivel más. No se calcula
+// nada distinto acá: si la planilla y la pantalla dieran números diferentes, el que la
+// baja le va a creer a la planilla — y ya no habría forma de saber cuál está mal.
+export function resumenParaPlanilla(db, desde, hasta) {
+  const d = esFecha(desde), h = esFecha(hasta);
+  if (!d || !h) return [];
+
+  // El ingreso del día: cuántos IFCOs y cuántos kilos entraron del campo.
+  const vol = db.prepare(
+    ' SELECT fecha, COALESCE(SUM(kilos),0) AS kilos, COALESCE(SUM(ifcos),0) AS ifcos'
+    + '  FROM gal_volcados WHERE fecha >= ? AND fecha <= ? AND eliminado_en IS NULL'
+    + '  GROUP BY fecha').all(d, h);
+
+  // Y la producción, abierta por presentación Y por destino: la planilla abre por
+  // presentación sólo lo comercial, y manda el descarte y el verde a sus dos columnas
+  // pintadas de la derecha.
+  const proc = db.prepare(
+    ' SELECT p.fecha, p.destino,'
+    + "       COALESCE(p.presentacion, 'Sin presentación') AS nombre,"
+    + '       COALESCE(pr.orden, 999) AS orden,'
+    + "       COALESCE(SUM(CASE WHEN p.tipo = 'ingreso' THEN p.kilos ELSE -p.kilos END),0) AS kilos,"
+    + "       COALESCE(SUM(CASE WHEN p.tipo = 'ingreso' THEN p.bultos ELSE -p.bultos END),0) AS bultos"
+    + '  FROM gal_procesos p'
+    + '  LEFT JOIN gal_presentaciones pr ON pr.id = p.presentacion_id'
+    + '  WHERE p.fecha >= ? AND p.fecha <= ? AND p.eliminado_en IS NULL'
+    + '  GROUP BY p.fecha, p.destino, nombre').all(d, h);
+
+  const dias = new Map();
+  const nuevo = (f) => ({ fecha: f, volcado: 0, ifcos: 0, comercial: 0, verde: 0,
+                          descarte: 0, procesado: 0, bultos: 0,
+                          verde_bultos: 0, descarte_bultos: 0, presentaciones: [] });
+  for (const v of vol) {
+    const x = nuevo(v.fecha);
+    x.volcado = round2(v.kilos);
+    x.ifcos = v.ifcos || 0;
+    dias.set(v.fecha, x);
+  }
+  for (const r of proc) {
+    if (!dias.has(r.fecha)) dias.set(r.fecha, nuevo(r.fecha));
+    const x = dias.get(r.fecha);
+    x[r.destino] = round2(x[r.destino] + r.kilos);
+    x.procesado = round2(x.procesado + r.kilos);
+    x.bultos = round2(x.bultos + (r.bultos || 0));
+    if (r.destino === 'verde') x.verde_bultos = round2(x.verde_bultos + (r.bultos || 0));
+    if (r.destino === 'descarte') {
+      x.descarte_bultos = round2(x.descarte_bultos + (r.bultos || 0));
+    }
+    /* Las columnas del medio son las COMERCIALES. El verde y el descarte tienen sus
+       dos columnas propias a la derecha, y meterlos también en el medio los contaría
+       dos veces en el total de la fila. */
+    if (r.destino === 'comercial') {
+      x.presentaciones.push({ nombre: r.nombre, orden: r.orden,
+                              kilos: round2(r.kilos), bultos: round2(r.bultos) });
+    }
+  }
+  return [...dias.values()].sort((a, b) => (a.fecha < b.fecha ? -1 : 1));
+}
 // ── CÓMO VIENE RINDIENDO LA FRUTA, TODA JUNTA ───────────────────────────────────────
 // Andy, 31/10/2026: «me da la impresión que hace mucho hincapié en cada lote. En
 // realidad una vez que procesamos lo interesante es cómo viene rindiendo en general la
@@ -1490,6 +1589,29 @@ export function procesoPorDia(db, desde, hasta) {
       rinde: x.procesado > 0
         ? Math.round((x.comercial / x.procesado) * 1000) / 10 : null,
     }));
+}
+// ── LO GUARDADO, POR PRODUCTO ───────────────────────────────────────────────────────
+// Andy, 1/11/2026: «después viene uva y melón». Hoy es todo damasco y este corte
+// devuelve una sola fila — y eso está bien: la pantalla lo esconde cuando hay uno solo,
+// y aparece el día que entre la segunda fruta sin que nadie tenga que acordarse.
+export function stockPorProducto(db) {
+  const filas = db.prepare(
+    ' SELECT COALESCE(producto, \'— sin producto —\') AS producto,'
+    + "       COALESCE(SUM(CASE WHEN tipo = 'ingreso' THEN kilos ELSE -kilos END),0) AS kilos,"
+    + "       COALESCE(SUM(CASE WHEN tipo = 'ingreso' THEN bultos ELSE -bultos END),0) AS bultos,"
+    + "       COALESCE(SUM(CASE WHEN destino = 'comercial' AND tipo = 'ingreso' THEN kilos"
+    + "                        WHEN destino = 'comercial' THEN -kilos ELSE 0 END),0) AS comercial,"
+    + "       COALESCE(SUM(CASE WHEN destino = 'verde' AND tipo = 'ingreso' THEN kilos"
+    + "                        WHEN destino = 'verde' THEN -kilos ELSE 0 END),0) AS verde,"
+    + "       COALESCE(SUM(CASE WHEN destino = 'descarte' AND tipo = 'ingreso' THEN kilos"
+    + "                        WHEN destino = 'descarte' THEN -kilos ELSE 0 END),0) AS descarte"
+    + '  FROM gal_procesos WHERE eliminado_en IS NULL'
+    + '  GROUP BY producto'
+    + '  ORDER BY SUM(kilos) DESC').all();
+  return filas.map((f) => Object.assign(f, {
+    kilos: round2(f.kilos), bultos: round2(f.bultos),
+    comercial: round2(f.comercial), verde: round2(f.verde), descarte: round2(f.descarte),
+  }));
 }
 // ── LO GUARDADO, POR LOTE ───────────────────────────────────────────────────────────
 // El otro corte del stock: el de arriba contesta «cuánto hay de cada cosa», éste

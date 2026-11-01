@@ -7877,10 +7877,11 @@ input[type=number]{-moz-appearance:textfield;appearance:textfield}
     <h3 class="gpr-t">Lo cargado este día</h3>
     <div class="ab-table-wrap">
       <table class="pa-tbl gpr-tbl">
-        <colgroup><col style="width:17%"><col style="width:24%"><col style="width:17%">
-                  <col style="width:13%"><col style="width:14%"><col style="width:15%"></colgroup>
+        <colgroup><col style="width:13%"><col style="width:12%"><col style="width:21%">
+                  <col style="width:16%"><col style="width:11%"><col style="width:12%">
+                  <col style="width:15%"></colgroup>
         <thead><tr>
-          <th>Destino</th><th>Presentación</th><th>Lote</th>
+          <th>Destino</th><th>Producto</th><th>Presentación</th><th>Lote</th>
           <th style="text-align:right">Bultos</th><th style="text-align:right">Kilos</th>
           <th style="text-align:right"></th>
         </tr></thead>
@@ -7895,6 +7896,7 @@ input[type=number]{-moz-appearance:textfield;appearance:textfield}
       sale nada por sistema, así que es todo lo cargado — cuando exista el despacho, lo
       que salga se descuenta solo.</div>
     <div id="gpr-stock" class="gpr-stock"></div>
+    <div id="gpr-stock-prod"></div>
     <div id="gpr-stock-lote"></div>
   </div>
 
@@ -8066,6 +8068,8 @@ input[type=number]{-moz-appearance:textfield;appearance:textfield}
       <button class="btn bo bs" onclick="galAcRango('todo')">Todo</button>
       <button class="btn bo bs" onclick="galAcRango('mes')">Este mes</button>
       <button class="btn bo bs" onclick="galAcRango('semana')">Últimos 7 días</button>
+      <button class="btn bo bs" style="margin-left:auto"
+        onclick="galAcPlanilla()">⬇ Bajar la planilla</button>
     </div>
 
     <div id="gac-aviso"></div>
@@ -27846,6 +27850,10 @@ SG_MANUAL['galpon-carga'] = { titulo: 'Galpón · Carga de kilos', html:
   + 'la balanza, serían dos kilos de menos por cajón — una tonelada cada quinientos, sin '
   + 'que nada avise.</div>'
 
+  + '<div class="ojo"><b>El peso de la balanza entra con coma</b> <span class="ver">V1118</span>. '
+  + 'No es un detalle de formato: con punto, un peso de tres decimales —«12.345»— se lee '
+  + 'como el <b>separador de miles</b>, o sea doce mil trescientos cuarenta y cinco. '
+  + 'Entraba por debajo del tope, sin marca, y nadie lo veía.</div>'
   + '<p>Cada carga guarda <b>de dónde salió el peso</b>: de la balanza o tipeado. No es un '
   + 'dato de archivo — si un día la mayoría entró a mano, la balanza está rota y nadie '
   + 'avisó.</p>'
@@ -27983,6 +27991,22 @@ SG_MANUAL['galpon-proceso'] = { titulo: 'Galpón · Proceso', html:
   + '<div class="ojo">En una carga <b>repartida</b> se corrige <b>sólo ese pedazo</b>: '
   + 'las de los otros lotes quedan como estaban. Si lo que está mal es el reparto entero, '
   + 'conviene borrarla —se van todas juntas— y cargarla de nuevo. La ventana lo avisa.</div>'
+  + '<h3>🍇 Qué fruta es <span class="ver">V1118</span></h3>'
+  + '<p>Andy, 1/11/2026: <i>«en ningún lado detallamos que es damasco, después se nos va '
+  + 'a empezar a mezclar la fruta... necesito diferenciarlo porque después viene uva y '
+  + 'melón»</i>.</p>'
+  + '<p>Cada carga guarda <b>qué fruta es</b>, y se toma del <b>cultivo del lote</b>, no '
+  + 'de lo que elija la pantalla: el producto forma parte de la atribución igual que el '
+  + 'nombre del lote. Si una carga se mueve a un lote de otra fruta, <b>el producto la '
+  + 'sigue</b> — dejarla diciendo «damasco» sería la mezcla que esto viene a evitar.</p>'
+  + '<p>En una <b>mezcla</b> de lotes, cada fila lleva el producto del suyo: damasco y '
+  + 'uva en la misma tolva salen como dos filas con su fruta, no como una sola.</p>'
+  + '<div class="ojo"><b>Lo cargado antes de la V1118 quedó como «Damasco».</b> La '
+  + 'columna existía y estaba siempre vacía —la pantalla nunca la mandaba— y con una sola '
+  + 'fruta el corte por producto se veía igual de bien contando todo junto. Se completó '
+  + 'una sola vez; de acá en adelante lo pone el lote.</div>'
+  + '<p>El corte <b>por producto</b> del stock aparece cuando hay <b>más de una</b> '
+  + 'fruta guardada. Con damasco solo sería una tabla de una fila.</p>'
   + '<h3>📊 El tablero de arriba <span class="ver">V1112</span></h3>'
   + '<p>Volcado, procesado, sin procesar y el rinde comercial, con la barra del reparto. '
   + 'No es decoración: un 40% de descarte se ve <b>mientras se carga</b>, no a fin de '
@@ -28087,6 +28111,25 @@ SG_MANUAL['galpon-acumulado'] = { titulo: 'Galpón · Acumulado', html:
   + 'solo producto, una temporada son varios — y es como se habla afuera.</li>'
   + '</ul>'
 
+  + '<h3>⬇ Bajar la planilla <span class="ver">V1118</span></h3>'
+  + '<p>Andy, 1/11/2026: <i>«quiero que en acumulado se pueda descargar un archivo como '
+  + 'el que te saco foto»</i>. Es la planilla que ya se lleva a mano: una fila por día, '
+  + 'con el <b>ingreso</b> a la izquierda, la <b>producción abierta por presentación</b> '
+  + 'en el medio y las dos columnas pintadas de <b>descarte</b> y <b>verde</b> a la '
+  + 'derecha.</p>'
+  + '<ul>'
+  + '<li>Se baja con el <b>mismo período</b> que está en pantalla. Bajar siempre todo '
+  + 'dejaría al que filtró tres días con un archivo de la temporada entera.</li>'
+  + '<li>Las columnas del medio <b>salen de los datos</b>: aparece una por cada '
+  + 'presentación que se usó en el período, en el orden del catálogo. Una presentación '
+  + 'nueva trae su par de columnas sola.</li>'
+  + '<li>El <b>verde</b> y el <b>descarte</b> van sólo en sus columnas de la derecha. '
+  + 'Meterlos también en el medio los contaría dos veces en el total de la fila — y ese '
+  + 'total es con lo que se controla la planilla.</li>'
+  + '<li>La fila de <b>TOTAL</b> va con fórmulas, no con el número ya hecho: la planilla '
+  + 'se va a filtrar y a tocar, y un total congelado deja de coincidir apenas alguien '
+  + 'saque una fila.</li>'
+  + '</ul>'
   + '<h3>🍑 Cómo viene rindiendo la fruta <span class="ver">V1117</span></h3>'
   + '<p>Andy, 31/10/2026: <i>«hace mucho hincapié en cada lote. En realidad una vez que '
   + 'procesamos lo interesante es cómo viene rindiendo en general la fruta... si me quiero '
@@ -57522,7 +57565,10 @@ function galBalLectura(l){
   if (!c) return;
   GBAL.ultimo = l.kilos;
   GBAL.usada = true;
-  c.value = String(l.kilos);
+  /* CON COMA. Con punto, un peso de tres decimales —«12.345»— lo lee el servidor como
+     doce mil trescientos cuarenta y cinco: es el separador de miles. La coma no es
+     ambigua, y además es como se escribe un peso de este lado. */
+  c.value = String(l.kilos).replace('.', ',');
   if (typeof galPrPrevio === 'function' && GBAL.campo === 'gpr-cant') galPrPrevio();
 }
 
@@ -57702,7 +57748,7 @@ async function galPrCargar(){
     galPrPintarStock();
   } catch (e) {
     var b = document.getElementById('gpr-body');
-    if (b) b.innerHTML = '<tr><td colspan="6" class="gpr-vacio">' + galPrEsc(e.message) + '</td></tr>';
+    if (b) b.innerHTML = '<tr><td colspan="7" class="gpr-vacio">' + galPrEsc(e.message) + '</td></tr>';
   }
 }
 
@@ -58103,7 +58149,7 @@ function galPrPintar(){
   var b = document.getElementById('gpr-body'); if (!b) return;
   var ps = (GPR.datos && GPR.datos.procesos) || [];
   if (!ps.length){
-    b.innerHTML = '<tr><td colspan="6" class="gpr-vacio">'
+    b.innerHTML = '<tr><td colspan="7" class="gpr-vacio">'
       + (GPR.lotes.length ? 'Todavía no se cargó nada de estos lotes para este día.'
                   : 'Todavía no se cargó nada para este día.') + '</td></tr>';
     return;
@@ -58113,6 +58159,11 @@ function galPrPintar(){
     return '<tr>'
       + '<td><span class="gpr-pt" style="background:' + d.color + '"></span>'
         + galPrEsc(d.label) + '</td>'
+      /* El producto, en su propia columna. Con una sola fruta parece de más; el día
+         que entre la uva es la diferencia entre un informe y una bolsa de números. */
+      + '<td title="' + galPrEsc(x.producto || '') + '">'
+        + (x.producto ? galPrEsc(x.producto)
+            : '<span style="color:#d62828">sin producto</span>') + '</td>'
       + '<td title="' + galPrEsc(x.presentacion || '') + '">'
         + galPrEsc(x.presentacion || 'A granel')
         + (x.estado === 'a_revisar' ? ' <b style="color:#d62828">⚠</b>' : '') + '</td>'
@@ -58232,7 +58283,33 @@ function galPrPintarStock(){
       + '</div>';
   }).join('');
 
+  galPrPintarProducto();
   galPrPintarStockLote();
+}
+
+/* EL STOCK POR PRODUCTO, y sólo cuando hay más de uno. Andy, 1/11/2026: «después
+   viene uva y melón». Hoy es todo damasco y una tabla de una sola fila es ruido;
+   el día que entre la segunda fruta aparece sola, sin que nadie se acuerde. */
+function galPrPintarProducto(){
+  var el = document.getElementById('gpr-stock-prod'); if (!el) return;
+  var ps = (GPR.datos && GPR.datos.stock_productos) || [];
+  if (ps.length < 2){ el.innerHTML = ''; return; }
+  var max = ps.reduce(function(m, x){ return x.kilos > m ? x.kilos : m; }, 0) || 1;
+  el.innerHTML = '<h3 class="gpr-t">Por producto</h3><div class="gpr-stock">'
+    + ps.map(function(x){
+        var tr = function(k){
+          return x[k] > 0
+            ? '<i style="width:' + ((x[k] / max) * 100) + '%;background:' + GAC_COL[k]
+              + '" title="' + galPrEsc(k + ': ' + galPrNum(x[k]) + ' kg') + '"></i>' : '';
+        };
+        return '<div class="gpr-sd" style="flex:1 1 240px">'
+          + '<div style="font-weight:700;font-size:13px">' + galPrEsc(x.producto) + '</div>'
+          + '<div class="hero">' + galPrNum(x.bultos, 0)
+            + '<span class="hu">bultos</span></div>'
+          + '<div class="meta">' + galPrNum(x.kilos) + ' kg</div>'
+          + '<div class="gpr-sbar" style="height:8px">'
+            + tr('comercial') + tr('verde') + tr('descarte') + '</div></div>';
+      }).join('') + '</div>';
 }
 
 /* De qué lote es lo guardado. Va PLEGADO: Andy, 31/10/2026 — «si me quiero meter a
@@ -58362,6 +58439,18 @@ function galAcRango(tipo){
     d.value = galAcIso(x); h.value = hoy;
   }
   galAcCargar();
+}
+
+/* La planilla se baja con el MISMO período que está en pantalla. Bajar siempre todo
+   dejaría al que filtró tres días con un archivo de la temporada entera y sin ninguna
+   señal de que no es lo que estaba mirando. */
+function galAcPlanilla(){
+  var q = [];
+  var d = document.getElementById('gac-desde');
+  var h = document.getElementById('gac-hasta');
+  if (d && d.value) q.push('desde=' + encodeURIComponent(d.value));
+  if (h && h.value) q.push('hasta=' + encodeURIComponent(h.value));
+  window.location = '/api/galpon/resumen.xlsx' + (q.length ? '?' + q.join('&') : '');
 }
 
 function galAcPintarAviso(){

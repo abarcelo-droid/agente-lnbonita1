@@ -34,22 +34,25 @@ try {
 
   // El emoji VA en el label: el sidebar no tiene mapa de íconos para galpon-* y usa el
   // emoji inicial del label.
+  // Sin «Galpón ·» adelante (V1118): los cinco cuelgan del grupo GALPÓN y repetirlo se
+  // come la mitad del ancho del renglón. El `upd` de abajo pisa el label en cada
+  // arranque, así que cambiar un nombre acá alcanza — no hay que tocar la base.
   const MODULOS = [
-    ['galpon-config',   '⚙️ Galpón · Configuración', 700],
-    ['galpon-lote-dia', '🗓️ Galpón · Lote del día',  701],
+    ['galpon-config',   '⚙️ Configuración',  700],
+    ['galpon-lote-dia', '🗓️ Lote del día',   701],
     // La carga de kilos a mano. Va DESPUÉS del lote del día porque ése es el orden en
     // que se usan: a la mañana se declara qué se cosecha, durante el día se cargan los
     // kilos. Y es un módulo aparte y no una solapa del anterior para que el que sólo
     // carga kilos no pueda cambiar el lote declarado.
-    ['galpon-carga',    '⚖️ Galpón · Carga de kilos', 702],
+    ['galpon-carga',    '⚖️ Carga de kilos', 702],
     // EL ACUMULADO (V1109). La carga contesta cuánto entró hoy; ésta, cuánto llevamos.
     // Va aparte y no como solapa de la carga porque las miran dos personas distintas:
     // el que pesa mira su día, y el total por cuadrilla de toda la temporada es con lo
     // que se discute un jornal.
     // EL PROCESO (V1112). Va entre la carga y el acumulado porque ése es el orden en
     // que se usa el galpón: entra fruta, se empaca, y al final se mira el rinde.
-    ['galpon-proceso',  '📦 Galpón · Proceso',       703],
-    ['galpon-acumulado','📈 Galpón · Acumulado',      704],
+    ['galpon-proceso',  '📦 Proceso',        703],
+    ['galpon-acumulado','📈 Acumulado',      704],
   ];
 
   const ins = db.prepare(
