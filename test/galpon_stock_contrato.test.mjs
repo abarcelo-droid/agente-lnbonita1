@@ -68,7 +68,7 @@ function base() {
     CREATE TABLE gal_presentaciones (id INTEGER PRIMARY KEY AUTOINCREMENT,
       nombre TEXT NOT NULL, destino TEXT NOT NULL, envase TEXT,
       por_bulto REAL NOT NULL DEFAULT 1, kg_unidad REAL NOT NULL DEFAULT 1,
-      granel INTEGER NOT NULL DEFAULT 0, categoria TEXT NOT NULL DEFAULT 'I',
+      granel INTEGER NOT NULL DEFAULT 0, emoji TEXT, categoria TEXT NOT NULL DEFAULT 'I',
       calibre TEXT, color TEXT, orden INTEGER NOT NULL DEFAULT 100,
       activo INTEGER NOT NULL DEFAULT 1, creado_en TEXT, eliminado_en TEXT);
     CREATE TABLE gal_pallets (id INTEGER PRIMARY KEY AUTOINCREMENT, numero TEXT UNIQUE,
@@ -251,7 +251,9 @@ t('LA PANTALLA SE PINTA SIN ERRORES con stock cargado', async () => {
     assert.match(dom.nodos['gst-bal'].innerHTML, />100</, 'no pintó las cajas');
     assert.match(dom.nodos['gst-stock'].innerHTML, /Cuadro 3/);
     assert.match(dom.nodos['gst-stock'].innerHTML, /50\/55/);
-    assert.match(dom.nodos['gst-lotes'].innerHTML, /La Esperanza/);
+    // El lote ya no tiene su propia sección: vive adentro de la baldosa de su
+    // presentación, plegado. Andy: «no me interesa por lote».
+    assert.match(dom.nodos['gst-stock'].innerHTML, /gst-lot/);
   } finally { s.cerrar(); }
 });
 
@@ -374,5 +376,109 @@ t('EMITIR DEJA EL NÚMERO A LA VISTA en la ventana', async () => {
     // Y el stock quedó descontado en la lista de atrás.
     assert.match(dom.nodos['gst-stock'].innerHTML, />60</,
       'la pantalla de atrás no se actualizó');
+  } finally { s.cerrar(); }
+});
+
+// ══════════════════════════════════════════════════════════════════════════
+// 4 · EL STOCK EN BALDOSAS, POR PRESENTACIÓN
+// ══════════════════════════════════════════════════════════════════════════
+t('LA MISMA CAJA DE DOS LOTES ES UNA SOLA BALDOSA', async () => {
+  // Andy, 1/11/2026: «no me interesa por lote. Me interesa PRESENTACIÓN Y
+  // CAJAS». Lo que vio eran diecinueve renglones y la misma caja repetida en
+  // cada lote: para saber cuántas había de cartón amarillo había que sumar
+  // tres números de memoria.
+  const db = base();
+  db.exec("INSERT INTO pa_lotes (id,nombre,sector_id,finca,activo) "
+    + "VALUES (11,'Cuadro 4',1,'La Esperanza',1)");
+  const s = await servidor(db, ADMIN);
+  const dom = domFalso();
+  try {
+    const a = await (await s.pegar('/presentaciones', json({ nombre: 'Carton Amarilla',
+      destino: 'comercial', envase: 'Caja', por_bulto: 10, kg_unidad: 0.7,
+      emoji: '📦', categoria: 'I' }))).json();
+    await s.pegar('/procesos', json({ fecha: HOY, lote_id: 10,
+      presentacion_id: a.id, bultos: 267, uuid: 'u1' }));
+    await s.pegar('/procesos', json({ fecha: HOY, lote_id: 11,
+      presentacion_id: a.id, bultos: 17, uuid: 'u2' }));
+
+    const p = pantalla(dom, s.pegar);
+    await p.galStCargar();
+    assert.equal(dom.nodos['gst-aviso'].innerHTML, '',
+      'la pantalla avisó un error: ' + dom.nodos['gst-aviso'].innerHTML);
+    const h = dom.nodos['gst-stock'].innerHTML;
+    // UNA baldosa, con los dos lotes sumados.
+    assert.equal((h.match(/gst-card/g) || []).length, 1,
+      'pintó más de una baldosa para la misma presentación');
+    assert.match(h, />284</, 'no sumó los dos lotes (267 + 17)');
+    assert.match(h, /📦/, 'no pintó el dibujito');
+    // Y los lotes siguen adentro, plegados: el despacho los necesita.
+    assert.match(h, /Cuadro 3/);
+    assert.match(h, /Cuadro 4/);
+    assert.match(h, /gst-lot/);
+  } finally { s.cerrar(); }
+});
+
+t('las baldosas salen agrupadas por destino, cada banda una sola vez', async () => {
+  const db = base();
+  const s = await servidor(db, ADMIN);
+  const dom = domFalso();
+  try {
+    for (const [nombre, destino] of [['Caja', 'comercial'], ['Blanca Verde', 'verde'],
+      ['Blanca Descarte', 'descarte'], ['IFCO', 'comercial']]) {
+      const a = await (await s.pegar('/presentaciones', json({ nombre, destino,
+        envase: 'x', por_bulto: 1, kg_unidad: 8, categoria: 'I' }))).json();
+      await s.pegar('/procesos', json({ fecha: HOY, lote_id: 10,
+        presentacion_id: a.id, bultos: 10, uuid: 'u' + a.id }));
+    }
+    const p = pantalla(dom, s.pegar);
+    await p.galStCargar();
+    const h = dom.nodos['gst-stock'].innerHTML;
+    assert.equal((h.match(/gst-card/g) || []).length, 4);
+    // Tres bandas, no cuatro: las dos comerciales van juntas.
+    assert.equal((h.match(/gst-dh/g) || []).length, 3,
+      'un destino apareció en dos bandas distintas');
+    // Y el markup cierra parejo: una grilla sin cerrar se come el resto de la
+    // pantalla adentro, y el navegador no se queja.
+    assert.equal((h.match(/<div\b/g) || []).length, (h.match(/<\/div>/g) || []).length,
+      'quedó un <div> sin cerrar');
+    assert.equal((h.match(/<div class="gst-grid">/g) || []).length, 3);
+  } finally { s.cerrar(); }
+});
+
+t('una presentación A GRANEL muestra kilos, no cajas', async () => {
+  const db = base();
+  const s = await servidor(db, ADMIN);
+  const dom = domFalso();
+  try {
+    const a = await (await s.pegar('/presentaciones', json({ nombre: 'Bin',
+      destino: 'verde', envase: 'Bin', granel: 1, categoria: 'I' }))).json();
+    await s.pegar('/procesos', json({ fecha: HOY, lote_id: 10,
+      presentacion_id: a.id, kilos: 1200, uuid: 'u1' }));
+    const p = pantalla(dom, s.pegar);
+    await p.galStCargar();
+    const h = dom.nodos['gst-stock'].innerHTML;
+    assert.match(h, /1\.200<span class="gst-cu">kg/,
+      'un granel tiene que decir kg, no cajas');
+    assert.ok(!/>cajas</.test(h), 'le puso cajas a un granel');
+  } finally { s.cerrar(); }
+});
+
+t('el DIBUJITO se esconde del lector de pantalla', async () => {
+  // Leído en voz alta, «caja envuelta para regalo Carton Amarilla» es peor
+  // que el nombre solo: el emoji acelera encontrar con la vista y no aporta
+  // nada a quien no la usa.
+  const db = base();
+  const s = await servidor(db, ADMIN);
+  const dom = domFalso();
+  try {
+    const a = await (await s.pegar('/presentaciones', json({ nombre: 'Caja',
+      destino: 'comercial', envase: 'x', por_bulto: 1, kg_unidad: 8,
+      emoji: '📦', categoria: 'I' }))).json();
+    await s.pegar('/procesos', json({ fecha: HOY, lote_id: 10,
+      presentacion_id: a.id, bultos: 10, uuid: 'u1' }));
+    const p = pantalla(dom, s.pegar);
+    await p.galStCargar();
+    assert.match(dom.nodos['gst-stock'].innerHTML,
+      /<span class="gst-emo" aria-hidden="true">📦<\/span>/);
   } finally { s.cerrar(); }
 });

@@ -449,6 +449,25 @@ const round2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
 // mañana, y un despacho quedaría fechado un día después del camión.
 const hoy = () => new Date().toLocaleDateString('en-CA');
 
+// ── EL PRIMER EMOJI Y NADA MÁS ──────────────────────────────────────────────────────
+// Intl.Segmenter agrupa por GRAFEMA, que es lo que una persona llama «un carácter»: una
+// bandera son dos code points y un emoji con tono de piel son cuatro, así que cortar
+// con .slice(0,1) devolvería medio dibujo o un cuadradito. Viene con Node y con todo
+// navegador de escritorio desde 2020.
+const primerEmoji = (v) => {
+  const t = txt(v);
+  if (!t) return null;
+  try {
+    const seg = new Intl.Segmenter('es', { granularity: 'grapheme' });
+    const g = [...seg.segment(t)][0];
+    return g ? g.segment : null;
+  } catch (e) {
+    /* Sin Segmenter se devuelve el primer code point entero (no la primera unidad
+       UTF-16, que parte un emoji al medio y deja un '\uFFFD'). */
+    return [...t][0] || null;
+  }
+};
+
 // ── DE DÓNDE SALIÓ EL PESO ──────────────────────────────────────────────────────────
 // Tres, y no texto libre. Es lo que después contesta «cuánto se pesó a mano», que es
 // la señal de que la balanza dejó de andar: si un día el 80% de la temporada entró
@@ -1010,22 +1029,29 @@ export function guardarPresentacion(db, d) {
      artículo y va impreso en el tarjetón. */
   const categoria = txt(dd.categoria) || 'I';
   const calibre = txt(dd.calibre);
+  /* UN SOLO carácter visible. Pegar «📦📦📦» o una palabra entera rompe el alto de la
+     baldosa y la fila deja de alinearse con las de al lado; y un emoji compuesto
+     —una bandera, una familia— son varios code points, así que no se cuenta con
+     .length sino con el segmentador del idioma. */
+  const emoji = primerEmoji(dd.emoji);
   const campos = [nombre, dd.destino, txt(dd.envase), porBulto, kgUnidad, granel,
-                  categoria, calibre,
+                  categoria, calibre, emoji,
                   txt(dd.color), Number.isFinite(Number(dd.orden)) ? Number(dd.orden) : 100,
                   dd.activo === 0 || dd.activo === false ? 0 : 1];
   const id = parseInt(dd.id, 10);
   if (Number.isFinite(id) && id > 0) {
     const r = db.prepare(
       ' UPDATE gal_presentaciones SET nombre=?, destino=?, envase=?, por_bulto=?,'
-      + ' kg_unidad=?, granel=?, categoria=?, calibre=?, color=?, orden=?, activo=?'
+      + ' kg_unidad=?, granel=?, categoria=?, calibre=?, emoji=?, color=?, orden=?,'
+      + ' activo=?'
       + ' WHERE id = ? AND eliminado_en IS NULL').run(...campos, id);
     if (!r.changes) return { ok: false, motivo: 'Esa presentación no existe' };
     return { ok: true, id };
   }
   const r = db.prepare(
     ' INSERT INTO gal_presentaciones (nombre,destino,envase,por_bulto,kg_unidad,granel,'
-    + ' categoria,calibre,color,orden,activo) VALUES (?,?,?,?,?,?,?,?,?,?,?)').run(...campos);
+    + ' categoria,calibre,emoji,color,orden,activo)'
+    + ' VALUES (?,?,?,?,?,?,?,?,?,?,?,?)').run(...campos);
   return { ok: true, id: Number(r.lastInsertRowid) };
 }
 
@@ -1702,6 +1728,81 @@ export function procesoPorDia(db, desde, hasta) {
       rinde: x.procesado > 0
         ? Math.round((x.comercial / x.procesado) * 1000) / 10 : null,
     }));
+}
+
+// ── LO QUE HAY, POR PRESENTACIÓN ────────────────────────────────────────────────────
+// Andy, 1/11/2026: «no me interesa por lote. Me interesa PRESENTACIÓN Y CAJAS».
+//
+// Es la pregunta que se le hace a una cámara llena antes de cargar un camión: «¿cuántas
+// cajas de cartón amarillo tengo?». Por lote eran diecinueve renglones para contestarla
+// —la misma caja repetida en cada lote— y había que sumar de memoria.
+//
+// El LOTE no desaparece: viaja adentro de cada presentación, plegado, porque el
+// despacho sí lo necesita (el RENSPA que va impreso sale del lote) y porque «de dónde
+// salió lo que hay» sigue siendo una pregunta real. Lo que cambia es cuál se contesta
+// primero.
+export function stockPorPresentacion(db, opts) {
+  const o = opts || {};
+  const lineas = saldosDeStock(db, o);
+  const cat = new Map();
+  for (const f of db.prepare(
+    'SELECT id, emoji, nombre, orden FROM gal_presentaciones WHERE eliminado_en IS NULL')
+    .all()) cat.set(f.id, f);
+
+  const por = new Map();
+  for (const l of lineas) {
+    if (!(l.bultos > 0 || l.kilos > 0)) continue;
+    /* La clave es la PRESENTACIÓN, no el artículo: el mismo envase en dos calibres es
+       un solo montón a la hora de mirar la cámara, y los calibres se ven adentro. Una
+       presentación borrada del catálogo sigue teniendo stock, y agruparla por id la
+       deja con su nombre congelado en vez de perderse en un «sin presentación». */
+    const k = String(l.presentacion_id || 0) + '|' + l.destino;
+    if (!por.has(k)) {
+      const c = cat.get(l.presentacion_id) || {};
+      por.set(k, {
+        presentacion_id: l.presentacion_id || null,
+        nombre: l.presentacion || (l.presentacion_id ? 'Presentación borrada' : 'A granel'),
+        emoji: c.emoji || null,
+        orden: c.orden == null ? 100 : c.orden,
+        destino: l.destino,
+        granel: l.granel,
+        bultos: 0, kilos: 0, lotes: [], calibres: new Set(),
+      });
+    }
+    const g = por.get(k);
+    g.bultos = round2(g.bultos + (l.bultos || 0));
+    g.kilos = round2(g.kilos + l.kilos);
+    if (l.calibre) g.calibres.add(l.calibre);
+    g.lotes.push({
+      lote_id: l.lote_id, nombre: l.lote_nombre || ('Lote ' + l.lote_id),
+      calibre: l.calibre || null, categoria: l.categoria || null,
+      bultos: l.bultos, kilos: l.kilos, kg_unidad: l.kg_unidad,
+    });
+  }
+
+  return [...por.values()]
+    .map((g) => Object.assign(g, {
+      calibres: [...g.calibres].sort(),
+      // El de más lotes arriba dentro de cada grupo: es el que más va a mirar.
+      lotes: g.lotes.sort((a, b) => (b.bultos || b.kilos) - (a.bultos || a.kilos)),
+    }))
+    /* Por DESTINO primero, en el ORDEN DE DESTINOS y no alfabético: comercial, verde,
+       descarte, que es de mejor a peor. Alfabético pone el descarte antes que el verde,
+       y la pantalla terminaría mostrando lo que se tira arriba de lo que se reprocesa.
+
+       El SQL de saldosDeStock ya viene ordenado por destino, pero alfabéticamente y por
+       casualidad: que el agrupamiento de esta función dependa del ORDER BY de otra es
+       una trampa para el día que esa otra cambie de orden. Acá se ordena igual.
+
+       Después, el orden del catálogo —el que eligió quien lo armó— y a igual orden el
+       montón más grande arriba. */
+    .sort((a, b) => {
+      const da = DESTINOS.findIndex((d) => d.clave === a.destino);
+      const dbb = DESTINOS.findIndex((d) => d.clave === b.destino);
+      if (da !== dbb) return da - dbb;
+      if (a.orden !== b.orden) return a.orden - b.orden;
+      return (b.bultos || b.kilos) - (a.bultos || a.kilos);
+    });
 }
 // ── LO GUARDADO, POR PRODUCTO ───────────────────────────────────────────────────────
 // Andy, 1/11/2026: «después viene uva y melón». Hoy es todo damasco y este corte
