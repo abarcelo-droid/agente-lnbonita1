@@ -25,7 +25,7 @@ import {
   ultimaCarga,
   DESTINOS, presentaciones, guardarPresentacion, borrarPresentacion,
   registrarProceso, editarProceso, borrarProceso, procesosDelDia,
-  tableroProceso, stockGalpon, lotesVolcados,
+  tableroProceso, stockGalpon, stockPorLote, lotesVolcados,
 } from '../servicios/galpon.js';
 import { generarTarjetasPDF, tarjetasAImprimir } from '../servicios/galponTarjetasPDF.js';
 
@@ -668,6 +668,9 @@ router.get('/procesos', (req, res) => {
       procesos: procesosDelDia(db, fecha, loteId),
       tablero: tableroProceso(db, fecha, loteId),
       stock: stockGalpon(db),
+      // El otro corte del stock: de qué lote es lo que hay guardado. No se deduce del
+      // de arriba, y es el que contesta a quién se le liquida lo que está en cámara.
+      stock_lotes: stockPorLote(db),
     });
   } catch (e) {
     console.error('[GALPON] GET /procesos:', e.message);

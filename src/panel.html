@@ -7810,6 +7810,34 @@ input[type=number]{-moz-appearance:textfield;appearance:textfield}
         font-size:12.5px;padding:3px 0;border-top:1px dashed var(--bor)}
       #sec-galpon-proceso .gpr-sl span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
       #sec-galpon-proceso .gpr-sl b{font-variant-numeric:tabular-nums;white-space:nowrap}
+      /* ── 📦 EL STOCK ───────────────────────────────────────────────────
+         Andy, 31/10/2026: «quiero el stock bien claro, por ejemplo cuánto quedó
+         guardado en el frío». Lo que le faltaba a una lista de kilos es el número
+         grande y HACE CUÁNTO: fruta que lleva tres semanas en cámara es otra cosa
+         que la de ayer, y los kilos solos no lo dicen. */
+      #sec-galpon-proceso .gpr-sd .hero{font-size:30px;font-weight:700;line-height:1.1;
+        font-variant-numeric:tabular-nums}
+      #sec-galpon-proceso .gpr-sd .hu{font-size:13px;font-weight:600;color:var(--mut);
+        margin-left:4px}
+      #sec-galpon-proceso .gpr-sd .meta{font-size:11.5px;color:var(--mut);margin:3px 0 9px}
+      #sec-galpon-proceso .gpr-sd .viejo{font-weight:600}
+      #sec-galpon-proceso .gpr-tot{display:flex;align-items:baseline;gap:10px;
+        margin-bottom:12px;flex-wrap:wrap}
+      #sec-galpon-proceso .gpr-tot b{font-size:34px;font-variant-numeric:tabular-nums;
+        line-height:1}
+      #sec-galpon-proceso .gpr-tot span{font-size:12.5px;color:var(--mut)}
+      /* El reparto del stock, en una sola barra: tres números no dicen la proporción
+         tan rápido como tres anchos. */
+      #sec-galpon-proceso .gpr-sbar{display:flex;height:14px;border-radius:7px;
+        overflow:hidden;background:var(--bor);margin-bottom:14px}
+      #sec-galpon-proceso .gpr-sbar i{display:block;height:100%;box-shadow:2px 0 0 0 var(--sur)}
+      #sec-galpon-proceso .gpr-sbar i:last-child{box-shadow:none}
+      #sec-galpon-proceso .gpr-sl2{display:flex;justify-content:space-between;gap:10px;
+        font-size:12.5px;padding:4px 0;border-top:1px dashed var(--bor)}
+      #sec-galpon-proceso .gpr-sl2 span{overflow:hidden;text-overflow:ellipsis;
+        white-space:nowrap}
+      #sec-galpon-proceso .gpr-sl2 b{font-variant-numeric:tabular-nums;white-space:nowrap}
+
       #sec-galpon-proceso .gpr-flash{animation:gprFlash 1s ease}
       @keyframes gprFlash{0%{background:rgba(22,163,74,.28)}100%{background:transparent}}
       #sec-galpon-proceso .gpr-fecha{display:flex;gap:8px;align-items:center;
@@ -7857,7 +7885,12 @@ input[type=number]{-moz-appearance:textfield;appearance:textfield}
     </div>
 
     <h3 class="gpr-t">📦 Lo que hay guardado</h3>
+    <div class="gal-ay" style="max-width:none;margin:-4px 0 10px">Todo lo procesado que
+      todavía no salió: es lo que está en la cámara y en el playón. Hoy no sale nada por
+      sistema, así que es todo lo cargado — cuando exista el despacho, lo que salga se
+      descuenta solo.</div>
     <div id="gpr-stock" class="gpr-stock"></div>
+    <div id="gpr-stock-lote"></div>
   </div>
 
   <div class="sec sg-mod" id="sec-galpon-acumulado">
@@ -7920,6 +7953,57 @@ input[type=number]{-moz-appearance:textfield;appearance:textfield}
       #sec-galpon-acumulado .gac-aviso{border:1px solid var(--bor);border-radius:8px;
         padding:8px 11px;font-size:12.5px;color:var(--mut);margin-bottom:12px}
       #sec-galpon-acumulado .gac-hoy{font-weight:700}
+      /* ── 📊 LOS GRÁFICOS ───────────────────────────────────────────────
+         Marcas finas, ejes discretos, y 2px de separación entre tramos apilados:
+         sin ese respiro, dos colores pegados se leen como uno solo. */
+      #sec-galpon-acumulado .gac-gs{display:flex;gap:16px;flex-wrap:wrap}
+      #sec-galpon-acumulado .gac-g{flex:1 1 420px;min-width:0;border:1px solid var(--bor);
+        border-radius:12px;padding:12px 14px 10px}
+      #sec-galpon-acumulado .gac-gh{display:flex;align-items:baseline;
+        justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:12px}
+      #sec-galpon-acumulado .gac-gh h4{margin:0;font-size:12.5px;font-weight:600}
+      #sec-galpon-acumulado .gac-sub{font-weight:400;color:var(--mut);font-size:11px}
+      #sec-galpon-acumulado .gac-leg{display:flex;gap:12px;font-size:11.5px;color:var(--mut)}
+      #sec-galpon-acumulado .gac-leg span{display:flex;align-items:center;gap:5px}
+      #sec-galpon-acumulado .gac-leg em{width:10px;height:10px;border-radius:3px;
+        display:inline-block;font-style:normal}
+      #sec-galpon-acumulado .gac-leg b{color:var(--txt);font-variant-numeric:tabular-nums}
+      #sec-galpon-acumulado .gac-pie{font-size:10.5px;color:var(--sub);margin-top:10px;
+        line-height:1.4}
+
+      /* El área de dibujo. La línea de base es lo único que hace de eje: una grilla
+         completa compite con los datos, que es lo que se vino a mirar. */
+      /* SIN overflow. Poner overflow-x:hidden le hace poner al navegador una barra
+         VERTICAL —fijar un eje convierte el otro en auto— y aparecía una barrita adentro
+         de cada cuadro. No hace falta: con flex:1 las columnas se reparten lo que hay y
+         no pueden desbordar, que es lo que la regla de CLAUDE.md quiere evitar. */
+      #sec-galpon-acumulado .gac-plot{display:flex;align-items:flex-end;gap:5px;
+        padding-top:4px}
+      #sec-galpon-acumulado .gac-col{flex:1 1 0;min-width:0;max-width:48px;display:flex;
+        flex-direction:column;align-items:stretch}
+      #sec-galpon-acumulado .gac-st{height:140px;display:flex;flex-direction:column;
+        justify-content:flex-end;border-bottom:1px solid var(--bor)}
+      /* El respiro de 2px entre tramos, con el color de la superficie. */
+      #sec-galpon-acumulado .gac-st i{display:block;width:100%;min-height:2px;
+        box-shadow:0 2px 0 0 var(--sur)}
+      #sec-galpon-acumulado .gac-st i:last-child{box-shadow:none}
+      /* El número va SÓLO en algunas columnas, y por eso puede desbordar su ancho sin
+         romper nada: no hay otro al lado con el que chocar. Con un número en cada una,
+         «1.030» entraba recortado como «1.03» — un número equivocado y creíble. */
+      #sec-galpon-acumulado .gac-vt{font-size:10.5px;color:var(--txt);text-align:center;
+        font-variant-numeric:tabular-nums;white-space:nowrap;height:15px;
+        overflow:visible;font-weight:600}
+      #sec-galpon-acumulado .gac-xl{font-size:9.5px;color:var(--sub);text-align:center;
+        white-space:nowrap;overflow:visible;margin-top:5px;height:12px}
+
+      /* Las barras del rinde por lote, adentro de la tabla. */
+      #sec-galpon-acumulado .gac-bl{display:flex;height:8px;border-radius:4px;
+        overflow:hidden;background:var(--bor);min-width:60px}
+      #sec-galpon-acumulado .gac-bl i{display:block;height:100%;
+        box-shadow:2px 0 0 0 var(--sur)}
+      #sec-galpon-acumulado .gac-bl i:last-child{box-shadow:none}
+      #sec-galpon-acumulado .gac-bl i.pend{background:var(--bor2)}
+
 
       /* EL RINDE POR LOTE. Siete columnas de largo conocido: se fijan todas y no se
          parte ninguna, que es la regla de CLAUDE.md sobre la barra lateral. */
@@ -7958,6 +8042,7 @@ input[type=number]{-moz-appearance:textfield;appearance:textfield}
     <!-- EL RINDE. Andy, 31/10/2026: «en lo que ya armaste de acumulado quiero ir
          viendo rindes y todo». Es lo que entró contra lo que salió, por lote: la
          pregunta que se le hace a una finca. -->
+    <div id="gac-graf"></div>
     <div id="gac-rinde"></div>
 
     <div class="ab-table-wrap">
@@ -27880,6 +27965,19 @@ SG_MANUAL['galpon-proceso'] = { titulo: 'Galpón · Proceso', html:
   + 'da una caja y cuánto dan cien. Y hay un tope por carga que <b>marca y deja entrar</b>: '
   + 'lo que ya se embaló, se embaló.</div>'
 
+  + '<h3>❄️ Cuánto quedó guardado <span class="ver">V1116</span></h3>'
+  + '<p>Andy, 31/10/2026: <i>«quiero el stock bien claro, por ejemplo cuánto quedó '
+  + 'guardado en el frío»</i>. Arriba va el total en grande y la barra del reparto; abajo, '
+  + 'una tarjeta por destino con sus kilos, sus bultos y <b>desde cuándo</b>.</p>'
+  + '<p>Lo de «desde cuándo» no es un adorno: <b>4.000 kg de ayer y 4.000 kg de hace tres '
+  + 'semanas se escriben igual y no son lo mismo</b>. En una cámara, esa es la pregunta.</p>'
+  + '<p>Y abajo de todo, el otro corte: <b>de qué lote es lo guardado</b>. No se deduce del '
+  + 'de arriba, y es el que contesta a quién se le liquida lo que está en cámara.</p>'
+  + '<div class="ojo"><b>Hoy no sale nada por sistema</b>, así que lo guardado es todo lo '
+  + 'procesado. Cuando exista el despacho —y el reproceso del verde, y el remate del '
+  + 'descarte— lo que salga se va a descontar solo: la tabla ya sabe restar salidas. Si '
+  + 'hace falta separar <b>cámara</b> de <b>playón</b> como dos lugares distintos, eso '
+  + 'todavía no existe y es una pantalla aparte.</div>'
   + '<h3>🔗 Con qué se vincula <span class="ver">V1112</span></h3>'
   + '<ul>'
   + '<li><b>⚖️ Carga de kilos</b> es de donde salen los lotes y los kilos volcados.</li>'
@@ -27941,6 +28039,29 @@ SG_MANUAL['galpon-acumulado'] = { titulo: 'Galpón · Acumulado', html:
   + 'solo producto, una temporada son varios — y es como se habla afuera.</li>'
   + '</ul>'
 
+  + '<h3>📊 Cómo viene la temporada <span class="ver">V1116</span></h3>'
+  + '<p>Andy, 31/10/2026: <i>«quiero más gráficos. Más visual respecto a cuánto '
+  + 'procesamos cada día y cómo rindió»</i>. Son <b>dos cuadros</b> y no uno:</p>'
+  + '<ul>'
+  + '<li><b>Cuánto se procesó cada día</b>: una columna por día, partida en comercial, '
+  + 'verde y descarte. Pasando el mouse por cada tramo dice cuántos kilos es.</li>'
+  + '<li><b>Cómo rindió cada día</b>: qué proporción de lo que salió de la máquina ese '
+  + 'día fue comercial. La barra llena es 100%.</li>'
+  + '</ul>'
+  + '<div class="ojo"><b>Por qué dos cuadros y no uno.</b> Kilos y porcentaje no comparten '
+  + 'escala. Un solo gráfico con dos ejes deja elegir cuál sube y cuál baja según dónde se '
+  + 'corte cada uno — es la manera más fácil que hay de hacer decir a un gráfico lo que '
+  + 'uno quiera. Van apilados y alineados por el mismo eje de días, que es lo que de '
+  + 'verdad hace falta para compararlos.</div>'
+
+  + '<p>El rinde del día es sobre <b>lo procesado ese día</b>, no sobre lo volcado. Lo que '
+  + 'entra el martes se procesa el jueves: contra el volcado del mismo día, cualquier '
+  + 'jueves daría más de 100% — y un gráfico que pasa de 100% no se lee como un error, se '
+  + 'lee como un día muy bueno. <b>El rinde que importa es el del lote</b>, en la tabla de '
+  + 'abajo; éste es el ritmo del galpón.</p>'
+  + '<p>Los días en que no se procesó <b>no dibujan columna</b>: no es lo mismo que rendir '
+  + 'cero. Y el número arriba sale sólo en el día más grande y en el último — uno por '
+  + 'columna no entra, y lo que no entra se recorta: «1.030» recortado es «1.03».</p>'
   + '<h3>🍑 Rinde por lote <span class="ver">V1112</span></h3>'
   + '<p>Lo que entró (los volcados) contra lo que salió (📦 Proceso), lote por lote. El '
   + '<b>rinde</b> es lo comercial sobre lo volcado: es el número con el que se decide si un '
@@ -57966,6 +58087,21 @@ async function galPrBorrar(id){
   } catch (e) { alert('No se pudo borrar: ' + e.message); }
 }
 
+/* Hace cuánto está guardado lo más viejo. Es la pregunta de una cámara llena, y los
+   kilos solos no la contestan: 4.000 kg de ayer y 4.000 kg de hace tres semanas se
+   escriben igual y no son lo mismo. */
+function galPrAntiguedad(desde){
+  if (!desde) return '';
+  var p = String(desde).split('-');
+  if (p.length !== 3) return '';
+  var d = new Date(Number(p[0]), Number(p[1]) - 1, Number(p[2]));
+  var hoy = new Date();
+  hoy = new Date(hoy.getFullYear(), hoy.getMonth(), hoy.getDate());
+  var dias = Math.round((hoy - d) / 86400000);
+  if (dias <= 0) return 'desde hoy';
+  if (dias === 1) return 'desde ayer';
+  return 'hace ' + dias + ' días';
+}
 /* ── EL STOCK ────────────────────────────────────────────────────────────────────
    Derivado de las mismas cargas, no una tabla de saldos: corregir una carga vieja lo
    arregla solo. Es lo que hay guardado en el galpón HOY, sin cortar por fecha — un
@@ -57976,22 +58112,77 @@ function galPrPintarStock(){
   if (!st || !st.kilos){
     el.innerHTML = '<div class="gpr-vacio" style="flex:1 1 100%">Todavía no hay nada '
       + 'guardado.</div>';
+    var e2 = document.getElementById('gpr-stock-lote'); if (e2) e2.innerHTML = '';
     return;
   }
-  el.innerHTML = st.destinos.map(function(d){
-    return '<div class="gpr-sd" style="border-color:' + d.color + '55">'
-      + '<div class="st"><span style="color:' + d.color + ';font-weight:700;font-size:13px;'
-        + 'text-transform:uppercase;letter-spacing:.3px">' + galPrEsc(d.label) + '</span>'
-        + '<b style="color:' + d.color + '">' + galPrNum(d.kilos) + ' kg</b></div>'
+
+  /* EL NÚMERO GRANDE PRIMERO. Lo que se viene a preguntar es «cuánto hay», y eso no se
+     contesta con tres tarjetas que hay que sumar de cabeza. */
+  var barra = st.destinos.filter(function(d){ return d.kilos > 0; }).map(function(d){
+    return '<i style="width:' + ((d.kilos / st.kilos) * 100) + '%;background:'
+      + (GAC_COL[d.clave] || d.color) + '" title="' + galPrEsc(d.label + ': '
+          + galPrNum(d.kilos) + ' kg') + '"></i>';
+  }).join('');
+
+  var cab = '<div style="flex:1 1 100%">'
+    + '<div class="gpr-tot"><b>' + galPrNum(st.kilos) + '</b><span>kg guardados en total</span>'
+    + '</div><div class="gpr-sbar">' + barra + '</div></div>';
+
+  el.innerHTML = cab + st.destinos.map(function(d){
+    var col = GAC_COL[d.clave] || d.color;
+    var pct = st.kilos > 0 ? (d.kilos / st.kilos) * 100 : 0;
+    return '<div class="gpr-sd" style="border-color:' + col + '55">'
+      + '<div style="color:' + col + ';font-weight:700;font-size:12px;'
+        + 'text-transform:uppercase;letter-spacing:.3px">' + galPrEsc(d.label) + '</div>'
+      + '<div class="hero" style="color:' + col + '">' + galPrNum(d.kilos)
+        + '<span class="hu">kg</span></div>'
+      + '<div class="meta">' + galPrNum(pct, 1) + '% de lo guardado'
+        + (d.bultos ? ' · ' + galPrNum(d.bultos, 0) + ' bultos' : '')
+        + (d.desde ? ' · <span class="viejo">' + galPrEsc(galPrAntiguedad(d.desde))
+            + '</span>' : '') + '</div>'
       + (d.items.length ? d.items.map(function(i){
-            return '<div class="gpr-sl"><span>' + galPrEsc(i.nombre) + '</span>'
+            return '<div class="gpr-sl2"><span>' + galPrEsc(i.nombre) + '</span>'
               + '<b>' + (i.bultos ? galPrNum(i.bultos, 0) + ' b · ' : '')
               + galPrNum(i.kilos) + ' kg</b></div>';
           }).join('')
-        : '<div class="gpr-sl" style="border-top:0;color:var(--mut)">—</div>')
+        : '<div class="gpr-sl2" style="border-top:0;color:var(--mut)">—</div>')
       + '</div>';
   }).join('');
+
+  galPrPintarStockLote();
 }
+
+/* El otro corte: de DÓNDE salió lo que hay. No se deduce del de arriba, y es el que
+   contesta a quién se le liquida lo que está en cámara. */
+function galPrPintarStockLote(){
+  var el = document.getElementById('gpr-stock-lote'); if (!el) return;
+  var ls = (GPR.datos && GPR.datos.stock_lotes) || [];
+  if (!ls.length){ el.innerHTML = ''; return; }
+  var max = ls.reduce(function(m, x){ return x.kilos > m ? x.kilos : m; }, 0) || 1;
+  el.innerHTML = '<h3 class="gpr-t">De qué lote es lo guardado</h3>'
+    + '<div class="ab-table-wrap"><table class="pa-tbl gpr-tbl">'
+    + '<colgroup><col style="width:26%"><col style="width:30%"><col style="width:14%">'
+    + '<col style="width:15%"><col style="width:15%"></colgroup>'
+    + '<thead><tr><th>Lote</th><th>Reparto</th><th style="text-align:right">Kilos</th>'
+    + '<th style="text-align:right">Comercial</th><th>Desde</th></tr></thead><tbody>'
+    + ls.map(function(x){
+        var tr = function(k){
+          return x[k] > 0
+            ? '<i style="width:' + ((x[k] / max) * 100) + '%;background:' + GAC_COL[k]
+              + '" title="' + galPrEsc(k + ': ' + galPrNum(x[k]) + ' kg') + '"></i>' : '';
+        };
+        return '<tr><td title="' + galPrEsc((x.finca ? x.finca + ' · ' : '') + x.nombre) + '">'
+          + (x.finca ? '<b>' + galPrEsc(x.finca) + '</b> · ' : '')
+          + galPrEsc(x.nombre) + '</td>'
+          + '<td><div class="gpr-sbar" style="height:8px;margin:0">'
+            + tr('comercial') + tr('verde') + tr('descarte') + '</div></td>'
+          + '<td class="gpr-n"><b>' + galPrNum(x.kilos) + '</b></td>'
+          + '<td class="gpr-n">' + galPrNum(x.comercial) + '</td>'
+          + '<td>' + galPrEsc(galPrAntiguedad(x.desde)) + '</td></tr>';
+      }).join('')
+    + '</tbody></table></div>';
+}
+
 
 /* ═══════════════════════════════════════════════════════════════════════════════════
    📈 GALPÓN · ACUMULADO
@@ -58052,6 +58243,7 @@ async function galAcCargar(){
     galAcPintarAviso();
     galAcPintarTot();
     galAcPintarCortes();
+    galAcPintarGraficos();
     galAcPintarRinde();
     galAcPintar();
   } catch (e) {
@@ -58133,6 +58325,166 @@ function galAcPintarCortes(){
                + caja('Por producto', j.por_producto || []);
 }
 
+/* ── 📊 LOS GRÁFICOS ─────────────────────────────────────────────────────────────
+   Andy, 31/10/2026: «quiero más gráficos. Más visual respecto a cuánto procesamos cada
+   día y cómo rindió».
+
+   DOS CUADROS Y NO UNO. Kilos y porcentaje no comparten escala: un solo cuadro con dos
+   ejes deja elegir cuál sube y cuál baja según dónde se corte cada uno, y es el error de
+   gráfico más repetido que hay. Van apilados y alineados por el mismo eje de días, que es
+   lo que de verdad hace falta para compararlos.
+
+   Están hechos con divs y no con SVG a propósito: el texto queda nítido a cualquier
+   ancho, el tooltip es el del navegador (anda sin JavaScript y lo lee un lector de
+   pantalla) y no hay una sola cuenta de viewBox que se desacomode al achicar la ventana.
+
+   Los colores son los tres destinos de siempre, re-escalonados para que se distingan:
+   los que estaban (#16a34a/#d97706/#dc2626) tenían el rojo y el naranja a ΔE 14,4 — por
+   debajo del piso con visión normal, o sea difíciles de separar incluso sin daltonismo.
+   Estos pasan los seis chequeos, y además cada tramo lleva su número: el color nunca es
+   lo único que distingue una cosa de otra. */
+var GAC_COL = { comercial:'#15803d', verde:'#f59e0b', descarte:'#b91c1c' };
+var GAC_DEST = [
+  { k:'comercial', t:'Comercial' },
+  { k:'verde',     t:'Verde' },
+  { k:'descarte',  t:'Descarte' },
+];
+
+function galAcLeyenda(){
+  return '<div class="gac-leg">' + GAC_DEST.map(function(d){
+    return '<span><em style="background:' + GAC_COL[d.k] + '"></em>' + d.t + '</span>';
+  }).join('') + '</div>';
+}
+
+/* Una columna apilada. El tramo de arriba lleva las esquinas redondeadas y el apoyo en
+   la base queda recto: redondear los dos extremos de cada tramo haría ver huecos donde
+   no los hay. */
+function galAcColumna(x, max){
+  /* Recortada arriba y abajo. El máximo es lo PROCESADO del día, y con una salida ese
+     total puede quedar por debajo de uno de sus tramos: 500 de comercial sobre 300
+     procesados son 166%, y la columna se sale del cuadro y tapa la de arriba. No se
+     ve como un error — se ve como un día enorme. */
+  var alto = function(v){
+    if (!(max > 0)) return 0;
+    var h = (v / max) * 100;
+    return h < 0 ? 0 : (h > 100 ? 100 : h);
+  };
+  var tramos = GAC_DEST.slice().reverse().filter(function(d){ return x[d.k] > 0; });
+  return tramos.map(function(d, i){
+    return '<i style="height:' + alto(x[d.k]) + '%;background:' + GAC_COL[d.k]
+      + (i === 0 ? ';border-radius:4px 4px 0 0' : '') + '"'
+      + ' title="' + galAcEsc(galAcFechaCorta(x.fecha) + ' · ' + d.t + ': '
+          + galAcNum(x[d.k]) + ' kg') + '"></i>';
+  }).join('');
+}
+
+/* CUÁNTAS ETIQUETAS ENTRAN. Con veinte días y columnas de 30px, un «mié 25/11» en cada
+   una se pisa con la de al lado y el navegador las recorta: quedan «mié (», «jue 0».
+   Se muestran sólo las que entran —la primera, la última y cada n— y el resto del
+   detalle está en el tooltip de cada columna. */
+function galAcCadaCuantos(n, cabenPx){
+  var cada = Math.ceil(n / Math.max(1, cabenPx));
+  return cada < 1 ? 1 : cada;
+}
+
+function galAcPintarGraficos(){
+  var el = document.getElementById('gac-graf'); if (!el) return;
+  var fs = (GAC.datos && GAC.datos.por_dia_proceso) || [];
+  /* Sólo los días en que PASÓ algo. Rellenar los domingos con columnas en cero hace un
+     gráfico lleno de huecos donde lo que se quiere ver es el ritmo. */
+  var dias = fs.filter(function(x){ return x.procesado > 0 || x.volcado > 0; });
+  if (!dias.length){ el.innerHTML = ''; return; }
+
+  var maxKg = 0, iMax = 0, hayRinde = false;
+  dias.forEach(function(x, i){
+    if (x.procesado > maxKg){ maxKg = x.procesado; iMax = i; }
+    if (x.rinde != null) hayRinde = true;
+  });
+
+  // Unas ocho etiquetas de fecha entran cómodas en el ancho de un cuadro.
+  var cada = galAcCadaCuantos(dias.length, 8);
+  var fecha = function(x, i){
+    var va = i === 0 || i === dias.length - 1 || i % cada === 0;
+    return '<div class="gac-xl">' + (va ? galAcEsc(galAcFechaCorta(x.fecha)) : '') + '</div>';
+  };
+
+  /* EL NÚMERO, SÓLO DONDE DICE ALGO: el día más grande y el último. Un número arriba de
+     cada columna es ruido que además no entra — y lo que no entra se recorta, que es
+     peor que no estar: «1.030» recortado es «1.03». El resto se lee en el tooltip. */
+  var kg = '<div class="gac-g">'
+    + '<div class="gac-gh"><h4>Cuánto se procesó cada día</h4>' + galAcLeyenda() + '</div>'
+    + '<div class="gac-plot">'
+    + dias.map(function(x, i){
+        var destaca = i === iMax || i === dias.length - 1;
+        return '<div class="gac-col">'
+          + '<div class="gac-vt">'
+            + (destaca && x.procesado > 0 ? galAcNum(x.procesado, 0) : '') + '</div>'
+          + '<div class="gac-st">' + galAcColumna(x, maxKg) + '</div>'
+          + fecha(x, i)
+          + '</div>';
+      }).join('')
+    + '</div>'
+    + '<div class="gac-pie">El número es el total del día. Pasá el mouse por cada tramo '
+    + 'para ver su destino y sus kilos.</div>'
+    + '</div>';
+
+  /* EL RITMO, en su propio cuadro y con su propia escala. Es comercial sobre lo PROCESADO
+     ese día —qué proporción de lo que salió de la máquina fue vendible—, no contra lo
+     volcado: lo que entra el martes se procesa el jueves, y contra el volcado del mismo
+     día cualquier jueves daría más de 100%. */
+  var rs = dias.filter(function(x){ return x.rinde != null; }).map(function(x){ return x.rinde; });
+  var prom = rs.length ? Math.round((rs.reduce(function(a, b){ return a + b; }, 0) / rs.length) * 10) / 10 : null;
+  var iMejor = -1, mejor = -1;
+  dias.forEach(function(x, i){ if (x.rinde != null && x.rinde > mejor){ mejor = x.rinde; iMejor = i; } });
+
+  var rinde = !hayRinde ? '' : '<div class="gac-g">'
+    + '<div class="gac-gh"><h4>Cómo rindió cada día '
+      + '<span class="gac-sub">comercial sobre lo procesado ese día</span></h4>'
+      + (prom == null ? '' : '<span class="gac-leg">promedio del período <b>'
+          + galAcNum(prom, 1) + '%</b></span>') + '</div>'
+    + '<div class="gac-plot">'
+    + dias.map(function(x, i){
+        var destaca = i === iMejor || i === dias.length - 1;
+        return '<div class="gac-col">'
+          + '<div class="gac-vt">'
+            + (destaca && x.rinde != null ? galAcNum(x.rinde, 0) + '%' : '') + '</div>'
+          + '<div class="gac-st">'
+            + (x.rinde == null ? ''
+               : '<i style="height:' + Math.min(100, x.rinde) + '%;background:'
+                 + GAC_COL.comercial + ';border-radius:4px 4px 0 0"'
+                 + ' title="' + galAcEsc(galAcFechaCorta(x.fecha) + ' · rinde '
+                     + galAcNum(x.rinde, 1) + '% · ' + galAcNum(x.comercial)
+                     + ' kg comerciales de ' + galAcNum(x.procesado) + ' procesados') + '"></i>')
+          + '</div>'
+          + fecha(x, i)
+          + '</div>';
+      }).join('')
+    + '</div>'
+    + '<div class="gac-pie">La barra llena es 100%. Un día sin procesar no dibuja '
+    + 'columna: no es lo mismo que rendir cero.</div>'
+    + '</div>';
+
+  el.innerHTML = '<h3 class="gac-t">Cómo viene la temporada</h3>'
+    + '<div class="gac-gs">' + kg + rinde + '</div>';
+}
+
+
+/* Las barras del rinde por lote, al lado de la tabla. Horizontales porque los nombres de
+   lote son largos y variables, que es justo cuando una columna vertical obliga a girar
+   la cabeza. */
+function galAcBarrasLote(f){
+  var tot = Math.max(f.volcado, f.procesado) || 1;
+  var tr = function(k){
+    return f[k] > 0 ? '<i style="width:' + ((f[k] / tot) * 100) + '%;background:'
+      + GAC_COL[k] + '" title="' + galAcEsc(k + ': ' + galAcNum(f[k]) + ' kg') + '"></i>' : '';
+  };
+  var sinProc = f.sin_procesar > 0 ? (f.sin_procesar / tot) * 100 : 0;
+  return '<div class="gac-bl">' + tr('comercial') + tr('verde') + tr('descarte')
+    + (sinProc > 0 ? '<i class="pend" style="width:' + sinProc + '%"'
+        + ' title="' + galAcEsc('sin procesar: ' + galAcNum(f.sin_procesar) + ' kg')
+        + '"></i>' : '')
+    + '</div>';
+}
 /* ── EL RINDE POR LOTE ───────────────────────────────────────────────────────────
    Lo que entró (los volcados) contra lo que salió (el proceso), por lote. El rinde es
    lo COMERCIAL sobre lo volcado: es el número con el que se decide si un cuadro se
@@ -58166,6 +58518,7 @@ function galAcPintarRinde(){
       + '<td class="gac-n">' + galAcNum(f.verde) + '</td>'
       + '<td class="gac-n">' + galAcNum(f.descarte) + '</td>'
       + '<td class="gac-n' + neg + '">' + galAcNum(f.sin_procesar) + '</td>'
+      + '<td>' + (pie ? '' : galAcBarrasLote(f)) + '</td>'
       + '<td class="gac-n gac-rinde-v">'
         + (f.rinde == null ? '—' : galAcNum(f.rinde, 1) + '%') + '</td>'
       + '</tr>';
@@ -58173,14 +58526,15 @@ function galAcPintarRinde(){
 
   el.innerHTML = '<h3 class="gac-t">Rinde por lote</h3>'
     + '<div class="ab-table-wrap"><table class="pa-tbl gac-rtbl">'
-    + '<colgroup><col style="width:22%"><col style="width:14%"><col style="width:13%">'
-    + '<col style="width:12%"><col style="width:13%"><col style="width:14%">'
-    + '<col style="width:12%"></colgroup>'
+    + '<colgroup><col style="width:19%"><col style="width:12%"><col style="width:11%">'
+    + '<col style="width:10%"><col style="width:11%"><col style="width:12%">'
+    + '<col style="width:15%"><col style="width:10%"></colgroup>'
     + '<thead><tr><th>Lote</th><th style="text-align:right">Volcado</th>'
     + '<th style="text-align:right"><span class="gac-pt" style="background:' + COL.comercial + '"></span>Comerc.</th>'
     + '<th style="text-align:right"><span class="gac-pt" style="background:' + COL.verde + '"></span>Verde</th>'
     + '<th style="text-align:right"><span class="gac-pt" style="background:' + COL.descarte + '"></span>Descarte</th>'
-    + '<th style="text-align:right">Sin proc.</th><th style="text-align:right">Rinde</th>'
+    + '<th style="text-align:right">Sin proc.</th><th>Reparto</th>'
+    + '<th style="text-align:right">Rinde</th>'
     + '</tr></thead><tbody>'
     + fs.map(function(f){ return fila(f, false); }).join('')
     /* El total tiene su propio rinde calculado sobre el TOTAL, no el promedio de los

@@ -853,6 +853,8 @@ export function acumulado(db, desde, hasta) {
     // cuánto salió vendible. Vive acá y no en una pantalla aparte porque es el mismo
     // período y los mismos lotes que ya se están mirando.
     rinde: rindePorLote(db, d, h),
+    // Lo que alimenta los dos gráficos de arriba: kilos por día y ritmo del galpón.
+    por_dia_proceso: procesoPorDia(db, d, h),
   };
 }
 
@@ -1307,6 +1309,7 @@ export function stockGalpon(db, opts) {
     + "       COALESCE(presentacion, CASE WHEN bultos IS NULL THEN 'A granel' ELSE 'Sin presentación' END) AS nombre,"
     + "       COALESCE(SUM(CASE WHEN tipo = 'ingreso' THEN kilos ELSE -kilos END),0) AS kilos,"
     + "       COALESCE(SUM(CASE WHEN tipo = 'ingreso' THEN bultos ELSE -bultos END),0) AS bultos,"
+    + '       MIN(fecha) AS desde, MAX(fecha) AS hasta,'
     + '       COUNT(*) AS cargas'
     + '  FROM gal_procesos WHERE eliminado_en IS NULL'
     + (o.lote_id ? ' AND lote_id = ?' : '')
@@ -1316,8 +1319,13 @@ export function stockGalpon(db, opts) {
   const por = DESTINOS.map((d) => {
     const items = filas.filter((f) => f.destino === d.clave)
       .map((f) => Object.assign({}, f, { kilos: round2(f.kilos), bultos: round2(f.bultos) }));
+    const desdes = items.map((x) => x.desde).filter(Boolean).sort();
     return Object.assign({}, d, {
       kilos: round2(items.reduce((t, x) => t + x.kilos, 0)),
+      bultos: round2(items.reduce((t, x) => t + (x.bultos || 0), 0)),
+      cargas: items.reduce((t, x) => t + (x.cargas || 0), 0),
+      // La carga más vieja que sigue guardada. En cámara, eso es la pregunta.
+      desde: desdes.length ? desdes[0] : null,
       items,
     });
   });
@@ -1375,6 +1383,89 @@ export function lotesVolcados(db) {
   });
 }
 
+// ── QUÉ SE PROCESÓ CADA DÍA, Y CÓMO RINDIÓ ──────────────────────────────────────────
+// Andy, 31/10/2026: «quiero más gráficos. Más visual respecto a cuánto procesamos cada
+// día y cómo rindió».
+//
+// Dos medidas distintas en la misma consulta, y a propósito NO en el mismo gráfico:
+// kilos y porcentaje no comparten escala. La pantalla dibuja dos cuadros alineados por
+// el mismo eje de días — un solo cuadro con dos escalas deja elegir cuál sube y cuál
+// baja según dónde se corten los ejes.
+//
+// EL RINDE DE UN DÍA NO ES EL DE UN LOTE. Lo que se vuelca el martes se procesa el
+// jueves: día contra día, el porcentaje salta y no significa nada. Por eso se devuelven
+// las dos columnas crudas —volcado y comercial del día— y el rinde diario queda como lo
+// que es: el ritmo del galpón, no el rendimiento de un cuadro.
+export function procesoPorDia(db, desde, hasta) {
+  const d = esFecha(desde), h = esFecha(hasta);
+  if (!d || !h) return [];
+
+  const proc = db.prepare(
+    ' SELECT fecha, destino,'
+    + "       COALESCE(SUM(CASE WHEN tipo = 'ingreso' THEN kilos ELSE -kilos END),0) AS kilos,"
+    + '       COUNT(*) AS cargas'
+    + '  FROM gal_procesos WHERE fecha >= ? AND fecha <= ? AND eliminado_en IS NULL'
+    + '  GROUP BY fecha, destino').all(d, h);
+
+  const vol = db.prepare(
+    ' SELECT fecha, COALESCE(SUM(kilos),0) AS kilos'
+    + '  FROM gal_volcados WHERE fecha >= ? AND fecha <= ? AND eliminado_en IS NULL'
+    + '  GROUP BY fecha').all(d, h);
+
+  const dias = new Map();
+  const nuevo = (f) => ({ fecha: f, volcado: 0, comercial: 0, verde: 0, descarte: 0,
+                          procesado: 0, cargas: 0 });
+  for (const v of vol) {
+    const x = nuevo(v.fecha);
+    x.volcado = round2(v.kilos);
+    dias.set(v.fecha, x);
+  }
+  for (const r of proc) {
+    // Un día con proceso y sin volcado existe igual: es procesar lo que entró ayer.
+    if (!dias.has(r.fecha)) dias.set(r.fecha, nuevo(r.fecha));
+    const x = dias.get(r.fecha);
+    x[r.destino] = round2(r.kilos);
+    x.procesado = round2(x.procesado + r.kilos);
+    x.cargas += r.cargas;
+  }
+
+  return [...dias.values()]
+    .sort((a, b) => (a.fecha < b.fecha ? -1 : 1))
+    .map((x) => Object.assign(x, {
+      // Sobre lo PROCESADO ese día, no sobre lo volcado: es qué proporción de lo que
+      // salió de la máquina fue vendible. Contra el volcado del mismo día daría más de
+      // 100% cualquier jueves que se procese el martes.
+      rinde: x.procesado > 0
+        ? Math.round((x.comercial / x.procesado) * 1000) / 10 : null,
+    }));
+}
+// ── LO GUARDADO, POR LOTE ───────────────────────────────────────────────────────────
+// El otro corte del stock: el de arriba contesta «cuánto hay de cada cosa», éste
+// contesta «de dónde salió lo que hay». Son las dos preguntas que se le hacen a una
+// cámara llena, y ninguna de las dos se deduce de la otra.
+export function stockPorLote(db) {
+  const filas = db.prepare(
+    ' SELECT lote_id, COALESCE(lote_nombre, \'Lote \' || lote_id) AS nombre,'
+    + "       COALESCE(SUM(CASE WHEN tipo = 'ingreso' THEN kilos ELSE -kilos END),0) AS kilos,"
+    + "       COALESCE(SUM(CASE WHEN destino = 'comercial' AND tipo = 'ingreso' THEN kilos"
+    + "                        WHEN destino = 'comercial' THEN -kilos ELSE 0 END),0) AS comercial,"
+    + "       COALESCE(SUM(CASE WHEN destino = 'verde' AND tipo = 'ingreso' THEN kilos"
+    + "                        WHEN destino = 'verde' THEN -kilos ELSE 0 END),0) AS verde,"
+    + "       COALESCE(SUM(CASE WHEN destino = 'descarte' AND tipo = 'ingreso' THEN kilos"
+    + "                        WHEN destino = 'descarte' THEN -kilos ELSE 0 END),0) AS descarte,"
+    + '       MIN(fecha) AS desde'
+    + '  FROM gal_procesos WHERE eliminado_en IS NULL'
+    + '  GROUP BY lote_id'
+    + '  ORDER BY SUM(kilos) DESC').all();
+  const fincas = fincasDeLotes(db);
+  return filas.map((f) => Object.assign(f, {
+    finca: fincas.get(f.lote_id) || null,
+    kilos: round2(f.kilos),
+    comercial: round2(f.comercial),
+    verde: round2(f.verde),
+    descarte: round2(f.descarte),
+  }));
+}
 // ── EL RINDE POR LOTE, PARA EL ACUMULADO ────────────────────────────────────────────
 // La pregunta de la temporada: de todo lo que entró de este lote, cuánto salió vendible.
 //
