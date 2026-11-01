@@ -1625,3 +1625,79 @@ test('el router acepta varios lotes y el tablero los suma', () => {
   assert.match(JS_PR, /q\.push\('lote_ids=' \+ GPR\.lotes\.join\(','\)\)/);
   assert.match(JS_PR, /lote_ids: GPR\.lotes,/);
 });
+
+// ══════════════════════════════════════════════════════════════════════════
+// 13 · LOS GRÁFICOS Y EL STOCK, CONTRA EL MANUAL (V1116)
+// ══════════════════════════════════════════════════════════════════════════
+// Los armadores se EJECUTAN en test/galpon_graficos.test.mjs. Acá se clava lo
+// que el manual promete.
+test('MANUAL AC: «son dos cuadros y no uno»', () => {
+  const ac = manualDe('galpon-acumulado');
+  assert.match(ac, /Por qué dos cuadros y no uno/);
+  assert.match(ac, /deja elegir cuál sube y cuál baja/);
+  // Y es cierto: dos contenedores, cada uno con su escala.
+  assert.equal((JS_AC.match(/class="gac-plot"/g) || []).length, 2,
+    'o hay un cuadro solo, o aparecieron tres');
+});
+
+test('MANUAL AC: «el rinde del día es sobre lo procesado»', () => {
+  const ac = manualDe('galpon-acumulado');
+  assert.match(ac, /sobre <b>lo procesado ese día<\/b>/);
+  assert.match(ac, /cualquier '\s*\+\s*'jueves daría más de 100%|jueves daría más de 100%/);
+  assert.match(cuerpoServicio('export function procesoPorDia('),
+    /x\.comercial \/ x\.procesado/);
+  assert.ok(!/x\.comercial \/ x\.volcado/.test(cuerpoServicio('export function procesoPorDia(')),
+    'el rinde diario se calcula contra el volcado del mismo día');
+});
+
+test('MANUAL AC: «los días sin procesar no dibujan columna»', () => {
+  const ac = manualDe('galpon-acumulado');
+  assert.match(ac, /no es lo mismo que rendir '\s*\+\s*'cero|no es lo mismo que rendir cero/);
+  assert.match(JS_AC, /x\.rinde == null \? ''/);
+});
+
+test('MANUAL PR: «el stock dice desde cuándo»', () => {
+  dicePr(/4\.000 kg de ayer y 4\.000 kg de hace tres '\s*\+\s*'semanas|4\.000 kg de ayer/);
+  assert.match(cuerpoServicio('export function stockGalpon('), /MIN\(fecha\) AS desde/);
+  assert.match(JS_PR, /function galPrAntiguedad\(desde\)\{/);
+  assert.match(JS_PR, /'hace ' \+ dias \+ ' días'/);
+  // Y SE USA en la tarjeta: tenerla escrita y no llamarla pasaba el test igual.
+  assert.match(JS_PR, /galPrEsc\(galPrAntiguedad\(d\.desde\)\)/);
+  assert.match(JS_PR, /galPrAntiguedad\(x\.desde\)/);
+});
+
+test('MANUAL PR: «de qué lote es lo guardado es OTRA pregunta»', () => {
+  dicePr(/No se deduce del '\s*\+\s*'de arriba|No se deduce del/);
+  assert.match(SERV, /export function stockPorLote\(db\)/);
+  assert.match(JS_PR, /function galPrPintarStockLote\(\)\{/);
+  assert.match(RUTA, /stock_lotes: stockPorLote\(db\)/);
+});
+
+test('MANUAL PR: «hoy no sale nada, pero la tabla ya sabe restar»', () => {
+  dicePr(/ya sabe restar salidas/);
+  assert.match(cuerpoServicio('export function stockPorLote('),
+    /CASE WHEN tipo = 'ingreso' THEN kilos ELSE -kilos END/);
+  // Y se dice que cámara y playón todavía no son dos lugares distintos, en vez de
+  // dejar creer que lo son.
+  dicePr(/separar <b>cámara<\/b> de <b>playón<\/b>/);
+});
+
+test('el número grande del stock está arriba de todo', () => {
+  // Lo que se viene a preguntar es «cuánto hay», y eso no se contesta con tres
+  // tarjetas que hay que sumar de cabeza.
+  assert.match(JS_PR, /kg guardados en total/);
+  assert.match(PANEL, /#sec-galpon-proceso \.gpr-tot b\{font-size:34px/);
+  assert.match(PANEL, /#sec-galpon-proceso \.gpr-sd \.hero\{font-size:30px/);
+});
+
+test('LOS COLORES DE LOS GRÁFICOS SON LOS MISMOS EN TODAS LAS PANTALLAS', () => {
+  // Si el stock usara unos y el gráfico otros, el verde de una pantalla sería el
+  // descarte de la otra — y eso no se nota hasta que alguien decide algo.
+  // Las DOS veces: la barra de arriba y la tarjeta. Con un match suelto, cambiar una
+  // sola dejaba media pantalla con la paleta vieja y el test en verde.
+  assert.equal((JS_PR.match(/GAC_COL\[d\.clave\] \|\| d\.color/g) || []).length, 2,
+    'alguna parte del stock dejó de usar la paleta común');
+  assert.match(JS_PR, /tr\(.comercial.\)/);
+  assert.equal((PANEL.match(/var GAC_COL = \{/g) || []).length, 1,
+    'hay más de una definición de la paleta');
+});
