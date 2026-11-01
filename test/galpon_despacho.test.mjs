@@ -28,7 +28,7 @@ import {
   disponibleParaDespacho, despachos, itemsDelDespacho, abrirDespacho,
   editarDespacho, agregarAlDespacho, sacarDelDespacho, emitirDespacho,
   anularDespacho, borrarDespacho, despachoPorNumero, proximoNumeroDespacho,
-  stockGalpon, stockPorProducto, stockPorLote,
+  stockGalpon, stockPorProducto, stockPorLote, stockPorPresentacion, presentaciones,
 } from '../src/servicios/galpon.js';
 
 const F = '2026-12-15';
@@ -53,7 +53,7 @@ function base() {
       cuartel TEXT, notas TEXT, actualizado TEXT);
     CREATE TABLE gal_presentaciones (id INTEGER PRIMARY KEY AUTOINCREMENT, nombre TEXT,
       destino TEXT, envase TEXT, por_bulto REAL DEFAULT 1, kg_unidad REAL DEFAULT 1,
-      granel INTEGER DEFAULT 0, categoria TEXT NOT NULL DEFAULT 'I', calibre TEXT,
+      granel INTEGER DEFAULT 0, emoji TEXT, categoria TEXT NOT NULL DEFAULT 'I', calibre TEXT,
       color TEXT, orden INTEGER DEFAULT 100, activo INTEGER DEFAULT 1,
       creado_en TEXT, eliminado_en TEXT);
     CREATE TABLE gal_pallets (id INTEGER PRIMARY KEY AUTOINCREMENT, numero TEXT UNIQUE,
@@ -623,4 +623,125 @@ test('UNA FECHA IMPOSIBLE SE DESCARTA DE VERDAD', () => {
   assert.equal(despachos(db, { hasta: '2026-02-30' }).length, 2);
   // Y una fecha REAL sí filtra: si no, el descarte se estaría comiendo todo.
   assert.equal(despachos(db, { desde: '2026-12-18' }).length, 1);
+});
+
+// ══════════════════════════════════════════════════════════════════════════
+// 10 · EL STOCK POR PRESENTACIÓN
+// ══════════════════════════════════════════════════════════════════════════
+// Andy, 1/11/2026: «no me interesa por lote. Me interesa PRESENTACIÓN Y
+// CAJAS». Eran diecinueve renglones para contestar «cuántas cajas de cartón
+// amarillo tengo» — la misma caja repetida en cada lote.
+test('AGRUPA POR PRESENTACIÓN Y SUMA LOS LOTES', () => {
+  const db = base();
+  const a = art(db, 'Carton Amarilla', '50/55');
+  const b = art(db, 'IFCO', null);
+  entra(db, a, 267, '1', 10);
+  entra(db, a, 17, '2', 11);     // la MISMA caja, otro lote
+  entra(db, b, 49, '3', 10);
+
+  const g = stockPorPresentacion(db);
+  assert.equal(g.length, 2, 'no agrupó: ' + g.map((x) => x.nombre).join(', '));
+  const am = g.filter((x) => x.nombre === 'Carton Amarilla')[0];
+  assert.equal(am.bultos, 284, '267 + 17 de dos lotes tienen que dar 284');
+  assert.equal(am.kilos, 2272);
+  // Y el lote sigue adentro: el despacho lo necesita, porque el RENSPA que va
+  // impreso sale del lote.
+  assert.equal(am.lotes.length, 2);
+  assert.equal(am.lotes[0].bultos, 267, 'el montón más grande no quedó arriba');
+  assert.equal(am.lotes[0].nombre, 'L-1215-A');
+});
+
+test('la presentación trae su dibujito y sus calibres', () => {
+  const db = base();
+  guardarPresentacion(db, { id: art(db, 'Carton Amarilla', '50/55'),
+    nombre: 'Carton Amarilla', destino: 'comercial', envase: 'Caja 8 kg',
+    por_bulto: 1, kg_unidad: 8, calibre: '50/55', categoria: 'I', emoji: '📦' });
+  const b = art(db, 'Carton Amarilla', '60/70');
+  entra(db, 1, 10, '1');
+  entra(db, b, 20, '2');
+  const g = stockPorPresentacion(db);
+  const uno = g.filter((x) => x.emoji === '📦')[0];
+  assert.ok(uno, 'no devolvió el emoji');
+  assert.deepEqual(uno.calibres, ['50/55']);
+});
+
+test('UN SOLO CARÁCTER DE DIBUJITO, aunque peguen tres', () => {
+  // Pegar «📦📦📦» o una palabra rompe el alto de la baldosa y desalinea la
+  // fila entera.
+  const db = base();
+  const id = guardarPresentacion(db, { nombre: 'X', destino: 'comercial',
+    por_bulto: 1, kg_unidad: 8, emoji: '📦📦📦' }).id;
+  assert.equal(presentaciones(db).filter((x) => x.id === id)[0].emoji, '📦');
+  // Y un emoji COMPUESTO no se parte al medio: 🗳️ son dos code points y
+  // cortar con slice(0,1) devuelve medio dibujo.
+  const dos = guardarPresentacion(db, { nombre: 'Y', destino: 'comercial',
+    por_bulto: 1, kg_unidad: 8, emoji: '🗳️' }).id;
+  assert.equal(presentaciones(db).filter((x) => x.id === dos)[0].emoji, '🗳️');
+  // Sin dibujito se guarda NULL, no una cadena vacía: la pantalla pregunta
+  // por la verdad o la mentira del campo.
+  const tres = guardarPresentacion(db, { nombre: 'Z', destino: 'comercial',
+    por_bulto: 1, kg_unidad: 8, emoji: '' }).id;
+  assert.equal(presentaciones(db).filter((x) => x.id === tres)[0].emoji, null);
+});
+
+test('lo que se despachó NO figura en el stock por presentación', () => {
+  const db = base();
+  const a = art(db, 'Caja', '50/55');
+  entra(db, a, 100, '1');
+  const x = abrirDespacho(db, { fecha: F });
+  agregarAlDespacho(db, x.id, { lote_id: 10, destino: 'comercial',
+    presentacion_id: a, calibre: '50/55', bultos: 100 });
+  assert.equal(stockPorPresentacion(db).length, 0,
+    'una presentación agotada sigue apareciendo');
+});
+
+test('se ordena por destino y después por el orden del catálogo', () => {
+  // La pantalla los pinta en bandas por destino: si no vienen juntos, una
+  // misma banda aparece dos veces.
+  const db = base();
+  const c = guardarPresentacion(db, { nombre: 'Caja', destino: 'comercial',
+    por_bulto: 1, kg_unidad: 8, orden: 50 }).id;
+  const v = guardarPresentacion(db, { nombre: 'Verde', destino: 'verde',
+    por_bulto: 1, kg_unidad: 8, orden: 10 }).id;
+  const d = guardarPresentacion(db, { nombre: 'Descarte', destino: 'descarte',
+    por_bulto: 1, kg_unidad: 8, orden: 10 }).id;
+  entra(db, c, 10, '1'); entra(db, v, 10, '2'); entra(db, d, 10, '3');
+  const g = stockPorPresentacion(db);
+  const dest = g.map((x) => x.destino);
+  assert.deepEqual([...new Set(dest)], dest, 'un destino aparece en dos tandas');
+});
+
+test('EL ORDEN ES COMERCIAL, VERDE, DESCARTE — no alfabético', () => {
+  // Alfabético pone el descarte antes que el verde, y la pantalla muestra lo
+  // que se tira arriba de lo que se reprocesa. El orden es de mejor a peor,
+  // que es el de DESTINOS. Y el SQL de abajo ordena alfabético, así que esto
+  // NO sale solo: depender de ese ORDER BY sería una trampa para el día que
+  // cambie.
+  const db = base();
+  for (const [n, d] of [['Caja', 'comercial'], ['Blanca Verde', 'verde'],
+    ['Blanca Descarte', 'descarte']]) {
+    const id = guardarPresentacion(db, { nombre: n, destino: d, por_bulto: 1,
+      kg_unidad: 8 }).id;
+    entra(db, id, 10, 'u' + id);
+  }
+  assert.deepEqual(stockPorPresentacion(db).map((x) => x.destino),
+    ['comercial', 'verde', 'descarte']);
+});
+
+test('una presentación que CAMBIÓ de destino no junta los dos en una baldosa', () => {
+  // El destino se congela en cada carga, así que cambiarlo en el catálogo deja
+  // filas viejas con el anterior. Agrupar sólo por presentación las juntaría:
+  // una baldosa que dice «comercial» con cajas de descarte adentro.
+  const db = base();
+  const a = guardarPresentacion(db, { nombre: 'Caja', destino: 'comercial',
+    por_bulto: 1, kg_unidad: 8 }).id;
+  entra(db, a, 40, '1');
+  guardarPresentacion(db, { id: a, nombre: 'Caja', destino: 'descarte',
+    por_bulto: 1, kg_unidad: 8 });
+  entra(db, a, 10, '2');
+
+  const g = stockPorPresentacion(db);
+  assert.equal(g.length, 2, 'juntó dos destinos en una sola baldosa');
+  assert.equal(g.filter((x) => x.destino === 'comercial')[0].bultos, 40);
+  assert.equal(g.filter((x) => x.destino === 'descarte')[0].bultos, 10);
 });

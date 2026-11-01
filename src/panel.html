@@ -7635,6 +7635,22 @@ input[type=number]{-moz-appearance:textfield;appearance:textfield}
             </select></div>
         </div>
 
+        <!-- EL DIBUJITO. Andy, 1/11/2026: «permitime en algún lugar sumar emoticones
+             para cada presentación. Quiero que sea algo más visual el stock».
+             Es un casillero de texto, no un selector cerrado: el teclado del sistema
+             (Win+punto) tiene todos, y una lista nuestra de veinte envejece el día que
+             entre la uva. Los de abajo son un atajo, no el catálogo. -->
+        <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:10px;align-items:flex-end">
+          <div style="flex:0 0 90px"><label>Dibujito</label>
+            <input type="text" id="gal-pres-emo" maxlength="8" placeholder="📦"
+                   style="width:100%;font-size:21px;text-align:center;line-height:1.3"></div>
+          <div style="flex:1 1 300px;min-width:0">
+            <div class="gal-ay" style="margin-bottom:5px">Para encontrarlo de un vistazo en
+              el stock. Con <b>Win + .</b> se abren todos; éstos son los que más se usan:</div>
+            <div id="gal-pres-emos" class="gal-emos"></div>
+          </div>
+        </div>
+
         <!-- EL ARTÍCULO. Andy, 1/11/2026: «los calibres en damasco los definimos en el
              artículo que hacemos del proceso». Dos calibres del mismo envase son dos
              artículos distintos, y cada uno es un renglón del tarjetón. -->
@@ -8063,6 +8079,44 @@ input[type=number]{-moz-appearance:textfield;appearance:textfield}
         font-variant-numeric:tabular-nums;line-height:1.1}
       #sec-galpon-stock .gst-b .l{font-size:11px;color:var(--mut);text-transform:uppercase;
         letter-spacing:.4px;margin-top:3px}
+      /* LA GRILLA DEL STOCK. auto-fill con minmax: entran las que quepan y se estiran
+         para llenar el ancho, así que NO HAY BARRA LATERAL a ningún ancho de pantalla
+         (CLAUDE.md) y en un teléfono quedan de a una sin ninguna media query. */
+      /* Los atajos de emoji del catálogo. Van acá y no en el modal porque el
+         <style> de una .sec aplica igual a todo el documento: el navegador no lo
+         recorta al bloque donde está escrito. */
+      .gal-emos{display:flex;flex-wrap:wrap;gap:4px}
+      .gal-emos button{font-size:18px;line-height:1;padding:3px 5px;cursor:pointer;
+        background:var(--pan);border:1px solid var(--bd);border-radius:7px}
+      .gal-emos button:hover{border-color:#94a3b8}
+      #sec-galpon-stock .gst-grid{display:grid;gap:10px;margin:0 0 18px;
+        grid-template-columns:repeat(auto-fill,minmax(210px,1fr))}
+      #sec-galpon-stock .gst-dh{display:flex;align-items:center;font-size:11px;
+        text-transform:uppercase;letter-spacing:.5px;color:var(--mut);margin:14px 0 8px}
+      #sec-galpon-stock .gst-card{border:1px solid var(--bd);border-radius:11px;
+        padding:12px 13px;background:var(--pan);cursor:pointer;transition:border-color .12s}
+      #sec-galpon-stock .gst-card:hover{border-color:#94a3b8}
+      #sec-galpon-stock .gst-ch{display:flex;align-items:flex-start;gap:8px;min-height:34px}
+      #sec-galpon-stock .gst-emo{font-size:24px;line-height:1;flex:0 0 auto}
+      /* El nombre puede partir en dos renglones y ahí se corta: un envase con un nombre
+         larguísimo no puede empujar el número hacia abajo y desalinear toda la fila. */
+      #sec-galpon-stock .gst-cn{font-size:13px;font-weight:600;line-height:1.25;
+        min-width:0;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;
+        overflow:hidden}
+      #sec-galpon-stock .gst-cal{font-size:10px;font-weight:400;color:var(--mut);
+        margin-top:2px}
+      #sec-galpon-stock .gst-cv{font-size:30px;font-weight:700;line-height:1.05;
+        font-variant-numeric:tabular-nums;margin-top:8px}
+      #sec-galpon-stock .gst-cu{font-size:12px;font-weight:600;color:var(--mut);
+        margin-left:5px}
+      /* Los lotes, plegados. max-height en 0 y no display:none para que la baldosa no
+         salte de alto al abrirse y corra las de abajo de golpe. */
+      #sec-galpon-stock .gst-lot{max-height:0;overflow:hidden;transition:max-height .18s}
+      #sec-galpon-stock .gst-lot.on{max-height:420px;overflow:auto;
+        margin-top:9px;border-top:1px solid var(--bd);padding-top:7px}
+      #sec-galpon-stock .gst-lr{display:flex;justify-content:space-between;gap:8px;
+        font-size:11px;color:var(--mut);padding:2px 0}
+      #sec-galpon-stock .gst-lr b{color:var(--txt);font-variant-numeric:tabular-nums}
       #sec-galpon-stock .gst-pt{display:inline-block;width:9px;height:9px;border-radius:3px;
         margin-right:5px}
       #sec-galpon-stock .gst-est{display:inline-block;padding:1px 7px;border-radius:9px;
@@ -8083,11 +8137,8 @@ input[type=number]{-moz-appearance:textfield;appearance:textfield}
     <div id="gst-aviso"></div>
     <div id="gst-bal" class="gst-bal"></div>
 
-    <h3 class="gst-t">Lo que hay en cámara</h3>
+    <h3 class="gst-t">Lo que hay en cámara <span style="text-transform:none;letter-spacing:0;font-weight:400">— tocá una para ver de qué lotes salió</span></h3>
     <div id="gst-stock"></div>
-
-    <h3 class="gst-t">Por lote</h3>
-    <div id="gst-lotes"></div>
 
     <h3 class="gst-t" style="display:flex;align-items:center;gap:10px">Despachos
       <button class="btn bo bs" style="margin-left:auto;text-transform:none;letter-spacing:0"
@@ -28515,7 +28566,32 @@ SG_MANUAL['galpon-stock'] = { titulo: 'Stock y Despachos', html:
   + 'liquidación sí se hace por kilo. El total general de arriba sí va en kilos: sumar '
   + 'cajas de 8 kg con bines de 400 daría un número que no significa nada físico.</p>'
 
-  + '<h3>Qué hay en cámara</h3>'
+  + '<h3>Qué hay en cámara <span class="ver">V1123</span></h3>'
+  + '<p>Una <b>baldosa por presentación</b>, con las cajas grandes y los kilos abajo. '
+  + 'Andy, 1/11/2026: <i>«no me interesa por lote. Me interesa PRESENTACIÓN Y CAJAS»</i>. '
+  + 'La pregunta que se le hace a una cámara llena antes de cargar un camión es '
+  + '«¿cuántas cajas de cartón amarillo tengo?», y por lote eran diecinueve renglones '
+  + 'con la misma caja repetida en cada uno.</p>'
+  + '<p><b>El lote no se fue: está adentro.</b> Tocá una baldosa y se despliega de qué '
+  + 'lotes salió lo que hay. Hace falta para despachar —el RENSPA que va impreso sale '
+  + 'del lote— pero es la segunda pregunta, no la primera.</p>'
+  + '<p>Las baldosas van agrupadas por <b>destino</b> (comercial, verde, descarte) y '
+  + 'dentro de cada banda en el orden que tengan en el catálogo. Una presentación a '
+  + '<b>granel</b> muestra kilos en vez de cajas, porque no tiene cajas.</p>'
+
+  + '<h3>El dibujito de cada presentación <span class="ver">V1123</span></h3>'
+  + '<p>En <b>⚙️ Configuración → Presentaciones</b> cada una puede llevar un '
+  + '<b>emoji</b>. No es decoración: el stock se mira de parado y de lejos, y un 📦 se '
+  + 'distingue de un 🫙 de un vistazo donde «Carton Amarilla· 10 × 700 g» y «Blanca '
+  + 'Chico (kilos)» son dos renglones que hay que leer. El nombre sigue al lado — el '
+  + 'dibujito no reemplaza nada, acelera encontrar.</p>'
+  + '<p>Hay una fila de atajos con los más usados, y con <b>Win + punto</b> se abren '
+  + 'todos los del sistema. Apretar el mismo atajo de nuevo lo <b>saca</b>. Entra uno '
+  + 'solo: pegar tres rompe el alto de la baldosa y desalinea la fila.</p>'
+  + '<p>El mismo dibujito aparece en las <b>baldosas de 📦 Proceso</b>, que es donde se '
+  + 'carga: si sirve para encontrar la caja en el stock, sirve el doble donde se '
+  + 'aprieta doce veces por hora.</p>'
+
   + '<p>Cada renglón es una <b>línea despachable</b>: lote + destino + presentación + '
   + 'calibre. Es la unidad con la que se carga el camión — no «200 kg de damasco» sino '
   + '«200 cajas 50/55 comerciales del lote 10». Lo que se despachó ya está descontado, '
@@ -57821,6 +57897,8 @@ function galPresAbrir(id){
   document.getElementById('gal-pres-env').value = p ? (p.envase || '') : '';
   document.getElementById('gal-pres-cat').value = p ? (p.categoria || 'I') : 'I';
   document.getElementById('gal-pres-cal').value = p ? (p.calibre || '') : '';
+  document.getElementById('gal-pres-emo').value = p ? (p.emoji || '') : '';
+  galPresEmojis();
   document.getElementById('gal-pres-granel').checked = !!(p && p.granel);
   document.getElementById('gal-pres-pb').value = p && !p.granel ? p.por_bulto : 1;
   /* Se vuelve a mostrar en GRAMOS si el número es chico: así se guardó «700 g» y así
@@ -57836,6 +57914,25 @@ function galPresAbrir(id){
   document.getElementById('gal-pres-error').style.display = 'none';
   galPresGranel();
   document.getElementById('gal-pres-modal').classList.add('on');
+}
+
+/* Los atajos. NO son el catálogo de emojis: son los que más se van a usar acá, y el
+   casillero acepta cualquiera que el sistema ofrezca. Una lista cerrada de veinte
+   envejece el día que entre la uva y obliga a tocar el código para agregar uno. */
+var GAL_EMOS = ['📦','🧺','🫙','🗳️','🥡','🍑','🍇','🍈','🍅','🥬','🟢','🟡','🔴','🧊','🚚','⭐'];
+function galPresEmojis(){
+  var el = document.getElementById('gal-pres-emos');
+  if (!el || el._armado) return;
+  el._armado = 1;
+  el.innerHTML = GAL_EMOS.map(function(e){
+    return '<button type="button" onclick="galPresEmo(\''+e+'\')">'+e+'</button>';
+  }).join('');
+}
+function galPresEmo(e){
+  var i = document.getElementById('gal-pres-emo');
+  /* El mismo de nuevo lo SACA: es el único lugar donde se puede dejar sin dibujito
+     después de haber puesto uno, sin tener que seleccionar y borrar a mano. */
+  if (i) i.value = (i.value === e) ? '' : e;
 }
 
 function galPresCerrar(){ document.getElementById('gal-pres-modal').classList.remove('on'); }
@@ -57870,6 +57967,7 @@ async function galPresGuardar(){
     envase: granel ? '' : document.getElementById('gal-pres-env').value,
     categoria: document.getElementById('gal-pres-cat').value,
     calibre: document.getElementById('gal-pres-cal').value,
+    emoji: document.getElementById('gal-pres-emo').value,
     granel: granel ? 1 : 0,
     por_bulto: granel ? 1 : document.getElementById('gal-pres-pb').value,
     kg_unidad: granel ? 1 : kg,
@@ -58374,7 +58472,10 @@ function galPrBaldosa(p, d){
   var h = '<div class="gpr-bald' + (sel ? ' on' : '') + '"'
     + ' style="border-color:' + d.color + (sel ? '' : '55') + '"'
     + (sel ? '' : ' onclick="galPrElegir(' + p.id + ')"') + '>'
-    + '<div class="bn">' + galPrEsc(p.nombre) + '</div>'
+    + '<div class="bn">'
+      + (p.emoji ? '<span aria-hidden="true" style="margin-right:5px">'
+                   + galPrEsc(p.emoji) + '</span>' : '')
+      + galPrEsc(p.nombre) + '</div>'
     + '<div class="bc"><b>' + galPrEsc(art) + '</b></div>'
     + '<div class="bc">' + cuenta + '</div>';
   if (sel){
@@ -59500,46 +59601,58 @@ function galStPintar(){
   });
   document.getElementById('gst-bal').innerHTML = h;
 
-  /* QUÉ HAY, por línea despachable: es la misma unidad con la que se carga el camión,
-     así que esta tabla es la que se mira cuando preguntan «¿tenemos 200 cajas 50/55?». */
-  var d = GST.disp||[];
-  document.getElementById('gst-stock').innerHTML = d.length
-    ? '<div class="ab-table-wrap"><table class="pa-tbl gst-tbl">'
-      + '<colgroup><col style="width:24%"><col style="width:12%"><col style="width:20%">'
-      + '<col style="width:12%"><col style="width:16%"><col style="width:16%"></colgroup>'
-      + '<thead><tr><th>Lote</th><th>Destino</th><th>Presentación</th><th>Calibre</th>'
-      + '<th style="text-align:right">Cajas</th><th style="text-align:right">Kilos</th>'
-      + '</tr></thead><tbody>'
-      + d.map(function(f){
-          return '<tr><td>'+galStEsc(f.lote_nombre||('Lote '+f.lote_id))+'</td>'
-            + '<td><span class="gst-pt" style="background:'+(GST_COL[f.destino]||'#999')+'"></span>'
-            + galStEsc(f.destino)+'</td>'
-            + '<td>'+galStEsc(f.presentacion||'A granel')+'</td>'
-            + '<td>'+galStEsc(f.calibre||'—')+'</td>'
-            + '<td style="text-align:right" class="gst-n">'+galStNum(f.bultos,0)+'</td>'
-            + '<td style="text-align:right" class="gst-n">'+galStNum(f.kilos,0)+'</td></tr>';
-        }).join('')
-      + '</tbody></table></div>'
-    : '<div class="ojo">No hay nada en cámara: todo lo que entró ya se despachó.</div>';
+  /* QUÉ HAY, POR PRESENTACIÓN. Andy, 1/11/2026: «no me interesa por lote. Me interesa
+     PRESENTACIÓN Y CAJAS». Y en baldosas, no en tabla: el stock se mira de parado y de
+     lejos antes de cargar un camión, y una grilla de números grandes se barre de un
+     vistazo donde una tabla de diecinueve renglones hay que leerla.
 
-  var lo = j.lotes||[];
-  document.getElementById('gst-lotes').innerHTML = lo.length
-    ? '<div class="ab-table-wrap"><table class="pa-tbl gst-tbl">'
-      + '<colgroup><col style="width:30%"><col style="width:18%"><col style="width:17%">'
-      + '<col style="width:17%"><col style="width:18%"></colgroup>'
-      + '<thead><tr><th>Lote</th><th>Finca</th>'
-      + '<th style="text-align:right">Comercial</th><th style="text-align:right">Verde</th>'
-      + '<th style="text-align:right">Total kg</th></tr></thead><tbody>'
-      + lo.map(function(f){
-          return '<tr><td>'+galStEsc(f.nombre)+'</td><td>'+galStEsc(f.finca||'—')+'</td>'
-            + '<td style="text-align:right" class="gst-n">'+galStNum(f.comercial,0)+'</td>'
-            + '<td style="text-align:right">'+galStNum(f.verde,0)+'</td>'
-            + '<td style="text-align:right" class="gst-n">'+galStNum(f.kilos,0)+'</td></tr>';
-        }).join('')
-      + '</tbody></table></div>'
-    : '<div class="ojo">Todavía no entró nada.</div>';
+     El LOTE no se va: queda plegado adentro de cada baldosa. El despacho lo necesita
+     —el RENSPA que va impreso sale del lote— y «de dónde salió lo que hay» sigue siendo
+     una pregunta real. Lo que cambia es cuál se contesta primero. */
+  var pr = j.presentaciones||[];
+  var dmap = {}; (j.destinos||[]).forEach(function(x){ dmap[x.clave] = x.nombre; });
+  var h2 = '';
+  var destAct = null;
+  pr.forEach(function(g, i){
+    if (g.destino !== destAct){
+      if (destAct !== null) h2 += '</div>';
+      destAct = g.destino;
+      h2 += '<div class="gst-dh"><span class="gst-pt" style="background:'
+         + (GST_COL[g.destino]||'#999') + '"></span>'
+         + galStEsc(dmap[g.destino] || g.destino) + '</div><div class="gst-grid">';
+    }
+    var cal = (g.calibres||[]).length
+      ? '<div class="gst-cal">' + g.calibres.map(galStEsc).join(' · ') + '</div>' : '';
+    /* El emoji es decoración y se esconde del lector de pantalla: leído en voz alta,
+       «caja envuelta para regalo Carton Amarilla» es peor que el nombre solo. */
+    var emo = g.emoji
+      ? '<span class="gst-emo" aria-hidden="true">' + galStEsc(g.emoji) + '</span>' : '';
+    h2 += '<div class="gst-card" onclick="galStPlegar(' + i + ')">'
+       + '<div class="gst-ch">' + emo
+       + '<div class="gst-cn">' + galStEsc(g.nombre) + cal + '</div></div>'
+       + '<div class="gst-cv">' + galStNum(g.granel ? g.kilos : g.bultos, 0)
+       + '<span class="gst-cu">' + (g.granel ? 'kg' : 'cajas') + '</span></div>'
+       + (g.granel ? '' : '<div class="gst-kg">' + galStNum(g.kilos,0) + ' kg</div>')
+       + '<div class="gst-lot" id="gst-lot-' + i + '">'
+       + (g.lotes||[]).map(function(l){
+           return '<div class="gst-lr"><span>' + galStEsc(l.nombre)
+             + (l.calibre ? (' · ' + galStEsc(l.calibre)) : '') + '</span>'
+             + '<b>' + galStNum(g.granel ? l.kilos : l.bultos, 0) + '</b></div>';
+         }).join('')
+       + '</div></div>';
+  });
+  if (destAct !== null) h2 += '</div>';
+  document.getElementById('gst-stock').innerHTML = h2
+    || '<div class="ojo">No hay nada en cámara: todo lo que entró ya se despachó.</div>';
 
   galStDesp();
+}
+
+/* De qué lotes salió lo que hay en esa baldosa. Va PLEGADO porque es la segunda
+   pregunta, no la primera: se abre cuando hace falta saber qué RENSPA va impreso. */
+function galStPlegar(i){
+  var el = document.getElementById('gst-lot-'+i);
+  if (el) el.classList.toggle('on');
 }
 
 function galStDesp(){

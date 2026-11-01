@@ -415,6 +415,15 @@ for (const sql of [
   // Sin esto, anular un despacho obligaría a adivinar qué filas eran suyas por fecha y
   // destino —y dos despachos del mismo día a la misma feria son indistinguibles—.
   "ALTER TABLE gal_procesos ADD COLUMN despacho_id INTEGER",
+  // ── UN DIBUJITO POR PRESENTACIÓN ───────────────────────────────────────────────
+  // Andy, 1/11/2026: «permitime en algún lugar sumar emoticones para cada
+  // presentación. Quiero que sea algo más visual el stock, más fácil de usar».
+  //
+  // No es decoración: el stock se mira de parado y de lejos, y un 📦 se distingue de
+  // un 🫙 de un vistazo mientras que «Carton Amarilla· 10 × 700 g» y «Blanca Chico
+  // (kilos)» son dos renglones de texto que hay que LEER. El nombre sigue estando al
+  // lado: el emoji no reemplaza nada, acelera encontrar.
+  "ALTER TABLE gal_presentaciones ADD COLUMN emoji TEXT",
   "ALTER TABLE gal_procesos ADD COLUMN repartido INTEGER NOT NULL DEFAULT 0",
   "CREATE INDEX IF NOT EXISTS gal_proc_reparto_idx ON gal_procesos(reparto)",
   // EL ARTÍCULO Y LOS DATOS DEL TARJETÓN (V1119). Ver los comentarios de arriba.
