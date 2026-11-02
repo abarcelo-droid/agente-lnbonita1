@@ -2016,3 +2016,30 @@ test('UN SOLO LUGAR DECIDE QUÉ DIBUJITO VA, y las cuatro pantallas lo usan', ()
   assert.equal((dib.match(/aria-hidden="true"/g) || []).length, 2,
     'alguno de los dos casos se lo lee el lector de pantalla');
 });
+
+test('LA VENTANA DEL ARMADO NO SE CIERRA AL CERRAR EL PALLET', () => {
+  // Regla 4 de CLAUDE.md, la que no es auditable en general porque depende de
+  // qué queda adentro: acá queda el NÚMERO del pallet, que es lo que hay que
+  // leer antes de ir a imprimir el tarjetón y pegarlo.
+  const js = bloqueJs('var GST = {');
+  const cerrar = js.slice(js.indexOf('async function galArmCerrarPallet()'),
+                          js.indexOf('async function galArmReabrir()'));
+  assert.ok(cerrar.length > 200, 'el corte de galArmCerrarPallet salió vacío');
+  assert.ok(!sinComentarios(cerrar).includes('galArmCerrar('),
+    'galArmCerrarPallet cierra la ventana y se lleva el número');
+  assert.match(cerrar, /galArmPintar\(\)/,
+    'no repinta: la ventana queda mostrando el pallet abierto de antes');
+});
+
+test('el abridor del armado DEJA LA VENTANA EN BLANCO', () => {
+  // Un formulario que sólo se esconde conserva lo que tenía: acá sería armar
+  // el pallet del jueves con la observación del martes.
+  const js = bloqueJs('var GST = {');
+  const abrir = js.slice(js.indexOf('async function galArmAbrir(id)'),
+                         js.indexOf('function galArmCerrar()'));
+  assert.ok(abrir.length > 200, 'el corte de galArmAbrir salió vacío');
+  for (const k of ['gal-arm-fecha', 'gal-arm-obs', 'gal-arm-cant']) {
+    assert.ok(abrir.includes(k), 'el abridor no limpia ' + k);
+  }
+  assert.match(abrir, /GST\.armsel = null/);
+});

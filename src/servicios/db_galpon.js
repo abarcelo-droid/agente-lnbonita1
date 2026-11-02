@@ -439,6 +439,31 @@ for (const sql of [
   // sesión (index.js:110-115) y es alcanzable sin cookie. Acá el dibujo de una caja no
   // es un secreto, pero tampoco hay una sola razón para publicarlo, y el día que
   // alguien copie este código para algo que sí lo sea arrastra el agujero.
+  // ── ARMAR UN PALLET CON LO QUE YA ESTÁ EN CÁMARA ───────────────────────────────
+  // Andy, 1/11/2026: «necesito un lugar donde pueda hacer cierre de pallet de
+  // mercadería que está suelta en el stock, donde puedo agarrar pallets mixtos y todo».
+  //
+  // El pallet DEL PROCESO se llena solo con la carga del día: la primera caja lo abre.
+  // Pero antes de que salga el camión hay que REARMAR —juntar lo que quedó de varias
+  // tandas, partir uno que no se completó, mezclar dos calibres—, y eso no se puede
+  // hacer cargando de nuevo: las cajas ya están contadas y volver a cargarlas las
+  // contaría dos veces.
+  //
+  // Por eso el pallet armado NO MUEVE EL STOCK. Un pallet es una UBICACIÓN, no un
+  // movimiento: las cajas siguen en la cámara, apiladas de otra manera. Lo que saca
+  // del stock es el despacho, y eso ya estaba.
+  "ALTER TABLE gal_pallets ADD COLUMN origen TEXT NOT NULL DEFAULT 'proceso'",
+  // ── DE QUÉ CARGA SALIÓ ESTA PARTE ──────────────────────────────────────────────
+  // Poner 60 cajas en un pallet cuando la carga de ese día fue de 267 obliga a PARTIR
+  // la fila: queda una de 207 y una de 60. El stock no cambia —207 + 60 son las 267 de
+  // siempre— pero la historia sí tiene que poder reconstruirse, y para eso las dos
+  // apuntan a la carga original.
+  //
+  // Es el mismo idioma que `reparto`, que marca una carga repartida entre varios lotes:
+  // ahí lo repartido es una estimación y acá es una mudanza, pero en los dos casos lo
+  // que importa es que el renglón que se ve en pantalla no es el que entró por la
+  // balanza.
+  "ALTER TABLE gal_procesos ADD COLUMN partido_de INTEGER",
   "ALTER TABLE gal_presentaciones ADD COLUMN icono TEXT",
   // Cambia cada vez que se sube uno nuevo. Va en la URL como ?v= porque si no el
   // navegador sigue mostrando el anterior: misma dirección, misma caché.

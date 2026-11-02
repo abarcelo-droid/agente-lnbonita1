@@ -30,6 +30,8 @@ import {
   palletAbierto, abrirPallet, contenidoDelPallet, cerrarPallet, reabrirPallet,
   disponibleParaDespacho, despachos, itemsDelDespacho, abrirDespacho, editarDespacho,
   stockPorPresentacion, guardarIcono, borrarIcono, rutaDelIcono,
+  stockParaArmar, palletsArmados, abrirPalletArmado, moverAlPallet,
+  sacarDelPalletArmado, lineasDelPallet, palletResumen,
   agregarAlDespacho, sacarDelDespacho, emitirDespacho, anularDespacho, borrarDespacho,
   despachoPorNumero,
   borrarPallet, sacarDelPallet, pallets, palletPorNumero, valorConfig,
@@ -1128,6 +1130,66 @@ router.get('/presentaciones/:id/icono', (req, res) => {
   } catch (e) {
     console.error('[GALPON] GET /presentaciones/:id/icono:', e.message);
     res.status(500).end();
+  }
+});
+
+
+// ── 🧱 ARMAR UN PALLET CON LO QUE YA ESTÁ EN CÁMARA ─────────────────────────────────
+// Andy, 1/11/2026: «necesito un lugar donde pueda hacer cierre de pallet de mercadería
+// que está suelta en el stock, donde puedo agarrar pallets mixtos y todo».
+//
+// Armar un pallet es TRABAJO DEL DÍA, como cargar kilos o cerrar el del proceso: va con
+// requireAuth. El que arma el camión en el playón es el que lo arma en la pantalla.
+router.get('/armado', (req, res) => {
+  try {
+    res.json({
+      ok: true,
+      hoy: hoy(),
+      destinos: DESTINOS,
+      stock: stockParaArmar(db, { destino: req.query.destino }),
+      pallets: palletsArmados(db, { estado: req.query.estado }).map((x) =>
+        Object.assign({}, x, { lineas: lineasDelPallet(db, x.id) })),
+    });
+  } catch (e) {
+    console.error('[GALPON] GET /armado:', e.message);
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+router.post('/armado', (req, res) => {
+  try {
+    const u = req._user || {};
+    res.json(abrirPalletArmado(db, Object.assign({}, req.body || {}, {
+      usuario_id: u.id || null, usuario: u.nombre || null,
+    })));
+  } catch (e) {
+    console.error('[GALPON] POST /armado:', e.message);
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+router.post('/armado/:id/mover', (req, res) => {
+  try {
+    const u = req._user || {};
+    const r = moverAlPallet(db, num(req.params.id), Object.assign({}, req.body || {}, {
+      usuario_id: u.id || null, usuario: u.nombre || null,
+    }));
+    if (!r.ok) return res.status(400).json(Object.assign({ ok: false, error: r.motivo }, r));
+    res.json(r);
+  } catch (e) {
+    console.error('[GALPON] POST /armado/:id/mover:', e.message);
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+router.delete('/armado/linea/:procesoId', (req, res) => {
+  try {
+    const r = sacarDelPalletArmado(db, num(req.params.procesoId));
+    if (!r.ok) return res.status(400).json({ ok: false, error: r.motivo });
+    res.json(r);
+  } catch (e) {
+    console.error('[GALPON] DELETE /armado/linea:', e.message);
+    res.status(500).json({ ok: false, error: e.message });
   }
 });
 

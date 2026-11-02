@@ -103,7 +103,7 @@ function base() {
       activo INTEGER DEFAULT 1, creado_en TEXT, eliminado_en TEXT);
     CREATE TABLE gal_pallets (id INTEGER PRIMARY KEY AUTOINCREMENT, numero TEXT UNIQUE,
       estado TEXT NOT NULL DEFAULT 'abierto', parcial INTEGER NOT NULL DEFAULT 0,
-      mixto INTEGER NOT NULL DEFAULT 0, fecha_empaque TEXT, bultos REAL, kilos REAL,
+      mixto INTEGER NOT NULL DEFAULT 0, origen TEXT NOT NULL DEFAULT 'proceso', fecha_empaque TEXT, bultos REAL, kilos REAL,
       observacion TEXT, abierto_en TEXT, cerrado_en TEXT, usuario_id INTEGER,
       usuario TEXT, eliminado_en TEXT);
     CREATE TABLE gal_procesos (id INTEGER PRIMARY KEY AUTOINCREMENT, uuid TEXT UNIQUE,
@@ -111,7 +111,7 @@ function base() {
       destino TEXT NOT NULL, presentacion_id INTEGER, presentacion TEXT, envase TEXT, categoria TEXT, calibre TEXT, variedad TEXT, renspa TEXT, cuartel TEXT,
       bultos REAL, por_bulto REAL, kg_unidad REAL, kilos REAL NOT NULL,
       tipo TEXT NOT NULL DEFAULT 'ingreso', reparto TEXT,
-      repartido INTEGER NOT NULL DEFAULT 0, pallet_id INTEGER, observacion TEXT,
+      repartido INTEGER NOT NULL DEFAULT 0, pallet_id INTEGER, partido_de INTEGER, observacion TEXT,
       estado TEXT NOT NULL DEFAULT 'ok', revision_motivo TEXT, usuario_id INTEGER,
       usuario TEXT, creado_en TEXT, eliminado_en TEXT);
   `);

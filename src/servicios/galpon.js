@@ -2060,9 +2060,13 @@ export function rindePorLote(db, desde, hasta) {
 // Un solo pallet abierto por vez. Dos abiertos a la vez son dos montones en el playón y
 // ninguna forma de saber a cuál fue la caja que se acaba de cargar — y lo que decide eso
 // no es el sistema, es dónde la apoyó el que la llevó.
+// EL PALLET DEL DÍA: el que se llena solo con la carga de proceso. Se filtra por
+// origen porque un pallet ARMADO que quede abierto se llevaría las cargas de la mañana
+// siguiente — palletAbierto() devuelve el último abierto y la primera caja entra ahí.
 export function palletAbierto(db) {
   return db.prepare(
     " SELECT * FROM gal_pallets WHERE estado = 'abierto' AND eliminado_en IS NULL"
+    + "   AND COALESCE(origen,'proceso') = 'proceso'"
     + '  ORDER BY id DESC LIMIT 1').get() || null;
 }
 
@@ -2088,13 +2092,17 @@ export function contenidoDelPallet(db, palletId) {
   return db.prepare(
     ' SELECT producto, variedad, categoria, calibre, envase, presentacion,'
     + '       lote_nombre, renspa, cuartel, destino,'
-    + '       COALESCE(SUM(bultos),0) AS bultos,'
-    + '       COALESCE(SUM(kilos),0) AS kilos,'
+    + "       COALESCE(SUM(CASE WHEN tipo = 'ingreso' THEN bultos"
+    + '                        ELSE -bultos END),0) AS bultos,'
+    + "       COALESCE(SUM(CASE WHEN tipo = 'ingreso' THEN kilos"
+    + '                        ELSE -kilos END),0) AS kilos,'
     + '       COUNT(*) AS cargas'
     + '  FROM gal_procesos'
-    + "  WHERE pallet_id = ? AND eliminado_en IS NULL AND tipo = 'ingreso'"
+    + '  WHERE pallet_id = ? AND eliminado_en IS NULL'
     + '  GROUP BY producto, variedad, categoria, calibre, envase, presentacion,'
     + '           lote_nombre, renspa, cuartel, destino'
+    + "  HAVING COALESCE(SUM(CASE WHEN tipo = 'ingreso' THEN kilos"
+    + '                           ELSE -kilos END),0) <> 0'
     + '  ORDER BY SUM(kilos) DESC').all(id).map((r) => Object.assign(r, {
     bultos: round2(r.bultos), kilos: round2(r.kilos),
   }));
@@ -2113,6 +2121,250 @@ export function proximoNumero(db, fecha) {
     + ' ORDER BY numero DESC LIMIT 1').get(pref + '%');
   const n = ult ? (parseInt(String(ult.numero).slice(pref.length), 10) || 0) : 0;
   return pref + String(n + 1).padStart(5, '0');
+}
+
+
+// ════════════════════════════════════════════════════════════════════════════════════
+// 🧱 ARMAR UN PALLET CON LO QUE YA ESTÁ EN CÁMARA
+// ════════════════════════════════════════════════════════════════════════════════════
+// Andy, 1/11/2026: «necesito un lugar donde pueda hacer cierre de pallet de mercadería
+// que está suelta en el stock, donde puedo agarrar pallets mixtos y todo».
+//
+// UN PALLET ES UNA UBICACIÓN, NO UN MOVIMIENTO. Armarlo no saca ni agrega una sola
+// caja: las mismas que había siguen estando, apiladas de otra manera. Lo que saca del
+// stock es el despacho. Por eso acá no se escribe ninguna fila de salida — se MUEVEN
+// las que ya existen.
+//
+// Y MOVER OBLIGA A PARTIR. Poner 60 cajas en un pallet cuando la carga de ese día fue
+// de 267 deja una fila de 207 y una de 60, las dos apuntando a la original con
+// partido_de. El stock no cambia; lo que cambia es dónde está cada parte.
+
+// Lo que se puede poner en un pallet: el stock, con el pallet en el que está hoy. Un
+// renglón por lote + destino + presentación + calibre + pallet, porque mover 60 cajas
+// es sacarlas de algún lado y hay que poder decir de cuál.
+export function stockParaArmar(db, opts) {
+  const o = opts || {};
+  const filas = db.prepare(
+    ' SELECT g.lote_id, g.lote_nombre, g.producto, g.destino, g.presentacion_id,'
+    + '       g.presentacion, g.envase, g.categoria, g.calibre, g.variedad,'
+    + '       g.pallet_id, p.numero AS pallet_numero, p.estado AS pallet_estado,'
+    + "       COALESCE(p.origen,'proceso') AS pallet_origen,"
+    + "       COALESCE(SUM(CASE WHEN g.tipo = 'ingreso' THEN g.bultos"
+    + "                        ELSE -g.bultos END),0) AS bultos,"
+    + "       COALESCE(SUM(CASE WHEN g.tipo = 'ingreso' THEN g.kilos"
+    + "                        ELSE -g.kilos END),0) AS kilos,"
+    + '       COUNT(*) AS filas'
+    + '  FROM gal_procesos g'
+    + '  LEFT JOIN gal_pallets p ON p.id = g.pallet_id AND p.eliminado_en IS NULL'
+    + '  WHERE g.eliminado_en IS NULL'
+    + (o.destino ? ' AND g.destino = ?' : '')
+    + '  GROUP BY g.lote_id, g.destino, g.presentacion_id, g.categoria, g.calibre,'
+    + '           g.pallet_id'
+    + '  HAVING COALESCE(SUM(g.bultos),0) > 0 OR COALESCE(SUM(g.kilos),0) > 0'
+    + '  ORDER BY g.destino, g.lote_nombre, g.presentacion')
+    .all(...(o.destino ? [txt(o.destino)] : []));
+
+  return filas.map((f) => Object.assign(f, {
+    bultos: round2(f.bultos), kilos: round2(f.kilos),
+    /* Lo despachado ya está descontado arriba porque esas filas son tipo='salida' y no
+       entran al WHERE. Lo que queda es lo que está físicamente en la cámara. */
+    kg_unidad: f.bultos > 0 ? round2(f.kilos / f.bultos) : null,
+    granel: !f.bultos,
+    /* De dónde viene: sin pallet es suelto; con uno del proceso es la tanda de ese día;
+       con uno armado es un pallet que alguien ya rearmó. Los tres se pueden tomar — el
+       galpón desarma pallets todo el tiempo— pero el que lo hace tiene que VERLO. */
+    ubicacion: !f.pallet_id ? 'suelto'
+      : (f.pallet_numero || ('pallet #' + f.pallet_id)),
+    clave: [f.lote_id, f.destino, f.presentacion_id || 0, f.calibre || '',
+            f.pallet_id || 0].join('|'),
+  }));
+}
+
+export function palletsArmados(db, opts) {
+  const o = opts || {};
+  const w = ["eliminado_en IS NULL", "COALESCE(origen,'proceso') = 'armado'"];
+  const a = [];
+  if (o.estado === 'abierto' || o.estado === 'cerrado') { w.push('estado = ?'); a.push(o.estado); }
+  return db.prepare('SELECT * FROM gal_pallets WHERE ' + w.join(' AND ')
+    + ' ORDER BY id DESC LIMIT ' + (parseInt(o.limite, 10) || 100)).all(...a)
+    .map((x) => Object.assign(x, { contenido: contenidoDelPallet(db, x.id) }));
+}
+
+// A diferencia del pallet del día, de los ARMADOS puede haber varios abiertos a la vez:
+// se arman tres para un camión y se van llenando en paralelo, que es como se trabaja en
+// el playón. El del proceso es uno solo porque ahí la caja se carga y tiene que haber
+// un único lugar donde cae.
+export function abrirPalletArmado(db, d) {
+  const dd = d || {};
+  const r = db.prepare(
+    " INSERT INTO gal_pallets (origen, fecha_empaque, observacion, usuario_id, usuario)"
+    + " VALUES ('armado',?,?,?,?)").run(
+    esFecha(dd.fecha_empaque) || esFecha(dd.fecha) || hoy(),
+    txt(dd.observacion), numPos(dd.usuario_id, 0) || null, txt(dd.usuario));
+  const id = Number(r.lastInsertRowid);
+  return { ok: true, id,
+           pallet: db.prepare('SELECT * FROM gal_pallets WHERE id = ?').get(id) };
+}
+
+/* MOVER CAJAS A UN PALLET. Toma de las filas que tengan esa mercadería en esa
+   ubicación, de la más vieja a la más nueva, partiendo la última si hace falta.
+
+   De la MÁS VIEJA primero y no de la más grande: en una cámara lo que entró antes sale
+   antes, y si hay que partir algo conviene que sea lo más nuevo. */
+export function moverAlPallet(db, palletId, d) {
+  const pid = parseInt(palletId, 10);
+  const dd = d || {};
+  if (!Number.isFinite(pid)) return { ok: false, motivo: 'Id inválido' };
+  const pal = db.prepare(
+    'SELECT * FROM gal_pallets WHERE id = ? AND eliminado_en IS NULL').get(pid);
+  if (!pal) return { ok: false, motivo: 'Ese pallet no existe o se borró' };
+  if (pal.estado !== 'abierto') {
+    return { ok: false, motivo: 'Ese pallet ya está cerrado: reabrilo para cambiarlo' };
+  }
+
+  const lote = parseInt(dd.lote_id, 10);
+  if (!Number.isFinite(lote)) return { ok: false, motivo: 'Falta el lote' };
+  const destino = txt(dd.destino);
+  if (!DESTINOS.some((y) => y.clave === destino)) return { ok: false, motivo: 'Destino inválido' };
+  const pres = parseInt(dd.presentacion_id, 10) || 0;
+  const cal = txt(dd.calibre) || '';
+  const desde = dd.pallet_id == null || dd.pallet_id === '' ? null
+    : (parseInt(dd.pallet_id, 10) || null);
+  if (desde === pid) return { ok: false, motivo: 'Eso ya está en este pallet' };
+
+  // Las filas candidatas: la misma mercadería, en la misma ubicación de origen.
+  const filas = db.prepare(
+    ' SELECT * FROM gal_procesos'
+    + "  WHERE eliminado_en IS NULL AND tipo = 'ingreso' AND lote_id = ? AND destino = ?"
+    + "    AND COALESCE(presentacion_id,0) = ? AND COALESCE(calibre,'') = ?"
+    + (desde ? '    AND pallet_id = ?' : '    AND pallet_id IS NULL')
+    + '  ORDER BY fecha, id').all(...[lote, destino, pres, cal]
+      .concat(desde ? [desde] : []));
+  if (!filas.length) return { ok: false, motivo: 'De eso no hay nada en esa ubicación' };
+
+  const granel = !filas.some((f) => f.bultos != null);
+  /* El tope sale del SALDO de esa ubicación y no de la suma de las filas de ingreso:
+     después de despachar, las cajas están en un camión y las filas de ingreso siguen
+     ahí. Sumarlas ofrecería mover mercadería que ya se fue. */
+  const saldo = stockParaArmar(db).find((x) => x.lote_id === lote
+    && x.destino === destino
+    && (x.presentacion_id || 0) === pres
+    && (x.calibre || '') === cal
+    && (x.pallet_id || null) === desde);
+  const hayB = saldo ? saldo.bultos : 0;
+  const hayK = saldo ? saldo.kilos : 0;
+  const pideB = granel ? null : numPos(dd.bultos, 0);
+  const pideK = granel ? numPos(dd.kilos, 0) : null;
+
+  if (!granel && !(pideB > 0)) return { ok: false, motivo: 'Poné cuántas cajas' };
+  if (granel && !(pideK > 0)) return { ok: false, motivo: 'Poné cuántos kilos' };
+  /* No se mueve más de lo que hay, por lo mismo que no se despacha de más: las cajas
+     están ahí para contarlas. Un pallet con cajas que no existen se descubre recién
+     cuando lo van a cargar. */
+  if (!granel && pideB > hayB) {
+    return { ok: false, motivo: 'Ahí hay ' + hayB + ' cajas y estás moviendo ' + pideB,
+             disponible: hayB, pedido: pideB };
+  }
+  if (granel && pideK > hayK) {
+    return { ok: false, motivo: 'Ahí hay ' + hayK + ' kg y estás moviendo ' + pideK,
+             disponible: hayK, pedido: pideK };
+  }
+
+  let faltaB = pideB;
+  let faltaK = pideK;
+  let movidas = 0;
+  for (const f of filas) {
+    if (granel ? !(faltaK > 0) : !(faltaB > 0)) break;
+    const tieneB = f.bultos || 0;
+    const tieneK = f.kilos || 0;
+    const tomaB = granel ? null : Math.min(tieneB, faltaB);
+    const tomaK = granel ? Math.min(tieneK, faltaK)
+      : (tomaB === tieneB ? tieneK : round2(tomaB * (tieneK / tieneB)));
+
+    if ((granel ? tomaK >= tieneK : tomaB >= tieneB)) {
+      // Se lleva la fila entera: no hay nada que partir.
+      db.prepare('UPDATE gal_procesos SET pallet_id = ? WHERE id = ?').run(pid, f.id);
+    } else {
+      /* SE PARTE. La fila que queda se achica y la que se va es NUEVA, con el mismo
+         contenido congelado y apuntando a la original. Al revés —mover la original y
+         crear el resto— el id que ya figura en un informe o en un tarjetón cambiaría
+         de pallet sin aviso. */
+      db.prepare('UPDATE gal_procesos SET bultos = ?, kilos = ? WHERE id = ?')
+        .run(granel ? null : round2(tieneB - tomaB), round2(tieneK - tomaK), f.id);
+      db.prepare(
+        ' INSERT INTO gal_procesos (fecha, lote_id, lote_nombre, producto, destino,'
+        + '   presentacion_id, presentacion, envase, categoria, calibre, variedad,'
+        + '   renspa, cuartel, bultos, por_bulto, kg_unidad, kilos, tipo, pallet_id,'
+        + '   partido_de, observacion, estado, usuario_id, usuario)'
+        + " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'ingreso',?,?,?,?,?,?)").run(
+        f.fecha, f.lote_id, f.lote_nombre, f.producto, f.destino,
+        f.presentacion_id, f.presentacion, f.envase, f.categoria, f.calibre, f.variedad,
+        f.renspa, f.cuartel, granel ? null : tomaB, f.por_bulto, f.kg_unidad,
+        round2(tomaK), pid, f.partido_de || f.id, f.observacion, f.estado,
+        numPos(dd.usuario_id, 0) || null, txt(dd.usuario));
+    }
+    movidas++;
+    if (granel) faltaK = round2(faltaK - tomaK); else faltaB = round2(faltaB - tomaB);
+  }
+
+  return { ok: true, id: pid, movidas,
+           bultos: pideB, kilos: granel ? pideK : null,
+           /* De dónde salieron, para poder decirlo en pantalla: sacarle cajas a un
+              pallet cerrado lo deja distinto de su tarjetón, y el que lo hizo tiene que
+              enterarse en el momento, no cuando llega el camión. */
+           desde: desde ? palletResumen(db, desde) : null,
+           contenido: contenidoDelPallet(db, pid) };
+}
+
+// Lo que quedó de un pallet después de sacarle algo. Si quedó vacío se dice: un pallet
+// cerrado sin nada adentro es una etiqueta pegada a un armazón de madera.
+export function palletResumen(db, id) {
+  const i = parseInt(id, 10);
+  if (!Number.isFinite(i)) return null;
+  const p = db.prepare('SELECT * FROM gal_pallets WHERE id = ?').get(i);
+  if (!p) return null;
+  const c = contenidoDelPallet(db, i);
+  return {
+    id: i, numero: p.numero, estado: p.estado,
+    origen: p.origen || 'proceso',
+    bultos: round2(c.reduce((t, x) => t + (x.bultos || 0), 0)),
+    kilos: round2(c.reduce((t, x) => t + x.kilos, 0)),
+    vacio: !c.length,
+  };
+}
+
+/* Devolver al suelto lo que se movió. No se refunde con la fila de la que salió: dos
+   filas de 207 y 60 que vuelven a ser una de 267 borran que alguna vez estuvieron
+   separadas, y el stock da igual de las dos maneras. */
+export function sacarDelPalletArmado(db, procesoId) {
+  const i = parseInt(procesoId, 10);
+  if (!Number.isFinite(i)) return { ok: false, motivo: 'Id inválido' };
+  const f = db.prepare(
+    'SELECT * FROM gal_procesos WHERE id = ? AND eliminado_en IS NULL').get(i);
+  if (!f) return { ok: false, motivo: 'Esa carga no existe' };
+  if (!f.pallet_id) return { ok: false, motivo: 'Eso ya está suelto' };
+  const p = db.prepare('SELECT * FROM gal_pallets WHERE id = ?').get(f.pallet_id);
+  if (p && p.estado !== 'abierto') {
+    return { ok: false, motivo: 'Ese pallet está cerrado: reabrilo primero' };
+  }
+  db.prepare('UPDATE gal_procesos SET pallet_id = NULL WHERE id = ?').run(i);
+  return { ok: true, id: i,
+           pallet: f.pallet_id ? palletResumen(db, f.pallet_id) : null };
+}
+
+// Las líneas de un pallet, UNA POR FILA y no agrupadas: es lo que se saca de a una
+// cuando el pallet se está armando. contenidoDelPallet() agrupa, que es lo que va en el
+// tarjetón, pero para corregir hay que poder señalar el renglón exacto.
+export function lineasDelPallet(db, palletId) {
+  const i = parseInt(palletId, 10);
+  if (!Number.isFinite(i)) return [];
+  return db.prepare(
+    ' SELECT id, fecha, lote_id, lote_nombre, producto, destino, presentacion,'
+    + '       categoria, calibre, variedad, bultos, kilos, partido_de'
+    + "  FROM gal_procesos WHERE pallet_id = ? AND eliminado_en IS NULL AND tipo = 'ingreso'"
+    + '  ORDER BY id').all(i).map((f) => Object.assign(f, {
+    bultos: round2(f.bultos), kilos: round2(f.kilos),
+  }));
 }
 
 export function cerrarPallet(db, id, d) {
@@ -2169,8 +2421,8 @@ export function reabrirPallet(db, id) {
   const p = db.prepare('SELECT * FROM gal_pallets WHERE id = ? AND eliminado_en IS NULL').get(i);
   if (!p) return { ok: false, motivo: 'Ese pallet no existe' };
   if (p.estado !== 'cerrado') return { ok: false, motivo: 'Ese pallet ya está abierto' };
-  if (palletAbierto(db)) {
-    return { ok: false, motivo: 'Ya hay un pallet abierto. Cerralo primero.' };
+  if ((p.origen || 'proceso') === 'proceso' && palletAbierto(db)) {
+    return { ok: false, motivo: 'Ya hay un pallet del día abierto. Cerralo primero.' };
   }
   db.prepare(
     " UPDATE gal_pallets SET estado = 'abierto', cerrado_en = NULL,"
@@ -2426,20 +2678,59 @@ export function agregarAlDespacho(db, despachoId, d) {
              disponible: disp.kilos, pedido: kilos };
   }
 
+  /* DE QUÉ UBICACIÓN SALEN. Un despacho de 97 cajas puede llevarse 60 de un pallet,
+     17 de otro y 20 de lo suelto: se escribe una salida por cada uno, todas con el
+     mismo despacho_id. Sin esto el saldo por ubicación nunca baja y el armado sigue
+     ofreciendo cajas que están en un camión.
+
+     De la más vieja primero, el mismo criterio con el que se arma un pallet: en una
+     cámara lo que entró antes sale antes. */
+  const ubis = stockParaArmar(db).filter((x) => x.lote_id === lote
+    && x.destino === destino
+    && (x.presentacion_id || 0) === pres
+    && (x.calibre || '') === cal
+    && (x.bultos > 0 || x.kilos > 0));
+  let restaB = granel ? null : bultos;
+  let restaK = granel ? kilos : null;
+  const partes = [];
+  for (const u of ubis) {
+    if (granel ? !(restaK > 0) : !(restaB > 0)) break;
+    const tomaB = granel ? null : Math.min(u.bultos, restaB);
+    const tomaK = granel ? Math.min(u.kilos, restaK)
+      : (tomaB === u.bultos ? u.kilos : round2(tomaB * (u.kilos / u.bultos)));
+    partes.push({ pallet_id: u.pallet_id || null, bultos: tomaB, kilos: round2(tomaK) });
+    if (granel) restaK = round2(restaK - tomaK); else restaB = round2(restaB - tomaB);
+  }
+  /* Si las ubicaciones no alcanzan —no debería, el tope se miró arriba— lo que falta
+     sale sin ubicación antes que perderse: la caja se despachó igual. */
+  if (granel ? restaK > 0 : restaB > 0) {
+    partes.push({ pallet_id: null, bultos: granel ? null : restaB,
+                  kilos: granel ? restaK : round2(restaB * (disp.kg_unidad || 0)) });
+  }
+
   /* Se CONGELA lo que se despachó, igual que en la carga y en el pallet: lo que dice el
      remito que salió no lo cambia un catálogo corregido el mes que viene. */
+  let primera = null;
+  for (const parte of partes) {
   const r = db.prepare(
     ' INSERT INTO gal_procesos (uuid, fecha, lote_id, lote_nombre, producto, destino,'
     + '   presentacion_id, presentacion, envase, categoria, calibre, variedad,'
-    + '   bultos, kg_unidad, kilos, tipo, despacho_id, observacion, usuario_id, usuario)'
-    + " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'salida',?,?,?,?)").run(
-    txt(dd.uuid), x.fecha, lote, txt(disp.lote_nombre), txt(disp.producto), destino,
+    + '   bultos, kg_unidad, kilos, tipo, pallet_id, despacho_id, observacion,'
+    + '   usuario_id, usuario)'
+    + " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'salida',?,?,?,?,?)").run(
+    /* El uuid va SÓLO en la primera parte: es UNIQUE y sirve para que un doble clic no
+       duplique el pedido entero, no cada renglón. */
+    primera === null ? txt(dd.uuid) : null,
+    x.fecha, lote, txt(disp.lote_nombre), txt(disp.producto), destino,
     disp.presentacion_id || null, txt(disp.presentacion), txt(disp.envase),
     txt(disp.categoria), txt(disp.calibre), txt(disp.variedad),
-    bultos, granel ? null : disp.kg_unidad, kilos,
-    i, txt(dd.observacion), numPos(dd.usuario_id, 0) || null, txt(dd.usuario));
+    parte.bultos, granel ? null : disp.kg_unidad, parte.kilos,
+    parte.pallet_id, i, txt(dd.observacion),
+    numPos(dd.usuario_id, 0) || null, txt(dd.usuario));
+  if (primera === null) primera = r.lastInsertRowid;
+  }
 
-  return { ok: true, id: r.lastInsertRowid, bultos, kilos,
+  return { ok: true, id: primera, bultos, kilos, partes: partes.length,
            despacho: recalcularDespacho(db, i) };
 }
 

@@ -88,7 +88,7 @@ function base() {
       categoria TEXT, calibre TEXT, variedad TEXT, renspa TEXT, cuartel TEXT,
       bultos REAL, por_bulto REAL, kg_unidad REAL, kilos REAL NOT NULL,
       tipo TEXT NOT NULL DEFAULT 'ingreso', reparto TEXT,
-      repartido INTEGER NOT NULL DEFAULT 0, pallet_id INTEGER, despacho_id INTEGER,
+      repartido INTEGER NOT NULL DEFAULT 0, pallet_id INTEGER, partido_de INTEGER, despacho_id INTEGER,
       observacion TEXT, estado TEXT NOT NULL DEFAULT 'ok', revision_motivo TEXT,
       usuario_id INTEGER, usuario TEXT, creado_en TEXT, eliminado_en TEXT);
   `);
@@ -155,7 +155,11 @@ function domFalso() {
     'gal-dsp-modal', 'gal-dsp-rep', 'gal-dsp-tit', 'gal-dsp-items', 'gal-dsp-cargar',
     'gal-dsp-emitir', 'gal-dsp-anular', 'gal-dsp-item', 'gal-dsp-cant', 'gal-dsp-cl',
     'gal-dsp-disp', 'gal-dsp-fecha', 'gal-dsp-dest', 'gal-dsp-transp', 'gal-dsp-pat',
-    'gal-dsp-rem', 'gal-dsp-obs']) nodos[id] = crear(id);
+    'gal-dsp-rem', 'gal-dsp-obs',
+    'gst-arm', 'gal-arm-modal', 'gal-arm-rep', 'gal-arm-tit', 'gal-arm-lineas',
+    'gal-arm-cargar', 'gal-arm-cerrarp', 'gal-arm-reabrir', 'gal-arm-tarj',
+    'gal-arm-item', 'gal-arm-cant', 'gal-arm-cl', 'gal-arm-disp',
+    'gal-arm-fecha', 'gal-arm-obs']) nodos[id] = crear(id);
   return { nodos, document: { getElementById: (id) => nodos[id] || null } };
 }
 
@@ -177,7 +181,9 @@ function pantalla(dom, pegar) {
   const f = new Function('document', 'fetch', 'confirm', 'prompt', 'window',
     'sgModalArriba',
     codigo + '\nreturn { GST, galStCargar, galStPintar, galDspAbrir, galDspPintar,'
-    + ' galDspItems, galDspAgregar, galDspItemPick, galDspEmitir };');
+    + ' galDspItems, galDspAgregar, galDspItemPick, galDspEmitir,'
+    + ' galArmCargar, galArmAbrir, galArmPintar, galArmMover, galArmItemPick,'
+    + ' galArmLineas, galArmLista, galArmCerrarPallet, galArmSacar };');
   dom.abiertas = [];
   return f(dom.document,
     (u, o) => pegar(String(u).replace('/api/galpon', ''), o),
@@ -638,5 +644,167 @@ t('quitar el dibujo lo saca de la baldosa y vuelve el emoji', async () => {
     assert.ok(!h.includes('<img'), 'la baldosa sigue pintando el dibujo borrado');
     assert.match(h, /📦/, 'no volvió el emoji');
     assert.equal((await s.pegar('/presentaciones/' + a.id + '/icono')).status, 404);
+  } finally { s.cerrar(); }
+});
+
+// ══════════════════════════════════════════════════════════════════════════
+// 6 · ARMAR UN PALLET DESDE EL STOCK, PUNTA A PUNTA
+// ══════════════════════════════════════════════════════════════════════════
+// Andy, 1/11/2026: «necesito un lugar donde pueda hacer cierre de pallet de
+// mercadería que está suelta en el stock, donde puedo agarrar pallets mixtos
+// y todo».
+t('UN PALLET MIXTO ARMADO DESDE LA PANTALLA, y el stock intacto', async () => {
+  const db = base();
+  db.exec("INSERT INTO pa_lotes (id,nombre,sector_id,finca,activo) "
+    + "VALUES (11,'Cuadro 4',1,'La Esperanza',1)");
+  const s = await servidor(db, ADMIN);
+  const dom = domFalso();
+  try {
+    const a = await (await s.pegar('/presentaciones', json({ nombre: 'Carton Amarilla',
+      destino: 'comercial', envase: 'Caja', por_bulto: 1, kg_unidad: 8,
+      categoria: 'I', calibre: '50/55' }))).json();
+    const b = await (await s.pegar('/presentaciones', json({ nombre: 'IFCO',
+      destino: 'comercial', envase: 'IFCO', por_bulto: 1, kg_unidad: 14,
+      categoria: 'I' }))).json();
+    await s.pegar('/procesos', json({ fecha: HOY, lote_id: 10,
+      presentacion_id: a.id, bultos: 267, uuid: 'u1' }));
+    await s.pegar('/procesos', json({ fecha: HOY, lote_id: 11,
+      presentacion_id: a.id, bultos: 17, uuid: 'u2' }));
+    await s.pegar('/procesos', json({ fecha: HOY, lote_id: 10,
+      presentacion_id: b.id, bultos: 49, uuid: 'u3' }));
+
+    const p = pantalla(dom, s.pegar);
+    await p.galStCargar();
+    const stockAntes = (await (await s.pegar('/stock')).json()).stock.kilos;
+
+    await p.galArmAbrir();
+    assert.equal(dom.nodos['gst-aviso'].innerHTML, '',
+      'la pantalla avisó un error: ' + dom.nodos['gst-aviso'].innerHTML);
+    assert.deepEqual(dom.abiertas, ['gal-arm-modal'], 'no abrió la ventana');
+    // El selector ofrece las tres líneas, cada una con SU ubicación.
+    const ops = dom.nodos['gal-arm-item'].innerHTML;
+    assert.ok((ops.match(/<option/g) || []).length >= 4, 'el selector salió vacío');
+    assert.match(ops, /50\/55/);
+    assert.match(ops, /IFCO/);
+
+    // Se mueven tres montones distintos al mismo pallet.
+    for (let i = 1; i <= 3; i++) {
+      dom.nodos['gal-arm-item'].value = String(i - 1);
+      dom.nodos['gal-arm-cant'].value = '10';
+      await p.galArmMover();
+    }
+    assert.match(dom.nodos['gal-arm-lineas'].innerHTML, /MIXTO/,
+      'tres artículos distintos y no dice mixto');
+
+    // Y EL STOCK NO SE MOVIÓ: es la invariante del módulo.
+    const stockDespues = (await (await s.pegar('/stock')).json()).stock.kilos;
+    assert.equal(stockDespues, stockAntes, 'armar el pallet movió el stock');
+
+    // Al cerrarlo queda el número a la vista y la ventana NO se cierra.
+    await p.galArmCerrarPallet();
+    assert.match(dom.nodos['gal-arm-rep'].innerHTML, /PC-\d\d-\d{5}/,
+      'el número del pallet no quedó a la vista');
+    assert.match(dom.nodos['gal-arm-rep'].innerHTML, /MIXTO/);
+    assert.equal((await (await s.pegar('/stock')).json()).stock.kilos, stockAntes);
+  } finally { s.cerrar(); }
+});
+
+t('SACARLE CAJAS A UN PALLET CERRADO LO AVISA EN LA PANTALLA', async () => {
+  // Queda distinto de su tarjetón, que ya está impreso y pegado. Enterarse
+  // cuando llega el camión es tarde.
+  const db = base();
+  const s = await servidor(db, ADMIN);
+  const dom = domFalso();
+  try {
+    const a = await (await s.pegar('/presentaciones', json({ nombre: 'Caja',
+      destino: 'comercial', envase: 'x', por_bulto: 1, kg_unidad: 8,
+      categoria: 'I' }))).json();
+    await s.pegar('/procesos', json({ fecha: HOY, lote_id: 10,
+      presentacion_id: a.id, bultos: 100, uuid: 'u1' }));
+    const abierto = (await (await s.pegar('/pallets')).json()).abierto;
+    await s.pegar('/pallets/' + abierto.id + '/cerrar', json({}));
+
+    const p = pantalla(dom, s.pegar);
+    await p.galStCargar();
+    await p.galArmAbrir();
+    dom.nodos['gal-arm-item'].value = '0';
+    dom.nodos['gal-arm-cant'].value = '60';
+    await p.galArmMover();
+
+    assert.match(dom.nodos['gst-aviso'].innerHTML, /PC-\d\d-\d{5}/,
+      'no avisó de qué pallet salieron');
+    assert.match(dom.nodos['gst-aviso'].innerHTML, /40/, 'no dijo cuánto le quedó');
+  } finally { s.cerrar(); }
+});
+
+t('y si lo deja vacío manda a despegar la etiqueta', async () => {
+  const db = base();
+  const s = await servidor(db, ADMIN);
+  const dom = domFalso();
+  try {
+    const a = await (await s.pegar('/presentaciones', json({ nombre: 'Caja',
+      destino: 'comercial', envase: 'x', por_bulto: 1, kg_unidad: 8,
+      categoria: 'I' }))).json();
+    await s.pegar('/procesos', json({ fecha: HOY, lote_id: 10,
+      presentacion_id: a.id, bultos: 40, uuid: 'u1' }));
+    const abierto = (await (await s.pegar('/pallets')).json()).abierto;
+    await s.pegar('/pallets/' + abierto.id + '/cerrar', json({}));
+
+    const p = pantalla(dom, s.pegar);
+    await p.galStCargar();
+    await p.galArmAbrir();
+    dom.nodos['gal-arm-item'].value = '0';
+    dom.nodos['gal-arm-cant'].value = '40';
+    await p.galArmMover();
+    assert.match(dom.nodos['gst-aviso'].innerHTML, /VAC[IÍ]O/i);
+    assert.match(dom.nodos['gst-aviso'].innerHTML, /etiqueta/);
+  } finally { s.cerrar(); }
+});
+
+t('mover de más avisa en la pantalla y no guarda nada', async () => {
+  const db = base();
+  const s = await servidor(db, ADMIN);
+  const dom = domFalso();
+  try {
+    const a = await (await s.pegar('/presentaciones', json({ nombre: 'Caja',
+      destino: 'comercial', envase: 'x', por_bulto: 1, kg_unidad: 8,
+      categoria: 'I' }))).json();
+    await s.pegar('/procesos', json({ fecha: HOY, lote_id: 10,
+      presentacion_id: a.id, bultos: 40, uuid: 'u1' }));
+
+    const p = pantalla(dom, s.pegar);
+    await p.galStCargar();
+    await p.galArmAbrir();
+    dom.nodos['gal-arm-item'].value = '0';
+    dom.nodos['gal-arm-cant'].value = '41';
+    await p.galArmMover();
+    assert.match(dom.nodos['gst-aviso'].innerHTML, /40/,
+      'el tope no llegó a la pantalla');
+    assert.match(dom.nodos['gal-arm-lineas'].innerHTML, /Todavía no le pusiste/);
+  } finally { s.cerrar(); }
+});
+
+t('el selector NO ofrece el pallet que se está armando', async () => {
+  // Sacarle algo para ponérselo a él mismo no es nada, y el renglón confunde.
+  const db = base();
+  const s = await servidor(db, ADMIN);
+  const dom = domFalso();
+  try {
+    const a = await (await s.pegar('/presentaciones', json({ nombre: 'Caja',
+      destino: 'comercial', envase: 'x', por_bulto: 1, kg_unidad: 8,
+      categoria: 'I' }))).json();
+    await s.pegar('/procesos', json({ fecha: HOY, lote_id: 10,
+      presentacion_id: a.id, bultos: 100, uuid: 'u1' }));
+
+    const p = pantalla(dom, s.pegar);
+    await p.galStCargar();
+    await p.galArmAbrir();
+    dom.nodos['gal-arm-item'].value = '0';
+    dom.nodos['gal-arm-cant'].value = '40';
+    await p.galArmMover();
+    // Ahora hay 40 en este pallet y 60 en el del día: sólo tiene que ofrecer 60.
+    const ops = [...dom.nodos['gal-arm-item'].innerHTML.matchAll(/<option value="\d/g)];
+    assert.equal(ops.length, 1, 'se ofrece a sí mismo');
+    assert.match(dom.nodos['gal-arm-item'].innerHTML, /60 cj/);
   } finally { s.cerrar(); }
 });
