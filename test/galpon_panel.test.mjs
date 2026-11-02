@@ -881,7 +881,16 @@ test('EL ACUMULADO ES UN MÓDULO APARTE, y el manual dice por qué', () => {
   // por cuadrilla de toda la temporada, que es con lo que se discute plata.
   diceAc(/los miran dos personas distintas/);
   assert.match(ENSURE, /\['galpon-acumulado'/);
-  assert.match(PREFIJOS, /\['galpon-acumulado', 'galpon\/acumulado,galpon\/resumen'\]/);
+  /* Las direcciones que cubre el permiso, sin clavar la lista entera: atada al texto
+     exacto, esta línea se cae cada vez que el acumulado gana una salida —la planilla,
+     el informe— y lo que hay que verificar es que CADA UNA esté cubierta, no que sean
+     esas tres. Sin su prefijo, exigirNivel deja pasar a cualquiera con sesión. */
+  const m = /\['galpon-acumulado', '([^']+)'\]/.exec(PREFIJOS);
+  assert.ok(m, 'el acumulado no tiene prefijo de API: exigirNivel no lo mira');
+  const cubre = m[1].split(',');
+  for (const r of ['galpon/acumulado', 'galpon/resumen', 'galpon/informe']) {
+    assert.ok(cubre.includes(r), 'el permiso no cubre ' + r);
+  }
 });
 
 test('EL MANUAL DE LA CARGA MANDA ACÁ PARA EL TOTAL', () => {
@@ -2095,4 +2104,28 @@ test('EL CARTEL DE «ESTO ES VIEJO» ESTÁ EN LAS TRES PANTALLAS', () => {
                          PANEL.indexOf('function galStAviso(msg, tipo){'));
   assert.match(fn, /cache_cuando/);
   assert.match(fn, /toLocaleDateString/);
+});
+
+test('EL INFORME SALE CON EL PERÍODO QUE ESTÁ EN PANTALLA', () => {
+  // Igual que la planilla: bajar siempre todo dejaría al que filtró tres días
+  // con un informe de la temporada entera y sin ninguna señal de que no es lo
+  // que estaba mirando.
+  const js = bloqueJs('var GAC = {');
+  const fn = js.slice(js.indexOf('function galAcInforme()'),
+                      js.indexOf('function galAcQs()'));
+  assert.ok(fn.length > 40, 'el corte de galAcInforme salió vacío');
+  assert.match(fn, /galAcQs\(\)/, 'el informe no manda el período de la pantalla');
+  assert.match(fn, /_blank/, 'se baja en vez de abrirse: hay que ir a buscarlo');
+
+  // Y el período sale de UN solo lugar: escrito dos veces, el día que se
+  // agregue un filtro queda uno de los dos bajando otra cosa.
+  const qs = js.slice(js.indexOf('function galAcQs()'),
+                      js.indexOf('function galAcPlanilla()'));
+  assert.match(qs, /gac-desde/);
+  assert.match(qs, /gac-hasta/);
+  assert.match(js.slice(js.indexOf('function galAcPlanilla()')), /galAcQs\(\)/,
+    'la planilla arma el período por su cuenta');
+  // Nadie lee los casilleros del rango fuera de ahí.
+  const sueltos = [...js.matchAll(/getElementById\('gac-(desde|hasta)'\)/g)].length;
+  assert.ok(sueltos <= 6, 'el rango se lee en ' + sueltos + ' lugares: se va a desincronizar');
 });

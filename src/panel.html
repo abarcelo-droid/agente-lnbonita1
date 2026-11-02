@@ -8420,6 +8420,7 @@ if ('serviceWorker' in navigator) {
       <button class="btn bo bs" onclick="galAcRango('semana')">Últimos 7 días</button>
       <button class="btn bo bs" style="margin-left:auto"
         onclick="galAcPlanilla()">⬇ Bajar la planilla</button>
+      <button class="btn bp bs" onclick="galAcInforme()">📄 Informe en PDF</button>
     </div>
 
     <div id="gac-aviso"></div>
@@ -28543,7 +28544,29 @@ SG_MANUAL['galpon-proceso'] = { titulo: 'Galpón · Proceso', html:
   + 'entren con ella.</p>'
 };
 SG_MANUAL['galpon-acumulado'] = { titulo: 'Galpón · Acumulado', html:
-  '<p>La pantalla de <b>Carga de kilos</b> contesta <i>cuánto entró hoy</i>. Ésta contesta '
+  '<h3>📄 El informe en PDF <span class="ver">V1130</span></h3>'
+  + '<p>Andy, 2/11/2026: <i>«quiero que me sumes en la parte de acumulado un buen '
+  + 'informe en PDF con gráficos. Gráficos de torta. Stock»</i>.</p>'
+  + '<p>El botón <b>📄 Informe en PDF</b> saca una hoja con los números grandes, '
+  + '<b>dos tortas</b> —cómo rindió la fruta y qué hay en cámara, una al lado de la '
+  + 'otra para poder compararlas—, el stock por presentación, el día a día apilado por '
+  + 'destino, y el rinde de cada lote. Sale con el <b>mismo período</b> que está en '
+  + 'pantalla, igual que la planilla.</p>'
+  + '<p>Se abre en una pestaña en vez de bajarse: es para mirarlo o mandarlo a la '
+  + 'impresora, y un archivo que cae en Descargas obliga a ir a buscarlo.</p>'
+
+  + '<div class="ojo"><b>Los emoticones no entran en un PDF.</b> No es una decisión: '
+  + 'la letra con la que se escribe un PDF no los tiene, y un 🍑 sale como dos '
+  + 'caracteres de basura. Por eso el informe usa el <b>dibujo que subiste</b> a cada '
+  + 'presentación —ésos son imágenes y sí entran— y, para las que sólo tienen un emoji '
+  + 'de texto, un círculo del color de su destino. Si querés que tus dibujitos salgan '
+  + 'en el informe, subilos como PNG desde <b>⚙️ Configuración → Presentaciones</b>.</div>'
+
+  + '<p>Las <b>barras del stock van todas en kilos</b>, con las cajas escritas al lado. '
+  + 'Mezclar las dos unidades en el mismo gráfico hacía que un bin de 2.400 kg tapara a '
+  + '467 cajas, como si no hubiera nada.</p>'
+
+  + '<p>La pantalla de <b>Carga de kilos</b> contesta <i>cuánto entró hoy</i>. Ésta contesta '
   + '<b>cuánto llevamos</b>, que es la pregunta con la que se cierra una temporada: con cuántos '
   + 'kilos terminó cada lote, cuánto trajo cada cuadrilla, y si el ritmo sube o baja.</p>'
 
@@ -59472,13 +59495,26 @@ function galAcRango(tipo){
 /* La planilla se baja con el MISMO período que está en pantalla. Bajar siempre todo
    dejaría al que filtró tres días con un archivo de la temporada entera y sin ninguna
    señal de que no es lo que estaba mirando. */
-function galAcPlanilla(){
+/* El informe con gráficos, con el MISMO período que la planilla. Se abre en una
+   pestaña y no se baja: es para mirarlo o mandarlo a la impresora, y un archivo que
+   cae en Descargas obliga a ir a buscarlo. */
+function galAcInforme(){
+  window.open('/api/galpon/informe.pdf' + galAcQs(), '_blank');
+}
+
+// El período de la pantalla, para los dos botones: escrito dos veces, el día que se
+// agregue un filtro queda uno de los dos bajando otra cosa.
+function galAcQs(){
   var q = [];
   var d = document.getElementById('gac-desde');
   var h = document.getElementById('gac-hasta');
   if (d && d.value) q.push('desde=' + encodeURIComponent(d.value));
   if (h && h.value) q.push('hasta=' + encodeURIComponent(h.value));
-  window.location = '/api/galpon/resumen.xlsx' + (q.length ? '?' + q.join('&') : '');
+  return q.length ? ('?' + q.join('&')) : '';
+}
+
+function galAcPlanilla(){
+  window.location = '/api/galpon/resumen.xlsx' + galAcQs();
 }
 
 function galAcPintarAviso(){
