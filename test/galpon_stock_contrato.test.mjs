@@ -184,7 +184,8 @@ function pantalla(dom, pegar) {
     codigo + '\nreturn { GST, galStCargar, galStPintar, galDspAbrir, galDspPintar,'
     + ' galDspItems, galDspAgregar, galDspItemPick, galDspEmitir,'
     + ' galArmCargar, galArmAbrir, galArmPintar, galArmMover, galArmItemPick,'
-    + ' galArmLineas, galArmLista, galArmCerrarPallet, galArmSacar };');
+    + ' galArmLineas, galArmLista, galArmCerrarPallet, galArmSacar,'
+    + ' galArmReabrir, galArmBorrar, galArmCerrar };');
   dom.abiertas = [];
   return f(dom.document,
     (u, o) => pegar(String(u).replace('/api/galpon', ''), o),
@@ -850,13 +851,21 @@ t('EL INTERRUPTOR VUELVE AL DETALLE POR MONTÓN', async () => {
     assert.match(ops, /Cuadro 3/);
     assert.match(ops, /Cuadro 4/);
 
-    // Y moviendo de ahí sale de ESE lote y de ninguno más.
+    // Y moviendo de ahí sale de ESE lote y de ninguno más. El lote se verifica
+    // en la base y no en la tabla: la tabla ya no lo muestra, porque Andy
+    // (2/11/2026) pidió «me interesa fecha de proceso pero no lote».
     dom.nodos['gal-arm-item'].value = '1';
     dom.nodos['gal-arm-cant'].value = '40';
     await p.galArmMover();
+    const lotes = db.prepare(
+      " SELECT DISTINCT lote_id FROM gal_procesos"
+      + "  WHERE pallet_id = (SELECT id FROM gal_pallets WHERE origen = 'armado')"
+      + "    AND eliminado_en IS NULL AND tipo = 'ingreso'").all().map((r) => r.lote_id);
+    assert.deepEqual(lotes, [11], 'tomó de un lote que no se nombró');
+    // Y la tabla muestra el DÍA, no el lote.
     const l = dom.nodos['gal-arm-lineas'].innerHTML;
-    assert.match(l, /Cuadro 4/);
-    assert.ok(!l.includes('Cuadro 3'), 'tomó de un lote que no se nombró');
+    assert.match(l, /<th>Día de proceso<\/th>/);
+    assert.ok(!l.includes('Cuadro 4'), 'la tabla del pallet sigue nombrando el lote');
   } finally { s.cerrar(); }
 });
 
@@ -921,5 +930,212 @@ t('el reparto avisa TODOS los pallets cerrados que dejó distintos', async () =>
     assert.equal((av.match(/PC-\d\d-\d{5}/g) || []).length, 2,
       'no avisó los dos pallets que tocó: ' + av);
     assert.match(av, /VAC[IÍ]O/i, 'uno quedó vacío y no lo dijo');
+  } finally { s.cerrar(); }
+});
+
+// ══════════════════════════════════════════════════════════════════════════
+// 7 · EL DÍA, NO EL LOTE — Y BORRAR LO QUE SE EMPEZÓ
+// ══════════════════════════════════════════════════════════════════════════
+t('EL CARTEL DE CERRADO SE APAGA AL REABRIR', async () => {
+  // Andy, 2/11/2026, mandó la captura: el cartel decía «Pallet PC-26-00001
+  // cerrado» y al lado el botón decía «Cerrar el pallet», con la lista de
+  // atrás diciendo ABIERTO. Se pintaba al cerrar y no se escondía nunca, así
+  // que sobrevivía a la reapertura: la pantalla afirmando dos cosas opuestas,
+  // y la que se lee primero es la equivocada.
+  const db = base();
+  const s = await servidor(db, ADMIN);
+  const dom = domFalso();
+  try {
+    const a = await (await s.pegar('/presentaciones', json({ nombre: 'Caja',
+      destino: 'comercial', envase: 'x', por_bulto: 1, kg_unidad: 8,
+      categoria: 'I' }))).json();
+    await s.pegar('/procesos', json({ fecha: HOY, lote_id: 10,
+      presentacion_id: a.id, bultos: 40, uuid: 'u1' }));
+
+    const p = pantalla(dom, s.pegar);
+    await p.galStCargar();
+    await p.galArmAbrir();
+    dom.nodos['gal-arm-item'].value = '0';
+    dom.nodos['gal-arm-cant'].value = '40';
+    await p.galArmMover();
+    await p.galArmCerrarPallet();
+
+    // Cerrado: el cartel se ve y el botón de cerrar no.
+    assert.notEqual(dom.nodos['gal-arm-rep'].style.display, 'none');
+    assert.match(dom.nodos['gal-arm-rep'].innerHTML, /cerrado/);
+    assert.equal(dom.nodos['gal-arm-cerrarp'].style.display, 'none');
+
+    await p.galArmReabrir();
+    // Abierto: el cartel SE APAGA y vuelve el botón. No pueden verse los dos.
+    assert.equal(dom.nodos['gal-arm-rep'].style.display, 'none',
+      'el cartel de cerrado sobrevivió a la reapertura');
+    assert.notEqual(dom.nodos['gal-arm-cerrarp'].style.display, 'none');
+  } finally { s.cerrar(); }
+});
+
+t('LA TABLA DEL PALLET MUESTRA EL DÍA Y NO REPITE EL ARTÍCULO', async () => {
+  // Andy, 2/11/2026: «me seguís poniendo muchas cosas del LOTE, me interesa
+  // fecha de proceso pero no lote». Lo que vio: tres renglones de «Carton
+  // Amarilla 10 × 700 g» para 49 cajas del mismo artículo, y la única columna
+  // que los distinguía era el lote.
+  const db = base();
+  db.exec("INSERT INTO pa_lotes (id,nombre,sector_id,finca,activo) "
+    + "VALUES (11,'Cuadro 4',1,'La Esperanza',1), (12,'Damasco',1,'El Abuelo',1)");
+  const s = await servidor(db, ADMIN);
+  const dom = domFalso();
+  try {
+    const a = await (await s.pegar('/presentaciones', json({ nombre: 'Carton Amarilla',
+      destino: 'comercial', envase: 'Caja', por_bulto: 1, kg_unidad: 7.7,
+      categoria: 'I' }))).json();
+    for (const [lote, n, u] of [[10, 28, 'u1'], [11, 2, 'u2'], [12, 19, 'u3']]) {
+      await s.pegar('/procesos', json({ fecha: HOY, lote_id: lote,
+        presentacion_id: a.id, bultos: n, uuid: u }));
+    }
+
+    const p = pantalla(dom, s.pegar);
+    await p.galStCargar();
+    await p.galArmAbrir();
+    dom.nodos['gal-arm-item'].value = '0';
+    dom.nodos['gal-arm-cant'].value = '49';
+    await p.galArmMover();
+
+    const l = dom.nodos['gal-arm-lineas'].innerHTML;
+    // UN renglón, no tres: es el mismo artículo del mismo día.
+    assert.equal((l.match(/<tr><td>/g) || []).length, 1,
+      'repitió el artículo una vez por lote: ' + l);
+    assert.match(l, /<th>Día de proceso<\/th>/, 'la columna sigue siendo el lote');
+    assert.ok(!/Cuadro 4|Damasco/.test(l), 'la tabla nombra lotes');
+    assert.match(l, />49</, 'no sumó las tres cargas');
+  } finally { s.cerrar(); }
+});
+
+t('DOS DÍAS DEL MISMO ARTÍCULO SON DOS RENGLONES', async () => {
+  // El día sí separa: la antigüedad es lo que se mira para decidir qué sale
+  // primero, así que juntarlos escondería justo el dato que importa.
+  const db = base();
+  const s = await servidor(db, ADMIN);
+  const dom = domFalso();
+  try {
+    const a = await (await s.pegar('/presentaciones', json({ nombre: 'Caja',
+      destino: 'comercial', envase: 'x', por_bulto: 1, kg_unidad: 8,
+      categoria: 'I' }))).json();
+    await s.pegar('/procesos', json({ fecha: '2026-12-10', lote_id: 10,
+      presentacion_id: a.id, bultos: 30, uuid: 'u1' }));
+    await s.pegar('/procesos', json({ fecha: '2026-12-14', lote_id: 10,
+      presentacion_id: a.id, bultos: 20, uuid: 'u2' }));
+
+    const p = pantalla(dom, s.pegar);
+    await p.galStCargar();
+    await p.galArmAbrir();
+    dom.nodos['gal-arm-item'].value = '0';
+    dom.nodos['gal-arm-cant'].value = '50';
+    await p.galArmMover();
+
+    const l = dom.nodos['gal-arm-lineas'].innerHTML;
+    assert.equal((l.match(/<tr><td>/g) || []).length, 2,
+      'juntó dos días en un renglón');
+    /* EN ORDEN, lo más viejo arriba: la tabla es lo que se mira para decidir
+       qué sale primero, y verificar sólo que los dos días APAREZCAN pasa
+       igual con la lista dada vuelta. */
+    const dias = [...l.matchAll(/<tr><td>(\d\d\/\d\d)</g)].map((m) => m[1]);
+    assert.deepEqual(dias, ['10/12', '14/12'],
+      'los días no salen con el más viejo arriba');
+  } finally { s.cerrar(); }
+});
+
+t('SACAR UN RENGLÓN SACA TODAS SUS FILAS', async () => {
+  // El renglón agrupa varias cargas: en pantalla se ve como uno, así que
+  // dejar la mitad adentro sería un renglón que no se puede sacar.
+  const db = base();
+  db.exec("INSERT INTO pa_lotes (id,nombre,sector_id,finca,activo) "
+    + "VALUES (11,'Cuadro 4',1,'La Esperanza',1)");
+  const s = await servidor(db, ADMIN);
+  const dom = domFalso();
+  try {
+    const a = await (await s.pegar('/presentaciones', json({ nombre: 'Caja',
+      destino: 'comercial', envase: 'x', por_bulto: 1, kg_unidad: 8,
+      categoria: 'I' }))).json();
+    await s.pegar('/procesos', json({ fecha: HOY, lote_id: 10,
+      presentacion_id: a.id, bultos: 30, uuid: 'u1' }));
+    await s.pegar('/procesos', json({ fecha: HOY, lote_id: 11,
+      presentacion_id: a.id, bultos: 20, uuid: 'u2' }));
+
+    const p = pantalla(dom, s.pegar);
+    await p.galStCargar();
+    await p.galArmAbrir();
+    dom.nodos['gal-arm-item'].value = '0';
+    dom.nodos['gal-arm-cant'].value = '50';
+    await p.galArmMover();
+    assert.equal((dom.nodos['gal-arm-lineas'].innerHTML.match(/<tr><td>/g) || []).length, 1);
+
+    // El × del único renglón saca las DOS filas que lo componen.
+    const m = /galArmSacar\('([^']+)'\)/.exec(dom.nodos['gal-arm-lineas'].innerHTML);
+    assert.ok(m, 'el renglón no ofrece sacarse');
+    assert.equal(m[1].split(',').length, 2, 'el botón saca una sola de las dos filas');
+    await p.galArmSacar(m[1]);
+    assert.match(dom.nodos['gal-arm-lineas'].innerHTML, /Todavía no le pusiste/,
+      'quedó media carga adentro');
+  } finally { s.cerrar(); }
+});
+
+t('UN PALLET VACÍO SE PUEDE BORRAR; uno con cajas no lo ofrece', async () => {
+  // Andy, 2/11/2026: «ahí me tenés que dejar eliminar los pallets que empecé a
+  // armar». Le quedaron cuatro «sin número» vacíos de probar y no había cómo
+  // sacarlos.
+  const db = base();
+  const s = await servidor(db, ADMIN);
+  const dom = domFalso();
+  try {
+    const a = await (await s.pegar('/presentaciones', json({ nombre: 'Caja',
+      destino: 'comercial', envase: 'x', por_bulto: 1, kg_unidad: 8,
+      categoria: 'I' }))).json();
+    await s.pegar('/procesos', json({ fecha: HOY, lote_id: 10,
+      presentacion_id: a.id, bultos: 40, uuid: 'u1' }));
+
+    const p = pantalla(dom, s.pegar);
+    await p.galStCargar();
+    await p.galArmAbrir();            // uno con cajas
+    dom.nodos['gal-arm-item'].value = '0';
+    dom.nodos['gal-arm-cant'].value = '40';
+    await p.galArmMover();
+    await p.galArmAbrir();            // y dos vacíos
+    await p.galArmAbrir();
+    await p.galArmCerrar();
+
+    const lista = dom.nodos['gst-arm'].innerHTML;
+    // Los vacíos ofrecen el ×, el que tiene cajas no.
+    assert.equal((lista.match(/galArmBorrar\(/g) || []).length, 2,
+      'no ofrece borrar los vacíos, u ofrece borrar el que tiene cajas');
+    // Tres pallets en la lista y dos botones de borrar: el que tiene cajas no
+    // lo ofrece. Sin este conteo, el de arriba pasaría con cualquier lista.
+    assert.equal((lista.match(/galArmAbrir\(/g) || []).length, 3,
+      'no hay tres pallets en la lista');
+
+    // Y borrar uno lo saca de la lista.
+    const id = /galArmBorrar\((\d+)\)/.exec(lista)[1];
+    await p.galArmBorrar(Number(id));
+    assert.equal((dom.nodos['gst-arm'].innerHTML.match(/galArmBorrar\(/g) || []).length, 1);
+    assert.equal(dom.nodos['gst-aviso'].innerHTML, '');
+  } finally { s.cerrar(); }
+});
+
+
+t('el pallet con cajas adentro NO se borra, y lo dice', async () => {
+  const db = base();
+  const s = await servidor(db, ADMIN);
+  try {
+    const a = await (await s.pegar('/presentaciones', json({ nombre: 'Caja',
+      destino: 'comercial', envase: 'x', por_bulto: 1, kg_unidad: 8,
+      categoria: 'I' }))).json();
+    await s.pegar('/procesos', json({ fecha: HOY, lote_id: 10,
+      presentacion_id: a.id, bultos: 40, uuid: 'u1' }));
+    const arm = await (await s.pegar('/armado', json({ fecha: HOY }))).json();
+    await s.pegar('/armado/' + arm.id + '/mover', json({ destino: 'comercial',
+      presentacion_id: a.id, calibre: '', bultos: 40 }));
+
+    const r = await s.pegar('/pallets/' + arm.id, { method: 'DELETE' });
+    assert.equal(r.status, 400);
+    const j = await r.json();
+    assert.match(j.error, /cargas adentro/);
   } finally { s.cerrar(); }
 });
