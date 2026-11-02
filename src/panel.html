@@ -28756,6 +28756,94 @@ SG_MANUAL['galpon-acumulado'] = { titulo: 'Galpón · Acumulado', html:
   + 'es con lo que se discute plata. Dar uno no da el otro.</p>'
   + '<p>Esta pantalla <b>sólo lee</b>: no tiene ningún botón que escriba.</p>'
 };
+SG_MANUAL['pa-lotes'] = { titulo: 'Fincas y Lotes', html:
+  '<p class="mv">V1132</p>'
+  + '<p>El <b>padrón de los lotes</b>: dónde están, cuántas hectáreas tienen y qué se '
+  + 'plantó en cada uno, temporada por temporada. De acá cuelga casi todo lo demás — '
+  + 'una orden de aplicación, un jornal, un volcado del galpón y un costo se imputan '
+  + '<b>a un lote</b>.</p>'
+
+  + '<h3>Tres vistas del mismo padrón</h3>'
+  + '<p><b>📋 Tabla</b> es la lista para cargar y corregir. <b>🗺️ Mapa</b> dibuja los '
+  + 'polígonos sobre la finca, pintados por cultivo. <b>🌱 Productividad</b> es nuevo y '
+  + 'tiene su propia sección más abajo.</p>'
+
+  + '<h3>Qué se plantó, por temporada</h3>'
+  + '<p>El cultivo <b>no es del lote: es del lote en una temporada</b>. El mismo cuadro '
+  + 'puede tener tomate un año y zapallo el siguiente, y los dos datos tienen que '
+  + 'seguir estando — los costos del año pasado se leen contra el cultivo del año '
+  + 'pasado. Por eso la ficha del lote tiene un renglón por campaña y no un campo '
+  + '«cultivo».</p>'
+  + '<p>Un <b>frutal</b> es perenne: ocupa el año entero, así que no se le piden mes de '
+  + 'siembra ni de cosecha, y el invierno de al lado desaparece de la ficha. Un cultivo '
+  + 'anual sí los lleva.</p>'
+
+  + '<h3>Si el lote todavía no produce <span class="ver">V1132</span></h3>'
+  + '<p>Andy, 2/11/2026: <i>«necesito un campo que permita identificar si cada lote es '
+  + 'productivo o no según cada temporada... los gastos en lotes NO PRODUCTIVOS que '
+  + 'vayan al centro de costos INVERSION»</i>.</p>'
+  + '<p><b>No es una etiqueta: es a dónde va la plata.</b> Lo que se gasta en una '
+  + 'plantación que todavía no produce no es gasto del ejercicio, <b>se activa</b>. Una '
+  + 'poda en un lote de dos años es inversión en la plantación; la misma poda en uno de '
+  + 'ocho es costo de producción. La tarea es idéntica y el destino contable es el '
+  + 'opuesto.</p>'
+  + '<p>Se marca en <b>🌱 Productividad</b>, eligiendo la temporada arriba y después, '
+  + 'en el renglón de cada lote, una de tres:</p>'
+  + '<ul>'
+  + '<li><b>Produce</b> — el lote maduro. Su gasto es costo de producción, como '
+  + 'siempre. Es lo que vale si nadie tocó nada.</li>'
+  + '<li><b>Produce parcialmente</b> — ya da fruta pero no lo que va a dar. Se carga el '
+  + '% esperado respecto de un lote maduro. <b>El gasto sigue siendo de producción:</b> '
+  + 'un lote que vende fruta ya entró en producción.</li>'
+  + '<li><b>Todavía no produce</b> — es el único que manda el gasto a <b>INVERSIÓN</b>, '
+  + 'y la fila queda marcada para que se vea.</li>'
+  + '</ul>'
+  + '<p>Lo mismo se puede marcar desde la ficha de cada lote, en el casillero '
+  + '<b>🌱 En desarrollo</b>. Es el mismo dato: lo que se cambia en un lado se ve en el '
+  + 'otro.</p>'
+
+  + '<h3>Vale de ahora en más, no para atrás</h3>'
+  + '<p>Marcar un lote <b>no mueve los gastos que ya estaban cargados</b>. El destino se '
+  + 'escribe en cada costo cuando se carga y ahí queda. El día que el lote entre en '
+  + 'producción, lo que se activó el año pasado tiene que <b>seguir activado</b>: un '
+  + 'informe que cambia de un año para otro porque una plantación creció no es un '
+  + 'informe, y esa diferencia ya está en un balance firmado.</p>'
+  + '<p>Así que conviene marcar <b>antes</b> de empezar a cargar la temporada. Si ya se '
+  + 'cargó algo y hay que corregirlo, se corrige el costo, no el lote.</p>'
+
+  + '<h3>Qué se activó</h3>'
+  + '<p>Arriba de la lista, cuatro números: cuántos lotes no producen, cuánto se '
+  + '<b>activó a INVERSIÓN</b>, cuánto quedó como costo de producción, y cuántos lotes '
+  + 'están sin cultivo cargado en esa temporada. Abajo, el <b>detalle de cada gasto '
+  + 'activado</b> con su lote, categoría y monto: un total sin detalle no se puede '
+  + 'revisar, y el que firma el balance va a preguntar cuáles son.</p>'
+  + '<p>La <b>categoría no cambia</b>: un fertilizante en un lote en desarrollo sigue '
+  + 'siendo fertilizante. Son dos cosas distintas —qué se gastó y dónde imputa— y el '
+  + 'sistema guarda las dos.</p>'
+
+  + '<h3>Un lote sin cultivo cargado no se puede marcar</h3>'
+  + '<p>Aparece en la lista, para que se vea que falta, pero sin el selector. La fila de '
+  + '(lote, temporada) la crea quien carga <b>qué se plantó</b>: primero el cultivo en '
+  + 'la ficha del lote, después la marca.</p>'
+
+  + '<h3>Si nadie marcó nada</h3>'
+  + '<p>Todo imputa a producción, como venía funcionando. <b>Falta de dato nunca '
+  + 'significa «no produce»</b>: si significara eso, el día que esto se instaló toda la '
+  + 'temporada se habría ido a inversión sin que nadie lo decida — y eso no se nota '
+  + 'hasta que el contador mira el balance.</p>'
+
+  + '<h3>Con qué se enlaza</h3>'
+  + '<ul>'
+  + '<li><b>Órdenes y Personal</b> — el costo de una aplicación o de un jornal se '
+  + 'imputa al lote, y ahí es donde se decide si va a producción o a inversión.</li>'
+  + '<li><b>Plan de cuentas</b> — el gasto activado imputa al rubro <b>INVERSION</b>. '
+  + 'Si ese rubro no estuviera cargado, la pantalla lo avisa arriba.</li>'
+  + '<li><b>Galpón</b> — el volcado de cada IFCO dice de qué lote salió.</li>'
+  + '<li><b>Calendario</b> — se arma con los meses de siembra y cosecha de cada '
+  + 'cultivo.</li>'
+  + '</ul>'
+};
+
 SG_MANUAL['galpon-stock'] = { titulo: 'Stock y Despachos', html:
   '<p class="mv">V1121</p>'
   + '<p>Lo que quedó <b>guardado en cámara</b>, y de ahí salen los despachos. '
@@ -34033,6 +34121,8 @@ function sgRepExport(){
 <div style="display:flex;gap:8px">
   <button class="btn bo" id="pa-lot-vista-tabla" onclick="paLotesVista('tabla')" style="border-color:var(--burg);color:var(--burg)">📋 Tabla</button>
   <button class="btn bo" id="pa-lot-vista-mapa" onclick="paLotesVista('mapa')">🗺️ Mapa</button>
+  <button class="btn bo" id="pa-lot-vista-prod" onclick="paLotesVista('prod')">🌱 Productividad</button>
+  <button class="btn bo bs" onclick="sgManualAbrir('pa-lotes')">❓ ¿Cómo se usa?</button>
   <button class="btn bb" onclick="paAbrirNuevoLote()">+ Nuevo lote</button>
 </div>
 </div>
@@ -34048,6 +34138,37 @@ function sgRepExport(){
   <thead><tr><th>Finca</th><th>Lote</th><th style="text-align:right">Hectáreas</th><th>Cultivo 2026/27</th><th>Polígono</th><th>Cultivos</th><th></th></tr></thead>
   <tbody id="pa-lot-tbody"><tr><td colspan="7" class="emp">Cargando...</td></tr></tbody>
 </table></div></div>
+<!-- Vista: Productividad por temporada ─ qué lotes producen y qué se activó -->
+<!-- Sin barra lateral: table-layout fijo, y lo único que puede partir es el nombre -->
+<div id="pa-lot-vista-prod-cont" style="display:none">
+  <div class="filt" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+    <label style="font-size:12px;color:var(--mut);margin:0">Temporada</label>
+    <select id="pa-prod-camp" onchange="paProdCargar()" data-sin-buscador style="width:auto"></select>
+    <span id="pa-prod-rubro" style="font-size:11px;color:var(--mut)"></span>
+  </div>
+  <div class="pa-grid4" style="margin-bottom:16px">
+    <div class="pa-card"><div class="pa-card-title">Lotes que no producen</div>
+      <div class="pa-stat" id="pa-prod-nprod">—</div></div>
+    <div class="pa-card"><div class="pa-card-title" style="color:#7c2d12">Activado a INVERSIÓN</div>
+      <div class="pa-stat" id="pa-prod-inv" style="color:#7c2d12">—</div></div>
+    <div class="pa-card"><div class="pa-card-title">Costo de producción</div>
+      <div class="pa-stat" id="pa-prod-prod">—</div></div>
+    <div class="pa-card"><div class="pa-card-title">Sin cultivo cargado</div>
+      <div class="pa-stat" id="pa-prod-sincult">—</div></div>
+  </div>
+  <div class="pa-wrap"><div class="ab-table-wrap" style="overflow-x:hidden !important">
+  <table class="pa-tbl" style="table-layout:fixed;width:100%;max-width:98vw">
+    <thead><tr>
+      <th style="width:16%">Finca</th><th style="width:16%">Lote</th>
+      <th style="width:8%;text-align:right">Ha</th><th style="width:16%">Cultivo</th>
+      <th style="width:8%;text-align:right">Plant.</th>
+      <th style="width:22%">Esta temporada</th><th style="width:14%">Gasto</th>
+    </tr></thead>
+    <tbody id="pa-prod-tbody"><tr><td colspan="7" class="emp">Cargando...</td></tr></tbody>
+  </table></div></div>
+  <div id="pa-prod-detalle" style="margin-top:16px"></div>
+</div>
+
 <!-- Vista: Mapa general -->
 <div id="pa-lot-vista-mapa-cont" style="display:none">
   <div id="pa-map-general" style="height:calc(100vh - 260px);min-height:500px;border:1px solid var(--bor);border-radius:8px;position:relative"></div>
@@ -62633,9 +62754,17 @@ function paBuildCampRowHTML(c, cultData, mostrarMeses) {
     +   '🌱 En desarrollo (no productivo al 100%)'
     + '</label>'
     + '<div id="pa-pp-cont-'+key+'" style="margin-top:6px;'+ppHidden+';display:'+(edVal?'flex':'none')+';align-items:center;gap:8px">'
-    +   '<label style="font-size:11px;color:#6b21a8;margin:0;font-weight:500">% productividad esperada:</label>'
-    +   '<input type="number" id="pa-pp-'+key+'" min="0" max="100" step="5" value="'+ppVal+'" placeholder="0-100" style="width:80px">'
-    +   '<span style="font-size:11px;color:#6b21a8">%</span>'
+    +   '<label style="font-size:11px;color:#6b21a8;margin:0;font-weight:500">Esta temporada:</label>'
+    +   '<select id="pa-pe-'+key+'" onchange="paToggleProdPct(\''+key+'\')" data-sin-buscador style="width:auto;font-size:11px">'
+    +     '<option value="parcial"'+(ppVal===0?'':' selected')+'>Produce (parcialmente)</option>'
+    +     '<option value="nada"'+(ppVal===0?' selected':'')+'>Todavía no produce</option>'
+    +   '</select>'
+    +   '<span id="pa-ppn-'+key+'" style="display:'+(ppVal===0?'none':'inline-flex')+';align-items:center;gap:6px">'
+    +     '<label style="font-size:11px;color:#6b21a8;margin:0;font-weight:500">% esperado:</label>'
+    +     '<input type="number" id="pa-pp-'+key+'" min="1" max="100" step="5" value="'+(ppVal===0?'':ppVal)+'" placeholder="1-100" style="width:70px">'
+    +     '<span style="font-size:11px;color:#6b21a8">%</span>'
+    +   '</span>'
+    +   '<span id="pa-pinv-'+key+'" style="display:'+(ppVal===0?'inline-block':'none')+';background:#7c2d12;color:#fff;border-radius:4px;padding:2px 7px;font-size:10px;font-weight:800;letter-spacing:.04em">→ a INVERSIÓN</span>'
     + '</div>'
   + '</div>';
   return { html, key, cultVal, msVal, mcVal, hsVal, edVal, ppVal };
@@ -62718,14 +62847,27 @@ function paRecalcInviernosVisibles(){
 }
 
 // Toggle del input de % cuando se tilda/destilda "en desarrollo"
+/* Tres estados y no dos: maduro (el casillero apagado), produce parcialmente, y
+   todavía no produce — que es el único que manda el gasto a INVERSIÓN. El cartel se
+   muestra ahí y en ningún otro caso: es la consecuencia de la plata, y si apareciera
+   siempre dejaría de leerse a los dos días. */
 function paToggleProdPct(key){
-  var cb = document.getElementById('pa-ed-'+key);
+  var cb  = document.getElementById('pa-ed-'+key);
   var ppC = document.getElementById('pa-pp-cont-'+key);
+  var pe  = document.getElementById('pa-pe-'+key);
+  var num = document.getElementById('pa-ppn-'+key);
+  var inv = document.getElementById('pa-pinv-'+key);
   if (!cb || !ppC) return;
   ppC.style.display = cb.checked ? 'flex' : 'none';
+  var nada = cb.checked && pe && pe.value === 'nada';
+  if (num) num.style.display = nada ? 'none' : 'inline-flex';
+  if (inv) inv.style.display = nada ? 'inline-block' : 'none';
   if (!cb.checked) {
+    // Al apagar el casillero se limpia todo: dejar un 0 guardado ahí activaría el
+    // gasto de un lote que acaban de declarar maduro.
     var pp = document.getElementById('pa-pp-'+key);
     if (pp) pp.value = '';
+    if (pe) pe.value = 'parcial';
   }
 }
 
@@ -62762,9 +62904,20 @@ function paGuardarEdicionLote(){
       var esF=esFrutal(sel.value);
       var edVal=(esF && ed && ed.checked)?1:0;
       var ppVal=null;
-      if(edVal && pp && pp.value!==''){
-        var ppNum=parseInt(pp.value,10);
-        if(!isNaN(ppNum)) ppVal=Math.max(0,Math.min(100,ppNum));
+      var pe=document.getElementById('pa-pe-'+key);
+      if(edVal){
+        if(pe && pe.value==='nada'){
+          /* El 0 EXPLÍCITO, que es lo que la regla mira. Vacío significa «no sé» y
+             NO activa nada: hay filas con en_desarrollo=1 cargadas antes de que esta
+             regla existiera, y si el vacío activara, toda esa historia se mudaría de
+             golpe a inversión sin que nadie lo haya decidido. */
+          ppVal=0;
+        } else if(pp && pp.value!==''){
+          var ppNum=parseInt(pp.value,10);
+          // Piso 1: un 0 con «produce» es una contradicción, y guardarlo lo mandaría
+          // a inversión justo cuando se dijo que produce.
+          if(!isNaN(ppNum)) ppVal=Math.max(1,Math.min(100,ppNum));
+        }
       }
       cultivos[c.nombre]={
         cultivo:sel.value||null,
@@ -69678,21 +69831,173 @@ var PA_MAP_COLORS = {
 };
 function paColorCultivo(c) { return PA_MAP_COLORS[c] || '#0ea5e9'; }
 
+var PA_LOT_VISTAS = ['tabla','mapa','prod'];
 function paLotesVista(v) {
-  var tabla = document.getElementById('pa-lot-vista-tabla-cont');
-  var mapa = document.getElementById('pa-lot-vista-mapa-cont');
-  var btnT = document.getElementById('pa-lot-vista-tabla');
-  var btnM = document.getElementById('pa-lot-vista-mapa');
-  if (v === 'tabla') {
-    tabla.style.display = ''; mapa.style.display = 'none';
-    btnT.style.borderColor='var(--burg)'; btnT.style.color='var(--burg)';
-    btnM.style.borderColor=''; btnM.style.color='';
-  } else {
-    tabla.style.display = 'none'; mapa.style.display = '';
-    btnM.style.borderColor='var(--burg)'; btnM.style.color='var(--burg)';
-    btnT.style.borderColor=''; btnT.style.color='';
-    paRenderMapaGeneral();
+  if (PA_LOT_VISTAS.indexOf(v) < 0) v = 'tabla';
+  PA_LOT_VISTAS.forEach(function(k){
+    var cont = document.getElementById('pa-lot-vista-'+k+'-cont');
+    var btn  = document.getElementById('pa-lot-vista-'+k);
+    if (cont) cont.style.display = (k === v) ? '' : 'none';
+    if (btn) {
+      btn.style.borderColor = (k === v) ? 'var(--burg)' : '';
+      btn.style.color       = (k === v) ? 'var(--burg)' : '';
+    }
+  });
+  if (v === 'mapa') paRenderMapaGeneral();
+  if (v === 'prod') paProdCargar();
+}
+
+// ── 🌱 QUÉ LOTES PRODUCEN EN ESTA TEMPORADA ──────────────────────────────────
+// Andy, 2/11/2026: «un campo que indique si es productivo o no según temporada... los
+// gastos en lotes NO PRODUCTIVOS que vayan al centro de costos INVERSION».
+var PA_PROD = { lotes: [], camp: null };
+function paProdCargar(){
+  var selC = document.getElementById('pa-prod-camp');
+  var q = (selC && selC.value) ? ('?campaña=' + encodeURIComponent(selC.value)) : '';
+  // Devuelve la promesa para poder esperarla: sin eso, lo que recargue después de
+  // guardar mide la pantalla vieja — y un test no puede ver nada.
+  return paF('/api/pa/lotes/productividad' + q).then(function(r){
+    if (!r || !r.ok) return paProdVacio(r && r.error);
+    if (r.sin_campaña) return paProdVacio(
+      'No hay ninguna temporada anual activa. Cargá una en Campañas y volvé.');
+    PA_PROD.lotes = r.lotes || []; PA_PROD.camp = r.campaña;
+    // El selector se llena una vez y se le respeta lo elegido: recargarlo en cada
+    // guardado volvería a la temporada activa y el que está revisando 2025/26
+    // perdería el lugar en cada clic.
+    if (selC && !selC.options.length) {
+      selC.innerHTML = (r.campañas||[]).map(function(c){
+        return '<option value="'+c.id+'"'+'>'+escH(c.nombre)
+          + (c.activa ? ' ★' : '') + '</option>';
+      }).join('');
+      selC.value = r.campaña.id;
+    }
+    var rb = document.getElementById('pa-prod-rubro');
+    if (rb) rb.textContent = r.rubro
+      ? ('El gasto activado imputa al rubro ' + r.rubro.nombre + '.')
+      : '⚠ No existe el rubro INVERSION en el plan: el gasto queda marcado pero sin rubro.';
+    paProdPintar(r);
+  }).catch(function(e){ paProdVacio(e.message); });
+}
+function paProdVacio(msg){
+  var tb = document.getElementById('pa-prod-tbody');
+  if (tb) tb.innerHTML = '<tr><td colspan="7" class="emp">'+escH(msg||'Sin datos')+'</td></tr>';
+}
+
+function paProdPintar(r){
+  var lotes = r.lotes || [];
+  var nprod = lotes.filter(function(l){ return l.a_inversion === 1; }).length;
+  var sinc  = lotes.filter(function(l){ return l.sin_cultivo === 1; }).length;
+  document.getElementById('pa-prod-nprod').textContent = nprod + ' de ' + lotes.length;
+  document.getElementById('pa-prod-sincult').textContent = sinc;
+  var res = r.resumen || {};
+  document.getElementById('pa-prod-inv').textContent  = paMoney(res.inversion||0);
+  document.getElementById('pa-prod-prod').textContent = paMoney(res.produccion||0);
+
+  var tb = document.getElementById('pa-prod-tbody');
+  if (!lotes.length) return paProdVacio(
+    'No hay lotes activos. Cargá uno en Fincas y Lotes.');
+  tb.innerHTML = lotes.map(function(l){
+    var inv = l.a_inversion === 1;
+    var est = l.sin_cultivo === 1 ? 'sinc' : (inv ? 'nada' : (Number(l.en_desarrollo)===1 ? 'parcial' : 'maduro'));
+    /* Un lote sin cultivo cargado no se puede marcar: la fila de (lote, temporada) la
+       crea quien carga QUÉ se plantó, y adivinarla acá dejaría un lote con cultivo
+       vacío que después nadie entiende. Aparece igual, para que se vea que falta. */
+    var sel = (est === 'sinc')
+      ? '<span style="font-size:11px;color:var(--mut)">— cargá el cultivo primero</span>'
+      : '<select data-sin-buscador onchange="paProdMarcar('+l.id+',this)" style="width:100%;font-size:12px">'
+        + '<option value="maduro"'+(est==='maduro'?' selected':'')+'>Produce</option>'
+        + '<option value="parcial"'+(est==='parcial'?' selected':'')+'>Produce parcialmente'
+        + (l.productividad_pct!=null&&Number(l.productividad_pct)>0?(' ('+l.productividad_pct+'%)'):'')+'</option>'
+        + '<option value="nada"'+(est==='nada'?' selected':'')+'>Todavía no produce</option>'
+        + '</select>'
+        /* El % se escribe DONDE SE LEE, en la misma celda. Un prompt() está prohibido
+           en el repo y acá se ve por qué: no deja ver el valor anterior, no se puede
+           corregir sin volver a abrirlo, y en el celular tapa la fila. */
+        + (est==='parcial'
+          ? '<input type="number" min="1" max="100" step="5" value="'
+            + (l.productividad_pct!=null&&Number(l.productividad_pct)>0?l.productividad_pct:50)
+            + '" onchange="paProdPct('+l.id+',this)" title="% de un lote maduro"'
+            + ' style="width:60px;margin-left:6px;font-size:12px">'
+          : '');
+    return '<tr'+(inv?' style="background:#fff7ed"':'')+'>'
+      + '<td style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+escH(l.finca||'—')+'</td>'
+      + '<td style="font-weight:700;overflow:hidden;text-overflow:ellipsis">'+escH(l.nombre||('#'+l.id))+'</td>'
+      + '<td style="text-align:right">'+(l.hectareas!=null?Number(l.hectareas).toFixed(1):'—')+'</td>'
+      + '<td style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+escH(l.cultivo||'—')+'</td>'
+      + '<td style="text-align:right">'+(l.año_plantacion||'—')+'</td>'
+      + '<td>'+sel+'</td>'
+      + '<td>'+(inv
+        ? '<span style="background:#7c2d12;color:#fff;border-radius:4px;padding:2px 6px;font-size:10px;font-weight:800">INVERSIÓN</span>'
+        : '<span style="font-size:11px;color:var(--mut)">Producción</span>')+'</td>'
+      + '</tr>';
+  }).join('');
+
+  // El detalle de lo activado. Un total sin detalle no se revisa, y el que firma el
+  // balance va a preguntar cuáles son.
+  var det = document.getElementById('pa-prod-detalle');
+  var ds = r.detalle || [];
+  if (!ds.length) {
+    det.innerHTML = nprod
+      ? '<div class="emp" style="padding:14px">Todavía no se cargó ningún gasto en los'
+        + ' lotes que no producen.</div>'
+      : '';
+    return;
   }
+  det.innerHTML = '<div class="pa-wrap"><div style="padding:14px 16px;border-bottom:1px solid var(--bor);'
+    + 'font-size:12px;font-weight:700;color:var(--mut);text-transform:uppercase;letter-spacing:.06em">'
+    + 'Qué se activó ('+ds.length+')</div><div class="ab-table-wrap" style="overflow-x:hidden !important">'
+    + '<table class="pa-tbl" style="table-layout:fixed;width:100%;max-width:98vw">'
+    + '<thead><tr><th style="width:18%">Lote</th><th style="width:16%">Categoría</th>'
+    + '<th style="width:12%">Fecha</th><th style="width:38%">Descripción</th>'
+    + '<th style="width:16%;text-align:right">Monto</th></tr></thead><tbody>'
+    + ds.map(function(d){
+        return '<tr><td style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'
+          + escH(d.lote||('#'+d.lote_id))+'</td>'
+          + '<td>'+escH(d.categoria||'—')+'</td><td>'+escH(d.fecha||'—')+'</td>'
+          + '<td style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'
+          + escH(d.descripcion||'—')+'</td>'
+          + '<td style="text-align:right;font-weight:700">'+paMoney(d.monto||0)+'</td></tr>';
+      }).join('')
+    + '</tbody></table></div></div>';
+}
+
+/* Se guarda al cambiar el select, un lote por vez: adentro de una lista se edita donde
+   se lee, y un botón «Guardar todo» abajo de 40 filas hace que un error de tipeo en la
+   fila 3 se descubra cuando ya se mandaron las 40.
+
+   Y se avisa que vale de acá en adelante: lo ya imputado NO se mueve. El día que el
+   lote entre en producción, lo que se activó el año pasado tiene que seguir activado. */
+// El % de un lote que produce parcialmente. Guarda produce=true, así que nunca puede
+// activar el gasto: para eso hay que elegir «Todavía no produce» a propósito.
+function paProdPct(loteId, inp){
+  return paF('/api/pa/lotes/'+loteId+'/productividad', { method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({ campaña: PA_PROD.camp ? PA_PROD.camp.id : null,
+      produce: true, productividad_pct: inp.value }) })
+    .then(function(r){
+      if (!r || !r.ok) { toast((r && r.error) || 'No se pudo guardar el %', 'er'); }
+      return paProdCargar();
+    }).catch(function(e){ toast(e.message, 'er'); });
+}
+
+function paProdMarcar(loteId, sel){
+  var v = sel.value;
+  var body = { campaña: PA_PROD.camp ? PA_PROD.camp.id : null, produce: v !== 'nada' };
+  if (v === 'parcial') {
+    /* Arranca en el % que ya tenía, o en 50 la primera vez. Un default es mejor que
+       pedirlo antes de guardar: el que marca quiere decir «todavía no está entero» y
+       el número exacto lo ajusta después, en el casillero que aparece al lado. */
+    var l = PA_PROD.lotes.filter(function(x){ return x.id === loteId; })[0];
+    body.productividad_pct = (l && l.productividad_pct != null
+      && Number(l.productividad_pct) > 0) ? l.productividad_pct : 50;
+  }
+  return paF('/api/pa/lotes/'+loteId+'/productividad', { method:'POST',
+    headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) })
+    .then(function(r){
+      if (!r || !r.ok) { toast((r && r.error) || 'No se pudo marcar', 'er'); return paProdCargar(); }
+      toast(r.a_inversion ? 'Marcado. Lo que se cargue va a INVERSIÓN.' : 'Marcado.');
+      return paProdCargar();
+    }).catch(function(e){ toast(e.message, 'er'); });
 }
 
 function paRenderMapaGeneral() {

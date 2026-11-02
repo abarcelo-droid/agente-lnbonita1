@@ -12,6 +12,13 @@ import { MODELO_CHAT } from '../config/ia.js';
 import { llamarIA } from '../servicios/ia.js';
 import { getDb } from '../servicios/db.js';
 import dbPa from '../servicios/db_pa.js'; // DB contable — asientos, proveedores
+// A dónde va el gasto de un lote que todavía no produce. La regla vive en un solo
+// lugar y la escribe un trigger (ver db_pa.js); esto es para que la pantalla diga
+// lo mismo que guardó la base.
+import {
+  lotesDeTemporada, marcarNoProduce, resumenInversion, costosDeInversion,
+  rubroInversion,
+} from '../servicios/lotesProductivos.js';
 
 const router = express.Router();
 const __dirnamePA = path.dirname(fileURLToPath(import.meta.url));
@@ -501,6 +508,74 @@ router.get('/lotes/cultivos-disponibles', requireAuth, (req, res) => {
 });
 
 // GET lote individual con todos sus cultivos por campaña
+// ── 🌱 QUÉ LOTES PRODUCEN EN ESTA TEMPORADA, Y QUÉ SE ACTIVÓ ──────────────
+// Andy, 2/11/2026: «un campo que indique si es productivo o no según temporada...
+// los gastos en lotes NO PRODUCTIVOS que vayan al centro de costos INVERSION».
+//
+// VA ANTES de GET /lotes/:id: Express se queda con la primera ruta que matchea, y
+// /lotes/productividad entraría por /lotes/:id con id="productividad" — devolvería
+// 404 y nadie entendería por qué.
+//
+// Es TRABAJO DEL DÍA, no parametrización: marcar que un lote todavía no produce lo
+// hace el que recorre la finca. Va con requireAuth y el nivel lo decide exigirNivel
+// mirando la URL contra pa-lotes. Pedir admin acá terminaría con el dueño marcando
+// lotes por teléfono.
+router.get('/lotes/productividad', requireAuth, (req, res) => {
+  try {
+    const db = dbPa;
+    // La temporada que se pide, o la anual activa. Siempre una: una pantalla que
+    // mezcla temporadas no se puede leer, porque el mismo lote aparece dos veces.
+    let camp = null;
+    if (req.query.campaña || req.query.campania) {
+      camp = db.prepare('SELECT * FROM pa_campañas WHERE id = ?')
+        .get(parseInt(req.query.campaña || req.query.campania, 10));
+    }
+    if (!camp) {
+      camp = db.prepare(
+        "SELECT * FROM pa_campañas WHERE activa=1 AND tipo='anual' LIMIT 1").get();
+    }
+    if (!camp) return res.json({ ok: true, sin_campaña: true, lotes: [] });
+
+    res.json({
+      ok: true,
+      campaña: camp,
+      campañas: db.prepare(
+        "SELECT id, nombre, tipo, activa FROM pa_campañas WHERE tipo='anual'"
+        + ' ORDER BY nombre DESC').all(),
+      lotes: lotesDeTemporada(db, camp.nombre),
+      resumen: resumenInversion(db, camp.id),
+      // El detalle, para poder MIRAR qué se activó: un total sin detalle no se
+      // revisa, y el que firma el balance va a preguntar cuáles son.
+      detalle: costosDeInversion(db, camp.id),
+      rubro: rubroInversion(db),
+    });
+  } catch (e) {
+    console.error('[PA] GET /lotes/productividad:', e.message);
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+// Marcar un lote en una temporada. `produce` false = todavía no produce (va a
+// INVERSIÓN); true con pct = produce parcialmente; true sin pct = maduro.
+router.post('/lotes/:id/productividad', requireAuth, (req, res) => {
+  try {
+    const b = req.body || {};
+    const r = marcarNoProduce(dbPa, req.params.id, b.campaña || b.campania,
+      b.produce !== false, b.productividad_pct);
+    if (!r.ok) return res.status(400).json({ ok: false, error: r.motivo });
+    /* Lo que YA se imputó no se toca: el destino se congela en el costo. El día que
+       el lote entre en producción, lo que se activó el año pasado tiene que SEGUIR
+       activado — un informe que cambia porque una plantación creció no es un
+       informe, y esa diferencia ya está en un balance firmado. Se le dice al que
+       marca, para que no espere que los números de atrás se muevan. */
+    res.json(Object.assign(r, { aviso: 'Vale para los gastos que se carguen de ahora'
+      + ' en más. Lo ya imputado no se cambia.' }));
+  } catch (e) {
+    console.error('[PA] POST /lotes/:id/productividad:', e.message);
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
 router.get('/lotes/:id', requireAuth, (req, res) => {
   const db = getDb();
   try {

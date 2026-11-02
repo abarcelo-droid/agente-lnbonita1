@@ -2219,6 +2219,86 @@ db.exec(`
   }
 })();
 
+// ── EL GASTO DE UN LOTE QUE TODAVÍA NO PRODUCE VA A INVERSIÓN ────────────
+// Andy, 2/11/2026: «necesito agregar un campo que permita identificar si cada lote
+// es productivo o no según cada temporada... los gastos en lotes NO PRODUCTIVOS que
+// vayan al centro de costos INVERSION».
+//
+// EL CAMPO YA ESTABA, arriba: `en_desarrollo` es por (lote, campaña) y su casillero en
+// el panel dice «En desarrollo (no productivo al 100%)». Agregar un `productivo` al
+// lado serían dos columnas con el mismo significado y la polaridad invertida, y el día
+// que una se cargue y la otra no, no hay manera de saber cuál tiene razón. Lo que
+// faltaba no era el campo: era la CONSECUENCIA CONTABLE.
+//
+// LA REGLA: en_desarrollo = 1 Y productividad_pct = 0 → el lote NO produce esta
+// temporada y su gasto se ACTIVA. Un % mayor a 0 ya produce —parcialmente, pero
+// produce— y su gasto es costo de producción, como hasta hoy.
+//
+// Y productividad_pct VACÍO no activa nada: vacío es «no sé», y no saber no puede
+// cambiar a dónde imputa un gasto. Hay filas con en_desarrollo=1 cargadas antes de
+// que esta regla existiera; si el vacío activara, toda esa historia se mudaría de
+// golpe a inversión sin que nadie lo haya decidido.
+//
+// Es una regla contable, no una etiqueta: lo que se gasta en una plantación que
+// todavía no produce NO ES GASTO DEL EJERCICIO, se ACTIVA. Una poda en un lote de dos
+// años es inversión en la plantación; la misma poda en uno de ocho es costo de
+// producción. La tarea es idéntica y el destino contable es el opuesto.
+//
+// EL DESTINO SE CONGELA EN EL COSTO, no se deduce al leer. El día que el lote entre en
+// producción, lo que se activó el año pasado tiene que SEGUIR activado: un informe que
+// cambia de un año para otro porque una plantación creció no es un informe, y la
+// diferencia ya está en un balance firmado.
+//
+// La CATEGORÍA no cambia: un fertilizante en un lote en desarrollo sigue siendo
+// fertilizante. Son dos dimensiones —qué se gastó y dónde imputa— y meterlas en un
+// solo campo pierde la primera para siempre.
+try {
+  const colsC = db.prepare('PRAGMA table_info(pa_costos_lote)').all().map(c => c.name);
+  if (!colsC.includes('a_inversion')) {
+    db.exec('ALTER TABLE pa_costos_lote ADD COLUMN a_inversion INTEGER NOT NULL DEFAULT 0');
+    console.log('[PA] pa_costos_lote.a_inversion agregada');
+  }
+
+  // ── Y LO MARCA UN TRIGGER, NO LOS CUATRO LUGARES QUE ESCRIBEN UN COSTO ──
+  // Hay CUATRO INSERT INTO pa_costos_lote en rutas/produccion.js y son distintos entre
+  // sí: dos listan las columnas y dos no. Tocar los cuatro son cuatro oportunidades de
+  // escribirlo mal, y el quinto que alguien agregue mañana quedaría afuera — y una
+  // imputación que se olvida NO DA ERROR, da un balance distinto. Es el mismo criterio
+  // con el que se resolvieron el buscador de los 47 desplegables y la altura de las
+  // 113 ventanas: se arregla el mecanismo, no las llamadas.
+  //
+  // LA CONTRA es que es invisible: quien lee el INSERT no ve que algo le va a tocar la
+  // fila después. Por eso está escrito acá con todas las letras y tiene su test, que lo
+  // prueba INSERTANDO y mirando la fila — no leyendo el SQL.
+  //
+  // `WHEN NEW.a_inversion = 0` deja pasar un INSERT que ya lo traiga en 1: si algún día
+  // hay que forzar la imputación a mano, el trigger no la pisa.
+  db.exec(`
+    DROP TRIGGER IF EXISTS pa_costo_a_inversion;
+    CREATE TRIGGER pa_costo_a_inversion AFTER INSERT ON pa_costos_lote
+    WHEN NEW.a_inversion = 0
+    BEGIN
+      UPDATE pa_costos_lote SET a_inversion = 1
+       WHERE id = NEW.id AND EXISTS (
+         SELECT 1 FROM pa_cultivos_lote cl
+           JOIN pa_campañas c ON c.nombre = cl.campaña
+          WHERE cl.lote_id = NEW.lote_id
+            -- La ANUAL manda: una estacional vive adentro de un año agrícola, y es el
+            -- año el que define si la plantación ya produce. COALESCE porque hay
+            -- INSERT viejos que sólo llenan campaña_id; sin él esos costos no se
+            -- clasificarían nunca y nadie lo notaría.
+            AND c.id = COALESCE(NEW.campaña_anual_id, NEW.campaña_id)
+            AND cl.en_desarrollo = 1
+            AND cl.productividad_pct = 0
+       );
+    END;
+  `);
+} catch (e) {
+  // Una base vieja sin alguna de las columnas: el trigger se crea en el próximo
+  // arranque y mientras tanto todo imputa como hasta hoy, que es lo seguro.
+  console.warn('[PA] a_inversion:', e.message);
+}
+
 // ─────────────────────────────────────────────────────────────────────────
 // PAÑOL — herramientas durables identificadas por unidad
 // (no son consumibles; se prestan/devuelven en lugar de gastarse)
