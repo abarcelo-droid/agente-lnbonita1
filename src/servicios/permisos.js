@@ -450,6 +450,34 @@ export function lecturaControlada(url) {
   return false;
 }
 
+// ── BORRAR LO DEL DÍA ES OPERAR, NO ANULAR ────────────────────────────────
+// Andy, 2/11/2026: «necesito que todos los usuarios puedan borrar algo del día
+// vigente (fecha día hoy)».
+//
+// Un renglón de kilos tipeado hace diez segundos con un cero de más es un error
+// de tipeo, no una anulación. Con nivel «anular» de por medio, el operario va a
+// buscar al dueño y mientras tanto el renglón mal queda cargado — que es peor
+// que si lo hubiera sacado él.
+//
+// ACÁ SÓLO SE AFLOJA EL NIVEL. La condición de que la fila sea de HOY la verifica
+// la RUTA, que es el único lugar que puede ver su fecha (borrarVolcado() en
+// servicios/galpon.js). Una dirección en esta lista SIN ese control del otro lado
+// deja borrar cualquier cosa con nivel «operar», incluida la temporada pasada: la
+// lista y el control son una sola decisión escrita en dos archivos.
+//
+// Por eso la lista es corta y explícita, y no un «los DELETE del galpón». El que
+// agregue el renglón número dos tiene que escribir también su control, y hay un
+// test que falla si no lo hace.
+const BORRAR_ES_OPERAR = ["/api/galpon/volcados"];
+
+export function borrarEsOperar(url) {
+  const limpia = String(url || '').split('?')[0].toLowerCase().replace(/\/+$/, '');
+  for (const b of BORRAR_ES_OPERAR) {
+    if (limpia === b || limpia.startsWith(b + '/')) return true;
+  }
+  return false;
+}
+
 // El mayor nivel que la persona tenga entre los dueños de la dirección.
 const ORDEN_NIVEL = { ver: 1, operar: 2, borrar: 3, anular: 3 };
 export function mejorNivel(usuario, modulos) {
@@ -511,6 +539,10 @@ export function exigirNivel(req, res, next) {
   // pago viaja como POST a /anular, no como DELETE. Se miran las dos cosas.
   const anula = metodo === 'DELETE'
     || /\/(anular|eliminar|borrar|desactivar|baja)(\/|$|\?)/i.test(String(req.originalUrl || req.url).split('?')[0]);
+  // La excepción de arriba: donde borrar es parte de operar, un nivel «operar»
+  // alcanza. Sigue haciendo falta tener el módulo y no ser de sólo lectura — eso ya
+  // se contestó más arriba.
+  if (anula && borrarEsOperar(req.originalUrl || req.url)) return next();
   if (anula && nivel !== 'anular' && nivel !== 'borrar') {
     return res.status(403).json({
       ok: false,

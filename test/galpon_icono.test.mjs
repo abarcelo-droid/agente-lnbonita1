@@ -40,6 +40,11 @@ function base() {
     CREATE TABLE pa_cultivos_lote (id INTEGER PRIMARY KEY AUTOINCREMENT, lote_id INTEGER,
       cultivo TEXT, campaña TEXT, es_perenne INTEGER DEFAULT 0);
     CREATE TABLE gal_config (clave TEXT PRIMARY KEY, valor TEXT, actualizado TEXT);
+    -- El reparto por cuadrilla de cada carga. Un cajon puede ser de dos (V1133).
+    CREATE TABLE gal_volcado_cuadrillas (
+      volcado_id INTEGER NOT NULL, cuadrilla_id INTEGER NOT NULL,
+      cuadrilla TEXT, kilos REAL NOT NULL,
+      PRIMARY KEY (volcado_id, cuadrilla_id));
     CREATE TABLE gal_volcados (id INTEGER PRIMARY KEY AUTOINCREMENT, fecha TEXT,
       lote_id INTEGER, lote_nombre TEXT, producto TEXT, kilos REAL, ifcos INTEGER, viaje INTEGER, sanitario TEXT,
       eliminado_en TEXT);

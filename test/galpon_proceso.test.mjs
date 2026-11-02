@@ -57,6 +57,11 @@ function base(techo = '50000') {
 
     CREATE TABLE gal_config (clave TEXT PRIMARY KEY, valor TEXT, actualizado TEXT);
 
+    -- El reparto por cuadrilla de cada carga. Un cajon puede ser de dos (V1133).
+    CREATE TABLE gal_volcado_cuadrillas (
+      volcado_id INTEGER NOT NULL, cuadrilla_id INTEGER NOT NULL,
+      cuadrilla TEXT, kilos REAL NOT NULL,
+      PRIMARY KEY (volcado_id, cuadrilla_id));
     CREATE TABLE gal_volcados (
       id INTEGER PRIMARY KEY AUTOINCREMENT, uuid TEXT UNIQUE, fecha TEXT NOT NULL,
       hora TEXT, lote_id INTEGER NOT NULL, lote_nombre TEXT, producto TEXT,

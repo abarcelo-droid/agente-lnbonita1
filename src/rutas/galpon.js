@@ -40,6 +40,14 @@ import {
   tableroProceso, stockGalpon, stockPorLote, stockPorProducto, lotesVolcados,
 } from '../servicios/galpon.js';
 import { generarTarjetasPDF, tarjetasAImprimir } from '../servicios/galponTarjetasPDF.js';
+/* El nivel de la persona en el módulo, con la MISMA regla que usa el servidor para
+   dejar pasar el pedido (ORDEN_NIVEL en servicios/permisos.js). Acá no se decide si
+   entra —eso ya lo contestó exigirNivel— sino hasta dónde llega adentro: borrar lo de
+   hoy lo puede cualquiera que opere, y lo de un día cerrado no.
+
+   Se importa de permisos.js y no se reescribe: dos copias de la escala de niveles son
+   dos lugares donde «borrar» y «anular» pueden dejar de pesar lo mismo. */
+import { nivelEnModulo } from '../servicios/permisos.js';
 
 const router = express.Router();
 
@@ -76,6 +84,16 @@ router.use((req, res, next) => {
 });
 
 const num = (v) => { const n = parseInt(v, 10); return Number.isFinite(n) ? n : null; };
+
+// ¿Puede esta persona sacar un renglón de un día YA CERRADO? Admin siempre. Para el
+// resto hace falta el nivel que CLAUDE.md llama de anulación, donde «anular» y
+// «borrar» pesan igual.
+function puedeAnularCargas(u) {
+  if (!u) return false;
+  if (u.rol === 'admin') return true;
+  const n = nivelEnModulo(u, 'galpon-carga');
+  return n === 'anular' || n === 'borrar';
+}
 
 // La fecha y la hora SALEN DEL SERVIDOR, no del navegador que preguntó. Dos máquinas
 // con la hora corrida cargarían dos tramos distintos del mismo cambio de lote, y el de
@@ -528,6 +546,11 @@ router.get('/volcados', (req, res) => {
       // que cargué yo» preguntado por el cliente lo contesta cualquiera.
       ultimo: ultimaCarga(db, fecha, (req._user || {}).id),
       resumen: resumenDelDia(db, fecha),
+      /* Si esta persona puede sacar un renglón de un día cerrado. La pantalla lo usa
+         para no ofrecer la × en un día pasado cuando va a contestar 403 — el que la
+         aprieta y le rebota cree que rompió algo. NO reemplaza el control: lo de
+         arriba sigue decidiendo. */
+      puede_anular: puedeAnularCargas(req._user),
       // El lote declarado para ese día, para proponerlo en la ventana. Es una PROPUESTA:
       // el que carga a mano elige el lote que quiera, y de hecho puede no haber ninguno
       // declarado — la carga manual no depende del lote del día, lo aprovecha si está.
@@ -571,10 +594,23 @@ router.patch('/volcados/:id', (req, res) => {
   }
 });
 
+/* ── BORRAR LO DE HOY LO PUEDE CUALQUIERA (V1133) ──────────────────────────────────
+   Andy, 2/11/2026: «necesito que todos los usuarios puedan borrar algo del día vigente
+   (fecha día hoy)».
+
+   El nivel ya lo aflojó exigirNivel para esta dirección (BORRAR_ES_OPERAR en
+   servicios/permisos.js). Lo que ese middleware NO puede ver es la FECHA de la fila:
+   sin lo de abajo, aflojar el nivel dejaría a cualquiera borrar la temporada pasada.
+   Las dos mitades son una sola decisión y las dos tienen que estar. */
 router.delete('/volcados/:id', (req, res) => {
   try {
-    const r = borrarVolcado(db, num(req.params.id));
-    if (!r.ok) return res.status(404).json({ ok: false, error: r.motivo });
+    const r = borrarVolcado(db, num(req.params.id), {
+      // La fecha de hoy la pone el SERVIDOR. Tomada del navegador, adelantar el reloj
+      // del equipo del galpón alcanzaría para que «hoy» fuera cualquier día.
+      hoy: hoy(),
+      puede_anular: puedeAnularCargas(req._user),
+    });
+    if (!r.ok) return res.status(r.status || 404).json({ ok: false, error: r.motivo });
     res.json({ ok: true });
   } catch (e) {
     console.error('[GALPON] DELETE /volcados/:id:', e.message);

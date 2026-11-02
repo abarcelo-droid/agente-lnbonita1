@@ -45,6 +45,11 @@ function base() {
     INSERT INTO pa_lotes (id,nombre,finca) VALUES
       (10,'Cuadro 3','La Esperanza'), (11,'Cuadro 4','Cochahual'), (12,'Suelto',NULL);
 
+    -- El reparto por cuadrilla de cada carga. Un cajon puede ser de dos (V1133).
+    CREATE TABLE gal_volcado_cuadrillas (
+      volcado_id INTEGER NOT NULL, cuadrilla_id INTEGER NOT NULL,
+      cuadrilla TEXT, kilos REAL NOT NULL,
+      PRIMARY KEY (volcado_id, cuadrilla_id));
     CREATE TABLE gal_volcados (
       id INTEGER PRIMARY KEY AUTOINCREMENT, uuid TEXT UNIQUE,
       fecha TEXT NOT NULL, hora TEXT,

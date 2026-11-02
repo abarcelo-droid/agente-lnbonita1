@@ -657,13 +657,20 @@ test('MANUAL KG: «los dos cortes son por cuadrilla y por lote»', () => {
   // ahora el acumulado (V1109), que tiene sus propios GROUP BY y los contaba de más.
   const iRes = SERV.indexOf('export function resumenDelDia(');
   const res = SERV.slice(iRes, SERV.indexOf('\r\n}', iRes));
-  assert.match(res, /GROUP BY cuadrilla_id/);
+  /* El corte por cuadrilla agrupa por la tabla SATÉLITE desde la V1133: un cajón puede
+     ser de dos cuadrillas y la atribución está repartida ahí. Agrupar por
+     gal_volcados.cuadrilla_id le daría los kilos enteros a la primera y cero a la
+     segunda — y el total del día seguiría cerrando, así que no se notaría. */
+  assert.match(res, /GROUP BY COALESCE\(vc\.cuadrilla_id, v\.cuadrilla_id\)/);
+  assert.match(res, /LEFT JOIN gal_volcado_cuadrillas/);
   assert.match(res, /GROUP BY lote_id/);
   // ORDENADOS POR EL TOTAL DEL GRUPO. Con el alias, SQLite ata el ORDER BY a la
   // COLUMNA kilos y no al SUM() que la tapa: sale una lista ordenada, sólo que
   // mal — y ordenada mal se ve igual que ordenada bien.
   assert.ok(!/ORDER BY kilos DESC/.test(res), 'ordena por el alias y no por el SUM');
-  assert.ok((res.match(/ORDER BY SUM\(kilos\) DESC/g) || []).length === 2);
+  assert.ok(/ORDER BY SUM\(kilos\) DESC/.test(res), 'el corte por lote no ordena por el SUM');
+  assert.ok(/ORDER BY SUM\(COALESCE\(vc\.kilos, v\.kilos\)\) DESC/.test(res),
+    'el corte por cuadrilla no ordena por el SUM');
 });
 
 test('MANUAL KG: «el recuadro rojo aparece sólo si hay algo que revisar»', () => {
@@ -747,7 +754,14 @@ test('LA VENTANA DE KILOS SE ABRE EN BLANCO, como todas', () => {
     assert.ok(n >= 2, id + ' no se escribe en las dos ramas del abridor (' + n + ')');
   }
   assert.ok((abrir.match(/sel\.value =/g) || []).length >= 2, 'el select no se fija en las dos ramas');
-  assert.ok((abrir.match(/cu\.value =/g) || []).length >= 1, 'la cuadrilla no se fija al corregir');
+  /* La cuadrilla pasó a ser una LISTA de renglones (V1133), así que lo que se fija en
+     las dos ramas es el pintado del contenedor: con las que tenía la carga al
+     corregir, y vacío al cargar. Si la rama de alta no lo pintara, la ventana
+     arrancaría con la cuadrilla de la tanda anterior puesta. */
+  const nc = (abrir.match(/galCuadPintar\('gal-kg-cuads'/g) || []).length;
+  assert.ok(nc >= 2, 'la lista de cuadrillas no se fija en las dos ramas (' + nc + ')');
+  assert.match(abrir, /galCuadPintar\('gal-kg-cuads', \[\]\)/,
+    'la rama de alta no deja la lista de cuadrillas en blanco');
 });
 
 test('la pantalla de kilos tampoco se arrastra de costado', () => {
@@ -843,9 +857,14 @@ test('MANUAL AC: «los tres cortes van ordenados por kilos, con su porcentaje»'
   diceAc(/Por cuadrilla/);
   diceAc(/Por producto/);
   diceAc(/es como se habla afuera/);
-  for (const g of ['cuadrilla_id', 'lote_id', 'producto']) {
+  for (const g of ['lote_id', 'producto']) {
     assert.ok(ACUM.includes("corte('" + g + "'"), 'falta el corte por ' + g);
   }
+  /* El de cuadrilla no usa corte(): desde la V1133 sale de la tabla satélite, porque
+     un cajón puede ser de dos y la atribución está repartida ahí. */
+  assert.match(ACUM, /LEFT JOIN gal_volcado_cuadrillas/);
+  assert.match(ACUM, /GROUP BY COALESCE\(vc\.cuadrilla_id, v\.cuadrilla_id\)/);
+  assert.match(ACUM, /ORDER BY SUM\(COALESCE\(vc\.kilos, v\.kilos\)\) DESC/);
   // Por el SUM() y no por el alias: en SQLite `ORDER BY kilos` adentro de un
   // GROUP BY se ata a la COLUMNA y la lista sale ordenada, sólo que mal.
   assert.match(ACUM, /ORDER BY SUM\(kilos\) DESC/);
@@ -1018,7 +1037,11 @@ test('MANUAL KG: «viene propuesto con lo último que cargaste VOS»', () => {
   assert.match(SERV, /export function ultimaCarga\(db, fecha, usuarioId\)/);
   // Los tres campos que pidió Andy: lote, cuadrilla y observación.
   assert.match(JS_RAP, /sel\.value = u \? String\(u\.lote_id\)/);
-  assert.match(JS_RAP, /cu\.value = \(u && u\.cuadrilla_id\)/);
+  /* Y las DOS cuadrillas, si la última tanda eran dos: proponer sólo la primera
+     arrancaría con la mitad del equipo sin que se note (V1133). */
+  assert.match(JS_RAP, /galCuadPintar\('gal-rap-cuads'/);
+  assert.match(JS_RAP, /u\.cuadrilla_ids/);
+  assert.match(SERV, /cuadrilla_ids: cuadrillasDeVolcado\(db, fila\.id\)/);
   assert.match(JS_RAP, /gal-rap-obs'\)\.value = \(u && u\.observacion\)/);
 });
 
@@ -1096,7 +1119,11 @@ test('MANUAL KG: «deshacer no pregunta», y por qué puede no preguntar', () =>
     + 'que existe para sacar clics');
   assert.match(des, /method:'DELETE'/);
   // Y es blando porque el servidor lo hace blando, no porque la pantalla lo diga.
-  assert.match(SERV, /export function borrarVolcado\([\s\S]{0,400}eliminado_en = datetime/);
+  const iBor = SERV.indexOf('export function borrarVolcado(');
+  assert.ok(iBor > 0, 'no está borrarVolcado');
+  const bor = SERV.slice(iBor, SERV.indexOf('\r\n}', iBor));
+  assert.match(bor, /UPDATE gal_volcados SET eliminado_en = datetime/);
+  assert.ok(!/DELETE FROM gal_volcados/.test(bor), 'borra duro los kilos');
 });
 
 test('LA VENTANA RÁPIDA VIVE FUERA DE TODA PANTALLA, como todas', () => {
@@ -1122,7 +1149,16 @@ test('LOS DESPLEGABLES SE ARMAN EN UN SOLO LUGAR', () => {
   // copias, y la de abajo se quedaría sin el agrupado por finca el día que
   // alguien toque una sola.
   assert.match(PANEL, /function galKgLlenarLote\(sel\)\{/);
-  assert.match(PANEL, /function galKgLlenarCuad\(cu\)\{/);
+  /* El desplegable único de cuadrilla se fue en la V1133: ahora es una LISTA, y el
+     armador común es galCuadPintar. Escrito dos veces, una de las dos ventanas se
+     quedaría con una sola cuadrilla por carga el día que alguien toque la otra. */
+  assert.match(PANEL, /function galCuadPintar\(contId, ids\)\{/);
+  assert.ok(!/function galKgLlenarCuad\(/.test(PANEL),
+    'volvió el desplegable único: una carga no puede volver a tener una sola cuadrilla');
+  for (const v of ['gal-kg-cuads', 'gal-rap-cuads']) {
+    assert.ok(PANEL.includes('id="' + v + '"'), 'falta el contenedor ' + v);
+    assert.ok(PANEL.includes("galCuadPintar('" + v + "'"), v + " no usa el armador comun");
+  }
   assert.equal((PANEL.match(/── ' \+ galKgEsc\(g\.f\) \+ ' ──/g) || []).length, 1,
     'el agrupado por finca está escrito más de una vez');
   for (const v of ['gal-kg-lote', 'gal-rap-lote']) {
@@ -2095,13 +2131,16 @@ test('el service worker se registra y se sirve desde la RAÍZ', () => {
     'el service worker se puede quedar cacheado para siempre');
 });
 
-test('EL CARTEL DE «ESTO ES VIEJO» ESTÁ EN LAS TRES PANTALLAS', () => {
+test('EL CARTEL DE «ESTO ES VIEJO» ESTÁ EN LAS CUATRO PANTALLAS', () => {
   // Un dato viejo que no dice que es viejo es peor que una pantalla vacía: el
   // operador arma un camión con cajas que ya salieron. Y va en UNA función,
   // no copiado en cada pantalla.
   assert.match(PANEL, /function galOffCartel\(j, dondeId\)\{/);
   const usos = [...PANEL.matchAll(/galOffCartel\(j, '([a-z-]+)'\)/g)].map((m) => m[1]);
-  assert.deepEqual(usos.sort(), ['gac-aviso', 'gpr-aviso', 'gst-aviso'],
+  /* La carga de kilos entró en la V1133 y era la que más falta hacía: es la única que
+     se usa SIN señal todo el día, y era justamente donde los kilos del día aparecían
+     en cero sin que nada dijera por qué. */
+  assert.deepEqual(usos.sort(), ['gac-aviso', 'gkg-aviso', 'gpr-aviso', 'gst-aviso'],
     'alguna pantalla del galpón no avisa que está mostrando datos viejos');
   // Y los tres contenedores existen, o el cartel se pinta en la nada.
   for (const id of usos) {

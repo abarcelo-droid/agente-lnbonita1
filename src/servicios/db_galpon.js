@@ -169,6 +169,38 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS gal_volc_lote_idx  ON gal_volcados(lote_id, fecha);
   CREATE INDEX IF NOT EXISTS gal_volc_cuad_idx  ON gal_volcados(cuadrilla_id, fecha);
   -- ═══════════════════════════════════════════════════════════════════════════
+  -- DOS CUADRILLAS LLENANDO EL MISMO CAJÓN
+  -- ═══════════════════════════════════════════════════════════════════════════
+  -- Andy, 2/11/2026: «que pueda elegir dos cuadrillas cosechando el mismo cajón. A
+  -- veces pasa».
+  --
+  -- POR QUÉ UNA TABLA Y NO UNA SEGUNDA COLUMNA. cuadrilla2_id es más corto de
+  -- escribir y es la trampa: el día que sean tres hay que agregar la tercera columna,
+  -- y los cortes por cuadrilla —que son dos consultas— hay que reescribirlos cada vez.
+  -- Con una fila por cuadrilla, la tercera sale gratis y las consultas no cambian.
+  --
+  -- Y LOS KILOS SE REPARTEN ACÁ, NO EN LA FILA MADRE. El cajón es uno y pesa lo que
+  -- pesa: gal_volcados.kilos es lo que entró y no se toca. Lo que se parte es la
+  -- ATRIBUCIÓN, que es otra cosa — y es la que se usa para pagar el jornal. Si los
+  -- kilos enteros se le contaran a las dos, el corte por cuadrilla sumaría más kilos
+  -- que los que entraron al galpón, y nadie podría decir cuál de los dos totales vale.
+  --
+  -- SIN FK hacia pa_cuadrillas, por la regla de CLAUDE.md: con foreign_keys=ON, una
+  -- clave foránea desde acá haría fallar los DELETE de Personal.
+  CREATE TABLE IF NOT EXISTS gal_volcado_cuadrillas (
+    volcado_id   INTEGER NOT NULL,            -- → gal_volcados(id)
+    cuadrilla_id INTEGER NOT NULL,            -- → pa_cuadrillas(id), FK lógica
+    -- Congelado, igual que en la fila madre: los nombres de Personal cambian y un
+    -- informe de la temporada pasada tiene que seguir diciendo lo que decía.
+    cuadrilla    TEXT,
+    -- La parte que le toca. Partes iguales: es la única reparto honesto cuando nadie
+    -- midió cuánto puso cada una. Si una llenó más, van dos cargas.
+    kilos        REAL NOT NULL,
+    PRIMARY KEY (volcado_id, cuadrilla_id)
+  );
+  CREATE INDEX IF NOT EXISTS gal_volc_cuad_sat_idx
+    ON gal_volcado_cuadrillas(cuadrilla_id);
+  -- ═══════════════════════════════════════════════════════════════════════════
   -- LO QUE EL TARJETÓN NECESITA DE CADA LOTE
   -- ═══════════════════════════════════════════════════════════════════════════
   -- Andy, 1/11/2026: «RENSPA los voy a cargar en los lotes» y «variedad del damasco es
@@ -510,6 +542,28 @@ for (const sql of [
   // operador—; esto es el cinturón de abajo, para lo que entre por otro lado.
   "CREATE UNIQUE INDEX IF NOT EXISTS gal_lote_vig_uq ON gal_lote_vigente(fecha, desde_hora)",
 ]) { try { db.exec(sql); } catch (_) {} }
+
+// ── LA HISTORIA TAMBIÉN TIENE QUE ESTAR EN LA TABLA NUEVA (V1133) ───────────────────
+// El corte por cuadrilla pasó a leerse de gal_volcado_cuadrillas. Sin este relleno,
+// la temporada que ya está cargada aparecería ENTERA como «— sin cuadrilla —»: no
+// faltaría un número, estaría mal el que se usa para pagar.
+//
+// INSERT OR IGNORE contra la clave (volcado, cuadrilla): corre en cada arranque y la
+// segunda vez no hace nada. Y NO toca las que ya tienen fila, así que un reparto entre
+// dos cuadrillas no se pisa con los kilos enteros de la fila madre.
+try {
+  const r = db.prepare(
+    'INSERT OR IGNORE INTO gal_volcado_cuadrillas (volcado_id, cuadrilla_id, cuadrilla, kilos)'
+    + ' SELECT id, cuadrilla_id, cuadrilla, kilos FROM gal_volcados'
+    + '  WHERE cuadrilla_id IS NOT NULL'
+    /* Sólo las que todavía no tienen NINGUNA fila. Una carga repartida entre dos ya
+       tiene las suyas y su clave (volcado, cuadrilla_id de la madre) está libre: sin
+       este NOT EXISTS, el IGNORE no la frena y le entra una tercera fila con los kilos
+       enteros. El corte sumaría 1,5 veces el cajón. */
+    + '    AND NOT EXISTS (SELECT 1 FROM gal_volcado_cuadrillas vc'
+    + '                     WHERE vc.volcado_id = gal_volcados.id)').run();
+  if (r.changes) console.log('[GALPON] cuadrillas de ' + r.changes + ' cargas pasadas a la tabla nueva');
+} catch (e) { console.warn('[GALPON] relleno de gal_volcado_cuadrillas:', e.message); }
 
 // ── LOS VALORES QUE TIENEN QUE EXISTIR DESDE EL DÍA UNO ──────────────────────────────
 // Se siembran con INSERT OR IGNORE: si alguien ya los cambió, no se pisan. Sin esto, la
