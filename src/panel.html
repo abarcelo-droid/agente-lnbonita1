@@ -7398,6 +7398,7 @@ if ('serviceWorker' in navigator) {
       <div style="display:flex;gap:8px">
         <button class="btn bp bs" onclick="galRapAbrir()">⚡ Carga rápida</button>
         <button class="btn bo bs" onclick="galKgAbrir()">+ Cargar kilos</button>
+        <button class="btn bo bs" onclick="galKgPlanilla()">📋 Planilla de control</button>
         <button class="btn bo bs" onclick="sgManualAbrir('galpon-carga')">❓ ¿Cómo se usa?</button></div>
     </div>
 
@@ -7461,10 +7462,24 @@ if ('serviceWorker' in navigator) {
           <div style="flex:0 0 130px"><label>IFCOs <span style="font-weight:400;
             text-transform:none;color:var(--mut)">(opcional)</span></label>
             <input type="number" id="gal-kg-ifcos" min="0" step="1" placeholder=""></div>
+          <div style="flex:0 0 110px"><label>N° de viaje <span style="font-weight:400;
+            text-transform:none;color:var(--mut)">(opc.)</span></label>
+            <input type="number" id="gal-kg-viaje" min="1" step="1" placeholder=""></div>
+          <div style="flex:0 0 150px"><label>Estado sanitario</label>
+            <select id="gal-kg-san">
+              <option value="">— sin mirar —</option>
+              <option value="B">B · bueno</option>
+              <option value="R">R · regular</option>
+              <option value="M">M · malo</option>
+            </select></div>
           <div style="flex:1 1 200px;min-width:0"><label>Observación <span style="font-weight:400;
             text-transform:none;color:var(--mut)">(opcional)</span></label>
             <input type="text" id="gal-kg-obs" placeholder=""></div>
         </div>
+        <div class="gal-ay" style="margin-top:6px">El <b>viaje</b> y el <b>estado
+          sanitario</b> son las dos columnas de la planilla de calidad. Dejar el estado
+          en «sin mirar» no es lo mismo que poner B: en la planilla sale con las tres
+          letras para circular a mano.</div>
 
         <div id="gal-kg-error" style="display:none;margin-top:10px" class="ojo"></div>
         <div id="gal-kg-ok" style="display:none;margin-top:10px"></div>
@@ -28148,7 +28163,38 @@ SG_MANUAL['galpon-config'] = { titulo: 'Galpón · Configuración', html:
 };
 
 SG_MANUAL['galpon-carga'] = { titulo: 'Galpón · Carga de kilos', html:
-  '<p>Acá se anota <b>cuánta fruta entró al galpón</b>: cuántos kilos, de qué lote y de qué '
+  '<h3>📋 La planilla de control de ingreso <span class="ver">V1131</span></h3>'
+  + '<p>Andy, 2/11/2026, con la foto del papel: <i>«necesito que en el panel de ingreso '
+  + 'de kilos pueda descargarse un exportable en PDF exactamente con esta '
+  + 'información»</i>.</p>'
+  + '<p>El botón <b>📋 Planilla de control</b> saca el <b>REGISTRO DE CONTROL EN GALPÓN '
+  + 'DE EMPAQUE</b> del día que está en pantalla, con las mismas siete columnas del '
+  + 'papel, el mismo encabezado y las tres firmas. Se abre en una pestaña para '
+  + 'imprimirla.</p>'
+
+  + '<p>Para llenarla hacen falta dos datos que antes no se cargaban y ahora están en '
+  + 'la ventana de carga:</p>'
+  + '<ul>'
+  + '<li><b>N° de viaje.</b> Es el camión. Un día entran varios y la planilla se lleva '
+  + 'uno por viaje: sin ese número todo cae en la misma hoja. Queda puesto entre carga '
+  + 'y carga, porque un camión son veinte cajones seguidos.</li>'
+  + '<li><b>Estado sanitario:</b> B, R o M. En el papel se circula uno.</li>'
+  + '</ul>'
+  + '<div class="ojo"><b>«Sin mirar» no es lo mismo que B.</b> Si se deja vacío, la '
+  + 'planilla sale igual con las <b>tres letras para circular a mano</b>. Una hoja '
+  + 'donde todo figura bueno porque nadie completó la columna es peor que una con '
+  + 'huecos: la firman tres personas.</div>'
+
+  + '<p>El <b>número de bolsón</b> no se carga: es el correlativo del papel y <b>arranca '
+  + 'en 1 con cada viaje</b>. Se calcula al armar la planilla — si se guardara, borrar '
+  + 'una carga del medio obligaría a renumerar todas las de abajo, y esa renumeración '
+  + 'es la que después no coincide con el papel que ya se firmó.</p>'
+  + '<p>Abajo quedan <b>filas en blanco</b> para seguir anotando: el camión que entra '
+  + 'después de imprimir se escribe con la lapicera, como hoy. Y un día sin nada '
+  + 'cargado saca la <b>hoja vacía</b> para llevar al galpón.</p>'
+  + '<p>La versión, la vigencia y los tres nombres que firman salen de <b>⚙️ Configuración</b>: es un documento controlado y lo revisa calidad, no un programador.</p>'
+
+  + '<p>Acá se anota <b>cuánta fruta entró al galpón</b>: cuántos kilos, de qué lote y de qué '
   + 'cuadrilla. Es la única tabla del sistema que guarda <b>volumen</b> — hasta la V1096 no '
   + 'había ninguna. De estos renglones salen después el rendimiento de cada lote y los kilos '
   + 'por jornal de cada cuadrilla.</p>'
@@ -57516,6 +57562,18 @@ async function galKgPadrones(){
   } catch (e) { GKG.cuadrillas = []; }
 }
 
+/* ── 📋 LA PLANILLA DE CALIDAD ─────────────────────────────────────────────────
+   Andy, 2/11/2026, con la foto del papel: «necesito que en el panel de ingreso de
+   kilos pueda descargarse un exportable en PDF exactamente con esa información».
+
+   Sale del DÍA que está en pantalla y se abre en una pestaña: es para imprimirla y
+   llevarla al galpón, no para guardarla en Descargas. */
+function galKgPlanilla(){
+  var f = document.getElementById('gkg-fecha');
+  var q = (f && f.value) ? ('?fecha=' + encodeURIComponent(f.value)) : '';
+  window.open('/api/galpon/planilla.pdf' + q, '_blank');
+}
+
 async function galKgCargar(){
   var f = document.getElementById('gkg-fecha');
   var q = f && f.value ? ('?fecha=' + encodeURIComponent(f.value)) : '';
@@ -57626,6 +57684,8 @@ function galKgAbrir(id){
   document.getElementById('gal-kg-kilos').value = '';
   document.getElementById('gal-kg-ifcos').value = '';
   document.getElementById('gal-kg-obs').value = '';
+  /* El viaje y el estado sanitario NO se limpian: un camión son veinte cajones
+     seguidos y volver a elegirlos veinte veces es como se llena mal. */
 
   if (c){
     document.getElementById('gal-kg-tit').textContent = 'Corregir la carga';
@@ -57693,6 +57753,8 @@ async function galKgGuardar(){
     kilos: document.getElementById('gal-kg-kilos').value,
     ifcos: document.getElementById('gal-kg-ifcos').value,
     observacion: document.getElementById('gal-kg-obs').value,
+    viaje: document.getElementById('gal-kg-viaje').value,
+    sanitario: document.getElementById('gal-kg-san').value,
     origen: GBAL.usada ? 'balanza' : 'manual',
   };
   var btn = document.getElementById('gal-kg-ok-btn');

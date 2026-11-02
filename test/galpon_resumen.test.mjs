@@ -93,7 +93,7 @@ function base() {
       (10,'Damasco','2026/27',1), (11,'Damasco','2026/27',1), (12,'Uva','2026/27',1);
     CREATE TABLE gal_config (clave TEXT PRIMARY KEY, valor TEXT, actualizado TEXT);
     CREATE TABLE gal_volcados (id INTEGER PRIMARY KEY AUTOINCREMENT, fecha TEXT,
-      lote_id INTEGER, lote_nombre TEXT, producto TEXT, kilos REAL, ifcos INTEGER,
+      lote_id INTEGER, lote_nombre TEXT, producto TEXT, kilos REAL, ifcos INTEGER, viaje INTEGER, sanitario TEXT,
       eliminado_en TEXT);
     CREATE TABLE gal_lote_datos (lote_id INTEGER PRIMARY KEY, renspa TEXT, variedad TEXT,
       cuartel TEXT, notas TEXT, actualizado TEXT);

@@ -464,6 +464,25 @@ for (const sql of [
   // que importa es que el renglón que se ve en pantalla no es el que entró por la
   // balanza.
   "ALTER TABLE gal_procesos ADD COLUMN partido_de INTEGER",
+  // ── LO QUE PIDE LA PLANILLA DE CALIDAD Y NO SE CARGABA ────────────────────────
+  // Andy, 2/11/2026, con la foto del papel: «necesito que en el panel de ingreso de
+  // kilos pueda descargarse un exportable en PDF exactamente con esta información».
+  //
+  // El REGISTRO DE CONTROL EN GALPÓN DE EMPAQUE pide por cada cajón: viaje, finca,
+  // lote, número de bolsón, peso, estado sanitario y observaciones. De esos, el
+  // sistema tenía todos menos dos.
+  //
+  // EL VIAJE es el camión. Un día entran varios y la planilla se lleva uno por viaje:
+  // sin ese número, todas las cargas del día caen en la misma hoja y el correlativo
+  // de bolsón —que en el papel arranca en 1 con cada camión— no se puede reconstruir.
+  "ALTER TABLE gal_volcados ADD COLUMN viaje INTEGER",
+  // EL ESTADO SANITARIO: B / R / M, y se circula uno. Es un dato de CALIDAD y no de
+  // volumen —no entra en ningún kilo— pero es por lo que existe la planilla: queda
+  // firmado por tres personas.
+  //
+  // Nulo es «no se miró», que no es lo mismo que B. Un informe donde todo figura
+  // bueno porque nadie completó la columna es peor que uno con huecos.
+  "ALTER TABLE gal_volcados ADD COLUMN sanitario TEXT",
   "ALTER TABLE gal_presentaciones ADD COLUMN icono TEXT",
   // Cambia cada vez que se sube uno nuevo. Va en la URL como ?v= porque si no el
   // navegador sigue mostrando el anterior: misma dirección, misma caché.
@@ -539,6 +558,11 @@ for (const [clave, valor] of [
   // El prefijo del número de pallet. PC = Puente Cordón.
   ['pallet_prefijo', 'PC'],
   ['despacho_prefijo', 'DG'],
+  ['plan_version', '02'],
+  ['plan_vigencia', 'diciembre 2028'],
+  ['plan_modifico', 'Ing. Videla, Erika'],
+  ['plan_reviso', 'Lic. Vives, Carina'],
+  ['plan_aprobo', 'Carlos Barceló'],
 ]) {
   try {
     db.prepare('INSERT OR IGNORE INTO gal_config (clave, valor) VALUES (?,?)').run(clave, valor);

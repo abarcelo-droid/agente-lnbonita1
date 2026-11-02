@@ -60,7 +60,7 @@ function base(techo = '50000') {
     CREATE TABLE gal_volcados (
       id INTEGER PRIMARY KEY AUTOINCREMENT, uuid TEXT UNIQUE, fecha TEXT NOT NULL,
       hora TEXT, lote_id INTEGER NOT NULL, lote_nombre TEXT, producto TEXT,
-      cuadrilla_id INTEGER, cuadrilla TEXT, kilos REAL NOT NULL, ifcos INTEGER,
+      cuadrilla_id INTEGER, cuadrilla TEXT, kilos REAL NOT NULL, ifcos INTEGER, viaje INTEGER, sanitario TEXT,
       estado TEXT NOT NULL DEFAULT 'ok', eliminado_en TEXT);
 
     CREATE TABLE gal_lote_datos (lote_id INTEGER PRIMARY KEY, renspa TEXT, variedad TEXT,
