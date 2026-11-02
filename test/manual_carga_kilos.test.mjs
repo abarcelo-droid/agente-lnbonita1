@@ -53,11 +53,13 @@ function fn(fuente, firma) {
 // ══════════════════════════════════════════════════════════════════════════
 // 0 · LA REGLA DE CLAUDE.md
 // ══════════════════════════════════════════════════════════════════════════
-test('las tres secciones nuevas llevan su V###', () => {
+test('cada sección nueva lleva su V###', () => {
   // Sin el número, el que lo lee no sabe si está mirando el manual de la
   // versión que tiene en pantalla.
   assert.equal((HTML.match(/<span class="ver">V1133<\/span>/g) || []).length, 3,
     'alguna de las tres secciones de la V1133 no lleva su número de versión');
+  assert.equal((HTML.match(/<span class="ver">V1134<\/span>/g) || []).length, 1,
+    'la sección del casillero no lleva su número de versión');
 });
 
 // ══════════════════════════════════════════════════════════════════════════
@@ -254,4 +256,89 @@ test('MANUAL: «la hora a la que bajó la foto»', () => {
   const nav = fs.readFileSync(path.join(RAIZ, 'src/galponOfflineNav.js'), 'utf8');
   assert.match(nav, /d\.cache_cuando = g\.cuando;/);
   assert.match(PANEL, /GKG\.cacheCuando = j\.cache_cuando \|\| null;/);
+});
+
+// ══════════════════════════════════════════════════════════════════════════
+// 4 · ☑️ BORRAR VARIAS DE UNA VEZ (V1134)
+// ══════════════════════════════════════════════════════════════════════════
+
+test('MANUAL: «cada renglón que se puede borrar tiene su casillero»', () => {
+  dice(/casillero/);
+  dice(/el del encabezado marca o desmarca todos/);
+  const pintar = fn(PANEL, 'function galKgPintar(){');
+  assert.match(pintar, /class="gkg-ck" data-id=/,
+    'los renglones no traen casillero');
+  assert.match(PANEL, /id="gkg-ck-todas"[\s\S]{0,200}galKgSelTodas\(this\.checked\)/,
+    'falta el casillero del encabezado');
+});
+
+test('MANUAL: «sólo tienen casillero las que se pueden borrar»', () => {
+  dice(/Sólo tienen casillero las que <b>se pueden<\/b> borrar/);
+  const pintar = fn(PANEL, 'function galKgPintar(){');
+  // La misma condición que la ×, no una copia suelta que pueda decir otra cosa.
+  assert.match(pintar, /\(\(puedoBorrar \|\| c\.encolado\)[\s\S]{0,200}class="gkg-ck"/,
+    'el casillero no mira el mismo permiso que la ×');
+});
+
+test('MANUAL: «la barra dice cuántas cargas y cuántos kilos»', () => {
+  dice(/cuántas cargas y cuántos kilos/);
+  dice(/5\.400 kg/);
+  const b = fn(PANEL, 'function galKgPintarSel(){');
+  assert.match(b, /galKgNum\(kg\)/, 'la barra no muestra los kilos');
+  assert.match(b, /GKG\.sel\.forEach/);
+  // Y aparece recién con algo marcado: lo normal es silencioso (CLAUDE.md).
+  assert.match(b, /if \(!n\)\{[\s\S]{0,120}display = 'none'/);
+  assert.match(PANEL, /#sec-galpon-carga \.gkg-barra\{display:none/);
+});
+
+test('MANUAL: «pregunta una vez, con esos dos números»', () => {
+  dice(/pregunta una vez/);
+  const b = fn(PANEL, 'async function galKgBorrarSel\(\)\{'.replace(/\\/g, ''));
+  assert.match(b, /confirm\(/, 'borra veinte renglones sin preguntar');
+  assert.match(b, /galKgNum\(kg\)/,
+    'la confirmación no dice los kilos: «12 cargas» se parece a cualquier cosa');
+});
+
+test('MANUAL: «o todas o ninguna»', () => {
+  dice(/O todas o ninguna/);
+  dice(/no se borra ninguna/);
+  const f = fn(SERV, 'export function borrarVolcados(db, ids, opts)');
+  // La validación entera ANTES del primer UPDATE.
+  const iVal = f.indexOf('filas.push(f);');
+  const iUpd = f.indexOf('UPDATE gal_volcados SET eliminado_en');
+  assert.ok(iVal > 0 && iUpd > iVal,
+    'borra al pasar: una tanda puede quedar a medias y el manual promete que no');
+  assert.match(f, /No se borró ninguna/,
+    'el aviso no aclara que no se borró nada');
+});
+
+test('MANUAL: «la selección no se pierde» cuando el servidor dice que no', () => {
+  dice(/no se pierde/);
+  const b = fn(PANEL, 'async function galKgBorrarSel\(\)\{'.replace(/\\/g, ''));
+  const i = b.indexOf('if (!j.ok)');
+  assert.ok(i > 0, 'no mira si el servidor aceptó');
+  const j = b.indexOf('GKG.sel = [];');
+  assert.ok(j > i, 'suelta la selección antes de saber si se pudo borrar');
+  assert.match(b.slice(i, i + 160), /return;/, 'sigue adelante después de un error');
+});
+
+test('MANUAL: «sin señal también funciona»', () => {
+  dice(/Sin señal también funciona/);
+  dice(/un solo pedido/);
+  const off = fs.readFileSync(path.join(RAIZ, 'src/galponOffline.js'), 'utf8');
+  assert.match(off, /\{ metodo: 'POST', re: \/\^\\\/api\\\/galpon\\\/volcados\\\/borrar\$\/ \}/,
+    'el borrado múltiple no se puede encolar: sin señal devuelve error de red');
+  // Lo de la cola sale de la cola, y la barra cuenta los kilos de las dos cosas.
+  const b = fn(PANEL, 'async function galKgBorrarSel\(\)\{'.replace(/\\/g, ''));
+  assert.match(b, /indexOf\('enc:'\) === 0/);
+  const bar = fn(PANEL, 'function galKgPintarSel(){');
+  assert.match(bar, /\(GKG\.encoladas \|\| \[\]\)\.concat\(GKG\.cargas\)/,
+    'la barra no cuenta los kilos de la cola');
+});
+
+test('MANUAL: «hay un tope de 500 por vez»', () => {
+  dice(/<b>tope de 500 por vez<\/b>/);
+  const f = fn(SERV, 'export function borrarVolcados(db, ids, opts)');
+  assert.match(f, /limpios\.length > 500/);
+  assert.match(f, /demasiadas/);
 });

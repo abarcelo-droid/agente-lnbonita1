@@ -28,7 +28,8 @@ import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { fileURLToPath } from 'node:url';
 
-import { borrarVolcado, registrarVolcado, resumenDelDia } from '../src/servicios/galpon.js';
+import { borrarVolcado, borrarVolcados, registrarVolcado, resumenDelDia }
+  from '../src/servicios/galpon.js';
 
 const RAIZ = process.env.LNB_RAIZ
   || path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -371,6 +372,9 @@ async function servidor(db, usuario) {
 const OPERADOR = { id: 2, nombre: 'Juan', rol: 'operador' };
 const ADMIN    = { id: 1, nombre: 'Andy', rol: 'admin' };
 
+const json = (b) => ({ method: 'POST', headers: { 'Content-Type': 'application/json' },
+                       body: JSON.stringify(b) });
+
 t('UN OPERADOR BORRA LO QUE ACABA DE CARGAR HOY', async () => {
   const db = base();
   const s = await servidor(db, OPERADOR);
@@ -456,4 +460,209 @@ test('Y LA PANTALLA MIRA LA FECHA JUNTO CON EL PERMISO, no en lugar de él', () 
   const panel = fs.readFileSync(path.join(RAIZ, 'src/panel.html'), 'utf8');
   assert.match(panel, /var puedoBorrar = \(GKG\.fecha === GKG\.hoy\) \|\| !!GKG\.puedeAnular;/);
   assert.match(panel, /GKG\.puedeAnular = !!j\.puede_anular;/);
+});
+
+// ══════════════════════════════════════════════════════════════════════════
+// 4 · ☑️ BORRAR VARIAS DE UNA VEZ
+// ══════════════════════════════════════════════════════════════════════════
+// Andy, 2/11/2026: «quiero poder seleccionar varios para eliminar, como si
+// tuvieran un casillero».
+//
+// O TODAS O NINGUNA. Un borrado a medias de una tanda es peor que ninguno: el
+// que apretó no sabe cuáles quedaron y tiene que mirar renglón por renglón,
+// que es el trabajo que el casillero venía a sacar.
+
+test('BORRA LAS QUE SE LE PASAN, y dice cuántas y cuántos kilos', () => {
+  const db = base();
+  const a = meter(db, HOY); const b = meter(db, HOY); const c = meter(db, HOY);
+  const r = borrarVolcados(db, [a, b], { hoy: HOY });
+  assert.equal(r.ok, true);
+  assert.equal(r.borradas, 2);
+  assert.equal(r.kilos, 900);
+  // Y la tercera queda: se borra lo que se pidió, no 'todo el día'.
+  assert.equal(resumenDelDia(db, HOY).cargas, 1);
+  assert.equal(resumenDelDia(db, HOY).kilos, 450);
+  assert.ok(c);
+});
+
+test('SI UNA NO SE PUEDE, NO SE BORRA NINGUNA', () => {
+  /* Es la razón de ser de la validación previa. Borrando al pasar, las dos
+     primeras se irían y la tercera no: el que apretó ve un error y no tiene
+     cómo saber que igual perdió dos renglones. */
+  const db = base();
+  const a = meter(db, HOY); const b = meter(db, HOY); const viejo = meter(db, AYER);
+  const r = borrarVolcados(db, [a, b, viejo], { hoy: HOY, puede_anular: false });
+  assert.equal(r.ok, false);
+  assert.equal(r.status, 403);
+  assert.match(r.motivo, new RegExp(AYER));
+  assert.match(r.motivo, /No se borró ninguna/, 'no aclara que no se borró nada');
+  assert.equal(resumenDelDia(db, HOY).cargas, 2);
+  assert.equal(resumenDelDia(db, AYER).cargas, 1);
+});
+
+test('una que ya no está frena la tanda, y lo dice', () => {
+  // Pasa de verdad: dos personas mirando el mismo día. Seguir adelante dejaría
+  // a la segunda creyendo que borró algo que ya no existía.
+  const db = base();
+  const a = meter(db, HOY); const b = meter(db, HOY);
+  borrarVolcado(db, b, { hoy: HOY });
+  const r = borrarVolcados(db, [a, b], { hoy: HOY });
+  assert.equal(r.ok, false);
+  assert.equal(r.status, 404);
+  assert.match(r.motivo, /ya la borró/);
+  assert.equal(resumenDelDia(db, HOY).cargas, 1, 'borró la primera igual');
+});
+
+test('con permiso de anular se puede mezclar días', () => {
+  const db = base();
+  const r = borrarVolcados(db, [meter(db, HOY), meter(db, AYER)],
+    { hoy: HOY, puede_anular: true });
+  assert.equal(r.ok, true);
+  assert.equal(r.borradas, 2);
+});
+
+test('el id repetido es un clic de más, no un error', () => {
+  const db = base();
+  const a = meter(db, HOY);
+  const r = borrarVolcados(db, [a, a, String(a)], { hoy: HOY });
+  assert.equal(r.ok, true);
+  assert.equal(r.borradas, 1, 'contó la misma carga dos veces');
+  assert.equal(r.kilos, 450);
+  /* Y LA LISTA QUE DEVUELVE TAMBIÉN VIENE SIN REPETIDOS. El total salía bien igual
+     —el UPDATE no hace nada la segunda vez— así que sin este assert la
+     deduplicación se podía borrar sin que nada cayera. Importa porque esta lista es
+     lo que la función dice haber tocado, y además es lo que se cuenta contra el
+     tope de 500. */
+  assert.deepEqual(r.ids, [a]);
+});
+
+test('una lista vacía o con basura no borra nada y dice qué pasó', () => {
+  const db = base();
+  meter(db, HOY);
+  for (const malo of [[], null, undefined, 'x']) {
+    const r = borrarVolcados(db, malo, { hoy: HOY });
+    assert.equal(r.ok, false, JSON.stringify(malo) + ' borró algo');
+    assert.match(r.motivo, /ninguna carga/);
+  }
+  const r2 = borrarVolcados(db, [1, 'tres'], { hoy: HOY });
+  assert.equal(r2.ok, false);
+  assert.match(r2.motivo, /no se entiende/);
+  assert.equal(resumenDelDia(db, HOY).cargas, 1);
+});
+
+test('HAY UN TECHO: la lista la manda el navegador', () => {
+  // Mil ids son mil consultas antes de contestar, y nadie selecciona mil a mano.
+  const db = base();
+  const muchos = [];
+  for (let i = 1; i <= 501; i++) muchos.push(i);
+  const r = borrarVolcados(db, muchos, { hoy: HOY });
+  assert.equal(r.ok, false);
+  assert.match(r.motivo, /demasiadas/);
+});
+
+t('LA RUTA: un operador borra varias de hoy en un solo pedido', async () => {
+  const db = base();
+  const s = await servidor(db, OPERADOR);
+  try {
+    const ids = [meter(db, HOY), meter(db, HOY), meter(db, HOY)];
+    const r = await s.pegar('/volcados/borrar', json({ ids }));
+    assert.equal(r.status, 200);
+    const j = await r.json();
+    assert.equal(j.borradas, 3);
+    assert.equal((await (await s.pegar('/volcados?fecha=' + HOY)).json()).resumen.cargas, 0);
+  } finally { s.cerrar(); }
+});
+
+t('LA RUTA CONTROLA LA FECHA TAMBIÉN ACÁ', async () => {
+  /* Es la segunda mitad de la misma decisión. El nivel ya lo aflojó permisos.js
+     para todo lo que cuelga de /api/galpon/volcados —y esta dirección cuelga de
+     ahí— así que sin este control un operador borraría la temporada pasada de a
+     quinientas por pedido. */
+  const db = base();
+  const s = await servidor(db, OPERADOR);
+  try {
+    const ids = [meter(db, HOY), meter(db, AYER)];
+    const r = await s.pegar('/volcados/borrar', json({ ids }));
+    assert.equal(r.status, 403);
+    assert.match((await r.json()).error, /No se borró ninguna/);
+    assert.equal((await (await s.pegar('/volcados?fecha=' + HOY)).json()).resumen.cargas, 1);
+  } finally { s.cerrar(); }
+});
+
+t('y un admin sí puede', async () => {
+  const db = base();
+  const s = await servidor(db, ADMIN);
+  try {
+    const ids = [meter(db, HOY), meter(db, AYER)];
+    assert.equal((await s.pegar('/volcados/borrar', json({ ids }))).status, 200);
+  } finally { s.cerrar(); }
+});
+
+t('sin sesión no borra nada', async () => {
+  const db = base();
+  const s = await servidor(db, null);
+  try {
+    assert.equal((await s.pegar('/volcados/borrar', json({ ids: [1] }))).status, 401);
+  } finally { s.cerrar(); }
+});
+
+t('EL CERROJO DE EMPRESA TAPA TAMBIÉN ESTA DIRECCIÓN', async () => {
+  // El galpón es de Puente Cordón. Parado en San Gerónimo no se borra nada de acá.
+  const db = base();
+  const s = await servidor(db, ADMIN);
+  try {
+    const id = meter(db, HOY);
+    const r = await s.pegar('/volcados/borrar?sociedad_id=9', json({ ids: [id] }));
+    assert.equal(r.status, 403);
+    assert.match((await r.json()).error, /Puente Cord/);
+    assert.equal(resumenDelDia(db, HOY).cargas, 1);
+  } finally { s.cerrar(); }
+});
+
+test('LA DIRECCIÓN NUEVA CUELGA DE LA QUE YA TENÍA EL NIVEL AFLOJADO', async () => {
+  /* No hizo falta tocar BORRAR_ES_OPERAR: /api/galpon/volcados/borrar empieza con
+     '/api/galpon/volcados/'. Esto lo clava, porque si mañana alguien acortara ese
+     prefijo la dirección nueva pediría nivel de anulación y el casillero dejaría
+     de funcionar para el operario — sin que nada más se rompa. */
+  const p = await conPermisos({});
+  try {
+    assert.equal(p.borrarEsOperar('/api/galpon/volcados/borrar'), true);
+  } finally { p.cerrar(); }
+  const pp = await conPermisos({ 'galpon-carga': 'operar' });
+  try {
+    assert.equal(pp.correr('/api/galpon/volcados/borrar', 'POST').paso, true,
+      'el borrado múltiple pide nivel de anulación');
+  } finally { pp.cerrar(); }
+  const pv = await conPermisos({ 'galpon-carga': 'ver' });
+  try {
+    assert.equal(pv.correr('/api/galpon/volcados/borrar', 'POST').paso, false);
+  } finally { pv.cerrar(); }
+});
+
+test('SIN TRANSACCIÓN, A PROPÓSITO, Y POR ESO SE VALIDA ANTES', () => {
+  /* db.transaction() no existe en node:sqlite, así que usarlo partiría los tests
+     en dos. No hace falta: después de validar lo único que queda es un UPDATE por
+     fila que no puede fallar. Lo que sí hace falta es que la validación esté
+     COMPLETA antes del primer UPDATE — y eso es lo que mira este assert. */
+  const f = fs.readFileSync(path.join(RAIZ, 'src/servicios/galpon.js'), 'utf8');
+  const i = f.indexOf('export function borrarVolcados(db, ids, opts)');
+  assert.ok(i > 0, 'no está borrarVolcados');
+  const cuerpo = f.slice(i, f.indexOf('\r\n}', i));
+  const iVal = cuerpo.indexOf('filas.push(f);');
+  const iUpd = cuerpo.indexOf('UPDATE gal_volcados SET eliminado_en');
+  assert.ok(iVal > 0 && iUpd > iVal,
+    'borra antes de terminar de validar: una tanda puede quedar a medias');
+  assert.ok(!/db\.transaction/.test(cuerpo), 'db.transaction no corre con node:sqlite');
+  /* Y el UPDATE sigue siendo blando e idempotente. Acotado AL UPDATE: buscado en la
+     función entera, el "AND eliminado_en IS NULL" del SELECT de arriba lo cumple
+     solo, y el assert pasaba con el UPDATE sin guardia. Lo destapó la prueba de
+     mutación.
+
+     Y la guardia está por la CARRERA: entre la validación y el UPDATE un compañero
+     puede borrar una. Sin ella se le pisaría la fecha de borrado con la de ahora, y
+     el renglón diría que lo sacó el que apretó el casillero. */
+  const iUp = cuerpo.indexOf('UPDATE gal_volcados SET eliminado_en');
+  assert.match(cuerpo.slice(iUp, iUp + 220), /WHERE id = \? AND eliminado_en IS NULL/,
+    'el UPDATE del borrado múltiple no lleva su guardia');
+  assert.ok(!/DELETE FROM gal_volcados/.test(cuerpo), 'borra duro los kilos');
 });

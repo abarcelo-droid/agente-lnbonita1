@@ -7341,6 +7341,23 @@ if ('serviceWorker' in navigator) {
       #sec-galpon-carga .gkg-t .sub{font-size:10.5px;color:var(--mut);margin-top:2px}
       #sec-galpon-carga .gkg-t .vx{font-size:17px;font-weight:700;line-height:1.3}
 
+      /* ── EL CASILLERO DE CADA RENGLÓN Y LA BARRA DE LO SELECCIONADO ───────
+         La columna va primera y es angosta: 4% de 98vw son unos 55px, de sobra para
+         un casillero y su área de toque. Los otros siete anchos bajaron para que la
+         suma siga siendo 100% — con table-layout:fixed, 104% es la barra de
+         desplazamiento lateral que CLAUDE.md prohíbe. */
+      #sec-galpon-carga .gkg-ckc{text-align:center;padding-left:6px;padding-right:0}
+      #sec-galpon-carga input.gkg-ck{width:17px;height:17px;cursor:pointer;margin:0;
+        accent-color:var(--burg)}
+      /* Lo normal es silencioso: la barra aparece recién cuando hay algo seleccionado
+         (CLAUDE.md). Una barra vacía todo el día le come el lugar a la tabla y enseña
+         a saltear esa franja de la pantalla. */
+      #sec-galpon-carga .gkg-barra{display:none;align-items:center;gap:12px;
+        flex-wrap:wrap;margin-bottom:10px;padding:9px 14px;border-radius:10px;
+        border:1px solid var(--burg);background:var(--burl);font-size:13px}
+      #sec-galpon-carga .gkg-barra b{font-variant-numeric:tabular-nums}
+      #sec-galpon-carga .gkg-barra .gkg-bsep{margin-left:auto}
+
       /* ── LAS CUADRILLAS DE UNA CARGA, UN RENGLÓN CADA UNA ─────────────────
          Scopeado a .gal-cuads y no a la .sec: los dos contenedores viven adentro de
          ventanas, que cuelgan FUERA de toda .sec (CLAUDE.md). Una regla colgada de
@@ -7441,12 +7458,21 @@ if ('serviceWorker' in navigator) {
     <div id="gkg-tot" class="gkg-tot"></div>
     <div id="gkg-cortes" class="gkg-cortes"></div>
 
+    <!-- Lo seleccionado y qué hacer con eso. Se llena desde galKgPintarSel(): sin
+         nada marcado no se muestra. -->
+    <div id="gkg-barra" class="gkg-barra"></div>
+
     <div class="ab-table-wrap">
       <table class="pa-tbl gkg-tbl">
-        <colgroup><col style="width:20%"><col style="width:16%"><col style="width:16%">
-                  <col style="width:13%"><col style="width:9%"><col style="width:16%">
-                  <col style="width:10%"></colgroup>
+        <colgroup><col style="width:4%"><col style="width:19%"><col style="width:15%">
+                  <col style="width:15%"><col style="width:12%"><col style="width:8%">
+                  <col style="width:16%"><col style="width:11%"></colgroup>
         <thead><tr>
+          <!-- El casillero del encabezado marca y desmarca TODAS las que se pueden
+               borrar, no todas las que se ven: ofrecer marcar una que el servidor va a
+               rechazar es prometer algo que no se puede cumplir. -->
+          <th class="gkg-ckc"><input type="checkbox" id="gkg-ck-todas" class="gkg-ck"
+              title="Marcar o desmarcar todas" onclick="galKgSelTodas(this.checked)"></th>
           <th class="gkg-w">Lote</th><th class="gkg-w">Producto</th><th class="gkg-w">Cuadrilla</th>
           <th style="text-align:right">Kilos</th><th style="text-align:right">IFCOs</th>
           <th>Lo cargó</th><th></th>
@@ -28218,6 +28244,35 @@ SG_MANUAL['galpon-carga'] = { titulo: 'Galpón · Carga de kilos', html:
   + 'más, que es lo que pasaría contándole el cajón entero a las dos.</p>'
   + '<p>Al <b>corregir</b> una carga vienen ofrecidas las que tenía, las dos. Y si se '
   + 'corrigen los kilos, el reparto se rehace solo.</p>'
+  + '<h3>☑️ Borrar varias de una vez <span class="ver">V1134</span></h3>'
+  + '<p>Andy, 2/11/2026: <i>«quiero poder seleccionar varios para eliminar, como si '
+  + 'tuvieran un casillero»</i>.</p>'
+  + '<p>Cada renglón que se puede borrar tiene su <b>casillero</b> a la izquierda, y '
+  + 'el del encabezado marca o desmarca todos. Al marcar algo aparece arriba de la '
+  + 'tabla una <b>barra</b> que dice <b>cuántas cargas y cuántos kilos</b> hay '
+  + 'marcados, con <b>Soltar</b> y <b>Borrar</b>.</p>'
+  + '<p>Los kilos están ahí por algo: «12 cargas» se parece a cualquier cosa, y «12 '
+  + 'cargas · 5.400 kg» en un día de 6.000 salta a la vista antes de apretar. Después '
+  + 'pregunta una vez, con esos dos números.</p>'
+  + '<div class="ojo"><b>O todas o ninguna.</b> Si alguna de las marcadas no se puede '
+  + 'borrar —es de un día ya cerrado, o un compañero la borró hace un minuto— <b>no se '
+  + 'borra ninguna</b> y el aviso dice cuál y por qué. Un borrado a medias de una '
+  + 'tanda es peor que ninguno: el que apretó no sabe cuáles quedaron y tiene que '
+  + 'mirar renglón por renglón, que es justo el trabajo que el casillero venía a '
+  + 'sacar. La selección <b>no se pierde</b>: se destilda la que molesta y se vuelve a '
+  + 'apretar.</div>'
+  + '<p>Sólo tienen casillero las que <b>se pueden</b> borrar, con la misma regla de '
+  + 'abajo: las de hoy siempre, las de un día cerrado sólo con el permiso de anular. '
+  + 'Ofrecer marcar una que después va a rebotar es prometer algo que no se puede '
+  + 'cumplir, y el que marcó veinte se enteraría recién al apretar.</p>'
+  + '<p><b>Sin señal también funciona.</b> Lo marcado que ya está en el servidor va en '
+  + 'un solo pedido que espera en la cola; lo que todavía no salió de este equipo se '
+  + 'saca de la cola directamente, sin pedirle nada a nadie. Y la barra cuenta los '
+  + 'kilos de las dos cosas.</p>'
+  + '<p>Hay un <b>tope de 500 por vez</b>. No es una limitación de la pantalla: nadie '
+  + 'marca quinientas a mano, así que una lista más larga que eso es casi seguro un '
+  + 'error — y borrar un día entero es otra conversación.</p>'
+
   + '<h3>🗑️ Borrar una carga del día <span class="ver">V1133</span></h3>'
   + '<p>Andy, 2/11/2026: <i>«necesito que todos los usuarios puedan borrar algo del '
   + 'día vigente (fecha día hoy)»</i>.</p>'
@@ -57908,7 +57963,10 @@ var GKG = { fecha:null, hoy:null, cargas:[], resumen:null, propuesta:null, ultim
                foto que bajó y los kilos del día aparecen en cero (V1133). */
             encoladas:[], bajasEnCola:[],
             // Si esta persona puede sacar un renglón de un día ya cerrado.
-            puedeAnular:false, deCache:false, cacheCuando:null };
+            puedeAnular:false, deCache:false, cacheCuando:null,
+            /* Lo que está marcado con el casillero, como TEXTO: el id de una carga de
+               la cola es «enc:uuid» y no un número (V1134). */
+            sel:[] };
 
 function galKgEsc(s){ return String(s == null ? '' : s)
   .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
@@ -58095,10 +58153,15 @@ function galKgPintar(){
   var bajas = GKG.bajasEnCola || [];
   var guardadas = GKG.cargas.filter(function(c){ return bajas.indexOf(c.id) < 0; });
   var filas = (GKG.encoladas || []).concat(guardadas);
+  /* La selección se suelta en cada pintado. El HTML se rearma con los casilleros
+     vacíos, así que conservarla dejaría a GKG.sel diciendo una cosa y a la pantalla
+     mostrando otra — y lo que se borra es lo que dice GKG.sel. */
+  GKG.sel = [];
   if (!filas.length){
-    b.innerHTML = '<tr><td colspan="7" class="gkg-vacio">'
+    b.innerHTML = '<tr><td colspan="8" class="gkg-vacio">'
       + 'Todavía no se cargó nada para este día.<br>'
       + 'Cada renglón es una pesada: lo que trajo una cuadrilla de un lote.</td></tr>';
+    galKgPintarSel();
     return;
   }
   /* ── LA × SE MUESTRA POR DÍA, NO A CUALQUIERA ─────────────────────────────────
@@ -58112,6 +58175,18 @@ function galKgPintar(){
   var puedoBorrar = (GKG.fecha === GKG.hoy) || !!GKG.puedeAnular;
   b.innerHTML = filas.map(function(c){
     return '<tr' + (c.encolado ? ' class="gkg-enc"' : '') + '>'
+      /* EL CASILLERO. Sólo donde la × está: ofrecer marcar una carga que después no se
+         va a poder borrar es prometer algo que no se puede cumplir, y el que marcó
+         veinte se entera recién al apretar Borrar.
+
+         El id va en data-id y no en el onclick: galKgSelTodas() recorre los casilleros
+         y necesita leerlo de cada uno. */
+      + '<td class="gkg-ckc">'
+        + ((puedoBorrar || c.encolado)
+            ? '<input type="checkbox" class="gkg-ck" data-id="' + galKgEsc(c.id) + '"'
+              + ' onclick="galKgSel(this)">'
+            : '')
+        + '</td>'
       + '<td class="gkg-w"><b>' + galKgEsc(c.lote_nombre || ('Lote ' + c.lote_id)) + '</b>'
         + (c.encolado ? '<span class="gkg-encp">📴 sin mandar</span>' : '')
         + (c.estado === 'a_revisar' ? '<div class="gkg-rev">⚠ '
@@ -58150,6 +58225,131 @@ function galKgPintar(){
         + '</td>'
       + '</tr>';
   }).join('');
+  galKgPintarSel();
+}
+
+/* ── ☑️ BORRAR VARIAS DE UNA VEZ ──────────────────────────────────────────────────
+   Sin banner de bloque a propósito: esto es parte de la pantalla de carga, no una
+   sección nueva. Un `/* ═══` acá parte el bloque en dos y los tests que miran el JS
+   de la pantalla se quedan con la primera mitad — pasan igual, sólo que dejan de
+   mirar la segunda.
+
+   Andy, 2/11/2026: «quiero poder seleccionar varios para eliminar, como si tuvieran un
+   casillero».
+
+   Es lo que se necesita cuando lo que está mal es la TANDA y no el renglón: la
+   cuadrilla equivocada en los ochenta cajones de la mañana son ochenta clics y ochenta
+   confirmaciones, y a la vigésima alguien deja la mitad hecha — que es peor que no
+   haber empezado, porque el día queda con la mitad de cada cosa.
+   ───────────────────────────────────────────────────────────────────────────────── */
+
+/* Un casillero. Se lee del propio casillero y no de un id en el onclick, para que el
+   «marcar todas» pueda recorrerlos y hacer exactamente lo mismo que un clic. */
+function galKgSel(ck){
+  var k = String(ck.getAttribute('data-id') || '');
+  var i = GKG.sel.indexOf(k);
+  /* Un if y su else, no dos ifs. Escrito como dos condiciones sueltas, romper la
+     primera no cambiaba nada —la segunda deshacía el error— así que un error de
+     verdad ahí tampoco se habría visto. */
+  if (ck.checked){ if (i < 0) GKG.sel.push(k); }
+  else if (i >= 0) GKG.sel.splice(i, 1);
+  galKgPintarSel();
+}
+
+/* Los casilleros que hay dibujados. Son los de las cargas que SE PUEDEN borrar: los
+   demás renglones no traen casillero. */
+function galKgCks(){
+  var b = document.getElementById('gkg-body');
+  return b ? b.querySelectorAll('input.gkg-ck') : [];
+}
+
+function galKgSelTodas(chk){
+  GKG.sel = [];
+  var cks = galKgCks();
+  for (var i = 0; i < cks.length; i++){
+    cks[i].checked = !!chk;
+    if (chk) GKG.sel.push(String(cks[i].getAttribute('data-id') || ''));
+  }
+  galKgPintarSel();
+}
+
+function galKgSelNada(){ galKgSelTodas(false); }
+
+/* LA BARRA DICE CUÁNTAS Y CUÁNTOS KILOS. El número de cargas solo no alcanza para
+   darse cuenta de que se marcó de más: «12 cargas» se parece a cualquier cosa, y
+   «12 cargas · 5.400 kg» en un día de 6.000 salta a la vista. */
+function galKgPintarSel(){
+  var el = document.getElementById('gkg-barra'); if (!el) return;
+  var n = GKG.sel.length;
+
+  /* EL CASILLERO DE ARRIBA LO DECIDE ACÁ Y EN NINGÚN OTRO LADO. Queda marcado sólo
+     si están TODAS: dejarlo marcado con una destildada haría que el próximo clic en
+     él desmarque en vez de marcar, que es al revés de lo que esperaría cualquiera.
+
+     Está en un solo lugar porque las tres puertas —un casillero, el de arriba, y el
+     repintado de la tabla— terminan todas acá. Escrito en cada una serían tres copias
+     y la cuarta que alguien agregue mañana quedaría afuera. */
+  var todas = document.getElementById('gkg-ck-todas');
+  if (todas) todas.checked = n > 0 && n === galKgCks().length;
+
+  if (!n){
+    el.innerHTML = ''; el.style.display = 'none';
+    return;
+  }
+  var mapa = {};
+  (GKG.encoladas || []).concat(GKG.cargas).forEach(function(c){ mapa[String(c.id)] = c; });
+  var kg = 0;
+  GKG.sel.forEach(function(k){ kg += Number((mapa[k] || {}).kilos) || 0; });
+  el.style.display = 'flex';
+  el.innerHTML = '☑️ <b>' + n + '</b> ' + (n === 1 ? 'carga' : 'cargas')
+    + ' seleccionada' + (n === 1 ? '' : 's') + ' · <b>' + galKgNum(kg) + ' kg</b>'
+    + '<span class="gkg-bsep"></span>'
+    + '<button class="btn bo bs" onclick="galKgSelNada()">Soltar</button>'
+    + '<button class="btn bd bs" id="gkg-bsel-btn" onclick="galKgBorrarSel()">'
+    + '🗑 Borrar ' + (n === 1 ? 'la carga' : ('las ' + n)) + '</button>';
+}
+
+/* O TODAS O NINGUNA, y lo decide el servidor mirando la lista completa. Un borrado a
+   medias de una tanda es peor que ninguno: el que apretó no sabe cuáles quedaron y
+   tiene que mirar renglón por renglón, que es el trabajo que esto venía a sacar.
+
+   LAS DE LA COLA VAN APARTE porque nunca llegaron al servidor: no hay una fila que
+   borrar, hay un pedido que sacar de este equipo. Se sacan DESPUÉS de que el servidor
+   acepte las suyas — al revés, un 403 dejaría las de la cola ya borradas y el pedido
+   habría quedado a medias justamente por el camino que no podía fallar. */
+async function galKgBorrarSel(){
+  var ids = GKG.sel.slice();
+  if (!ids.length) return;
+  var locales = ids.filter(function(k){ return k.indexOf('enc:') === 0; });
+  var remotas = ids.filter(function(k){ return k.indexOf('enc:') !== 0; });
+
+  var mapa = {};
+  (GKG.encoladas || []).concat(GKG.cargas).forEach(function(c){ mapa[String(c.id)] = c; });
+  var kg = 0;
+  ids.forEach(function(k){ kg += Number((mapa[k] || {}).kilos) || 0; });
+  if (!confirm('¿Borrar ' + ids.length + (ids.length === 1 ? ' carga' : ' cargas')
+    + ' por ' + galKgNum(kg) + ' kg?')) return;
+
+  var btn = document.getElementById('gkg-bsel-btn');
+  if (btn) btn.disabled = true;
+  try {
+    if (remotas.length){
+      var r = await fetch('/api/galpon/volcados/borrar', { method:'POST',
+        credentials:'include', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ ids: remotas }) });
+      var j = await r.json();
+      /* El error se muestra TAL CUAL lo manda el servidor: dice cuál no se pudo y por
+         qué, y eso es lo único con lo que el operador puede hacer algo. */
+      if (!j.ok){ alert(j.error || 'no se pudo borrar'); return; }
+    }
+    for (var i = 0; i < locales.length; i++){
+      await fetch('/api/galpon/volcados/' + encodeURIComponent(locales[i]),
+        { method:'DELETE', credentials:'include' });
+    }
+    GKG.sel = [];
+    await galKgCargar();
+  } catch (e) { alert('No se pudo borrar: ' + e.message); }
+  finally { if (btn) btn.disabled = false; }
 }
 
 /* ── LA VENTANA ───────────────────────────────────────────────────────────────────

@@ -46,6 +46,15 @@ var GOFF = (function () {
     // así que el pedido es válido aunque salga más tarde.
     { metodo: 'PATCH', re: /^\/api\/galpon\/volcados\/\d+$/ },
     { metodo: 'DELETE', re: /^\/api\/galpon\/volcados\/\d+$/ },
+    /* Borrar VARIAS de una vez (V1134). Va como POST porque lleva la lista de ids en
+       el cuerpo, y todos los ids son del servidor — las que nunca salieron de este
+       equipo las saca la pantalla de la cola, sin pedirle nada a nadie.
+
+       Reintentarlo no duplica nada y no hace falta el uuid para eso: un borrado es
+       idempotente por su cuenta, porque el UPDATE lleva "AND eliminado_en IS NULL".
+       El uuid se le pone igual —lo hace conUuid() para todo lo que se encola— y no
+       molesta: el servidor no lo mira en esta dirección. */
+    { metodo: 'POST', re: /^\/api\/galpon\/volcados\/borrar$/ },
     { metodo: 'PATCH', re: /^\/api\/galpon\/procesos\/\d+$/ },
     { metodo: 'DELETE', re: /^\/api\/galpon\/procesos\/\d+$/ },
     // El lote del día y los datos del lote: son del día y no devuelven nada que se use.
