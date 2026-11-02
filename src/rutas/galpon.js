@@ -31,6 +31,7 @@ import {
   disponibleParaDespacho, despachos, itemsDelDespacho, abrirDespacho, editarDespacho,
   stockPorPresentacion, guardarIcono, borrarIcono, rutaDelIcono,
   stockParaArmar, stockPorArticulo, palletsArmados, abrirPalletArmado, moverAlPallet,
+  procesoPorDia, procesoTotal, rindePorLote,
   sacarDelPalletArmado, lineasDelPallet, palletResumen,
   agregarAlDespacho, sacarDelDespacho, emitirDespacho, anularDespacho, borrarDespacho,
   despachoPorNumero,
@@ -1192,6 +1193,69 @@ router.delete('/armado/linea/:procesoId', (req, res) => {
     res.json(r);
   } catch (e) {
     console.error('[GALPON] DELETE /armado/linea:', e.message);
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+
+// ── 📄 EL INFORME DEL ACUMULADO ─────────────────────────────────────────────────────
+// Andy, 2/11/2026: «quiero que me sumes en la parte de acumulado un buen informe en PDF
+// con gráficos. Gráficos de torta. Stock».
+//
+// Sale con el MISMO período que está en pantalla, igual que la planilla: bajar siempre
+// todo dejaría al que filtró tres días con un informe de la temporada entera y sin
+// ninguna señal de que no es lo que estaba mirando.
+router.get('/informe.pdf', async (req, res) => {
+  try {
+    const r = rangoCargado(db);
+    const desde = esFecha(req.query.desde) || r.primera || hoy();
+    const hasta = esFecha(req.query.hasta) || r.ultima || hoy();
+
+    const ac = acumulado(db, desde, hasta);
+    const pt = procesoTotal(db, desde, hasta);
+    const stock = stockGalpon(db, {});
+
+    /* LOS DIBUJITOS SUBIDOS, leídos del disco y pasados como data URL. Los emojis de
+       texto no se pueden imprimir —jsPDF con Helvetica los convierte en basura— pero un
+       PNG sí, y es exactamente para lo que Andy puede subirlos desde el catálogo. */
+    const iconos = {};
+    for (const f of db.prepare(
+      'SELECT id, icono FROM gal_presentaciones WHERE eliminado_en IS NULL').all()) {
+      if (!f.icono) continue;
+      try {
+        iconos[f.id] = 'data:image/png;base64,'
+          + fs.readFileSync(f.icono).toString('base64');
+      } catch (e) { /* el archivo no está: va el disco de color */ }
+    }
+
+    const { galponInformePDF } = await import('../servicios/galponInformePDF.js');
+    const buf = await galponInformePDF({
+      desde, hasta, hoy: hoy(),
+      usuario: (req._user && req._user.nombre) || null,
+      totales: {
+        kilos: (ac.total && ac.total.kilos) || 0,
+        dias: (ac.total && ac.total.dias) || 0,
+        procesado: pt.procesado || 0,
+        comercial: pt.comercial || 0,
+        verde: pt.verde || 0,
+        descarte: pt.descarte || 0,
+        stock: stock.kilos || 0,
+      },
+      stock,
+      presentaciones: stockPorPresentacion(db, {}),
+      por_dia: procesoPorDia(db, desde, hasta),
+      rinde: rindePorLote(db, desde, hasta),
+    }, { iconos });
+
+    res.setHeader('Content-Type', 'application/pdf');
+    /* inline y no attachment: esto se abre para mirarlo o mandarlo a la impresora, y un
+       archivo que cae en Descargas obliga a ir a buscarlo. El nombre igual va, para el
+       que lo guarde. */
+    res.setHeader('Content-Disposition',
+      'inline; filename="galpon-informe-' + desde + '-a-' + hasta + '.pdf"');
+    res.end(buf);
+  } catch (e) {
+    console.error('[GALPON] GET /informe.pdf:', e.message);
     res.status(500).json({ ok: false, error: e.message });
   }
 });
