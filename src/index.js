@@ -311,6 +311,11 @@ app.get("/m", (req, res) => res.redirect('/m/ifco'));
 app.get("/manifest-mifco.json", (req, res) => {
   res.sendFile(path.join(__dirname, "manifest-mifco.json"));
 });
+app.get("/galpon-sw.js", (req, res) => {
+  res.set('Service-Worker-Allowed', '/');
+  res.set('Cache-Control', 'no-cache');
+  res.sendFile(path.join(__dirname, "galpon-sw.js"));
+});
 app.get("/mifco-sw.js", (req, res) => {
   res.set('Service-Worker-Allowed', '/');
   res.sendFile(path.join(__dirname, "mifco-sw.js"));
