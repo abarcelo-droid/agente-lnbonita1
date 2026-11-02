@@ -26,7 +26,7 @@ import { DatabaseSync } from 'node:sqlite';
 import {
   guardarPresentacion, registrarProceso, stockGalpon, stockPorPresentacion,
   palletAbierto, cerrarPallet, reabrirPallet, contenidoDelPallet,
-  stockParaArmar, palletsArmados, abrirPalletArmado, moverAlPallet,
+  stockParaArmar, stockPorArticulo, palletsArmados, abrirPalletArmado, moverAlPallet,
   sacarDelPalletArmado, lineasDelPallet, palletResumen,
   abrirDespacho, agregarAlDespacho, emitirDespacho,
 } from '../src/servicios/galpon.js';
@@ -545,4 +545,305 @@ test('LA SALIDA DICE DE QUÉ UBICACIÓN SALIÓ, y se parte si toca varias', () =
   assert.equal(stock(db).bultos, 3);
   // Y las ubicaciones suman exactamente el stock, que es la invariante.
   assert.equal(stockParaArmar(db).reduce((t, x) => t + x.bultos, 0), 3);
+});
+
+// ══════════════════════════════════════════════════════════════════════════
+// 8 · ELEGIR SIN DECIR EL LOTE: LO REPARTE EL SISTEMA
+// ══════════════════════════════════════════════════════════════════════════
+// Andy, 1/11/2026: «dame la opción de elegir independientemente del lote, es
+// decir que lo haga solo el sistema. Es más: es más importante el día de
+// proceso que el lote».
+test('LA LISTA POR ARTÍCULO JUNTA LOS LOTES Y LAS UBICACIONES', () => {
+  // Eran diecinueve renglones —la misma caja repetida por cada lote y cada
+  // pallet— y armar un pallet de 100 cajas pedía elegir tres veces y sumar de
+  // memoria.
+  const db = base();
+  const a = art(db, 'Carton Amarilla', '50/55');
+  const b = art(db, 'IFCO', null);
+  entra(db, a, 267, '1', 10);
+  entra(db, a, 17, '2', 11);
+  entra(db, b, 49, '3', 10);
+
+  const g = stockPorArticulo(db);
+  assert.equal(g.length, 2, 'no juntó los lotes: ' + g.map((x) => x.presentacion).join(', '));
+  const am = g.filter((x) => x.calibre === '50/55')[0];
+  assert.equal(am.bultos, 284, '267 + 17 de dos lotes tienen que dar 284');
+  assert.equal(am.lotes.length, 2);
+  // Y las ubicaciones quedan adentro, en el orden en que se van a tomar.
+  assert.equal(am.ubicaciones.length, 2);
+});
+
+test('EL DÍA DE PROCESO VIENE EN EL RENGLÓN: es con lo que se elige', () => {
+  // Andy: «es más importante el día de proceso que el lote». Sin la fecha, el
+  // renglón no puede contestar la pregunta con la que se arma un camión: cuál
+  // hay que sacar primero.
+  const db = base();
+  const a = art(db, 'Carton', '50/55');
+  registrarProceso(db, { fecha: '2026-12-10', lote_id: 10, presentacion_id: a,
+    bultos: 30, uuid: '1' });
+  registrarProceso(db, { fecha: '2026-12-14', lote_id: 11, presentacion_id: a,
+    bultos: 50, uuid: '2' });
+  const g = stockPorArticulo(db)[0];
+  assert.equal(g.desde, '2026-12-10', 'no dice desde cuándo está');
+  assert.equal(g.hasta, '2026-12-14');
+  // La ubicación más vieja primero: es de la que va a salir.
+  assert.equal(g.ubicaciones[0].desde, '2026-12-10');
+});
+
+test('y lo MÁS VIEJO va arriba dentro de cada destino', () => {
+  const db = base();
+  const viejo = art(db, 'Viejo', '50/55');
+  const nuevo = art(db, 'Nuevo', '60/70');
+  registrarProceso(db, { fecha: '2026-12-14', lote_id: 10, presentacion_id: nuevo,
+    bultos: 10, uuid: '1' });
+  registrarProceso(db, { fecha: '2026-12-10', lote_id: 10, presentacion_id: viejo,
+    bultos: 10, uuid: '2' });
+  assert.deepEqual(stockPorArticulo(db).map((x) => x.presentacion), ['Viejo', 'Nuevo']);
+});
+
+test('SIN LOTE, TOMA DEL DÍA MÁS VIEJO PRIMERO', () => {
+  // El reparto lo hace el sistema y el criterio es la fecha, no el lote ni el
+  // montón más grande: en una cámara lo que entró antes sale antes.
+  const db = base();
+  const a = art(db, 'Carton', '50/55');
+  registrarProceso(db, { fecha: '2026-12-10', lote_id: 11, presentacion_id: a,
+    bultos: 30, uuid: '1' });
+  registrarProceso(db, { fecha: '2026-12-14', lote_id: 10, presentacion_id: a,
+    bultos: 50, uuid: '2' });
+  const antes = stock(db);
+
+  const p = abrirPalletArmado(db, { fecha: F });
+  // Sin lote_id NI pallet_id: que elija el sistema.
+  const r = moverAlPallet(db, p.id, { destino: 'comercial', presentacion_id: a,
+    calibre: '50/55', bultos: 45 });
+  assert.equal(r.ok, true, r.motivo);
+  assert.deepEqual(stock(db), antes, 'repartir movió el stock');
+
+  // Las 30 del 10 enteras, y 15 de las del 14.
+  assert.equal(r.detalle.length, 2, 'no dice de dónde salió');
+  assert.equal(r.detalle[0].fecha, '2026-12-10');
+  assert.equal(r.detalle[0].bultos, 30);
+  assert.equal(r.detalle[0].lote_id, 11);
+  assert.equal(r.detalle[1].fecha, '2026-12-14');
+  assert.equal(r.detalle[1].bultos, 15);
+  assert.equal(contenidoDelPallet(db, p.id).reduce((t, x) => t + x.bultos, 0), 45);
+});
+
+test('sin lote el TOPE es el del artículo entero, no el de un montón', () => {
+  const db = base();
+  const a = art(db, 'Carton', '50/55');
+  entra(db, a, 30, '1', 10);
+  entra(db, a, 50, '2', 11);
+  const p = abrirPalletArmado(db, { fecha: F });
+  // 80 hay, 81 no.
+  assert.equal(moverAlPallet(db, p.id, { destino: 'comercial', presentacion_id: a,
+    calibre: '50/55', bultos: 80 }).ok, true);
+  const r = moverAlPallet(db, p.id, { destino: 'comercial', presentacion_id: a,
+    calibre: '50/55', bultos: 1 });
+  assert.equal(r.ok, false);
+  assert.equal(r.disponible, 0);
+});
+
+test('CON lote sigue tomando sólo de ése', () => {
+  // La opción detallada no se va: hace falta cuando el RENSPA importa, o para
+  // sacar de un pallet concreto.
+  const db = base();
+  const a = art(db, 'Carton', '50/55');
+  registrarProceso(db, { fecha: '2026-12-10', lote_id: 11, presentacion_id: a,
+    bultos: 30, uuid: '1' });
+  registrarProceso(db, { fecha: '2026-12-14', lote_id: 10, presentacion_id: a,
+    bultos: 50, uuid: '2' });
+  const p = abrirPalletArmado(db, { fecha: F });
+  const r = moverAlPallet(db, p.id, { lote_id: 10, destino: 'comercial',
+    presentacion_id: a, calibre: '50/55', bultos: 45 });
+  assert.equal(r.ok, true, r.motivo);
+  assert.equal(r.detalle.length, 1, 'tomó de más de un lote habiéndolo nombrado');
+  assert.equal(r.detalle[0].lote_id, 10);
+  // Y el tope del lote nombrado: del 11 hay 30, no 80.
+  const q = abrirPalletArmado(db, { fecha: F });
+  assert.equal(moverAlPallet(db, q.id, { lote_id: 11, destino: 'comercial',
+    presentacion_id: a, calibre: '50/55', bultos: 40 }).ok, false);
+});
+
+test('SIN UBICACIÓN NO SE LLEVA LO DE SU PROPIO PALLET', () => {
+  // Tomar del montón que uno mismo está armando es no hacer nada, y además
+  // haría que el tope cuente dos veces lo que ya está adentro.
+  const db = base();
+  const a = art(db, 'Carton', '50/55');
+  entra(db, a, 100, '1');
+  const p = abrirPalletArmado(db, { fecha: F });
+  assert.equal(moverAlPallet(db, p.id, { destino: 'comercial', presentacion_id: a,
+    calibre: '50/55', bultos: 60 }).ok, true);
+  // Quedan 40 afuera: pedir 50 tiene que frenarse aunque adentro haya 60.
+  const r = moverAlPallet(db, p.id, { destino: 'comercial', presentacion_id: a,
+    calibre: '50/55', bultos: 50 });
+  assert.equal(r.ok, false, 'se tomó a sí mismo');
+  assert.equal(r.disponible, 40);
+});
+
+test('pedir lo SUELTO explícitamente sigue siendo otra cosa que no pedir nada', () => {
+  // pallet_id: null es «lo que no está en ningún pallet». No nombrar el campo
+  // es «de donde sea». Son dos pedidos distintos y tienen que dar distinto.
+  const db = base();
+  const a = art(db, 'Carton', '50/55');
+  entra(db, a, 100, '1');                    // va al pallet del día
+  registrarProceso(db, { fecha: F, lote_id: 10, presentacion_id: a, bultos: 20,
+    uuid: '2', sin_pallet: 1 });             // suelto
+  const p = abrirPalletArmado(db, { fecha: F });
+
+  const soloSuelto = moverAlPallet(db, p.id, { destino: 'comercial',
+    presentacion_id: a, calibre: '50/55', bultos: 30, pallet_id: null });
+  assert.equal(soloSuelto.ok, false, 'tomó del pallet habiendo pedido lo suelto');
+  assert.equal(soloSuelto.disponible, 20);
+
+  const deDondeSea = moverAlPallet(db, p.id, { destino: 'comercial',
+    presentacion_id: a, calibre: '50/55', bultos: 30 });
+  assert.equal(deDondeSea.ok, true, deDondeSea.motivo);
+});
+
+test('EL REPARTO AUTOMÁTICO DICE TODOS LOS PALLETS QUE DEJÓ DISTINTOS', () => {
+  // Con el sistema eligiendo, un pedido puede desarmar DOS pallets cerrados a
+  // la vez. Decir sólo el primero deja el segundo con su etiqueta mintiendo.
+  const db = base();
+  const a = art(db, 'Carton', '50/55');
+  registrarProceso(db, { fecha: '2026-12-10', lote_id: 10, presentacion_id: a,
+    bultos: 30, uuid: '1' });
+  const uno = palletAbierto(db).id;
+  cerrarPallet(db, uno, {});
+  registrarProceso(db, { fecha: '2026-12-14', lote_id: 11, presentacion_id: a,
+    bultos: 50, uuid: '2' });
+  const dos = palletAbierto(db).id;
+  cerrarPallet(db, dos, {});
+
+  const p = abrirPalletArmado(db, { fecha: F });
+  const r = moverAlPallet(db, p.id, { destino: 'comercial', presentacion_id: a,
+    calibre: '50/55', bultos: 45 });
+  assert.equal(r.ok, true, r.motivo);
+  assert.equal(r.tocados.length, 2, 'no dijo los dos pallets que tocó');
+  const porNumero = r.tocados.sort((x, y) => x.numero.localeCompare(y.numero));
+  assert.equal(porNumero[0].vacio, true, 'el primero quedó vacío y no lo dijo');
+  assert.equal(porNumero[1].bultos, 35);
+});
+
+test('lo DESPACHADO no se ofrece ni se puede repartir', () => {
+  const db = base();
+  const a = art(db, 'Carton', '50/55');
+  entra(db, a, 100, '1');
+  const d = abrirDespacho(db, { fecha: F });
+  agregarAlDespacho(db, d.id, { lote_id: 10, destino: 'comercial',
+    presentacion_id: a, calibre: '50/55', bultos: 100 });
+  emitirDespacho(db, d.id);
+
+  assert.deepEqual(stockPorArticulo(db), [], 'ofrece lo que ya se fue en un camión');
+  const p = abrirPalletArmado(db, { fecha: F });
+  assert.equal(moverAlPallet(db, p.id, { destino: 'comercial', presentacion_id: a,
+    calibre: '50/55', bultos: 10 }).ok, false);
+});
+
+test('DOS CALIBRES DE LA MISMA CAJA SON DOS ARTÍCULOS', () => {
+  // Juntarlos haría que pedir «Carton Amarilla» mezcle 50/55 con 60/70 en el
+  // mismo pallet sin que nadie lo decida — y el calibre va impreso en el
+  // tarjetón, así que la etiqueta diría una cosa y el pallet tendría otra.
+  const db = base();
+  const a = art(db, 'Carton Amarilla', '50/55');
+  const b = art(db, 'Carton Amarilla', '60/70');
+  entra(db, a, 30, '1');
+  entra(db, b, 50, '2');
+  const g = stockPorArticulo(db);
+  assert.equal(g.length, 2, 'juntó dos calibres en un artículo');
+  assert.deepEqual(g.map((x) => x.calibre).sort(), ['50/55', '60/70']);
+});
+
+test('LAS UBICACIONES SALEN EN EL ORDEN EN QUE SE VAN A TOMAR', () => {
+  // La pantalla las muestra para decir de dónde VA a salir antes de apretar.
+  // Si no vienen por fecha, dice que va a sacar del montón equivocado — y el
+  // que va al playón a buscarlo no lo encuentra.
+  const db = base();
+  const a = art(db, 'Carton', '50/55');
+  // El lote 10 entra DESPUÉS: por lote iría primero, por fecha va segundo.
+  registrarProceso(db, { fecha: '2026-12-14', lote_id: 10, presentacion_id: a,
+    bultos: 50, uuid: '1' });
+  cerrarPallet(db, palletAbierto(db).id, {});
+  registrarProceso(db, { fecha: '2026-12-10', lote_id: 11, presentacion_id: a,
+    bultos: 30, uuid: '2' });
+
+  const u = stockPorArticulo(db)[0].ubicaciones;
+  assert.equal(u.length, 2);
+  assert.equal(u[0].desde, '2026-12-10', 'la más vieja no quedó primera');
+  assert.equal(u[0].lote_id, 11);
+  // Y el movimiento sale en ese mismo orden: lo que se anuncia es lo que pasa.
+  const p = abrirPalletArmado(db, { fecha: F });
+  const r = moverAlPallet(db, p.id, { destino: 'comercial', presentacion_id: a,
+    calibre: '50/55', bultos: 40 });
+  assert.equal(r.detalle[0].fecha, '2026-12-10');
+  assert.equal(r.detalle[0].bultos, 30);
+});
+
+test('SIN UBICACIÓN NO SE SACA DE SÍ MISMO, ni siquiera cuando el tope da', () => {
+  // El tope ya excluye lo propio, pero la consulta tiene que excluirlo
+  // también: si no, pedir 40 cuando hay 40 afuera y 60 adentro se lleva las
+  // de adentro —que ya estaban— y deja las de afuera sin mover. El pallet
+  // queda igual y el que lo armó cree que puso 100.
+  const db = base();
+  const a = art(db, 'Carton', '50/55');
+  entra(db, a, 100, '1');
+  const p = abrirPalletArmado(db, { fecha: F });
+  assert.equal(moverAlPallet(db, p.id, { destino: 'comercial', presentacion_id: a,
+    calibre: '50/55', bultos: 60 }).ok, true);
+  assert.equal(contenidoDelPallet(db, p.id)[0].bultos, 60);
+
+  // Las 40 que quedan afuera: tienen que entrar y el pallet quedar en 100.
+  const r = moverAlPallet(db, p.id, { destino: 'comercial', presentacion_id: a,
+    calibre: '50/55', bultos: 40 });
+  assert.equal(r.ok, true, r.motivo);
+  assert.equal(contenidoDelPallet(db, p.id)[0].bultos, 100,
+    'se movió a sí mismo: el pallet no creció');
+  // Las 40 salieron del pallet DEL DÍA, que es donde estaban, y de ninguna
+  // manera del que se está armando.
+  assert.ok(!r.detalle.some((x) => x.pallet_id === p.id),
+    'se sacó cajas a sí mismo para ponérselas de nuevo');
+});
+
+test('un calibre CAMBIADO en el catálogo no junta lo viejo con lo nuevo', () => {
+  // Dos calibres son dos presentaciones del catálogo, así que agrupar por
+  // presentación ya los separa... hasta que alguien le cambia el calibre a
+  // una. El calibre queda congelado en cada carga, y sin él en la clave las
+  // cajas 50/55 de ayer se juntarían con las 60/70 de hoy en un renglón — y
+  // el calibre va impreso en el tarjetón.
+  const db = base();
+  const a = art(db, 'Carton', '50/55');
+  entra(db, a, 30, '1');
+  guardarPresentacion(db, { id: a, nombre: 'Carton', destino: 'comercial',
+    envase: 'Caja', por_bulto: 1, kg_unidad: 8, calibre: '60/70', categoria: 'I' });
+  entra(db, a, 50, '2');
+
+  const g = stockPorArticulo(db);
+  assert.equal(g.length, 2, 'juntó dos calibres de la misma presentación');
+  assert.deepEqual(g.map((x) => x.calibre).sort(), ['50/55', '60/70']);
+});
+
+test('no se saca de sí mismo NI cuando lo propio es lo más viejo', () => {
+  // El orden es por fecha, así que si lo que está adentro del pallet es más
+  // viejo que lo de afuera, es lo primero que la consulta devuelve. Sin el
+  // filtro, mover 40 se lleva 40 que ya estaban adentro: el pallet no crece y
+  // el que lo armó cree que le puso 40 más.
+  const db = base();
+  const a = art(db, 'Carton', '50/55');
+  registrarProceso(db, { fecha: '2026-12-10', lote_id: 10, presentacion_id: a,
+    bultos: 60, uuid: '1' });
+  const p = abrirPalletArmado(db, { fecha: F });
+  // Las 60 VIEJAS entran al pallet armado.
+  assert.equal(moverAlPallet(db, p.id, { destino: 'comercial', presentacion_id: a,
+    calibre: '50/55', bultos: 60 }).ok, true);
+  // Y después entran 40 NUEVAS a la cámara.
+  registrarProceso(db, { fecha: '2026-12-20', lote_id: 10, presentacion_id: a,
+    bultos: 40, uuid: '2' });
+
+  const r = moverAlPallet(db, p.id, { destino: 'comercial', presentacion_id: a,
+    calibre: '50/55', bultos: 40 });
+  assert.equal(r.ok, true, r.motivo);
+  assert.equal(contenidoDelPallet(db, p.id)[0].bultos, 100,
+    'se llevó las suyas de nuevo: el pallet no creció');
+  assert.equal(r.detalle[0].fecha, '2026-12-20',
+    'tomó las viejas, que ya estaban adentro de este mismo pallet');
 });

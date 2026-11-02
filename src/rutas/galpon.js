@@ -30,7 +30,7 @@ import {
   palletAbierto, abrirPallet, contenidoDelPallet, cerrarPallet, reabrirPallet,
   disponibleParaDespacho, despachos, itemsDelDespacho, abrirDespacho, editarDespacho,
   stockPorPresentacion, guardarIcono, borrarIcono, rutaDelIcono,
-  stockParaArmar, palletsArmados, abrirPalletArmado, moverAlPallet,
+  stockParaArmar, stockPorArticulo, palletsArmados, abrirPalletArmado, moverAlPallet,
   sacarDelPalletArmado, lineasDelPallet, palletResumen,
   agregarAlDespacho, sacarDelDespacho, emitirDespacho, anularDespacho, borrarDespacho,
   despachoPorNumero,
@@ -1146,6 +1146,9 @@ router.get('/armado', (req, res) => {
       ok: true,
       hoy: hoy(),
       destinos: DESTINOS,
+      // Los DOS cortes: por artículo es el camino normal —el sistema reparte entre
+      // lotes y días— y por ubicación hace falta para sacar de un montón concreto.
+      articulos: stockPorArticulo(db, { destino: req.query.destino }),
       stock: stockParaArmar(db, { destino: req.query.destino }),
       pallets: palletsArmados(db, { estado: req.query.estado }).map((x) =>
         Object.assign({}, x, { lineas: lineasDelPallet(db, x.id) })),

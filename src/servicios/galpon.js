@@ -2153,7 +2153,9 @@ export function stockParaArmar(db, opts) {
     + "                        ELSE -g.bultos END),0) AS bultos,"
     + "       COALESCE(SUM(CASE WHEN g.tipo = 'ingreso' THEN g.kilos"
     + "                        ELSE -g.kilos END),0) AS kilos,"
-    + '       COUNT(*) AS filas'
+    + '       COUNT(*) AS filas,'
+    + "       MIN(CASE WHEN g.tipo = 'ingreso' THEN g.fecha END) AS desde,"
+    + "       MAX(CASE WHEN g.tipo = 'ingreso' THEN g.fecha END) AS hasta"
     + '  FROM gal_procesos g'
     + '  LEFT JOIN gal_pallets p ON p.id = g.pallet_id AND p.eliminado_en IS NULL'
     + '  WHERE g.eliminado_en IS NULL'
@@ -2178,6 +2180,64 @@ export function stockParaArmar(db, opts) {
     clave: [f.lote_id, f.destino, f.presentacion_id || 0, f.calibre || '',
             f.pallet_id || 0].join('|'),
   }));
+}
+
+
+// ── LO QUE SE PUEDE PONER EN UN PALLET, POR ARTÍCULO ────────────────────────────────
+// Andy, 1/11/2026: «dame la opción de elegir independientemente del lote, es decir que
+// lo haga solo el sistema. Es más: es más importante el día de proceso que el lote».
+//
+// La lista por ubicación tenía DIECINUEVE renglones —la misma caja repetida por cada
+// lote y cada pallet— y para armar un pallet de 100 cajas había que elegir tres veces y
+// hacer la cuenta a mano. Acá hay uno por artículo, y de qué lote sale lo decide el
+// sistema tomando lo MÁS VIEJO primero: en una cámara lo que entró antes sale antes, y
+// ése es el criterio que importa.
+//
+// El corte por ubicación sigue existiendo —hace falta para sacar de un pallet
+// concreto— pero deja de ser el camino normal.
+export function stockPorArticulo(db, opts) {
+  const o = opts || {};
+  const por = new Map();
+  for (const f of stockParaArmar(db, o)) {
+    if (!(f.bultos > 0 || f.kilos > 0)) continue;
+    const k = [f.destino, f.presentacion_id || 0, f.calibre || ''].join('|');
+    if (!por.has(k)) {
+      por.set(k, {
+        destino: f.destino, presentacion_id: f.presentacion_id, presentacion: f.presentacion,
+        envase: f.envase, categoria: f.categoria, calibre: f.calibre, producto: f.producto,
+        granel: f.granel, bultos: 0, kilos: 0,
+        desde: null, hasta: null, lotes: [], ubicaciones: [],
+      });
+    }
+    const g = por.get(k);
+    g.bultos = round2(g.bultos + f.bultos);
+    g.kilos = round2(g.kilos + f.kilos);
+    if (f.desde && (!g.desde || f.desde < g.desde)) g.desde = f.desde;
+    if (f.hasta && (!g.hasta || f.hasta > g.hasta)) g.hasta = f.hasta;
+    if (!g.lotes.some((x) => x.lote_id === f.lote_id)) {
+      g.lotes.push({ lote_id: f.lote_id, nombre: f.lote_nombre });
+    }
+    g.ubicaciones.push({
+      pallet_id: f.pallet_id || null, ubicacion: f.ubicacion,
+      pallet_estado: f.pallet_estado || null,
+      lote_id: f.lote_id, lote_nombre: f.lote_nombre,
+      bultos: f.bultos, kilos: f.kilos, desde: f.desde,
+    });
+  }
+  return [...por.values()].map((g) => Object.assign(g, {
+    kg_unidad: g.bultos > 0 ? round2(g.kilos / g.bultos) : null,
+    /* Las ubicaciones en el orden en que se van a tomar: lo más viejo primero. Sirve
+       para que la pantalla pueda decir de dónde VA a salir antes de apretar. */
+    ubicaciones: g.ubicaciones.sort((a, b) => String(a.desde || '').localeCompare(
+      String(b.desde || '')) || (a.pallet_id || 0) - (b.pallet_id || 0)),
+    clave: [g.destino, g.presentacion_id || 0, g.calibre || ''].join('|'),
+  })).sort((a, b) => {
+    const da = DESTINOS.findIndex((d) => d.clave === a.destino);
+    const dbb = DESTINOS.findIndex((d) => d.clave === b.destino);
+    if (da !== dbb) return da - dbb;
+    // Dentro del destino, lo más viejo arriba: es lo que hay que sacar primero.
+    return String(a.desde || '').localeCompare(String(b.desde || ''));
+  });
 }
 
 export function palletsArmados(db, opts) {
@@ -2222,8 +2282,14 @@ export function moverAlPallet(db, palletId, d) {
     return { ok: false, motivo: 'Ese pallet ya está cerrado: reabrilo para cambiarlo' };
   }
 
-  const lote = parseInt(dd.lote_id, 10);
-  if (!Number.isFinite(lote)) return { ok: false, motivo: 'Falta el lote' };
+  /* EL LOTE ES OPCIONAL. Andy, 1/11/2026: «dame la opción de elegir
+     independientemente del lote, es decir que lo haga solo el sistema». Sin lote se
+     toma de todos, lo más viejo primero; con lote, sólo de ése. Lo mismo la ubicación:
+     sin decirla se toma de donde haya. */
+  const lote = dd.lote_id == null || dd.lote_id === ''
+    ? null : parseInt(dd.lote_id, 10);
+  if (lote !== null && !Number.isFinite(lote)) return { ok: false, motivo: 'Lote inválido' };
+  const libre = dd.pallet_id === undefined;
   const destino = txt(dd.destino);
   if (!DESTINOS.some((y) => y.clave === destino)) return { ok: false, motivo: 'Destino inválido' };
   const pres = parseInt(dd.presentacion_id, 10) || 0;
@@ -2232,27 +2298,44 @@ export function moverAlPallet(db, palletId, d) {
     : (parseInt(dd.pallet_id, 10) || null);
   if (desde === pid) return { ok: false, motivo: 'Eso ya está en este pallet' };
 
-  // Las filas candidatas: la misma mercadería, en la misma ubicación de origen.
-  const filas = db.prepare(
-    ' SELECT * FROM gal_procesos'
-    + "  WHERE eliminado_en IS NULL AND tipo = 'ingreso' AND lote_id = ? AND destino = ?"
-    + "    AND COALESCE(presentacion_id,0) = ? AND COALESCE(calibre,'') = ?"
-    + (desde ? '    AND pallet_id = ?' : '    AND pallet_id IS NULL')
-    + '  ORDER BY fecha, id').all(...[lote, destino, pres, cal]
-      .concat(desde ? [desde] : []));
-  if (!filas.length) return { ok: false, motivo: 'De eso no hay nada en esa ubicación' };
+  /* LAS FILAS CANDIDATAS, ORDENADAS POR DÍA DE PROCESO. Andy: «es más importante el día
+     de proceso que el lote». En una cámara lo que entró antes sale antes, así que el
+     orden es la fecha y el lote es lo que salga.
+
+     Sin lote se toma de todos; sin ubicación —cuando ni siquiera se nombró el campo— de
+     donde haya, saltando sólo este mismo pallet. Decir pallet_id: null es otra cosa: es
+     pedir explícitamente lo SUELTO. */
+  const w = ["eliminado_en IS NULL", "tipo = 'ingreso'", 'destino = ?',
+             'COALESCE(presentacion_id,0) = ?', "COALESCE(calibre,'') = ?"];
+  const a = [destino, pres, cal];
+  if (lote !== null) { w.push('lote_id = ?'); a.push(lote); }
+  if (libre) { w.push('COALESCE(pallet_id,0) <> ?'); a.push(pid); }
+  else if (desde) { w.push('pallet_id = ?'); a.push(desde); }
+  else { w.push('pallet_id IS NULL'); }
+  const filas = db.prepare('SELECT * FROM gal_procesos WHERE ' + w.join(' AND ')
+    + '  ORDER BY fecha, id').all(...a);
+  if (!filas.length) {
+    const propio = db.prepare(
+      " SELECT COALESCE(SUM(bultos),0) AS b FROM gal_procesos"
+      + "  WHERE eliminado_en IS NULL AND tipo = 'ingreso' AND pallet_id = ?"
+      + "    AND destino = ? AND COALESCE(presentacion_id,0) = ?"
+      + "    AND COALESCE(calibre,'') = ?").get(pid, destino, pres, cal);
+    return { ok: false, disponible: 0,
+      motivo: (propio && propio.b > 0) ? 'De eso ya está todo en este pallet'
+        : (libre ? 'De eso no hay nada en cámara' : 'De eso no hay nada en esa ubicación') };
+  }
 
   const granel = !filas.some((f) => f.bultos != null);
   /* El tope sale del SALDO de esa ubicación y no de la suma de las filas de ingreso:
      después de despachar, las cajas están en un camión y las filas de ingreso siguen
      ahí. Sumarlas ofrecería mover mercadería que ya se fue. */
-  const saldo = stockParaArmar(db).find((x) => x.lote_id === lote
-    && x.destino === destino
+  const saldos = stockParaArmar(db).filter((x) => x.destino === destino
     && (x.presentacion_id || 0) === pres
     && (x.calibre || '') === cal
-    && (x.pallet_id || null) === desde);
-  const hayB = saldo ? saldo.bultos : 0;
-  const hayK = saldo ? saldo.kilos : 0;
+    && (lote === null || x.lote_id === lote)
+    && (libre ? (x.pallet_id || 0) !== pid : (x.pallet_id || null) === desde));
+  const hayB = round2(saldos.reduce((t, x) => t + x.bultos, 0));
+  const hayK = round2(saldos.reduce((t, x) => t + x.kilos, 0));
   const pideB = granel ? null : numPos(dd.bultos, 0);
   const pideK = granel ? numPos(dd.kilos, 0) : null;
 
@@ -2273,6 +2356,7 @@ export function moverAlPallet(db, palletId, d) {
   let faltaB = pideB;
   let faltaK = pideK;
   let movidas = 0;
+  const tocadas = new Map();
   for (const f of filas) {
     if (granel ? !(faltaK > 0) : !(faltaB > 0)) break;
     const tieneB = f.bultos || 0;
@@ -2304,15 +2388,34 @@ export function moverAlPallet(db, palletId, d) {
         numPos(dd.usuario_id, 0) || null, txt(dd.usuario));
     }
     movidas++;
+    const k = f.fecha + '|' + f.lote_id + '|' + (f.pallet_id || 0);
+    if (!tocadas.has(k)) {
+      tocadas.set(k, { fecha: f.fecha, lote_id: f.lote_id, lote_nombre: f.lote_nombre,
+                       pallet_id: f.pallet_id || null, bultos: 0, kilos: 0 });
+    }
+    const t = tocadas.get(k);
+    t.bultos = round2(t.bultos + (tomaB || 0));
+    t.kilos = round2(t.kilos + tomaK);
     if (granel) faltaK = round2(faltaK - tomaK); else faltaB = round2(faltaB - tomaB);
   }
 
-  return { ok: true, id: pid, movidas,
+  /* DE DÓNDE SALIÓ, con el reparto ya hecho. Cuando el sistema elige solo, el que
+     apretó el botón no sabe de qué lotes ni de qué días salieron las cajas — y eso es
+     justamente lo que va a tener que mirar si algo no cuadra. */
+  const detalle = [...tocadas.values()].sort((x, y) =>
+    String(x.fecha).localeCompare(String(y.fecha)));
+
+  return { ok: true, id: pid, movidas, detalle,
            bultos: pideB, kilos: granel ? pideK : null,
            /* De dónde salieron, para poder decirlo en pantalla: sacarle cajas a un
               pallet cerrado lo deja distinto de su tarjetón, y el que lo hizo tiene que
               enterarse en el momento, no cuando llega el camión. */
+           /* Los pallets que quedaron distintos. Con el reparto automático pueden
+              ser varios, y cada uno que estuviera CERRADO quedó distinto de su
+              tarjetón: hay que decirlo todo, no sólo el primero. */
            desde: desde ? palletResumen(db, desde) : null,
+           tocados: [...new Set([...tocadas.values()].map((t) => t.pallet_id))]
+             .filter(Boolean).map((x) => palletResumen(db, x)),
            contenido: contenidoDelPallet(db, pid) };
 }
 

@@ -159,7 +159,8 @@ function domFalso() {
     'gst-arm', 'gal-arm-modal', 'gal-arm-rep', 'gal-arm-tit', 'gal-arm-lineas',
     'gal-arm-cargar', 'gal-arm-cerrarp', 'gal-arm-reabrir', 'gal-arm-tarj',
     'gal-arm-item', 'gal-arm-cant', 'gal-arm-cl', 'gal-arm-disp',
-    'gal-arm-fecha', 'gal-arm-obs']) nodos[id] = crear(id);
+    'gal-arm-fecha', 'gal-arm-obs', 'gal-arm-detalle',
+    'gal-arm-lab']) nodos[id] = crear(id);
   return { nodos, document: { getElementById: (id) => nodos[id] || null } };
 }
 
@@ -681,11 +682,18 @@ t('UN PALLET MIXTO ARMADO DESDE LA PANTALLA, y el stock intacto', async () => {
     assert.equal(dom.nodos['gst-aviso'].innerHTML, '',
       'la pantalla avisó un error: ' + dom.nodos['gst-aviso'].innerHTML);
     assert.deepEqual(dom.abiertas, ['gal-arm-modal'], 'no abrió la ventana');
-    // El selector ofrece las tres líneas, cada una con SU ubicación.
     const ops = dom.nodos['gal-arm-item'].innerHTML;
-    assert.ok((ops.match(/<option/g) || []).length >= 4, 'el selector salió vacío');
+    /* TRES opciones y no veinte: el vacío y los dos artículos. Por ubicación eran
+       cuatro montones —el cartón repetido por cada lote— y lo que Andy vio en
+       pantalla fueron diecinueve renglones. */
+    assert.equal((ops.match(/<option/g) || []).length, 3,
+      'el selector no agrupó por artículo: ' + ops);
     assert.match(ops, /50\/55/);
     assert.match(ops, /IFCO/);
+    // Con el DÍA, que es con lo que se elige, y sin el lote, que lo decide el
+    // sistema. Andy: «es más importante el día de proceso que el lote».
+    assert.match(ops, /desde el \d\d\/\d\d/, 'el renglón no dice desde cuándo está');
+    assert.ok(!ops.includes('Cuadro 3'), 'el renglón por artículo nombra un lote');
 
     // Se mueven tres montones distintos al mismo pallet.
     for (let i = 1; i <= 3; i++) {
@@ -806,5 +814,112 @@ t('el selector NO ofrece el pallet que se está armando', async () => {
     const ops = [...dom.nodos['gal-arm-item'].innerHTML.matchAll(/<option value="\d/g)];
     assert.equal(ops.length, 1, 'se ofrece a sí mismo');
     assert.match(dom.nodos['gal-arm-item'].innerHTML, /60 cj/);
+  } finally { s.cerrar(); }
+});
+
+t('EL INTERRUPTOR VUELVE AL DETALLE POR MONTÓN', async () => {
+  // El camino normal es por artículo, pero sacar de un pallet concreto pasa —
+  // y para eso hay que poder nombrarlo. Son dos listas distintas del mismo
+  // stock y el interruptor es lo único que las separa.
+  const db = base();
+  db.exec("INSERT INTO pa_lotes (id,nombre,sector_id,finca,activo) "
+    + "VALUES (11,'Cuadro 4',1,'La Esperanza',1)");
+  const s = await servidor(db, ADMIN);
+  const dom = domFalso();
+  try {
+    const a = await (await s.pegar('/presentaciones', json({ nombre: 'Caja',
+      destino: 'comercial', envase: 'x', por_bulto: 1, kg_unidad: 8,
+      categoria: 'I', calibre: '50/55' }))).json();
+    await s.pegar('/procesos', json({ fecha: HOY, lote_id: 10,
+      presentacion_id: a.id, bultos: 60, uuid: 'u1' }));
+    await s.pegar('/procesos', json({ fecha: HOY, lote_id: 11,
+      presentacion_id: a.id, bultos: 40, uuid: 'u2' }));
+
+    const p = pantalla(dom, s.pegar);
+    await p.galStCargar();
+    await p.galArmAbrir();
+    // Por artículo: UN renglón con las 100.
+    assert.equal((dom.nodos['gal-arm-item'].innerHTML.match(/<option/g) || []).length, 2);
+    assert.match(dom.nodos['gal-arm-item'].innerHTML, /100 cj/);
+
+    // Con el interruptor: DOS montones, cada uno con su lote.
+    dom.nodos['gal-arm-detalle'].checked = true;
+    p.galArmPintar();
+    const ops = dom.nodos['gal-arm-item'].innerHTML;
+    assert.equal((ops.match(/<option/g) || []).length, 3, 'no volvió al detalle');
+    assert.match(ops, /Cuadro 3/);
+    assert.match(ops, /Cuadro 4/);
+
+    // Y moviendo de ahí sale de ESE lote y de ninguno más.
+    dom.nodos['gal-arm-item'].value = '1';
+    dom.nodos['gal-arm-cant'].value = '40';
+    await p.galArmMover();
+    const l = dom.nodos['gal-arm-lineas'].innerHTML;
+    assert.match(l, /Cuadro 4/);
+    assert.ok(!l.includes('Cuadro 3'), 'tomó de un lote que no se nombró');
+  } finally { s.cerrar(); }
+});
+
+t('EL RENGLÓN DICE DE DÓNDE VA A SALIR antes de apretar', async () => {
+  // Con el sistema eligiendo, el que arma no sabe qué lotes ni qué días se va
+  // a llevar — y es lo que va a mirar si algo no cuadra. Se dice antes, no
+  // después.
+  const db = base();
+  db.exec("INSERT INTO pa_lotes (id,nombre,sector_id,finca,activo) "
+    + "VALUES (11,'Cuadro 4',1,'La Esperanza',1)");
+  const s = await servidor(db, ADMIN);
+  const dom = domFalso();
+  try {
+    const a = await (await s.pegar('/presentaciones', json({ nombre: 'Caja',
+      destino: 'comercial', envase: 'x', por_bulto: 1, kg_unidad: 8,
+      categoria: 'I', calibre: '50/55' }))).json();
+    await s.pegar('/procesos', json({ fecha: '2026-12-10', lote_id: 10,
+      presentacion_id: a.id, bultos: 30, uuid: 'u1' }));
+    const uno = (await (await s.pegar('/pallets')).json()).abierto;
+    await s.pegar('/pallets/' + uno.id + '/cerrar', json({}));
+    await s.pegar('/procesos', json({ fecha: '2026-12-14', lote_id: 11,
+      presentacion_id: a.id, bultos: 50, uuid: 'u2' }));
+
+    const p = pantalla(dom, s.pegar);
+    await p.galStCargar();
+    await p.galArmAbrir();
+    dom.nodos['gal-arm-item'].value = '0';
+    p.galArmItemPick();
+    const d = dom.nodos['gal-arm-disp'].innerHTML;
+    assert.match(d, /2 lotes/, 'no dice de cuántos lotes sale');
+    assert.match(d, /más viejo primero/);
+    assert.match(d, /10\/12/, 'no dice el día del más viejo');
+    // Y que uno de los montones es un pallet CERRADO.
+    assert.match(d, /CERRADOS/, 'no avisa que va a desarmar un pallet cerrado');
+  } finally { s.cerrar(); }
+});
+
+t('el reparto avisa TODOS los pallets cerrados que dejó distintos', async () => {
+  // Un pedido puede desarmar dos a la vez. Decir sólo el primero deja al
+  // segundo con la etiqueta mintiendo.
+  const db = base();
+  const s = await servidor(db, ADMIN);
+  const dom = domFalso();
+  try {
+    const a = await (await s.pegar('/presentaciones', json({ nombre: 'Caja',
+      destino: 'comercial', envase: 'x', por_bulto: 1, kg_unidad: 8,
+      categoria: 'I' }))).json();
+    for (const [f, u] of [['2026-12-10', 'u1'], ['2026-12-14', 'u2']]) {
+      await s.pegar('/procesos', json({ fecha: f, lote_id: 10,
+        presentacion_id: a.id, bultos: 30, uuid: u }));
+      const ab = (await (await s.pegar('/pallets')).json()).abierto;
+      await s.pegar('/pallets/' + ab.id + '/cerrar', json({}));
+    }
+
+    const p = pantalla(dom, s.pegar);
+    await p.galStCargar();
+    await p.galArmAbrir();
+    dom.nodos['gal-arm-item'].value = '0';
+    dom.nodos['gal-arm-cant'].value = '45';
+    await p.galArmMover();
+    const av = dom.nodos['gst-aviso'].innerHTML;
+    assert.equal((av.match(/PC-\d\d-\d{5}/g) || []).length, 2,
+      'no avisó los dos pallets que tocó: ' + av);
+    assert.match(av, /VAC[IÍ]O/i, 'uno quedó vacío y no lo dijo');
   } finally { s.cerrar(); }
 });
