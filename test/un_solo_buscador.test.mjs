@@ -395,7 +395,11 @@ test('lo busca la lupa igual que el resto del manual', () => {
 
 test('y dice lo que el buscador hace de verdad, con su versión', () => {
   // No alcanza con que el texto exista: tiene que afirmar lo mismo que el código.
-  const b = trozo(PANEL, 'var SG_MANUAL_COMUN =', "todo lo cargado.</p>';");
+  const ini = PANEL.indexOf('var SG_MANUAL_COMUN =');
+  assert.ok(ini > 0, 'no está SG_MANUAL_COMUN');
+  const fin = PANEL.indexOf("';", ini);
+  assert.ok(fin > ini, 'SG_MANUAL_COMUN no cierra');
+  const b = PANEL.slice(ini, fin + 2);
   assert.match(b, /<span class="ver">V1037<\/span>/);
 
   // «No hace falta poner tildes» — y el buscador lo cumple.

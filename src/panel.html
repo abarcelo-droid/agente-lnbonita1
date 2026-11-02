@@ -162,6 +162,24 @@ input[type=number]{-moz-appearance:textfield;appearance:textfield}
 <!-- La balanza por puerto serie. Sin defer no serviría: el panel la usa recién
      cuando alguien abre la carga de kilos. -->
 <script src="/static/balanza.js" defer></script>
+<!-- 📴 El galpón sin internet. Sin defer: el envoltorio de fetch tiene que estar
+     puesto antes del primer pedido de cualquier pantalla. -->
+<script src="/static/galponOffline.js"></script>
+<script src="/static/galponOfflineNav.js"></script>
+<script>
+/* El service worker, para que el panel ABRA sin señal. La cola de adentro ya evita
+   que se pierda una carga con la pestaña abierta; esto es para el que llega a la
+   mañana sin internet, o para después de un corte de luz.
+
+   Si el navegador no lo soporta no pasa nada: la cola funciona igual mientras la
+   pestaña esté abierta, que es el 95% del uso. */
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', function () {
+    navigator.serviceWorker.register('/galpon-sw.js', { scope: '/' })
+      .catch(function (e) { console.warn('[GALPON] sin service worker:', e.message); });
+  });
+}
+</script>
 <style>
   /* Evitar el FOUC del sidebar viejo: cuando carga el sidebar v2 (sb-v2),
      el nav original queda como "fuente de verdad" pero NO debe renderizarse.
@@ -8089,6 +8107,7 @@ input[type=number]{-moz-appearance:textfield;appearance:textfield}
       font-weight:400">— se puede elegir más de uno si la tolva está mezclada</span>
       <button class="btn bo bs" style="margin-left:8px"
         onclick="galPrTodosLosLotes()">Todos los que están en la tolva</button></h3>
+    <div id="gpr-aviso"></div>
     <div id="gpr-lotes" class="gpr-lotes"></div>
 
     <div id="gpr-tablero"></div>
@@ -25480,7 +25499,36 @@ var SG_MANUAL_COMUN =
   + '<h3>🪟 Salir de una ventana</h3>'
   + '<p>Una ventana de carga <b>no se cierra haciendo clic afuera</b>: se sale con '
   + '<b>Cancelar</b>, con el botón de guardar, o con la <b>×</b>. Un clic al costado '
-  + 'es un accidente, y perdería todo lo cargado.</p>';
+  + 'es un accidente, y perdería todo lo cargado.</p>'
+
+  + '<h3 class="mc">📴 Trabajar sin internet (galpón) <span class="ver">V1129</span></h3>'
+  + '<p>Andy, 2/11/2026: <i>«que los chicos puedan cargar info sin necesidad de estar '
+  + 'conectados»</i>. Las pantallas del galpón <b>funcionan sin señal</b>: lo que se '
+  + 'carga queda guardado en ese equipo y se manda solo cuando vuelve.</p>'
+  + '<p>Abajo de todo aparece una <b>barra</b> que dice qué está pasando. '
+  + '<b>Amarilla</b>: sin conexión, se puede seguir cargando, y dice cuántas cargas '
+  + 'están esperando. <b>Verde</b>: volvió la señal y la cola se vacía sola — el botón '
+  + '«Mandar ahora» la apura. <b>Roja</b>: algo no está pudiendo salir, y eso ya no es '
+  + 'falta de señal sino un problema del que hay que avisar.</p>'
+  + '<div class="ojo"><b>Lo cargado no se pierde ni se duplica.</b> Cada carga viaja '
+  + 'con un número propio, así que aunque la señal vaya y venga y se reintente diez '
+  + 'veces, el servidor guarda una sola. Y lo que queda esperando sigue ahí aunque se '
+  + 'cierre el navegador o se corte la luz: está en el equipo, no en la pantalla.</div>'
+  + '<p><b>Sin señal se puede:</b> cargar kilos (la ventana larga y la rápida), cargar y '
+  + 'corregir procesos, declarar el lote del día, y borrar una carga recién hecha.</p>'
+  + '<p><b>No se puede:</b> cerrar un pallet, emitir un despacho, armar un pallet desde '
+  + 'el stock, ni tocar el catálogo. Ésas avisan que hace falta señal en vez de fingir '
+  + 'que se guardaron, y la razón es la misma en todas: el <b>número</b> de un pallet o '
+  + 'de un remito, y el <b>tope</b> contra el stock, los decide el servidor mirando lo '
+  + 'que hay en TODOS los equipos. Un número inventado acá choca con uno de verdad, y un '
+  + 'pallet armado sin ver el stock se lleva cajas que otro ya despachó.</p>'
+  + '<p>Las listas muestran <b>lo último que alcanzó a bajar</b>, con un cartel amarillo '
+  + 'que dice de cuándo es: un dato viejo que no avisa que es viejo es peor que una '
+  + 'pantalla vacía. Lo que se carga <b>sí aparece en el momento</b>, con su renglón '
+  + 'normal.</p>'
+  + '<div class="ojo"><b>La primera vez hay que abrir el panel CON señal.</b> El equipo '
+  + 'se lo guarda y después abre sin internet; si nunca lo abrió conectado, no tiene qué '
+  + 'mostrar.</div>';
 
 // Lo que se muestra: el manual del módulo más lo que vale en todos.
 function sgManualHtml(m){
@@ -58558,6 +58606,7 @@ async function galPrCargar(){
     var j = await r.json();
     if (!j.ok) throw new Error(j.error || 'no se pudo leer');
     GPR.datos = j; GPR.fecha = j.fecha; GPR.hoy = j.hoy;
+    galOffCartel(j, 'gpr-aviso');
     if (f && !f.value) f.value = j.fecha;
     galPrPintarLotes();
     galPrPintarTablero();
@@ -59387,6 +59436,7 @@ async function galAcCargar(){
     var j = await r.json();
     if (!j.ok) throw new Error(j.error || 'no se pudo leer');
     GAC.datos = j; GAC.rango = j.rango || null; GAC.hoy = j.hoy;
+    galOffCartel(j, 'gac-aviso');
     /* Los casilleros se escriben con lo que el servidor RESOLVIÓ, no con lo que se pidió.
        Si se entró sin rango, acá aparecen la primera y la última carga; y si las fechas
        iban al revés, aparecen ya dadas vuelta — que es lo que el aviso de abajo explica. */
@@ -59854,6 +59904,26 @@ function galStNum(v, dec){
   return n.toLocaleString('es-AR', { minimumFractionDigits:dec==null?0:dec,
                                      maximumFractionDigits:dec==null?0:dec });
 }
+/* ── LO QUE SE ESTÁ MIRANDO ES DE CUÁNDO ─────────────────────────────────────────
+   Sin señal, los GET del galpón contestan lo último que guardó este equipo. Un dato
+   viejo que no dice que es viejo es peor que no tener dato: el operador arma un
+   camión con cajas que ya salieron. El envoltorio marca la respuesta con `de_cache`
+   y esto lo pinta, en un solo lugar para todas las pantallas del galpón. */
+function galOffCartel(j, dondeId){
+  var el = document.getElementById(dondeId);
+  if (!el) return;
+  if (!j || !j.de_cache){ el.innerHTML = ''; return; }
+  var h = '';
+  if (j.cache_cuando){
+    var d = new Date(j.cache_cuando);
+    h = ' (leído el ' + d.toLocaleDateString('es-AR') + ' a las '
+      + d.toLocaleTimeString('es-AR', { hour:'2-digit', minute:'2-digit' }) + ')';
+  }
+  el.innerHTML = '<div class="ojo" style="margin-bottom:10px;background:#fef3c7;'
+    + 'color:#92400e">📴 <b>Sin conexión.</b> Esto es lo último que alcanzó a bajar'
+    + h + '. Lo que cargues ahora se guarda en este equipo y se manda solo.</div>';
+}
+
 function galStAviso(msg, tipo){
   var el = document.getElementById('gst-aviso');
   if(!el) return;
@@ -59872,6 +59942,7 @@ async function galStCargar(){
     var j = await r.json();
     if(!j.ok) throw new Error(j.error||'No se pudo leer el stock');
     GST.datos = j; GST.disp = j.disponible||[]; GST.desp = j.despachos||[];
+    galOffCartel(j, 'gst-aviso');
     galStPintar();
     galStAviso('');
   }catch(e){ galStAviso(e.message); }

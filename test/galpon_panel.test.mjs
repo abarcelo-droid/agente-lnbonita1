@@ -2043,3 +2043,56 @@ test('el abridor del armado DEJA LA VENTANA EN BLANCO', () => {
   }
   assert.match(abrir, /GST\.armsel = null/);
 });
+
+// ── 📴 EL CABLEADO DEL MODO SIN INTERNET ──────────────────────────────────
+test('EL ENVOLTORIO SE CARGA ANTES QUE TODO, Y SIN defer', () => {
+  // Con `defer` los scripts corren en orden pero DESPUÉS del HTML, y una
+  // pantalla que arranque sola en el camino usaría el fetch pelado — justo la
+  // primera carga, que es la que al operador le importa.
+  const i = PANEL.indexOf('<script src="/static/galponOffline.js">');
+  assert.ok(i > 0, 'el panel no carga galponOffline.js');
+  const j = PANEL.indexOf('<script src="/static/galponOfflineNav.js">');
+  assert.ok(j > i, 'la parte del navegador se carga antes que la lógica');
+  // Ninguno de los dos lleva defer.
+  for (const f of ['galponOffline.js', 'galponOfflineNav.js']) {
+    const tag = new RegExp('<script src="/static/' + f + '"([^>]*)>').exec(PANEL);
+    assert.ok(tag, 'no está el tag de ' + f);
+    assert.ok(!/defer|async/.test(tag[1]), f + ' se carga con defer/async');
+  }
+});
+
+test('el service worker se registra y se sirve desde la RAÍZ', () => {
+  // Un service worker sólo controla las URLs de su propia carpeta hacia
+  // abajo: uno servido desde /static no vería /panel, que es justamente lo
+  // que hay que poder abrir sin señal.
+  assert.match(PANEL, /navigator\.serviceWorker\.register\('\/galpon-sw\.js'/,
+    'el panel no registra el service worker, o lo busca en otro lado');
+  const idx = fs.readFileSync(path.join(RAIZ, 'src/index.js'), 'utf8');
+  assert.match(idx, /app\.get\("\/galpon-sw\.js"/, 'el servidor no sirve el SW en la raíz');
+  const bloque = idx.slice(idx.indexOf('app.get("/galpon-sw.js"'),
+                           idx.indexOf('app.get("/mifco-sw.js"'));
+  assert.match(bloque, /Service-Worker-Allowed/, 'sin ese header el scope queda en /static');
+  // Y NO se cachea: un navegador que se queda con un SW viejo decide para
+  // siempre qué cachear, y eso no se corrige desde el servidor.
+  assert.match(bloque, /Cache-Control['"]?,\s*['"]no-cache/,
+    'el service worker se puede quedar cacheado para siempre');
+});
+
+test('EL CARTEL DE «ESTO ES VIEJO» ESTÁ EN LAS TRES PANTALLAS', () => {
+  // Un dato viejo que no dice que es viejo es peor que una pantalla vacía: el
+  // operador arma un camión con cajas que ya salieron. Y va en UNA función,
+  // no copiado en cada pantalla.
+  assert.match(PANEL, /function galOffCartel\(j, dondeId\)\{/);
+  const usos = [...PANEL.matchAll(/galOffCartel\(j, '([a-z-]+)'\)/g)].map((m) => m[1]);
+  assert.deepEqual(usos.sort(), ['gac-aviso', 'gpr-aviso', 'gst-aviso'],
+    'alguna pantalla del galpón no avisa que está mostrando datos viejos');
+  // Y los tres contenedores existen, o el cartel se pinta en la nada.
+  for (const id of usos) {
+    assert.ok(PANEL.includes('id="' + id + '"'), 'falta el contenedor ' + id);
+  }
+  // Dice DE CUÁNDO son los datos: «es viejo» sin fecha no deja decidir nada.
+  const fn = PANEL.slice(PANEL.indexOf('function galOffCartel(j, dondeId){'),
+                         PANEL.indexOf('function galStAviso(msg, tipo){'));
+  assert.match(fn, /cache_cuando/);
+  assert.match(fn, /toLocaleDateString/);
+});
