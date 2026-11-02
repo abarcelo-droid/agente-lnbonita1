@@ -7753,7 +7753,8 @@ input[type=number]{-moz-appearance:textfield;appearance:textfield}
       <div class="sgr-card" id="gal-arm-cargar" style="margin-top:12px">
         <div style="font-weight:600;font-size:13px;margin-bottom:8px">Agregar del stock</div>
         <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end">
-          <div style="flex:1 1 340px;min-width:0"><label>De dónde</label>
+          <div style="flex:1 1 340px;min-width:0">
+            <label id="gal-arm-lab">Qué</label>
             <select id="gal-arm-item" onchange="galArmItemPick()"></select></div>
           <div style="flex:0 0 110px"><label id="gal-arm-cl">Cajas</label>
             <input type="number" id="gal-arm-cant" min="0" step="1"
@@ -7761,6 +7762,15 @@ input[type=number]{-moz-appearance:textfield;appearance:textfield}
           <button class="btn bp bs" style="flex:0 0 auto" onclick="galArmMover()">Agregar</button>
         </div>
         <div id="gal-arm-disp" style="font-size:11px;color:var(--mut);margin-top:6px"></div>
+        <!-- EL CAMINO NORMAL es por artículo, con el sistema eligiendo de qué lote y
+             de qué día — lo más viejo primero. El detalle por montón sigue estando
+             para cuando hay que sacar de un pallet concreto, que pasa, pero deja de
+             ser lo primero que se ve. -->
+        <label style="display:flex;align-items:center;gap:6px;margin-top:8px;
+                      font-size:11.5px;text-transform:none;letter-spacing:0;color:var(--mut)">
+          <input type="checkbox" id="gal-arm-detalle" onchange="galArmPintar()"
+                 style="width:auto;margin:0">
+          Elegir yo de qué lote y de qué montón sale</label>
       </div>
 
       <div id="gal-arm-lineas" style="margin-top:12px"></div>
@@ -28695,7 +28705,21 @@ SG_MANUAL['galpon-stock'] = { titulo: 'Stock y Despachos', html:
   + 'manera. Lo único que saca del stock es el <b>despacho</b>. Si al armar bajara el '
   + 'stock, la cámara figuraría vacía con toda la fruta adentro.</div>'
 
-  + '<h3>De dónde sale cada cosa <span class="ver">V1126</span></h3>'
+  + '<h3>Qué poner, y de dónde sale <span class="ver">V1127</span></h3>'
+  + '<p>Andy, 1/11/2026: <i>«dame la opción de elegir independientemente del lote, es '
+  + 'decir que lo haga solo el sistema. Es más: es más importante el día de proceso que '
+  + 'el lote»</i>.</p>'
+  + '<p>El selector tiene <b>un renglón por artículo</b> —la caja y el calibre— con '
+  + '<b>desde qué día</b> está en cámara. Se pone la cantidad y <b>el sistema elige de '
+  + 'qué lote y de qué montón sacarlas, tomando lo más viejo primero</b>: en una cámara '
+  + 'lo que entró antes sale antes. Antes de apretar, abajo dice exactamente de dónde '
+  + 'va a salir: «de 2 lotes. Sale lo más viejo primero: 10/12 · PC-26-00001 (30) → '
+  + '14/12 · suelto (15)».</p>'
+  + '<p>Si hace falta <b>elegir el montón exacto</b> —porque importa el RENSPA de un '
+  + 'lote, o porque hay que vaciar un pallet determinado— el casillero <b>Elegir yo de '
+  + 'qué lote y de qué montón sale</b> vuelve a la lista detallada, una por ubicación.</p>'
+
+  + '<h3>Sacar de un pallet ya cerrado <span class="ver">V1126</span></h3>'
   + '<p>El selector no ofrece un total sino <b>montones concretos</b>: «PC-26-00003 · '
   + 'lote 13 · Carton Amarilla 50/55 — 120 cj». Es así porque sacar 60 cajas es sacarlas '
   + 'de algún lado, y el que está parado en el playón mira un montón, no un total. Lo '
@@ -60158,7 +60182,8 @@ async function galArmCargar(){
     var r = await fetch('/api/galpon/armado', { credentials:'same-origin' });
     var j = await r.json();
     if(!j.ok) throw new Error(j.error||'No se pudo leer');
-    GST.arm = j.stock||[]; GST.armp = j.pallets||[]; GST.armhoy = j.hoy;
+    GST.arm = j.stock||[]; GST.armart = j.articulos||[];
+    GST.armp = j.pallets||[]; GST.armhoy = j.hoy;
     galArmLista();
     galStAviso('');
   }catch(e){ galStAviso(e.message); }
@@ -60261,40 +60286,102 @@ function galArmPintar(){
       + ' Imprimí el tarjetón y pegalo.';
   }
 
-  /* El selector lista el stock POR UBICACIÓN: no se ofrece un total sino montones
-     concretos, porque sacar 60 cajas es sacarlas de algún lado. El propio pallet se
-     saltea — sacarle algo para ponérselo a él mismo no es nada. */
+  /* DOS MODOS. Andy, 1/11/2026: «dame la opción de elegir independientemente del
+     lote, es decir que lo haga solo el sistema. Es más: es más importante el día de
+     proceso que el lote».
+
+     El normal lista UN RENGLÓN POR ARTÍCULO con la fecha de lo más viejo, y de qué
+     lote sale lo decide el servidor tomando por fecha. El detallado lista los montones
+     uno por uno, y hace falta cuando hay que sacar de un pallet concreto.
+
+     El propio pallet se saltea en los dos: sacarle algo para ponérselo a él mismo no
+     es nada, y además haría que el tope cuente dos veces lo que ya tiene adentro. */
+  var det = document.getElementById('gal-arm-detalle');
+  GST.armdet = !!(det && det.checked);
+  var lab = document.getElementById('gal-arm-lab');
+  if (lab) lab.textContent = GST.armdet ? 'De qué montón' : 'Qué';
+
   var sel = document.getElementById('gal-arm-item');
   if(sel){
-    var ops = (GST.arm||[]).filter(function(f){
-      return (f.pallet_id||null) !== x.id && (f.bultos>0 || f.kilos>0); });
+    var ops = GST.armdet
+      ? (GST.arm||[]).filter(function(f){
+          return (f.pallet_id||null) !== x.id && (f.bultos>0 || f.kilos>0); })
+      : (GST.armart||[]).map(function(f){
+          /* Lo que ya está en ESTE pallet no se ofrece de nuevo: el corte por artículo
+             lo suma igual que el resto, así que hay que descontarlo acá o el renglón
+             ofrece cajas que están adentro. */
+          var propio = (f.ubicaciones||[]).filter(function(u){
+            return u.pallet_id === x.id; });
+          var b = propio.reduce(function(t,u){ return t+(Number(u.bultos)||0); },0);
+          var k = propio.reduce(function(t,u){ return t+(Number(u.kilos)||0); },0);
+          return Object.assign({}, f, { bultos: Math.round((f.bultos-b)*100)/100,
+                                        kilos: Math.round((f.kilos-k)*100)/100 });
+        }).filter(function(f){ return f.bultos>0 || f.kilos>0; });
     GST.armops = ops;
-    sel.innerHTML = '<option value="">— Elegir de dónde —</option>'
+    sel.innerHTML = '<option value="">— Elegir '
+      + (GST.armdet ? 'de dónde' : 'qué poner') + ' —</option>'
       + ops.map(function(f,i){
-          return '<option value="'+i+'">'+galStEsc(f.ubicacion)+' · '
-            + galStEsc(f.lote_nombre||('Lote '+f.lote_id))+' · '
-            + galStEsc(f.presentacion||'granel')
+          var cant = galStNum(f.granel?f.kilos:f.bultos,0) + (f.granel?' kg':' cj');
+          if (GST.armdet){
+            return '<option value="'+i+'">'+galStEsc(f.ubicacion)+' · '
+              + galStEsc(f.lote_nombre||('Lote '+f.lote_id))+' · '
+              + galStEsc(f.presentacion||'granel')
+              + (f.calibre?(' '+galStEsc(f.calibre)):'')
+              + ' — '+cant+'</option>';
+          }
+          /* EL DÍA PRIMERO, que es con lo que se elige. El lote no va: son varios y es
+             lo que el sistema decide. */
+          return '<option value="'+i+'">'+galStEsc(f.presentacion||'granel')
             + (f.calibre?(' '+galStEsc(f.calibre)):'')
-            + ' — '+galStNum(f.granel?f.kilos:f.bultos,0)
-            + (f.granel?' kg':' cj')+'</option>';
+            + ' — '+cant
+            + (f.desde ? (' · desde el '+galArmDia(f.desde)) : '')+'</option>';
         }).join('');
   }
   galArmItemPick();
   galArmLineas();
 }
 
+// Un día en 10/12, que es como se lee de un vistazo. Se parte a mano y no con
+// new Date('2026-12-10'): una fecha sola la toma el navegador como UTC de medianoche y
+// parada en Argentina eso se muestra como el día anterior.
+function galArmDia(f){
+  var q = String(f||'').split('-');
+  return q.length===3 ? (q[2]+'/'+q[1]) : (f||'');
+}
+
 function galArmItemPick(){
   var i = document.getElementById('gal-arm-item').value;
   var f = i===''? null : (GST.armops||[])[Number(i)];
   document.getElementById('gal-arm-cl').textContent = (f && f.granel) ? 'Kilos' : 'Cajas';
-  document.getElementById('gal-arm-disp').textContent = f
-    ? (f.granel ? ('Ahí hay '+galStNum(f.kilos,0)+' kg')
-                : ('Ahí hay '+galStNum(f.bultos,0)+' cajas de '
-                   + galStNum(f.kg_unidad,1)+' kg'))
+  var el = document.getElementById('gal-arm-disp');
+  if (!f){ el.innerHTML = ''; return; }
+  var hay = f.granel ? ('Hay '+galStNum(f.kilos,0)+' kg')
+                     : ('Hay '+galStNum(f.bultos,0)+' cajas de '
+                        + galStNum(f.kg_unidad,1)+' kg');
+  if (GST.armdet){
+    el.innerHTML = galStEsc(hay)
       + (f.pallet_estado==='cerrado'
-         ? ' — OJO: está en un pallet YA CERRADO, sacarle cajas lo deja distinto de su '
-           + 'tarjetón' : '')
-    : '';
+         ? ' — <b>OJO:</b> está en un pallet YA CERRADO, sacarle cajas lo deja distinto '
+           + 'de su tarjetón' : '');
+    return;
+  }
+  /* DE DÓNDE VA A SALIR, antes de apretar. Con el sistema eligiendo, el que arma no
+     sabe qué lotes ni qué días se va a llevar — y es lo que va a tener que mirar si
+     algo no cuadra. Se muestran los tres primeros en el orden en que se toman. */
+  var u = (f.ubicaciones||[]).slice(0, 3);
+  var cerrados = (f.ubicaciones||[]).filter(function(y){
+    return y.pallet_estado === 'cerrado'; }).length;
+  el.innerHTML = galStEsc(hay) + ', de ' + (f.lotes||[]).length + ' lote'
+    + ((f.lotes||[]).length === 1 ? '' : 's')
+    + '. Sale lo más viejo primero: '
+    + u.map(function(y){
+        return galStEsc(galArmDia(y.desde)) + ' · ' + galStEsc(y.ubicacion)
+          + ' (' + galStNum(f.granel?y.kilos:y.bultos,0) + ')';
+      }).join(' → ')
+    + ((f.ubicaciones||[]).length > 3 ? ' → …' : '')
+    + (cerrados
+       ? ' — <b>OJO:</b> ' + cerrados + ' de esos montones son pallets YA CERRADOS'
+       : '');
 }
 
 async function galArmMover(){
@@ -60307,20 +60394,34 @@ async function galArmMover(){
   try{
     var r = await fetch('/api/galpon/armado/'+x.id+'/mover', { method:'POST',
       headers:{'Content-Type':'application/json'}, credentials:'same-origin',
-      body: JSON.stringify({ lote_id:f.lote_id, destino:f.destino,
-        presentacion_id:f.presentacion_id||0, calibre:f.calibre||'',
-        pallet_id:f.pallet_id||null,
-        bultos: f.granel?null:c, kilos: f.granel?c:null }) });
+      /* En el modo normal NO se mandan lote_id ni pallet_id, y eso es distinto de
+         mandarlos en null: el servidor lee «de donde sea» en vez de «de lo suelto».
+         En el detallado se mandan los dos. */
+      body: JSON.stringify(GST.armdet
+        ? { lote_id:f.lote_id, destino:f.destino,
+            presentacion_id:f.presentacion_id||0, calibre:f.calibre||'',
+            pallet_id:f.pallet_id||null,
+            bultos: f.granel?null:c, kilos: f.granel?c:null }
+        : { destino:f.destino, presentacion_id:f.presentacion_id||0,
+            calibre:f.calibre||'',
+            bultos: f.granel?null:c, kilos: f.granel?c:null }) });
     var j = await r.json();
     if(!j.ok) throw new Error(j.error||'No se pudo mover');
     document.getElementById('gal-arm-cant').value='';
     /* Si salió de un pallet CERRADO hay que decirlo acá y ahora: queda distinto de su
        tarjetón, que está impreso y pegado. Enterarse cuando llega el camión es tarde. */
     await galArmCargar();
-    if(j.desde && j.desde.numero){
-      galStAviso('Salieron de ' + j.desde.numero + ', que queda con '
-        + galStNum(j.desde.bultos,0) + ' cajas'
-        + (j.desde.vacio ? ' — quedó VACÍO: andá a despegarle la etiqueta.' : '.'), 'ok');
+    /* Con el reparto automático un pedido puede desarmar VARIOS pallets a la vez:
+       se avisan todos los que estaban cerrados, no sólo el primero. Un pallet cerrado
+       al que le faltan cajas tiene su etiqueta mintiendo. */
+    var cer = (j.tocados||[]).filter(function(y){ return y && y.numero; });
+    if(cer.length){
+      galStAviso('Salieron de ' + cer.map(function(y){
+        return y.numero + ' (queda con ' + galStNum(y.bultos,0) + ')'
+          + (y.vacio ? ' — VACÍO' : '');
+      }).join(', ') + '. '
+        + (cer.some(function(y){ return y.vacio; })
+           ? 'Andá a despegar la etiqueta del que quedó vacío.' : ''), 'ok');
     }
     GST.armsel = (GST.armp||[]).filter(function(y){ return y.id===x.id; })[0] || GST.armsel;
     galArmPintar();
