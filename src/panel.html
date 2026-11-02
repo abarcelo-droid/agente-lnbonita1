@@ -28732,6 +28732,25 @@ SG_MANUAL['galpon-stock'] = { titulo: 'Stock y Despachos', html:
   + 'no cambia y las dos partes recuerdan de qué carga salieron, así que la historia se '
   + 'puede reconstruir.</p>'
 
+  + '<h3>Lo que lleva el pallet <span class="ver">V1128</span></h3>'
+  + '<p>Andy, 2/11/2026: <i>«me seguís poniendo muchas cosas del LOTE, me interesa '
+  + 'fecha de proceso pero no lote»</i>.</p>'
+  + '<p>La tabla de adentro va por <b>día de proceso y artículo</b>. Antes era una fila '
+  + 'por carga, así que 49 cajas del mismo cartón salían en tres renglones idénticos y '
+  + 'la única columna que los distinguía era el lote. Ahora es <b>un renglón</b>, y el '
+  + '× lo saca entero.</p>'
+  + '<p>El <b>día sí separa</b>: dos cargas del mismo artículo de días distintos son dos '
+  + 'renglones, porque la antigüedad es lo que se mira para decidir qué sale primero.</p>'
+  + '<div class="ojo"><b>El lote se sigue guardando.</b> No se muestra porque no es lo '
+  + 'que se mira para armar un camión, pero el RENSPA que va en un remito sale de ahí: '
+  + 'el día que haya que contestar «de qué lote era», la respuesta está.</div>'
+
+  + '<h3>Borrar un pallet empezado <span class="ver">V1128</span></h3>'
+  + '<p>Andy, 2/11/2026: <i>«ahí me tenés que dejar eliminar los pallets que empecé a '
+  + 'armar»</i>. El <b>×</b> al lado de cada uno lo borra — y <b>sólo aparece si está '
+  + 'vacío</b>: con cajas adentro, esas cajas quedarían contadas en el stock y en '
+  + 'ningún pallet. Primero se sacan y después se borra.</p>'
+
   + '<h3>Cerrar el pallet armado <span class="ver">V1126</span></h3>'
   + '<p>Igual que el del proceso: se le pone <b>número</b>, se congela lo que lleva, y sale <b>MIXTO</b> solo si adentro hay más de un artículo — no lo elige nadie. De ahí '
   + 'sale el <b>tarjetón</b> para imprimir y pegar.</p>'
@@ -60210,13 +60229,24 @@ function galArmLista(){
             + '<td>'+galStEsc(x.fecha_empaque||'—')+'</td>'
             /* Qué lleva, resumido: con tres artículos el nombre de cada uno no entra,
                y lo que importa en la lista es si es mixto y de qué. */
-            + '<td>'+(c.length ? galStEsc(c.map(function(y){
-                return (y.presentacion||'granel')+(y.calibre?(' '+y.calibre):''); })
+            /* Sin repetir: contenidoDelPallet agrupa por lote, así que el mismo
+               artículo de tres lotes salía tres veces y la celda decía «Carton
+               Amarilla · Carton Amarilla · Carton Amarill…». */
+            + '<td>'+(c.length ? galStEsc([...new Set(c.map(function(y){
+                return (y.presentacion||'granel')+(y.calibre?(' '+y.calibre):''); }))]
                 .join(' · ')) : '<span style="color:var(--mut)">vacío</span>')+'</td>'
             + '<td style="text-align:right" class="gst-n">'+galStNum(b,0)+'</td>'
             + '<td style="text-align:right">'+galStNum(k,0)+'</td>'
-            + '<td><button class="btn bo bs" onclick="galArmAbrir('+x.id+')">'
-            + (x.estado==='abierto'?'Seguir armando':'Ver')+'</button></td></tr>';
+            /* BORRAR. Andy, 2/11/2026: «ahí me tenés que dejar eliminar los pallets
+               que empecé a armar» — quedaron cuatro «sin número» vacíos de probar y
+               no había cómo sacarlos. Sólo los que no tienen nada adentro: con cajas,
+               esas cajas quedarían contadas en el stock y en ningún pallet. */
+            + '<td style="white-space:nowrap">'
+            + '<button class="btn bo bs" onclick="galArmAbrir('+x.id+')">'
+            + (x.estado==='abierto'?'Seguir armando':'Ver')+'</button>'
+            + (b ? '' : ' <button class="btn bo bs" title="Borrar este pallet" '
+                + 'onclick="galArmBorrar('+x.id+')">×</button>')
+            + '</td></tr>';
         }).join('')
       + '</tbody></table></div>'
     : '<div class="ojo">No hay ningún pallet armado. El botón de arriba arma el primero '
@@ -60274,8 +60304,13 @@ function galArmPintar(){
   ['gal-arm-fecha','gal-arm-obs'].forEach(function(k){
     var e=document.getElementById(k); if(e) e.disabled = !ab; });
 
+  var rep = document.getElementById('gal-arm-rep');
+  /* Se apaga SIEMPRE antes de decidir si se enciende. Sin el else, el cartel del cierre
+     sobrevivía a la reapertura y la pantalla decía «cerrado» con el botón de cerrar al
+     lado. */
+  if (rep) rep.style.display = 'none';
   if(!ab && x.numero){
-    var r = document.getElementById('gal-arm-rep');
+    var r = rep;
     var c = x.contenido||[];
     r.style.display=''; r.className='oko';
     r.innerHTML = 'Pallet <b>'+galStEsc(x.numero)+'</b> cerrado: '
@@ -60436,17 +60471,24 @@ function galArmLineas(){
     ? '<table class="pa-tbl gst-tbl" style="width:100%;table-layout:fixed">'
       + '<colgroup><col style="width:26%"><col style="width:24%"><col style="width:14%">'
       + '<col style="width:13%"><col style="width:13%"><col style="width:10%"></colgroup>'
-      + '<thead><tr><th>Lote</th><th>Presentación</th><th>Calibre</th>'
+      /* EL DÍA DE PROCESO EN VEZ DEL LOTE. Andy, 2/11/2026: «me seguís poniendo
+         muchas cosas del LOTE, me interesa fecha de proceso pero no lote». Las tres
+         filas de «Carton Amarilla» que se veían eran el mismo artículo repetido por
+         lote: ahora es un renglón por artículo y día. */
+      + '<thead><tr><th>Día de proceso</th><th>Presentación</th><th>Calibre</th>'
       + '<th style="text-align:right">Cajas</th><th style="text-align:right">Kilos</th>'
       + '<th></th></tr></thead><tbody>'
       + l.map(function(f){
-          return '<tr><td>'+galStEsc(f.lote_nombre||('Lote '+f.lote_id))+'</td>'
+          return '<tr><td>'+galStEsc(galArmDia(f.fecha))+'</td>'
             + '<td>'+galStEsc(f.presentacion||'A granel')+'</td>'
             + '<td>'+galStEsc(f.calibre||'—')+'</td>'
             + '<td style="text-align:right" class="gst-n">'+galStNum(f.bultos,0)+'</td>'
             + '<td style="text-align:right">'+galStNum(f.kilos,0)+'</td>'
+            /* El renglón es un grupo, así que sacarlo saca TODAS sus filas: se ve como
+               uno y se comporta como uno. */
             + '<td>'+(ab?('<button class="btn bo bs" title="Devolver al stock" '
-              + 'onclick="galArmSacar('+f.id+')">×</button>'):'')+'</td></tr>';
+              + 'onclick="galArmSacar(\''+(f.ids||[]).join(',')+'\')">×</button>'):'')
+            + '</td></tr>';
         }).join('')
       + '</tbody><tfoot><tr style="font-weight:700"><td colspan="3">Total'
       + (l.length>1 ? ' · MIXTO' : '')+'</td>'
@@ -60458,12 +60500,33 @@ function galArmLineas(){
     : '<div class="ojo">Todavía no le pusiste nada. Elegí arriba de qué montón sacar.</div>';
 }
 
-async function galArmSacar(id){
+// Un renglón de la tabla puede ser VARIAS filas —el mismo artículo del mismo día que
+// entró en dos cargas— y se saca entero: en pantalla es uno solo, así que dejar la
+// mitad adentro sería un renglón que no se puede sacar.
+/* Borrar un pallet VACÍO. El servicio frena si tiene algo adentro, así que acá sólo
+   hace falta no ofrecerlo: un botón que va a contestar que no se puede es un botón
+   que enseña a no leer los avisos. */
+async function galArmBorrar(id){
+  if(!confirm('¿Borrar este pallet?\n\nEstá vacío, así que no se pierde nada.')) return;
   try{
-    var r = await fetch('/api/galpon/armado/linea/'+id, { method:'DELETE',
+    var r = await fetch('/api/galpon/pallets/'+id, { method:'DELETE',
       credentials:'same-origin' });
     var j = await r.json();
-    if(!j.ok) throw new Error(j.error||'No se pudo sacar');
+    if(!j.ok) throw new Error(j.error||'No se pudo borrar');
+    await galArmCargar();
+    galStAviso('');
+  }catch(e){ galStAviso(e.message); }
+}
+
+async function galArmSacar(ids){
+  try{
+    for (var k of String(ids).split(',')){
+      if (!k) continue;
+      var r = await fetch('/api/galpon/armado/linea/'+k, { method:'DELETE',
+        credentials:'same-origin' });
+      var j = await r.json();
+      if(!j.ok) throw new Error(j.error||'No se pudo sacar');
+    }
     var ab = GST.armsel;
     await galArmCargar();
     GST.armsel = (GST.armp||[]).filter(function(y){ return y.id===(ab&&ab.id); })[0]||null;

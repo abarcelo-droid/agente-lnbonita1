@@ -157,13 +157,16 @@ test('LA PARTE QUE SE VA APUNTA A LA CARGA ORIGINAL', () => {
 
   const l = lineasDelPallet(db, p.id);
   assert.equal(l.length, 1);
-  assert.equal(l[0].partido_de, uno.id, 'la parte movida no dice de dónde salió');
+  // El renglón agrupa, así que de qué carga salió se pregunta a la base.
+  assert.equal(db.prepare('SELECT partido_de FROM gal_procesos WHERE pallet_id = ?')
+    .get(p.id).partido_de, uno.id, 'la parte movida no dice de dónde salió');
   // Y si esa parte se vuelve a partir, sigue apuntando a la ORIGINAL y no a la
   // parte: una cadena de partido_de no se puede seguir hasta el principio.
   const q = abrirPalletArmado(db, { fecha: F });
   moverAlPallet(db, q.id, { lote_id: 10, destino: 'comercial',
     presentacion_id: a, calibre: '50/55', bultos: 20, pallet_id: p.id });
-  assert.equal(lineasDelPallet(db, q.id)[0].partido_de, uno.id);
+  assert.equal(db.prepare('SELECT partido_de FROM gal_procesos WHERE pallet_id = ?')
+    .get(q.id).partido_de, uno.id);
 });
 
 test('mover la fila ENTERA no la parte', () => {
@@ -177,7 +180,8 @@ test('mover la fila ENTERA no la parte', () => {
     presentacion_id: a, calibre: '50/55', bultos: 40, pallet_id: delDia });
 
   assert.equal(lineasDelPallet(db, p.id).length, 1);
-  assert.equal(lineasDelPallet(db, p.id)[0].partido_de, null, 'partió una fila entera');
+  assert.equal(db.prepare('SELECT partido_de FROM gal_procesos WHERE pallet_id = ?')
+    .get(p.id).partido_de, null, 'partió una fila entera');
   assert.equal(contenidoDelPallet(db, delDia).length, 0, 'quedó una fila en cero');
 });
 
@@ -382,7 +386,7 @@ test('sacar una línea la devuelve al suelto, sin tocar el stock', () => {
   moverAlPallet(db, p.id, { lote_id: 10, destino: 'comercial',
     presentacion_id: a, calibre: '50/55', bultos: 40, pallet_id: delDia });
 
-  const linea = lineasDelPallet(db, p.id)[0];
+  const linea = { id: lineasDelPallet(db, p.id)[0].ids[0] };
   assert.equal(sacarDelPalletArmado(db, linea.id).ok, true);
   assert.deepEqual(stock(db), antes);
   assert.equal(contenidoDelPallet(db, p.id).length, 0);
@@ -400,7 +404,7 @@ test('no se saca de un pallet cerrado, ni algo que ya está suelto', () => {
   const p = abrirPalletArmado(db, { fecha: F });
   moverAlPallet(db, p.id, { lote_id: 10, destino: 'comercial',
     presentacion_id: a, calibre: '50/55', bultos: 40, pallet_id: delDia });
-  const linea = lineasDelPallet(db, p.id)[0];
+  const linea = { id: lineasDelPallet(db, p.id)[0].ids[0] };
   cerrarPallet(db, p.id, {});
 
   assert.equal(sacarDelPalletArmado(db, linea.id).ok, false);

@@ -2458,16 +2458,47 @@ export function sacarDelPalletArmado(db, procesoId) {
 // Las líneas de un pallet, UNA POR FILA y no agrupadas: es lo que se saca de a una
 // cuando el pallet se está armando. contenidoDelPallet() agrupa, que es lo que va en el
 // tarjetón, pero para corregir hay que poder señalar el renglón exacto.
+// Las líneas de un pallet, AGRUPADAS POR ARTÍCULO Y DÍA DE PROCESO. Andy, 2/11/2026:
+// «me interesa fecha de proceso pero no lote». Antes era una fila por carga, así que un
+// pallet con 49 cajas del mismo cartón mostraba tres renglones idénticos salvo por el
+// lote — la única columna que los distinguía era la que no interesa.
+//
+// El día SÍ queda separado: dos cargas del mismo artículo de días distintos son dos
+// renglones, porque la antigüedad es lo que se mira para decidir qué sale primero.
+//
+// Los ids de las filas que lo componen viajan juntos para poder sacarlas: el renglón se
+// ve como uno y al quitarlo se van las tres.
 export function lineasDelPallet(db, palletId) {
   const i = parseInt(palletId, 10);
   if (!Number.isFinite(i)) return [];
-  return db.prepare(
+  const filas = db.prepare(
     ' SELECT id, fecha, lote_id, lote_nombre, producto, destino, presentacion,'
-    + '       categoria, calibre, variedad, bultos, kilos, partido_de'
+    + '       presentacion_id, categoria, calibre, variedad, bultos, kilos, partido_de'
     + "  FROM gal_procesos WHERE pallet_id = ? AND eliminado_en IS NULL AND tipo = 'ingreso'"
-    + '  ORDER BY id').all(i).map((f) => Object.assign(f, {
-    bultos: round2(f.bultos), kilos: round2(f.kilos),
-  }));
+    + '  ORDER BY fecha, id').all(i);
+
+  const por = new Map();
+  for (const f of filas) {
+    const k = [f.fecha, f.presentacion_id || 0, f.calibre || '', f.destino].join('|');
+    if (!por.has(k)) {
+      por.set(k, { fecha: f.fecha, presentacion_id: f.presentacion_id,
+                   presentacion: f.presentacion, destino: f.destino,
+                   categoria: f.categoria, calibre: f.calibre, producto: f.producto,
+                   variedad: f.variedad, bultos: 0, kilos: 0, ids: [], lotes: [] });
+    }
+    const g = por.get(k);
+    g.bultos = round2(g.bultos + (f.bultos || 0));
+    g.kilos = round2(g.kilos + f.kilos);
+    g.ids.push(f.id);
+    /* Los lotes viajan igual aunque la pantalla no los muestre: el RENSPA que va en un
+       remito sale de ahí, y el día que haya que contestar «de qué lote era» la
+       respuesta tiene que estar. Lo que cambia es qué se mira primero, no qué se
+       guarda. */
+    if (!g.lotes.some((x) => x.lote_id === f.lote_id)) {
+      g.lotes.push({ lote_id: f.lote_id, nombre: f.lote_nombre });
+    }
+  }
+  return [...por.values()];
 }
 
 export function cerrarPallet(db, id, d) {
