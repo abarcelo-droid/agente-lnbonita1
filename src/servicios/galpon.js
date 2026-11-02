@@ -484,6 +484,78 @@ const primerEmoji = (v) => {
    NULO ES «NO SE MIRÓ», y no es lo mismo que B. Una planilla donde todo figura bueno
    porque nadie completó la columna es peor que una con huecos: la firman tres
    personas. */
+// ════════════════════════════════════════════════════════════════════════════════════
+// 👷 DOS CUADRILLAS EN EL MISMO CAJÓN
+// ════════════════════════════════════════════════════════════════════════════════════
+// Andy, 2/11/2026: «que pueda elegir dos cuadrillas cosechando el mismo cajón. A veces
+// pasa».
+//
+// UNA SOLA PUERTA PARA LAS DOS MANERAS DE PEDIRLO. La pantalla manda `cuadrilla_ids`
+// (una lista); la carga rápida vieja, la cola que quedó de ayer sin mandar y cualquier
+// pedido escrito antes de hoy mandan `cuadrilla_id` (uno). Las dos entran por acá, así
+// que el resto del módulo no tiene que saber cuál vino — y una cola guardada el jueves
+// sigue entrando el viernes.
+//
+// Devuelve `{ok:false, motivo}` como todo el módulo, nunca tira.
+export function cuadrillasPedidas(db, d) {
+  const dd = d || {};
+  const crudos = Array.isArray(dd.cuadrilla_ids) ? dd.cuadrilla_ids
+                 : (dd.cuadrilla_id != null ? [dd.cuadrilla_id] : []);
+  const ids = [];
+  for (const c of crudos) {
+    if (c == null || String(c).trim() === '') continue;   // el '— sin cuadrilla —'
+    const i = parseInt(c, 10);
+    if (!Number.isFinite(i)) return { ok: false, motivo: 'La cuadrilla "' + c + '" no se entiende' };
+    // REPETIDA NO ES ERROR, ES UN CLIC DE MÁS. Dejarla pasar dos veces partiría los
+    // kilos en dos mitades para la MISMA cuadrilla, que suman lo mismo pero hacen que
+    // la pantalla diga «Norte + Norte». Y rechazarlo sería frenar una carga por un
+    // problema que se arregla solo.
+    if (ids.indexOf(i) < 0) ids.push(i);
+  }
+  const lista = [];
+  for (const i of ids) {
+    const c = db.prepare('SELECT id, nombre FROM pa_cuadrillas WHERE id = ?').get(i);
+    if (!c) return { ok: false, motivo: 'La cuadrilla ' + i + ' no existe' };
+    lista.push({ id: c.id, nombre: c.nombre });
+  }
+  return { ok: true, lista };
+}
+
+// Cómo se ve en una sola línea: «Norte + Sur». Es lo que va en gal_volcados.cuadrilla,
+// que es la columna que lee cualquier pantalla sin saber de esto.
+export function nombreDeCuadrillas(lista) {
+  const l = lista || [];
+  if (!l.length) return null;
+  return l.map((c) => c.nombre).join(' + ');
+}
+
+// LA ATRIBUCIÓN, EN PARTES IGUALES. `repartir` le da el resto a la última, así que la
+// suma cierra exacta contra los kilos del cajón: repartir 701 en dos y redondear cada
+// mitad daría 700,99, y ese centavo aparecería como kilos que nadie cosechó.
+//
+// Se BORRA y se vuelve a escribir, no se actualiza: corregir los kilos o cambiar una
+// cuadrilla por otra son el caso normal, y un UPDATE selectivo dejaría la fila de la
+// cuadrilla que se sacó con su parte adentro.
+export function guardarCuadrillas(db, volcadoId, lista, kg) {
+  db.prepare('DELETE FROM gal_volcado_cuadrillas WHERE volcado_id = ?').run(volcadoId);
+  const l = lista || [];
+  if (!l.length) return [];
+  const partes = repartir(kg, l.map(() => 1 / l.length));
+  const ins = db.prepare(
+    'INSERT INTO gal_volcado_cuadrillas (volcado_id, cuadrilla_id, cuadrilla, kilos)'
+    + ' VALUES (?,?,?,?)');
+  l.forEach((c, i) => ins.run(volcadoId, c.id, c.nombre, partes[i]));
+  return l.map((c, i) => ({ cuadrilla_id: c.id, cuadrilla: c.nombre, kilos: partes[i] }));
+}
+
+// Las cuadrillas de una carga, para que la pantalla pueda mostrar las dos y volver a
+// ofrecerlas al corregir. La fila madre sólo guarda la PRIMERA y el nombre pegado.
+export function cuadrillasDeVolcado(db, volcadoId) {
+  return db.prepare(
+    ' SELECT cuadrilla_id, cuadrilla, kilos FROM gal_volcado_cuadrillas'
+    + '  WHERE volcado_id = ? ORDER BY cuadrilla_id').all(volcadoId);
+}
+
 export const SANITARIOS = ['B', 'R', 'M'];
 export function sanitarioDe(v) {
   const t = String(v == null ? '' : v).trim().toUpperCase().slice(0, 1);
@@ -528,14 +600,15 @@ export function registrarVolcado(db, d) {
   const lote = db.prepare('SELECT id, nombre FROM pa_lotes WHERE id = ?').get(loteId);
   if (!lote) return { ok: false, motivo: 'El lote ' + loteId + ' no existe' };
 
-  let cuadId = null, cuadNom = null;
-  if (dd.cuadrilla_id != null && String(dd.cuadrilla_id).trim() !== '') {
-    const ci = parseInt(dd.cuadrilla_id, 10);
-    const c = Number.isFinite(ci)
-      ? db.prepare('SELECT id, nombre FROM pa_cuadrillas WHERE id = ?').get(ci) : null;
-    if (!c) return { ok: false, motivo: 'La cuadrilla ' + dd.cuadrilla_id + ' no existe' };
-    cuadId = c.id; cuadNom = c.nombre;
-  }
+  // UNA O VARIAS. En la fila madre queda la PRIMERA y el nombre de todas pegado
+  // («Norte + Sur»): es la columna que leen las pantallas y los informes que no saben
+  // de esto, y dejarla en null cuando hay dos haría aparecer la carga como si no
+  // tuviera cuadrilla. El reparto de los kilos va en la tabla satélite, abajo.
+  const qq = cuadrillasPedidas(db, dd);
+  if (!qq.ok) return { ok: false, motivo: qq.motivo };
+  const cuads = qq.lista;
+  const cuadId = cuads.length ? cuads[0].id : null;
+  const cuadNom = nombreDeCuadrillas(cuads);
 
   const kg = kilos(dd.kilos);
   if (kg === null) {
@@ -571,15 +644,21 @@ export function registrarVolcado(db, d) {
   // estaba, para que el que reintentó vea lo mismo que vería si hubiera entrado recién.
   if (!r.changes) {
     const ya = db.prepare('SELECT * FROM gal_volcados WHERE uuid = ?').get(txt(dd.uuid));
+    if (ya) ya.cuadrillas = cuadrillasDeVolcado(db, ya.id);
     return { ok: true, repetido: true, id: ya ? ya.id : null, fila: ya || null, aviso: null };
   }
 
   const id = Number(r.lastInsertRowid);
+  // El reparto se escribe DESPUÉS del INSERT porque necesita el id, y sale siempre:
+  // también con una sola cuadrilla. Que la tabla satélite sea el único lugar donde se
+  // lee la atribución es lo que hace que el corte por cuadrilla no tenga dos caminos.
+  const reparto = guardarCuadrillas(db, id, cuads, kg);
   return {
     ok: true,
     repetido: false,
     id,
-    fila: db.prepare('SELECT * FROM gal_volcados WHERE id = ?').get(id),
+    fila: Object.assign(db.prepare('SELECT * FROM gal_volcados WHERE id = ?').get(id),
+                        { cuadrillas: reparto }),
     aviso: revision,
   };
 }
@@ -612,15 +691,15 @@ export function editarVolcado(db, id, d) {
     if (!l) return { ok: false, motivo: 'El lote ' + dd.lote_id + ' no existe' };
     set('lote_id', l.id); set('lote_nombre', l.nombre);
   }
-  if ('cuadrilla_id' in dd) {
-    if (dd.cuadrilla_id == null || String(dd.cuadrilla_id).trim() === '') {
-      set('cuadrilla_id', null); set('cuadrilla', null);
-    } else {
-      const c = db.prepare('SELECT id, nombre FROM pa_cuadrillas WHERE id = ?')
-                  .get(parseInt(dd.cuadrilla_id, 10));
-      if (!c) return { ok: false, motivo: 'La cuadrilla ' + dd.cuadrilla_id + ' no existe' };
-      set('cuadrilla_id', c.id); set('cuadrilla', c.nombre);
-    }
+  /* Sólo si VINO en el pedido, igual que el resto: un PATCH de los kilos no puede
+     dejar la carga sin cuadrilla. Y si vino, se reescribe el reparto entero (abajo). */
+  let cuads = null;
+  if ('cuadrilla_ids' in dd || 'cuadrilla_id' in dd) {
+    const qq = cuadrillasPedidas(db, dd);
+    if (!qq.ok) return { ok: false, motivo: qq.motivo };
+    cuads = qq.lista;
+    set('cuadrilla_id', cuads.length ? cuads[0].id : null);
+    set('cuadrilla', nombreDeCuadrillas(cuads));
   }
   if ('producto' in dd)    set('producto', txt(dd.producto));
   if ('observacion' in dd) set('observacion', txt(dd.observacion));
@@ -646,23 +725,64 @@ export function editarVolcado(db, id, d) {
 
   par.push(i);
   db.prepare('UPDATE gal_volcados SET ' + sets.join(', ') + ' WHERE id = ?').run(...par);
+
+  /* EL REPARTO SE REHACE TAMBIÉN CUANDO SÓLO CAMBIARON LOS KILOS. Corregir 700 a 900
+     sin tocar esto dejaría a cada cuadrilla con 350 y a la carga con 900: el corte por
+     cuadrilla sumaría 700 y el total del día 900, y los dos números saldrían de la
+     misma pantalla sin que nada avise cuál vale. */
+  if (cuads !== null || 'kilos' in dd) {
+    guardarCuadrillas(db, i, cuads !== null ? cuads : cuadrillasDeVolcado(db, i)
+      .map((x) => ({ id: x.cuadrilla_id, nombre: x.cuadrilla })), kg);
+  }
   return {
     ok: true,
-    fila: db.prepare('SELECT * FROM gal_volcados WHERE id = ?').get(i),
+    fila: Object.assign(db.prepare('SELECT * FROM gal_volcados WHERE id = ?').get(i),
+                        { cuadrillas: cuadrillasDeVolcado(db, i) }),
     aviso: revision,
   };
 }
 
 // Soft delete, como en el resto del repo: un renglón de kilos borrado de verdad es un
 // jornal que no se puede auditar después.
-export function borrarVolcado(db, id) {
+//
+// ── LO DE HOY LO BORRA CUALQUIERA; LO DE AYER, NO ─────────────────────────────────
+// Andy, 2/11/2026: «necesito que todos los usuarios puedan borrar algo del día vigente
+// (fecha día hoy)».
+//
+// Un renglón tipeado hace diez segundos con un cero de más es un ERROR DE TIPEO, no una
+// anulación. Pedirle nivel «anular» para eso significa que el operario va a buscar al
+// dueño y, mientras tanto, el renglón mal queda cargado — que es peor que si lo hubiera
+// sacado él. Y es el que está parado ahí: sabe que ese cajón no existió.
+//
+// Lo de días ANTERIORES sigue necesitando nivel: un día cerrado ya se usó para pagar un
+// jornal y para medir un rinde, y sacarle un renglón mueve los dos para atrás.
+//
+// LA FECHA DE HOY ENTRA POR PARÁMETRO y no se calcula acá: la decide el SERVIDOR (ver
+// hoy() en rutas/galpon.js). Tomada del navegador, adelantar el reloj del equipo del
+// galpón alcanzaría para que «hoy» fuera cualquier día.
+export function borrarVolcado(db, id, opts) {
+  const o = opts || {};
   const i = parseInt(id, 10);
   if (!Number.isFinite(i)) return { ok: false, motivo: 'Id inválido' };
+  const fila = db.prepare(
+    'SELECT id, fecha, kilos FROM gal_volcados WHERE id = ? AND eliminado_en IS NULL').get(i);
+  if (!fila) return { ok: false, motivo: 'Esa carga no existe o ya se borró' };
+
+  if (!o.puede_anular && o.hoy && fila.fecha !== o.hoy) {
+    return { ok: false, status: 403,
+      motivo: 'Esa carga es del ' + fila.fecha + ' y hoy es ' + o.hoy + '. Lo del día se'
+           + ' borra solo; un día ya cerrado lo tiene que anular alguien con ese permiso'
+           + ' — esos kilos ya se usaron para pagar el jornal y para medir el rinde.' };
+  }
+
   const r = db.prepare(
     "UPDATE gal_volcados SET eliminado_en = datetime('now','localtime')"
     + ' WHERE id = ? AND eliminado_en IS NULL').run(i);
   if (!r.changes) return { ok: false, motivo: 'Esa carga no existe o ya se borró' };
-  return { ok: true };
+  /* El reparto por cuadrilla NO se borra. Cuelga de la fila madre, y los cortes la
+     unen con un JOIN que ya filtra eliminado_en: borrarlo sería perder a quién se le
+     habían anotado esos kilos, que es justamente lo que un borrado blando conserva. */
+  return { ok: true, fecha: fila.fecha };
 }
 
 // ── LO QUE SE CARGÓ UN DÍA ──────────────────────────────────────────────────────────
@@ -745,10 +865,28 @@ export function planillaIngreso(db, fecha) {
 export function volcadosDelDia(db, fecha) {
   const f = esFecha(fecha);
   if (!f) return [];
-  return db.prepare(
+  const filas = db.prepare(
     ' SELECT * FROM gal_volcados'
     + '  WHERE fecha = ? AND eliminado_en IS NULL'
     + '  ORDER BY id DESC').all(f);
+  /* Las cuadrillas de cada carga, en UNA consulta y no una por renglón: un día de
+     cosecha son trescientas cargas, y trescientas consultas se notan en la pantalla
+     que el operador abre cada vez que guarda. */
+  const porCarga = new Map();
+  if (filas.length) {
+    const ids = filas.map((x) => x.id);
+    const sat = db.prepare(
+      ' SELECT volcado_id, cuadrilla_id, cuadrilla, kilos'
+      + '  FROM gal_volcado_cuadrillas'
+      + '  WHERE volcado_id IN (' + ids.map(() => '?').join(',') + ')'
+      + '  ORDER BY cuadrilla_id').all(...ids);
+    for (const x of sat) {
+      if (!porCarga.has(x.volcado_id)) porCarga.set(x.volcado_id, []);
+      porCarga.get(x.volcado_id).push(
+        { cuadrilla_id: x.cuadrilla_id, cuadrilla: x.cuadrilla, kilos: x.kilos });
+    }
+  }
+  return filas.map((x) => Object.assign(x, { cuadrillas: porCarga.get(x.id) || [] }));
 }
 
 // ── LO ÚLTIMO QUE CARGÓ ─────────────────────────────────────────────────────────────
@@ -786,6 +924,10 @@ export function ultimaCarga(db, fecha, usuarioId) {
     producto: fila.producto,
     cuadrilla_id: fila.cuadrilla_id,
     cuadrilla: fila.cuadrilla,
+    /* LAS DOS, si eran dos. Proponer sólo la primera sería arrancar la tanda siguiente
+       con la mitad del equipo, y el que aprieta Empezar no tiene cómo notarlo: la
+       cuadrilla que aparece es una de las que estaban. */
+    cuadrilla_ids: cuadrillasDeVolcado(db, fila.id).map((x) => x.cuadrilla_id),
     observacion: fila.observacion,
     fecha: fila.fecha,
     // Las dos banderas con las que la pantalla decide si pregunta o no.
@@ -815,15 +957,38 @@ export function resumenDelDia(db, fecha) {
     + "       COALESCE(SUM(CASE WHEN estado = 'a_revisar' THEN 1 ELSE 0 END),0) AS a_revisar"
     + base).get(f);
 
+  /* ── EL CORTE SALE DE LA TABLA SATÉLITE (V1133) ──────────────────────────────────
+     Un cajón puede ser de dos cuadrillas, y entonces la atribución no está en la fila
+     madre: está repartida. Leer cuadrilla_id de gal_volcados le daría los kilos enteros
+     a la primera y cero a la segunda — y el total del día seguiría cerrando, así que
+     no se notaría nunca.
+
+     LEFT JOIN y no JOIN: una carga sin cuadrilla tiene que seguir apareciendo como
+     «— sin cuadrilla —» con sus kilos. Con JOIN desaparecería del corte y el corte
+     sumaría menos que el total, que es el error de siempre con la fruta sin atribuir.
+
+     Y EL COALESCE CONTRA LA FILA MADRE NO ES UN SEGUNDO CAMINO: es el respaldo de una
+     carga que no tiene ninguna fila en la satélite. Devuelve lo MISMO que el relleno
+     de db_galpon.js le habría escrito —su cuadrilla, sus kilos enteros— así que los
+     dos no pueden contestar distinto. Sin él, una carga que entrara por un camino que
+     se olvidó de la satélite aparecería como «sin cuadrilla» conservando sus kilos, y
+     eso es peor que faltar: el total del día sigue cerrando. */
   const porCuadrilla = db.prepare(
-    ' SELECT cuadrilla_id,'
-    + "       COALESCE(cuadrilla, '— sin cuadrilla —') AS nombre,"
+    ' SELECT COALESCE(vc.cuadrilla_id, v.cuadrilla_id) AS cuadrilla_id,'
+    + "       COALESCE(vc.cuadrilla, v.cuadrilla, '— sin cuadrilla —') AS nombre,"
     + '       COUNT(*) AS cargas,'
-    + '       COALESCE(SUM(kilos),0) AS kilos,'
-    + '       COALESCE(SUM(ifcos),0) AS ifcos'
-    + base
-    + ' GROUP BY cuadrilla_id'
-    + ' ORDER BY SUM(kilos) DESC').all(f);
+    + '       COALESCE(SUM(COALESCE(vc.kilos, v.kilos)),0) AS kilos,'
+    /* El cajón compartido cuenta MEDIO para cada una. Entero en las dos haría que la
+       columna sume más cajones que los que entraron al galpón. */
+    + '       COALESCE(SUM(CASE WHEN vc.cuadrilla_id IS NULL THEN v.ifcos'
+    + '                         ELSE v.ifcos * 1.0 / (SELECT COUNT(*)'
+    + '                           FROM gal_volcado_cuadrillas x'
+    + '                          WHERE x.volcado_id = v.id) END),0) AS ifcos'
+    + '  FROM gal_volcados v'
+    + '  LEFT JOIN gal_volcado_cuadrillas vc ON vc.volcado_id = v.id'
+    + '  WHERE v.fecha = ? AND v.eliminado_en IS NULL'
+    + ' GROUP BY COALESCE(vc.cuadrilla_id, v.cuadrilla_id)'
+    + ' ORDER BY SUM(COALESCE(vc.kilos, v.kilos)) DESC').all(f);
 
   const porLote = db.prepare(
     ' SELECT lote_id,'
@@ -936,7 +1101,24 @@ export function acumulado(db, desde, hasta) {
     pct: kilos > 0 ? Math.round(((f.kilos || 0) / kilos) * 1000) / 10 : 0,
   }));
 
-  const porCuadrilla = conPct(corte('cuadrilla_id', "cuadrilla, '— sin cuadrilla —'"));
+  /* El corte por cuadrilla no usa corte(): sale de la tabla satélite, por lo mismo que
+     en resumenDelDia. Un cajón de dos cuadrillas tiene su atribución repartida ahí, y
+     leerlo de la fila madre le daría los kilos enteros a una sola. */
+  const porCuadrilla = conPct(db.prepare(
+    ' SELECT COALESCE(vc.cuadrilla_id, v.cuadrilla_id) AS gid,'
+    + "       COALESCE(vc.cuadrilla, v.cuadrilla, '— sin cuadrilla —') AS nombre,"
+    + '       COUNT(*) AS cargas,'
+    + '       COUNT(DISTINCT v.fecha) AS dias,'
+    + '       COALESCE(SUM(COALESCE(vc.kilos, v.kilos)),0) AS kilos,'
+    + '       COALESCE(SUM(CASE WHEN vc.cuadrilla_id IS NULL THEN v.ifcos'
+    + '                         ELSE v.ifcos * 1.0 / (SELECT COUNT(*)'
+    + '                           FROM gal_volcado_cuadrillas x'
+    + '                          WHERE x.volcado_id = v.id) END),0) AS ifcos'
+    + '  FROM gal_volcados v'
+    + '  LEFT JOIN gal_volcado_cuadrillas vc ON vc.volcado_id = v.id'
+    + '  WHERE v.fecha >= ? AND v.fecha <= ? AND v.eliminado_en IS NULL'
+    + ' GROUP BY COALESCE(vc.cuadrilla_id, v.cuadrilla_id)'
+    + ' ORDER BY SUM(COALESCE(vc.kilos, v.kilos)) DESC').all(d, h));
   const fincas = fincasDeLotes(db);
   const porLote = conPct(corte('lote_id', "lote_nombre, 'Lote ' || lote_id",
     // GROUP_CONCAT y no `producto` pelado: una columna suelta adentro de un GROUP BY la

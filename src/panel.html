@@ -7330,6 +7330,30 @@ if ('serviceWorker' in navigator) {
       #sec-galpon-carga .gkg-vacio{text-align:center;padding:34px;color:var(--mut);font-size:13px}
       #sec-galpon-carga .gkg-chi{font-size:11px;color:var(--mut);font-style:italic}
       #sec-galpon-carga .gkg-rev{color:#d62828;font-size:11px;font-weight:600}
+      /* El renglón que está en la cola de este equipo y todavía no salió. Se nota a
+         simple vista: mezclado con los que ya están en el servidor, el operador no
+         tendría cómo saber qué falta mandar. */
+      #sec-galpon-carga tr.gkg-enc{background:rgba(217,119,6,.07)}
+      #sec-galpon-carga .gkg-encp{display:inline-block;font-size:10px;font-weight:700;
+        color:#92400e;background:#fef3c7;border-radius:7px;padding:1px 6px;margin-left:5px}
+      /* La baldosa de los totales cuando no hay señal: sin número inventado. */
+      #sec-galpon-carga .gkg-t.off{border-color:#d97706;background:rgba(217,119,6,.07)}
+      #sec-galpon-carga .gkg-t .sub{font-size:10.5px;color:var(--mut);margin-top:2px}
+      #sec-galpon-carga .gkg-t .vx{font-size:17px;font-weight:700;line-height:1.3}
+
+      /* ── LAS CUADRILLAS DE UNA CARGA, UN RENGLÓN CADA UNA ─────────────────
+         Scopeado a .gal-cuads y no a la .sec: los dos contenedores viven adentro de
+         ventanas, que cuelgan FUERA de toda .sec (CLAUDE.md). Una regla colgada de
+         #sec-galpon-carga no las alcanzaría — y eso compila igual: se ve recién al
+         abrir la ventana. */
+      .gal-cuadl{display:flex;gap:6px;align-items:center;margin-bottom:5px}
+      .gal-cuadl select{flex:1 1 auto;min-width:0}
+      .gal-cuadl button{flex:0 0 auto;border:1px solid var(--bor);background:none;
+        color:#b3261e;border-radius:7px;cursor:pointer;font-size:14px;line-height:1;
+        padding:5px 9px}
+      .gal-cuadmas{border:0;background:none;color:var(--burg);cursor:pointer;
+        font-size:12px;text-decoration:underline;padding:0;margin-top:1px}
+      .gal-cuadav{font-size:10.5px;color:var(--mut);margin-top:4px;line-height:1.35}
       /* El acuse de la ventana. Va scopeado al modal y no a la .sec porque la ventana
          vive FUERA de toda .sec (CLAUDE.md) — una regla colgada de #sec-galpon-carga
          no la alcanzaría, y eso compila igual: se ve recién abriéndola. */
@@ -7408,6 +7432,12 @@ if ('serviceWorker' in navigator) {
       <button class="btn bo bs" onclick="galKgHoy()">Hoy</button>
     </div>
 
+    <!-- Lo que se está mirando es de cuándo. Sin señal los GET contestan lo último
+         que bajó este equipo, y un dato viejo que no avisa que es viejo es peor que
+         una pantalla vacía. Lo pinta galOffCartel(), que es el mismo de las otras
+         tres pantallas del galpón. -->
+    <div id="gkg-aviso"></div>
+
     <div id="gkg-tot" class="gkg-tot"></div>
     <div id="gkg-cortes" class="gkg-cortes"></div>
 
@@ -7448,8 +7478,11 @@ if ('serviceWorker' in navigator) {
         <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:10px">
           <div style="flex:1 1 200px;min-width:0"><label>Producto</label>
             <input type="text" id="gal-kg-prod" placeholder="ej: Damasco"></div>
+          <!-- UNA O VARIAS. Andy, 2/11/2026: «que pueda elegir dos cuadrillas
+               cosechando el mismo cajón. A veces pasa». Es una lista de renglones y no
+               un segundo casillero: el día que sean tres sale gratis. -->
           <div style="flex:1 1 200px;min-width:0"><label>Cuadrilla</label>
-            <select id="gal-kg-cuad"></select></div>
+            <div class="gal-cuads" id="gal-kg-cuads"></div></div>
         </div>
 
         <div id="gal-bal-chip-kg" style="margin-top:10px"></div>
@@ -7531,7 +7564,7 @@ if ('serviceWorker' in navigator) {
             <div style="flex:1 1 200px;min-width:0"><label>Producto</label>
               <input type="text" id="gal-rap-prod" placeholder="ej: Damasco"></div>
             <div style="flex:1 1 200px;min-width:0"><label>Cuadrilla</label>
-              <select id="gal-rap-cuad"></select></div>
+              <div class="gal-cuads" id="gal-rap-cuads"></div></div>
           </div>
           <div style="margin-top:10px"><label>Observación <span style="font-weight:400;
             text-transform:none;color:var(--mut)">(opcional — se repite en TODAS las cargas
@@ -28163,7 +28196,71 @@ SG_MANUAL['galpon-config'] = { titulo: 'Galpón · Configuración', html:
 };
 
 SG_MANUAL['galpon-carga'] = { titulo: 'Galpón · Carga de kilos', html:
-  '<h3>📋 La planilla de control de ingreso <span class="ver">V1131</span></h3>'
+  '<h3>👷 Dos cuadrillas en el mismo cajón <span class="ver">V1133</span></h3>'
+  + '<p>Andy, 2/11/2026: <i>«que pueda elegir dos cuadrillas cosechando el mismo '
+  + 'cajón. A veces pasa»</i>.</p>'
+  + '<p>Donde antes había un desplegable de cuadrilla ahora hay una <b>lista</b>: se '
+  + 'elige una, y con <b>+ otra cuadrilla</b> se agrega otra abajo. Están las dos '
+  + 'ventanas: la larga y el primer paso de la carga rápida.</p>'
+  + '<p><b>Los kilos del cajón se reparten en partes iguales.</b> Un cajón de 700 kg '
+  + 'cargado a dos cuadrillas le anota 350 a cada una. Es lo que dice la ventana '
+  + 'abajo de la lista, y el renglón de la tabla lo muestra: «Norte + Sur» arriba y '
+  + '«Norte 350 · Sur 350» debajo.</p>'
+  + '<div class="ojo"><b>El reparto en mitades no es una medición: es la única '
+  + 'manera honesta de repartir algo que nadie midió.</b> Si una cuadrilla llenó '
+  + 'bastante más que la otra, <b>van dos cargas</b> — una por cuadrilla, con los '
+  + 'kilos de cada una. Por eso el reparto se muestra en la tabla y no queda '
+  + 'escondido detrás del «Norte + Sur»: es con lo que se paga el jornal, y tiene '
+  + 'que poder discutirse.</div>'
+  + '<p><b>El cajón sigue siendo uno.</b> Los kilos que entraron al galpón no cambian '
+  + 'y el cajón se cuenta una vez: lo que se parte es a quién se le anota. Por eso el '
+  + 'corte <b>Por cuadrilla</b> suma siempre lo mismo que el total del día — nunca '
+  + 'más, que es lo que pasaría contándole el cajón entero a las dos.</p>'
+  + '<p>Al <b>corregir</b> una carga vienen ofrecidas las que tenía, las dos. Y si se '
+  + 'corrigen los kilos, el reparto se rehace solo.</p>'
+  + '<h3>🗑️ Borrar una carga del día <span class="ver">V1133</span></h3>'
+  + '<p>Andy, 2/11/2026: <i>«necesito que todos los usuarios puedan borrar algo del '
+  + 'día vigente (fecha día hoy)»</i>.</p>'
+  + '<p><b>Lo cargado HOY lo borra cualquiera que pueda cargar.</b> Un renglón '
+  + 'tipeado hace diez segundos con un cero de más es un error de tipeo, no una '
+  + 'anulación: el que está parado ahí sabe que ese cajón no existió, y mandarlo a '
+  + 'buscar al dueño deja el renglón mal cargado mientras tanto.</p>'
+  + '<p><b>Lo de un día anterior, no.</b> Ahí hace falta el permiso de anular del '
+  + 'módulo. Esos kilos ya se usaron para pagar un jornal y para medir el rinde de '
+  + 'un lote, y sacarles un renglón mueve los dos para atrás.</p>'
+  + '<p>Cuando no se puede, <b>la × no aparece</b>: en vez de ofrecer un botón que va '
+  + 'a contestar «no tenés permiso», la columna queda con un guión. <b>Corregir</b> '
+  + 'se puede siempre.</p>'
+  + '<div class="ojo"><b>Borrar no borra.</b> La fila queda en la base con la marca '
+  + 'de cuándo se sacó: deja de contar en el día, en los cortes y en el acumulado, '
+  + 'pero se puede auditar después. Un renglón de kilos borrado de verdad es un '
+  + 'jornal que ya no se puede revisar.</div>'
+  + '<h3>📴 Cargar sin señal: lo que muestra la pantalla <span class="ver">V1133'
+  + '</span></h3>'
+  + '<p>Andy, 2/11/2026: <i>«en la conexión sin internet aparece como en cero los '
+  + 'kilos, es medio confuso... funciona todo pero lo muestra en cero»</i>.</p>'
+  + '<p>El <b>total del día lo suma el servidor</b>, así que sin señal no hay de '
+  + 'dónde sacarlo: lo único que tiene el equipo es la última foto que alcanzó a '
+  + 'bajar, que suele ser de antes de empezar a cargar. Y eso se mostraba como un '
+  + '<b>0</b> grande, igual que cuando el cero es cierto.</p>'
+  + '<p>Ahora, sin señal, arriba se ven <b>dos números y ninguno sumado con el '
+  + 'otro</b>:</p>'
+  + '<ul>'
+  + '<li><b>Esperando en este equipo</b> — lo que se cargó y todavía no salió. Es lo '
+  + 'que se acaba de tipear, y es cierto.</li>'
+  + '<li><b>Lo último que se vio</b> — la foto, con la hora a la que bajó.</li>'
+  + '</ul>'
+  + '<p>No se suman a propósito: a la foto le falta lo que cargaron los otros equipos '
+  + 'desde entonces, así que el total que saldría parecería el del día sin serlo. Un '
+  + 'número que parece completo y no lo está es peor que dos números chicos.</p>'
+  + '<p><b>Cada carga sin mandar aparece en la lista</b>, arriba y marcada «📴 sin '
+  + 'mandar». Se puede borrar —sale de la cola de este equipo— pero <b>no se puede '
+  + 'corregir</b>: todavía no tiene número del servidor. Se borra y se carga de '
+  + 'nuevo, que son dos teclas.</p>'
+  + '<p>Los cortes <b>Por cuadrilla</b> y <b>Por lote</b> se esconden mientras no hay '
+  + 'señal: los calcula el servidor y les falta lo que se acaba de cargar. Un corte '
+  + 'por cuadrilla al que le falta media mañana es con lo que se paga un jornal.</p>'
+  + '<h3>📋 La planilla de control de ingreso <span class="ver">V1131</span></h3>'
   + '<p>Andy, 2/11/2026, con la foto del papel: <i>«necesito que en el panel de ingreso '
   + 'de kilos pueda descargarse un exportable en PDF exactamente con esta '
   + 'información»</i>.</p>'
@@ -57508,11 +57605,172 @@ function galKgLlenarLote(sel){
       }).join('');
 }
 
-function galKgLlenarCuad(cu){
-  cu.innerHTML = '<option value="">— sin cuadrilla —</option>'
-    + GKG.cuadrillas.map(function(q){
-        return '<option value="' + q.id + '">' + galKgEsc(q.nombre) + '</option>';
-      }).join('');
+/* El desplegable único de cuadrilla se fue en la V1133: las dos ventanas pasaron a una LISTA de
+   cuadrillas (galCuadPintar, abajo) y ya no hay un desplegable único que llenar.
+   Dejarlo «por si acaso» es la manera de que alguien lo use mañana y vuelva a tener
+   una sola cuadrilla por carga sin enterarse de que se puede elegir más de una. */
+
+/* ── 👷 DOS CUADRILLAS EN EL MISMO CAJÓN ────────────────────────────────────────
+   Andy, 2/11/2026: «que pueda elegir dos cuadrillas cosechando el mismo cajón. A
+   veces pasa».
+
+   UN RENGLÓN POR CUADRILLA, y no un segundo casillero «Cuadrilla 2». Con el
+   casillero, el día que sean tres hay que agregar el tercero y tocar las dos
+   ventanas otra vez; con renglones, la tercera sale gratis. Y cada renglón es un
+   <select> de verdad, así que el buscador que el panel le monta a cualquier lista
+   larga sigue funcionando sin configurar nada.
+
+   EL ESTADO VIVE EN EL DOM, no en una variable al lado. Una lista paralela que hay
+   que mantener en sincronía con los casilleros es la manera de que la pantalla
+   muestre una cuadrilla y se mande otra — y eso es el jornal de un equipo.
+
+   El mismo mecanismo para las dos ventanas: la larga y el primer paso de la rápida. */
+function galCuadCrudos(contId){
+  var c = document.getElementById(contId); if (!c) return [];
+  var sel = c.querySelectorAll('select');
+  var out = [];
+  for (var i = 0; i < sel.length; i++) out.push(String(sel[i].value || ''));
+  return out;
+}
+
+/* Lo que se manda: sin vacíos y sin repetidas. La repetida no es un error que haya
+   que avisar —es un clic de más— pero dejarla pasar partiría los kilos en dos
+   mitades para la MISMA cuadrilla y la pantalla diría «Norte + Norte». */
+function galCuadIds(contId){
+  var out = [];
+  galCuadCrudos(contId).forEach(function(v){
+    if (v && out.indexOf(v) < 0) out.push(v);
+  });
+  return out;
+}
+
+function galCuadPintar(contId, ids){
+  var c = document.getElementById(contId); if (!c) return;
+  var l = (ids && ids.length) ? ids.map(function(x){ return String(x == null ? '' : x); }) : [''];
+  c.innerHTML = l.map(function(v, i){
+    return '<div class="gal-cuadl"><select onchange="galCuadCambio(\'' + contId + '\')">'
+      + '<option value="">— sin cuadrilla —</option>'
+      + GKG.cuadrillas.map(function(q){
+          return '<option value="' + q.id + '"'
+            + (String(q.id) === v ? ' selected' : '') + '>'
+            + galKgEsc(q.nombre) + '</option>'; }).join('')
+      + '</select>'
+      /* La × aparece recién con dos renglones: con uno solo, sacarlo es elegir
+         «— sin cuadrilla —», y dos maneras de hacer lo mismo es una de más. */
+      + (l.length > 1
+          ? '<button type="button" title="sacar esta cuadrilla" onclick="galCuadQuitar(\''
+            + contId + '\',' + i + ')">×</button>'
+          : '')
+      + '</div>';
+  }).join('')
+    + '<button type="button" class="gal-cuadmas" onclick="galCuadAgregar(\'' + contId
+      + '\')">+ otra cuadrilla</button>'
+    + '<div class="gal-cuadav" id="' + contId + '-av"></div>';
+  galCuadCambio(contId);
+}
+
+/* Al cambiar un renglón NO se repinta la lista: se repinta sólo el aviso. Rearmar los
+   <select> acá cerraría el buscador que la persona acaba de usar y le sacaría el foco
+   de abajo de la mano. */
+function galCuadCambio(contId){
+  var av = document.getElementById(contId + '-av'); if (!av) return;
+  var n = galCuadIds(contId).length;
+  if (n < 2){ av.innerHTML = ''; return; }
+  /* SE DICE CÓMO SE REPARTE. El sistema no midió cuánto puso cada una y no puede: lo
+     reparte en partes iguales, y eso tiene que estar escrito donde se elige. Un
+     número que parece medido y es un promedio es peor que uno que se declara. */
+  av.innerHTML = 'Los kilos del cajón se reparten <b>en partes iguales</b> entre las '
+    + n + '. Si una llenó bastante más, van dos cargas.';
+}
+
+function galCuadAgregar(contId){
+  galCuadPintar(contId, galCuadCrudos(contId).concat(['']));
+}
+
+function galCuadQuitar(contId, i){
+  var l = galCuadCrudos(contId);
+  l.splice(i, 1);
+  galCuadPintar(contId, l);
+}
+
+/* ── LOS KILOS QUE TODAVÍA ESTÁN EN LA COLA ─────────────────────────────────────
+   Lo que se tipeó sin señal está guardado como TEXTO, tal cual se escribió: el que
+   lo convierte a número es el servidor, y todavía no lo vio. Para poder mostrarlo
+   hay que leerlo acá.
+
+   ES UNA SEGUNDA COPIA DE kilos() (servicios/galpon.js) Y ESO SE PAGA. La única
+   manera de que las dos no se separen es probarlas contra la misma tabla de casos,
+   y eso es lo que hace test/galpon_carga_sin_senal.test.mjs: si alguien cambia una,
+   el test cae. Sin esto la pantalla mostraría «1.250» como 1,25 kg sin señal y como
+   1.250 kg con señal, y el operador no tendría a cuál creerle. */
+function galKgLeerKilos(v){
+  if (typeof v === 'number') return isFinite(v) ? Math.round(v * 100) / 100 : null;
+  var s = String(v == null ? '' : v).trim().replace(/\s*kgs?\.?$/i, '').replace(/\s/g, '');
+  if (!s) return null;
+  var limpio;
+  if (s.indexOf(',') >= 0) limpio = s.replace(/\./g, '').replace(',', '.');
+  else if (/^-?\d{1,3}(\.\d{3})+$/.test(s) && !/^-?0\./.test(s)) limpio = s.replace(/\./g, '');
+  else limpio = s;
+  if (!/^-?\d+(\.\d+)?$/.test(limpio)) return null;
+  var n = Number(limpio);
+  return isFinite(n) ? Math.round(n * 100) / 100 : null;
+}
+
+/* LO QUE ESTÁ EN LA COLA DE ESTE EQUIPO, con forma de renglón del día.
+
+   Sin señal el GET contesta la ÚLTIMA foto que bajó, y la carga que se acaba de
+   hacer NO está ahí: nunca llegó al servidor. Antes de esto la pantalla volvía a
+   pintar la foto vieja y los kilos del día aparecían en cero — se había guardado
+   todo y parecía que no se había guardado nada.
+
+   Devuelve también las BAJAS: lo que se borró sin señal tiene que desaparecer de la
+   foto, o el renglón que el operador ya sacó sigue ahí hasta que vuelva la señal. */
+function galKgCola(){
+  var vacio = { altas: [], bajas: [] };
+  if (typeof GOFF === 'undefined' || !GOFF.pendientes) return Promise.resolve(vacio);
+  return GOFF.pendientes().then(function(l){
+    var altas = [], bajas = [];
+    (l || []).forEach(function(f){
+      var ruta = String(f.url || '').split('?')[0];
+      if (f.metodo === 'POST' && /\/api\/galpon\/volcados$/.test(ruta)){
+        var d = null;
+        try { d = JSON.parse(f.cuerpo); } catch(e){ return; }
+        if (d) altas.push(galKgDeCola(d, f));
+      } else if (f.metodo === 'DELETE'){
+        var m = /\/api\/galpon\/volcados\/(\d+)$/.exec(ruta);
+        if (m) bajas.push(Number(m[1]));
+      }
+    });
+    return { altas: altas, bajas: bajas };
+  }).catch(function(){ return vacio; });
+}
+
+/* El id es LOCAL y se nota: «enc:» + uuid, igual que el que devuelve la cola. No se
+   inventa un número que después va a chocar con uno de verdad, y la × sabe por el
+   prefijo que tiene que sacarlo de la cola en vez de pedirle al servidor que borre
+   algo que nunca recibió. */
+function galKgDeCola(d, f){
+  var lote = GKG.lotes.filter(function(x){ return String(x.id) === String(d.lote_id); })[0];
+  var ids = Array.isArray(d.cuadrilla_ids) ? d.cuadrilla_ids
+            : ((d.cuadrilla_id != null && d.cuadrilla_id !== '') ? [d.cuadrilla_id] : []);
+  var nom = ids.map(function(i){
+    var q = GKG.cuadrillas.filter(function(x){ return String(x.id) === String(i); })[0];
+    return q ? q.nombre : ('Cuadrilla ' + i);
+  });
+  return {
+    id: 'enc:' + f.uuid,
+    encolado: 1,
+    fecha: d.fecha,
+    lote_id: d.lote_id,
+    lote_nombre: lote ? lote.nombre : ('Lote ' + d.lote_id),
+    producto: d.producto || null,
+    cuadrilla: nom.length ? nom.join(' + ') : null,
+    kilos: galKgLeerKilos(d.kilos),
+    ifcos: (d.ifcos == null || d.ifcos === '') ? null : parseInt(d.ifcos, 10),
+    observacion: d.observacion || null,
+    usuario: (window.LNB_USER && window.LNB_USER.nombre) || 'vos',
+    estado: 'ok',
+  };
 }
 
 /* ── LA VENTANA ───────────────────────────────────────────────────────────────────
@@ -57644,7 +57902,13 @@ async function galLdGuardar(){
    hardware. Esto escribe en gal_volcados, el MISMO libro donde va a escribir el escaneo
    cuando llegue: lo que cambia es quién llena los campos. */
 var GKG = { fecha:null, hoy:null, cargas:[], resumen:null, propuesta:null, ultimo:null,
-            lotes:[], cuadrillas:[], editId:null, sug:'', uuid:null };
+            lotes:[], cuadrillas:[], editId:null, sug:'', uuid:null,
+            /* Lo que está en la cola de ESTE equipo y todavía no salió, y lo que se
+               borró sin señal. Sin esto, sin conexión la pantalla repinta la última
+               foto que bajó y los kilos del día aparecen en cero (V1133). */
+            encoladas:[], bajasEnCola:[],
+            // Si esta persona puede sacar un renglón de un día ya cerrado.
+            puedeAnular:false, deCache:false, cacheCuando:null };
 
 function galKgEsc(s){ return String(s == null ? '' : s)
   .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
@@ -57706,7 +57970,23 @@ async function galKgCargar(){
     GKG.cargas = j.cargas || []; GKG.resumen = j.resumen || null;
     GKG.propuesta = j.propuesta || null;
     GKG.ultimo = j.ultimo || null;
+    /* Si esta persona puede sacar un renglón de un día YA CERRADO. Lo contesta el
+       servidor con la misma regla con la que después va a decidir: la pantalla no
+       ofrece una × que va a contestar 403 — el que la aprieta y le rebota cree que
+       rompió algo. Y no reemplaza el control, que sigue estando del otro lado. */
+    GKG.puedeAnular = !!j.puede_anular;
+    /* SIN SEÑAL ESTO ES UNA FOTO VIEJA, y la pantalla lo dice. El envoltorio de la
+       cola marca la respuesta con de_cache cuando la sirvió de lo guardado. */
+    GKG.deCache = !!j.de_cache;
+    GKG.cacheCuando = j.cache_cuando || null;
     if (f && !f.value) f.value = j.fecha;
+    galOffCartel(j, 'gkg-aviso');
+    /* Y lo que está esperando en ESTE equipo, que es lo que la foto no tiene. Se pide
+       siempre y no sólo sin señal: la cola puede tener algo trabado de hace un rato
+       aunque ahora haya señal. */
+    var col = await galKgCola();
+    GKG.encoladas = (col.altas || []).filter(function(x){ return x.fecha === GKG.fecha; });
+    GKG.bajasEnCola = col.bajas || [];
     galKgPintarTot();
     galKgPintarCortes();
     galKgPintar();
@@ -57725,11 +58005,56 @@ function galKgHoy(){
 function galKgPintarTot(){
   var el = document.getElementById('gkg-tot'); if (!el) return;
   var r = GKG.resumen || { kilos:0, ifcos:0, cargas:0, a_revisar:0 };
-  var t = function(k, v, cls){ return '<div class="gkg-t' + (cls ? ' ' + cls : '') + '">'
-    + '<div class="k">' + k + '</div><div class="v">' + v + '</div></div>'; };
+  var t = function(k, v, cls, sub){ return '<div class="gkg-t' + (cls ? ' ' + cls : '') + '">'
+    + '<div class="k">' + k + '</div><div class="v">' + v + '</div>'
+    + (sub ? '<div class="sub">' + sub + '</div>' : '') + '</div>'; };
+
+  /* ── SIN SEÑAL NO SE MUESTRA UN CERO ────────────────────────────────────────────
+     Andy, 2/11/2026: «en la conexión sin internet aparece como en cero los kilos, es
+     medio confuso... funciona todo pero lo muestra en cero».
+
+     Y tenía razón en las dos cosas. El total del día lo suma el SERVIDOR, así que sin
+     señal lo único que hay es la última foto que bajó —la de antes de empezar a
+     cargar, o sea cero— y se mostraba igual, con el mismo número grande que cuando es
+     cierto. Un cero que miente no es un dato que falta: es un dato malo, y el
+     operador que acaba de tipear ochenta cajones ve que no se guardó ninguno.
+
+     Se muestran DOS números, cada uno diciendo de dónde sale, y NINGUNO sumado con el
+     otro: lo que está esperando en este equipo —que es lo que acaba de cargar y es
+     cierto— y lo último que se alcanzó a ver, con su hora. Sumarlos daría algo que
+     parece el total del día y no lo es, porque a la foto le falta lo que cargaron los
+     otros equipos desde entonces. */
+  if (GKG.deCache){
+    var enc = GKG.encoladas || [];
+    var kgEnc = 0;
+    enc.forEach(function(x){ kgEnc += Number(x.kilos) || 0; });
+    var cuando = '';
+    if (GKG.cacheCuando){
+      var dd = new Date(GKG.cacheCuando);
+      cuando = 'leído a las ' + dd.toLocaleTimeString('es-AR', { hour:'2-digit', minute:'2-digit' });
+    }
+    el.innerHTML = '<div class="gkg-t off"><div class="k">📴 Sin conexión</div>'
+        + '<div class="vx">Se sigue cargando</div>'
+        + '<div class="sub">El total del día lo suma el servidor: vuelve solo con señal.</div></div>'
+      + t('Esperando en este equipo', galKgNum(kgEnc) + ' kg', 'off',
+          enc.length + (enc.length === 1 ? ' carga' : ' cargas') + ' · se mandan solas')
+      + t('Lo último que se vio', galKgNum(r.kilos) + ' kg', null,
+          cuando || 'de la última vez con señal');
+    return;
+  }
+
   var h = t('Kilos del día', galKgNum(r.kilos))
         + t('Cargas', galKgNum(r.cargas, 0));
   if (r.ifcos) h += t('IFCOs', galKgNum(r.ifcos, 0));
+  /* Lo que todavía no salió de este equipo se muestra aparte TAMBIÉN con señal: una
+     carga trabada en la cola no está en el total del día, y sumarla haría que esta
+     pantalla diga un número distinto al del acumulado. */
+  if ((GKG.encoladas || []).length){
+    var ke = 0;
+    GKG.encoladas.forEach(function(x){ ke += Number(x.kilos) || 0; });
+    h += t('Sin mandar todavía', galKgNum(ke) + ' kg', 'off',
+           GKG.encoladas.length + ' en la cola de este equipo');
+  }
   /* Lo marcado para revisar se muestra SÓLO si hay. Lo normal es silencioso y lo
      excepcional es lo que ocupa lugar — un «0 para revisar» todos los días enseña a no
      mirar ese recuadro justo para el día que diga 1. */
@@ -57741,6 +58066,10 @@ function galKgPintarCortes(){
   var el = document.getElementById('gkg-cortes'); if (!el) return;
   var r = GKG.resumen;
   if (!r || !r.cargas){ el.innerHTML = ''; return; }
+  /* Los dos cortes los calcula el servidor, así que sin señal son de la foto vieja y
+     les falta lo que se acaba de cargar. Se esconden en vez de mostrarse a medias: el
+     corte por cuadrilla es con lo que se paga un jornal. */
+  if (GKG.deCache){ el.innerHTML = ''; return; }
   var caja = function(tit, filas){
     if (!filas.length) return '';
     return '<div class="gkg-corte"><h4>' + tit + '</h4>' + filas.map(function(x){
@@ -57757,15 +58086,34 @@ function galKgPintarCortes(){
 
 function galKgPintar(){
   var b = document.getElementById('gkg-body'); if (!b) return;
-  if (!GKG.cargas.length){
+  /* LO QUE ESTÁ EN LA COLA VA ARRIBA Y SE VE DISTINTO. Es lo que se acaba de cargar,
+     así que es lo que el que está parado ahí viene a mirar; y mezclado con lo que ya
+     está en el servidor no habría cómo saber qué falta mandar.
+
+     Y lo que se borró sin señal sale de la lista: el renglón que el operador ya sacó
+     no puede seguir ahí hasta que vuelva la señal. */
+  var bajas = GKG.bajasEnCola || [];
+  var guardadas = GKG.cargas.filter(function(c){ return bajas.indexOf(c.id) < 0; });
+  var filas = (GKG.encoladas || []).concat(guardadas);
+  if (!filas.length){
     b.innerHTML = '<tr><td colspan="7" class="gkg-vacio">'
       + 'Todavía no se cargó nada para este día.<br>'
       + 'Cada renglón es una pesada: lo que trajo una cuadrilla de un lote.</td></tr>';
     return;
   }
-  b.innerHTML = GKG.cargas.map(function(c){
-    return '<tr>'
+  /* ── LA × SE MUESTRA POR DÍA, NO A CUALQUIERA ─────────────────────────────────
+     Andy, 2/11/2026: «necesito que todos los usuarios puedan borrar algo del día
+     vigente (fecha día hoy)». Lo de hoy lo saca cualquiera que pueda cargar; lo de un
+     día ya cerrado necesita el nivel de anulación, porque esos kilos ya se usaron
+     para pagar un jornal y para medir un rinde.
+
+     La pantalla mira una sola fecha por vez, así que se decide una vez para toda la
+     tabla. Y NO reemplaza el control: el servidor vuelve a preguntarlo. */
+  var puedoBorrar = (GKG.fecha === GKG.hoy) || !!GKG.puedeAnular;
+  b.innerHTML = filas.map(function(c){
+    return '<tr' + (c.encolado ? ' class="gkg-enc"' : '') + '>'
       + '<td class="gkg-w"><b>' + galKgEsc(c.lote_nombre || ('Lote ' + c.lote_id)) + '</b>'
+        + (c.encolado ? '<span class="gkg-encp">📴 sin mandar</span>' : '')
         + (c.estado === 'a_revisar' ? '<div class="gkg-rev">⚠ '
             + galKgEsc(c.revision_motivo || 'Para revisar') + '</div>' : '')
         + (c.observacion ? '<div class="gkg-chi">' + galKgEsc(c.observacion) + '</div>' : '')
@@ -57774,14 +58122,32 @@ function galKgPintar(){
         + (c.producto ? galKgEsc(c.producto) : '<span class="gkg-chi">—</span>') + '</td>'
       + '<td class="gkg-w" title="' + galKgEsc(c.cuadrilla || '') + '">'
         + (c.cuadrilla ? galKgEsc(c.cuadrilla)
+            /* Con DOS, debajo va cuánto le tocó a cada una. El reparto en partes
+               iguales lo decide el sistema y no lo midió nadie: escondido detrás de
+               un «Norte + Sur» no habría cómo discutirlo, y es con lo que se paga. */
+            + ((c.cuadrillas && c.cuadrillas.length > 1)
+                ? '<div class="gkg-chi">' + c.cuadrillas.map(function(q){
+                    return galKgEsc(q.cuadrilla) + ' ' + galKgNum(q.kilos); }).join(' · ')
+                  + ' kg</div>' : '')
             : '<span class="gkg-chi">sin cuadrilla</span>') + '</td>'
       + '<td class="gkg-n">' + galKgNum(c.kilos) + '</td>'
       + '<td class="gkg-n">' + (c.ifcos == null ? '<span class="gkg-chi">—</span>'
           : galKgNum(c.ifcos, 0)) + '</td>'
       + '<td>' + galKgEsc(c.usuario || '—') + '</td>'
       + '<td style="text-align:right">'
-        + '<button class="btn bo bs" onclick="galKgAbrir(' + c.id + ')">✎</button> '
-        + '<button class="btn bo bs" onclick="galKgBorrar(' + c.id + ')">×</button></td>'
+        /* UNA CARGA DE LA COLA NO SE CORRIGE: todavía no tiene id del servidor y un
+           PATCH a «enc:…» no tiene a qué apuntar. Se borra y se carga de nuevo, que
+           son dos teclas — y es lo que contesta la cola si se intenta igual. */
+        + (c.encolado ? ''
+            : '<button class="btn bo bs" onclick="galKgAbrir(\'' + c.id + '\')">✎</button> ')
+        /* El id va ENTRE COMILLAS. El de una carga de la cola es «enc:uuid» y sin
+           comillas el onclick queda `galKgBorrar(enc:9f…)`, que es un error de
+           sintaxis: el botón no hace nada y no se ve por qué. */
+        + ((puedoBorrar || c.encolado)
+            ? '<button class="btn bo bs" onclick="galKgBorrar(\'' + c.id + '\')">×</button>'
+            : '<span class="gkg-chi" title="Un día ya cerrado lo anula alguien con ese'
+              + ' permiso">—</span>')
+        + '</td>'
       + '</tr>';
   }).join('');
 }
@@ -57790,14 +58156,16 @@ function galKgPintar(){
    Se abre EN BLANCO (CLAUDE.md): un formulario que sólo se esconde conserva lo que
    tenía, y acá eso sería cargarle los kilos de una cuadrilla a la otra. */
 function galKgAbrir(id){
-  var c = id ? GKG.cargas.filter(function(x){ return x.id === id; })[0] : null;
+  /* Comparado como TEXTO: el id de una carga de la cola es «enc:uuid». Comparar con
+     === contra un número no encontraría nunca la fila y la ventana abriría en modo
+     alta, pisando con una carga nueva la que se quería corregir. */
+  var c = id ? GKG.cargas.filter(function(x){
+    return String(x.id) === String(id); })[0] : null;
   GKG.editId = c ? c.id : null;
   GKG.uuid = galKgNuevoUuid();
 
   var sel = document.getElementById('gal-kg-lote');
   galKgLlenarLote(sel);
-  var cu = document.getElementById('gal-kg-cuad');
-  galKgLlenarCuad(cu);
 
   GKG.sug = '';
   document.getElementById('gal-kg-error').style.display = 'none';
@@ -57815,11 +58183,21 @@ function galKgAbrir(id){
     document.getElementById('gal-kg-fecha').value = c.fecha;
     sel.value = String(c.lote_id);
     document.getElementById('gal-kg-prod').value = c.producto || '';
-    cu.value = c.cuadrilla_id ? String(c.cuadrilla_id) : '';
+    /* LAS QUE TENÍA, todas. `cuadrillas` viene de la tabla satélite; el cuadrilla_id
+       de la fila madre es el respaldo para una carga vieja que no la tenga. Si se
+       ofreciera sólo la primera, guardar sin tocar nada le sacaría la segunda — y el
+       que corrige los kilos no tiene cómo enterarse. */
+    galCuadPintar('gal-kg-cuads', (c.cuadrillas && c.cuadrillas.length)
+      ? c.cuadrillas.map(function(q){ return q.cuadrilla_id; })
+      : (c.cuadrilla_id ? [c.cuadrilla_id] : []));
     document.getElementById('gal-kg-kilos').value = c.kilos;
     document.getElementById('gal-kg-ifcos').value = c.ifcos == null ? '' : c.ifcos;
     document.getElementById('gal-kg-obs').value = c.observacion || '';
   } else {
+    // En blanco, como toda la ventana (CLAUDE.md): un formulario que sólo se esconde
+    // conserva lo que tenía, y acá eso sería cargarle los kilos a la cuadrilla de la
+    // tanda anterior.
+    galCuadPintar('gal-kg-cuads', []);
     document.getElementById('gal-kg-tit').textContent = 'Cargar kilos';
     document.getElementById('gal-kg-ok-btn').textContent = 'Cargar';
     document.getElementById('gal-kg-salir').textContent = 'Listo';
@@ -57870,7 +58248,9 @@ async function galKgGuardar(){
     fecha: document.getElementById('gal-kg-fecha').value,
     lote_id: lote,
     producto: document.getElementById('gal-kg-prod').value,
-    cuadrilla_id: document.getElementById('gal-kg-cuad').value,
+    // UNA O VARIAS. El servidor acepta las dos formas, así que una carga que quedó en
+    // la cola de ayer con cuadrilla_id sigue entrando hoy.
+    cuadrilla_ids: galCuadIds('gal-kg-cuads'),
     kilos: document.getElementById('gal-kg-kilos').value,
     ifcos: document.getElementById('gal-kg-ifcos').value,
     observacion: document.getElementById('gal-kg-obs').value,
@@ -57918,11 +58298,19 @@ async function galKgGuardar(){
 }
 
 async function galKgBorrar(id){
-  var c = GKG.cargas.filter(function(x){ return x.id === id; })[0]; if (!c) return;
+  /* Se busca en las DOS listas: lo que ya está en el servidor y lo que todavía está en
+     la cola de este equipo. Y por texto, porque el id de la cola es «enc:uuid». */
+  var c = (GKG.encoladas || []).concat(GKG.cargas).filter(function(x){
+    return String(x.id) === String(id); })[0];
+  if (!c) return;
   if (!confirm('¿Borrar la carga de ' + galKgNum(c.kilos) + ' kg ('
     + (c.lote_nombre || c.lote_id) + ')?')) return;
   try {
-    var r = await fetch('/api/galpon/volcados/' + id, { method:'DELETE', credentials:'include' });
+    /* Una carga de la cola se BORRA DE LA COLA, no se le pide al servidor que borre
+       una fila que nunca recibió. Eso lo resuelve el envoltorio mirando el prefijo
+       «enc:» de la dirección (GOFF.esLocal), así que acá es el mismo pedido. */
+    var r = await fetch('/api/galpon/volcados/' + encodeURIComponent(id),
+      { method:'DELETE', credentials:'include' });
     var j = await r.json();
     if (!j.ok) return alert(j.error || 'no se pudo borrar');
     await galKgCargar();
@@ -57966,8 +58354,6 @@ function galRapAbrir(){
 
   var sel = document.getElementById('gal-rap-lote');
   galKgLlenarLote(sel);
-  var cu = document.getElementById('gal-rap-cuad');
-  galKgLlenarCuad(cu);
 
   /* De dónde sale lo propuesto, en este orden: lo último que cargó esta persona, y si no
      hay nada, el lote declarado en «Lote del día». La cuadrilla sólo puede venir de una
@@ -57977,7 +58363,12 @@ function galRapAbrir(){
   sel.value = u ? String(u.lote_id) : (p ? String(p.lote_id) : '');
   document.getElementById('gal-rap-prod').value =
     (u && u.producto) || (p && p.producto) || '';
-  cu.value = (u && u.cuadrilla_id) ? String(u.cuadrilla_id) : '';
+  /* LAS DOS, si la última tanda eran dos. Proponer sólo la primera sería arrancar con
+     la mitad del equipo, y el que aprieta Empezar no tiene cómo notarlo: la cuadrilla
+     que aparece es una de las que estaban. */
+  galCuadPintar('gal-rap-cuads', (u && u.cuadrilla_ids && u.cuadrilla_ids.length)
+    ? u.cuadrilla_ids
+    : ((u && u.cuadrilla_id) ? [u.cuadrilla_id] : []));
   document.getElementById('gal-rap-obs').value = (u && u.observacion) || '';
   GRP.sug = document.getElementById('gal-rap-prod').value;
 
@@ -58014,17 +58405,23 @@ function galRapEmpezar(){
   var err = document.getElementById('gal-rap-serror');
   err.style.display = 'none';
   var sel = document.getElementById('gal-rap-lote');
-  var cu  = document.getElementById('gal-rap-cuad');
   if (!sel.value){
     err.textContent = 'Elegí el lote del que vienen estos kilos.'; err.style.display = ''; return;
   }
+  var ids = galCuadIds('gal-rap-cuads');
   GRP.fijo = {
     fecha: document.getElementById('gal-rap-fecha').value,
     lote_id: sel.value,
     lote_nombre: sel.options[sel.selectedIndex].textContent.split(' · ')[0],
     producto: document.getElementById('gal-rap-prod').value,
-    cuadrilla_id: cu.value,
-    cuadrilla: cu.value ? cu.options[cu.selectedIndex].textContent : '',
+    /* UNA O VARIAS, y los nombres se resuelven ACÁ una sola vez: el cartel fijo de
+       arriba se repinta en cada carga y leerlos del desplegable cada vez obliga a
+       tenerlo armado, que es justo lo que el segundo paso esconde. */
+    cuadrilla_ids: ids,
+    cuadrilla: ids.map(function(i){
+      var q = GKG.cuadrillas.filter(function(x){ return String(x.id) === String(i); })[0];
+      return q ? q.nombre : ('Cuadrilla ' + i);
+    }).join(' + '),
     observacion: document.getElementById('gal-rap-obs').value,
   };
   galRapPintarFijo();
@@ -58071,7 +58468,7 @@ async function galRapCargar(){
   var body = {
     uuid: GRP.uuid,
     fecha: f.fecha, lote_id: f.lote_id, producto: f.producto,
-    cuadrilla_id: f.cuadrilla_id, observacion: f.observacion,
+    cuadrilla_ids: f.cuadrilla_ids, observacion: f.observacion,
     kilos: kg.value,
     // DE DÓNDE SALIÓ EL PESO. Si un día el 80% de la temporada entró a mano, la
     // balanza está rota y nadie avisó — con esto se ve en una consulta.
@@ -58128,7 +58525,11 @@ function galRapPintar(){
             + '<b>' + galKgNum(x.kilos) + ' kg</b>'
             + (x.aviso ? ' <span style="font-size:11px">' + galKgEsc(x.aviso) + '</span>' : '')
           + '</span>'
-          + '<button class="btn bo bs" onclick="galRapDeshacer(' + x.id + ')">↩ deshacer</button>'
+          /* ENTRE COMILLAS: sin señal el id es «enc:uuid», y sin comillas el onclick
+             queda `galRapDeshacer(enc:9f…)` — un error de sintaxis, así que el botón
+             no hace nada y no se ve por qué. */
+          + '<button class="btn bo bs" onclick="galRapDeshacer(\'' + x.id
+            + '\')">↩ deshacer</button>'
           + '</div>';
       }).join('') + '</div>';
 }
@@ -58138,13 +58539,14 @@ function galRapPintar(){
    acá sería un clic más en la pantalla que existe para sacar clics. */
 async function galRapDeshacer(id){
   try {
-    var r = await fetch('/api/galpon/volcados/' + id, { method:'DELETE', credentials:'include' });
+    var r = await fetch('/api/galpon/volcados/' + encodeURIComponent(id),
+      { method:'DELETE', credentials:'include' });
     var j = await r.json();
     if (!j.ok){
       var err = document.getElementById('grp-error');
       err.textContent = j.error || 'no se pudo deshacer'; err.style.display = ''; return;
     }
-    GRP.tanda = GRP.tanda.filter(function(x){ return x.id !== id; });
+    GRP.tanda = GRP.tanda.filter(function(x){ return String(x.id) !== String(id); });
     galRapPintar();
   } catch (e) {
     var e2 = document.getElementById('grp-error');
