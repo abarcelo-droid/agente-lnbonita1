@@ -476,6 +476,20 @@ const primerEmoji = (v) => {
 // la señal de que la balanza dejó de andar: si un día el 80% de la temporada entró
 // tipeado, hay un equipo roto y nadie avisó. Con texto libre serían 'manual',
 // 'a mano', 'MANUAL' y ' manual' y ningún informe posible.
+/* ── EL ESTADO SANITARIO DE LA PLANILLA: B / R / M ────────────────────────────────
+   Bueno, Regular, Malo. Tres letras y no texto libre: en el papel se CIRCULA una de
+   las tres, y texto libre serían cuarenta maneras de escribir lo mismo y ningún
+   informe posible — la misma razón por la que los motivos de gestión son cuatro.
+
+   NULO ES «NO SE MIRÓ», y no es lo mismo que B. Una planilla donde todo figura bueno
+   porque nadie completó la columna es peor que una con huecos: la firman tres
+   personas. */
+export const SANITARIOS = ['B', 'R', 'M'];
+export function sanitarioDe(v) {
+  const t = String(v == null ? '' : v).trim().toUpperCase().slice(0, 1);
+  return SANITARIOS.indexOf(t) >= 0 ? t : null;
+}
+
 export const ORIGENES = ['manual', 'balanza', 'escaneo'];
 // Lo que no está en la lista entra como manual y no se rechaza: acá nada se rechaza
 // después del hecho, y unos kilos perdidos por un origen mal escrito serían
@@ -543,12 +557,13 @@ export function registrarVolcado(db, d) {
   const r = db.prepare(
     `INSERT OR IGNORE INTO gal_volcados
        (uuid, fecha, hora, lote_id, lote_nombre, producto, cuadrilla_id, cuadrilla,
-        kilos, ifcos, origen, observacion, estado, revision_motivo, usuario_id, usuario)
-     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`
+        kilos, ifcos, viaje, sanitario, origen, observacion, estado, revision_motivo,
+        usuario_id, usuario)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`
   ).run(
     txt(dd.uuid), fecha, hhmm(dd.hora), lote.id, lote.nombre, txt(dd.producto),
-    cuadId, cuadNom, kg, entero(dd.ifcos), origenDe(dd.origen),
-    txt(dd.observacion), estado, revision,
+    cuadId, cuadNom, kg, entero(dd.ifcos), entero(dd.viaje), sanitarioDe(dd.sanitario),
+    origenDe(dd.origen), txt(dd.observacion), estado, revision,
     dd.usuario_id ?? null, txt(dd.usuario),
   );
 
@@ -651,6 +666,82 @@ export function borrarVolcado(db, id) {
 }
 
 // ── LO QUE SE CARGÓ UN DÍA ──────────────────────────────────────────────────────────
+
+// ════════════════════════════════════════════════════════════════════════════════════
+// 📋 LA PLANILLA DE CONTROL DE INGRESO
+// ════════════════════════════════════════════════════════════════════════════════════
+// Andy, 2/11/2026, con la foto del papel: «necesito que en el panel de ingreso de kilos
+// pueda descargarse un exportable en PDF exactamente con esta información».
+//
+// Es el REGISTRO DE CONTROL EN GALPÓN DE EMPAQUE, el formulario de calidad que hoy se
+// llena a mano y firman tres personas. Una fila por CAJÓN, agrupadas por viaje.
+//
+// EL NÚMERO DE BOLSÓN ES CORRELATIVO DENTRO DEL VIAJE, no un dato que se carga: en el
+// papel arranca en 1 con cada camión y sube de a uno. Se calcula al armar la planilla
+// —no se guarda— porque guardarlo obligaría a renumerar todas las filas de abajo cada
+// vez que alguien borra una del medio, y esa renumeración es la que después no coincide
+// con el papel que ya se firmó.
+export function planillaIngreso(db, fecha) {
+  const f = esFecha(fecha) || hoy();
+  const filas = db.prepare(
+    ' SELECT v.*, l.finca'
+    + '  FROM gal_volcados v'
+    + '  LEFT JOIN pa_lotes l ON l.id = v.lote_id'
+    + '  WHERE v.fecha = ? AND v.eliminado_en IS NULL'
+    /* Por VIAJE y después por el orden en que entraron. El que no tiene viaje va al
+       final y no al principio: en SQLite NULL ordena primero, y eso pondría lo que
+       todavía no se asignó arriba de los camiones que sí se registraron. */
+    + '  ORDER BY CASE WHEN v.viaje IS NULL THEN 1 ELSE 0 END, v.viaje, v.id').all(f);
+
+  const viajes = [];
+  let actual = null;
+  for (const v of filas) {
+    const n = v.viaje == null ? null : Number(v.viaje);
+    if (!actual || actual.viaje !== n) {
+      actual = { viaje: n, filas: [], kilos: 0, bultos: 0 };
+      viajes.push(actual);
+    }
+    actual.filas.push({
+      n: actual.filas.length + 1,          // el correlativo del papel
+      finca: v.finca || null,
+      lote: v.lote_nombre || ('Lote ' + v.lote_id),
+      kilos: round2(v.kilos),
+      sanitario: v.sanitario || null,
+      observacion: v.observacion || null,
+      producto: v.producto || null,
+      hora: v.hora || null,
+      id: v.id,
+    });
+    actual.kilos = round2(actual.kilos + (v.kilos || 0));
+    actual.bultos += 1;
+  }
+
+  /* El cultivo y la variedad del encabezado salen de lo que se cargó, no de un campo
+     aparte: en el papel se escriben una vez arriba porque un viaje trae una sola cosa.
+     Si ese día entraron dos, se listan las dos — mentir con la primera sería peor. */
+  const prods = [...new Set(filas.map((v) => v.producto).filter(Boolean))];
+  const vars = [...new Set([...datosDeLotes(db).values()]
+    .map((x) => x && x.variedad).filter(Boolean))];
+
+  return {
+    fecha: f,
+    viajes,
+    cultivo: prods.join(' · '),
+    variedad: vars.length === 1 ? vars[0] : '',
+    total: {
+      kilos: round2(filas.reduce((t, v) => t + (v.kilos || 0), 0)),
+      bultos: filas.length,
+      viajes: viajes.length,
+    },
+    // El encabezado y el pie del formulario, que son parte del documento controlado.
+    version: valorConfig(db, 'plan_version', '02'),
+    vigencia: valorConfig(db, 'plan_vigencia', ''),
+    modifico: valorConfig(db, 'plan_modifico', ''),
+    reviso: valorConfig(db, 'plan_reviso', ''),
+    aprobo: valorConfig(db, 'plan_aprobo', ''),
+  };
+}
+
 export function volcadosDelDia(db, fecha) {
   const f = esFecha(fecha);
   if (!f) return [];

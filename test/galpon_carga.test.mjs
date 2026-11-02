@@ -64,7 +64,7 @@ function base(techo = '20000') {
       fecha TEXT NOT NULL, hora TEXT,
       lote_id INTEGER NOT NULL, lote_nombre TEXT, producto TEXT,
       cuadrilla_id INTEGER, cuadrilla TEXT,
-      kilos REAL NOT NULL, ifcos INTEGER, bruto REAL, tara REAL, tarjeta_id INTEGER,
+      kilos REAL NOT NULL, ifcos INTEGER, bruto REAL, tara REAL, tarjeta_id INTEGER, viaje INTEGER, sanitario TEXT,
       origen TEXT NOT NULL DEFAULT 'manual',
       observacion TEXT, estado TEXT NOT NULL DEFAULT 'ok', revision_motivo TEXT,
       usuario_id INTEGER, usuario TEXT,

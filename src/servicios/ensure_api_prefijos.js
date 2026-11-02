@@ -80,10 +80,10 @@ const PREFIJOS = [
   ['galpon-lote-dia', 'galpon/lote-dia,galpon/lote-vigente,galpon/lotes'],
   // LA CARGA DE KILOS (V1108). Escribe el libro de la cosecha: cada fila es volumen
   // que después se convierte en rendimiento por lote y en kg/jornal por cuadrilla.
-  // Sólo 'galpon/volcados' — lo que esta pantalla LEE de las otras va en LECTURA, más
+  // Sólo 'galpon/volcados,galpon/planilla' — lo que esta pantalla LEE de las otras va en LECTURA, más
   // abajo: necesita la lista de lotes y de cuadrillas para los desplegables, y no por
   // eso puede declarar el lote del día ni tocar los rangos de tarjetas.
-  ['galpon-carga', 'galpon/volcados'],
+  ['galpon-carga', 'galpon/volcados,galpon/planilla'],
   // EL ACUMULADO (V1109). Hoy sólo LEE, y aun así se declara acá y no en la lista de
   // lecturas: una dirección que no figura en ningún mapa es una dirección que
   // exigirNivel deja pasar entera el día que alguien le cuelgue un POST —un cierre de

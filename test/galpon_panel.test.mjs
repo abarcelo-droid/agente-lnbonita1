@@ -700,7 +700,15 @@ test('MANUAL KG: «quién cargó sale de la cookie» y «no hace falta ser admin
   assert.match(post, /usuario: u\.nombre \|\| null,/);
   // Y el permiso de escribir es sólo sobre sus propias direcciones: lo que lee
   // de otros módulos va en api_lectura, que da leer y no escribir.
-  assert.match(PREFIJOS, /\['galpon-carga', 'galpon\/volcados'\]/);
+  /* Las direcciones que cubre el permiso, sin clavar la lista entera: atada al
+     texto exacto, esta línea se cae cada vez que la carga gana una salida —la
+     planilla de calidad fue la primera— y lo que importa es que CADA UNA esté
+     cubierta, no que sean esas dos. Mismo arreglo que el del acumulado. */
+  const mk = /\['galpon-carga', '([^']+)'\]/.exec(PREFIJOS);
+  assert.ok(mk, 'la carga no tiene prefijo de API: exigirNivel no la mira');
+  for (const r of ['galpon/volcados', 'galpon/planilla']) {
+    assert.ok(mk[1].split(',').includes(r), 'el permiso no cubre ' + r);
+  }
   assert.match(PREFIJOS, /\['galpon-carga',\s+'galpon\/lotes,galpon\/cuadrillas,galpon\/lote-vigente'\]/);
 });
 
@@ -2128,4 +2136,38 @@ test('EL INFORME SALE CON EL PERÍODO QUE ESTÁ EN PANTALLA', () => {
   // Nadie lee los casilleros del rango fuera de ahí.
   const sueltos = [...js.matchAll(/getElementById\('gac-(desde|hasta)'\)/g)].length;
   assert.ok(sueltos <= 6, 'el rango se lee en ' + sueltos + ' lugares: se va a desincronizar');
+});
+
+test('LA PLANILLA SALE DEL DÍA QUE ESTÁ EN PANTALLA', () => {
+  // Es el mismo criterio que la planilla de Excel y el informe del acumulado:
+  // lo que se baja es lo que se está mirando. Sin la fecha, el que revisa el
+  // martes el papel del lunes se lleva el de hoy y no coincide con nada.
+  const js = bloqueJs('var GKG =');
+  const fn = js.slice(js.indexOf('function galKgPlanilla()'),
+                      js.indexOf('async function galKgCargar()'));
+  assert.ok(fn.length > 60, 'el corte de galKgPlanilla salió vacío');
+  assert.match(fn, /gkg-fecha/, 'no manda el día que está en pantalla');
+  assert.match(fn, /encodeURIComponent/);
+  assert.match(fn, /_blank/, 'se baja en vez de abrirse: es para imprimirla');
+  // Y el botón existe en la pantalla, o la función no la llama nadie.
+  assert.match(PANEL, /onclick="galKgPlanilla\(\)"/);
+});
+
+test('el viaje y el estado sanitario VIAJAN al servidor', () => {
+  // Son las dos columnas de la planilla que el sistema no tenía. Si el
+  // formulario los pide y el pedido no los manda, la planilla sale vacía en
+  // esas dos columnas y nadie entiende por qué.
+  const js = bloqueJs('var GKG =');
+  assert.match(js, /viaje: document\.getElementById\('gal-kg-viaje'\)\.value/);
+  assert.match(js, /sanitario: document\.getElementById\('gal-kg-san'\)\.value/);
+  // Y los dos campos existen en la ventana.
+  assert.match(PANEL, /id="gal-kg-viaje"/);
+  assert.match(PANEL, /id="gal-kg-san"/);
+  // El selector ofrece las tres letras y el «sin mirar», que no es lo mismo que B.
+  const sel = PANEL.slice(PANEL.indexOf('<select id="gal-kg-san">'),
+                          PANEL.indexOf('</select>', PANEL.indexOf('<select id="gal-kg-san">')));
+  assert.match(sel, /value=""/, 'no se puede dejar sin mirar');
+  for (const l of ['B', 'R', 'M']) {
+    assert.match(sel, new RegExp('value="' + l + '"'), 'falta la opción ' + l);
+  }
 });

@@ -31,7 +31,7 @@ import {
   disponibleParaDespacho, despachos, itemsDelDespacho, abrirDespacho, editarDespacho,
   stockPorPresentacion, guardarIcono, borrarIcono, rutaDelIcono,
   stockParaArmar, stockPorArticulo, palletsArmados, abrirPalletArmado, moverAlPallet,
-  procesoPorDia, procesoTotal, rindePorLote,
+  procesoPorDia, procesoTotal, rindePorLote, planillaIngreso,
   sacarDelPalletArmado, lineasDelPallet, palletResumen,
   agregarAlDespacho, sacarDelDespacho, emitirDespacho, anularDespacho, borrarDespacho,
   despachoPorNumero,
@@ -1256,6 +1256,30 @@ router.get('/informe.pdf', async (req, res) => {
     res.end(buf);
   } catch (e) {
     console.error('[GALPON] GET /informe.pdf:', e.message);
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+
+// ── 📋 LA PLANILLA DE CONTROL DE INGRESO ────────────────────────────────────────────
+// Andy, 2/11/2026, con la foto del papel: «necesito que en el panel de ingreso de kilos
+// pueda descargarse un exportable en PDF exactamente con esta información».
+//
+// Es de UN DÍA, como el papel: el formulario se llena por jornada y lo firman tres
+// personas. Un rango de fechas en esta hoja sería otro documento.
+router.get('/planilla.pdf', async (req, res) => {
+  try {
+    const f = esFecha(req.query.fecha) || hoy();
+    const datos = planillaIngreso(db, f);
+    const { galponPlanillaPDF } = await import('../servicios/galponPlanillaPDF.js');
+    const buf = await galponPlanillaPDF(datos, { en_blanco: num(req.query.en_blanco) });
+    res.setHeader('Content-Type', 'application/pdf');
+    /* inline: esto se abre para imprimirlo y llevarlo al galpón, no para guardarlo. */
+    res.setHeader('Content-Disposition',
+      'inline; filename="control-ingreso-' + f + '.pdf"');
+    res.end(buf);
+  } catch (e) {
+    console.error('[GALPON] GET /planilla.pdf:', e.message);
     res.status(500).json({ ok: false, error: e.message });
   }
 });
