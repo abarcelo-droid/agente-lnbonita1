@@ -7730,6 +7730,53 @@ input[type=number]{-moz-appearance:textfield;appearance:textfield}
        hacer. Un cartel que manda a hacer algo imposible es peor que no tenerlo.
 
        Fuera de toda .sec y sin cerrarse al clic afuera, como todas. -->
+  <div class="ab-modal-overlay sg-mod" id="gal-arm-modal">
+    <div class="ab-modal" style="width:min(900px,96vw);max-width:96vw">
+      <div class="mh"><div class="mht" id="gal-arm-tit">Armar un pallet</div>
+        <button class="mcl" onclick="galArmCerrar()">×</button></div>
+
+      <div id="gal-arm-rep" style="display:none;margin-bottom:12px" class="ojo"></div>
+
+      <div class="sgr-card">
+        <div style="display:flex;gap:10px;flex-wrap:wrap">
+          <div style="flex:0 0 150px"><label>Fecha de empaque</label>
+            <input type="date" id="gal-arm-fecha"></div>
+          <div style="flex:1 1 260px;min-width:0"><label>Observación</label>
+            <input type="text" id="gal-arm-obs"
+                   placeholder="Para el camión del jueves, cliente, lo que haga falta"></div>
+        </div>
+      </div>
+
+      <!-- DE DÓNDE SALE CADA COSA. El selector lista el stock POR UBICACIÓN y no por
+           mercadería: mover 60 cajas es sacarlas de algún montón, y el que está parado
+           en el playón mira un montón, no un total. -->
+      <div class="sgr-card" id="gal-arm-cargar" style="margin-top:12px">
+        <div style="font-weight:600;font-size:13px;margin-bottom:8px">Agregar del stock</div>
+        <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end">
+          <div style="flex:1 1 340px;min-width:0"><label>De dónde</label>
+            <select id="gal-arm-item" onchange="galArmItemPick()"></select></div>
+          <div style="flex:0 0 110px"><label id="gal-arm-cl">Cajas</label>
+            <input type="number" id="gal-arm-cant" min="0" step="1"
+              onkeydown="if(event.key==='Enter'){event.preventDefault();galArmMover()}"></div>
+          <button class="btn bp bs" style="flex:0 0 auto" onclick="galArmMover()">Agregar</button>
+        </div>
+        <div id="gal-arm-disp" style="font-size:11px;color:var(--mut);margin-top:6px"></div>
+      </div>
+
+      <div id="gal-arm-lineas" style="margin-top:12px"></div>
+
+      <div class="mf">
+        <button class="btn bo" onclick="galArmCerrar()">Cerrar</button>
+        <button class="btn bo" id="gal-arm-reabrir" style="display:none"
+          onclick="galArmReabrir()">Reabrir</button>
+        <button class="btn bo" id="gal-arm-tarj" style="display:none"
+          onclick="galArmTarjeton()">🖨 Tarjetón</button>
+        <button class="btn bp" id="gal-arm-cerrarp"
+          onclick="galArmCerrarPallet()">Cerrar el pallet</button>
+      </div>
+    </div>
+  </div>
+
   <div class="ab-modal-overlay sg-mod" id="gal-dsp-modal">
     <div class="ab-modal" style="width:min(820px,96vw);max-width:96vw">
       <div class="mh"><div class="mht" id="gal-dsp-tit">Armar despacho</div>
@@ -8160,6 +8207,13 @@ input[type=number]{-moz-appearance:textfield;appearance:textfield}
 
     <h3 class="gst-t">Lo que hay en cámara <span style="text-transform:none;letter-spacing:0;font-weight:400">— tocá una para ver de qué lotes salió</span></h3>
     <div id="gst-stock"></div>
+
+    <!-- LOS PALLETS ARMADOS van ANTES que los despachos, porque ése es el orden
+         del trabajo: se procesa, se arma el pallet, y recién después sale. -->
+    <h3 class="gst-t" style="display:flex;align-items:center;gap:10px">Pallets armados
+      <button class="btn bo bs" style="margin-left:auto;text-transform:none;letter-spacing:0"
+        onclick="galArmAbrir()">+ Armar un pallet</button></h3>
+    <div id="gst-arm"></div>
 
     <h3 class="gst-t" style="display:flex;align-items:center;gap:10px">Despachos
       <button class="btn bo bs" style="margin-left:auto;text-transform:none;letter-spacing:0"
@@ -28626,6 +28680,40 @@ SG_MANUAL['galpon-stock'] = { titulo: 'Stock y Despachos', html:
   + 'así que lo que figura es lo que queda.</p>'
   + '<p>El <b>peso de una caja</b> sale del stock que hay, no del catálogo: si entraron '
   + 'cajas de 8,2 kg y el catálogo dice 8,0, despachar 100 saca los 820 que hay.</p>'
+
+  + '<h3>Armar un pallet con lo que ya está en cámara <span class="ver">V1126</span></h3>'
+  + '<p>Andy, 1/11/2026: <i>«necesito un lugar donde pueda hacer cierre de pallet de '
+  + 'mercadería que está suelta en el stock, donde puedo agarrar pallets mixtos y '
+  + 'todo»</i>.</p>'
+  + '<p>El pallet de <b>📦 Proceso</b> se llena solo: la primera caja del día lo abre. '
+  + 'Éste es el otro: el que se arma <b>antes de que salga el camión</b>, juntando lo '
+  + 'que quedó de varias tandas, partiendo uno que no se completó, o mezclando dos '
+  + 'calibres. El botón <b>+ Armar un pallet</b> lo abre.</p>'
+
+  + '<div class="ojo"><b>Armar NO mueve el stock.</b> Un pallet es una <b>ubicación</b>, '
+  + 'no un movimiento: las mismas cajas que había siguen estando, apiladas de otra '
+  + 'manera. Lo único que saca del stock es el <b>despacho</b>. Si al armar bajara el '
+  + 'stock, la cámara figuraría vacía con toda la fruta adentro.</div>'
+
+  + '<h3>De dónde sale cada cosa <span class="ver">V1126</span></h3>'
+  + '<p>El selector no ofrece un total sino <b>montones concretos</b>: «PC-26-00003 · '
+  + 'lote 13 · Carton Amarilla 50/55 — 120 cj». Es así porque sacar 60 cajas es sacarlas '
+  + 'de algún lado, y el que está parado en el playón mira un montón, no un total. Lo '
+  + 'que nunca entró a ningún pallet figura como <b>suelto</b>.</p>'
+  + '<p>Se puede sacar de un <b>pallet ya cerrado</b> — en el galpón se desarman pallets '
+  + 'todo el tiempo — y la pantalla <b>lo dice</b>: con qué número quedó y cuántas cajas '
+  + 'le quedaron. Si lo deja vacío avisa que hay que ir a despegarle la etiqueta: un '
+  + 'pallet cerrado sin nada adentro es una etiqueta pegada a un armazón de madera.</p>'
+  + '<p>Mover 60 cajas de una carga de 267 <b>parte el renglón</b> en 207 y 60. El stock '
+  + 'no cambia y las dos partes recuerdan de qué carga salieron, así que la historia se '
+  + 'puede reconstruir.</p>'
+
+  + '<h3>Cerrar el pallet armado <span class="ver">V1126</span></h3>'
+  + '<p>Igual que el del proceso: se le pone <b>número</b>, se congela lo que lleva, y sale <b>MIXTO</b> solo si adentro hay más de un artículo — no lo elige nadie. De ahí '
+  + 'sale el <b>tarjetón</b> para imprimir y pegar.</p>'
+  + '<p>Puede haber <b>varios armados abiertos a la vez</b>: se preparan tres para un '
+  + 'camión y se van llenando en paralelo. El del proceso es uno solo porque ahí la caja '
+  + 'cae sola y tiene que haber un único lugar donde caiga — y por eso un armado abierto <b>no</b> se lleva la carga de la mañana siguiente.</p>'
 
   + '<h3>Armar un despacho</h3>'
   + '<p>El botón <b>+ Armar despacho</b> abre uno nuevo en <b>borrador</b>. Ahí se pone a '
@@ -59714,7 +59802,8 @@ function galDibHtml(p, px){
    cargar. No me interesa ahí verlo en kilos». Las cajas van grandes; los kilos al lado,
    chicos, porque la liquidación sí se hace por kilo.
    ════════════════════════════════════════════════════════════════════════════════════ */
-var GST = { datos:null, desp:null, disp:null, abierto:null };
+var GST = { datos:null, desp:null, disp:null, abierto:null,
+            arm:null, armp:null, armsel:null, armops:null, armhoy:null };
 var GST_COL = { comercial:'#15803d', verde:'#f59e0b', descarte:'#b91c1c' };
 
 function galStNum(v, dec){
@@ -60056,7 +60145,271 @@ async function galDspAnular(){
   }catch(e){ galStAviso(e.message); }
 }
 
-function galStInit(){ galStCargar(); }
+
+/* ── 🧱 ARMAR UN PALLET CON LO QUE YA ESTÁ EN CÁMARA ──────────────────────────────
+   Andy, 1/11/2026: «necesito un lugar donde pueda hacer cierre de pallet de mercadería
+   que está suelta en el stock, donde puedo agarrar pallets mixtos y todo».
+
+   ARMAR NO MUEVE EL STOCK: las mismas cajas, apiladas de otra manera. Lo que saca es
+   el despacho. Por eso esta pantalla no habla de kilos que entran o salen sino de
+   montones que se mudan. */
+async function galArmCargar(){
+  try{
+    var r = await fetch('/api/galpon/armado', { credentials:'same-origin' });
+    var j = await r.json();
+    if(!j.ok) throw new Error(j.error||'No se pudo leer');
+    GST.arm = j.stock||[]; GST.armp = j.pallets||[]; GST.armhoy = j.hoy;
+    galArmLista();
+    galStAviso('');
+  }catch(e){ galStAviso(e.message); }
+}
+
+function galArmLista(){
+  var l = GST.armp||[];
+  var el = document.getElementById('gst-arm');
+  if(!el) return;
+  el.innerHTML = l.length
+    ? '<div class="ab-table-wrap"><table class="pa-tbl gst-tbl">'
+      + '<colgroup><col style="width:17%"><col style="width:11%"><col style="width:30%">'
+      + '<col style="width:11%"><col style="width:11%"><col style="width:20%"></colgroup>'
+      + '<thead><tr><th>Pallet</th><th>Fecha</th><th>Qué lleva</th>'
+      + '<th style="text-align:right">Cajas</th><th style="text-align:right">Kilos</th>'
+      + '<th></th></tr></thead><tbody>'
+      + l.map(function(x){
+          var c = x.contenido||[];
+          var b = c.reduce(function(t,y){ return t+(Number(y.bultos)||0); },0);
+          var k = c.reduce(function(t,y){ return t+(Number(y.kilos)||0); },0);
+          var cl = x.estado==='cerrado' ? 'gst-emi' : 'gst-brr';
+          return '<tr><td>'+galStEsc(x.numero||'sin número')
+            + ' <span class="gst-est '+cl+'">'+galStEsc(x.estado)+'</span></td>'
+            + '<td>'+galStEsc(x.fecha_empaque||'—')+'</td>'
+            /* Qué lleva, resumido: con tres artículos el nombre de cada uno no entra,
+               y lo que importa en la lista es si es mixto y de qué. */
+            + '<td>'+(c.length ? galStEsc(c.map(function(y){
+                return (y.presentacion||'granel')+(y.calibre?(' '+y.calibre):''); })
+                .join(' · ')) : '<span style="color:var(--mut)">vacío</span>')+'</td>'
+            + '<td style="text-align:right" class="gst-n">'+galStNum(b,0)+'</td>'
+            + '<td style="text-align:right">'+galStNum(k,0)+'</td>'
+            + '<td><button class="btn bo bs" onclick="galArmAbrir('+x.id+')">'
+            + (x.estado==='abierto'?'Seguir armando':'Ver')+'</button></td></tr>';
+        }).join('')
+      + '</tbody></table></div>'
+    : '<div class="ojo">No hay ningún pallet armado. El botón de arriba arma el primero '
+      + 'con lo que haya en cámara — se pueden mezclar lotes, calibres y lo que quede de '
+      + 'varias tandas.</div>';
+}
+
+/* Abrir con id abre uno que existe; sin id ARRANCA uno nuevo, para que lo que se mueva
+   tenga dónde ir. Y deja la ventana en blanco antes de llenarla: un formulario que sólo
+   se esconde conserva lo que tenía. */
+async function galArmAbrir(id){
+  var set = function(k,v){ var e=document.getElementById(k); if(e) e.value = v==null?'':v; };
+  ['gal-arm-fecha','gal-arm-obs','gal-arm-cant'].forEach(function(k){ set(k,''); });
+  document.getElementById('gal-arm-rep').style.display='none';
+  document.getElementById('gal-arm-lineas').innerHTML='';
+  GST.armsel = null;
+  try{
+    if(!GST.arm) await galArmCargar();
+    if(!id){
+      var r = await fetch('/api/galpon/armado', { method:'POST',
+        headers:{'Content-Type':'application/json'}, credentials:'same-origin',
+        body: JSON.stringify({ fecha: GST.armhoy||'' }) });
+      var j = await r.json();
+      if(!j.ok) throw new Error(j.error||'No se pudo abrir');
+      await galArmCargar();
+      GST.armsel = (GST.armp||[]).filter(function(x){ return x.id===j.id; })[0];
+    } else {
+      await galArmCargar();
+      GST.armsel = (GST.armp||[]).filter(function(x){ return x.id===id; })[0];
+    }
+    if(!GST.armsel) throw new Error('Ese pallet no está');
+    galArmPintar();
+    sgModalArriba('gal-arm-modal');
+  }catch(e){ galStAviso(e.message); }
+}
+
+function galArmCerrar(){
+  document.getElementById('gal-arm-modal').classList.remove('on');
+  GST.armsel = null;
+  galStCargar();
+  galArmCargar();
+}
+
+function galArmPintar(){
+  var x = GST.armsel; if(!x) return;
+  var set = function(k,v){ var e=document.getElementById(k); if(e) e.value = v==null?'':v; };
+  set('gal-arm-fecha', x.fecha_empaque); set('gal-arm-obs', x.observacion);
+  var ab = x.estado==='abierto';
+  document.getElementById('gal-arm-tit').textContent = ab
+    ? 'Armar un pallet' : ('Pallet '+(x.numero||x.id));
+  document.getElementById('gal-arm-cargar').style.display = ab ? '' : 'none';
+  document.getElementById('gal-arm-cerrarp').style.display = ab ? '' : 'none';
+  document.getElementById('gal-arm-reabrir').style.display = ab ? 'none' : '';
+  document.getElementById('gal-arm-tarj').style.display = x.numero ? '' : 'none';
+  ['gal-arm-fecha','gal-arm-obs'].forEach(function(k){
+    var e=document.getElementById(k); if(e) e.disabled = !ab; });
+
+  if(!ab && x.numero){
+    var r = document.getElementById('gal-arm-rep');
+    var c = x.contenido||[];
+    r.style.display=''; r.className='oko';
+    r.innerHTML = 'Pallet <b>'+galStEsc(x.numero)+'</b> cerrado: '
+      + galStNum(c.reduce(function(t,y){ return t+(Number(y.bultos)||0); },0),0)
+      + ' cajas, '
+      + galStNum(c.reduce(function(t,y){ return t+(Number(y.kilos)||0); },0),0)+' kg.'
+      + (c.length>1 ? ' <b>MIXTO.</b>' : '')
+      + ' Imprimí el tarjetón y pegalo.';
+  }
+
+  /* El selector lista el stock POR UBICACIÓN: no se ofrece un total sino montones
+     concretos, porque sacar 60 cajas es sacarlas de algún lado. El propio pallet se
+     saltea — sacarle algo para ponérselo a él mismo no es nada. */
+  var sel = document.getElementById('gal-arm-item');
+  if(sel){
+    var ops = (GST.arm||[]).filter(function(f){
+      return (f.pallet_id||null) !== x.id && (f.bultos>0 || f.kilos>0); });
+    GST.armops = ops;
+    sel.innerHTML = '<option value="">— Elegir de dónde —</option>'
+      + ops.map(function(f,i){
+          return '<option value="'+i+'">'+galStEsc(f.ubicacion)+' · '
+            + galStEsc(f.lote_nombre||('Lote '+f.lote_id))+' · '
+            + galStEsc(f.presentacion||'granel')
+            + (f.calibre?(' '+galStEsc(f.calibre)):'')
+            + ' — '+galStNum(f.granel?f.kilos:f.bultos,0)
+            + (f.granel?' kg':' cj')+'</option>';
+        }).join('');
+  }
+  galArmItemPick();
+  galArmLineas();
+}
+
+function galArmItemPick(){
+  var i = document.getElementById('gal-arm-item').value;
+  var f = i===''? null : (GST.armops||[])[Number(i)];
+  document.getElementById('gal-arm-cl').textContent = (f && f.granel) ? 'Kilos' : 'Cajas';
+  document.getElementById('gal-arm-disp').textContent = f
+    ? (f.granel ? ('Ahí hay '+galStNum(f.kilos,0)+' kg')
+                : ('Ahí hay '+galStNum(f.bultos,0)+' cajas de '
+                   + galStNum(f.kg_unidad,1)+' kg'))
+      + (f.pallet_estado==='cerrado'
+         ? ' — OJO: está en un pallet YA CERRADO, sacarle cajas lo deja distinto de su '
+           + 'tarjetón' : '')
+    : '';
+}
+
+async function galArmMover(){
+  var x = GST.armsel; if(!x) return;
+  var i = document.getElementById('gal-arm-item').value;
+  var f = i===''? null : (GST.armops||[])[Number(i)];
+  if(!f) return galStAviso('Elegí de dónde sale');
+  var c = Number(document.getElementById('gal-arm-cant').value)||0;
+  if(!(c>0)) return galStAviso('Poné la cantidad');
+  try{
+    var r = await fetch('/api/galpon/armado/'+x.id+'/mover', { method:'POST',
+      headers:{'Content-Type':'application/json'}, credentials:'same-origin',
+      body: JSON.stringify({ lote_id:f.lote_id, destino:f.destino,
+        presentacion_id:f.presentacion_id||0, calibre:f.calibre||'',
+        pallet_id:f.pallet_id||null,
+        bultos: f.granel?null:c, kilos: f.granel?c:null }) });
+    var j = await r.json();
+    if(!j.ok) throw new Error(j.error||'No se pudo mover');
+    document.getElementById('gal-arm-cant').value='';
+    /* Si salió de un pallet CERRADO hay que decirlo acá y ahora: queda distinto de su
+       tarjetón, que está impreso y pegado. Enterarse cuando llega el camión es tarde. */
+    await galArmCargar();
+    if(j.desde && j.desde.numero){
+      galStAviso('Salieron de ' + j.desde.numero + ', que queda con '
+        + galStNum(j.desde.bultos,0) + ' cajas'
+        + (j.desde.vacio ? ' — quedó VACÍO: andá a despegarle la etiqueta.' : '.'), 'ok');
+    }
+    GST.armsel = (GST.armp||[]).filter(function(y){ return y.id===x.id; })[0] || GST.armsel;
+    galArmPintar();
+  }catch(e){ galStAviso(e.message); }
+}
+
+function galArmLineas(){
+  var x = GST.armsel; if(!x) return;
+  var l = x.lineas||[];
+  var ab = x.estado==='abierto';
+  document.getElementById('gal-arm-lineas').innerHTML = l.length
+    ? '<table class="pa-tbl gst-tbl" style="width:100%;table-layout:fixed">'
+      + '<colgroup><col style="width:26%"><col style="width:24%"><col style="width:14%">'
+      + '<col style="width:13%"><col style="width:13%"><col style="width:10%"></colgroup>'
+      + '<thead><tr><th>Lote</th><th>Presentación</th><th>Calibre</th>'
+      + '<th style="text-align:right">Cajas</th><th style="text-align:right">Kilos</th>'
+      + '<th></th></tr></thead><tbody>'
+      + l.map(function(f){
+          return '<tr><td>'+galStEsc(f.lote_nombre||('Lote '+f.lote_id))+'</td>'
+            + '<td>'+galStEsc(f.presentacion||'A granel')+'</td>'
+            + '<td>'+galStEsc(f.calibre||'—')+'</td>'
+            + '<td style="text-align:right" class="gst-n">'+galStNum(f.bultos,0)+'</td>'
+            + '<td style="text-align:right">'+galStNum(f.kilos,0)+'</td>'
+            + '<td>'+(ab?('<button class="btn bo bs" title="Devolver al stock" '
+              + 'onclick="galArmSacar('+f.id+')">×</button>'):'')+'</td></tr>';
+        }).join('')
+      + '</tbody><tfoot><tr style="font-weight:700"><td colspan="3">Total'
+      + (l.length>1 ? ' · MIXTO' : '')+'</td>'
+      + '<td style="text-align:right">'
+      + galStNum(l.reduce(function(t,f){ return t+(Number(f.bultos)||0); },0),0)+'</td>'
+      + '<td style="text-align:right">'
+      + galStNum(l.reduce(function(t,f){ return t+(Number(f.kilos)||0); },0),0)+'</td>'
+      + '<td></td></tr></tfoot></table>'
+    : '<div class="ojo">Todavía no le pusiste nada. Elegí arriba de qué montón sacar.</div>';
+}
+
+async function galArmSacar(id){
+  try{
+    var r = await fetch('/api/galpon/armado/linea/'+id, { method:'DELETE',
+      credentials:'same-origin' });
+    var j = await r.json();
+    if(!j.ok) throw new Error(j.error||'No se pudo sacar');
+    var ab = GST.armsel;
+    await galArmCargar();
+    GST.armsel = (GST.armp||[]).filter(function(y){ return y.id===(ab&&ab.id); })[0]||null;
+    if(GST.armsel) galArmPintar(); else galArmCerrar();
+  }catch(e){ galStAviso(e.message); }
+}
+
+async function galArmCerrarPallet(){
+  var x = GST.armsel; if(!x) return;
+  if(!confirm('¿Cerrar el pallet?\n\nSe le pone número y se congela lo que lleva. '
+    + 'Después hay que reabrirlo para cambiarlo.')) return;
+  try{
+    var r = await fetch('/api/galpon/pallets/'+x.id+'/cerrar', { method:'POST',
+      headers:{'Content-Type':'application/json'}, credentials:'same-origin',
+      body: JSON.stringify({ observacion: document.getElementById('gal-arm-obs').value }) });
+    var j = await r.json();
+    if(!j.ok) throw new Error(j.error||'No se pudo cerrar');
+    /* La ventana NO se cierra: adentro queda el número, que es lo que hay que leer
+       antes de ir a imprimir el tarjetón (CLAUDE.md). */
+    await galArmCargar();
+    GST.armsel = (GST.armp||[]).filter(function(y){ return y.id===x.id; })[0] || GST.armsel;
+    galArmPintar();
+  }catch(e){ galStAviso(e.message); }
+}
+
+async function galArmReabrir(){
+  var x = GST.armsel; if(!x) return;
+  if(!confirm('¿Reabrir este pallet?\n\nEl número se conserva: es el mismo pallet. '
+    + 'Pero si le cambiás lo que lleva hay que REIMPRIMIR la etiqueta.')) return;
+  try{
+    var r = await fetch('/api/galpon/pallets/'+x.id+'/reabrir', { method:'POST',
+      credentials:'same-origin' });
+    var j = await r.json();
+    if(!j.ok) throw new Error(j.error||'No se pudo reabrir');
+    await galArmCargar();
+    GST.armsel = (GST.armp||[]).filter(function(y){ return y.id===x.id; })[0] || GST.armsel;
+    galArmPintar();
+  }catch(e){ galStAviso(e.message); }
+}
+
+function galArmTarjeton(){
+  var x = GST.armsel; if(!x) return;
+  window.open('/api/galpon/pallets/'+x.id+'/tarjeton.pdf', '_blank');
+}
+
+// Las dos listas se cargan juntas: la de pallets armados vive en esta pantalla.
+function galStInit(){ galStCargar(); galArmCargar(); }
 
 </script>
 
