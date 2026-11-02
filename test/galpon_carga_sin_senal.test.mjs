@@ -40,7 +40,24 @@ function elemento(id) {
     classList: { add() {}, remove() {}, contains: () => false },
     _html: null,
     _sel: [],
+    _htmlCk: null,
+    _ck: [],
     querySelectorAll(q) {
+      /* Los casilleros se rearman desde el innerHTML igual que los <select>: así
+         galKgSelTodas() recorre los que galKgPintar() dibujó de verdad, y no una
+         lista que el test le pasa por abajo. */
+      if (q === 'input.gkg-ck') {
+        if (el._htmlCk !== el.innerHTML) {
+          el._htmlCk = el.innerHTML;
+          el._ck = (el.innerHTML.match(/<input type="checkbox" class="gkg-ck"[^>]*>/g) || [])
+            .map((t) => {
+              const m = /data-id="([^"]*)"/.exec(t);
+              const id = m ? m[1] : '';
+              return { checked: false, getAttribute: (k) => (k === 'data-id' ? id : null) };
+            });
+        }
+        return el._ck;
+      }
       if (q !== 'select') return [];
       if (el._html !== el.innerHTML) {
         el._html = el.innerHTML;
@@ -56,6 +73,7 @@ function elemento(id) {
 }
 
 const IDS = ['gkg-fecha', 'gkg-aviso', 'gkg-tot', 'gkg-cortes', 'gkg-body',
+  'gkg-barra', 'gkg-ck-todas',
   'gal-kg-cuads', 'gal-kg-cuads-av', 'gal-rap-cuads', 'gal-rap-cuads-av'];
 
 function domFalso() {
@@ -99,7 +117,9 @@ function pantalla(dom, opts) {
     + '\nreturn { GKG, galKgCargar, galKgPintar, galKgPintarTot, galKgPintarCortes,'
     + ' galKgCola, galKgDeCola, galKgLeerKilos, galCuadPintar, galCuadIds,'
     + ' galCuadCrudos, galCuadAgregar, galCuadQuitar, galKgBorrar, galKgNum,'
-    + ' galKgGuardar, galKgAbrir, GRP, galRapEmpezar, galRapCargar, galRapPintar };');
+    + ' galKgGuardar, galKgAbrir, GRP, galRapEmpezar, galRapCargar, galRapPintar,'
+    + ' galKgSel, galKgSelTodas, galKgSelNada, galKgPintarSel, galKgBorrarSel,'
+    + ' galKgCks };');
 
   dom.cartel = [];
   dom.alertas = [];
@@ -637,4 +657,245 @@ test('LA CARGA RÁPIDA MANDA LAS CUADRILLAS DE LA TANDA, en cada cajón', async 
     assert.deepEqual(c.cuadrilla_ids, ['1', '2'],
       'la carga rápida no manda las cuadrillas: cien cajones sin atribuir');
   }
+});
+
+// ══════════════════════════════════════════════════════════════════════════
+// 7 · ☑️ SELECCIONAR VARIAS PARA BORRAR
+// ══════════════════════════════════════════════════════════════════════════
+// Andy, 2/11/2026: «quiero poder seleccionar varios para eliminar, como si
+// tuvieran un casillero».
+//
+// Se ejecuta, no se lee: lo que puede estar mal —que se mande un id que no se
+// marcó, que la barra cuente de más, que el casillero de arriba marque una
+// carga que no se puede borrar— se ve idéntico mirando el código.
+
+function diaCon(cargas, extra) {
+  return DIA(Object.assign({
+    cargas,
+    resumen: { kilos: cargas.reduce((t, c) => t + c.kilos, 0), ifcos: 0,
+               cargas: cargas.length, a_revisar: 0 },
+  }, extra || {}));
+}
+const CARGA = (id, kilos, fecha) => ({ id, fecha: fecha || HOY, lote_id: 10,
+  lote_nombre: 'Cuadro ' + id, kilos });
+
+async function conTres(opts) {
+  const o = opts || {};
+  const pedidos = [];
+  const dom = domFalso();
+  const p = pantalla(dom, {
+    fetch: (u, x) => {
+      const metodo = (x || {}).method || 'GET';
+      if (metodo !== 'GET') pedidos.push([String(u), metodo, x.body ? JSON.parse(x.body) : null]);
+      return Promise.resolve({ ok: true, json: () => Promise.resolve(
+        metodo === 'GET' ? (o.dia || diaCon([CARGA(7, 100), CARGA(8, 200), CARGA(9, 300)]))
+                         : (o.respuesta || { ok: true, borradas: 3 })) });
+    },
+    GOFF: goff(o.cola || []),
+    confirmar: o.confirmar,
+  });
+  p.GKG.lotes = [{ id: 10, nombre: 'Cuadro 3' }];
+  await p.galKgCargar();
+  return { dom, p, pedidos };
+}
+
+test('CADA RENGLÓN QUE SE PUEDE BORRAR TRAE SU CASILLERO', async () => {
+  const { dom, p } = await conTres();
+  assert.equal((dom.nodos['gkg-body'].innerHTML.match(/class="gkg-ck"/g) || []).length, 3);
+  assert.equal(p.galKgCks().length, 3);
+  // Y la tabla sigue teniendo tantas celdas como columnas.
+  assert.match(dom.nodos['gkg-body'].innerHTML, /colspan="8"|<td class="gkg-ckc">/);
+});
+
+test('EN UN DÍA CERRADO SIN PERMISO NO HAY CASILLERO', async () => {
+  /* Ofrecer marcar una carga que después no se va a poder borrar es prometer algo
+     que no se puede cumplir, y el que marcó veinte se entera recién al apretar. */
+  const { dom, p } = await conTres({
+    dia: diaCon([CARGA(7, 100, '2026-11-19')], { fecha: '2026-11-19', puede_anular: false }),
+  });
+  assert.ok(!/class="gkg-ck"/.test(dom.nodos['gkg-body'].innerHTML));
+  assert.equal(p.galKgCks().length, 0);
+});
+
+test('pero con permiso de anular sí, en un día cerrado', async () => {
+  const { p } = await conTres({
+    dia: diaCon([CARGA(7, 100, '2026-11-19')], { fecha: '2026-11-19', puede_anular: true }),
+  });
+  assert.equal(p.galKgCks().length, 1);
+});
+
+test('LA BARRA APARECE RECIÉN CON ALGO MARCADO, y dice cuántas y cuántos kilos', async () => {
+  // El número de cargas solo no alcanza para darse cuenta de que se marcó de más:
+  // «12 cargas» se parece a cualquier cosa; «12 cargas · 5.400 kg» en un día de
+  // 6.000 salta a la vista.
+  const { dom, p } = await conTres();
+  assert.equal(dom.nodos['gkg-barra'].innerHTML, '');
+  assert.equal(dom.nodos['gkg-barra'].style.display, 'none');
+
+  const ck = p.galKgCks()[0];
+  ck.checked = true;
+  p.galKgSel(ck);
+  assert.deepEqual(p.GKG.sel, ['7']);
+  assert.equal(dom.nodos['gkg-barra'].style.display, 'flex');
+  assert.match(dom.nodos['gkg-barra'].innerHTML, /<b>1<\/b> carga/);
+  assert.match(dom.nodos['gkg-barra'].innerHTML, /100 kg/);
+
+  const ck2 = p.galKgCks()[1];
+  ck2.checked = true;
+  p.galKgSel(ck2);
+  assert.deepEqual(p.GKG.sel, ['7', '8']);
+  assert.match(dom.nodos['gkg-barra'].innerHTML, /<b>2<\/b> cargas/);
+  assert.match(dom.nodos['gkg-barra'].innerHTML, /300 kg/);
+
+  // Y destildar la saca, no la suma de nuevo.
+  ck.checked = false;
+  p.galKgSel(ck);
+  assert.deepEqual(p.GKG.sel, ['8']);
+  assert.match(dom.nodos['gkg-barra'].innerHTML, /200 kg/);
+});
+
+test('MARCAR TODAS marca las tres, y soltar las suelta', async () => {
+  const { dom, p } = await conTres();
+  p.galKgSelTodas(true);
+  assert.deepEqual(p.GKG.sel, ['7', '8', '9']);
+  assert.ok(p.galKgCks().every((c) => c.checked));
+  assert.match(dom.nodos['gkg-barra'].innerHTML, /600 kg/);
+
+  p.galKgSelNada();
+  assert.deepEqual(p.GKG.sel, []);
+  assert.ok(p.galKgCks().every((c) => !c.checked));
+  assert.equal(dom.nodos['gkg-barra'].style.display, 'none');
+  assert.equal(dom.nodos['gkg-ck-todas'].checked, false);
+});
+
+test('EL DE ARRIBA QUEDA MARCADO SÓLO SI ESTÁN TODAS', async () => {
+  /* Dejarlo marcado con una destildada haría que el próximo clic en él desmarque
+     en vez de marcar, que es al revés de lo que esperaría cualquiera. */
+  const { dom, p } = await conTres();
+  p.galKgSelTodas(true);
+  assert.equal(dom.nodos['gkg-ck-todas'].checked, true);
+  const ck = p.galKgCks()[1];
+  ck.checked = false;
+  p.galKgSel(ck);
+  assert.equal(dom.nodos['gkg-ck-todas'].checked, false);
+  // Y volver a marcarla lo deja marcado otra vez.
+  ck.checked = true;
+  p.galKgSel(ck);
+  assert.equal(dom.nodos['gkg-ck-todas'].checked, true);
+});
+
+test('LA SELECCIÓN SE SUELTA AL REPINTAR', async () => {
+  /* El HTML se rearma con los casilleros vacíos. Conservarla dejaría a GKG.sel
+     diciendo una cosa y a la pantalla mostrando otra — y lo que se borra es lo que
+     dice GKG.sel. */
+  const { dom, p } = await conTres();
+  p.galKgSelTodas(true);
+  assert.equal(p.GKG.sel.length, 3);
+  await p.galKgCargar();
+  assert.deepEqual(p.GKG.sel, []);
+  assert.equal(dom.nodos['gkg-barra'].style.display, 'none');
+});
+
+test('BORRAR MANDA UN SOLO PEDIDO CON LOS IDS MARCADOS', async () => {
+  const { p, pedidos } = await conTres();
+  p.galKgSelTodas(true);
+  await p.galKgBorrarSel();
+  const borrados = pedidos.filter((x) => x[0] === '/api/galpon/volcados/borrar');
+  assert.equal(borrados.length, 1, 'no mandó un solo pedido: ' + JSON.stringify(pedidos));
+  assert.equal(borrados[0][1], 'POST');
+  assert.deepEqual(borrados[0][2].ids, ['7', '8', '9']);
+  assert.deepEqual(p.GKG.sel, []);
+});
+
+test('manda SÓLO lo marcado, no todo lo que se ve', async () => {
+  const { p, pedidos } = await conTres();
+  const ck = p.galKgCks()[1];
+  ck.checked = true;
+  p.galKgSel(ck);
+  await p.galKgBorrarSel();
+  assert.deepEqual(pedidos.filter((x) => x[1] === 'POST')[0][2].ids, ['8']);
+});
+
+test('SI SE CANCELA LA CONFIRMACIÓN NO SE MANDA NADA', async () => {
+  // Son veinte renglones de una vez: la confirmación acá no es un clic de más.
+  const { p, pedidos } = await conTres({ confirmar: false });
+  p.galKgSelTodas(true);
+  await p.galKgBorrarSel();
+  assert.equal(pedidos.filter((x) => x[1] !== 'GET').length, 0);
+  assert.equal(p.GKG.sel.length, 3);
+});
+
+test('sin nada marcado el botón no manda nada', async () => {
+  const { p, pedidos } = await conTres();
+  await p.galKgBorrarSel();
+  assert.equal(pedidos.filter((x) => x[1] !== 'GET').length, 0);
+});
+
+test('SI EL SERVIDOR DICE QUE NO, LA SELECCIÓN NO SE PIERDE', async () => {
+  /* El error que manda el servidor dice CUÁL no se pudo y por qué. Soltar la
+     selección obligaría a volver a marcar veinte renglones para corregir uno. */
+  const { p, pedidos } = await conTres({
+    respuesta: { ok: false, error: 'La carga 9 es del 2026-11-19. No se borró ninguna' },
+  });
+  p.galKgSelTodas(true);
+  await p.galKgBorrarSel();
+  assert.equal(p.GKG.sel.length, 3);
+  assert.equal(p.dom_alertas === undefined, true);
+  assert.equal(pedidos.filter((x) => x[1] === 'POST').length, 1);
+});
+
+test('LAS DE LA COLA SE SACAN DE LA COLA, Y DESPUÉS DE QUE EL SERVIDOR ACEPTE', async () => {
+  /* Nunca llegaron al servidor: no hay una fila que borrar, hay un pedido que sacar
+     de este equipo. Y van DESPUÉS: al revés, un 403 del servidor dejaría las de la
+     cola ya borradas, o sea el pedido a medias justo por el camino que no falla. */
+  const { p, pedidos } = await conTres({
+    cola: [enCola('abc', { fecha: HOY, lote_id: 10, kilos: '450' }),
+           enCola('def', { fecha: HOY, lote_id: 10, kilos: '50' })],
+  });
+  p.galKgSelTodas(true);
+  assert.deepEqual(p.GKG.sel, ['enc:abc', 'enc:def', '7', '8', '9']);
+  await p.galKgBorrarSel();
+
+  const noGet = pedidos.filter((x) => x[1] !== 'GET');
+  assert.equal(noGet[0][0], '/api/galpon/volcados/borrar', 'la cola se vació antes de que el servidor aceptara');
+  assert.deepEqual(noGet[0][2].ids, ['7', '8', '9'], 'mandó ids locales al servidor');
+  assert.deepEqual(noGet.slice(1).map((x) => [x[0], x[1]]), [
+    ['/api/galpon/volcados/enc%3Aabc', 'DELETE'],
+    ['/api/galpon/volcados/enc%3Adef', 'DELETE'],
+  ]);
+});
+
+test('si TODO lo marcado es de la cola, no se le pide nada al servidor', async () => {
+  const { p, pedidos } = await conTres({
+    dia: diaCon([]),
+    cola: [enCola('abc', { fecha: HOY, lote_id: 10, kilos: '450' })],
+  });
+  p.galKgSelTodas(true);
+  await p.galKgBorrarSel();
+  const noGet = pedidos.filter((x) => x[1] !== 'GET');
+  assert.deepEqual(noGet.map((x) => x[1]), ['DELETE']);
+});
+
+test('LA BARRA CUENTA TAMBIÉN LOS KILOS DE LA COLA', async () => {
+  // Si no los contara, el total de la confirmación saldría corto justo el día sin
+  // señal, que es cuando más se tipea y más se corrige.
+  const { dom, p } = await conTres({
+    dia: diaCon([CARGA(7, 100)]),
+    cola: [enCola('abc', { fecha: HOY, lote_id: 10, kilos: '1.250' })],
+  });
+  p.galKgSelTodas(true);
+  assert.match(dom.nodos['gkg-barra'].innerHTML, /1\.350 kg/);
+});
+
+test('EL BORRADO MÚLTIPLE SE PUEDE ENCOLAR: sin señal también funciona', async () => {
+  /* Si la dirección no estuviera en ENCOLABLES, sin señal el pedido devolvería el
+     error de red tal cual y los veinte renglones quedarían ahí — en la pantalla que
+     justamente se arregló para que se pueda trabajar sin señal. */
+  const off = fs.readFileSync(path.join(RAIZ, 'src/galponOffline.js'), 'utf8');
+  const GOFF = new Function(off + '\nreturn GOFF;')();
+  assert.equal(GOFF.esEncolable('POST', '/api/galpon/volcados/borrar'), true);
+  assert.equal(GOFF.esEncolable('POST', '/api/galpon/volcados/borrar?x=1'), true);
+  // Y no se le escapa a lo que no se puede encolar.
+  assert.equal(GOFF.esEncolable('POST', '/api/galpon/pallets/3/cerrar'), false);
+  assert.equal(GOFF.esEncolable('POST', '/api/galpon/volcados/borrar/todo'), false);
 });

@@ -22,7 +22,8 @@ import {
   COLORES, config, guardarConfig, cuadrillas, rangoSuperpuesto, colorSugerido,
   loteVigente, tramosDelDia, tramoChoca, lotesParaElDia, volcadosEnTramo,
   hhmm, esFecha,
-  registrarVolcado, editarVolcado, borrarVolcado, volcadosDelDia, resumenDelDia,
+  registrarVolcado, editarVolcado, borrarVolcado, borrarVolcados,
+  volcadosDelDia, resumenDelDia,
   acumulado, rangoCargado, resumenParaPlanilla,
   ultimaCarga,
   DESTINOS, presentaciones, guardarPresentacion, borrarPresentacion,
@@ -602,6 +603,32 @@ router.patch('/volcados/:id', (req, res) => {
    servicios/permisos.js). Lo que ese middleware NO puede ver es la FECHA de la fila:
    sin lo de abajo, aflojar el nivel dejaría a cualquiera borrar la temporada pasada.
    Las dos mitades son una sola decisión y las dos tienen que estar. */
+/* ── BORRAR VARIAS DE UNA VEZ (V1134) ──────────────────────────────────────────────
+   Andy, 2/11/2026: «quiero poder seleccionar varios para eliminar, como si tuvieran un
+   casillero».
+
+   VA COMO POST Y NO COMO DELETE porque lleva CUERPO: la lista de ids. Un DELETE con
+   body lo tiran algunos intermediarios sin avisar, y meter ochenta ids en el query
+   string topa con el largo máximo de una URL.
+
+   El nivel lo resuelve igual: la dirección cuelga de /api/galpon/volcados, que está en
+   BORRAR_ES_OPERAR (servicios/permisos.js), y además la palabra «borrar» en la URL ya
+   la hace pasar por el control de anulación. Y el control de la FECHA está adentro,
+   como en el de una sola — es la otra mitad de la misma decisión. */
+router.post('/volcados/borrar', (req, res) => {
+  try {
+    const r = borrarVolcados(db, (req.body || {}).ids, {
+      hoy: hoy(),
+      puede_anular: puedeAnularCargas(req._user),
+    });
+    if (!r.ok) return res.status(r.status || 400).json({ ok: false, error: r.motivo });
+    res.json(r);
+  } catch (e) {
+    console.error('[GALPON] POST /volcados/borrar:', e.message);
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
 router.delete('/volcados/:id', (req, res) => {
   try {
     const r = borrarVolcado(db, num(req.params.id), {

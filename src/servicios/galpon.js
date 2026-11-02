@@ -785,6 +785,76 @@ export function borrarVolcado(db, id, opts) {
   return { ok: true, fecha: fila.fecha };
 }
 
+// ── BORRAR VARIAS DE UNA VEZ ────────────────────────────────────────────────────────
+// Andy, 2/11/2026: «quiero poder seleccionar varios para eliminar, como si tuvieran un
+// casillero».
+//
+// Se corrige una tanda entera, no un renglón: la cuadrilla equivocada en los ochenta
+// cajones de la mañana son ochenta clics y ochenta confirmaciones, y a la vigésima
+// alguien deja la mitad hecha.
+//
+// ── O TODAS O NINGUNA ──────────────────────────────────────────────────────────────
+// Primero se mira la LISTA COMPLETA y recién después se borra. Si una sola no se puede
+// —es de un día cerrado, ya la borró un compañero— no se borra ninguna y se dice cuál.
+//
+// Un borrado a medias de una tanda es peor que ninguno: el que apretó no sabe cuáles
+// quedaron y tiene que mirar renglón por renglón, que es exactamente el trabajo que
+// esta pantalla venía a sacar.
+//
+// NO HACE FALTA UNA TRANSACCIÓN, y no es una omisión: después de validar, lo único que
+// queda es un UPDATE por fila que no puede fallar. Y si entre la validación y el UPDATE
+// un compañero borra una, el "AND eliminado_en IS NULL" la saltea — queda borrada una
+// sola vez, que es lo que se quería. Un db.transaction() además partiría los tests en
+// dos, porque node:sqlite no lo tiene.
+export function borrarVolcados(db, ids, opts) {
+  const o = opts || {};
+  const crudos = Array.isArray(ids) ? ids : [];
+  const limpios = [];
+  for (const x of crudos) {
+    const i = parseInt(x, 10);
+    if (!Number.isFinite(i)) return { ok: false, motivo: 'Hay un id que no se entiende: "' + x + '"' };
+    // Repetido es un clic de más, no un error: la segunda vez el UPDATE no haría nada.
+    if (limpios.indexOf(i) < 0) limpios.push(i);
+  }
+  if (!limpios.length) return { ok: false, motivo: 'No vino ninguna carga para borrar' };
+  /* UN TECHO, porque la lista la manda el navegador. Mil ids en un pedido son mil
+     consultas antes de contestar; y nadie selecciona mil a mano. Si alguna vez hace
+     falta borrar un día entero, eso es otra pantalla y otra conversación. */
+  if (limpios.length > 500) {
+    return { ok: false, motivo: 'Son demasiadas de una vez (' + limpios.length
+             + '). Hacelo en tandas de hasta 500.' };
+  }
+
+  const buscar = db.prepare(
+    'SELECT id, fecha, kilos FROM gal_volcados WHERE id = ? AND eliminado_en IS NULL');
+  const filas = [];
+  for (const i of limpios) {
+    const f = buscar.get(i);
+    if (!f) {
+      return { ok: false, status: 404,
+        motivo: 'La carga ' + i + ' no existe o alguien ya la borró. No se borró ninguna'
+             + ' de las ' + limpios.length + ': volvé a mirar la lista.' };
+    }
+    if (!o.puede_anular && o.hoy && f.fecha !== o.hoy) {
+      return { ok: false, status: 403,
+        motivo: 'La carga ' + i + ' es del ' + f.fecha + ' y hoy es ' + o.hoy + '. No se'
+             + ' borró ninguna: lo de un día ya cerrado lo tiene que anular alguien con'
+             + ' ese permiso.' };
+    }
+    filas.push(f);
+  }
+
+  const marcar = db.prepare(
+    "UPDATE gal_volcados SET eliminado_en = datetime('now','localtime')"
+    + ' WHERE id = ? AND eliminado_en IS NULL');
+  let borradas = 0;
+  let kilos = 0;
+  for (const f of filas) {
+    if (marcar.run(f.id).changes) { borradas++; kilos = round2(kilos + (f.kilos || 0)); }
+  }
+  return { ok: true, borradas, kilos, ids: filas.map((f) => f.id) };
+}
+
 // ── LO QUE SE CARGÓ UN DÍA ──────────────────────────────────────────────────────────
 
 // ════════════════════════════════════════════════════════════════════════════════════
