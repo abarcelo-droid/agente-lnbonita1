@@ -185,6 +185,15 @@ const PREFIJOS = [
 async function conPermisos(niveles) {
   const dir = fs.mkdtempSync(path.join(RAIZ, '.tmp-galbh-'));
   fs.mkdirSync(path.join(dir, 'servicios'));
+  /* src/config también: servicios/ia_costo.js importa ../config/ia.js, que es
+     donde viven los model IDs. Sin esta carpeta el router no arranca y el test
+     muere con ERR_MODULE_NOT_FOUND, que no dice nada de lo que se está probando. */
+  fs.mkdirSync(path.join(dir, 'config'));
+  for (const f of fs.readdirSync(path.join(RAIZ, 'src/config'))) {
+    if (f.endsWith('.js')) {
+      fs.copyFileSync(path.join(RAIZ, 'src/config', f), path.join(dir, 'config', f));
+    }
+  }
   for (const f of fs.readdirSync(path.join(RAIZ, 'src/servicios'))) {
     if (f.endsWith('.js')) {
       fs.copyFileSync(path.join(RAIZ, 'src/servicios', f), path.join(dir, 'servicios', f));
@@ -341,6 +350,15 @@ async function servidor(db, usuario) {
   const dir = fs.mkdtempSync(path.join(RAIZ, '.tmp-galbh-'));
   fs.mkdirSync(path.join(dir, 'servicios'));
   fs.mkdirSync(path.join(dir, 'rutas'));
+  /* src/config también: servicios/ia_costo.js importa ../config/ia.js, que es
+     donde viven los model IDs. Sin esa carpeta el router no arranca y el test
+     muere con ERR_MODULE_NOT_FOUND, que no dice nada de lo que se está probando. */
+  fs.mkdirSync(path.join(dir, 'config'), { recursive: true });
+  for (const f of fs.readdirSync(path.join(RAIZ, 'src/config'))) {
+    if (f.endsWith('.js')) {
+      fs.copyFileSync(path.join(RAIZ, 'src/config', f), path.join(dir, 'config', f));
+    }
+  }
   for (const f of fs.readdirSync(path.join(RAIZ, 'src/servicios'))) {
     if (f.endsWith('.js')) {
       fs.copyFileSync(path.join(RAIZ, 'src/servicios', f), path.join(dir, 'servicios', f));

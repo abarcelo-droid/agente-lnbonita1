@@ -24,6 +24,7 @@ const SERV  = fs.readFileSync(path.join(RAIZ, 'src/servicios/galpon.js'), 'utf8'
 const RUTA  = fs.readFileSync(path.join(RAIZ, 'src/rutas/galpon.js'), 'utf8');
 const DDL   = fs.readFileSync(path.join(RAIZ, 'src/servicios/db_galpon.js'), 'utf8');
 const PERM  = fs.readFileSync(path.join(RAIZ, 'src/servicios/permisos.js'), 'utf8');
+const OCR  = fs.readFileSync(path.join(RAIZ, 'src/servicios/galponPlanillaOCR.js'), 'utf8');
 
 // ── EL MANUAL, EJECUTADO ─────────────────────────────────────────────────
 const HTML = (() => {
@@ -60,6 +61,8 @@ test('cada sección nueva lleva su V###', () => {
     'alguna de las tres secciones de la V1133 no lleva su número de versión');
   assert.equal((HTML.match(/<span class="ver">V1134<\/span>/g) || []).length, 1,
     'la sección del casillero no lleva su número de versión');
+  assert.equal((HTML.match(/<span class="ver">V1135<\/span>/g) || []).length, 1,
+    'la sección de la planilla por foto no lleva su número de versión');
 });
 
 // ══════════════════════════════════════════════════════════════════════════
@@ -341,4 +344,137 @@ test('MANUAL: «hay un tope de 500 por vez»', () => {
   const f = fn(SERV, 'export function borrarVolcados(db, ids, opts)');
   assert.match(f, /limpios\.length > 500/);
   assert.match(f, /demasiadas/);
+});
+
+// ══════════════════════════════════════════════════════════════════════════
+// 5 · 📷 CARGAR DESDE LA PLANILLA DE PAPEL (V1135)
+// ══════════════════════════════════════════════════════════════════════════
+
+test('MANUAL: «son tres pasos y el del medio no se saltea»', () => {
+  dice(/tres pasos/);
+  dice(/Acá todavía no se guardó nada/);
+  dice(/Leer no guarda, y es a propósito/);
+  /* La ruta que lee NO escribe: devuelve la propuesta y nada más. Lo que crea las
+     cargas es el POST /volcados de siempre, desde la pantalla. */
+  const i = RUTA.indexOf("router.post('/volcados/leer-foto'");
+  assert.ok(i > 0, 'no está la ruta que lee la planilla');
+  const r = RUTA.slice(i, RUTA.indexOf('\r\n});', i));
+  assert.ok(!/INSERT|registrarVolcado|guardarCuadrillas/.test(r),
+    'la ruta que lee está escribiendo cargas: una foto mal leída entraría sola');
+  assert.match(r, /res\.json\(Object\.assign\(\{ ok: true \}, r\)\)/);
+  // Y la pantalla las crea de a una por el camino de siempre.
+  const c = fn(PANEL, 'async function galFotoCargar(){');
+  assert.match(c, /fetch\('\/api\/galpon\/volcados'/);
+});
+
+test('MANUAL: «mirá el total antes de apretar»', () => {
+  dice(/cuántos renglones, cuántos kilos y cuánto da por/);
+  dice(/240 son creíbles/);
+  dice(/sólo lo que se va a cargar/);
+  const t = fn(PANEL, 'function galFotoTotal(){');
+  // Lo destildado y lo sin peso quedan afuera del total.
+  assert.match(t, /if \(f\.excluida\)\{ fuera\+\+; return; \}/);
+  assert.match(t, /if \(k === null \|\| k <= 0\)\{ sinPeso\+\+; return; \}/);
+  const pi = fn(PANEL, 'function galFotoPintar(){');
+  assert.match(pi, /Comparalo con el papel antes de cargar/);
+});
+
+test('MANUAL: «lo que no se pudo leer viene en blanco, no inventado»', () => {
+  dice(/sin peso y marcado en/);
+  dice(/Un peso adivinado/);
+  // El servicio devuelve null y la duda, nunca un cero.
+  const f = fn(OCR, 'export function filasDePlanilla(datos)');
+  assert.match(f, /kilos: kg !== null && kg > 0 \? kg : null/);
+  assert.match(f, /no se pudo leer el peso/);
+  // Y el prompt se lo pide al modelo con esas palabras.
+  assert.match(OCR, /No adivines/);
+  // La pantalla no lo deja cargar.
+  const c = fn(PANEL, 'async function galFotoCargar(){');
+  assert.match(c, /if \(k === null \|\| k <= 0\) return;/,
+    'carga un renglón sin peso: entra como cero y baja el promedio');
+});
+
+test('MANUAL: «el viaje queda pegado a cada renglón»', () => {
+  dice(/el final de un camión y el principio del siguiente/);
+  // El ídem se resuelve, y el viaje viaja por fila.
+  const f = fn(OCR, 'export function filasDePlanilla(datos)');
+  assert.match(f, /if \(v != null\) viaje = v;/);
+  const c = fn(PANEL, 'async function galFotoCargar(){');
+  assert.match(c, /viaje: x\.f\.viaje/,
+    'el viaje sale del encabezado: once cargas al camión equivocado');
+});
+
+test('MANUAL: «el sanitario sale de cuál está circulado»', () => {
+  dice(/circulado/);
+  dice(/«no se miró» no es lo mismo que B/);
+  assert.match(OCR, /PREIMPRESO/,
+    'el prompt no avisa que B/R/M está impreso: devolvería B en todas');
+  assert.match(OCR, /NO devuelvas "B" porque la B esté impresa/);
+});
+
+test('MANUAL: «el lote, el producto y la cuadrilla no salen de la foto»', () => {
+  dice(/NO salen de la foto/);
+  const c = fn(PANEL, 'async function galFotoCargar(){');
+  assert.match(c, /Elegí el lote/,
+    'deja cargar sin lote y los kilos quedan sin atribuir');
+  assert.match(c, /galCuadIds\('gal-foto-cuads'\)/);
+});
+
+test('MANUAL: «si los números saltan, lo avisa»', () => {
+  dice(/saltan/);
+  dice(/único que delata un renglón perdido/);
+  assert.match(OCR, /export function saltoDeNumeracion\(filas\)/);
+  const f = fn(OCR, 'export function filasDePlanilla(datos)');
+  assert.match(f, /saltoDeNumeracion\(filas\)/);
+});
+
+test('MANUAL: «avisa si ese día ya hay cargas de ese viaje»', () => {
+  dice(/la misma planilla dos veces/);
+  const a = fn(PANEL, 'function galFotoAvisos(){');
+  assert.match(a, /ya hay/);
+  assert.match(a, /GKG\.cargas/);
+});
+
+test('MANUAL: «los que no entraron se quedan, y reintentar no duplica»', () => {
+  dice(/se quedan, con el/);
+  dice(/no se duplican/);
+  const c = fn(PANEL, 'async function galFotoCargar(){');
+  // El uuid se genera UNA vez por renglón y se guarda en la fila.
+  assert.match(c, /if \(!f\.uuid\) f\.uuid = galKgNuevoUuid\(\);/,
+    'el uuid se genera en cada intento: el reintento duplica lo que ya entró');
+  assert.match(c, /GFOT\.filas = GFOT\.filas\.filter\(function\(f\)\{ return !f\.cargada; \}\);/);
+});
+
+test('MANUAL: «necesita internet, y puede no estar»', () => {
+  dice(/Necesita internet/);
+  dice(/manda a cargar a mano/);
+  const i = RUTA.indexOf("router.post('/volcados/leer-foto'");
+  const r = RUTA.slice(i, RUTA.indexOf('\r\n});', i));
+  assert.match(r, /if \(!hayIA\(\)\)/,
+    'sin clave intenta la llamada igual y contesta un 500');
+  assert.match(r, /ia_caida: true/);
+  assert.match(r, /motivoFalla\(e\)/,
+    'el error técnico le llega al operador: es lo que le pasó a Santiago');
+  // Y esta dirección NO se encola: sin señal no hay nada que leer.
+  const off = fs.readFileSync(path.join(RAIZ, 'src/galponOffline.js'), 'utf8');
+  assert.ok(off.indexOf('leer-foto') < 0,
+    'la lectura se encola: la foto se mandaría sola mañana y nadie la revisaría');
+});
+
+test('MANUAL: «la foto no se guarda»', () => {
+  dice(/no se guarda/);
+  dice(/El original es el papel/);
+  const i = RUTA.indexOf("router.post('/volcados/leer-foto'");
+  const r = RUTA.slice(i, RUTA.indexOf('\r\n});', i));
+  assert.ok(!/writeFileSync|mkdirSync|fotoIO/.test(r), 'la ruta guarda la foto');
+  assert.ok(!/writeFileSync/.test(OCR));
+});
+
+test('MANUAL: «se achica antes de mandarla»', () => {
+  dice(/Se achica antes de mandarla/);
+  const e = fn(PANEL, 'function galFotoElegida(inp){');
+  assert.match(e, /paComprimirImagen\(f, 1568, 0\.9\)/,
+    'manda la foto entera: megas que el modelo tira igual');
+  // Y el servidor igual pone su tope, porque el data URL lo manda el cliente.
+  assert.match(OCR, /FOTO_MAX_BYTES = 5 \* 1024 \* 1024/);
 });

@@ -22,6 +22,7 @@ import { MODELO_CHAT, MODELO_OCR, MODELO_RAPIDO } from "../config/ia.js";
 // «produccion».
 export const FUNCIONES = {
   'ifco-ocr-remito':      'IFCO · leer un remito',
+  'galpon-leer-planilla': 'Galpón · leer la planilla de ingreso',
   'ifco-ocr-sellado':     'IFCO · buscar el remito de un sellado',
   'combustible-leer-ticket': 'Combustible · leer un ticket de carga',
   'compra-leer-remito':   'Compras · leer un remito de insumos',
