@@ -63,6 +63,8 @@ test('cada sección nueva lleva su V###', () => {
     'la sección del casillero no lleva su número de versión');
   assert.equal((HTML.match(/<span class="ver">V1135<\/span>/g) || []).length, 1,
     'la sección de la planilla por foto no lleva su número de versión');
+  assert.equal((HTML.match(/<span class="ver">V1136<\/span>/g) || []).length, 1,
+    'la sección del día al que entran los kilos no lleva su número de versión');
 });
 
 // ══════════════════════════════════════════════════════════════════════════
@@ -477,4 +479,71 @@ test('MANUAL: «se achica antes de mandarla»', () => {
     'manda la foto entera: megas que el modelo tira igual');
   // Y el servidor igual pone su tope, porque el data URL lo manda el cliente.
   assert.match(OCR, /FOTO_MAX_BYTES = 5 \* 1024 \* 1024/);
+});
+
+// ══════════════════════════════════════════════════════════════════════════
+// 6 · A QUÉ DÍA ENTRAN ESTOS KILOS (V1136)
+// ══════════════════════════════════════════════════════════════════════════
+
+test('MANUAL: «la fecha del papel gana, y se dice»', () => {
+  dice(/esa fecha gana/);
+  dice(/una pila de hojas de la semana pasada/);
+  // El casillero se pisa con la del papel, y queda anotado de dónde salió.
+  const l = fn(PANEL, 'async function galFotoLeer(){');
+  assert.match(l, /GFOT\.fechaPapel = j\.fecha;/,
+    'no queda registro de que la fecha la trajo el papel: el aviso no puede decirlo');
+});
+
+test('MANUAL: «avisa si no es el día que estás mirando»', () => {
+  dice(/no es el que estás mirando/);
+  dice(/con los dos días escritos/);
+  const av = fn(PANEL, 'function galFotoAvisos(){');
+  /* Se compara la fecha que se va a mandar contra la que la pantalla tiene cargada.
+     Avisar por el ORIGEN de la fecha y no por la diferencia dejaría afuera el caso
+     en que la tipeó una persona, que confunde exactamente igual. */
+  assert.match(av, /fecha !== GKG\.fecha/,
+    'el aviso no compara los dos días: vuelve el modo de falla silencioso');
+  assert.match(av, /galKgFechaCorta\(fecha\)/);
+  assert.match(av, /galKgFechaCorta\(GKG\.fecha\)/);
+});
+
+test('MANUAL: «el acuse nombra el día»', () => {
+  dice(/nombra el día/);
+  dice(/la fecha no la miró nadie/);
+  const c = fn(PANEL, 'async function galFotoCargar(){');
+  assert.match(c, /galKgFechaCorta\(comun\.fecha\)/,
+    'el acuse no dice a qué día entraron');
+});
+
+test('MANUAL: «la lista de atrás se va a ese día»', () => {
+  dice(/se va a ese día/);
+  const c = fn(PANEL, 'async function galFotoCargar(){');
+  /* Y SÓLO SI ENTRÓ ALGO. Mandar la pantalla a un día donde no entró nada es
+     cambiar un vacío engañoso por otro, y encima le saca de la vista el que tenía. */
+  assert.match(c, /if \(entraron && fl && fl\.value !== comun\.fecha\) fl\.value = comun\.fecha;/,
+    'la lista no se mueve, o se mueve aunque no haya entrado nada');
+  // Y se mueve ANTES de recargar, o la recarga trae el día viejo.
+  assert.ok(c.indexOf('fl.value = comun.fecha') < c.indexOf('await galKgCargar()'),
+    'se mueve la fecha después de recargar: la lista sigue mostrando el día viejo');
+});
+
+test('MANUAL: «el vacío dice de qué día fue lo último»', () => {
+  dice(/todavía no se cargó nada/);
+  dice(/de qué día fue lo último/);
+  dice(/un compañero en otra pantalla/);
+  const pi = fn(PANEL, 'function galKgPintar(){');
+  assert.match(pi, /ul\.de_otro_dia/,
+    'la pista sale también cuando lo último es de ESTE día: se contradice con el vacío');
+  assert.match(pi, /galKgIrAlUltimo\(\)/);
+});
+
+test('MANUAL: un día se escribe como se lee, y sin corrimiento de zona', () => {
+  dice(/28\/10\/2026/);
+  /* SE PARTE EL TEXTO. new Date('2026-10-28') se interpreta en UTC y acá estamos
+     en -03: mostrarlo con un Date devuelve el 27, y un aviso cuyo trabajo es decir
+     la fecha diría la de al lado. */
+  const f = fn(PANEL, 'function galKgFechaCorta(f){');
+  assert.ok(!/new Date/.test(f),
+    'arma un Date para mostrar la fecha: se corre un día por la zona horaria');
+  assert.match(f, /\\d\{4\}/);
 });
