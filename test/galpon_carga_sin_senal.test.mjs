@@ -119,7 +119,7 @@ function pantalla(dom, opts) {
     + ' galCuadCrudos, galCuadAgregar, galCuadQuitar, galKgBorrar, galKgNum,'
     + ' galKgGuardar, galKgAbrir, GRP, galRapEmpezar, galRapCargar, galRapPintar,'
     + ' galKgSel, galKgSelTodas, galKgSelNada, galKgPintarSel, galKgBorrarSel,'
-    + ' galKgCks };');
+    + ' galKgCks, galKgIrAlUltimo, galKgFechaCorta };');
 
   dom.cartel = [];
   dom.alertas = [];
@@ -898,4 +898,88 @@ test('EL BORRADO MÚLTIPLE SE PUEDE ENCOLAR: sin señal también funciona', asyn
   // Y no se le escapa a lo que no se puede encolar.
   assert.equal(GOFF.esEncolable('POST', '/api/galpon/pallets/3/cerrar'), false);
   assert.equal(GOFF.esEncolable('POST', '/api/galpon/volcados/borrar/todo'), false);
+});
+
+// ══════════════════════════════════════════════════════════════════════════
+// EL VACÍO QUE SEÑALA DÓNDE ESTÁ LO QUE SE CARGÓ (V1136)
+// ══════════════════════════════════════════════════════════════════════════
+//
+// Andy, 2/11/2026: «funciona todo bien la foto pero al final la planilla no
+// muestra ningún cambio: "todavía no se cargó nada para este día"».
+//
+// Éste es el cartel al que llega el que cargó en un día y está mirando otro.
+// «Todavía no se cargó nada» era cierto Y completamente engañoso: había
+// veintiún renglones a cinco días de distancia y ninguna pista de para qué
+// lado buscar. El arreglo de fondo está en la ventana de la foto —la lista se
+// va al día en que entraron— y esto es la red: sirve igual si los kilos los
+// cargó otro, u otra pantalla, o la semana pasada.
+
+test('EL VACÍO DICE DE QUÉ DÍA FUE LO ÚLTIMO QUE SE CARGÓ', async () => {
+  const dom = domFalso();
+  const p = pantalla(dom, {
+    fetch: respuesta(DIA({
+      ultimo: { lote_id: 10, lote_nombre: 'Cuadro 3', producto: 'Damasco',
+                cuadrilla_id: 1, cuadrilla: 'Norte', cuadrilla_ids: [1],
+                observacion: null, fecha: '2026-10-28', de_otro_dia: true, mio: true },
+    })),
+    GOFF: goff([]),
+  });
+  await p.galKgCargar();
+  const v = dom.nodos['gkg-body'].innerHTML;
+  assert.match(v, /Todavía no se cargó nada/);
+  assert.match(v, /28\/10\/2026/, 'no dice de qué día fue lo último');
+  assert.match(v, /galKgIrAlUltimo\(\)/, 'no hay cómo ir a ese día');
+});
+
+test('y el botón lleva a ese día', async () => {
+  const dom = domFalso();
+  const p = pantalla(dom, {
+    fetch: respuesta(DIA({
+      ultimo: { lote_id: 10, cuadrilla_ids: [], fecha: '2026-10-28',
+                de_otro_dia: true, mio: true },
+    })),
+    GOFF: goff([]),
+  });
+  await p.galKgCargar();
+  p.galKgIrAlUltimo();
+  assert.equal(dom.nodos['gkg-fecha'].value, '2026-10-28');
+});
+
+test('si lo último es de ESTE día, no se dice nada', async () => {
+  /* «Lo último que se cargó fue de hoy» arriba de «todavía no se cargó nada»
+     es una contradicción en dos renglones, y además manda a buscar al día que
+     ya se está mirando. Pasa en cuanto se borra la única carga del día. */
+  const dom = domFalso();
+  const p = pantalla(dom, {
+    fetch: respuesta(DIA({
+      ultimo: { lote_id: 10, cuadrilla_ids: [], fecha: HOY,
+                de_otro_dia: false, mio: true },
+    })),
+    GOFF: goff([]),
+  });
+  await p.galKgCargar();
+  const v = dom.nodos['gkg-body'].innerHTML;
+  assert.match(v, /Todavía no se cargó nada/);
+  assert.ok(!/galKgIrAlUltimo/.test(v));
+});
+
+test('sin nada cargado nunca, el vacío es el de siempre', async () => {
+  // El primer día de la temporada: no hay ningún día al que mandar a nadie.
+  const dom = domFalso();
+  const p = pantalla(dom, { fetch: respuesta(DIA()), GOFF: goff([]) });
+  await p.galKgCargar();
+  const v = dom.nodos['gkg-body'].innerHTML;
+  assert.match(v, /Todavía no se cargó nada/);
+  assert.ok(!/galKgIrAlUltimo/.test(v));
+  // Y apretar el botón que no está no revienta.
+  p.galKgIrAlUltimo();
+});
+
+test('el día que se muestra no se corre de zona', () => {
+  /* new Date('2026-10-28') se interpreta en UTC y acá estamos en -03: mostrarlo
+     con un Date devuelve el 27, y la pista mandaría al día de al lado. */
+  const dom = domFalso();
+  const p = pantalla(dom, { GOFF: goff([]) });
+  assert.equal(p.galKgFechaCorta('2026-10-28'), '28/10/2026');
+  assert.equal(p.galKgFechaCorta('2026-03-01'), '01/03/2026');
 });

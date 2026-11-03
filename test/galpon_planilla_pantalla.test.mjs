@@ -83,7 +83,8 @@ function pantalla(dom, opts) {
     codigo
     + '\nreturn { GFOT, galFotoAbrir, galFotoCerrar, galFotoElegida, galFotoLeer,'
     + ' galFotoPintar, galFotoFila, galFotoTotal, galFotoCargar, galFotoOtra,'
-    + ' galFotoAvisos, galCuadPintar, galCuadIds, galKgLeerKilos };');
+    + ' galFotoAvisos, galCuadPintar, galCuadIds, galKgLeerKilos,'
+    + ' galKgFechaCorta };');
 
   dom.recargas = 0;
   return f(
@@ -430,4 +431,121 @@ test('EL ERROR DE LA IA SE MUESTRA TAL CUAL LO MANDÓ EL SERVIDOR', async () => 
   assert.ok(!/crédito/.test(av), 'le mostró el motivo técnico al operador');
   // Y no pasa al paso de revisar: no hay nada que revisar.
   assert.equal(dom2.nodos['gal-foto-p2'].style.display, 'none');
+});
+
+// ══════════════════════════════════════════════════════════════════════════
+// 6 · A QUÉ DÍA ENTRAN ESTOS KILOS (V1136)
+// ══════════════════════════════════════════════════════════════════════════
+//
+// Andy, 2/11/2026: «funciona todo bien la foto pero al final la planilla no
+// muestra ningún cambio: "todavía no se cargó nada para este día"».
+//
+// Y no era que no se hubiera cargado: se había cargado A OTRO DÍA. La fecha del
+// encabezado del papel pisa la propuesta, las cargas entran a ese día, y la
+// lista de atrás seguía mirando hoy. Veintiún renglones guardados que nadie
+// podía ver.
+//
+// Es el peor modo de falla de esta ventana: todo contesta ok, el acuse dice
+// «entraron 21», y el operador concluye que no se guardó nada — así que lo
+// vuelve a cargar, ahora sí al día que mira, y quedan los dos.
+
+test('UN DÍA SE ESCRIBE COMO SE LEE, y sin corrimiento de zona', async () => {
+  const { p } = conLectura();
+  assert.equal(p.galKgFechaCorta('2026-10-28'), '28/10/2026');
+  /* EL CORRIMIENTO ES LA TRAMPA: new Date('2026-10-28') se interpreta en UTC y
+     acá estamos en -03, así que mostrarlo con un Date devuelve el 27. Un aviso
+     cuyo trabajo es decir la fecha diciendo la fecha de al lado es peor que no
+     tenerlo. */
+  assert.ok(p.galKgFechaCorta('2026-10-28').indexOf('27/') < 0);
+  assert.equal(p.galKgFechaCorta('2026-01-01'), '01/01/2026');
+  // Y lo que no es una fecha vuelve tal cual, sin inventar nada.
+  assert.equal(p.galKgFechaCorta(''), '');
+  assert.equal(p.galKgFechaCorta(null), '');
+});
+
+test('LA FECHA QUE TRAE EL PAPEL SE DICE, no se pisa en silencio', async () => {
+  const x = await hastaRevisar(Object.assign(LEIDO(), { fecha: '2026-10-28' }),
+                               { GKG: { fecha: '2026-11-02', hoy: '2026-11-02' } });
+  // El casillero queda con la del papel, que es lo correcto: es ESTA planilla.
+  assert.equal(x.dom.nodos['gal-foto-fecha'].value, '2026-10-28');
+  assert.equal(x.p.GFOT.fechaPapel, '2026-10-28');
+  // Y la ventana lo DICE, con los dos días escritos.
+  const av = x.dom.nodos['gal-foto-avisos'].innerHTML;
+  assert.match(av, /28\/10\/2026/, 'no dice a qué día van a entrar');
+  assert.match(av, /02\/11\/2026/, 'no dice qué día está mirando');
+  assert.match(av, /que trae el papel/);
+});
+
+test('el aviso también sale si la fecha la tipeó una persona', async () => {
+  /* Se avisa por la DIFERENCIA, no por el origen. Lo que confunde es cargar a un
+     día y mirar otro, y eso se ve comparando los dos — da igual quién la puso. */
+  const x = await hastaRevisar(LEIDO(),
+                               { GKG: { fecha: '2026-11-02', hoy: '2026-11-02' } });
+  assert.equal(x.dom.nodos['gal-foto-avisos'].innerHTML, '');
+  x.dom.nodos['gal-foto-fecha'].value = '2026-10-28';
+  x.p.galFotoPintar();
+  const av = x.dom.nodos['gal-foto-avisos'].innerHTML;
+  assert.match(av, /28\/10\/2026/);
+  // Pero NO dice que la trae el papel, porque no la trae.
+  assert.ok(av.indexOf('que trae el papel') < 0);
+});
+
+test('sin diferencia no hay aviso: un cartel que sale siempre no se lee', async () => {
+  const x = await hastaRevisar(Object.assign(LEIDO(), { fecha: '2026-11-02' }),
+                               { GKG: { fecha: '2026-11-02', hoy: '2026-11-02' } });
+  assert.equal(x.dom.nodos['gal-foto-avisos'].innerHTML, '');
+});
+
+test('LA LISTA DE ATRÁS SE VA AL DÍA EN QUE ENTRARON', async () => {
+  /* Éste es el arreglo de fondo. El aviso de arriba avisa antes; esto hace que el
+     resultado se vea aunque nadie lo haya leído. */
+  const x = await hastaRevisar(Object.assign(LEIDO(), { fecha: '2026-10-28' }),
+                               { GKG: { fecha: '2026-11-02', hoy: '2026-11-02' } });
+  x.dom.nodos['gal-foto-lote'].value = '10';
+  const fl = x.dom.document.getElementById('gkg-fecha');
+  fl.value = '2026-11-02';
+  await x.p.galFotoCargar();
+  assert.equal(fl.value, '2026-10-28',
+    'la lista se quedó en el día que estaba mirando: 21 renglones invisibles');
+  assert.ok(x.dom.recargas >= 1);
+});
+
+test('y si no entró NINGUNA, la lista no se mueve', async () => {
+  /* Mandar la pantalla a un día donde no entró nada es cambiar un vacío engañoso
+     por otro, y encima le saca de la vista lo que sí tenía. */
+  const x = await hastaRevisar(Object.assign(LEIDO(), { fecha: '2026-10-28' }), {
+    GKG: { fecha: '2026-11-02', hoy: '2026-11-02' },
+    alCargar: () => ({ ok: false, error: 'el lote 10 no existe' }),
+  });
+  x.dom.nodos['gal-foto-lote'].value = '10';
+  const fl = x.dom.document.getElementById('gkg-fecha');
+  fl.value = '2026-11-02';
+  await x.p.galFotoCargar();
+  assert.equal(fl.value, '2026-11-02',
+    'la lista se fue a un día donde no entró nada, y encima perdió el que tenía');
+});
+
+test('EL ACUSE NOMBRA EL DÍA', async () => {
+  /* Es el único dato del acuse que puede estar mal sin que se note: los kilos se
+     acaban de revisar renglón por renglón, la fecha no la miró nadie. */
+  const x = await hastaRevisar(Object.assign(LEIDO(), { fecha: '2026-10-28' }),
+                               { GKG: { fecha: '2026-11-02', hoy: '2026-11-02' } });
+  x.dom.nodos['gal-foto-lote'].value = '10';
+  await x.p.galFotoCargar();
+  const ok = x.dom.nodos['gal-foto-ok'];
+  assert.equal(ok.style.display, '');
+  assert.match(ok.innerHTML, /28\/10\/2026/);
+  assert.match(ok.innerHTML, /Entraron 3/);
+});
+
+test('la fecha del papel NO se hereda de la planilla anterior', async () => {
+  /* Si quedara, la segunda planilla —con la fecha tipeada— mostraría el aviso
+     diciendo «la que trae el papel» sobre una fecha que el papel no trajo. */
+  const x = await hastaRevisar(Object.assign(LEIDO(), { fecha: '2026-10-28' }),
+                               { GKG: { fecha: '2026-11-02', hoy: '2026-11-02' } });
+  assert.equal(x.p.GFOT.fechaPapel, '2026-10-28');
+  x.p.galFotoOtra();
+  assert.equal(x.p.GFOT.fechaPapel, null);
+  x.p.galFotoAbrir();
+  assert.equal(x.p.GFOT.fechaPapel, null);
 });

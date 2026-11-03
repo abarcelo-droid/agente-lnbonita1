@@ -7328,6 +7328,7 @@ if ('serviceWorker' in navigator) {
       #sec-galpon-carga .gkg-fecha input{padding:6px 9px;border:1px solid var(--bor);
         border-radius:7px;font-size:13px;background:var(--bg);color:var(--fg)}
       #sec-galpon-carga .gkg-vacio{text-align:center;padding:34px;color:var(--mut);font-size:13px}
+      #sec-galpon-carga .gkg-pista{margin-top:12px;font-size:12.5px;display:flex;gap:9px;align-items:center;justify-content:center;flex-wrap:wrap}
       #sec-galpon-carga .gkg-chi{font-size:11px;color:var(--mut);font-style:italic}
       #sec-galpon-carga .gkg-rev{color:#d62828;font-size:11px;font-weight:600}
       /* El renglón que está en la cola de este equipo y todavía no salió. Se nota a
@@ -28426,6 +28427,28 @@ SG_MANUAL['galpon-carga'] = { titulo: 'Galpón · Carga de kilos', html:
   + '<p>Y si ese día ya hay cargas de ese mismo viaje, <b>también lo avisa</b>: es lo '
   + 'que pasa cuando se sube la misma planilla dos veces. No frena —un camión puede '
   + 'entrar en dos tandas— pero lo dice.</p>'
+  + '<h4>A qué día entran estos kilos <span class="ver">V1136</span></h4>'
+  + '<p>Andy, 2/11/2026: <i>«funciona todo bien la foto pero al final la planilla no '
+  + 'muestra ningún cambio: todavía no se cargó nada para este día»</i>.</p>'
+  + '<p>Se habían cargado, pero <b>a otro día</b>. Si el encabezado del papel trae una '
+  + 'fecha escrita, esa fecha gana — y está bien que gane, porque es la de ESA planilla: '
+  + 'así se puede subir una pila de hojas de la semana pasada sin corregir el casillero '
+  + 'una por una. Lo que faltaba era decirlo.</p>'
+  + '<ul>'
+  + '<li>Si el día al que van a entrar <b>no es el que estás mirando</b>, la ventana lo '
+  + 'avisa arriba de la lista, con los dos días escritos. Si no es ése, se cambia en '
+  + '<b>Día de cosecha</b>.</li>'
+  + '<li>El acuse del final <b>nombra el día</b>: «entraron 21 cargas del 28/10/2026». '
+  + 'Es el único dato del acuse que puede estar mal sin que se note — los kilos se '
+  + 'acaban de revisar renglón por renglón, la fecha no la miró nadie.</li>'
+  + '<li>Y al cargar, <b>la lista de atrás se va a ese día</b>. Así lo que entró se ve, '
+  + 'aunque nadie haya leído el aviso.</li>'
+  + '</ul>'
+  + '<div class="ojo">Y al revés: si entrás a un día y dice <b>«todavía no se cargó '
+  + 'nada»</b>, el cartel te dice de qué día fue lo último que se cargó y te lleva ahí '
+  + 'con un botón. Es la misma confusión mirada desde el otro lado, y pasa igual '
+  + 'cuando los kilos los cargó un compañero en otra pantalla.</div>'
+
   + '<h4>Si no entró alguno</h4>'
   + '<p>Los que entraron desaparecen de la lista y los que no <b>se quedan, con el '
   + 'motivo</b>. Se corrigen y se vuelve a apretar Cargar: los que ya habían entrado '
@@ -58174,6 +58197,17 @@ function galKgNum(n, dec){ return (Number(n) || 0)
    POST idénticos entran como una sola fila, porque el servidor hace INSERT OR IGNORE
    sobre esta columna— y mañana lo va a necesitar la cola offline para reintentar sin
    duplicar kilos. Es gratis ahora y es una migración después. */
+/* UN DÍA SE ESCRIBE COMO SE LEE: 28/10/2026. Un «2026-10-28» en medio de una frase
+   se lee dos veces, y acá la frase existe justamente para que la fecha se note.
+
+   SE PARTE EL TEXTO, no se arma un Date. `new Date('2026-10-28')` se interpreta en
+   UTC y acá estamos en -03: a la hora de mostrarlo sale el 27. Es el error que hace
+   que un aviso sobre la fecha diga la fecha equivocada. */
+function galKgFechaCorta(f){
+  var m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(f == null ? '' : f));
+  return m ? (m[3] + '/' + m[2] + '/' + m[1]) : String(f == null ? '' : f);
+}
+
 function galKgNuevoUuid(){
   try { if (window.crypto && crypto.randomUUID) return crypto.randomUUID(); } catch(e){}
   return 'gkg-' + Date.now() + '-' + Math.random().toString(36).slice(2, 10);
@@ -58251,6 +58285,20 @@ async function galKgCargar(){
 function galKgHoy(){
   var f = document.getElementById('gkg-fecha');
   if (f) f.value = GKG.hoy || new Date().toLocaleDateString('en-CA');
+  galKgCargar();
+}
+
+/* Mismo mecanismo que galKgHoy, con el día de la última carga. Un <input type="date">
+   cambiado por código NO dispara su onchange, así que la recarga va a mano.
+
+   LA FECHA SALE DE GKG Y NO DEL BOTÓN. Interpolarla en el onclick son dos niveles de
+   comillas anidadas, que es lo que ya había roto una vez el deshacer de la carga
+   rápida con los ids de la cola. */
+function galKgIrAlUltimo(){
+  var ul = GKG.ultimo;
+  if (!ul || !ul.fecha) return;
+  var f = document.getElementById('gkg-fecha');
+  if (f) f.value = ul.fecha;
   galKgCargar();
 }
 
@@ -58352,9 +58400,24 @@ function galKgPintar(){
      mostrando otra — y lo que se borra es lo que dice GKG.sel. */
   GKG.sel = [];
   if (!filas.length){
+    /* ── Y SI HAY ALGO CARGADO EN OTRO DÍA, SE DICE CUÁL ───────────────────────
+       Éste es el cartel al que llega el que cargó en un día y está mirando otro,
+       así que es el lugar donde decírselo. Sin esto «todavía no se cargó nada» es
+       cierto y además completamente engañoso: hay veintiún renglones a cinco días
+       de distancia y ninguna pista de para qué lado.
+
+       `ultimo` ya traía la fecha y de_otro_dia (servicios/galpon.js): no hizo
+       falta pedirle nada nuevo al servidor. */
+    var ul = GKG.ultimo;
+    var pista = (ul && ul.de_otro_dia && ul.fecha)
+      ? '<div class="gkg-pista">Lo último que se cargó fue del <b>'
+        + galKgFechaCorta(ul.fecha) + '</b>. '
+        + '<button type="button" class="btn bo bs" onclick="galKgIrAlUltimo()">Ver ese día</button></div>'
+      : '';
     b.innerHTML = '<tr><td colspan="8" class="gkg-vacio">'
       + 'Todavía no se cargó nada para este día.<br>'
-      + 'Cada renglón es una pesada: lo que trajo una cuadrilla de un lote.</td></tr>';
+      + 'Cada renglón es una pesada: lo que trajo una cuadrilla de un lote.'
+      + pista + '</td></tr>';
     galKgPintarSel();
     return;
   }
@@ -58980,7 +59043,10 @@ function galRapCerrar(){
    240 son creíbles, y que den 2.400 no. Es el control más barato que hay contra una
    coma leída de más, y el papel no lo trae escrito.
    ═══════════════════════════════════════════════════════════════════════════════════ */
-var GFOT = { imagen:null, filas:[], avisos:[], leyendo:false, cargando:false, sug:'' };
+var GFOT = { imagen:null, filas:[], avisos:[], leyendo:false, cargando:false, sug:'',
+             /* La fecha que venía escrita en el encabezado del papel, si venía. Sólo
+                sirve para poder decir en el aviso de dónde salió. */
+             fechaPapel:null };
 
 /* Se vacía EN SU LUGAR y no se reemplaza con un objeto nuevo. Reasignar la variable
    deja con la caja vieja a cualquiera que ya la tuviera guardada, y entonces la
@@ -58992,6 +59058,7 @@ function galFotoVaciar(){
   GFOT.leyendo = false;
   GFOT.cargando = false;
   GFOT.sug = '';
+  GFOT.fechaPapel = null;
 }
 
 function galFotoAbrir(){
@@ -59093,7 +59160,12 @@ async function galFotoLeer(){
     /* La fecha y el producto que venían en el encabezado del papel PISAN lo propuesto,
        porque son de esta planilla y lo otro es de la carga anterior. Si el papel los
        trae en blanco —que es lo normal— queda lo propuesto. */
-    if (j.fecha) document.getElementById('gal-foto-fecha').value = j.fecha;
+    /* Y SE GUARDA DE DÓNDE SALIÓ. Sin esto, la fecha del papel cambiaba el
+       casillero en silencio mientras el operador miraba los renglones de abajo. */
+    if (j.fecha){
+      document.getElementById('gal-foto-fecha').value = j.fecha;
+      GFOT.fechaPapel = j.fecha;
+    }
     if (j.cultivo){
       document.getElementById('gal-foto-prod').value = j.cultivo;
       GFOT.sug = j.cultivo;
@@ -59196,6 +59268,25 @@ function galFotoAvisos(){
   var todos = (GFOT.avisos || []).slice();
 
   var fecha = document.getElementById('gal-foto-fecha').value;
+
+  /* ── ESTOS KILOS NO VAN AL DÍA QUE ESTÁS MIRANDO ───────────────────────────
+     Andy, 2/11/2026: «funciona todo bien la foto pero al final la planilla no
+     muestra ningún cambio».
+
+     Era esto. La fecha del encabezado del papel PISA la propuesta, las cargas
+     entran a ese día, y la lista de atrás seguía en hoy: veintiún renglones
+     guardados y una pantalla que dice «todavía no se cargó nada».
+
+     Se avisa por la DIFERENCIA y no por el origen de la fecha. Da igual si la
+     leyó la IA o la tipeó una persona: lo que confunde es cargar a un día y
+     mirar otro, y eso se ve comparando los dos. */
+  if (fecha && GKG.fecha && fecha !== GKG.fecha){
+    todos.push('Estos kilos van a entrar al <b>' + galKgFechaCorta(fecha) + '</b>'
+      + (GFOT.fechaPapel === fecha ? ', que es la fecha que trae el papel' : '')
+      + ' — no al día que estás mirando (' + galKgFechaCorta(GKG.fecha) + '). '
+      + 'Si no es ésa, cambiala arriba.');
+  }
+
   var viajes = [];
   GFOT.filas.forEach(function(f){
     if (f.viaje != null && viajes.indexOf(f.viaje) < 0) viajes.push(f.viaje);
@@ -59309,6 +59400,18 @@ async function galFotoCargar(){
      aprieta Cargar dos veces. Las que fallaron quedan, con su motivo. */
   GFOT.filas = GFOT.filas.filter(function(f){ return !f.cargada; });
   galFotoPintar();
+
+  /* ── Y SE VA AL DÍA EN QUE ENTRARON, NO AL QUE ESTABA MIRANDO ──────────────
+     Esto es el arreglo de fondo, y el aviso de arriba es el que avisa antes.
+     Refrescar la lista sin mover la fecha la deja exactamente igual que antes de
+     cargar —porque en ESE día no entró nada— y el operador concluye, con razón,
+     que no se guardó nada.
+
+     Moverla también repara el aviso de planilla repetida: ése sólo puede mirar el
+     día que la pantalla tiene cargado, así que subir la misma foto dos veces
+     recién se detecta si la lista quedó parada donde entraron los kilos. */
+  var fl = document.getElementById('gkg-fecha');
+  if (entraron && fl && fl.value !== comun.fecha) fl.value = comun.fecha;
   // La pantalla de atrás se refresca ahora: es donde se ven las cargas que entraron.
   await galKgCargar();
 
@@ -59322,8 +59425,12 @@ async function galFotoCargar(){
        ventanas (CLAUDE.md), y acá es lo que hace que el operador sepa que los
        veintiún renglones entraron sin tener que ir a contarlos. */
     ok.className = 'gkg-ok';
+    /* CON EL DÍA ESCRITO. Es el único número del acuse que puede estar mal sin
+       que se note: los kilos se acaban de revisar renglón por renglón, la fecha
+       no la miró nadie. */
     ok.innerHTML = '<b>✓ Entraron ' + entraron + (entraron === 1 ? ' carga' : ' cargas')
-      + '.</b> Ya están en la lista de atrás. Podés cerrar, o sacar otra foto.';
+      + ' del ' + galKgFechaCorta(comun.fecha) + '.</b> Ya están en la lista de atrás, '
+      + 'que se fue a ese día. Podés cerrar, o sacar otra foto.';
     ok.style.display = '';
   }
 }
