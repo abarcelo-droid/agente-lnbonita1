@@ -41,6 +41,12 @@ import {
   tableroProceso, stockGalpon, stockPorLote, stockPorProducto, lotesVolcados,
 } from '../servicios/galpon.js';
 import { generarTarjetasPDF, tarjetasAImprimir } from '../servicios/galponTarjetasPDF.js';
+import { promptPlanilla, jsonDeRespuesta, filasDePlanilla, fotoDeDataUrl }
+  from '../servicios/galponPlanillaOCR.js';
+/* UNA SOLA PUERTA A LA IA (servicios/ia.js): deja el consumo registrado y traduce el
+   error una vez. Había siete archivos llamando por su cuenta y ninguno dejaba rastro
+   — el 14/10 la cuenta se quedó sin crédito y no hubo forma de saber qué lo gastó. */
+import { llamarIA, hayIA, motivoFalla, MODELO_CHAT } from '../servicios/ia.js';
 /* El nivel de la persona en el módulo, con la MISMA regla que usa el servidor para
    dejar pasar el pedido (ORDEN_NIVEL en servicios/permisos.js). Acá no se decide si
    entra —eso ya lo contestó exigirNivel— sino hasta dónde llega adentro: borrar lo de
@@ -615,6 +621,69 @@ router.patch('/volcados/:id', (req, res) => {
    BORRAR_ES_OPERAR (servicios/permisos.js), y además la palabra «borrar» en la URL ya
    la hace pasar por el control de anulación. Y el control de la FECHA está adentro,
    como en el de una sola — es la otra mitad de la misma decisión. */
+/* ── 📷 LEER LA PLANILLA DE PAPEL (V1135) ──────────────────────────────────────────
+   Andy, 2/11/2026: «¿podremos desarrollar una carga rápida por foto? O sea cargamos la
+   foto de esto y que genere sola los ingresos. Va a necesitar intervención de algún
+   operador para completar datos faltantes».
+
+   ESTO NO GUARDA NADA. Lee la foto y devuelve una PROPUESTA; las cargas las crea
+   después la pantalla con el POST /volcados de siempre, una por fila, cuando el
+   operador confirma. Que la lectura no escriba es lo que hace que una lectura mala
+   sea un rato perdido y no veintiún renglones de kilos inventados.
+
+   Y LA FOTO NO SE GUARDA: se manda, se lee y se descarta. El original es el papel,
+   que lo firman tres personas y lo archiva calidad.
+
+   MODELO_CHAT y no MODELO_OCR, que es el barato. Esto es una tabla manuscrita de
+   veintiún pesos con coma, y cada uno se convierte en kilos que pagan un jornal: un
+   «15,90» leído «13,90» son dos kilos que no encuentra nadie. Una foto por camión,
+   diez por día: la diferencia de costo es despreciable y la de lectura no.
+   ──────────────────────────────────────────────────────────────────────────────── */
+router.post('/volcados/leer-foto', async (req, res) => {
+  try {
+    if (!hayIA()) {
+      return res.status(503).json({ ok: false, ia_caida: true,
+        error: 'El lector de planillas no está disponible. Cargá los renglones a mano'
+             + ' y avisá a la oficina.',
+        motivo_admin: 'Sin ANTHROPIC_API_KEY.' });
+    }
+    const foto = fotoDeDataUrl((req.body || {}).imagen);
+    if (!foto.ok) return res.status(400).json({ ok: false, error: foto.motivo });
+
+    const u = req._user || {};
+    const msg = await llamarIA('galpon-leer-planilla', {
+      model: MODELO_CHAT,
+      /* Veintiún renglones de JSON entran holgados en 4096. Cortado, la respuesta
+         llega sin cerrar y el JSON no parsea: se pierde la lectura entera —y lo que
+         costó— por las últimas tres filas. */
+      max_tokens: 4096,
+      messages: [{
+        role: 'user',
+        content: [
+          { type: 'image', source: { type: 'base64',
+                                     media_type: foto.media_type, data: foto.base64 } },
+          { type: 'text', text: promptPlanilla() },
+        ],
+      }],
+    }, { usuario_id: u.id, usuario: u.nombre });
+
+    const texto = (msg.content || [])
+      .filter((b) => b.type === 'text').map((b) => b.text).join('\n');
+    const r = filasDePlanilla(jsonDeRespuesta(texto));
+    if (!r.ok) return res.status(502).json({ ok: false, error: r.motivo });
+    res.json(Object.assign({ ok: true }, r));
+  } catch (e) {
+    /* El motivo técnico va al log y a motivo_admin, no a la cara del que está con la
+       planilla en la mano. Lo que él necesita saber es que puede seguir cargando a
+       mano, no el JSON de facturación de Anthropic en inglés. */
+    const m = motivoFalla(e);
+    console.error('[GALPON] leer-foto: ' + m.admin + ' — ' + m.crudo);
+    res.status(502).json({ ok: false, ia_caida: true,
+      error: m.operador.replace('Cargalo a mano', 'Cargá los renglones a mano'),
+      motivo_admin: m.admin });
+  }
+});
+
 router.post('/volcados/borrar', (req, res) => {
   try {
     const r = borrarVolcados(db, (req.body || {}).ids, {

@@ -7358,6 +7358,49 @@ if ('serviceWorker' in navigator) {
       #sec-galpon-carga .gkg-barra b{font-variant-numeric:tabular-nums}
       #sec-galpon-carga .gkg-barra .gkg-bsep{margin-left:auto}
 
+      /* ── 📷 LA VENTANA DE LA PLANILLA ────────────────────────────────────
+         Scopeada al id de la ventana y no a la .sec: la ventana vive FUERA de toda
+         .sec (CLAUDE.md), así que una regla colgada de #sec-galpon-carga no la
+         alcanzaría — y eso compila igual, se ve recién al abrirla. */
+      #gal-foto-modal .gfo-zona{border:2px dashed var(--bor);border-radius:12px;
+        padding:26px 18px;text-align:center;cursor:pointer;background:var(--bg2)}
+      #gal-foto-modal .gfo-zona:hover{border-color:var(--burg)}
+      #gal-foto-modal .gfo-zona .gfo-ico{font-size:30px;line-height:1}
+      #gal-foto-modal .gfo-zona .gfo-t{font-size:14px;font-weight:600;margin-top:6px}
+      #gal-foto-modal .gfo-zona .gfo-s{font-size:11.5px;color:var(--mut);margin-top:4px;
+        line-height:1.45}
+      #gal-foto-modal .gfo-prev{max-width:100%;max-height:30vh;border-radius:10px;
+        display:block;margin:0 auto;border:1px solid var(--bor)}
+      /* Los totales que se comparan contra el papel ANTES de confirmar. */
+      #gal-foto-modal .gfo-tot{display:flex;gap:14px;flex-wrap:wrap;align-items:baseline;
+        border:1px solid var(--burg);background:var(--burl);border-radius:10px;
+        padding:10px 14px;font-size:13px;margin-bottom:10px}
+      #gal-foto-modal .gfo-tot b{font-size:18px;font-variant-numeric:tabular-nums}
+      /* SIN BARRA DE DESPLAZAMIENTO LATERAL (CLAUDE.md): anchos por columna y lo
+         único que se parte es la duda, que es texto de largo variable. */
+      #gal-foto-modal .gfo-tbl{table-layout:fixed;width:100%;font-size:12.5px}
+      #gal-foto-modal .gfo-tbl th,#gal-foto-modal .gfo-tbl td{white-space:nowrap;
+        overflow:hidden;text-overflow:ellipsis;padding:3px 5px;vertical-align:middle;
+        border-top:1px solid var(--bor)}
+      #gal-foto-modal .gfo-tbl th{color:var(--mut);font-size:10.5px;text-transform:uppercase;
+        letter-spacing:.3px;border-top:0;text-align:left}
+      #gal-foto-modal .gfo-tbl td.gfo-w{white-space:normal;overflow-wrap:break-word}
+      #gal-foto-modal .gfo-lista{max-height:38vh;overflow-y:auto;overflow-x:hidden;
+        border:1px solid var(--bor);border-radius:10px;padding:6px 8px}
+      #gal-foto-modal .gfo-tbl input,#gal-foto-modal .gfo-tbl select{width:100%;
+        padding:3px 5px;font-size:12.5px;border:1px solid var(--bor);border-radius:6px;
+        background:var(--bg);color:var(--fg)}
+      #gal-foto-modal .gfo-tbl input.gfo-kg{text-align:right;
+        font-variant-numeric:tabular-nums}
+      /* El renglón que la IA no pudo leer. En rojo y fuera del total hasta que
+         alguien escriba el peso: un peso inventado no lo encuentra nadie. */
+      #gal-foto-modal tr.gfo-mal{background:rgba(214,40,40,.07)}
+      #gal-foto-modal tr.gfo-mal input.gfo-kg{border-color:#d62828}
+      #gal-foto-modal .gfo-duda{font-size:10.5px;color:#b3261e;line-height:1.3}
+      #gal-foto-modal .gfo-fuera{opacity:.45}
+      #gal-foto-modal .gfo-ck{width:16px;height:16px;cursor:pointer;margin:0;
+        accent-color:var(--burg)}
+
       /* ── LAS CUADRILLAS DE UNA CARGA, UN RENGLÓN CADA UNA ─────────────────
          Scopeado a .gal-cuads y no a la .sec: los dos contenedores viven adentro de
          ventanas, que cuelgan FUERA de toda .sec (CLAUDE.md). Una regla colgada de
@@ -7438,6 +7481,7 @@ if ('serviceWorker' in navigator) {
           lugar del que después salen el rendimiento y el kg por jornal.</div></div>
       <div style="display:flex;gap:8px">
         <button class="btn bp bs" onclick="galRapAbrir()">⚡ Carga rápida</button>
+        <button class="btn bp bs" onclick="galFotoAbrir()">📷 Desde la planilla</button>
         <button class="btn bo bs" onclick="galKgAbrir()">+ Cargar kilos</button>
         <button class="btn bo bs" onclick="galKgPlanilla()">📋 Planilla de control</button>
         <button class="btn bo bs" onclick="sgManualAbrir('galpon-carga')">❓ ¿Cómo se usa?</button></div>
@@ -7636,6 +7680,89 @@ if ('serviceWorker' in navigator) {
 
         <div style="display:flex;justify-content:flex-end;margin-top:14px">
           <button class="btn bo" onclick="galRapCerrar()">Listo</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── 📷 CARGAR DESDE LA PLANILLA DE PAPEL ──────────────────────────────────────
+       Andy, 2/11/2026: «¿podremos desarrollar una carga rápida por foto? O sea
+       cargamos la foto de esto y que genere sola los ingresos. Va a necesitar
+       intervención de algún operador para completar datos faltantes, pero puede ayudar
+       a cargar bastante rápido».
+
+       TRES PASOS, Y EL DEL MEDIO ES EL QUE IMPORTA. La foto se lee, se REVISA contra
+       el papel, y recién entonces se carga. Nada se guarda hasta el último botón: una
+       lectura mala tiene que costar un rato, no veintiún renglones de kilos inventados.
+
+       Fuera de toda .sec, no se cierra al clic afuera, y no se cierra al cargar — las
+       reglas de CLAUDE.md. La última acá es la razón de ser de la ventana: adentro
+       queda el acuse de cuántas entraron y cuáles no. -->
+  <div class="ab-modal-overlay sg-mod" id="gal-foto-modal">
+    <div class="ab-modal" style="width:min(820px,96vw);max-width:96vw">
+      <div class="mhd"><div class="mht">📷 Cargar desde la planilla</div>
+        <button class="mcl" onclick="galFotoCerrar()">×</button></div>
+
+      <!-- PASO 1 · LA FOTO -->
+      <div id="gal-foto-p1">
+        <div class="gfo-zona" id="gal-foto-zona" onclick="galFotoPedir()">
+          <div class="gfo-ico">📷</div>
+          <div class="gfo-t">Sacá o elegí la foto de la planilla</div>
+          <div class="gfo-s">El <b>REGISTRO DE CONTROL EN GALPÓN DE EMPAQUE</b>, la hoja
+            de los bolsones con su peso.<br>Puede estar acostada: se endereza sola.
+            Que se lean los números y que no haya sombra encima.</div>
+        </div>
+        <input type="file" id="gal-foto-inp" accept="image/*" capture="environment"
+               style="display:none" onchange="galFotoElegida(this)">
+        <div id="gal-foto-aviso1" style="display:none;margin-top:12px" class="ojo"></div>
+        <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:14px">
+          <button class="btn bo" onclick="galFotoCerrar()">Cancelar</button>
+          <button class="btn bp" id="gal-foto-leer" style="display:none"
+                  onclick="galFotoLeer()">Leer la planilla</button>
+        </div>
+      </div>
+
+      <!-- PASO 2 · REVISAR -->
+      <div id="gal-foto-p2" style="display:none">
+        <!-- De qué son estos kilos. Va ARRIBA y se pide igual que en la carga rápida:
+             la planilla no dice de qué lote ni de qué cuadrilla son, y atribuirlos
+             tiene que seguir siendo un acto deliberado. -->
+        <div class="sgr-card">
+          <div style="display:flex;gap:10px;flex-wrap:wrap">
+            <div style="flex:0 0 160px"><label>Día de cosecha</label>
+              <input type="date" id="gal-foto-fecha" onchange="galFotoPintar()"></div>
+            <div style="flex:1 1 220px;min-width:0"><label>Lote</label>
+              <select id="gal-foto-lote" onchange="galFotoLotePick()"></select></div>
+          </div>
+          <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:10px">
+            <div style="flex:1 1 200px;min-width:0"><label>Producto</label>
+              <input type="text" id="gal-foto-prod" placeholder="ej: Damasco"></div>
+            <div style="flex:1 1 200px;min-width:0"><label>Cuadrilla</label>
+              <div class="gal-cuads" id="gal-foto-cuads"></div></div>
+          </div>
+        </div>
+
+        <div id="gal-foto-avisos"></div>
+        <div id="gal-foto-tot" class="gfo-tot"></div>
+        <div class="gfo-lista"><table class="gfo-tbl">
+          <colgroup><col style="width:6%"><col style="width:9%"><col style="width:9%">
+                    <col style="width:17%"><col style="width:15%"><col style="width:44%">
+          </colgroup>
+          <thead><tr><th></th><th>Viaje</th><th>N°</th><th style="text-align:right">Kilos</th>
+            <th>Sanitario</th><th>Observación</th></tr></thead>
+          <tbody id="gal-foto-body"></tbody>
+        </table></div>
+
+        <div id="gal-foto-error" style="display:none;margin-top:10px" class="ojo"></div>
+        <div id="gal-foto-ok" style="display:none;margin-top:10px"></div>
+        <div style="display:flex;justify-content:space-between;gap:8px;margin-top:14px;
+                    flex-wrap:wrap">
+          <button class="btn bo bs" onclick="galFotoOtra()">📷 Otra foto</button>
+          <div style="display:flex;gap:8px">
+            <button class="btn bo" onclick="galFotoCerrar()">Cancelar</button>
+            <button class="btn bp" id="gal-foto-cargar" onclick="galFotoCargar()">
+              Cargar</button>
+          </div>
         </div>
       </div>
     </div>
@@ -28244,6 +28371,73 @@ SG_MANUAL['galpon-carga'] = { titulo: 'Galpón · Carga de kilos', html:
   + 'más, que es lo que pasaría contándole el cajón entero a las dos.</p>'
   + '<p>Al <b>corregir</b> una carga vienen ofrecidas las que tenía, las dos. Y si se '
   + 'corrigen los kilos, el reparto se rehace solo.</p>'
+  + '<h3>📷 Cargar desde la planilla de papel <span class="ver">V1135</span></h3>'
+  + '<p>Andy, 2/11/2026: <i>«¿podremos desarrollar una carga rápida por foto? O sea '
+  + 'cargamos la foto de esto y que genere sola los ingresos. Va a necesitar '
+  + 'intervención de algún operador para completar datos faltantes, pero puede ayudar a '
+  + 'cargar bastante rápido»</i>.</p>'
+  + '<p>El botón <b>📷 Desde la planilla</b> saca o toma la foto del <b>REGISTRO DE '
+  + 'CONTROL EN GALPÓN DE EMPAQUE</b> —la hoja donde se anota cada bolsón con su '
+  + 'peso— y propone los renglones ya cargados. Veintiún bolsones tipeados de a uno '
+  + 'son media hora y veintiuna oportunidades de equivocarse.</p>'
+  + '<h4>Son tres pasos, y el del medio no se saltea</h4>'
+  + '<ul>'
+  + '<li><b>La foto.</b> Puede estar acostada: se endereza sola. Lo que hace falta es '
+  + 'que se lean los números y que no haya sombra encima. Se achica antes de mandarla, '
+  + 'así que no importa que el teléfono saque fotos de cinco megas.</li>'
+  + '<li><b>Revisar.</b> Arriba se completa de qué son estos kilos —día, lote, producto '
+  + 'y cuadrilla— y abajo aparece renglón por renglón lo que se leyó, todo editable. '
+  + '<b>Acá todavía no se guardó nada.</b></li>'
+  + '<li><b>Cargar.</b> Recién el último botón crea las cargas, una por renglón.</li>'
+  + '</ul>'
+  + '<div class="ojo"><b>Leer no guarda, y es a propósito.</b> Si la foto se cargara '
+  + 'sola, una lectura mala serían veintiún renglones de kilos inventados — números '
+  + 'creíbles, el lote existe, el camión existe, y no los encuentra nadie. Así, una '
+  + 'lectura mala cuesta un rato.</div>'
+  + '<h4>Mirá el total antes de apretar</h4>'
+  + '<p>Arriba de la lista dice <b>cuántos renglones, cuántos kilos y cuánto da por '
+  + 'cajón</b>. Es el control más barato que hay contra una coma leída de más: '
+  + 'veintiún bolsones de entre 7 y 19 kg que dan 240 son creíbles, y que den 2.400 '
+  + 'no. El papel no trae el total escrito, así que esto no sale de ningún lado más '
+  + 'que de mirarlo.</p>'
+  + '<p>El total cuenta <b>sólo lo que se va a cargar</b>: lo destildado no entra, y un '
+  + 'renglón sin peso tampoco — se cuenta aparte, en rojo.</p>'
+  + '<h4>Lo que no se pudo leer viene en blanco, no inventado</h4>'
+  + '<p>Si un peso está pisado o borroso, el renglón llega <b>sin peso y marcado en '
+  + 'rojo</b>, con el motivo al lado. No se puede cargar hasta que alguien lo escriba. '
+  + 'Un peso adivinado entra como un renglón más y no lo encuentra nadie; uno en blanco '
+  + 'se completa en dos segundos mirando el papel.</p>'
+  + '<h4>Lo que la foto sí sabe y lo que no</h4>'
+  + '<ul>'
+  + '<li><b>El viaje, el número de bolsón y el peso</b> salen del papel. El viaje y la '
+  + 'finca se escriben una sola vez y abajo van comillas: eso se resuelve solo, y el '
+  + 'viaje queda pegado a <b>cada renglón</b> — una misma hoja puede tener el final de '
+  + 'un camión y el principio del siguiente.</li>'
+  + '<li><b>El estado sanitario</b> sale de cuál está <b>circulado</b>. Si en esa fila '
+  + 'no hay ninguno marcado queda en blanco, que es lo correcto: «no se miró» no es lo '
+  + 'mismo que B.</li>'
+  + '<li><b>El lote, el producto y la cuadrilla NO salen de la foto.</b> La planilla no '
+  + 'los trae, así que se eligen arriba y valen para todos los renglones. Es el mismo '
+  + 'paso que pide la carga rápida, y por la misma razón: atribuir los kilos tiene que '
+  + 'ser un acto deliberado.</li>'
+  + '</ul>'
+  + '<p>Si los números de bolsón <b>saltan</b> —del 2 al 4— la pantalla lo avisa. Es lo '
+  + 'único que delata un renglón perdido: ni el total ni el peso lo muestran.</p>'
+  + '<p>Y si ese día ya hay cargas de ese mismo viaje, <b>también lo avisa</b>: es lo '
+  + 'que pasa cuando se sube la misma planilla dos veces. No frena —un camión puede '
+  + 'entrar en dos tandas— pero lo dice.</p>'
+  + '<h4>Si no entró alguno</h4>'
+  + '<p>Los que entraron desaparecen de la lista y los que no <b>se quedan, con el '
+  + 'motivo</b>. Se corrigen y se vuelve a apretar Cargar: los que ya habían entrado '
+  + 'no se duplican, porque cada renglón viaja con un número propio.</p>'
+  + '<div class="ojo"><b>Necesita internet, y puede no estar.</b> La lectura la hace un '
+  + 'servicio de afuera: sin señal, o si el servicio está caído, la ventana lo dice y '
+  + 'manda a cargar a mano. <b>No se queda esperando ni inventa renglones.</b> El resto '
+  + 'de la pantalla sigue funcionando sin señal como siempre.</div>'
+  + '<p>La foto <b>no se guarda</b>: se manda, se lee y se descarta. El original es el '
+  + 'papel, que lo firman tres personas y lo archiva calidad; acá lo que vale son los '
+  + 'renglones.</p>'
+
   + '<h3>☑️ Borrar varias de una vez <span class="ver">V1134</span></h3>'
   + '<p>Andy, 2/11/2026: <i>«quiero poder seleccionar varios para eliminar, como si '
   + 'tuvieran un casillero»</i>.</p>'
@@ -58764,6 +58958,374 @@ function galRapCerrar(){
   document.getElementById('gal-rap-modal').classList.remove('on');
   GRP.fijo = null;
   galKgCargar();
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════════════
+   📷 CARGAR DESDE LA PLANILLA DE PAPEL
+   ═══════════════════════════════════════════════════════════════════════════════════
+   Andy, 2/11/2026: «¿podremos desarrollar una carga rápida por foto? O sea cargamos la
+   foto de esto y que genere sola los ingresos. Va a necesitar intervención de algún
+   operador para completar datos faltantes, pero puede ayudar a cargar bastante rápido».
+
+   Veintiún renglones por camión, tipeados de a uno, son media hora y veintiuna
+   oportunidades de equivocarse.
+
+   ── EL PASO DEL MEDIO NO SE SALTEA ─────────────────────────────────────────────────
+   Leer no guarda. Lo que la IA devuelve es una PROPUESTA que se compara contra el
+   papel y se corrige, y recién el último botón crea las cargas. Eso es lo que hace que
+   una lectura mala cueste un rato y no veintiún renglones de kilos que nadie va a
+   poder encontrar después.
+
+   Por eso arriba de la tabla va el TOTAL: veintiún pesos de entre 7 y 19 kg que dan
+   240 son creíbles, y que den 2.400 no. Es el control más barato que hay contra una
+   coma leída de más, y el papel no lo trae escrito.
+   ═══════════════════════════════════════════════════════════════════════════════════ */
+var GFOT = { imagen:null, filas:[], avisos:[], leyendo:false, cargando:false, sug:'' };
+
+/* Se vacía EN SU LUGAR y no se reemplaza con un objeto nuevo. Reasignar la variable
+   deja con la caja vieja a cualquiera que ya la tuviera guardada, y entonces la
+   pantalla muestra unas filas y el que carga manda otras. */
+function galFotoVaciar(){
+  GFOT.imagen = null;
+  GFOT.filas = [];
+  GFOT.avisos = [];
+  GFOT.leyendo = false;
+  GFOT.cargando = false;
+  GFOT.sug = '';
+}
+
+function galFotoAbrir(){
+  /* En blanco, como todas (CLAUDE.md): una ventana que sólo se esconde conserva lo que
+     tenía, y acá eso sería volver a cargar los veintiún renglones de la foto anterior. */
+  galFotoVaciar();
+  document.getElementById('gal-foto-p1').style.display = '';
+  document.getElementById('gal-foto-p2').style.display = 'none';
+  document.getElementById('gal-foto-leer').style.display = 'none';
+  document.getElementById('gal-foto-aviso1').style.display = 'none';
+  document.getElementById('gal-foto-error').style.display = 'none';
+  document.getElementById('gal-foto-ok').style.display = 'none';
+  galFotoZonaVacia();
+
+  galKgLlenarLote(document.getElementById('gal-foto-lote'));
+  galCuadPintar('gal-foto-cuads', []);
+  /* Lo mismo que propone la carga rápida: lo último que cargó esta persona, y si no
+     hay nada, el lote declarado en «Lote del día». La planilla no dice de qué lote es. */
+  var u = GKG.ultimo, pr = GKG.propuesta;
+  document.getElementById('gal-foto-fecha').value = GKG.fecha || GKG.hoy || '';
+  document.getElementById('gal-foto-lote').value =
+    u ? String(u.lote_id) : (pr ? String(pr.lote_id) : '');
+  document.getElementById('gal-foto-prod').value =
+    (u && u.producto) || (pr && pr.producto) || '';
+  GFOT.sug = document.getElementById('gal-foto-prod').value;
+  if (u && u.cuadrilla_ids && u.cuadrilla_ids.length) galCuadPintar('gal-foto-cuads', u.cuadrilla_ids);
+  document.getElementById('gal-foto-modal').classList.add('on');
+}
+
+function galFotoCerrar(){
+  document.getElementById('gal-foto-modal').classList.remove('on');
+}
+
+function galFotoLotePick(){
+  var sel = document.getElementById('gal-foto-lote');
+  var o = sel.options[sel.selectedIndex];
+  var cultivo = o ? (o.getAttribute('data-cultivo') || '') : '';
+  var pr = document.getElementById('gal-foto-prod');
+  if (!pr.value || pr.value === GFOT.sug) pr.value = cultivo;
+  GFOT.sug = cultivo;
+}
+
+function galFotoZonaVacia(){
+  var z = document.getElementById('gal-foto-zona'); if (!z) return;
+  z.innerHTML = '<div class="gfo-ico">📷</div>'
+    + '<div class="gfo-t">Sacá o elegí la foto de la planilla</div>'
+    + '<div class="gfo-s">El <b>REGISTRO DE CONTROL EN GALPÓN DE EMPAQUE</b>, la hoja '
+    + 'de los bolsones con su peso.<br>Puede estar acostada: se endereza sola. '
+    + 'Que se lean los números y que no haya sombra encima.</div>';
+}
+
+function galFotoPedir(){ document.getElementById('gal-foto-inp').click(); }
+
+/* SE ACHICA ANTES DE MANDARLA, con el mismo compresor que usa el lector de
+   comprobantes. 1568 px es el lado largo con el que trabaja el modelo: más grande es
+   subir megas que se tiran igual, y la foto de un teléfono son cuatro o cinco. */
+function galFotoElegida(inp){
+  var f = inp.files && inp.files[0]; if (!f) return;
+  var av = document.getElementById('gal-foto-aviso1');
+  av.style.display = 'none';
+  paComprimirImagen(f, 1568, 0.9).then(function(r){
+    GFOT.imagen = r.dataUrl;
+    document.getElementById('gal-foto-zona').innerHTML =
+      '<img src="' + r.dataUrl + '" class="gfo-prev" alt="">'
+      + '<div class="gfo-s" style="margin-top:8px">Tocá para cambiarla · '
+      + Math.round(r.newSize / 1024) + ' KB</div>';
+    document.getElementById('gal-foto-leer').style.display = '';
+  }).catch(function(e){
+    av.textContent = 'No se pudo preparar la foto: ' + e.message;
+    av.style.display = '';
+  });
+  inp.value = '';
+}
+
+async function galFotoLeer(){
+  if (GFOT.leyendo || !GFOT.imagen) return;
+  var av = document.getElementById('gal-foto-aviso1');
+  var btn = document.getElementById('gal-foto-leer');
+  GFOT.leyendo = true;
+  btn.disabled = true;
+  btn.textContent = 'Leyendo…';
+  av.style.display = '';
+  av.innerHTML = '⏳ <b>Leyendo la planilla.</b> Tarda entre diez y treinta segundos. '
+    + 'No cierres la ventana.';
+  try {
+    var r = await fetch('/api/galpon/volcados/leer-foto', { method:'POST',
+      credentials:'include', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ imagen: GFOT.imagen }) });
+    var j = await r.json();
+    if (!j.ok){
+      /* El mensaje es el que armó el servidor para el operador. Cuando la IA está
+         caída dice además que se puede seguir a mano, que es lo único accionable:
+         esto no se arregla sacando otra foto. */
+      av.innerHTML = (j.ia_caida ? '⚠️ ' : '') + galKgEsc(j.error || 'No se pudo leer');
+      return;
+    }
+    GFOT.filas = j.filas || [];
+    GFOT.avisos = j.avisos || [];
+    /* La fecha y el producto que venían en el encabezado del papel PISAN lo propuesto,
+       porque son de esta planilla y lo otro es de la carga anterior. Si el papel los
+       trae en blanco —que es lo normal— queda lo propuesto. */
+    if (j.fecha) document.getElementById('gal-foto-fecha').value = j.fecha;
+    if (j.cultivo){
+      document.getElementById('gal-foto-prod').value = j.cultivo;
+      GFOT.sug = j.cultivo;
+    }
+    av.style.display = 'none';
+    document.getElementById('gal-foto-p1').style.display = 'none';
+    document.getElementById('gal-foto-p2').style.display = '';
+    galFotoPintar();
+  } catch (e) {
+    av.innerHTML = 'No se pudo llegar al lector: ' + galKgEsc(e.message)
+      + '. Cargá los renglones a mano.';
+  } finally {
+    GFOT.leyendo = false;
+    btn.disabled = false;
+    btn.textContent = 'Leer la planilla';
+  }
+}
+
+/* Volver a la foto SIN perder lo revisado no tiene sentido: es otra planilla. Se
+   vuelve en blanco, igual que al abrir. */
+function galFotoOtra(){
+  galFotoVaciar();
+  galFotoZonaVacia();
+  document.getElementById('gal-foto-leer').style.display = 'none';
+  document.getElementById('gal-foto-aviso1').style.display = 'none';
+  document.getElementById('gal-foto-error').style.display = 'none';
+  document.getElementById('gal-foto-ok').style.display = 'none';
+  document.getElementById('gal-foto-p2').style.display = 'none';
+  document.getElementById('gal-foto-p1').style.display = '';
+}
+
+/* ── EL TOTAL, QUE ES LO QUE SE COMPARA CONTRA EL PAPEL ─────────────────────────
+   Cuenta sólo las que están marcadas Y tienen peso. Un renglón sin peso no suma: si
+   sumara cero, el total diría que todo está bien justo cuando falta algo. */
+function galFotoTotal(){
+  var n = 0, kg = 0, fuera = 0, sinPeso = 0;
+  GFOT.filas.forEach(function(f){
+    if (f.excluida){ fuera++; return; }
+    var k = galKgLeerKilos(f.kilos);
+    if (k === null || k <= 0){ sinPeso++; return; }
+    n++; kg += k;
+  });
+  return { cargas:n, kilos:Math.round(kg * 100) / 100, fuera:fuera, sin_peso:sinPeso };
+}
+
+function galFotoPintar(){
+  var b = document.getElementById('gal-foto-body'); if (!b) return;
+
+  b.innerHTML = GFOT.filas.map(function(f, i){
+    var k = galKgLeerKilos(f.kilos);
+    var mal = (k === null || k <= 0);
+    var cls = (mal && !f.excluida ? ' gfo-mal' : '') + (f.excluida ? ' gfo-fuera' : '');
+    return '<tr class="' + cls.trim() + '">'
+      + '<td><input type="checkbox" class="gfo-ck"'
+        + (f.excluida ? '' : ' checked')
+        + ' onclick="galFotoFila(' + i + ', \'excluida\', !this.checked)"></td>'
+      + '<td>' + (f.viaje == null ? '—' : f.viaje) + '</td>'
+      + '<td>' + (f.numero == null ? '—' : f.numero) + '</td>'
+      + '<td><input class="gfo-kg" inputmode="decimal" value="'
+        + galKgEsc(f.kilos == null ? '' : f.kilos) + '"'
+        + ' onchange="galFotoFila(' + i + ', \'kilos\', this.value)"></td>'
+      + '<td><select onchange="galFotoFila(' + i + ', \'sanitario\', this.value)">'
+        + ['', 'B', 'R', 'M'].map(function(v){
+            return '<option value="' + v + '"'
+              + ((f.sanitario || '') === v ? ' selected' : '') + '>'
+              + (v || '—') + '</option>'; }).join('')
+        + '</select></td>'
+      + '<td class="gfo-w">'
+        + '<input value="' + galKgEsc(f.observacion || '') + '"'
+        + ' onchange="galFotoFila(' + i + ', \'observacion\', this.value)">'
+        + (f.duda ? '<div class="gfo-duda">⚠ ' + galKgEsc(f.duda) + '</div>' : '')
+        + '</td>'
+      + '</tr>';
+  }).join('');
+
+  var t = galFotoTotal();
+  var el = document.getElementById('gal-foto-tot');
+  el.innerHTML = '<span>📋 <b>' + t.cargas + '</b> renglones</span>'
+    + '<span><b>' + galKgNum(t.kilos) + '</b> kg</span>'
+    + (t.cargas ? '<span>' + galKgNum(t.kilos / t.cargas) + ' kg por cajón</span>' : '')
+    + (t.sin_peso ? '<span style="color:#b3261e"><b>' + t.sin_peso
+        + '</b> sin peso</span>' : '')
+    + (t.fuera ? '<span style="color:var(--mut)">' + t.fuera + ' fuera</span>' : '')
+    + '<span class="gkg-bsep" style="margin-left:auto;font-size:11.5px;color:var(--mut)">'
+    + 'Comparalo con el papel antes de cargar</span>';
+
+  galFotoAvisos();
+  var bc = document.getElementById('gal-foto-cargar');
+  bc.textContent = t.cargas ? ('Cargar ' + t.cargas + (t.cargas === 1 ? ' renglón' : ' renglones'))
+                            : 'Cargar';
+  bc.disabled = !t.cargas;
+}
+
+/* Los avisos de la lectura MÁS el de duplicado. El de duplicado se calcula acá y no en
+   el servidor porque la pantalla ya tiene el día cargado: ya hay N cargas con ese
+   viaje es lo que pasa cuando alguien sube la misma foto dos veces, y la velocidad es
+   justamente lo que hace que pase. */
+function galFotoAvisos(){
+  var el = document.getElementById('gal-foto-avisos'); if (!el) return;
+  var todos = (GFOT.avisos || []).slice();
+
+  var fecha = document.getElementById('gal-foto-fecha').value;
+  var viajes = [];
+  GFOT.filas.forEach(function(f){
+    if (f.viaje != null && viajes.indexOf(f.viaje) < 0) viajes.push(f.viaje);
+  });
+  if (fecha === GKG.fecha && viajes.length){
+    var ya = (GKG.cargas || []).filter(function(c){
+      return c.viaje != null && viajes.indexOf(Number(c.viaje)) >= 0; }).length;
+    if (ya){
+      todos.push('Para este día ya hay <b>' + ya + '</b> carga' + (ya === 1 ? '' : 's')
+        + ' del viaje ' + viajes.join(' y ') + '. Mirá que no sea la misma planilla.');
+    }
+  }
+  if (!todos.length){ el.innerHTML = ''; return; }
+  el.innerHTML = '<div class="ojo" style="margin-bottom:10px">'
+    + todos.map(function(x){ return '• ' + x; }).join('<br>') + '</div>';
+}
+
+function galFotoFila(i, campo, valor){
+  var f = GFOT.filas[i]; if (!f) return;
+  f[campo] = valor;
+  if (campo === 'kilos'){
+    /* Si alguien lo escribió, la duda de la IA ya no vale: la tenía porque no pudo
+       leerlo, y ahora lo leyó una persona. */
+    f.duda = null;
+  }
+  galFotoPintar();
+}
+
+/* ── CARGAR ─────────────────────────────────────────────────────────────────────
+   De a una y con el POST /volcados de siempre. No hay un endpoint que las cree todas:
+   así cada renglón pasa por la MISMA validación que una carga tipeada a mano —el tope
+   de kilos, el lote que existe, la cuadrilla que existe— y además entra en la cola sin
+   señal sin hacer nada.
+
+   CADA UNA CON SU uuid. Es lo que hace que apretar dos veces no duplique: el servidor
+   inserta una sola fila por uuid. Y el uuid se genera UNA VEZ por renglón y se guarda,
+   así que reintentar después de un error no duplica lo que ya había entrado.
+
+   Lo que falla queda en la ventana con su motivo. A diferencia del borrado, acá el
+   parcial es recuperable y es lo correcto: las que entraron se ven en la lista de
+   atrás, y las que no se corrigen y se vuelven a mandar. */
+async function galFotoCargar(){
+  if (GFOT.cargando) return;
+  var err = document.getElementById('gal-foto-error');
+  var ok  = document.getElementById('gal-foto-ok');
+  err.style.display = 'none'; ok.style.display = 'none';
+
+  var lote = document.getElementById('gal-foto-lote').value;
+  if (!lote){
+    err.textContent = 'Elegí el lote del que vienen estos kilos.';
+    err.style.display = ''; return;
+  }
+  var comun = {
+    fecha: document.getElementById('gal-foto-fecha').value,
+    lote_id: lote,
+    producto: document.getElementById('gal-foto-prod').value,
+    cuadrilla_ids: galCuadIds('gal-foto-cuads'),
+  };
+
+  var pendientes = [];
+  GFOT.filas.forEach(function(f, i){
+    if (f.excluida || f.cargada) return;
+    var k = galKgLeerKilos(f.kilos);
+    if (k === null || k <= 0) return;
+    if (!f.uuid) f.uuid = galKgNuevoUuid();
+    pendientes.push({ i: i, f: f, k: k });
+  });
+  if (!pendientes.length) return;
+
+  var btn = document.getElementById('gal-foto-cargar');
+  GFOT.cargando = true;
+  btn.disabled = true;
+  var entraron = 0;
+  var fallaron = [];
+  try {
+    for (var n = 0; n < pendientes.length; n++){
+      var x = pendientes[n];
+      btn.textContent = 'Cargando ' + (n + 1) + ' de ' + pendientes.length + '…';
+      var body = {
+        uuid: x.f.uuid,
+        fecha: comun.fecha,
+        lote_id: comun.lote_id,
+        producto: comun.producto,
+        cuadrilla_ids: comun.cuadrilla_ids,
+        kilos: x.k,
+        // Una fila del papel es UN bolsón, igual que en la carga rápida.
+        ifcos: 1,
+        // El viaje sale de la FILA: una foto puede tener el final de un camión y el
+        // principio del siguiente, que es lo que pasa en las planillas de verdad.
+        viaje: x.f.viaje,
+        sanitario: x.f.sanitario || null,
+        observacion: x.f.observacion || null,
+        origen: 'manual',
+      };
+      try {
+        var r = await fetch('/api/galpon/volcados', { method:'POST', credentials:'include',
+          headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
+        var j = await r.json();
+        if (j.ok){ x.f.cargada = true; entraron++; }
+        else fallaron.push('N° ' + (x.f.numero == null ? (x.i + 1) : x.f.numero) + ': ' + j.error);
+      } catch (e) {
+        fallaron.push('N° ' + (x.f.numero == null ? (x.i + 1) : x.f.numero) + ': ' + e.message);
+      }
+    }
+  } finally {
+    GFOT.cargando = false;
+    btn.disabled = false;
+  }
+
+  /* Las que entraron se sacan de la lista: dejarlas marcadas pero visibles es como se
+     aprieta Cargar dos veces. Las que fallaron quedan, con su motivo. */
+  GFOT.filas = GFOT.filas.filter(function(f){ return !f.cargada; });
+  galFotoPintar();
+  // La pantalla de atrás se refresca ahora: es donde se ven las cargas que entraron.
+  await galKgCargar();
+
+  if (fallaron.length){
+    err.innerHTML = '<b>Entraron ' + entraron + '.</b> No entraron ' + fallaron.length
+      + ', y siguen en la lista de arriba:<br>'
+      + fallaron.map(function(x){ return '• ' + galKgEsc(x); }).join('<br>');
+    err.style.display = '';
+  } else {
+    /* La ventana NO se cierra: adentro queda el acuse. Es la cuarta regla de las
+       ventanas (CLAUDE.md), y acá es lo que hace que el operador sepa que los
+       veintiún renglones entraron sin tener que ir a contarlos. */
+    ok.className = 'gkg-ok';
+    ok.innerHTML = '<b>✓ Entraron ' + entraron + (entraron === 1 ? ' carga' : ' cargas')
+      + '.</b> Ya están en la lista de atrás. Podés cerrar, o sacar otra foto.';
+    ok.style.display = '';
+  }
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════════════
