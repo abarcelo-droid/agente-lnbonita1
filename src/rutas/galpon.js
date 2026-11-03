@@ -41,7 +41,8 @@ import {
   tableroProceso, stockGalpon, stockPorLote, stockPorProducto, lotesVolcados,
 } from '../servicios/galpon.js';
 import { generarTarjetasPDF, tarjetasAImprimir } from '../servicios/galponTarjetasPDF.js';
-import { promptPlanilla, jsonDeRespuesta, filasDePlanilla, fotoDeDataUrl }
+import { promptPlanilla, jsonDeRespuesta, filasDePlanilla, fotoDeDataUrl,
+         resolverLotes }
   from '../servicios/galponPlanillaOCR.js';
 /* UNA SOLA PUERTA A LA IA (servicios/ia.js): deja el consumo registrado y traduce el
    error una vez. Había siete archivos llamando por su cuenta y ninguno dejaba rastro
@@ -671,7 +672,37 @@ router.post('/volcados/leer-foto', async (req, res) => {
       .filter((b) => b.type === 'text').map((b) => b.text).join('\n');
     const r = filasDePlanilla(jsonDeRespuesta(texto));
     if (!r.ok) return res.status(502).json({ ok: false, error: r.motivo });
-    res.json(Object.assign({ ok: true }, r));
+
+    /* ── LA FINCA Y EL LOTE DEL PAPEL SE RESUELVEN CONTRA EL PADRÓN ──────────────
+       Andy, 2/11/2026: «a veces en la misma hoja tenemos algunos cajones que son de
+       una cuadrilla y otros de otra. Y fincas también puede pasar lo mismo».
+
+       La planilla trae las columnas Finca y «Lote y/o Llave» y el lector ya las lee:
+       preguntárselas igual renglón por renglón sería pedirle a una persona que
+       transcriba lo que acaba de transcribir una máquina.
+
+       SE RESUELVE ACÁ Y NO EN LA PANTALLA porque acá está el padrón y se puede
+       probar con una base de verdad. Y NO ADIVINA: con dos candidatos o con ninguno
+       devuelve null y el motivo escrito, y lo elige una persona. Un lote mal
+       atribuido no se nota nunca —los kilos están, el total cierra— y deja el rinde
+       de dos cuadros cruzado para toda la temporada. */
+    /* Y SI ESTO FALLA, LA LECTURA VUELVE IGUAL. Resolver el lote es una comodidad;
+       la lectura es lo que costó una llamada al modelo y treinta segundos de alguien
+       parado con la planilla en la mano. Perderla entera porque una consulta al
+       padrón se cayó sería cambiar lo barato por lo caro — y el operador no tiene
+       cómo distinguir eso de «la IA no anda»: elegiría los lotes a mano igual, pero
+       después de volver a sacar la foto. */
+    let rl = { filas: r.filas, avisos: [], resueltos: 0 };
+    try {
+      rl = resolverLotes(lotesParaElDia(db), r.filas);
+    } catch (e2) {
+      console.error('[GALPON] leer-foto, resolver lotes: ' + e2.message);
+    }
+    res.json(Object.assign({ ok: true }, r, {
+      filas: rl.filas,
+      avisos: (r.avisos || []).concat(rl.avisos),
+      lotes_resueltos: rl.resueltos,
+    }));
   } catch (e) {
     /* El motivo técnico va al log y a motivo_admin, no a la cara del que está con la
        planilla en la mano. Lo que él necesita saber es que puede seguir cargando a

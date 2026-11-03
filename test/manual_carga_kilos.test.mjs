@@ -65,6 +65,8 @@ test('cada sección nueva lleva su V###', () => {
     'la sección de la planilla por foto no lleva su número de versión');
   assert.equal((HTML.match(/<span class="ver">V1136<\/span>/g) || []).length, 1,
     'la sección del día al que entran los kilos no lleva su número de versión');
+  assert.equal((HTML.match(/<span class="ver">V1137<\/span>/g) || []).length, 1,
+    'la sección de la hoja mezclada no lleva su número de versión');
 });
 
 // ══════════════════════════════════════════════════════════════════════════
@@ -363,7 +365,10 @@ test('MANUAL: «son tres pasos y el del medio no se saltea»', () => {
   const r = RUTA.slice(i, RUTA.indexOf('\r\n});', i));
   assert.ok(!/INSERT|registrarVolcado|guardarCuadrillas/.test(r),
     'la ruta que lee está escribiendo cargas: una foto mal leída entraría sola');
-  assert.match(r, /res\.json\(Object\.assign\(\{ ok: true \}, r\)\)/);
+  /* Devuelve la propuesta y nada más. Desde la V1137 le agrega los lotes ya
+     resueltos contra el padrón, así que el cierre del Object.assign queda abierto a
+     propósito: lo que importa es que lo que vuelve sea r, no una escritura. */
+  assert.match(r, /res\.json\(Object\.assign\(\{ ok: true \}, r/);
   // Y la pantalla las crea de a una por el camino de siempre.
   const c = fn(PANEL, 'async function galFotoCargar(){');
   assert.match(c, /fetch\('\/api\/galpon\/volcados'/);
@@ -414,8 +419,14 @@ test('MANUAL: «el sanitario sale de cuál está circulado»', () => {
   assert.match(OCR, /NO devuelvas "B" porque la B esté impresa/);
 });
 
-test('MANUAL: «el lote, el producto y la cuadrilla no salen de la foto»', () => {
-  dice(/NO salen de la foto/);
+test('MANUAL: «la finca y el lote sí salen del papel; la cuadrilla no»', () => {
+  /* Esta afirmación se dio vuelta en la V1137 y el manual se CORRIGIÓ, no se le
+     agregó un párrafo abajo: un manual que se contradice entre dos renglones es
+     peor que uno viejo, porque el operador elige el que le conviene. */
+  dice(/La finca y el lote SÍ salen del papel/);
+  dice(/La cuadrilla y el producto no/);
+  assert.ok(!/NO salen de la foto/.test(HTML),
+    'quedó la frase vieja: el manual dice las dos cosas');
   const c = fn(PANEL, 'async function galFotoCargar(){');
   assert.match(c, /Elegí el lote/,
     'deja cargar sin lote y los kilos quedan sin atribuir');
@@ -546,4 +557,93 @@ test('MANUAL: un día se escribe como se lee, y sin corrimiento de zona', () => 
   assert.ok(!/new Date/.test(f),
     'arma un Date para mostrar la fecha: se corre un día por la zona horaria');
   assert.match(f, /\\d\{4\}/);
+});
+
+// ══════════════════════════════════════════════════════════════════════════
+// 7 · UNA HOJA CON DOS CUADRILLAS O DOS FINCAS (V1137)
+// ══════════════════════════════════════════════════════════════════════════
+
+test('MANUAL: «lo de arriba es el valor por omisión»', () => {
+  dice(/valor por omisión/);
+  dice(/↑ el de arriba/);
+  dice(/no se queda con una copia/);
+  /* El renglón guarda «lo de arriba» como VACÍO y no como una copia del id: es lo
+     que hace que cambiar el de arriba mueva a todos los que no eligieron. */
+  const cf = fn(OCR, 'export function cargaDeFila(fila, comun)');
+  assert.match(cf, /f\.lote_id != null && f\.lote_id !== ''/,
+    'trata el vacío como un valor: el renglón se cargaría sin lote');
+  // Y la pantalla hace lo mismo, que es la segunda copia de esta regla.
+  const c = fn(PANEL, 'async function galFotoCargar(){');
+  assert.match(c, /x\.f\.lote_id != null && x\.f\.lote_id !== ''/);
+  assert.match(c, /x\.f\.cuadrilla_id != null && x\.f\.cuadrilla_id !== ''/);
+});
+
+test('MANUAL: «los lotes que el papel ya dice vienen elegidos»', () => {
+  dice(/vienen elegidos/);
+  dice(/columnas «Finca» y «Lote y\/o Llave»/);
+  // Lo resuelve el servidor contra el padrón, donde se puede probar con una base.
+  assert.match(OCR, /export function loteDePapel\(lotes, finca, lote\)/);
+  const i = RUTA.indexOf("router.post('/volcados/leer-foto'");
+  const r = RUTA.slice(i, RUTA.indexOf('\r\n});', i));
+  assert.match(r, /resolverLotes\(lotesParaElDia\(db\), r\.filas\)/,
+    'la ruta no resuelve el lote: el operador lo elige veintiuna veces');
+});
+
+test('MANUAL: «no adivina, y es a propósito»', () => {
+  dice(/No adivina, y es a propósito/);
+  dice(/no se nota nunca/);
+  dice(/tiene 2 lotes: elegí cuál/);
+  const f = fn(OCR, 'export function loteDePapel(lotes, finca, lote)');
+  /* Con la finca sola, SÓLO si tiene un lote. Con dos, null y el motivo: elegir
+     uno sería tirar una moneda, y el que sale mal no se ve nunca más. */
+  assert.match(f, /if \(cand\.length === 1\) return \{ lote_id: cand\[0\]\.id/);
+  assert.match(f, /if \(exacto\.length === 1\) return \{ lote_id: exacto\[0\]\.id/,
+    'con dos lotes del mismo nombre elige uno: atribuye kilos al cuadro de al lado');
+  assert.match(f, /elegí cuál/);
+});
+
+test('MANUAL: «la ñ queda, el acento se cae»', () => {
+  /* «La Estacion» tiene que encontrar «La Estación» porque nadie escribe el
+     acento al transcribir; «Las Penas» NO puede encontrar «Las Peñas», que puede
+     ser otra finca. Misma regla que sgNorm (CLAUDE.md). */
+  const n = fn(OCR, 'export function normPapel(v)');
+  assert.match(n, /replace\(\/ñ\/gi/,
+    'la ñ se cae con el acento: «Las Penas» encontraría «Las Peñas»');
+  assert.match(n, /normalize\('NFD'\)/);
+});
+
+test('MANUAL: «el de arriba se pide sólo si hace falta»', () => {
+  dice(/se pide sólo si hace falta/);
+  dice(/o entran todas con su lote, o no entra nada/);
+  const c = fn(PANEL, 'async function galFotoCargar(){');
+  assert.match(c, /var faltaLote = GFOT\.filas\.some/,
+    'pide el lote de arriba aunque todos los renglones lo traigan del papel');
+  assert.match(c, /if \(!lote && faltaLote\)/);
+  /* Y un renglón sin peso no lo pide: no se va a cargar, así que su lote no
+     importa. Frenar la hoja por el renglón que se dejó afuera es al revés. */
+  assert.match(c, /if \(k === null \|\| k <= 0\) return false;/);
+});
+
+test('MANUAL: «dice cuántos lotes y cuántas cuadrillas van a quedar»', () => {
+  dice(/cuántos lotes y cuántas/);
+  dice(/se están yendo al mismo/);
+  const t = fn(PANEL, 'function galFotoTotal(){');
+  /* Cuenta el valor EFECTIVO —el del renglón, o el de arriba si no dijo nada—
+     porque es el que se manda. Contar sólo los del renglón diría «1 lote» en la
+     hoja mezclada en que uno se resolvió y el otro heredó. */
+  assert.match(t, /\? f\.lote_id : elLote/);
+  assert.match(t, /lotes:lotes\.length/);
+  assert.match(t, /cuadrillas:cuads\.length/);
+  // Y sólo se muestra con más de uno: un «1 lote» en todas las hojas es ruido.
+  const pi = fn(PANEL, 'function galFotoPintar(){');
+  assert.match(pi, /t\.lotes > 1/);
+  assert.match(pi, /t\.cuadrillas > 1/);
+});
+
+test('MANUAL: «la cuadrilla del renglón es una y reemplaza»', () => {
+  dice(/reemplaza a la de arriba/);
+  dice(/se corrige en la lista de atrás/);
+  const f = fn(OCR, 'export function cuadrillasDeFila(fila, comun)');
+  assert.match(f, /return \[f\.cuadrilla_id\];/,
+    'suma la del renglón a las de arriba: repartiría sus kilos en tres');
 });
