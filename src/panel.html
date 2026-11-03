@@ -7700,7 +7700,7 @@ if ('serviceWorker' in navigator) {
        reglas de CLAUDE.md. La última acá es la razón de ser de la ventana: adentro
        queda el acuse de cuántas entraron y cuáles no. -->
   <div class="ab-modal-overlay sg-mod" id="gal-foto-modal">
-    <div class="ab-modal" style="width:min(820px,96vw);max-width:96vw">
+    <div class="ab-modal" style="width:min(1060px,96vw);max-width:96vw">
       <div class="mhd"><div class="mht">📷 Cargar desde la planilla</div>
         <button class="mcl" onclick="galFotoCerrar()">×</button></div>
 
@@ -7725,20 +7725,25 @@ if ('serviceWorker' in navigator) {
 
       <!-- PASO 2 · REVISAR -->
       <div id="gal-foto-p2" style="display:none">
-        <!-- De qué son estos kilos. Va ARRIBA y se pide igual que en la carga rápida:
-             la planilla no dice de qué lote ni de qué cuadrilla son, y atribuirlos
-             tiene que seguir siendo un acto deliberado. -->
+        <!-- De qué son estos kilos. Va ARRIBA y se pide igual que en la carga rápida,
+             y desde la V1137 es el valor POR OMISIÓN: lo que vale para los renglones
+             que no dicen otra cosa. Cada renglón puede tener su lote y su cuadrilla
+             (Andy, 2/11/2026: «a veces en la misma hoja tenemos algunos cajones que
+             son de una cuadrilla y otros de otra; y fincas también»).
+
+             Atribuir sigue siendo deliberado: lo que cambió es que ahora se puede
+             hacer renglón por renglón en vez de partir la hoja en dos tandas. -->
         <div class="sgr-card">
           <div style="display:flex;gap:10px;flex-wrap:wrap">
             <div style="flex:0 0 160px"><label>Día de cosecha</label>
               <input type="date" id="gal-foto-fecha" onchange="galFotoPintar()"></div>
-            <div style="flex:1 1 220px;min-width:0"><label>Lote</label>
+            <div style="flex:1 1 220px;min-width:0"><label>Lote · para todos los renglones</label>
               <select id="gal-foto-lote" onchange="galFotoLotePick()"></select></div>
           </div>
           <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:10px">
             <div style="flex:1 1 200px;min-width:0"><label>Producto</label>
               <input type="text" id="gal-foto-prod" placeholder="ej: Damasco"></div>
-            <div style="flex:1 1 200px;min-width:0"><label>Cuadrilla</label>
+            <div style="flex:1 1 200px;min-width:0"><label>Cuadrilla · para todos los renglones</label>
               <div class="gal-cuads" id="gal-foto-cuads"></div></div>
           </div>
         </div>
@@ -7746,11 +7751,14 @@ if ('serviceWorker' in navigator) {
         <div id="gal-foto-avisos"></div>
         <div id="gal-foto-tot" class="gfo-tot"></div>
         <div class="gfo-lista"><table class="gfo-tbl">
-          <colgroup><col style="width:6%"><col style="width:9%"><col style="width:9%">
-                    <col style="width:17%"><col style="width:15%"><col style="width:44%">
+          <!-- Suman 100 y no hay barra de abajo (CLAUDE.md): lo único que parte es la
+               observación, que es lo de largo variable. -->
+          <colgroup><col style="width:5%"><col style="width:6%"><col style="width:6%">
+                    <col style="width:11%"><col style="width:9%"><col style="width:21%">
+                    <col style="width:16%"><col style="width:26%">
           </colgroup>
           <thead><tr><th></th><th>Viaje</th><th>N°</th><th style="text-align:right">Kilos</th>
-            <th>Sanitario</th><th>Observación</th></tr></thead>
+            <th>Sanit.</th><th>Lote</th><th>Cuadrilla</th><th>Observación</th></tr></thead>
           <tbody id="gal-foto-body"></tbody>
         </table></div>
 
@@ -28417,11 +28425,47 @@ SG_MANUAL['galpon-carga'] = { titulo: 'Galpón · Carga de kilos', html:
   + '<li><b>El estado sanitario</b> sale de cuál está <b>circulado</b>. Si en esa fila '
   + 'no hay ninguno marcado queda en blanco, que es lo correcto: «no se miró» no es lo '
   + 'mismo que B.</li>'
-  + '<li><b>El lote, el producto y la cuadrilla NO salen de la foto.</b> La planilla no '
-  + 'los trae, así que se eligen arriba y valen para todos los renglones. Es el mismo '
-  + 'paso que pide la carga rápida, y por la misma razón: atribuir los kilos tiene que '
-  + 'ser un acto deliberado.</li>'
+  + '<li><b>La finca y el lote SÍ salen del papel</b>, desde la V1137: la planilla '
+  + 'trae las columnas «Finca» y «Lote y/o Llave», y lo que dice ahí se busca en el '
+  + 'padrón y queda elegido en cada renglón. Igual que el viaje, se escriben una vez '
+  + 'y abajo van comillas.</li>'
+  + '<li><b>La cuadrilla y el producto no.</b> La planilla no los trae, así que se '
+  + 'eligen arriba. Es el mismo paso que pide la carga rápida y por la misma razón: '
+  + 'atribuir los kilos tiene que ser un acto deliberado.</li>'
   + '</ul>'
+
+  + '<h4>Una hoja con dos cuadrillas o dos fincas <span class="ver">V1137</span></h4>'
+  + '<p>Andy, 2/11/2026: <i>«a veces en la misma hoja tenemos algunos cajones que son '
+  + 'de una cuadrilla y otros de otra. Y fincas también puede pasar lo mismo»</i>.</p>'
+  + '<p>Lo que se elige arriba es el <b>valor por omisión</b>: vale para los renglones '
+  + 'que no digan otra cosa. Y cada renglón tiene sus dos desplegables, <b>Lote</b> y '
+  + '<b>Cuadrilla</b>, que arrancan en <b>«↑ el de arriba»</b>.</p>'
+  + '<ul>'
+  + '<li><b>La hoja de siempre no cambia:</b> se elige una vez arriba y los veintiún '
+  + 'renglones la siguen. Si después se cambia el de arriba, se mueven todos — el '
+  + 'renglón no se queda con una copia.</li>'
+  + '<li><b>La hoja mezclada</b> se carga de una sola vez: al renglón que es de otra '
+  + 'cuadrilla se le elige la suya y listo. Antes había que partirla en dos tandas.</li>'
+  + '<li><b>Los lotes que el papel ya dice vienen elegidos.</b> Lo que no se pudo '
+  + 'encontrar queda en «↑ el de arriba» y el motivo sale arriba de la tabla: «no hay '
+  + 'ninguna finca La Quinta», «la finca La Estación tiene 2 lotes: elegí cuál».</li>'
+  + '</ul>'
+  + '<div class="ojo"><b>No adivina, y es a propósito.</b> Si la finca del papel tiene '
+  + 'cuatro lotes, no elige uno: un lote mal atribuido <b>no se nota nunca</b> —los '
+  + 'kilos están, el total cierra— y deja cruzado el rinde de dos cuadros para toda la '
+  + 'temporada. Elegirlo a mano son dos segundos.</div>'
+  + '<p>Arriba de la tabla, al lado de los kilos, dice <b>cuántos lotes y cuántas '
+  + 'cuadrillas</b> van a quedar cuando hay más de uno. Es el control de que la hoja '
+  + 'mezclada se cargó mezclada: si el papel traía dos fincas y ahí dice «1 lote», las '
+  + 'dos se están yendo al mismo.</p>'
+  + '<p>El de arriba <b>se pide sólo si hace falta</b>: con todos los renglones '
+  + 'resueltos desde el papel, no hay que elegir ninguno. Y si falta en alguno, no '
+  + 'entra ninguna hasta que se elija — o entran todas con su lote, o no entra nada.</p>'
+  + '<p>La cuadrilla del renglón es <b>una</b> y reemplaza a la de arriba. Si arriba '
+  + 'hay dos (el cajón que llenaron entre las dos) el renglón que elige una dice que '
+  + '<b>ese</b> cajón es de ella entero. Para un renglón con dos cuadrillas distintas '
+  + 'de las de arriba, se carga y se corrige en la lista de atrás, que sí tiene la '
+  + 'lista completa.</p>'
   + '<p>Si los números de bolsón <b>saltan</b> —del 2 al 4— la pantalla lo avisa. Es lo '
   + 'único que delata un renglón perdido: ni el total ni el peso lo muestran.</p>'
   + '<p>Y si ese día ya hay cargas de ese mismo viaje, <b>también lo avisa</b>: es lo '
@@ -57859,7 +57903,14 @@ function galLdPintar(){
 /* Los dos desplegables, en una sola función: los usan la ventana de siempre y la de
    carga rápida. Dos copias del mismo armado son dos lugares donde mañana el de abajo
    queda sin el agrupado por finca y nadie se entera. */
-function galKgLlenarLote(sel){
+/* LAS OPCIONES DE LOTE SE ARMAN EN UN SOLO LUGAR. Lo usan los dos desplegables de
+   encabezado (la ventana larga y la carga rápida) y los de cada renglón de la foto,
+   que sólo cambian en la primera opción: «elegí el lote» cuando es obligatorio,
+   «↑ el de arriba» cuando heredar es lo normal.
+
+   Agrupado por finca, que es como se nombran los lotes en el campo. */
+function galKgLoteOpts(primera, valor){
+  var sel = String(valor == null ? '' : valor);
   var porFinca = [];
   GKG.lotes.forEach(function(l){
     var f = l.finca || 'Sin finca';
@@ -57867,14 +57918,19 @@ function galKgLlenarLote(sel){
     if (!g) { g = { f: f, ls: [] }; porFinca.push(g); }
     g.ls.push(l);
   });
-  sel.innerHTML = '<option value="">— elegí el lote —</option>'
+  return '<option value="">' + galKgEsc(primera) + '</option>'
     + porFinca.map(function(g){
         return '<option disabled>── ' + galKgEsc(g.f) + ' ──</option>'
           + g.ls.map(function(l){
-              return '<option value="' + l.id + '" data-cultivo="' + galKgEsc(l.cultivo || '') + '">'
+              return '<option value="' + l.id + '" data-cultivo="' + galKgEsc(l.cultivo || '') + '"'
+                + (String(l.id) === sel ? ' selected' : '') + '>'
                 + galKgEsc(l.nombre) + (l.cultivo ? ' · ' + galKgEsc(l.cultivo) : '') + '</option>';
             }).join('');
       }).join('');
+}
+
+function galKgLlenarLote(sel){
+  sel.innerHTML = galKgLoteOpts('— elegí el lote —', sel.value);
 }
 
 /* El desplegable único de cuadrilla se fue en la V1133: las dos ventanas pasaron a una LISTA de
@@ -59101,6 +59157,33 @@ function galFotoLotePick(){
   GFOT.sug = cultivo;
 }
 
+/* ── LOS DESPLEGABLES DE UN RENGLÓN ───────────────────────────────────────────────
+   Andy, 2/11/2026: «a veces en la misma hoja tenemos algunos cajones que son de una
+   cuadrilla y otros de otra. Y fincas también puede pasar lo mismo».
+
+   LA PRIMERA OPCIÓN ES «EL DE ARRIBA» Y VALE VACÍO. Así el caso normal —la hoja
+   entera de un lote y una cuadrilla— no se toca: se elige una vez arriba y los
+   veintiún renglones la siguen. Y cambiar la de arriba los mueve a todos sin repasar
+   la tabla, porque el renglón no guarda una copia: guarda «lo de arriba».
+
+   Son <select> de verdad, así que el buscador que el panel le monta a cualquier lista
+   de doce o más opciones funciona acá también sin configurar nada. */
+function galFotoLoteOpts(v){ return galKgLoteOpts('↑ el de arriba', v); }
+
+/* UNA SOLA CUADRILLA POR RENGLÓN, y no la lista entera. La lista de arriba sirve para
+   el cajón que llenaron dos (V1133) y reparte en partes iguales; acá hace falta lo
+   otro: que ESTE cajón sea de la Sur entera. Meterle una lista desplegable a cada una
+   de veintiún filas por un caso que casi no pasa es una tabla ilegible a cambio de
+   nada — y si pasa, se carga y se corrige en la lista de atrás, que sí la tiene. */
+function galFotoCuadOpts(v){
+  var sel = String(v == null ? '' : v);
+  return '<option value="">↑ la de arriba</option>'
+    + GKG.cuadrillas.map(function(q){
+        return '<option value="' + q.id + '"'
+          + (String(q.id) === sel ? ' selected' : '') + '>'
+          + galKgEsc(q.nombre) + '</option>'; }).join('');
+}
+
 function galFotoZonaVacia(){
   var z = document.getElementById('gal-foto-zona'); if (!z) return;
   z.innerHTML = '<div class="gfo-ico">📷</div>'
@@ -59202,13 +59285,26 @@ function galFotoOtra(){
    sumara cero, el total diría que todo está bien justo cuando falta algo. */
 function galFotoTotal(){
   var n = 0, kg = 0, fuera = 0, sinPeso = 0;
+  /* CUÁNTOS LOTES Y CUÁNTAS CUADRILLAS DISTINTAS van a quedar. Es el control de que
+     una hoja mezclada se cargó mezclada: el papel tenía dos fincas y si acá dice
+     «1 lote» es que las dos se fueron al mismo. Se cuenta el valor EFECTIVO —el del
+     renglón, o el de arriba si el renglón no dijo nada— porque es el que se manda. */
+  var elLote = (document.getElementById('gal-foto-lote') || {}).value || '';
+  var lasCuads = galCuadIds('gal-foto-cuads').join('+');
+  var lotes = [], cuads = [];
   GFOT.filas.forEach(function(f){
     if (f.excluida){ fuera++; return; }
     var k = galKgLeerKilos(f.kilos);
     if (k === null || k <= 0){ sinPeso++; return; }
     n++; kg += k;
+    var l = String((f.lote_id != null && f.lote_id !== '') ? f.lote_id : elLote);
+    if (l && lotes.indexOf(l) < 0) lotes.push(l);
+    var q = String((f.cuadrilla_id != null && f.cuadrilla_id !== '')
+                     ? f.cuadrilla_id : lasCuads);
+    if (q && cuads.indexOf(q) < 0) cuads.push(q);
   });
-  return { cargas:n, kilos:Math.round(kg * 100) / 100, fuera:fuera, sin_peso:sinPeso };
+  return { cargas:n, kilos:Math.round(kg * 100) / 100, fuera:fuera, sin_peso:sinPeso,
+           lotes:lotes.length, cuadrillas:cuads.length };
 }
 
 function galFotoPintar(){
@@ -59233,6 +59329,13 @@ function galFotoPintar(){
               + ((f.sanitario || '') === v ? ' selected' : '') + '>'
               + (v || '—') + '</option>'; }).join('')
         + '</select></td>'
+      /* El lote puede venir RESUELTO desde el papel: el servidor cruzó las columnas
+         Finca y Lote contra el padrón (resolverLotes, servicios/galponPlanillaOCR.js).
+         Si no pudo, queda en «el de arriba» y el motivo sale en los avisos. */
+      + '<td><select onchange="galFotoFila(' + i + ', \'lote_id\', this.value)">'
+        + galFotoLoteOpts(f.lote_id) + '</select></td>'
+      + '<td><select onchange="galFotoFila(' + i + ', \'cuadrilla_id\', this.value)">'
+        + galFotoCuadOpts(f.cuadrilla_id) + '</select></td>'
       + '<td class="gfo-w">'
         + '<input value="' + galKgEsc(f.observacion || '') + '"'
         + ' onchange="galFotoFila(' + i + ', \'observacion\', this.value)">'
@@ -59246,6 +59349,8 @@ function galFotoPintar(){
   el.innerHTML = '<span>📋 <b>' + t.cargas + '</b> renglones</span>'
     + '<span><b>' + galKgNum(t.kilos) + '</b> kg</span>'
     + (t.cargas ? '<span>' + galKgNum(t.kilos / t.cargas) + ' kg por cajón</span>' : '')
+    + (t.lotes > 1 ? '<span><b>' + t.lotes + '</b> lotes</span>' : '')
+    + (t.cuadrillas > 1 ? '<span><b>' + t.cuadrillas + '</b> cuadrillas</span>' : '')
     + (t.sin_peso ? '<span style="color:#b3261e"><b>' + t.sin_peso
         + '</b> sin peso</span>' : '')
     + (t.fuera ? '<span style="color:var(--mut)">' + t.fuera + ' fuera</span>' : '')
@@ -59335,8 +59440,19 @@ async function galFotoCargar(){
   err.style.display = 'none'; ok.style.display = 'none';
 
   var lote = document.getElementById('gal-foto-lote').value;
-  if (!lote){
-    err.textContent = 'Elegí el lote del que vienen estos kilos.';
+  /* ── SE PIDE EL DE ARRIBA SÓLO SI ALGÚN RENGLÓN LO NECESITA ───────────────────
+     Con una hoja de dos fincas, las dos resueltas desde el papel, el de arriba no
+     hace falta — y exigirlo obligaría a elegir uno al azar, que es justo el que se
+     le atribuiría a cualquier renglón que quede sin resolver. */
+  var faltaLote = GFOT.filas.some(function(f){
+    if (f.excluida || f.cargada) return false;
+    var k = galKgLeerKilos(f.kilos);
+    if (k === null || k <= 0) return false;
+    return !(f.lote_id != null && f.lote_id !== '');
+  });
+  if (!lote && faltaLote){
+    err.textContent = 'Elegí el lote del que vienen estos kilos. '
+      + 'Hay renglones que no lo traen del papel.';
     err.style.display = ''; return;
   }
   var comun = {
@@ -59365,12 +59481,20 @@ async function galFotoCargar(){
     for (var n = 0; n < pendientes.length; n++){
       var x = pendientes[n];
       btn.textContent = 'Cargando ' + (n + 1) + ' de ' + pendientes.length + '…';
+      /* ── LO DE LA FILA LE GANA AL ENCABEZADO ─────────────────────────────────
+         ES UNA SEGUNDA COPIA de cargaDeFila()/cuadrillasDeFila()
+         (servicios/galponPlanillaOCR.js) Y ESO SE PAGA, igual que galKgLeerKilos
+         con kilos(). La única manera de que las dos no se separen es probarlas
+         contra la misma tabla de casos, y es lo que hacen el test del servicio y
+         el de la pantalla. */
       var body = {
         uuid: x.f.uuid,
         fecha: comun.fecha,
-        lote_id: comun.lote_id,
+        lote_id: (x.f.lote_id != null && x.f.lote_id !== '')
+                   ? x.f.lote_id : comun.lote_id,
         producto: comun.producto,
-        cuadrilla_ids: comun.cuadrilla_ids,
+        cuadrilla_ids: (x.f.cuadrilla_id != null && x.f.cuadrilla_id !== '')
+                   ? [x.f.cuadrilla_id] : comun.cuadrilla_ids,
         kilos: x.k,
         // Una fila del papel es UN bolsón, igual que en la carga rápida.
         ifcos: 1,

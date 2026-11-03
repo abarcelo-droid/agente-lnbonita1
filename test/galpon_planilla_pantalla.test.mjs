@@ -69,8 +69,17 @@ function corte(desde, hasta) {
 function pantalla(dom, opts) {
   const o = opts || {};
   const codigo =
+    /* EL ARMADOR DE OPCIONES DE LOTE, DE VERDAD y no un doble: los desplegables de
+       cada renglón salen de ahí, y lo que hay que verificar es que el renglón venga
+       con SU lote seleccionado. Con un doble, el test diría que sí sin mirar nada.
+
+       Y conviene saber por qué faltaba: sin él, galFotoPintar tiraba un
+       ReferenceError que se comía el catch de galFotoLeer —queda como «no se pudo
+       llegar al lector»— y el test fallaba tres líneas después, pidiendo el total
+       de una tabla que nunca se pintó. */
+    corte('function galKgLoteOpts(primera, valor){', 'function galKgLlenarLote(sel){')
     // Los helpers que la ventana usa: el escape, el formato de número, el uuid.
-    corte('function galKgEsc(s){', 'async function galKgInit(){')
+    + corte('function galKgEsc(s){', 'async function galKgInit(){')
     // La lista de cuadrillas y el lector de kilos.
     + corte('/* ── 👷 DOS CUADRILLAS EN EL MISMO CAJÓN ─', 'function galLdAbrir(id){')
     /* Y la ventana. Arranca en var GFOT y no en el banner de arriba: el banner es el
@@ -84,7 +93,7 @@ function pantalla(dom, opts) {
     + '\nreturn { GFOT, galFotoAbrir, galFotoCerrar, galFotoElegida, galFotoLeer,'
     + ' galFotoPintar, galFotoFila, galFotoTotal, galFotoCargar, galFotoOtra,'
     + ' galFotoAvisos, galCuadPintar, galCuadIds, galKgLeerKilos,'
-    + ' galKgFechaCorta };');
+    + ' galKgFechaCorta, galFotoLoteOpts, galFotoCuadOpts };');
 
   dom.recargas = 0;
   return f(
@@ -94,7 +103,11 @@ function pantalla(dom, opts) {
     Object.assign({
       fecha: '2026-11-20', hoy: '2026-11-20', cargas: [], resumen: null,
       propuesta: null, ultimo: null,
-      lotes: [{ id: 10, nombre: 'Cuadro 3', finca: 'La Estación' }],
+      /* Tres lotes en dos fincas, como el padrón de verdad: con uno solo no se
+         puede probar que el renglón venga con EL SUYO elegido. */
+      lotes: [{ id: 10, nombre: 'Cuadro 3', finca: 'La Estación' },
+              { id: 11, nombre: 'Cuadro 4', finca: 'La Estación' },
+              { id: 12, nombre: 'Peñas Sur', finca: 'Las Peñas' }],
       cuadrillas: [{ id: 1, nombre: 'Norte' }, { id: 2, nombre: 'Sur' }],
     }, o.GKG || {}),
     () => {},
@@ -107,7 +120,11 @@ function pantalla(dom, opts) {
 // Lo que devuelve el servidor leyendo la primera foto del 2/11, ya normalizado.
 const FILA = (viaje, numero, kilos, extra) => Object.assign(
   { viaje, finca: 'La Estación', lote: null, numero, kilos,
-    sanitario: null, observacion: null, ok: kilos != null && kilos > 0, duda: null },
+    sanitario: null, observacion: null, ok: kilos != null && kilos > 0, duda: null,
+    /* Lo que el servidor resolvió de la columna Finca/Lote del papel. null es la
+       respuesta normal y correcta: La Estación tiene dos lotes, así que la finca
+       sola no alcanza y lo elige una persona. */
+    lote_id: null, lote_motivo: null },
   extra || {});
 
 /* UNA FUNCIÓN Y NO UNA CONSTANTE. La ventana MUTA las filas —les pone el uuid, las
@@ -215,7 +232,7 @@ test('EL TOTAL ES EL DE LO QUE SE VA A CARGAR, no el de lo que se leyó', async 
      bien justo cuando falta algo — y entonces no sirve para comparar contra el
      papel, que es lo único para lo que está. */
   const x = await hastaRevisar();
-  assert.deepEqual(x.p.galFotoTotal(), { cargas: 3, kilos: 41, fuera: 0, sin_peso: 0 });
+  assert.deepEqual(x.p.galFotoTotal(), { cargas: 3, kilos: 41, fuera: 0, sin_peso: 0, lotes: 0, cuadrillas: 0 });
   assert.match(x.dom.nodos['gal-foto-tot'].innerHTML, /<b>3<\/b> renglones/);
   assert.match(x.dom.nodos['gal-foto-tot'].innerHTML, /41<\/b> kg/);
   assert.match(x.dom.nodos['gal-foto-tot'].innerHTML, /Comparalo con el papel/);
@@ -225,7 +242,7 @@ test('un renglón sin peso NO suma cero: se cuenta aparte y en rojo', async () =
   const x = await hastaRevisar({
     ok: true, avisos: [], filas: [FILA(13, 1, 10), FILA(13, 2, null, { duda: 'borroso' })],
   });
-  assert.deepEqual(x.p.galFotoTotal(), { cargas: 1, kilos: 10, fuera: 0, sin_peso: 1 });
+  assert.deepEqual(x.p.galFotoTotal(), { cargas: 1, kilos: 10, fuera: 0, sin_peso: 1, lotes: 0, cuadrillas: 0 });
   assert.match(x.dom.nodos['gal-foto-tot'].innerHTML, /<b>1<\/b> sin peso/);
   assert.match(x.dom.nodos['gal-foto-body'].innerHTML, /gfo-mal/);
   assert.match(x.dom.nodos['gal-foto-body'].innerHTML, /borroso/);
@@ -236,7 +253,7 @@ test('escribir el peso saca la fila del rojo y la suma', async () => {
     ok: true, avisos: [], filas: [FILA(13, 1, 10), FILA(13, 2, null, { duda: 'borroso' })],
   });
   x.p.galFotoFila(1, 'kilos', '12,40');
-  assert.deepEqual(x.p.galFotoTotal(), { cargas: 2, kilos: 22.4, fuera: 0, sin_peso: 0 });
+  assert.deepEqual(x.p.galFotoTotal(), { cargas: 2, kilos: 22.4, fuera: 0, sin_peso: 0, lotes: 0, cuadrillas: 0 });
   // Y la duda de la IA se va: la tenía porque no pudo leerlo, y ahora lo leyó
   // una persona.
   assert.equal(x.p.GFOT.filas[1].duda, null);
@@ -246,7 +263,7 @@ test('escribir el peso saca la fila del rojo y la suma', async () => {
 test('destildar una fila la saca del total y se nota', async () => {
   const x = await hastaRevisar();
   x.p.galFotoFila(0, 'excluida', true);
-  assert.deepEqual(x.p.galFotoTotal(), { cargas: 2, kilos: 25.1, fuera: 1, sin_peso: 0 });
+  assert.deepEqual(x.p.galFotoTotal(), { cargas: 2, kilos: 25.1, fuera: 1, sin_peso: 0, lotes: 0, cuadrillas: 0 });
   assert.match(x.dom.nodos['gal-foto-tot'].innerHTML, /1 fuera/);
   assert.match(x.dom.nodos['gal-foto-body'].innerHTML, /gfo-fuera/);
 });
@@ -548,4 +565,157 @@ test('la fecha del papel NO se hereda de la planilla anterior', async () => {
   assert.equal(x.p.GFOT.fechaPapel, null);
   x.p.galFotoAbrir();
   assert.equal(x.p.GFOT.fechaPapel, null);
+});
+
+// ══════════════════════════════════════════════════════════════════════════
+// 7 · UNA HOJA MEZCLADA: LOTE Y CUADRILLA POR RENGLÓN (V1137)
+// ══════════════════════════════════════════════════════════════════════════
+//
+// Andy, 2/11/2026: «a veces en la misma hoja tenemos algunos cajones que son
+// de una cuadrilla y otros de otra. Y fincas también puede pasar lo mismo».
+//
+// El encabezado dejó de ser LA respuesta y pasó a ser el valor POR OMISIÓN.
+// Lo que puede salir mal es callado y es siempre el mismo: que la pantalla
+// muestre una cosa y el POST mande otra. Un lote mal atribuido no se nota
+// nunca —los kilos están, el total cierra— y cruza el rinde de dos cuadros
+// para toda la temporada.
+
+// Una hoja de dos fincas: el primero lo resolvió el servidor, el otro no.
+const MEZCLA = () => ({
+  ok: true, fecha: null, cultivo: null, avisos: [],
+  filas: [FILA(13, 1, 10.5, { lote_id: 11, finca: 'La Estación', lote: 'Cuadro 4' }),
+          FILA(13, 2, 11, { finca: 'La Quinta', lote_motivo: 'no hay ninguna finca «La Quinta»' })],
+});
+
+test('CADA RENGLÓN TRAE SU DESPLEGABLE, con lo del papel ya elegido', async () => {
+  const x = await hastaRevisar(MEZCLA());
+  const b = x.dom.nodos['gal-foto-body'].innerHTML;
+  assert.match(b, /galFotoFila\(0, 'lote_id'/);
+  assert.match(b, /galFotoFila\(1, 'cuadrilla_id'/);
+  /* EL PRIMERO VIENE CON EL LOTE DEL PAPEL SELECCIONADO, Y SE MIRA EN LO PINTADO
+     y no en el armador suelto. Lo agarró la prueba de mutación: pintar el renglón
+     con galFotoLoteOpts(null) —o sea tirando lo que el servidor resolvió— dejaba
+     todos los tests en verde. Y el síntoma es que la función entera no sirve de
+     nada: el operador ve «↑ el de arriba» en los veintiún renglones y los elige a
+     mano igual, sin enterarse de que el papel ya lo decía. */
+  assert.match(b, /value="11" data-cultivo="[^"]*" selected/,
+    'el renglón se pinta sin el lote que vino del papel');
+  // Y el segundo, el que no se pudo resolver, queda heredando.
+  const fila2 = b.slice(b.indexOf('<tr', b.indexOf('<tr') + 1));
+  assert.ok(!/value="1[12]"[^>]*selected/.test(fila2),
+    'el renglón sin resolver viene con un lote elegido: alguien lo eligió por él');
+  assert.match(x.p.galFotoLoteOpts(11), /value="11" data-cultivo="[^"]*" selected/);
+  // Y la primera opción vale vacío: heredar es lo normal.
+  assert.match(x.p.galFotoLoteOpts(null), /<option value="">↑ el de arriba<\/option>/);
+  assert.match(x.p.galFotoCuadOpts(null), /<option value="">↑ la de arriba<\/option>/);
+  assert.match(x.p.galFotoCuadOpts(2), /value="2" selected/);
+});
+
+test('LO DE LA FILA ES LO QUE VIAJA, y lo que no dijo nada hereda', async () => {
+  const x = await hastaRevisar(MEZCLA());
+  x.dom.nodos['gal-foto-lote'].value = '10';
+  x.p.galCuadPintar('gal-foto-cuads', [1]);
+  // El segundo renglón: su cuadrilla y su lote, elegidos a mano.
+  x.p.galFotoFila(1, 'lote_id', '12');
+  x.p.galFotoFila(1, 'cuadrilla_id', '2');
+  await x.p.galFotoCargar();
+
+  const cargas = x.pedidos.filter((q) => q[0] === '/api/galpon/volcados').map((q) => q[1]);
+  assert.equal(cargas.length, 2);
+  // El primero: el lote del papel (11, no el 10 de arriba) y la cuadrilla de arriba.
+  assert.equal(cargas[0].lote_id, 11);
+  assert.deepEqual(cargas[0].cuadrilla_ids, ['1']);
+  // El segundo: los dos elegidos a mano.
+  assert.equal(cargas[1].lote_id, '12');
+  assert.deepEqual(cargas[1].cuadrilla_ids, ['2']);
+});
+
+test('volver a «↑ el de arriba» vuelve a heredar', async () => {
+  /* El <select> manda '' en esa opción. Tratado como un valor, el renglón se
+     cargaría sin lote — y el encabezado está elegido y a la vista. */
+  const x = await hastaRevisar(MEZCLA());
+  x.dom.nodos['gal-foto-lote'].value = '10';
+  x.p.galFotoFila(0, 'lote_id', '');
+  await x.p.galFotoCargar();
+  const cargas = x.pedidos.filter((q) => q[0] === '/api/galpon/volcados').map((q) => q[1]);
+  assert.equal(cargas[0].lote_id, '10');
+});
+
+test('la cuadrilla del renglón REEMPLAZA a las dos de arriba, no se suma', async () => {
+  /* Arriba pueden ser dos: el cajón que llenaron entre las dos, y los kilos se
+     reparten en partes iguales (V1133). El renglón que dice «Sur» dice que ESE
+     cajón es de la Sur entero. Sumarlas repartiría sus kilos en tres. */
+  const x = await hastaRevisar(MEZCLA());
+  x.dom.nodos['gal-foto-lote'].value = '10';
+  x.p.galCuadPintar('gal-foto-cuads', [1, 2]);
+  x.p.galFotoFila(1, 'cuadrilla_id', '2');
+  await x.p.galFotoCargar();
+  const cargas = x.pedidos.filter((q) => q[0] === '/api/galpon/volcados').map((q) => q[1]);
+  assert.deepEqual(cargas[0].cuadrilla_ids, ['1', '2']);
+  assert.deepEqual(cargas[1].cuadrilla_ids, ['2']);
+});
+
+test('EL LOTE DE ARRIBA NO SE PIDE SI NINGÚN RENGLÓN LO NECESITA', async () => {
+  /* Con las dos fincas resueltas desde el papel, exigir uno arriba obligaría a
+     elegir al azar — y ése es justo el que se le atribuiría a cualquier renglón
+     que quedara sin resolver. */
+  const x = await hastaRevisar({
+    ok: true, avisos: [],
+    filas: [FILA(13, 1, 10, { lote_id: 11 }), FILA(13, 2, 11, { lote_id: 12 })],
+  });
+  assert.equal(x.dom.nodos['gal-foto-lote'].value, '');
+  await x.p.galFotoCargar();
+  assert.equal(x.dom.nodos['gal-foto-error'].style.display, 'none',
+    'pide el lote de arriba aunque los dos renglones lo traen del papel');
+  const cargas = x.pedidos.filter((q) => q[0] === '/api/galpon/volcados').map((q) => q[1]);
+  assert.deepEqual(cargas.map((c) => c.lote_id), [11, 12]);
+});
+
+test('pero SÍ se pide si alguno quedó sin resolver', async () => {
+  const x = await hastaRevisar(MEZCLA());
+  await x.p.galFotoCargar();
+  assert.equal(x.dom.nodos['gal-foto-error'].style.display, '');
+  assert.match(x.dom.nodos['gal-foto-error'].textContent, /Elegí el lote/);
+  assert.match(x.dom.nodos['gal-foto-error'].textContent, /no lo traen del papel/);
+  // Y no mandó nada: o entran todas con su lote, o no entra ninguna.
+  assert.equal(x.pedidos.filter((q) => q[0] === '/api/galpon/volcados').length, 0);
+});
+
+test('un renglón sin peso no obliga a elegir el lote de arriba', async () => {
+  /* No se va a cargar, así que su lote no importa. Pedirlo por él sería frenar
+     una hoja entera por el renglón que justamente se dejó afuera. */
+  const x = await hastaRevisar({
+    ok: true, avisos: [],
+    filas: [FILA(13, 1, 10, { lote_id: 11 }),
+            FILA(13, 2, null, { duda: 'borroso' })],
+  });
+  await x.p.galFotoCargar();
+  assert.equal(x.dom.nodos['gal-foto-error'].style.display, 'none');
+});
+
+test('EL TOTAL DICE CUÁNTOS LOTES Y CUÁNTAS CUADRILLAS VAN A QUEDAR', async () => {
+  /* Es el control de que una hoja mezclada se cargó mezclada: el papel tenía dos
+     fincas y si acá dice «1 lote» es que las dos se fueron al mismo. */
+  const x = await hastaRevisar(MEZCLA());
+  x.dom.nodos['gal-foto-lote'].value = '10';
+  x.p.galCuadPintar('gal-foto-cuads', [1]);
+  x.p.galFotoFila(1, 'cuadrilla_id', '2');
+  const t = x.p.galFotoTotal();
+  assert.equal(t.lotes, 2, 'el papel traía dos fincas y el total dice una');
+  assert.equal(t.cuadrillas, 2);
+  assert.match(x.dom.nodos['gal-foto-tot'].innerHTML, /<b>2<\/b> lotes/);
+  assert.match(x.dom.nodos['gal-foto-tot'].innerHTML, /<b>2<\/b> cuadrillas/);
+});
+
+test('y con una hoja de un solo lote no dice nada', async () => {
+  /* Un «1 lote» que sale en todas las planillas es ruido, y el ruido es lo que
+     hace que no se lea el «2 lotes» del día que importa. */
+  const x = await hastaRevisar();
+  x.dom.nodos['gal-foto-lote'].value = '10';
+  x.p.galFotoPintar();
+  assert.equal(x.p.galFotoTotal().lotes, 1);
+  // Sin cuadrilla elegida en ningún lado son CERO, no una: no se eligió ninguna.
+  assert.equal(x.p.galFotoTotal().cuadrillas, 0);
+  assert.ok(!/ lotes/.test(x.dom.nodos['gal-foto-tot'].innerHTML));
+  assert.ok(!/ cuadrillas/.test(x.dom.nodos['gal-foto-tot'].innerHTML));
 });

@@ -34,11 +34,19 @@ function base() {
 
     CREATE TABLE pa_lotes (id INTEGER PRIMARY KEY, nombre TEXT, sector_id INTEGER,
                            finca TEXT, activo INTEGER DEFAULT 1);
-    INSERT INTO pa_lotes (id,nombre,finca,activo) VALUES (10,'Cuadro 3','La Estación',1);
+    /* Cuatro lotes a propósito, y no uno: con uno solo, resolver la finca del papel
+       acertaría siempre y el test no distinguiría «lo encontró» de «eligió el único».
+       La Estación tiene DOS —así que la finca sola no alcanza— y Las Peñas una. */
+    INSERT INTO pa_lotes (id,nombre,finca,activo) VALUES
+      (10,'Cuadro 3','La Estación',1),
+      (11,'Cuadro 4','La Estación',1),
+      (12,'Peñas Sur','Las Peñas',1),
+      (13,'Viejo','Las Peñas',0);
+    CREATE TABLE pa_sectores (id INTEGER PRIMARY KEY, nombre TEXT, tipo TEXT);
     CREATE TABLE pa_cultivos_lote (id INTEGER PRIMARY KEY, lote_id INTEGER, cultivo TEXT,
                                    campaña TEXT, es_perenne INTEGER DEFAULT 0);
     CREATE TABLE pa_cuadrillas (id INTEGER PRIMARY KEY, nombre TEXT, activo INTEGER DEFAULT 1);
-    INSERT INTO pa_cuadrillas (id,nombre,activo) VALUES (1,'Norte',1);
+    INSERT INTO pa_cuadrillas (id,nombre,activo) VALUES (1,'Norte',1), (2,'Sur',1);
     CREATE TABLE gal_cuadrilla_tarjetas (
       id INTEGER PRIMARY KEY AUTOINCREMENT, cuadrilla_id INTEGER NOT NULL,
       desde_id INTEGER NOT NULL, hasta_id INTEGER NOT NULL,
@@ -365,5 +373,110 @@ t('y las cargas se siguen creando por el POST de siempre, una por fila', async (
     // Y el uuid hace que repetir el mismo envío no duplique.
     await s.pegar('/volcados', json({ uuid: 'u-48', fecha: HOY, lote_id: 10, kilos: 15.9 }));
     assert.equal((await (await s.pegar('/volcados?fecha=' + HOY)).json()).resumen.cargas, 3);
+  } finally { s.cerrar(); }
+});
+
+// ══════════════════════════════════════════════════════════════════════════
+// LA FINCA Y EL LOTE DEL PAPEL, RESUELTOS CONTRA EL PADRÓN (V1137)
+// ══════════════════════════════════════════════════════════════════════════
+//
+// Andy, 2/11/2026: «a veces en la misma hoja tenemos algunos cajones que son
+// de una cuadrilla y otros de otra. Y fincas también puede pasar lo mismo».
+//
+// Se resuelve EN EL SERVIDOR porque acá está el padrón y se puede probar con
+// una base de verdad. La pantalla recibe el lote_id ya puesto en cada fila.
+
+// Dos fincas en la misma hoja, que es el caso que Andy describió. Las Peñas
+// tiene un solo lote activo, así que la finca sola alcanza; La Estación tiene
+// dos y hace falta el nombre del lote.
+const MEZCLADA = JSON.stringify({
+  fecha: null, cultivo: null,
+  filas: [
+    { viaje: 13, finca: 'La Estación', lote: null, numero: 1, kilos: 10.5, sanitario: 'B' },
+    { viaje: 13, finca: 'Las Peñas', lote: null, numero: 2, kilos: 11, sanitario: 'B' },
+    { viaje: 13, finca: 'La Estacion', lote: 'Cuadro 4', numero: 3, kilos: 12, sanitario: null },
+    { viaje: 13, finca: 'La Quinta', lote: null, numero: 4, kilos: 13, sanitario: null },
+  ],
+});
+
+t('LA PANTALLA RECIBE EL LOTE YA RESUELTO', async () => {
+  const s = await servidor(base(), OPERADOR, { texto: MEZCLADA });
+  try {
+    const j = await (await s.pegar('/volcados/leer-foto', json({ imagen: JPG }))).json();
+    assert.equal(j.ok, true);
+    /* La Estación sin nombre de lote → null, porque tiene dos y elegir uno sería
+       tirar una moneda. Las Peñas → su único lote ACTIVO. «La Estacion» sin tilde
+       → La Estación, porque el acento no lo escribe nadie al transcribir. La
+       Quinta no existe → null. */
+    assert.deepEqual(j.filas.map((f) => f.lote_id), [null, 12, 11, null]);
+    assert.equal(j.lotes_resueltos, 2);
+  } finally { s.cerrar(); }
+});
+
+t('lo que no pudo resolver vuelve con el motivo escrito, agrupado', async () => {
+  const s = await servidor(base(), OPERADOR, { texto: MEZCLADA });
+  try {
+    const j = await (await s.pegar('/volcados/leer-foto', json({ imagen: JPG }))).json();
+    const t = (j.avisos || []).join(' | ');
+    assert.match(t, /La Estación» tiene 2 lotes/);
+    assert.match(t, /no hay ninguna finca «La Quinta»/);
+    // Y el motivo también viaja en la fila, para poder marcarla.
+    assert.match(j.filas[3].lote_motivo, /La Quinta/);
+    assert.match(j.filas[0].lote_motivo, /tiene 2 lotes/);
+    // La que sí resolvió no lleva motivo: no hay nada que decirle al operador.
+    assert.equal(j.filas[1].lote_motivo, null);
+  } finally { s.cerrar(); }
+});
+
+t('un lote INACTIVO no se propone', async () => {
+  /* El padrón de la base tiene «Viejo» en Las Peñas con activo=0. Si entrara,
+     Las Peñas tendría dos lotes y la finca sola dejaría de alcanzar — y peor,
+     podría proponerse un cuadro que ya no se cosecha. */
+  const s = await servidor(base(), OPERADOR, { texto: MEZCLADA });
+  try {
+    const j = await (await s.pegar('/volcados/leer-foto', json({ imagen: JPG }))).json();
+    assert.equal(j.filas[1].lote_id, 12);
+  } finally { s.cerrar(); }
+});
+
+t('Y SI EL PADRÓN FALLA, LA LECTURA VUELVE IGUAL', async () => {
+  /* Resolver el lote es una comodidad; la lectura es lo que costó una llamada
+     al modelo y treinta segundos de alguien parado con la planilla en la mano.
+     Perderla entera por una consulta caída sería cambiar lo barato por lo caro
+     — y el operador no puede distinguir eso de «la IA no anda»: elegiría los
+     lotes a mano igual, pero después de volver a sacar la foto. */
+  const db = base();
+  db.exec('DROP TABLE pa_sectores');
+  const s = await servidor(db, OPERADOR, { texto: MEZCLADA });
+  try {
+    const r = await s.pegar('/volcados/leer-foto', json({ imagen: JPG }));
+    assert.equal(r.status, 200, 'se perdió la lectura por el padrón');
+    const j = await r.json();
+    assert.equal(j.filas.length, 4);
+    assert.deepEqual(j.filas.map((f) => f.kilos), [10.5, 11, 12, 13]);
+    // Sin resolver, pero los kilos están.
+    assert.equal(j.lotes_resueltos, 0);
+  } finally { s.cerrar(); }
+});
+
+t('EL ÍDEM SE RESUELVE ANTES: una celda vacía debajo de «Cuadro 4» ES Cuadro 4', async () => {
+  /* En el papel el lote se escribe una vez y abajo van comillas, así que resolver
+     contra el padrón tiene que pasar DESPUÉS de propagarlo. Al revés, cada fila con
+     la celda vacía quedaría sin lote y habría que elegirlo veinte veces a mano —
+     justo lo que esto vino a sacar. */
+  const idem = JSON.stringify({
+    fecha: null, cultivo: null,
+    filas: [
+      { viaje: 13, finca: 'La Estación', lote: 'Cuadro 4', numero: 1, kilos: 9 },
+      { viaje: null, finca: null, lote: null, numero: 2, kilos: 10 },
+      { viaje: null, finca: '"', lote: '"', numero: 3, kilos: 11 },
+    ],
+  });
+  const s = await servidor(base(), OPERADOR, { texto: idem });
+  try {
+    const j = await (await s.pegar('/volcados/leer-foto', json({ imagen: JPG }))).json();
+    assert.deepEqual(j.filas.map((f) => f.lote_id), [11, 11, 11]);
+    assert.equal(j.lotes_resueltos, 3);
+    assert.deepEqual(j.avisos || [], []);
   } finally { s.cerrar(); }
 });

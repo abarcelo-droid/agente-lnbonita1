@@ -28,6 +28,7 @@ import assert from 'node:assert/strict';
 import {
   promptPlanilla, jsonDeRespuesta, filasDePlanilla, totalDePlanilla,
   saltoDeNumeracion, enteroPlanilla, fotoDeDataUrl, cargaDeFila,
+  cuadrillasDeFila, normPapel, loteDePapel, resolverLotes,
   TIPOS_FOTO, FOTO_MAX_BYTES, MAX_FILAS,
 } from '../src/servicios/galponPlanillaOCR.js';
 
@@ -406,4 +407,158 @@ test('enteroPlanilla no deja pasar el cero: no hay bolsón número cero', () => 
   assert.equal(enteroPlanilla(''), null);
   assert.equal(enteroPlanilla(null), null);
   assert.equal(enteroPlanilla('hola'), null);
+});
+
+// ══════════════════════════════════════════════════════════════════════════
+// UNA HOJA MEZCLADA: DOS CUADRILLAS Y DOS FINCAS (V1137)
+// ══════════════════════════════════════════════════════════════════════════
+//
+// Andy, 2/11/2026: «a veces en la misma hoja tenemos algunos cajones que son
+// de una cuadrilla y otros de otra. Y fincas también puede pasar lo mismo».
+//
+// El encabezado dejó de ser LA respuesta y pasó a ser el valor POR OMISIÓN.
+// Y el papel YA trae las columnas Finca y «Lote y/o Llave», así que
+// preguntárselas renglón por renglón sería pedirle a una persona que
+// transcriba lo que acaba de transcribir una máquina.
+//
+// LO QUE NO SE HACE ES ADIVINAR. Un lote mal atribuido no se nota nunca —los
+// kilos están, el total cierra— y deja el rinde de dos cuadros cruzado para
+// toda la temporada. Con dos candidatos, o con ninguno, devuelve null y el
+// motivo escrito.
+
+// Cuatro lotes a propósito: con uno solo, resolver «la finca» acertaría
+// siempre y el test no distinguiría encontrarlo de elegir el único que hay.
+const PADRON = [
+  { id: 10, nombre: 'Cuadro 3', finca: 'La Estación' },
+  { id: 11, nombre: 'Cuadro 4', finca: 'La Estación' },
+  { id: 12, nombre: 'Peñas Sur', finca: 'Las Peñas' },
+  { id: 13, nombre: 'San José', finca: 'San José' },
+];
+
+test('EL ACENTO SE CAE Y LA Ñ QUEDA', () => {
+  /* El acento pide una tecla muerta y nadie lo escribe al transcribir, así que
+     «La Estacion» tiene que encontrar «La Estación». La Ñ NO: es una letra del
+     idioma y tiene tecla propia, y «Las Penas» y «Las Peñas» pueden ser dos
+     fincas distintas — confundirlas manda los kilos al campo de al lado.
+     Es la misma regla que sgNorm en el panel (CLAUDE.md). */
+  assert.equal(normPapel('La Estación'), 'la estacion');
+  assert.equal(normPapel('LA ESTACION'), 'la estacion');
+  assert.equal(normPapel('Las Peñas'), 'las peñas');
+  assert.notEqual(normPapel('Las Peñas'), normPapel('Las Penas'));
+  // Y los separadores no cuentan: en el papel se escribe como sale.
+  assert.equal(normPapel('  cuadro-3 '), 'cuadro 3');
+  assert.equal(normPapel('Cuadro  3'), 'cuadro 3');
+  assert.equal(normPapel(null), '');
+});
+
+test('LA FINCA Y EL LOTE DEL PAPEL ENCUENTRAN EL LOTE', () => {
+  assert.equal(loteDePapel(PADRON, 'La Estacion', 'Cuadro 3').lote_id, 10);
+  assert.equal(loteDePapel(PADRON, 'LA ESTACIÓN', 'cuadro 4').lote_id, 11);
+  // Sin finca, con el nombre del lote solo, también.
+  assert.equal(loteDePapel(PADRON, null, 'Peñas Sur').lote_id, 12);
+});
+
+test('la finca sola alcanza si tiene UN lote, y si no, no', () => {
+  // Las Peñas tiene uno: es el caso de la finca chica, el más frecuente.
+  assert.equal(loteDePapel(PADRON, 'Las Peñas', null).lote_id, 12);
+  // La Estación tiene dos. Elegir uno sería tirar una moneda.
+  const r = loteDePapel(PADRON, 'La Estación', null);
+  assert.equal(r.lote_id, null);
+  assert.match(r.motivo, /tiene 2 lotes/);
+});
+
+test('NO ADIVINA, Y DICE POR QUÉ', () => {
+  const a = loteDePapel(PADRON, 'La Quinta', 'Cuadro 1');
+  assert.equal(a.lote_id, null);
+  assert.match(a.motivo, /no hay ninguna finca «La Quinta»/);
+
+  const b = loteDePapel(PADRON, 'La Estación', 'Cuadro 9');
+  assert.equal(b.lote_id, null);
+  assert.match(b.motivo, /no hay ningún lote «Cuadro 9»/);
+  assert.match(b.motivo, /en la finca «La Estación»/);
+
+  // Dos lotes con el mismo nombre en fincas distintas, sin finca en el papel.
+  const dup = PADRON.concat([{ id: 14, nombre: 'Cuadro 3', finca: 'San José' }]);
+  const c = loteDePapel(dup, null, 'Cuadro 3');
+  assert.equal(c.lote_id, null);
+  assert.match(c.motivo, /hay 2 lotes «Cuadro 3»/);
+});
+
+test('y si el papel no dijo nada, no es un problema', () => {
+  /* Es el caso normal de la hoja de un solo lote: queda el del encabezado y no
+     se avisa nada. Un aviso acá saldría en todas las planillas y en dos días
+     nadie lee ninguno. */
+  const r = loteDePapel(PADRON, null, null);
+  assert.equal(r.lote_id, null);
+  assert.equal(r.motivo, null);
+});
+
+test('RESOLVER TODAS: los avisos se agrupan, no se repiten veintiuna veces', () => {
+  const filas = [
+    { finca: 'Las Peñas', lote: null, kilos: 10 },
+    { finca: 'La Quinta', lote: null, kilos: 11 },
+    { finca: 'La Quinta', lote: null, kilos: 12 },
+    { finca: 'La Quinta', lote: null, kilos: 13 },
+    { finca: 'La Estación', lote: 'Cuadro 4', kilos: 14 },
+  ];
+  const r = resolverLotes(PADRON, filas);
+  assert.deepEqual(r.filas.map((f) => f.lote_id), [12, null, null, null, 11]);
+  assert.equal(r.resueltos, 2);
+  // UN aviso para los tres renglones de La Quinta, con la cuenta.
+  assert.equal(r.avisos.length, 1);
+  assert.match(r.avisos[0], /La Quinta/);
+  assert.match(r.avisos[0], /3 renglones/);
+});
+
+test('resolver no pisa lo que la fila ya traía', () => {
+  // Devuelve copias: el kilo, el viaje y la observación siguen ahí.
+  const r = resolverLotes(PADRON, [{ finca: 'Las Peñas', viaje: 13, kilos: 9.7, ok: true }]);
+  assert.equal(r.filas[0].kilos, 9.7);
+  assert.equal(r.filas[0].viaje, 13);
+  assert.equal(r.filas[0].ok, true);
+  assert.equal(r.filas[0].lote_id, 12);
+  assert.equal(r.filas[0].lote_motivo, null);
+});
+
+test('LO DE LA FILA LE GANA AL ENCABEZADO', () => {
+  const comun = { fecha: '2026-11-20', lote_id: '10', cuadrilla_ids: ['1'] };
+  // Sin nada propio, hereda.
+  const a = cargaDeFila({ kilos: 9 }, comun);
+  assert.equal(a.lote_id, '10');
+  assert.deepEqual(a.cuadrilla_ids, ['1']);
+  // Con lo suyo, manda lo suyo.
+  const b = cargaDeFila({ kilos: 9, lote_id: 12, cuadrilla_id: '2' }, comun);
+  assert.equal(b.lote_id, 12);
+  assert.deepEqual(b.cuadrilla_ids, ['2']);
+});
+
+test('«el de arriba» es el vacío, no el cero', () => {
+  /* El <select> manda '' cuando está en «↑ el de arriba». Si se tratara como un
+     valor, el renglón se cargaría sin lote y el servidor lo rebotaría — con el
+     encabezado elegido y a la vista. */
+  const comun = { lote_id: '10', cuadrilla_ids: ['1'] };
+  const c = cargaDeFila({ kilos: 9, lote_id: '', cuadrilla_id: '' }, comun);
+  assert.equal(c.lote_id, '10');
+  assert.deepEqual(c.cuadrilla_ids, ['1']);
+});
+
+test('la cuadrilla de la fila es UNA y reemplaza a las dos de arriba', () => {
+  /* Arriba pueden ser dos —el cajón que llenaron entre las dos, V1133— y el
+     reparto es en partes iguales. El renglón que dice «Sur» dice que ESE cajón
+     es de la Sur entero: reemplaza, no se suma. */
+  const comun = { cuadrilla_ids: ['1', '2'] };
+  assert.deepEqual(cuadrillasDeFila({}, comun), ['1', '2']);
+  assert.deepEqual(cuadrillasDeFila({ cuadrilla_id: '2' }, comun), ['2']);
+  // Y sin nada en ningún lado, una lista vacía y no un undefined.
+  assert.deepEqual(cuadrillasDeFila({}, {}), []);
+  assert.deepEqual(cuadrillasDeFila(null, null), []);
+});
+
+test('el prompt sigue pidiendo la finca y el lote de cada fila', () => {
+  /* Resolver contra el padrón no sirve de nada si el lector deja de traerlas, y
+     eso no se vería: todos los renglones quedarían en «el de arriba», que es
+     exactamente como se veía antes de la V1137. */
+  assert.match(promptPlanilla(), /"finca": string o null/);
+  assert.match(promptPlanilla(), /"lote": string o null/);
+  assert.match(promptPlanilla(), /EL VIAJE, LA FINCA Y EL LOTE SE ESCRIBEN UNA SOLA VEZ/);
 });

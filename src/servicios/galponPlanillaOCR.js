@@ -312,9 +312,20 @@ export function cargaDeFila(fila, comun) {
   const f = fila || {};
   return {
     fecha: c.fecha,
-    lote_id: c.lote_id,
+    /* ── LO DE LA FILA LE GANA AL ENCABEZADO ──────────────────────────────────────
+       Andy, 2/11/2026: «a veces en la misma hoja tenemos algunos cajones que son de
+       una cuadrilla y otros de otra. Y fincas también puede pasar lo mismo».
+
+       El encabezado dejó de ser LA respuesta y pasó a ser el valor POR OMISIÓN: lo
+       que vale para los renglones que no dijeron otra cosa. Que una hoja mezclada
+       obligue a cargarla en dos tandas es pedirle al operador que parta el papel.
+
+       Y el lote de la fila puede venir de dos lados: de la columna Finca/Lote del
+       papel —resuelta contra el padrón por loteDePapel(), abajo— o de que alguien lo
+       eligió en la pantalla. Para acá son lo mismo: lo que la fila diga, manda. */
+    lote_id: f.lote_id != null && f.lote_id !== '' ? f.lote_id : c.lote_id,
     producto: c.producto || null,
-    cuadrilla_ids: Array.isArray(c.cuadrilla_ids) ? c.cuadrilla_ids : [],
+    cuadrilla_ids: cuadrillasDeFila(f, c),
     kilos: f.kilos,
     // UNO. Cada fila del papel es un bolsón, igual que en la carga rápida: es lo que
     // hace que el promedio por cajón signifique algo.
@@ -329,4 +340,100 @@ export function cargaDeFila(fila, comun) {
     // todo 'manual': lo tipeó una persona en el papel y lo transcribió una máquina.
     origen: 'manual',
   };
+}
+
+/* Las cuadrillas de un renglón. La de la fila es UNA —en la tabla de revisión no
+   entra una lista por renglón, y con veintiún renglones tampoco se querría— y la del
+   encabezado pueden ser varias, que es el caso de dos cuadrillas en el mismo cajón
+   (V1133). Las dos cosas conviven: el encabezado reparte el cajón entre las que
+   estuvieron, y la fila lo atribuye entero a una.
+
+   Si hiciera falta un renglón con DOS cuadrillas distintas de las del encabezado, se
+   carga y se corrige en la lista de atrás, que sí tiene la lista completa. Es raro y
+   no vale meterle una lista desplegable a cada una de veintiún filas. */
+export function cuadrillasDeFila(fila, comun) {
+  const f = fila || {};
+  const c = comun || {};
+  if (f.cuadrilla_id != null && f.cuadrilla_id !== '') return [f.cuadrilla_id];
+  return Array.isArray(c.cuadrilla_ids) ? c.cuadrilla_ids : [];
+}
+
+// ── EL PAPEL YA DICE LA FINCA Y EL LOTE ──────────────────────────────────────────────
+//
+// La planilla tiene las columnas «Finca» y «Lote y/o Llave», y el lector ya las trae.
+// Preguntárselas igual renglón por renglón sería pedirle a una persona que transcriba
+// lo que acaba de transcribir una máquina.
+//
+// LO QUE NO SE HACE ES ADIVINAR. Un lote mal atribuido no se nota nunca: los kilos
+// están, el total cierra, y el rinde de dos cuadros queda cruzado para toda la
+// temporada. Así que se resuelve sólo cuando hay UN candidato y nada más; con dos, con
+// ninguno, o con la finca sola y cuatro lotes adentro, se devuelve null con el motivo
+// escrito y lo elige una persona.
+//
+// LA Ñ QUEDA (CLAUDE.md). «Peñas» y «Penas» son dos palabras y pueden ser dos fincas;
+// el acento sí se cae, porque nadie lo escribe al transcribir.
+export function normPapel(v) {
+  return String(v == null ? '' : v)
+    .replace(/ñ/gi, '\u0001')
+    .normalize('NFD').replace(/\p{M}/gu, '')
+    .replace(/\u0001/g, 'ñ')
+    .toLowerCase()
+    .replace(/[^a-z0-9ñ]+/g, ' ')
+    .trim();
+}
+
+// Devuelve { lote_id, motivo }. lote_id null significa «decidilo vos», nunca «no hay».
+export function loteDePapel(lotes, finca, lote) {
+  const L = Array.isArray(lotes) ? lotes : [];
+  const f = normPapel(finca);
+  const n = normPapel(lote);
+  // El papel no dijo nada: no es un problema, es el caso normal de la hoja de un solo
+  // lote. Queda el del encabezado y no se avisa nada.
+  if (!f && !n) return { lote_id: null, motivo: null };
+
+  let cand = L;
+  if (f) {
+    cand = L.filter((x) => normPapel(x.finca) === f);
+    if (!cand.length) {
+      return { lote_id: null, motivo: 'no hay ninguna finca «' + String(finca).trim() + '»' };
+    }
+  }
+
+  if (n) {
+    const exacto = cand.filter((x) => normPapel(x.nombre) === n);
+    if (exacto.length === 1) return { lote_id: exacto[0].id, motivo: null };
+    const donde = f ? ' en la finca «' + String(finca).trim() + '»' : '';
+    if (exacto.length > 1) {
+      return { lote_id: null,
+               motivo: 'hay ' + exacto.length + ' lotes «' + String(lote).trim() + '»' + donde };
+    }
+    return { lote_id: null,
+             motivo: 'no hay ningún lote «' + String(lote).trim() + '»' + donde };
+  }
+
+  /* Sólo la finca. Alcanza cuando tiene UN lote: es el caso de una finca chica, y es
+     el que más se repite en estas planillas. Con más de uno, no. */
+  if (cand.length === 1) return { lote_id: cand[0].id, motivo: null };
+  return { lote_id: null,
+           motivo: 'la finca «' + String(finca).trim() + '» tiene ' + cand.length
+                 + ' lotes: elegí cuál' };
+}
+
+/* Resuelve TODAS las filas y junta los avisos. Agrupados por motivo y con la cuenta:
+   veintiún renglones que dicen lo mismo son un aviso, no veintiuno — un cartel de
+   veintiuna líneas tapa la tabla que hay que revisar. */
+export function resolverLotes(lotes, filas) {
+  const l = Array.isArray(filas) ? filas : [];
+  const cuenta = new Map();
+  let resueltos = 0;
+  const out = l.map((f) => {
+    const r = loteDePapel(lotes, f && f.finca, f && f.lote);
+    if (r.lote_id != null) resueltos++;
+    if (r.motivo) cuenta.set(r.motivo, (cuenta.get(r.motivo) || 0) + 1);
+    return Object.assign({}, f, { lote_id: r.lote_id, lote_motivo: r.motivo });
+  });
+  const avisos = [...cuenta.entries()].map(([m, n]) => (
+    'El papel dice algo que no encuentro: ' + m + ' (' + n + ' renglon'
+    + (n === 1 ? '' : 'es') + '). Elegí el lote a mano.'));
+  return { filas: out, avisos, resueltos };
 }
