@@ -1770,6 +1770,22 @@ export function editarProceso(db, id, d) {
   if (!fila) return { ok: false, motivo: 'Ese proceso no existe o ya se borró' };
   const dd = d || {};
 
+  /* ── UNA CARGA SE CORRIGE ENTERA ──────────────────────────────────────────────
+     Andy, 4/11/2026: «no lo abras por LOTE... sólo me interesa cómo viene el
+     proceso».
+
+     Desde que la pantalla muestra una fila por CARGA, corregir un pedazo sería
+     peor que antes: el operador ve 90 kg, aprieta el lápiz y le cambia los kilos
+     a los 3,33 de uno de los tres lotes. Lo que ve y lo que toca tienen que ser
+     la misma cosa.
+
+     Con un lote solo el grupo es de uno y nada de esto cambia. */
+  const grupo = fila.reparto
+    ? db.prepare('SELECT * FROM gal_procesos WHERE reparto = ? AND eliminado_en IS NULL'
+        + ' ORDER BY id').all(fila.reparto)
+    : [fila];
+  const esGrupo = grupo.length > 1;
+
   const sets = [], val = [];
   const poner = (col, v) => { sets.push(col + ' = ?'); val.push(v); };
 
@@ -1785,6 +1801,16 @@ export function editarProceso(db, id, d) {
      cargar — creerle el que manda la pantalla escribiría dos nombres para el mismo
      lote y el rinde los contaría separados. */
   if ('lote_id' in dd) {
+    /* EN UNA MEZCLA, NO. Cambiar «el lote» de una carga repartida entre tres no
+       quiere decir nada: o se la manda entera a uno —y entonces el reparto que la
+       prorrateó deja de tener sentido— o hay que elegir cuál de los tres se mueve,
+       que es volver a abrir la carga por lote. Se borra y se carga de nuevo, que es
+       lo que la ventana ya recomendaba. */
+    if (esGrupo) {
+      return { ok: false, motivo: 'Esta carga se repartió entre ' + grupo.length
+        + ' lotes, así que no se le puede cambiar el lote desde acá. Borrala —se van'
+        + ' las ' + grupo.length + ' juntas— y cargala de nuevo con los lotes que van.' };
+    }
     const l = parseInt(dd.lote_id, 10);
     if (!Number.isFinite(l) || l <= 0) return { ok: false, motivo: 'Elegí el lote' };
     const lote = db.prepare(
@@ -1830,29 +1856,52 @@ export function editarProceso(db, id, d) {
     poner('kg_unidad', pres.granel ? null : pres.kg_unidad);
   }
 
-  let kg = fila.kilos;
+  /* LOS TOTALES SON LOS DE LA CARGA, no los de la fila: es lo que la pantalla
+     muestra y lo que el operador acaba de tipear. */
+  const totalKg = round2(grupo.reduce((t, x) => t + (Number(x.kilos) || 0), 0));
+  const totalBultos = grupo[0].bultos == null
+    ? null : round2(grupo.reduce((t, x) => t + (Number(x.bultos) || 0), 0));
+
+  let kg = totalKg;
   /* Si cambió la presentación, manda la nueva; si no, la que tenía la fila. Y eso
      decide también QUÉ se pide: bultos o kilos. */
   const granel = pres ? !!pres.granel : fila.bultos == null;
   const porB = pres ? pres.por_bulto : fila.por_bulto;
   const kgU = pres ? pres.kg_unidad : fila.kg_unidad;
+  let bultosTot = null, tocaNumeros = false;
 
   if (!granel) {
-    const b = 'bultos' in dd ? numPos(dd.bultos) : fila.bultos;
+    const b = 'bultos' in dd ? numPos(dd.bultos) : totalBultos;
     if (b == null) return { ok: false, motivo: 'Poné cuántos bultos entraron' };
     kg = kilosDeProceso(b, porB, kgU);
     if (kg == null) return { ok: false, motivo: 'La presentación tiene mal la cuenta' };
-    poner('bultos', b);
-    poner('kilos', kg);
+    bultosTot = b;
+    tocaNumeros = true;
   } else if (pres || 'kilos' in dd) {
-    const k = 'kilos' in dd ? numPos(dd.kilos) : fila.kilos;
+    const k = 'kilos' in dd ? numPos(dd.kilos) : totalKg;
     if (k == null) return { ok: false, motivo: 'Poné los kilos' };
     kg = k;
-    poner('bultos', null);
-    poner('kilos', kg);
+    bultosTot = null;
+    tocaNumeros = true;
   }
 
-  if (!sets.length) return { ok: true, id: i, fila };
+  if (!sets.length && !tocaNumeros) return { ok: true, id: i, fila };
+
+  /* ── EL REPARTO SE REHACE CON LAS MISMAS PROPORCIONES ─────────────────────────
+     Y no volviendo a prorratear contra la tolva: lo que queda sin procesar cambió
+     desde que se cargó, así que recalcularlo movería kilos entre cuadros por el
+     solo hecho de corregir una observación un rato después.
+
+     repartir() le deja el resto al último, así que la suma de los pedazos vuelve a
+     dar exactamente el total — que es la única razón por la que el número grande de
+     la pantalla se puede creer. */
+  const pesos = pesosDelReparto(grupo.map((x) => Number(x.kilos) || 0));
+  /* SE REPARTE SIEMPRE, también cuando nadie tocó los números: con los pesos sacados
+     de estos mismos kilos, repartir() devuelve los que ya estaban. Un camino aparte
+     para «no cambió nada» sería un segundo camino que da lo mismo y que nadie prueba. */
+  const kgPorFila = repartir(kg, pesos);
+  const bultosPorFila = bultosTot == null
+    ? grupo.map(() => null) : repartir(bultosTot, pesos);
 
   // El techo se vuelve a mirar en las DOS direcciones: corregir para abajo tiene que
   // poder sacar la marca, o la fila queda en rojo para siempre después de arreglada.
@@ -1865,8 +1914,18 @@ export function editarProceso(db, id, d) {
   poner('estado', estado);
   poner('revision_motivo', motivo);
 
-  db.prepare('UPDATE gal_procesos SET ' + sets.join(', ') + ' WHERE id = ?').run(...val, i);
-  return { ok: true, id: i, aviso: motivo,
+  /* UNA PASADA POR FILA: lo común va igual en todas y los números van repartidos.
+     Sin transacción a propósito: node:sqlite no tiene db.transaction y el
+     envoltorio existe sólo en los tests. El riesgo real es acotado —son n filas de
+     la misma carga en el mismo proceso— y partirlo en dos caminos, uno con
+     transacción y otro sin, deja el de producción sin probar. */
+  const upd = db.prepare('UPDATE gal_procesos SET '
+    + sets.concat(['bultos = ?', 'kilos = ?']).join(', ') + ' WHERE id = ?');
+  for (let n = 0; n < grupo.length; n++) {
+    upd.run(...val, bultosPorFila[n], kgPorFila[n], grupo[n].id);
+  }
+  return { ok: true, id: i, ids: grupo.map((x) => x.id), aviso: motivo,
+           lotes: grupo.length,
            fila: db.prepare('SELECT * FROM gal_procesos WHERE id = ?').get(i) };
 }
 
@@ -1887,16 +1946,89 @@ export function borrarProceso(db, id) {
   return { ok: true, borradas: r.changes };
 }
 
+// ── UNA FILA POR CARGA, NO POR LOTE ─────────────────────────────────────────────────
+// Andy, 4/11/2026: «esto es confuso. No lo abras por LOTE. En la parte de proceso sólo
+// me interesa cómo viene el proceso, no de qué lotes son. Eso es para un análisis
+// posterior».
+//
+// Con la tolva mezclada, UNA carga se guarda como n filas —una por lote, a prorrata— y
+// la lista las mostraba todas. Cuatro cargas de damasco se veían como once renglones.
+//
+// Y EL DAÑO NO ERA SÓLO VISUAL: LA COLUMNA DE BULTOS MENTÍA. Los bultos se reparten
+// con la misma prorrata que los kilos, así que nueve cajones entre tres lotes son
+// 0,33 / 3,53 / 5,14 y la pantalla los redondea a «0», «4» y «5». Un renglón de
+// «0 bultos · 0,74 kg» no es nada que exista en el galpón: no se puede contar, no se
+// puede subir a un camión y no se puede comparar contra la pila. El número de bultos
+// sólo es cierto ENTERO, que es como se tipeó.
+//
+// El reparto no se toca: se sigue guardando por lote, que es de donde sale el rinde
+// por cuadro. Lo que cambia es que esta pantalla no es el lugar donde se lee.
+export function agruparProcesos(filas) {
+  const l = Array.isArray(filas) ? filas : [];
+  const porGrupo = new Map();
+  const out = [];
+  for (const f of l) {
+    /* Sin reparto, cada fila es su propia carga. Con reparto, la clave es el grupo:
+       es el id que registrarProceso le puso a las n filas de una misma carga. */
+    const clave = f.reparto ? 'g:' + f.reparto : 'f:' + f.id;
+    const ya = porGrupo.get(clave);
+    if (!ya) {
+      /* La PRIMERA fila es la representante y de ella salen el destino, el producto y
+         la presentación, que son iguales en todo el grupo: la carga es una sola y el
+         reparto sólo partió los números. */
+      const nueva = Object.assign({}, f, {
+        ids: [f.id],
+        lotes: 1,
+        bultos: f.bultos == null ? null : Number(f.bultos),
+        kilos: Number(f.kilos) || 0,
+      });
+      porGrupo.set(clave, nueva);
+      out.push(nueva);
+      continue;
+    }
+    ya.ids.push(f.id);
+    ya.lotes++;
+    if (f.bultos != null) ya.bultos = (ya.bultos || 0) + Number(f.bultos);
+    ya.kilos += Number(f.kilos) || 0;
+    /* EL ⚠ DE CUALQUIER PEDAZO ES EL DE LA CARGA. Si se apagara al agrupar, una carga
+       marcada para revisar desaparecería de la vista justo por agruparla. */
+    if (f.estado === 'a_revisar') {
+      ya.estado = 'a_revisar';
+      ya.revision_motivo = ya.revision_motivo || f.revision_motivo;
+    }
+  }
+  /* Y recién acá se redondea, sobre el total. Redondear cada pedazo y sumar después
+     es como se llegaba a «0 bultos». */
+  for (const x of out) {
+    x.kilos = round2(x.kilos);
+    if (x.bultos != null) x.bultos = round2(x.bultos);
+  }
+  return out;
+}
+
 // ── LO PROCESADO UN DÍA ─────────────────────────────────────────────────────────────
+// Devuelve UNA FILA POR CARGA (agruparProcesos, arriba).
+//
+// EL FILTRO POR LOTE SE APLICA AL GRUPO Y NO A LA FILA, y los números son los de la
+// carga ENTERA. Filtrar primero y sumar después daría otra vez el pedazo: «0 bultos ·
+// 0,74 kg» con otro nombre. Una carga que tocó alguno de los lotes elegidos se muestra
+// completa, porque la pregunta de esta pantalla es qué se embaló y no cuánto puso cada
+// cuadro — eso se lee en el stock por lote y en los informes.
 export function procesosDelDia(db, fecha, loteId) {
   const f = esFecha(fecha);
   if (!f) return [];
   const ls = idsDeLotes(loteId);
-  return db.prepare(
+  /* SE TRAE EL DÍA ENTERO y se filtra después. Poner el lote en el WHERE partiría los
+     grupos antes de armarlos y la carga mezclada volvería a mostrarse a pedazos. */
+  const todas = db.prepare(
     ' SELECT * FROM gal_procesos'
     + '  WHERE fecha = ? AND eliminado_en IS NULL'
-    + (ls.length ? ' AND lote_id IN (' + ls.map(() => '?').join(',') + ')' : '')
-    + '  ORDER BY id DESC').all(f, ...ls);
+    + '  ORDER BY id DESC').all(f);
+  const grupos = agruparProcesos(todas);
+  if (!ls.length) return grupos;
+  const deLote = new Set();
+  for (const x of todas) if (ls.indexOf(x.lote_id) >= 0) deLote.add(x.id);
+  return grupos.filter((g) => g.ids.some((id) => deLote.has(id)));
 }
 
 // ── EL TABLERO DEL LOTE: CUÁNTO ENTRÓ, CUÁNTO SALIÓ Y ADÓNDE ────────────────────────

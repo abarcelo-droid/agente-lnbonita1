@@ -135,6 +135,12 @@ test('EL PRODUCTO SE CONGELA DESDE EL LOTE, no lo manda la pantalla', () => {
   assert.equal(r.fila.producto, 'Uva');
 });
 
+/* LAS FILAS COMO ESTÁN GUARDADAS, una por lote. procesosDelDia() devuelve una fila
+   por CARGA desde la V1139 —es lo que la pantalla muestra— así que lo que se prueba
+   acá, que es el REPARTO, se lee de la tabla. */
+const crudas = (db, f) => db.prepare(
+  'SELECT * FROM gal_procesos WHERE fecha = ? AND eliminado_en IS NULL ORDER BY id')
+  .all(f);
 test('con la mezcla, CADA FILA LLEVA EL PRODUCTO DE SU LOTE', () => {
   // Es justamente el caso que preocupa: damasco y uva en la misma tolva. Una
   // sola etiqueta para las dos filas sería la mezcla que esto viene a evitar.
@@ -144,7 +150,7 @@ test('con la mezcla, CADA FILA LLEVA EL PRODUCTO DE SU LOTE', () => {
     bultos: 100, uuid: 'm' });
   assert.equal(r.ok, true);
   const por = {};
-  for (const f of procesosDelDia(db, F)) por[f.lote_id] = f.producto;
+  for (const f of crudas(db, F)) por[f.lote_id] = f.producto;
   assert.equal(por[10], 'Damasco');
   assert.equal(por[12], 'Uva');
 });

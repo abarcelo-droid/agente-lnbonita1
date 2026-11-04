@@ -1643,20 +1643,28 @@ test('MANUAL PR: «una fila por lote, no una fila mezcla»', () => {
     'el rinde tuvo que aprender qué es un reparto: la fila por lote no alcanzó');
 });
 
-test('MANUAL PR: «quedan marcadas ≈ mezcla»', () => {
-  dicePr(/≈ mezcla/);
+test('MANUAL PR: «quedan marcadas repartidas», y la marca vive en la base', () => {
+  /* La marca sigue existiendo y sigue importando —un rinde hecho de prorrateos no
+     es el mismo dato que uno medido— pero desde la V1139 NO se muestra en esta
+     lista: acá el renglón es la carga entera y su total es exacto, así que un «≈»
+     al lado diría que el número es aproximado cuando no lo es. */
+  dicePr(/quedan marcadas <b>repartidas<\/b>/);
   dicePr(/no es el mismo dato que el de uno que entró solo/);
-  assert.match(JS_PR, /x\.repartido \? ' <span class="gpr-mz"/);
-  assert.match(PANEL, /#sec-galpon-proceso \.gpr-mz\{/);
   assert.match(DDL, /ADD COLUMN repartido INTEGER NOT NULL DEFAULT 0/);
+  assert.ok(!/gpr-mz/.test(JS_PR),
+    'volvió el «≈ mezcla» a la lista: dice que el total es aproximado y es exacto');
 });
 
-test('MANUAL PR: «borrar una las borra a todas», y la pantalla lo avisa', () => {
-  dicePr(/Borrar una las borra a todas/);
+test('MANUAL PR: «borrar una carga la borra entera», y la pantalla lo avisa', () => {
+  dicePr(/Borrar una carga la borra entera/);
   assert.match(cuerpoServicio('export function borrarProceso('),
     /WHERE reparto = \? AND eliminado_en IS NULL/);
-  // Y el confirm lo dice, que es donde se lee: nadie abre el manual para borrar.
-  assert.match(JS_PR, /Es parte de una MEZCLA/);
+  /* Y el confirm lo dice, que es donde se lee: nadie abre el manual para borrar.
+     Lo que dice cambió con la V1139: el renglón YA es la carga entera, así que
+     «se borran también las de los otros lotes» describía unas filas que el
+     operador no tenía delante. */
+  assert.match(JS_PR, /vuelve entera a la tolva/);
+  assert.ok(!/Es parte de una MEZCLA/.test(JS_PR));
 });
 
 test('MANUAL PR: «el lápiz deja cambiar el día, el lote, la presentación…»', () => {
@@ -1684,16 +1692,37 @@ test('una presentación que ya no está en el catálogo no se pierde al editar',
   assert.match(PANEL, /fuera del catálogo/);
 });
 
-test('MANUAL PR: «en una repartida se corrige sólo ese pedazo»', () => {
-  dicePr(/sólo ese pedazo<\/b>/);
+test('MANUAL PR: «una carga se corrige entera» (V1139)', () => {
+  dicePr(/Una carga se corrige entera/);
+  dicePr(/con las mismas proporciones/);
   const abrir = JS_PR.slice(JS_PR.indexOf('function galProcAbrir('),
                             JS_PR.indexOf('function galProcCerrar('));
   assert.ok(abrir.length > 400, 'el corte de galProcAbrir quedó vacío');
-  assert.match(abrir, /if \(x\.repartido\)\{/,
-    'el aviso no depende de que la carga sea repartida: o se ve siempre, o nunca');
-  assert.match(abrir, /Esta carga es parte de una mezcla/);
+  assert.match(abrir, /var mezcla = !!x\.repartido;/);
+  assert.match(abrir, /salió de ' \+ \(x\.lotes \|\| 'varios'\) \+ ' lotes a la vez/);
   assert.match(abrir, /\} else \{ rep\.style\.display = 'none'; \}/,
     'el aviso no se esconde en una carga normal');
+  // Y el servicio reparte de nuevo con las proporciones que ya tenía la carga.
+  const ed = cuerpoServicio('export function editarProceso(');
+  assert.match(ed, /pesosDelReparto\(grupo\.map\(\(x\) => Number\(x\.kilos\) \|\| 0\)\)/,
+    'reprorratea contra la tolva: corregir una observación mueve kilos de cuadro');
+});
+
+test('MANUAL PR: «el lote queda con candado en una carga repartida»', () => {
+  dicePr(/queda con candado/);
+  dicePr(/no quiere decir nada/);
+  const abrir = JS_PR.slice(JS_PR.indexOf('function galProcAbrir('),
+                            JS_PR.indexOf('function galProcCerrar('));
+  assert.match(abrir, /sel\.disabled = mezcla;/,
+    'ofrece un desplegable que el servidor va a rechazar');
+  // Y no se manda, o corregir una observación rebotaría por el lote.
+  const guardar = JS_PR.slice(JS_PR.indexOf('async function galProcGuardar('),
+                              JS_PR.indexOf('async function galProcBorrarDesdeFicha('));
+  assert.match(guardar, /if \(!sel\.disabled\) body\.lote_id = sel\.value;/);
+  // El control de verdad sigue estando del otro lado.
+  const ed = cuerpoServicio('export function editarProceso(');
+  assert.match(ed, /if \(esGrupo\) \{/,
+    'el servidor acepta cambiarle el lote a una mezcla: queda media carga movida');
 });
 
 test('el router acepta varios lotes y el tablero los suma', () => {
@@ -2209,4 +2238,40 @@ test('el viaje y el estado sanitario VIAJAN al servidor', () => {
   for (const l of ['B', 'R', 'M']) {
     assert.match(sel, new RegExp('value="' + l + '"'), 'falta la opción ' + l);
   }
+});
+
+// ══════════════════════════════════════════════════════════════════════════
+// LA TABLA DE «LO CARGADO ESTE DÍA» (V1139)
+// ══════════════════════════════════════════════════════════════════════════
+
+/* El <colgroup> y el <thead> de esa tabla, como están escritos en el panel. */
+const TBL_PR = (() => {
+  const i = PANEL.indexOf('<table class="pa-tbl gpr-tbl">');
+  assert.ok(i > 0, 'no está la tabla de lo cargado este día');
+  return PANEL.slice(i, PANEL.indexOf('</thead>', i));
+})();
+
+test('LA TABLA NO TIENE COLUMNA DE LOTE', () => {
+  /* Andy, 4/11/2026: «no lo abras por LOTE. En la parte de proceso sólo me
+     interesa cómo viene el proceso, no de qué lotes son». */
+  assert.ok(!/<th>Lote<\/th>/.test(TBL_PR),
+    'volvió la columna de lote: cuatro cargas se ven otra vez como once renglones');
+  dicePr(/no por lote/);
+  dicePr(/la columna de bultos mentía/);
+  dicePr(/Lo cargado este día va por CARGA, no por lote <span class="ver">V1139<\/span>/);
+  dicePr(/Una carga se corrige entera <span class="ver">V1139<\/span>/);
+});
+
+test('y las columnas cierran: tantos <col> como <th>, 100% y un colspan al día', () => {
+  /* Sin barra de desplazamiento lateral (CLAUDE.md): los anchos se fijan por
+     columna y tienen que sumar 100. Y un <col> de más corre todo el encabezado
+     medio casillero, que es de esas cosas que se ven raras y nadie sabe por qué. */
+  const cols = TBL_PR.match(/<col style="width:(\d+)%">/g) || [];
+  const ths = TBL_PR.match(/<th[\s>]/g) || [];
+  assert.equal(cols.length, ths.length, 'hay ' + cols.length + ' <col> y ' + ths.length + ' <th>');
+  const suma = cols.reduce((t, c) => t + Number(/width:(\d+)%/.exec(c)[1]), 0);
+  assert.equal(suma, 100, 'los anchos suman ' + suma + ' y no 100');
+  // Y el cartel de «no se cargó nada» abarca exactamente las columnas que hay.
+  assert.match(JS_PR, new RegExp('colspan="' + ths.length + '" class="gpr-vacio"'),
+    'el cartel de vacío abarca otra cantidad de columnas que la tabla');
 });

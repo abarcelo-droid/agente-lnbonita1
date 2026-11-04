@@ -8332,11 +8332,15 @@ if ('serviceWorker' in navigator) {
     <h3 class="gpr-t">Lo cargado este día</h3>
     <div class="ab-table-wrap">
       <table class="pa-tbl gpr-tbl">
-        <colgroup><col style="width:13%"><col style="width:12%"><col style="width:21%">
-                  <col style="width:16%"><col style="width:11%"><col style="width:12%">
-                  <col style="width:15%"></colgroup>
+        <!-- SIN COLUMNA DE LOTE. Andy, 4/11/2026: «no lo abras por LOTE. En la parte
+             de proceso sólo me interesa cómo viene el proceso, no de qué lotes son.
+             Eso es para un análisis posterior». El reparto se sigue guardando por
+             lote; acá cada renglón es una CARGA. -->
+        <colgroup><col style="width:16%"><col style="width:16%"><col style="width:30%">
+                  <col style="width:12%"><col style="width:13%">
+                  <col style="width:13%"></colgroup>
         <thead><tr>
-          <th>Destino</th><th>Producto</th><th>Presentación</th><th>Lote</th>
+          <th>Destino</th><th>Producto</th><th>Presentación</th>
           <th style="text-align:right">Bultos</th><th style="text-align:right">Kilos</th>
           <th style="text-align:right"></th>
         </tr></thead>
@@ -28848,14 +28852,34 @@ SG_MANUAL['galpon-proceso'] = { titulo: 'Galpón · Proceso', html:
   + '<ul>'
   + '<li>Se guarda <b>una fila por lote</b>, no una sola «mezcla»: así el rinde de cada '
   + 'lote y el stock se siguen calculando igual, sin ninguna consulta especial.</li>'
-  + '<li>Esas filas quedan marcadas <b>≈ mezcla</b>. Es una <b>estimación</b>, no una '
+  + '<li>Esas filas quedan marcadas <b>repartidas</b>. Es una <b>estimación</b>, no una '
   + 'medición, y tiene que poder distinguirse: el rinde de un lote hecho de prorrateos '
-  + 'no es el mismo dato que el de uno que entró solo.</li>'
-  + '<li><b>Borrar una las borra a todas.</b> Media carga deshecha deja la otra mitad '
-  + 'atribuida y los kilos que faltan en ningún lado.</li>'
+  + 'no es el mismo dato que el de uno que entró solo. La marca se ve en los informes '
+  + 'por lote, que es donde se leen esos números.</li>'
   + '<li>Si ninguno tiene pendiente, va en <b>partes iguales</b> — no hay de dónde '
   + 'prorratear.</li>'
   + '</ul>'
+
+  + '<h3>📋 Lo cargado este día va por CARGA, no por lote '
+  + '<span class="ver">V1139</span></h3>'
+  + '<p>Andy, 4/11/2026: <i>«esto es confuso. No lo abras por LOTE. En la parte de '
+  + 'proceso sólo me interesa cómo viene el proceso, no de qué lotes son. Eso es para '
+  + 'un análisis posterior»</i>.</p>'
+  + '<p>La lista de abajo muestra <b>un renglón por carga</b>: lo que se tipeó. Con la '
+  + 'tolva mezclada entre tres lotes, cuatro cargas de damasco se veían como <b>once '
+  + 'renglones</b>, cada uno con su pedacito.</p>'
+  + '<div class="ojo"><b>Y no era sólo que fuera largo: la columna de bultos mentía.</b> '
+  + 'Los bultos se reparten con la misma prorrata que los kilos, así que nueve cajones '
+  + 'entre tres lotes son 0,33 · 3,53 · 5,14 y la pantalla los redondeaba a <b>0</b>, '
+  + '<b>4</b> y <b>5</b>. Un renglón de «0 bultos · 0,74 kg» no es nada que exista en el '
+  + 'galpón: no se puede contar, no se puede subir a un camión y no se puede comparar '
+  + 'contra la pila. El número de bultos sólo es cierto <b>entero</b>.</div>'
+  + '<p>El reparto por lote <b>se sigue guardando igual</b> — de ahí sale el rinde de '
+  + 'cada cuadro — y se lee en el <b>stock por lote</b> y en los informes. Lo que cambió '
+  + 'es que esta pantalla ya no es el lugar donde se mira.</p>'
+  + '<p>Si elegís lotes arriba, la lista muestra las cargas que tocaron alguno de ellos, '
+  + '<b>enteras</b>. Mostrar sólo el pedazo del lote elegido sería volver al renglón de '
+  + '0,74 kg con otro nombre.</p>'
 
   + '<h3>✎ Corregir una carga <span class="ver">V1115</span></h3>'
   + '<p>El lápiz de cada renglón abre la carga y deja cambiar el <b>día</b>, el '
@@ -28867,9 +28891,20 @@ SG_MANUAL['galpon-proceso'] = { titulo: 'Galpón · Proceso', html:
   + '<p>Cambiar la <b>presentación</b> cambia también el destino y <b>vuelve a calcular '
   + 'los kilos</b> con la cuenta de la nueva: dejar los viejos sería una fila que miente '
   + 'sobre sí misma — cien cajas de 7 kg sumando 300.</p>'
-  + '<div class="ojo">En una carga <b>repartida</b> se corrige <b>sólo ese pedazo</b>: '
-  + 'las de los otros lotes quedan como estaban. Si lo que está mal es el reparto entero, '
-  + 'conviene borrarla —se van todas juntas— y cargarla de nuevo. La ventana lo avisa.</div>'
+  + '<p><b>Una carga se corrige entera <span class="ver">V1139</span>.</b> Si salió de '
+  + 'tres lotes a la vez, lo que cambies vale para toda la carga y los kilos se vuelven '
+  + 'a repartir entre los tres <b>con las mismas proporciones</b> — y no prorrateando de '
+  + 'nuevo contra la tolva, que cambió desde que se cargó: corregir una observación un '
+  + 'rato después movería kilos de un cuadro a otro.</p>'
+  + '<div class="ojo">El <b>lote</b> es la excepción y queda con candado en una carga '
+  + 'repartida: cambiar «el lote» de algo que salió de tres no quiere decir nada. Si los '
+  + 'lotes están mal, <b>borrala</b> —se van las tres juntas y los kilos vuelven a la '
+  + 'tolva— y cargala de nuevo con los que van.</div>'
+  + '<p>Hasta la V1139 el lápiz corregía <b>sólo un pedazo</b> del reparto, y con la '
+  + 'lista mostrando la carga entera eso pasaba a ser una trampa: se ven 90 kg, se '
+  + 'aprieta el lápiz y se le cambian los kilos a los 3,33 de uno de los tres lotes.</p>'
+  + '<p><b>Borrar una carga la borra entera</b>, con todos sus lotes: media carga '
+  + 'deshecha deja la otra mitad atribuida y los kilos que faltan en ningún lado.</p>'
   + '<h3>🔖 El artículo <span class="ver">V1119</span></h3>'
   + '<p>Cada baldosa dice su <b>categoría y su calibre</b> además del envase: eso es el '
   + 'artículo, y es lo que va en cada renglón del tarjetón del pallet. Dos calibres del '
@@ -60182,14 +60217,6 @@ function galPrEsc(s){ return String(s == null ? '' : s)
 function galPrNum(n, dec){ return (Number(n) || 0)
   .toLocaleString('es-AR', { minimumFractionDigits:0, maximumFractionDigits: dec == null ? 2 : dec }); }
 
-/* La finca del lote, de la lista que ya vino con el pedido: no hace falta pedirla de
-   nuevo ni guardarla en cada proceso. */
-function galPrFinca(loteId){
-  var l = ((GPR.datos && GPR.datos.lotes) || [])
-    .filter(function(x){ return x.lote_id === loteId; })[0];
-  return l ? (l.finca || '') : '';
-}
-
 function galPrDest(clave){
   var ds = (GPR.datos && GPR.datos.destinos) || [];
   return ds.filter(function(d){ return d.clave === clave; })[0]
@@ -60519,14 +60546,22 @@ function galProcAbrir(id){
   if (!x) return;
   GPR.editId = id;
 
-  /* Una carga REPARTIDA se avisa antes de tocarla: corregir una fila del grupo deja las
-     otras como estaban, y el reparto deja de sumar lo que se cargó. */
+  /* UNA CARGA SE CORRIGE ENTERA (V1139). Antes esto avisaba que se corregía «sólo
+     este pedazo», y con la lista mostrando la carga completa eso pasó a ser una
+     trampa: el operador ve 90 kg, aprieta el lápiz y le cambia los kilos a los 3,33
+     de uno de los tres lotes. Ahora lo que se toca acá vale para toda la carga.
+
+     El LOTE es la excepción, y queda con candado: cambiar «el lote» de una carga
+     repartida entre tres no quiere decir nada. */
   var rep = document.getElementById('gal-proc-rep');
-  if (x.repartido){
-    rep.innerHTML = '<b>Esta carga es parte de una mezcla.</b> Se repartió entre varios lotes '
-      + 'a prorrata, y acá se corrige <b>sólo este pedazo</b>: los de los otros lotes quedan '
-      + 'como están. Si lo que está mal es el reparto entero, conviene <b>borrarla</b> —se '
-      + 'van todas juntas— y cargarla de nuevo.';
+  var sel = document.getElementById('gal-proc-lote');
+  var mezcla = !!x.repartido;
+  if (mezcla){
+    rep.innerHTML = '<b>Esta carga salió de ' + (x.lotes || 'varios') + ' lotes a la vez.</b> '
+      + 'Lo que cambies acá vale para <b>toda la carga</b>, y los kilos se vuelven a '
+      + 'repartir entre los lotes con las mismas proporciones.<br>'
+      + 'El <b>lote</b> no se puede cambiar desde acá: si están mal, <b>borrala</b> —se '
+      + 'van las ' + (x.lotes || '') + ' juntas— y cargala de nuevo con los que van.';
     rep.style.display = '';
   } else { rep.style.display = 'none'; }
 
@@ -60535,12 +60570,15 @@ function galProcAbrir(id){
 
   // Los lotes: TODOS los volcados, no sólo los elegidos arriba. Corregir es justamente
   // mandarla a uno que no estaba seleccionado.
-  var sel = document.getElementById('gal-proc-lote');
   sel.innerHTML = ((GPR.datos && GPR.datos.lotes) || []).map(function(l){
     return '<option value="' + l.lote_id + '">'
       + galPrEsc((l.finca ? l.finca + ' · ' : '') + l.nombre) + '</option>';
   }).join('');
   sel.value = String(x.lote_id);
+  /* Y con candado si es una mezcla. Ofrecer un desplegable que el servidor va a
+     rechazar es prometer algo que no se puede cumplir: el que lo usa cree que rompió
+     algo. El servidor lo vuelve a controlar igual. */
+  sel.disabled = mezcla;
 
   var pr = document.getElementById('gal-proc-pres');
   pr.innerHTML = ((GPR.datos && GPR.datos.presentaciones) || []).map(function(q){
@@ -60602,12 +60640,17 @@ async function galProcGuardar(){
   var o = galProcPresOpt();
   var granel = o && o.getAttribute('data-granel') === '1';
   var cant = document.getElementById('gal-proc-cant').value;
+  var sel = document.getElementById('gal-proc-lote');
   var body = {
     fecha: document.getElementById('gal-proc-fecha').value,
-    lote_id: document.getElementById('gal-proc-lote').value,
     presentacion_id: document.getElementById('gal-proc-pres').value,
     observacion: document.getElementById('gal-proc-obs').value,
   };
+  /* EN UNA MEZCLA NO VIAJA EL LOTE. Mandarlo igual haría que corregir una
+     observación rebote con «no se le puede cambiar el lote», que es cierto y no es
+     lo que el operador pidió. El desplegable está con candado, así que su valor es
+     el que ya tenía. */
+  if (!sel.disabled) body.lote_id = sel.value;
   if (granel) body.kilos = cant; else body.bultos = cant;
 
   var btn = document.getElementById('gal-proc-btn');
@@ -60785,7 +60828,7 @@ function galPrPintar(){
   var b = document.getElementById('gpr-body'); if (!b) return;
   var ps = (GPR.datos && GPR.datos.procesos) || [];
   if (!ps.length){
-    b.innerHTML = '<tr><td colspan="7" class="gpr-vacio">'
+    b.innerHTML = '<tr><td colspan="6" class="gpr-vacio">'
       + (GPR.lotes.length ? 'Todavía no se cargó nada de estos lotes para este día.'
                   : 'Todavía no se cargó nada para este día.') + '</td></tr>';
     return;
@@ -60803,14 +60846,9 @@ function galPrPintar(){
       + '<td title="' + galPrEsc(x.presentacion || '') + '">'
         + galPrEsc(x.presentacion || 'A granel')
         + (x.estado === 'a_revisar' ? ' <b style="color:#d62828">⚠</b>' : '') + '</td>'
-      + '<td title="' + galPrEsc((galPrFinca(x.lote_id) ? galPrFinca(x.lote_id) + ' · ' : '')
-          + (x.lote_nombre || '')) + '">'
-        + (galPrFinca(x.lote_id) ? '<b>' + galPrEsc(galPrFinca(x.lote_id)) + '</b> · ' : '')
-        + galPrEsc(x.lote_nombre || ('Lote ' + x.lote_id))
-        /* Repartido = estos kilos son una PRORRATA, no una medición. Sin la marca, el
-           renglón se ve igual que uno medido y a fin de temporada nadie los distingue. */
-        + (x.repartido ? ' <span class="gpr-mz" title="repartido entre varios lotes">'
-            + '≈ mezcla</span>' : '') + '</td>'
+      /* NI LOTE NI «≈ mezcla». La marca decía que esos kilos eran una PRORRATA, y a
+         nivel de la carga ya no lo son: el total es exactamente lo que se tipeó.
+         Colapsar los pedazos es lo que hace que el número vuelva a ser exacto. */
       + '<td class="gpr-n">' + (x.bultos == null ? '—' : galPrNum(x.bultos, 0)) + '</td>'
       + '<td class="gpr-n"><b>' + galPrNum(x.kilos) + '</b></td>'
       + '<td style="text-align:right">'
@@ -60823,12 +60861,14 @@ function galPrPintar(){
 async function galPrBorrar(id){
   var x = ((GPR.datos && GPR.datos.procesos) || [])
     .filter(function(p){ return p.id === id; })[0]; if (!x) return;
-  /* Si es una mezcla se avisa que se van TODAS. Borrar la mitad de un reparto deja
-     la otra mitad atribuida a un lote y los kilos que faltan en ningún lado. */
+  /* El renglón ES la carga entera (V1139), así que lo que se borra es lo que se ve.
+     Antes esto avisaba que «se borran también las de los otros lotes», que describía
+     unas filas que el operador no tenía delante. Lo que sí vale decir es adónde van
+     a parar los kilos: vuelven a la tolva de los lotes de los que salieron. */
   if (!confirm('¿Borrar ' + galPrNum(x.kilos) + ' kg de '
     + (x.presentacion || x.destino) + '?'
-    + (x.repartido ? '\n\nEs parte de una MEZCLA: se borran también las de los otros '
-        + 'lotes del mismo reparto.' : ''))) return;
+    + (x.repartido ? '\n\nEsta carga salió de ' + (x.lotes || 'varios')
+        + ' lotes y vuelve entera a la tolva de los ' + (x.lotes || '') + '.' : ''))) return;
   try {
     var r = await fetch('/api/galpon/procesos/' + id, { method:'DELETE', credentials:'include' });
     var j = await r.json();
