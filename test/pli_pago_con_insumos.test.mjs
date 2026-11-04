@@ -754,13 +754,172 @@ test('la factura compara su importe contra TODO lo que cubre, por moneda', () =>
   assert.match(ruta, /diferencia: comparable \?/);
 });
 
-test('no se ofrece adjuntar un papel donde todavía no hay dónde colgarlo', () => {
-  const f = fuente(PANEL, 'function pliAdjPintar(entidad, id, destino)');
-  assert.match(f, /if \(!id\)/);
-  assert.match(f, /Guardá primero y después podés adjuntar el papel/);
-  // Ni cuando el guardado de archivos no está configurado: el botón contestaría 503.
-  assert.match(f, /r\.storage_ok/);
-  assert.match(f, /no está configurado/);
+// ══ EL PAPEL SE ADJUNTA ANTES DE GUARDAR (V1138) ═══════════════════════════
+//
+// Pablo, 3/11/2026: «fijate si podés agregarme un "agregar adjunto", así si tengo, subo el
+// comprobante». Hasta acá había que guardar la entrega, buscarla en la lista y entrar de nuevo, y
+// el papel que no se adjunta en el momento no se adjunta nunca.
+//
+// Lo que esto clava NO es que el botón esté: es que el archivo que el operador eligió LLEGUE, y
+// que no llegue a donde no va. Se prueba EJECUTANDO las funciones contra un DOM y un fetch de
+// mentira, porque un papel que se pierde en silencio se ve en pantalla igual que uno que se subió.
+
+function adjLab(opt) {
+  opt = opt || {};
+  const cajas = {};
+  const doc = { getElementById: (id) => (cajas[id] = cajas[id] || { innerHTML: '' }) };
+  const subidas = [];
+  const toasts = [];
+  function FormDataFalso() { this.__archivo = null; }
+  FormDataFalso.prototype.append = function(k, v) { this.__archivo = v; };
+  const fetchFalso = (url, o) => {
+    subidas.push({ url, archivo: o.body.__archivo });
+    return Promise.resolve({
+      json: () => Promise.resolve(opt.respuesta ? opt.respuesta(subidas.length) : { ok: true, id: 1 }),
+    });
+  };
+  const apiFalso = (ruta) => Promise.resolve(
+    opt.api ? opt.api(ruta) : { ok: true, data: [], storage_ok: true });
+  const PLI = {};
+  const fns = new Function('document', 'PLI', 'pliEsc', 'toast', 'fetch', 'FormData', 'pliApi',
+    'pliPagCargar', [
+      fuente(PANEL, 'function pliAdjPintar(entidad, id, destino)'),
+      fuente(PANEL, 'function pliAdjCabeza(hayStorage)'),
+      fuente(PANEL, 'function pliAdjPendPintar()'),
+      fuente(PANEL, 'function pliAdjPendSacar(i)'),
+      fuente(PANEL, 'function pliAdjRechazo(f)'),
+      fuente(PANEL, 'function pliAdjSubir(inp)'),
+      fuente(PANEL, 'function pliAdjPost(entidad, id, archivo)'),
+      fuente(PANEL, 'function pliAdjSubirPendientes(entidad, id)'),
+      fuente(PANEL, 'function pliAdjFrase(adj)'),
+      'return { pintar: pliAdjPintar, elegir: pliAdjSubir, sacar: pliAdjPendSacar,'
+      + ' vaciar: pliAdjSubirPendientes, frase: pliAdjFrase };',
+    ].join('\n'))(doc, PLI, (s) => String(s), (m) => toasts.push(String(m)),
+      fetchFalso, FormDataFalso, apiFalso, () => Promise.resolve());
+  return Object.assign(fns, { PLI, cajas, subidas, toasts });
+}
+
+const PDF = (nombre) => ({ files: [{ name: nombre || 'remito.pdf', type: 'application/pdf', size: 2048 }] });
+
+test('todavía sin guardar, el papel elegido espera en la ventana y no se manda a ningún lado', () => {
+  const L = adjLab();
+  L.pintar('entrega', null, 'pli-ent-adjuntos');
+  // El botón está aunque la entrega no exista: eso es lo que pidió Pablo.
+  assert.match(L.cajas['pli-ent-adjuntos'].innerHTML, /pliAdjElegir\(\)/);
+  L.elegir(PDF());
+  // Y NO sale un POST contra un id que no existe, que es lo que contestaría «no encontrado».
+  assert.equal(L.subidas.length, 0, 'mandó el papel a una entrega que todavía no existe');
+  assert.equal(L.PLI.adj.pend.length, 1);
+  // Se ve con nombre y dice cuándo se sube: una cola invisible es un archivo que el operador cree
+  // subido.
+  assert.match(L.cajas['pli-ent-adjuntos'].innerHTML, /remito\.pdf/);
+  assert.match(L.cajas['pli-ent-adjuntos'].innerHTML, /cuando guardes/);
+  // Y se puede sacar antes de guardar.
+  L.sacar(0);
+  assert.equal(L.PLI.adj.pend.length, 0);
+});
+
+test('al guardar, lo que esperaba se sube contra la entrega recién creada', async () => {
+  const L = adjLab();
+  L.pintar('entrega', null, 'pli-ent-adjuntos');
+  L.elegir(PDF());
+  const res = await L.vaciar('entrega', 77);
+  assert.deepEqual(res, { subidos: 1, fallaron: 0 });
+  assert.equal(L.subidas.length, 1);
+  assert.equal(L.subidas[0].url, '/api/pli/adjuntos/entrega/77');
+  assert.equal(L.subidas[0].archivo.name, 'remito.pdf');
+  // La cola queda vacía: guardar dos veces no sube el mismo papel dos veces.
+  assert.equal(L.PLI.adj.pend.length, 0);
+  assert.deepEqual(await L.vaciar('entrega', 77), { subidos: 0, fallaron: 0 });
+  assert.equal(L.subidas.length, 1);
+  // Y la pantalla lo dice en el aviso de que se guardó.
+  assert.equal(L.frase(res), ' con 1 papel');
+  assert.equal(L.frase({ subidos: 2 }), ' con 2 papeles');
+  assert.equal(L.frase({ subidos: 0 }), '');
+});
+
+test('el papel que se canceló no se le cuelga a la entrega siguiente', async () => {
+  // Una ventana que sólo se esconde CONSERVA lo que tenía. En Scout eso fue mandarle el reporte a
+  // la persona del reporte anterior; acá sería adjuntarle a una entrega el remito de otra.
+  const L = adjLab();
+  L.pintar('entrega', null, 'pli-ent-adjuntos');
+  L.elegir(PDF('el-de-ayer.pdf'));
+  L.pintar('entrega', null, 'pli-ent-adjuntos');   // se cerró con Cancelar y se abrió otra
+  assert.equal(L.PLI.adj.pend.length, 0);
+  assert.deepEqual(await L.vaciar('entrega', 78), { subidos: 0, fallaron: 0 });
+  assert.equal(L.subidas.length, 0, 'le colgó a la entrega nueva el papel de la anterior');
+});
+
+test('el papel de la factura no se sube con una entrega', async () => {
+  // PLI.adj es uno solo para las dos ventanas: sin el control de entidad, la cola de una se vacía
+  // contra el id de la otra y el papel queda colgado del comprobante equivocado.
+  const L = adjLab();
+  L.pintar('recupero', null, 'pli-rec-f-adjuntos');
+  L.elegir(PDF('factura.pdf'));
+  assert.deepEqual(await L.vaciar('entrega', 90), { subidos: 0, fallaron: 0 });
+  assert.equal(L.subidas.length, 0, 'subió el papel de la factura a una entrega');
+  // Y no se lo come: sigue esperando a SU factura.
+  assert.deepEqual(await L.vaciar('recupero', 5), { subidos: 1, fallaron: 0 });
+  assert.equal(L.subidas[0].url, '/api/pli/adjuntos/recupero/5');
+});
+
+test('lo que el servidor va a rechazar no entra en la cola', () => {
+  // Enterarse de que el archivo no servía recién al guardar es enterarse cuando la ventana ya se
+  // cerró y lo que se había cargado ya no está a la vista.
+  const L = adjLab();
+  L.pintar('entrega', null, 'pli-ent-adjuntos');
+  L.elegir({ files: [{ name: 'planilla.xlsx', type: 'application/vnd.ms-excel', size: 500 }] });
+  assert.equal(L.PLI.adj.pend.length, 0);
+  assert.match(L.toasts.join(' | '), /PDF/);
+  L.elegir({ files: [{ name: 'foto.jpg', type: 'image/jpeg', size: 11 * 1024 * 1024 }] });
+  assert.equal(L.PLI.adj.pend.length, 0);
+  assert.match(L.toasts.join(' | '), /10 MB/);
+  // Un PDF que el navegador manda sin tipo SÍ entra: lo decide el servidor, que mira el contenido.
+  // Rechazarlo acá sería no dejar adjuntar un archivo perfectamente válido.
+  L.elegir({ files: [{ name: 'remito.pdf', type: '', size: 10 }] });
+  assert.equal(L.PLI.adj.pend.length, 1);
+});
+
+test('con la entrega ya guardada el papel sube al toque, sin esperar nada', () => {
+  const L = adjLab();
+  L.pintar('entrega', 12, 'pli-ent-adjuntos');
+  L.elegir(PDF());
+  assert.equal(L.subidas.length, 1, 'encoló un papel que ya tenía dónde colgarse');
+  assert.equal(L.subidas[0].url, '/api/pli/adjuntos/entrega/12');
+});
+
+test('un papel que no se pudo subir se dice con su nombre, no se pierde callado', async () => {
+  const L = adjLab({ respuesta: () => ({ ok: false, error: 'El almacenamiento no está configurado' }) });
+  L.pintar('entrega', null, 'pli-ent-adjuntos');
+  L.elegir(PDF('remito-4455.pdf'));
+  assert.deepEqual(await L.vaciar('entrega', 3), { subidos: 0, fallaron: 1 });
+  assert.match(L.toasts.join(' | '), /remito-4455\.pdf/);
+  // Y la entrega se guardó igual: el papel es un respaldo, no una condición.
+  assert.equal(L.PLI.adj.pend.length, 0);
+});
+
+test('toda ventana que ofrece adjuntar vacía su cola al guardar', () => {
+  // Se auditan TODAS y no una lista escrita a mano: la ventana que alguien agregue mañana ofrecería
+  // el botón igual, y ofrecerlo sin subir el archivo es peor que no ofrecerlo.
+  const entidades = [...new Set([...PANEL.matchAll(/pliAdjPintar\('(\w+)'/g)].map((m) => m[1]))];
+  assert.ok(entidades.length >= 2, 'no se encontró ninguna ventana con papeles');
+  for (const e of entidades) {
+    assert.ok(PANEL.includes("pliAdjSubirPendientes('" + e + "'"),
+      'la ventana de «' + e + '» ofrece adjuntar y no sube lo que quedó esperando');
+  }
+});
+
+test('no se ofrece adjuntar cuando el guardado de archivos no está configurado', () => {
+  // El botón contestaría 503, y el que lo aprieta cree que rompió algo.
+  const L = adjLab({ api: () => ({ ok: true, data: [], storage_ok: false }) });
+  L.pintar('entrega', 12, 'pli-ent-adjuntos');
+  return Promise.resolve().then(() => {
+    assert.match(L.cajas['pli-ent-adjuntos'].innerHTML, /no está configurado/);
+    assert.doesNotMatch(L.cajas['pli-ent-adjuntos'].innerHTML, /pliAdjElegir/);
+    // Y una vez que se supo, la ventana sin guardar tampoco lo ofrece.
+    L.pintar('entrega', null, 'pli-ent-adjuntos');
+    assert.match(L.cajas['pli-ent-adjuntos'].innerHTML, /no está configurado/);
+  });
 });
 
 test('elegir dos veces el mismo papel vuelve a subirlo', () => {
@@ -1000,13 +1159,22 @@ test('la moneda del renglón arranca en la del insumo, y no se pisa si la tocast
   assert.equal(cambiar([{ moneda: 'ARS' }], [{ id: 7, nombre: 'X' }]).moneda, 'ARS');
 });
 
-test('recién creada, la entrega se vuelve a abrir para poder adjuntar el papel', () => {
+test('recién creada, la entrega se vuelve a abrir sólo si quedó sin papel', () => {
   // Adjuntar la factura es lo último que pidió Pablo, y mientras la entrega no existe no hay dónde
-  // colgarla: sin esto hay que buscarla en la lista y entrar de nuevo.
+  // colgarla: sin esto hay que buscarla en la lista y entrar de nuevo. Desde la V1138 el papel se
+  // puede elegir ANTES de guardar, así que cuando ya entró con la entrega no hay nada que hacer en
+  // esa ventana — y que se abra sola parece que no se guardó. Si alguno falló sí se reabre, que es
+  // donde se reintenta.
   const g = fuente(PANEL, 'function pliEntregaGuardar()');
   assert.match(g, /var recien = !id && r\.id;/);
   assert.match(g, /pliPagCargar\(\)\.then\(function\(\) \{/);
-  assert.match(g, /if \(recien\) pliEntregaAbrir\(r\.id\);/);
+  assert.match(g, /if \(recien && \(!adj\.subidos \|\| adj\.fallaron\)\) pliEntregaAbrir\(r\.id\);/);
+  // Y los papeles se suben ANTES de cerrar la ventana: cerrarla primero haría que la próxima
+  // apertura vaciara la cola y el archivo ya elegido se perdiera sin que nada lo diga.
+  assert.ok(g.indexOf("pliAdjSubirPendientes('entrega'") < g.indexOf("classList.remove('on')"));
+  // Y contra el id RECIÉN CREADO. Con el de la ventana —vacío cuando la entrega es nueva— los
+  // papeles se subirían a la entrega número cero.
+  assert.match(g, /pliAdjSubirPendientes\('entrega', r\.id \|\| Number\(id\)\)/);
   // Y se reabre DESPUÉS de recargar, o la lista todavía no tendría la entrega nueva.
   assert.ok(g.indexOf('pliPagCargar().then') < g.indexOf('pliEntregaAbrir(r.id)'));
   // Corregir una que ya existía no reabre nada: ya estabas ahí.
@@ -1020,4 +1188,15 @@ test('después de entregar, la lista de insumos se recarga', () => {
   for (const firma of ['function pliEntregaGuardar()', 'function pliEntregaBorrar(id)']) {
     assert.match(fuente(PANEL, firma), /pliInsCargar/, firma + ' no recarga los insumos');
   }
+});
+
+test('el manual dice que el papel se puede adjuntar mientras cargás, y es cierto', () => {
+  assert.match(MANUAL, /mientras cargás/);
+  assert.match(MANUAL, /se suben solos al apretar Guardar/);
+  assert.match(MANUAL, /V1138/);
+  // Y es cierto: el papel elegido sin guardar va a una cola, y guardar la vacía.
+  assert.match(fuente(PANEL, 'function pliAdjSubir(inp)'), /PLI\.adj\.pend\.push\(f\)/);
+  assert.match(fuente(PANEL, 'function pliEntregaGuardar()'), /pliAdjSubirPendientes\('entrega'/);
+  // El manual también dice que Cancelar lo descarta: lo hace pliAdjPintar al abrir la próxima.
+  assert.match(fuente(PANEL, 'function pliAdjPintar(entidad, id, destino)'), /pend: \[\]/);
 });

@@ -26026,6 +26026,14 @@ SG_MANUAL.pli = { titulo: 'Planificación de Insumos', html:
       + 'proveedor lo discuta.',
       'V1103')
 
+  + sgManCampo('Papeles',
+      'El remito o la factura escaneados, en PDF, JPG o PNG de hasta 10 MB. Se pueden adjuntar '
+      + '<b>mientras cargás</b>, sin guardar primero: quedan esperando abajo y se suben solos al '
+      + 'apretar Guardar.',
+      'Es el respaldo de lo que salió y de lo que se le cobró. Si cerrás la ventana con Cancelar, '
+      + 'el papel elegido se descarta junto con el resto de lo que habías cargado.',
+      'V1138')
+
   + '<p class="nota">Cuando las dos puntas están en monedas distintas —el costo en dólares y el '
   + 'precio en pesos, o la factura en una y los renglones en otra— la resta <b>no se hace</b> y se '
   + 'dice por qué. Restar pesos contra dólares con una cotización que nadie eligió daría una '
@@ -82316,16 +82324,22 @@ function pliEntregaGuardar() {
              : pliApi('/entregas', { method: 'POST', body: JSON.stringify(body) });
   p.then(function(r) {
     if (!r.ok) return pliErr(r);
-    toast('✓ Entrega registrada', 'ok');
-    document.getElementById('pli-mb-entrega').classList.remove('on');
-    // El stock de los insumos cambió: la lista que tiene la pantalla quedó vieja.
-    if (typeof pliInsCargar === 'function') pliInsCargar();
     var recien = !id && r.id;
-    pliPagCargar().then(function() {
-      // ADJUNTAR LA FACTURA ES LO ÚLTIMO QUE PIDIÓ PABLO, y mientras la entrega no existe no hay
-      // dónde colgarla. Recién creada se vuelve a abrir sola, así el papel se adjunta en el mismo
-      // momento en vez de obligar a buscarla en la lista y entrar de nuevo.
-      if (recien) pliEntregaAbrir(r.id);
+    // LOS PAPELES QUE ESPERABAN, CONTRA LA ENTREGA RECIÉN CREADA. Se suben ANTES de cerrar: si la
+    // ventana se cerrara primero, la próxima que se abra vaciaría la cola y el archivo que el
+    // operador ya eligió se perdería sin que nada lo diga.
+    pliAdjSubirPendientes('entrega', r.id || Number(id)).then(function(adj) {
+      toast('✓ Entrega registrada' + pliAdjFrase(adj), 'ok');
+      document.getElementById('pli-mb-entrega').classList.remove('on');
+      // El stock de los insumos cambió: la lista que tiene la pantalla quedó vieja.
+      if (typeof pliInsCargar === 'function') pliInsCargar();
+      pliPagCargar().then(function() {
+        // RECIÉN CREADA SE VUELVE A ABRIR SOLA PARA ADJUNTAR EL PAPEL, que mientras la entrega no
+        // existía no tenía dónde colgarse. Salvo que el papel ya haya entrado con ella: ahí no hay
+        // nada que hacer en esa ventana y reabrirla parece que no se guardó. Si alguno falló sí se
+        // reabre, que es donde se reintenta.
+        if (recien && (!adj.subidos || adj.fallaron)) pliEntregaAbrir(r.id);
+      });
     });
   });
 }
@@ -82427,13 +82441,17 @@ function pliRecuperoGuardar() {
              : pliApi('/recuperos', { method: 'POST', body: JSON.stringify(body) });
   p.then(function(r) {
     if (!r.ok) return pliErr(r);
-    toast('✓ Factura guardada', 'ok');
-    document.getElementById('pli-mb-recupero').classList.remove('on');
-    var volverA = PLI.marcando;
-    pliPagCargar();
-    // Si se venía de marcar una entrega, se vuelve ahí con la lista al día en vez de dejar al
-    // operador buscando dónde estaba.
-    if (volverA && !id) setTimeout(function() { pliEntRecuperar(volverA.id); }, 250);
+    // LA MISMA COLA QUE LA ENTREGA. Las dos ventanas ofrecen el mismo botón, así que las dos tienen
+    // que vaciarla: ofrecerlo acá y no subir el archivo es peor que no ofrecerlo.
+    pliAdjSubirPendientes('recupero', r.id || Number(id)).then(function(adj) {
+      toast('✓ Factura guardada' + pliAdjFrase(adj), 'ok');
+      document.getElementById('pli-mb-recupero').classList.remove('on');
+      var volverA = PLI.marcando;
+      pliPagCargar();
+      // Si se venía de marcar una entrega, se vuelve ahí con la lista al día en vez de dejar al
+      // operador buscando dónde estaba.
+      if (volverA && !id) setTimeout(function() { pliEntRecuperar(volverA.id); }, 250);
+    });
   });
 }
 
@@ -82450,24 +82468,26 @@ function pliRecuperoBorrar(id) {
 
 // ── LOS PAPELES ───────────────────────────────────────────────────────────
 
-// MIENTRAS NO ESTÉ GUARDADA NO HAY DÓNDE COLGAR EL ARCHIVO. Decirlo es mejor que mostrar un botón
-// que va a contestar «no encontrado».
+// EL PAPEL SE ADJUNTA ANTES DE GUARDAR (V1138). Pablo, 3/11/2026: «fijate si podés agregarme un
+// "agregar adjunto", así si tengo, subo el comprobante». El remito está en la mano JUSTO cuando se
+// carga la entrega: hasta acá había que guardar, buscarla en la lista y entrar de nuevo, y el papel
+// que no se adjunta en ese momento no se adjunta nunca.
+//
+// Mientras la entrega todavía no existe no hay dónde colgarlo, así que el archivo ESPERA en la
+// ventana y se sube solo al guardar, contra el id recién creado.
 function pliAdjPintar(entidad, id, destino) {
-  PLI.adj = { entidad: entidad, id: id, destino: destino };
+  // LA COLA SE VACÍA EN CADA APERTURA. Una ventana que sólo se esconde conserva lo que tenía: sin
+  // esto, un papel elegido y después cancelado se le colgaría a la entrega siguiente.
+  PLI.adj = { entidad: entidad, id: id, destino: destino, pend: [] };
   var box = document.getElementById(destino);
-  if (!id) {
-    box.innerHTML = '<div class="pli-cel-chica">Guardá primero y después podés adjuntar el papel.</div>';
-    return;
-  }
+  if (!id) { pliAdjPendPintar(); return; }
   box.innerHTML = '<div class="pli-cel-chica">Cargando papeles…</div>';
   pliApi('/adjuntos/' + entidad + '/' + id).then(function(r) {
+    // De paso se aprende si el guardado de archivos está configurado, que es lo único que no se
+    // puede preguntar antes de que el comprobante exista.
+    if (r.storage_ok !== undefined) PLI.storageOk = !!r.storage_ok;
     if (!r.ok) { box.innerHTML = '<div class="pli-cel-chica">' + pliEsc(r.error || 'Error') + '</div>'; return; }
-    var h = '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">'
-      + '<b style="font-size:12px">Papeles</b>'
-      + (r.storage_ok
-        ? '<button class="btn bo bs" onclick="pliAdjElegir()">📎 Adjuntar</button>'
-        : '<span class="pli-cel-chica" style="color:#92400e">El guardado de archivos no está configurado</span>')
-      + '</div>';
+    var h = pliAdjCabeza(r.storage_ok);
     h += (r.data || []).length
       ? '<div style="margin-top:6px">' + r.data.map(function(a) {
           return '<div class="pli-cel-chica" style="display:flex;align-items:center;gap:8px;padding:3px 0">'
@@ -82480,6 +82500,53 @@ function pliAdjPintar(entidad, id, destino) {
   });
 }
 
+// El título y el botón, UNO SOLO para los dos estados: la entrega ya guardada y la que todavía no.
+// Que el botón aparezca en un estado y no en el otro es cómo volvería a quedar sin adjuntar.
+function pliAdjCabeza(hayStorage) {
+  return '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">'
+    + '<b style="font-size:12px">Papeles</b>'
+    + (hayStorage
+      ? '<button class="btn bo bs" onclick="pliAdjElegir()">📎 Adjuntar</button>'
+      : '<span class="pli-cel-chica" style="color:#92400e">El guardado de archivos no está configurado</span>')
+    + '</div>';
+}
+
+// LO QUE ESPERA PARA SUBIRSE. Se ve con nombre y con su tacho: un archivo que quedó en una cola
+// invisible es un archivo que el operador cree subido.
+function pliAdjPendPintar() {
+  var pend = (PLI.adj && PLI.adj.pend) || [];
+  // Antes de que exista el comprobante no se le puede preguntar al servidor si R2 está configurado,
+  // así que se ofrece salvo que ya se haya sabido que no.
+  var h = pliAdjCabeza(PLI.storageOk !== false);
+  h += pend.length
+    ? '<div style="margin-top:6px">' + pend.map(function(f, i) {
+        return '<div class="pli-cel-chica" style="display:flex;align-items:center;gap:8px;padding:3px 0">'
+          + '<span>📄 ' + pliEsc(f.name) + '</span>'
+          + '<button class="btn bd bs" onclick="pliAdjPendSacar(' + i + ')" style="padding:1px 5px;font-size:10px">🗑</button>'
+          + '</div>';
+      }).join('') + '</div>'
+      + '<div class="pli-cel-chica" style="margin-top:4px;color:#92400e">'
+      + (pend.length === 1 ? 'Se sube' : 'Se suben') + ' cuando guardes.</div>'
+    : '<div class="pli-cel-chica" style="margin-top:4px">Si ya tenés el remito o la factura, '
+      + 'adjuntalo ahora: se sube cuando guardes.</div>';
+  document.getElementById(PLI.adj.destino).innerHTML = h;
+}
+
+function pliAdjPendSacar(i) {
+  PLI.adj.pend.splice(i, 1);
+  pliAdjPendPintar();
+}
+
+// EL MISMO FILTRO QUE EL SERVIDOR, pero antes de dejarlo esperando. Enterarse de que el archivo no
+// servía recién al guardar es enterarse cuando la ventana ya se cerró. Un archivo sin tipo —pasa
+// con algunos PDF— no se rechaza acá: lo decide el servidor, que mira el contenido.
+function pliAdjRechazo(f) {
+  var ok = ['application/pdf', 'image/jpeg', 'image/png'];
+  if (f.type && ok.indexOf(f.type) < 0) return 'El papel tiene que ser un PDF, un JPG o un PNG.';
+  if (f.size > 10 * 1024 * 1024) return 'El archivo supera los 10 MB.';
+  return '';
+}
+
 function pliAdjElegir() {
   var inp = document.getElementById('pli-pag-file');
   // Se limpia antes de abrir: si no, elegir DOS VECES el mismo archivo no dispara el change y
@@ -82490,24 +82557,64 @@ function pliAdjElegir() {
 
 function pliAdjSubir(inp) {
   var f = inp.files && inp.files[0];
-  if (!f || !PLI.adj || !PLI.adj.id) return;
+  if (!f || !PLI.adj) return;
+  var mal = pliAdjRechazo(f);
+  if (mal) return toast(mal, 'er');
+  // Todavía sin guardar: espera acá. Mandarlo ahora sería un POST contra un id que no existe.
+  if (!PLI.adj.id) { PLI.adj.pend.push(f); pliAdjPendPintar(); return; }
+  pliAdjPost(PLI.adj.entidad, PLI.adj.id, f).then(function(r) {
+    if (!r.ok) return toast(r.error || 'No se pudo subir', 'er');
+    toast('✓ Papel adjuntado', 'ok');
+    pliAdjPintar(PLI.adj.entidad, PLI.adj.id, PLI.adj.destino);
+    pliPagCargar();
+  });
+}
+
+// UNA SOLA PUERTA PARA SUBIR. La usan el botón de un comprobante ya guardado y la cola que se
+// vacía al guardar uno nuevo: dos fetch distintos son dos lugares donde desincronizar la dirección
+// o el mensaje de error.
+function pliAdjPost(entidad, id, archivo) {
   var fd = new FormData();
-  fd.append('archivo', f);
-  fetch('/api/pli/adjuntos/' + PLI.adj.entidad + '/' + PLI.adj.id,
+  fd.append('archivo', archivo);
+  return fetch('/api/pli/adjuntos/' + entidad + '/' + id,
     { method: 'POST', credentials: 'include', body: fd })
     .then(function(r) { return r.json(); })
-    .then(function(r) {
-      if (!r.ok) return toast(r.error || 'No se pudo subir', 'er');
-      toast('✓ Papel adjuntado', 'ok');
-      pliAdjPintar(PLI.adj.entidad, PLI.adj.id, PLI.adj.destino);
-      pliPagCargar();
-    })
     // PASARSE DE LOS 10 MB NO ES UN ERROR DE RED. Multer corta la subida y el servidor contesta un
     // HTML que `r.json()` no puede leer: sin esto, el que sube una foto grande lee «error de red» y
     // vuelve a intentar con el mismo archivo.
     .catch(function() {
-      toast('No se pudo subir. Tiene que ser un PDF, JPG o PNG de hasta 10 MB.', 'er');
+      return { ok: false, error: 'No se pudo subir. Tiene que ser un PDF, JPG o PNG de hasta 10 MB.' };
     });
+}
+
+// LA COLA SE VACÍA CONTRA EL COMPROBANTE RECIÉN CREADO. De a uno, así el aviso de error nombra
+// el archivo que falló. Devuelve cuántos entraron y cuántos no, porque de eso depende si la
+// ventana se vuelve a abrir.
+//
+// Y SÓLO LA SUYA: se exige que la cola sea de esta misma entidad y que estuviera sin guardar. Sin
+// esa condición, un papel elegido en la ventana de la factura y abandonado ahí terminaría colgado
+// de la próxima entrega.
+function pliAdjSubirPendientes(entidad, id) {
+  var a = PLI.adj || {};
+  var mia = a.entidad === entidad && !a.id && !!a.pend;
+  var pend = mia ? a.pend.slice() : [];
+  if (mia) a.pend = [];
+  var res = { subidos: 0, fallaron: 0 };
+  return pend.reduce(function(p, f) {
+    return p.then(function() {
+      return pliAdjPost(entidad, id, f).then(function(r) {
+        if (r && r.ok) { res.subidos++; return; }
+        res.fallaron++;
+        toast((f.name || 'El papel') + ': ' + ((r && r.error) || 'no se pudo subir'), 'er');
+      });
+    });
+  }, Promise.resolve()).then(function() { return res; });
+}
+
+// «con 2 papeles», o nada. En un solo lugar para que las dos ventanas digan lo mismo.
+function pliAdjFrase(adj) {
+  return adj && adj.subidos
+    ? ' con ' + adj.subidos + (adj.subidos === 1 ? ' papel' : ' papeles') : '';
 }
 
 function pliAdjBorrar(id) {
