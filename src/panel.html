@@ -8203,6 +8203,24 @@ if ('serviceWorker' in navigator) {
       #sec-galpon-proceso .gpr-previo .kg{font-size:19px;font-weight:700;
         font-variant-numeric:tabular-nums}
       #sec-galpon-proceso .gpr-previo .cta{font-size:11px;color:var(--mut)}
+      #sec-galpon-proceso .gpr-btns{display:flex;gap:7px;flex-wrap:wrap;
+        justify-content:flex-end}
+      /* El cartel del cierre: va DENTRO de la baldosa, pegado al número que se acaba
+         de tipear. Un diálogo del navegador tapa justamente eso. */
+      #sec-galpon-proceso .gpr-cierre{margin-top:10px;border:1px solid var(--burg);
+        border-radius:10px;padding:10px 12px;background:var(--burl)}
+      #sec-galpon-proceso .gpr-ct{font-size:12.5px;line-height:1.45;color:var(--txt)}
+      #sec-galpon-proceso .gpr-cb{display:flex;gap:7px;flex-wrap:wrap;margin-top:9px}
+      /* EL ACUSE DEL CIERRE. El número en pantalla y no sólo en la pestaña nueva:
+         window.open() después de un await es lo que los navegadores bloquean, y un
+         pallet cerrado sin número a la vista es un pallet sin identificar. */
+      #sec-galpon-proceso .gpr-ack{display:flex;align-items:center;gap:12px;
+        justify-content:space-between;flex-wrap:wrap;border:1px solid #16a34a;
+        border-radius:12px;padding:11px 14px;margin-bottom:12px;
+        background:rgba(22,163,74,.10)}
+      #sec-galpon-proceso .gpr-ack b{font-size:15px}
+      #sec-galpon-proceso .gpr-ack .s{font-size:12px;color:var(--mut);margin-top:2px;
+        font-variant-numeric:tabular-nums}
 
       /* LO CARGADO Y EL STOCK. Sin barra lateral (CLAUDE.md): anchos fijos y lo que no
          entra se recorta, nunca se arrastra la tabla. */
@@ -28965,6 +28983,38 @@ SG_MANUAL['galpon-proceso'] = { titulo: 'Galpón · Proceso', html:
   + '<li>El cuadro bordó de arriba muestra <b>qué tiene adentro</b> mientras se carga, '
   + 'agrupado por artículo: eso es exactamente un renglón del tarjetón.</li>'
   + '</ul>'
+
+  + '<h3>🧱 Cargar y cerrar el pallet de una <span class="ver">V1140</span></h3>'
+  + '<p>Andy, 4/11/2026: <i>«tiene que existir la forma en el proceso de directamente '
+  + 'cerrar pallet, es decir no procesar y después cerrar el pallet. Hacerlo '
+  + 'juntos»</i>.</p>'
+  + '<p>Un pallet que se completa con <b>una sola carga</b> —sesenta cajas del mismo '
+  + 'calibre— eran dos gestos para un solo hecho: tipear las cajas en la baldosa y '
+  + 'después subir a la tarjeta del pallet a cerrarlo. Ahora la baldosa tiene, al lado '
+  + 'de <b>Cargar</b>, un <b>Cargar y cerrar pallet</b>.</p>'
+  + '<ul>'
+  + '<li>Pregunta una sola vez, <b>ahí mismo</b>, y muestra <b>el total que va a '
+  + 'quedar impreso</b>: esta carga más lo que el pallet ya tenía adentro. Cerrar '
+  + 'mirando sólo las cajas que se acaban de tipear es cerrar a ciegas un pallet '
+  + 'mixto.</li>'
+  + '<li><b>PARCIAL es un botón</b>, no un segundo cartel de sí/no. «Cancelar = no, va '
+  + 'completo» se contesta al revés la mitad de las veces, y lo que sale mal sale '
+  + '<b>impreso</b> en el tarjetón.</li>'
+  + '<li>Con el casillero <b>vacío</b> no cierra: manda a la tarjeta del pallet de '
+  + 'arriba, que es la que cierra sin cargar nada. Lo que falta ahí no es confirmar, '
+  + 'es el número.</li>'
+  + '</ul>'
+  + '<div class="ojo"><b>Las dos cosas van en un solo pedido al servidor</b>, no en dos '
+  + 'seguidos. Con dos, si el segundo no llega —el wifi del galpón, que es lo que '
+  + 'pasa— el operador se va convencido de que cerró: el pallet queda abierto, la '
+  + 'primera caja del pallet siguiente le cae adentro, y la etiqueta que se imprima '
+  + 'después dice otra cosa que lo que hay arriba de la madera.</div>'
+  + '<p>Y si el cierre falla, <b>la carga queda igual</b>: ya pasó. Avisa qué pasó con '
+  + 'el pallet, que sigue abierto donde se lo ve.</p>'
+  + '<p>Al cerrar —con este botón o con el de la tarjeta— queda arriba un <b>cartel '
+  + 'verde con el número</b> y un enlace al tarjetón. El tarjetón se abre solo en una '
+  + 'pestaña nueva, pero el navegador a veces la bloquea, y un pallet cerrado cuyo '
+  + 'número nadie vio es un pallet sin identificar en el playón.</p>'
 
   + '<h3>🔢 El número <span class="ver">V1120</span></h3>'
   + '<p>Sale <b>al cerrar</b>, no al abrir: <b>PC-26-00001</b>, con el prefijo, el año de '
@@ -60210,7 +60260,11 @@ async function galBalGuardarBaud(){
    porque no siempre tenemos bien en claro de qué lote es cada uno. Es decir es todo
    Damasco». La tolva mezcla, y pedirle al operador que elija UNO cuando hay tres
    adentro es pedirle que invente — y una invención entra al rinde igual que un dato. */
-var GPR = { fecha:null, hoy:null, lotes:[], datos:null, sel:null, uuid:null, editId:null };
+/* cerrado: el último pallet que se cerró en esta pantalla. No es dato del servidor
+   —se vuelve a pedir todo en cada galPrCargar()— sino el acuse que queda a la vista
+   con su número, por si el tarjetón no llegó a abrirse. */
+var GPR = { fecha:null, hoy:null, lotes:[], datos:null, sel:null, uuid:null, editId:null,
+            cerrado:null };
 
 function galPrEsc(s){ return String(s == null ? '' : s)
   .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
@@ -60442,8 +60496,20 @@ function galPrBaldosa(p, d){
       + '<div class="gpr-previo">'
         + '<div><div class="kg" id="gpr-previo" style="color:' + d.color + '">0 kg</div>'
           + '<div class="cta">Enter para cargar</div></div>'
-        + '<button class="btn bp" id="gpr-btn" onclick="galPrCargarUno()">Cargar</button>'
+        + '<div class="gpr-btns">'
+          + '<button class="btn bp" id="gpr-btn" onclick="galPrCargarUno()">Cargar</button>'
+          /* CARGAR Y CERRAR. Andy, 4/11/2026: «no procesar y después cerrar el
+             pallet. Hacerlo juntos». Va acá y no arriba en la tarjeta del pallet
+             porque es el mismo hecho físico que la carga: el pallet se completó con
+             estas cajas. Subir a buscar el otro botón es el paso que se saltea. */
+          + '<button class="btn bo" id="gpr-btn-cerrar" onclick="galPrPedirCierre()">'
+            + 'Cargar y cerrar pallet</button>'
+        + '</div>'
       + '</div>'
+      /* El cartel del cierre se dibuja ESCONDIDO y se muestra a mano, sin volver a
+         pintar la zona: un redibujado le borra al operador los bultos que acaba de
+         tipear. Es la misma razón por la que galPrMas() no repinta. */
+      + '<div id="gpr-cierre" class="gpr-cierre" style="display:none"></div>'
       + '<div id="gpr-error" style="display:none;margin-top:9px" class="ojo"></div>'
       + '</div>';
   }
@@ -60490,11 +60556,78 @@ function galPrTecla(ev){
   if (ev.key === 'Enter'){ ev.preventDefault(); galPrCargarUno(); }
 }
 
-async function galPrCargarUno(){
+/* ── 🧱 CARGAR Y CERRAR EL PALLET, DE UNA ─────────────────────────────────────
+   Andy, 4/11/2026: «tiene que existir la forma en el proceso de directamente cerrar
+   pallet, es decir no procesar y después cerrar el pallet. Hacerlo juntos».
+
+   Se pregunta, porque cerrar le pone el número y emite la etiqueta — pero se pregunta
+   UNA vez y acá adentro, con los totales a la vista. Lo PARCIAL es un botón y no un
+   segundo cartel de sí/no: «Cancelar = no, va completo» se contesta al revés la mitad
+   de las veces, y lo que sale mal sale IMPRESO en el tarjetón. */
+function galPrPedirCierre(){
+  var p = galPrPresSel(); if (!p) return;
+  var box = document.getElementById('gpr-cierre'); if (!box) return;
+  var err = document.getElementById('gpr-error');
+  var c = document.getElementById('gpr-cant');
+  var v = Number(String((c && c.value) || '').replace(',', '.')) || 0;
+
+  /* Sin cantidad no se cierra DESDE ACÁ. Cerrar un pallet sin cargarle nada es otra
+     cosa y ya tiene su botón arriba, en la tarjeta del pallet: con el campo vacío lo
+     que falta no es confirmar, es el número. */
+  if (v <= 0){
+    box.style.display = 'none'; box.innerHTML = '';
+    if (err){
+      err.textContent = 'Escribí cuántos ' + (p.granel ? 'kilos' : 'bultos')
+        + ' van antes de cerrar. Si el pallet ya está completo y no hay nada más que'
+        + ' cargarle, cerralo desde la tarjeta del pallet, arriba.';
+      err.style.display = '';
+    }
+    if (c){ try { c.focus(); } catch(e){} }
+    return;
+  }
+  if (err) err.style.display = 'none';
+
+  /* Lo que va a quedar adentro: lo que el pallet YA tiene más esta carga. El número
+     que importa es el total, porque es el que va impreso — cerrar mirando sólo las
+     cajas que se acaban de tipear es cerrar a ciegas un pallet mixto. */
+  var pal = (GPR.datos && GPR.datos.pallet_abierto) || null;
+  var cont = (pal && pal.contenido) || [];
+  var hb = 0, hk = 0;
+  cont.forEach(function(x){ hb += Number(x.bultos) || 0; hk += Number(x.kilos) || 0; });
+  var mb = p.granel ? 0 : v;
+  var mk = p.granel ? v : v * p.por_bulto * p.kg_unidad;
+
+  box.innerHTML = '<div class="gpr-ct">Se cierra el pallet con <b>'
+    + galPrNum(hb + mb, 0) + ' bultos</b> · <b>' + galPrNum(hk + mk) + ' kg</b>'
+    + (cont.length
+        ? ': esta carga más lo que ya tiene adentro (' + cont.length
+          + (cont.length === 1 ? ' artículo' : ' artículos') + ').'
+        : ': sólo esta carga.')
+    + ' Le pone el número y sale el tarjetón.</div>'
+    + '<div class="gpr-cb">'
+      + '<button class="btn bp" onclick="galPrCargarUno(1, 0)">Cargar y cerrar</button>'
+      + '<button class="btn bo" onclick="galPrCargarUno(1, 1)">Cerrar y va PARCIAL</button>'
+      + '<button class="btn bo bs" onclick="galPrCierreNo()">cancelar</button>'
+    + '</div>';
+  box.style.display = '';
+}
+
+function galPrCierreNo(){
+  var box = document.getElementById('gpr-cierre');
+  if (box){ box.style.display = 'none'; box.innerHTML = ''; }
+  var c = document.getElementById('gpr-cant');
+  if (c){ try { c.focus(); } catch(e){} }
+}
+
+/* cerrar: además de guardar la carga, cierra el pallet en el MISMO pedido. No son dos
+   fetch seguidos a propósito: si el segundo no llega, el operador se va convencido de
+   que cerró y la caja siguiente le cae adentro del pallet que creía etiquetado. */
+async function galPrCargarUno(cerrar, parcial){
   var p = galPrPresSel(); if (!p || !GPR.lotes.length) return;
   var err = document.getElementById('gpr-error');
   var c = document.getElementById('gpr-cant');
   var btn = document.getElementById('gpr-btn');
+  var btn2 = document.getElementById('gpr-btn-cerrar');
   if (err) err.style.display = 'none';
   var body = {
     uuid: GPR.uuid,
@@ -60504,8 +60637,10 @@ async function galPrCargarUno(){
   };
   if (p.granel) body.kilos = c ? c.value : '';
   else body.bultos = c ? c.value : '';
+  if (cerrar){ body.cerrar_pallet = 1; body.parcial = parcial ? 1 : 0; }
 
   if (btn) btn.disabled = true;
+  if (btn2) btn2.disabled = true;
   try {
     var r = await fetch('/api/galpon/procesos', { method:'POST', credentials:'include',
       headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
@@ -60519,6 +60654,14 @@ async function galPrCargarUno(){
        IGNORE sobre esa columna, así que reusarlo haría que la segunda caja se descarte
        en silencio. Es el mismo mecanismo que frena el doble clic en la carga de kilos. */
     GPR.uuid = galKgNuevoUuid();
+    /* EL CIERRE SE LEE ANTES DE REDIBUJAR. Si el pallet se cerró, lo que queda en
+       pantalla es el acuse con su número; si se guardó la carga pero el cierre falló,
+       eso hay que decirlo y no taparlo con el refresco. */
+    if (j.pallet_cerrado) GPR.cerrado = j.pallet_cerrado;
+    if (j.cierre_motivo){
+      alert('La carga SE GUARDÓ, pero el pallet NO se cerró:' + String.fromCharCode(10)
+        + String.fromCharCode(10) + j.cierre_motivo);
+    }
     var sel = GPR.sel;
     await galPrCargar();
     GPR.sel = sel;
@@ -60527,10 +60670,17 @@ async function galPrCargarUno(){
     if (z) { z.classList.remove('gpr-flash'); void z.offsetWidth; z.classList.add('gpr-flash'); }
     var c2 = document.getElementById('gpr-cant');
     if (c2) setTimeout(function(){ try { c2.focus(); } catch(e){} }, 50);
+    /* Y el tarjetón, último: cerrar un pallet y no imprimir la etiqueta es un pallet
+       sin identificar en el playón. Si el navegador bloquea la pestaña, el número
+       quedó igual en el acuse verde de arriba, con su enlace. */
+    if (j.pallet_cerrado){
+      window.open('/api/galpon/pallets/' + j.pallet_cerrado.id + '/tarjeton.pdf', '_blank');
+    }
   } catch (e) {
     if (err){ err.textContent = 'No se pudo cargar: ' + e.message; err.style.display = ''; }
   } finally {
     if (btn) btn.disabled = false;
+    if (btn2) btn2.disabled = false;
   }
 }
 
@@ -60682,21 +60832,44 @@ async function galProcBorrarDesdeFicha(){
 
    Va ARRIBA de las baldosas a propósito: todo lo que se cargue abajo cae acá, y el que
    carga tiene que ver qué hay adentro ANTES de apretar, no después. */
+/* EL NÚMERO, EN PANTALLA Y NO SÓLO EN LA PESTAÑA NUEVA. El tarjetón se abre con
+   window.open() después de un await, que es justo lo que los navegadores bloquean: si
+   el popup no sale, el operador cerró un pallet y no sabe con qué número — y el número
+   es lo único que lo identifica en el playón y en un remito. */
+function galPrAcuseCierre(){
+  var c = GPR.cerrado; if (!c) return '';
+  return '<div class="gpr-ack"><div>'
+    + '<b>✔ Pallet ' + galPrEsc(c.numero || 'cerrado') + '</b>'
+    + (c.parcial ? ' <span class="gpl-chapa">PARCIAL</span>' : '')
+    + '<div class="s">' + galPrNum(c.bultos, 0) + ' bultos · ' + galPrNum(c.kilos) + ' kg'
+      + (c.articulos ? ' · ' + c.articulos
+          + (c.articulos === 1 ? ' artículo' : ' artículos') : '') + '</div></div>'
+    + '<div style="display:flex;gap:7px;align-items:center">'
+      + '<a class="btn bo bs" target="_blank" href="/api/galpon/pallets/' + c.id
+        + '/tarjeton.pdf">🖨 tarjetón</a>'
+      + '<button class="btn bo bs" onclick="galPrAcuseNo()">×</button></div>'
+    + '</div>';
+}
+
+function galPrAcuseNo(){ GPR.cerrado = null; galPrPintarPallet(); }
+
 function galPrPintarPallet(){
   var el = document.getElementById('gpr-pallet'); if (!el) return;
   var p = GPR.datos && GPR.datos.pallet_abierto;
+  var ack = galPrAcuseCierre();
   if (!p){
     /* Sin pallet abierto no se muestra un cartel vacío: el primero se abre solo con la
        primera carga, y anunciar que no hay ninguno sería pedirle al operador que haga
-       un paso que el sistema ya hace. */
-    el.innerHTML = '';
+       un paso que el sistema ya hace. Lo único que puede quedar es el acuse del que
+       se acaba de cerrar, que es justo el momento en que no hay ninguno abierto. */
+    el.innerHTML = ack;
     return;
   }
   var c = p.contenido || [];
   var bultos = 0, kilos = 0;
   c.forEach(function(x){ bultos += Number(x.bultos) || 0; kilos += Number(x.kilos) || 0; });
 
-  el.innerHTML = '<div class="gpl">'
+  el.innerHTML = ack + '<div class="gpl">'
     + '<div class="gpl-h">'
       + '<div><div class="gpl-t">Pallet abierto</div>'
         + '<div class="gpl-n">sin número todavía'
@@ -60755,6 +60928,13 @@ async function galPlCerrar(id){
       body: JSON.stringify({ parcial: parcial ? 1 : 0 }) });
     var j = await r.json();
     if (!j.ok) return alert(j.error || 'no se pudo cerrar');
+    /* El mismo acuse que deja «cargar y cerrar»: un solo mecanismo para el número.
+       Dos maneras de cerrar con una sola que avisa es la que no avisa la que se usa. */
+    GPR.cerrado = { id: id, numero: j.numero,
+                    bultos: (j.pallet && j.pallet.bultos) || 0,
+                    kilos: (j.pallet && j.pallet.kilos) || 0,
+                    articulos: (j.contenido || []).length,
+                    parcial: parcial ? 1 : 0 };
     await galPrCargar();
     /* Y se abre el tarjetón enseguida. Cerrar un pallet y no imprimir la etiqueta es
        un pallet sin identificar en el playón: el paso siguiente es siempre pegarla. */
