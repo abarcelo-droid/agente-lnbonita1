@@ -1702,12 +1702,6 @@ export function registrarProceso(db, d) {
   const bultosPorLote = bultos == null ? lotes.map(() => null) : repartir(bultos, pesos);
   const grupo = esMezcla ? (txt(dd.uuid) || String(Date.now()) + Math.random()) : null;
 
-  /* AL PALLET ABIERTO. Si no hay ninguno se abre uno solo: pedirle al operador que
-     abra el pallet antes de la primera caja es un paso que se va a saltear, y la caja
-     quedaría suelta sin que nada avise. */
-  const palletId = dd.sin_pallet ? null : abrirPallet(db, { fecha_empaque: fecha,
-    usuario_id: dd.usuario_id, usuario: dd.usuario }).id;
-
   const ins = db.prepare(
     ' INSERT OR IGNORE INTO gal_procesos (uuid,fecha,lote_id,lote_nombre,producto,destino,'
     + ' presentacion_id,presentacion,envase,bultos,por_bulto,kg_unidad,kilos,tipo,'
@@ -1716,14 +1710,36 @@ export function registrarProceso(db, d) {
     + ' reparto,repartido,observacion,estado,revision_motivo,usuario_id,usuario)'
     + " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,'ingreso',?,?,?,?,?,?,?,?,?,?,?,?,?)");
 
-  /* EL DOBLE CLIC. Si el primer uuid ya está, la carga entró entera y no se hace
-     nada: el INSERT OR IGNORE de abajo protege la carrera, pero mirar primero es lo
-     que deja contestar «ya estaba» en vez de «no se pudo guardar». */
+  /* EL DOBLE CLIC, Y SE MIRA ANTES DE ABRIR EL PALLET. Si el primer uuid ya está, la
+     carga entró entera y no se hace nada: el INSERT OR IGNORE de abajo protege la
+     carrera, pero mirar primero es lo que deja contestar «ya estaba» en vez de «no se
+     pudo guardar».
+
+     EL ORDEN NO ERA INDIFERENTE Y AHORA MENOS. Hasta la V1140 esto venía DESPUÉS de
+     abrirPallet(), y daba igual: con el pallet abierto, abrirPallet() devuelve el que
+     hay. Desde que la misma llamada puede CERRARLO, el segundo clic de un doble clic
+     llega con el pallet ya cerrado y abriría uno nuevo —vacío y sin número— para una
+     carga que no va a insertar. Un pallet fantasma abierto en el playón se lleva la
+     primera caja de la mañana siguiente y nadie sabe de dónde salió. */
   const u0 = txt(dd.uuid) ? (esMezcla ? dd.uuid + '#' + lotes[0] : dd.uuid) : null;
   if (u0) {
     const ya = db.prepare('SELECT * FROM gal_procesos WHERE uuid = ?').get(u0);
-    if (ya) return { ok: true, id: ya.id, ids: [ya.id], fila: ya, repetido: true };
+    if (ya) {
+      /* Y si pidió cerrar, el primer clic ya cerró: se contesta con el pallet de la
+         fila que YA está para que la pantalla vuelva a ofrecer el tarjetón. Contestar
+         sólo «repetido» dejaría al operador que apretó «cargar y cerrar» sin número y
+         sin saber si cerró. */
+      const pal = dd.cerrar_pallet && ya.pallet_id ? palletResumen(db, ya.pallet_id) : null;
+      return { ok: true, id: ya.id, ids: [ya.id], fila: ya, repetido: true,
+               pallet_cerrado: pal && pal.estado === 'cerrado' ? pal : null };
+    }
   }
+
+  /* AL PALLET ABIERTO. Si no hay ninguno se abre uno solo: pedirle al operador que
+     abra el pallet antes de la primera caja es un paso que se va a saltear, y la caja
+     quedaría suelta sin que nada avise. */
+  const palletId = dd.sin_pallet ? null : abrirPallet(db, { fecha_empaque: fecha,
+    usuario_id: dd.usuario_id, usuario: dd.usuario }).id;
 
   const ids = [];
   for (let i = 0; i < lotes.length; i++) {
@@ -1751,12 +1767,47 @@ export function registrarProceso(db, d) {
   }
   if (!ids.length) return { ok: false, motivo: 'No se pudo guardar' };
 
+  /* ── CARGAR Y CERRAR, EN UN SOLO VIAJE ─────────────────────────────────────────
+     Andy, 4/11/2026: «tiene que existir la forma en el proceso de directamente cerrar
+     pallet, es decir no procesar y después cerrar el pallet. Hacerlo juntos».
+
+     Un pallet que se completa con una sola carga —sesenta cajas del mismo calibre— son
+     DOS gestos para UN hecho físico: tipear las cajas abajo y después subir a la
+     tarjeta del pallet a cerrarlo. El segundo es el que se saltea, y un pallet sin
+     cerrar se lleva adentro la primera caja del siguiente.
+
+     Y VA EN LA MISMA LLAMADA, no en dos seguidas desde la pantalla. Con dos, si la
+     segunda no llega —el wifi del galpón, que es lo que pasa— el operador se va
+     convencido de que cerró: el pallet queda abierto, la caja siguiente le cae adentro
+     y la etiqueta que se imprima después dice otra cosa que lo que hay arriba de la
+     madera. Una sola decisión y un solo «no se pudo».
+
+     SI EL CIERRE FALLA, LA CARGA QUEDA. Ya pasó —la fruta ya está en la tolva
+     (CLAUDE.md)— y se contesta ok con el motivo: el pallet sigue abierto, donde se ve. */
+  let cerrado = null, cierreMotivo = null;
+  if (dd.cerrar_pallet) {
+    if (!palletId) {
+      cierreMotivo = 'La carga no fue a ningún pallet, así que no hay nada que cerrar.';
+    } else {
+      const c = cerrarPallet(db, palletId, { parcial: dd.parcial });
+      if (!c.ok) cierreMotivo = c.motivo;
+      else {
+        cerrado = Object.assign(palletResumen(db, palletId) || {}, {
+          articulos: (c.contenido || []).length,
+          parcial: dd.parcial ? 1 : 0,
+        });
+      }
+    }
+  }
+
   return {
     ok: true, id: ids[0], ids,
     fila: db.prepare('SELECT * FROM gal_procesos WHERE id = ?').get(ids[0]),
     reparto: esMezcla ? { grupo, lotes, nombres, kilos: kilosPorLote,
                           pct: pesos.map((x) => Math.round(x * 1000) / 10) } : null,
     aviso: motivo,
+    pallet_cerrado: cerrado,
+    cierre_motivo: cierreMotivo,
   };
 }
 
