@@ -57,6 +57,12 @@ export function config(db) {
     // El techo del PROCESO. Ver el seed en db_galpon.js: acá el cero de más tiene
     // forma de gramos escritos donde van kilos, y la cuenta se va por mil.
     kg_max_proceso: Number(c.kg_max_proceso) || 0,
+    // DE DÓNDE ARRANCA EL CORRELATIVO DEL PALLET. Van acá y no en valorConfig() porque
+    // la pantalla las muestra juntas con el próximo número, que es la única forma de
+    // ver antes de cerrar un pallet si se está a punto de abrir un hueco.
+    pallet_prefijo: c.pallet_prefijo || 'PC',
+    pallet_desde: Number(c.pallet_desde) || 0,
+    pallet_desde_anio: (c.pallet_desde_anio || '').trim(),
   };
 }
 
@@ -2741,7 +2747,25 @@ export function contenidoDelPallet(db, palletId) {
 /* EL NÚMERO. PC-26-01234: prefijo, los dos dígitos del año y un correlativo de cinco.
    Se arma con el MÁXIMO del año y no con un contador aparte: un contador que se
    incrementa antes de escribir se saltea un número cada vez que algo falla, y el hueco
-   en la numeración de los pallets es lo que después nadie puede explicar. */
+   en la numeración de los pallets es lo que después nadie puede explicar.
+
+   ── Y DÓNDE ARRANCA LO DICE LA CONFIGURACIÓN ──────────────────────────────────────
+   Andy, 5/11/2026: «dejame el primer pallet a armar el 269 así hacemos match con el
+   sistema viejo». El galpón venía numerando con otro sistema y ese papel está pegado en
+   pallets que están en cámara: si acá se arranca de nuevo en 1, el mismo número queda
+   escrito en dos pallets distintos y la cámara deja de poder contarse.
+
+   Es un PISO, no un contador: `pallet_desde` se aplica mientras el máximo del año sea
+   menor, y a partir de ahí el que manda vuelve a ser el máximo. Así no se puede
+   retroceder —bajar el piso no reutiliza un número ya impreso— y poner un piso más alto
+   a mitad de temporada abre un hueco a propósito en vez de pisar algo.
+
+   ── EL PISO VA ATADO A UN AÑO, Y POR ESO SON DOS CLAVES ───────────────────────────
+   El número lleva el año adentro, así que el correlativo arranca de nuevo cada
+   temporada. Un piso sin año se volvería a aplicar en 2027 y el primer pallet de la
+   temporada que viene saldría 00269 otra vez, dejando 268 números que no existen y que
+   nadie podría explicar. `pallet_desde_anio` es el año —dos dígitos— al que el piso le
+   corresponde; en cualquier otro, el correlativo arranca en 1 como siempre. */
 export function proximoNumero(db, fecha) {
   const f = esFecha(fecha) || '';
   const anio = f ? f.slice(2, 4) : String(new Date().getFullYear()).slice(2);
@@ -2750,7 +2774,10 @@ export function proximoNumero(db, fecha) {
     ' SELECT numero FROM gal_pallets WHERE numero LIKE ?'
     + ' ORDER BY numero DESC LIMIT 1').get(pref + '%');
   const n = ult ? (parseInt(String(ult.numero).slice(pref.length), 10) || 0) : 0;
-  return pref + String(n + 1).padStart(5, '0');
+  const piso = String(valorConfig(db, 'pallet_desde_anio') || '').trim() === anio
+    ? Math.floor(Number(valorConfig(db, 'pallet_desde') || 0)) || 0
+    : 0;
+  return pref + String(Math.max(n + 1, piso)).padStart(5, '0');
 }
 
 

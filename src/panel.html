@@ -7040,6 +7040,28 @@ if ('serviceWorker' in navigator) {
           ve el que vuelca: texto libre serían cuarenta maneras de escribir «golpeado» y
           ningún informe posible.</div>
       </div>
+      <!-- ── DE DÓNDE ARRANCA EL NÚMERO DE PALLET ─────────────────────────────
+           Andy, 5/11/2026: «dejame el primer pallet a armar el 269 así hacemos match
+           con el sistema viejo». Es un PISO: se aplica mientras el correlativo del año
+           sea menor. El número que se ve abajo es el que va a salir si se cierra un
+           pallet ahora, y es lo único que avisa si se está abriendo un hueco. -->
+      <div>
+        <label>Primer número de pallet</label>
+        <input type="number" step="1" min="0" id="gal-pdesde" style="width:120px">
+        <div class="gal-ay">0 lo apaga y el correlativo arranca en 1.</div>
+      </div>
+      <div>
+        <label>Año de ese arranque</label>
+        <input type="text" maxlength="2" id="gal-pdanio" style="width:70px"
+               placeholder="26">
+        <div class="gal-ay">Dos dígitos. En los otros años arranca en 1.</div>
+      </div>
+      <div style="flex:1;min-width:200px">
+        <label>El próximo que se cierre</label>
+        <div id="gal-pprox" style="font-size:19px;font-weight:700;color:var(--pri)">—</div>
+        <div class="gal-ay" style="max-width:none">Se recalcula al guardar. Si acá
+          aparece un número que ya está pegado en un pallet, el arranque está mal.</div>
+      </div>
       <div><button class="btn bp" id="gal-cfg-guardar" onclick="galCfgGuardar()">Guardar</button></div>
     </div>
 
@@ -28347,6 +28369,34 @@ SG_MANUAL['galpon-config'] = { titulo: 'Galpón · Configuración', html:
   + 'serían cuarenta maneras de escribir «golpeado» y ningún informe posible al final de la '
   + 'temporada.</p>'
 
+  + '<h3>🔢 De dónde arranca el número de pallet <span class="ver">V1142</span></h3>'
+  + '<p>Andy, 5/11/2026: <i>«dejame el primer pallet a armar el 269 así hacemos match '
+  + 'con el sistema viejo»</i>.</p>'
+  + '<p>El número de un pallet es <b>PC-26-00269</b>: el prefijo, los <b>dos dígitos del '
+  + 'año</b> y un correlativo de cinco. El galpón venía numerando con otro sistema y esos '
+  + 'números están <b>pegados en pallets que hoy están en cámara</b>: si acá se empieza de '
+  + 'nuevo en 1, el mismo número queda escrito en dos pallets distintos y la cámara deja '
+  + 'de poder contarse.</p>'
+  + '<ul>'
+  + '<li><b>Primer número de pallet</b> es un <b>piso, no un contador</b>. Se aplica '
+  + 'mientras el correlativo del año sea menor; a partir de ahí vuelve a mandar el último '
+  + 'número usado. Por eso <b>no se puede retroceder</b>: bajarlo no reutiliza un número '
+  + 'que ya se imprimió.</li>'
+  + '<li><b>Año de ese arranque</b>, dos dígitos. Va atado a un año porque el año está '
+  + 'adentro del número y el correlativo arranca de nuevo cada temporada: sin el año, el '
+  + 'primer pallet del año que viene saldría <b>00269 otra vez</b> y quedarían 268 '
+  + 'números que no existen y que nadie podría explicar.</li>'
+  + '<li><b>El próximo que se cierre</b> no se escribe: lo calcula el sistema y es lo '
+  + 'único que deja ver, <b>antes</b> de cerrar un pallet, si el arranque está bien. Si '
+  + 'ahí aparece un número que ya está pegado en un pallet, el arranque está mal.</li>'
+  + '<li><b>0 lo apaga</b> y el correlativo arranca en 1.</li>'
+  + '</ul>'
+  + '<div class="ojo"><b>Subirlo a mitad de temporada abre un hueco a propósito.</b> Si el '
+  + 'último pallet fue el 40 y se pone 269, los números del 41 al 268 no van a existir '
+  + 'nunca. Eso es lo correcto cuando se está empalmando con otra numeración, y es un '
+  + 'error si se puso un número de más: el hueco se ve enseguida en «el próximo que se '
+  + 'cierre», y después ya no, porque los pallets cerrados no cambian de número.</div>'
+
   + '<h3>👤 Quién puede qué <span class="ver">V1096</span></h3>'
   + '<ul>'
   + '<li><b>Cualquiera con el módulo</b> puede mirar la configuración e <b>imprimir</b> '
@@ -29106,6 +29156,15 @@ SG_MANUAL['galpon-proceso'] = { titulo: 'Galpón · Proceso', html:
   + '<p>El <b>QR lleva el número pelado</b>, igual que las tarjetas de cuadrilla: la '
   + 'lectora se comporta como un teclado, y una dirección adentro del QR escribiría la '
   + 'dirección entera en el casillero donde se espera el número.</p>'
+
+  + '<p><b>El número es lo más grande de la hoja</b> <span class="ver">V1142</span>, y '
+  + 'está arriba a la derecha. Es el único dato que alguien busca a tres metros y con un '
+  + 'pallet de por medio: el producto se adivina mirando las cajas, el número no. '
+  + '<b>PARCIAL</b> y <b>MIXTO</b> van a su izquierda, en la misma línea. Y vuelve a '
+  + 'estar debajo del QR, en chico, porque es el que alguien tipea el día que la lectora '
+  + 'no anda.</p>'
+  + '<p>De dónde sale ese número —el prefijo, el año y de qué número arranca el '
+  + 'correlativo— se configura en <b>Galpón · Configuración</b>.</p>'
 
   + '<div class="ojo"><b>Lo que se imprimió es lo que viajó.</b> Al cerrar se congelan '
   + 'los totales: borrar o corregir una carga después <b>no cambia</b> la etiqueta ya '
@@ -57741,7 +57800,7 @@ function galEsc(s){ return String(s == null ? '' : s)
 async function galInit(){
   var ro = document.getElementById('gal-aviso-ro');
   if (ro) ro.style.display = galAdmin() ? 'none' : '';
-  ['gal-tara','gal-obj','gal-motivos'].forEach(function(id){
+  ['gal-tara','gal-obj','gal-motivos','gal-pdesde','gal-pdanio'].forEach(function(id){
     var e = document.getElementById(id); if (e) e.disabled = !galAdmin();
   });
   var g = document.getElementById('gal-cfg-guardar');
@@ -57758,6 +57817,14 @@ async function galCargar(){
     var t = document.getElementById('gal-tara');    if (t) t.value = j.config.tara_ifco;
     var o = document.getElementById('gal-obj');     if (o) o.value = j.config.objetivo_kg_hora;
     var m = document.getElementById('gal-motivos'); if (m) m.value = (j.config.motivos_calidad||[]).join(', ');
+    /* El arranque del correlativo. El 0 se muestra VACÍO y no como «0»: un cero en el
+       casillero parece un número configurado y lo que significa es que no hay piso. */
+    var pd = document.getElementById('gal-pdesde');
+    if (pd) pd.value = j.config.pallet_desde ? j.config.pallet_desde : '';
+    var pa = document.getElementById('gal-pdanio');
+    if (pa) pa.value = j.config.pallet_desde_anio || '';
+    var px = document.getElementById('gal-pprox');
+    if (px) px.textContent = j.proximo_pallet || '—';
 
     var rc = await fetch('/api/galpon/cuadrillas', { credentials:'include' });
     var jc = await rc.json();
@@ -57814,6 +57881,8 @@ async function galCfgGuardar(){
     tara_ifco: document.getElementById('gal-tara').value,
     objetivo_kg_hora: document.getElementById('gal-obj').value,
     motivos_calidad: document.getElementById('gal-motivos').value,
+    pallet_desde: document.getElementById('gal-pdesde').value,
+    pallet_desde_anio: document.getElementById('gal-pdanio').value,
   };
   try {
     var r = await fetch('/api/galpon/config', { method:'PUT', credentials:'include',
@@ -57821,6 +57890,10 @@ async function galCfgGuardar(){
     var j = await r.json();
     if (!j.ok) return alert(j.error || 'no se pudo guardar');
     GAL.config = j.config;
+    /* Y SE VUELVE A LEER, por el próximo número de pallet: el PUT devuelve la config
+       pero no lo recalcula, y dejar en pantalla el número viejo después de cambiar el
+       arranque es justamente el dato que se vino a mirar. */
+    await galCargar();
     alert('Guardado.');
   } catch (e) { alert('No se pudo guardar: ' + e.message); }
 }

@@ -29,6 +29,7 @@ import {
   DESTINOS, presentaciones, guardarPresentacion, borrarPresentacion,
   lotesConDatos, guardarDatosDeLote, variedadATodos,
   palletAbierto, abrirPallet, contenidoDelPallet, cerrarPallet, reabrirPallet,
+  proximoNumero,
   disponibleParaDespacho, despachos, itemsDelDespacho, abrirDespacho, editarDespacho,
   stockPorPresentacion, guardarIcono, borrarIcono, rutaDelIcono,
   procesosDelRango,
@@ -114,7 +115,12 @@ const ahora = () => new Date().toLocaleTimeString('es-AR',
 // ── LA CONFIGURACIÓN ─────────────────────────────────────────────────────────────────
 router.get('/config', (req, res) => {
   try {
-    res.json({ ok: true, config: config(db), colores: COLORES });
+    /* Y CUÁL VA A SER EL PRÓXIMO NÚMERO DE PALLET. Es lo único que permite ver, ANTES
+       de cerrar, si el arranque configurado abre un hueco o pisa algo: el que lo
+       configura escribe «269» y acá lee «PC-26-00269». Se calcula con la fecha de hoy
+       porque es la que va a tener el pallet que se cierre ahora. */
+    res.json({ ok: true, config: config(db), colores: COLORES,
+               proximo_pallet: proximoNumero(db, hoy()) });
   } catch (e) {
     console.error('[GALPON] GET /config:', e.message);
     res.status(500).json({ ok: false, error: e.message });
@@ -124,7 +130,8 @@ router.get('/config', (req, res) => {
 // Las claves que se pueden tocar desde la pantalla, declaradas. Sin esta lista, un PUT con
 // una clave inventada ensucia gal_config con filas que nadie lee nunca más.
 const CLAVES = ['tara_ifco', 'objetivo_kg_hora', 'motivos_calidad',
-                'balanza_puerto', 'balanza_baudios'];
+                'balanza_puerto', 'balanza_baudios',
+                'pallet_desde', 'pallet_desde_anio'];
 
 router.put('/config', requireAdmin, (req, res) => {
   try {
@@ -143,6 +150,29 @@ router.put('/config', requireAdmin, (req, res) => {
         valor = String(n);
       }
       if (clave === 'motivos_calidad' && Array.isArray(valor)) valor = valor.join(',');
+      /* EL ARRANQUE DEL CORRELATIVO. Entero y no negativo —0 lo apaga— porque un
+         «269,5» guardado como texto volvería del padStart como 269.5 y el número del
+         pallet dejaría de ser un número. Con decimales se rechaza en vez de truncarse:
+         truncar en silencio un dato que se imprime y se pega es peor que no guardarlo. */
+      if (clave === 'pallet_desde') {
+        const n = (valor === '' || valor === null || valor === undefined) ? 0 : Number(valor);
+        if (!Number.isInteger(n) || n < 0) {
+          return res.status(400).json({ ok: false,
+            error: 'El primer número de pallet tiene que ser un entero (0 lo apaga)' });
+        }
+        valor = String(n);
+      }
+      /* Y EL AÑO, EXACTAMENTE DOS DÍGITOS: es lo que va adentro del número. Un «2026»
+         acá no coincidiría nunca con el «26» que arma proximoNumero(), y el arranque
+         quedaría guardado y sin efecto — que es la peor de las tres respuestas. */
+      if (clave === 'pallet_desde_anio') {
+        const a = String(valor == null ? '' : valor).trim();
+        if (a !== '' && !/^\d{2}$/.test(a)) {
+          return res.status(400).json({ ok: false,
+            error: 'El año del arranque va con dos dígitos, como 26' });
+        }
+        valor = a;
+      }
       guardarConfig(db, clave, valor);
       guardadas.push(clave);
     }

@@ -27,6 +27,14 @@ import { getLogo } from './pdfComun.js';
 const A = { ancho: 297, alto: 210 };
 const M = 10;                      // el margen del marco
 
+/* EL NÚMERO DEL PALLET: su tamaño, hasta dónde puede crecer a lo ancho y a qué altura
+   se apoya. Con nombre y acá arriba porque las tres se mueven juntas —subir el tamaño
+   sin bajar la base mete los dígitos abajo del rótulo «PALLET N°»— y porque la raya
+   del encabezado está en M+31: la base tiene que quedar antes. */
+const NUM_TAM = 46;
+const NUM_ANCHO = 150;             // mm; después del logo quedan 221
+const NUM_BASE = M + 24;           // la raya del encabezado va en M+31
+
 const ROJO = [155, 34, 50];        // el bordó de la marca
 const NEGRO = [26, 26, 26];
 const GRIS = [110, 110, 110];
@@ -100,27 +108,39 @@ function encabezado(doc, pallet, logo, marca) {
   doc.setTextColor(...GRIS);
   doc.text('PALLET N°', A.ancho - M - 2, M + 5, { align: 'right' });
 
+  /* EL NÚMERO, Y ES LO MÁS GRANDE DE LA HOJA. Andy, 5/11/2026: «que el número de pallet
+     sea un poco más grande». Es el único dato que alguien busca a tres metros y con un
+     pallet de por medio: el producto se adivina mirando las cajas, el número no.
+
+     46 y no 30, y el tope de ancho pasa de 110 a 150: a 30 el número ocupaba
+     poco más de un tercio del espacio que tenía al lado del logo, y el límite de 110
+     recortaba antes de que el renglón se llenara. Sigue siendo medida() el que decide:
+     un prefijo largo achica la letra en vez de salirse del marco.
+
+     Y LAS CHAPAS SE CORREN AL COSTADO, no abajo. Antes iban en M+20, que con el número
+     de 46 queda DEBAJO de los dígitos: una chapa negra pisada por un número bordó no se
+     lee, y la que importa es la que dice PARCIAL. Al costado hay 140 mm libres. */
   doc.setFont('helvetica', 'bold');
   doc.setTextColor(...ROJO);
   const num = S(pallet.numero) || 'SIN CERRAR';
-  const t = medida(doc, num, 110, 30, 14);
-  doc.text(num, A.ancho - M - 2, M + 17, { align: 'right' });
-  void t;
+  medida(doc, num, NUM_ANCHO, NUM_TAM, 14);
+  doc.text(num, A.ancho - M - 2, NUM_BASE, { align: 'right' });
+  const wNum = doc.getTextWidth(num);
 
-  // Las chapas de estado, abajo del número. Sólo las que corresponden: una chapa que
-  // dice «COMPLETO» en todos los pallets no la mira nadie, y entonces tampoco se mira
-  // la que dice PARCIAL.
-  let x = A.ancho - M - 2;
+  // Las chapas de estado, a la izquierda del número. Sólo las que corresponden: una
+  // chapa que dice «COMPLETO» en todos los pallets no la mira nadie, y entonces tampoco
+  // se mira la que dice PARCIAL.
+  let x = A.ancho - M - 2 - wNum - 5;
   for (const [cond, texto] of [[pallet.parcial, 'PARCIAL'], [pallet.mixto, 'MIXTO']]) {
     if (!cond) continue;
-    doc.setFontSize(10);
+    doc.setFontSize(11);
     doc.setFont('helvetica', 'bold');
     const w = doc.getTextWidth(texto) + 9;
     x -= w;
     doc.setFillColor(...NEGRO);
-    doc.roundedRect(x, M + 20, w, 7.5, 1.6, 1.6, 'F');
+    doc.roundedRect(x, NUM_BASE - 13, w, 8.5, 1.6, 1.6, 'F');
     doc.setTextColor(255, 255, 255);
-    doc.text(texto, x + 4.5, M + 25.3);
+    doc.text(texto, x + 4.5, NUM_BASE - 7);
     x -= 3;
   }
 
@@ -145,10 +165,13 @@ function elQR(doc, qr, numero, x, y, lado) {
   if (qr) {
     try { doc.addImage(qr, 'PNG', x, y, lado, lado); } catch (e) { /* sin QR */ }
   }
+  /* El número otra vez, debajo del QR: es el que alguien tipea el día que la lectora no
+     anda. 16 y no 13, con medida() porque acá el ancho que hay es el del QR y nada más
+     —un número largo a tamaño fijo se metería abajo de las cajas de datos. */
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(13);
+  medida(doc, S(numero), lado, 16, 9);
   doc.setTextColor(...NEGRO);
-  doc.text(S(numero), x + lado / 2, y + lado + 7, { align: 'center' });
+  doc.text(S(numero), x + lado / 2, y + lado + 7.5, { align: 'center' });
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(7.5);
   doc.setTextColor(...GRIS);

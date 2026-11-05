@@ -1600,8 +1600,12 @@ test('los baudios se piden UNA vez y quedan', () => {
   // reconexión sería uno por cada vez que se abre la ventana.
   assert.match(JS_BAL, /if \(GBAL\.baudios\) return GBAL\.baudios;/);
   assert.match(JS_BAL, /balanza_baudios/);
-  // Y la clave ya estaba declarada como guardable, no hace falta tocar el router.
-  assert.match(RUTA, /'balanza_puerto', 'balanza_baudios'\]/);
+  /* Y las dos claves están declaradas como guardables. Se mira que estén DENTRO del
+     arreglo, no que lo cierren: el «balanza_baudios']» de antes ataba este test a que
+     fueran las dos últimas, y agregar una clave nueva al final daba un rojo que hablaba
+     de los baudios de la balanza. */
+  assert.match(RUTA, /const CLAVES = \[[^\]]*'balanza_puerto'/);
+  assert.match(RUTA, /const CLAVES = \[[^\]]*'balanza_baudios'/);
 });
 
 // ══════════════════════════════════════════════════════════════════════════

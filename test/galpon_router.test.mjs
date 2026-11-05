@@ -483,3 +483,87 @@ t('sin sesión tampoco se lee el período', async () => {
     assert.ok(r.status === 401 || r.status === 403, 'contestó ' + r.status);
   } finally { s.cerrar(); }
 });
+
+// ── 🔢 DE DÓNDE ARRANCA EL NÚMERO DE PALLET ───────────────────────────────
+// Andy, 5/11/2026: «dejame el primer pallet a armar el 269 así hacemos match
+// con el sistema viejo». Acá se prueba el CABLEADO: que la pantalla pueda
+// leer el próximo número, guardar el arranque, y que un valor que no puede
+// funcionar se rechace ANTES de quedar escrito y sin efecto.
+//
+// EL AÑO NO VA ESCRITO A MANO EN NINGÚN ASSERT. La base de este archivo usa
+// el DDL de verdad, que siembra el arranque del año 26: un test que diga
+// «PC-26-...» pasa hoy y se cae solo en enero, sin que nada haya cambiado.
+const AA = String(new Date().getFullYear()).slice(2);
+
+t('GET /config dice cuál va a ser el próximo número de pallet', async () => {
+  const s = await servidor(base(), OPERADOR);
+  try {
+    const r = await (await s.pegar('/config')).json();
+    assert.match(r.proximo_pallet, /^PC-\d{2}-\d{5}$/,
+      'el próximo número no tiene la forma del número de pallet: ' + r.proximo_pallet);
+    assert.equal(typeof r.config.pallet_desde, 'number');
+    assert.equal(r.config.pallet_desde_anio.length, 2, 'el año del arranque no son dos dígitos');
+  } finally { s.cerrar(); }
+});
+
+t('EL ARRANQUE SE GUARDA Y EL PRÓXIMO NÚMERO LO REFLEJA', async () => {
+  /* Es lo único que deja ver, ANTES de cerrar un pallet, si el arranque está
+     bien: el que lo configura escribe «500» y tiene que leer «...00500». */
+  const s = await servidor(base(), ADMIN);
+  try {
+    const g = await (await s.pegar('/config',
+      put({ pallet_desde: 500, pallet_desde_anio: AA }))).json();
+    assert.equal(g.ok, true, g.error);
+    assert.equal(g.config.pallet_desde, 500);
+    const r = await (await s.pegar('/config')).json();
+    assert.equal(r.proximo_pallet, 'PC-' + AA + '-00500');
+  } finally { s.cerrar(); }
+});
+
+t('un arranque con decimales se RECHAZA, no se trunca', async () => {
+  /* Truncar en silencio un dato que se imprime y se pega es peor que no
+     guardarlo: nadie se enteraría hasta ver el tarjetón. */
+  const s = await servidor(base(), ADMIN);
+  try {
+    const r = await s.pegar('/config', put({ pallet_desde: '269,5' }));
+    assert.equal(r.status, 400);
+    const j = await (await s.pegar('/config', put({ pallet_desde: 269.5 }))).json();
+    assert.equal(j.ok, false);
+    assert.match(j.error, /entero/i, 'no dice qué está mal: ' + j.error);
+  } finally { s.cerrar(); }
+});
+
+t('UN AÑO DE CUATRO DÍGITOS SE RECHAZA, porque quedaría sin efecto', async () => {
+  /* Guardado así, el arranque está escrito en la base y el pallet sale 00001:
+     el que lo configuró ve su 269 en la pantalla y le cree. */
+  const s = await servidor(base(), ADMIN);
+  try {
+    const j = await (await s.pegar('/config',
+      put({ pallet_desde: 269, pallet_desde_anio: '2026' }))).json();
+    assert.equal(j.ok, false);
+    assert.match(j.error, /dos dígitos/i, 'no dice qué está mal: ' + j.error);
+    // Y no se guardó nada: el PUT corta antes de escribir.
+    const r = await (await s.pegar('/config')).json();
+    assert.notEqual(r.config.pallet_desde_anio, '2026');
+  } finally { s.cerrar(); }
+});
+
+t('un arranque negativo se rechaza', async () => {
+  // Un piso negativo es inerte —el máximo gana— y por eso queda guardado y sin
+  // efecto: el que escribió «-269» ve su número en la pantalla y le cree.
+  const s = await servidor(base(), ADMIN);
+  try {
+    const j = await (await s.pegar('/config', put({ pallet_desde: -269 }))).json();
+    assert.equal(j.ok, false);
+    assert.match(j.error, /entero/i, 'no dice qué está mal: ' + j.error);
+  } finally { s.cerrar(); }
+});
+
+t('el arranque lo toca sólo el administrador', async () => {
+  // Es PARAMETRIZACIÓN: un número de pallet mal empalmado se descubre con el
+  // camión cargado y los tarjetones ya pegados.
+  const s = await servidor(base(), OPERADOR);
+  try {
+    assert.equal((await s.pegar('/config', put({ pallet_desde: 1 }))).status, 403);
+  } finally { s.cerrar(); }
+});

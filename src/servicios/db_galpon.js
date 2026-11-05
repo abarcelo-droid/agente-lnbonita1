@@ -611,6 +611,12 @@ for (const [clave, valor] of [
   ['etq_origen', 'Carpintería, San Juan · Producto argentino'],
   // El prefijo del número de pallet. PC = Puente Cordón.
   ['pallet_prefijo', 'PC'],
+  // DÓNDE ARRANCA EL CORRELATIVO, y de qué año es ese arranque. Andy, 5/11/2026: el
+  // galpón venía numerando a mano y el 268 ya está pegado en un pallet que está en
+  // cámara. Es un PISO atado al año 26: en 27 el correlativo arranca en 1 solo, porque
+  // el año ya va adentro del número. Ver proximoNumero() en galpon.js.
+  ['pallet_desde', '269'],
+  ['pallet_desde_anio', '26'],
   ['despacho_prefijo', 'DG'],
   ['plan_version', '02'],
   ['plan_vigencia', 'diciembre 2028'],
