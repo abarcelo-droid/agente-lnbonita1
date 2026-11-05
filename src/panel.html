@@ -29146,8 +29146,7 @@ SG_MANUAL['galpon-proceso'] = { titulo: 'Galpón · Proceso', html:
   + '<ul>'
   + '<li><b>Un solo artículo</b>: el producto en letras grandes, con su categoría, su '
   + 'calibre y su envase, y abajo bultos, kilos, lote, fecha, cuartel y RENSPA.</li>'
-  + '<li><b>Varios</b>: una línea por artículo con su lote y su RENSPA —un pallet mixto '
-  + 'puede tener fruta de dos cuadros— y el total abajo. Se marca <b>MIXTO</b>.</li>'
+  + '<li><b>Varios</b>: una línea por artículo y el total abajo. Se marca <b>MIXTO</b>.</li>'
   + '</ul>'
   + '<p>Dejarlo a criterio de quien imprime sería una etiqueta que dice DAMASCO en letras '
   + 'de diez centímetros sobre un pallet que abajo tiene ciruela.</p>'
@@ -29176,6 +29175,20 @@ SG_MANUAL['galpon-proceso'] = { titulo: 'Galpón · Proceso', html:
   + '<p>En el modelo <b>mixto</b> pasa lo mismo con los renglones, y el <b>total</b> '
   + 'queda apoyado en el pie: es el número que se controla contra el remito al cargar, '
   + 'y buscarlo a una altura distinta en cada etiqueta obliga a leer la hoja entera.</p>'
+
+  + '<h3>El tarjetón va por artículo, no por lote <span class="ver">V1148</span></h3>'
+  + '<p>Andy, 5/11/2026, con el tarjetón del PC-26-00269 en la mano: <i>«no pongas el '
+  + 'detalle de cada lote en el tarjetón, que confunde»</i>. Eran doce renglones para '
+  + 'cuatro artículos: la misma caja de cartón 35-55 tres veces, una por cada lote.</p>'
+  + '<p>Ahora es <b>un renglón por artículo</b> —producto, categoría, calibre y envase— '
+  + 'con todas sus cajas sumadas, venga de los lotes que venga. Sin columna de lote ni '
+  + 'de RENSPA. En el modelo de un solo artículo, las cajas de <b>Lote</b>, '
+  + '<b>Cuartel</b> y <b>RENSPA</b> dicen el dato si es uno solo, y <b>Varios</b> si son '
+  + 'más.</p>'
+  + '<p>Y <b>MIXTO</b> quiere decir <b>más de un artículo</b>. Un solo cartón de dos '
+  + 'cuadros no es mixto, aunque antes saliera así.</p>'
+  + '<div class="ojo"><b>El lote no se pierde.</b> Se sigue guardando con cada caja: la '
+  + 'respuesta a «de qué lote era» está en el sistema con el número del pallet.</div>'
 
   + '<div class="ojo"><b>Lo que se imprimió es lo que viajó.</b> Al cerrar se congelan '
   + 'los totales: borrar o corregir una carga después <b>no cambia</b> la etiqueta ya '
@@ -61048,7 +61061,9 @@ function galPrPintarPallet(){
     + '<div class="gpl-h">'
       + '<div><div class="gpl-t">Pallet abierto</div>'
         + '<div class="gpl-n">sin número todavía'
-        + (c.length > 1 ? '<span class="gpl-chapa">MIXTO</span>' : '') + '</div></div>'
+        /* MIXTO es más de un ARTÍCULO, no más de un renglón: dos lotes del mismo
+           cartón son dos renglones y un solo artículo (V1148). */
+        + ((new Set(c.map(function(y){ return [y.producto,y.variedad,y.categoria,y.calibre,y.presentacion].join('|'); })).size > 1) ? '<span class="gpl-chapa">MIXTO</span>' : '') + '</div></div>'
       + '<div class="gpl-tot">'
         + '<div><b>' + galPrNum(bultos, 0) + '</b> <span>bultos</span></div>'
         + '<div><b>' + galPrNum(kilos) + '</b> <span>kg</span></div>'
@@ -62527,7 +62542,8 @@ function galArmPintar(){
       + galStNum(c.reduce(function(t,y){ return t+(Number(y.bultos)||0); },0),0)
       + ' cajas, '
       + galStNum(c.reduce(function(t,y){ return t+(Number(y.kilos)||0); },0),0)+' kg.'
-      + (c.length>1 ? ' <b>MIXTO.</b>' : '')
+      /* Más de un ARTÍCULO, no más de un renglón (V1148): el contenido viene por lote. */
+      + ((new Set(c.map(function(y){ return [y.producto,y.variedad,y.categoria,y.calibre,y.presentacion].join('|'); })).size > 1) ? ' <b>MIXTO.</b>' : '')
       + ' Imprimí el tarjetón y pegalo.';
   }
 
@@ -62705,7 +62721,9 @@ function galArmLineas(){
             + '</td></tr>';
         }).join('')
       + '</tbody><tfoot><tr style="font-weight:700"><td colspan="3">Total'
-      + (l.length>1 ? ' · MIXTO' : '')+'</td>'
+      /* Las líneas vienen por artículo Y día: dos días del mismo cartón no lo hacen
+         mixto (V1148). */
+      + ((new Set(l.map(function(y){ return [y.producto,y.variedad,y.categoria,y.calibre,y.presentacion].join('|'); })).size > 1) ? ' · MIXTO' : '')+'</td>'
       + '<td style="text-align:right">'
       + galStNum(l.reduce(function(t,f){ return t+(Number(f.bultos)||0); },0),0)+'</td>'
       + '<td style="text-align:right">'

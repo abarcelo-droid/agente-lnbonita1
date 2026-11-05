@@ -30,7 +30,7 @@ import {
   guardarPresentacion, registrarProceso, stockGalpon, stockPorPresentacion,
   palletAbierto, cerrarPallet, reabrirPallet, contenidoDelPallet,
   stockParaArmar, stockPorArticulo, enPallets, palletsArmados, abrirPalletArmado,
-  moverAlPallet,
+  moverAlPallet, porArticulo,
   sacarDelPalletArmado, lineasDelPallet, palletResumen,
   abrirDespacho, agregarAlDespacho, agregarPalletAlDespacho, emitirDespacho,
 } from '../src/servicios/galpon.js';
@@ -1034,4 +1034,50 @@ test('no se saca de sí mismo NI cuando lo propio es lo más viejo', () => {
     'se llevó las suyas de nuevo: el pallet no creció');
   assert.equal(r.detalle[0].fecha, '2026-12-20',
     'tomó las viejas, que ya estaban adentro de este mismo pallet');
+});
+
+// ══════════════════════════════════════════════════════════════════════════
+// 9 · MIXTO ES MÁS DE UN ARTÍCULO, NO MÁS DE UN LOTE (V1148)
+// ══════════════════════════════════════════════════════════════════════════
+// Andy, 5/11/2026: «no pongas el detalle de cada lote en el tarjetón, que
+// confunde». El contenido viene por lote; el artículo es lo que se ve en la caja.
+test('porArticulo junta los lotes del mismo artículo y suma al centavo', () => {
+  const r = porArticulo([
+    { producto: 'Damasco', categoria: 'I', calibre: '35-55', envase: 'Caja',
+      presentacion: 'C', destino: 'comercial', lote_nombre: 'A', bultos: 25, kilos: 177.94 },
+    { producto: 'Damasco', categoria: 'I', calibre: '35-55', envase: 'Caja',
+      presentacion: 'C', destino: 'comercial', lote_nombre: 'B', bultos: 22, kilos: 153.55 },
+    { producto: 'Damasco', categoria: 'I', calibre: '35-55', envase: 'IFCO',
+      presentacion: 'I', destino: 'comercial', lote_nombre: 'A', bultos: 5, kilos: 72.63 },
+  ]);
+  assert.equal(r.length, 2, 'no juntó los dos lotes del mismo cartón');
+  const caja = r.find((x) => x.envase === 'Caja');
+  assert.equal(caja.bultos, 47);
+  assert.equal(caja.kilos, 331.49);
+  // Los lotes no se pierden: viajan adentro del artículo.
+  assert.deepEqual(caja.lotes.map((l) => l.lote_nombre), ['A', 'B']);
+  // Y dos calibres SÍ son dos artículos: el calibre va impreso en la caja.
+  assert.equal(porArticulo([
+    { producto: 'D', calibre: '35-55', bultos: 1, kilos: 1 },
+    { producto: 'D', calibre: '0-35', bultos: 1, kilos: 1 }]).length, 2);
+});
+
+test('CERRAR UN PALLET DE UN SOLO CARTÓN Y DOS LOTES no lo marca MIXTO', () => {
+  const db = base();
+  const a = art(db, 'Carton', '35-55');
+  entraAlDia(db, a, 25, '1', 10);
+  entraAlDia(db, a, 22, '2', 11);
+  const id = palletAbierto(db).id;
+  assert.equal(contenidoDelPallet(db, id).length, 2, 'el caso de prueba no tiene dos lotes');
+  const c = cerrarPallet(db, id, {});
+  assert.equal(c.ok, true, c.motivo);
+  assert.equal(db.prepare('SELECT mixto FROM gal_pallets WHERE id = ?').get(id).mixto, 0,
+    'un solo artículo de dos lotes quedó MIXTO');
+  // Y con dos artículos, sí.
+  const b = art(db, 'IFCO', '35-55');
+  entraAlDia(db, a, 5, '3', 10);
+  entraAlDia(db, b, 5, '4', 10);
+  const id2 = palletAbierto(db).id;
+  cerrarPallet(db, id2, {});
+  assert.equal(db.prepare('SELECT mixto FROM gal_pallets WHERE id = ?').get(id2).mixto, 1);
 });

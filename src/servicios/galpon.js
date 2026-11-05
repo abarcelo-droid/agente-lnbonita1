@@ -2718,6 +2718,38 @@ export function abrirPallet(db, d) {
   return { ok: true, id, pallet: db.prepare('SELECT * FROM gal_pallets WHERE id = ?').get(id) };
 }
 
+// ── LO QUE LLEVA, POR ARTÍCULO Y SIN LOTE ───────────────────────────────────────────
+// Andy, 5/11/2026, con el tarjetón del PC-26-00269 en la mano: «no pongas el detalle
+// de cada lote en el tarjetón, que confunde». Doce renglones donde había cuatro
+// artículos: la misma caja de cartón 35-55 tres veces, una por cada lote.
+//
+// Junta lo que contenidoDelPallet() separa por lote. Un artículo es producto,
+// variedad, categoría, calibre, envase y presentación: lo que se ve en la caja. El
+// lote no se ve, así que no separa. Y es también lo que decide si un pallet es
+// MIXTO: un solo cartón de dos cuadros no lo es, aunque fueran dos renglones.
+//
+// El lote no se pierde: contenidoDelPallet() lo sigue devolviendo, y la respuesta a
+// «de qué lote era» está en el sistema con el número del pallet.
+export function porArticulo(contenido) {
+  const por = new Map();
+  for (const x of contenido || []) {
+    const k = [x.producto, x.variedad, x.categoria, x.calibre, x.envase,
+               x.presentacion, x.destino].map((v) => v == null ? '' : String(v)).join('|');
+    if (!por.has(k)) {
+      por.set(k, { producto: x.producto, variedad: x.variedad, categoria: x.categoria,
+                   calibre: x.calibre, envase: x.envase, presentacion: x.presentacion,
+                   destino: x.destino, bultos: 0, kilos: 0, lotes: [] });
+    }
+    const g = por.get(k);
+    g.bultos = round2(g.bultos + (Number(x.bultos) || 0));
+    g.kilos = round2(g.kilos + (Number(x.kilos) || 0));
+    if (!g.lotes.some((l) => l.lote_nombre === x.lote_nombre)) {
+      g.lotes.push({ lote_nombre: x.lote_nombre, renspa: x.renspa, cuartel: x.cuartel });
+    }
+  }
+  return [...por.values()];
+}
+
 // ── LO QUE TIENE ADENTRO ────────────────────────────────────────────────────────────
 // Agrupado por ARTÍCULO —producto, variedad, categoría, calibre, envase y lote—, que es
 // exactamente un renglón del tarjetón. Dos cargas del mismo artículo y el mismo lote son
@@ -3277,8 +3309,9 @@ export function cerrarPallet(db, id, d) {
 
   const bultos = round2(cont.reduce((t, x) => t + (x.bultos || 0), 0));
   const kilos = round2(cont.reduce((t, x) => t + x.kilos, 0));
-  // MIXTO lo decide el contenido, no el que cierra.
-  const mixto = cont.length > 1 ? 1 : 0;
+  // MIXTO lo decide el contenido, no el que cierra: más de un ARTÍCULO. Dos lotes del
+  // mismo cartón son dos renglones de contenido y un solo artículo (V1148).
+  const mixto = porArticulo(cont).length > 1 ? 1 : 0;
   /* Si ya tenía número —se reabrió y se vuelve a cerrar— se conserva: es el mismo
      pallet físico y la etiqueta que puede estar pegada lo sigue identificando. Pedir
      uno nuevo en cada cierre dejaría dos números para un solo pallet y un hueco en el
@@ -3386,7 +3419,7 @@ export function pallets(db, opts) {
     return Object.assign({}, p, {
       bultos: round2(c.reduce((t, x) => t + (x.bultos || 0), 0)),
       kilos: round2(c.reduce((t, x) => t + x.kilos, 0)),
-      mixto: c.length > 1 ? 1 : 0,
+      mixto: porArticulo(c).length > 1 ? 1 : 0,
       lineas: c.length,
     });
   });
