@@ -875,12 +875,14 @@ router.get('/procesos', (req, res) => {
       lotes: lotesVolcados(db),
       procesos: procesosDelDia(db, fecha, loteId),
       tablero: tableroProceso(db, fecha, loteId),
-      stock: stockGalpon(db),
-      // El otro corte del stock: de qué lote es lo que hay guardado. No se deduce del
-      // de arriba, y es el que contesta a quién se le liquida lo que está en cámara.
-      stock_lotes: stockPorLote(db),
-      // De qué fruta es lo guardado. Con una sola la pantalla lo esconde.
-      stock_productos: stockPorProducto(db),
+      /* EL STOCK YA NO VIAJA ACÁ. Andy, 5/11/2026: «eso es análisis; la parte de
+         proceso tiene que ser bien operativa». Iban tres cortes del stock —el total,
+         por lote y por producto— y los tres son agregados sobre TODA gal_procesos sin
+         cortar por fecha. La pantalla de proceso se recarga después de cada carga, así
+         que eran tres barridos de la tabla entera por cada caja que alguien tipea, y
+         desde que la pantalla no los dibuja nadie los miraba.
+
+         Lo que hay guardado se lee en 🚚 Stock y Despachos, que pega contra /stock. */
       // El pallet que se está armando y los cerrados: la pantalla de proceso ES la de
       // cierre de pallet, así que van en el mismo pedido que todo lo demás.
       pallet_abierto: (function () {

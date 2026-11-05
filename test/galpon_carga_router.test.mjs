@@ -640,14 +640,20 @@ t('LA PANTALLA SE ARMA DE UN SOLO PEDIDO', async () => {
                                       kilos: 1200 }));
 
     const j = await (await s.pegar('/procesos?fecha=' + HOY + '&lote_id=10')).json();
-    for (const k of ['destinos', 'presentaciones', 'lotes', 'procesos', 'tablero', 'stock']) {
+    for (const k of ['destinos', 'presentaciones', 'lotes', 'procesos', 'tablero']) {
       assert.ok(k in j, 'falta ' + k + ' en la respuesta');
+    }
+    /* Y EL STOCK NO VIAJA ACÁ (V1145). Andy: «eso es análisis; la parte de proceso
+       tiene que ser bien operativa». Eran tres agregados sobre TODA gal_procesos —el
+       total, por lote y por producto— en cada recarga de la pantalla con la que se
+       tipea caja por caja. Lo que hay guardado se lee en 🚚 Stock y Despachos. */
+    for (const k of ['stock', 'stock_lotes', 'stock_productos']) {
+      assert.ok(!(k in j), 'volvió ' + k + ' a la pantalla de carga');
     }
     assert.equal(j.lotes[0].lote_id, 10);
     assert.equal(j.lotes[0].sin_procesar, 3800);
     assert.equal(j.tablero.volcado, 5000);
     assert.equal(j.tablero.destinos.verde, 1200);
-    assert.equal(j.stock.kilos, 1200);
     assert.equal(j.procesos.length, 1);
   } finally { s.cerrar(); }
 });
