@@ -31,6 +31,7 @@ import {
   palletAbierto, abrirPallet, contenidoDelPallet, cerrarPallet, reabrirPallet,
   disponibleParaDespacho, despachos, itemsDelDespacho, abrirDespacho, editarDespacho,
   stockPorPresentacion, guardarIcono, borrarIcono, rutaDelIcono,
+  procesosDelRango,
   stockParaArmar, stockPorArticulo, palletsArmados, abrirPalletArmado, moverAlPallet,
   procesoPorDia, procesoTotal, rindePorLote, planillaIngreso,
   sacarDelPalletArmado, lineasDelPallet, palletResumen,
@@ -858,6 +859,30 @@ router.get('/procesos', (req, res) => {
     });
   } catch (e) {
     console.error('[GALPON] GET /procesos:', e.message);
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+/* ── 📋 A TRAVÉS DE LOS DÍAS ──────────────────────────────────────────────────────
+   Andy, 4/11/2026: «quiero un lugar que sea transversal a los días, es decir que
+   pueda ver todos los procesos de cada día».
+
+   Va aparte de GET /procesos y no como un parámetro suyo. Ese devuelve la pantalla
+   de carga entera —lotes, presentaciones, tablero, pallets, el stock— parada en UN
+   día, porque es con lo que se carga. Esto devuelve una lista y nada más: meterlos
+   en la misma puerta sería un endpoint con dos formas de respuesta y la mitad de
+   los campos en null según con qué se lo llame.
+
+   Y se declara ANTES de /procesos/:id —aunque hoy ninguno sea GET— porque Express
+   resuelve por orden: el día que alguien escriba un GET /procesos/:id arriba, este
+   se volvería la carga con id «rango» y contestaría 400 sin que nadie entienda. */
+router.get('/procesos/rango', (req, res) => {
+  try {
+    res.json(Object.assign({ ok: true, hoy: hoy() },
+      procesosDelRango(db, req.query.desde, req.query.hasta,
+        { destino: req.query.destino })));
+  } catch (e) {
+    console.error('[GALPON] GET /procesos/rango:', e.message);
     res.status(500).json({ ok: false, error: e.message });
   }
 });

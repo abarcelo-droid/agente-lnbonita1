@@ -2082,6 +2082,110 @@ export function procesosDelDia(db, fecha, loteId) {
   return grupos.filter((g) => g.ids.some((id) => deLote.has(id)));
 }
 
+/* ── 📋 TODAS LAS CARGAS, A TRAVÉS DE LOS DÍAS ──────────────────────────────────────
+   Andy, 4/11/2026: «quiero un lugar que sea transversal a los días, es decir que pueda
+   ver todos los procesos de cada día».
+
+   La pantalla de Proceso es para CARGAR, y por eso está parada en un día: lo que se
+   tipea entra en ese día. «Lo cargado este día» es el acuse de lo que se acaba de
+   hacer, no el lugar donde se consulta — para ver el martes hay que cambiar el
+   almanaque, y no hay manera de mirar dos días juntos.
+
+   SE AGRUPA CON agruparProcesos(), el mismo de la pantalla de Proceso (V1139), y eso
+   no es por ahorrar código: sin agrupar, una carga que salió de tres lotes vuelve a
+   verse en tres renglones con los bultos prorrateados —0,33 · 3,53 · 5,14 redondeados
+   a 0, 4 y 5— y el número de bultos sólo es cierto entero. Un renglón de «0 bultos» no
+   es nada que exista en el galpón.
+
+   EL TOPE SE CUENTA ANTES DE RECORTAR. Una temporada entera son miles de cargas y no
+   tiene sentido mandarlas todas; lo que no se puede hacer es que los totales de arriba
+   cuenten sólo las que entraron. Un total que depende de cuántas filas se mostraron es
+   un total que miente sin que nada lo diga. */
+export const TOPE_CARGAS_RANGO = 400;
+
+export function procesosDelRango(db, desde, hasta, opts) {
+  const o = opts || {};
+  /* SIN FECHAS SE TOMA TODO LO QUE HAY, y se saca de gal_procesos y no del rango de
+     los VOLCADOS: lo que entró el último día se procesa al siguiente, y ese día queda
+     afuera del rango de lo volcado. La pantalla pediría todo y le faltaría el final. */
+  let d = esFecha(desde), h = esFecha(hasta);
+  if (!d || !h) {
+    const r = db.prepare(' SELECT MIN(fecha) AS a, MAX(fecha) AS b FROM gal_procesos'
+      + '  WHERE eliminado_en IS NULL').get() || {};
+    if (!d) d = esFecha(r.a) || h;
+    if (!h) h = esFecha(r.b) || d;
+  }
+  const vacio = { desde: d || null, hasta: h || null, dias: [],
+                  total: { cargas: 0, bultos: 0, kilos: 0, dias: 0, a_revisar: 0,
+                           destinos: { comercial: 0, verde: 0, descarte: 0 } },
+                  hay_mas: 0, tope: TOPE_CARGAS_RANGO };
+  if (!d || !h) return vacio;
+
+  const w = ['p.fecha >= ?', 'p.fecha <= ?', 'p.eliminado_en IS NULL'];
+  const a = [d, h];
+  /* El filtro por destino va en el WHERE y no después, y se puede: el destino lo
+     lleva cada fila igual dentro de un reparto —es la misma carga— así que no parte
+     ningún grupo, al revés que el lote. */
+  if (esDestino(o.destino)) { w.push('p.destino = ?'); a.push(o.destino); }
+
+  const filas = db.prepare(
+    ' SELECT p.*, pa.numero AS pallet_numero, pa.estado AS pallet_estado'
+    + '  FROM gal_procesos p'
+    + '  LEFT JOIN gal_pallets pa ON pa.id = p.pallet_id AND pa.eliminado_en IS NULL'
+    + '  WHERE ' + w.join(' AND ')
+    + '  ORDER BY p.fecha DESC, p.id DESC').all(...a);
+
+  const cargas = agruparProcesos(filas);
+
+  /* Los totales, sobre TODAS las cargas del período. Las salidas restan: lo verde que
+     vuelve a la tolva salió del stock y no se puede contar dos veces. */
+  const signo = (c) => (c.tipo === 'ingreso' ? 1 : -1);
+  const total = { cargas: cargas.length, bultos: 0, kilos: 0, dias: 0, a_revisar: 0,
+                  destinos: { comercial: 0, verde: 0, descarte: 0 } };
+  const porDia = new Map();
+  for (const c of cargas) {
+    const sg = signo(c);
+    total.bultos += sg * (Number(c.bultos) || 0);
+    total.kilos += sg * (Number(c.kilos) || 0);
+    if (c.estado === 'a_revisar') total.a_revisar++;
+    if (total.destinos[c.destino] !== undefined) {
+      total.destinos[c.destino] += sg * (Number(c.kilos) || 0);
+    }
+    if (!porDia.has(c.fecha)) {
+      porDia.set(c.fecha, { fecha: c.fecha, cargas: [], bultos: 0, kilos: 0,
+                            a_revisar: 0, mostradas: 0 });
+    }
+    const x = porDia.get(c.fecha);
+    x.bultos += sg * (Number(c.bultos) || 0);
+    x.kilos += sg * (Number(c.kilos) || 0);
+    if (c.estado === 'a_revisar') x.a_revisar++;
+  }
+  total.dias = porDia.size;
+  total.bultos = round2(total.bultos);
+  total.kilos = round2(total.kilos);
+  for (const k of ['comercial', 'verde', 'descarte']) {
+    total.destinos[k] = round2(total.destinos[k]);
+  }
+
+  /* Y recién ahora se recorta. Vienen ordenadas de la más nueva a la más vieja, así
+     que lo que se corta es lo más viejo — que es lo que uno deja de mirar primero
+     cuando el rango es demasiado grande. */
+  const muestra = cargas.slice(0, TOPE_CARGAS_RANGO);
+  for (const c of muestra) {
+    const x = porDia.get(c.fecha);
+    x.cargas.push(c);
+    x.mostradas++;
+  }
+
+  const dias = [...porDia.values()]
+    .filter((x) => x.cargas.length)
+    .map((x) => Object.assign(x, { bultos: round2(x.bultos), kilos: round2(x.kilos) }));
+
+  return { desde: d, hasta: h, dias, total,
+           hay_mas: Math.max(0, cargas.length - muestra.length),
+           tope: TOPE_CARGAS_RANGO };
+}
+
 // ── EL TABLERO DEL LOTE: CUÁNTO ENTRÓ, CUÁNTO SALIÓ Y ADÓNDE ────────────────────────
 // Es lo que hace que la pantalla de proceso no sea un formulario a ciegas: mientras se
 // carga se ve cuánto queda de la tolva y cómo viene el reparto.

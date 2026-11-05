@@ -999,7 +999,12 @@ test('los cortes del panel no quedaron ni vacíos ni de más', () => {
   assert.ok(JS_AC.includes('function galAcPintar('),
     'JS_AC se corta antes del final del bloque del acumulado');
   assert.ok(!JS_AC.includes('var GPR = {'), 'JS_AC se comió el proceso');
-  assert.ok(JS_AC.length < 30000, 'JS_AC se pasó de largo: ' + JS_AC.length);
+  /* Y que NO se haya comido el bloque de abajo. Antes esto era un tope de largo —
+     JS_AC.length < 30000— y eso es un centinela que hay que ir subiendo cada vez que
+     la pantalla crece: el día que alguien lo sube de apuro deja de mirar nada. Lo que
+     se quiere saber es si el corte se pasó de su banner, y eso se pregunta directo. */
+  assert.ok(!JS_AC.includes('function galDibHtml('),
+    'JS_AC se comió el bloque del dibujito, que es el que sigue');
   assert.ok(!JS_KG.includes('var GRP'), 'JS_KG se comió la carga rápida');
   assert.ok(!MOD_RAP.includes('gal-pres-modal'), 'MOD_RAP se comió la ventana de al lado');
   assert.ok(!ACUM.includes('registrarProceso'), 'ACUM se comió el servicio de proceso');

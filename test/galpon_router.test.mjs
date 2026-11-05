@@ -416,3 +416,70 @@ t('UN RANGO ABSURDO NO CUELGA EL SERVIDOR', async () => {
     assert.equal((b.toString('latin1').match(/\/MediaBox/g) || []).length, 63, '500 / 8 = 63 hojas');
   } finally { s.cerrar(); }
 });
+
+// ── 📋 A TRAVÉS DE LOS DÍAS ───────────────────────────────────────────────
+// Andy, 4/11/2026: «quiero un lugar que sea transversal a los días». Lo que
+// se prueba acá es el CABLEADO: que la ruta esté montada, que las fechas y el
+// destino lleguen, y que sin fechas conteste todo lo que hay en vez de nada.
+const cargas = (db, filas) => {
+  const ins = db.prepare(
+    " INSERT INTO gal_procesos (fecha,lote_id,lote_nombre,producto,destino,"
+    + " presentacion,bultos,kilos,tipo) VALUES (?,?,'Cuadro 3','Damasco',?,?,?,?,'ingreso')");
+  for (const f of filas) ins.run(f[0], 10, f[1], f[2], f[3], f[4]);
+};
+
+t('GET /procesos/rango trae las cargas de varios días', async () => {
+  const db = base();
+  const s = await servidor(db, OPERADOR);
+  try {
+    cargas(db, [['2026-11-02', 'comercial', 'IFCO HN', 10, 50],
+                ['2026-11-04', 'comercial', 'IFCO HN', 20, 100],
+                ['2026-11-04', 'verde', 'Blanca Verde', 5, 25]]);
+    const j = await (await s.pegar('/procesos/rango?desde=2026-11-01&hasta=2026-11-30')).json();
+    assert.equal(j.ok, true);
+    assert.deepEqual(j.dias.map((d) => d.fecha), ['2026-11-04', '2026-11-02']);
+    assert.equal(j.total.cargas, 3);
+    assert.equal(j.total.kilos, 175);
+    assert.equal(j.dias[0].cargas.length, 2);
+  } finally { s.cerrar(); }
+});
+
+t('el destino llega por la query', async () => {
+  const db = base();
+  const s = await servidor(db, OPERADOR);
+  try {
+    cargas(db, [['2026-11-04', 'comercial', 'IFCO HN', 20, 100],
+                ['2026-11-04', 'verde', 'Blanca Verde', 5, 25]]);
+    const j = await (await s.pegar(
+      '/procesos/rango?desde=2026-11-01&hasta=2026-11-30&destino=verde')).json();
+    assert.equal(j.total.cargas, 1);
+    assert.equal(j.total.kilos, 25);
+  } finally { s.cerrar(); }
+});
+
+t('SIN FECHAS CONTESTA TODO LO QUE HAY, no una lista vacía', async () => {
+  /* Abrir la pantalla en blanco porque faltó un parámetro es la peor respuesta
+     posible a «mostrame todos los días» — el mismo criterio que /acumulado. */
+  const db = base();
+  const s = await servidor(db, OPERADOR);
+  try {
+    /* Y un volcado SUELTO el 2, para que el rango de lo volcado termine ahí: si
+       el período saliera de gal_volcados, la carga del 9 —procesar lo que entró
+       antes— quedaría afuera y nadie lo notaría. */
+    db.prepare("INSERT INTO gal_volcados (fecha,lote_id,kilos) VALUES ('2026-11-02',10,900)").run();
+    cargas(db, [['2026-11-02', 'comercial', 'IFCO HN', 10, 50],
+                ['2026-11-09', 'comercial', 'IFCO HN', 7, 35]]);
+    const j = await (await s.pegar('/procesos/rango')).json();
+    assert.equal(j.ok, true);
+    assert.equal(j.total.cargas, 2, 'sin fechas contestó vacío');
+    assert.equal(j.desde, '2026-11-02', 'no arrancó en la primera carga que hay');
+  } finally { s.cerrar(); }
+});
+
+t('sin sesión tampoco se lee el período', async () => {
+  const s = await servidor(base(), null);
+  try {
+    const r = await s.pegar('/procesos/rango?desde=2026-11-01&hasta=2026-11-30');
+    assert.ok(r.status === 401 || r.status === 403, 'contestó ' + r.status);
+  } finally { s.cerrar(); }
+});
