@@ -451,7 +451,9 @@ test('EL TARJETÓN HOMOGÉNEO lleva el producto grande y los seis datos', async 
   assert.ok(!t.includes('PARCIAL'));
 });
 
-test('EL TARJETÓN MIXTO lleva una línea por artículo, con su lote', async () => {
+test('EL TARJETÓN MIXTO lleva una línea por artículo, SIN su lote', async () => {
+  /* Andy, 5/11/2026: «no pongas el detalle de cada lote en el tarjetón, que
+     confunde». Hasta la V1147 este test exigía que los lotes estuvieran. */
   const { galponPalletPDF } = await import('../src/servicios/galponPalletPDF.js');
   const buf = await galponPalletPDF(
     { numero: 'PC-26-01235', parcial: 1, mixto: 1, fecha_empaque: '2026-12-15',
@@ -465,10 +467,64 @@ test('EL TARJETÓN MIXTO lleva una línea por artículo, con su lote', async () 
     CFG);
   const t = await textoDelPDF(buf);
   for (const esperado of ['PC-26-01235', 'MIXTO', 'PARCIAL', 'Damasco Bulida',
-                          'Ciruela Red Beaut', 'L-1215-A', 'L-1215-C', '40', '30', '25',
+                          'Ciruela Red Beaut', '40', '30', '25',
                           'TOTAL · Empaque 15/12/2026', '95', '550']) {
     assert.ok(t.includes(esperado), 'al tarjetón mixto le falta ' + esperado + '\n' + t);
   }
+  for (const sobra of ['L-1215-A', 'L-1215-C', 'LOTE', 'RENSPA']) {
+    assert.ok(!t.includes(sobra), 'el tarjetón mixto sigue diciendo ' + sobra);
+  }
+});
+
+test('EL MISMO CARTÓN DE TRES LOTES ES UN SOLO RENGLÓN, con las cajas sumadas', async () => {
+  /* Es la foto del PC-26-00269: «Caja cartón 35-55» tres veces, 25 + 22 + 2. */
+  const { galponPalletPDF } = await import('../src/servicios/galponPalletPDF.js');
+  const caja = (lote, b, k) => ({ producto: 'Damasco', categoria: 'I', calibre: '35-55',
+    envase: 'Caja cartón', presentacion: 'Carton', destino: 'comercial',
+    lote_nombre: lote, bultos: b, kilos: k });
+  const ifco = (lote, b, k) => ({ producto: 'Damasco', categoria: 'I', calibre: '35-55',
+    envase: 'IFCO', presentacion: 'IFCO', destino: 'comercial',
+    lote_nombre: lote, bultos: b, kilos: k });
+  const d = await dibujadoDelPDF(await galponPalletPDF(
+    Object.assign({}, unPallet, { mixto: 1, bultos: 63, kilos: 489 }),
+    [caja('11-12 y 16-17', 25, 177.94), caja('Damasco', 22, 153.55), caja('13', 2, 11.51),
+     ifco('11-12 y 16-17', 8, 108.94), ifco('Damasco', 6, 37.06)], CFG));
+  const envases = d.filter((x) => x.texto === 'Caja cartón' || x.texto === 'IFCO');
+  assert.equal(envases.length, 2, 'repite el artículo por lote: ' + envases.length);
+  // Las cajas sumadas, al centavo de kilo.
+  assert.ok(d.some((x) => x.texto === '49'), 'no sumó 25 + 22 + 2');
+  // 177,94 + 153,55 + 11,51 = 343 justo, y n2() no escribe decimales en cero.
+  assert.ok(d.some((x) => x.texto === '343'), 'no sumó los kilos del cartón');
+  assert.ok(d.some((x) => x.texto === '14'), 'no sumó los IFCO');
+});
+
+test('UN SOLO ARTÍCULO DE DOS LOTES NO ES MIXTO: modelo grande y «Varios»', async () => {
+  /* Antes salía MIXTO, con una tabla de dos renglones iguales. Y un pallet cerrado
+     antes de la V1148 trae mixto=1 guardado: la etiqueta no puede creerle a eso. */
+  const { galponPalletPDF } = await import('../src/servicios/galponPalletPDF.js');
+  const l = (lote, renspa) => ({ producto: 'Damasco', categoria: 'I', calibre: '35-55',
+    envase: 'Caja cartón', presentacion: 'Carton', destino: 'comercial',
+    lote_nombre: lote, renspa, cuartel: 'C-1', bultos: 20, kilos: 140 });
+  const t = await textoDelPDF(await galponPalletPDF(
+    Object.assign({}, unPallet, { mixto: 1, bultos: 40, kilos: 280 }),
+    [l('Lote A', 'R-1'), l('Lote B', 'R-2')], CFG));
+  assert.ok(!t.includes('MIXTO'), 'un solo artículo salió MIXTO');
+  assert.ok(t.includes('DAMASCO'), 'no usó el modelo de un artículo');
+  assert.ok(t.includes('40'), 'no sumó las cajas de los dos lotes');
+  assert.ok(t.includes('Varios'), 'no dice que son varios lotes');
+  assert.ok(!t.includes('Lote A') && !t.includes('R-2'), 'lista los lotes');
+  // El cuartel es el mismo en los dos: ése sí se dice.
+  assert.ok(t.includes('C-1'), 'tiró un dato que era el mismo para todos');
+});
+
+test('con UN solo lote, el homogéneo lo sigue diciendo', async () => {
+  const { galponPalletPDF } = await import('../src/servicios/galponPalletPDF.js');
+  const t = await textoDelPDF(await galponPalletPDF(unPallet,
+    [{ producto: 'Damasco', categoria: 'I', calibre: '35-55', envase: 'Caja',
+       lote_nombre: 'Cuadro 3', renspa: 'R-9', cuartel: 'C-2', bultos: 10, kilos: 70 }],
+    CFG));
+  for (const e of ['Cuadro 3', 'R-9', 'C-2']) assert.ok(t.includes(e), 'falta ' + e);
+  assert.ok(!t.includes('Varios'));
 });
 
 test('EL QR LLEVA EL NÚMERO PELADO, no una URL', async () => {
@@ -626,7 +682,7 @@ test('y el renglón del mixto crece cuando hay pocos artículos', async () => {
     }
     const d = await dibujadoDelPDF(await galponPalletPDF(
       Object.assign({}, unPallet, { mixto: 1 }), lineas, CFG));
-    tam.push(d.find((x) => x.texto === 'L-0').tam);
+    tam.push(d.find((x) => x.texto === '50/60').tam);
   }
   assert.ok(tam[0] > tam[1], 'con dos artículos la letra salió igual: ' + tam);
   assert.ok(tam[1] >= 9, 'con nueve se achicó hasta no leerse: ' + tam[1]);
@@ -646,7 +702,7 @@ test('CADA RENGLÓN DEL MIXTO ESCRIBE ADENTRO DE SU PROPIO RENGLÓN', async () =
   const d = await dibujadoDelPDF(await galponPalletPDF(
     Object.assign({}, unPallet, { mixto: 1 }), lineas, CFG));
   const cab = d.find((x) => x.texto === 'PRODUCTO');
-  const filas = d.filter((x) => /^L-\d$/.test(x.texto)).sort((a, b) => a.y - b.y);
+  const filas = d.filter((x) => /^5\d\/6\d$/.test(x.texto)).sort((a, b) => a.y - b.y);
   assert.equal(filas.length, 4);
   const paso = filas[1].y - filas[0].y;
   assert.ok(paso > 8, 'las filas quedaron encimadas: paso de ' + paso.toFixed(1) + ' mm');

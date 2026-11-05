@@ -2388,3 +2388,43 @@ test('y el aviso de «salieron de PC-00007» no quedó escrito al pedo', () => {
   assert.ok(!/YA CERRADO/.test(JS_ST),
     'el selector sigue avisando que va a desarmar un pallet cerrado');
 });
+
+// ══════════════════════════════════════════════════════════════════════════
+// 🏷️ EL TARJETÓN VA POR ARTÍCULO, NO POR LOTE (V1148)
+// ══════════════════════════════════════════════════════════════════════════
+const PDF_PAL = leer('src/servicios/galponPalletPDF.js');
+
+test('MANUAL PR: «el tarjetón va por artículo», y el PDF lo hace', () => {
+  dicePr(/El tarjetón va por artículo, no por lote <span class="ver">V1148<\/span>/);
+  dicePr(/Sin columna de lote ni de RENSPA/);
+  // El PDF agrupa antes de dibujar, y la tabla ya no tiene esas columnas.
+  assert.match(PDF_PAL, /const lineas = porArticulo\(Array\.isArray\(contenido\)/);
+  assert.match(PDF_PAL, /const titulos = \['PRODUCTO', 'CAT\.', 'CALIBRE', 'ENVASE', 'BULTOS', 'KG'\];/);
+  // Y el viejo texto del manual, que prometía el lote en cada línea, no quedó.
+  assert.ok(!/una línea por artículo con su lote y su RENSPA/.test(MANUAL_PR),
+    'el manual sigue diciendo que el tarjetón lleva el lote');
+});
+
+test('MANUAL PR: «Varios» si son varios lotes, el dato si es uno', () => {
+  dicePr(/dicen el dato si es uno solo, y <b>Varios<\/b> si son/);
+  assert.match(PDF_PAL, /'Lote', unico\(linea, 'lote_nombre', 'Varios'\)/);
+  assert.match(PDF_PAL, /'RENSPA', unico\(linea, 'renspa', 'Varios'\)/);
+});
+
+test('MANUAL PR: «MIXTO es más de un artículo», en el cierre, el PDF y la pantalla', () => {
+  dicePr(/<b>MIXTO<\/b> quiere decir <b>más de un artículo<\/b>/);
+  assert.match(cuerpoServicio('export function cerrarPallet('),
+    /const mixto = porArticulo\(cont\)\.length > 1 \? 1 : 0;/);
+  // El tarjetón no le cree al mixto guardado: un pallet viejo lo tiene por lote.
+  assert.match(PDF_PAL, /mixto: lineas\.length > 1 \? 1 : 0/);
+  /* Y las tres chapas de la pantalla cuentan artículos, no renglones. Se ejecuta
+     la expresión: que diga «producto» no prueba que agrupe. */
+  const usos = [...PANEL.matchAll(/new Set\((\w)\.map\(function\(y\)\{ return \[y\.producto,y\.variedad,y\.categoria,y\.calibre,y\.presentacion\]\.join\('\|'\); \}\)\)\.size > 1/g)];
+  assert.equal(usos.length, 3, 'no son las tres chapas de MIXTO: ' + usos.length);
+  assert.ok(!/\(c\.length ?> ?1 \?[^:]*MIXTO/.test(PANEL), 'queda una chapa que cuenta renglones');
+  const esMixto = new Function('c', 'return ' + usos[0][0] + ';');
+  const caja = (lote) => ({ producto: 'Damasco', categoria: 'I', calibre: '35-55',
+    presentacion: 'Carton', lote_nombre: lote });
+  assert.equal(esMixto([caja('A'), caja('B')]), false, 'dos lotes del mismo cartón: MIXTO');
+  assert.equal(esMixto([caja('A'), Object.assign(caja('A'), { presentacion: 'IFCO' })]), true);
+});

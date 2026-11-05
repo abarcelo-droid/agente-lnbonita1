@@ -21,6 +21,7 @@
 import { jsPDF } from 'jspdf';
 import QRCode from 'qrcode';
 import { getLogo } from './pdfComun.js';
+import { porArticulo } from './galpon.js';
 
 // A4 apaisado. Es la hoja que hay en cualquier impresora del galpón, y entra entera en
 // una funda portaetiquetas de pallet.
@@ -195,6 +196,13 @@ function elQR(doc, qr, numero, x, y, lado) {
   doc.text('Escanear al cargar el camión', x + lado / 2, y + lado + 12, { align: 'center' });
 }
 
+// El dato de lote de un artículo: si todos sus lotes dicen lo mismo, eso; si no,
+// «Varios». Listar tres lotes en una caja de 5 cm es justo lo que confundía (V1148).
+function unico(linea, campo, varios) {
+  const v = [...new Set((linea.lotes || [linea]).map((l) => l[campo] || ''))];
+  return v.length > 1 ? varios : v[0];
+}
+
 // ── EL MODELO HOMOGÉNEO ─────────────────────────────────────────────────────────────
 // Un solo artículo: el producto en letras grandes, porque es lo que se lee de lejos.
 function homogeneo(doc, pallet, linea, qr) {
@@ -235,30 +243,31 @@ function homogeneo(doc, pallet, linea, qr) {
   const h = (PIE_Y - y - 4) / 2;
   caja(doc, M + 3, y, w, h, 'Bultos', n0(linea.bultos));
   caja(doc, M + 3 + w + 4, y, w, h, 'Kg netos', n2(linea.kilos));
-  caja(doc, M + 3 + (w + 4) * 2, y, w, h, 'Lote', linea.lote_nombre);
+  caja(doc, M + 3 + (w + 4) * 2, y, w, h, 'Lote', unico(linea, 'lote_nombre', 'Varios'));
   y += h + 4;
   caja(doc, M + 3, y, w, h, 'Fecha empaque', fechaAr(pallet.fecha_empaque));
-  caja(doc, M + 3 + w + 4, y, w, h, 'Cuartel', linea.cuartel);
-  caja(doc, M + 3 + (w + 4) * 2, y, w, h, 'RENSPA', linea.renspa);
+  caja(doc, M + 3 + w + 4, y, w, h, 'Cuartel', unico(linea, 'cuartel', 'Varios'));
+  caja(doc, M + 3 + (w + 4) * 2, y, w, h, 'RENSPA', unico(linea, 'renspa', 'Varios'));
 
   elQR(doc, qr, pallet.numero, QX, M + 40, QL);
 }
 
 // ── EL MODELO MIXTO ─────────────────────────────────────────────────────────────────
 // Varios artículos: una línea por cada uno, con sus bultos y sus kilos, y el total
-// abajo. Cada línea lleva SU lote y SU renspa: un pallet mixto puede tener fruta de dos
-// cuadros, y el que lo recibe necesita saber de cuál es cada caja.
+// abajo. SIN LOTE NI RENSPA (V1148). Andy, 5/11/2026: «no pongas el detalle de cada
+// lote en el tarjetón, que confunde». Una línea por lote repetía el mismo cartón tres
+// veces y escondía lo que se controla al cargar: cuántas cajas de cada cosa.
 function mixto(doc, pallet, lineas, qr) {
   const QL = 46;
   const QX = A.ancho - M - 2 - QL;
   const anchoTabla = QX - (M + 3) - 8;
 
   // Las columnas, en milímetros, proporcionales al ancho que quede.
-  const pesos = [26, 7, 11, 15, 13, 18, 10, 10];
+  const pesos = [34, 9, 14, 21, 11, 11];
   const total = pesos.reduce((a, b) => a + b, 0);
   const cols = pesos.map((x) => (x / total) * anchoTabla);
-  const titulos = ['PRODUCTO', 'CAT.', 'CALIBRE', 'ENVASE', 'LOTE', 'RENSPA', 'BULTOS', 'KG'];
-  const derecha = [false, false, false, false, false, false, true, true];
+  const titulos = ['PRODUCTO', 'CAT.', 'CALIBRE', 'ENVASE', 'BULTOS', 'KG'];
+  const derecha = [false, false, false, false, true, true];
 
   let y = M + 40;
   const xs = [];
@@ -293,17 +302,16 @@ function mixto(doc, pallet, lineas, qr) {
   for (const l of muestra) {
     const datos = [
       S(l.producto) + (l.variedad ? ' ' + S(l.variedad) : ''),
-      S(l.categoria), S(l.calibre), S(l.envase), S(l.lote_nombre), S(l.renspa),
+      S(l.categoria), S(l.calibre), S(l.envase),
       n0(l.bultos), n2(l.kilos),
     ];
     doc.setDrawColor(...GRIS_CL);
     doc.setLineWidth(0.3);
     doc.line(M + 3, y + alto, M + 3 + anchoTabla, y + alto);
     datos.forEach((d, i) => {
-      doc.setFont('helvetica', i === 0 || i >= 6 ? 'bold' : 'normal');
-      doc.setTextColor(...(i === 5 ? GRIS : NEGRO));
-      // El RENSPA va un punto más chico: es el dato más largo y el que menos se mira.
-      medida(doc, d, cols[i] - 4, i === 5 ? tamFila * 0.8 : tamFila, 5.5);
+      doc.setFont('helvetica', i === 0 || i >= 4 ? 'bold' : 'normal');
+      doc.setTextColor(...NEGRO);
+      medida(doc, d, cols[i] - 4, tamFila, 5.5);
       doc.text(d, derecha[i] ? xs[i] + cols[i] - 2 : xs[i] + 2, y + alto * 0.7,
         derecha[i] ? { align: 'right' } : undefined);
     });
@@ -332,8 +340,8 @@ function mixto(doc, pallet, lineas, qr) {
   doc.setTextColor(...NEGRO);
   doc.text('TOTAL · Empaque ' + fechaAr(pallet.fecha_empaque), M + 3, y);
   doc.setFontSize(19);
-  doc.text(n0(pallet.bultos), xs[6] + cols[6] - 2, y, { align: 'right' });
-  doc.text(n2(pallet.kilos), xs[7] + cols[7] - 2, y, { align: 'right' });
+  doc.text(n0(pallet.bultos), xs[4] + cols[4] - 2, y, { align: 'right' });
+  doc.text(n2(pallet.kilos), xs[5] + cols[5] - 2, y, { align: 'right' });
 
   elQR(doc, qr, pallet.numero, QX, M + 38, QL);
 }
@@ -341,7 +349,10 @@ function mixto(doc, pallet, lineas, qr) {
 // ── LA HOJA ─────────────────────────────────────────────────────────────────────────
 export async function galponPalletPDF(pallet, contenido, cfg) {
   const c = cfg || {};
-  const lineas = Array.isArray(contenido) ? contenido : [];
+  /* POR ARTÍCULO, no por lote (V1148): ver porArticulo() en galpon.js. Es lo que
+     decide también el modelo — un solo cartón de dos cuadros va con el producto en
+     letras grandes, no en una tabla de dos renglones iguales. */
+  const lineas = porArticulo(Array.isArray(contenido) ? contenido : []);
   const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4',
                           compress: true });
 
@@ -354,7 +365,11 @@ export async function galponPalletPDF(pallet, contenido, cfg) {
     } catch (e) { qr = null; }
   }
 
-  encabezado(doc, pallet, getLogo(), c.marca || 'LA NIÑA BONITA');
+  /* La chapa MIXTO sale de los artículos, igual que el modelo: un pallet cerrado antes
+     de la V1148 puede tener mixto=1 guardado por llevar dos lotes del mismo cartón, y
+     la etiqueta diría MIXTO arriba de un modelo homogéneo. */
+  encabezado(doc, Object.assign({}, pallet, { mixto: lineas.length > 1 ? 1 : 0 }),
+    getLogo(), c.marca || 'LA NIÑA BONITA');
   if (lineas.length === 1) homogeneo(doc, pallet, lineas[0], qr);
   else mixto(doc, pallet, lineas, qr);
   pie(doc, c);
