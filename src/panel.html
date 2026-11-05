@@ -8181,33 +8181,6 @@ if ('serviceWorker' in navigator) {
         margin-top:7px;overflow:hidden}
       #sec-galpon-proceso .gpr-lote .barra i{display:block;height:100%;background:var(--burg)}
 
-      /* EL TABLERO DEL LOTE: entró / salió / queda, y el reparto en una sola barra. */
-      #sec-galpon-proceso .gpr-rep{border:1px solid var(--warn);border-radius:10px;
-        background:rgba(217,119,6,.07);padding:10px 13px;font-size:12.5px;
-        margin-bottom:4px}
-      #sec-galpon-proceso .gpr-rp{display:inline-block;border:1px solid var(--bor);
-        border-radius:999px;padding:1px 9px;margin:3px 5px 0 0;background:var(--sur);
-        font-variant-numeric:tabular-nums}
-      #sec-galpon-proceso .gpr-rpn{margin-top:5px;color:var(--mut)}
-      #sec-galpon-proceso .gpr-mz{font-size:10.5px;border:1px solid var(--warn);
-        color:var(--warn);border-radius:999px;padding:0 6px;white-space:nowrap}
-      #sec-galpon-proceso .gpr-tab{border:1px solid var(--bor);border-radius:12px;
-        padding:14px 16px;margin-bottom:18px;background:var(--sur)}
-      #sec-galpon-proceso .gpr-nums{display:flex;gap:22px;flex-wrap:wrap;margin-bottom:12px}
-      #sec-galpon-proceso .gpr-nums .k{font-size:11px;color:var(--mut);text-transform:uppercase;
-        letter-spacing:.4px}
-      #sec-galpon-proceso .gpr-nums .v{font-size:23px;font-weight:700;
-        font-variant-numeric:tabular-nums;line-height:1.2}
-      #sec-galpon-proceso .gpr-apilada{display:flex;height:22px;border-radius:6px;
-        overflow:hidden;background:var(--bor)}
-      #sec-galpon-proceso .gpr-apilada i{display:block;height:100%;transition:width .35s ease}
-      #sec-galpon-proceso .gpr-leyenda{display:flex;gap:16px;flex-wrap:wrap;margin-top:9px;
-        font-size:12px}
-      #sec-galpon-proceso .gpr-leyenda span{display:flex;align-items:center;gap:6px}
-      #sec-galpon-proceso .gpr-leyenda em{width:11px;height:11px;border-radius:3px;
-        display:inline-block;font-style:normal}
-      #sec-galpon-proceso .gpr-demas{margin-top:10px}
-
       /* LAS TRES ZONAS Y SUS BALDOSAS. El color es el destino y se repite en todos lados
          —zona, baldosa, barra, renglón— para que no haya que leer la palabra. */
       #sec-galpon-proceso .gpr-zonas{display:flex;gap:14px;flex-wrap:wrap;margin-bottom:18px}
@@ -8282,17 +8255,6 @@ if ('serviceWorker' in navigator) {
       #sec-galpon-proceso .gpr-vacio{text-align:center;padding:30px;color:var(--mut);font-size:13px}
       #sec-galpon-proceso h3.gpr-t{font-size:12px;text-transform:uppercase;letter-spacing:.5px;
         color:var(--mut);margin:22px 0 9px}
-      #sec-galpon-proceso .gpr-stock{display:flex;gap:14px;flex-wrap:wrap}
-      #sec-galpon-proceso .gpr-sd{flex:1 1 260px;min-width:0;border:1px solid var(--bor);
-        border-radius:12px;padding:12px 14px}
-      #sec-galpon-proceso .gpr-sd .st{display:flex;justify-content:space-between;
-        align-items:baseline;gap:10px;margin-bottom:7px}
-      #sec-galpon-proceso .gpr-sd .st b{font-size:19px;font-variant-numeric:tabular-nums}
-      #sec-galpon-proceso .gpr-sl{display:flex;justify-content:space-between;gap:10px;
-        font-size:12.5px;padding:3px 0;border-top:1px dashed var(--bor)}
-      #sec-galpon-proceso .gpr-sl span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-      #sec-galpon-proceso .gpr-sl b{font-variant-numeric:tabular-nums;white-space:nowrap}
-
       /* ── 🧱 EL PALLET ──────────────────────────────────────────────────
          Bordó, como el tarjetón que va a salir: lo que se ve en pantalla y lo que
          se imprime tienen que parecerse, o nadie relaciona una cosa con la otra. */
@@ -8323,38 +8285,6 @@ if ('serviceWorker' in navigator) {
         white-space:nowrap;overflow:hidden;text-overflow:ellipsis;vertical-align:middle}
       #sec-galpon-proceso .gpl-num{font-weight:700;color:#9b2232;
         font-variant-numeric:tabular-nums}
-      /* ── 📦 EL STOCK ───────────────────────────────────────────────────
-         Andy, 31/10/2026: «quiero el stock bien claro, por ejemplo cuánto quedó
-         guardado en el frío». Lo que le faltaba a una lista de kilos es el número
-         grande y HACE CUÁNTO: fruta que lleva tres semanas en cámara es otra cosa
-         que la de ayer, y los kilos solos no lo dicen. */
-      #sec-galpon-proceso .gpr-sd .hero{font-size:30px;font-weight:700;line-height:1.1;
-        font-variant-numeric:tabular-nums}
-      #sec-galpon-proceso .gpr-sd .hu{font-size:13px;font-weight:600;color:var(--mut);
-        margin-left:4px}
-      #sec-galpon-proceso .gpr-sd .meta{font-size:11.5px;color:var(--mut);margin:3px 0 9px}
-      #sec-galpon-proceso .gpr-sd .viejo{font-weight:600}
-      #sec-galpon-proceso .gpr-tot{display:flex;align-items:baseline;gap:10px;
-        margin-bottom:12px;flex-wrap:wrap}
-      #sec-galpon-proceso .gpr-tot b{font-size:34px;font-variant-numeric:tabular-nums;
-        line-height:1}
-      #sec-galpon-proceso .gpr-tot span{font-size:12.5px;color:var(--mut)}
-      /* El reparto del stock, en una sola barra: tres números no dicen la proporción
-         tan rápido como tres anchos. */
-      #sec-galpon-proceso .gpr-sbar{display:flex;height:14px;border-radius:7px;
-        overflow:hidden;background:var(--bor);margin-bottom:14px}
-      #sec-galpon-proceso .gpr-sbar i{display:block;height:100%;box-shadow:2px 0 0 0 var(--sur)}
-      #sec-galpon-proceso .gpr-sbar i:last-child{box-shadow:none}
-      #sec-galpon-proceso .gpr-sl2{display:flex;justify-content:space-between;gap:10px;
-        font-size:12.5px;padding:4px 0;border-top:1px dashed var(--bor)}
-      #sec-galpon-proceso .gpr-sl2 span{overflow:hidden;text-overflow:ellipsis;
-        white-space:nowrap}
-      #sec-galpon-proceso .gpr-sl2 b{font-variant-numeric:tabular-nums;white-space:nowrap}
-      #sec-galpon-proceso .gac-plg{background:none;border:1px solid var(--bor);
-        border-radius:8px;padding:6px 12px;font-size:12px;cursor:pointer;
-        color:var(--burd);margin:4px 0 10px}
-      #sec-galpon-proceso .gac-plg:hover{background:var(--burl)}
-
       #sec-galpon-proceso .gpr-flash{animation:gprFlash 1s ease}
       @keyframes gprFlash{0%{background:rgba(22,163,74,.28)}100%{background:transparent}}
       #sec-galpon-proceso .gpr-fecha{display:flex;gap:8px;align-items:center;
@@ -8365,9 +8295,9 @@ if ('serviceWorker' in navigator) {
 
     <div class="ph">
       <div><div class="ph-t">📦 Proceso</div>
-        <div class="ph-s">Qué salió de lo que entró. Se elige el lote volcado y se van
-          cargando los procesos parciales: comercial, verde y descarte. De acá sale el
-          rinde, y lo cargado queda como stock del galpón.</div></div>
+        <div class="ph-s">Se elige el lote volcado y se van cargando los procesos
+          parciales: comercial, verde y descarte. El <b>rinde</b> se mira en 📈 Acumulado
+          y lo que queda en cámara, en 🚚 Stock y Despachos.</div></div>
       <div style="display:flex;gap:8px">
         <button class="btn bo bs" onclick="sgManualAbrir('galpon-proceso')">❓ ¿Cómo se usa?</button></div>
     </div>
@@ -8385,7 +8315,6 @@ if ('serviceWorker' in navigator) {
     <div id="gpr-aviso"></div>
     <div id="gpr-lotes" class="gpr-lotes"></div>
 
-    <div id="gpr-tablero"></div>
 
     <!-- ── 🧱 EL PALLET QUE SE ESTÁ ARMANDO ─────────────────────────────────────
          Andy, 1/11/2026: «algo más parecido a Cierre de Pallet». Va ARRIBA de las
@@ -8418,23 +8347,26 @@ if ('serviceWorker' in navigator) {
          la puerta al período entero va acá abajo, que es donde se la vino a buscar. -->
     <div class="gal-ay" style="max-width:none;margin:10px 0 0;display:flex;gap:12px;
          align-items:center;flex-wrap:wrap;justify-content:space-between">
-      <span>Esto es sólo el día elegido arriba. Para ver <b>todos los días juntos</b>
-        —qué se cargó cada uno, con su pallet— está 📈 Acumulado.</span>
+      <span>Esto es sólo el día elegido arriba. El <b>rinde</b> y <b>todos los días
+        juntos</b> están en 📈 Acumulado; lo que quedó en cámara, en
+        <b>🚚 Stock y Despachos</b>.</span>
       <button class="btn bo bs" onclick="galPrVerTodosLosDias()">
         Ver todos los días →</button>
     </div>
 
     <div id="gpr-pallets"></div>
 
-    <h3 class="gpr-t">📦 Lo que hay guardado</h3>
-    <div class="gal-ay" style="max-width:none;margin:-4px 0 10px">Todo lo procesado que
-      todavía no salió: lo que está en la cámara y en el playón. <b>Va en bultos</b>,
-      que es lo que hace falta para cargar un camión; los kilos están al lado. Hoy no
-      sale nada por sistema, así que es todo lo cargado — cuando exista el despacho, lo
-      que salga se descuenta solo.</div>
-    <div id="gpr-stock" class="gpr-stock"></div>
-    <div id="gpr-stock-prod"></div>
-    <div id="gpr-stock-lote"></div>
+    <!-- ACÁ NO VA NI EL RINDE NI EL STOCK ────────────────────────────────────
+         Andy, 5/11/2026: «te paso las cosas que para mí confunden al operador,
+         saquémoslas de ahí. Eso es análisis; la parte de proceso tiene que ser bien
+         operativa».
+
+         Esta pantalla contesta UNA pregunta: qué estoy cargando ahora. El tablero de
+         volcado / procesado / sin procesar / rinde y el bloque de «lo que hay
+         guardado» contestan otras dos, y las dos ya tienen su pantalla —📈 Acumulado
+         y 🚚 Stock y Despachos—. Nada de eso se perdió; dejó de estar en el medio.
+
+         La puerta es el renglón de abajo de «Lo cargado este día». -->
   </div>
 
   <!-- ════════════════════════════════════════════════════════════════════════════════
@@ -29085,18 +29017,41 @@ SG_MANUAL['galpon-proceso'] = { titulo: 'Galpón · Proceso', html:
   + 'una sola vez; de acá en adelante lo pone el lote.</div>'
   + '<p>El corte <b>por producto</b> del stock aparece cuando hay <b>más de una</b> '
   + 'fruta guardada. Con damasco solo sería una tabla de una fila.</p>'
-  + '<h3>📊 El tablero de arriba <span class="ver">V1112</span></h3>'
-  + '<p>Volcado, procesado, sin procesar y el rinde comercial, con la barra del reparto. '
-  + 'No es decoración: un 40% de descarte se ve <b>mientras se carga</b>, no a fin de '
-  + 'temporada. Un formulario a ciegas se completa igual y nadie se entera.</p>'
-  + '<p>El volcado del lote <b>no se corta por día</b>: lo que entró el martes se puede '
-  + 'procesar el jueves, y un tablero que sólo mirara hoy diría que se procesó de más.</p>'
+  + '<h3>🎯 Acá no se analiza, acá se carga <span class="ver">V1145</span></h3>'
+  + '<p>Andy, 5/11/2026: <i>«te paso las cosas que para mí confunden al operador, '
+  + 'saquémoslas de ahí. Eso es análisis; la parte de proceso tiene que ser bien '
+  + 'operativa»</i>.</p>'
+  + '<p>Esta pantalla contesta <b>una sola pregunta</b>: qué estoy cargando ahora. '
+  + 'Hasta la V1144 también tenía el tablero de volcado / procesado / sin procesar / '
+  + 'rinde y el bloque de <b>lo que hay guardado</b> — dos preguntas más, en el medio '
+  + 'del camino de la que importa mientras suena la cinta.</p>'
+  + '<ul>'
+  + '<li>El <b>rinde</b>, lo volcado, lo procesado y lo que queda sin procesar están en '
+  + '<b>📈 Acumulado</b>, lote por lote y con el período que uno elija — incluido el '
+  + 'aviso de cuando se procesó <i>más</i> de lo volcado, que es la tolva mezclando.</li>'
+  + '<li>Lo que <b>quedó en cámara</b>, en bultos y por presentación, está en '
+  + '<b>🚚 Stock y Despachos</b>, que es desde donde se carga el camión.</li>'
+  + '</ul>'
+  + '<p>No se perdió nada: dejó de estar en el medio. Y la pantalla pide tres consultas '
+  + 'menos sobre la tabla entera cada vez que se tipea una caja.</p>'
+  + '<p>Lo único que quedó de ese lado es el número que muestra <b>cada zona</b>: es lo '
+  + 'que lleva ese destino <b>en los lotes elegidos</b>, no en el día. Lo que entró el '
+  + 'martes se procesa el jueves, así que cortarlo por día diría que se procesó de más '
+  + 'todos los días.</p>'
 
-  + '<h3>📦 Lo que hay guardado <span class="ver">V1112</span></h3>'
-  + '<p>El stock del galpón, por destino y por presentación. <b>No es una tabla aparte</b>: '
-  + 'se suma de las mismas cargas cada vez que se abre la pantalla. Por eso corregir una '
-  + 'carga de la semana pasada lo arregla solo — un saldo guardado en su propia fila se '
-  + 'desincroniza en silencio, y acá corregir cargas viejas es lo normal, no la excepción.</p>'
+  + '<h3>🥣 Si la tolva está mezclada <span class="ver">V1145</span></h3>'
+  + '<p>Se pueden marcar <b>varios lotes</b> arriba. Lo que se cargue <b>se reparte a '
+  + 'prorrata</b> de lo que le queda sin procesar a cada uno: si del Cuadro 3 quedan '
+  + '3.000 kg y del Cuadro 4 quedan 1.000, lo que sale ahora va 75% y 25%. Si ninguno '
+  + 'tiene pendiente, va en partes iguales.</p>'
+  + '<div class="ojo"><b>Es una estimación, no una medición.</b> La tolva mezcla la '
+  + 'fruta y no hay forma física de decir de qué árbol salió cada caja. Las cargas '
+  + 'quedan <b>marcadas</b> como repartidas, y el reparto se ve en <b>📈 Acumulado</b>, '
+  + 'que es donde se lee el rinde de cada lote.</div>'
+  + '<p>Hasta la V1144 los porcentajes se dibujaban acá, antes de cargar. Salieron por '
+  + 'lo mismo que el tablero: el operador no los decide, y un cartel con tres '
+  + 'porcentajes arriba de las baldosas es una cuenta que hay que leer para apretar un '
+  + 'botón que no cambia.</p>'
 
   + '<div class="ojo"><b>El cero de más, en esta pantalla, tiene forma de gramos.</b> Una '
   + 'presentación cargada con <b>700</b> donde van kilos convierte cien cajas en 700.000 kg. '
@@ -29213,33 +29168,12 @@ SG_MANUAL['galpon-proceso'] = { titulo: 'Galpón · Proceso', html:
   + '<li>Si hay que repartir cien cajas entre dos pallets, se cargan <b>dos veces</b> — '
   + 'que es lo que se hace físicamente igual.</li>'
   + '</ul>'
-  + '<h3>❄️ Cuánto quedó guardado <span class="ver">V1116</span></h3>'
-  + '<div class="ojo"><b>El stock va en BULTOS, no en kilos</b> <span class="ver">V1117</span>. '
-  + 'Andy, 31/10/2026: <i>«los stock van en cajas porque necesitamos saber qué cargar. '
-  + 'No me interesa ahí verlo en kilos»</i>. Es la única pantalla del galpón donde el '
-  + 'número grande no es el kilo, porque la pregunta es otra: cuántas cajas suben al '
-  + 'camión. Los kilos siguen al lado, más chicos.</div>'
-  + '<p>Lo que está <b>a granel</b> no tiene bultos que contar y muestra sus kilos. '
-  + 'Inventarle «1 bulto» a un bin sería un número que alguien va a usar para cargar.</p>'
-  + '<p>La <b>barra</b> del reparto, en cambio, se divide por <b>kilos</b>: una caja de '
-  + '7 kg y un bin de 300 ocupan lo mismo contados por bulto, y la proporción saldría al '
-  + 'revés de lo que hay. El bulto es para cargar; el kilo es para comparar.</p>'
-  + '<p>Andy, 31/10/2026: <i>«quiero el stock bien claro, por ejemplo cuánto quedó '
-  + 'guardado en el frío»</i>. Arriba va el total en grande y la barra del reparto; abajo, '
-  + 'una tarjeta por destino con sus kilos, sus bultos y <b>desde cuándo</b>.</p>'
-  + '<p>Lo de «desde cuándo» no es un adorno: <b>4.000 kg de ayer y 4.000 kg de hace tres '
-  + 'semanas se escriben igual y no son lo mismo</b>. En una cámara, esa es la pregunta.</p>'
-  + '<p>Y abajo de todo, <b>plegado</b> <span class="ver">V1117</span>, el otro corte: '
-  + '<b>de qué lote es lo guardado</b>. No se deduce del '
-  + 'de arriba, y es el que contesta a quién se le liquida lo que está en cámara.</p>'
-  + '<div class="ojo"><b>Hoy no sale nada por sistema</b>, así que lo guardado es todo lo '
-  + 'procesado. Cuando exista el despacho —y el reproceso del verde, y el remate del '
-  + 'descarte— lo que salga se va a descontar solo: la tabla ya sabe restar salidas. Si '
-  + 'hace falta separar <b>cámara</b> de <b>playón</b> como dos lugares distintos, eso '
-  + 'todavía no existe y es una pantalla aparte.</div>'
+
   + '<h3>🔗 Con qué se vincula <span class="ver">V1112</span></h3>'
   + '<ul>'
   + '<li><b>⚖️ Carga de kilos</b> es de donde salen los lotes y los kilos volcados.</li>'
+  + '<li><b>📈 Acumulado</b> es donde se lee el rinde y cómo venía cada lote.</li>'
+  + '<li><b>🚚 Stock y Despachos</b> es lo que quedó guardado y de ahí sale el camión.</li>'
   + '<li><b>⚙️ Configuración</b> tiene el catálogo de presentaciones: las baldosas de acá.</li>'
   + '<li><b>📈 Acumulado</b> muestra el rinde por lote de todo el período.</li>'
   + '</ul>'
@@ -29557,6 +29491,26 @@ SG_MANUAL['galpon-stock'] = { titulo: 'Stock y Despachos', html:
   + '<p>Las baldosas van agrupadas por <b>destino</b> (comercial, verde, descarte) y '
   + 'dentro de cada banda en el orden que tengan en el catálogo. Una presentación a '
   + '<b>granel</b> muestra kilos en vez de cajas, porque no tiene cajas.</p>'
+
+  + '<h3>❄️ Hace cuánto está, y de dónde salió <span class="ver">V1145</span></h3>'
+  + '<p>Cada destino de arriba dice <b>desde cuándo</b> está lo más viejo que tiene. '
+  + 'No es un adorno: <b>4.000 kg de ayer y 4.000 kg de hace tres semanas se escriben '
+  + 'igual y no son lo mismo</b>. En una cámara, ésa es la pregunta.</p>'
+  + '<p>Y <b>de qué lote</b> es lo guardado está plegado adentro de cada baldosa. '
+  + 'No se deduce del total de arriba, y es el que contesta a quién se le liquida lo '
+  + 'que está en cámara.</p>'
+  + '<p>Las dos cosas vivían en <b>📦 Proceso</b> hasta la V1144. Andy, 5/11/2026: '
+  + '<i>«eso es análisis; la parte de proceso tiene que ser bien operativa»</i>. Es '
+  + 'acá donde se miran, porque es acá donde se decide qué sube al camión.</p>'
+
+  + '<h3>No es una tabla aparte <span class="ver">V1145</span></h3>'
+  + '<p>El stock <b>se suma de las mismas cargas</b> cada vez que se abre la pantalla: '
+  + 'no hay una tabla de saldos ni un cierre que haya que correr. Por eso <b>corregir '
+  + 'una carga de la semana pasada lo arregla solo</b> — un saldo guardado en su propia '
+  + 'fila se desincroniza en silencio, y acá corregir cargas viejas es lo normal, no la '
+  + 'excepción.</p>'
+  + '<p>Y las salidas <b>restan</b>: lo que se despacha se descuenta solo, sin que nadie '
+  + 'tenga que tocar el stock.</p>'
 
   + '<h3>El dibujito de cada presentación <span class="ver">V1125</span></h3>'
   + '<p>En <b>⚙️ Configuración → Presentaciones</b> cada una puede llevar un '
@@ -60557,11 +60511,9 @@ async function galPrCargar(){
     galOffCartel(j, 'gpr-aviso');
     if (f && !f.value) f.value = j.fecha;
     galPrPintarLotes();
-    galPrPintarTablero();
     galPrPintarPallet();
     galPrPintarZonas();
     galPrPintar();
-    galPrPintarStock();
     galPrPintarPallets();
   } catch (e) {
     var b = document.getElementById('gpr-body');
@@ -60623,49 +60575,6 @@ function galPrTodosLosLotes(){
   galPrCargar();
 }
 
-/* ── EL TABLERO ──────────────────────────────────────────────────────────────────
-   Entró, salió, queda — y el reparto en una sola barra apilada. Es lo que hace que la
-   pantalla no sea un formulario a ciegas: un 40% de descarte se ve mientras se carga,
-   no a fin de temporada. */
-function galPrPintarTablero(){
-  var el = document.getElementById('gpr-tablero'); if (!el) return;
-  var t = GPR.datos && GPR.datos.tablero;
-  if (!GPR.lotes.length || !t){ el.innerHTML = ''; return; }
-  var tot = Math.max(t.volcado, t.procesado) || 1;
-  var tramo = function(clave){
-    var d = galPrDest(clave), kg = t.destinos[clave] || 0;
-    return kg > 0 ? '<i style="width:' + ((kg / tot) * 100) + '%;background:' + d.color + '"></i>' : '';
-  };
-  var ley = (GPR.datos.destinos || []).map(function(d){
-    var kg = t.destinos[d.clave] || 0;
-    return '<span><em style="background:' + d.color + '"></em>' + galPrEsc(d.label) + ' '
-      + '<b>' + galPrNum(kg) + ' kg</b>'
-      + (t.volcado > 0 ? ' · ' + galPrNum((kg / t.volcado) * 100, 1) + '%' : '') + '</span>';
-  }).join('');
-
-  var n = function(k, v, u){ return '<div><div class="k">' + k + '</div>'
-    + '<div class="v">' + v + (u ? ' <span style="font-size:12px;color:var(--mut)">' + u
-    + '</span>' : '') + '</div></div>'; };
-
-  el.innerHTML = '<div class="gpr-tab">'
-    + '<div class="gpr-nums">'
-      + n('Volcado', galPrNum(t.volcado), 'kg')
-      + n('Procesado', galPrNum(t.procesado), 'kg')
-      + n('Sin procesar', galPrNum(t.sin_procesar), 'kg')
-      + n('Rinde comercial', t.rinde == null ? '—' : galPrNum(t.rinde, 1) + '%')
-    + '</div>'
-    + '<div class="gpr-apilada">' + tramo('comercial') + tramo('verde') + tramo('descarte') + '</div>'
-    + '<div class="gpr-leyenda">' + ley + '</div>'
-    /* Procesar MÁS de lo volcado no se tapa con un Math.max(0, …): es la señal de que la
-       atribución a este lote se corrió —la tolva mezcla— y taparla es esconder el único
-       aviso que hay. */
-    + (t.de_mas ? '<div class="ojo gpr-demas"><b>Hay más procesado que volcado en este '
-        + 'lote.</b> La tolva mezcla la fruta de varios lotes, así que esto pasa cuando '
-        + 'una carga se le atribuyó al lote de al lado. Se arregla corrigiendo el lote '
-        + 'de las cargas, acá abajo o en la carga de kilos.</div>' : '')
-    + '</div>';
-}
-
 /* ── LAS TRES ZONAS Y SUS BALDOSAS ───────────────────────────────────────────────── */
 function galPrPintarZonas(){
   var el = document.getElementById('gpr-zonas'); if (!el) return;
@@ -60676,7 +60585,7 @@ function galPrPintarZonas(){
   }
   var pres = (GPR.datos.presentaciones) || [];
   var t = GPR.datos.tablero || { destinos:{} };
-  el.innerHTML = galPrCartelReparto() + (GPR.datos.destinos || []).map(function(d){
+  el.innerHTML = (GPR.datos.destinos || []).map(function(d){
     var mias = pres.filter(function(p){ return p.destino === d.clave; });
     return '<div class="gpr-zona" style="border-color:' + d.color + '33">'
       + '<div class="gpr-zh"><b style="color:' + d.color + '">' + galPrEsc(d.label) + '</b>'
@@ -60688,36 +60597,6 @@ function galPrPintarZonas(){
             + '<b>⚙️ Configuración</b>.</div>')
       + '</div>';
   }).join('');
-}
-
-/* CÓMO SE VA A REPARTIR, antes de cargar. A prorrata de lo que le queda sin procesar a
-   cada lote: si del Cuadro 3 quedan 3.000 kg y del Cuadro 4 quedan 1.000, lo que sale
-   ahora es 75% y 25%.
-
-   Se muestra porque es una ESTIMACIÓN y no una medición. Un reparto que el sistema
-   hace callado entra al rinde de cada lote con la misma cara que un dato medido, y a
-   fin de temporada nadie puede distinguirlos. */
-function galPrCartelReparto(){
-  if (GPR.lotes.length < 2) return '';
-  var ls = ((GPR.datos && GPR.datos.lotes) || [])
-    .filter(function(l){ return GPR.lotes.indexOf(l.lote_id) >= 0; });
-  if (!ls.length) return '';
-  var pend = ls.map(function(l){ return l.sin_procesar > 0 ? l.sin_procesar : 0; });
-  var tot = pend.reduce(function(a, b){ return a + b; }, 0);
-  var pct = ls.map(function(l, i){
-    return tot > 0 ? (pend[i] / tot) * 100 : 100 / ls.length;
-  });
-  return '<div class="gpr-rep" style="flex:1 1 100%">'
-    + '<b>Mezcla de ' + ls.length + ' lotes.</b> Lo que cargues se reparte a prorrata '
-    + 'de lo que le queda sin procesar a cada uno — es una <b>estimación</b>, no una '
-    + 'medición, y las cargas quedan marcadas: '
-    + ls.map(function(l, i){
-        return '<span class="gpr-rp">' + galPrNum(pct[i], 1) + '% '
-          + galPrEsc(l.finca || l.nombre) + '</span>';
-      }).join('')
-    + (tot <= 0 ? '<div class="gpr-rpn">Ninguno tiene pendiente, así que va en partes '
-        + 'iguales.</div>' : '')
-    + '</div>';
 }
 
 function galPrBaldosa(p, d){
@@ -61314,163 +61193,6 @@ async function galPrBorrar(id){
     await galPrCargar();
   } catch (e) { alert('No se pudo borrar: ' + e.message); }
 }
-
-/* Hace cuánto está guardado lo más viejo. Es la pregunta de una cámara llena, y los
-   kilos solos no la contestan: 4.000 kg de ayer y 4.000 kg de hace tres semanas se
-   escriben igual y no son lo mismo. */
-function galPrAntiguedad(desde){
-  if (!desde) return '';
-  var p = String(desde).split('-');
-  if (p.length !== 3) return '';
-  var d = new Date(Number(p[0]), Number(p[1]) - 1, Number(p[2]));
-  var hoy = new Date();
-  hoy = new Date(hoy.getFullYear(), hoy.getMonth(), hoy.getDate());
-  var dias = Math.round((hoy - d) / 86400000);
-  if (dias <= 0) return 'desde hoy';
-  if (dias === 1) return 'desde ayer';
-  return 'hace ' + dias + ' días';
-}
-/* ── EL STOCK ────────────────────────────────────────────────────────────────────
-   Derivado de las mismas cargas, no una tabla de saldos: corregir una carga vieja lo
-   arregla solo. Es lo que hay guardado en el galpón HOY, sin cortar por fecha — un
-   stock de un día no es un stock. */
-/* ── EL STOCK, EN BULTOS ─────────────────────────────────────────────────────────
-   Andy, 31/10/2026: «los stock van en cajas porque necesitamos saber qué cargar. No me
-   interesa ahí verlo en kilos».
-
-   Así que el número grande es el BULTO y los kilos quedan al lado. No es lo mismo que
-   en el resto del galpón —todo lo demás se mide en kilos, porque de ahí sale el rinde y
-   el jornal— y acá la pregunta es otra: cuántas cajas hay que subir al camión.
-
-   Lo que está a granel no tiene bultos que contar y muestra sus kilos: inventarle un
-   «1 bulto» a un bin a granel sería un número que alguien va a usar para cargar. */
-function galPrBultos(x){
-  return x && x.bultos > 0 ? galPrNum(x.bultos, 0) : null;
-}
-
-function galPrPintarStock(){
-  var el = document.getElementById('gpr-stock'); if (!el) return;
-  var st = GPR.datos && GPR.datos.stock;
-  if (!st || !st.kilos){
-    el.innerHTML = '<div class="gpr-vacio" style="flex:1 1 100%">Todavía no hay nada '
-      + 'guardado.</div>';
-    var e0 = document.getElementById('gpr-stock-lote'); if (e0) e0.innerHTML = '';
-    return;
-  }
-
-  var bultos = 0;
-  st.destinos.forEach(function(d){ bultos += Number(d.bultos) || 0; });
-
-  /* La barra se reparte por KILOS aunque el número sea el bulto: una caja de 7 kg y un
-     bin de 300 ocupan lo mismo contados por bulto, y la proporción saldría al revés de
-     lo que hay. El bulto es para cargar; el kilo es para comparar. */
-  var barra = st.destinos.filter(function(d){ return d.kilos > 0; }).map(function(d){
-    return '<i style="width:' + ((d.kilos / st.kilos) * 100) + '%;background:'
-      + (GAC_COL[d.clave] || d.color) + '" title="' + galPrEsc(d.label + ': '
-          + galPrNum(d.kilos) + ' kg') + '"></i>';
-  }).join('');
-
-  var cab = '<div style="flex:1 1 100%">'
-    + '<div class="gpr-tot"><b>' + galPrNum(bultos, 0) + '</b>'
-    + '<span>bultos guardados · ' + galPrNum(st.kilos) + ' kg</span></div>'
-    + '<div class="gpr-sbar">' + barra + '</div></div>';
-
-  el.innerHTML = cab + st.destinos.map(function(d){
-    var col = GAC_COL[d.clave] || d.color;
-    var b = galPrBultos(d);
-    return '<div class="gpr-sd" style="border-color:' + col + '55">'
-      + '<div style="color:' + col + ';font-weight:700;font-size:12px;'
-        + 'text-transform:uppercase;letter-spacing:.3px">' + galPrEsc(d.label) + '</div>'
-      + '<div class="hero" style="color:' + col + '">' + (b == null ? galPrNum(d.kilos) : b)
-        + '<span class="hu">' + (b == null ? 'kg' : 'bultos') + '</span></div>'
-      + '<div class="meta">' + (b == null ? 'a granel' : galPrNum(d.kilos) + ' kg')
-        + (d.desde ? ' · <span class="viejo">' + galPrEsc(galPrAntiguedad(d.desde))
-            + '</span>' : '') + '</div>'
-      + (d.items.length ? d.items.map(function(i){
-            var ib = galPrBultos(i);
-            return '<div class="gpr-sl2"><span>' + galPrEsc(i.nombre) + '</span>'
-              + '<b>' + (ib == null ? galPrNum(i.kilos) + ' kg'
-                  : ib + ' <span style="font-weight:400;color:var(--mut)">· '
-                    + galPrNum(i.kilos) + ' kg</span>') + '</b></div>';
-          }).join('')
-        : '<div class="gpr-sl2" style="border-top:0;color:var(--mut)">—</div>')
-      + '</div>';
-  }).join('');
-
-  galPrPintarProducto();
-  galPrPintarStockLote();
-}
-
-/* EL STOCK POR PRODUCTO, y sólo cuando hay más de uno. Andy, 1/11/2026: «después
-   viene uva y melón». Hoy es todo damasco y una tabla de una sola fila es ruido;
-   el día que entre la segunda fruta aparece sola, sin que nadie se acuerde. */
-function galPrPintarProducto(){
-  var el = document.getElementById('gpr-stock-prod'); if (!el) return;
-  var ps = (GPR.datos && GPR.datos.stock_productos) || [];
-  if (ps.length < 2){ el.innerHTML = ''; return; }
-  var max = ps.reduce(function(m, x){ return x.kilos > m ? x.kilos : m; }, 0) || 1;
-  el.innerHTML = '<h3 class="gpr-t">Por producto</h3><div class="gpr-stock">'
-    + ps.map(function(x){
-        var tr = function(k){
-          return x[k] > 0
-            ? '<i style="width:' + ((x[k] / max) * 100) + '%;background:' + GAC_COL[k]
-              + '" title="' + galPrEsc(k + ': ' + galPrNum(x[k]) + ' kg') + '"></i>' : '';
-        };
-        return '<div class="gpr-sd" style="flex:1 1 240px">'
-          + '<div style="font-weight:700;font-size:13px">' + galPrEsc(x.producto) + '</div>'
-          + '<div class="hero">' + galPrNum(x.bultos, 0)
-            + '<span class="hu">bultos</span></div>'
-          + '<div class="meta">' + galPrNum(x.kilos) + ' kg</div>'
-          + '<div class="gpr-sbar" style="height:8px">'
-            + tr('comercial') + tr('verde') + tr('descarte') + '</div></div>';
-      }).join('') + '</div>';
-}
-
-/* De qué lote es lo guardado. Va PLEGADO: Andy, 31/10/2026 — «si me quiero meter a
-   analizar algo del lote entro y me fijo». Lo de todos los días es cuánto hay para
-   cargar, no de cuál cuadro salió. */
-var GPR_VERLOTES = false;
-function galPrVerStockLote(){
-  GPR_VERLOTES = !GPR_VERLOTES;
-  galPrPintarStockLote();
-}
-
-function galPrPintarStockLote(){
-  var el = document.getElementById('gpr-stock-lote'); if (!el) return;
-  var ls = (GPR.datos && GPR.datos.stock_lotes) || [];
-  if (!ls.length){ el.innerHTML = ''; return; }
-  var cab = '<button class="gac-plg" style="margin-top:14px"'
-    + ' onclick="galPrVerStockLote()">'
-    + (GPR_VERLOTES ? '▴ ocultar de qué lote es lo guardado'
-        : '▾ ver de qué lote es lo guardado (' + ls.length + ')') + '</button>';
-  if (!GPR_VERLOTES){ el.innerHTML = cab; return; }
-
-  var max = ls.reduce(function(m, x){ return x.kilos > m ? x.kilos : m; }, 0) || 1;
-  el.innerHTML = cab
-    + '<div class="ab-table-wrap"><table class="pa-tbl gpr-tbl">'
-    + '<colgroup><col style="width:28%"><col style="width:28%"><col style="width:14%">'
-    + '<col style="width:15%"><col style="width:15%"></colgroup>'
-    + '<thead><tr><th>Lote</th><th>Reparto</th><th style="text-align:right">Kilos</th>'
-    + '<th style="text-align:right">Comercial</th><th>Desde</th></tr></thead><tbody>'
-    + ls.map(function(x){
-        var tr = function(k){
-          return x[k] > 0
-            ? '<i style="width:' + ((x[k] / max) * 100) + '%;background:' + GAC_COL[k]
-              + '" title="' + galPrEsc(k + ': ' + galPrNum(x[k]) + ' kg') + '"></i>' : '';
-        };
-        return '<tr><td title="' + galPrEsc((x.finca ? x.finca + ' · ' : '') + x.nombre) + '">'
-          + (x.finca ? '<b>' + galPrEsc(x.finca) + '</b> · ' : '')
-          + galPrEsc(x.nombre) + '</td>'
-          + '<td><div class="gpr-sbar" style="height:8px;margin:0">'
-            + tr('comercial') + tr('verde') + tr('descarte') + '</div></td>'
-          + '<td class="gpr-n"><b>' + galPrNum(x.kilos) + '</b></td>'
-          + '<td class="gpr-n">' + galPrNum(x.comercial) + '</td>'
-          + '<td>' + galPrEsc(galPrAntiguedad(x.desde)) + '</td></tr>';
-      }).join('')
-    + '</tbody></table></div>';
-}
-
-
 
 /* ═══════════════════════════════════════════════════════════════════════════════════
    📈 GALPÓN · ACUMULADO
@@ -62163,6 +61885,27 @@ var GST = { datos:null, desp:null, piso:null, pallets:null, abierto:null,
             arm:null, armp:null, armsel:null, armops:null, armhoy:null };
 var GST_COL = { comercial:'#15803d', verde:'#f59e0b', descarte:'#b91c1c' };
 
+/* HACE CUÁNTO ESTÁ GUARDADO LO MÁS VIEJO. Es la pregunta de una cámara llena y los
+   kilos solos no la contestan: 4.000 kg de ayer y 4.000 kg de hace tres semanas se
+   escriben igual y no son lo mismo.
+
+   Vivía en la pantalla de Proceso, que es donde se carga y no donde se mira lo que
+   hay (V1145). Se mudó acá en vez de borrarse: el dato lo manda el servidor desde
+   siempre —stockGalpon() devuelve MIN(fecha) por destino— y dejarlo sin dibujar era
+   perder la única señal de que algo lleva demasiado en el frío. */
+function galStAntiguedad(desde){
+  if (!desde) return '';
+  var p = String(desde).split('-');
+  if (p.length !== 3) return '';
+  var d = new Date(Number(p[0]), Number(p[1]) - 1, Number(p[2]));
+  var hoy = new Date();
+  hoy = new Date(hoy.getFullYear(), hoy.getMonth(), hoy.getDate());
+  var dias = Math.round((hoy - d) / 86400000);
+  if (dias <= 0) return 'desde hoy';
+  if (dias === 1) return 'desde ayer';
+  return 'hace ' + dias + ' días';
+}
+
 function galStNum(v, dec){
   var n = Number(v)||0;
   return n.toLocaleString('es-AR', { minimumFractionDigits:dec==null?0:dec,
@@ -62233,7 +61976,8 @@ function galStPintar(){
       + galStNum(d.bultos,0)+'</div>'
       + '<div class="l"><span class="gst-pt" style="background:'+(GST_COL[d.clave]||'#999')+'"></span>'
       + galStEsc(d.nombre||d.clave)+'</div>'
-      + '<div class="gst-kg">'+galStNum(d.kilos,0)+' kg</div></div>';
+      + '<div class="gst-kg">'+galStNum(d.kilos,0)+' kg'
+      + (d.desde ? ' · '+galStEsc(galStAntiguedad(d.desde)) : '')+'</div></div>';
   });
   document.getElementById('gst-bal').innerHTML = h;
 

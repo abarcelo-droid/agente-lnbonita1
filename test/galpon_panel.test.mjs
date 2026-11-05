@@ -994,7 +994,7 @@ test('los cortes del panel no quedaron ni vacíos ni de más', () => {
   // Y que los cortes lleguen hasta el FINAL de su bloque. Un banner nuevo en el medio
   // lo parte al medio, y los asserts de la segunda mitad pasan a mirar la nada — sin
   // que el corte quede vacío, que es lo único que este centinela miraba antes.
-  assert.ok(JS_PR.includes('function galPrPintarStock('),
+  assert.ok(JS_PR.includes('async function galPrBorrar('),
     'JS_PR se corta antes del final del bloque de proceso');
   assert.ok(JS_AC.includes('function galAcPintar('),
     'JS_AC se corta antes del final del bloque del acumulado');
@@ -1249,6 +1249,15 @@ test('MANUAL PR: «se elige entre los lotes VOLCADOS, no entre todos»', () => {
   assert.match(JS_PR, /GPR\.datos && GPR\.datos\.lotes/);
 });
 
+test('MANUAL PR: «acá no se analiza, acá se carga», con su versión', () => {
+  /* Andy, 5/11/2026: «eso es análisis; la parte de proceso tiene que ser bien
+     operativa». La sección explica QUÉ se fue y ADÓNDE: un manual que no nombra las
+     dos pantallas deja al operador buscando el rinde donde ya no está. */
+  dicePr(/Acá no se analiza, acá se carga <span class="ver">V1145<\/span>/);
+  dicePr(/📈 Acumulado<\/b>, lote por lote/);
+  dicePr(/🚚 Stock y Despachos<\/b>, que es desde donde se carga el camión/);
+});
+
 test('MANUAL PR: «el lote es una declaración, no una traza»', () => {
   dicePr(/no existe forma física de decir/);
   dicePr(/el rinde puede dar más de 100%/);
@@ -1259,7 +1268,11 @@ test('MANUAL PR: «el lote es una declaración, no una traza»', () => {
   // un assert que mira el texto crudo se dispara con la explicación.
   assert.ok(!/Math\.max\(0/.test(sinComentarios(tab)),
     'se recorta el sobrante en cero: tapa el único aviso');
-  assert.match(JS_PR, /t\.de_mas \?/);
+  /* Y EL AVISO SE VE EN ACUMULADO, no en Proceso (V1145): «eso es análisis; la parte
+     de proceso tiene que ser bien operativa». El que carga no puede hacer nada con
+     un rinde de 252% mientras suena la cinta; el que mira el acumulado sí. */
+  assert.match(JS_AC, /Se procesó más de lo volcado/);
+  assert.ok(!/de_mas/.test(JS_PR), 'el aviso volvió a la pantalla de carga');
 });
 
 test('MANUAL PR: «son tres y son fijas, no un campo de texto»', () => {
@@ -1312,7 +1325,10 @@ test('MANUAL PR: «a granel se escriben los kilos y no hay cuenta»', () => {
 });
 
 test('MANUAL PR: «el volcado del lote no se corta por día»', () => {
-  dicePr(/no se corta por día/);
+  /* La frase estaba en el tablero, que salió de esta pantalla. La regla sigue
+     valiendo y se sigue viendo acá: el número de cada ZONA es lo que lleva ese
+     destino en los lotes elegidos, no en el día. */
+  dicePr(/no en el día/);
   // Si lo cortara, lo que entró el martes y se procesa el jueves daría «de más»
   // todos los días.
   const tab = cuerpoServicio('export function tableroProceso(');
@@ -1321,14 +1337,16 @@ test('MANUAL PR: «el volcado del lote no se corta por día»', () => {
   assert.ok(!/gal_volcados[\s\S]{0,200}fecha = \?/.test(tab), 'el tablero corta el volcado por día');
 });
 
-test('MANUAL PR: «el stock no es una tabla aparte»', () => {
-  dicePr(/No es una tabla aparte/);
-  dicePr(/corregir una carga de la semana pasada lo arregla solo/);
-  const st = cuerpoServicio('export function stockGalpon(');
-  assert.match(st, /FROM gal_procesos WHERE eliminado_en IS NULL/);
+test('MANUAL ST: «el stock no es una tabla aparte»', () => {
+  // Se mudó del manual de Proceso al de Stock con la pantalla (V1145).
+  const st = manualDe('galpon-stock');
+  assert.match(st, /No es una tabla aparte/);
+  assert.match(st, /corregir una carga de la semana pasada lo arregla solo/);
+  const sg = cuerpoServicio('export function stockGalpon(');
+  assert.match(sg, /FROM gal_procesos WHERE eliminado_en IS NULL/);
   assert.ok(!/gal_stock|gal_saldos/.test(SERV + DDL), 'apareció una tabla de saldos');
   // Y las salidas ya restan, para el día que existan.
-  assert.match(st, /CASE WHEN tipo = 'ingreso' THEN kilos ELSE -kilos END/);
+  assert.match(sg, /CASE WHEN tipo = 'ingreso' THEN kilos ELSE -kilos END/);
 });
 
 test('MANUAL PR: «el cero de más tiene forma de gramos»', () => {
@@ -1628,18 +1646,20 @@ test('«todos los que están en la tolva» son los que TIENEN pendiente', () => 
   // Marcar todos los que alguna vez se volcaron metería en el reparto de hoy un
   // lote cerrado hace un mes, y esos kilos se le restarían a su rinde.
   const fn = JS_PR.slice(JS_PR.indexOf('function galPrTodosLosLotes('),
-                         JS_PR.indexOf('function galPrPintarTablero('));
+                         JS_PR.indexOf('function galPrPintarZonas('));
   assert.match(fn, /l\.sin_procesar > 0/);
 });
 
-test('MANUAL PR: «se reparte a prorrata, y se ve ANTES de cargar»', () => {
-  dicePr(/reparte a prorrata de lo que le queda/);
-  dicePr(/El cartel naranja lo muestra <b>antes<\/b> de cargar/);
-  assert.match(JS_PR, /function galPrCartelReparto\(\)\{/);
-  assert.match(JS_PR, /if \(GPR\.lotes\.length < 2\) return '';/);
-  assert.match(JS_PR, /Mezcla de ' \+ ls\.length \+ ' lotes/);
-  // Y el cartel usa el MISMO criterio que el servidor: lo que queda sin procesar.
-  assert.match(JS_PR, /l\.sin_procesar > 0 \? l\.sin_procesar : 0/);
+test('MANUAL PR: «se reparte a prorrata», y el cartel de los porcentajes SALIÓ', () => {
+  /* El reparto sigue pasando igual en el servidor; lo que salió de la pantalla es el
+     cartel que lo anunciaba con tres porcentajes (V1145). Andy: «eso es análisis».
+     El operador no decide el reparto, así que leerlo antes de apretar no cambia nada
+     — y el manual lo sigue diciendo, que es donde hace falta. */
+  dicePr(/reparte a prorrata<\/b> de lo que le queda/);
+  dicePr(/es una estimación, no una medición|Es una estimación, no una medición/);
+  assert.ok(!/galPrCartelReparto/.test(JS_PR), 'el cartel volvió a la pantalla');
+  assert.ok(!/Mezcla de /.test(JS_PR), 'el cartel volvió a la pantalla');
+  // Y el criterio del servidor no se tocó: lo que queda sin procesar, y nunca negativo.
   assert.match(cuerpoServicio('export function pesosDelReparto('),
     /Number\(x\) > 0 \? Number\(x\) : 0/);
 });
@@ -1771,67 +1791,43 @@ test('MANUAL AC: «los días sin procesar no dibujan columna»', () => {
   assert.match(JS_AC, /x\.rinde == null \? ''/);
 });
 
-test('MANUAL PR: «el stock dice desde cuándo»', () => {
-  dicePr(/4\.000 kg de ayer y 4\.000 kg de hace tres '\s*\+\s*'semanas|4\.000 kg de ayer/);
+// ── LO QUE HAY GUARDADO SE MUDÓ A 🚚 STOCK Y DESPACHOS (V1145) ────────────
+// Andy, 5/11/2026: «eso es análisis; la parte de proceso tiene que ser bien
+// operativa». Los tests de abajo miraban el bloque de stock DENTRO de Proceso.
+// Lo que seguía siendo cierto se mudó con la pantalla; lo demás ya lo prueba
+// test/galpon_stock_contrato.test.mjs, que corre la pantalla de verdad contra
+// el router: el granel en kilos, los lotes plegados, las bandas por destino.
+test('EL BLOQUE DE STOCK YA NO ESTÁ EN LA PANTALLA DE CARGA', () => {
+  /* Ni el marcado, ni el dibujo, ni la consulta. Dejar el servidor mandándolo
+     eran tres agregados sobre toda gal_procesos por cada caja que se tipea. */
+  const sec = bloqueHtml('<div class="sec sg-mod" id="sec-galpon-proceso">');
+  for (const id of ['gpr-stock', 'gpr-stock-prod', 'gpr-stock-lote', 'gpr-tablero']) {
+    assert.ok(!sec.includes('id="' + id + '"'), 'quedó ' + id + ' en la pantalla');
+  }
+  for (const f of ['galPrPintarStock', 'galPrPintarStockLote', 'galPrPintarTablero',
+                   'galPrAntiguedad', 'galPrBultos']) {
+    assert.ok(!JS_PR.includes(f), 'quedó ' + f + ' en el bloque de proceso');
+  }
+  for (const k of ['stock:', 'stock_lotes:', 'stock_productos:']) {
+    const i = RUTA.indexOf("router.get('/procesos'");
+    const j = RUTA.indexOf("router.get('/procesos/", i + 1);
+    assert.ok(!RUTA.slice(i, j > 0 ? j : i + 2500).includes(k),
+      'la ruta /procesos sigue mandando ' + k);
+  }
+});
+
+test('y la ANTIGÜEDAD se mudó, no se tiró', () => {
+  /* «4.000 kg de ayer y 4.000 kg de hace tres semanas se escriben igual y no son
+     lo mismo». El servidor manda el dato desde siempre; borrar el único lugar que
+     lo dibujaba habría sido perder la señal, no limpiarla. */
+  const st = manualDe('galpon-stock');
+  assert.match(st, /4\.000 kg de ayer/);
+  assert.match(st, /No se deduce del/);
   assert.match(cuerpoServicio('export function stockGalpon('), /MIN\(fecha\) AS desde/);
-  assert.match(JS_PR, /function galPrAntiguedad\(desde\)\{/);
-  assert.match(JS_PR, /'hace ' \+ dias \+ ' días'/);
-  // Y SE USA en la tarjeta: tenerla escrita y no llamarla pasaba el test igual.
-  assert.match(JS_PR, /galPrEsc\(galPrAntiguedad\(d\.desde\)\)/);
-  assert.match(JS_PR, /galPrAntiguedad\(x\.desde\)/);
-});
-
-test('MANUAL PR: «de qué lote es lo guardado es OTRA pregunta»', () => {
-  dicePr(/No se deduce del '\s*\+\s*'de arriba|No se deduce del/);
-  assert.match(SERV, /export function stockPorLote\(db\)/);
-  assert.match(JS_PR, /function galPrPintarStockLote\(\)\{/);
-  assert.match(RUTA, /stock_lotes: stockPorLote\(db\)/);
-});
-
-test('MANUAL PR: «hoy no sale nada, pero la tabla ya sabe restar»', () => {
-  dicePr(/ya sabe restar salidas/);
-  assert.match(cuerpoServicio('export function stockPorLote('),
-    /CASE WHEN tipo = 'ingreso' THEN kilos ELSE -kilos END/);
-  // Y se dice que cámara y playón todavía no son dos lugares distintos, en vez de
-  // dejar creer que lo son.
-  dicePr(/separar <b>cámara<\/b> de <b>playón<\/b>/);
-});
-
-test('el número grande del stock está arriba de todo', () => {
-  // Lo que se viene a preguntar es «cuánto hay», y eso no se contesta con tres
-  // tarjetas que hay que sumar de cabeza.
-  assert.match(JS_PR, /bultos guardados · ' \+ galPrNum\(st\.kilos\)/);
-  assert.match(PANEL, /#sec-galpon-proceso \.gpr-tot b\{font-size:34px/);
-  assert.match(PANEL, /#sec-galpon-proceso \.gpr-sd \.hero\{font-size:30px/);
-});
-
-test('EL STOCK SE CUENTA EN BULTOS, no en kilos', () => {
-  // Andy, 31/10/2026: «los stock van en cajas porque necesitamos saber qué cargar.
-  // No me interesa ahí verlo en kilos». Es la única pantalla del galpón donde el
-  // número grande no es el kilo — porque la pregunta es otra: cuántas cajas suben
-  // al camión.
-  dicePr(/El stock va en BULTOS, no en kilos/);
-  assert.match(JS_PR, /function galPrBultos\(x\)\{/);
-  assert.match(JS_PR, /\(b == null \? 'kg' : 'bultos'\)/);
-  assert.match(JS_PR, /bultos guardados/);
-});
-
-test('lo que está A GRANEL no inventa un bulto', () => {
-  // Inventarle «1 bulto» a un bin a granel sería un número que alguien va a usar
-  // para cargar un camión.
-  assert.match(JS_PR, /x && x\.bultos > 0 \? galPrNum\(x\.bultos, 0\) : null/);
-  assert.match(JS_PR, /b == null \? 'a granel'/);
-});
-
-test('LA BARRA DEL STOCK SE REPARTE POR KILOS, no por bultos', () => {
-  // Una caja de 7 kg y un bin de 300 ocupan lo mismo contados por bulto, y la
-  // proporción saldría al revés de lo que hay. El bulto es para cargar; el kilo
-  // es para comparar.
-  const pin = JS_PR.slice(JS_PR.indexOf('function galPrPintarStock(){'),
-                          JS_PR.indexOf('function galPrVerStockLote('));
-  assert.match(pin, /d\.kilos \/ st\.kilos/);
-  assert.ok(!/d\.bultos \/ \w+\.bultos/.test(sinComentarios(pin)),
-    'la barra se reparte por bultos: la proporción sale al revés');
+  assert.match(JS_ST, /function galStAntiguedad\(desde\)\{/);
+  assert.match(JS_ST, /'hace ' \+ dias \+ ' días'/);
+  // Y SE USA en la baldosa: tenerla escrita y no llamarla pasaba el test igual.
+  assert.match(JS_ST, /galStEsc\(galStAntiguedad\(d\.desde\)\)/);
 });
 
 test('MANUAL AC: «cómo viene rindiendo la fruta» va PRIMERO y el lote PLEGADO', () => {
@@ -1850,9 +1846,18 @@ test('MANUAL AC: «cómo viene rindiendo la fruta» va PRIMERO y el lote PLEGADO
   assert.ok(i > 0 && j > i, 'el titular se pinta después de los gráficos');
 });
 
-test('el stock por lote también arranca plegado', () => {
-  assert.match(JS_PR, /var GPR_VERLOTES = false;/);
-  assert.match(JS_PR, /if \(!GPR_VERLOTES\)\{ el\.innerHTML = cab; return; \}/);
+test('el stock por lote también arranca plegado, en la pantalla de Stock', () => {
+  /* Andy, 31/10/2026: «si me quiero meter a analizar algo del lote entro y me fijo».
+     Se mudó con la pantalla (V1145) y cambió el mecanismo: en Proceso era una
+     variable y un botón; en Stock cada baldosa se despliega sola. Lo que no cambia
+     es que arranque CERRADA — se mira con CSS, que es quien decide si se ve. */
+  assert.match(PANEL, /#sec-galpon-stock \.gst-lot\{max-height:0;overflow:hidden/,
+    'el detalle por lote arranca desplegado');
+  assert.match(PANEL, /#sec-galpon-stock \.gst-lot\.on\{max-height:/);
+  assert.match(JS_ST, /function galStPlegar\(i\)\{/);
+  assert.match(JS_ST, /el\.classList\.toggle\('on'\)/);
+  // Y la baldosa tiene con qué abrirla: sin el onclick el detalle no sale nunca.
+  assert.match(JS_ST, /onclick="galStPlegar\(' \+ i \+ '\)"/);
 });
 
 test('EL RINDE GRANDE ES SOBRE LO VOLCADO, y el reparto sobre lo procesado', () => {
@@ -1871,11 +1876,20 @@ test('LOS COLORES DE LOS GRÁFICOS SON LOS MISMOS EN TODAS LAS PANTALLAS', () =>
   // descarte de la otra — y eso no se nota hasta que alguien decide algo.
   // Las DOS veces: la barra de arriba y la tarjeta. Con un match suelto, cambiar una
   // sola dejaba media pantalla con la paleta vieja y el test en verde.
-  assert.equal((JS_PR.match(/GAC_COL\[d\.clave\] \|\| d\.color/g) || []).length, 2,
-    'alguna parte del stock dejó de usar la paleta común');
-  assert.match(JS_PR, /tr\(.comercial.\)/);
-  assert.equal((PANEL.match(/var GAC_COL = \{/g) || []).length, 1,
-    'hay más de una definición de la paleta');
+  /* Son DOS: GAC_COL en el acumulado y GST_COL en el stock. Que tengan los mismos
+     valores es la regla, y hasta la V1145 no la miraba nadie: el test comparaba el
+     stock que vivía adentro de Proceso contra GAC_COL, y ese bloque ya no existe. */
+  const paleta = (v) => {
+    const m = new RegExp('var ' + v + ' = (\\{[^}]*\\})').exec(PANEL);
+    assert.ok(m, 'no está la paleta ' + v);
+    return m[1].replace(/\s/g, '');
+  };
+  assert.equal(paleta('GST_COL'), paleta('GAC_COL'),
+    'el stock y el acumulado pintan los destinos de colores distintos');
+  for (const v of ['GAC_COL', 'GST_COL']) {
+    assert.equal((PANEL.match(new RegExp('var ' + v + ' = \\{', 'g')) || []).length, 1,
+      'hay más de una definición de ' + v);
+  }
 });
 
 // ══════════════════════════════════════════════════════════════════════════
