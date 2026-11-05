@@ -30,7 +30,9 @@ import {
   lotesConDatos, guardarDatosDeLote, variedadATodos,
   palletAbierto, abrirPallet, contenidoDelPallet, cerrarPallet, reabrirPallet,
   proximoNumero,
-  disponibleParaDespacho, despachos, itemsDelDespacho, abrirDespacho, editarDespacho,
+  pisoParaDespacho, palletsParaDespacho, unidadesDelDespacho,
+  agregarPalletAlDespacho, sacarPalletDelDespacho,
+  despachos, itemsDelDespacho, abrirDespacho, editarDespacho,
   stockPorPresentacion, guardarIcono, borrarIcono, rutaDelIcono,
   procesosDelRango,
   stockParaArmar, stockPorArticulo, palletsArmados, abrirPalletArmado, moverAlPallet,
@@ -1172,9 +1174,14 @@ router.get('/stock', (req, res) => {
       presentaciones: stockPorPresentacion(db, { destino: req.query.destino }),
       productos: stockPorProducto(db),
       lotes: stockPorLote(db),
-      disponible: disponibleParaDespacho(db, { destino: req.query.destino }),
+      /* LAS DOS MANERAS DE CARGAR UN CAMIÓN, por separado. «piso» es lo suelto y lo
+         que está en un pallet abierto; «pallets» son los cerrados, que van enteros.
+         Antes había una sola lista que mezclaba las dos cosas, y por eso se podía
+         pedir una cantidad que terminaba partiendo un pallet armado. */
+      piso: pisoParaDespacho(db, { destino: req.query.destino }),
+      pallets: palletsParaDespacho(db, { destino: req.query.destino }),
       despachos: despachos(db, { limite: 50 }).map((x) => Object.assign({}, x,
-        { items: itemsDelDespacho(db, x.id) })),
+        { items: itemsDelDespacho(db, x.id), unidades: unidadesDelDespacho(db, x.id) })),
     });
   } catch (e) {
     console.error('[GALPON] GET /stock:', e.message);
@@ -1187,7 +1194,7 @@ router.get('/despachos', (req, res) => {
     const l = despachos(db, { estado: req.query.estado, desde: req.query.desde,
                               hasta: req.query.hasta, limite: req.query.limite });
     res.json({ ok: true, despachos: l.map((x) => Object.assign({}, x,
-      { items: itemsDelDespacho(db, x.id) })) });
+      { items: itemsDelDespacho(db, x.id), unidades: unidadesDelDespacho(db, x.id) })) });
   } catch (e) {
     console.error('[GALPON] GET /despachos:', e.message);
     res.status(500).json({ ok: false, error: e.message });
@@ -1238,6 +1245,33 @@ router.delete('/despachos/items/:procesoId', (req, res) => {
     res.json(r);
   } catch (e) {
     console.error('[GALPON] DELETE /despachos/items:', e.message);
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+/* UN PALLET ENTERO. Es una ruta propia y no un item con una cantidad: la cantidad es
+   lo que tiene adentro y no hay nada que elegir. Y así exigirNivel la reconoce por
+   la URL, como el resto del repo. */
+router.post('/despachos/:id/pallets', (req, res) => {
+  try {
+    const u = req._user || {};
+    const r = agregarPalletAlDespacho(db, req.params.id, (req.body || {}).pallet_id,
+      Object.assign({}, req.body || {}, { usuario_id: u.id, usuario: u.nombre }));
+    if (!r.ok) return res.status(400).json({ ok: false, error: r.motivo, en_pallet: r.en_pallet });
+    res.json(r);
+  } catch (e) {
+    console.error('[GALPON] POST /despachos/:id/pallets:', e.message);
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+router.delete('/despachos/:id/pallets/:palletId', (req, res) => {
+  try {
+    const r = sacarPalletDelDespacho(db, req.params.id, req.params.palletId);
+    if (!r.ok) return res.status(400).json({ ok: false, error: r.motivo });
+    res.json(r);
+  } catch (e) {
+    console.error('[GALPON] DELETE /despachos/:id/pallets:', e.message);
     res.status(500).json({ ok: false, error: e.message });
   }
 });

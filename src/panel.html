@@ -8065,11 +8065,32 @@ if ('serviceWorker' in navigator) {
           <input type="text" id="gal-dsp-obs" placeholder="Lo que haga falta aclarar"></div>
       </div>
 
-      <!-- LO QUE SE CARGA. Se elige del stock que HAY: el selector lista lo disponible y
-           no deja tipear un lote que no tiene nada, que es la única validación del
-           galpón que frena (la fruta todavía está en la cámara). -->
+      <!-- LO QUE SE CARGA, POR LAS DOS PUERTAS QUE HAY EN EL PLAYÓN ──────────────
+           Andy, 5/11/2026: «tenés que tener la opción de cargar del "piso" o pallets.
+           Pero una vez que está armado el pallet no puede cargarse sólo una parte».
+
+           Un pallet cerrado está enzunchado y con el tarjetón pegado: sacarle 60 de
+           100 obliga a romperlo y manda al camión una etiqueta que miente. Por eso el
+           pallet no tiene casillero de cantidad — va lo que tiene adentro.
+
+           Los dos selectores salen del STOCK y no de un catálogo: no se puede tipear
+           un lote que no tiene nada, que es la única validación del galpón que frena
+           (la fruta todavía está en la cámara, no en la tolva). -->
       <div class="sgr-card" id="gal-dsp-cargar" style="margin-top:12px">
-        <div style="font-weight:600;font-size:13px;margin-bottom:8px">Cargar del stock</div>
+        <div style="font-weight:600;font-size:13px;margin-bottom:8px">📦 Un pallet entero</div>
+        <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end">
+          <div style="flex:1 1 320px;min-width:0"><label>Cuál</label>
+            <select id="gal-dsp-pal" onchange="galDspPalPick()"></select></div>
+          <button class="btn bp bs" style="flex:0 0 auto"
+            onclick="galDspAgregarPallet()">Agregar pallet</button>
+        </div>
+        <div id="gal-dsp-palinfo" style="font-size:11px;color:var(--mut);margin-top:6px"></div>
+
+        <div style="border-top:1px solid var(--bor);margin:14px 0 10px"></div>
+
+        <div style="font-weight:600;font-size:13px;margin-bottom:8px">🧺 Del piso
+          <span style="font-weight:400;color:var(--mut)">— lo suelto y lo que está en un
+          pallet todavía abierto</span></div>
         <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end">
           <div style="flex:1 1 300px;min-width:0"><label>Qué</label>
             <select id="gal-dsp-item" onchange="galDspItemPick()"></select></div>
@@ -8079,6 +8100,10 @@ if ('serviceWorker' in navigator) {
           <button class="btn bp bs" style="flex:0 0 auto" onclick="galDspAgregar()">Agregar</button>
         </div>
         <div id="gal-dsp-disp" style="font-size:11px;color:var(--mut);margin-top:6px"></div>
+        <div style="font-size:11px;color:var(--mut);margin-top:8px">Si de un pallet
+          cerrado hace falta llevar sólo una parte, se lo <b>reabre</b>, se le sacan las
+          cajas —que vuelven al piso— y se lo cierra de nuevo. Queda el pallet con lo
+          que quedó y el tarjetón reimpreso diciendo la verdad.</div>
       </div>
 
       <div id="gal-dsp-items" style="margin-top:12px"></div>
@@ -29619,10 +29644,45 @@ SG_MANUAL['galpon-stock'] = { titulo: 'Stock y Despachos', html:
 
   + '<h3>Armar un despacho</h3>'
   + '<p>El botón <b>+ Armar despacho</b> abre uno nuevo en <b>borrador</b>. Ahí se pone a '
-  + 'dónde va, quién lleva y la patente, y se van cargando líneas del selector: sólo '
-  + 'aparece lo que hay en stock, así que no se puede tipear un lote que no tiene nada. '
+  + 'dónde va, quién lleva y la patente, y se carga lo que se lleva. Los dos selectores '
+  + 'salen del <b>stock</b>, así que no se puede tipear un lote que no tiene nada. '
   + 'Un borrador se puede dejar a medias y seguir después: el botón de su renglón dice '
   + '<i>Seguir cargando</i>.</p>'
+
+  + '<h3>📦 Un pallet entero, o 🧺 del piso <span class="ver">V1143</span></h3>'
+  + '<p>Andy, 5/11/2026: <i>«en los despachos tenés que tener la opción de cargar del '
+  + '"piso" o pallets. Pero una vez que está armado el pallet no puede cargarse sólo una '
+  + 'parte del pallet»</i>.</p>'
+  + '<ul>'
+  + '<li><b>Un pallet entero.</b> Se elige por su <b>número</b> y <b>no tiene casillero '
+  + 'de cantidad</b>: va lo que tiene adentro. Antes de agregarlo se ve qué lleva, que es '
+  + 'la única oportunidad de darse cuenta de que se eligió el equivocado.</li>'
+  + '<li><b>Del piso</b> es lo suelto <i>y también lo que está en un pallet todavía '
+  + 'abierto</i> —el del día mientras se llena—: eso no tiene número ni tarjetón y nadie '
+  + 'lo enzunchó, así que todavía son cajas apiladas. Ahí sí se pide la cantidad.</li>'
+  + '<li>En la lista de pallets <b>sólo salen los cerrados</b>. Cerrar un pallet es un '
+  + 'clic y hace falta igual para imprimir el tarjetón, que es con lo que se controla el '
+  + 'camión.</li>'
+  + '</ul>'
+  + '<div class="ojo"><b>Por qué entero.</b> Un pallet cerrado está enzunchado y con el '
+  + 'tarjetón pegado. Sacarle 60 de 100 obliga a romperlo en el playón y manda al camión '
+  + 'una etiqueta que dice 100 arriba de un pallet que lleva 40. Hasta la V1143 esto '
+  + 'pasaba <b>sin avisar</b>: se pedían 97 cajas, el sistema las juntaba de donde '
+  + 'hubiera y partía el pallet que hiciera falta. En el papel cerraba.</div>'
+  + '<p><b>Y si de verdad hay que partirlo, se lo parte de verdad:</b> se <b>reabre</b> el '
+  + 'pallet, se le sacan las cajas —que vuelven al piso— y se lo cierra de nuevo. Queda el '
+  + 'pallet con lo que quedó, el piso con lo que salió, y el tarjetón reimpreso diciendo '
+  + 'la verdad. La regla no es una pared: es que partir un pallet sea un <b>acto</b> y no '
+  + 'el efecto secundario de cargar un camión.</p>'
+  + '<p>Por eso tampoco se puede <b>reabrir</b> un pallet que ya está en un despacho, ni '
+  + 'sacar <b>un renglón suelto</b> de un pallet mixto: el pallet se saca entero, con su '
+  + 'única <b>×</b>.</p>'
+
+  + '<h3>Lo que lleva el camión <span class="ver">V1143</span></h3>'
+  + '<p>La tabla del despacho muestra un renglón por <b>unidad</b> —un pallet o una pila '
+  + 'de cajas sueltas—, no uno por artículo. Tres pallets mixtos daban nueve renglones, y '
+  + 'el que va a cargar no sube nueve cosas: sube <b>tres pallets</b>. El pie dice cuántos '
+  + 'pallets y cuánto del piso.</p>'
   + '<p><b>A dónde va es texto libre</b> a propósito. El mismo día se despacha a San '
   + 'Gerónimo y a la feria, y un selector de clientes ataría este módulo a una operativa '
   + 'que todavía no está al 100%.</p>'
@@ -62089,7 +62149,7 @@ function galDibHtml(p, px){
    cargar. No me interesa ahí verlo en kilos». Las cajas van grandes; los kilos al lado,
    chicos, porque la liquidación sí se hace por kilo.
    ════════════════════════════════════════════════════════════════════════════════════ */
-var GST = { datos:null, desp:null, disp:null, abierto:null,
+var GST = { datos:null, desp:null, piso:null, pallets:null, abierto:null,
             arm:null, armp:null, armsel:null, armops:null, armhoy:null };
 var GST_COL = { comercial:'#15803d', verde:'#f59e0b', descarte:'#b91c1c' };
 
@@ -62135,7 +62195,8 @@ async function galStCargar(){
     var r = await fetch('/api/galpon/stock', { credentials:'same-origin' });
     var j = await r.json();
     if(!j.ok) throw new Error(j.error||'No se pudo leer el stock');
-    GST.datos = j; GST.disp = j.disponible||[]; GST.desp = j.despachos||[];
+    GST.datos = j; GST.piso = j.piso||[]; GST.pallets = j.pallets||[];
+    GST.desp = j.despachos||[];
     galOffCartel(j, 'gst-aviso');
     galStPintar();
     galStAviso('');
@@ -62308,25 +62369,56 @@ function galDspPintar(){
         +' cajas, '+galStNum(x.kilos,0)+' kg.';
   }
 
-  /* El selector de qué cargar sale del STOCK, no de un catálogo: no se puede tipear un
+  /* EL SELECTOR DE PALLETS. Sólo los CERRADOS: uno abierto no tiene número ni
+     tarjetón, y el camión se controla leyendo el tarjetón. El número va primero
+     porque es lo que está escrito en el pallet que alguien tiene enfrente. */
+  var sp = document.getElementById('gal-dsp-pal');
+  if(sp){
+    var lp = GST.pallets||[];
+    sp.innerHTML = (lp.length ? '<option value="">— Elegir un pallet —</option>'
+                              : '<option value="">— No hay pallets cerrados con stock —</option>')
+      + lp.map(function(f,i){
+          return '<option value="'+i+'">'+galStEsc(f.numero||('#'+f.id))
+            + ' — '+galStNum(f.bultos,0)+' cj / '+galStNum(f.kilos,0)+' kg'
+            + (f.articulos>1?(' · '+f.articulos+' artículos'):'')
+            + (f.parcial?' · PARCIAL':'')+'</option>';
+        }).join('');
+  }
+
+  /* El selector del piso sale del STOCK, no de un catálogo: no se puede tipear un
      lote que no tiene nada. */
   var sel = document.getElementById('gal-dsp-item');
   if(sel){
-    sel.innerHTML = '<option value="">— Elegir del stock —</option>'
-      + (GST.disp||[]).map(function(f,i){
+    sel.innerHTML = '<option value="">— Elegir del piso —</option>'
+      + (GST.piso||[]).map(function(f,i){
           return '<option value="'+i+'">'+galStEsc(f.lote_nombre||('Lote '+f.lote_id))
             + ' · '+galStEsc(f.destino)+' · '+galStEsc(f.presentacion||'granel')
             + (f.calibre?(' · '+galStEsc(f.calibre)):'')
             + ' — '+galStNum(f.bultos,0)+' cj / '+galStNum(f.kilos,0)+' kg</option>';
         }).join('');
   }
+  galDspPalPick();
   galDspItemPick();
   galDspItems();
 }
 
+function galDspPalPick(){
+  var e = document.getElementById('gal-dsp-pal'); if(!e) return;
+  var f = e.value===''? null : (GST.pallets||[])[Number(e.value)];
+  var d = document.getElementById('gal-dsp-palinfo'); if(!d) return;
+  /* Qué tiene adentro, ANTES de agregarlo: es la única manera de darse cuenta de que
+     se eligió el pallet equivocado, porque después va entero. */
+  d.innerHTML = f
+    ? ('Lleva <b>'+galStNum(f.bultos,0)+'</b> cajas y <b>'+galStNum(f.kilos,0)+'</b> kg: '
+       + (f.contenido||[]).map(function(c){
+           return galStEsc(c.producto||'')+(c.calibre?(' '+galStEsc(c.calibre)):'')
+             + ' ('+galStNum(c.bultos,0)+' cj)'; }).join(' · '))
+    : 'Va entero: lo que tiene adentro. No hay cantidad que elegir.';
+}
+
 function galDspItemPick(){
   var i = document.getElementById('gal-dsp-item').value;
-  var f = i===''? null : (GST.disp||[])[Number(i)];
+  var f = i===''? null : (GST.piso||[])[Number(i)];
   var granel = f && !f.bultos;
   document.getElementById('gal-dsp-cl').textContent = granel ? 'Kilos' : 'Cajas';
   document.getElementById('gal-dsp-disp').textContent = f
@@ -62338,8 +62430,8 @@ function galDspItemPick(){
 async function galDspAgregar(){
   var x = GST.abierto; if(!x) return;
   var i = document.getElementById('gal-dsp-item').value;
-  var f = i===''? null : (GST.disp||[])[Number(i)];
-  if(!f) return galStAviso('Elegí qué cargar');
+  var f = i===''? null : (GST.piso||[])[Number(i)];
+  if(!f) return galStAviso('Elegí qué cargar del piso');
   var c = Number(document.getElementById('gal-dsp-cant').value)||0;
   if(!(c>0)) return galStAviso('Poné la cantidad');
   var granel = !f.bultos;
@@ -62351,41 +62443,96 @@ async function galDspAgregar(){
         bultos: granel?null:c, kilos: granel?c:null }) });
     var j = await r.json();
     if(!j.ok) throw new Error(j.error||'No se pudo agregar');
-    GST.abierto = j.despacho || x;
     document.getElementById('gal-dsp-cant').value='';
-    await galStCargar();
-    GST.abierto = (GST.desp||[]).filter(function(y){ return y.id===x.id; })[0] || GST.abierto;
-    galDspPintar();
+    await galDspRefrescar(x.id);
     galStAviso('');
   }catch(e){ galStAviso(e.message); }
 }
 
+/* UN PALLET ENTERO. Sin cantidad: la cantidad es lo que tiene adentro. */
+async function galDspAgregarPallet(){
+  var x = GST.abierto; if(!x) return;
+  var e = document.getElementById('gal-dsp-pal');
+  var f = (e && e.value!=='') ? (GST.pallets||[])[Number(e.value)] : null;
+  if(!f) return galStAviso('Elegí qué pallet subir');
+  try{
+    var r = await fetch('/api/galpon/despachos/'+x.id+'/pallets', { method:'POST',
+      headers:{'Content-Type':'application/json'}, credentials:'same-origin',
+      body: JSON.stringify({ pallet_id: f.id }) });
+    var j = await r.json();
+    if(!j.ok) throw new Error(j.error||'No se pudo agregar el pallet');
+    await galDspRefrescar(x.id);
+    galStAviso('');
+  }catch(err){ galStAviso(err.message); }
+}
+
+async function galDspSacarPallet(palletId){
+  var x = GST.abierto; if(!x) return;
+  try{
+    var r = await fetch('/api/galpon/despachos/'+x.id+'/pallets/'+palletId,
+      { method:'DELETE', credentials:'same-origin' });
+    var j = await r.json();
+    if(!j.ok) throw new Error(j.error||'No se pudo sacar el pallet');
+    await galDspRefrescar(x.id);
+  }catch(err){ galStAviso(err.message); }
+}
+
+/* VOLVER A LEER Y QUEDARSE EN LA MISMA VENTANA. Estaba escrito tres veces con tres
+   variantes; la cuarta copia es la que se olvida de alguno de los pasos. */
+async function galDspRefrescar(id){
+  await galStCargar();
+  GST.abierto = (GST.desp||[]).filter(function(y){ return y.id===id; })[0] || null;
+  if(GST.abierto) galDspPintar(); else galDspCerrar();
+}
+
+/* LO QUE LLEVA EL CAMIÓN, COMO SE CARGA: un renglón por UNIDAD —un pallet o una pila
+   de cajas sueltas— y no uno por artículo. Un despacho de tres pallets mixtos daba
+   nueve renglones, y el que va a cargar no sube nueve cosas: sube tres pallets.
+
+   Y el pallet trae UNA sola ×, que lo saca entero. Una × por renglón dejaría medio
+   pallet adentro del camión, que es justo lo que la regla evita. */
 function galDspItems(){
   var x = GST.abierto; if(!x) return;
-  var it = x.items||[];
+  var un = x.unidades||[];
   var brr = x.estado==='borrador';
-  document.getElementById('gal-dsp-items').innerHTML = it.length
+  var tb = un.reduce(function(t,f){ return t+(Number(f.bultos)||0); },0);
+  var tk = un.reduce(function(t,f){ return t+(Number(f.kilos)||0); },0);
+  var np = un.filter(function(f){ return f.tipo==='pallet'; }).length;
+  document.getElementById('gal-dsp-items').innerHTML = un.length
     ? '<table class="pa-tbl gst-tbl" style="width:100%;table-layout:fixed">'
-      + '<colgroup><col style="width:26%"><col style="width:14%"><col style="width:20%">'
-      + '<col style="width:14%"><col style="width:14%"><col style="width:12%"></colgroup>'
-      + '<thead><tr><th>Lote</th><th>Destino</th><th>Presentación</th>'
+      + '<colgroup><col style="width:22%"><col style="width:42%"><col style="width:13%">'
+      + '<col style="width:13%"><col style="width:10%"></colgroup>'
+      + '<thead><tr><th>Qué sube</th><th>Qué lleva</th>'
       + '<th style="text-align:right">Cajas</th><th style="text-align:right">Kilos</th>'
       + '<th></th></tr></thead><tbody>'
-      + it.map(function(f){
-          return '<tr><td>'+galStEsc(f.lote_nombre||('Lote '+f.lote_id))+'</td>'
-            + '<td>'+galStEsc(f.destino)+'</td>'
-            + '<td>'+galStEsc(f.presentacion||'A granel')
-            + (f.calibre?(' '+galStEsc(f.calibre)):'')+'</td>'
+      + un.map(function(f){
+          var esPal = f.tipo==='pallet';
+          var que = esPal
+            ? '📦 <b>'+galStEsc(f.numero||('#'+f.pallet_id))+'</b>'
+            : '🧺 '+galStEsc(f.lote_nombre||('Lote '+f.lote_id));
+          var det = esPal
+            ? (f.lineas||[]).map(function(l){
+                return galStEsc(l.presentacion||'A granel')
+                  + (l.calibre?(' '+galStEsc(l.calibre)):'')
+                  + ' · '+galStNum(l.bultos,0)+' cj'; }).join(' + ')
+            : (galStEsc(f.destino)+' · '+galStEsc(f.presentacion||'A granel')
+               + (f.calibre?(' '+galStEsc(f.calibre)):''));
+          var saca = esPal ? ('galDspSacarPallet('+f.pallet_id+')')
+                           : ('galDspSacar('+f.id+')');
+          return '<tr><td style="overflow:hidden;text-overflow:ellipsis">'+que+'</td>'
+            + '<td style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'
+            + det+'</td>'
             + '<td style="text-align:right" class="gst-n">'+galStNum(f.bultos,0)+'</td>'
             + '<td style="text-align:right">'+galStNum(f.kilos,0)+'</td>'
-            + '<td>'+(brr?('<button class="btn bo bs" onclick="galDspSacar('+f.id+')">×</button>'):'')
-            + '</td></tr>';
+            + '<td>'+(brr?('<button class="btn bo bs" title="Sacar del despacho"'
+              + ' onclick="'+saca+'">×</button>'):'')+'</td></tr>';
         }).join('')
-      + '</tbody><tfoot><tr style="font-weight:700"><td colspan="3">Total</td>'
-      + '<td style="text-align:right">'
-      + galStNum(it.reduce(function(t,f){ return t+(Number(f.bultos)||0); },0),0)+'</td>'
-      + '<td style="text-align:right">'
-      + galStNum(it.reduce(function(t,f){ return t+(Number(f.kilos)||0); },0),0)+'</td>'
+      + '</tbody><tfoot><tr style="font-weight:700"><td>Total</td>'
+      + '<td>'+(np? (np+(np===1?' pallet':' pallets')) : '')
+      + (np && un.length>np ? ' + ' : '')
+      + (un.length>np ? ((un.length-np)+' del piso') : '')+'</td>'
+      + '<td style="text-align:right">'+galStNum(tb,0)+'</td>'
+      + '<td style="text-align:right">'+galStNum(tk,0)+'</td>'
       + '<td></td></tr></tfoot></table>'
     : '<div class="ojo">Todavía no cargaste nada en este despacho.</div>';
 }
@@ -62396,10 +62543,7 @@ async function galDspSacar(id){
       credentials:'same-origin' });
     var j = await r.json();
     if(!j.ok) throw new Error(j.error||'No se pudo sacar');
-    var ab = GST.abierto;
-    await galStCargar();
-    GST.abierto = (GST.desp||[]).filter(function(y){ return y.id===(ab&&ab.id); })[0]||null;
-    if(GST.abierto) galDspPintar(); else galDspCerrar();
+    await galDspRefrescar(GST.abierto && GST.abierto.id);
   }catch(e){ galStAviso(e.message); }
 }
 

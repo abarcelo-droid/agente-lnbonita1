@@ -70,9 +70,17 @@ function base() {
       categoria TEXT, calibre TEXT, variedad TEXT, renspa TEXT, cuartel TEXT,
       bultos REAL, por_bulto REAL, kg_unidad REAL, kilos REAL NOT NULL,
       tipo TEXT NOT NULL DEFAULT 'ingreso', reparto TEXT,
-      repartido INTEGER NOT NULL DEFAULT 0, pallet_id INTEGER, partido_de INTEGER, observacion TEXT,
+      repartido INTEGER NOT NULL DEFAULT 0, pallet_id INTEGER, partido_de INTEGER,
+      despacho_id INTEGER, observacion TEXT,
       estado TEXT NOT NULL DEFAULT 'ok', revision_motivo TEXT, usuario_id INTEGER,
       usuario TEXT, creado_en TEXT, eliminado_en TEXT);
+    -- REABRIR UN PALLET MIRA SI ESTÁ EN UN DESPACHO (V1143): reabrirlo lo devolvería
+    -- al piso y el remito pasaría a llevar cajas sueltas donde decía un pallet, con
+    -- el tarjetón ya impreso. Por eso esta base necesita la tabla aunque el archivo
+    -- no pruebe despachos: la dependencia es de verdad.
+    CREATE TABLE gal_despachos (id INTEGER PRIMARY KEY AUTOINCREMENT, numero TEXT UNIQUE,
+      estado TEXT NOT NULL DEFAULT 'borrador', fecha TEXT NOT NULL, destinatario TEXT,
+      bultos REAL, kilos REAL, eliminado_en TEXT);
   `);
   guardarDatosDeLote(db, { lote_id: 10, renspa: '12.345.6.78901/00',
     variedad: 'Bulida', cuartel: 'C-07' });
