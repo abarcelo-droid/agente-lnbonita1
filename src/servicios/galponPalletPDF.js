@@ -35,6 +35,17 @@ const NUM_TAM = 46;
 const NUM_ANCHO = 150;             // mm; después del logo quedan 221
 const NUM_BASE = M + 24;           // la raya del encabezado va en M+31
 
+/* HASTA DÓNDE LLEGA EL CONTENIDO. Abajo viven la observación (A.alto-M-12 = 188) y
+   el pie con su raya (191). Los 184 dejan los cuatro milímetros de aire que hacen
+   falta para que una cosa no se apoye sobre la otra.
+
+   ── Y ESTÁ ACÁ PORQUE ANTES NO EXISTÍA ─────────────────────────────────────────
+   Las dos filas de cajas medían 24 mm fijos y terminaban en 130: quedaban SESENTA
+   milímetros de hoja en blanco entre el último dato y el pie, casi un tercio de la
+   etiqueta. En una hoja que se lee desde un autoelevador eso no es aire, es tamaño
+   de letra que se está tirando. */
+const PIE_Y = A.alto - M - 16;
+
 const ROJO = [155, 34, 50];        // el bordó de la marca
 const NEGRO = [26, 26, 26];
 const GRIS = [110, 110, 110];
@@ -73,7 +84,13 @@ function chapa(doc, x, y, texto, fondo, tinta, alto, tam) {
   return w;
 }
 
-// Una caja con rótulo chiquito arriba y el dato grande adentro.
+/* Una caja con rótulo chiquito arriba y el dato grande adentro.
+
+   EL TAMAÑO DEL DATO SALE DE LA CAJA, no de un número por campo. Había seis escritos
+   a mano —22, 22, 20, 17, 17, 13— elegidos para que el más largo entrara a lo ancho,
+   y eso ya lo hace medida(): el 13 del RENSPA le bajaba la letra también al CUARTEL,
+   que dice «C-07». Acá se pide lo más grande que la caja aguanta de alto y medida()
+   lo achica si no entra de ancho, que es dato por dato. */
 function caja(doc, x, y, w, h, rotulo, dato, tamDato) {
   doc.setDrawColor(...GRIS_CL);
   doc.setLineWidth(0.4);
@@ -84,7 +101,7 @@ function caja(doc, x, y, w, h, rotulo, dato, tamDato) {
   doc.text(S(rotulo).toUpperCase(), x + 3, y + 5);
   doc.setFont('helvetica', 'bold');
   doc.setTextColor(...NEGRO);
-  const t = medida(doc, S(dato) || '—', w - 6, tamDato || 17, 8);
+  const t = medida(doc, S(dato) || '—', w - 6, tamDato || Math.min(30, h * 0.6), 8);
   doc.text(S(dato) || '—', x + 3, y + 5 + 3 + t * 0.36);
 }
 
@@ -209,17 +226,20 @@ function homogeneo(doc, pallet, linea, qr) {
   if (linea.envase) chapa(doc, x, y, S(linea.envase).toUpperCase(),
     [245, 224, 150], NEGRO, 10, 13);
 
-  // Las seis cajas: lo que se va a buscar de cerca.
+  /* Las seis cajas: lo que se va a buscar de cerca. Bajan HASTA EL PIE en vez de
+     medir 24 mm y dejar el último tercio de la hoja vacío. El alto lo reparte la
+     hoja entre las dos filas, así que mover el pie o los chips no deja un hueco ni
+     mete las cajas abajo de la raya: se recalcula solo. */
   y += 16;
   const w = (anchoTexto - 8) / 3;
-  const h = 24;
-  caja(doc, M + 3, y, w, h, 'Bultos', n0(linea.bultos), 22);
-  caja(doc, M + 3 + w + 4, y, w, h, 'Kg netos', n2(linea.kilos), 22);
-  caja(doc, M + 3 + (w + 4) * 2, y, w, h, 'Lote', linea.lote_nombre, 20);
+  const h = (PIE_Y - y - 4) / 2;
+  caja(doc, M + 3, y, w, h, 'Bultos', n0(linea.bultos));
+  caja(doc, M + 3 + w + 4, y, w, h, 'Kg netos', n2(linea.kilos));
+  caja(doc, M + 3 + (w + 4) * 2, y, w, h, 'Lote', linea.lote_nombre);
   y += h + 4;
-  caja(doc, M + 3, y, w, h, 'Fecha empaque', fechaAr(pallet.fecha_empaque), 17);
-  caja(doc, M + 3 + w + 4, y, w, h, 'Cuartel', linea.cuartel, 17);
-  caja(doc, M + 3 + (w + 4) * 2, y, w, h, 'RENSPA', linea.renspa, 13);
+  caja(doc, M + 3, y, w, h, 'Fecha empaque', fechaAr(pallet.fecha_empaque));
+  caja(doc, M + 3 + w + 4, y, w, h, 'Cuartel', linea.cuartel);
+  caja(doc, M + 3 + (w + 4) * 2, y, w, h, 'RENSPA', linea.renspa);
 
   elQR(doc, qr, pallet.numero, QX, M + 40, QL);
 }
@@ -261,6 +281,15 @@ function mixto(doc, pallet, lineas, qr) {
      completo está en el sistema con el número del pallet. */
   const MAX = 9;
   const muestra = lineas.slice(0, MAX);
+
+  /* EL RENGLÓN CRECE CON LA HOJA, igual que las cajas del modelo homogéneo. Con dos
+     artículos, nueve renglones de 8,5 mm dejaban media etiqueta en blanco y la letra
+     igual de chica que con nueve. El tope de 15 es para que dos artículos no salgan
+     con renglones de cuatro centímetros, que ya no se lee como una tabla. */
+  const libre = PIE_Y - (y + 14) - (lineas.length > MAX ? 7 : 0);
+  const alto = Math.max(8.5, Math.min(15, libre / Math.max(1, muestra.length)));
+  const tamFila = Math.max(9, Math.min(14, alto * 0.85));
+
   for (const l of muestra) {
     const datos = [
       S(l.producto) + (l.variedad ? ' ' + S(l.variedad) : ''),
@@ -269,16 +298,16 @@ function mixto(doc, pallet, lineas, qr) {
     ];
     doc.setDrawColor(...GRIS_CL);
     doc.setLineWidth(0.3);
-    doc.line(M + 3, y + 8.5, M + 3 + anchoTabla, y + 8.5);
+    doc.line(M + 3, y + alto, M + 3 + anchoTabla, y + alto);
     datos.forEach((d, i) => {
       doc.setFont('helvetica', i === 0 || i >= 6 ? 'bold' : 'normal');
       doc.setTextColor(...(i === 5 ? GRIS : NEGRO));
-      const tam = medida(doc, d, cols[i] - 4, i === 5 ? 7.5 : 9, 5.5);
-      void tam;
-      doc.text(d, derecha[i] ? xs[i] + cols[i] - 2 : xs[i] + 2, y + 6,
+      // El RENSPA va un punto más chico: es el dato más largo y el que menos se mira.
+      medida(doc, d, cols[i] - 4, i === 5 ? tamFila * 0.8 : tamFila, 5.5);
+      doc.text(d, derecha[i] ? xs[i] + cols[i] - 2 : xs[i] + 2, y + alto * 0.7,
         derecha[i] ? { align: 'right' } : undefined);
     });
-    y += 8.5;
+    y += alto;
   }
   if (lineas.length > MAX) {
     doc.setFont('helvetica', 'italic');
@@ -289,9 +318,11 @@ function mixto(doc, pallet, lineas, qr) {
     y += 7;
   }
 
-  // El total, en la misma línea que la fecha de empaque: son los dos números que se
-  // controlan contra el remito al cargar.
-  y += 2;
+  /* El total, en la misma línea que la fecha de empaque: son los dos números que se
+     controlan contra el remito al cargar. Y se APOYA EN EL PIE en vez de colgar del
+     último renglón: es el número que se busca, y buscarlo a una altura distinta en
+     cada etiqueta es mirar toda la hoja cada vez. */
+  y = Math.max(y + 2, PIE_Y - 11);
   doc.setDrawColor(...NEGRO);
   doc.setLineWidth(0.8);
   doc.line(M + 3, y, M + 3 + anchoTabla, y);
