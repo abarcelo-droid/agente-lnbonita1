@@ -8366,6 +8366,17 @@ if ('serviceWorker' in navigator) {
       </table>
     </div>
 
+    <!-- A TRAVÉS DE LOS DÍAS. Andy, 4/11/2026: «quiero un lugar que sea transversal
+         a los días». La tabla de arriba es el acuse del día que está elegido arriba;
+         la puerta al período entero va acá abajo, que es donde se la vino a buscar. -->
+    <div class="gal-ay" style="max-width:none;margin:10px 0 0;display:flex;gap:12px;
+         align-items:center;flex-wrap:wrap;justify-content:space-between">
+      <span>Esto es sólo el día elegido arriba. Para ver <b>todos los días juntos</b>
+        —qué se cargó cada uno, con su pallet— está 📈 Acumulado.</span>
+      <button class="btn bo bs" onclick="galPrVerTodosLosDias()">
+        Ver todos los días →</button>
+    </div>
+
     <div id="gpr-pallets"></div>
 
     <h3 class="gpr-t">📦 Lo que hay guardado</h3>
@@ -8633,6 +8644,37 @@ if ('serviceWorker' in navigator) {
       #sec-galpon-acumulado .gac-neg{color:#d62828}
       #sec-galpon-acumulado h3.gac-t{font-size:12px;text-transform:uppercase;
         letter-spacing:.5px;color:var(--mut);margin:22px 0 9px}
+
+      /* ── 📋 TODAS LAS CARGAS, A TRAVÉS DE LOS DÍAS ─────────────────────
+         Seis columnas, todas de largo conocido o recortable: se fijan y no se
+         arrastra nada (CLAUDE.md). La presentación es la única que puede ser
+         larga de verdad, así que se lleva el ancho que sobra. */
+      #sec-galpon-acumulado .gac-ptbl{table-layout:fixed;width:100%;max-width:98vw}
+      #sec-galpon-acumulado .gac-ptbl th,#sec-galpon-acumulado .gac-ptbl td{
+        white-space:nowrap;overflow:hidden;text-overflow:ellipsis;vertical-align:middle}
+      /* El renglón del día: es el que convierte una lista larga en «los procesos de
+         cada día». Sin él son cuatrocientas filas sin ningún corte a la vista. */
+      #sec-galpon-acumulado .gac-pdia td{background:var(--burl);font-weight:600;
+        border-top:2px solid var(--burg);padding-top:9px;padding-bottom:9px}
+      #sec-galpon-acumulado .gac-pdh{display:flex;align-items:baseline;gap:12px;
+        flex-wrap:wrap;justify-content:space-between}
+      #sec-galpon-acumulado .gac-pdf{font-size:14px;color:var(--burd)}
+      #sec-galpon-acumulado .gac-pdn{font-size:12px;font-weight:400;color:var(--mut);
+        font-variant-numeric:tabular-nums}
+      #sec-galpon-acumulado .gac-ppt{display:inline-block;width:9px;height:9px;
+        border-radius:3px;margin-right:6px;vertical-align:middle}
+      #sec-galpon-acumulado .gac-pnum{font-variant-numeric:tabular-nums;text-align:right}
+      #sec-galpon-acumulado .gac-ppal{font-size:11.5px;color:var(--mut)}
+      #sec-galpon-acumulado .gac-ppal b{color:#9b2232;font-variant-numeric:tabular-nums}
+      #sec-galpon-acumulado .gac-pchips{display:flex;gap:7px;flex-wrap:wrap;
+        align-items:center;margin:0 0 10px}
+      #sec-galpon-acumulado .gac-pchip{border:1px solid var(--bor);border-radius:999px;
+        padding:4px 13px;font-size:12px;cursor:pointer;background:var(--sur);
+        color:var(--mut)}
+      #sec-galpon-acumulado .gac-pchip.on{border-color:var(--burg);color:var(--burd);
+        background:var(--burl);font-weight:600}
+      #sec-galpon-acumulado .gac-ptope{border:1px solid var(--warn);border-radius:8px;
+        padding:8px 11px;font-size:12.5px;margin-bottom:10px}
     </style>
 
     <div class="ph">
@@ -8681,6 +8723,13 @@ if ('serviceWorker' in navigator) {
         <tbody id="gac-body"></tbody>
       </table>
     </div>
+
+    <!-- ── 📋 TODAS LAS CARGAS, A TRAVÉS DE LOS DÍAS ────────────────────────────
+         Andy, 4/11/2026: «quiero un lugar que sea transversal a los días, es decir
+         que pueda ver todos los procesos de cada día». Va plegado: lo que no se mira
+         todos los días no ocupa el lugar más caro de la pantalla (CLAUDE.md), y
+         además se pide recién al abrirlo. -->
+    <div id="gac-proc"></div>
   </div>
 
   <div class="sec sg-mod" id="sec-sg-importacion">
@@ -28899,6 +28948,18 @@ SG_MANUAL['galpon-proceso'] = { titulo: 'Galpón · Proceso', html:
   + '<b>enteras</b>. Mostrar sólo el pedazo del lote elegido sería volver al renglón de '
   + '0,74 kg con otro nombre.</p>'
 
+  + '<h3>📅 Un día por vez, y dónde están todos juntos '
+  + '<span class="ver">V1141</span></h3>'
+  + '<p>Esta pantalla está parada en <b>un día</b>, y no es una limitación: es con lo '
+  + 'que se carga. Lo que se tipea entra en el día que dice el almanaque de arriba, '
+  + 'así que un rango acá dejaría sin contestar en cuál de los dos se guarda.</p>'
+  + '<p>«Lo cargado este día» es el <b>acuse</b> de lo que se acaba de hacer. Para ver '
+  + '<b>todos los días juntos</b> —qué se cargó cada uno, con su pallet— está el botón '
+  + '<b>Ver todos los días</b> abajo de esa tabla, que lleva al detalle de '
+  + '<b>📈 Acumulado</b>. Y de allá se vuelve a cualquier día con <b>abrir el '
+  + 'día →</b>, que deja esta pantalla con esa fecha puesta y sin ningún lote '
+  + 'elegido.</p>'
+
   + '<h3>✎ Corregir una carga <span class="ver">V1115</span></h3>'
   + '<p>El lápiz de cada renglón abre la carga y deja cambiar el <b>día</b>, el '
   + '<b>lote</b>, la <b>presentación</b>, la <b>cantidad</b> y la <b>observación</b>.</p>'
@@ -29246,6 +29307,34 @@ SG_MANUAL['galpon-acumulado'] = { titulo: 'Galpón · Acumulado', html:
   + 'renglón de arriba de todo es el total grande.</p>'
   + '<p>Los días en que no se cargó nada <b>no aparecen</b>. Una lista con veinte ceros entre '
   + 'cosecha y cosecha esconde los días que importan.</p>'
+
+  + '<h3>📋 Todas las cargas, día por día <span class="ver">V1141</span></h3>'
+  + '<p>Andy, 4/11/2026: <i>«quiero un lugar que sea transversal a los días, es decir '
+  + 'que pueda ver todos los procesos de cada día»</i>.</p>'
+  + '<p>Abajo de todo, plegado, está el <b>detalle de lo que se procesó</b> en el '
+  + 'período: un renglón por <b>carga</b> —destino, producto, presentación, bultos, '
+  + 'kilos y en qué pallet quedó— agrupado por día, con el total de cada uno.</p>'
+  + '<p>Se pide <b>recién al abrirlo</b>, y usa <b>el mismo período de arriba</b>: los '
+  + 'mismos botones de Todo / Este mes / Últimos 7 días. Un segundo lugar donde poner '
+  + 'las dos fechas son dos lugares que terminan mostrando cosas distintas.</p>'
+  + '<ul>'
+  + '<li>Un renglón es <b>una carga</b>, no un lote. Si la tolva estaba mezclada, los '
+  + 'kilos siguen repartidos por dentro, pero acá se ve lo que se tipeó: los bultos '
+  + 'sólo son ciertos <b>enteros</b>, y nueve cajones entre tres lotes serían 0, 4 y '
+  + '5.</li>'
+  + '<li>Los <b>chips de destino</b> filtran la lista. Los números de la derecha son '
+  + 'los del filtro puesto.</li>'
+  + '<li>Las <b>salidas restan</b>: lo verde que volvió a la tolva salió del stock y no '
+  + 'se cuenta dos veces.</li>'
+  + '<li>Hay un <b>tope de 400 cargas</b> por pedido, y se muestran las más nuevas. '
+  + 'Los totales de arriba cuentan <b>todas</b> igual: un total que contara sólo lo '
+  + 'que se alcanzó a dibujar cambiaría según cuánto se pidió, y nada lo diría.</li>'
+  + '</ul>'
+  + '<div class="ojo"><b>Desde acá no se corrige.</b> Corregir una carga necesita el '
+  + 'lote y la tolva de ese día al lado, y eso lo tiene <b>Galpón · Proceso</b>. Por '
+  + 'eso cada día trae un <b>abrir el día →</b> que lleva allá con el almanaque ya '
+  + 'puesto. Una segunda ventana de edición sería el mismo mecanismo escrito dos '
+  + 'veces, y la segunda es la que se queda atrás.</div>'
 
   + '<h3>🔗 Con qué se vincula <span class="ver">V1109</span></h3>'
   + '<ul>'
@@ -60277,7 +60366,33 @@ function galPrDest(clave){
       || { clave:clave, label:clave, color:'#888', nota:'' };
 }
 
-async function galPrInit(){ await galPrCargar(); }
+/* Un día pedido desde otra pantalla (Acumulado → «abrir el día»). Se guarda y se
+   consume en el init en vez de escribir el casillero desde allá: cuando se aprieta,
+   la sección de Proceso todavía no se mostró y el campo existe pero no está en
+   pantalla — y el init que corre después la cargaría igual con la fecha de antes. */
+var GPR_PEDIDO = null;
+
+async function galPrInit(){
+  if (GPR_PEDIDO){
+    var f = document.getElementById('gpr-fecha');
+    if (f) f.value = GPR_PEDIDO;
+    GPR_PEDIDO = null;
+    /* Sin lotes elegidos: se viene a MIRAR un día, y los del día anterior no tienen
+       por qué estar en la tolva de éste — la lista saldría filtrada por lotes que
+       nadie eligió y parecería que falta la mitad de las cargas. */
+    GPR.lotes = [];
+  }
+  await galPrCargar();
+}
+
+function galPrVerTodosLosDias(){
+  /* Se pide el detalle abierto: el que aprieta este botón ya dijo lo que quiere ver,
+     y llegar a una pantalla donde hay que apretar otro plegable es media puerta. */
+  GAC.procVer = true;
+  var ni = document.querySelector('.ni[data-sec="galpon-acumulado"]');
+  if (ni) ni.click();
+  else if (typeof loadSec === 'function') loadSec('galpon-acumulado');
+}
 
 function galPrHoy(){
   var f = document.getElementById('gpr-fecha');
@@ -60307,7 +60422,7 @@ async function galPrCargar(){
     galPrPintarPallets();
   } catch (e) {
     var b = document.getElementById('gpr-body');
-    if (b) b.innerHTML = '<tr><td colspan="7" class="gpr-vacio">' + galPrEsc(e.message) + '</td></tr>';
+    if (b) b.innerHTML = '<tr><td colspan="6" class="gpr-vacio">' + galPrEsc(e.message) + '</td></tr>';
   }
 }
 
@@ -61223,7 +61338,11 @@ function galPrPintarStockLote(){
    No hay una segunda tabla ni un cierre que haya que correr: esto SUMA gal_volcados.
    Un acumulado que se guarda aparte es un número que se desincroniza en silencio la
    primera vez que alguien corrige una carga de la semana pasada. */
-var GAC = { datos:null, rango:null, hoy:null };
+/* proc: el detalle de todas las cargas del período, que se pide aparte y recién
+   cuando alguien lo abre. Son cientos de renglones y la pregunta con la que se
+   entra a esta pantalla es «cuánto llevamos», no «qué se cargó el martes». */
+var GAC = { datos:null, rango:null, hoy:null,
+            proc:null, procVer:false, procDest:'', procCargando:false };
 
 function galAcEsc(s){ return String(s == null ? '' : s)
   .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
@@ -61278,10 +61397,170 @@ async function galAcCargar(){
     galAcPintarGraficos();
     galAcPintarRinde();
     galAcPintar();
+    /* EL DETALLE SE VUELVE A PEDIR CUANDO CAMBIA EL RANGO. Dejarlo como estaba sería
+       una tabla de otro período abajo de los totales de éste — y se ve igual de
+       bien, que es lo peor que puede pasarle a un número. */
+    GAC.proc = null;
+    if (GAC.procVer) await galAcProcCargar(); else galAcProcPintar();
   } catch (e) {
     var b = document.getElementById('gac-body');
     if (b) b.innerHTML = '<tr><td colspan="5" class="gac-vacio">' + galAcEsc(e.message) + '</td></tr>';
   }
+}
+
+/* ── 📋 TODAS LAS CARGAS, A TRAVÉS DE LOS DÍAS ────────────────────────────────
+   Andy, 4/11/2026: «quiero un lugar que sea transversal a los días, es decir que
+   pueda ver todos los procesos de cada día».
+
+   Vive acá y no en una pantalla nueva por lo mismo que el rinde: es el MISMO período
+   que ya se está mirando, con el mismo selector de arriba. Una pantalla aparte sería
+   un segundo lugar donde poner las dos fechas, y dos lugares para lo mismo terminan
+   mostrando cosas distintas.
+
+   Y la de Proceso no puede ser: está parada en un día porque es con lo que se CARGA
+   —lo que se tipea entra en ese día—, así que no hay dónde poner un rango sin que
+   quede ambiguo en cuál de los dos se guarda. */
+function galAcProcVer(){
+  GAC.procVer = !GAC.procVer;
+  if (GAC.procVer && !GAC.proc) galAcProcCargar();
+  else galAcProcPintar();
+}
+
+function galAcProcDest(d){
+  GAC.procDest = GAC.procDest === d ? '' : d;
+  galAcProcCargar();
+}
+
+async function galAcProcCargar(){
+  var q = [];
+  if (GAC.datos && GAC.datos.desde) q.push('desde=' + encodeURIComponent(GAC.datos.desde));
+  if (GAC.datos && GAC.datos.hasta) q.push('hasta=' + encodeURIComponent(GAC.datos.hasta));
+  if (GAC.procDest) q.push('destino=' + encodeURIComponent(GAC.procDest));
+  GAC.procCargando = true;
+  galAcProcPintar();
+  try {
+    var r = await fetch('/api/galpon/procesos/rango' + (q.length ? '?' + q.join('&') : ''),
+                        { credentials:'include' });
+    var j = await r.json();
+    if (!j.ok) throw new Error(j.error || 'no se pudo leer');
+    GAC.proc = j;
+  } catch (e) {
+    GAC.proc = { error: e.message, dias: [], total: null };
+  } finally {
+    GAC.procCargando = false;
+    galAcProcPintar();
+  }
+}
+
+function galAcProcDestInfo(clave){
+  var ds = { comercial: { label:'Comercial', color:'#16a34a' },
+             verde: { label:'Verde', color:'#d97706' },
+             descarte: { label:'Descarte', color:'#dc2626' } };
+  return ds[clave] || { label: clave || '—', color:'#888' };
+}
+
+function galAcProcPintar(){
+  var el = document.getElementById('gac-proc'); if (!el) return;
+  var j = GAC.proc;
+  var cab = '<h3 class="gac-t" style="margin-top:26px">📋 Todas las cargas, día por día</h3>'
+    + '<button class="gac-plg" onclick="galAcProcVer()">'
+    + (GAC.procVer ? '▴ ocultar el detalle'
+        : '▾ ver qué se cargó cada día del período') + '</button>';
+  if (!GAC.procVer){ el.innerHTML = cab; return; }
+
+  var chips = ['comercial','verde','descarte'].map(function(d){
+    var i = galAcProcDestInfo(d);
+    return '<span class="gac-pchip' + (GAC.procDest === d ? ' on' : '') + '"'
+      + ' onclick="galAcProcDest(\'' + d + '\')">'
+      + '<span class="gac-ppt" style="background:' + i.color + '"></span>'
+      + i.label + '</span>';
+  }).join('');
+
+  if (GAC.procCargando && !j){
+    el.innerHTML = cab + '<div class="gac-vacio">Buscando…</div>';
+    return;
+  }
+  if (!j){ el.innerHTML = cab; return; }
+  if (j.error){
+    el.innerHTML = cab + '<div class="gac-vacio">' + galAcEsc(j.error) + '</div>';
+    return;
+  }
+
+  var t = j.total || { cargas:0, bultos:0, kilos:0, dias:0 };
+  /* El total va arriba y cuenta TODAS las del período, también las que el tope dejó
+     afuera. Un total que contara sólo lo que se alcanzó a dibujar sería un número
+     distinto según cuánto se haya pedido, y nada lo diría. */
+  var resumen = '<div class="gac-pchips">' + chips
+    + '<span style="margin-left:auto;font-size:12.5px;color:var(--mut)">'
+    + '<b style="color:var(--txt);font-variant-numeric:tabular-nums">'
+    + galAcNum(t.cargas, 0) + '</b> cargas · <b style="color:var(--txt);'
+    + 'font-variant-numeric:tabular-nums">' + galAcNum(t.bultos, 0) + '</b> bultos · '
+    + '<b style="color:var(--txt);font-variant-numeric:tabular-nums">'
+    + galAcNum(t.kilos) + '</b> kg en <b style="color:var(--txt)">'
+    + galAcNum(t.dias, 0) + '</b> ' + (t.dias === 1 ? 'día' : 'días') + '</span></div>';
+
+  var tope = j.hay_mas > 0
+    ? '<div class="gac-ptope">Se muestran las <b>' + galAcNum(j.tope, 0) + '</b> más '
+      + 'nuevas y quedan <b>' + galAcNum(j.hay_mas, 0) + '</b> más atrás. Los números '
+      + 'de arriba cuentan <b>todas</b>; para verlas, achicá el período.</div>'
+    : '';
+
+  if (!j.dias || !j.dias.length){
+    el.innerHTML = cab + resumen + '<div class="gac-vacio">No se cargó ningún proceso '
+      + 'en este período' + (GAC.procDest ? ' para ese destino' : '') + '.</div>';
+    return;
+  }
+
+  el.innerHTML = cab + resumen + tope
+    + '<div class="ab-table-wrap"><table class="pa-tbl gac-ptbl">'
+    + '<colgroup><col style="width:14%"><col style="width:15%"><col style="width:29%">'
+    + '<col style="width:11%"><col style="width:13%"><col style="width:18%"></colgroup>'
+    + '<thead><tr><th>Destino</th><th>Producto</th><th>Presentación</th>'
+    + '<th style="text-align:right">Bultos</th><th style="text-align:right">Kilos</th>'
+    + '<th>Pallet</th></tr></thead><tbody>'
+    + j.dias.map(function(d){
+        return '<tr class="gac-pdia"><td colspan="6"><div class="gac-pdh">'
+          + '<span class="gac-pdf">' + galAcEsc(galAcFechaCorta(d.fecha))
+            + '<span class="gac-pdn"> · ' + galAcNum(d.cargas.length, 0) + ' '
+            + (d.cargas.length === 1 ? 'carga' : 'cargas') + ' · '
+            + galAcNum(d.bultos, 0) + ' bultos · ' + galAcNum(d.kilos) + ' kg'
+            + (d.a_revisar ? ' · <b style="color:#d62828">' + d.a_revisar
+                + ' a revisar</b>' : '') + '</span></span>'
+          + '<button class="btn bo bs" onclick="galAcProcIrAlDia(\''
+            + galAcEsc(d.fecha) + '\')">abrir el día →</button>'
+          + '</div></td></tr>'
+          + d.cargas.map(function(x){
+              var i = galAcProcDestInfo(x.destino);
+              var pal = x.pallet_numero
+                ? '<b>' + galAcEsc(x.pallet_numero) + '</b>'
+                : (x.pallet_id ? 'sin cerrar' : '—');
+              return '<tr>'
+                + '<td><span class="gac-ppt" style="background:' + i.color + '"></span>'
+                  + galAcEsc(i.label) + '</td>'
+                + '<td title="' + galAcEsc(x.producto || '') + '">'
+                  + galAcEsc(x.producto || '—') + '</td>'
+                + '<td title="' + galAcEsc(x.presentacion || '') + '">'
+                  + galAcEsc(x.presentacion || 'A granel')
+                  + (x.estado === 'a_revisar' ? ' <b style="color:#d62828">⚠</b>' : '')
+                  + '</td>'
+                + '<td class="gac-pnum">' + galAcNum(x.bultos, 0) + '</td>'
+                + '<td class="gac-pnum">' + galAcNum(x.kilos) + '</td>'
+                + '<td class="gac-ppal">' + pal + '</td>'
+                + '</tr>';
+            }).join('');
+      }).join('')
+    + '</tbody></table></div>';
+}
+
+/* LA PUERTA DE VUELTA. Desde acá no se corrige: corregir una carga necesita el lote y
+   la tolva de ese día al lado, que es lo que la pantalla de Proceso tiene y ésta no.
+   Así que se va al día, con el almanaque ya puesto. Una segunda ventana de edición
+   sería el mismo mecanismo escrito dos veces, y la segunda es la que se desactualiza. */
+function galAcProcIrAlDia(f){
+  GPR_PEDIDO = f;
+  var ni = document.querySelector('.ni[data-sec="galpon-proceso"]');
+  if (ni) ni.click();
+  else if (typeof loadSec === 'function') loadSec('galpon-proceso');
 }
 
 function galAcRango(tipo){
