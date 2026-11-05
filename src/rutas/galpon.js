@@ -35,7 +35,8 @@ import {
   despachos, itemsDelDespacho, abrirDespacho, editarDespacho,
   stockPorPresentacion, guardarIcono, borrarIcono, rutaDelIcono,
   procesosDelRango,
-  stockParaArmar, stockPorArticulo, palletsArmados, abrirPalletArmado, moverAlPallet,
+  stockParaArmar, stockPorArticulo, enPallets, palletsArmados, abrirPalletArmado,
+  moverAlPallet,
   procesoPorDia, procesoTotal, rindePorLote, planillaIngreso,
   sacarDelPalletArmado, lineasDelPallet, palletResumen,
   agregarAlDespacho, sacarDelDespacho, emitirDespacho, anularDespacho, borrarDespacho,
@@ -1401,11 +1402,19 @@ router.get('/armado', (req, res) => {
       ok: true,
       hoy: hoy(),
       destinos: DESTINOS,
-      // Los DOS cortes: por artículo es el camino normal —el sistema reparte entre
-      // lotes y días— y por ubicación hace falta para sacar de un montón concreto.
-      articulos: stockPorArticulo(db, { destino: req.query.destino }),
-      stock: stockParaArmar(db, { destino: req.query.destino }),
-      pallets: palletsArmados(db, { estado: req.query.estado }).map((x) =>
+      /* SÓLO EL PISO. Andy, 5/11/2026: «al momento de armar un pallet tiene que estar
+         disponible solo lo que está SIN PALLET... sino va a quedar duplicado». Los dos
+         cortes salen de lo mismo: por artículo es el camino normal —el sistema reparte
+         entre lotes y días— y por lote hace falta cuando el que arma quiere elegir. */
+      articulos: stockPorArticulo(db, { destino: req.query.destino, suelto: true }),
+      stock: stockParaArmar(db, { destino: req.query.destino, suelto: true }),
+      /* Y lo que NO se puede, para poder decir por qué: sin esto la lista pasa de 2.109
+         cajas a 40 y parece que desapareció mercadería. */
+      en_pallets: enPallets(db, { destino: req.query.destino }),
+      /* TODOS los pallets de la cámara, no sólo los armados: desde que a un pallet no
+         se le sacan cajas desde afuera, ésta es la única pantalla desde la que se
+         puede abrir uno del proceso para desarmarlo. */
+      pallets: palletsArmados(db, { estado: req.query.estado, todos: true }).map((x) =>
         Object.assign({}, x, { lineas: lineasDelPallet(db, x.id) })),
     });
   } catch (e) {

@@ -7997,11 +7997,15 @@ if ('serviceWorker' in navigator) {
         </div>
       </div>
 
-      <!-- DE DÓNDE SALE CADA COSA. El selector lista el stock POR UBICACIÓN y no por
-           mercadería: mover 60 cajas es sacarlas de algún montón, y el que está parado
-           en el playón mira un montón, no un total. -->
+      <!-- DE DÓNDE SALE CADA COSA: DEL PISO, y de ningún pallet cerrado. Andy,
+           5/11/2026: «me tiene que aparecer solo lo que no tiene pallet cerrado».
+           Un pallet cerrado es una pila física con su tarjetón pegado: moverle cajas
+           con el mouse no las baja de ahí. Uno abierto todavía se está armando. -->
       <div class="sgr-card" id="gal-arm-cargar" style="margin-top:12px">
-        <div style="font-weight:600;font-size:13px;margin-bottom:8px">Agregar del stock</div>
+        <div style="font-weight:600;font-size:13px;margin-bottom:8px">Agregar del piso
+          <span style="font-weight:400;color:var(--mut)">— lo que no está en un pallet
+          cerrado</span></div>
+        <div id="gal-arm-enp" style="font-size:11.5px;color:var(--mut);margin-bottom:8px"></div>
         <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end">
           <div style="flex:1 1 340px;min-width:0">
             <label id="gal-arm-lab">Qué</label>
@@ -8013,14 +8017,14 @@ if ('serviceWorker' in navigator) {
         </div>
         <div id="gal-arm-disp" style="font-size:11px;color:var(--mut);margin-top:6px"></div>
         <!-- EL CAMINO NORMAL es por artículo, con el sistema eligiendo de qué lote y
-             de qué día — lo más viejo primero. El detalle por montón sigue estando
-             para cuando hay que sacar de un pallet concreto, que pasa, pero deja de
-             ser lo primero que se ve. -->
+             de qué día — lo más viejo primero. El detalle por lote y por pallet
+             abierto sigue estando para cuando importa el RENSPA, o hay que vaciar un
+             pallet a medio armar, pero deja de ser lo primero que se ve. -->
         <label style="display:flex;align-items:center;gap:6px;margin-top:8px;
                       font-size:11.5px;text-transform:none;letter-spacing:0;color:var(--mut)">
           <input type="checkbox" id="gal-arm-detalle" onchange="galArmPintar()"
                  style="width:auto;margin:0">
-          Elegir yo de qué lote y de qué montón sale</label>
+          Elegir yo de qué lote y de qué pallet abierto sale</label>
       </div>
 
       <div id="gal-arm-lineas" style="margin-top:12px"></div>
@@ -8443,6 +8447,9 @@ if ('serviceWorker' in navigator) {
       #sec-galpon-stock .gst-brr{background:#fef3c7;color:#92400e}
       #sec-galpon-stock .gst-emi{background:#dcfce7;color:#166534}
       #sec-galpon-stock .gst-anu{background:#fee2e2;color:#991b1b;text-decoration:line-through}
+      /* El pallet que se llena solo con cada caja que se tipea en Proceso, para
+         distinguirlo del que alguien armó a mano acá. */
+      #sec-galpon-stock .gst-pro{background:#e0e7ff;color:#3730a3}
     </style>
 
     <div class="ph">
@@ -8459,9 +8466,13 @@ if ('serviceWorker' in navigator) {
     <h3 class="gst-t">Lo que hay en cámara <span style="text-transform:none;letter-spacing:0;font-weight:400">— tocá una para ver de qué lotes salió</span></h3>
     <div id="gst-stock"></div>
 
-    <!-- LOS PALLETS ARMADOS van ANTES que los despachos, porque ése es el orden
-         del trabajo: se procesa, se arma el pallet, y recién después sale. -->
-    <h3 class="gst-t" style="display:flex;align-items:center;gap:10px">Pallets armados
+    <!-- LOS PALLETS van ANTES que los despachos, porque ése es el orden del trabajo:
+         se procesa, se arma el pallet, y recién después sale.
+
+         Y están TODOS, no sólo los que se armaron acá: desde la V1146 a un pallet no
+         se le sacan cajas desde afuera, así que ésta es la única pantalla desde la
+         que se puede abrir uno del proceso para desarmarlo. -->
+    <h3 class="gst-t" style="display:flex;align-items:center;gap:10px">Pallets en cámara
       <button class="btn bo bs" style="margin-left:auto;text-transform:none;letter-spacing:0"
         onclick="galArmAbrir()">+ Armar un pallet</button></h3>
     <div id="gst-arm"></div>
@@ -29553,32 +29564,49 @@ SG_MANUAL['galpon-stock'] = { titulo: 'Stock y Despachos', html:
   + 'manera. Lo único que saca del stock es el <b>despacho</b>. Si al armar bajara el '
   + 'stock, la cámara figuraría vacía con toda la fruta adentro.</div>'
 
-  + '<h3>Qué poner, y de dónde sale <span class="ver">V1127</span></h3>'
+  + '<h3>🧱 Nada de un pallet cerrado <span class="ver">V1146</span></h3>'
+  + '<p>Andy, 5/11/2026: <i>«me tiene que aparecer solo lo que no tiene pallet cerrado... '
+  + 'sino va a quedar duplicado»</i>.</p>'
+  + '<p>El selector ofrece <b>el piso</b>: lo suelto y lo que está en un pallet '
+  + '<b>todavía abierto</b>. Lo que está en un pallet <b>cerrado</b> no aparece, y justo '
+  + 'arriba del selector dice <b>cuántas cajas son y en cuántos pallets cerrados</b>, '
+  + 'para que la lista corta no se lea como mercadería perdida.</p>'
+  + '<div class="ojo"><b>Un pallet cerrado es una pila física con su tarjetón pegado.</b> '
+  + 'Moverle cajas con el mouse no las baja de ahí: quedaban <b>dos etiquetas impresas '
+  + 'reclamando las mismas sesenta cajas</b>, y eso se descubre cuando llega el '
+  + 'camión. Es la misma razón por la que un pallet cerrado se despacha entero.</div>'
+  + '<p>Uno <b>abierto</b> sí se ofrece: todavía no tiene tarjetón y se está armando. '
+  + 'Es lo que pasa con el del día, que se llena solo con cada caja que se carga en '
+  + '<b>📦 Proceso</b>. Es la misma regla que usa el despacho para decir qué es piso.</p>'
+  + '<p><b>Para usar las cajas de un pallet cerrado hay que desarmarlo</b>: se lo abre '
+  + 'desde <b>Pallets en cámara</b> y se lo <b>reabre</b>. Ahí deja de ser una unidad, '
+  + 'sus cajas vuelven a aparecer acá, y el tarjetón que tenía pegado pasa a ser papel '
+  + 'para tirar.</p>'
+
+  + '<h3>Qué poner, y de dónde sale <span class="ver">V1146</span></h3>'
   + '<p>Andy, 1/11/2026: <i>«dame la opción de elegir independientemente del lote, es '
   + 'decir que lo haga solo el sistema. Es más: es más importante el día de proceso que '
   + 'el lote»</i>.</p>'
   + '<p>El selector tiene <b>un renglón por artículo</b> —la caja y el calibre— con '
   + '<b>desde qué día</b> está en cámara. Se pone la cantidad y <b>el sistema elige de '
-  + 'qué lote y de qué montón sacarlas, tomando lo más viejo primero</b>: en una cámara '
-  + 'lo que entró antes sale antes. Antes de apretar, abajo dice exactamente de dónde '
-  + 'va a salir: «de 2 lotes. Sale lo más viejo primero: 10/12 · PC-26-00001 (30) → '
-  + '14/12 · suelto (15)».</p>'
-  + '<p>Si hace falta <b>elegir el montón exacto</b> —porque importa el RENSPA de un '
-  + 'lote, o porque hay que vaciar un pallet determinado— el casillero <b>Elegir yo de '
-  + 'qué lote y de qué montón sale</b> vuelve a la lista detallada, una por ubicación.</p>'
-
-  + '<h3>Sacar de un pallet ya cerrado <span class="ver">V1126</span></h3>'
-  + '<p>El selector no ofrece un total sino <b>montones concretos</b>: «PC-26-00003 · '
-  + 'lote 13 · Carton Amarilla 50/55 — 120 cj». Es así porque sacar 60 cajas es sacarlas '
-  + 'de algún lado, y el que está parado en el playón mira un montón, no un total. Lo '
-  + 'que nunca entró a ningún pallet figura como <b>suelto</b>.</p>'
-  + '<p>Se puede sacar de un <b>pallet ya cerrado</b> — en el galpón se desarman pallets '
-  + 'todo el tiempo — y la pantalla <b>lo dice</b>: con qué número quedó y cuántas cajas '
-  + 'le quedaron. Si lo deja vacío avisa que hay que ir a despegarle la etiqueta: un '
-  + 'pallet cerrado sin nada adentro es una etiqueta pegada a un armazón de madera.</p>'
+  + 'qué lote sacarlas, tomando lo más viejo primero</b>: en una cámara lo que entró '
+  + 'antes sale antes. Antes de apretar, abajo dice de dónde va a salir: «de 2 lotes. '
+  + 'Sale lo más viejo primero: 10/12 · 11-12 y 16-17 (30) → 14/12 · 13 (15)».</p>'
+  + '<p>Si hace falta <b>elegir el lote exacto</b> —porque importa el RENSPA— o vaciar '
+  + 'un pallet que quedó a medio armar, el casillero <b>Elegir yo de qué lote y de qué '
+  + 'pallet abierto sale</b> abre la misma lista por lote y por pallet.</p>'
   + '<p>Mover 60 cajas de una carga de 267 <b>parte el renglón</b> en 207 y 60. El stock '
   + 'no cambia y las dos partes recuerdan de qué carga salieron, así que la historia se '
   + 'puede reconstruir.</p>'
+
+  + '<h3>Pallets en cámara <span class="ver">V1146</span></h3>'
+  + '<p>La lista trae <b>todos</b> los pallets que tienen algo adentro, no sólo los que '
+  + 'se armaron acá: los que se llenaron solos en <b>📦 Proceso</b> llevan el cartelito '
+  + '<b>del proceso</b>. Van juntos porque para el camión son el mismo bulto, y porque '
+  + 'desarmar uno del proceso necesita poder abrirlo desde algún lado.</p>'
+  + '<p>Un pallet <b>despachado entero deja de figurar</b>: queda en cero y sale de la '
+  + 'lista. Los vacíos que sí quedan son los <b>abiertos</b>, que son los que alguien '
+  + 'acaba de empezar.</p>'
 
   + '<h3>Lo que lleva el pallet <span class="ver">V1128</span></h3>'
   + '<p>Andy, 2/11/2026: <i>«me seguís poniendo muchas cosas del LOTE, me interesa '
@@ -62365,6 +62393,7 @@ async function galArmCargar(){
     var j = await r.json();
     if(!j.ok) throw new Error(j.error||'No se pudo leer');
     GST.arm = j.stock||[]; GST.armart = j.articulos||[];
+    GST.armenp = j.en_pallets||null;
     GST.armp = j.pallets||[]; GST.armhoy = j.hoy;
     galArmLista();
     galStAviso('');
@@ -62387,8 +62416,14 @@ function galArmLista(){
           var b = c.reduce(function(t,y){ return t+(Number(y.bultos)||0); },0);
           var k = c.reduce(function(t,y){ return t+(Number(y.kilos)||0); },0);
           var cl = x.estado==='cerrado' ? 'gst-emi' : 'gst-brr';
+          /* DE DÓNDE SALIÓ. Un pallet del proceso es la tanda de un día y uno armado
+             se juntó a mano acá: se despachan igual, pero el que mira la lista tiene
+             que poder distinguir el que está llenándose solo con cada caja que se
+             tipea en Proceso del que armó él. */
+          var arm = (x.origen||'proceso')==='armado';
           return '<tr><td>'+galStEsc(x.numero||'sin número')
-            + ' <span class="gst-est '+cl+'">'+galStEsc(x.estado)+'</span></td>'
+            + ' <span class="gst-est '+cl+'">'+galStEsc(x.estado)+'</span>'
+            + (arm ? '' : ' <span class="gst-est gst-pro">del proceso</span>')+'</td>'
             + '<td>'+galStEsc(x.fecha_empaque||'—')+'</td>'
             /* Qué lleva, resumido: con tres artículos el nombre de cada uno no entra,
                y lo que importa en la lista es si es mixto y de qué. */
@@ -62407,14 +62442,16 @@ function galArmLista(){
             + '<td style="white-space:nowrap">'
             + '<button class="btn bo bs" onclick="galArmAbrir('+x.id+')">'
             + (x.estado==='abierto'?'Seguir armando':'Ver')+'</button>'
-            + (b ? '' : ' <button class="btn bo bs" title="Borrar este pallet" '
+            /* Y sólo los ARMADOS: el del proceso lo abre solo la primera caja de la
+               mañana, así que borrarlo es apretar un botón para que vuelva. */
+            + ((b || !arm) ? '' : ' <button class="btn bo bs" title="Borrar este pallet" '
                 + 'onclick="galArmBorrar('+x.id+')">×</button>')
             + '</td></tr>';
         }).join('')
       + '</tbody></table></div>'
-    : '<div class="ojo">No hay ningún pallet armado. El botón de arriba arma el primero '
-      + 'con lo que haya en cámara — se pueden mezclar lotes, calibres y lo que quede de '
-      + 'varias tandas.</div>';
+    : '<div class="ojo">No hay ningún pallet en cámara. El botón de arriba arma el '
+      + 'primero con lo que haya suelto — se pueden mezclar lotes, calibres y lo que '
+      + 'quede de varias tandas.</div>';
 }
 
 /* Abrir con id abre uno que existe; sin id ARRANCA uno nuevo, para que lo que se mueva
@@ -62484,20 +62521,37 @@ function galArmPintar(){
       + ' Imprimí el tarjetón y pegalo.';
   }
 
-  /* DOS MODOS. Andy, 1/11/2026: «dame la opción de elegir independientemente del
-     lote, es decir que lo haga solo el sistema. Es más: es más importante el día de
-     proceso que el lote».
+  /* DOS MODOS, Y LOS DOS SOBRE EL PISO. Andy, 1/11/2026: «dame la opción de elegir
+     independientemente del lote, es decir que lo haga solo el sistema. Es más: es más
+     importante el día de proceso que el lote».
 
      El normal lista UN RENGLÓN POR ARTÍCULO con la fecha de lo más viejo, y de qué
-     lote sale lo decide el servidor tomando por fecha. El detallado lista los montones
-     uno por uno, y hace falta cuando hay que sacar de un pallet concreto.
+     lote sale lo decide el servidor tomando por fecha. El detallado abre eso mismo
+     por lote, para el día que haya que armar un pallet de un lote solo.
 
-     El propio pallet se saltea en los dos: sacarle algo para ponérselo a él mismo no
-     es nada, y además haría que el tope cuente dos veces lo que ya tiene adentro. */
+     Lo que NO aparece en ninguno de los dos es lo que está en un pallet CERRADO. Andy,
+     5/11/2026: «me tiene que aparecer solo lo que no tiene pallet cerrado». El
+     servidor ya manda sólo eso. Lo que SÍ hay que sacar acá es lo de este mismo
+     pallet, que está abierto y por eso viene en la lista: ofrecérselo a sí mismo no
+     es nada, y el tope contaría dos veces lo que ya tiene adentro. */
   var det = document.getElementById('gal-arm-detalle');
   GST.armdet = !!(det && det.checked);
   var lab = document.getElementById('gal-arm-lab');
-  if (lab) lab.textContent = GST.armdet ? 'De qué montón' : 'Qué';
+  if (lab) lab.textContent = GST.armdet ? 'De dónde' : 'Qué';
+
+  /* LO QUE HAY EN PALLETS CERRADOS, dicho en la misma pantalla. Sin esto la lista
+     ofrece menos que el total de la cámara y parece que se perdió mercadería. */
+  var enp = document.getElementById('gal-arm-enp');
+  if (enp){
+    var e = GST.armenp||{};
+    var n = Number(e.pallets)||0;
+    enp.innerHTML = (Number(e.bultos)||0) > 0
+      ? ('Hay <b>'+galStNum(e.bultos,0)+'</b> cajas más en '+galStNum(n,0)
+         + ' pallet'+(n===1?'':'s')+' cerrado'+(n===1?'':'s')+', y no se ofrecen: '
+         + '<b>un pallet cerrado se despacha entero</b>. Si hay que desarmar uno, se '
+         + 'lo reabre y sus cajas vuelven a aparecer acá.')
+      : '';
+  }
 
   var sel = document.getElementById('gal-arm-item');
   if(sel){
@@ -62505,9 +62559,6 @@ function galArmPintar(){
       ? (GST.arm||[]).filter(function(f){
           return (f.pallet_id||null) !== x.id && (f.bultos>0 || f.kilos>0); })
       : (GST.armart||[]).map(function(f){
-          /* Lo que ya está en ESTE pallet no se ofrece de nuevo: el corte por artículo
-             lo suma igual que el resto, así que hay que descontarlo acá o el renglón
-             ofrece cajas que están adentro. */
           var propio = (f.ubicaciones||[]).filter(function(u){
             return u.pallet_id === x.id; });
           var b = propio.reduce(function(t,u){ return t+(Number(u.bultos)||0); },0);
@@ -62516,16 +62567,22 @@ function galArmPintar(){
                                         kilos: Math.round((f.kilos-k)*100)/100 });
         }).filter(function(f){ return f.bultos>0 || f.kilos>0; });
     GST.armops = ops;
-    sel.innerHTML = '<option value="">— Elegir '
-      + (GST.armdet ? 'de dónde' : 'qué poner') + ' —</option>'
+    sel.innerHTML = '<option value="">'
+      + (ops.length ? '— Elegir '+(GST.armdet ? 'de dónde' : 'qué poner')+' —'
+                    : '— No hay nada fuera de pallets cerrados —') + '</option>'
       + ops.map(function(f,i){
           var cant = galStNum(f.granel?f.kilos:f.bultos,0) + (f.granel?' kg':' cj');
+          /* El detallado dice el lote y, si está en un pallet abierto, cuál: es lo
+             que hay que saber para ir a buscarlo. Lo suelto no lo dice, porque es
+             casi todo y repetir «suelto» en cada renglón es ruido. */
           if (GST.armdet){
-            return '<option value="'+i+'">'+galStEsc(f.ubicacion)+' · '
+            return '<option value="'+i+'">'
+              + (f.pallet_id ? galStEsc(f.ubicacion)+' (abierto) · ' : '')
               + galStEsc(f.lote_nombre||('Lote '+f.lote_id))+' · '
               + galStEsc(f.presentacion||'granel')
               + (f.calibre?(' '+galStEsc(f.calibre)):'')
-              + ' — '+cant+'</option>';
+              + ' — '+cant
+              + (f.desde ? (' · desde el '+galArmDia(f.desde)) : '')+'</option>';
           }
           /* EL DÍA PRIMERO, que es con lo que se elige. El lote no va: son varios y es
              lo que el sistema decide. */
@@ -62556,30 +62613,25 @@ function galArmItemPick(){
   var hay = f.granel ? ('Hay '+galStNum(f.kilos,0)+' kg')
                      : ('Hay '+galStNum(f.bultos,0)+' cajas de '
                         + galStNum(f.kg_unidad,1)+' kg');
-  if (GST.armdet){
-    el.innerHTML = galStEsc(hay)
-      + (f.pallet_estado==='cerrado'
-         ? ' — <b>OJO:</b> está en un pallet YA CERRADO, sacarle cajas lo deja distinto '
-           + 'de su tarjetón' : '');
-    return;
-  }
-  /* DE DÓNDE VA A SALIR, antes de apretar. Con el sistema eligiendo, el que arma no
+  if (GST.armdet){ el.innerHTML = galStEsc(hay); return; }
+  /* DE QUÉ DÍAS VA A SALIR, antes de apretar. Con el sistema eligiendo, el que arma no
      sabe qué lotes ni qué días se va a llevar — y es lo que va a tener que mirar si
-     algo no cuadra. Se muestran los tres primeros en el orden en que se toman. */
-  var u = (f.ubicaciones||[]).slice(0, 3);
-  var cerrados = (f.ubicaciones||[]).filter(function(y){
-    return y.pallet_estado === 'cerrado'; }).length;
+     algo no cuadra. Se muestran los tres primeros en el orden en que se toman.
+
+     Ya no hace falta avisar de pallets cerrados: desde la V1146 no sale de ninguno.
+     Y este mismo pallet se saltea, igual que en la lista de arriba. */
+  var u = (f.ubicaciones||[]).filter(function(y){ return y.pallet_id !== (GST.armsel||{}).id; })
+    .slice(0, 3);
   el.innerHTML = galStEsc(hay) + ', de ' + (f.lotes||[]).length + ' lote'
     + ((f.lotes||[]).length === 1 ? '' : 's')
     + '. Sale lo más viejo primero: '
     + u.map(function(y){
-        return galStEsc(galArmDia(y.desde)) + ' · ' + galStEsc(y.ubicacion)
+        return galStEsc(galArmDia(y.desde)) + ' · '
+          + galStEsc(y.lote_nombre||('Lote '+y.lote_id))
+          + (y.pallet_id ? ' en ' + galStEsc(y.ubicacion) : '')
           + ' (' + galStNum(f.granel?y.kilos:y.bultos,0) + ')';
       }).join(' → ')
-    + ((f.ubicaciones||[]).length > 3 ? ' → …' : '')
-    + (cerrados
-       ? ' — <b>OJO:</b> ' + cerrados + ' de esos montones son pallets YA CERRADOS'
-       : '');
+    + ((f.ubicaciones||[]).length > 3 ? ' → …' : '');
 }
 
 async function galArmMover(){
@@ -62606,21 +62658,10 @@ async function galArmMover(){
     var j = await r.json();
     if(!j.ok) throw new Error(j.error||'No se pudo mover');
     document.getElementById('gal-arm-cant').value='';
-    /* Si salió de un pallet CERRADO hay que decirlo acá y ahora: queda distinto de su
-       tarjetón, que está impreso y pegado. Enterarse cuando llega el camión es tarde. */
+    /* Ya no hay nada que avisar después: todo salió del piso, así que ningún tarjetón
+       impreso quedó mintiendo. El cartel de «salieron de PC-00007, queda con 40» era
+       de cuando esto desarmaba pallets por la espalda. */
     await galArmCargar();
-    /* Con el reparto automático un pedido puede desarmar VARIOS pallets a la vez:
-       se avisan todos los que estaban cerrados, no sólo el primero. Un pallet cerrado
-       al que le faltan cajas tiene su etiqueta mintiendo. */
-    var cer = (j.tocados||[]).filter(function(y){ return y && y.numero; });
-    if(cer.length){
-      galStAviso('Salieron de ' + cer.map(function(y){
-        return y.numero + ' (queda con ' + galStNum(y.bultos,0) + ')'
-          + (y.vacio ? ' — VACÍO' : '');
-      }).join(', ') + '. '
-        + (cer.some(function(y){ return y.vacio; })
-           ? 'Andá a despegar la etiqueta del que quedó vacío.' : ''), 'ok');
-    }
     GST.armsel = (GST.armp||[]).filter(function(y){ return y.id===x.id; })[0] || GST.armsel;
     galArmPintar();
   }catch(e){ galStAviso(e.message); }

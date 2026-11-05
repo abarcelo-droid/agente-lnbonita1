@@ -2796,9 +2796,19 @@ export function proximoNumero(db, fecha) {
 // de 267 deja una fila de 207 y una de 60, las dos apuntando a la original con
 // partido_de. El stock no cambia; lo que cambia es dónde está cada parte.
 
-// Lo que se puede poner en un pallet: el stock, con el pallet en el que está hoy. Un
-// renglón por lote + destino + presentación + calibre + pallet, porque mover 60 cajas
-// es sacarlas de algún lado y hay que poder decir de cuál.
+// El stock, con el pallet en el que está hoy. Un renglón por lote + destino +
+// presentación + calibre + pallet.
+//
+// CON { suelto: true } SÓLO LO QUE NO ESTÁ EN UN PALLET CERRADO, que es lo único que
+// se puede poner en otro. Andy, 5/11/2026: «me tiene que aparecer solo lo que no
+// tiene pallet cerrado». Un pallet ABIERTO todavía es una pila en formación, sin
+// tarjetón: cada caja que se carga en Proceso cae en uno, así que excluirlos dejaba
+// la lista vacía todo el día. Es la misma definición de «piso» que usa el despacho
+// (EN_EL_PISO, V1143): una sola regla en las dos pantallas.
+//
+// Sin la opción devuelve TODO, que es lo que necesita el despacho para saber de qué
+// ubicación sale cada caja. Son dos preguntas distintas: «qué hay» y «qué puedo
+// apilar».
 export function stockParaArmar(db, opts) {
   const o = opts || {};
   const filas = db.prepare(
@@ -2816,6 +2826,7 @@ export function stockParaArmar(db, opts) {
     + '  FROM gal_procesos g'
     + '  LEFT JOIN gal_pallets p ON p.id = g.pallet_id AND p.eliminado_en IS NULL'
     + '  WHERE g.eliminado_en IS NULL'
+    + (o.suelto ? EN_EL_PISO : '')
     + (o.destino ? ' AND g.destino = ?' : '')
     + '  GROUP BY g.lote_id, g.destino, g.presentacion_id, g.categoria, g.calibre,'
     + '           g.pallet_id'
@@ -2839,6 +2850,40 @@ export function stockParaArmar(db, opts) {
   }));
 }
 
+
+// ── Y LO QUE NO SE PUEDE, PORQUE ESTÁ EN UN PALLET CERRADO ──────────────────────────
+// El contrapeso de { suelto: true }. Sin esto la pantalla pasa de ofrecer 2.109 cajas
+// a ofrecer 40 y parece que se perdió mercadería: hay que poder decir «las otras 2.069
+// están en 19 pallets» en la misma pantalla y en el mismo momento.
+export function enPallets(db, opts) {
+  const o = opts || {};
+  const r = db.prepare(
+    " SELECT COALESCE(SUM(CASE WHEN g.tipo = 'ingreso' THEN g.bultos"
+    + '                        ELSE -g.bultos END),0) AS bultos,'
+    + "       COALESCE(SUM(CASE WHEN g.tipo = 'ingreso' THEN g.kilos"
+    + '                        ELSE -g.kilos END),0) AS kilos,'
+    + '       COUNT(DISTINCT g.pallet_id) AS pallets'
+    + '  FROM gal_procesos g'
+    + "  JOIN gal_pallets p ON p.id = g.pallet_id AND p.eliminado_en IS NULL AND p.estado = 'cerrado'"
+    + '  WHERE g.eliminado_en IS NULL'
+    + (o.destino ? ' AND g.destino = ?' : '')).get(...(o.destino ? [txt(o.destino)] : []));
+  /* Los pallets se cuentan sobre las filas de INGRESO y no sobre el neto: un pallet
+     que se despachó entero deja sus cajas en cero pero sigue apareciendo en el COUNT
+     de arriba. Se recuenta aparte para no decir «19 pallets» cuando quedan 4. */
+  const c = db.prepare(
+    ' SELECT COUNT(*) AS n FROM ('
+    + '   SELECT g.pallet_id FROM gal_procesos g'
+    + "    JOIN gal_pallets p ON p.id = g.pallet_id AND p.eliminado_en IS NULL AND p.estado = 'cerrado'"
+    + '    WHERE g.eliminado_en IS NULL'
+    + (o.destino ? ' AND g.destino = ?' : '')
+    + '    GROUP BY g.pallet_id'
+    + "    HAVING COALESCE(SUM(CASE WHEN g.tipo = 'ingreso' THEN g.bultos"
+    + '                             ELSE -g.bultos END),0) > 0'
+    + "       OR COALESCE(SUM(CASE WHEN g.tipo = 'ingreso' THEN g.kilos"
+    + '                             ELSE -g.kilos END),0) > 0)')
+    .get(...(o.destino ? [txt(o.destino)] : []));
+  return { bultos: round2(r.bultos), kilos: round2(r.kilos), pallets: c.n };
+}
 
 // ── LO QUE SE PUEDE PONER EN UN PALLET, POR ARTÍCULO ────────────────────────────────
 // Andy, 1/11/2026: «dame la opción de elegir independientemente del lote, es decir que
@@ -2897,14 +2942,27 @@ export function stockPorArticulo(db, opts) {
   });
 }
 
+// CON { todos: true } SALEN TAMBIÉN LOS DEL PROCESO, que es lo que hay en la cámara.
+// Desde que a un pallet no se le sacan cajas desde afuera (ver moverAlPallet), la
+// única manera de desarmar uno es ABRIRLO — y si la pantalla de Stock sólo lista los
+// armados, los del proceso no tienen desde dónde abrirse y su mercadería queda
+// congelada hasta que alguien la despache entera.
+//
+// Se dejan afuera los que no tienen nada adentro y ya están cerrados: un pallet
+// despachado entero queda en cero y listarlo para siempre convierte la lista en el
+// historial de la temporada. Los ABIERTOS vacíos sí van: son los que alguien acaba de
+// empezar.
 export function palletsArmados(db, opts) {
   const o = opts || {};
-  const w = ["eliminado_en IS NULL", "COALESCE(origen,'proceso') = 'armado'"];
+  const w = ['eliminado_en IS NULL'];
+  if (!o.todos) w.push("COALESCE(origen,'proceso') = 'armado'");
   const a = [];
   if (o.estado === 'abierto' || o.estado === 'cerrado') { w.push('estado = ?'); a.push(o.estado); }
   return db.prepare('SELECT * FROM gal_pallets WHERE ' + w.join(' AND ')
-    + ' ORDER BY id DESC LIMIT ' + (parseInt(o.limite, 10) || 100)).all(...a)
-    .map((x) => Object.assign(x, { contenido: contenidoDelPallet(db, x.id) }));
+    + " ORDER BY (estado = 'abierto') DESC, id DESC"
+    + ' LIMIT ' + (parseInt(o.limite, 10) || 100)).all(...a)
+    .map((x) => Object.assign(x, { contenido: contenidoDelPallet(db, x.id) }))
+    .filter((x) => !o.todos || x.estado === 'abierto' || x.contenido.length);
 }
 
 // A diferencia del pallet del día, de los ARMADOS puede haber varios abiertos a la vez:
@@ -2923,11 +2981,19 @@ export function abrirPalletArmado(db, d) {
            pallet: db.prepare('SELECT * FROM gal_pallets WHERE id = ?').get(id) };
 }
 
-/* MOVER CAJAS A UN PALLET. Toma de las filas que tengan esa mercadería en esa
-   ubicación, de la más vieja a la más nueva, partiendo la última si hace falta.
+/* MOVER CAJAS AL PALLET, DESDE EL PISO. Toma de las filas que tengan esa mercadería
+   suelta, de la más vieja a la más nueva, partiendo la última si hace falta.
 
    De la MÁS VIEJA primero y no de la más grande: en una cámara lo que entró antes sale
-   antes, y si hay que partir algo conviene que sea lo más nuevo. */
+   antes, y si hay que partir algo conviene que sea lo más nuevo.
+
+   Y NUNCA DE UN PALLET CERRADO. Hasta la V1145 esto tomaba de cualquier lado. Andy,
+   5/11/2026: «me tiene que aparecer solo lo que no tiene pallet cerrado... sino va a
+   quedar duplicado». Y duplicado es la palabra exacta: un pallet cerrado es una pila
+   física con su tarjetón pegado. Mover sus cajas con el mouse no las baja de ahí, así
+   que quedan dos etiquetas impresas reclamando las mismas sesenta cajas y el error
+   aparece cuando llega el camión. Uno ABIERTO no tiene tarjetón todavía: es una pila
+   en formación y de ahí sí se toma. */
 export function moverAlPallet(db, palletId, d) {
   const pid = parseInt(palletId, 10);
   const dd = d || {};
@@ -2946,24 +3012,44 @@ export function moverAlPallet(db, palletId, d) {
   const lote = dd.lote_id == null || dd.lote_id === ''
     ? null : parseInt(dd.lote_id, 10);
   if (lote !== null && !Number.isFinite(lote)) return { ok: false, motivo: 'Lote inválido' };
-  const libre = dd.pallet_id === undefined;
   const destino = txt(dd.destino);
   if (!DESTINOS.some((y) => y.clave === destino)) return { ok: false, motivo: 'Destino inválido' };
   const pres = parseInt(dd.presentacion_id, 10) || 0;
   const cal = txt(dd.calibre) || '';
+
+  /* TRES PEDIDOS DISTINTOS. Sin nombrar el campo es «de donde sea, menos de un pallet
+     cerrado». pallet_id: null es «sólo lo suelto». Y un pallet nombrado es «de ése»,
+     siempre que esté ABIERTO.
+
+     Uno CERRADO se rechaza aunque lo nombren: se desarma reabriéndolo, que es una
+     decisión que se ve y que deja el tarjetón viejo como lo que es — papel para tirar.
+     Partirlo desde acá era lo que dejaba dos etiquetas impresas reclamando las mismas
+     cajas. */
+  const libre = dd.pallet_id === undefined;
   const desde = dd.pallet_id == null || dd.pallet_id === '' ? null
     : (parseInt(dd.pallet_id, 10) || null);
   if (desde === pid) return { ok: false, motivo: 'Eso ya está en este pallet' };
+  if (desde) {
+    const o = db.prepare('SELECT numero, estado FROM gal_pallets WHERE id = ?'
+      + ' AND eliminado_en IS NULL').get(desde);
+    if (o && o.estado === 'cerrado') {
+      return { ok: false, en_pallet: 1,
+        motivo: 'Eso está en el pallet ' + (o.numero || ('#' + desde))
+          + ', que está cerrado: un pallet cerrado no se reparte. Si hay que desarmarlo,'
+          + ' reabrilo — sus cajas vuelven a aparecer acá.' };
+    }
+  }
 
   /* LAS FILAS CANDIDATAS, ORDENADAS POR DÍA DE PROCESO. Andy: «es más importante el día
      de proceso que el lote». En una cámara lo que entró antes sale antes, así que el
      orden es la fecha y el lote es lo que salga.
 
-     Sin lote se toma de todos; sin ubicación —cuando ni siquiera se nombró el campo— de
-     donde haya, saltando sólo este mismo pallet. Decir pallet_id: null es otra cosa: es
-     pedir explícitamente lo SUELTO. */
+     Sin lote se toma de todos los lotes; con lote, sólo de ése. Y de NINGÚN pallet
+     cerrado, por ninguno de los tres caminos: la condición va siempre, no sólo en el
+     «de donde sea». */
   const w = ["eliminado_en IS NULL", "tipo = 'ingreso'", 'destino = ?',
-             'COALESCE(presentacion_id,0) = ?', "COALESCE(calibre,'') = ?"];
+             'COALESCE(presentacion_id,0) = ?', "COALESCE(calibre,'') = ?",
+             FUERA_DE_CERRADOS];
   const a = [destino, pres, cal];
   if (lote !== null) { w.push('lote_id = ?'); a.push(lote); }
   if (libre) { w.push('COALESCE(pallet_id,0) <> ?'); a.push(pid); }
@@ -2977,16 +3063,33 @@ export function moverAlPallet(db, palletId, d) {
       + "  WHERE eliminado_en IS NULL AND tipo = 'ingreso' AND pallet_id = ?"
       + "    AND destino = ? AND COALESCE(presentacion_id,0) = ?"
       + "    AND COALESCE(calibre,'') = ?").get(pid, destino, pres, cal);
-    return { ok: false, disponible: 0,
-      motivo: (propio && propio.b > 0) ? 'De eso ya está todo en este pallet'
-        : (libre ? 'De eso no hay nada en cámara' : 'De eso no hay nada en esa ubicación') };
+    if (propio && propio.b > 0) {
+      return { ok: false, disponible: 0, motivo: 'De eso ya está todo en este pallet' };
+    }
+    /* «No hay» y «hay, pero está apilado» son dos problemas distintos y se arreglan
+       distinto: uno se carga, el otro se desarma. Un solo cartel para los dos manda
+       a buscar mercadería que está ahí nomás. */
+    const ap = db.prepare(
+      " SELECT COALESCE(SUM(CASE WHEN tipo = 'ingreso' THEN bultos ELSE -bultos END),0) AS b"
+      + '  FROM gal_procesos'
+      + "  WHERE eliminado_en IS NULL AND NOT " + FUERA_DE_CERRADOS + " AND destino = ?"
+      + "    AND COALESCE(presentacion_id,0) = ? AND COALESCE(calibre,'') = ?"
+      + (lote !== null ? ' AND lote_id = ?' : ''))
+      .get(...[destino, pres, cal].concat(lote !== null ? [lote] : []));
+    return { ok: false, disponible: 0, en_pallet: ap && ap.b > 0 ? 1 : 0,
+      motivo: ap && ap.b > 0
+        ? 'De eso no hay nada fuera de pallets cerrados: las ' + round2(ap.b)
+          + ' cajas que hay están apiladas, y un pallet cerrado se despacha entero.'
+          + ' Si hay que desarmar uno, reabrilo.'
+        : (libre ? 'De eso no hay nada en cámara'
+          : 'De eso no hay nada en esa ubicación') };
   }
 
   const granel = !filas.some((f) => f.bultos != null);
   /* El tope sale del SALDO de esa ubicación y no de la suma de las filas de ingreso:
      después de despachar, las cajas están en un camión y las filas de ingreso siguen
      ahí. Sumarlas ofrecería mover mercadería que ya se fue. */
-  const saldos = stockParaArmar(db).filter((x) => x.destino === destino
+  const saldos = stockParaArmar(db, { suelto: true }).filter((x) => x.destino === destino
     && (x.presentacion_id || 0) === pres
     && (x.calibre || '') === cal
     && (lote === null || x.lote_id === lote)
@@ -3062,17 +3165,12 @@ export function moverAlPallet(db, palletId, d) {
   const detalle = [...tocadas.values()].sort((x, y) =>
     String(x.fecha).localeCompare(String(y.fecha)));
 
+  /* Ya no hay «pallets tocados»: nada sale de un pallet cerrado, así que ningún
+     tarjetón impreso quedó mintiendo. Ese aviso —y el cartel de «quedó VACÍO»—
+     existían porque esto desarmaba pallets cerrados por la espalda. Uno abierto que
+     se achica no tiene etiqueta que contradecir. */
   return { ok: true, id: pid, movidas, detalle,
            bultos: pideB, kilos: granel ? pideK : null,
-           /* De dónde salieron, para poder decirlo en pantalla: sacarle cajas a un
-              pallet cerrado lo deja distinto de su tarjetón, y el que lo hizo tiene que
-              enterarse en el momento, no cuando llega el camión. */
-           /* Los pallets que quedaron distintos. Con el reparto automático pueden
-              ser varios, y cada uno que estuviera CERRADO quedó distinto de su
-              tarjetón: hay que decirlo todo, no sólo el primero. */
-           desde: desde ? palletResumen(db, desde) : null,
-           tocados: [...new Set([...tocadas.values()].map((t) => t.pallet_id))]
-             .filter(Boolean).map((x) => palletResumen(db, x)),
            contenido: contenidoDelPallet(db, pid) };
 }
 
@@ -3349,6 +3447,11 @@ export const DESPACHO_ESTADOS = ['borrador', 'emitido', 'anulado'];
    algún lado y no es un pallet. Sin ese caso quedarían fuera de las dos listas y
    serían kilos que el stock cuenta y que nadie puede despachar nunca. */
 const EN_EL_PISO = " AND (g.pallet_id IS NULL OR p.id IS NULL OR p.estado = 'abierto')";
+// Lo mismo para una consulta SIN el JOIN a gal_pallets: una fila está en el piso si
+// no apunta a ningún pallet cerrado vivo. Un pallet borrado deja sus cajas en el piso,
+// igual que arriba con p.id IS NULL.
+const FUERA_DE_CERRADOS = "(pallet_id IS NULL OR pallet_id NOT IN"
+  + " (SELECT id FROM gal_pallets WHERE estado = 'cerrado' AND eliminado_en IS NULL))";
 
 function saldosDeStock(db, opts) {
   const o = opts || {};
