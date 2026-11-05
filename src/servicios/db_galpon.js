@@ -22,6 +22,7 @@
 // Y SIN FOREIGN KEYS hacia `pa_*`. Con `foreign_keys=ON` (db.js:22) una FK desde acá haría
 // fallar los DELETE de Personal. Regla de CLAUDE.md: JOINs de lectura sí, FKs cruzadas no.
 import db from "./db.js";
+import { ponerEnCero } from "./galpon.js";
 
 db.exec(`
   -- ═══════════════════════════════════════════════════════════════════════════
@@ -679,6 +680,29 @@ try {
     }
   }
 } catch (e) { console.error('[GALPON] migración del producto:', e.message); }
+
+// ── EL GALPÓN EN CERO, PEDIDO EL 5/11/2026 ──────────────────────────────────────────
+// Andy: «dejame todo el proceso en cero y los pallets también porque habíamos cargado
+// algo mal. Por otro lado volvé el numerador al pallet 269». Proceso, pallets y
+// despachos; los volcados se quedan. Ver ponerEnCero() en galpon.js.
+//
+// CORRE UNA SOLA VEZ, marcada en gal_config, como la del producto de arriba. Sin la
+// marca, cada deploy volvería a borrar lo que el galpón cargó desde entonces. La marca
+// guarda el momento exacto del borrado, que es la llave para recuperarlo si hiciera
+// falta.
+try {
+  const hecha = db.prepare("SELECT valor FROM gal_config WHERE clave = 'migr_cero_20261105'").get();
+  if (!hecha) {
+    const r = ponerEnCero(db);
+    if (!r.ok) throw new Error(r.motivo);
+    db.prepare("INSERT INTO gal_config (clave, valor) VALUES ('migr_cero_20261105', ?)")
+      .run(r.cuando + ': ' + r.procesos + ' procesos, ' + r.pallets + ' pallets, '
+           + r.despachos + ' despachos');
+    console.log('[GALPON] en cero: ' + r.procesos + ' procesos, ' + r.pallets
+      + ' pallets y ' + r.despachos + ' despachos marcados como borrados el ' + r.cuando
+      + '. El próximo pallet arranca en 269.');
+  }
+} catch (e) { console.error('[GALPON] poner en cero:', e.message); }
 
 console.log("[GALPON] Tablas de Galpón verificadas");
 
