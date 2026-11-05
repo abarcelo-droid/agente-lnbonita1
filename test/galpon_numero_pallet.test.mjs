@@ -379,8 +379,11 @@ test('el manual explica de dónde arranca el número, con su versión', () => {
 });
 
 test('el manual dice que es un PISO, y el código lo aplica como piso', () => {
+  /* En el código la variable se llama `arranque` y no `piso`: desde la V1143 «el piso»
+     es el lugar —lo que no está en un pallet cerrado— y dos pisos en el mismo archivo
+     son una hora de alguien. En el manual sigue siendo piso, que es como se dice. */
   dice(/piso, no un contador/);
-  assert.match(SVC, /Math\.max\(n \+ 1, piso\)/,
+  assert.match(SVC, /Math\.max\(n \+ 1, arranque\)/,
     'el manual promete un piso y el código no usa el máximo');
 });
 

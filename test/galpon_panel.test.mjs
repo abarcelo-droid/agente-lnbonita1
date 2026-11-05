@@ -1981,14 +1981,15 @@ test('el abridor DEJA LA VENTANA EN BLANCO antes de llenarla', () => {
   assert.match(abrir, /GST\.abierto = null/);
 });
 
-test('EL SELECTOR DE QUÉ CARGAR SALE DEL STOCK, no de un catálogo', () => {
-  // Si saliera del catálogo de presentaciones se podría elegir un artículo que
+test('LOS DOS SELECTORES SALEN DEL STOCK, no de un catálogo', () => {
+  // Si salieran del catálogo de presentaciones se podría elegir un artículo que
   // no tiene una sola caja, y el error aparecería recién al apretar Agregar.
-  assert.match(JS_ST, /GST\.disp\b/);
   const pintar = JS_ST.slice(JS_ST.indexOf('function galDspPintar()'),
-                             JS_ST.indexOf('function galDspItemPick()'));
-  assert.match(pintar, /\(GST\.disp\|\|\[\]\)\.map/,
-    'el selector no se arma con el disponible');
+                             JS_ST.indexOf('function galDspPalPick()'));
+  assert.match(pintar, /\(GST\.piso\|\|\[\]\)\.map/,
+    'el selector del piso no se arma con lo que hay suelto');
+  assert.match(pintar, /GST\.pallets\|\|\[\]/,
+    'el selector de pallets no se arma con los pallets cerrados');
 });
 
 test('el stock se muestra EN CAJAS, con los kilos al lado', () => {

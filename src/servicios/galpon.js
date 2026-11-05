@@ -2755,16 +2755,16 @@ export function contenidoDelPallet(db, palletId) {
    pallets que están en cámara: si acá se arranca de nuevo en 1, el mismo número queda
    escrito en dos pallets distintos y la cámara deja de poder contarse.
 
-   Es un PISO, no un contador: `pallet_desde` se aplica mientras el máximo del año sea
-   menor, y a partir de ahí el que manda vuelve a ser el máximo. Así no se puede
-   retroceder —bajar el piso no reutiliza un número ya impreso— y poner un piso más alto
+   Es un MÍNIMO, no un contador: `pallet_desde` se aplica mientras el máximo del año
+   sea menor, y a partir de ahí el que manda vuelve a ser el máximo. Así no se puede
+   retroceder —bajarlo no reutiliza un número ya impreso— y poner uno más alto
    a mitad de temporada abre un hueco a propósito en vez de pisar algo.
 
-   ── EL PISO VA ATADO A UN AÑO, Y POR ESO SON DOS CLAVES ───────────────────────────
+   ── EL ARRANQUE VA ATADO A UN AÑO, Y POR ESO SON DOS CLAVES ──────────────────────
    El número lleva el año adentro, así que el correlativo arranca de nuevo cada
-   temporada. Un piso sin año se volvería a aplicar en 2027 y el primer pallet de la
-   temporada que viene saldría 00269 otra vez, dejando 268 números que no existen y que
-   nadie podría explicar. `pallet_desde_anio` es el año —dos dígitos— al que el piso le
+   temporada. Un arranque sin año se volvería a aplicar en 2027 y el primer pallet de
+   la temporada que viene saldría 00269 otra vez, dejando 268 números que no existen y
+   que nadie podría explicar. `pallet_desde_anio` es el año —dos dígitos— al que le
    corresponde; en cualquier otro, el correlativo arranca en 1 como siempre. */
 export function proximoNumero(db, fecha) {
   const f = esFecha(fecha) || '';
@@ -2774,10 +2774,10 @@ export function proximoNumero(db, fecha) {
     ' SELECT numero FROM gal_pallets WHERE numero LIKE ?'
     + ' ORDER BY numero DESC LIMIT 1').get(pref + '%');
   const n = ult ? (parseInt(String(ult.numero).slice(pref.length), 10) || 0) : 0;
-  const piso = String(valorConfig(db, 'pallet_desde_anio') || '').trim() === anio
+  const arranque = String(valorConfig(db, 'pallet_desde_anio') || '').trim() === anio
     ? Math.floor(Number(valorConfig(db, 'pallet_desde') || 0)) || 0
     : 0;
-  return pref + String(Math.max(n + 1, piso)).padStart(5, '0');
+  return pref + String(Math.max(n + 1, arranque)).padStart(5, '0');
 }
 
 
@@ -3212,6 +3212,18 @@ export function reabrirPallet(db, id) {
   const p = db.prepare('SELECT * FROM gal_pallets WHERE id = ? AND eliminado_en IS NULL').get(i);
   if (!p) return { ok: false, motivo: 'Ese pallet no existe' };
   if (p.estado !== 'cerrado') return { ok: false, motivo: 'Ese pallet ya está abierto' };
+  /* Y NO SI ESTÁ EN UN DESPACHO. Reabrirlo lo devuelve al piso, y entonces el remito
+     pasaría a llevar cajas sueltas que creía que eran un pallet — con el tarjetón ya
+     impreso. Primero se lo saca del despacho, que es una decisión y se ve. */
+  const enDesp = db.prepare(
+    ' SELECT d.id, d.numero, d.estado FROM gal_procesos g'
+    + '  JOIN gal_despachos d ON d.id = g.despacho_id AND d.eliminado_en IS NULL'
+    + "  WHERE g.pallet_id = ? AND g.tipo = 'salida' AND g.eliminado_en IS NULL"
+    + '  LIMIT 1').get(i);
+  if (enDesp) {
+    return { ok: false, motivo: 'Ese pallet está en el despacho '
+      + (enDesp.numero || '#' + enDesp.id) + ': sacalo de ahí primero' };
+  }
   if ((p.origen || 'proceso') === 'proceso' && palletAbierto(db)) {
     return { ok: false, motivo: 'Ya hay un pallet del día abierto. Cerralo primero.' };
   }
@@ -3322,20 +3334,39 @@ export const DESPACHO_ESTADOS = ['borrador', 'emitido', 'anulado'];
    alias en HAVING se liga a la COLUMNA de la tabla, no a la suma, así que
    un "HAVING bultos > 0" filtraría fila por fila y dejaría pasar las líneas agotadas. Ya
    pasó en este repo con un GROUP BY. */
+/* ── QUÉ ES «EL PISO» ───────────────────────────────────────────────────────────────
+   Andy, 5/11/2026: «en los despachos tenés que tener la opción de cargar del "piso" o
+   pallets. Pero una vez que está armado el pallet NO puede cargarse sólo una parte del
+   pallet».
+
+   EL PISO ES TODO LO QUE NO ESTÁ EN UN PALLET CERRADO: lo suelto, y también lo que
+   está en un pallet ABIERTO. Un pallet abierto es el del día mientras se llena —no
+   tiene número, no tiene tarjetón y nadie lo enzunchó—, así que todavía es mercadería
+   suelta apilada. Cerrarlo es lo que lo convierte en una unidad, y desde ahí sale
+   entero o no sale.
+
+   Un pallet_id que apunta a un pallet BORRADO también es piso: esas cajas están en
+   algún lado y no es un pallet. Sin ese caso quedarían fuera de las dos listas y
+   serían kilos que el stock cuenta y que nadie puede despachar nunca. */
+const EN_EL_PISO = " AND (g.pallet_id IS NULL OR p.id IS NULL OR p.estado = 'abierto')";
+
 function saldosDeStock(db, opts) {
   const o = opts || {};
   const filas = db.prepare(
-    ' SELECT lote_id, lote_nombre, producto, destino, presentacion_id, presentacion,'
-    + '       categoria, calibre, variedad, envase,'
-    + "       COALESCE(SUM(CASE WHEN tipo = 'ingreso' THEN bultos ELSE -bultos END),0) AS bultos,"
-    + "       COALESCE(SUM(CASE WHEN tipo = 'ingreso' THEN kilos ELSE -kilos END),0) AS kilos,"
+    ' SELECT g.lote_id, g.lote_nombre, g.producto, g.destino, g.presentacion_id,'
+    + '       g.presentacion, g.categoria, g.calibre, g.variedad, g.envase,'
+    + "       COALESCE(SUM(CASE WHEN g.tipo = 'ingreso' THEN g.bultos ELSE -g.bultos END),0) AS bultos,"
+    + "       COALESCE(SUM(CASE WHEN g.tipo = 'ingreso' THEN g.kilos ELSE -g.kilos END),0) AS kilos,"
     /* Granel = en esta línea NUNCA hubo bultos. Deducirlo de «bultos llegó a 0» haría
        que una línea de cajas agotada se trate como granel y pida kilos. */
-    + '       COUNT(bultos) AS con_bultos'
-    + '  FROM gal_procesos WHERE eliminado_en IS NULL'
-    + (o.destino ? ' AND destino = ?' : '')
-    + '  GROUP BY lote_id, destino, presentacion_id, categoria, calibre'
-    + '  ORDER BY destino, lote_nombre, presentacion').all(...(o.destino ? [txt(o.destino)] : []));
+    + '       COUNT(g.bultos) AS con_bultos'
+    + '  FROM gal_procesos g'
+    + '  LEFT JOIN gal_pallets p ON p.id = g.pallet_id AND p.eliminado_en IS NULL'
+    + '  WHERE g.eliminado_en IS NULL'
+    + (o.piso ? EN_EL_PISO : '')
+    + (o.destino ? ' AND g.destino = ?' : '')
+    + '  GROUP BY g.lote_id, g.destino, g.presentacion_id, g.categoria, g.calibre'
+    + '  ORDER BY g.destino, g.lote_nombre, g.presentacion').all(...(o.destino ? [txt(o.destino)] : []));
 
   return filas.map((f) => Object.assign(f, {
     bultos: round2(f.bultos), kilos: round2(f.kilos),
@@ -3348,12 +3379,74 @@ function saldosDeStock(db, opts) {
   }));
 }
 
-// ── QUÉ SE PUEDE DESPACHAR ──────────────────────────────────────────────────────────
-// Lo que HAY, por línea: no «200 kg de damasco» sino «la caja 50/55 comercial del lote
-// 10». Es la unidad con la que se carga un camión, y es lo que alimenta el selector de
-// la ventana: por eso las líneas agotadas no salen.
-export function disponibleParaDespacho(db, opts) {
-  return saldosDeStock(db, opts).filter((f) => f.bultos > 0 || f.kilos > 0);
+// ── LO QUE SE PUEDE DESPACHAR DEL PISO ──────────────────────────────────────────────
+// Por línea: no «200 kg de damasco» sino «la caja 50/55 comercial del lote 10». Las
+// líneas agotadas no salen, para que el selector no ofrezca lo que no hay.
+//
+// SE LLAMABA disponibleParaDespacho Y DEVOLVÍA TODO, pallets cerrados incluidos. Ése
+// era el agujero: pedir 97 cajas que estaban en un pallet de 100 lo partía sin decir
+// nada. Ahora lo de los pallets sale por palletsParaDespacho() y entero.
+export function pisoParaDespacho(db, opts) {
+  return saldosDeStock(db, Object.assign({}, opts, { piso: true }))
+    .filter((f) => f.bultos > 0 || f.kilos > 0);
+}
+
+// ── Y LOS PALLETS QUE SE PUEDEN SUBIR AL CAMIÓN ─────────────────────────────────────
+// Cerrados y con algo adentro. Un pallet ABIERTO no entra en esta lista a propósito:
+// no tiene número ni tarjetón, y el camión se carga leyendo el tarjetón. Cerrarlo es
+// un clic y hace falta igual para imprimirlo.
+//
+// Los que ya se fueron en otro despacho se caen solos: contenidoDelPallet() descuenta
+// las salidas, así que un pallet despachado queda sin contenido.
+export function palletsParaDespacho(db, opts) {
+  const o = opts || {};
+  const lim = parseInt(o.limite, 10) || 300;
+  const filas = db.prepare(
+    " SELECT * FROM gal_pallets WHERE eliminado_en IS NULL AND estado = 'cerrado'"
+    + ' ORDER BY numero DESC LIMIT ' + lim).all();
+  const salida = [];
+  for (const x of filas) {
+    const lineas = lineasDePalletParaSalida(db, x.id);
+    if (!lineas.length) continue;
+    if (o.destino && !lineas.some((l) => l.destino === txt(o.destino))) continue;
+    salida.push({
+      id: x.id, numero: x.numero, fecha_empaque: x.fecha_empaque,
+      parcial: x.parcial, mixto: x.mixto, articulos: lineas.length,
+      bultos: round2(lineas.reduce((t, l) => t + (l.bultos || 0), 0)),
+      kilos: round2(lineas.reduce((t, l) => t + (l.kilos || 0), 0)),
+      contenido: contenidoDelPallet(db, x.id),
+    });
+  }
+  return salida;
+}
+
+/* LAS LÍNEAS DE UN PALLET, CON LO QUE UNA SALIDA NECESITA. contenidoDelPallet() es
+   para el tarjetón: agrupa por nombre y no trae lote_id ni presentacion_id, que son
+   justo las columnas con las que se escribe la salida. Agrupa por las MISMAS claves
+   que el saldo del stock, así lo que sale de acá y lo que el stock descuenta son la
+   misma cuenta. */
+function lineasDePalletParaSalida(db, palletId) {
+  const i = parseInt(palletId, 10);
+  if (!Number.isFinite(i)) return [];
+  return db.prepare(
+    ' SELECT lote_id, lote_nombre, producto, destino, presentacion_id, presentacion,'
+    + '       envase, categoria, calibre, variedad,'
+    + "       COALESCE(SUM(CASE WHEN tipo = 'ingreso' THEN bultos ELSE -bultos END),0) AS bultos,"
+    + "       COALESCE(SUM(CASE WHEN tipo = 'ingreso' THEN kilos ELSE -kilos END),0) AS kilos,"
+    + '       COUNT(bultos) AS con_bultos'
+    + '  FROM gal_procesos'
+    + '  WHERE pallet_id = ? AND eliminado_en IS NULL'
+    + '  GROUP BY lote_id, destino, presentacion_id, categoria, calibre'
+    + "  HAVING COALESCE(SUM(CASE WHEN tipo = 'ingreso' THEN kilos"
+    + '                           ELSE -kilos END),0) > 0'
+    + '  ORDER BY lote_nombre, presentacion').all(i).map((f) => Object.assign(f, {
+      bultos: f.con_bultos ? round2(f.bultos) : null,
+      kilos: round2(f.kilos),
+      granel: !f.con_bultos,
+      /* El peso de la caja sale del stock y no del catálogo, igual que en el resto
+         del módulo: lo que se despacha son los kilos que hay. */
+      kg_unidad: f.con_bultos && f.bultos > 0 ? round2(f.kilos / f.bultos) : null,
+    }));
 }
 
 export function despachos(db, opts) {
@@ -3441,13 +3534,24 @@ export function agregarAlDespacho(db, despachoId, d) {
 
   const pres = parseInt(dd.presentacion_id, 10) || 0;
   const cal = txt(dd.calibre) || '';
-  /* Contra el SALDO, no contra el disponible: así una línea agotada puede contestar
-     «hay 0 cajas de eso» en vez de «no existe». */
-  const disp = saldosDeStock(db).find((f) => f.lote_id === lote
-    && f.destino === destino
-    && (f.presentacion_id || 0) === pres
-    && (f.calibre || '') === cal);
-  if (!disp) return { ok: false, motivo: 'De eso nunca entró nada al galpón' };
+  const mismo = (f) => f.lote_id === lote && f.destino === destino
+    && (f.presentacion_id || 0) === pres && (f.calibre || '') === cal;
+
+  /* CONTRA EL SALDO DEL PISO, y contra el saldo y no contra el disponible: así una
+     línea agotada contesta «hay 0 cajas de eso» en vez de «no existe».
+
+     Y si de eso no queda nada suelto pero sí hay en un pallet cerrado, se dice CUÁL
+     es el camino en vez de «no hay». Antes esta misma llamada agarraba las cajas del
+     pallet y lo partía sin avisar: en el papel cerraba y en el playón alguien tenía
+     que cortarle el film a un pallet terminado. */
+  const disp = saldosDeStock(db, { piso: true }).find(mismo);
+  if (!disp) {
+    const enPallet = saldosDeStock(db).find(mismo);
+    return { ok: false, en_pallet: enPallet ? 1 : 0, motivo: enPallet
+      ? 'De eso no queda nada suelto: lo que hay está en pallets cerrados, y un pallet '
+        + 'se despacha entero. Agregalo desde «Un pallet entero».'
+      : 'De eso nunca entró nada al galpón' };
+  }
 
   /* Granel: se despachan kilos. Con presentación: se despachan CAJAS y los kilos los
      calcula el servidor, como en la carga de proceso. */
@@ -3480,7 +3584,11 @@ export function agregarAlDespacho(db, despachoId, d) {
     && x.destino === destino
     && (x.presentacion_id || 0) === pres
     && (x.calibre || '') === cal
-    && (x.bultos > 0 || x.kilos > 0));
+    && (x.bultos > 0 || x.kilos > 0)
+    /* DEL PISO Y DE NINGÚN PALLET CERRADO. El tope de arriba ya se miró contra el
+       piso, así que acá no debería aparecer uno — pero si apareciera, esta línea es
+       la que impide que el reparto se lleve cajas de adentro de un pallet armado. */
+    && (!x.pallet_id || !x.pallet_estado || x.pallet_estado === 'abierto'));
   let restaB = granel ? null : bultos;
   let restaK = granel ? kilos : null;
   const partes = [];
@@ -3525,6 +3633,153 @@ export function agregarAlDespacho(db, despachoId, d) {
            despacho: recalcularDespacho(db, i) };
 }
 
+// ── UN PALLET ENTERO AL CAMIÓN ──────────────────────────────────────────────────────
+// Andy, 5/11/2026: «una vez que está armado el pallet no puede cargarse sólo una parte
+// del pallet».
+//
+// Un pallet cerrado está enzunchado y tiene un tarjetón pegado que dice cuántas cajas
+// lleva. Sacarle 60 de 100 obliga a romperlo en el playón y manda al camión una etiqueta
+// que miente. Así que acá no hay cantidad que elegir: entra lo que tiene adentro.
+//
+// Y SI DE VERDAD HAY QUE PARTIRLO, SE LO PARTE DE VERDAD: se reabre, se sacan las cajas
+// —que vuelven al piso— y se cierra. Queda el pallet con lo que quedó, el piso con lo
+// que salió, y el tarjetón reimpreso dice la verdad. La regla no es una pared, es que
+// partir un pallet sea un acto y no un efecto secundario de cargar un camión.
+export function agregarPalletAlDespacho(db, despachoId, palletId, d) {
+  const i = parseInt(despachoId, 10);
+  const pid = parseInt(palletId, 10);
+  const dd = d || {};
+  if (!Number.isFinite(i) || !Number.isFinite(pid)) return { ok: false, motivo: 'Id inválido' };
+  const x = db.prepare('SELECT * FROM gal_despachos WHERE id = ? AND eliminado_en IS NULL').get(i);
+  if (!x) return { ok: false, motivo: 'Ese despacho no existe o se borró' };
+  if (x.estado !== 'borrador') {
+    return { ok: false, motivo: 'Ese despacho ya está ' + x.estado + ': no se le puede agregar' };
+  }
+  const pal = db.prepare('SELECT * FROM gal_pallets WHERE id = ? AND eliminado_en IS NULL').get(pid);
+  if (!pal) return { ok: false, motivo: 'Ese pallet no existe o se borró' };
+  if (pal.estado !== 'cerrado') {
+    return { ok: false, motivo: 'Ese pallet está abierto: cerralo primero. Al cerrarlo le '
+      + 'sale el número y el tarjetón, que es con lo que se controla el camión.' };
+  }
+
+  /* EL MISMO PALLET NO VA DOS VECES, y se dice en cuál está. Sin esto, el segundo
+     intento fallaría más adelante por otra razón —no queda contenido— y el motivo
+     hablaría de otra cosa.
+
+     Un despacho ANULADO no traba el pallet, y eso NO hace falta escribirlo acá:
+     anular le pone eliminado_en a sus líneas de salida, así que el filtro de
+     eliminadas ya lo deja afuera. Estuvo escrito un rato como `d.estado <> 'anulado'`
+     y la prueba de mutación mostró que sacarlo no cambiaba nada — una condición que
+     nunca puede ser falsa hace creer que el caso está cubierto por ella, y el día que
+     el filtro de arriba cambie nadie va a mirar acá. */
+  const ya = db.prepare(
+    ' SELECT d.id, d.numero, d.estado FROM gal_procesos g'
+    + '  JOIN gal_despachos d ON d.id = g.despacho_id AND d.eliminado_en IS NULL'
+    + "  WHERE g.pallet_id = ? AND g.tipo = 'salida' AND g.eliminado_en IS NULL"
+    + '  LIMIT 1').get(pid);
+  if (ya) {
+    return { ok: false, ya_en: ya.id, motivo: ya.id === i
+      ? 'Ese pallet ya está en este despacho'
+      : 'Ese pallet ya está en el despacho ' + (ya.numero || '#' + ya.id)
+        + ', que está ' + ya.estado };
+  }
+
+  const lineas = lineasDePalletParaSalida(db, pid);
+  if (!lineas.length) {
+    return { ok: false, motivo: 'Ese pallet no tiene nada adentro' };
+  }
+
+  /* Se CONGELA lo que se despachó, igual que en la carga y en el pallet: una línea de
+     salida por artículo, todas con el pallet para que después se sepa de dónde salió
+     cada caja —y para que el que carga el camión pueda escanear el tarjetón. */
+  let primera = null;
+  for (const l of lineas) {
+    const r = db.prepare(
+      ' INSERT INTO gal_procesos (uuid, fecha, lote_id, lote_nombre, producto, destino,'
+      + '   presentacion_id, presentacion, envase, categoria, calibre, variedad,'
+      + '   bultos, kg_unidad, kilos, tipo, pallet_id, despacho_id, observacion,'
+      + '   usuario_id, usuario)'
+      + " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'salida',?,?,?,?,?)").run(
+      /* El uuid va SÓLO en la primera línea: es UNIQUE y sirve para que un doble clic
+         no duplique el pallet entero, no cada renglón. */
+      primera === null ? txt(dd.uuid) : null,
+      x.fecha, l.lote_id, txt(l.lote_nombre), txt(l.producto), l.destino,
+      l.presentacion_id || null, txt(l.presentacion), txt(l.envase),
+      txt(l.categoria), txt(l.calibre), txt(l.variedad),
+      l.bultos, l.kg_unidad, l.kilos,
+      pid, i, txt(dd.observacion),
+      numPos(dd.usuario_id, 0) || null, txt(dd.usuario));
+    if (primera === null) primera = r.lastInsertRowid;
+  }
+
+  return { ok: true, id: primera, pallet_id: pid, numero: pal.numero,
+           articulos: lineas.length,
+           bultos: round2(lineas.reduce((t, l) => t + (l.bultos || 0), 0)),
+           kilos: round2(lineas.reduce((t, l) => t + (l.kilos || 0), 0)),
+           despacho: recalcularDespacho(db, i) };
+}
+
+// Y SE SACA ENTERO TAMBIÉN. Sacar un renglón de un pallet mixto dejaría adentro del
+// camión medio pallet, que es justo lo que esta regla evita.
+export function sacarPalletDelDespacho(db, despachoId, palletId) {
+  const i = parseInt(despachoId, 10);
+  const pid = parseInt(palletId, 10);
+  if (!Number.isFinite(i) || !Number.isFinite(pid)) return { ok: false, motivo: 'Id inválido' };
+  const x = db.prepare('SELECT * FROM gal_despachos WHERE id = ? AND eliminado_en IS NULL').get(i);
+  if (!x) return { ok: false, motivo: 'Ese despacho no existe o se borró' };
+  if (x.estado !== 'borrador') {
+    return { ok: false, motivo: 'Ese despacho ya está ' + x.estado + ': anulalo entero' };
+  }
+  const r = db.prepare(
+    " UPDATE gal_procesos SET eliminado_en = datetime('now','localtime')"
+    + "  WHERE despacho_id = ? AND pallet_id = ? AND tipo = 'salida'"
+    + '    AND eliminado_en IS NULL').run(i, pid);
+  if (!r.changes) return { ok: false, motivo: 'Ese pallet no está en este despacho' };
+  return { ok: true, lineas: Number(r.changes), despacho: recalcularDespacho(db, i) };
+}
+
+/* ── LO QUE LLEVA EL CAMIÓN, COMO SE CARGA ─────────────────────────────────────────
+   Un despacho de tres pallets y cuarenta cajas sueltas son tres bultos grandes y una
+   pila, no nueve renglones de artículos. itemsDelDespacho() sigue devolviendo las
+   líneas —el remito y los totales salen de ahí— y esto las agrupa en las UNIDADES con
+   las que alguien sube cosas a un camión.
+
+   Lo que salió de un pallet ABIERTO cuenta como piso: ahí no había ninguna unidad. */
+export function unidadesDelDespacho(db, despachoId) {
+  const items = itemsDelDespacho(db, despachoId);
+  const pal = new Map();
+  const salida = [];
+  for (const f of items) {
+    let p = null;
+    if (f.pallet_id) {
+      if (!pal.has(f.pallet_id)) {
+        pal.set(f.pallet_id, db.prepare(
+          'SELECT numero, estado FROM gal_pallets WHERE id = ?').get(f.pallet_id) || null);
+      }
+      p = pal.get(f.pallet_id);
+    }
+    if (!p || p.estado !== 'cerrado') {
+      salida.push({ tipo: 'piso', id: f.id, lote_id: f.lote_id,
+        lote_nombre: f.lote_nombre, destino: f.destino, presentacion: f.presentacion,
+        calibre: f.calibre, bultos: f.bultos, kilos: f.kilos });
+      continue;
+    }
+    let u = salida.find((y) => y.tipo === 'pallet' && y.pallet_id === f.pallet_id);
+    if (!u) {
+      u = { tipo: 'pallet', pallet_id: f.pallet_id, numero: p.numero,
+            articulos: 0, bultos: 0, kilos: 0, lineas: [] };
+      salida.push(u);
+    }
+    u.articulos++;
+    u.bultos = round2(u.bultos + (f.bultos || 0));
+    u.kilos = round2(u.kilos + (f.kilos || 0));
+    u.lineas.push({ id: f.id, lote_nombre: f.lote_nombre, destino: f.destino,
+                    presentacion: f.presentacion, calibre: f.calibre,
+                    bultos: f.bultos, kilos: f.kilos });
+  }
+  return salida;
+}
+
 export function sacarDelDespacho(db, procesoId) {
   const i = parseInt(procesoId, 10);
   if (!Number.isFinite(i)) return { ok: false, motivo: 'Id inválido' };
@@ -3535,6 +3790,19 @@ export function sacarDelDespacho(db, procesoId) {
   const x = db.prepare('SELECT estado FROM gal_despachos WHERE id = ?').get(f.despacho_id);
   if (x && x.estado !== 'borrador') {
     return { ok: false, motivo: 'Ese despacho ya está ' + x.estado + ': anulalo entero' };
+  }
+  /* NI UN RENGLÓN DE UN PALLET CERRADO. Un pallet mixto son varios renglones: sacar
+     uno dejaría en el camión medio pallet, que es exactamente lo que esta regla
+     evita. Se saca el pallet entero, y la pantalla ya ofrece ese botón y no éste. */
+  if (f.pallet_id) {
+    const pal = db.prepare(
+      'SELECT numero, estado FROM gal_pallets WHERE id = ? AND eliminado_en IS NULL')
+      .get(f.pallet_id);
+    if (pal && pal.estado === 'cerrado') {
+      return { ok: false, pallet_id: f.pallet_id,
+        motivo: 'Ese renglón es parte del pallet ' + (pal.numero || '#' + f.pallet_id)
+          + ': el pallet se saca entero.' };
+    }
   }
   db.prepare("UPDATE gal_procesos SET eliminado_en = datetime('now','localtime') WHERE id = ?")
     .run(i);

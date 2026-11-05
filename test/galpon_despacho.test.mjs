@@ -25,7 +25,7 @@ import { DatabaseSync } from 'node:sqlite';
 
 import {
   guardarPresentacion, guardarDatosDeLote, registrarProceso,
-  disponibleParaDespacho, despachos, itemsDelDespacho, abrirDespacho,
+  pisoParaDespacho, despachos, itemsDelDespacho, abrirDespacho,
   editarDespacho, agregarAlDespacho, sacarDelDespacho, emitirDespacho,
   anularDespacho, borrarDespacho, despachoPorNumero, proximoNumeroDespacho,
   stockGalpon, stockPorProducto, stockPorLote, stockPorPresentacion, presentaciones,
@@ -110,7 +110,7 @@ test('el disponible es el stock, no el catálogo', () => {
   const a = art(db, 'Caja', '50/55');
   art(db, 'Caja', '60/70');          // en el catálogo y sin una sola caja
   entra(db, a, 40, '1');
-  const d = disponibleParaDespacho(db);
+  const d = pisoParaDespacho(db);
   assert.equal(d.length, 1, 'apareció un artículo que no tiene stock');
   assert.equal(d[0].bultos, 40);
   assert.equal(d[0].calibre, '50/55');
@@ -126,7 +126,7 @@ test('EL PESO DE UNA CAJA SALE DEL STOCK, NO DEL CATÁLOGO', () => {
   db.prepare("INSERT INTO gal_procesos (uuid,fecha,lote_id,destino,presentacion_id,"
     + "presentacion,calibre,bultos,kg_unidad,kilos,tipo) "
     + "VALUES ('x',?,10,'comercial',?,'Caja','50/55',100,8.2,820,'ingreso')").run(F, a);
-  const d = disponibleParaDespacho(db)[0];
+  const d = pisoParaDespacho(db)[0];
   assert.equal(d.kg_unidad, 8.2, 'tomó el peso del catálogo en vez del stock');
 
   const x = abrirDespacho(db, { fecha: F, destinatario: 'San Gerónimo' });
@@ -135,7 +135,7 @@ test('EL PESO DE UNA CAJA SALE DEL STOCK, NO DEL CATÁLOGO', () => {
   assert.equal(r.ok, true);
   assert.equal(r.kilos, 820);
   // Y el stock queda en CERO, no en 20.
-  assert.equal(disponibleParaDespacho(db).length, 0);
+  assert.equal(pisoParaDespacho(db).length, 0);
 });
 
 // ══════════════════════════════════════════════════════════════════════════
@@ -306,7 +306,7 @@ test('despachar DESCUENTA del stock en los tres cortes', () => {
   agregarAlDespacho(db, x.id, { lote_id: 10, destino: 'comercial',
     presentacion_id: a, calibre: '50/55', bultos: 40 });
 
-  assert.equal(disponibleParaDespacho(db)[0].bultos, 60);
+  assert.equal(pisoParaDespacho(db)[0].bultos, 60);
   assert.equal(cajasEnStock(db), 60);
   assert.equal(stockPorProducto(db)[0].bultos, 60);
   assert.equal(stockPorLote(db)[0].kilos, 480);
@@ -326,7 +326,7 @@ test('ANULAR DEVUELVE LAS CAJAS AL STOCK', () => {
 
   anularDespacho(db, x.id, 'no vino el camión');
   assert.equal(cajasEnStock(db), 100, 'las cajas no volvieron');
-  assert.equal(disponibleParaDespacho(db)[0].bultos, 100);
+  assert.equal(pisoParaDespacho(db)[0].bultos, 100);
   assert.equal(itemsDelDespacho(db, x.id).length, 0);
   const d = despachos(db, {}).filter((y) => y.id === x.id)[0];
   assert.equal(d.estado, 'anulado');

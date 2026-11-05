@@ -227,9 +227,15 @@ t('la respuesta de /stock trae TODO lo que la pantalla lee', async () => {
   try {
     const j = await (await s.pegar('/stock')).json();
     assert.equal(j.ok, true);
-    for (const k of ['hoy', 'destinos', 'stock', 'lotes', 'disponible', 'despachos']) {
+    /* «piso» y «pallets» son las DOS maneras de cargar un camión (V1143). Antes
+       había una sola lista, «disponible», que mezclaba lo suelto con lo que estaba
+       adentro de un pallet cerrado — y por eso se podía pedir una cantidad que
+       terminaba partiendo un pallet armado. */
+    for (const k of ['hoy', 'destinos', 'stock', 'lotes', 'piso', 'pallets', 'despachos']) {
       assert.ok(k in j, 'falta ' + k + ' en la respuesta de /stock');
     }
+    assert.ok(!('disponible' in j),
+      'volvió la lista que mezclaba el piso con los pallets cerrados');
     // Y el stock es un OBJETO con destinos, no un array: tratarlo como array
     // es exactamente lo que rompió la pantalla.
     assert.ok(!Array.isArray(j.stock), 'stock volvió a ser un array');

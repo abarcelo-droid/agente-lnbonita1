@@ -567,3 +567,96 @@ t('el arranque lo toca sólo el administrador', async () => {
     assert.equal((await s.pegar('/config', put({ pallet_desde: 1 }))).status, 403);
   } finally { s.cerrar(); }
 });
+
+// ── 📦 EL PALLET VA ENTERO ────────────────────────────────────────────────
+// Andy, 5/11/2026: «una vez que está armado el pallet no puede cargarse sólo
+// una parte». Acá se prueba el CABLEADO: que las dos rutas estén montadas,
+// que un pedido imposible conteste 400 y no 500, y que sin sesión reboten.
+async function conPallet(s, db) {
+  const a = (await (await s.pegar('/presentaciones', json({
+    nombre: 'Carton', destino: 'comercial', envase: 'Caja 8 kg',
+    por_bulto: 1, kg_unidad: 8, calibre: '50/55', categoria: 'I' }))).json()).id;
+  /* pa_lotes es de Personal y esta base sólo trae las tablas de otros módulos que el
+     galpón lee: la carga de proceso necesita el lote y su cultivo, así que se
+     crean acá. */
+  db.exec("CREATE TABLE IF NOT EXISTS pa_lotes (id INTEGER PRIMARY KEY, nombre TEXT,"
+    + ' finca TEXT, sector_id INTEGER, activo INTEGER DEFAULT 1);'
+    + " INSERT INTO pa_lotes (id,nombre,finca) VALUES (10,'L-A','El Abuelo');"
+    + ' CREATE TABLE IF NOT EXISTS pa_cultivos_lote (id INTEGER PRIMARY KEY AUTOINCREMENT,'
+    + '   lote_id INTEGER, cultivo TEXT, campaña TEXT, es_perenne INTEGER DEFAULT 0);'
+    + " INSERT INTO pa_cultivos_lote (lote_id,cultivo,es_perenne) VALUES (10,'Damasco',1);");
+  await s.pegar('/procesos', json({ fecha: '2026-12-15', lote_id: 10,
+    presentacion_id: a, bultos: 60, uuid: 'p1' }));
+  const pid = db.prepare("SELECT id FROM gal_pallets WHERE estado = 'abierto'").get().id;
+  await s.pegar('/pallets/' + pid + '/cerrar', json({}));
+  return pid;
+}
+
+t('POST /despachos/:id/pallets sube el pallet entero', async () => {
+  const db = base();
+  const s = await servidor(db, ADMIN);
+  try {
+    const pid = await conPallet(s, db);
+    const d = await (await s.pegar('/despachos', json({ fecha: '2026-12-15',
+      destinatario: 'San Gerónimo' }))).json();
+    const r = await (await s.pegar('/despachos/' + d.id + '/pallets',
+      json({ pallet_id: pid }))).json();
+    assert.equal(r.ok, true, r.error);
+    assert.equal(r.bultos, 60);
+    assert.equal(r.despacho.bultos, 60);
+  } finally { s.cerrar(); }
+});
+
+t('y DELETE lo saca entero', async () => {
+  const db = base();
+  const s = await servidor(db, ADMIN);
+  try {
+    const pid = await conPallet(s, db);
+    const d = await (await s.pegar('/despachos', json({ fecha: '2026-12-15' }))).json();
+    await s.pegar('/despachos/' + d.id + '/pallets', json({ pallet_id: pid }));
+    const r = await (await s.pegar('/despachos/' + d.id + '/pallets/' + pid,
+      { method: 'DELETE' })).json();
+    assert.equal(r.ok, true, r.error);
+    assert.equal(r.despacho.bultos, 0);
+  } finally { s.cerrar(); }
+});
+
+t('EL MISMO PALLET DOS VECES CONTESTA 400, no 500', async () => {
+  /* Un 500 le dice al operador «se rompió» cuando lo que pasó es que ya lo
+     había subido. Son dos reacciones distintas: una es llamar, la otra seguir. */
+  const db = base();
+  const s = await servidor(db, ADMIN);
+  try {
+    const pid = await conPallet(s, db);
+    const d = await (await s.pegar('/despachos', json({ fecha: '2026-12-15' }))).json();
+    await s.pegar('/despachos/' + d.id + '/pallets', json({ pallet_id: pid }));
+    const r = await s.pegar('/despachos/' + d.id + '/pallets', json({ pallet_id: pid }));
+    assert.equal(r.status, 400);
+    assert.match((await r.json()).error, /ya está en este despacho/i);
+  } finally { s.cerrar(); }
+});
+
+t('/stock trae el piso y los pallets por separado', async () => {
+  const db = base();
+  const s = await servidor(db, ADMIN);
+  try {
+    const pid = await conPallet(s, db);
+    const j = await (await s.pegar('/stock')).json();
+    assert.deepEqual(j.piso, [], 'un pallet cerrado apareció en el piso');
+    assert.equal(j.pallets.length, 1);
+    assert.equal(j.pallets[0].id, pid);
+    assert.equal(j.pallets[0].bultos, 60);
+    assert.ok(Array.isArray(j.pallets[0].contenido), 'la pantalla no puede decir qué lleva');
+  } finally { s.cerrar(); }
+});
+
+t('sin sesión no se sube ni se saca un pallet', async () => {
+  const s = await servidor(base(), null);
+  try {
+    for (const [ruta, op] of [['/despachos/1/pallets', json({ pallet_id: 1 })],
+                              ['/despachos/1/pallets/1', { method: 'DELETE' }]]) {
+      const r = await s.pegar(ruta, op);
+      assert.ok(r.status === 401 || r.status === 403, ruta + ' contestó ' + r.status);
+    }
+  } finally { s.cerrar(); }
+});

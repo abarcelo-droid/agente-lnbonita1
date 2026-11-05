@@ -28,7 +28,7 @@ import {
   palletAbierto, cerrarPallet, reabrirPallet, contenidoDelPallet,
   stockParaArmar, stockPorArticulo, palletsArmados, abrirPalletArmado, moverAlPallet,
   sacarDelPalletArmado, lineasDelPallet, palletResumen,
-  abrirDespacho, agregarAlDespacho, emitirDespacho,
+  abrirDespacho, agregarAlDespacho, agregarPalletAlDespacho, emitirDespacho,
 } from '../src/servicios/galpon.js';
 
 const F = '2026-12-15';
@@ -528,10 +528,13 @@ test('lo DESPACHADO no se ofrece para armar', () => {
   assert.equal(stock(db).bultos, 0, 'mover cambió el stock');
 });
 
-test('LA SALIDA DICE DE QUÉ UBICACIÓN SALIÓ, y se parte si toca varias', () => {
-  // Un despacho de 97 cajas puede llevarse 60 de un pallet y 37 de otro. Sin
-  // esto el total del stock baja y las ubicaciones no, y son dos cuentas que
-  // tienen que dar lo mismo.
+test('UN DESPACHO POR CANTIDAD NO PARTE UN PALLET CERRADO', () => {
+  /* Andy, 5/11/2026: «una vez que está armado el pallet no puede cargarse sólo
+     una parte del pallet».
+
+     Hasta la V1143 este MISMO caso pasaba en verde y era el bug: 97 cajas se
+     llevaban 60 de un pallet cerrado y 37 del piso, el pallet quedaba en 0 y su
+     tarjetón —impreso, pegado y diciendo 60— se iba con el camión. */
   const db = base();
   const a = art(db, 'Carton', '50/55');
   entra(db, a, 60, '1');
@@ -544,16 +547,58 @@ test('LA SALIDA DICE DE QUÉ UBICACIÓN SALIÓ, y se parte si toca varias', () =
   const d = abrirDespacho(db, { fecha: F });
   const r = agregarAlDespacho(db, d.id, { lote_id: 10, destino: 'comercial',
     presentacion_id: a, calibre: '50/55', bultos: 97 });
+  assert.equal(r.ok, false, 'partió el pallet cerrado');
+  assert.match(r.motivo, /Hay 40 cajas/, 'no dice cuánto hay en el piso: ' + r.motivo);
+  // Y no escribió NADA: el pallet sigue entero y el stock no se movió.
+  assert.equal(palletResumen(db, unoId).bultos, 60);
+  assert.equal(stock(db).bultos, 100);
+});
+
+test('el pallet cerrado va ENTERO, y el piso aparte', () => {
+  const db = base();
+  const a = art(db, 'Carton', '50/55');
+  entra(db, a, 60, '1');
+  const unoId = palletAbierto(db).id;
+  cerrarPallet(db, unoId, {});
+  entra(db, a, 40, '2');
+
+  const d = abrirDespacho(db, { fecha: F });
+  const rp = agregarPalletAlDespacho(db, d.id, unoId);
+  assert.equal(rp.ok, true, rp.motivo);
+  assert.equal(rp.bultos, 60);
+  const r2 = agregarAlDespacho(db, d.id, { lote_id: 10, destino: 'comercial',
+    presentacion_id: a, calibre: '50/55', bultos: 37 });
+  assert.equal(r2.ok, true, r2.motivo);
+  emitirDespacho(db, d.id);
+
+  assert.equal(palletResumen(db, unoId).bultos, 0, 'el pallet no salió entero');
+  assert.equal(stock(db).bultos, 3);
+  // Y las ubicaciones suman exactamente el stock, que es la invariante.
+  assert.equal(stockParaArmar(db).reduce((t, x) => t + x.bultos, 0), 3);
+});
+
+test('LA SALIDA DICE DE QUÉ UBICACIÓN SALIÓ, y se parte entre varias DEL PISO', () => {
+  /* Partir entre ubicaciones del piso sigue estando bien: son cajas sueltas y
+     apiladas, nadie las enzunchó. Sin esto el total del stock baja y las
+     ubicaciones no, y son dos cuentas que tienen que dar lo mismo. */
+  const db = base();
+  const a = art(db, 'Carton', '50/55');
+  // Una suelta de verdad y otra en el pallet del día, que todavía está abierto.
+  registrarProceso(db, { fecha: F, lote_id: 10, presentacion_id: a, bultos: 60,
+    uuid: 's1', sin_pallet: 1 });
+  entra(db, a, 40, '2');
+  const delDia = palletAbierto(db).id;
+
+  const d = abrirDespacho(db, { fecha: F });
+  const r = agregarAlDespacho(db, d.id, { lote_id: 10, destino: 'comercial',
+    presentacion_id: a, calibre: '50/55', bultos: 97 });
   assert.equal(r.ok, true, r.motivo);
   assert.equal(r.partes, 2, 'escribió una sola salida para dos ubicaciones');
   emitirDespacho(db, d.id);
 
-  // El primero quedó vacío y el segundo con 3.
-  assert.equal(palletResumen(db, unoId).bultos, 0);
-  assert.equal(palletResumen(db, dosId).bultos, 3);
   assert.equal(stock(db).bultos, 3);
-  // Y las ubicaciones suman exactamente el stock, que es la invariante.
   assert.equal(stockParaArmar(db).reduce((t, x) => t + x.bultos, 0), 3);
+  void delDia;
 });
 
 // ══════════════════════════════════════════════════════════════════════════
