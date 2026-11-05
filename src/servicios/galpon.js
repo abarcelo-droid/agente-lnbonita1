@@ -4005,3 +4005,56 @@ export function despachoPorNumero(db, numero) {
     ' SELECT * FROM gal_despachos WHERE numero = ? AND eliminado_en IS NULL').get(n);
   return x ? Object.assign(x, { items: itemsDelDespacho(db, x.id) }) : null;
 }
+
+
+// ════════════════════════════════════════════════════════════════════════════════════
+// 🧹 PONER EL GALPÓN EN CERO
+// ════════════════════════════════════════════════════════════════════════════════════
+// Andy, 5/11/2026: «dejame todo el proceso en cero y los pallets también porque
+// habíamos cargado algo mal. Por otro lado volvé el numerador al pallet 269».
+//
+// Se borran las cargas de PROCESO, los PALLETS y los DESPACHOS. Los despachos van
+// porque son salidas de esas mismas cajas: sin ellas quedarían apuntando a nada. Lo
+// que NO se toca: los volcados (lo que entró a la tolva), la configuración, las
+// presentaciones, las cuadrillas y sus tarjetas, y los datos de cada lote.
+//
+// SE MARCA, NO SE DESTRUYE. Todo lo borrado lleva el MISMO eliminado_en, que queda
+// anotado en la marca de gal_config: si hubiera que recuperarlo, es un
+// UPDATE ... SET eliminado_en = NULL WHERE eliminado_en = '<ese momento>' por tabla.
+//
+// LOS NÚMEROS DE PALLET SE LIBERAN. numero es UNIQUE y proximoNumero() mira el más
+// alto que empiece con el prefijo, esté borrado o no: dejar «PC-26-00300» en una fila
+// borrada haría que el próximo fuera el 301 y no el 269. Por eso se les antepone
+// «BORRADO-», que no empieza con el prefijo y conserva el número viejo para quien lo
+// busque. Incluye los pallets que ya estaban borrados de antes: también tienen número.
+//
+// Y EL ARRANQUE VUELVE A 269 para este año, aunque alguien lo haya cambiado en
+// Configuración: es exactamente lo que se pidió.
+export function ponerEnCero(db, opts) {
+  const o = opts || {};
+  const t = o.cuando
+    || db.prepare("SELECT datetime('now','localtime') AS t").get().t;
+  const anio = String(o.anio || new Date().getFullYear()).slice(-2);
+  db.exec('BEGIN');
+  try {
+    const procesos = db.prepare(
+      'UPDATE gal_procesos SET eliminado_en = ? WHERE eliminado_en IS NULL').run(t).changes;
+    const despachos = db.prepare(
+      'UPDATE gal_despachos SET eliminado_en = ? WHERE eliminado_en IS NULL').run(t).changes;
+    const pallets = db.prepare(
+      'UPDATE gal_pallets SET eliminado_en = ? WHERE eliminado_en IS NULL').run(t).changes;
+    const numeros = db.prepare(
+      " UPDATE gal_pallets SET numero = 'BORRADO-' || numero"
+      + " WHERE numero IS NOT NULL AND numero NOT LIKE 'BORRADO-%'").run().changes;
+    const cfg = db.prepare(
+      ' INSERT INTO gal_config (clave, valor) VALUES (?, ?)'
+      + ' ON CONFLICT(clave) DO UPDATE SET valor = excluded.valor');
+    cfg.run('pallet_desde', '269');
+    cfg.run('pallet_desde_anio', anio);
+    db.exec('COMMIT');
+    return { ok: true, cuando: t, procesos, pallets, despachos, numeros };
+  } catch (e) {
+    try { db.exec('ROLLBACK'); } catch { /* ya no había transacción */ }
+    return { ok: false, motivo: e.message };
+  }
+}
