@@ -2299,3 +2299,92 @@ test('y las columnas cierran: tantos <col> como <th>, 100% y un colspan al día'
   assert.match(JS_PR, new RegExp('colspan="' + ths.length + '" class="gpr-vacio"'),
     'el cartel de vacío abarca otra cantidad de columnas que la tabla');
 });
+
+// ══════════════════════════════════════════════════════════════════════════
+// 🧱 LO QUE SE PUEDE APILAR EN UN PALLET: NADA DE UNO CERRADO (V1146)
+// ══════════════════════════════════════════════════════════════════════════
+// Andy, 5/11/2026: «me tiene que aparecer solo lo que no tiene pallet
+// cerrado... sino va a quedar duplicado».
+const diceSt = lector(manualDe('galpon-stock'));
+
+test('MANUAL ST: «nada de un pallet cerrado», y la ruta pide sólo el piso', () => {
+  diceSt(/Nada de un pallet cerrado <span class="ver">V1146<\/span>/);
+  diceSt(/Lo que está en un pallet <b>cerrado<\/b> no aparece/);
+  diceSt(/Uno <b>abierto<\/b> sí se ofrece/);
+  // Y los DOS cortes de la ruta del armado lo piden.
+  const arm = RUTA.slice(RUTA.indexOf("router.get('/armado'"),
+    RUTA.indexOf("router.post('/armado'"));
+  assert.match(arm, /stockPorArticulo\(db, \{ destino: req\.query\.destino, suelto: true \}\)/);
+  assert.match(arm, /stock: stockParaArmar\(db, \{ destino: req\.query\.destino, suelto: true \}\)/);
+  // Y la opción filtra de verdad: con la MISMA definición de piso que el
+  // despacho, no con una segunda que algún día diga otra cosa.
+  assert.match(cuerpoServicio('export function stockParaArmar('),
+    /o\.suelto \? EN_EL_PISO : ''/);
+  assert.match(SERV, /const EN_EL_PISO = " AND \(g\.pallet_id IS NULL OR p\.id IS NULL OR p\.estado = 'abierto'\)";/);
+});
+
+test('MANUAL ST: y mover tampoco se mete adentro de un pallet cerrado', () => {
+  /* El filtro de la lista es la pantalla; el que decide es el servidor. Sin esta
+     mitad, cualquiera que mande el pedido a mano sigue partiendo pallets. */
+  const mov = cuerpoServicio('export function moverAlPallet(');
+  assert.match(mov, /if \(o && o\.estado === 'cerrado'\) \{/);
+  assert.match(mov, /un pallet cerrado no se reparte/);
+  // La condición va en TODAS las candidatas, no sólo en «de donde sea».
+  assert.match(mov, /"COALESCE\(calibre,''\) = \?",\s*FUERA_DE_CERRADOS\];/);
+  assert.match(SERV, /const FUERA_DE_CERRADOS = "\(pallet_id IS NULL OR pallet_id NOT IN"/);
+  // Y el tope también: si mirara todo el stock, dejaría pedir lo que está apilado.
+  assert.match(mov, /stockParaArmar\(db, \{ suelto: true \}\)/);
+});
+
+test('MANUAL ST: el contrapeso — dice cuánto hay apilado y en cuántos pallets', () => {
+  /* Sin esto la lista pasa de 2.109 cajas a 40 y parece que se perdió
+     mercadería. El cartel es parte del cambio, no un adorno. */
+  diceSt(/dice <b>cuántas cajas son y en cuántos pallets cerrados<\/b>/);
+  assert.match(RUTA, /en_pallets: enPallets\(db, \{ destino: req\.query\.destino \}\)/);
+  assert.match(JS_ST, /GST\.armenp = j\.en_pallets\|\|null;/);
+  assert.match(JS_ST, /cajas más en '\+galStNum\(n,0\)/);
+  // Y cuenta SÓLO los cerrados, que son los que no se ofrecen; y no los que ya se
+  // fueron en un camión.
+  const en = cuerpoServicio('export function enPallets(');
+  assert.equal((en.match(/AND p\.estado = 'cerrado'/g) || []).length, 2,
+    'cuenta como no ofrecido lo que está en un pallet abierto');
+  assert.match(en, /GROUP BY g\.pallet_id/);
+  assert.match(en, /HAVING COALESCE\(SUM\(CASE WHEN g\.tipo = 'ingreso'/);
+});
+
+test('MANUAL ST: «hay que desarmarlo», y reabrirlo alcanza', () => {
+  diceSt(/Para usar las cajas de un pallet cerrado hay que desarmarlo<\/b>/);
+  diceSt(/se lo <b>reabre<\/b>/);
+  // Reabrir existe, y lo reabierto vuelve a la lista sin más pasos: porque el
+  // piso es «no está en un pallet cerrado», no «no está en ningún pallet».
+  assert.match(RUTA, /router\.post\('\/pallets\/:id\/reabrir'/);
+  assert.match(PANEL, /onclick="galArmReabrir\(\)"/);
+  assert.match(JS_ST, /se '\s*\+ 'lo reabre y sus cajas vuelven a aparecer acá/);
+});
+
+test('MANUAL ST: «Pallets en cámara» están todos, y el del proceso marcado', () => {
+  diceSt(/Pallets en cámara <span class="ver">V1146<\/span>/);
+  diceSt(/llevan el cartelito/);
+  assert.match(PANEL, /<h3 class="gst-t"[^>]*>Pallets en cámara/);
+  assert.match(RUTA, /palletsArmados\(db, \{ estado: req\.query\.estado, todos: true \}\)/);
+  // Y el servicio deja pasar los del proceso sólo con esa opción.
+  const pa = cuerpoServicio('export function palletsArmados(');
+  assert.match(pa, /if \(!o\.todos\) w\.push\("COALESCE\(origen,'proceso'\) = 'armado'"\)/);
+  // El despachado entero queda en cero y sale de la lista.
+  diceSt(/despachado entero deja de figurar<\/b>/);
+  assert.match(pa, /!o\.todos \|\| x\.estado === 'abierto' \|\| x\.contenido\.length/);
+  // Y la pantalla lo distingue.
+  assert.match(JS_ST, /gst-est gst-pro">del proceso/);
+  assert.match(PANEL, /#sec-galpon-stock \.gst-pro\{/,
+    'la chapa del proceso no tiene una sola regla de CSS');
+});
+
+test('y el aviso de «salieron de PC-00007» no quedó escrito al pedo', () => {
+  /* Era el parche de cuando esto desarmaba pallets por la espalda. Dejarlo es
+     dejar código que no puede correr, y el que lo lea mañana va a creer que sí. */
+  assert.ok(!/tocados/.test(JS_ST), 'la pantalla sigue leyendo j.tocados');
+  assert.ok(!/tocados: \[/.test(cuerpoServicio('export function moverAlPallet(')),
+    'el servicio sigue devolviendo los pallets tocados');
+  assert.ok(!/YA CERRADO/.test(JS_ST),
+    'el selector sigue avisando que va a desarmar un pallet cerrado');
+});

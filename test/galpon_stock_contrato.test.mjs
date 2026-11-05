@@ -155,6 +155,39 @@ const json = (b) => ({ method: 'POST', headers: { 'Content-Type': 'application/j
                        body: JSON.stringify(b) });
 const HOY = new Date().toLocaleDateString('en-CA');
 
+/* BAJAR AL PISO LO QUE CAYÓ EN EL PALLET DEL DÍA. Una carga de /procesos entra
+   siempre al pallet que se está llenando, y desde la V1146 lo que está en un
+   pallet no se ofrece para armar otro. Esto hace por la API lo que el operador
+   hace a mano: reabre lo que esté cerrado y le saca los renglones.
+
+   Y es el camino de verdad, no un atajo del test: el mismo que recorre el que
+   junta tres pallets parciales en uno para el camión. */
+async function alPiso(s, db) {
+  const vaciar = async (pid) => {
+    for (const r of db.prepare('SELECT id FROM gal_procesos WHERE pallet_id = ?'
+      + " AND eliminado_en IS NULL AND tipo = 'ingreso'").all(pid)) {
+      await s.pegar('/pallets/sacar/' + r.id, json({}));
+    }
+    await s.pegar('/pallets/' + pid, { method: 'DELETE' });
+  };
+  /* DE A UNO Y EL ABIERTO PRIMERO: un pallet del proceso no se reabre mientras
+     haya otro abierto (sería la ambigüedad de a dónde cae la caja siguiente), así
+     que el vacío se saca del medio antes de reabrir el que sigue. */
+  for (;;) {
+    const ab = db.prepare("SELECT id FROM gal_pallets WHERE estado = 'abierto'"
+      + ' AND eliminado_en IS NULL').get();
+    if (!ab) break;
+    await vaciar(ab.id);
+  }
+  for (;;) {
+    const ce = db.prepare("SELECT id FROM gal_pallets WHERE estado = 'cerrado'"
+      + ' AND eliminado_en IS NULL').get();
+    if (!ce) break;
+    await s.pegar('/pallets/' + ce.id + '/reabrir', json({}));
+    await vaciar(ce.id);
+  }
+}
+
 // ── EL DOM DE MENTIRA ──────────────────────────────────────────────────────
 // Lo mínimo para que el JS de la pantalla corra: los contenedores que pinta y
 // los casilleros de la ventana. Guarda el innerHTML para poder mirarlo.
@@ -173,7 +206,7 @@ function domFalso() {
     'gst-arm', 'gal-arm-modal', 'gal-arm-rep', 'gal-arm-tit', 'gal-arm-lineas',
     'gal-arm-cargar', 'gal-arm-cerrarp', 'gal-arm-reabrir', 'gal-arm-tarj',
     'gal-arm-item', 'gal-arm-cant', 'gal-arm-cl', 'gal-arm-disp',
-    'gal-arm-fecha', 'gal-arm-obs', 'gal-arm-detalle',
+    'gal-arm-fecha', 'gal-arm-obs', 'gal-arm-detalle', 'gal-arm-enp',
     'gal-arm-lab']) nodos[id] = crear(id);
   return { nodos, document: { getElementById: (id) => nodos[id] || null } };
 }
@@ -695,6 +728,7 @@ t('UN PALLET MIXTO ARMADO DESDE LA PANTALLA, y el stock intacto', async () => {
     await s.pegar('/procesos', json({ fecha: HOY, lote_id: 10,
       presentacion_id: b.id, bultos: 49, uuid: 'u3' }));
 
+    await alPiso(s, db);
     const p = pantalla(dom, s.pegar);
     await p.galStCargar();
     const stockAntes = (await (await s.pegar('/stock')).json()).stock.kilos;
@@ -738,9 +772,14 @@ t('UN PALLET MIXTO ARMADO DESDE LA PANTALLA, y el stock intacto', async () => {
   } finally { s.cerrar(); }
 });
 
-t('SACARLE CAJAS A UN PALLET CERRADO LO AVISA EN LA PANTALLA', async () => {
-  // Queda distinto de su tarjetón, que ya está impreso y pegado. Enterarse
-  // cuando llega el camión es tarde.
+t('UN PALLET CERRADO NO APARECE EN EL SELECTOR, y la pantalla dice por qué', async () => {
+  /* Andy, 5/11/2026: «al momento de armar un pallet tiene que estar disponible
+     solo lo que está SIN PALLET... sino va a quedar duplicado».
+
+     Hasta la V1145 esto se podía y la pantalla avisaba DESPUÉS, con el pallet ya
+     distinto de su tarjetón. El aviso era el parche; acá se saca la causa — y
+     hace falta decir dónde está la mercadería, o la lista vacía se lee como
+     mercadería perdida. */
   const db = base();
   const s = await servidor(db, ADMIN);
   const dom = domFalso();
@@ -756,17 +795,22 @@ t('SACARLE CAJAS A UN PALLET CERRADO LO AVISA EN LA PANTALLA', async () => {
     const p = pantalla(dom, s.pegar);
     await p.galStCargar();
     await p.galArmAbrir();
-    dom.nodos['gal-arm-item'].value = '0';
-    dom.nodos['gal-arm-cant'].value = '60';
-    await p.galArmMover();
-
-    assert.match(dom.nodos['gst-aviso'].innerHTML, /PC-\d\d-\d{5}/,
-      'no avisó de qué pallet salieron');
-    assert.match(dom.nodos['gst-aviso'].innerHTML, /40/, 'no dijo cuánto le quedó');
+    const ops = dom.nodos['gal-arm-item'].innerHTML;
+    assert.equal((ops.match(/<option value="\d/g) || []).length, 0,
+      'ofrece cajas que están apiladas: ' + ops);
+    assert.match(ops, /No hay nada fuera de pallets cerrados/,
+      'el selector vacío no dice nada');
+    const enp = dom.nodos['gal-arm-enp'].innerHTML;
+    assert.match(enp, /100/, 'no dice cuántas cajas hay apiladas: ' + enp);
+    assert.match(enp, /1 pallet cerrado/, 'no dice en cuántos pallets están');
+    assert.match(enp, /entero/, 'no explica por qué no se ofrecen');
+    assert.match(enp, /reabre/, 'no dice cómo se usan esas cajas');
   } finally { s.cerrar(); }
 });
 
-t('y si lo deja vacío manda a despegar la etiqueta', async () => {
+t('Y DESARMARLO DESDE LA PANTALLA LO DEVUELVE AL SELECTOR', async () => {
+  // El camino honesto, entero y por la API: reabrir, sacar el renglón, y la
+  // mercadería vuelve al piso lista para apilarse en otro.
   const db = base();
   const s = await servidor(db, ADMIN);
   const dom = domFalso();
@@ -778,15 +822,22 @@ t('y si lo deja vacío manda a despegar la etiqueta', async () => {
       presentacion_id: a.id, bultos: 40, uuid: 'u1' }));
     const abierto = (await (await s.pegar('/pallets')).json()).abierto;
     await s.pegar('/pallets/' + abierto.id + '/cerrar', json({}));
+    const antes = (await (await s.pegar('/stock')).json()).stock.kilos;
 
+    await alPiso(s, db);
     const p = pantalla(dom, s.pegar);
     await p.galStCargar();
     await p.galArmAbrir();
+    assert.match(dom.nodos['gal-arm-item'].innerHTML, /40 cj/,
+      'lo desarmado no volvió al selector');
+    assert.equal(dom.nodos['gal-arm-enp'].innerHTML, '',
+      'sigue diciendo que hay cajas apiladas');
     dom.nodos['gal-arm-item'].value = '0';
     dom.nodos['gal-arm-cant'].value = '40';
     await p.galArmMover();
-    assert.match(dom.nodos['gst-aviso'].innerHTML, /VAC[IÍ]O/i);
-    assert.match(dom.nodos['gst-aviso'].innerHTML, /etiqueta/);
+    assert.match(dom.nodos['gal-arm-lineas'].innerHTML, />40</);
+    assert.equal((await (await s.pegar('/stock')).json()).stock.kilos, antes,
+      'desarmar y rearmar movió el stock');
   } finally { s.cerrar(); }
 });
 
@@ -800,6 +851,7 @@ t('mover de más avisa en la pantalla y no guarda nada', async () => {
       categoria: 'I' }))).json();
     await s.pegar('/procesos', json({ fecha: HOY, lote_id: 10,
       presentacion_id: a.id, bultos: 40, uuid: 'u1' }));
+    await alPiso(s, db);
 
     const p = pantalla(dom, s.pegar);
     await p.galStCargar();
@@ -814,7 +866,9 @@ t('mover de más avisa en la pantalla y no guarda nada', async () => {
 });
 
 t('el selector NO ofrece el pallet que se está armando', async () => {
-  // Sacarle algo para ponérselo a él mismo no es nada, y el renglón confunde.
+  /* Sale gratis desde la V1146: lo que entró al pallet dejó de estar suelto, así
+     que el corte del piso ya no lo trae. Antes había que descontarlo a mano en
+     la pantalla, y ese descuento era una resta que podía quedar en negativo. */
   const db = base();
   const s = await servidor(db, ADMIN);
   const dom = domFalso();
@@ -824,6 +878,7 @@ t('el selector NO ofrece el pallet que se está armando', async () => {
       categoria: 'I' }))).json();
     await s.pegar('/procesos', json({ fecha: HOY, lote_id: 10,
       presentacion_id: a.id, bultos: 100, uuid: 'u1' }));
+    await alPiso(s, db);
 
     const p = pantalla(dom, s.pegar);
     await p.galStCargar();
@@ -831,17 +886,17 @@ t('el selector NO ofrece el pallet que se está armando', async () => {
     dom.nodos['gal-arm-item'].value = '0';
     dom.nodos['gal-arm-cant'].value = '40';
     await p.galArmMover();
-    // Ahora hay 40 en este pallet y 60 en el del día: sólo tiene que ofrecer 60.
+    // Ahora hay 40 en este pallet y 60 en el piso: sólo tiene que ofrecer 60.
     const ops = [...dom.nodos['gal-arm-item'].innerHTML.matchAll(/<option value="\d/g)];
     assert.equal(ops.length, 1, 'se ofrece a sí mismo');
     assert.match(dom.nodos['gal-arm-item'].innerHTML, /60 cj/);
   } finally { s.cerrar(); }
 });
 
-t('EL INTERRUPTOR VUELVE AL DETALLE POR MONTÓN', async () => {
-  // El camino normal es por artículo, pero sacar de un pallet concreto pasa —
-  // y para eso hay que poder nombrarlo. Son dos listas distintas del mismo
-  // stock y el interruptor es lo único que las separa.
+t('EL INTERRUPTOR VUELVE AL DETALLE POR LOTE', async () => {
+  // El camino normal es por artículo, pero el RENSPA de un remito sale del lote,
+  // así que a veces hay que nombrarlo. Son dos cortes del mismo piso y el
+  // interruptor es lo único que los separa.
   const db = base();
   db.exec("INSERT INTO pa_lotes (id,nombre,sector_id,finca,activo) "
     + "VALUES (11,'Cuadro 4',1,'La Esperanza',1)");
@@ -855,6 +910,7 @@ t('EL INTERRUPTOR VUELVE AL DETALLE POR MONTÓN', async () => {
       presentacion_id: a.id, bultos: 60, uuid: 'u1' }));
     await s.pegar('/procesos', json({ fecha: HOY, lote_id: 11,
       presentacion_id: a.id, bultos: 40, uuid: 'u2' }));
+    await alPiso(s, db);
 
     const p = pantalla(dom, s.pegar);
     await p.galStCargar();
@@ -863,13 +919,15 @@ t('EL INTERRUPTOR VUELVE AL DETALLE POR MONTÓN', async () => {
     assert.equal((dom.nodos['gal-arm-item'].innerHTML.match(/<option/g) || []).length, 2);
     assert.match(dom.nodos['gal-arm-item'].innerHTML, /100 cj/);
 
-    // Con el interruptor: DOS montones, cada uno con su lote.
+    // Con el interruptor: DOS renglones, cada uno con su lote.
     dom.nodos['gal-arm-detalle'].checked = true;
     p.galArmPintar();
     const ops = dom.nodos['gal-arm-item'].innerHTML;
     assert.equal((ops.match(/<option/g) || []).length, 3, 'no volvió al detalle');
     assert.match(ops, /Cuadro 3/);
     assert.match(ops, /Cuadro 4/);
+    assert.ok(!/suelto/.test(ops),
+      'el renglón sigue diciendo la ubicación, que ahora es siempre la misma');
 
     // Y moviendo de ahí sale de ESE lote y de ninguno más. El lote se verifica
     // en la base y no en la tabla: la tabla ya no lo muestra, porque Andy
@@ -908,6 +966,7 @@ t('EL RENGLÓN DICE DE DÓNDE VA A SALIR antes de apretar', async () => {
     await s.pegar('/pallets/' + uno.id + '/cerrar', json({}));
     await s.pegar('/procesos', json({ fecha: '2026-12-14', lote_id: 11,
       presentacion_id: a.id, bultos: 50, uuid: 'u2' }));
+    await alPiso(s, db);
 
     const p = pantalla(dom, s.pegar);
     await p.galStCargar();
@@ -918,14 +977,17 @@ t('EL RENGLÓN DICE DE DÓNDE VA A SALIR antes de apretar', async () => {
     assert.match(d, /2 lotes/, 'no dice de cuántos lotes sale');
     assert.match(d, /más viejo primero/);
     assert.match(d, /10\/12/, 'no dice el día del más viejo');
-    // Y que uno de los montones es un pallet CERRADO.
-    assert.match(d, /CERRADOS/, 'no avisa que va a desarmar un pallet cerrado');
+    // Y de qué LOTE, que es lo que queda por decir: la ubicación ya es siempre
+    // el piso, así que repetirla en cada renglón era ruido.
+    assert.match(d, /Cuadro 3/, 'no dice de qué lote sale el más viejo: ' + d);
+    assert.ok(!/CERRADOS/.test(d), 'sigue avisando que va a desarmar un pallet');
   } finally { s.cerrar(); }
 });
 
-t('el reparto avisa TODOS los pallets cerrados que dejó distintos', async () => {
-  // Un pedido puede desarmar dos a la vez. Decir sólo el primero deja al
-  // segundo con la etiqueta mintiendo.
+t('EL REPARTO NO DESARMA NINGÚN PALLET, y lo dice antes de apretar', async () => {
+  /* Era el caso más feo del modelo viejo: pedir 45 cajas sin decir de dónde
+     desarmaba DOS pallets cerrados de una, y los dos quedaban con su tarjetón
+     impreso diciendo otra cosa. Se avisaba después; ahora no pasa. */
   const db = base();
   const s = await servidor(db, ADMIN);
   const dom = domFalso();
@@ -943,13 +1005,17 @@ t('el reparto avisa TODOS los pallets cerrados que dejó distintos', async () =>
     const p = pantalla(dom, s.pegar);
     await p.galStCargar();
     await p.galArmAbrir();
-    dom.nodos['gal-arm-item'].value = '0';
-    dom.nodos['gal-arm-cant'].value = '45';
-    await p.galArmMover();
-    const av = dom.nodos['gst-aviso'].innerHTML;
-    assert.equal((av.match(/PC-\d\d-\d{5}/g) || []).length, 2,
-      'no avisó los dos pallets que tocó: ' + av);
-    assert.match(av, /VAC[IÍ]O/i, 'uno quedó vacío y no lo dijo');
+    // No hay nada que elegir: las 60 cajas están en los dos pallets cerrados.
+    assert.equal((dom.nodos['gal-arm-item'].innerHTML.match(/<option value="\d/g)
+      || []).length, 0, 'ofrece repartir entre dos pallets cerrados');
+    assert.match(dom.nodos['gal-arm-enp'].innerHTML, /2 pallets/,
+      'no dice en cuántos pallets está: ' + dom.nodos['gal-arm-enp'].innerHTML);
+    // Y los dos siguen enteros, con su tarjetón diciendo la verdad.
+    for (const q of db.prepare("SELECT id FROM gal_pallets WHERE estado = 'cerrado'")
+      .all()) {
+      assert.equal(db.prepare('SELECT COALESCE(SUM(bultos),0) AS b FROM gal_procesos'
+        + ' WHERE pallet_id = ? AND eliminado_en IS NULL').get(q.id).b, 30);
+    }
   } finally { s.cerrar(); }
 });
 
@@ -971,6 +1037,7 @@ t('EL CARTEL DE CERRADO SE APAGA AL REABRIR', async () => {
       categoria: 'I' }))).json();
     await s.pegar('/procesos', json({ fecha: HOY, lote_id: 10,
       presentacion_id: a.id, bultos: 40, uuid: 'u1' }));
+    await alPiso(s, db);
 
     const p = pantalla(dom, s.pegar);
     await p.galStCargar();
@@ -1011,6 +1078,7 @@ t('LA TABLA DEL PALLET MUESTRA EL DÍA Y NO REPITE EL ARTÍCULO', async () => {
       await s.pegar('/procesos', json({ fecha: HOY, lote_id: lote,
         presentacion_id: a.id, bultos: n, uuid: u }));
     }
+    await alPiso(s, db);
 
     const p = pantalla(dom, s.pegar);
     await p.galStCargar();
@@ -1043,6 +1111,7 @@ t('DOS DÍAS DEL MISMO ARTÍCULO SON DOS RENGLONES', async () => {
       presentacion_id: a.id, bultos: 30, uuid: 'u1' }));
     await s.pegar('/procesos', json({ fecha: '2026-12-14', lote_id: 10,
       presentacion_id: a.id, bultos: 20, uuid: 'u2' }));
+    await alPiso(s, db);
 
     const p = pantalla(dom, s.pegar);
     await p.galStCargar();
@@ -1079,6 +1148,7 @@ t('SACAR UN RENGLÓN SACA TODAS SUS FILAS', async () => {
       presentacion_id: a.id, bultos: 30, uuid: 'u1' }));
     await s.pegar('/procesos', json({ fecha: HOY, lote_id: 11,
       presentacion_id: a.id, bultos: 20, uuid: 'u2' }));
+    await alPiso(s, db);
 
     const p = pantalla(dom, s.pegar);
     await p.galStCargar();
@@ -1111,6 +1181,7 @@ t('UN PALLET VACÍO SE PUEDE BORRAR; uno con cajas no lo ofrece', async () => {
       categoria: 'I' }))).json();
     await s.pegar('/procesos', json({ fecha: HOY, lote_id: 10,
       presentacion_id: a.id, bultos: 40, uuid: 'u1' }));
+    await alPiso(s, db);
 
     const p = pantalla(dom, s.pegar);
     await p.galStCargar();
@@ -1140,6 +1211,44 @@ t('UN PALLET VACÍO SE PUEDE BORRAR; uno con cajas no lo ofrece', async () => {
 });
 
 
+t('LA LISTA ES LA DE LA CÁMARA: el del proceso también está, y marcado', async () => {
+  /* Desde la V1146 a un pallet no se le sacan cajas desde afuera, así que la
+     única manera de desarmar uno del proceso es abrirlo — y si la lista de Stock
+     muestra sólo los armados, no hay desde dónde. Pero hay que poder
+     distinguirlos: el del proceso se llena solo con cada caja que se tipea. */
+  const db = base();
+  const s = await servidor(db, ADMIN);
+  const dom = domFalso();
+  try {
+    const a = await (await s.pegar('/presentaciones', json({ nombre: 'Caja',
+      destino: 'comercial', envase: 'x', por_bulto: 1, kg_unidad: 8,
+      categoria: 'I' }))).json();
+    const r = await (await s.pegar('/procesos', json({ fecha: HOY, lote_id: 10,
+      presentacion_id: a.id, bultos: 40, uuid: 'u1' }))).json();
+    await s.pegar('/armado', json({ fecha: HOY }));
+    /* Y el del proceso se deja VACÍO, bajando su carga al piso. Es la única
+       manera de que los dos pallets estén en la misma condición —vacíos y
+       abiertos— y que lo único que los distinga sea de dónde salieron. Con
+       cajas adentro, el × no se ofrece por tener cajas y no por ser del
+       proceso, y el test pasaría por la razón equivocada. */
+    await s.pegar('/pallets/sacar/' + r.id, json({}));
+
+    const p = pantalla(dom, s.pegar);
+    await p.galStCargar();
+    await p.galArmCargar();
+    const lista = dom.nodos['gst-arm'].innerHTML;
+    assert.equal((lista.match(/galArmAbrir\(/g) || []).length, 2,
+      'falta el pallet del proceso en la lista de la cámara: ' + lista);
+    assert.equal((lista.match(/del proceso/g) || []).length, 1,
+      'no se distingue cuál es el del proceso');
+    /* Y al del proceso no se le ofrece el ×, aunque esté igual de vacío que el
+       armado, que sí lo ofrece: el del día lo abre solo la primera caja de la
+       mañana, así que borrarlo es apretar un botón para que vuelva. */
+    assert.equal((lista.match(/galArmBorrar\(/g) || []).length, 1,
+      'ofrece borrar el pallet del proceso, o no ofrece borrar el armado vacío');
+  } finally { s.cerrar(); }
+});
+
 t('el pallet con cajas adentro NO se borra, y lo dice', async () => {
   const db = base();
   const s = await servidor(db, ADMIN);
@@ -1149,6 +1258,7 @@ t('el pallet con cajas adentro NO se borra, y lo dice', async () => {
       categoria: 'I' }))).json();
     await s.pegar('/procesos', json({ fecha: HOY, lote_id: 10,
       presentacion_id: a.id, bultos: 40, uuid: 'u1' }));
+    await alPiso(s, db);
     const arm = await (await s.pegar('/armado', json({ fecha: HOY }))).json();
     await s.pegar('/armado/' + arm.id + '/mover', json({ destino: 'comercial',
       presentacion_id: a.id, calibre: '', bultos: 40 }));
