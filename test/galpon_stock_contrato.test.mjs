@@ -202,7 +202,7 @@ function domFalso() {
     'gal-dsp-modal', 'gal-dsp-rep', 'gal-dsp-tit', 'gal-dsp-items', 'gal-dsp-cargar',
     'gal-dsp-emitir', 'gal-dsp-anular', 'gal-dsp-item', 'gal-dsp-cant', 'gal-dsp-cl',
     'gal-dsp-disp', 'gal-dsp-fecha', 'gal-dsp-dest', 'gal-dsp-transp', 'gal-dsp-pat',
-    'gal-dsp-rem', 'gal-dsp-obs',
+    'gal-dsp-rem', 'gal-dsp-obs', 'gal-dsp-culata',
     'gst-arm', 'gal-arm-modal', 'gal-arm-rep', 'gal-arm-tit', 'gal-arm-lineas',
     'gal-arm-cargar', 'gal-arm-cerrarp', 'gal-arm-reabrir', 'gal-arm-tarj',
     'gal-arm-item', 'gal-arm-cant', 'gal-arm-cl', 'gal-arm-disp',
@@ -1268,4 +1268,170 @@ t('el pallet con cajas adentro NO se borra, y lo dice', async () => {
     const j = await r.json();
     assert.match(j.error, /cargas adentro/);
   } finally { s.cerrar(); }
+});
+
+// ══════════════════════════════════════════════════════════════════════════
+// 8 · LO QUE LA OFICINA VE DE LA CULATA (V1150)
+// ══════════════════════════════════════════════════════════════════════════
+// La app del cargador escribe; la oficina lee acá, antes de emitir. Todo por la
+// API: los pallets se cargan y se cierran como en Proceso, el despacho se arma
+// como en esta pantalla, y se escanea como en la culata.
+async function camionArmado(s) {
+  const a = await (await s.pegar('/presentaciones', json({ nombre: 'Carton Amarilla',
+    destino: 'comercial', envase: 'Caja', por_bulto: 1, kg_unidad: 7, calibre: '35-55',
+    categoria: 'I' }))).json();
+  const pal = [];
+  for (let i = 0; i < 3; i++) {
+    await s.pegar('/procesos', json({ fecha: HOY, lote_id: 10, presentacion_id: a.id,
+      bultos: 40 + i, uuid: 'cu' + i }));
+    const ab = (await (await s.pegar('/pallets')).json()).abierto;
+    const c = await (await s.pegar('/pallets/' + ab.id + '/cerrar', json({}))).json();
+    pal.push({ id: ab.id, numero: c.numero });
+  }
+  const d = (await (await s.pegar('/despachos', json({ fecha: HOY }))).json()).despacho;
+  await s.pegar('/despachos/' + d.id + '/pallets', json({ pallet_id: pal[0].id }));
+  await s.pegar('/despachos/' + d.id + '/pallets', json({ pallet_id: pal[1].id }));
+  return { d: d.id, pal };
+}
+const escanear = (s, d, numero, agregar) =>
+  s.pegar('/camion/' + d + '/escanear', json({ numero, agregar: agregar ? 1 : 0 }));
+
+t('LA LISTA DE DESPACHOS DICE CÓMO VA EL CAMIÓN', async () => {
+  const db = base();
+  const s = await servidor(db, ADMIN);
+  const dom = domFalso();
+  try {
+    const { d, pal } = await camionArmado(s);
+    const p = pantalla(dom, s.pegar);
+    await p.galStCargar();
+    assert.match(dom.nodos['gst-desp'].innerHTML, /sin escanear/);
+
+    await escanear(s, d, pal[0].numero);
+    await p.galStCargar();
+    assert.match(dom.nodos['gst-desp'].innerHTML, /1\/2 subidos/);
+
+    await s.pegar('/camion/' + d + '/cargado', json({ confirmar: 1 }));
+    await p.galStCargar();
+    const h = dom.nodos['gst-desp'].innerHTML;
+    assert.match(h, /✅ <b>Cargado<\/b> 1\/2 · Andy/);
+    assert.match(h, /faltaron 1/, 'no dice que salió con un pallet de menos');
+    // Y el título, sin HTML, nombra cuál.
+    assert.ok(h.includes('salió sin ' + pal[1].numero), 'el título no nombra el que faltó');
+  } finally { s.cerrar(); }
+});
+
+t('LA LISTA TIENE TANTOS <col> COMO <th>, y suman 100', async () => {
+  // Sin barra de desplazamiento lateral (CLAUDE.md): la columna nueva le saca ancho a
+  // otras, no se suma por encima.
+  const db = base();
+  const s = await servidor(db, ADMIN);
+  const dom = domFalso();
+  try {
+    await camionArmado(s);
+    const p = pantalla(dom, s.pegar);
+    await p.galStCargar();
+    const h = dom.nodos['gst-desp'].innerHTML;
+    const cols = [...h.matchAll(/<col style="width:(\d+)%">/g)].map((m) => Number(m[1]));
+    const ths = (h.slice(0, h.indexOf('</thead>')).match(/<th[\s>]/g) || []).length;
+    assert.equal(cols.length, ths);
+    assert.equal(cols.reduce((x, y) => x + y, 0), 100);
+  } finally { s.cerrar(); }
+});
+
+t('ADENTRO DEL DESPACHO: ✓ en los que subieron, y lo que faltó con número', async () => {
+  const db = base();
+  const s = await servidor(db, ADMIN);
+  const dom = domFalso();
+  try {
+    const { d, pal } = await camionArmado(s);
+    await escanear(s, d, pal[0].numero);
+    await s.pegar('/camion/' + d + '/cargado', json({ confirmar: 1 }));
+    const p = pantalla(dom, s.pegar);
+    await p.galStCargar();
+    await p.galDspAbrir(d);
+    const h = dom.nodos['gal-dsp-items'].innerHTML;
+    // La ✓ va pegada al número del que subió, y NO al otro.
+    const subio = new RegExp('✓</span> 📦 <b>' + pal[0].numero);
+    assert.match(h, subio, 'el que subió no tiene la ✓');
+    assert.ok(!new RegExp('✓</span> 📦 <b>' + pal[1].numero).test(h),
+      'el que no subió tiene la ✓');
+    assert.match(h, /Salió sin: <b>/);
+    assert.ok(h.includes(pal[1].numero));
+  } finally { s.cerrar(); }
+});
+
+t('EL REGISTRO DE LA CULATA: cada lectura, y lo que no iba en rojo', async () => {
+  const db = base();
+  const s = await servidor(db, ADMIN);
+  const dom = domFalso();
+  try {
+    const { d, pal } = await camionArmado(s);
+    await escanear(s, d, pal[0].numero);
+    await escanear(s, d, pal[2].numero);            // no va: no se sube
+    const p = pantalla(dom, s.pegar);
+    await p.galStCargar();
+    await p.galDspAbrir(d);
+    const h = dom.nodos['gal-dsp-culata'].innerHTML;
+    assert.match(h, /2 lecturas/);
+    assert.match(h, /1 fuera de lo previsto/, 'el título no avisa que hubo algo raro');
+    assert.match(h, /<tr style="color:#b91c1c">[^]*NO IBA — no se subió/);
+    assert.ok(h.includes(pal[2].numero));
+    assert.match(h, /">subió<\/td>/);
+    assert.match(h, /<details>/, 'el registro no va plegado');
+  } finally { s.cerrar(); }
+});
+
+t('ABRIR OTRO DESPACHO NO ARRASTRA EL REGISTRO DEL ANTERIOR', async () => {
+  // Un formulario que sólo se esconde conserva lo que tenía.
+  const db = base();
+  const s = await servidor(db, ADMIN);
+  const dom = domFalso();
+  try {
+    const { d, pal } = await camionArmado(s);
+    await escanear(s, d, pal[0].numero);
+    const otro = (await (await s.pegar('/despachos', json({ fecha: HOY }))).json()).despacho;
+    const p = pantalla(dom, s.pegar);
+    await p.galStCargar();
+    await p.galDspAbrir(d);
+    assert.match(dom.nodos['gal-dsp-culata'].innerHTML, /1 lectura/);
+    await p.galDspAbrir(otro.id);
+    assert.equal(dom.nodos['gal-dsp-culata'].innerHTML, '',
+      'el despacho nuevo muestra las lecturas del anterior');
+
+    /* Y SI EL PEDIDO DEL REGISTRO FALLA, tampoco. Es el caso en que se nota: cuando
+       anda, el registro nuevo pisa al viejo igual. Acá el otro despacho se borra
+       entre que se cargó la lista y que se abre, y el registro contesta 404. */
+    await p.galDspAbrir(d);
+    assert.match(dom.nodos['gal-dsp-culata'].innerHTML, /1 lectura/);
+    db.prepare("UPDATE gal_despachos SET eliminado_en = '2026-01-01' WHERE id = ?")
+      .run(otro.id);
+    await p.galDspAbrir(otro.id);
+    assert.equal(dom.nodos['gal-dsp-culata'].innerHTML, '',
+      'un pedido que falló dejó las lecturas del despacho anterior');
+  } finally { s.cerrar(); }
+});
+
+t('LA RUTA DEL REGISTRO es de la oficina y dice lo que pasó', async () => {
+  const db = base();
+  const s = await servidor(db, ADMIN);
+  try {
+    const { d, pal } = await camionArmado(s);
+    await escanear(s, d, pal[2].numero);
+    await escanear(s, d, pal[2].numero, 1);
+    const j = await (await s.pegar('/despachos/' + d + '/culata')).json();
+    assert.deepEqual(j.registro.map((r) => r.resultado), ['no_va', 'agregado']);
+    assert.equal(j.carga.total, 3);
+    assert.equal(j.carga.rechazos, 1);
+    assert.equal((await s.pegar('/despachos/9999/culata')).status, 404);
+  } finally { s.cerrar(); }
+});
+
+test('MANUAL ST: «lo que pasó en la culata» es lo que hace la pantalla', () => {
+  const i = PANEL.indexOf("SG_MANUAL['galpon-stock']");
+  const man = PANEL.slice(i, PANEL.indexOf('\n};', i)).replace(/'\s*\r?\n\s*\+\s*'/g, '');
+  assert.match(man, /Lo que pasó en la culata <span class="ver">V1150<\/span>/);
+  assert.match(man, /una columna <b>Camión<\/b>/);
+  assert.match(PANEL, /'<th>Camión<\/th><th><\/th><\/tr><\/thead><tbody>'/);
+  assert.match(man, /cada pallet que subió lleva una <b>✓<\/b>/);
+  assert.match(man, /<b>Emitir sigue siendo de acá\.<\/b>/);
 });

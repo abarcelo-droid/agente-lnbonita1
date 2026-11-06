@@ -42,6 +42,7 @@ import {
   agregarAlDespacho, sacarDelDespacho, emitirDespacho, anularDespacho, borrarDespacho,
   despachoPorNumero,
   camion, camionesParaCargar, nuevoCamion, escanearPallet, bajarPallet, marcarCargado,
+  cargaDelDespacho, registroDeCulata,
   borrarPallet, sacarDelPallet, pallets, palletPorNumero, valorConfig,
   registrarProceso, editarProceso, borrarProceso, procesosDelDia,
   tableroProceso, stockGalpon, stockPorLote, stockPorProducto, lotesVolcados,
@@ -1185,7 +1186,8 @@ router.get('/stock', (req, res) => {
       piso: pisoParaDespacho(db, { destino: req.query.destino }),
       pallets: palletsParaDespacho(db, { destino: req.query.destino }),
       despachos: despachos(db, { limite: 50 }).map((x) => Object.assign({}, x,
-        { items: itemsDelDespacho(db, x.id), unidades: unidadesDelDespacho(db, x.id) })),
+        { items: itemsDelDespacho(db, x.id), unidades: unidadesDelDespacho(db, x.id),
+          carga: cargaDelDespacho(db, x.id) })),
     });
   } catch (e) {
     console.error('[GALPON] GET /stock:', e.message);
@@ -1198,7 +1200,8 @@ router.get('/despachos', (req, res) => {
     const l = despachos(db, { estado: req.query.estado, desde: req.query.desde,
                               hasta: req.query.hasta, limite: req.query.limite });
     res.json({ ok: true, despachos: l.map((x) => Object.assign({}, x,
-      { items: itemsDelDespacho(db, x.id), unidades: unidadesDelDespacho(db, x.id) })) });
+      { items: itemsDelDespacho(db, x.id), unidades: unidadesDelDespacho(db, x.id),
+        carga: cargaDelDespacho(db, x.id) })) });
   } catch (e) {
     console.error('[GALPON] GET /despachos:', e.message);
     res.status(500).json({ ok: false, error: e.message });
@@ -1390,6 +1393,19 @@ router.get('/presentaciones/:id/icono', (req, res) => {
   }
 });
 
+
+// EL REGISTRO DE LA CULATA (V1150), para la oficina. Cuelga de /despachos y no de
+// /camion: lo lee el que arma y emite los remitos, con el permiso de Stock y Despachos.
+router.get('/despachos/:id/culata', (req, res) => {
+  try {
+    const c = cargaDelDespacho(db, num(req.params.id));
+    if (!c) return res.status(404).json({ ok: false, error: 'Ese despacho no existe' });
+    res.json({ ok: true, carga: c, registro: registroDeCulata(db, num(req.params.id)) });
+  } catch (e) {
+    console.error('[GALPON] GET /despachos/:id/culata:', e.message);
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
 
 // ── 📲 CARGAR EL CAMIÓN, ESCANEANDO (V1149) ──────────────────────────────────────────
 // Lo usa la app del cargador, /m/galpon-camion. Todas bajo /camion para que tengan su

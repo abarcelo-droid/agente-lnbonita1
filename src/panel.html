@@ -8112,6 +8112,8 @@ if ('serviceWorker' in navigator) {
       </div>
 
       <div id="gal-dsp-items" style="margin-top:12px"></div>
+      <!-- Lo que pasó en la culata (V1150): cada lectura de la app del cargador. -->
+      <div id="gal-dsp-culata" style="margin-top:12px"></div>
 
       <div class="mf">
         <button class="btn bo" onclick="galDspCerrar()">Cerrar</button>
@@ -29761,6 +29763,21 @@ SG_MANUAL['galpon-stock'] = { titulo: 'Stock y Despachos', html:
   + '<p>Este módulo <b>no toca San Gerónimo</b> todavía. La fruta termina vendiéndose por '
   + 'ahí, pero mientras esa operativa no esté al 100% los despachos del galpón viven acá, '
   + 'como pidió Andy.</p>'
+
+  + '<h3>📲 Lo que pasó en la culata <span class="ver">V1150</span></h3>'
+  + '<p>Cuando el camión se carga con la app del cargador (<b>📲 Cargar camiones</b>), la '
+  + 'lista de despachos tiene una columna <b>Camión</b>: <b>sin escanear</b>, <b>8/14 '
+  + 'subidos</b>, o <b>✅ Cargado</b> con quién y a qué hora. Si se dio por cargado con '
+  + 'pallets de menos, dice <b>faltaron</b> y cuántos.</p>'
+  + '<p>Adentro del despacho, cada pallet que subió lleva una <b>✓</b>, y arriba de la '
+  + 'tabla dice <b>de qué pallets salió sin</b>. Es lo que hay que mirar <b>antes de '
+  + 'emitir</b>: el remito tiene que decir lo que va arriba del camión.</p>'
+  + '<p>Abajo, plegado, <b>Lo que pasó en la culata</b>: cada lectura, con hora y quién. '
+  + 'También las que no hicieron nada —un pallet que <b>no iba</b> y no se subió, uno '
+  + 'que estaba en otro camión—, en rojo, y el título dice cuántas fueron. Es lo que se '
+  + 'busca cuando un cliente reclama un pallet que no llegó.</p>'
+  + '<div class="ojo"><b>Emitir sigue siendo de acá.</b> La app da el camión por '
+  + 'cargado pero no emite: el remito se imprime y se firma en la oficina.</div>'
 };
 
 SG_MANUAL['galpon-camion'] = { titulo: 'Cargar camiones', html:
@@ -62166,11 +62183,12 @@ function galStDesp(){
   var l = GST.desp||[];
   document.getElementById('gst-desp').innerHTML = l.length
     ? '<div class="ab-table-wrap"><table class="pa-tbl gst-tbl">'
-      + '<colgroup><col style="width:17%"><col style="width:11%"><col style="width:24%">'
-      + '<col style="width:12%"><col style="width:12%"><col style="width:24%"></colgroup>'
+      + '<colgroup><col style="width:15%"><col style="width:10%"><col style="width:19%">'
+      + '<col style="width:9%"><col style="width:9%"><col style="width:22%">'
+      + '<col style="width:16%"></colgroup>'
       + '<thead><tr><th>Número</th><th>Fecha</th><th>A dónde</th>'
       + '<th style="text-align:right">Cajas</th><th style="text-align:right">Kilos</th>'
-      + '<th></th></tr></thead><tbody>'
+      + '<th>Camión</th><th></th></tr></thead><tbody>'
       + l.map(function(x){
           var cl = x.estado==='emitido' ? 'gst-emi' : (x.estado==='anulado'?'gst-anu':'gst-brr');
           return '<tr><td>'+galStEsc(x.numero||'—')
@@ -62178,11 +62196,82 @@ function galStDesp(){
             + '<td>'+galStEsc(x.fecha)+'</td><td>'+galStEsc(x.destinatario||'—')+'</td>'
             + '<td style="text-align:right" class="gst-n">'+galStNum(x.bultos,0)+'</td>'
             + '<td style="text-align:right">'+galStNum(x.kilos,0)+'</td>'
+            + '<td title="'+galStEsc(galDspCargaTxt(x.carga, 1))+'">'
+            + galDspCargaTxt(x.carga)+'</td>'
             + '<td><button class="btn bo bs" onclick="galDspAbrir('+x.id+')">'
             + (x.estado==='borrador'?'Seguir cargando':'Ver')+'</button></td></tr>';
         }).join('')
       + '</tbody></table></div>'
     : '<div class="ojo">Todavía no se despachó nada. El botón de arriba arma el primero.</div>';
+}
+
+/* ── 📲 LO QUE PASÓ EN LA CULATA (V1150) ─────────────────────────────────────────────
+   El estado de carga que deja la app del cargador, dicho en una línea. UNA función
+   para la lista y para la ventana: dos maneras de escribirlo son dos lugares donde
+   «cargado» puede querer decir cosas distintas. Con plano=1 sale sin HTML, para el
+   título que aparece al pasar el mouse. */
+function galDspCargaTxt(c, plano){
+  if (!c) return plano ? '' : '<span style="color:var(--mut)">—</span>';
+  var b = function(t){ return plano ? t : '<b>'+t+'</b>'; };
+  var hm = function(t){ var m = /(\d\d):(\d\d)/.exec(String(t||'')); return m ? m[1]+':'+m[2] : ''; };
+  if (c.cargado) {
+    var f = c.cargado.faltaron || [];
+    return (plano ? '' : '✅ ') + b('Cargado') + ' ' + c.subidos + '/' + c.total
+      + ' · ' + galStEsc(c.cargado.por || '—') + ' ' + hm(c.cargado.en)
+      + (f.length ? (plano ? ' · salió sin ' + f.join(', ')
+                           : ' <span style="color:#b45309">· faltaron ' + f.length + '</span>') : '');
+  }
+  if (c.subidos) return (plano ? '' : '📲 ') + c.subidos + '/' + c.total + ' subidos';
+  return plano ? 'Todavía no se escaneó' : '<span style="color:var(--mut)">sin escanear</span>';
+}
+
+/* Qué quiere decir cada lectura, para el que lee el registro en la oficina. Lo que no
+   está en la lista se muestra tal cual: mejor un código raro que un renglón en blanco. */
+var GAL_CULATA_TXT = {
+  subido: 'subió', agregado: 'NO IBA — se agregó en la culata', ya_estaba: 'leído de nuevo',
+  no_va: 'NO IBA — no se subió', otro_despacho: 'estaba en otro camión',
+  despachado: 'ya había salido en otro despacho', abierto: 'pallet abierto, sin tarjetón',
+  no_existe: 'no existe ese pallet', no_se_pudo: 'no se pudo agregar',
+  bajado: 'lo bajaron', bajado_y_sacado: 'lo bajaron y salió del despacho',
+};
+var GAL_CULATA_ROJO = { agregado:1, no_va:1, otro_despacho:1, despachado:1, abierto:1,
+  no_existe:1, no_se_pudo:1 };
+
+function galDspCulata(){
+  var el = document.getElementById('gal-dsp-culata'); if (!el) return;
+  var x = GST.abierto; var reg = GST.culata || [];
+  if (!x || !reg.length) { el.innerHTML = ''; return; }
+  var rojos = reg.filter(function(f){ return GAL_CULATA_ROJO[f.resultado]; }).length;
+  /* PLEGADO: es la segunda pregunta. La primera —¿está todo arriba?— la contestan
+     las ✓ de la tabla. Pero si hubo algo raro se dice en el título, que se lee sin
+     abrir. */
+  el.innerHTML = '<details><summary style="cursor:pointer;font-size:13px">📲 Lo que pasó en '
+    + 'la culata — ' + reg.length + (reg.length === 1 ? ' lectura' : ' lecturas')
+    + (rojos ? ' · <b style="color:#b91c1c">' + rojos + ' fuera de lo previsto</b>' : '')
+    + '</summary>'
+    + '<table class="pa-tbl gst-tbl" style="width:100%;table-layout:fixed;margin-top:6px">'
+    + '<colgroup><col style="width:14%"><col style="width:22%"><col style="width:20%">'
+    + '<col style="width:44%"></colgroup>'
+    + '<thead><tr><th>Hora</th><th>Quién</th><th>Pallet</th><th>Qué pasó</th></tr></thead><tbody>'
+    + reg.map(function(f){
+        var m = /(\d\d):(\d\d)/.exec(String(f.creado_en||''));
+        return '<tr' + (GAL_CULATA_ROJO[f.resultado] ? ' style="color:#b91c1c"' : '') + '>'
+          + '<td>' + (m ? m[1]+':'+m[2] : '') + '</td>'
+          + '<td style="overflow:hidden;text-overflow:ellipsis">' + galStEsc(f.usuario||'—') + '</td>'
+          + '<td style="overflow:hidden;text-overflow:ellipsis">' + galStEsc(f.numero||'—') + '</td>'
+          + '<td style="overflow:hidden;text-overflow:ellipsis">'
+          + galStEsc(GAL_CULATA_TXT[f.resultado] || f.resultado || f.accion) + '</td></tr>';
+      }).join('') + '</tbody></table></details>';
+}
+
+async function galDspCulataCargar(id){
+  GST.culata = [];
+  if (!id) return;
+  try {
+    var r = await fetch('/api/galpon/despachos/' + id + '/culata', { credentials:'same-origin' });
+    var j = await r.json();
+    if (j && j.ok) GST.culata = j.registro || [];
+  } catch(e) { GST.culata = []; }
 }
 
 /* ── LA VENTANA ─────────────────────────────────────────────────────────────────────
@@ -62211,6 +62300,10 @@ async function galDspAbrir(id){
       if(!l.length) { await galStCargar(); l = (GST.desp||[]).filter(function(x){ return x.id===id; }); }
       GST.abierto = l[0];
     }
+    /* Antes de pintar. galDspCulataCargar() vacía el registro ANTES de pedir el nuevo:
+       el del despacho anterior no puede aparecer abajo de éste ni un segundo, ni quedar
+       si el pedido falla. */
+    await galDspCulataCargar(GST.abierto && GST.abierto.id);
     galDspPintar();
     sgModalArriba('gal-dsp-modal');
   }catch(e){ galStAviso(e.message); }
@@ -62385,8 +62478,14 @@ function galDspItems(){
       + '<th></th></tr></thead><tbody>'
       + un.map(function(f){
           var esPal = f.tipo==='pallet';
+          /* ARRIBA DEL CAMIÓN: la ✓ sale de la app del cargador (V1150). Va en la
+             misma celda del número porque es lo que se mira junto: este pallet, y si
+             subió. */
+          var sub = esPal && x.carga && x.carga.pallets && x.carga.pallets[f.pallet_id];
           var que = esPal
-            ? '📦 <b>'+galStEsc(f.numero||('#'+f.pallet_id))+'</b>'
+            ? (sub && sub.subido ? '<span title="Subió: '+galStEsc((sub.por||'')+' '+(sub.en||''))
+                + '" style="color:#15803d">✓</span> ' : '')
+              + '📦 <b>'+galStEsc(f.numero||('#'+f.pallet_id))+'</b>'
             : '🧺 '+galStEsc(f.lote_nombre||('Lote '+f.lote_id));
           var det = esPal
             ? (f.lineas||[]).map(function(l){
@@ -62413,6 +62512,17 @@ function galDspItems(){
       + '<td style="text-align:right">'+galStNum(tk,0)+'</td>'
       + '<td></td></tr></tfoot></table>'
     : '<div class="ojo">Todavía no cargaste nada en este despacho.</div>';
+  /* El estado del camión, arriba de la tabla de abajo: es lo que la oficina mira
+     antes de emitir. Con faltantes se dice cuáles, con nombre y número. */
+  if (x.carga && (x.carga.subidos || x.carga.cargado)) {
+    var ec = document.getElementById('gal-dsp-items');
+    var falt = (x.carga.cargado && x.carga.cargado.faltaron) || [];
+    ec.innerHTML = '<div class="' + (falt.length ? 'ojo' : 'oko') + '" style="margin-bottom:8px">'
+      + galDspCargaTxt(x.carga)
+      + (falt.length ? '<br>Salió sin: <b>' + galStEsc(falt.join(', ')) + '</b>' : '')
+      + '</div>' + ec.innerHTML;
+  }
+  galDspCulata();
 }
 
 async function galDspSacar(id){
