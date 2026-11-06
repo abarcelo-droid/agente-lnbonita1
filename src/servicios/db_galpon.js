@@ -418,6 +418,31 @@ db.exec(`
   );
   CREATE INDEX IF NOT EXISTS gal_desp_estado_idx ON gal_despachos(estado, fecha);
 
+  -- ═══════════════════════════════════════════════════════════════════════════
+  -- 📲 CADA LECTURA EN LA CULATA DEL CAMIÓN (V1149)
+  -- ═══════════════════════════════════════════════════════════════════════════
+  -- Andy, 6/11/2026: «quiero que scanee cada pallet mientras está en la culata del
+  -- camión cargando». Una fila por lectura, también las que no hacen nada: «se quiso
+  -- subir el PC-26-00274 y no iba» es justo lo que hay que contestar cuando un cliente
+  -- reclama. Si un pallet está arriba lo dice la ÚLTIMA subida o bajada, no una
+  -- columna: un tilde no puede contar que se subió, se bajó y se volvió a subir.
+  --
+  -- Sin FK a gal_despachos ni a gal_pallets: el registro tiene que sobrevivir a que
+  -- se borre cualquiera de los dos, que es cuando más se lo va a querer leer.
+  CREATE TABLE IF NOT EXISTS gal_camion_escaneos (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    despacho_id  INTEGER NOT NULL,
+    pallet_id    INTEGER,                  -- NULL si lo leído no es ningún pallet
+    numero       TEXT,                     -- lo que se leyó, exista o no
+    accion       TEXT NOT NULL,            -- subio | bajo | leido (no cambió nada)
+    resultado    TEXT,                     -- subido, ya_estaba, no_va, agregado, ...
+    agregado     INTEGER NOT NULL DEFAULT 0,  -- 1: no estaba en la lista y se agregó ahí
+    creado_en    TEXT DEFAULT (datetime('now','localtime')),
+    usuario_id   INTEGER,
+    usuario      TEXT
+  );
+  CREATE INDEX IF NOT EXISTS gal_cam_esc_idx ON gal_camion_escaneos(despacho_id, pallet_id);
+
 
   CREATE INDEX IF NOT EXISTS gal_proc_fecha_idx ON gal_procesos(fecha);
   CREATE INDEX IF NOT EXISTS gal_proc_lote_idx  ON gal_procesos(lote_id, fecha);
@@ -542,6 +567,13 @@ for (const sql of [
   // El router lo corta antes con un 409 que dice con qué se pisa —eso es lo que lee el
   // operador—; esto es el cinturón de abajo, para lo que entre por otro lado.
   "CREATE UNIQUE INDEX IF NOT EXISTS gal_lote_vig_uq ON gal_lote_vigente(fecha, desde_hora)",
+  // EL CAMIÓN CARGADO (V1149). Quién lo dio por cargado y cuándo, y qué pallets
+  // faltaban si se dio por cargado igual. No es «emitido»: emitir sigue siendo de la
+  // oficina. Cualquier subida o bajada posterior lo vuelve a NULL.
+  "ALTER TABLE gal_despachos ADD COLUMN cargado_en TEXT",
+  "ALTER TABLE gal_despachos ADD COLUMN cargado_por TEXT",
+  "ALTER TABLE gal_despachos ADD COLUMN cargado_por_id INTEGER",
+  "ALTER TABLE gal_despachos ADD COLUMN cargado_faltan TEXT",
 ]) { try { db.exec(sql); } catch (_) {} }
 
 // ── LA HISTORIA TAMBIÉN TIENE QUE ESTAR EN LA TABLA NUEVA (V1133) ───────────────────

@@ -1,4 +1,4 @@
-// Service Worker para las PWA que viven bajo /m/ (IFCO móvil e Informes).
+// Service Worker para las PWA que viven bajo /m/ (IFCO móvil, Informes y Cargar camiones).
 // Estrategia: NETWORK-FIRST para todo. Quedan online-first pero cachean como fallback si el
 // operador pierde señal un momento.
 //
@@ -19,7 +19,7 @@
 // archivo termina en una Response de verdad, y hay un test que lo verifica pedido por
 // pedido (.smoke/sw_test.mjs).
 
-const CACHE_NAME = 'lnb-mifco-v8';
+const CACHE_NAME = 'lnb-mifco-v9';
 
 // Recursos que SÍ cacheamos como fallback offline (no HTML del app):
 const STATIC_FALLBACKS = [
@@ -112,7 +112,8 @@ self.addEventListener('fetch', (event) => {
 
   const acceptsHtml = req.headers.get('accept') && req.headers.get('accept').includes('text/html');
   const esNavegacion = req.mode === 'navigate' || acceptsHtml
-    || url.pathname === '/m/ifco' || url.pathname === '/m/informes' || url.pathname.endsWith('.html');
+    || url.pathname === '/m/ifco' || url.pathname === '/m/informes'
+    || url.pathname === '/m/galpon-camion' || url.pathname.endsWith('.html');
 
   if (esNavegacion) {
     event.respondWith(

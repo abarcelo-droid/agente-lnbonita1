@@ -1,0 +1,548 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#7a1426">
+<title>La Niña Bonita - Cargar camiones</title>
+
+<!-- PWA. Mismo patrón que /m/ifco y /m/informes: una app propia, instalable, no el panel
+     achicado. panel.html pesa 3,6 MB y en la culata del camión se usa con una mano. -->
+<link rel="manifest" href="/manifest-mgalpon-camion.json">
+<link rel="icon" type="image/png" sizes="32x32" href="/mifco-icon-32.png">
+<link rel="apple-touch-icon" sizes="180x180" href="/mifco-icon-apple.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="LNB Camiones">
+<meta name="mobile-web-app-capable" content="yes">
+<style>
+:root{
+  --bg:#f4f1ef;--sur:#fff;--bor:#e2dcd8;
+  --txt:#1f1a1a;--mut:#6b5f5f;
+  --burg:#9b1c31;--burd:#7a1426;
+  --ok:#15803d;--okl:#dcfce7;--warn:#b45309;--warnl:#fef3c7;--err:#b91c1c;--errl:#fee2e2;
+  --sans:'DM Sans',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+}
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+html,body{background:var(--bg);color:var(--txt);font-family:var(--sans);font-size:16px;
+  line-height:1.45;min-height:100vh;overflow-x:hidden}
+body{padding-bottom:calc(110px + env(safe-area-inset-bottom))}
+
+.hd{position:sticky;top:0;background:var(--burd);color:#fff;padding:12px 14px;
+  display:flex;align-items:center;gap:10px;z-index:20;
+  padding-top:calc(12px + env(safe-area-inset-top))}
+.hd .tit{flex:1;min-width:0;font-size:17px;font-weight:700;line-height:1.2;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.hd .tit small{display:block;font-size:12px;opacity:.75;font-weight:400;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.hd button{background:transparent;border:1px solid rgba(255,255,255,.3);color:#fff;
+  font-size:13px;padding:7px 11px;border-radius:9px;font-family:var(--sans);flex-shrink:0}
+.hd .atras{border:0;font-size:24px;padding:0 8px 4px;line-height:1}
+
+.cuerpo{padding:14px;max-width:640px;margin:0 auto}
+.cargando{padding:40px 10px;text-align:center;color:var(--mut)}
+.aviso{border-radius:12px;padding:12px 14px;margin-bottom:12px;font-size:14px}
+.aviso.err{background:var(--errl);color:var(--err);border:1px solid #fca5a5}
+.aviso.warn{background:var(--warnl);color:var(--warn);border:1px solid #fcd34d}
+.aviso.ok{background:var(--okl);color:var(--ok);border:1px solid #86efac}
+
+.btn{display:block;width:100%;border:0;border-radius:14px;padding:16px;font-size:17px;
+  font-weight:700;font-family:var(--sans);cursor:pointer}
+.btn.pri{background:var(--burg);color:#fff}
+.btn.sec{background:var(--sur);color:var(--txt);border:1.5px solid var(--bor)}
+.btn.ok{background:var(--ok);color:#fff}
+.btn:disabled{opacity:.5}
+
+/* ── la lista de camiones ── */
+.cam{background:var(--sur);border:1.5px solid var(--bor);border-radius:14px;padding:14px;
+  margin-bottom:10px;cursor:pointer;display:flex;align-items:center;gap:12px}
+.cam .d{flex:1;min-width:0}
+.cam .d b{display:block;font-size:17px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.cam .d span{font-size:13px;color:var(--mut)}
+.cam .n{font-size:22px;font-weight:800;white-space:nowrap}
+.cam .n small{font-size:12px;font-weight:600;color:var(--mut)}
+.cam.listo{border-color:var(--ok)}
+
+/* ── el camión ── */
+.cont{text-align:center;padding:6px 0 14px}
+.cont .big{font-size:58px;font-weight:800;line-height:1;letter-spacing:-1px}
+.cont .big small{font-size:24px;color:var(--mut);font-weight:700}
+.cont .sub{font-size:14px;color:var(--mut);margin-top:4px}
+.barra{height:10px;background:var(--bor);border-radius:6px;overflow:hidden;margin:10px 0 14px}
+.barra i{display:block;height:100%;background:var(--ok);transition:width .25s}
+.tipeo{display:flex;gap:8px;margin:12px 0 16px}
+.tipeo input{flex:1;min-width:0;border:1.5px solid var(--bor);border-radius:12px;padding:13px;
+  font-size:18px;font-family:var(--sans);text-transform:uppercase}
+.tipeo button{flex:0 0 auto;width:auto;padding:13px 18px}
+h3.t{font-size:12px;text-transform:uppercase;letter-spacing:.5px;color:var(--mut);margin:16px 0 8px}
+.pal{background:var(--sur);border:1.5px solid var(--bor);border-radius:12px;padding:11px 12px;
+  margin-bottom:8px;display:flex;align-items:center;gap:10px}
+.pal .d{flex:1;min-width:0}
+.pal .d b{font-size:17px;display:block}
+.pal .d span{font-size:12.5px;color:var(--mut);display:block;white-space:nowrap;overflow:hidden;
+  text-overflow:ellipsis}
+.pal.arriba{background:var(--okl);border-color:#86efac}
+.pal.arriba b{color:var(--ok)}
+.pal .ag{font-size:11px;font-weight:700;color:var(--warn)}
+.pal button{flex:0 0 auto;border:1.5px solid var(--bor);background:var(--sur);border-radius:9px;
+  padding:8px 10px;font-size:13px;font-family:var(--sans)}
+.pie{position:fixed;left:0;right:0;bottom:0;background:var(--sur);border-top:1px solid var(--bor);
+  padding:10px 14px calc(10px + env(safe-area-inset-bottom));z-index:15}
+.pie .fila{display:flex;gap:8px;max-width:640px;margin:0 auto}
+.pie .fila .btn{padding:15px 10px}
+.campo{margin-bottom:12px}
+.campo label{display:block;font-size:13px;color:var(--mut);margin-bottom:4px}
+.campo input{width:100%;border:1.5px solid var(--bor);border-radius:12px;padding:13px;
+  font-size:17px;font-family:var(--sans)}
+
+/* ── el escáner, a pantalla completa ── */
+#esc{position:fixed;inset:0;background:#000;z-index:50;display:none}
+#esc.on{display:block}
+#esc video{width:100%;height:100%;object-fit:cover}
+#esc .mira{position:absolute;left:50%;top:44%;width:66vw;max-width:320px;aspect-ratio:1;
+  transform:translate(-50%,-50%);border:4px solid rgba(255,255,255,.85);border-radius:18px;
+  box-shadow:0 0 0 2000px rgba(0,0,0,.35)}
+#esc .arr{position:absolute;left:0;right:0;top:0;padding:calc(14px + env(safe-area-inset-top)) 16px 14px;
+  color:#fff;font-size:18px;font-weight:700;text-align:center;background:rgba(0,0,0,.45)}
+#esc .ab{position:absolute;left:0;right:0;bottom:0;padding:14px 16px calc(14px + env(safe-area-inset-bottom));
+  background:rgba(0,0,0,.55)}
+
+/* ── la respuesta de cada lectura: que se vea desde la culata ── */
+#res{position:fixed;inset:0;z-index:60;display:none;flex-direction:column;
+  justify-content:center;align-items:center;padding:24px;text-align:center;color:#fff}
+#res.on{display:flex}
+#res.ok{background:var(--ok)}
+#res.ya{background:#ca8a04}
+#res.err{background:var(--err)}
+#res .ic{font-size:84px;line-height:1}
+#res .num{font-size:30px;font-weight:800;margin-top:14px;word-break:break-all}
+#res .msg{font-size:21px;font-weight:700;margin-top:10px;max-width:520px}
+#res .lleva{font-size:15px;opacity:.9;margin-top:8px}
+#res .bts{width:100%;max-width:420px;margin-top:26px;display:flex;flex-direction:column;gap:10px}
+#res .bts .btn{background:#fff;color:var(--txt)}
+#res .bts .btn.fuerte{background:#1f1a1a;color:#fff}
+</style>
+</head>
+<body>
+
+<div class="hd">
+  <button class="atras" id="atras" style="display:none" onclick="history.back()" aria-label="Volver">‹</button>
+  <div class="tit" id="tit">Cargar camiones<small id="sub"></small></div>
+  <button onclick="salir()">Salir</button>
+</div>
+
+<div class="cuerpo" id="cuerpo"><div class="cargando">Cargando…</div></div>
+<div class="pie" id="pie" style="display:none"></div>
+
+<div id="esc">
+  <video id="video" playsinline muted></video>
+  <div class="mira"></div>
+  <div class="arr" id="esc-txt">Apuntá al QR del tarjetón</div>
+  <div class="ab"><button class="btn sec" onclick="cerrarEscaner()">Terminar de escanear</button></div>
+</div>
+
+<div id="res"></div>
+
+<script>
+// ── 📲 CARGAR CAMIONES, LA APP DEL CARGADOR (V1149) ──────────────────────────────────
+// Andy, 6/11/2026: «quiero que scanee cada pallet mientras está en la culata del camión
+// cargando». Decisiones cerradas con él: sirve para un despacho armado en la oficina y
+// para uno que se arma escaneando; el pallet que no va FRENA con aviso fuerte y se puede
+// agregar igual; se escanea con la cámara del celular; hay buena señal (no hace falta
+// cola sin conexión); cada cargador con su usuario; «Lo bajé» deshace; al final queda
+// «cargado» y EMITIR sigue siendo de la oficina.
+//
+// LA PANTALLA NO DECIDE NADA. Todo lo que se puede o no se puede lo contesta el servidor
+// (servicios/galpon.js → escanearPallet); acá sólo se pinta. Así una regla vive en un
+// lugar y la pantalla del panel y ésta no pueden decir cosas distintas.
+//
+// LA CÁMARA: BarcodeDetector, que viene con Chrome en Android y no pide ninguna
+// librería. Donde no está (iPhone), se tipea el número del tarjetón — que va grande
+// justamente para eso.
+var S = { user:null, vista:'lista', camion:null, camiones:null, det:null, stream:null,
+          leyendo:false, ultimo:null, ultimoEn:0, timer:null, pendiente:null };
+var $ = function(id){ return document.getElementById(id); };
+var esc = function(s){ return String(s==null?'':s).replace(/[&<>"']/g, function(c){
+  return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; }); };
+var nr = function(n){ return Number(n||0).toLocaleString('es-AR'); };
+var hora = function(t){ var m = /(\d\d):(\d\d)/.exec(String(t||'')); return m ? m[1]+':'+m[2] : ''; };
+
+// ── EL SERVIDOR ───────────────────────────────────────────────────────────────────────
+// Devuelve el JSON TAL CUAL, también con ok:false: un «no va en este camión» no es un
+// error, es la respuesta que hay que pintar en rojo.
+async function api(url, body){
+  var r = await fetch(url, body === undefined ? { credentials:'include' } : {
+    method:'POST', credentials:'include',
+    headers:{ 'Content-Type':'application/json' }, body: JSON.stringify(body) });
+  if (r.status === 401) { location.href = '/login?next=/m/galpon-camion'; return null; }
+  if (r.status === 403) throw new Error('No tenés permiso para cargar camiones. Pedíselo al administrador.');
+  var d = null;
+  try { d = await r.json(); } catch(e) { d = null; }
+  if (!d) throw new Error('El servidor no contestó bien (HTTP ' + r.status + ')');
+  return d;
+}
+function salir(){
+  fetch('/api/auth/logout', { method:'POST', credentials:'include' })
+    .finally(function(){ location.href = '/login'; });
+}
+function titulo(t, s, atras){
+  $('tit').innerHTML = esc(t) + '<small id="sub">' + esc(s||'') + '</small>';
+  $('atras').style.display = atras ? '' : 'none';
+}
+function error(e){
+  $('cuerpo').innerHTML = '<div class="aviso err">' + esc(e && e.message || e) + '</div>'
+    + '<button class="btn sec" onclick="volverALista()">Volver</button>';
+  $('pie').style.display = 'none';
+}
+
+// ── 1 · LA LISTA DE CAMIONES ──────────────────────────────────────────────────────────
+async function verLista(){
+  S.vista = 'lista'; S.camion = null; pararRefresco();
+  titulo('Cargar camiones', S.user ? S.user.nombre : '', false);
+  $('pie').style.display = 'none';
+  try {
+    var d = await api('/api/galpon/camion');
+    if (!d) return;
+    if (!d.ok) throw new Error(d.error || 'No se pudo leer');
+    S.camiones = d.camiones || [];
+    pintarLista();
+  } catch(e){ error(e); }
+}
+function pintarLista(){
+  var l = S.camiones || [];
+  $('cuerpo').innerHTML =
+    '<button class="btn pri" onclick="verNuevo()" style="margin-bottom:16px">＋ Nuevo camión</button>'
+    + (l.length ? l.map(function(c){
+        var listo = c.total > 0 && c.subidos === c.total;
+        return '<div class="cam' + (listo ? ' listo' : '') + '" onclick="abrirCamion(' + c.id + ')">'
+          + '<div class="d"><b>' + esc(c.destinatario || 'Sin destino') + '</b>'
+          + '<span>' + esc(c.patente || 'sin patente') + ' · ' + esc(c.fecha || '')
+          + (c.cargado ? ' · ✅ cargado' : '')
+          + (c.piso ? ' · ⚠ tiene cajas sueltas' : '') + '</span></div>'
+          + '<div class="n">' + c.subidos + '<small> de ' + c.total + '</small></div></div>';
+      }).join('')
+      : '<div class="cargando">No hay camiones para cargar. Los arma la oficina en Stock y '
+        + 'Despachos, o se arranca uno con <b>Nuevo camión</b>.</div>');
+}
+
+// ── 2 · UN CAMIÓN NUEVO ───────────────────────────────────────────────────────────────
+function verNuevo(){
+  S.vista = 'nuevo';
+  history.pushState({ v:'nuevo' }, '', '#nuevo');
+  titulo('Nuevo camión', 'Se arma escaneando', true);
+  $('cuerpo').innerHTML =
+    '<div class="campo"><label>¿A dónde va?</label><input id="n-dest" autocomplete="off"></div>'
+    + '<div class="campo"><label>Patente</label><input id="n-pat" autocomplete="off"'
+    + ' style="text-transform:uppercase"></div>'
+    + '<div class="campo"><label>Transporte (si se sabe)</label><input id="n-tra" autocomplete="off"></div>'
+    + '<div id="n-err"></div>'
+    + '<button class="btn pri" id="n-ok" onclick="crearCamion()">Empezar a cargar</button>';
+}
+async function crearCamion(){
+  var b = $('n-ok'); if (b) b.disabled = true;
+  try {
+    var d = await api('/api/galpon/camion', { destinatario: $('n-dest').value,
+      patente: $('n-pat').value, transporte: $('n-tra').value });
+    if (!d) return;
+    if (!d.ok) { $('n-err').innerHTML = '<div class="aviso err">' + esc(d.error) + '</div>'; return; }
+    S.camion = d.camion;
+    history.replaceState({ v:'camion', id:d.id }, '', '#camion');
+    S.vista = 'camion';
+    pintarCamion();
+    empezarRefresco();
+  } catch(e){ error(e); }
+  finally { if (b) b.disabled = false; }
+}
+
+// ── 3 · EL CAMIÓN ─────────────────────────────────────────────────────────────────────
+async function abrirCamion(id){
+  S.vista = 'camion';
+  history.pushState({ v:'camion', id:id }, '', '#camion');
+  $('cuerpo').innerHTML = '<div class="cargando">Cargando…</div>';
+  await recargarCamion(id);
+  empezarRefresco();
+}
+async function recargarCamion(id){
+  try {
+    var d = await api('/api/galpon/camion/' + (id || (S.camion && S.camion.id)));
+    if (!d) return;
+    if (!d.ok) throw new Error(d.error || 'No se pudo leer');
+    S.camion = d.camion;
+    pintarCamion();
+  } catch(e){ error(e); }
+}
+/* Dos cargadores pueden estar subiendo el mismo camión. Cada 15 segundos se vuelve a
+   leer, salvo con la cámara abierta: ahí cada lectura ya trae el camión al día. */
+function empezarRefresco(){
+  pararRefresco();
+  S.timer = setInterval(function(){
+    if (S.vista === 'camion' && !S.leyendo && S.camion) recargarCamion(S.camion.id);
+  }, 15000);
+}
+function pararRefresco(){ if (S.timer) { clearInterval(S.timer); S.timer = null; } }
+
+function pintarCamion(){
+  var c = S.camion; if (!c) return;
+  titulo(c.destinatario || 'Camión', (c.patente || 'sin patente')
+    + (c.modo === 'libre' ? ' · se arma escaneando' : ''), true);
+  var pct = c.total ? Math.round(100 * c.subidos / c.total) : 0;
+  var h = '';
+  if (c.estado !== 'borrador') {
+    h += '<div class="aviso err">Este despacho ya está ' + esc(c.estado) + ': no se puede cargar.</div>';
+  }
+  /* Cajas sueltas: Andy, 6/11/2026, «no se cargan sueltas en camión». Se dice arriba de
+     todo, porque no se puede dar por cargado hasta que la oficina las saque. */
+  if (c.piso && c.piso.length) {
+    h += '<div class="aviso err"><b>Este despacho tiene cajas sueltas</b> y en camión no se '
+      + 'cargan sueltas: ' + c.piso.map(function(p){
+        return esc((p.presentacion || 'granel') + (p.calibre ? ' ' + p.calibre : '')) + ' · ' + nr(p.bultos);
+      }).join(', ') + '. Que la oficina las saque o las palletice.</div>';
+  }
+  if (c.cargado) {
+    h += '<div class="aviso ok">✅ Cargado por <b>' + esc(c.cargado.por || '—') + '</b> a las '
+      + esc(hora(c.cargado.en))
+      + ((c.cargado.faltaron || []).length ? ' · salió sin ' + esc(c.cargado.faltaron.join(', ')) : '')
+      + '</div>';
+  }
+  h += '<div class="cont"><div class="big" id="contador">' + c.subidos + '<small> de ' + c.total + '</small></div>'
+    + '<div class="sub">pallets arriba · ' + nr(c.bultos) + ' cajas · ' + nr(c.kilos) + ' kg</div></div>'
+    + '<div class="barra"><i style="width:' + pct + '%"></i></div>'
+    + '<button class="btn pri" onclick="abrirEscaner()" style="font-size:20px;padding:20px">📷 Escanear</button>'
+    + '<div class="tipeo"><input id="tipeo" inputmode="text" autocomplete="off" placeholder="o tipeá el número: 269"'
+    + ' onkeydown="if(event.key===\'Enter\'){event.preventDefault();subirTipeado()}">'
+    + '<button class="btn sec" onclick="subirTipeado()">Subir</button></div>';
+
+  var faltan = (c.pallets || []).filter(function(p){ return !p.subido; });
+  var arriba = (c.pallets || []).filter(function(p){ return p.subido; });
+  if (faltan.length) {
+    h += '<h3 class="t">Faltan · ' + faltan.length + '</h3>' + faltan.map(function(p){
+      return '<div class="pal"><div class="d"><b>' + esc(p.numero) + '</b><span>' + esc(p.lleva) + '</span></div></div>';
+    }).join('');
+  }
+  if (arriba.length) {
+    h += '<h3 class="t">Arriba · ' + arriba.length + '</h3>' + arriba.map(function(p){
+      return '<div class="pal arriba"><div class="d"><b>✓ ' + esc(p.numero) + '</b><span>'
+        + esc(p.lleva) + '</span><span>' + esc(hora(p.subido_en)) + ' · ' + esc(p.subido_por || '')
+        + (p.agregado ? ' · <span class="ag">agregado acá</span>' : '') + '</span></div>'
+        + '<button onclick="bajar(' + p.pallet_id + ')">Lo bajé</button></div>';
+    }).join('');
+  }
+  if (!c.total) {
+    h += '<div class="cargando">' + (c.modo === 'libre'
+      ? 'Todavía no se subió nada. Cada pallet que escanees se suma a este camión.'
+      : 'Este despacho no tiene pallets.') + '</div>';
+  }
+  $('cuerpo').innerHTML = h;
+
+  $('pie').style.display = c.estado === 'borrador' ? '' : 'none';
+  $('pie').innerHTML = '<div class="fila">'
+    + '<button class="btn ok" id="btn-cargado" onclick="darPorCargado(0)"'
+    + (c.subidos && !(c.piso && c.piso.length) ? '' : ' disabled') + '>'
+    + (c.cargado ? 'Volver a confirmar cargado' : 'Camión cargado') + '</button></div>';
+}
+
+// ── 4 · CADA LECTURA ──────────────────────────────────────────────────────────────────
+async function subirTipeado(){
+  var i = $('tipeo'); var v = i ? i.value : '';
+  if (!String(v).trim()) return;
+  await leer(v, 0);
+  if ($('tipeo')) $('tipeo').value = '';
+}
+async function leer(numero, agregar){
+  if (!S.camion) return;
+  try {
+    var d = await api('/api/galpon/camion/' + S.camion.id + '/escanear',
+      { numero: numero, agregar: agregar ? 1 : 0 });
+    if (!d) return;
+    if (d.camion) S.camion = d.camion;
+    mostrarResultado(d, numero);
+  } catch(e){
+    mostrarResultado({ ok:false, resultado:'error', motivo: e.message || String(e) }, numero);
+  }
+}
+
+/* EL COLOR LO DECIDE EL RESULTADO, en un solo lugar. Verde sube, amarillo ya estaba, y
+   todo lo demás es rojo: en la culata no hay tiempo para leer un cartel, se mira el
+   color. */
+var COLOR = { subido:'ok', agregado:'ok', ya_estaba:'ya' };
+function claseDe(resultado){ return COLOR[resultado] || 'err'; }
+
+function mostrarResultado(d, leido){
+  var cl = claseDe(d.resultado);
+  var p = d.pallet || {};
+  var num = p.numero || d.numero || String(leido || '').toUpperCase();
+  var c = S.camion || {};
+  var ic = cl === 'ok' ? '✓' : (cl === 'ya' ? '↺' : '✕');
+  var bts = '';
+  S.pendiente = null;
+  if (d.resultado === 'no_va' && d.puede_agregar) {
+    /* El que NO VA frena y no sigue solo: hay que decidir. Agregarlo es el botón
+       oscuro y de abajo, para que no se apriete de pasada. */
+    S.pendiente = num;
+    bts = '<button class="btn" onclick="seguir()">No va — sigo</button>'
+      + '<button class="btn fuerte" onclick="agregarIgual()">Agregarlo igual a este camión</button>';
+  } else if (cl === 'err') {
+    bts = '<button class="btn" onclick="seguir()">Seguir</button>';
+  }
+  var r = $('res');
+  r.className = 'on ' + cl;
+  r.innerHTML = '<div class="ic">' + ic + '</div>'
+    + '<div class="num">' + esc(num) + '</div>'
+    + '<div class="msg">' + esc(d.motivo || '') + '</div>'
+    + (p.lleva ? '<div class="lleva">' + esc(p.lleva) + '</div>' : '')
+    + (cl !== 'err' && c.total ? '<div class="lleva"><b>' + c.subidos + ' de ' + c.total + '</b></div>' : '')
+    + (bts ? '<div class="bts">' + bts + '</div>' : '');
+  avisar(cl);
+  pintarCamion();
+  /* Verde y amarillo se van solos y la cámara sigue: el cargador tiene las manos
+     ocupadas. El rojo se queda hasta que alguien lo toque. */
+  if (cl !== 'err') setTimeout(function(){ if ($('res').className.indexOf(cl) >= 0) seguir(); }, 1300);
+}
+function seguir(){
+  $('res').className = '';
+  S.pendiente = null;
+  if (S.leyendo) leerUnaVez();
+}
+async function agregarIgual(){
+  var n = S.pendiente; if (!n) return seguir();
+  $('res').className = '';
+  await leer(n, 1);
+}
+
+/* Sonido y vibración. El verde es un pip corto; el rojo, tres largos y graves: se tiene
+   que oír con el motor del camión en marcha y el celular en el bolsillo. */
+function avisar(cl){
+  try {
+    if (navigator.vibrate) navigator.vibrate(cl === 'err' ? [400, 120, 400, 120, 400] : (cl === 'ya' ? [80, 60, 80] : 90));
+  } catch(e){}
+  try {
+    var A = window.AudioContext || window.webkitAudioContext;
+    if (!A) return;
+    S.audio = S.audio || new A();
+    var veces = cl === 'err' ? 3 : (cl === 'ya' ? 2 : 1);
+    for (var k = 0; k < veces; k++) {
+      var o = S.audio.createOscillator(), g = S.audio.createGain();
+      o.frequency.value = cl === 'err' ? 220 : (cl === 'ya' ? 660 : 1040);
+      o.type = cl === 'err' ? 'square' : 'sine';
+      o.connect(g); g.connect(S.audio.destination);
+      var t0 = S.audio.currentTime + k * (cl === 'err' ? 0.42 : 0.16);
+      g.gain.setValueAtTime(0.25, t0);
+      o.start(t0); o.stop(t0 + (cl === 'err' ? 0.32 : 0.11));
+    }
+  } catch(e){}
+}
+
+// ── 5 · LA CÁMARA ─────────────────────────────────────────────────────────────────────
+async function abrirEscaner(){
+  if (!('BarcodeDetector' in window)) {
+    mostrarResultado({ ok:false, resultado:'sin_camara',
+      motivo:'Este celular no lee QR con la cámara. Tipeá el número del tarjetón abajo.' }, '');
+    return;
+  }
+  try {
+    S.det = S.det || new window.BarcodeDetector({ formats: ['qr_code'] });
+    S.stream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: 'environment' }, audio: false });
+    var v = $('video');
+    v.srcObject = S.stream;
+    await v.play();
+    $('esc').className = 'on';
+    S.leyendo = true;
+    history.pushState({ v:'escaner' }, '', '#escaner');
+    leerUnaVez();
+  } catch(e) {
+    cerrarEscaner(true);
+    mostrarResultado({ ok:false, resultado:'sin_camara',
+      motivo:'No se pudo abrir la cámara (' + (e.message || e) + '). Tipeá el número abajo.' }, '');
+  }
+}
+/* Una lectura por vez: mientras la respuesta está en pantalla no se lee nada más. Y el
+   MISMO código leído en los 3 segundos siguientes se ignora: el cargador sigue
+   apuntando al tarjetón mientras mira el verde, y sin esto sería «ya lo subiste» en
+   loop. */
+async function leerUnaVez(){
+  if (!S.leyendo) return;
+  if ($('res').className.indexOf('on') >= 0) return;
+  try {
+    var cods = await S.det.detect($('video'));
+    var v = cods && cods[0] && String(cods[0].rawValue || '').trim();
+    if (v && !(v === S.ultimo && Date.now() - S.ultimoEn < 3000)) {
+      S.ultimo = v; S.ultimoEn = Date.now();
+      await leer(v, 0);
+      return;
+    }
+  } catch(e){}
+  setTimeout(leerUnaVez, 180);
+}
+function cerrarEscaner(sinHistoria){
+  S.leyendo = false;
+  $('esc').className = '';
+  try { (S.stream && S.stream.getTracks() || []).forEach(function(t){ t.stop(); }); } catch(e){}
+  S.stream = null;
+  if (!sinHistoria && location.hash === '#escaner') history.back();
+}
+
+// ── 6 · LO BAJÉ Y CAMIÓN CARGADO ──────────────────────────────────────────────────────
+async function bajar(palletId){
+  try {
+    var d = await api('/api/galpon/camion/' + S.camion.id + '/bajar', { pallet_id: palletId });
+    if (!d) return;
+    if (d.camion) S.camion = d.camion;
+    if (!d.ok) throw new Error(d.error || d.motivo);
+    pintarCamion();
+  } catch(e){ mostrarResultado({ ok:false, resultado:'error', motivo: e.message || String(e) }, ''); }
+}
+async function darPorCargado(confirmar){
+  try {
+    var d = await api('/api/galpon/camion/' + S.camion.id + '/cargado', { confirmar: confirmar ? 1 : 0 });
+    if (!d) return;
+    if (d.necesita_confirmar) {
+      /* Faltan pallets: se pregunta acá, en grande, nombrándolos. Un confirm() del
+         navegador se contesta sin leer. */
+      var r = $('res');
+      r.className = 'on ya';
+      r.innerHTML = '<div class="ic">!</div><div class="msg">Faltan ' + d.faltan.length + ' pallets</div>'
+        + '<div class="num" style="font-size:22px">' + esc(d.faltan.join(' · ')) + '</div>'
+        + '<div class="bts"><button class="btn" onclick="seguir()">Volver a cargar</button>'
+        + '<button class="btn fuerte" onclick="seguir();darPorCargado(1)">Sale sin esos</button></div>';
+      avisar('ya');
+      return;
+    }
+    if (d.camion) S.camion = d.camion;
+    if (!d.ok) throw new Error(d.error || d.motivo);
+    pintarCamion();
+    avisar('ok');
+  } catch(e){ mostrarResultado({ ok:false, resultado:'error', motivo: e.message || String(e) }, ''); }
+}
+
+// ── LA NAVEGACIÓN ─────────────────────────────────────────────────────────────────────
+// El botón «atrás» del teléfono es el que se usa: cierra la cámara, o vuelve a la lista,
+// en vez de cerrar la aplicación.
+function volverALista(){ verLista(); history.replaceState({ v:'lista' }, '', '#lista'); }
+window.addEventListener('popstate', function(){
+  if (S.leyendo) { cerrarEscaner(true); return; }
+  if ($('res').className.indexOf('on') >= 0) $('res').className = '';
+  if (S.vista !== 'lista') verLista();
+});
+
+// ── ARRANQUE ──────────────────────────────────────────────────────────────────────────
+(async function(){
+  try {
+    var r = await fetch('/api/auth/me', { credentials:'include' });
+    if (!r.ok) { location.href = '/login?next=/m/galpon-camion'; return; }
+    var d = await r.json();
+    if (!d || !d.ok) { location.href = '/login?next=/m/galpon-camion'; return; }
+    S.user = d.user;
+    history.replaceState({ v:'lista' }, '', '#lista');
+    verLista();
+  } catch(e) { error(e); }
+})();
+
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', function(){
+    navigator.serviceWorker.register('/mifco-sw.js', { scope: '/m/' }).catch(function(){});
+  });
+}
+</script>
+</body>
+</html>

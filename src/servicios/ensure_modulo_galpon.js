@@ -54,6 +54,11 @@ try {
     ['galpon-proceso',  '📦 Proceso',        703],
     ['galpon-acumulado','📈 Acumulado',      704],
     ['galpon-stock',    '🚚 Stock y Despachos', 705],
+    // CARGAR CAMIONES (V1149). La app del cargador, /m/galpon-camion. Es un módulo
+    // aparte para que se le pueda dar SÓLO esto al que está en la culata: escanea y
+    // da el camión por cargado, pero no arma despachos ni los emite. Su pantalla en
+    // el panel es un botón que abre la app.
+    ['galpon-camion',   '📲 Cargar camiones', 706],
   ];
 
   const ins = db.prepare(

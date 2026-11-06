@@ -1,0 +1,26 @@
+{
+  "name": "La Niña Bonita - Cargar camiones",
+  "short_name": "LNB Camiones",
+  "description": "Escanear cada pallet al subirlo al camión",
+  "start_url": "/m/galpon-camion",
+  "scope": "/m/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#7a1426",
+  "theme_color": "#7a1426",
+  "lang": "es-AR",
+  "icons": [
+    {
+      "src": "/mifco-icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/mifco-icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}
