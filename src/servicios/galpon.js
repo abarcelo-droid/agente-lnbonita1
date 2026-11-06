@@ -4376,3 +4376,36 @@ export function marcarCargado(db, despachoId, d) {
     c.faltan.length ? JSON.stringify(c.faltan) : null, i);
   return { ok: true, camion: camion(db, i) };
 }
+
+
+// ── LO QUE LA OFICINA VE DE LA CULATA (V1150) ──────────────────────────────────────────
+// La app del cargador escribe; esto es lo que lee la oficina en 🚚 Stock y Despachos.
+// Sale del MISMO registro y de la MISMA función que usa la app (camion()), así que las
+// dos pantallas no pueden decir cosas distintas sobre si un pallet está arriba.
+export function cargaDelDespacho(db, despachoId) {
+  const c = camion(db, despachoId);
+  if (!c) return null;
+  const n = db.prepare(
+    " SELECT COUNT(*) AS lecturas,"
+    + " SUM(CASE WHEN resultado IN ('no_va','otro_despacho','despachado','abierto',"
+    + "   'no_existe','no_se_pudo') THEN 1 ELSE 0 END) AS rechazos"
+    + ' FROM gal_camion_escaneos WHERE despacho_id = ?').get(c.id);
+  const pallets = {};
+  for (const p of c.pallets) {
+    pallets[p.pallet_id] = { subido: p.subido, en: p.subido_en, por: p.subido_por,
+                             agregado: p.agregado };
+  }
+  return { total: c.total, subidos: c.subidos, cargado: c.cargado, pallets,
+           lecturas: Number(n.lecturas) || 0, rechazos: Number(n.rechazos) || 0 };
+}
+
+/* EL REGISTRO DE LA CULATA, lectura por lectura. Las que no hicieron nada también:
+   «se quiso subir el PC-26-00274 y no iba» es lo que se busca cuando un cliente
+   reclama un pallet que no llegó, o uno que llegó de más. */
+export function registroDeCulata(db, despachoId) {
+  const i = parseInt(despachoId, 10);
+  if (!Number.isFinite(i)) return [];
+  return db.prepare(
+    ' SELECT id, numero, accion, resultado, agregado, creado_en, usuario'
+    + '  FROM gal_camion_escaneos WHERE despacho_id = ? ORDER BY id').all(i);
+}
