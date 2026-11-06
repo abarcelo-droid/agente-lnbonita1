@@ -41,6 +41,7 @@ import {
   sacarDelPalletArmado, lineasDelPallet, palletResumen,
   agregarAlDespacho, sacarDelDespacho, emitirDespacho, anularDespacho, borrarDespacho,
   despachoPorNumero,
+  camion, camionesParaCargar, nuevoCamion, escanearPallet, bajarPallet, marcarCargado,
   borrarPallet, sacarDelPallet, pallets, palletPorNumero, valorConfig,
   registrarProceso, editarProceso, borrarProceso, procesosDelDia,
   tableroProceso, stockGalpon, stockPorLote, stockPorProducto, lotesVolcados,
@@ -1386,6 +1387,91 @@ router.get('/presentaciones/:id/icono', (req, res) => {
   } catch (e) {
     console.error('[GALPON] GET /presentaciones/:id/icono:', e.message);
     res.status(500).end();
+  }
+});
+
+
+// ── 📲 CARGAR EL CAMIÓN, ESCANEANDO (V1149) ──────────────────────────────────────────
+// Lo usa la app del cargador, /m/galpon-camion. Todas bajo /camion para que tengan su
+// PROPIO permiso (galpon-camion en ensure_api_prefijos.js): el que carga camiones no
+// tiene por qué poder armar despachos, emitirlos ni anularlos, y si estas rutas
+// colgaran de /despachos heredarían todo eso.
+//
+// Es trabajo del día: requireAuth, y el nivel lo decide exigirNivel. Las respuestas
+// que no suben nada vuelven con 200 y ok:false — no son errores del pedido, son lo
+// que la pantalla tiene que pintar en rojo.
+const quien = (req) => ({ usuario_id: (req._user || {}).id || null,
+                         usuario: (req._user || {}).nombre || null });
+
+router.get('/camion', (req, res) => {
+  try {
+    res.json({ ok: true, hoy: hoy(), camiones: camionesParaCargar(db) });
+  } catch (e) {
+    console.error('[GALPON] GET /camion:', e.message);
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+router.post('/camion', (req, res) => {
+  try {
+    const r = nuevoCamion(db, Object.assign({}, req.body || {}, quien(req)));
+    if (!r.ok) return res.status(400).json({ ok: false, error: r.motivo });
+    res.json(r);
+  } catch (e) {
+    console.error('[GALPON] POST /camion:', e.message);
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+router.get('/camion/:id', (req, res) => {
+  try {
+    const c = camion(db, num(req.params.id));
+    if (!c) return res.status(404).json({ ok: false, error: 'Ese despacho no existe' });
+    res.json({ ok: true, camion: c });
+  } catch (e) {
+    console.error('[GALPON] GET /camion/:id:', e.message);
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+router.post('/camion/:id/escanear', (req, res) => {
+  try {
+    const b = req.body || {};
+    const r = escanearPallet(db, num(req.params.id), b.numero,
+      Object.assign({ agregar: b.agregar ? 1 : 0 }, quien(req)));
+    if (r.resultado === 'sin_camion') return res.status(404).json(Object.assign(
+      { error: r.motivo }, r));
+    res.json(r);
+  } catch (e) {
+    console.error('[GALPON] POST /camion/:id/escanear:', e.message);
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+router.post('/camion/:id/bajar', (req, res) => {
+  try {
+    const r = bajarPallet(db, num(req.params.id), (req.body || {}).pallet_id, quien(req));
+    if (!r.ok) return res.status(400).json(Object.assign({ error: r.motivo }, r));
+    res.json(r);
+  } catch (e) {
+    console.error('[GALPON] POST /camion/:id/bajar:', e.message);
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+router.post('/camion/:id/cargado', (req, res) => {
+  try {
+    const r = marcarCargado(db, num(req.params.id), Object.assign(
+      { confirmar: (req.body || {}).confirmar ? 1 : 0 }, quien(req)));
+    /* Faltan pallets y no se confirmó: no es un error, es la pregunta. 200 con
+       necesita_confirmar, y la pantalla la hace. */
+    if (!r.ok && !r.necesita_confirmar) {
+      return res.status(400).json(Object.assign({ error: r.motivo }, r));
+    }
+    res.json(r);
+  } catch (e) {
+    console.error('[GALPON] POST /camion/:id/cargado:', e.message);
+    res.status(500).json({ ok: false, error: e.message });
   }
 });
 

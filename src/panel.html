@@ -312,6 +312,7 @@ if ('serviceWorker' in navigator) {
     <div class="ni" data-sec="galpon-proceso"><span class="dot da"></span>📦 Proceso</div>
     <div class="ni" data-sec="galpon-acumulado"><span class="dot da"></span>📈 Acumulado</div>
     <div class="ni" data-sec="galpon-stock"><span class="dot da"></span>🚚 Stock y Despachos</div>
+    <div class="ni" data-sec="galpon-camion"><span class="dot da"></span>📲 Cargar camiones</div>
   </div>
 
   <div class="ni-grp" data-grp="ven-ventas">Administración de Ventas<span class="ni-caret">▾</span></div>
@@ -8481,6 +8482,28 @@ if ('serviceWorker' in navigator) {
       <button class="btn bo bs" style="margin-left:auto;text-transform:none;letter-spacing:0"
         onclick="galDspAbrir()">+ Armar un despacho</button></h3>
     <div id="gst-desp"></div>
+  </div>
+
+  <!-- 📲 CARGAR CAMIONES (V1149). La pantalla del panel es SÓLO la puerta a la app del
+       cargador, /m/galpon-camion: la carga se hace con el celular en la culata, y el
+       panel pesa 3,6 MB. Está en el menú para que el permiso se pueda dar: el que sólo
+       tiene este módulo entra al panel, ve un ítem, y de acá salta a la app. -->
+  <div class="sec sg-mod" id="sec-galpon-camion">
+    <div class="ph">
+      <div><div class="ph-t">📲 Cargar camiones</div>
+        <div class="ph-s">Se escanea cada pallet con el celular mientras sube al camión. La
+          app avisa si uno no va, cuenta cuántos faltan y deja el camión como cargado.</div></div>
+      <div style="display:flex;gap:8px">
+        <button class="btn bo bs" onclick="sgManualAbrir('galpon-camion')">❓ ¿Cómo se usa?</button></div>
+    </div>
+    <div class="sgr-card" style="max-width:640px">
+      <a class="btn bp" id="gcm-abrir" href="/m/galpon-camion" target="_blank" rel="noopener"
+         style="display:inline-block;font-size:16px;padding:12px 22px">📲 Abrir la app del cargador</a>
+      <p style="margin:14px 0 4px;font-size:13px">En el celular, entrá a esta dirección y
+        agregala a la pantalla de inicio:</p>
+      <div id="gcm-url" style="font-family:monospace;font-size:14px;font-weight:700;
+           word-break:break-all"></div>
+    </div>
   </div>
 
   <div class="sec sg-mod" id="sec-galpon-acumulado">
@@ -29740,6 +29763,53 @@ SG_MANUAL['galpon-stock'] = { titulo: 'Stock y Despachos', html:
   + 'como pidió Andy.</p>'
 };
 
+SG_MANUAL['galpon-camion'] = { titulo: 'Cargar camiones', html:
+  '<p class="mv">V1149</p>'
+  + '<p>Andy, 6/11/2026: <i>«quiero que scanee cada pallet mientras está en la culata del '
+  + 'camión cargando»</i>.</p>'
+  + '<p>Es una <b>app aparte, para el celular</b>: se abre con el botón de esta pantalla o '
+  + 'entrando a <b>/m/galpon-camion</b>, y se agrega a la pantalla de inicio. Cada cargador '
+  + 'entra con <b>su usuario</b>: queda escrito quién subió cada pallet.</p>'
+
+  + '<h3>1 · Elegir el camión <span class="ver">V1149</span></h3>'
+  + '<p>La lista son los despachos <b>en borrador</b>, con cuántos pallets van arriba. Un '
+  + 'despacho emitido no aparece: ya salió con su remito.</p>'
+  + '<p><b>Nuevo camión</b> arranca uno vacío: pide a dónde va y la patente, y se arma '
+  + 'escaneando.</p>'
+
+  + '<h3>2 · Escanear <span class="ver">V1149</span></h3>'
+  + '<p>Se apunta la cámara al QR del tarjetón. Si no lee, se tipea el número: alcanza '
+  + 'con <b>269</b> para el PC-26-00269. Cada lectura contesta en toda la pantalla:</p>'
+  + '<ul>'
+  + '<li><b>Verde — subido.</b> Cuenta uno más: «8 de 14».</li>'
+  + '<li><b>Amarillo — ya lo subiste.</b> El mismo tarjetón dos veces no cuenta dos.</li>'
+  + '<li><b>Rojo, con sonido y vibración — no va en este camión.</b> No se agrega solo. '
+  + 'Si de verdad va, <b>Agregarlo igual</b> lo suma y queda escrito que se agregó en la '
+  + 'culata.</li>'
+  + '<li><b>Rojo — no se puede:</b> el pallet está abierto, está en <b>otro camión</b> '
+  + '(eso lo cambia la oficina, no la culata), ya salió, o no existe.</li>'
+  + '</ul>'
+  + '<p>En un camión que se arrancó <b>vacío</b> no hay «no va»: no hay lista contra qué '
+  + 'controlar, así que cada pallet que se escanea se suma.</p>'
+
+  + '<h3>3 · Lo bajé <span class="ver">V1149</span></h3>'
+  + '<p>Cada pallet subido tiene <b>Lo bajé</b>: vuelve a faltar. Si se había agregado en '
+  + 'la culata, además sale del despacho.</p>'
+
+  + '<h3>4 · Camión cargado <span class="ver">V1149</span></h3>'
+  + '<p>Queda escrito <b>quién y cuándo</b>. <b>No emite el remito</b>: eso sigue siendo de '
+  + 'la oficina. Si faltan pallets, pregunta y deja escrito <b>cuáles faltaron</b>.</p>'
+  + '<ul>'
+  + '<li><b>Con cajas sueltas no se puede</b>: en camión no se cargan sueltas. La oficina '
+  + 'las saca o las palletiza primero.</li>'
+  + '<li>Subir o bajar un pallet después <b>deshace el «cargado»</b>: se dio por cargado un '
+  + 'camión distinto del que ahora está.</li>'
+  + '</ul>'
+  + '<div class="ojo"><b>Cada lectura queda anotada</b>, también las que no hicieron nada: '
+  + '«se quiso subir el PC-26-00274 y no iba» es justo lo que hay que poder contestar '
+  + 'cuando un cliente reclama.</div>'
+};
+
 SG_MANUAL['galpon-lote-dia'] = { titulo: 'Galpón · Lote del día', html:
   '<p>Esta pantalla contesta <b>una sola pregunta</b>: qué se está cosechando. Parece poco, '
   + 'y es lo que convierte un montón de IFCOs en kilos de un lote. Sin esto, la balanza pesa '
@@ -42370,6 +42440,7 @@ function loadSec(s) {
     'galpon-proceso': function(){ galPrInit(); },
     'galpon-acumulado': function(){ galAcInit(); },
     'galpon-stock': function(){ galStInit(); },
+    'galpon-camion': function(){ galCamInit(); },
     'pl-abasto': function(){ plaInit(); },
     'sg-catalogo':   function(){ sgLoadCaches(function(){ sgCatSub('productos'); }); },
     'sg-reportes':   function(){ sgRepInit(); },
@@ -62806,6 +62877,13 @@ function galArmTarjeton(){
 
 // Las dos listas se cargan juntas: la de pallets armados vive en esta pantalla.
 function galStInit(){ galStCargar(); galArmCargar(); }
+
+// La dirección completa, para dictarla o copiarla al celular. Se arma con el origen de
+// la página y no se escribe a mano: son tres Railway, y cada uno tiene la suya.
+function galCamInit(){
+  var el = document.getElementById('gcm-url');
+  if (el) el.textContent = location.origin + '/m/galpon-camion';
+}
 
 </script>
 

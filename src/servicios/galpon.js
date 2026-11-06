@@ -4091,3 +4091,288 @@ export function ponerEnCero(db, opts) {
     return { ok: false, motivo: e.message };
   }
 }
+
+
+// ════════════════════════════════════════════════════════════════════════════════════
+// 📲 CARGAR EL CAMIÓN, ESCANEANDO
+// ════════════════════════════════════════════════════════════════════════════════════
+// Andy, 6/11/2026: «quiero que scanee cada pallet mientras está en la culata del camión
+// cargando». Decisiones cerradas con él ese día:
+//
+//   · Sirve para los DOS casos: un despacho armado en la oficina se controla contra su
+//     lista, y uno vacío se va llenando con lo que se escanea.
+//   · Un pallet que no está en la lista FRENA con aviso fuerte, y se puede agregar igual.
+//     Queda escrito que se agregó en la culata.
+//   · No se cargan cajas sueltas en camión: un despacho con cajas del piso no está listo.
+//   · «Lo bajé» deshace un escaneo. Si el pallet se había agregado en la culata, además
+//     sale del despacho.
+//   · Al terminar queda «cargado», con quién y cuándo. EMITIR sigue siendo de la oficina.
+//
+// EL ESTADO SALE DEL REGISTRO, NO DE UNA COLUMNA. Cada lectura escribe una fila en
+// gal_camion_escaneos y lo que dice si un pallet está arriba es la ÚLTIMA fila de
+// subida o bajada de ese pallet en ese despacho. Un tilde en una columna no puede
+// contestar «quién lo subió, lo bajó y lo volvió a subir», y cuando un cliente reclama
+// un pallet que no llegó, ésa es la pregunta.
+
+// Lo que se leyó, convertido a un número de pallet. El QR trae el número pelado; lo
+// que hace falta resolver es lo TIPEADO, cuando la cámara no lee: «269», «00269» o
+// «pc-26-269» tienen que encontrar el PC-26-00269. Sólo con dígitos se busca primero
+// entre los pallets del despacho —es casi siempre lo que se está buscando— y si no,
+// se arma con el prefijo y el año de hoy.
+function numeroLeido(db, leido, enDespacho) {
+  const s = String(leido == null ? '' : leido).trim().toUpperCase().replace(/\s+/g, '');
+  if (!s) return '';
+  if (/^\d+$/.test(s)) {
+    const n5 = s.padStart(5, '0');
+    const propio = (enDespacho || []).find((x) => String(x).endsWith('-' + n5));
+    if (propio) return propio;
+    const pref = valorConfig(db, 'pallet_prefijo') || 'PC';
+    return pref + '-' + String(new Date().getFullYear()).slice(2) + '-' + n5;
+  }
+  const m = /^([A-Z]+)-(\d{2})-(\d+)$/.exec(s);
+  return m ? m[1] + '-' + m[2] + '-' + m[3].padStart(5, '0') : s;
+}
+
+// Arriba o abajo, por pallet: la ÚLTIMA subida o bajada manda.
+function subidosDelCamion(db, despachoId) {
+  const por = new Map();
+  for (const f of db.prepare(
+    " SELECT pallet_id, accion, agregado, creado_en, usuario FROM gal_camion_escaneos"
+    + "  WHERE despacho_id = ? AND accion IN ('subio','bajo') AND pallet_id IS NOT NULL"
+    + '  ORDER BY id').all(despachoId)) {
+    if (f.accion === 'subio') {
+      por.set(f.pallet_id, { subido: true, en: f.creado_en, por: f.usuario,
+                             agregado: f.agregado ? 1 : 0 });
+    } else {
+      por.set(f.pallet_id, { subido: false, agregado: 0 });
+    }
+  }
+  return por;
+}
+
+// Lo que lleva un pallet, en una línea que se lea en la culata: «Carton Amarilla 35-55
+// · 49». Las líneas de salida vienen por lote; acá se juntan por artículo (V1148).
+function queLleva(lineas) {
+  const por = new Map();
+  for (const l of lineas || []) {
+    const k = (l.presentacion || 'granel') + (l.calibre ? ' ' + l.calibre : '');
+    por.set(k, round2((por.get(k) || 0) + (Number(l.bultos) || 0)));
+  }
+  return [...por.entries()].map(([k, b]) => k + ' · ' + b).join(' — ');
+}
+
+const ESTADOS_CAMION_FIN = { emitido: 'ya está emitido', anulado: 'está anulado' };
+
+export function camion(db, despachoId) {
+  const i = parseInt(despachoId, 10);
+  if (!Number.isFinite(i)) return null;
+  const x = db.prepare('SELECT * FROM gal_despachos WHERE id = ? AND eliminado_en IS NULL')
+    .get(i);
+  if (!x) return null;
+  const unidades = unidadesDelDespacho(db, i);
+  const sub = subidosDelCamion(db, i);
+  const pallets = unidades.filter((u) => u.tipo === 'pallet').map((u) => {
+    const s = sub.get(u.pallet_id) || { subido: false, agregado: 0 };
+    return { pallet_id: u.pallet_id, numero: u.numero, bultos: u.bultos, kilos: u.kilos,
+             lleva: queLleva(u.lineas), subido: s.subido ? 1 : 0,
+             subido_en: s.subido ? s.en : null, subido_por: s.subido ? s.por : null,
+             agregado: s.subido ? s.agregado : 0 };
+  });
+  /* Los pendientes ARRIBA: es lo que el cargador busca con la vista. Entre ellos, por
+     número, que es como están pegados los tarjetones. */
+  pallets.sort((a, b) => (a.subido - b.subido)
+    || String(a.numero || '').localeCompare(String(b.numero || '')));
+  const piso = unidades.filter((u) => u.tipo === 'piso');
+  const subidos = pallets.filter((p) => p.subido).length;
+  let faltaron = [];
+  try { faltaron = JSON.parse(x.cargado_faltan || '[]'); } catch { faltaron = []; }
+  return {
+    id: i, numero: x.numero, estado: x.estado, fecha: x.fecha,
+    /* 'lista' si la oficina armó qué lleva; 'libre' si se arma escaneando. */
+    modo: pallets.some((p) => !p.agregado) ? 'lista' : 'libre',
+    destinatario: x.destinatario, patente: x.patente, transporte: x.transporte,
+    total: pallets.length, subidos,
+    faltan: pallets.filter((p) => !p.subido).map((p) => p.numero),
+    bultos: round2(pallets.reduce((t, p) => t + (p.bultos || 0), 0)),
+    kilos: round2(pallets.reduce((t, p) => t + (p.kilos || 0), 0)),
+    pallets,
+    /* Las cajas sueltas no se escanean y no deberían estar: Andy, 6/11/2026, «no se
+       cargan sueltas en camión». Se devuelven para poder decir cuáles son. */
+    piso: piso.map((u) => ({ presentacion: u.presentacion, calibre: u.calibre,
+                             bultos: u.bultos, kilos: u.kilos })),
+    listo: x.estado === 'borrador' && !piso.length && pallets.length > 0,
+    cargado: x.cargado_en
+      ? { en: x.cargado_en, por: x.cargado_por, faltaron } : null,
+  };
+}
+
+// Los camiones que se pueden cargar: los despachos en BORRADOR. Uno emitido ya salió
+// con su remito; cargarlo después de emitirlo sería controlar al revés.
+export function camionesParaCargar(db) {
+  return db.prepare(
+    " SELECT id FROM gal_despachos WHERE estado = 'borrador' AND eliminado_en IS NULL"
+    + '  ORDER BY fecha DESC, id DESC LIMIT 50').all()
+    .map((r) => camion(db, r.id)).filter(Boolean)
+    .map((c) => ({ id: c.id, fecha: c.fecha, destinatario: c.destinatario,
+                   patente: c.patente, total: c.total, subidos: c.subidos,
+                   piso: c.piso.length, cargado: c.cargado }));
+}
+
+export function nuevoCamion(db, d) {
+  const dd = d || {};
+  if (!txt(dd.destinatario)) return { ok: false, motivo: 'Poné a dónde va el camión' };
+  if (!txt(dd.patente)) return { ok: false, motivo: 'Poné la patente del camión' };
+  const r = abrirDespacho(db, { fecha: hoy(), destinatario: dd.destinatario,
+    patente: String(dd.patente).trim().toUpperCase(), transporte: dd.transporte,
+    usuario_id: dd.usuario_id, usuario: dd.usuario });
+  return { ok: true, id: Number(r.id), camion: camion(db, r.id) };
+}
+
+/* Un cambio en lo que hay arriba deshace el «cargado»: se dio por cargado un camión
+   distinto del que ahora está. Que lo vuelva a decir el que lo cargó. */
+function camionTocado(db, i) {
+  db.prepare(' UPDATE gal_despachos SET cargado_en = NULL, cargado_por = NULL,'
+    + ' cargado_por_id = NULL, cargado_faltan = NULL WHERE id = ?').run(i);
+}
+
+function anotarLectura(db, i, palletId, numero, accion, resultado, dd, agregado) {
+  db.prepare(
+    ' INSERT INTO gal_camion_escaneos (despacho_id, pallet_id, numero, accion, resultado,'
+    + '   agregado, usuario_id, usuario) VALUES (?,?,?,?,?,?,?,?)').run(
+    i, palletId || null, txt(numero), accion, resultado, agregado ? 1 : 0,
+    numPos(dd.usuario_id, 0) || null, txt(dd.usuario));
+}
+
+/* ESCANEAR. Contesta SIEMPRE con un resultado que la pantalla pueda pintar de un
+   color —subido, ya_estaba, no_va, agregado, o lo que impide subirlo— y con el camión
+   como queda. Toda lectura se anota, también las que no hacen nada: «se quiso subir
+   el PC-26-00274 y no iba» es justo lo que hay que poder contestar después. */
+export function escanearPallet(db, despachoId, leido, d) {
+  const i = parseInt(despachoId, 10);
+  const dd = d || {};
+  const c = camion(db, i);
+  if (!c) return { ok: false, resultado: 'sin_camion', motivo: 'Ese despacho no existe' };
+  const fin = (ok, resultado, motivo, extra) => Object.assign(
+    { ok, resultado, motivo, camion: camion(db, i) }, extra || {});
+  if (c.estado !== 'borrador') {
+    return fin(false, 'despacho_cerrado', 'Este despacho ' + ESTADOS_CAMION_FIN[c.estado]
+      + ': no se puede cargar.');
+  }
+  const numero = numeroLeido(db, leido, c.pallets.map((p) => p.numero));
+  if (!numero) return fin(false, 'vacio', 'No se leyó nada');
+
+  const pal = db.prepare(
+    'SELECT * FROM gal_pallets WHERE numero = ? AND eliminado_en IS NULL').get(numero);
+  if (!pal) {
+    anotarLectura(db, i, null, numero, 'leido', 'no_existe', dd);
+    return fin(false, 'no_existe', 'No hay ningún pallet ' + numero + '.', { numero });
+  }
+  const p = { pallet_id: pal.id, numero: pal.numero };
+
+  // ── ESTÁ EN ESTE CAMIÓN ──
+  const enLista = c.pallets.find((x) => x.pallet_id === pal.id);
+  if (enLista) {
+    if (enLista.subido) {
+      anotarLectura(db, i, pal.id, numero, 'leido', 'ya_estaba', dd);
+      return fin(true, 'ya_estaba', numero + ' ya está arriba.', { pallet: enLista });
+    }
+    anotarLectura(db, i, pal.id, numero, 'subio', 'subido', dd);
+    camionTocado(db, i);
+    return fin(true, 'subido', numero + ' subido.', { pallet: enLista });
+  }
+
+  // ── NO ESTÁ: por qué no se puede, o que se puede agregar ──
+  if (pal.estado !== 'cerrado') {
+    anotarLectura(db, i, pal.id, numero, 'leido', 'abierto', dd);
+    return fin(false, 'abierto', numero + ' está abierto: no tiene tarjetón cerrado. Se'
+      + ' cierra en Proceso antes de cargarlo.', p);
+  }
+  const otro = db.prepare(
+    ' SELECT d.id, d.numero, d.estado, d.destinatario FROM gal_procesos g'
+    + '  JOIN gal_despachos d ON d.id = g.despacho_id AND d.eliminado_en IS NULL'
+    + "  WHERE g.pallet_id = ? AND g.tipo = 'salida' AND g.eliminado_en IS NULL"
+    + '  LIMIT 1').get(pal.id);
+  if (otro) {
+    const sale = otro.estado === 'emitido';
+    anotarLectura(db, i, pal.id, numero, 'leido', sale ? 'despachado' : 'otro_despacho', dd);
+    /* No se mueve desde la culata (decisión del 6/11/2026): mover pallets entre
+       camiones desde acá es donde se pierden. Lo resuelve la oficina. */
+    return fin(false, sale ? 'despachado' : 'otro_despacho', sale
+      ? numero + ' ya salió en el despacho ' + (otro.numero || '#' + otro.id) + '.'
+      : numero + ' está en otro camión' + (otro.destinatario ? ' (a ' + otro.destinatario
+        + ')' : '') + '. Lo cambia la oficina.', Object.assign({ otro_id: otro.id }, p));
+  }
+  /* SIN LISTA NO HAY «NO VA». Un camión que se arrancó vacío en la culata —o uno de
+     la oficina que todavía no tiene nada— se arma escaneando: ahí cada pallet es lo
+     normal, y un cartel rojo en cada uno enseñaría a ignorar el cartel rojo. La lista
+     son los pallets que NO se agregaron en la culata. */
+  if (!dd.agregar && c.modo === 'lista') {
+    anotarLectura(db, i, pal.id, numero, 'leido', 'no_va', dd);
+    return fin(false, 'no_va', numero + ' NO VA EN ESTE CAMIÓN.',
+      Object.assign({ puede_agregar: 1 }, p));
+  }
+  const r = agregarPalletAlDespacho(db, i, pal.id,
+    { usuario_id: dd.usuario_id, usuario: dd.usuario,
+      observacion: 'Agregado en la culata' });
+  if (!r.ok) {
+    anotarLectura(db, i, pal.id, numero, 'leido', 'no_se_pudo', dd);
+    return fin(false, 'no_se_pudo', r.motivo, p);
+  }
+  anotarLectura(db, i, pal.id, numero, 'subio', 'agregado', dd, 1);
+  camionTocado(db, i);
+  return fin(true, c.modo === 'lista' ? 'agregado' : 'subido', c.modo === 'lista'
+    ? numero + ' agregado a este camión y subido.' : numero + ' subido.', p);
+}
+
+/* LO BAJÉ. Vuelve a pendiente. Si se había agregado en la culata, además sale del
+   despacho: lo agregó el que lo subió, y bajarlo es deshacer las dos cosas. Uno que
+   venía en la lista de la oficina, en cambio, sigue en la lista — falta subirlo. */
+export function bajarPallet(db, despachoId, palletId, d) {
+  const i = parseInt(despachoId, 10);
+  const pid = parseInt(palletId, 10);
+  const dd = d || {};
+  const c = camion(db, i);
+  if (!c) return { ok: false, motivo: 'Ese despacho no existe' };
+  if (c.estado !== 'borrador') {
+    return { ok: false, motivo: 'Este despacho ' + ESTADOS_CAMION_FIN[c.estado] };
+  }
+  const p = c.pallets.find((x) => x.pallet_id === pid);
+  if (!p || !p.subido) return { ok: false, motivo: 'Ese pallet no está arriba' };
+  anotarLectura(db, i, pid, p.numero, 'bajo', p.agregado ? 'bajado_y_sacado' : 'bajado', dd);
+  if (p.agregado) {
+    const r = sacarPalletDelDespacho(db, i, pid);
+    if (!r.ok) return { ok: false, motivo: r.motivo, camion: camion(db, i) };
+  }
+  camionTocado(db, i);
+  return { ok: true, resultado: p.agregado ? 'bajado_y_sacado' : 'bajado',
+           motivo: p.numero + (p.agregado ? ' bajado y sacado de este camión.'
+             : ' bajado: vuelve a faltar.'),
+           camion: camion(db, i) };
+}
+
+/* CAMIÓN CARGADO. No emite: eso es de la oficina. Con cajas sueltas no se puede —no
+   se cargan sueltas—, y con pallets que faltan hay que decirlo: queda escrito cuáles,
+   para que la oficina los vea antes de emitir un remito que diga otra cosa. */
+export function marcarCargado(db, despachoId, d) {
+  const i = parseInt(despachoId, 10);
+  const dd = d || {};
+  const c = camion(db, i);
+  if (!c) return { ok: false, motivo: 'Ese despacho no existe' };
+  if (c.estado !== 'borrador') {
+    return { ok: false, motivo: 'Este despacho ' + ESTADOS_CAMION_FIN[c.estado] };
+  }
+  if (c.piso.length) {
+    return { ok: false, motivo: 'Este despacho tiene cajas sueltas, y en camión no se'
+      + ' cargan sueltas. Que la oficina las saque o las palletice.' };
+  }
+  if (!c.subidos) return { ok: false, motivo: 'Todavía no se subió ningún pallet' };
+  if (c.faltan.length && !dd.confirmar) {
+    return { ok: false, necesita_confirmar: 1, faltan: c.faltan,
+             motivo: 'Faltan ' + c.faltan.length + ': ' + c.faltan.join(', ') };
+  }
+  db.prepare(' UPDATE gal_despachos SET cargado_en = datetime(\'now\',\'localtime\'),'
+    + ' cargado_por = ?, cargado_por_id = ?, cargado_faltan = ? WHERE id = ?').run(
+    txt(dd.usuario), numPos(dd.usuario_id, 0) || null,
+    c.faltan.length ? JSON.stringify(c.faltan) : null, i);
+  return { ok: true, camion: camion(db, i) };
+}

@@ -304,6 +304,18 @@ app.get("/m/informes", (req, res) => {
 app.get("/manifest-minf.json", (req, res) => {
   res.sendFile(path.join(__dirname, "manifest-minf.json"));
 });
+// 📲 Cargar camiones (V1149) — la app del cargador, en la culata del camión. Escanea
+// cada pallet al subirlo. Mismo patrón que /m/informes: app aparte, contra los mismos
+// endpoints (/api/galpon/camion), y el permiso lo decide el servidor —galpon-camion—
+// así que esta ruta sólo pide sesión.
+app.get("/m/galpon-camion", (req, res) => {
+  const cookie = req.cookies?.lnb_user;
+  if (!cookie) return res.redirect('/login?next=/m/galpon-camion');
+  res.sendFile(path.join(__dirname, "mgalpon-camion.html"));
+});
+app.get("/manifest-mgalpon-camion.json", (req, res) => {
+  res.sendFile(path.join(__dirname, "manifest-mgalpon-camion.json"));
+});
 
 app.get("/m", (req, res) => res.redirect('/m/ifco'));
 

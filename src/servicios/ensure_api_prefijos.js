@@ -95,6 +95,10 @@ const PREFIJOS = [
   // catálogo de presentaciones, que está arriba con el resto de la parametrización.
   ['galpon-proceso', 'galpon/procesos,galpon/pallets,galpon/armado'],
   ['galpon-stock', 'galpon/stock,galpon/despachos'],
+  // CARGAR CAMIONES (V1149). Todo lo de la app del cargador cuelga de /camion y no de
+  // /despachos a propósito: con 'galpon/despachos' el que escanea en la culata podría
+  // además emitir y anular remitos, que es de la oficina.
+  ['galpon-camion', 'galpon/camion'],
   // P&L ABASTO (V1052). Router propio de un solo módulo: subir el libro diario y guardar
   // los rubros pide 'operar'.
   ['pl-abasto', 'pl-abasto'],
