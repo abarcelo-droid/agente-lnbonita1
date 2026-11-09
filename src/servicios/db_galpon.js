@@ -21,7 +21,7 @@
 //
 // Y SIN FOREIGN KEYS hacia `pa_*`. Con `foreign_keys=ON` (db.js:22) una FK desde acá haría
 // fallar los DELETE de Personal. Regla de CLAUDE.md: JOINs de lectura sí, FKs cruzadas no.
-import db from "./db.js";
+import db, { rehacerTabla } from "./db.js";
 import { ponerEnCero } from "./galpon.js";
 
 db.exec(`
@@ -344,7 +344,10 @@ db.exec(`
   -- que se cita en un remito y lo que se busca cuando un cliente reclama.
   CREATE TABLE IF NOT EXISTS gal_pallets (
     id            INTEGER PRIMARY KEY AUTOINCREMENT,
-    numero        TEXT UNIQUE,              -- PC-26-01234, recién al cerrar
+    -- PC-26-01234, recién al cerrar. NO es UNIQUE desde la V1151: se puede corregir a
+    -- mano para empalmar con el sistema viejo, y un repetido se marca en rojo en vez de
+    -- trabar la carga (ver cambiarNumeroPallet en galpon.js).
+    numero        TEXT,
     estado        TEXT NOT NULL DEFAULT 'abierto',   -- abierto | cerrado
     -- PARCIAL lo marca el operador: el pallet se cierra sin completarse porque se
     -- terminó la fruta o porque se va el camión. Va impreso, porque quien lo recibe
@@ -368,6 +371,8 @@ db.exec(`
     eliminado_en  TEXT
   );
   CREATE INDEX IF NOT EXISTS gal_pallet_estado_idx ON gal_pallets(estado);
+  -- Se busca por número (la culata, un reclamo): el índice sigue, pero ya no es único.
+  CREATE INDEX IF NOT EXISTS gal_pallet_numero_idx ON gal_pallets(numero);
 
   -- ═══════════════════════════════════════════════════════════════════════════
   -- EL DESPACHO
@@ -511,6 +516,9 @@ for (const sql of [
   // movimiento: las cajas siguen en la cámara, apiladas de otra manera. Lo que saca
   // del stock es el despacho, y eso ya estaba.
   "ALTER TABLE gal_pallets ADD COLUMN origen TEXT NOT NULL DEFAULT 'proceso'",
+  // EL NÚMERO QUE LE DIO EL SISTEMA (V1151), si después se corrigió a mano. Es el que
+  // pudo quedar impreso en el primer tarjetón: el día que aparezca uno, se busca acá.
+  "ALTER TABLE gal_pallets ADD COLUMN numero_original TEXT",
   // ── DE QUÉ CARGA SALIÓ ESTA PARTE ──────────────────────────────────────────────
   // Poner 60 cajas en un pallet cuando la carga de ese día fue de 267 obliga a PARTIR
   // la fila: queda una de 207 y una de 60. El stock no cambia —207 + 60 son las 267 de
@@ -712,6 +720,61 @@ try {
     }
   }
 } catch (e) { console.error('[GALPON] migración del producto:', e.message); }
+
+// ── EL NÚMERO DE PALLET DEJA DE SER ÚNICO (V1151) ───────────────────────────────────
+// Andy, 9/11/2026: que se pueda corregir el número a mano, y que si quedan dos iguales
+// salga en rojo en vez de trabar. Con el UNIQUE puesto, la base rechaza el segundo y el
+// operador vuelve a no poder cargar, que es lo que se quería evitar.
+//
+// SQLite no saca un UNIQUE con ALTER: hay que rehacer la tabla. Va con rehacerTabla(),
+// que corre todo en UNA transacción y la deja como estaba si algo falla. Y sólo si la
+// tabla tiene exactamente las columnas que se conocen: con una columna nueva que esta
+// lista no nombra, copiar perdería ese dato. En ese caso no se toca y se avisa.
+try {
+  const unico = db.prepare("PRAGMA index_list('gal_pallets')").all()
+    .filter((x) => x.unique && x.origin === 'u')
+    .some((x) => db.prepare("PRAGMA index_info('" + x.name + "')").all()
+      .some((c) => c.name === 'numero'));
+  if (unico) {
+    const COLS = ['id', 'numero', 'estado', 'parcial', 'mixto', 'fecha_empaque', 'bultos',
+      'kilos', 'observacion', 'abierto_en', 'cerrado_en', 'usuario_id', 'usuario',
+      'eliminado_en', 'origen', 'numero_original'];
+    const hay = db.prepare("PRAGMA table_info('gal_pallets')").all().map((c) => c.name);
+    const raras = hay.filter((c) => !COLS.includes(c));
+    if (raras.length || COLS.some((c) => !hay.includes(c))) {
+      console.error('[GALPON] gal_pallets tiene columnas que no conozco (' + raras.join(', ')
+        + '): no le saco el UNIQUE al número para no perder datos.');
+    } else {
+      const ok = rehacerTabla('gal_pallets', `
+        CREATE TABLE gal_pallets_v2 (
+          id            INTEGER PRIMARY KEY AUTOINCREMENT,
+          numero        TEXT,
+          estado        TEXT NOT NULL DEFAULT 'abierto',
+          parcial       INTEGER NOT NULL DEFAULT 0,
+          mixto         INTEGER NOT NULL DEFAULT 0,
+          fecha_empaque TEXT,
+          bultos        REAL,
+          kilos         REAL,
+          observacion   TEXT,
+          abierto_en    TEXT DEFAULT (datetime('now','localtime')),
+          cerrado_en    TEXT,
+          usuario_id    INTEGER,
+          usuario       TEXT,
+          eliminado_en  TEXT,
+          origen        TEXT NOT NULL DEFAULT 'proceso',
+          numero_original TEXT
+        );
+        INSERT INTO gal_pallets_v2 (${COLS.join(', ')})
+          SELECT ${COLS.join(', ')} FROM gal_pallets;
+        DROP TABLE gal_pallets;
+        ALTER TABLE gal_pallets_v2 RENAME TO gal_pallets;
+        CREATE INDEX IF NOT EXISTS gal_pallet_estado_idx ON gal_pallets(estado);
+        CREATE INDEX IF NOT EXISTS gal_pallet_numero_idx ON gal_pallets(numero);
+      `);
+      if (ok) console.log('[GALPON] gal_pallets: el número de pallet ya no es único');
+    }
+  }
+} catch (e) { console.error('[GALPON] sacar el UNIQUE del número de pallet:', e.message); }
 
 // ── EL GALPÓN EN CERO, PEDIDO EL 5/11/2026 ──────────────────────────────────────────
 // Andy: «dejame todo el proceso en cero y los pallets también porque habíamos cargado

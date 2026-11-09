@@ -2990,10 +2990,12 @@ export function palletsArmados(db, opts) {
   if (!o.todos) w.push("COALESCE(origen,'proceso') = 'armado'");
   const a = [];
   if (o.estado === 'abierto' || o.estado === 'cerrado') { w.push('estado = ?'); a.push(o.estado); }
+  const rep = numerosRepetidos(db);
   return db.prepare('SELECT * FROM gal_pallets WHERE ' + w.join(' AND ')
     + " ORDER BY (estado = 'abierto') DESC, id DESC"
     + ' LIMIT ' + (parseInt(o.limite, 10) || 100)).all(...a)
-    .map((x) => Object.assign(x, { contenido: contenidoDelPallet(db, x.id) }))
+    .map((x) => Object.assign(x, { contenido: contenidoDelPallet(db, x.id),
+                                   repetido: rep.get(x.numero) || 0 }))
     .filter((x) => !o.todos || x.estado === 'abierto' || x.contenido.length);
 }
 
@@ -3413,8 +3415,11 @@ export function pallets(db, opts) {
   /* A los ABIERTOS se les calculan los totales al vuelo: todavía no hay nada congelado y
      mostrar su casillero vacío sería esconder lo único que importa de un pallet abierto,
      que es cuánto lleva. */
+  const rep = numerosRepetidos(db);
   return filas.map((p) => {
-    if (p.estado === 'cerrado') return p;
+    if (p.estado === 'cerrado') {
+      return Object.assign({}, p, { repetido: rep.get(p.numero) || 0 });
+    }
     const c = contenidoDelPallet(db, p.id);
     return Object.assign({}, p, {
       bultos: round2(c.reduce((t, x) => t + (x.bultos || 0), 0)),
@@ -3428,10 +3433,98 @@ export function pallets(db, opts) {
 export function palletPorNumero(db, numero) {
   const n = txt(numero);
   if (!n) return null;
-  const p = db.prepare(
-    'SELECT * FROM gal_pallets WHERE numero = ? AND eliminado_en IS NULL').get(n);
-  if (!p) return null;
-  return Object.assign({}, p, { contenido: contenidoDelPallet(db, p.id) });
+  /* Desde la V1151 un número puede estar dos veces (ver cambiarNumeroPallet). Se
+     devuelve el más nuevo y se dice cuántos hay: el que busca por un reclamo tiene
+     que saber que hay otro con el mismo número antes de sacar conclusiones. */
+  const l = db.prepare('SELECT * FROM gal_pallets WHERE numero = ? AND eliminado_en IS NULL'
+    + ' ORDER BY id DESC').all(n);
+  if (!l.length) return null;
+  return Object.assign({}, l[0], { contenido: contenidoDelPallet(db, l[0].id),
+    repetido: l.length > 1 ? l.length : 0,
+    mismo_numero: l.slice(1).map((x) => ({ id: x.id, fecha_empaque: x.fecha_empaque,
+                                           estado: x.estado })) });
+}
+
+// ════════════════════════════════════════════════════════════════════════════════════
+// ✏️ CAMBIAR EL NÚMERO DE UN PALLET (V1151)
+// ════════════════════════════════════════════════════════════════════════════════════
+// Andy, 9/11/2026: «¿ves difícil que el sistema permita modificar el número de romaneo?
+// De última si hay dos con el mismo que salga un cartel en rojo. El tema es que lo
+// tenemos matcheado a un sistema viejo y tengo muchas equivocaciones del operador que
+// me traban. Se equivoca de número entonces deja de cargar en el nuevo».
+//
+// EL MISMO PRINCIPIO QUE EL RESTO DEL GALPÓN: no se traba la carga, se marca el
+// problema. Un número repetido se GUARDA igual y queda en rojo en todas las listas
+// hasta que alguien lo corrija. Trabar el cambio era exactamente lo que estaba
+// haciendo que se dejara de usar el sistema.
+//
+// Lo único que se rechaza es lo que ya está impreso en OTRO papel: un pallet que salió
+// con un remito emitido. Ese número figura en el remito, y cambiarlo acá deja dos
+// documentos diciendo cosas distintas sobre el mismo camión.
+
+// Los números que hoy tienen más de un pallet: numero → cuántos. Los borrados no
+// cuentan —un número que quedó en un pallet eliminado no le estorba a nadie— ni los
+// BORRADO- de la puesta en cero.
+export function numerosRepetidos(db) {
+  return new Map(db.prepare(
+    " SELECT numero, COUNT(*) AS n FROM gal_pallets"
+    + "  WHERE eliminado_en IS NULL AND numero IS NOT NULL AND numero NOT LIKE 'BORRADO-%'"
+    + '  GROUP BY numero HAVING COUNT(*) > 1').all().map((r) => [r.numero, Number(r.n)]));
+}
+
+/* Lo tipeado, al formato del tarjetón. «274» toma el prefijo y el año del número que
+   el pallet ya tiene —un pallet del 26 corregido no pasa al 27 porque hoy sea otro
+   año—; «pc-26-274» se completa a cinco cifras. El correlativo depende de que todos
+   tengan el MISMO ancho: proximoNumero() ordena el texto, y «PC-26-274» quedaría
+   arriba de «PC-26-01000». */
+export function normalizarNumeroPallet(db, texto, actual) {
+  const t = String(texto == null ? '' : texto).trim().toUpperCase().replace(/\s+/g, '');
+  if (/^\d{1,5}$/.test(t)) {
+    const m = /^([A-Z]+-\d{2}-)\d+$/.exec(String(actual || ''));
+    const pref = m ? m[1] : (valorConfig(db, 'pallet_prefijo') || 'PC') + '-'
+      + String(new Date().getFullYear()).slice(2) + '-';
+    return pref + t.padStart(5, '0');
+  }
+  const m = /^([A-Z]+)-(\d{2})-(\d{1,5})$/.exec(t);
+  return m ? m[1] + '-' + m[2] + '-' + m[3].padStart(5, '0') : null;
+}
+
+export function cambiarNumeroPallet(db, id, nuevo, d) {
+  const i = parseInt(id, 10);
+  if (!Number.isFinite(i)) return { ok: false, motivo: 'Id inválido' };
+  const p = db.prepare('SELECT * FROM gal_pallets WHERE id = ? AND eliminado_en IS NULL').get(i);
+  if (!p) return { ok: false, motivo: 'Ese pallet no existe o se borró' };
+  if (!p.numero) {
+    return { ok: false, motivo: 'Este pallet todavía no tiene número: lo recibe al cerrarlo.' };
+  }
+  const numero = normalizarNumeroPallet(db, nuevo, p.numero);
+  if (!numero) {
+    return { ok: false, motivo: 'Escribí el número como está en el tarjetón: 274, o'
+      + ' PC-26-00274.' };
+  }
+  const emitido = db.prepare(
+    ' SELECT d.numero FROM gal_procesos g'
+    + '  JOIN gal_despachos d ON d.id = g.despacho_id AND d.eliminado_en IS NULL'
+    + "  WHERE g.pallet_id = ? AND g.tipo = 'salida' AND g.eliminado_en IS NULL"
+    + "    AND d.estado = 'emitido' LIMIT 1").get(i);
+  if (emitido) {
+    return { ok: false, motivo: 'Este pallet ya salió con el remito ' + (emitido.numero || '')
+      + ': su número está impreso ahí y no se cambia.' };
+  }
+  if (numero !== p.numero) {
+    /* El ORIGINAL se guarda una sola vez: es el que salió del sistema y el que pudo
+       quedar impreso en el primer tarjetón. Una segunda corrección no lo pisa. */
+    db.prepare(' UPDATE gal_pallets SET numero = ?, numero_original = COALESCE(numero_original, ?)'
+      + ' WHERE id = ?').run(numero, p.numero, i);
+  }
+  const repetidos = db.prepare(
+    ' SELECT id, fecha_empaque, estado FROM gal_pallets'
+    + '  WHERE numero = ? AND id <> ? AND eliminado_en IS NULL ORDER BY id').all(numero, i);
+  return { ok: true, id: i, numero, anterior: p.numero, cambio: numero !== p.numero ? 1 : 0,
+           repetidos,
+           /* El que sigue, para que se vea en el momento si el cambio corrió el
+              correlativo: subir un número a 280 hace que el próximo sea el 281. */
+           proximo: proximoNumero(db, p.fecha_empaque) };
 }
 
 // ════════════════════════════════════════════════════════════════════════════════════
@@ -3541,6 +3634,7 @@ export function palletsParaDespacho(db, opts) {
     " SELECT * FROM gal_pallets WHERE eliminado_en IS NULL AND estado = 'cerrado'"
     + ' ORDER BY numero DESC LIMIT ' + lim).all();
   const salida = [];
+  const rep = numerosRepetidos(db);
   for (const x of filas) {
     const lineas = lineasDePalletParaSalida(db, x.id);
     if (!lineas.length) continue;
@@ -3551,6 +3645,7 @@ export function palletsParaDespacho(db, opts) {
       bultos: round2(lineas.reduce((t, l) => t + (l.bultos || 0), 0)),
       kilos: round2(lineas.reduce((t, l) => t + (l.kilos || 0), 0)),
       contenido: contenidoDelPallet(db, x.id),
+      repetido: rep.get(x.numero) || 0,
     });
   }
   return salida;
@@ -4261,8 +4356,20 @@ export function escanearPallet(db, despachoId, leido, d) {
   const numero = numeroLeido(db, leido, c.pallets.map((p) => p.numero));
   if (!numero) return fin(false, 'vacio', 'No se leyó nada');
 
-  const pal = db.prepare(
-    'SELECT * FROM gal_pallets WHERE numero = ? AND eliminado_en IS NULL').get(numero);
+  /* UN NÚMERO PUEDE ESTAR DOS VECES (V1151). Si uno de los dos está en este camión,
+     es ése: es lo que se busca. Si no, no hay forma de saber cuál es el que tiene el
+     cargador en la mano, y subir el equivocado es peor que no subir ninguno. */
+  const iguales = db.prepare(
+    'SELECT * FROM gal_pallets WHERE numero = ? AND eliminado_en IS NULL ORDER BY id')
+    .all(numero);
+  const pal = iguales.length > 1
+    ? iguales.find((x) => c.pallets.some((y) => y.pallet_id === x.id))
+    : iguales[0];
+  if (!pal && iguales.length > 1) {
+    anotarLectura(db, i, null, numero, 'leido', 'repetido', dd);
+    return fin(false, 'repetido', 'Hay ' + iguales.length + ' pallets con el número ' + numero
+      + ' y no se sabe cuál es éste. Que la oficina le corrija el número a uno.', { numero });
+  }
   if (!pal) {
     anotarLectura(db, i, null, numero, 'leido', 'no_existe', dd);
     return fin(false, 'no_existe', 'No hay ningún pallet ' + numero + '.', { numero });
@@ -4388,7 +4495,7 @@ export function cargaDelDespacho(db, despachoId) {
   const n = db.prepare(
     " SELECT COUNT(*) AS lecturas,"
     + " SUM(CASE WHEN resultado IN ('no_va','otro_despacho','despachado','abierto',"
-    + "   'no_existe','no_se_pudo') THEN 1 ELSE 0 END) AS rechazos"
+    + "   'no_existe','no_se_pudo','repetido') THEN 1 ELSE 0 END) AS rechazos"
     + ' FROM gal_camion_escaneos WHERE despacho_id = ?').get(c.id);
   const pallets = {};
   for (const p of c.pallets) {

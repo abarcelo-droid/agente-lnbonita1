@@ -8241,6 +8241,12 @@ if ('serviceWorker' in navigator) {
       /* EL ACUSE DEL CIERRE. El número en pantalla y no sólo en la pestaña nueva:
          window.open() después de un await es lo que los navegadores bloquean, y un
          pallet cerrado sin número a la vista es un pallet sin identificar. */
+      /* Los carteles del número de pallet (V1151). Con clase propia: «err» y «oko» no
+         tienen estilo fuera del manual, y un cartel rojo sin rojo no avisa nada. */
+      #sec-galpon-proceso .gpl-av-err{border:1px solid #b91c1c;border-radius:10px;
+        padding:10px 13px;background:#fee2e2;color:#991b1b;font-size:13px}
+      #sec-galpon-proceso .gpl-av-ok{border:1px solid #16a34a;border-radius:10px;
+        padding:10px 13px;background:rgba(22,163,74,.10);font-size:13px}
       #sec-galpon-proceso .gpr-ack{display:flex;align-items:center;gap:12px;
         justify-content:space-between;flex-wrap:wrap;border:1px solid #16a34a;
         border-radius:12px;padding:11px 14px;margin-bottom:12px;
@@ -28388,7 +28394,11 @@ SG_MANUAL['galpon-config'] = { titulo: 'Galpón · Configuración', html:
   + 'último pallet fue el 40 y se pone 269, los números del 41 al 268 no van a existir '
   + 'nunca. Eso es lo correcto cuando se está empalmando con otra numeración, y es un '
   + 'error si se puso un número de más: el hueco se ve enseguida en «el próximo que se '
-  + 'cierre», y después ya no, porque los pallets cerrados no cambian de número.</div>'
+  + 'cierre».</div>'
+  + '<p>Desde la <b>V1151</b> el número de un pallet cerrado <b>se puede corregir a mano</b> '
+  + '(✏️ en 📦 Proceso), para empalmar con el sistema viejo cuando el operador se '
+  + 'equivoca. Y eso <b>mueve el correlativo</b>: si un pallet se pasa a un número más '
+  + 'alto que el último, el próximo sale después de ése.</p>'
 
   + '<h3>🧹 El galpón se puso en cero el 5/11/2026 <span class="ver">V1147</span></h3>'
   + '<p>Andy, 5/11/2026: <i>«dejame todo el proceso en cero y los pallets también porque '
@@ -29218,6 +29228,27 @@ SG_MANUAL['galpon-proceso'] = { titulo: 'Galpón · Proceso', html:
   + '<div class="ojo"><b>Lo que se imprimió es lo que viajó.</b> Al cerrar se congelan '
   + 'los totales: borrar o corregir una carga después <b>no cambia</b> la etiqueta ya '
   + 'emitida. Si hay que cambiarla, se reabre el pallet y se reimprime.</div>'
+
+  + '<h3>✏️ Cambiar el número de un pallet <span class="ver">V1151</span></h3>'
+  + '<p>Andy, 9/11/2026: <i>«lo tenemos matcheado a un sistema viejo y tengo muchas '
+  + 'equivocaciones del operador que me traban... Si me permite modificarlo van a usar '
+  + 'más el nuevo»</i>.</p>'
+  + '<p>El número se corrige con el <b>✏️</b>: está en el aviso verde que aparece apenas '
+  + 'se cierra un pallet, y en la lista de <b>pallets cerrados</b>. Se escribe como está '
+  + 'en el papel: alcanza con <b>274</b> para el PC-26-00274. Enter guarda, Escape deja '
+  + 'todo como estaba.</p>'
+  + '<ul>'
+  + '<li><b>Si queda repetido, se guarda igual</b> y sale en <b>rojo</b>: en el aviso, en la '
+  + 'lista —aunque esté plegada— y en Stock. No traba la carga; se corrige cuando se '
+  + 'pueda, cambiándole el número a uno de los dos.</li>'
+  + '<li>Mientras haya dos iguales, la <b>app del cargador</b> no sabe cuál es cuál: si '
+  + 'ninguno de los dos va en ese camión, no lo sube y avisa.</li>'
+  + '<li><b>Lo que no se puede</b> es cambiarle el número a un pallet que ya salió con un '
+  + '<b>remito emitido</b>: ese número está impreso en el remito.</li>'
+  + '<li>Cambiar el número <b>no reimprime</b> el tarjetón: hay que volver a imprimirlo. El '
+  + 'número que le había dado el sistema <b>queda guardado</b>, por si aparece el papel '
+  + 'viejo.</li>'
+  + '</ul>'
 
   + '<h3>↩ Sacar, borrar y reabrir <span class="ver">V1120</span></h3>'
   + '<ul>'
@@ -61123,6 +61154,11 @@ function galPrAcuseCierre(){
     + '<div style="display:flex;gap:7px;align-items:center">'
       + '<a class="btn bo bs" target="_blank" href="/api/galpon/pallets/' + c.id
         + '/tarjeton.pdf">🖨 tarjetón</a>'
+      /* ✏️ AL LADO DEL NÚMERO RECIÉN DADO (V1151): es el momento en que el operador
+         ve que no coincide con el del sistema viejo. Corregirlo después, buscándolo
+         en una lista, es el paso que se saltea. */
+      + (c.numero ? '<button class="btn bo bs" title="Cambiar el número"'
+        + ' onclick="galPlNumero(' + c.id + ')">✏️ número</button>' : '')
       + '<button class="btn bo bs" onclick="galPrAcuseNo()">×</button></div>'
     + '</div>';
 }
@@ -61248,26 +61284,108 @@ async function galPlReabrir(id){
 var GPL_VER = false;
 function galPlVer(){ GPL_VER = !GPL_VER; galPrPintarPallets(); }
 
+/* ── ✏️ CAMBIAR EL NÚMERO DE UN PALLET (V1151) ────────────────────────────────────
+   Andy, 9/11/2026: «lo tenemos matcheado a un sistema viejo y tengo muchas
+   equivocaciones del operador que me traban... Si me permite modificarlo van a usar
+   más el nuevo. De última que salga una advertencia y cada tanto corregimos».
+
+   Un repetido se GUARDA y queda en rojo: lo decide el servidor (cambiarNumeroPallet)
+   y acá sólo se dice. Lo que no se puede —un pallet que ya salió con un remito— vuelve
+   como error y el casillero queda abierto para corregirlo. */
+var GPL_EDIT = null;
+var GPL_MSG = null;
+function galPlNumero(id){
+  GPL_VER = true; GPL_EDIT = id; GPL_MSG = null;
+  galPrPintarPallets();
+  var i = document.getElementById('gpl-num-in');
+  if (i){ try { i.focus(); i.select(); } catch(e){} }
+}
+function galPlNumeroNo(){ GPL_EDIT = null; GPL_MSG = null; galPrPintarPallets(); }
+function galPlNumeroTecla(ev){
+  if (ev.key === 'Enter'){ ev.preventDefault(); galPlNumeroGuardar(); }
+  else if (ev.key === 'Escape'){ ev.preventDefault(); galPlNumeroNo(); }
+}
+async function galPlNumeroGuardar(){
+  var id = GPL_EDIT; if (!id) return;
+  var i = document.getElementById('gpl-num-in');
+  var v = i ? i.value : '';
+  try {
+    var r = await fetch('/api/galpon/pallets/' + id + '/numero', { method:'PATCH',
+      headers:{'Content-Type':'application/json'}, credentials:'same-origin',
+      body: JSON.stringify({ numero: v }) });
+    var j = await r.json();
+    if (!j.ok){
+      GPL_MSG = { tipo:'err', html: galPrEsc(j.error || 'No se pudo cambiar') };
+      galPrPintarPallets();
+      return;
+    }
+    GPL_EDIT = null;
+    var rep = j.repetidos || [];
+    GPL_MSG = rep.length
+      ? { tipo:'err', html: '<b>' + galPrEsc(j.numero) + ' quedó repetido:</b> también lo tiene '
+          + (rep.length === 1 ? 'otro pallet' : rep.length + ' pallets más') + ' ('
+          + rep.map(function(x){ return 'empaque ' + galPrEsc(galAcFechaCorta(x.fecha_empaque)); })
+              .join(', ')
+          + '). Se guardó igual; quedan en rojo hasta que corrijas uno.' }
+      : { tipo:'ok', html: j.cambio
+          ? 'Ahora es <b>' + galPrEsc(j.numero) + '</b> (era ' + galPrEsc(j.anterior) + ').'
+            + ' Reimprimí el tarjetón. El próximo que se cierre va a ser <b>'
+            + galPrEsc(j.proximo) + '</b>.'
+          : 'No cambió nada: ya era ' + galPrEsc(j.numero) + '.' };
+    if (GPR.cerrado && GPR.cerrado.id === id) GPR.cerrado.numero = j.numero;
+    await galPrCargar();
+    galPrPintarPallet();
+    galPrPintarPallets();
+  } catch(e) {
+    GPL_MSG = { tipo:'err', html: galPrEsc(e.message || String(e)) };
+    galPrPintarPallets();
+  }
+}
+
 function galPrPintarPallets(){
   var el = document.getElementById('gpr-pallets'); if (!el) return;
   var ps = ((GPR.datos && GPR.datos.pallets) || [])
     .filter(function(p){ return p.estado === 'cerrado'; });
   if (!ps.length){ el.innerHTML = ''; return; }
-  var cab = '<button class="gac-plg" style="margin-top:14px" onclick="galPlVer()">'
+  /* LOS REPETIDOS SE VEN CON LA LISTA PLEGADA (V1151). Andy, 9/11/2026: «de última
+     si hay dos con el mismo que salga un cartel en rojo». Si hubiera que desplegar
+     para enterarse, nadie se entera. */
+  var rep = {};
+  ps.forEach(function(p){ if (p.repetido > 1) rep[p.numero] = p.repetido; });
+  var nrep = Object.keys(rep);
+  var aviso = (GPL_MSG ? '<div class="' + (GPL_MSG.tipo === 'err' ? 'gpl-av-err' : 'gpl-av-ok')
+      + '" style="margin-top:12px">' + GPL_MSG.html + '</div>' : '')
+    + (nrep.length ? '<div class="gpl-av-err" style="margin-top:12px"><b>⚠ Número de pallet repetido:</b> '
+      + nrep.map(function(n){ return galPrEsc(n) + ' (' + rep[n] + ' pallets)'; }).join(', ')
+      + '. Corregí uno con ✏️ en la lista de pallets cerrados.</div>' : '');
+  var cab = aviso + '<button class="gac-plg" style="margin-top:14px" onclick="galPlVer()">'
     + (GPL_VER ? '▴ ocultar los pallets cerrados'
         : '▾ ver los ' + ps.length + ' pallets cerrados') + '</button>';
   if (!GPL_VER){ el.innerHTML = cab; return; }
 
   el.innerHTML = cab
     + '<div class="ab-table-wrap"><table class="pa-tbl gpl-tbl">'
-    + '<colgroup><col style="width:18%"><col style="width:14%"><col style="width:14%">'
-    + '<col style="width:12%"><col style="width:12%"><col style="width:30%"></colgroup>'
+    + '<colgroup><col style="width:26%"><col style="width:12%"><col style="width:12%">'
+    + '<col style="width:11%"><col style="width:12%"><col style="width:27%"></colgroup>'
     + '<thead><tr><th>Pallet</th><th>Empaque</th><th style="text-align:right">Bultos</th>'
     + '<th style="text-align:right">Kilos</th><th></th><th style="text-align:right"></th>'
     + '</tr></thead><tbody>'
     + ps.map(function(p){
-        return '<tr>'
-          + '<td class="gpl-num">' + galPrEsc(p.numero || '—') + '</td>'
+        /* EL NÚMERO SE EDITA DONDE SE LEE (regla de la casa): el lápiz convierte la
+           celda en un casillero, Enter guarda y Escape deja todo como estaba. */
+        var celda = GPL_EDIT === p.id
+          ? '<input id="gpl-num-in" class="gpl-num-in" value="' + galPrEsc(p.numero || '') + '"'
+            + ' onkeydown="galPlNumeroTecla(event)" autocomplete="off"'
+            + ' style="width:100%;max-width:150px;font-weight:700;text-transform:uppercase">'
+            + ' <button class="btn bp bs" onclick="galPlNumeroGuardar()">✓</button>'
+            + ' <button class="btn bo bs" onclick="galPlNumeroNo()">×</button>'
+          : galPrEsc(p.numero || '—')
+            + (p.repetido > 1 ? ' <span class="gpl-chapa" style="background:#b91c1c;color:#fff"'
+              + ' title="Hay ' + p.repetido + ' pallets con este número">REPETIDO</span>' : '')
+            + (p.numero ? ' <button class="btn bo bs" title="Cambiar el número"'
+              + ' onclick="galPlNumero(' + p.id + ')">✏️</button>' : '');
+        return '<tr' + (p.repetido > 1 ? ' style="background:#fee2e2"' : '') + '>'
+          + '<td class="gpl-num" style="white-space:nowrap;overflow:hidden">' + celda + '</td>'
           + '<td>' + galPrEsc(galAcFechaCorta(p.fecha_empaque)) + '</td>'
           + '<td class="gpr-n"><b>' + galPrNum(p.bultos, 0) + '</b></td>'
           + '<td class="gpr-n">' + galPrNum(p.kilos) + '</td>'
@@ -62233,9 +62351,10 @@ var GAL_CULATA_TXT = {
   despachado: 'ya había salido en otro despacho', abierto: 'pallet abierto, sin tarjetón',
   no_existe: 'no existe ese pallet', no_se_pudo: 'no se pudo agregar',
   bajado: 'lo bajaron', bajado_y_sacado: 'lo bajaron y salió del despacho',
+  repetido: 'número repetido: no se supo cuál pallet era',
 };
 var GAL_CULATA_ROJO = { agregado:1, no_va:1, otro_despacho:1, despachado:1, abierto:1,
-  no_existe:1, no_se_pudo:1 };
+  no_existe:1, no_se_pudo:1, repetido:1 };
 
 function galDspCulata(){
   var el = document.getElementById('gal-dsp-culata'); if (!el) return;
@@ -62352,7 +62471,8 @@ function galDspPintar(){
           return '<option value="'+i+'">'+galStEsc(f.numero||('#'+f.id))
             + ' — '+galStNum(f.bultos,0)+' cj / '+galStNum(f.kilos,0)+' kg'
             + (f.articulos>1?(' · '+f.articulos+' artículos'):'')
-            + (f.parcial?' · PARCIAL':'')+'</option>';
+            + (f.parcial?' · PARCIAL':'')
+            + (f.repetido>1?' · ⚠ NÚMERO REPETIDO':'')+'</option>';
         }).join('');
   }
 
@@ -62628,6 +62748,9 @@ function galArmLista(){
              tipea en Proceso del que armó él. */
           var arm = (x.origen||'proceso')==='armado';
           return '<tr><td>'+galStEsc(x.numero||'sin número')
+            + (x.repetido > 1 ? ' <span class="gst-est gst-anu" style="text-decoration:none"'
+              + ' title="Hay '+x.repetido+' pallets con este número: se corrige con ✏️ en Proceso">'
+              + 'REPETIDO</span>' : '')
             + ' <span class="gst-est '+cl+'">'+galStEsc(x.estado)+'</span>'
             + (arm ? '' : ' <span class="gst-est gst-pro">del proceso</span>')+'</td>'
             + '<td>'+galStEsc(x.fecha_empaque||'—')+'</td>'

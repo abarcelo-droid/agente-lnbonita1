@@ -490,3 +490,40 @@ test('MANUAL: lo que dice es lo que hace el código', () => {
   // Con versión.
   assert.match(man, /<span class="ver">V1149<\/span>/);
 });
+
+// ══════════════════════════════════════════════════════════════════════════
+// 4 · EL NÚMERO EDITABLE, POR LA RUTA (V1151)
+// ══════════════════════════════════════════════════════════════════════════
+t('UNA BASE NUEVA ACEPTA DOS PALLETS CON EL MISMO NÚMERO', async () => {
+  // Es la DDL de verdad, la que corre al montar el router.
+  const db = base();
+  const s = await servidor(db, CARGADOR);
+  try {
+    const u = db.prepare("PRAGMA index_list('gal_pallets')").all().filter((x) => x.unique);
+    assert.ok(!u.some((x) => db.prepare("PRAGMA index_info('" + x.name + "')").all()
+      .some((c) => c.name === 'numero')), 'el número sigue siendo único en una base nueva');
+    const cols = db.prepare("PRAGMA table_info('gal_pallets')").all().map((c) => c.name);
+    assert.ok(cols.includes('numero_original'));
+  } finally { s.cerrar(); }
+});
+
+t('PATCH /pallets/:id/numero: un repetido es 200, lo imposible es 400', async () => {
+  const db = base();
+  const s = await servidor(db, CARGADOR);
+  try {
+    const { ids } = cargarCamara(db, s.svc);
+    const patch = (id, numero) => s.pegar('/pallets/' + id + '/numero', {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ numero }) });
+    const r = await patch(ids[3], '269');
+    assert.equal(r.status, 200, 'un repetido volvió como error');
+    const j = await r.json();
+    assert.equal(j.numero, num(0));
+    assert.equal(j.repetidos.length, 1);
+    assert.equal((await patch(ids[3], 'abc')).status, 400);
+    assert.equal((await patch(9999, '300')).status, 400);
+    // Y la lista de Proceso lo trae marcado.
+    const l = await (await s.pegar('/procesos?fecha=' + F)).json();
+    assert.equal(l.pallets.filter((x) => x.repetido > 1).length, 2);
+  } finally { s.cerrar(); }
+});

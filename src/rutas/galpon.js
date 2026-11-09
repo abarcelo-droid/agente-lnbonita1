@@ -42,7 +42,7 @@ import {
   agregarAlDespacho, sacarDelDespacho, emitirDespacho, anularDespacho, borrarDespacho,
   despachoPorNumero,
   camion, camionesParaCargar, nuevoCamion, escanearPallet, bajarPallet, marcarCargado,
-  cargaDelDespacho, registroDeCulata,
+  cargaDelDespacho, registroDeCulata, cambiarNumeroPallet,
   borrarPallet, sacarDelPallet, pallets, palletPorNumero, valorConfig,
   registrarProceso, editarProceso, borrarProceso, procesosDelDia,
   tableroProceso, stockGalpon, stockPorLote, stockPorProducto, lotesVolcados,
@@ -1094,6 +1094,24 @@ router.delete('/pallets/:id', (req, res) => {
     res.json({ ok: true });
   } catch (e) {
     console.error('[GALPON] DELETE /pallets/:id:', e.message);
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+// ✏️ CAMBIAR EL NÚMERO (V1151). Trabajo del día, como cerrar: lo corrige el que se
+// equivocó, en el momento, y no el dueño por teléfono. Un número repetido NO es un
+// error del pedido: vuelve 200 con los repetidos para que la pantalla los muestre en
+// rojo. 400 es sólo lo que no se puede: un formato que no es un número, o un pallet
+// que ya salió con un remito emitido.
+router.patch('/pallets/:id/numero', (req, res) => {
+  try {
+    const u = req._user || {};
+    const r = cambiarNumeroPallet(db, num(req.params.id), (req.body || {}).numero,
+      { usuario_id: u.id || null, usuario: u.nombre || null });
+    if (!r.ok) return res.status(400).json({ ok: false, error: r.motivo });
+    res.json(r);
+  } catch (e) {
+    console.error('[GALPON] PATCH /pallets/:id/numero:', e.message);
     res.status(500).json({ ok: false, error: e.message });
   }
 });
