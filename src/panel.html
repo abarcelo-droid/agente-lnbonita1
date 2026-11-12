@@ -25831,7 +25831,34 @@ var SG_MANUAL_COMUN =
   + 'normal.</p>'
   + '<div class="ojo"><b>La primera vez hay que abrir el panel CON señal.</b> El equipo '
   + 'se lo guarda y después abre sin internet; si nunca lo abrió conectado, no tiene qué '
-  + 'mostrar.</div>';
+  + 'mostrar.</div>'
+
+  + '<h3 class="mc">🐢 Con la señal lenta, se sigue cargando <span class="ver">V1152</span></h3>'
+  + '<p>Andy, 12/11/2026: <i>«quiero que no se preocupen si hay mala señal. Sigan '
+  + 'cargando. Sobre todo el peor momento es cuando está lento»</i>. Sin internet la '
+  + 'carga ya se guardaba en el equipo; con la señal <b>lenta</b> no: el botón se quedaba '
+  + 'esperando uno o dos minutos, porque para el navegador eso no es estar sin conexión.</p>'
+  + '<p><b>Una carga de kilos o de proceso que no contesta en 6 segundos se guarda en el '
+  + 'equipo</b>, igual que sin señal, y la pantalla sigue. Mientras la señal siga lenta, '
+  + 'las cargas que vienen después <b>entran directo, sin esperar</b>. Salen solas: el '
+  + 'equipo vuelve a probar a los 10 segundos, y si sigue lento cada vez más espaciado, '
+  + 'hasta cada 30.</p>'
+  + '<p>La barra de abajo dice <b>🐢 Señal lenta</b>, en amarillo. <b>No se pone roja por '
+  + 'tardar</b>: el rojo queda para lo que está roto de verdad.</p>'
+  + '<div class="ojo"><b>No se duplica aunque haya llegado.</b> Una carga que tardó pudo '
+  + 'haber llegado al servidor igual, sólo que la respuesta no volvió. Viaja con su número '
+  + 'propio desde el primer intento, así que el reenvío el servidor lo reconoce y no la '
+  + 'cuenta dos veces.</div>'
+  + '<p>Una <b>lista</b> que tarda más de 5 segundos muestra lo último que bajó, con el '
+  + 'cartel <b>«Señal lenta»</b> y la hora. Si nunca bajó nada, espera.</p>'
+  + '<p><b>Lo que sigue esperando a la señal</b>, aunque tarde: el lote del día, cerrar un '
+  + 'pallet, emitir un despacho y armar un pallet. Mandar dos veces el lote del día no es '
+  + 'repetir el pedido, es cambiar de lote; y los números y el stock los decide el '
+  + 'servidor.</p>'
+  + '<p><b>El panel abre con la señal lenta.</b> El equipo guarda quién sos y tu menú, y '
+  + 'los usa si el servidor tarda. Al <b>salir</b> se borran, y lo que se guardó antes '
+  + 'del último ingreso no se usa: el que entra con otro usuario en esa PC necesita señal '
+  + 'la primera vez, para no ver el menú del anterior.</p>';
 
 // Lo que se muestra: el manual del módulo más lo que vale en todos.
 function sgManualHtml(m){
@@ -55960,6 +55987,8 @@ function usrResetearPassword(userId, userNombre) {
 }
 
 function doLogout() {
+  // V1152: el nombre y el menú guardados para abrir sin señal son de quien sale.
+  try { if (window.galOffOlvidarArranque) window.galOffOlvidarArranque(); } catch(e) {}
   fetch('/api/auth/logout', { method:'POST' })
     .then(function(){ window.location.href='/login'; });
 }
@@ -62185,8 +62214,12 @@ function galOffCartel(j, dondeId){
     h = ' (leído el ' + d.toLocaleDateString('es-AR') + ' a las '
       + d.toLocaleTimeString('es-AR', { hour:'2-digit', minute:'2-digit' }) + ')';
   }
+  /* 🐢 V1152: si la red no está caída sino LENTA, se dice así. «Sin conexión» con el
+     wifi andando es una pantalla que miente, y el operador deja de creerle. */
   el.innerHTML = '<div class="ojo" style="margin-bottom:10px;background:#fef3c7;'
-    + 'color:#92400e">📴 <b>Sin conexión.</b> Esto es lo último que alcanzó a bajar'
+    + 'color:#92400e">'
+    + (j.senal_lenta ? '🐢 <b>Señal lenta.</b> Para no hacerte esperar, esto es lo último que bajó'
+                     : '📴 <b>Sin conexión.</b> Esto es lo último que alcanzó a bajar')
     + h + '. Lo que cargues ahora se guarda en este equipo y se manda solo.</div>';
 }
 
