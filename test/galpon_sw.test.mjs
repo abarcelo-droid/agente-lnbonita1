@@ -71,6 +71,11 @@ function montar(opts) {
     pedidos.push(typeof req === 'string' ? req : req.url);
     if (o.red === 'cae') throw new TypeError('Failed to fetch');
     if (o.red === 'tarda') return new Promise(() => {});   // nunca resuelve
+    // V1152: contesta, pero después de la espera del SW (que acá corre 100 veces más rápido).
+    if (o.red === 'lenta') {
+      return new Promise((ok) => setTimeout(() => ok({ ok: true, status: 200,
+        delServidor: true, clone: () => ({ clonado: true }) }), o.demora || 80));
+    }
     return { ok: true, status: 200, delServidor: true, clone: () => ({ clonado: true }) };
   };
 
@@ -83,7 +88,9 @@ function montar(opts) {
 
   new Function('self', 'caches', 'fetch', 'Response', 'URL', 'setTimeout',
     'clearTimeout', 'Promise', FUENTE)(
-    self, caches, fetch, Response, URLc, setTimeout, clearTimeout, Promise);
+    self, caches, fetch, Response, URLc,
+    o.rapido ? (fn, ms) => setTimeout(fn, (ms || 0) / 100) : setTimeout,
+    clearTimeout, Promise);
 
   return { eventos, guardado, puestos, pedidos, caches, borrados: o.borrados || [] };
 }
@@ -248,4 +255,32 @@ test('NO LE BORRA EL CACHÉ AL OTRO SERVICE WORKER', async () => {
   await esperado;
   assert.deepEqual(borrados, ['lnb-galpon-v0'],
     'borró cachés que no son suyos: ' + borrados.join(', '));
+});
+
+// ══════════════════════════════════════════════════════════════════════════
+// 🐢 V1152 · SEÑAL LENTA
+// ══════════════════════════════════════════════════════════════════════════
+test('LENTA Y SIN NADA GUARDADO: se sigue esperando, no «sin conexión»', async () => {
+  // Una red lenta termina contestando. Cortarla a los cuatro segundos le
+  // mostraba la página de «no hay señal» a alguien que tenía señal.
+  const sw = montar({ red: 'lenta', demora: 80, rapido: true });
+  const r = await contestar(sw, GET('/panel', 'navigate'));
+  assert.equal(r.delServidor, true, 'mostró «sin conexión» con la red contestando');
+});
+
+test('LO QUE LLEGA TARDE TAMBIÉN SE GUARDA', async () => {
+  // Antes la copia se guardaba sólo si la red ganaba la carrera; con señal
+  // lenta no la ganaba nunca y el equipo quedaba con una versión vieja.
+  const sw = montar({ red: 'lenta', demora: 80, rapido: true,
+    guardado: [['https://panel.test/panel', { url: '/panel' }]] });
+  const r = await contestar(sw, GET('/panel', 'navigate'));
+  assert.equal(r.delCache, true, 'con algo guardado, igual se quedó esperando');
+  await new Promise((ok) => setTimeout(ok, 150));
+  assert.equal(sw.puestos.length, 1, 'la respuesta que llegó tarde no actualizó lo guardado');
+});
+
+test('lenta y después caída, sin nada guardado: recién ahí la página de aviso', async () => {
+  const sw = montar({ red: 'cae', rapido: true });
+  const r = await contestar(sw, GET('/panel', 'navigate'));
+  assert.match(r.cuerpo, /Sin conexión/);
 });

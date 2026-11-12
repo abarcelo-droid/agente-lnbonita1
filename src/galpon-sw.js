@@ -110,21 +110,36 @@ self.addEventListener('fetch', (ev) => {
      fuera el de hoy. */
   if (url.pathname.startsWith('/api/')) return;
 
+  /* 🐢 V1152 — DOS CORRECCIONES PARA LA SEÑAL LENTA, que es el caso que más duele:
+
+     1. Lo que llega TARDE también se guarda. Antes la copia se guardaba sólo si la red
+        ganaba la carrera de los cuatro segundos; con señal lenta no la ganaba nunca, y
+        el equipo se quedaba con la versión de la última vez que hubo buena señal.
+
+     2. Tardar sin nada guardado es SEGUIR ESPERANDO, no «sin conexión». Una red lenta
+        termina contestando; cortarla a los cuatro segundos mostraba la página de «no
+        hay señal» a alguien que tenía señal. Sólo cuando la red falla de verdad sale
+        esa página. */
+  const red = fetch(req).then((r) => {
+    // Se guarda una COPIA: el cuerpo se lee una sola vez.
+    if (r && r.ok) {
+      const copia = r.clone();
+      caches.open(CACHE).then((c) => c.put(req, copia)).catch(() => {});
+    }
+    return r;
+  });
+  const faltante = () => (req.mode === 'navigate' ? sinNada()
+    /* Un recurso que no está guardado tiene que fallar como un recurso, no como
+       una página: devolver el HTML de «sin conexión» en el lugar de un .js lo
+       rompería con un error de sintaxis que no dice nada. */
+    : new Response('', { status: 504, statusText: 'Sin conexión' }));
+
   ev.respondWith(
-    conTimeout(fetch(req), ESPERA)
-      .then((r) => {
-        // Se guarda una COPIA: el cuerpo se lee una sola vez.
-        if (r && r.ok) {
-          const copia = r.clone();
-          caches.open(CACHE).then((c) => c.put(req, copia)).catch(() => {});
-        }
-        return r;
-      })
+    conTimeout(red, ESPERA)
       .catch(() => caches.match(req).then((g) => g
-        || (req.mode === 'navigate' ? sinNada()
-          /* Un recurso que no está guardado tiene que fallar como un recurso, no como
-             una página: devolver el HTML de «sin conexión» en el lugar de un .js lo
-             rompería con un error de sintaxis que no dice nada. */
-          : new Response('', { status: 504, statusText: 'Sin conexión' }))))
+        // Nada guardado: se sigue esperando a la red, y si ésa falla, recién ahí se avisa.
+        || red.catch(() => faltante())))
+      // Si hasta el caché falla, igual sale una respuesta: nunca undefined.
+      .catch(() => faltante())
   );
 });

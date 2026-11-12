@@ -78,12 +78,43 @@ var GOFF = (function () {
 
      Estas devuelven el error de red tal cual, y la pantalla avisa que hace falta señal. */
 
+  /* 🐢 LO QUE NO SE ESPERA (V1152). Andy, 12/11/2026: «quiero que no se preocupen si
+     hay mala señal. Sigan cargando. Sobre todo el peor momento es cuando está lento.
+     Cuando no hay internet ya saben que no hay internet».
+
+     Sin señal el pedido FALLA enseguida y la cola lo agarra. Con señal mala no falla:
+     se queda colgado uno o dos minutos, y mientras tanto el operador mira un botón que
+     no contesta. Para el navegador eso no es estar offline, así que la cola nunca se
+     enteraba. Para estas cargas, una que no contesta en ESPERA_CARGA se guarda en el
+     equipo igual que si no hubiera señal.
+
+     SÓLO las dos que el servidor reconoce por uuid. El pedido que se corta por tardar
+     pudo haber llegado igual: el servidor lo grabó y la respuesta se perdió en el
+     camino. Reenviarlo es seguro sólo si el servidor reconoce el uuid y devuelve la
+     fila que ya tenía (gal_volcados y gal_procesos: «el uuid repetido no es un error,
+     es la cola reintentando»). El lote del día NO está: un segundo POST del mismo lote
+     no es el mismo pedido, es un cambio de lote, y saldría como rechazo. Esas siguen
+     esperando como antes y sólo se encolan si la red falla de verdad. */
+  var SIN_ESPERAR = [
+    { metodo: 'POST', re: /^\/api\/galpon\/volcados$/ },
+    { metodo: 'POST', re: /^\/api\/galpon\/procesos$/ },
+  ];
+
   // ── EL ESTADO ───────────────────────────────────────────────────────────────────────
   var almacen = null;      // lo inyecta arrancar(): IndexedDB en el navegador
   var reloj = function () { return Date.now(); };
   var pedir = null;        // el fetch de verdad
   var alCambiar = function () {};
   var mandando = false;
+
+  /* Cuánto se espera. Una carga sana contesta en menos de un segundo; seis es el
+     límite de lo que alguien con un cajón en la mano espera sin volver a apretar.
+     Al mandar lo pendiente se espera más, porque nadie está mirando: cortar antes
+     de tiempo sólo obliga a reenviar. */
+  var ESPERAS = { carga: 6000, envio: 20000, reintento: 10000, reintento_max: 30000 };
+  var lentaHasta = 0;      // hasta cuándo se avisa que la señal está lenta
+  var proximo = null;      // el reintento programado, uno solo
+  var pausa = 0;           // cuánto espera el próximo reintento: crece mientras falle
 
   /* El prefijo del id de lo que todavía no salió. Se ve a simple vista en cualquier
      lugar donde aparezca, que es la idea: un número inventado que se parece a uno real
@@ -99,13 +130,62 @@ var GOFF = (function () {
     return m ? m[1] : null;
   }
 
-  function esEncolable(metodo, url) {
+  function coincide(lista, metodo, url) {
     var m = String(metodo || 'GET').toUpperCase();
     var ruta = String(url || '').split('?')[0];
-    for (var i = 0; i < ENCOLABLES.length; i++) {
-      if (ENCOLABLES[i].metodo === m && ENCOLABLES[i].re.test(ruta)) return true;
+    for (var i = 0; i < lista.length; i++) {
+      if (lista[i].metodo === m && lista[i].re.test(ruta)) return true;
     }
     return false;
+  }
+  function esEncolable(metodo, url) { return coincide(ENCOLABLES, metodo, url); }
+  function noSeEspera(metodo, url) { return coincide(SIN_ESPERAR, metodo, url); }
+
+  /* LA RED, CON RELOJ. Si no contesta en `ms` se CORTA el pedido —no sólo se deja de
+     mirarlo— para que no quede ocupando la poca señal que hay mientras la cola manda
+     el reintento. Lo que se corta tira un error con `lento`, que es lo que separa
+     «tardó» de «no hay red» en el aviso. */
+  function conEspera(url, opts, ms) {
+    var o = Object.assign({}, opts || {});
+    var corte = null;
+    try {
+      if (typeof AbortController !== 'undefined' && !o.signal) {
+        corte = new AbortController();
+        o.signal = corte.signal;
+      }
+    } catch (e) { corte = null; }
+    return new Promise(function (ok, mal) {
+      var listo = false;
+      var t = setTimeout(function () {
+        if (listo) return;
+        listo = true;
+        try { if (corte) corte.abort(); } catch (e) { /* ya estaba */ }
+        var err = new Error('La señal está lenta: no contestó en ' + Math.round(ms / 1000) + ' s');
+        err.lento = true;
+        mal(err);
+      }, ms);
+      Promise.resolve().then(function () { return pedir(url, o); }).then(function (r) {
+        if (listo) return;
+        listo = true; clearTimeout(t); ok(r);
+      }, function (e) {
+        if (listo) return;
+        listo = true; clearTimeout(t); mal(e);
+      });
+    });
+  }
+
+  function marcarLenta() { lentaHasta = reloj() + 120000; }
+
+  /* EL REINTENTO, sin esperar el tic de dos minutos ni el evento 'online' —que con
+     señal mala no llega nunca, porque el navegador cree que está conectado—. Empieza
+     en ESPERAS.reintento y se duplica mientras siga fallando, hasta reintento_max:
+     una cola grande no puede martillar a un servidor que ya está costando alcanzar. */
+  function programar() {
+    if (proximo) return;
+    pausa = pausa ? Math.min(pausa * 2, ESPERAS.reintento_max) : ESPERAS.reintento;
+    proximo = setTimeout(function () { proximo = null; mandar(); }, pausa);
+    // En node (los tests) un reloj pendiente no deja terminar el proceso.
+    if (proximo && typeof proximo.unref === 'function') proximo.unref();
   }
 
   /* ¿ESTO ES «NO LLEGUÉ» O «LLEGARON Y DIJERON QUE NO»? Un fetch que TIRA es siempre lo
@@ -178,6 +258,9 @@ var GOFF = (function () {
          no es «sin señal», es algo roto, y el que carga tiene que poder distinguirlo. */
       trabados: l.filter(function (x) { return x.intentos >= 3; }).length,
       mas_viejo: l.length ? l[0].creado : null,
+      /* Hay red pero no alcanza. Se dice aparte porque el operador lo vive distinto:
+         «sin conexión» ya sabe qué es; «lenta» es lo que lo hacía apretar dos veces. */
+      lenta: lentaHasta > reloj(),
     };
   }
 
@@ -192,42 +275,62 @@ var GOFF = (function () {
     mandando = true;
     var enviados = 0;
     var rechazados = [];
+    var cortado = false;
     try {
-      var l = await pendientes();
-      for (var i = 0; i < l.length; i++) {
-        var f = l[i];
-        var res = null;
-        var err = null;
-        try {
-          res = await pedir(f.url, {
-            method: f.metodo,
-            headers: { 'Content-Type': 'application/json' },
-            credentials: 'same-origin',
-            body: f.cuerpo,
-          });
-        } catch (e) { err = e; }
-
-        if (esFalloDeRed(err, res)) {
-          f.intentos = (f.intentos || 0) + 1;
-          f.ultimo_error = err ? String(err.message || err) : ('HTTP ' + res.status);
-          await almacen.guardar(f);
-          break;                       // sigue sin señal: no tiene sentido insistir
-        }
-        if (res.ok) {
-          enviados++;
-        } else {
-          var motivo = 'HTTP ' + res.status;
+      /* UNA VUELTA MÁS mientras haya algo nuevo. Con señal lenta el operador sigue
+         cargando MIENTRAS esto manda, y lo que entra a la cola durante la vuelta no
+         estaba en la lista que se leyó al empezar: sin esto quedaría esperando el
+         próximo reintento con la señal ya buena. */
+      var vista = {};
+      for (;;) {
+        var l = (await pendientes()).filter(function (x) { return !vista[x.uuid]; });
+        if (!l.length) break;
+        for (var i = 0; i < l.length; i++) {
+          var f = l[i];
+          vista[f.uuid] = true;
+          var res = null;
+          var err = null;
           try {
-            var j = await res.json();
-            if (j && j.error) motivo = j.error;
-          } catch (e2) { /* el cuerpo no era JSON: queda el status */ }
-          rechazados.push({ uuid: f.uuid, url: f.url, motivo: motivo, cuerpo: f.cuerpo });
+            res = await conEspera(f.url, {
+              method: f.metodo,
+              headers: { 'Content-Type': 'application/json' },
+              credentials: 'same-origin',
+              body: f.cuerpo,
+            }, ESPERAS.envio);
+          } catch (e) { err = e; }
+
+          if (esFalloDeRed(err, res)) {
+            /* Tardar no cuenta como intento fallido. «Trabado» pinta la barra de rojo y
+               dice «avisá», y eso es para lo que está roto: con señal lenta todo tarda
+               y nada está roto. */
+            if (err && err.lento) marcarLenta();
+            else f.intentos = (f.intentos || 0) + 1;
+            f.ultimo_error = err ? String(err.message || err) : ('HTTP ' + res.status);
+            await almacen.guardar(f);
+            cortado = true;
+            break;                       // sigue sin señal: no tiene sentido insistir
+          }
+          if (res.ok) {
+            enviados++;
+          } else {
+            var motivo = 'HTTP ' + res.status;
+            try {
+              var j = await res.json();
+              if (j && j.error) motivo = j.error;
+            } catch (e2) { /* el cuerpo no era JSON: queda el status */ }
+            rechazados.push({ uuid: f.uuid, url: f.url, motivo: motivo, cuerpo: f.cuerpo });
+          }
+          await almacen.borrar(f.uuid);
         }
-        await almacen.borrar(f.uuid);
+        if (cortado) break;
       }
     } finally {
       mandando = false;
     }
+    /* Si se cortó queda algo esperando: se reintenta solo, sin esperar a nadie. Si salió
+       todo, la señal anda y el próximo corte vuelve a empezar desde la pausa corta. */
+    if (cortado) programar();
+    else { pausa = 0; if (enviados) lentaHasta = 0; }
     alCambiar(await estado());
     return { ok: true, enviados: enviados, rechazados: rechazados };
   }
@@ -263,6 +366,41 @@ var GOFF = (function () {
           error: 'Esa carga todavía no salió de este equipo. Borrala y cargala de nuevo.' },
         400);
       }
+
+      /* 🐢 UNA CARGA NO ESPERA A LA SEÑAL (V1152). */
+      if (noSeEspera(o.method, u)) {
+        /* El uuid se pone ANTES del primer intento, no al encolar: si el pedido se corta
+           por tardar pero llegó igual, el reenvío tiene que ser reconocible como el
+           mismo. Con un uuid nuevo al encolar, esos kilos entrarían dos veces. */
+        var c = conUuid(o.body);
+        if (c) {
+          var o2 = Object.assign({}, o, { body: c.texto });
+          /* CON LA SEÑAL LENTA Y FILA ESPERANDO, SE PONE DETRÁS sin probar. La señal ya
+             demostró que no anda: probar de nuevo son otros seis segundos por cada
+             cajón, que es justo lo que se quería sacar. La cola la empuja mandar(), que
+             manda de a uno: nunca hay más de un pedido peleando por la poca señal.
+
+             Sin lentitud reciente se prueba directo, como siempre: sin red falla en el
+             acto y no cuesta nada, y si volvió, la carga sale y arrastra la cola. */
+          if (lentaHasta > reloj() && (await pendientes()).length) {
+            var fd = await encolar(u, o2);
+            if (fd) { mandar(); return respuestaEncolada(fd, true); }
+          }
+          try {
+            var rr = await conEspera(u, o2, ESPERAS.carga);
+            if (rr && rr.ok) { lentaHasta = 0; mandar(); }
+            return rr;
+          } catch (e) {
+            // Antes de encolar: encolar avisa a la barra, y la barra tiene que decir «lenta».
+            if (e && e.lento) marcarLenta();
+            var fe = await encolar(u, o2);
+            if (!fe) throw e;
+            programar();
+            return respuestaEncolada(fe, e && e.lento);
+          }
+        }
+      }
+
       try {
         var r = await fetchReal(url, opts);
         /* Si volvió la señal, lo pendiente sale AHORA y no en el próximo tic: el
@@ -298,14 +436,17 @@ var GOFF = (function () {
      El ID es LOCAL y se nota: 'enc:' + uuid. No se inventa un número que después va a
      chocar con uno de verdad, y el deshacer sabe por el prefijo que tiene que sacarlo
      de la cola en vez de pedirle al servidor que borre algo que nunca recibió. */
-  function respuestaEncolada(f) {
+  function respuestaEncolada(f, lento) {
     var fila = {};
     try { fila = JSON.parse(f.cuerpo) || {}; } catch (e) { /* queda vacía */ }
     var cuerpo = JSON.stringify({
       ok: true, encolado: true, uuid: f.uuid,
       id: ID_LOCAL + f.uuid,
       fila: Object.assign({}, fila, { id: ID_LOCAL + f.uuid, encolado: 1 }),
-      aviso: 'Sin conexión: se guardó en este equipo y se manda solo cuando vuelva.',
+      lento: !!(lento || lentaHasta > reloj()),
+      aviso: (lento || lentaHasta > reloj())
+        ? 'Señal lenta: se guardó en este equipo y sale sola. Seguí cargando.'
+        : 'Sin conexión: se guardó en este equipo y se manda solo cuando vuelva.',
     });
     if (typeof Response !== 'undefined') {
       return new Response(cuerpo, { status: 202,
@@ -320,6 +461,7 @@ var GOFF = (function () {
     almacen = c.almacen;
     if (c.reloj) reloj = c.reloj;
     if (c.alCambiar) alCambiar = c.alCambiar;
+    if (c.esperas) ESPERAS = Object.assign({}, ESPERAS, c.esperas);
     return envolver(c.fetch);
   }
 
@@ -330,6 +472,8 @@ var GOFF = (function () {
     estado: estado,
     mandar: mandar,
     esEncolable: esEncolable,
+    noSeEspera: noSeEspera,
+    SIN_ESPERAR: SIN_ESPERAR,
     esFalloDeRed: esFalloDeRed,
     conUuid: conUuid,
     ENCOLABLES: ENCOLABLES,

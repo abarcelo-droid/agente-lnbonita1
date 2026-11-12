@@ -315,6 +315,14 @@ function showCard(id) {
   document.getElementById(id).classList.add('on');
 }
 
+/* EL SELLO DE INGRESO (V1152). El panel guarda en el equipo quién es el usuario y su
+   menú para poder abrir con la señal lenta; esa copia vale sólo si es posterior a este
+   sello. Sin él, el que entra en una PC donde trabajó otro vería el menú del anterior
+   hasta que la señal alcance. Ver galponOfflineNav.js. */
+function marcarIngreso(){
+  try { localStorage.setItem('lnb_ingreso_en', String(Date.now())); } catch(e) {}
+}
+
 /* ═══════════ Estado + login ═══════════ */
 var pendingUserId = null;
 var nextParam = new URLSearchParams(window.location.search).get('next') || '';
@@ -351,6 +359,7 @@ function doLogin() {
       return;
     }
     if (res.ok) {
+      marcarIngreso();
       window.location.href = res.redirect_to || '/panel';
     } else {
       errEl.textContent = res.error || 'Error al ingresar';
@@ -388,6 +397,7 @@ function setearPassword() {
   .then(function(r){ return r.json(); })
   .then(function(res) {
     if (res.ok) {
+      marcarIngreso();
       window.location.href = res.redirect_to || '/panel';
     } else {
       err.textContent = res.error || 'Error al guardar';
