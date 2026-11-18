@@ -87301,12 +87301,21 @@ function spFiltrosRender(vista, r) {
       + '</select>';
   };
 
+  var bandeja = vista === 'pendiente' || vista === 'otros';
   var html = '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:10px">'
     + '<input id="sp-f-q-' + vista + '" class="sp-inp" style="font-size:12px;min-width:230px"'
     + ' placeholder="Buscar nº, proveedor, concepto o cuenta…" value="' + spEsc(f.q) + '"'
     + ' oninput="spFiltroTexto(\'' + vista + '\',this.value)">'
-    + sel('sp-f-est-' + vista, 'estado', 'Todos los estados', SP_ESTADOS, f.estado)
-    + sel('sp-f-paso-' + vista, 'paso', 'Cualquier paso',
+    // EL ESTADO NO VA EN LAS BANDEJAS (V1153). Una solicitud cerrada —completada, cancelada o
+    // rechazada— no le toca a nadie, así que en "Me toca a mí" y en "Dirigidas a otro" elegir
+    // cualquier estado que no sea "en curso" sólo podía devolver la lista vacía. Una pantalla
+    // vacía no se lee como "no hay": se lee como que el panel se rompió.
+    + (bandeja ? '' : sel('sp-f-est-' + vista, 'estado', 'Todos los estados', SP_ESTADOS, f.estado))
+    // EL PASO ES EN CUÁL ESTÁ PARADA AHORA, no por cuáles pasó. Es con lo que se contesta "¿qué
+    // me falta firmar?" — en "Me toca a mí", elegir Firma deja exactamente eso—, y con el nombre
+    // viejo ("Cualquier paso") eso no se adivinaba: Pablo, 18/11/2026, pidió el filtro que ya
+    // estaba ahí.
+    + sel('sp-f-paso-' + vista, 'paso', 'En qué paso está: todos',
         (opts.pasos || []).map(function(p) { return [p.clave, p.nombre]; }), f.paso);
 
   // En "Mis solicitudes" filtrar por solicitante no tiene sentido: son todas mías.
@@ -88715,6 +88724,29 @@ function spAyudaHtml(d) {
             + (p.instrucciones ? '<div style="font-size:13px;margin-top:2px">' + spEsc(p.instrucciones) + '</div>' : '')
           + '</div></div>';
       }).join('') + '</div>';
+
+  // ── Encontrar lo tuyo en la lista ──
+  var pFir = spPasoDe(d, 'firma');
+  html += '<h3>Cómo encontrar lo tuyo en la lista <span class="sp-chica">V1153</span></h3>'
+    + '<p>Las solapas de arriba ya parten el trabajo: <strong>Me toca a mí</strong> es lo que está '
+    + 'esperando por vos, <strong>Dirigidas a otro</strong> lo que podés resolver pero se lo pidieron '
+    + 'a otra persona, y <strong>Mis solicitudes</strong> lo que pediste vos.</p>'
+    + '<p>Adentro de cada solapa, el desplegable <strong>«En qué paso está»</strong> recorta por el '
+    + 'paso en el que la solicitud está parada <strong>ahora</strong>, no por los pasos por los que '
+    + 'ya pasó. Es con lo que se contesta <em>¿qué me falta firmar?</em>: en <strong>Me toca a mí'
+    + '</strong>, elegí <strong>' + spEsc(pFir ? pFir.nombre : 'Firma') + '</strong> y queda '
+    + 'exactamente eso.</p>'
+    + '<p>Los otros dos desplegables recortan por <strong>quién pidió</strong> el pago y por el tilde '
+    + 'de <strong>avisado al proveedor</strong>. El de estado —completadas, canceladas, rechazadas— '
+    + 'aparece sólo en <strong>Mis solicitudes</strong> y en <strong>Todas</strong>: en las dos '
+    + 'bandejas no hay nada cerrado, porque lo cerrado ya no le toca a nadie.</p>'
+    + '<div style="background:rgba(59,130,246,.10);border-radius:8px;padding:10px 13px;margin:10px 0 16px">'
+    + '<strong>La lista muestra las 400 más recientes</strong>, y abajo a la derecha avisa cuándo '
+    + 'quedó algo afuera. El recorte lo hace el servidor <em>después</em> de aplicar los filtros, así '
+    + 'que una solicitud vieja no se pierde: aparece filtrando, o buscando por número, proveedor, '
+    + 'concepto o cuenta corriente. Y <strong>las dos bandejas se arman sólo con lo que está en '
+    + 'curso</strong> —lo cerrado lo descarta la consulta, antes del tope—, así que una orden parada '
+    + 'hace meses esperando tu firma te aparece igual.</div>';
 
   // ── Comprador ──
   var pAut = spPasoDe(d, 'autorizacion');
