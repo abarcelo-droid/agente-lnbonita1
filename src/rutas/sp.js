@@ -808,6 +808,15 @@ router.get('/solicitudes', wrap((req, res) => {
   const params = [soc];
   let where = ' WHERE s.sociedad_id=? AND s.eliminado_en IS NULL';
   if (vista === 'mias') { where += ' AND s.solicitante_id = ?'; params.push(req.user.id); }
+  // LAS DOS BANDEJAS SON DE LO QUE ESTÁ EN CURSO, Y ESO SE RECORTA EN SQL (V1153).
+  // accionesDisponibles() devuelve [] para todo lo que no está en curso, y bloqueo_sod sólo se
+  // calcula en curso: esta condición no saca NI UNA fila del resultado. Lo que cambia es cuáles
+  // llegan al tope de 400 — que se aplica en la consulta, mientras que la bandeja se arma después
+  // en JS. Con 521 solicitudes y 400 de tope, las 121 más viejas no se miraban nunca, y una orden
+  // esperando la firma desde hace meses es justo la que cae afuera. El contador decía 32 como si
+  // fueran todas. El tope sigue estando —no se saca, porque la lista tiene que tener un techo—,
+  // pero ahora se le aplica a lo que está en curso, que es una fracción del total.
+  if (vista === 'pendiente' || vista === 'otros') where += " AND s.estado_global = 'en_curso'";
   if (req.query.estado) { where += ' AND s.estado_global = ?'; params.push(req.query.estado); }
   if (req.query.paso)   { where += ' AND s.paso_actual_clave = ?'; params.push(req.query.paso); }
   if (req.query.solicitante_id) {
